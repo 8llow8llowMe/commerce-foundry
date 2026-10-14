@@ -224,6 +224,25 @@ public final class ProductValidationMessage {
 - DB 반복 → `in` 절 벌크 조회. 원격(Feign) 반복 → 대상 서비스에 **벌크 내부 엔드포인트**를 연다
   (예: 장바구니 상품 20개 가격 조회 → `GET /internal/v1/skus?ids=...` 한 번).
 
+### 9-8. 스키마 변경 · 운영 DDL (필수)
+
+DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마의 정본은 엔티티이고, 운영 반영은 사람이 한다.
+
+| 환경 | `spring.jpa.hibernate.ddl-auto` | 스키마를 만드는 쪽 |
+|------|---------------------------------|--------------------|
+| local · dev | `update` | 서비스 기동 시 Hibernate |
+| 운영 (공통 `application.yml` 기본값) | `none` | 사용자가 DDL 을 직접 적용한다 |
+| 컨텍스트 테스트 (H2) | `create-drop` | 테스트 컨텍스트 |
+
+- **엔티티를 추가 · 변경하는 PR 은 본문 `운영 DDL` 절에 운영에 적용할 PostgreSQL DDL 을 그대로 적는다.**
+  테이블 · 컬럼 코멘트, 인덱스(`idx_` / `uk_`), 제약까지 넣는다. 스키마(`auth` · `product` · `orders` · `payment` · `delivery`)를 붙여 쓴다.
+- DDL 은 손으로 짓지 않고 **local · dev 에서 `update` 가 만든 결과로 뽑는다** — 예: `pg_dump --schema-only -t product.product_option`.
+  손으로 쓰면 타입(`timestamptz`, `bigint`, `varchar(n)`)이나 인덱스 이름이 dev 와 갈라진다.
+- `update` 는 테이블 · 컬럼을 **추가만** 한다. 이름 변경 · 타입 변경 · 삭제 · 기존 행이 있는 컬럼의 `NOT NULL` 추가는 dev 에서도 저절로 되지 않는다.
+  이런 변경은 PR 에 dev · 운영 공통 DDL 과 데이터 이관 SQL 을 적고 **dev 에도 직접 적용**한다.
+- 운영 적용 순서는 **추가 DDL → 배포 → 정리 DDL(삭제)** 이다. 새 버전이 뜨기 전에 옛 버전이 쓰는 컬럼을 지우지 않는다.
+- 운영에 적용했으면 PR 에 "운영 DDL 적용 완료" 코멘트를 남긴다. 적용 전 머지는 괜찮지만, 배포는 적용 뒤에 한다.
+
 ## 10. Internal / External Client
 
 - Feign `name` 은 하드코딩하지 않는다: `name = "${feign-client.target-services.product-service:product-service}"`.
