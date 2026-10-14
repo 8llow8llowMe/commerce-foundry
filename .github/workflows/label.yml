@@ -1,0 +1,22 @@
+name: label
+
+# **라벨을 사람 손에 맡기지 않는다.**
+# 경로를 보고 서비스 라벨을 붙인다. 매핑은 `.github/labeler.yml`.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# 기본 토큰은 읽기 전용이다. 라벨을 붙이려면 이 권한이 필요하다
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      # 포크 없이 브랜치로 작업하므로 `pull_request_target` 을 쓰지 않는다 — 그쪽은 base 권한으로 돌아 더 위험하다.
+      - uses: actions/labeler@v5
+        with:
+          sync-labels: false

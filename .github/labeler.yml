@@ -1,0 +1,52 @@
+# 경로 → 라벨 매핑 (actions/labeler v5)
+#
+# 라벨은 "이 PR 이 어느 배포 단위를 건드렸는가" 를 나타낸다. 배포 파이프라인이 붙으면
+# 라벨이 배포 스코프가 된다 (`docs/git-workflow.md` §6).
+#
+# **더하기만 한다** (`sync-labels: false`). 사람이 손으로 붙인 라벨을 지우지 않는다.
+#
+# 여기 없는 경로(루트 문서 · `.github/**` · `.claude/**`)는 라벨이 붙지 않는다.
+# 저장소 공통 변경([DOCS] / [INFRA])은 라벨을 새로 만들지 않고 생략한다.
+
+frontend-web:
+  - changed-files:
+      - any-glob-to-any-file: 'frontend/**'
+
+# ── 백엔드 서비스 — 배포 단위가 곧 라벨이다
+backend-auth-service:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/service/auth-service/**'
+
+backend-product-service:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/service/product-service/**'
+
+backend-order-service:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/service/order-service/**'
+
+backend-payment-service:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/service/payment-service/**'
+
+backend-delivery-service:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/service/delivery-service/**'
+
+backend-api-gateway:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/cloud/api-gateway/**'
+
+backend-service-discovery:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/cloud/service-discovery/**'
+
+# `backend-core` 는 배포 라벨이 아니다. 공용 모듈이 바뀌면 그것을 쓰는 서비스 전부가 바뀌지만
+# 자동으로 전 서비스 라벨을 붙이지 않는다 — core 를 건드린 PR 작성자가 배포할 서비스 라벨을 직접 더한다.
+backend-core:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/core/**'
+
+backend-docs:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/docs/**'
