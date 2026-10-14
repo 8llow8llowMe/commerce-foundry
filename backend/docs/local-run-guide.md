@@ -20,6 +20,9 @@ cp .env.example .env
 - `.env` 는 커밋되지 않는다 (`.gitignore`). 값의 정본은 Vault 이고, 로컬에는 **테스트 값만** 넣는다 (`secret-management.md`).
 - 미들웨어만 띄울 때 필요한 칸은 `DB_USERNAME` · `DB_PASSWORD` · `REDIS_PASSWORD` 셋이다. 로컬 전용이니 아무 값이나 정해 넣는다.
 - 토스 키는 `test_sk_` 로 시작하는 테스트 키만 쓴다. 라이브 키는 로컬에 두지 않는다.
+- JWT 키(`JWT_PRIVATE_KEY` · `JWT_PUBLIC_KEY`)는 로컬에서 openssl 로 직접 만든 RSA 2048 쌍을 넣는다. dev · prod 키를 가져오지 않는다.
+  만들기와 한 줄 변환 명령은 `security-guide.md` §6-1 · §6-2 다. 저장소 밖 디렉터리에서 만들고, `.env` 에 넣은 뒤 개인키 파일은 지운다.
+  `JWT_PUBLIC_KEY_PREVIOUS` 는 비워 둔다.
 
 ## 3. 미들웨어 (PostgreSQL · Redis)
 
@@ -107,6 +110,8 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 | `docker compose up` 이 `DB_USERNAME 을 채우세요` 로 멈춘다 | `.env` 가 없거나 칸이 비었다. §2 |
 | 6379 포트가 이미 쓰이고 있다 | 다른 프로젝트의 Redis 다. `.env` 의 `REDIS_PORT` 를 바꾼다 |
 | 서비스가 `Redis 설정이 기동 조건에 맞지 않습니다` 로 뜨지 않는다 | `REDIS_PASSWORD` 가 비었거나 yml 에 `timeout` · `connect-timeout` 이 없다. 메시지가 가리키는 항목을 채운다 (`coding-conventions.md` §9-7) |
+| 서비스가 `security.jwt.public-key(환경변수 JWT_PUBLIC_KEY)` 로 시작하는 메시지로 뜨지 않는다 | 공개키가 비었거나 형식이 틀렸다. `BEGIN PUBLIC KEY` 공개키의 본문 한 줄을 넣는다 — 개인키 · PKCS#1 · 2048비트 미만은 받지 않는다 (`security-guide.md` §6) |
+| auth 가 `JWT_PRIVATE_KEY 와 JWT_PUBLIC_KEY 가 한 쌍이 아닙니다` 로 뜨지 않는다 | 두 값이 다른 키 쌍에서 왔다. 같은 `jwt-private.pem` 에서 만든 공개키를 넣는다 (`security-guide.md` §6-3) |
 | 새 스키마가 안 보인다 | init 스크립트는 첫 기동에만 돈다. `down -v` 후 다시 올린다 |
 | 서비스가 `'url' must start with "jdbc"` 로 안 뜬다 | `DB_URL` 을 받지 못했다. `.env` 는 local 프로파일에서만 읽는다 — `backend/.env` 가 있는지, 작업 디렉터리가 모듈 디렉터리인지(§5), `SPRING_PROFILES_ACTIVE` 가 local 인지 본다 |
 | 서비스가 `Failed to bind properties under 'snowflake.datacenter-id'` 로 안 뜬다 | local 이 아닌 프로파일로 떴고 `SNOWFLAKE_DATACENTER_ID` · `SNOWFLAKE_WORKER_ID` 가 없다. dev · prod 는 인스턴스마다 환경변수로 넣는다 (local 은 yml 고정값) |

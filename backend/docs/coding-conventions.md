@@ -96,7 +96,7 @@ public record ProductDetailResponse(
 
 - 로그는 검색 가능한 영어 키 + 값 조합을 쓴다: `log.warn("payment confirm failed. orderId={}, code={}", ...)`
 - **로그에 남기지 않는 것**: PG 시크릿 키, 결제키 전체, 카드 정보, 고객 이름·전화번호·주소, JWT 원문.
-  식별이 필요하면 마스킹하거나 내부 ID 만 남긴다.
+  식별이 필요하면 마스킹하거나 내부 ID 만 남긴다. 토큰은 `jti` 와 memberId 만 남긴다 — refresh 토큰도 원문 대신 핑거프린트다.
 - 사용자 노출 메시지와 내부 로그 메시지는 분리한다.
 
 ### 8-1. 예외 패턴 (필수)
@@ -126,6 +126,8 @@ public enum OrderErrorCode {
 - 생성자는 `(errorCode)` 필수, 필요 시 `(errorCode, Object... args)`(메시지의 `%s` 채움), `(errorCode, Throwable cause)`.
   **임의 문자열을 잇는 `(errorCode, String detail)` 은 만들지 않는다.**
 - 한 서비스에 advice 가 둘 이상이면 좁은 범위 advice 에 `@Order` 를 붙여 우선순위를 확정한다.
+- 도메인 `*ExceptionHandler` 는 `Exception` · `RuntimeException` 을 통째로 잡지 않는다. 보안 예외(`@PreAuthorize` 거부)는
+  security-core 의 advice 가 처리한다 — 통째로 잡으면 403 이 500 이 될 수 있다 (`security-guide.md` §5-2).
 
 ### 8-2. 검증 에러코드 (필수)
 

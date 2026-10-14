@@ -12,7 +12,8 @@
 3. `docs/coding-conventions.md` — 네이밍, 예외, 엔티티, 금액, 쿼리
 4. `docs/api-design-guide.md` — 경로 체계, 응답 봉투, 멱등성
 5. 결제·주문·재고 작업이면 `docs/payment-guide.md`, `docs/order-flow-guide.md`
-6. `docs/done-checklist.md`
+6. 인증·인가(토큰·`@PreAuthorize`·보안 설정) 작업이면 `docs/security-guide.md`
+7. `docs/done-checklist.md`
 
 ## 한눈에 보는 핵심 규칙
 

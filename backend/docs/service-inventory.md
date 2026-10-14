@@ -37,7 +37,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | `common-core` | 전부 |
 | `persistence-core` | auth · product · order · payment · delivery |
 | `redis-core` | auth(토큰·소셜 state) · order(멱등 키·장바구니 캐시 검토) · api-gateway(블랙리스트) |
-| `security-core` | auth(발급) · 나머지 서비스(Resource Server) |
+| `security-core` | auth(발급 · 검증) · 나머지 서비스(서블릿 Resource Server) · api-gateway(리액티브 검증기 · 오류 코드 — #4) |
 | `storage-core` | product(상품 이미지) |
 | `shared-commerce` | product · order · payment · delivery |
 
@@ -59,6 +59,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | Gradle | 9.7.1 | Wrapper |
 | Spring Boot | 4.0.8 | Spring Framework 7 · Hibernate 7.2 · **Jackson 3** (`tools.jackson`) |
 | Spring Cloud | 2025.1.3 | Boot 4.0 대응 GA 트레인. Boot 4.1 은 트레인 2026.0 이 GA 된 뒤 함께 올린다 |
+| Spring Security | 7.0.7 (Boot BOM) | JOSE 는 Nimbus JOSE + JWT 10.4. jjwt 를 쓰지 않는다 (`security-guide.md`) |
 | springdoc-openapi | 3.0.3 | Boot 4 대응 라인 |
 | QueryDSL | OpenFeign 포크 7.7 | `com.querydsl` 원본은 2024년 이후 릴리스가 없다 |
 | PostgreSQL / Redis (로컬) | 17 / 7.4 | `docker-compose-local.yml` |
@@ -73,3 +74,5 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
 | 오브젝트 스토리지 | S3 / Cloudflare R2 / NCP Object Storage | 상품 이미지 |
 | 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |
+| refresh 토큰 전달 방식 | 응답 본문 + 헤더 / httpOnly 쿠키 (쿠키면 CORS 자격 증명 · SameSite · CSRF 를 함께 정한다) | #4 |
+| 로그아웃 블랙리스트 저장소 장애 시 | 거부(`SECURITY_006`, 503) / 통과(서명 검증만) | #4 |

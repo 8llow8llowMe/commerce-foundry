@@ -63,8 +63,18 @@ return ResponseEntity.ok().body(Response.success(response));
 ```
 
 - **게이트웨이가 끊은 응답(JWT 거부, ADMIN 아님)도 같은 봉투로 나간다.** 클라이언트는 어디서 끊겼는지 모른다.
-- 인증 오류 코드는 `SECURITY_00x` 하나로 통일한다. 만료·서명 오류는 `401`(프론트가 재발급을 시도하는 신호),
-  권한 부족은 `403` 이다.
+- 인증·인가 오류 코드는 `SECURITY_00x` 하나로 통일한다. **게이트웨이도 JWT 거부는 `SECURITY_*` 를 쓴다.**
+  코드 표와 `WWW-Authenticate` 값의 정본은 [security-guide.md](security-guide.md) §4 다.
+
+| 코드 | HTTP | 언제 | 프론트 처리 |
+|------|------|------|-------------|
+| `SECURITY_001` | 401 | 토큰 없이 인증 필요 API · 어드민 경로 | 로그인 화면 |
+| `SECURITY_002` | 401 | access 토큰 만료 | **재발급 후 재시도** (이 코드만) |
+| `SECURITY_003` · `SECURITY_004` | 401 | 위조 · 형식 오류 · 다른 발급자 / 로그아웃된 토큰 | 토큰을 지우고 로그인 화면 |
+| `SECURITY_005` | 403 | 역할 부족 (CUSTOMER 가 어드민 API) | 권한 없음 안내 |
+| `SECURITY_006` | 503 | 토큰 검증 저장소 장애 | 잠시 후 재시도 (로그아웃시키지 않는다) |
+
+- 토큰을 보냈는데 틀리면 **비로그인으로 되는 공개 API 여도 401** 이다. 틀린 토큰을 익명으로 취급하지 않는다.
 
 #### 게이트웨이 오류 코드
 
@@ -131,7 +141,20 @@ Info → Presenter → Response
 ## 5. 보안 API 설계
 
 - 인증 사용자 전용 API 는 `@PreAuthorize` 를 명시한다. 어드민 API 는 `hasRole('ADMIN')`.
+  internal API(`/internal/**`)는 JWT 없이 호출되므로 `@PreAuthorize` 를 달지 않는다.
 - member 식별은 JWT claim 기준이다. **클라이언트가 보낸 memberId 로 소유자를 판정하지 않는다.**
+  컨트롤러는 `@AuthenticationPrincipal MemberPrincipal member` 로 받고 `member.memberId()` 만 UseCase 로 넘긴다.
+
+```java
+@PreAuthorize("isAuthenticated()")
+@GetMapping("/api/v1/orders/{orderId}")
+public ResponseEntity<Response<OrderDetailResponse>> getOrder(
+    @AuthenticationPrincipal MemberPrincipal member, @PathVariable long orderId
+) {
+    return ResponseEntity.ok().body(Response.success(orderWebUseCase.getOrder(member.memberId(), orderId)));
+}
+```
+
 - 소유 확인은 Facade 첫 줄에서 한다 — 주문 상세는 `orderId` 와 JWT 의 memberId 가 모두 맞아야 조회된다.
 - 비회원 주문을 지원하면 주문번호 + 주문 비밀번호(해시)로 조회한다. 별도 이슈에서 확정한다.
 

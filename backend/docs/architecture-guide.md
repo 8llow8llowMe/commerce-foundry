@@ -14,7 +14,7 @@ backend/
 │   ├── common-core          Response 래퍼, 오류 봉투, 검증 유틸, Swagger 공통
 │   ├── persistence-core     JPA / QueryDSL / Snowflake ID / BaseEntity / Slice·PageResponse
 │   ├── redis-core           Redis 연결 (Boot 자동설정 + 기동 가드) · 키 규칙
-│   ├── security-core        JWT 발급(auth) · Resource Server(나머지) · 인증 주체
+│   ├── security-core        JWT 발급(auth) · 검증(서비스 · 게이트웨이) · 서블릿 Resource Server · 인증 주체 · 보안 오류 코드
 │   ├── storage-core         오브젝트 스토리지 (상품 이미지 업로드 / 삭제 / 키 생성 / 검증)
 │   └── shared-commerce      서비스를 가로지르는 커머스 enum·값 (CurrencyCode, Money, SalesChannel 등)
 ├── cloud/          (실행 모듈 — bootJar on)
@@ -160,8 +160,12 @@ Info → Presenter → Response
 
 ## 6. 보안 기준
 
-- `auth-service` 가 JWT(access/refresh)를 발급한다. 소셜 로그인은 카카오·네이버를 기본으로 한다.
-- 나머지 서비스는 **Resource Server** 로 JWT claim 만 해석한다 (`security-core/resourceserver`).
+- `auth-service` 가 토큰을 발급한다. 소셜 로그인은 카카오·네이버를 기본으로 한다.
+- access 토큰은 **RS256 JWT**(`typ=at+jwt`)다. auth 만 개인키로 서명하고, 나머지 서비스·게이트웨이는 공개키로 검증하는
+  **Resource Server** 다 (`security-core`). refresh 토큰은 JWT 가 아닌 불투명 난수이고 auth 가 저장·회전한다.
+  토큰 사양 · 오류 코드 · 키 배포와 교체의 정본은 [security-guide.md](security-guide.md) 다.
+- **게이트웨이는 검증 결과를 헤더(`X-Member-Id` 등)로 넘기지 않고, 서비스가 JWT 를 직접 검증한다.** 서비스가 헤더를 믿으면
+  게이트웨이를 거치지 않은 요청이 그 헤더를 위조해 아무 회원이나 될 수 있다.
 - 역할: `CUSTOMER`, `ADMIN`. 관리자 계정은 소셜 로그인 없이 별도 발급한다.
 - 게이트웨이는 JWT 유효성 검증과 라우팅에 집중한다. **단 `/api/v1/admin/**` 은 게이트웨이에서도
   `ADMIN` 역할을 확인한다(이중 방어).** 서비스 안에서도 `@PreAuthorize("hasRole('ADMIN')")` 를 건다.
