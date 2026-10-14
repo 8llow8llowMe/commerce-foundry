@@ -1,0 +1,21 @@
+# 로컬 개발 전용. bootRun 은 SPRING_PROFILES_ACTIVE 가 없으면 local 로 뜬다 (backend/build.gradle).
+
+spring:
+  config:
+    # backend/.env 를 읽는다 (local-run-guide.md §2). bootRun 의 작업 디렉터리는 모듈 디렉터리다.
+    # OS 환경변수가 이 파일의 값보다 우선한다.
+    import: optional:file:../../.env[.properties]
+  jpa:
+    hibernate:
+      ddl-auto: update
+
+snowflake:
+  # 서비스마다 worker-id 를 다르게 둔다 (auth 1 · product 2 · order 3 · payment 4 · delivery 5)
+  datacenter-id: 1
+  worker-id: 5
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
