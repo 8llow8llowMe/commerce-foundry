@@ -7,8 +7,8 @@
 
 | 모듈 | 포트(안) | 상태 | 책임 |
 |------|----------|------|------|
-| `cloud/service-discovery` | 8761 | 미착수 | Eureka 서버 |
-| `cloud/api-gateway` | 8000 | 미착수 | 라우팅(`api-design-guide.md` §1-2), JWT 검증, `/api/v1/admin/**` ADMIN 확인, CORS |
+| `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
+| `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3) — JWT·ADMIN 은 #4·#6 | 라우팅(`api-design-guide.md` §1-2), JWT 검증, `/api/v1/admin/**` ADMIN 확인, CORS |
 | `service/auth-service` | 8081 | 미착수 | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
 | `service/product-service` | 8082 | 미착수 | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제), 상품 이미지, 다국어 상품정보, 통화별 가격 |
 | `service/order-service` | 8083 | 미착수 | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |

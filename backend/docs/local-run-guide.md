@@ -52,8 +52,33 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 
 ## 5. 서비스 실행
 
-서비스 모듈은 #3 에서 생긴다. 실행 방법(`bootRun`, 포트, `.env` 를 읽는 방식)은 그때 이 절에 적는다.
-Vault 주입 방식은 #32 에서 정한다.
+Eureka → 게이트웨이 순서로 터미널을 하나씩 열어 띄운다. 둘 다 DB · Redis 가 필요 없다.
+
+```bash
+./gradlew :cloud:service-discovery:bootRun   # Eureka 서버 — 8761 (local 은 127.0.0.1 에만 묶인다)
+./gradlew :cloud:api-gateway:bootRun         # API 게이트웨이 — 8000
+```
+
+- **`bootRun` 은 `SPRING_PROFILES_ACTIVE` 가 없으면 `local` 프로파일로 뜬다** (`backend/build.gradle`). 빌드한 jar 를 `java -jar` 로
+  띄울 때는 적용되지 않는다 — 배포 환경이 프로파일을 빠뜨려도 로컬 설정으로 뜨지 않게 하려는 것이다.
+- 로컬 전용 설정은 모듈의 `application-local.yml` 에 있다.
+
+| 모듈 | `application-local.yml` 이 하는 일 |
+|------|-------------------------------------|
+| service-discovery | `server.address: 127.0.0.1` (같은 LAN 에서 레지스트리를 조작하지 못하게), self-preservation 끔 |
+| api-gateway | CORS 허용 origin 기본값 `http://localhost:3000`. 공통 `application.yml` 의 기본값은 비어 있다(닫힘) |
+
+| 확인 URL | 기대 |
+|----------|------|
+| `http://localhost:8761` | Eureka 대시보드. 게이트웨이를 띄우고 30초쯤 지나면 `API-GATEWAY` 가 등록된다 |
+| `http://localhost:8761/actuator/health` | `"status":"UP"` |
+| `http://localhost:8000/actuator/health` | `"status":"UP"` (actuator 는 `health` 만 노출한다) |
+| `http://localhost:8000/api/v1/products` | 서비스가 아직 없어 `503` + `GATEWAY_002` 봉투 (`api-design-guide.md` §2-1) |
+
+- 게이트웨이가 읽는 `EUREKA_DEFAULT_ZONE` · `GATEWAY_CORS_ALLOWED_ORIGINS` 는 기본값(yml · `application-local.yml`)이 로컬 값과 같아
+  `.env` 없이 뜬다. 바꿀 때는 환경변수로 넘긴다: `GATEWAY_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001 ./gradlew :cloud:api-gateway:bootRun`
+- 도메인 서비스(auth · product · order · payment · delivery) 모듈과 실행 방법은 #36 에서 이 절에 더한다.
+  Vault 주입 방식은 #32 에서 정한다.
 
 ## 6. 문제 해결
 
