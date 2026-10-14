@@ -33,18 +33,24 @@ gateway:
     # 로컬 기본값(http://localhost:3000)은 application-local.yml 에 있다.
     allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:}
   dev-routes:
-    # 서비스 헬스 체크(/health/{service-id})와 Swagger 통합(/docs/**, Swagger UI)을 연다 (GatewayDevRouteConfig).
+    # 서비스 헬스 체크(/health/{service-id})와 문서(/docs/{service-id}/v3/api-docs/{group}) 라우트를 연다 (GatewayDevRouteConfig).
     # 기본은 꺼짐이고 local · dev 만 켠다. 운영의 헬스 체크는 게이트웨이를 거치지 않고 내부망에서 서비스에 직접 붙는다.
+    # 아래 springdoc 두 스위치와 항상 같은 값이어야 한다 — 프로파일 yml 에서 셋을 함께 켠다 (GatewayDevRouteProfileTest 가 지킨다).
     enabled: false
 
-# 게이트웨이 자신은 API 문서가 없다. Swagger UI 만 띄워 서비스 문서(/docs/**)를 고르게 한다. dev 라우트와 함께 열고 닫는다.
-# 목록은 서비스 5종 × 고객 / 어드민 그룹이다. 서비스를 더하면 여기도 더한다 (GatewayDevRouteTest 가 어긋나면 잡는다).
+# 게이트웨이 자신은 API 문서가 없다. Swagger UI 만 띄워 서비스 문서(/docs/**)를 고르게 한다.
+# 스위치는 리터럴로 둔다. ${gateway.dev-routes.enabled} 로 묶으면 "0" · "no" 같은 값에서 라우트는 닫히고 UI 만 열린다
+# (springdoc 은 "false" 가 아니면 켠다).
+# 목록은 서비스 5종 × 고객 / 어드민 그룹이다. 서비스를 더하면 여기도 더한다 (GatewayDevRouteTest 가 ServiceRoute 와 대조한다).
 springdoc:
   enable-default-api-docs: false
   api-docs:
-    enabled: ${gateway.dev-routes.enabled}
+    enabled: false
   swagger-ui:
-    enabled: ${gateway.dev-routes.enabled}
+    enabled: false
+    # 외부 검증 배지(validator.swagger.io)로 문서 주소를 보내지 않는다.
+    # query-config-enabled(?url= 로 외부 문서 주입) · persist-authorization(토큰을 브라우저 저장소에 남김)은 켜지 않는다.
+    validator-url: none
     urls:
       - name: 인증 — 고객
         url: /docs/auth-service/v3/api-docs/customer

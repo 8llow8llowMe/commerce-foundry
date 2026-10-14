@@ -13,13 +13,21 @@ import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTest
  * <p>설정이 한 글자라도 다르면 테스트 컨텍스트를 따로 띄우므로, 통합 테스트는 이 애노테이션만 붙여 컨텍스트 하나를 공유한다.
  * Eureka 를 끄면 등록된 인스턴스가 없어 모든 {@code lb://} 라우트가 "인스턴스 없음" 으로 끝난다.
  *
- * <p>CORS origin 은 여기서 고정한다. 셸의 {@code GATEWAY_CORS_ALLOWED_ORIGINS} · {@code SPRING_PROFILES_ACTIVE} 에 따라 결과가 바뀌지 않게.
+ * <p>CORS origin 과 dev 라우트 · Swagger 스위치(꺼짐)는 여기서 고정한다. 셸의 {@code GATEWAY_CORS_ALLOWED_ORIGINS} ·
+ * {@code SPRING_PROFILES_ACTIVE}(local 이면 dev 라우트가 켜진다)에 따라 결과가 바뀌지 않게.
+ * 켠 상태는 {@code GatewayDevRouteTest} 가 {@code @TestPropertySource} 로 덮어 따로 본다.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"eureka.client.enabled=false", "gateway.cors.allowed-origins=" + GatewayIntegrationTest.ALLOWED_ORIGIN}
+    properties = {
+        "eureka.client.enabled=false",
+        "gateway.cors.allowed-origins=" + GatewayIntegrationTest.ALLOWED_ORIGIN,
+        "gateway.dev-routes.enabled=false",
+        "springdoc.api-docs.enabled=false",
+        "springdoc.swagger-ui.enabled=false"
+    }
 )
 @AutoConfigureWebTestClient
 public @interface GatewayIntegrationTest {

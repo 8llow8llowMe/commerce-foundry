@@ -52,3 +52,5 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+    # 외부 검증 배지(validator.swagger.io)로 문서 주소를 보내지 않는다
+    validator-url: none
