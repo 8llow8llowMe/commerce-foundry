@@ -48,15 +48,16 @@ public final class JwtIssuer {
 
     /**
      * 개인키를 읽고 {@code JWT_PUBLIC_KEY} 와 한 쌍인지 확인한 뒤 발급기를 만든다. 쌍이 아니면 기동하지 않는다 —
-     * auth 가 다른 키로 서명하면 모든 서비스가 그 토큰을 거부한다. 키 교체 순서를 틀렸을 때 여기서 걸린다.
+     * auth 가 다른 키로 서명하면 모든 서비스가 그 토큰을 거부한다. 키 교체 순서를 틀렸을 때 여기서 걸린다 ({@code security-guide.md} §6-3).
      */
     public static JwtIssuer create(JwtVerificationProperties verification, JwtIssuanceProperties issuance, Clock clock) {
         RSAPrivateKey privateKey = RsaKeys.loadPrivateKey(issuance.privateKey(), RsaKeys.Slot.PRIVATE_KEY);
         RSAPublicKey publicKey = RsaKeys.loadPublicKey(verification.publicKey(), RsaKeys.Slot.PUBLIC_KEY);
         if (!privateKey.getModulus().equals(publicKey.getModulus())) {
-            throw new IllegalStateException("환경변수 %s 와 %s 가 한 쌍이 아닙니다. 키 교체 중이면 %s 를 새 키로 바꾼 뒤 %s 를 바꿉니다 (security-guide.md 키 교체)"
+            throw new IllegalStateException(("환경변수 %s 와 %s 가 한 쌍이 아닙니다. 두 값은 같은 키 쌍에서 와야 합니다"
+                + " — 키 교체 중이면 auth 에서는 둘을 함께 바꾸고, 새 키 검증만 먼저 더할 때는 %s 에 넣습니다 (security-guide.md §6-3)")
                 .formatted(RsaKeys.Slot.PRIVATE_KEY.environmentVariable(), RsaKeys.Slot.PUBLIC_KEY.environmentVariable(),
-                    RsaKeys.Slot.PUBLIC_KEY.environmentVariable(), RsaKeys.Slot.PRIVATE_KEY.environmentVariable()));
+                    RsaKeys.Slot.PREVIOUS_PUBLIC_KEY.environmentVariable()));
         }
 
         RSAKey signingKey = RsaKeys.toJwk(publicKey, privateKey);

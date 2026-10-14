@@ -34,16 +34,17 @@ public final class ReactiveAccessTokenDecoderFactory {
     }
 
     /**
-     * 서블릿 {@code NimbusJwtDecoder} 와 같은 예외 분류를 따른다 — 토큰 잘못({@link BadJOSEException})은 {@link BadJwtException}(→ 401),
-     * 처리 오류({@link JOSEException})는 {@link JwtException}. 키가 메모리에 고정돼 있어 원격 조회 실패는 없다.
+     * 서블릿 {@code NimbusJwtDecoder#createJwt} 와 같은 예외 분류를 따른다 — 처리 오류({@link JOSEException})만 {@link JwtException}(→ 006)이고,
+     * 토큰 잘못({@link BadJOSEException})과 처리기 안의 그 밖의 런타임 예외는 {@link BadJwtException}(→ 003)이다.
+     * 키가 메모리에 고정돼 있어 원격 조회 실패는 없다.
      */
-    private static JWTClaimsSet process(JWTProcessor<SecurityContext> processor, JWT jwt) {
+    static JWTClaimsSet process(JWTProcessor<SecurityContext> processor, JWT jwt) {
         try {
             return processor.process(jwt, null);
-        } catch (BadJOSEException rejected) {
-            throw new BadJwtException("An error occurred while attempting to decode the Jwt: " + rejected.getMessage(), rejected);
         } catch (JOSEException failure) {
             throw new JwtException("An error occurred while attempting to decode the Jwt: " + failure.getMessage(), failure);
+        } catch (BadJOSEException | RuntimeException rejected) {
+            throw new BadJwtException("An error occurred while attempting to decode the Jwt: " + rejected.getMessage(), rejected);
         }
     }
 }

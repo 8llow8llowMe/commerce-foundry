@@ -22,8 +22,11 @@ import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.GrantedAuthority;
@@ -110,6 +113,27 @@ class AccessTokenVerificationTest {
         String token = TestTokens.sign(TestKeys.PREVIOUS, TestTokens.claims().build());
 
         assertThat(rejection(token, VERIFIED_AT, TestTokens.verificationWithoutPrevious())).isEqualTo(SecurityErrorCode.TOKEN_INVALID);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("이전 슬롯이 채워져 있으면 디코더를 만들 때 WARN 한 줄 — 두 kid 와 비우라는 안내만 있고 키 내용은 없다")
+    void warnsWhilePreviousSlotIsInUse(CapturedOutput output) {
+        AccessTokenDecoderFactory.create(TestTokens.verification(), TestTokens.clockAt(VERIFIED_AT));
+
+        assertThat(output.getOut().lines().filter(line -> line.contains("jwt previous public key slot is in use")))
+            .singleElement().asString()
+            .contains("WARN", "previousKid=" + TestTokens.kid(TestKeys.PREVIOUS), "currentKid=" + TestTokens.kid(TestKeys.CURRENT), "JWT_PUBLIC_KEY_PREVIOUS")
+            .doesNotContain(TestKeys.publicKeyLine(TestKeys.PREVIOUS).substring(40, 80));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("이전 슬롯이 비어 있으면 경고하지 않는다")
+    void staysQuietWithoutPreviousSlot(CapturedOutput output) {
+        AccessTokenDecoderFactory.create(TestTokens.verificationWithoutPrevious(), TestTokens.clockAt(VERIFIED_AT));
+
+        assertThat(output.getOut()).doesNotContain("previous public key slot");
     }
 
     @Test

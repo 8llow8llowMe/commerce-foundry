@@ -1,11 +1,20 @@
 package com.commercefoundry.security.token.reactive;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.commercefoundry.security.error.SecurityErrorResolver;
 import com.commercefoundry.security.principal.MemberJwtAuthenticationConverter;
 import com.commercefoundry.security.support.TestTokens;
+import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.token.AccessTokenDecoderFactory;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWT;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.JWTParser;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
+import com.nimbusds.jwt.proc.JWTProcessor;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
@@ -13,6 +22,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.jwt.BadJwtException;
+import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.BearerTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
 import org.springframework.security.oauth2.server.resource.authentication.JwtReactiveAuthenticationManager;
@@ -42,6 +54,42 @@ class ReactiveAccessTokenDecoderFactoryTest {
             assertThat(reactiveOutcome).as(name).isEqualTo(servletOutcome);
             assertThat(servletOutcome).as(name).startsWith(name.startsWith("accepted-") ? "accepted:" : "rejected:");
         });
+    }
+
+    /**
+     * 처리기 안에서 예상하지 못한 런타임 예외가 나도 서블릿과 같게 {@link BadJwtException}(→ 003)이고,
+     * {@link JOSEException} 만 Bad 가 아닌 {@link JwtException}(→ 006)이다.
+     */
+    @Test
+    @DisplayName("처리기 예외의 분류가 서블릿 NimbusJwtDecoder 와 같다 — 런타임 예외는 BadJwtException, JOSEException 은 JwtException")
+    void classifiesProcessorFailuresLikeServlet() throws Exception {
+        String token = TestTokens.issuer(TestTokens.NOW).issueAccessToken(TestTokens.MEMBER_ID, MemberRole.CUSTOMER).tokenValue();
+        JWT parsed = JWTParser.parse(token);
+
+        JWTProcessor<SecurityContext> runtimeFailure = failingProcessor(new IllegalStateException("unexpected"));
+        JWTProcessor<SecurityContext> joseFailure = failingProcessor(new JOSEException("verifier unavailable"));
+
+        Throwable servletRuntime = catchThrowable(() -> new NimbusJwtDecoder(runtimeFailure).decode(token));
+        Throwable reactiveRuntime = catchThrowable(() -> ReactiveAccessTokenDecoderFactory.process(runtimeFailure, parsed));
+        assertThat(servletRuntime).isExactlyInstanceOf(BadJwtException.class);
+        assertThat(reactiveRuntime).isExactlyInstanceOf(BadJwtException.class);
+
+        Throwable servletJose = catchThrowable(() -> new NimbusJwtDecoder(joseFailure).decode(token));
+        Throwable reactiveJose = catchThrowable(() -> ReactiveAccessTokenDecoderFactory.process(joseFailure, parsed));
+        assertThat(servletJose).isExactlyInstanceOf(JwtException.class);
+        assertThat(reactiveJose).isExactlyInstanceOf(JwtException.class);
+    }
+
+    private static JWTProcessor<SecurityContext> failingProcessor(Exception failure) {
+        return new DefaultJWTProcessor<>() {
+            @Override
+            public JWTClaimsSet process(JWT jwt, SecurityContext context) throws JOSEException {
+                if (failure instanceof JOSEException jose) {
+                    throw jose;
+                }
+                throw (RuntimeException) failure;
+            }
+        };
     }
 
     private static String outcome(AuthenticationCall call) {

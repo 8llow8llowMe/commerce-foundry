@@ -8,13 +8,16 @@ import com.commercefoundry.security.token.JwtVerificationProperties;
 import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
+import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.AuthenticationEntryPointFailureHandler;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -28,6 +31,7 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>나머지 경로는 열어 두고 인증 필요 여부는 메서드의 {@code @PreAuthorize} 가 정한다 — 비로그인 상품 조회 같은 API 가 있다.
  *       {@code /internal/**} 은 JWT 없이 호출되므로 internal 컨트롤러에 {@code @PreAuthorize} 를 달지 않는다.</li>
  *   <li>토큰이 있는데 틀리면 공개 API 여도 401 이다. 틀린 토큰을 익명으로 취급하지 않는다.</li>
+ *   <li>토큰 검증 중 시스템 오류({@code AuthenticationServiceException})는 500 이 아니라 006(503) 봉투로 답한다.</li>
  * </ul>
  */
 @EnableWebSecurity
@@ -65,7 +69,8 @@ public class ResourceServerSecurityConfigurer {
             .oauth2ResourceServer(resourceServer -> resourceServer
                 .jwt(jwt -> jwt.decoder(accessTokenDecoder).jwtAuthenticationConverter(authenticationConverter))
                 .authenticationEntryPoint(responder)
-                .accessDeniedHandler(responder))
+                .accessDeniedHandler(responder)
+                .withObjectPostProcessor(new ServiceFailureAsEnvelope(responder)))
             .exceptionHandling(exceptions -> exceptions
                 .authenticationEntryPoint(responder)
                 .accessDeniedHandler(responder))
@@ -75,5 +80,27 @@ public class ResourceServerSecurityConfigurer {
     @Bean
     public SecurityExceptionAdvice securityExceptionAdvice() {
         return new SecurityExceptionAdvice();
+    }
+
+    /**
+     * {@code BearerTokenAuthenticationFilter} 의 기본 실패 처리기는 {@code AuthenticationServiceException}(디코더의 {@code JwtException},
+     * #4 의 검증 저장소 장애)을 다시 던진다 — 필터 밖으로 나가 봉투 없는 500 이 된다. 다시 던지지 않고 진입점(006, 503)으로 보낸다.
+     * 리액티브 게이트웨이는 {@code ServerAuthenticationEntryPointFailureHandler} 에 같은 설정이 필요하다 ({@code security-guide.md} §7).
+     */
+    private static final class ServiceFailureAsEnvelope implements ObjectPostProcessor<BearerTokenAuthenticationFilter> {
+
+        private final SecurityErrorResponder responder;
+
+        private ServiceFailureAsEnvelope(SecurityErrorResponder responder) {
+            this.responder = responder;
+        }
+
+        @Override
+        public <O extends BearerTokenAuthenticationFilter> O postProcess(O filter) {
+            AuthenticationEntryPointFailureHandler failureHandler = new AuthenticationEntryPointFailureHandler(responder);
+            failureHandler.setRethrowAuthenticationServiceException(false);
+            filter.setAuthenticationFailureHandler(failureHandler);
+            return filter;
+        }
     }
 }

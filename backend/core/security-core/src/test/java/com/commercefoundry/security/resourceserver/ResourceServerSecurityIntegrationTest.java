@@ -23,17 +23,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -52,12 +58,17 @@ import tools.jackson.databind.json.JsonMapper;
  * 토큰 없음 · 만료 · 위조 · 역할 부족이 {@code Response.fail} 봉투로 나가는지 본다.
  *
  * <p>서비스에 흔한 catch-all advice({@code Exception} → 500)를 일부러 두었다. 보안 예외가 그쪽으로 새면 403 이 500 이 된다.
+ * 디코더는 Configurer 가 만든 실제 빈을 감싸, 정해 둔 두 토큰에만 검증 저장소 장애(#4 의 006)와 로그아웃 토큰(#4 의 004)을 흉내 낸다.
  */
 @SpringBootTest(classes = ResourceServerSecurityIntegrationTest.TestApplication.class)
 @AutoConfigureMockMvc
 class ResourceServerSecurityIntegrationTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    /** 디코더가 {@code JwtException}(Bad 아님)을 던진다 → Spring 이 {@code AuthenticationServiceException} 으로 감싼다. */
+    private static final String STORE_DOWN_TOKEN = "verification-store-down";
+    /** 디코더가 {@code OAuth2AuthenticationException(SECURITY_004)} 을 던진다 — #4 의 블랙리스트 확인 모양. */
+    private static final String REVOKED_TOKEN = "revoked-token";
 
     @Autowired
     private MockMvc mockMvc;
@@ -152,6 +163,27 @@ class ResourceServerSecurityIntegrationTest {
         assertThat(advices).extracting(ControllerAdviceBean::getBeanType).containsSubsequence(SecurityExceptionAdvice.class, CatchAllAdvice.class);
     }
 
+    // ── #4 경로: 006 · 004 ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("토큰 검증 중 시스템 오류는 500 이 아니라 503 · SECURITY_006 봉투다 — 공개 API 여도 같다")
+    void verificationFailureIsServiceUnavailable() throws Exception {
+        MockHttpServletResponse response = perform(get("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + STORE_DOWN_TOKEN));
+
+        assertError(response, SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
+        assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isNull();
+        assertError(perform(get("/api/v1/public").header(HttpHeaders.AUTHORIZATION, "Bearer " + STORE_DOWN_TOKEN)), SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("디코더가 OAuth2Error(SECURITY_004) 를 던지면 401 · SECURITY_004 — #4 의 로그아웃 토큰 경로")
+    void revokedTokenIsTokenRevoked() throws Exception {
+        MockHttpServletResponse response = perform(get("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + REVOKED_TOKEN));
+
+        assertError(response, SecurityErrorCode.TOKEN_REVOKED);
+        assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isEqualTo("Bearer error=\"invalid_token\"");
+    }
+
     // ── 200 ──────────────────────────────────────────────────────
 
     @Test
@@ -212,6 +244,55 @@ class ResourceServerSecurityIntegrationTest {
         assertThat(TestController.ADMIN_CALLS).as(path).hasValue(0);
     }
 
+    @Test
+    @DisplayName("대소문자가 다른 경로(/API/v1/admin/x)는 어느 컨트롤러에도 매핑되지 않아 404 이고 어드민 컨트롤러에 닿지 않는다")
+    void upperCasePathDoesNotReachAdminController() throws Exception {
+        assertThat(perform(get("/API/v1/admin/x").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))).getStatus()).isEqualTo(404);
+        assertThat(perform(get("/API/v1/admin/x")).getStatus()).isEqualTo(404);
+        assertThat(TestController.ADMIN_CALLS).hasValue(0);
+    }
+
+    /**
+     * 비예약 문자를 인코딩한 경로({@code %61} = {@code a})는 방화벽이 막지 않는다. 대신 URL 규칙과 MVC 가 <b>같은 디코딩</b>으로 본다 —
+     * 보안 규칙에는 어드민 경로로 걸리고, 통과한 ADMIN 만 어드민 컨트롤러에 닿는다.
+     */
+    @Test
+    @DisplayName("인코딩한 경로(/api/v1/%61dmin/x)도 어드민 URL 규칙에 걸린다 — CUSTOMER 403 · 무토큰 401, ADMIN 만 200")
+    void encodedUnreservedCharacterStillMatchesAdminRule() throws Exception {
+        URI encoded = URI.create("/api/v1/%61dmin/x");
+
+        assertError(perform(get(encoded).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
+        assertError(perform(get(encoded)), SecurityErrorCode.UNAUTHORIZED);
+        assertThat(TestController.ADMIN_CALLS).hasValue(0);
+
+        assertThat(perform(get(encoded).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).getStatus()).isEqualTo(200);
+        assertThat(TestController.ADMIN_CALLS).hasValue(1);
+    }
+
+    /** Spring Security 7 이 자동으로 켜는 DPoP 필터의 응답이다 — 우리 봉투가 아니다(security-guide.md 알려진 예외). */
+    @Test
+    @DisplayName("Authorization: DPoP 요청은 유효한 ADMIN 토큰이어도 봉투 없는 401 로 끝나고 컨트롤러에 닿지 않는다")
+    void dpopRequestIsRejectedWithoutEnvelope() throws Exception {
+        String adminToken = token(Instant.now(), MemberRole.ADMIN);
+
+        MockHttpServletResponse response = perform(get("/api/v1/admin/x").header(HttpHeaders.AUTHORIZATION, "DPoP " + adminToken));
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).startsWith("DPoP");
+        assertThat(response.getContentAsByteArray()).isEmpty();
+        assertThat(TestController.ADMIN_CALLS).hasValue(0);
+    }
+
+    /** Spring Security 7 의 Resource Server 가 자동으로 여는 메타데이터 엔드포인트다(security-guide.md 알려진 예외). */
+    @Test
+    @DisplayName("/.well-known/oauth-protected-resource 는 토큰 없이 200 으로 메타데이터를 내준다 — 게이트웨이가 라우팅하지 않는다")
+    void protectedResourceMetadataIsPublic() throws Exception {
+        MockHttpServletResponse response = perform(get("/.well-known/oauth-protected-resource"));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(JSON.readTree(response.getContentAsByteArray()).has("resource")).isTrue();
+    }
+
     // ── 도우미 ────────────────────────────────────────────────────
 
     private MockHttpServletResponse perform(MockHttpServletRequestBuilder request) throws Exception {
@@ -254,6 +335,24 @@ class ResourceServerSecurityIntegrationTest {
     @EnableAutoConfiguration
     @Import({ResourceServerSecurityConfigurer.class, JwtVerificationPropertiesConfig.class, TestController.class, CatchAllAdvice.class})
     static class TestApplication {
+
+        /** Configurer 의 실제 디코더 빈을 감싼다. 정해 둔 두 토큰 말고는 그대로 실제 디코더가 판정한다. */
+        @Bean
+        static BeanPostProcessor failureInjectingDecoder() {
+            return new BeanPostProcessor() {
+                @Override
+                public Object postProcessAfterInitialization(Object bean, String beanName) {
+                    if (!(bean instanceof JwtDecoder real)) {
+                        return bean;
+                    }
+                    return (JwtDecoder) token -> switch (token) {
+                        case STORE_DOWN_TOKEN -> throw new JwtException("verification store unavailable");
+                        case REVOKED_TOKEN -> throw new OAuth2AuthenticationException(new OAuth2Error(SecurityErrorCode.TOKEN_REVOKED.getCode()));
+                        default -> real.decode(token);
+                    };
+                }
+            };
+        }
     }
 
     @RestController
@@ -261,6 +360,8 @@ class ResourceServerSecurityIntegrationTest {
 
         static final AtomicInteger ADMIN_CALLS = new AtomicInteger();
 
+        /** 공개 API 도 permitAll() 을 명시한다 — 빠뜨린 메서드가 리뷰에서 보이게 (security-guide.md §5-1). */
+        @PreAuthorize("permitAll()")
         @GetMapping("/api/v1/public")
         ResponseEntity<Response<Void>> publicEndpoint() {
             return ResponseEntity.ok(Response.success());
@@ -292,8 +393,11 @@ class ResourceServerSecurityIntegrationTest {
         }
     }
 
-    /** 서비스에 흔한 "모든 예외 → 500" advice. 보안 예외가 여기로 오면 안 된다. */
-    @RestControllerAdvice
+    /**
+     * 서비스에 흔한 "모든 예외 → 500" advice. 보안 예외가 여기로 오면 안 된다.
+     * 도메인 advice 가 {@code basePackages} 로 범위를 좁히듯 테스트 컨트롤러로 좁힌다 — 매핑 없는 경로(404)까지 500 으로 바꾸지 않게.
+     */
+    @RestControllerAdvice(assignableTypes = TestController.class)
     static class CatchAllAdvice {
 
         @ExceptionHandler(Exception.class)
