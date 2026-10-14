@@ -207,3 +207,6 @@ git worktree remove <워크트리 경로>    # 워크트리에서 작업했다�
 - `-D` 전에 `git diff <브랜치> origin/develop` 이 비었거나 `git cherry -v origin/develop <브랜치>` 가 전부 `-` 인지
   (= 이미 develop 에 있음) 확인한다.
 - 워크트리는 저장소 밖 `../commerce-foundry-wt/<번호>-<요약>` 에 만든다. 저장소 안에 두면 빌드 산출물·`.gitignore` 와 섞인다.
+- Windows 에서 `git worktree remove` 가 `Filename too long` 으로 실패하면 **등록은 풀리고 폴더만 남는다** (Gradle 빌드 산출물의 긴 경로).
+  위 diff 확인을 마친 뒤 PowerShell `Remove-Item -LiteralPath '\\?\<절대 경로>' -Recurse -Force` 로 남은 폴더를 지우고
+  `git worktree prune` 한다. 다시 겪지 않으려면 `git config --global core.longpaths true` 를 켠다.
