@@ -66,8 +66,15 @@ class AuthServiceApplicationTests {
         assertThat(result).bodyJson().doesNotHavePath("$.components").doesNotHavePath("$.details");
     }
 
+    @Test
+    @DisplayName("헬스 구성 요소 경로도 닫혀 있다 — show-components 기본값(never)에서는 루트가 아닌 헬스 경로가 404 다")
+    void healthComponentPathIsClosed() {
+        // DataSource 가 있으니 db 기여자는 있다. 숨겨져서 404 이고, 구성 요소를 보이게 바꾸면 이 경로가 열린다
+        assertThat(mockMvc.get().uri("/actuator/health/db")).hasStatus(HttpStatus.NOT_FOUND);
+    }
+
     @ParameterizedTest
-    @ValueSource(strings = {"/actuator/env", "/actuator/configprops", "/actuator/beans", "/actuator/info", "/actuator/health/db"})
+    @ValueSource(strings = {"/actuator/env", "/actuator/configprops", "/actuator/beans", "/actuator/info"})
     @DisplayName("actuator 는 health 만 노출한다 — local 은 .env 값이 Environment 에 그대로 들어 있다")
     void actuatorExposesHealthOnly(String path) {
         assertThat(mockMvc.get().uri(path)).hasStatus(HttpStatus.NOT_FOUND);

@@ -1,6 +1,13 @@
 # dev 서버. 값은 Vault 에서 환경변수로 주입한다 (secret-management.md §3 · 주입 방식은 #32).
+# dev 게이트웨이를 외부에 열면 아래 헬스 · 문서 · Swagger UI 가 인증 없이 보인다 — 접근 제한 뒤에 둔다 (architecture-guide.md §6).
 
 gateway:
   dev-routes:
-    # 서비스 헬스 체크 · Swagger UI. 운영(prod)에서는 켜지 않는다
+    # 서비스 헬스 체크 · 문서 라우트. 아래 Swagger 스위치와 함께 켠다. 운영(prod)에서는 켜지 않는다
+    enabled: true
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
     enabled: true

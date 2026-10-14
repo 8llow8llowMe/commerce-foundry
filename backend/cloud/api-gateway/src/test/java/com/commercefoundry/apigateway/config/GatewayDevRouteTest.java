@@ -3,6 +3,7 @@ package com.commercefoundry.apigateway.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.apigateway.GatewayIntegrationTest;
+import com.commercefoundry.apigateway.route.ServiceRoute;
 import com.jayway.jsonpath.JsonPath;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -13,6 +14,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -29,26 +31,35 @@ import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.http.HttpMethod;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
- * dev 라우트(헬스 · 문서)와 Swagger UI 를 켠 게이트웨이 ({@code gateway.dev-routes.enabled=true}, local · dev 와 같은 설정).
+ * dev 라우트(헬스 · 문서)와 Swagger UI 를 켠 게이트웨이 (local · dev 프로파일과 같은 스위치 셋).
  *
  * <p>서비스 대신 JDK {@link HttpServer} 하나를 띄워 서비스 5종의 인스턴스로 등록한다 (Eureka 대신 simple discovery).
  * 게이트웨이가 하류에 넘긴 경로를 기록해 rewrite 결과를 직접 확인한다.
  *
- * <p>기대값은 {@link GatewayDevRouteConfig} 에서 뽑지 않고 손으로 적는다 — 검증 대상에서 기대값을 만들면 어긋나도 통과한다.
+ * <p>하류 서버는 이 클래스의 수명과 같다. 클래스가 끝나면 서버를 닫고 컨텍스트도 캐시에서 내린다 — 닫힌 서버를 가리키는
+ * 컨텍스트가 재사용되지 않게. 테스트는 순차 실행을 가정한다 (기록된 하류 경로를 테스트마다 비운다).
+ *
+ * <p>라우트 · 하류 경로 기대값은 {@link GatewayDevRouteConfig} 에서 뽑지 않고 손으로 적는다 — 검증 대상에서 기대값을 만들면 어긋나도 통과한다.
+ * Swagger UI 목록(yml)만은 다른 출처인 {@link ServiceRoute} 와 대조한다 — 서비스를 더하고 yml 을 빠뜨리면 잡히게.
  */
 @GatewayIntegrationTest
-@TestPropertySource(properties = "gateway.dev-routes.enabled=true")
+@TestPropertySource(properties = {"gateway.dev-routes.enabled=true", "springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true"})
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class GatewayDevRouteTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
     private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service");
+
+    /** 서비스 {@code *SwaggerConfig} 의 그룹 이름 ({@code bootstrap-conventions.md}). */
+    private static final List<String> SWAGGER_GROUPS = List.of("customer", "admin");
 
     /** 하류(가짜 서비스)가 받은 원문 경로. */
     private static final Queue<String> UPSTREAM_PATHS = new ConcurrentLinkedQueue<>();
@@ -92,37 +103,47 @@ class GatewayDevRouteTest {
             "auth-service-docs", "product-service-docs", "order-service-docs", "payment-service-docs", "delivery-service-docs");
     }
 
-    @ParameterizedTest(name = "{0} → {1}")
+    @ParameterizedTest(name = "{0} → {1} → 하류 {2}")
     @CsvSource(delimiter = '|', textBlock = """
-        /health/auth-service                           | auth-service-health
-        /health/product-service                        | product-service-health
-        /health/order-service                          | order-service-health
-        /health/payment-service                        | payment-service-health
-        /health/delivery-service                       | delivery-service-health
-        /docs/auth-service/v3/api-docs/customer        | auth-service-docs
-        /docs/auth-service/v3/api-docs/admin           | auth-service-docs
-        /docs/product-service/v3/api-docs/customer     | product-service-docs
-        /docs/product-service/v3/api-docs/admin        | product-service-docs
-        /docs/order-service/v3/api-docs/customer       | order-service-docs
-        /docs/order-service/v3/api-docs/admin          | order-service-docs
-        /docs/payment-service/v3/api-docs/customer     | payment-service-docs
-        /docs/payment-service/v3/api-docs/admin        | payment-service-docs
-        /docs/delivery-service/v3/api-docs/customer    | delivery-service-docs
-        /docs/delivery-service/v3/api-docs/admin       | delivery-service-docs
-        /api/v1/products                               | product-service
+        /health/auth-service                           | auth-service-health     | /actuator/health
+        /health/product-service                        | product-service-health  | /actuator/health
+        /health/order-service                          | order-service-health    | /actuator/health
+        /health/payment-service                        | payment-service-health  | /actuator/health
+        /health/delivery-service                       | delivery-service-health | /actuator/health
+        /docs/auth-service/v3/api-docs/customer        | auth-service-docs       | /v3/api-docs/customer
+        /docs/auth-service/v3/api-docs/admin           | auth-service-docs       | /v3/api-docs/admin
+        /docs/product-service/v3/api-docs/customer     | product-service-docs    | /v3/api-docs/customer
+        /docs/product-service/v3/api-docs/admin        | product-service-docs    | /v3/api-docs/admin
+        /docs/order-service/v3/api-docs/customer       | order-service-docs      | /v3/api-docs/customer
+        /docs/order-service/v3/api-docs/admin          | order-service-docs      | /v3/api-docs/admin
+        /docs/payment-service/v3/api-docs/customer     | payment-service-docs    | /v3/api-docs/customer
+        /docs/payment-service/v3/api-docs/admin        | payment-service-docs    | /v3/api-docs/admin
+        /docs/delivery-service/v3/api-docs/customer    | delivery-service-docs   | /v3/api-docs/customer
+        /docs/delivery-service/v3/api-docs/admin       | delivery-service-docs   | /v3/api-docs/admin
         """)
-    @DisplayName("헬스 · 문서 경로는 서비스마다 정해진 라우트 하나에만 걸리고, 서비스 라우트는 그대로다")
-    void routesDevPathToItsRoute(String path, String routeId) {
+    @DisplayName("헬스 · 문서 경로는 정해진 라우트 하나에만 걸리고, 하류에는 고정된 경로로만 간다")
+    void devPathGoesToFixedDownstreamPath(String path, String routeId, String downstreamPath) {
         assertThat(matchingRouteIds(HttpMethod.GET, path)).containsExactly(routeId);
+
+        webTestClient.get().uri(path).exchange().expectStatus().isOk();
+        assertThat(UPSTREAM_PATHS).containsExactly(downstreamPath);
+    }
+
+    @Test
+    @DisplayName("dev 라우트를 켜도 서비스 라우트는 그대로다")
+    void serviceRoutesAreUnchanged() {
+        assertThat(matchingRouteIds(HttpMethod.GET, "/api/v1/products")).containsExactly("product-service");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {
         "/health", "/health/unknown-service", "/health/api-gateway", "/health/product-service/db", "/health/product-service/liveness",
+        "/health/product-service/", "/HEALTH/product-service", "/health/PRODUCT-SERVICE",
         "/docs/product-service/v3/api-docs", "/docs/product-service/v3/api-docs/swagger-config", "/docs/product-service/v3/api-docs/customer/extra",
+        "/docs/product-service/v3/api-docs/customer/", "/docs/product-service/v3/api-docs/CUSTOMER",
         "/docs/order-service/internal/v1/orders/1", "/docs/auth-service/api/v1/admin/members/1", "/docs/unknown-service/v3/api-docs/customer"
     })
-    @DisplayName("정해진 헬스 · 문서 경로 밖은 어떤 라우트에도 걸리지 않는다 — 서비스 간 API · 어드민 경로 · 다른 actuator 로 새지 않는다")
+    @DisplayName("정해진 헬스 · 문서 경로 밖(하위 경로 · 끝 슬래시 · 대소문자 변형 포함)은 어떤 라우트에도 걸리지 않는다")
     void otherDevPathMatchesNoRoute(String path) {
         assertThat(matchingRouteIds(HttpMethod.GET, path)).isEmpty();
     }
@@ -135,47 +156,31 @@ class GatewayDevRouteTest {
         assertThat(matchingRouteIds(HttpMethod.valueOf(method), "/docs/product-service/v3/api-docs/customer")).isEmpty();
     }
 
-    // ── 하류로 넘기는 경로 ─────────────────────────────────────────
-
-    @Test
-    @DisplayName("게이트웨이 경유 헬스 체크는 서비스의 /actuator/health 로만 간다")
-    void healthRouteGoesToActuatorHealth() {
-        webTestClient.get().uri("/health/product-service").exchange()
-            .expectStatus().isOk()
-            .expectBody().jsonPath("$.status").isEqualTo("UP");
-
-        assertThat(UPSTREAM_PATHS).containsExactly("/actuator/health");
-    }
-
-    @Test
-    @DisplayName("게이트웨이 경유 문서는 앞의 /docs/{service-id} 를 떼고 서비스의 /v3/api-docs/{group} 으로 간다")
-    void docsRouteGoesToServiceGroupDocs() {
-        webTestClient.get().uri("/docs/order-service/v3/api-docs/admin").exchange()
-            .expectStatus().isOk();
-
-        assertThat(UPSTREAM_PATHS).containsExactly("/v3/api-docs/admin");
-    }
-
     // ── Swagger UI ────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Swagger UI 의 문서 목록은 서비스 5종 × 고객 / 어드민 그룹이고 모두 /docs/** 를 가리킨다")
-    void swaggerUiListsServiceGroupDocs() {
+    @DisplayName("Swagger UI 의 문서 목록은 ServiceRoute 의 서비스 × 고객 / 어드민 그룹과 같고, 각 문서는 그 서비스의 문서 라우트에 걸린다")
+    void swaggerUiListsEveryServiceGroupDocs() {
         byte[] body = webTestClient.get().uri("/v3/api-docs/swagger-config").exchange()
             .expectStatus().isOk()
             .expectBody().returnResult().getResponseBody();
-
         List<String> urls = JsonPath.read(new String(body, StandardCharsets.UTF_8), "$.urls[*].url");
-        assertThat(urls).containsExactlyInAnyOrder(
-            "/docs/auth-service/v3/api-docs/customer", "/docs/auth-service/v3/api-docs/admin",
-            "/docs/product-service/v3/api-docs/customer", "/docs/product-service/v3/api-docs/admin",
-            "/docs/order-service/v3/api-docs/customer", "/docs/order-service/v3/api-docs/admin",
-            "/docs/payment-service/v3/api-docs/customer", "/docs/payment-service/v3/api-docs/admin",
-            "/docs/delivery-service/v3/api-docs/customer", "/docs/delivery-service/v3/api-docs/admin");
+
+        List<String> expected = Arrays.stream(ServiceRoute.values())
+            .flatMap(route -> SWAGGER_GROUPS.stream().map(group -> "/docs/" + route.getServiceId() + "/v3/api-docs/" + group))
+            .toList();
+        assertThat(urls).containsExactlyInAnyOrderElementsOf(expected);
+
+        for (ServiceRoute route : ServiceRoute.values()) {
+            for (String group : SWAGGER_GROUPS) {
+                assertThat(matchingRouteIds(HttpMethod.GET, "/docs/" + route.getServiceId() + "/v3/api-docs/" + group))
+                    .containsExactly(route.getServiceId() + "-docs");
+            }
+        }
     }
 
     @Test
-    @DisplayName("Swagger UI 가 열리고, 게이트웨이 자신의 기본 문서는 내지 않는다")
+    @DisplayName("Swagger UI 가 열리고, 게이트웨이 자신의 기본 문서와 /webjars 경로는 열리지 않는다")
     void servesSwaggerUiWithoutGatewayDocs() {
         URI uiLocation = webTestClient.get().uri("/swagger-ui.html").exchange()
             .expectStatus().is3xxRedirection()
