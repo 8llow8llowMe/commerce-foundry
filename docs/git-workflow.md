@@ -14,7 +14,7 @@
 | 이슈 생성 | 화면 / 기능 단위, 담당자·라벨 지정 | `/issue` |
 | 브랜치 생성 | 이름에 이슈 번호 포함, `develop` 에서 분기 | `/issue-start` |
 | PR 생성 | `Issue Number` · assignee · 라벨 | `/pr` |
-| Rebase and merge | `develop` 선형 유지 | |
+| Rebase and merge | `develop` 선형 유지 (ruleset 이 강제), 원격 브랜치 자동 삭제 | |
 | **이슈 갱신** | **체크박스 갱신 → 전부 끝났으면 닫기** | |
 
 **이슈 없이 브랜치를 만들지 않는다.** 이슈가 작업 단위이자 추적 지점이다.
@@ -175,12 +175,35 @@ gh pr create --base develop \
 
 ## 7. 머지 · 이슈 갱신 · 릴리스
 
-- 머지는 **`Rebase and merge`** 만 쓴다: `gh pr merge <번호> --rebase --delete-branch`
+- 작업 PR 의 머지는 **`Rebase and merge`** 만 쓴다: `gh pr merge <번호> --rebase`
 - **CI 통과가 머지 조건이다.**
+- 머지되면 **원격 브랜치는 GitHub 가 자동으로 지운다** (아래 저장소 설정). 남는 일은 로컬 정리다 — 아래 §7-2.
 - 머지 뒤 이슈 체크박스를 갱신하고, 전부 끝났으면 이슈를 닫는다. `develop` 머지는 `Closes #N` 으로
   자동으로 닫히지 않는다 (기본 브랜치가 `main` 이라서) — `gh issue close <번호>` 로 직접 닫는다.
-- **릴리스(develop → main)는 `Create a merge commit`** 을 쓴다: `gh pr merge <번호> --merge`
-  (`--delete-branch` 를 붙이지 않는다 — develop 을 지우면 안 된다).
+- **릴리스(develop → main)는 `Create a merge commit`** 을 쓴다: `gh pr merge <번호> --merge`.
+  `develop` 은 ruleset 으로 삭제가 막혀 있어 자동 삭제 대상이 아니다.
 
-> 리베이스 머지 뒤 `git branch -d` 가 거부하면 `git cherry -v origin/develop <branch>` 로 전부 `-` 인지
-> (= 이미 develop 에 있음) 확인하고 `-D` 한다.
+### 7-1. 저장소 설정
+
+GitHub 에 적용돼 있는 값이다. 바꾸면 이 표도 같이 고친다 (`gh api repos/8llow8llowMe/commerce-foundry`, `.../rulesets`).
+
+| 설정 | 값 | 이유 |
+|------|-----|------|
+| Allow rebase merging | 켬 | 작업 PR 의 유일한 머지 방식. 커밋이 그대로 develop 에 남는다 |
+| Allow merge commits | 켬 | **릴리스(develop → main) 전용.** 작업 PR 에는 아래 ruleset 이 막는다 |
+| Allow squash merging | 끔 | 의미 단위로 나눈 커밋을 하나로 뭉갠다 |
+| Automatically delete head branches | 켬 | 머지된 원격 작업 브랜치를 남기지 않는다 |
+| Ruleset `develop-linear-history` | `develop` 에 선형 이력 강제 · 삭제 금지 | 작업 PR 이 merge commit 으로 들어오는 것을 막는다 |
+
+### 7-2. 로컬 정리
+
+```bash
+git fetch --prune origin
+git switch develop && git merge --ff-only origin/develop
+git branch -D <머지된 브랜치>          # 리베이스 머지라 SHA 가 달라 -d 는 거부된다
+git worktree remove <워크트리 경로>    # 워크트리에서 작업했다면
+```
+
+- `-D` 전에 `git diff <브랜치> origin/develop` 이 비었거나 `git cherry -v origin/develop <브랜치>` 가 전부 `-` 인지
+  (= 이미 develop 에 있음) 확인한다.
+- 워크트리는 저장소 밖 `../commerce-foundry-wt/<번호>-<요약>` 에 만든다. 저장소 안에 두면 빌드 산출물·`.gitignore` 와 섞인다.
