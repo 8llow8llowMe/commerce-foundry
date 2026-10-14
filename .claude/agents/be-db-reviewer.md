@@ -37,7 +37,7 @@ grep -rn -A5 "for (\|\.stream()\|\.forEach(" backend/service/*/src/main/java --i
 
 ## 그 외
 
-- JPA 연관관계 어노테이션 금지, raw FK + `@Comment("... (FK: table.id)")`, 다른 서비스 FK 는 `외부 FK` 표기
+- JPA 연관관계 어노테이션 금지, raw FK + `@Column(comment = "... (FK: table.id)")`, 다른 서비스 FK 는 `외부 FK` 표기
 - 다른 서비스 스키마를 직접 조회하지 않는가 (서비스별 스키마 원칙)
 - 엔티티 Wrapper / 도메인 primitive 타입 규칙, 카운트는 primitive
 - **금액 = `long` + 통화 컬럼 쌍**. `double`/`float`/`BigDecimal` 저장 ✕

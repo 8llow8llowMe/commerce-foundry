@@ -34,6 +34,7 @@ cd backend
 ./gradlew compileJava
 ./gradlew :service:<svc>:cleanTest :service:<svc>:test --no-build-cache   # 테스트가 실제로 돈 결과
 ./gradlew check
+docker compose -f docker-compose-local.yml up -d --wait   # PostgreSQL + Redis (.env 필요 — docs/local-run-guide.md)
 ```
 
 ## 파일 인코딩 규칙 (필수)

@@ -167,7 +167,9 @@ public final class ProductValidationMessage {
 - **JPA 연관관계 어노테이션(`@ManyToOne` / `@OneToMany` / `@OneToOne` / `@ManyToMany` / `@JoinColumn` / `@JoinTable`)을
   쓰지 않는다.** 모든 관계는 raw FK 컬럼으로 표현하고, 그래프 탐색은 application 계층에서 별도 조회한다.
   서비스 경계를 흐리지 않고 지연로딩 N+1 을 구조적으로 없앤다.
-- 필드 설명은 `@Comment`. FK 컬럼은 `(FK: target_table.id)` 를 명시한다: `@Comment("상품 아이디 (FK: product.id)")`.
+- 필드 설명은 JPA 3.2 의 `@Column(comment = ...)`, 테이블 설명은 `@Table(comment = ...)` 로 단다.
+  Hibernate `@Comment` 는 Hibernate 7 에서 deprecated 라 쓰지 않는다.
+  FK 컬럼은 `(FK: target_table.id)` 를 명시한다: `@Column(name = "product_id", comment = "상품 아이디 (FK: product.id)")`.
   다른 서비스 테이블을 가리키면 `(외부 FK: product-service product.id)` 로 적는다 — DB 제약은 걸 수 없다.
 - 상태가 있는 엔티티(주문·결제·재고)는 **낙관적 락(`@Version`)** 을 기본으로 검토한다.
 
@@ -179,6 +181,10 @@ public final class ProductValidationMessage {
 | FK | `Long` | `long` (nullable 의미가 있으면 `Long`) |
 | 카운트·NOT NULL DEFAULT 0 | primitive | primitive |
 | boolean | primitive | primitive |
+| 시각 | `Instant` (`timestamptz`) | `Instant` |
+
+- 시각은 `LocalDateTime` 이 아니라 **`Instant`** 로 저장한다. 해외 주문이 같은 테이블에 들어오므로 서버 시간대에 묶지 않는다.
+  화면 시간대(KST 등) 변환은 Presenter 가 한다. 생성·수정 시각은 `persistence-core` 의 `BaseEntity` 를 상속한다.
 
 ### 9-3. 금액 (필수)
 
@@ -186,6 +192,10 @@ public final class ProductValidationMessage {
 - `double` / `float` 로 금액을 다루지 않는다. `BigDecimal` 은 환산·비율 계산 중간값에만 쓰고 저장 전에 최소 단위로 확정한다.
 - 금액 컬럼은 항상 통화 컬럼과 짝을 이룬다: `sale_price_amount` + `sale_price_currency`.
 - 반올림 규칙(할인·환산)은 한 곳(`shared-commerce` 의 `Money`)에만 둔다.
+  - 비율 계산(`Money.multiply` — 할인액·수수료)은 최소 단위 미만을 **버린다**(`RoundingMode.DOWN`). 할인액이 원가를 넘지 않는다.
+  - 소수 표현 변환(`Money.ofMajorUnit` — PG 응답 `89.50`)은 **반올림하지 않는다.** 자릿수가 넘치면 실패한다.
+  - 음수 `Money` 는 만들지 않는다. 할인·환불은 양수로 들고 `minus` 로 뺀다 — 결과가 음수면 계산 오류로 실패한다.
+- `BigDecimal` 비율은 문자열로 만든다(`new BigDecimal("0.1")`). `new BigDecimal(0.1)` 은 이진 오차를 그대로 가져온다.
 
 ### 9-4. 인덱스 명명
 

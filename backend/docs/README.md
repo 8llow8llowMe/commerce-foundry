@@ -15,6 +15,7 @@
 | `payment-guide.md` | 토스페이먼츠 통합 결제 — 승인 흐름, 중복 방지, UNKNOWN, 웹훅, 환불, USD/PayPal |
 | `order-flow-guide.md` | 주문·재고·배송·클레임 상태 전이와 동시성 |
 | `bootstrap-conventions.md` | Application 클래스, Global Config 템플릿 |
+| `local-run-guide.md` | 로컬 빌드·테스트, PostgreSQL·Redis compose, 문제 해결 |
 | `secret-management.md` | Vault 시크릿 관리 — 키 이름 규칙(`../.env.example`), 환경별 출처, 키 추가 절차, 유출 대응 |
 | `service-inventory.md` | 서비스 책임·포트·호출 관계·결정 대기 항목 |
 | `done-checklist.md` | 기능 단위 완료 기준 |
@@ -28,6 +29,7 @@
 5. 결제·주문 작업이면 `payment-guide.md`, `order-flow-guide.md`
 6. `service-inventory.md`
 7. `done-checklist.md`
+8. 처음 받았으면 `local-run-guide.md`
 
 ## 작업 원칙
 
