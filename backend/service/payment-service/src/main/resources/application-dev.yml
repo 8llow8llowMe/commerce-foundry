@@ -1,10 +1,5 @@
 # dev 서버. 값은 Vault 에서 환경변수로 주입한다 (secret-management.md §3 · 주입 방식은 #32).
 
-snowflake:
-  # 인스턴스마다 (datacenter-id, worker-id) 쌍이 달라야 한다. 겹치면 같은 밀리초에 같은 ID 가 나와 기본값을 두지 않는다
-  datacenter-id: ${SNOWFLAKE_DATACENTER_ID}
-  worker-id: ${SNOWFLAKE_WORKER_ID}
-
 springdoc:
   api-docs:
     enabled: true
