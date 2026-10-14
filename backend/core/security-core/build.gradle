@@ -1,0 +1,72 @@
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+
+dependencies {
+    implementation project(':core:common-core')
+
+    // JWT 발급·검증은 Spring Security JOSE(Nimbus)만 쓴다. 서비스·게이트웨이가 디코더·주체 타입을 그대로 받으므로 api 다
+    api 'org.springframework.security:spring-security-oauth2-jose'
+    api 'org.springframework.security:spring-security-oauth2-resource-server'
+    implementation 'org.springframework.boot:spring-boot'
+    implementation 'tools.jackson.core:jackson-databind'
+    implementation 'org.slf4j:slf4j-api'
+
+    // 서블릿 · Boot 보안 자동설정은 컴파일에만 쓴다. 서블릿 서비스가 spring-boot-starter-security · spring-boot-starter-webmvc 를 직접 선언한다.
+    // api/implementation 으로 넣으면 리액티브 게이트웨이에 서블릿 스택과 Boot 기본 보안 체인이 새어 들어간다 (common-core 와 같은 판단)
+    compileOnly 'org.springframework.boot:spring-boot-starter-security'
+    compileOnly 'org.springframework:spring-webmvc'
+    compileOnly 'jakarta.servlet:jakarta.servlet-api'
+    // token.reactive 만 쓴다. reactor 는 게이트웨이에 이미 있다
+    compileOnly 'io.projectreactor:reactor-core'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-security'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'io.projectreactor:reactor-core'
+}
+
+configurations.named('testRuntimeClasspath') {
+    // 이 모듈 테스트는 Mockito 를 쓰지 않는다. 있으면 @SpringBootTest 가 Mockito 를 초기화하면서 byte-buddy 에이전트를
+    // 동적으로 붙이고, JDK 21 이 그 경고(동적 에이전트 · CDS)를 콘솔에 찍는다
+    exclude group: 'org.mockito'
+}
+
+// 위 compileOnly 가 api/implementation 으로 바뀌는 회귀를 막는다. runtimeClasspath 에 아래 모듈이 있으면 check 가 실패한다.
+// 구성 시점에 Provider 로 잡아 두고 실행 시점에는 project 를 만지지 않는다 (configuration cache 안전)
+def runtimeModules = configurations.named('runtimeClasspath').flatMap { runtimeClasspath ->
+    runtimeClasspath.incoming.artifacts.resolvedArtifacts
+}.map { artifacts ->
+    artifacts.collect { it.id.componentIdentifier }
+        .findAll { it instanceof ModuleComponentIdentifier }
+        .collect { "${it.group}:${it.module}".toString() }
+        .sort()
+}
+
+def verifyNoServletLeak = tasks.register('verifyNoServletLeak') {
+    group = 'verification'
+    description = 'security-core 의 runtimeClasspath 에 서블릿 스택 · Boot 보안 자동설정이 없는지 확인한다'
+
+    def forbiddenModules = [
+        'org.springframework:spring-webmvc',
+        'org.springframework.boot:spring-boot-webmvc',
+        'org.springframework.boot:spring-boot-servlet',
+        'org.springframework.boot:spring-boot-tomcat',
+        'org.apache.tomcat.embed:tomcat-embed-core',
+        'jakarta.servlet:jakarta.servlet-api',
+        'org.springframework.boot:spring-boot-security',
+        'org.springframework.security:spring-security-config',
+    ]
+    inputs.property('runtimeModules', runtimeModules)
+    inputs.property('forbiddenModules', forbiddenModules)
+
+    doLast {
+        def leaked = runtimeModules.get().findAll { it in forbiddenModules }
+        if (!leaked.isEmpty()) {
+            throw new GradleException("security-core runtimeClasspath 에 서블릿 · Boot 보안 자동설정 모듈이 들어왔습니다: ${leaked}. "
+                + 'compileOnly 로 두고 소비 서비스가 직접 선언하게 하세요 (security-guide.md 의존)')
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyNoServletLeak
+}
