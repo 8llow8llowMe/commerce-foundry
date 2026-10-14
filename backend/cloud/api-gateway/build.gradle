@@ -2,6 +2,8 @@ dependencies {
     implementation project(':core:common-core')
     implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    // 서비스 문서를 한 화면에서 고르는 Swagger UI. dev 라우트와 함께 local · dev 에서만 연다 (GatewayDevRouteConfig)
+    implementation "org.springdoc:springdoc-openapi-starter-webflux-ui:${rootProject.ext.springdocVersion}"
 
     testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
 }

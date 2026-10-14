@@ -17,6 +17,10 @@ spring:
           httpclient:
             connect-timeout: 3000
             response-timeout: 10s
+  web:
+    resources:
+      # 정적 리소스를 내지 않는다. 켜 두면 Swagger 를 닫아도 /webjars/swagger-ui/** 가 그대로 열린다 (Swagger UI 는 springdoc 이 따로 낸다)
+      add-mappings: false
 
 eureka:
   client:
@@ -28,6 +32,40 @@ gateway:
     # 콤마로 여러 개를 적는다. 기본값은 비어 있다 — 설정이 빠진 배포 환경은 어떤 origin 도 허용하지 않고 닫힌 채로 뜬다.
     # 로컬 기본값(http://localhost:3000)은 application-local.yml 에 있다.
     allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:}
+  dev-routes:
+    # 서비스 헬스 체크(/health/{service-id})와 Swagger 통합(/docs/**, Swagger UI)을 연다 (GatewayDevRouteConfig).
+    # 기본은 꺼짐이고 local · dev 만 켠다. 운영의 헬스 체크는 게이트웨이를 거치지 않고 내부망에서 서비스에 직접 붙는다.
+    enabled: false
+
+# 게이트웨이 자신은 API 문서가 없다. Swagger UI 만 띄워 서비스 문서(/docs/**)를 고르게 한다. dev 라우트와 함께 열고 닫는다.
+# 목록은 서비스 5종 × 고객 / 어드민 그룹이다. 서비스를 더하면 여기도 더한다 (GatewayDevRouteTest 가 어긋나면 잡는다).
+springdoc:
+  enable-default-api-docs: false
+  api-docs:
+    enabled: ${gateway.dev-routes.enabled}
+  swagger-ui:
+    enabled: ${gateway.dev-routes.enabled}
+    urls:
+      - name: 인증 — 고객
+        url: /docs/auth-service/v3/api-docs/customer
+      - name: 인증 — 어드민
+        url: /docs/auth-service/v3/api-docs/admin
+      - name: 상품 — 고객
+        url: /docs/product-service/v3/api-docs/customer
+      - name: 상품 — 어드민
+        url: /docs/product-service/v3/api-docs/admin
+      - name: 주문 — 고객
+        url: /docs/order-service/v3/api-docs/customer
+      - name: 주문 — 어드민
+        url: /docs/order-service/v3/api-docs/admin
+      - name: 결제 — 고객
+        url: /docs/payment-service/v3/api-docs/customer
+      - name: 결제 — 어드민
+        url: /docs/payment-service/v3/api-docs/admin
+      - name: 배송 — 고객
+        url: /docs/delivery-service/v3/api-docs/customer
+      - name: 배송 — 어드민
+        url: /docs/delivery-service/v3/api-docs/admin
 
 management:
   endpoints:
