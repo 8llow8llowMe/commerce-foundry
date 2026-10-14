@@ -1,0 +1,5 @@
+dependencies {
+    // 접속은 Boot 의 spring.data.redis.* 자동설정(Lettuce)을 그대로 쓴다. 이 모듈은 기동 가드와 키 규칙만 더한다.
+    // 서블릿 의존을 넣지 않는다 — 리액티브 게이트웨이도 이 모듈을 import 한다
+    api 'org.springframework.boot:spring-boot-starter-data-redis'
+}
