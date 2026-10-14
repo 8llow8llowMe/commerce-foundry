@@ -49,14 +49,23 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 - `gradle.properties` 가 빌드 캐시를 켜 둔다. 테스트가 **실제로 돌았는지** 확인할 때는 `cleanTest` + `--no-build-cache` 를 붙인다.
   그냥 `test` 는 `UP-TO-DATE` · `FROM-CACHE` 로 건너뛰고도 성공으로 끝난다.
 - CI(`backend-ci`)는 실행된 테스트 건수를 세고, 0건이면 통과로 보지 않는다.
+- 서비스(`service/*`)의 컨텍스트 로딩 테스트(`*ApplicationTests`)는 H2(PostgreSQL 모드) test 프로파일로 돈다. Docker 없이 로컬에서도 실행된다.
+  락 · `timestamptz` · 인덱스처럼 엔진에 기대는 동작은 여기서 검증하지 않는다. 리포지토리 테스트는 Testcontainers(PostgreSQL)로 따로 두고
+  CI 에서 돌린다 (`bootstrap-conventions.md` "컨텍스트 로딩 테스트").
 
 ## 5. 서비스 실행
 
-Eureka → 게이트웨이 순서로 터미널을 하나씩 열어 띄운다. 둘 다 DB · Redis 가 필요 없다.
+Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어 띄운다. Eureka · 게이트웨이는 DB · Redis 가 필요 없고,
+도메인 서비스는 PostgreSQL(§3)과 `backend/.env` 의 `DB_USERNAME` · `DB_PASSWORD`(§2)가 필요하다.
 
 ```bash
-./gradlew :cloud:service-discovery:bootRun   # Eureka 서버 — 8761 (local 은 127.0.0.1 에만 묶인다)
-./gradlew :cloud:api-gateway:bootRun         # API 게이트웨이 — 8000
+./gradlew :cloud:service-discovery:bootRun    # Eureka 서버 — 8761 (local 은 127.0.0.1 에만 묶인다)
+./gradlew :cloud:api-gateway:bootRun          # API 게이트웨이 — 8000
+./gradlew :service:auth-service:bootRun       # 8081
+./gradlew :service:product-service:bootRun    # 8082
+./gradlew :service:order-service:bootRun      # 8083
+./gradlew :service:payment-service:bootRun    # 8084
+./gradlew :service:delivery-service:bootRun   # 8085
 ```
 
 - **`bootRun` 은 `SPRING_PROFILES_ACTIVE` 가 없으면 `local` 프로파일로 뜬다** (`backend/build.gradle`). 빌드한 jar 를 `java -jar` 로
@@ -66,19 +75,28 @@ Eureka → 게이트웨이 순서로 터미널을 하나씩 열어 띄운다. �
 | 모듈 | `application-local.yml` 이 하는 일 |
 |------|-------------------------------------|
 | service-discovery | `server.address: 127.0.0.1` (같은 LAN 에서 레지스트리를 조작하지 못하게), self-preservation 끔 |
-| api-gateway | CORS 허용 origin 기본값 `http://localhost:3000`. 공통 `application.yml` 의 기본값은 비어 있다(닫힘) |
+| api-gateway | CORS 허용 origin 기본값 `http://localhost:3000`. 공통 `application.yml` 의 기본값은 비어 있다(닫힘). dev 라우트(헬스 · Swagger UI) 켬 |
+| 서비스 5종 | `backend/.env` 읽기, `ddl-auto: update`, Snowflake 고정값(`bootstrap-conventions.md` 배정표), Swagger 열기 |
 
 | 확인 URL | 기대 |
 |----------|------|
-| `http://localhost:8761` | Eureka 대시보드. 게이트웨이를 띄우고 30초쯤 지나면 `API-GATEWAY` 가 등록된다 |
+| `http://localhost:8761` | Eureka 대시보드. 띄우고 30초쯤 지나면 `API-GATEWAY` 와 서비스 5종이 등록된다 |
 | `http://localhost:8761/actuator/health` | `"status":"UP"` |
 | `http://localhost:8000/actuator/health` | `"status":"UP"` (actuator 는 `health` 만 노출한다) |
-| `http://localhost:8000/api/v1/products` | 서비스가 아직 없어 `503` + `GATEWAY_002` 봉투 (`api-design-guide.md` §2-1) |
+| `http://localhost:8000/health/{service-id}` (예: `/health/product-service`) | `"status":"UP"` — 게이트웨이 경유 서비스 헬스 체크. local · dev 만 |
+| `http://localhost:8000/swagger-ui.html` | Swagger UI. 상단 목록에서 서비스 · 고객 / 어드민 문서를 고른다. local · dev 만 |
+| `http://localhost:8000/api/v1/products` | 서비스가 떠 있지 않으면 `503` + `GATEWAY_002` 봉투 (`api-design-guide.md` §2-1) |
 
 - 게이트웨이가 읽는 `EUREKA_DEFAULT_ZONE` · `GATEWAY_CORS_ALLOWED_ORIGINS` 는 기본값(yml · `application-local.yml`)이 로컬 값과 같아
   `.env` 없이 뜬다. 바꿀 때는 환경변수로 넘긴다: `GATEWAY_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001 ./gradlew :cloud:api-gateway:bootRun`
-- 도메인 서비스(auth · product · order · payment · delivery) 모듈과 실행 방법은 #36 에서 이 절에 더한다.
-  Vault 주입 방식은 #32 에서 정한다.
+- 서비스는 `application-local.yml` 의 `spring.config.import: optional:file:../../.env[.properties]` 로 `backend/.env` 를 읽는다.
+  OS 환경변수가 `.env` 값보다 우선한다.
+  - 경로는 **작업 디렉터리 기준**이다. `bootRun` 은 작업 디렉터리가 모듈 디렉터리라 맞는다.
+  - IDE 로 띄울 때는 실행 구성의 작업 디렉터리를 모듈 디렉터리(`backend/service/<서비스>`)로 둔다.
+  - 작업 디렉터리가 다르면 `optional` 이라 조용히 건너뛰고 §6 의 `'url' must start with "jdbc"` 로 실패한다.
+- 헬스 체크 · Swagger 통합은 게이트웨이의 `gateway.dev-routes.enabled` 로 열고 닫는다(local · dev 만 `true`).
+  운영의 헬스 체크는 게이트웨이를 거치지 않고 내부망에서 서비스에 직접 붙는다.
+- Vault 주입 방식은 #32 에서 정한다.
 
 ## 6. 문제 해결
 
@@ -88,4 +106,9 @@ Eureka → 게이트웨이 순서로 터미널을 하나씩 열어 띄운다. �
 | `docker compose up` 이 `DB_USERNAME 을 채우세요` 로 멈춘다 | `.env` 가 없거나 칸이 비었다. §2 |
 | 6379 포트가 이미 쓰이고 있다 | 다른 프로젝트의 Redis 다. `.env` 의 `REDIS_PORT` 를 바꾼다 |
 | 새 스키마가 안 보인다 | init 스크립트는 첫 기동에만 돈다. `down -v` 후 다시 올린다 |
+| 서비스가 `'url' must start with "jdbc"` 로 안 뜬다 | `.env` 를 읽지 못했다. `backend/.env` 가 있는지, 작업 디렉터리가 모듈 디렉터리인지 본다 (§5) |
+| 서비스가 `Could not resolve placeholder 'SNOWFLAKE_DATACENTER_ID'` 로 안 뜬다 | local 이 아닌 프로파일로 떴다. `SPRING_PROFILES_ACTIVE` 를 확인한다 — dev · prod 는 Snowflake 값을 환경변수로 받는다 |
+| 게이트웨이 경유 `/health/{service-id}` 가 `503` + `GATEWAY_002` | 서비스가 꺼져 있거나 아직 Eureka 에 등록되지 않았다(기동 후 30초쯤 걸린다) |
+| 게이트웨이 경유 `/health/{service-id}` · `/swagger-ui.html` 이 `404` | local · dev 프로파일이 아니라 dev 라우트가 꺼져 있다 (`gateway.dev-routes.enabled`) |
+| Gradle 데몬·테스트 JVM 이 `EXCEPTION_ACCESS_VIOLATION`(jvm.dll)으로 죽는다 | 이 PC 의 JDK 21.0.4 문제로 보인다. `./gradlew --stop` 후 다시 돌리고, JDK 21 최신 패치로 올린다. 코드 원인이 아니다 |
 | `./gradlew: Permission denied` | 실행 비트가 빠졌다. `git update-index --chmod=+x backend/gradlew` 로 고쳐 커밋한다 (`chmod` 로 덮지 않는다) |

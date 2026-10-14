@@ -1,19 +1,21 @@
 # Service Inventory
 
 > 서비스별 책임 · 상태 · 의존의 요약이다. 서비스 책임이 바뀌면 이 문서를 같은 PR 에서 갱신한다.
-> 포트 번호는 스캐폴딩 이슈에서 확정하고 이 표를 고친다.
+> 포트는 확정했다(#3 · #36). 바꾸면 이 표와 모듈의 `application.yml`, 서비스의 `*ApplicationTests` 를 같이 고친다.
 
 ## 1. 실행 모듈
 
-| 모듈 | 포트(안) | 상태 | 책임 |
-|------|----------|------|------|
+| 모듈 | 포트 | 상태 | 책임 |
+|------|------|------|------|
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
-| `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3) — JWT·ADMIN 은 #4·#6 | 라우팅(`api-design-guide.md` §1-2), JWT 검증, `/api/v1/admin/**` ADMIN 확인, CORS |
-| `service/auth-service` | 8081 | 미착수 | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
-| `service/product-service` | 8082 | 미착수 | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제), 상품 이미지, 다국어 상품정보, 통화별 가격 |
-| `service/order-service` | 8083 | 미착수 | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
-| `service/payment-service` | 8084 | 미착수 | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
-| `service/delivery-service` | 8085 | 미착수 | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
+| `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36) — JWT·ADMIN 은 #4·#6 | 라우팅(`api-design-guide.md` §1-2), JWT 검증, `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
+| `service/auth-service` | 8081 | 골격 (#36) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
+| `service/product-service` | 8082 | 골격 (#36) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제), 상품 이미지, 다국어 상품정보, 통화별 가격 |
+| `service/order-service` | 8083 | 골격 (#36) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
+| `service/payment-service` | 8084 | 골격 (#36) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
+| `service/delivery-service` | 8085 | 골격 (#36) | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
+
+"골격" 은 실행·Eureka 등록·헬스 체크·Swagger 그룹까지 갖추고 도메인 코드는 없는 상태다 (`bootstrap-conventions.md`).
 
 ## 2. 서비스 간 호출 (동기, Feign)
 
@@ -69,3 +71,4 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
 | 오브젝트 스토리지 | S3 / Cloudflare R2 / NCP Object Storage | 상품 이미지 |
 | 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |
+| DB 마이그레이션 도구 | Flyway / Liquibase / 없음(`ddl-auto` 만). 지금은 기본 `validate`, local 만 `update` | 첫 엔티티 이슈(#4 · #8) **전에** 조율 세션이 정한다 |
