@@ -3,7 +3,7 @@
 A modular e-commerce platform built with Spring Cloud and Next.js, designed for customizable storefronts,
 order management, and payment integrations.
 
-재사용 가능한 쇼핑몰 엔진입니다. 첫 번째 적용 사례는 생활한복 브랜드 MOKOYURI 의 카페24 → 자체 쇼핑몰 이전입니다.
+재사용 가능한 쇼핑몰 엔진입니다. 브랜드별 차이는 설정과 기능 플래그로 표현하고, 같은 코드로 여러 쇼핑몰을 배포합니다.
 
 ## 구성
 
