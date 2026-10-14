@@ -45,11 +45,24 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
   다른 서비스 스키마를 직접 조회하지 않는다 — 필요한 데이터는 내부 API 로 받는다.
 - 운영 규모가 커지면 인스턴스를 나눌 수 있게 스키마 간 FK·조인을 만들지 않는다.
 
+### 4-1. 기술 버전
+
+정본은 `backend/build.gradle` · `backend/gradle/wrapper/gradle-wrapper.properties` 다. 올릴 때 이 표도 고친다.
+
+| 항목 | 버전 | 비고 |
+|------|------|------|
+| Java | 21 | Gradle toolchain |
+| Gradle | 9.7.1 | Wrapper |
+| Spring Boot | 4.0.8 | Spring Framework 7 · Hibernate 7.2 · **Jackson 3** (`tools.jackson`) |
+| Spring Cloud | 2025.1.3 | Boot 4.0 대응 GA 트레인. Boot 4.1 은 트레인 2026.0 이 GA 된 뒤 함께 올린다 |
+| springdoc-openapi | 3.0.3 | Boot 4 대응 라인 |
+| QueryDSL | OpenFeign 포크 7.7 | `com.querydsl` 원본은 2024년 이후 릴리스가 없다 |
+| PostgreSQL / Redis (로컬) | 17 / 7.4 | `docker-compose-local.yml` |
+
 ## 5. 결정 대기
 
 | 항목 | 선택지 | 결정할 이슈 |
 |------|--------|-------------|
-| Spring Boot / Cloud 버전 | 3.5.x + 2025.0.x / 4.x + 2025.1.x | 스캐폴딩 |
 | 서비스 간 비동기 메시징 | 없음(동기 + 재전송) / RabbitMQ / Kafka | 결제 연동 이후 |
 | 비회원 주문 | 지원 / 미지원 | 주문 생성 |
 | USD 가격 | SKU 별 통화 가격표 / 환율 환산 | 해외 판매 |

@@ -38,7 +38,7 @@ Info → Presenter → Response
 
 ## 영속성
 
-- **JPA 연관관계 어노테이션 금지**, raw FK + `@Comment("... (FK: table.id)")`
+- **JPA 연관관계 어노테이션 금지**, raw FK + `@Column(comment = "... (FK: table.id)")`
 - 인덱스 `idx_`/`uk_` + 모든 컬럼, PostgreSQL 63자 이내
 - 쿼리 수단: 파생 쿼리 → JPQL `@Query` → 동적·조인은 QueryDSL `*CustomRepository` + `Impl`. **네이티브 쿼리 금지, `@Param` 금지**
 - **N+1 금지** — 루프 안 `Port.`/`Repository.`/`Client.` 단건 호출 대신 `in` 절 벌크, 원격은 벌크 internal 엔드포인트

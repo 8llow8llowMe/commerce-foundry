@@ -95,6 +95,13 @@ Info → Presenter → Response
 | 스토어프론트 목록 (상품 목록, 리뷰) | `SliceResponse` (커서/무한 스크롤) 기본 | 총계가 필요 없고 count 질의 비용이 없다 |
 | 어드민 목록 (주문·상품·회원 관리 표) | `PageResponse` (`page`, `size`, `totalElements`, `totalPages`) | 페이지 번호·전체 건수가 업무에 필요하다 |
 
+```json
+{ "contents": [ ... ], "hasNext": true }
+{ "contents": [ ... ], "page": 0, "size": 20, "totalElements": 135, "totalPages": 7 }
+```
+
+- 두 타입은 `persistence-core` 의 `SliceResponse` · `PageResponse` 다. Presenter 는 `map(...)` 으로 항목만 바꾼다.
+- **`page` 는 0 부터 센다** (Spring `Pageable` 과 같다). 화면의 "1페이지" 는 프론트가 +1 해서 보여준다.
 - 정렬은 enum `RequestParam`(`sortType`, `orderType`) 으로 받는다. Swagger 에 허용값이 드러난다.
 - `totalCount` 를 내리는 응답은 **자르기 전 개수**여야 한다. Presenter 가 `items.size()` 로 채우지 않는다.
 

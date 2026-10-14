@@ -3,8 +3,8 @@
 ## 1. 목표 구조
 
 - 백엔드는 **Spring Cloud MSA + Hexagonal Architecture** 를 기준으로 설계한다.
-- 기술 기준: Java 21 · Spring Boot 3.x · Spring Cloud · Gradle 멀티모듈 · PostgreSQL · Redis
-  (정확한 버전은 스캐폴딩 이슈에서 확정하고 루트 `build.gradle` 이 정본이다).
+- 기술 기준: Java 21 · Spring Boot 4.0 · Spring Cloud 2025.1 · Gradle 멀티모듈 · PostgreSQL · Redis
+  (정확한 버전은 `backend/build.gradle` 이 정본이다. Boot 4 라 Jackson 은 3 — 패키지가 `tools.jackson` 이다).
 - **commerce-foundry 는 재사용 가능한 쇼핑몰 엔진이다.** 첫 고객사는 MOKOYURI(생활한복)지만
   특정 브랜드의 규칙을 공통 코드에 고정하지 않는다 (§9).
 
