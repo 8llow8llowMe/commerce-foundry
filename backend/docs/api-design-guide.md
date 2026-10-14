@@ -140,8 +140,9 @@ Info → Presenter → Response
 
 ## 5. 보안 API 설계
 
-- 인증 사용자 전용 API 는 `@PreAuthorize` 를 명시한다. 어드민 API 는 `hasRole('ADMIN')`.
-  internal API(`/internal/**`)는 JWT 없이 호출되므로 `@PreAuthorize` 를 달지 않는다.
+- 고객·어드민 API(`adapter/in/web` · `adapter/in/admin`)의 **모든 핸들러에 `@PreAuthorize` 를 단다.** 서비스 URL 단계가 열려 있어(default-allow)
+  빠뜨리면 공개 API 가 된다. 공개 API 도 `@PreAuthorize("permitAll()")` 로 명시하고, 로그인 필요는 `isAuthenticated()`, 어드민은 `hasRole('ADMIN')` 이다.
+  internal API(`/internal/**`)는 JWT 없이 호출되므로 `@PreAuthorize` 를 달지 않는다 (`security-guide.md` §5-1).
 - member 식별은 JWT claim 기준이다. **클라이언트가 보낸 memberId 로 소유자를 판정하지 않는다.**
   컨트롤러는 `@AuthenticationPrincipal MemberPrincipal member` 로 받고 `member.memberId()` 만 UseCase 로 넘긴다.
 
