@@ -1,0 +1,79 @@
+package com.commercefoundry.security.resourceserver;
+
+import com.commercefoundry.security.error.SecurityErrorEnvelope;
+import com.commercefoundry.security.principal.MemberJwtAuthenticationConverter;
+import com.commercefoundry.security.principal.MemberRole;
+import com.commercefoundry.security.token.AccessTokenDecoderFactory;
+import com.commercefoundry.security.token.JwtVerificationProperties;
+import java.time.Clock;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.annotation.Bean;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.web.SecurityFilterChain;
+import tools.jackson.databind.json.JsonMapper;
+
+/**
+ * 서블릿 서비스의 Resource Server 설정. 서비스의 {@code *BeansConfig} 가 {@code @Import} 하고, {@code *PropertiesConfig} 가
+ * {@code JwtVerificationPropertiesConfig} 를 {@code @Import} 한다 ({@code security-guide.md} Resource Server).
+ * 컴포넌트 스캔에 걸리지 않게 {@code @Configuration} 을 달지 않는다 — lite 모드라 {@code @Bean} 끼리 메서드를 부르지 않고 파라미터로 받는다.
+ *
+ * <ul>
+ *   <li>세션을 만들지 않는다(STATELESS). CSRF · 폼 로그인 · Basic · 로그아웃 · CORS(게이트웨이 몫)를 끈다.</li>
+ *   <li>{@code /api/v1/admin/**} 은 URL 규칙으로 ADMIN 을 요구한다. 컨트롤러의 {@code hasRole('ADMIN')} 과 이중이다.</li>
+ *   <li>나머지 경로는 열어 두고 인증 필요 여부는 메서드의 {@code @PreAuthorize} 가 정한다 — 비로그인 상품 조회 같은 API 가 있다.
+ *       {@code /internal/**} 은 JWT 없이 호출되므로 internal 컨트롤러에 {@code @PreAuthorize} 를 달지 않는다.</li>
+ *   <li>토큰이 있는데 틀리면 공개 API 여도 401 이다. 틀린 토큰을 익명으로 취급하지 않는다.</li>
+ * </ul>
+ */
+@EnableWebSecurity
+@EnableMethodSecurity
+public class ResourceServerSecurityConfigurer {
+
+    public static final String ADMIN_PATH_PATTERN = "/api/v1/admin/**";
+
+    /** {@code JwtDecoder} 빈이 있으면 Boot 가 기본 사용자(생성 비밀번호)를 만들지 않는다. */
+    @Bean
+    public JwtDecoder accessTokenDecoder(JwtVerificationProperties properties) {
+        return AccessTokenDecoderFactory.create(properties, Clock.systemUTC());
+    }
+
+    /** 오류 본문은 서비스의 {@code JsonMapper} 빈으로 쓴다 — 다른 오류 응답과 직렬화 설정이 같아야 한다. */
+    @Bean
+    public SecurityFilterChain resourceServerSecurityFilterChain(
+        HttpSecurity http, JwtDecoder accessTokenDecoder, ObjectProvider<JsonMapper> jsonMapper
+    ) throws Exception {
+        SecurityErrorResponder responder = new SecurityErrorResponder(new SecurityErrorEnvelope(jsonMapper.getIfAvailable(() -> JsonMapper.builder().build())));
+        // Converter 빈으로 두면 MVC 변환 서비스에도 등록된다. 여기서만 쓰므로 직접 만든다
+        MemberJwtAuthenticationConverter authenticationConverter = new MemberJwtAuthenticationConverter();
+
+        return http
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .csrf(AbstractHttpConfigurer::disable)
+            .cors(AbstractHttpConfigurer::disable)
+            .formLogin(AbstractHttpConfigurer::disable)
+            .httpBasic(AbstractHttpConfigurer::disable)
+            .logout(AbstractHttpConfigurer::disable)
+            .requestCache(AbstractHttpConfigurer::disable)
+            .authorizeHttpRequests(authorize -> authorize
+                .requestMatchers(ADMIN_PATH_PATTERN).hasRole(MemberRole.ADMIN.name())
+                .anyRequest().permitAll())
+            .oauth2ResourceServer(resourceServer -> resourceServer
+                .jwt(jwt -> jwt.decoder(accessTokenDecoder).jwtAuthenticationConverter(authenticationConverter))
+                .authenticationEntryPoint(responder)
+                .accessDeniedHandler(responder))
+            .exceptionHandling(exceptions -> exceptions
+                .authenticationEntryPoint(responder)
+                .accessDeniedHandler(responder))
+            .build();
+    }
+
+    @Bean
+    public SecurityExceptionAdvice securityExceptionAdvice() {
+        return new SecurityExceptionAdvice();
+    }
+}
