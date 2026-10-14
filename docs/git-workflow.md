@@ -200,8 +200,8 @@ GitHub 에 적용돼 있는 값이다. 바꾸면 이 표도 같이 고친다 (`g
 ```bash
 git fetch --prune origin
 git switch develop && git merge --ff-only origin/develop
+git worktree remove <워크트리 경로>    # 워크트리에서 작업했다면 — 브랜치를 쥐고 있어 먼저 지운다
 git branch -D <머지된 브랜치>          # 리베이스 머지라 SHA 가 달라 -d 는 거부된다
-git worktree remove <워크트리 경로>    # 워크트리에서 작업했다면
 ```
 
 - `-D` 전에 `git diff <브랜치> origin/develop` 이 비었거나 `git cherry -v origin/develop <브랜치>` 가 전부 `-` 인지

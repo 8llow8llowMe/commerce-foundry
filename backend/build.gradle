@@ -55,6 +55,9 @@ subprojects { project ->
         // 실행 모듈은 전부 헬스 체크를 낸다 (노출 엔드포인트는 각 application.yml 이 health 로 좁힌다)
         dependencies {
             implementation 'org.springframework.boot:spring-boot-starter-actuator'
+            // 실행 모듈은 eureka-client 를 통해 Spring Cloud LoadBalancer 를 쓴다(게이트웨이 lb:// · 서비스 Feign).
+            // Caffeine 이 없으면 기본 캐시로 떨어지며 "운영에 쓰지 말라" WARN 을 남긴다
+            implementation 'com.github.ben-manes.caffeine:caffeine'
         }
     }
 
