@@ -41,6 +41,20 @@ subprojects { project ->
     if (!library) {
         apply plugin: 'org.springframework.boot'
         tasks.named('jar') { enabled = false }
+
+        // bootRun(로컬 실행)만 SPRING_PROFILES_ACTIVE 가 없으면 local 로 띄운다. bootJar 로 만든 jar 실행에는 영향이 없다 —
+        // 배포 환경이 프로파일을 빠뜨려도 local 설정(로컬 CORS origin, self-preservation off)으로 뜨지 않게 하려는 것이다
+        boolean profileFromEnvironment = project.providers.environmentVariable('SPRING_PROFILES_ACTIVE').isPresent()
+        tasks.named('bootRun', JavaExec) {
+            if (!profileFromEnvironment) {
+                systemProperty 'spring.profiles.active', 'local'
+            }
+        }
+
+        // 실행 모듈은 전부 헬스 체크를 낸다 (노출 엔드포인트는 각 application.yml 이 health 로 좁힌다)
+        dependencies {
+            implementation 'org.springframework.boot:spring-boot-starter-actuator'
+        }
     }
 
     dependencyManagement {

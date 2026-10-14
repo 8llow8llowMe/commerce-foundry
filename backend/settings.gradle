@@ -5,4 +5,8 @@ include 'core:common-core'
 include 'core:persistence-core'
 include 'core:shared-commerce'
 
-// Cloud · Services — #3 에서 추가한다
+// Cloud
+include 'cloud:service-discovery'
+include 'cloud:api-gateway'
+
+// Services — #36 에서 추가한다
