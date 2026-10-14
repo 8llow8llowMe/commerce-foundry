@@ -98,7 +98,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | 경로 | 규칙 |
 |------|------|
 | `/api/v1/admin/**` | URL 규칙으로 `ADMIN` 을 요구한다. 컨트롤러의 `@PreAuthorize("hasRole('ADMIN')")` 와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
-| `/internal/**` | JWT 없이 호출된다. **internal 컨트롤러에 `@PreAuthorize` 를 달지 않는다.** 외부 차단은 게이트웨이 몫이다 (`architecture-guide.md` §6) |
+| `/internal/**` | JWT 없이 호출된다. **internal 컨트롤러에 `@PreAuthorize` 를 달지 않는다.** 서비스 포트가 **사설망에서만 닿는다는 전제**의 정책이다 — 게이트웨이가 라우팅하지 않고, 서비스 포트를 외부에 열지 않는다 (`architecture-guide.md` §6) |
 | 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고, 인증이 필요한 메서드에 `@PreAuthorize("isAuthenticated()")` 를 단다. 비로그인 상품 조회 같은 API 가 있다 |
 
 - **토큰을 보냈는데 틀리면 공개 API 여도 401 이다.** 틀린 토큰을 익명으로 취급하지 않는다. 프론트는 만료 토큰을 지우거나 재발급한 뒤 다시 보낸다.

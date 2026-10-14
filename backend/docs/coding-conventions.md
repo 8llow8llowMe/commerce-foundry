@@ -228,32 +228,78 @@ public final class ProductValidationMessage {
 
 ### 9-7. Redis
 
-- 접속은 Boot 의 `spring.data.redis.*` 자동설정(Lettuce, standalone)을 그대로 쓴다. 접속 프로퍼티나
+**접속**
+
+- 접속은 Boot 의 `spring.data.redis.*` 자동설정(Lettuce)을 그대로 쓰고 **standalone 만** 지원한다. 접속 프로퍼티나
   `LettuceConnectionFactory` 를 따로 만들지 않는다. 쓰는 서비스는 `redis-core` 를 의존하고 `*BeansConfig` 에서
   `RedisConfigurer` 를 `@Import` 한다 — yml 은 `bootstrap-conventions.md` 의 Redis 절.
-- **기동 가드** — `RedisConfigurer` 가 등록하는 `RedisStartupGuard` 가 접속 팩토리를 만들기 전에 아래를 검사해 기동을 멈춘다.
-  환경변수(`SPRING_DATA_REDIS_*`)도 Boot 와 같은 규칙으로 읽는다. 메시지에는 프로퍼티·환경변수 이름만 넣고 값은 넣지 않는다.
+- 환경(dev · stage · prod)과 고객사마다 Redis 인스턴스를 나눈다. 한 인스턴스를 나눠 써야 하면 최소한 `database` 번호를 나눈다.
+  키에 환경·스토어 접두어가 없으므로 이것이 유일한 경계다.
+- Vault 의 Redis 비밀번호에 `$` 를 쓰지 않는다 — Boot 가 `${...}` 를 플레이스홀더로 해석한다.
+- 운영 Redis 는 `maxmemory-policy noeviction` 으로 둔다. 메모리가 차면 쓰기가 실패할 뿐, 블랙리스트·멱등 키가 조용히 퇴출되지 않는다.
+
+**기동 가드** — `RedisConfigurer` 가 등록하는 `RedisStartupGuard` 가 접속 팩토리를 만들기 전에 아래를 검사해 기동을 멈춘다.
+환경변수(`SPRING_DATA_REDIS_*`)도 Boot 와 같은 규칙으로 읽는다. 위반은 모아서 한 번에 알리고, 메시지에는 프로퍼티·환경변수 이름만 넣는다.
 
 | 기동을 멈추는 조건 | 이유 |
 |--------------------|------|
 | `password` 가 비었거나 공백, `${REDIS_PASSWORD}` 가 풀리지 않았다 | 로컬 compose 도 `requirepass` 다. 인증 없는 Redis 에 붙지 않는다 |
-| `timeout`(명령) · `connect-timeout`(연결)이 없거나 0 이하다 | 타임아웃 없는 블로킹 호출 금지 (`architecture-guide.md` §8) |
+| `host` 에 `${REDIS_HOST}` 가 풀리지 않고 남았다 | 그대로 두면 기동은 되고 첫 명령에서야 실패한다 |
+| `timeout`(명령) · `connect-timeout`(연결)이 없거나 0 이하거나 형식이 틀렸다 | 타임아웃 없는 블로킹 호출 금지 (`architecture-guide.md` §8) |
 | `url` 이 설정됐다 | url 이 있으면 Boot 가 host·port·password 를 무시한다 — 비밀번호 검사가 무력해진다 |
+| `sentinel` · `cluster` · `masterreplica` 아래 값이 있다 | 다른 모드는 노드·비밀번호를 다른 프로퍼티에서 읽어 위 검사를 비켜 간다 |
 
-- **키는 `RedisKey.of(owner, domain, id...)` 로 만든다** — `{owner}:{domain}:{id...}`. 어긋나면 `IllegalArgumentException`.
+**키** — `RedisKey.of(owner, domain, id...)` 로 만든다. 형식 `{owner}:{domain}:{id...}`, 어긋나면 `IllegalArgumentException`.
 
 | 부분 | 규칙 | 예 |
 |------|------|----|
-| owner | 키를 쓰는 서비스의 짧은 이름. 소문자 kebab `[a-z][a-z0-9-]*` | `auth`, `order`, `gateway` |
+| owner | 키의 **수명주기(생성·갱신·삭제)를 소유하는** 서비스. 소문자 kebab `[a-z][a-z0-9-]*` | 아래 표 |
 | domain | 그 서비스 안의 용도. 소문자 kebab | `refresh-token`, `cart` |
-| id | 하나 이상. 비어 있지 않고 `:` · 공백이 없다. 숫자 · UUID · base64url 은 그대로 | `4611686018427387904` |
+| id | 하나 이상. ASCII `[A-Za-z0-9._~=+/-]` 1~128자 — glob(`* ? [ ] \`) · `{ }` · 공백 · 제어문자 · 비ASCII 는 거부 | Snowflake · UUID · base64(표준·url) |
 
-- owner 로 서비스별 네임스페이스를 나눈다. 같은 이름의 키가 부딪히지 않고, 한 서비스가 패턴으로 지운 키가 다른 서비스 것이 아니게 된다.
-- 싱글 테넌트(`architecture-guide.md` §9)라 스토어 접두어는 붙이지 않는다 — 고객사마다 Redis 가 따로다.
-- 서비스를 가로지르는 키(auth 가 쓰고 gateway 가 읽는 등)는 **쓰는 쪽**이 owner 다.
-- **직렬화** — Boot 가 만드는 `StringRedisTemplate`(서블릿) · `ReactiveStringRedisTemplate`(게이트웨이)만 쓴다.
-  값이 객체면 JSON 문자열로 바꿔 넣는다. `RedisTemplate<Object, Object>`(JDK 직렬화)는 쓰지 않는다 —
+| owner | 서비스 |
+|-------|--------|
+| `auth` · `product` · `order` · `payment` · `delivery` | 같은 이름의 `*-service` |
+| `gateway` | `api-gateway` |
+
+- owner 로 서비스별 네임스페이스를 나눠 같은 이름의 키가 부딪히지 않게 한다. 싱글 테넌트(`architecture-guide.md` §9)라 스토어 접두어는 붙이지 않는다.
+- **서비스를 가로지르는 키**(auth 가 쓰고 gateway 가 읽는 등) — 다른 서비스는 그 키에 직접 쓰지 않고 owner 의 API 를 거친다.
+  키는 양쪽이 의존하는 모듈(예: `security-core`)의 키 함수 하나로만 만든다. 형식이 두 곳에서 갈라지지 않게 한다.
+- `:` 가 들어가는 값(IPv6 등)은 정규화한 뒤 인코딩해 넣는다(예: IPv6 → 16바이트 hex).
+- id 에 원문 토큰·개인정보를 넣지 않는다. 해시(SHA-256 base64url 등)로 넣는다 — `RedisKey.toString()` 이 키 전체를 출력하고, 키는 `MONITOR`·슬로로그에도 남는다.
+- `KEYS` · `SCAN` 패턴으로 지우지 않는다. 묶어서 지울 키는 색인 SET(예: 회원별 refresh 토큰 지문)에 모아 두고 그 SET 으로 지운다.
+
+**TTL** (필수)
+
+- 모든 키는 쓰는 **같은 명령**에서 TTL 을 준다 — `set(k, v, Duration)`, `setIfAbsent(k, v, Duration)`.
+  `set` 뒤에 `expire` 를 따로 부르지 않는다. 그 사이에 실패하면 영구 키가 남는다.
+- 덮어쓸 때도 TTL 을 다시 주거나 `KEEPTTL`(`Expiration.keepTtl()`)을 쓴다. TTL 없는 `SET` 은 기존 TTL 을 지운다.
+- 컬렉션(`SADD` · `HSET` 등)은 `MULTI` 나 Lua 로 `EXPIRE` 와 함께 보낸다.
+- 영구 키는 만들지 않는다. 예외는 아래 예외 표에 올린다.
+- TTL 값은 프로퍼티로 두고 근거에 묶는다.
+
+| 용도 | TTL |
+|------|-----|
+| refresh 토큰 | refresh 토큰 TTL 과 같게 (`security.jwt.issuance.refresh-token-ttl`) |
+| access 토큰 블랙리스트 | 토큰의 남은 수명(`exp − now`) + 시계 오차 허용(`security.jwt.clock-skew`) 이상 |
+| 소셜 로그인 state | 짧게(분 단위). 꺼낼 때 `GETDEL` 로 한 번만 쓴다 |
+| 멱등 키 | 클라이언트 재시도 창보다 길게. 처리 중 마커는 최대 처리 시간보다 길게 |
+| 캐시 | 짧게. 원본을 쓸 때 무효화한다 |
+
+**직렬화**
+
+- Boot 가 만드는 `StringRedisTemplate`(서블릿) · `ReactiveStringRedisTemplate`(게이트웨이)만 주입한다. 값이 객체면 JSON 문자열로 바꿔 넣는다.
+- Boot 는 `redisTemplate` · `reactiveRedisTemplate`(`<Object, Object>`, JDK 직렬화)도 등록한다. **있지만 주입하지 않는다** —
   클래스가 바뀌면 읽지 못하고, `redis-cli` 로 값을 볼 수 없고, 역직렬화 취약점의 입구가 된다.
+- 타입 정보(`@class`)를 값에 싣는 Generic Jackson 직렬화(`GenericJacksonJsonRedisSerializer` · `GenericJackson2JsonRedisSerializer`)도 같은 이유로 쓰지 않는다.
+- Spring Cache(`@Cacheable`)는 쓰지 않는다. 기본 설정이 JDK 직렬화 · 무기한 TTL · `{cacheName}::{key}` 키다.
+  필요해지면 redis-core 가 접두어 · String/JSON 직렬화 · TTL 을 강제하는 `RedisCacheConfiguration` 을 먼저 제공한다.
+
+**형식 · TTL 예외** — 프레임워크가 만드는 키만 둔다. 새 예외는 이 표에 올리고 리뷰에서 근거를 확인한다.
+
+| 키 | 만드는 곳 | 비고 |
+|----|-----------|------|
+| `request_rate_limiter.{<id>}.tokens` · `.timestamp` | Spring Cloud Gateway `RedisRateLimiter` (gateway) | 형식은 프레임워크가 정한다. TTL 은 Lua 스크립트가 같이 건다 |
 
 ### 9-8. 스키마 변경 · 운영 DDL (필수)
 
