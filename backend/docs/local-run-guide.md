@@ -109,7 +109,7 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 | 한글이 깨진 파일이 diff 에 잡힌다 | CP949 로 저장됐다. UTF-8(no BOM)로 다시 저장한다 (`.editorconfig`) |
 | `docker compose up` 이 `DB_USERNAME 을 채우세요` 로 멈춘다 | `.env` 가 없거나 칸이 비었다. §2 |
 | 6379 포트가 이미 쓰이고 있다 | 다른 프로젝트의 Redis 다. `.env` 의 `REDIS_PORT` 를 바꾼다 |
-| 서비스가 `Redis 설정이 기동 조건에 맞지 않습니다` 로 뜨지 않는다 | `REDIS_PASSWORD` 가 비었거나 yml 에 `timeout` · `connect-timeout` 이 없다. 메시지가 가리키는 항목을 채운다 (`coding-conventions.md` §9-7) |
+| 서비스가 `Redis 설정이 기동 조건에 맞지 않습니다` 로 뜨지 않는다 | `REDIS_PASSWORD` · `REDIS_HOST` 가 비었거나 yml 에 `timeout` · `connect-timeout` 이 없다. 메시지가 가리키는 항목을 채운다 (`coding-conventions.md` §9-7) |
 | 서비스가 `security.jwt.public-key(환경변수 JWT_PUBLIC_KEY)` 로 시작하는 메시지로 뜨지 않는다 | 공개키가 비었거나 형식이 틀렸다. `BEGIN PUBLIC KEY` 공개키의 본문 한 줄을 넣는다 — 개인키 · PKCS#1 · 2048비트 미만은 받지 않는다 (`security-guide.md` §6) |
 | auth 가 `JWT_PRIVATE_KEY 와 JWT_PUBLIC_KEY 가 한 쌍이 아닙니다` 로 뜨지 않는다 | 두 값이 다른 키 쌍에서 왔다. 같은 `jwt-private.pem` 에서 만든 공개키를 넣는다 (`security-guide.md` §6-3) |
 | 새 스키마가 안 보인다 | init 스크립트는 첫 기동에만 돈다. `down -v` 후 다시 올린다 |

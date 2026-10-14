@@ -137,7 +137,8 @@ spring:
 ```
 
 - 타임아웃 값은 예시다. 서비스가 정하되 비우지 않는다.
-- `url` 은 쓰지 않는다 — 가드가 막는다.
+- `url` · `sentinel` · `cluster` · `masterreplica` 는 쓰지 않는다 — standalone 만 지원하고 가드가 막는다.
+- 키 TTL 은 서비스 프로퍼티로 둔다 (근거는 `coding-conventions.md` §9-7 TTL 표).
 
 ## Reason
 
