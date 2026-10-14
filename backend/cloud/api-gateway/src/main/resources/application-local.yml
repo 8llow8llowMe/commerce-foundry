@@ -1,0 +1,6 @@
+# 로컬 개발 전용. bootRun 은 SPRING_PROFILES_ACTIVE 가 없으면 local 로 뜬다 (backend/build.gradle).
+
+gateway:
+  cors:
+    # 로컬 프론트 개발 서버. 다른 포트를 쓰면 환경변수로 넘긴다 (local-run-guide.md §5).
+    allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:http://localhost:3000}
