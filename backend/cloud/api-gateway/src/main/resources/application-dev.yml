@@ -1,0 +1,6 @@
+# dev 서버. 값은 Vault 에서 환경변수로 주입한다 (secret-management.md §3 · 주입 방식은 #32).
+
+gateway:
+  dev-routes:
+    # 서비스 헬스 체크 · Swagger UI. 운영(prod)에서는 켜지 않는다
+    enabled: true
