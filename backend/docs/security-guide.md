@@ -38,7 +38,9 @@
 | `jti` | UUID | 있어야 한다. 로그아웃 블랙리스트(#4)의 키 |
 
 - `nbf` 는 넣지 않는다. iss 가 URL 이 아니므로 `Jwt#getIssuer()`(URL 변환)를 쓰지 않는다.
-- TTL 기본 30분(`security.jwt.issuance.access-token-ttl`), 시계 오차 허용 기본 60초(`security.jwt.clock-skew`, 0 이상 5분 이하).
+- TTL 기본 30분, **최대 1시간**(`security.jwt.issuance.access-token-ttl`). access 토큰은 발급 뒤 거둘 수 없어 길수록 탈취 시 악용 창과
+  로그아웃 블랙리스트(#4) 보관 기간이 늘어난다. 긴 로그인 유지는 refresh 토큰으로 한다.
+- 시계 오차 허용 기본 60초(`security.jwt.clock-skew`, 0 이상 5분 이하).
 - 위반은 한 번에 모두 모아 판정한다 (§4-1).
 
 ### 2-3. refresh 토큰은 JWT 가 아니다
@@ -76,7 +78,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | `SECURITY_003` | `TOKEN_INVALID` | 401 | 서명 · 형식 · alg · typ · iss · aud · claim 위반 | `Bearer error="invalid_token"` |
 | `SECURITY_004` | `TOKEN_REVOKED` | 401 | 로그아웃된 토큰 (#4) | `Bearer error="invalid_token"` |
 | `SECURITY_005` | `FORBIDDEN` | 403 | 로그인했지만 역할이 모자란다 | 없음 |
-| `SECURITY_006` | `TOKEN_VERIFICATION_UNAVAILABLE` | 503 | 토큰 검증 저장소 장애 (#4) · 인증 처리 중 시스템 오류 | 없음 |
+| `SECURITY_006` | `TOKEN_VERIFICATION_UNAVAILABLE` | 503 | 토큰 검증 저장소 장애 (#4) · 검증 중 시스템 오류(`AuthenticationServiceException`) | 없음 |
 
 - 본문은 `Response.fail(code, message)` 봉투다 (`api-design-guide.md` §2-1). 서비스와 게이트웨이가 `SecurityErrorEnvelope` 로 같은 바이트를 쓴다.
 - 002 이외의 401 은 재발급으로 풀리지 않는다 — 프론트는 다시 로그인시킨다.
@@ -87,8 +89,12 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - 검증 위반이 **만료 하나뿐일 때만 002** 다. 만료에 다른 위반(aud 불일치 등)이 섞이면 003 — 재발급으로 풀리지 않는 토큰이다.
 - 만료 판정은 security-core 의 validator 가 오류 코드 `SECURITY_002` 로 남긴다. Nimbus 의 기본 claim 검증은 꺼 두었다
   (켜 두면 Nimbus 가 먼저 "Expired JWT" 문구의 예외를 던져 만료를 문자열로 가려내야 한다).
-- #4 가 004 · 006 을 낼 때는 `new OAuth2AuthenticationException(new OAuth2Error(SecurityErrorCode.TOKEN_REVOKED.getCode()))` 처럼
-  오류 코드에 `SECURITY_xxx` 를 싣는다. 리졸버가 그 코드를 그대로 쓴다.
+- **#4 가 004 · 006 을 내는 방법** — 디코더 래퍼(서블릿 `JwtDecoder` · 리액티브 `ReactiveJwtDecoder`)나 `AuthenticationManager` 에서
+  `new OAuth2AuthenticationException(new OAuth2Error(SecurityErrorCode.TOKEN_REVOKED.getCode()))` 를 던진다.
+  리졸버는 원인 사슬에 실려 온 코드 중 **004 · 006 만** 따르고 001 · 002 · 003 · 005 는 무시한다 — 만료가 아닌 토큰이 002 를 실어 재발급을 유도하지 못하게.
+- **validator 에 넣지 않는다.** validator 의 오류는 `JwtValidationException` 안에 들어가 003 이 된다.
+- 저장소 장애를 `JwtException`(Bad 아님)이나 `AuthenticationServiceException` 으로 던져도 006 이다. Spring 의 기본 실패 처리기는 이 예외를
+  다시 던져 **봉투 없는 500** 을 만들기 때문에, 서블릿 Resource Server 는 다시 던지지 않는 처리기로 바꿔 두었다(`ResourceServerSecurityConfigurer`).
 - 권한 거부는 익명이면 001, 로그인했으면 005 다.
 
 ## 5. Resource Server (서블릿 서비스)
@@ -98,13 +104,28 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | 경로 | 규칙 |
 |------|------|
 | `/api/v1/admin/**` | URL 규칙으로 `ADMIN` 을 요구한다. 컨트롤러의 `@PreAuthorize("hasRole('ADMIN')")` 와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
-| `/internal/**` | JWT 없이 호출된다. **internal 컨트롤러에 `@PreAuthorize` 를 달지 않는다.** 서비스 포트가 **사설망에서만 닿는다는 전제**의 정책이다 — 게이트웨이가 라우팅하지 않고, 서비스 포트를 외부에 열지 않는다 (`architecture-guide.md` §6) |
-| 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고, 인증이 필요한 메서드에 `@PreAuthorize("isAuthenticated()")` 를 단다. 비로그인 상품 조회 같은 API 가 있다 |
+| `/internal/**` | JWT 없이 호출된다. **internal 컨트롤러에 `@PreAuthorize` 를 달지 않는다.** 서비스 포트가 **사설망에서만 닿는다는 전제**의 정책이다 — 게이트웨이가 라우팅하지 않고, 서비스 포트를 외부에 열지 않는다 (`architecture-guide.md` §6, 아래 강제 수단) |
+| 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고(default-allow) 메서드의 `@PreAuthorize` 가 정한다. 비로그인 상품 조회 같은 API 가 있다 (아래 보완 규칙) |
+| `/actuator/**` | URL 단계에서 열린다. 웹 노출은 `health` 만 두거나 별도 management 포트(사설망)로 뺀다. **auth-service 는 `heapdump` 를 노출하지 않는다** — 힙에 개인키가 있다 |
 
 - **토큰을 보냈는데 틀리면 공개 API 여도 401 이다.** 틀린 토큰을 익명으로 취급하지 않는다. 프론트는 만료 토큰을 지우거나 재발급한 뒤 다시 보낸다.
 - 세션을 만들지 않는다(STATELESS). CSRF · 폼 로그인 · Basic · 로그아웃을 끈다. CORS 는 게이트웨이가 처리하므로 서비스에서 끈다.
 - 정규화되면 다른 경로가 되는 원문 경로(`..` · `%2e` · `;` · `//` · `%2f`)는 Spring Security 방화벽이 필터 체인 앞에서 **400(봉투 없음)** 으로 끊는다.
   게이트웨이도 같은 경로를 먼저 거절한다(`GATEWAY_004`). 서비스의 400 은 게이트웨이를 거치지 않은 요청에 대한 이중 방어다.
+- 대소문자가 다른 경로(`/API/v1/admin/x`)는 어느 컨트롤러에도 매핑되지 않아 404 다. 비예약 문자를 인코딩한 경로(`/api/v1/%61dmin/x`)는
+  URL 규칙과 MVC 가 같은 디코딩으로 보므로 어드민 규칙에 그대로 걸린다(CUSTOMER 403 · 무토큰 401). 둘 다 통합 테스트로 고정했다.
+
+**default-allow 보완 규칙** — URL 단계가 열려 있으니 메서드 애노테이션이 빠지면 그대로 공개 API 가 된다.
+
+- `adapter/in/web` · `adapter/in/admin` 의 **모든 핸들러 메서드에 `@PreAuthorize` 를 단다.** 공개 API 도 `@PreAuthorize("permitAll()")` 로 적어
+  빠뜨린 메서드가 리뷰에서 보이게 한다. 로그인 필요는 `isAuthenticated()`, 어드민은 `hasRole('ADMIN')` 이다. ArchUnit 강제는 후속 이슈에서 한다.
+
+**`/internal/**` 사설망 전제의 강제 수단**
+
+- 서비스 포트를 외부에 publish 하지 않는다. 운영은 네트워크 정책(보안 그룹 · NetworkPolicy)으로 서비스 간 통신만 허용한다.
+- 게이트웨이 라우트는 경로를 바꾸지 않는다 — `StripPrefix` · `RewritePath` 로 `/internal` 로 시작하는 경로가 만들어지지 않게 하고,
+  정규화한 경로가 `/internal` 로 시작하면 라우팅 전에 거부한다.
+- 결제·재고 상태를 바꾸는 internal API 가 생기기 전에 서비스 간 인증(공유 토큰 · mTLS · 서비스 토큰)을 정한다 — 후속 이슈.
 
 ### 5-2. 도메인 advice 와의 관계
 
@@ -123,6 +144,9 @@ implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 
 - security-core 는 서블릿 · Boot 보안 자동설정을 `compileOnly` 로만 둔다. 리액티브 게이트웨이에 서블릿 스택이 새지 않게 하려는 것이고,
   security-core 의 `verifyNoServletLeak` 태스크가 `check` 에서 이를 확인한다. 그래서 서블릿 서비스가 위 두 스타터를 직접 선언한다.
+- **구성 실패 모드** — `spring-boot-starter-security` 와 `ResourceServerSecurityConfigurer` import 를 **둘 다** 빠뜨리면 오류 없이 기동하고,
+  `@PreAuthorize` 가 무시되어 모든 API 가 열린다(스타터만 있으면 Boot 기본 체인이 모든 요청을 막고, Configurer 만 있으면 spring-security-config 클래스가 없어 기동이 실패한다).
+  그래서 서비스마다 **"익명 요청 → `@PreAuthorize("isAuthenticated()")` 엔드포인트가 401 · `SECURITY_001`" 스모크 테스트**를 둔다.
 
 | 파일 | import |
 |------|--------|
@@ -150,7 +174,18 @@ security:
 | 공개키가 비었거나 `${JWT_PUBLIC_KEY}` 가 풀리지 않았다 | `JWT_PUBLIC_KEY` |
 | 키가 PEM 으로 읽히지 않는다 · 2048비트 미만이다 · PKCS#1 이다 · 공개키 자리에 개인키가 왔다 | 해당 환경변수 · 변환 명령 |
 | `issuer` · `audience` 가 비었다, `clock-skew` 가 범위 밖이다, TTL 이 0 이하다 | 해당 프로퍼티 |
+| (auth) `access-token-ttl` 이 1시간을 넘는다 | `security.jwt.issuance.access-token-ttl` · 이유(탈취 창 · 블랙리스트) |
 | (auth) 개인키가 `JWT_PUBLIC_KEY` 와 한 쌍이 아니다 | `JWT_PRIVATE_KEY` · `JWT_PUBLIC_KEY` (§6-3) |
+
+### 5-4. 알려진 예외 — 우리 봉투가 아닌 응답
+
+Spring Security 7 이 Resource Server 설정에 자동으로 더하는 것과 방화벽 거절이다. 정상 클라이언트는 만나지 않는다.
+
+| 요청 | 응답 | 비고 |
+|------|------|------|
+| `GET /.well-known/oauth-protected-resource` | 200 + 메타데이터(무인증) | 비밀은 아니다. 게이트웨이가 라우팅하지 않는다 |
+| `Authorization: DPoP ...` | 봉투 없는 401 + `WWW-Authenticate: DPoP ...` | 우리 토큰은 DPoP 바인딩이 없어 항상 거부된다. 프론트는 `Bearer` 만 쓴다 |
+| 정규화되지 않은 경로 (§5-1) | 봉투 없는 400 | 게이트웨이가 먼저 `GATEWAY_004` 로 거절한다 |
 
 ## 6. 키
 
@@ -176,16 +211,20 @@ grep -v '^-----' jwt-public.pem  | tr -d '\r\n'   # JWT_PUBLIC_KEY  (전원)
 
 ### 6-3. 교체 런북
 
-auth 는 기동할 때 자기 개인키와 `JWT_PUBLIC_KEY` 가 한 쌍인지 확인한다. 아래 순서를 지키면 교체 중에도 401 이 나지 않는다.
+auth 는 기동할 때 자기 `JWT_PRIVATE_KEY` 와 `JWT_PUBLIC_KEY` 가 한 쌍인지 확인한다(`JWT_PUBLIC_KEY_PREVIOUS` 는 보지 않는다).
+아래 순서를 지키면 auth 가 여러 인스턴스여도 교체 중에 401 이 나지 않는다.
 
-1. **검증자에 새 공개키를 먼저 배포한다** — auth 를 뺀 서비스 전부와 게이트웨이에서 `JWT_PUBLIC_KEY_PREVIOUS` ← 지금 공개키,
-   `JWT_PUBLIC_KEY` ← 새 공개키로 바꾸고 롤링 재기동한다. 이제 옛 키·새 키로 서명한 토큰을 모두 받는다.
-2. **auth 의 키를 바꾼다** — `JWT_PRIVATE_KEY` ← 새 개인키, `JWT_PUBLIC_KEY` ← 새 공개키, `JWT_PUBLIC_KEY_PREVIOUS` ← 옛 공개키로 바꾸고 재기동한다.
-   이때부터 새 키로 서명한다.
-3. **access TTL + 시계 오차(기본 31분)가 지난 뒤** 모든 곳의 `JWT_PUBLIC_KEY_PREVIOUS` 를 비우고 롤링 재기동한다.
+| 단계 | auth 를 뺀 서비스 · 게이트웨이 | auth | 결과 |
+|------|------------------------------|------|------|
+| ① 검증 키 추가 | `PREVIOUS` ← 옛 공개키, `PUBLIC` ← 새 공개키 | `PREVIOUS` ← **새** 공개키만. 개인키 · `PUBLIC` 은 그대로라 쌍 검사를 통과한다 | 모두 롤링 재기동. 어디서나 옛 키 · 새 키 토큰을 받는다 |
+| ② 서명 키 교체 | 그대로 | `PRIVATE` ← 새 개인키, `PUBLIC` ← 새 공개키, `PREVIOUS` ← 옛 공개키 | auth 롤링 재기동. 옛 · 새 인스턴스가 서로의 토큰을 받는다 |
+| ③ 정리 | `PREVIOUS` 비움 | `PREVIOUS` 비움 | ② 완료 후 access TTL + 시계 오차(기본 31분, 최대 61분)가 지나면 롤링 재기동 |
 
-- 순서를 틀리면 auth 의 쌍 검사가 기동을 막는다 — ①에서 auth 까지 재기동하거나(개인키는 옛 키, 공개키는 새 키) ②를 ①보다 먼저 하면
-  `JWT_PRIVATE_KEY 와 JWT_PUBLIC_KEY 가 한 쌍이 아닙니다` 로 멈춘다. 이미 떠 있는 auth 인스턴스는 옛 설정으로 계속 동작한다.
+- ②를 ①보다 먼저 하면 아직 새 공개키가 없는 서비스가 새 토큰을 003 으로 거부한다. ①에서 auth 의 `PUBLIC` 까지 바꾸거나 ②에서 개인키만 바꾸면
+  쌍 검사가 `JWT_PRIVATE_KEY 와 JWT_PUBLIC_KEY 가 한 쌍이 아닙니다` 로 기동을 막는다. 이미 떠 있는 인스턴스는 옛 설정으로 계속 동작한다.
+- `PREVIOUS` 가 채워져 있는 동안 기동 로그에 `jwt previous public key slot is in use. previousKid=... currentKid=...` WARN 이 한 줄 남는다.
+  ③을 잊은 곳을 찾는 신호다.
+- ①에서 auth 와 다른 서비스의 `PUBLIC` · `PREVIOUS` 값이 다르다. Vault 경로는 서비스별로 두어 따로 바꿀 수 있어야 한다 (#32).
 - 개인키가 유출됐으면 ③을 기다리지 않는다 — `JWT_PUBLIC_KEY_PREVIOUS` 를 바로 비워 옛 키로 서명한 토큰을 모두 무효로 한다 (`secret-management.md` §6).
 - JWKS 엔드포인트는 두지 않는다. 키는 환경변수로만 배포한다.
 
@@ -201,6 +240,8 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 | `error.SecurityErrorResolver` · `SecurityErrorEnvelope` · `SecurityErrorCode` | JWT 거부 응답 — 서비스와 같은 코드 · 같은 바이트 · 같은 `WWW-Authenticate` |
 
 - 게이트웨이의 JWT 거부도 `SECURITY_*` 를 쓴다 (`api-design-guide.md` §2-1). `GATEWAY_*` 는 라우팅 오류에만 쓴다.
+- 인증 실패 처리기는 `ServerAuthenticationEntryPointFailureHandler` 를 `setRethrowAuthenticationServiceException(false)` 로 설정해 쓴다.
+  기본(true)이면 006 이 될 `AuthenticationServiceException` 이 봉투 없는 500 이 된다 — 서블릿 쪽과 같은 이유다 (§4-1).
 
 ## 8. 로그
 
