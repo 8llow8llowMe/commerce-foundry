@@ -46,6 +46,14 @@ class RedisStartupGuardTest {
     }
 
     @Test
+    @DisplayName("connect-timeout 은 밑줄 형식 SPRING_DATA_REDIS_CONNECT_TIMEOUT 으로 줘도 읽는다")
+    void readsUnderscoredConnectTimeoutEnvironmentVariable() {
+        runner.withInitializer(systemEnvironment(Map.of("SPRING_DATA_REDIS_CONNECT_TIMEOUT", "2s")))
+            .withPropertyValues(PASSWORD, TIMEOUT)
+            .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
     @DisplayName("비밀번호가 없으면 기동하지 않고 프로퍼티 이름과 REDIS_PASSWORD 를 알려준다")
     void failsWithoutPassword() {
         runner.withPropertyValues(TIMEOUT, CONNECT_TIMEOUT)
@@ -66,6 +74,13 @@ class RedisStartupGuardTest {
     void failsWithUnresolvedPasswordPlaceholder() {
         runner.withPropertyValues("spring.data.redis.password=${REDIS_PASSWORD}", TIMEOUT, CONNECT_TIMEOUT)
             .run(context -> assertStartupFailure(context, "spring.data.redis.password", "REDIS_PASSWORD"));
+    }
+
+    @Test
+    @DisplayName("환경변수가 없어 ${REDIS_HOST} 가 풀리지 않으면 기동하지 않는다 — 그대로 두면 첫 명령에서야 실패한다")
+    void failsWithUnresolvedHostPlaceholder() {
+        runner.withPropertyValues("spring.data.redis.host=${REDIS_HOST}", PASSWORD, TIMEOUT, CONNECT_TIMEOUT)
+            .run(context -> assertStartupFailure(context, "spring.data.redis.host", "REDIS_HOST"));
     }
 
     @Test
@@ -95,6 +110,39 @@ class RedisStartupGuardTest {
     void failsWithZeroConnectTimeout() {
         runner.withPropertyValues(PASSWORD, TIMEOUT, "spring.data.redis.connect-timeout=0s")
             .run(context -> assertStartupFailure(context, "spring.data.redis.connect-timeout"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"spring.data.redis.timeout", "spring.data.redis.connect-timeout"})
+    @DisplayName("타임아웃 형식이 틀리면 Boot 의 바인딩 오류 대신 위반 목록에 넣고, 메시지에 값을 넣지 않는다")
+    void reportsMalformedTimeoutWithoutValue(String property) {
+        runner.withPropertyValues(PASSWORD, TIMEOUT, CONNECT_TIMEOUT, property + "=bad-duration-value")
+            .run(context -> {
+                assertStartupFailure(context, property, "형식");
+                assertThat(context.getStartupFailure().getMessage()).doesNotContain("bad-duration-value");
+                assertThat(context.getStartupFailure()).hasNoCause();
+            });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "spring.data.redis.sentinel.master=mymaster",
+        "spring.data.redis.cluster.nodes=localhost:7000",
+        "spring.data.redis.masterreplica.nodes=localhost:6379"
+    })
+    @DisplayName("sentinel · cluster · masterreplica 아래 값이 있으면 기동하지 않는다 — standalone 만 지원한다")
+    void failsWithNonStandaloneMode(String property) {
+        String prefix = property.substring(0, property.lastIndexOf('.'));
+        runner.withPropertyValues(PASSWORD, TIMEOUT, CONNECT_TIMEOUT, property)
+            .run(context -> assertStartupFailure(context, prefix, "standalone"));
+    }
+
+    @Test
+    @DisplayName("환경변수 SPRING_DATA_REDIS_SENTINEL_* 로 들어온 sentinel 설정도 막는다")
+    void failsWithSentinelFromEnvironmentVariable() {
+        runner.withInitializer(systemEnvironment(Map.of("SPRING_DATA_REDIS_SENTINEL_NODES", "localhost:26379")))
+            .withPropertyValues(PASSWORD, TIMEOUT, CONNECT_TIMEOUT)
+            .run(context -> assertStartupFailure(context, "spring.data.redis.sentinel", "SPRING_DATA_REDIS_SENTINEL_*"));
     }
 
     @Test
