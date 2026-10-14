@@ -1,0 +1,53 @@
+name: backend-local-infra
+
+# **로컬 미들웨어 compose 가 실제로 뜨는지 확인한다.**
+# compose · 스키마 init · .env.example 이 바뀐 PR 에서만 돈다. 깨진 compose 를 다음 사람이 로컬에서 처음 발견하지 않게 한다.
+# 비밀번호는 매 실행 무작위로 만든다 — 로컬용 값이라도 저장소에 남기지 않는다.
+
+on:
+  pull_request:
+    paths:
+      - 'backend/docker-compose-local.yml'
+      - 'backend/docker/**'
+      - 'backend/.env.example'
+      - '.github/workflows/backend-local-infra.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compose-up:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      # 개발자 절차(`.env.example` → `.env` 복사)를 그대로 따르고, compose 가 요구하는 칸만 채운다.
+      - name: .env 준비
+        run: |
+          cp .env.example .env
+          sed -i "s/^DB_USERNAME=.*/DB_USERNAME=cf_local/" .env
+          sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$(openssl rand -hex 16)/" .env
+          sed -i "s/^REDIS_PASSWORD=.*/REDIS_PASSWORD=$(openssl rand -hex 16)/" .env
+
+      - name: compose up (healthcheck 통과까지 대기)
+        run: docker compose -f docker-compose-local.yml up -d --wait --wait-timeout 120
+
+      - name: 서비스별 스키마가 만들어졌는지 확인
+        run: |
+          actual=$(echo "select string_agg(schema_name, ' ' order by schema_name) from information_schema.schemata where schema_name in ('auth','product','orders','payment','delivery');" \
+            | docker compose -f docker-compose-local.yml exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d commerce_foundry -tA')
+          echo "schemas: $actual"
+          test "$actual" = "auth delivery orders payment product"
+
+      - name: Redis 가 비밀번호를 요구하는지 확인
+        run: |
+          test "$(docker compose -f docker-compose-local.yml exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping')" = "PONG"
+          test "$(docker compose -f docker-compose-local.yml exec -T redis redis-cli ping)" != "PONG"
+
+      - name: compose down
+        if: ${{ always() }}
+        run: docker compose -f docker-compose-local.yml down -v
