@@ -9,4 +9,9 @@ include 'core:shared-commerce'
 include 'cloud:service-discovery'
 include 'cloud:api-gateway'
 
-// Services — #36 에서 추가한다
+// Services
+include 'service:auth-service'
+include 'service:product-service'
+include 'service:order-service'
+include 'service:payment-service'
+include 'service:delivery-service'

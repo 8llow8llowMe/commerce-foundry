@@ -1,0 +1,18 @@
+dependencies {
+    implementation project(':core:common-core')
+    implementation project(':core:persistence-core')
+
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${rootProject.ext.springdocVersion}"
+
+    // Q 클래스 생성기. persistence-core 의 annotationProcessor 는 전이되지 않아 엔티티를 가진 모듈마다 선언한다
+    annotationProcessor "io.github.openfeign.querydsl:querydsl-apt:${rootProject.ext.querydslVersion}:jpa"
+
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    // 컨텍스트 로딩 테스트용 (application-test.yml). Docker 없이 로컬·CI 가 같은 결과를 낸다
+    testRuntimeOnly 'com.h2database:h2'
+}
