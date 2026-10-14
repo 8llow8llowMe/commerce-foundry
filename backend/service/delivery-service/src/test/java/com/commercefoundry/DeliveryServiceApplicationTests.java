@@ -19,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
+import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
  * 컨텍스트 로딩 게이트. test 프로파일(H2, Eureka 꺼짐)에서 빈 정의가 끝까지 조립되는지와 Swagger 노출 범위를 본다.
@@ -53,6 +54,23 @@ class DeliveryServiceApplicationTests {
         assertThat(environment.getProperty("spring.application.name")).isEqualTo("delivery-service");
         assertThat(environment.getProperty("server.port")).isEqualTo("8085");
         assertThat(environment.getProperty("spring.jpa.properties.hibernate.default_schema")).isEqualTo("delivery");
+    }
+
+    @Test
+    @DisplayName("헬스 체크는 상태만 낸다 — DB 같은 구성 요소 상세를 싣지 않는다")
+    void healthExposesStatusOnly() {
+        MvcTestResult result = mockMvc.get().uri("/actuator/health").exchange();
+
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.status").isEqualTo("UP");
+        assertThat(result).bodyJson().doesNotHavePath("$.components").doesNotHavePath("$.details");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/actuator/env", "/actuator/configprops", "/actuator/beans", "/actuator/info", "/actuator/health/db"})
+    @DisplayName("actuator 는 health 만 노출한다 — local 은 .env 값이 Environment 에 그대로 들어 있다")
+    void actuatorExposesHealthOnly(String path) {
+        assertThat(mockMvc.get().uri(path)).hasStatus(HttpStatus.NOT_FOUND);
     }
 
     @ParameterizedTest
