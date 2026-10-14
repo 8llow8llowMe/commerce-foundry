@@ -43,8 +43,9 @@ subprojects { project ->
         tasks.named('jar') { enabled = false }
 
         // bootRun(로컬 실행)만 SPRING_PROFILES_ACTIVE 가 없으면 local 로 띄운다. bootJar 로 만든 jar 실행에는 영향이 없다 —
-        // 배포 환경이 프로파일을 빠뜨려도 local 설정(로컬 CORS origin, self-preservation off)으로 뜨지 않게 하려는 것이다
-        boolean profileFromEnvironment = project.providers.environmentVariable('SPRING_PROFILES_ACTIVE').isPresent()
+        // 배포 환경이 프로파일을 빠뜨려도 local 설정(로컬 CORS origin, self-preservation off)으로 뜨지 않게 하려는 것이다.
+        // 빈 값도 "없음" 으로 본다 — .env.example 의 빈 SPRING_PROFILES_ACTIVE= 를 셸에 export 한 경우
+        boolean profileFromEnvironment = !project.providers.environmentVariable('SPRING_PROFILES_ACTIVE').getOrElse('').isBlank()
         tasks.named('bootRun', JavaExec) {
             if (!profileFromEnvironment) {
                 systemProperty 'spring.profiles.active', 'local'
@@ -76,9 +77,24 @@ subprojects { project ->
         // 라이브러리 모듈에는 Boot 플러그인이 없어 -parameters 가 자동으로 붙지 않는다
         options.compilerArgs << '-parameters'
     }
+    // Mockito 는 inline mock maker 를 쓰려고 테스트 도중 byte-buddy 에이전트를 동적으로 붙인다.
+    // JDK 21 은 이를 경고하고(JEP 451) 이후 버전에서 막는다 — 테스트 JVM 을 띄울 때 -javaagent 로 미리 붙인다 (Mockito 공식 권장).
+    // 버전은 Boot BOM 이 관리하는 mockito-core 와 같다
+    configurations {
+        mockitoAgent
+    }
+    dependencies {
+        mockitoAgent('org.mockito:mockito-core') {
+            transitive = false
+        }
+    }
+
     tasks.withType(Test).configureEach {
         systemProperty 'file.encoding', 'UTF-8'
         useJUnitPlatform()
+        jvmArgs "-javaagent:${configurations.mockitoAgent.asPath}"
+        // 에이전트가 부트스트랩 클래스패스를 덧붙이면 JVM 이 CDS 를 부분만 쓰겠다는 경고를 매번 찍는다. 테스트 JVM 에서만 CDS 를 끈다
+        jvmArgs '-Xshare:off'
     }
     tasks.withType(Javadoc).configureEach {
         options.encoding = 'UTF-8'
