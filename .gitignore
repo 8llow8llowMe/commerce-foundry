@@ -25,8 +25,13 @@ frontend/**/.next/
 frontend/**/out/
 
 # env / secrets — 공개 저장소다. PG 시크릿 키·JWT 키·DB 비밀번호는 절대 커밋하지 않는다
+# local 프로파일이 backend/.env 를 실제로 읽는다. 복사본·변형 이름(dev.env, .env-dev, .env_local)도 막는다
 .env
 .env.*
+*.env
+.env-*
+.env_*
+# 키 이름만 있는 목록은 추적한다 — 이 예외는 위 패턴들보다 뒤에 있어야 한다
 !.env.example
 *.pem
 *.p12
