@@ -42,6 +42,8 @@ grep -rn -A5 "for (\|\.stream()\|\.forEach(" backend/service/*/src/main/java --i
 - 엔티티 Wrapper / 도메인 primitive 타입 규칙, 카운트는 primitive
 - **금액 = `long` + 통화 컬럼 쌍**. `double`/`float`/`BigDecimal` 저장 ✕
 - 인덱스 이름 `idx_`/`uk_` + 모든 컬럼, **63자 이내**. 실제 조회 조건·정렬과 인덱스 컬럼 순서가 맞는가
+- **운영 DDL**(§9-8): 엔티티가 바뀐 PR 본문에 운영 DDL 이 있는가, 엔티티 매핑(타입·길이·nullable·인덱스 이름·코멘트)과 일치하는가,
+  `update` 가 못 하는 변경(이름·타입 변경·삭제·기존 행 NOT NULL)에 이관 SQL 과 적용 순서(추가 → 배포 → 정리)가 있는가
 - 쿼리 수단 순서: 파생 → JPQL → QueryDSL. **네이티브 쿼리, `@Param` ✕**
 - 동적 쿼리·JPQL 에 `@DataJpaTest` 가 있는가 (컴파일로 검증되지 않는다)
 - 스냅숏 컬럼(주문 시점 가격·상품명·배송지)이 원본 참조로 대체되지 않았는가

@@ -31,12 +31,19 @@
   - FE: 프론트엔드 `CLAUDE.md` 의 검증 명령
 - [ ] 완료 체크리스트를 확인하셨나요? (BE: `backend/docs/done-checklist.md`)
 - [ ] 결제·주문·재고 로직을 건드렸다면 `/payment-guard` · `/order-flow-guard` 를 돌렸나요?
+- [ ] 엔티티를 추가·변경했다면 아래 `운영 DDL` 절을 채웠나요? (BE: `backend/docs/coding-conventions.md` §9-8)
 - [ ] 비밀키·사업자 정보·고객 개인정보가 커밋에 섞이지 않았나요? (공개 저장소)
 - [ ] 새 키가 생겼다면 `backend/.env.example` 에 이름만 추가하고, 참고 사항에 `Vault 등록 필요: KEY_NAME` 을 적었나요?
 
 ## 검증 내역
 
 - [실제로 실행한 명령과 결과. 미실행·실패는 숨기지 않고 적습니다]
+
+## 운영 DDL (엔티티를 바꾼 경우만)
+
+```sql
+-- local·dev 에서 ddl-auto: update 가 만든 결과로 뽑는다 (pg_dump --schema-only -t <schema>.<table>)
+```
 
 ## 참고 사항
 
