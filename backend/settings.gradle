@@ -4,6 +4,7 @@ rootProject.name = 'commerce-foundry-backend'
 include 'core:common-core'
 include 'core:persistence-core'
 include 'core:redis-core'
+include 'core:security-core'
 include 'core:shared-commerce'
 
 // Cloud
