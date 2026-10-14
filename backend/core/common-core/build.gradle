@@ -1,0 +1,15 @@
+dependencies {
+    // ResponseEntity · 검증 예외 타입. webmvc 가 아니라 spring-web 만 의존한다 —
+    // api-gateway 도 이 모듈의 Response 봉투를 쓴다. 게이트웨이가 WebFlux 변형이면 webmvc 가 섞일 때 기동하지 않는다
+    api 'org.springframework:spring-web'
+    api 'jakarta.validation:jakarta.validation-api'
+
+    // ValidationErrorSupport 가 역직렬화 실패(HttpMessageNotReadableException)의 Jackson 3 원인을 읽는다
+    implementation 'tools.jackson.core:jackson-databind'
+
+    // @Schema · Components 만 쓴다. 실제 springdoc 은 각 서비스가 선언한다 (Swagger 를 안 쓰는 게이트웨이에 끌려가지 않게)
+    compileOnly "org.springdoc:springdoc-openapi-starter-common:${rootProject.ext.springdocVersion}"
+    implementation 'org.springframework.boot:spring-boot'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-validation'
+}
