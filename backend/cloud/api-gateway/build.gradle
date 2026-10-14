@@ -2,6 +2,8 @@ dependencies {
     implementation project(':core:common-core')
     implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    // lb:// 라우팅의 LoadBalancer 인스턴스 목록 캐시. 없으면 기본 캐시로 떨어지며 "운영에 쓰지 말라" WARN 을 남긴다
+    implementation 'com.github.ben-manes.caffeine:caffeine'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
 }

@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: service-discovery
+  cloud:
+    # Eureka 서버는 다른 서비스를 호출하지 않는다. eureka-server 가 끌고 오는 LoadBalancer 를 꺼서
+    # 쓰지도 않는 캐시의 "Caffeine 을 쓰라" WARN 을 남기지 않는다
+    loadbalancer:
+      enabled: false
 
 eureka:
   instance:
