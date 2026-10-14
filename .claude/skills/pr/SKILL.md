@@ -57,6 +57,8 @@ commerce-foundry PR 본문을 작성하고 **gh 로 생성**한다.
    - 실제 확인하지 않은 체크박스는 체크하지 않는다.
    - `검증 내역` 에는 **실제로 돌린 명령과 결과**만 적는다. 미실행·실패를 숨기지 않는다.
    - 결제·주문·재고를 건드렸으면 `/payment-guard` · `/order-flow-guard` 결과 요약을 `참고 사항` 에 적는다.
+   - 엔티티를 추가·변경했으면 `운영 DDL` 절에 local·dev 에서 뽑은 PostgreSQL DDL 을 적는다 (`coding-conventions.md` §9-8).
+     운영에는 사용자가 직접 적용하므로 이 절이 유일한 근거다. 비어 있으면 PR 을 만들지 않는다.
 
 6. **푸시 · 생성**
 
@@ -104,11 +106,18 @@ commerce-foundry PR 본문을 작성하고 **gh 로 생성**한다.
 - [ ] local ci test를 진행하셨나요?
 - [ ] 완료 체크리스트를 확인하셨나요?
 - [ ] 결제·주문·재고 로직을 건드렸다면 `/payment-guard` · `/order-flow-guard` 를 돌렸나요?
+- [ ] 엔티티를 추가·변경했다면 아래 `운영 DDL` 절을 채웠나요?
 - [ ] 비밀키·사업자 정보·고객 개인정보가 커밋에 섞이지 않았나요?
 
 ## 검증 내역
 
 - [실제로 돌린 명령과 결과]
+
+## 운영 DDL (엔티티를 바꾼 경우만)
+
+```sql
+-- local·dev 에서 ddl-auto: update 가 만든 결과 (pg_dump --schema-only -t <schema>.<table>)
+```
 
 ## 참고 사항
 
