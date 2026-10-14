@@ -1,0 +1,106 @@
+name: backend-ci
+
+# **백엔드 PR 에서 테스트를 돌리고, 실제로 몇 건이 돌았는지 센다.**
+# 초록불이 "테스트가 통과했다" 가 아니라 "테스트가 한 건도 안 돌았다" 를 뜻하는 경우를 막는다
+# (hondigagae 에서 캐시 때문에 테스트가 FROM-CACHE 로 건너뛰어진 채 통과한 일이 있었다).
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  # develop 에서도 돈다. Actions 캐시는 기본 브랜치 스코프만 모든 PR 이 상속하므로,
+  # 여기서 한 번 돌아야 PR 들이 의존성 캐시를 받는다. 겸사겸사 머지된 develop 자체도 검사한다.
+  push:
+    branches:
+      - develop
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+
+# 같은 PR 에 새 커밋이 올라오면 이전 실행을 버린다.
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      # **`cache: gradle` 을 쓰지 않는다.** 그 옵션은 `~/.gradle/caches` 를 통째로 담는데 거기에 빌드 캐시가 들어 있어,
+      # 다음 실행에서 test 태스크가 FROM-CACHE 로 건너뛰어진다. 의존성과 wrapper 배포본만 아래에서 따로 캐시한다.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: gradle-deps-${{ runner.os }}-${{ hashFiles('backend/**/*.gradle', 'backend/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-deps-${{ runner.os }}-
+
+      # `gradle.properties` 가 빌드 캐시를 켜 두므로 명시로 끈다. 러너는 매번 새 체크아웃이라 cleanTest 는 필요 없다.
+      - name: Gradle check
+        id: gradle
+        run: ./gradlew check --no-build-cache --stacktrace
+
+      # **초록불이 거짓인지 확인한다.** 통과했는데 실행 건수가 0 이면 여기서 떨어뜨린다.
+      - name: 실행된 테스트 건수 집계
+        if: ${{ !cancelled() }}
+        env:
+          GRADLE_OUTCOME: ${{ steps.gradle.outcome }}
+        run: |
+          python3 - <<'PY'
+          import glob, os, sys, xml.etree.ElementTree as ET
+
+          total = failures = errors = skipped = 0
+          modules = {}
+          for path in glob.glob('**/build/test-results/test/*.xml', recursive=True):
+              root = ET.parse(path).getroot()
+              count = int(root.get('tests', 0))
+              total += count
+              failures += int(root.get('failures', 0))
+              errors += int(root.get('errors', 0))
+              skipped += int(root.get('skipped', 0))
+              module = path.replace(os.sep, '/').split('/build/test-results')[0]
+              modules[module] = modules.get(module, 0) + count
+
+          lines = ['| 모듈 | 실행 건수 |', '|------|----------:|']
+          lines += ['| `%s` | %d |' % (m, modules[m]) for m in sorted(modules)]
+          lines.append('| **합계** | **%d** |' % total)
+          lines.append('')
+          lines.append('실패 %d · 오류 %d · 건너뜀 %d' % (failures, errors, skipped))
+
+          summary = '\n'.join(lines)
+          print(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as fp:
+              fp.write('## 백엔드 테스트 실행 결과\n\n' + summary + '\n')
+
+          # check 가 이미 실패했다면 원인은 그쪽이다. 0건을 덧씌워 혼란을 주지 않는다.
+          if total == 0 and os.environ.get('GRADLE_OUTCOME') == 'success':
+              sys.exit('테스트가 한 건도 실행되지 않았는데 check 가 통과했다 — 이 초록불은 믿을 수 없다.')
+          PY
+
+      # `working-directory` 는 액션 입력에 적용되지 않는다 — 경로에 backend/ 를 붙인다.
+      - name: Upload test reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: |
+            backend/**/build/reports/tests/test/
+            backend/**/build/test-results/test/
+          retention-days: 7
