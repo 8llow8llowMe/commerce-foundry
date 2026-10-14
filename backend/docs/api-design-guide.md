@@ -1,0 +1,130 @@
+# Backend API Design Guide
+
+## 1. 경로 체계
+
+| 구분 | 접두어 | 사용자 | 게이트웨이 | 진입 패키지 |
+|------|--------|--------|-----------|-------------|
+| 고객(스토어프론트) | `/api/v1/**` | 비로그인 · `CUSTOMER` | 라우팅 | `adapter/in/web` |
+| 어드민 콘솔 | `/api/v1/admin/**` | `ADMIN` | 라우팅 + **ADMIN 역할 확인** | `adapter/in/admin` |
+| 서비스 간 | `/internal/v1/**` | 다른 서비스 | **라우팅하지 않는다** | `adapter/in/internal` |
+| 외부 콜백 | `/api/v1/payments/webhooks/**` 등 | PG·택배사 | 라우팅 (JWT 없음) | `adapter/in/webhook` |
+
+### 1-1. RESTful 원칙
+
+- 컬렉션은 복수형 kebab-case: `products`, `categories`, `carts`, `orders`, `payments`, `deliveries`, `shipping-addresses`
+- 상위 → 하위 리소스 순으로 깊이를 표현한다.
+  - `GET /api/v1/products/{productId}/skus` (상품의 옵션 조합)
+  - `GET /api/v1/members/me/shipping-addresses`
+  - `POST /api/v1/orders/{orderId}/cancellation` (주문 취소 요청 — 동사 대신 명사 리소스)
+  - `PATCH /api/v1/admin/orders/{orderId}/status`
+- 컬렉션에 대한 계산·요약은 컬렉션 바로 아래 리터럴로 둔다: `POST /api/v1/orders/quotes` (주문서 금액 미리 계산).
+
+### 1-2. 서비스별 경로 소유
+
+| 서비스 | 고객 | 어드민 |
+|--------|------|--------|
+| auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**` |
+| product-service | `/api/v1/categories/**`, `/api/v1/products/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**` |
+| order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
+| payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
+| delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
+
+게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
+
+## 2. 응답 구조
+
+- 공통 래퍼 `Response<T>` 를 쓰고, Controller 반환은 `ResponseEntity<Response<T>>` 로 통일한다.
+- 내부 `Info` 를 응답 타입으로 직접 노출하지 않는다. 응답 모양은 Presenter 가 마무리한다.
+
+```java
+ProductDetailResponse response = productWebUseCase.getProduct(productId);
+return ResponseEntity.ok().body(Response.success(response));
+```
+
+### 2-1. 오류 봉투 계약
+
+`dataHeader` 의 칸마다 타입이 하나씩만 있다. 오류 종류에 따라 타입이 갈리지 않는다.
+
+| 필드 | 타입 | 값 |
+|------|------|-----|
+| `success` | `boolean` | 성공 여부 |
+| `resultCode` | `string \| null` | 대표 오류 코드. 성공이면 `null` |
+| `resultMessage` | `string \| null` | 사용자에게 보여줄 대표 메시지. 성공이면 `null` |
+| `fieldErrors` | `ValidationErrorItem[] \| null` | 필드 단위 검증 오류. 검증 실패가 아니면 `null` |
+
+```json
+{"dataHeader":{"success":false,"resultCode":"ORDER_001",
+  "resultMessage":"존재하지 않는 주문입니다.","fieldErrors":null},"dataBody":null}
+
+{"dataHeader":{"success":false,"resultCode":"MEMBER_103",
+  "resultMessage":"휴대폰 번호 형식이 올바르지 않습니다.",
+  "fieldErrors":[{"code":"MEMBER_103","field":"phone","message":"휴대폰 번호 형식이 올바르지 않습니다."}]},"dataBody":null}
+```
+
+- **게이트웨이가 끊은 응답(JWT 거부, ADMIN 아님)도 같은 봉투로 나간다.** 클라이언트는 어디서 끊겼는지 모른다.
+- 인증 오류 코드는 `SECURITY_00x` 하나로 통일한다. 만료·서명 오류는 `401`(프론트가 재발급을 시도하는 신호),
+  권한 부족은 `403` 이다.
+
+### 2-2. 부재는 언제 200 + null 이고 언제 404 인가
+
+- **id 로 지정한 리소스가 없거나 타인 소유면 404** — 남의 주문은 403 이 아니라 404 로 답해 존재를 숨긴다.
+- **부모당 0~1개인 선택적 하위 리소스의 부재는 200 + `dataBody: null`** — 예: 아직 송장이 없는 주문의 배송 정보.
+
+### 2-3. 금액 표현
+
+```json
+{ "salePrice": { "amount": 129000, "currency": "KRW" } }
+{ "salePrice": { "amount": 8950,   "currency": "USD" } }
+```
+
+- `amount` 는 **최소 화폐 단위 정수**다 (KRW 원, USD 센트 — 위 USD 는 89.50 달러).
+- 표시 포맷(천 단위 구분, 소수점)은 프론트가 `currency` 로 정한다. 서버가 포맷된 문자열을 내리지 않는다.
+- 이 계약은 FE 와 합의한 것이므로 바꿀 때는 `seonghoho` 에게 먼저 알린다.
+
+## 3. 계층 흐름
+
+```text
+Controller → UseCase → Facade → Processor → Port/Adapter
+Info → Presenter → Response
+```
+
+## 4. 정렬 / 페이지네이션
+
+| 화면 | 응답 | 이유 |
+|------|------|------|
+| 스토어프론트 목록 (상품 목록, 리뷰) | `SliceResponse` (커서/무한 스크롤) 기본 | 총계가 필요 없고 count 질의 비용이 없다 |
+| 어드민 목록 (주문·상품·회원 관리 표) | `PageResponse` (`page`, `size`, `totalElements`, `totalPages`) | 페이지 번호·전체 건수가 업무에 필요하다 |
+
+- 정렬은 enum `RequestParam`(`sortType`, `orderType`) 으로 받는다. Swagger 에 허용값이 드러난다.
+- `totalCount` 를 내리는 응답은 **자르기 전 개수**여야 한다. Presenter 가 `items.size()` 로 채우지 않는다.
+
+## 5. 보안 API 설계
+
+- 인증 사용자 전용 API 는 `@PreAuthorize` 를 명시한다. 어드민 API 는 `hasRole('ADMIN')`.
+- member 식별은 JWT claim 기준이다. **클라이언트가 보낸 memberId 로 소유자를 판정하지 않는다.**
+- 소유 확인은 Facade 첫 줄에서 한다 — 주문 상세는 `orderId` 와 JWT 의 memberId 가 모두 맞아야 조회된다.
+- 비회원 주문을 지원하면 주문번호 + 주문 비밀번호(해시)로 조회한다. 별도 이슈에서 확정한다.
+
+## 6. 멱등성 (쓰기 API)
+
+중복 클릭·네트워크 재시도가 **두 번 주문하거나 두 번 결제하는** 일이 없어야 한다.
+
+- 주문 생성·결제 승인·결제 취소·환불은 **멱등**이어야 한다.
+- 클라이언트는 `Idempotency-Key` 헤더(UUID)를 보낸다. 서버는 `(memberId, key)` 로 결과를 저장하고, 같은 키의
+  재요청에는 **처음 결과를 그대로** 돌려준다. 처리 중인 같은 키가 오면 `409` 로 답한다.
+- 결제 승인은 PG 쪽 멱등 키와 별개로 우리 쪽 상태(`payment.status`)로도 중복을 막는다 (`payment-guide.md` §3).
+
+## 7. 비동기 작업
+
+엑셀 일괄 등록(카페24 이관), 대량 송장 등록처럼 오래 걸리는 작업은 다음 패턴을 따른다.
+
+- 제출 `POST {resource}` → `202 Accepted` + `jobId`. 같은 사용자의 같은 요청이 진행 중이면 기존 `jobId` 재사용.
+- 상태 조회 `GET /jobs/{jobId}` — 본인(또는 ADMIN) 작업만. 남의 jobId 는 404.
+- 작업 실패는 `200 OK` + `status=FAILED` + `errorCode/errorMessage` 로 답한다 (HTTP 5xx 가 아니다).
+- 워커는 서비스 전용 `ThreadPoolTaskExecutor` 빈 + `@Async("<빈이름>")`. 전역 기본 executor 를 공유하지 않는다.
+  빈 이름 `{도메인}{용도}TaskExecutor`, 풀 크기·큐·graceful shutdown 을 명시한다.
+
+## 8. Swagger
+
+- `@Tag` 는 고객/어드민을 나눠 단다: `@Tag(name = "상품")`, `@Tag(name = "[어드민] 상품 관리")`.
+- 사유 코드처럼 문자열로 내리는 enum 값은 `@Schema(allowableValues = {...})` 로 허용값을 밝힌다.
