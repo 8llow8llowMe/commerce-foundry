@@ -31,10 +31,15 @@ class RedisKeyTest {
         }
 
         @ParameterizedTest
-        @ValueSource(strings = {"3f2a9c1e-7b4d-4e8a-9c0f-2d6b1a5e7c3f", "dGVzdC10b2tlbg_-", "203.0.113.7"})
-        @DisplayName("UUID · base64url · 점이 든 값은 id 로 그대로 쓴다")
+        @ValueSource(strings = {
+            "3f2a9c1e-7b4d-4e8a-9c0f-2d6b1a5e7c3f",
+            "n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg",
+            "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
+            "v1.2~rc"
+        })
+        @DisplayName("UUID · base64url · base64 표준(+ / =) · 점과 물결이 든 값은 id 로 그대로 쓴다")
         void acceptsCommonIdShapes(String id) {
-            assertThat(RedisKey.of("gateway", "rate-limit", id).value()).isEqualTo("gateway:rate-limit:" + id);
+            assertThat(RedisKey.of("auth", "refresh-token", id).value()).isEqualTo("auth:refresh-token:" + id);
         }
 
         @Test
@@ -74,7 +79,7 @@ class RedisKeyTest {
     }
 
     @Nested
-    @DisplayName("id — 비어 있지 않고 ':' · 공백이 없어야 한다")
+    @DisplayName("id — ASCII [A-Za-z0-9._~=+/-] 1~128자")
     class IdPart {
 
         @ParameterizedTest
@@ -83,6 +88,29 @@ class RedisKeyTest {
         @DisplayName("빈 값 · 콜론 · 공백이 든 id 는 거부한다")
         void rejectsInvalidIdPart(String id) {
             assertThatThrownBy(() -> RedisKey.of("auth", "refresh-token", id)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"a*", "a?", "a[1]", "a\\b", "{a}", "a\u0000b", "a\u007Fb", "a b", "a​b", "회원"})
+        @DisplayName("glob · 해시 태그 중괄호 · 제어문자 · 비ASCII(NBSP · zero-width · 한글)는 거부한다")
+        void rejectsCharactersOutsideAllowList(String id) {
+            assertThatThrownBy(() -> RedisKey.of("auth", "refresh-token", id)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("128자까지 허용하고 129자부터 거부한다")
+        void limitsLength() {
+            assertThat(RedisKey.of("auth", "refresh-token", "a".repeat(128)).value()).hasSize("auth:refresh-token:".length() + 128);
+            assertThatThrownBy(() -> RedisKey.of("auth", "refresh-token", "a".repeat(129))).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("IPv6 원문은 ':' 가 있어 거부한다 — 정규화한 뒤 인코딩해서 넣는다")
+        void rejectsRawIpv6() {
+            assertThatThrownBy(() -> RedisKey.of("gateway", "rate-limit", "2001:db8::1")).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> RedisKey.of("gateway", "rate-limit", "::1")).isInstanceOf(IllegalArgumentException.class);
+            assertThat(RedisKey.of("gateway", "rate-limit", "20010db8000000000000000000000001").value())
+                .isEqualTo("gateway:rate-limit:20010db8000000000000000000000001");
         }
 
         @Test

@@ -8,16 +8,18 @@ import java.util.regex.Pattern;
  * ({@code coding-conventions.md} §9-7).
  *
  * <ul>
- *   <li>{@code owner} — 키를 쓰는 서비스의 짧은 이름. {@code auth}, {@code order}, {@code gateway} 처럼 소문자 kebab.</li>
+ *   <li>{@code owner} — 키의 수명주기(생성·갱신·삭제)를 소유하는 서비스의 짧은 이름. {@code auth}, {@code order}, {@code gateway} 처럼 소문자 kebab.</li>
  *   <li>{@code domain} — 그 서비스 안의 용도. {@code refresh-token}, {@code cart} 처럼 소문자 kebab.</li>
- *   <li>{@code id} — 하나 이상. 비어 있지 않고 {@code :}·공백이 없어야 한다. 숫자·UUID·base64url 은 그대로 쓴다.</li>
+ *   <li>{@code id} — 하나 이상. ASCII {@code [A-Za-z0-9._~=+/-]} 1~128자. 숫자·UUID·base64(표준·url)는 그대로 쓴다.
+ *       {@code :} 가 들어가는 값(IPv6 등)은 정규화한 뒤 인코딩한다.</li>
  * </ul>
  *
- * <p>서비스들이 Redis 하나를 같이 쓴다. owner 로 네임스페이스를 나눠야 같은 이름의 키가 부딪히지 않고,
- * 한 서비스가 패턴으로 지운 키가 다른 서비스 것이 아니게 된다. 싱글 테넌트 템플릿이라(고객사마다 Redis 가 따로다)
- * 스토어 접두어는 붙이지 않는다. 서비스를 가로지르는 키(auth 가 쓰고 gateway 가 읽는 등)는 <b>쓰는 쪽</b>이 owner 다.
+ * <p>서비스들이 Redis 하나를 같이 쓴다. owner 로 네임스페이스를 나눠 같은 이름의 키가 부딪히지 않게 한다.
+ * 싱글 테넌트 템플릿이라(고객사마다 Redis 가 따로다) 스토어 접두어는 붙이지 않는다.
+ * 다른 서비스가 읽는 키도 쓰기는 owner 의 API 를 거치고, 키는 양쪽이 의존하는 모듈의 키 함수 하나로만 만든다.
  *
- * <p>잘못된 키는 {@link IllegalArgumentException} 으로 거부한다. id 에 토큰·개인정보가 들어갈 수 있어 메시지에 값을 넣지 않는다.
+ * <p>id 에 원문 토큰·개인정보를 넣지 않는다(해시로 넣는다) — {@link #toString()} 이 키 전체를 출력한다.
+ * 잘못된 키는 {@link IllegalArgumentException} 으로 거부하고, 메시지에 값을 넣지 않는다.
  *
  * @param value Redis 에 그대로 쓰는 키 문자열
  */
@@ -25,6 +27,9 @@ public record RedisKey(String value) {
 
     private static final String SEPARATOR = ":";
     private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9-]*");
+
+    /** glob({@code * ? [ ] \})·해시 태그({@code { }})·공백·제어문자·비ASCII 를 막는다. 상한은 base64 SHA-256(43자)·UUID(36자)에 여유를 둔 값. */
+    private static final Pattern ID_PART = Pattern.compile("[A-Za-z0-9._~=+/-]{1,128}");
 
     public RedisKey {
         if (value == null) {
@@ -62,11 +67,8 @@ public record RedisKey(String value) {
     }
 
     private static String requireIdPart(String idPart) {
-        if (idPart == null || idPart.isEmpty()) {
-            throw new IllegalArgumentException("Redis 키의 id 는 비어 있으면 안 됩니다");
-        }
-        if (idPart.chars().anyMatch(c -> c == ':' || Character.isWhitespace(c))) {
-            throw new IllegalArgumentException("Redis 키의 id 에 ':' 나 공백을 쓸 수 없습니다");
+        if (idPart == null || !ID_PART.matcher(idPart).matches()) {
+            throw new IllegalArgumentException("Redis 키의 id 는 [A-Za-z0-9._~=+/-] 1~128자여야 합니다");
         }
         return idPart;
     }

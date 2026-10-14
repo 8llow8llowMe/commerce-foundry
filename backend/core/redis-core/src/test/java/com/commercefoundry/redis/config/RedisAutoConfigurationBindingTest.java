@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.lettuce.core.ClientOptions;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration;
+import org.springframework.boot.data.redis.autoconfigure.LettuceClientConfigurationBuilderCustomizer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
@@ -58,18 +60,31 @@ class RedisAutoConfigurationBindingTest {
             .run(context -> {
                 assertThat(context).hasSingleBean(StringRedisTemplate.class);
                 assertThat(context).hasSingleBean(ReactiveStringRedisTemplate.class);
+                // JDK 직렬화 템플릿도 함께 등록된다 — 있지만 주입하지 않는다 (coding-conventions.md §9-7)
+                assertThat(context).hasBean("redisTemplate").hasBean("reactiveRedisTemplate");
             });
     }
 
     @Test
-    @DisplayName("가드에 걸리면 자동설정이 있어도 접속 팩토리를 만들기 전에 기동이 멈춘다")
+    @DisplayName("가드에 걸리면 접속 팩토리를 만들기 전에 멈춘다 — Lettuce 클라이언트 설정 훅이 한 번도 불리지 않는다")
     void guardFailsBeforeConnectionFactory() {
-        runner.withPropertyValues("spring.data.redis.timeout=1s", "spring.data.redis.connect-timeout=2s")
+        AtomicInteger valid = new AtomicInteger();
+        runner.withBean(LettuceClientConfigurationBuilderCustomizer.class, () -> builder -> valid.incrementAndGet())
+            .withPropertyValues(
+                "spring.data.redis.password=test-password", "spring.data.redis.timeout=1s", "spring.data.redis.connect-timeout=2s")
+            .run(context -> assertThat(context).hasNotFailed());
+        // 대조군 — 정상 설정이면 접속 팩토리를 만들며 훅이 불린다. 그래야 아래의 0 이 의미가 있다
+        assertThat(valid).hasValue(1);
+
+        AtomicInteger blocked = new AtomicInteger();
+        runner.withBean(LettuceClientConfigurationBuilderCustomizer.class, () -> builder -> blocked.incrementAndGet())
+            .withPropertyValues("spring.data.redis.timeout=1s", "spring.data.redis.connect-timeout=2s")
             .run(context -> {
                 assertThat(context).hasFailed();
                 assertThat(context.getStartupFailure())
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("spring.data.redis.password");
             });
+        assertThat(blocked).hasValue(0);
     }
 }
