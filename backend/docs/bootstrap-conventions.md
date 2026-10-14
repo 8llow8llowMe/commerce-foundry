@@ -25,8 +25,8 @@ public class ProductServiceApplication {
 
 | 파일 | 담는 것 |
 |------|---------|
-| `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, ResourceServerSecurity, `RedisConfigurer` — Redis 를 쓰는 서비스만) |
-| `*PropertiesConfig` | 공통 프로퍼티 `@Import` + 서비스 도메인 프로퍼티 `@EnableConfigurationProperties` |
+| `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, `ResourceServerSecurityConfigurer` — 전 서비스, `JwtIssuerConfigurer` — auth 만, `RedisConfigurer` — Redis 를 쓰는 서비스만) |
+| `*PropertiesConfig` | 공통 프로퍼티 `@Import` (`JwtVerificationPropertiesConfig` — 전 서비스, `JwtIssuerPropertiesConfig` — auth 만) + 서비스 도메인 프로퍼티 `@EnableConfigurationProperties` |
 | `*FeaturesConfig` | JPA Auditing(`BaseEntity` 시각), Scheduling, Async 같은 기능 스위치 |
 | `*SwaggerConfig` | 서비스 Swagger 그룹 (고객 / 어드민 그룹 분리) |
 
@@ -35,7 +35,7 @@ public class ProductServiceApplication {
 @Import({
     SwaggerPropertiesConfig.class,
     SnowflakePropertiesConfig.class,
-    JwtResourceServerPropertiesConfig.class
+    JwtVerificationPropertiesConfig.class
 })
 @EnableConfigurationProperties({StoreProperties.class, TossPaymentsProperties.class})
 public class PaymentServicePropertiesConfig {
@@ -106,6 +106,20 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
   기본 프로파일에서 Swagger 경로 404, Swagger 를 연 설정에서 그룹 문서 200 · 기본 문서 404.
 - 새 서비스를 더하면 게이트웨이의 dev 라우트(`GatewayDevRouteConfig` 는 `ServiceRoute` 를 따른다)와 Swagger UI 목록
   (`api-gateway` 의 `application.yml` `springdoc.swagger-ui.urls`)도 같이 늘린다. `GatewayDevRouteTest` 가 어긋나면 잡는다.
+
+## 보안 (서블릿 서비스 전부)
+
+security-core 는 서블릿·Boot 보안 자동설정을 끌고 오지 않는다(게이트웨이가 리액티브라서). 서비스 `build.gradle` 이 직접 선언한다.
+
+```groovy
+implementation project(':core:security-core')
+implementation 'org.springframework.boot:spring-boot-starter-security'
+implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+```
+
+- `*BeansConfig` 가 `ResourceServerSecurityConfigurer` 를, `*PropertiesConfig` 가 `JwtVerificationPropertiesConfig` 를 `@Import` 한다.
+  auth-service 는 `JwtIssuerConfigurer` · `JwtIssuerPropertiesConfig` 를 더한다.
+- `security.jwt.*` yml 과 키 환경변수는 `security-guide.md` §5-3 · §6.
 
 ## Redis (쓰는 서비스만)
 
