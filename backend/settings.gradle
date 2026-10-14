@@ -1,0 +1,8 @@
+rootProject.name = 'commerce-foundry-backend'
+
+// Cores — redis-core · security-core 는 회원 인증 이슈(#4), storage-core 는 어드민 상품 이슈(#9)에서 추가한다
+include 'core:common-core'
+include 'core:persistence-core'
+include 'core:shared-commerce'
+
+// Cloud · Services — #3 에서 추가한다
