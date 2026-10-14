@@ -12,8 +12,8 @@ spring:
   jpa:
     open-in-view: false
     hibernate:
-      # 스키마는 Hibernate 가 바꾸지 않는다. local 만 update 로 덮는다
-      ddl-auto: validate
+      # 운영은 애플리케이션이 스키마를 건드리지 않는다 — DDL 은 사람이 직접 적용한다. local · dev 만 update 로 덮는다
+      ddl-auto: none
     properties:
       hibernate:
         # 서비스별 스키마 (service-inventory.md §4). 다른 서비스 스키마를 직접 조회하지 않는다

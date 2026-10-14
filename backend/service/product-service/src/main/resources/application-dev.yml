@@ -1,5 +1,11 @@
 # dev 서버. 값은 Vault 에서 환경변수로 주입한다 (secret-management.md §3 · 주입 방식은 #32).
 
+spring:
+  jpa:
+    hibernate:
+      # 서비스가 뜰 때 개발 DB 스키마를 엔티티에 맞춘다. 운영은 공통 기본값 none 이다
+      ddl-auto: update
+
 springdoc:
   api-docs:
     enabled: true
