@@ -48,7 +48,8 @@ grep -rn -A5 "for (\|\.stream()\|\.forEach(" backend/service/*/src/main/java --i
 - 동적 쿼리·JPQL 에 `@DataJpaTest` 가 있는가 (컴파일로 검증되지 않는다)
 - 스냅숏 컬럼(주문 시점 가격·상품명·배송지)이 원본 참조로 대체되지 않았는가
 - 어드민 목록의 count 질의가 필터와 같은 조건인가 (`PageResponse` 총계 오차)
-- Redis 키: `{prefix}:{domain}:{용도}:{식별자}` 형태, TTL 명시, 멱등 키의 TTL 이 재시도 창보다 긴가
+- Redis (`coding-conventions.md` §9-7): 키를 `RedisKey.of(owner, domain, id...)` 로 만드는가, 같은 명령에서 TTL 을 주는가(영구 키 ✕),
+  멱등 키의 TTL 이 재시도 창보다 긴가, 서비스를 가로지르는 키를 공유 모듈의 함수 하나로 만드는가, `StringRedisTemplate` 만 쓰는가
 
 ## 출력
 
