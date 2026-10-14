@@ -92,6 +92,15 @@ class JwtIssuerConfigurerTest {
     }
 
     @Test
+    @DisplayName("access 수명은 1시간까지다 — 넘으면 프로퍼티 이름과 이유(탈취 창 · 블랙리스트)를 알리고 기동하지 않는다")
+    void failsWithAccessTokenTtlOverOneHour() {
+        runner.withPropertyValues(PUBLIC_KEY, PRIVATE_KEY, "security.jwt.issuance.access-token-ttl=1h")
+            .run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues(PUBLIC_KEY, PRIVATE_KEY, "security.jwt.issuance.access-token-ttl=61m")
+            .run(context -> assertStartupFailure(context, "security.jwt.issuance.access-token-ttl", "1시간", "블랙리스트"));
+    }
+
+    @Test
     @DisplayName("시계 오차 허용이 음수거나 5분을 넘으면, iss · aud 가 비면 기동하지 않는다")
     void failsWithInvalidVerificationSettings() {
         runner.withPropertyValues(PUBLIC_KEY, PRIVATE_KEY, "security.jwt.clock-skew=6m")

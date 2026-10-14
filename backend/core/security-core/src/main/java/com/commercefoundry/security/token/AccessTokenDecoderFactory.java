@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
@@ -40,6 +41,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
  *       ({@code sub} 양의 정수, {@code role} ∈ {@link MemberRole}, {@code jti} 있음). 위반을 모두 모아 한 번에 낸다.</li>
  * </ul>
  */
+@Slf4j
 public final class AccessTokenDecoderFactory {
 
     private static final OAuth2Error MALFORMED_CLAIMS = new OAuth2Error(OAuth2ErrorCodes.INVALID_TOKEN, "access token claims are malformed", null);
@@ -56,7 +58,11 @@ public final class AccessTokenDecoderFactory {
         return decoder;
     }
 
-    /** 현재 공개키(필수)와 이전 공개키(있을 때만). 같은 키가 두 번 들어오면 하나로 둔다. */
+    /**
+     * 현재 공개키(필수)와 이전 공개키(있을 때만). 같은 키가 두 번 들어오면 하나로 둔다.
+     * 이전 슬롯이 채워져 있으면 WARN 을 한 줄 남긴다 — 교체가 끝났는데 비우지 않으면 옛 키 토큰이 계속 통과한다 ({@code security-guide.md} §6-3).
+     * 로그에는 kid(공개키 썸프린트)만 남기고 키 내용은 남기지 않는다.
+     */
     public static JWKSet verificationKeys(JwtVerificationProperties properties) {
         List<JWK> keys = new ArrayList<>();
         RSAKey current = RsaKeys.toJwk(RsaKeys.loadPublicKey(properties.publicKey(), RsaKeys.Slot.PUBLIC_KEY));
@@ -66,6 +72,8 @@ public final class AccessTokenDecoderFactory {
             if (!previous.getKeyID().equals(current.getKeyID())) {
                 keys.add(previous);
             }
+            log.warn("jwt previous public key slot is in use. previousKid={}, currentKid={}. clear {} once key rotation is complete",
+                previous.getKeyID(), current.getKeyID(), RsaKeys.Slot.PREVIOUS_PUBLIC_KEY.environmentVariable());
         }
         return new JWKSet(keys);
     }

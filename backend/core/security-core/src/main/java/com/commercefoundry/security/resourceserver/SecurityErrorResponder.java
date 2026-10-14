@@ -47,10 +47,19 @@ public final class SecurityErrorResponder implements AuthenticationEntryPoint, A
         write(response, errorCode);
     }
 
-    /** 만료 토큰은 흔하다 — debug 로 둔다. 예외 메시지에는 토큰 조각이 섞일 수 있어 타입만 남긴다. */
+    /**
+     * 만료 토큰은 흔하다 — debug 로 둔다. 검증 시스템 오류(006)는 운영이 봐야 하므로 warn 이다.
+     * 예외 메시지에는 토큰 조각이 섞일 수 있어 타입만 남긴다.
+     */
     static void logAuthenticationRejected(HttpServletRequest request, SecurityErrorCode errorCode, AuthenticationException exception) {
-        log.debug("authentication rejected. code={}, method={}, path={}, reason={}",
-            errorCode.getCode(), request.getMethod(), request.getRequestURI(), exception.getClass().getSimpleName());
+        String reason = exception.getCause() == null
+            ? exception.getClass().getSimpleName()
+            : exception.getClass().getSimpleName() + "<-" + exception.getCause().getClass().getSimpleName();
+        if (errorCode == SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE) {
+            log.warn("token verification unavailable. code={}, method={}, path={}, reason={}", errorCode.getCode(), request.getMethod(), request.getRequestURI(), reason);
+        } else {
+            log.debug("authentication rejected. code={}, method={}, path={}, reason={}", errorCode.getCode(), request.getMethod(), request.getRequestURI(), reason);
+        }
     }
 
     /** 로그인한 회원의 권한 거부는 어드민 경로 탐색일 수 있어 info 로 memberId · jti 를 남긴다. */

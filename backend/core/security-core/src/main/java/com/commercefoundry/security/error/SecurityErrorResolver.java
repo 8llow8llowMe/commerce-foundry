@@ -1,8 +1,9 @@
 package com.commercefoundry.security.error;
 
-import java.util.Arrays;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.authentication.AuthenticationTrustResolver;
@@ -24,6 +25,13 @@ public final class SecurityErrorResolver {
 
     private static final AuthenticationTrustResolver TRUST_RESOLVER = new AuthenticationTrustResolverImpl();
 
+    /**
+     * 토큰 밖의 사정으로만 정해지는 코드 — 로그아웃(004) · 검증 저장소 장애(006). #4 가 디코더 래퍼나 AuthenticationManager 에서
+     * {@code OAuth2AuthenticationException(new OAuth2Error("SECURITY_00x"))} 로 던진다. 나머지 코드는 리졸버가 직접 판정하므로
+     * 예외에 실려 와도 따르지 않는다 — 만료가 아닌 토큰이 002 를 실어 재발급을 유도하는 일을 막는다.
+     */
+    private static final Set<SecurityErrorCode> DECLARABLE = EnumSet.of(SecurityErrorCode.TOKEN_REVOKED, SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
+
     private SecurityErrorResolver() {
     }
 
@@ -32,7 +40,8 @@ public final class SecurityErrorResolver {
      *
      * <ul>
      *   <li>토큰이 없다 ({@link InsufficientAuthenticationException}, {@link AuthenticationCredentialsNotFoundException}) → 001</li>
-     *   <li>원인 사슬의 {@link OAuth2AuthenticationException} 오류 코드가 {@code SECURITY_xxx} 다 → 그 코드 (#4 의 로그아웃 토큰 004 · 저장소 장애 006)</li>
+     *   <li>원인 사슬의 {@link OAuth2AuthenticationException} 오류 코드가 {@code SECURITY_004} · {@code SECURITY_006} 이다 → 그 코드 (#4).
+     *       validator 의 오류는 {@code JwtValidationException} 안에 들어가므로 여기에 해당하지 않는다(003)</li>
      *   <li>검증 위반이 <b>만료 하나뿐</b>이다 → 002. 다른 위반이 하나라도 섞이면 003 — 만료 신호로 재발급을 시도하게 두지 않는다</li>
      *   <li>인증 처리 중 시스템 오류 ({@link AuthenticationServiceException}) → 006 — 토큰 잘못이 아니므로 401 로 로그아웃시키지 않는다</li>
      *   <li>그 밖의 bearer 오류 (서명 · 형식 · alg · typ · iss · aud · claim) → 003</li>
@@ -65,7 +74,7 @@ public final class SecurityErrorResolver {
         for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
             if (cause instanceof OAuth2AuthenticationException oauth2) {
                 String errorCode = oauth2.getError().getErrorCode();
-                Optional<SecurityErrorCode> matched = Arrays.stream(SecurityErrorCode.values()).filter(code -> code.getCode().equals(errorCode)).findFirst();
+                Optional<SecurityErrorCode> matched = DECLARABLE.stream().filter(code -> code.getCode().equals(errorCode)).findFirst();
                 if (matched.isPresent()) {
                     return matched;
                 }

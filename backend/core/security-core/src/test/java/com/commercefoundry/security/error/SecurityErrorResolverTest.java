@@ -7,6 +7,8 @@ import com.commercefoundry.security.principal.MemberRole;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.AuthenticationServiceException;
@@ -66,6 +68,23 @@ class SecurityErrorResolverTest {
             .isEqualTo(SecurityErrorCode.TOKEN_REVOKED);
         assertThat(SecurityErrorResolver.resolve(new InvalidBearerTokenException("wrapped", new OAuth2AuthenticationException(new OAuth2Error("SECURITY_006")))))
             .isEqualTo(SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SECURITY_001", "SECURITY_002", "SECURITY_003", "SECURITY_005"})
+    @DisplayName("예외에 실린 코드는 004 · 006 만 따른다 — 만료가 아닌 토큰이 002 를 실어 재발급을 유도하지 못한다")
+    void ignoresNonDeclarableCodes(String code) {
+        assertThat(SecurityErrorResolver.resolve(new OAuth2AuthenticationException(new OAuth2Error(code))))
+            .isEqualTo(SecurityErrorCode.TOKEN_INVALID);
+    }
+
+    @Test
+    @DisplayName("validator 가 SECURITY_004 를 남겨도 JwtValidationException 안이라 003 이다 — #4 는 디코더 래퍼에서 던진다")
+    void revokedCodeFromValidatorIsTokenInvalid() {
+        OAuth2Error revoked = new OAuth2Error("SECURITY_004", "revoked", null);
+
+        assertThat(SecurityErrorResolver.resolve(bearerFailure(new JwtValidationException("revoked", List.of(revoked)))))
+            .isEqualTo(SecurityErrorCode.TOKEN_INVALID);
     }
 
     @Test
