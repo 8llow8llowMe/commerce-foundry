@@ -105,7 +105,7 @@ class GatewayRouteCoverageTest {
     }
 
     @Test
-    @DisplayName("라우트 id 는 서비스 5종과 정확히 같다")
+    @DisplayName("dev 라우트 플래그가 꺼져 있으면 라우트 id 는 서비스 5종과 정확히 같다 — 헬스 · 문서 라우트가 하나도 없다")
     void routeIdsAreExactlyTheFiveServices() {
         List<String> routeIds = routeLocator.getRoutes().map(Route::getId).collectList().block(TIMEOUT);
 
@@ -143,8 +143,11 @@ class GatewayRouteCoverageTest {
     // ── 노출되면 안 되는 경로 ─────────────────────────────────────
 
     @ParameterizedTest
-    @ValueSource(strings = {"/internal/v1/orders/1", "/auth-service/internal/v1/x", "/api/v2/products"})
-    @DisplayName("서비스 간 API · discovery locator 꼴 경로 · 다른 버전 경로는 어떤 라우트에도 걸리지 않는다")
+    @ValueSource(strings = {
+        "/internal/v1/orders/1", "/auth-service/internal/v1/x", "/api/v2/products",
+        "/health/product-service", "/docs/product-service/v3/api-docs/customer"
+    })
+    @DisplayName("서비스 간 API · discovery locator 꼴 경로 · 다른 버전 경로 · 꺼진 dev 라우트 경로는 어떤 라우트에도 걸리지 않는다")
     void unownedPathMatchesNoRoute(String path) {
         assertThat(matchingRouteIds(path)).isEmpty();
     }
