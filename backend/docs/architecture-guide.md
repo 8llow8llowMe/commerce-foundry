@@ -13,7 +13,7 @@ backend/
 ├── core/           (라이브러리 — jar, bootJar off)
 │   ├── common-core          Response 래퍼, 오류 봉투, 검증 유틸, Swagger 공통
 │   ├── persistence-core     JPA / QueryDSL / Snowflake ID / BaseEntity / Slice·PageResponse
-│   ├── redis-core           Redis 연결 (standalone / sentinel)
+│   ├── redis-core           Redis 연결 (Boot 자동설정 + 기동 가드) · 키 규칙
 │   ├── security-core        JWT 발급(auth) · Resource Server(나머지) · 인증 주체
 │   ├── storage-core         오브젝트 스토리지 (상품 이미지 업로드 / 삭제 / 키 생성 / 검증)
 │   └── shared-commerce      서비스를 가로지르는 커머스 enum·값 (CurrencyCode, Money, SalesChannel 등)

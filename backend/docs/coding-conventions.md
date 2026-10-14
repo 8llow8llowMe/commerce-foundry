@@ -224,6 +224,35 @@ public final class ProductValidationMessage {
 - DB 반복 → `in` 절 벌크 조회. 원격(Feign) 반복 → 대상 서비스에 **벌크 내부 엔드포인트**를 연다
   (예: 장바구니 상품 20개 가격 조회 → `GET /internal/v1/skus?ids=...` 한 번).
 
+### 9-7. Redis
+
+- 접속은 Boot 의 `spring.data.redis.*` 자동설정(Lettuce, standalone)을 그대로 쓴다. 접속 프로퍼티나
+  `LettuceConnectionFactory` 를 따로 만들지 않는다. 쓰는 서비스는 `redis-core` 를 의존하고 `*BeansConfig` 에서
+  `RedisConfigurer` 를 `@Import` 한다 — yml 은 `bootstrap-conventions.md` 의 Redis 절.
+- **기동 가드** — `RedisConfigurer` 가 등록하는 `RedisStartupGuard` 가 접속 팩토리를 만들기 전에 아래를 검사해 기동을 멈춘다.
+  환경변수(`SPRING_DATA_REDIS_*`)도 Boot 와 같은 규칙으로 읽는다. 메시지에는 프로퍼티·환경변수 이름만 넣고 값은 넣지 않는다.
+
+| 기동을 멈추는 조건 | 이유 |
+|--------------------|------|
+| `password` 가 비었거나 공백, `${REDIS_PASSWORD}` 가 풀리지 않았다 | 로컬 compose 도 `requirepass` 다. 인증 없는 Redis 에 붙지 않는다 |
+| `timeout`(명령) · `connect-timeout`(연결)이 없거나 0 이하다 | 타임아웃 없는 블로킹 호출 금지 (`architecture-guide.md` §8) |
+| `url` 이 설정됐다 | url 이 있으면 Boot 가 host·port·password 를 무시한다 — 비밀번호 검사가 무력해진다 |
+
+- **키는 `RedisKey.of(owner, domain, id...)` 로 만든다** — `{owner}:{domain}:{id...}`. 어긋나면 `IllegalArgumentException`.
+
+| 부분 | 규칙 | 예 |
+|------|------|----|
+| owner | 키를 쓰는 서비스의 짧은 이름. 소문자 kebab `[a-z][a-z0-9-]*` | `auth`, `order`, `gateway` |
+| domain | 그 서비스 안의 용도. 소문자 kebab | `refresh-token`, `cart` |
+| id | 하나 이상. 비어 있지 않고 `:` · 공백이 없다. 숫자 · UUID · base64url 은 그대로 | `4611686018427387904` |
+
+- owner 로 서비스별 네임스페이스를 나눈다. 같은 이름의 키가 부딪히지 않고, 한 서비스가 패턴으로 지운 키가 다른 서비스 것이 아니게 된다.
+- 싱글 테넌트(`architecture-guide.md` §9)라 스토어 접두어는 붙이지 않는다 — 고객사마다 Redis 가 따로다.
+- 서비스를 가로지르는 키(auth 가 쓰고 gateway 가 읽는 등)는 **쓰는 쪽**이 owner 다.
+- **직렬화** — Boot 가 만드는 `StringRedisTemplate`(서블릿) · `ReactiveStringRedisTemplate`(게이트웨이)만 쓴다.
+  값이 객체면 JSON 문자열로 바꿔 넣는다. `RedisTemplate<Object, Object>`(JDK 직렬화)는 쓰지 않는다 —
+  클래스가 바뀌면 읽지 못하고, `redis-cli` 로 값을 볼 수 없고, 역직렬화 취약점의 입구가 된다.
+
 ### 9-8. 스키마 변경 · 운영 DDL (필수)
 
 DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마의 정본은 엔티티이고, 운영 반영은 사람이 한다.
