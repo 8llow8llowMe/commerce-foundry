@@ -30,6 +30,7 @@
 - [ ] 금액이 `long` 최소 단위 + 통화 컬럼 쌍이다
 - [ ] 루프 안 단건 조회(N+1)가 없다
 - [ ] 동적 쿼리·JPQL 은 `@DataJpaTest` 로 실제 질의를 검증했다
+- [ ] 엔티티를 추가·변경했다면 PR 본문 `운영 DDL` 절에 local·dev 에서 뽑은 PostgreSQL DDL 을 적었다 (`coding-conventions.md` §9-8)
 
 ## 4. 커머스 흐름 체크리스트 (해당 시)
 
