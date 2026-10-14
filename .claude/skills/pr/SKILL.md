@@ -72,7 +72,8 @@ commerce-foundry PR 본문을 작성하고 **gh 로 생성**한다.
    이미 만든 PR 은 `gh pr edit <번호> --add-assignee @me --add-label <라벨>` 로 보정한다.
 
 7. **출력** — PR URL, 붙인 라벨, 리뷰어, 그리고 머지 방법을 안내한다:
-   `gh pr merge <번호> --rebase --delete-branch` (CI 통과 후). 머지 뒤 이슈 체크박스 갱신 · `gh issue close <번호>`.
+   `gh pr merge <번호> --rebase` (CI 통과 후). 원격 브랜치는 GitHub 가 자동 삭제한다 — 로컬 브랜치·워크트리 정리는
+   `docs/git-workflow.md` §7-2. 머지 뒤 이슈 체크박스 갱신 · `gh issue close <번호>`.
 
 ## 본문 템플릿
 
