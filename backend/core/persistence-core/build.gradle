@@ -1,0 +1,7 @@
+dependencies {
+    api 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // com.querydsl 원본은 2024년 이후 릴리스가 없다. 유지되는 OpenFeign 포크를 쓴다
+    api "io.github.openfeign.querydsl:querydsl-jpa:${rootProject.ext.querydslVersion}"
+    annotationProcessor "io.github.openfeign.querydsl:querydsl-apt:${rootProject.ext.querydslVersion}:jpa"
+}
