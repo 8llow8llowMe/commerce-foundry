@@ -1,0 +1,11 @@
+# 로컬 개발 전용. bootRun 은 SPRING_PROFILES_ACTIVE 가 없으면 local 로 뜬다 (backend/build.gradle).
+
+server:
+  # 레지스트리는 인증이 없다. 같은 LAN 의 다른 PC 가 인스턴스를 등록·삭제하지 못하게 루프백에만 묶는다.
+  address: 127.0.0.1
+
+eureka:
+  server:
+    # 로컬은 서비스를 자주 껐다 켠다. self-preservation 이 켜져 있으면 갱신이 끊긴 인스턴스를 지우지 않아
+    # 게이트웨이가 이미 내려간 인스턴스로 라우팅한다.
+    enable-self-preservation: false
