@@ -1,0 +1,42 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: payment-service
+  # 값은 환경변수로 받는다 (secret-management.md). local 은 backend/.env 를 읽는다 (application-local.yml)
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # 스키마는 Hibernate 가 바꾸지 않는다. local 만 update 로 덮는다
+      ddl-auto: validate
+    properties:
+      hibernate:
+        # 서비스별 스키마 (service-inventory.md §4). 다른 서비스 스키마를 직접 조회하지 않는다
+        default_schema: payment
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+swagger:
+  # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다
+  server-url: /
+
+# Swagger 는 기본 닫힘이다. local · dev 프로파일만 연다 — 프로파일이 빠진 배포 환경에서 문서가 열리지 않게.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
