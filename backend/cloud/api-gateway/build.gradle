@@ -1,0 +1,15 @@
+dependencies {
+    implementation project(':core:common-core')
+    implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
+    implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
+}
+
+tasks.named('test') {
+    // GatewayRouteCoverageTest 가 경로 소유 표(api-design-guide.md §1-2)를 읽어 ServiceRoute 와 대조한다.
+    // 문서만 바뀌어도 테스트가 UP-TO-DATE 로 건너뛰지 않게 입력으로 선언한다
+    inputs.file(rootProject.file('docs/api-design-guide.md'))
+        .withPropertyName('routeOwnershipTable')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}

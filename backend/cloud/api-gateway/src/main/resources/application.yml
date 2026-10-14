@@ -1,0 +1,36 @@
+server:
+  port: 8000
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # 라우트의 정본은 ServiceRoute enum 이다 (api-design-guide.md §1-2). 여기에 routes 를 적지 않는다.
+          discovery:
+            locator:
+              # 켜지 않는다. 켜면 Eureka 에 등록된 모든 서비스가 /<service-id>/** 로 자동 노출돼
+              # /auth-service/internal/** 같은 서비스 간 API 까지 외부에서 닿는다.
+              enabled: false
+          httpclient:
+            connect-timeout: 3000
+            response-timeout: 10s
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
+
+gateway:
+  cors:
+    # 콤마로 여러 개를 적는다. 기본값은 비어 있다 — 설정이 빠진 배포 환경은 어떤 origin 도 허용하지 않고 닫힌 채로 뜬다.
+    # 로컬 기본값(http://localhost:3000)은 application-local.yml 에 있다.
+    allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
