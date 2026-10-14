@@ -1,0 +1,38 @@
+# Claude Code local settings
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Java / Gradle (backend)
+backend/**/build/
+# Eclipse·VS Code Java 확장의 컴파일 출력. src/main/resources 복사본이 섞여 커밋 대상이 아니다
+backend/**/bin/
+backend/.gradle/
+*.class
+hs_err_pid*.log
+replay_pid*.log
+
+# Node (frontend)
+frontend/**/node_modules/
+frontend/**/.next/
+frontend/**/out/
+
+# env / secrets — 공개 저장소다. PG 시크릿 키·JWT 키·DB 비밀번호는 절대 커밋하지 않는다
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.jks
+
+# 이관 원본 데이터 (카페24 엑셀 등 — 고객 개인정보 포함 가능)
+backend/data/
+*.xlsx
+*.csv
