@@ -106,6 +106,7 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 | 한글이 깨진 파일이 diff 에 잡힌다 | CP949 로 저장됐다. UTF-8(no BOM)로 다시 저장한다 (`.editorconfig`) |
 | `docker compose up` 이 `DB_USERNAME 을 채우세요` 로 멈춘다 | `.env` 가 없거나 칸이 비었다. §2 |
 | 6379 포트가 이미 쓰이고 있다 | 다른 프로젝트의 Redis 다. `.env` 의 `REDIS_PORT` 를 바꾼다 |
+| 서비스가 `Redis 설정이 기동 조건에 맞지 않습니다` 로 뜨지 않는다 | `REDIS_PASSWORD` 가 비었거나 yml 에 `timeout` · `connect-timeout` 이 없다. 메시지가 가리키는 항목을 채운다 (`coding-conventions.md` §9-7) |
 | 새 스키마가 안 보인다 | init 스크립트는 첫 기동에만 돈다. `down -v` 후 다시 올린다 |
 | 서비스가 `'url' must start with "jdbc"` 로 안 뜬다 | `DB_URL` 을 받지 못했다. `.env` 는 local 프로파일에서만 읽는다 — `backend/.env` 가 있는지, 작업 디렉터리가 모듈 디렉터리인지(§5), `SPRING_PROFILES_ACTIVE` 가 local 인지 본다 |
 | 서비스가 `Failed to bind properties under 'snowflake.datacenter-id'` 로 안 뜬다 | local 이 아닌 프로파일로 떴고 `SNOWFLAKE_DATACENTER_ID` · `SNOWFLAKE_WORKER_ID` 가 없다. dev · prod 는 인스턴스마다 환경변수로 넣는다 (local 은 yml 고정값) |

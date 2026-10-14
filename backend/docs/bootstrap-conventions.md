@@ -25,7 +25,7 @@ public class ProductServiceApplication {
 
 | 파일 | 담는 것 |
 |------|---------|
-| `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, ResourceServerSecurity) |
+| `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, ResourceServerSecurity, `RedisConfigurer` — Redis 를 쓰는 서비스만) |
 | `*PropertiesConfig` | 공통 프로퍼티 `@Import` + 서비스 도메인 프로퍼티 `@EnableConfigurationProperties` |
 | `*FeaturesConfig` | JPA Auditing(`BaseEntity` 시각), Scheduling, Async 같은 기능 스위치 |
 | `*SwaggerConfig` | 서비스 Swagger 그룹 (고객 / 어드민 그룹 분리) |
@@ -106,6 +106,24 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
   기본 프로파일에서 Swagger 경로 404, Swagger 를 연 설정에서 그룹 문서 200 · 기본 문서 404.
 - 새 서비스를 더하면 게이트웨이의 dev 라우트(`GatewayDevRouteConfig` 는 `ServiceRoute` 를 따른다)와 Swagger UI 목록
   (`api-gateway` 의 `application.yml` `springdoc.swagger-ui.urls`)도 같이 늘린다. `GatewayDevRouteTest` 가 어긋나면 잡는다.
+
+## Redis (쓰는 서비스만)
+
+`*BeansConfig` 가 `RedisConfigurer` 를 `@Import` 하고 `application.yml` 에 아래를 둔다. 규칙과 기동 가드는 `coding-conventions.md` §9-7.
+
+```yaml
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      timeout: 1s            # 명령 타임아웃 — 없거나 0 이하면 기동하지 않는다
+      connect-timeout: 2s    # 연결 타임아웃 — 없거나 0 이하면 기동하지 않는다
+```
+
+- 타임아웃 값은 예시다. 서비스가 정하되 비우지 않는다.
+- `url` 은 쓰지 않는다 — 가드가 막는다.
 
 ## Reason
 
