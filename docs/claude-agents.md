@@ -40,7 +40,12 @@ Leader 는 파일이 없다. **메인 세션이 맡는다** (`/backend-multi-age
 
 ### 프론트엔드
 
-프론트 담당(`seonghoho`)이 `frontend/` 를 구성하면서 `fe-*` 접두어로 추가한다. 추가하면 이 표에 같은 형식으로 적는다.
+| 역할 | 모델 | 권한 | 사용 시점 |
+|------|------|------|-----------|
+| `fe-implementer` | Opus | 쓰기 | 앱 화면·route handler·packages 실구현, format·lint·typecheck·test·build 통과까지 |
+| `fe-reviewer` | Opus | 읽기 전용 | BFF·쿠키 경계, ApiError 처리, 금액·멱등 키, 테마 토큰 규칙 검토 |
+
+새 프론트 역할은 `fe-*` 접두어로 추가하고 이 표에 같은 형식으로 적는다.
 
 ## 모델 배정 기준
 
