@@ -1,0 +1,15 @@
+/*
+ * MOKOYURI 임시 팔레트 — 브랜드 가이드를 받으면 값만 바꾼다.
+ * --cf-* 원시 토큰만 덮어쓴다. 토큰 이름은 @cf/ui/tokens.css 가 정본이다.
+ */
+:root {
+  --cf-color-bg: #fbf8f3; /* 한지 아이보리 */
+  --cf-color-fg: #2b2622;
+  --cf-color-muted: #f1ebe2;
+  --cf-color-muted-fg: #7a6f64;
+  --cf-color-border: #e3d9cc;
+  --cf-color-primary: #2f3e5c; /* 쪽빛 */
+  --cf-color-primary-fg: #ffffff;
+  --cf-color-danger: #b42318;
+  --cf-radius-md: 0.25rem;
+}
