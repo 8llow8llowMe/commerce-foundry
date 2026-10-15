@@ -194,7 +194,8 @@ packages/theme-mokoyuri/brand.ts  { name, logoSrc, seo: { titleTemplate, descrip
 - 트리거: `pull_request`(`frontend/**`, 워크플로 파일) + `develop` push(캐시를 PR 이 상속하도록)
 - `concurrency` 로 같은 ref 의 이전 실행 취소, `permissions: contents: read`
 - `pnpm/action-setup` → `actions/setup-node`(`.nvmrc`, pnpm 캐시) → `pnpm install --frozen-lockfile`
-  → `pnpm turbo run lint typecheck test build`
+  → `format:check` → `lint` → `typecheck` → `test:ci` → 테스트 건수 검사 → `build`
+- lint · format · test 는 루트에서 한 번에 돈다(설정 하나로 전 패키지). typecheck · build 만 turbo 로 패키지별로 돈다.
 - 테스트 건수 검사: Vitest JSON 리포트를 읽어 테스트가 있어야 하는 패키지(`api-client`)가 0 건이면 실패한다.
   "초록불인데 테스트가 하나도 안 돌았다" 를 막는다.
 - Turbo 원격 캐시는 쓰지 않는다(공개 저장소에 토큰을 두지 않는다).
