@@ -18,7 +18,7 @@
 | 경로 | 대상 | 담당 | 엔트리 문서 | 규칙 정본 |
 |------|------|------|-------------|-----------|
 | `backend/` | Spring Cloud MSA + Hexagonal | `shindonggeun` | `backend/CLAUDE.md` | `backend/docs/*.md` |
-| `frontend/` | Next.js (스토어프론트 · 어드민) | `seonghoho` | `frontend/CLAUDE.md` (프론트에서 작성) | `frontend/docs/*.md` |
+| `frontend/` | Next.js 모노레포 (스토어프론트 · 어드민) | `seonghoho` | `frontend/CLAUDE.md` | `frontend/docs/*.md` |
 
 **작업 시작 시 해당 워크스페이스의 엔트리 문서를 먼저 읽는다.** 두 워크스페이스에 걸친 작업이면 양쪽 다 읽는다.
 
@@ -92,7 +92,8 @@
 |------|------|
 | 공용 | `explorer`, `architect`, `reviewer` |
 | 백엔드 | `be-executor`, `be-hexagonal-reviewer`, `be-db-reviewer`, `be-security-reviewer`, `be-payment-reviewer` |
+| 프론트엔드 | `fe-implementer`, `fe-reviewer` |
 
 - 검토 역할은 `tools` 로 읽기 전용을 강제한다. Write/Edit 를 부여하지 않는다.
 - **모든 작업을 병렬화하지 않는다.** 독립적인 읽기 전용 조사·검토만 병렬로 부르고, 쓰기 역할은 한 번에 하나만 실행한다.
-- 프론트엔드 스킬·에이전트는 프론트 담당자가 `frontend/` 구성 시 추가한다 (`fe-*` 접두어).
+- 프론트엔드 에이전트는 `fe-*` 접두어다. 프론트 전용 스킬은 반복 작업이 생기면 `fe-*` 로 추가한다.
