@@ -1,0 +1,69 @@
+name: frontend-ci
+
+# **프론트엔드 PR 에서 format · lint · 타입 · 테스트 · 빌드를 돌리고, 테스트가 실제로 몇 건 돌았는지 센다.**
+# backend-ci 와 같은 이유로 "초록불인데 테스트가 한 건도 안 돌았다" 를 막는다.
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+      - '.github/scripts/frontend-test-count.mjs'
+  # develop 에서도 돈다. Actions 캐시는 기본 브랜치 스코프만 모든 PR 이 상속한다.
+  push:
+    branches:
+      - develop
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+      - '.github/scripts/frontend-test-count.mjs'
+
+# 같은 PR 에 새 커밋이 올라오면 이전 실행을 버린다.
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm 버전은 frontend/package.json 의 packageManager 를 따른다.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test:ci
+
+      - name: Test count
+        run: node ../.github/scripts/frontend-test-count.mjs test-results/vitest.json
+
+      - name: Build
+        run: pnpm build
