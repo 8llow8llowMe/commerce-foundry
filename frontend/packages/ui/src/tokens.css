@@ -1,0 +1,30 @@
+/*
+ * 브랜드 무관 중립 토큰. 브랜드 테마(theme-<brand>/theme.css)는 --cf-* 값만 덮어쓴다.
+ * 컴포넌트는 아래 @theme 로 연결된 클래스(bg-primary 등)만 쓴다. frontend/docs/styling-theme.md
+ */
+:root {
+  --cf-color-bg: #ffffff;
+  --cf-color-fg: #111827;
+  --cf-color-muted: #f3f4f6;
+  --cf-color-muted-fg: #6b7280;
+  --cf-color-border: #e5e7eb;
+  --cf-color-primary: #111827;
+  --cf-color-primary-fg: #ffffff;
+  --cf-color-danger: #dc2626;
+  --cf-radius-md: 0.5rem;
+  --cf-font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+}
+
+@theme inline {
+  --color-bg: var(--cf-color-bg);
+  --color-fg: var(--cf-color-fg);
+  --color-muted: var(--cf-color-muted);
+  --color-muted-fg: var(--cf-color-muted-fg);
+  --color-border: var(--cf-color-border);
+  --color-primary: var(--cf-color-primary);
+  --color-primary-fg: var(--cf-color-primary-fg);
+  --color-danger: var(--cf-color-danger);
+  --radius-md: var(--cf-radius-md);
+  --font-sans: var(--cf-font-sans);
+}

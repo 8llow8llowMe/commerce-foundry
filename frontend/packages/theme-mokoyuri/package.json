@@ -1,0 +1,22 @@
+{
+  "name": "@cf/theme-mokoyuri",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/brand.ts",
+    "./theme.css": {
+      "style": "./theme.css",
+      "default": "./theme.css"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cf/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}
