@@ -1,0 +1,29 @@
+{
+  "name": "commerce-foundry-frontend",
+  "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:ci": "vitest run --reporter=default --reporter=json --outputFile.json=test-results/vitest.json"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.1",
+    "eslint-config-prettier": "10.1.8",
+    "next": "catalog:",
+    "prettier": "3.9.10",
+    "turbo": "2.11.8",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
