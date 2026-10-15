@@ -36,8 +36,10 @@
 | `server` | 그 밖 | `message` 표시 |
 
 - `message` 는 서버 `resultMessage` 가 있으면 그것, 없으면 kind 별 기본 문구다.
-- 요청 취소(`AbortError`)는 `ApiError` 로 바뀌지 않고 그대로 던져진다. 오류 안내를 띄우지 않는다.
-- BFF 자체 코드: `BFF_001`(404, `/api/v1` 밖 경로), `BFF_002`(503, 게이트웨이 연결 실패).
+- 요청을 취소하면(`signal` abort) `ApiError` 가 아니라 취소 reason(기본 `AbortError`)이 그대로 던져진다.
+  응답 본문을 읽는 중에 취소돼도 같다. 오류 안내를 띄우지 않는다.
+- BFF 자체 코드: `BFF_001`(404, `/api/v1` 밖 경로), `BFF_002`(503, 게이트웨이 연결 실패·재발급 일시 장애),
+  `BFF_003`(403, 다른 origin 에서 온 쓰기 요청 — CSRF).
 
 ## 4. 멱등 키
 

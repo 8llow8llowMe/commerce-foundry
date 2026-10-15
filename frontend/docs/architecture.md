@@ -25,7 +25,8 @@ pnpm workspace + Turborepo. 앱 둘과 패키지 셋이다.
   - /api/v1/** 만 전달, 그 외 BFF_001 404
   - Content-Type · Accept · Accept-Language · Idempotency-Key 만 전달
   - access 쿠키 → Authorization: Bearer (클라이언트가 보낸 Authorization 은 버린다)
-  - 401 + refresh 쿠키 → 재발급 1회 → 새 쿠키 → 원 요청 1회 재시도. 재발급 실패면 쿠키 삭제 + 401
+  - POST · PUT · PATCH · DELETE 는 같은 origin 요청만 받는다(아래 CSRF), 아니면 BFF_003 403
+  - 401 + refresh 쿠키 → 재발급 1회 → 새 쿠키 → 원 요청 1회 재시도 (재발급 결과별 처리는 §3)
   - 게이트웨이 Set-Cookie 는 버린다. 연결 실패는 BFF_002 503
       ↓
 [API Gateway :8000] → 서비스
@@ -35,13 +36,25 @@ pnpm workspace + Turborepo. 앱 둘과 패키지 셋이다.
 
 - 브라우저는 게이트웨이를 직접 부르지 않으므로 운영 CORS 가 필요 없다.
 - 401 은 인증 단계 거절이라 서버가 처리하지 않았다. 쓰기 요청도 재발급 후 1회 재시도가 안전하다.
-- 같은 refresh 토큰의 동시 재발급은 인스턴스 안에서 한 번으로 합친다. 다중 인스턴스 경합은 #25 에서 BE 와 정한다.
+- 같은 refresh 토큰의 동시 재발급은 인스턴스 안에서 한 번으로 합친다. 성공 결과는 30초(`REISSUE_GRACE_MS`) 동안
+  같은 옛 refresh 토큰에 다시 내준다 — 브라우저가 새 쿠키를 반영하기 전에 옛 쿠키로 온 요청(병렬 요청·다른 탭)이
+  회전된 refresh 로 재발급을 시도해 로그아웃되는 것을 막는다. 다중 인스턴스 경합은 #25 에서 BE 와 정한다.
 - 재발급이 성공한 뒤 재시도가 연결 실패해도 새 쿠키는 심는다(회전된 refresh 토큰을 잃지 않는다).
+
+### CSRF
+
+BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므로, 게이트웨이·BE 가 아니라 **BFF 가 CSRF 경계**다.
+
+- 안전하지 않은 메서드(GET · HEAD · OPTIONS 외)는 `Sec-Fetch-Site: same-origin` 일 때만 통과한다.
+- `Sec-Fetch-Site` 가 없으면(구형 브라우저) `Origin` 이 요청 origin 과 같아야 한다. 둘 다 없으면 브라우저 요청이 아니므로 통과한다.
+- SameSite=Lax 쿠키는 이 검사의 보조 수단이다. GET 은 부수 효과가 없어야 한다(BE 규칙).
 
 ## 3. 쿠키
 
 - `HttpOnly; SameSite=Lax; Path=/`, 운영은 `Secure`.
 - 고객 `cf_at` / `cf_rt`, 어드민 `cf_admin_at` / `cf_admin_rt` — 세션을 섞지 않는다.
+- 쿠키를 지우는 조건은 **재발급 명시적 거절**(4xx 또는 `success=false`)뿐이다. 재발급 5xx · 연결 실패 · 봉투 아님 ·
+  토큰 누락은 일시 장애로 보고 쿠키를 그대로 둔 채 BFF_002 503 을 준다(일시 장애로 세션을 날리지 않는다).
 - 이름·수명은 임시다. 고객은 #25, 어드민은 #29 에서 BE 토큰 만료와 맞춰 확정한다.
 - 재발급 요청·응답 모양(`{ refreshToken }` → `{ accessToken, refreshToken }`)은 #4 기준 가정이다. #4 머지 후 `packages/api-client/src/server/reissue.ts` 를 맞춘다.
 

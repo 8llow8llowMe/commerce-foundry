@@ -3,5 +3,11 @@ export { readCookie, serializeCookie, type AuthCookieConfig } from './cookies';
 export { gatewayRequest, type GatewayRequestOptions } from './gateway-request';
 export { checkGateway, healthResponse, type HealthReport, type HealthStatus } from './health';
 export { createProxyHandler, type ProxyOptions } from './proxy';
-export { REISSUE_PATH, reissueTokens, type TokenPair } from './reissue';
+export {
+  REISSUE_GRACE_MS,
+  REISSUE_PATH,
+  reissueTokens,
+  type ReissueResult,
+  type TokenPair,
+} from './reissue';
 export { joinUrl } from './url';
