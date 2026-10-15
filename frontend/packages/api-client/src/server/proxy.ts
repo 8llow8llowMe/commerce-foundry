@@ -10,6 +10,7 @@ export type ProxyOptions = {
 };
 
 const API_PREFIX = '/api/v1/';
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // 게이트웨이로 넘기는 요청 헤더. Cookie·Authorization·X-Forwarded-* 등은 넘기지 않는다.
 const FORWARD_REQUEST_HEADERS = ['content-type', 'accept', 'accept-language', 'idempotency-key'];
 // 중계하지 않는 응답 헤더. fetch 가 본문을 이미 풀었으므로 인코딩·길이 헤더도 버린다.
@@ -37,6 +38,11 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
       return Response.json(errorEnvelope('BFF_001', '존재하지 않는 경로입니다.'), { status: 404 });
     }
 
+    // 쿠키를 Bearer 로 바꿔 주므로 BFF 가 CSRF 경계다. 안전하지 않은 메서드는 같은 origin 요청만 받는다.
+    if (!SAFE_METHODS.has(request.method) && !isSameOrigin(request, url)) {
+      return Response.json(errorEnvelope('BFF_003', '허용되지 않은 요청입니다.'), { status: 403 });
+    }
+
     // 재시도에 다시 써야 하므로 본문을 한 번 버퍼에 담는다.
     const body =
       request.method === 'GET' || request.method === 'HEAD'
@@ -61,10 +67,13 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
       const first = await send(accessToken);
       if (first.status !== 401 || !refreshToken) return relay(first, []);
 
-      issued = await reissueTokens(options.gatewayUrl, refreshToken, fetchImpl);
-      if (!issued) return relay(first, clearCookies(cookies));
-
+      const result = await reissueTokens(options.gatewayUrl, refreshToken, fetchImpl);
+      // 명시적 거절만 세션을 끝낸다. 일시 장애로는 쿠키를 지우지 않는다(아래 catch → BFF_002).
+      if (result.status === 'rejected') return relay(first, clearCookies(cookies));
       await first.body?.cancel();
+      if (result.status === 'unavailable') throw new Error('reissue unavailable');
+
+      issued = result.pair;
       const retried = await send(issued.accessToken);
       return relay(retried, issueCookies(cookies, issued));
     } catch {
@@ -81,6 +90,18 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
       return response;
     }
   };
+}
+
+/**
+ * 브라우저는 Sec-Fetch-Site 를 보낸다. 없으면(구형 브라우저) Origin 으로 판단하고,
+ * 둘 다 없으면 브라우저 요청이 아니므로 통과시킨다(쿠키를 자동으로 실어 오는 주체가 없다).
+ */
+function isSameOrigin(request: Request, url: URL): boolean {
+  const site = request.headers.get('sec-fetch-site');
+  if (site !== null) return site === 'same-origin';
+  const origin = request.headers.get('origin');
+  if (origin !== null) return origin === url.origin;
+  return true;
 }
 
 function forwardHeaders(source: Headers, accessToken: string | null): Headers {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthCookieConfig } from './cookies';
 import { createProxyHandler } from './proxy';
 import { REISSUE_PATH } from './reissue';
@@ -211,5 +211,176 @@ describe('createProxyHandler', () => {
       'cf_at=access-3; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800',
       'cf_rt=refresh-3; Path=/; HttpOnly; SameSite=Lax; Max-Age=1209600',
     ]);
+  });
+
+  describe('재발급 실패 분류 — 일시 장애로는 세션을 지우지 않는다', () => {
+    it.each([
+      ['재발급 5xx', 'r-5xx', () => envelope(503, false, null, 'GATEWAY_002')],
+      ['재발급 응답이 봉투가 아님', 'r-html', () => new Response('<html>', { status: 200 })],
+      ['재발급 성공인데 토큰이 없음', 'r-empty', () => envelope(200, true, {})],
+    ])('%s → 쿠키를 지우지 않고 BFF_002 503', async (_, refresh, make) => {
+      const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+        urlOf(input).endsWith(REISSUE_PATH) ? make() : unauthorized(),
+      );
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(
+        request('/api/v1/members/me', { cookie: `cf_at=a; cf_rt=${refresh}` }),
+      );
+
+      expect(res.status).toBe(503);
+      expect(res.headers.getSetCookie()).toEqual([]);
+      expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'BFF_002' } });
+    });
+
+    it('재발급 연결 실패 → 쿠키를 지우지 않고 BFF_002 503', async () => {
+      const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+        if (urlOf(input).endsWith(REISSUE_PATH)) throw new TypeError('fetch failed');
+        return unauthorized();
+      });
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(request('/api/v1/members/me', { cookie: 'cf_at=a; cf_rt=r-net' }));
+
+      expect(res.status).toBe(503);
+      expect(res.headers.getSetCookie()).toEqual([]);
+    });
+  });
+
+  describe('재발급 직후 옛 refresh 로 온 요청', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const rotatingGateway = () => {
+      let issued = 0;
+      const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+        if (urlOf(input).endsWith(REISSUE_PATH)) {
+          issued += 1;
+          // 회전형 refresh: 같은 값으로 두 번째 재발급은 거절된다.
+          if (issued > 1) return envelope(401, false, null, 'SECURITY_002');
+          return envelope(200, true, { accessToken: 'access-new', refreshToken: 'refresh-new' });
+        }
+        return authOf(init) === 'Bearer access-new' ? envelope(200, true, {}) : unauthorized();
+      });
+      return { fetchImpl, reissueCount: () => issued };
+    };
+
+    it('유예 시간 안이면 방금 받은 토큰 쌍을 다시 써서 로그아웃시키지 않는다', async () => {
+      const { fetchImpl, reissueCount } = rotatingGateway();
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+      const cookie = 'cf_at=old; cf_rt=refresh-rotating';
+
+      const first = await handler(request('/api/v1/a', { cookie }));
+      const second = await handler(request('/api/v1/b', { cookie }));
+
+      expect([first.status, second.status]).toEqual([200, 200]);
+      expect(reissueCount()).toBe(1);
+      expect(second.headers.getSetCookie()[0]).toContain('cf_at=access-new');
+    });
+
+    it('유예 시간이 지나면 다시 재발급한다', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const { fetchImpl, reissueCount } = rotatingGateway();
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+      const cookie = 'cf_at=old; cf_rt=refresh-expiring';
+
+      await handler(request('/api/v1/a', { cookie }));
+      vi.setSystemTime(Date.now() + 31_000);
+      const late = await handler(request('/api/v1/b', { cookie }));
+
+      expect(reissueCount()).toBe(2);
+      expect(late.status).toBe(401);
+    });
+  });
+
+  describe('CSRF — 안전하지 않은 메서드는 같은 origin 요청만 받는다', () => {
+    it.each(['cross-site', 'same-site', 'none'])(
+      'POST + Sec-Fetch-Site: %s → BFF_003 403, 게이트웨이를 부르지 않는다',
+      async (site) => {
+        const fetchImpl = vi.fn<typeof fetch>();
+        const handler = createProxyHandler({
+          gatewayUrl: GATEWAY,
+          cookies: COOKIES,
+          fetch: fetchImpl,
+        });
+
+        const res = await handler(
+          request('/api/v1/orders', {
+            method: 'POST',
+            body: '{}',
+            cookie: 'cf_at=a',
+            headers: { 'sec-fetch-site': site },
+          }),
+        );
+
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'BFF_003' } });
+        expect(fetchImpl).not.toHaveBeenCalled();
+      },
+    );
+
+    it('Sec-Fetch-Site 가 없으면 Origin 으로 판단한다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, {}));
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const foreign = await handler(
+        request('/api/v1/orders', {
+          method: 'DELETE',
+          headers: { origin: 'https://evil.test' },
+        }),
+      );
+      const own = await handler(
+        request('/api/v1/orders', {
+          method: 'DELETE',
+          headers: { origin: 'http://localhost:3000' },
+        }),
+      );
+
+      expect(foreign.status).toBe(403);
+      expect(own.status).toBe(200);
+    });
+
+    it('같은 origin POST 와 cross-site GET 은 통과한다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, {}));
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const post = await handler(
+        request('/api/v1/orders', {
+          method: 'POST',
+          body: '{}',
+          headers: { 'sec-fetch-site': 'same-origin' },
+        }),
+      );
+      const get = await handler(
+        request('/api/v1/products', { headers: { 'sec-fetch-site': 'cross-site' } }),
+      );
+
+      expect([post.status, get.status]).toEqual([200, 200]);
+    });
   });
 });

@@ -23,18 +23,26 @@ export async function apiFetch<T>(
   if (json !== undefined) merged.set('content-type', 'application/json');
   if (idempotencyKey) merged.set('idempotency-key', idempotencyKey);
 
-  let response: Response;
+  // 화면 이탈 등으로 취소된 요청은 오류 안내 대상이 아니다. 취소 reason 을 그대로 던진다.
+  // 응답 헤더를 받은 뒤 본문을 읽는 중에 취소돼도 마찬가지다.
+  const signal = rest.signal;
   try {
-    response = await fetchImpl(path, {
+    const response = await fetchImpl(path, {
       ...rest,
       headers: merged,
       credentials: 'same-origin',
       body: json === undefined ? undefined : JSON.stringify(json),
+    }).catch((cause: unknown) => {
+      if (signal?.aborted || isAbortError(cause)) throw cause;
+      throw new ApiError('network', null, null, null);
     });
+    return await unwrap<T>(response);
   } catch (cause) {
-    // 화면 이탈 등으로 취소된 요청은 오류 안내 대상이 아니다.
-    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
-    throw new ApiError('network', null, null, null);
+    if (signal?.aborted) throw signal.reason;
+    throw cause;
   }
-  return unwrap<T>(response);
+}
+
+function isAbortError(cause: unknown): boolean {
+  return cause instanceof DOMException && cause.name === 'AbortError';
 }

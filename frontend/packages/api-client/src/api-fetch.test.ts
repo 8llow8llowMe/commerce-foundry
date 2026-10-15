@@ -53,4 +53,31 @@ describe('apiFetch', () => {
     const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(abort);
     await expect(apiFetch('/api/v1/products', {}, fetchImpl)).rejects.toBe(abort);
   });
+
+  it('사용자 지정 reason 으로 취소하면 그 reason 을 그대로 던진다', async () => {
+    const controller = new AbortController();
+    const reason = new Error('route change');
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      controller.abort(reason);
+      throw reason;
+    });
+    await expect(
+      apiFetch('/api/v1/products', { signal: controller.signal }, fetchImpl),
+    ).rejects.toBe(reason);
+  });
+
+  it('본문을 읽는 중에 취소돼도 invalidResponse 가 아니라 취소 reason 을 던진다', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('The operation was aborted.', 'AbortError');
+    const response = new Response('{}', { status: 200 });
+    vi.spyOn(response, 'json').mockImplementation(async () => {
+      controller.abort(reason);
+      throw reason;
+    });
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response);
+
+    await expect(
+      apiFetch('/api/v1/products', { signal: controller.signal }, fetchImpl),
+    ).rejects.toBe(reason);
+  });
 });
