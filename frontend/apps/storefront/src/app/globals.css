@@ -1,0 +1,6 @@
+@import 'tailwindcss';
+@import '@cf/ui/tokens.css';
+@import '@cf/brand/theme.css';
+
+/* 공유 컴포넌트의 클래스를 스캔한다 (frontend/ 기준 packages/ui/src) */
+@source '../../../../packages/ui/src';
