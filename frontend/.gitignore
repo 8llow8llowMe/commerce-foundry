@@ -3,3 +3,5 @@ next-env.d.ts
 test-results/
 coverage/
 *.tsbuildinfo
+# next dev 가 앱마다 다시 만드는 에이전트 안내 파일 — 내용은 frontend/CLAUDE.md 에 옮겨 두었다
+apps/*/AGENTS.md
