@@ -1,0 +1,5 @@
+@import 'tailwindcss';
+@import '@cf/ui/tokens.css';
+/* 어드민은 브랜드 테마를 쓰지 않는다 (중립 토큰) */
+
+@source '../../../../packages/ui/src';
