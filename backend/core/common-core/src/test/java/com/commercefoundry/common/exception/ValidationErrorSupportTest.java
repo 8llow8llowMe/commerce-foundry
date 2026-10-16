@@ -160,6 +160,20 @@ class ValidationErrorSupportTest {
         assertThat(errors.getFirst().message()).isEqualTo("이메일 형식이 올바르지 않습니다.");
     }
 
+    // ── 필수 요청 파라미터 누락 (서블릿 MissingServletRequestParameterException) ──────
+
+    @Test
+    @DisplayName("필수 파라미터가 빠지면 호출부 코드로 400 을 내고 어느 파라미터인지 fieldErrors 로 짚는다")
+    void missingRequestParameter() {
+        ResponseEntity<Response<Void>> response = ValidationErrorSupport.toMissingParameterResponse("ids", "PRODUCT_199");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        DataHeader header = response.getBody().dataHeader();
+        assertThat(header.resultCode()).isEqualTo("PRODUCT_199");
+        assertThat(header.resultMessage()).isEqualTo("ids 파라미터는 필수입니다.");
+        assertThat(header.fieldErrors()).containsExactly(new ValidationErrorItem("PRODUCT_199", "ids", "ids 파라미터는 필수입니다."));
+    }
+
     // ── 응답 봉투의 타입 계약 (api-design-guide.md §2-1) ─────────────────────────
 
     /** 계약을 읽는 쪽이 보는 것은 JSON 이다. 직렬화 결과에서 {@code resultMessage} 가 문자열인지 고정한다. */

@@ -114,6 +114,19 @@ public final class ValidationErrorSupport {
     }
 
     /**
+     * 필수 요청 파라미터가 빠진 경우({@code @RequestParam} 기본 required — 서블릿 {@code MissingServletRequestParameterException}).
+     * Bean Validation 보다 앞선 바인딩 단계라 필드별 코드가 없어 호출부가 넘긴 코드({@code {DOMAIN}_199 PARAMETER_REQUIRED})로 답하되,
+     * 어느 파라미터인지는 {@code fieldErrors} 로 밝힌다.
+     *
+     * <p>예외가 아니라 파라미터 이름을 받는다 — 그 예외는 {@code ServletException} 하위인데 common-core 는 서블릿 API 를 의존하지 않는다
+     * (WebFlux 게이트웨이도 이 모듈을 쓴다). 서블릿 서비스의 핸들러가 {@code exception.getParameterName()} 을 넘긴다.
+     */
+    public static ResponseEntity<Response<Void>> toMissingParameterResponse(String parameterName, String defaultCode) {
+        String message = "%s 파라미터는 필수입니다.".formatted(parameterName);
+        return respond(List.of(new ValidationErrorItem(defaultCode, parameterName, message)));
+    }
+
+    /**
      * 요청 본문을 읽지 못한 경우 — 깨진 JSON, enum 에 없는 값({@code currency: "JPY"}), 타입 불일치, 정수 범위 초과.
      *
      * <p>Bean Validation 보다 앞선 역직렬화 단계라 필드별 코드가 없다. 도메인 기본 코드({@code {DOMAIN}_100})로
