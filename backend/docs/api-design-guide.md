@@ -6,7 +6,7 @@
 |------|--------|--------|-----------|-------------|
 | 고객(스토어프론트) | `/api/v1/**` | 비로그인 · `CUSTOMER` | 라우팅 | `adapter/in/web` |
 | 어드민 콘솔 | `/api/v1/admin/**` | `ADMIN` | 라우팅 + **ADMIN 역할 확인** | `adapter/in/admin` |
-| 서비스 간 | `/internal/v1/**` | 다른 서비스 | **라우팅하지 않는다** | `adapter/in/internal` |
+| 서비스 간 | `/internal/v1/**` | 다른 서비스 (서비스 토큰 · 허용 호출자, `security-guide.md` §9) | **라우팅하지 않는다** | `adapter/in/internal` |
 | 외부 콜백 | `/api/v1/payments/webhooks/**` 등 | PG·택배사 | 라우팅 (JWT 없음) | `adapter/in/webhook` |
 | 운영(개발용) | `/health/{service-id}`, `/docs/{service-id}/v3/api-docs/{customer\|admin}`, `/swagger-ui.html` | 개발자 | 정해진 경로만 서비스로 라우팅(`/actuator/health` · `/v3/api-docs/{group}` 으로 고정), Swagger UI 는 게이트웨이가 낸다 · **local·dev 만** (`gateway.dev-routes.enabled`) | — (서비스 actuator · springdoc) |
 
@@ -73,6 +73,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `SECURITY_003` · `SECURITY_004` | 401 | 위조 · 형식 오류 · 다른 발급자 / 로그아웃된 토큰 |
 | `SECURITY_005` | 403 | 역할 부족 (CUSTOMER 가 어드민 API) |
 | `SECURITY_006` | 503 | 토큰 검증 저장소 장애 |
+| `SECURITY_007` | 401 | 서비스 간 인증 실패 — internal API 전용이라 프론트는 받지 않는다 |
 
 | HTTP | 프론트(BFF) 처리 — 정본 [frontend/docs/architecture.md](../../frontend/docs/architecture.md) §2 · §3 |
 |------|------------------------------------------------------|
@@ -151,7 +152,10 @@ Info → Presenter → Response
 
 - 고객·어드민 API(`adapter/in/web` · `adapter/in/admin`)의 **모든 핸들러에 `@PreAuthorize` 를 단다.** 서비스 URL 단계가 열려 있어(default-allow)
   빠뜨리면 공개 API 가 된다. 공개 API 도 `@PreAuthorize("permitAll()")` 로 명시하고, 로그인 필요는 `isAuthenticated()`, 어드민은 `hasRole('ADMIN')` 이다.
-  internal API(`/internal/**`)는 JWT 없이 호출되므로 `@PreAuthorize` 를 달지 않는다 (`security-guide.md` §5-1).
+- internal API(`adapter/in/internal`, `/internal/**`)의 **모든 핸들러에 허용 호출자를 `@PreAuthorize` 로 단다** —
+  `hasAuthority('SERVICE_order-service')`, 여럿이면 `hasAnyAuthority(...)`. `isAuthenticated()` · `permitAll()` 은 쓰지 않는다(서비스 5종 누구나 부르게 된다).
+  사용자 JWT 는 internal 로 오지 않으므로 사용자 식별이 필요하면 memberId 를 요청 본문 · 파라미터로 받는다 — 호출 서비스가 사용자 JWT 로
+  이미 검증한 값이다. 아래 "클라이언트가 보낸 memberId 를 믿지 않는다" 는 고객 · 어드민 API 의 규칙이다 (`security-guide.md` §9-4).
 - member 식별은 JWT claim 기준이다. **클라이언트가 보낸 memberId 로 소유자를 판정하지 않는다.**
   컨트롤러는 `@AuthenticationPrincipal MemberPrincipal member` 로 받고 `member.memberId()` 만 UseCase 로 넘긴다.
 

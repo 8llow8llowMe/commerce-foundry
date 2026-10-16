@@ -366,6 +366,16 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
 - Feign `name` 은 하드코딩하지 않는다: `name = "${feign-client.target-services.product-service:product-service}"`.
   Eureka 등록명은 환경마다 다를 수 있다.
 - 같은 대상을 여러 인터페이스가 호출하면 `contextId` 를 반드시 지정한다.
+- **internal 클라이언트는 서비스 토큰을 싣는다** (`security-guide.md` §9-5).
+  - `@FeignClient(name = ..., contextId = ..., configuration = InternalFeignClientConfiguration.class)` 로 클라이언트마다 붙이고,
+    서비스 `*BeansConfig` 에 `InternalTokenIssuerConfigurer` 를 import 한다.
+  - Feign `name` 은 대상의 Eureka 서비스 ID(= 대상의 `spring.application.name`)다. 그대로 서비스 토큰의 `aud` 가 되므로
+    `feign-client.target-services.*` 로 바꿀 때도 대상의 서비스 ID 와 같아야 한다 — 다르면 대상이 401 · `SECURITY_007` 로 거부한다.
+  - **사용자 `Authorization` 헤더를 internal 로 넘기지 않는다.** `RequestContextHolder` 로 현재 요청의 헤더(사용자 토큰)를 꺼내 Feign 에 싣지 않는다.
+    사용자 식별이 필요하면 memberId 를 요청 본문 · 파라미터로 넘긴다.
+  - **`RequestInterceptor` 를 전역 빈으로 등록하지 않는다.** 전역 인터셉터는 모든 Feign 클라이언트에 붙는다 — 외부 API(토스 등)에 서비스 토큰이 실리거나
+    그쪽 `Authorization` 을 덮어쓴다. 외부 클라이언트에는 `InternalFeignClientConfiguration` 을 붙이지 않는다.
+  - 대상의 401 · `SECURITY_007` 은 요청 내용이 아니라 키 · 설정 문제다. 토큰을 다시 발급해 재시도하지 않는다(재시도로 풀리지 않는다).
 - Feign 파라미터가 `LocalDate`·`LocalDateTime` 등이면 `@DateTimeFormat(iso = ...)` 를 붙인다
   (없으면 요청 로케일 형식으로 문자열화되어 받는 쪽이 400 을 준다).
 - 타임아웃은 `spring.cloud.openfeign.client.config` 공통 설정으로 관리한다. 기본 read timeout 60초를 그대로 두지 않는다.

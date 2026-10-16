@@ -14,7 +14,7 @@
 | `api-design-guide.md` | 경로 체계(고객/어드민/internal/webhook), 응답·오류 봉투, 금액 표현, 페이지네이션, 멱등성 |
 | `payment-guide.md` | 토스페이먼츠 통합 결제 — 승인 흐름, 중복 방지, UNKNOWN, 웹훅, 환불, USD/PayPal |
 | `order-flow-guide.md` | 주문·재고·배송·클레임 상태 전이와 동시성 |
-| `security-guide.md` | JWT 토큰 사양(RS256 · claim · refresh 불투명 토큰), 인증·인가 오류 코드, Resource Server 정책, 키 생성·교체 |
+| `security-guide.md` | JWT 토큰 사양(RS256 · claim · refresh 불투명 토큰), 인증·인가 오류 코드, Resource Server 정책, 키 생성·교체, 서비스 간 인증(서비스 토큰 · 허용 호출자) |
 | `bootstrap-conventions.md` | Application 클래스, Global Config 템플릿 |
 | `local-run-guide.md` | 로컬 빌드·테스트, PostgreSQL·Redis compose, 서비스 실행·게이트웨이 경유 헬스 체크·Swagger UI, 문제 해결 |
 | `secret-management.md` | Vault 시크릿 관리 — 키 이름 규칙(`../.env.example`), 환경별 출처, 키 추가 절차, 유출 대응 |

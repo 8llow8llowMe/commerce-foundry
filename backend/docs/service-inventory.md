@@ -9,14 +9,15 @@
 |------|------|------|------|
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
 | `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36) — JWT·ADMIN 은 #4·#6 | 라우팅(`api-design-guide.md` §1-2), JWT 검증, `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
-| `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
-| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제), 상품 이미지, 다국어 상품정보, 통화별 가격 |
-| `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
-| `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
-| `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
+| `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
+| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제), 상품 이미지, 다국어 상품정보, 통화별 가격 |
+| `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
+| `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
+| `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
 
 "골격" 은 실행·Eureka 등록·헬스 체크·Swagger 그룹까지 갖추고 도메인 코드는 없는 상태다 (`bootstrap-conventions.md`).
 "Resource Server" 는 JWT 검증 · `/api/v1/admin/**` ADMIN 규칙 · 보안 오류 봉투가 걸려 있고 인가 스모크가 도는 상태다 (`security-guide.md` §5).
+"서비스 간 인증" 은 `/internal/**` 이 서비스 토큰(1단계, 공용 HS256 비밀)으로만 열리고 인가 스모크가 그것을 보는 상태다 (`security-guide.md` §9).
 
 ## 2. 서비스 간 호출 (동기, Feign)
 
@@ -31,6 +32,9 @@
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —
 A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃이 겹친다.
 
+호출은 모두 서비스 토큰을 싣고(`InternalFeignClientConfiguration`), 대상 internal 핸들러는 이 표의 호출하는 쪽을 허용 호출자로 선언한다
+(`@PreAuthorize("hasAuthority('SERVICE_order-service')")`, `security-guide.md` §9-4). 호출 관계가 바뀌면 이 표와 허용 목록을 같이 고친다.
+
 ## 3. core 모듈 사용처
 
 | core | 사용 서비스 |
@@ -38,7 +42,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | `common-core` | 전부 |
 | `persistence-core` | auth · product · order · payment · delivery |
 | `redis-core` | auth(토큰·소셜 state) · order(멱등 키·장바구니 캐시 검토) · api-gateway(블랙리스트) |
-| `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 — #4) |
+| `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 — #4) |
 | `storage-core` | product(상품 이미지) |
 | `shared-commerce` | product · order · payment · delivery |
 
@@ -79,3 +83,4 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |
 | refresh 토큰 전달 방식 | 응답 본문 + 헤더 / httpOnly 쿠키 (쿠키면 CORS 자격 증명 · SameSite · CSRF 를 함께 정한다) | #4 |
 | 로그아웃 블랙리스트 저장소 장애 시 | 거부(`SECURITY_006`, 503) / 통과(서명 검증만) | #4 |
+| 서비스 간 인증 2단계 | 서비스별 RS256 키 / 플랫폼 mTLS — 1단계(공용 HS256, #51)의 호출자 "선언" 을 "증명" 으로 바꾼다 (`security-guide.md` §9-9) | 배포 환경 결정 후 |
