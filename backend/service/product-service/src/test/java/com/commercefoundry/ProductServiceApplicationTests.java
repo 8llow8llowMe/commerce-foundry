@@ -2,6 +2,9 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
+import com.commercefoundry.domainlayer.product.application.service.SkuInternalFacade;
+import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManagerFactory;
@@ -28,6 +31,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionAttribute;
 
 /**
  * 컨텍스트 로딩 게이트. test 프로파일(H2, Eureka 꺼짐)에서 빈 정의가 끝까지 조립되는지와 Swagger 노출 범위를 본다.
@@ -52,6 +58,29 @@ class ProductServiceApplicationTests {
         assertThat(applicationContext.getBeansOfType(GroupedOpenApi.class).values())
             .extracting(GroupedOpenApi::getGroup)
             .containsExactlyInAnyOrder("customer", "admin");
+    }
+
+    @Test
+    @DisplayName("store.* 가 StoreProperties 로 바인딩된다 — test 프로파일은 맞춤 제작을 켠다")
+    void storePropertiesBound() {
+        assertThat(applicationContext.getBean(StoreProperties.class).features().customOrder()).isTrue();
+    }
+
+    /**
+     * internal SKU 조회는 {@code REPEATABLE_READ} 읽기 전용 트랜잭션이다. 슬라이스 · Mockito 테스트는 트랜잭션 관리자를 타지 않으므로,
+     * 실제 트랜잭션 관리자(JPA)와 DB 가 그 격리 수준을 받는지 웹 계층을 거치지 않고 유스케이스로 확인한다.
+     */
+    @Test
+    @DisplayName("internal SKU 조회는 REPEATABLE_READ 읽기 전용으로 선언돼 있고, 실제 트랜잭션 관리자 · DB 가 그 격리 수준으로 돈다")
+    void skuInternalUseCaseRunsInRepeatableRead() throws NoSuchMethodException {
+        TransactionAttribute attribute = new AnnotationTransactionAttributeSource()
+            .getTransactionAttribute(SkuInternalFacade.class.getMethod("getSkus", List.class), SkuInternalFacade.class);
+        assertThat(attribute).isNotNull();
+        assertThat(attribute.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        assertThat(attribute.isReadOnly()).isTrue();
+
+        SkuInternalUseCase skuInternalUseCase = applicationContext.getBean(SkuInternalUseCase.class);
+        assertThat(skuInternalUseCase.getSkus(List.of(1L, 2L)).skus()).isEmpty();
     }
 
     @Test
