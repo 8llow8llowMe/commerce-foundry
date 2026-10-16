@@ -4,8 +4,8 @@ import java.util.StringJoiner;
 import java.util.regex.Pattern;
 
 /**
- * Redis 키. 형식은 {@code {owner}:{domain}:{id...}} 다 — 예 {@code auth:refresh-token:4611686018427387904}
- * ({@code coding-conventions.md} §9-7).
+ * Redis 키. 형식은 {@code {owner}:{domain}:{id...}} 다 — 예 {@code auth:refresh-token:n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg}
+ * (refresh 토큰 원문이 아니라 SHA-256 핑거프린트, base64url 43자), {@code order:stock-lock:4611686018427387904:2} ({@code coding-conventions.md} §9-7).
  *
  * <ul>
  *   <li>{@code owner} — 키의 수명주기(생성·갱신·삭제)를 소유하는 서비스의 짧은 이름. {@code auth}, {@code order}, {@code gateway} 처럼 소문자 kebab.</li>

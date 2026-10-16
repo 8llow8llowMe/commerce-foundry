@@ -7,7 +7,9 @@ import org.springframework.http.HttpStatus;
 /**
  * 인증·인가 실패 코드 ({@code security-guide.md} 오류 코드 표). 서비스와 게이트웨이가 같은 코드를 쓴다.
  *
- * <p>401 중 {@link #TOKEN_EXPIRED} 만 프론트가 재발급을 시도하는 신호다. 나머지 401 은 다시 로그인해야 한다.
+ * <p>코드는 거부 <b>원인</b>을 알린다. 프론트(BFF)는 재발급 여부를 코드로 가르지 않는다 — 401 이면 refresh 로 한 번 재발급 후 재시도하고,
+ * 403 은 권한 없음 안내, 503({@link #TOKEN_VERIFICATION_UNAVAILABLE})은 로그아웃시키지 않고 재시도한다 ({@code api-design-guide.md} §2-1).
+ * {@link #TOKEN_EXPIRED} 는 보낸 토큰이 만료됐다는 뜻이고, access 쿠키가 만료로 사라져 토큰 없이 온 요청은 {@link #UNAUTHORIZED} 다.
  */
 @Getter
 @RequiredArgsConstructor

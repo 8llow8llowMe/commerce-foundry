@@ -44,7 +44,7 @@ class SecurityErrorResolverTest {
     }
 
     @Test
-    @DisplayName("만료와 다른 위반이 섞이면 003 — 재발급으로 풀리지 않는 토큰이다")
+    @DisplayName("만료와 다른 위반이 섞이면 003 — 단순 만료가 아니라 잘못된 토큰이다")
     void expiryMixedWithOtherViolationIsTokenInvalid() {
         assertThat(SecurityErrorResolver.resolve(bearerFailure(new JwtValidationException("expired", List.of(EXPIRED, INVALID)))))
             .isEqualTo(SecurityErrorCode.TOKEN_INVALID);
@@ -72,7 +72,7 @@ class SecurityErrorResolverTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"SECURITY_001", "SECURITY_002", "SECURITY_003", "SECURITY_005"})
-    @DisplayName("예외에 실린 코드는 004 · 006 만 따른다 — 만료가 아닌 토큰이 002 를 실어 재발급을 유도하지 못한다")
+    @DisplayName("예외에 실린 코드는 004 · 006 만 따른다 — 만료가 아닌 토큰이 002 로 보고되지 않는다")
     void ignoresNonDeclarableCodes(String code) {
         assertThat(SecurityErrorResolver.resolve(new OAuth2AuthenticationException(new OAuth2Error(code))))
             .isEqualTo(SecurityErrorCode.TOKEN_INVALID);

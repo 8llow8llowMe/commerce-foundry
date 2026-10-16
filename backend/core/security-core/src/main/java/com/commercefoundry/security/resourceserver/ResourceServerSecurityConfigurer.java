@@ -6,7 +6,6 @@ import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.token.AccessTokenDecoderFactory;
 import com.commercefoundry.security.token.JwtVerificationProperties;
 import java.time.Clock;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -46,12 +45,15 @@ public class ResourceServerSecurityConfigurer {
         return AccessTokenDecoderFactory.create(properties, Clock.systemUTC());
     }
 
-    /** 오류 본문은 서비스의 {@code JsonMapper} 빈으로 쓴다 — 다른 오류 응답과 직렬화 설정이 같아야 한다. */
+    /**
+     * 오류 본문은 서비스의 {@code JsonMapper} 빈(Boot 의 Jackson 자동설정, {@code spring-boot-starter-webmvc} 가 끌고 온다)으로 쓴다 —
+     * 다른 오류 응답과 직렬화 설정이 같아야 한다. 빈이 없으면 기본 인스턴스로 몰래 바꾸지 않고 기동을 멈춘다.
+     */
     @Bean
     public SecurityFilterChain resourceServerSecurityFilterChain(
-        HttpSecurity http, JwtDecoder accessTokenDecoder, ObjectProvider<JsonMapper> jsonMapper
+        HttpSecurity http, JwtDecoder accessTokenDecoder, JsonMapper jsonMapper
     ) throws Exception {
-        SecurityErrorResponder responder = new SecurityErrorResponder(new SecurityErrorEnvelope(jsonMapper.getIfAvailable(() -> JsonMapper.builder().build())));
+        SecurityErrorResponder responder = new SecurityErrorResponder(new SecurityErrorEnvelope(jsonMapper));
         // Converter 빈으로 두면 MVC 변환 서비스에도 등록된다. 여기서만 쓰므로 직접 만든다
         MemberJwtAuthenticationConverter authenticationConverter = new MemberJwtAuthenticationConverter();
 
