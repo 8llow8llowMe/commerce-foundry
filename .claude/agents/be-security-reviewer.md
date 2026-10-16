@@ -1,6 +1,6 @@
 ---
 name: be-security-reviewer
-description: commerce-foundry 백엔드의 인증·인가·토큰·게이트웨이·어드민 권한·비밀정보·개인정보 경계를 전용 검토할 때 사용한다. 로그인/소셜/토큰 재발급/Security 설정/게이트웨이 라우트/@PreAuthorize 변경, 어드민 API 추가, 타인 리소스(주문·배송지)에 접근할 수 있는 API 추가, 웹훅 수신 경로 추가가 트리거다. 읽기 전용이며 코드를 수정하지 않는다.
+description: commerce-foundry 백엔드의 인증·인가·토큰·게이트웨이·어드민 권한·비밀정보·개인정보 경계를 전용 검토할 때 사용한다. 로그인/소셜/토큰 재발급/Security 설정/게이트웨이 라우트/@PreAuthorize 변경, 어드민 API 추가, internal API 추가 · internal Feign 클라이언트 추가, 타인 리소스(주문·배송지)에 접근할 수 있는 API 추가, 웹훅 수신 경로 추가가 트리거다. 읽기 전용이며 코드를 수정하지 않는다.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
@@ -39,8 +39,10 @@ git status --short
 3. **게이트웨이 라우트** — 새 경로가 `/internal/**` 을 외부에 열지 않는가, admin 경로가 ADMIN 필터를 타는가
 4. **웹훅** — JWT 없는 공개 경로이므로 본문을 믿지 않고 PG 재조회로 확정하는가, 다른 경로가 같은 예외 규칙에 묻어 열리지 않았는가
 5. **서비스 간 호출** — internal Feign 클라이언트가 `configuration = InternalFeignClientConfiguration.class` 를 쓰는가. 사용자 `Authorization` 을
-   internal 로 넘기거나 `RequestContextHolder` 로 사용자 토큰을 꺼내 싣지 않는가. `RequestInterceptor` 를 전역 빈으로 등록하거나 외부(PG 등) 클라이언트에
-   서비스 토큰 설정을 붙이지 않았는가 (`coding-conventions.md` §10). 두 번째 `JwtDecoder` 빈을 만들지 않았는가
+   internal 로 넘기거나 `RequestContextHolder` 로 사용자 토큰을 꺼내 싣지 않는가. 전역 `RequestInterceptor` · `Capability` 빈,
+   `@EnableFeignClients(defaultConfiguration = ...)`, `client.config.default.request-interceptors` 처럼 모든 클라이언트에 붙는 설정이 없는가.
+   외부(PG 등) 클라이언트에 서비스 토큰 설정을 붙이지 않았는가 — 이름이 kebab 이면 코드가 막지 못한다 (`coding-conventions.md` §10).
+   두 번째 `JwtDecoder` 빈을 만들지 않았는가
 6. **비밀정보 (공개 저장소)** — 시크릿 키·JWT 키·서비스 토큰 비밀·DB 비밀번호·사업자 정보가 코드·yml·테스트에 평문으로 없는가,
    새 플레이스홀더가 `backend/.env.example` 에 같은 이름으로 있는가 (`backend/docs/secret-management.md`)
 
