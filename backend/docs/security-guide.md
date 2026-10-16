@@ -73,25 +73,27 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 | 코드 | enum | HTTP | 언제 | `WWW-Authenticate` |
 |------|------|------|------|--------------------|
-| `SECURITY_001` | `UNAUTHORIZED` | 401 | 토큰 없이 인증 필요 API · 어드민 경로에 왔다 | `Bearer` |
-| `SECURITY_002` | `TOKEN_EXPIRED` | 401 | 만료 — **프론트가 재발급을 시도하는 유일한 신호** | `Bearer error="invalid_token", error_description="The access token expired"` |
+| `SECURITY_001` | `UNAUTHORIZED` | 401 | 토큰 없이 인증 필요 API · 어드민 경로에 왔다 (access 쿠키가 만료로 사라져 Authorization 없이 온 요청도 여기다) | `Bearer` |
+| `SECURITY_002` | `TOKEN_EXPIRED` | 401 | 보낸 access 토큰이 만료됐다 | `Bearer error="invalid_token", error_description="The access token expired"` |
 | `SECURITY_003` | `TOKEN_INVALID` | 401 | 서명 · 형식 · alg · typ · iss · aud · claim 위반 | `Bearer error="invalid_token"` |
 | `SECURITY_004` | `TOKEN_REVOKED` | 401 | 로그아웃된 토큰 (#4) | `Bearer error="invalid_token"` |
 | `SECURITY_005` | `FORBIDDEN` | 403 | 로그인했지만 역할이 모자란다 | 없음 |
 | `SECURITY_006` | `TOKEN_VERIFICATION_UNAVAILABLE` | 503 | 토큰 검증 저장소 장애 (#4) · 검증 중 시스템 오류(`AuthenticationServiceException`) | 없음 |
 
 - 본문은 `Response.fail(code, message)` 봉투다 (`api-design-guide.md` §2-1). 서비스와 게이트웨이가 `SecurityErrorEnvelope` 로 같은 바이트를 쓴다.
-- 002 이외의 401 은 재발급으로 풀리지 않는다 — 프론트는 다시 로그인시킨다.
+- **프론트(BFF)는 재발급 여부를 코드로 가르지 않는다.** 401 이면 refresh 쿠키로 한 번 재발급하고 원 요청을 한 번 재시도한다.
+  재발급이 명시적으로 거절되면 로그인, 일시 장애면 쿠키를 둔 채 `BFF_002` 503 이다. 006(503)으로는 로그아웃시키지 않는다
+  ([frontend/docs/architecture.md](../../frontend/docs/architecture.md) §2 · §3, `api-design-guide.md` §2-1). 코드는 원인을 알리는 용도다(로그 · 모니터링 · 화면 문구).
 
 ### 4-1. 판정 규칙 (`SecurityErrorResolver`)
 
 - 예외 타입과 `OAuth2Error` 의 오류 코드로만 판정한다. **예외 메시지 문자열을 비교하지 않는다.**
-- 검증 위반이 **만료 하나뿐일 때만 002** 다. 만료에 다른 위반(aud 불일치 등)이 섞이면 003 — 재발급으로 풀리지 않는 토큰이다.
+- 검증 위반이 **만료 하나뿐일 때만 002** 다. 만료에 다른 위반(aud 불일치 등)이 섞이면 003 — 단순 만료가 아니라 잘못된 토큰이라는 원인을 가리지 않는다.
 - 만료 판정은 security-core 의 validator 가 오류 코드 `SECURITY_002` 로 남긴다. Nimbus 의 기본 claim 검증은 꺼 두었다
   (켜 두면 Nimbus 가 먼저 "Expired JWT" 문구의 예외를 던져 만료를 문자열로 가려내야 한다).
 - **#4 가 004 · 006 을 내는 방법** — 디코더 래퍼(서블릿 `JwtDecoder` · 리액티브 `ReactiveJwtDecoder`)나 `AuthenticationManager` 에서
   `new OAuth2AuthenticationException(new OAuth2Error(SecurityErrorCode.TOKEN_REVOKED.getCode()))` 를 던진다.
-  리졸버는 원인 사슬에 실려 온 코드 중 **004 · 006 만** 따르고 001 · 002 · 003 · 005 는 무시한다 — 만료가 아닌 토큰이 002 를 실어 재발급을 유도하지 못하게.
+  리졸버는 원인 사슬에 실려 온 코드 중 **004 · 006 만** 따르고 001 · 002 · 003 · 005 는 무시한다 — 만료가 아닌 토큰이 002 로 보고되어 원인이 가려지지 않게.
 - **validator 에 넣지 않는다.** validator 의 오류는 `JwtValidationException` 안에 들어가 003 이 된다.
 - 저장소 장애를 `JwtException`(Bad 아님)이나 `AuthenticationServiceException` 으로 던져도 006 이다. Spring 의 기본 실패 처리기는 이 예외를
   다시 던져 **봉투 없는 500** 을 만들기 때문에, 서블릿 Resource Server 는 다시 던지지 않는 처리기로 바꿔 두었다(`ResourceServerSecurityConfigurer`).
@@ -108,7 +110,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고(default-allow) 메서드의 `@PreAuthorize` 가 정한다. 비로그인 상품 조회 같은 API 가 있다 (아래 보완 규칙) |
 | `/actuator/**` | URL 단계에서 열린다. 웹 노출은 `health` 만 두거나 별도 management 포트(사설망)로 뺀다. **auth-service 는 `heapdump` 를 노출하지 않는다** — 힙에 개인키가 있다 |
 
-- **토큰을 보냈는데 틀리면 공개 API 여도 401 이다.** 틀린 토큰을 익명으로 취급하지 않는다. 프론트는 만료 토큰을 지우거나 재발급한 뒤 다시 보낸다.
+- **토큰을 보냈는데 틀리면 공개 API 여도 401 이다.** 틀린 토큰을 익명으로 취급하지 않는다. BFF 는 401 이면 재발급 후 한 번 재시도한다(§4).
 - 세션을 만들지 않는다(STATELESS). CSRF · 폼 로그인 · Basic · 로그아웃을 끈다. CORS 는 게이트웨이가 처리하므로 서비스에서 끈다.
 - 정규화되면 다른 경로가 되는 원문 경로(`..` · `%2e` · `;` · `//` · `%2f`)는 Spring Security 방화벽이 필터 체인 앞에서 **400(봉투 없음)** 으로 끊는다.
   게이트웨이도 같은 경로를 먼저 거절한다(`GATEWAY_004`). 서비스의 400 은 게이트웨이를 거치지 않은 요청에 대한 이중 방어다.
@@ -123,8 +125,10 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 **`/internal/**` 사설망 전제의 강제 수단**
 
 - 서비스 포트를 외부에 publish 하지 않는다. 운영은 네트워크 정책(보안 그룹 · NetworkPolicy)으로 서비스 간 통신만 허용한다.
-- 게이트웨이 라우트는 경로를 바꾸지 않는다 — `StripPrefix` · `RewritePath` 로 `/internal` 로 시작하는 경로가 만들어지지 않게 하고,
-  정규화한 경로가 `/internal` 로 시작하면 라우팅 전에 거부한다.
+- 게이트웨이(#3)가 막는 방식 — 정규화되지 않은 경로(`..` · `%2e` · `;` · `//` 등)는 `GatewayRequestGuardFilter` 가 라우팅 전에 `GATEWAY_004`(400)로 끊는다.
+  그 뒤로는 원문 경로와 정규화 경로가 같으므로, `/internal/**` 은 어느 라우트(`ServiceRoute`)에도 없어 `GATEWAY_001`(404)이 된다.
+- 그래서 규칙은 둘이다. 게이트웨이 라우트 predicate 는 `/internal` 을 포함할 수 있는 패턴(`/**` 같은 catch-all)을 쓰지 않는다.
+  라우트 필터로 경로를 바꾸지 않는다(`StripPrefix` · `RewritePath` 로 `/internal` 로 시작하는 경로가 만들어지지 않게). 명시적 `/internal` 거부 필터는 #4 에서 검토한다.
 - 결제·재고 상태를 바꾸는 internal API 가 생기기 전에 서비스 간 인증(공유 토큰 · mTLS · 서비스 토큰)을 정한다 — 후속 이슈.
 
 ### 5-2. 도메인 advice 와의 관계
