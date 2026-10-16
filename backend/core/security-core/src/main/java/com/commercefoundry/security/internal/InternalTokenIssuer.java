@@ -21,7 +21,7 @@ import java.util.UUID;
  *
  * <p><b>요청마다 새로 서명한다 — 캐시하지 않고, 401 을 받아도 다시 발급해 재시도하지 않는다.</b> HS256 서명은 마이크로초 단위라 캐시 이득이 없고,
  * 캐시가 없으면 만료 경계와 키 교체 직후의 낡은 토큰 문제가 생기지 않는다. {@code jti} 도 요청마다 다르다.
- * internal Feign 클라이언트는 {@code internal.client.InternalServiceTokenInterceptor} 로 이 발급기를 쓴다.
+ * internal Feign 클라이언트는 {@code internal.client.InternalServiceTokenCapability} 로 이 발급기를 쓴다.
  *
  * <p>Nimbus 서명기를 직접 쓴다 — 헤더에 위 두 값 말고 아무것도(특히 비밀에서 계산한 {@code kid}) 붙지 않게. 서명기는 스레드 안전하다.
  */
