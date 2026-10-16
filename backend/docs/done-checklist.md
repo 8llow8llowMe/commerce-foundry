@@ -44,7 +44,7 @@
 ## 5. 보안 / 운영 체크리스트
 
 - [ ] `adapter/in/web` · `adapter/in/admin` 의 모든 핸들러에 `@PreAuthorize` 가 있다 — 공개 API 는 `permitAll()`, 어드민 API 는 `hasRole('ADMIN')`
-- [ ] 서비스에 "익명 요청 → `isAuthenticated()` 엔드포인트가 401 · `SECURITY_001`" 스모크 테스트가 있다 (`security-guide.md` §5-3)
+- [ ] 서비스에 인가 스모크 `*SecuritySmokeTest`(`ResourceServerSmokeTestSupport` 상속)가 있다. `isAuthenticated()` 핸들러를 추가했다면 그 경로의 익명 401 · `SECURITY_001` 케이스를 더했다 (`security-guide.md` §5-3)
 - [ ] 리소스 소유 확인이 JWT memberId 기준이고, 타인 리소스는 404 다
 - [ ] 설정값이 하드코딩 대신 프로퍼티로 관리된다
 - [ ] 시크릿 키·사업자 정보가 커밋되지 않았다 (공개 저장소)

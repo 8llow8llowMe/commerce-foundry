@@ -108,14 +108,15 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | `/api/v1/admin/**` | URL 규칙으로 `ADMIN` 을 요구한다. 컨트롤러의 `@PreAuthorize("hasRole('ADMIN')")` 와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
 | `/internal/**` | JWT 없이 호출된다. **internal 컨트롤러에 `@PreAuthorize` 를 달지 않는다.** 서비스 포트가 **사설망에서만 닿는다는 전제**의 정책이다 — 게이트웨이가 라우팅하지 않고, 서비스 포트를 외부에 열지 않는다 (`architecture-guide.md` §6, 아래 강제 수단) |
 | 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고(default-allow) 메서드의 `@PreAuthorize` 가 정한다. 비로그인 상품 조회 같은 API 가 있다 (아래 보완 규칙) |
-| `/actuator/**` | URL 단계에서 열린다. 웹 노출은 `health` 만 두거나 별도 management 포트(사설망)로 뺀다. **auth-service 는 `heapdump` 를 노출하지 않는다** — 힙에 개인키가 있다 |
+| `/actuator/**` | `health`(하위 경로 포함)만 `permitAll` 이다. 웹에 노출된 다른 엔드포인트와 링크(`/actuator`)는 `denyAll` — 토큰 없으면 401(001), 로그인했으면 403(005). 노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — **노출 설정(`exposure.include: health`)이 1차, URL 규칙이 2차** 방어다. 경로는 Boot 의 `EndpointRequest` 로 잡아 management base-path 를 바꿔도 따라간다. **auth-service 는 `heapdump` 를 노출하지 않는다** — 힙에 개인키가 있다 |
+| Swagger (`/v3/api-docs/**` · `/swagger-ui/**`) | 명시 `permitAll` 을 두지 않는다. URL 단계는 default-allow 로 열려 있고, springdoc 스위치(기본 닫힘, local · dev 만 켬 — `bootstrap-conventions.md`)가 닫는다 |
 
 - **토큰을 보냈는데 틀리면 공개 API 여도 401 이다.** 틀린 토큰을 익명으로 취급하지 않는다. BFF 는 401 이면 재발급 후 한 번 재시도한다(§4).
 - 세션을 만들지 않는다(STATELESS). CSRF · 폼 로그인 · Basic · 로그아웃을 끈다. CORS 는 게이트웨이가 처리하므로 서비스에서 끈다.
 - 정규화되면 다른 경로가 되는 원문 경로(`..` · `%2e` · `;` · `//` · `%2f`)는 Spring Security 방화벽이 필터 체인 앞에서 **400(봉투 없음)** 으로 끊는다.
   게이트웨이도 같은 경로를 먼저 거절한다(`GATEWAY_004`). 서비스의 400 은 게이트웨이를 거치지 않은 요청에 대한 이중 방어다.
 - 대소문자가 다른 경로(`/API/v1/admin/x`)는 어느 컨트롤러에도 매핑되지 않아 404 다. 비예약 문자를 인코딩한 경로(`/api/v1/%61dmin/x`)는
-  URL 규칙과 MVC 가 같은 디코딩으로 보므로 어드민 규칙에 그대로 걸린다(CUSTOMER 403 · 무토큰 401). 둘 다 통합 테스트로 고정했다.
+  URL 규칙과 MVC 가 같은 디코딩으로 보므로 어드민 규칙에 그대로 걸린다(CUSTOMER 403 · 무토큰 401). 둘 다 security-core 통합 테스트와 서비스 인가 스모크(§5-3)로 고정했다.
 
 **default-allow 보완 규칙** — URL 단계가 열려 있으니 메서드 애노테이션이 빠지면 그대로 공개 API 가 된다.
 
@@ -146,13 +147,18 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 implementation project(':core:security-core')
 implementation 'org.springframework.boot:spring-boot-starter-security'
 implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+testImplementation testFixtures(project(':core:security-core'))   // 테스트 키 · 토큰 · 인가 스모크 (아래 "테스트 키")
 ```
 
 - security-core 는 서블릿 · Boot 보안 자동설정을 `compileOnly` 로만 둔다. 리액티브 게이트웨이에 서블릿 스택이 새지 않게 하려는 것이고,
   security-core 의 `verifyNoServletLeak` 태스크가 `check` 에서 이를 확인한다. 그래서 서블릿 서비스가 위 두 스타터를 직접 선언한다.
 - **구성 실패 모드** — `spring-boot-starter-security` 와 `ResourceServerSecurityConfigurer` import 를 **둘 다** 빠뜨리면 오류 없이 기동하고,
   `@PreAuthorize` 가 무시되어 모든 API 가 열린다(스타터만 있으면 Boot 기본 체인이 모든 요청을 막고, Configurer 만 있으면 spring-security-config 클래스가 없어 기동이 실패한다).
-  그래서 서비스마다 **"익명 요청 → `@PreAuthorize("isAuthenticated()")` 엔드포인트가 401 · `SECURITY_001`" 스모크 테스트**를 둔다.
+  그래서 서비스마다 **인가 스모크 `*SecuritySmokeTest extends ResourceServerSmokeTestSupport {}`**(security-core 테스트 픽스처)를 둔다.
+  서비스 컨트롤러에 기대지 않고 매핑 없는 경로(`/api/v1/admin/smoke` · `/api/v1/smoke`)로 URL 규칙과 토큰 필터를 본다 —
+  무토큰 어드민 401(001, `WWW-Authenticate: Bearer`) · CUSTOMER 403(005) · ADMIN 통과(404) · `%61` 인코딩 경로 401 · 403 · 정규화 우회 400 ·
+  대소문자 404 · 공개 경로의 틀린 토큰 003 · 만료 002 · 세션 없음. 004 · 006 은 디코더 장애를 흉내 내야 해 security-core 통합 테스트에만 둔다.
+  **`@PreAuthorize("isAuthenticated()")` 익명 401 · `SECURITY_001` 케이스는 첫 실제 핸들러가 생기는 이슈에서 그 경로로 서비스 테스트에 더한다 (#8 B PR · #4).**
 
 | 파일 | import |
 |------|--------|
@@ -182,6 +188,18 @@ security:
 | `issuer` · `audience` 가 비었다, `clock-skew` 가 범위 밖이다, TTL 이 0 이하다 | 해당 프로퍼티 |
 | (auth) `access-token-ttl` 이 1시간을 넘는다 | `security.jwt.issuance.access-token-ttl` · 이유(탈취 창 · 블랙리스트) |
 | (auth) 개인키가 `JWT_PUBLIC_KEY` 와 한 쌍이 아니다 | `JWT_PRIVATE_KEY` · `JWT_PUBLIC_KEY` (§6-3) |
+
+#### 테스트 키
+
+- 키를 커밋하지 않는다. security-core 테스트 픽스처(`src/testFixtures`)의 `TestKeys` 가 실행 중 RSA 2048 쌍을 만들고,
+  `SecurityTestPropertiesInitializer` 가 `@SpringBootTest` 컨텍스트에 `security.jwt.public-key`(현재 공개키) · `previous-public-key`(빈 값) ·
+  `issuance.private-key`(현재 개인키 — auth 가 발급기를 붙이는 #4 대비, 발급기를 import 하지 않으면 무해)를 넣는다. `application-test.yml` 에 키를 적지 않는다.
+- 초기화기는 픽스처의 `META-INF/spring.factories` 로 등록돼 픽스처를 받은 모듈의 `SpringApplication` 마다 돈다(Boot 4 에는 `context.initializer.classes` 프로퍼티가 없다).
+  속성 소스를 맨 앞에 두어 개발 PC 의 OS 환경변수 `JWT_PUBLIC_KEY` 보다 우선한다. 그래서 `@TestPropertySource` 로도 바꿀 수 없다 —
+  다른 키로 기동 실패를 보는 테스트는 `ApplicationContextRunner` 로 쓴다(이 초기화기가 돌지 않는다).
+- 토큰은 `TestTokens.issuer(Instant.now()).issueAccessToken(...)` 로 만든다 — 컨텍스트의 공개키와 한 쌍이다. 봉투 단언은 `SecurityEnvelopeAssertions` 다.
+- 픽스처는 `testImplementation testFixtures(...)` 로만 받는다 — `runtimeClasspath` 와 `bootJar` 에 들어가지 않는다. 픽스처의 서블릿 · MockMvc 의존은
+  `compileOnly` 라 리액티브 게이트웨이(#4)도 키 · 토큰 픽스처를 받을 수 있고, `verifyNoServletLeak` 가 `testFixturesRuntimeClasspath` 도 본다.
 
 ### 5-4. 알려진 예외 — 우리 봉투가 아닌 응답
 

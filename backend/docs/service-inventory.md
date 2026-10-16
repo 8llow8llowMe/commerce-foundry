@@ -9,13 +9,14 @@
 |------|------|------|------|
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
 | `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36) — JWT·ADMIN 은 #4·#6 | 라우팅(`api-design-guide.md` §1-2), JWT 검증, `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
-| `service/auth-service` | 8081 | 골격 (#36) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
-| `service/product-service` | 8082 | 골격 (#36) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제), 상품 이미지, 다국어 상품정보, 통화별 가격 |
-| `service/order-service` | 8083 | 골격 (#36) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
-| `service/payment-service` | 8084 | 골격 (#36) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
-| `service/delivery-service` | 8085 | 골격 (#36) | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
+| `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
+| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제), 상품 이미지, 다국어 상품정보, 통화별 가격 |
+| `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
+| `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
+| `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
 
 "골격" 은 실행·Eureka 등록·헬스 체크·Swagger 그룹까지 갖추고 도메인 코드는 없는 상태다 (`bootstrap-conventions.md`).
+"Resource Server" 는 JWT 검증 · `/api/v1/admin/**` ADMIN 규칙 · 보안 오류 봉투가 걸려 있고 인가 스모크가 도는 상태다 (`security-guide.md` §5).
 
 ## 2. 서비스 간 호출 (동기, Feign)
 
@@ -37,7 +38,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | `common-core` | 전부 |
 | `persistence-core` | auth · product · order · payment · delivery |
 | `redis-core` | auth(토큰·소셜 state) · order(멱등 키·장바구니 캐시 검토) · api-gateway(블랙리스트) |
-| `security-core` | auth(발급 · 검증) · 나머지 서비스(서블릿 Resource Server) · api-gateway(리액티브 검증기 · 오류 코드 — #4) |
+| `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 — #4) |
 | `storage-core` | product(상품 이미지) |
 | `shared-commerce` | product · order · payment · delivery |
 
