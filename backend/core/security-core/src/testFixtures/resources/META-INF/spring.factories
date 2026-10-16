@@ -1,0 +1,4 @@
+# security-core 테스트 픽스처 — 테스트 클래스패스에만 있다 (testImplementation testFixtures(project(':core:security-core'))).
+# @SpringBootTest 컨텍스트에 실행 중 만든 JWT 키를 넣는다 (security-guide.md §5-3 테스트 키)
+org.springframework.context.ApplicationContextInitializer=\
+com.commercefoundry.security.support.SecurityTestPropertiesInitializer

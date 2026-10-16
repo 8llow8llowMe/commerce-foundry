@@ -6,6 +6,7 @@ import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.token.AccessTokenDecoderFactory;
 import com.commercefoundry.security.token.JwtVerificationProperties;
 import java.time.Clock;
+import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -26,6 +27,9 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <ul>
  *   <li>세션을 만들지 않는다(STATELESS). CSRF · 폼 로그인 · Basic · 로그아웃 · CORS(게이트웨이 몫)를 끈다.</li>
+ *   <li>actuator 는 {@code health}(하위 경로 포함)만 열고, 웹에 노출된 다른 엔드포인트와 링크({@code /actuator})는 막는다(익명 001 · 로그인 005).
+ *       노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — 노출 설정이 1차, URL 규칙이 2차 방어다. management base-path 를 바꿔도 따라간다.
+ *       실행 모듈은 actuator 를 가진다는 전제다({@code backend/build.gradle} 이 실행 모듈마다 넣는다).</li>
  *   <li>{@code /api/v1/admin/**} 은 URL 규칙으로 ADMIN 을 요구한다. 컨트롤러의 {@code hasRole('ADMIN')} 과 이중이다.</li>
  *   <li>나머지 경로는 열어 두고 인증 필요 여부는 메서드의 {@code @PreAuthorize} 가 정한다 — 비로그인 상품 조회 같은 API 가 있다.
  *       {@code /internal/**} 은 JWT 없이 호출되므로 internal 컨트롤러에 {@code @PreAuthorize} 를 달지 않는다.</li>
@@ -38,6 +42,8 @@ import tools.jackson.databind.json.JsonMapper;
 public class ResourceServerSecurityConfigurer {
 
     public static final String ADMIN_PATH_PATTERN = "/api/v1/admin/**";
+    /** 익명으로 여는 유일한 actuator 엔드포인트. 상태만 낸다(구성 요소 · 상세는 숨김 기본값). */
+    public static final String HEALTH_ENDPOINT = "health";
 
     /** {@code JwtDecoder} 빈이 있으면 Boot 가 기본 사용자(생성 비밀번호)를 만들지 않는다. */
     @Bean
@@ -66,6 +72,8 @@ public class ResourceServerSecurityConfigurer {
             .logout(AbstractHttpConfigurer::disable)
             .requestCache(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(authorize -> authorize
+                .requestMatchers(EndpointRequest.to(HEALTH_ENDPOINT)).permitAll()
+                .requestMatchers(EndpointRequest.toAnyEndpoint().excluding(HEALTH_ENDPOINT)).denyAll()
                 .requestMatchers(ADMIN_PATH_PATTERN).hasRole(MemberRole.ADMIN.name())
                 .anyRequest().permitAll())
             .oauth2ResourceServer(resourceServer -> resourceServer
