@@ -33,7 +33,7 @@
 | `be-executor` | Opus | 쓰기 | Hexagonal 계층·Port/Adapter 실구현, compile/test 통과까지 |
 | `be-hexagonal-reviewer` | Opus | 읽기 전용 | 계층 흐름, Port/Adapter 경계, 고객/어드민 진입 분리 |
 | `be-db-reviewer` | Opus | 읽기 전용 | 엔티티·인덱스·쿼리·락·금액 컬럼 (N+1·초과 판매 우선) |
-| `be-security-reviewer` | Opus | 읽기 전용 | JWT, ADMIN 경로, 소유 확인(IDOR), 비밀정보·개인정보 |
+| `be-security-reviewer` | Opus | 읽기 전용 | JWT, ADMIN 경로, 소유 확인(IDOR), 서비스 간 인증(internal API · internal Feign 클라이언트), 비밀정보·개인정보 |
 | `be-payment-reviewer` | Opus | 읽기 전용 | 결제·주문·재고 정합성 — 실패·중복·지연 주입 표 |
 
 Leader 는 파일이 없다. **메인 세션이 맡는다** (`/backend-multi-agent`).
