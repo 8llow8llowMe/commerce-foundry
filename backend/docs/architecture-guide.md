@@ -175,6 +175,10 @@ Info → Presenter → Response
 - **Eureka(8761) · 서비스 포트 · 게이트웨이 → 서비스 평문 HTTP 는 사설망 전용이다.** 외부에는 게이트웨이 포트만 연다.
   Eureka 레지스트리는 인증이 없어 닿기만 하면 인스턴스를 등록·삭제할 수 있다. 운영 Eureka 인증은 배포 이슈 · #32 에서 정한다.
   로컬은 `service-discovery` 의 `local` 프로파일이 루프백(127.0.0.1)에만 묶는다.
+- 게이트웨이의 개발용 라우트(서비스 헬스 체크 · Swagger 문서, `api-design-guide.md` §1)는 local · dev 에서만 켠다 (`gateway.dev-routes.enabled`).
+  서비스마다 **정확한 경로만** 열고 하류 경로를 고정한다(`/actuator/health`, `/v3/api-docs/{customer|admin}`).
+  `/docs/{service-id}/**` 처럼 접두어만 떼는 라우트를 만들지 않는다 — `/internal/**` 에 닿고 어드민 경로 판정을 우회한다.
+  dev 게이트웨이를 외부에 열면 이 경로들이 인증 없이 보이므로 dev 는 접근 제한(IP 허용 목록 · VPN 등) 뒤에 둔다.
 - 카드번호 등 결제수단 정보는 **우리 서버를 지나가지 않는다** (PG 결제창/위젯이 받는다).
 
 ## 7. 내부 서비스 호출 기준
