@@ -1,7 +1,7 @@
 # Service Inventory
 
 > 서비스별 책임 · 상태 · 의존의 요약이다. 서비스 책임이 바뀌면 이 문서를 같은 PR 에서 갱신한다.
-> 포트는 확정했다(#3 · #36). 바꾸면 이 표와 모듈의 `application.yml`, 서비스의 `*ApplicationTests` 를 같이 고친다.
+> 포트는 확정했다(#3 · #36). 바꾸면 이 표와 모듈의 `application.yml`, 서비스의 `*ApplicationTests`, `local-run-guide.md` §5 를 같이 고친다.
 
 ## 1. 실행 모듈
 
@@ -46,6 +46,8 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 - PostgreSQL 한 인스턴스에 **서비스별 스키마**를 둔다 (`auth`, `product`, `orders`, `payment`, `delivery`).
   다른 서비스 스키마를 직접 조회하지 않는다 — 필요한 데이터는 내부 API 로 받는다.
 - 운영 규모가 커지면 인스턴스를 나눌 수 있게 스키마 간 FK·조인을 만들지 않는다.
+- 스키마 관리: 마이그레이션 도구 없음 — local · dev 는 `ddl-auto: update`, 운영은 `none` 이고 사용자가 DDL 을 직접 적용한다
+  (`coding-conventions.md` §9-8).
 
 ### 4-1. 기술 버전
 
@@ -71,4 +73,3 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
 | 오브젝트 스토리지 | S3 / Cloudflare R2 / NCP Object Storage | 상품 이미지 |
 | 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |
-| DB 마이그레이션 도구 | Flyway / Liquibase / 없음(`ddl-auto` 만). 지금은 기본 `validate`, local 만 `update` | 첫 엔티티 이슈(#4 · #8) **전에** 조율 세션이 정한다 |

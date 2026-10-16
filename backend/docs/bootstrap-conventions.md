@@ -60,12 +60,13 @@ public class PaymentServicePropertiesConfig {
 |------|---------|
 | `application.yml` | 포트, 서비스 이름, DB 플레이스홀더, 스키마, Eureka 주소, actuator, Snowflake 플레이스홀더, Swagger 기본값 |
 | `application-local.yml` | `backend/.env` import, `ddl-auto: update`, Snowflake 고정값, Swagger 열기 |
-| `application-dev.yml` | Swagger 열기. 값은 Vault 에서 환경변수로 받는다 (`secret-management.md`) |
+| `application-dev.yml` | `ddl-auto: update`, Swagger 열기. 값은 Vault 에서 환경변수로 받는다 (`secret-management.md`) |
 | `src/test/resources/application-test.yml` | 컨텍스트 로딩 테스트용 H2 · Eureka 끄기 (아래 "컨텍스트 로딩 테스트") |
 
 **기본값은 닫힌 쪽이다.** 프로파일이 빠진 채 배포돼도 열리거나 조용히 틀린 값으로 뜨지 않게, 여는 설정은 프로파일 yml 에만 둔다.
 
-- `ddl-auto` 는 `validate`, local 만 `update`. 마이그레이션 도구는 첫 엔티티 이슈 전에 정한다 (`service-inventory.md` §5).
+- `ddl-auto` 는 기본 `none`, local · dev 만 `update`. 운영은 애플리케이션이 스키마를 건드리지 않고 사람이 DDL 을 적용한다.
+  마이그레이션 도구는 쓰지 않는다 (`coding-conventions.md` §9-8).
 - 스키마는 `spring.jpa.properties.hibernate.default_schema` 로 서비스마다 지정한다. 다른 서비스 스키마를 직접 조회하지 않는다.
 - actuator 는 `health` 만 노출한다.
 - Snowflake 는 base 에 `${SNOWFLAKE_DATACENTER_ID}` · `${SNOWFLAKE_WORKER_ID}` 를 **기본값 없이** 둔다. 값이 빠지면 0/0 으로

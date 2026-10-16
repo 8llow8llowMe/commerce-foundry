@@ -48,7 +48,8 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 
 - `gradle.properties` 가 빌드 캐시를 켜 둔다. 테스트가 **실제로 돌았는지** 확인할 때는 `cleanTest` + `--no-build-cache` 를 붙인다.
   그냥 `test` 는 `UP-TO-DATE` · `FROM-CACHE` 로 건너뛰고도 성공으로 끝난다.
-- CI(`backend-ci`)는 실행된 테스트 건수를 세고, 0건이면 통과로 보지 않는다.
+- CI(`backend-ci`)는 **테스트가 있어야 하는 모듈마다**(core 가 아닌 실행 모듈 전부 + `src/test/java` 가 있는 모듈) 실제 실행 건수(건너뜀 제외)를 세고,
+  0건인 모듈이 있으면 실패시킨다. 로컬에서 같은 검사: `python ../.github/scripts/backend-test-count.py .`
 - 서비스(`service/*`)의 컨텍스트 로딩 테스트(`*ApplicationTests`)는 H2(PostgreSQL 모드) test 프로파일로 돈다. Docker 없이 로컬에서도 실행된다.
   락 · `timestamptz` · 인덱스처럼 엔진에 기대는 동작은 여기서 검증하지 않는다. 리포지토리 테스트는 Testcontainers(PostgreSQL)로 따로 두고
   CI 에서 돌린다 (`bootstrap-conventions.md` "컨텍스트 로딩 테스트").
@@ -56,7 +57,7 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 ## 5. 서비스 실행
 
 Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어 띄운다. Eureka · 게이트웨이는 DB · Redis 가 필요 없고,
-도메인 서비스는 PostgreSQL(§3)과 `backend/.env` 의 `DB_USERNAME` · `DB_PASSWORD`(§2)가 필요하다.
+도메인 서비스는 PostgreSQL(§3)과 `backend/.env` 의 `DB_URL` · `DB_USERNAME` · `DB_PASSWORD`(§2)가 필요하다.
 
 ```bash
 ./gradlew :cloud:service-discovery:bootRun    # Eureka 서버 — 8761 (local 은 127.0.0.1 에만 묶인다)
@@ -68,7 +69,7 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 ./gradlew :service:delivery-service:bootRun   # 8085
 ```
 
-- **`bootRun` 은 `SPRING_PROFILES_ACTIVE` 가 없으면 `local` 프로파일로 뜬다** (`backend/build.gradle`). 빌드한 jar 를 `java -jar` 로
+- **`bootRun` 은 `SPRING_PROFILES_ACTIVE` 가 없거나 비어 있으면 `local` 프로파일로 뜬다** (`backend/build.gradle`). 빌드한 jar 를 `java -jar` 로
   띄울 때는 적용되지 않는다 — 배포 환경이 프로파일을 빠뜨려도 로컬 설정으로 뜨지 않게 하려는 것이다.
 - 로컬 전용 설정은 모듈의 `application-local.yml` 에 있다.
 
@@ -85,7 +86,7 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 | `http://localhost:8000/actuator/health` | `"status":"UP"` (actuator 는 `health` 만 노출한다) |
 | `http://localhost:8000/health/{service-id}` (예: `/health/product-service`) | `"status":"UP"` — 게이트웨이 경유 서비스 헬스 체크. local · dev 만 |
 | `http://localhost:8000/swagger-ui.html` | Swagger UI. 상단 목록에서 서비스 · 고객 / 어드민 문서를 고른다. local · dev 만 |
-| `http://localhost:8000/api/v1/products` | 서비스가 떠 있지 않으면 `503` + `GATEWAY_002` 봉투 (`api-design-guide.md` §2-1) |
+| `http://localhost:8000/api/v1/products` | 서비스가 떠 있지 않으면 `503` + `GATEWAY_002` 봉투 (`api-design-guide.md` §2-1). 떠 있으면 아직 API 가 없어 서비스가 낸 `404` 를 그대로 중계한다 |
 
 - 게이트웨이가 읽는 `EUREKA_DEFAULT_ZONE` · `GATEWAY_CORS_ALLOWED_ORIGINS` 는 기본값(yml · `application-local.yml`)이 로컬 값과 같아
   `.env` 없이 뜬다. 바꿀 때는 환경변수로 넘긴다: `GATEWAY_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001 ./gradlew :cloud:api-gateway:bootRun`
@@ -106,9 +107,10 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 | `docker compose up` 이 `DB_USERNAME 을 채우세요` 로 멈춘다 | `.env` 가 없거나 칸이 비었다. §2 |
 | 6379 포트가 이미 쓰이고 있다 | 다른 프로젝트의 Redis 다. `.env` 의 `REDIS_PORT` 를 바꾼다 |
 | 새 스키마가 안 보인다 | init 스크립트는 첫 기동에만 돈다. `down -v` 후 다시 올린다 |
-| 서비스가 `'url' must start with "jdbc"` 로 안 뜬다 | `.env` 를 읽지 못했다. `backend/.env` 가 있는지, 작업 디렉터리가 모듈 디렉터리인지 본다 (§5) |
-| 서비스가 `Could not resolve placeholder 'SNOWFLAKE_DATACENTER_ID'` 로 안 뜬다 | local 이 아닌 프로파일로 떴다. `SPRING_PROFILES_ACTIVE` 를 확인한다 — dev · prod 는 Snowflake 값을 환경변수로 받는다 |
+| 서비스가 `'url' must start with "jdbc"` 로 안 뜬다 | `DB_URL` 을 받지 못했다. `.env` 는 local 프로파일에서만 읽는다 — `backend/.env` 가 있는지, 작업 디렉터리가 모듈 디렉터리인지(§5), `SPRING_PROFILES_ACTIVE` 가 local 인지 본다 |
+| 서비스가 `Failed to bind properties under 'snowflake.datacenter-id'` 로 안 뜬다 | local 이 아닌 프로파일로 떴고 `SNOWFLAKE_DATACENTER_ID` · `SNOWFLAKE_WORKER_ID` 가 없다. dev · prod 는 인스턴스마다 환경변수로 넣는다 (local 은 yml 고정값) |
 | 게이트웨이 경유 `/health/{service-id}` 가 `503` + `GATEWAY_002` | 서비스가 꺼져 있거나 아직 Eureka 에 등록되지 않았다(기동 후 30초쯤 걸린다) |
+| 게이트웨이 경유 `/health/{service-id}` 가 `503` + `{"status":"DOWN"}` | 서비스는 떠 있지만 DB 같은 구성 요소가 내려갔다. 헬스는 상세를 숨기므로 서비스 로그를 본다 |
 | 게이트웨이 경유 `/health/{service-id}` · `/swagger-ui.html` 이 `404` | local · dev 프로파일이 아니라 dev 라우트가 꺼져 있다 (`gateway.dev-routes.enabled`) |
-| Gradle 데몬·테스트 JVM 이 `EXCEPTION_ACCESS_VIOLATION`(jvm.dll)으로 죽는다 | 이 PC 의 JDK 21.0.4 문제로 보인다. `./gradlew --stop` 후 다시 돌리고, JDK 21 최신 패치로 올린다. 코드 원인이 아니다 |
+| Gradle 데몬·테스트 JVM 이 `EXCEPTION_ACCESS_VIOLATION`(jvm.dll)으로 죽는다 | JDK 21.0.4(Windows)에서 여러 번 관찰됐다(C1 컴파일러 스레드). `./gradlew --stop` 후 다시 돌리고, 재발하면 JDK 21 최신 패치로 올린다. 같은 코드가 재실행에서 통과해 코드 원인으로 보지 않는다 |
 | `./gradlew: Permission denied` | 실행 비트가 빠졌다. `git update-index --chmod=+x backend/gradlew` 로 고쳐 커밋한다 (`chmod` 로 덮지 않는다) |

@@ -8,7 +8,7 @@
 | 어드민 콘솔 | `/api/v1/admin/**` | `ADMIN` | 라우팅 + **ADMIN 역할 확인** | `adapter/in/admin` |
 | 서비스 간 | `/internal/v1/**` | 다른 서비스 | **라우팅하지 않는다** | `adapter/in/internal` |
 | 외부 콜백 | `/api/v1/payments/webhooks/**` 등 | PG·택배사 | 라우팅 (JWT 없음) | `adapter/in/webhook` |
-| 운영(개발용) | `/health/{service-id}`, `/docs/**`, Swagger UI | 개발자 | 게이트웨이 직접 · **local·dev 만** (`gateway.dev-routes.enabled`) | — (서비스 actuator · springdoc) |
+| 운영(개발용) | `/health/{service-id}`, `/docs/{service-id}/v3/api-docs/{customer\|admin}`, `/swagger-ui.html` | 개발자 | 정해진 경로만 서비스로 라우팅(`/actuator/health` · `/v3/api-docs/{group}` 으로 고정), Swagger UI 는 게이트웨이가 낸다 · **local·dev 만** (`gateway.dev-routes.enabled`) | — (서비스 actuator · springdoc) |
 
 ### 1-1. RESTful 원칙
 
