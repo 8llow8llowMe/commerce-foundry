@@ -37,6 +37,7 @@ import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
@@ -59,10 +60,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * 상품 영속성 어댑터를 실제 PostgreSQL 에 질의해 본다 — QueryDSL · 파생 쿼리는 컴파일로 검증되지 않는다 ({@code coding-conventions.md} §9-5).
  *
  * <p>스키마는 DDL 스냅숏을 init script 로 적용하고 {@code ddl-auto=validate} 로 엔티티와 대조한다. 컨텍스트가 뜨면 스냅숏과 매핑이 맞는 것이다.
- * Docker 가 없으면 건너뛴다 — CI 에서 돈다.
+ * Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다 ({@link EnabledWithDockerOrOnCi}).
  */
 @DataJpaTest
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
+@EnabledWithDockerOrOnCi
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = {
     "spring.jpa.hibernate.ddl-auto=validate",
