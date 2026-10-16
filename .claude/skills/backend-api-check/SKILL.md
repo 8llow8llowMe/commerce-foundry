@@ -58,6 +58,7 @@ git status --short -- backend
 
 6. **보안 · 멱등**
    - 인증 API 에 `@PreAuthorize`, member 식별은 JWT claim (요청 바디의 memberId 를 믿지 않는다)
+   - internal Controller 의 모든 메서드에 허용 호출자 `@PreAuthorize("hasAuthority('SERVICE_<호출 서비스>')")` 가 있다 (`security-guide.md` §9-4)
    - 주문 생성·결제·취소 같은 쓰기 API 가 멱등 키를 받는다
 
 7. **Swagger**
