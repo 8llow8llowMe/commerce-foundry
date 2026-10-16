@@ -59,6 +59,15 @@ subprojects { project ->
             // Caffeine 이 없으면 기본 캐시로 떨어지며 "운영에 쓰지 말라" WARN 을 남긴다
             implementation 'com.github.ben-manes.caffeine:caffeine'
         }
+
+        // 테스트 픽스처가 실행 jar 로 새는 회귀(testFixtures(...) 를 implementation 으로 선언)를 check 에서 막는다
+        def runtimeTestFixtures = configurations.named('runtimeClasspath').flatMap { it.incoming.artifacts.resolvedArtifacts }
+            .map { artifacts -> artifacts.collectMany { it.variant.capabilities*.name }.findAll { it.endsWith('-test-fixtures') }.unique().sort() }
+        def verifyNoTestFixturesAtRuntime = tasks.register('verifyNoTestFixturesAtRuntime') {
+            inputs.property('runtimeTestFixtures', runtimeTestFixtures)
+            doLast { if (!runtimeTestFixtures.get().isEmpty()) throw new GradleException("runtimeClasspath 에 테스트 픽스처가 있습니다: ${runtimeTestFixtures.get()}") }
+        }
+        tasks.named('check') { dependsOn verifyNoTestFixturesAtRuntime }
     }
 
     dependencyManagement {
