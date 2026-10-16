@@ -49,7 +49,7 @@
 
 - 검증은 Spring MVC 의 메서드 검증이 한다. 컨트롤러 클래스에 `@Validated` 를 달지 않는다 (`coding-conventions.md` §8-2).
 - 서비스 토큰 인증을 통과한 요청에서는 메서드 검증이 `@PreAuthorize`(허용 호출자)보다 먼저 돈다 — 허용되지 않은 호출자도 형식이 틀리면 400 이다.
-  인증 전 단계(#51 internal 체인)에서는 401 이 먼저다.
+  인증 전 단계(internal 체인 — `security-guide.md` §9)에서는 401 `SECURITY_007` 이 먼저다.
 - 처음 만든 곳: product-service `SkuInternalController` (#8). 코드 표는 `ProductValidationMessage` (`PRODUCT_103` 빈 목록 · `PRODUCT_104` 100개 초과 · `PRODUCT_105` 양수 아님).
 
 ## 2. 응답 구조
