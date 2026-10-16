@@ -32,10 +32,32 @@
 
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
 
+### 1-3. 서비스 간 벌크 조회 (`/internal/v1/**`)
+
+여러 건을 한 번에 읽는 internal API(예: `GET /internal/v1/skus?ids=1,2,3`)는 아래를 지킨다. 호출하는 쪽이 루프에서 단건 API 를 부르지 않게 하려는 것이다 (`coding-conventions.md` §9-6).
+
+| 규칙 | 내용 |
+|------|------|
+| 파라미터 | `ids` 하나. `ids=1,2,3` · `ids=1&ids=2` 모두 받는다. 컨트롤러 시그니처는 `@RequestParam @NotEmpty @Size(max = 100) List<@NotNull @Positive Long> ids` |
+| 상한 | **100개** — 중복을 포함한 원문 개수로 센다. 넘으면 400 |
+| 빈 목록 | `ids=` 는 400 이다. 호출하는 쪽은 조회할 것이 없으면 부르지 않는다 |
+| 원소 | 0 · 음수 · 빈 원소(`1,,2`)는 400, 숫자가 아니면 400 (`{DOMAIN}_198`), 파라미터가 없으면 400 (`{DOMAIN}_199`) |
+| 중복 | 첫 등장 순서로 한 번만 조회한다 |
+| 없는 아이디 | **응답에서 뺀다** — 404 로 전체를 실패시키지 않는다. 누락을 보고 거절할지는 호출한 쪽이 정한다 |
+| 순서 | 응답은 요청 순서(중복 제거 후)다. 호출한 쪽이 다시 맞추지 않아도 된다 |
+| 쿼리 | 받은 아이디로 `in` 절 벌크 조회만 한다. 첫 조회가 0건이면 이어지는 조회를 보내지 않는다 |
+
+- 검증은 Spring MVC 의 메서드 검증이 한다. 컨트롤러 클래스에 `@Validated` 를 달지 않는다 (`coding-conventions.md` §8-2).
+- 서비스 토큰 인증을 통과한 요청에서는 메서드 검증이 `@PreAuthorize`(허용 호출자)보다 먼저 돈다 — 허용되지 않은 호출자도 형식이 틀리면 400 이다.
+  인증 전 단계(#51 internal 체인)에서는 401 이 먼저다.
+- 처음 만든 곳: product-service `SkuInternalController` (#8). 코드 표는 `ProductValidationMessage` (`PRODUCT_103` 빈 목록 · `PRODUCT_104` 100개 초과 · `PRODUCT_105` 양수 아님).
+
 ## 2. 응답 구조
 
 - 공통 래퍼 `Response<T>` 를 쓰고, Controller 반환은 `ResponseEntity<Response<T>>` 로 통일한다.
 - 내부 `Info` 를 응답 타입으로 직접 노출하지 않는다. 응답 모양은 Presenter 가 마무리한다.
+- HTML 을 담는 응답 필드(상품 상세 설명 `descriptionHtml`)는 서버가 정제하지 않은 원문이다. 클라이언트가 렌더 전에 허용 목록으로 sanitize 한다.
+  쓰기 시점 서버 sanitize 는 상품 등록(#9) · 이관(#19)이 맡는다.
 
 ```java
 ProductDetailResponse response = productWebUseCase.getProduct(productId);
@@ -145,7 +167,10 @@ Info → Presenter → Response
 
 - 두 타입은 `persistence-core` 의 `SliceResponse` · `PageResponse` 다. Presenter 는 `map(...)` 으로 항목만 바꾼다.
 - **`page` 는 0 부터 센다** (Spring `Pageable` 과 같다). 화면의 "1페이지" 는 프론트가 +1 해서 보여준다.
-- 정렬은 enum `RequestParam`(`sortType`, `orderType`) 으로 받는다. Swagger 에 허용값이 드러난다.
+- 정렬은 enum `@RequestParam` 으로 받는다. Swagger 에 허용값이 드러난다.
+  - **기본은 `sortType` 단일 enum 이다.** 방향을 값에 담는다 — 상품 목록 `NEWEST`(기본) / `PRICE_ASC` / `PRICE_DESC`.
+  - 방향이 따로 의미를 갖는 경우(같은 기준을 사용자가 오름 · 내림으로 뒤집는 표 등)만 `orderType` 을 더한다.
+  - 모든 정렬은 마지막에 아이디 내림차순(최신순)으로 동률을 끊는다. 페이지 경계에서 같은 항목이 두 번 나오거나 빠지지 않게 한다.
 - `totalCount` 를 내리는 응답은 **자르기 전 개수**여야 한다. Presenter 가 `items.size()` 로 채우지 않는다.
 
 ## 5. 보안 API 설계
