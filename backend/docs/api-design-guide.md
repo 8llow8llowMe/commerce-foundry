@@ -72,7 +72,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `SECURITY_002` | 401 | 보낸 access 토큰이 만료됐다 |
 | `SECURITY_003` · `SECURITY_004` | 401 | 위조 · 형식 오류 · 다른 발급자 / 로그아웃된 토큰 |
 | `SECURITY_005` | 403 | 역할 부족 (CUSTOMER 가 어드민 API) |
-| `SECURITY_006` | 503 | 토큰 검증 저장소 장애 |
+| `SECURITY_006` | 503 | 토큰 검증 저장소 장애 · 검증 중 시스템 오류 |
 | `SECURITY_007` | 401 | 서비스 간 인증 실패 — internal API 전용이라 프론트는 받지 않는다 |
 
 | HTTP | 프론트(BFF) 처리 — 정본 [frontend/docs/architecture.md](../../frontend/docs/architecture.md) §2 · §3 |

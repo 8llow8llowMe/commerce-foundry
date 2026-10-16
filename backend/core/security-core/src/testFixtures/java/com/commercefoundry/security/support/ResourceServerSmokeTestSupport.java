@@ -60,7 +60,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
  *   <li>서비스 컨트롤러에 기대지 않는다 — 어느 서비스에도 없는 경로({@value #ADMIN_PATH} · {@value #PUBLIC_PATH})로 URL 규칙과 토큰 필터만 본다.
  *       규칙을 통과하면 매핑이 없어 404 다. 대소문자 우회는 컨트롤러가 있어야 의미가 있어 security-core 통합 테스트에 두고,
  *       여기서는 서비스 MVC 의 경로 매칭이 URL 규칙과 같은 대소문자 규칙인지 본다.</li>
- *   <li>{@code @PreAuthorize("isAuthenticated()")} 의 익명 401 은 첫 실제 핸들러가 생기는 이슈에서 서비스의 {@code *SecuritySmokeTest} 에
+ *   <li>{@code @PreAuthorize("isAuthenticated()")} 의 익명 401 은 #4 또는 서비스에 첫 {@code isAuthenticated()} 핸들러가 생기는 이슈에서 서비스의 {@code *SecuritySmokeTest} 에
  *       메서드로 더한다 — {@link #perform} · {@link #bearer} · {@link SecurityEnvelopeAssertions} 를 쓰고 같은 컨텍스트를 공유한다.</li>
  *   <li>004 · 006 은 디코더 장애를 흉내 내야 해 security-core 통합 테스트에만 둔다.</li>
  *   <li>서비스 간 인증은 테스트 전용 internal 핸들러({@link InternalSecuritySmokeController#PATH}, 허용 호출자 고정)로 본다 — 토큰 없음 · 사용자 access 토큰 ·

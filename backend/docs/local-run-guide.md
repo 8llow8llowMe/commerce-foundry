@@ -132,7 +132,8 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 | 서비스가 `security.jwt.public-key(환경변수 JWT_PUBLIC_KEY)` 로 시작하는 메시지로 뜨지 않는다 | 공개키가 비었거나 형식이 틀렸다. `BEGIN PUBLIC KEY` 공개키의 본문 한 줄을 넣는다 — 개인키 · PKCS#1 · 2048비트 미만은 받지 않는다 (`security-guide.md` §6) |
 | auth 가 `JWT_PRIVATE_KEY 와 JWT_PUBLIC_KEY 가 한 쌍이 아닙니다` 로 뜨지 않는다 | 두 값이 다른 키 쌍에서 왔다. 같은 `jwt-private.pem` 에서 만든 공개키를 넣는다 (`security-guide.md` §6-3) |
 | 서비스가 `security.internal.secret(환경변수 INTERNAL_JWT_SECRET)` 로 시작하는 메시지로 뜨지 않는다 | 서비스 토큰 비밀이 비었거나 base64 32바이트가 아니다. `openssl rand -base64 32` 결과를 넣는다 (§2, `security-guide.md` §9-6) |
-| `bootTestRun` 으로 띄운 서비스가 `.env` 키로 만든 토큰을 401(`SECURITY_003`)로 거부한다 | `bootTestRun` 은 테스트 클래스패스로 뜬다. security-core 테스트 픽스처의 초기화기가 `.env` 의 공개키를 실행 중 만든 테스트 키로 덮는다. `bootTestRun` 을 쓰지 않고 `bootRun` 으로 띄운다 (`security-guide.md` §5-3 테스트 키) |
+| 서비스 간 호출이 가끔 401(`SECURITY_007`)로 거부된다 | 서버 시계가 어긋났다. 받는 쪽은 `iat` 가 30초 넘게 미래거나 만료가 30초 넘게 지난 토큰을 거부한다 — 서버 시계(NTP) 동기화를 확인한다 (`security-guide.md` §9-2) |
+| `bootTestRun` 으로 띄운 서비스가 `.env` 키로 만든 토큰을 401(`SECURITY_003`)로 거부한다 | `bootTestRun` 은 테스트 클래스패스로 뜬다. security-core 테스트 픽스처의 초기화기가 `.env` 의 공개키를 실행 중 만든 테스트 키로 덮는다. 서비스끼리 internal 호출도 JVM 마다 다른 난수 비밀(`INTERNAL_JWT_SECRET`)로 덮여 401(`SECURITY_007`)로 거부된다. `bootTestRun` 을 쓰지 않고 `bootRun` 으로 띄운다 (`security-guide.md` §5-3 테스트 키) |
 | 새 스키마가 안 보인다 | init 스크립트는 첫 기동에만 돈다. `down -v` 후 다시 올린다 |
 | 서비스가 `'url' must start with "jdbc"` 로 안 뜬다 | `DB_URL` 을 받지 못했다. `.env` 는 local 프로파일에서만 읽는다 — `backend/.env` 가 있는지, 작업 디렉터리가 모듈 디렉터리인지(§5), `SPRING_PROFILES_ACTIVE` 가 local 인지 본다 |
 | 서비스가 `Failed to bind properties under 'snowflake.datacenter-id'` 로 안 뜬다 | local 이 아닌 프로파일로 떴고 `SNOWFLAKE_DATACENTER_ID` · `SNOWFLAKE_WORKER_ID` 가 없다. dev · prod 는 인스턴스마다 환경변수로 넣는다 (local 은 yml 고정값) |
