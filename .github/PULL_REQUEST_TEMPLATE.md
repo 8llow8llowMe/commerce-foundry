@@ -42,7 +42,12 @@
 ## 운영 DDL (엔티티를 바꾼 경우만)
 
 ```sql
--- local·dev 에서 ddl-auto: update 가 만든 결과로 뽑는다 (pg_dump --schema-only -t <schema>.<table>)
+-- Hibernate 가 만든 DDL — local·dev update 결과(pg_dump --schema-only -t <schema>.<table>) 또는 *SchemaSnapshotTest 스냅숏, create schema 줄 제외
+-- backend/docs/coding-conventions.md §9-8
+set client_encoding = 'UTF8';
+begin;
+
+commit;
 ```
 
 ## 참고 사항
