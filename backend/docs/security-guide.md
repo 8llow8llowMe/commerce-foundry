@@ -111,17 +111,21 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | `/actuator/**` | `health`(하위 경로 포함)만 `permitAll` 이다. 웹에 노출된 다른 엔드포인트와 링크(`/actuator`)는 `denyAll` — 토큰 없으면 401(001), 로그인했으면 403(005). 노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — **노출 설정(`exposure.include: health`)이 1차, URL 규칙이 2차** 방어다. 경로는 Boot 의 `EndpointRequest` 로 잡아 management base-path 를 바꿔도 따라간다. **auth-service 는 `heapdump` 를 노출하지 않는다** — 힙에 개인키가 있다 |
 | Swagger (`/v3/api-docs/**` · `/swagger-ui/**`) | 명시 `permitAll` 을 두지 않는다. URL 단계는 default-allow 로 열려 있고, springdoc 스위치(기본 닫힘, local · dev 만 켬 — `bootstrap-conventions.md`)가 닫는다 |
 
+- health 는 익명에 열려 있으므로 `management.endpoint.health.show-details` · `show-components` 는 기본값 `never` 를 유지한다.
+  상세가 필요하면 management 포트를 분리하고 roles 로 좁힌다. **management 포트 분리는 검증하지 않았다** — 분리할 때 security-core 에
+  RANDOM_PORT + `management.server.port=0` 통합 테스트를 더해 actuator 규칙이 분리된 포트에서도 걸리는지 확인한다.
 - **토큰을 보냈는데 틀리면 공개 API 여도 401 이다.** 틀린 토큰을 익명으로 취급하지 않는다. BFF 는 401 이면 재발급 후 한 번 재시도한다(§4).
 - 세션을 만들지 않는다(STATELESS). CSRF · 폼 로그인 · Basic · 로그아웃을 끈다. CORS 는 게이트웨이가 처리하므로 서비스에서 끈다.
 - 정규화되면 다른 경로가 되는 원문 경로(`..` · `%2e` · `;` · `//` · `%2f`)는 Spring Security 방화벽이 필터 체인 앞에서 **400(봉투 없음)** 으로 끊는다.
   게이트웨이도 같은 경로를 먼저 거절한다(`GATEWAY_004`). 서비스의 400 은 게이트웨이를 거치지 않은 요청에 대한 이중 방어다.
 - 대소문자가 다른 경로(`/API/v1/admin/x`)는 어느 컨트롤러에도 매핑되지 않아 404 다. 비예약 문자를 인코딩한 경로(`/api/v1/%61dmin/x`)는
-  URL 규칙과 MVC 가 같은 디코딩으로 보므로 어드민 규칙에 그대로 걸린다(CUSTOMER 403 · 무토큰 401). 둘 다 security-core 통합 테스트와 서비스 인가 스모크(§5-3)로 고정했다.
+  URL 규칙과 MVC 가 같은 디코딩으로 보므로 어드민 규칙에 그대로 걸린다(CUSTOMER 403 · 무토큰 401). 둘 다 컨트롤러가 있는 security-core 통합 테스트로 고정했다.
+  서비스 인가 스모크(§5-3)는 인코딩 경로가 규칙에 걸리는지와, 서비스 MVC 의 경로 매칭이 URL 규칙과 같은 대소문자 규칙(`PathPatternParser`, 대소문자 구분)인지 본다.
 
 **default-allow 보완 규칙** — URL 단계가 열려 있으니 메서드 애노테이션이 빠지면 그대로 공개 API 가 된다.
 
 - `adapter/in/web` · `adapter/in/admin` 의 **모든 핸들러 메서드에 `@PreAuthorize` 를 단다.** 공개 API 도 `@PreAuthorize("permitAll()")` 로 적어
-  빠뜨린 메서드가 리뷰에서 보이게 한다. 로그인 필요는 `isAuthenticated()`, 어드민은 `hasRole('ADMIN')` 이다. ArchUnit 강제는 후속 이슈에서 한다.
+  빠뜨린 메서드가 리뷰에서 보이게 한다. 로그인 필요는 `isAuthenticated()`, 어드민은 `hasRole('ADMIN')` 이다. ArchUnit 강제는 #42 에서 한다.
 
 **`/internal/**` 사설망 전제의 강제 수단**
 
@@ -157,8 +161,13 @@ testImplementation testFixtures(project(':core:security-core'))   // 테스트 �
   그래서 서비스마다 **인가 스모크 `*SecuritySmokeTest extends ResourceServerSmokeTestSupport {}`**(security-core 테스트 픽스처)를 둔다.
   서비스 컨트롤러에 기대지 않고 매핑 없는 경로(`/api/v1/admin/smoke` · `/api/v1/smoke`)로 URL 규칙과 토큰 필터를 본다 —
   무토큰 어드민 401(001, `WWW-Authenticate: Bearer`) · CUSTOMER 403(005) · ADMIN 통과(404) · `%61` 인코딩 경로 401 · 403 · 정규화 우회 400 ·
-  대소문자 404 · 공개 경로의 틀린 토큰 003 · 만료 002 · 세션 없음. 004 · 006 은 디코더 장애를 흉내 내야 해 security-core 통합 테스트에만 둔다.
-  **`@PreAuthorize("isAuthenticated()")` 익명 401 · `SECURITY_001` 케이스는 첫 실제 핸들러가 생기는 이슈에서 그 경로로 서비스 테스트에 더한다 (#8 B PR · #4).**
+  MVC 경로 매칭의 대소문자 구분 · 공개 경로의 틀린 토큰 003 · 만료 002 · 세션 없음. 구성도 본다 — actuator 웹 노출이 정확히 `health` 하나(바인딩된 최종 값),
+  `application.yml` 원문의 `${JWT_PUBLIC_KEY}` · `${JWT_PUBLIC_KEY_PREVIOUS:}`(테스트 키가 실제 값을 가리므로 원문을 본다), 발급기(`JwtIssuer`) 빈은
+  발급하는 서비스에만(`issuerExpected()` — #4 에서 auth 만 `true`). 004 · 006 은 디코더 장애를 흉내 내야 해 security-core 통합 테스트에만 둔다.
+  **`@PreAuthorize("isAuthenticated()")` 익명 401 · `SECURITY_001` 케이스는 첫 실제 핸들러가 생기는 이슈(#8 B PR · #4)에서 서비스의 `*SecuritySmokeTest` 에
+  메서드로 더한다** — `perform` · `bearer` · `SecurityEnvelopeAssertions.assertEnvelope` 를 쓰고 같은 컨텍스트를 공유한다.
+  `@WebMvcTest` 같은 슬라이스로 쓸 때는 `*BeansConfig` 가 빠지므로 `ResourceServerSecurityConfigurer` · `JwtVerificationPropertiesConfig` 를 `@Import` 한다
+  (안 하면 Boot 기본 체인이 Basic 401 을 내서 우리 봉투를 보지 못한다).
 
 | 파일 | import |
 |------|--------|
@@ -197,6 +206,7 @@ security:
 - 초기화기는 픽스처의 `META-INF/spring.factories` 로 등록돼 픽스처를 받은 모듈의 `SpringApplication` 마다 돈다(Boot 4 에는 `context.initializer.classes` 프로퍼티가 없다).
   속성 소스를 맨 앞에 두어 개발 PC 의 OS 환경변수 `JWT_PUBLIC_KEY` 보다 우선한다. 그래서 `@TestPropertySource` 로도 바꿀 수 없다 —
   다른 키로 기동 실패를 보는 테스트는 `ApplicationContextRunner` 로 쓴다(이 초기화기가 돌지 않는다).
+- 테스트 클래스패스로 앱을 띄우는 `bootTestRun` 에서도 이 초기화기가 돌아 `.env` 의 키를 테스트 키로 덮는다. 로컬 실행은 `bootRun` 만 쓴다 (`local-run-guide.md` §6).
 - 토큰은 `TestTokens.issuer(Instant.now()).issueAccessToken(...)` 로 만든다 — 컨텍스트의 공개키와 한 쌍이다. 봉투 단언은 `SecurityEnvelopeAssertions` 다.
 - 픽스처는 `testImplementation testFixtures(...)` 로만 받는다 — `runtimeClasspath` 와 `bootJar` 에 들어가지 않는다. 픽스처의 서블릿 · MockMvc 의존은
   `compileOnly` 라 리액티브 게이트웨이(#4)도 키 · 토큰 픽스처를 받을 수 있고, `verifyNoServletLeak` 가 `testFixturesRuntimeClasspath` 도 본다.
