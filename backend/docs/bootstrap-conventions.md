@@ -30,12 +30,14 @@ public class ProductServiceApplication {
 | `*FeaturesConfig` | JPA Auditing(`BaseEntity` 시각), Scheduling, Async 같은 기능 스위치 |
 | `*SwaggerConfig` | 서비스 Swagger 그룹 (고객 / 어드민 그룹 분리) |
 
+- `@Import` 목록은 **단순 클래스명 알파벳순, 한 줄에 하나**다. 이슈마다 한 줄을 끼워 넣어도 다른 줄이 움직이지 않아 PR 끼리 충돌이 적다.
+
 ```java
 @Configuration
 @Import({
-    SwaggerPropertiesConfig.class,
+    JwtVerificationPropertiesConfig.class,
     SnowflakePropertiesConfig.class,
-    JwtVerificationPropertiesConfig.class
+    SwaggerPropertiesConfig.class
 })
 @EnableConfigurationProperties({StoreProperties.class, TossPaymentsProperties.class})
 public class PaymentServicePropertiesConfig {
@@ -58,7 +60,7 @@ public class PaymentServicePropertiesConfig {
 
 | 파일 | 담는 것 |
 |------|---------|
-| `application.yml` | 포트, 서비스 이름, DB 플레이스홀더, 스키마, Eureka 주소, actuator, Snowflake 플레이스홀더, Swagger 기본값 |
+| `application.yml` | 포트, 서비스 이름, DB 플레이스홀더, 스키마, Eureka 주소, actuator, Snowflake 플레이스홀더, `security.jwt.*` 플레이스홀더(`${JWT_PUBLIC_KEY}` · `${JWT_PUBLIC_KEY_PREVIOUS:}`), Swagger 기본값 |
 | `application-local.yml` | `backend/.env` import, `ddl-auto: update`, Snowflake 고정값, Swagger 열기 |
 | `application-dev.yml` | `ddl-auto: update`, Swagger 열기. 값은 Vault 에서 환경변수로 받는다 (`secret-management.md`) |
 | `src/test/resources/application-test.yml` | 컨텍스트 로딩 테스트용 H2 · Eureka 끄기 (아래 "컨텍스트 로딩 테스트") |
@@ -107,6 +109,22 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
 - 새 서비스를 더하면 게이트웨이의 dev 라우트(`GatewayDevRouteConfig` 는 `ServiceRoute` 를 따른다)와 Swagger UI 목록
   (`api-gateway` 의 `application.yml` `springdoc.swagger-ui.urls`)도 같이 늘린다. `GatewayDevRouteTest` 가 어긋나면 잡는다.
 
+## 보안 스모크 테스트
+
+서비스마다 인가 스모크 하나를 한 줄로 둔다. 케이스와 이유는 `security-guide.md` §5-3 "구성 실패 모드" 다.
+
+```java
+class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
+}
+```
+
+- `ResourceServerSmokeTestSupport`(security-core 테스트 픽스처)의 애노테이션(`@SpringBootTest` · `@ActiveProfiles("test")` · `@AutoConfigureMockMvc`)은
+  `*ApplicationTests` 와 **정확히 같다.** 그래서 컨텍스트 캐시를 같이 써 서비스 컨텍스트를 한 번만 띄운다. 한쪽 애노테이션을 바꾸면 다른 쪽도 바꾼다.
+- JWT 키는 픽스처의 초기화기가 실행 중 만든 키로 넣는다. `application-test.yml` 에 적지 않는다 (`security-guide.md` §5-3 "테스트 키").
+- `*ApplicationTests` 의 "다른 actuator 경로 404" 단언은 그대로 둔다. 노출하지 않은 엔드포인트는 보안 규칙에 걸리지 않아 404 이고,
+  누가 노출을 넓히면 이 단언이 먼저 깨진다 — 노출 설정이 1차, URL 규칙(노출된 health 외 `denyAll`)이 2차 방어다.
+- `@PreAuthorize("isAuthenticated()")` 핸들러가 처음 생기는 이슈에서 그 경로의 익명 401 · `SECURITY_001` 케이스를 서비스 테스트에 더한다.
+
 ## 보안 (서블릿 서비스 전부)
 
 security-core 는 서블릿·Boot 보안 자동설정을 끌고 오지 않는다(게이트웨이가 리액티브라서). 서비스 `build.gradle` 이 직접 선언한다.
@@ -115,6 +133,7 @@ security-core 는 서블릿·Boot 보안 자동설정을 끌고 오지 않는다
 implementation project(':core:security-core')
 implementation 'org.springframework.boot:spring-boot-starter-security'
 implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+testImplementation testFixtures(project(':core:security-core'))   // 테스트 키 · 토큰 · 인가 스모크
 ```
 
 - `*BeansConfig` 가 `ResourceServerSecurityConfigurer` 를, `*PropertiesConfig` 가 `JwtVerificationPropertiesConfig` 를 `@Import` 한다.
