@@ -38,7 +38,7 @@ public ProductListInfo searchProducts(
 | Controller | `*WebController` · `*AdminController` · `*InternalController` · `*WebhookController` |
 | UseCase | `*WebUseCase` · `*AdminUseCase` · `*InternalUseCase` |
 | Facade | `*WebFacade` · `*AdminFacade` · `*InternalFacade` |
-| Processor / Presenter | `*Processor` / `*Presenter` (어드민 응답은 `*AdminPresenter`) |
+| Processor / Presenter | `*Processor` / `*Presenter` (고객 응답은 `*WebPresenter`, 어드민 응답은 `*AdminPresenter`, 서비스 간 응답은 `*InternalPresenter`) |
 | Feign interface | `*Client` |
 | 조회 결과 / 조건 | `*QueryResult` / `*Criteria` · `*Query` |
 
@@ -154,6 +154,10 @@ public final class ProductValidationMessage {
   문자열을 DTO 에 직접 적으면 오타가 조용히 폴백 코드로 샌다.
 - 핸들러는 `common-core` 의 `ValidationErrorSupport` 에 위임한다. **핸들러가 없으면 Spring 기본 400 이
   `Response` 봉투 없이 나가 프론트 파서가 깨진다.**
+- `@RequestParam` · `@PathVariable` 의 제약은 Spring MVC 의 메서드 검증이 `HandlerMethodValidationException` 으로 낸다.
+  **컨트롤러 클래스에 `@Validated` 를 달지 않는다** — 달면 AOP 검증으로 바뀌어 `ConstraintViolationException` 이 나고,
+  도메인 핸들러가 받지 않으면 봉투 없는 500 이 된다. 필수 파라미터 누락(`MissingServletRequestParameterException`)은
+  `ValidationErrorSupport.toMissingParameterResponse(exception.getParameterName(), {DOMAIN}_199)` 로 답한다.
 - 한 필드의 여러 오류는 순서를 고정한다: 필드 선언 순서 → 필수 → 길이 → 범위 → 형식.
 - 컬렉션 원소는 `@NotNull` 과 값 제약을 쌍으로 건다 — `List<@Positive Long>` 만 걸면 `[null]` 이 통과한다.
 
@@ -396,6 +400,7 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
 
 - 응답에서 enum 은 raw 문자열 대신 `{code, name, description}` metadata 객체로 내린다.
 - enum 의 UI 표시명은 `displayName`, 설명은 `description` 필드로 둔다.
+- 예외: 화면이 분기에만 쓰고 표시하지 않는 제어 코드(예: 맞춤 제작 입력 형식 `inputType` — `NUMBER` · `TEXT`)는 문자열 + `@Schema(allowableValues)` 로 내릴 수 있다.
 
 ```json
 { "orderStatus": { "code": "PREPARING", "name": "상품 준비중", "description": "결제가 완료되어 출고를 준비하고 있습니다." } }

@@ -24,6 +24,8 @@
 - 사업자 정보는 화면에 공개되는 값이지만 **고객사마다 다르고 실정보**라서 시크릿과 같이 다룬다.
   템플릿 저장소에 MOKOYURI 의 값이 박히면 다른 고객사 배포에 그대로 따라간다.
 - 정산 계좌는 우리 시스템이 다루지 않는다 (PG 상점관리자에서 고객사가 관리).
+- `store.features.*` 같은 고객사별 기능 플래그는 비밀이 아니다 — 기본값은 yml, 고객사별 값은 환경변수(배포 설정, Vault 등록 불필요)로 넣는다.
+  `.env.example` 에 이름이 있지만 Vault 키는 아니다.
 - JWT 키 만들기 · 환경변수 한 줄 변환 · 교체 순서는 [security-guide.md](security-guide.md) §6 이 정본이다.
 - 서비스 토큰 비밀(`INTERNAL_JWT_SECRET`)은 `openssl rand -base64 32` 로 만들고 서비스 5종에 **같은 값**을 넣는다. 게이트웨이에는 넣지 않는다.
   교체는 `INTERNAL_JWT_SECRET_PREVIOUS` 로 3단계를 밟는다 — 정본은 [security-guide.md](security-guide.md) §9-6 · §9-7.

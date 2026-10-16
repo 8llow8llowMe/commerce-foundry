@@ -60,7 +60,10 @@ com.commercefoundry
   |  |  |  |- dto/{request,response,item}
   |  |  |  \- presenter
   |  |  |- in/internal          서비스 간 전용 — /internal/v1/** (게이트웨이가 라우팅하지 않는다)
-  |  |  |  \- controller
+  |  |  |  |- controller
+  |  |  |  |- dto/{request,response,item}
+  |  |  |  \- presenter
+  |  |  |- in/support           진입 adapter 들이 같이 쓰는 변환 함수 (예: Money → MoneyItem). DTO 는 두지 않는다
   |  |  |- in/webhook           외부 시스템 콜백 — PG 웹훅 등 (payment-service)
   |  |  |- in/scheduler         시각이 부르는 진입점 (@Scheduled — 재고 선점 만료, 미결제 주문 정리 등)
   |  |  \- out
@@ -92,10 +95,11 @@ com.commercefoundry
 ```
 
 - 예외 3종 세트 구성은 `coding-conventions.md` §8 을 따른다.
-- **고객 API 와 어드민 API 는 진입 패키지(`in/web` / `in/admin`)부터 나눈다.** 같은 상품이라도
-  고객 응답에는 원가·재고 수량·내부 메모가 없고, 어드민 응답에는 있다. DTO 를 공유하면 언젠가
-  어드민 필드가 고객 응답으로 샌다.
-- Processor·Port·Domain 은 고객/어드민이 **공유한다.** 나누는 것은 진입·응답 모양까지다.
+- **고객 · 어드민 · 서비스 간 API 는 진입 패키지(`in/web` / `in/admin` / `in/internal`)부터 나누고 DTO 를 공유하지 않는다.**
+  같은 상품이라도 고객 응답에는 원가·재고 수량·내부 메모가 없고, 어드민 응답에는 있다.
+  서비스 간 SKU 조회는 숨긴 상품의 SKU 행과 `purchasable` 을 내리는데, 이것이 고객 응답에 나가면 안 된다.
+  DTO 를 공유하면 언젠가 한쪽 필드가 다른 응답으로 샌다.
+- Processor·Port·Domain 은 고객/어드민/서비스 간이 **공유한다.** 나누는 것은 진입·응답 모양까지다.
 
 ## 3. 계층 책임
 
@@ -106,7 +110,7 @@ Info → Presenter → Response
 
 ### Controller
 
-- `*WebUseCase` / `*AdminUseCase` 만 호출한다.
+- `*WebUseCase` / `*AdminUseCase` / `*InternalUseCase` 만 호출한다.
 - 요청 바인딩, 인증 주체 해석, 응답 래핑까지만 담당한다.
 - 응답은 `ResponseEntity<Response<T>>` 를 사용한다.
 
@@ -133,17 +137,34 @@ Info → Presenter → Response
 ### Presenter
 
 - `Info → Response`, `Info → Item` 변환만 담당한다. **식별자 `long → String` 변환 경계다.**
+- 금액 `Money → MoneyItem`, enum → metadata(`toMetadata()`) 변환도 Presenter 경계다. Processor · Info 는 `Money` · enum 그대로 둔다.
 
 ### Port / Adapter
 
 - `application/port/out` 은 외부 시스템에 대한 계약만 노출한다.
 - `adapter/out/*` 는 JPA, Redis, PG, 택배사, 내부 서비스 호출의 세부를 숨긴다.
 - `application` 은 `adapter` 구현 타입에 의존하지 않는다. 단 아래 셋은 **문서화된 예외**다.
-  - `port/in`(`*WebUseCase`·`*AdminUseCase`)의 반환 타입은 `adapter/in/*/dto` 의 Response DTO 를 쓴다.
+  - `port/in`(`*WebUseCase`·`*AdminUseCase`·`*InternalUseCase`)의 반환 타입은 `adapter/in/*/dto` 의 Response DTO 를 쓴다.
   - Facade 는 Presenter 를 주입받아 조합한다 (Facade 의 책임 자체가 조합이다).
   - `application/mapper` 의 MapStruct 매퍼는 Entity ↔ Domain 변환이므로 Entity 를 참조한다.
 - **out-adapter 타입(PG 응답 DTO, Feign 래퍼)이 application 으로 새는 것은 금지**한다.
   out-port 반환에는 `QueryResult` 또는 domain model 을 쓰고, `Info` 를 노출하지 않는다.
+
+### 컨텍스트 간 의존 규칙 (같은 서비스 안)
+
+한 서비스에 컨텍스트가 여럿이면(product-service 의 `category` · `product`) 다른 컨텍스트에서 쓸 수 있는 것은 **둘뿐이다** (허용 목록).
+
+1. **그 컨텍스트의 Processor.** Facade 만 주입한다 — Processor 끼리는 컨텍스트를 넘어 주입하지 않는다.
+2. **그 Processor 가 돌려준 domain model.** 읽기 전용이다 — Facade 가 자기 컨텍스트 Processor 의 인자로 넘길 수 있다.
+
+- 그 밖(UseCase · Facade · Presenter · Info · Port · Adapter · Mapper · Entity · Repository · Q 타입)은 쓰지 않는다.
+  다른 컨텍스트의 포트 · 리포지토리를 직접 부르면 그 컨텍스트의 조회 규칙(숨김 · 정렬 · 캐시)을 비켜 간다.
+- domain 은 다른 컨텍스트 domain 을 필드로 갖지 않고 아이디로만 가리킨다 (예: `Product.categoryId`).
+- 의존은 한 방향으로만 둔다 (지금 product → category). 역방향이 필요해지면 컨텍스트 경계를 다시 정한다.
+- 트랜잭션은 호출한 Facade 가 건다.
+- 숨김 같은 조회 규칙은 그 컨텍스트가 정한다 — 다른 컨텍스트는 용도별 Processor 메서드만 부른다.
+  예: `ProductWebFacade` 는 `CategoryProcessor.subtreeIdsOf(categoryId)`(목록 필터 — 숨김과 무관) · `visiblePathOf(categoryId)`(상세 경로 — 숨김 제외)만 부른다.
+- 다른 서비스의 데이터는 지금처럼 internal API(Feign)로만 받는다 (§7). 다른 서비스 스키마를 직접 조회하지 않는다.
 
 ## 4. Query / Model 경계
 
@@ -235,6 +256,9 @@ store:
     reviews: false
 ```
 
+- `store.*` 는 쓰는 서비스의 `global/properties/StoreProperties` 로 바인딩한다 — 처음 쓰는 곳은 product-service 의 `store.features.custom-order`(#8)다.
+  두 번째 서비스가 같은 프로퍼티를 쓰게 되면 common-core 로 올린다. 플래그 기본값은 꺼짐(닫힌 쪽)이고 local · dev 프로파일 yml 만 켠다.
+  플래그가 꺼지면 데이터는 그대로 두고 응답에서만 숨긴다 (맞춤 제작: 목록 `customOrder=false`, 상세 `customOrder=null`).
 - 상호·대표자·사업자등록번호·통신판매업 신고번호 같은 **법정 표시 정보는 Vault 에 등록하고 주입**한다
   (`STORE_*` — `secret-management.md`). 저장소가 public 이므로 yml 에 실값을 쓰지 않는다.
 - 브랜드 특화 요구가 생기면 먼저 "다른 쇼핑몰에도 의미가 있는 일반 기능인가" 를 묻는다. 그렇다면
