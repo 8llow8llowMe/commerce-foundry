@@ -31,9 +31,10 @@ class SecurityErrorEnvelopeTest {
     }
 
     @Test
-    @DisplayName("401 만 WWW-Authenticate 를 싣는다 — 토큰 없음은 Bearer, 만료는 설명까지, 그 밖의 거부는 invalid_token")
+    @DisplayName("401 만 WWW-Authenticate 를 싣는다 — 토큰 없음 · 서비스 인증 실패는 Bearer, 만료는 설명까지, 그 밖의 거부는 invalid_token")
     void wwwAuthenticateFollowsRfc6750() {
         assertThat(SecurityErrorEnvelope.wwwAuthenticate(SecurityErrorCode.UNAUTHORIZED)).hasValue("Bearer");
+        assertThat(SecurityErrorEnvelope.wwwAuthenticate(SecurityErrorCode.SERVICE_UNAUTHORIZED)).hasValue("Bearer");
         assertThat(SecurityErrorEnvelope.wwwAuthenticate(SecurityErrorCode.TOKEN_EXPIRED))
             .hasValue("Bearer error=\"invalid_token\", error_description=\"The access token expired\"");
         assertThat(SecurityErrorEnvelope.wwwAuthenticate(SecurityErrorCode.TOKEN_INVALID)).hasValue("Bearer error=\"invalid_token\"");
@@ -43,11 +44,11 @@ class SecurityErrorEnvelopeTest {
     }
 
     @Test
-    @DisplayName("코드는 SECURITY_001~006 으로 겹치지 않고, 401 · 403 · 503 만 쓴다")
+    @DisplayName("코드는 SECURITY_001~007 로 겹치지 않고, 401 · 403 · 503 만 쓴다")
     void codesAreUniqueAndStatusesAreFixed() {
         assertThat(Arrays.stream(SecurityErrorCode.values()).map(SecurityErrorCode::getCode))
-            .containsExactly("SECURITY_001", "SECURITY_002", "SECURITY_003", "SECURITY_004", "SECURITY_005", "SECURITY_006");
+            .containsExactly("SECURITY_001", "SECURITY_002", "SECURITY_003", "SECURITY_004", "SECURITY_005", "SECURITY_006", "SECURITY_007");
         assertThat(Arrays.stream(SecurityErrorCode.values()).map(code -> code.getHttpStatus().value()))
-            .containsExactly(401, 401, 401, 401, 403, 503);
+            .containsExactly(401, 401, 401, 401, 403, 503, 401);
     }
 }

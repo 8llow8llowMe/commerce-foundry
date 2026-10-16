@@ -71,7 +71,7 @@ class SecurityErrorResolverTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"SECURITY_001", "SECURITY_002", "SECURITY_003", "SECURITY_005"})
+    @ValueSource(strings = {"SECURITY_001", "SECURITY_002", "SECURITY_003", "SECURITY_005", "SECURITY_007"})
     @DisplayName("예외에 실린 코드는 004 · 006 만 따른다 — 만료가 아닌 토큰이 002 로 보고되지 않는다")
     void ignoresNonDeclarableCodes(String code) {
         assertThat(SecurityErrorResolver.resolve(new OAuth2AuthenticationException(new OAuth2Error(code))))
@@ -91,6 +91,28 @@ class SecurityErrorResolverTest {
     @DisplayName("인증 처리 중 시스템 오류는 006(503) — 토큰 잘못으로 보고 로그아웃시키지 않는다")
     void authenticationServiceFailureIsUnavailable() {
         assertThat(SecurityErrorResolver.resolve(new AuthenticationServiceException("key source down")))
+            .isEqualTo(SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("서비스 간 인증 실패는 원인과 무관하게 007 이다 — 토큰 없음 · 위조 · 만료 · aud 불일치 · 로그아웃 표시")
+    void serviceAuthenticationFailureIsServiceUnauthorized() {
+        assertThat(SecurityErrorResolver.resolveServiceAuthentication(new InsufficientAuthenticationException("Full authentication is required")))
+            .isEqualTo(SecurityErrorCode.SERVICE_UNAUTHORIZED);
+        assertThat(SecurityErrorResolver.resolveServiceAuthentication(bearerFailure(new BadJwtException("bad signature"))))
+            .isEqualTo(SecurityErrorCode.SERVICE_UNAUTHORIZED);
+        assertThat(SecurityErrorResolver.resolveServiceAuthentication(bearerFailure(new JwtValidationException("expired", List.of(EXPIRED)))))
+            .isEqualTo(SecurityErrorCode.SERVICE_UNAUTHORIZED);
+        assertThat(SecurityErrorResolver.resolveServiceAuthentication(bearerFailure(new JwtValidationException("aud", List.of(INVALID)))))
+            .isEqualTo(SecurityErrorCode.SERVICE_UNAUTHORIZED);
+        assertThat(SecurityErrorResolver.resolveServiceAuthentication(new OAuth2AuthenticationException(new OAuth2Error("SECURITY_004"))))
+            .isEqualTo(SecurityErrorCode.SERVICE_UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("서비스 간 인증도 검증 중 시스템 오류는 006(503) 이다 — 호출자 잘못이 아니다")
+    void serviceAuthenticationSystemFailureIsUnavailable() {
+        assertThat(SecurityErrorResolver.resolveServiceAuthentication(new AuthenticationServiceException("decoder failure")))
             .isEqualTo(SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
     }
 

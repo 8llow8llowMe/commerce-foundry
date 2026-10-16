@@ -17,6 +17,7 @@ import org.springframework.security.oauth2.jwt.JwtValidationException;
 
 /**
  * Spring Security 예외를 {@link SecurityErrorCode} 로 바꾼다. 서블릿 진입점·advice 와 게이트웨이(#4)가 같이 쓴다.
+ * 서비스 간 인증 체인({@code /internal/**})은 {@link #resolveServiceAuthentication} 을 쓴다.
  *
  * <p>판정은 예외 타입과 {@link OAuth2Error#getErrorCode()} 로만 한다. 예외 메시지 문자열을 비교하지 않는다 —
  * 라이브러리 문구가 바뀌면 만료가 조용히 "위조" 로 바뀐다.
@@ -63,6 +64,17 @@ public final class SecurityErrorResolver {
             return SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE;
         }
         return SecurityErrorCode.TOKEN_INVALID;
+    }
+
+    /**
+     * 서비스 간 인증({@code /internal/**} 체인) 실패의 코드를 고른다. 토큰이 없든 · 서명 · 만료 · {@code typ} · {@code aud} 가 틀리든 ·
+     * 사용자 access 토큰이든 007 하나다 — 호출자는 다른 서비스라 원인별로 다르게 처리할 것이 없고, 어느 검증에서 걸렸는지 알리지 않는다.
+     * 원인은 수신 쪽 로그(예외 타입)에 남는다. 검증 중 시스템 오류만 {@link #resolve} 와 같이 006(503)이다 — 호출자 잘못이 아니다.
+     */
+    public static SecurityErrorCode resolveServiceAuthentication(AuthenticationException exception) {
+        return resolve(exception) == SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE
+            ? SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE
+            : SecurityErrorCode.SERVICE_UNAUTHORIZED;
     }
 
     /** 권한 거부의 코드를 고른다. 아직 로그인하지 않았으면(익명) 001, 로그인했는데 역할이 모자라면 005 다. */
