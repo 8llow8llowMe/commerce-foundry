@@ -40,6 +40,14 @@ snowflake:
   datacenter-id: ${SNOWFLAKE_DATACENTER_ID}
   worker-id: ${SNOWFLAKE_WORKER_ID}
 
+security:
+  jwt:
+    # access 토큰 검증 공개키 — PEM 본문 한 줄 (security-guide.md §5-3 · §6). 비었거나 풀리지 않으면 기동하지 않는다.
+    # issuer · audience · clock-skew 는 기본값을 쓴다. 테스트는 security-core 테스트 픽스처가 실행 중 만든 키를 넣는다
+    public-key: ${JWT_PUBLIC_KEY}
+    # 키 교체 중에만 이전 공개키를 넣는다 (security-guide.md §6-3)
+    previous-public-key: ${JWT_PUBLIC_KEY_PREVIOUS:}
+
 swagger:
   # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다
   server-url: /
