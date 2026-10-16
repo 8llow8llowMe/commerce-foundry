@@ -16,6 +16,9 @@ import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTest
  * <p>CORS origin 과 dev 라우트 · Swagger 스위치(꺼짐)는 여기서 고정한다. 셸의 {@code GATEWAY_CORS_ALLOWED_ORIGINS} ·
  * {@code SPRING_PROFILES_ACTIVE}(local 이면 dev 라우트가 켜진다)에 따라 결과가 바뀌지 않게.
  * 켠 상태는 {@code GatewayDevRouteTest} 가 {@code @TestPropertySource} 로 덮어 따로 본다.
+ *
+ * <p>응답 대기는 30초다. 기본 5초는 CI 러너가 모듈 테스트를 병렬로 돌릴 때 404 하나도 넘긴 적이 있다(#49).
+ * 정상 응답은 수십 ms 라 테스트 시간은 늘지 않고, 실제로 멈춘 요청은 여전히 실패한다.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
@@ -29,7 +32,7 @@ import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTest
         "springdoc.swagger-ui.enabled=false"
     }
 )
-@AutoConfigureWebTestClient
+@AutoConfigureWebTestClient(timeout = "30s")
 public @interface GatewayIntegrationTest {
 
     /** 통합 테스트에서 CORS 를 허용하는 유일한 origin. */
