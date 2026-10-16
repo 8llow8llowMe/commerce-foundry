@@ -69,6 +69,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 - 컨트롤러는 `member.memberId()` 만 UseCase 로 넘긴다. `MemberPrincipal` 을 application 계층으로 넘기지 않는다.
 - 소유자 판정은 JWT 의 memberId 로만 한다. 요청 본문·파라미터의 memberId 를 믿지 않는다 (`api-design-guide.md` §5).
+  internal API 는 예외다 — 사용자 JWT 가 오지 않으므로 호출 서비스가 검증한 memberId 를 본문 · 파라미터로 받는다 (§9-4).
 
 ## 4. 오류 코드
 
@@ -112,7 +113,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | `/api/v1/admin/**` | URL 규칙으로 `ADMIN` 을 요구한다. 컨트롤러의 `@PreAuthorize("hasRole('ADMIN')")` 와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
 | `/internal/**` | 이 체인에서는 **`denyAll`**(익명 001 · 로그인 005)이다. 앞 순서의 서비스 인증 체인(§9-3)만 서비스 토큰으로 연다 — 서비스가 그 Configurer 를 빠뜨려도 internal API 가 열리지 않는다(fail-closed). **internal 컨트롤러 메서드마다 허용 호출자를 `@PreAuthorize("hasAuthority('SERVICE_<service-id>')")` 로 선언한다**(§9-4). 사설망 전제(게이트웨이가 라우팅하지 않고 서비스 포트를 외부에 열지 않는다, 아래 강제 수단)는 그대로 둔다 — 1단계 서비스 토큰은 그 위의 두 번째 방어다 |
 | 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고(default-allow) 메서드의 `@PreAuthorize` 가 정한다. 비로그인 상품 조회 같은 API 가 있다 (아래 보완 규칙) |
-| `/actuator/**` | `health`(하위 경로 포함)만 `permitAll` 이다. 웹에 노출된 다른 엔드포인트와 링크(`/actuator`)는 `denyAll` — 토큰 없으면 401(001), 로그인했으면 403(005). 노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — **노출 설정(`exposure.include: health`)이 1차, URL 규칙이 2차** 방어다. 경로는 Boot 의 `EndpointRequest` 로 잡아 management base-path 를 바꿔도 따라간다. **auth-service 는 `heapdump` 를 노출하지 않는다** — 힙에 개인키가 있다 |
+| `/actuator/**` | `health`(하위 경로 포함)만 `permitAll` 이다. 웹에 노출된 다른 엔드포인트와 링크(`/actuator`)는 `denyAll` — 토큰 없으면 401(001), 로그인했으면 403(005). 노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — **노출 설정(`exposure.include: health`)이 1차, URL 규칙이 2차** 방어다. 경로는 Boot 의 `EndpointRequest` 로 잡아 management base-path 를 바꿔도 따라간다. **어느 서비스도 `heapdump` 를 노출하지 않는다** — 서비스 5종의 힙에 `INTERNAL_JWT_SECRET` 이 있고, auth 의 힙에는 개인키도 있다 |
 | Swagger (`/v3/api-docs/**` · `/swagger-ui/**`) | 명시 `permitAll` 을 두지 않는다. URL 단계는 default-allow 로 열려 있고, springdoc 스위치(기본 닫힘, local · dev 만 켬 — `bootstrap-conventions.md`)가 닫는다 |
 
 - health 는 익명에 열려 있으므로 `management.endpoint.health.show-details` · `show-components` 는 기본값 `never` 를 유지한다.
@@ -170,7 +171,8 @@ testImplementation testFixtures(project(':core:security-core'))   // 테스트 �
   발급하는 서비스에만(`issuerExpected()` — #4 에서 auth 만 `true`). 004 · 006 은 디코더 장애를 흉내 내야 해 security-core 통합 테스트에만 둔다.
   서비스 간 인증(§9-10)도 같은 스모크가 본다 — 서비스 토큰 없음 · 사용자 access 토큰 · `aud` 불일치 401 · 007, 허용 목록 밖 호출자 403 · 005, 허용된 호출자 200,
   `application.yml` 원문의 `${INTERNAL_JWT_SECRET}` · `${INTERNAL_JWT_SECRET_PREVIOUS:}` · `${spring.application.name}`.
-  **`@PreAuthorize("isAuthenticated()")` 익명 401 · `SECURITY_001` 케이스는 첫 실제 핸들러가 생기는 이슈(#8 B PR · #4)에서 서비스의 `*SecuritySmokeTest` 에
+  인가 선언 누락 가드(§9-10)도 같은 스모크에 있다 — 서비스의 모든 `/api/` · `/internal/` 핸들러가 `@PreAuthorize` 를 선언했는지 본다.
+  **`@PreAuthorize("isAuthenticated()")` 익명 401 · `SECURITY_001` 케이스는 #4 또는 서비스에 첫 `isAuthenticated()` 핸들러가 생기는 이슈에서 서비스의 `*SecuritySmokeTest` 에
   메서드로 더한다** — `perform` · `bearer` · `SecurityEnvelopeAssertions.assertEnvelope` 를 쓰고 같은 컨텍스트를 공유한다.
   `@WebMvcTest` 같은 슬라이스로 쓸 때는 `*BeansConfig` 가 빠지므로 `ResourceServerSecurityConfigurer` · `JwtVerificationPropertiesConfig` 를 `@Import` 한다
   (안 하면 Boot 기본 체인이 Basic 401 을 내서 우리 봉투를 보지 못한다). internal 컨트롤러 슬라이스는 `InternalResourceServerConfigurer` ·
@@ -296,6 +298,9 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 - `IssuedAccessToken` 과 `JwtIssuanceProperties` 의 `toString()` 은 토큰 · 개인키를 가린다. `InternalTokenProperties` 의 `toString()` 은 비밀을 가린다.
 - 서비스 인증 실패(007)와 서비스의 허용 목록 거부(005)는 **warn** 이다 — 정상 배포에서는 일어나지 않고 키 · 설정 실수나 사설망 안의 위조를 드러낸다.
   거부 로그에는 호출 서비스 · jti 를 남긴다. 서비스 토큰 원문 · 비밀 · 비밀에서 계산한 값(지문)은 남기지 않는다.
+- internal 체인의 006 은 **error** 다 — 서비스 토큰 검증은 메모리의 비밀만 써서 저장소 장애가 있을 수 없다. 나면 서버 결함 신호다(사용자 체인의 006 은 warn).
+- 보안 거부 로그의 경로는 **앞 세 구간만** 남기고 나머지를 가린다 — `/internal/v1/orders/4611686018427387904` → `/internal/v1/orders/…`.
+  internal · 고객 경로에 주문번호 같은 식별자가 들어가기 때문이다 (`SecurityErrorResponder#maskPath`).
 
 ## 9. 서비스 간 인증 (internal API, 1단계)
 
@@ -329,6 +334,7 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 - 사용자 체인보다 **앞 순서**(`@Order(HIGHEST_PRECEDENCE)`)다. 사용자 체인은 모든 요청에 걸리므로 마지막이어야 한다 — 뒤집히면 Spring Security 가 기동을 멈춘다.
 - 모든 요청이 인증을 요구한다(`anyRequest().authenticated()`). 매핑 없는 internal 경로도 인증부터 한다.
 - 인증 실패는 전부 **401 · `SECURITY_007`**, 허용 목록 거부는 **403 · `SECURITY_005`**, 검증 중 시스템 오류만 503 · 006 이다. 봉투는 사용자 체인과 같다(`SecurityErrorEnvelope`).
+  006 은 메모리 비밀만 쓰는 검증에서 나므로 서버 결함 신호로 보고 error 로그를 남긴다(§8). Bearer 필터의 실패 처리기는 다시 던지지 않는다 — 봉투 없는 500 이 되지 않게.
 - STATELESS. CSRF · 폼 로그인 · Basic · 로그아웃 · CORS · 요청 캐시를 끈다.
 - 디코더는 체인 안에서만 만든다. **두 번째 `JwtDecoder` 빈을 두지 않는다** — 사용자 체인의 `accessTokenDecoder` 주입과 Boot 자동설정이 빈 하나를 전제로 한다.
 - 사용자 체인은 `/internal/**` 을 `denyAll` 한다(§5-1). 이 Configurer 를 빠뜨려도 internal 이 열리지 않고 001 · 005 로 닫힌다. 거꾸로 이 Configurer 만 import 하면
@@ -350,11 +356,13 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
 - 여럿이면 `hasAnyAuthority('SERVICE_order-service', 'SERVICE_payment-service')`. `isAuthenticated()` · `permitAll()` 은 쓰지 않는다.
 - 호출 서비스가 필요하면 `@AuthenticationPrincipal ServicePrincipal caller` 로 받는다(`caller.serviceId()`). application 계층으로 넘기지 않는다.
 - 사용자 식별이 필요하면 memberId 를 요청 본문 · 파라미터로 받는다 — 호출 서비스가 사용자 JWT 로 이미 검증한 값이다. 사용자 토큰은 internal 로 오지 않는다.
-- 빠뜨린 메서드는 #42 의 ArchUnit 이 잡는다(예정). 그 전까지는 리뷰(`be-security-reviewer`)가 본다.
+- **빠뜨린 메서드는 서비스 인가 스모크가 잡는다**(§9-10) — 서비스의 실제 MVC 매핑을 모두 돌며, `/internal/` 핸들러의 `@PreAuthorize`(메서드, 없으면 클래스) 식이
+  서비스 권한만 나열한 `hasAuthority('SERVICE_…')` · `hasAnyAuthority('SERVICE_…', ...)` 그 자체인지 본다. `or isAuthenticated()` 처럼 넓힌 식도 실패다.
+  #42 의 ArchUnit 은 정적 규칙(전역 `RequestInterceptor` 빈, `RequestContextHolder` 로 사용자 토큰 꺼내기 등)을 맡는다.
 - **1단계에서 호출자는 "선언" 이다.** 비밀이 하나라 비밀을 가진 서비스는 어느 `iss` 로도 서명할 수 있다. 허용 목록은 설정 실수 · 버그로 엉뚱한 서비스가
   부르는 것을 막고, 2단계(§9-9)에서 같은 선언이 "증명" 이 된다.
 
-### 9-5. 호출 쪽 — Feign 인터셉터
+### 9-5. 호출 쪽 — Feign Capability
 
 ```java
 @FeignClient(
@@ -364,11 +372,18 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
 public interface ProductStockClient { ... }
 ```
 
-- `InternalFeignClientConfiguration`(security-core `internal.client`)이 그 클라이언트에만 `InternalServiceTokenInterceptor` 를 붙인다.
-  서비스 `*BeansConfig` 는 `InternalTokenIssuerConfigurer` 를 import 한다(발급기 빈 — 빠뜨리면 클라이언트를 만들 때 기동이 멈춘다).
-- 인터셉터는 **기존 `Authorization` 을 지운 뒤** `Bearer <서비스 토큰>` 을 넣는다. `aud` 는 Feign 대상 이름이다 — 비었거나 서비스 ID 모양이 아니면 요청을 보내지 않고 실패한다.
-- **전역 빈으로 등록하지 않는다.** `RequestInterceptor` 빈은 모든 Feign 클라이언트에 붙는다 — 외부 API(토스 등)에 서비스 토큰이 실리고 그쪽 `Authorization` 을 덮어쓴다.
-  외부 클라이언트에 `InternalFeignClientConfiguration` 을 붙이지 않는다.
+- `InternalFeignClientConfiguration`(security-core `internal.client`)이 그 클라이언트의 자식 컨텍스트에 Feign `Capability`(`InternalServiceTokenCapability`)
+  빈을 둔다. Spring Cloud OpenFeign 의 `FeignClientFactoryBean#configureUsingConfiguration` 이 클라이언트 컨텍스트의 `Capability` 빈을 정렬해
+  `Feign.Builder#addCapability` 한다. 서비스 `*BeansConfig` 는 `InternalTokenIssuerConfigurer` 를 import 한다(발급기 빈 — 빠뜨리면 클라이언트를 만들 때 기동이 멈춘다).
+- **정규화는 최종 요청 단계에서 한다.** Capability 가 감싼 `Client` 는 인터셉터 · 대상 URL 적용이 모두 끝난 `Request` 를 받아 `Authorization` 을
+  대소문자와 무관하게 **전부 지우고** `Bearer <서비스 토큰>` 하나만 싣는다. 요청 인터셉터로 하면 자기보다 뒤에 붙은 인터셉터가 넣은 값을 지우지 못해
+  헤더가 둘이 되고, 받는 쪽은 첫 헤더만 읽어 사용자 토큰 · 외부 키가 internal 로 새고도 조용히 성공할 수 있다.
+  Capability 는 `HIGHEST_PRECEDENCE` 라 가장 먼저 더해져 실제 Client(로드밸런서)를 바로 감싼다 — 다른 Capability 가 Client 단계에서 더한 값까지 정리한다.
+- `aud` 는 Feign 대상 이름(`request.requestTemplate().feignTarget().name()`)이다. 비면 요청을 보내지 않고 실패하고, 서비스 ID 모양(소문자 kebab)이 아니면 발급기가 거부한다.
+  **kebab 이름의 외부 클라이언트(`name = "toss-payments", url = ...`)에 붙이면 막지 못한다** — URL 검사는 로컬 url override 를 막으므로 두지 않는다. 리뷰가 본다.
+- **모든 클라이언트에 붙는 설정을 쓰지 않는다** — 전역 `RequestInterceptor` · `Capability` 빈, `@EnableFeignClients(defaultConfiguration = ...)`,
+  `spring.cloud.openfeign.client.config.default.request-interceptors`. 외부 API(토스 등)에 사용자 토큰 · 서비스 토큰이 실리거나 그쪽 `Authorization` 을 덮어쓴다.
+  internal 클라이언트에 붙은 값은 위 정규화가 지우지만 외부 클라이언트에는 정규화가 없다. 외부 클라이언트에 `InternalFeignClientConfiguration` 을 붙이지 않는다.
 - **요청마다 새로 서명한다.** 캐시하지 않고 401 을 받아도 다시 발급해 재시도하지 않는다 — HS256 서명은 마이크로초 단위라 캐시 이득이 없고,
   캐시가 없으면 만료 경계 · 키 교체 직후의 낡은 토큰 문제가 사라진다. 받는 쪽 401 · 007 은 설정 · 키 문제이므로 재시도로 풀리지 않는다.
 - 사용자 토큰을 `RequestContextHolder` 로 꺼내 internal 요청에 싣지 않는다 (`coding-conventions.md` §10).
@@ -426,7 +441,7 @@ openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하
 ### 9-9. 2단계 (예정)
 
 - 배포 환경이 정해지면(`service-inventory.md` §5) **서비스별 RS256 키** 또는 **플랫폼 mTLS** 로 바꾼다. 그때 호출자가 "증명" 된다.
-- 바꾸는 것은 검증기 · 발급기뿐이다. 주체(`ServicePrincipal`) · 권한 이름(`SERVICE_<service-id>`) · 허용 목록 선언 · 인터셉터 경계 · 오류 코드는 그대로 둔다.
+- 바꾸는 것은 검증기 · 발급기뿐이다. 주체(`ServicePrincipal`) · 권한 이름(`SERVICE_<service-id>`) · 허용 목록 선언 · Feign Capability 경계 · 오류 코드는 그대로 둔다.
 
 ### 9-10. 테스트
 
@@ -435,4 +450,9 @@ openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하
 - 서비스 스모크(`ResourceServerSmokeTestSupport`)는 테스트 전용 핸들러 `/internal/v1/__security-smoke`(허용 호출자 `smoke-allowed-caller` 고정)로 본다.
   이 핸들러는 픽스처의 `InternalSecuritySmokeContextCustomizerFactory`(spring.factories)가 **모든 서블릿 테스트 컨텍스트**에 등록한다 —
   모든 테스트에 같은 커스터마이저라 `*ApplicationTests` 와 스모크가 컨텍스트를 계속 같이 쓴다. 리액티브 컨텍스트에는 등록하지 않는다.
+- **인가 선언 누락 가드** — 같은 스모크의 `handlersDeclareAuthorization` 이 서비스 컨텍스트의 `RequestMappingHandlerMapping` 을 모두 돈다.
+  `/internal/` 핸들러는 서비스 권한만 나열한 `hasAuthority` · `hasAnyAuthority` 식, `/api/` 핸들러는 `@PreAuthorize` 존재(식은 자유)를 요구하고 위반 핸들러를 목록으로 알린다.
+  스모크 핸들러가 검사 대상에 들어 있는지도 단언해, 실제 핸들러가 없는 지금도 빈 목록으로 통과하지 않는다. 정적 규칙은 #42 ArchUnit 이 맡는다.
+- 호출 쪽은 `InternalServiceTokenCapabilityTest` 가 실제 Feign 파이프라인(`Feign.builder()` + 앞 · 뒤 인터셉터 + 다른 Capability + 요청을 붙잡는 Client)을
+  왕복해 최종 요청의 `Authorization` 이 서비스 토큰 하나인지 본다.
 - internal 컨트롤러가 생기면 그 서비스의 `*SecuritySmokeTest` 나 컨트롤러 테스트에서 실제 경로의 허용 · 거부 호출자를 하나씩 본다.

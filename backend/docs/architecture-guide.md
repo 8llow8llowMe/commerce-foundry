@@ -199,8 +199,8 @@ Info → Presenter → Response
 - 내부 호출 계약은 `application/port/out` 뒤의 `adapter/out/client` 에서만 캡슐화한다.
   `FeignClient → Adapter → QueryResult` 흐름을 유지한다.
 - internal Feign 클라이언트는 `configuration = InternalFeignClientConfiguration.class` 로 서비스 토큰을 싣는다 (`security-guide.md` §9-5).
-  **사용자 `Authorization` 을 internal 로 넘기지 않는다** — 인터셉터가 지우고 서비스 토큰으로 바꾼다. 사용자 식별이 필요하면 memberId 를 요청 본문 · 파라미터로 넘긴다.
-  인터셉터는 전역 빈이 아니다 — 외부 API(PG 등) 클라이언트에는 붙지 않는다.
+  **사용자 `Authorization` 을 internal 로 넘기지 않는다** — 설정의 Feign Capability 가 최종 요청에서 지우고 서비스 토큰 하나로 바꾼다.
+  사용자 식별이 필요하면 memberId 를 요청 본문 · 파라미터로 넘긴다. 이 설정은 전역이 아니다 — 외부 API(PG 등) 클라이언트에는 붙지 않는다.
 - 내부 호출에는 공통 타임아웃과 Resilience4j CircuitBreaker 를 적용한다. 서킷 오픈·전송 실패는
   `adapter/out/client` 안에서 도메인 예외(503)로 변환하고 `FeignException` 을 상위로 노출하지 않는다
   (`coding-conventions.md` §10).
