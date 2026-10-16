@@ -310,11 +310,29 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
 | local · dev | `update` | 서비스 기동 시 Hibernate |
 | 운영 (공통 `application.yml` 기본값) | `none` | 사용자가 DDL 을 직접 적용한다 |
 | 컨텍스트 테스트 (H2) | `create-drop` | 테스트 컨텍스트 |
+| 리포지토리 테스트 (Testcontainers PostgreSQL) | `validate` | DDL 스냅숏을 init script 로 적용 (`bootstrap-conventions.md` 리포지토리 테스트) |
 
 - **엔티티를 추가 · 변경하는 PR 은 본문 `운영 DDL` 절에 운영에 적용할 PostgreSQL DDL 을 그대로 적는다.**
   테이블 · 컬럼 코멘트, 인덱스(`idx_` / `uk_`), 제약까지 넣는다. 스키마(`auth` · `product` · `orders` · `payment` · `delivery`)를 붙여 쓴다.
-- DDL 은 손으로 짓지 않고 **local · dev 에서 `update` 가 만든 결과로 뽑는다** — 예: `pg_dump --schema-only -t product.product_option`.
+- DDL 은 손으로 짓지 않는다. **Hibernate 가 만든 DDL** 을 아래 둘 중 하나로 뽑는다.
   손으로 쓰면 타입(`timestamptz`, `bigint`, `varchar(n)`)이나 인덱스 이름이 dev 와 갈라진다.
+  - local · dev 에서 `update` 가 만든 결과 — 예: `pg_dump --schema-only -t product.product_option`
+  - 엔티티에서 Hibernate 스키마 생성 스크립트로 만든 결과 — 서비스의 **DDL 스냅숏 테스트**(`*SchemaSnapshotTest`)가
+    DB 없이 `build/ddl/<서비스>-schema.sql` 을 만들고, 커밋된 `src/test/resources/ddl/<서비스>-schema.sql` 과 비교한다.
+    방언은 PostgreSQL, 네이밍 전략은 Boot 기본값이라 서비스가 `update` 로 만드는 것과 같은 이름이 나온다.
+- 엔티티를 바꾸면 **스냅숏을 같은 PR 에서 갱신한다** — 스냅숏 테스트가 실패하며 `build/ddl/...` 을 복사하라고 안내한다.
+  PR 본문 운영 DDL 은 스냅숏에서 바뀐 부분을 옮긴다 (새 테이블은 `create`, 기존 테이블 변경은 `alter` 로 고쳐 쓴다).
+- 로컬 DB 가 없으면 **스냅숏이 정본**이다. CI 의 리포지토리 테스트(Testcontainers)가 스냅숏을 PostgreSQL 에 적용하고
+  `ddl-auto=validate` 로 엔티티와 대조한다 — 스냅숏이 엔티티와 어긋나거나 PostgreSQL 이 받지 못하는 DDL 이면 CI 가 실패한다.
+- **enum 값을 추가 · 삭제하면 check 제약도 바꾼다.** Hibernate 는 `@Enumerated(STRING)` 컬럼에
+  `check (sale_status in ('ON_SALE','STOP_SELLING'))` 를 만드는데, `update` 는 이미 있는 check 제약을 고치지 않는다.
+  운영 DDL 에 drop / add 를 적고 dev 에도 직접 적용한다. 이름 없는 컬럼 check 는 PostgreSQL 이 `<테이블>_<컬럼>_check` 로 이름을 붙인다
+  (적용 전 `\d product.product` 로 확인).
+
+  ```sql
+  alter table product.product drop constraint product_sale_status_check;
+  alter table product.product add constraint product_sale_status_check check (sale_status in ('ON_SALE','STOP_SELLING','PAUSED'));
+  ```
 - `update` 는 테이블 · 컬럼을 **추가만** 한다. 이름 변경 · 타입 변경 · 삭제 · 기존 행이 있는 컬럼의 `NOT NULL` 추가는 dev 에서도 저절로 되지 않는다.
   이런 변경은 PR 에 dev · 운영 공통 DDL 과 데이터 이관 SQL 을 적고 **dev 에도 직접 적용**한다.
 - 운영 적용 순서는 **추가 DDL → 배포 → 정리 DDL(삭제)** 이다. 새 버전이 뜨기 전에 옛 버전이 쓰는 컬럼을 지우지 않는다.

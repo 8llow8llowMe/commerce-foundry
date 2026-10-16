@@ -102,12 +102,58 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
 
 - `ddl-auto: create-drop` 으로 엔티티 매핑 오류가 컨텍스트 로딩에서 드러나게 한다. Eureka 는 끈다.
 - 락 · `timestamptz` · 인덱스처럼 **엔진에 기대는 동작은 여기서 검증되지 않는다.** 리포지토리 테스트는 Testcontainers(PostgreSQL)로
-  따로 두고 CI 에서 돌린다.
+  따로 두고 CI 에서 돌린다 (아래 "리포지토리 테스트").
 - 단언: 공통 빈(Snowflake · `JPAQueryFactory` · JPA Auditing · Swagger 그룹), 서비스 이름 · 포트 · 스키마,
   `/actuator/health` 는 상태만(`components` · `details` 없음) · 다른 actuator 경로 404,
   기본 프로파일에서 Swagger 경로 404, Swagger 를 연 설정에서 그룹 문서 200 · 기본 문서 404.
 - 새 서비스를 더하면 게이트웨이의 dev 라우트(`GatewayDevRouteConfig` 는 `ServiceRoute` 를 따른다)와 Swagger UI 목록
   (`api-gateway` 의 `application.yml` `springdoc.swagger-ui.urls`)도 같이 늘린다. `GatewayDevRouteTest` 가 어긋나면 잡는다.
+
+## 리포지토리 테스트 (Testcontainers, 엔티티를 가진 서비스)
+
+QueryDSL · JPQL · 파생 쿼리는 컴파일로 검증되지 않는다 (`coding-conventions.md` §9-5). `@DataJpaTest` 로 실제 PostgreSQL 에 질의한다.
+서비스 `build.gradle` 에 아래 4개를 더한다. 버전은 Boot BOM 이 정한다.
+
+```groovy
+testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+testImplementation 'org.testcontainers:testcontainers-postgresql'
+```
+
+```java
+@DataJpaTest
+@Testcontainers(disabledWithoutDocker = true)
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@TestPropertySource(properties = {
+    "spring.jpa.hibernate.ddl-auto=validate",
+    "spring.jpa.properties.hibernate.default_schema=product",
+    "spring.cloud.discovery.enabled=false",
+    "eureka.client.enabled=false"
+})
+@Import({QuerydslConfigurer.class, ProductServiceFeaturesConfig.class, ProductRepositoryAdapter.class, ProductMapperImpl.class})
+class ProductPersistenceAdapterTest {
+
+    @Container
+    @ServiceConnection
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/product-schema.sql");
+}
+```
+
+- **스키마는 DDL 스냅숏(`src/test/resources/ddl/<서비스>-schema.sql`)을 init script 로 적용하고 `ddl-auto=validate` 로 대조한다.**
+  컨텍스트가 뜨면 커밋된 스냅숏 — 운영 DDL 의 원본 — 이 실제 PostgreSQL 에서 엔티티 매핑과 맞는다는 뜻이다.
+  `create-drop` 으로 바꾸면 스냅숏이 검증되지 않는다. 스냅숏 생성은 `coding-conventions.md` §9-8.
+- **`disabledWithoutDocker = true`** — Docker 가 없는 로컬에서는 건너뛰고(skip) CI(ubuntu 러너)에서 돈다.
+  건너뛴 건은 CI 실행 건수에 세지 않는다(`backend-test-count.py`). 로컬에서 쿼리를 확인하려면 Docker 를 켜고 돌린다.
+- 슬라이스는 `@Component` 를 스캔하지 않는다. 테스트할 어댑터와 MapStruct 구현(`*MapperImpl`), `QuerydslConfigurer`(커스텀 리포지토리가
+  `JPAQueryFactory` 를 받는다), `*FeaturesConfig`(JPA Auditing — 빠지면 `created_at` NOT NULL 위반)를 `@Import` 한다.
+- 컨테이너는 테스트 클래스마다 자기 `static` 필드로 둔다. 상위 클래스의 컨테이너를 여러 클래스가 상속해 쓰면 확장이 클래스마다
+  컨테이너를 내렸다 다시 띄우는데, 캐시된 스프링 컨텍스트는 처음 포트를 들고 있어 연결이 끊길 수 있다.
+- 데이터는 엔티티 빌더 + 고정 아이디로 `TestEntityManager.persist` 하고 `flush` · `clear` 한 뒤 질의한다 — 1차 캐시가 아니라 DB 를 읽게.
+- Boot 4 · Testcontainers 2 패키지: `org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`,
+  `org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase`, `org.springframework.boot.jpa.test.autoconfigure.TestEntityManager`,
+  `org.springframework.boot.testcontainers.service.connection.ServiceConnection`, `org.testcontainers.postgresql.PostgreSQLContainer`
+  (`org.testcontainers.containers.PostgreSQLContainer` 는 deprecated).
 
 ## 보안 스모크 테스트
 
