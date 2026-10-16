@@ -229,6 +229,8 @@ public final class ProductValidationMessage {
 - 루프·스트림 안에서 `Port.` / `Repository.` / `Client.` 단건 호출을 하지 않는다.
 - DB 반복 → `in` 절 벌크 조회. 원격(Feign) 반복 → 대상 서비스에 **벌크 내부 엔드포인트**를 연다
   (예: 장바구니 상품 20개 가격 조회 → `GET /internal/v1/skus?ids=...` 한 번).
+- 서비스 `application.yml` 은 `spring.jpa.properties.hibernate.query.in_clause_parameter_padding: true` 를 둔다. IN 절 파라미터 수를 2의 거듭제곱으로
+  채워(3개 → 4개, 5개 → 8개) 개수마다 다른 SQL 이 생기지 않게 한다 — 그대로면 쿼리 계획 캐시와 PreparedStatement 캐시가 개수만큼 늘어난다 (#8 DB 검토).
 
 ### 9-7. Redis
 
