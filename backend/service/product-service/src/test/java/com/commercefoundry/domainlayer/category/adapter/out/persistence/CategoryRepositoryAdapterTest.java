@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.category.application.port.out.CategoryRep
 import com.commercefoundry.domainlayer.category.domain.model.Category;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
+import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,10 +26,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * PostgreSQL 컨테이너에 DDL 스냅숏을 적용하고 {@code ddl-auto=validate} 로 엔티티와 대조한 뒤 실제로 질의한다
- * ({@code bootstrap-conventions.md} "리포지토리 테스트"). Docker 가 없으면 건너뛴다 — CI 에서 돈다.
+ * ({@code bootstrap-conventions.md} "리포지토리 테스트"). Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다.
  */
 @DataJpaTest
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
+@EnabledWithDockerOrOnCi
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = {
     "spring.jpa.hibernate.ddl-auto=validate",
