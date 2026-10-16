@@ -6,14 +6,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import com.commercefoundry.security.error.SecurityErrorCode;
+import com.commercefoundry.security.internal.InternalTokenFormat;
 import com.commercefoundry.security.internal.InternalTokenProperties;
 import com.commercefoundry.security.issuer.JwtIssuer;
 import com.commercefoundry.security.principal.MemberRole;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,14 +30,17 @@ import org.springframework.boot.env.OriginTrackedMapPropertySource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.PropertySource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import org.springframework.web.util.pattern.PathPatternParser;
 
@@ -60,6 +66,9 @@ import org.springframework.web.util.pattern.PathPatternParser;
  *   <li>서비스 간 인증은 테스트 전용 internal 핸들러({@link InternalSecuritySmokeController#PATH}, 허용 호출자 고정)로 본다 — 토큰 없음 · 사용자 access 토큰 ·
  *       {@code aud} 불일치 401 · 007, 허용 목록 밖 호출자 403 · 005, 허용된 호출자 200. 핸들러는 {@link InternalSecuritySmokeContextCustomizerFactory} 가
  *       모든 서블릿 테스트 컨텍스트에 등록하므로 {@code *ApplicationTests} 와 컨텍스트 공유가 깨지지 않는다.</li>
+ *   <li>인가 선언 누락 가드 — 서비스 컨텍스트의 모든 MVC 핸들러를 돌며 {@code /internal/} 핸들러는 허용 호출자({@code hasAuthority('SERVICE_…')}),
+ *       {@code /api/} 핸들러는 {@code @PreAuthorize} 가 있는지 본다. 실제 매핑을 보는 런타임 가드이고, 정적 규칙(전역 인터셉터 · {@code RequestContextHolder} 등)은
+ *       #42 ArchUnit 이 맡는다.</li>
  * </ul>
  */
 @SpringBootTest
@@ -71,6 +80,12 @@ public abstract class ResourceServerSmokeTestSupport {
     protected static final String ADMIN_PATH = "/api/v1/admin/smoke";
     /** 어드민이 아닌, 어느 서비스에도 매핑되지 않는 경로. */
     protected static final String PUBLIC_PATH = "/api/v1/smoke";
+
+    private static final String INTERNAL_PREFIX = "/internal/";
+    private static final String API_PREFIX = "/api/";
+    /** 허용 호출자 선언의 모양 — 서비스 권한만 나열한 {@code hasAuthority} · {@code hasAnyAuthority} 식 그 자체. */
+    private static final Pattern SERVICE_CALLERS_EXPRESSION = Pattern.compile(
+        "has(Any)?Authority\\(\\s*'" + InternalTokenFormat.AUTHORITY_PREFIX + "[a-z][a-z0-9-]*'(\\s*,\\s*'" + InternalTokenFormat.AUTHORITY_PREFIX + "[a-z][a-z0-9-]*')*\\s*\\)");
 
     @Autowired
     private MockMvc mockMvc;
@@ -256,6 +271,50 @@ public abstract class ResourceServerSmokeTestSupport {
         assertEnvelope(response, SecurityErrorCode.TOKEN_INVALID);
     }
 
+    // ── 인가 선언 누락 가드 ──────────────────────────────────────
+
+    /**
+     * URL 단계는 {@code /api/**} 를 열어 두고(default-allow) internal 체인은 "서비스 토큰이 있다" 까지만 보므로, 메서드의 {@code @PreAuthorize} 가
+     * 빠지면 공개 API 가 되거나 서비스 5종 누구나 부르는 internal API 가 된다 ({@code security-guide.md} §5-1 · §9-4). 서비스의 실제 매핑을 모두 돈다.
+     *
+     * <ul>
+     *   <li>{@code /internal/} — 메서드(없으면 클래스)의 {@code @PreAuthorize} 식이 {@code hasAuthority('SERVICE_<id>')} 또는
+     *       {@code hasAnyAuthority('SERVICE_<id>', ...)} <b>그 자체</b>여야 한다. {@code isAuthenticated()} · {@code permitAll()} · {@code or} 로 넓힌 식은 실패다.</li>
+     *   <li>{@code /api/} — {@code @PreAuthorize} 가 있으면 된다(식은 {@code permitAll()} · {@code isAuthenticated()} · {@code hasRole(...)} 등 자유).</li>
+     * </ul>
+     *
+     * <p>지금 서비스에는 실제 핸들러가 없어 빈 목록으로 통과하지 않도록, 스모크 핸들러가 검사 대상에 들어 있는지도 본다.
+     */
+    @Test
+    @DisplayName("모든 /internal 핸들러는 허용 호출자 hasAuthority('SERVICE_…') 를, 모든 /api 핸들러는 @PreAuthorize 를 선언한다")
+    void handlersDeclareAuthorization() {
+        RequestMappingHandlerMapping handlerMapping = applicationContext.getBean("requestMappingHandlerMapping", RequestMappingHandlerMapping.class);
+        List<String> checkedInternalPatterns = new ArrayList<>();
+        List<String> violations = new ArrayList<>();
+
+        handlerMapping.getHandlerMethods().forEach((mapping, handler) -> {
+            Set<String> patterns = mapping.getPatternValues();
+            boolean internal = patterns.stream().anyMatch(pattern -> pattern.startsWith(INTERNAL_PREFIX));
+            boolean api = patterns.stream().anyMatch(pattern -> pattern.startsWith(API_PREFIX));
+            if (!internal && !api) {
+                return;
+            }
+            PreAuthorize declared = declaredPreAuthorize(handler);
+            String handlerName = handler.getBeanType().getName() + "#" + handler.getMethod().getName() + " " + patterns;
+            if (internal) {
+                checkedInternalPatterns.addAll(patterns);
+                if (declared == null || !SERVICE_CALLERS_EXPRESSION.matcher(declared.value().strip()).matches()) {
+                    violations.add(handlerName + " -> " + (declared == null ? "@PreAuthorize 없음" : declared.value()));
+                }
+            } else if (declared == null) {
+                violations.add(handlerName + " -> @PreAuthorize 없음");
+            }
+        });
+
+        assertThat(checkedInternalPatterns).as("스모크 핸들러가 검사 대상에 들어 있다 — 빈 목록이라 통과한 것이 아니다").contains(InternalSecuritySmokeController.PATH);
+        assertThat(violations).as("허용 호출자 · 인가 선언이 없는 핸들러 (security-guide.md §5-1 · §9-4)").isEmpty();
+    }
+
     // ── 구성 ─────────────────────────────────────────────────────
 
     /**
@@ -318,6 +377,12 @@ public abstract class ResourceServerSmokeTestSupport {
 
     protected final MockHttpServletResponse perform(MockHttpServletRequestBuilder request) throws Exception {
         return mockMvc.perform(request).andReturn().getResponse();
+    }
+
+    /** 메서드의 {@code @PreAuthorize}, 없으면 클래스의 것. 메서드 보안과 같은 우선순위다. 메타 애노테이션도 찾는다. */
+    private static PreAuthorize declaredPreAuthorize(HandlerMethod handler) {
+        PreAuthorize onMethod = AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(), PreAuthorize.class);
+        return onMethod != null ? onMethod : AnnotatedElementUtils.findMergedAnnotation(handler.getBeanType(), PreAuthorize.class);
     }
 
     /** 이 서비스의 ID — {@code spring.application.name}. 다른 서비스가 보내는 서비스 토큰의 {@code aud} 다. */
