@@ -17,7 +17,7 @@ import org.springframework.http.HttpHeaders;
  * 애노테이션은 {@link ProductServiceApplicationTests} 와 같아 컨텍스트를 같이 쓴다.
  *
  * <p>공개 조회 API 케이스는 슬라이스가 아니라 실제 빈 구성(Facade · Processor · 어댑터 · H2)으로 {@code permitAll()} 이 걸렸는지 본다.
- * internal API 의 익명 응답은 단언하지 않는다 — 서비스 간 인증(#51)이 들어오면 바뀐다.
+ * internal API 의 서비스 토큰 · 익명 응답은 여기서 단언하지 않는다 — 상속한 공통 스모크({@code ResourceServerSmokeTestSupport})가 본다.
  */
 class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
 

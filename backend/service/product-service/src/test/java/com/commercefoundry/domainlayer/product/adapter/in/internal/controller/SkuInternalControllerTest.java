@@ -11,6 +11,8 @@ import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuI
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
 import com.commercefoundry.security.error.SecurityErrorCode;
+import com.commercefoundry.security.internal.InternalTokenPropertiesConfig;
+import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
@@ -30,11 +32,19 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
- * 서비스 간 SKU 벌크 조회의 HTTP 계약 — 권한과 {@code ids} 검증 코드. 서비스 토큰(#51)이 아직 없어 인증 주체는 {@code @WithMockUser} 로 넣는다.
- * 익명 응답 코드는 단언하지 않는다 — #51 의 서비스 토큰 필터가 들어오면 바뀔 수 있다.
+ * 서비스 간 SKU 벌크 조회의 HTTP 계약 — 권한과 {@code ids} 검증 코드.
+ *
+ * <p>{@code /internal/**} 은 internal 체인({@link InternalResourceServerConfigurer})이 받는다 — 사용자 체인은 그 경로를 막으므로 두 Configurer 를
+ * 함께 올린다. 서비스 토큰을 만들지 않고 인증 주체를 {@code @WithMockUser} 로 넣어, 체인이 아니라 핸들러의 허용 호출자({@code @PreAuthorize})를 본다.
+ * 서비스 토큰 검증 · 익명 401({@code SECURITY_007})은 security-core 테스트와 서비스 인가 스모크가 본다.
  */
 @WebMvcTest(SkuInternalController.class)
-@Import({ResourceServerSecurityConfigurer.class, JwtVerificationPropertiesConfig.class})
+@Import({
+    InternalResourceServerConfigurer.class,
+    InternalTokenPropertiesConfig.class,
+    JwtVerificationPropertiesConfig.class,
+    ResourceServerSecurityConfigurer.class
+})
 class SkuInternalControllerTest {
 
     private static final String PATH = "/internal/v1/skus";
@@ -107,7 +117,7 @@ class SkuInternalControllerTest {
         }
 
         /**
-         * 인증을 통과한 호출자 기준으로 메서드 검증이 {@code @PreAuthorize} 보다 먼저 돈다. 인증 전 단계(#51 internal 체인)의 401 은 여기서 보지 않는다.
+         * 인증을 통과한 호출자 기준으로 메서드 검증이 {@code @PreAuthorize} 보다 먼저 돈다. 인증 전 단계(internal 체인)의 401 은 여기서 보지 않는다.
          * 컨트롤러 주석 · {@code api-design-guide.md} §1-3 이 이 순서를 적는다.
          */
         @Test
