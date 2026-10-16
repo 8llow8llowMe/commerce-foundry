@@ -34,6 +34,36 @@ class ProductPricingTest {
     }
 
     @Nested
+    @DisplayName("displaySalePrice")
+    class DisplaySalePrice {
+
+        @Test
+        @DisplayName("판매중 SKU 추가금 최소값이 없으면(판매중 SKU 없음) 기본 판매가 그대로다")
+        void noOnSaleSku() {
+            assertThat(ProductPricing.displaySalePrice(Money.of(39_000, KRW), null)).isEqualTo(Money.of(39_000, KRW));
+        }
+
+        @Test
+        @DisplayName("기본 판매가 + 판매중 SKU 추가금 최소값이다")
+        void basePlusMinimumAdditional() {
+            assertThat(ProductPricing.displaySalePrice(Money.of(39_000, KRW), 0L)).isEqualTo(Money.of(39_000, KRW));
+            assertThat(ProductPricing.displaySalePrice(Money.of(39_000, KRW), 3_000L)).isEqualTo(Money.of(42_000, KRW));
+        }
+
+        @Test
+        @DisplayName("통화는 기본 판매가를 따른다")
+        void currencyFollowsBase() {
+            assertThat(ProductPricing.displaySalePrice(Money.of(8_950, USD), 500L)).isEqualTo(Money.of(9_450, USD));
+        }
+
+        @Test
+        @DisplayName("기본 판매가는 필수다")
+        void baseRequired() {
+            assertThatThrownBy(() -> ProductPricing.displaySalePrice(null, 0L)).isInstanceOf(NullPointerException.class);
+        }
+    }
+
+    @Nested
     @DisplayName("discountRate")
     class DiscountRate {
 

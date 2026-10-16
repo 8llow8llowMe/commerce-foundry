@@ -113,6 +113,42 @@ class CategoryTreeTest {
     }
 
     @Nested
+    @DisplayName("visiblePathTo")
+    class VisiblePathTo {
+
+        @Test
+        @DisplayName("모두 보이면 pathTo 와 같다")
+        void allVisible() {
+            assertThat(tree.visiblePathTo(111)).extracting(Category::id).containsExactly(1L, 11L, 111L);
+        }
+
+        @Test
+        @DisplayName("숨긴 중간 노드만 빠지고 그 하위와 상위는 순서대로 남는다 — 숨김은 메뉴에서만 뺀다")
+        void dropsHiddenMiddleNodeOnly() {
+            assertThat(tree.visiblePathTo(121)).extracting(Category::id).containsExactly(1L, 121L);
+        }
+
+        @Test
+        @DisplayName("숨긴 최상위만 빠진다")
+        void dropsHiddenRoot() {
+            assertThat(tree.visiblePathTo(31)).extracting(Category::id).containsExactly(31L);
+        }
+
+        @Test
+        @DisplayName("대상이 숨김이면 대상도 빠진다")
+        void dropsHiddenTarget() {
+            assertThat(tree.visiblePathTo(12)).extracting(Category::id).containsExactly(1L);
+            assertThat(tree.visiblePathTo(3)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("없는 아이디(대표 카테고리 데이터 오류)면 빈 목록이다")
+        void unknownId() {
+            assertThat(tree.visiblePathTo(999)).isEmpty();
+        }
+    }
+
+    @Nested
     @DisplayName("순환 데이터")
     class Cycle {
 

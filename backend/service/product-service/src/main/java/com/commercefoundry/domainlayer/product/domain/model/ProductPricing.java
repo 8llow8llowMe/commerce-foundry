@@ -30,6 +30,22 @@ public final class ProductPricing {
     }
 
     /**
+     * 상품 단위 표시 판매가 (목록 항목 · 상세 상단) = 기본 판매가 + 판매중 SKU 추가금의 최소값. 판매중 SKU 가 없으면 기본 판매가 그대로다.
+     *
+     * <p>상품 등록(#9)이 "기본 판매가 = 판매중 SKU 최저가" 불변식을 지키면 최소 추가금은 0 이라 기본 판매가와 같다.
+     * 불변식이 깨진 데이터에서도 화면에 살 수 없는 가격(판매중 SKU 어디에도 없는 가격)을 보이지 않게 최소 추가금을 더한다.
+     *
+     * @param minOnSaleAdditionalAmount 판매중 SKU 추가금의 최소값(최소 화폐 단위). 통화는 기본 판매가를 따른다 ({@link Sku} 불변식). 판매중 SKU 가 없으면 null
+     */
+    public static Money displaySalePrice(Money base, Long minOnSaleAdditionalAmount) {
+        Objects.requireNonNull(base, "base");
+        if (minOnSaleAdditionalAmount == null) {
+            return base;
+        }
+        return base.plus(Money.of(minOnSaleAdditionalAmount, base.currency()));
+    }
+
+    /**
      * 정가 대비 할인율(%) — {@code (정가 − 판매가) × 100 / 정가} 를 정수로 버린다. 표시용이라 할인율을 부풀리지 않는다.
      *
      * <p>할인이 없으면 null 이다 (FE 계약). 버려서 0 이 되는 1% 미만 할인도 할인 표시를 하지 않으므로 null 이다.

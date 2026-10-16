@@ -105,6 +105,18 @@ public final class CategoryTree {
         return List.copyOf(path);
     }
 
+    /**
+     * 스토어프론트 상세 화면 breadcrumb — {@link #pathTo} 에서 숨긴 카테고리만 뺀다. 순서는 그대로다.
+     *
+     * <p>카테고리 숨김은 "메뉴에서만 숨김" 이다. 숨긴 카테고리 아래 상품도 노출되므로 경로에서는 숨긴 노드만 빠지고
+     * 그 하위 노드는 남는다 ({@link #visibleRoots()} 가 숨긴 노드의 하위까지 빼는 것과 다르다).
+     *
+     * @return 없는 아이디면 빈 목록
+     */
+    public List<Category> visiblePathTo(long categoryId) {
+        return pathTo(categoryId).stream().filter(Category::visible).toList();
+    }
+
     private List<CategoryNode> visibleNodes(List<Category> categories, Set<Long> visited) {
         List<CategoryNode> nodes = new ArrayList<>();
         for (Category category : categories) {

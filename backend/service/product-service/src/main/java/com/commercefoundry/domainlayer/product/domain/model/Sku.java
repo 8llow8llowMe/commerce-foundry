@@ -16,4 +16,9 @@ public record Sku(long id, long productId, SkuOptionKey optionKey, Money additio
         Objects.requireNonNull(additionalPrice, "additionalPrice");
         Objects.requireNonNull(saleStatus, "saleStatus");
     }
+
+    /** 판매중(ON_SALE) SKU 인가. 상품 판매 상태 · 재고는 보지 않는다 — 판매 가능 여부는 {@link SaleAvailability#ofSku} 가 정한다. */
+    public boolean isOnSale() {
+        return saleStatus == SaleStatus.ON_SALE;
+    }
 }
