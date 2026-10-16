@@ -44,14 +44,26 @@ class ProductPricingTest {
             "30000, 20001, 33",
             // 66.66 → 66 (반올림하면 67)
             "3, 1, 66",
-            // 0.99 → 0
-            "10000, 9901, 0",
+            // 1.00 → 1 (1% 는 표시한다)
+            "10000, 9900, 1",
             // 판매가 0 은 100%
             "10000, 0, 100"
         })
         @DisplayName("(정가 − 판매가) × 100 / 정가 를 정수로 버린다")
         void truncates(long list, long sale, int expected) {
             assertThat(ProductPricing.discountRate(Money.of(list, KRW), Money.of(sale, KRW))).isEqualTo(expected);
+        }
+
+        @ParameterizedTest(name = "정가 {0} · 판매가 {1}")
+        @CsvSource({
+            // 0.99 → 0
+            "10000, 9901",
+            // 0.01 → 0
+            "10000, 9999"
+        })
+        @DisplayName("버려서 0% 가 되는 1% 미만 할인은 할인이 없는 것으로 보고 null 이다 (FE 계약)")
+        void belowOnePercentIsNull(long list, long sale) {
+            assertThat(ProductPricing.discountRate(Money.of(list, KRW), Money.of(sale, KRW))).isNull();
         }
 
         @Test

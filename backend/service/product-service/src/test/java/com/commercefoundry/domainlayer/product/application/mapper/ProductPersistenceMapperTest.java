@@ -12,6 +12,8 @@ import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.shared.commerce.Money;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Entity → Domain 매퍼 중 금액 · 조합 키처럼 손으로 쓴 변환이 섞인 것만 본다. 나머지 필드 대응은 MapStruct 가 컴파일 시점에
@@ -49,11 +51,12 @@ class ProductPersistenceMapperTest {
     }
 
     @Test
-    @DisplayName("SKU: 조합 키를 정규형으로 읽고, 추가금을 Money 로 묶는다")
+    @DisplayName("SKU: 정규형 조합 키를 읽고, 추가금을 Money 로 묶는다")
     void sku() {
-        Sku sku = skuMapper.toDomain(sku("23,5,5"));
+        Sku sku = skuMapper.toDomain(sku("5,23"));
 
         assertThat(sku.optionKey().value()).isEqualTo("5,23");
+        assertThat(sku.optionKey().valueIds()).containsExactly(5L, 23L);
         assertThat(sku.additionalPrice()).isEqualTo(Money.of(3_000, KRW));
         assertThat(sku.saleStatus()).isEqualTo(SaleStatus.ON_SALE);
     }
@@ -62,6 +65,24 @@ class ProductPersistenceMapperTest {
     @DisplayName("SKU: 옵션 없는 상품의 빈 조합 키는 빈 키다")
     void skuWithoutOptions() {
         assertThat(skuMapper.toDomain(sku("")).optionKey().isEmpty()).isTrue();
+    }
+
+    @ParameterizedTest(name = "\"{0}\"")
+    @ValueSource(strings = {"23,5,5", "23,5", "5,5"})
+    @DisplayName("SKU: 저장된 조합 키가 정규형(오름차순 · 중복 없음)이 아니면 고쳐 읽지 않고 실패한다")
+    void skuWithNonCanonicalKey(String stored) {
+        assertThatThrownBy(() -> skuMapper.toDomain(sku(stored)))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining(stored);
+    }
+
+    @ParameterizedTest(name = "\"{0}\"")
+    @ValueSource(strings = {"1,,2", "05", "+5", "5,"})
+    @DisplayName("SKU: 저장된 조합 키의 형식이 틀리면 실패한다")
+    void skuWithMalformedKey(String stored) {
+        assertThatThrownBy(() -> skuMapper.toDomain(sku(stored)))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining(stored);
     }
 
     private static ProductEntity.ProductEntityBuilder product() {

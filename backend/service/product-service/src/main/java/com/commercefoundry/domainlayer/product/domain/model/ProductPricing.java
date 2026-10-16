@@ -32,8 +32,10 @@ public final class ProductPricing {
     /**
      * 정가 대비 할인율(%) — {@code (정가 − 판매가) × 100 / 정가} 를 정수로 버린다. 표시용이라 할인율을 부풀리지 않는다.
      *
+     * <p>할인이 없으면 null 이다 (FE 계약). 버려서 0 이 되는 1% 미만 할인도 할인 표시를 하지 않으므로 null 이다.
+     *
      * @param list 정가. null 이면 할인 표시가 없다
-     * @return 정가가 없거나, 판매가 이하이거나, 통화가 다르면 null
+     * @return 1 이상의 할인율. 정가가 없거나, 판매가 이하이거나, 통화가 다르거나, 1% 미만이면 null
      */
     public static Integer discountRate(Money list, Money sale) {
         Objects.requireNonNull(sale, "sale");
@@ -42,8 +44,9 @@ public final class ProductPricing {
         }
 
         BigDecimal discount = BigDecimal.valueOf(list.amount() - sale.amount());
-        return discount.multiply(PERCENT)
+        int rate = discount.multiply(PERCENT)
             .divide(BigDecimal.valueOf(list.amount()), 0, RoundingMode.DOWN)
             .intValueExact();
+        return rate == 0 ? null : rate;
     }
 }

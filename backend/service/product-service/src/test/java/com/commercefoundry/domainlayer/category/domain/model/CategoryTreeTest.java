@@ -125,7 +125,7 @@ class CategoryTreeTest {
         ));
 
         @Test
-        @Timeout(1)
+        @Timeout(value = 1, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
         @DisplayName("subtreeIds 가 무한 루프에 빠지지 않는다")
         void subtreeIdsTerminates() {
             assertThat(cyclicTree.subtreeIds(41)).containsExactlyInAnyOrder(41L, 42L);
@@ -133,7 +133,7 @@ class CategoryTreeTest {
         }
 
         @Test
-        @Timeout(1)
+        @Timeout(value = 1, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
         @DisplayName("pathTo 가 무한 루프에 빠지지 않고 대상으로 끝난다")
         void pathToTerminates() {
             assertThat(cyclicTree.pathTo(41)).extracting(Category::id).containsExactly(42L, 41L);
@@ -141,7 +141,7 @@ class CategoryTreeTest {
         }
 
         @Test
-        @Timeout(1)
+        @Timeout(value = 1, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
         @DisplayName("최상위에서 닿지 않는 순환 노드는 visibleRoots 에 나오지 않는다")
         void visibleRootsSkipsCycles() {
             assertThat(cyclicTree.visibleRoots()).extracting(node -> node.category().id()).containsExactly(1L);

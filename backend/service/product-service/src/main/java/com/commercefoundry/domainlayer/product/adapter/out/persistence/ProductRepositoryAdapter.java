@@ -9,8 +9,11 @@ import com.commercefoundry.domainlayer.product.domain.model.Product;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -22,6 +25,10 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
 
     @Override
     public Slice<ProductListQueryResult> searchVisible(ProductSearchCriteria criteria) {
+        Set<Long> categoryIds = criteria.categoryIds();
+        if (categoryIds != null && categoryIds.isEmpty()) {
+            return new SliceImpl<>(List.of(), PageRequest.of(criteria.page(), criteria.size()), false);
+        }
         return productRepository.searchVisible(criteria);
     }
 
@@ -31,7 +38,7 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
     }
 
     @Override
-    public List<Product> findAllByIds(Collection<Long> productIds) {
+    public List<Product> findAllByIdsIncludingHidden(Collection<Long> productIds) {
         if (productIds.isEmpty()) {
             return List.of();
         }

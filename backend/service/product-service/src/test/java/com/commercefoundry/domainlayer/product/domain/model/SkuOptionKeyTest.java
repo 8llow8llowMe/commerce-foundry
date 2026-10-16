@@ -90,6 +90,13 @@ class SkuOptionKeyTest {
             assertThatThrownBy(() -> SkuOptionKey.parse(value)).isInstanceOf(IllegalArgumentException.class);
         }
 
+        @ParameterizedTest(name = "\"{0}\"")
+        @ValueSource(strings = {"+5", "05", "0", "-5", "5,007", "1e3", "99999999999999999999"})
+        @DisplayName("조각은 0 으로 시작하지 않는 양의 십진수만 받는다 — 같은 아이디의 다른 표기 · long 범위 밖은 거절한다")
+        void rejectsNonCanonicalNumbers(String value) {
+            assertThatThrownBy(() -> SkuOptionKey.parse(value)).isInstanceOf(IllegalArgumentException.class);
+        }
+
         @Test
         @DisplayName("parse → of 로 정규형을 되찾는다")
         void roundTrip() {
@@ -97,6 +104,38 @@ class SkuOptionKeyTest {
 
             assertThat(SkuOptionKey.of(SkuOptionKey.parse(key.value()))).isEqualTo(key);
             assertThat(SkuOptionKey.of(SkuOptionKey.parse("23,5,5")).value()).isEqualTo("5,23");
+        }
+    }
+
+    @Nested
+    @DisplayName("fromStored")
+    class FromStored {
+
+        @Test
+        @DisplayName("정규형 저장값을 그대로 읽는다")
+        void readsCanonical() {
+            assertThat(SkuOptionKey.fromStored("5,11,23")).isEqualTo(SkuOptionKey.of(List.of(23L, 11L, 5L)));
+            assertThat(SkuOptionKey.fromStored("7").valueIds()).containsExactly(7L);
+            assertThat(SkuOptionKey.fromStored("").isEmpty()).isTrue();
+        }
+
+        @ParameterizedTest(name = "\"{0}\"")
+        @ValueSource(strings = {"23,5", "5,5", "23,5,5", "5,11,11"})
+        @DisplayName("정렬이 안 됐거나 중복이 있으면 정규화하지 않고 실패한다 — 메시지에 저장값을 넣는다")
+        void rejectsNonCanonical(String stored) {
+            assertThatThrownBy(() -> SkuOptionKey.fromStored(stored))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("\"" + stored + "\"");
+        }
+
+        @ParameterizedTest(name = "\"{0}\"")
+        @ValueSource(strings = {"1,,2", "05", "+5", "a", "1,2,3,4,5,6"})
+        @DisplayName("형식 오류 · 조합 개수 초과도 저장 데이터 오류로 실패한다")
+        void rejectsMalformed(String stored) {
+            assertThatThrownBy(() -> SkuOptionKey.fromStored(stored))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("\"" + stored + "\"")
+                .hasCauseInstanceOf(IllegalArgumentException.class);
         }
     }
 }

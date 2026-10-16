@@ -41,16 +41,29 @@ class SaleAvailabilityTest {
         assertThat(SaleAvailability.ofSku(productStatus, skuStatus, stock)).isEqualTo(expected);
     }
 
-    @ParameterizedTest(name = "상품 {0} · 판매 가능 SKU {1} → {2}")
+    @ParameterizedTest(name = "상품 {0} · 판매중 SKU {1} · 구매 가능 SKU {2} → {3}")
     @CsvSource({
-        "ON_SALE, true, ON_SALE",
-        "ON_SALE, false, SOLD_OUT",
-        "STOP_SELLING, true, STOP_SELLING",
-        "STOP_SELLING, false, STOP_SELLING"
+        "ON_SALE, true, true, ON_SALE",
+        // 판매중 SKU 가 모두 재고 없음 (#10 재고 이후에만 나온다)
+        "ON_SALE, true, false, SOLD_OUT",
+        // 판매중 SKU 없음 (SKU 0건 포함) — 품절이 아니라 판매 종료다
+        "ON_SALE, false, false, STOP_SELLING",
+        // 판매중 SKU 가 없으면 구매 가능 여부는 보지 않는다
+        "ON_SALE, false, true, STOP_SELLING",
+        "STOP_SELLING, true, true, STOP_SELLING",
+        "STOP_SELLING, true, false, STOP_SELLING",
+        "STOP_SELLING, false, false, STOP_SELLING"
     })
-    @DisplayName("상품 판정: 판매 종료가 아니면 살 수 있는 SKU 유무로 판매중 / 품절이다 (SKU 0건은 품절)")
-    void ofProduct(SaleStatus productStatus, boolean hasSellableSku, SaleAvailability expected) {
-        assertThat(SaleAvailability.ofProduct(productStatus, hasSellableSku)).isEqualTo(expected);
+    @DisplayName("상품 판정: 상품 판매 종료 → 판매중 SKU 없음(판매 종료) → 구매 가능 SKU 있음(판매중) → 그 밖(품절) 순으로 본다")
+    void ofProduct(SaleStatus productStatus, boolean hasOnSaleSku, boolean hasPurchasableSku, SaleAvailability expected) {
+        assertThat(SaleAvailability.ofProduct(productStatus, hasOnSaleSku, hasPurchasableSku)).isEqualTo(expected);
+    }
+
+    @ParameterizedTest(name = "상품 {0} · 판매중 SKU {1}")
+    @CsvSource({"ON_SALE, true", "ON_SALE, false", "STOP_SELLING, true", "STOP_SELLING, false"})
+    @DisplayName("재고가 없는 #8 (구매 가능 SKU = 판매중 SKU) 에서는 품절이 나오지 않는다")
+    void noSoldOutWithoutStock(SaleStatus productStatus, boolean hasOnSaleSku) {
+        assertThat(SaleAvailability.ofProduct(productStatus, hasOnSaleSku, hasOnSaleSku)).isNotEqualTo(SaleAvailability.SOLD_OUT);
     }
 
     @Test

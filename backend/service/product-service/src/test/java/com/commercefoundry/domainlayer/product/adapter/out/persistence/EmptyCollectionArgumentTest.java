@@ -27,7 +27,7 @@ import org.springframework.data.domain.Slice;
 
 /**
  * 빈 컬렉션 인자는 DB 에 가지 않고 빈 결과를 낸다 — {@code in ()} 은 방언에 따라 문법 오류이고, 가도 결과는 늘 비어 있다.
- * 실제 질의 결과는 PostgreSQL 리포지토리 테스트({@code ProductPersistenceAdapterTest})가 본다.
+ * 이 계약은 어댑터가 지킨다. 실제 질의 결과는 PostgreSQL 리포지토리 테스트({@code ProductPersistenceAdapterTest})가 본다.
  */
 class EmptyCollectionArgumentTest {
 
@@ -37,7 +37,23 @@ class EmptyCollectionArgumentTest {
         ProductRepository repository = mock(ProductRepository.class);
         ProductMapper mapper = mock(ProductMapper.class);
 
-        assertThat(new ProductRepositoryAdapter(repository, mapper).findAllByIds(List.of())).isEmpty();
+        assertThat(new ProductRepositoryAdapter(repository, mapper).findAllByIdsIncludingHidden(List.of())).isEmpty();
+        verifyNoInteractions(repository, mapper);
+    }
+
+    @Test
+    @DisplayName("상품 목록: 빈 카테고리 집합이면 요청한 페이지의 빈 Slice 다")
+    void productsInEmptyCategories() {
+        ProductRepository repository = mock(ProductRepository.class);
+        ProductMapper mapper = mock(ProductMapper.class);
+
+        Slice<ProductListQueryResult> slice = new ProductRepositoryAdapter(repository, mapper)
+            .searchVisible(new ProductSearchCriteria(Set.of(), ProductSortType.PRICE_ASC, 2, 20));
+
+        assertThat(slice.getContent()).isEmpty();
+        assertThat(slice.hasNext()).isFalse();
+        assertThat(slice.getNumber()).isEqualTo(2);
+        assertThat(slice.getSize()).isEqualTo(20);
         verifyNoInteractions(repository, mapper);
     }
 
@@ -77,7 +93,7 @@ class EmptyCollectionArgumentTest {
     }
 
     @Test
-    @DisplayName("QueryDSL 구현도 직접 불리면 같은 규칙을 지킨다 — 빈 카테고리 필터는 빈 Slice, 빈 상품 목록 집계는 빈 목록")
+    @DisplayName("QueryDSL 구현의 방어 코드도 같은 규칙을 지킨다 — 빈 카테고리 필터는 빈 Slice, 빈 상품 목록 집계는 빈 목록 (계약은 어댑터가 지킨다)")
     void customRepositories() {
         JPAQueryFactory queryFactory = mock(JPAQueryFactory.class);
 
