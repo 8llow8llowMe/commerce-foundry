@@ -24,6 +24,8 @@ dependencies {
     compileOnly 'jakarta.servlet:jakarta.servlet-api'
     // token.reactive 만 쓴다. reactor 는 게이트웨이에 이미 있다
     compileOnly 'io.projectreactor:reactor-core'
+    // internal.client(서비스 토큰 Feign 인터셉터)만 쓴다. Feign 클라이언트를 가진 서비스가 openfeign 스타터로 직접 가져온다 — 버전은 Spring Cloud BOM
+    compileOnly 'io.github.openfeign:feign-core'
 
     testFixturesImplementation 'org.springframework.boot:spring-boot-starter-test'
     testFixturesImplementation 'tools.jackson.core:jackson-databind'
@@ -38,9 +40,10 @@ dependencies {
     // actuator 경로 규칙(health 만 열고 나머지 노출 엔드포인트는 막는다)을 실제 엔드포인트로 본다
     testImplementation 'org.springframework.boot:spring-boot-starter-actuator'
     testImplementation 'io.projectreactor:reactor-core'
+    testImplementation 'io.github.openfeign:feign-core'
 }
 
-// 위 compileOnly 가 api/implementation 으로 바뀌는 회귀를 막는다. 소비자에게 가는 두 클래스패스 — 본체(runtimeClasspath)와
+// 위 compileOnly(서블릿 · Boot 보안 자동설정 · Feign)가 api/implementation 으로 바뀌는 회귀를 막는다. 소비자에게 가는 두 클래스패스 — 본체(runtimeClasspath)와
 // 테스트 픽스처(testFixturesRuntimeClasspath, 게이트웨이 테스트도 받는다) — 에 아래 모듈이 있으면 check 가 실패한다.
 // 구성 시점에 Provider 로 잡아 두고 실행 시점에는 project 를 만지지 않는다 (configuration cache 안전)
 def resolvedModules = { String configurationName ->
@@ -58,7 +61,7 @@ def testFixturesRuntimeModules = resolvedModules('testFixturesRuntimeClasspath')
 
 def verifyNoServletLeak = tasks.register('verifyNoServletLeak') {
     group = 'verification'
-    description = 'security-core 의 runtimeClasspath · testFixturesRuntimeClasspath 에 서블릿 스택 · Boot 보안 자동설정이 없는지 확인한다'
+    description = 'security-core 의 runtimeClasspath · testFixturesRuntimeClasspath 에 서블릿 스택 · Boot 보안 자동설정 · Feign 이 없는지 확인한다'
 
     def forbiddenModules = [
         'org.springframework:spring-webmvc',
@@ -69,6 +72,8 @@ def verifyNoServletLeak = tasks.register('verifyNoServletLeak') {
         'jakarta.servlet:jakarta.servlet-api',
         'org.springframework.boot:spring-boot-security',
         'org.springframework.security:spring-security-config',
+        // Feign 을 쓰지 않는 서비스 · 게이트웨이에 Feign 이 끌려가지 않게 (internal.client)
+        'io.github.openfeign:feign-core',
     ]
     inputs.property('runtimeModules', runtimeModules)
     inputs.property('testFixturesRuntimeModules', testFixturesRuntimeModules)
@@ -79,7 +84,7 @@ def verifyNoServletLeak = tasks.register('verifyNoServletLeak') {
             .collectEntries { name, modules -> [name, modules.findAll { it in forbiddenModules }] }
             .findAll { name, modules -> !modules.isEmpty() }
         if (!leaked.isEmpty()) {
-            throw new GradleException("security-core 의 클래스패스에 서블릿 · Boot 보안 자동설정 모듈이 들어왔습니다: ${leaked}. "
+            throw new GradleException("security-core 의 클래스패스에 서블릿 · Boot 보안 자동설정 · Feign 모듈이 들어왔습니다: ${leaked}. "
                 + 'compileOnly 로 두고 소비 서비스가 직접 선언하게 하세요 (security-guide.md 의존)')
         }
     }

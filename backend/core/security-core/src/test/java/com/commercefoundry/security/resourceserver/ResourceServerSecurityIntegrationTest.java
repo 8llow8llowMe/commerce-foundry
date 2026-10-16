@@ -9,6 +9,7 @@ import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestKeys;
+import com.commercefoundry.security.support.TestServiceTokens;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import com.nimbusds.jwt.JWTClaimsSet;
@@ -82,6 +83,7 @@ class ResourceServerSecurityIntegrationTest {
     @BeforeEach
     void resetCalls() {
         TestController.ADMIN_CALLS.set(0);
+        TestController.INTERNAL_CALLS.set(0);
     }
 
     // ── 401 ──────────────────────────────────────────────────────
@@ -210,10 +212,19 @@ class ResourceServerSecurityIntegrationTest {
         assertThat(JSON.readTree(response.getContentAsByteArray()).get("dataBody").asString()).isEqualTo(String.valueOf(TestTokens.MEMBER_ID));
     }
 
+    /**
+     * 이 컨텍스트는 사용자 체인만 import 한다 — 서비스가 {@code InternalResourceServerConfigurer} 를 빠뜨린 모양이다.
+     * 그래도 internal API 는 열리지 않는다(fail-closed). 서비스 토큰은 사용자 체인의 RS256 디코더를 통과하지 못해 003 이다.
+     */
     @Test
-    @DisplayName("/internal/** 은 JWT 없이 호출된다")
-    void internalEndpointNeedsNoToken() throws Exception {
-        assertThat(perform(get("/internal/v1/x")).getStatus()).isEqualTo(200);
+    @DisplayName("internal 체인 없이 사용자 체인만 있으면 /internal/** 은 거부된다 — 무토큰 401 · 001, 로그인 403 · 005, 서비스 토큰 401 · 003")
+    void internalEndpointIsDeniedWithoutInternalChain() throws Exception {
+        String serviceToken = TestServiceTokens.bearer(TestServiceTokens.CALLER, TestServiceTokens.SERVICE_ID);
+
+        assertEnvelope(perform(get("/internal/v1/x")), SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(perform(get("/internal/v1/x").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))), SecurityErrorCode.FORBIDDEN);
+        assertEnvelope(perform(get("/internal/v1/x").header(HttpHeaders.AUTHORIZATION, serviceToken)), SecurityErrorCode.TOKEN_INVALID);
+        assertThat(TestController.INTERNAL_CALLS).hasValue(0);
     }
 
     @Test
@@ -429,6 +440,7 @@ class ResourceServerSecurityIntegrationTest {
     static class TestController {
 
         static final AtomicInteger ADMIN_CALLS = new AtomicInteger();
+        static final AtomicInteger INTERNAL_CALLS = new AtomicInteger();
 
         /** 공개 API 도 permitAll() 을 명시한다 — 빠뜨린 메서드가 리뷰에서 보이게 (security-guide.md §5-1). */
         @PreAuthorize("permitAll()")
@@ -457,8 +469,10 @@ class ResourceServerSecurityIntegrationTest {
             return ResponseEntity.ok(Response.success());
         }
 
+        /** 사용자 체인의 {@code denyAll} 만으로 막히는지 본다 — 애노테이션이 있으면 그것이 막았는지 구분되지 않는다. */
         @GetMapping("/internal/v1/x")
         ResponseEntity<Response<Void>> internal() {
+            INTERNAL_CALLS.incrementAndGet();
             return ResponseEntity.ok(Response.success());
         }
 

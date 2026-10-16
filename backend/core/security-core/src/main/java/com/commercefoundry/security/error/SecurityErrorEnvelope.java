@@ -28,10 +28,13 @@ public final class SecurityErrorEnvelope {
         return jsonMapper.writeValueAsBytes(Response.fail(errorCode.getCode(), errorCode.getMessage()));
     }
 
-    /** 401 이면 RFC 6750 의 {@code WWW-Authenticate} 값, 403 · 503 이면 비어 있다. */
+    /**
+     * 401 이면 RFC 6750 의 {@code WWW-Authenticate} 값, 403 · 503 이면 비어 있다.
+     * 서비스 인증 실패(007)는 토큰이 없든 틀리든 {@code Bearer} 만 싣는다 — 어느 검증에서 걸렸는지 알리지 않는다.
+     */
     public static Optional<String> wwwAuthenticate(SecurityErrorCode errorCode) {
         return switch (errorCode) {
-            case UNAUTHORIZED -> Optional.of(BEARER);
+            case UNAUTHORIZED, SERVICE_UNAUTHORIZED -> Optional.of(BEARER);
             case TOKEN_EXPIRED -> Optional.of(EXPIRED);
             case TOKEN_INVALID, TOKEN_REVOKED -> Optional.of(INVALID_TOKEN);
             case FORBIDDEN, TOKEN_VERIFICATION_UNAVAILABLE -> Optional.empty();

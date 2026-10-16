@@ -31,8 +31,10 @@ import tools.jackson.databind.json.JsonMapper;
  *       노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — 노출 설정이 1차, URL 규칙이 2차 방어다. management base-path 를 바꿔도 따라간다.
  *       실행 모듈은 actuator 를 가진다는 전제다({@code backend/build.gradle} 이 실행 모듈마다 넣는다).</li>
  *   <li>{@code /api/v1/admin/**} 은 URL 규칙으로 ADMIN 을 요구한다. 컨트롤러의 {@code hasRole('ADMIN')} 과 이중이다.</li>
- *   <li>나머지 경로는 열어 두고 인증 필요 여부는 메서드의 {@code @PreAuthorize} 가 정한다 — 비로그인 상품 조회 같은 API 가 있다.
- *       {@code /internal/**} 은 JWT 없이 호출되므로 internal 컨트롤러에 {@code @PreAuthorize} 를 달지 않는다.</li>
+ *   <li>{@code /internal/**} 은 이 체인에서 {@code denyAll} 이다(익명 001 · 로그인 005). 서비스 토큰으로 여는 것은 그보다 앞 순서의
+ *       {@link InternalResourceServerConfigurer} 체인이다 — 서비스가 그 import 를 빠뜨려도 internal API 가 열리지 않는다(fail-closed).
+ *       internal 컨트롤러 메서드는 허용 호출자를 {@code @PreAuthorize("hasAuthority('SERVICE_<service-id>')")} 로 반드시 선언한다.</li>
+ *   <li>나머지 경로는 열어 두고 인증 필요 여부는 메서드의 {@code @PreAuthorize} 가 정한다 — 비로그인 상품 조회 같은 API 가 있다.</li>
  *   <li>토큰이 있는데 틀리면 공개 API 여도 401 이다. 틀린 토큰을 익명으로 취급하지 않는다.</li>
  *   <li>토큰 검증 중 시스템 오류({@code AuthenticationServiceException})는 500 이 아니라 006(503) 봉투로 답한다.</li>
  * </ul>
@@ -75,6 +77,8 @@ public class ResourceServerSecurityConfigurer {
                 .requestMatchers(EndpointRequest.to(HEALTH_ENDPOINT)).permitAll()
                 .requestMatchers(EndpointRequest.toAnyEndpoint().excluding(HEALTH_ENDPOINT)).denyAll()
                 .requestMatchers(ADMIN_PATH_PATTERN).hasRole(MemberRole.ADMIN.name())
+                // internal API 는 앞 순서의 서비스 인증 체인(InternalResourceServerConfigurer)만 연다. 그 체인이 없으면 여기서 닫힌다
+                .requestMatchers(InternalResourceServerConfigurer.INTERNAL_PATH_PATTERN).denyAll()
                 .anyRequest().permitAll())
             .oauth2ResourceServer(resourceServer -> resourceServer
                 .jwt(jwt -> jwt.decoder(accessTokenDecoder).jwtAuthenticationConverter(authenticationConverter))
@@ -96,12 +100,13 @@ public class ResourceServerSecurityConfigurer {
      * {@code BearerTokenAuthenticationFilter} 의 기본 실패 처리기는 {@code AuthenticationServiceException}(디코더의 {@code JwtException},
      * #4 의 검증 저장소 장애)을 다시 던진다 — 필터 밖으로 나가 봉투 없는 500 이 된다. 다시 던지지 않고 진입점(006, 503)으로 보낸다.
      * 리액티브 게이트웨이는 {@code ServerAuthenticationEntryPointFailureHandler} 에 같은 설정이 필요하다 ({@code security-guide.md} §7).
+     * 서비스 간 인증 체인({@link InternalResourceServerConfigurer})도 같은 이유로 쓴다.
      */
-    private static final class ServiceFailureAsEnvelope implements ObjectPostProcessor<BearerTokenAuthenticationFilter> {
+    static final class ServiceFailureAsEnvelope implements ObjectPostProcessor<BearerTokenAuthenticationFilter> {
 
         private final SecurityErrorResponder responder;
 
-        private ServiceFailureAsEnvelope(SecurityErrorResponder responder) {
+        ServiceFailureAsEnvelope(SecurityErrorResponder responder) {
             this.responder = responder;
         }
 
