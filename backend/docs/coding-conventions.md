@@ -199,10 +199,14 @@ public final class ProductValidationMessage {
   - 음수 `Money` 는 만들지 않는다. 할인·환불은 양수로 들고 `minus` 로 뺀다 — 결과가 음수면 계산 오류로 실패한다.
 - `BigDecimal` 비율은 문자열로 만든다(`new BigDecimal("0.1")`). `new BigDecimal(0.1)` 은 이진 오차를 그대로 가져온다.
 
-### 9-4. 인덱스 명명
+### 9-4. 인덱스 · 제약 명명
 
 - 일반 `idx_{table}_{col1}_{col2}`, 유니크 `uk_{table}_{col1}_{col2}`. snake_case, **모든 컬럼을 이름에 담는다.**
-- PostgreSQL 식별자 상한은 **63자**다. 넘으면 의미를 해치지 않는 범위에서 축약한다.
+- check 제약 `ck_{table}_{의미}` — 예: `ck_product_list_price_pair`, `ck_sku_additional_price_non_negative`.
+  JPA 3.2 `@Table(check = @CheckConstraint(name = ..., constraint = ...))` 로 단다. 표현식은 H2(PostgreSQL 모드 — 컨텍스트 테스트)와
+  PostgreSQL 이 둘 다 받는 표준 SQL 로 쓴다. `update` 는 이미 있는 테이블에 check 제약을 더하지 않는다 —
+  기존 테이블에 더하면 운영 DDL 에 `alter table ... add constraint ... check (...)` 를 적고 dev 에도 직접 적용한다.
+- PostgreSQL 식별자 상한은 **63자**다. 넘으면 의미를 해치지 않는 범위에서 축약한다. 스냅숏 테스트가 접두어(`idx_` · `uk_` · `ck_` + 테이블명)와 길이를 검사한다.
 
 ### 9-5. 쿼리 작성 (필수)
 
@@ -313,7 +317,16 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
 | 리포지토리 테스트 (Testcontainers PostgreSQL) | `validate` | DDL 스냅숏을 init script 로 적용 (`bootstrap-conventions.md` 리포지토리 테스트) |
 
 - **엔티티를 추가 · 변경하는 PR 은 본문 `운영 DDL` 절에 운영에 적용할 PostgreSQL DDL 을 그대로 적는다.**
-  테이블 · 컬럼 코멘트, 인덱스(`idx_` / `uk_`), 제약까지 넣는다. 스키마(`auth` · `product` · `orders` · `payment` · `delivery`)를 붙여 쓴다.
+  테이블 · 컬럼 코멘트, 인덱스(`idx_` / `uk_`), 제약(`ck_`)까지 넣는다. 스키마(`auth` · `product` · `orders` · `payment` · `delivery`)를 붙여 쓴다.
+  아래 틀로 감싼다 — Windows `psql` 은 클라이언트 인코딩 기본값이 CP949 라 그대로 붙여 넣으면 한글 코멘트가 깨지고,
+  트랜잭션으로 묶지 않으면 중간에 실패했을 때 일부만 적용된다.
+
+  ```sql
+  set client_encoding = 'UTF8';
+  begin;
+  -- 스냅숏 그대로 (create schema 줄 제외)
+  commit;
+  ```
 - DDL 은 손으로 짓지 않는다. **Hibernate 가 만든 DDL** 을 아래 둘 중 하나로 뽑는다.
   손으로 쓰면 타입(`timestamptz`, `bigint`, `varchar(n)`)이나 인덱스 이름이 dev 와 갈라진다.
   - local · dev 에서 `update` 가 만든 결과 — 예: `pg_dump --schema-only -t product.product_option`
@@ -322,8 +335,18 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
     방언은 PostgreSQL, 네이밍 전략은 Boot 기본값이라 서비스가 `update` 로 만드는 것과 같은 이름이 나온다.
 - 엔티티를 바꾸면 **스냅숏을 같은 PR 에서 갱신한다** — 스냅숏 테스트가 실패하며 `build/ddl/...` 을 복사하라고 안내한다.
   PR 본문 운영 DDL 은 스냅숏에서 바뀐 부분을 옮긴다 (새 테이블은 `create`, 기존 테이블 변경은 `alter` 로 고쳐 쓴다).
-- 로컬 DB 가 없으면 **스냅숏이 정본**이다. CI 의 리포지토리 테스트(Testcontainers)가 스냅숏을 PostgreSQL 에 적용하고
-  `ddl-auto=validate` 로 엔티티와 대조한다 — 스냅숏이 엔티티와 어긋나거나 PostgreSQL 이 받지 못하는 DDL 이면 CI 가 실패한다.
+  스냅숏의 `create schema` 줄은 운영 DDL 로 옮기지 않는다 — 서비스 스키마는 운영 DB 에 이미 있다.
+- 스냅숏 테스트는 방언 버전을 운영 PostgreSQL 메이저 버전(17)으로 고정한다(`jakarta.persistence.database-major-version`).
+  DB 에 붙지 않으면 Hibernate 는 방언의 최소 지원 버전으로 DDL 을 만들기 때문이다. 운영 버전을 올리면 이 값과 스냅숏을 같이 바꾼다.
+- 로컬 DB 가 없으면 **스냅숏이 정본**이다. 검증은 셋으로 나뉜다 — 어느 하나가 나머지를 대신하지 않는다.
+
+  | 무엇을 | 어디서 |
+  |--------|--------|
+  | 테이블 · 컬럼이 있는가, 타입이 맞는가 | 리포지토리 테스트(Testcontainers)의 `ddl-auto=validate` — 스냅숏을 적용한 PostgreSQL 과 엔티티를 대조한다 |
+  | NOT NULL · 길이 · `uk_` · `idx_` · check · 코멘트 | 스냅숏 테스트의 텍스트 비교 — `validate` 는 이것들을 보지 않는다 |
+  | PostgreSQL 이 그 DDL 을 받는가 | 리포지토리 테스트가 스냅숏을 init script 로 적용한다 — 받지 못하면 컨테이너 기동에서 실패한다 |
+
+  리포지토리 테스트는 CI 에서 Docker 가 없으면 건너뛰지 않고 실패한다 (`bootstrap-conventions.md` 리포지토리 테스트).
 - **enum 값을 추가 · 삭제하면 check 제약도 바꾼다.** Hibernate 는 `@Enumerated(STRING)` 컬럼에
   `check (sale_status in ('ON_SALE','STOP_SELLING'))` 를 만드는데, `update` 는 이미 있는 check 제약을 고치지 않는다.
   운영 DDL 에 drop / add 를 적고 dev 에도 직접 적용한다. 이름 없는 컬럼 check 는 PostgreSQL 이 `<테이블>_<컬럼>_check` 로 이름을 붙인다

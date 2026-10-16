@@ -123,7 +123,8 @@ testImplementation 'org.testcontainers:testcontainers-postgresql'
 
 ```java
 @DataJpaTest
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
+@EnabledWithDockerOrOnCi
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = {
     "spring.jpa.hibernate.ddl-auto=validate",
@@ -143,8 +144,20 @@ class ProductPersistenceAdapterTest {
 - **스키마는 DDL 스냅숏(`src/test/resources/ddl/<서비스>-schema.sql`)을 init script 로 적용하고 `ddl-auto=validate` 로 대조한다.**
   컨텍스트가 뜨면 커밋된 스냅숏 — 운영 DDL 의 원본 — 이 실제 PostgreSQL 에서 엔티티 매핑과 맞는다는 뜻이다.
   `create-drop` 으로 바꾸면 스냅숏이 검증되지 않는다. 스냅숏 생성은 `coding-conventions.md` §9-8.
-- **`disabledWithoutDocker = true`** — Docker 가 없는 로컬에서는 건너뛰고(skip) CI(ubuntu 러너)에서 돈다.
-  건너뛴 건은 CI 실행 건수에 세지 않는다(`backend-test-count.py`). 로컬에서 쿼리를 확인하려면 Docker 를 켜고 돌린다.
+- **`@Testcontainers` 는 기본값으로 두고 `@EnabledWithDockerOrOnCi` 를 붙인다. `disabledWithoutDocker = true` 는 쓰지 않는다.**
+  `disabledWithoutDocker` 는 CI 러너에서도 Docker 를 못 찾으면 조용히 skip 하고 초록불을 낸다 — 그러면 스냅숏 DDL 을
+  PostgreSQL 에 적용하는 검증과 QueryDSL · JPQL 실제 질의가 소리 없이 사라진다.
+  `@EnabledWithDockerOrOnCi`(`com.commercefoundry.support`, 판정은 `DockerOrCiCondition`)는 이렇게 정한다.
+
+  | Docker | 환경변수 `CI` | 결과 |
+  |--------|---------------|------|
+  | 있음 | 무관 | 돈다 |
+  | 없음 | `true` (GitHub Actions 가 넣는다) | 돈다 — 컨테이너 기동 실패로 **시끄럽게 실패**한다 |
+  | 없음 | 없음 · 그 밖 | 건너뛴다 — 사유 "Docker 없음 — CI 에서 실행된다" |
+
+  지원 클래스는 서비스 test 소스(`src/test/java/com/commercefoundry/support/`)에 둔다. 처음 만든 것은 product-service 이고,
+  `DockerOrCiConditionTest` 가 판정표와 "모든 `@Testcontainers` 테스트가 이 애노테이션을 쓴다" 를 검사한다.
+  로컬에서 건너뛴 건은 CI 실행 건수에 세지 않는다(`backend-test-count.py`). 로컬에서 쿼리를 확인하려면 Docker 를 켜고 돌린다.
 - 슬라이스는 `@Component` 를 스캔하지 않는다. 테스트할 어댑터와 MapStruct 구현(`*MapperImpl`), `QuerydslConfigurer`(커스텀 리포지토리가
   `JPAQueryFactory` 를 받는다), `*FeaturesConfig`(JPA Auditing — 빠지면 `created_at` NOT NULL 위반)를 `@Import` 한다.
 - 컨테이너는 테스트 클래스마다 자기 `static` 필드로 둔다. 상위 클래스의 컨테이너를 여러 클래스가 상속해 쓰면 확장이 클래스마다
