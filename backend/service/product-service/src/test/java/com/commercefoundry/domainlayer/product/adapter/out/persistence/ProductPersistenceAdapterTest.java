@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence;
 
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductCategoryEntity;
@@ -132,8 +133,10 @@ class ProductPersistenceAdapterTest {
             displayedIn(9005L, 104L, 10L),
             displayedIn(9006L, 105L, 12L),
 
+            // 101: 판매중 SKU 추가금 0 하나 + 판매 종료 SKU 추가금 5,000 (집계에서 빠진다)
+            // 102: 판매 종료 SKU 하나뿐   103: 판매중 SKU 추가금 0 · 1,000   105: SKU 없음
             sku(1001L, 101L, "2001", 0L, SaleStatus.ON_SALE),
-            sku(1002L, 101L, "2002", 0L, SaleStatus.STOP_SELLING),
+            sku(1002L, 101L, "2002", 5_000L, SaleStatus.STOP_SELLING),
             sku(1003L, 102L, "", 3_000L, SaleStatus.STOP_SELLING),
             sku(1004L, 103L, "2003", 0L, SaleStatus.ON_SALE),
             sku(1005L, 103L, "2004", 1_000L, SaleStatus.ON_SALE),
@@ -256,19 +259,51 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("상세: 아이디 목록 조회는 노출 여부와 무관하다")
-    void findAllByIds() {
-        assertThat(productRepositoryPort.findAllByIds(List.of(101L, 104L, 999L))).extracting(Product::id).containsExactlyInAnyOrder(101L, 104L);
+    @DisplayName("internal · 어드민: 아이디 목록 조회는 숨김 상품까지 읽는다")
+    void findAllByIdsIncludingHidden() {
+        assertThat(productRepositoryPort.findAllByIdsIncludingHidden(List.of(101L, 104L, 999L)))
+            .extracting(Product::id)
+            .containsExactlyInAnyOrder(101L, 104L);
     }
 
     @Test
-    @DisplayName("SKU: 상품별로 추가금 있는 SKU · 판매중 SKU 유무를 한 번에 집계하고, SKU 없는 상품은 행이 없다")
+    @DisplayName("SKU 집계: 상품별 판매중 SKU 유무와 판매중 SKU 추가금 최소 · 최대를 한 번에 내고, 판매 종료 SKU 추가금은 무시한다")
     void aggregateSkus() {
         List<SkuAggregateQueryResult> aggregates = skuRepositoryPort.aggregateByProductIds(List.of(101L, 102L, 103L, 105L));
 
-        assertThat(aggregates)
-            .extracting(SkuAggregateQueryResult::productId, SkuAggregateQueryResult::hasOptionSurcharge, SkuAggregateQueryResult::hasSellableSku)
-            .containsExactlyInAnyOrder(tuple(101L, false, true), tuple(102L, true, false), tuple(103L, true, true));
+        assertThat(aggregates).containsExactlyInAnyOrder(
+            // 최소 = 최대 — 판매 종료 SKU(1002)의 추가금 5,000 은 섞이지 않는다
+            new SkuAggregateQueryResult(101L, true, 0L, 0L),
+            // 판매중 SKU 가 없으면 최소 · 최대가 null 이다
+            new SkuAggregateQueryResult(102L, false, null, null),
+            // 최소 ≠ 최대 — 옵션에 따라 가격이 다르다
+            new SkuAggregateQueryResult(103L, true, 0L, 1_000L)
+        );
+        assertThat(aggregates).extracting(SkuAggregateQueryResult::productId).as("SKU 없는 상품은 행이 없다").doesNotContain(105L);
+    }
+
+    @Test
+    @DisplayName("제약: 같은 상품에 같은 옵션 조합 키의 SKU 는 저장되지 않는다 (uk_sku_product_id_option_value_key)")
+    void duplicateOptionKeyIsRejected() {
+        assertThatThrownBy(() -> persistAll(sku(1009L, 101L, "2001", 0L, SaleStatus.ON_SALE)))
+            .rootCause()
+            .hasMessageContaining("uk_sku_product_id_option_value_key");
+    }
+
+    @Test
+    @DisplayName("제약: 음수 추가금은 저장되지 않는다 (ck_sku_additional_price_non_negative)")
+    void negativeAdditionalPriceIsRejected() {
+        assertThatThrownBy(() -> persistAll(sku(1009L, 101L, "2005", -1L, SaleStatus.ON_SALE)))
+            .rootCause()
+            .hasMessageContaining("ck_sku_additional_price_non_negative");
+    }
+
+    @Test
+    @DisplayName("제약: 정가 금액만 있고 통화가 없으면 저장되지 않는다 (ck_product_list_price_pair)")
+    void halfListPriceIsRejected() {
+        assertThatThrownBy(() -> persistAll(product(106L, 10_000L, true, SaleStatus.ON_SALE).listPriceAmount(12_000L).build()))
+            .rootCause()
+            .hasMessageContaining("ck_product_list_price_pair");
     }
 
     @Test

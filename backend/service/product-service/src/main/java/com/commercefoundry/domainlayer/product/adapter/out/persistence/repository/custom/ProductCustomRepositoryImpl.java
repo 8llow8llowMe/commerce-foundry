@@ -30,6 +30,8 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
      *
      * <p>카테고리 필터는 {@code product_category} 에 EXISTS 로 건다. JOIN 하면 한 상품이 고른 카테고리 여러 곳에 진열됐을 때
      * 행이 겹쳐 같은 상품이 두 번 나오고 페이지 크기가 어긋난다.
+     *
+     * <p>빈 카테고리 집합 검사는 방어용이다 — "빈 집합이면 쿼리 없이 빈 Slice" 계약은 어댑터({@code ProductRepositoryAdapter})가 지킨다.
      */
     @Override
     public Slice<ProductListQueryResult> searchVisible(ProductSearchCriteria criteria) {
