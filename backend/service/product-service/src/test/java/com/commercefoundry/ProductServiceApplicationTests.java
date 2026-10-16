@@ -4,6 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -54,6 +60,24 @@ class ProductServiceApplicationTests {
         assertThat(environment.getProperty("spring.application.name")).isEqualTo("product-service");
         assertThat(environment.getProperty("server.port")).isEqualTo("8082");
         assertThat(environment.getProperty("spring.jpa.properties.hibernate.default_schema")).isEqualTo("product");
+    }
+
+    @Test
+    @DisplayName("엔티티 테이블이 서비스 스키마(product)에 만들어진다 — create-drop 이 매핑을 실제 DDL 로 적용했다")
+    void entityTablesAreCreatedInServiceSchema() throws SQLException {
+        DataSource dataSource = applicationContext.getBean(DataSource.class);
+        List<String> tables = new ArrayList<>();
+        try (Connection connection = dataSource.getConnection();
+             ResultSet resultSet = connection.getMetaData().getTables(null, "product", "%", new String[] {"TABLE"})) {
+            while (resultSet.next()) {
+                tables.add(resultSet.getString("TABLE_NAME"));
+            }
+        }
+
+        assertThat(tables).contains(
+            "category", "product", "product_category", "product_option_group", "product_option_value",
+            "sku", "product_image", "product_custom_order_field"
+        );
     }
 
     @Test
