@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence.entity;
 
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.persistence.entity.BaseEntity;
+import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -16,7 +17,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 대표 이미지(THUMBNAIL)는 순서가 항상 0 이라 유니크 키가 "상품당 1개" 를 보장한다.
+ * 대표 이미지(THUMBNAIL)는 순서가 항상 0 이라(check 제약) 유니크 키가 "상품당 1개" 를 보장한다.
  */
 @Entity
 @Table(
@@ -24,7 +25,8 @@ import lombok.NoArgsConstructor;
     comment = "상품 이미지",
     uniqueConstraints = @UniqueConstraint(
         name = "uk_product_image_product_id_image_type_display_order", columnNames = {"product_id", "image_type", "display_order"}
-    )
+    ),
+    check = @CheckConstraint(name = "ck_product_image_thumbnail_display_order", constraint = "image_type <> 'THUMBNAIL' or display_order = 0")
 )
 @Getter
 @Builder

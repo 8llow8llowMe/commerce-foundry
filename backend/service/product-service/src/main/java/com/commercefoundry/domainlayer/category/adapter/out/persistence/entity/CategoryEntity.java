@@ -4,7 +4,6 @@ import com.commercefoundry.persistence.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
-import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -12,12 +11,12 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+/**
+ * 고객 화면은 전체 카테고리를 한 번에 읽어 트리로 만든다({@code CategoryTree}). 상위별 조회가 없어 {@code parent_id} 인덱스를 두지 않는다 —
+ * 어드민 상위별 조회(#9)가 생기면 그때 더한다.
+ */
 @Entity
-@Table(
-    name = "category",
-    comment = "상품 카테고리 (계층)",
-    indexes = @Index(name = "idx_category_parent_id_display_order", columnList = "parent_id, display_order")
-)
+@Table(name = "category", comment = "상품 카테고리 (계층)")
 @Getter
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

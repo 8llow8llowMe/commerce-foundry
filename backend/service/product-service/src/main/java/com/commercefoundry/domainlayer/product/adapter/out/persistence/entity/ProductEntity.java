@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence.entity;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.persistence.entity.BaseEntity;
 import com.commercefoundry.shared.commerce.CurrencyCode;
+import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -20,13 +21,24 @@ import org.hibernate.type.SqlTypes;
 
 /**
  * 진열 카테고리는 {@link ProductCategoryEntity} 가 가진다. 목록의 카테고리 필터는 그쪽으로 걸므로 {@code category_id} 에는 인덱스를 두지 않는다.
- * 최신순은 PK(Snowflake) 내림차순이라 별도 인덱스가 없다.
+ * 최신순은 PK(Snowflake) 내림차순이라 별도 인덱스가 없다. 가격순 인덱스는 동률을 끊는 정렬 키({@code id})까지 담는다.
+ *
+ * <p>check 제약은 금액 · 통화 짝과 음수 금지를 DB 에서도 막는다 — 매퍼({@code MoneyColumns})가 읽을 때 실패하는 데이터가 애초에 들어오지 않게.
  */
 @Entity
 @Table(
     name = "product",
     comment = "상품",
-    indexes = @Index(name = "idx_product_visible_sale_price_amount", columnList = "visible, sale_price_amount")
+    indexes = @Index(name = "idx_product_visible_sale_price_amount_id", columnList = "visible, sale_price_amount, id"),
+    check = {
+        @CheckConstraint(name = "ck_product_sale_price_non_negative", constraint = "sale_price_amount >= 0"),
+        @CheckConstraint(
+            name = "ck_product_list_price_pair",
+            constraint = "(list_price_amount is null and list_price_currency is null) or (list_price_amount is not null and list_price_currency is not null)"
+        ),
+        @CheckConstraint(name = "ck_product_list_price_currency", constraint = "list_price_currency is null or list_price_currency = sale_price_currency"),
+        @CheckConstraint(name = "ck_product_list_price_non_negative", constraint = "list_price_amount is null or list_price_amount >= 0")
+    }
 )
 @Getter
 @Builder

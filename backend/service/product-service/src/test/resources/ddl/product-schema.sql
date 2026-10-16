@@ -53,7 +53,11 @@
         sale_status varchar(20) not null check ((sale_status in ('ON_SALE','STOP_SELLING'))),
         summary varchar(200),
         visible boolean not null,
-        primary key (id)
+        primary key (id),
+        constraint ck_product_sale_price_non_negative check (sale_price_amount >= 0),
+        constraint ck_product_list_price_pair check ((list_price_amount is null and list_price_currency is null) or (list_price_amount is not null and list_price_currency is not null)),
+        constraint ck_product_list_price_currency check (list_price_currency is null or list_price_currency = sale_price_currency),
+        constraint ck_product_list_price_non_negative check (list_price_amount is null or list_price_amount >= 0)
     );
 
     comment on table product.product is
@@ -218,7 +222,8 @@
         url varchar(500) not null,
         width integer,
         primary key (id),
-        constraint uk_product_image_product_id_image_type_display_order unique (product_id, image_type, display_order)
+        constraint uk_product_image_product_id_image_type_display_order unique (product_id, image_type, display_order),
+        constraint ck_product_image_thumbnail_display_order check (image_type <> 'THUMBNAIL' or display_order = 0)
     );
 
     comment on table product.product_image is
@@ -332,7 +337,8 @@
         product_id bigint not null,
         sale_status varchar(20) not null check ((sale_status in ('ON_SALE','STOP_SELLING'))),
         primary key (id),
-        constraint uk_sku_product_id_option_value_key unique (product_id, option_value_key)
+        constraint uk_sku_product_id_option_value_key unique (product_id, option_value_key),
+        constraint ck_sku_additional_price_non_negative check (additional_price_amount >= 0)
     );
 
     comment on table product.sku is
@@ -362,11 +368,8 @@
     comment on column product.sku.sale_status is
         '판매 상태 (ON_SALE / STOP_SELLING). 품절은 저장하지 않는다 — 재고에서 유도';
 
-    create index idx_category_parent_id_display_order
-       on product.category (parent_id, display_order);
-
-    create index idx_product_visible_sale_price_amount
-       on product.product (visible, sale_price_amount);
+    create index idx_product_visible_sale_price_amount_id
+       on product.product (visible, sale_price_amount, id);
 
     create index idx_product_category_category_id_product_id
        on product.product_category (category_id, product_id);

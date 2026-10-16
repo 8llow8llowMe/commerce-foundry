@@ -2,6 +2,7 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
@@ -14,11 +15,15 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.assertj.core.api.SoftAssertions;
 import org.hibernate.boot.Metadata;
 import org.hibernate.boot.MetadataSources;
 import org.hibernate.boot.registry.StandardServiceRegistry;
 import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.dialect.PostgreSQLDialect;
 import org.hibernate.engine.config.spi.ConfigurationService;
+import org.hibernate.engine.jdbc.env.spi.JdbcEnvironment;
 import org.hibernate.tool.schema.spi.DelayedDropRegistryNotAvailableImpl;
 import org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator;
 import org.junit.jupiter.api.BeforeAll;
@@ -37,12 +42,16 @@ import org.springframework.core.type.filter.AnnotationTypeFilter;
  *
  * <p>Hibernate 7 에는 {@code SchemaExport} 가 없어 스키마 생성 도구({@link SchemaManagementToolCoordinator})를 스크립트 모드로 부른다.
  * 네이밍 전략은 Spring Boot 기본값과 같게 둔다 — 서비스가 local · dev 에서 {@code update} 로 만드는 스키마와 같은 이름이 나오게.
+ * 방언 버전은 운영 PostgreSQL 메이저 버전으로 고정한다 — DB 에 붙지 않으면 Hibernate 는 방언의 최소 지원 버전으로 DDL 을 만든다.
  */
 class ProductSchemaSnapshotTest {
 
-    private static final String ENTITY_PACKAGE = "com.commercefoundry.domainlayer";
+    /** 런타임 엔티티 스캔 범위와 같다 — Boot 는 {@code @SpringBootApplication} 패키지(AutoConfigurationPackages)에서 엔티티를 찾는다. */
+    private static final String ENTITY_PACKAGE = "com.commercefoundry";
     private static final Path GENERATED = Path.of("build", "ddl", "product-schema.sql");
+    private static final Path SNAPSHOT = Path.of("src", "test", "resources", "ddl", "product-schema.sql");
     private static final String SNAPSHOT_RESOURCE = "/ddl/product-schema.sql";
+    private static final int POSTGRESQL_MAJOR_VERSION = 17;
     private static final int POSTGRESQL_IDENTIFIER_MAX_LENGTH = 63;
 
     private static List<Class<?>> entityClasses;
@@ -65,46 +74,63 @@ class ProductSchemaSnapshotTest {
     }
 
     @Test
-    @DisplayName("엔티티에서 만든 DDL 이 커밋된 스냅숏과 같다")
+    @DisplayName("엔티티에서 만든 DDL 이 커밋된 스냅숏과 같다 (줄 단위 비교)")
     void schemaMatchesSnapshot() throws IOException {
         assertThat(entityClasses).as("스캔된 엔티티").isNotEmpty();
 
-        String generated = generateDdl();
-        String snapshot = readSnapshot();
+        List<String> generated = lines(generateDdl());
+        List<String> snapshot = lines(readSnapshot());
 
-        assertThat(normalize(generated))
-            .as("엔티티와 DDL 스냅숏이 다르다. build/ddl/product-schema.sql 을 src/test/resources/ddl/product-schema.sql 로 복사하고, "
-                + "바뀐 부분을 PR 본문 운영 DDL 절에 적는다 (coding-conventions.md §9-8)")
-            .isEqualTo(normalize(snapshot));
+        assertThat(generated)
+            .as("엔티티와 DDL 스냅숏이 다르다. %s 를 %s 로 복사하고, 바뀐 부분을 PR 본문 운영 DDL 절에 적는다 (coding-conventions.md §9-8)",
+                GENERATED.toAbsolutePath(), SNAPSHOT.toAbsolutePath())
+            .containsExactlyElementsOf(snapshot);
     }
 
     @Test
-    @DisplayName("인덱스 · 유니크 키 이름은 idx_ / uk_ 로 시작하고 PostgreSQL 식별자 상한 63자 이하다")
+    @DisplayName("DB 연결 없이 운영과 같은 방언 버전(PostgreSQL 17)으로 DDL 을 만든다")
+    void dialectVersionIsPinned() {
+        StandardServiceRegistry registry = buildRegistry();
+        try {
+            Dialect dialect = registry.requireService(JdbcEnvironment.class).getDialect();
+
+            assertThat(dialect).isInstanceOf(PostgreSQLDialect.class);
+            assertThat(dialect.getVersion().getDatabaseMajorVersion()).isEqualTo(POSTGRESQL_MAJOR_VERSION);
+        } finally {
+            StandardServiceRegistryBuilder.destroy(registry);
+        }
+    }
+
+    @Test
+    @DisplayName("인덱스 · 유니크 키 · check 제약 이름은 idx_ / uk_ / ck_ + 테이블명으로 시작하고 PostgreSQL 식별자 상한 63자 이하다")
     void constraintNamesFollowConvention() {
-        List<String> indexNames = new ArrayList<>();
-        List<String> uniqueNames = new ArrayList<>();
+        SoftAssertions softly = new SoftAssertions();
         for (Class<?> entityClass : entityClasses) {
             Table table = entityClass.getAnnotation(Table.class);
             assertThat(table).as("%s 의 @Table", entityClass.getSimpleName()).isNotNull();
+
             for (Index index : table.indexes()) {
-                indexNames.add(index.name());
+                assertName(softly, index.name(), "idx_" + table.name() + "_");
             }
             for (UniqueConstraint uniqueConstraint : table.uniqueConstraints()) {
-                uniqueNames.add(uniqueConstraint.name());
+                assertName(softly, uniqueConstraint.name(), "uk_" + table.name() + "_");
+            }
+            for (CheckConstraint checkConstraint : table.check()) {
+                assertName(softly, checkConstraint.name(), "ck_" + table.name() + "_");
             }
         }
+        softly.assertAll();
+    }
 
-        assertThat(indexNames).allSatisfy(name -> assertThat(name).startsWith("idx_").hasSizeLessThanOrEqualTo(POSTGRESQL_IDENTIFIER_MAX_LENGTH));
-        assertThat(uniqueNames).allSatisfy(name -> assertThat(name).startsWith("uk_").hasSizeLessThanOrEqualTo(POSTGRESQL_IDENTIFIER_MAX_LENGTH));
+    private static void assertName(SoftAssertions softly, String name, String prefix) {
+        softly.assertThat(name).as(name).startsWith(prefix).hasSizeLessThanOrEqualTo(POSTGRESQL_IDENTIFIER_MAX_LENGTH);
     }
 
     private static String generateDdl() throws IOException {
         Files.createDirectories(GENERATED.getParent());
         Files.deleteIfExists(GENERATED);
 
-        StandardServiceRegistry registry = new StandardServiceRegistryBuilder()
-            .applySettings(schemaSettings())
-            .build();
+        StandardServiceRegistry registry = buildRegistry();
         try {
             MetadataSources sources = new MetadataSources(registry);
             entityClasses.forEach(sources::addAnnotatedClass);
@@ -119,11 +145,20 @@ class ProductSchemaSnapshotTest {
         return Files.readString(GENERATED, StandardCharsets.UTF_8);
     }
 
+    private static StandardServiceRegistry buildRegistry() {
+        return new StandardServiceRegistryBuilder()
+            .applySettings(schemaSettings())
+            .build();
+    }
+
     private static Map<String, Object> schemaSettings() {
         return Map.ofEntries(
             Map.entry("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect"),
-            // DB 에 붙지 않는다 — 방언만으로 DDL 을 만든다
+            // DB 에 붙지 않는다 — 방언과 아래 버전 정보만으로 DDL 을 만든다
             Map.entry("hibernate.boot.allow_jdbc_metadata_access", "false"),
+            Map.entry("jakarta.persistence.database-product-name", "PostgreSQL"),
+            Map.entry("jakarta.persistence.database-major-version", String.valueOf(POSTGRESQL_MAJOR_VERSION)),
+            Map.entry("jakarta.persistence.database-minor-version", "0"),
             Map.entry("hibernate.default_schema", "product"),
             Map.entry("hibernate.physical_naming_strategy", "org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy"),
             Map.entry("hibernate.implicit_naming_strategy", "org.springframework.boot.hibernate.SpringImplicitNamingStrategy"),
@@ -143,14 +178,17 @@ class ProductSchemaSnapshotTest {
     private static String readSnapshot() throws IOException {
         try (InputStream snapshot = ProductSchemaSnapshotTest.class.getResourceAsStream(SNAPSHOT_RESOURCE)) {
             assertThat(snapshot)
-                .as("DDL 스냅숏이 없다. build/ddl/product-schema.sql 을 src/test/resources/ddl/product-schema.sql 로 복사한다")
+                .as("DDL 스냅숏이 없다. %s 를 %s 로 복사한다", GENERATED.toAbsolutePath(), SNAPSHOT.toAbsolutePath())
                 .isNotNull();
             return new String(snapshot.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 
-    /** 줄끝(CRLF · LF)과 들여쓰기 차이는 무시한다 — 공백 연속을 공백 하나로 접는다. */
-    private static String normalize(String ddl) {
-        return ddl.replaceAll("\\s+", " ").trim();
+    /** 줄끝(CRLF · LF) · 들여쓰기 · 빈 줄 차이는 무시한다 — 줄마다 앞뒤 공백을 자르고 빈 줄을 뺀다. 실패하면 AssertJ 가 다른 줄을 보여 준다. */
+    private static List<String> lines(String ddl) {
+        return ddl.lines()
+            .map(String::trim)
+            .filter(line -> !line.isEmpty())
+            .toList();
     }
 }
