@@ -24,12 +24,6 @@ dependencies {
     testImplementation 'io.projectreactor:reactor-core'
 }
 
-configurations.named('testRuntimeClasspath') {
-    // 이 모듈 테스트는 Mockito 를 쓰지 않는다. 있으면 @SpringBootTest 가 Mockito 를 초기화하면서 byte-buddy 에이전트를
-    // 동적으로 붙이고, JDK 21 이 그 경고(동적 에이전트 · CDS)를 콘솔에 찍는다
-    exclude group: 'org.mockito'
-}
-
 // 위 compileOnly 가 api/implementation 으로 바뀌는 회귀를 막는다. runtimeClasspath 에 아래 모듈이 있으면 check 가 실패한다.
 // 구성 시점에 Provider 로 잡아 두고 실행 시점에는 project 를 만지지 않는다 (configuration cache 안전)
 def runtimeModules = configurations.named('runtimeClasspath').flatMap { runtimeClasspath ->
