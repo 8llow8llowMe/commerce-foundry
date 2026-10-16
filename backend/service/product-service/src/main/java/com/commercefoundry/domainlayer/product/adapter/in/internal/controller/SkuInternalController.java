@@ -22,7 +22,8 @@ import org.springframework.web.bind.annotation.RestController;
  * 서비스 간 SKU 벌크 조회 — 장바구니 · 주문 생성이 SKU 마다 따로 부르지 않게 한 번에 받는다 ({@code coding-conventions.md} §9-6).
  *
  * <p>호출자는 order-service 하나다. 권한은 서비스 간 인증(#51)의 {@code SERVICE_<spring.application.name>} 이고, 허용 호출자가 아니면 거절한다
- * (닫힌 쪽). 서비스 토큰이 없는 요청은 #51 이후 internal 보안 체인이 이 컨트롤러에 닿기 전에 먼저 막는다.
+ * (닫힌 쪽). 서비스 토큰이 없거나 틀린 요청은 internal 보안 체인이 이 컨트롤러에 닿기 전에 401({@code SECURITY_007})로 막는다
+ * ({@code security-guide.md} §9).
  *
  * <p>검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
  * 서비스 토큰 인증을 통과한 요청에서는 메서드 검증이 {@code @PreAuthorize}(허용 호출자)보다 먼저 돈다 — 허용되지 않은 호출자도 형식이 틀리면 400 이다.
