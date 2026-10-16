@@ -43,6 +43,13 @@ snowflake:
   datacenter-id: ${SNOWFLAKE_DATACENTER_ID}
   worker-id: ${SNOWFLAKE_WORKER_ID}
 
+# 스토어(고객사)별 기능 플래그 (architecture-guide.md §9). 기본은 꺼짐(닫힌 기본값)이고, 켜는 스토어만 환경변수로 연다.
+# local · dev 프로파일은 yml 이 켠다. 플래그가 꺼지면 데이터는 그대로 두고 응답에서만 숨긴다
+store:
+  features:
+    # 맞춤 제작(치수 입력 · 제작 안내)
+    custom-order: ${STORE_FEATURES_CUSTOM_ORDER:false}
+
 security:
   jwt:
     # access 토큰 검증 공개키 — PEM 본문 한 줄 (security-guide.md §5-3 · §6). 비었거나 풀리지 않으면 기동하지 않는다.
