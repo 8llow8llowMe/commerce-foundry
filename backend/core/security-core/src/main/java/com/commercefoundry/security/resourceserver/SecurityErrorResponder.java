@@ -8,6 +8,7 @@ import com.commercefoundry.security.principal.MemberPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -27,20 +28,29 @@ import org.springframework.security.web.access.AccessDeniedHandler;
  * {@link #forServiceAuthentication}(인증 실패 007)을 쓴다. 권한 거부(005)는 둘이 같다.
  *
  * <p>로그에는 코드 · 경로 · 예외 타입만 남긴다. 토큰 원문과 예외 메시지(토큰 조각이 섞일 수 있다)는 남기지 않는다.
+ * 경로는 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남기고 나머지를 가린다({@link #maskPath}) — 주문번호 같은 식별자가 경로에 들어간다.
  */
 @Slf4j
 public final class SecurityErrorResponder implements AuthenticationEntryPoint, AccessDeniedHandler {
 
+    /** 로그에 남기는 경로 구간 수. {@code /internal/v1/orders/4611686018427387904} → {@code /internal/v1/orders/…}. */
+    static final int VISIBLE_PATH_SEGMENTS = 3;
+    private static final String MASKED_REST = "/…";
+
     private final SecurityErrorEnvelope envelope;
     private final Function<AuthenticationException, SecurityErrorCode> authenticationFailureCode;
+    private final boolean serviceAuthentication;
 
     public SecurityErrorResponder(SecurityErrorEnvelope envelope) {
-        this(envelope, SecurityErrorResolver::resolve);
+        this(envelope, SecurityErrorResolver::resolve, false);
     }
 
-    private SecurityErrorResponder(SecurityErrorEnvelope envelope, Function<AuthenticationException, SecurityErrorCode> authenticationFailureCode) {
+    private SecurityErrorResponder(
+        SecurityErrorEnvelope envelope, Function<AuthenticationException, SecurityErrorCode> authenticationFailureCode, boolean serviceAuthentication
+    ) {
         this.envelope = envelope;
         this.authenticationFailureCode = authenticationFailureCode;
+        this.serviceAuthentication = serviceAuthentication;
     }
 
     /**
@@ -48,13 +58,17 @@ public final class SecurityErrorResponder implements AuthenticationEntryPoint, A
      * ({@link SecurityErrorResolver#resolveServiceAuthentication}).
      */
     public static SecurityErrorResponder forServiceAuthentication(SecurityErrorEnvelope envelope) {
-        return new SecurityErrorResponder(envelope, SecurityErrorResolver::resolveServiceAuthentication);
+        return new SecurityErrorResponder(envelope, SecurityErrorResolver::resolveServiceAuthentication, true);
     }
 
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException exception) throws IOException {
         SecurityErrorCode errorCode = authenticationFailureCode.apply(exception);
-        logAuthenticationRejected(request, errorCode, exception);
+        if (serviceAuthentication) {
+            logServiceAuthenticationRejected(request, errorCode, exception);
+        } else {
+            logAuthenticationRejected(request, errorCode, exception);
+        }
         write(response, errorCode);
     }
 
@@ -67,21 +81,30 @@ public final class SecurityErrorResponder implements AuthenticationEntryPoint, A
     }
 
     /**
-     * 만료 토큰은 흔하다 — debug 로 둔다. 검증 시스템 오류(006)는 운영이 봐야 하므로 warn 이다.
-     * 서비스 인증 실패(007)도 warn 이다 — 정상 배포에서는 일어나지 않고, 키 · 설정 실수나 사설망 안의 위조 요청을 드러낸다.
+     * 사용자 체인. 만료 토큰은 흔하다 — debug 로 둔다. 검증 시스템 오류(006)는 운영이 봐야 하므로 warn 이다(#4 의 검증 저장소 장애).
      * 예외 메시지에는 토큰 조각이 섞일 수 있어 타입만 남긴다.
      */
     static void logAuthenticationRejected(HttpServletRequest request, SecurityErrorCode errorCode, AuthenticationException exception) {
-        String reason = exception.getCause() == null
-            ? exception.getClass().getSimpleName()
-            : exception.getClass().getSimpleName() + "<-" + exception.getCause().getClass().getSimpleName();
-        switch (errorCode) {
-            case TOKEN_VERIFICATION_UNAVAILABLE ->
-                log.warn("token verification unavailable. code={}, method={}, path={}, reason={}", errorCode.getCode(), request.getMethod(), request.getRequestURI(), reason);
-            case SERVICE_UNAUTHORIZED ->
-                log.warn("service authentication rejected. code={}, method={}, path={}, reason={}", errorCode.getCode(), request.getMethod(), request.getRequestURI(), reason);
-            default ->
-                log.debug("authentication rejected. code={}, method={}, path={}, reason={}", errorCode.getCode(), request.getMethod(), request.getRequestURI(), reason);
+        if (errorCode == SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE) {
+            log.warn("token verification unavailable. code={}, method={}, path={}, reason={}",
+                errorCode.getCode(), request.getMethod(), maskedPath(request), reason(exception));
+        } else {
+            log.debug("authentication rejected. code={}, method={}, path={}, reason={}",
+                errorCode.getCode(), request.getMethod(), maskedPath(request), reason(exception));
+        }
+    }
+
+    /**
+     * 서비스 간 인증 체인. 인증 실패(007)는 warn 이다 — 정상 배포에서는 일어나지 않고, 키 · 설정 실수나 사설망 안의 위조 요청을 드러낸다.
+     * 006 은 error 다 — 서비스 토큰 검증은 메모리의 비밀만 쓰므로 저장소 장애가 있을 수 없다. 나면 서버 결함 신호다.
+     */
+    static void logServiceAuthenticationRejected(HttpServletRequest request, SecurityErrorCode errorCode, AuthenticationException exception) {
+        if (errorCode == SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE) {
+            log.error("service token verification failed by a server-side error. code={}, method={}, path={}, reason={}",
+                errorCode.getCode(), request.getMethod(), maskedPath(request), reason(exception));
+        } else {
+            log.warn("service authentication rejected. code={}, method={}, path={}, reason={}",
+                errorCode.getCode(), request.getMethod(), maskedPath(request), reason(exception));
         }
     }
 
@@ -93,13 +116,38 @@ public final class SecurityErrorResponder implements AuthenticationEntryPoint, A
         Object principal = current == null ? null : current.getPrincipal();
         if (principal instanceof MemberPrincipal member) {
             log.info("access denied. code={}, method={}, path={}, memberId={}, jti={}",
-                errorCode.getCode(), request.getMethod(), request.getRequestURI(), member.memberId(), member.tokenId());
+                errorCode.getCode(), request.getMethod(), maskedPath(request), member.memberId(), member.tokenId());
         } else if (principal instanceof ServicePrincipal service) {
             log.warn("service access denied. code={}, method={}, path={}, callerService={}, jti={}",
-                errorCode.getCode(), request.getMethod(), request.getRequestURI(), service.serviceId(), service.tokenId());
+                errorCode.getCode(), request.getMethod(), maskedPath(request), service.serviceId(), service.tokenId());
         } else {
-            log.debug("access denied. code={}, method={}, path={}", errorCode.getCode(), request.getMethod(), request.getRequestURI());
+            log.debug("access denied. code={}, method={}, path={}", errorCode.getCode(), request.getMethod(), maskedPath(request));
         }
+    }
+
+    /**
+     * 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남기고 나머지를 {@code /…} 로 가린다. 쿼리 문자열은 원래 싣지 않는다({@code getRequestURI}).
+     * 구간이 그 이하면 그대로 둔다 — {@code /api/v1/admin/x} → {@code /api/v1/admin/…}, {@code /api/v1/smoke} → 그대로.
+     */
+    static String maskPath(String path) {
+        if (path == null) {
+            return null;
+        }
+        String[] parts = path.split("/", VISIBLE_PATH_SEGMENTS + 2);
+        if (parts.length < VISIBLE_PATH_SEGMENTS + 2 || parts[VISIBLE_PATH_SEGMENTS + 1].isEmpty()) {
+            return path;
+        }
+        return String.join("/", Arrays.copyOf(parts, VISIBLE_PATH_SEGMENTS + 1)) + MASKED_REST;
+    }
+
+    private static String maskedPath(HttpServletRequest request) {
+        return maskPath(request.getRequestURI());
+    }
+
+    private static String reason(AuthenticationException exception) {
+        return exception.getCause() == null
+            ? exception.getClass().getSimpleName()
+            : exception.getClass().getSimpleName() + "<-" + exception.getCause().getClass().getSimpleName();
     }
 
     private void write(HttpServletResponse response, SecurityErrorCode errorCode) throws IOException {

@@ -39,8 +39,11 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.AuthenticationEntryPointFailureHandler;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -212,6 +215,24 @@ class InternalResourceServerIntegrationTest {
         assertThat(chains.getFirst().matches(request("/actuator/health"))).isFalse();
         assertThat(chains.getLast().matches(request("/api/v1/products"))).isTrue();
         assertThat(context.getBeansOfType(JwtDecoder.class)).hasSize(1).containsKey("accessTokenDecoder");
+    }
+
+    /**
+     * 기본 실패 처리기는 검증 시스템 오류({@code AuthenticationServiceException})를 다시 던져 봉투 없는 500 을 만든다.
+     * 서비스 토큰 디코더는 메모리 비밀만 써 이 경로를 실제로 일으키기 어려우므로, 체인에 끼운 처리기를 직접 본다.
+     */
+    @Test
+    @DisplayName("internal 체인의 Bearer 필터 실패 처리기는 다시 던지지 않는 진입점 처리기다 — 검증 시스템 오류가 봉투 없는 500 이 되지 않는다")
+    void internalChainDoesNotRethrowAuthenticationServiceException() {
+        SecurityFilterChain internal = context.getBean(FilterChainProxy.class).getFilterChains().getFirst();
+        BearerTokenAuthenticationFilter bearerFilter = internal.getFilters().stream()
+            .filter(BearerTokenAuthenticationFilter.class::isInstance).map(BearerTokenAuthenticationFilter.class::cast)
+            .findFirst().orElseThrow();
+
+        Object failureHandler = ReflectionTestUtils.getField(bearerFilter, "authenticationFailureHandler");
+
+        assertThat(failureHandler).isInstanceOf(AuthenticationEntryPointFailureHandler.class);
+        assertThat(ReflectionTestUtils.getField(failureHandler, "rethrowAuthenticationServiceException")).isEqualTo(false);
     }
 
     // ── 도우미 ────────────────────────────────────────────────────
