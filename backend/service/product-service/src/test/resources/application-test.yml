@@ -24,3 +24,8 @@ eureka:
 snowflake:
   datacenter-id: 1
   worker-id: 1
+
+# 맞춤 제작 플래그를 켠 채로 컨텍스트를 띄운다 — ProductServiceApplicationTests 가 바인딩된 값(true)을 단언한다
+store:
+  features:
+    custom-order: true
