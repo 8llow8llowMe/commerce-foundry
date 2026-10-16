@@ -29,16 +29,20 @@ public final class SecurityEnvelopeAssertions {
     public static void assertEnvelope(MockHttpServletResponse response, int status, String resultCode, String resultMessage) {
         assertThat(response.getStatus()).as("status").isEqualTo(status);
         assertThat(response.getContentType()).as("content type").startsWith("application/json");
+        assertThat(response.getContentAsByteArray()).as("본문").isNotEmpty();
 
+        // get() 은 키가 없으면 null 이라 NPE 로 끝난다. path() 는 MissingNode 를 돌려 아래 단언이 어떤 키가 빠졌는지 알린다
         JsonNode root = JSON.readTree(response.getContentAsByteArray());
-        JsonNode header = root.get("dataHeader");
-        assertThat(header.get("success").isBoolean()).isTrue();
-        assertThat(header.get("success").asBoolean()).isFalse();
-        assertThat(header.get("resultCode").asString()).isEqualTo(resultCode);
-        assertThat(header.get("resultMessage").isString()).isTrue();
-        assertThat(header.get("resultMessage").asString()).isEqualTo(resultMessage);
-        assertThat(header.get("fieldErrors").isNull()).isTrue();
-        assertThat(root.get("dataBody").isNull()).isTrue();
+        JsonNode header = root.path("dataHeader");
+        assertThat(header.isObject()).as("dataHeader 는 객체다").isTrue();
+        assertThat(header.path("success").isBoolean()).as("dataHeader.success 는 boolean 이다").isTrue();
+        assertThat(header.path("success").asBoolean()).as("dataHeader.success").isFalse();
+        assertThat(header.path("resultCode").isString()).as("dataHeader.resultCode 는 문자열이다").isTrue();
+        assertThat(header.path("resultCode").asString()).as("dataHeader.resultCode").isEqualTo(resultCode);
+        assertThat(header.path("resultMessage").isString()).as("dataHeader.resultMessage 는 문자열이다").isTrue();
+        assertThat(header.path("resultMessage").asString()).as("dataHeader.resultMessage").isEqualTo(resultMessage);
+        assertThat(header.path("fieldErrors").isNull()).as("dataHeader.fieldErrors 는 null 이다(키는 있다)").isTrue();
+        assertThat(root.path("dataBody").isNull()).as("dataBody 는 null 이다(키는 있다)").isTrue();
     }
 
     /** {@code WWW-Authenticate} 값. 403 · 503 처럼 헤더가 없어야 하면 {@code null} 을 넘긴다. */

@@ -6,24 +6,35 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import com.commercefoundry.security.error.SecurityErrorCode;
+import com.commercefoundry.security.issuer.JwtIssuer;
 import com.commercefoundry.security.principal.MemberRole;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.env.OriginTrackedMapPropertySource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.ApplicationContext;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.PropertySource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
+import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * 서블릿 서비스의 인가 스모크. 서비스가 {@code spring-boot-starter-security} 와 {@code ResourceServerSecurityConfigurer} import 를
@@ -38,9 +49,11 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
  *   <li>애노테이션은 서비스의 {@code *ApplicationTests} 와 <b>정확히 같다</b> — 컨텍스트 캐시를 같이 써 서비스 컨텍스트를 한 번만 띄운다.
  *       서비스 쪽 애노테이션을 바꾸면 여기도 바꾼다.</li>
  *   <li>서비스 컨트롤러에 기대지 않는다 — 어느 서비스에도 없는 경로({@value #ADMIN_PATH} · {@value #PUBLIC_PATH})로 URL 규칙과 토큰 필터만 본다.
- *       규칙을 통과하면 매핑이 없어 404 다.</li>
- *   <li>{@code @PreAuthorize("isAuthenticated()")} 의 익명 401 은 첫 실제 핸들러가 생기는 이슈에서 그 경로로 서비스 테스트에 더한다.
- *       004 · 006 은 디코더 장애를 흉내 내야 해 security-core 통합 테스트에만 둔다. {@code /internal/**} 은 여기서 단언하지 않는다.</li>
+ *       규칙을 통과하면 매핑이 없어 404 다. 대소문자 우회는 컨트롤러가 있어야 의미가 있어 security-core 통합 테스트에 두고,
+ *       여기서는 서비스 MVC 의 경로 매칭이 URL 규칙과 같은 대소문자 규칙인지 본다.</li>
+ *   <li>{@code @PreAuthorize("isAuthenticated()")} 의 익명 401 은 첫 실제 핸들러가 생기는 이슈에서 서비스의 {@code *SecuritySmokeTest} 에
+ *       메서드로 더한다 — {@link #perform} · {@link #bearer} · {@link SecurityEnvelopeAssertions} 를 쓰고 같은 컨텍스트를 공유한다.</li>
+ *   <li>004 · 006 은 디코더 장애를 흉내 내야 해 security-core 통합 테스트에만 둔다. {@code /internal/**} 은 여기서 단언하지 않는다.</li>
  * </ul>
  */
 @SpringBootTest
@@ -55,6 +68,12 @@ public abstract class ResourceServerSmokeTestSupport {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ApplicationContext applicationContext;
+
+    @Autowired
+    private ConfigurableEnvironment environment;
 
     /**
      * 정규화되면 어드민 경로가 되는 원문 경로 — {@code ..} · {@code %2e} · {@code ;} · {@code //} · {@code %2f}.
@@ -71,6 +90,13 @@ public abstract class ResourceServerSmokeTestSupport {
             "/api/v1/admin%2fx"
         );
     }
+
+    /** 발급기({@code JwtIssuerConfigurer})를 import 하는 서비스만 {@code true} 로 바꾼다 — auth-service(#4). */
+    protected boolean issuerExpected() {
+        return false;
+    }
+
+    // ── URL 규칙 · 토큰 필터 ──────────────────────────────────────
 
     @Test
     @DisplayName("토큰 없이 어드민 경로에 오면 401 · SECURITY_001 봉투 · WWW-Authenticate: Bearer")
@@ -90,6 +116,7 @@ public abstract class ResourceServerSmokeTestSupport {
         assertWwwAuthenticate(response, null);
     }
 
+    /** 보안이 없어도 404 라 단독으로는 아무것도 증명하지 않는다. 위 401 · 403 케이스와 함께라야 "ADMIN 만 통과" 가 된다. */
     @Test
     @DisplayName("ADMIN 토큰은 어드민 URL 규칙을 통과한다 — 매핑이 없어 404")
     void adminPassesAdminRule() throws Exception {
@@ -119,11 +146,19 @@ public abstract class ResourceServerSmokeTestSupport {
         assertThat(customer.getContentAsByteArray()).as(path).isEmpty();
     }
 
+    /**
+     * URL 규칙({@code requestMatchers(String)})은 Spring Security 7 이 {@link PathPatternParser#defaultInstance}(대소문자 구분)로 만든다.
+     * 서비스 MVC 가 대소문자를 무시하게 바뀌면 {@code /API/v1/admin/x} 가 규칙을 비껴 어드민 컨트롤러에 닿는다 — 두 매칭 규칙이 같은지 본다.
+     * 우회 자체는 컨트롤러가 있는 security-core 통합 테스트가 본다.
+     */
     @Test
-    @DisplayName("대소문자가 다른 경로(/API/v1/admin/x)는 어디에도 매핑되지 않아 404 다")
-    void upperCasePathIsNotFound() throws Exception {
-        assertThat(perform(get("/API/v1/admin/x")).getStatus()).isEqualTo(404);
-        assertThat(perform(get("/API/v1/admin/x").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))).getStatus()).isEqualTo(404);
+    @DisplayName("서비스 MVC 의 경로 매칭이 URL 규칙과 같다 — PathPatternParser · 대소문자 구분")
+    void mvcPathMatchingIsCaseSensitive() {
+        RequestMappingHandlerMapping handlerMapping = applicationContext.getBean("requestMappingHandlerMapping", RequestMappingHandlerMapping.class);
+
+        assertThat(handlerMapping.getPatternParser()).as("MVC 가 PathPatternParser 로 매칭한다").isNotNull();
+        assertThat(PathPatternParser.defaultInstance.isCaseSensitive()).as("URL 규칙의 경로 매칭이 대소문자를 가린다").isTrue();
+        assertThat(handlerMapping.getPatternParser().isCaseSensitive()).as("MVC 경로 매칭이 URL 규칙과 같이 대소문자를 가린다").isTrue();
     }
 
     @Test
@@ -146,6 +181,7 @@ public abstract class ResourceServerSmokeTestSupport {
         assertWwwAuthenticate(response, "Bearer error=\"invalid_token\", error_description=\"The access token expired\"");
     }
 
+    /** 보안이 없어도 세션이 없을 수 있어 단독으로는 약하다. 위 401 · 403 케이스와 함께라야 "인증하고도 세션을 만들지 않는다" 가 된다. */
     @Test
     @DisplayName("인증된 요청도 세션을 만들지 않는다 (STATELESS) — Set-Cookie 없음")
     void createsNoSession() throws Exception {
@@ -153,6 +189,43 @@ public abstract class ResourceServerSmokeTestSupport {
 
         assertThat(result.getRequest().getSession(false)).isNull();
         assertThat(result.getResponse().getHeaders(HttpHeaders.SET_COOKIE)).isEmpty();
+    }
+
+    // ── 구성 ─────────────────────────────────────────────────────
+
+    /**
+     * 노출 설정은 actuator 의 1차 방어다. URL 규칙이 노출된 health 외를 막아도, {@code heapdump} · {@code loggers} 를 목록에 넣는 실수는 여기서 잡는다
+     * (auth-service 의 힙에는 개인키가 있다). 쉼표 문자열 · YAML 목록 어느 쪽으로 적어도 바인딩된 최종 값을 본다.
+     */
+    @Test
+    @DisplayName("actuator 웹 노출은 정확히 health 하나다")
+    void actuatorExposesHealthOnly() {
+        Set<String> include = Binder.get(environment).bind("management.endpoints.web.exposure.include", Bindable.setOf(String.class)).orElse(Set.of());
+
+        assertThat(include).containsExactly("health");
+    }
+
+    /**
+     * 테스트는 초기화기({@link SecurityTestPropertiesInitializer})가 키를 맨 앞에 넣어 yml 의 값이 가려진다. 운영 배선이 빠지거나 바뀌지 않았는지
+     * {@code application.yml} 원본 속성 소스의 풀리지 않은 원문을 본다 ({@code security-guide.md} §5-3).
+     */
+    @Test
+    @DisplayName("application.yml 이 공개키를 환경변수 JWT_PUBLIC_KEY · JWT_PUBLIC_KEY_PREVIOUS 로 받는다")
+    void applicationYmlWiresPublicKeyPlaceholders() {
+        List<PropertySource<?>> applicationYml = environment.getPropertySources().stream()
+            .filter(source -> source instanceof OriginTrackedMapPropertySource && source.getName().contains("[application.yml]"))
+            .toList();
+
+        assertThat(applicationYml).as("application.yml 속성 소스").hasSize(1);
+        assertThat(applicationYml.getFirst().getProperty("security.jwt.public-key")).isEqualTo("${JWT_PUBLIC_KEY}");
+        assertThat(applicationYml.getFirst().getProperty("security.jwt.previous-public-key")).isEqualTo("${JWT_PUBLIC_KEY_PREVIOUS:}");
+    }
+
+    /** 발급기는 auth-service 만 붙인다. 테스트 키에 개인키가 들어 있어 잘못 import 해도 기동하므로 빈 유무로 본다. */
+    @Test
+    @DisplayName("발급기(JwtIssuer)는 발급하는 서비스에만 있다")
+    void issuerOnlyWhereExpected() {
+        assertThat(applicationContext.getBeanNamesForType(JwtIssuer.class)).hasSize(issuerExpected() ? 1 : 0);
     }
 
     // ── 도우미 ────────────────────────────────────────────────────
