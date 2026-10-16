@@ -128,7 +128,9 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - 게이트웨이(#3)가 막는 방식 — 정규화되지 않은 경로(`..` · `%2e` · `;` · `//` 등)는 `GatewayRequestGuardFilter` 가 라우팅 전에 `GATEWAY_004`(400)로 끊는다.
   그 뒤로는 원문 경로와 정규화 경로가 같으므로, `/internal/**` 은 어느 라우트(`ServiceRoute`)에도 없어 `GATEWAY_001`(404)이 된다.
 - 그래서 규칙은 둘이다. 게이트웨이 라우트 predicate 는 `/internal` 을 포함할 수 있는 패턴(`/**` 같은 catch-all)을 쓰지 않는다.
-  라우트 필터로 경로를 바꾸지 않는다(`StripPrefix` · `RewritePath` 로 `/internal` 로 시작하는 경로가 만들어지지 않게). 명시적 `/internal` 거부 필터는 #4 에서 검토한다.
+  경로를 바꾸는 필터(`StripPrefix` · `RewritePath` · `SetPath`)는 **와일드카드 없는 고정 경로 라우트에만** 쓴다 — 바뀐 경로도 고정값이라
+  `/internal` · `/api/v1/admin` 이 만들어질 수 없다. 예: local · dev 전용 `GatewayDevRouteConfig`(`/health/{service-id}` · `/docs/{service-id}/v3/api-docs/{group}`).
+  접두어만 떼는 라우트(`/docs/{service-id}/**` + `StripPrefix`)는 만들지 않는다. 명시적 `/internal` 거부 필터는 #4 에서 검토한다.
 - 결제·재고 상태를 바꾸는 internal API 가 생기기 전에 서비스 간 인증(공유 토큰 · mTLS · 서비스 토큰)을 정한다 — 후속 이슈.
 
 ### 5-2. 도메인 advice 와의 관계
