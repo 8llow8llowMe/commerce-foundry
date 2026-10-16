@@ -11,10 +11,11 @@ import java.util.Base64;
 /**
  * 테스트용 RSA 키를 실행 중에 만든다. 공개 저장소라 키 파일·PEM 본문을 커밋하지 않는다.
  * 생성 비용(2048비트 수십 ms)을 줄이려고 같은 JVM 의 테스트가 공유한다.
+ * security-core 의 테스트 픽스처라 서비스 · 게이트웨이 테스트도 같은 키를 쓴다.
  */
 public final class TestKeys {
 
-    /** 발급기가 쓰는 현재 키. */
+    /** 발급기가 쓰는 현재 키. 컨텍스트 테스트의 {@code security.jwt.*} 도 이 키다 ({@link SecurityTestPropertiesInitializer}). */
     public static final KeyPair CURRENT = generate(2048);
     /** 키 교체 중의 이전 키. */
     public static final KeyPair PREVIOUS = generate(2048);

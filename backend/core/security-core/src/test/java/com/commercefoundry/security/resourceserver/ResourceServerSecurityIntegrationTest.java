@@ -1,5 +1,6 @@
 package com.commercefoundry.security.resourceserver;
 
+import static com.commercefoundry.security.support.SecurityEnvelopeAssertions.assertEnvelope;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
@@ -19,8 +20,10 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -41,8 +44,7 @@ import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -51,7 +53,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.ControllerAdviceBean;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -60,6 +61,7 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>서비스에 흔한 catch-all advice({@code Exception} → 500)를 일부러 두었다. 보안 예외가 그쪽으로 새면 403 이 500 이 된다.
  * 디코더는 Configurer 가 만든 실제 빈을 감싸, 정해 둔 두 토큰에만 검증 저장소 장애(#4 의 006)와 로그아웃 토큰(#4 의 004)을 흉내 낸다.
+ * 공개키는 테스트 픽스처의 {@code SecurityTestPropertiesInitializer}(spring.factories)가 {@link TestKeys#CURRENT} 로 넣는다.
  */
 @SpringBootTest(classes = ResourceServerSecurityIntegrationTest.TestApplication.class)
 @AutoConfigureMockMvc
@@ -77,12 +79,6 @@ class ResourceServerSecurityIntegrationTest {
     @Autowired
     private ApplicationContext context;
 
-    @DynamicPropertySource
-    static void jwtProperties(DynamicPropertyRegistry registry) {
-        registry.add("security.jwt.public-key", () -> TestKeys.publicKeyLine(TestKeys.CURRENT));
-        registry.add("security.jwt.previous-public-key", () -> "");
-    }
-
     @BeforeEach
     void resetCalls() {
         TestController.ADMIN_CALLS.set(0);
@@ -95,7 +91,7 @@ class ResourceServerSecurityIntegrationTest {
     void missingTokenOnAuthenticatedEndpoint() throws Exception {
         MockHttpServletResponse response = perform(get("/api/v1/me"));
 
-        assertError(response, SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(response, SecurityErrorCode.UNAUTHORIZED);
         assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isEqualTo("Bearer");
     }
 
@@ -106,7 +102,7 @@ class ResourceServerSecurityIntegrationTest {
 
         MockHttpServletResponse response = perform(get("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + expired));
 
-        assertError(response, SecurityErrorCode.TOKEN_EXPIRED);
+        assertEnvelope(response, SecurityErrorCode.TOKEN_EXPIRED);
         assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).startsWith("Bearer error=\"invalid_token\", error_description=");
     }
 
@@ -117,7 +113,7 @@ class ResourceServerSecurityIntegrationTest {
 
         MockHttpServletResponse response = perform(get("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + forged));
 
-        assertError(response, SecurityErrorCode.TOKEN_INVALID);
+        assertEnvelope(response, SecurityErrorCode.TOKEN_INVALID);
         assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isEqualTo("Bearer error=\"invalid_token\"");
     }
 
@@ -126,14 +122,14 @@ class ResourceServerSecurityIntegrationTest {
     void publicEndpointRejectsInvalidToken() throws Exception {
         assertThat(perform(get("/api/v1/public")).getStatus()).isEqualTo(200);
 
-        assertError(perform(get("/api/v1/public").header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt")), SecurityErrorCode.TOKEN_INVALID);
+        assertEnvelope(perform(get("/api/v1/public").header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt")), SecurityErrorCode.TOKEN_INVALID);
     }
 
     @Test
     @DisplayName("토큰 없이 어드민 경로에 오면 403 이 아니라 401 · SECURITY_001 — URL 규칙 · 애노테이션 모두")
     void missingTokenOnAdminEndpoints() throws Exception {
-        assertError(perform(get("/api/v1/admin/x")), SecurityErrorCode.UNAUTHORIZED);
-        assertError(perform(get("/api/v1/annotated-admin")), SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(perform(get("/api/v1/admin/x")), SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(perform(get("/api/v1/annotated-admin")), SecurityErrorCode.UNAUTHORIZED);
         assertThat(TestController.ADMIN_CALLS).hasValue(0);
     }
 
@@ -143,7 +139,7 @@ class ResourceServerSecurityIntegrationTest {
     void authenticationExceptionFromControllerIsUnauthorized() throws Exception {
         MockHttpServletResponse response = perform(get("/api/v1/credentials-missing").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)));
 
-        assertError(response, SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(response, SecurityErrorCode.UNAUTHORIZED);
         assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isEqualTo("Bearer");
     }
 
@@ -154,7 +150,7 @@ class ResourceServerSecurityIntegrationTest {
     void customerOnAdminPath() throws Exception {
         MockHttpServletResponse response = perform(get("/api/v1/admin/x").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)));
 
-        assertError(response, SecurityErrorCode.FORBIDDEN);
+        assertEnvelope(response, SecurityErrorCode.FORBIDDEN);
         assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isNull();
         assertThat(TestController.ADMIN_CALLS).hasValue(0);
     }
@@ -162,7 +158,7 @@ class ResourceServerSecurityIntegrationTest {
     @Test
     @DisplayName("CUSTOMER 가 hasRole('ADMIN') 메서드에 오면 catch-all advice 가 있어도 403 · SECURITY_005 다")
     void customerOnAnnotatedAdminMethod() throws Exception {
-        assertError(perform(get("/api/v1/annotated-admin").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
+        assertEnvelope(perform(get("/api/v1/annotated-admin").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
         assertThat(TestController.ADMIN_CALLS).hasValue(0);
     }
 
@@ -181,9 +177,9 @@ class ResourceServerSecurityIntegrationTest {
     void verificationFailureIsServiceUnavailable() throws Exception {
         MockHttpServletResponse response = perform(get("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + STORE_DOWN_TOKEN));
 
-        assertError(response, SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
+        assertEnvelope(response, SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
         assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isNull();
-        assertError(perform(get("/api/v1/public").header(HttpHeaders.AUTHORIZATION, "Bearer " + STORE_DOWN_TOKEN)), SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
+        assertEnvelope(perform(get("/api/v1/public").header(HttpHeaders.AUTHORIZATION, "Bearer " + STORE_DOWN_TOKEN)), SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
     }
 
     @Test
@@ -191,7 +187,7 @@ class ResourceServerSecurityIntegrationTest {
     void revokedTokenIsTokenRevoked() throws Exception {
         MockHttpServletResponse response = perform(get("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + REVOKED_TOKEN));
 
-        assertError(response, SecurityErrorCode.TOKEN_REVOKED);
+        assertEnvelope(response, SecurityErrorCode.TOKEN_REVOKED);
         assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isEqualTo("Bearer error=\"invalid_token\"");
     }
 
@@ -236,15 +232,7 @@ class ResourceServerSecurityIntegrationTest {
      * Spring Security 의 방화벽(StrictHttpFirewall)이 필터 체인 앞에서 400 으로 끊는다 — 봉투 없는 응답이고 컨트롤러는 돌지 않는다.
      */
     @ParameterizedTest
-    @ValueSource(strings = {
-        "/api/v1/orders/../admin/x",
-        "/api/v1/orders/%2e%2e/admin/x",
-        "/api/v1/orders/%2E%2E/admin/x",
-        "/api/v1/admin;x=y/x",
-        "/api/v1/orders/..;/admin/x",
-        "/api/v1//admin/x",
-        "/api/v1/admin%2fx"
-    })
+    @MethodSource("com.commercefoundry.security.support.ResourceServerSmokeTestSupport#nonNormalizedAdminPaths")
     @DisplayName("정규화되면 어드민 경로가 되는 원문 경로는 CUSTOMER · 무토큰 모두 400 으로 끊기고 어드민 컨트롤러에 닿지 않는다")
     void pathTraversalDoesNotReachAdminController(String path) throws Exception {
         MockHttpServletResponse customer = perform(get(URI.create(path)).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)));
@@ -272,8 +260,8 @@ class ResourceServerSecurityIntegrationTest {
     void encodedUnreservedCharacterStillMatchesAdminRule() throws Exception {
         URI encoded = URI.create("/api/v1/%61dmin/x");
 
-        assertError(perform(get(encoded).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
-        assertError(perform(get(encoded)), SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(perform(get(encoded).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
+        assertEnvelope(perform(get(encoded)), SecurityErrorCode.UNAUTHORIZED);
         assertThat(TestController.ADMIN_CALLS).hasValue(0);
 
         assertThat(perform(get(encoded).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).getStatus()).isEqualTo(200);
@@ -304,26 +292,97 @@ class ResourceServerSecurityIntegrationTest {
         assertThat(JSON.readTree(response.getContentAsByteArray()).has("resource")).isTrue();
     }
 
+    // ── actuator ─────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("/actuator/health 는 토큰 없이 200 이다")
+    void healthIsPublic() throws Exception {
+        MockHttpServletResponse response = perform(get("/actuator/health"));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(JSON.readTree(response.getContentAsByteArray()).get("status").asString()).isEqualTo("UP");
+    }
+
+    /** 노출 설정이 1차 방어다. 노출하지 않은 엔드포인트는 actuator 규칙에 걸리지 않고 매핑이 없어 404 다. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/actuator/info", "/actuator/env", "/actuator/heapdump"})
+    @DisplayName("노출하지 않은 actuator 엔드포인트는 무토큰 · ADMIN 모두 404 다")
+    void unexposedEndpointIsNotFound(String path) throws Exception {
+        assertThat(perform(get(path)).getStatus()).as(path).isEqualTo(404);
+        assertThat(perform(get(path).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).getStatus()).as(path).isEqualTo(404);
+    }
+
+    @Test
+    @DisplayName("actuator 링크(/actuator)는 무토큰 401 · SECURITY_001, 로그인해도 403 · SECURITY_005 다")
+    void actuatorLinksAreDenied() throws Exception {
+        assertEnvelope(perform(get("/actuator")), SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(perform(get("/actuator").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))), SecurityErrorCode.FORBIDDEN);
+    }
+
+    /** 바깥 클래스의 {@code mockMvc} 는 바깥 컨텍스트 것이라 쓰지 않는다. 노출 범위를 바꾼 컨텍스트의 것을 따로 받는다. */
+    @Nested
+    @TestPropertySource(properties = {"management.endpoints.web.exposure.include=health,info", "management.endpoint.health.show-components=always"})
+    @DisplayName("actuator 노출을 health,info 로 넓혀도")
+    class ExposedBeyondHealth {
+
+        @Autowired
+        private MockMvc mockMvc;
+
+        /** 구성 요소 경로는 show-components 를 켜야 생긴다. 켠 상태에서 하위 경로도 health 규칙에 들어가는지 본다. */
+        @Test
+        @DisplayName("health 는 하위 경로(/actuator/health/ping)까지 그대로 열려 있다")
+        void healthStaysPublic() throws Exception {
+            assertThat(perform(mockMvc, get("/actuator/health")).getStatus()).isEqualTo(200);
+            assertThat(perform(mockMvc, get("/actuator/health/ping")).getStatus()).isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("health 가 아닌 노출 엔드포인트(/actuator/info)는 무토큰 401 · SECURITY_001, CUSTOMER · ADMIN 403 · SECURITY_005 다")
+        void otherExposedEndpointIsDenied() throws Exception {
+            assertEnvelope(perform(mockMvc, get("/actuator/info")), SecurityErrorCode.UNAUTHORIZED);
+            assertEnvelope(perform(mockMvc, get("/actuator/info").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
+            assertEnvelope(perform(mockMvc, get("/actuator/info").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))), SecurityErrorCode.FORBIDDEN);
+        }
+
+        @Test
+        @DisplayName("링크(/actuator)도 무토큰 401 · SECURITY_001 이다")
+        void linksAreDenied() throws Exception {
+            assertEnvelope(perform(mockMvc, get("/actuator")), SecurityErrorCode.UNAUTHORIZED);
+        }
+    }
+
+    @Nested
+    @TestPropertySource(properties = {"management.endpoints.web.exposure.include=health,info", "management.endpoints.web.base-path=/manage"})
+    @DisplayName("management base-path 를 /manage 로 바꾸면 규칙이 따라간다")
+    class CustomBasePath {
+
+        @Autowired
+        private MockMvc mockMvc;
+
+        @Test
+        @DisplayName("/manage/health 는 열리고 /manage/info · /manage 는 막힌다")
+        void rulesFollowBasePath() throws Exception {
+            assertThat(perform(mockMvc, get("/manage/health")).getStatus()).isEqualTo(200);
+            assertEnvelope(perform(mockMvc, get("/manage/info")), SecurityErrorCode.UNAUTHORIZED);
+            assertEnvelope(perform(mockMvc, get("/manage/info").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))), SecurityErrorCode.FORBIDDEN);
+            assertEnvelope(perform(mockMvc, get("/manage")), SecurityErrorCode.UNAUTHORIZED);
+        }
+
+        @Test
+        @DisplayName("옛 경로(/actuator/info)는 엔드포인트가 아니어서 404 다")
+        void oldBasePathIsNotFound() throws Exception {
+            assertThat(perform(mockMvc, get("/actuator/info")).getStatus()).isEqualTo(404);
+        }
+    }
+
     // ── 도우미 ────────────────────────────────────────────────────
 
     private MockHttpServletResponse perform(MockHttpServletRequestBuilder request) throws Exception {
-        return mockMvc.perform(request).andReturn().getResponse();
+        return perform(mockMvc, request);
     }
 
-    /** 봉투의 타입 계약까지 JSON 트리로 본다 ({@code api-design-guide.md} §2-1). */
-    private static void assertError(MockHttpServletResponse response, SecurityErrorCode errorCode) {
-        assertThat(response.getStatus()).isEqualTo(errorCode.getHttpStatus().value());
-        assertThat(response.getContentType()).startsWith("application/json");
-
-        JsonNode root = JSON.readTree(response.getContentAsByteArray());
-        JsonNode header = root.get("dataHeader");
-        assertThat(header.get("success").isBoolean()).isTrue();
-        assertThat(header.get("success").asBoolean()).isFalse();
-        assertThat(header.get("resultCode").asString()).isEqualTo(errorCode.getCode());
-        assertThat(header.get("resultMessage").isString()).isTrue();
-        assertThat(header.get("resultMessage").asString()).isEqualTo(errorCode.getMessage());
-        assertThat(header.get("fieldErrors").isNull()).isTrue();
-        assertThat(root.get("dataBody").isNull()).isTrue();
+    private static MockHttpServletResponse perform(MockMvc mockMvc, MockHttpServletRequestBuilder request) throws Exception {
+        return mockMvc.perform(request).andReturn().getResponse();
     }
 
     private static String bearer(MemberRole role) {
