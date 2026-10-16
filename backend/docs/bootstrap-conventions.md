@@ -25,8 +25,8 @@ public class ProductServiceApplication {
 
 | 파일 | 담는 것 |
 |------|---------|
-| `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, `ResourceServerSecurityConfigurer` — 전 서비스, `JwtIssuerConfigurer` — auth 만, `RedisConfigurer` — Redis 를 쓰는 서비스만) |
-| `*PropertiesConfig` | 공통 프로퍼티 `@Import` (`JwtVerificationPropertiesConfig` — 전 서비스, `JwtIssuerPropertiesConfig` — auth 만) + 서비스 도메인 프로퍼티 `@EnableConfigurationProperties` |
+| `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, `ResourceServerSecurityConfigurer` · `InternalResourceServerConfigurer` — 전 서비스, `JwtIssuerConfigurer` — auth 만, `InternalTokenIssuerConfigurer` — internal Feign 클라이언트가 있는 서비스만, `RedisConfigurer` — Redis 를 쓰는 서비스만) |
+| `*PropertiesConfig` | 공통 프로퍼티 `@Import` (`JwtVerificationPropertiesConfig` · `InternalTokenPropertiesConfig` — 전 서비스, `JwtIssuerPropertiesConfig` — auth 만) + 서비스 도메인 프로퍼티 `@EnableConfigurationProperties` |
 | `*FeaturesConfig` | JPA Auditing(`BaseEntity` 시각), Scheduling, Async 같은 기능 스위치 |
 | `*SwaggerConfig` | 서비스 Swagger 그룹 (고객 / 어드민 그룹 분리) |
 
@@ -35,6 +35,7 @@ public class ProductServiceApplication {
 ```java
 @Configuration
 @Import({
+    InternalTokenPropertiesConfig.class,
     JwtVerificationPropertiesConfig.class,
     SnowflakePropertiesConfig.class,
     SwaggerPropertiesConfig.class
@@ -60,7 +61,7 @@ public class PaymentServicePropertiesConfig {
 
 | 파일 | 담는 것 |
 |------|---------|
-| `application.yml` | 포트, 서비스 이름, DB 플레이스홀더, 스키마, Eureka 주소, actuator, Snowflake 플레이스홀더, `security.jwt.*` 플레이스홀더(`${JWT_PUBLIC_KEY}` · `${JWT_PUBLIC_KEY_PREVIOUS:}`), Swagger 기본값 |
+| `application.yml` | 포트, 서비스 이름, DB 플레이스홀더, 스키마, Eureka 주소, actuator, Snowflake 플레이스홀더, `security.jwt.*` 플레이스홀더(`${JWT_PUBLIC_KEY}` · `${JWT_PUBLIC_KEY_PREVIOUS:}`), `security.internal.*`(`${spring.application.name}` · `${INTERNAL_JWT_SECRET}` · `${INTERNAL_JWT_SECRET_PREVIOUS:}`), Swagger 기본값 |
 | `application-local.yml` | `backend/.env` import, `ddl-auto: update`, Snowflake 고정값, Swagger 열기 |
 | `application-dev.yml` | `ddl-auto: update`, Swagger 열기. 값은 Vault 에서 환경변수로 받는다 (`secret-management.md`) |
 | `src/test/resources/application-test.yml` | 컨텍스트 로딩 테스트용 H2 · Eureka 끄기 (아래 "컨텍스트 로딩 테스트") |
@@ -179,7 +180,9 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
 
 - `ResourceServerSmokeTestSupport`(security-core 테스트 픽스처)의 애노테이션(`@SpringBootTest` · `@ActiveProfiles("test")` · `@AutoConfigureMockMvc`)은
   `*ApplicationTests` 와 **정확히 같다.** 그래서 컨텍스트 캐시를 같이 써 서비스 컨텍스트를 한 번만 띄운다. 한쪽 애노테이션을 바꾸면 다른 쪽도 바꾼다.
-- JWT 키는 픽스처의 초기화기가 실행 중 만든 키로 넣는다. `application-test.yml` 에 적지 않는다 (`security-guide.md` §5-3 "테스트 키").
+- JWT 키 · 서비스 토큰 비밀은 픽스처의 초기화기가 실행 중 만든 값으로 넣는다. `application-test.yml` 에 적지 않는다 (`security-guide.md` §5-3 "테스트 키").
+- 서비스 간 인증(`/internal/**`) 케이스도 같은 스모크에 있다 — 테스트 전용 internal 핸들러는 픽스처의 `ContextCustomizerFactory` 가 모든 서블릿 테스트 컨텍스트에
+  등록하므로 `*ApplicationTests` 와의 컨텍스트 공유가 유지된다 (`security-guide.md` §9-10).
 - 노출 확대는 스모크의 "actuator 웹 노출은 정확히 `health` 하나" 단언이 잡는다(바인딩된 최종 값이라 `heapdump` · `loggers` 를 목록에 넣어도 깨진다).
   `*ApplicationTests` 의 "다른 actuator 경로 404" 단언은 그대로 둔다 — 목록에 적은 경로만 보지만, 노출하지 않은 엔드포인트가 보안 규칙에
   걸리지 않고 404 라는 동작을 고정한다. 노출 설정이 1차, URL 규칙(노출된 health 외 `denyAll`)이 2차 방어다.
@@ -200,9 +203,10 @@ implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 testImplementation testFixtures(project(':core:security-core'))   // 테스트 키 · 토큰 · 인가 스모크
 ```
 
-- `*BeansConfig` 가 `ResourceServerSecurityConfigurer` 를, `*PropertiesConfig` 가 `JwtVerificationPropertiesConfig` 를 `@Import` 한다.
-  auth-service 는 `JwtIssuerConfigurer` · `JwtIssuerPropertiesConfig` 를 더한다.
-- `security.jwt.*` yml 과 키 환경변수는 `security-guide.md` §5-3 · §6.
+- `*BeansConfig` 가 `ResourceServerSecurityConfigurer` · `InternalResourceServerConfigurer` 를, `*PropertiesConfig` 가 `JwtVerificationPropertiesConfig` ·
+  `InternalTokenPropertiesConfig` 를 `@Import` 한다. auth-service 는 `JwtIssuerConfigurer` · `JwtIssuerPropertiesConfig` 를 더한다.
+  internal Feign 클라이언트를 처음 만드는 서비스는 `InternalTokenIssuerConfigurer` 를 더한다 (`security-guide.md` §9-5).
+- `security.jwt.*` yml 과 키 환경변수는 `security-guide.md` §5-3 · §6, `security.internal.*` 과 `INTERNAL_JWT_SECRET` 은 §9-6.
 
 ## Redis (쓰는 서비스만)
 
