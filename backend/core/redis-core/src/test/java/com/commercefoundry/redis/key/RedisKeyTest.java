@@ -17,10 +17,10 @@ class RedisKeyTest {
     class Format {
 
         @Test
-        @DisplayName("owner · domain · id 를 ':' 로 잇는다")
+        @DisplayName("owner · domain · id 를 ':' 로 잇는다 — refresh 토큰은 원문이 아니라 핑거프린트(base64url 43자)를 id 로 쓴다")
         void joinsWithColon() {
-            assertThat(RedisKey.of("auth", "refresh-token", "4611686018427387904").value())
-                .isEqualTo("auth:refresh-token:4611686018427387904");
+            assertThat(RedisKey.of("auth", "refresh-token", "n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg").value())
+                .isEqualTo("auth:refresh-token:n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg");
         }
 
         @Test

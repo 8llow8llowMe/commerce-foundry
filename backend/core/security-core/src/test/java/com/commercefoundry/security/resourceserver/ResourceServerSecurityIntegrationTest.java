@@ -35,6 +35,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
@@ -99,7 +100,7 @@ class ResourceServerSecurityIntegrationTest {
     }
 
     @Test
-    @DisplayName("만료된 토큰은 401 · SECURITY_002 — 프론트의 재발급 신호")
+    @DisplayName("만료된 토큰은 401 · SECURITY_002 — 보낸 토큰이 만료됐다")
     void expiredToken() throws Exception {
         String expired = token(Instant.now().minus(Duration.ofHours(2)), MemberRole.CUSTOMER);
 
@@ -134,6 +135,16 @@ class ResourceServerSecurityIntegrationTest {
         assertError(perform(get("/api/v1/admin/x")), SecurityErrorCode.UNAUTHORIZED);
         assertError(perform(get("/api/v1/annotated-admin")), SecurityErrorCode.UNAUTHORIZED);
         assertThat(TestController.ADMIN_CALLS).hasValue(0);
+    }
+
+    /** 컨트롤러에서 난 인증 예외는 필터가 아니라 SecurityExceptionAdvice#handleAuthentication 이 받는다. catch-all advice 보다 먼저다. */
+    @Test
+    @DisplayName("컨트롤러가 AuthenticationCredentialsNotFoundException 을 던지면 401 · SECURITY_001 · WWW-Authenticate: Bearer 봉투다")
+    void authenticationExceptionFromControllerIsUnauthorized() throws Exception {
+        MockHttpServletResponse response = perform(get("/api/v1/credentials-missing").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)));
+
+        assertError(response, SecurityErrorCode.UNAUTHORIZED);
+        assertThat(response.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isEqualTo("Bearer");
     }
 
     // ── 403 ──────────────────────────────────────────────────────
@@ -390,6 +401,13 @@ class ResourceServerSecurityIntegrationTest {
         @GetMapping("/internal/v1/x")
         ResponseEntity<Response<Void>> internal() {
             return ResponseEntity.ok(Response.success());
+        }
+
+        /** 서비스 코드가 SecurityContext 를 직접 읽다 인증 정보를 못 찾은 경우를 흉내 낸다. */
+        @PreAuthorize("permitAll()")
+        @GetMapping("/api/v1/credentials-missing")
+        ResponseEntity<Response<Void>> credentialsMissing() {
+            throw new AuthenticationCredentialsNotFoundException("no credentials in security context");
         }
     }
 

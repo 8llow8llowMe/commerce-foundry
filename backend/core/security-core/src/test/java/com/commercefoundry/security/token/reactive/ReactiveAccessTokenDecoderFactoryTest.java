@@ -5,8 +5,8 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.commercefoundry.security.error.SecurityErrorResolver;
 import com.commercefoundry.security.principal.MemberJwtAuthenticationConverter;
-import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.principal.MemberRole;
+import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.AccessTokenDecoderFactory;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.proc.SecurityContext;

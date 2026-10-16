@@ -82,7 +82,7 @@ class AccessTokenVerificationTest {
     }
 
     @Test
-    @DisplayName("만료된 토큰은 002 — 프론트가 재발급을 시도하는 유일한 신호다")
+    @DisplayName("만료된 토큰은 002 — 보낸 토큰이 만료됐다는 원인을 알린다")
     void expiredTokenIsTokenExpired() {
         String token = TestTokens.issuer(NOW).issueAccessToken(MEMBER_ID, MemberRole.CUSTOMER).tokenValue();
         Instant afterSkew = NOW.plus(TestTokens.ACCESS_TOKEN_TTL).plus(TestTokens.CLOCK_SKEW).plusSeconds(1);
