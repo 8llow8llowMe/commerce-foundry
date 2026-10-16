@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence.entity;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.persistence.entity.BaseEntity;
 import com.commercefoundry.shared.commerce.CurrencyCode;
+import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -23,7 +24,8 @@ import lombok.NoArgsConstructor;
 @Table(
     name = "sku",
     comment = "SKU (상품 × 옵션 값 조합)",
-    uniqueConstraints = @UniqueConstraint(name = "uk_sku_product_id_option_value_key", columnNames = {"product_id", "option_value_key"})
+    uniqueConstraints = @UniqueConstraint(name = "uk_sku_product_id_option_value_key", columnNames = {"product_id", "option_value_key"}),
+    check = @CheckConstraint(name = "ck_sku_additional_price_non_negative", constraint = "additional_price_amount >= 0")
 )
 @Getter
 @Builder
