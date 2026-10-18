@@ -1,7 +1,5 @@
 package com.commercefoundry.domainlayer.product.domain.model;
 
-import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
-import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -13,7 +11,7 @@ import java.util.stream.Collectors;
  * ({@code order-flow-guide.md} §3). 전이는 새 인스턴스를 만들고, 바뀌었는지는 {@link Transition#changed()} 로 알린다.
  *
  * <table>
- *   <caption>허용 전이 (표 밖은 409)</caption>
+ *   <caption>허용 전이 (표 밖은 {@link StockReservationTransitionException} — Processor 가 409 오류 코드로 바꾼다)</caption>
  *   <tr><th>현재</th><th>confirm</th><th>release</th></tr>
  *   <tr><td>RESERVED (만료 시각 전 · 후 모두)</td><td>CONFIRMED</td><td>RELEASED</td></tr>
  *   <tr><td>CONFIRMED</td><td>그대로 (멱등)</td><td>{@code STOCK_RESERVATION_CONFIRMED}</td></tr>
@@ -74,7 +72,7 @@ public record StockReservation(
     /**
      * 결제 완료로 확정한다.
      *
-     * @throws ProductException {@code STOCK_RESERVATION_RELEASED} — 이미 해제 · 만료된 선점. 호출한 쪽이 새로 선점한다
+     * @throws StockReservationTransitionException 이미 해제 · 만료된 선점 (Processor 가 {@code STOCK_RESERVATION_RELEASED} 로 바꾼다). 호출한 쪽이 새로 선점한다
      */
     public Transition confirm(Instant now) {
         Objects.requireNonNull(now, "now");
@@ -83,14 +81,15 @@ public record StockReservation(
                 id, orderId, StockReservationStatus.CONFIRMED, expiresAt, now, null, null, items, version
             ));
             case CONFIRMED -> Transition.unchanged(this);
-            case RELEASED -> throw new ProductException(ProductErrorCode.STOCK_RESERVATION_RELEASED);
+            case RELEASED -> throw new StockReservationTransitionException(status, StockReservationTransitionException.Action.CONFIRM);
         };
     }
 
     /**
      * 선점을 푼다. 바뀌었으면 호출한 쪽이 {@link #deductedItems()} 의 재고를 되돌린다.
      *
-     * @throws ProductException {@code STOCK_RESERVATION_CONFIRMED} — 이미 확정된 선점. 결제 후 취소 · 반품의 재고 복원은 이 경로가 아니다
+     * @throws StockReservationTransitionException 이미 확정된 선점 (Processor 가 {@code STOCK_RESERVATION_CONFIRMED} 로 바꾼다).
+     *     결제 후 취소 · 반품의 재고 복원은 이 경로가 아니다
      */
     public Transition release(Instant now, StockReleaseReason reason) {
         Objects.requireNonNull(now, "now");
@@ -99,7 +98,7 @@ public record StockReservation(
             case RESERVED -> Transition.changed(new StockReservation(
                 id, orderId, StockReservationStatus.RELEASED, expiresAt, null, now, reason, items, version
             ));
-            case CONFIRMED -> throw new ProductException(ProductErrorCode.STOCK_RESERVATION_CONFIRMED);
+            case CONFIRMED -> throw new StockReservationTransitionException(status, StockReservationTransitionException.Action.RELEASE);
             case RELEASED -> Transition.unchanged(this);
         };
     }

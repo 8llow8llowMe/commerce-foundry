@@ -19,6 +19,7 @@ import com.commercefoundry.domainlayer.product.application.info.StockAdminInfo;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockAdjustmentHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.query.StockQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.domain.model.StockAdjustmentHistory;
@@ -55,6 +56,9 @@ class StockAdjustmentProcessorTest {
     private StockAdjustmentHistoryRepositoryPort stockAdjustmentHistoryRepositoryPort;
 
     @Mock
+    private StockReservationRepositoryPort stockReservationRepositoryPort;
+
+    @Mock
     private SnowflakeIdGenerator snowflakeIdGenerator;
 
     @InjectMocks
@@ -88,7 +92,7 @@ class StockAdjustmentProcessorTest {
 
             verify(stockRepositoryPort).create(new Stock(SKU_ID, true, 12L));
             verify(stockRepositoryPort, never()).updateQuantityIfMatches(anyLong(), anyLong(), anyLong());
-            assertThat(info).isEqualTo(new StockAdminInfo(SKU_ID, true, 12L, UPDATED_AT));
+            assertThat(info).isEqualTo(new StockAdminInfo(SKU_ID, true, 12L, 0L, UPDATED_AT));
             assertThat(appendedHistory()).isEqualTo(new StockAdjustmentHistory(
                 HISTORY_ID, SKU_ID, 0L, 12L, 12L, true, true, StockAdjustmentReason.RESTOCK, "10월 입고분", ADMIN_ID
             ));
@@ -146,10 +150,11 @@ class StockAdjustmentProcessorTest {
             givenRows(row(true, 7L), row(true, 12L));
             given(stockRepositoryPort.updateQuantityIfMatches(SKU_ID, 5L, 12L)).willReturn(true);
             given(snowflakeIdGenerator.generateId()).willReturn(HISTORY_ID);
+            given(stockReservationRepositoryPort.sumReservedQuantityBySkuId(SKU_ID)).willReturn(3L);
 
             StockAdminInfo info = processor.adjust(command(12L, 5L, null));
 
-            assertThat(info).isEqualTo(new StockAdminInfo(SKU_ID, true, 12L, UPDATED_AT));
+            assertThat(info).isEqualTo(new StockAdminInfo(SKU_ID, true, 12L, 3L, UPDATED_AT));
             verify(stockRepositoryPort, never()).updateStockManaged(anyLong(), anyBoolean());
             verify(stockRepositoryPort, never()).create(any());
             StockAdjustmentHistory history = appendedHistory();

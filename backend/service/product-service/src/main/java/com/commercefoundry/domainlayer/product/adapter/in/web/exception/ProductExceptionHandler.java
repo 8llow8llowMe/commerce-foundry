@@ -6,6 +6,9 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.validation.FieldError;
+import org.springframework.validation.method.ParameterErrors;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -42,10 +45,19 @@ public class ProductExceptionHandler {
         return ValidationErrorSupport.toResponse(exception, ProductErrorCode.INVALID_REQUEST.getCode());
     }
 
-    /** {@code @RequestParam} 의 Bean Validation 실패 (컨트롤러 메서드 검증). 코드는 {@code ProductValidationMessage} 접두어를 따른다. */
+    /**
+     * {@code @RequestParam} · {@code @PathVariable} 의 Bean Validation 실패 (컨트롤러 메서드 검증). 코드는 {@code ProductValidationMessage} 접두어를 따른다.
+     *
+     * <p>한 메서드에 제약 붙은 경로 변수와 {@code @RequestBody @Valid} 가 함께 있으면(어드민 재고 조정) Spring 이 본문 검증까지 메서드 검증으로 묶어
+     * 이 예외로 던진다. 그대로 넘기면 본문 필드 오류의 필드명이 파라미터 이름({@code request})으로 뭉개지므로, 본문 결과가 있으면
+     * {@link MethodArgumentNotValidException} 과 같은 모양(필드명 · record 선언 순서)으로 바꾸고 경로 변수 오류를 함께 싣는다.
+     */
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<Response<Void>> handleHandlerMethodValidation(HandlerMethodValidationException exception) {
-        return ValidationErrorSupport.toResponse(exception, ProductErrorCode.INVALID_REQUEST.getCode());
+        if (exception.getBeanResults().isEmpty()) {
+            return ValidationErrorSupport.toResponse(exception, ProductErrorCode.INVALID_REQUEST.getCode());
+        }
+        return ValidationErrorSupport.toResponse(asBodyValidationException(exception), ProductErrorCode.INVALID_REQUEST.getCode());
     }
 
     /** 숫자 자리에 문자 · enum 에 없는 값({@code sortType=FOO}) 등 바인딩 단계의 형식 오류. */
@@ -57,5 +69,23 @@ public class ProductExceptionHandler {
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<Response<Void>> handleMissingParameter(MissingServletRequestParameterException exception) {
         return ValidationErrorSupport.toMissingParameterResponse(exception.getParameterName(), ProductErrorCode.PARAMETER_REQUIRED.getCode());
+    }
+
+    /**
+     * 메서드 검증 결과를 본문 검증 예외 모양으로 옮긴다. 본문(첫 bean 결과)의 필드 오류는 그대로, 경로 변수 · 쿼리 파라미터 오류는
+     * 파라미터 이름을 필드명으로 한 필드 오류로 더한다. 메시지 · 제약 코드는 원래 오류의 것을 쓴다.
+     */
+    private static MethodArgumentNotValidException asBodyValidationException(HandlerMethodValidationException exception) {
+        ParameterErrors body = exception.getBeanResults().getFirst();
+        BeanPropertyBindingResult bindingResult = new BeanPropertyBindingResult(body.getArgument(), body.getObjectName());
+        exception.getBeanResults().forEach(result -> result.getAllErrors().forEach(bindingResult::addError));
+        exception.getValueResults().forEach(result -> {
+            String field = result.getMethodParameter().getParameterName();
+            result.getResolvableErrors().forEach(error -> bindingResult.addError(new FieldError(
+                body.getObjectName(), field == null ? "request" : field, result.getArgument(), false,
+                error.getCodes(), error.getArguments(), error.getDefaultMessage()
+            )));
+        });
+        return new MethodArgumentNotValidException(body.getMethodParameter(), bindingResult);
     }
 }

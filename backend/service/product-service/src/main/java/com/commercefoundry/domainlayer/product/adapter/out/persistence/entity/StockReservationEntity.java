@@ -28,7 +28,7 @@ import lombok.NoArgsConstructor;
  *
  * <p>{@code active_order_id} 는 RESERVED · CONFIRMED 동안만 주문 아이디이고 RELEASED 면 null 이다. 유니크 키가 주문당 활성 선점을 하나로 막고,
  * 해제된 주문은 다시 선점할 수 있다(PostgreSQL 유니크 키는 null 을 겹치게 둔다).
- * 만료 스윕은 {@code (status, expires_at)} 인덱스로 RESERVED 중 만료 시각이 지난 것을 오래된 순으로 읽는다.
+ * 만료 스윕은 {@code (status, expires_at, id)} 인덱스로 RESERVED 중 만료 시각이 지난 것을 오래된 순으로 읽고, 배치마다 {@code (expires_at, id)} keyset 으로 이어 읽는다.
  */
 @Entity
 @Table(
@@ -36,7 +36,7 @@ import lombok.NoArgsConstructor;
     comment = "재고 선점 (주문 하나에 한 행)",
     uniqueConstraints = @UniqueConstraint(name = "uk_stock_reservation_active_order_id", columnNames = "active_order_id"),
     indexes = {
-        @Index(name = "idx_stock_reservation_status_expires_at", columnList = "status, expires_at"),
+        @Index(name = "idx_stock_reservation_status_expires_at_id", columnList = "status, expires_at, id"),
         @Index(name = "idx_stock_reservation_order_id", columnList = "order_id")
     }
 )

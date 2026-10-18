@@ -17,17 +17,20 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.domainlayer.product.application.command.StockReservationCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
+import com.commercefoundry.domainlayer.product.application.info.ExpiredStockReservationInfo;
 import com.commercefoundry.domainlayer.product.application.info.StockReservationInfo;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.domain.model.StockReleaseReason;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservation;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationItem;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationStatus;
+import com.commercefoundry.domainlayer.product.domain.model.StockReservationTransitionException;
 import com.commercefoundry.global.properties.StockProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
@@ -37,6 +40,7 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -85,25 +89,27 @@ class StockReservationProcessorTest {
         }
 
         @Test
-        @DisplayName("같은 SKU 는 수량을 합치고 SKU 오름차순으로 저장 · 차감한다 — 만료 시각은 지금 + ttl")
+        @DisplayName("같은 SKU 는 수량을 합치고 헤더 → SKU 오름차순 차감 → 항목 순으로 쓴다 — 만료 시각은 지금 + ttl")
         void mergesAndSorts() {
             givenOnSale(1003L, 1001L);
-            givenStocks(managed(1001L), managed(1003L));
             given(stockRepositoryPort.deduct(anyLong(), anyLong())).willReturn(true);
 
             StockReservationInfo info = processor.reserve(command(item(1003L, 1), item(1001L, 2), item(1003L, 2)));
 
             StockReservation saved = savedReservation();
-            assertThat(saved.items()).extracting(StockReservationItem::skuId, StockReservationItem::quantity)
-                .containsExactly(tuple(1001L, 2), tuple(1003L, 3));
+            assertThat(saved.items()).extracting(StockReservationItem::skuId, StockReservationItem::quantity, StockReservationItem::deducted)
+                .containsExactly(tuple(1001L, 2, true), tuple(1003L, 3, true));
             assertThat(saved.status()).isEqualTo(StockReservationStatus.RESERVED);
             assertThat(saved.orderId()).isEqualTo(ORDER_ID);
             assertThat(saved.expiresAt()).isEqualTo(NOW.plus(TTL));
 
             InOrder order = inOrder(stockReservationRepositoryPort, stockRepositoryPort);
-            order.verify(stockReservationRepositoryPort).create(any());
+            order.verify(stockReservationRepositoryPort).createHeader(saved.id(), ORDER_ID, NOW.plus(TTL));
             order.verify(stockRepositoryPort).deduct(1001L, 2L);
             order.verify(stockRepositoryPort).deduct(1003L, 3L);
+            order.verify(stockReservationRepositoryPort).createItems(any());
+            // 모두 차감됐으면 재고 행을 다시 읽지 않는다
+            verify(stockRepositoryPort, never()).findAllBySkuIds(any());
 
             assertThat(info.reservationId()).isEqualTo(saved.id());
             assertThat(info.status()).isEqualTo(StockReservationStatus.RESERVED);
@@ -111,37 +117,65 @@ class StockReservationProcessorTest {
         }
 
         @Test
-        @DisplayName("무제한 SKU 는 deducted=false 이고 차감하지 않는다")
+        @DisplayName("차감이 0행인 SKU 를 다시 읽어 무제한이면 deducted=false 로 선점한다 — 다시 읽기는 0행 SKU 만 in 절 한 번이다")
         void unlimitedIsNotDeducted() {
             givenOnSale(1001L, 1002L);
-            givenStocks(managed(1001L), new Stock(1002L, false, 0L));
             given(stockRepositoryPort.deduct(1001L, 1L)).willReturn(true);
+            given(stockRepositoryPort.deduct(1002L, 5L)).willReturn(false);
+            given(stockRepositoryPort.findAllBySkuIds(Set.of(1002L))).willReturn(List.of(new Stock(1002L, false, 0L)));
 
             StockReservationInfo info = processor.reserve(command(item(1001L, 1), item(1002L, 5)));
 
             assertThat(info.items()).extracting(StockReservationInfo.Item::deducted).containsExactly(true, false);
-            verify(stockRepositoryPort, never()).deduct(Mockito.eq(1002L), anyLong());
+            assertThat(savedReservation().deductedItems()).extracting(StockReservationItem::skuId).containsExactly(1001L);
+            verify(stockRepositoryPort).findAllBySkuIds(Set.of(1002L));
         }
 
         @Test
-        @DisplayName("재고 행이 없는 SKU 는 품절로 보고 차감 대상이 된다 — 차감이 0행이라 부족으로 모인다")
+        @DisplayName("미리 무제한이던 SKU 를 그 사이 어드민이 관리로 바꿨으면 조건부 차감이 1행이라 deducted=true 다 (스냅숏 무제한 → 실제 관리)")
+        void becameManagedIsDeducted() {
+            givenOnSale(1001L);
+            // 스냅숏을 미리 읽지 않는다 — 차감 결과가 곧 판정이다
+            given(stockRepositoryPort.deduct(1001L, 2L)).willReturn(true);
+
+            StockReservationInfo info = processor.reserve(command(item(1001L, 2)));
+
+            assertThat(info.items()).extracting(StockReservationInfo.Item::deducted).containsExactly(true);
+            verify(stockRepositoryPort, never()).findAllBySkuIds(any());
+        }
+
+        @Test
+        @DisplayName("관리 중이던 SKU 를 그 사이 어드민이 무제한으로 바꿨으면 차감 0행 뒤 다시 읽어 무제한이라 deducted=false 로 선점한다 (관리 → 무제한)")
+        void becameUnlimitedIsNotDeducted() {
+            givenOnSale(1001L);
+            given(stockRepositoryPort.deduct(1001L, 2L)).willReturn(false);
+            given(stockRepositoryPort.findAllBySkuIds(Set.of(1001L))).willReturn(List.of(new Stock(1001L, false, 0L)));
+
+            StockReservationInfo info = processor.reserve(command(item(1001L, 2)));
+
+            assertThat(info.items()).extracting(StockReservationInfo.Item::deducted).containsExactly(false);
+        }
+
+        @Test
+        @DisplayName("재고 행이 없는 SKU 는 품절이다 — 차감 0행 · 다시 읽어도 행이 없어 부족으로 모이고 항목을 쓰지 않는다")
         void missingStockRowIsInsufficient() {
             givenOnSale(1001L);
-            givenStocks();
             given(stockRepositoryPort.deduct(1001L, 1L)).willReturn(false);
+            given(stockRepositoryPort.findAllBySkuIds(Set.of(1001L))).willReturn(List.of());
 
             assertFailsWith(() -> processor.reserve(command(item(1001L, 1))), ProductErrorCode.STOCK_INSUFFICIENT, "[1001]");
-            assertThat(savedReservation().items().getFirst().deducted()).isTrue();
+            verify(stockReservationRepositoryPort, never()).createItems(any());
         }
 
         @Test
-        @DisplayName("부족한 SKU 를 끝까지 돌며 모두 모아 STOCK_INSUFFICIENT 로 실패한다 — 롤백은 Facade 트랜잭션이 한다")
+        @DisplayName("부족한 SKU 를 끝까지 돌며 모두 모아(SKU 오름차순) STOCK_INSUFFICIENT 로 실패한다 — 롤백은 Facade 트랜잭션이 한다")
         void collectsAllInsufficient() {
             givenOnSale(1001L, 1002L, 1003L);
-            givenStocks(managed(1001L), managed(1002L), managed(1003L));
             given(stockRepositoryPort.deduct(1001L, 1L)).willReturn(false);
             given(stockRepositoryPort.deduct(1002L, 1L)).willReturn(true);
             given(stockRepositoryPort.deduct(1003L, 1L)).willReturn(false);
+            given(stockRepositoryPort.findAllBySkuIds(Set.of(1001L, 1003L)))
+                .willReturn(List.of(new Stock(1001L, true, 0L), new Stock(1003L, true, 0L)));
 
             assertFailsWith(
                 () -> processor.reserve(command(item(1003L, 1), item(1002L, 1), item(1001L, 1))),
@@ -150,6 +184,7 @@ class StockReservationProcessorTest {
             verify(stockRepositoryPort).deduct(1001L, 1L);
             verify(stockRepositoryPort).deduct(1002L, 1L);
             verify(stockRepositoryPort).deduct(1003L, 1L);
+            verify(stockReservationRepositoryPort, never()).createItems(any());
         }
 
         @Test
@@ -172,19 +207,20 @@ class StockReservationProcessorTest {
                 () -> processor.reserve(command(item(1001L, 1), item(1002L, 1), item(1003L, 1), item(1004L, 1), item(1005L, 1), item(1006L, 1))),
                 ProductErrorCode.STOCK_SKU_NOT_PURCHASABLE, "[1002, 1003, 1004, 1005, 1006]"
             );
-            verify(stockReservationRepositoryPort, never()).create(any());
+            verify(stockReservationRepositoryPort, never()).createHeader(anyLong(), anyLong(), any());
             verify(stockRepositoryPort, never()).deduct(anyLong(), anyLong());
         }
 
         @Test
-        @DisplayName("같은 주문의 선점 생성이 동시에 겹치면 어댑터의 409 를 그대로 올리고 차감하지 않는다")
+        @DisplayName("같은 주문의 선점 생성이 동시에 겹치면 헤더 INSERT 의 409 를 그대로 올리고 차감하지 않는다")
         void concurrentCreate() {
             givenOnSale(1001L);
-            givenStocks(managed(1001L));
-            doThrow(new ProductException(ProductErrorCode.STOCK_RESERVATION_CONFLICT)).when(stockReservationRepositoryPort).create(any());
+            doThrow(new ProductException(ProductErrorCode.STOCK_RESERVATION_CONFLICT))
+                .when(stockReservationRepositoryPort).createHeader(anyLong(), anyLong(), any());
 
             assertFailsWith(() -> processor.reserve(command(item(1001L, 1))), ProductErrorCode.STOCK_RESERVATION_CONFLICT, "");
             verify(stockRepositoryPort, never()).deduct(anyLong(), anyLong());
+            verify(stockReservationRepositoryPort, never()).createItems(any());
         }
     }
 
@@ -202,7 +238,7 @@ class StockReservationProcessorTest {
 
             assertThat(info.reservationId()).isEqualTo(RESERVATION_ID);
             assertThat(info.items()).extracting(StockReservationInfo.Item::quantity).containsExactly(3, 1);
-            verify(stockReservationRepositoryPort, never()).create(any());
+            verify(stockReservationRepositoryPort, never()).createHeader(anyLong(), anyLong(), any());
             verifyNoInteractions(stockRepositoryPort, skuRepositoryPort, productRepositoryPort);
         }
 
@@ -252,11 +288,12 @@ class StockReservationProcessorTest {
         }
 
         @Test
-        @DisplayName("RELEASED 면 409 STOCK_RESERVATION_RELEASED")
+        @DisplayName("RELEASED 면 도메인 전이 거절을 409 STOCK_RESERVATION_RELEASED 로 바꾼다 — 500 으로 새지 않는다")
         void released() {
             givenReservation(StockReservationStatus.RELEASED);
 
             assertFailsWith(() -> processor.confirm(RESERVATION_ID), ProductErrorCode.STOCK_RESERVATION_RELEASED, "");
+            assertThatThrownBy(() -> processor.confirm(RESERVATION_ID)).hasCauseInstanceOf(StockReservationTransitionException.class);
             verify(stockReservationRepositoryPort, never()).update(any());
         }
 
@@ -312,11 +349,12 @@ class StockReservationProcessorTest {
         }
 
         @Test
-        @DisplayName("CONFIRMED 면 409 STOCK_RESERVATION_CONFIRMED 이고 복원하지 않는다")
+        @DisplayName("CONFIRMED 면 도메인 전이 거절을 409 STOCK_RESERVATION_CONFIRMED 로 바꾸고 복원하지 않는다 — 500 으로 새지 않는다")
         void confirmed() {
             givenReservation(StockReservationStatus.CONFIRMED);
 
             assertFailsWith(() -> processor.release(RESERVATION_ID), ProductErrorCode.STOCK_RESERVATION_CONFIRMED, "");
+            assertThatThrownBy(() -> processor.release(RESERVATION_ID)).hasCauseInstanceOf(StockReservationTransitionException.class);
             verifyNoInteractions(stockRepositoryPort);
         }
 
@@ -378,11 +416,23 @@ class StockReservationProcessorTest {
         }
 
         @Test
-        @DisplayName("만료 대상 조회는 지금 시각으로 한다")
+        @DisplayName("만료 대상 조회는 지금 시각으로 하고, 커서가 없으면 처음부터 읽는다")
         void findExpired() {
-            given(stockReservationRepositoryPort.findExpiredReservationIds(NOW, 100)).willReturn(List.of(1L, 2L));
+            given(stockReservationRepositoryPort.findExpiredReservations(NOW, null, 100))
+                .willReturn(List.of(new ExpiredStockReservationQueryResult(1L, NOW.minusSeconds(30)), new ExpiredStockReservationQueryResult(2L, NOW)));
 
-            assertThat(processor.findExpiredReservationIds(100)).containsExactly(1L, 2L);
+            assertThat(processor.findExpiredReservations(null, 100))
+                .containsExactly(new ExpiredStockReservationInfo(1L, NOW.minusSeconds(30)), new ExpiredStockReservationInfo(2L, NOW));
+        }
+
+        @Test
+        @DisplayName("커서를 넘기면 그 건의 (만료 시각, 아이디) 다음부터 읽는다")
+        void findExpiredAfterCursor() {
+            ExpiredStockReservationInfo cursor = new ExpiredStockReservationInfo(2L, NOW.minusSeconds(10));
+            given(stockReservationRepositoryPort.findExpiredReservations(NOW, new ExpiredStockReservationQueryResult(2L, NOW.minusSeconds(10)), 100))
+                .willReturn(List.of(new ExpiredStockReservationQueryResult(3L, NOW)));
+
+            assertThat(processor.findExpiredReservations(cursor, 100)).containsExactly(new ExpiredStockReservationInfo(3L, NOW));
         }
     }
 
@@ -391,10 +441,6 @@ class StockReservationProcessorTest {
         given(skuRepositoryPort.findAllByIds(sortedIds))
             .willReturn(sortedIds.stream().map(skuId -> sku(skuId, PRODUCT_ID, "", 0L, SaleStatus.ON_SALE)).toList());
         given(productRepositoryPort.findAllByIdsIncludingHidden(List.of(PRODUCT_ID))).willReturn(List.of(product(PRODUCT_ID)));
-    }
-
-    private void givenStocks(Stock... stocks) {
-        given(stockRepositoryPort.findAllBySkuIds(any())).willReturn(List.of(stocks));
     }
 
     private void givenReservation(StockReservationStatus status, StockReservationItem... items) {
@@ -407,7 +453,7 @@ class StockReservationProcessorTest {
 
     private StockReservation savedReservation() {
         ArgumentCaptor<StockReservation> captor = ArgumentCaptor.forClass(StockReservation.class);
-        verify(stockReservationRepositoryPort).create(captor.capture());
+        verify(stockReservationRepositoryPort).createItems(captor.capture());
         return captor.getValue();
     }
 
@@ -438,10 +484,6 @@ class StockReservationProcessorTest {
 
     private static StockReservationCommand command(StockReservationCommand.Item... items) {
         return new StockReservationCommand(ORDER_ID, List.of(items));
-    }
-
-    private static Stock managed(long skuId) {
-        return new Stock(skuId, true, 10L);
     }
 
     private static void assertFailsWith(Runnable call, ProductErrorCode errorCode, String messagePart) {

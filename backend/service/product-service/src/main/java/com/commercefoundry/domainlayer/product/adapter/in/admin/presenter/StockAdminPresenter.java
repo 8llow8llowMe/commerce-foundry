@@ -12,6 +12,7 @@ public class StockAdminPresenter {
             .skuId(String.valueOf(stock.skuId()))
             .stockManaged(stock.stockManaged())
             .availableQuantity(stock.availableQuantity())
+            .reservedQuantity(stock.reservedQuantity())
             .updatedAt(stock.updatedAt())
             .build();
     }

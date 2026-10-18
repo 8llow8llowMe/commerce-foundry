@@ -3,8 +3,6 @@ package com.commercefoundry.domainlayer.product.domain.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
-import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -98,9 +96,12 @@ class StockReservationTest {
 
         @ParameterizedTest
         @EnumSource(StockReleaseReason.class)
-        @DisplayName("해제 → 409 STOCK_RESERVATION_CONFIRMED")
+        @DisplayName("해제 → 전이 거절 (현재 CONFIRMED · 시도 RELEASE) — Processor 가 409 STOCK_RESERVATION_CONFIRMED 로 바꾼다")
         void releaseIsRejected(StockReleaseReason reason) {
-            assertRejected(() -> saved(StockReservationStatus.CONFIRMED).release(NOW, reason), ProductErrorCode.STOCK_RESERVATION_CONFIRMED);
+            assertRejected(
+                () -> saved(StockReservationStatus.CONFIRMED).release(NOW, reason),
+                StockReservationStatus.CONFIRMED, StockReservationTransitionException.Action.RELEASE
+            );
         }
     }
 
@@ -109,9 +110,12 @@ class StockReservationTest {
     class Released {
 
         @Test
-        @DisplayName("확정 → 409 STOCK_RESERVATION_RELEASED")
+        @DisplayName("확정 → 전이 거절 (현재 RELEASED · 시도 CONFIRM) — Processor 가 409 STOCK_RESERVATION_RELEASED 로 바꾼다")
         void confirmIsRejected() {
-            assertRejected(() -> saved(StockReservationStatus.RELEASED).confirm(NOW), ProductErrorCode.STOCK_RESERVATION_RELEASED);
+            assertRejected(
+                () -> saved(StockReservationStatus.RELEASED).confirm(NOW),
+                StockReservationStatus.RELEASED, StockReservationTransitionException.Action.CONFIRM
+            );
         }
 
         @ParameterizedTest
@@ -215,10 +219,12 @@ class StockReservationTest {
         return new StockReservation(RESERVATION_ID, ORDER_ID, status, EXPIRES_AT, confirmedAt, releasedAt, reason, ITEMS, 3L);
     }
 
-    private static void assertRejected(Runnable transition, ProductErrorCode errorCode) {
+    /** domain 은 application 오류 코드를 모른다 — 현재 상태와 시도한 동작만 싣는다. */
+    private static void assertRejected(Runnable transition, StockReservationStatus currentStatus, StockReservationTransitionException.Action action) {
         assertThatThrownBy(transition::run)
-            .isInstanceOf(ProductException.class)
-            .extracting(exception -> ((ProductException) exception).getErrorCode())
-            .isEqualTo(errorCode);
+            .isInstanceOfSatisfying(StockReservationTransitionException.class, exception -> {
+                assertThat(exception.getCurrentStatus()).isEqualTo(currentStatus);
+                assertThat(exception.getAttemptedAction()).isEqualTo(action);
+            });
     }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.domainlayer.product.adapter.in.scheduler.StockReservationExpiryScheduler;
 import com.commercefoundry.domainlayer.product.application.command.StockReservationCommand;
+import com.commercefoundry.domainlayer.product.application.info.ExpiredStockReservationInfo;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
 import com.commercefoundry.domainlayer.product.application.port.in.StockInternalUseCase;
 import com.commercefoundry.domainlayer.product.application.port.in.StockSchedulerUseCase;
@@ -122,7 +123,7 @@ class ProductServiceApplicationTests {
         AnnotationTransactionAttributeSource source = new AnnotationTransactionAttributeSource();
         TransactionAttribute expire = source.getTransactionAttribute(StockSchedulerFacade.class.getMethod("expire", long.class), StockSchedulerFacade.class);
         TransactionAttribute findExpired = source.getTransactionAttribute(
-            StockSchedulerFacade.class.getMethod("findExpiredReservationIds", int.class), StockSchedulerFacade.class
+            StockSchedulerFacade.class.getMethod("findExpiredReservations", ExpiredStockReservationInfo.class, int.class), StockSchedulerFacade.class
         );
         TransactionAttribute reserve = source.getTransactionAttribute(
             StockInternalFacade.class.getMethod("reserve", StockReservationCommand.class), StockInternalFacade.class

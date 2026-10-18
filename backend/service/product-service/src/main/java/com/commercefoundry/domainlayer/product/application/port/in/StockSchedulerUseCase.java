@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.port.in;
 
+import com.commercefoundry.domainlayer.product.application.info.ExpiredStockReservationInfo;
 import java.util.List;
 
 /**
@@ -8,8 +9,12 @@ import java.util.List;
  */
 public interface StockSchedulerUseCase {
 
-    /** 지금 만료 대상인 선점 아이디 — 만료 시각 오름차순으로 {@code limit} 건까지. */
-    List<Long> findExpiredReservationIds(int limit);
+    /**
+     * 지금 만료 대상인 선점 — 만료 시각 → 아이디 오름차순으로 {@code limit} 건까지.
+     *
+     * @param after 앞 배치의 마지막 건. 이 건 다음부터 읽는다(keyset) — 앞 배치에서 실패한 건을 다시 읽지 않는다. null 이면 처음부터다
+     */
+    List<ExpiredStockReservationInfo> findExpiredReservations(ExpiredStockReservationInfo after, int limit);
 
     /**
      * 선점 한 건을 만료 해제하고 차감했던 재고를 되돌린다. 다시 읽어 아직 RESERVED 이고 만료 시각이 지났을 때만 푼다.

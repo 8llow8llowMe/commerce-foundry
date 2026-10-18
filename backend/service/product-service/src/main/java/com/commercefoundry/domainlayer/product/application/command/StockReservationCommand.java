@@ -35,7 +35,7 @@ public record StockReservationCommand(long orderId, List<Item> items) {
         return items.stream().map(Item::skuId).toList();
     }
 
-    /** 요청 DTO 가 수량을 1 이상으로 검증한다. 합친 수량이 int 를 넘으면 실패한다 — 그만한 재고는 없다. */
+    /** 요청 DTO 가 수량을 1~10000, 항목을 100개 이하로 검증해 합친 수량이 int 를 넘지 않는다. addExact 는 그 전제가 깨졌을 때의 방어다. */
     private static List<Item> merge(List<Item> items) {
         Map<Long, Integer> merged = new TreeMap<>();
         for (Item item : items) {

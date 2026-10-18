@@ -16,7 +16,11 @@ public record StockReservationResponse(
     @Schema(description = "주문 아이디", example = "4611686018427387904")
     String orderId,
 
-    @Schema(description = "선점 상태", allowableValues = {"RESERVED", "CONFIRMED", "RELEASED"}, example = "RESERVED")
+    @Schema(
+        description = "선점 상태 — 호출자(order-service)가 분기에만 쓰는 제어 코드다. 화면에 그대로 내보내지 않으므로 표시 문자열을 두지 않는다 "
+            + "(coding-conventions §11 예외)",
+        allowableValues = {"RESERVED", "CONFIRMED", "RELEASED"}, example = "RESERVED"
+    )
     String status,
 
     @Schema(description = "만료 시각 (UTC, ISO-8601). RESERVED 로 이 시각이 지나면 스케줄러가 해제한다", example = "2026-10-18T09:30:00Z")

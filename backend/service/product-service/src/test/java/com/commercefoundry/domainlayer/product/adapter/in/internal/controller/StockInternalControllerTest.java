@@ -186,6 +186,7 @@ class StockInternalControllerTest {
             quantity 없음        | {"orderId": 1, "items": [{"skuId": 1}]}                     | PRODUCT_119 | items[0].quantity | quantity 는 필수입니다.
             quantity 0          | {"orderId": 1, "items": [{"skuId": 1, "quantity": 0}]}      | PRODUCT_120 | items[0].quantity | quantity 는 1 이상이어야 합니다.
             quantity 음수         | {"orderId": 1, "items": [{"skuId": 1, "quantity": -2}]}     | PRODUCT_120 | items[0].quantity | quantity 는 1 이상이어야 합니다.
+            quantity 상한 초과     | {"orderId": 1, "items": [{"skuId": 1, "quantity": 10001}]}  | PRODUCT_122 | items[0].quantity | quantity 는 10000 이하여야 합니다.
             """)
         @DisplayName("필드별 검증 코드")
         void fieldErrors(String name, String body, String code, String field, String message) {
@@ -204,6 +205,16 @@ class StockInternalControllerTest {
 
             assertFailure(post(PATH, "{\"orderId\": 1, \"items\": [" + items + "]}"), HttpStatus.BAD_REQUEST, "PRODUCT_115", "items 는 최대 100개입니다.");
             verifyNoInteractions(stockInternalUseCase);
+        }
+
+        @Test
+        @DisplayName("상한 경계 — 같은 SKU 10000개 × 100항목도 통과하고, 합친 수량(1,000,000)이 int 를 넘지 않아 500 이 나지 않는다")
+        void maxQuantityMergesWithoutOverflow() {
+            given(stockInternalUseCase.reserve(any())).willReturn(response("RESERVED"));
+            String items = IntStream.rangeClosed(1, 100).mapToObj(i -> "{\"skuId\": 1, \"quantity\": 10000}").collect(Collectors.joining(","));
+
+            assertThat(post(PATH, "{\"orderId\": 1, \"items\": [" + items + "]}")).hasStatusOk();
+            verify(stockInternalUseCase).reserve(new StockReservationCommand(1L, List.of(new StockReservationCommand.Item(1L, 1_000_000))));
         }
 
         @Test

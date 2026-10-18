@@ -4,6 +4,8 @@ import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.St
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.StockReservationItemEntity;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservation;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationItem;
+import com.commercefoundry.domainlayer.product.domain.model.StockReservationStatus;
+import java.time.Instant;
 import java.util.List;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -25,6 +27,21 @@ public interface StockReservationMapper {
      */
     @Mapping(target = "activeOrderId", expression = "java(reservation.activeOrderId())")
     StockReservationEntity toEntity(StockReservation reservation);
+
+    /**
+     * 새 선점(RESERVED)의 헤더. 항목의 차감 여부가 정해지기 전에 INSERT 해 같은 주문의 동시 생성을 차감보다 먼저 막는다 —
+     * 도메인 선점은 항목이 있어야 만들 수 있어 헤더만 따로 만든다. 활성 주문 아이디는 RESERVED 라 주문 아이디다
+     * ({@link StockReservation#activeOrderId()}). 버전이 null 이라 INSERT 다.
+     */
+    default StockReservationEntity toNewHeaderEntity(long reservationId, long orderId, Instant expiresAt) {
+        return StockReservationEntity.builder()
+            .id(reservationId)
+            .orderId(orderId)
+            .activeOrderId(orderId)
+            .status(StockReservationStatus.RESERVED)
+            .expiresAt(expiresAt)
+            .build();
+    }
 
     @Mapping(target = "id", source = "item.id")
     @Mapping(target = "reservationId", source = "reservationId")

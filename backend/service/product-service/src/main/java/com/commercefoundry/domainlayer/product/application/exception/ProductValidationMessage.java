@@ -31,6 +31,10 @@ public final class ProductValidationMessage {
     public static final String STOCK_RESERVATION_QUANTITY_REQUIRED = "PRODUCT_119:quantity 는 필수입니다.";
     public static final String STOCK_RESERVATION_QUANTITY_POSITIVE = "PRODUCT_120:quantity 는 1 이상이어야 합니다.";
     public static final String STOCK_RESERVATION_ID_POSITIVE = "PRODUCT_121:reservationId 는 양수여야 합니다.";
+    public static final String STOCK_RESERVATION_QUANTITY_MAX = "PRODUCT_122:quantity 는 10000 이하여야 합니다.";
+
+    // 어드민 재고 조정 경로 변수 (PATCH /api/v1/admin/stocks/{skuId})
+    public static final String STOCK_SKU_ID_POSITIVE = "PRODUCT_123:skuId 는 양수여야 합니다.";
 
     private ProductValidationMessage() {
     }
