@@ -517,7 +517,7 @@ openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하
   이 핸들러는 픽스처의 `InternalSecuritySmokeContextCustomizerFactory`(spring.factories)가 **모든 서블릿 테스트 컨텍스트**에 등록한다 —
   모든 테스트에 같은 커스터마이저라 `*ApplicationTests` 와 스모크가 컨텍스트를 계속 같이 쓴다. 리액티브 컨텍스트에는 등록하지 않는다.
 - **인가 선언 누락 가드** — 같은 스모크의 `handlersDeclareAuthorization` 이 서비스 컨텍스트의 `RequestMappingHandlerMapping` 을 모두 돈다.
-  `/internal/` 핸들러는 서비스 권한만 나열한 `hasAuthority` · `hasAnyAuthority` 식, `/api/` 핸들러는 `@PreAuthorize` 존재(식은 자유)를 요구하고 위반 핸들러를 목록으로 알린다.
+  `/internal/` 핸들러는 서비스 권한만 나열한 `hasAuthority` · `hasAnyAuthority` 식, `/api/v1/admin` 과 그 아래 핸들러는 `hasRole('ADMIN')` 필요조건, 그 밖의 `/api/` 핸들러는 `@PreAuthorize` 존재(식은 자유)를 요구하고 위반 핸들러를 고치는 법과 함께 목록으로 알린다.
   스모크 핸들러가 검사 대상에 들어 있는지도 단언해, 실제 핸들러가 없는 지금도 빈 목록으로 통과하지 않는다. 허용 호출자 식 판정은 `AuthorizationExpressions` 하나를 ArchUnit(§9-11)과 같이 쓴다.
 - 호출 쪽은 `InternalServiceTokenCapabilityTest` 가 실제 Feign 파이프라인(`Feign.builder()` + 앞 · 뒤 인터셉터 + 다른 Capability + 요청을 붙잡는 Client)을
   왕복해 최종 요청의 `Authorization` 이 서비스 토큰 하나인지 본다.
@@ -531,19 +531,28 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
 
 | 규칙 | 대상 | 위반하면 이렇게 고친다 |
 |------|------|------------------------|
+| R0 컨트롤러 위치 | `@Controller`(메타 포함, `@RestController` 포함 · `@(Rest)ControllerAdvice` 제외) 클래스 | `adapter.in.web`(고객) · `adapter.in.admin`(어드민) · `adapter.in.internal`(서비스 간) · `adapter.in.webhook`(외부 콜백) 중 하나로 옮긴다 |
+| R7 매핑은 컨트롤러에 직접 | web · admin · internal 컨트롤러의 상위 클래스 · 인터페이스 | springdoc `XxxApi` 인터페이스나 추상 기반 컨트롤러에 매핑을 두지 않는다. 매핑 · `@PreAuthorize` · Swagger 애노테이션을 컨트롤러 메서드에 직접 둔다 (상속받은 핸들러는 R1~R3 이 보지 못한다) |
 | R1 핸들러 인가 선언 | `..adapter.in.web..` · `..adapter.in.admin..` 의 `@Controller`(·`@RestController`) 매핑 메서드 | 보고된 `클래스#메서드` **메서드에** `@PreAuthorize` 를 단다 — 공개 `permitAll()`, 로그인 `isAuthenticated()`, 어드민 `hasRole('ADMIN')`. 클래스 선언은 대신하지 않는다 |
 | R2 어드민은 ADMIN 필요 | `..adapter.in.admin..` 핸들러 | `hasRole('ADMIN')` 또는 `hasRole('ADMIN') and <추가 조건>`. `permitAll()` · `isAuthenticated()` · 괄호 밖 `or` · `\|\|` · 삼항은 실패다. 고객도 부르는 API 면 admin 이 아니라 web 패키지에 따로 만든다(DTO 공유 금지) |
 | R3 internal 허용 호출자 | `..adapter.in.internal..` 핸들러(메서드, 없으면 클래스) | `hasAuthority('SERVICE_<호출 서비스>')` 또는 `hasAnyAuthority('SERVICE_a', 'SERVICE_b')` **그 자체**. `isAuthenticated()` · `or` 금지 (§9-4) |
 | R4 `RequestContextHolder` 금지 | 서비스 main 전체 | 사용자 토큰 · 헤더를 꺼내 넘기지 않는다. memberId 를 본문 · 파라미터로 넘긴다 (§9-4, `coding-conventions.md` §10) |
-| R5 Feign 전역 빈 금지 | `feign.RequestInterceptor` · `feign.Capability`(구현 포함)를 반환하는 `@Bean` | 전역 빈을 지운다. internal 클라이언트는 `@FeignClient(configuration = InternalFeignClientConfiguration.class)` 로 붙인다 (§9-5) |
-| R6 기본 설정 금지 | `@EnableFeignClients(defaultConfiguration = ...)` | 지우고 클라이언트마다 `configuration` 으로 붙인다 |
+| R5 Feign 전역 빈 금지 | `feign.RequestInterceptor` · `feign.Capability`(구현 포함)를 반환하는 `@Bean`, 그리고 그 둘을 구현한 `@Component`(메타 포함 — `@Configuration` · `@Service` 등) 클래스 | 전역 빈 · 스캔되는 구현을 지운다(OpenFeign 은 컨텍스트의 인터셉터를 모든 클라이언트에 붙인다). internal 클라이언트는 `@FeignClient(configuration = InternalFeignClientConfiguration.class)` 로 붙이고, 그 configuration 클래스에도 `@Configuration` 을 달지 않는다 (§9-5) |
+| R6 기본 설정 금지 | `@EnableFeignClients(defaultConfiguration = ...)` — 메타(합성) 애노테이션 포함 | 지우고 클라이언트마다 `configuration` 으로 붙인다 |
 
-- 런타임 가드(§9-10 스모크, **경로 기준**)와 정적 가드(ArchUnit, **패키지 기준**)는 서로를 대신하지 않는다 — 패키지 밖에 둔 `/api/` 컨트롤러는 스모크가,
-  `/internal/` 이 아닌 경로로 매핑된 internal 패키지 컨트롤러는 ArchUnit 이 잡는다.
-- 식은 SpEL 을 파싱하지 않고 문자열 모양으로 본다. 애매한 모양은 실패 쪽으로 판정한다 — 막히면 식을 문서의 표준 형태로 고친다.
-- 알려진 한계: yml 의 `spring.cloud.openfeign.client.config.default.*` 는 보지 않는다(리뷰로 본다). 외부 API(PG 등) 클라이언트 전용 인터셉터를 서비스에 `@Bean` 으로 두면
-  R5 에 걸린다 — 클라이언트 `configuration` 클래스 안의 빈으로 둘지 규칙을 고칠지는 그 이슈에서 정한다.
-- 헥사고날 계층 의존 규칙은 #77 에서 같은 지원 클래스에 더한다.
+- 런타임 가드(§9-10 스모크, **경로 기준**)와 정적 가드(ArchUnit, **패키지 기준**)는 서로를 대신하지 않는다.
+  스모크는 실제 매핑(상속 · 인터페이스로 받은 것 포함)을 보고 `/internal/` 은 허용 호출자 식 그 자체, **`/api/v1/admin` 과 그 아래는 `hasRole('ADMIN')` 필요조건(R2 와 같은 판정)**,
+  그 밖의 `/api/` 는 선언 존재를 요구한다 — `adapter.in.web.admin` 처럼 패키지로는 R2 를 비켜 간 어드민 핸들러를 여기서 잡는다.
+  ArchUnit 은 `/internal/` 이 아닌 경로로 매핑된 internal 패키지 컨트롤러, 어드민 경로가 아닌 admin 패키지 핸들러를 잡는다.
+- 식은 SpEL 을 파싱하지 않고 문자열 모양으로 본다. 애매한 모양은 실패 쪽으로 판정한다 — **식에 큰따옴표 문자열과 `{...}` 템플릿 자리표시자를 쓰지 않는다**(문자열은 작은따옴표).
+  막히면 식을 위 표의 표준 형태로 고친다.
+- `adapter.in.webhook` 은 R1~R3 · R7 대상이 아니다. 경로가 `/api/` 면 런타임 가드가 `@PreAuthorize` 를 요구하므로 공개 수신은 `permitAll()` 을 적는다.
+- 알려진 한계
+  - R4 는 `RequestContextHolder` 만 막는다. `SecurityContextHolder` 의 토큰 값 · `@RequestHeader(AUTHORIZATION)` 를 Feign 파라미터로 넘기는 경로는 리뷰로 본다(§9-4).
+  - yml 의 `spring.cloud.openfeign.client.config.default.*` 는 보지 않는다(리뷰로 본다).
+  - 외부 API(PG 등) 클라이언트 전용 인터셉터도 서비스에 `@Bean` 으로 두면 R5 에 걸린다 — 외부 클라이언트 이슈에서 예외 방식을 정한다.
+  - 정적 규칙은 서비스 모듈만 읽는다. 컨트롤러는 core 모듈에 두지 않는다.
+- 헥사고날 계층 의존 규칙은 #77 에서 다룬다 — 같은 지원 클래스에 더할지, 이름에 맞게 별도 클래스로 나눌지는 그 이슈에서 정한다.
 
 ## 10. 계정 존재 노출 (회원가입 · 로그인, #4)
 

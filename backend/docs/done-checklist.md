@@ -47,6 +47,7 @@
 - [ ] `adapter/in/internal` 의 모든 핸들러에 허용 호출자 `@PreAuthorize("hasAuthority('SERVICE_<호출 서비스>')")` 가 있다 — `isAuthenticated()` · `permitAll()` 이 아니다 (`security-guide.md` §9-4)
 - [ ] internal Feign 클라이언트에 `configuration = InternalFeignClientConfiguration.class` 를 붙였다. 사용자 `Authorization` 을 넘기지 않고(`RequestContextHolder` 로 꺼내 싣지 않는다), 전역 `RequestInterceptor` 빈이 없다 (`coding-conventions.md` §10)
 - [ ] 서비스에 인가 스모크 `*SecuritySmokeTest`(`ResourceServerSmokeTestSupport` 상속 — 서비스 간 인증 케이스 포함)가 있다. `isAuthenticated()` 핸들러를 추가했다면 그 경로의 익명 401 · `SECURITY_001` 케이스를 그 스모크에 메서드로 더했다 (`security-guide.md` §5-3)
+- [ ] 서비스에 정적 규칙 `<Svc>ArchitectureTest`(`ControllerAuthorizationArchTestSupport` 상속 한 파일)가 있다 — 없으면 규칙이 돌지 않아도 빌드가 통과한다 (`security-guide.md` §9-11)
 - [ ] 리소스 소유 확인이 JWT memberId 기준이고, 타인 리소스는 404 다
 - [ ] 설정값이 하드코딩 대신 프로퍼티로 관리된다
 - [ ] 시크릿 키·사업자 정보가 커밋되지 않았다 (공개 저장소)
