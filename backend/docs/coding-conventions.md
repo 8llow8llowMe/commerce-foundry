@@ -110,6 +110,8 @@ public record ProductDetailResponse(
 | `{Domain}Exception` | `application/exception/` | `extends RuntimeException`, `super(errorCode.getMessage())` |
 | `{Domain}ExceptionHandler` | `adapter/in/web/exception/` | `@RestControllerAdvice(basePackages = "...domainlayer")`, `Response.fail()` 변환 |
 
+진입 API 가 없는 컨텍스트(order-service `catalog`)는 `*ExceptionHandler` 를 두지 않고, 호출한 컨텍스트의 핸들러가 자기 코드로 번역한다 (`architecture-guide.md` §3).
+
 ```java
 @Getter
 @RequiredArgsConstructor

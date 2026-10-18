@@ -88,7 +88,7 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 | 수량 변경 · 삭제 | 품절 · 판매 종료 줄도 허용한다. 수량 변경은 트랜잭션 두 구간(소유 확인 → 원격 상한 조회 → 다시 읽어 쓰기)이라 사이의 변경은 마지막 쓰기가 이긴다. `@Version` 409(`CART_007`)는 쓰기 구간 안의 동시 수정에서만 난다 |
 | 조회 상태 | SKU 없음 → `STOP_SELLING`, `purchasable` → `ON_SALE`, 판매 상태 `SOLD_OUT` → `SOLD_OUT`(숨긴 상품이라도 품절이면 품절), 그 밖(판매 종료 · 품절이 아닌 숨김) → `STOP_SELLING`. 합계는 `ON_SALE` 이고 수량이 현재 상한 안인 줄만 더한다(없으면 null) |
 | 병합 | 로그인 직후 로컬 장바구니를 한 번 보낸다(최대 50개, 오래 전에 담은 것부터 — 새 줄은 요청 순서로 아이디가 커져 나중 항목이 위에 보인다). 담을 수 없는 항목은 **항목 단위로** 건너뛰어 `skippedItems: [{index, skuId, reason}]` 로 알린다 — reason 은 `SKU_NOT_FOUND` · `NOT_PURCHASABLE` · `CUSTOM_OPTION_NOT_ALLOWED` · `LINE_LIMIT_EXCEEDED` · `QUANTITY_LIMIT_EXCEEDED`(1회 주문 최대 수량 0) 순으로 판정한다. 같은 SKU 라도 항목마다 따로 판정한다. 같은 줄은 더한 뒤 상한에서 자른다(거절하지 않는다, 이미 넘은 줄을 줄이지 않는다). **멱등하지 않다** — 재전송하면 한 번 더 더해진다. 결제 · 재고와 무관하고 상한이 피해를 제한해 멱등 키를 두지 않는다 |
-| 원격 호출 | SKU 는 `GET /internal/v1/skus` 로 몇 줄이든 100개씩 묶어 부른다(보통 한 번, 장바구니가 비면 호출하지 않는다). Facade 에 트랜잭션을 걸지 않고 DB 구간만 Processor 에서 좁힌다. product-service 장애는 503 `CART_008` 이다 — 쓰기 뒤 장바구니 재조회가 실패해도 쓰기는 커밋돼 있다 |
+| 원격 호출 | SKU 는 `catalog` 컨텍스트(`CatalogSkuProcessor`, 주문 생성과 공용)가 `GET /internal/v1/skus` 로 몇 줄이든 100개씩 묶어 부른다(보통 한 번, 장바구니가 비면 호출하지 않는다). Facade 에 트랜잭션을 걸지 않고 DB 구간만 Processor 에서 좁힌다. product-service 장애는 503 `CART_008` 이다(`CATALOG_001` 을 `CartExceptionHandler` 가 번역) — 쓰기 뒤 장바구니 재조회가 실패해도 쓰기는 커밋돼 있다 |
 
 ## 3. 재고
 
