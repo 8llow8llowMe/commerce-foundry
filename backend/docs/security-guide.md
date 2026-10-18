@@ -58,18 +58,19 @@
 
 | 키 | 타입 · 값 | TTL |
 |----|-----------|-----|
-| `auth:refresh-token:{fingerprint}` | HASH `{memberId, familyId, rotatedAt?, siblings?}` — `rotatedAt` 은 회전한 시각(epoch ms), `siblings` 는 유예 안 형제 발급 수 | refresh TTL |
-| `auth:refresh-family:{familyId}` | STRING `"1"` — 있으면 그 family 의 토큰이 살아 있다 | refresh TTL, **회전마다 다시 refresh TTL 로 늘어난다** |
+| `auth:refresh-token:{fingerprint}` | HASH `{memberId, familyId, rotatedAt?, siblings?}` — `rotatedAt` 은 회전한 시각(epoch ms), `siblings` 는 유예 안 형제 발급 수 | `min(refresh TTL, 상한까지 남은 시간)` |
+| `auth:refresh-family:{familyId}` | STRING **최초 로그인 시각(epoch ms)** — 있으면 그 family 의 토큰이 살아 있다. 회전해도 값을 다시 쓰지 않는다 | `min(refresh TTL, 상한까지 남은 시간)`, 회전마다 다시 건다 |
 
 - family 는 로그인 한 번에서 회전으로 이어진 토큰 묶음이다(`familyId` = UUID). **폐기 = family 키 DEL** 하나로 그 family 의 토큰이 모두 무효가 된다
   (토큰 HASH 는 TTL 까지 남지만 family 가 없으면 읽기 · 회전 모두 무효다).
 - 키는 auth 안에서만 쓰므로 auth 의 키 함수(`RefreshTokenRedisKeys`) 하나로 만든다. HASH 와 TTL 은 같은 Lua 스크립트에서 쓴다 (`coding-conventions.md` §9-7).
-- 로그인은 새 family 와 첫 토큰을 한 스크립트로 저장한다.
+- 로그인은 새 family 와 첫 토큰을 한 스크립트로 저장한다. family 값은 로그인 시각(애플리케이션 `Clock`)이고 TTL 은 refresh TTL 그대로다
+  (절대 수명 ≥ refresh TTL 이라 로그인 시점에는 줄어들 일이 없다).
 
 #### 재발급 (`POST /api/v1/auth/token/reissue`)
 
 1. **모양 검사가 먼저다** — base64url 43자가 아니면(없음 · 빈 값 포함 — 필드 검증 400 을 두지 않는다) 지문을 계산하거나 저장소를 부르지 않고 401 `AUTH_010`.
-2. 지문으로 HMGET(`memberId` · `familyId`) → family 키 존재 확인. 없으면 401 `AUTH_011`(만료 · 로그아웃 · 폐기를 구분하지 않는다).
+2. 지문으로 HMGET(`memberId` · `familyId`) → family 키 존재 확인. 없으면 401 `AUTH_011`(만료 · 로그아웃 · 폐기 · 절대 수명 초과를 구분하지 않는다).
 3. DB 에서 회원(역할)을 읽는다. 없거나 고객이 아니면 family 를 폐기하고 401 `AUTH_011`. **회원 조회를 회전보다 먼저 한다** —
    회전 뒤 DB 가 실패하면 "옛 토큰은 회전됐는데 새 토큰을 못 받은" 상태가 남기 때문이다.
 4. Lua 회전(원자, 지금 시각은 애플리케이션 `Clock` 을 ARGV 로 넘긴다):
@@ -77,10 +78,18 @@
 | 옛 토큰 상태 | 처리 | 결과 |
 |--------------|------|------|
 | 없음 · 읽은 memberId/familyId 와 다름 · family 없음 | 아무것도 쓰지 않는다 | 401 `AUTH_011` |
-| `rotatedAt` 없음 (처음 쓰임) | `rotatedAt`=지금, 새 토큰 저장(HSET + PEXPIRE), family TTL 연장 | 200 새 쌍 |
-| `rotatedAt` 있고 지금 − `rotatedAt` ≤ 유예(30초, 음수는 0) · 형제 상한 안 | `siblings` 를 HINCRBY 하고 새 토큰(형제) 저장, family TTL 연장. **옛 토큰의 `rotatedAt` 은 그대로** — 유예는 첫 회전부터 재는 창이라 재시도가 창을 늘리지 못한다 | 200 새 쌍 + info 로그 |
-| 유예 밖 재사용 · 형제 상한(3) 초과 · `rotatedAt` 이 숫자가 아님 | family DEL — 형제 · 새 토큰까지 모두 무효 | 401 `AUTH_012` + warn 로그 |
+| family 값(로그인 시각)이 정수 문자열이 아님 (손상) | family DEL | 401 `AUTH_011` |
+| 절대 수명(30일)까지 남은 시간(경과 음수는 0) < 1초 — **재사용 판정보다 먼저 본다** | 회전하지 않고 family DEL | 401 `AUTH_011` + info 로그 |
+| `rotatedAt` 없음 (처음 쓰임) | `rotatedAt`=지금, 새 토큰 저장(HSET + PEXPIRE), family TTL 다시 걸기 | 200 새 쌍 |
+| `rotatedAt` 있고 지금 − `rotatedAt` ≤ 유예(30초, 음수는 0) · 형제 상한 안 | `siblings` 를 HINCRBY 하고 새 토큰(형제) 저장, family TTL 다시 걸기. **옛 토큰의 `rotatedAt` 은 그대로** — 유예는 첫 회전부터 재는 창이라 재시도가 창을 늘리지 못한다 | 200 새 쌍 + info 로그 |
+| 유예 밖 재사용 · 형제 상한(3) 초과 · `rotatedAt` 이 정수 문자열이 아님 | family DEL — 형제 · 새 토큰까지 모두 무효 | 401 `AUTH_012` + warn 로그 |
 
+- 새 토큰 · family 의 TTL 은 `min(refresh TTL, 로그인 시각 + 절대 수명 − 지금)` 이다(정상 회전 · 형제 발급 모두).
+  **남은 시간이 1초 미만이면 회전하지 않고 만료로 본다**(`RefreshTokenRotationPolicy.MIN_REMAINING_LIFETIME`, Lua `1000`) — 응답 `refreshTokenExpiresIn` 이
+  0초로 버려져 BFF 쿠키가 바로 지워지는 토큰을 내주지 않는다.
+- 저장값(family 값 · `rotatedAt`)은 `^%d+$` 정수 문자열만 받는다 — Lua `tonumber` 는 strtod 라 `"nan"` · `"inf"` · `"0x10"` · `"1e3"` 도 숫자로 읽는다.
+  스크립트가 판정과 같은 자리에서 한 번만 계산해 `{결과, TTL ms}` 로 돌려주고, **재발급 응답의 `refreshTokenExpiresIn` 은 이 값(초, 버림)이다** —
+  BFF 쿠키 만료가 서버 키 TTL 과 맞는다. 로그인 응답은 refresh TTL 그대로다.
 - 옛 토큰 HASH 의 TTL 은 회전해도 그대로다 — 남은 수명 동안 재사용 감지에 쓰인다.
 - 키 타입이 어긋나 스크립트가 실패하면(WRONGTYPE 등) 저장소 장애와 같이 503 `AUTH_013` 이다.
 
@@ -90,9 +99,15 @@
   유예 안에서는 회전한 토큰을 훔친 쪽도 형제 토큰을 받는다 — 유예를 길게 두지 않고, 형제 수도 토큰당 `auth.token.refresh-reuse-grace-max-siblings`
   (기본 3, 0 이상 10 이하)로 묶는다. 넘으면 재사용 감지와 같이 family 를 폐기한다.
 - 형제 발급(info) · 재사용 감지(warn) 로그는 memberId · familyId · 지문 앞 8자만 남긴다. 토큰 원문 · 지문 전체를 남기지 않는다.
-- **결정: 이번 범위(#4)에서는 family 절대 수명 상한이 없다 — #67.** family TTL 은 회전마다 연장된다(슬라이딩) — 14일 안에 한 번씩 재발급하면
-  로그인이 끝없이 이어진다. 로그인 시각 기준 절대 상한은 #67 에서 더한다.
-- 판정 시각은 애플리케이션 `Clock` 이다(Redis `TIME` 이 아니다). **인스턴스 간 시계는 NTP 로 맞춘다는 전제다** — 어긋나 지금이 `rotatedAt` 보다 이르면 0 으로 본다.
+- **family 절대 수명은 최초 로그인 기준 30일이다 (#67).** `auth.token.refresh-family-max-lifetime`(기본 `30d`) — refresh TTL 14일의 약 두 배로,
+  자주 쓰는 사용자도 한 달에 한 번은 다시 로그인한다. 회전마다 TTL 이 다시 걸려도(슬라이딩) 이 시각을 넘겨 이어지지 않고, 가까워지면 TTL 을 남은 시간으로 줄인다.
+  넘기면 재발급이 401 `AUTH_011` 이고 BFF 는 다른 4xx 와 같이 쿠키를 지우고 로그인 화면으로 보낸다(FE 변경 없음).
+  - 0 이하이거나 `security.jwt.issuance.refresh-token-ttl` 보다 짧으면 기동하지 않는다 — 짧으면 로그인 직후부터 TTL 이 줄어 refresh TTL 설정이 뜻을 잃는다.
+    두 설정을 함께 보는 검사는 회전 정책 빈(`AuthTokenBeansConfig#refreshTokenRotationPolicy`)을 만들 때 한다.
+  - 응답 코드는 새로 만들지 않고 `AUTH_011`("로그인이 만료되었습니다") 을 쓴다 — 사용자에게는 만료와 같은 일이고, `AUTH_012`(재사용 · 탈취 신호, warn)와는
+    로그 수준(info, memberId · familyId 만)으로 나눈다.
+- 판정 시각은 애플리케이션 `Clock` 이다(Redis `TIME` 이 아니다). **인스턴스 간 시계는 NTP 로 맞춘다는 전제다** — 어긋나 지금이 `rotatedAt` · 로그인 시각보다 이르면
+  0 으로 본다.
 - 스크립트는 standalone 전제다. **Redis Cluster 로 바꾸면** 한 스크립트의 세 키(옛 토큰 · family · 새 토큰)가 같은 슬롯에 있어야 해(CROSSSLOT)
   키에 같은 hash tag(예: `{familyId}`)를 넣어야 한다.
 - 저장소(Redis) 장애 · 타임아웃은 503 `AUTH_013` 이다. BFF 는 재발급 401(4xx)이면 쿠키를 지우고, 503 이면 쿠키를 둔다.
