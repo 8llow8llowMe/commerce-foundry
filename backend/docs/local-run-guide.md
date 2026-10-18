@@ -20,7 +20,7 @@ cp .env.example .env
 - `.env` 는 커밋되지 않는다 (`.gitignore`). 값의 정본은 Vault 이고, 로컬에는 **테스트 값만** 넣는다 (`secret-management.md`).
 - 미들웨어만 띄울 때 필요한 칸은 `DB_USERNAME` · `DB_PASSWORD` · `REDIS_PASSWORD` 셋이다. 로컬 전용이니 아무 값이나 정해 넣는다.
 - 토스 키는 `test_sk_` 로 시작하는 테스트 키만 쓴다. 라이브 키는 로컬에 두지 않는다.
-- **#41 부터 서비스 5종은 `JWT_PUBLIC_KEY` 가 비면 뜨지 않는다**(§6). `JWT_PUBLIC_KEY_PREVIOUS` 는 비워 둔다.
+- **#41 부터 서비스 5종은, #4 부터 게이트웨이도 `JWT_PUBLIC_KEY` 가 비면 뜨지 않는다**(§6). `JWT_PUBLIC_KEY_PREVIOUS` 는 비워 둔다.
 - JWT 키는 로컬에서 openssl 로 직접 만든 RSA 2048 쌍을 넣는다. dev · prod 키를 가져오지 않는다. **로컬은 쌍을 만들 때 `JWT_PRIVATE_KEY` 와
   `JWT_PUBLIC_KEY` 를 둘 다 `.env` 에 채워 둔다** — 개인키는 auth 가 토큰을 발급하는 #4 부터 읽지만, 그때 쌍을 다시 만들 필요가 없게 한다
   (쌍이 다르면 auth 가 `JWT_PRIVATE_KEY 와 JWT_PUBLIC_KEY 가 한 쌍이 아닙니다` 로 뜨지 않는다).
@@ -77,7 +77,9 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 
 ## 5. 서비스 실행
 
-Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어 띄운다. Eureka · 게이트웨이는 DB · Redis 가 필요 없고,
+Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어 띄운다. Eureka 는 DB · Redis 가 필요 없다.
+**게이트웨이는 #4 부터 `backend/.env` 의 `JWT_PUBLIC_KEY` 와 `REDIS_HOST` · `REDIS_PORT` · `REDIS_PASSWORD`(§2)가 필요하다** — 토큰을 검증하고
+로그아웃 차단 목록(Redis)을 읽는다(`security-guide.md` §7). Redis 가 꺼져 있어도 뜨고 공개 경로는 통과하지만(fail-open), 토큰을 붙인 어드민 요청은 503 이다.
 도메인 서비스는 PostgreSQL(§3)과 `backend/.env` 의 `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` · `JWT_PUBLIC_KEY` · `INTERNAL_JWT_SECRET`(§2)가 필요하다.
 
 ```bash
@@ -97,7 +99,7 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 | 모듈 | `application-local.yml` 이 하는 일 |
 |------|-------------------------------------|
 | service-discovery | `server.address: 127.0.0.1` (같은 LAN 에서 레지스트리를 조작하지 못하게), self-preservation 끔 |
-| api-gateway | CORS 허용 origin 기본값 `http://localhost:3000`. 공통 `application.yml` 의 기본값은 비어 있다(닫힘). dev 라우트(헬스 · Swagger UI) 켬 |
+| api-gateway | `backend/.env` 읽기(#4), CORS 허용 origin 기본값 `http://localhost:3000`. 공통 `application.yml` 의 기본값은 비어 있다(닫힘). dev 라우트(헬스 · Swagger UI) 켬 |
 | 서비스 5종 | `backend/.env` 읽기, `ddl-auto: update`, Snowflake 고정값(`bootstrap-conventions.md` 배정표), Swagger 열기 |
 
 | 확인 URL | 기대 |

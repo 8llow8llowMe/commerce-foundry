@@ -8,7 +8,7 @@
 | 모듈 | 포트 | 상태 | 책임 |
 |------|------|------|------|
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
-| `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36) — JWT·ADMIN 은 #4·#6 | 라우팅(`api-design-guide.md` §1-2), JWT 검증, `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
+| `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36), JWT 검증·ADMIN 확인·로그아웃 차단 목록 조회 (#4) | 라우팅(`api-design-guide.md` §1-2), JWT 검증(전역 보안 체인 — `security-guide.md` §7), 로그아웃 차단 목록 조회(Redis, 어드민 경로만 fail-closed), `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
 | `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
 | `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제), 상품 이미지, 다국어 상품정보, 통화별 가격 |
 | `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
@@ -42,8 +42,8 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 |------|-------------|
 | `common-core` | 전부 |
 | `persistence-core` | auth · product · order · payment · delivery |
-| `redis-core` | auth(토큰·소셜 state) · order(멱등 키·장바구니 캐시 검토) · api-gateway(블랙리스트) |
-| `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 — #4) |
+| `redis-core` | auth(토큰·소셜 state) · order(멱등 키·장바구니 캐시 검토) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용) |
+| `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
 | `storage-core` | product(상품 이미지) |
 | `shared-commerce` | product · order · payment · delivery |
 
@@ -82,6 +82,4 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
 | 오브젝트 스토리지 | S3 / Cloudflare R2 / NCP Object Storage | 상품 이미지 |
 | 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |
-| refresh 토큰 전달 방식 | 응답 본문 + 헤더 / httpOnly 쿠키 (쿠키면 CORS 자격 증명 · SameSite · CSRF 를 함께 정한다) | #4 |
-| 로그아웃 블랙리스트 저장소 장애 시 | 거부(`SECURITY_006`, 503) / 통과(서명 검증만) | #4 |
 | 서비스 간 인증 2단계 | 서비스별 RS256 키 / 플랫폼 mTLS — 1단계(공용 HS256, #51)의 호출자 "선언" 을 "증명" 으로 바꾼다 (`security-guide.md` §9-9) | 배포 환경 결정 후 |

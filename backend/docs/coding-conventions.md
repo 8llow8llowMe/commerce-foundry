@@ -275,6 +275,11 @@ public final class ProductValidationMessage {
 - owner 로 서비스별 네임스페이스를 나눠 같은 이름의 키가 부딪히지 않게 한다. 싱글 테넌트(`architecture-guide.md` §9)라 스토어 접두어는 붙이지 않는다.
 - **서비스를 가로지르는 키**(auth 가 쓰고 gateway 가 읽는 등) — 다른 서비스는 그 키에 직접 쓰지 않고 owner 의 API 를 거친다.
   키는 양쪽이 의존하는 모듈(예: `security-core`)의 키 함수 하나로만 만든다. 형식이 두 곳에서 갈라지지 않게 한다.
+  지금 있는 서비스 횡단 키는 하나다.
+
+  | 키 | 키 함수 | 쓰는 곳 · 읽는 곳 | 값 · TTL |
+  |----|---------|-------------------|----------|
+  | `auth:revoked-access-token:{jti}` | `security-core` `RevokedAccessTokenKeys.of(jti)` | auth(로그아웃) · api-gateway(요청마다 존재 확인) | 값은 뜻 없음(존재만 본다). TTL `RevokedAccessTokenKeys.ttl(clockSkew)` = access 수명 상한 1시간 + `security.jwt.clock-skew` |
 - `:` 가 들어가는 값(IPv6 등)은 정규화한 뒤 인코딩해 넣는다(예: IPv6 → 16바이트 hex).
 - id 에 원문 토큰·개인정보를 넣지 않는다. 해시(SHA-256 base64url 등)로 넣는다 — `RedisKey.toString()` 이 키 전체를 출력하고, 키는 `MONITOR`·슬로로그에도 남는다.
 - `KEYS` · `SCAN` 패턴으로 지우지 않는다. 묶어서 지울 키는 색인 SET(예: 회원별 refresh 토큰 지문)에 모아 두고 그 SET 으로 지운다.
@@ -291,7 +296,7 @@ public final class ProductValidationMessage {
 | 용도 | TTL |
 |------|-----|
 | refresh 토큰 | refresh 토큰 TTL 과 같게 (`security.jwt.issuance.refresh-token-ttl`) |
-| access 토큰 블랙리스트 | 토큰의 남은 수명(`exp − now`) + 시계 오차 허용(`security.jwt.clock-skew`) 이상 |
+| access 토큰 차단 목록(로그아웃) | 토큰의 남은 수명(`exp − now`) + 시계 오차 허용(`security.jwt.clock-skew`) 이상. 로그아웃 시점엔 `exp` 를 모르므로 **수명 상한(`JwtIssuanceProperties.MAX_ACCESS_TOKEN_TTL`, 1시간) + 시계 오차**를 쓴다(`RevokedAccessTokenKeys.ttl`) — `access-token-ttl` 설정값을 쓰면 TTL 을 줄인 배포 직후 옛 긴 토큰보다 차단 항목이 먼저 사라진다 |
 | 소셜 로그인 state | 짧게(분 단위). 꺼낼 때 `GETDEL` 로 한 번만 쓴다 |
 | 멱등 키 | 클라이언트 재시도 창보다 길게. 처리 중 마커는 최대 처리 시간보다 길게 |
 | 캐시 | 짧게. 원본을 쓸 때 무효화한다 |
