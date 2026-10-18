@@ -65,7 +65,7 @@ class GatewayErrorResponseTest {
     }
 
     @Test
-    @DisplayName("서비스 간 API(/internal/**)는 라우트가 없어 404 + GATEWAY_001 로 막힌다")
+    @DisplayName("서비스 간 API(/internal/**)는 요청 가드가 라우팅 전에 404 + GATEWAY_001 로 막는다 — 매핑 없는 경로와 같은 응답이다")
     void internalPathIsNotRouted() {
         JsonNode body = getExpectingError("/internal/v1/orders/1", HttpStatus.NOT_FOUND);
 

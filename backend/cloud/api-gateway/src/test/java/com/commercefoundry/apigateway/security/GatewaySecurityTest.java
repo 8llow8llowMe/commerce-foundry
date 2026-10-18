@@ -288,6 +288,49 @@ class GatewaySecurityTest {
         assertThat(revocationChecker.checkedJtis()).isEmpty();
     }
 
+    // ── 요청 가드 (GatewayRequestGuardFilter) ──────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {PUBLIC_PATH, ADMIN_PATH})
+    @DisplayName("Authorization 이 두 개면 어느 토큰도 검증하지 않고 400 + GATEWAY_004 이며 하류에 닿지 않는다")
+    void multipleAuthorizationHeadersAreRejected(String path) {
+        String adminToken = TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, MemberRole.ADMIN).tokenValue();
+
+        webTestClient.get().uri(path)
+            .header(HttpHeaders.AUTHORIZATION, BEARER + adminToken, BEARER + token(MemberRole.CUSTOMER))
+            .exchange()
+            .expectStatus().isBadRequest()
+            .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_004");
+
+        assertThat(UPSTREAM_REQUESTS).as("하류에 닿지 않는다").isEmpty();
+        assertThat(revocationChecker.checkedJtis()).as("보안 체인보다 앞이라 차단 목록을 조회하지 않는다").isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/internal/v1/skus?skuIds=1", "/internal", "/INTERNAL/v1/skus", "/Internal/v1/orders/1", "/%69nternal/v1/skus"})
+    @DisplayName("/internal 은 ADMIN 토큰이어도 토큰 검증 전에 404 + GATEWAY_001 이고 하류에 닿지 않는다 — 대소문자 · 인코딩 변형 포함")
+    void internalPathIsRejectedBeforeAuthentication(String rawPath) {
+        revocationChecker.failWith(new RedisConnectionFailureException("simulated outage"));
+        String adminToken = TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, MemberRole.ADMIN).tokenValue();
+
+        webTestClient.get().uri(rawUri(rawPath))
+            .header(HttpHeaders.AUTHORIZATION, BEARER + adminToken)
+            .exchange()
+            .expectStatus().isNotFound()
+            .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_001");
+
+        assertThat(UPSTREAM_REQUESTS).as("하류에 닿지 않는다").isEmpty();
+        assertThat(revocationChecker.checkedJtis()).as("차단 목록 장애 중에도 503 이 아니라 404 다 — 조회 전에 끝난다").isEmpty();
+    }
+
+    @Test
+    @DisplayName("이름만 /internal 로 시작하는 공개 경로는 막지 않는다 — 세그먼트 단위로 본다")
+    void internalPrefixLookalikeIsNotRejected() {
+        webTestClient.get().uri("/internalx/v1/skus").exchange()
+            .expectStatus().isNotFound()
+            .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_001");
+    }
+
     // ── 구성 ──────────────────────────────────────────────────────
 
     @Test
