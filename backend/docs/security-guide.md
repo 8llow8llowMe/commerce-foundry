@@ -103,7 +103,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
   jti 가 키 규칙에 맞지 않으면 저장소 장애가 아니라 003 이다 — fail-open 경로에서도 통과시키지 않는다.
 - **validator 에 넣지 않는다.** validator 의 오류는 `JwtValidationException` 안에 들어가 003 이 된다.
 - 저장소 장애를 `JwtException`(Bad 아님)이나 `AuthenticationServiceException` 으로 던져도 006 이다. Spring 의 기본 실패 처리기는 이 예외를
-  다시 던져 **봉투 없는 500** 을 만들기 때문에, 서블릿 Resource Server 는 다시 던지지 않는 처리기로 바꿔 두었다(`ResourceServerSecurityConfigurer`).
+  다시 던져 필터 밖 500(지금은 `/error` 의 `COMMON_000`, #81 — 원인 · 재인증 분기를 잃는다)을 만들기 때문에, 서블릿 Resource Server 는 다시 던지지 않는 처리기로 바꿔 두었다(`ResourceServerSecurityConfigurer`).
 - 권한 거부는 익명이면 001, 로그인했으면 005 다. 인증된 서비스가 허용 목록(§9-4) 밖이어도 005 다.
 - **internal 체인은 `resolveServiceAuthentication` 을 쓴다** — 인증 실패는 원인과 무관하게 007, 검증 중 시스템 오류만 006 이다.
   호출자는 다른 서비스라 원인별로 다르게 처리할 것이 없고, 어느 검증에서 걸렸는지 응답으로 알리지 않는다(원인은 수신 쪽 로그의 예외 타입).
@@ -125,11 +125,15 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
   RANDOM_PORT + `management.server.port=0` 통합 테스트를 더해 actuator 규칙이 분리된 포트에서도 걸리는지 확인한다.
 - **토큰을 보냈는데 틀리면 공개 API 여도 401 이다.** 틀린 토큰을 익명으로 취급하지 않는다. BFF 는 401 이면 재발급 후 한 번 재시도한다(§4).
 - 세션을 만들지 않는다(STATELESS). CSRF · 폼 로그인 · Basic · 로그아웃을 끈다. CORS 는 게이트웨이가 처리하므로 서비스에서 끈다.
-- 정규화되면 다른 경로가 되는 원문 경로(`..` · `%2e` · `;` · `//` · `%2f`)는 Spring Security 방화벽이 필터 체인 앞에서 **400** 으로 끊는다.
+- 정규화되면 다른 경로가 되는 원문 경로(`..` · `%2e` · `;` · `//`)는 Spring Security 방화벽이 필터 체인 앞에서 **400** 으로 끊는다(`%2f` 는 그보다 앞의 Tomcat 이 끊는다 — 아래).
   게이트웨이도 같은 경로를 먼저 거절한다(`GATEWAY_004`). 서비스의 400 은 게이트웨이를 거치지 않은 요청에 대한 이중 방어다.
   방화벽은 기본 처리기대로 `sendError(400)` 만 하고(`RequestRejectedHandler` 를 두지 않는다), 실제 컨테이너에서는 `/error` ERROR 디스패치를 거쳐
   common-core `FallbackErrorController` 가 `COMMON_004` 봉투를 쓴다(#81, `api-design-guide.md` §2-1). MockMvc 는 재전송하지 않아 본문이 비어 있다.
-  사용자 체인의 `anyRequest().permitAll()` 이 `/error` 디스패치를 연다 — **`/error` 를 막는 URL 규칙을 더하면 MVC 밖 오류가 모두 401 로 덮인다.**
+  사용자 체인의 `anyRequest().permitAll()` 이 `/error` 디스패치를 열고, Bearer 필터는 ERROR 디스패치에서 돌지 않는다(`OncePerRequestFilter` 기본값) —
+  **`/error` 의 ERROR 디스패치를 인증 · 거부하는 어떤 규칙도 두지 않는다**(URL 규칙 · `dispatcherTypeMatchers(ERROR)` · 컨트롤러 메서드 보안 · Bearer 필터를 ERROR 에도 돌리기).
+  두면 MVC 밖 오류가 401(익명) · 403 `SECURITY_005`(인증)로 덮인다. 서비스 `*ErrorPageEnvelopeSmokeTest` 가 무토큰 · 고객 토큰 · 틀린 토큰으로 이것을 본다.
+  `/internal/**` 원 요청의 방화벽 거부도 400 `COMMON_004` 다 — `/error` 는 internal 체인(`securityMatcher` `/internal/**`)이 아니라 사용자 체인을 탄다.
+  핸들러를 실행하지 않고 봉투만 쓰므로 internal 의 "인증 전 단계 `SECURITY_007`" 보다 앞서는 것이 위험은 아니다.
   `%2f` 는 Tomcat 이 Spring 전에 400 HTML 로 끊는다.
 - 대소문자가 다른 경로(`/API/v1/admin/x`)는 어느 컨트롤러에도 매핑되지 않아 404 다. 비예약 문자를 인코딩한 경로(`/api/v1/%61dmin/x`)는
   URL 규칙과 MVC 가 같은 디코딩으로 보므로 어드민 규칙에 그대로 걸린다(CUSTOMER 403 · 무토큰 401). 둘 다 컨트롤러가 있는 security-core 통합 테스트로 고정했다.
@@ -247,7 +251,7 @@ Spring Security 7 이 Resource Server 설정에 자동으로 더하는 것과 �
 |------|------|------|
 | `GET /.well-known/oauth-protected-resource` | 200 + 메타데이터(무인증) | 비밀은 아니다. 게이트웨이가 라우팅하지 않는다 |
 | `Authorization: DPoP ...` | 봉투 없는 401 + `WWW-Authenticate: DPoP ...` | 우리 토큰은 DPoP 바인딩이 없어 항상 거부된다. 프론트는 `Bearer` 만 쓴다 |
-| 인코딩된 슬래시 `%2f` 경로 (§5-1) | Tomcat 의 400 HTML (서버 버전 없음) | 애플리케이션 전에 끊긴다. 게이트웨이가 먼저 `GATEWAY_004` 로 거절한다. 그 밖의 비정규 경로는 `COMMON_004` 봉투다(#81) |
+| 인코딩된 슬래시 `%2f` 경로 (§5-1) | Tomcat 의 400 HTML (서버 버전 없음) | 애플리케이션 전에 끊긴다. 게이트웨이가 먼저 `GATEWAY_004` 로 거절한다. 그 밖의 비정규 경로는 `COMMON_004` 봉투다(#81). 서버 버전이 나가지 않게 운영 프로필에서 Tomcat 오류 페이지(`ErrorReportValve` showServerInfo · showReport)와 `server.server-header` 를 바꾸지 않는다 |
 
 ## 6. 키
 
