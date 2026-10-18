@@ -4,7 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import feign.FeignException;
+import feign.Request;
+import feign.Response;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import jakarta.persistence.EntityManagerFactory;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -15,6 +22,7 @@ import org.springdoc.core.models.GroupedOpenApi;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.cloud.openfeign.FeignClientProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
@@ -65,6 +73,24 @@ class OrderServiceApplicationTests {
         SessionFactoryImplementor sessionFactory = applicationContext.getBean(EntityManagerFactory.class).unwrap(SessionFactoryImplementor.class);
 
         assertThat(sessionFactory.getSessionFactoryOptions().inClauseParameterPaddingEnabled()).isTrue();
+    }
+
+    /** 서킷 · 타임아웃은 yml 키 오타가 조용히 무시된다. 바인딩된 결과를 본다 ({@code coding-conventions.md} §10). */
+    @Test
+    @DisplayName("product-service 서킷은 4xx 를 실패로 세지 않고, Feign 기본 타임아웃은 60초 기본값이 아니다")
+    void internalClientResilience() {
+        CircuitBreakerConfig productService = applicationContext.getBean(CircuitBreakerRegistry.class).circuitBreaker("product-service").getCircuitBreakerConfig();
+        Request request = Request.create(Request.HttpMethod.GET, "http://product-service", Map.of(), null, StandardCharsets.UTF_8, null);
+        Response notFound = Response.builder().status(404).reason("x").request(request).headers(Map.of()).build();
+        Response unavailable = Response.builder().status(503).reason("x").request(request).headers(Map.of()).build();
+
+        assertThat(productService.getIgnoreExceptionPredicate().test(FeignException.errorStatus("m", notFound))).isTrue();
+        assertThat(productService.getIgnoreExceptionPredicate().test(FeignException.errorStatus("m", unavailable))).isFalse();
+
+        FeignClientProperties.FeignClientConfiguration defaults = applicationContext.getBean(FeignClientProperties.class).getConfig().get("default");
+        assertThat(defaults.getConnectTimeout()).isEqualTo(2_000);
+        assertThat(defaults.getReadTimeout()).isEqualTo(3_000);
+        assertThat(defaults.getRequestInterceptors()).as("전역 인터셉터를 두지 않는다 (security-guide.md §9-5)").isNullOrEmpty();
     }
 
     @Test
