@@ -59,6 +59,11 @@ public record Member(long id, String email, String passwordHash, String name, St
         return new Member(id, email, passwordHash, changedName, changedPhone, role, version);
     }
 
+    /** 고객 로그인 · 토큰 재발급을 쓸 수 있는 계정인가. 관리자 계정은 고객 로그인으로 들어오지 못한다 (#4 결정 4, 관리자 로그인은 #6). */
+    public boolean isCustomer() {
+        return role == MemberRole.CUSTOMER;
+    }
+
     /**
      * 저장 · 조회 키로 쓰는 이메일 — 앞뒤 공백 제거 + 소문자({@link Locale#ROOT}). 로그인(#4 A3)도 이 함수로 찾는다.
      *

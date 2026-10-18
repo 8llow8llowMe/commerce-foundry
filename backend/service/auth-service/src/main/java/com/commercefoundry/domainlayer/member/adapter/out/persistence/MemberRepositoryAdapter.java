@@ -30,6 +30,11 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
     }
 
     @Override
+    public Optional<Member> findByEmail(String email) {
+        return memberRepository.findByEmail(email).map(memberMapper::toDomain);
+    }
+
+    @Override
     public Optional<Member> findById(long memberId) {
         return memberRepository.findById(memberId).map(memberMapper::toDomain);
     }

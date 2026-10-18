@@ -2,7 +2,7 @@ package com.commercefoundry.domainlayer.member.application.exception;
 
 /**
  * 회원 요청 검증 메시지 — {@code "AUTH_1xx:사용자 메시지"} ({@code coding-conventions.md} §8-2). DTO 는 이 상수만 참조한다.
- * 대역 끝 198 · 199 는 {@link MemberErrorCode} 의 타입 불일치 · 필수 파라미터 누락이다. 로그인 · 토큰 요청(#4 A3 · A4)의 필드 코드는 116 부터 잇는다.
+ * 대역 끝 198 · 199 는 {@link MemberErrorCode} 의 타입 불일치 · 필수 파라미터 누락이다. 로그인 요청은 같은 뜻의 101 · 102 · 104 를 다시 쓴다. 토큰 요청의 refresh 토큰은 필드 검증 대신 401(AUTH_010)로 거절한다.
  */
 public final class MemberValidationMessage {
 
