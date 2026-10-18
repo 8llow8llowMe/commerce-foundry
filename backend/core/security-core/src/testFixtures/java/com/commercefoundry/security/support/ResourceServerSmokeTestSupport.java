@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
@@ -39,6 +40,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import org.springframework.web.util.pattern.PathPatternParser;
 
@@ -82,6 +84,8 @@ public abstract class ResourceServerSmokeTestSupport {
 
     private static final String INTERNAL_PREFIX = "/internal/";
     private static final String API_PREFIX = "/api/";
+    /** 어드민 API 경로 머리 ({@code api-design-guide.md}). URL 규칙의 {@code /api/v1/admin/**} 와 같다. */
+    private static final String ADMIN_API_PREFIX = "/api/v1/admin";
 
     @Autowired
     private MockMvc mockMvc;
@@ -276,39 +280,59 @@ public abstract class ResourceServerSmokeTestSupport {
      * <ul>
      *   <li>{@code /internal/} — 메서드(없으면 클래스)의 {@code @PreAuthorize} 식이 {@code hasAuthority('SERVICE_<id>')} 또는
      *       {@code hasAnyAuthority('SERVICE_<id>', ...)} <b>그 자체</b>여야 한다. {@code isAuthenticated()} · {@code permitAll()} · {@code or} 로 넓힌 식은 실패다.</li>
-     *   <li>{@code /api/} — {@code @PreAuthorize} 가 있으면 된다(식은 {@code permitAll()} · {@code isAuthenticated()} · {@code hasRole(...)} 등 자유).</li>
+     *   <li>{@code /api/v1/admin} 아래 — 식이 ADMIN 을 필요조건으로 해야 한다({@link AuthorizationExpressions#requiresAdminRole}). ArchUnit R2 는 패키지
+     *       ({@code adapter.in.admin})로 보므로, 어드민 핸들러를 다른 패키지({@code adapter.in.web.admin} 등)에 두거나 상속으로 받으면 비켜 간다.
+     *       여기는 실제 매핑 경로로 보아 패키지 · 상속과 무관하다.</li>
+     *   <li>그 밖의 {@code /api/} — {@code @PreAuthorize} 가 있으면 된다(식은 {@code permitAll()} · {@code isAuthenticated()} · {@code hasRole(...)} 등 자유).</li>
      * </ul>
      *
      * <p>지금 서비스에는 실제 핸들러가 없어 빈 목록으로 통과하지 않도록, 스모크 핸들러가 검사 대상에 들어 있는지도 본다.
      */
     @Test
-    @DisplayName("모든 /internal 핸들러는 허용 호출자 hasAuthority('SERVICE_…') 를, 모든 /api 핸들러는 @PreAuthorize 를 선언한다")
+    @DisplayName("모든 /internal 핸들러는 허용 호출자 hasAuthority('SERVICE_…') 를, /api/v1/admin 핸들러는 hasRole('ADMIN') 을, 모든 /api 핸들러는 @PreAuthorize 를 선언한다")
     void handlersDeclareAuthorization() {
         RequestMappingHandlerMapping handlerMapping = applicationContext.getBean("requestMappingHandlerMapping", RequestMappingHandlerMapping.class);
+
+        AuthorizationScan scan = scanHandlers(handlerMapping.getHandlerMethods());
+
+        assertThat(scan.checkedInternalPatterns()).as("스모크 핸들러가 검사 대상에 들어 있다 — 빈 목록이라 통과한 것이 아니다").contains(InternalSecuritySmokeController.PATH);
+        assertThat(scan.violations()).as("허용 호출자 · 어드민 권한 · 인가 선언이 없는 핸들러 (security-guide.md §5-1 · §9-4)").isEmpty();
+    }
+
+    /** 인가 선언 누락 가드의 판정. 컨텍스트 없이 security-core 테스트가 매핑을 직접 만들어 시험할 수 있게 떼어 둔다. */
+    static AuthorizationScan scanHandlers(Map<RequestMappingInfo, HandlerMethod> handlerMethods) {
         List<String> checkedInternalPatterns = new ArrayList<>();
         List<String> violations = new ArrayList<>();
 
-        handlerMapping.getHandlerMethods().forEach((mapping, handler) -> {
+        handlerMethods.forEach((mapping, handler) -> {
             Set<String> patterns = mapping.getPatternValues();
             boolean internal = patterns.stream().anyMatch(pattern -> pattern.startsWith(INTERNAL_PREFIX));
+            boolean admin = patterns.stream().anyMatch(pattern -> pattern.equals(ADMIN_API_PREFIX) || pattern.startsWith(ADMIN_API_PREFIX + "/"));
             boolean api = patterns.stream().anyMatch(pattern -> pattern.startsWith(API_PREFIX));
             if (!internal && !api) {
                 return;
             }
             PreAuthorize declared = declaredPreAuthorize(handler);
             String handlerName = handler.getBeanType().getName() + "#" + handler.getMethod().getName() + " " + patterns;
+            String found = declared == null ? "@PreAuthorize 없음" : "@PreAuthorize(\"" + declared.value() + "\")";
             if (internal) {
                 checkedInternalPatterns.addAll(patterns);
                 if (declared == null || !AuthorizationExpressions.isServiceCallersOnly(declared.value())) {
-                    violations.add(handlerName + " -> " + (declared == null ? "@PreAuthorize 없음" : declared.value()));
+                    violations.add(handlerName + " -> " + found + " — hasAuthority('SERVICE_<호출 서비스 ID>') · hasAnyAuthority(...) 로 부를 수 있는 서비스만 적으세요");
+                }
+            } else if (admin) {
+                if (declared == null || !AuthorizationExpressions.requiresAdminRole(declared.value())) {
+                    violations.add(handlerName + " -> " + found + " — 어드민 경로는 hasRole('ADMIN') 또는 hasRole('ADMIN') and ... 로 고치세요");
                 }
             } else if (declared == null) {
-                violations.add(handlerName + " -> @PreAuthorize 없음");
+                violations.add(handlerName + " -> " + found + " — 메서드에 인가 식(permitAll() · isAuthenticated() · hasRole(...))을 적으세요");
             }
         });
+        return new AuthorizationScan(List.copyOf(checkedInternalPatterns), List.copyOf(violations));
+    }
 
-        assertThat(checkedInternalPatterns).as("스모크 핸들러가 검사 대상에 들어 있다 — 빈 목록이라 통과한 것이 아니다").contains(InternalSecuritySmokeController.PATH);
-        assertThat(violations).as("허용 호출자 · 인가 선언이 없는 핸들러 (security-guide.md §5-1 · §9-4)").isEmpty();
+    /** {@link #scanHandlers} 결과 — 검사한 internal 경로(빈 검사 방지)와 위반 목록. */
+    record AuthorizationScan(List<String> checkedInternalPatterns, List<String> violations) {
     }
 
     // ── 구성 ─────────────────────────────────────────────────────

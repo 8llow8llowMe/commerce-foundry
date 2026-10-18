@@ -47,9 +47,13 @@ class AuthorizationExpressionsTest {
         "hasRole('ADMIN')and(isAuthenticated()) or true",
         "hasRole('ADMINISTRATOR')",
         "isAuthenticated() and hasRole('ADMIN')",
-        "hasRole('ADMIN') andIsAuthenticated()"
+        "hasRole('ADMIN') andIsAuthenticated()",
+        "hasRole('ADMIN') and \"(\" != \"\" or true and \")\" != \"\"",
+        "hasRole('ADMIN') and \"'\" != \"\" or true and \"'\" != \"\"",
+        "hasRole('ADMIN') and \"x\" != \"\"",
+        "hasRole('ADMIN') and {cond}"
     })
-    @DisplayName("ADMIN 이 필요조건이 아닌 식은 실패한다 — permitAll · isAuthenticated · 다른 표기 · 괄호 밖 or · 삼항 · 괄호 불일치")
+    @DisplayName("ADMIN 이 필요조건이 아닌 식은 실패한다 — permitAll · isAuthenticated · 다른 표기 · 괄호 밖 or · 삼항 · 괄호 불일치 · 큰따옴표 · 템플릿 자리표시자")
     void adminRoleNotRequired(String expression) {
         assertThat(AuthorizationExpressions.requiresAdminRole(expression)).isFalse();
     }
@@ -73,9 +77,12 @@ class AuthorizationExpressionsTest {
         "hasAuthority('SERVICE_order-service') or permitAll()",
         "hasAnyAuthority('SERVICE_order-service', 'ROLE_ADMIN')",
         "hasRole('ADMIN')",
-        "hasAuthority('SERVICE_Order')"
+        "hasAuthority('SERVICE_Order')",
+        "hasAuthority(\"SERVICE_order-service\")",
+        "hasAuthority('SERVICE_{caller}')",
+        "{callers}"
     })
-    @DisplayName("서비스 권한 밖으로 넓히거나 다른 식이면 허용 호출자 선언이 아니다")
+    @DisplayName("서비스 권한 밖으로 넓히거나 다른 식 · 큰따옴표 · 템플릿 자리표시자면 허용 호출자 선언이 아니다")
     void notServiceCallersOnly(String expression) {
         assertThat(AuthorizationExpressions.isServiceCallersOnly(expression)).isFalse();
     }

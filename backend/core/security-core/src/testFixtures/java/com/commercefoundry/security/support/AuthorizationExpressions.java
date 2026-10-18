@@ -27,7 +27,7 @@ public final class AuthorizationExpressions {
 
     /** {@code hasAuthority('SERVICE_<id>')} · {@code hasAnyAuthority('SERVICE_<id>', ...)} 그 자체인가. 앞뒤 공백만 무시한다. */
     public static boolean isServiceCallersOnly(String expression) {
-        return expression != null && SERVICE_CALLERS.matcher(expression.strip()).matches();
+        return expression != null && !hasUncheckableToken(expression) && SERVICE_CALLERS.matcher(expression.strip()).matches();
     }
 
     /**
@@ -40,10 +40,11 @@ public final class AuthorizationExpressions {
      *   <li>괄호 안의 {@code or} 는 {@code and} 로 묶여 있어 ADMIN 이 여전히 필요조건이다 — 통과시킨다.</li>
      *   <li>{@code permitAll()} · {@code isAuthenticated()} · {@code hasAnyRole('ADMIN', ...)} · {@code hasAuthority('ROLE_ADMIN')} 은 실패다.
      *       뒤의 둘은 같은 뜻이 될 수 있어도 문서의 표기({@code hasRole('ADMIN')}) 하나로 맞춘다.</li>
+     *   <li>큰따옴표 · {@code {}} 가 있으면 실패다 ({@link #hasUncheckableToken}).</li>
      * </ul>
      */
     public static boolean requiresAdminRole(String expression) {
-        if (expression == null) {
+        if (expression == null || hasUncheckableToken(expression)) {
             return false;
         }
         String stripped = expression.strip();
@@ -57,6 +58,19 @@ public final class AuthorizationExpressions {
         }
         Matcher and = AND_TAIL.matcher(tail);
         return and.lookingAt() && !widensAtTopLevel(tail.substring(and.end()));
+    }
+
+    /**
+     * 이 판정이 문자열 모양으로는 따라갈 수 없는 토큰이 있는가 — 애매하면 실패 쪽으로 둔다.
+     *
+     * <ul>
+     *   <li>큰따옴표 — SpEL 은 {@code "..."} 도 문자열 리터럴이다. 작은따옴표만 따라가는 괄호 · {@code or} 탐색을 속인다
+     *       (예: {@code hasRole('ADMIN') and "(" != "" or true and ")" != ""} 는 ADMIN 없이 통과한다).</li>
+     *   <li>{@code {}} — Spring Security 애노테이션 템플릿 자리표시자({@code {cond}})다. 실제 식은 합성 애노테이션의 속성 값으로 바뀌어 여기서 볼 수 없다.</li>
+     * </ul>
+     */
+    private static boolean hasUncheckableToken(String expression) {
+        return expression.indexOf('"') >= 0 || expression.indexOf('{') >= 0;
     }
 
     /** 괄호 · 문자열 밖에 {@code or} · {@code ||} · {@code ?} 가 있는가. 괄호가 맞지 않아도 넓힌 것으로 본다(실패 쪽). */

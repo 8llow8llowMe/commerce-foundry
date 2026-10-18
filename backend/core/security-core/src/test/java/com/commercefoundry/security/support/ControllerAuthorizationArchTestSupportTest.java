@@ -33,6 +33,9 @@ class ControllerAuthorizationArchTestSupportTest {
 
     static Stream<ArchRule> rules() {
         return Stream.of(
+            ControllerAuthorizationArchTestSupport.CONTROLLERS_RESIDE_IN_ADAPTER_IN_PACKAGES,
+            ControllerAuthorizationArchTestSupport.CONTROLLERS_DECLARE_MAPPINGS_DIRECTLY,
+            ControllerAuthorizationArchTestSupport.NO_GLOBAL_FEIGN_REQUEST_CUSTOMIZER_COMPONENTS,
             ControllerAuthorizationArchTestSupport.CUSTOMER_AND_ADMIN_HANDLERS_DECLARE_PRE_AUTHORIZE,
             ControllerAuthorizationArchTestSupport.ADMIN_HANDLERS_REQUIRE_ADMIN_ROLE,
             ControllerAuthorizationArchTestSupport.INTERNAL_HANDLERS_ALLOW_SERVICE_CALLERS_ONLY,
@@ -44,7 +47,7 @@ class ControllerAuthorizationArchTestSupportTest {
 
     @ParameterizedTest
     @MethodSource("rules")
-    @DisplayName("준수 예시는 모든 규칙을 통과한다 — 메타 애노테이션 · 괄호 안 or · 클래스의 허용 호출자 · @RestControllerAdvice 포함")
+    @DisplayName("준수 예시는 모든 규칙을 통과한다 — 메타 애노테이션 · 괄호 안 or · 클래스의 허용 호출자 · @RestControllerAdvice · webhook · 매핑 없는 인터페이스 · 비컴포넌트 인터셉터 포함")
     void compliantFixturesPass(ArchRule rule) {
         assertThatCode(() -> rule.check(COMPLIANT)).doesNotThrowAnyException();
     }
@@ -100,11 +103,43 @@ class ControllerAuthorizationArchTestSupportTest {
     }
 
     @Test
-    @DisplayName("R6 @EnableFeignClients 에 defaultConfiguration 이 있으면 실패한다")
+    @DisplayName("R5 RequestInterceptor · Capability 구현 클래스가 컴포넌트(@Component · @Configuration 등)면 실패한다 — 컴포넌트가 아닌 구현은 통과")
+    void feignRequestCustomizerComponentsFail() {
+        assertThat(violations(ControllerAuthorizationArchTestSupport.NO_GLOBAL_FEIGN_REQUEST_CUSTOMIZER_COMPONENTS))
+            .hasSize(2)
+            .anySatisfy(detail -> assertThat(detail).contains("violating.config.ScannedInterceptor", "컴포넌트"))
+            .anySatisfy(detail -> assertThat(detail).contains("violating.config.ScannedCapability"));
+    }
+
+    @Test
+    @DisplayName("R6 @EnableFeignClients 에 defaultConfiguration 이 있으면 실패한다 — 합성 애노테이션으로 단 경우 · 그 합성 애노테이션 자체도")
     void defaultFeignConfigurationFails() {
         assertThat(violations(DEFAULT_FEIGN_CONFIGURATION))
-            .singleElement()
-            .satisfies(detail -> assertThat(detail).contains("GlobalFeignConfig", "defaultConfiguration"));
+            .hasSize(3)
+            .anySatisfy(detail -> assertThat(detail).contains("violating.config.GlobalFeignConfig ", "defaultConfiguration"))
+            .anySatisfy(detail -> assertThat(detail).contains("violating.config.MetaGlobalFeignConfig "))
+            .anySatisfy(detail -> assertThat(detail).contains("violating.config.EnableAllFeignClients "));
+    }
+
+    @Test
+    @DisplayName("R0 adapter.in.web · admin · internal · webhook 밖의 컨트롤러는 실패한다 — @RestControllerAdvice 는 대상이 아니다")
+    void controllersOutsideAdapterInPackagesFail() {
+        assertThat(violations(ControllerAuthorizationArchTestSupport.CONTROLLERS_RESIDE_IN_ADAPTER_IN_PACKAGES))
+            .hasSize(2)
+            .anySatisfy(detail -> assertThat(detail).contains("violating.adapter.in.rest.MisplacedRestController", "adapter.in.admin"))
+            .anySatisfy(detail -> assertThat(detail).contains("violating.presentation.PresentationController"));
+    }
+
+    @Test
+    @DisplayName("R7 매핑 메서드를 물려주는 인터페이스 · 상위 클래스를 구현 · 상속한 컨트롤러는 실패한다 — R1 · R2 가 보지 못하는 핸들러")
+    void controllersInheritingMappingsFail() {
+        assertThat(violations(ControllerAuthorizationArchTestSupport.CONTROLLERS_DECLARE_MAPPINGS_DIRECTLY))
+            .hasSize(2)
+            .anySatisfy(detail -> assertThat(detail).contains("InheritedWebController", "ProductApi#list"))
+            .anySatisfy(detail -> assertThat(detail).contains("InheritedAdminController", "AbstractAdminController#inherited"));
+        assertThat(violations(ControllerAuthorizationArchTestSupport.CUSTOMER_AND_ADMIN_HANDLERS_DECLARE_PRE_AUTHORIZE))
+            .as("R7 이 없으면 놓치는 핸들러다 — R1 은 상속받은 매핑을 보지 못한다")
+            .noneSatisfy(detail -> assertThat(detail).contains("Inherited"));
     }
 
     @Test
