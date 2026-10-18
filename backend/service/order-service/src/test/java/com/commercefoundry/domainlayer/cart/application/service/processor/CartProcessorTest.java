@@ -3,7 +3,7 @@ package com.commercefoundry.domainlayer.cart.application.service.processor;
 import static com.commercefoundry.domainlayer.cart.support.CartFixtures.MEMBER_ID;
 import static com.commercefoundry.domainlayer.cart.support.CartFixtures.OTHER_MEMBER_ID;
 import static com.commercefoundry.domainlayer.cart.support.CartFixtures.add;
-import static com.commercefoundry.domainlayer.cart.support.CartFixtures.cartSku;
+import static com.commercefoundry.domainlayer.cart.support.CartFixtures.catalogSku;
 import static com.commercefoundry.domainlayer.cart.support.CartFixtures.customOrder;
 import static com.commercefoundry.domainlayer.cart.support.CartFixtures.onSale;
 import static com.commercefoundry.domainlayer.cart.support.CartFixtures.options;
@@ -19,11 +19,11 @@ import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
 import com.commercefoundry.domainlayer.cart.application.exception.CartException;
 import com.commercefoundry.domainlayer.cart.application.model.CartMergeSkip;
 import com.commercefoundry.domainlayer.cart.application.model.CartMergeSkipReason;
-import com.commercefoundry.domainlayer.cart.application.model.CartSku;
 import com.commercefoundry.domainlayer.cart.domain.model.CartItem;
 import com.commercefoundry.domainlayer.cart.domain.model.CustomOption;
 import com.commercefoundry.domainlayer.cart.domain.model.CustomOptions;
 import com.commercefoundry.domainlayer.cart.support.InMemoryCartItemRepository;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogSku;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,8 +50,32 @@ class CartProcessorTest {
             .forEach(skuId -> repository.givenSaved(new CartItem(skuId * 10, memberId, skuId, 1, CustomOptions.empty(), 0L)));
     }
 
-    private static CartSku sku(long skuId) {
-        return cartSku(onSale(skuId, 10_000));
+    private static CatalogSku sku(long skuId) {
+        return catalogSku(onSale(skuId, 10_000));
+    }
+
+    @Nested
+    @DisplayName("담기 판정 · 수량 상한 (I/O 없음)")
+    class Rules {
+
+        @Test
+        @DisplayName("없음 → 구매 불가 → 맞춤 제작 불가 순으로 처음 맞는 사유다 — 담을 수 있으면 null")
+        void rejectionOrder() {
+            assertThat(processor.rejectionOf(null, true)).isEqualTo(CartMergeSkipReason.SKU_NOT_FOUND);
+            assertThat(processor.rejectionOf(catalogSku(soldOut(9001, 10_000)), true)).isEqualTo(CartMergeSkipReason.NOT_PURCHASABLE);
+            assertThat(processor.rejectionOf(sku(9001), true)).isEqualTo(CartMergeSkipReason.CUSTOM_OPTION_NOT_ALLOWED);
+            assertThat(processor.rejectionOf(sku(9001), false)).isNull();
+            assertThat(processor.rejectionOf(catalogSku(customOrder(onSale(9001, 10_000))), true)).isNull();
+            assertThat(repository.saveCalls()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("수량 상한은 99 와 1회 주문 최대 수량 중 작은 값이고, SKU 를 찾지 못하면 99 다")
+        void maxQuantityOf() {
+            assertThat(processor.maxQuantityOf(catalogSku(withMaxQuantity(onSale(9001, 10_000), 5)))).isEqualTo(5);
+            assertThat(processor.maxQuantityOf(sku(9001))).isEqualTo(CartItem.MAX_QUANTITY);
+            assertThat(processor.maxQuantityOf(null)).isEqualTo(CartItem.MAX_QUANTITY);
+        }
     }
 
     @Nested
@@ -61,7 +85,7 @@ class CartProcessorTest {
         @Test
         @DisplayName("새 줄은 아이디와 맞춤 제작 입력 아이디를 채워 만든다")
         void createsLine() {
-            CartSku sku = cartSku(customOrder(onSale(9001, 39_000)));
+            CatalogSku sku = catalogSku(customOrder(onSale(9001, 39_000)));
 
             processor.addItem(MEMBER_ID, add(9001, 2, options("chest", "96")), sku);
 
@@ -96,7 +120,7 @@ class CartProcessorTest {
         @Test
         @DisplayName("합계가 상한(1회 주문 최대 수량)을 넘으면 CART_QUANTITY_EXCEEDED 이고 줄은 그대로다")
         void rejectsOverMax() {
-            CartSku limited = cartSku(withMaxQuantity(onSale(9001, 10_000), 5));
+            CatalogSku limited = catalogSku(withMaxQuantity(onSale(9001, 10_000), 5));
             processor.addItem(MEMBER_ID, add(9001, 4), limited);
 
             assertThatThrownBy(() -> processor.addItem(MEMBER_ID, add(9001, 2), limited))
@@ -110,7 +134,7 @@ class CartProcessorTest {
         @Test
         @DisplayName("새 줄 수량이 상한을 넘어도 CART_QUANTITY_EXCEEDED 다")
         void rejectsNewLineOverMax() {
-            assertThatThrownBy(() -> processor.addItem(MEMBER_ID, add(9001, 6), cartSku(withMaxQuantity(onSale(9001, 10_000), 5))))
+            assertThatThrownBy(() -> processor.addItem(MEMBER_ID, add(9001, 6), catalogSku(withMaxQuantity(onSale(9001, 10_000), 5))))
                 .extracting(exception -> ((CartException) exception).getErrorCode()).isEqualTo(CartErrorCode.CART_QUANTITY_EXCEEDED);
             assertThat(repository.all()).isEmpty();
         }
@@ -195,7 +219,7 @@ class CartProcessorTest {
         @DisplayName("같은 줄은 수량을 더하고, 상한에서 자른다 — 거절하지 않는다")
         void mergesAndCaps() {
             repository.givenSaved(new CartItem(77L, MEMBER_ID, 9001, 8, CustomOptions.empty(), 0L));
-            Map<Long, CartSku> skus = Map.of(9001L, cartSku(withMaxQuantity(onSale(9001, 10_000), 10)), 9002L, sku(9002));
+            Map<Long, CatalogSku> skus = Map.of(9001L, catalogSku(withMaxQuantity(onSale(9001, 10_000), 10)), 9002L, sku(9002));
 
             List<CartMergeSkip> skipped = processor.merge(MEMBER_ID, new CartMergeCommand(List.of(add(9001, 5), add(9002, 3))), skus);
 
@@ -206,7 +230,7 @@ class CartProcessorTest {
         @Test
         @DisplayName("병합 요청 안의 같은 줄도 합친다 — 새 줄 하나로 만들고 상한에서 자른다")
         void mergesWithinRequest() {
-            Map<Long, CartSku> skus = Map.of(9001L, cartSku(customOrder(onSale(9001, 10_000))));
+            Map<Long, CatalogSku> skus = Map.of(9001L, catalogSku(customOrder(onSale(9001, 10_000))));
 
             processor.merge(MEMBER_ID, new CartMergeCommand(List.of(add(9001, 60), add(9001, 60), add(9001, 1, options("chest", "96")))), skus);
 
@@ -216,7 +240,7 @@ class CartProcessorTest {
         @Test
         @DisplayName("없는 SKU · 구매할 수 없는 SKU · 맞춤 제작이 아닌데 입력이 있는 항목은 항목 단위로 건너뛰고(위치 · 사유) 나머지는 담는다")
         void skipsInvalid() {
-            Map<Long, CartSku> skus = Map.of(9002L, cartSku(soldOut(9002, 10_000)), 9003L, sku(9003), 9004L, sku(9004));
+            Map<Long, CatalogSku> skus = Map.of(9002L, catalogSku(soldOut(9002, 10_000)), 9003L, sku(9003), 9004L, sku(9004));
             CartMergeCommand command = new CartMergeCommand(List.of(
                 add(9001, 1), add(9002, 1), add(9003, 1, options("chest", "96")), add(9004, 2), add(9001, 1)));
 
@@ -233,7 +257,7 @@ class CartProcessorTest {
         @Test
         @DisplayName("같은 SKU 라도 항목마다 판정한다 — 입력이 있는 항목은 건너뛰고(맞춤 제작 아님) 입력이 없는 항목은 담는다")
         void sameSkuOneSkippedOneMerged() {
-            Map<Long, CartSku> skus = Map.of(9003L, sku(9003));
+            Map<Long, CatalogSku> skus = Map.of(9003L, sku(9003));
 
             List<CartMergeSkip> skipped = processor.merge(MEMBER_ID, new CartMergeCommand(List.of(add(9003, 1, options("chest", "96")), add(9003, 2))), skus);
 
@@ -248,7 +272,7 @@ class CartProcessorTest {
         @Test
         @DisplayName("새 줄은 요청 순서대로 아이디가 커진다 — 나중 항목일수록 최근 담은 줄로 위에 보인다")
         void laterItemsAreNewer() {
-            Map<Long, CartSku> skus = Map.of(9001L, sku(9001), 9002L, sku(9002), 9003L, sku(9003));
+            Map<Long, CatalogSku> skus = Map.of(9001L, sku(9001), 9002L, sku(9002), 9003L, sku(9003));
 
             processor.merge(MEMBER_ID, new CartMergeCommand(List.of(add(9001, 1), add(9002, 1), add(9003, 1))), skus);
 
@@ -259,7 +283,7 @@ class CartProcessorTest {
         @DisplayName("50줄을 넘는 새 줄은 건너뛰지만, 있는 줄과 합치는 항목은 담는다")
         void skipsOverLineLimit() {
             givenLines(MEMBER_ID, 1, CartItem.MAX_LINES_PER_CART - 1);
-            Map<Long, CartSku> skus = Map.of(1L, sku(1), 9001L, sku(9001), 9002L, sku(9002));
+            Map<Long, CatalogSku> skus = Map.of(1L, sku(1), 9001L, sku(9001), 9002L, sku(9002));
 
             List<CartMergeSkip> skipped = processor.merge(MEMBER_ID, new CartMergeCommand(List.of(add(9001, 1), add(9002, 1), add(1, 4))), skus);
 
@@ -272,7 +296,7 @@ class CartProcessorTest {
         @DisplayName("바뀐 줄은 한 번에 저장한다 — 루프 안에서 하나씩 저장하지 않는다. 바뀐 것이 없으면 저장하지 않는다")
         void savesOnce() {
             repository.givenSaved(new CartItem(77L, MEMBER_ID, 9001, 99, CustomOptions.empty(), 0L));
-            Map<Long, CartSku> skus = Map.of(9001L, sku(9001), 9002L, sku(9002), 9003L, sku(9003));
+            Map<Long, CatalogSku> skus = Map.of(9001L, sku(9001), 9002L, sku(9002), 9003L, sku(9003));
 
             processor.merge(MEMBER_ID, new CartMergeCommand(List.of(add(9001, 1))), skus);
             assertThat(repository.saveCalls()).as("이미 상한인 줄만 있으면 저장하지 않는다").isEmpty();
@@ -284,7 +308,7 @@ class CartProcessorTest {
         @Test
         @DisplayName("1회 주문 최대 수량이 0 인 상품은 새 줄로 담을 수 없어 건너뛴다")
         void skipsZeroMax() {
-            Map<Long, CartSku> skus = Map.of(9001L, cartSku(withMaxQuantity(onSale(9001, 10_000), 0)));
+            Map<Long, CatalogSku> skus = Map.of(9001L, catalogSku(withMaxQuantity(onSale(9001, 10_000), 0)));
 
             assertThat(processor.merge(MEMBER_ID, new CartMergeCommand(List.of(add(9001, 1))), skus))
                 .containsExactly(new CartMergeSkip(0, 9001L, CartMergeSkipReason.QUANTITY_LIMIT_EXCEEDED));

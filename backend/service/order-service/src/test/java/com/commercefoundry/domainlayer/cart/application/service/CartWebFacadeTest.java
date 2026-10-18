@@ -21,10 +21,10 @@ import com.commercefoundry.domainlayer.cart.application.command.CartMergeCommand
 import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
 import com.commercefoundry.domainlayer.cart.application.exception.CartException;
 import com.commercefoundry.domainlayer.cart.application.service.processor.CartProcessor;
-import com.commercefoundry.domainlayer.cart.application.service.processor.CartSkuProcessor;
 import com.commercefoundry.domainlayer.cart.application.service.processor.CartViewProcessor;
-import com.commercefoundry.domainlayer.cart.support.FakeSkuQueryPort;
 import com.commercefoundry.domainlayer.cart.support.InMemoryCartItemRepository;
+import com.commercefoundry.domainlayer.catalog.application.service.processor.CatalogSkuProcessor;
+import com.commercefoundry.domainlayer.catalog.support.FakeSkuQueryPort;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.List;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -48,7 +48,7 @@ class CartWebFacadeTest {
         repository = new InMemoryCartItemRepository();
         skuQueryPort = new FakeSkuQueryPort();
         facade = new CartWebFacade(
-            new CartProcessor(repository, new SnowflakeIdGenerator(1, 3)), new CartSkuProcessor(skuQueryPort), new CartViewProcessor(), new CartWebPresenter());
+            new CartProcessor(repository, new SnowflakeIdGenerator(1, 3)), new CatalogSkuProcessor(skuQueryPort), new CartViewProcessor(), new CartWebPresenter());
     }
 
     private static CartLineItem lineOf(CartResponse cart, long skuId) {

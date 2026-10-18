@@ -1,10 +1,10 @@
 package com.commercefoundry.domainlayer.cart.support;
 
 import com.commercefoundry.domainlayer.cart.application.command.CartItemAddCommand;
-import com.commercefoundry.domainlayer.cart.application.model.CartSku;
-import com.commercefoundry.domainlayer.cart.application.port.out.query.SkuQueryResult;
 import com.commercefoundry.domainlayer.cart.domain.model.CustomOption;
 import com.commercefoundry.domainlayer.cart.domain.model.CustomOptions;
+import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogSku;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
@@ -44,8 +44,8 @@ public final class CartFixtures {
             sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), true);
     }
 
-    public static CartSku cartSku(SkuQueryResult sku) {
-        return new CartSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
+    public static CatalogSku catalogSku(SkuQueryResult sku) {
+        return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
             sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), sku.customOrder());
     }
 

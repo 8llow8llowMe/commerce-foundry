@@ -1,12 +1,12 @@
-package com.commercefoundry.domainlayer.cart.adapter.out.client.feign;
+package com.commercefoundry.domainlayer.catalog.adapter.out.client.feign;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
-import com.commercefoundry.domainlayer.cart.application.exception.CartException;
-import com.commercefoundry.domainlayer.cart.application.port.out.SkuQueryPort;
-import com.commercefoundry.domainlayer.cart.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
+import com.commercefoundry.domainlayer.catalog.application.port.out.SkuQueryPort;
+import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
 import com.commercefoundry.security.internal.InternalTokenDecoderFactory;
 import com.commercefoundry.security.support.TestServiceTokens;
 import com.commercefoundry.shared.commerce.CurrencyCode;
@@ -117,13 +117,13 @@ class ProductSkuClientTest {
     }
 
     @Test
-    @DisplayName("product-service 의 5xx 는 CART_PRODUCT_SERVICE_UNAVAILABLE 로 바뀐다 — FeignException 이 밖으로 나오지 않는다")
+    @DisplayName("product-service 의 5xx 는 CATALOG_001(503) 로 바뀐다 — FeignException 이 밖으로 나오지 않는다")
     void serverError() {
         RESPONSE_STATUS.set(503);
         RESPONSE_BODY.set("{\"dataHeader\":{\"success\":false,\"resultCode\":\"X\",\"resultMessage\":\"x\",\"fieldErrors\":null},\"dataBody\":null}");
 
         assertThatThrownBy(() -> skuQueryPort.findSkus(List.of(9004L)))
-            .isInstanceOfSatisfying(CartException.class,
-                exception -> assertThat(exception.getErrorCode()).isEqualTo(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE));
+            .isInstanceOfSatisfying(CatalogException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE));
     }
 }

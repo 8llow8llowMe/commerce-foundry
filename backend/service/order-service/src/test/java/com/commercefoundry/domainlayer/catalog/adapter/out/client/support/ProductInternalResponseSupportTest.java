@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.cart.adapter.out.client.support;
+package com.commercefoundry.domainlayer.catalog.adapter.out.client.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -7,11 +7,11 @@ import com.commercefoundry.common.dto.DataHeader;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.dto.ProductSkuInternalItem;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.dto.ProductSkuInternalResponse;
-import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
-import com.commercefoundry.domainlayer.cart.application.exception.CartException;
-import com.commercefoundry.domainlayer.cart.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalItem;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalResponse;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
+import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import feign.FeignException;
@@ -59,8 +59,8 @@ class ProductInternalResponseSupportTest {
     }
 
     private static void assertUnavailable(Runnable call) {
-        assertThatThrownBy(call::run).isInstanceOfSatisfying(CartException.class,
-            exception -> assertThat(exception.getErrorCode()).isEqualTo(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE));
+        assertThatThrownBy(call::run).isInstanceOfSatisfying(CatalogException.class,
+            exception -> assertThat(exception.getErrorCode()).isEqualTo(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE));
     }
 
     @Nested
@@ -75,7 +75,7 @@ class ProductInternalResponseSupportTest {
 
         @ParameterizedTest(name = "status={0}")
         @ValueSource(ints = {500, 502, 503, 504})
-        @DisplayName("5xx 는 CART_PRODUCT_SERVICE_UNAVAILABLE(503) 이고 FeignException 을 밖으로 내보내지 않는다")
+        @DisplayName("5xx 는 CATALOG_001(503) 이고 FeignException 을 밖으로 내보내지 않는다")
         void serverError(int status) {
             assertUnavailable(() -> support.call(() -> {
                 throw status(status);
@@ -116,8 +116,8 @@ class ProductInternalResponseSupportTest {
 
             int[] remoteCalls = {0};
             assertThatThrownBy(() -> support.call(() -> ++remoteCalls[0]))
-                .isInstanceOfSatisfying(CartException.class, exception -> {
-                    assertThat(exception.getErrorCode()).isEqualTo(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE);
+                .isInstanceOfSatisfying(CatalogException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE);
                     assertThat(exception.getCause()).isInstanceOf(CallNotPermittedException.class);
                 });
             assertThat(remoteCalls[0]).isZero();
