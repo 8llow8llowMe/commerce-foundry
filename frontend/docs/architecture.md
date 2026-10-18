@@ -28,6 +28,7 @@ pnpm workspace + Turborepo. 앱 둘과 패키지 셋이다.
   - POST · PUT · PATCH · DELETE 는 같은 origin 요청만 받는다(아래 CSRF), 아니면 BFF_003 403
   - 401 + refresh 쿠키 → 재발급 1회 → 새 쿠키 → 원 요청 1회 재시도 (재발급 결과별 처리는 §3)
   - 게이트웨이 Set-Cookie 는 버린다. 연결 실패는 BFF_002 503
+  - 그 밖의 상태(429 + Retry-After 포함)는 재발급 · 재시도 없이 그대로 중계한다
       ↓
 [API Gateway :8000] → 서비스
 
