@@ -28,8 +28,13 @@ import lombok.NoArgsConstructor;
     check = {
         @CheckConstraint(name = "ck_sku_additional_price_non_negative", constraint = "additional_price_amount >= 0"),
         @CheckConstraint(name = "ck_sku_weight_grams_positive", constraint = "weight_grams is null or weight_grams > 0"),
-        // 숫자 여부는 도메인(HsCode)이 본다 — 정규식 문법이 H2 와 PostgreSQL 에서 달라 DB 는 길이만 막는다
-        @CheckConstraint(name = "ck_sku_hs_code_length", constraint = "hs_code is null or char_length(hs_code) between 6 and 10")
+        // 도메인 HsCode 와 같은 규칙(숫자 6~10자리)을 DB 도 막는다 — 운영 SQL 로 '6211.42.00' 이 들어가면 그 SKU 를 읽는 상세 · internal 조회 ·
+        // 재고 선점이 매퍼에서 실패(500)한다. 정규식 문법이 H2 와 PostgreSQL 에서 달라 ltrim 으로 앞의 숫자를 걷어낸 나머지가 비었는지 본다
+        // (translate(.., '0123456789', '') 는 H2 에서 문자를 지우지 않고 그대로 둬 맞는 값까지 거절한다)
+        @CheckConstraint(
+            name = "ck_sku_hs_code_format",
+            constraint = "hs_code is null or (char_length(hs_code) between 6 and 10 and ltrim(hs_code, '0123456789') = '')"
+        )
     }
 )
 @Getter
