@@ -6,6 +6,10 @@ spring:
       # 서비스가 뜰 때 개발 DB 스키마를 엔티티에 맞춘다. 운영은 공통 기본값 none 이다
       ddl-auto: update
 
+store:
+  features:
+    international-shipping: true
+
 springdoc:
   api-docs:
     enabled: true

@@ -37,6 +37,7 @@ public interface ShippingPolicyMapper {
     @Mapping(target = "baseFeeCurrency", source = "baseFee.currency")
     @Mapping(target = "freeShippingThresholdAmount", source = "freeShippingThreshold.amount")
     @Mapping(target = "freeShippingThresholdCurrency", source = "freeShippingThreshold.currency")
+    @Mapping(target = "customsNotice", ignore = true)
     ShippingPolicyEntity toEntity(ShippingPolicy policy);
 
     @Mapping(target = "id", source = "remoteArea.id")

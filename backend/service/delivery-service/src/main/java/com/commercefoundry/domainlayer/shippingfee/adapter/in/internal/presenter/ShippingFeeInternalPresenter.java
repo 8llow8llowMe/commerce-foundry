@@ -17,6 +17,9 @@ public class ShippingFeeInternalPresenter {
             .remoteAreaName(quote.remoteAreaName())
             .freeShippingThreshold(MoneyItems.of(quote.freeShippingThreshold()))
             .shippingPolicyVersion(quote.shippingPolicyVersion())
+            .scope(quote.scope().name())
+            .shippingZoneName(quote.shippingZoneName())
+            .weightFee(MoneyItems.of(quote.weightFee()))
             .build();
     }
 }

@@ -30,8 +30,8 @@ public class ShippingPolicyRepositoryAdapter implements ShippingPolicyRepository
     private final ShippingPolicyMapper shippingPolicyMapper;
 
     @Override
-    public Optional<ShippingPolicy> findByScope(ShippingScope scope) {
-        return shippingPolicyRepository.findByScope(scope).map(this::toDomain);
+    public Optional<ShippingPolicy> findDomesticPolicy() {
+        return shippingPolicyRepository.findByScope(ShippingScope.DOMESTIC).map(this::toDomain);
     }
 
     /**
@@ -68,8 +68,11 @@ public class ShippingPolicyRepositoryAdapter implements ShippingPolicyRepository
         }
     }
 
-    /** 원인 체인의 Hibernate {@link ConstraintViolationException} 이 알려 준 제약 이름으로 판정한다. 이름을 모르면 충돌로 보지 않는다. */
-    private static boolean isDuplicatePolicy(DataIntegrityViolationException exception) {
+    /**
+     * 원인 체인의 Hibernate {@link ConstraintViolationException} 이 알려 준 제약 이름으로 판정한다. 이름을 모르면 충돌로 보지 않는다.
+     * 해외 정책 어댑터({@link InternationalShippingPolicyRepositoryAdapter})도 같은 정책 행을 만들므로 같은 판정을 쓴다.
+     */
+    static boolean isDuplicatePolicy(DataIntegrityViolationException exception) {
         for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
             if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null) {
                 String constraintName = violation.getConstraintName().toLowerCase(Locale.ROOT);
@@ -83,7 +86,7 @@ public class ShippingPolicyRepositoryAdapter implements ShippingPolicyRepository
         Money threshold = policy.freeShippingThreshold();
         int updated = shippingPolicyRepository.updateIfVersionMatches(
             policy.id(), policy.version(), policy.baseFee().amount(), policy.baseFee().currency(),
-            threshold == null ? null : threshold.amount(), threshold == null ? null : threshold.currency(), Instant.now()
+            threshold == null ? null : threshold.amount(), threshold == null ? null : threshold.currency(), null, Instant.now()
         );
         if (updated == 0) {
             throw new ObjectOptimisticLockingFailureException(ShippingPolicyEntity.class, policy.id());

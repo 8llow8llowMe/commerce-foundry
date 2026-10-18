@@ -25,6 +25,25 @@ public final class DeliveryValidationMessage {
     public static final String REMOTE_AREA_NAME_LENGTH = "DELIVERY_115:도서산간 구간 이름은 50자 이하여야 합니다.";
     public static final String SURCHARGE_REQUIRED = "DELIVERY_116:도서산간 추가 배송비(surcharge)는 필수입니다.";
     public static final String AMOUNT_MAX = "DELIVERY_117:금액(amount)은 100,000,000 이하여야 합니다.";
+    public static final String WEIGHT_GRAMS_REQUIRED = "DELIVERY_118:해외(KR 외) 배송 견적에는 weightGrams 가 필수입니다.";
+    public static final String WEIGHT_GRAMS_POSITIVE = "DELIVERY_119:weightGrams 는 1 이상이어야 합니다.";
+    public static final String INTERNATIONAL_POSTAL_CODE_FORMAT = "DELIVERY_120:해외 우편번호는 영문 · 숫자 · 공백 · 하이픈으로 20자 이하여야 합니다.";
+    public static final String CUSTOMS_NOTICE_LENGTH = "DELIVERY_121:관세 · 부가세 안내 문구는 1000자 이하여야 합니다.";
+    public static final String ZONES_REQUIRED = "DELIVERY_122:zones 는 1개 이상이어야 합니다.";
+    public static final String ZONES_SIZE_MAX = "DELIVERY_123:zones 는 최대 50개입니다.";
+    public static final String ZONE_REQUIRED = "DELIVERY_124:zones 에 null 원소를 넣을 수 없습니다.";
+    public static final String ZONE_NAME_REQUIRED = "DELIVERY_125:국가 그룹 이름은 필수입니다.";
+    public static final String ZONE_NAME_LENGTH = "DELIVERY_126:국가 그룹 이름은 50자 이하여야 합니다.";
+    public static final String ZONE_COUNTRY_CODES_REQUIRED = "DELIVERY_127:국가 그룹에는 국가(countryCodes)가 1개 이상 있어야 합니다.";
+    public static final String ZONE_COUNTRY_CODES_SIZE_MAX = "DELIVERY_128:국가 그룹의 국가(countryCodes)는 최대 250개입니다.";
+    public static final String ZONE_RATES_REQUIRED = "DELIVERY_129:국가 그룹에는 무게 구간(rates)이 1개 이상 있어야 합니다.";
+    public static final String ZONE_RATES_SIZE_MAX = "DELIVERY_130:국가 그룹의 무게 구간(rates)은 최대 100개입니다.";
+    public static final String ZONE_RATE_REQUIRED = "DELIVERY_131:rates 에 null 원소를 넣을 수 없습니다.";
+    public static final String MAX_WEIGHT_GRAMS_REQUIRED = "DELIVERY_132:무게 구간 상한(maxWeightGrams)은 필수입니다.";
+    public static final String MAX_WEIGHT_GRAMS_POSITIVE = "DELIVERY_133:무게 구간 상한(maxWeightGrams)은 1 이상이어야 합니다.";
+    public static final String MAX_WEIGHT_GRAMS_MAX = "DELIVERY_134:무게 구간 상한(maxWeightGrams)은 1,000,000 이하여야 합니다.";
+    public static final String RATE_FEE_REQUIRED = "DELIVERY_135:무게 구간 요금(fee)은 필수입니다.";
+    public static final String REMOTE_AREAS_NOT_ALLOWED = "DELIVERY_136:해외 배송비 정책에는 도서산간 구간(remoteAreas)을 둘 수 없습니다.";
 
     private DeliveryValidationMessage() {
     }

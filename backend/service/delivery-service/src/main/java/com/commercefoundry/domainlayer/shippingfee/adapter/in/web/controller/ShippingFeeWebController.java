@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.shippingfee.adapter.in.web.controller;
 
 import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.response.InternationalShippingPolicyResponse;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.response.ShippingPolicyResponse;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingFeeWebUseCase;
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,5 +34,18 @@ public class ShippingFeeWebController {
     @GetMapping("/policy")
     public ResponseEntity<Response<ShippingPolicyResponse>> getDomesticPolicy() {
         return ResponseEntity.ok().body(Response.success(shippingFeeWebUseCase.getDomesticPolicy()));
+    }
+
+    @Operation(
+        summary = "해외 배송비 정책 조회",
+        description = "기본료 · 무료배송 기준 · 관세 · 부가세 안내 문구 · 국가 그룹별 무게 요금표를 낸다. 해외 배송비 = 기본료 + 무게 요금이고, "
+            + "무게 요금은 상한이 무게 이상인 가장 작은 구간의 요금이다(상한 포함). 할인 후 상품 합계가 무료배송 기준 이상이면 둘 다 없다. "
+            + "금액의 통화는 정책 통화이고, 주문 통화가 다르면 주문할 수 없다(환산하지 않는다). "
+            + "해외 배송을 하지 않는 스토어이거나 정책이 아직 설정되지 않았으면 dataBody 가 null 이다. 로그인 없이 호출할 수 있다."
+    )
+    @PreAuthorize("permitAll()")
+    @GetMapping("/international-policy")
+    public ResponseEntity<Response<InternationalShippingPolicyResponse>> getInternationalPolicy() {
+        return ResponseEntity.ok().body(Response.success(shippingFeeWebUseCase.getInternationalPolicy()));
     }
 }
