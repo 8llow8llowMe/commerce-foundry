@@ -138,6 +138,7 @@ Info → Presenter → Response
 
 - `Info → Response`, `Info → Item` 변환만 담당한다. **식별자 `long → String` 변환 경계다.**
 - 금액 `Money → MoneyItem`, enum → metadata(`toMetadata()`) 변환도 Presenter 경계다. Processor · Info 는 `Money` · enum 그대로 둔다.
+- Processor 가 돌려준 domain model 을 조합·가공 없이 그대로 응답으로 바꿀 때는 Info 를 두지 않고 Presenter 가 domain model 을 받는다 (예: delivery-service `ShippingFeeWebPresenter`, #11).
 
 ### Port / Adapter
 
