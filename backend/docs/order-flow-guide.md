@@ -109,10 +109,80 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 - **조회 후 차감(read-modify-write)을 쓰지 않는다** — 동시 주문에서 초과 판매가 난다. 조건부 UPDATE 한 문장으로 한다.
   영향 행 수가 0 이면 재고 부족(`STOCK_INSUFFICIENT`)이다.
 - 선점 만료 시간은 **PG 결제 인증 제한 시간보다 길게** 잡는다 (결제창을 열어 둔 고객의 재고가 먼저 풀리지 않게).
-  기본값은 설정(`order.stock-reservation-ttl`)으로 둔다.
+  설정 키는 product-service 의 `stock.reservation.ttl` 이고 기본값 `30m` 은 **결제창 제한 시간을 확인하기 전 임시값**이다.
 - 해제·복원은 **멱등**이어야 한다. 선점 행의 상태로 이미 처리됐는지 판단한다 — 같은 해제가 두 번 오면 재고가 늘어난다.
 - 여러 SKU 를 선점할 때는 **SKU ID 오름차순**으로 처리한다 (교착 방지). 하나라도 실패하면 앞서 잡은 것을 해제한다.
 - 맞춤 제작 상품은 재고 무제한(`stock_managed = false`) 옵션을 둔다.
+
+### 3-1. 재고 데이터 (product-service, #10)
+
+| 테이블 | 내용 |
+|--------|------|
+| `stock` | SKU 와 1:1 (`sku_id` PK) — `stock_managed`, `available_quantity >= 0`. **행이 없는 SKU 는 품절**이다(닫힌 기본값). `@Version` 없음 — 모든 쓰기가 조건부 UPDATE |
+| `stock_reservation` | 주문 하나에 한 행 — `status`, `expires_at`, `confirmed_at` · `released_at` · `release_reason`, `@Version`. `active_order_id` 는 RESERVED · CONFIRMED 동안만 `order_id` 이고 RELEASED 면 null — 유니크 키가 **주문당 활성 선점을 하나**로 막는다 |
+| `stock_reservation_item` | 선점 × SKU — `quantity > 0`, `deducted`. 무제한 SKU 는 `deducted = false` 로 차감하지 않고 해제 때 되돌리지 않는다 |
+| `stock_adjustment_history` | 어드민 조정 이력 (append-only) |
+
+- 어드민 재고 조정(`PATCH /api/v1/admin/stocks/{skuId}`)은 수량 **절대값 + 기대 수량 CAS**(`expectedQuantity`) 다 — 그 사이 주문이 차감했으면 409 `PRODUCT_020`.
+  재고 행이 없는 SKU 의 첫 등록은 INSERT 이고, 동시 첫 등록은 PK 충돌로 409 다.
+
+### 3-2. 서비스 간 API (호출자 order-service)
+
+| 경로 | 동작 |
+|------|------|
+| `POST /internal/v1/stock-reservations` | 선점 — 요청 `{ orderId, items: [{ skuId, quantity }] }` (항목 1~100개) |
+| `POST /internal/v1/stock-reservations/{reservationId}/confirmation` | 확정 (결제 완료) |
+| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (결제 전 취소 · 주문 생성 실패) |
+
+응답은 셋 다 같은 모양이고 신규 · 기존 모두 200 이다 —
+`{ reservationId: String, orderId: String, status, expiresAt(UTC ISO-8601), items: [{ skuId: String, quantity, deducted }] }`. 항목은 SKU 아이디 오름차순이다.
+
+선점 처리 순서 (Facade 트랜잭션 하나, 기본 격리 READ COMMITTED):
+
+1. 같은 `skuId` 는 수량을 합치고 SKU 아이디 오름차순으로 놓는다.
+2. 같은 주문의 활성 선점이 있으면 — SKU 별 수량이 같으면 그 선점을 그대로 200(멱등), 다르면 409 `PRODUCT_023`.
+3. SKU · 상품(숨김 포함)을 in 절로 읽어 판매 가능 조건(상품 노출 · 판매중 && SKU 판매중 — internal SKU 조회의 `purchasable` 과 같은 규칙에서 재고만 뺀 것)을
+   확인한다. 없는 SKU · 숨긴 상품 · 판매 종료는 모두 모아 409 `PRODUCT_022`.
+4. 재고 행을 in 절로 읽어 항목의 `deducted` 를 정한다 — 무제한이면 false, 관리 중이거나 **행이 없으면(품절) true**.
+5. 선점 헤더(RESERVED, `expires_at = now + ttl`) · 항목을 INSERT 하고 flush — 같은 주문의 동시 생성은 유니크 키 위반으로 409 `PRODUCT_026`.
+6. `deducted` 항목을 SKU 오름차순으로 조건부 차감한다. 0행(부족 · 행 없음)이어도 끝까지 돌려 부족한 SKU 를 모두 모은 뒤 409 `PRODUCT_021`("…: [1001, 1003]") —
+   **예외가 같은 트랜잭션을 롤백해 앞서 차감한 재고와 선점 행이 함께 사라진다(전체 해제)**. 따로 보상 해제를 부르지 않는다.
+
+### 3-3. 선점 상태 전이
+
+```text
+RESERVED ──확정──▶ CONFIRMED
+   └──────해제 · 만료──▶ RELEASED (release_reason = RELEASED_BY_CALLER / EXPIRED)
+```
+
+| 현재 | confirm | release |
+|------|---------|---------|
+| `RESERVED` (만료 시각 전 · 후, 스케줄러가 풀기 전 모두) | `CONFIRMED` 200 | `RELEASED` + 재고 복원 200 |
+| `CONFIRMED` | 200 (그대로) | 409 `PRODUCT_024` |
+| `RELEASED` | 409 `PRODUCT_025` | 200 (그대로) |
+| 없음 | 404 `PRODUCT_003` | 404 `PRODUCT_003` |
+| 동시 변경 (`@Version`) | 409 `PRODUCT_026` | 409 `PRODUCT_026` |
+
+- 전이는 도메인 `StockReservation.confirm(now)` · `release(now, reason)` 만 한다. 상태를 저장(merge · 버전 검사 · flush)한 **뒤** `deducted` 항목을 SKU 오름차순으로
+  복원한다 — 같은 해제가 동시에 와도 버전에서 진 쪽은 복원까지 가지 않아 재고가 한 번만 늘어난다.
+- 만료 스케줄러(`StockReservationExpiryScheduler`)는 `stock.reservation.expiry-sweep.*`(기본 fixed-delay 60s · batch-size 100 · max-batches-per-run 10) 주기로
+  `RESERVED && expires_at <= now` 를 만료 시각 순으로 읽고, **건마다 트랜잭션**으로 다시 읽어 아직 만료 대상일 때만 `release(EXPIRED)` + 복원한다.
+  한 건의 실패 · 409 는 로그만 남기고 다음 건으로 간다. 확정과 만료가 겹치면 `@Version` 이 하나만 통과시킨다. 인스턴스가 여럿이어도 분산 락을 두지 않는다.
+- **만료 후 확정** — 스케줄러가 먼저 풀었으면 확정은 409 `PRODUCT_025` 다. order-service 는 같은 주문으로 **다시 선점**한다(해제된 주문은 활성 유니크 키에 걸리지 않는다).
+  재선점이 재고 부족이면 결제를 전액 취소한다 (`payment-guide.md` §6).
+
+| 코드 | HTTP | 뜻 |
+|------|------|----|
+| `PRODUCT_003` | 404 | 없는 재고 선점 |
+| `PRODUCT_021` | 409 | 재고 부족 (행 없는 SKU 포함) — 메시지에 SKU 아이디 목록 |
+| `PRODUCT_022` | 409 | 판매 불가 SKU (없는 SKU · 숨긴 상품 · 판매 종료) — 메시지에 SKU 아이디 목록 |
+| `PRODUCT_023` | 409 | 같은 주문의 활성 선점과 항목이 다르다 |
+| `PRODUCT_024` | 409 | 이미 확정된 선점의 해제 |
+| `PRODUCT_025` | 409 | 이미 해제 · 만료된 선점의 확정 |
+| `PRODUCT_026` | 409 | 동시 변경(`@Version`) · 같은 주문의 동시 선점 생성 — 다시 시도한다 |
+| `PRODUCT_112`~`PRODUCT_121` | 400 | 요청 검증 (`ProductValidationMessage`) |
+
+- **결제 후 취소 · 반품의 재고 복원**(위 표의 "복원")은 이 API 범위 밖이다 — 확정된 선점은 해제하지 않는다. 후속 이슈에서 다룬다.
 
 ## 4. 배송
 

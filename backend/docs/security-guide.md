@@ -439,9 +439,9 @@ internal 컨트롤러의 **모든 핸들러 메서드**에 허용 호출자를 �
 
 ```java
 @PreAuthorize("hasAuthority('SERVICE_order-service')")
-@PostMapping("/internal/v1/stocks/reservations")
+@PostMapping("/internal/v1/stock-reservations")
 public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @Valid StockReservationRequest request) {
-    return ResponseEntity.ok().body(Response.success(stockInternalUseCase.reserve(request)));
+    return ResponseEntity.ok().body(Response.success(stockInternalUseCase.reserve(request.toCommand())));
 }
 ```
 
