@@ -454,16 +454,30 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 | `cart-write` | 그 밖의 `/api/v1/carts/**` 쓰기 (POST · PUT · PATCH · DELETE) | 분당 60회 · 순간 20회 |
 | `order-write` | `/api/v1/orders/**` 쓰기 | 분당 12회 · 순간 5회 |
 
-- **키는 검증된 회원 id 다** — `request_rate_limiter.{<정책>.<정책>:member:<memberId>}.tokens` · `.timestamp`(Spring Cloud Gateway `RedisRateLimiter` 의 토큰 버킷,
-  `coding-conventions.md` §9-7). 내부 Snowflake id 만 들어가고 이메일 · IP 같은 개인정보는 넣지 않는다. 요청 하나는 처음 맞는 정책 하나에만 걸리고 정책마다 버킷이 따로다.
-- **토큰 없는 요청은 세지 않는다.** 대상 API 가 모두 `isAuthenticated()` 라 서비스가 401 로 끊고 쓰기가 일어나지 않는다. 조회(GET) · 어드민 경로 · preflight 는 세지 않는다.
-  **비로그인으로 쓰는 API(비회원 주문 등)를 대상 경로에 더하는 PR 은 IP 단위 제한(#89 — 신뢰할 프록시 목록 · IP 원문 없는 키)을 먼저 끝낸다.**
-  그 전에 열면 익명 요청이 제한 없이 서비스에 닿는다.
-- **로그인 · 회원가입 시도 제한은 auth-service 가 맡는다(#66)** — 계정 잠금처럼 회원 상태와 묶여 있어 게이트웨이가 아니라 소유 서비스가 판정한다. 게이트웨이 정책에 넣지 않는다.
+- **주체는 둘이다** — 로그인한 요청은 검증된 회원 id, 토큰 없는 요청은 클라이언트 IP 의 HMAC(#89). 같은 정책 한도를 쓰되 버킷이 따로다.
+  키는 `request_rate_limiter.{<정책>.<정책>:member:<memberId>}` · `request_rate_limiter.{<정책>.<정책>:ip:<HMAC>}` 의 `.tokens` · `.timestamp`(Spring Cloud Gateway `RedisRateLimiter` 의 토큰 버킷,
+  `coding-conventions.md` §9-7). 내부 Snowflake id 또는 IP 의 HMAC 만 들어가고 **이메일 · IP 원문 같은 개인정보는 넣지 않는다.** 요청 하나는 처음 맞는 정책 하나에만 걸린다.
+  조회(GET) · 어드민 경로 · preflight 는 세지 않는다.
+- **비로그인 정책은 최소다.** 지금은 비로그인 쓰기 API 가 없어 새 경로를 열지 않고, 위 정책을 토큰 없는 요청에도 IP 로 적용하는 것만 한다 —
+  대상 API 가 모두 `isAuthenticated()` 라 정상 사용자는 영향이 없고(어차피 401), 401 을 노리는 익명 폭주가 서비스에 닿는 양만 줄인다.
+  **비로그인으로 쓰는 API(비회원 주문 등)를 만들면 그 경로 · 한도를 `RateLimitPolicy` 에 더한다.** 한 IP 뒤 여러 사용자(회사 · 통신사 NAT)를 고려해 한도를 정한다.
+- **클라이언트 IP 는 클라이언트가 바꿀 수 없는 값으로만 정한다** (`ClientIpResolver`).
+  - 신뢰 프록시(`gateway.client-ip.trusted-proxies` — `GATEWAY_TRUSTED_PROXIES`, 주소 · CIDR 콤마 목록)가 **비면(기본) `X-Forwarded-For` 를 무시하고 소켓의 원격 주소**를 쓴다.
+    LB · CDN 구성(`service-inventory.md` §5)이 정해지면 **우리가 운영하는 LB 의 대역만** 넣는다. 공용 CDN 처럼 남도 쓰는 대역을 넣으면 그 안의 누구나
+    `X-Forwarded-For` 를 정해 버킷을 바꾸거나 남의 버킷을 소진시킨다. 그래서 IPv4 /8 · IPv6 /32 보다 넓은 대역은 기동에서 거부한다.
+  - 원격 주소가 신뢰 프록시면 `X-Forwarded-For` 를 **오른쪽부터** 읽어 신뢰 프록시를 건너뛴 첫 주소를 쓴다. 맨 왼쪽은 클라이언트가 마음대로 넣는 값이라 쓰지 않는다.
+    헤더가 없거나 · 전부 신뢰 프록시이거나 · 주소가 아닌 값(호스트 이름 · 포트 · 대괄호)을 만나면 프록시 주소를 쓴다(그 프록시 뒤가 한 버킷 — 닫힌 쪽). 이름은 DNS 로 찾지 않는다.
+  - 프레임워크가 전달 헤더로 원격 주소를 바꾸지 않게 `server.forward-headers-strategy: none` 을 명시한다(클라우드 플랫폼을 감지하면 Boot 기본값이 바뀐다). `Forwarded`(RFC 7239)는 보지 않는다.
+- **IP 는 HMAC-SHA256 으로 바꿔 키에 넣는다** (`ClientIpHasher`, 앞 16바이트 base64url 22자). 키는 `GATEWAY_CLIENT_IP_HASH_KEY`(Vault, base64 32바이트 이상,
+  게이트웨이 인스턴스 전부 같은 값) — 키 없는 해시는 IPv4 공간을 전수 대입하면 되돌릴 수 있다. 비었거나 짧거나 풀리지 않으면 기동하지 않는다.
+  키를 바꾸면 진행 중인 비로그인 버킷이 새로 시작될 뿐 다른 영향은 없다 — 롤링 배포 중에는 인스턴스마다 키가 달라 한도가 잠시 최대 두 배가 될 수 있다.
+  로그에도 IP 원문 대신 HMAC 을 남긴다. **IPv6 는 /64 로 묶어** 센다 — 한 가입자가 보통 /64 를 받아 그 안에서 주소를 바꿔 가며 새 버킷을 얻을 수 있어서다.
+- **로그인 · 회원가입 시도 제한은 auth-service 가 맡는다(#66)** — 계정 잠금처럼 회원 상태와 묶여 있어 게이트웨이가 아니라 소유 서비스가 판정한다.
+  게이트웨이 정책에 `/api/v1/auth/**` 를 넣지 않는다. 그 시도 제한이 IP 를 쓰게 되면 같은 신뢰 프록시 규칙(이 절)을 따른다.
 - 한도를 넘으면 하류로 보내지 않고 **429 `GATEWAY_006`** + `Retry-After`(초, 요청 한 번만큼 버킷이 다시 차는 시간의 근사)로 답한다. CORS 헤더는 실린다(보안 체인 뒤라서).
   프레임워크의 `X-RateLimit-*` 헤더는 내보내지 않는다.
 - **Redis 장애 · 응답 없음이면 통과(fail-open)** 한다 — 제한은 남용 완화 수단이라 장애가 쇼핑 장애가 되지 않게 한다(차단 목록 일반 경로와 같은 판단, §7-1).
-  `RedisRateLimiter` 는 명령 오류를 스스로 허용으로 바꾸고 남은 토큰을 `-1` 로 알린다 — `RedisMemberRateLimiter` 가 그 신호를 장애로 바꾸고, 응답 없는 명령은
+  `RedisRateLimiter` 는 명령 오류를 스스로 허용으로 바꾸고 남은 토큰을 `-1` 로 알린다 — `RedisBucketRateLimiter` 가 그 신호를 장애로 바꾸고, 응답 없는 명령은
   2초 상한(`GatewayRateLimitFilter.CHECK_TIMEOUT`)이 끊는다. warn 은 1분에 한 번만 남기고, 프레임워크의 요청마다 쌓이는 error 로그는 yml 에서 끈다.
   응답 없는 Redis 에서는 대상 요청마다 최대 약 1~2초 늦어진다(차단 목록 조회와 같다). 장애 동안은 회원 한 명의 쓰기가 제한 없이 서비스에 닿는다.
 - 한도는 yml 로만 바꾼다(`requests-per-minute` 는 60 의 약수 또는 배수, `burst` ≥ 1 — 어긋나면 기동하지 않는다). 대상 경로를 바꾸려면 `RateLimitPolicy` 를 고친다.
