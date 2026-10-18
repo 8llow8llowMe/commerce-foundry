@@ -110,6 +110,28 @@ describe('createProxyHandler', () => {
     expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'ORDER_001' } });
   });
 
+  it('429 는 재발급·재시도 없이 Retry-After 와 함께 그대로 중계하고 쿠키를 건드리지 않는다', async () => {
+    const upstream = envelope(429, false, null, 'GATEWAY_006');
+    upstream.headers.set('retry-after', '3');
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(upstream);
+    const handler = createProxyHandler({ gatewayUrl: GATEWAY, cookies: COOKIES, fetch: fetchImpl });
+
+    const res = await handler(
+      request('/api/v1/carts/me/items', {
+        method: 'POST',
+        body: '{}',
+        headers: { 'sec-fetch-site': 'same-origin' },
+        cookie: 'cf_at=access-1; cf_rt=refresh-1',
+      }),
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('3');
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'GATEWAY_006' } });
+  });
+
   it('401 이면 재발급 후 새 토큰으로 한 번 재시도하고 새 쿠키를 심는다', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       if (urlOf(input).endsWith(REISSUE_PATH)) {
