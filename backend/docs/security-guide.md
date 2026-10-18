@@ -143,6 +143,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
   그 뒤로는 원문 경로와 정규화 경로가 같다. `/internal` 과 그 아래는 **같은 필터가 명시적으로 404 `GATEWAY_001`** 로 끊는다(#65) —
   매핑 없는 경로와 같은 응답이라 존재를 드러내지 않고, 토큰 검증 · 차단 목록 조회 전에 끝나며, 대소문자 · 비예약 문자 인코딩(`/%69nternal`)도 같은 경로로 본다.
   라우트(`ServiceRoute`)에도 `/internal` 은 없다 — 라우트 부재가 두 번째 방어다.
+  가드는 CORS 필터보다 앞이라 **가드가 거절한 응답(400 · 405 · 이 404)에는 CORS 헤더가 없다** — preflight 도 같다. 정상 프론트는 이런 요청을 만들지 않는다.
 - 그래서 규칙은 둘이다. 게이트웨이 라우트 predicate 는 `/internal` 을 포함할 수 있는 패턴(`/**` 같은 catch-all)을 쓰지 않는다.
   경로를 바꾸는 필터(`StripPrefix` · `RewritePath` · `SetPath`)는 **와일드카드 없는 고정 경로 라우트에만** 쓴다 — 바뀐 경로도 고정값이라
   `/internal` · `/api/v1/admin` 이 만들어질 수 없다. 예: local · dev 전용 `GatewayDevRouteConfig`(`/health/{service-id}` · `/docs/{service-id}/v3/api-docs/{group}`).
