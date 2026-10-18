@@ -126,6 +126,9 @@ public enum OrderErrorCode {
 
 - 생성자는 `(errorCode)` 필수, 필요 시 `(errorCode, Object... args)`(메시지의 `%s` 채움), `(errorCode, Throwable cause)`.
   **임의 문자열을 잇는 `(errorCode, String detail)` 은 만들지 않는다.**
+- **domain 은 application(예외 포함)을 import 하지 않는다. 업무 오류 코드는 Processor 가 붙인다** — 도메인 규칙 위반은 domain 소유 예외(현재 상태 · 시도한 동작을
+  싣는다)나 결과 값으로 알리고, Processor 가 받아 `{Domain}Exception` 으로 바꾼다. 바꾸지 않고 흘리면 500 이다.
+  예: product-service `StockReservationTransitionException` → `StockReservationProcessor` 가 `PRODUCT_024` · `PRODUCT_025` (#10).
 - 한 서비스에 advice 가 둘 이상이면 좁은 범위 advice 에 `@Order` 를 붙여 우선순위를 확정한다.
 - 도메인 `*ExceptionHandler` 는 `Exception` · `RuntimeException` 을 통째로 잡지 않는다. 보안 예외(`@PreAuthorize` 거부)는
   security-core 의 advice 가 처리한다 — 통째로 잡으면 403 이 500 이 될 수 있다 (`security-guide.md` §5-2).
@@ -163,6 +166,10 @@ public final class ProductValidationMessage {
   **컨트롤러 클래스에 `@Validated` 를 달지 않는다** — 달면 AOP 검증으로 바뀌어 `ConstraintViolationException` 이 나고,
   도메인 핸들러가 받지 않으면 봉투 없는 500 이 된다. 필수 파라미터 누락(`MissingServletRequestParameterException`)은
   `ValidationErrorSupport.toMissingParameterResponse(exception.getParameterName(), {DOMAIN}_199)` 로 답한다.
+- **제약 붙은 경로 변수 · 쿼리 파라미터와 `@RequestBody @Valid` 가 한 메서드에 함께 있으면** Spring 이 본문 검증까지 메서드 검증으로 묶어
+  `HandlerMethodValidationException` 으로 낸다 — 그대로 `ValidationErrorSupport` 에 넘기면 본문 필드명이 파라미터 이름(`request`)으로 뭉개진다.
+  도메인 핸들러가 bean 결과가 있을 때 `MethodArgumentNotValidException` 모양(필드명 · record 선언 순서)으로 옮기고 파라미터 오류를 함께 싣는다.
+  예: product-service `ProductExceptionHandler` · `PATCH /api/v1/admin/stocks/{skuId}` (#10).
 - 한 필드의 여러 오류는 순서를 고정한다: 필드 선언 순서 → 필수 → 길이 → 범위 → 형식.
 - 컬렉션 원소는 `@NotNull` 과 값 제약을 쌍으로 건다 — `List<@Positive Long>` 만 걸면 `[null]` 이 통과한다.
 
@@ -193,7 +200,7 @@ public final class ProductValidationMessage {
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.
-  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity`.
+  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity` · `StockAdjustmentHistoryEntity`.
 - 유니크 키 위반 · 버전 충돌을 도메인 오류(409)로 바꿔야 하는 저장은 어댑터에서 `saveAndFlush` 로 바로 내보내고 그 자리에서 바꾼다 —
   커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 바꿀 자리가 없다. 제약은 예외 메시지가 아니라 Hibernate 가 준 제약 이름으로 가린다 (예: auth `MemberRepositoryAdapter`).
 

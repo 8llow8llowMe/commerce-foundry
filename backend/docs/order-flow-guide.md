@@ -126,11 +126,21 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 - 어드민 재고 조정(`PATCH /api/v1/admin/stocks/{skuId}`)은 수량 **절대값 + 기대 수량 CAS**(`expectedQuantity`) 다 — 그 사이 주문이 차감했으면 409 `PRODUCT_020`.
   재고 행이 없는 SKU 의 첫 등록은 INSERT 이고, 동시 첫 등록은 PK 충돌로 409 다.
 
+#### 어드민 조정 운영 규칙
+
+- **`availableQuantity`(요청의 `quantity`)는 선점분을 뺀 판매 가능 수량이다 — 실물 수량이 아니다.** 응답의 `reservedQuantity` 는 그 SKU 의
+  RESERVED 선점 중 실제로 차감한(`deducted = true`) 수량 합이다. **실사 수량을 입력할 때는 `quantity = 실물 − reservedQuantity`** 로 보낸다.
+  실물을 그대로 넣으면 결제 대기 중인 선점분만큼 초과 판매된다. 결제 완료(CONFIRMED) 뒤 아직 출고하지 않은 수량도 실물에 있으므로 함께 빼야 한다 —
+  배송 연동 전까지는 운영자가 확인한다. `reservedQuantity` 는 응답 순간의 참고치이고 CAS 판정에는 쓰지 않는다.
+- **무제한 → 관리 전환 직후의 선점** — 무제한일 때 만든 선점은 항목이 `deducted = false` 다. 그 선점이 RESERVED 로 남아 있는 동안 관리로 바꾸면,
+  그 선점은 재고를 차감하지 않은 채 확정될 수 있다(확정은 재고를 다시 보지 않는다). 전환할 때는 **그 SKU 의 결제 대기 주문이 끝난 뒤(최대 `stock.reservation.ttl`)
+  실사 수량을 다시 맞춘다.** 반대로 관리 → 무제한 전환 뒤 풀리는 선점은 차감했던 수량을 무제한 SKU 에 되돌린다 — 판매 판정에는 영향이 없다.
+
 ### 3-2. 서비스 간 API (호출자 order-service)
 
 | 경로 | 동작 |
 |------|------|
-| `POST /internal/v1/stock-reservations` | 선점 — 요청 `{ orderId, items: [{ skuId, quantity }] }` (항목 1~100개) |
+| `POST /internal/v1/stock-reservations` | 선점 — 요청 `{ orderId, items: [{ skuId, quantity }] }` (항목 1~100개, 수량 1~10000) |
 | `POST /internal/v1/stock-reservations/{reservationId}/confirmation` | 확정 (결제 완료) |
 | `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (결제 전 취소 · 주문 생성 실패) |
 
@@ -143,10 +153,14 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 2. 같은 주문의 활성 선점이 있으면 — SKU 별 수량이 같으면 그 선점을 그대로 200(멱등), 다르면 409 `PRODUCT_023`.
 3. SKU · 상품(숨김 포함)을 in 절로 읽어 판매 가능 조건(상품 노출 · 판매중 && SKU 판매중 — internal SKU 조회의 `purchasable` 과 같은 규칙에서 재고만 뺀 것)을
    확인한다. 없는 SKU · 숨긴 상품 · 판매 종료는 모두 모아 409 `PRODUCT_022`.
-4. 재고 행을 in 절로 읽어 항목의 `deducted` 를 정한다 — 무제한이면 false, 관리 중이거나 **행이 없으면(품절) true**.
-5. 선점 헤더(RESERVED, `expires_at = now + ttl`) · 항목을 INSERT 하고 flush — 같은 주문의 동시 생성은 유니크 키 위반으로 409 `PRODUCT_026`.
-6. `deducted` 항목을 SKU 오름차순으로 조건부 차감한다. 0행(부족 · 행 없음)이어도 끝까지 돌려 부족한 SKU 를 모두 모은 뒤 409 `PRODUCT_021`("…: [1001, 1003]") —
-   **예외가 같은 트랜잭션을 롤백해 앞서 차감한 재고와 선점 행이 함께 사라진다(전체 해제)**. 따로 보상 해제를 부르지 않는다.
+4. 선점 **헤더만** INSERT 하고 flush 한다(RESERVED, `expires_at = now + ttl`) — 같은 주문의 동시 생성은 유니크 키에서 먼저 커밋된 쪽을 기다렸다가
+   409 `PRODUCT_026` 로 끝나 **재고를 건드리지 않는다**. 차감을 먼저 하면 재고가 빠듯할 때 중복 요청이 409 대신 `PRODUCT_021` 을 받는다.
+5. **모든 항목**에 SKU 오름차순으로 조건부 차감(`stock_managed = true and available_quantity >= qty`)을 시도한다. 1행이면 `deducted = true`.
+6. 0행인 SKU 만 재고 행을 in 절로 **다시 읽는다**(같은 트랜잭션, READ COMMITTED 라 최신 커밋 값). 무제한이면 `deducted = false` 로 선점하고,
+   관리 중 부족이거나 **행이 없으면(품절)** 부족이다. 차감 여부를 미리 읽은 스냅숏으로 정하지 않는다 — 읽은 뒤 어드민이 관리 여부를 바꾸면
+   관리 SKU 를 차감 없이 선점하거나 무제한 SKU 를 부족으로 거절한다(TOCTOU).
+7. 부족한 SKU 가 하나라도 있으면 모두 모아 409 `PRODUCT_021`("…: [1001, 1003]") — **예외가 같은 트랜잭션을 롤백해 앞서 차감한 재고와 헤더가 함께 사라진다(전체 해제)**.
+   따로 보상 해제를 부르지 않는다. 없으면 `deducted` 가 정해진 항목을 INSERT 한다.
 
 ### 3-3. 선점 상태 전이
 
@@ -166,10 +180,14 @@ RESERVED ──확정──▶ CONFIRMED
 - 전이는 도메인 `StockReservation.confirm(now)` · `release(now, reason)` 만 한다. 상태를 저장(merge · 버전 검사 · flush)한 **뒤** `deducted` 항목을 SKU 오름차순으로
   복원한다 — 같은 해제가 동시에 와도 버전에서 진 쪽은 복원까지 가지 않아 재고가 한 번만 늘어난다.
 - 만료 스케줄러(`StockReservationExpiryScheduler`)는 `stock.reservation.expiry-sweep.*`(기본 fixed-delay 60s · batch-size 100 · max-batches-per-run 10) 주기로
-  `RESERVED && expires_at <= now` 를 만료 시각 순으로 읽고, **건마다 트랜잭션**으로 다시 읽어 아직 만료 대상일 때만 `release(EXPIRED)` + 복원한다.
-  한 건의 실패 · 409 는 로그만 남기고 다음 건으로 간다. 확정과 만료가 겹치면 `@Version` 이 하나만 통과시킨다. 인스턴스가 여럿이어도 분산 락을 두지 않는다.
-- **만료 후 확정** — 스케줄러가 먼저 풀었으면 확정은 409 `PRODUCT_025` 다. order-service 는 같은 주문으로 **다시 선점**한다(해제된 주문은 활성 유니크 키에 걸리지 않는다).
-  재선점이 재고 부족이면 결제를 전액 취소한다 (`payment-guide.md` §6).
+  `RESERVED && expires_at <= now` 를 `(expires_at, id)` 순으로 읽고(`idx_stock_reservation_status_expires_at_id`), **건마다 트랜잭션**으로 다시 읽어
+  아직 만료 대상일 때만 `release(EXPIRED)` + 복원한다. 한 실행 안에서는 배치의 마지막 건 다음부터 이어 읽는다(keyset) — 실패한 건이 RESERVED 로 남아도
+  같은 실행이 그 건으로 배치를 다시 채우지 않는다(head-of-line blocking 없음). 실패한 건은 다음 실행이 다시 읽는다.
+  한 건의 실패는 로그만 남기고 다음 건으로 간다 — 409 `PRODUCT_026`(확정 · 다른 인스턴스와 경합)은 WARN, 그 밖의 업무 오류 · 예상 못 한 예외는 ERROR 이고
+  업무 오류면 오류 코드를 남긴다. 확정과 만료가 겹치면 `@Version` 이 하나만 통과시킨다. 인스턴스가 여럿이어도 분산 락을 두지 않는다.
+- **만료 후 확정** — 스케줄러가 먼저 풀었으면 확정은 409 `PRODUCT_025` 다. order-service 의 처리는 아래 §3-4 를 따른다.
+- 허용 전이 표 밖의 요청은 도메인이 `StockReservationTransitionException`(현재 상태 · 시도한 동작)으로 알리고, `StockReservationProcessor` 가
+  `PRODUCT_024` · `PRODUCT_025` 를 붙인다 — domain 은 application 의 오류 코드를 모른다 (`coding-conventions.md` §8-1).
 
 | 코드 | HTTP | 뜻 |
 |------|------|----|
@@ -180,9 +198,25 @@ RESERVED ──확정──▶ CONFIRMED
 | `PRODUCT_024` | 409 | 이미 확정된 선점의 해제 |
 | `PRODUCT_025` | 409 | 이미 해제 · 만료된 선점의 확정 |
 | `PRODUCT_026` | 409 | 동시 변경(`@Version`) · 같은 주문의 동시 선점 생성 — 다시 시도한다 |
-| `PRODUCT_112`~`PRODUCT_121` | 400 | 요청 검증 (`ProductValidationMessage`) |
+| `PRODUCT_112`~`PRODUCT_123` | 400 | 요청 검증 (`ProductValidationMessage`) — 선점 수량 상한 `PRODUCT_122`, 어드민 조정 경로의 `skuId` 양수 `PRODUCT_123` |
 
 - **결제 후 취소 · 반품의 재고 복원**(위 표의 "복원")은 이 API 범위 밖이다 — 확정된 선점은 해제하지 않는다. 후속 이슈에서 다룬다.
+
+### 3-4. order-service 호출 규칙
+
+- **주문을 PAID 로 확정하기 전에 선점 확정(`/confirmation`)의 200 · `CONFIRMED` 응답을 받아야 한다.** 확정 응답 없이 PAID 로 두면 만료 스케줄러가 선점을 풀어
+  돈은 받았는데 재고는 다른 주문에 팔린다. 결제 완료 알림이 다시 와도(웹훅 재전송 · 재조회) 확정을 **멱등으로 다시 부른다** — 이미 CONFIRMED 면 200 이다.
+- **만료 후 확정(409 `PRODUCT_025`)** — 같은 `orderId` 로 다시 선점하고(해제된 주문은 활성 유니크 키에 걸리지 않는다) **곧바로 같은 흐름에서 확정**한다.
+  재선점과 확정 사이를 비우면 새 선점도 `ttl` 뒤 다시 만료돼 같은 경합이 되풀이된다. 재선점이 `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면
+  결제를 전액 취소한다 (`payment-guide.md` §6).
+- **409 는 `resultCode` 로 분기한다.** `PRODUCT_026`(동시 변경 · 동시 생성)만 재시도 대상이고 **새 트랜잭션(새 요청)** 으로 다시 부른다 — 다시 부르면 바뀐 상태를
+  기준으로 답한다. `PRODUCT_021` · `PRODUCT_022` · `PRODUCT_023` · `PRODUCT_024` · `PRODUCT_025` 는 재시도해도 결과가 같은 종결 오류다.
+- **409 를 같은 트랜잭션 안에서 잡고 계속하지 않는다.** product-service 안에서도 어댑터가 409 로 바꾼 시점에는 flush 가 이미 실패해 트랜잭션이 rollback-only 다 —
+  잡고 계속하면 커밋에서 실패한다. order-service 도 Feign 409 를 받은 트랜잭션에서 주문 상태를 바꾸고 재시도까지 하지 말고, 재시도는 새 트랜잭션에서 한다.
+- **확정 · 해제는 `reservationId` 하나로 식별한다** — 서비스 토큰(`SERVICE_order-service`)을 가진 호출자를 신뢰한다는 전제다. order-service 는 자기 주문의
+  `reservationId` 만 저장 · 사용한다.
+- **오류 메시지를 고객 응답에 그대로 넘기지 않는다.** `PRODUCT_021` · `PRODUCT_022` 메시지에는 SKU 아이디 목록이 실린다 — order-service 는 자기 오류 코드
+  (예: `ORDER_*`)와 고객용 문구로 바꾸고, 필요한 SKU 정보는 자기 주문 항목에서 골라 보여 준다.
 
 ## 4. 배송
 
