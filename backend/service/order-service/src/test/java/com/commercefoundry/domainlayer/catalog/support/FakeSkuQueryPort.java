@@ -1,7 +1,7 @@
-package com.commercefoundry.domainlayer.cart.support;
+package com.commercefoundry.domainlayer.catalog.support;
 
-import com.commercefoundry.domainlayer.cart.application.port.out.SkuQueryPort;
-import com.commercefoundry.domainlayer.cart.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.application.port.out.SkuQueryPort;
+import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;

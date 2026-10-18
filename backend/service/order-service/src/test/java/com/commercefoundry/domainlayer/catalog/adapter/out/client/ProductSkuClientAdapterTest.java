@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.cart.adapter.out.client;
+package com.commercefoundry.domainlayer.catalog.adapter.out.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -11,11 +11,11 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.ProductSkuClient;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.dto.ProductSkuInternalItem;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.dto.ProductSkuInternalResponse;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.support.ProductInternalResponseSupport;
-import com.commercefoundry.domainlayer.cart.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.ProductSkuClient;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalItem;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalResponse;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.support.ProductInternalResponseSupport;
+import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.List;
 import java.util.stream.LongStream;

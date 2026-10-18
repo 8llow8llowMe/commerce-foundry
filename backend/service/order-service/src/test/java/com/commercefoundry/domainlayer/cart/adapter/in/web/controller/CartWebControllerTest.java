@@ -21,6 +21,8 @@ import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
 import com.commercefoundry.domainlayer.cart.application.exception.CartException;
 import com.commercefoundry.domainlayer.cart.application.port.in.CartWebUseCase;
 import com.commercefoundry.domainlayer.cart.domain.model.CustomOption;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.TestTokens;
@@ -241,6 +243,17 @@ class CartWebControllerTest {
             given(cartWebUseCase.addItem(anyLong(), any())).willThrow(new CartException(errorCode, 50));
 
             assertFailure(post("/api/v1/carts/me/items", "{\"skuId\":1,\"quantity\":1}"), HttpStatus.valueOf(status), code);
+        }
+
+        @Test
+        @DisplayName("catalog 의 SKU 조회 실패(CATALOG_001)는 장바구니 계약대로 CART_008(503) 로 나간다")
+        void catalogFailureIsTranslated() {
+            given(cartWebUseCase.addItem(anyLong(), any())).willThrow(new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE));
+
+            MvcTestResult result = post("/api/v1/carts/me/items", "{\"skuId\":1,\"quantity\":1}");
+
+            assertFailure(result, HttpStatus.SERVICE_UNAVAILABLE, "CART_008");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE.getMessage());
         }
 
         @Test
