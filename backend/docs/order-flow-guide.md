@@ -90,6 +90,22 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 | 병합 | 로그인 직후 로컬 장바구니를 한 번 보낸다(최대 50개, 오래 전에 담은 것부터 — 새 줄은 요청 순서로 아이디가 커져 나중 항목이 위에 보인다). 담을 수 없는 항목은 **항목 단위로** 건너뛰어 `skippedItems: [{index, skuId, reason}]` 로 알린다 — reason 은 `SKU_NOT_FOUND` · `NOT_PURCHASABLE` · `CUSTOM_OPTION_NOT_ALLOWED` · `LINE_LIMIT_EXCEEDED` · `QUANTITY_LIMIT_EXCEEDED`(1회 주문 최대 수량 0) 순으로 판정한다. 같은 SKU 라도 항목마다 따로 판정한다. 같은 줄은 더한 뒤 상한에서 자른다(거절하지 않는다, 이미 넘은 줄을 줄이지 않는다). **멱등하지 않다** — 재전송하면 한 번 더 더해진다. 결제 · 재고와 무관하고 상한이 피해를 제한해 멱등 키를 두지 않는다 |
 | 원격 호출 | SKU 는 `catalog` 컨텍스트(`CatalogSkuProcessor`, 주문 생성과 공용)가 `GET /internal/v1/skus` 로 몇 줄이든 100개씩 묶어 부른다(보통 한 번, 장바구니가 비면 호출하지 않는다). Facade 에 트랜잭션을 걸지 않고 DB 구간만 Processor 에서 좁힌다. product-service 장애는 503 `CART_008` 이다(`CATALOG_001` 을 `CartExceptionHandler` 가 번역) — 쓰기 뒤 장바구니 재조회가 실패해도 쓰기는 커밋돼 있다 |
 
+### 2-2. 해외 주문의 SKU 무게 · HS 코드 (#80)
+
+해외 배송비 견적(무게 구간)과 통관 신고(HS 코드 · 신고 금액)의 입력은 SKU 의 **배송 무게**와 **HS 코드**다. 둘 다 해외 판매 상품만 필수라 비어 있을 수 있다.
+**비어 있는 값을 거절하는 쪽은 order-service 다** — product-service 는 null 을 그대로 내리고, delivery-service 는 order-service 가 만든 총 무게만 받는다.
+
+| 항목 | 규칙 |
+|------|------|
+| 저장 (product-service) | `product.sku.weight_grams` integer(그램, 1 이상) · `hs_code` varchar(10)(숫자 6~10자리), 둘 다 null 허용 — null 은 미입력이다. DB check 는 무게 양수(`ck_sku_weight_grams_positive`)와 HS 코드 길이(`ck_sku_hs_code_length`)만 보고, 숫자 여부는 도메인 `HsCode` 가 본다. 점 · 하이픈 · 공백(`6211.42`)은 고쳐 받지 않는다 — 정규화는 입력 쪽(#9 · #19)이 한다 |
+| 내려주기 | `GET /internal/v1/skus` 항목의 `weightGrams`(number, nullable) · `hsCode`(string, nullable). 미입력이면 키를 빼지 않고 `null` 이다. 기본값으로 채우지 않고 거절하지도 않는다 — 국내 주문에는 필요 없는 값이다. 고객 API(상품 상세)에는 내리지 않는다 |
+| 해외 주문 | 배송 국가가 KR 이 아닌 주문 — delivery 견적이 `INTERNATIONAL` 로 계산하는 주문이다. 영문 스토어(USD) 주문이 여기에 든다 |
+| 거절 (order-service, #13) | 해외 주문의 주문서 미리보기 · 주문 생성에서 항목 중 **무게 또는 HS 코드가 null 인 SKU 가 하나라도 있으면 거절**한다 — 장바구니 `purchasable=false` 와 같은 결의 409, 어느 SKU 인지 알 수 있게 한다. 코드는 #13 이 `ORDER_0xx` 로 정한다. delivery 견적을 부르기 **전에** 거절한다 — 무게 없이 부르면 `DELIVERY_118`(무게 필수) 400 이 나와 원인이 흐려진다. 국내 주문은 두 값을 보지 않는다 |
+| 총 무게 (#13 · #22) | order-service 가 **Σ(SKU `weightGrams` × 수량)** 을 `long` 으로 더해 견적 요청 `weightGrams`(Integer)로 보낸다. int 범위를 넘으면 견적을 부르지 않고 배송할 수 없는 무게로 거절한다(delivery 의 가장 큰 구간 초과와 같은 뜻). 포장재 무게는 따로 더하지 않는다 |
+| 스냅숏 (#13) | 주문 항목에 단위 무게 · HS 코드를 **주문 시점 값으로 저장**한다(가격 · 상품명과 같은 규칙, 국내 주문은 null 일 수 있다). 총 무게는 배송 견적 스냅숏과 함께 주문에 저장한다. 주문 뒤 SKU 값을 고쳐도 지난 주문은 바뀌지 않는다 |
+| 통관 정보 (#18) | 송장 · 출고는 통관 신고 품목(HS 코드 · 수량 · 단위 무게 · **신고 금액 = 주문 항목의 주문 시점 금액**, 주문 통화)을 **주문 항목 스냅숏에서** 만든다 — delivery-service 가 order-service internal 로 읽고 product-service SKU 를 다시 읽지 않는다. 할인 반영 금액으로 신고할지는 #18 이 정한다 |
+| 입력 | 어드민 상품 등록 · 수정(#9)에 입력 칸을 추가한다 — 그 전에는 운영 SQL 로 넣는다. 카페24 이관(#19)의 원천 필드는 **미정**이다 — 카페24 상품 무게 필드의 단위 · HS 코드 유무를 #19 에서 확인해 매핑하고, 없으면 이관 뒤 어드민이 채운다 |
+
 ## 3. 재고
 
 재고는 product-service 의 SKU(상품 × 옵션 조합) 단위로 관리한다.
@@ -229,8 +245,8 @@ RESERVED ──확정──▶ CONFIRMED
 
 - 송장 등록은 어드민에서 단건/일괄(엑셀)로 한다. 택배사 코드는 enum 으로 관리한다.
 - 배송 상태 추적은 외부 추적 API(`ShipmentTrackingPort`)로 하되, 실패해도 주문 흐름을 막지 않는다. 어드민이 수동으로도 바꿀 수 있다.
-- 해외 배송비는 국가 그룹 · 무게 구간으로 정한다(§2, #22). 무게는 견적 요청이 싣고(SKU 무게 × 수량 합), SKU 무게 · HS 코드 필드는
-  product-service 후속 이슈, 통관 신고 금액(주문 시점 금액)은 송장 · 출고(#18) · 주문(#13)에서 다룬다.
+- 해외 배송비는 국가 그룹 · 무게 구간으로 정한다(§2, #22). 무게는 견적 요청이 싣고(SKU 무게 × 수량 합 — §2-2), 무게 · HS 코드는 product-service SKU 에 있다(#80).
+  통관 정보(HS 코드, 신고 금액 = 주문 항목의 주문 시점 금액)는 **주문 항목 스냅숏**에서 송장 · 출고(#18)로 넘긴다 — §2-2.
 - 배송지 정보는 주문 시점 스냅숏이다. 회원 주소록을 바꿔도 지난 주문 배송지는 바뀌지 않는다.
 
 ## 5. 클레임 (취소 · 반품 · 교환)
