@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.product.application.info.StockAdminInfo;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockAdjustmentHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.query.StockQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.domain.model.StockAdjustmentHistory;
@@ -26,6 +27,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>재고 행이 없는 SKU 는 품절(재고 관리 · 수량 0)로 본다 ({@link StockSnapshot#empty()}). 그래서 첫 등록의 조정 전 값은 관리 true · 수량 0 이고
  * 기대 수량도 0 이어야 한다. 관리 여부를 보내지 않은 첫 등록은 재고 관리(true)로 만든다.
+ *
+ * <p>판매 가능 수량은 결제 전 선점분이 빠진 값이다 — 어드민이 실사 수량을 그대로 넣으면 선점분만큼 초과 판매된다. 그래서 응답에 선점 수량
+ * ({@code reservedQuantity})을 함께 실어, 실사 입력은 {@code 실물 − reservedQuantity} 로 하게 한다 ({@code order-flow-guide.md} §3).
  */
 @Component
 @RequiredArgsConstructor
@@ -34,6 +38,7 @@ public class StockAdjustmentProcessor {
     private final SkuRepositoryPort skuRepositoryPort;
     private final StockRepositoryPort stockRepositoryPort;
     private final StockAdjustmentHistoryRepositoryPort stockAdjustmentHistoryRepositoryPort;
+    private final StockReservationRepositoryPort stockReservationRepositoryPort;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
     public StockAdminInfo adjust(StockAdjustmentCommand command) {
@@ -56,7 +61,9 @@ public class StockAdjustmentProcessor {
         stockAdjustmentHistoryRepositoryPort.append(StockAdjustmentHistory.of(
             snowflakeIdGenerator.generateId(), before, after.toStock(), command.reason(), command.memo(), command.adminMemberId()
         ));
-        return new StockAdminInfo(after.skuId(), after.stockManaged(), after.availableQuantity(), after.updatedAt());
+        // 선점 수량은 행 잠금 밖의 값이다 — 응답 순간의 참고치이고, 조정 판정(CAS)에는 쓰지 않는다
+        long reservedQuantity = stockReservationRepositoryPort.sumReservedQuantityBySkuId(skuId);
+        return new StockAdminInfo(after.skuId(), after.stockManaged(), after.availableQuantity(), reservedQuantity, after.updatedAt());
     }
 
     /** 재고 행이 없는 SKU 의 첫 등록. 동시에 다른 어드민이 먼저 등록했으면 어댑터가 PK 충돌을 409 로 바꾼다 — 덮어쓰지 않는다. */

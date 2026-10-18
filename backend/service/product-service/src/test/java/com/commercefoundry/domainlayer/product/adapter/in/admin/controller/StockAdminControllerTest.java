@@ -66,6 +66,7 @@ class StockAdminControllerTest {
                 .skuId("1001")
                 .stockManaged(true)
                 .availableQuantity(12L)
+                .reservedQuantity(3L)
                 .updatedAt(Instant.parse("2026-10-18T09:00:00Z"))
                 .build());
 
@@ -76,6 +77,7 @@ class StockAdminControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataBody.skuId").isEqualTo("1001");
             assertThat(result).bodyJson().extractingPath("$.dataBody.stockManaged").isEqualTo(true);
             assertThat(result).bodyJson().extractingPath("$.dataBody.availableQuantity").isEqualTo(12);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.reservedQuantity").isEqualTo(3);
             assertThat(result).bodyJson().extractingPath("$.dataBody.updatedAt").isEqualTo("2026-10-18T09:00:00Z");
             verify(stockAdminUseCase).adjustStock(StockAdjustmentCommand.builder()
                 .skuId(1001L)
@@ -201,6 +203,36 @@ class StockAdminControllerTest {
                 .exchange();
 
             assertFailure(result, HttpStatus.BAD_REQUEST, "PRODUCT_198", "skuId 파라미터 형식이 올바르지 않습니다.");
+            verifyNoInteractions(stockAdminUseCase);
+        }
+
+        @ParameterizedTest(name = "skuId={0}")
+        @CsvSource({"0", "-1"})
+        @DisplayName("SKU 아이디가 양수가 아니면 400 · PRODUCT_123 — internal 경로 변수와 같은 동작이다")
+        void skuIdNotPositive(String skuId) {
+            MvcTestResult result = mvc.patch().uri("/api/v1/admin/stocks/" + skuId)
+                .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))
+                .contentType(MediaType.APPLICATION_JSON).content(VALID_BODY)
+                .exchange();
+
+            assertFailure(result, HttpStatus.BAD_REQUEST, "PRODUCT_123", "skuId 는 양수여야 합니다.");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo("skuId");
+            verifyNoInteractions(stockAdminUseCase);
+        }
+
+        @Test
+        @DisplayName("경로 변수와 본문이 함께 틀리면 둘 다 알린다 — 본문 필드 이름 · 코드는 그대로다")
+        void skuIdAndBodyInvalid() {
+            MvcTestResult result = mvc.patch().uri("/api/v1/admin/stocks/0")
+                .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\": -1, \"expectedQuantity\": 0, \"reason\": \"RESTOCK\"}")
+                .exchange();
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[*].code").asArray()
+                .containsExactlyInAnyOrder("PRODUCT_123", "PRODUCT_106");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[*].field").asArray()
+                .containsExactlyInAnyOrder("skuId", "quantity");
             verifyNoInteractions(stockAdminUseCase);
         }
     }

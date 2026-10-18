@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.mapper.StockReservationMapperImpl;
 import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.StockReleaseReason;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservation;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationItem;
@@ -65,9 +66,9 @@ class StockReservationPersistenceAdapterTest {
     private StockReservationRepositoryPort stockReservationRepositoryPort;
 
     @Test
-    @DisplayName("저장: 헤더(버전 0)와 항목이 INSERT 되고, 항목은 SKU 오름차순으로 다시 읽힌다")
+    @DisplayName("저장: 헤더(버전 0 · 활성 주문 아이디)와 항목이 따로 INSERT 되고, 항목은 SKU 오름차순으로 다시 읽힌다")
     void createAndRead() {
-        stockReservationRepositoryPort.create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
+        create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
         entityManager.clear();
 
         StockReservation found = stockReservationRepositoryPort.findById(7001L).orElseThrow();
@@ -86,7 +87,7 @@ class StockReservationPersistenceAdapterTest {
     @Test
     @DisplayName("갱신: merge 가 상태 · 활성 주문 아이디를 바꾸고 버전을 올린다. created_at 은 그대로다")
     void updateMerges() {
-        stockReservationRepositoryPort.create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
+        create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
         entityManager.clear();
         Instant createdAt = entityManager.find(StockReservationEntity.class, 7001L).getCreatedAt();
         entityManager.clear();
@@ -108,7 +109,7 @@ class StockReservationPersistenceAdapterTest {
     @Test
     @DisplayName("갱신: 읽은 뒤 다른 쪽이 먼저 바꿨으면(낡은 버전) STOCK_RESERVATION_CONFLICT 다")
     void staleVersionFails() {
-        stockReservationRepositoryPort.create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
+        create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
         entityManager.clear();
         StockReservation stale = stockReservationRepositoryPort.findById(7001L).orElseThrow();
         stockReservationRepositoryPort.update(stale.confirm(NOW).reservation());
@@ -123,9 +124,9 @@ class StockReservationPersistenceAdapterTest {
     @Test
     @DisplayName("활성 선점: 같은 주문의 두 번째 활성 선점은 유니크 키 위반으로 STOCK_RESERVATION_CONFLICT 다")
     void activeOrderIdIsUnique() {
-        stockReservationRepositoryPort.create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
+        create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
 
-        assertThatThrownBy(() -> stockReservationRepositoryPort.create(reserved(7002L, ORDER_ID, NOW.plusSeconds(1800))))
+        assertThatThrownBy(() -> stockReservationRepositoryPort.createHeader(7002L, ORDER_ID, NOW.plusSeconds(1800)))
             .isInstanceOf(ProductException.class)
             .extracting(exception -> ((ProductException) exception).getErrorCode())
             .isEqualTo(ProductErrorCode.STOCK_RESERVATION_CONFLICT);
@@ -134,13 +135,13 @@ class StockReservationPersistenceAdapterTest {
     @Test
     @DisplayName("활성 선점: 해제된 주문은 다시 선점할 수 있고, 활성 조회는 새 선점만 찾는다")
     void releasedOrderCanReserveAgain() {
-        stockReservationRepositoryPort.create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
+        create(reserved(7001L, ORDER_ID, NOW.plusSeconds(1800)));
         entityManager.clear();
         stockReservationRepositoryPort.update(stockReservationRepositoryPort.findById(7001L).orElseThrow()
             .release(NOW, StockReleaseReason.EXPIRED).reservation());
         entityManager.clear();
 
-        stockReservationRepositoryPort.create(reserved(7002L, ORDER_ID, NOW.plusSeconds(3600)));
+        create(reserved(7002L, ORDER_ID, NOW.plusSeconds(3600)));
         entityManager.clear();
 
         assertThat(stockReservationRepositoryPort.findActiveByOrderId(ORDER_ID)).get().extracting(StockReservation::id).isEqualTo(7002L);
@@ -150,25 +151,73 @@ class StockReservationPersistenceAdapterTest {
     @Test
     @DisplayName("만료 대상: RESERVED 이고 만료 시각이 now 이전 · 같은 것만, 만료 시각 → 아이디 순으로 limit 건까지 읽는다")
     void findExpired() {
-        stockReservationRepositoryPort.create(reserved(7001L, 1L, NOW.minusSeconds(10)));
-        stockReservationRepositoryPort.create(reserved(7002L, 2L, NOW.minusSeconds(30)));
-        stockReservationRepositoryPort.create(reserved(7003L, 3L, NOW));
-        stockReservationRepositoryPort.create(reserved(7004L, 4L, NOW.plusMillis(1)));
-        stockReservationRepositoryPort.create(reserved(7000L, 5L, NOW.minusSeconds(10)));
-        stockReservationRepositoryPort.create(reserved(7005L, 6L, NOW.minus(1, ChronoUnit.HOURS)));
-        stockReservationRepositoryPort.create(reserved(7006L, 7L, NOW.minus(2, ChronoUnit.HOURS)));
+        create(reserved(7001L, 1L, NOW.minusSeconds(10)));
+        create(reserved(7002L, 2L, NOW.minusSeconds(30)));
+        create(reserved(7003L, 3L, NOW));
+        create(reserved(7004L, 4L, NOW.plusMillis(1)));
+        create(reserved(7000L, 5L, NOW.minusSeconds(10)));
+        create(reserved(7005L, 6L, NOW.minus(1, ChronoUnit.HOURS)));
+        create(reserved(7006L, 7L, NOW.minus(2, ChronoUnit.HOURS)));
         entityManager.clear();
         settle(7005L, true);
         settle(7006L, false);
 
-        assertThat(stockReservationRepositoryPort.findExpiredReservationIds(NOW, 10)).containsExactly(7002L, 7000L, 7001L, 7003L);
-        assertThat(stockReservationRepositoryPort.findExpiredReservationIds(NOW, 2)).containsExactly(7002L, 7000L);
+        assertThat(expiredIds(null, 10)).containsExactly(7002L, 7000L, 7001L, 7003L);
+        assertThat(expiredIds(null, 2)).containsExactly(7002L, 7000L);
+    }
+
+    @Test
+    @DisplayName("만료 대상 keyset: 커서 (만료 시각, 아이디) 다음부터 읽는다 — 같은 만료 시각이면 아이디로 이어 가고, 커서 앞의 건은 다시 읽지 않는다")
+    void findExpiredAfterCursor() {
+        create(reserved(7001L, 1L, NOW.minusSeconds(10)));
+        create(reserved(7002L, 2L, NOW.minusSeconds(30)));
+        create(reserved(7003L, 3L, NOW));
+        create(reserved(7000L, 5L, NOW.minusSeconds(10)));
+        create(reserved(7004L, 4L, NOW.plusMillis(1)));
+        entityManager.clear();
+
+        List<ExpiredStockReservationQueryResult> first = stockReservationRepositoryPort.findExpiredReservations(NOW, null, 2);
+        assertThat(first).containsExactly(
+            new ExpiredStockReservationQueryResult(7002L, NOW.minusSeconds(30)), new ExpiredStockReservationQueryResult(7000L, NOW.minusSeconds(10))
+        );
+        // 7000 과 만료 시각이 같은 7001 은 아이디가 커서보다 커서 이어서 읽힌다
+        assertThat(expiredIds(first.getLast(), 2)).containsExactly(7001L, 7003L);
+        assertThat(expiredIds(new ExpiredStockReservationQueryResult(7003L, NOW), 2)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("선점 수량: SKU 의 RESERVED 선점 중 차감한 항목 수량만 더한다 — 확정 · 해제 · 무제한(deducted=false) · 다른 SKU 는 빠지고, 없으면 0")
+    void sumReservedQuantity() {
+        create(reserved(7001L, 1L, NOW.plusSeconds(1800)));
+        create(reserved(7002L, 2L, NOW.plusSeconds(1800)));
+        create(reserved(7003L, 3L, NOW.plusSeconds(1800)));
+        create(reserved(7004L, 4L, NOW.plusSeconds(1800)));
+        entityManager.clear();
+        settle(7003L, true);
+        settle(7004L, false);
+
+        // 7001 · 7002 의 SKU 1001(차감, 2개씩)만 남는다. SKU 1002 는 무제한(deducted=false)
+        assertThat(stockReservationRepositoryPort.sumReservedQuantityBySkuId(1001L)).isEqualTo(4L);
+        assertThat(stockReservationRepositoryPort.sumReservedQuantityBySkuId(1002L)).isZero();
+        assertThat(stockReservationRepositoryPort.sumReservedQuantityBySkuId(9999L)).isZero();
     }
 
     @Test
     @DisplayName("없는 선점은 빈 값이다")
     void notFound() {
         assertThat(stockReservationRepositoryPort.findById(1L)).isEmpty();
+    }
+
+    /** 선점 Processor 와 같은 순서 — 헤더 먼저, 항목 나중. */
+    private void create(StockReservation reservation) {
+        stockReservationRepositoryPort.createHeader(reservation.id(), reservation.orderId(), reservation.expiresAt());
+        stockReservationRepositoryPort.createItems(reservation);
+    }
+
+    private List<Long> expiredIds(ExpiredStockReservationQueryResult after, int limit) {
+        return stockReservationRepositoryPort.findExpiredReservations(NOW, after, limit).stream()
+            .map(ExpiredStockReservationQueryResult::reservationId)
+            .toList();
     }
 
     /** 확정 또는 해제해 만료 대상에서 뺀다. */

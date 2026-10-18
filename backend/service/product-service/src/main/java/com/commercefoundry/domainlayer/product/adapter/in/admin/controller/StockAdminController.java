@@ -4,6 +4,7 @@ import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.StockAdjustmentRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.StockAdminResponse;
+import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.port.in.StockAdminUseCase;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,6 +12,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -38,12 +40,14 @@ public class StockAdminController {
         summary = "SKU 재고 조정",
         description = "수량은 절대값으로 바꾸고, 화면에서 본 현재 수량을 expectedQuantity 로 함께 보낸다. 그 사이 주문 · 다른 어드민이 수량을 바꿨으면 "
             + "409(PRODUCT_020)이며 현재 수량을 다시 읽어 조정한다. 재고를 처음 등록하는 SKU(재고 없음 = 품절)는 expectedQuantity 가 0 이다. "
-            + "없는 SKU 는 404(PRODUCT_002). 요청마다 조정 이력을 한 건 남긴다."
+            + "없는 SKU 는 404(PRODUCT_002). 요청마다 조정 이력을 한 건 남긴다. availableQuantity 는 결제 전 선점분(reservedQuantity)이 빠진 값이라 "
+            + "실사 수량을 입력할 때는 실물 − reservedQuantity 를 quantity 로 보낸다."
     )
     @PreAuthorize("hasRole('ADMIN')")
     @PatchMapping("/{skuId}")
     public ResponseEntity<Response<StockAdminResponse>> adjustStock(
-        @AuthenticationPrincipal MemberPrincipal member, @Parameter(description = "SKU 아이디") @PathVariable long skuId,
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "SKU 아이디") @PathVariable @Positive(message = ProductValidationMessage.STOCK_SKU_ID_POSITIVE) long skuId,
         @RequestBody @Valid StockAdjustmentRequest request
     ) {
         return ResponseEntity.ok().body(Response.success(stockAdminUseCase.adjustStock(request.toCommand(skuId, member.memberId()))));

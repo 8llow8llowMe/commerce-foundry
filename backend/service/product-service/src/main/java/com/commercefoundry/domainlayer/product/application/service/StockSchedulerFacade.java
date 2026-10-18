@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.service;
 
+import com.commercefoundry.domainlayer.product.application.info.ExpiredStockReservationInfo;
 import com.commercefoundry.domainlayer.product.application.port.in.StockSchedulerUseCase;
 import com.commercefoundry.domainlayer.product.application.service.processor.StockReservationProcessor;
 import java.util.List;
@@ -19,8 +20,8 @@ public class StockSchedulerFacade implements StockSchedulerUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Long> findExpiredReservationIds(int limit) {
-        return stockReservationProcessor.findExpiredReservationIds(limit);
+    public List<ExpiredStockReservationInfo> findExpiredReservations(ExpiredStockReservationInfo after, int limit) {
+        return stockReservationProcessor.findExpiredReservations(after, limit);
     }
 
     /** 확정과 동시에 오면 {@code @Version} 이 하나만 통과시키고, 진 쪽은 409 로 롤백된다 — 스케줄러가 로그만 남기고 다음 건으로 간다. */

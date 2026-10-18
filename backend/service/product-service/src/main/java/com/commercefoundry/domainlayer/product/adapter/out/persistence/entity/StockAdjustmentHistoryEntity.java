@@ -14,10 +14,14 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Persistable;
 
 /**
  * 어드민 재고 조정 이력. append-only 다 — 행을 고치거나 지우지 않는다. {@code created_at} 이 조정 시각이다.
  * SKU 별 최근 이력을 아이디(Snowflake — 시각 순) 내림차순으로 읽으므로 {@code (sku_id, id)} 인덱스를 둔다.
+ *
+ * <p>{@link Persistable} 로 새 행이면 {@code merge} 가 아니라 {@code persist}(INSERT) 하게 한다. 아이디(Snowflake)를 직접 넣는 엔티티라
+ * 기본 {@code save} 는 merge 로 가서 SELECT 를 한 번 더 보내고, 같은 아이디가 겹치면 append-only 이력을 조건 없이 덮어쓴다.
  */
 @Entity
 @Table(
@@ -29,7 +33,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class StockAdjustmentHistoryEntity extends BaseEntity {
+public class StockAdjustmentHistoryEntity extends BaseEntity implements Persistable<Long> {
 
     @Id
     @Column(name = "id", comment = "재고 조정 이력 아이디 (Snowflake)")
@@ -62,4 +66,10 @@ public class StockAdjustmentHistoryEntity extends BaseEntity {
 
     @Column(name = "admin_member_id", nullable = false, comment = "조정한 어드민 회원 아이디 (외부 FK: auth-service 회원 id)")
     private Long adminMemberId;
+
+    /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다. */
+    @Override
+    public boolean isNew() {
+        return getCreatedAt() == null;
+    }
 }

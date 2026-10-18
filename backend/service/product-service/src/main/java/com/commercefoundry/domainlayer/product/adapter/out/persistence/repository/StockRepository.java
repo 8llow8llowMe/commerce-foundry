@@ -18,7 +18,7 @@ public interface StockRepository extends JpaRepository<StockEntity, Long> {
 
     /**
      * 재고를 관리하는 SKU 의 판매 가능 수량을 줄인다. 수량이 모자라거나, 무제한(재고 관리 안 함) SKU 이거나, 행이 없으면 0행이다.
-     * 무제한 SKU 는 수량을 건드리지 않는다 — 호출한 쪽이 차감 대상에서 뺀다.
+     * 무제한 SKU 는 수량을 건드리지 않는다 — 선점은 모든 항목에 이 차감을 먼저 시도하고, 0행인 SKU 만 다시 읽어 무제한인지 가린다.
      */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""

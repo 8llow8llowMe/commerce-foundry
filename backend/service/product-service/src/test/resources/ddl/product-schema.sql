@@ -552,8 +552,8 @@
     create index idx_stock_adjustment_history_sku_id_id
        on product.stock_adjustment_history (sku_id, id);
 
-    create index idx_stock_reservation_status_expires_at
-       on product.stock_reservation (status, expires_at);
+    create index idx_stock_reservation_status_expires_at_id
+       on product.stock_reservation (status, expires_at, id);
 
     create index idx_stock_reservation_order_id
        on product.stock_reservation (order_id);

@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.mapper.StockReservationMapper;
 import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservation;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationStatus;
 import java.time.Instant;
@@ -41,22 +42,38 @@ public class StockReservationRepositoryAdapter implements StockReservationReposi
     }
 
     @Override
-    public List<Long> findExpiredReservationIds(Instant now, int limit) {
-        return stockReservationRepository.findIdsByStatusAndExpiresAtUpTo(StockReservationStatus.RESERVED, now, Limit.of(limit));
+    public List<ExpiredStockReservationQueryResult> findExpiredReservations(Instant now, ExpiredStockReservationQueryResult after, int limit) {
+        if (after == null) {
+            return stockReservationRepository.findExpired(StockReservationStatus.RESERVED, now, Limit.of(limit));
+        }
+        return stockReservationRepository.findExpiredAfter(
+            StockReservationStatus.RESERVED, now, after.expiresAt(), after.reservationId(), Limit.of(limit)
+        );
+    }
+
+    @Override
+    public long sumReservedQuantityBySkuId(long skuId) {
+        Long sum = stockReservationItemRepository.sumDeductedQuantityBySkuIdAndReservationStatus(skuId, StockReservationStatus.RESERVED);
+        return sum == null ? 0L : sum;
     }
 
     /**
-     * 헤더(버전 null → persist)와 항목(Persistable → persist)을 INSERT 한다. 입력이 검증 · 병합을 거쳐 항목 쪽 제약은 위반되지 않으므로
-     * 여기서 나는 무결성 위반은 같은 주문의 활성 선점 유니크 키({@code uk_stock_reservation_active_order_id}) 충돌뿐이다.
+     * 헤더(버전 null → persist)를 INSERT 한다. 입력이 검증을 거쳐 헤더 쪽 다른 제약은 위반되지 않으므로 여기서 나는 무결성 위반은
+     * 같은 주문의 활성 선점 유니크 키({@code uk_stock_reservation_active_order_id}) 충돌뿐이다.
      */
     @Override
-    public void create(StockReservation reservation) {
+    public void createHeader(long reservationId, long orderId, Instant expiresAt) {
         try {
-            stockReservationRepository.saveAndFlush(stockReservationMapper.toEntity(reservation));
-            stockReservationItemRepository.saveAllAndFlush(stockReservationMapper.toItemEntities(reservation));
+            stockReservationRepository.saveAndFlush(stockReservationMapper.toNewHeaderEntity(reservationId, orderId, expiresAt));
         } catch (DataIntegrityViolationException exception) {
             throw new ProductException(ProductErrorCode.STOCK_RESERVATION_CONFLICT, exception);
         }
+    }
+
+    /** 항목(Persistable → persist)을 INSERT 한다. 헤더 INSERT 가 같은 주문의 동시 생성을 이미 막았고 입력이 병합을 거쳐 항목 제약은 위반되지 않는다. */
+    @Override
+    public void createItems(StockReservation reservation) {
+        stockReservationItemRepository.saveAllAndFlush(stockReservationMapper.toItemEntities(reservation));
     }
 
     /**
