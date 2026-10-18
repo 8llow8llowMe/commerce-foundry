@@ -4,7 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * 고객 쓰기 API 의 회원 단위 요청 제한 ({@code security-guide.md} §7-3). 정책과 대상 경로는 {@code RateLimitPolicy} 가 정하고, 한도만 여기서 바꾼다.
+ * 고객 쓰기 API 의 회원 · 클라이언트 IP 단위 요청 제한 ({@code security-guide.md} §7-3). 정책과 대상 경로는 {@code RateLimitPolicy} 가 정하고, 한도만 여기서 바꾼다.
  *
  * @param enabled    끄면 어떤 요청도 세지 않는다. 기본 켬
  * @param cartMerge  장바구니 병합(로그인 직후 한 번) — 한 번에 항목을 많이 쓰는 가장 무거운 쓰기라 따로 센다
