@@ -152,6 +152,8 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - `@PreAuthorize` 거부(`AuthorizationDeniedException`)는 필터가 아니라 **MVC 예외 처리**로 먼저 간다.
   security-core 의 `SecurityExceptionAdvice` 가 가장 높은 우선순위(`@Order(HIGHEST_PRECEDENCE)`)로 잡아 001 · 005 로 답한다.
 - 도메인 `*ExceptionHandler` 는 `Exception` · `RuntimeException` 을 통째로 잡지 않는다 (`coding-conventions.md` §8-1). 잡으면 보안 예외를 가로챌 수 있다.
+- 남는 오류는 common-core 의 `FallbackErrorResolver` 가 `COMMON_00x` 로 받는다. advice 가 아니라 MVC 예외 처리 사슬에서 모든 advice **뒤**에 선
+  처리기라 `SecurityExceptionAdvice` · 도메인 advice 보다 늦다 — 보안 오류 응답은 바뀌지 않는다 (`api-design-guide.md` §2-1 공통 오류 코드).
 
 ### 5-3. 서비스 구성
 

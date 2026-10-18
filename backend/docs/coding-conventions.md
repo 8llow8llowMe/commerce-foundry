@@ -128,6 +128,10 @@ public enum OrderErrorCode {
 - 한 서비스에 advice 가 둘 이상이면 좁은 범위 advice 에 `@Order` 를 붙여 우선순위를 확정한다.
 - 도메인 `*ExceptionHandler` 는 `Exception` · `RuntimeException` 을 통째로 잡지 않는다. 보안 예외(`@PreAuthorize` 거부)는
   security-core 의 advice 가 처리한다 — 통째로 잡으면 403 이 500 이 될 수 있다 (`security-guide.md` §5-2).
+- 어느 advice 도 받지 않은 오류(매핑 없는 경로 404 · 메서드 405 · 미디어 타입 415 · 처리되지 않은 예외 500)는 common-core 의
+  `FallbackErrorResolver` 가 `COMMON_00x` 봉투로 쓴다 (`api-design-guide.md` §2-1 공통 오류 코드). 서블릿 서비스에 자동 구성으로 걸리고,
+  MVC 예외 처리 사슬에서 모든 advice **뒤**에 서므로 도메인 advice 에 `@Order` 를 달 필요가 없다. "남는 오류를 잡으려고" 도메인 핸들러에
+  `Exception` 을 더하지 않는다.
 
 ### 8-2. 검증 에러코드 (필수)
 
