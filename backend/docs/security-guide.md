@@ -292,7 +292,8 @@ auth 는 기동할 때 자기 `JWT_PRIVATE_KEY` 와 `JWT_PUBLIC_KEY` 가 한 쌍
 구현은 `cloud/api-gateway` 의 `security` 패키지다. 라우트 필터가 아니라 **전역 `SecurityWebFilterChain`**(`GatewaySecurityConfig`) 이다 —
 한 라우트(`ServiceRoute`)가 고객 · 어드민 패턴을 섞어 갖고, dev 라우트(`/health/**` · `/docs/**`)도 덮어야 한다.
 
-**필터 순서** — `GatewayRequestGuardFilter`(가장 앞, 비정규 경로 거절) → 보안 체인(`WebFilterChainProxy`, -100: CORS → Bearer 인증 → 인가) → 라우팅.
+**필터 순서** — `GatewayRequestGuardFilter`(가장 앞, 비정규 경로 거절) → `GatewayRequestBodySizeFilter`(본문 크기 상한, §7-4) →
+보안 체인(`WebFilterChainProxy`, -100: CORS → Bearer 인증 → 인가) → 라우팅.
 정규화되지 않은 경로로 인가 판정을 하지 않는다.
 
 | 요청 | 게이트웨이 판정 |
@@ -379,7 +380,32 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
   2초 상한(`GatewayRateLimitFilter.CHECK_TIMEOUT`)이 끊는다. warn 은 1분에 한 번만 남기고, 프레임워크의 요청마다 쌓이는 error 로그는 yml 에서 끈다.
   응답 없는 Redis 에서는 대상 요청마다 최대 약 1~2초 늦어진다(차단 목록 조회와 같다). 장애 동안은 회원 한 명의 쓰기가 제한 없이 서비스에 닿는다.
 - 한도는 yml 로만 바꾼다(`requests-per-minute` 는 60 의 약수 또는 배수, `burst` ≥ 1 — 어긋나면 기동하지 않는다). 대상 경로를 바꾸려면 `RateLimitPolicy` 를 고친다.
-- **JSON 본문 크기 상한은 이 제한에 없다.** 게이트웨이는 본문을 스트리밍으로 넘기고 Tomcat 의 폼 상한은 JSON 에 걸리지 않는다 — #90 에서 정한다.
+- **JSON 본문 크기 상한은 이 제한에 없다.** 게이트웨이는 본문을 스트리밍으로 넘기고 Tomcat 의 폼 상한은 JSON 에 걸리지 않는다 — §7-4 (#90) 가 맡는다.
+
+### 7-4. 요청 본문 크기 상한 (#90)
+
+서비스(Tomcat)의 `server.tomcat.max-http-form-post-size` 는 폼에만 걸리고 JSON 에는 걸리지 않는다. 요청 수 제한만으로는 한 요청에 큰 본문을 싣는 남용을 막지 못해
+게이트웨이가 하류로 넘기기 전에 끊는다(`GatewayRequestBodySizeFilter`). 서비스 쪽 상한은 두지 않는다 — 게이트웨이를 거치지 않는 요청은 사설망 전제(§5-1)가 막는다.
+
+| 설정 (`gateway.request-body.*`) | 기본 | 넘으면 | 근거 |
+|--------------------------------|------|--------|------|
+| `max-size` | 2MB | 413 `GATEWAY_007` | 가장 큰 정상 요청인 장바구니 병합(50줄 × 입력 20개 × 500자)이 한글 UTF-8 로 약 1.5MB 다. 이 검증 한도를 키우면 상한도 같이 본다 |
+| `buffering-budget` | 32MB | 411 `GATEWAY_004` | chunked 본문을 동시에 모으는 총량 — 상한 2MB 면 동시 16개 |
+| `body-read-timeout` | 10초 | 408 `GATEWAY_004` | chunked 본문을 다 받기까지의 시간 |
+
+- **`Content-Length` 가 있으면** 그 값만 보고 정한다. 넘으면 본문을 읽지 않고 **413 `GATEWAY_007`** 로 끊는다.
+- **chunked 면** 상한까지만 메모리에 모은다. 넘으면 버리고 413, 넘지 않으면 모은 본문을 `Content-Length` 와 함께 넘긴다(`Transfer-Encoding` 은 지운다).
+  스트리밍으로 세면서 넘기지 않는다 — 그러면 상한을 넘기 전까지의 앞부분이 이미 서비스에 닿는다. **두 경우 모두 하류에는 한 바이트도 가지 않는다.**
+  `Content-Length` 와 chunked 가 함께 오면 chunked 가 경계를 정하므로(RFC 9112 §6.3) 모아서 센다.
+- **둘 다 없으면** HTTP/1.1 에서 본문이 없는 요청이다(RFC 9112 §6.3). 모으지 않고 헤더도 바꾸지 않는다. **HTTP/2 를 켜면 길이 없는 본문이 생기므로 이 판단을 다시 본다**(지금은 켜지 않았다).
+- **천천히 보내는 공격(slowloris)** — 인증 없는 연결 여러 개가 chunked 본문을 상한 직전까지 천천히 보내 메모리를 채우지 못하게, 동시에 모으는 총량(넘으면 411 — `Content-Length` 를 붙여 다시 보내라)과
+  수신 시간(넘으면 408)을 함께 건다. 그래서 chunked 로 쓸 수 있는 메모리는 총량 × 약 2배(모은 버퍼 + 넘길 바이트 배열을 옮기는 순간)가 상한이다.
+  정상 클라이언트(브라우저 fetch · BFF)는 `Content-Length` 를 보내 이 경로를 타지 않는다.
+- **업로드 특례를 전역으로 두지 않는다.** `Content-Type: multipart/form-data` 만 바꿔 상한을 올릴 수 없게 한다. 상품 이미지 업로드(#9)를 만들 때 그 라우트에만 따로 상한을 둔다.
+- 요청 가드 바로 뒤, CORS · 보안 체인보다 앞이다 — 큰 본문은 토큰 검증 전에 끊는다. 그래서 이 거절에는 CORS 헤더가 없다(요청 가드의 400 · 405 와 같다). BFF 는 서버에서 부르므로 영향이 없다.
+  거절 응답은 `Connection: close` 로 연결을 닫는다 — 읽지 않은 본문을 끝까지 받아 비우지 않게.
+- 413 · 408 · 411 처리는 본문을 모으는 단계에만 건다 — 하류(코덱 등)에서 난 같은 종류의 오류를 이 코드로 바꾸지 않는다.
+- 상한은 100MB 를 넘길 수 없고 총량은 상한 이상이어야 한다(어긋나면 기동하지 않는다). 익명 요청 폭주 자체는 IP 단위 제한(#89)이 맡는다.
 
 ## 8. 로그
 
