@@ -50,6 +50,18 @@ store:
     # 맞춤 제작(치수 입력 · 제작 안내)
     custom-order: ${STORE_FEATURES_CUSTOM_ORDER:false}
 
+# 재고 (order-flow-guide.md §3)
+stock:
+  reservation:
+    # 선점 유지 시간 — PG 결제창 제한 시간보다 길어야 한다. 결제창 제한 시간을 확인하기 전 임시값이다
+    ttl: 30m
+    # 만료 스윕. 한 번 돌 때 batch-size 건씩 읽어 건마다 트랜잭션으로 풀고, 배치가 가득 차면 max-batches-per-run 번까지 이어 읽는다
+    expiry-sweep:
+      initial-delay: 60s
+      fixed-delay: 60s
+      batch-size: 100
+      max-batches-per-run: 10
+
 security:
   jwt:
     # access 토큰 검증 공개키 — PEM 본문 한 줄 (security-guide.md §5-3 · §6). 비었거나 풀리지 않으면 기동하지 않는다.

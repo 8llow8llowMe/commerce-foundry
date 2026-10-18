@@ -20,6 +20,18 @@ public final class ProductValidationMessage {
     public static final String STOCK_ADJUSTMENT_TARGET_REQUIRED = "PRODUCT_110:quantity · stockManaged 중 하나 이상을 보내야 합니다.";
     public static final String STOCK_EXPECTED_QUANTITY_REQUIRED = "PRODUCT_111:quantity 를 바꾸려면 expectedQuantity 가 필수입니다.";
 
+    // 서비스 간 재고 선점 (/internal/v1/stock-reservations)
+    public static final String STOCK_RESERVATION_ORDER_ID_REQUIRED = "PRODUCT_112:orderId 는 필수입니다.";
+    public static final String STOCK_RESERVATION_ORDER_ID_POSITIVE = "PRODUCT_113:orderId 는 양수여야 합니다.";
+    public static final String STOCK_RESERVATION_ITEMS_REQUIRED = "PRODUCT_114:items 는 필수입니다.";
+    public static final String STOCK_RESERVATION_ITEMS_SIZE_MAX = "PRODUCT_115:items 는 최대 100개입니다.";
+    public static final String STOCK_RESERVATION_ITEM_REQUIRED = "PRODUCT_116:items 의 원소는 비어 있을 수 없습니다.";
+    public static final String STOCK_RESERVATION_SKU_ID_REQUIRED = "PRODUCT_117:skuId 는 필수입니다.";
+    public static final String STOCK_RESERVATION_SKU_ID_POSITIVE = "PRODUCT_118:skuId 는 양수여야 합니다.";
+    public static final String STOCK_RESERVATION_QUANTITY_REQUIRED = "PRODUCT_119:quantity 는 필수입니다.";
+    public static final String STOCK_RESERVATION_QUANTITY_POSITIVE = "PRODUCT_120:quantity 는 1 이상이어야 합니다.";
+    public static final String STOCK_RESERVATION_ID_POSITIVE = "PRODUCT_121:reservationId 는 양수여야 합니다.";
+
     private ProductValidationMessage() {
     }
 }
