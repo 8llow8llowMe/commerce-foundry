@@ -14,6 +14,8 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
     // 실행 중 만든 테스트 키 · 토큰. 픽스처의 SecurityTestPropertiesInitializer 가 컨텍스트마다 security.jwt.* 를 채운다
     testImplementation testFixtures(project(':core:security-core'))
+    // 회원 단위 요청 제한을 실제 Redis(토큰 버킷 Lua 스크립트)로 본다. Docker 없는 로컬은 건너뛰고 CI 는 실패한다 (bootstrap-conventions.md)
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 }
 
 tasks.named('test') {
