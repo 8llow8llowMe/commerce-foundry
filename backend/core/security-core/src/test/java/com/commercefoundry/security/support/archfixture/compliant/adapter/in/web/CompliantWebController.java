@@ -6,10 +6,18 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 준수 예시 — 고객 핸들러는 식이 무엇이든 메서드마다 {@code @PreAuthorize} 가 있으면 된다. 매핑이 없는 메서드는 핸들러가 아니다. */
+/**
+ * 준수 예시 — 고객 핸들러는 식이 무엇이든 메서드마다 {@code @PreAuthorize} 가 있으면 된다. 매핑이 없는 메서드는 핸들러가 아니다.
+ * 매핑을 물려주지 않는 인터페이스({@link Describable})는 구현해도 된다.
+ */
 @RestController
 @RequestMapping("/api/v1/compliant")
-public class CompliantWebController {
+public class CompliantWebController implements Describable {
+
+    @Override
+    public String describe() {
+        return "compliant";
+    }
 
     @PreAuthorize("permitAll()")
     @GetMapping
