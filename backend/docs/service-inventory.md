@@ -21,7 +21,7 @@
 "회원가입 · 내 정보" 는 고객 회원가입(`POST /api/v1/auth/sign-up`)과 내 정보 조회 · 수정(`/api/v1/members/me`)이 있는 상태다 (`api-design-guide.md` §2-4).
 테이블은 `auth.member`(고객 · 관리자 한 테이블, `role` CUSTOMER / ADMIN — #4 결정 4)와 `auth.member_agreement`(동의 이력, 추가만 한다)다.
 "로그인 · 토큰" 은 고객 로그인 · 토큰 재발급 · 로그아웃(`/api/v1/auth/login` · `/token/reissue` · `/logout`)이 있고
-refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초 유예)하는 상태다 (`security-guide.md` §2-3). 로그인 절대 상한은 #67, 요청 제한은 #66 이다.
+refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초 유예)하는 상태다 (`security-guide.md` §2-3). 로그인은 최초 로그인부터 30일이 절대 상한이다(#67). 요청 제한은 #66 이다.
 "카탈로그 조회" 는 고객 카테고리 트리 · 상품 목록 · 상품 상세(`/api/v1/categories` · `/api/v1/products/**`)와 서비스 간 SKU 벌크 조회(`/internal/v1/skus`)가 있는 상태다. "재고" 는 SKU 재고 · 어드민 재고 조정(`/api/v1/admin/stocks/{skuId}`) · 서비스 간 재고 선점 · 확정 · 해제(`/internal/v1/stock-reservations/**`) · 선점 만료 스케줄러가 있는 상태다 (`order-flow-guide.md` §3).
 SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullable)를 가지고 서비스 간 SKU 벌크 조회가 그대로 내린다 — 해외 주문 거절은 order-service 몫이다 (#80, `order-flow-guide.md` §2-2).
 "국내 배송비 정책" 은 고객 정책 안내(`/api/v1/shipping-fees/policy`) · 어드민 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/domestic`) · 서비스 간 배송비 견적(`/internal/v1/shipping-fees/quotes`)이 있는 상태다.

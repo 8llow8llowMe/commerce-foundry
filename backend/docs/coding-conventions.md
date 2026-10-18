@@ -318,8 +318,8 @@ public final class ProductValidationMessage {
 
   | 키 | 키 함수 | 값 · TTL |
   |----|---------|----------|
-  | `auth:refresh-token:{fingerprint}` | auth `RefreshTokenRedisKeys.token` | HASH `{memberId, familyId, rotatedAt?, siblings?}`. TTL refresh 토큰 TTL — HSET 과 같은 Lua 에서 PEXPIRE (`security-guide.md` §2-3) |
-  | `auth:refresh-family:{familyId}` | auth `RefreshTokenRedisKeys.family` | STRING `"1"`. TTL refresh 토큰 TTL, 회전마다 다시 늘어난다(절대 상한은 #67). 폐기 = DEL |
+  | `auth:refresh-token:{fingerprint}` | auth `RefreshTokenRedisKeys.token` | HASH `{memberId, familyId, rotatedAt?, siblings?}`. TTL `min(refresh 토큰 TTL, family 상한까지 남은 시간)` — HSET 과 같은 Lua 에서 PEXPIRE (`security-guide.md` §2-3) |
+  | `auth:refresh-family:{familyId}` | auth `RefreshTokenRedisKeys.family` | STRING 최초 로그인 시각(epoch ms) — 절대 수명(기본 30일)의 기준이라 회전해도 다시 쓰지 않는다(PEXPIRE 만). TTL `min(refresh 토큰 TTL, 상한까지 남은 시간)`, 회전마다 다시 건다. 폐기 = DEL |
 - `:` 가 들어가는 값(IPv6 등)은 정규화한 뒤 인코딩해 넣는다(예: IPv6 → 16바이트 hex).
 - id 에 원문 토큰·개인정보를 넣지 않는다. 해시(SHA-256 base64url 등)로 넣는다 — `RedisKey.toString()` 이 키 전체를 출력하고, 키는 `MONITOR`·슬로로그에도 남는다.
 - `KEYS` · `SCAN` 패턴으로 지우지 않는다. 묶어서 지울 키는 색인 SET(예: 회원별 refresh 토큰 지문)에 모아 두고 그 SET 으로 지운다.
