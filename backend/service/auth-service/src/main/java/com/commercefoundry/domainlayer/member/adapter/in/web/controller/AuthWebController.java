@@ -66,7 +66,9 @@ public class AuthWebController {
     @Operation(
         summary = "토큰 재발급",
         description = "refresh 토큰을 회전해 새 access · refresh 토큰을 받는다 — 보낸 refresh 토큰은 이제 쓰지 않는다. "
-            + "refresh 토큰 없음 · 형식 오류 401(AUTH_010), 만료 · 로그아웃 · 폐기 401(AUTH_011), 이미 쓴 토큰의 재사용 401(AUTH_012 — 그 로그인의 토큰을 모두 폐기한다)이다. "
+            + "refresh 토큰 없음 · 형식 오류 401(AUTH_010), 만료 · 로그아웃 · 폐기 · 최초 로그인 후 절대 수명(30일) 초과 401(AUTH_011), "
+            + "이미 쓴 토큰의 재사용 401(AUTH_012 — 그 로그인의 토큰을 모두 폐기한다)이다. "
+            + "새 refresh 토큰 수명(refreshTokenExpiresIn)은 14일이되 절대 수명까지 남은 시간이 더 짧으면 그 시간이다. "
             + "같은 토큰을 30초 안에 다시 보내면(동시 요청 · 재시도) 새 토큰을 더 준다(토큰당 3개까지, 넘으면 AUTH_012). "
             + "토큰 저장소 장애는 503(AUTH_013) — 토큰을 버리지 말고 다시 시도한다. access 토큰 없이 호출한다."
     )

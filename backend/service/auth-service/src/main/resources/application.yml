@@ -70,7 +70,7 @@ security:
     issuance:
       private-key: ${JWT_PRIVATE_KEY}
       access-token-ttl: 30m     # 최대 1시간 — 로그아웃 차단 목록 TTL 이 이 상한에 묶인다
-      refresh-token-ttl: 14d    # refresh 토큰 · family 키의 TTL. 회전마다 family TTL 이 다시 이 값으로 늘어난다(절대 상한은 #67)
+      refresh-token-ttl: 14d    # refresh 토큰 · family 키의 TTL. 회전마다 다시 걸리되 auth.token.refresh-family-max-lifetime 을 넘지 않는다
   # 서비스 간 internal API 의 서비스 토큰 (security-guide.md §9). 수명은 기본값(60초)을 쓴다
   internal:
     # 보내는 토큰의 iss 이자 받는 토큰에 있어야 하는 aud — Eureka 서비스 ID
@@ -96,6 +96,11 @@ auth:
     # 유예 안에서 한 토큰으로 내줄 수 있는 형제 토큰 수. 넘으면 재사용 감지로 family 를 폐기한다 — 훔친 토큰으로 유예 동안 새 토큰을 마구 받지 못하게.
     # 0 이상 10 이하가 아니면 기동하지 않는다
     refresh-reuse-grace-max-siblings: 3
+    # 로그인(family) 하나의 절대 수명 — 최초 로그인 시각부터 잰다 (#67, security-guide.md §2-3). 회전해도 이 시간을 넘겨 이어지지 않고,
+    # 넘기면 재발급이 401 AUTH_011(재로그인)이다. 상한이 가까우면 새 refresh 토큰 TTL 을 남은 시간으로 줄인다.
+    # 30일 — refresh TTL 14일의 약 두 배로, 자주 쓰는 사용자도 한 달에 한 번은 다시 로그인한다.
+    # 0 이하이거나 security.jwt.issuance.refresh-token-ttl 보다 짧으면 기동하지 않는다(AuthTokenProperties · AuthTokenBeansConfig)
+    refresh-family-max-lifetime: 30d
 
 swagger:
   # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다
