@@ -128,6 +128,8 @@ Info → Presenter → Response
   트랜잭션을 Facade 에 걸지 않는다.** DB 커넥션을 잡은 채 원격 응답을 기다리게 되고, 원격 호출이
   성공한 뒤 롤백되면 "PG 는 승인했는데 우리 DB 에는 없는" 상태가 생긴다. 외부 호출을 트랜잭션 밖에
   두고 DB 구간만 Processor 단위로 `@Transactional` 을 건다. **왜 좁혔는지 메서드 주석으로 남긴다.**
+- **의도적으로 느린 CPU 작업(비밀번호 해시 — BCrypt)** 도 같은 예외다. 트랜잭션 안에서 하면 해시 시간만큼 DB 커넥션을 쥔다.
+  해시는 트랜잭션 밖에서 만들고 저장 구간만 Processor 에 `@Transactional` 을 건다 (예: auth `MemberWebFacade#signUp`).
 
 ### Processor
 

@@ -178,6 +178,10 @@ public final class ProductValidationMessage {
   FK 컬럼은 `(FK: target_table.id)` 를 명시한다: `@Column(name = "product_id", comment = "상품 아이디 (FK: product.id)")`.
   다른 서비스 테이블을 가리키면 `(외부 FK: product-service product.id)` 로 적는다 — DB 제약은 걸 수 없다.
 - 상태가 있는 엔티티(주문·결제·재고)는 **낙관적 락(`@Version`)** 을 기본으로 검토한다.
+- 아이디(Snowflake)를 직접 넣는 엔티티는 Spring Data `save` 가 새 행도 merge(SELECT 후 INSERT)로 다룬다. `@Version Long` 이 있으면 버전 null 이 새 행이고,
+  버전이 없는 추가 전용 엔티티(이력)는 `Persistable` 의 `isNew()` 를 "감사 시각이 아직 없다" 로 둔다 (예: auth `MemberAgreementEntity`).
+- 유니크 키 위반 · 버전 충돌을 도메인 오류(409)로 바꿔야 하는 저장은 어댑터에서 `saveAndFlush` 로 바로 내보내고 그 자리에서 바꾼다 —
+  커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 바꿀 자리가 없다. 제약은 예외 메시지가 아니라 Hibernate 가 준 제약 이름으로 가린다 (예: auth `MemberRepositoryAdapter`).
 
 ### 9-2. 필드 타입
 

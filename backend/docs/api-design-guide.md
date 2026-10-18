@@ -146,6 +146,41 @@ return ResponseEntity.ok().body(Response.success(response));
 - 표시 포맷(천 단위 구분, 소수점)은 프론트가 `currency` 로 정한다. 서버가 포맷된 문자열을 내리지 않는다.
 - 이 계약은 FE 와 합의한 것이므로 바꿀 때는 `seonghoho` 에게 먼저 알린다.
 
+### 2-4. 회원 · 인증 (auth-service)
+
+| API | 인가 | 성공 | 주요 오류 |
+|-----|------|------|-----------|
+| `POST /api/v1/auth/sign-up` | `permitAll()` | 201 `{memberId}` — 토큰은 주지 않는다(로그인을 따로 한다) | 400 `AUTH_1xx` · 409 `AUTH_002` |
+| `GET /api/v1/members/me` | `isAuthenticated()` | 200 `{memberId, email, name, phone, marketingAgreed}` | 401 `SECURITY_001` · 404 `AUTH_003` |
+| `PATCH /api/v1/members/me` | `isAuthenticated()` | 200 바뀐 내 정보 — `{name?, phone?, marketingAgreed?}` 중 보낸 칸만 바꾼다 | 400 `AUTH_1xx` · 404 `AUTH_003` · 409 `AUTH_004` |
+
+오류 코드의 정본은 `MemberErrorCode` · `MemberValidationMessage` 다. 접두어는 서비스 단위 `AUTH_` 이고, 로그인 · 토큰(#4 A3 · A4)이 `AUTH_010~` 을 이어 쓴다.
+
+| 코드 | HTTP | 뜻 |
+|------|------|----|
+| `AUTH_001` | 400 | 로그인 실패 — 이메일 없음 · 비밀번호 틀림 · 관리자 계정을 구분하지 않는다. 401 은 토큰 거절에만 쓴다 (#4 결정 5, 로그인은 A3) |
+| `AUTH_002` | 409 | 이미 가입된 이메일. 사전 조회를 함께 지난 동시 가입은 유니크 키(`uk_member_email`) 위반을 같은 코드로 바꾼다. 계정 존재를 드러내는 것은 감수한 위험이다 (`security-guide.md` §10) |
+| `AUTH_003` | 404 | 토큰은 유효하지만 회원이 없다 |
+| `AUTH_004` | 409 | 같은 회원을 다른 요청이 먼저 고쳤다(낙관적 락 — 마케팅 동의만 바꿔도 회원 버전이 오른다). 다시 조회한 뒤 보낸다 |
+| `AUTH_100` | 400 | 깨진 JSON · 본문 없음 · 타입 불일치 (필드는 `fieldErrors` 로 밝힌다) |
+| `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115 |
+
+입력 규칙
+
+- **이메일** — 254자 이하, 도메인에 점이 있는 형식. 앞뒤를 포함해 공백이 있으면 거절한다(103 — 프론트가 trim 해서 보낸다).
+  소문자로 바꿔 저장 · 조회하므로(`Member.normalizeEmail`) 대소문자만 다른 이메일은 같은 회원이다. DB 도 `ck_member_email_normalized`(`email = lower(email)`)로 강제한다.
+- **비밀번호** — 8~64자, 영문 · 숫자를 1자 이상씩 포함하고 공백 없는 ASCII 출력 문자(영문 · 숫자 · 특수문자)만. ASCII 로 묶는 이유는 BCrypt 가
+  72바이트까지만 쓰기 때문이다(64자 ASCII = 64바이트). 저장은 `BCryptPasswordEncoder`(강도 10) 해시뿐이고 원문 · 해시를 로그 · 응답에 싣지 않는다.
+- **이름** — 1~50자, 앞뒤 공백을 지우고 저장한다. 공백만인 값은 가입에서는 필수 누락(107), 내 정보 수정에서는 114 다 —
+  가입은 필수 칸이라 `@NotBlank` 로, 수정은 선택 칸이라 "보냈다면 공백만은 안 된다" 로 검사한다.
+- **전화번호** — 선택. 국내 휴대폰(`01012345678` · `010-1234-5678`)을 받고 숫자만 저장한다. 가입에서 빈 문자열은 109 다.
+  내 정보 수정에서는 빈 문자열(`""`)만 "지우기" 이고, 공백만 있는 값은 109 다. 해외 번호는 영문 스토어 회원가입에서 넓힌다.
+- 저장된 값은 검증 없이 읽는다(`Member.restore`) — 이관(#19) 데이터가 지금 규칙 밖이어도 조회 · 로그인은 된다. 규칙은 가입 · 수정 때 바꾸는 칸에만 건다.
+- **동의** — 가입 때 `agreements.{termsOfService, privacyPolicy, marketing}` 세 칸을 모두 보낸다. 앞의 둘은 `true` 여야 한다.
+  세 칸 모두 동의 이력(`member_agreement`, 추가만 한다)에 한 줄씩 남고 약관 버전은 서버 설정 `auth.agreement.versions.*` 다 — 클라이언트가 보내지 않는다.
+  마케팅 현재 상태는 그 회원의 가장 최근 마케팅 행이고, 내 정보 수정에서 값이 바뀔 때만 한 줄 더한다.
+- 역할은 요청으로 받지 않는다. 가입은 언제나 `CUSTOMER` 다. 관리자 계정은 같은 `member` 테이블에 `role=ADMIN` 으로 따로 만든다(#6).
+
 ## 3. 계층 흐름
 
 ```text
@@ -196,6 +231,9 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 }
 ```
 
+- 본문 검증(`@Valid @RequestBody`)은 인자를 만들 때 돌아 `@PreAuthorize`(메서드 호출 시점)보다 **먼저**다. 인증이 필요한 쓰기 API 에
+  익명이 틀린 본문을 보내면 401 이 아니라 400(`{DOMAIN}_1xx`)이 나온다 — 검증 규칙은 공개 정보라 막지 않는다. 인가 스모크의 익명 401 케이스는
+  올바른 본문으로 보낸다 (예: `AuthServiceSecuritySmokeTest`).
 - 소유 확인은 Facade 첫 줄에서 한다 — 주문 상세는 `orderId` 와 JWT 의 memberId 가 모두 맞아야 조회된다.
 - 비회원 주문을 지원하면 주문번호 + 주문 비밀번호(해시)로 조회한다. 별도 이슈에서 확정한다.
 
