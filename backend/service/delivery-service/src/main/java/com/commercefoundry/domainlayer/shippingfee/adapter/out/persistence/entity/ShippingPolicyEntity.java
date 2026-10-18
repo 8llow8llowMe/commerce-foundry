@@ -19,7 +19,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 도서산간 구간은 {@link ShippingRemoteAreaEntity} 가 가진다. 교체는 조건부 UPDATE 한 문장(버전 확인 + 증가)으로 하고 이 엔티티에 변경 메서드를 두지 않는다
+ * 범위(국내 · 해외)마다 한 행이다. 국내의 도서산간 구간은 {@link ShippingRemoteAreaEntity}, 해외의 국가 그룹 · 국가 · 무게 구간은
+ * {@link ShippingZoneEntity} · {@link ShippingZoneCountryEntity} · {@link ShippingZoneRateEntity} 가 가진다. 관세 · 부가세 안내 문구는 해외 행만 쓴다.
+ * 교체는 조건부 UPDATE 한 문장(버전 확인 + 증가)으로 하고 이 엔티티에 변경 메서드를 두지 않는다
  * ({@code ShippingPolicyRepository#updateIfVersionMatches}).
  *
  * <p>check 제약은 금액 · 통화 짝과 음수 · 0 금지를 DB 에서도 막는다 — 매퍼({@code MoneyColumns})와 도메인이 읽을 때 실패하는 데이터가 애초에 들어오지 않게.
@@ -44,7 +46,8 @@ import lombok.NoArgsConstructor;
         @CheckConstraint(
             name = "ck_shipping_policy_free_shipping_threshold_currency",
             constraint = "free_shipping_threshold_currency is null or free_shipping_threshold_currency = base_fee_currency"
-        )
+        ),
+        @CheckConstraint(name = "ck_shipping_policy_customs_notice_scope", constraint = "customs_notice is null or scope = 'INTERNATIONAL'")
     }
 )
 @Getter
@@ -58,7 +61,7 @@ public class ShippingPolicyEntity extends BaseEntity {
     private Long id;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "scope", nullable = false, length = 20, comment = "배송 범위 (DOMESTIC). 범위마다 정책이 하나다")
+    @Column(name = "scope", nullable = false, length = 20, comment = "배송 범위 (DOMESTIC · INTERNATIONAL). 범위마다 정책이 하나다")
     private ShippingScope scope;
 
     @Column(name = "base_fee_amount", nullable = false, comment = "기본 배송비 (0 이상, 최소 화폐 단위)")
@@ -75,6 +78,9 @@ public class ShippingPolicyEntity extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "free_shipping_threshold_currency", length = 3, comment = "무료배송 기준 통화 — 기본 배송비 통화와 같다")
     private CurrencyCode freeShippingThresholdCurrency;
+
+    @Column(name = "customs_notice", length = 1000, comment = "관세 · 부가세 고객 부담 안내 문구 (해외 정책만). 없으면 null")
+    private String customsNotice;
 
     /** null 이면 새 엔티티다 — Spring Data 가 {@code persist} 로 저장한다(아이디를 직접 넣어도 {@code merge} 의 선조회가 없다). 저장하면 0 부터 센다. */
     @Version

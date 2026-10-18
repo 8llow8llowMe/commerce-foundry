@@ -26,11 +26,11 @@ public interface ShippingPolicyRepository extends JpaRepository<ShippingPolicyEn
         update ShippingPolicyEntity p
         set p.baseFeeAmount = :baseFeeAmount, p.baseFeeCurrency = :baseFeeCurrency,
             p.freeShippingThresholdAmount = :freeShippingThresholdAmount, p.freeShippingThresholdCurrency = :freeShippingThresholdCurrency,
-            p.version = p.version + 1, p.updatedAt = :updatedAt
+            p.customsNotice = :customsNotice, p.version = p.version + 1, p.updatedAt = :updatedAt
         where p.id = :id and p.version = :version
         """)
     int updateIfVersionMatches(
         Long id, Long version, long baseFeeAmount, CurrencyCode baseFeeCurrency,
-        Long freeShippingThresholdAmount, CurrencyCode freeShippingThresholdCurrency, Instant updatedAt
+        Long freeShippingThresholdAmount, CurrencyCode freeShippingThresholdCurrency, String customsNotice, Instant updatedAt
     );
 }

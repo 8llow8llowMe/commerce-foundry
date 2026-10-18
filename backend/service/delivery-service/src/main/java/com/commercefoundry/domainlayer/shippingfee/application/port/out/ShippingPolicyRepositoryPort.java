@@ -1,16 +1,16 @@
 package com.commercefoundry.domainlayer.shippingfee.application.port.out;
 
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import java.util.Optional;
 
 /**
- * 배송비 정책과 도서산간 구간. 정책은 배송 범위마다 하나다.
+ * 국내 배송비 정책과 도서산간 구간. 범위를 인자로 받지 않는다 — 해외 행을 국내 모델로 읽는 호출을 포트에서 막는다.
+ * 해외 정책은 {@link InternationalShippingPolicyRepositoryPort} 다.
  */
 public interface ShippingPolicyRepositoryPort {
 
-    /** 도서산간 구간은 시작 우편번호 오름차순이다. */
-    Optional<ShippingPolicy> findByScope(ShippingScope scope);
+    /** 국내({@code DOMESTIC}) 정책. 도서산간 구간은 시작 우편번호 오름차순이다. */
+    Optional<ShippingPolicy> findDomesticPolicy();
 
     /**
      * 정책을 통째로 바꾼다 — 정책 행을 만들거나 고치고, 도서산간 구간은 모두 지운 뒤 새로 넣는다. 호출자의 트랜잭션 안에서 돈다.

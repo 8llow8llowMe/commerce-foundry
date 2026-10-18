@@ -9,9 +9,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 배송 범위 하나의 배송비 정책 — 기본 배송비, 무료배송 기준, 도서산간 구간.
+ * 국내 배송비 정책 — 기본 배송비, 무료배송 기준, 도서산간 구간. 해외는 {@link InternationalShippingPolicy} 다 (같은 {@code shipping_policy} 테이블의 다른 범위 행).
  *
- * <p>만들 때 불변식을 지킨다 — 모든 금액이 같은 통화, 무료배송 기준은 없거나 0 보다 크다, 도서산간 구간은 서로 겹치지 않는다.
+ * <p>만들 때 불변식을 지킨다 — 범위는 국내, 모든 금액이 같은 통화, 무료배송 기준은 없거나 0 보다 크다, 도서산간 구간은 서로 겹치지 않는다.
  * 어긋나면 {@link IllegalArgumentException} 이다. 어드민 입력은 Processor 가 먼저 도메인 오류 코드로 거절하므로 여기까지 오는 위반은 코드 · 데이터 오류다.
  *
  * @param freeShippingThreshold 무료배송 기준 주문 금액. null 이면 무료배송이 없다
@@ -30,6 +30,10 @@ public record ShippingPolicy(
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(baseFee, "baseFee");
         Objects.requireNonNull(remoteAreas, "remoteAreas");
+        if (scope != ShippingScope.DOMESTIC) {
+            // 해외 행을 국내 모델로 읽으면 국가 그룹 · 무게 구간을 잃은 채 계산한다 — 매퍼 · 포트를 잘못 쓴 코드 오류다
+            throw new IllegalArgumentException("국내 배송비 정책 모델은 DOMESTIC 범위만 담습니다: " + scope);
+        }
         CurrencyCode currency = baseFee.currency();
         if (freeShippingThreshold != null) {
             requireCurrency(currency, freeShippingThreshold, "freeShippingThreshold");
@@ -92,8 +96,8 @@ public record ShippingPolicy(
         Money fee = freeShipping ? Money.zero(currency()) : baseFee;
 
         return new ShippingFeeQuote(
-            baseFee, freeShippingThreshold, freeShipping,
-            surcharge, remoteArea.map(RemoteArea::name).orElse(null), fee.plus(surcharge), version
+            ShippingScope.DOMESTIC, baseFee, freeShippingThreshold, freeShipping,
+            surcharge, remoteArea.map(RemoteArea::name).orElse(null), null, null, fee.plus(surcharge), version
         );
     }
 

@@ -14,6 +14,10 @@ snowflake:
   datacenter-id: 1
   worker-id: 5
 
+store:
+  features:
+    international-shipping: true
+
 springdoc:
   api-docs:
     enabled: true

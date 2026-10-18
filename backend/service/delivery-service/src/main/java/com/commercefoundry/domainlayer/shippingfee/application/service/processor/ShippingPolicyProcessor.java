@@ -33,14 +33,14 @@ public class ShippingPolicyProcessor {
 
     /** @return 정책이 아직 없으면 빈 값 */
     public Optional<ShippingPolicy> findDomesticPolicy() {
-        return shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC);
+        return shippingPolicyRepositoryPort.findDomesticPolicy();
     }
 
     /**
      * 정책이 없고 {@code version} 이 null 이면 만든다. 정책이 있으면 {@code version} 이 현재 버전과 같을 때만 바꾼다.
      * 도서산간 구간 아이디는 교체마다 새로 발급한다.
      *
-     * @throws DeliveryException 003 통화 섞임 · 004 구간 순서 · 005 구간 겹침 · 006 버전 충돌
+     * @throws DeliveryException 003 통화 섞임 · 004 구간 순서 · 005 구간 겹침 · 006 버전 충돌 · 012 저장된 정책의 통화 변경
      */
     public ShippingPolicy replaceDomesticPolicy(ShippingPolicyReplaceCommand command) {
         validateCurrencies(command);
@@ -52,6 +52,7 @@ public class ShippingPolicyProcessor {
 
         Optional<ShippingPolicy> current = findDomesticPolicy();
         requireSameVersion(current, command.version());
+        ShippingPolicyCurrencies.requireUnchanged(current.map(ShippingPolicy::currency), command.baseFee().currency());
         long policyId = current.map(ShippingPolicy::id).orElseGet(snowflakeIdGenerator::generateId);
         ShippingPolicy policy = new ShippingPolicy(
             policyId, ShippingScope.DOMESTIC, command.baseFee(), command.freeShippingThreshold(),
