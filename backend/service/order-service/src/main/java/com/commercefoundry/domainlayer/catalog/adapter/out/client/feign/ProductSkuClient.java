@@ -1,7 +1,7 @@
-package com.commercefoundry.domainlayer.cart.adapter.out.client.feign;
+package com.commercefoundry.domainlayer.catalog.adapter.out.client.feign;
 
 import com.commercefoundry.common.dto.Response;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.dto.ProductSkuInternalResponse;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalResponse;
 import com.commercefoundry.security.internal.client.InternalFeignClientConfiguration;
 import java.util.List;
 import org.springframework.cloud.openfeign.FeignClient;

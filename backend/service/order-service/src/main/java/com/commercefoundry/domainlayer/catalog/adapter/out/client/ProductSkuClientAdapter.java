@@ -1,9 +1,9 @@
-package com.commercefoundry.domainlayer.cart.adapter.out.client;
+package com.commercefoundry.domainlayer.catalog.adapter.out.client;
 
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.ProductSkuClient;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.support.ProductInternalResponseSupport;
-import com.commercefoundry.domainlayer.cart.application.port.out.SkuQueryPort;
-import com.commercefoundry.domainlayer.cart.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.ProductSkuClient;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.support.ProductInternalResponseSupport;
+import com.commercefoundry.domainlayer.catalog.application.port.out.SkuQueryPort;
+import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;

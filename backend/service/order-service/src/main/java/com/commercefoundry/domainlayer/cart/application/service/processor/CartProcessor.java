@@ -6,10 +6,10 @@ import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
 import com.commercefoundry.domainlayer.cart.application.exception.CartException;
 import com.commercefoundry.domainlayer.cart.application.model.CartMergeSkip;
 import com.commercefoundry.domainlayer.cart.application.model.CartMergeSkipReason;
-import com.commercefoundry.domainlayer.cart.application.model.CartSku;
 import com.commercefoundry.domainlayer.cart.application.port.out.CartItemRepositoryPort;
 import com.commercefoundry.domainlayer.cart.domain.model.CartItem;
 import com.commercefoundry.domainlayer.cart.domain.model.CustomOptions;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogSku;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 장바구니 줄의 DB 구간. 원격 SKU 조회는 Facade 가 이 트랜잭션 밖에서 먼저 끝내고 결과({@link CartSku})만 넘긴다 —
+ * 장바구니 줄의 DB 구간. 원격 SKU 조회는 Facade 가 이 트랜잭션 밖에서 먼저 끝내고 결과({@link CatalogSku})만 넘긴다 —
  * DB 커넥션을 잡은 채 product-service 응답을 기다리지 않게 메서드마다 트랜잭션을 좁힌다 ({@code architecture-guide.md} §3 Facade).
  *
  * <p>소유 확인은 회원 아이디로만 한다 — 다른 회원의 줄은 없는 줄과 같이 {@code CART_ITEM_NOT_FOUND}(404)다.
@@ -47,12 +47,12 @@ public class CartProcessor {
     /**
      * 담기. 같은 줄(SKU · 맞춤 제작 입력)이 있으면 수량을 더하고, 없으면 새 줄을 만든다.
      *
-     * @param sku 담을 수 있는지 이미 확인한 SKU ({@link CartSkuProcessor#getAddableSku})
+     * @param sku 담을 수 있는지 이미 확인한 SKU ({@link #rejectionOf} 가 null 이었다)
      * @throws CartException {@code CART_QUANTITY_EXCEEDED} — 합계가 상한을 넘는다. {@code CART_ITEM_LIMIT_EXCEEDED} — 새 줄인데 이미 50줄이다
      */
     @Transactional
-    public void addItem(long memberId, CartItemAddCommand command, CartSku sku) {
-        int maxQuantity = sku.maxQuantity();
+    public void addItem(long memberId, CartItemAddCommand command, CatalogSku sku) {
+        int maxQuantity = CartItem.maxQuantity(sku.maxQuantityPerOrder());
         List<CartItem> items = cartItemRepositoryPort.findAllByMemberId(memberId);
         Optional<CartItem> sameLine = findSameLine(items, command.skuId(), command.customOptions());
 
@@ -107,24 +107,24 @@ public class CartProcessor {
      *
      * <p>멱등하지 않다 — 같은 요청을 다시 보내면 수량이 한 번 더 더해진다. 피해는 상한이 제한한다(장바구니라 결제 · 재고와 무관하다).
      *
-     * @param skus 병합 요청의 SKU 를 한 번에 조회한 결과 ({@link CartSkuProcessor#findSkus}). 없는 SKU 는 키가 없다
+     * @param skus 병합 요청의 SKU 를 한 번에 조회한 결과 ({@code CatalogSkuProcessor#findSkus}). 없는 SKU 는 키가 없다
      * @return 건너뛴 항목 — 요청 순서
      */
     @Transactional
-    public List<CartMergeSkip> merge(long memberId, CartMergeCommand command, Map<Long, CartSku> skus) {
+    public List<CartMergeSkip> merge(long memberId, CartMergeCommand command, Map<Long, CatalogSku> skus) {
         List<CartItem> lines = new ArrayList<>(cartItemRepositoryPort.findAllByMemberId(memberId));
         Map<Long, CartItem> changed = new LinkedHashMap<>();
         List<CartMergeSkip> skipped = new ArrayList<>();
 
         for (int position = 0; position < command.items().size(); position++) {
             CartItemAddCommand item = command.items().get(position);
-            CartSku sku = skus.get(item.skuId());
-            CartMergeSkipReason rejection = rejectionOf(sku, item);
+            CatalogSku sku = skus.get(item.skuId());
+            CartMergeSkipReason rejection = rejectionOf(sku, !item.customOptions().isEmpty());
             if (rejection != null) {
                 skipped.add(new CartMergeSkip(position, item.skuId(), rejection));
                 continue;
             }
-            int maxQuantity = sku.maxQuantity();
+            int maxQuantity = CartItem.maxQuantity(sku.maxQuantityPerOrder());
             int index = indexOfSameLine(lines, item.skuId(), item.customOptions());
             if (index >= 0) {
                 CartItem current = lines.get(index);
@@ -154,18 +154,40 @@ public class CartProcessor {
         return List.copyOf(skipped);
     }
 
-    /** SKU 만으로 정해지는 건너뜀 사유. 담을 수 있으면 null. */
-    private static CartMergeSkipReason rejectionOf(CartSku sku, CartItemAddCommand item) {
+    /**
+     * 새로 담을 수 있는가 — SKU 만으로 정해지는 거절 사유. 담기({@code CartWebFacade} 가 {@code CART_002~004} 로 바꾼다)와 병합(건너뜀 사유)이 함께 쓰는
+     * 장바구니의 유일한 담기 판정이다. 아래 순서로 처음 맞는 것이고, I/O 가 없어 트랜잭션을 걸지 않는다.
+     *
+     * <ol>
+     *   <li>SKU 를 찾지 못했다 — {@link CartMergeSkipReason#SKU_NOT_FOUND}</li>
+     *   <li>품절 · 판매 종료 · 숨김 — {@link CartMergeSkipReason#NOT_PURCHASABLE}</li>
+     *   <li>맞춤 제작 상품이 아닌데 맞춤 제작 입력이 있다 — {@link CartMergeSkipReason#CUSTOM_OPTION_NOT_ALLOWED}</li>
+     * </ol>
+     *
+     * @param sku 조회한 SKU. 찾지 못했으면 null
+     * @return 담을 수 있으면 null
+     */
+    public CartMergeSkipReason rejectionOf(CatalogSku sku, boolean hasCustomOptions) {
         if (sku == null) {
             return CartMergeSkipReason.SKU_NOT_FOUND;
         }
         if (!sku.purchasable()) {
             return CartMergeSkipReason.NOT_PURCHASABLE;
         }
-        if (!sku.accepts(!item.customOptions().isEmpty())) {
+        if (hasCustomOptions && !sku.customOrder()) {
             return CartMergeSkipReason.CUSTOM_OPTION_NOT_ALLOWED;
         }
         return null;
+    }
+
+    /**
+     * 이미 담긴 줄의 현재 수량 상한 — {@link CartItem#maxQuantity}. SKU 를 찾지 못하면(삭제 등) {@link CartItem#MAX_QUANTITY} 다 —
+     * 상한 정보가 없을 뿐 사용자가 줄을 고치거나 지우는 것은 막지 않는다. I/O 가 없다.
+     *
+     * @param sku 조회한 SKU. 찾지 못했으면 null
+     */
+    public int maxQuantityOf(CatalogSku sku) {
+        return sku == null ? CartItem.MAX_QUANTITY : CartItem.maxQuantity(sku.maxQuantityPerOrder());
     }
 
     private CartItem findOwnedItem(long memberId, long cartItemId) {

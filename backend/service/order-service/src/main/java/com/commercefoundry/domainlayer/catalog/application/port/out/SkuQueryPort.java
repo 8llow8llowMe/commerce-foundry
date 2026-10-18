@@ -1,6 +1,6 @@
-package com.commercefoundry.domainlayer.cart.application.port.out;
+package com.commercefoundry.domainlayer.catalog.application.port.out;
 
-import com.commercefoundry.domainlayer.cart.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
 import java.util.Collection;
 import java.util.List;
 
@@ -14,7 +14,7 @@ public interface SkuQueryPort {
      *
      * @param skuIds 중복은 한 번만 조회한다
      * @return 요청 순서(중복 제거 후). 없는 SKU 는 빠진다
-     * @throws com.commercefoundry.domainlayer.cart.application.exception.CartException {@code CART_PRODUCT_SERVICE_UNAVAILABLE} — 서킷 오픈 · 전송 실패 · 오류 응답
+     * @throws com.commercefoundry.domainlayer.catalog.application.exception.CatalogException {@code PRODUCT_SERVICE_UNAVAILABLE}(503) — 서킷 오픈 · 전송 실패 · 오류 응답
      */
     List<SkuQueryResult> findSkus(Collection<Long> skuIds);
 }

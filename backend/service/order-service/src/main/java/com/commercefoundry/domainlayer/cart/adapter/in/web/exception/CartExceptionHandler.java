@@ -4,6 +4,8 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.exception.ValidationErrorSupport;
 import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
 import com.commercefoundry.domainlayer.cart.application.exception.CartException;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -32,6 +34,17 @@ public class CartExceptionHandler {
             log.warn("cart request failed. code={}", errorCode.getCode(), exception);
         }
         return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), exception.getMessage()));
+    }
+
+    /**
+     * catalog 컨텍스트(SKU 조회)의 실패를 장바구니 코드로 번역한다 — catalog 는 자기 advice 가 없고, 장바구니 API 계약은 {@code CART_008}(503)이다
+     * ({@code architecture-guide.md} §3). {@link CatalogErrorCode} 는 지금 503 하나뿐이라 모두 {@code CART_PRODUCT_SERVICE_UNAVAILABLE} 이다.
+     */
+    @ExceptionHandler(CatalogException.class)
+    public ResponseEntity<Response<Void>> handleCatalogException(CatalogException exception) {
+        CartErrorCode errorCode = CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE;
+        log.warn("cart request failed. code={}, cause={}", errorCode.getCode(), exception.getErrorCode().getCode(), exception);
+        return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), errorCode.getMessage()));
     }
 
     /** {@code @RequestBody @Valid} 실패. 코드는 {@code CartValidationMessage} 접두어를 따른다. */

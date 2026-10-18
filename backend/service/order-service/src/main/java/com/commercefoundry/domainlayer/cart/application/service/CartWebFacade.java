@@ -5,15 +5,18 @@ import com.commercefoundry.domainlayer.cart.adapter.in.web.dto.response.CartResp
 import com.commercefoundry.domainlayer.cart.adapter.in.web.presenter.CartWebPresenter;
 import com.commercefoundry.domainlayer.cart.application.command.CartItemAddCommand;
 import com.commercefoundry.domainlayer.cart.application.command.CartMergeCommand;
+import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
+import com.commercefoundry.domainlayer.cart.application.exception.CartException;
 import com.commercefoundry.domainlayer.cart.application.info.CartInfo;
 import com.commercefoundry.domainlayer.cart.application.info.CartMergeInfo;
 import com.commercefoundry.domainlayer.cart.application.model.CartMergeSkip;
-import com.commercefoundry.domainlayer.cart.application.model.CartSku;
+import com.commercefoundry.domainlayer.cart.application.model.CartMergeSkipReason;
 import com.commercefoundry.domainlayer.cart.application.port.in.CartWebUseCase;
 import com.commercefoundry.domainlayer.cart.application.service.processor.CartProcessor;
-import com.commercefoundry.domainlayer.cart.application.service.processor.CartSkuProcessor;
 import com.commercefoundry.domainlayer.cart.application.service.processor.CartViewProcessor;
 import com.commercefoundry.domainlayer.cart.domain.model.CartItem;
+import com.commercefoundry.domainlayer.catalog.application.service.processor.CatalogSkuProcessor;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogSku;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +29,9 @@ import org.springframework.stereotype.Service;
  * 원격 응답을 기다린다. SKU 조회는 트랜잭션 밖에서 먼저 하고, DB 구간만 {@link CartProcessor} 의 메서드 단위 트랜잭션으로 좁힌다
  * ({@code architecture-guide.md} §3 Facade).
  *
+ * <p>SKU 조회는 catalog 컨텍스트의 {@link CatalogSkuProcessor} 가 하고, 담기 가능 판정 · 수량 상한 같은 장바구니 규칙은 {@link CartProcessor} 가 정한다.
+ * 조회 실패({@code CatalogException})는 {@code CartExceptionHandler} 가 {@code CART_008}(503)로 번역한다 ({@code architecture-guide.md} §3).
+ *
  * <p>쓰기 뒤 돌려주는 장바구니는 쓰기 트랜잭션이 커밋된 뒤 다시 읽는다 — 쓰기는 커밋됐는데 그 뒤 SKU 조회가 실패하면 503 이다(쓰기는 남는다).
  */
 @Service
@@ -33,7 +39,7 @@ import org.springframework.stereotype.Service;
 public class CartWebFacade implements CartWebUseCase {
 
     private final CartProcessor cartProcessor;
-    private final CartSkuProcessor cartSkuProcessor;
+    private final CatalogSkuProcessor catalogSkuProcessor;
     private final CartViewProcessor cartViewProcessor;
     private final CartWebPresenter cartWebPresenter;
 
@@ -46,7 +52,7 @@ public class CartWebFacade implements CartWebUseCase {
     /** SKU 를 먼저 확인해(원격) 담을 수 없으면 DB 에 닿지 않고 거절한다. */
     @Override
     public CartResponse addItem(long memberId, CartItemAddCommand command) {
-        CartSku sku = cartSkuProcessor.getAddableSku(command.skuId(), !command.customOptions().isEmpty());
+        CatalogSku sku = getAddableSku(command.skuId(), !command.customOptions().isEmpty());
         cartProcessor.addItem(memberId, command, sku);
         return getCart(memberId);
     }
@@ -63,7 +69,7 @@ public class CartWebFacade implements CartWebUseCase {
     @Override
     public CartResponse changeQuantity(long memberId, long cartItemId, int quantity) {
         CartItem item = cartProcessor.getItem(memberId, cartItemId);
-        int maxQuantity = cartSkuProcessor.maxQuantityOf(item.skuId());
+        int maxQuantity = maxQuantityOf(item.skuId());
         cartProcessor.changeQuantity(memberId, cartItemId, quantity, maxQuantity);
         return getCart(memberId);
     }
@@ -83,7 +89,7 @@ public class CartWebFacade implements CartWebUseCase {
     public CartMergeResponse merge(long memberId, CartMergeCommand command) {
         Set<Long> skuIds = new LinkedHashSet<>();
         command.items().forEach(item -> skuIds.add(item.skuId()));
-        Map<Long, CartSku> skus = cartSkuProcessor.findSkus(skuIds);
+        Map<Long, CatalogSku> skus = catalogSkuProcessor.findSkus(skuIds);
         List<CartMergeSkip> skippedItems = cartProcessor.merge(memberId, command, skus);
         return cartWebPresenter.toMergeResponse(new CartMergeInfo(loadCart(memberId), skippedItems));
     }
@@ -92,6 +98,34 @@ public class CartWebFacade implements CartWebUseCase {
         List<CartItem> items = cartProcessor.getItems(memberId);
         Set<Long> skuIds = new LinkedHashSet<>();
         items.forEach(item -> skuIds.add(item.skuId()));
-        return cartViewProcessor.compose(items, cartSkuProcessor.findSkus(skuIds));
+        return cartViewProcessor.compose(items, catalogSkuProcessor.findSkus(skuIds));
+    }
+
+    /**
+     * 새로 담을 SKU(원격 조회). 판정은 {@link CartProcessor#rejectionOf} 하나이고, 여기서는 그 사유를 오류 코드로 바꿔 던지기만 한다 —
+     * {@code SKU_NOT_FOUND} → {@code CART_002}(404), {@code NOT_PURCHASABLE} → {@code CART_003}(409), {@code CUSTOM_OPTION_NOT_ALLOWED} → {@code CART_004}(400).
+     */
+    private CatalogSku getAddableSku(long skuId, boolean hasCustomOptions) {
+        CatalogSku sku = catalogSkuProcessor.findSku(skuId).orElse(null);
+        CartMergeSkipReason rejection = cartProcessor.rejectionOf(sku, hasCustomOptions);
+        if (rejection != null) {
+            throw new CartException(errorCodeOf(rejection));
+        }
+        return sku;
+    }
+
+    private static CartErrorCode errorCodeOf(CartMergeSkipReason rejection) {
+        return switch (rejection) {
+            case SKU_NOT_FOUND -> CartErrorCode.CART_SKU_NOT_FOUND;
+            case NOT_PURCHASABLE -> CartErrorCode.CART_SKU_NOT_PURCHASABLE;
+            case CUSTOM_OPTION_NOT_ALLOWED -> CartErrorCode.CART_CUSTOM_OPTION_NOT_ALLOWED;
+            // rejectionOf 는 SKU 만으로 정해지는 위 셋만 돌려준다 — 줄 수 · 수량 상한은 담기 트랜잭션 안에서 CART_005 · CART_006 으로 거절한다
+            case LINE_LIMIT_EXCEEDED, QUANTITY_LIMIT_EXCEEDED -> throw new IllegalStateException("담기 판정이 아닌 사유입니다: " + rejection);
+        };
+    }
+
+    /** 이미 담긴 줄의 현재 수량 상한(원격 조회) — {@link CartProcessor#maxQuantityOf}. */
+    private int maxQuantityOf(long skuId) {
+        return cartProcessor.maxQuantityOf(catalogSkuProcessor.findSku(skuId).orElse(null));
     }
 }
