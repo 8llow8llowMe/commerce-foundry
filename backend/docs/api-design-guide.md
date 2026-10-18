@@ -177,6 +177,8 @@ Info → Presenter → Response
 
 - 고객·어드민 API(`adapter/in/web` · `adapter/in/admin`)의 **모든 핸들러에 `@PreAuthorize` 를 단다.** 서비스 URL 단계가 열려 있어(default-allow)
   빠뜨리면 공개 API 가 된다. 공개 API 도 `@PreAuthorize("permitAll()")` 로 명시하고, 로그인 필요는 `isAuthenticated()`, 어드민은 `hasRole('ADMIN')` 이다.
+  본문 검증(`@RequestBody @Valid`)은 인자 바인딩 단계라 메서드 보안보다 먼저 돈다 — `isAuthenticated()` 쓰기 API 에 익명으로 형식이 틀린 본문을 보내면
+  401 이 아니라 400 이다(형식이 맞으면 401 · `SECURITY_001`). 400 응답에는 리소스 데이터가 없고 유스케이스에 닿지 않는다 (처음 확인: 장바구니 #12).
 - internal API(`adapter/in/internal`, `/internal/**`)의 **모든 핸들러에 허용 호출자를 `@PreAuthorize` 로 단다** —
   `hasAuthority('SERVICE_order-service')`, 여럿이면 `hasAnyAuthority(...)`. `isAuthenticated()` · `permitAll()` 은 쓰지 않는다(서비스 5종 누구나 부르게 된다).
   사용자 JWT 는 internal 로 오지 않으므로 사용자 식별이 필요하면 memberId 를 요청 본문 · 파라미터로 받는다 — 호출 서비스가 사용자 JWT 로

@@ -53,6 +53,7 @@ com.commercefoundry
   |  |  |- in/web               고객(스토어프론트) API — /api/v1/**
   |  |  |  |- controller
   |  |  |  |- dto/{request,response,item}
+  |  |  |  |- dto/validation    그 진입 요청 DTO 전용 커스텀 Bean Validation 제약 + Validator (다른 진입과 공유하지 않는다, 필요할 때만)
   |  |  |  |- exception         (*ExceptionHandler)
   |  |  |  \- presenter
   |  |  |- in/admin             어드민 콘솔 API — /api/v1/admin/** (ADMIN 전용)
