@@ -140,11 +140,13 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 - 서비스 포트를 외부에 publish 하지 않는다. 운영은 네트워크 정책(보안 그룹 · NetworkPolicy)으로 서비스 간 통신만 허용한다.
 - 게이트웨이(#3)가 막는 방식 — 정규화되지 않은 경로(`..` · `%2e` · `;` · `//` 등)는 `GatewayRequestGuardFilter` 가 라우팅 전에 `GATEWAY_004`(400)로 끊는다.
-  그 뒤로는 원문 경로와 정규화 경로가 같으므로, `/internal/**` 은 어느 라우트(`ServiceRoute`)에도 없어 `GATEWAY_001`(404)이 된다.
+  그 뒤로는 원문 경로와 정규화 경로가 같다. `/internal` 과 그 아래는 **같은 필터가 명시적으로 404 `GATEWAY_001`** 로 끊는다(#65) —
+  매핑 없는 경로와 같은 응답이라 존재를 드러내지 않고, 토큰 검증 · 차단 목록 조회 전에 끝나며, 대소문자 · 비예약 문자 인코딩(`/%69nternal`)도 같은 경로로 본다.
+  라우트(`ServiceRoute`)에도 `/internal` 은 없다 — 라우트 부재가 두 번째 방어다.
 - 그래서 규칙은 둘이다. 게이트웨이 라우트 predicate 는 `/internal` 을 포함할 수 있는 패턴(`/**` 같은 catch-all)을 쓰지 않는다.
   경로를 바꾸는 필터(`StripPrefix` · `RewritePath` · `SetPath`)는 **와일드카드 없는 고정 경로 라우트에만** 쓴다 — 바뀐 경로도 고정값이라
   `/internal` · `/api/v1/admin` 이 만들어질 수 없다. 예: local · dev 전용 `GatewayDevRouteConfig`(`/health/{service-id}` · `/docs/{service-id}/v3/api-docs/{group}`).
-  접두어만 떼는 라우트(`/docs/{service-id}/**` + `StripPrefix`)는 만들지 않는다. 명시적 `/internal` 거부 필터는 #4 에서 검토한다.
+  접두어만 떼는 라우트(`/docs/{service-id}/**` + `StripPrefix`)는 만들지 않는다.
 - 서비스 간 인증은 §9 다(결정 #43, 구현 #51). 1단계는 공용 키라 호출자가 "선언" 이므로 사설망 전제를 걷어 내지 않는다.
 
 ### 5-2. 도메인 advice 와의 관계
@@ -302,6 +304,8 @@ auth 는 기동할 때 자기 `JWT_PRIVATE_KEY` 와 `JWT_PUBLIC_KEY` 가 한 쌍
 - 어드민 패턴(`GatewaySecurityConfig.ADMIN_PATH_PATTERN`)은 서비스 체인(§5-1)과 같은 `/api/v1/admin/**` 다. 경로 판정은 `PathPattern` 이라
   비예약 문자 인코딩(`/api/v1/%61dmin/x`)도 같은 경로로 본다.
 - **`Authorization` 헤더는 그대로 하류로 넘긴다.** 서비스가 같은 토큰을 다시 검증한다. 검증 결과를 `X-Member-Id` 같은 헤더로 만들지 않는다 (§1).
+  **`Authorization` 이 둘 이상인 요청은 `GatewayRequestGuardFilter` 가 보안 체인 전에 400 `GATEWAY_004` 로 끊는다**(#65) — 게이트웨이가 검증한 토큰과
+  서비스가 쓰는 토큰이 하류 구성에 따라 갈라질 수 있어서다. 어느 토큰도 검증하지 않고, 헤더 값은 로그에 남기지 않는다.
 - 매니저는 `oauth2ResourceServer().authenticationManagerResolver(...)` 로 경로마다 고른다(`GatewayAuthenticationManagerResolver`).
   Spring Security 7 은 resolver 와 `jwt()` DSL 을 같이 쓸 수 없어(`validateConfiguration`) 디코더 · 변환기를 resolver 안에서 조합한다.
   두 매니저(fail-open · fail-closed)는 기동 때 한 번 만들고 디코더를 나눠 쓴다. resolver 를 빈으로 내보내 Boot 가 생성 비밀번호 사용자를 만들지 않는다.
