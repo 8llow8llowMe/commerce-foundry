@@ -57,6 +57,10 @@ class ShippingFeeInternalControllerTest {
     private static final String VALID_BODY = """
         {"orderAmount": {"amount": 99000, "currency": "KRW"}, "countryCode": "KR", "postalCode": "63100"}
         """;
+    /** 해외는 우편번호 없이 무게만으로 견적한다. */
+    private static final String INTERNATIONAL_BODY = """
+        {"orderAmount": {"amount": 10000, "currency": "USD"}, "countryCode": "US", "weightGrams": 500}
+        """;
 
     @Autowired
     private MockMvcTester mvc;
@@ -84,6 +88,7 @@ class ShippingFeeInternalControllerTest {
                 .remoteAreaName("제주")
                 .freeShippingThreshold(MoneyItem.of(100_000, "KRW"))
                 .shippingPolicyVersion(3L)
+                .scope("DOMESTIC")
                 .build());
 
             MvcTestResult result = post(VALID_BODY);
@@ -95,7 +100,59 @@ class ShippingFeeInternalControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataBody.remoteAreaName").isEqualTo("제주");
             assertThat(result).bodyJson().extractingPath("$.dataBody.freeShippingThreshold.amount").asNumber().isEqualTo(100_000);
             assertThat(result).bodyJson().extractingPath("$.dataBody.shippingPolicyVersion").asNumber().isEqualTo(3);
-            verify(shippingFeeInternalUseCase).quote(new ShippingFeeQuoteCommand(Money.of(99_000, CurrencyCode.KRW), "KR", new PostalCode("63100")));
+            assertThat(result).bodyJson().extractingPath("$.dataBody.scope").isEqualTo("DOMESTIC");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.shippingZoneName").isNull();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.weightFee").isNull();
+            verify(shippingFeeInternalUseCase).quote(ShippingFeeQuoteCommand.domestic(Money.of(99_000, CurrencyCode.KRW), new PostalCode("63100")));
+        }
+
+        @Test
+        @WithMockUser(authorities = ORDER_SERVICE)
+        @DisplayName("국내 요청에 무게를 실어도 무시한다(0 이어도 400 이 아니다) — 하위 호환")
+        void domesticIgnoresWeight() {
+            post("""
+                {"orderAmount": {"amount": 99000, "currency": "KRW"}, "countryCode": "KR", "postalCode": "63100", "weightGrams": 0}
+                """);
+
+            verify(shippingFeeInternalUseCase).quote(ShippingFeeQuoteCommand.domestic(Money.of(99_000, CurrencyCode.KRW), new PostalCode("63100")));
+        }
+
+        @Test
+        @WithMockUser(authorities = ORDER_SERVICE)
+        @DisplayName("해외 요청은 무게를 command 로 넘기고 우편번호는 버린다 — 응답에 범위 · 국가 그룹 · 무게 요금이 실린다")
+        void internationalQuote() {
+            given(shippingFeeInternalUseCase.quote(any())).willReturn(ShippingFeeQuoteInternalResponse.builder()
+                .shippingFee(MoneyItem.of(2_000, "USD"))
+                .baseFee(MoneyItem.of(500, "USD"))
+                .remoteAreaSurcharge(MoneyItem.of(0, "USD"))
+                .shippingPolicyVersion(2L)
+                .scope("INTERNATIONAL")
+                .shippingZoneName("아시아")
+                .weightFee(MoneyItem.of(1_500, "USD"))
+                .build());
+
+            MvcTestResult result = post("""
+                {"orderAmount": {"amount": 10000, "currency": "USD"}, "countryCode": "JP", "postalCode": "100-0001", "weightGrams": 800}
+                """);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.scope").isEqualTo("INTERNATIONAL");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.shippingZoneName").isEqualTo("아시아");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.weightFee.amount").asNumber().isEqualTo(1_500);
+            verify(shippingFeeInternalUseCase).quote(ShippingFeeQuoteCommand.international(Money.of(10_000, CurrencyCode.USD), "JP", 800));
+        }
+
+        @ParameterizedTest(name = "postalCode={0}")
+        @CsvSource(nullValues = "NULL", value = {"NULL", "''", "'   '"})
+        @WithMockUser(authorities = ORDER_SERVICE)
+        @DisplayName("해외 우편번호가 없거나 비었거나 공백뿐이면 없는 값으로 보고 통과한다")
+        void blankInternationalPostalCodeIsAbsent(String postalCode) {
+            String postalCodeJson = postalCode == null ? "null" : "\"" + postalCode + "\"";
+
+            assertThat(post("""
+                {"orderAmount": {"amount": 10000, "currency": "USD"}, "countryCode": "JP", "postalCode": %s, "weightGrams": 800}
+                """.formatted(postalCodeJson))).hasStatusOk();
+            verify(shippingFeeInternalUseCase).quote(ShippingFeeQuoteCommand.international(Money.of(10_000, CurrencyCode.USD), "JP", 800));
         }
 
         @Test
@@ -133,7 +190,15 @@ class ShippingFeeInternalControllerTest {
         void destinationNotSupported() {
             given(shippingFeeInternalUseCase.quote(any())).willThrow(new DeliveryException(DeliveryErrorCode.DESTINATION_NOT_SUPPORTED));
 
-            assertError(post(VALID_BODY.replace("\"KR\"", "\"US\"")), HttpStatus.BAD_REQUEST, "DELIVERY_002");
+            assertError(post(INTERNATIONAL_BODY), HttpStatus.BAD_REQUEST, "DELIVERY_002");
+        }
+
+        @Test
+        @DisplayName("국가 그룹의 최대 무게 초과는 400 · DELIVERY_011")
+        void weightNotSupported() {
+            given(shippingFeeInternalUseCase.quote(any())).willThrow(new DeliveryException(DeliveryErrorCode.WEIGHT_NOT_SUPPORTED, 2_001, 2_000));
+
+            assertError(post(INTERNATIONAL_BODY), HttpStatus.BAD_REQUEST, "DELIVERY_011");
         }
 
         @Test
@@ -167,6 +232,9 @@ class ShippingFeeInternalControllerTest {
             "{\"orderAmount\": {\"amount\": 1000, \"currency\": \"KRW\"}, \"postalCode\": \"63100\"}                 | DELIVERY_105 | countryCode",
             "{\"orderAmount\": {\"amount\": 1000, \"currency\": \"KRW\"}, \"countryCode\": \"kr\", \"postalCode\": \"63100\"} | DELIVERY_106 | countryCode",
             "{\"orderAmount\": {\"amount\": 1000, \"currency\": \"KRW\"}, \"countryCode\": \"KR\"}                    | DELIVERY_107 | postalCode",
+            "{\"orderAmount\": {\"amount\": 1000, \"currency\": \"USD\"}, \"countryCode\": \"US\"}                    | DELIVERY_118 | weightGrams",
+            "{\"orderAmount\": {\"amount\": 1000, \"currency\": \"USD\"}, \"countryCode\": \"US\", \"weightGrams\": 0} | DELIVERY_119 | weightGrams",
+            "{\"orderAmount\": {\"amount\": 1000, \"currency\": \"USD\"}, \"countryCode\": \"US\", \"weightGrams\": 500, \"postalCode\": \"10001#\"} | DELIVERY_120 | postalCode",
             "{\"orderAmount\": {\"amount\": 1000, \"currency\": \"KRW\"}, \"countryCode\": \"KR\", \"postalCode\": \"6310\"} | DELIVERY_108 | postalCode",
             "{\"orderAmount\": {\"amount\": 1000, \"currency\": \"JPY\"}, \"countryCode\": \"KR\", \"postalCode\": \"63100\"} | DELIVERY_100 | orderAmount.currency",
             "{\"orderAmount\":                                                                                       | DELIVERY_100 | request"

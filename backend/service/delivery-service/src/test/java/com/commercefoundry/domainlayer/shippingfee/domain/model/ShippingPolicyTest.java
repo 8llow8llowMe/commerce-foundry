@@ -168,6 +168,24 @@ class ShippingPolicyTest {
         void zeroThresholdIsRejected() {
             assertThatThrownBy(() -> policy(krw(0), List.of())).isInstanceOf(IllegalArgumentException.class);
         }
+
+        /** 해외 행을 국내 모델로 읽으면 국가 그룹 · 무게 구간을 잃은 채 계산한다 — 매퍼 · 포트 오용을 바로 드러낸다. */
+        @Test
+        @DisplayName("국내 정책 모델은 DOMESTIC 범위만 담는다")
+        void onlyDomesticScope() {
+            assertThatThrownBy(() -> new ShippingPolicy(1L, ShippingScope.INTERNATIONAL, krw(3_000), null, List.of(), VERSION, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("국내 견적은 범위 DOMESTIC 이고 국가 그룹 · 무게 요금이 null 이다")
+        void domesticQuoteHasNoZone() {
+            ShippingFeeQuote quote = policy(null, List.of()).quote(krw(10_000), postalCode(MAINLAND));
+
+            assertThat(quote.scope()).isEqualTo(ShippingScope.DOMESTIC);
+            assertThat(quote.shippingZoneName()).isNull();
+            assertThat(quote.weightFee()).isNull();
+        }
     }
 
     @Nested

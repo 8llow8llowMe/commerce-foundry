@@ -5,6 +5,9 @@ import static org.mockito.BDDMockito.given;
 
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.item.RemoteAreaItem;
+import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.item.ShippingZoneItem;
+import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.item.ShippingZoneRateItem;
+import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.response.InternationalShippingPolicyResponse;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.response.ShippingPolicyResponse;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingFeeWebUseCase;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
@@ -28,6 +31,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 class ShippingFeeWebControllerTest {
 
     private static final String PATH = "/api/v1/shipping-fees/policy";
+    private static final String INTERNATIONAL_PATH = "/api/v1/shipping-fees/international-policy";
 
     @Autowired
     private MockMvcTester mvc;
@@ -79,6 +83,43 @@ class ShippingFeeWebControllerTest {
 
         assertThat(result).hasStatusOk();
         assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
+        assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
+    }
+
+    @Test
+    @DisplayName("해외 정책: 익명으로 200 — 그룹 · 국가 코드 · 무게 구간 · 안내 문구를 내리고 아이디 · 버전은 없다")
+    void internationalPolicyEnvelope() {
+        given(shippingFeeWebUseCase.getInternationalPolicy()).willReturn(InternationalShippingPolicyResponse.builder()
+            .baseFee(MoneyItem.of(500, "USD"))
+            .freeShippingThreshold(MoneyItem.of(20_000, "USD"))
+            .customsNotice("관세는 받는 분 부담")
+            .zones(List.of(ShippingZoneItem.builder()
+                .name("아시아")
+                .countryCodes(List.of("JP", "SG"))
+                .rates(List.of(ShippingZoneRateItem.builder().maxWeightGrams(500).fee(MoneyItem.of(1_000, "USD")).build()))
+                .build()))
+            .build());
+
+        MvcTestResult result = mvc.get().uri(INTERNATIONAL_PATH).exchange();
+
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataBody.baseFee.currency").isEqualTo("USD");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.customsNotice").isEqualTo("관세는 받는 분 부담");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.zones[0].name").isEqualTo("아시아");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.zones[0].countryCodes[1]").isEqualTo("SG");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.zones[0].rates[0].maxWeightGrams").asNumber().isEqualTo(500);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.zones[0].rates[0].fee.amount").asNumber().isEqualTo(1_000);
+        assertThat(result).bodyJson().doesNotHavePath("$.dataBody.version").doesNotHavePath("$.dataBody.shippingPolicyId");
+    }
+
+    @Test
+    @DisplayName("해외 정책: 해외 배송이 꺼졌거나 정책이 없으면 200 이고 dataBody 가 null 이다")
+    void internationalPolicyNotOffered() {
+        given(shippingFeeWebUseCase.getInternationalPolicy()).willReturn(null);
+
+        MvcTestResult result = mvc.get().uri(INTERNATIONAL_PATH).exchange();
+
+        assertThat(result).hasStatusOk();
         assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
     }
 }
