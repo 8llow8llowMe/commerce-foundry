@@ -31,6 +31,8 @@ public class SkuInternalPresenter {
             .purchasable(sku.purchasable())
             .maxQuantityPerOrder(sku.maxQuantityPerOrder())
             .customOrder(sku.customOrder())
+            .weightGrams(sku.weightGrams())
+            .hsCode(sku.hsCode() == null ? null : sku.hsCode().value())
             .build();
     }
 

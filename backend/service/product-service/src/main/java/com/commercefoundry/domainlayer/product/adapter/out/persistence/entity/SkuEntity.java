@@ -25,7 +25,12 @@ import lombok.NoArgsConstructor;
     name = "sku",
     comment = "SKU (상품 × 옵션 값 조합)",
     uniqueConstraints = @UniqueConstraint(name = "uk_sku_product_id_option_value_key", columnNames = {"product_id", "option_value_key"}),
-    check = @CheckConstraint(name = "ck_sku_additional_price_non_negative", constraint = "additional_price_amount >= 0")
+    check = {
+        @CheckConstraint(name = "ck_sku_additional_price_non_negative", constraint = "additional_price_amount >= 0"),
+        @CheckConstraint(name = "ck_sku_weight_grams_positive", constraint = "weight_grams is null or weight_grams > 0"),
+        // 숫자 여부는 도메인(HsCode)이 본다 — 정규식 문법이 H2 와 PostgreSQL 에서 달라 DB 는 길이만 막는다
+        @CheckConstraint(name = "ck_sku_hs_code_length", constraint = "hs_code is null or char_length(hs_code) between 6 and 10")
+    }
 )
 @Getter
 @Builder
@@ -55,4 +60,12 @@ public class SkuEntity extends BaseEntity {
     @Column(name = "sale_status", nullable = false, length = 20,
         comment = "판매 상태 (ON_SALE / STOP_SELLING). 품절은 저장하지 않는다 — 재고에서 유도")
     private SaleStatus saleStatus;
+
+    @Column(name = "weight_grams",
+        comment = "배송 무게 (그램, 1 이상) — 해외 배송비 견적에 쓴다. 해외 판매 상품만 필수, null 이면 미입력")
+    private Integer weightGrams;
+
+    @Column(name = "hs_code", length = 10,
+        comment = "통관 신고용 HS 코드 (숫자 6~10자리) — 해외 판매 상품만 필수, null 이면 미입력")
+    private String hsCode;
 }

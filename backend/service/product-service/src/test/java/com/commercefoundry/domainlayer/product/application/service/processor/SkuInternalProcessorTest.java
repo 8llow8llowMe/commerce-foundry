@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.application.service.processor;
 
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
@@ -13,6 +14,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductOptio
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
@@ -128,6 +130,22 @@ class SkuInternalProcessorTest {
         assertThat(sku.saleStatus()).isEqualTo(SaleAvailability.ON_SALE);
         assertThat(sku.purchasable()).isTrue();
         assertThat(sku.maxQuantityPerOrder()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("SKU 무게 · HS 코드를 싣고, 미입력이면 null 을 그대로 내린다 — 해외 주문 거절은 호출한 쪽이 한다")
+    void weightAndHsCode() {
+        given(skuRepositoryPort.findAllByIds(List.of(1L, 2L))).willReturn(List.of(
+            ProductFixtures.sku(1, PRODUCT_ID, "", 0, SaleStatus.ON_SALE, 450, "6211420000"),
+            noOptionSku(2)
+        ));
+        given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(PRODUCT_ID))).willReturn(List.of(ProductFixtures.product(PRODUCT_ID)));
+        givenNoOptions();
+
+        List<SkuInternalInfo> skus = processor(true).getSkus(List.of(1L, 2L));
+
+        assertThat(skus).extracting(SkuInternalInfo::skuId, SkuInternalInfo::weightGrams, SkuInternalInfo::hsCode)
+            .containsExactly(tuple(1L, 450, new HsCode("6211420000")), tuple(2L, null, null));
     }
 
     /**

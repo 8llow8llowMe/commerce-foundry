@@ -333,12 +333,16 @@
         updated_at timestamp(6) with time zone not null,
         additional_price_amount bigint not null,
         additional_price_currency varchar(3) not null check ((additional_price_currency in ('KRW','USD'))),
+        hs_code varchar(10),
         option_value_key varchar(255) not null,
         product_id bigint not null,
         sale_status varchar(20) not null check ((sale_status in ('ON_SALE','STOP_SELLING'))),
+        weight_grams integer,
         primary key (id),
         constraint uk_sku_product_id_option_value_key unique (product_id, option_value_key),
-        constraint ck_sku_additional_price_non_negative check (additional_price_amount >= 0)
+        constraint ck_sku_additional_price_non_negative check (additional_price_amount >= 0),
+        constraint ck_sku_weight_grams_positive check (weight_grams is null or weight_grams > 0),
+        constraint ck_sku_hs_code_length check (hs_code is null or char_length(hs_code) between 6 and 10)
     );
 
     comment on table product.sku is
@@ -359,6 +363,9 @@
     comment on column product.sku.additional_price_currency is
         '추가금 통화 — 상품 기본 판매가 통화와 같아야 한다';
 
+    comment on column product.sku.hs_code is
+        '통관 신고용 HS 코드 (숫자 6~10자리) — 해외 판매 상품만 필수, null 이면 미입력';
+
     comment on column product.sku.option_value_key is
         '옵션 값 아이디 조합 키 — 값 아이디 오름차순을 쉼표(,)로 이은 문자열. 옵션 없는 상품은 빈 문자열';
 
@@ -367,6 +374,9 @@
 
     comment on column product.sku.sale_status is
         '판매 상태 (ON_SALE / STOP_SELLING). 품절은 저장하지 않는다 — 재고에서 유도';
+
+    comment on column product.sku.weight_grams is
+        '배송 무게 (그램, 1 이상) — 해외 배송비 견적에 쓴다. 해외 판매 상품만 필수, null 이면 미입력';
 
     create table product.stock (
         sku_id bigint not null,

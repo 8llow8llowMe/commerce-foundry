@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.info;
 
+import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
@@ -14,12 +15,14 @@ import lombok.Builder;
  * @param purchasable 상품이 노출 중이고 판매 상태가 판매중일 때만 true (품절이면 false) — 숨긴 상품의 SKU 도 행은 내린다
  * @param maxQuantityPerOrder 1회 주문 최대 수량. null 이면 제한 없음
  * @param customOrder 스토어 기능 플래그와 상품 설정이 모두 켜졌을 때만 true
+ * @param weightGrams SKU 배송 무게 (그램). null 이면 미입력 — 해외 주문에서 거절할지는 호출한 쪽(order-service)이 정한다
+ * @param hsCode 통관 신고용 HS 코드. null 이면 미입력
  */
 @Builder
 public record SkuInternalInfo(
     long skuId, long productId, String productName, List<SkuOptionValueInfo> optionValues, String optionName,
     Money salePrice, Money additionalPrice, SaleAvailability saleStatus, boolean purchasable,
-    Integer maxQuantityPerOrder, boolean customOrder
+    Integer maxQuantityPerOrder, boolean customOrder, Integer weightGrams, HsCode hsCode
 ) {
 
     public SkuInternalInfo {
