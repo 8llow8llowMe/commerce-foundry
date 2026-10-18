@@ -12,6 +12,14 @@ public final class ProductValidationMessage {
     public static final String IDS_SIZE_MAX = "PRODUCT_104:ids 는 최대 100개입니다.";
     public static final String ID_POSITIVE = "PRODUCT_105:id 는 양수여야 합니다.";
 
+    // 어드민 재고 조정 (PATCH /api/v1/admin/stocks/{skuId})
+    public static final String STOCK_QUANTITY_MIN = "PRODUCT_106:quantity 는 0 이상이어야 합니다.";
+    public static final String STOCK_EXPECTED_QUANTITY_MIN = "PRODUCT_107:expectedQuantity 는 0 이상이어야 합니다.";
+    public static final String STOCK_ADJUSTMENT_REASON_REQUIRED = "PRODUCT_108:reason 은 필수입니다.";
+    public static final String STOCK_ADJUSTMENT_MEMO_SIZE_MAX = "PRODUCT_109:memo 는 200자 이하여야 합니다.";
+    public static final String STOCK_ADJUSTMENT_TARGET_REQUIRED = "PRODUCT_110:quantity · stockManaged 중 하나 이상을 보내야 합니다.";
+    public static final String STOCK_EXPECTED_QUANTITY_REQUIRED = "PRODUCT_111:quantity 를 바꾸려면 expectedQuantity 가 필수입니다.";
+
     private ProductValidationMessage() {
     }
 }

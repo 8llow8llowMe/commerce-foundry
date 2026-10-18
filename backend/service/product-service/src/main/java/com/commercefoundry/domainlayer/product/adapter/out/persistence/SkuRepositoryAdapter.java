@@ -31,6 +31,11 @@ public class SkuRepositoryAdapter implements SkuRepositoryPort {
     }
 
     @Override
+    public boolean existsById(long skuId) {
+        return skuRepository.existsById(skuId);
+    }
+
+    @Override
     public List<SkuAggregateQueryResult> aggregateByProductIds(Collection<Long> productIds) {
         if (productIds.isEmpty()) {
             return List.of();

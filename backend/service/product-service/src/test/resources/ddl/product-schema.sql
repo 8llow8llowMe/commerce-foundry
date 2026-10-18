@@ -396,6 +396,61 @@
     comment on column product.stock.stock_managed is
         '재고 관리 여부. false 면 수량과 무관하게 품절이 아니다 (무제한)';
 
+    create table product.stock_adjustment_history (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        admin_member_id bigint not null,
+        after_quantity bigint not null,
+        after_stock_managed boolean not null,
+        before_quantity bigint not null,
+        before_stock_managed boolean not null,
+        delta bigint not null,
+        memo varchar(200),
+        reason varchar(30) not null check ((reason in ('RESTOCK','RECOUNT','DAMAGE','MANAGEMENT_CHANGE','OTHER'))),
+        sku_id bigint not null,
+        primary key (id)
+    );
+
+    comment on table product.stock_adjustment_history is
+        '어드민 재고 조정 이력 (append-only)';
+
+    comment on column product.stock_adjustment_history.id is
+        '재고 조정 이력 아이디 (Snowflake)';
+
+    comment on column product.stock_adjustment_history.created_at is
+        '생성 시각';
+
+    comment on column product.stock_adjustment_history.updated_at is
+        '수정 시각';
+
+    comment on column product.stock_adjustment_history.admin_member_id is
+        '조정한 어드민 회원 아이디 (외부 FK: auth-service 회원 id)';
+
+    comment on column product.stock_adjustment_history.after_quantity is
+        '조정 후 판매 가능 수량';
+
+    comment on column product.stock_adjustment_history.after_stock_managed is
+        '조정 후 재고 관리 여부';
+
+    comment on column product.stock_adjustment_history.before_quantity is
+        '조정 전 판매 가능 수량. 재고 행이 없던 SKU 는 0 (품절)';
+
+    comment on column product.stock_adjustment_history.before_stock_managed is
+        '조정 전 재고 관리 여부. 재고 행이 없던 SKU 는 true (품절)';
+
+    comment on column product.stock_adjustment_history.delta is
+        '수량 변화 (after_quantity - before_quantity)';
+
+    comment on column product.stock_adjustment_history.memo is
+        '조정 메모';
+
+    comment on column product.stock_adjustment_history.reason is
+        '조정 사유 (RESTOCK / RECOUNT / DAMAGE / MANAGEMENT_CHANGE / OTHER)';
+
+    comment on column product.stock_adjustment_history.sku_id is
+        'SKU 아이디 (FK: sku.id)';
+
     create index idx_product_visible_sale_price_amount_id
        on product.product (visible, sale_price_amount, id);
 
@@ -404,3 +459,6 @@
 
     create index idx_product_option_value_product_id
        on product.product_option_value (product_id);
+
+    create index idx_stock_adjustment_history_sku_id_id
+       on product.stock_adjustment_history (sku_id, id);

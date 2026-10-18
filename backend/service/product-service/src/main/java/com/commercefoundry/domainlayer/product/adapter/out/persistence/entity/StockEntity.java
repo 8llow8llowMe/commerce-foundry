@@ -11,6 +11,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Persistable;
 
 /**
  * SKU 재고. SKU 와 1:1 이라 PK 가 {@code sku_id} 다. <b>행이 없는 SKU 는 품절이다</b> — 재고를 등록하지 않은 SKU 가 무제한으로 팔리지 않게 닫힌 기본값을 둔다.
@@ -20,6 +21,9 @@ import lombok.NoArgsConstructor;
  * bulk UPDATE 는 감사 리스너를 거치지 않으므로 {@code updated_at} 을 쿼리에서 직접 세팅한다.
  *
  * <p>음수 수량은 check 제약으로 DB 에서도 막는다 — 조건부 차감이 깨져도 마이너스 재고가 저장되지 않게.
+ *
+ * <p>{@link Persistable} 로 새 행이면 {@code merge} 가 아니라 {@code persist}(INSERT) 하게 한다. PK 를 직접 넣는 엔티티라 기본 {@code save} 는
+ * merge 로 가는데, 두 어드민이 동시에 첫 재고를 등록하면 늦은 쪽의 merge 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.
  */
 @Entity
 @Table(
@@ -31,7 +35,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class StockEntity extends BaseEntity {
+public class StockEntity extends BaseEntity implements Persistable<Long> {
 
     @Id
     @Column(name = "sku_id", comment = "SKU 아이디 (PK · FK: sku.id)")
@@ -42,4 +46,15 @@ public class StockEntity extends BaseEntity {
 
     @Column(name = "available_quantity", nullable = false, comment = "판매 가능 수량 (선점분 제외, 0 이상)")
     private long availableQuantity;
+
+    @Override
+    public Long getId() {
+        return skuId;
+    }
+
+    /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다. */
+    @Override
+    public boolean isNew() {
+        return getCreatedAt() == null;
+    }
 }

@@ -107,7 +107,7 @@ class ProductServiceApplicationTests {
 
         assertThat(tables).contains(
             "category", "product", "product_category", "product_option_group", "product_option_value",
-            "sku", "stock", "product_image", "product_custom_order_field"
+            "sku", "stock", "stock_adjustment_history", "product_image", "product_custom_order_field"
         );
     }
 
