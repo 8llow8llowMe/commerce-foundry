@@ -161,4 +161,11 @@ class MemberTest {
 
         assertThat(member.toString()).contains("7").doesNotContain(HASH, "secret@example.com", "홍길동", "01012345678");
     }
+
+    @Test
+    @DisplayName("고객 로그인은 CUSTOMER 만 쓸 수 있다 — 관리자 계정은 고객 로그인 대상이 아니다")
+    void onlyCustomerCanUseCustomerLogin() {
+        assertThat(Member.restore(1L, "a@example.com", HASH, "홍길동", null, MemberRole.CUSTOMER, 0L).isCustomer()).isTrue();
+        assertThat(Member.restore(1L, "a@example.com", HASH, "관리자", null, MemberRole.ADMIN, 0L).isCustomer()).isFalse();
+    }
 }

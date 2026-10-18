@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.member.application.command.MemberProfileU
 import com.commercefoundry.domainlayer.member.application.command.SignUpCommand;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
+import com.commercefoundry.domainlayer.member.application.port.in.AuthWebUseCase;
 import com.commercefoundry.domainlayer.member.application.port.in.MemberWebUseCase;
 import com.commercefoundry.domainlayer.member.domain.model.SignUpAgreements;
 import com.commercefoundry.security.principal.MemberRole;
@@ -58,6 +59,10 @@ class MemberWebControllerTest {
 
     @MockitoBean
     private MemberWebUseCase memberWebUseCase;
+
+    /** {@link AuthWebController} 의 로그인 · 토큰 의존. 이 테스트는 부르지 않는다 — 계약은 {@code AuthWebControllerTest}. */
+    @MockitoBean
+    private AuthWebUseCase authWebUseCase;
 
     @Nested
     @DisplayName("POST /api/v1/auth/sign-up")
