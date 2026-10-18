@@ -2,6 +2,7 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.global.properties.AgreementProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManagerFactory;
@@ -18,6 +19,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -46,6 +49,14 @@ class AuthServiceApplicationTests {
         assertThat(applicationContext.getBeansOfType(GroupedOpenApi.class).values())
             .extracting(GroupedOpenApi::getGroup)
             .containsExactlyInAnyOrder("customer", "admin");
+    }
+
+    @Test
+    @DisplayName("비밀번호 인코더는 BCrypt 하나이고, 약관 버전은 application.yml 값으로 바인딩된다")
+    void passwordEncoderAndAgreementVersions() {
+        assertThat(applicationContext.getBean(PasswordEncoder.class)).isInstanceOf(BCryptPasswordEncoder.class);
+        assertThat(applicationContext.getBean(AgreementProperties.class).versions())
+            .isEqualTo(new AgreementProperties.Versions("2026-10-01", "2026-10-01", "2026-10-01"));
     }
 
     @Test
