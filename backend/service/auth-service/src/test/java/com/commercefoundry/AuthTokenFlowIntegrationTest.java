@@ -1,0 +1,274 @@
+package com.commercefoundry;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
+import com.commercefoundry.domainlayer.member.domain.model.Member;
+import com.commercefoundry.security.principal.MemberRole;
+import com.commercefoundry.security.support.TestTokens;
+import com.commercefoundry.support.InMemoryRefreshTokenStore;
+import com.jayway.jsonpath.JsonPath;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.assertj.MockMvcTester;
+import org.springframework.test.web.servlet.assertj.MvcTestResult;
+
+/**
+ * 로그인 → access 만료 → 재발급 → 로그아웃 → 재사용 거부 흐름을 실제 빈 구성(보안 체인 · Facade · Processor · 발급기 · H2)으로 본다 (#4 완료 기준).
+ *
+ * <p>토큰 저장소 포트만 인메모리 스텁({@link InMemoryRefreshTokenStore}, {@code @Primary})으로 바꾼다 — 그래서 다른 {@code @SpringBootTest} 와 컨텍스트를 같이 쓰지 않는다.
+ * 실제 Lua · 키 · TTL 은 {@code RefreshTokenRedisAdapterTest}(Testcontainers)가 본다.
+ */
+@SpringBootTest
+@ActiveProfiles("test")
+@AutoConfigureMockMvc
+class AuthTokenFlowIntegrationTest {
+
+    private static final String PASSWORD = "mokoyuri2026!";
+    private static final String LOGIN_FAILED_MESSAGE = "이메일 또는 비밀번호가 올바르지 않습니다.";
+    private static final String LOGIN = "/api/v1/auth/login";
+    private static final String REISSUE = "/api/v1/auth/token/reissue";
+    private static final String LOGOUT = "/api/v1/auth/logout";
+    private static final String ME = "/api/v1/members/me";
+
+    @TestConfiguration
+    static class StoreConfig {
+
+        @Bean
+        @Primary
+        InMemoryRefreshTokenStore inMemoryRefreshTokenStore() {
+            return new InMemoryRefreshTokenStore();
+        }
+    }
+
+    @Autowired
+    private MockMvcTester mvc;
+
+    @Autowired
+    private InMemoryRefreshTokenStore store;
+
+    @Autowired
+    private MemberRepositoryPort memberRepositoryPort;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @AfterEach
+    void restoreStore() {
+        store.unavailable = false;
+    }
+
+    @Test
+    @DisplayName("가입 → 로그인 → 만료된 access 는 401 · SECURITY_002 → 재발급 → 새 access 로 200 → 로그아웃 → 같은 refresh 재발급은 401 · AUTH_011, jti 는 차단 목록에 들어간다")
+    void loginReissueLogout() {
+        String email = uniqueEmail();
+        long memberId = signUp(email);
+
+        MvcTestResult login = login(email.toUpperCase(), PASSWORD);
+        assertThat(login).hasStatusOk();
+        assertThat(login.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).contains("no-store");
+        String loginBody = body(login);
+        String refreshToken = JsonPath.read(loginBody, "$.dataBody.refreshToken");
+        assertThat(refreshToken).hasSize(43);
+        assertThat(JsonPath.<Integer>read(loginBody, "$.dataBody.accessTokenExpiresIn")).isBetween(1790, 1800);
+        assertThat(JsonPath.<Integer>read(loginBody, "$.dataBody.refreshTokenExpiresIn")).isEqualTo((int) Duration.ofDays(14).toSeconds());
+        assertThat(loginBody).doesNotContain(PASSWORD, "$2", "password");
+        assertThat(subjectOf(JsonPath.read(loginBody, "$.dataBody.accessToken"))).isEqualTo(String.valueOf(memberId));
+
+        String expired = TestTokens.issuer(Instant.now().minus(Duration.ofHours(2))).issueAccessToken(memberId, MemberRole.CUSTOMER).tokenValue();
+        MvcTestResult expiredMe = mvc.get().uri(ME).header(HttpHeaders.AUTHORIZATION, "Bearer " + expired).exchange();
+        assertThat(expiredMe).hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(expiredMe).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("SECURITY_002");
+
+        MvcTestResult reissue = reissue(refreshToken);
+        assertThat(reissue).hasStatusOk();
+        assertThat(reissue.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).contains("no-store");
+        String newAccess = JsonPath.read(body(reissue), "$.dataBody.accessToken");
+        String newRefresh = JsonPath.read(body(reissue), "$.dataBody.refreshToken");
+        assertThat(newRefresh).hasSize(43).isNotEqualTo(refreshToken);
+
+        MvcTestResult me = mvc.get().uri(ME).header(HttpHeaders.AUTHORIZATION, "Bearer " + newAccess).exchange();
+        assertThat(me).hasStatusOk();
+        assertThat(me).bodyJson().extractingPath("$.dataBody.memberId").asString().isEqualTo(String.valueOf(memberId));
+
+        MvcTestResult logout = logout(newAccess, "{\"refreshToken\":\"" + newRefresh + "\"}");
+        assertThat(logout).hasStatusOk();
+        assertThat(logout).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
+        assertThat(logout).bodyJson().extractingPath("$.dataBody").isNull();
+        assertThat(store.accessTokenRevoked(jtiOf(newAccess))).as("TTL 61분은 AccessTokenRevocationRedisAdapter 테스트가 본다").isTrue();
+
+        assertRejected(reissue(newRefresh), HttpStatus.UNAUTHORIZED, "AUTH_011");
+        assertRejected(reissue(refreshToken), HttpStatus.UNAUTHORIZED, "AUTH_011");
+    }
+
+    @Test
+    @DisplayName("회원 없음 · 비밀번호 틀림 · 관리자 계정은 모두 400 · AUTH_001 같은 문구다")
+    void loginFailuresLookTheSame() {
+        String customer = uniqueEmail();
+        signUp(customer);
+        String admin = uniqueEmail();
+        memberRepositoryPort.save(Member.restore(System.nanoTime(), admin, passwordEncoder.encode(PASSWORD), "관리자", null, MemberRole.ADMIN, null));
+
+        assertRejected(login(uniqueEmail(), PASSWORD), HttpStatus.BAD_REQUEST, "AUTH_001", LOGIN_FAILED_MESSAGE);
+        assertRejected(login(customer, "wrong-password1"), HttpStatus.BAD_REQUEST, "AUTH_001", LOGIN_FAILED_MESSAGE);
+        assertRejected(login(admin, PASSWORD), HttpStatus.BAD_REQUEST, "AUTH_001", LOGIN_FAILED_MESSAGE);
+    }
+
+    @Test
+    @DisplayName("refresh 토큰이 없거나 · 비었거나 · 발급 모양이 아니면 모두 401 · AUTH_010 이다")
+    void malformedRefreshToken() {
+        assertRejected(reissue("not-a-refresh-token"), HttpStatus.UNAUTHORIZED, "AUTH_010");
+        assertRejected(reissue("a".repeat(42) + "="), HttpStatus.UNAUTHORIZED, "AUTH_010");
+        assertRejected(reissue(""), HttpStatus.UNAUTHORIZED, "AUTH_010");
+        assertRejected(mvc.post().uri(REISSUE).contentType(MediaType.APPLICATION_JSON).content("{}").exchange(), HttpStatus.UNAUTHORIZED, "AUTH_010");
+    }
+
+    @Test
+    @DisplayName("모양은 맞지만 모르는 refresh 토큰은 401 · AUTH_011 이다")
+    void unknownRefreshToken() {
+        assertRejected(reissue("A".repeat(43)), HttpStatus.UNAUTHORIZED, "AUTH_011");
+    }
+
+    @Test
+    @DisplayName("같은 refresh 토큰을 유예 안에 다시 보내면 새 토큰(형제)을 하나 더 준다 — 둘 다 이어서 쓸 수 있다")
+    void reuseInGraceIssuesSibling() {
+        String email = uniqueEmail();
+        signUp(email);
+        String refreshToken = JsonPath.read(body(login(email, PASSWORD)), "$.dataBody.refreshToken");
+
+        String first = JsonPath.read(body(reissue(refreshToken)), "$.dataBody.refreshToken");
+        MvcTestResult again = reissue(refreshToken);
+
+        assertThat(again).hasStatusOk();
+        String sibling = JsonPath.read(body(again), "$.dataBody.refreshToken");
+        assertThat(sibling).isNotEqualTo(first);
+        assertThat(reissue(first)).hasStatusOk();
+        assertThat(reissue(sibling)).hasStatusOk();
+    }
+
+    @Test
+    @DisplayName("로그아웃은 남의 refresh 토큰 family 를 건드리지 않고, refresh 토큰이 없어도 access 는 차단하고 200 이다")
+    void logoutLeavesOthersAlone() {
+        String mine = uniqueEmail();
+        long myId = signUp(mine);
+        String other = uniqueEmail();
+        signUp(other);
+        String otherRefresh = JsonPath.read(body(login(other, PASSWORD)), "$.dataBody.refreshToken");
+        String myAccess = JsonPath.read(body(login(mine, PASSWORD)), "$.dataBody.accessToken");
+
+        assertThat(logout(myAccess, "{\"refreshToken\":\"" + otherRefresh + "\"}")).hasStatusOk();
+        assertThat(reissue(otherRefresh)).as("남의 로그인은 그대로다").hasStatusOk();
+
+        String anotherAccess = TestTokens.issuer(Instant.now()).issueAccessToken(myId, MemberRole.CUSTOMER).tokenValue();
+        assertThat(logout(anotherAccess, "{}")).hasStatusOk();
+        assertThat(store.accessTokenRevoked(jtiOf(anotherAccess))).isTrue();
+        assertThat(logout(anotherAccess, "{\"refreshToken\":\"broken\"}")).as("형식이 틀린 refresh 도 200(멱등)").hasStatusOk();
+
+        String thirdAccess = TestTokens.issuer(Instant.now()).issueAccessToken(myId, MemberRole.CUSTOMER).tokenValue();
+        MvcTestResult withoutBody = mvc.post().uri(LOGOUT).header(HttpHeaders.AUTHORIZATION, "Bearer " + thirdAccess).exchange();
+        assertThat(withoutBody).as("본문 없이도 access 를 막고 200").hasStatusOk();
+        assertThat(store.accessTokenRevoked(jtiOf(thirdAccess))).isTrue();
+    }
+
+    @Test
+    @DisplayName("유예 안 형제는 토큰당 3개까지다 — 넷째 재사용은 401 · AUTH_012 이고 그 family 의 토큰이 모두 무효가 된다")
+    void siblingCapRevokesFamily() {
+        String email = uniqueEmail();
+        signUp(email);
+        String refreshToken = JsonPath.read(body(login(email, PASSWORD)), "$.dataBody.refreshToken");
+        String rotated = JsonPath.read(body(reissue(refreshToken)), "$.dataBody.refreshToken");
+        for (int i = 0; i < 3; i++) {
+            assertThat(reissue(refreshToken)).hasStatusOk();
+        }
+
+        assertRejected(reissue(refreshToken), HttpStatus.UNAUTHORIZED, "AUTH_012");
+        assertRejected(reissue(rotated), HttpStatus.UNAUTHORIZED, "AUTH_011");
+    }
+
+    @Test
+    @DisplayName("토큰 저장소 장애면 로그인 · 재발급 · 로그아웃이 503 · AUTH_013 이다")
+    void storeUnavailable() {
+        String email = uniqueEmail();
+        long memberId = signUp(email);
+        String access = TestTokens.issuer(Instant.now()).issueAccessToken(memberId, MemberRole.CUSTOMER).tokenValue();
+        store.unavailable = true;
+
+        assertRejected(login(email, PASSWORD), HttpStatus.SERVICE_UNAVAILABLE, "AUTH_013");
+        assertRejected(reissue("A".repeat(43)), HttpStatus.SERVICE_UNAVAILABLE, "AUTH_013");
+        assertRejected(logout(access, "{}"), HttpStatus.SERVICE_UNAVAILABLE, "AUTH_013");
+    }
+
+    private long signUp(String email) {
+        String body = """
+            {"email":"%s","password":"%s","name":"홍길동","agreements":{"termsOfService":true,"privacyPolicy":true,"marketing":false}}
+            """.formatted(email, PASSWORD);
+        MvcTestResult result = mvc.post().uri("/api/v1/auth/sign-up").contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+        assertThat(result).hasStatus(HttpStatus.CREATED);
+        return Long.parseLong(JsonPath.read(body(result), "$.dataBody.memberId"));
+    }
+
+    private MvcTestResult login(String email, String password) {
+        return mvc.post().uri(LOGIN).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, password)).exchange();
+    }
+
+    private MvcTestResult reissue(String refreshToken) {
+        return mvc.post().uri(REISSUE).contentType(MediaType.APPLICATION_JSON).content("{\"refreshToken\":\"%s\"}".formatted(refreshToken)).exchange();
+    }
+
+    private MvcTestResult logout(String accessToken, String body) {
+        return mvc.post().uri(LOGOUT).header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    }
+
+    private static void assertRejected(MvcTestResult result, HttpStatus status, String code) {
+        assertThat(result).hasStatus(status);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
+    }
+
+    private static void assertRejected(MvcTestResult result, HttpStatus status, String code, String message) {
+        assertRejected(result, status, code);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo(message);
+    }
+
+    private static String body(MvcTestResult result) {
+        try {
+            return result.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        } catch (java.io.UnsupportedEncodingException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private static String jtiOf(String accessToken) {
+        return JsonPath.read(payloadOf(accessToken), "$.jti");
+    }
+
+    private static String subjectOf(String accessToken) {
+        return JsonPath.read(payloadOf(accessToken), "$.sub");
+    }
+
+    private static String payloadOf(String accessToken) {
+        return new String(Base64.getUrlDecoder().decode(accessToken.split("\\.")[1]), StandardCharsets.UTF_8);
+    }
+
+    private static String uniqueEmail() {
+        return "token-" + UUID.randomUUID() + "@example.com";
+    }
+}

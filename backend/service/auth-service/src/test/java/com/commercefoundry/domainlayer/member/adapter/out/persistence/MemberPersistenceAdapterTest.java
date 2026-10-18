@@ -80,6 +80,8 @@ class MemberPersistenceAdapterTest {
         assertThat(saved.version()).isZero();
         assertThat(memberRepositoryPort.existsByEmail("customer@example.com")).isTrue();
         assertThat(memberRepositoryPort.existsByEmail("other@example.com")).isFalse();
+        assertThat(memberRepositoryPort.findByEmail("customer@example.com")).hasValueSatisfying(member -> assertThat(member.id()).isEqualTo(1L));
+        assertThat(memberRepositoryPort.findByEmail("other@example.com")).isEmpty();
         assertThat(memberRepositoryPort.findById(1L)).hasValueSatisfying(member -> assertThat(member)
             .extracting(Member::email, Member::passwordHash, Member::name, Member::phone, Member::role, Member::version)
             .containsExactly("customer@example.com", HASH, "홍길동", "01012345678", MemberRole.CUSTOMER, 0L));
