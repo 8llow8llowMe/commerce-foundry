@@ -16,6 +16,7 @@ describe('classifyFailure', () => {
     [403, 'forbidden'],
     [404, 'notFound'],
     [409, 'conflict'],
+    [429, 'rateLimited'],
     [502, 'unknownOutcome'],
     [504, 'unknownOutcome'],
     [503, 'unavailable'],
@@ -40,6 +41,12 @@ describe('ApiError', () => {
   it('서버 메시지가 없으면 kind 기본 문구를 쓴다', () => {
     expect(new ApiError('unavailable', 503, 'GATEWAY_002', null).message).toBe(
       '서비스가 잠시 응답하지 않습니다. 잠시 후 다시 시도해 주세요.',
+    );
+  });
+
+  it('rateLimited 기본 문구는 잠시 후 다시 시도하라는 안내다', () => {
+    expect(new ApiError('rateLimited', 429, 'GATEWAY_006', null).message).toBe(
+      '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
     );
   });
 

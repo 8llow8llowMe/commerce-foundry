@@ -10,6 +10,7 @@ export type ApiErrorKind =
   | 'conflict'
   | 'unknownOutcome'
   | 'unavailable'
+  | 'rateLimited'
   | 'server';
 
 const DEFAULT_MESSAGES: Record<ApiErrorKind, string> = {
@@ -22,6 +23,7 @@ const DEFAULT_MESSAGES: Record<ApiErrorKind, string> = {
   conflict: '요청을 처리하고 있습니다. 잠시 후 결과를 확인해 주세요.',
   unknownOutcome: '처리 결과를 확인하지 못했습니다. 잠시 후 결과를 확인해 주세요.',
   unavailable: '서비스가 잠시 응답하지 않습니다. 잠시 후 다시 시도해 주세요.',
+  rateLimited: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
   server: '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.',
 };
 
@@ -31,6 +33,8 @@ export class ApiError extends Error {
   readonly status: number | null;
   readonly code: string | null;
   readonly fieldErrors: FieldErrorItem[];
+  /** 429 의 `Retry-After`(초). 헤더가 없거나 읽을 수 없으면 null 이다. */
+  readonly retryAfterSec: number | null;
 
   constructor(
     kind: ApiErrorKind,
@@ -38,12 +42,14 @@ export class ApiError extends Error {
     code: string | null,
     message: string | null,
     fieldErrors: FieldErrorItem[] = [],
+    retryAfterSec: number | null = null,
   ) {
     super(message ?? DEFAULT_MESSAGES[kind]);
     this.kind = kind;
     this.status = status;
     this.code = code;
     this.fieldErrors = fieldErrors;
+    this.retryAfterSec = retryAfterSec;
   }
 }
 
@@ -59,6 +65,8 @@ export function classifyFailure(status: number, header: DataHeader): ApiErrorKin
       return 'notFound';
     case 409:
       return 'conflict';
+    case 429:
+      return 'rateLimited';
     case 502:
     case 504:
       return 'unknownOutcome';

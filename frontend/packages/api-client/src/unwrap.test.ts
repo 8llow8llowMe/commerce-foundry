@@ -60,6 +60,56 @@ describe('unwrap', () => {
     await expect(unwrap(res)).rejects.toMatchObject({ kind: 'validation', fieldErrors });
   });
 
+  it('429 는 rateLimited 이고 Retry-After 초를 싣는다', async () => {
+    const res = new Response(
+      JSON.stringify({
+        dataHeader: {
+          success: false,
+          resultCode: 'GATEWAY_006',
+          resultMessage: null,
+          fieldErrors: null,
+        },
+        dataBody: null,
+      }),
+      { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '4' } },
+    );
+    await expect(unwrap(res)).rejects.toMatchObject({
+      kind: 'rateLimited',
+      status: 429,
+      code: 'GATEWAY_006',
+      retryAfterSec: 4,
+    });
+  });
+
+  it('429 에 Retry-After 가 없으면 retryAfterSec 은 null 이다', async () => {
+    const res = envelope(429, {
+      dataHeader: {
+        success: false,
+        resultCode: 'GATEWAY_006',
+        resultMessage: null,
+        fieldErrors: null,
+      },
+      dataBody: null,
+    });
+    await expect(unwrap(res)).rejects.toMatchObject({ kind: 'rateLimited', retryAfterSec: null });
+  });
+
+  it('429 가 아니면 Retry-After 가 있어도 retryAfterSec 을 싣지 않는다', async () => {
+    const res = new Response(
+      JSON.stringify({
+        dataHeader: {
+          success: false,
+          resultCode: 'GATEWAY_002',
+          resultMessage: null,
+          fieldErrors: null,
+        },
+        dataBody: null,
+      }),
+      { status: 503, headers: { 'retry-after': '10' } },
+    );
+    await expect(unwrap(res)).rejects.toMatchObject({ kind: 'unavailable', retryAfterSec: null });
+  });
+
   it('봉투가 아닌 JSON 은 invalidResponse 다', async () => {
     await expect(unwrap(envelope(403, { message: 'nope' }))).rejects.toMatchObject({
       kind: 'invalidResponse',
