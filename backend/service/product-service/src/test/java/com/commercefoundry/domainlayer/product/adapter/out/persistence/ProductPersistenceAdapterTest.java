@@ -12,11 +12,13 @@ import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.Pr
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductOptionGroupEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductOptionValueEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.StockEntity;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductCustomOrderFieldMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductImageMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductOptionMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.SkuMapperImpl;
+import com.commercefoundry.domainlayer.product.application.mapper.StockMapperImpl;
 import com.commercefoundry.domainlayer.product.application.model.ProductSearchCriteria;
 import com.commercefoundry.domainlayer.product.application.model.ProductSortType;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
@@ -24,6 +26,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductImage
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.query.ProductListQueryResult;
 import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
@@ -35,6 +38,7 @@ import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
+import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.shared.commerce.Money;
@@ -75,9 +79,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 })
 @Import({
     QuerydslConfigurer.class, ProductServiceFeaturesConfig.class,
-    ProductRepositoryAdapter.class, ProductOptionRepositoryAdapter.class, SkuRepositoryAdapter.class,
+    ProductRepositoryAdapter.class, ProductOptionRepositoryAdapter.class, SkuRepositoryAdapter.class, StockRepositoryAdapter.class,
     ProductImageRepositoryAdapter.class, ProductCustomOrderFieldRepositoryAdapter.class,
-    ProductMapperImpl.class, ProductOptionMapperImpl.class, SkuMapperImpl.class,
+    ProductMapperImpl.class, ProductOptionMapperImpl.class, SkuMapperImpl.class, StockMapperImpl.class,
     ProductImageMapperImpl.class, ProductCustomOrderFieldMapperImpl.class
 })
 class ProductPersistenceAdapterTest {
@@ -108,6 +112,9 @@ class ProductPersistenceAdapterTest {
     private SkuRepositoryPort skuRepositoryPort;
 
     @Autowired
+    private StockRepositoryPort stockRepositoryPort;
+
+    @Autowired
     private ProductImageRepositoryPort productImageRepositoryPort;
 
     @Autowired
@@ -134,12 +141,20 @@ class ProductPersistenceAdapterTest {
             displayedIn(9006L, 105L, 12L),
 
             // 101: 판매중 SKU 추가금 0 하나 + 판매 종료 SKU 추가금 5,000 (집계에서 빠진다)
-            // 102: 판매 종료 SKU 하나뿐   103: 판매중 SKU 추가금 0 · 1,000   105: SKU 없음
+            // 102: 판매 종료 SKU 하나뿐   103: 판매중 SKU 추가금 0 · 1,000   104: 판매중 SKU 하나   105: SKU 없음
             sku(1001L, 101L, "2001", 0L, SaleStatus.ON_SALE),
             sku(1002L, 101L, "2002", 5_000L, SaleStatus.STOP_SELLING),
             sku(1003L, 102L, "", 3_000L, SaleStatus.STOP_SELLING),
             sku(1004L, 103L, "2003", 0L, SaleStatus.ON_SALE),
             sku(1005L, 103L, "2004", 1_000L, SaleStatus.ON_SALE),
+            sku(1006L, 104L, "", 0L, SaleStatus.ON_SALE),
+
+            // 재고 — 1001 수량 3 · 1002 수량 10(판매 종료라 구매 가능에 들지 않는다) · 1003 행 없음
+            //        1004 수량 0 · 1005 행 없음 (103 은 판매중 SKU 가 모두 품절) · 1006 무제한(수량 0)
+            stock(1001L, true, 3L),
+            stock(1002L, true, 10L),
+            stock(1004L, true, 0L),
+            stock(1006L, false, 0L),
 
             optionGroup(3001L, 101L, "색상", 1),
             optionGroup(3002L, 101L, "사이즈", 0),
@@ -267,19 +282,55 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("SKU 집계: 상품별 판매중 SKU 유무와 판매중 SKU 추가금 최소 · 최대를 한 번에 내고, 판매 종료 SKU 추가금은 무시한다")
+    @DisplayName("SKU 집계: 상품별 판매중 · 구매 가능 SKU 유무와 판매중 SKU 추가금 최소 · 최대를 한 번에 내고, 판매 종료 SKU 추가금 · 재고는 무시한다")
     void aggregateSkus() {
-        List<SkuAggregateQueryResult> aggregates = skuRepositoryPort.aggregateByProductIds(List.of(101L, 102L, 103L, 105L));
+        List<SkuAggregateQueryResult> aggregates = skuRepositoryPort.aggregateByProductIds(List.of(101L, 102L, 103L, 104L, 105L));
 
         assertThat(aggregates).containsExactlyInAnyOrder(
-            // 최소 = 최대 — 판매 종료 SKU(1002)의 추가금 5,000 은 섞이지 않는다
-            new SkuAggregateQueryResult(101L, true, 0L, 0L),
-            // 판매중 SKU 가 없으면 최소 · 최대가 null 이다
-            new SkuAggregateQueryResult(102L, false, null, null),
-            // 최소 ≠ 최대 — 옵션에 따라 가격이 다르다
-            new SkuAggregateQueryResult(103L, true, 0L, 1_000L)
+            // 최소 = 최대 — 판매 종료 SKU(1002)의 추가금 5,000 은 섞이지 않는다. 1001 은 수량 3 이라 구매 가능하다
+            new SkuAggregateQueryResult(101L, true, true, 0L, 0L),
+            // 판매중 SKU 가 없으면 최소 · 최대가 null 이고 구매 가능 SKU 도 없다
+            new SkuAggregateQueryResult(102L, false, false, null, null),
+            // 최소 ≠ 최대 — 옵션에 따라 가격이 다르다. 수량 0(1004) · 재고 행 없음(1005)은 품절이라 구매 가능 SKU 가 없다
+            new SkuAggregateQueryResult(103L, true, false, 0L, 1_000L),
+            // 무제한 SKU 는 수량 0 이어도 구매 가능하다
+            new SkuAggregateQueryResult(104L, true, true, 0L, 0L)
         );
         assertThat(aggregates).extracting(SkuAggregateQueryResult::productId).as("SKU 없는 상품은 행이 없다").doesNotContain(105L);
+    }
+
+    @Test
+    @DisplayName("SKU 집계: 판매중 SKU 하나라도 수량이 있으면 구매 가능하고, 재고 left join 이 SKU 행을 늘리지 않는다")
+    void aggregateWithPartialStock() {
+        persistAll(stock(1005L, true, 2L));
+
+        assertThat(skuRepositoryPort.aggregateByProductIds(List.of(103L)))
+            .containsExactly(new SkuAggregateQueryResult(103L, true, true, 0L, 1_000L));
+    }
+
+    @Test
+    @DisplayName("재고: SKU 아이디 목록으로 읽고, 재고 행이 없는 SKU 는 결과에 없다")
+    void findStocks() {
+        assertThat(stockRepositoryPort.findAllBySkuIds(List.of(1001L, 1004L, 1005L, 1006L)))
+            .containsExactlyInAnyOrder(new Stock(1001L, true, 3L), new Stock(1004L, true, 0L), new Stock(1006L, false, 0L));
+        assertThat(stockRepositoryPort.findAllBySkuIds(List.of(1003L, 9999L))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("재고: 감사 시각이 저장된다")
+    void stockAudit() {
+        StockEntity saved = entityManager.find(StockEntity.class, 1001L);
+
+        assertThat(saved.getCreatedAt()).isNotNull();
+        assertThat(saved.getUpdatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("제약: 음수 재고 수량은 저장되지 않는다 (ck_stock_available_quantity_non_negative)")
+    void negativeStockIsRejected() {
+        assertThatThrownBy(() -> persistAll(stock(1005L, true, -1L)))
+            .rootCause()
+            .hasMessageContaining("ck_stock_available_quantity_non_negative");
     }
 
     @Test
@@ -402,6 +453,10 @@ class ProductPersistenceAdapterTest {
             .additionalPriceCurrency(KRW)
             .saleStatus(saleStatus)
             .build();
+    }
+
+    private static StockEntity stock(Long skuId, boolean stockManaged, long availableQuantity) {
+        return StockEntity.builder().skuId(skuId).stockManaged(stockManaged).availableQuantity(availableQuantity).build();
     }
 
     private static ProductOptionGroupEntity optionGroup(Long id, Long productId, String name, int displayOrder) {

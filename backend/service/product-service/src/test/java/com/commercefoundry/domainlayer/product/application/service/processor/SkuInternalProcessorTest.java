@@ -12,9 +12,11 @@ import com.commercefoundry.domainlayer.product.application.info.SkuOptionValueIn
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
+import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.shared.commerce.Money;
@@ -43,6 +45,9 @@ class SkuInternalProcessorTest {
     private ProductRepositoryPort productRepositoryPort;
 
     @Mock
+    private StockRepositoryPort stockRepositoryPort;
+
+    @Mock
     private ProductOptionRepositoryPort productOptionRepositoryPort;
 
     @Test
@@ -68,12 +73,12 @@ class SkuInternalProcessorTest {
     }
 
     @Test
-    @DisplayName("SKU 가 하나도 없으면 상품 · 옵션 포트를 부르지 않고 빈 목록이다")
+    @DisplayName("SKU 가 하나도 없으면 상품 · 재고 · 옵션 포트를 부르지 않고 빈 목록이다")
     void noSkuSkipsFollowUpQueries() {
         given(skuRepositoryPort.findAllByIds(List.of(99L))).willReturn(List.of());
 
         assertThat(processor(true).getSkus(List.of(99L))).isEmpty();
-        verifyNoInteractions(productRepositoryPort, productOptionRepositoryPort);
+        verifyNoInteractions(productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort);
     }
 
     @Test
@@ -87,7 +92,7 @@ class SkuInternalProcessorTest {
     }
 
     @Test
-    @DisplayName("상품이 없는 SKU 의 옵션 값은 읽지 않는다 — 어차피 응답에서 빠진다")
+    @DisplayName("상품이 없는 SKU 의 재고 · 옵션 값은 읽지 않는다 — 어차피 응답에서 빠진다")
     void skipsOptionValuesOfSkuWithoutProduct() {
         given(skuRepositoryPort.findAllByIds(List.of(1L, 2L))).willReturn(List.of(
             ProductFixtures.sku(1, PRODUCT_ID, "5011", 0, SaleStatus.ON_SALE),
@@ -102,6 +107,7 @@ class SkuInternalProcessorTest {
 
         assertThat(skus).extracting(SkuInternalInfo::skuId).containsExactly(1L);
         assertThat(skus.getFirst().optionName()).isEqualTo("쪽빛");
+        verify(stockRepositoryPort).findAllBySkuIds(List.of(1L));
         verify(productOptionRepositoryPort).findValuesByIds(Set.of(5011L));
     }
 
@@ -110,6 +116,7 @@ class SkuInternalProcessorTest {
     void pricesAndProductFields() {
         given(skuRepositoryPort.findAllByIds(List.of(1L))).willReturn(List.of(ProductFixtures.sku(1, PRODUCT_ID, "", 5_000, SaleStatus.ON_SALE)));
         given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(PRODUCT_ID))).willReturn(List.of(ProductFixtures.product(PRODUCT_ID)));
+        given(stockRepositoryPort.findAllBySkuIds(List.of(1L))).willReturn(ProductFixtures.stocks(1));
         givenNoOptions();
 
         SkuInternalInfo sku = processor(true).getSkus(List.of(1L)).getFirst();
@@ -125,22 +132,34 @@ class SkuInternalProcessorTest {
 
     /**
      * {@code purchasable = 상품 노출 && saleStatus == ON_SALE}. 숨긴 상품의 SKU 도 행은 내리고(판매 상태는 판매 상태대로), 구매만 막는다.
+     * 판매 상태는 실제 재고에서 낸다 — 재고 행이 없는 SKU 는 품절이다. 판매 종료가 품절보다 앞선다.
      */
-    @ParameterizedTest(name = "[{0}] 노출 {1} · 상품 {2} · SKU {3} → {4} · purchasable={5}")
+    @ParameterizedTest(name = "[{0}] 노출 {1} · 상품 {2} · SKU {3} · 재고 {4} → {5} · purchasable={6}")
     @CsvSource({
-        "판매중 상품의 판매중 SKU,   true,  ON_SALE,      ON_SALE,      ON_SALE,      true",
-        "숨긴 상품의 SKU,            false, ON_SALE,      ON_SALE,      ON_SALE,      false",
-        "판매 종료 상품의 SKU,       true,  STOP_SELLING, ON_SALE,      STOP_SELLING, false",
-        "판매중이 아닌 SKU,          true,  ON_SALE,      STOP_SELLING, STOP_SELLING, false"
+        "판매중 상품의 판매중 SKU,   true,  ON_SALE,      ON_SALE,      IN_STOCK,  ON_SALE,      true",
+        "숨긴 상품의 SKU,            false, ON_SALE,      ON_SALE,      IN_STOCK,  ON_SALE,      false",
+        "판매 종료 상품의 SKU,       true,  STOP_SELLING, ON_SALE,      IN_STOCK,  STOP_SELLING, false",
+        "판매중이 아닌 SKU,          true,  ON_SALE,      STOP_SELLING, IN_STOCK,  STOP_SELLING, false",
+        "수량 0 인 SKU,              true,  ON_SALE,      ON_SALE,      ZERO,      SOLD_OUT,     false",
+        "재고 행이 없는 SKU,         true,  ON_SALE,      ON_SALE,      NONE,      SOLD_OUT,     false",
+        "무제한 SKU,                 true,  ON_SALE,      ON_SALE,      UNLIMITED, ON_SALE,      true",
+        "판매 종료 SKU 의 품절,      true,  ON_SALE,      STOP_SELLING, ZERO,      STOP_SELLING, false"
     })
-    @DisplayName("purchasable 은 상품이 노출 중이고 판매 상태가 ON_SALE 일 때만 true 다")
+    @DisplayName("purchasable 은 상품이 노출 중이고 판매 상태(재고 반영)가 ON_SALE 일 때만 true 다")
     void purchasable(
-        String caseName, boolean visible, SaleStatus productStatus, SaleStatus skuStatus,
+        String caseName, boolean visible, SaleStatus productStatus, SaleStatus skuStatus, String stockCase,
         SaleAvailability expectedSaleStatus, boolean expectedPurchasable
     ) {
         given(skuRepositoryPort.findAllByIds(List.of(1L))).willReturn(List.of(ProductFixtures.sku(1, PRODUCT_ID, "", 0, skuStatus)));
         given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(PRODUCT_ID)))
             .willReturn(List.of(ProductFixtures.product(PRODUCT_ID, productStatus, visible, false)));
+        given(stockRepositoryPort.findAllBySkuIds(List.of(1L))).willReturn(switch (stockCase) {
+            case "IN_STOCK" -> ProductFixtures.stocks(1);
+            case "ZERO" -> List.of(new Stock(1, true, 0));
+            case "UNLIMITED" -> List.of(new Stock(1, false, 0));
+            case "NONE" -> List.of();
+            default -> throw new IllegalArgumentException(stockCase);
+        });
         givenNoOptions();
 
         SkuInternalInfo sku = processor(true).getSkus(List.of(1L)).getFirst();
@@ -208,7 +227,7 @@ class SkuInternalProcessorTest {
     }
 
     @Test
-    @DisplayName("상품 · 옵션 값 · 옵션 그룹은 SKU 들의 아이디로 한 번씩만 읽는다 (N+1 금지)")
+    @DisplayName("상품 · 재고 · 옵션 값 · 옵션 그룹은 SKU 들의 아이디로 한 번씩만 읽는다 (N+1 금지)")
     void bulkQueriesOnce() {
         given(skuRepositoryPort.findAllByIds(List.of(1L, 2L))).willReturn(List.of(
             ProductFixtures.sku(1, PRODUCT_ID, "5011", 0, SaleStatus.ON_SALE),
@@ -221,13 +240,15 @@ class SkuInternalProcessorTest {
 
         assertThat(processor(true).getSkus(List.of(1L, 2L))).hasSize(2);
         verify(productRepositoryPort).findAllByIdsIncludingHidden(Set.of(PRODUCT_ID, 8L));
+        verify(stockRepositoryPort).findAllBySkuIds(List.of(1L, 2L));
         verify(productOptionRepositoryPort).findValuesByIds(Set.of(5011L));
         verify(productOptionRepositoryPort).findGroupsByIds(Set.of(COLOR));
     }
 
     private SkuInternalProcessor processor(boolean customOrderFeature) {
         return new SkuInternalProcessor(
-            skuRepositoryPort, productRepositoryPort, productOptionRepositoryPort, new StoreProperties(new StoreProperties.Features(customOrderFeature))
+            skuRepositoryPort, productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort,
+            new StoreProperties(new StoreProperties.Features(customOrderFeature))
         );
     }
 

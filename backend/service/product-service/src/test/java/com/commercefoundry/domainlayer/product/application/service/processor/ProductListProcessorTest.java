@@ -72,9 +72,9 @@ class ProductListProcessorTest {
     void computesFromAggregates() {
         givenRows(false, row(1, SaleStatus.ON_SALE, false), row(2, SaleStatus.ON_SALE, false), row(3, SaleStatus.STOP_SELLING, false));
         given(skuRepositoryPort.aggregateByProductIds(List.of(1L, 2L, 3L))).willReturn(List.of(
-            new SkuAggregateQueryResult(1, true, 1_000L, 5_000L),
-            new SkuAggregateQueryResult(2, true, 0L, 0L),
-            new SkuAggregateQueryResult(3, true, 0L, 0L)
+            new SkuAggregateQueryResult(1, true, true, 1_000L, 5_000L),
+            new SkuAggregateQueryResult(2, true, true, 0L, 0L),
+            new SkuAggregateQueryResult(3, true, true, 0L, 0L)
         ));
         given(productImageRepositoryPort.findThumbnailsByProductIds(List.of(1L, 2L, 3L)))
             .willReturn(List.of(ProductFixtures.image(10, 1, ImageType.THUMBNAIL, 0)));
@@ -98,6 +98,20 @@ class ProductListProcessorTest {
         assertThat(items.get(2).saleStatus()).as("판매 종료 상품도 목록에 남고 뱃지로 알린다").isEqualTo(SaleAvailability.STOP_SELLING);
         verify(skuRepositoryPort, times(1)).aggregateByProductIds(anyCollection());
         verify(productImageRepositoryPort, times(1)).findThumbnailsByProductIds(anyCollection());
+    }
+
+    @Test
+    @DisplayName("판매중 SKU 는 있지만 구매 가능 SKU 가 없으면(집계의 재고 판정) 품절이고, 가격은 판매중 SKU 추가금으로 계산한다")
+    void soldOutFromAggregate() {
+        givenRows(false, row(1, SaleStatus.ON_SALE, false));
+        given(skuRepositoryPort.aggregateByProductIds(List.of(1L))).willReturn(List.of(new SkuAggregateQueryResult(1, true, false, 1_000L, 5_000L)));
+        given(productImageRepositoryPort.findThumbnailsByProductIds(List.of(1L))).willReturn(List.of());
+
+        ProductListItemInfo item = processor(true).search(CRITERIA).getContent().getFirst();
+
+        assertThat(item.saleStatus()).isEqualTo(SaleAvailability.SOLD_OUT);
+        assertThat(item.salePrice()).isEqualTo(Money.of(40_000, KRW));
+        assertThat(item.hasOptionSurcharge()).isTrue();
     }
 
     @Test

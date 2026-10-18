@@ -3,7 +3,10 @@ package com.commercefoundry.domainlayer.product.application.service.processor;
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.domainlayer.category.domain.model.Category;
@@ -21,11 +24,13 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductImage
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderInputType;
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
+import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.shared.commerce.Money;
@@ -56,6 +61,9 @@ class ProductDetailProcessorTest {
 
     @Mock
     private SkuRepositoryPort skuRepositoryPort;
+
+    @Mock
+    private StockRepositoryPort stockRepositoryPort;
 
     @Mock
     private ProductImageRepositoryPort productImageRepositoryPort;
@@ -102,6 +110,7 @@ class ProductDetailProcessorTest {
                 ProductFixtures.sku(2, PRODUCT_ID, "5012,9002", 5_000, SaleStatus.ON_SALE),
                 ProductFixtures.sku(3, PRODUCT_ID, "5011,9002", 3_000, SaleStatus.STOP_SELLING)
             ));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(1L, 2L, 3L))).willReturn(ProductFixtures.stocks(1, 2, 3));
             given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(
                 ProductFixtures.image(10, PRODUCT_ID, ImageType.THUMBNAIL, 0),
                 ProductFixtures.image(11, PRODUCT_ID, ImageType.GALLERY, 1),
@@ -169,6 +178,43 @@ class ProductDetailProcessorTest {
         }
 
         @Test
+        @DisplayName("재고: SKU 아이디로 한 번에 읽고, 수량 0 · 재고 행 없음은 품절, 무제한은 판매중이다. 판매중 SKU 가 모두 품절이면 상품도 품절이다")
+        void stockDecidesSoldOut() {
+            givenOptions();
+            given(skuRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.sku(1, PRODUCT_ID, "5011,9001", 0, SaleStatus.ON_SALE),
+                ProductFixtures.sku(2, PRODUCT_ID, "5012,9002", 5_000, SaleStatus.ON_SALE),
+                ProductFixtures.sku(3, PRODUCT_ID, "5011,9002", 3_000, SaleStatus.STOP_SELLING)
+            ));
+            // 1 은 수량 0, 2 는 재고 행이 없다, 3 은 재고가 있지만 판매 종료다
+            given(stockRepositoryPort.findAllBySkuIds(List.of(1L, 2L, 3L))).willReturn(List.of(new Stock(1, true, 0), ProductFixtures.stock(3)));
+            given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of());
+
+            ProductDetailInfo detail = processor(true).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
+
+            assertThat(detail.skus()).extracting(ProductSkuInfo::saleStatus)
+                .containsExactly(SaleAvailability.SOLD_OUT, SaleAvailability.SOLD_OUT, SaleAvailability.STOP_SELLING);
+            assertThat(detail.saleStatus()).isEqualTo(SaleAvailability.SOLD_OUT);
+            assertThat(detail.salePrice()).as("품절이어도 판매중 SKU 최소 추가금으로 계산한다").isEqualTo(Money.of(ProductFixtures.BASE_PRICE, KRW));
+            verify(stockRepositoryPort, times(1)).findAllBySkuIds(anyCollection());
+        }
+
+        @Test
+        @DisplayName("재고: 무제한 SKU 는 수량과 무관하게 판매중이다")
+        void unlimitedStockIsOnSale() {
+            given(productOptionRepositoryPort.findGroupsByProductId(PRODUCT_ID)).willReturn(List.of());
+            given(productOptionRepositoryPort.findValuesByProductId(PRODUCT_ID)).willReturn(List.of());
+            given(skuRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(ProductFixtures.sku(1, PRODUCT_ID, "", 0, SaleStatus.ON_SALE)));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(1L))).willReturn(List.of(new Stock(1, false, 0)));
+            given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of());
+
+            ProductDetailInfo detail = processor(true).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
+
+            assertThat(detail.skus()).extracting(ProductSkuInfo::saleStatus).containsExactly(SaleAvailability.ON_SALE);
+            assertThat(detail.saleStatus()).isEqualTo(SaleAvailability.ON_SALE);
+        }
+
+        @Test
         @DisplayName("상품의 옵션 값 목록에 없는 값 아이디는 그룹 순으로 정렬한 값 뒤에 키 순서대로 붙인다")
         void unknownOptionValueGoesLast() {
             givenOptions();
@@ -205,6 +251,7 @@ class ProductDetailProcessorTest {
             given(productOptionRepositoryPort.findGroupsByProductId(PRODUCT_ID)).willReturn(List.of());
             given(productOptionRepositoryPort.findValuesByProductId(PRODUCT_ID)).willReturn(List.of());
             given(skuRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(ProductFixtures.sku(1, PRODUCT_ID, "", 0, SaleStatus.ON_SALE)));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(1L))).willReturn(ProductFixtures.stocks(1));
             given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of());
 
             ProductDetailInfo detail = processor(true).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
@@ -256,7 +303,7 @@ class ProductDetailProcessorTest {
 
     private ProductDetailProcessor processor(boolean customOrderFeature) {
         return new ProductDetailProcessor(
-            productRepositoryPort, productOptionRepositoryPort, skuRepositoryPort, productImageRepositoryPort, productCustomOrderFieldRepositoryPort,
+            productRepositoryPort, productOptionRepositoryPort, skuRepositoryPort, stockRepositoryPort, productImageRepositoryPort, productCustomOrderFieldRepositoryPort,
             new StoreProperties(new StoreProperties.Features(customOrderFeature))
         );
     }

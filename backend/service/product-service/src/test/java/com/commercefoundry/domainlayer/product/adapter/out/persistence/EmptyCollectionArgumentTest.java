@@ -9,12 +9,14 @@ import com.commercefoundry.domainlayer.product.adapter.out.persistence.repositor
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.ProductOptionValueRepository;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.ProductRepository;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.SkuRepository;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.StockRepository;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.custom.ProductCustomRepositoryImpl;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.custom.SkuCustomRepositoryImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductImageMapper;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductMapper;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductOptionMapper;
 import com.commercefoundry.domainlayer.product.application.mapper.SkuMapper;
+import com.commercefoundry.domainlayer.product.application.mapper.StockMapper;
 import com.commercefoundry.domainlayer.product.application.model.ProductSearchCriteria;
 import com.commercefoundry.domainlayer.product.application.model.ProductSortType;
 import com.commercefoundry.domainlayer.product.application.port.out.query.ProductListQueryResult;
@@ -68,6 +70,16 @@ class EmptyCollectionArgumentTest {
         assertThat(adapter.findGroupsByIds(Set.of())).isEmpty();
         assertThat(adapter.findValuesByIds(List.of())).isEmpty();
         verifyNoInteractions(groupRepository, valueRepository, mapper);
+    }
+
+    @Test
+    @DisplayName("SKU 아이디 목록으로 재고 조회")
+    void stocks() {
+        StockRepository repository = mock(StockRepository.class);
+        StockMapper mapper = mock(StockMapper.class);
+
+        assertThat(new StockRepositoryAdapter(repository, mapper).findAllBySkuIds(List.of())).isEmpty();
+        verifyNoInteractions(repository, mapper);
     }
 
     @Test

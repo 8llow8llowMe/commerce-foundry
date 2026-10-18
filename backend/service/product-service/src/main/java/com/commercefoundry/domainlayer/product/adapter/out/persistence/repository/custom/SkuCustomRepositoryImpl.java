@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.custom;
 
 import static com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.QSkuEntity.skuEntity;
+import static com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.QStockEntity.stockEntity;
 
 import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
@@ -20,13 +21,18 @@ public class SkuCustomRepositoryImpl implements SkuCustomRepository {
     private final JPAQueryFactory queryFactory;
 
     /**
-     * 상품별로 "판매중 SKU 가 있는가" 와 판매중 SKU 추가금의 최소 · 최대를 한 번의 group by 로 낸다.
+     * 상품별로 "판매중 SKU 가 있는가", "구매 가능한 SKU 가 있는가" 와 판매중 SKU 추가금의 최소 · 최대를 한 번의 group by 로 낸다.
      *
      * <ul>
      *   <li>{@code max(case when 판매중 then 1 else 0 end)} 가 1 이면 판매중 SKU 가 하나 이상 있다</li>
+     *   <li>{@code max(case when 판매중 and 재고 있음 then 1 else 0 end)} 가 1 이면 구매 가능한 SKU 가 하나 이상 있다.
+     *       재고 있음 = 재고 행이 있고 무제한이거나 판매 가능 수량 &gt; 0 — {@code StockSnapshot#isSoldOut} 의 부정과 같다.
+     *       재고 행이 없는 SKU 는 left join 결과가 null 이라 품절로 센다 ({@code StockSnapshot#empty})</li>
      *   <li>{@code min · max(case when 판매중 then 추가금 else null end)} — 집계 함수는 null 을 건너뛰므로 판매 종료 SKU 의 추가금은
      *       섞이지 않고, 판매중 SKU 가 없으면 null 이다</li>
      * </ul>
+     *
+     * <p>stock 은 PK 가 {@code sku_id} 라 SKU 행마다 많아야 한 행이 붙는다 — left join 이 SKU 행을 늘리지 않는다.
      *
      * <p>1 · 0 은 바인드 파라미터가 아니라 리터럴로 넣는다 — 집계 함수 안의 타입 없는 파라미터는 PostgreSQL 이 타입을 정하지 못한다.
      * 집계 결과의 Java 타입(Integer · Long)은 방언 · 버전에 따라 달라질 수 있어 {@link Number} 로 받아 바꾼다.
@@ -40,10 +46,10 @@ public class SkuCustomRepositoryImpl implements SkuCustomRepository {
         }
 
         BooleanExpression onSale = skuEntity.saleStatus.eq(SaleStatus.ON_SALE);
-        NumberExpression<Integer> hasOnSaleSku = new CaseBuilder()
-            .when(onSale).then(Expressions.ONE)
-            .otherwise(Expressions.ZERO)
-            .max();
+        BooleanExpression inStock = stockEntity.skuId.isNotNull()
+            .and(stockEntity.stockManaged.isFalse().or(stockEntity.availableQuantity.gt(0L)));
+        NumberExpression<Integer> hasOnSaleSku = flagMax(onSale);
+        NumberExpression<Integer> hasPurchasableSku = flagMax(onSale.and(inStock));
         NumberExpression<Long> onSaleAdditionalAmount = new CaseBuilder()
             .when(onSale).then(skuEntity.additionalPriceAmount)
             .otherwise(Expressions.nullExpression(Long.class));
@@ -51,8 +57,9 @@ public class SkuCustomRepositoryImpl implements SkuCustomRepository {
         NumberExpression<Long> maxOnSaleAdditionalAmount = onSaleAdditionalAmount.max();
 
         List<Tuple> rows = queryFactory
-            .select(skuEntity.productId, hasOnSaleSku, minOnSaleAdditionalAmount, maxOnSaleAdditionalAmount)
+            .select(skuEntity.productId, hasOnSaleSku, hasPurchasableSku, minOnSaleAdditionalAmount, maxOnSaleAdditionalAmount)
             .from(skuEntity)
+            .leftJoin(stockEntity).on(stockEntity.skuId.eq(skuEntity.id))
             .where(skuEntity.productId.in(productIds))
             .groupBy(skuEntity.productId)
             .fetch();
@@ -61,10 +68,19 @@ public class SkuCustomRepositoryImpl implements SkuCustomRepository {
             .map(row -> new SkuAggregateQueryResult(
                 row.get(skuEntity.productId),
                 isOne(row.get(1, Number.class)),
-                toLong(row.get(2, Number.class)),
-                toLong(row.get(3, Number.class))
+                isOne(row.get(2, Number.class)),
+                toLong(row.get(3, Number.class)),
+                toLong(row.get(4, Number.class))
             ))
             .toList();
+    }
+
+    /** {@code max(case when condition then 1 else 0 end)} — 조건을 만족하는 행이 하나라도 있으면 1. */
+    private static NumberExpression<Integer> flagMax(BooleanExpression condition) {
+        return new CaseBuilder()
+            .when(condition).then(Expressions.ONE)
+            .otherwise(Expressions.ZERO)
+            .max();
     }
 
     private static boolean isOne(Number flag) {

@@ -21,7 +21,7 @@ import org.springframework.data.domain.SliceImpl;
 import org.springframework.stereotype.Component;
 
 /**
- * 고객 상품 목록. 쿼리는 목록 → SKU 집계 → 대표 이미지 3번이고, 집계 · 이미지는 그 페이지의 상품 아이디로 한 번에 읽는다 (N+1 금지).
+ * 고객 상품 목록. 쿼리는 목록 → SKU 집계(재고 left join 포함) → 대표 이미지 3번이고, 집계 · 이미지는 그 페이지의 상품 아이디로 한 번에 읽는다 (N+1 금지).
  */
 @Component
 @RequiredArgsConstructor
@@ -49,14 +49,14 @@ public class ProductListProcessor {
     }
 
     /**
-     * @param aggregate 판매중 SKU 집계. SKU 가 하나도 없는 상품은 집계 행이 없어 null 이다 — 판매중 SKU 없음으로 본다
+     * @param aggregate 판매중 SKU 집계. SKU 가 하나도 없는 상품은 집계 행이 없어 null 이다 — 판매중 · 구매 가능 SKU 없음으로 본다
      */
     private ProductListItemInfo toInfo(ProductListQueryResult row, SkuAggregateQueryResult aggregate, ProductImage thumbnail) {
         ProductSaleSummary summary = aggregate == null
-            ? ProductSaleSummary.of(row.saleStatus(), row.salePrice(), row.listPrice(), false, null, null)
+            ? ProductSaleSummary.of(row.saleStatus(), row.salePrice(), row.listPrice(), false, false, null, null)
             : ProductSaleSummary.of(
                 row.saleStatus(), row.salePrice(), row.listPrice(),
-                aggregate.hasOnSaleSku(), aggregate.minOnSaleAdditionalAmount(), aggregate.maxOnSaleAdditionalAmount()
+                aggregate.hasOnSaleSku(), aggregate.hasPurchasableSku(), aggregate.minOnSaleAdditionalAmount(), aggregate.maxOnSaleAdditionalAmount()
             );
 
         return ProductListItemInfo.builder()
