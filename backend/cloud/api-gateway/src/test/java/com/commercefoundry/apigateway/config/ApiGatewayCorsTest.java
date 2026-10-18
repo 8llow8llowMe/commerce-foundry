@@ -81,12 +81,31 @@ class ApiGatewayCorsTest {
             .expectStatus().isForbidden();
     }
 
+    @Test
+    @DisplayName("토큰 없는 어드민 경로 preflight 도 보안 체인의 인증 앞에서 CORS 가 답한다 — 401 이 아니고, 세션 쿠키 · 보안 헤더를 붙이지 않는다")
+    void adminPreflightWithoutTokenIsAnsweredByCors() {
+        webTestClient.options().uri("/api/v1/admin/orders/1")
+            .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
+            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, HttpMethod.PATCH.name())
+            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization, Content-Type")
+            .exchange()
+            .expectStatus().isOk()
+            .expectHeader().valueEquals(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, ALLOWED_ORIGIN)
+            .expectHeader().doesNotExist(HttpHeaders.WWW_AUTHENTICATE)
+            .expectHeader().doesNotExist(HttpHeaders.SET_COOKIE)
+            .expectHeader().doesNotExist("Strict-Transport-Security")
+            .expectHeader().doesNotExist("X-Frame-Options")
+            .expectHeader().doesNotExist("X-Content-Type-Options")
+            .expectHeader().doesNotExist(HttpHeaders.CACHE_CONTROL);
+    }
+
     // ── 설정 값 ──────────────────────────────────────────────────
 
     @Test
     @DisplayName("허용 origin 이 비어 있으면 열리지 않고 닫힌다 — 어떤 origin 의 preflight 도 통과하지 못한다")
     void emptyAllowedOriginsRejectsEveryOrigin() {
-        CorsWebFilter filter = new GatewayCorsConfig().corsWebFilter(new GatewayCorsProperties(null));
+        // 보안 체인이 이 원천으로 만드는 것과 같은 필터다 (GatewaySecurityConfig 의 cors)
+        CorsWebFilter filter = new CorsWebFilter(new GatewayCorsConfig().corsConfigurationSource(new GatewayCorsProperties(null)));
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.options(PREFLIGHT_PATH)
             .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
             .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, HttpMethod.GET.name()));
