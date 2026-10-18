@@ -17,6 +17,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductImage
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
@@ -26,7 +27,7 @@ import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.ProductPricing;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
-import com.commercefoundry.domainlayer.product.domain.model.StockSnapshot;
+import com.commercefoundry.domainlayer.product.domain.model.SkuStocks;
 import com.commercefoundry.global.properties.StoreProperties;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -40,8 +41,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * 고객 상품 상세. 쿼리는 상품 → (Facade 가 부르는 카테고리 전체) → 옵션 그룹 → 옵션 값 → SKU → 이미지 → (맞춤 제작일 때만) 입력 항목이고,
- * 모두 상품 아이디 단건 조건이다. 나누기 · 정렬은 메모리에서 한다.
+ * 고객 상품 상세. 쿼리는 상품 → (Facade 가 부르는 카테고리 전체) → 옵션 그룹 → 옵션 값 → SKU → 재고 → 이미지 → (맞춤 제작일 때만) 입력 항목이고,
+ * 재고는 그 상품 SKU 아이디의 in 절 한 번, 나머지는 상품 아이디 단건 조건이다. 나누기 · 정렬은 메모리에서 한다.
  */
 @Slf4j
 @Component
@@ -51,6 +52,7 @@ public class ProductDetailProcessor {
     private final ProductRepositoryPort productRepositoryPort;
     private final ProductOptionRepositoryPort productOptionRepositoryPort;
     private final SkuRepositoryPort skuRepositoryPort;
+    private final StockRepositoryPort stockRepositoryPort;
     private final ProductImageRepositoryPort productImageRepositoryPort;
     private final ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
     private final StoreProperties storeProperties;
@@ -71,9 +73,10 @@ public class ProductDetailProcessor {
         List<OptionGroup> groups = productOptionRepositoryPort.findGroupsByProductId(product.id());
         List<OptionValue> values = productOptionRepositoryPort.findValuesByProductId(product.id());
         List<Sku> skus = skuRepositoryPort.findAllByProductId(product.id());
+        SkuStocks stocks = SkuStocks.of(stockRepositoryPort.findAllBySkuIds(skus.stream().map(Sku::id).toList()));
         List<ProductImage> images = productImageRepositoryPort.findAllByProductId(product.id());
 
-        ProductSaleSummary summary = ProductSaleSummary.ofSkus(product.saleStatus(), product.salePrice(), product.listPrice(), skus);
+        ProductSaleSummary summary = ProductSaleSummary.ofSkus(product.saleStatus(), product.salePrice(), product.listPrice(), skus, stocks);
         Map<Long, List<OptionValue>> valuesByGroupId = values.stream()
             .collect(Collectors.groupingBy(OptionValue::optionGroupId, LinkedHashMap::new, Collectors.toList()));
 
@@ -91,7 +94,7 @@ public class ProductDetailProcessor {
             .saleStatus(summary.saleStatus())
             .maxQuantityPerOrder(product.maxQuantityPerOrder())
             .optionGroups(groups.stream().map(group -> toGroupInfo(group, valuesByGroupId.getOrDefault(group.id(), List.of()))).toList())
-            .skus(toSkuInfos(product, skus, optionValueRanks(groups, valuesByGroupId)))
+            .skus(toSkuInfos(product, skus, stocks, optionValueRanks(groups, valuesByGroupId)))
             .customOrder(customOrderOf(product))
             .build();
     }
@@ -126,14 +129,14 @@ public class ProductDetailProcessor {
         return ranks;
     }
 
-    private static List<ProductSkuInfo> toSkuInfos(Product product, List<Sku> skus, Map<Long, Integer> optionValueRanks) {
+    private static List<ProductSkuInfo> toSkuInfos(Product product, List<Sku> skus, SkuStocks stocks, Map<Long, Integer> optionValueRanks) {
         return skus.stream()
             .map(sku -> new ProductSkuInfo(
                 sku.id(),
                 orderedOptionValueIds(sku, optionValueRanks),
                 sku.additionalPrice(),
                 ProductPricing.skuSalePrice(product.salePrice(), sku.additionalPrice()),
-                SaleAvailability.ofSku(product.saleStatus(), sku.saleStatus(), StockSnapshot.unlimited())
+                SaleAvailability.ofSku(product.saleStatus(), sku.saleStatus(), stocks.snapshotOf(sku.id()))
             ))
             .toList();
     }

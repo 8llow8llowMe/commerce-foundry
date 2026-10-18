@@ -18,7 +18,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 재고 수량 · 재고 관리 여부는 별도 {@code stock} 테이블이 가진다 (재고 이슈 #10). 여기에 두지 않는다.
+ * 재고 수량 · 재고 관리 여부는 별도 {@code stock} 테이블({@link StockEntity})이 가진다. 여기에 두지 않는다.
  */
 @Entity
 @Table(

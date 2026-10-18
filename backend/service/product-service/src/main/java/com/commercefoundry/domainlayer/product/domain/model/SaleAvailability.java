@@ -45,8 +45,8 @@ public enum SaleAvailability implements CodeNameDescribable {
      *   <li>그 밖(판매중 SKU 는 있지만 모두 재고가 없다)이면 품절</li>
      * </ol>
      *
-     * <p>재고 테이블이 생기기 전(#8)에는 모든 SKU 가 {@link StockSnapshot#unlimited()} 라 {@code hasPurchasableSku = hasOnSaleSku} 이고,
-     * 그래서 품절은 나오지 않는다. 재고 이슈(#10)가 판매중 SKU 의 재고(stock)로 {@code hasPurchasableSku} 를 계산하면 품절이 나온다.
+     * <p>{@code hasPurchasableSku} 는 목록 · 상세가 같은 규칙으로 계산한다 — 판매중 SKU 이면서 재고가 무제한이거나 판매 가능 수량이 0 보다 크다.
+     * 재고 행이 없는 SKU 는 품절이다 ({@link StockSnapshot#empty()}). 목록은 SKU 집계 쿼리의 stock left join 이, 상세는 {@code ProductSaleSummary#ofSkus} 가 계산한다.
      *
      * @param hasOnSaleSku 판매중(ON_SALE) SKU 가 하나라도 있는가
      * @param hasPurchasableSku 판매중이면서 품절이 아닌 SKU 가 하나라도 있는가 — {@link #ofSku} 가 판매중을 내는 SKU

@@ -368,6 +368,34 @@
     comment on column product.sku.sale_status is
         '판매 상태 (ON_SALE / STOP_SELLING). 품절은 저장하지 않는다 — 재고에서 유도';
 
+    create table product.stock (
+        sku_id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        available_quantity bigint not null,
+        stock_managed boolean not null,
+        primary key (sku_id),
+        constraint ck_stock_available_quantity_non_negative check (available_quantity >= 0)
+    );
+
+    comment on table product.stock is
+        'SKU 재고 (SKU 와 1:1). 행이 없는 SKU 는 품절';
+
+    comment on column product.stock.sku_id is
+        'SKU 아이디 (PK · FK: sku.id)';
+
+    comment on column product.stock.created_at is
+        '생성 시각';
+
+    comment on column product.stock.updated_at is
+        '수정 시각';
+
+    comment on column product.stock.available_quantity is
+        '판매 가능 수량 (선점분 제외, 0 이상)';
+
+    comment on column product.stock.stock_managed is
+        '재고 관리 여부. false 면 수량과 무관하게 품절이 아니다 (무제한)';
+
     create index idx_product_visible_sale_price_amount_id
        on product.product (visible, sale_price_amount, id);
 

@@ -12,8 +12,12 @@ import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SkuOptionKey;
+import com.commercefoundry.domainlayer.product.domain.model.SkuStocks;
+import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * 상품 도메인 테스트 데이터. 금액은 KRW 다 — 기본 판매가 39,000원 · 정가 45,000원.
@@ -24,6 +28,8 @@ public final class ProductFixtures {
     public static final long LIST_PRICE = 45_000L;
     /** 대표 카테고리. */
     public static final long CATEGORY_ID = 11L;
+    /** {@link #stock} 의 판매 가능 수량. */
+    public static final long IN_STOCK_QUANTITY = 10L;
 
     private ProductFixtures() {
     }
@@ -53,6 +59,21 @@ public final class ProductFixtures {
     /** @param optionKey 저장 정규형 조합 키 ({@code "5011,9001"}). 옵션 없는 상품은 {@code ""} */
     public static Sku sku(long id, long productId, String optionKey, long additionalAmount, SaleStatus saleStatus) {
         return new Sku(id, productId, SkuOptionKey.fromStored(optionKey), Money.of(additionalAmount, KRW), saleStatus);
+    }
+
+    /** 재고 관리 · 판매 가능 수량 {@link #IN_STOCK_QUANTITY} 인 재고 행. */
+    public static Stock stock(long skuId) {
+        return new Stock(skuId, true, IN_STOCK_QUANTITY);
+    }
+
+    /** 주어진 SKU 마다 재고가 있는 재고 묶음. 인자가 없으면 재고 행이 하나도 없다 (모두 품절). */
+    public static SkuStocks inStock(long... skuIds) {
+        return SkuStocks.of(stocks(skuIds));
+    }
+
+    /** 주어진 SKU 마다 재고가 있는 재고 행 목록 — 포트 응답 스텁용. */
+    public static List<Stock> stocks(long... skuIds) {
+        return Arrays.stream(skuIds).mapToObj(ProductFixtures::stock).toList();
     }
 
     public static OptionGroup group(long id, long productId, String name, int displayOrder) {

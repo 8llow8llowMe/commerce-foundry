@@ -25,6 +25,8 @@ class SaleAvailabilityTest {
             Arguments.of(ON_SALE, ON_SALE, UNLIMITED, SaleAvailability.ON_SALE),
             Arguments.of(ON_SALE, ON_SALE, IN_STOCK, SaleAvailability.ON_SALE),
             Arguments.of(ON_SALE, ON_SALE, EMPTY, SaleAvailability.SOLD_OUT),
+            // 재고 행이 없는 SKU 는 품절이다
+            Arguments.of(ON_SALE, ON_SALE, StockSnapshot.empty(), SaleAvailability.SOLD_OUT),
             Arguments.of(STOP_SELLING, ON_SALE, UNLIMITED, SaleAvailability.STOP_SELLING),
             Arguments.of(ON_SALE, STOP_SELLING, UNLIMITED, SaleAvailability.STOP_SELLING),
             Arguments.of(STOP_SELLING, STOP_SELLING, IN_STOCK, SaleAvailability.STOP_SELLING),
@@ -44,7 +46,7 @@ class SaleAvailabilityTest {
     @ParameterizedTest(name = "상품 {0} · 판매중 SKU {1} · 구매 가능 SKU {2} → {3}")
     @CsvSource({
         "ON_SALE, true, true, ON_SALE",
-        // 판매중 SKU 가 모두 재고 없음 (#10 재고 이후에만 나온다)
+        // 판매중 SKU 가 모두 재고 없음
         "ON_SALE, true, false, SOLD_OUT",
         // 판매중 SKU 없음 (SKU 0건 포함) — 품절이 아니라 판매 종료다
         "ON_SALE, false, false, STOP_SELLING",
@@ -61,8 +63,8 @@ class SaleAvailabilityTest {
 
     @ParameterizedTest(name = "상품 {0} · 판매중 SKU {1}")
     @CsvSource({"ON_SALE, true", "ON_SALE, false", "STOP_SELLING, true", "STOP_SELLING, false"})
-    @DisplayName("재고가 없는 #8 (구매 가능 SKU = 판매중 SKU) 에서는 품절이 나오지 않는다")
-    void noSoldOutWithoutStock(SaleStatus productStatus, boolean hasOnSaleSku) {
+    @DisplayName("판매중 SKU 가 모두 구매 가능하면(구매 가능 SKU 유무 = 판매중 SKU 유무) 품절이 나오지 않는다")
+    void noSoldOutWhenEveryOnSaleSkuIsPurchasable(SaleStatus productStatus, boolean hasOnSaleSku) {
         assertThat(SaleAvailability.ofProduct(productStatus, hasOnSaleSku, hasOnSaleSku)).isNotEqualTo(SaleAvailability.SOLD_OUT);
     }
 
