@@ -120,6 +120,8 @@ return ResponseEntity.ok().body(Response.success(response));
   코드는 원인을 알리는 용도다(로그 · 모니터링 · 화면 문구). 서버 컴포넌트의 `serverFetch` 는 재발급하지 않고 401 이면 로그인으로 보낸다(같은 문서 §2).
 
 - 토큰을 보냈는데 틀리면 **비로그인으로 되는 공개 API 여도 401** 이다. 틀린 토큰을 익명으로 취급하지 않는다.
+- **401 은 토큰(access · refresh) 거절에만 쓴다.** 로그인 실패(이메일 없음 · 비밀번호 틀림 · 관리자 계정)는 400 `AUTH_001` 이다 (#4 결정 5) —
+  BFF 가 401 을 "재발급 후 재시도" 신호로 쓰므로 자격 증명 오류가 그 경로에 섞이지 않게 한다. refresh 거절은 401 `AUTH_010~012`, 토큰 저장소 장애는 503 `AUTH_013` (§2-4).
 
 #### 공통 오류 코드 (서비스)
 
@@ -200,8 +202,23 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/auth/sign-up` | `permitAll()` | 201 `{memberId}` — 토큰은 주지 않는다(로그인을 따로 한다) | 400 `AUTH_1xx` · 409 `AUTH_002` |
 | `GET /api/v1/members/me` | `isAuthenticated()` | 200 `{memberId, email, name, phone, marketingAgreed}` | 401 `SECURITY_001` · 404 `AUTH_003` |
 | `PATCH /api/v1/members/me` | `isAuthenticated()` | 200 바뀐 내 정보 — `{name?, phone?, marketingAgreed?}` 중 보낸 칸만 바꾼다 | 400 `AUTH_1xx` · 404 `AUTH_003` · 409 `AUTH_004` |
+| `POST /api/v1/auth/login` | `permitAll()` | 200 토큰 쌍(아래) · `Cache-Control: no-store` — 본문 `{email, password}` | 400 `AUTH_001` · `AUTH_101` · `AUTH_102` · `AUTH_104` · 503 `AUTH_013` |
+| `POST /api/v1/auth/token/reissue` | `permitAll()` | 200 토큰 쌍 · `Cache-Control: no-store` — 본문 `{refreshToken}`. 보낸 refresh 는 회전돼 더 쓰지 않는다 | 401 `AUTH_010`(없음 · 빈 값 포함) · `AUTH_011` · `AUTH_012` · 503 `AUTH_013` |
+| `POST /api/v1/auth/logout` | `isAuthenticated()` | 200 `dataBody: null` — 본문 `{refreshToken?}`(본문 생략 가능). 모르는 · 남의 refresh 여도 access 는 막고 200(멱등) | 401 `SECURITY_001` · 503 `AUTH_013` |
 
-오류 코드의 정본은 `MemberErrorCode` · `MemberValidationMessage` 다. 접두어는 서비스 단위 `AUTH_` 이고, 로그인 · 토큰(#4 A3 · A4)이 `AUTH_010~` 을 이어 쓴다.
+토큰 쌍 (로그인 · 재발급 공통, #4 결정 1 — 전달은 응답 본문이고 쿠키는 BFF 가 만든다)
+
+| 필드 | 타입 | 값 |
+|------|------|-----|
+| `accessToken` | `string` | access 토큰(JWT, `security-guide.md` §2) |
+| `accessTokenExpiresIn` | `number` | access 토큰의 남은 수명(초) — 기본 1800 |
+| `refreshToken` | `string` | 불투명 base64url 43자. 재발급할 때마다 새 값이다 |
+| `refreshTokenExpiresIn` | `number` | refresh 토큰의 남은 수명(초) — 기본 1209600(14일). 재발급마다 다시 꽉 찬다 |
+
+- 같은 refresh 를 30초 안에 다시 보내면(동시 요청 · 재시도) 새 쌍을 더 준다(토큰당 3개까지). 그 뒤 · 넷째의 재사용은 그 로그인의 토큰을 모두 폐기하고 401 `AUTH_012` 다 (`security-guide.md` §2-3).
+- BFF 는 재발급이 4xx(`success=false`)면 쿠키를 지우고 로그인으로, 503 이면 쿠키를 둔다(§2-1 표).
+
+오류 코드의 정본은 `MemberErrorCode` · `MemberValidationMessage` 다. 접두어는 서비스 단위 `AUTH_` 이고, 001~009 는 회원 · 로그인, 010~ 은 토큰이다.
 
 | 코드 | HTTP | 뜻 |
 |------|------|----|
@@ -209,8 +226,12 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_002` | 409 | 이미 가입된 이메일. 사전 조회를 함께 지난 동시 가입은 유니크 키(`uk_member_email`) 위반을 같은 코드로 바꾼다. 계정 존재를 드러내는 것은 감수한 위험이다 (`security-guide.md` §10) |
 | `AUTH_003` | 404 | 토큰은 유효하지만 회원이 없다 |
 | `AUTH_004` | 409 | 같은 회원을 다른 요청이 먼저 고쳤다(낙관적 락 — 마케팅 동의만 바꿔도 회원 버전이 오른다). 다시 조회한 뒤 보낸다 |
+| `AUTH_010` | 401 | refresh 토큰이 없거나 발급 모양(base64url 43자)이 아니다 — 저장소를 보기 전에 거절한다. 필드 검증(400)을 따로 두지 않는다 |
+| `AUTH_011` | 401 | refresh 토큰 무효 — 만료 · 로그아웃 · 폐기 · 회원 없음을 구분하지 않는다 |
+| `AUTH_012` | 401 | refresh 토큰 재사용 감지 — 이미 회전한 토큰이 유예(30초) 밖에서 다시 왔거나 유예 안 형제가 3개를 넘었다. 그 로그인(family)의 토큰을 모두 폐기했다 |
+| `AUTH_013` | 503 | 토큰 저장소(Redis) 장애 — 로그인 · 재발급 · 로그아웃. 로그인 상태(쿠키)는 그대로 두고 다시 시도한다 |
 | `AUTH_100` | 400 | 깨진 JSON · 본문 없음 · 타입 불일치 (필드는 `fieldErrors` 로 밝힌다) |
-| `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115 |
+| `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 
 입력 규칙
 
