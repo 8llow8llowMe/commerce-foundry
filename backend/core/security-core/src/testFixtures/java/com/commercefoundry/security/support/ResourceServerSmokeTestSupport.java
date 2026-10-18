@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import com.commercefoundry.security.error.SecurityErrorCode;
-import com.commercefoundry.security.internal.InternalTokenFormat;
 import com.commercefoundry.security.internal.InternalTokenProperties;
 import com.commercefoundry.security.issuer.JwtIssuer;
 import com.commercefoundry.security.principal.MemberRole;
@@ -16,7 +15,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -67,8 +65,9 @@ import org.springframework.web.util.pattern.PathPatternParser;
  *       {@code aud} 불일치 401 · 007, 허용 목록 밖 호출자 403 · 005, 허용된 호출자 200. 핸들러는 {@link InternalSecuritySmokeContextCustomizerFactory} 가
  *       모든 서블릿 테스트 컨텍스트에 등록하므로 {@code *ApplicationTests} 와 컨텍스트 공유가 깨지지 않는다.</li>
  *   <li>인가 선언 누락 가드 — 서비스 컨텍스트의 모든 MVC 핸들러를 돌며 {@code /internal/} 핸들러는 허용 호출자({@code hasAuthority('SERVICE_…')}),
- *       {@code /api/} 핸들러는 {@code @PreAuthorize} 가 있는지 본다. 실제 매핑을 보는 런타임 가드이고, 정적 규칙(전역 인터셉터 · {@code RequestContextHolder} 등)은
- *       #42 ArchUnit 이 맡는다.</li>
+ *       {@code /api/} 핸들러는 {@code @PreAuthorize} 가 있는지 본다. 실제 매핑을 보는 런타임 가드이고, 패키지 기준 정적 규칙(어드민의 {@code hasRole('ADMIN')} ·
+ *       전역 Feign 설정 · {@code RequestContextHolder})은 {@link ControllerAuthorizationArchTestSupport} 가 맡는다. 허용 호출자 판정은 둘이
+ *       {@link AuthorizationExpressions} 를 같이 쓴다.</li>
  * </ul>
  */
 @SpringBootTest
@@ -83,9 +82,6 @@ public abstract class ResourceServerSmokeTestSupport {
 
     private static final String INTERNAL_PREFIX = "/internal/";
     private static final String API_PREFIX = "/api/";
-    /** 허용 호출자 선언의 모양 — 서비스 권한만 나열한 {@code hasAuthority} · {@code hasAnyAuthority} 식 그 자체. */
-    private static final Pattern SERVICE_CALLERS_EXPRESSION = Pattern.compile(
-        "has(Any)?Authority\\(\\s*'" + InternalTokenFormat.AUTHORITY_PREFIX + "[a-z][a-z0-9-]*'(\\s*,\\s*'" + InternalTokenFormat.AUTHORITY_PREFIX + "[a-z][a-z0-9-]*')*\\s*\\)");
 
     @Autowired
     private MockMvc mockMvc;
@@ -303,7 +299,7 @@ public abstract class ResourceServerSmokeTestSupport {
             String handlerName = handler.getBeanType().getName() + "#" + handler.getMethod().getName() + " " + patterns;
             if (internal) {
                 checkedInternalPatterns.addAll(patterns);
-                if (declared == null || !SERVICE_CALLERS_EXPRESSION.matcher(declared.value().strip()).matches()) {
+                if (declared == null || !AuthorizationExpressions.isServiceCallersOnly(declared.value())) {
                     violations.add(handlerName + " -> " + (declared == null ? "@PreAuthorize 없음" : declared.value()));
                 }
             } else if (declared == null) {

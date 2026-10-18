@@ -36,6 +36,9 @@ dependencies {
     // 스모크(ResourceServerSmokeTestSupport)를 쓰는 서블릿 서비스는 이미 spring-boot-starter-webmvc-test 를 가진다
     testFixturesCompileOnly 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testFixturesCompileOnly 'jakarta.servlet:jakarta.servlet-api'
+    // 컨트롤러 인가 선언 · 전역 Feign 설정 정적 규칙(ControllerAuthorizationArchTestSupport). 규칙(ArchRule)을 공개 상수로 내보내 서비스 테스트도 타입을 보므로 api 다.
+    // archunit-junit5 엔진은 쓰지 않는다 — Boot 4 의 JUnit 플랫폼과 맞물린다는 보장이 없어, 일반 Jupiter @Test 에서 rule.check 한다
+    testFixturesApi "com.tngtech.archunit:archunit:${rootProject.ext.archunitVersion}"
 
     testImplementation 'org.springframework.boot:spring-boot-starter-security'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc'
