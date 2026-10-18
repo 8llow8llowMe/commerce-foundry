@@ -125,8 +125,12 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
   RANDOM_PORT + `management.server.port=0` 통합 테스트를 더해 actuator 규칙이 분리된 포트에서도 걸리는지 확인한다.
 - **토큰을 보냈는데 틀리면 공개 API 여도 401 이다.** 틀린 토큰을 익명으로 취급하지 않는다. BFF 는 401 이면 재발급 후 한 번 재시도한다(§4).
 - 세션을 만들지 않는다(STATELESS). CSRF · 폼 로그인 · Basic · 로그아웃을 끈다. CORS 는 게이트웨이가 처리하므로 서비스에서 끈다.
-- 정규화되면 다른 경로가 되는 원문 경로(`..` · `%2e` · `;` · `//` · `%2f`)는 Spring Security 방화벽이 필터 체인 앞에서 **400(봉투 없음)** 으로 끊는다.
+- 정규화되면 다른 경로가 되는 원문 경로(`..` · `%2e` · `;` · `//` · `%2f`)는 Spring Security 방화벽이 필터 체인 앞에서 **400** 으로 끊는다.
   게이트웨이도 같은 경로를 먼저 거절한다(`GATEWAY_004`). 서비스의 400 은 게이트웨이를 거치지 않은 요청에 대한 이중 방어다.
+  방화벽은 기본 처리기대로 `sendError(400)` 만 하고(`RequestRejectedHandler` 를 두지 않는다), 실제 컨테이너에서는 `/error` ERROR 디스패치를 거쳐
+  common-core `FallbackErrorController` 가 `COMMON_004` 봉투를 쓴다(#81, `api-design-guide.md` §2-1). MockMvc 는 재전송하지 않아 본문이 비어 있다.
+  사용자 체인의 `anyRequest().permitAll()` 이 `/error` 디스패치를 연다 — **`/error` 를 막는 URL 규칙을 더하면 MVC 밖 오류가 모두 401 로 덮인다.**
+  `%2f` 는 Tomcat 이 Spring 전에 400 HTML 로 끊는다.
 - 대소문자가 다른 경로(`/API/v1/admin/x`)는 어느 컨트롤러에도 매핑되지 않아 404 다. 비예약 문자를 인코딩한 경로(`/api/v1/%61dmin/x`)는
   URL 규칙과 MVC 가 같은 디코딩으로 보므로 어드민 규칙에 그대로 걸린다(CUSTOMER 403 · 무토큰 401). 둘 다 컨트롤러가 있는 security-core 통합 테스트로 고정했다.
   서비스 인가 스모크(§5-3)는 인코딩 경로가 규칙에 걸리는지와, 서비스 MVC 의 경로 매칭이 URL 규칙과 같은 대소문자 규칙(`PathPatternParser`, 대소문자 구분)인지 본다.
@@ -244,7 +248,7 @@ Spring Security 7 이 Resource Server 설정에 자동으로 더하는 것과 �
 |------|------|------|
 | `GET /.well-known/oauth-protected-resource` | 200 + 메타데이터(무인증) | 비밀은 아니다. 게이트웨이가 라우팅하지 않는다 |
 | `Authorization: DPoP ...` | 봉투 없는 401 + `WWW-Authenticate: DPoP ...` | 우리 토큰은 DPoP 바인딩이 없어 항상 거부된다. 프론트는 `Bearer` 만 쓴다 |
-| 정규화되지 않은 경로 (§5-1) | 봉투 없는 400 | 게이트웨이가 먼저 `GATEWAY_004` 로 거절한다 |
+| 인코딩된 슬래시 `%2f` 경로 (§5-1) | Tomcat 의 400 HTML (서버 버전 없음) | 애플리케이션 전에 끊긴다. 게이트웨이가 먼저 `GATEWAY_004` 로 거절한다. 그 밖의 비정규 경로는 `COMMON_004` 봉투다(#81) |
 
 ## 6. 키
 

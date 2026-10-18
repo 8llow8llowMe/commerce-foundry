@@ -141,9 +141,14 @@ return ResponseEntity.ok().body(Response.success(response));
   예외 메시지에 입력값이 섞이는 오류(제약 위반 등)는 폴백에 맡기지 말고 도메인에서 먼저 받아 도메인 코드로 바꾼다 — 폴백 로그는 예외를 그대로 남긴다.
 - 인증 · 인가 실패를 `ResponseStatusException(401/403)` 으로 던지지 않는다. 폴백으로 오면 `SECURITY_00x` 가 아니라 `COMMON_004` 로 나간다(경고 로그가 남는다).
 - internal 경로(`/internal/**`)의 매핑 없는 요청은 인증 전 단계에서 401 `SECURITY_007` 이 먼저다.
-- 폴백은 MVC(`DispatcherServlet`) 안의 오류만 받는다. 보안 필터의 인증 · 인가 거부는 `SECURITY_00x` 진입점이 쓰지만,
-  **방화벽의 비정규 경로 거부(400 — `;` · `%2e` 등, 정상 클라이언트는 게이트웨이에서 먼저 끊긴다)와 그 밖의 필터 예외는 `/error` 로 가 아직 Boot 기본 JSON 이다.**
-- `@WebMvcTest` 슬라이스에는 이 자동 구성이 들어가지 않는다 — 슬라이스의 404 · 500 모양은 운영과 다르다. 폴백 모양은 `*FallbackErrorSmokeTest`(전체 컨텍스트)가 본다.
+- 폴백은 두 곳에 있다. MVC(`DispatcherServlet`) 안의 오류는 `FallbackErrorResolver` 가, **MVC 밖의 오류**(서블릿 필터 예외 · Spring Security 방화벽의
+  비정규 경로 거부 · 그 밖의 `sendError`)는 `/error` 를 맡는 `FallbackErrorController`(Boot `BasicErrorController` 대체, #81)가 같은 표로 `COMMON_00x` 봉투를 쓴다.
+  보안 필터의 인증 · 인가 거부는 여전히 `SECURITY_00x` 진입점이 직접 쓴다(`/error` 로 가지 않는다).
+  - `/error` 응답은 `Accept` 와 무관하게 언제나 JSON 봉투다(HTML 화이트라벨을 내지 않는다). 직접 `GET /error` 는 404 `COMMON_001` 이다.
+  - 방화벽 거부는 400 `COMMON_004` 다 (`;` · `%2e` · `//` 등 — 정상 클라이언트는 게이트웨이 `GATEWAY_004` 에서 먼저 끊긴다).
+  - 예외: 인코딩된 슬래시(`%2f`)는 Tomcat 이 애플리케이션 전에 400 HTML 로 끊는다 — 봉투가 아니고 서버 이름 · 버전은 싣지 않는다. 게이트웨이가 먼저 거절한다.
+- `@WebMvcTest` 슬라이스에는 이 자동 구성이 들어가지 않는다 — 슬라이스의 404 · 500 모양은 운영과 다르다. 폴백 모양은 `*FallbackErrorSmokeTest`(전체 컨텍스트)가,
+  `/error` 경로는 `*ErrorPageEnvelopeSmokeTest`(실제 서블릿 컨테이너 — MockMvc 는 `/error` 재전송을 재현하지 않는다)가 본다.
 
 #### 게이트웨이 오류 코드
 
