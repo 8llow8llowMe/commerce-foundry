@@ -20,7 +20,9 @@ public enum GatewayErrorCode {
     BAD_REQUEST("GATEWAY_004", "잘못된 요청입니다.", HttpStatus.BAD_REQUEST),
     BAD_GATEWAY("GATEWAY_005", "서비스 응답을 받지 못했습니다. 처리 여부를 확인한 뒤 다시 시도해주세요.", HttpStatus.BAD_GATEWAY),
     // 요청이 서비스에 닿지 않았다 — Retry-After 뒤에 같은 요청을 다시 보내도 된다 (security-guide.md §7-3)
-    TOO_MANY_REQUESTS("GATEWAY_006", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.", HttpStatus.TOO_MANY_REQUESTS);
+    TOO_MANY_REQUESTS("GATEWAY_006", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.", HttpStatus.TOO_MANY_REQUESTS),
+    // 요청은 서비스에 닿지 않았다 — 본문을 줄여 다시 보내야 한다
+    PAYLOAD_TOO_LARGE("GATEWAY_007", "요청 본문이 너무 큽니다.", HttpStatus.CONTENT_TOO_LARGE);
 
     private final String code;
     private final String message;
