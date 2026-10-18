@@ -351,7 +351,7 @@ public final class ProductValidationMessage {
 
 | 키 | 만드는 곳 | 비고 |
 |----|-----------|------|
-| `request_rate_limiter.{<routeId>.<id>}.tokens` · `.timestamp` | Spring Cloud Gateway `RedisRateLimiter` (gateway) | 형식은 프레임워크가 정한다(쓰는 버전 5.0.3 의 `RedisRateLimiter.getKeys` 로 확인). TTL 은 Lua 스크립트가 같이 건다. `<routeId>` 는 정책 id, `<id>` 는 `<정책>:member:<memberId>` 다(`RedisMemberRateLimiter`, `security-guide.md` §7-3) — 개인정보 원문을 넣지 않는다 |
+| `request_rate_limiter.{<routeId>.<id>}.tokens` · `.timestamp` | Spring Cloud Gateway `RedisRateLimiter` (gateway) | 형식은 프레임워크가 정한다(쓰는 버전 5.0.3 의 `RedisRateLimiter.getKeys` 로 확인). TTL 은 Lua 스크립트가 같이 건다. `<routeId>` 는 정책 id, `<id>` 는 `<정책>:member:<memberId>` 또는 `<정책>:ip:<HMAC>` 다(`RedisBucketRateLimiter`, `security-guide.md` §7-3) — 개인정보 원문(IP 포함)을 넣지 않는다 |
 
 ### 9-8. 스키마 변경 · 운영 DDL (필수)
 

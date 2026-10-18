@@ -41,6 +41,9 @@ cp .env.example .env
 - **#51 부터 서비스 5종은 `INTERNAL_JWT_SECRET`(서비스 토큰 비밀)이 비면 뜨지 않는다.** 빈 `INTERNAL_JWT_SECRET=` 줄을 지우고
   `printf 'INTERNAL_JWT_SECRET=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다(서비스 5종이 같은 `.env` 를 읽는다).
   `INTERNAL_JWT_SECRET_PREVIOUS` 는 비워 둔다 (`security-guide.md` §9-6).
+- **#89 부터 게이트웨이는 `GATEWAY_CLIENT_IP_HASH_KEY`(비로그인 요청 IP 의 HMAC 키)가 비면 뜨지 않는다.** 빈 줄을 지우고
+  `printf 'GATEWAY_CLIENT_IP_HASH_KEY=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다.
+  `GATEWAY_TRUSTED_PROXIES` 는 비워 둔다 — 로컬은 프록시 없이 붙는다 (`security-guide.md` §7-3).
 
 ## 3. 미들웨어 (PostgreSQL · Redis)
 
