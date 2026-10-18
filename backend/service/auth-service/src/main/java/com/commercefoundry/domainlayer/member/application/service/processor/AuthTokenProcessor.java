@@ -7,12 +7,10 @@ import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRe
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenFormat;
-import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationResult;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
-import com.commercefoundry.global.properties.AuthTokenProperties;
 import com.commercefoundry.security.issuer.IssuedAccessToken;
-import com.commercefoundry.security.issuer.JwtIssuanceProperties;
 import com.commercefoundry.security.issuer.JwtIssuer;
 import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
 import java.time.Clock;
@@ -37,15 +35,20 @@ public class AuthTokenProcessor {
     private final AccessTokenRevocationPort accessTokenRevocationPort;
     private final JwtIssuer jwtIssuer;
     private final OpaqueTokenGenerator opaqueTokenGenerator;
-    private final JwtIssuanceProperties jwtIssuanceProperties;
-    private final AuthTokenProperties authTokenProperties;
+    /** 유예 · 형제 상한 · refresh TTL · family 절대 수명. 두 설정의 어긋남은 빈을 만들 때(기동) 거른다 ({@code AuthTokenBeansConfig}). */
+    private final RefreshTokenRotationPolicy rotationPolicy;
     private final Clock clock;
 
-    /** 로그인 — 새 family 로 refresh 토큰을 저장하고 access 토큰을 발급한다. */
+    /**
+     * 로그인 — 새 family 로 refresh 토큰을 저장하고 access 토큰을 발급한다. family 에는 지금을 로그인 시각으로 남긴다(절대 수명의 기준).
+     * refresh 수명은 정책 TTL 그대로다 — 절대 수명 ≥ TTL 이라 로그인 시점에는 줄어들 일이 없다.
+     */
     public AuthTokenInfo issueForLogin(Member member) {
         String refreshToken = opaqueTokenGenerator.generate();
-        refreshTokenStorePort.saveNewFamily(opaqueTokenGenerator.fingerprint(refreshToken), member.id(), UUID.randomUUID().toString(), refreshTokenTtl());
-        return issue(member, refreshToken);
+        refreshTokenStorePort.saveNewFamily(
+            opaqueTokenGenerator.fingerprint(refreshToken), member.id(), UUID.randomUUID().toString(), clock.instant(), rotationPolicy.ttl()
+        );
+        return issue(member, refreshToken, rotationPolicy.ttl());
     }
 
     /**
@@ -67,7 +70,7 @@ public class AuthTokenProcessor {
      *
      * @param customer 세션 주인 — 지금도 고객 로그인을 쓸 수 있는 회원({@code MemberLoginProcessor#findCustomer}). 없거나 관리자면 null 이고,
      *                 그때는 family 를 폐기하고 무효로 답한다(고객 로그인은 관리자를 막으므로 정상 흐름에는 없다)
-     * @throws MemberException {@link MemberErrorCode#REFRESH_TOKEN_INVALID} — 주인 없음 · 관리자 · 읽은 뒤 무효가 됐다.
+     * @throws MemberException {@link MemberErrorCode#REFRESH_TOKEN_INVALID} — 주인 없음 · 관리자 · 읽은 뒤 무효가 됐다 · family 절대 수명 초과(family 를 폐기했다).
      *                         {@link MemberErrorCode#REFRESH_TOKEN_REUSED} — 유예 밖 재사용 · 형제 상한 초과, family 를 폐기했다
      */
     public AuthTokenInfo reissue(RefreshTokenSession session, Member customer) {
@@ -78,18 +81,20 @@ public class AuthTokenProcessor {
         }
 
         String refreshToken = opaqueTokenGenerator.generate();
-        RefreshTokenRotationPolicy policy = new RefreshTokenRotationPolicy(
-            authTokenProperties.refreshReuseGrace(), authTokenProperties.refreshReuseGraceMaxSiblings(), refreshTokenTtl()
-        );
-        RefreshTokenRotation rotation = refreshTokenStorePort.rotate(session, opaqueTokenGenerator.fingerprint(refreshToken), clock.instant(), policy);
-        return switch (rotation) {
-            case ROTATED -> issue(customer, refreshToken);
+        RefreshTokenRotationResult result = refreshTokenStorePort.rotate(session, opaqueTokenGenerator.fingerprint(refreshToken), clock.instant(), rotationPolicy);
+        return switch (result.rotation()) {
+            case ROTATED -> issue(customer, refreshToken, result.refreshTokenTtl());
             case REISSUED_IN_GRACE -> {
                 log.info("refresh token reused in grace, sibling issued: memberId={}, familyId={}, fingerprint={}",
                     session.memberId(), session.familyId(), session.fingerprintForLog());
-                yield issue(customer, refreshToken);
+                yield issue(customer, refreshToken, result.refreshTokenTtl());
             }
             case INVALID -> throw new MemberException(MemberErrorCode.REFRESH_TOKEN_INVALID);
+            // 정상 만료라 재사용(AUTH_012 · warn)과 나눈다. 클라이언트에는 만료 · 폐기와 같은 AUTH_011 — BFF 는 4xx 로 쿠키를 지우고 로그인 화면으로 보낸다
+            case FAMILY_EXPIRED -> {
+                log.info("refresh token family reached its max lifetime, family revoked: memberId={}, familyId={}", session.memberId(), session.familyId());
+                throw new MemberException(MemberErrorCode.REFRESH_TOKEN_INVALID);
+            }
             case REUSE_DETECTED -> {
                 log.warn("refresh token reuse detected, family revoked: memberId={}, familyId={}, fingerprint={}",
                     session.memberId(), session.familyId(), session.fingerprintForLog());
@@ -124,13 +129,13 @@ public class AuthTokenProcessor {
             .ifPresent(session -> refreshTokenStorePort.revokeFamily(session.familyId()));
     }
 
-    private AuthTokenInfo issue(Member member, String refreshToken) {
+    /**
+     * @param refreshTokenTtl 저장소가 새 refresh 토큰에 실제로 건 TTL — 응답 {@code refreshTokenExpiresIn}(초, 버림)이 BFF 쿠키 만료가 된다.
+     *                        버림이라 쿠키가 서버 키보다 먼저(1초 안) 사라진다 — 반대면 이미 지운 토큰으로 재발급을 부른다
+     */
+    private AuthTokenInfo issue(Member member, String refreshToken, Duration refreshTokenTtl) {
         IssuedAccessToken accessToken = jwtIssuer.issueAccessToken(member.id(), member.role());
         long accessTokenExpiresIn = Math.max(0, Duration.between(clock.instant(), accessToken.expiresAt()).toSeconds());
-        return new AuthTokenInfo(accessToken.tokenValue(), accessTokenExpiresIn, refreshToken, refreshTokenTtl().toSeconds());
-    }
-
-    private Duration refreshTokenTtl() {
-        return jwtIssuanceProperties.refreshTokenTtl();
+        return new AuthTokenInfo(accessToken.tokenValue(), accessTokenExpiresIn, refreshToken, refreshTokenTtl.toSeconds());
     }
 }

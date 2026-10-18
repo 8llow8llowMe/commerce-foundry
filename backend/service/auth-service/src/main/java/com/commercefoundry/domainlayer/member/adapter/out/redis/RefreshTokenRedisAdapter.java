@@ -5,6 +5,7 @@ import static com.commercefoundry.domainlayer.member.adapter.out.redis.TokenStor
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationResult;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import java.time.Duration;
 import java.time.Instant;
@@ -25,9 +26,11 @@ public class RefreshTokenRedisAdapter implements RefreshTokenStorePort {
     private final StringRedisTemplate redisTemplate;
 
     @Override
-    public void saveNewFamily(String fingerprint, long memberId, String familyId, Duration ttl) {
+    public void saveNewFamily(String fingerprint, long memberId, String familyId, Instant loginAt, Duration ttl) {
         List<String> keys = List.of(RefreshTokenRedisKeys.token(fingerprint).value(), RefreshTokenRedisKeys.family(familyId).value());
-        execute(() -> redisTemplate.execute(RefreshTokenRedisScripts.SAVE_NEW_FAMILY, keys, String.valueOf(memberId), familyId, millis(ttl)));
+        execute(() -> redisTemplate.execute(
+            RefreshTokenRedisScripts.SAVE_NEW_FAMILY, keys, String.valueOf(memberId), familyId, millis(ttl), String.valueOf(loginAt.toEpochMilli())
+        ));
     }
 
     /**
@@ -48,27 +51,32 @@ public class RefreshTokenRedisAdapter implements RefreshTokenStorePort {
     }
 
     @Override
-    public RefreshTokenRotation rotate(RefreshTokenSession session, String newFingerprint, Instant now, RefreshTokenRotationPolicy policy) {
+    public RefreshTokenRotationResult rotate(RefreshTokenSession session, String newFingerprint, Instant now, RefreshTokenRotationPolicy policy) {
         List<String> keys = List.of(
             RefreshTokenRedisKeys.token(session.fingerprint()).value(),
             RefreshTokenRedisKeys.family(session.familyId()).value(),
             RefreshTokenRedisKeys.token(newFingerprint).value()
         );
-        String result = execute(() -> redisTemplate.execute(
+        List<Object> result = execute(() -> redisTemplate.execute(
             RefreshTokenRedisScripts.ROTATE, keys,
             String.valueOf(session.memberId()), session.familyId(), String.valueOf(now.toEpochMilli()),
-            millis(policy.reuseGrace()), millis(policy.ttl()), String.valueOf(policy.maxSiblings())
+            millis(policy.reuseGrace()), millis(policy.ttl()), String.valueOf(policy.maxSiblings()), millis(policy.familyMaxLifetime())
         ));
-        if (result == null) {
-            throw new IllegalStateException("refresh 토큰 회전 스크립트가 결과를 돌려주지 않았습니다");
-        }
-        return RefreshTokenRotation.valueOf(result);
+        return toRotationResult(result);
     }
 
     @Override
     public void revokeFamily(String familyId) {
         String familyKey = RefreshTokenRedisKeys.family(familyId).value();
         execute(() -> redisTemplate.delete(familyKey));
+    }
+
+    /** 스크립트 반환 {@code {이름, TTL(ms)}} — 이름은 문자열, TTL 은 정수 응답(Long)이다. 모양이 다르면 스크립트와 코드가 어긋난 것이라 그대로 실패한다. */
+    static RefreshTokenRotationResult toRotationResult(List<Object> result) {
+        if (result == null || result.size() != 2 || !(result.get(0) instanceof String name) || !(result.get(1) instanceof Number ttlMillis)) {
+            throw new IllegalStateException("refresh 토큰 회전 스크립트의 결과 모양이 다릅니다: " + result);
+        }
+        return new RefreshTokenRotationResult(RefreshTokenRotation.valueOf(name), Duration.ofMillis(ttlMillis.longValue()));
     }
 
     private static Optional<RefreshTokenSession> toSession(String fingerprint, List<Object> stored) {

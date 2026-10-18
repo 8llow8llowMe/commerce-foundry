@@ -1,8 +1,8 @@
 package com.commercefoundry.domainlayer.member.application.port.out;
 
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
-import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationResult;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import java.time.Duration;
 import java.time.Instant;
@@ -16,19 +16,22 @@ import java.util.Optional;
  */
 public interface RefreshTokenStorePort {
 
-    /** 로그인 — 새 family 와 그 첫 토큰을 함께(원자) 둘 다 {@code ttl} 로 저장한다. */
-    void saveNewFamily(String fingerprint, long memberId, String familyId, Duration ttl);
+    /**
+     * 로그인 — 새 family 와 그 첫 토큰을 함께(원자) 둘 다 {@code ttl} 로 저장한다. family 에는 {@code loginAt} 을 남긴다 — 절대 수명을 재는 기준이고 회전해도 바뀌지 않는다.
+     * {@code ttl} ≤ family 절대 수명이 전제다({@link RefreshTokenRotationPolicy} 가 보장한다) — 그래서 로그인 시점에는 TTL 을 줄이지 않는다.
+     */
+    void saveNewFamily(String fingerprint, long memberId, String familyId, Instant loginAt, Duration ttl);
 
     /** 토큰과 그 family 가 둘 다 살아 있으면 세션, 아니면 빈 값. 읽기만 한다 — 판정은 {@link #rotate} 가 다시 한다. */
     Optional<RefreshTokenSession> findSession(String fingerprint);
 
     /**
-     * 읽은 세션을 원자적으로 다시 확인하고 회전한다. 성공(회전 · 유예 안 형제 발급)이면 새 토큰을 같은 family 로 저장하고 family TTL 도 다시 늘린다.
-     * 유예 밖 재사용 · 형제 상한 초과는 family 를 지운다.
+     * 읽은 세션을 원자적으로 다시 확인하고 회전한다. 성공(회전 · 유예 안 형제 발급)이면 새 토큰을 같은 family 로 저장하고 family TTL 도 다시 건다 —
+     * TTL 은 {@code min(정책 TTL, family 상한까지 남은 시간)} 이고 결과에 담는다. family 가 절대 수명을 다 썼거나 · 유예 밖 재사용 · 형제 상한 초과면 family 를 지운다.
      *
-     * @param now 회전 시각 — 유예 판정의 기준이다
+     * @param now 회전 시각 — 유예 · 절대 수명 판정의 기준이다
      */
-    RefreshTokenRotation rotate(RefreshTokenSession session, String newFingerprint, Instant now, RefreshTokenRotationPolicy policy);
+    RefreshTokenRotationResult rotate(RefreshTokenSession session, String newFingerprint, Instant now, RefreshTokenRotationPolicy policy);
 
     /** family 를 지운다 — 그 family 의 토큰이 모두 무효가 된다. 이미 없으면 아무 일도 없다. */
     void revokeFamily(String familyId);

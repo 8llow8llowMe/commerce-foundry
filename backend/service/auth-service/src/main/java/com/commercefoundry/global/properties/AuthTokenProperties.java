@@ -6,16 +6,20 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * refresh 토큰 회전 정책 ({@code auth.token.*}). 수명(TTL)은 발급 설정 {@code security.jwt.issuance.refresh-token-ttl} 이 정한다.
+ * 두 설정을 함께 봐야 하는 검사(절대 수명 ≥ refresh TTL)는 정책 빈을 만들 때 한다 ({@code AuthTokenBeansConfig}).
  *
  * @param refreshReuseGrace            이미 회전한 refresh 토큰이 다시 와도 탈취로 보지 않고 형제 토큰을 내주는 창 (#4 결정 6).
  *                                     BFF 의 동시 재발급 · 응답 유실 재시도를 받아 준다. FE {@code REISSUE_GRACE_MS} 와 같은 값이다. 기본 30초
  * @param refreshReuseGraceMaxSiblings 유예 안에서 한 토큰으로 내줄 수 있는 형제 토큰 수. 넘으면 재사용 감지로 family 를 폐기한다 —
  *                                     회전한 토큰을 훔친 쪽이 유예 동안 새 토큰을 마구 받아 가지 못하게. 기본 3
+ * @param refreshFamilyMaxLifetime     로그인(family) 하나의 절대 수명 — 최초 로그인 시각부터 잰다 (#67). 회전마다 refresh TTL 이 다시 걸려도
+ *                                     이 시간을 넘겨 이어지지 않는다. 기본 30일 — refresh TTL 14일의 약 두 배로, 자주 쓰는 사용자도 한 달에 한 번은 다시 로그인한다
  */
 @ConfigurationProperties(prefix = "auth.token")
 public record AuthTokenProperties(
     @DefaultValue("30s") Duration refreshReuseGrace,
-    @DefaultValue("3") int refreshReuseGraceMaxSiblings
+    @DefaultValue("3") int refreshReuseGraceMaxSiblings,
+    @DefaultValue("30d") Duration refreshFamilyMaxLifetime
 ) {
 
     /**
@@ -34,6 +38,9 @@ public record AuthTokenProperties(
         }
         if (refreshReuseGraceMaxSiblings < 0 || refreshReuseGraceMaxSiblings > MAX_REFRESH_REUSE_GRACE_SIBLINGS) {
             throw new IllegalStateException("auth.token.refresh-reuse-grace-max-siblings 는 0 이상 10 이하여야 합니다");
+        }
+        if (refreshFamilyMaxLifetime == null || !refreshFamilyMaxLifetime.isPositive()) {
+            throw new IllegalStateException("auth.token.refresh-family-max-lifetime 은 0 보다 커야 합니다");
         }
     }
 }

@@ -7,10 +7,11 @@ import com.commercefoundry.redis.key.RedisKey;
  *
  * <ul>
  *   <li>{@code auth:refresh-token:{fingerprint}} — HASH {@code {memberId, familyId, rotatedAt?, siblings?}}. 원문이 아니라 SHA-256 지문(base64url 43자)이다.</li>
- *   <li>{@code auth:refresh-family:{familyId}} — STRING {@code "1"}. 있으면 그 family 의 토큰이 살아 있다. 지우면 모두 무효다.</li>
+ *   <li>{@code auth:refresh-family:{familyId}} — STRING 최초 로그인 시각(epoch ms). 있으면 그 family 의 토큰이 살아 있다. 지우면 모두 무효다.
+ *       회전해도 값은 그대로다 — 절대 수명을 재는 기준이다.</li>
  * </ul>
  *
- * <p>TTL 은 둘 다 refresh 토큰 TTL 이고 쓰는 스크립트 안에서 함께 준다 ({@link RefreshTokenRedisScripts}).
+ * <p>TTL 은 둘 다 {@code min(refresh 토큰 TTL, family 절대 수명까지 남은 시간)} 이고 쓰는 스크립트 안에서 함께 준다 ({@link RefreshTokenRedisScripts}).
  */
 final class RefreshTokenRedisKeys {
 
