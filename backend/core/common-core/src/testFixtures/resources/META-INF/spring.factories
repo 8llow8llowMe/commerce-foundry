@@ -1,0 +1,5 @@
+# common-core 테스트 픽스처 — 테스트 클래스패스에만 있다 (testImplementation testFixtures(project(':core:common-core'))).
+# 서블릿 테스트 컨텍스트에 폴백 오류 봉투 스모크 전용 핸들러를 등록한다 (api-design-guide.md §2-1 공통 오류 코드).
+# 모든 테스트에 같은 커스터마이저라 *ApplicationTests 와 *FallbackErrorSmokeTest 가 컨텍스트를 같이 쓴다
+org.springframework.test.context.ContextCustomizerFactory=\
+com.commercefoundry.common.support.FallbackErrorSmokeContextCustomizerFactory
