@@ -237,6 +237,9 @@ public final class ProductValidationMessage {
   JPA 3.2 `@Table(check = @CheckConstraint(name = ..., constraint = ...))` 로 단다. 표현식은 H2(PostgreSQL 모드 — 컨텍스트 테스트)와
   PostgreSQL 이 둘 다 받는 표준 SQL 로 쓴다. `update` 는 이미 있는 테이블에 check 제약을 더하지 않는다 —
   기존 테이블에 더하면 운영 DDL 에 `alter table ... add constraint ... check (...)` 를 적고 dev 에도 직접 적용한다.
+  기존 컬럼에 거는 제약이면 적용 전에 위반 행이 없는지 `select` 로 먼저 확인한다 — 있으면 `add constraint` 가 실패한다.
+  - 문자 형식은 정규식(`~` · `REGEXP_LIKE`)이 두 엔진에서 달라 쓰지 않는다. 숫자만인지는 `ltrim(col, '0123456789') = ''` 로 본다
+    (예: `ck_sku_hs_code_format`). `translate(col, '0123456789', '')` 는 H2 에서 문자를 지우지 않아(빈 치환 문자열을 무시) 맞는 값까지 거절한다.
 - PostgreSQL 식별자 상한은 **63자**다. 넘으면 의미를 해치지 않는 범위에서 축약한다. 스냅숏 테스트가 접두어(`idx_` · `uk_` · `ck_` + 테이블명)와 길이를 검사한다.
 
 ### 9-5. 쿼리 작성 (필수)
