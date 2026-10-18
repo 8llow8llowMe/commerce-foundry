@@ -110,6 +110,8 @@ public class SkuInternalProcessor {
             .purchasable(SaleAvailability.isPurchasable(product, sku, stock))
             .maxQuantityPerOrder(product.maxQuantityPerOrder())
             .customOrder(storeProperties.features().customOrder() && product.customOrder())
+            .weightGrams(sku.weightGrams())
+            .hsCode(sku.hsCode())
             .build();
     }
 

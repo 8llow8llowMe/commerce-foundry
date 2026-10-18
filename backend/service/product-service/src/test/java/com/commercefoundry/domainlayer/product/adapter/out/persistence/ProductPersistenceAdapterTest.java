@@ -350,6 +350,40 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("제약: 무게 0g 은 저장되지 않는다 (ck_sku_weight_grams_positive)")
+    void nonPositiveWeightIsRejected() {
+        assertThatThrownBy(() -> persistAll(skuBuilder(1009L, 101L, "2005", 0L, SaleStatus.ON_SALE).weightGrams(0).build()))
+            .rootCause()
+            .hasMessageContaining("ck_sku_weight_grams_positive");
+    }
+
+    @Test
+    @DisplayName("제약: 6자리 미만 HS 코드는 저장되지 않는다 (ck_sku_hs_code_length)")
+    void shortHsCodeIsRejected() {
+        assertThatThrownBy(() -> persistAll(skuBuilder(1009L, 101L, "2005", 0L, SaleStatus.ON_SALE).hsCode("62114").build()))
+            .rootCause()
+            .hasMessageContaining("ck_sku_hs_code_length");
+    }
+
+    @Test
+    @DisplayName("제약: 10자리 초과 HS 코드는 저장되지 않는다 (varchar(10))")
+    void longHsCodeIsRejected() {
+        assertThatThrownBy(() -> persistAll(skuBuilder(1009L, 101L, "2005", 0L, SaleStatus.ON_SALE).hsCode("62114200001").build()))
+            .rootCause()
+            .hasMessageContaining("character varying(10)");
+    }
+
+    @Test
+    @DisplayName("SKU: 무게 · HS 코드를 저장하고 읽는다 — 미입력은 null 그대로다")
+    void skuWeightAndHsCode() {
+        persistAll(skuBuilder(1009L, 101L, "2005", 0L, SaleStatus.ON_SALE).weightGrams(450).hsCode("0621142000").build());
+
+        assertThat(skuRepositoryPort.findAllByIds(List.of(1009L, 1001L)))
+            .extracting(Sku::id, Sku::weightGrams, sku -> sku.hsCode() == null ? null : sku.hsCode().value())
+            .containsExactlyInAnyOrder(tuple(1009L, 450, "0621142000"), tuple(1001L, null, null));
+    }
+
+    @Test
     @DisplayName("제약: 정가 금액만 있고 통화가 없으면 저장되지 않는다 (ck_product_list_price_pair)")
     void halfListPriceIsRejected() {
         assertThatThrownBy(() -> persistAll(product(106L, 10_000L, true, SaleStatus.ON_SALE).listPriceAmount(12_000L).build()))
@@ -445,14 +479,19 @@ class ProductPersistenceAdapterTest {
     }
 
     private static SkuEntity sku(Long id, Long productId, String optionValueKey, long additionalPriceAmount, SaleStatus saleStatus) {
+        return skuBuilder(id, productId, optionValueKey, additionalPriceAmount, saleStatus).build();
+    }
+
+    private static SkuEntity.SkuEntityBuilder skuBuilder(
+        Long id, Long productId, String optionValueKey, long additionalPriceAmount, SaleStatus saleStatus
+    ) {
         return SkuEntity.builder()
             .id(id)
             .productId(productId)
             .optionValueKey(optionValueKey)
             .additionalPriceAmount(additionalPriceAmount)
             .additionalPriceCurrency(KRW)
-            .saleStatus(saleStatus)
-            .build();
+            .saleStatus(saleStatus);
     }
 
     private static StockEntity stock(Long skuId, boolean stockManaged, long availableQuantity) {

@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuO
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
 import com.commercefoundry.domainlayer.product.application.info.SkuInternalInfo;
 import com.commercefoundry.domainlayer.product.application.info.SkuOptionValueInfo;
+import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
@@ -35,6 +36,8 @@ class SkuInternalPresenterTest {
             .purchasable(true)
             .maxQuantityPerOrder(null)
             .customOrder(false)
+            .weightGrams(450)
+            .hsCode(new HsCode("6211420000"))
             .build();
 
         SkuInternalResponse response = presenter.toResponse(List.of(info));
@@ -54,7 +57,31 @@ class SkuInternalPresenterTest {
             .purchasable(true)
             .maxQuantityPerOrder(null)
             .customOrder(false)
+            .weightGrams(450)
+            .hsCode("6211420000")
             .build());
+    }
+
+    @Test
+    @DisplayName("무게 · HS 코드가 미입력이면 null 그대로다 — 기본값으로 채우지 않는다")
+    void missingWeightAndHsCode() {
+        SkuInternalInfo info = SkuInternalInfo.builder()
+            .skuId(1L)
+            .productId(7301L)
+            .productName("저고리")
+            .optionValues(List.of())
+            .optionName("")
+            .salePrice(Money.of(39_000, KRW))
+            .additionalPrice(Money.of(0, KRW))
+            .saleStatus(SaleAvailability.ON_SALE)
+            .purchasable(true)
+            .customOrder(false)
+            .build();
+
+        SkuInternalItem item = presenter.toResponse(List.of(info)).skus().getFirst();
+
+        assertThat(item.weightGrams()).isNull();
+        assertThat(item.hsCode()).isNull();
     }
 
     @Test

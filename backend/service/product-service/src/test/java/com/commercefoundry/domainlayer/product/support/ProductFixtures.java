@@ -4,6 +4,7 @@ import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderInputType;
+import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
@@ -56,9 +57,19 @@ public final class ProductFixtures {
         );
     }
 
-    /** @param optionKey 저장 정규형 조합 키 ({@code "5011,9001"}). 옵션 없는 상품은 {@code ""} */
+    /** 무게 · HS 코드가 없는(국내 판매 전용) SKU. @param optionKey 저장 정규형 조합 키 ({@code "5011,9001"}). 옵션 없는 상품은 {@code ""} */
     public static Sku sku(long id, long productId, String optionKey, long additionalAmount, SaleStatus saleStatus) {
-        return new Sku(id, productId, SkuOptionKey.fromStored(optionKey), Money.of(additionalAmount, KRW), saleStatus);
+        return sku(id, productId, optionKey, additionalAmount, saleStatus, null, null);
+    }
+
+    /** 무게 · HS 코드까지 정한 SKU. 둘 다 null 이면 미입력이다. */
+    public static Sku sku(
+        long id, long productId, String optionKey, long additionalAmount, SaleStatus saleStatus, Integer weightGrams, String hsCode
+    ) {
+        return new Sku(
+            id, productId, SkuOptionKey.fromStored(optionKey), Money.of(additionalAmount, KRW), saleStatus,
+            weightGrams, hsCode == null ? null : new HsCode(hsCode)
+        );
     }
 
     /** 재고 관리 · 판매 가능 수량 {@link #IN_STOCK_QUANTITY} 인 재고 행. */

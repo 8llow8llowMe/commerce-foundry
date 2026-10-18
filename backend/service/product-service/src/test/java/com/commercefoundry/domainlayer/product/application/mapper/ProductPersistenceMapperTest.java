@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
+import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
@@ -85,6 +86,32 @@ class ProductPersistenceMapperTest {
             .hasMessageContaining(stored);
     }
 
+    @Test
+    @DisplayName("SKU: 무게 · HS 코드가 없으면(미입력) null 이다")
+    void skuWithoutWeightAndHsCode() {
+        Sku sku = skuMapper.toDomain(sku("5,23"));
+
+        assertThat(sku.weightGrams()).isNull();
+        assertThat(sku.hsCode()).isNull();
+    }
+
+    @Test
+    @DisplayName("SKU: 무게는 그대로, HS 코드는 HsCode 로 읽는다")
+    void skuWithWeightAndHsCode() {
+        Sku sku = skuMapper.toDomain(skuBuilder("").weightGrams(450).hsCode("6211420000").build());
+
+        assertThat(sku.weightGrams()).isEqualTo(450);
+        assertThat(sku.hsCode()).isEqualTo(new HsCode("6211420000"));
+    }
+
+    @Test
+    @DisplayName("SKU: 저장된 HS 코드가 숫자가 아니면(DB check 는 길이만 본다) 고쳐 읽지 않고 실패한다")
+    void skuWithMalformedHsCode() {
+        assertThatThrownBy(() -> skuMapper.toDomain(skuBuilder("").hsCode("6211.42").build()))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("6211.42");
+    }
+
     private static ProductEntity.ProductEntityBuilder product() {
         return ProductEntity.builder()
             .id(101L)
@@ -98,13 +125,16 @@ class ProductPersistenceMapperTest {
     }
 
     private static SkuEntity sku(String optionValueKey) {
+        return skuBuilder(optionValueKey).build();
+    }
+
+    private static SkuEntity.SkuEntityBuilder skuBuilder(String optionValueKey) {
         return SkuEntity.builder()
             .id(301L)
             .productId(101L)
             .optionValueKey(optionValueKey)
             .additionalPriceAmount(3_000L)
             .additionalPriceCurrency(KRW)
-            .saleStatus(SaleStatus.ON_SALE)
-            .build();
+            .saleStatus(SaleStatus.ON_SALE);
     }
 }

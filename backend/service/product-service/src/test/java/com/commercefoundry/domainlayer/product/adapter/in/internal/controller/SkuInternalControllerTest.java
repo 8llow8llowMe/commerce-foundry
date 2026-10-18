@@ -90,6 +90,40 @@ class SkuInternalControllerTest {
 
         @Test
         @WithMockUser(authorities = ORDER_SERVICE)
+        @DisplayName("무게 · HS 코드를 싣는다 — 무게는 숫자, HS 코드는 문자열(앞자리 0 유지)이고, 미입력이면 키를 빼지 않고 null 로 낸다")
+        void weightAndHsCode() {
+            given(skuInternalUseCase.getSkus(List.of(1L, 2L))).willReturn(SkuInternalResponse.builder().skus(List.of(
+                skuItem("1").weightGrams(450).hsCode("0123456789").build(),
+                skuItem("2").build()
+            )).build());
+
+            MvcTestResult result = mvc.get().uri(PATH).param("ids", "1,2").exchange();
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.skus[0].weightGrams").isEqualTo(450);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.skus[0].hsCode").isEqualTo("0123456789");
+            assertThat(result).bodyJson().hasPath("$.dataBody.skus[1].weightGrams");
+            assertThat(result).bodyJson().hasPath("$.dataBody.skus[1].hsCode");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.skus[1].weightGrams").isNull();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.skus[1].hsCode").isNull();
+        }
+
+        private static SkuInternalItem.SkuInternalItemBuilder skuItem(String skuId) {
+            return SkuInternalItem.builder()
+                .skuId(skuId)
+                .productId("7301")
+                .productName("저고리")
+                .optionValues(List.of())
+                .optionName("")
+                .salePrice(MoneyItem.of(39_000, "KRW"))
+                .additionalPrice(MoneyItem.of(0, "KRW"))
+                .saleStatus(CodeNameDescriptionMetadata.of("ON_SALE", "판매중", "구매할 수 있습니다."))
+                .purchasable(true)
+                .customOrder(false);
+        }
+
+        @Test
+        @WithMockUser(authorities = ORDER_SERVICE)
         @DisplayName("ids 를 여러 번 나눠 보내도(ids=1&ids=2) 같은 목록이다")
         void repeatedParameter() {
             given(skuInternalUseCase.getSkus(List.of(1L, 2L))).willReturn(SkuInternalResponse.builder().skus(List.of()).build());
