@@ -23,7 +23,7 @@ public enum CartErrorCode {
     CART_ITEM_LIMIT_EXCEEDED("CART_006", "장바구니에는 최대 %s개 상품까지 담을 수 있습니다.", HttpStatus.CONFLICT),
     /** 같은 줄을 동시에 담았거나(유니크 키) 같은 줄을 동시에 고쳤다(@Version). 다시 시도하면 된다. */
     CART_CONCURRENTLY_MODIFIED("CART_007", "장바구니가 동시에 변경되었습니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
-    /** product-service 서킷 오픈 · 전송 실패 · 5xx ({@code coding-conventions.md} §10). */
+    /** product-service 서킷 오픈 · 전송 실패 · 5xx ({@code coding-conventions.md} §10). catalog 의 {@code CATALOG_001} 을 {@code CartExceptionHandler} 가 이 코드로 번역한다. */
     CART_PRODUCT_SERVICE_UNAVAILABLE("CART_008", "상품 정보를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */

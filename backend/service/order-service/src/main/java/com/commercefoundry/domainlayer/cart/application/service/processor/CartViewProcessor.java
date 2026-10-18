@@ -2,9 +2,9 @@ package com.commercefoundry.domainlayer.cart.application.service.processor;
 
 import com.commercefoundry.domainlayer.cart.application.info.CartInfo;
 import com.commercefoundry.domainlayer.cart.application.info.CartLineInfo;
-import com.commercefoundry.domainlayer.cart.application.model.CartSku;
 import com.commercefoundry.domainlayer.cart.domain.model.CartItem;
 import com.commercefoundry.domainlayer.cart.domain.model.CartItemStatus;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogSku;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
 import java.util.Map;
@@ -25,14 +25,14 @@ public class CartViewProcessor {
      * @param items 최근에 담은 순
      * @param skus SKU 아이디 → 현재 SKU. 찾지 못한 SKU 는 키가 없다
      */
-    public CartInfo compose(List<CartItem> items, Map<Long, CartSku> skus) {
+    public CartInfo compose(List<CartItem> items, Map<Long, CatalogSku> skus) {
         List<CartLineInfo> lines = items.stream().map(item -> toLine(item, skus.get(item.skuId()))).toList();
         List<CartLineInfo> countable = lines.stream().filter(CartLineInfo::countable).toList();
         Money totalAmount = countable.stream().map(CartLineInfo::lineAmount).reduce(Money::plus).orElse(null);
         return new CartInfo(lines, totalAmount, countable.size());
     }
 
-    private static CartLineInfo toLine(CartItem item, CartSku sku) {
+    private static CartLineInfo toLine(CartItem item, CatalogSku sku) {
         CartLineInfo.CartLineInfoBuilder line = CartLineInfo.builder()
             .itemId(item.id())
             .skuId(item.skuId())
@@ -52,10 +52,10 @@ public class CartViewProcessor {
             .optionName(sku.optionName())
             .unitPrice(sku.salePrice())
             .lineAmount(sku.salePrice().times(item.quantity()))
-            .status(sku.status())
+            .status(CartItemStatus.resolve(true, sku.purchasable(), sku.soldOut()))
             .maxQuantityPerOrder(sku.maxQuantityPerOrder())
             .customOrder(sku.customOrder())
-            .quantityExceeded(item.exceeds(sku.maxQuantity()))
+            .quantityExceeded(item.exceeds(CartItem.maxQuantity(sku.maxQuantityPerOrder())))
             .build();
     }
 }

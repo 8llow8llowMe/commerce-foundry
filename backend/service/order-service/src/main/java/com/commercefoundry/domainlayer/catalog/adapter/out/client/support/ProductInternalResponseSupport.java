@@ -1,12 +1,12 @@
-package com.commercefoundry.domainlayer.cart.adapter.out.client.support;
+package com.commercefoundry.domainlayer.catalog.adapter.out.client.support;
 
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.dto.item.MoneyItem;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.dto.ProductSkuInternalItem;
-import com.commercefoundry.domainlayer.cart.adapter.out.client.feign.dto.ProductSkuInternalResponse;
-import com.commercefoundry.domainlayer.cart.application.exception.CartErrorCode;
-import com.commercefoundry.domainlayer.cart.application.exception.CartException;
-import com.commercefoundry.domainlayer.cart.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalItem;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalResponse;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
+import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
+import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import feign.FeignException;
@@ -23,7 +23,7 @@ import org.springframework.stereotype.Component;
  *
  * <ul>
  *   <li>서킷 인스턴스는 {@value #CIRCUIT_BREAKER}(대상 서비스 논리명)다. 설정은 {@code application.yml} 의 {@code resilience4j.circuitbreaker.instances.product-service}.</li>
- *   <li>서킷 오픈({@link CallNotPermittedException}) · 전송 실패 · 타임아웃 · 5xx — 장바구니 503 {@code CART_PRODUCT_SERVICE_UNAVAILABLE}.</li>
+ *   <li>서킷 오픈({@link CallNotPermittedException}) · 전송 실패 · 타임아웃 · 5xx — 503 {@code CatalogException}({@code CATALOG_001}). 호출한 컨텍스트가 자기 코드로 번역한다(장바구니 {@code CART_008}).</li>
  *   <li>4xx({@code FeignClientException})는 서킷 실패로 세지 않는다({@code ignore-exceptions}) — 호출한 쪽(우리)의 요청 · 설정 문제다.
  *       사용자에게는 같은 503 으로 답하고 error 로그를 남긴다. 401 · {@code SECURITY_007} 은 서비스 토큰 비밀 · 서비스 ID 설정 문제라 재시도로 풀리지 않는다
  *       ({@code security-guide.md} §9-5).</li>
@@ -44,40 +44,40 @@ public class ProductInternalResponseSupport {
         this.circuitBreaker = circuitBreakerRegistry.circuitBreaker(CIRCUIT_BREAKER);
     }
 
-    /** 원격 호출을 서킷으로 감싸고 실패를 장바구니 503 으로 바꾼다. */
+    /** 원격 호출을 서킷으로 감싸고 실패를 503 {@code CatalogException} 으로 바꾼다. */
     public <T> T call(Supplier<T> remoteCall) {
         try {
             return circuitBreaker.executeSupplier(remoteCall);
         } catch (CallNotPermittedException exception) {
             log.warn("product-service circuit open. circuitBreaker={}", CIRCUIT_BREAKER);
-            throw new CartException(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE, exception);
+            throw new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
         } catch (FeignException.FeignClientException exception) {
             log.error("product-service rejected internal request. status={}", exception.status());
-            throw new CartException(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE, exception);
+            throw new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
         } catch (FeignException exception) {
             log.warn("product-service call failed. status={}, type={}", exception.status(), exception.getClass().getSimpleName());
-            throw new CartException(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE, exception);
+            throw new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
         }
     }
 
     /**
      * SKU 벌크 조회 응답을 조회 결과로 바꾼다. 봉투가 실패이거나 본문이 비었으면 503 이다 — 성공 응답에는 언제나 목록이 있다.
      *
-     * @throws CartException {@code CART_PRODUCT_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 아이디를 읽을 수 없다
+     * @throws CatalogException {@code PRODUCT_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 아이디를 읽을 수 없다
      */
     public List<SkuQueryResult> toSkuQueryResults(Response<ProductSkuInternalResponse> response) {
         if (response == null || response.dataHeader() == null || !response.dataHeader().success()
             || response.dataBody() == null || response.dataBody().skus() == null) {
             log.error("product-service sku response is not a success envelope. resultCode={}",
                 response == null || response.dataHeader() == null ? null : response.dataHeader().resultCode());
-            throw new CartException(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE);
+            throw new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE);
         }
         try {
             return response.dataBody().skus().stream().map(ProductInternalResponseSupport::toSkuQueryResult).toList();
         } catch (RuntimeException exception) {
             // 아이디 · 금액 · 통화가 계약과 다르다(숫자 아님 · 음수 · 모르는 통화 · 빠진 칸). 가격을 추측하지 않는다
             log.error("product-service sku response violates contract. type={}", exception.getClass().getSimpleName());
-            throw new CartException(CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE, exception);
+            throw new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
         }
     }
 

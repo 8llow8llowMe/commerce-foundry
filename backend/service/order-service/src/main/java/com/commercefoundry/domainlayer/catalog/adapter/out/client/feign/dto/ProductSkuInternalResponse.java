@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.cart.adapter.out.client.feign.dto;
+package com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto;
 
 import java.util.List;
 

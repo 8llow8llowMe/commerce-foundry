@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.cart.application.port.out.query;
+package com.commercefoundry.domainlayer.catalog.application.port.out.query;
 
 import com.commercefoundry.shared.commerce.Money;
 
