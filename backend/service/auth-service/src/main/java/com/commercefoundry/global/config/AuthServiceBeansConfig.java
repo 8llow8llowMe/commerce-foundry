@@ -5,8 +5,11 @@ import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
 import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Configuration
 @Import({
@@ -18,4 +21,12 @@ import org.springframework.context.annotation.Import;
 })
 public class AuthServiceBeansConfig {
 
+    /**
+     * 비밀번호 해시는 BCrypt(기본 강도 10) 하나다. {@code PasswordEncoderFactories} 의 위임 인코더({@code {bcrypt}...} 접두어)를 쓰지 않는다 —
+     * 해시 방식을 바꿀 일이 생기면 그때 저장 형식과 이관을 함께 정한다. 해시(60자)는 {@code member.password_hash}(100자)에 들어간다.
+     */
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
 }
