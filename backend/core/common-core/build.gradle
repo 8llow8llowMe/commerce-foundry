@@ -1,3 +1,11 @@
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+
+plugins {
+    // 서블릿 서비스 테스트가 같이 쓰는 폴백 오류 봉투 스모크 (src/testFixtures).
+    // 소비자는 testImplementation testFixtures(project(':core:common-core')) 로만 받는다 — 실행 클래스패스에 들어가지 않는다
+    id 'java-test-fixtures'
+}
+
 dependencies {
     // ResponseEntity · 검증 예외 타입. webmvc 가 아니라 spring-web 만 의존한다 —
     // api-gateway 도 이 모듈의 Response 봉투를 쓴다. 게이트웨이가 WebFlux 변형이면 webmvc 가 섞일 때 기동하지 않는다
@@ -10,6 +18,67 @@ dependencies {
     // @Schema · Components 만 쓴다. 실제 springdoc 은 각 서비스가 선언한다 (Swagger 를 안 쓰는 게이트웨이에 끌려가지 않게)
     compileOnly "org.springdoc:springdoc-openapi-starter-common:${rootProject.ext.springdocVersion}"
     implementation 'org.springframework.boot:spring-boot'
+    implementation 'org.slf4j:slf4j-api'
+
+    // 폴백 오류 봉투(web.servlet — 자동 구성)만 쓴다. 서블릿 서비스는 spring-boot-starter-webmvc 로 이미 가진다.
+    // api/implementation 으로 넣으면 리액티브 게이트웨이에 서블릿 스택이 새어 들어간다 (security-core 와 같은 판단, 아래 verifyNoServletLeak)
+    compileOnly 'org.springframework:spring-webmvc'
+    compileOnly 'jakarta.servlet:jakarta.servlet-api'
+    compileOnly 'org.springframework.boot:spring-boot-autoconfigure'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-validation'
+    testImplementation 'org.springframework:spring-webmvc'
+    testImplementation 'jakarta.servlet:jakarta.servlet-api'
+
+    testFixturesImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testFixturesImplementation 'tools.jackson.core:jackson-databind'
+    // 서블릿 · MockMvc 는 픽스처도 컴파일에만 쓴다 — 스모크를 쓰는 서블릿 서비스는 이미 spring-boot-starter-webmvc-test 를 가진다
+    testFixturesCompileOnly 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testFixturesCompileOnly 'jakarta.servlet:jakarta.servlet-api'
+}
+
+// 위 compileOnly(서블릿 스택)가 api/implementation 으로 바뀌는 회귀를 막는다. 게이트웨이도 받는 두 클래스패스 —
+// 본체(runtimeClasspath)와 테스트 픽스처(testFixturesRuntimeClasspath) — 에 아래 모듈이 있으면 check 가 실패한다 (security-core 와 같은 방식)
+def resolvedModules = { String configurationName ->
+    configurations.named(configurationName).flatMap { classpath ->
+        classpath.incoming.artifacts.resolvedArtifacts
+    }.map { artifacts ->
+        artifacts.collect { it.id.componentIdentifier }
+            .findAll { it instanceof ModuleComponentIdentifier }
+            .collect { "${it.group}:${it.module}".toString() }
+            .sort()
+    }
+}
+def runtimeModules = resolvedModules('runtimeClasspath')
+def testFixturesRuntimeModules = resolvedModules('testFixturesRuntimeClasspath')
+
+def verifyNoServletLeak = tasks.register('verifyNoServletLeak') {
+    group = 'verification'
+    description = 'common-core 의 runtimeClasspath · testFixturesRuntimeClasspath 에 서블릿 스택이 없는지 확인한다'
+
+    def forbiddenModules = [
+        'org.springframework:spring-webmvc',
+        'org.springframework.boot:spring-boot-webmvc',
+        'org.springframework.boot:spring-boot-servlet',
+        'org.springframework.boot:spring-boot-tomcat',
+        'org.apache.tomcat.embed:tomcat-embed-core',
+        'jakarta.servlet:jakarta.servlet-api',
+    ]
+    inputs.property('runtimeModules', runtimeModules)
+    inputs.property('testFixturesRuntimeModules', testFixturesRuntimeModules)
+    inputs.property('forbiddenModules', forbiddenModules)
+
+    doLast {
+        def leaked = [runtimeClasspath: runtimeModules.get(), testFixturesRuntimeClasspath: testFixturesRuntimeModules.get()]
+            .collectEntries { name, modules -> [name, modules.findAll { it in forbiddenModules }] }
+            .findAll { name, modules -> !modules.isEmpty() }
+        if (!leaked.isEmpty()) {
+            throw new GradleException("common-core 의 클래스패스에 서블릿 스택 모듈이 들어왔습니다: ${leaked}. "
+                + 'compileOnly 로 두고 서블릿 서비스가 직접 선언하게 하세요 (api-gateway 가 이 모듈을 쓴다)')
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyNoServletLeak
 }
