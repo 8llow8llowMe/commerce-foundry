@@ -15,6 +15,7 @@ public interface SkuMapper {
 
     @Mapping(target = "optionKey", source = "optionValueKey")
     @Mapping(target = "additionalPrice", expression = "java(MoneyColumns.required(entity.getAdditionalPriceAmount(), entity.getAdditionalPriceCurrency()))")
+    @Mapping(target = "weightGrams", expression = "java(toWeightGrams(entity.getWeightGrams()))")
     Sku toDomain(SkuEntity entity);
 
     List<Sku> toDomains(List<SkuEntity> entities);
@@ -27,5 +28,16 @@ public interface SkuMapper {
     /** 저장된 HS 코드는 {@link HsCode#fromStoredOrNull} 로 읽는다 — null 은 미입력, 형식이 틀린 저장값은 실패한다. */
     default HsCode toHsCode(String hsCode) {
         return HsCode.fromStoredOrNull(hsCode);
+    }
+
+    /**
+     * 저장된 무게를 읽는다 — null 은 미입력. 1 미만은 DB check({@code ck_sku_weight_grams_positive})를 비켜 들어온 저장 데이터 오류라
+     * 도메인 입력 오류(IllegalArgumentException)가 아니라 {@link HsCode#fromStoredOrNull} 과 같은 IllegalStateException 으로 실패한다.
+     */
+    default Integer toWeightGrams(Integer weightGrams) {
+        if (weightGrams != null && weightGrams <= 0) {
+            throw new IllegalStateException("저장된 SKU 무게가 1g 미만입니다: " + weightGrams);
+        }
+        return weightGrams;
     }
 }

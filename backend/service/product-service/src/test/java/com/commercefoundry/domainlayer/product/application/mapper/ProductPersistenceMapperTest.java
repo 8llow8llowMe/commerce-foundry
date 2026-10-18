@@ -105,11 +105,21 @@ class ProductPersistenceMapperTest {
     }
 
     @Test
-    @DisplayName("SKU: 저장된 HS 코드가 숫자가 아니면(DB check 는 길이만 본다) 고쳐 읽지 않고 실패한다")
+    @DisplayName("SKU: 저장된 HS 코드가 숫자가 아니면(DB check 를 비켜 들어온 데이터) 고쳐 읽지 않고 실패한다")
     void skuWithMalformedHsCode() {
         assertThatThrownBy(() -> skuMapper.toDomain(skuBuilder("").hsCode("6211.42").build()))
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("6211.42");
+    }
+
+    @ParameterizedTest(name = "{0}g")
+    @ValueSource(ints = {0, -1})
+    @DisplayName("SKU: 저장된 무게가 1g 미만이면 저장 데이터 오류(IllegalStateException)로 실패하고 메시지에 저장값을 담는다")
+    void skuWithNonPositiveWeight(int weightGrams) {
+        assertThatThrownBy(() -> skuMapper.toDomain(skuBuilder("").weightGrams(weightGrams).build()))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("저장된 SKU 무게")
+            .hasMessageContaining(String.valueOf(weightGrams));
     }
 
     private static ProductEntity.ProductEntityBuilder product() {

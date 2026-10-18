@@ -49,6 +49,8 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -357,12 +359,13 @@ class ProductPersistenceAdapterTest {
             .hasMessageContaining("ck_sku_weight_grams_positive");
     }
 
-    @Test
-    @DisplayName("제약: 6자리 미만 HS 코드는 저장되지 않는다 (ck_sku_hs_code_length)")
-    void shortHsCodeIsRejected() {
-        assertThatThrownBy(() -> persistAll(skuBuilder(1009L, 101L, "2005", 0L, SaleStatus.ON_SALE).hsCode("62114").build()))
+    @ParameterizedTest(name = "\"{0}\"")
+    @ValueSource(strings = {"62114", "6211.42.00", "6211-42", "621142 ", "62114A"})
+    @DisplayName("제약: 숫자 6~10자리가 아닌 HS 코드(5자리 · 점 · 하이픈 · 공백 · 문자)는 저장되지 않는다 (ck_sku_hs_code_format)")
+    void malformedHsCodeIsRejected(String hsCode) {
+        assertThatThrownBy(() -> persistAll(skuBuilder(1009L, 101L, "2005", 0L, SaleStatus.ON_SALE).hsCode(hsCode).build()))
             .rootCause()
-            .hasMessageContaining("ck_sku_hs_code_length");
+            .hasMessageContaining("ck_sku_hs_code_format");
     }
 
     @Test

@@ -342,7 +342,7 @@
         constraint uk_sku_product_id_option_value_key unique (product_id, option_value_key),
         constraint ck_sku_additional_price_non_negative check (additional_price_amount >= 0),
         constraint ck_sku_weight_grams_positive check (weight_grams is null or weight_grams > 0),
-        constraint ck_sku_hs_code_length check (hs_code is null or char_length(hs_code) between 6 and 10)
+        constraint ck_sku_hs_code_format check (hs_code is null or (char_length(hs_code) between 6 and 10 and ltrim(hs_code, '0123456789') = ''))
     );
 
     comment on table product.sku is
