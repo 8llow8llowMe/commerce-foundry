@@ -355,6 +355,32 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 - 인증 실패 처리기는 `ServerAuthenticationEntryPointFailureHandler` 를 `setRethrowAuthenticationServiceException(false)` 로 설정해 쓴다.
   기본(true)이면 006 이 될 `AuthenticationServiceException` 이 봉투 없는 500 이 된다 — 서블릿 쪽과 같은 이유다 (§4-1).
 
+### 7-3. 고객 쓰기 API 요청 제한 (#79)
+
+로그인한 회원 한 명이 쓰기 요청을 몰아 보내 DB 를 키우는 남용을 게이트웨이에서 줄인다(장바구니 병합 1회에 맞춤 제작 입력 약 50만 자, #12 보안 검토).
+구현은 `cloud/api-gateway` 의 `ratelimit` 패키지다 — 라우트 전역 필터(`GatewayRateLimitFilter`)가 보안 체인 **뒤**, 하류 전송 **앞**에서 센다.
+
+| 정책 (`RateLimitPolicy`) | 대상 | 기본 한도 (`gateway.rate-limit.*`) |
+|--------------------------|------|-------------------------------------|
+| `cart-merge` | `POST /api/v1/carts/*/merge` | 분당 6회 · 순간 3회 |
+| `cart-write` | 그 밖의 `/api/v1/carts/**` 쓰기 (POST · PUT · PATCH · DELETE) | 분당 60회 · 순간 20회 |
+| `order-write` | `/api/v1/orders/**` 쓰기 | 분당 12회 · 순간 5회 |
+
+- **키는 검증된 회원 id 다** — `request_rate_limiter.{<정책>:member:<memberId>}.tokens` · `.timestamp`(Spring Cloud Gateway `RedisRateLimiter` 의 토큰 버킷,
+  `coding-conventions.md` §9-7). 내부 Snowflake id 만 들어가고 이메일 · IP 같은 개인정보는 넣지 않는다. 요청 하나는 처음 맞는 정책 하나에만 걸리고 정책마다 버킷이 따로다.
+- **토큰 없는 요청은 세지 않는다.** 대상 API 가 모두 `isAuthenticated()` 라 서비스가 401 로 끊고 쓰기가 일어나지 않는다. 조회(GET) · 어드민 경로 · preflight 는 세지 않는다.
+  **비로그인으로 쓰는 API(비회원 주문 등)를 대상 경로에 더하는 PR 은 IP 단위 제한(#89 — 신뢰할 프록시 목록 · IP 원문 없는 키)을 먼저 끝낸다.**
+  그 전에 열면 익명 요청이 제한 없이 서비스에 닿는다.
+- **로그인 · 회원가입 시도 제한은 auth-service 가 맡는다(#66)** — 계정 잠금처럼 회원 상태와 묶여 있어 게이트웨이가 아니라 소유 서비스가 판정한다. 게이트웨이 정책에 넣지 않는다.
+- 한도를 넘으면 하류로 보내지 않고 **429 `GATEWAY_006`** + `Retry-After`(초, 요청 한 번만큼 버킷이 다시 차는 시간의 근사)로 답한다. CORS 헤더는 실린다(보안 체인 뒤라서).
+  프레임워크의 `X-RateLimit-*` 헤더는 내보내지 않는다.
+- **Redis 장애 · 응답 없음이면 통과(fail-open)** 한다 — 제한은 남용 완화 수단이라 장애가 쇼핑 장애가 되지 않게 한다(차단 목록 일반 경로와 같은 판단, §7-1).
+  `RedisRateLimiter` 는 명령 오류를 스스로 허용으로 바꾸고 남은 토큰을 `-1` 로 알린다 — `RedisMemberRateLimiter` 가 그 신호를 장애로 바꾸고, 응답 없는 명령은
+  2초 상한(`GatewayRateLimitFilter.CHECK_TIMEOUT`)이 끊는다. warn 은 1분에 한 번만 남기고, 프레임워크의 요청마다 쌓이는 error 로그는 yml 에서 끈다.
+  응답 없는 Redis 에서는 대상 요청마다 최대 약 1~2초 늦어진다(차단 목록 조회와 같다). 장애 동안은 회원 한 명의 쓰기가 제한 없이 서비스에 닿는다.
+- 한도는 yml 로만 바꾼다(`requests-per-minute` 는 60 의 약수 또는 배수, `burst` ≥ 1 — 어긋나면 기동하지 않는다). 대상 경로를 바꾸려면 `RateLimitPolicy` 를 고친다.
+- **JSON 본문 크기 상한은 이 제한에 없다.** 게이트웨이는 본문을 스트리밍으로 넘기고 Tomcat 의 폼 상한은 JSON 에 걸리지 않는다 — #90 에서 정한다.
+
 ## 8. 로그
 
 - JWT 원문 · 키 · 예외 메시지(토큰 조각이 섞일 수 있다)를 남기지 않는다. 남기는 것은 코드 · 경로 · 예외 타입, 로그인한 요청이면 memberId · jti 다.
