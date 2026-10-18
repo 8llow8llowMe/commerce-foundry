@@ -1,0 +1,89 @@
+package com.commercefoundry.domainlayer.member.adapter.out.redis;
+
+import static com.commercefoundry.domainlayer.member.adapter.out.redis.TokenStoreRedisSupport.execute;
+
+import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Component;
+
+/**
+ * refresh 토큰 저장소(Redis). 키는 {@link RefreshTokenRedisKeys}, 원자 처리는 {@link RefreshTokenRedisScripts} 다.
+ * Boot 가 만드는 {@link StringRedisTemplate} 만 쓴다 ({@code coding-conventions.md} §9-7). Redis 오류는 {@link TokenStoreRedisSupport} 가 {@code AUTH_013} 으로 바꾼다.
+ */
+@Component
+@RequiredArgsConstructor
+public class RefreshTokenRedisAdapter implements RefreshTokenStorePort {
+
+    private final StringRedisTemplate redisTemplate;
+
+    @Override
+    public void saveNewFamily(String fingerprint, long memberId, String familyId, Duration ttl) {
+        List<String> keys = List.of(RefreshTokenRedisKeys.token(fingerprint).value(), RefreshTokenRedisKeys.family(familyId).value());
+        execute(() -> redisTemplate.execute(RefreshTokenRedisScripts.SAVE_NEW_FAMILY, keys, String.valueOf(memberId), familyId, millis(ttl)));
+    }
+
+    /**
+     * HMGET 으로 주인 · family 를 읽고 family 가 살아 있는지 본다. 두 명령 사이에 바뀌어도 괜찮다 — 회전 스크립트가 다시 확인한다.
+     * 저장된 값이 규칙 밖(숫자 아닌 memberId · 키 규칙 밖 familyId)이면 없는 토큰과 같다.
+     */
+    @Override
+    public Optional<RefreshTokenSession> findSession(String fingerprint) {
+        String tokenKey = RefreshTokenRedisKeys.token(fingerprint).value();
+        return execute(() -> {
+            List<Object> stored = redisTemplate.opsForHash().multiGet(tokenKey, List.<Object>of(RefreshTokenRedisScripts.MEMBER_ID, RefreshTokenRedisScripts.FAMILY_ID));
+            Optional<RefreshTokenSession> session = toSession(fingerprint, stored);
+            if (session.isEmpty() || !Boolean.TRUE.equals(redisTemplate.hasKey(RefreshTokenRedisKeys.family(session.get().familyId()).value()))) {
+                return Optional.empty();
+            }
+            return session;
+        });
+    }
+
+    @Override
+    public RefreshTokenRotation rotate(RefreshTokenSession session, String newFingerprint, Instant now, RefreshTokenRotationPolicy policy) {
+        List<String> keys = List.of(
+            RefreshTokenRedisKeys.token(session.fingerprint()).value(),
+            RefreshTokenRedisKeys.family(session.familyId()).value(),
+            RefreshTokenRedisKeys.token(newFingerprint).value()
+        );
+        String result = execute(() -> redisTemplate.execute(
+            RefreshTokenRedisScripts.ROTATE, keys,
+            String.valueOf(session.memberId()), session.familyId(), String.valueOf(now.toEpochMilli()),
+            millis(policy.reuseGrace()), millis(policy.ttl()), String.valueOf(policy.maxSiblings())
+        ));
+        if (result == null) {
+            throw new IllegalStateException("refresh 토큰 회전 스크립트가 결과를 돌려주지 않았습니다");
+        }
+        return RefreshTokenRotation.valueOf(result);
+    }
+
+    @Override
+    public void revokeFamily(String familyId) {
+        String familyKey = RefreshTokenRedisKeys.family(familyId).value();
+        execute(() -> redisTemplate.delete(familyKey));
+    }
+
+    private static Optional<RefreshTokenSession> toSession(String fingerprint, List<Object> stored) {
+        if (stored == null || stored.size() != 2 || !(stored.get(0) instanceof String memberId) || !(stored.get(1) instanceof String familyId)) {
+            return Optional.empty();
+        }
+        try {
+            RefreshTokenRedisKeys.family(familyId);
+            return Optional.of(new RefreshTokenSession(fingerprint, Long.parseLong(memberId), familyId));
+        } catch (IllegalArgumentException outOfRule) {
+            return Optional.empty();
+        }
+    }
+
+    private static String millis(Duration duration) {
+        return String.valueOf(duration.toMillis());
+    }
+}

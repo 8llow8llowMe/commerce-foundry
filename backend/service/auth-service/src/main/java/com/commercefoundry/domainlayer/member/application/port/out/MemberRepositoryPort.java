@@ -11,6 +11,9 @@ public interface MemberRepositoryPort {
 
     boolean existsByEmail(String email);
 
+    /** 로그인 — 고객 · 관리자를 가리지 않고 찾는다. 역할 판정은 부르는 쪽이 한다. */
+    Optional<Member> findByEmail(String email);
+
     Optional<Member> findById(long memberId);
 
     /**

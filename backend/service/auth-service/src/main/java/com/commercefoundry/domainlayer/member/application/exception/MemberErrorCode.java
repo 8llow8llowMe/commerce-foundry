@@ -21,6 +21,15 @@ public enum MemberErrorCode {
     /** 같은 회원을 다른 요청이 먼저 고쳤다 (낙관적 락). 다시 읽고 다시 보내면 된다. */
     MEMBER_UPDATE_CONFLICT("AUTH_004", "회원 정보가 다른 요청으로 먼저 변경되었습니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
+    /** refresh 토큰이 발급 모양(base64url 43자)이 아니다. 지문을 계산하거나 저장소를 부르기 전에 거절한다. */
+    REFRESH_TOKEN_MALFORMED("AUTH_010", "로그인 정보가 올바르지 않습니다. 다시 로그인해 주세요.", HttpStatus.UNAUTHORIZED),
+    /** refresh 토큰이 저장소에 없다 — 만료 · 로그아웃 · family 폐기 · 회원 없음. 어느 쪽인지 밝히지 않는다. */
+    REFRESH_TOKEN_INVALID("AUTH_011", "로그인이 만료되었습니다. 다시 로그인해 주세요.", HttpStatus.UNAUTHORIZED),
+    /** 이미 회전한 refresh 토큰이 재사용 유예 밖에서 다시 왔다 — 탈취로 보고 그 family 를 모두 폐기했다. */
+    REFRESH_TOKEN_REUSED("AUTH_012", "보안을 위해 로그아웃되었습니다. 다시 로그인해 주세요.", HttpStatus.UNAUTHORIZED),
+    /** refresh 토큰 · 로그아웃 차단 목록 저장소(Redis)에 닿지 못했다. 로그인 상태는 그대로 두고 다시 시도하게 한다. */
+    TOKEN_STORE_UNAVAILABLE("AUTH_013", "일시적으로 로그인을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
     INVALID_REQUEST("AUTH_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_TYPE_INVALID("AUTH_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.member.adapter.out.persistence.repositor
 
 import com.commercefoundry.domainlayer.member.adapter.out.persistence.entity.MemberEntity;
 import java.time.Instant;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -9,6 +10,9 @@ import org.springframework.data.jpa.repository.Query;
 public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
 
     boolean existsByEmail(String email);
+
+    /** 로그인. 이메일은 정규화한 값이고 {@code uk_member_email} 인덱스를 탄다. */
+    Optional<MemberEntity> findByEmail(String email);
 
     /**
      * 읽은 버전일 때만 버전을 하나 올린다 — 조건부 UPDATE 한 문장. 바뀐 행 수가 0 이면 다른 요청이 먼저 고쳤다.

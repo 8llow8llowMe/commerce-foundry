@@ -3,8 +3,11 @@ package com.commercefoundry.global.config;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
+import com.commercefoundry.redis.config.RedisConfigurer;
+import com.commercefoundry.security.issuer.JwtIssuerConfigurer;
 import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -14,7 +17,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 @Configuration
 @Import({
     InternalResourceServerConfigurer.class,
+    JwtIssuerConfigurer.class,
     QuerydslConfigurer.class,
+    RedisConfigurer.class,
     ResourceServerSecurityConfigurer.class,
     SnowflakeConfigurer.class,
     SwaggerSecurityConfigurer.class
@@ -28,5 +33,11 @@ public class AuthServiceBeansConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /** refresh 토큰 회전 시각 · 재사용 유예 판정의 기준 시계. 테스트는 고정 시계로 바꿔 끼운다. */
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
     }
 }

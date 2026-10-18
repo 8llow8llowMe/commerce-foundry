@@ -25,6 +25,15 @@ spring:
     resources:
       # 정적 리소스를 내지 않는다. 켜 두면 Swagger 를 닫아도 /webjars/swagger-ui/** 가 그대로 열린다 (Swagger UI 는 springdoc 이 따로 낸다)
       add-mappings: false
+  data:
+    redis:
+      # refresh 토큰 저장 · 회전(auth:refresh-token · auth:refresh-family)과 로그아웃 차단 목록 쓰기(auth:revoked-access-token)
+      # (security-guide.md §2-3 · §7-1). 게이트웨이와 같은 Redis 를 가리켜야 한다. 규칙 · 기동 가드는 coding-conventions.md §9-7
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      timeout: 1s            # 명령 타임아웃 — 없거나 0 이하면 기동하지 않는다
+      connect-timeout: 2s    # 연결 타임아웃 — 없거나 0 이하면 기동하지 않는다
 
 eureka:
   client:
@@ -36,6 +45,12 @@ management:
     web:
       exposure:
         include: health
+  health:
+    redis:
+      # 헬스에 Redis 를 넣지 않는다. Redis 는 인스턴스가 모두 같이 쓰는 의존이라 장애면 모든 인스턴스가 함께 DOWN 이 되고,
+      # LB · 오케스트레이터가 auth 를 통째로 빼거나 재시작해 Redis 와 무관한 회원가입 · 내 정보까지 끊긴다. 재시작으로 낫는 장애도 아니다.
+      # 토큰 API 는 AUTH_013(503) 응답과 warn 로그로 장애를 드러낸다 (security-guide.md §2-3). DB 는 모든 API 가 쓰므로 그대로 둔다
+      enabled: false
 
 snowflake:
   # 인스턴스마다 (datacenter-id, worker-id) 쌍이 달라야 한다. 겹치면 같은 밀리초에 같은 ID 가 나온다.
@@ -50,6 +65,12 @@ security:
     public-key: ${JWT_PUBLIC_KEY}
     # 키 교체 중에만 이전 공개키를 넣는다 (security-guide.md §6-3)
     previous-public-key: ${JWT_PUBLIC_KEY_PREVIOUS:}
+    # 토큰 발급 (auth 만, security-guide.md §2 · §5-3). 개인키는 PEM 본문 한 줄이고 JWT_PUBLIC_KEY 와 한 쌍이 아니면 기동하지 않는다.
+    # 테스트는 security-core 테스트 픽스처가 실행 중 만든 개인키를 넣는다
+    issuance:
+      private-key: ${JWT_PRIVATE_KEY}
+      access-token-ttl: 30m     # 최대 1시간 — 로그아웃 차단 목록 TTL 이 이 상한에 묶인다
+      refresh-token-ttl: 14d    # refresh 토큰 · family 키의 TTL. 회전마다 family TTL 이 다시 이 값으로 늘어난다(절대 상한은 #67)
   # 서비스 간 internal API 의 서비스 토큰 (security-guide.md §9). 수명은 기본값(60초)을 쓴다
   internal:
     # 보내는 토큰의 iss 이자 받는 토큰에 있어야 하는 aud — Eureka 서비스 ID
@@ -68,6 +89,13 @@ auth:
       terms-of-service: '2026-10-01'
       privacy-policy: '2026-10-01'
       marketing: '2026-10-01'
+  token:
+    # 이미 회전한 refresh 토큰이 다시 와도 형제 토큰을 내주는 창 — BFF 의 동시 재발급 · 재시도 (#4 결정 6, FE REISSUE_GRACE_MS 와 같다).
+    # 밖이면 재사용 감지로 그 로그인(family)을 모두 폐기한다. 0 이상 2분 이하가 아니면 기동하지 않는다(AuthTokenProperties)
+    refresh-reuse-grace: 30s
+    # 유예 안에서 한 토큰으로 내줄 수 있는 형제 토큰 수. 넘으면 재사용 감지로 family 를 폐기한다 — 훔친 토큰으로 유예 동안 새 토큰을 마구 받지 못하게.
+    # 0 이상 10 이하가 아니면 기동하지 않는다
+    refresh-reuse-grace-max-siblings: 3
 
 swagger:
   # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다
