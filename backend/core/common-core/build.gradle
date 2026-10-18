@@ -25,10 +25,15 @@ dependencies {
     compileOnly 'org.springframework:spring-webmvc'
     compileOnly 'jakarta.servlet:jakarta.servlet-api'
     compileOnly 'org.springframework.boot:spring-boot-autoconfigure'
+    // /error 컨트롤러(FallbackErrorController)의 ErrorController · ErrorAttributes. 같은 이유로 컴파일에만 쓴다
+    compileOnly 'org.springframework.boot:spring-boot-webmvc'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-validation'
     testImplementation 'org.springframework:spring-webmvc'
     testImplementation 'jakarta.servlet:jakarta.servlet-api'
+    // 실제 서블릿 컨테이너(RANDOM_PORT)로 필터 예외 → /error 에러 디스패치를 본다 (FallbackErrorControllerContainerTest).
+    // 테스트 클래스패스에만 들어간다 — verifyNoServletLeak 은 runtime · testFixtures 클래스패스만 본다
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc'
 
     testFixturesImplementation 'org.springframework.boot:spring-boot-starter-test'
     testFixturesImplementation 'tools.jackson.core:jackson-databind'

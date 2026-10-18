@@ -22,7 +22,7 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * 도메인 · 보안 advice 가 잡지 않은 오류를 {@code Response.fail} 봉투로 쓴다 ({@code api-design-guide.md} §2-1 공통 오류 코드).
  * 없으면 매핑 없는 경로(404) · 메서드(405) · 미디어 타입(415) · 처리되지 않은 예외(500)가 Boot 기본 오류 JSON 으로 나가
- * BFF · 서비스 간 호출의 봉투 파서가 갈라진다.
+ * BFF · 서비스 간 호출의 봉투 파서가 갈라진다. {@code DispatcherServlet} 에 닿기 전(필터 · 방화벽)의 오류는 {@link FallbackErrorController} 가 맡는다.
  *
  * <p><b>위치가 곧 우선순위다.</b> {@link FallbackErrorAutoConfiguration} 이 MVC 예외 처리 사슬에서 {@code @ExceptionHandler}
  * 처리기(모든 {@code @RestControllerAdvice}) <b>바로 뒤</b>, Spring 기본 처리기({@code ResponseStatusExceptionResolver} ·
@@ -63,7 +63,7 @@ public class FallbackErrorResolver implements HandlerExceptionResolver {
         CommonErrorCode errorCode = CommonErrorCode.of(status);
         log(request, status, errorCode, exception);
         try {
-            write(response, status, headersOf(exception), errorCode);
+            write(jsonMapper, response, status, headersOf(exception), errorCode);
         } catch (IOException writeFailure) {
             log.warn("fallback error response write failed. code={}, method={}, path={}",
                 errorCode.getCode(), request.getMethod(), maskPath(request.getRequestURI()), writeFailure);
@@ -114,7 +114,9 @@ public class FallbackErrorResolver implements HandlerExceptionResolver {
         }
     }
 
-    private void write(HttpServletResponse response, HttpStatusCode status, HttpHeaders headers, CommonErrorCode errorCode) throws IOException {
+    /** 봉투를 쓰고 응답을 커밋한다. MVC 밖 오류를 쓰는 {@link FallbackErrorController} 도 모양을 맞추려고 이 메서드를 쓴다. */
+    static void write(JsonMapper jsonMapper, HttpServletResponse response, HttpStatusCode status, HttpHeaders headers, CommonErrorCode errorCode)
+        throws IOException {
         byte[] body = jsonMapper.writeValueAsBytes(Response.fail(errorCode.getCode(), errorCode.getMessage()));
         response.setStatus(status.value());
         headers.forEach((name, values) -> values.forEach(value -> response.addHeader(name, value)));
