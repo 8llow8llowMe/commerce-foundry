@@ -2,10 +2,13 @@ package com.commercefoundry.apigateway.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.apigateway.GatewayIntegrationTest;
 import com.commercefoundry.apigateway.handler.GatewayErrorResponseWriter;
+import com.commercefoundry.apigateway.properties.GatewayClientIpProperties;
 import com.commercefoundry.apigateway.properties.GatewayRateLimitProperties;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.security.principal.MemberRole;
+import java.net.InetSocketAddress;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,6 +38,9 @@ class GatewayRateLimitFilterTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final long MEMBER_ID = 4611686018427387904L;
     private static final String CART_ITEMS = "/api/v1/carts/me/items";
+    private static final GatewayClientIpProperties CLIENT_IP = new GatewayClientIpProperties(List.of(), GatewayIntegrationTest.TEST_CLIENT_IP_HASH_KEY);
+    private static final ClientIpResolver RESOLVER = new ClientIpResolver(CLIENT_IP);
+    private static final ClientIpHasher HASHER = new ClientIpHasher(CLIENT_IP);
 
     private final StubLimiter limiter = new StubLimiter();
     private final GatewayRateLimitFilter filter = filter(true);
@@ -47,7 +53,7 @@ class GatewayRateLimitFilterTest {
         run(post(CART_ITEMS), member(), routed);
 
         assertThat(routed).isTrue();
-        assertThat(limiter.calls).containsExactly(RateLimitPolicy.CART_WRITE + ":" + MEMBER_ID);
+        assertThat(limiter.calls).containsExactly(RateLimitPolicy.CART_WRITE + ":member:" + MEMBER_ID);
     }
 
     @Test
@@ -70,8 +76,34 @@ class GatewayRateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("토큰 없는 요청은 세지 않는다 — 대상 API 가 로그인 필수라 서비스가 401 로 끊는다")
-    void anonymousRequestIsNotCounted() {
+    @DisplayName("토큰 없는 요청은 클라이언트 IP 의 HMAC 으로 센다 — 키에 IP 원문이 없다")
+    void anonymousRequestIsCountedByClientIpHash() {
+        AtomicBoolean routed = new AtomicBoolean();
+
+        run(post(CART_ITEMS, "203.0.113.7"), null, routed);
+
+        assertThat(routed).isTrue();
+        assertThat(limiter.calls).containsExactly(RateLimitPolicy.CART_WRITE + ":ip:" + HASHER.hash("203.0.113.7"));
+        assertThat(limiter.calls.getFirst()).doesNotContain("203.0.113.7");
+    }
+
+    @Test
+    @DisplayName("신뢰 프록시가 없으면 X-Forwarded-For 를 바꿔 보내도 같은 버킷이다 — 클라이언트가 버킷을 고를 수 없다")
+    void spoofedForwardedForDoesNotChangeBucket() {
+        MockServerWebExchange first = MockServerWebExchange.from(MockServerHttpRequest.post(CART_ITEMS)
+            .remoteAddress(new InetSocketAddress("203.0.113.7", 40000)).header("X-Forwarded-For", "198.51.100.1"));
+        MockServerWebExchange second = MockServerWebExchange.from(MockServerHttpRequest.post(CART_ITEMS)
+            .remoteAddress(new InetSocketAddress("203.0.113.7", 40001)).header("X-Forwarded-For", "198.51.100.2"));
+
+        run(first, null, new AtomicBoolean());
+        run(second, null, new AtomicBoolean());
+
+        assertThat(limiter.calls).hasSize(2).containsOnly(RateLimitPolicy.CART_WRITE + ":ip:" + HASHER.hash("203.0.113.7"));
+    }
+
+    @Test
+    @DisplayName("원격 주소조차 모르는 비로그인 요청은 세지 않고 통과시킨다")
+    void unknownClientAddressIsNotCounted() {
         AtomicBoolean routed = new AtomicBoolean();
 
         run(post(CART_ITEMS), null, routed);
@@ -130,7 +162,7 @@ class GatewayRateLimitFilterTest {
     @Test
     @DisplayName("fail-open warn 은 간격마다 한 번만 남긴다")
     void failOpenWarnIsThrottled() {
-        GatewayRateLimitFilter fixedClockFilter = new GatewayRateLimitFilter(limiter, properties(true), new GatewayErrorResponseWriter(JSON),
+        GatewayRateLimitFilter fixedClockFilter = new GatewayRateLimitFilter(limiter, RESOLVER, HASHER, properties(true), new GatewayErrorResponseWriter(JSON),
             Clock.fixed(Instant.parse("2026-10-18T00:00:00Z"), ZoneOffset.UTC));
 
         assertThat(fixedClockFilter.claimWarnSlot()).isTrue();
@@ -146,7 +178,7 @@ class GatewayRateLimitFilterTest {
     }
 
     private GatewayRateLimitFilter filter(boolean enabled) {
-        return new GatewayRateLimitFilter(limiter, properties(enabled), new GatewayErrorResponseWriter(JSON));
+        return new GatewayRateLimitFilter(limiter, RESOLVER, HASHER, properties(enabled), new GatewayErrorResponseWriter(JSON));
     }
 
     private static GatewayRateLimitProperties properties(boolean enabled) {
@@ -155,6 +187,10 @@ class GatewayRateLimitFilterTest {
 
     private static MockServerWebExchange post(String path) {
         return MockServerWebExchange.from(MockServerHttpRequest.post(path));
+    }
+
+    private static MockServerWebExchange post(String path, String remoteIp) {
+        return MockServerWebExchange.from(MockServerHttpRequest.post(path).remoteAddress(new InetSocketAddress(remoteIp, 40000)));
     }
 
     private static Authentication member() {
@@ -170,14 +206,14 @@ class GatewayRateLimitFilterTest {
         };
     }
 
-    private static final class StubLimiter implements MemberRateLimiter {
+    private static final class StubLimiter implements BucketRateLimiter {
 
         private final List<String> calls = new CopyOnWriteArrayList<>();
         private volatile Mono<Boolean> answer = Mono.just(true);
 
         @Override
-        public Mono<Boolean> tryAcquire(RateLimitPolicy policy, long memberId) {
-            calls.add(policy + ":" + memberId);
+        public Mono<Boolean> tryAcquire(RateLimitPolicy policy, RateLimitSubject subject) {
+            calls.add(policy + ":" + subject.value());
             return answer;
         }
     }

@@ -15,8 +15,8 @@ import org.springframework.cloud.gateway.filter.ratelimit.RateLimiter;
 import org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter;
 import reactor.core.publisher.Mono;
 
-/** 프레임워크 응답 해석과 정책 등록을 본다. 실제 토큰 버킷은 {@link RedisMemberRateLimiterTest} 가 실제 Redis 로 본다. */
-class RedisMemberRateLimiterUnitTest {
+/** 프레임워크 응답 해석과 정책 등록을 본다. 실제 토큰 버킷은 {@link RedisBucketRateLimiterTest} 가 실제 Redis 로 본다. */
+class RedisBucketRateLimiterUnitTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final long MEMBER_ID = 42L;
@@ -39,33 +39,33 @@ class RedisMemberRateLimiterUnitTest {
     @Test
     @DisplayName("버킷 id 는 정책 · 회원 id 로 만든다 — 프레임워크 키에는 이 값만 들어간다")
     void bucketIdSeparatesPolicies() {
-        assertThat(RedisMemberRateLimiter.bucketId(RateLimitPolicy.CART_WRITE, MEMBER_ID)).isEqualTo("cart-write:member:42");
-        assertThat(RedisMemberRateLimiter.bucketId(RateLimitPolicy.ORDER_WRITE, MEMBER_ID)).isEqualTo("order-write:member:42");
+        assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.CART_WRITE, RateLimitSubject.member(MEMBER_ID))).isEqualTo("cart-write:member:42");
+        assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.ORDER_WRITE, RateLimitSubject.member(MEMBER_ID))).isEqualTo("order-write:member:42");
     }
 
     @Test
     @DisplayName("허용 · 거절은 프레임워크 응답을 그대로 따른다")
     void followsFrameworkDecision() {
-        RedisMemberRateLimiter limiter = limiter();
+        RedisBucketRateLimiter limiter = limiter();
         answer(new RateLimiter.Response(false, Map.of(RedisRateLimiter.REMAINING_HEADER, "0")));
 
-        assertThat(limiter.tryAcquire(RateLimitPolicy.CART_WRITE, MEMBER_ID).block(TIMEOUT)).isFalse();
+        assertThat(limiter.tryAcquire(RateLimitPolicy.CART_WRITE, RateLimitSubject.member(MEMBER_ID)).block(TIMEOUT)).isFalse();
     }
 
     @Test
     @DisplayName("프레임워크가 Redis 오류를 삼킨 응답(남은 토큰 -1)은 저장소 장애로 알린다 — 필터가 fail-open warn 을 간격마다 남기게")
     void swallowedStorageFailureIsSignalled() {
-        RedisMemberRateLimiter limiter = limiter();
+        RedisBucketRateLimiter limiter = limiter();
         answer(new RateLimiter.Response(true, Map.of(RedisRateLimiter.REMAINING_HEADER, "-1")));
 
-        assertThatThrownBy(() -> limiter.tryAcquire(RateLimitPolicy.CART_WRITE, MEMBER_ID).block(TIMEOUT))
-            .isInstanceOf(RedisMemberRateLimiter.RateLimitStorageUnavailableException.class);
+        assertThatThrownBy(() -> limiter.tryAcquire(RateLimitPolicy.CART_WRITE, RateLimitSubject.member(MEMBER_ID)).block(TIMEOUT))
+            .isInstanceOf(RedisBucketRateLimiter.RateLimitStorageUnavailableException.class);
     }
 
-    private RedisMemberRateLimiter limiter() {
+    private RedisBucketRateLimiter limiter() {
         given(redisRateLimiter.getConfig()).willReturn(registered);
         given(redisRateLimiter.getRemainingHeader()).willReturn(RedisRateLimiter.REMAINING_HEADER);
-        return new RedisMemberRateLimiter(redisRateLimiter, new GatewayRateLimitProperties(true, null, null, null));
+        return new RedisBucketRateLimiter(redisRateLimiter, new GatewayRateLimitProperties(true, null, null, null));
     }
 
     private void answer(RateLimiter.Response response) {

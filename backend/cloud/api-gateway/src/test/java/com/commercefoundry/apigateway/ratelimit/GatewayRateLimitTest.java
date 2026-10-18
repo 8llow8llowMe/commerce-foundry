@@ -35,8 +35,8 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;
 
 /**
- * 회원 단위 요청 제한을 실제 서버 · 보안 체인 · 라우팅으로 본다 ({@code security-guide.md} §7-3). 하류는 받은 경로를 기록하는 가짜 서비스다.
- * 제한기는 스텁({@link StubMemberRateLimiter})으로 바꿔 허용 · 거절을 정한다 — 실제 토큰 버킷은 {@link RedisMemberRateLimiterTest} 가 실제 Redis 로 본다.
+ * 회원 · 클라이언트 IP 단위 요청 제한을 실제 서버 · 보안 체인 · 라우팅으로 본다 ({@code security-guide.md} §7-3). 하류는 받은 경로를 기록하는 가짜 서비스다.
+ * 제한기는 스텁({@link StubBucketRateLimiter})으로 바꿔 허용 · 거절을 정한다 — 실제 토큰 버킷은 {@link RedisBucketRateLimiterTest} 가 실제 Redis 로 본다.
  */
 @GatewayIntegrationTest
 @Import(GatewayRateLimitTest.StubConfig.class)
@@ -52,7 +52,10 @@ class GatewayRateLimitTest {
     private WebTestClient webTestClient;
 
     @Autowired
-    private StubMemberRateLimiter rateLimiter;
+    private StubBucketRateLimiter rateLimiter;
+
+    @Autowired
+    private ClientIpHasher clientIpHasher;
 
     @DynamicPropertySource
     static void registerServiceInstances(DynamicPropertyRegistry registry) {
@@ -88,7 +91,7 @@ class GatewayRateLimitTest {
             .jsonPath("$.dataBody").isEmpty();
 
         assertThat(UPSTREAM_PATHS).as("하류에 닿지 않는다").isEmpty();
-        assertThat(rateLimiter.calls).containsExactly("CART_WRITE:" + TestTokens.MEMBER_ID);
+        assertThat(rateLimiter.calls).containsExactly("CART_WRITE:member:" + TestTokens.MEMBER_ID);
     }
 
     @Test
@@ -114,14 +117,28 @@ class GatewayRateLimitTest {
     }
 
     @Test
-    @DisplayName("토큰 없는 장바구니 쓰기는 세지 않고 하류로 간다 — 인증 필요 판정은 서비스가 한다")
-    void anonymousCartWriteIsNotCounted() {
+    @DisplayName("토큰 없는 장바구니 쓰기는 클라이언트 IP 의 HMAC 으로 세고, 한도를 넘으면 429 이며 하류에 닿지 않는다")
+    void anonymousCartWriteIsCountedByClientIp() {
         rateLimiter.deny = true;
 
-        webTestClient.post().uri(CART_ITEMS).contentType(MediaType.APPLICATION_JSON).bodyValue("{}").exchange().expectStatus().isOk();
+        webTestClient.post().uri(CART_ITEMS).contentType(MediaType.APPLICATION_JSON).bodyValue("{}").exchange()
+            .expectStatus().isEqualTo(429)
+            .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_006");
 
-        assertThat(rateLimiter.calls).isEmpty();
-        assertThat(UPSTREAM_PATHS).containsExactly(CART_ITEMS);
+        assertThat(rateLimiter.calls).containsExactly("CART_WRITE:ip:" + clientIpHasher.hash("127.0.0.1"));
+        assertThat(UPSTREAM_PATHS).isEmpty();
+    }
+
+    @Test
+    @DisplayName("신뢰 프록시가 없으면(기본) X-Forwarded-For 를 바꿔 보내도 같은 버킷이다 — 버킷을 우회할 수 없다")
+    void spoofedForwardedForCannotEscapeBucket() {
+        for (String spoofed : List.of("198.51.100.1", "198.51.100.2", "10.0.0.1, 198.51.100.3")) {
+            webTestClient.post().uri(CART_ITEMS).header("X-Forwarded-For", spoofed)
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{}").exchange().expectStatus().isOk();
+        }
+
+        assertThat(rateLimiter.calls).hasSize(3).containsOnly("CART_WRITE:ip:" + clientIpHasher.hash("127.0.0.1"));
+        assertThat(rateLimiter.calls).allSatisfy(call -> assertThat(call).doesNotContain("127.0.0.1").doesNotContain("198.51.100"));
     }
 
     @Test
@@ -182,8 +199,8 @@ class GatewayRateLimitTest {
 
         @Bean
         @Primary
-        StubMemberRateLimiter stubMemberRateLimiter() {
-            return new StubMemberRateLimiter();
+        StubBucketRateLimiter stubBucketRateLimiter() {
+            return new StubBucketRateLimiter();
         }
 
         /** 실제 Redis 가 없으므로 차단 목록은 항상 비어 있다고 답한다 (차단 목록 동작은 GatewaySecurityTest 가 본다). */
@@ -194,15 +211,15 @@ class GatewayRateLimitTest {
         }
     }
 
-    static final class StubMemberRateLimiter implements MemberRateLimiter {
+    static final class StubBucketRateLimiter implements BucketRateLimiter {
 
         private final Queue<String> calls = new ConcurrentLinkedQueue<>();
         private volatile boolean deny;
         private volatile boolean fail;
 
         @Override
-        public Mono<Boolean> tryAcquire(RateLimitPolicy policy, long memberId) {
-            calls.add(policy + ":" + memberId);
+        public Mono<Boolean> tryAcquire(RateLimitPolicy policy, RateLimitSubject subject) {
+            calls.add(policy + ":" + subject.value());
             if (fail) {
                 return Mono.error(new IllegalStateException("simulated outage"));
             }

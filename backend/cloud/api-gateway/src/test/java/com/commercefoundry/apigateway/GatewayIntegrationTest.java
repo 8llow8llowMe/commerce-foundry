@@ -34,7 +34,9 @@ import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTest
         // 차단 목록을 실제로 읽는 테스트(GatewaySecurityTest)는 조회기를 스텁으로 바꾼다
         "spring.data.redis.host=127.0.0.1",
         "spring.data.redis.port=6379",
-        "spring.data.redis.password=gateway-test-only"
+        "spring.data.redis.password=gateway-test-only",
+        // 비로그인 요청의 IP 를 키로 바꾸는 HMAC 키 — 테스트 전용 값(base64 "gateway-test-only-client-ip-hash-key"). 운영 값은 Vault 에만 있다
+        "gateway.client-ip.hash-key=" + GatewayIntegrationTest.TEST_CLIENT_IP_HASH_KEY
     }
 )
 @AutoConfigureWebTestClient(timeout = "30s")
@@ -42,4 +44,7 @@ public @interface GatewayIntegrationTest {
 
     /** 통합 테스트에서 CORS 를 허용하는 유일한 origin. */
     String ALLOWED_ORIGIN = "http://localhost:3000";
+
+    /** 테스트 전용 HMAC 키 (base64 로 36바이트). */
+    String TEST_CLIENT_IP_HASH_KEY = "Z2F0ZXdheS10ZXN0LW9ubHktY2xpZW50LWlwLWhhc2gta2V5";
 }
