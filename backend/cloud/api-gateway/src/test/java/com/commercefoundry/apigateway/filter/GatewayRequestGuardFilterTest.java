@@ -165,6 +165,37 @@ class GatewayRequestGuardFilterTest {
     }
 
     @Test
+    @DisplayName("값이 빈 Authorization 이 두 줄이어도 400 + GATEWAY_004 다 — 개수로 판정한다")
+    void rejectsDuplicatedEmptyAuthorizationHeaders() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/products")
+            .header(HttpHeaders.AUTHORIZATION, "", ""));
+        AtomicBoolean routed = new AtomicBoolean();
+
+        filter.filter(exchange, chain(routed)).block(TIMEOUT);
+
+        assertThat(routed).isFalse();
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertGatewayBadRequestEnvelope(exchange);
+    }
+
+    /**
+     * 쉼표로 합친 값 하나는 헤더가 하나라 여기서 끊지 않는다. Bearer 형식({@code ^Bearer token68$})이 쉼표를 받지 않아 게이트웨이 · 서비스 모두
+     * 401 {@code SECURITY_003} 으로 같은 판정을 낸다 — 두 토큰 중 하나를 골라 쓰는 경로가 없다. Bearer 해석이 바뀌면 이 가정을 다시 본다.
+     */
+    @Test
+    @DisplayName("쉼표로 합친 Authorization 값 하나는 통과시킨다 — 토큰 형식 오류로 보안 체인이 401 을 낸다")
+    void passesCommaJoinedSingleAuthorizationValue() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/products")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer first, Bearer second"));
+        AtomicBoolean routed = new AtomicBoolean();
+
+        filter.filter(exchange, chain(routed)).block(TIMEOUT);
+
+        assertThat(exchange.getRequest().getHeaders().get(HttpHeaders.AUTHORIZATION)).hasSize(1);
+        assertThat(routed).isTrue();
+    }
+
+    @Test
     @DisplayName("Authorization 이 없거나 하나면 통과한다 — 토큰 판정은 보안 체인이 한다")
     void passesSingleOrNoAuthorizationHeader() {
         AtomicBoolean anonymous = new AtomicBoolean();

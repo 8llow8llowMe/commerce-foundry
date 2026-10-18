@@ -225,6 +225,15 @@ class GatewaySecurityTest {
     }
 
     @Test
+    @DisplayName("쉼표로 합친 Authorization 값 하나는 401 + SECURITY_003 이고 하류에 닿지 않는다 — 두 토큰 중 하나를 고르지 않는다")
+    void commaJoinedAuthorizationIsInvalid() {
+        String joined = BEARER + token(MemberRole.ADMIN) + ", " + BEARER + token(MemberRole.CUSTOMER);
+
+        assertRejected(webTestClient.get().uri(ADMIN_PATH).header(HttpHeaders.AUTHORIZATION, joined).exchange(),
+            SecurityErrorCode.TOKEN_INVALID, INVALID_TOKEN);
+    }
+
+    @Test
     @DisplayName("Bearer 뒤가 토큰 모양이 아니면 401 + SECURITY_003 이다")
     void malformedBearerIsInvalid() {
         assertRejected(webTestClient.get().uri(PUBLIC_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer not a token").exchange(),
@@ -324,11 +333,13 @@ class GatewaySecurityTest {
     }
 
     @Test
-    @DisplayName("이름만 /internal 로 시작하는 공개 경로는 막지 않는다 — 세그먼트 단위로 본다")
-    void internalPrefixLookalikeIsNotRejected() {
-        webTestClient.get().uri("/internalx/v1/skus").exchange()
-            .expectStatus().isNotFound()
-            .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_001");
+    @DisplayName("경로 중간에 internal 세그먼트가 있는 공개 경로는 막지 않고 하류로 간다 — 맨 앞 세그먼트만 본다")
+    void internalSegmentInsidePublicPathIsRouted() {
+        String path = "/api/v1/products/internal";
+
+        webTestClient.get().uri(path).exchange().expectStatus().isOk();
+
+        assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(path));
     }
 
     // ── 구성 ──────────────────────────────────────────────────────
