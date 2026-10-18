@@ -278,7 +278,8 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - 있는데 `version` 이 없거나 다르면 `409` 이고 아무것도 바꾸지 않는다. 클라이언트는 다시 불러와 편집한다.
 - 응답 유실 뒤 같은 본문을 재전송하면 `409` 다 — 조회로 반영 여부를 확인한다. `Idempotency-Key` 는 쓰지 않는다.
 - 하위 행(도서산간 구간 등)은 교체마다 아이디가 새로 발급된다. 클라이언트는 하위 행 아이디를 보관하지 않는다.
-- 처음 만든 곳: delivery-service `ShippingPolicyAdminController` (#11, `DELIVERY_006`).
+- 처음 만든 곳: delivery-service `ShippingPolicyAdminController` (#11, `DELIVERY_006`). 해외 정책(`InternationalShippingPolicyAdminController`, #22)도 같은 규칙이다.
+- 설정의 기준 값 중 바꾸면 기존 흐름이 한꺼번에 깨지는 것(배송비 정책 통화)은 `PUT` 으로 바꾸지 않고 `409` 로 거절한다(`DELIVERY_012`, `order-flow-guide.md` §2).
 
 ## 7. 비동기 작업
 
