@@ -23,6 +23,8 @@ replay_pid*.log
 frontend/**/node_modules/
 frontend/**/.next/
 frontend/**/out/
+# Turborepo 캐시 — 루트에서 turbo 를 실행하면 루트에도 생긴다
+.turbo/
 
 # env / secrets — 공개 저장소다. PG 시크릿 키·JWT 키·DB 비밀번호는 절대 커밋하지 않는다
 # local 프로파일이 backend/.env 를 실제로 읽는다. 복사본·변형 이름(dev.env, .env-dev, .env_local)도 막는다
