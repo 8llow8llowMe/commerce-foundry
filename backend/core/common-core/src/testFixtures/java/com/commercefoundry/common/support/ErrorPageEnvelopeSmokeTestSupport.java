@@ -54,6 +54,10 @@ public abstract class ErrorPageEnvelopeSmokeTestSupport {
 
     /** security-core {@code SecurityErrorCode.UNAUTHORIZED} 의 코드. 이 모듈은 security-core 에 의존하지 않아 문자열로 적는다. */
     protected static final String SECURITY_UNAUTHORIZED_CODE = "SECURITY_001";
+    /** security-core {@code SecurityErrorCode.FORBIDDEN}(역할 부족) 의 코드. */
+    protected static final String SECURITY_FORBIDDEN_CODE = "SECURITY_005";
+    /** 서명 · 모양이 틀린 Bearer 토큰. 일반 요청이면 401 · SECURITY_003 이다. */
+    protected static final String INVALID_AUTHORIZATION = "Bearer invalid.token.value";
     /** {@code /api/v1/admin/**} 규칙에 걸리는, 어느 서비스에도 매핑되지 않는 경로. */
     protected static final String ADMIN_PATH = "/api/v1/admin/error-page-smoke";
     /** 어드민이 아닌, 어느 서비스에도 매핑되지 않는 경로. */
@@ -69,8 +73,13 @@ public abstract class ErrorPageEnvelopeSmokeTestSupport {
     protected abstract String customerAuthorization();
 
     /**
-     * Spring Security 방화벽({@code StrictHttpFirewall})이 거부하는 원문 경로 — security-core {@code ResourceServerSmokeTestSupport#nonNormalizedAdminPaths} 에서
-     * Tomcat 이 먼저 끊는 것({@link #containerRejectedPaths()})을 뺀 나머지다. 둘을 합치면 그 목록과 같다.
+     * Spring Security 방화벽({@code StrictHttpFirewall})이 거부하는 원문 경로.
+     * <ul>
+     *   <li>{@code /api/**} 6개는 security-core {@code ResourceServerSmokeTestSupport#nonNormalizedAdminPaths} 에서 Tomcat 이 먼저 끊는 것
+     *       ({@link #containerRejectedPaths()})을 뺀 나머지다. 둘을 합치면 그 목록과 같다.</li>
+     *   <li>{@code /internal/**} 2개는 서비스 간 체인이 받는 경로다. 방화벽은 체인을 고르기 전({@code FilterChainProxy})에 돌고, 이어지는
+     *       ERROR 디스패치의 경로는 {@code /error} 라 internal 체인이 아니라 사용자 체인을 탄다 — 그래서 internal 경로도 400 · COMMON_004 봉투다.</li>
+     * </ul>
      */
     public static Stream<String> firewallRejectedPaths() {
         return Stream.of(
@@ -79,7 +88,9 @@ public abstract class ErrorPageEnvelopeSmokeTestSupport {
             "/api/v1/orders/%2E%2E/admin/x",
             "/api/v1/admin;x=y/x",
             "/api/v1/orders/..;/admin/x",
-            "/api/v1//admin/x"
+            "/api/v1//admin/x",
+            "/internal/v1/x;y",
+            "/internal/..;/x"
         );
     }
 
@@ -92,12 +103,17 @@ public abstract class ErrorPageEnvelopeSmokeTestSupport {
         return Stream.of("/api/v1/admin%2fx");
     }
 
+    /**
+     * 틀린 토큰도 400 이다 — ERROR 디스패치에서는 Bearer 토큰 필터가 다시 돌지 않는다(한 요청에 한 번).
+     * 이 전제가 깨지면 방화벽 거부가 401 · SECURITY_003 으로 덮여 클라이언트가 재로그인으로 빠진다.
+     */
     @ParameterizedTest
     @MethodSource("firewallRejectedPaths")
-    @DisplayName("방화벽이 거부한 원문 경로는 무토큰 · 고객 토큰 모두 400 · COMMON_004 봉투다 — /error 에러 디스패치가 보안 체인을 통과한다")
+    @DisplayName("방화벽이 거부한 원문 경로는 무토큰 · 고객 토큰 · 틀린 토큰 모두 400 · COMMON_004 봉투다 — /error 에러 디스패치가 보안 체인을 통과한다")
     void firewallRejectionIsEnvelope(String path) throws Exception {
-        assertEnvelope(send(path, null, null), path, 400, CommonErrorCode.BAD_REQUEST.getCode(), CommonErrorCode.BAD_REQUEST.getMessage());
-        assertEnvelope(send(path, customerAuthorization(), null), path, 400, CommonErrorCode.BAD_REQUEST.getCode(), CommonErrorCode.BAD_REQUEST.getMessage());
+        assertEnvelope(send(path, null, null), path, 400, CommonErrorCode.BAD_REQUEST);
+        assertEnvelope(send(path, customerAuthorization(), null), path, 400, CommonErrorCode.BAD_REQUEST);
+        assertEnvelope(send(path, INVALID_AUTHORIZATION, null), path, 400, CommonErrorCode.BAD_REQUEST);
     }
 
     @Test
@@ -105,7 +121,7 @@ public abstract class ErrorPageEnvelopeSmokeTestSupport {
     void firewallRejectionIsJsonForHtmlAccept() throws Exception {
         String path = firewallRejectedPaths().findFirst().orElseThrow();
 
-        assertEnvelope(send(path, null, MediaType.TEXT_HTML_VALUE), path, 400, CommonErrorCode.BAD_REQUEST.getCode(), CommonErrorCode.BAD_REQUEST.getMessage());
+        assertEnvelope(send(path, null, MediaType.TEXT_HTML_VALUE), path, 400, CommonErrorCode.BAD_REQUEST);
     }
 
     @ParameterizedTest
@@ -124,25 +140,26 @@ public abstract class ErrorPageEnvelopeSmokeTestSupport {
     @Test
     @DisplayName("토큰 없이 어드민 경로에 오면 여전히 401 · SECURITY_001 봉투다 — 보안 진입점이 직접 쓰고 /error 로 가지 않는다")
     void anonymousOnAdminPath() throws Exception {
-        HttpResponse<byte[]> response = send(ADMIN_PATH, null, null);
+        assertSecurityCode(send(ADMIN_PATH, null, null), 401, SECURITY_UNAUTHORIZED_CODE);
+    }
 
-        assertThat(response.statusCode()).isEqualTo(401);
-        assertThat(JSON.readTree(response.body()).path("dataHeader").path("resultCode").asString()).isEqualTo(SECURITY_UNAUTHORIZED_CODE);
+    @Test
+    @DisplayName("고객 토큰으로 어드민 경로에 오면 여전히 403 · SECURITY_005 봉투다 — 보안 거부 처리기가 직접 쓰고 /error 로 가지 않는다")
+    void customerOnAdminPath() throws Exception {
+        assertSecurityCode(send(ADMIN_PATH, customerAuthorization(), null), 403, SECURITY_FORBIDDEN_CODE);
     }
 
     @Test
     @DisplayName("매핑 없는 경로는 컨테이너에서도 404 · COMMON_001 봉투다")
     void unmappedPath() throws Exception {
-        assertEnvelope(send(UNMAPPED_PATH, null, null), UNMAPPED_PATH, 404,
-            CommonErrorCode.PATH_NOT_FOUND.getCode(), CommonErrorCode.PATH_NOT_FOUND.getMessage());
+        assertEnvelope(send(UNMAPPED_PATH, null, null), UNMAPPED_PATH, 404, CommonErrorCode.PATH_NOT_FOUND);
     }
 
     @Test
     @DisplayName("직접 GET /error 는 무토큰 · 고객 토큰 모두 404 · COMMON_001 봉투다 — 매핑 없는 경로처럼 보인다")
     void directErrorPath() throws Exception {
-        assertEnvelope(send("/error", null, null), "/error", 404, CommonErrorCode.PATH_NOT_FOUND.getCode(), CommonErrorCode.PATH_NOT_FOUND.getMessage());
-        assertEnvelope(send("/error", customerAuthorization(), null), "/error", 404,
-            CommonErrorCode.PATH_NOT_FOUND.getCode(), CommonErrorCode.PATH_NOT_FOUND.getMessage());
+        assertEnvelope(send("/error", null, null), "/error", 404, CommonErrorCode.PATH_NOT_FOUND);
+        assertEnvelope(send("/error", customerAuthorization(), null), "/error", 404, CommonErrorCode.PATH_NOT_FOUND);
     }
 
     /** {@code rawPath} 를 그대로 요청 줄에 싣는다. {@code authorization} · {@code accept} 는 {@code null} 이면 보내지 않는다. */
@@ -157,8 +174,22 @@ public abstract class ErrorPageEnvelopeSmokeTestSupport {
         return CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
     }
 
-    /** {@code FallbackErrorSmokeTestSupport#assertEnvelope} 와 같은 계약 — 그쪽은 MockMvc 응답, 여기는 실제 HTTP 응답이다. Boot 기본 오류 JSON 이 아님도 본다. */
-    protected static void assertEnvelope(HttpResponse<byte[]> response, String path, int status, String resultCode, String resultMessage) {
+    /** 보안 오류는 봉투 모양을 security-core 가 본다. 여기서는 /error 로 새지 않고 보안 코드 그대로인지(상태 · 코드)만 본다. */
+    private static void assertSecurityCode(HttpResponse<byte[]> response, int status, String resultCode) {
+        assertThat(response.statusCode()).as("status").isEqualTo(status);
+        assertThat(JSON.readTree(response.body()).path("dataHeader").path("resultCode").asString()).as("dataHeader.resultCode").isEqualTo(resultCode);
+    }
+
+    /** {@link #assertEnvelope(HttpResponse, String, int, String, String)} 에 공통 오류 코드의 코드 · 메시지를 넣는다. */
+    public static void assertEnvelope(HttpResponse<byte[]> response, String path, int status, CommonErrorCode errorCode) {
+        assertEnvelope(response, path, status, errorCode.getCode(), errorCode.getMessage());
+    }
+
+    /**
+     * {@code FallbackErrorSmokeTestSupport#assertEnvelope} 와 같은 계약 — 그쪽은 MockMvc 응답, 여기는 실제 HTTP 응답이다. Boot 기본 오류 JSON 이 아님도 본다.
+     * common-core 의 컨테이너 테스트({@code FallbackErrorControllerContainerTest})도 이 단언을 쓴다.
+     */
+    public static void assertEnvelope(HttpResponse<byte[]> response, String path, int status, String resultCode, String resultMessage) {
         assertThat(response.statusCode()).as("%s status", path).isEqualTo(status);
         assertThat(response.headers().firstValue(HttpHeaders.CONTENT_TYPE)).as("%s content type", path)
             .hasValueSatisfying(contentType -> assertThat(contentType).startsWith(MediaType.APPLICATION_JSON_VALUE));

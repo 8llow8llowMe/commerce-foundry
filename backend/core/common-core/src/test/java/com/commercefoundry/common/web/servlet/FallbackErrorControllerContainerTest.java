@@ -1,5 +1,6 @@
 package com.commercefoundry.common.web.servlet;
 
+import static com.commercefoundry.common.support.ErrorPageEnvelopeSmokeTestSupport.assertEnvelope;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.common.exception.CommonErrorCode;
@@ -29,20 +30,18 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 실제 서블릿 컨테이너(Tomcat, RANDOM_PORT)에서 MVC 밖 오류가 {@code /error} 에러 디스패치를 거쳐 봉투로 나가는지 본다.
  * MockMvc 는 에러 디스패치를 하지 않아 이 경로를 볼 수 없다 — 그래서 MockMvc 스모크에서 필터 오류는 빈 본문이다.
  *
  * <p>보안이 없는 최소 앱이다. 방화벽 거부 · 보안 체인 통과는 서비스의 {@code *ErrorPageEnvelopeSmokeTest} 가 서비스 구성 그대로 본다.
+ * 봉투 단언은 그 스모크와 같은 것({@code ErrorPageEnvelopeSmokeTestSupport#assertEnvelope})을 쓴다.
  */
 @ExtendWith(OutputCaptureExtension.class)
 @SpringBootTest(classes = FallbackErrorControllerContainerTest.ContainerSmokeApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class FallbackErrorControllerContainerTest {
 
-    private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final HttpClient CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     @Value("${local.server.port}")
@@ -61,9 +60,10 @@ class FallbackErrorControllerContainerTest {
     @Test
     @DisplayName("필터가 던진 예외는 500 · COMMON_000 봉투이고 원인을 응답에 싣지 않는다 — 로그에는 원인과 가린 경로가 남는다")
     void filterException(CapturedOutput output) throws Exception {
-        HttpResponse<byte[]> response = send("GET", ThrowingFilter.FAILURE_PATH + "/4611686018427387904", null);
+        String path = ThrowingFilter.FAILURE_PATH + "/4611686018427387904";
+        HttpResponse<byte[]> response = send(port, "GET", path, null);
 
-        assertEnvelope(response, 500, CommonErrorCode.INTERNAL_ERROR);
+        assertEnvelope(response, path, 500, CommonErrorCode.INTERNAL_ERROR);
         assertThat(new String(response.body())).doesNotContain(ThrowingFilter.FAILURE_DETAIL).doesNotContain("IllegalStateException");
         assertThat(output).contains("unhandled exception answered by error page envelope").contains(ThrowingFilter.FAILURE_DETAIL)
             .contains("path=/container-smoke/failure/x/…").doesNotContain("4611686018427387904");
@@ -72,28 +72,33 @@ class FallbackErrorControllerContainerTest {
     @Test
     @DisplayName("필터가 sendError(400) 로 끝낸 요청(방화벽 거부와 같은 모양)은 Accept: text/html 이어도 400 · COMMON_004 JSON 봉투다")
     void filterSendErrorWithHtmlAccept() throws Exception {
-        assertEnvelope(send("GET", ThrowingFilter.REJECT_PATH, MediaType.TEXT_HTML_VALUE), 400, CommonErrorCode.BAD_REQUEST);
+        String path = ThrowingFilter.REJECT_PATH;
+
+        assertEnvelope(send(port, "GET", path, MediaType.TEXT_HTML_VALUE), path, 400, CommonErrorCode.BAD_REQUEST);
     }
 
     @Test
     @DisplayName("원래 요청이 POST 여도 에러 디스패치는 봉투로 끝난다 — /error 는 모든 메서드를 받는다")
     void filterSendErrorOnPost() throws Exception {
-        assertEnvelope(send("POST", ThrowingFilter.REJECT_PATH, null), 400, CommonErrorCode.BAD_REQUEST);
+        assertEnvelope(send(port, "POST", ThrowingFilter.REJECT_PATH, null), ThrowingFilter.REJECT_PATH, 400, CommonErrorCode.BAD_REQUEST);
     }
 
     @Test
     @DisplayName("직접 GET /error 는 404 · COMMON_001 이다")
     void directErrorPath() throws Exception {
-        assertEnvelope(send("GET", "/error", null), 404, CommonErrorCode.PATH_NOT_FOUND);
+        assertEnvelope(send(port, "GET", "/error", null), "/error", 404, CommonErrorCode.PATH_NOT_FOUND);
     }
 
     @Test
     @DisplayName("매핑 없는 경로는 컨테이너에서도 404 · COMMON_001 이다 — MVC 안 오류는 폴백 리졸버가 끝내 /error 로 가지 않는다")
     void unmappedPath() throws Exception {
-        assertEnvelope(send("GET", "/container-smoke-missing", null), 404, CommonErrorCode.PATH_NOT_FOUND);
+        String path = "/container-smoke-missing";
+
+        assertEnvelope(send(port, "GET", path, null), path, 404, CommonErrorCode.PATH_NOT_FOUND);
     }
 
-    private HttpResponse<byte[]> send(String method, String path, String accept) throws IOException, InterruptedException {
+    /** 컨테이너 테스트들이 같이 쓴다({@link FallbackErrorControllerCustomPathContainerTest}). {@code accept} 는 {@code null} 이면 보내지 않는다. */
+    static HttpResponse<byte[]> send(int port, String method, String path, String accept) throws IOException, InterruptedException {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
             .timeout(Duration.ofSeconds(10))
             .method(method, HttpRequest.BodyPublishers.noBody());
@@ -101,19 +106,6 @@ class FallbackErrorControllerContainerTest {
             request.header(HttpHeaders.ACCEPT, accept);
         }
         return CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
-    }
-
-    private static void assertEnvelope(HttpResponse<byte[]> response, int status, CommonErrorCode errorCode) {
-        assertThat(response.statusCode()).as("status").isEqualTo(status);
-        assertThat(response.headers().firstValue(HttpHeaders.CONTENT_TYPE)).as("content type").hasValueSatisfying(
-            contentType -> assertThat(contentType).startsWith(MediaType.APPLICATION_JSON_VALUE));
-        JsonNode root = JSON.readTree(response.body());
-        assertThat(root.has("timestamp")).as("Boot 기본 오류 JSON 이 아니다").isFalse();
-        JsonNode header = root.path("dataHeader");
-        assertThat(header.path("success").asBoolean(true)).isFalse();
-        assertThat(header.path("resultCode").asString()).isEqualTo(errorCode.getCode());
-        assertThat(header.path("resultMessage").asString()).isEqualTo(errorCode.getMessage());
-        assertThat(root.path("dataBody").isNull()).isTrue();
     }
 
     @SpringBootConfiguration
