@@ -14,7 +14,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
- * product-service 컨트롤러(카테고리 · 상품 · 어드민 재고 · internal SKU)의 도메인 · 요청 검증 오류를 {@code Response.fail} 봉투로 바꾼다.
+ * product-service 컨트롤러(카테고리 · 상품 · 어드민 재고 · internal SKU · internal 재고 선점)의 도메인 · 요청 검증 오류를 {@code Response.fail} 봉투로 바꾼다.
  * 카테고리 컨텍스트는 오류 경로가 없어 3종 세트를 따로 두지 않고, 같은 서비스의 이 advice 가 요청 바인딩 오류를 받는다.
  *
  * <p>{@code Exception} · {@code RuntimeException} 을 통째로 잡지 않는다 — {@code @PreAuthorize} 거부는 security-core 의

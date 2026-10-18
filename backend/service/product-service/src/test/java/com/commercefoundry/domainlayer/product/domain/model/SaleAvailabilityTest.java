@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
+import com.commercefoundry.domainlayer.product.support.ProductFixtures;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -84,5 +85,32 @@ class SaleAvailabilityTest {
         assertThat(EMPTY.isSoldOut()).isTrue();
         assertThat(new StockSnapshot(false, 0).isSoldOut()).isFalse();
         assertThatThrownBy(() -> new StockSnapshot(true, -1)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest(name = "노출 {0} · 상품 {1} · SKU {2} → 판매 가능 조건 {3}")
+    @CsvSource({
+        "true,  ON_SALE,      ON_SALE,      true",
+        "false, ON_SALE,      ON_SALE,      false",
+        "true,  STOP_SELLING, ON_SALE,      false",
+        "true,  ON_SALE,      STOP_SELLING, false"
+    })
+    @DisplayName("재고를 보기 전의 판매 가능 조건(재고 선점이 쓴다) — 노출 · 상품 판매중 · SKU 판매중")
+    void isOpenForSale(boolean visible, SaleStatus productStatus, SaleStatus skuStatus, boolean expected) {
+        Product product = ProductFixtures.product(1L, productStatus, visible, false);
+        Sku sku = ProductFixtures.sku(2L, 1L, "", 0L, skuStatus);
+
+        assertThat(SaleAvailability.isOpenForSale(product, sku)).isEqualTo(expected);
+    }
+
+    @Test
+    @DisplayName("구매 가능(서비스 간 SKU 조회의 purchasable) = 판매 가능 조건 && 품절 아님 — 무제한은 수량 0 이어도 구매 가능")
+    void isPurchasable() {
+        Product product = ProductFixtures.product(1L);
+        Sku sku = ProductFixtures.sku(2L, 1L, "", 0L, ON_SALE);
+
+        assertThat(SaleAvailability.isPurchasable(product, sku, IN_STOCK)).isTrue();
+        assertThat(SaleAvailability.isPurchasable(product, sku, UNLIMITED)).isTrue();
+        assertThat(SaleAvailability.isPurchasable(product, sku, EMPTY)).isFalse();
+        assertThat(SaleAvailability.isPurchasable(ProductFixtures.product(1L, ON_SALE, false, false), sku, IN_STOCK)).isFalse();
     }
 }

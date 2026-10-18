@@ -2,8 +2,15 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.product.adapter.in.scheduler.StockReservationExpiryScheduler;
+import com.commercefoundry.domainlayer.product.application.command.StockReservationCommand;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
+import com.commercefoundry.domainlayer.product.application.port.in.StockInternalUseCase;
+import com.commercefoundry.domainlayer.product.application.port.in.StockSchedulerUseCase;
 import com.commercefoundry.domainlayer.product.application.service.SkuInternalFacade;
+import com.commercefoundry.domainlayer.product.application.service.StockInternalFacade;
+import com.commercefoundry.domainlayer.product.application.service.StockSchedulerFacade;
+import com.commercefoundry.global.properties.StockProperties;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
@@ -11,6 +18,8 @@ import jakarta.persistence.EntityManagerFactory;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import javax.sql.DataSource;
@@ -21,12 +30,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springdoc.core.models.GroupedOpenApi;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.config.FixedDelayTask;
+import org.springframework.scheduling.config.ScheduledTask;
+import org.springframework.scheduling.config.ScheduledTaskHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -64,6 +77,63 @@ class ProductServiceApplicationTests {
     @DisplayName("store.* 가 StoreProperties 로 바인딩된다 — test 프로파일은 맞춤 제작을 켠다")
     void storePropertiesBound() {
         assertThat(applicationContext.getBean(StoreProperties.class).features().customOrder()).isTrue();
+    }
+
+    @Test
+    @DisplayName("stock.* 가 StockProperties 로 바인딩된다 — application.yml 기본값 위에 test 프로파일이 첫 실행만 미룬다")
+    void stockPropertiesBound() {
+        StockProperties.Reservation reservation = applicationContext.getBean(StockProperties.class).reservation();
+
+        assertThat(reservation.ttl()).isEqualTo(Duration.ofMinutes(30));
+        assertThat(reservation.expirySweep().fixedDelay()).isEqualTo(Duration.ofSeconds(60));
+        assertThat(reservation.expirySweep().initialDelay()).isEqualTo(Duration.ofHours(24));
+        assertThat(reservation.expirySweep().batchSize()).isEqualTo(100);
+        assertThat(reservation.expirySweep().maxBatchesPerRun()).isEqualTo(10);
+    }
+
+    /** 스케줄러가 실제로 등록됐고(@EnableScheduling) 주기가 yml 에서 풀렸는지, 업무 시각용 Clock 빈이 하나인지 본다. */
+    @Test
+    @DisplayName("재고 선점 만료 스케줄러가 설정 주기(fixed-delay 60s, test 는 initial-delay 24h)로 등록된다")
+    void expirySchedulerIsRegistered() {
+        List<FixedDelayTask> tasks = applicationContext.getBeansOfType(ScheduledTaskHolder.class).values().stream()
+            .flatMap(holder -> holder.getScheduledTasks().stream())
+            .map(ScheduledTask::getTask)
+            .filter(FixedDelayTask.class::isInstance)
+            .map(FixedDelayTask.class::cast)
+            .filter(task -> task.toString().contains(StockReservationExpiryScheduler.class.getName()))
+            .toList();
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.getFirst().getIntervalDuration()).isEqualTo(Duration.ofSeconds(60));
+        assertThat(tasks.getFirst().getInitialDelayDuration()).isEqualTo(Duration.ofHours(24));
+        assertThat(applicationContext.getBeanNamesForType(Clock.class)).hasSize(1);
+    }
+
+    /**
+     * 만료 스윕은 건마다 트랜잭션이다 — 스케줄러가 유스케이스(Facade 프록시)를 건마다 부른다. 프록시가 걸렸는지와 메서드별 트랜잭션 선언을 본다.
+     * 재고 선점 쓰기는 기본 격리 수준(READ COMMITTED)이다.
+     */
+    @Test
+    @DisplayName("만료 스윕 · 재고 선점 유스케이스는 트랜잭션 프록시이고, 건별 만료는 쓰기 · 목록 조회는 읽기 전용 트랜잭션이다")
+    void stockUseCasesAreTransactionalProxies() throws NoSuchMethodException {
+        assertThat(AopUtils.isAopProxy(applicationContext.getBean(StockSchedulerUseCase.class))).isTrue();
+        assertThat(AopUtils.isAopProxy(applicationContext.getBean(StockInternalUseCase.class))).isTrue();
+
+        AnnotationTransactionAttributeSource source = new AnnotationTransactionAttributeSource();
+        TransactionAttribute expire = source.getTransactionAttribute(StockSchedulerFacade.class.getMethod("expire", long.class), StockSchedulerFacade.class);
+        TransactionAttribute findExpired = source.getTransactionAttribute(
+            StockSchedulerFacade.class.getMethod("findExpiredReservationIds", int.class), StockSchedulerFacade.class
+        );
+        TransactionAttribute reserve = source.getTransactionAttribute(
+            StockInternalFacade.class.getMethod("reserve", StockReservationCommand.class), StockInternalFacade.class
+        );
+        assertThat(expire).isNotNull();
+        assertThat(expire.isReadOnly()).isFalse();
+        assertThat(expire.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+        assertThat(findExpired).isNotNull();
+        assertThat(findExpired.isReadOnly()).isTrue();
+        assertThat(reserve).isNotNull();
+        assertThat(reserve.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT);
     }
 
     /**
@@ -107,7 +177,7 @@ class ProductServiceApplicationTests {
 
         assertThat(tables).contains(
             "category", "product", "product_category", "product_option_group", "product_option_value",
-            "sku", "stock", "stock_adjustment_history", "product_image", "product_custom_order_field"
+            "sku", "stock", "stock_adjustment_history", "stock_reservation", "stock_reservation_item", "product_image", "product_custom_order_field"
         );
     }
 

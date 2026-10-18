@@ -451,6 +451,95 @@
     comment on column product.stock_adjustment_history.sku_id is
         'SKU 아이디 (FK: sku.id)';
 
+    create table product.stock_reservation (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        active_order_id bigint,
+        confirmed_at timestamp(6) with time zone,
+        expires_at timestamp(6) with time zone not null,
+        order_id bigint not null,
+        release_reason varchar(20) check ((release_reason in ('EXPIRED','RELEASED_BY_CALLER'))),
+        released_at timestamp(6) with time zone,
+        status varchar(20) not null check ((status in ('RESERVED','CONFIRMED','RELEASED'))),
+        version bigint not null,
+        primary key (id),
+        constraint uk_stock_reservation_active_order_id unique (active_order_id)
+    );
+
+    comment on table product.stock_reservation is
+        '재고 선점 (주문 하나에 한 행)';
+
+    comment on column product.stock_reservation.id is
+        '재고 선점 아이디 (Snowflake)';
+
+    comment on column product.stock_reservation.created_at is
+        '생성 시각';
+
+    comment on column product.stock_reservation.updated_at is
+        '수정 시각';
+
+    comment on column product.stock_reservation.active_order_id is
+        '활성 선점의 주문 아이디 — RESERVED · CONFIRMED 동안만 order_id 와 같고 RELEASED 면 null (주문당 활성 선점 1건)';
+
+    comment on column product.stock_reservation.confirmed_at is
+        '확정 시각 (CONFIRMED 일 때만)';
+
+    comment on column product.stock_reservation.expires_at is
+        '만료 시각 — RESERVED 로 이 시각이 지나면 스케줄러가 해제한다';
+
+    comment on column product.stock_reservation.order_id is
+        '주문 아이디 (외부 FK: order-service 주문 id)';
+
+    comment on column product.stock_reservation.release_reason is
+        '해제 사유 (EXPIRED / RELEASED_BY_CALLER). RELEASED 일 때만';
+
+    comment on column product.stock_reservation.released_at is
+        '해제 시각 (RELEASED 일 때만)';
+
+    comment on column product.stock_reservation.status is
+        '선점 상태 (RESERVED / CONFIRMED / RELEASED)';
+
+    comment on column product.stock_reservation.version is
+        '낙관적 락 버전';
+
+    create table product.stock_reservation_item (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        deducted boolean not null,
+        quantity integer not null,
+        reservation_id bigint not null,
+        sku_id bigint not null,
+        primary key (id),
+        constraint uk_stock_reservation_item_reservation_id_sku_id unique (reservation_id, sku_id),
+        constraint ck_stock_reservation_item_quantity_positive check (quantity > 0)
+    );
+
+    comment on table product.stock_reservation_item is
+        '재고 선점 항목 (선점 × SKU)';
+
+    comment on column product.stock_reservation_item.id is
+        '재고 선점 항목 아이디 (Snowflake)';
+
+    comment on column product.stock_reservation_item.created_at is
+        '생성 시각';
+
+    comment on column product.stock_reservation_item.updated_at is
+        '수정 시각';
+
+    comment on column product.stock_reservation_item.deducted is
+        '선점 때 재고를 차감했는가. 무제한 SKU 는 false 이고 해제 · 만료 때 되돌리지 않는다';
+
+    comment on column product.stock_reservation_item.quantity is
+        '선점 수량 (1 이상)';
+
+    comment on column product.stock_reservation_item.reservation_id is
+        '재고 선점 아이디 (FK: stock_reservation.id)';
+
+    comment on column product.stock_reservation_item.sku_id is
+        'SKU 아이디 (FK: sku.id)';
+
     create index idx_product_visible_sale_price_amount_id
        on product.product (visible, sale_price_amount, id);
 
@@ -462,3 +551,9 @@
 
     create index idx_stock_adjustment_history_sku_id_id
        on product.stock_adjustment_history (sku_id, id);
+
+    create index idx_stock_reservation_status_expires_at
+       on product.stock_reservation (status, expires_at);
+
+    create index idx_stock_reservation_order_id
+       on product.stock_reservation (order_id);

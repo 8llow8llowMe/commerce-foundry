@@ -107,7 +107,7 @@ public class SkuInternalProcessor {
             .salePrice(ProductPricing.skuSalePrice(product.salePrice(), sku.additionalPrice()))
             .additionalPrice(sku.additionalPrice())
             .saleStatus(saleStatus)
-            .purchasable(product.visible() && saleStatus == SaleAvailability.ON_SALE)
+            .purchasable(SaleAvailability.isPurchasable(product, sku, stock))
             .maxQuantityPerOrder(product.maxQuantityPerOrder())
             .customOrder(storeProperties.features().customOrder() && product.customOrder())
             .build();

@@ -36,6 +36,27 @@ public enum SaleAvailability implements CodeNameDescribable {
     }
 
     /**
+     * 재고를 보기 전의 구매 가능 조건 — 상품이 노출 중이고, 상품 · SKU 가 모두 판매중(ON_SALE)이다.
+     * 재고 선점은 이 조건으로 판매 불가를 거르고, 수량은 조건부 차감이 판정한다.
+     */
+    public static boolean isOpenForSale(Product product, Sku sku) {
+        Objects.requireNonNull(product, "product");
+        Objects.requireNonNull(sku, "sku");
+
+        return product.visible() && product.saleStatus() == SaleStatus.ON_SALE && sku.isOnSale();
+    }
+
+    /**
+     * 지금 주문할 수 있는 SKU 인가 — {@link #isOpenForSale} 이고 품절이 아니다. 서비스 간 SKU 조회의 {@code purchasable} 이다.
+     * {@code ofSku(...) == ON_SALE} 에 노출 조건을 더한 것과 같다.
+     */
+    public static boolean isPurchasable(Product product, Sku sku, StockSnapshot stock) {
+        Objects.requireNonNull(stock, "stock");
+
+        return isOpenForSale(product, sku) && !stock.isSoldOut();
+    }
+
+    /**
      * 상품 단위 판매 가능 상태 (목록 뱃지 · 상세 상단). 아래 순서로 처음 맞는 것이다.
      *
      * <ol>
