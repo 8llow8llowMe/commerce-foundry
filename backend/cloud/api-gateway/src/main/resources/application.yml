@@ -44,6 +44,14 @@ eureka:
       defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
 
 gateway:
+  request-body:
+    # 하류로 넘기는 요청 본문 상한 (security-guide.md §7-4). 넘으면 413 GATEWAY_007 이고 하류에 닿지 않는다.
+    # 2MB 는 가장 큰 정상 요청(장바구니 병합 50줄 × 입력 20개 × 500자, 한글 약 1.5MB)이 들어가는 값이다. 검증 한도를 키우면 이 값도 같이 본다
+    # 업로드(#9)는 그 라우트에만 따로 상한을 둔다 — Content-Type 만 바꿔 상한을 올릴 수 없게 전역 multipart 상한을 두지 않는다
+    max-size: 2MB
+    # chunked 본문을 동시에 모으는 총량(넘으면 411)과 수신 시간(넘으면 408) — 천천히 보내는 연결로 메모리를 채우는 공격의 상한
+    buffering-budget: 32MB
+    body-read-timeout: 10s
   cors:
     # 콤마로 여러 개를 적는다. 기본값은 비어 있다 — 설정이 빠진 배포 환경은 어떤 origin 도 허용하지 않고 닫힌 채로 뜬다.
     # 로컬 기본값(http://localhost:3000)은 application-local.yml 에 있다.
