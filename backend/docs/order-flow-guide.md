@@ -97,10 +97,10 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 
 | 항목 | 규칙 |
 |------|------|
-| 저장 (product-service) | `product.sku.weight_grams` integer(그램, 1 이상) · `hs_code` varchar(10)(숫자 6~10자리), 둘 다 null 허용 — null 은 미입력이다. DB check 는 무게 양수(`ck_sku_weight_grams_positive`)와 HS 코드 길이(`ck_sku_hs_code_length`)만 보고, 숫자 여부는 도메인 `HsCode` 가 본다. 점 · 하이픈 · 공백(`6211.42`)은 고쳐 받지 않는다 — 정규화는 입력 쪽(#9 · #19)이 한다 |
+| 저장 (product-service) | `product.sku.weight_grams` integer(그램, 1 이상) · `hs_code` varchar(10)(숫자 6~10자리), 둘 다 null 허용 — null 은 미입력이다. 도메인(`Sku` · `HsCode`)과 DB check(무게 양수 `ck_sku_weight_grams_positive`, HS 코드 숫자 6~10자리 `ck_sku_hs_code_format`)가 같은 규칙을 막는다 — 운영 SQL 로 형식이 틀린 값이 들어가 그 SKU 를 읽는 상세 · internal 조회 · 재고 선점(국내 주문 포함)이 500 이 되지 않게. 점 · 하이픈 · 공백(`6211.42.00`)은 고쳐 받지 않는다 — 정규화는 입력 쪽(#9 · #19)이 한다 |
 | 내려주기 | `GET /internal/v1/skus` 항목의 `weightGrams`(number, nullable) · `hsCode`(string, nullable). 미입력이면 키를 빼지 않고 `null` 이다. 기본값으로 채우지 않고 거절하지도 않는다 — 국내 주문에는 필요 없는 값이다. 고객 API(상품 상세)에는 내리지 않는다 |
-| 해외 주문 | 배송 국가가 KR 이 아닌 주문 — delivery 견적이 `INTERNATIONAL` 로 계산하는 주문이다. 영문 스토어(USD) 주문이 여기에 든다 |
-| 거절 (order-service, #13) | 해외 주문의 주문서 미리보기 · 주문 생성에서 항목 중 **무게 또는 HS 코드가 null 인 SKU 가 하나라도 있으면 거절**한다 — 장바구니 `purchasable=false` 와 같은 결의 409, 어느 SKU 인지 알 수 있게 한다. 코드는 #13 이 `ORDER_0xx` 로 정한다. delivery 견적을 부르기 **전에** 거절한다 — 무게 없이 부르면 `DELIVERY_118`(무게 필수) 400 이 나와 원인이 흐려진다. 국내 주문은 두 값을 보지 않는다 |
+| 해외 주문 | **배송 국가 ≠ KR** 인 주문 하나로 판정한다(통화는 보지 않는다). delivery 견적이 해외 정책(응답 `scope` = `INTERNATIONAL`, #22 에서 생기는 계약)으로 계산하는 주문과 같다. 통화와 배송 국가의 관계는 #22 · #70 을 따른다 |
+| 거절 (order-service, #13) | 해외 주문의 주문서 미리보기 · 주문 생성에서 항목 중 **무게 또는 HS 코드가 null 인 SKU 가 하나라도 있으면 거절**한다 — 장바구니 `purchasable=false` 와 같은 결의 409, 어느 SKU 인지 알 수 있게 한다. 코드는 #13 이 `ORDER_0xx` 로 정한다. delivery 견적을 부르기 **전에** 거절한다 — 무게 없이 부르면 delivery 의 무게 필수 오류(`DELIVERY_118` 400, #22 에서 생기는 계약)가 나와 원인이 흐려진다. 국내 주문은 두 값이 비어 있어도 거절하지 않고 견적에 무게를 싣지 않는다 — 값이 있으면 형식은 위 저장 규칙대로 늘 맞다 |
 | 총 무게 (#13 · #22) | order-service 가 **Σ(SKU `weightGrams` × 수량)** 을 `long` 으로 더해 견적 요청 `weightGrams`(Integer)로 보낸다. int 범위를 넘으면 견적을 부르지 않고 배송할 수 없는 무게로 거절한다(delivery 의 가장 큰 구간 초과와 같은 뜻). 포장재 무게는 따로 더하지 않는다 |
 | 스냅숏 (#13) | 주문 항목에 단위 무게 · HS 코드를 **주문 시점 값으로 저장**한다(가격 · 상품명과 같은 규칙, 국내 주문은 null 일 수 있다). 총 무게는 배송 견적 스냅숏과 함께 주문에 저장한다. 주문 뒤 SKU 값을 고쳐도 지난 주문은 바뀌지 않는다 |
 | 통관 정보 (#18) | 송장 · 출고는 통관 신고 품목(HS 코드 · 수량 · 단위 무게 · **신고 금액 = 주문 항목의 주문 시점 금액**, 주문 통화)을 **주문 항목 스냅숏에서** 만든다 — delivery-service 가 order-service internal 로 읽고 product-service SKU 를 다시 읽지 않는다. 할인 반영 금액으로 신고할지는 #18 이 정한다 |
