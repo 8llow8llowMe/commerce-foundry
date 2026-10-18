@@ -17,13 +17,13 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * 회원 단위 제한을 실제 Redis 에서 Spring Cloud Gateway 의 토큰 버킷 Lua 스크립트로 돌려 본다 — 스텁으로는 키 형식 · 한도 변환 · TTL 이 검증되지 않는다.
+ * 회원 · 클라이언트 IP 단위 제한을 실제 Redis 에서 Spring Cloud Gateway 의 토큰 버킷 Lua 스크립트로 돌려 본다 — 스텁으로는 키 형식 · 한도 변환 · TTL 이 검증되지 않는다.
  * 게이트웨이 컨텍스트를 그대로 띄우고 Redis 접속만 컨테이너로 바꾼다. Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다.
  */
 @GatewayIntegrationTest
 @Testcontainers
 @EnabledWithDockerOrOnCi
-class RedisMemberRateLimiterTest {
+class RedisBucketRateLimiterTest {
 
     private static final String PASSWORD = "gateway-test-only";
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
@@ -41,10 +41,13 @@ class RedisMemberRateLimiterTest {
     }
 
     @Autowired
-    private RedisMemberRateLimiter rateLimiter;
+    private RedisBucketRateLimiter rateLimiter;
 
     @Autowired
     private ReactiveStringRedisTemplate redisTemplate;
+
+    @Autowired
+    private ClientIpHasher clientIpHasher;
 
     @Test
     @DisplayName("병합은 순간 3회까지 허용하고 4번째를 거절한다 — 분당 6회 · 순간 3회 기본 한도")
@@ -52,9 +55,9 @@ class RedisMemberRateLimiterTest {
         long memberId = randomMemberId();
 
         for (int attempt = 1; attempt <= 3; attempt++) {
-            assertThat(rateLimiter.tryAcquire(RateLimitPolicy.CART_MERGE, memberId).block(TIMEOUT)).as("%d 번째", attempt).isTrue();
+            assertThat(rateLimiter.tryAcquire(RateLimitPolicy.CART_MERGE, RateLimitSubject.member(memberId)).block(TIMEOUT)).as("%d 번째", attempt).isTrue();
         }
-        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.CART_MERGE, memberId).block(TIMEOUT)).as("4 번째").isFalse();
+        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.CART_MERGE, RateLimitSubject.member(memberId)).block(TIMEOUT)).as("4 번째").isFalse();
     }
 
     @Test
@@ -62,11 +65,11 @@ class RedisMemberRateLimiterTest {
     void bucketsAreSeparatedByPolicyAndMember() {
         long memberId = randomMemberId();
         for (int attempt = 0; attempt < 4; attempt++) {
-            rateLimiter.tryAcquire(RateLimitPolicy.CART_MERGE, memberId).block(TIMEOUT);
+            rateLimiter.tryAcquire(RateLimitPolicy.CART_MERGE, RateLimitSubject.member(memberId)).block(TIMEOUT);
         }
 
-        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.CART_WRITE, memberId).block(TIMEOUT)).isTrue();
-        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.CART_MERGE, randomMemberId()).block(TIMEOUT)).isTrue();
+        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.CART_WRITE, RateLimitSubject.member(memberId)).block(TIMEOUT)).isTrue();
+        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.CART_MERGE, RateLimitSubject.member(randomMemberId())).block(TIMEOUT)).isTrue();
     }
 
     @Test
@@ -74,12 +77,23 @@ class RedisMemberRateLimiterTest {
     void keyFormatAndTtl() {
         long memberId = randomMemberId();
 
-        rateLimiter.tryAcquire(RateLimitPolicy.ORDER_WRITE, memberId).block(TIMEOUT);
+        rateLimiter.tryAcquire(RateLimitPolicy.ORDER_WRITE, RateLimitSubject.member(memberId)).block(TIMEOUT);
 
         // 프레임워크 키는 {<routeId>.<id>} 다 — routeId 자리에 정책 id 가 한 번 더 들어간다
         String key = "request_rate_limiter.{order-write.order-write:member:" + memberId + "}.tokens";
         assertThat(redisTemplate.hasKey(key).block(TIMEOUT)).isTrue();
         assertThat(redisTemplate.getExpire(key).block(TIMEOUT)).isPositive();
+    }
+
+    @Test
+    @DisplayName("비로그인 버킷 키는 request_rate_limiter.{<policy>:ip:<HMAC>}.tokens 다 — Redis 어디에도 IP 원문이 없다")
+    void clientKeyHasNoRawIp() {
+        String ip = "203.0.113." + ThreadLocalRandom.current().nextInt(1, 255);
+
+        rateLimiter.tryAcquire(RateLimitPolicy.CART_WRITE, RateLimitSubject.client(clientIpHasher.hash(ip))).block(TIMEOUT);
+
+        assertThat(redisTemplate.hasKey("request_rate_limiter.{cart-write:ip:" + clientIpHasher.hash(ip) + "}.tokens").block(TIMEOUT)).isTrue();
+        assertThat(redisTemplate.keys("*" + ip + "*").collectList().block(TIMEOUT)).as("IP 원문이 든 키").isEmpty();
     }
 
     private static long randomMemberId() {
