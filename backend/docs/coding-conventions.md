@@ -311,6 +311,12 @@ public final class ProductValidationMessage {
   | 키 | 키 함수 | 쓰는 곳 · 읽는 곳 | 값 · TTL |
   |----|---------|-------------------|----------|
   | `auth:revoked-access-token:{jti}` | `security-core` `RevokedAccessTokenKeys.of(jti)` | auth(로그아웃) · api-gateway(요청마다 존재 확인) | 값은 뜻 없음(존재만 본다). TTL `RevokedAccessTokenKeys.ttl(clockSkew)` = access 수명 상한 1시간 + `security.jwt.clock-skew` |
+- **서비스 안의 키** — 한 서비스만 읽고 쓰는 키는 그 서비스의 키 함수 하나로 만든다.
+
+  | 키 | 키 함수 | 값 · TTL |
+  |----|---------|----------|
+  | `auth:refresh-token:{fingerprint}` | auth `RefreshTokenRedisKeys.token` | HASH `{memberId, familyId, rotatedAt?, siblings?}`. TTL refresh 토큰 TTL — HSET 과 같은 Lua 에서 PEXPIRE (`security-guide.md` §2-3) |
+  | `auth:refresh-family:{familyId}` | auth `RefreshTokenRedisKeys.family` | STRING `"1"`. TTL refresh 토큰 TTL, 회전마다 다시 늘어난다(절대 상한은 #67). 폐기 = DEL |
 - `:` 가 들어가는 값(IPv6 등)은 정규화한 뒤 인코딩해 넣는다(예: IPv6 → 16바이트 hex).
 - id 에 원문 토큰·개인정보를 넣지 않는다. 해시(SHA-256 base64url 등)로 넣는다 — `RedisKey.toString()` 이 키 전체를 출력하고, 키는 `MONITOR`·슬로로그에도 남는다.
 - `KEYS` · `SCAN` 패턴으로 지우지 않는다. 묶어서 지울 키는 색인 SET(예: 회원별 refresh 토큰 지문)에 모아 두고 그 SET 으로 지운다.

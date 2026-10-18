@@ -50,7 +50,69 @@
 - 서버 저장소에 있어야만 유효하므로 서명·claim 이 필요 없고, 탈취돼도 내용이 드러나지 않는다.
 - 저장소에는 원문이 아니라 `OpaqueTokenGenerator#fingerprint(token)`(SHA-256, base64url 43자)을 키로 둔다.
   `RedisKey.of("auth", "refresh-token", fingerprint)` 처럼 그대로 쓸 수 있다.
-- TTL 기본 14일(`security.jwt.issuance.refresh-token-ttl`). 저장·회전·재사용 감지·전달 방식(헤더 / httpOnly 쿠키)은 #4 에서 정한다.
+- TTL 기본 14일(`security.jwt.issuance.refresh-token-ttl`).
+- **전달은 응답 본문이다**(#4 결정 1) — 로그인 · 재발급 응답 `{accessToken, accessTokenExpiresIn, refreshToken, refreshTokenExpiresIn}`(수명은 초),
+  `Cache-Control: no-store`. 쿠키는 BFF 가 만든다(게이트웨이 CORS `allowCredentials(false)` 유지).
+
+#### 저장 구조 (auth-service `adapter/out/redis`, `StringRedisTemplate` + Lua)
+
+| 키 | 타입 · 값 | TTL |
+|----|-----------|-----|
+| `auth:refresh-token:{fingerprint}` | HASH `{memberId, familyId, rotatedAt?, siblings?}` — `rotatedAt` 은 회전한 시각(epoch ms), `siblings` 는 유예 안 형제 발급 수 | refresh TTL |
+| `auth:refresh-family:{familyId}` | STRING `"1"` — 있으면 그 family 의 토큰이 살아 있다 | refresh TTL, **회전마다 다시 refresh TTL 로 늘어난다** |
+
+- family 는 로그인 한 번에서 회전으로 이어진 토큰 묶음이다(`familyId` = UUID). **폐기 = family 키 DEL** 하나로 그 family 의 토큰이 모두 무효가 된다
+  (토큰 HASH 는 TTL 까지 남지만 family 가 없으면 읽기 · 회전 모두 무효다).
+- 키는 auth 안에서만 쓰므로 auth 의 키 함수(`RefreshTokenRedisKeys`) 하나로 만든다. HASH 와 TTL 은 같은 Lua 스크립트에서 쓴다 (`coding-conventions.md` §9-7).
+- 로그인은 새 family 와 첫 토큰을 한 스크립트로 저장한다.
+
+#### 재발급 (`POST /api/v1/auth/token/reissue`)
+
+1. **모양 검사가 먼저다** — base64url 43자가 아니면(없음 · 빈 값 포함 — 필드 검증 400 을 두지 않는다) 지문을 계산하거나 저장소를 부르지 않고 401 `AUTH_010`.
+2. 지문으로 HMGET(`memberId` · `familyId`) → family 키 존재 확인. 없으면 401 `AUTH_011`(만료 · 로그아웃 · 폐기를 구분하지 않는다).
+3. DB 에서 회원(역할)을 읽는다. 없거나 고객이 아니면 family 를 폐기하고 401 `AUTH_011`. **회원 조회를 회전보다 먼저 한다** —
+   회전 뒤 DB 가 실패하면 "옛 토큰은 회전됐는데 새 토큰을 못 받은" 상태가 남기 때문이다.
+4. Lua 회전(원자, 지금 시각은 애플리케이션 `Clock` 을 ARGV 로 넘긴다):
+
+| 옛 토큰 상태 | 처리 | 결과 |
+|--------------|------|------|
+| 없음 · 읽은 memberId/familyId 와 다름 · family 없음 | 아무것도 쓰지 않는다 | 401 `AUTH_011` |
+| `rotatedAt` 없음 (처음 쓰임) | `rotatedAt`=지금, 새 토큰 저장(HSET + PEXPIRE), family TTL 연장 | 200 새 쌍 |
+| `rotatedAt` 있고 지금 − `rotatedAt` ≤ 유예(30초, 음수는 0) · 형제 상한 안 | `siblings` 를 HINCRBY 하고 새 토큰(형제) 저장, family TTL 연장. **옛 토큰의 `rotatedAt` 은 그대로** — 유예는 첫 회전부터 재는 창이라 재시도가 창을 늘리지 못한다 | 200 새 쌍 + info 로그 |
+| 유예 밖 재사용 · 형제 상한(3) 초과 · `rotatedAt` 이 숫자가 아님 | family DEL — 형제 · 새 토큰까지 모두 무효 | 401 `AUTH_012` + warn 로그 |
+
+- 옛 토큰 HASH 의 TTL 은 회전해도 그대로다 — 남은 수명 동안 재사용 감지에 쓰인다.
+- 키 타입이 어긋나 스크립트가 실패하면(WRONGTYPE 등) 저장소 장애와 같이 503 `AUTH_013` 이다.
+
+5. access 토큰을 발급해 로그인과 같은 모양으로 답한다.
+
+- 유예는 `auth.token.refresh-reuse-grace`(기본 30초, 0 이상 2분 이하 — #4 결정 6, FE `REISSUE_GRACE_MS` 와 같다)다. BFF 의 동시 재발급 · 응답 유실 재시도를 받아 준다.
+  유예 안에서는 회전한 토큰을 훔친 쪽도 형제 토큰을 받는다 — 유예를 길게 두지 않고, 형제 수도 토큰당 `auth.token.refresh-reuse-grace-max-siblings`
+  (기본 3, 0 이상 10 이하)로 묶는다. 넘으면 재사용 감지와 같이 family 를 폐기한다.
+- 형제 발급(info) · 재사용 감지(warn) 로그는 memberId · familyId · 지문 앞 8자만 남긴다. 토큰 원문 · 지문 전체를 남기지 않는다.
+- **결정: 이번 범위(#4)에서는 family 절대 수명 상한이 없다 — #67.** family TTL 은 회전마다 연장된다(슬라이딩) — 14일 안에 한 번씩 재발급하면
+  로그인이 끝없이 이어진다. 로그인 시각 기준 절대 상한은 #67 에서 더한다.
+- 판정 시각은 애플리케이션 `Clock` 이다(Redis `TIME` 이 아니다). **인스턴스 간 시계는 NTP 로 맞춘다는 전제다** — 어긋나 지금이 `rotatedAt` 보다 이르면 0 으로 본다.
+- 스크립트는 standalone 전제다. **Redis Cluster 로 바꾸면** 한 스크립트의 세 키(옛 토큰 · family · 새 토큰)가 같은 슬롯에 있어야 해(CROSSSLOT)
+  키에 같은 hash tag(예: `{familyId}`)를 넣어야 한다.
+- 저장소(Redis) 장애 · 타임아웃은 503 `AUTH_013` 이다. BFF 는 재발급 401(4xx)이면 쿠키를 지우고, 503 이면 쿠키를 둔다.
+- Redis 헬스는 끈다(`management.health.redis.enabled: false`) — 인스턴스가 모두 같이 쓰는 의존이라 DOWN 이면 모든 인스턴스가 함께 빠지고
+  Redis 와 무관한 회원가입 · 내 정보까지 끊긴다. 재시작으로 낫는 장애도 아니다. 장애는 503 `AUTH_013` 응답과 어댑터의 warn 로그(예외 타입만)로 드러난다.
+
+#### 로그아웃 (`POST /api/v1/auth/logout`, `isAuthenticated()`)
+
+1. 본문의 refresh 토큰이 모양이 맞고 · 저장소에 있고 · **이 회원의 것**이면 그 family 를 DEL 한다. 본문 없음 · 토큰 없음 · 모양 오류 · 모르는 토큰 · 남의 토큰은
+   건드리지 않고 넘어간다(200 멱등) — 남의 refresh 를 손에 넣은 사람이 자기 로그아웃으로 남의 세션을 끊지 못하게.
+2. access 토큰의 jti 를 차단 목록에 SET(값 `"1"`, TTL `RevokedAccessTokenKeys.ttl(clockSkew)` — 같은 명령) (§7-1). 쓰기는 `AccessTokenRevocationPort` 뒤
+   `AccessTokenRevocationRedisAdapter` 가 하고 키 · TTL 도 어댑터가 정한다.
+
+- **순서는 family 폐기 → 차단 등록이다. 사용자 확정 결정 7 은 차단 → family 순서였다.** 이 PR 은 둘째 단계가 실패했을 때 남는 것을
+  14일짜리 refresh 대신 ≤61분짜리 access 로 줄이려고 순서를 바꿨고, PR 에서 사용자 확인을 받는다.
+  확인을 받지 못해 되돌리면 `AuthTokenProcessor#logout` 안의 두 줄(`revokeOwnFamily` · `accessTokenRevocationPort.revoke`)의 순서만 바꾸면 된다.
+- 어느 쪽이든 Redis 장애면 503 `AUTH_013` 이고, 다시 부르면 같은 결과가 된다.
+- **FE 후속 메모** — BFF 는 로그아웃이 401 이면(access 만료) 재발급한 뒤 한 번 재시도한다. 그러지 않으면 access 가 만료된 뒤 로그아웃할 때
+  refresh family 가 지워지지 않고 남는다.
+- auth-service 도 차단 목록을 보지 않는다 — 서비스는 서명 · 만료만 본다(#4 결정 3, §7-1).
 
 ## 3. 인증 주체
 
@@ -84,6 +146,8 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | `SECURITY_007` | `SERVICE_UNAUTHORIZED` | 401 | internal API(`/internal/**`)의 서비스 인증 실패 — 토큰 없음 · 서명 · 만료 · `typ` · `aud` 불일치 · 사용자 access 토큰 (§9). 프론트는 보지 않는다 | `Bearer` |
 
 - 본문은 `Response.fail(code, message)` 봉투다 (`api-design-guide.md` §2-1). 서비스와 게이트웨이가 `SecurityErrorEnvelope` 로 같은 바이트를 쓴다.
+- `SECURITY_*` 는 access 토큰 판정뿐이다. refresh 토큰 거절(재발급)은 auth 도메인 코드 401 `AUTH_010` · `AUTH_011` · `AUTH_012`, 토큰 저장소 장애는 503 `AUTH_013` 이다 (§2-3).
+  로그인 실패는 401 이 아니라 400 `AUTH_001` 이다 — 401 은 토큰 거절에만 쓴다 (#4 결정 5).
 - **프론트(BFF)는 재발급 여부를 코드로 가르지 않는다.** 401 이면 refresh 쿠키로 한 번 재발급하고 원 요청을 한 번 재시도한다.
   재발급이 명시적으로 거절되면 로그인, 일시 장애면 쿠키를 둔 채 `BFF_002` 503 이다. 006(503)으로는 로그아웃시키지 않는다
   ([frontend/docs/architecture.md](../../frontend/docs/architecture.md) §2 · §3, `api-design-guide.md` §2-1). 코드는 원인을 알리는 용도다(로그 · 모니터링 · 화면 문구).
@@ -619,7 +683,7 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
 | 경로 | 응답 | 판단 |
 |------|------|------|
 | 회원가입 `POST /api/v1/auth/sign-up` | 이미 가입된 이메일이면 409 `AUTH_002` | **계정 존재를 드러낸다 — UX 를 위해 감수하는 위험이다.** "이미 가입된 이메일" 을 알려 주지 않으면 사용자가 왜 가입이 안 되는지 모른다. 그 대신 이메일로 가입 여부를 하나씩 확인(열거)할 수 있다 |
-| 로그인 `POST /api/v1/auth/login` (#4 A3) | 이메일 없음 · 비밀번호 틀림 · 관리자 계정 모두 400 `AUTH_001` 같은 문구 | 숨긴다. 이메일이 없을 때도 더미 해시로 비교해 응답 시간 차이를 없앤다 |
+| 로그인 `POST /api/v1/auth/login` (#4 A3) | 이메일 없음 · 비밀번호 틀림 · 관리자 계정 모두 400 `AUTH_001` 같은 문구 | 숨긴다. 이메일이 없을 때도 더미 해시(기동 때 같은 인코더로 만든 BCrypt)로 비교하고, 관리자 계정도 비교한 뒤 거절해 응답 시간 차이를 없앤다 (`MemberLoginProcessor`) |
 
 - 회원가입은 비밀번호 해시를 중복 확인보다 **먼저** 한다(`MemberWebFacade#signUp`) — 409 응답이 해시를 건너뛰어 빨리 끝나면 응답 시간으로도 존재가 드러나기 때문이다.
   409 자체가 존재를 알리므로 이것은 시간 차이를 더하지 않게 하는 것뿐이다.

@@ -81,6 +81,8 @@ Eureka → 게이트웨이 → 서비스 순서로 터미널을 하나씩 열어
 **게이트웨이는 #4 부터 `backend/.env` 의 `JWT_PUBLIC_KEY` 와 `REDIS_HOST` · `REDIS_PORT` · `REDIS_PASSWORD`(§2)가 필요하다** — 토큰을 검증하고
 로그아웃 차단 목록(Redis)을 읽는다(`security-guide.md` §7). Redis 가 꺼져 있어도 뜨고 공개 경로는 통과하지만(fail-open), 토큰을 붙인 어드민 요청은 503 이다.
 도메인 서비스는 PostgreSQL(§3)과 `backend/.env` 의 `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` · `JWT_PUBLIC_KEY` · `INTERNAL_JWT_SECRET`(§2)가 필요하다.
+**auth-service 는 #4 부터 `JWT_PRIVATE_KEY`(발급 개인키 — `JWT_PUBLIC_KEY` 와 한 쌍이어야 뜬다, `security-guide.md` §6)와 `REDIS_HOST` · `REDIS_PORT` · `REDIS_PASSWORD` 도 필요하다** —
+refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨이와 같은 Redis). Redis 가 꺼져 있어도 뜨지만 로그인 · 재발급 · 로그아웃은 503(`AUTH_013`)이다.
 
 ```bash
 ./gradlew :cloud:service-discovery:bootRun    # Eureka 서버 — 8761 (local 은 127.0.0.1 에만 묶인다)
