@@ -21,6 +21,22 @@ spring:
     resources:
       # 정적 리소스를 내지 않는다. 켜 두면 Swagger 를 닫아도 /webjars/swagger-ui/** 가 그대로 열린다 (Swagger UI 는 springdoc 이 따로 낸다)
       add-mappings: false
+  data:
+    redis:
+      # 로그아웃 차단 목록(auth:revoked-access-token:{jti})을 읽는다 (security-guide.md §7). 규칙 · 기동 가드는 coding-conventions.md §9-7
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      timeout: 1s            # 명령 타임아웃 — 없거나 0 이하면 기동하지 않는다
+      connect-timeout: 2s    # 연결 타임아웃 — 없거나 0 이하면 기동하지 않는다
+
+security:
+  jwt:
+    # access 토큰 검증 공개키 — PEM 본문 한 줄 (security-guide.md §6). 비었거나 풀리지 않으면 기동하지 않는다.
+    # issuer · audience · clock-skew 는 기본값을 쓴다 — 서비스와 같은 값이어야 같은 토큰을 같게 판정한다. 테스트는 security-core 테스트 픽스처가 실행 중 만든 키를 넣는다
+    public-key: ${JWT_PUBLIC_KEY}
+    # 키 교체 중에만 이전 공개키를 넣는다 (security-guide.md §6-3)
+    previous-public-key: ${JWT_PUBLIC_KEY_PREVIOUS:}
 
 eureka:
   client:
@@ -78,3 +94,8 @@ management:
     web:
       exposure:
         include: health
+  health:
+    redis:
+      # 게이트웨이 헬스에 Redis 를 넣지 않는다. Redis 장애에도 일반 경로는 통과(fail-open)시키기로 했는데(security-guide.md §7),
+      # 헬스가 DOWN 이 되면 LB 가 게이트웨이를 빼 전체 장애가 된다. 차단 목록 장애는 fail-open warn 로그 · 어드민 503 으로 드러난다
+      enabled: false

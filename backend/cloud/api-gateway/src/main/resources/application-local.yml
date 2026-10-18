@@ -1,5 +1,11 @@
 # 로컬 개발 전용. bootRun 은 SPRING_PROFILES_ACTIVE 가 없으면 local 로 뜬다 (backend/build.gradle).
 
+spring:
+  config:
+    # backend/.env 를 읽는다 (local-run-guide.md §2) — JWT_PUBLIC_KEY · REDIS_* (#4). bootRun 의 작업 디렉터리는 모듈 디렉터리다.
+    # OS 환경변수가 이 파일의 값보다 우선한다.
+    import: optional:file:../../.env[.properties]
+
 gateway:
   cors:
     # 로컬 프론트 개발 서버. 다른 포트를 쓰면 환경변수로 넘긴다 (local-run-guide.md §5).
