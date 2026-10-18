@@ -112,6 +112,7 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   (이미 PAID 면 성공으로 응답).
 - 재고 선점이 만료된 뒤 결제가 완료되는 경우(고객이 결제창을 오래 열어 둠)가 있다. order-service 가 재고를 다시
   잡지 못하면 **자동 전액 취소** 후 고객에게 안내한다 — 돈만 받고 상품이 없는 주문을 남기지 않는다.
+  확정이 409 `PRODUCT_025`(이미 해제 · 만료)면 같은 주문으로 재선점(`POST /internal/v1/stock-reservations`)하고, 그것이 `PRODUCT_021`(재고 부족)이면 전액 취소다 (`order-flow-guide.md` §3-3).
 - 메시지 브로커(Kafka/RabbitMQ) + outbox 로 바꿀지는 트래픽을 보고 별도 이슈에서 결정한다. 그 전까지는 위의
   "동기 호출 + 재전송 플래그 + 스케줄러" 가 기본이다.
 

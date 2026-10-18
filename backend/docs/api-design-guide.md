@@ -52,12 +52,25 @@
   인증 전 단계(internal 체인 — `security-guide.md` §9)에서는 401 `SECURITY_007` 이 먼저다.
 - 처음 만든 곳: product-service `SkuInternalController` (#8). 코드 표는 `ProductValidationMessage` (`PRODUCT_103` 빈 목록 · `PRODUCT_104` 100개 초과 · `PRODUCT_105` 양수 아님).
 
+**internal 쓰기 API** 도 같은 자리(`/internal/v1/**`, `@Hidden`, 허용 호출자 `@PreAuthorize`)에 둔다. 아래를 더 지킨다.
+
+| 규칙 | 내용 |
+|------|------|
+| 본문 | `@RequestBody @Valid` record. 목록 필드 상한은 벌크 조회와 같은 **100개**(원문 개수). 필드별 검증 코드는 도메인 `1xx` 대역 |
+| 경로 변수 | `@PathVariable @Positive long` — 양수가 아니면 400, 숫자가 아니면 `{DOMAIN}_198` |
+| 멱등 | 호출한 쪽이 타임아웃 뒤 같은 요청을 다시 보낸다고 본다. 업무 키(주문 아이디 등)나 대상 행의 상태로 이미 처리됐는지 판단하고, **이미 처리된 요청은 처음 결과와 같은 모양으로 200** 이다 (§6) |
+| 상태 전이 | 허용 전이 표 밖은 409 — 어떤 상태라서 거절했는지 코드로 구분한다 (`order-flow-guide.md` §3) |
+
+- 처음 만든 곳: product-service `StockInternalController` (#10) — `POST /internal/v1/stock-reservations` · `.../{reservationId}/confirmation` · `.../{reservationId}/release`.
+  검증 코드 `PRODUCT_112`~`PRODUCT_121`, 도메인 코드 `PRODUCT_003` · `PRODUCT_021`~`PRODUCT_026` (`order-flow-guide.md` §3).
+
 ## 2. 응답 구조
 
 - 공통 래퍼 `Response<T>` 를 쓰고, Controller 반환은 `ResponseEntity<Response<T>>` 로 통일한다.
 - 내부 `Info` 를 응답 타입으로 직접 노출하지 않는다. 응답 모양은 Presenter 가 마무리한다.
 - HTML 을 담는 응답 필드(상품 상세 설명 `descriptionHtml`)는 서버가 정제하지 않은 원문이다. 클라이언트가 렌더 전에 허용 목록으로 sanitize 한다.
   쓰기 시점 서버 sanitize 는 상품 등록(#9) · 이관(#19)이 맡는다.
+- 시각 필드는 `Instant` 그대로 내린다 — **UTC ISO-8601 문자열**(`"2026-10-18T09:30:00Z"`)이다. 화면 시간대 변환은 클라이언트(또는 고객 응답의 Presenter)가 한다.
 
 ```java
 ProductDetailResponse response = productWebUseCase.getProduct(productId);
@@ -270,6 +283,9 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - 클라이언트는 `Idempotency-Key` 헤더(UUID)를 보낸다. 서버는 `(memberId, key)` 로 결과를 저장하고, 같은 키의
   재요청에는 **처음 결과를 그대로** 돌려준다. 처리 중인 같은 키가 오면 `409` 로 답한다.
 - 결제 승인은 PG 쪽 멱등 키와 별개로 우리 쪽 상태(`payment.status`)로도 중복을 막는다 (`payment-guide.md` §3).
+- **서비스 간(internal) 쓰기는 `Idempotency-Key` 대신 업무 키로 멱등을 만든다.** 재고 선점은 `orderId` 가 키다 — 같은 주문의 활성 선점이 있으면
+  항목이 같을 때 기존 선점을 그대로 200 으로 돌려주고, 다르면 409(`PRODUCT_023`)다. 주문당 활성 선점 하나는 DB 유니크 키(`uk_stock_reservation_active_order_id`)가
+  보장하고, 동시에 겹친 생성은 409(`PRODUCT_026`) 뒤 재시도가 200 이 된다. 확정 · 해제는 선점 행의 상태로 이미 처리됐는지 판단한다 (`order-flow-guide.md` §3).
 
 ### 6-1. 설정 전체 교체 (`PUT` + `version`)
 

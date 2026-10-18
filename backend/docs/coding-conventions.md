@@ -36,8 +36,9 @@ public ProductListInfo searchProducts(
 | 대상 | 이름 |
 |------|------|
 | Controller | `*WebController` · `*AdminController` · `*InternalController` · `*WebhookController` |
-| UseCase | `*WebUseCase` · `*AdminUseCase` · `*InternalUseCase` |
-| Facade | `*WebFacade` · `*AdminFacade` · `*InternalFacade` |
+| Scheduler | `adapter/in/scheduler/*Scheduler` — `@Scheduled` 진입점. `*SchedulerUseCase` 만 부르고, 건별 트랜잭션은 Facade 프록시를 건마다 불러 나눈다 |
+| UseCase | `*WebUseCase` · `*AdminUseCase` · `*InternalUseCase` · `*SchedulerUseCase` (스케줄러 진입점) |
+| Facade | `*WebFacade` · `*AdminFacade` · `*InternalFacade` · `*SchedulerFacade` |
 | Processor / Presenter | `*Processor` / `*Presenter` (고객 응답은 `*WebPresenter`, 어드민 응답은 `*AdminPresenter`, 서비스 간 응답은 `*InternalPresenter`) |
 | Feign interface | `*Client` |
 | 조회 결과 / 조건 | `*QueryResult` / `*Criteria` · `*Query` |
@@ -182,8 +183,17 @@ public final class ProductValidationMessage {
   FK 컬럼은 `(FK: target_table.id)` 를 명시한다: `@Column(name = "product_id", comment = "상품 아이디 (FK: product.id)")`.
   다른 서비스 테이블을 가리키면 `(외부 FK: product-service product.id)` 로 적는다 — DB 제약은 걸 수 없다.
 - 상태가 있는 엔티티(주문·결제·재고)는 **낙관적 락(`@Version`)** 을 기본으로 검토한다.
-- 아이디(Snowflake)를 직접 넣는 엔티티는 Spring Data `save` 가 새 행도 merge(SELECT 후 INSERT)로 다룬다. `@Version Long` 이 있으면 버전 null 이 새 행이고,
-  버전이 없는 추가 전용 엔티티(이력)는 `Persistable` 의 `isNew()` 를 "감사 시각이 아직 없다" 로 둔다 (예: auth `MemberAgreementEntity`).
+  - 버전은 **`Long`(wrapper)** 으로 두고 도메인 모델도 `Long version` 을 들고 다닌다. 쓰기는 `domain → mapper.toEntity → repository.save` 다 —
+    새 행은 버전이 null 이라 Spring Data 가 `persist`(INSERT)로, 읽어 온 행은 버전이 있어 `merge`(버전 비교 · `UPDATE ... where version = ?`)로 간다.
+  - 상태를 바꾼 저장은 `saveAndFlush` 로 바로 내보내고, 어댑터가 `ObjectOptimisticLockingFailureException` 을 도메인 409 로 바꾼다 —
+    커밋 시점까지 미루면 트랜잭션 밖에서 터져 도메인 예외로 바꿀 수 없다. 유니크 키 위반(`DataIntegrityViolationException`)도 같은 자리에서 바꾼다.
+  - 도메인은 생성 시각을 들고 다니지 않는다. `created_at` 이 `updatable = false` 라 merge 가 덮어쓰지 않는다.
+  - 상태 저장(버전 검사)을 **먼저** 하고 그 결과에 딸린 쓰기(재고 복원 등)를 뒤에 한다 — 동시 요청에서 진 쪽이 딸린 쓰기까지 가지 않는다.
+  - 예: product-service `StockReservationEntity` · `StockReservationRepositoryAdapter` (#10).
+- **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
+  ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
+  동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.
+  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity`.
 - 유니크 키 위반 · 버전 충돌을 도메인 오류(409)로 바꿔야 하는 저장은 어댑터에서 `saveAndFlush` 로 바로 내보내고 그 자리에서 바꾼다 —
   커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 바꿀 자리가 없다. 제약은 예외 메시지가 아니라 Hibernate 가 준 제약 이름으로 가린다 (예: auth `MemberRepositoryAdapter`).
 
@@ -233,6 +243,10 @@ public final class ProductValidationMessage {
 
 - **재고 차감은 조건부 UPDATE 한 문장으로 한다** — `update Stock s set s.available = s.available - :qty
   where s.skuId = :skuId and s.available >= :qty`. 조회 후 차감(read-modify-write)은 동시 주문에서 초과 판매를 만든다.
+- 조건부 UPDATE 는 `@Modifying(flushAutomatically = true, clearAutomatically = true)` 로 둔다 — 앞서 쌓인 쓰기를 먼저 내보내고, 뒤이은 조회가 옛 값을 읽지 않게 한다.
+  **bulk UPDATE 는 감사 리스너를 거치지 않으므로 `updatedAt` 을 인자로 받아 쿼리에서 직접 세팅한다** (`StockRepository`).
+- 조건부 UPDATE 는 대상마다 한 문장이라 여러 SKU 를 루프에서 부르는 것은 §9-6 의 예외다. 대신 **SKU 아이디 오름차순**으로 부른다 — 행 잠금 순서를 맞춰 교착을 막는다.
+- 상태 엔티티의 상태를 JPQL bulk UPDATE 로 바꾸지 않는다 — 도메인 전이 → merge(`@Version`) 로만 바꾼다 (§9-1).
 - `@Param` 은 쓰지 않는다 (`-parameters` 가 켜져 있다).
 - **커스텀 구현과 JPQL 은 컴파일로 검증되지 않는다.** `@DataJpaTest` 슬라이스 테스트로 실제 스키마에 질의한다.
 
