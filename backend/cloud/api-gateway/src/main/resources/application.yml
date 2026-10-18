@@ -1,5 +1,8 @@
 server:
   port: 8000
+  # 전달 헤더(X-Forwarded-For · Forwarded)로 원격 주소를 바꾸지 않는다. 클라이언트 IP 는 신뢰 프록시 목록으로만 정한다 (ClientIpResolver, security-guide.md §7-3).
+  # 클라우드 플랫폼을 감지하면 Boot 가 기본값을 native 로 바꾸므로 명시한다
+  forward-headers-strategy: none
 
 spring:
   application:
@@ -57,7 +60,7 @@ gateway:
     # 로컬 기본값(http://localhost:3000)은 application-local.yml 에 있다.
     allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:}
   rate-limit:
-    # 고객 쓰기 API 회원 단위 요청 제한 (security-guide.md §7-3). 대상 경로는 RateLimitPolicy 가 정하고 한도만 여기서 바꾼다.
+    # 고객 쓰기 API 회원 · 클라이언트 IP 단위 요청 제한 (security-guide.md §7-3). 대상 경로는 RateLimitPolicy 가 정하고 한도만 여기서 바꾼다.
     # requests-per-minute 는 60 의 약수 또는 배수, burst 는 한 번에 몰아서 허용하는 요청 수다. Redis 장애 때는 통과(fail-open)한다
     enabled: true
     cart-merge:
@@ -69,6 +72,12 @@ gateway:
     order-write:
       requests-per-minute: 12
       burst: 5
+  client-ip:
+    # 토큰 없는 요청을 셀 때의 클라이언트 IP 규칙 (security-guide.md §7-3).
+    # 믿는 프록시(LB · CDN)의 주소 · CIDR. 기본은 비어 있다 — X-Forwarded-For 를 무시하고 소켓의 원격 주소를 쓴다. LB 구성이 정해지면 그 대역만 넣는다
+    trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:}
+    # IP 를 Redis 키로 바꾸는 HMAC 키 (Vault). base64 32바이트 이상, 게이트웨이 인스턴스 전부 같은 값. 비었거나 풀리지 않으면 기동하지 않는다
+    hash-key: ${GATEWAY_CLIENT_IP_HASH_KEY}
   dev-routes:
     # 서비스 헬스 체크(/health/{service-id})와 문서(/docs/{service-id}/v3/api-docs/{group}) 라우트를 연다 (GatewayDevRouteConfig).
     # 기본은 꺼짐이고 local · dev 만 켠다. 운영의 헬스 체크는 게이트웨이를 거치지 않고 내부망에서 서비스에 직접 붙는다.
@@ -124,5 +133,5 @@ management:
 logging:
   level:
     # Redis 장애 때 Spring Cloud Gateway 의 RedisRateLimiter 가 요청마다 스택과 함께 error 를 남긴다 (오류는 삼키고 허용한다).
-    # 그 신호는 RedisMemberRateLimiter 가 장애로 바꿔 GatewayRateLimitFilter 가 1분에 한 번 warn 으로 남기므로 프레임워크 로그는 끈다 (security-guide.md §7-3)
+    # 그 신호는 RedisBucketRateLimiter 가 장애로 바꿔 GatewayRateLimitFilter 가 1분에 한 번 warn 으로 남기므로 프레임워크 로그는 끈다 (security-guide.md §7-3)
     org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter: OFF
