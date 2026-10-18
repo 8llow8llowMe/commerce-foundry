@@ -60,6 +60,15 @@ security:
     # 키 교체 중에만 이전 비밀을 넣는다 (security-guide.md §9 교체 런북)
     previous-secret: ${INTERNAL_JWT_SECRET_PREVIOUS:}
 
+auth:
+  agreement:
+    # 시행 중인 약관 버전 — 동의 이력(member_agreement.terms_version)에 남는다. 클라이언트가 보내지 않는다.
+    # 약관을 고치면 시행일로 올린다. 비었거나 20자를 넘으면 기동하지 않는다(AgreementProperties). 날짜로 읽히지 않게 따옴표로 감싼다
+    versions:
+      terms-of-service: '2026-10-01'
+      privacy-policy: '2026-10-01'
+      marketing: '2026-10-01'
+
 swagger:
   # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다
   server-url: /
