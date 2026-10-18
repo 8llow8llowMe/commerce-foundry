@@ -62,7 +62,7 @@
 | 상태 전이 | 허용 전이 표 밖은 409 — 어떤 상태라서 거절했는지 코드로 구분한다 (`order-flow-guide.md` §3) |
 
 - 처음 만든 곳: product-service `StockInternalController` (#10) — `POST /internal/v1/stock-reservations` · `.../{reservationId}/confirmation` · `.../{reservationId}/release`.
-  검증 코드 `PRODUCT_112`~`PRODUCT_121`, 도메인 코드 `PRODUCT_003` · `PRODUCT_021`~`PRODUCT_026` (`order-flow-guide.md` §3).
+  검증 코드 `PRODUCT_112`~`PRODUCT_122`(수량 상한 10000 은 `PRODUCT_122`), 도메인 코드 `PRODUCT_003` · `PRODUCT_021`~`PRODUCT_026` (`order-flow-guide.md` §3).
 
 ## 2. 응답 구조
 
