@@ -29,7 +29,12 @@ import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTest
         "gateway.cors.allowed-origins=" + GatewayIntegrationTest.ALLOWED_ORIGIN,
         "gateway.dev-routes.enabled=false",
         "springdoc.api-docs.enabled=false",
-        "springdoc.swagger-ui.enabled=false"
+        "springdoc.swagger-ui.enabled=false",
+        // 기동 가드(RedisStartupGuard)를 통과할 접속 값. 접속은 첫 명령 때 하므로 Redis 가 없어도 뜬다.
+        // 차단 목록을 실제로 읽는 테스트(GatewaySecurityTest)는 조회기를 스텁으로 바꾼다
+        "spring.data.redis.host=127.0.0.1",
+        "spring.data.redis.port=6379",
+        "spring.data.redis.password=gateway-test-only"
     }
 )
 @AutoConfigureWebTestClient(timeout = "30s")
