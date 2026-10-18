@@ -16,7 +16,10 @@ public class ProductServiceApplication {
   Application 의 패키지라서, 여기 있어야 `domainlayer/**` 의 엔티티·리포지토리가 따로 지정하지 않아도 잡힌다.
   같은 이유로 core jar(`com.commercefoundry.persistence` 등)도 엔티티 스캔 범위에 들어가므로 core 에는 `@Entity` 를 두지 않는다
   (`architecture-guide.md` §1-1).
-- Feign 이 필요한 서비스만 `@EnableFeignClients` 를 더한다.
+- Feign 이 필요한 서비스만 `@EnableFeignClients(basePackages = "com.commercefoundry.domainlayer")` 를 더한다 — Application 이 아니라 `global.config.*FeignConfig` 에 둔다.
+  슬라이스 테스트(`@WebMvcTest` · `@DataJpaTest`)는 Application 클래스를 설정으로 쓰고 리포지토리 테스트는 `*FeaturesConfig` 를 import 하는데,
+  거기 있으면 Feign 자동설정이 없는 슬라이스가 클라이언트를 만들려다 실패한다. 스캔으로 잡히는 `*FeignConfig` 는 슬라이스에서 빠진다 (처음 둔 곳: order-service, #12).
+  `defaultConfiguration` 은 두지 않는다 (`security-guide.md` §9-5).
 - 스케줄러가 있는 서비스만 `@EnableScheduling` 을 더한다 (`global.config.*FeaturesConfig` 에 두는 것을 우선).
 
 ## Global Config
@@ -28,6 +31,7 @@ public class ProductServiceApplication {
 | `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, `ResourceServerSecurityConfigurer` · `InternalResourceServerConfigurer` — 전 서비스, `JwtIssuerConfigurer` — auth 만, `InternalTokenIssuerConfigurer` — internal Feign 클라이언트가 있는 서비스만, `RedisConfigurer` — Redis 를 쓰는 서비스만) |
 | `*PropertiesConfig` | 공통 프로퍼티 `@Import` (`JwtVerificationPropertiesConfig` · `InternalTokenPropertiesConfig` — 전 서비스, `JwtIssuerPropertiesConfig` — auth 만) + 서비스 도메인 프로퍼티 `@EnableConfigurationProperties` |
 | `*FeaturesConfig` | JPA Auditing(`BaseEntity` 시각), Scheduling, Async 같은 기능 스위치 |
+| `*FeignConfig` | `@EnableFeignClients` — Feign 클라이언트가 있는 서비스만 (위 Application 절) |
 | `*SwaggerConfig` | 서비스 Swagger 그룹 (고객 / 어드민 그룹 분리) |
 
 - `@Import` 목록은 **단순 클래스명 알파벳순, 한 줄에 하나**다. 이슈마다 한 줄을 끼워 넣어도 다른 줄이 움직이지 않아 PR 끼리 충돌이 적다.
