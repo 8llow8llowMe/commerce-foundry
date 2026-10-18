@@ -19,6 +19,8 @@ ext {
     mapstructVersion = '1.6.3'
     // Lombok 이 만든 생성자·빌더를 MapStruct 가 읽게 하는 처리기 연결
     lombokMapstructBindingVersion = '0.2.0'
+    // 컨트롤러 인가 선언 · 전역 Feign 설정 정적 규칙 (security-core testFixtures). Boot BOM 이 관리하지 않아 여기서 고정한다
+    archunitVersion = '1.4.1'
 }
 
 allprojects {
