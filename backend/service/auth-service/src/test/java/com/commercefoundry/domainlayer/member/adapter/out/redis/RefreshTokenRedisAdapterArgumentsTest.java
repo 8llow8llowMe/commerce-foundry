@@ -15,6 +15,7 @@ import com.commercefoundry.domainlayer.member.application.exception.MemberErrorC
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationResult;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import com.commercefoundry.security.support.TestTokens;
 import java.time.Duration;
@@ -43,28 +44,44 @@ class RefreshTokenRedisAdapterArgumentsTest {
     private final RefreshTokenRedisAdapter adapter = new RefreshTokenRedisAdapter(redisTemplate);
 
     @Test
-    @DisplayName("로그인 저장 — KEYS [토큰, family], ARGV [memberId, familyId, TTL ms]")
+    @DisplayName("로그인 저장 — KEYS [토큰, family], ARGV [memberId, familyId, TTL ms, 로그인 시각 ms]")
     void saveNewFamilyArguments() {
-        adapter.saveNewFamily(FINGERPRINT, 42L, FAMILY_ID, Duration.ofDays(14));
+        Instant loginAt = Instant.parse("2026-10-18T00:00:00.123Z");
+
+        adapter.saveNewFamily(FINGERPRINT, 42L, FAMILY_ID, loginAt, Duration.ofDays(14));
 
         verify(redisTemplate).execute(
             RefreshTokenRedisScripts.SAVE_NEW_FAMILY,
             List.of("auth:refresh-token:" + FINGERPRINT, "auth:refresh-family:" + FAMILY_ID),
-            "42", FAMILY_ID, "1209600000"
+            "42", FAMILY_ID, "1209600000", String.valueOf(loginAt.toEpochMilli())
         );
     }
 
     @Test
-    @DisplayName("회전 — KEYS [옛 토큰, family, 새 토큰], ARGV [memberId, familyId, 지금 ms, 유예 ms, TTL ms, 형제 상한], 결과 이름을 enum 으로 읽는다")
+    @DisplayName("회전 — KEYS [옛 토큰, family, 새 토큰], ARGV [memberId, familyId, 지금 ms, 유예 ms, TTL ms, 형제 상한, 절대 수명 ms], 결과 {이름, TTL ms} 를 읽는다")
     void rotateArguments() {
         Instant now = Instant.parse("2026-10-18T00:00:00.123Z");
         RefreshTokenSession session = new RefreshTokenSession(FINGERPRINT, 42L, FAMILY_ID);
         List<String> keys = List.of("auth:refresh-token:" + FINGERPRINT, "auth:refresh-family:" + FAMILY_ID, "auth:refresh-token:" + NEW_FINGERPRINT);
-        given(redisTemplate.execute(RefreshTokenRedisScripts.ROTATE, keys, "42", FAMILY_ID, String.valueOf(now.toEpochMilli()), "30000", "1209600000", "3"))
-            .willReturn("REISSUED_IN_GRACE");
+        given(redisTemplate.execute(
+            RefreshTokenRedisScripts.ROTATE, keys, "42", FAMILY_ID, String.valueOf(now.toEpochMilli()), "30000", "1209600000", "3", "2592000000"
+        )).willReturn(List.of("REISSUED_IN_GRACE", 86_400_000L));
 
-        RefreshTokenRotationPolicy policy = new RefreshTokenRotationPolicy(Duration.ofSeconds(30), 3, Duration.ofDays(14));
-        assertThat(adapter.rotate(session, NEW_FINGERPRINT, now, policy)).isEqualTo(RefreshTokenRotation.REISSUED_IN_GRACE);
+        RefreshTokenRotationPolicy policy = new RefreshTokenRotationPolicy(Duration.ofSeconds(30), 3, Duration.ofDays(14), Duration.ofDays(30));
+        assertThat(adapter.rotate(session, NEW_FINGERPRINT, now, policy))
+            .isEqualTo(new RefreshTokenRotationResult(RefreshTokenRotation.REISSUED_IN_GRACE, Duration.ofDays(1)));
+    }
+
+    @Test
+    @DisplayName("회전 결과 해석 — 거절은 TTL 0, 모양이 다르면(이름만 · TTL 이 숫자 아님 · 없음) 스크립트와 코드가 어긋난 것이라 실패한다")
+    void rotationResultShape() {
+        assertThat(RefreshTokenRedisAdapter.toRotationResult(List.of("FAMILY_EXPIRED", 0L)))
+            .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_EXPIRED));
+        assertThatThrownBy(() -> RefreshTokenRedisAdapter.toRotationResult(List.of("ROTATED"))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> RefreshTokenRedisAdapter.toRotationResult(List.of("ROTATED", "1000"))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> RefreshTokenRedisAdapter.toRotationResult(null)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> RefreshTokenRedisAdapter.toRotationResult(List.of("ROTATED", 0L))).as("새 토큰을 저장한 판정은 TTL 이 있다")
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -75,9 +92,12 @@ class RefreshTokenRedisAdapterArgumentsTest {
             assertThat(rotate).contains("'" + rotation.name() + "'");
         }
         assertThat(rotate).contains("'" + RefreshTokenRedisScripts.MEMBER_ID + "'", "'" + RefreshTokenRedisScripts.FAMILY_ID + "'",
-            "'" + RefreshTokenRedisScripts.ROTATED_AT + "'", "'" + RefreshTokenRedisScripts.SIBLINGS + "'", "ARGV[6]");
-        assertThat(RefreshTokenRedisScripts.ROTATE.getResultType()).isEqualTo(String.class);
+            "'" + RefreshTokenRedisScripts.ROTATED_AT + "'", "'" + RefreshTokenRedisScripts.SIBLINGS + "'", "ARGV[7]");
+        assertThat(RefreshTokenRedisScripts.ROTATE.getResultType()).isEqualTo(List.class);
         assertThat(RefreshTokenRedisScripts.SAVE_NEW_FAMILY.getResultType()).isEqualTo(Long.class);
+        assertThat(RefreshTokenRedisScripts.SAVE_NEW_FAMILY.getScriptAsString()).contains("ARGV[4]");
+        assertThat(rotate).as("저장값은 정수 문자열만, 최소 남은 수명은 RefreshTokenRotationPolicy 와 같다")
+            .contains("'^%d+$'", "remaining < " + RefreshTokenRotationPolicy.MIN_REMAINING_LIFETIME.toMillis());
     }
 
     @Test
@@ -123,7 +143,7 @@ class RefreshTokenRedisAdapterArgumentsTest {
         RedisConnectionFailureException failure = new RedisConnectionFailureException("connection refused");
         given(redisTemplate.execute(eq(RefreshTokenRedisScripts.SAVE_NEW_FAMILY), anyList(), any(Object[].class))).willThrow(failure);
 
-        assertThatThrownBy(() -> adapter.saveNewFamily(FINGERPRINT, 42L, FAMILY_ID, Duration.ofDays(14)))
+        assertThatThrownBy(() -> adapter.saveNewFamily(FINGERPRINT, 42L, FAMILY_ID, Instant.EPOCH, Duration.ofDays(14)))
             .isInstanceOf(MemberException.class)
             .hasCause(failure)
             .extracting(exception -> ((MemberException) exception).getErrorCode())

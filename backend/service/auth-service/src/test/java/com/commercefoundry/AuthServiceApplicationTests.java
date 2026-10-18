@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.member.adapter.out.redis.AccessTokenRevoc
 import com.commercefoundry.domainlayer.member.adapter.out.redis.RefreshTokenRedisAdapter;
 import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRevocationPort;
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
 import com.commercefoundry.global.properties.AgreementProperties;
 import com.commercefoundry.global.properties.AuthTokenProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
@@ -67,12 +68,14 @@ class AuthServiceApplicationTests {
     }
 
     @Test
-    @DisplayName("토큰 수명 · 재사용 유예가 application.yml 값으로 바인딩되고, refresh 저장소는 Redis 어댑터 하나다")
+    @DisplayName("토큰 수명 · 재사용 유예 · family 절대 수명이 application.yml 값으로 바인딩되어 회전 정책 빈 하나가 되고, refresh 저장소는 Redis 어댑터 하나다")
     void tokenPolicy() {
         JwtIssuanceProperties issuance = applicationContext.getBean(JwtIssuanceProperties.class);
         assertThat(issuance.accessTokenTtl()).isEqualTo(Duration.ofMinutes(30));
         assertThat(issuance.refreshTokenTtl()).isEqualTo(Duration.ofDays(14));
-        assertThat(applicationContext.getBean(AuthTokenProperties.class)).isEqualTo(new AuthTokenProperties(Duration.ofSeconds(30), 3));
+        assertThat(applicationContext.getBean(AuthTokenProperties.class)).isEqualTo(new AuthTokenProperties(Duration.ofSeconds(30), 3, Duration.ofDays(30)));
+        assertThat(applicationContext.getBean(RefreshTokenRotationPolicy.class))
+            .isEqualTo(new RefreshTokenRotationPolicy(Duration.ofSeconds(30), 3, Duration.ofDays(14), Duration.ofDays(30)));
         assertThat(applicationContext.getBean(RefreshTokenStorePort.class)).isInstanceOf(RefreshTokenRedisAdapter.class);
         assertThat(applicationContext.getBean(AccessTokenRevocationPort.class)).isInstanceOf(AccessTokenRevocationRedisAdapter.class);
         assertThat(applicationContext.getEnvironment().getProperty("management.health.redis.enabled")).isEqualTo("false");

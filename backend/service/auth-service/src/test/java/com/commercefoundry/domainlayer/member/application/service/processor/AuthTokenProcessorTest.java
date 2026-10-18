@@ -22,11 +22,10 @@ import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenS
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationResult;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
-import com.commercefoundry.global.properties.AuthTokenProperties;
 import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
 import com.commercefoundry.security.principal.MemberRole;
-import com.commercefoundry.security.support.TestKeys;
 import com.commercefoundry.security.support.TestTokens;
 import java.time.Duration;
 import java.util.Optional;
@@ -47,25 +46,24 @@ class AuthTokenProcessorTest {
 
     private static final Duration REFRESH_TTL = Duration.ofDays(14);
     private static final Duration GRACE = Duration.ofSeconds(30);
-    private static final RefreshTokenRotationPolicy POLICY = new RefreshTokenRotationPolicy(GRACE, 3, REFRESH_TTL);
+    private static final RefreshTokenRotationPolicy POLICY = new RefreshTokenRotationPolicy(GRACE, 3, REFRESH_TTL, Duration.ofDays(30));
     private static final Member CUSTOMER = Member.restore(TestTokens.MEMBER_ID, "a@example.com", "$2a$10$hash", "홍길동", null, MemberRole.CUSTOMER, 0L);
 
     private final RefreshTokenStorePort store = mock(RefreshTokenStorePort.class);
     private final AccessTokenRevocationPort revocation = mock(AccessTokenRevocationPort.class);
     private final OpaqueTokenGenerator opaqueTokenGenerator = new OpaqueTokenGenerator();
     private final AuthTokenProcessor processor = new AuthTokenProcessor(
-        store, revocation, TestTokens.issuer(TestTokens.NOW), opaqueTokenGenerator, TestTokens.issuance(TestKeys.CURRENT),
-        new AuthTokenProperties(GRACE, 3), TestTokens.FIXED_CLOCK
+        store, revocation, TestTokens.issuer(TestTokens.NOW), opaqueTokenGenerator, POLICY, TestTokens.FIXED_CLOCK
     );
 
     @Test
-    @DisplayName("로그인은 새 family(UUID)로 refresh 지문을 14일 저장하고, 원문 43자 · access 30분(1800초) · refresh 14일(초)을 준다")
+    @DisplayName("로그인은 새 family(UUID)로 refresh 지문을 지금(로그인 시각)과 함께 14일 저장하고, 원문 43자 · access 30분(1800초) · refresh 14일(초)을 준다")
     void issueForLogin() {
         AuthTokenInfo info = processor.issueForLogin(CUSTOMER);
 
         ArgumentCaptor<String> fingerprint = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> familyId = ArgumentCaptor.forClass(String.class);
-        verify(store).saveNewFamily(fingerprint.capture(), eq(TestTokens.MEMBER_ID), familyId.capture(), eq(REFRESH_TTL));
+        verify(store).saveNewFamily(fingerprint.capture(), eq(TestTokens.MEMBER_ID), familyId.capture(), eq(TestTokens.NOW), eq(REFRESH_TTL));
         assertThat(info.refreshToken()).hasSize(43);
         assertThat(fingerprint.getValue()).as("원문이 아니라 지문을 저장한다").isEqualTo(opaqueTokenGenerator.fingerprint(info.refreshToken())).isNotEqualTo(info.refreshToken());
         assertThat(UUID.fromString(familyId.getValue())).isNotNull();
@@ -99,10 +97,10 @@ class AuthTokenProcessorTest {
 
     @ParameterizedTest
     @EnumSource(value = RefreshTokenRotation.class, names = {"ROTATED", "REISSUED_IN_GRACE"})
-    @DisplayName("회전 · 유예 안 형제 발급이면 새 쌍을 준다 — 지금 시각 · 정책(유예 30초 · 형제 3 · TTL 14일) · 새 지문으로 회전한다")
+    @DisplayName("회전 · 유예 안 형제 발급이면 새 쌍을 준다 — 지금 시각 · 정책(유예 30초 · 형제 3 · TTL 14일 · 상한 30일) · 새 지문으로 회전한다")
     void reissued(RefreshTokenRotation rotation) {
         RefreshTokenSession session = session();
-        given(store.rotate(eq(session), anyString(), eq(TestTokens.NOW), eq(POLICY))).willReturn(rotation);
+        given(store.rotate(eq(session), anyString(), eq(TestTokens.NOW), eq(POLICY))).willReturn(new RefreshTokenRotationResult(rotation, REFRESH_TTL));
 
         AuthTokenInfo info = processor.reissue(session, CUSTOMER);
 
@@ -110,12 +108,22 @@ class AuthTokenProcessorTest {
         verify(store).rotate(eq(session), newFingerprint.capture(), eq(TestTokens.NOW), eq(POLICY));
         assertThat(newFingerprint.getValue()).isEqualTo(opaqueTokenGenerator.fingerprint(info.refreshToken()));
         assertThat(info.accessTokenExpiresIn()).isEqualTo(1800);
+        assertThat(info.refreshTokenExpiresIn()).isEqualTo(REFRESH_TTL.toSeconds());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RefreshTokenRotation.class, names = {"ROTATED", "REISSUED_IN_GRACE"})
+    @DisplayName("재발급 응답의 refresh 수명은 저장소가 실제로 건 TTL(상한까지 남은 시간)의 초다 — 밀리초는 버린다")
+    void reissuedTtlIsWhatStoreApplied(RefreshTokenRotation rotation) {
+        given(store.rotate(any(), anyString(), any(), any())).willReturn(new RefreshTokenRotationResult(rotation, Duration.ofHours(5).plusMillis(999)));
+
+        assertThat(processor.reissue(session(), CUSTOMER).refreshTokenExpiresIn()).isEqualTo(Duration.ofHours(5).toSeconds());
     }
 
     @Test
     @DisplayName("읽은 뒤 무효가 됐으면 AUTH_011 이다")
     void invalidAfterRead() {
-        given(store.rotate(any(), anyString(), any(), any())).willReturn(RefreshTokenRotation.INVALID);
+        given(store.rotate(any(), anyString(), any(), any())).willReturn(RefreshTokenRotationResult.rejected(RefreshTokenRotation.INVALID));
 
         assertError(() -> processor.reissue(session(), CUSTOMER), MemberErrorCode.REFRESH_TOKEN_INVALID);
     }
@@ -123,10 +131,22 @@ class AuthTokenProcessorTest {
     @Test
     @DisplayName("유예 밖 재사용 · 형제 상한 초과면 AUTH_012 다 (family 폐기는 저장소 스크립트가 이미 했다)")
     void reuseDetected() {
-        given(store.rotate(any(), anyString(), any(), any())).willReturn(RefreshTokenRotation.REUSE_DETECTED);
+        given(store.rotate(any(), anyString(), any(), any())).willReturn(RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED));
 
         assertError(() -> processor.reissue(session(), CUSTOMER), MemberErrorCode.REFRESH_TOKEN_REUSED);
         verify(store, never()).revokeFamily(anyString());
+    }
+
+    @Test
+    @DisplayName("family 절대 수명 초과면 재사용(AUTH_012)이 아니라 401 · AUTH_011 이다 — family 폐기는 저장소 스크립트가 이미 했다")
+    void familyExpired() {
+        RefreshTokenSession session = session();
+        given(store.rotate(eq(session), anyString(), eq(TestTokens.NOW), eq(POLICY))).willReturn(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_EXPIRED));
+
+        assertError(() -> processor.reissue(session, CUSTOMER), MemberErrorCode.REFRESH_TOKEN_INVALID);
+        verify(store, times(1)).rotate(eq(session), anyString(), eq(TestTokens.NOW), eq(POLICY));
+        verify(store, never()).revokeFamily(anyString());
+        verifyNoInteractions(revocation);
     }
 
     @Test
@@ -185,7 +205,7 @@ class AuthTokenProcessorTest {
 
         assertError(() -> processor.logout(TestTokens.MEMBER_ID, "jti-1", refreshToken), MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
         verifyNoInteractions(revocation);
-        verify(store, never()).saveNewFamily(anyString(), anyLong(), anyString(), any());
+        verify(store, never()).saveNewFamily(anyString(), anyLong(), anyString(), any(), any());
     }
 
     private RefreshTokenSession session() {
