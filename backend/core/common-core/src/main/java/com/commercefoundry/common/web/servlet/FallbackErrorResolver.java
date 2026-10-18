@@ -39,6 +39,7 @@ public class FallbackErrorResolver implements HandlerExceptionResolver {
     /** 로그에 남기는 경로 구간 수. {@code /api/v1/orders/4611686018427387904} → {@code /api/v1/orders/…}. */
     static final int VISIBLE_PATH_SEGMENTS = 3;
     private static final String MASKED_REST = "/…";
+    private static final String MASKED_PARAMETERS = ";…";
 
     private final JsonMapper jsonMapper;
 
@@ -128,16 +129,23 @@ public class FallbackErrorResolver implements HandlerExceptionResolver {
 
     /**
      * 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남기고 나머지를 {@code /…} 로 가린다. 쿼리 문자열은 원래 싣지 않는다({@code getRequestURI}).
-     * 구간이 그 이하면 그대로 둔다.
+     * 남기는 구간도 {@code ;} 뒤(매트릭스 파라미터 — {@code jsessionid} · 방화벽이 거부한 경로의 공격 문자열)는 {@code ;…} 로 가린다.
+     * 구간이 그 이하면 매트릭스 파라미터만 가리고 그대로 둔다.
+     * {@code /api/v1/admin;jsessionid=x/y} → {@code /api/v1/admin;…/…}, {@code /api;x=y} → {@code /api;…}.
      */
     static String maskPath(String path) {
         if (path == null) {
             return null;
         }
         String[] parts = path.split("/", VISIBLE_PATH_SEGMENTS + 2);
-        if (parts.length < VISIBLE_PATH_SEGMENTS + 2 || parts[VISIBLE_PATH_SEGMENTS + 1].isEmpty()) {
-            return path;
+        boolean hasRest = parts.length == VISIBLE_PATH_SEGMENTS + 2 && !parts[VISIBLE_PATH_SEGMENTS + 1].isEmpty();
+        String[] visible = hasRest ? Arrays.copyOf(parts, VISIBLE_PATH_SEGMENTS + 1) : parts;
+        for (int index = 0; index < visible.length; index++) {
+            int parameterStart = visible[index].indexOf(';');
+            if (parameterStart >= 0) {
+                visible[index] = visible[index].substring(0, parameterStart) + MASKED_PARAMETERS;
+            }
         }
-        return String.join("/", Arrays.copyOf(parts, VISIBLE_PATH_SEGMENTS + 1)) + MASKED_REST;
+        return String.join("/", visible) + (hasRest ? MASKED_REST : "");
     }
 }

@@ -34,15 +34,20 @@ import tools.jackson.databind.json.JsonMapper;
  *       {@link FallbackErrorResolver#maskPath} 로 가린다 — 방화벽이 거부한 경로에는 공격 문자열 · 식별자가 들어온다.</li>
  *   <li>{@code @PreAuthorize} 를 달지 않는다. 오류 응답은 원래 요청의 인증 여부와 무관하게 나가야 한다 — 메서드 보안이 ERROR 디스패치의 익명 요청을 거부하면
  *       401 이 400 · 500 을 덮는다. URL 규칙도 {@code /error} 를 막지 않는다(사용자 체인 {@code anyRequest().permitAll()}).</li>
+ *   <li>응답 헤더는 {@code sendError} 를 부른 쪽 책임이다 — 이 컨트롤러는 헤더를 만들지 않고 상태 · 봉투만 쓴다
+ *       ({@code WWW-Authenticate} · {@code Allow} 가 필요하면 보낸 쪽이 {@code sendError} 전에 싣는다).</li>
  *   <li>Swagger 에 내지 않는다({@code @Hidden}) — API 가 아니다.</li>
  * </ul>
+ *
+ * <p>매핑 키는 Boot 4 {@code BasicErrorController} 와 같은 {@code spring.web.error.path}(없으면 {@code error.path}, 기본 {@code /error})다 —
+ * Boot 의 {@code ErrorPageCustomizer} 가 에러 페이지를 같은 키로 등록하므로 키가 갈라지면 경로를 바꾼 서비스에서 에러 디스패치가 이 컨트롤러를 비껴간다.
  *
  * <p>{@code @Controller} 이지만 컴포넌트 스캔 대상이 아니다(core 패키지). {@link FallbackErrorAutoConfiguration} 이 빈으로 등록한다.
  */
 @Slf4j
 @Hidden
 @Controller
-@RequestMapping("${server.error.path:${error.path:/error}}")
+@RequestMapping("${spring.web.error.path:${error.path:/error}}")
 public class FallbackErrorController implements ErrorController {
 
     private final JsonMapper jsonMapper;

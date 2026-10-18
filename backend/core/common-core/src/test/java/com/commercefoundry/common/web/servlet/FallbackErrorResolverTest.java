@@ -156,6 +156,20 @@ class FallbackErrorResolverTest {
         void masksAfterThreeSegments(String path, String expected) {
             assertThat(FallbackErrorResolver.maskPath(path)).isEqualTo(expected);
         }
+
+        @ParameterizedTest
+        @CsvSource({
+            "/api/v1/admin;jsessionid=x/y, /api/v1/admin;…/…",
+            "/api/v1/admin;x=y, /api/v1/admin;…",
+            "/api;x=<script>/v1/orders/1, /api;…/v1/orders/…",
+            "/api/v1;a=1;b=2/orders, /api/v1;…/orders",
+            "/api/v1/orders/..;/admin/x, /api/v1/orders/…",
+            "/internal/v1/x;y, /internal/v1/x;…"
+        })
+        @DisplayName("남기는 구간도 ; 뒤(매트릭스 파라미터)는 ;… 로 가린다 — 세션 ID · 공격 문자열을 로그에 남기지 않는다")
+        void masksMatrixParameters(String path, String expected) {
+            assertThat(FallbackErrorResolver.maskPath(path)).isEqualTo(expected);
+        }
     }
 
     @ResponseStatus(HttpStatus.GONE)
