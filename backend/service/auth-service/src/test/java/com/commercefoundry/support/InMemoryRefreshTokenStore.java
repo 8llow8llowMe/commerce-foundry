@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRe
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationResult;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import java.time.Duration;
 import java.time.Instant;
@@ -13,30 +14,40 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * 컨텍스트 흐름 테스트용 토큰 저장소(refresh 토큰 + 로그아웃 차단 목록). Lua 스크립트({@code RefreshTokenRedisScripts#ROTATE})와 같은 판정을 메모리로 흉내 낸다 —
- * 유예 경계(지금 − rotatedAt ≤ 유예, 음수는 0) · 형제 상한(넘으면 재사용 감지) 모두 같다({@code InMemoryRefreshTokenStoreTest} 가 고정한다).
+ * 저장값은 정수 문자열만(아니면 family 값은 INVALID, rotatedAt 은 재사용 감지) · 절대 수명(남은 시간 1초 미만이면 만료, 경과 음수는 0) ·유예 경계(지금 − rotatedAt ≤ 유예, 음수는 0) · 형제 상한(넘으면 재사용 감지) ·
+ * 새 TTL {@code min(TTL, 상한 − 경과)} 모두 같다({@code InMemoryRefreshTokenStoreTest} 가 고정한다).
  * TTL 은 기록만 하고 만료시키지 않는다. 실제 Lua · 키 · TTL 은 {@code RefreshTokenRedisAdapterTest}(Testcontainers)가 본다.
  *
  * <p>{@link #unavailable} 을 켜면 모든 메서드가 저장소 장애({@code AUTH_013})를 던진다 — 어댑터가 Redis 오류를 바꾸는 모양 그대로다.
  */
 public class InMemoryRefreshTokenStore implements RefreshTokenStorePort, AccessTokenRevocationPort {
 
-    private record StoredToken(long memberId, String familyId, Instant rotatedAt, int siblings) {
+    /** rotatedAt 은 Redis 해시 필드처럼 문자열(epoch ms)로 둔다 — 손상 값 판정을 Lua 와 같게 본다. */
+    private record StoredToken(long memberId, String familyId, String rotatedAt, int siblings) {
     }
 
+    /** Redis family 키의 값(로그인 시각 epoch ms 문자열)과 TTL. */
+    private record StoredFamily(String loginAt, Duration ttl) {
+    }
+
+    /** Lua {@code string.match(v, '^%d+$')} 와 같다 — {@code "nan"} · {@code "1e3"} · {@code "0x10"} 은 받지 않는다. */
+    private static final Pattern EPOCH_MILLIS = Pattern.compile("\\d+");
+
     private final Map<String, StoredToken> tokens = new ConcurrentHashMap<>();
-    private final Map<String, Duration> families = new ConcurrentHashMap<>();
+    private final Map<String, StoredFamily> families = new ConcurrentHashMap<>();
     private final Set<String> revokedAccessTokens = ConcurrentHashMap.newKeySet();
 
     public volatile boolean unavailable;
 
     @Override
-    public void saveNewFamily(String fingerprint, long memberId, String familyId, Duration ttl) {
+    public void saveNewFamily(String fingerprint, long memberId, String familyId, Instant loginAt, Duration ttl) {
         failIfUnavailable();
         tokens.put(fingerprint, new StoredToken(memberId, familyId, null, 0));
-        families.put(familyId, ttl);
+        families.put(familyId, new StoredFamily(String.valueOf(loginAt.toEpochMilli()), ttl));
     }
 
     @Override
@@ -50,32 +61,48 @@ public class InMemoryRefreshTokenStore implements RefreshTokenStorePort, AccessT
     }
 
     @Override
-    public synchronized RefreshTokenRotation rotate(RefreshTokenSession session, String newFingerprint, Instant now, RefreshTokenRotationPolicy policy) {
+    public synchronized RefreshTokenRotationResult rotate(RefreshTokenSession session, String newFingerprint, Instant now, RefreshTokenRotationPolicy policy) {
         failIfUnavailable();
         StoredToken token = tokens.get(session.fingerprint());
-        if (token == null || token.memberId() != session.memberId() || !token.familyId().equals(session.familyId()) || !families.containsKey(session.familyId())) {
-            return RefreshTokenRotation.INVALID;
+        StoredFamily family = families.get(session.familyId());
+        if (token == null || token.memberId() != session.memberId() || !token.familyId().equals(session.familyId()) || family == null) {
+            return RefreshTokenRotationResult.rejected(RefreshTokenRotation.INVALID);
         }
+        if (!EPOCH_MILLIS.matcher(family.loginAt()).matches()) {
+            families.remove(session.familyId());
+            return RefreshTokenRotationResult.rejected(RefreshTokenRotation.INVALID);
+        }
+        long age = Math.max(0, now.toEpochMilli() - Long.parseLong(family.loginAt()));
+        long remaining = policy.familyMaxLifetime().toMillis() - age;
+        if (remaining < RefreshTokenRotationPolicy.MIN_REMAINING_LIFETIME.toMillis()) {
+            families.remove(session.familyId());
+            return RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_EXPIRED);
+        }
+        Duration ttl = Duration.ofMillis(Math.min(policy.ttl().toMillis(), remaining));
         RefreshTokenRotation result = RefreshTokenRotation.ROTATED;
         if (token.rotatedAt() != null) {
-            long elapsed = Math.max(0, Duration.between(token.rotatedAt(), now).toMillis());
+            if (!EPOCH_MILLIS.matcher(token.rotatedAt()).matches()) {
+                families.remove(session.familyId());
+                return RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED);
+            }
+            long elapsed = Math.max(0, now.toEpochMilli() - Long.parseLong(token.rotatedAt()));
             if (elapsed > policy.reuseGrace().toMillis()) {
                 families.remove(session.familyId());
-                return RefreshTokenRotation.REUSE_DETECTED;
+                return RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED);
             }
             int siblings = token.siblings() + 1;
             tokens.put(session.fingerprint(), new StoredToken(token.memberId(), token.familyId(), token.rotatedAt(), siblings));
             if (siblings > policy.maxSiblings()) {
                 families.remove(session.familyId());
-                return RefreshTokenRotation.REUSE_DETECTED;
+                return RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED);
             }
             result = RefreshTokenRotation.REISSUED_IN_GRACE;
         } else {
-            tokens.put(session.fingerprint(), new StoredToken(token.memberId(), token.familyId(), now, 0));
+            tokens.put(session.fingerprint(), new StoredToken(token.memberId(), token.familyId(), String.valueOf(now.toEpochMilli()), 0));
         }
         tokens.put(newFingerprint, new StoredToken(session.memberId(), session.familyId(), null, 0));
-        families.put(session.familyId(), policy.ttl());
-        return result;
+        families.put(session.familyId(), new StoredFamily(family.loginAt(), ttl));
+        return new RefreshTokenRotationResult(result, ttl);
     }
 
     @Override
@@ -96,6 +123,28 @@ public class InMemoryRefreshTokenStore implements RefreshTokenStorePort, AccessT
 
     public boolean familyAlive(String familyId) {
         return families.containsKey(familyId);
+    }
+
+    /** family 의 로그인 시각 — 회전해도 그대로인지 본다. 없으면 null. */
+    public Instant familyLoginAt(String familyId) {
+        StoredFamily family = families.get(familyId);
+        return family == null ? null : Instant.ofEpochMilli(Long.parseLong(family.loginAt()));
+    }
+
+    /** family 값을 손상시킨다 — Redis 에 정수가 아닌 값이 들어간 경우를 흉내 낸다. */
+    public void corruptFamilyValue(String familyId, String value) {
+        families.computeIfPresent(familyId, (id, family) -> new StoredFamily(value, family.ttl()));
+    }
+
+    /** 토큰의 rotatedAt 을 손상시킨다. */
+    public void corruptRotatedAt(String fingerprint, String value) {
+        tokens.computeIfPresent(fingerprint, (key, token) -> new StoredToken(token.memberId(), token.familyId(), value, token.siblings()));
+    }
+
+    /** family 에 마지막으로 건 TTL. 없으면 null. */
+    public Duration familyTtl(String familyId) {
+        StoredFamily family = families.get(familyId);
+        return family == null ? null : family.ttl();
     }
 
     private void failIfUnavailable() {

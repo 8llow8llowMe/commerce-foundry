@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.member.application.exception.MemberErrorC
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationResult;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
 import com.commercefoundry.security.support.TestTokens;
@@ -41,7 +42,9 @@ class RefreshTokenRedisAdapterTest {
     private static final String PASSWORD = "auth-redis-test-only";
     private static final Duration TTL = Duration.ofDays(14);
     private static final Duration GRACE = Duration.ofSeconds(30);
-    private static final RefreshTokenRotationPolicy POLICY = new RefreshTokenRotationPolicy(GRACE, 3, TTL);
+    private static final Duration MAX_LIFETIME = Duration.ofDays(30);
+    private static final RefreshTokenRotationPolicy POLICY = new RefreshTokenRotationPolicy(GRACE, 3, TTL, MAX_LIFETIME);
+    /** 로그인 시각이자 기본 회전 시각. 판정은 애플리케이션 시계(ARGV)라 실제 시각과 떨어져 있어도 된다. */
     private static final Instant NOW = Instant.parse("2026-10-18T03:00:00Z");
     private static final long MEMBER_ID = 4611686018427387904L;
 
@@ -73,37 +76,40 @@ class RefreshTokenRedisAdapterTest {
     }
 
     @Test
-    @DisplayName("로그인 저장 — 토큰 HASH {memberId, familyId} 와 family \"1\" 이 둘 다 refresh TTL 로 생기고 rotatedAt 은 없다")
+    @DisplayName("로그인 저장 — 토큰 HASH {memberId, familyId} 와 family 값 로그인 시각(epoch ms)이 둘 다 refresh TTL 로 생기고 rotatedAt 은 없다")
     void saveNewFamily() {
         String fingerprint = fingerprint();
         String familyId = familyId();
 
-        adapter.saveNewFamily(fingerprint, MEMBER_ID, familyId, TTL);
+        adapter.saveNewFamily(fingerprint, MEMBER_ID, familyId, NOW, TTL);
 
         Map<Object, Object> hash = redisTemplate.opsForHash().entries(tokenKey(fingerprint));
         assertThat(hash).containsOnly(Map.entry("memberId", String.valueOf(MEMBER_ID)), Map.entry("familyId", familyId));
-        assertThat(redisTemplate.opsForValue().get(familyKey(familyId))).isEqualTo("1");
+        assertThat(redisTemplate.opsForValue().get(familyKey(familyId))).isEqualTo(String.valueOf(NOW.toEpochMilli()));
         assertTtlAbout(tokenKey(fingerprint), TTL);
         assertTtlAbout(familyKey(familyId), TTL);
         assertThat(adapter.findSession(fingerprint)).contains(new RefreshTokenSession(fingerprint, MEMBER_ID, familyId));
     }
 
     @Test
-    @DisplayName("정상 회전 — 옛 토큰에 rotatedAt=지금(ms) · TTL 은 그대로, 새 토큰은 같은 family 로 TTL 과 함께, family TTL 은 다시 refresh TTL 로 늘어난다")
+    @DisplayName("정상 회전 — 옛 토큰에 rotatedAt=지금(ms) · TTL 은 그대로, 새 토큰은 같은 family 로 TTL 과 함께, family TTL 은 다시 refresh TTL 로 늘어나고 값(로그인 시각)은 그대로다")
     void rotate() {
         RefreshTokenSession session = login();
         redisTemplate.expire(familyKey(session.familyId()), Duration.ofDays(1));
         redisTemplate.expire(tokenKey(session.fingerprint()), Duration.ofDays(1));
         String next = fingerprint();
+        Instant rotatedAt = NOW.plus(Duration.ofDays(2));
 
-        assertThat(adapter.rotate(session, next, NOW, POLICY)).isEqualTo(RefreshTokenRotation.ROTATED);
+        assertThat(adapter.rotate(session, next, rotatedAt, POLICY)).isEqualTo(new RefreshTokenRotationResult(RefreshTokenRotation.ROTATED, TTL));
 
-        assertThat(redisTemplate.opsForHash().get(tokenKey(session.fingerprint()), "rotatedAt")).isEqualTo(String.valueOf(NOW.toEpochMilli()));
+        assertThat(redisTemplate.opsForHash().get(tokenKey(session.fingerprint()), "rotatedAt")).isEqualTo(String.valueOf(rotatedAt.toEpochMilli()));
         assertTtlAbout(tokenKey(session.fingerprint()), Duration.ofDays(1));
         assertThat(redisTemplate.opsForHash().entries(tokenKey(next)))
             .containsOnly(Map.entry("memberId", String.valueOf(MEMBER_ID)), Map.entry("familyId", session.familyId()));
         assertTtlAbout(tokenKey(next), TTL);
         assertTtlAbout(familyKey(session.familyId()), TTL);
+        assertThat(redisTemplate.opsForValue().get(familyKey(session.familyId()))).as("회전은 로그인 시각을 다시 쓰지 않는다")
+            .isEqualTo(String.valueOf(NOW.toEpochMilli()));
         assertThat(adapter.findSession(next)).isPresent();
     }
 
@@ -115,14 +121,14 @@ class RefreshTokenRedisAdapterTest {
         redisTemplate.expire(familyKey(session.familyId()), Duration.ofDays(1));
         String sibling = fingerprint();
 
-        assertThat(adapter.rotate(session, sibling, NOW.plus(GRACE), POLICY)).isEqualTo(RefreshTokenRotation.REISSUED_IN_GRACE);
+        assertThat(rotation(session, sibling, NOW.plus(GRACE))).isEqualTo(RefreshTokenRotation.REISSUED_IN_GRACE);
 
         assertThat(redisTemplate.opsForHash().get(tokenKey(session.fingerprint()), "rotatedAt")).isEqualTo(String.valueOf(NOW.toEpochMilli()));
         assertThat(redisTemplate.opsForHash().get(tokenKey(session.fingerprint()), "siblings")).isEqualTo("1");
         assertThat(adapter.findSession(sibling)).isPresent();
         assertTtlAbout(tokenKey(sibling), TTL);
         assertTtlAbout(familyKey(session.familyId()), TTL);
-        assertThat(adapter.rotate(session, fingerprint(), NOW.plus(GRACE).plusMillis(1), POLICY))
+        assertThat(rotation(session, fingerprint(), NOW.plus(GRACE).plusMillis(1)))
             .as("첫 회전부터 잰다 — 형제 발급이 창을 늘리지 않는다").isEqualTo(RefreshTokenRotation.REUSE_DETECTED);
     }
 
@@ -132,7 +138,7 @@ class RefreshTokenRedisAdapterTest {
         RefreshTokenSession session = login();
         adapter.rotate(session, fingerprint(), NOW, POLICY);
 
-        assertThat(adapter.rotate(session, fingerprint(), NOW.minusSeconds(5), POLICY)).isEqualTo(RefreshTokenRotation.REISSUED_IN_GRACE);
+        assertThat(rotation(session, fingerprint(), NOW.minusSeconds(5))).isEqualTo(RefreshTokenRotation.REISSUED_IN_GRACE);
     }
 
     @Test
@@ -141,10 +147,10 @@ class RefreshTokenRedisAdapterTest {
         RefreshTokenSession session = login();
         adapter.rotate(session, fingerprint(), NOW, POLICY);
         for (int i = 0; i < 3; i++) {
-            assertThat(adapter.rotate(session, fingerprint(), NOW, POLICY)).isEqualTo(RefreshTokenRotation.REISSUED_IN_GRACE);
+            assertThat(rotation(session, fingerprint(), NOW)).isEqualTo(RefreshTokenRotation.REISSUED_IN_GRACE);
         }
 
-        assertThat(adapter.rotate(session, fingerprint(), NOW, POLICY)).isEqualTo(RefreshTokenRotation.REUSE_DETECTED);
+        assertThat(adapter.rotate(session, fingerprint(), NOW, POLICY)).isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED));
         assertThat(redisTemplate.hasKey(familyKey(session.familyId()))).isFalse();
     }
 
@@ -156,11 +162,11 @@ class RefreshTokenRedisAdapterTest {
         adapter.rotate(session, next, NOW, POLICY);
         RefreshTokenSession nextSession = adapter.findSession(next).orElseThrow();
 
-        assertThat(adapter.rotate(session, fingerprint(), NOW.plus(GRACE).plusMillis(1), POLICY)).isEqualTo(RefreshTokenRotation.REUSE_DETECTED);
+        assertThat(rotation(session, fingerprint(), NOW.plus(GRACE).plusMillis(1))).isEqualTo(RefreshTokenRotation.REUSE_DETECTED);
 
         assertThat(redisTemplate.hasKey(familyKey(session.familyId()))).isFalse();
         assertThat(adapter.findSession(next)).isEmpty();
-        assertThat(adapter.rotate(nextSession, fingerprint(), NOW.plusSeconds(60), POLICY)).isEqualTo(RefreshTokenRotation.INVALID);
+        assertThat(rotation(nextSession, fingerprint(), NOW.plusSeconds(60))).isEqualTo(RefreshTokenRotation.INVALID);
     }
 
     @Test
@@ -169,8 +175,124 @@ class RefreshTokenRedisAdapterTest {
         RefreshTokenSession session = login();
         redisTemplate.opsForHash().put(tokenKey(session.fingerprint()), "rotatedAt", "not-a-number");
 
-        assertThat(adapter.rotate(session, fingerprint(), NOW, POLICY)).isEqualTo(RefreshTokenRotation.REUSE_DETECTED);
+        assertThat(rotation(session, fingerprint(), NOW)).isEqualTo(RefreshTokenRotation.REUSE_DETECTED);
         assertThat(redisTemplate.hasKey(familyKey(session.familyId()))).isFalse();
+    }
+
+    @Test
+    @DisplayName("절대 수명을 넘기면(로그인 + 상한과 같은 시각부터) 회전하지 않고 family 를 지운 뒤 FAMILY_EXPIRED 다 — 새 토큰도 rotatedAt 도 쓰지 않는다")
+    void familyExpired() {
+        RefreshTokenSession session = login();
+        String next = fingerprint();
+
+        assertThat(adapter.rotate(session, next, NOW.plus(MAX_LIFETIME), POLICY)).isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_EXPIRED));
+
+        assertThat(redisTemplate.hasKey(familyKey(session.familyId()))).isFalse();
+        assertThat(redisTemplate.hasKey(tokenKey(next))).isFalse();
+        assertThat(redisTemplate.opsForHash().hasKey(tokenKey(session.fingerprint()), "rotatedAt")).isFalse();
+        assertThat(adapter.findSession(session.fingerprint())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("이미 회전한 토큰이 유예 안에 와도 절대 수명을 넘겼으면 FAMILY_EXPIRED 다 — 만료 판정이 재사용 판정보다 먼저다")
+    void familyExpiredBeforeReuseCheck() {
+        RefreshTokenSession session = login();
+        // family TTL 이 남은 시간(실제 Redis 시계로 10초)으로 줄어든다 — 그 안에 다음 회전을 부른다
+        Instant rotatedAt = NOW.plus(MAX_LIFETIME).minusSeconds(10);
+        adapter.rotate(session, fingerprint(), rotatedAt, POLICY);
+
+        assertThat(rotation(session, fingerprint(), rotatedAt.plusSeconds(10))).isEqualTo(RefreshTokenRotation.FAMILY_EXPIRED);
+        assertThat(redisTemplate.opsForHash().hasKey(tokenKey(session.fingerprint()), "siblings")).isFalse();
+    }
+
+    @Test
+    @DisplayName("상한 근처에서 회전하면 새 토큰 · family TTL 이 남은 시간으로 줄고, 결과 TTL 도 그 값이다")
+    void rotateNearMaxLifetimeShrinksTtl() {
+        RefreshTokenSession session = login();
+        String next = fingerprint();
+        Duration remaining = Duration.ofDays(2);
+
+        RefreshTokenRotationResult result = adapter.rotate(session, next, NOW.plus(MAX_LIFETIME).minus(remaining), POLICY);
+
+        assertThat(result).isEqualTo(new RefreshTokenRotationResult(RefreshTokenRotation.ROTATED, remaining));
+        assertTtlAbout(tokenKey(next), remaining);
+        assertTtlAbout(familyKey(session.familyId()), remaining);
+        assertThat(redisTemplate.opsForValue().get(familyKey(session.familyId()))).isEqualTo(String.valueOf(NOW.toEpochMilli()));
+    }
+
+    @Test
+    @DisplayName("상한까지 999ms 남으면(1초 미만) 회전하지 않고 family 를 지운 뒤 FAMILY_EXPIRED 다")
+    void lessThanOneSecondLeftExpires() {
+        RefreshTokenSession session = login();
+        String next = fingerprint();
+
+        assertThat(adapter.rotate(session, next, NOW.plus(MAX_LIFETIME).minusMillis(999), POLICY))
+            .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_EXPIRED));
+        assertThat(redisTemplate.hasKey(familyKey(session.familyId()))).isFalse();
+        assertThat(redisTemplate.hasKey(tokenKey(next))).isFalse();
+    }
+
+    @Test
+    @DisplayName("상한까지 1000ms 남으면 회전하고 TTL 이 1초다")
+    void oneSecondLeftRotatesWithOneSecondTtl() {
+        RefreshTokenSession session = login();
+        String next = fingerprint();
+
+        assertThat(adapter.rotate(session, next, NOW.plus(MAX_LIFETIME).minusMillis(1000), POLICY))
+            .isEqualTo(new RefreshTokenRotationResult(RefreshTokenRotation.ROTATED, Duration.ofSeconds(1)));
+        assertThat(redisTemplate.getExpire(tokenKey(next), TimeUnit.MILLISECONDS)).isBetween(1L, 1000L);
+    }
+
+    @Test
+    @DisplayName("family 값 · rotatedAt 이 \"nan\" 이면(tonumber 는 받는다) 정수 문자열이 아니라 각각 INVALID · REUSE_DETECTED 이고 family 를 지운다")
+    void nanStoredValues() {
+        RefreshTokenSession corruptFamily = login();
+        redisTemplate.opsForValue().set(familyKey(corruptFamily.familyId()), "nan", Duration.ofMinutes(1));
+        assertThat(adapter.rotate(corruptFamily, fingerprint(), NOW, POLICY)).isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.INVALID));
+        assertThat(redisTemplate.hasKey(familyKey(corruptFamily.familyId()))).isFalse();
+
+        RefreshTokenSession corruptRotatedAt = login();
+        redisTemplate.opsForHash().put(tokenKey(corruptRotatedAt.fingerprint()), "rotatedAt", "nan");
+        assertThat(adapter.rotate(corruptRotatedAt, fingerprint(), NOW, POLICY))
+            .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED));
+        assertThat(redisTemplate.hasKey(familyKey(corruptRotatedAt.familyId()))).isFalse();
+    }
+
+    @Test
+    @DisplayName("유예 안 형제 발급도 상한 근처면 TTL 을 남은 시간으로 줄인다")
+    void siblingNearMaxLifetimeShrinksTtl() {
+        RefreshTokenSession session = login();
+        Instant rotatedAt = NOW.plus(MAX_LIFETIME).minus(Duration.ofHours(3));
+        adapter.rotate(session, fingerprint(), rotatedAt, POLICY);
+        String sibling = fingerprint();
+
+        RefreshTokenRotationResult result = adapter.rotate(session, sibling, rotatedAt.plusSeconds(20), POLICY);
+
+        Duration remaining = Duration.ofHours(3).minusSeconds(20);
+        assertThat(result).isEqualTo(new RefreshTokenRotationResult(RefreshTokenRotation.REISSUED_IN_GRACE, remaining));
+        assertTtlAbout(tokenKey(sibling), remaining);
+        assertTtlAbout(familyKey(session.familyId()), remaining);
+        assertThat(redisTemplate.opsForValue().get(familyKey(session.familyId()))).isEqualTo(String.valueOf(NOW.toEpochMilli()));
+    }
+
+    @Test
+    @DisplayName("지금이 로그인 시각보다 이르면(시계 차이) 경과 0 으로 보고 TTL 그대로 회전한다")
+    void negativeAgeIsZero() {
+        RefreshTokenSession session = login();
+
+        assertThat(adapter.rotate(session, fingerprint(), NOW.minusSeconds(5), POLICY)).isEqualTo(new RefreshTokenRotationResult(RefreshTokenRotation.ROTATED, TTL));
+    }
+
+    @Test
+    @DisplayName("family 값이 숫자가 아니면(손상) family 를 지우고 INVALID 다")
+    void corruptFamilyValueIsInvalid() {
+        RefreshTokenSession session = login();
+        redisTemplate.opsForValue().set(familyKey(session.familyId()), "not-a-number", Duration.ofMinutes(1));
+        String next = fingerprint();
+
+        assertThat(adapter.rotate(session, next, NOW, POLICY)).isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.INVALID));
+        assertThat(redisTemplate.hasKey(familyKey(session.familyId()))).isFalse();
+        assertThat(redisTemplate.hasKey(tokenKey(next))).isFalse();
     }
 
     @Test
@@ -182,7 +304,7 @@ class RefreshTokenRedisAdapterTest {
 
         assertThat(adapter.findSession(session.fingerprint())).isEmpty();
         String next = fingerprint();
-        assertThat(adapter.rotate(session, next, NOW, POLICY)).isEqualTo(RefreshTokenRotation.INVALID);
+        assertThat(rotation(session, next, NOW)).isEqualTo(RefreshTokenRotation.INVALID);
         assertThat(redisTemplate.hasKey(tokenKey(next))).isFalse();
         assertThat(redisTemplate.opsForHash().hasKey(tokenKey(session.fingerprint()), "rotatedAt")).isFalse();
     }
@@ -193,10 +315,9 @@ class RefreshTokenRedisAdapterTest {
         RefreshTokenSession session = login();
         String next = fingerprint();
 
-        assertThat(adapter.rotate(new RefreshTokenSession(fingerprint(), MEMBER_ID, session.familyId()), next, NOW, POLICY)).isEqualTo(RefreshTokenRotation.INVALID);
-        assertThat(adapter.rotate(new RefreshTokenSession(session.fingerprint(), MEMBER_ID + 1, session.familyId()), next, NOW, POLICY))
-            .isEqualTo(RefreshTokenRotation.INVALID);
-        assertThat(adapter.rotate(new RefreshTokenSession(session.fingerprint(), MEMBER_ID, familyId()), next, NOW, POLICY)).isEqualTo(RefreshTokenRotation.INVALID);
+        assertThat(rotation(new RefreshTokenSession(fingerprint(), MEMBER_ID, session.familyId()), next, NOW)).isEqualTo(RefreshTokenRotation.INVALID);
+        assertThat(rotation(new RefreshTokenSession(session.fingerprint(), MEMBER_ID + 1, session.familyId()), next, NOW)).isEqualTo(RefreshTokenRotation.INVALID);
+        assertThat(rotation(new RefreshTokenSession(session.fingerprint(), MEMBER_ID, familyId()), next, NOW)).isEqualTo(RefreshTokenRotation.INVALID);
         assertThat(redisTemplate.hasKey(tokenKey(next))).isFalse();
     }
 
@@ -206,7 +327,7 @@ class RefreshTokenRedisAdapterTest {
         String fingerprint = fingerprint();
         String familyId = familyId();
         redisTemplate.opsForValue().set(tokenKey(fingerprint), "not-a-hash", Duration.ofMinutes(1));
-        redisTemplate.opsForValue().set(familyKey(familyId), "1", Duration.ofMinutes(1));
+        redisTemplate.opsForValue().set(familyKey(familyId), String.valueOf(NOW.toEpochMilli()), Duration.ofMinutes(1));
 
         assertThatThrownBy(() -> adapter.rotate(new RefreshTokenSession(fingerprint, MEMBER_ID, familyId), fingerprint(), NOW, POLICY))
             .isInstanceOf(MemberException.class)
@@ -250,11 +371,16 @@ class RefreshTokenRedisAdapterTest {
         return factory;
     }
 
+    /** NOW 에 로그인한 토큰의 세션. */
     private RefreshTokenSession login() {
         String fingerprint = fingerprint();
         String familyId = familyId();
-        adapter.saveNewFamily(fingerprint, MEMBER_ID, familyId, TTL);
+        adapter.saveNewFamily(fingerprint, MEMBER_ID, familyId, NOW, TTL);
         return adapter.findSession(fingerprint).orElseThrow();
+    }
+
+    private RefreshTokenRotation rotation(RefreshTokenSession session, String newFingerprint, Instant now) {
+        return adapter.rotate(session, newFingerprint, now, POLICY).rotation();
     }
 
     private String fingerprint() {

@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.member.application.port.out.MemberReposit
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
+import com.commercefoundry.support.AdjustableClock;
 import com.commercefoundry.support.InMemoryRefreshTokenStore;
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
@@ -56,6 +57,13 @@ class AuthTokenFlowIntegrationTest {
         InMemoryRefreshTokenStore inMemoryRefreshTokenStore() {
             return new InMemoryRefreshTokenStore();
         }
+
+        /** 회전 판정 시계(Processor 의 {@code Clock}). access 토큰 발급 · 검증은 각자 시스템 시계라 앞당겨도 영향이 없다. */
+        @Bean
+        @Primary
+        AdjustableClock adjustableClock() {
+            return new AdjustableClock();
+        }
     }
 
     @Autowired
@@ -63,6 +71,9 @@ class AuthTokenFlowIntegrationTest {
 
     @Autowired
     private InMemoryRefreshTokenStore store;
+
+    @Autowired
+    private AdjustableClock clock;
 
     @Autowired
     private MemberRepositoryPort memberRepositoryPort;
@@ -73,6 +84,7 @@ class AuthTokenFlowIntegrationTest {
     @AfterEach
     void restoreStore() {
         store.unavailable = false;
+        clock.reset();
     }
 
     @Test
@@ -200,6 +212,34 @@ class AuthTokenFlowIntegrationTest {
 
         assertRejected(reissue(refreshToken), HttpStatus.UNAUTHORIZED, "AUTH_012");
         assertRejected(reissue(rotated), HttpStatus.UNAUTHORIZED, "AUTH_011");
+    }
+
+    @Test
+    @DisplayName("로그인 절대 수명 30일 — 13일 · 26일 뒤 재발급은 이어지되 둘째 refresh 수명은 남은 4일로 줄고, 30일이 되면 재발급이 401 · AUTH_011 이다")
+    void familyMaxLifetimeEndsLogin() {
+        String email = uniqueEmail();
+        signUp(email);
+        String loginBody = body(login(email, PASSWORD));
+        assertThat(JsonPath.<Integer>read(loginBody, "$.dataBody.refreshTokenExpiresIn")).isEqualTo((int) Duration.ofDays(14).toSeconds());
+        String first = JsonPath.read(loginBody, "$.dataBody.refreshToken");
+
+        clock.advance(Duration.ofDays(13));
+        MvcTestResult beforeCap = reissue(first);
+        assertThat(beforeCap).hasStatusOk();
+        assertThat(JsonPath.<Integer>read(body(beforeCap), "$.dataBody.refreshTokenExpiresIn")).as("상한까지 17일 남아 TTL 그대로")
+            .isEqualTo((int) Duration.ofDays(14).toSeconds());
+        String second = JsonPath.read(body(beforeCap), "$.dataBody.refreshToken");
+
+        clock.advance(Duration.ofDays(13));
+        MvcTestResult nearCap = reissue(second);
+        assertThat(nearCap).hasStatusOk();
+        assertThat(JsonPath.<Integer>read(body(nearCap), "$.dataBody.refreshTokenExpiresIn")).as("상한까지 남은 4일로 준다 — BFF 쿠키 만료가 서버 TTL 과 맞는다")
+            .isBetween((int) Duration.ofDays(4).minusMinutes(1).toSeconds(), (int) Duration.ofDays(4).toSeconds());
+        String third = JsonPath.read(body(nearCap), "$.dataBody.refreshToken");
+
+        clock.advance(Duration.ofDays(4));
+        assertRejected(reissue(third), HttpStatus.UNAUTHORIZED, "AUTH_011", "로그인이 만료되었습니다. 다시 로그인해 주세요.");
+        assertRejected(reissue(third), HttpStatus.UNAUTHORIZED, "AUTH_011");
     }
 
     @Test
