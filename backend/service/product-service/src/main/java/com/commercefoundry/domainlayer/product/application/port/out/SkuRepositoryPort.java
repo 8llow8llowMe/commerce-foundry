@@ -15,6 +15,8 @@ public interface SkuRepositoryPort {
 
     List<Sku> findAllByIds(Collection<Long> skuIds);
 
+    boolean existsById(long skuId);
+
     /** 상품별 SKU 집계. SKU 가 없는 상품은 결과에 행이 없다. */
     List<SkuAggregateQueryResult> aggregateByProductIds(Collection<Long> productIds);
 }
