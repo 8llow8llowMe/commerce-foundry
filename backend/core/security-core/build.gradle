@@ -26,6 +26,9 @@ dependencies {
     compileOnly 'io.projectreactor:reactor-core'
     // internal.client(서비스 토큰 Feign 인터셉터)만 쓴다. Feign 클라이언트를 가진 서비스가 openfeign 스타터로 직접 가져온다 — 버전은 Spring Cloud BOM
     compileOnly 'io.github.openfeign:feign-core'
+    // token.revocation(로그아웃 차단 목록 키 함수)만 쓴다. 키를 쓰는 auth 와 읽는 api-gateway 가 redis-core 를 직접 의존한다 —
+    // Redis 를 쓰지 않는 서비스에 Lettuce · 기동 가드가 끌려가지 않게 (coding-conventions.md §9-7 서비스 횡단 키)
+    compileOnly project(':core:redis-core')
 
     testFixturesImplementation 'org.springframework.boot:spring-boot-starter-test'
     testFixturesImplementation 'tools.jackson.core:jackson-databind'
@@ -41,9 +44,13 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-actuator'
     testImplementation 'io.projectreactor:reactor-core'
     testImplementation 'io.github.openfeign:feign-core'
+    // RedisKey 만 쓴다. 전이 의존(data-redis 스타터)을 받으면 이 모듈의 컨텍스트 테스트에 Redis 자동설정 · 헬스 지표가 켜진다
+    testImplementation(project(':core:redis-core')) {
+        transitive = false
+    }
 }
 
-// 위 compileOnly(서블릿 · Boot 보안 자동설정 · Feign)가 api/implementation 으로 바뀌는 회귀를 막는다. 소비자에게 가는 두 클래스패스 — 본체(runtimeClasspath)와
+// 위 compileOnly(서블릿 · Boot 보안 자동설정 · Feign · Redis)가 api/implementation 으로 바뀌는 회귀를 막는다. 소비자에게 가는 두 클래스패스 — 본체(runtimeClasspath)와
 // 테스트 픽스처(testFixturesRuntimeClasspath, 게이트웨이 테스트도 받는다) — 에 아래 모듈이 있으면 check 가 실패한다.
 // 구성 시점에 Provider 로 잡아 두고 실행 시점에는 project 를 만지지 않는다 (configuration cache 안전)
 def resolvedModules = { String configurationName ->
@@ -61,7 +68,7 @@ def testFixturesRuntimeModules = resolvedModules('testFixturesRuntimeClasspath')
 
 def verifyNoServletLeak = tasks.register('verifyNoServletLeak') {
     group = 'verification'
-    description = 'security-core 의 runtimeClasspath · testFixturesRuntimeClasspath 에 서블릿 스택 · Boot 보안 자동설정 · Feign 이 없는지 확인한다'
+    description = 'security-core 의 runtimeClasspath · testFixturesRuntimeClasspath 에 서블릿 스택 · Boot 보안 자동설정 · Feign · Redis 가 없는지 확인한다'
 
     def forbiddenModules = [
         'org.springframework:spring-webmvc',
@@ -74,6 +81,11 @@ def verifyNoServletLeak = tasks.register('verifyNoServletLeak') {
         'org.springframework.security:spring-security-config',
         // Feign 을 쓰지 않는 서비스 · 게이트웨이에 Feign 이 끌려가지 않게 (internal.client)
         'io.github.openfeign:feign-core',
+        // Redis 를 쓰지 않는 서비스 3종(product · payment · delivery)에 Lettuce · Redis 자동설정이 끌려가지 않게 (token.revocation).
+        // 끌려가면 Redis 접속 설정 없이도 RedisConnectionFactory 가 생기고 헬스 지표가 localhost:6379 를 찌른다.
+        // redis-core 자체는 프로젝트 의존이라 여기 이름으로 잡히지 않는다 — 그 전이 의존(아래 둘)으로 잡는다
+        'io.lettuce:lettuce-core',
+        'org.springframework.data:spring-data-redis',
     ]
     inputs.property('runtimeModules', runtimeModules)
     inputs.property('testFixturesRuntimeModules', testFixturesRuntimeModules)
@@ -84,7 +96,7 @@ def verifyNoServletLeak = tasks.register('verifyNoServletLeak') {
             .collectEntries { name, modules -> [name, modules.findAll { it in forbiddenModules }] }
             .findAll { name, modules -> !modules.isEmpty() }
         if (!leaked.isEmpty()) {
-            throw new GradleException("security-core 의 클래스패스에 서블릿 · Boot 보안 자동설정 · Feign 모듈이 들어왔습니다: ${leaked}. "
+            throw new GradleException("security-core 의 클래스패스에 서블릿 · Boot 보안 자동설정 · Feign · Redis 모듈이 들어왔습니다: ${leaked}. "
                 + 'compileOnly 로 두고 소비 서비스가 직접 선언하게 하세요 (security-guide.md 의존)')
         }
     }
