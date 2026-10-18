@@ -97,6 +97,10 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - **#4 가 004 · 006 을 내는 방법** — 디코더 래퍼(서블릿 `JwtDecoder` · 리액티브 `ReactiveJwtDecoder`)나 `AuthenticationManager` 에서
   `new OAuth2AuthenticationException(new OAuth2Error(SecurityErrorCode.TOKEN_REVOKED.getCode()))` 를 던진다.
   리졸버는 원인 사슬에 실려 온 코드 중 **004 · 006 만** 따르고 001 · 002 · 003 · 005 는 무시한다 — 만료가 아닌 토큰이 002 로 보고되어 원인이 가려지지 않게.
+  **실제로 내는 곳은 게이트웨이뿐이다**(서비스는 차단 목록을 보지 않는다, §7). 게이트웨이의 `RevocationCheckingAuthenticationManager` 가
+  서명 · 만료 검증(`JwtReactiveAuthenticationManager`)을 **통과한 뒤에만** jti 로 차단 목록을 조회해, 차단이면 004 를, 조회 실패 · 타임아웃이면
+  어드민 경로에서만 `new OAuth2AuthenticationException(new OAuth2Error("SECURITY_006"), cause)` 를 던진다. 틀린 토큰은 조회 전에 003 · 002 로 끝난다.
+  jti 가 키 규칙에 맞지 않으면 저장소 장애가 아니라 003 이다 — fail-open 경로에서도 통과시키지 않는다.
 - **validator 에 넣지 않는다.** validator 의 오류는 `JwtValidationException` 안에 들어가 003 이 된다.
 - 저장소 장애를 `JwtException`(Bad 아님)이나 `AuthenticationServiceException` 으로 던져도 006 이다. Spring 의 기본 실패 처리기는 이 예외를
   다시 던져 **봉투 없는 500** 을 만들기 때문에, 서블릿 Resource Server 는 다시 던지지 않는 처리기로 바꿔 두었다(`ResourceServerSecurityConfigurer`).
@@ -277,7 +281,57 @@ auth 는 기동할 때 자기 `JWT_PRIVATE_KEY` 와 `JWT_PUBLIC_KEY` 가 한 쌍
 - 개인키가 유출됐으면 ③을 기다리지 않는다 — `JWT_PUBLIC_KEY_PREVIOUS` 를 바로 비워 옛 키로 서명한 토큰을 모두 무효로 한다 (`secret-management.md` §6).
 - JWKS 엔드포인트는 두지 않는다. 키는 환경변수로만 배포한다.
 
-## 7. 게이트웨이(#4)가 재사용하는 것
+## 7. 게이트웨이 (#4)
+
+구현은 `cloud/api-gateway` 의 `security` 패키지다. 라우트 필터가 아니라 **전역 `SecurityWebFilterChain`**(`GatewaySecurityConfig`) 이다 —
+한 라우트(`ServiceRoute`)가 고객 · 어드민 패턴을 섞어 갖고, dev 라우트(`/health/**` · `/docs/**`)도 덮어야 한다.
+
+**필터 순서** — `GatewayRequestGuardFilter`(가장 앞, 비정규 경로 거절) → 보안 체인(`WebFilterChainProxy`, -100: CORS → Bearer 인증 → 인가) → 라우팅.
+정규화되지 않은 경로로 인가 판정을 하지 않는다.
+
+| 요청 | 게이트웨이 판정 |
+|------|-----------------|
+| 토큰 없음 · 공개 경로 | 그대로 하류로 간다. 인증 필요 여부는 서비스가 판정한다 (`architecture-guide.md` §6) |
+| 토큰 없음 · `/api/v1/admin/**` | 401 `SECURITY_001` |
+| 토큰 있음 (경로 무관) | 서명 · 만료 · claim 검증 → 차단 목록 조회. 틀리면 공개 경로여도 401(002 · 003 · 004) — 틀린 토큰을 익명으로 취급하지 않는다 |
+| CUSTOMER · `/api/v1/admin/**` | 403 `SECURITY_005` |
+| 토큰 없는 preflight(`OPTIONS`) | 보안 체인 안의 CORS 필터가 인증보다 먼저 답한다 — 어드민 경로도 401 이 되지 않는다 |
+
+- 어드민 패턴(`GatewaySecurityConfig.ADMIN_PATH_PATTERN`)은 서비스 체인(§5-1)과 같은 `/api/v1/admin/**` 다. 경로 판정은 `PathPattern` 이라
+  비예약 문자 인코딩(`/api/v1/%61dmin/x`)도 같은 경로로 본다.
+- **`Authorization` 헤더는 그대로 하류로 넘긴다.** 서비스가 같은 토큰을 다시 검증한다. 검증 결과를 `X-Member-Id` 같은 헤더로 만들지 않는다 (§1).
+- 매니저는 `oauth2ResourceServer().authenticationManagerResolver(...)` 로 경로마다 고른다(`GatewayAuthenticationManagerResolver`).
+  Spring Security 7 은 resolver 와 `jwt()` DSL 을 같이 쓸 수 없어(`validateConfiguration`) 디코더 · 변환기를 resolver 안에서 조합한다.
+  두 매니저(fail-open · fail-closed)는 기동 때 한 번 만들고 디코더를 나눠 쓴다. resolver 를 빈으로 내보내 Boot 가 생성 비밀번호 사용자를 만들지 않는다.
+- 토큰 없는 어드민 요청(001)은 `exceptionHandling` 의 진입점이, 토큰이 붙은 요청의 실패는 resource server 의 실패 처리기가 같은
+  `GatewaySecurityErrorResponder` 로 답한다.
+- CORS 는 `GatewayCorsConfig` 의 `CorsConfigurationSource` 빈을 보안 체인의 `cors(...)` 에 **직접** 넘긴다. 따로 둔 `CorsWebFilter` 빈은 보안 체인 뒤에 돌아
+  토큰 없는 어드민 preflight 가 401 이 된다. `withDefaults()` 는 `CorsConfigurationSource` 빈이 둘 이상이면 조용히 CORS 를 빼므로 쓰지 않는다.
+- 세션 · CSRF · Basic · 폼 로그인 · 로그아웃 · request cache 를 끄고 `NoOpServerSecurityContextRepository` 를 쓴다(SESSION 쿠키 없음).
+  **보안 헤더(`headers`)도 끈다** — 프록시한 서비스 응답에는 서비스 체인의 헤더가 이미 있고, 게이트웨이가 HSTS(includeSubDomains) · `Cache-Control` 을
+  덧붙이면 서비스가 정한 값과 겹치거나 바뀐다. 게이트웨이가 직접 만드는 응답은 오류 봉투뿐이고, 그중 보안 오류(401 · 403 · 503)에만
+  `Cache-Control: no-store` 를 붙인다(`GatewaySecurityErrorResponder`).
+
+### 7-1. 로그아웃 차단 목록
+
+- 키 `auth:revoked-access-token:{jti}` — `security-core` 의 `RevokedAccessTokenKeys` 하나로만 만든다. auth 가 로그아웃 때 쓰고(TTL = access 수명 상한 1시간 + 시계 오차),
+  게이트웨이가 존재 여부만 읽는다 (`coding-conventions.md` §9-7).
+- **차단 목록은 게이트웨이만 본다.** 서비스 5종은 서명 · 만료만 본다(#4 결정 3). 사설망 안에서 서비스에 직접 붙는 요청은 로그아웃한 토큰도
+  만료까지(`access-token-ttl` + `clock-skew` — 기본 31분, 상한 61분) 통과한다 — 서비스 포트를 외부에 열지 않는 사설망 전제(§5-1)가 이 잔여 위험을 막는 수단이다.
+- 조회 상한은 Redis 명령 타임아웃(`spring.data.redis.timeout`, 1s)이고, 게이트웨이 쪽 뒤쪽 방어로 2초 상한(`RevocationCheckingAuthenticationManager.CHECK_TIMEOUT`)이 하나 더 있다.
+- **Redis 에 닿지 못하는 동안은 토큰이 붙은 요청마다 최대 약 2초 지연된다.** 연결 거부(포트 닫힘)는 바로 실패하지만, 응답 없는 호스트는 연결 타임아웃
+  (`connect-timeout`, 2s)까지 기다리고, 끊긴 연결에서는 Lettuce 가 재연결을 기다리며 명령을 쌓아 둔다. 어느 쪽이든 `CHECK_TIMEOUT`(2s)이 먼저 끊어
+  fail-open(통과) · fail-closed(503)로 넘긴다. 토큰 없는 요청은 조회하지 않으므로 지연이 없다. 두 값을 바꿀 때는 `CHECK_TIMEOUT` ≥ `timeout` 을 지킨다.
+
+| 차단 목록 저장소 장애 · 타임아웃 시 | 동작 | 근거 |
+|------------------------------------|------|------|
+| 그 밖의 경로 | **통과(fail-open)** + warn 로그(§8) | 저장소 장애가 쇼핑 전체 장애가 되지 않게 (#4 결정 2) |
+| `/api/v1/admin/**` | **503 `SECURITY_006`** (fail-closed) | 로그아웃한 관리자 토큰이 통과하면 피해가 크다 |
+
+- fail-open 의 대가 — **장애 동안 로그아웃한 access 토큰은 만료까지 유효하다 — `access-token-ttl` + `clock-skew` (기본 31분 = 30분 + 1분, 상한 61분 = 1시간 + 1분).**
+- 게이트웨이 헬스에 Redis 를 넣지 않는다(`management.health.redis.enabled: false`). 넣으면 Redis 장애에 LB 가 게이트웨이를 빼 fail-open 이 무의미해진다.
+
+### 7-2. 재사용하는 security-core 클래스
 
 security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨이는 `spring-boot-starter-security`(WebFlux 변형)를 직접 선언하고 이것들을 조합한다.
 
@@ -287,6 +341,7 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 | `token.reactive.ReactiveAccessTokenDecoderFactory` | `ReactiveJwtDecoder` — 서블릿과 같은 키 묶음 · validator |
 | `principal.MemberJwtAuthenticationConverter` | `ReactiveJwtAuthenticationConverterAdapter` 로 감싸 쓴다 |
 | `error.SecurityErrorResolver` · `SecurityErrorEnvelope` · `SecurityErrorCode` | JWT 거부 응답 — 서비스와 같은 코드 · 같은 바이트 · 같은 `WWW-Authenticate` |
+| `token.revocation.RevokedAccessTokenKeys` | 차단 목록 키 · TTL (auth 와 공유). redis-core 는 security-core 에서 `compileOnly` 다 |
 
 - 게이트웨이의 JWT 거부도 `SECURITY_*` 를 쓴다 (`api-design-guide.md` §2-1). `GATEWAY_*` 는 라우팅 오류에만 쓴다.
 - 인증 실패 처리기는 `ServerAuthenticationEntryPointFailureHandler` 를 `setRethrowAuthenticationServiceException(false)` 로 설정해 쓴다.
@@ -300,7 +355,10 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
   거부 로그에는 호출 서비스 · jti 를 남긴다. 서비스 토큰 원문 · 비밀 · 비밀에서 계산한 값(지문)은 남기지 않는다.
 - internal 체인의 006 은 **error** 다 — 서비스 토큰 검증은 메모리의 비밀만 써서 저장소 장애가 있을 수 없다. 나면 서버 결함 신호다(사용자 체인의 006 은 warn).
 - 보안 거부 로그의 경로는 **앞 세 구간만** 남기고 나머지를 가린다 — `/internal/v1/orders/4611686018427387904` → `/internal/v1/orders/…`.
-  internal · 고객 경로에 주문번호 같은 식별자가 들어가기 때문이다 (`SecurityErrorResponder#maskPath`).
+  internal · 고객 경로에 주문번호 같은 식별자가 들어가기 때문이다 (`SecurityErrorResponder#maskPath`, 게이트웨이는 `GatewaySecurityErrorResponder#maskPath` — 같은 규칙).
+- 게이트웨이의 거부 로그 수준은 서비스와 같다 — 001 · 002 · 003 · 004 는 debug, 006 은 warn, 로그인한 회원의 005 는 info(memberId · jti).
+- **차단 목록 fail-open 통과 로그**(§7-1)는 warn 이지만 **1분에 한 번만** warn 이고 나머지는 debug 다 — 장애 동안 토큰 붙은 요청마다 warn 을 쓰면 로그가 폭주한다.
+  jti · 메서드 · 마스킹 경로 · 예외 타입만 남긴다(`revocation list unavailable, token passed (fail-open)`). 어드민 경로의 006 은 응답 로그(warn)로 남는다.
 
 ## 9. 서비스 간 인증 (internal API, 1단계)
 
