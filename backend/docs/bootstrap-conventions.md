@@ -37,7 +37,7 @@ public class ProductServiceApplication {
 - `@Import` 목록은 **단순 클래스명 알파벳순, 한 줄에 하나**다. 이슈마다 한 줄을 끼워 넣어도 다른 줄이 움직이지 않아 PR 끼리 충돌이 적다.
 - **예외: 폴백 오류 봉투(`FallbackErrorAutoConfiguration`, common-core)는 `@Import` 하지 않는다 — 자동 구성이다.** 빠뜨려도 기동은 되고
   Boot 기본 오류 JSON 만 조용히 나가므로, 서블릿 서비스면 고르지 않고 언제나 걸리게 했다. 리액티브 게이트웨이는 조건에서 빠진다.
-  걸렸는지는 서비스의 `*FallbackErrorSmokeTest` 가 본다 (아래 보안 절).
+  걸렸는지는 서비스의 `*FallbackErrorSmokeTest` · `*ErrorPageEnvelopeSmokeTest` 가 본다 (아래 보안 절). `/error` 컨트롤러(#81)도 같은 자동 구성이 등록한다.
 
 ```java
 @Configuration
@@ -218,6 +218,11 @@ testImplementation testFixtures(project(':core:common-core'))     // 폴백 오�
   도메인 · 보안 advice 가 받지 않는 404 · 405 · 415 · 400 · 500 이 `COMMON_00x` 봉투로 나가는지, `@Order` 없는 advice 가 여전히 먼저 받는지 본다.
   애노테이션이 `*ApplicationTests` 와 같아 컨텍스트를 같이 쓰고, 오류를 만드는 테스트 전용 핸들러(`/fallback-smoke/**`)는 픽스처의
   `ContextCustomizerFactory` 가 등록한다 — 서비스 컨트롤러에 기대지 않는다.
+- 서비스마다 **`/error` 봉투 스모크 `<Svc>ErrorPageEnvelopeSmokeTest extends ErrorPageEnvelopeSmokeTestSupport`**(common-core 테스트 픽스처)를 하나 둔다.
+  `customerAuthorization()`(security-core `TestTokens` 로 만든 고객 토큰)만 재정의한다. 실제 서블릿 컨테이너(`RANDOM_PORT`)로 방화벽 거부 400 · `COMMON_004`,
+  직접 `/error` 404 · `COMMON_001`, 그리고 같은 컨테이너에서 `SECURITY_001` · `COMMON_001` 이 그대로인지 본다.
+  RANDOM_PORT 라 MockMvc 스모크와 컨텍스트를 같이 쓰지 못해 서비스당 컨텍스트가 하나 더 뜬다(2~4초) — 서비스당 하나만 둔다.
+  `FallbackErrorController` 는 Boot `ErrorMvcAutoConfiguration` 앞에 등록된다. **서비스는 `ErrorController` 를 따로 정의하지 않는다** — 정의하면 매핑이 겹쳐 기동이 실패한다.
 
 - `*BeansConfig` 가 `ResourceServerSecurityConfigurer` · `InternalResourceServerConfigurer` 를, `*PropertiesConfig` 가 `JwtVerificationPropertiesConfig` ·
   `InternalTokenPropertiesConfig` 를 `@Import` 한다. auth-service 는 `JwtIssuerConfigurer` · `JwtIssuerPropertiesConfig` 를 더한다.
