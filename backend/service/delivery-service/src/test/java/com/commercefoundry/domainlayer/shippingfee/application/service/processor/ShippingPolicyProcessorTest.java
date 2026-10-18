@@ -66,7 +66,7 @@ class ShippingPolicyProcessorTest {
     @Test
     @DisplayName("정책이 없고 version 이 null 이면 새 정책 · 구간 아이디를 발급해 만든다 — 저장은 한 번")
     void createsWhenAbsent() {
-        given(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).willReturn(Optional.empty());
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.empty());
         given(snowflakeIdGenerator.generateId()).willReturn(9101L, 9102L, 9001L);
         given(shippingPolicyRepositoryPort.replace(any())).willAnswer(invocation -> invocation.getArgument(0));
 
@@ -88,7 +88,7 @@ class ShippingPolicyProcessorTest {
     @Test
     @DisplayName("정책이 있으면 아이디를 유지하고 조회한 version 으로 교체한다 — 구간 아이디는 새로 발급한다")
     void replacesExistingWithSameVersion() {
-        given(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).willReturn(Optional.of(domesticPolicy()));
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.of(domesticPolicy()));
         given(snowflakeIdGenerator.generateId()).willReturn(9201L);
         given(shippingPolicyRepositoryPort.replace(any())).willAnswer(invocation -> invocation.getArgument(0));
 
@@ -103,7 +103,7 @@ class ShippingPolicyProcessorTest {
     @Test
     @DisplayName("무료배송 기준이 없고 구간이 없는 정책도 된다")
     void withoutThresholdAndAreas() {
-        given(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).willReturn(Optional.empty());
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.empty());
         given(snowflakeIdGenerator.generateId()).willReturn(9001L);
         given(shippingPolicyRepositoryPort.replace(any())).willAnswer(invocation -> invocation.getArgument(0));
 
@@ -116,7 +116,7 @@ class ShippingPolicyProcessorTest {
     @Test
     @DisplayName("정책이 있는데 version 이 다르면 DELIVERY_006 이고 저장하지 않는다")
     void staleVersion() {
-        given(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).willReturn(Optional.of(domesticPolicy()));
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.of(domesticPolicy()));
 
         assertErrorCode(catchThrowable(() -> processor.replaceDomesticPolicy(command(2L, List.of()))), DeliveryErrorCode.SHIPPING_POLICY_VERSION_CONFLICT);
         verify(shippingPolicyRepositoryPort, never()).replace(any());
@@ -125,7 +125,7 @@ class ShippingPolicyProcessorTest {
     @Test
     @DisplayName("정책이 있는데 version 을 비우면(처음 만들기로 착각) DELIVERY_006")
     void missingVersionForExisting() {
-        given(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).willReturn(Optional.of(domesticPolicy()));
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.of(domesticPolicy()));
 
         assertErrorCode(catchThrowable(() -> processor.replaceDomesticPolicy(command(null, List.of()))), DeliveryErrorCode.SHIPPING_POLICY_VERSION_CONFLICT);
         verify(shippingPolicyRepositoryPort, never()).replace(any());
@@ -134,7 +134,7 @@ class ShippingPolicyProcessorTest {
     @Test
     @DisplayName("정책이 없는데 version 을 보내면(그 사이 사라짐) DELIVERY_006")
     void versionForAbsent() {
-        given(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).willReturn(Optional.empty());
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.empty());
 
         assertErrorCode(catchThrowable(() -> processor.replaceDomesticPolicy(command(0L, List.of()))), DeliveryErrorCode.SHIPPING_POLICY_VERSION_CONFLICT);
         verify(shippingPolicyRepositoryPort, never()).replace(any());
@@ -143,7 +143,7 @@ class ShippingPolicyProcessorTest {
     @Test
     @DisplayName("확인 뒤 저장에서 동시 교체에 지면(낙관적 락 실패) DELIVERY_006 으로 바꾼다")
     void concurrentReplace() {
-        given(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).willReturn(Optional.of(domesticPolicy()));
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.of(domesticPolicy()));
         given(shippingPolicyRepositoryPort.replace(any())).willThrow(new ObjectOptimisticLockingFailureException(Object.class, POLICY_ID));
 
         Throwable thrown = catchThrowable(() -> processor.replaceDomesticPolicy(command(3L, List.of())));
@@ -161,7 +161,7 @@ class ShippingPolicyProcessorTest {
 
         assertErrorCode(thrown, DeliveryErrorCode.REMOTE_AREA_RANGE_OVERLAP);
         assertThat(thrown).hasMessage("도서산간 구간이 겹칩니다: 제주, 제주 일부");
-        verify(shippingPolicyRepositoryPort, never()).findByScope(any());
+        verify(shippingPolicyRepositoryPort, never()).findDomesticPolicy();
         verify(shippingPolicyRepositoryPort, never()).replace(any());
     }
 
@@ -193,8 +193,34 @@ class ShippingPolicyProcessorTest {
     @Test
     @DisplayName("조회는 국내 범위 정책이다")
     void findsDomesticPolicy() {
-        given(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).willReturn(Optional.of(domesticPolicy()));
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.of(domesticPolicy()));
 
         assertThat(processor.findDomesticPolicy()).hasValue(domesticPolicy());
+    }
+
+    /** #70 — 어드민 실수 한 번에 KRW 주문 견적이 모두 003 으로 막히지 않게. */
+    @Test
+    @DisplayName("저장된 KRW 정책을 USD 로 바꾸면 DELIVERY_012 이고 저장하지 않는다 — 통화가 섞이지 않은 요청이어도")
+    void currencyChangeIsRejected() {
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.of(domesticPolicy()));
+        Money usd = Money.of(300, CurrencyCode.USD);
+
+        Throwable thrown = catchThrowable(() -> processor.replaceDomesticPolicy(new ShippingPolicyReplaceCommand(usd, null, List.of(), 3L)));
+
+        assertErrorCode(thrown, DeliveryErrorCode.SHIPPING_POLICY_CURRENCY_CHANGE_NOT_ALLOWED);
+        assertThat(thrown).hasMessage("배송비 정책의 통화는 바꿀 수 없습니다. 현재 통화: KRW");
+        verify(shippingPolicyRepositoryPort, never()).replace(any());
+    }
+
+    @Test
+    @DisplayName("처음 만들 때는 어떤 통화든 받는다 — KRW 로 고정하지 않는다")
+    void anyCurrencyOnCreate() {
+        given(shippingPolicyRepositoryPort.findDomesticPolicy()).willReturn(Optional.empty());
+        given(snowflakeIdGenerator.generateId()).willReturn(9001L);
+        given(shippingPolicyRepositoryPort.replace(any())).willAnswer(invocation -> invocation.getArgument(0));
+
+        ShippingPolicy result = processor.replaceDomesticPolicy(new ShippingPolicyReplaceCommand(Money.of(300, CurrencyCode.USD), null, List.of(), null));
+
+        assertThat(result.currency()).isEqualTo(CurrencyCode.USD);
     }
 }

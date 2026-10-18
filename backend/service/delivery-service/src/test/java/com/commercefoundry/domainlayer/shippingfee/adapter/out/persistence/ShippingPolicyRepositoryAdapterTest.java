@@ -82,7 +82,7 @@ class ShippingPolicyRepositoryAdapterTest {
     @Test
     @DisplayName("정책이 없으면 빈 값이다")
     void emptyWhenAbsent() {
-        assertThat(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).isEmpty();
+        assertThat(shippingPolicyRepositoryPort.findDomesticPolicy()).isEmpty();
     }
 
     @Test
@@ -97,7 +97,7 @@ class ShippingPolicyRepositoryAdapterTest {
         assertThat(created.remoteAreas()).extracting(RemoteArea::id, RemoteArea::name).containsExactly(tuple(7102L, "울릉"), tuple(7101L, "제주"));
 
         entityManager.clear();
-        assertThat(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).hasValue(created);
+        assertThat(shippingPolicyRepositoryPort.findDomesticPolicy()).hasValue(created);
     }
 
     @Test
@@ -138,7 +138,7 @@ class ShippingPolicyRepositoryAdapterTest {
             .isInstanceOf(ObjectOptimisticLockingFailureException.class);
 
         entityManager.clear();
-        assertThat(shippingPolicyRepositoryPort.findByScope(ShippingScope.DOMESTIC)).hasValueSatisfying(current -> {
+        assertThat(shippingPolicyRepositoryPort.findDomesticPolicy()).hasValueSatisfying(current -> {
             assertThat(current.version()).isEqualTo(replaced.version());
             assertThat(current.baseFee()).isEqualTo(krw(3_500));
             assertThat(current.remoteAreas()).extracting(RemoteArea::name).containsExactly("제주");
