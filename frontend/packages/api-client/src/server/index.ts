@@ -4,6 +4,7 @@ export { gatewayRequest, type GatewayRequestOptions } from './gateway-request';
 export { checkGateway, healthResponse, type HealthReport, type HealthStatus } from './health';
 export { createLoginHandler, LOGIN_PATH, type LoginHandlerOptions } from './login';
 export { createProxyHandler, type ProxyOptions } from './proxy';
+export { createSignUpHandler, SIGN_UP_PATH, type SignUpResult } from './sign-up';
 export {
   REISSUE_GRACE_MS,
   REISSUE_PATH,
