@@ -56,7 +56,7 @@ export async function generateMetadata({
 
 export default async function ProductPage({ params }: PageProps<'/[locale]/products/[productId]'>) {
   const { productId } = await params;
-  const { href } = await getI18n();
+  const { href, dict } = await getI18n();
 
   let product: ProductDetail | null;
   try {
@@ -64,12 +64,10 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
   } catch {
     return (
       <main className="mx-auto flex max-w-xl flex-col items-center gap-4 px-4 py-24 text-center">
-        <p className="text-sm text-muted-fg">
-          상품 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
-        </p>
+        <p className="text-sm text-muted-fg">{dict.product.loadFailed}</p>
         {/* 같은 URL 이라 문서를 새로 받는다 */}
         <a href={href(`/products/${productId}`)} className="text-sm underline underline-offset-4">
-          다시 불러오기
+          {dict.product.reload}
         </a>
       </main>
     );
@@ -83,7 +81,10 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
   return (
     <main className="mx-auto max-w-screen-xl px-4 pt-6 pb-24 lg:px-8 lg:pt-10">
       {categoryPath.length > 0 && (
-        <nav aria-label="카테고리 경로" className="mb-6 text-xs tracking-[0.15em] text-muted-fg">
+        <nav
+          aria-label={dict.product.breadcrumb}
+          className="mb-6 text-xs tracking-[0.15em] text-muted-fg"
+        >
           <ol className="flex flex-wrap gap-2">
             {categoryPath.map((category, index) => (
               <li key={category.categoryId} className="flex gap-2">

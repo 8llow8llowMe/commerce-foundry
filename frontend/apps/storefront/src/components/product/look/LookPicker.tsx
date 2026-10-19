@@ -1,9 +1,9 @@
 'use client';
 
-import { formatMoney } from '@cf/api-client';
 import { Button } from '@cf/ui';
 import { Link } from '@/components/i18n/Link';
 import { useId, useState } from 'react';
+import { useDictionary, useFormatMoney } from '@/components/i18n/LocaleProvider';
 import { OptionGroupsField } from '@/components/product/detail/OptionGroupsField';
 import {
   lookCartLines,
@@ -12,6 +12,7 @@ import {
   type LookProduct,
 } from '@/lib/catalog/look-cart';
 import { selectOption } from '@/lib/catalog/option-selection';
+import { fill } from '@/lib/i18n/format';
 
 /**
  * Shop the Look 구성품 목록 — 메인 04 영역과 상품 상세가 함께 쓴다.
@@ -29,6 +30,8 @@ export function LookPicker({
 }) {
   const baseId = useId();
   const noticeId = useId();
+  const t = useDictionary().look;
+  const formatMoney = useFormatMoney();
   const [picks, setPicks] = useState<LookPick[]>(() =>
     products.map((product) => ({ product, included: lookPickable(product), selection: {} })),
   );
@@ -41,10 +44,10 @@ export function LookPicker({
   const { lines, incomplete } = lookCartLines(picks);
   const notice =
     incomplete.length > 0
-      ? `${incomplete.join(', ')} 옵션을 선택해 주세요.`
+      ? fill(t.selectOptions, { names: incomplete.join(', ') })
       : lines.length === 0
-        ? '함께 담을 상품을 골라 주세요.'
-        : '장바구니 담기는 준비 중입니다.';
+        ? t.pickItems
+        : t.cartPending;
 
   return (
     <div className="flex flex-col gap-6">
@@ -84,7 +87,7 @@ export function LookPicker({
                 <div className="flex flex-col gap-1">
                   <label htmlFor={checkboxId} className="truncate">
                     {product.name}
-                    {current && <span className="text-xs text-muted-fg"> · 지금 보는 상품</span>}
+                    {current && <span className="text-xs text-muted-fg"> · {t.current}</span>}
                   </label>
                   <span className="text-muted-fg">
                     {formatMoney(product.salePrice)}
@@ -94,13 +97,13 @@ export function LookPicker({
 
                 {product.customOrder && product.saleStatus.code === 'ON_SALE' ? (
                   <p className="text-xs text-muted-fg">
-                    맞춤 제작 상품은 치수를 받아야 해요.{' '}
+                    {t.customOrder}{' '}
                     {!current && (
                       <Link
                         href={`/products/${product.productId}`}
                         className="underline underline-offset-4"
                       >
-                        상품에서 주문하기
+                        {t.orderFromProduct}
                       </Link>
                     )}
                   </p>
@@ -128,7 +131,7 @@ export function LookPicker({
                     href={`/products/${product.productId}`}
                     className="self-start text-xs text-muted-fg underline-offset-4 hover:text-fg hover:underline"
                   >
-                    상품 보기 <span aria-hidden>→</span>
+                    {t.viewProduct} <span aria-hidden>→</span>
                   </Link>
                 )}
               </div>
@@ -140,7 +143,8 @@ export function LookPicker({
       <div className="flex flex-col gap-3">
         {/* 장바구니 API(#26)가 생기면 lines 를 담는다 */}
         <Button disabled variant="secondary" className="h-12 w-full" aria-describedby={noticeId}>
-          함께 담기{lines.length > 0 && ` (${lines.length})`}
+          {t.addAll}
+          {lines.length > 0 && ` (${lines.length})`}
         </Button>
         <p id={noticeId} role="status" className="text-center text-xs text-muted-fg">
           {notice}

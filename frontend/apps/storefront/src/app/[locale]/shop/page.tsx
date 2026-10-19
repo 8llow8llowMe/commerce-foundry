@@ -15,7 +15,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function ShopPage({ searchParams }: PageProps<'/[locale]/shop'>) {
   const query = parseShopQuery(await searchParams);
-  const { href } = await getI18n();
+  const { href, dict } = await getI18n();
 
   // 카테고리를 못 받아도 상품 목록은 보여 준다(필터 줄만 빠진다)
   const [categoriesResult, productsResult] = await Promise.allSettled([
@@ -39,7 +39,7 @@ export default async function ShopPage({ searchParams }: PageProps<'/[locale]/sh
         {current?.name ?? 'Shop'}
       </h1>
 
-      <ShopFilters categories={categories} query={query} />
+      <ShopFilters categories={categories} query={query} labels={dict.shop} />
 
       <div className="mt-8 lg:mt-10">
         {productsResult.status === 'fulfilled' ? (
@@ -51,11 +51,11 @@ export default async function ShopPage({ searchParams }: PageProps<'/[locale]/sh
               {/* 서버 → 게이트웨이 연결 실패(network)는 사용자 네트워크 문제가 아니다 — 일반 문구로 */}
               {productsResult.reason instanceof ApiError && productsResult.reason.kind !== 'network'
                 ? productsResult.reason.message
-                : '상품을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'}
+                : dict.shop.loadFailed}
             </p>
             {/* 같은 URL 이라 클라이언트 라우팅으로는 다시 받지 않는다 — 문서를 새로 받는다 */}
             <a href={href(shopHref(query))} className="text-sm underline underline-offset-4">
-              다시 불러오기
+              {dict.shop.reload}
             </a>
           </div>
         )}

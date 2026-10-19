@@ -2,6 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ShopQuery } from '@/lib/catalog/shop-query';
 import type { CategoryItem } from '@/lib/catalog/types';
+import { en } from '@/lib/i18n/dictionaries/en';
+import { ko } from '@/lib/i18n/dictionaries/ko';
 import { ShopFilters } from './ShopFilters';
 
 const CATEGORIES: CategoryItem[] = [
@@ -18,7 +20,7 @@ const CATEGORIES: CategoryItem[] = [
 ];
 
 const render = (query: ShopQuery) =>
-  renderToStaticMarkup(<ShopFilters categories={CATEGORIES} query={query} />);
+  renderToStaticMarkup(<ShopFilters categories={CATEGORIES} query={query} labels={ko.shop} />);
 
 /** aria-current 가 붙은 링크의 텍스트들 */
 const currentLabels = (html: string) =>
@@ -47,9 +49,21 @@ describe('ShopFilters', () => {
 
   it('카테고리를 못 받았으면 카테고리 줄 없이 정렬만 보여 준다', () => {
     const html = renderToStaticMarkup(
-      <ShopFilters categories={[]} query={{ categoryId: null, sort: 'NEWEST' }} />,
+      <ShopFilters categories={[]} query={{ categoryId: null, sort: 'NEWEST' }} labels={ko.shop} />,
     );
     expect(html).not.toContain('aria-label="카테고리"');
     expect(html).toContain('aria-label="정렬"');
+  });
+
+  it('영문 사전이면 카테고리 · 정렬 라벨이 영문이다(카테고리 이름은 운영 데이터 그대로)', () => {
+    const html = renderToStaticMarkup(
+      <ShopFilters
+        categories={CATEGORIES}
+        query={{ categoryId: '1', sort: 'PRICE_ASC' }}
+        labels={en.shop}
+      />,
+    );
+    expect(currentLabels(html)).toEqual(['원피스', 'All 원피스', 'Price: low to high']);
+    expect(html).toContain('aria-label="Sort"');
   });
 });

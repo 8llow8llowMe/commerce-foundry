@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ProductSku, SaleStatusCode } from '@/lib/catalog/types';
+import { LocaleProvider } from '@/components/i18n/LocaleProvider';
+import { en } from '@/lib/i18n/dictionaries/en';
 import { PurchasePanel, type PurchaseProduct } from './PurchasePanel';
 
 const krw = (amount: number) => ({ amount, currency: 'KRW' as const });
@@ -132,5 +134,21 @@ describe('PurchasePanel 모바일 하단 구매 바', () => {
   it('판매중이 아니면 버튼에 서버 상태 문구를 쓴다', () => {
     const html = bar(render({ saleStatus: status('SOLD_OUT', '품절') }));
     expect(html).toMatch(/<button[^>]*>품절<\/button>/);
+  });
+});
+
+describe('PurchasePanel (영문 스토어)', () => {
+  it('문구 · 수량 안내 · 금액을 영문 스토어 표기로 보인다', () => {
+    const html = renderToStaticMarkup(
+      <LocaleProvider locale="en" prefix="/en" dict={en}>
+        <PurchasePanel product={product()} />
+      </LocaleProvider>,
+    ).replaceAll('<!-- -->', '');
+    expect(html).toContain('₩129,000');
+    expect(html).toContain('Please select your options.');
+    expect(html).toContain('You can order up to 3 per order.');
+    expect(html).toContain('aria-label="Increase quantity"');
+    expect(html).toContain('Add to bag');
+    expect(html).not.toMatch(/장바구니|수량|옵션을/);
   });
 });

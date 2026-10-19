@@ -2,6 +2,8 @@
 
 import { useId, useRef, useState } from 'react';
 import { CloseIcon } from '@/components/header/HeaderIcons';
+import { useDictionary } from '@/components/i18n/LocaleProvider';
+import { fill } from '@/lib/i18n/format';
 import type { ProductImage, ProductThumbnail } from '@/lib/catalog/types';
 
 /**
@@ -22,11 +24,12 @@ export function ProductGallery({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [current, setCurrent] = useState(0);
   const titleId = useId();
+  const t = useDictionary().product;
 
   if (list.length === 0) {
     return (
       <div className="flex aspect-[3/4] items-center justify-center bg-muted text-sm text-muted-fg">
-        이미지 준비 중
+        {t.imagePending}
       </div>
     );
   }
@@ -42,7 +45,7 @@ export function ProductGallery({
   return (
     <>
       <ul
-        aria-label={`${name} 이미지 ${list.length}장`}
+        aria-label={fill(t.gallery.images, { name, count: list.length })}
         className="-mx-4 flex snap-x snap-mandatory overflow-x-auto lg:mx-0 lg:grid lg:grid-cols-2 lg:gap-2 lg:overflow-visible"
       >
         {list.map((image, index) => (
@@ -50,7 +53,7 @@ export function ProductGallery({
             <button
               type="button"
               onClick={() => open(index)}
-              aria-label={`${altOf(image, index)} 크게 보기`}
+              aria-label={fill(t.gallery.zoom, { alt: altOf(image, index) })}
               className="block aspect-[3/4] w-full cursor-zoom-in bg-muted focus-visible:outline-offset-[-4px]"
             >
               {/* 이미지 CDN 이 정해지지 않아 next/image 를 아직 쓰지 않는다 (목록과 같다) */}
@@ -84,12 +87,12 @@ export function ProductGallery({
         <div className="flex h-full flex-col">
           <div className="flex h-14 shrink-0 items-center justify-between px-4">
             <p id={titleId} className="text-xs tracking-[0.15em]" aria-live="polite">
-              <span className="sr-only">{name} 이미지 </span>
+              <span className="sr-only">{fill(t.gallery.zoomTitle, { name })} </span>
               {current + 1} / {list.length}
             </p>
             <button
               type="button"
-              aria-label="크게 보기 닫기"
+              aria-label={t.gallery.closeZoom}
               onClick={() => dialogRef.current?.close()}
               className="-mr-2 inline-flex size-10 items-center justify-center"
             >
@@ -104,7 +107,7 @@ export function ProductGallery({
               <>
                 <button
                   type="button"
-                  aria-label="이전 이미지"
+                  aria-label={t.gallery.prev}
                   onClick={() => move(-1)}
                   className="absolute inset-y-0 left-0 w-1/4 text-2xl opacity-0 hover:opacity-60 focus-visible:opacity-60"
                 >
@@ -112,7 +115,7 @@ export function ProductGallery({
                 </button>
                 <button
                   type="button"
-                  aria-label="다음 이미지"
+                  aria-label={t.gallery.next}
                   onClick={() => move(1)}
                   className="absolute inset-y-0 right-0 w-1/4 text-2xl opacity-0 hover:opacity-60 focus-visible:opacity-60"
                 >
