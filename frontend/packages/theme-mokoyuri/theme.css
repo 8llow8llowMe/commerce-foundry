@@ -1,15 +1,33 @@
 /*
- * MOKOYURI 임시 팔레트 — 브랜드 가이드를 받으면 값만 바꾼다.
+ * MOKOYURI 테마 — "Romantic Heritage" (#57). 배경은 아이보리, 핑크(Blush)는 accent 로 일부 구간에만 쓴다.
  * --cf-* 원시 토큰만 덮어쓴다. 토큰 이름은 @cf/ui/tokens.css 가 정본이다.
  */
+
+/* 웹폰트 (OFL-1.1, npm 으로 self-host). 한글은 unicode-range 로 쓰는 글자 구간만 내려받는다. */
+@import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
+@import '@fontsource/cormorant-garamond/latin-300.css';
+@import '@fontsource/cormorant-garamond/latin-400.css';
+@import '@fontsource/cormorant-garamond/latin-400-italic.css';
+@import '@fontsource/noto-serif-kr/400.css';
+
 :root {
-  --cf-color-bg: #fbf8f3; /* 한지 아이보리 */
-  --cf-color-fg: #2b2622;
-  --cf-color-muted: #f1ebe2;
-  --cf-color-muted-fg: #7a6f64;
-  --cf-color-border: #e3d9cc;
-  --cf-color-primary: #2f3e5c; /* 쪽빛 */
-  --cf-color-primary-fg: #ffffff;
+  --cf-color-bg: #f7f3ef; /* Porcelain */
+  --cf-color-fg: #302b2c; /* Soft Black — 대비 12.6:1 */
+  --cf-color-muted: #efe8e3; /* Porcelain 보다 한 단계 짙은 면 */
+  /* Dusty Rose(#b9a7a5)는 글자로 쓰면 2.1:1 이라 AA 미달 — 같은 계열을 어둡게 해 5.5:1 로 맞춘다 */
+  --cf-color-muted-fg: #6e5f5e;
+  --cf-color-border: #b9a7a5; /* Dusty Rose — 얇은 구분선 */
+  --cf-color-primary: #302b2c; /* Soft Black 버튼 */
+  --cf-color-primary-fg: #f7f3ef;
   --cf-color-danger: #b42318;
-  --cf-radius-md: 0.25rem;
+  --cf-color-accent: #e7d4d7; /* Blush — 히어로 등 일부 구간 배경 */
+  --cf-color-accent-fg: #302b2c;
+  /* 화보 · 상품 이미지 · 버튼은 각지게. 둥근 카드 UI 를 쓰지 않는다 */
+  --cf-radius-md: 0;
+
+  --cf-font-sans:
+    'Pretendard Variable', Pretendard, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic',
+    sans-serif;
+  --cf-font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --cf-font-serif: 'Noto Serif KR', 'AppleMyungjo', 'Batang', serif;
 }

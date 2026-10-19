@@ -6,7 +6,8 @@ export const brand: BrandConfig = {
   defaultLocale: 'ko-KR',
   seo: {
     titleTemplate: '%s | MOKOYURI',
-    description: '생활한복 MOKOYURI 온라인 스토어',
+    // 최종 문구는 고객사 확인 (#57)
+    description: '한복에서 출발한 로맨틱 디자이너 패션 브랜드 MOKOYURI',
   },
   // 아직 없는 화면은 링크만 둔다(앱의 not-found 가 '준비 중' 으로 받는다).
   navigation: [
