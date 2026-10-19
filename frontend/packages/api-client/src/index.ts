@@ -10,6 +10,6 @@ export {
   type SliceResponse,
 } from './envelope';
 export { createIdempotencyKey } from './idempotency';
-export { formatMoney, type Currency, type Money } from './money';
+export { formatMoney, moneyToDecimalString, type Currency, type Money } from './money';
 export { parseRetryAfter } from './retry-after';
 export { unwrap } from './unwrap';

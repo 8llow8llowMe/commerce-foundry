@@ -29,3 +29,9 @@ export function formatMoney({ amount, currency }: Money): string {
   }
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(major);
 }
+
+/** 기계가 읽는 소수 표기(구조화 데이터 · 결제 SDK 등). KRW 129000 → '129000', USD 8950 → '89.50' */
+export function moneyToDecimalString({ amount, currency }: Money): string {
+  const digits = fractionDigits(currency);
+  return (amount / 10 ** digits).toFixed(digits);
+}
