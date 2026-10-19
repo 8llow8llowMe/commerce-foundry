@@ -39,6 +39,7 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 - 토큰은 httpOnly 쿠키에만 있다. JS 에서 토큰을 읽거나 localStorage 에 두지 않는다.
 - 금액은 서버 값을 `formatMoney` 로 표시만 한다. 클라이언트에서 합계·할인을 계산하지 않는다.
 - 색은 토큰 클래스(`bg-primary` 등)로만 쓴다. 앱 코드에 브랜드 이름을 하드코딩하지 않는다.
+- 스토어프론트 화면은 `app/[locale]/` 아래다. 링크는 `@/components/i18n/Link`, 문구는 사전 · 브랜드 `content` 에 둔다(`docs/architecture.md` §5).
 - Next.js 16 은 학습 데이터와 API·규칙이 다를 수 있다. Next API 를 쓰기 전에 앱 디렉터리의
   `node_modules/next/dist/docs/` 해당 가이드를 확인한다(`next dev` 가 만드는 `apps/*/AGENTS.md` 는 커밋하지 않는다).
 - 완료 보고 전에 위 검사 명령을 실제로 돌린다.

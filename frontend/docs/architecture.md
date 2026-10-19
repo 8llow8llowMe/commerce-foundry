@@ -62,3 +62,22 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
 ## 4. 헬스체크
 
 각 앱 `GET /api/health` → 게이트웨이 `/actuator/health` 결과로 `{ app, gateway }`. 게이트웨이 DOWN 이면 503.
+
+## 5. 언어 (i18n, #31)
+
+스토어프론트 화면은 모두 `app/[locale]/...` 아래 하나다. 바깥 URL 은 `src/proxy.ts` 가 `/[locale]/...` 로 바꿔 넣는다(규칙 정본 `src/lib/i18n/routing.ts`).
+
+| 방식 | 국문 | 영문 | 켜는 법 |
+|------|------|------|---------|
+| 경로 (기본) | `/shop` | `/en/shop` | 그대로 |
+| 호스트 | `example.com/shop` | `en.example.com/shop` | env `LOCALE_HOSTS=en=en.example.com` |
+
+- 정식 주소가 아닌 요청은 308 로 보낸다: `/ko/...` → `/...`, 언어 호스트의 `/en/...` → `/...`, 기본 호스트의 `/en/...`(호스트 방식일 때) → 언어 호스트.
+- 브라우저 언어(Accept-Language)로 자동으로 보내지 않는다. 같은 주소는 누구에게나 같은 언어다(검색 노출 · 공유 링크).
+- 언어 목록 · 기본 언어는 브랜드 설정(`brand.locales` · `defaultLocale`), 전용 호스트는 배포 env 다(환경마다 도메인이 다르다).
+- 서버는 `getI18n()`(`lib/i18n/server.ts`, `next/root-params`)으로 언어 · 사전 · 브랜드 문구를 읽는다. 클라이언트는 `LocaleProvider` 의 `useLocale()` · `useLocalizedHref()` 를 쓴다.
+- 링크는 `next/link` 대신 `@/components/i18n/Link` — 앱 경로('/shop')에 언어 접두어를 붙인다. 언어 전환만 `<a>`(루트 레이아웃이 달라 문서를 새로 받는다).
+- 게이트웨이 요청에 스토어 언어를 `Accept-Language` 로 싣는다(`serverFetch`, 클라이언트 `apiFetch` 호출부). BFF 는 이 헤더를 넘긴다.
+- 페이지는 `generateMetadata` 에서 `localeAlternates(path)` 로 canonical · hreflang(+ `x-default`)을 낸다. 절대 주소는 `NEXT_PUBLIC_SITE_URL` 이 기준이다.
+- UI 문구는 `lib/i18n/dictionaries/{ko,en}.ts`. `en` 은 `Dictionary`(= ko 의 모양) 타입이라 키가 빠지면 typecheck 가 잡는다.
+
