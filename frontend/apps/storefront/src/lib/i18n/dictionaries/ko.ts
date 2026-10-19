@@ -12,6 +12,26 @@ export const ko = {
     primaryNav: '주 메뉴',
     switchLanguage: '언어 선택',
   },
+  auth: {
+    login: {
+      title: '로그인',
+      email: '이메일',
+      password: '비밀번호',
+      submit: '로그인',
+      submitting: '로그인 중…',
+      noAccount: '아직 회원이 아니신가요?',
+      signUp: '회원가입',
+    },
+    /** 서버 오류 코드별 문구 — 영문 스토어에서도 같은 뜻으로 보이게 코드로 고른다. 없는 코드는 서버 문구 */
+    errors: {
+      AUTH_001: '이메일 또는 비밀번호가 올바르지 않습니다.',
+      AUTH_101: '이메일을 입력해 주세요.',
+      AUTH_102: '이메일이 너무 깁니다.',
+      AUTH_104: '비밀번호를 입력해 주세요.',
+    } as Record<string, string>,
+    /** 연결 실패 · 일시 장애 */
+    failed: '로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+  },
   footer: {
     customerLinks: '고객 안내',
     business: '사업자 정보',

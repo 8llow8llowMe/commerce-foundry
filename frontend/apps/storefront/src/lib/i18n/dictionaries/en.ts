@@ -13,6 +13,24 @@ export const en: Dictionary = {
     primaryNav: 'Main',
     switchLanguage: 'Language',
   },
+  auth: {
+    login: {
+      title: 'Sign in',
+      email: 'Email',
+      password: 'Password',
+      submit: 'Sign in',
+      submitting: 'Signing in…',
+      noAccount: 'New here?',
+      signUp: 'Create an account',
+    },
+    errors: {
+      AUTH_001: 'The email or password is incorrect.',
+      AUTH_101: 'Please enter your email.',
+      AUTH_102: 'This email is too long.',
+      AUTH_104: 'Please enter your password.',
+    } as Record<string, string>,
+    failed: 'We could not sign you in. Please try again in a moment.',
+  },
   footer: {
     customerLinks: 'Customer care',
     business: 'Company information',

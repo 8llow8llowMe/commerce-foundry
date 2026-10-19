@@ -1,6 +1,6 @@
 import type { AuthCookieConfig } from '@cf/api-client/server';
 
-// 쿠키 이름·수명은 #25 에서 BE 토큰 만료와 맞춰 확정한다. 지금 값은 임시다.
+// 고객 인증 쿠키(#25). 수명은 로그인 응답의 *ExpiresIn 이 없을 때의 대체값이다 — BE 설정(access 30분 · refresh 14일)과 같게 둔다.
 export const authCookies: AuthCookieConfig = {
   accessName: 'cf_at',
   refreshName: 'cf_rt',
