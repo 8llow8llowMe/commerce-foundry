@@ -62,7 +62,10 @@ export function SiteHeader({ brandName, navigation, labels, languages }: SiteHea
         </div>
 
         {primary.length > 0 && (
-          <nav aria-label={labels.primaryNav} className="hidden pb-4 lg:block">
+          <nav
+            aria-label={labels.primaryNav}
+            className="hidden h-10 items-center justify-center lg:flex"
+          >
             <ul className="flex justify-center gap-12">
               {primary.map((item) => (
                 <li key={item.href}>
@@ -76,7 +79,10 @@ export function SiteHeader({ brandName, navigation, labels, languages }: SiteHea
         )}
 
         {shortcuts.length > 0 && (
-          <nav aria-label={labels.shortcuts} className="pb-3 lg:hidden">
+          <nav
+            aria-label={labels.shortcuts}
+            className="flex h-9 items-center justify-center lg:hidden"
+          >
             <ul className="flex justify-center gap-8">
               {shortcuts.map((item) => (
                 <li key={item.href}>

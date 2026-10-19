@@ -105,7 +105,7 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
         <ProductGallery name={product.name} thumbnail={product.thumbnail} images={images} />
 
         {/* PC 에서는 이미지를 내리는 동안 구매 정보가 따라온다(헤더 높이만큼 띄운다) */}
-        <div className="mt-8 flex flex-col gap-6 lg:sticky lg:top-32 lg:mt-0 lg:self-start">
+        <div className="mt-8 flex flex-col gap-6 lg:sticky lg:top-[calc(var(--site-header-h)+1.5rem)] lg:mt-0 lg:self-start">
           <div className="flex flex-col gap-3">
             <h1 className="font-serif text-2xl leading-snug lg:text-3xl">{product.name}</h1>
             {product.summary && <p className="text-sm text-muted-fg">{product.summary}</p>}

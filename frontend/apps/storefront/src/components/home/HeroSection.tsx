@@ -18,7 +18,7 @@ export function HeroSection({ section }: { section: HeroSectionData }) {
   return (
     <section
       aria-labelledby={titleId}
-      className="relative overflow-hidden bg-accent text-accent-fg lg:h-[calc(100svh-6.5rem)] lg:min-h-[40rem]"
+      className="relative overflow-hidden bg-accent text-accent-fg lg:h-[calc(100svh-var(--site-header-h))] lg:min-h-[40rem]"
     >
       <div className="relative aspect-[4/5] max-h-[62svh] w-full overflow-hidden bg-muted lg:absolute lg:top-[6svh] lg:right-[4vw] lg:max-h-none lg:w-[52vw]">
         <HeroMedia section={section} />
