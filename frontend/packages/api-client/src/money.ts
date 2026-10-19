@@ -15,7 +15,11 @@ function fractionDigits(currency: Currency): number {
   );
 }
 
-export function formatMoney({ amount, currency }: Money): string {
+/**
+ * 화면 표시용 금액. locale 은 스토어 언어('ko' · 'en')다.
+ * 국문 스토어의 KRW 는 국내 관례대로 '129,000원', 그 밖에는 통화 기호 표기('₩129,000', '$89.50').
+ */
+export function formatMoney({ amount, currency }: Money, locale: string = 'ko'): string {
   if (!Number.isSafeInteger(amount)) {
     if (process.env.NODE_ENV !== 'production') {
       throw new Error(`amount 는 최소 화폐 단위 정수여야 한다: ${amount} ${currency}`);
@@ -23,7 +27,7 @@ export function formatMoney({ amount, currency }: Money): string {
   }
   const major = amount / 10 ** fractionDigits(currency);
 
-  if (currency === 'KRW') {
+  if (currency === 'KRW' && locale === 'ko') {
     // 국내 쇼핑몰 관례: ₩129,000 이 아니라 129,000원
     return `${new Intl.NumberFormat('ko-KR').format(major)}원`;
   }
