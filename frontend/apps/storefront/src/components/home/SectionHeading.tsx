@@ -5,16 +5,24 @@ export function SectionHeading({
   id,
   title,
   align = 'left',
+  size = 'title',
 }: {
   id: string;
   title: string;
   align?: 'left' | 'center';
+  /** title: 섹션 제목(28 / 48px), display: 페이지의 대표 제목 하나(40 / 72~96px, #57 §4) */
+  size?: 'title' | 'display';
 }) {
   return (
     <div className={cx('flex flex-col gap-3', align === 'center' && 'items-center text-center')}>
       <h2
         id={id}
-        className="font-display text-[1.75rem] leading-[1.05] tracking-[-0.02em] lg:text-5xl"
+        className={cx(
+          'font-display tracking-[-0.02em]',
+          size === 'display'
+            ? 'text-[2.5rem] leading-none font-light lg:text-[clamp(4.5rem,5.6vw,6rem)]'
+            : 'text-[1.75rem] leading-[1.05] lg:text-5xl',
+        )}
       >
         {title}
       </h2>

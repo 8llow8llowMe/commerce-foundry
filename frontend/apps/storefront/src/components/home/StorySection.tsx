@@ -1,15 +1,17 @@
 import type { StorySection as StorySectionData } from '@cf/ui';
 import { Link } from '@/components/i18n/Link';
 import { CurtainStory } from './CurtainStory';
+import { PanelStory } from './PanelStory';
 import { MediaFrame } from './MediaFrame';
 import { SectionHeading } from './SectionHeading';
 
 /**
- * 03 Collection Story · 06 Our Story. curtain 은 CurtainStory, asymmetric 은 큰 화보 + 글 + 작은 컷을 어긋나게,
+ * 03 Collection Story · 06 Our Story. curtain 은 CurtainStory, panel 은 PanelStory, asymmetric 은 큰 화보 + 글 + 작은 컷을 어긋나게,
  * centered 는 글을 가운데 두고 아래에 넓은 사진 한 장. 같은 '왼쪽 글 / 오른쪽 이미지' 반복을 피한다.
  */
 export function StorySection({ section }: { section: StorySectionData }) {
   if (section.layout === 'curtain') return <CurtainStory section={section} />;
+  if (section.layout === 'panel') return <PanelStory section={section} />;
   const headingId = `${section.id}-title`;
   const [first, second] = section.media;
 

@@ -119,23 +119,50 @@ describe('StorySection · DetailSection', () => {
     expect(centered).toContain('text-center');
   });
 
-  it('디테일은 클로즈업 칸과 포인트를 번호 · 라벨 없이 그린다(#57 금지 목록)', () => {
+  it('디테일은 서버 렌더(스크립트 전)에서 본문 · 포인트마다 클로즈업 + 설명을 번호 없이 세로로 그린다', () => {
     const detail: DetailData = {
       type: 'DETAIL',
       id: 'detail',
       title: 'Craft',
       body: '본문',
+      frame: slot('전신 4:5'),
       points: [
-        { title: '첫째', text: 'a' },
-        { title: '둘째', text: 'b' },
+        { title: '첫째', text: 'a', focus: { x: 0.5, y: 0.3, scale: 1.8 } },
+        { title: '둘째', text: 'b', focus: null },
       ],
-      media: [slot('클로즈업 1'), slot('클로즈업 2'), slot('클로즈업 3')],
+      media: [slot('클로즈업 1'), slot('클로즈업 2')],
     };
     const html = renderToStaticMarkup(<DetailSection section={detail} />);
-    expect(html.match(/aspect-\[3\/4\]/g)).toHaveLength(3);
-    expect(html).toContain('첫째');
+    expect(html).toContain('본문');
+    expect(html.match(/<figure/g)).toHaveLength(2);
+    expect(html).toContain('클로즈업 2');
+    // 확대 무대(전신 · 지점 버튼)는 하이드레이션 뒤에만 그린다
+    expect(html).not.toContain('전신 4:5');
+    expect(html).not.toContain('aria-pressed');
     expect(html).not.toMatch(/>0[12]</);
     expect(html).not.toContain('<ol');
+  });
+});
+
+describe('StorySection — panel', () => {
+  it('어두운 면에 제목 · 빈 줄로 나눈 단락 · 버튼, 사진은 모티프 모양으로 자른다', () => {
+    const html = renderToStaticMarkup(
+      <StorySection
+        section={{
+          type: 'STORY',
+          id: 'our',
+          title: '한복에서 시작한 로맨스',
+          body: '첫 단락\n\n둘째 단락',
+          links: [{ label: '브랜드 이야기', href: '/our-story' }],
+          media: [slot('인물 3:4')],
+          layout: 'panel',
+        }}
+      />,
+    );
+    expect(html).toContain('bg-fg text-bg');
+    expect(html.match(/<p class="leading-7">/g)).toHaveLength(2);
+    expect(html).toContain('href="/our-story"');
+    expect(html).toContain('[border-radius:var(--cf-motif-radius)]');
   });
 });
 

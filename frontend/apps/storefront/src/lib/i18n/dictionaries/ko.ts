@@ -77,6 +77,10 @@ export const ko = {
       optional: '선택',
     },
   },
+  home: {
+    /** 05 Craft 확대에서 전신으로 돌아가기 */
+    craftOverview: '전신 보기',
+  },
   look: {
     selectOptions: '{names} 옵션을 선택해 주세요.',
     pickItems: '함께 담을 상품을 골라 주세요.',
