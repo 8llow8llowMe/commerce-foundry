@@ -28,7 +28,7 @@ export function SiteHeader({ brandName, navigation }: SiteHeaderProps) {
 
           <Link
             href="/"
-            className="justify-self-center text-lg font-medium tracking-[0.3em] whitespace-nowrap uppercase lg:text-xl"
+            className="justify-self-center font-display text-xl tracking-[0.25em] whitespace-nowrap uppercase sm:text-2xl lg:text-3xl"
           >
             {brandName}
           </Link>
