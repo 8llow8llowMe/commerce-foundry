@@ -87,8 +87,19 @@ describe('LookPicker (첫 렌더)', () => {
 
   it('지금 보는 상품은 표시하고 자기 자신으로 가는 링크는 두지 않는다', () => {
     const html = render([product('1'), product('2')], '1');
-    expect(html).toContain('구성품 1<span class="text-xs text-muted-fg"> · 지금 보는 상품</span>');
+    expect(html).toContain(
+      '구성품 1<span class="text-xs font-normal text-muted-fg"> · 지금 보는 상품</span>',
+    );
     expect(html).not.toContain('href="/products/1"');
     expect(html).toContain('href="/products/2"');
+  });
+
+  it('floatingAction 이면 모바일 하단 고정 바로 두고, 목록이 보이기 전에는 숨긴다(PC 는 제자리)', () => {
+    const plain = render([product('1')]);
+    expect(plain).not.toContain('fixed inset-x-0 bottom-0');
+    const html = renderToStaticMarkup(<LookPicker products={[product('1')]} floatingAction />);
+    expect(html).toContain('fixed inset-x-0 bottom-0');
+    expect(html).toContain('lg:static');
+    expect(html).toContain('translate-y-full');
   });
 });
