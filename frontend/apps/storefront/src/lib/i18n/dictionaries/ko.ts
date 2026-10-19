@@ -52,6 +52,8 @@ export const ko = {
     loadFailed: '상품 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
     reload: '다시 불러오기',
     breadcrumb: '카테고리 경로',
+    /** 상세 아래 공통 안내 아코디언 */
+    info: { sizeGuide: '사이즈 가이드', shipping: '배송 · 교환' },
     gallery: {
       images: '{name} 이미지 {count}장',
       zoom: '{alt} 크게 보기',
