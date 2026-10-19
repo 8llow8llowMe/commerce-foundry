@@ -2,6 +2,7 @@
 export { readCookie, serializeCookie, type AuthCookieConfig } from './cookies';
 export { gatewayRequest, type GatewayRequestOptions } from './gateway-request';
 export { checkGateway, healthResponse, type HealthReport, type HealthStatus } from './health';
+export { createLoginHandler, LOGIN_PATH, type LoginHandlerOptions } from './login';
 export { createProxyHandler, type ProxyOptions } from './proxy';
 export {
   REISSUE_GRACE_MS,
