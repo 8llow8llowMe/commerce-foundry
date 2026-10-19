@@ -27,8 +27,11 @@ export type HeroSection = {
   /** 줄마다 하나 */
   title: string[];
   subtitle: string | null;
+  /** 주 버튼(단색 채움) */
   cta: HomeLink;
-  /** PC 가로(16:9) · 모바일 세로(4:5) 화보를 따로 둔다(art direction) */
+  /** 보조 동작 — 모바일은 cta 와 반반 버튼, PC 는 글자 링크. 없으면 null */
+  secondaryCta: HomeLink | null;
+  /** PC · 모바일 화보를 따로 둔다(art direction). 둘 다 세로 4:5 전신 — PC 는 아래쪽이 화면 밖으로 잘린다 */
   desktop: HomeMediaSlot;
   mobile: HomeMediaSlot;
   /** 짧은 영상. 있으면 muted autoplay, 움직임 줄이기 설정이면 포스터만 */

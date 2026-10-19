@@ -9,8 +9,14 @@ export const home: HomeSection[] = [
     id: 'main-visual',
     title: ['The Poetry of', 'Everyday Romance'],
     subtitle: '전통의 고운 선, 오늘의 로맨스.',
-    cta: { label: 'EXPLORE COLLECTION', href: '/collection' },
-    desktop: { image: null, placeholder: '시즌 대표 화보 · PC 가로 16:9 · 전신 · 자연광' },
+    // 시안의 'MOKOYURI 2026 COLLECTION' 라벨은 버튼 문구로 옮겼다(#59)
+    cta: { label: '2026 컬렉션 보기', href: '/collection' },
+    secondaryCta: { label: 'SHOP', href: '/shop' },
+    desktop: {
+      image: null,
+      placeholder:
+        '시즌 대표 화보 · 세로 4:5 · 전신 · 자연광 · 치마 아랫단이 화면 아래로 잘리는 구도',
+    },
     mobile: { image: null, placeholder: '시즌 대표 화보 · 모바일 세로 4:5' },
     video: null,
   },
