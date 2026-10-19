@@ -1,8 +1,13 @@
+'use client';
+
+import { useId, useRef, useState } from 'react';
+import { CloseIcon } from '@/components/header/HeaderIcons';
 import type { ProductImage, ProductThumbnail } from '@/lib/catalog/types';
 
 /**
  * 상세 이미지. 고정 3:4 비율 · 각진 모서리. 모바일은 가로로 넘기고(scroll-snap), PC 는 2열로 쌓는다.
- * 갤러리가 비면 대표 이미지 하나를 쓴다. 확대 보기 · 착용 영상은 #60 에서 더한다.
+ * 갤러리가 비면 대표 이미지 하나를 쓴다. 누르면 전체 화면으로 크게 본다(#60) — 네이티브 모달 <dialog> 라
+ * ESC 닫기 · 포커스 가두기 · 닫은 뒤 포커스 복귀를 브라우저가 한다. 착용 영상은 API 가 생기면 더한다.
  */
 export function ProductGallery({
   name,
@@ -14,6 +19,9 @@ export function ProductGallery({
   images: ProductImage[];
 }) {
   const list: ProductThumbnail[] = images.length > 0 ? images : thumbnail ? [thumbnail] : [];
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [current, setCurrent] = useState(0);
+  const titleId = useId();
 
   if (list.length === 0) {
     return (
@@ -23,30 +31,98 @@ export function ProductGallery({
     );
   }
 
+  const altOf = (image: ProductThumbnail, index: number) => image.altText ?? `${name} ${index + 1}`;
+  const open = (index: number) => {
+    setCurrent(index);
+    dialogRef.current?.showModal();
+  };
+  const move = (step: number) => setCurrent((index) => (index + step + list.length) % list.length);
+  const shown = list[current] ?? list[0]!;
+
   return (
-    <ul
-      aria-label={`${name} 이미지 ${list.length}장`}
-      className="-mx-4 flex snap-x snap-mandatory overflow-x-auto lg:mx-0 lg:grid lg:grid-cols-2 lg:gap-2 lg:overflow-visible"
-    >
-      {list.map((image, index) => (
-        <li key={image.imageId} className="w-full shrink-0 snap-start lg:w-auto">
-          <div className="aspect-[3/4] bg-muted">
-            {/* 이미지 CDN 이 정해지지 않아 next/image 를 아직 쓰지 않는다 (목록과 같다) */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={image.url}
-              alt={image.altText ?? `${name} ${index + 1}`}
-              width={image.width ?? undefined}
-              height={image.height ?? undefined}
-              // 첫 장은 첫 화면에 보이므로 바로 받는다
-              loading={index === 0 ? 'eager' : 'lazy'}
-              fetchPriority={index === 0 ? 'high' : undefined}
-              decoding="async"
-              className="size-full object-cover"
-            />
+    <>
+      <ul
+        aria-label={`${name} 이미지 ${list.length}장`}
+        className="-mx-4 flex snap-x snap-mandatory overflow-x-auto lg:mx-0 lg:grid lg:grid-cols-2 lg:gap-2 lg:overflow-visible"
+      >
+        {list.map((image, index) => (
+          <li key={image.imageId} className="w-full shrink-0 snap-start lg:w-auto">
+            <button
+              type="button"
+              onClick={() => open(index)}
+              aria-label={`${altOf(image, index)} 크게 보기`}
+              className="block aspect-[3/4] w-full cursor-zoom-in bg-muted focus-visible:outline-offset-[-4px]"
+            >
+              {/* 이미지 CDN 이 정해지지 않아 next/image 를 아직 쓰지 않는다 (목록과 같다) */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={image.url}
+                alt=""
+                width={image.width ?? undefined}
+                height={image.height ?? undefined}
+                // 첫 장은 첫 화면에 보이므로 바로 받는다
+                loading={index === 0 ? 'eager' : 'lazy'}
+                fetchPriority={index === 0 ? 'high' : undefined}
+                decoding="async"
+                className="size-full object-cover"
+              />
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <dialog
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        onKeyDown={(event) => {
+          if (list.length < 2) return;
+          if (event.key === 'ArrowRight') move(1);
+          if (event.key === 'ArrowLeft') move(-1);
+        }}
+        className="m-0 h-dvh max-h-none w-full max-w-none bg-bg text-fg backdrop:bg-fg/60"
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex h-14 shrink-0 items-center justify-between px-4">
+            <p id={titleId} className="text-xs tracking-[0.15em]" aria-live="polite">
+              <span className="sr-only">{name} 이미지 </span>
+              {current + 1} / {list.length}
+            </p>
+            <button
+              type="button"
+              aria-label="크게 보기 닫기"
+              onClick={() => dialogRef.current?.close()}
+              className="-mr-2 inline-flex size-10 items-center justify-center"
+            >
+              <CloseIcon />
+            </button>
           </div>
-        </li>
-      ))}
-    </ul>
+
+          <div className="relative min-h-0 flex-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={shown.url} alt={altOf(shown, current)} className="size-full object-contain" />
+            {list.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  aria-label="이전 이미지"
+                  onClick={() => move(-1)}
+                  className="absolute inset-y-0 left-0 w-1/4 text-2xl opacity-0 hover:opacity-60 focus-visible:opacity-60"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  aria-label="다음 이미지"
+                  onClick={() => move(1)}
+                  className="absolute inset-y-0 right-0 w-1/4 text-2xl opacity-0 hover:opacity-60 focus-visible:opacity-60"
+                >
+                  ›
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </dialog>
+    </>
   );
 }
