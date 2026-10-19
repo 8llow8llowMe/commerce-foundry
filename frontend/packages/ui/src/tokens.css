@@ -17,6 +17,8 @@
   --cf-radius-md: 0.5rem;
   /* 가장 작은 글자(text-xs). 브랜드가 최소 글자 크기를 정하면 덮어쓴다 */
   --cf-text-xs: 0.75rem;
+  /* 브랜드 모티프 모양(사진 한두 장에만) — border-radius 값. 중립은 직사각형 */
+  --cf-motif-radius: 0;
   --cf-font-sans:
     ui-sans-serif, system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   /* 영문 제목 */
