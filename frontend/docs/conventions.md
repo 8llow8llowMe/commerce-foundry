@@ -13,6 +13,8 @@
 - 사용자 문구는 한국어. 서버 `resultMessage` 를 우선한다.
 - 서버 전용 모듈(`@cf/api-client/server`, `next/headers`)을 클라이언트 컴포넌트에서 import 하지 않는다.
 - 환경변수는 앱의 `src/lib/env.ts` 에서만 읽는다.
+- 서버가 준 HTML 원문(상품 상세 `descriptionHtml` 등)은 **서버 컴포넌트에서 `sanitizeProductHtml`(허용 목록)을 거친 뒤에만** `dangerouslySetInnerHTML` 에 넣는다. BE 는 정제하지 않는다.
+- JSON-LD 처럼 `<script>` 안에 운영 데이터를 넣을 때는 `<` 를 `\u003c` 로 이스케이프한다(`productJsonLd`).
 
 ## 3. 테스트
 
