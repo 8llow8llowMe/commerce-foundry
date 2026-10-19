@@ -2,19 +2,14 @@ import type { DetailSection as DetailSectionData } from '@cf/ui';
 import { MediaFrame } from './MediaFrame';
 import { SectionHeading } from './SectionHeading';
 
-/** 05 Craft & Details. 가운데 제목 → 클로즈업 3칸 → 번호 붙은 제작 포인트 */
+/** 05 Craft & Details. 가운데 제목 → 클로즈업 3칸 → 제작 포인트(번호 · 구분선 없이 여백으로 나눈다, #57) */
 export function DetailSection({ section }: { section: DetailSectionData }) {
   const headingId = `${section.id}-title`;
 
   return (
     <section aria-labelledby={headingId} className="mx-auto w-full max-w-screen-xl px-4 lg:px-8">
       <div className="mx-auto flex max-w-2xl flex-col gap-5 text-center">
-        <SectionHeading
-          id={headingId}
-          eyebrow={section.eyebrow}
-          title={section.title}
-          align="center"
-        />
+        <SectionHeading id={headingId} title={section.title} align="center" />
         <p className="font-serif leading-8">{section.body}</p>
       </div>
 
@@ -27,17 +22,14 @@ export function DetailSection({ section }: { section: DetailSectionData }) {
       )}
 
       {section.points.length > 0 && (
-        <ol className="mt-10 grid gap-8 lg:mt-14 lg:grid-cols-3">
-          {section.points.map((point, index) => (
-            <li key={point.title} className="flex flex-col gap-2 border-t border-border pt-5">
-              <span aria-hidden className="font-display text-lg text-muted-fg">
-                {String(index + 1).padStart(2, '0')}
-              </span>
-              <p className="text-sm font-medium">{point.title}</p>
-              <p className="text-sm leading-7 text-muted-fg">{point.text}</p>
+        <ul className="mt-12 grid gap-10 lg:mt-16 lg:grid-cols-3 lg:gap-12">
+          {section.points.map((point) => (
+            <li key={point.title} className="flex flex-col gap-2">
+              <p className="font-serif text-lg">{point.title}</p>
+              <p className="leading-7">{point.text}</p>
             </li>
           ))}
-        </ol>
+        </ul>
       )}
     </section>
   );

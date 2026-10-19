@@ -26,7 +26,6 @@ const slot = (placeholder: string) => ({ image: null, placeholder });
 const HERO: HeroData = {
   type: 'HERO',
   id: 'hero',
-  eyebrow: 'ACME 2026',
   title: ['Line One', 'Line Two'],
   subtitle: '한 줄 문구',
   cta: { label: 'EXPLORE', href: '/collection' },
@@ -92,7 +91,6 @@ describe('StorySection · DetailSection', () => {
   const story: StoryData = {
     type: 'STORY',
     id: 'story',
-    eyebrow: 'STORY',
     title: 'Pink Forest',
     body: '본문',
     links: [{ label: 'SEE', href: '/collection' }],
@@ -113,11 +111,10 @@ describe('StorySection · DetailSection', () => {
     expect(centered).toContain('text-center');
   });
 
-  it('디테일은 클로즈업 칸과 번호 붙은 포인트를 그린다', () => {
+  it('디테일은 클로즈업 칸과 포인트를 번호 · 라벨 없이 그린다(#57 금지 목록)', () => {
     const detail: DetailData = {
       type: 'DETAIL',
       id: 'detail',
-      eyebrow: 'THE DETAILS',
       title: 'Craft',
       body: '본문',
       points: [
@@ -128,8 +125,9 @@ describe('StorySection · DetailSection', () => {
     };
     const html = renderToStaticMarkup(<DetailSection section={detail} />);
     expect(html.match(/aspect-\[3\/4\]/g)).toHaveLength(3);
-    expect(html).toContain('>01</span>');
-    expect(html).toContain('>02</span>');
+    expect(html).toContain('첫째');
+    expect(html).not.toMatch(/>0[12]</);
+    expect(html).not.toContain('<ol');
   });
 });
 

@@ -7,7 +7,6 @@ export const homeEn: HomeSection[] = [
   {
     type: 'HERO',
     id: 'main-visual',
-    eyebrow: 'MOKOYURI 2026 COLLECTION',
     title: ['The Poetry of', 'Everyday Romance'],
     subtitle: 'Graceful lines of tradition, romance for today.',
     cta: { label: 'EXPLORE COLLECTION', href: '/collection' },
@@ -25,7 +24,6 @@ export const homeEn: HomeSection[] = [
   {
     type: 'STORY',
     id: 'collection-story',
-    eyebrow: 'COLLECTION STORY',
     title: 'Pink Forest',
     body: 'A collection where forest-light pink meets the graceful lines of hanbok — each piece a picture of its own.',
     links: [{ label: 'SEE THE COLLECTION', href: '/collection' }],
@@ -48,7 +46,6 @@ export const homeEn: HomeSection[] = [
   {
     type: 'DETAIL',
     id: 'craft-details',
-    eyebrow: 'THE DETAILS',
     title: 'The Beauty of Craft',
     body: 'Delicate stitching and traditional texture come together in clothes for today.',
     points: [
@@ -71,7 +68,6 @@ export const homeEn: HomeSection[] = [
   {
     type: 'STORY',
     id: 'our-story',
-    eyebrow: 'OUR STORY',
     title: 'From Hanbok, Toward Today',
     body: 'From the wrap of hanbok, the silhouette of its skirt and traditional motifs, we make clothes to wear today.',
     links: [{ label: 'OUR STORY', href: '/our-story' }],

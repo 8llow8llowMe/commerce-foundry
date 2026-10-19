@@ -13,9 +13,6 @@ export function HeroSection({ section }: { section: HeroSectionData }) {
     <section aria-labelledby={`${section.id}-title`} className="bg-accent text-accent-fg">
       <div className="mx-auto grid max-w-screen-xl lg:grid-cols-[2fr_3fr] lg:items-center">
         <div className="flex flex-col items-start gap-4 px-4 py-10 lg:px-12 lg:py-20">
-          {section.eyebrow && (
-            <p className="text-xs tracking-[0.25em] uppercase">{section.eyebrow}</p>
-          )}
           <h1
             id={`${section.id}-title`}
             className="font-display text-4xl leading-tight lg:text-6xl"

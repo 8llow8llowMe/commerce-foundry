@@ -7,7 +7,6 @@ export const home: HomeSection[] = [
   {
     type: 'HERO',
     id: 'main-visual',
-    eyebrow: 'MOKOYURI 2026 COLLECTION',
     title: ['The Poetry of', 'Everyday Romance'],
     subtitle: '전통의 고운 선, 오늘의 로맨스.',
     cta: { label: 'EXPLORE COLLECTION', href: '/collection' },
@@ -25,7 +24,6 @@ export const home: HomeSection[] = [
   {
     type: 'STORY',
     id: 'collection-story',
-    eyebrow: 'COLLECTION STORY',
     title: 'Pink Forest',
     body: '숲의 빛을 닮은 분홍과 한복의 고운 선이 만나는 컬렉션. 한 벌의 옷이 한 장의 화보가 되는 순간을 담았습니다.',
     links: [{ label: 'SEE THE COLLECTION', href: '/collection' }],
@@ -48,7 +46,6 @@ export const home: HomeSection[] = [
   {
     type: 'DETAIL',
     id: 'craft-details',
-    eyebrow: 'THE DETAILS',
     title: 'The Beauty of Craft',
     body: '섬세한 바느질과 전통의 결이 만나 오늘의 특별한 옷이 됩니다.',
     points: [
@@ -65,7 +62,6 @@ export const home: HomeSection[] = [
   {
     type: 'STORY',
     id: 'our-story',
-    eyebrow: 'OUR STORY',
     title: 'From Hanbok, Toward Today',
     body: '한복의 여밈과 치마의 실루엣, 전통 문양에서 출발해 오늘 입는 옷을 만듭니다.',
     links: [{ label: 'OUR STORY', href: '/our-story' }],
