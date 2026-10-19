@@ -39,7 +39,7 @@ pnpm workspace + Turborepo. 앱 둘과 패키지 셋이다.
 - 401 은 인증 단계 거절이라 서버가 처리하지 않았다. 쓰기 요청도 재발급 후 1회 재시도가 안전하다.
 - 같은 refresh 토큰의 동시 재발급은 인스턴스 안에서 한 번으로 합친다. 성공 결과는 30초(`REISSUE_GRACE_MS`) 동안
   같은 옛 refresh 토큰에 다시 내준다 — 브라우저가 새 쿠키를 반영하기 전에 옛 쿠키로 온 요청(병렬 요청·다른 탭)이
-  회전된 refresh 로 재발급을 시도해 로그아웃되는 것을 막는다. 다중 인스턴스 경합은 #25 에서 BE 와 정한다.
+  회전된 refresh 로 재발급을 시도해 로그아웃되는 것을 막는다. 다른 인스턴스로 간 같은 refresh 는 BE 가 30초 유예 안에 3회까지 새 토큰을 내준다(PR #99, 넷째는 AUTH_012 로 family 폐기).
 - 재발급이 성공한 뒤 재시도가 연결 실패해도 새 쿠키는 심는다(회전된 refresh 토큰을 잃지 않는다).
 
 ### CSRF
@@ -56,8 +56,13 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
 - 고객 `cf_at` / `cf_rt`, 어드민 `cf_admin_at` / `cf_admin_rt` — 세션을 섞지 않는다.
 - 쿠키를 지우는 조건은 **재발급 명시적 거절**(4xx 또는 `success=false`)뿐이다. 재발급 5xx · 연결 실패 · 봉투 아님 ·
   토큰 누락은 일시 장애로 보고 쿠키를 그대로 둔 채 BFF_002 503 을 준다(일시 장애로 세션을 날리지 않는다).
-- 이름·수명은 임시다. 고객은 #25, 어드민은 #29 에서 BE 토큰 만료와 맞춰 확정한다.
-- 재발급 요청·응답 모양(`{ refreshToken }` → `{ accessToken, refreshToken }`)은 #4 기준 가정이다. #4 머지 후 `packages/api-client/src/server/reissue.ts` 를 맞춘다.
+- **로그인**은 전용 route handler(`app/api/v1/auth/login`, `createLoginHandler`)가 받는다 — 일반 프록시보다 구체적인 경로라 먼저 잡힌다.
+  BE 는 토큰을 응답 본문으로 주므로(Set-Cookie 없음) BFF 가 쿠키로 심고, 브라우저에는 토큰을 뺀 성공 봉투(`dataBody: null`)만 준다.
+  쿠키 수명은 응답의 `accessTokenExpiresIn` · `refreshTokenExpiresIn`(초)이고, 없으면 앱 설정값이다. 같은 origin 요청만 받는다(login CSRF).
+  실패는 게이트웨이 봉투 · 상태를 그대로 중계한다 — 로그인 실패는 401 이 아니라 **400 `AUTH_001`** 이라 화면은 kind 가 아니라 code 로 본다.
+- 고객 쿠키 이름 `cf_at` / `cf_rt` 와 대체 수명(30분 / 14일, BE 설정과 같다)은 `apps/storefront/src/lib/auth-cookies.ts`. 어드민은 #29 에서 정한다.
+- 인증 계약은 BE PR #99 기준이다(머지 전): 재발급 `{ refreshToken }` → 로그인과 같은 모양. 재발급 쿠키도 응답 수명을 쓰게 하는 것과
+  로그아웃(Bearer + `{ refreshToken }`, 401 이면 재발급 후 1회 재시도) · 회원가입은 #25 다음 단계에서 붙인다.
 
 ## 4. 헬스체크
 
