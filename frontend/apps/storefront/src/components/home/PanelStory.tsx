@@ -16,6 +16,7 @@ export function PanelStory({ section }: { section: StorySectionData }) {
     <section aria-labelledby={headingId} className="mx-2.5 overflow-hidden bg-fg text-bg lg:mx-5">
       <div className="mx-auto grid max-w-screen-xl gap-10 px-6 pt-16 lg:min-h-[110svh] lg:grid-cols-12 lg:grid-rows-[auto_1fr] lg:gap-x-8 lg:px-12 lg:pt-24">
         <h2
+          data-reveal="title"
           id={headingId}
           className="font-serif text-[1.75rem] leading-[1.25] lg:col-span-5 lg:text-[2.75rem]"
         >
@@ -24,7 +25,7 @@ export function PanelStory({ section }: { section: StorySectionData }) {
 
         <div className="flex flex-col gap-6 lg:col-span-4 lg:col-start-9 lg:row-span-2">
           {paragraphs.map((paragraph, index) => (
-            <p key={index} className="leading-7">
+            <p key={index} data-reveal="text" className="leading-7">
               {paragraph}
             </p>
           ))}

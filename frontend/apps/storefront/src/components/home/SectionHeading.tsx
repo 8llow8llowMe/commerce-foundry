@@ -14,7 +14,10 @@ export function SectionHeading({
   size?: 'title' | 'display';
 }) {
   return (
-    <div className={cx('flex flex-col gap-3', align === 'center' && 'items-center text-center')}>
+    <div
+      data-reveal="title"
+      className={cx('flex flex-col gap-3', align === 'center' && 'items-center text-center')}
+    >
       <h2
         id={id}
         className={cx(

@@ -16,7 +16,9 @@ export function CurtainStory({ section }: { section: StorySectionData }) {
       <div className="mx-auto max-w-screen-xl px-4 lg:px-8">
         <div className="flex w-3/5 flex-col gap-4 lg:w-[220px]">
           <SectionHeading id={headingId} title={section.title} />
-          <p className="leading-7">{section.body}</p>
+          <p data-reveal="text" className="leading-7">
+            {section.body}
+          </p>
         </div>
       </div>
 

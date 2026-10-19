@@ -22,7 +22,9 @@ export function StorySection({ section }: { section: StorySectionData }) {
         title={section.title}
         align={section.layout === 'centered' ? 'center' : 'left'}
       />
-      <p className="font-serif text-base leading-8 whitespace-pre-line">{section.body}</p>
+      <p data-reveal="text" className="font-serif text-base leading-8 whitespace-pre-line">
+        {section.body}
+      </p>
       {section.links.length > 0 && (
         <div className={section.layout === 'centered' ? 'flex justify-center gap-6' : 'flex gap-6'}>
           {section.links.map((link) => (
