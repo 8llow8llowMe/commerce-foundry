@@ -1,0 +1,92 @@
+import type { FooterLink } from '@cf/ui';
+import { cx } from '@cf/ui';
+import Link from 'next/link';
+import { businessVerificationUrl, type BusinessInfo } from '@/lib/business-info';
+
+export type SiteFooterProps = {
+  brandName: string;
+  links: FooterLink[];
+  business: BusinessInfo;
+  /** 저작권 연도. 테스트에서 고정하려고 받는다 */
+  year?: number;
+};
+
+/**
+ * 스토어프론트 공통 푸터. 고객 안내 링크(브랜드 설정)와 사업자 정보(서버 env)를 둔다.
+ * 사업자 정보는 값이 있는 줄만 그린다 — 로컬 · 미설정 환경에서도 깨지지 않는다.
+ */
+export function SiteFooter({
+  brandName,
+  links,
+  business,
+  year = new Date().getFullYear(),
+}: SiteFooterProps) {
+  const rows: { label: string; value: string | null }[] = [
+    { label: '상호', value: business.name },
+    { label: '대표', value: business.representative },
+    { label: '사업자등록번호', value: business.registrationNumber },
+    { label: '통신판매업 신고번호', value: business.mailOrderNumber },
+    { label: '주소', value: business.address },
+    { label: '고객센터', value: business.contact },
+  ];
+  const shown = rows.filter((row): row is { label: string; value: string } => row.value !== null);
+  const verifyUrl = businessVerificationUrl(business.registrationNumber);
+
+  return (
+    <footer className="border-t border-border">
+      <div className="mx-auto flex max-w-screen-xl flex-col gap-10 px-4 py-12 lg:flex-row lg:justify-between lg:gap-16 lg:px-8 lg:py-16">
+        <div className="flex flex-col gap-6">
+          <Link href="/" className="font-display text-2xl tracking-[0.25em] uppercase">
+            {brandName}
+          </Link>
+          {links.length > 0 && (
+            <nav aria-label="고객 안내">
+              <ul className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
+                {links.map((link) => (
+                  <li key={`${link.href}-${link.label}`}>
+                    <Link
+                      href={link.href}
+                      className={cx(
+                        'hover:underline',
+                        link.emphasis ? 'font-semibold' : 'text-muted-fg',
+                      )}
+                    >
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          )}
+        </div>
+
+        {shown.length > 0 && (
+          <section aria-label="사업자 정보" className="text-xs leading-6 text-muted-fg lg:max-w-xl">
+            <dl className="flex flex-wrap gap-x-4">
+              {shown.map((row) => (
+                <div key={row.label} className="flex gap-1">
+                  <dt>{row.label}</dt>
+                  <dd className="text-fg">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+            {verifyUrl && (
+              <a
+                href={verifyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block underline underline-offset-4 hover:text-fg"
+              >
+                사업자 정보 확인
+              </a>
+            )}
+          </section>
+        )}
+      </div>
+
+      <p className="border-t border-border px-4 py-5 text-center text-xs tracking-[0.15em] text-muted-fg">
+        © {year} {brandName}
+      </p>
+    </footer>
+  );
+}
