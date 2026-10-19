@@ -5,12 +5,13 @@ import { Button, cx } from '@cf/ui';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   displayPrice,
-  optionValueState,
   resolveSku,
+  selectOption,
   type OptionSelection,
 } from '@/lib/catalog/option-selection';
 import type { ProductDetail } from '@/lib/catalog/types';
 import { CustomOrderFields, type CustomOrderValues } from './CustomOrderFields';
+import { OptionGroupsField } from './OptionGroupsField';
 
 /** 클라이언트로 넘기는 상세 데이터. 큰 descriptionHtml 은 서버에서만 쓴다 */
 export type PurchaseProduct = Omit<ProductDetail, 'descriptionHtml' | 'images' | 'categoryPath'>;
@@ -32,6 +33,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
   const [customValues, setCustomValues] = useState<CustomOrderValues>({});
   const quantityLabelId = useId();
   const noticeId = useId();
+  const radioPrefix = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const [panelInView, setPanelInView] = useState(false);
 
@@ -65,19 +67,8 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
   const maxQuantity = product.maxQuantityPerOrder ?? QUANTITY_CAP;
   const productOnSale = product.saleStatus.code === 'ON_SALE';
 
-  const select = (groupId: string, valueId: string) => {
-    setSelection((current) => {
-      const next = { ...current, [groupId]: valueId };
-      // 새 값과 함께 살 수 없게 된 다른 그룹의 선택은 푼다
-      for (const [otherGroup, otherValue] of Object.entries(next)) {
-        if (otherGroup === groupId) continue;
-        if (optionValueState(product.skus, next, otherGroup, otherValue) !== 'available') {
-          delete next[otherGroup];
-        }
-      }
-      return next;
-    });
-  };
+  const select = (groupId: string, valueId: string) =>
+    setSelection((current) => selectOption(product.skus, current, groupId, valueId));
 
   const notice = !productOnSale
     ? product.saleStatus.name
@@ -113,52 +104,13 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
         )}
       </p>
 
-      {groups.map((group) => (
-        <fieldset key={group.optionGroupId} className="flex flex-col gap-3">
-          <legend className="mb-3 text-xs tracking-[0.15em] uppercase">{group.name}</legend>
-          <div className="flex flex-wrap gap-2">
-            {group.values.map((value) => {
-              // 어떤 조합으로도 살 수 없는 값만 막는다. 지금 고른 다른 옵션과 안 맞는 값은 취소선으로 보이되
-              // 누를 수 있다 — 누르면 select() 가 충돌하는 다른 선택을 푼다.
-              const disabled =
-                optionValueState(product.skus, {}, group.optionGroupId, value.optionValueId) !==
-                'available';
-              const state = optionValueState(
-                product.skus,
-                selection,
-                group.optionGroupId,
-                value.optionValueId,
-              );
-              const checked = selection[group.optionGroupId] === value.optionValueId;
-              return (
-                <label
-                  key={value.optionValueId}
-                  className={cx(
-                    'relative inline-flex min-h-10 min-w-12 cursor-pointer items-center justify-center border px-4 text-sm transition',
-                    'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary',
-                    checked ? 'border-fg bg-fg text-bg' : 'border-border hover:border-fg',
-                    !checked && state !== 'available' && 'text-muted-fg line-through',
-                    disabled && 'cursor-not-allowed hover:border-border',
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name={group.optionGroupId}
-                    value={value.optionValueId}
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={() => select(group.optionGroupId, value.optionValueId)}
-                    className="sr-only"
-                  />
-                  {value.name}
-                  {state === 'soldOut' && <span className="sr-only"> (품절)</span>}
-                  {state === 'unavailable' && <span className="sr-only"> (선택 불가)</span>}
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
-      ))}
+      <OptionGroupsField
+        groups={groups}
+        skus={product.skus}
+        selection={selection}
+        namePrefix={radioPrefix}
+        onSelect={select}
+      />
 
       {sku && sku.additionalPrice.amount > 0 && (
         <p className="text-sm text-muted-fg">옵션 추가금 +{formatMoney(sku.additionalPrice)}</p>

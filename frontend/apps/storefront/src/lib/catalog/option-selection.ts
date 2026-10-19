@@ -49,6 +49,23 @@ export function optionValueState(
   return 'unavailable';
 }
 
+/** 값 하나를 고른 다음 선택. 새 값과 함께 살 수 없게 된 다른 그룹의 선택은 푼다 */
+export function selectOption(
+  skus: ProductSku[],
+  selection: OptionSelection,
+  groupId: string,
+  valueId: string,
+): OptionSelection {
+  const next = { ...selection, [groupId]: valueId };
+  for (const [otherGroup, otherValue] of Object.entries(next)) {
+    if (otherGroup === groupId) continue;
+    if (optionValueState(skus, next, otherGroup, otherValue) !== 'available') {
+      delete next[otherGroup];
+    }
+  }
+  return next;
+}
+
 export type DisplayPrice = {
   salePrice: Money;
   /** 할인 전 정가 — 상품 표시가에 대한 값이라, SKU 를 골랐으면 그 판매가가 표시가와 같을 때만 */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayPrice, optionValueState, resolveSku } from './option-selection';
+import { displayPrice, optionValueState, resolveSku, selectOption } from './option-selection';
 import type { ProductDetail, ProductOptionGroup, ProductSku, SaleStatusCode } from './types';
 
 const krw = (amount: number) => ({ amount, currency: 'KRW' as const });
@@ -102,6 +102,26 @@ describe('optionValueState', () => {
   it('같은 그룹의 현재 선택은 무시하고 바꿀 값으로 본다', () => {
     expect(optionValueState(SKUS, { color: 'ivory', size: 's' }, 'size', 'm')).toBe('soldOut');
     expect(optionValueState(SKUS, { color: 'ivory', size: 'm' }, 'size', 'l')).toBe('available');
+  });
+});
+
+describe('selectOption', () => {
+  it('값을 고르고 다른 그룹 선택은 그대로 둔다', () => {
+    expect(selectOption(SKUS, { color: 'ivory' }, 'size', 'l')).toEqual({
+      color: 'ivory',
+      size: 'l',
+    });
+  });
+
+  it('새 값과 함께 살 수 없게 된 다른 그룹의 선택은 푼다', () => {
+    // 먹색 L 은 없다 → 먹색을 고른 상태에서 L 을 누르면 색상 선택이 풀린다
+    expect(selectOption(SKUS, { color: 'ink' }, 'size', 'l')).toEqual({ size: 'l' });
+  });
+
+  it('원래 선택 객체는 바꾸지 않는다', () => {
+    const before = { color: 'ink' };
+    selectOption(SKUS, before, 'size', 'l');
+    expect(before).toEqual({ color: 'ink' });
   });
 });
 
