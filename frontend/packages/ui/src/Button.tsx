@@ -9,7 +9,8 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const VARIANT_CLASS: Record<Variant, string> = {
   primary: 'bg-primary text-primary-fg hover:opacity-90',
-  secondary: 'border border-border bg-bg text-fg hover:bg-muted',
+  // 버튼은 한 가지 모양(직각 + 단색 채움)으로 — 보조는 테두리 대신 강조 배경(accent)으로 채운다
+  secondary: 'bg-accent text-accent-fg hover:opacity-90',
 };
 
 /** 기본 type 은 button 이다. 폼 제출은 type="submit" 을 명시한다. */

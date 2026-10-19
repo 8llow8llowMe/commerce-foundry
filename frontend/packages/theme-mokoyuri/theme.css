@@ -16,12 +16,14 @@
   --cf-color-muted: #efe8e3; /* Porcelain 보다 한 단계 짙은 면 */
   /* Dusty Rose(#b9a7a5)는 글자로 쓰면 2.1:1 이라 AA 미달 — 같은 계열을 어둡게 해 5.5:1 로 맞춘다 */
   --cf-color-muted-fg: #6e5f5e;
-  --cf-color-border: #b9a7a5; /* Dusty Rose — 얇은 구분선 */
+  --cf-color-border: #b9a7a5; /* Dusty Rose — 입력 · 선택 컨트롤 테두리 (장식 구분선은 쓰지 않는다) */
   --cf-color-primary: #302b2c; /* Soft Black 버튼 */
   --cf-color-primary-fg: #f7f3ef;
   --cf-color-danger: #b42318;
   --cf-color-accent: #e7d4d7; /* Blush — 히어로 등 일부 구간 배경 */
   --cf-color-accent-fg: #302b2c;
+  /* 13px 미만 글자 금지(#57 §4) — 메뉴 · 상품명 · 가격 · 법정 정보의 Small 단계 하한 */
+  --cf-text-xs: 0.8125rem;
   /* 화보 · 상품 이미지 · 버튼은 각지게. 둥근 카드 UI 를 쓰지 않는다 */
   --cf-radius-md: 0;
 
