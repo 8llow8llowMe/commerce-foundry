@@ -58,6 +58,8 @@ export const brand: BrandConfig = {
         placeholder:
           '메인 마지막 화보 · 전폭 가로 · 아래쪽이 어둡고 여백이 넉넉한 컷(법정 정보 13px 가 얹힌다)',
       },
+      // 배송비 · 기간 · 교환 조건과 사이즈 치수는 고객사 확인 값만 넣는다 — 받기 전에는 숨긴다(#60)
+      productInfo: { sizeGuide: null, shipping: null },
       home,
     },
     // 영문 문구는 초안이다 — 고객사 확인 대상 (#31)
@@ -111,6 +113,8 @@ export const brand: BrandConfig = {
         placeholder:
           '메인 마지막 화보 · 전폭 가로 · 아래쪽이 어둡고 여백이 넉넉한 컷(법정 정보 13px 가 얹힌다)',
       },
+      // 배송비 · 기간 · 교환 조건과 사이즈 치수는 고객사 확인 값만 넣는다 — 받기 전에는 숨긴다(#60)
+      productInfo: { sizeGuide: null, shipping: null },
       home: homeEn,
     },
   },
