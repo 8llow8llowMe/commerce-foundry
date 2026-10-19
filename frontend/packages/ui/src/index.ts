@@ -1,4 +1,4 @@
-export type { BrandConfig, NavItem } from './brand';
+export type { BrandConfig, FooterLink, NavItem } from './brand';
 export { Button, type ButtonProps } from './Button';
 export type {
   DetailSection,

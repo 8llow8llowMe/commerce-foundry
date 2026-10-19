@@ -13,6 +13,14 @@ export type NavItem = {
   shortcut?: boolean;
 };
 
+/** 푸터 고객 안내 링크 (약관 · 개인정보처리방침 · 고객센터 등) */
+export type FooterLink = {
+  label: string;
+  href: string;
+  /** 굵게 — 개인정보처리방침은 다른 약관과 구분해 눈에 띄게 둔다 */
+  emphasis?: boolean;
+};
+
 /** 브랜드 테마 패키지(theme-<brand>)가 채우는 설정. 고객사 실정보(사업자번호 등)는 넣지 않는다. */
 export type BrandConfig = {
   name: string;
@@ -25,6 +33,8 @@ export type BrandConfig = {
   };
   /** 전체 메뉴 순서대로 */
   navigation: NavItem[];
+  /** 푸터 고객 안내 링크, 순서대로. 사업자 실정보는 여기 두지 않는다(서버 env BUSINESS_*) */
+  footerLinks: FooterLink[];
   /** 메인 화면 섹션, 위에서부터. 메인 전시 API(#63)가 생기면 그 응답으로 바꾼다 */
   home: HomeSection[];
 };
