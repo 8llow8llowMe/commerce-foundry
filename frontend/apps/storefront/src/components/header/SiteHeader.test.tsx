@@ -81,8 +81,8 @@ describe('SiteHeader', () => {
 
   it('언어가 둘 이상이면 메뉴 패널에 언어 전환 링크를 두고 지금 언어를 표시한다', () => {
     const languages: LanguageLink[] = [
-      { locale: 'ko', name: '한국어', href: '/' },
-      { locale: 'en', name: 'English', href: '/en' },
+      { locale: 'ko', name: '한국어', href: '/', target: { origin: '', prefix: '' } },
+      { locale: 'en', name: 'English', href: '/en', target: { origin: '', prefix: '/en' } },
     ];
     expect(render(NAV, languages.slice(0, 1))).not.toContain('aria-label="언어 선택"');
     const html = render(NAV, languages);

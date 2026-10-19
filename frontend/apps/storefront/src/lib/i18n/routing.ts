@@ -103,3 +103,40 @@ export function localeUrl(
   const host = routing.hosts[locale];
   return host ? `https://${host}${path}` : `${origin}${localizePath(routing, locale, path)}`;
 }
+
+/** 다른 언어의 같은 화면으로 가는 데 필요한 값. 서버가 라우팅 설정으로 만들어 클라이언트에 넘긴다 */
+export type LocaleTarget = {
+  /** 다른 호스트면 'https://en.example.com', 같은 호스트면 '' */
+  origin: string;
+  /** 그 언어의 경로 접두어('' 또는 '/en') */
+  prefix: string;
+};
+
+export function localeTarget(
+  routing: LocaleRouting,
+  locale: Locale,
+  siteOrigin: string,
+): LocaleTarget {
+  const host = routing.hosts[locale];
+  // 언어 호스트를 하나라도 쓰면 언어마다 호스트가 다를 수 있어 절대 주소로 간다
+  const origin =
+    Object.keys(routing.hosts).length === 0 ? '' : host ? `https://${host}` : siteOrigin;
+  return { origin, prefix: localePrefix(routing, locale) };
+}
+
+/** 브라우저 주소에서 지금 언어의 접두어를 떼어 앱 경로로('/en/shop' → '/shop', '/en' → '/') */
+export function stripLocalePrefix(pathname: string, prefix: string): string {
+  if (!prefix) return pathname;
+  if (pathname === prefix) return '/';
+  return pathname.startsWith(`${prefix}/`) ? pathname.slice(prefix.length) : pathname;
+}
+
+/** 지금 보는 화면(브라우저 경로 · 쿼리)을 다른 언어의 같은 화면 주소로 */
+export function switchLocaleHref(
+  location: { pathname: string; search: string },
+  currentPrefix: string,
+  target: LocaleTarget,
+): string {
+  const appPath = stripLocalePrefix(location.pathname, currentPrefix);
+  return `${target.origin}${withLocalePrefix(target.prefix, appPath)}${location.search}`;
+}
