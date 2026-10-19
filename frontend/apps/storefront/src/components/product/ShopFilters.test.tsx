@@ -26,16 +26,22 @@ const render = (query: ShopQuery) =>
 const currentLabels = (html: string) =>
   [...html.matchAll(/<a [^>]*aria-current="[^"]+"[^>]*>([^<]+)<\/a>/g)].map((m) => m[1]);
 
+/** 화면에 놓인 줄(PC · 모바일 최상위 줄)과 모바일 바텀시트를 나눈다 */
+const split = (html: string) => {
+  const at = html.indexOf('id="shop-sort-filter"');
+  return { inline: html.slice(0, at), sheet: html.slice(at) };
+};
+
 describe('ShopFilters', () => {
   it('전체 · 신상품순이 기본으로 선택되고 하위 줄은 없다', () => {
     const html = render({ categoryId: null, sort: 'NEWEST' });
-    expect(currentLabels(html)).toEqual(['전체', '신상품순']);
+    expect(currentLabels(split(html).inline)).toEqual(['전체', '신상품순']);
     expect(html).not.toContain('원피스 전체');
   });
 
   it('하위 카테고리를 고르면 최상위와 그 하위가 함께 선택되고 형제들이 보인다', () => {
     const html = render({ categoryId: '12', sort: 'PRICE_ASC' });
-    expect(currentLabels(html)).toEqual(['원피스', '미디', '낮은 가격순']);
+    expect(currentLabels(split(html).inline)).toEqual(['원피스', '미디', '낮은 가격순']);
     expect(html).toContain('원피스 전체');
     expect(html).toContain('>롱</a>');
   });
@@ -63,7 +69,32 @@ describe('ShopFilters', () => {
         labels={en.shop}
       />,
     );
-    expect(currentLabels(html)).toEqual(['원피스', 'All 원피스', 'Price: low to high']);
+    expect(currentLabels(split(html).inline)).toEqual([
+      '원피스',
+      'All 원피스',
+      'Price: low to high',
+    ]);
     expect(html).toContain('aria-label="Sort"');
+  });
+
+  it('모바일은 하단 고정 버튼으로 정렬 · 세부 카테고리 바텀시트를 연다(스크립트 없는 popover)', () => {
+    const html = render({ categoryId: '12', sort: 'PRICE_ASC' });
+    const { inline, sheet } = split(html);
+    expect(inline).toMatch(
+      /<button type="button" popoverTarget="shop-sort-filter"[^>]*>정렬 · 필터<\/button>/i,
+    );
+    // PC 줄의 정렬 · 세부 카테고리는 모바일에서 숨는다
+    expect(inline).toContain('class="hidden lg:ml-auto lg:block"');
+    expect(inline).toContain('class="hidden gap-5 lg:flex"');
+
+    expect(sheet).toMatch(/^id="shop-sort-filter" popover="auto" role="dialog"/);
+    expect(currentLabels(sheet)).toEqual(['낮은 가격순', '미디']);
+    expect(sheet).toMatch(/popoverTargetAction="hide" aria-label="닫기"/i);
+  });
+
+  it('하위 카테고리가 없으면 시트에는 정렬만 있다', () => {
+    const { sheet } = split(render({ categoryId: '2', sort: 'NEWEST' }));
+    expect(sheet).not.toContain('aria-label="카테고리"');
+    expect(currentLabels(sheet)).toEqual(['신상품순']);
   });
 });

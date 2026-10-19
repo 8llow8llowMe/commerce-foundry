@@ -30,6 +30,9 @@ export const ko = {
     allOf: '{name} 전체',
     sort: '정렬',
     sortTypes: { NEWEST: '신상품순', PRICE_ASC: '낮은 가격순', PRICE_DESC: '높은 가격순' },
+    /** 모바일 하단 고정 버튼 · 바텀시트 제목 */
+    sortAndFilter: '정렬 · 필터',
+    closeSheet: '닫기',
     loadFailed: '상품을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
     reload: '다시 불러오기',
     loadMoreFailed: '상품을 더 불러오지 못했습니다.',

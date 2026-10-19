@@ -34,6 +34,8 @@ export const en: Dictionary = {
       PRICE_ASC: 'Price: low to high',
       PRICE_DESC: 'Price: high to low',
     },
+    sortAndFilter: 'Sort · Filter',
+    closeSheet: 'Close',
     loadFailed: 'We could not load the products. Please try again in a moment.',
     reload: 'Reload',
     loadMoreFailed: 'We could not load more products.',
