@@ -21,6 +21,23 @@ export type FooterLink = {
   emphasis?: boolean;
 };
 
+/** 사이즈 가이드 표 — 상점 공통 치수. 상품마다 다른 치수(사이즈 · 핏)는 상품 데이터로 받는다(BE) */
+export type SizeGuide = {
+  /** 머리줄. 첫 칸은 사이즈 열 이름 (예: ['사이즈', '가슴둘레', '총장']) */
+  columns: string[];
+  /** 줄마다 columns 와 같은 수의 칸. 첫 칸이 사이즈 이름 */
+  rows: string[][];
+  /** 표 아래 안내 한 줄 (예: '단위 cm, 재는 방법에 따라 1~2cm 차이'). 없으면 null */
+  note: string | null;
+};
+
+/** 상품 상세 아래 아코디언의 상점 공통 안내(#60). 값이 null 인 항목은 그리지 않는다 */
+export type ProductInfo = {
+  sizeGuide: SizeGuide | null;
+  /** 배송 · 교환 안내, 단락마다 하나 */
+  shipping: string[] | null;
+};
+
 /** 스토어 언어. URL 접두어(`/en`) · `<html lang>` · 사전 키로 쓴다 */
 export type Locale = 'ko' | 'en';
 
@@ -37,6 +54,8 @@ export type BrandContent = {
   footerLinks: FooterLink[];
   /** 메인 푸터의 전폭 배경 화보(#59 푸터) — 메인에서만 깔린다. 없으면 null(목록 · 상세와 같은 푸터) */
   footerBackdrop: HomeMediaSlot | null;
+  /** 상품 상세 공통 안내(사이즈 가이드 · 배송 · 교환). 고객사 값을 받기 전에는 null 로 숨긴다 */
+  productInfo: ProductInfo;
   /** 메인 화면 섹션, 위에서부터. 메인 전시 API(#63)가 생기면 그 응답으로 바꾼다 */
   home: HomeSection[];
 };

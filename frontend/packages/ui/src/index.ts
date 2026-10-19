@@ -1,4 +1,12 @@
-export type { BrandConfig, BrandContent, FooterLink, Locale, NavItem } from './brand';
+export type {
+  BrandConfig,
+  BrandContent,
+  FooterLink,
+  Locale,
+  NavItem,
+  ProductInfo,
+  SizeGuide,
+} from './brand';
 export { Button, type ButtonProps } from './Button';
 export type {
   DetailPoint,
