@@ -3,6 +3,7 @@ export { readCookie, serializeCookie, type AuthCookieConfig } from './cookies';
 export { gatewayRequest, type GatewayRequestOptions } from './gateway-request';
 export { checkGateway, healthResponse, type HealthReport, type HealthStatus } from './health';
 export { createLoginHandler, LOGIN_PATH, type LoginHandlerOptions } from './login';
+export { createLogoutHandler, LOGOUT_PATH, type LogoutHandlerOptions } from './logout';
 export { createProxyHandler, type ProxyOptions } from './proxy';
 export { createSignUpHandler, SIGN_UP_PATH, type SignUpResult } from './sign-up';
 export {

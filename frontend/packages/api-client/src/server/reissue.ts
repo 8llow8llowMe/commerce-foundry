@@ -4,6 +4,9 @@ import { joinUrl } from './url';
 export type TokenPair = {
   accessToken: string;
   refreshToken: string;
+  /** 서버가 준 수명(초). 없으면 쿠키는 앱 설정 수명을 쓴다 */
+  accessTokenExpiresIn?: number;
+  refreshTokenExpiresIn?: number;
 };
 
 /**
@@ -29,7 +32,7 @@ const recent = new Map<string, { result: ReissueResult; expiresAt: number }>();
 
 /**
  * 요청 `{ refreshToken }` → dataBody `{ accessToken, refreshToken, *ExpiresIn }` (BE PR #99 계약).
- * 응답 수명(`*ExpiresIn`)은 아직 읽지 않고 앱 설정 수명으로 쿠키를 심는다 — 로그인 핸들러(login.ts)는 읽는다.
+ * 응답 수명(`*ExpiresIn`, 초)은 `TokenPair` 에 실어 쿠키 수명으로 쓴다(`issueCookies`) — 로그인과 같다.
  */
 export function reissueTokens(
   gatewayUrl: string,
@@ -76,15 +79,29 @@ async function requestReissue(
     const payload: unknown = await response.json().catch(() => null);
     if (!isApiEnvelope(payload)) return { status: 'unavailable' };
     if (!response.ok || !payload.dataHeader.success) return { status: 'rejected' };
-    const body = payload.dataBody as Partial<TokenPair> | null;
-    if (typeof body?.accessToken !== 'string' || typeof body.refreshToken !== 'string') {
-      return { status: 'unavailable' };
-    }
-    return {
-      status: 'issued',
-      pair: { accessToken: body.accessToken, refreshToken: body.refreshToken },
-    };
+    const pair = readTokenPair(payload.dataBody);
+    return pair ? { status: 'issued', pair } : { status: 'unavailable' };
   } catch {
     return { status: 'unavailable' };
   }
+}
+
+/**
+ * 로그인 · 재발급 dataBody `{ accessToken, refreshToken, accessTokenExpiresIn?, refreshTokenExpiresIn? }`(BE PR #99, 수명은 초)를 읽는다.
+ * 토큰이 없으면 null(계약 불일치), 수명은 양의 정수일 때만 싣는다.
+ */
+export function readTokenPair(body: unknown): TokenPair | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const value = body as Record<string, unknown>;
+  if (typeof value.accessToken !== 'string' || typeof value.refreshToken !== 'string') return null;
+  const pair: TokenPair = { accessToken: value.accessToken, refreshToken: value.refreshToken };
+  const access = lifetime(value.accessTokenExpiresIn);
+  const refresh = lifetime(value.refreshTokenExpiresIn);
+  if (access !== undefined) pair.accessTokenExpiresIn = access;
+  if (refresh !== undefined) pair.refreshTokenExpiresIn = refresh;
+  return pair;
+}
+
+function lifetime(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }
