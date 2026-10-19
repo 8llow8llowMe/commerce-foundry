@@ -21,11 +21,11 @@ export type FooterLink = {
   emphasis?: boolean;
 };
 
-/** 브랜드 테마 패키지(theme-<brand>)가 채우는 설정. 고객사 실정보(사업자번호 등)는 넣지 않는다. */
-export type BrandConfig = {
-  name: string;
-  logoSrc: string | null;
-  defaultLocale: 'ko-KR' | 'en-US';
+/** 스토어 언어. URL 접두어(`/en`) · `<html lang>` · 사전 키로 쓴다 */
+export type Locale = 'ko' | 'en';
+
+/** 언어마다 다른 브랜드 문구. 링크 href 는 언어 접두어 없는 경로로 적는다 — 앱이 붙인다 */
+export type BrandContent = {
   seo: {
     /** 예: '%s | 브랜드명' */
     titleTemplate: string;
@@ -37,4 +37,16 @@ export type BrandConfig = {
   footerLinks: FooterLink[];
   /** 메인 화면 섹션, 위에서부터. 메인 전시 API(#63)가 생기면 그 응답으로 바꾼다 */
   home: HomeSection[];
+};
+
+/** 브랜드 테마 패키지(theme-<brand>)가 채우는 설정. 고객사 실정보(사업자번호 등)는 넣지 않는다. */
+export type BrandConfig = {
+  name: string;
+  logoSrc: string | null;
+  /** 접두어 없는 URL 의 언어. supported 의 첫 값이어야 한다 */
+  defaultLocale: Locale;
+  /** 이 스토어가 여는 언어. 하나뿐이면 언어 전환 · 접두어가 없다 */
+  locales: readonly Locale[];
+  /** 언어별 문구. 여는 언어는 모두 채운다 */
+  content: Record<Locale, BrandContent>;
 };
