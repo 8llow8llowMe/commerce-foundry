@@ -65,4 +65,27 @@ describe('ProductGallery', () => {
     expect(html).toContain('이미지 준비 중');
     expect(html).not.toContain('<dialog');
   });
+
+  it('이미지는 4:5 로 PC 에서 세로로 이어 붙이고, 모바일 위치는 점 대신 글자(1 / n)로 보인다', () => {
+    const html = renderToStaticMarkup(
+      <ProductGallery
+        name="윤금 드레스"
+        thumbnail={null}
+        images={[image('a', 0), image('b', 1), image('c', 2)]}
+      />,
+    );
+    expect(html).toContain('aspect-[4/5]');
+    expect(html).not.toContain('aspect-[3/4]');
+    expect(html).toContain('lg:flex-col');
+    expect(html.replace(/<!-- -->/g, '')).toMatch(
+      /<p aria-hidden="true" class="[^"]*lg:hidden">1 \/ 3<\/p>/,
+    );
+  });
+
+  it('한 장이면 모바일 위치 글자를 두지 않는다', () => {
+    const html = renderToStaticMarkup(
+      <ProductGallery name="x" thumbnail={null} images={[image('a', 0)]} />,
+    );
+    expect(html).not.toContain('lg:hidden');
+  });
 });
