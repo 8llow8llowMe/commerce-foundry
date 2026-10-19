@@ -7,7 +7,15 @@
 | 중립 토큰 | `packages/ui/src/tokens.css` | `--cf-*` 원시 토큰 기본값 + Tailwind `@theme inline` 연결 |
 | 브랜드 테마 | `packages/theme-<brand>/theme.css` | `--cf-*` 값만 덮어쓴다 |
 
-사용 가능한 클래스: `bg-bg` `text-fg` `bg-muted` `text-muted-fg` `border-border` `bg-primary` `text-primary-fg` `text-danger` `border-danger` `ring-primary` `rounded-md` `font-sans`.
+사용 가능한 클래스: `bg-bg` `text-fg` `bg-muted` `text-muted-fg` `border-border` `bg-primary` `text-primary-fg` `text-danger` `border-danger` `ring-primary` `bg-accent` `text-accent-fg` `rounded-md` `font-sans` `font-display` `font-serif`.
+
+| 글꼴 클래스 | 토큰 | 용도 |
+|-------------|------|------|
+| `font-sans` | `--cf-font-sans` | 본문 · 메뉴 · 상품명 · 가격 (기본) |
+| `font-display` | `--cf-font-display` | 영문 제목 · 워드마크 |
+| `font-serif` | `--cf-font-serif` | 한글 감성 문구 |
+
+`bg-accent` 는 히어로처럼 **일부 구간에만** 쓰는 강조 배경이다. 사이트 전체 배경으로 쓰지 않는다.
 새 토큰이 필요하면 `tokens.css` 에 `--cf-*` 와 `@theme` 연결을 같이 더하고 이 목록을 갱신한다.
 
 ## 2. 규칙
@@ -15,7 +23,10 @@
 - 임의 색 값(`bg-[#fff]`, `text-[rgb(...)]`)을 쓰지 않는다. ESLint `no-restricted-syntax` 가 막는다.
 - 앱 코드에 브랜드 이름·색을 하드코딩하지 않는다. 이름은 `brand.name`(`@cf/brand`).
 - 어드민은 브랜드 테마 CSS 를 import 하지 않는다(중립 토큰).
-- 폰트: 테마가 `--cf-font-sans` 를 정한다. 웹폰트를 로딩해야 하면 앱 `layout.tsx` 에서 `next/font` 로 하고 변수를 연결한다.
+- 폰트: 테마가 `--cf-font-*` 를 정하고 **웹폰트도 테마가 로딩한다** — `theme.css` 첫머리에서 npm 폰트 패키지의 CSS 를 `@import` 한다(self-host, 버전은 `pnpm-workspace.yaml` catalog).
+  앱 코드(`layout.tsx`)는 브랜드 글꼴을 모른다. 그래서 브랜드를 바꿔도 앱을 고치지 않는다.
+  한글 글꼴은 unicode-range 로 나뉜 CSS(`*-dynamic-subset.css`, Fontsource 의 굵기별 CSS)를 써서 쓰는 글자 구간만 내려받게 한다. 굵기도 쓰는 것만 import 한다.
+  `next/font` 를 쓰지 않으므로 preload · 폴백 크기 보정은 없다(`font-display: swap`).
 - 다크 모드는 아직 없다.
 
 ## 3. 메뉴 (navigation)
@@ -41,6 +52,20 @@
 2. 앱 `package.json` 의 `"@cf/brand": "workspace:@cf/theme-<brand>@*"` 한 줄을 바꾼다.
 3. `pnpm install && pnpm build`.
 
-## 6. 현재 MOKOYURI 팔레트
+## 6. 현재 MOKOYURI 테마 — "Romantic Heritage" (#57)
 
-임시 값이다(한지 아이보리 배경 · 쪽빛 primary). 브랜드 가이드를 받으면 `theme.css` 값만 바꾼다.
+배경은 아이보리, 핑크는 일부 구간만. 고급스러운 로맨틱 70% · 한국적 정체성 20% · 현대적 미니멀 10%.
+
+| 토큰 | 값 | 이름 | 대비(배경 대비) |
+|------|-----|------|-----------------|
+| `bg` | `#f7f3ef` | Porcelain | — |
+| `fg` · `primary` | `#302b2c` | Soft Black | 12.6:1 |
+| `muted-fg` | `#6e5f5e` | Dusty Rose 를 어둡게 | 5.5:1 |
+| `border` | `#b9a7a5` | Dusty Rose | 구분선 전용 (글자로 쓰면 2.1:1 로 AA 미달) |
+| `accent` | `#e7d4d7` | Blush | 위 글자는 `accent-fg`(Soft Black, 9.8:1) |
+| `muted` | `#efe8e3` | Porcelain 한 단계 짙게 | — |
+
+- 모서리 `--cf-radius-md: 0` — 이미지 · 버튼을 각지게, 둥근 카드 UI 를 쓰지 않는다.
+- 글꼴: 본문 Pretendard(가변), 영문 제목 Cormorant Garamond(300 · 400 · 400 italic), 한글 감성 문구 Noto Serif KR(400). 모두 OFL-1.1.
+  마루부리는 npm 배포가 없어 Noto Serif KR 로 갔다 — 바꾸려면 `--cf-font-serif` 와 import 만 바꾼다.
+- 세일 · 강조용 버건디 포인트는 아직 넣지 않았다(고객사 확인 대상).
