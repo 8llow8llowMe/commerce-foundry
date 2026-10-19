@@ -55,6 +55,7 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
             links={content.footerLinks}
             business={businessInfo}
             labels={dict.footer}
+            backdrop={content.footerBackdrop}
           />
         </LocaleProvider>
       </body>
