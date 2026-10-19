@@ -28,6 +28,20 @@
   한글 글꼴은 unicode-range 로 나뉜 CSS(`*-dynamic-subset.css`, Fontsource 의 굵기별 CSS)를 써서 쓰는 글자 구간만 내려받게 한다. 굵기도 쓰는 것만 import 한다.
   `next/font` 를 쓰지 않으므로 preload · 폴백 크기 보정은 없다(`font-display: swap`).
 - 다크 모드는 아직 없다.
+- 가장 작은 글자 `text-xs` 는 토큰 `--cf-text-xs` 다(중립 12px). 브랜드가 최소 글자 크기를 정하면 테마가 덮어쓴다.
+
+### 2-1. 디자인 금지 목록 (#57 §5, #118)
+
+스토어프론트 화면이 함께 지키는 규칙이다. 섹션 레이아웃 명세는 #59 · #60 댓글이다.
+
+- 제목 위 작은 라벨(eyebrow)을 두지 않는다 — `HomeSection` 타입에도 없다. 필요한 정보는 제목 · 첫 문장 · 버튼 문구에 넣는다.
+- `01 / 02 / 03` 번호 매기기를 하지 않는다.
+- 장식용 가는 구분선 · 1px 테두리 박스를 쓰지 않는다. 구분은 **여백**이나 **배경 톤 한 단계**(`bg-muted` · `bg-accent`)로 한다.
+  예외: 입력 · 선택 컨트롤(옵션 버튼 · 수량 · 입력칸)의 테두리, 콘텐츠 위에 떠 있는 층(고정 헤더 · 모바일 하단 구매 바)의 경계선, 진짜 표(`<table>`).
+- 버튼은 한 모양 — 직각 + 단색 채움. 주 버튼 `primary`(Soft Black), 보조 버튼 `secondary`(accent 채움, 테두리 없음).
+- 판매 상태(`품절` · `프리오더`)는 이미지 위 뱃지 · pill 이 아니라 가격 줄 뒤 글자로.
+- 본문(설명 · 제작 포인트 · 룩 설명)은 `fg`, 회색(`muted-fg`)은 보조 정보(정가 · 메뉴 설명 · 안내)에만.
+- 그림자 · 그라데이션 · 둥근 카드 · 유리 효과 · 이모지 · 한 단어만 이탤릭/색 강조를 쓰지 않는다.
 
 ## 3. 메뉴 (navigation)
 
@@ -95,11 +109,12 @@
 | `bg` | `#f7f3ef` | Porcelain | — |
 | `fg` · `primary` | `#302b2c` | Soft Black | 12.6:1 |
 | `muted-fg` | `#6e5f5e` | Dusty Rose 를 어둡게 | 5.5:1 |
-| `border` | `#b9a7a5` | Dusty Rose | 구분선 전용 (글자로 쓰면 2.1:1 로 AA 미달) |
+| `border` | `#b9a7a5` | Dusty Rose | 입력 · 선택 컨트롤 테두리 전용 (글자로 쓰면 2.1:1 로 AA 미달) |
 | `accent` | `#e7d4d7` | Blush | 위 글자는 `accent-fg`(Soft Black, 9.8:1) |
 | `muted` | `#efe8e3` | Porcelain 한 단계 짙게 | — |
 
 - 모서리 `--cf-radius-md: 0` — 이미지 · 버튼을 각지게, 둥근 카드 UI 를 쓰지 않는다.
+- 최소 글자 `--cf-text-xs: 0.8125rem`(13px) — #57 §4 "13px 미만 금지". 메뉴 · 상품명 · 가격 · 법정 정보의 Small 단계 하한이다.
 - 글꼴: 본문 Pretendard(가변), 영문 제목 Cormorant Garamond(300 · 400 · 400 italic), 한글 감성 문구 Noto Serif KR(400). 모두 OFL-1.1.
   마루부리는 npm 배포가 없어 Noto Serif KR 로 갔다 — 바꾸려면 `--cf-font-serif` 와 import 만 바꾼다.
 - 세일 · 강조용 버건디 포인트는 아직 넣지 않았다(고객사 확인 대상).
