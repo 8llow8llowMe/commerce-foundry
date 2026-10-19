@@ -17,6 +17,7 @@
 ## 3. 테스트
 
 - Vitest, 대상 파일 옆 `*.test.ts(x)`. 실행은 `frontend/` 루트에서 `pnpm test`.
+- 앱 테스트에서도 `@/` 별칭을 쓴다. 루트 `vitest.config.ts` 가 가져오는 파일이 속한 앱의 `src/` 로 푼다(앱 tsconfig 의 `paths` 와 같다).
 - 네트워크는 `fetch` 를 인자로 주입해 `vi.fn<typeof fetch>()` 로 대신한다.
 - 컴포넌트는 `react-dom/server` 의 `renderToStaticMarkup` 문자열로 확인한다(DOM 환경 없음).
 - 새 분기·새 오류 kind 에는 테스트를 같이 더한다. CI 는 `packages/api-client` · `packages/ui` 테스트가 0 건이면 실패한다.
