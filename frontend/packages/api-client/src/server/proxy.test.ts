@@ -154,6 +154,32 @@ describe('createProxyHandler', () => {
     ]);
   });
 
+  it('재발급 응답에 수명(*ExpiresIn)이 있으면 쿠키 수명으로 쓴다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      if (urlOf(input).endsWith(REISSUE_PATH)) {
+        return envelope(200, true, {
+          accessToken: 'access-life',
+          accessTokenExpiresIn: 900,
+          refreshToken: 'refresh-life-2',
+          refreshTokenExpiresIn: 3600,
+        });
+      }
+      return authOf(init) === 'Bearer access-life'
+        ? envelope(200, true, { id: 1 })
+        : unauthorized();
+    });
+    const handler = createProxyHandler({ gatewayUrl: GATEWAY, cookies: COOKIES, fetch: fetchImpl });
+
+    const res = await handler(
+      request('/api/v1/members/me', { cookie: 'cf_at=old; cf_rt=refresh-life-1' }),
+    );
+
+    expect(res.headers.getSetCookie()).toEqual([
+      'cf_at=access-life; Path=/; HttpOnly; SameSite=Lax; Max-Age=900',
+      'cf_rt=refresh-life-2; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600',
+    ]);
+  });
+
   it('재발급이 실패하면 인증 쿠키를 지우고 401 을 그대로 돌려준다', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) =>
       urlOf(input).endsWith(REISSUE_PATH)

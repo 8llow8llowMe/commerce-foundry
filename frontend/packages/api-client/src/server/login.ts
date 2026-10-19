@@ -1,6 +1,7 @@
 import { errorEnvelope, isApiEnvelope, type DataHeader } from '../envelope';
 import type { AuthCookieConfig } from './cookies';
 import { issueCookies, isSameOrigin } from './proxy';
+import { readTokenPair } from './reissue';
 import { joinUrl } from './url';
 
 export type LoginHandlerOptions = {
@@ -10,14 +11,6 @@ export type LoginHandlerOptions = {
 };
 
 export const LOGIN_PATH = '/api/v1/auth/login';
-
-/** 게이트웨이 로그인 dataBody(#4 · PR #99). 수명은 초 단위 */
-type LoginTokens = {
-  accessToken: string;
-  accessTokenExpiresIn: number | null;
-  refreshToken: string;
-  refreshTokenExpiresIn: number | null;
-};
 
 const FORWARD_HEADERS = ['content-type', 'accept-language'];
 
@@ -83,17 +76,14 @@ export async function attemptLogin(
     return { ok: false, response: noStore(Response.json(payload, { status: upstream.status })) };
   }
 
-  const tokens = readTokens(payload.dataBody);
+  const tokens = readTokenPair(payload.dataBody);
   // 성공이라면서 토큰이 없으면 계약 불일치 — 로그인된 척하지 않는다
   if (!tokens) return { ok: false, response: unavailable() };
 
   return {
     ok: true,
     dataHeader: payload.dataHeader,
-    cookies: issueCookies(options.cookies, tokens, {
-      access: tokens.accessTokenExpiresIn ?? undefined,
-      refresh: tokens.refreshTokenExpiresIn ?? undefined,
-    }),
+    cookies: issueCookies(options.cookies, tokens),
   };
 }
 
@@ -111,20 +101,6 @@ export function crossSite(): Response {
   return noStore(
     Response.json(errorEnvelope('BFF_003', '허용되지 않은 요청입니다.'), { status: 403 }),
   );
-}
-
-function readTokens(body: unknown): LoginTokens | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const value = body as Record<string, unknown>;
-  if (typeof value.accessToken !== 'string' || typeof value.refreshToken !== 'string') return null;
-  const seconds = (input: unknown) =>
-    typeof input === 'number' && Number.isInteger(input) && input > 0 ? input : null;
-  return {
-    accessToken: value.accessToken,
-    accessTokenExpiresIn: seconds(value.accessTokenExpiresIn),
-    refreshToken: value.refreshToken,
-    refreshTokenExpiresIn: seconds(value.refreshTokenExpiresIn),
-  };
 }
 
 export function unavailable(): Response {

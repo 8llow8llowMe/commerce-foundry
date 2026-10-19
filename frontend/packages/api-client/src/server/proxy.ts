@@ -123,23 +123,19 @@ function relay(upstream: Response, setCookies: string[]): Response {
   return new Response(upstream.body, { status: upstream.status, headers });
 }
 
-/** 토큰 쌍을 쿠키로. 수명은 서버가 준 값(초)이 있으면 그것을, 없으면 앱 설정값을 쓴다 */
-export function issueCookies(
-  config: AuthCookieConfig,
-  pair: TokenPair,
-  maxAgeSec: { access?: number; refresh?: number } = {},
-): string[] {
+/** 토큰 쌍을 쿠키로. 수명은 서버가 준 값(`*ExpiresIn`, 초)이 있으면 그것을, 없으면 앱 설정값을 쓴다 */
+export function issueCookies(config: AuthCookieConfig, pair: TokenPair): string[] {
   return [
     serializeCookie(
       config.accessName,
       pair.accessToken,
-      maxAgeSec.access ?? config.accessMaxAgeSec,
+      pair.accessTokenExpiresIn ?? config.accessMaxAgeSec,
       config.secure,
     ),
     serializeCookie(
       config.refreshName,
       pair.refreshToken,
-      maxAgeSec.refresh ?? config.refreshMaxAgeSec,
+      pair.refreshTokenExpiresIn ?? config.refreshMaxAgeSec,
       config.secure,
     ),
   ];
