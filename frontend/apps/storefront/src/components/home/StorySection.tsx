@@ -15,7 +15,6 @@ export function StorySection({ section }: { section: StorySectionData }) {
     <div className="flex flex-col gap-5">
       <SectionHeading
         id={headingId}
-        eyebrow={section.eyebrow}
         title={section.title}
         align={section.layout === 'centered' ? 'center' : 'left'}
       />

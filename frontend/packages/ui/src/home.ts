@@ -1,6 +1,6 @@
 // 메인 화면 섹션 계약. 유형은 BE 메인 전시 API(#63)의 섹션 유형과 같은 이름으로 둔다 —
 // API 가 생기면 브랜드 설정 대신 응답을 그대로 넘긴다. 유형 이름은 브랜드 무관 블록이고,
-// 'The Romantic Edit' 같은 브랜드 문구는 title 값이다.
+// 'The Romantic Edit' 같은 브랜드 문구는 title 값이다. 제목 위 작은 라벨(eyebrow)은 두지 않는다(#57 금지 목록).
 
 export type HomeLink = {
   label: string;
@@ -24,7 +24,6 @@ export type HomeMediaSlot = {
 export type HeroSection = {
   type: 'HERO';
   id: string;
-  eyebrow: string | null;
   /** 줄마다 하나 */
   title: string[];
   subtitle: string | null;
@@ -48,7 +47,6 @@ export type ProductPickSection = {
 export type StorySection = {
   type: 'STORY';
   id: string;
-  eyebrow: string | null;
   title: string;
   body: string;
   links: HomeLink[];
@@ -72,7 +70,6 @@ export type LookSection = {
 export type DetailSection = {
   type: 'DETAIL';
   id: string;
-  eyebrow: string | null;
   title: string;
   body: string;
   points: { title: string; text: string }[];
