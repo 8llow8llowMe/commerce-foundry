@@ -58,7 +58,7 @@ export async function ProductLooks({ productId }: { productId: string }) {
           'mt-10',
           single
             ? 'mx-auto max-w-5xl'
-            : '-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-6 overflow-x-auto px-4 lg:mx-0 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0',
+            : 'relative -mx-4 flex snap-x snap-mandatory scroll-px-4 gap-6 overflow-x-auto px-4 lg:mx-0 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0',
         )}
       >
         {visible.map((look) => (

@@ -10,6 +10,7 @@ import { SectionHeading } from './SectionHeading';
 /**
  * 02 대표 상품. 상품 목록 API 에서 고른다 — 이름 · 가격을 설정에 적지 않는다.
  * 못 받았거나 비었으면 메인을 깨뜨리지 않고 섹션을 그리지 않는다.
+ * PC 4열은 짝수 번째를 80px 내려 같은 카드가 줄지어 있는 느낌을 피하고, 모바일은 72vw 가로 스와이프(다음 카드가 보이게)다(#59).
  */
 export async function ProductPickSection({ section }: { section: ProductPickSectionData }) {
   let products: ProductListItem[];
@@ -41,9 +42,10 @@ export async function ProductPickSection({ section }: { section: ProductPickSect
           </Link>
         )}
       </div>
-      <ul className="grid grid-cols-2 gap-x-4 gap-y-10 lg:grid-cols-4 lg:gap-x-6">
+      {/* relative: 카드 안 sr-only(absolute)가 스크롤 상자 밖으로 새어 페이지 가로 스크롤을 만들지 않게 */}
+      <ul className="relative -mx-4 flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 lg:mx-0 lg:grid lg:grid-cols-4 lg:gap-x-6 lg:overflow-visible lg:px-0 lg:[&>li:nth-child(even)]:mt-20">
         {products.map((product) => (
-          <li key={product.productId}>
+          <li key={product.productId} className="w-[72vw] shrink-0 snap-start lg:w-auto">
             <ProductCard product={product} />
           </li>
         ))}

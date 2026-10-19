@@ -12,7 +12,10 @@ export function SectionHeading({
 }) {
   return (
     <div className={cx('flex flex-col gap-3', align === 'center' && 'items-center text-center')}>
-      <h2 id={id} className="font-display text-3xl lg:text-5xl">
+      <h2
+        id={id}
+        className="font-display text-[1.75rem] leading-[1.05] tracking-[-0.02em] lg:text-5xl"
+      >
         {title}
       </h2>
     </div>
