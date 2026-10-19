@@ -1,13 +1,17 @@
 'use client';
 
 import type { NavItem } from '@cf/ui';
-import Link from 'next/link';
 import { useId, useRef, useState } from 'react';
+import { LanguageLinks, type LanguageLink } from '@/components/i18n/LanguageLinks';
+import { Link } from '@/components/i18n/Link';
+import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { CloseIcon, MenuIcon } from './HeaderIcons';
 
 export type MenuPanelProps = {
   brandName: string;
   items: NavItem[];
+  labels: Dictionary['header'];
+  languages: LanguageLink[];
 };
 
 /**
@@ -15,7 +19,7 @@ export type MenuPanelProps = {
  * 네이티브 모달 <dialog>(showModal)를 쓴다 — 바깥을 inert 로 만들어 포커스를 가두고, ESC 로 닫히고,
  * 닫히면 연 버튼으로 포커스가 돌아간다. 직접 포커스 트랩을 만들지 않는다.
  */
-export function MenuPanel({ brandName, items }: MenuPanelProps) {
+export function MenuPanel({ brandName, items, labels, languages }: MenuPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
   const panelId = useId();
@@ -32,7 +36,7 @@ export function MenuPanel({ brandName, items }: MenuPanelProps) {
       <button
         type="button"
         className="-ml-2 inline-flex size-10 items-center justify-center"
-        aria-label="전체 메뉴 열기"
+        aria-label={labels.openMenu}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={panelId}
@@ -54,7 +58,7 @@ export function MenuPanel({ brandName, items }: MenuPanelProps) {
             <button
               type="button"
               className="-ml-2 inline-flex size-10 items-center justify-center"
-              aria-label="전체 메뉴 닫기"
+              aria-label={labels.closeMenu}
               onClick={closePanel}
             >
               <CloseIcon />
@@ -63,12 +67,12 @@ export function MenuPanel({ brandName, items }: MenuPanelProps) {
               id={titleId}
               className="text-center font-display text-xl tracking-[0.25em] uppercase"
             >
-              <span className="sr-only">전체 메뉴 — </span>
+              <span className="sr-only">{labels.menu} — </span>
               {brandName}
             </p>
           </div>
 
-          <nav aria-label="전체 메뉴" className="mt-8 lg:mt-10">
+          <nav aria-label={labels.menu} className="mt-8 lg:mt-10">
             <ul className="grid grid-cols-1 gap-x-12 sm:grid-cols-2">
               {items.map((item) => (
                 <li key={item.href} className="border-t border-border">
@@ -86,6 +90,12 @@ export function MenuPanel({ brandName, items }: MenuPanelProps) {
               ))}
             </ul>
           </nav>
+
+          <LanguageLinks
+            languages={languages}
+            label={labels.switchLanguage}
+            className="mt-8 border-t border-border pt-6"
+          />
         </div>
       </dialog>
     </>

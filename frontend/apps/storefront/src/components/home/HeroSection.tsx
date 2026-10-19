@@ -1,5 +1,5 @@
 import type { HeroSection as HeroSectionData } from '@cf/ui';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 
 /**
  * 01 Main Visual. 사이트에서 accent(Blush) 배경을 쓰는 몇 안 되는 구간이다.

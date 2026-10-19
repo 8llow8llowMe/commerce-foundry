@@ -8,3 +8,15 @@ export const gatewayUrl = process.env.GATEWAY_URL ?? 'http://localhost:8000';
  * 배포 환경은 빌드 · 실행 모두에 같은 값을 준다.
  */
 export const businessInfo = parseBusinessInfo(process.env);
+
+/**
+ * 서버 전용. 언어 전용 호스트(`en=en.example.com`). 없으면 모든 언어가 경로 방식(/en/...)이다.
+ * proxy 도 읽으므로 빌드 · 실행 모두에 같은 값을 준다.
+ */
+export const localeHosts = process.env.LOCALE_HOSTS;
+
+/** 기본 호스트의 정식 주소(끝 슬래시 없이) — hreflang · canonical 의 절대 주소. 빌드 시점에 들어간다(NEXT_PUBLIC_) */
+export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(
+  /\/+$/,
+  '',
+);

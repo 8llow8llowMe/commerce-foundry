@@ -1,12 +1,14 @@
 import type { FooterLink } from '@cf/ui';
 import { cx } from '@cf/ui';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 import { businessVerificationUrl, type BusinessInfo } from '@/lib/business-info';
+import type { Dictionary } from '@/lib/i18n/dictionaries';
 
 export type SiteFooterProps = {
   brandName: string;
   links: FooterLink[];
   business: BusinessInfo;
+  labels: Dictionary['footer'];
   /** 저작권 연도. 테스트에서 고정하려고 받는다 */
   year?: number;
 };
@@ -19,15 +21,16 @@ export function SiteFooter({
   brandName,
   links,
   business,
+  labels,
   year = new Date().getFullYear(),
 }: SiteFooterProps) {
   const rows: { label: string; value: string | null }[] = [
-    { label: '상호', value: business.name },
-    { label: '대표', value: business.representative },
-    { label: '사업자등록번호', value: business.registrationNumber },
-    { label: '통신판매업 신고번호', value: business.mailOrderNumber },
-    { label: '주소', value: business.address },
-    { label: '고객센터', value: business.contact },
+    { label: labels.businessName, value: business.name },
+    { label: labels.representative, value: business.representative },
+    { label: labels.registrationNumber, value: business.registrationNumber },
+    { label: labels.mailOrderNumber, value: business.mailOrderNumber },
+    { label: labels.address, value: business.address },
+    { label: labels.contact, value: business.contact },
   ];
   const shown = rows.filter((row): row is { label: string; value: string } => row.value !== null);
   const verifyUrl = businessVerificationUrl(business.registrationNumber);
@@ -40,7 +43,7 @@ export function SiteFooter({
             {brandName}
           </Link>
           {links.length > 0 && (
-            <nav aria-label="고객 안내">
+            <nav aria-label={labels.customerLinks}>
               <ul className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
                 {links.map((link) => (
                   <li key={`${link.href}-${link.label}`}>
@@ -61,7 +64,10 @@ export function SiteFooter({
         </div>
 
         {shown.length > 0 && (
-          <section aria-label="사업자 정보" className="text-xs leading-6 text-muted-fg lg:max-w-xl">
+          <section
+            aria-label={labels.business}
+            className="text-xs leading-6 text-muted-fg lg:max-w-xl"
+          >
             <dl className="flex flex-wrap gap-x-4">
               {shown.map((row) => (
                 <div key={row.label} className="flex gap-1">
@@ -77,7 +83,7 @@ export function SiteFooter({
                 rel="noopener noreferrer"
                 className="mt-2 inline-block underline underline-offset-4 hover:text-fg"
               >
-                사업자 정보 확인
+                {labels.verify}
               </a>
             )}
           </section>

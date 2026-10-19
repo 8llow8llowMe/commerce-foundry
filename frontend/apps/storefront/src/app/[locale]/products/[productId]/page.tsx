@@ -1,6 +1,6 @@
 import { ApiError } from '@cf/api-client';
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 import { notFound } from 'next/navigation';
 import { cache, Suspense } from 'react';
 import { ProductGallery } from '@/components/product/detail/ProductGallery';
@@ -9,6 +9,7 @@ import { ProductLooks } from '@/components/product/look/ProductLooks';
 import { productJsonLd } from '@/lib/catalog/product-jsonld';
 import { shopHref } from '@/lib/catalog/shop-query';
 import type { ProductDetail } from '@/lib/catalog/types';
+import { getI18n, localeAlternates } from '@/lib/i18n/server';
 import { sanitizeProductHtml } from '@/lib/sanitize-html';
 import { serverFetch } from '@/lib/server-api';
 
@@ -28,13 +29,14 @@ const getProduct = cache(async (productId: string): Promise<ProductDetail | null
 
 export async function generateMetadata({
   params,
-}: PageProps<'/products/[productId]'>): Promise<Metadata> {
+}: PageProps<'/[locale]/products/[productId]'>): Promise<Metadata> {
   const product = await getProduct((await params).productId).catch(() => null);
   if (!product) return {};
   const description = product.summary ?? undefined;
   return {
     title: product.name,
     description,
+    alternates: await localeAlternates(`/products/${product.productId}`),
     openGraph: {
       title: product.name,
       description,
@@ -52,8 +54,9 @@ export async function generateMetadata({
   };
 }
 
-export default async function ProductPage({ params }: PageProps<'/products/[productId]'>) {
+export default async function ProductPage({ params }: PageProps<'/[locale]/products/[productId]'>) {
   const { productId } = await params;
+  const { href } = await getI18n();
 
   let product: ProductDetail | null;
   try {
@@ -65,7 +68,7 @@ export default async function ProductPage({ params }: PageProps<'/products/[prod
           상품 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
         {/* 같은 URL 이라 문서를 새로 받는다 */}
-        <a href={`/products/${productId}`} className="text-sm underline underline-offset-4">
+        <a href={href(`/products/${productId}`)} className="text-sm underline underline-offset-4">
           다시 불러오기
         </a>
       </main>

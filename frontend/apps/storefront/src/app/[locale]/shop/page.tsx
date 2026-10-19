@@ -5,12 +5,17 @@ import { ProductGrid } from '@/components/product/ProductGrid';
 import { ShopFilters } from '@/components/product/ShopFilters';
 import { categoryTrail, parseShopQuery, productsApiPath, shopHref } from '@/lib/catalog/shop-query';
 import type { CategoryTreeResponse, ProductListItem } from '@/lib/catalog/types';
+import { getI18n, localeAlternates } from '@/lib/i18n/server';
 import { serverFetch } from '@/lib/server-api';
 
-export const metadata: Metadata = { title: 'Shop' };
+export async function generateMetadata(): Promise<Metadata> {
+  // 카테고리 · 정렬은 같은 목록의 보기라 정식 주소는 /shop 하나로 둔다
+  return { title: 'Shop', alternates: await localeAlternates('/shop') };
+}
 
-export default async function ShopPage({ searchParams }: PageProps<'/shop'>) {
+export default async function ShopPage({ searchParams }: PageProps<'/[locale]/shop'>) {
   const query = parseShopQuery(await searchParams);
+  const { href } = await getI18n();
 
   // 카테고리를 못 받아도 상품 목록은 보여 준다(필터 줄만 빠진다)
   const [categoriesResult, productsResult] = await Promise.allSettled([
@@ -49,7 +54,7 @@ export default async function ShopPage({ searchParams }: PageProps<'/shop'>) {
                 : '상품을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'}
             </p>
             {/* 같은 URL 이라 클라이언트 라우팅으로는 다시 받지 않는다 — 문서를 새로 받는다 */}
-            <a href={shopHref(query)} className="text-sm underline underline-offset-4">
+            <a href={href(shopHref(query))} className="text-sm underline underline-offset-4">
               다시 불러오기
             </a>
           </div>

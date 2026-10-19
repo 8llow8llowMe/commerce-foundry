@@ -1,6 +1,6 @@
 import { formatMoney } from '@cf/api-client';
 import { cx } from '@cf/ui';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 import type { ProductListItem } from '@/lib/catalog/types';
 
 /**
