@@ -52,6 +52,12 @@ export const brand: BrandConfig = {
         { label: '배송 · 교환 안내', href: '/customer-care' },
         { label: '고객센터', href: '/customer-care' },
       ],
+      // 촬영 전 — 빈 자리면 어두운 단색 면으로 둔다(화보 placeholder 는 촬영 안내라 국문 그대로)
+      footerBackdrop: {
+        image: null,
+        placeholder:
+          '메인 마지막 화보 · 전폭 가로 · 아래쪽이 어둡고 여백이 넉넉한 컷(법정 정보 13px 가 얹힌다)',
+      },
       home,
     },
     // 영문 문구는 초안이다 — 고객사 확인 대상 (#31)
@@ -100,6 +106,11 @@ export const brand: BrandConfig = {
         { label: 'Shipping & Returns', href: '/customer-care' },
         { label: 'Customer Care', href: '/customer-care' },
       ],
+      footerBackdrop: {
+        image: null,
+        placeholder:
+          '메인 마지막 화보 · 전폭 가로 · 아래쪽이 어둡고 여백이 넉넉한 컷(법정 정보 13px 가 얹힌다)',
+      },
       home: homeEn,
     },
   },

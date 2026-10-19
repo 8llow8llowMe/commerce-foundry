@@ -1,4 +1,4 @@
-import type { HomeSection } from './home';
+import type { HomeMediaSlot, HomeSection } from './home';
 
 /** 전체 메뉴 항목. 사업자마다 메뉴가 다르므로 컴포넌트가 아니라 브랜드 설정이 갖는다. */
 export type NavItem = {
@@ -35,6 +35,8 @@ export type BrandContent = {
   navigation: NavItem[];
   /** 푸터 고객 안내 링크, 순서대로. 사업자 실정보는 여기 두지 않는다(서버 env BUSINESS_*) */
   footerLinks: FooterLink[];
+  /** 메인 푸터의 전폭 배경 화보(#59 푸터) — 메인에서만 깔린다. 없으면 null(목록 · 상세와 같은 푸터) */
+  footerBackdrop: HomeMediaSlot | null;
   /** 메인 화면 섹션, 위에서부터. 메인 전시 API(#63)가 생기면 그 응답으로 바꾼다 */
   home: HomeSection[];
 };
