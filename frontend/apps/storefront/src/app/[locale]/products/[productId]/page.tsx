@@ -4,6 +4,7 @@ import { Link } from '@/components/i18n/Link';
 import { notFound } from 'next/navigation';
 import { cache, Suspense } from 'react';
 import { ProductGallery } from '@/components/product/detail/ProductGallery';
+import { ProductInfoAccordion } from '@/components/product/detail/ProductInfoAccordion';
 import { PurchasePanel, type PurchaseProduct } from '@/components/product/detail/PurchasePanel';
 import { ProductLooks } from '@/components/product/look/ProductLooks';
 import { productJsonLd } from '@/lib/catalog/product-jsonld';
@@ -56,7 +57,7 @@ export async function generateMetadata({
 
 export default async function ProductPage({ params }: PageProps<'/[locale]/products/[productId]'>) {
   const { productId } = await params;
-  const { href, dict } = await getI18n();
+  const { href, dict, content } = await getI18n();
 
   let product: ProductDetail | null;
   try {
@@ -114,6 +115,7 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
             {product.summary && <p className="text-sm text-muted-fg">{product.summary}</p>}
           </div>
           <PurchasePanel product={purchaseProduct} />
+          <ProductInfoAccordion info={content.productInfo} labels={dict.product.info} />
         </div>
       </div>
 
