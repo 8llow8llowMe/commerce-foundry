@@ -18,7 +18,9 @@ describe('LoginForm', () => {
     );
     expect(html.match(/ required=""/g)).toHaveLength(2);
     expect(html).toContain('<button type="submit"');
-    expect(html).toContain('href="/signup"');
+    // 돌아갈 경로를 가입 화면에도 실어 보낸다
+    expect(html).toContain('href="/signup?next=%2Fshop"');
+    expect(renderToStaticMarkup(<LoginForm returnPath="/" />)).toContain('href="/signup"');
   });
 });
 

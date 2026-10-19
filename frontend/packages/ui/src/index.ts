@@ -8,6 +8,7 @@ export type {
   SizeGuide,
 } from './brand';
 export { Button, type ButtonProps } from './Button';
+export { Checkbox, type CheckboxProps } from './Checkbox';
 export type {
   DetailPoint,
   DetailSection,
