@@ -19,6 +19,8 @@ export type HomeMediaSlot = {
   image: HomeImage | null;
   /** 빈 자리에 보이는 안내 (예: '소재 클로즈업 · 3:4') */
   placeholder: string;
+  /** 사진 아래쪽에 얹는 한 줄 캡션(curtain 스토리). 없으면 생략 */
+  caption?: string | null;
 };
 
 export type HeroSection = {
@@ -53,10 +55,13 @@ export type StorySection = {
   title: string;
   body: string;
   links: HomeLink[];
-  /** 1~2장. 2장이면 비대칭으로 놓는다 */
+  /** asymmetric · centered 는 1~2장, curtain 은 2~3장(같은 빛 · 같은 톤으로 고른다) */
   media: HomeMediaSlot[];
-  /** asymmetric: 큰 이미지 + 글 비대칭, centered: 글 가운데 */
-  layout: 'asymmetric' | 'centered';
+  /**
+   * asymmetric: 큰 이미지 + 글 비대칭, centered: 글 가운데,
+   * curtain: 전폭 사진을 스크롤 고정으로 쌓아 다음 장이 커튼처럼 덮는다(#59 03)
+   */
+  layout: 'asymmetric' | 'centered' | 'curtain';
 };
 
 export type LookSection = {
