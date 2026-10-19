@@ -38,11 +38,6 @@ export function ProductCard({ product }: { product: ProductListItem }) {
             {dict.product.imagePending}
           </span>
         )}
-        {!available && (
-          <span className="absolute top-3 left-3 bg-bg px-2 py-1 text-xs tracking-[0.15em]">
-            {saleStatus.name}
-          </span>
-        )}
       </div>
 
       <div className="mt-3 flex flex-col gap-1 text-sm">
@@ -69,6 +64,8 @@ export function ProductCard({ product }: { product: ProductListItem }) {
               {formatMoney(product.listPrice)}
             </del>
           )}
+          {/* 판매 상태는 이미지 위 뱃지가 아니라 가격 줄 뒤 글자로(#60) */}
+          {!available && <span className="text-muted-fg">· {saleStatus.name}</span>}
         </p>
       </div>
     </Link>

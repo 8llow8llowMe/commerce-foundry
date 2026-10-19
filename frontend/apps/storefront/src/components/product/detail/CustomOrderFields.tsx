@@ -23,7 +23,7 @@ export function CustomOrderFields({
   const t = useDictionary().product.customOrder;
 
   return (
-    <fieldset className="flex flex-col gap-4 border-t border-border pt-6">
+    <fieldset className="flex flex-col gap-4 pt-4">
       <legend className="float-left mb-2 w-full text-xs tracking-[0.15em] uppercase">
         {t.title}
       </legend>

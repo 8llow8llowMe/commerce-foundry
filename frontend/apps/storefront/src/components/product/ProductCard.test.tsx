@@ -59,11 +59,12 @@ describe('ProductCard', () => {
     expect(html).toContain('129,000원<span aria-hidden="true">~</span>');
   });
 
-  it('판매중이 아니면 서버의 상태 문구를 배지로 보여 준다', () => {
+  it('판매중이 아니면 서버의 상태 문구를 가격 줄 뒤 글자로 보인다(이미지 위 뱃지 없음)', () => {
     const html = render({
       saleStatus: { code: 'SOLD_OUT', name: '품절', description: '재고가 모두 소진되었습니다.' },
-    });
-    expect(html).toContain('>품절</span>');
+    }).replaceAll('<!-- -->', '');
+    expect(html).toContain('<span class="text-muted-fg">· 품절</span>');
+    expect(html).not.toContain('absolute top-3');
     expect(render()).not.toContain('판매중');
   });
 

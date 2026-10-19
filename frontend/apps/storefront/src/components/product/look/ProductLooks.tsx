@@ -46,10 +46,10 @@ export async function ProductLooks({ productId }: { productId: string }) {
   const single = visible.length === 1;
 
   return (
-    <section aria-labelledby="shop-the-look" className="mt-20">
+    <section aria-labelledby="shop-the-look" className="mt-24 lg:mt-32">
       <h2
         id="shop-the-look"
-        className="border-t border-border pt-10 text-center font-display text-2xl tracking-[0.15em] uppercase"
+        className="text-center font-display text-2xl tracking-[0.15em] uppercase"
       >
         Shop the Look
       </h2>
@@ -74,9 +74,7 @@ export async function ProductLooks({ productId }: { productId: string }) {
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <h3 className="font-serif text-lg">{look.title}</h3>
-                {look.description && (
-                  <p className="text-sm leading-7 text-muted-fg">{look.description}</p>
-                )}
+                {look.description && <p className="leading-7">{look.description}</p>}
               </div>
               <LookPicker products={look.products} currentProductId={productId} />
             </div>

@@ -51,13 +51,13 @@ export function LookPicker({
 
   return (
     <div className="flex flex-col gap-6">
-      <ul className="flex flex-col border-t border-border">
+      <ul className="flex flex-col gap-6">
         {picks.map(({ product, included, selection }, index) => {
           const pickable = lookPickable(product);
           const checkboxId = `${baseId}-${index}`;
           const current = product.productId === currentProductId;
           return (
-            <li key={product.productId} className="flex gap-4 border-b border-border py-4">
+            <li key={product.productId} className="flex gap-4">
               <input
                 id={checkboxId}
                 type="checkbox"

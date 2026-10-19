@@ -75,7 +75,7 @@ export function MenuPanel({ brandName, items, labels, languages }: MenuPanelProp
           <nav aria-label={labels.menu} className="mt-8 lg:mt-10">
             <ul className="grid grid-cols-1 gap-x-12 sm:grid-cols-2">
               {items.map((item) => (
-                <li key={item.href} className="border-t border-border">
+                <li key={item.href}>
                   <Link
                     href={item.href}
                     onClick={closePanel}
@@ -91,11 +91,7 @@ export function MenuPanel({ brandName, items, labels, languages }: MenuPanelProp
             </ul>
           </nav>
 
-          <LanguageLinks
-            languages={languages}
-            label={labels.switchLanguage}
-            className="mt-8 border-t border-border pt-6"
-          />
+          <LanguageLinks languages={languages} label={labels.switchLanguage} className="mt-8" />
         </div>
       </dialog>
     </>

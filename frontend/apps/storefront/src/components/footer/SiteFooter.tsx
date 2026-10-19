@@ -36,7 +36,8 @@ export function SiteFooter({
   const verifyUrl = businessVerificationUrl(business.registrationNumber);
 
   return (
-    <footer className="border-t border-border">
+    // 위 내용과는 선 대신 배경 톤 한 단계(muted)로 나눈다
+    <footer className="bg-muted">
       <div className="mx-auto flex max-w-screen-xl flex-col gap-10 px-4 py-12 lg:flex-row lg:justify-between lg:gap-16 lg:px-8 lg:py-16">
         <div className="flex flex-col gap-6">
           <Link href="/" className="font-display text-2xl tracking-[0.25em] uppercase">
@@ -90,7 +91,7 @@ export function SiteFooter({
         )}
       </div>
 
-      <p className="border-t border-border px-4 py-5 text-center text-xs tracking-[0.15em] text-muted-fg">
+      <p className="px-4 pt-4 pb-8 text-center text-xs tracking-[0.15em] text-muted-fg">
         © {year} {brandName}
       </p>
     </footer>
