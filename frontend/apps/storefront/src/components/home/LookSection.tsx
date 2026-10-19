@@ -1,5 +1,5 @@
 import type { LookSection as LookSectionData } from '@cf/ui';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 import { LookPicker } from '@/components/product/look/LookPicker';
 import { fetchLookProducts } from '@/lib/catalog/look-products';
 import { MediaFrame } from './MediaFrame';

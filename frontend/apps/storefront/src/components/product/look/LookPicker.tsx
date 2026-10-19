@@ -2,7 +2,7 @@
 
 import { formatMoney } from '@cf/api-client';
 import { Button } from '@cf/ui';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 import { useId, useState } from 'react';
 import { OptionGroupsField } from '@/components/product/detail/OptionGroupsField';
 import {

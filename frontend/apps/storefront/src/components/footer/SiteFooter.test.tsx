@@ -2,6 +2,8 @@ import type { FooterLink } from '@cf/ui';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { parseBusinessInfo } from '@/lib/business-info';
+import { en } from '@/lib/i18n/dictionaries/en';
+import { ko } from '@/lib/i18n/dictionaries/ko';
 import { SiteFooter } from './SiteFooter';
 
 // 실정보가 아닌 자리 값만 쓴다 (공개 저장소)
@@ -18,9 +20,9 @@ const FULL = parseBusinessInfo({
   BUSINESS_CONTACT: '00-0000-0000',
 });
 
-const render = (business = FULL, links = LINKS) =>
+const render = (business = FULL, links = LINKS, labels = ko.footer) =>
   renderToStaticMarkup(
-    <SiteFooter brandName="ACME" links={links} business={business} year={2026} />,
+    <SiteFooter brandName="ACME" links={links} business={business} labels={labels} year={2026} />,
   );
 
 describe('SiteFooter', () => {
@@ -57,5 +59,12 @@ describe('SiteFooter', () => {
     expect(html).toMatch(/<a class="hover:underline text-muted-fg" href="\/terms">약관<\/a>/);
     expect(html).toMatch(/<a class="hover:underline font-semibold" href="\/privacy">방침<\/a>/);
     expect(render(FULL, [])).not.toContain('aria-label="고객 안내"');
+  });
+
+  it('영문 스토어는 사업자 정보 항목 이름을 영문 사전으로 보인다', () => {
+    const html = render(FULL, LINKS, en.footer);
+    expect(html).toContain('aria-label="Company information"');
+    expect(html).toContain('<dt>Business registration no.</dt>');
+    expect(html).not.toContain('사업자등록번호');
   });
 });

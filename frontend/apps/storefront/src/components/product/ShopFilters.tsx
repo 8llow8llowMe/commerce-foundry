@@ -1,5 +1,5 @@
 import { cx } from '@cf/ui';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 import {
   SORT_LABELS,
   SORT_TYPES,

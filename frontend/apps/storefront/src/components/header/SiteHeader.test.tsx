@@ -1,6 +1,9 @@
 import type { NavItem } from '@cf/ui';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import type { LanguageLink } from '@/components/i18n/LanguageLinks';
+import { LocaleProvider } from '@/components/i18n/LocaleProvider';
+import { ko } from '@/lib/i18n/dictionaries/ko';
 import { SiteHeader } from './SiteHeader';
 
 // 브랜드와 무관한 메뉴로 확인한다 — 컴포넌트가 특정 브랜드 메뉴를 갖고 있지 않아야 한다.
@@ -10,8 +13,15 @@ const NAV: NavItem[] = [
   { label: 'GAMMA', description: '셋째 설명', href: '/gamma' },
 ];
 
-const render = (navigation: NavItem[] = NAV) =>
-  renderToStaticMarkup(<SiteHeader brandName="ACME" navigation={navigation} />);
+const render = (navigation: NavItem[] = NAV, languages: LanguageLink[] = []) =>
+  renderToStaticMarkup(
+    <SiteHeader
+      brandName="ACME"
+      navigation={navigation}
+      labels={ko.header}
+      languages={languages}
+    />,
+  );
 
 /** aria-label 로 찾은 nav 블록의 마크업 */
 const navBlock = (html: string, label: string) =>
@@ -67,5 +77,31 @@ describe('SiteHeader', () => {
     // primary · shortcut 이 없으면 아래 줄 nav 를 그리지 않는다
     expect(html).not.toContain('aria-label="주 메뉴"');
     expect(html).not.toContain('aria-label="바로가기"');
+  });
+
+  it('언어가 둘 이상이면 메뉴 패널에 언어 전환 링크를 두고 지금 언어를 표시한다', () => {
+    const languages: LanguageLink[] = [
+      { locale: 'ko', name: '한국어', href: '/' },
+      { locale: 'en', name: 'English', href: '/en' },
+    ];
+    expect(render(NAV, languages.slice(0, 1))).not.toContain('aria-label="언어 선택"');
+    const html = render(NAV, languages);
+    const block = navBlock(html, '언어 선택');
+    const link = (name: string) => block.match(new RegExp(`<a [^>]*>${name}</a>`))?.[0] ?? '';
+    expect(link('English')).toMatch(/href="\/en"/);
+    expect(link('English')).toMatch(/hreflang="en"/i);
+    expect(link('English')).not.toContain('aria-current');
+    expect(link('한국어')).toContain('aria-current="true"');
+  });
+
+  it('영문 스토어에서는 앱 경로 링크에 /en 접두어가 붙는다', () => {
+    const html = renderToStaticMarkup(
+      <LocaleProvider locale="en" prefix="/en">
+        <SiteHeader brandName="ACME" navigation={NAV} labels={ko.header} languages={[]} />
+      </LocaleProvider>,
+    );
+    expect(html).toMatch(/<a [^>]*href="\/en"[^>]*>ACME<\/a>/);
+    expect(navBlock(html, '주 메뉴')).toContain('href="/en/alpha"');
+    expect(html).toContain('href="/en/search"');
   });
 });

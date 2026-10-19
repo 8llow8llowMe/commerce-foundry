@@ -1,5 +1,5 @@
 import type { StorySection as StorySectionData } from '@cf/ui';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 import { MediaFrame } from './MediaFrame';
 import { SectionHeading } from './SectionHeading';
 

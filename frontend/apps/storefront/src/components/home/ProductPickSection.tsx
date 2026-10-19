@@ -1,6 +1,6 @@
 import type { SliceResponse } from '@cf/api-client';
 import type { ProductPickSection as ProductPickSectionData } from '@cf/ui';
-import Link from 'next/link';
+import { Link } from '@/components/i18n/Link';
 import { ProductCard } from '@/components/product/ProductCard';
 import { productsApiPath } from '@/lib/catalog/shop-query';
 import type { ProductListItem } from '@/lib/catalog/types';

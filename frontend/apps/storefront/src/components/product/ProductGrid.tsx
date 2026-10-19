@@ -3,6 +3,7 @@
 import { ApiError, apiFetch, type SliceResponse } from '@cf/api-client';
 import { Button } from '@cf/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocale } from '@/components/i18n/LocaleProvider';
 import { productsApiPath, type ShopQuery } from '@/lib/catalog/shop-query';
 import type { ProductListItem } from '@/lib/catalog/types';
 import { ProductCard } from './ProductCard';
@@ -33,6 +34,7 @@ export function ProductGrid({ query, initial }: ProductGridProps) {
   const controllerRef = useRef<AbortController | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  const locale = useLocale();
   const loadMore = useCallback(async () => {
     if (loadingRef.current || !hasNext) return;
     loadingRef.current = true;
@@ -43,7 +45,8 @@ export function ProductGrid({ query, initial }: ProductGridProps) {
     try {
       const next = await apiFetch<SliceResponse<ProductListItem>>(
         productsApiPath(query, page + 1),
-        { signal: controller.signal },
+        // BFF 는 Accept-Language 를 게이트웨이로 넘긴다 — 브라우저 언어가 아니라 스토어 언어로 받는다
+        { signal: controller.signal, headers: { 'accept-language': locale } },
       );
       setItems((prev) => appendUnique(prev, next.contents));
       setHasNext(next.hasNext);
@@ -56,7 +59,7 @@ export function ProductGrid({ query, initial }: ProductGridProps) {
       loadingRef.current = false;
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [hasNext, page, query]);
+  }, [hasNext, locale, page, query]);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
