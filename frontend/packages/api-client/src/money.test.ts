@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMoney } from './money';
+import { formatMoney, moneyToDecimalString } from './money';
 
 describe('formatMoney', () => {
   it('KRW 는 원 단위 정수를 "129,000원" 으로 표시한다', () => {
@@ -20,5 +20,13 @@ describe('formatMoney', () => {
   it('정수가 아닌 amount 는 계약 위반으로 던진다', () => {
     expect(() => formatMoney({ amount: 89.5, currency: 'USD' })).toThrow(/최소 화폐 단위 정수/);
     expect(() => formatMoney({ amount: Number.NaN, currency: 'KRW' })).toThrow();
+  });
+});
+
+describe('moneyToDecimalString', () => {
+  it('통화의 소수 자릿수로 쓴다', () => {
+    expect(moneyToDecimalString({ amount: 129000, currency: 'KRW' })).toBe('129000');
+    expect(moneyToDecimalString({ amount: 8950, currency: 'USD' })).toBe('89.50');
+    expect(moneyToDecimalString({ amount: 5, currency: 'USD' })).toBe('0.05');
   });
 });
