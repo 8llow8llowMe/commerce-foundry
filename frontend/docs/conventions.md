@@ -15,6 +15,7 @@
 - 환경변수는 앱의 `src/lib/env.ts` 에서만 읽는다.
 - 서버가 준 HTML 원문(상품 상세 `descriptionHtml` 등)은 **서버 컴포넌트에서 `sanitizeProductHtml`(허용 목록)을 거친 뒤에만** `dangerouslySetInnerHTML` 에 넣는다. BE 는 정제하지 않는다.
 - JSON-LD 처럼 `<script>` 안에 운영 데이터를 넣을 때는 `<` 를 `\u003c` 로 이스케이프한다(`productJsonLd`).
+- `<form>` 밖 라디오는 `name` 이 같으면 문서 전체가 한 묶음이다. 같은 페이지에 여러 번 나올 수 있는 옵션 선택(`OptionGroupsField`)은 `useId()` 로 만든 `namePrefix` 를 붙인다.
 
 ## 3. 테스트
 
