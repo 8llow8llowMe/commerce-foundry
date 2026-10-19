@@ -120,15 +120,15 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
       </Suspense>
 
       {descriptionHtml && (
-        <section aria-labelledby="product-description" className="mx-auto mt-20 max-w-3xl">
+        <section aria-labelledby="product-description" className="mx-auto mt-24 max-w-3xl lg:mt-32">
           <h2
             id="product-description"
-            className="border-t border-border pt-10 text-center font-display text-2xl tracking-[0.15em] uppercase"
+            className="text-center font-display text-2xl tracking-[0.15em] uppercase"
           >
             Details
           </h2>
           <div
-            className="mt-8 text-sm leading-7 [&_a]:underline [&_h2]:mt-10 [&_h2]:font-serif [&_h2]:text-xl [&_h3]:mt-8 [&_h3]:font-serif [&_h3]:text-lg [&_img]:my-6 [&_img]:h-auto [&_img]:w-full [&_li]:ml-5 [&_ol]:list-decimal [&_p]:my-4 [&_table]:my-6 [&_table]:w-full [&_td]:border-b [&_td]:border-border [&_td]:py-2 [&_th]:border-b [&_th]:border-border [&_th]:py-2 [&_th]:text-left [&_ul]:list-disc"
+            className="mt-8 leading-7 [&_a]:underline [&_h2]:mt-10 [&_h2]:font-serif [&_h2]:text-xl [&_h3]:mt-8 [&_h3]:font-serif [&_h3]:text-lg [&_img]:my-6 [&_img]:h-auto [&_img]:w-full [&_li]:ml-5 [&_ol]:list-decimal [&_p]:my-4 [&_table]:my-6 [&_table]:w-full [&_td]:border-b [&_td]:border-border [&_td]:py-2 [&_th]:border-b [&_th]:border-border [&_th]:py-2 [&_th]:text-left [&_ul]:list-disc"
             // 서버에서 허용 목록으로 거른 HTML 만 넣는다 (lib/sanitize-html.ts)
             dangerouslySetInnerHTML={{ __html: sanitizeProductHtml(descriptionHtml) }}
           />

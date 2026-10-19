@@ -34,7 +34,7 @@ export function ShopFilters({
   );
 
   return (
-    <div className="flex flex-col gap-4 border-b border-border pb-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       {categories.length > 0 && (
         <nav aria-label={labels.categories} className="flex flex-col gap-3">
           {/* 좁은 화면에서는 이 줄만 가로로 넘긴다(페이지 전체는 가로 스크롤 없음) */}

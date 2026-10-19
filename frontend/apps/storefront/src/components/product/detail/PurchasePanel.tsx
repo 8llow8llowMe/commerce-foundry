@@ -130,7 +130,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
         />
       )}
 
-      <div className="flex flex-col gap-3 border-t border-border pt-6">
+      <div className="flex flex-col gap-3 pt-4">
         <div className="flex items-center justify-between">
           <span className="text-xs tracking-[0.15em] uppercase" id={quantityLabelId}>
             {t.quantity}
