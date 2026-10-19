@@ -36,5 +36,12 @@ export const brand: BrandConfig = {
     { label: 'STOCKISTS', description: '입점처 / 해외 구매', href: '/stockists' },
     { label: 'CUSTOMER CARE', description: '배송 / 교환 / 문의', href: '/customer-care' },
   ],
+  // 약관 · 방침 본문 페이지는 고객사 문서를 받아 만든다 — 그 전에는 not-found(준비 중)가 받는다
+  footerLinks: [
+    { label: '이용약관', href: '/terms' },
+    { label: '개인정보처리방침', href: '/privacy', emphasis: true },
+    { label: '배송 · 교환 안내', href: '/customer-care' },
+    { label: '고객센터', href: '/customer-care' },
+  ],
   home,
 };
