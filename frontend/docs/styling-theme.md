@@ -95,7 +95,9 @@
 
 사업자등록번호·대표자 등 실정보는 테마에 넣지 않는다(공개 저장소). 서버 env(`BUSINESS_*`)로 받는다.
 
-- 스토어프론트 푸터(`components/footer/SiteFooter`)가 `src/lib/env.ts` 의 `businessInfo` 로 표시한다(상호 · 대표 · 사업자등록번호 · 통신판매업 신고번호 · 주소 · 고객센터). 빈 값은 그 줄을 빼고, 사업자등록번호가 10자리면 공정위 사업자 정보 확인 링크를 단다.
+- 스토어프론트 푸터(`components/footer/SiteFooter`)가 `src/lib/env.ts` 의 `businessInfo` 로 표시한다 — 법정 정보(상호 · 대표 · 사업자등록번호 · 통신판매업 신고번호 · 주소)는 아래 13px, 고객센터 연락처는 위 줄 오른쪽 전화 링크. 빈 값은 그 줄을 빼고, 사업자등록번호가 10자리면 공정위 사업자 정보 확인 링크를 단다.
+- 푸터 구성(#59): 위 줄 링크 · 연락처 → 화면 폭 가득 워드마크(`Wordmark`, 브랜드 이름을 SVG `textLength` 로 자간만 벌려 양 끝을 맞춘다) → 법정 정보. 모바일은 링크 1열부터 같은 순서다.
+- 메인에서만 브랜드 설정 `brand.content[locale].footerBackdrop` 화보를 밝기 0.62 로 깔고 글을 Porcelain(`text-bg`)으로 바꾼다. 화보가 null 이면 같은 어두운 단색 면이다. 메인 판별은 `useSelectedLayoutSegment() === null`(`FooterSurface`) — proxy rewrite 뒤 `usePathname` 은 주소와 다를 수 있다. 그라데이션 금지라 스크림을 두지 않으니 화보는 아래쪽이 어두운 컷으로 고른다.
 - 정적으로 미리 그리는 페이지(not-found 등)에는 **빌드 시점** 값이 들어간다. 배포 환경은 빌드 · 실행 모두에 같은 값을 준다.
 - 푸터 고객 안내 링크(약관 · 개인정보처리방침 · 고객센터)는 브랜드 설정 `brand.content[locale].footerLinks` 다. 개인정보처리방침은 `emphasis: true` 로 굵게 둔다.
 - 테스트 · 예시에는 실정보가 아닌 자리 값(`000-00-00000`, `홍길동`)만 쓴다.
