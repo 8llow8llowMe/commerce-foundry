@@ -16,7 +16,7 @@ export function MediaFrame({
   priority?: boolean;
 }) {
   return (
-    <div className={cx('relative overflow-hidden bg-muted', className)}>
+    <div data-reveal="media" className={cx('relative overflow-hidden bg-muted', className)}>
       {slot.image ? (
         // 이미지 CDN 이 정해지지 않아 next/image 를 아직 쓰지 않는다 (상품 화면과 같다)
         // eslint-disable-next-line @next/next/no-img-element

@@ -28,7 +28,11 @@ export async function LookSection({ section }: { section: LookSectionData }) {
 
       <div className="flex flex-col gap-6 lg:col-span-5 lg:self-center">
         <SectionHeading id={headingId} title={section.title} />
-        {section.body && <p className="font-serif leading-8">{section.body}</p>}
+        {section.body && (
+          <p data-reveal="text" className="font-serif leading-8">
+            {section.body}
+          </p>
+        )}
 
         {products.length > 0 && <LookPicker products={products} floatingAction />}
 

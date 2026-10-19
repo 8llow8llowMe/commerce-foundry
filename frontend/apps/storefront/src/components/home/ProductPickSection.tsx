@@ -43,7 +43,10 @@ export async function ProductPickSection({ section }: { section: ProductPickSect
         )}
       </div>
       {/* relative: 카드 안 sr-only(absolute)가 스크롤 상자 밖으로 새어 페이지 가로 스크롤을 만들지 않게 */}
-      <ul className="relative -mx-4 flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 lg:mx-0 lg:grid lg:grid-cols-4 lg:gap-x-6 lg:overflow-visible lg:px-0 lg:[&>li:nth-child(even)]:mt-20">
+      <ul
+        data-reveal="media"
+        className="relative -mx-4 flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 lg:mx-0 lg:grid lg:grid-cols-4 lg:gap-x-6 lg:overflow-visible lg:px-0 lg:[&>li:nth-child(even)]:mt-20"
+      >
         {products.map((product) => (
           <li key={product.productId} className="w-[72vw] shrink-0 snap-start lg:w-auto">
             <ProductCard product={product} />

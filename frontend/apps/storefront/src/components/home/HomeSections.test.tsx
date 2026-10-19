@@ -11,6 +11,7 @@ import { DetailSection } from './DetailSection';
 import { HeroSection } from './HeroSection';
 import { LookSection } from './LookSection';
 import { ProductPickSection } from './ProductPickSection';
+import { Reveal } from './Reveal';
 import { StorySection } from './StorySection';
 
 const serverFetch = vi.hoisted(() => vi.fn());
@@ -160,7 +161,7 @@ describe('StorySection — panel', () => {
       />,
     );
     expect(html).toContain('bg-fg text-bg');
-    expect(html.match(/<p class="leading-7">/g)).toHaveLength(2);
+    expect(html.match(/<p data-reveal="text" class="leading-7">/g)).toHaveLength(2);
     expect(html).toContain('href="/our-story"');
     expect(html).toContain('[border-radius:var(--cf-motif-radius)]');
   });
@@ -264,5 +265,33 @@ describe('StorySection — curtain', () => {
     expect(html.match(/<figcaption/g)).toHaveLength(1);
     expect(html).toContain('첫 장');
     expect(html).toContain('href="/collection"');
+  });
+});
+
+describe('Reveal (섹션 첫 등장 모션)', () => {
+  const STORY: StoryData = {
+    type: 'STORY',
+    id: 'story',
+    title: '제목',
+    body: '본문',
+    links: [],
+    media: [slot('사진')],
+    layout: 'asymmetric',
+  };
+
+  it('서버 렌더는 숨김 상태가 없다 — 스크립트가 실패해도 내용이 보인다', () => {
+    const html = renderToStaticMarkup(
+      <Reveal>
+        <StorySection section={STORY} />
+      </Reveal>,
+    );
+    expect(html).not.toContain('data-reveal-state');
+  });
+
+  it('제목 → 글 → 사진 순서로 떠오를 요소에 표시를 단다', () => {
+    const html = renderToStaticMarkup(<StorySection section={STORY} />);
+    const order = [...html.matchAll(/data-reveal="(\w+)"/g)].map((m) => m[1]);
+    // 지연은 DOM 순서가 아니라 종류로 정한다(globals.css)
+    expect(order.sort()).toEqual(['media', 'text', 'title']);
   });
 });
