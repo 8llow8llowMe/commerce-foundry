@@ -6,20 +6,24 @@ import { LanguageLinks, type LanguageLink } from '@/components/i18n/LanguageLink
 import { Link } from '@/components/i18n/Link';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { CloseIcon, MenuIcon } from './HeaderIcons';
+import { LogoutButton } from './LogoutButton';
 
 export type MenuPanelProps = {
   brandName: string;
   items: NavItem[];
   labels: Dictionary['header'];
   languages: LanguageLink[];
+  signedIn: boolean;
 };
 
+const ACCOUNT_LINK = 'hover:text-primary disabled:opacity-50';
+
 /**
- * 햄버거 버튼 + 전체 메뉴 패널.
+ * 햄버거 버튼 + 전체 메뉴 패널. 메뉴 아래에 계정 줄(로그인 · 회원가입 / 마이페이지 · 로그아웃)을 둔다.
  * 네이티브 모달 <dialog>(showModal)를 쓴다 — 바깥을 inert 로 만들어 포커스를 가두고, ESC 로 닫히고,
  * 닫히면 연 버튼으로 포커스가 돌아간다. 직접 포커스 트랩을 만들지 않는다.
  */
-export function MenuPanel({ brandName, items, labels, languages }: MenuPanelProps) {
+export function MenuPanel({ brandName, items, labels, languages, signedIn }: MenuPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
   const panelId = useId();
@@ -88,6 +92,38 @@ export function MenuPanel({ brandName, items, labels, languages }: MenuPanelProp
                   </Link>
                 </li>
               ))}
+            </ul>
+          </nav>
+
+          <nav aria-label={labels.accountNav} className="mt-8 border-t border-border pt-6">
+            <ul className="flex gap-8 text-sm tracking-[0.15em]">
+              {signedIn ? (
+                <>
+                  <li>
+                    <Link href="/mypage" onClick={closePanel} className={ACCOUNT_LINK}>
+                      {labels.account}
+                    </Link>
+                  </li>
+                  <li>
+                    <LogoutButton onDone={closePanel} className={ACCOUNT_LINK}>
+                      {labels.logout}
+                    </LogoutButton>
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li>
+                    <Link href="/login" onClick={closePanel} className={ACCOUNT_LINK}>
+                      {labels.login}
+                    </Link>
+                  </li>
+                  <li>
+                    <Link href="/signup" onClick={closePanel} className={ACCOUNT_LINK}>
+                      {labels.signUp}
+                    </Link>
+                  </li>
+                </>
+              )}
             </ul>
           </nav>
 

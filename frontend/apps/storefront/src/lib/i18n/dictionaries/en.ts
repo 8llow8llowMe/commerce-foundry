@@ -12,6 +12,11 @@ export const en: Dictionary = {
     shortcuts: 'Shortcuts',
     primaryNav: 'Main',
     switchLanguage: 'Language',
+    login: 'Sign in',
+    signUp: 'Create an account',
+    account: 'My account',
+    logout: 'Sign out',
+    accountNav: 'Account',
   },
   auth: {
     login: {
