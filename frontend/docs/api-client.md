@@ -65,5 +65,5 @@
 ## 5. 금액
 
 - `Money = { amount, currency }`, amount 는 최소 화폐 단위 정수(KRW 원, USD 센트).
-- 표시는 `formatMoney(money)` 만 쓴다: KRW `129,000원`, USD `$89.50`.
+- 표시는 `formatMoney(money, locale)` 만 쓴다: 국문 스토어 KRW `129,000원`, 영문 스토어 KRW `₩129,000`, USD `$89.50`. 스토어프론트 클라이언트 컴포넌트는 `useFormatMoney()` 로 지금 언어를 넣는다.
 - 클라이언트에서 금액을 계산하지 않는다. 합계·할인·배송비는 서버 값을 표시한다.

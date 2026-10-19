@@ -80,4 +80,8 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
 - 게이트웨이 요청에 스토어 언어를 `Accept-Language` 로 싣는다(`serverFetch`, 클라이언트 `apiFetch` 호출부). BFF 는 이 헤더를 넘긴다.
 - 페이지는 `generateMetadata` 에서 `localeAlternates(path)` 로 canonical · hreflang(+ `x-default`)을 낸다. 절대 주소는 `NEXT_PUBLIC_SITE_URL` 이 기준이다.
 - UI 문구는 `lib/i18n/dictionaries/{ko,en}.ts`. `en` 은 `Dictionary`(= ko 의 모양) 타입이라 키가 빠지면 typecheck 가 잡는다.
+  - 서버 컴포넌트는 `getI18n().dict`, 클라이언트 컴포넌트는 `useDictionary()`(사전이 몇 KB 라 `LocaleProvider` 에 통째로 싣는다). 서버 · 클라이언트 양쪽에서 쓰는 화면 조각(`ProductCard`)은 클라이언트 컴포넌트로 둔다.
+  - 값이 들어가는 문구는 함수 대신 `{name}` 자리표시자 + `fill(template, values)` — 사전이 서버 → 클라이언트 props 로 넘어가 직렬화돼야 한다.
+  - 상품명 · 카테고리 · 옵션 · 판매 상태 이름 등 **운영 데이터는 사전에 두지 않는다**. BE 가 `Accept-Language` 로 고른 값을 그대로 보인다(#20).
+- 금액은 클라이언트에서 `useFormatMoney()`, 서버에서 `formatMoney(money, locale)` — 영문 스토어의 KRW 는 `₩129,000`.
 
