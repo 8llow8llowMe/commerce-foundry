@@ -1,15 +1,19 @@
-import { formatMoney } from '@cf/api-client';
+'use client';
+
 import { cx } from '@cf/ui';
 import { Link } from '@/components/i18n/Link';
+import { useDictionary, useFormatMoney } from '@/components/i18n/LocaleProvider';
 import type { ProductListItem } from '@/lib/catalog/types';
 
 /**
  * 목록의 상품 하나. 큰 이미지 + 작은 상품명 · 가격, 테두리 · 그림자 없이 여백으로 나눈다(#60).
- * 금액은 서버 값을 표시만 한다.
+ * 금액은 서버 값을 표시만 한다. 메인(서버)과 목록 무한 스크롤(클라이언트) 양쪽에서 쓰여 클라이언트 컴포넌트다.
  */
 export function ProductCard({ product }: { product: ProductListItem }) {
   const { thumbnail, saleStatus } = product;
   const available = saleStatus.code === 'ON_SALE';
+  const dict = useDictionary();
+  const formatMoney = useFormatMoney();
 
   return (
     <Link href={`/products/${product.productId}`} className="group block">
@@ -31,7 +35,7 @@ export function ProductCard({ product }: { product: ProductListItem }) {
           />
         ) : (
           <span className="absolute inset-0 flex items-center justify-center text-xs text-muted-fg">
-            이미지 준비 중
+            {dict.product.imagePending}
           </span>
         )}
         {!available && (
@@ -46,7 +50,7 @@ export function ProductCard({ product }: { product: ProductListItem }) {
         <p className="flex flex-wrap items-baseline gap-x-2">
           {product.discountRate !== null && (
             <span className="font-medium">
-              <span className="sr-only">할인율 </span>
+              <span className="sr-only">{dict.price.discountRate} </span>
               {product.discountRate}%
             </span>
           )}
@@ -55,13 +59,13 @@ export function ProductCard({ product }: { product: ProductListItem }) {
             {product.hasOptionSurcharge && (
               <>
                 <span aria-hidden>~</span>
-                <span className="sr-only"> 부터</span>
+                <span className="sr-only"> {dict.price.from}</span>
               </>
             )}
           </span>
           {product.listPrice && (
             <del className="text-xs text-muted-fg">
-              <span className="sr-only">정가 </span>
+              <span className="sr-only">{dict.price.listPrice} </span>
               {formatMoney(product.listPrice)}
             </del>
           )}

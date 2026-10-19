@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ProductListItem } from '@/lib/catalog/types';
+import { LocaleProvider } from '@/components/i18n/LocaleProvider';
+import { en } from '@/lib/i18n/dictionaries/en';
 import { ProductCard } from './ProductCard';
 
 const product = (overrides: Partial<ProductListItem> = {}): ProductListItem => ({
@@ -63,5 +65,19 @@ describe('ProductCard', () => {
     });
     expect(html).toContain('>품절</span>');
     expect(render()).not.toContain('판매중');
+  });
+
+  it('영문 스토어는 /en 링크 · 통화 기호 금액 · 영문 스크린리더 문구다', () => {
+    const html = renderToStaticMarkup(
+      <LocaleProvider locale="en" prefix="/en" dict={en}>
+        <ProductCard
+          product={product({ discountRate: 18, listPrice: { amount: 159000, currency: 'KRW' } })}
+        />
+      </LocaleProvider>,
+    ).replaceAll('<!-- -->', '');
+    expect(html).toMatch(/href="\/en\/products\/[^"]+"/);
+    expect(html).toContain('₩');
+    expect(html).not.toContain('원');
+    expect(html).toContain('<span class="sr-only">Discount </span>');
   });
 });

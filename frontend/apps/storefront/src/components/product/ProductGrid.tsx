@@ -3,7 +3,7 @@
 import { ApiError, apiFetch, type SliceResponse } from '@cf/api-client';
 import { Button } from '@cf/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocale } from '@/components/i18n/LocaleProvider';
+import { useDictionary, useLocale } from '@/components/i18n/LocaleProvider';
 import { productsApiPath, type ShopQuery } from '@/lib/catalog/shop-query';
 import type { ProductListItem } from '@/lib/catalog/types';
 import { ProductCard } from './ProductCard';
@@ -35,6 +35,7 @@ export function ProductGrid({ query, initial }: ProductGridProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const locale = useLocale();
+  const t = useDictionary().shop;
   const loadMore = useCallback(async () => {
     if (loadingRef.current || !hasNext) return;
     loadingRef.current = true;
@@ -54,12 +55,12 @@ export function ProductGrid({ query, initial }: ProductGridProps) {
     } catch (cause) {
       // 화면을 떠나 취소된 요청은 안내하지 않는다
       if (controller.signal.aborted) return;
-      setError(cause instanceof ApiError ? cause.message : '상품을 더 불러오지 못했습니다.');
+      setError(cause instanceof ApiError ? cause.message : t.loadMoreFailed);
     } finally {
       loadingRef.current = false;
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [hasNext, locale, page, query]);
+  }, [hasNext, locale, page, query, t.loadMoreFailed]);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
@@ -78,7 +79,7 @@ export function ProductGrid({ query, initial }: ProductGridProps) {
   }, [error, hasNext, loadMore]);
 
   if (items.length === 0) {
-    return <p className="py-24 text-center text-sm text-muted-fg">아직 등록된 상품이 없습니다.</p>;
+    return <p className="py-24 text-center text-sm text-muted-fg">{t.empty}</p>;
   }
 
   return (
@@ -93,11 +94,11 @@ export function ProductGrid({ query, initial }: ProductGridProps) {
 
       <div ref={sentinelRef} className="mt-14 flex flex-col items-center gap-3">
         <p role="status" className="text-sm text-muted-fg">
-          {loading ? '상품을 불러오는 중입니다.' : (error ?? '')}
+          {loading ? t.loading : (error ?? '')}
         </p>
         {hasNext && !loading && (
           <Button variant="secondary" onClick={() => void loadMore()}>
-            {error ? '다시 시도' : '더 보기'}
+            {error ? t.retry : t.more}
           </Button>
         )}
       </div>

@@ -1,4 +1,6 @@
 import { useId } from 'react';
+import { useDictionary } from '@/components/i18n/LocaleProvider';
+import { fill } from '@/lib/i18n/format';
 import type { CustomOrder } from '@/lib/catalog/types';
 
 /** fieldKey → 입력값. 주문 생성 때 그대로 보낸다(#26) */
@@ -18,16 +20,17 @@ export function CustomOrderFields({
   onChange: (fieldKey: string, value: string) => void;
 }) {
   const baseId = useId();
+  const t = useDictionary().product.customOrder;
 
   return (
     <fieldset className="flex flex-col gap-4 border-t border-border pt-6">
       <legend className="float-left mb-2 w-full text-xs tracking-[0.15em] uppercase">
-        맞춤 제작
+        {t.title}
       </legend>
       {(customOrder.notice || customOrder.leadTimeDays) && (
         <div className="flex flex-col gap-1 bg-accent p-4 text-sm text-accent-fg">
           {customOrder.leadTimeDays !== null && (
-            <p className="font-medium">제작 기간 약 {customOrder.leadTimeDays}일</p>
+            <p className="font-medium">{fill(t.leadTime, { days: customOrder.leadTimeDays })}</p>
           )}
           {customOrder.notice && <p className="whitespace-pre-line">{customOrder.notice}</p>}
         </div>
@@ -43,9 +46,9 @@ export function CustomOrderFields({
               {field.label}
               {field.unit && <span className="text-muted-fg"> ({field.unit})</span>}
               {field.required ? (
-                <span className="text-muted-fg"> · 필수</span>
+                <span className="text-muted-fg"> · {t.required}</span>
               ) : (
-                <span className="text-muted-fg"> · 선택</span>
+                <span className="text-muted-fg"> · {t.optional}</span>
               )}
             </label>
             <input

@@ -4,12 +4,6 @@ import type { CategoryItem } from './types';
 export const SORT_TYPES = ['NEWEST', 'PRICE_ASC', 'PRICE_DESC'] as const;
 export type ProductSortType = (typeof SORT_TYPES)[number];
 
-export const SORT_LABELS: Record<ProductSortType, string> = {
-  NEWEST: '신상품순',
-  PRICE_ASC: '낮은 가격순',
-  PRICE_DESC: '높은 가격순',
-};
-
 /** 한 번에 불러오는 상품 수. BE 상한은 100 이다. 2 · 3 · 4 열 모두 나누어떨어지게 둔다 */
 export const PAGE_SIZE = 24;
 

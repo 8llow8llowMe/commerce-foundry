@@ -1,6 +1,5 @@
 'use client';
 
-import { formatMoney } from '@cf/api-client';
 import { Button, cx } from '@cf/ui';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
@@ -10,6 +9,8 @@ import {
   type OptionSelection,
 } from '@/lib/catalog/option-selection';
 import type { ProductDetail } from '@/lib/catalog/types';
+import { useDictionary, useFormatMoney } from '@/components/i18n/LocaleProvider';
+import { fill } from '@/lib/i18n/format';
 import { CustomOrderFields, type CustomOrderValues } from './CustomOrderFields';
 import { OptionGroupsField } from './OptionGroupsField';
 
@@ -28,6 +29,9 @@ const QUANTITY_CAP = 99;
  */
 export function PurchasePanel({ product }: { product: PurchaseProduct }) {
   const groups = product.optionGroups;
+  const dict = useDictionary();
+  const t = dict.product.purchase;
+  const formatMoney = useFormatMoney();
   const [selection, setSelection] = useState<OptionSelection>({});
   const [quantity, setQuantity] = useState(1);
   const [customValues, setCustomValues] = useState<CustomOrderValues>({});
@@ -73,17 +77,17 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
   const notice = !productOnSale
     ? product.saleStatus.name
     : groups.length > 0 && !sku
-      ? '옵션을 선택해 주세요.'
+      ? t.selectOptions
       : sku && sku.saleStatus.code !== 'ON_SALE'
-        ? `선택한 옵션은 ${sku.saleStatus.name} 입니다.`
-        : '장바구니 담기는 준비 중입니다.';
+        ? fill(t.optionStatus, { status: sku.saleStatus.name })
+        : t.cartPending;
 
   return (
     <div ref={panelRef} className="flex scroll-mt-32 flex-col gap-6">
       <p className="flex flex-wrap items-baseline gap-x-3 text-lg">
         {price.discountRate !== null && (
           <span className="font-medium">
-            <span className="sr-only">할인율 </span>
+            <span className="sr-only">{dict.price.discountRate} </span>
             {price.discountRate}%
           </span>
         )}
@@ -92,13 +96,13 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
           {price.from && (
             <>
               <span aria-hidden>~</span>
-              <span className="sr-only"> 부터</span>
+              <span className="sr-only"> {dict.price.from}</span>
             </>
           )}
         </span>
         {price.listPrice && (
           <del className="text-sm text-muted-fg">
-            <span className="sr-only">정가 </span>
+            <span className="sr-only">{dict.price.listPrice} </span>
             {formatMoney(price.listPrice)}
           </del>
         )}
@@ -113,7 +117,9 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
       />
 
       {sku && sku.additionalPrice.amount > 0 && (
-        <p className="text-sm text-muted-fg">옵션 추가금 +{formatMoney(sku.additionalPrice)}</p>
+        <p className="text-sm text-muted-fg">
+          {fill(t.surcharge, { amount: formatMoney(sku.additionalPrice) })}
+        </p>
       )}
 
       {product.customOrder && (
@@ -127,7 +133,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
       <div className="flex flex-col gap-3 border-t border-border pt-6">
         <div className="flex items-center justify-between">
           <span className="text-xs tracking-[0.15em] uppercase" id={quantityLabelId}>
-            수량
+            {t.quantity}
           </span>
           <div
             className="flex items-center border border-border"
@@ -136,7 +142,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
           >
             <button
               type="button"
-              aria-label="수량 줄이기"
+              aria-label={t.decrease}
               disabled={quantity <= 1}
               onClick={() => setQuantity((q) => Math.max(1, q - 1))}
               className="size-10 disabled:text-muted-fg"
@@ -148,7 +154,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
             </output>
             <button
               type="button"
-              aria-label="수량 늘리기"
+              aria-label={t.increase}
               disabled={quantity >= maxQuantity}
               onClick={() => setQuantity((q) => Math.min(maxQuantity, q + 1))}
               className="size-10 disabled:text-muted-fg"
@@ -159,12 +165,12 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
         </div>
         {product.maxQuantityPerOrder !== null && (
           <p className="text-xs text-muted-fg">
-            한 번에 최대 {product.maxQuantityPerOrder}개까지 주문할 수 있습니다.
+            {fill(t.maxPerOrder, { count: product.maxQuantityPerOrder })}
           </p>
         )}
 
         <Button disabled className="h-12 w-full" aria-describedby={noticeId}>
-          장바구니 담기
+          {t.addToCart}
         </Button>
         <p id={noticeId} role="status" className="text-center text-xs text-muted-fg">
           {notice}
@@ -191,7 +197,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
           tabIndex={panelInView ? -1 : undefined}
           onClick={goToPanel}
         >
-          {productOnSale ? '구매하기' : product.saleStatus.name}
+          {productOnSale ? t.buy : product.saleStatus.name}
         </Button>
       </div>
     </div>

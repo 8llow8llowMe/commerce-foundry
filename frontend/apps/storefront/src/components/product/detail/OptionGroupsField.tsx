@@ -1,4 +1,5 @@
 import { cx } from '@cf/ui';
+import { useDictionary } from '@/components/i18n/LocaleProvider';
 import { optionValueState, type OptionSelection } from '@/lib/catalog/option-selection';
 import type { ProductOptionGroup, ProductSku } from '@/lib/catalog/types';
 
@@ -22,6 +23,7 @@ export function OptionGroupsField({
   onSelect: (groupId: string, valueId: string) => void;
   size?: 'md' | 'sm';
 }) {
+  const t = useDictionary().product.option;
   return groups.map((group) => (
     <fieldset key={group.optionGroupId} className="flex flex-col gap-3">
       <legend
@@ -59,8 +61,8 @@ export function OptionGroupsField({
                 className="sr-only"
               />
               {value.name}
-              {state === 'soldOut' && <span className="sr-only"> (품절)</span>}
-              {state === 'unavailable' && <span className="sr-only"> (선택 불가)</span>}
+              {state === 'soldOut' && <span className="sr-only"> ({t.soldOut})</span>}
+              {state === 'unavailable' && <span className="sr-only"> ({t.unavailable})</span>}
             </label>
           );
         })}
