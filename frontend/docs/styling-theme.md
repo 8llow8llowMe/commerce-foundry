@@ -77,6 +77,7 @@
 - 섹션 간격은 모바일 96 · 태블릿 120 · PC 160px(`HomeSections`), 섹션 제목은 Title 단계(28 / 48px). 레이아웃 명세 정본은 #59 댓글이다.
 - 첫 화면을 채우거나 스크롤 고정(sticky)하는 요소는 헤더 높이 `--site-header-h`(`app/globals.css`)를 기준으로 한다 — `h-[calc(100svh-var(--site-header-h))]`, `top-[var(--site-header-h)]`. 헤더 줄 높이를 바꾸면 이 값도 바꾼다.
 - 브랜드 모티프 모양은 토큰 `--cf-motif-radius`(border-radius 값, 중립은 0)다 — MOKOYURI 는 저고리 배래 곡선. 페이지당 1~2장(메인 Our Story 인물 사진 등)에만 쓰고 상품 이미지에는 쓰지 않는다.
+- 섹션 첫 등장 모션(#57 §6): `HomeSections` 가 히어로를 뺀 섹션을 `Reveal` 로 감싸고, 섹션 안 요소에 `data-reveal="title|text|media"` 를 단다(`SectionHeading` · `MediaFrame` 은 기본으로 단다). 지연은 종류로 정한다(제목 0 → 글 75 → 사진 150ms, 24px). 하이드레이션 뒤 화면 아래 섹션만 숨김으로 바꾸므로 서버 렌더 · 스크립트 실패 · 움직임 줄이기면 그대로 보인다. 고정 위치 버튼을 품은 요소(`LookPicker`)에는 달지 않는다 — 움직이는 동안 transform 이 fixed 의 기준을 바꾼다.
 - 스크롤에 따라 바뀌는 화면(Craft 확대)은 서버 렌더 · 하이드레이션 전에 스크립트 없는 기본 화면을 그린다(`useSyncExternalStore` 로 하이드레이션 여부를 읽는다 — effect 안 setState 금지). transform 만 움직이고 `motion-reduce` 면 전환을 끈다.
 - 메인 `LOOK` 의 `LookPicker` 는 `floatingAction` 으로 모바일 하단 고정 담기 버튼을 쓴다(목록이 보일 때만). 상품 상세는 구매 패널 하단 바가 있어 쓰지 않는다.
 - 가로 스와이프 목록(`overflow-x-auto`)에는 `relative` 를 준다 — 안의 `sr-only`(absolute)가 스크롤 상자 밖 기준으로 잡혀 페이지 가로 스크롤을 만든다.
