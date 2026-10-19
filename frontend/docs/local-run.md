@@ -17,6 +17,8 @@ pnpm install
 키 목록은 `frontend/.env.example`. 기본값으로 로컬에서 그대로 뜬다. 바꿀 때만 앱 디렉터리에 `.env.local` 을 만든다
 (예: `apps/storefront/.env.local` 에 `GATEWAY_URL=http://localhost:8000`). `.env.local` 은 커밋되지 않는다.
 
+영문 스토어는 `http://localhost:3000/en` 이다. 호스트 방식(`LOCALE_HOSTS=en=en.localhost`)을 로컬에서 보려면 `http://en.localhost:3000` 으로 연다(`*.localhost` 는 브라우저가 자기 자신으로 푼다).
+
 ## 3. 실행
 
 ```bash

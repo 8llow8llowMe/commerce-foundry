@@ -31,7 +31,9 @@
 
 ## 3. 메뉴 (navigation)
 
-헤더 메뉴는 컴포넌트가 아니라 브랜드 설정 `brand.navigation`(`NavItem[]`, 타입은 `@cf/ui`)이 갖는다. 사업자마다 메뉴가 다르기 때문이다.
+헤더 메뉴는 컴포넌트가 아니라 브랜드 설정 `brand.content[locale].navigation`(`NavItem[]`, 타입은 `@cf/ui`)이 갖는다. 사업자마다 메뉴가 다르기 때문이다.
+
+브랜드 문구(SEO · 메뉴 · 푸터 링크 · 메인 섹션)는 언어마다 `brand.content.ko` · `brand.content.en` 으로 나눈다(`BrandContent`). `brand.locales` 에 둔 언어는 모두 채운다. `href` 는 언어 접두어 없는 앱 경로로 적는다 — 앱의 `Link` 가 붙인다.
 
 | 필드 | 쓰는 곳 |
 |------|---------|
@@ -44,7 +46,7 @@
 
 ### 3-1. 메인 화면 (home)
 
-메인 섹션도 브랜드 설정 `brand.home`(`HomeSection[]`, 타입은 `@cf/ui`)이 위에서부터 정한다. `apps/storefront/src/components/home/*` 는 데이터만 그린다.
+메인 섹션도 브랜드 설정 `brand.content[locale].home`(`HomeSection[]`, 타입은 `@cf/ui`)이 위에서부터 정한다. `apps/storefront/src/components/home/*` 는 데이터만 그린다.
 
 | 유형 | 내용 | 데이터 |
 |------|------|--------|
@@ -54,7 +56,7 @@
 | `LOOK` | 착장 화보 + 구성 상품(옵션 선택 · 함께 담기) | 상품 상세 API(`productIds`) |
 | `DETAIL` | 클로즈업 칸 + 번호 붙은 제작 포인트 | 설정 |
 
-- 유형 이름은 BE 메인 전시 API(#63)의 섹션 유형과 같다. API 가 생기면 `brand.home` 대신 응답을 넘긴다. `ROMANTIC_EDIT` 같은 브랜드 이름은 유형이 아니라 `title` 값이다.
+- 유형 이름은 BE 메인 전시 API(#63)의 섹션 유형과 같다. API 가 생기면 `content.home` 대신 응답을 넘긴다. `ROMANTIC_EDIT` 같은 브랜드 이름은 유형이 아니라 `title` 값이다.
 - 화보가 없으면 `image: null` 과 `placeholder`(필요한 사진 · 비율)를 둔다. 같은 비율의 빈 자리가 그려져 레이아웃이 밀리지 않는다.
 - API 를 쓰는 섹션은 실패하거나 비면 그리지 않는다(메인을 깨뜨리지 않는다).
 - 새 유형을 더하면 `HomeSections` 의 `switch` 가 컴파일 오류로 알려 준다.
@@ -75,12 +77,12 @@
 
 - 스토어프론트 푸터(`components/footer/SiteFooter`)가 `src/lib/env.ts` 의 `businessInfo` 로 표시한다(상호 · 대표 · 사업자등록번호 · 통신판매업 신고번호 · 주소 · 고객센터). 빈 값은 그 줄을 빼고, 사업자등록번호가 10자리면 공정위 사업자 정보 확인 링크를 단다.
 - 정적으로 미리 그리는 페이지(not-found 등)에는 **빌드 시점** 값이 들어간다. 배포 환경은 빌드 · 실행 모두에 같은 값을 준다.
-- 푸터 고객 안내 링크(약관 · 개인정보처리방침 · 고객센터)는 브랜드 설정 `brand.footerLinks` 다. 개인정보처리방침은 `emphasis: true` 로 굵게 둔다.
+- 푸터 고객 안내 링크(약관 · 개인정보처리방침 · 고객센터)는 브랜드 설정 `brand.content[locale].footerLinks` 다. 개인정보처리방침은 `emphasis: true` 로 굵게 둔다.
 - 테스트 · 예시에는 실정보가 아닌 자리 값(`000-00-00000`, `홍길동`)만 쓴다.
 
 ## 5. 새 브랜드 추가
 
-1. `packages/theme-mokoyuri` 를 복사해 `packages/theme-<brand>` 를 만들고 이름·`theme.css` 값·`brand.ts`(메뉴 `navigation` 포함)를 바꾼다.
+1. `packages/theme-mokoyuri` 를 복사해 `packages/theme-<brand>` 를 만들고 이름·`theme.css` 값·`brand.ts`(여는 언어 `locales`, 언어별 `content`)를 바꾼다.
 2. 앱 `package.json` 의 `"@cf/brand": "workspace:@cf/theme-<brand>@*"` 한 줄을 바꾼다.
 3. `pnpm install && pnpm build`.
 
