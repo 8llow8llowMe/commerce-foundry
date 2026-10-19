@@ -1,23 +1,13 @@
-import { checkGateway } from '@cf/api-client/server';
 import { brand } from '@cf/brand';
-import { gatewayUrl } from '@/lib/env';
+import { HomeSections } from '@/components/home/HomeSections';
 
+// 대표 상품 · 룩 구성품을 요청마다 받는다 — 캐시 전략은 메인 전시 API(#63)와 함께 정한다
 export const dynamic = 'force-dynamic';
 
-// 임시 화면 — #24 에서 메인 화면으로 바꾼다.
-export default async function HomePage() {
-  const gateway = await checkGateway(gatewayUrl);
-
+export default function HomePage() {
   return (
-    <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-4 px-4">
-      <h1 className="text-2xl font-semibold">{brand.name}</h1>
-      <p className="text-muted-fg">스토어프론트 초기 구성</p>
-      <p>
-        게이트웨이:{' '}
-        <span className={gateway === 'UP' ? 'font-medium text-primary' : 'font-medium text-danger'}>
-          {gateway}
-        </span>
-      </p>
+    <main>
+      <HomeSections sections={brand.home} />
     </main>
   );
 }
