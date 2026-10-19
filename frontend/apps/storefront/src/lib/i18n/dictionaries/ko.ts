@@ -11,6 +11,13 @@ export const ko = {
     shortcuts: '바로가기',
     primaryNav: '주 메뉴',
     switchLanguage: '언어 선택',
+    /** 계정 진입점 — 로그아웃 상태 */
+    login: '로그인',
+    signUp: '회원가입',
+    /** 계정 진입점 — 로그인 상태. 마이페이지는 #28 */
+    account: '마이페이지',
+    logout: '로그아웃',
+    accountNav: '계정',
   },
   auth: {
     login: {

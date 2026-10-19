@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { SiteFooter } from '@/components/footer/SiteFooter';
 import { SiteHeader } from '@/components/header/SiteHeader';
 import { LocaleProvider } from '@/components/i18n/LocaleProvider';
+import { hasSession } from '@/lib/auth/session';
 import { businessInfo, siteUrl } from '@/lib/env';
 import { hasLocale, localeRouting } from '@/lib/i18n/config';
 import { getDictionary } from '@/lib/i18n/dictionaries';
@@ -31,6 +32,8 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
   if (!hasLocale(locale)) notFound();
   const dict = getDictionary(locale);
   const content = brand.content[locale];
+  // 스토어프론트 화면은 이미 요청마다 렌더링된다(언어 판별) — 쿠키를 읽어도 정적 생성을 잃지 않는다
+  const signedIn = await hasSession();
   const languages = brand.locales.map((code) => ({
     locale: code,
     name: getDictionary(code).languageName,
@@ -48,6 +51,7 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
             navigation={content.navigation}
             labels={dict.header}
             languages={languages}
+            signedIn={signedIn}
           />
           <div className="flex-1">{children}</div>
           <SiteFooter

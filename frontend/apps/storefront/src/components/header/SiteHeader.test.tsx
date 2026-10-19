@@ -1,10 +1,12 @@
 import type { NavItem } from '@cf/ui';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { LanguageLink } from '@/components/i18n/LanguageLinks';
 import { LocaleProvider } from '@/components/i18n/LocaleProvider';
 import { ko } from '@/lib/i18n/dictionaries/ko';
 import { SiteHeader } from './SiteHeader';
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 
 // 브랜드와 무관한 메뉴로 확인한다 — 컴포넌트가 특정 브랜드 메뉴를 갖고 있지 않아야 한다.
 const NAV: NavItem[] = [
@@ -13,15 +15,20 @@ const NAV: NavItem[] = [
   { label: 'GAMMA', description: '셋째 설명', href: '/gamma' },
 ];
 
-const render = (navigation: NavItem[] = NAV, languages: LanguageLink[] = []) =>
+const render = (navigation: NavItem[] = NAV, languages: LanguageLink[] = [], signedIn = false) =>
   renderToStaticMarkup(
     <SiteHeader
       brandName="ACME"
       navigation={navigation}
       labels={ko.header}
       languages={languages}
+      signedIn={signedIn}
     />,
   );
+
+/** aria-label 로 찾은 링크 태그 */
+const linkLabelled = (html: string, label: string) =>
+  html.match(new RegExp(`<a [^>]*aria-label="${label}"[^>]*>`))?.[0] ?? '';
 
 /** aria-label 로 찾은 nav 블록의 마크업 */
 const navBlock = (html: string, label: string) =>
@@ -35,6 +42,24 @@ describe('SiteHeader', () => {
       /<a [^>]*href="\/search"[^>]*aria-label="검색"|aria-label="검색"[^>]*href="\/search"/,
     );
     expect(html).toMatch(/aria-label="장바구니"/);
+  });
+
+  it('로그아웃 상태면 계정 아이콘은 로그인으로, 메뉴 계정 줄은 로그인 · 회원가입이다', () => {
+    const html = render();
+    expect(linkLabelled(html, '로그인')).toContain('href="/login"');
+    const account = navBlock(html, '계정');
+    expect(account).toContain('href="/login"');
+    expect(account).toContain('href="/signup"');
+    expect(account).not.toContain('로그아웃');
+  });
+
+  it('로그인 상태면 계정 아이콘은 마이페이지로, 메뉴 계정 줄은 마이페이지 · 로그아웃 버튼이다', () => {
+    const html = render(NAV, [], true);
+    expect(linkLabelled(html, '마이페이지')).toContain('href="/mypage"');
+    const account = navBlock(html, '계정');
+    expect(account).toContain('href="/mypage"');
+    expect(account).toMatch(/<button type="button"[^>]*>로그아웃<\/button>/);
+    expect(account).not.toContain('href="/login"');
   });
 
   it('전체 메뉴 버튼은 닫힌 상태로 시작하고 패널을 가리킨다', () => {
@@ -97,11 +122,18 @@ describe('SiteHeader', () => {
   it('영문 스토어에서는 앱 경로 링크에 /en 접두어가 붙는다', () => {
     const html = renderToStaticMarkup(
       <LocaleProvider locale="en" prefix="/en" dict={ko}>
-        <SiteHeader brandName="ACME" navigation={NAV} labels={ko.header} languages={[]} />
+        <SiteHeader
+          brandName="ACME"
+          navigation={NAV}
+          labels={ko.header}
+          languages={[]}
+          signedIn={false}
+        />
       </LocaleProvider>,
     );
     expect(html).toMatch(/<a [^>]*href="\/en"[^>]*>ACME<\/a>/);
     expect(navBlock(html, '주 메뉴')).toContain('href="/en/alpha"');
     expect(html).toContain('href="/en/search"');
+    expect(html).toContain('href="/en/login"');
   });
 });
