@@ -115,3 +115,22 @@ describe('PurchasePanel (첫 렌더)', () => {
     expect(html).toContain('배꼽 위치에서 잽니다.');
   });
 });
+
+describe('PurchasePanel 모바일 하단 구매 바', () => {
+  /** 화면 아래 고정 바의 마크업 */
+  const bar = (html: string) =>
+    html.match(/<div[^>]*class="fixed inset-x-0 bottom-0[\s\S]*$/)?.[0] ?? '';
+
+  it('PC 에서는 숨기고, 상품명 · 표시가 · 구매하기 버튼을 둔다', () => {
+    const html = bar(render());
+    expect(html).toContain('lg:hidden');
+    expect(html).toContain('윤금 드레스');
+    expect(html).toContain('129,000원<span aria-hidden="true">~</span>');
+    expect(html).toMatch(/<button[^>]*>구매하기<\/button>/);
+  });
+
+  it('판매중이 아니면 버튼에 서버 상태 문구를 쓴다', () => {
+    const html = bar(render({ saleStatus: status('SOLD_OUT', '품절') }));
+    expect(html).toMatch(/<button[^>]*>품절<\/button>/);
+  });
+});
