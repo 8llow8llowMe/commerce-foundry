@@ -68,10 +68,24 @@ export const home: HomeSection[] = [
     id: 'craft-details',
     title: 'The Beauty of Craft',
     body: '섬세한 바느질과 전통의 결이 만나 오늘의 특별한 옷이 됩니다.',
+    // 같은 드레스 전신 한 장을 단계마다 확대한다. focus 는 촬영본이 오면 실제 위치로 맞춘다
+    frame: { image: null, placeholder: '윤금 드레스 전신 · 세로 4:5 · 고해상도(320% 확대용)' },
     points: [
-      { title: '7개 패널 상체 구조', text: '몸의 곡선을 따라 나눈 패널로 단정하게 감싸는 실루엣.' },
-      { title: '이중 맞주름', text: '걸을 때마다 풍성하게 흔들리는 치마의 볼륨.' },
-      { title: '깨끼바느질', text: '솔기를 곱게 감싸는 전통 바느질로 마감한 안과 밖.' },
+      {
+        title: '7개 패널 상체 구조',
+        text: '몸의 곡선을 따라 나눈 패널로 단정하게 감싸는 실루엣.',
+        focus: { x: 0.5, y: 0.28, scale: 1.8 },
+      },
+      {
+        title: '이중 맞주름',
+        text: '걸을 때마다 풍성하게 흔들리는 치마의 볼륨.',
+        focus: { x: 0.42, y: 0.68, scale: 3.2 },
+      },
+      {
+        title: '깨끼바느질',
+        text: '솔기를 곱게 감싸는 전통 바느질로 마감한 안과 밖.',
+        focus: { x: 0.6, y: 0.86, scale: 3.2 },
+      },
     ],
     media: [
       { image: null, placeholder: '소재 클로즈업 · 자카드 · 3:4' },
@@ -82,10 +96,13 @@ export const home: HomeSection[] = [
   {
     type: 'STORY',
     id: 'our-story',
-    title: 'From Hanbok, Toward Today',
-    body: '한복의 여밈과 치마의 실루엣, 전통 문양에서 출발해 오늘 입는 옷을 만듭니다.',
-    links: [{ label: 'OUR STORY', href: '/our-story' }],
-    media: [{ image: null, placeholder: '브랜드 · 작업실 컷 · 가로 3:2' }],
-    layout: 'centered',
+    // 문구는 시안 초안 — 고객사 확인 대상. 단락은 빈 줄로 나눈다(브랜드 철학 / 디자이너 이야기)
+    title: '한복에서 시작한 로맨스',
+    body: '한복의 여밈과 치마의 실루엣, 전통 문양에서 출발해 오늘 입는 옷을 만듭니다. 특별한 날의 옷이 아니라 매일 꺼내 입고 싶은 한 벌을 생각합니다.\n\n디자이너는 어린 시절 할머니의 저고리에서 처음 선의 아름다움을 배웠습니다. 그 곡선을 지금의 몸과 생활에 맞게 다시 그립니다.',
+    links: [{ label: '브랜드 이야기', href: '/our-story' }],
+    media: [
+      { image: null, placeholder: '디자이너 · 작업실 인물 컷 · 세로 3:4 · 배래 곡선으로 자름' },
+    ],
+    layout: 'panel',
   },
 ];

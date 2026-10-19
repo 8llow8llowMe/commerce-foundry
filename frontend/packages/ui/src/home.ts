@@ -59,9 +59,10 @@ export type StorySection = {
   media: HomeMediaSlot[];
   /**
    * asymmetric: 큰 이미지 + 글 비대칭, centered: 글 가운데,
-   * curtain: 전폭 사진을 스크롤 고정으로 쌓아 다음 장이 커튼처럼 덮는다(#59 03)
+   * curtain: 전폭 사진을 스크롤 고정으로 쌓아 다음 장이 커튼처럼 덮는다(#59 03),
+   * panel: 사이트에서 유일한 어두운 면 — 제목 · 글(빈 줄로 단락) · 버튼 + 브랜드 모티프 모양으로 자른 사진 1장(#59 06)
    */
-  layout: 'asymmetric' | 'centered' | 'curtain';
+  layout: 'asymmetric' | 'centered' | 'curtain' | 'panel';
 };
 
 export type LookSection = {
@@ -80,8 +81,18 @@ export type DetailSection = {
   id: string;
   title: string;
   body: string;
-  points: { title: string; text: string }[];
+  /** 확대해 보는 전신 사진(세로 4:5). null 이면 확대 무대 없이 클로즈업만 보인다 */
+  frame: HomeMediaSlot | null;
+  points: DetailPoint[];
+  /** 클로즈업 — 스크립트가 없거나 frame 이 없을 때 확대 대신 보인다. points 와 같은 순서 */
   media: HomeMediaSlot[];
+};
+
+/** 제작 포인트. focus 는 frame 사진에서 이 부분의 위치(0~1)와 확대 배율 */
+export type DetailPoint = {
+  title: string;
+  text: string;
+  focus: { x: number; y: number; scale: number } | null;
 };
 
 export type HomeSection =

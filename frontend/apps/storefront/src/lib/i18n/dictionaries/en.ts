@@ -80,6 +80,9 @@ export const en: Dictionary = {
       optional: 'optional',
     },
   },
+  home: {
+    craftOverview: 'Full view',
+  },
   look: {
     selectOptions: 'Please select options for {names}.',
     pickItems: 'Choose the pieces to add together.',

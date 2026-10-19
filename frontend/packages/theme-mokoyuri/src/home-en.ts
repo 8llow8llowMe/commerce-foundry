@@ -66,15 +66,22 @@ export const homeEn: HomeSection[] = [
     id: 'craft-details',
     title: 'The Beauty of Craft',
     body: 'Delicate stitching and traditional texture come together in clothes for today.',
+    frame: { image: null, placeholder: '윤금 드레스 전신 · 세로 4:5 · 고해상도(320% 확대용)' },
     points: [
       {
         title: 'Seven-panel bodice',
         text: 'Panels cut along the curves of the body for a neat, enveloping silhouette.',
+        focus: { x: 0.5, y: 0.28, scale: 1.8 },
       },
-      { title: 'Double box pleats', text: 'A full skirt that sways with every step.' },
+      {
+        title: 'Double box pleats',
+        text: 'A full skirt that sways with every step.',
+        focus: { x: 0.42, y: 0.68, scale: 3.2 },
+      },
       {
         title: 'Kkekki stitching',
         text: 'Traditional seam-enclosing stitches, finished inside and out.',
+        focus: { x: 0.6, y: 0.86, scale: 3.2 },
       },
     ],
     media: [
@@ -86,10 +93,12 @@ export const homeEn: HomeSection[] = [
   {
     type: 'STORY',
     id: 'our-story',
-    title: 'From Hanbok, Toward Today',
-    body: 'From the wrap of hanbok, the silhouette of its skirt and traditional motifs, we make clothes to wear today.',
-    links: [{ label: 'OUR STORY', href: '/our-story' }],
-    media: [{ image: null, placeholder: '브랜드 · 작업실 컷 · 가로 3:2' }],
-    layout: 'centered',
+    title: 'Romance, Begun in Hanbok',
+    body: "From the wrap of hanbok, the silhouette of its skirt and traditional motifs, we make clothes to wear today — not for special days, but pieces you reach for every day.\n\nOur designer first learned the beauty of a line from her grandmother's jeogori, and redraws those curves for today's bodies and lives.",
+    links: [{ label: 'Our story', href: '/our-story' }],
+    media: [
+      { image: null, placeholder: '디자이너 · 작업실 인물 컷 · 세로 3:4 · 배래 곡선으로 자름' },
+    ],
+    layout: 'panel',
   },
 ];

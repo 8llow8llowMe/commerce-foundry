@@ -1,6 +1,7 @@
 export type { BrandConfig, BrandContent, FooterLink, Locale, NavItem } from './brand';
 export { Button, type ButtonProps } from './Button';
 export type {
+  DetailPoint,
   DetailSection,
   HeroSection,
   HomeImage,
