@@ -1,4 +1,5 @@
 import type { BrandConfig } from '@cf/ui';
+import { home } from './home';
 
 export const brand: BrandConfig = {
   name: 'MOKOYURI',
@@ -35,4 +36,5 @@ export const brand: BrandConfig = {
     { label: 'STOCKISTS', description: '입점처 / 해외 구매', href: '/stockists' },
     { label: 'CUSTOMER CARE', description: '배송 / 교환 / 문의', href: '/customer-care' },
   ],
+  home,
 };
