@@ -7,7 +7,7 @@ import { LocaleProvider } from '@/components/i18n/LocaleProvider';
 import { businessInfo, siteUrl } from '@/lib/env';
 import { hasLocale, localeRouting } from '@/lib/i18n/config';
 import { getDictionary } from '@/lib/i18n/dictionaries';
-import { localePrefix, localeUrl } from '@/lib/i18n/routing';
+import { localePrefix, localeTarget, localeUrl } from '@/lib/i18n/routing';
 import { getI18n, localeHomeHref } from '@/lib/i18n/server';
 import '../globals.css';
 
@@ -35,6 +35,7 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
     locale: code,
     name: getDictionary(code).languageName,
     href: localeHomeHref(code),
+    target: localeTarget(localeRouting, code, siteUrl),
   }));
 
   return (

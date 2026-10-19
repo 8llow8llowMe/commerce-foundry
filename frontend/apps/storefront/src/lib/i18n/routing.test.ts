@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  localeTarget,
   localeUrl,
   localizePath,
   parseLocaleHosts,
   routeRequest,
+  stripLocalePrefix,
+  switchLocaleHref,
   type LocaleRouting,
 } from './routing';
 
@@ -106,5 +109,39 @@ describe('localizePath · localeUrl', () => {
       'https://en.example.com/shop',
     );
     expect(localeUrl(byHost, 'ko', '/', 'https://example.com')).toBe('https://example.com/');
+  });
+});
+
+describe('언어 전환 — 같은 화면', () => {
+  it('지금 언어 접두어를 떼어 앱 경로로', () => {
+    expect(stripLocalePrefix('/en/shop', '/en')).toBe('/shop');
+    expect(stripLocalePrefix('/en', '/en')).toBe('/');
+    expect(stripLocalePrefix('/english', '/en')).toBe('/english');
+    expect(stripLocalePrefix('/shop', '')).toBe('/shop');
+  });
+
+  it('경로 방식: 같은 호스트에서 접두어만 바꾸고 쿼리를 유지한다', () => {
+    const ko = localeTarget(byPath, 'ko', 'https://example.com');
+    const en = localeTarget(byPath, 'en', 'https://example.com');
+    expect(ko).toEqual({ origin: '', prefix: '' });
+    expect(switchLocaleHref({ pathname: '/shop', search: '?sort=NEWEST' }, '', en)).toBe(
+      '/en/shop?sort=NEWEST',
+    );
+    expect(switchLocaleHref({ pathname: '/en/products/1', search: '' }, '/en', ko)).toBe(
+      '/products/1',
+    );
+    expect(switchLocaleHref({ pathname: '/en', search: '' }, '/en', ko)).toBe('/');
+  });
+
+  it('호스트 방식: 그 언어의 호스트 절대 주소로', () => {
+    const ko = localeTarget(byHost, 'ko', 'https://example.com');
+    const en = localeTarget(byHost, 'en', 'https://example.com');
+    expect(en).toEqual({ origin: 'https://en.example.com', prefix: '' });
+    expect(switchLocaleHref({ pathname: '/shop', search: '?a=1' }, '', en)).toBe(
+      'https://en.example.com/shop?a=1',
+    );
+    expect(switchLocaleHref({ pathname: '/products/1', search: '' }, '', ko)).toBe(
+      'https://example.com/products/1',
+    );
   });
 });

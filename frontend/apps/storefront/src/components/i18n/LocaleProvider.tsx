@@ -28,6 +28,11 @@ export function LocaleProvider({
   return <LocaleContext value={{ locale, prefix, dict }}>{children}</LocaleContext>;
 }
 
+/** 지금 언어의 경로 접두어('' 또는 '/en') */
+export function useLocalePrefix(): string {
+  return useContext(LocaleContext).prefix;
+}
+
 export function useDictionary(): Dictionary {
   return useContext(LocaleContext).dict;
 }
