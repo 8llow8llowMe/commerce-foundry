@@ -66,7 +66,7 @@
 |------|------|--------|
 | `HERO` | 제목(줄 배열) · 문구 · 주 버튼 `cta` + 보조 `secondaryCta`, PC · 모바일 세로 4:5 화보(따로), 선택 영상 | 설정 |
 | `PRODUCT_PICK` | 대표 상품 n개 | 상품 목록 API(`categoryId` · `limit`) — 이름 · 가격을 설정에 적지 않는다 |
-| `STORY` | 라벨 · 제목 · 본문 · 링크, `asymmetric`(이미지 2장 비대칭) / `centered` | 설정 |
+| `STORY` | 제목 · 본문 · 링크, `asymmetric`(이미지 2장 비대칭) / `centered` / `curtain`(전폭 사진 2~3장 스크롤 고정 · 캡션) | 설정 |
 | `LOOK` | 착장 화보 + 구성 상품(옵션 선택 · 함께 담기) | 상품 상세 API(`productIds`) |
 | `DETAIL` | 클로즈업 칸 + 번호 붙은 제작 포인트 | 설정 |
 
@@ -75,6 +75,8 @@
 - API 를 쓰는 섹션은 실패하거나 비면 그리지 않는다(메인을 깨뜨리지 않는다).
 - 새 유형을 더하면 `HomeSections` 의 `switch` 가 컴파일 오류로 알려 준다.
 - 섹션 간격은 모바일 96 · 태블릿 120 · PC 160px(`HomeSections`), 섹션 제목은 Title 단계(28 / 48px). 레이아웃 명세 정본은 #59 댓글이다.
+- 첫 화면을 채우거나 스크롤 고정(sticky)하는 요소는 헤더 높이 `--site-header-h`(`app/globals.css`)를 기준으로 한다 — `h-[calc(100svh-var(--site-header-h))]`, `top-[var(--site-header-h)]`. 헤더 줄 높이를 바꾸면 이 값도 바꾼다.
+- 메인 `LOOK` 의 `LookPicker` 는 `floatingAction` 으로 모바일 하단 고정 담기 버튼을 쓴다(목록이 보일 때만). 상품 상세는 구매 패널 하단 바가 있어 쓰지 않는다.
 - 가로 스와이프 목록(`overflow-x-auto`)에는 `relative` 를 준다 — 안의 `sr-only`(absolute)가 스크롤 상자 밖 기준으로 잡혀 페이지 가로 스크롤을 만든다.
 
 ### 3-2. Shop the Look
