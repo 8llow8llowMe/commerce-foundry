@@ -171,7 +171,10 @@ describe('LookSection (서버 데이터)', () => {
       thumbnail: null,
       salePrice: { amount: 89000, currency: 'KRW' },
       saleStatus: { code, name, description: '' },
-    }) as ProductDetail;
+      optionGroups: [],
+      skus: [],
+      customOrder: null,
+    }) as unknown as ProductDetail;
 
   const section = {
     type: 'LOOK' as const,
