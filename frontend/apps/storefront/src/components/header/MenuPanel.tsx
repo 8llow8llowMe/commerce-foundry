@@ -61,7 +61,7 @@ export function MenuPanel({ brandName, items }: MenuPanelProps) {
             </button>
             <p
               id={titleId}
-              className="text-center text-base font-medium tracking-[0.3em] uppercase"
+              className="text-center font-display text-xl tracking-[0.25em] uppercase"
             >
               <span className="sr-only">전체 메뉴 — </span>
               {brandName}
