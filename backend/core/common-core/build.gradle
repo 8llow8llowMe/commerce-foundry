@@ -40,6 +40,9 @@ dependencies {
     // 서블릿 · MockMvc 는 픽스처도 컴파일에만 쓴다 — 스모크를 쓰는 서블릿 서비스는 이미 spring-boot-starter-webmvc-test 를 가진다
     testFixturesCompileOnly 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testFixturesCompileOnly 'jakarta.servlet:jakarta.servlet-api'
+    // 헥사고날 계층 의존 정적 규칙(HexagonalArchitectureRules). 보안과 무관해 security-core 가 아니라 여기 둔다. 규칙(ArchRule)을 공개 상수로 내보내므로 api 다.
+    // archunit-junit5 엔진은 쓰지 않는다 — security-core 와 같이 일반 Jupiter @Test(인터페이스 default 메서드)에서 rule.check 한다
+    testFixturesApi "com.tngtech.archunit:archunit:${rootProject.ext.archunitVersion}"
 }
 
 // 위 compileOnly(서블릿 스택)가 api/implementation 으로 바뀌는 회귀를 막는다. 게이트웨이도 받는 두 클래스패스 —
