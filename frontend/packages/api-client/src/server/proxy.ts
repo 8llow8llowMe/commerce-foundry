@@ -96,7 +96,7 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
  * 브라우저는 Sec-Fetch-Site 를 보낸다. 없으면(구형 브라우저) Origin 으로 판단하고,
  * 둘 다 없으면 브라우저 요청이 아니므로 통과시킨다(쿠키를 자동으로 실어 오는 주체가 없다).
  */
-function isSameOrigin(request: Request, url: URL): boolean {
+export function isSameOrigin(request: Request, url: URL): boolean {
   const site = request.headers.get('sec-fetch-site');
   if (site !== null) return site === 'same-origin';
   const origin = request.headers.get('origin');
@@ -123,14 +123,29 @@ function relay(upstream: Response, setCookies: string[]): Response {
   return new Response(upstream.body, { status: upstream.status, headers });
 }
 
-function issueCookies(config: AuthCookieConfig, pair: TokenPair): string[] {
+/** 토큰 쌍을 쿠키로. 수명은 서버가 준 값(초)이 있으면 그것을, 없으면 앱 설정값을 쓴다 */
+export function issueCookies(
+  config: AuthCookieConfig,
+  pair: TokenPair,
+  maxAgeSec: { access?: number; refresh?: number } = {},
+): string[] {
   return [
-    serializeCookie(config.accessName, pair.accessToken, config.accessMaxAgeSec, config.secure),
-    serializeCookie(config.refreshName, pair.refreshToken, config.refreshMaxAgeSec, config.secure),
+    serializeCookie(
+      config.accessName,
+      pair.accessToken,
+      maxAgeSec.access ?? config.accessMaxAgeSec,
+      config.secure,
+    ),
+    serializeCookie(
+      config.refreshName,
+      pair.refreshToken,
+      maxAgeSec.refresh ?? config.refreshMaxAgeSec,
+      config.secure,
+    ),
   ];
 }
 
-function clearCookies(config: AuthCookieConfig): string[] {
+export function clearCookies(config: AuthCookieConfig): string[] {
   return [
     serializeCookie(config.accessName, '', 0, config.secure),
     serializeCookie(config.refreshName, '', 0, config.secure),

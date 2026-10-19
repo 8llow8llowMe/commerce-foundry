@@ -23,13 +23,13 @@ export const REISSUE_PATH = '/api/v1/auth/token/reissue';
 export const REISSUE_GRACE_MS = 30_000;
 
 // 진행 중인 재발급과 유예 시간 안의 성공 결과. 인스턴스 내부 한정이다.
-// 다중 인스턴스 경합은 BE refresh 회전 정책과 함께 #25 에서 정한다.
+// 다른 인스턴스와의 경합은 BE 가 받는다 — 같은 refresh 로 30초 안에 3회까지 재발급(PR #99).
 const inFlight = new Map<string, Promise<ReissueResult>>();
 const recent = new Map<string, { result: ReissueResult; expiresAt: number }>();
 
 /**
- * 요청 `{ refreshToken }` → dataBody `{ accessToken, refreshToken }` 은 #4 기준 가정이다.
- * #4 가 머지되면 실제 계약에 맞춘다.
+ * 요청 `{ refreshToken }` → dataBody `{ accessToken, refreshToken, *ExpiresIn }` (BE PR #99 계약).
+ * 응답 수명(`*ExpiresIn`)은 아직 읽지 않고 앱 설정 수명으로 쿠키를 심는다 — 로그인 핸들러(login.ts)는 읽는다.
  */
 export function reissueTokens(
   gatewayUrl: string,
