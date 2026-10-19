@@ -80,6 +80,8 @@
 - 스크롤에 따라 바뀌는 화면(Craft 확대)은 서버 렌더 · 하이드레이션 전에 스크립트 없는 기본 화면을 그린다(`useSyncExternalStore` 로 하이드레이션 여부를 읽는다 — effect 안 setState 금지). transform 만 움직이고 `motion-reduce` 면 전환을 끈다.
 - 메인 `LOOK` 의 `LookPicker` 는 `floatingAction` 으로 모바일 하단 고정 담기 버튼을 쓴다(목록이 보일 때만). 상품 상세는 구매 패널 하단 바가 있어 쓰지 않는다.
 - 가로 스와이프 목록(`overflow-x-auto`)에는 `relative` 를 준다 — 안의 `sr-only`(absolute)가 스크롤 상자 밖 기준으로 잡혀 페이지 가로 스크롤을 만든다.
+- 상품 상세 이미지(`ProductGallery`, #60)는 4:5 · 각진 모서리. PC 는 7열 폭에 한 장씩 세로로 이어 붙이고(오른쪽 5열 구매 정보가 sticky), 모바일은 전폭 가로 스와이프 + 아래 `1 / n` 글자(점 금지). 목록 카드는 3:4 그대로다.
+- 상품 목록 모바일(`ShopFilters`, #60)은 최상위 카테고리 줄만 화면에 두고, 정렬 · 세부 카테고리는 하단 고정 버튼 `정렬 · 필터` 로 여는 바텀시트에 둔다. 시트는 Popover API(`popover` · `popoverTarget`)라 스크립트 없이 열리고 바깥 · ESC 로 닫힌다. 시트에 `key={shopHref(query)}` 를 줘서 링크로 주소가 바뀌면 닫힌 채로 다시 그린다.
 
 ### 3-2. Shop the Look
 
