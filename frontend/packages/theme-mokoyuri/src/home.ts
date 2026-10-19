@@ -33,11 +33,25 @@ export const home: HomeSection[] = [
     title: 'Pink Forest',
     body: '숲의 빛을 닮은 분홍과 한복의 고운 선이 만나는 컬렉션. 한 벌의 옷이 한 장의 화보가 되는 순간을 담았습니다.',
     links: [{ label: 'SEE THE COLLECTION', href: '/collection' }],
+    // 캡션은 시안 문구 — 고객사 확인 대상. 사진 3장은 같은 빛 · 같은 톤으로 촬영 요청
     media: [
-      { image: null, placeholder: '컬렉션 화보 · 세로 3:4' },
-      { image: null, placeholder: '컬렉션 디테일 컷 · 세로 3:4' },
+      {
+        image: null,
+        placeholder: '컬렉션 화보 1 · 전폭(PC 가로 · 모바일 세로 크롭) · 같은 빛 · 같은 톤',
+        caption: '숲으로 들어서는 아침',
+      },
+      {
+        image: null,
+        placeholder: '컬렉션 화보 2 · 전폭 · 치마 실루엣이 크게',
+        caption: '바람에 흔들리는 이중 맞주름',
+      },
+      {
+        image: null,
+        placeholder: '컬렉션 화보 3 · 전폭 · 뒷모습 · 리본 여밈',
+        caption: '돌아서는 순간의 리본',
+      },
     ],
-    layout: 'asymmetric',
+    layout: 'curtain',
   },
   {
     type: 'LOOK',

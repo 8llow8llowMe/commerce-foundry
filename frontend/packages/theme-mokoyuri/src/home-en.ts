@@ -33,10 +33,23 @@ export const homeEn: HomeSection[] = [
     body: 'A collection where forest-light pink meets the graceful lines of hanbok — each piece a picture of its own.',
     links: [{ label: 'SEE THE COLLECTION', href: '/collection' }],
     media: [
-      { image: null, placeholder: '컬렉션 화보 · 세로 3:4' },
-      { image: null, placeholder: '컬렉션 디테일 컷 · 세로 3:4' },
+      {
+        image: null,
+        placeholder: '컬렉션 화보 1 · 전폭(PC 가로 · 모바일 세로 크롭) · 같은 빛 · 같은 톤',
+        caption: 'Morning, into the forest',
+      },
+      {
+        image: null,
+        placeholder: '컬렉션 화보 2 · 전폭 · 치마 실루엣이 크게',
+        caption: 'Double pleats in the breeze',
+      },
+      {
+        image: null,
+        placeholder: '컬렉션 화보 3 · 전폭 · 뒷모습 · 리본 여밈',
+        caption: 'A ribbon, turning away',
+      },
     ],
-    layout: 'asymmetric',
+    layout: 'curtain',
   },
   {
     type: 'LOOK',

@@ -214,3 +214,28 @@ describe('LookSection (서버 데이터)', () => {
     expect(html).toContain('SHOP ALL');
   });
 });
+
+describe('StorySection — curtain', () => {
+  it('전폭 사진을 헤더 아래에 고정해 쌓고, 캡션은 아래 스크림 위에만 둔다', () => {
+    const html = renderToStaticMarkup(
+      <StorySection
+        section={{
+          type: 'STORY',
+          id: 'story',
+          title: 'Pink Forest',
+          body: '본문',
+          links: [{ label: 'SEE', href: '/collection' }],
+          media: [
+            { image: null, placeholder: '화보 1', caption: '첫 장' },
+            { image: null, placeholder: '화보 2' },
+          ],
+          layout: 'curtain',
+        }}
+      />,
+    );
+    expect(html.match(/<figure class="sticky top-\[var\(--site-header-h\)\]/g)).toHaveLength(2);
+    expect(html.match(/<figcaption/g)).toHaveLength(1);
+    expect(html).toContain('첫 장');
+    expect(html).toContain('href="/collection"');
+  });
+});
