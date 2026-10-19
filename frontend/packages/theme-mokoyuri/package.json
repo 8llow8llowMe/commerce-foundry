@@ -14,7 +14,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cf/ui": "workspace:*"
+    "@cf/ui": "workspace:*",
+    "@fontsource/cormorant-garamond": "catalog:",
+    "@fontsource/noto-serif-kr": "catalog:",
+    "pretendard": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:"
