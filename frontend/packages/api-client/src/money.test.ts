@@ -4,6 +4,9 @@ import { formatMoney, moneyToDecimalString } from './money';
 describe('formatMoney', () => {
   it('KRW 는 원 단위 정수를 "129,000원" 으로 표시한다', () => {
     expect(formatMoney({ amount: 129000, currency: 'KRW' })).toBe('129,000원');
+    // 영문 스토어는 통화 기호로
+    expect(formatMoney({ amount: 129000, currency: 'KRW' }, 'en')).toBe('₩129,000');
+    expect(formatMoney({ amount: 8950, currency: 'USD' }, 'ko')).toBe('$89.50');
   });
 
   it('USD 는 센트 정수를 달러로 표시한다', () => {

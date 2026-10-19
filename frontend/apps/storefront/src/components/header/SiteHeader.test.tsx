@@ -96,7 +96,7 @@ describe('SiteHeader', () => {
 
   it('영문 스토어에서는 앱 경로 링크에 /en 접두어가 붙는다', () => {
     const html = renderToStaticMarkup(
-      <LocaleProvider locale="en" prefix="/en">
+      <LocaleProvider locale="en" prefix="/en" dict={ko}>
         <SiteHeader brandName="ACME" navigation={NAV} labels={ko.header} languages={[]} />
       </LocaleProvider>,
     );
