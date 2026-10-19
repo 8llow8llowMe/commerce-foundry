@@ -24,6 +24,9 @@ export function LoginForm({ returnPath }: { returnPath: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<LoginErrors>(NO_ERRORS);
 
+  const signUpHref =
+    returnPath === '/' ? '/signup' : `/signup?next=${encodeURIComponent(returnPath)}`;
+
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submitting) return;
@@ -76,7 +79,7 @@ export function LoginForm({ returnPath }: { returnPath: string }) {
 
       <p className="flex justify-center gap-2 text-sm text-muted-fg">
         {t.login.noAccount}
-        <Link href="/signup" className="text-fg underline underline-offset-4">
+        <Link href={signUpHref} className="text-fg underline underline-offset-4">
           {t.login.signUp}
         </Link>
       </p>
