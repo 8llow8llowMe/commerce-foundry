@@ -101,11 +101,14 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
         </nav>
       )}
 
-      <div className="lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-12">
-        <ProductGallery name={product.name} thumbnail={product.thumbnail} images={images} />
+      {/* PC: 왼쪽 7열 이미지 세로 이어 붙이기, 오른쪽 5열 구매 정보(#60) */}
+      <div className="lg:grid lg:grid-cols-12 lg:gap-x-12">
+        <div className="lg:col-span-7">
+          <ProductGallery name={product.name} thumbnail={product.thumbnail} images={images} />
+        </div>
 
         {/* PC 에서는 이미지를 내리는 동안 구매 정보가 따라온다(헤더 높이만큼 띄운다) */}
-        <div className="mt-8 flex flex-col gap-6 lg:sticky lg:top-[calc(var(--site-header-h)+1.5rem)] lg:mt-0 lg:self-start">
+        <div className="mt-8 flex flex-col gap-6 lg:sticky lg:col-span-5 lg:top-[calc(var(--site-header-h)+1.5rem)] lg:mt-0 lg:self-start">
           <div className="flex flex-col gap-3">
             <h1 className="font-serif text-2xl leading-snug lg:text-3xl">{product.name}</h1>
             {product.summary && <p className="text-sm text-muted-fg">{product.summary}</p>}
