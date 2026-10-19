@@ -42,6 +42,23 @@
 - 순서는 배열 순서다. 메뉴를 바꿀 때 `apps/storefront/src/components/header/*` 를 고치지 않는다.
 - 아직 없는 화면도 링크로 둘 수 있다. 앱의 `not-found.tsx` 가 "준비 중" 문구로 받는다(상태는 404).
 
+### 3-1. 메인 화면 (home)
+
+메인 섹션도 브랜드 설정 `brand.home`(`HomeSection[]`, 타입은 `@cf/ui`)이 위에서부터 정한다. `apps/storefront/src/components/home/*` 는 데이터만 그린다.
+
+| 유형 | 내용 | 데이터 |
+|------|------|--------|
+| `HERO` | 라벨 · 제목(줄 배열) · 문구 · CTA, PC 16:9 / 모바일 4:5 화보(따로), 선택 영상 | 설정 |
+| `PRODUCT_PICK` | 대표 상품 n개 | 상품 목록 API(`categoryId` · `limit`) — 이름 · 가격을 설정에 적지 않는다 |
+| `STORY` | 라벨 · 제목 · 본문 · 링크, `asymmetric`(이미지 2장 비대칭) / `centered` | 설정 |
+| `LOOK` | 착장 화보 + 구성 상품 | 상품 상세 API(`productIds`) |
+| `DETAIL` | 클로즈업 칸 + 번호 붙은 제작 포인트 | 설정 |
+
+- 유형 이름은 BE 메인 전시 API(#63)의 섹션 유형과 같다. API 가 생기면 `brand.home` 대신 응답을 넘긴다. `ROMANTIC_EDIT` 같은 브랜드 이름은 유형이 아니라 `title` 값이다.
+- 화보가 없으면 `image: null` 과 `placeholder`(필요한 사진 · 비율)를 둔다. 같은 비율의 빈 자리가 그려져 레이아웃이 밀리지 않는다.
+- API 를 쓰는 섹션은 실패하거나 비면 그리지 않는다(메인을 깨뜨리지 않는다).
+- 새 유형을 더하면 `HomeSections` 의 `switch` 가 컴파일 오류로 알려 준다.
+
 ## 4. 고객사 정보
 
 사업자등록번호·대표자 등 실정보는 테마에 넣지 않는다(공개 저장소). 서버 env(`BUSINESS_*`)로 받는다.
