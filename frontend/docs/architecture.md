@@ -77,6 +77,7 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
 - 언어 목록 · 기본 언어는 브랜드 설정(`brand.locales` · `defaultLocale`), 전용 호스트는 배포 env 다(환경마다 도메인이 다르다).
 - 서버는 `getI18n()`(`lib/i18n/server.ts`, `next/root-params`)으로 언어 · 사전 · 브랜드 문구를 읽는다. 클라이언트는 `LocaleProvider` 의 `useLocale()` · `useLocalizedHref()` 를 쓴다.
 - 링크는 `next/link` 대신 `@/components/i18n/Link` — 앱 경로('/shop')에 언어 접두어를 붙인다. 언어 전환만 `<a>`(루트 레이아웃이 달라 문서를 새로 받는다).
+- 언어 전환(`LanguageLinks`)은 **같은 화면 · 같은 쿼리**의 다른 언어로 간다. 서버는 각 언어 메인 주소로 그리고(JS 전 기본값), 링크를 가리키거나 누를 때 `window.location` 으로 주소를 만든다(`switchLocaleHref`). 렌더 중에 `usePathname()` · `window` 를 읽지 않는다 — rewrite 뒤 브라우저 주소와 다를 수 있고 hydration 이 어긋난다.
 - 게이트웨이 요청에 스토어 언어를 `Accept-Language` 로 싣는다(`serverFetch`, 클라이언트 `apiFetch` 호출부). BFF 는 이 헤더를 넘긴다.
 - 페이지는 `generateMetadata` 에서 `localeAlternates(path)` 로 canonical · hreflang(+ `x-default`)을 낸다. 절대 주소는 `NEXT_PUBLIC_SITE_URL` 이 기준이다.
 - UI 문구는 `lib/i18n/dictionaries/{ko,en}.ts`. `en` 은 `Dictionary`(= ko 의 모양) 타입이라 키가 빠지면 typecheck 가 잡는다.
