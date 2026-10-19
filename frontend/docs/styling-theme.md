@@ -66,9 +66,9 @@
 |------|------|--------|
 | `HERO` | 제목(줄 배열) · 문구 · 주 버튼 `cta` + 보조 `secondaryCta`, PC · 모바일 세로 4:5 화보(따로), 선택 영상 | 설정 |
 | `PRODUCT_PICK` | 대표 상품 n개 | 상품 목록 API(`categoryId` · `limit`) — 이름 · 가격을 설정에 적지 않는다 |
-| `STORY` | 제목 · 본문 · 링크, `asymmetric`(이미지 2장 비대칭) / `centered` / `curtain`(전폭 사진 2~3장 스크롤 고정 · 캡션) | 설정 |
+| `STORY` | 제목 · 본문 · 링크, `asymmetric`(이미지 2장 비대칭) / `centered` / `curtain`(전폭 사진 2~3장 스크롤 고정 · 캡션) / `panel`(어두운 면 · 단락 · 모티프 사진) | 설정 |
 | `LOOK` | 착장 화보 + 구성 상품(옵션 선택 · 함께 담기) | 상품 상세 API(`productIds`) |
-| `DETAIL` | 클로즈업 칸 + 번호 붙은 제작 포인트 | 설정 |
+| `DETAIL` | Display 제목 + 같은 전신 사진(`frame`)을 스크롤 · 지점 클릭으로 확대(포인트별 `focus`). 스크립트 없으면 클로즈업 + 포인트 세로 | 설정 |
 
 - 유형 이름은 BE 메인 전시 API(#63)의 섹션 유형과 같다. API 가 생기면 `content.home` 대신 응답을 넘긴다. `ROMANTIC_EDIT` 같은 브랜드 이름은 유형이 아니라 `title` 값이다.
 - 화보가 없으면 `image: null` 과 `placeholder`(필요한 사진 · 비율)를 둔다. 같은 비율의 빈 자리가 그려져 레이아웃이 밀리지 않는다.
@@ -76,6 +76,8 @@
 - 새 유형을 더하면 `HomeSections` 의 `switch` 가 컴파일 오류로 알려 준다.
 - 섹션 간격은 모바일 96 · 태블릿 120 · PC 160px(`HomeSections`), 섹션 제목은 Title 단계(28 / 48px). 레이아웃 명세 정본은 #59 댓글이다.
 - 첫 화면을 채우거나 스크롤 고정(sticky)하는 요소는 헤더 높이 `--site-header-h`(`app/globals.css`)를 기준으로 한다 — `h-[calc(100svh-var(--site-header-h))]`, `top-[var(--site-header-h)]`. 헤더 줄 높이를 바꾸면 이 값도 바꾼다.
+- 브랜드 모티프 모양은 토큰 `--cf-motif-radius`(border-radius 값, 중립은 0)다 — MOKOYURI 는 저고리 배래 곡선. 페이지당 1~2장(메인 Our Story 인물 사진 등)에만 쓰고 상품 이미지에는 쓰지 않는다.
+- 스크롤에 따라 바뀌는 화면(Craft 확대)은 서버 렌더 · 하이드레이션 전에 스크립트 없는 기본 화면을 그린다(`useSyncExternalStore` 로 하이드레이션 여부를 읽는다 — effect 안 setState 금지). transform 만 움직이고 `motion-reduce` 면 전환을 끈다.
 - 메인 `LOOK` 의 `LookPicker` 는 `floatingAction` 으로 모바일 하단 고정 담기 버튼을 쓴다(목록이 보일 때만). 상품 상세는 구매 패널 하단 바가 있어 쓰지 않는다.
 - 가로 스와이프 목록(`overflow-x-auto`)에는 `relative` 를 준다 — 안의 `sr-only`(absolute)가 스크롤 상자 밖 기준으로 잡혀 페이지 가로 스크롤을 만든다.
 
