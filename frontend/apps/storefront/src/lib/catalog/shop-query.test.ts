@@ -52,6 +52,9 @@ describe('productsApiPath', () => {
     expect(productsApiPath({ categoryId: null, sort: 'NEWEST' }, 0)).toBe(
       '/api/v1/products?sortType=NEWEST&page=0&size=24',
     );
+    expect(productsApiPath({ categoryId: null, sort: 'NEWEST' }, 0, 4)).toBe(
+      '/api/v1/products?sortType=NEWEST&page=0&size=4',
+    );
   });
 });
 

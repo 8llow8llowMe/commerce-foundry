@@ -42,13 +42,13 @@ export function shopHref(query: ShopQuery): string {
   return search ? `/shop?${search}` : '/shop';
 }
 
-/** 상품 목록 API 경로. page 는 0 부터 */
-export function productsApiPath(query: ShopQuery, page: number): string {
+/** 상품 목록 API 경로. page 는 0 부터, size 는 1~100(BE 검증) */
+export function productsApiPath(query: ShopQuery, page: number, size: number = PAGE_SIZE): string {
   const params = new URLSearchParams();
   if (query.categoryId) params.set('categoryId', query.categoryId);
   params.set('sortType', query.sort);
   params.set('page', String(page));
-  params.set('size', String(PAGE_SIZE));
+  params.set('size', String(size));
   return `/api/v1/products?${params.toString()}`;
 }
 
