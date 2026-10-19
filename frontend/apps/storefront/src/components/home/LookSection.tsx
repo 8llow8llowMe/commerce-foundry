@@ -18,15 +18,19 @@ export async function LookSection({ section }: { section: LookSectionData }) {
   return (
     <section
       aria-labelledby={headingId}
-      className="mx-auto grid w-full max-w-screen-xl gap-10 px-4 lg:grid-cols-2 lg:items-center lg:gap-16 lg:px-8"
+      className="mx-auto grid w-full max-w-screen-xl gap-10 px-4 lg:grid-cols-12 lg:gap-x-8 lg:px-8"
     >
-      <MediaFrame slot={section.media} className="aspect-[4/5]" />
+      {/* 모바일은 전폭 사진, PC 는 7열 큰 사진이 목록을 내리는 동안 고정된다 */}
+      <MediaFrame
+        slot={section.media}
+        className="-mx-4 aspect-[4/5] lg:sticky lg:top-[calc(var(--site-header-h)+1.5rem)] lg:col-span-7 lg:mx-0 lg:self-start"
+      />
 
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-6 lg:col-span-5 lg:self-center">
         <SectionHeading id={headingId} title={section.title} />
         {section.body && <p className="font-serif leading-8">{section.body}</p>}
 
-        {products.length > 0 && <LookPicker products={products} />}
+        {products.length > 0 && <LookPicker products={products} floatingAction />}
 
         {section.link && (
           <Link
