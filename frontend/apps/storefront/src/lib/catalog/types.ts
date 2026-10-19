@@ -124,3 +124,28 @@ export type ProductDetail = {
   /** 맞춤 제작 상품이 아니거나 스토어 기능이 꺼져 있으면 null */
   customOrder: CustomOrder | null;
 };
+
+// GET /api/v1/products/{productId}/looks — 이 상품이 들어간 룩(Shop the Look). BE #62 초안 계약이다.
+// 룩은 전시용 묶음이라 가격 · 재고 · 주문은 구성 상품(SKU) 각각을 따른다. 확정되면 여기를 맞춘다.
+
+export type LookItem = {
+  productId: string;
+  name: string;
+  thumbnail: ProductThumbnail | null;
+  salePrice: Money;
+  saleStatus: SaleStatus;
+};
+
+export type ProductLook = {
+  lookId: string;
+  title: string;
+  description: string | null;
+  /** 대표 착장 화보 */
+  image: ProductThumbnail | null;
+  /** 노출 순서. 비노출 · 판매 종료 상품의 처리 규칙은 #62 에서 정한다 */
+  items: LookItem[];
+};
+
+export type ProductLooksResponse = {
+  looks: ProductLook[];
+};

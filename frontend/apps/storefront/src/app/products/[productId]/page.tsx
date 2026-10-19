@@ -2,9 +2,10 @@ import { ApiError } from '@cf/api-client';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { cache } from 'react';
+import { cache, Suspense } from 'react';
 import { ProductGallery } from '@/components/product/detail/ProductGallery';
 import { PurchasePanel, type PurchaseProduct } from '@/components/product/detail/PurchasePanel';
+import { ProductLooks } from '@/components/product/look/ProductLooks';
 import { productJsonLd } from '@/lib/catalog/product-jsonld';
 import { shopHref } from '@/lib/catalog/shop-query';
 import type { ProductDetail } from '@/lib/catalog/types';
@@ -108,6 +109,11 @@ export default async function ProductPage({ params }: PageProps<'/products/[prod
           <PurchasePanel product={purchaseProduct} />
         </div>
       </div>
+
+      {/* 룩은 덧붙이는 영역이라 구매 정보를 기다리게 하지 않는다 */}
+      <Suspense fallback={null}>
+        <ProductLooks productId={product.productId} />
+      </Suspense>
 
       {descriptionHtml && (
         <section aria-labelledby="product-description" className="mx-auto mt-20 max-w-3xl">
