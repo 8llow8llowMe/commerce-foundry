@@ -160,6 +160,8 @@ Info → Presenter → Response
 
 1. **그 컨텍스트의 Processor.** Facade 만 주입한다 — Processor 끼리는 컨텍스트를 넘어 주입하지 않는다.
 2. **그 Processor 가 돌려준 domain model.** 읽기 전용이다 — Facade 가 자기 컨텍스트 Processor 의 인자로 넘길 수 있다.
+3. **그 Processor 가 던지는 예외(`application.exception`).** 부른 쪽 컨텍스트의 `adapter/in/*/exception` 의 `*ExceptionHandler` 만 받아 번역한다
+   (Processor 를 부르면 그 예외는 반드시 넘어온다). 그 밖의 계층은 다른 컨텍스트 예외를 쓰지 않는다.
 
 - 그 밖(UseCase · Facade · Presenter · Info · Port · Adapter · Mapper · Entity · Repository · Q 타입)은 쓰지 않는다.
   다른 컨텍스트의 포트 · 리포지토리를 직접 부르면 그 컨텍스트의 조회 규칙(숨김 · 정렬 · 캐시)을 비켜 간다.
@@ -174,6 +176,33 @@ Info → Presenter → Response
 - 다른 컨텍스트의 예외는 호출한 컨텍스트의 `*ExceptionHandler` 가 자기 코드로 번역한다 — advice 범위가 컨트롤러 패키지(`basePackages`)라서다.
   예: `CatalogException`(`CATALOG_001`, 503)은 advice 를 두지 않고 `CartExceptionHandler` 가 `CART_008`(503)로 번역한다. API 계약은 부른 컨텍스트의 코드다.
 - 다른 서비스의 데이터는 지금처럼 internal API(Feign)로만 받는다 (§7). 다른 서비스 스키마를 직접 조회하지 않는다.
+
+### 기계로 보는 것 / 사람이 보는 것 (#77)
+
+계층 의존은 **빌드가 본다.** 서비스의 `<Svc>ArchitectureTest` 가 common-core 테스트 픽스처의 `HexagonalArchitectureRules`(JUnit 인터페이스)를
+`implements` 하고, 서비스 main 클래스 위치만 읽어 `..domainlayer..` 아래를 검사한다(`./gradlew check`). 인가 규칙(`ControllerAuthorizationArchTestSupport`,
+`security-guide.md` §9-11)과 같은 테스트 클래스에서 돈다. 보안과 무관한 규칙이라 security-core 가 아니라 common-core 에 둔다. 판정은 **패키지 이름 기준**이다(§2 구조를 지켜야 규칙이 본다).
+
+| 규칙 | 금지 | 위반하면 이렇게 고친다 |
+|------|------|------------------------|
+| H1 Controller 는 UseCase 만 | 컨트롤러 → application 중 `port.in` · UseCase 입력 타입(`command` · `model`) 밖(Facade · Processor · out-port · Info), Presenter, out-adapter | UseCase 를 거친다. 정렬 enum 같은 `@RequestParam` 입력 타입은 `application.model` 에 두면 된다 |
+| H2 application → adapter 금지 | 아래 예외 셋 밖의 의존 | 예외: ① `port/in` → 진입 DTO ② Facade(`*Facade`) → Presenter · 진입 DTO ③ `application/mapper` → Entity. 그 밖은 port/out 계약 · QueryResult · domain 으로 바꾼다 |
+| H3 Processor → adapter 금지 | Response DTO · out-adapter 타입 | Info · domain model 을 돌려주고 응답은 Presenter 가 만든다 |
+| H4 domain 은 순수 | domain → application · adapter · Spring · JPA · Hibernate | 프레임워크 타입은 entity · adapter 로 옮긴다 |
+| H5 out-port 는 Info 를 내지 않는다 | `port/out` → `application/info` | QueryResult · domain 을 반환한다 (§4) |
+| H6 진입 간 타입 공유 금지 | `adapter/in/web` ↔ `admin` ↔ `internal` | 진입마다 DTO 를 따로 둔다. 공용 변환 함수는 `adapter/in/support` (§2) |
+| H7 in-adapter → out-adapter 금지 | 컨트롤러 · Presenter 가 리포지토리 · Feign client · Entity 를 직접 씀 | UseCase → Facade → Processor → Port 로 간다 |
+| H8 컨텍스트 간 허용 목록 | 위 허용 목록 1~3 밖의 다른 컨텍스트 의존, domain → 다른 컨텍스트 domain | Processor(Facade 에서) · domain model(Facade · Processor 에서) · 예외(ExceptionHandler 에서)만. domain 끼리는 아이디로 |
+| H9 Presenter 는 변환만 | Presenter → `application/service` · `application/port`(QueryResult 포함) | Facade 가 조회해 Info · domain 을 넘긴다 (§4) |
+
+**사람이 보는 것** (리뷰 · `/hexagonal-guard` — 의미 판단이라 규칙화하지 않는다)
+
+- 트랜잭션 경계 — 외부 I/O(PG · Feign · 소셜 · 택배사)가 섞인 Facade 에 `@Transactional` 을 걸지 않았는지, Processor 단위로 좁힌 이유 주석이 있는지 (§3 Facade)
+- 상태 전이가 도메인 메서드로만 일어나는지(setter · `status = X` 금지), 저장 흐름이 domain → entity → save → domain 인지 (§5)
+- Processor 안의 진입 분기(`if (isAdmin)`), ID(Snowflake) 생성 위치
+- out-port 이름이 책임 기준인지(`PaymentGatewayPort` ○, `TossClientPort` ✕) — `coding-conventions.md` §5-1
+- 진입 DTO 의 필드 누출(고객 응답에 원가 · 재고 수량 · 내부 메모), 다른 컨텍스트 Processor 메서드가 용도별인지(숨김 규칙 비켜 가기)
+- 패키지 구조(§2)를 비켜 간 클래스 — 규칙은 패키지 이름으로 판정하므로 이름이 틀리면 보지 못한다
 
 ## 4. Query / Model 경계
 
