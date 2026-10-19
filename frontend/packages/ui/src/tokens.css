@@ -11,9 +11,16 @@
   --cf-color-primary: #111827;
   --cf-color-primary-fg: #ffffff;
   --cf-color-danger: #dc2626;
+  /* 일부 구간에만 쓰는 강조 배경(히어로 등). 기본은 muted 와 같다 */
+  --cf-color-accent: #f3f4f6;
+  --cf-color-accent-fg: #111827;
   --cf-radius-md: 0.5rem;
   --cf-font-sans:
     ui-sans-serif, system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  /* 영문 제목 */
+  --cf-font-display: ui-serif, Georgia, 'Times New Roman', serif;
+  /* 한글 감성 문구 */
+  --cf-font-serif: ui-serif, 'AppleMyungjo', 'Batang', Georgia, serif;
 }
 
 @theme inline {
@@ -25,6 +32,10 @@
   --color-primary: var(--cf-color-primary);
   --color-primary-fg: var(--cf-color-primary-fg);
   --color-danger: var(--cf-color-danger);
+  --color-accent: var(--cf-color-accent);
+  --color-accent-fg: var(--cf-color-accent-fg);
   --radius-md: var(--cf-radius-md);
   --font-sans: var(--cf-font-sans);
+  --font-display: var(--cf-font-display);
+  --font-serif: var(--cf-font-serif);
 }
