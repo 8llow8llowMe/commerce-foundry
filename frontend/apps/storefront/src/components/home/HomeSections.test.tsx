@@ -29,7 +29,8 @@ const HERO: HeroData = {
   title: ['Line One', 'Line Two'],
   subtitle: '한 줄 문구',
   cta: { label: 'EXPLORE', href: '/collection' },
-  desktop: slot('PC 16:9'),
+  secondaryCta: { label: 'SHOP', href: '/shop' },
+  desktop: slot('PC 4:5'),
   mobile: slot('모바일 4:5'),
   video: null,
 };
@@ -47,17 +48,24 @@ const listItem = (productId: string): ProductListItem => ({
 });
 
 describe('HeroSection', () => {
-  it('h1 제목을 줄마다 나누고 CTA 링크 · 브레이크포인트별 빈 자리를 그린다', () => {
+  it('h1 제목을 줄마다 끊어(줄바꿈 없이) 그리고, 두 동작 링크 · 브레이크포인트별 빈 자리를 그린다', () => {
     const html = renderToStaticMarkup(<HeroSection section={HERO} />);
     expect(html).toMatch(
-      /<h1[^>]*><span class="block">Line One<\/span><span class="block">Line Two<\/span><\/h1>/,
+      /<h1[^>]*><span class="block whitespace-nowrap">Line One<\/span><span class="block whitespace-nowrap">Line Two<\/span><\/h1>/,
     );
-    expect(html).toContain('href="/collection"');
-    expect(html).toContain('EXPLORE');
+    expect(html).toMatch(/<a [^>]*href="\/collection"[^>]*>EXPLORE<\/a>/);
+    expect(html).toContain('href="/shop"');
+    // 두 동작이면 모바일 반반 버튼
+    expect(html).toContain('grid-cols-2');
     expect(html).toContain('모바일 4:5');
-    expect(html).toContain('PC 16:9');
+    expect(html).toContain('PC 4:5');
     expect(html).toContain('aspect-[4/5]');
-    expect(html).toContain('lg:aspect-video');
+  });
+
+  it('보조 동작이 없으면 주 버튼 하나만 전폭으로 둔다', () => {
+    const html = renderToStaticMarkup(<HeroSection section={{ ...HERO, secondaryCta: null }} />);
+    expect(html).not.toContain('href="/shop"');
+    expect(html).toContain('grid-cols-1');
   });
 
   it('화보가 있으면 PC 는 source, 모바일은 img 로 고르고 바로 받는다', () => {
