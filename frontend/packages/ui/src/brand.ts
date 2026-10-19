@@ -1,3 +1,5 @@
+import type { HomeSection } from './home';
+
 /** 전체 메뉴 항목. 사업자마다 메뉴가 다르므로 컴포넌트가 아니라 브랜드 설정이 갖는다. */
 export type NavItem = {
   /** 대제목 (예: 'SHOP') */
@@ -23,4 +25,6 @@ export type BrandConfig = {
   };
   /** 전체 메뉴 순서대로 */
   navigation: NavItem[];
+  /** 메인 화면 섹션, 위에서부터. 메인 전시 API(#63)가 생기면 그 응답으로 바꾼다 */
+  home: HomeSection[];
 };
