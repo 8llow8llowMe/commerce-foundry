@@ -66,8 +66,15 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
   화면이 `/login?signedUp=1` 로 보내 가입 완료 안내를 띄운다. 가입 실패(검증 fieldErrors · 409 `AUTH_002` 이메일 중복)는 그대로 중계한다.
   fieldErrors 의 동의 칸은 `agreements.termsOfService` 처럼 중첩 경로다. 비밀번호 확인 칸은 BE 에 없어 화면에서만 본다.
 - 고객 쿠키 이름 `cf_at` / `cf_rt` 와 대체 수명(30분 / 14일, BE 설정과 같다)은 `apps/storefront/src/lib/auth-cookies.ts`. 어드민은 #29 에서 정한다.
-- 인증 계약은 BE PR #99 기준이다(머지 전): 재발급 `{ refreshToken }` → 로그인과 같은 모양. 재발급 쿠키도 응답 수명을 쓰게 하는 것과
-  로그아웃(Bearer + `{ refreshToken }`, 401 이면 재발급 후 1회 재시도)은 #25 다음 단계에서 붙인다.
+- 인증 계약은 BE PR #99 기준이다(머지 전): 재발급 `{ refreshToken }` → 로그인과 같은 모양. 로그인 · 재발급 모두 응답의 `*ExpiresIn` 을
+  `TokenPair` 에 실어(`readTokenPair`) 쿠키 수명으로 쓴다(`issueCookies`). 없으면 앱 설정값이다.
+- **로그아웃**은 전용 route handler(`app/api/v1/auth/logout`, `createLogoutHandler`)다 — refresh 는 httpOnly 쿠키라 일반 프록시로는 본문에 실을 수 없다.
+  Bearer(access 쿠키) + `{ refreshToken }` 으로 부르고, **401 이거나 access 쿠키가 없으면 재발급한 뒤 새 토큰 쌍으로 한 번 다시 부른다**
+  (그러지 않으면 서버의 refresh family 가 남는다). 서버 결과(503 `AUTH_013` · 연결 실패 · 재발급 거절)와 무관하게 쿠키를 지우고 200 이다.
+  같은 origin 요청만 받는다(남이 몰래 로그아웃시키지 못하게).
+- **로그인 상태 표시**는 레이아웃이 `hasSession()`(`lib/auth/session.ts`, 인증 쿠키 존재 여부)으로 정해 헤더에 넘긴다. 토큰 유효성은 보지 않는다 —
+  진입점(로그인 ↔ 마이페이지 · 로그아웃)만 바꾸고, 권한이 걸린 화면은 API 응답으로 판단한다. `[locale]` 화면은 이미 요청마다 렌더링되므로
+  쿠키를 읽어도 정적 생성을 잃지 않는다. RSC 는 쿠키를 쓰지 못하므로 여기서 지우거나 재발급하지 않는다.
 
 ## 4. 헬스체크
 
