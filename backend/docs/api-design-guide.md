@@ -304,6 +304,33 @@ return ResponseEntity.ok().body(Response.success(response));
 - 받는 사람 · 연락처 · 주소는 개인정보라 요청 · 커맨드 · 도메인 · 응답의 `toString` 에 싣지 않고 로그 · 예외 메시지에도 남기지 않는다.
 - 주문 배송지는 이 API 를 거치지 않는 스냅숏이다 (`order-flow-guide.md` §4).
 
+### 2-5. 어드민 카테고리 관리 (product-service, #9)
+
+모두 `hasRole('ADMIN')` 이다. 고객 트리(`GET /api/v1/categories` — 숨긴 카테고리는 하위까지 빠진다)와 DTO 를 공유하지 않는다. 경로는 `/api/v1/admin/categories` (아래 `…`).
+
+| API | 성공 | 주요 오류 |
+|-----|------|-----------|
+| `GET …` | 200 `{categories: [노드]}` — 숨김 포함 전체 트리. 같은 상위 안에서 노출 순서 → 아이디 오름차순 | — |
+| `POST …` | 201 `{categoryId, parentId, name, displayOrder, visible}` | 400 `PRODUCT_040` · `PRODUCT_044` · `PRODUCT_131~136` |
+| `PUT …/{categoryId}` | 200 위와 같은 모양. 본문은 생성과 같고 **전체 교체**다 — `parentId` 를 바꾸면 하위까지 함께 옮긴다 | 404 `PRODUCT_004` · 400 `PRODUCT_040` · `041` · `044` · `131~137` |
+| `DELETE …/{categoryId}` | 200, `dataBody: null` | 404 `PRODUCT_004` · 409 `PRODUCT_042` · `PRODUCT_043` · 400 `PRODUCT_137` |
+
+- **본문** — `{parentId?, name, displayOrder, visible}`. `parentId` 는 문자열로 보내도 되고 없거나 null 이면 최상위다. 이름은 1~50자이고 앞뒤 공백을 빼고 저장한다.
+  `displayOrder` 는 0 이상이다. 같은 상위 안의 이름 · 순서에 유니크 키가 없어 순서를 맞바꿔도 된다.
+- **노드** — `{categoryId, parentId, name, displayOrder, visible, children[]}`. 아이디는 문자열, 최상위 `parentId` 는 null 이다.
+- **깊이 · 순환** — 깊이는 3단계(대 · 중 · 소)까지다. 하위를 거느린 카테고리를 옮기면 하위 높이까지 센다(옮긴 뒤 넘으면 `PRODUCT_040`).
+  자기 자신이나 자기 하위를 상위로 지정하면 `PRODUCT_041` 이다. 상위를 그대로 두는 수정(이름 · 순서 · 노출)은 깊이 · 순환을 다시 보지 않는다.
+- **없는 상위** — 본문의 `parentId` 가 없는 카테고리면 404 가 아니라 400 `PRODUCT_044` 다. 경로 리소스가 아니라 본문 참조라서다(§2-2).
+- **삭제** — 하위 카테고리가 있으면 409 `PRODUCT_042`, 상품의 대표(`product.category_id`) · 진열(`product_category`) 카테고리로 쓰이면 숨김 · 판매 종료 상품까지 세어
+  409 `PRODUCT_043` 이다. 진열 연결을 자동으로 풀지 않는다. 메뉴에서만 감추려면 삭제 대신 `visible=false` 로 수정한다 — 하위까지 메뉴에서 빠지고 상품 노출은 막지 않는다.
+  삭제는 행을 지운다(soft delete 아님). 성공 뒤 같은 요청을 다시 보내면 404 다.
+- **동시성** — 생성 · 수정 · 삭제는 트랜잭션 맨 앞에서 모든 카테고리 행을 아이디 순으로 잠그고(`PESSIMISTIC_WRITE`) 다시 읽어 판정한다. 어드민 쓰기끼리 줄을 서므로
+  두 카테고리를 동시에 서로의 아래로 옮겨 순환이 생기거나, 삭제 판정 뒤 그 아래에 하위가 생기지 않는다. 카테고리는 수가 적어 표 전체 잠금의 비용이 작다.
+- 카테고리 표에 작성자 · 수정자 칸이 없어 어드민 memberId 를 받지 않는다. `version` · `Idempotency-Key` 도 두지 않는다 — 동시 편집은 마지막 쓰기가 이긴다.
+- 계층 — 컨트롤러 · Facade · 판정 Processor 는 상품 컨텍스트에 둔다(`CategoryAdminFacade` · `CategoryAdminProcessor`). "연결된 상품" 을 상품 컨텍스트가 알기 때문이다.
+  트리 판정(`CategoryTree.placementViolationOf` · `hasChildren`)과 쓰기는 카테고리 컨텍스트 `CategoryProcessor` 가 하고, 상품 컨텍스트는 그 Processor 와
+  domain model 만 쓴다(`architecture-guide.md` §3 컨텍스트 간 의존 규칙, 의존 방향 product → category).
+
 ## 3. 계층 흐름
 
 ```text
