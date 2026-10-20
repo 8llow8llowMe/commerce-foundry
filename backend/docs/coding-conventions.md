@@ -202,10 +202,14 @@ public final class ProductValidationMessage {
   - 도메인은 생성 시각을 들고 다니지 않는다. `created_at` 이 `updatable = false` 라 merge 가 덮어쓰지 않는다.
   - 상태 저장(버전 검사)을 **먼저** 하고 그 결과에 딸린 쓰기(재고 복원 등)를 뒤에 한다 — 동시 요청에서 진 쪽이 딸린 쓰기까지 가지 않는다.
   - 예: product-service `StockReservationEntity` · `StockReservationRepositoryAdapter` (#10).
+- **비관적 잠금(`@Lock(PESSIMISTIC_WRITE)`)은 상태를 바꾸지 않는 쓰기가 같은 부모 행 기준으로 합계 · 상한을 판정할 때만 쓴다** — 상태 전이가 없으면
+  `@Version` 이 경합을 잡지 못하고, 각자 읽은 합으로 함께 상한을 넘긴다. 정적 JPQL(`select ... where id = :id`)에 `@Lock` 을 달고 이름은 `findByIdForUpdate` 로 둔다
+  (네이티브 `for update` 금지 — §9-5). 잠금 순서는 다른 경로와 같은 순서(부모 행 → 자식 · 재고 행 아이디 오름차순)로 맞춰 교착을 막는다.
+  예: product-service 결제 후 재고 복원이 선점 헤더를 잠근다 (`StockReservationRepository#findByIdForUpdate`, #85 — `order-flow-guide.md` §3-2).
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.
-  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity` · `StockAdjustmentHistoryEntity`.
+  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity` · `StockAdjustmentHistoryEntity` · `StockRestorationEntity` · `StockRestorationItemEntity`.
 - 유니크 키 위반 · 버전 충돌을 도메인 오류(409)로 바꿔야 하는 저장은 어댑터에서 `saveAndFlush` 로 바로 내보내고 그 자리에서 바꾼다 —
   커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 바꿀 자리가 없다. 제약은 예외 메시지가 아니라 Hibernate 가 준 제약 이름으로 가린다 (예: auth `MemberRepositoryAdapter`).
 
