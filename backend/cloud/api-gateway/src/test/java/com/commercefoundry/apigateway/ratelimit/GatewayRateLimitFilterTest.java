@@ -224,7 +224,7 @@ class GatewayRateLimitFilterTest {
     }
 
     private static GatewayRateLimitProperties properties(boolean enabled) {
-        return new GatewayRateLimitProperties(enabled, null, null, null);
+        return new GatewayRateLimitProperties(enabled, null, null, null, null);
     }
 
     private static MockServerWebExchange post(String path) {

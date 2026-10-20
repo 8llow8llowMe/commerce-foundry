@@ -40,10 +40,11 @@ class GatewayRateLimitPropertiesTest {
     @Test
     @DisplayName("yml 에 적지 않은 정책은 기본 한도를 쓴다")
     void fallsBackToDefaults() {
-        GatewayRateLimitProperties properties = new GatewayRateLimitProperties(true, null, null, null);
+        GatewayRateLimitProperties properties = new GatewayRateLimitProperties(true, null, null, null, null);
 
         assertThat(properties.cartMerge()).isEqualTo(GatewayRateLimitProperties.DEFAULT_CART_MERGE);
         assertThat(properties.cartWrite()).isEqualTo(GatewayRateLimitProperties.DEFAULT_CART_WRITE);
         assertThat(properties.orderWrite()).isEqualTo(GatewayRateLimitProperties.DEFAULT_ORDER_WRITE);
+        assertThat(properties.orderQuote()).isEqualTo(GatewayRateLimitProperties.DEFAULT_ORDER_QUOTE);
     }
 }

@@ -20,11 +20,15 @@ class RateLimitPolicyTest {
         "PUT,    /api/v1/carts/me,           CART_WRITE",
         "POST,   /api/v1/orders,             ORDER_WRITE",
         "POST,   /api/v1/orders/1/cancellation, ORDER_WRITE",
+        "POST,   /api/v1/orders/quotes,      ORDER_QUOTE",
+        // 미리보기 한도는 POST 미리보기에만 쓴다 — 같은 경로의 다른 쓰기 메서드 · 끝 슬래시는 주문 쓰기 한도로 센다(하류에 매핑이 없어 405 · 404 라 우회가 아니다)
+        "PUT,    /api/v1/orders/quotes,      ORDER_WRITE",
+        "POST,   /api/v1/orders/quotes/,     ORDER_WRITE",
         "POST,   /api/v1/carts/%6De/merge,   CART_MERGE",
         // 끝 슬래시는 병합 패턴에 맞지 않아 일반 장바구니 쓰기 한도로 센다 — 하류 MVC 도 끝 슬래시를 맞추지 않아 404 라 병합 우회가 아니다
         "POST,   /api/v1/carts/me/merge/,    CART_WRITE"
     })
-    @DisplayName("쓰기 요청은 처음 맞는 정책 하나에 걸린다 — 병합은 일반 장바구니 쓰기가 아니라 병합 한도를 쓴다")
+    @DisplayName("쓰기 요청은 처음 맞는 정책 하나에 걸린다 — 병합 · 주문서 미리보기는 일반 쓰기가 아니라 각자의 한도를 쓴다")
     void matchesWritePolicy(String method, String path, RateLimitPolicy expected) {
         assertThat(RateLimitPolicy.match(HttpMethod.valueOf(method), PathContainer.parsePath(path))).contains(expected);
     }
