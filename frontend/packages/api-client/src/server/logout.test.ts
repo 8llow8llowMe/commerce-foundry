@@ -127,4 +127,28 @@ describe('createLogoutHandler', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(res.headers.getSetCookie()).toEqual([]);
   });
+
+  it('로그아웃 · 재발급 요청 모두 X-Forwarded-For 를 클라이언트 IP 한 값으로 보낸다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+      urlOf(input).endsWith(REISSUE_PATH)
+        ? envelope(200, true, { accessToken: 'access-ip', refreshToken: 'refresh-ip-2' })
+        : envelope(200, true),
+    );
+    const request = new Request(`http://localhost:3000${LOGOUT_PATH}`, {
+      method: 'POST',
+      headers: {
+        'sec-fetch-site': 'same-origin',
+        cookie: 'cf_rt=refresh-ip',
+        'x-forwarded-for': '1.2.3.4',
+        'x-real-ip': '203.0.113.7',
+      },
+    });
+
+    await handlerWith(fetchImpl)(request);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(new Headers(init?.headers).get('x-forwarded-for')).toBe('203.0.113.7');
+    }
+  });
 });

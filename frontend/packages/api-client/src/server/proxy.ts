@@ -1,4 +1,5 @@
 import { errorEnvelope } from '../envelope';
+import { resolveClientIp, setClientIp } from './client-ip';
 import { readCookie, serializeCookie, type AuthCookieConfig } from './cookies';
 import { reissueTokens, type TokenPair } from './reissue';
 import { joinUrl } from './url';
@@ -7,11 +8,13 @@ export type ProxyOptions = {
   gatewayUrl: string;
   cookies: AuthCookieConfig;
   fetch?: typeof fetch;
+  /** 클라이언트 IP 를 읽을 헤더. 생략하면 `x-real-ip`, null 이면 넘기지 않는다(`resolveClientIp`) */
+  clientIpHeader?: string | null;
 };
 
 const API_PREFIX = '/api/v1/';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-// 게이트웨이로 넘기는 요청 헤더. Cookie·Authorization·X-Forwarded-* 등은 넘기지 않는다.
+// 게이트웨이로 넘기는 요청 헤더. Cookie·Authorization·X-Forwarded-* 등은 넘기지 않는다(X-Forwarded-For 는 BFF 가 정한 한 값으로 덮어쓴다).
 const FORWARD_REQUEST_HEADERS = ['content-type', 'accept', 'accept-language', 'idempotency-key'];
 // 중계하지 않는 응답 헤더. fetch 가 본문을 이미 풀었으므로 인코딩·길이 헤더도 버린다.
 const DROP_RESPONSE_HEADERS = new Set([
@@ -27,6 +30,8 @@ const DROP_RESPONSE_HEADERS = new Set([
  * 브라우저 → Next(/api/v1/**) → 게이트웨이 중계 핸들러.
  * httpOnly 쿠키의 access 토큰을 Authorization 으로 바꾸고, 401 이면 한 번 재발급·재시도한다.
  * 401 은 인증 단계 거절이라 서버가 처리하지 않았으므로 쓰기 요청도 재시도가 안전하다.
+ * access 쿠키가 없고 refresh 만 있으면(access 쿠키 만료) 보내기 **전에** 재발급한다 — 로그인한 회원의 요청이 토큰 없이 가서
+ * 게이트웨이의 비로그인(IP) 요청 제한에 세이지 않게(BE security-guide §7-3, #134).
  */
 export function createProxyHandler(options: ProxyOptions): (request: Request) => Promise<Response> {
   const fetchImpl = options.fetch ?? fetch;
@@ -52,11 +57,12 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
     const accessToken = readCookie(cookieHeader, cookies.accessName);
     const refreshToken = readCookie(cookieHeader, cookies.refreshName);
     const target = joinUrl(options.gatewayUrl, url.pathname + url.search);
+    const clientIp = resolveClientIp(request, options.clientIpHeader);
 
     const send = (token: string | null) =>
       fetchImpl(target, {
         method: request.method,
-        headers: forwardHeaders(request.headers, token),
+        headers: setClientIp(forwardHeaders(request.headers, token), clientIp),
         body,
         redirect: 'manual',
         cache: 'no-store',
@@ -64,10 +70,20 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
 
     let issued: TokenPair | null = null;
     try {
+      if (!accessToken && refreshToken) {
+        const result = await reissueTokens(options.gatewayUrl, refreshToken, fetchImpl, clientIp);
+        if (result.status === 'unavailable') throw new Error('reissue unavailable');
+        // 거절이면 끝난 세션이다 — 쿠키를 지우고 비로그인으로 보낸다(공개 조회는 그대로 되고, 회원 API 는 401 이다)
+        if (result.status === 'rejected') return relay(await send(null), clearCookies(cookies));
+        issued = result.pair;
+        // 방금 받은 토큰이 401 이면 다시 재발급해도 같다 — 그대로 중계한다
+        return relay(await send(issued.accessToken), issueCookies(cookies, issued));
+      }
+
       const first = await send(accessToken);
       if (first.status !== 401 || !refreshToken) return relay(first, []);
 
-      const result = await reissueTokens(options.gatewayUrl, refreshToken, fetchImpl);
+      const result = await reissueTokens(options.gatewayUrl, refreshToken, fetchImpl, clientIp);
       // 명시적 거절만 세션을 끝낸다. 일시 장애로는 쿠키를 지우지 않는다(아래 catch → BFF_002).
       if (result.status === 'rejected') return relay(first, clearCookies(cookies));
       await first.body?.cancel();

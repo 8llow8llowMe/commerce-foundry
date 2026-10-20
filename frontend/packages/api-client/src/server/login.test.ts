@@ -108,4 +108,19 @@ describe('createLoginHandler', () => {
       expect(res.headers.getSetCookie()).toEqual([]);
     }
   });
+
+  it('브라우저가 보낸 X-Forwarded-For 는 버리고 클라이언트 IP 한 값으로 덮어쓴다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, TOKENS));
+    await handlerWith(fetchImpl)(
+      login({
+        'sec-fetch-site': 'same-origin',
+        'x-forwarded-for': '1.2.3.4',
+        'x-real-ip': '203.0.113.7',
+      }),
+    );
+
+    expect(new Headers(fetchImpl.mock.calls[0]![1]?.headers).get('x-forwarded-for')).toBe(
+      '203.0.113.7',
+    );
+  });
 });
