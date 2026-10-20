@@ -35,11 +35,15 @@ Info → Presenter → Response
 `backend/`에서 실행한다. `<svc>`는 `product-service` 같은 실제 모듈명으로 바꾼다.
 
 ```bash
-./gradlew compileJava
-./gradlew :service:<svc>:cleanTest :service:<svc>:test --no-build-cache
-./gradlew check
+./gradlew :service:<svc>:test --tests '*XxxTest'
+./gradlew :service:<svc>:cleanTest :service:<svc>:check --no-build-cache
+./gradlew compileTestJava
 docker compose -f docker-compose-local.yml up -d --wait
 ```
+
+- 반복 중에는 `--tests` 로 바꾼 클래스만, 보고 전에는 바꾼 모듈만 실제 실행한다. 공용 모듈(core 등)을 바꿨으면 `compileTestJava` 로 전 모듈 컴파일까지 본다.
+- 루트 `./gradlew check`(전 모듈 테스트)는 로컬 기본 검증이 아니다 — CI 가 그룹 병렬로 돌린다. 같은 PC 에서 여러 세션이 빌드한다([local-run-guide.md](docs/local-run-guide.md) §4-1).
+- 데몬을 쓴다. `--no-daemon` 은 JVM 크래시 직후 한 번만, `./gradlew --stop` 은 쓰지 않는다(다른 세션 빌드까지 끊긴다).
 
 Windows PowerShell에서는 `./gradlew` 대신 `.\gradlew.bat`를 사용한다.
 인프라 기동에는 `.env`가 필요하다. [local-run-guide.md](docs/local-run-guide.md)를 먼저 확인한다.

@@ -64,7 +64,7 @@ description: "Commerce Foundry 백엔드 새 서비스·컨텍스트를 시작�
 
 6. **검증 계획**
    - 단위: Processor·도메인 상태 전이 / 슬라이스: `@DataJpaTest` / 웹: `@WebMvcTest` (오류 봉투·검증 코드)
-   - `./gradlew :service:<svc>:cleanTest :service:<svc>:test --no-build-cache`, `./gradlew check`
+   - `./gradlew :service:<svc>:cleanTest :service:<svc>:check --no-build-cache`(바꾼 모듈만), 공용 모듈을 바꿨으면 `./gradlew compileTestJava`. 전 모듈은 CI
    - Swagger 확인, `service-inventory.md` 갱신
 
 ## Output Format
