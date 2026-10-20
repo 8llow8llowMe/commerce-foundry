@@ -168,7 +168,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `GATEWAY_003` | 504 | 서비스가 응답 타임아웃(10초) 안에 답하지 않았다 | 처리 여부 불명 (아래) |
 | `GATEWAY_004` | 400 · 405 · 그 밖의 4xx | 라우팅 전에 거절한 요청 — 정규화되지 않은 경로(400), `Authorization` 헤더가 둘 이상(400), 허용하지 않는 메서드(405 + `Allow`), chunked 본문 수신 시간 초과(408) · 동시 수신 총량 초과(411, `Content-Length` 를 붙여 다시 보낸다) | 요청 수정 |
 | `GATEWAY_005` | 502 | 요청을 보낸 뒤 서비스가 응답 전에 연결을 끊었다 | 처리 여부 불명 (아래) |
-| `GATEWAY_006` | 429 + `Retry-After` | 회원 단위 쓰기 요청 한도를 넘었다 — 장바구니 · 주문 쓰기 (`security-guide.md` §7-3) | `Retry-After` 초 뒤 재시도. 요청은 서비스에 닿지 않았다. 재발급 · 로그아웃하지 않는다 (#91) |
+| `GATEWAY_006` | 429 + `Retry-After` | 회원 단위 쓰기 요청 한도를 넘었다 — 장바구니 · 주문 쓰기. 비로그인 IP 계수(`gateway.client-ip.enabled`, 기본 끔)를 켜면 토큰 없는 요청은 클라이언트 IP 단위로 센다 (`security-guide.md` §7-3) | `Retry-After` 초 뒤 재시도. 요청은 서비스에 닿지 않았다. 재발급 · 로그아웃하지 않는다 (#91) |
 | `GATEWAY_007` | 413 | 요청 본문이 상한(2MB)을 넘었다 (`security-guide.md` §7-4) | 요청은 서비스에 닿지 않았다. 본문을 줄여 다시 보낸다 |
 
 - **502 · 504 는 처리 여부를 알 수 없다** — 쓰기 요청은 같은 `Idempotency-Key` 로 재시도하거나 조회로 확인한다 (§6).
