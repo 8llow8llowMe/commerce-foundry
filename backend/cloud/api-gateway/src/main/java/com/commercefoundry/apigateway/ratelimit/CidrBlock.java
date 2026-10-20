@@ -19,7 +19,7 @@ public final class CidrBlock {
      * 맨 앞이 점({@code .a:b:c})이면 JDK 가 리터럴 분기를 건너뛰고 OS 리졸버로 넘겨 이벤트 루프에서 이름 조회가 돈다.
      */
     private static final Pattern IPV6 = Pattern.compile("(?=(?:[^:]*:){2})[0-9A-Fa-f:][0-9A-Fa-f:.]{1,44}");
-    /** 이보다 넓은 신뢰 대역은 받지 않는다 — 공용 CDN 처럼 남이 쓰는 대역이면 그 안의 누구나 X-Forwarded-For 를 정할 수 있다. */
+    /** 오타 · 실수 방지용 하한이다 — 이보다 넓은 대역은 받지 않지만, 공용 CDN 대역(예: /13)을 넣는 위험은 막지 못한다 ({@code security-guide.md} §7-3). */
     static final int MIN_IPV4_PREFIX = 8;
     static final int MIN_IPV6_PREFIX = 32;
 

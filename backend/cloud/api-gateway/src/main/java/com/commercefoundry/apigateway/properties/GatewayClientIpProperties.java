@@ -14,7 +14,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *       스토어프론트는 Next BFF 를 거쳐 오는데 BFF 가 클라이언트 IP 를 넘기지 않아 게이트웨이가 보는 원격 주소는 늘 BFF 다 —
  *       켜면 비로그인 요청 전체가 버킷 하나가 되고, access 쿠키가 만료된 회원(BFF 가 첫 요청을 토큰 없이 보낸다)이 401 재발급 대신 429 를 받는다 (#134 · #135).</li>
  *   <li>{@code trusted-proxies} 가 비면(기본) 어떤 프록시도 믿지 않는다 — {@code X-Forwarded-For} 를 무시하고 소켓의 원격 주소를 쓴다.
- *       BFF · LB · CDN 구성이 정해지면 그 주소 대역만 넣는다 ({@code GATEWAY_TRUSTED_PROXIES}, 콤마로 CIDR · 단일 주소). 잘못된 값이면 꺼져 있어도 기동하지 않는다.</li>
+ *       우리가 운영하는 BFF · L7 LB 중 XFF 를 덧붙이거나 한 값으로 덮어쓰는 것의 주소 대역만 넣는다(공용 CDN 대역 금지)
+ *       ({@code GATEWAY_TRUSTED_PROXIES}, 콤마로 CIDR · 단일 주소). 잘못된 값이면 꺼져 있어도 기동하지 않는다.</li>
  *   <li>{@code hash-key} 는 IP 를 Redis 키로 바꾸는 HMAC 키다({@code GATEWAY_CLIENT_IP_HASH_KEY}, Vault). <b>켤 때만 필수</b>다 — base64 로 32바이트 이상이어야 하고,
  *       비었거나 {@code ${...}} 가 풀리지 않았으면 기동하지 않는다. 키 없이 해시를 만들면 IPv4 는 전수 대입으로 되돌릴 수 있다.
  *       게이트웨이 인스턴스가 모두 같은 값을 써야 같은 IP 가 같은 버킷에 모인다.</li>

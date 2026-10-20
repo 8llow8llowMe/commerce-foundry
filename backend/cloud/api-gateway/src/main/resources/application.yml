@@ -77,7 +77,8 @@ gateway:
     # 토큰 없는 요청을 클라이언트 IP 단위로 셀지. 기본은 끔이다 — BFF 가 클라이언트 IP 를 넘기기 전에는 비로그인 요청 전체가 BFF 주소 한 버킷이 돼
     # access 쿠키가 만료된 회원(BFF 가 첫 요청을 토큰 없이 보낸다)이 401 재발급 대신 429 를 받는다 (#134 · #135)
     enabled: false
-    # 믿는 프록시(BFF · LB · CDN)의 주소 · CIDR. 기본은 비어 있다 — X-Forwarded-For 를 무시하고 소켓의 원격 주소를 쓴다. 구성이 정해지면 그 대역만 넣는다
+    # 믿는 프록시의 주소 · CIDR. 기본은 비어 있다 — X-Forwarded-For 를 무시하고 소켓의 원격 주소를 쓴다.
+    # 우리가 운영하는 BFF · L7 LB 중 XFF 를 덧붙이거나 한 값으로 덮어쓰는 것만 넣는다. 공용 CDN 대역은 넣지 않는다
     trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:}
     # IP 를 Redis 키로 바꾸는 HMAC 키 (Vault). 켤 때만 필수 — base64 32바이트 이상, 게이트웨이 인스턴스 전부 같은 값. 켰는데 비었거나 풀리지 않으면 기동하지 않는다
     hash-key: ${GATEWAY_CLIENT_IP_HASH_KEY:}
