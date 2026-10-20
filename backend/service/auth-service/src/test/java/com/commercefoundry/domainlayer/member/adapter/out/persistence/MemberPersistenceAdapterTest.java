@@ -91,6 +91,19 @@ class MemberPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("잠금 조회는 회원을 읽고 버전을 올리지 않는다 — 없는 회원은 빈 값")
+    void findByIdForUpdate() {
+        memberRepositoryPort.save(Member.signUp(1L, "customer@example.com", HASH, "홍길동", null));
+        entityManager.clear();
+
+        assertThat(memberRepositoryPort.findByIdForUpdate(1L)).hasValueSatisfying(member -> assertThat(member.version()).isZero());
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(memberRepositoryPort.findById(1L)).hasValueSatisfying(member -> assertThat(member.version()).isZero());
+        assertThat(memberRepositoryPort.findByIdForUpdate(2L)).isEmpty();
+    }
+
+    @Test
     @DisplayName("같은 이메일을 다시 넣으면 유니크 키(uk_member_email) 위반이 AUTH_002 가 된다 — 사전 조회를 함께 지난 동시 가입")
     void duplicateEmailBecomesConflict() {
         memberRepositoryPort.save(Member.signUp(1L, "customer@example.com", HASH, "홍길동", null));
