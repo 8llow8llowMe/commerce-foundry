@@ -10,6 +10,8 @@ import {
 } from '@/lib/catalog/option-selection';
 import type { ProductDetail } from '@/lib/catalog/types';
 import { useDictionary, useFormatMoney } from '@/components/i18n/LocaleProvider';
+import { CartActionNotice } from '@/components/cart/CartActionNotice';
+import { useCartAction } from '@/lib/cart/use-cart-action';
 import { fill } from '@/lib/i18n/format';
 import { CustomOrderFields, type CustomOrderValues } from './CustomOrderFields';
 import { OptionGroupsField } from './OptionGroupsField';
@@ -22,7 +24,8 @@ const QUANTITY_CAP = 99;
 
 /**
  * 가격 · 옵션 선택 · 수량 · 맞춤 제작 입력. 옵션 조합으로 SKU 를 찾아 그 SKU 의 서버 판매가 · 상태를 보인다.
- * 장바구니 담기 연결은 #26 이다 — 지금은 선택이 끝나면 버튼 자리만 활성 조건을 보여 준다.
+ * 판매중 SKU 가 정해지고 맞춤 제작 필수 칸이 채워지면 장바구니에 담는다(#26 — 회원은 서버, 비회원은 로컬).
+ * 담은 뒤에는 버튼 아래에 결과와 장바구니 링크를 보인다. 입력값이 상품 정의에 맞는지는 주문 생성이 본다.
  *
  * 모바일에서는 갤러리가 첫 화면을 차지하므로 하단에 가격 + 구매 버튼 바를 고정한다(#60).
  * 패널이 화면에 들어오면 바를 숨기고, 버튼은 패널로 스크롤해 첫 옵션에 포커스를 준다.
@@ -40,6 +43,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
   const radioPrefix = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const [panelInView, setPanelInView] = useState(false);
+  const cart = useCartAction();
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -71,8 +75,20 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
   const maxQuantity = product.maxQuantityPerOrder ?? QUANTITY_CAP;
   const productOnSale = product.saleStatus.code === 'ON_SALE';
 
-  const select = (groupId: string, valueId: string) =>
+  const select = (groupId: string, valueId: string) => {
+    cart.clear();
     setSelection((current) => selectOption(product.skus, current, groupId, valueId));
+  };
+  const changeQuantity = (next: number) => {
+    cart.clear();
+    setQuantity(Math.min(maxQuantity, Math.max(1, next)));
+  };
+
+  const missingRequired =
+    product.customOrder?.fields.some(
+      (field) => field.required && !(customValues[field.fieldKey] ?? '').trim(),
+    ) ?? false;
+  const canAdd = productOnSale && sku?.saleStatus.code === 'ON_SALE' && !missingRequired;
 
   const notice = !productOnSale
     ? product.saleStatus.name
@@ -80,7 +96,24 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
       ? t.selectOptions
       : sku && sku.saleStatus.code !== 'ON_SALE'
         ? fill(t.optionStatus, { status: sku.saleStatus.name })
-        : t.cartPending;
+        : missingRequired
+          ? t.fillRequired
+          : t.ready;
+
+  const addToCart = () => {
+    if (!canAdd || !sku) return;
+    void cart.add([
+      {
+        productId: product.productId,
+        skuId: sku.skuId,
+        quantity,
+        customOptions: Object.entries(customValues)
+          .filter(([, value]) => value.trim() !== '')
+          .map(([fieldKey, value]) => ({ fieldKey, value })),
+        maxQuantity: product.maxQuantityPerOrder,
+      },
+    ]);
+  };
 
   return (
     <div ref={panelRef} className="flex scroll-mt-32 flex-col gap-6">
@@ -126,7 +159,10 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
         <CustomOrderFields
           customOrder={product.customOrder}
           values={customValues}
-          onChange={(key, value) => setCustomValues((current) => ({ ...current, [key]: value }))}
+          onChange={(key, value) => {
+            cart.clear();
+            setCustomValues((current) => ({ ...current, [key]: value }));
+          }}
         />
       )}
 
@@ -144,7 +180,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
               type="button"
               aria-label={t.decrease}
               disabled={quantity <= 1}
-              onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+              onClick={() => changeQuantity(quantity - 1)}
               className="size-10 disabled:text-muted-fg"
             >
               −
@@ -156,7 +192,7 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
               type="button"
               aria-label={t.increase}
               disabled={quantity >= maxQuantity}
-              onClick={() => setQuantity((q) => Math.min(maxQuantity, q + 1))}
+              onClick={() => changeQuantity(quantity + 1)}
               className="size-10 disabled:text-muted-fg"
             >
               +
@@ -169,12 +205,15 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
           </p>
         )}
 
-        <Button disabled className="h-12 w-full" aria-describedby={noticeId}>
-          {t.addToCart}
+        <Button
+          disabled={!canAdd || cart.pending || cart.coolingDown}
+          onClick={addToCart}
+          className="h-12 w-full"
+          aria-describedby={noticeId}
+        >
+          {cart.pending ? t.adding : t.addToCart}
         </Button>
-        <p id={noticeId} role="status" className="text-center text-xs text-muted-fg">
-          {notice}
-        </p>
+        <CartActionNotice id={noticeId} result={cart.result} notice={notice} />
       </div>
 
       {/* 모바일 하단 고정 구매 바 — 패널이 보이면 숨긴다 */}

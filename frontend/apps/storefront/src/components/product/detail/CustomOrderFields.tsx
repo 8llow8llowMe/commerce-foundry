@@ -6,6 +6,9 @@ import type { CustomOrder } from '@/lib/catalog/types';
 /** fieldKey → 입력값. 주문 생성 때 그대로 보낸다(#26) */
 export type CustomOrderValues = Record<string, string>;
 
+/** 장바구니 · 주문이 받는 입력값 최대 길이(BE `CustomOptionRequest`) — 상품 정의에 상한이 없어도 넘기지 않는다 */
+const TEXT_MAX = 500;
+
 /**
  * 맞춤 제작 치수 · 요청 입력. 입력 항목 정의는 상품 데이터(customOrder.fields)가 정한다.
  * 브라우저 검증 속성(min · max · step · maxLength · required)만 건다 — 최종 검증은 주문 생성 때 서버가 한다(#97).
@@ -60,7 +63,7 @@ export function CustomOrderFields({
               min={number ? (field.min ?? undefined) : undefined}
               max={number ? (field.max ?? undefined) : undefined}
               step={number ? (field.step ?? 'any') : undefined}
-              maxLength={!number && field.max !== null ? field.max : undefined}
+              maxLength={number ? undefined : Math.min(field.max ?? TEXT_MAX, TEXT_MAX)}
               aria-describedby={helpId}
               value={values[field.fieldKey] ?? ''}
               onChange={(event) => onChange(field.fieldKey, event.target.value)}
