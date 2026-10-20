@@ -41,6 +41,13 @@ public final class ProductValidationMessage {
     public static final String STOCK_SKU_IDS_SIZE_MAX = "PRODUCT_125:skuIds 는 최대 100개입니다.";
     public static final String STOCK_SKU_IDS_POSITIVE = "PRODUCT_126:skuIds 는 양수여야 합니다.";
 
+    // 서비스 간 재고 복원 (/internal/v1/stock-restorations). 이름 · 뜻이 같은 칸은 선점 코드를 그대로 쓴다 —
+    // reservationId 양수는 STOCK_RESERVATION_ID_POSITIVE, items · skuId · quantity 는 STOCK_RESERVATION_ITEMS_* · _ITEM_REQUIRED · _SKU_ID_* · _QUANTITY_* 다
+    public static final String STOCK_RESTORATION_CLAIM_ID_REQUIRED = "PRODUCT_127:claimId 는 필수입니다.";
+    public static final String STOCK_RESTORATION_CLAIM_ID_POSITIVE = "PRODUCT_128:claimId 는 양수여야 합니다.";
+    public static final String STOCK_RESTORATION_RESERVATION_ID_REQUIRED = "PRODUCT_129:reservationId 는 필수입니다.";
+    public static final String STOCK_RESTORATION_REASON_REQUIRED = "PRODUCT_130:reason 은 필수입니다.";
+
     private ProductValidationMessage() {
     }
 }

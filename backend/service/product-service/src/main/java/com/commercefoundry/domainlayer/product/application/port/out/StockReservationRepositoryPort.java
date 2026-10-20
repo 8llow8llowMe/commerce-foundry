@@ -17,6 +17,13 @@ public interface StockReservationRepositoryPort {
     /** 헤더와 항목(SKU 아이디 오름차순)을 함께 읽는다. 쿼리 2번이다. */
     Optional<StockReservation> findById(long reservationId);
 
+    /**
+     * {@link #findById} 와 같지만 헤더 행을 비관적 쓰기 잠금으로 읽는다 — 트랜잭션이 끝날 때까지 같은 선점을 잠그려는 다른 트랜잭션이 기다린다.
+     * 결제 후 재고 복원이 같은 선점의 복원끼리 줄을 세워, "이미 복원한 수량" 을 각자 읽고 함께 상한을 넘기는 것을 막는 데 쓴다.
+     * 버전은 올리지 않는다. 트랜잭션 안에서만 부른다.
+     */
+    Optional<StockReservation> findByIdForUpdate(long reservationId);
+
     /** 주문의 활성(RESERVED · CONFIRMED) 선점. 주문당 하나다 — {@code uk_stock_reservation_active_order_id}. */
     Optional<StockReservation> findActiveByOrderId(long orderId);
 

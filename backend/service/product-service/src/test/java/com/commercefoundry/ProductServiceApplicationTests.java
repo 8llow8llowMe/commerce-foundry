@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.domainlayer.product.adapter.in.scheduler.StockReservationExpiryScheduler;
 import com.commercefoundry.domainlayer.product.application.command.StockReservationCommand;
+import com.commercefoundry.domainlayer.product.application.command.StockRestorationCommand;
 import com.commercefoundry.domainlayer.product.application.info.ExpiredStockReservationInfo;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
 import com.commercefoundry.domainlayer.product.application.port.in.StockInternalUseCase;
@@ -135,6 +136,12 @@ class ProductServiceApplicationTests {
         assertThat(findExpired.isReadOnly()).isTrue();
         assertThat(reserve).isNotNull();
         assertThat(reserve.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT);
+        TransactionAttribute restore = source.getTransactionAttribute(
+            StockInternalFacade.class.getMethod("restore", StockRestorationCommand.class), StockInternalFacade.class
+        );
+        assertThat(restore).as("결제 후 복원은 선점 헤더 잠금 · 기록 · 재고 증가가 한 트랜잭션이다").isNotNull();
+        assertThat(restore.isReadOnly()).isFalse();
+        assertThat(restore.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT);
     }
 
     /**
@@ -178,7 +185,8 @@ class ProductServiceApplicationTests {
 
         assertThat(tables).contains(
             "category", "product", "product_category", "product_option_group", "product_option_value",
-            "sku", "stock", "stock_adjustment_history", "stock_reservation", "stock_reservation_item", "product_image", "product_custom_order_field"
+            "sku", "stock", "stock_adjustment_history", "stock_reservation", "stock_reservation_item", "stock_restoration", "stock_restoration_item",
+            "product_image", "product_custom_order_field"
         );
     }
 

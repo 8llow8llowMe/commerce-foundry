@@ -3,11 +3,13 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence.reposito
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.StockReservationEntity;
 import com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationStatus;
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
 /**
@@ -20,6 +22,17 @@ public interface StockReservationRepository extends JpaRepository<StockReservati
 
     /** 주문의 활성 선점 — {@code uk_stock_reservation_active_order_id} 로 찾는다. RELEASED 는 이 값이 null 이라 걸리지 않는다. */
     Optional<StockReservationEntity> findByActiveOrderId(Long activeOrderId);
+
+    /**
+     * 선점 헤더 한 행을 비관적 쓰기 잠금({@code select ... for update} 계열)으로 읽는다 — 결제 후 재고 복원 전용이다.
+     *
+     * <p>복원은 선점 상태를 바꾸지 않아 {@code @Version} 이 경합을 잡지 못한다. 같은 선점에 서로 다른 클레임이 동시에 오면 각자 "이미 복원한 수량" 을
+     * 읽고 함께 상한을 넘길 수 있어, 헤더 행 잠금으로 같은 선점의 복원을 줄 세운다. 잠금 순서는 선점 헤더 → 재고 행(SKU 오름차순)으로
+     * 해제 · 만료(헤더 UPDATE → 재고 오름차순)와 같아 교착이 없다. 네이티브가 아닌 정적 JPQL + {@link Lock} 이다 ({@code coding-conventions.md} §9-5).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from StockReservationEntity r where r.id = :id")
+    Optional<StockReservationEntity> findByIdForUpdate(Long id);
 
     /** 만료 대상의 첫 배치. */
     @Query("""

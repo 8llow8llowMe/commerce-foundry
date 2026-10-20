@@ -39,6 +39,11 @@ public class StockReservationRepositoryAdapter implements StockReservationReposi
     }
 
     @Override
+    public Optional<StockReservation> findByIdForUpdate(long reservationId) {
+        return stockReservationRepository.findByIdForUpdate(reservationId).map(this::withItems);
+    }
+
+    @Override
     public Optional<StockReservation> findActiveByOrderId(long orderId) {
         return stockReservationRepository.findByActiveOrderId(orderId).map(this::withItems);
     }
