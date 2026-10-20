@@ -21,7 +21,7 @@ class RateLimitPolicyTest {
         "POST,   /api/v1/orders,             ORDER_WRITE",
         "POST,   /api/v1/orders/1/cancellation, ORDER_WRITE",
         "POST,   /api/v1/orders/quotes,      ORDER_QUOTE",
-        // 미리보기 한도는 POST 미리보기에만 쓴다 — 같은 경로의 다른 쓰기 메서드 · 끝 슬래시는 주문 쓰기 한도로 센다(하류에 매핑이 없어 405 · 404 라 우회가 아니다)
+        // 미리보기 한도는 POST 미리보기에만 쓴다 — 같은 경로의 다른 쓰기 메서드 · 끝 슬래시는 주문 쓰기 한도로 센다(더 엄격한 order-write 로 세므로 우회가 아니다)
         "PUT,    /api/v1/orders/quotes,      ORDER_WRITE",
         "POST,   /api/v1/orders/quotes/,     ORDER_WRITE",
         "POST,   /api/v1/carts/%6De/merge,   CART_MERGE",
