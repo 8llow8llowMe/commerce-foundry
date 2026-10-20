@@ -182,6 +182,118 @@ class CategoryTreeTest {
         void visibleRootsSkipsCycles() {
             assertThat(cyclicTree.visibleRoots()).extracting(node -> node.category().id()).containsExactly(1L);
         }
+
+        @Test
+        @Timeout(value = 1, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+        @DisplayName("allRoots · placementViolationOf 도 무한 루프에 빠지지 않는다")
+        void adminOperationsTerminate() {
+            assertThat(cyclicTree.allRoots()).extracting(node -> node.category().id()).containsExactly(1L);
+            assertThat(cyclicTree.placementViolationOf(41L, 1L)).isEmpty();
+            assertThat(cyclicTree.placementViolationOf(41L, 42L)).contains(CategoryPlacementViolation.CYCLE);
+            assertThat(cyclicTree.placementViolationOf(43L, null)).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("allRoots · find · hasChildren (어드민)")
+    class Admin {
+
+        @Test
+        @DisplayName("숨긴 노드와 그 하위도 담고, 같은 상위 안에서 노출 순서 → 아이디 오름차순이다")
+        void includesHidden() {
+            List<CategoryNode> roots = tree.allRoots();
+
+            assertThat(roots).extracting(node -> node.category().id()).containsExactly(3L, 2L, 1L);
+            assertThat(roots.get(0).children()).extracting(node -> node.category().id()).containsExactly(31L);
+            CategoryNode top = roots.get(2);
+            assertThat(top.children()).extracting(node -> node.category().id()).containsExactly(12L, 11L, 13L);
+            assertThat(top.children().get(0).children()).extracting(node -> node.category().id()).containsExactly(121L);
+        }
+
+        @Test
+        @DisplayName("find 는 숨김과 무관하게 찾고, 없으면 빈 값이다")
+        void find() {
+            assertThat(tree.find(12)).map(Category::name).contains("숨김상의");
+            assertThat(tree.find(999)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("hasChildren 은 숨긴 하위도 센다")
+        void hasChildren() {
+            assertThat(tree.hasChildren(1)).isTrue();
+            assertThat(tree.hasChildren(3)).isTrue();
+            assertThat(tree.hasChildren(111)).isFalse();
+            assertThat(tree.hasChildren(999)).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("placementViolationOf — 새로 만들기")
+    class PlacementOfNew {
+
+        @Test
+        @DisplayName("최상위 · 1단계 아래 · 2단계 아래(3단계가 된다)는 둘 수 있다")
+        void allowedUpToMaxDepth() {
+            assertThat(tree.placementViolationOf(null, null)).isEmpty();
+            assertThat(tree.placementViolationOf(null, 1L)).isEmpty();
+            assertThat(tree.placementViolationOf(null, 11L)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("3단계 아래에 만들면 깊이 초과다")
+        void depthExceeded() {
+            assertThat(tree.placementViolationOf(null, 111L)).contains(CategoryPlacementViolation.DEPTH_EXCEEDED);
+        }
+
+        @Test
+        @DisplayName("없는 상위면 PARENT_NOT_FOUND 다")
+        void parentNotFound() {
+            assertThat(tree.placementViolationOf(null, 999L)).contains(CategoryPlacementViolation.PARENT_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("숨긴 상위 아래에도 만들 수 있다")
+        void hiddenParent() {
+            assertThat(tree.placementViolationOf(null, 12L)).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("placementViolationOf — 상위 바꾸기")
+    class PlacementOfMove {
+
+        @Test
+        @DisplayName("하위를 거느린 카테고리를 옮기면 하위 높이까지 깊이를 센다")
+        void countsSubtreeHeight() {
+            // 셔츠(11) 는 반팔(111)을 거느려 높이 2 — 1단계 아래면 3단계, 2단계 아래면 4단계다
+            assertThat(tree.placementViolationOf(11L, 2L)).isEmpty();
+            assertThat(tree.placementViolationOf(11L, 13L)).contains(CategoryPlacementViolation.DEPTH_EXCEEDED);
+            // 상의(1) 는 높이 3 — 어디 아래로도 옮길 수 없고 최상위에는 둘 수 있다
+            assertThat(tree.placementViolationOf(1L, 2L)).contains(CategoryPlacementViolation.DEPTH_EXCEEDED);
+            assertThat(tree.placementViolationOf(1L, null)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("리프를 최상위로 올리거나 다른 1단계 아래로 옮길 수 있다")
+        void leafMoves() {
+            assertThat(tree.placementViolationOf(111L, null)).isEmpty();
+            assertThat(tree.placementViolationOf(111L, 3L)).isEmpty();
+            assertThat(tree.placementViolationOf(12L, 3L)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("자기 자신이나 자기 하위(숨긴 하위 포함)를 상위로 지정하면 순환이다 — 깊이보다 먼저 본다")
+        void cycle() {
+            assertThat(tree.placementViolationOf(11L, 11L)).contains(CategoryPlacementViolation.CYCLE);
+            assertThat(tree.placementViolationOf(11L, 111L)).contains(CategoryPlacementViolation.CYCLE);
+            assertThat(tree.placementViolationOf(1L, 121L)).contains(CategoryPlacementViolation.CYCLE);
+        }
+
+        @Test
+        @DisplayName("없는 상위면 순환 · 깊이보다 먼저 PARENT_NOT_FOUND 다")
+        void parentNotFound() {
+            assertThat(tree.placementViolationOf(1L, 999L)).contains(CategoryPlacementViolation.PARENT_NOT_FOUND);
+        }
     }
 
     private static Category category(long id, Long parentId, String name, int displayOrder, boolean visible) {

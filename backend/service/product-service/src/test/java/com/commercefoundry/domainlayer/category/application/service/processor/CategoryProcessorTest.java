@@ -2,11 +2,17 @@ package com.commercefoundry.domainlayer.category.application.service.processor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.domainlayer.category.application.info.CategoryNodeInfo;
 import com.commercefoundry.domainlayer.category.application.info.CategoryTreeInfo;
 import com.commercefoundry.domainlayer.category.application.port.out.CategoryRepositoryPort;
 import com.commercefoundry.domainlayer.category.domain.model.Category;
+import com.commercefoundry.domainlayer.category.domain.model.CategoryNode;
+import com.commercefoundry.domainlayer.category.domain.model.CategoryTree;
+import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +26,9 @@ class CategoryProcessorTest {
 
     @Mock
     private CategoryRepositoryPort categoryRepositoryPort;
+
+    @Mock
+    private SnowflakeIdGenerator snowflakeIdGenerator;
 
     @InjectMocks
     private CategoryProcessor categoryProcessor;
@@ -97,5 +106,60 @@ class CategoryProcessorTest {
         given(categoryRepositoryPort.findAll()).willReturn(CHAIN);
 
         assertThat(categoryProcessor.visiblePathOf(999)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("getAdminTree 는 숨긴 카테고리와 그 하위도 낸다")
+    void adminTreeIncludesHidden() {
+        given(categoryRepositoryPort.findAll()).willReturn(CHAIN);
+
+        List<CategoryNode> roots = categoryProcessor.getAdminTree();
+
+        assertThat(roots).extracting(node -> node.category().id()).containsExactly(1L);
+        CategoryNode hidden = roots.getFirst().children().getFirst().children().getFirst();
+        assertThat(hidden.category().id()).isEqualTo(111L);
+        assertThat(hidden.children()).extracting(node -> node.category().id()).containsExactly(1111L);
+    }
+
+    @Test
+    @DisplayName("getTreeForUpdate 는 잠그는 조회로 트리를 만든다 — 잠그지 않는 findAll 을 부르지 않는다")
+    void treeForUpdateLocks() {
+        given(categoryRepositoryPort.findAllForUpdate()).willReturn(CHAIN);
+
+        CategoryTree tree = categoryProcessor.getTreeForUpdate();
+
+        assertThat(tree.subtreeIds(1)).containsExactlyInAnyOrder(1L, 11L, 111L, 1111L);
+        verify(categoryRepositoryPort, never()).findAll();
+    }
+
+    @Test
+    @DisplayName("create 는 Snowflake 아이디를 발급해 INSERT 하고 만든 카테고리를 돌려준다")
+    void create() {
+        given(snowflakeIdGenerator.generateId()).willReturn(5001L);
+
+        Category created = categoryProcessor.create(1L, "저고리", 2, false);
+
+        Category expected = new Category(5001L, 1L, "저고리", 2, false);
+        assertThat(created).isEqualTo(expected);
+        verify(categoryRepositoryPort).insert(expected);
+    }
+
+    @Test
+    @DisplayName("update 는 받은 값 전체로 기존 카테고리를 바꾼다 (상위 이동 포함)")
+    void update() {
+        Category updated = categoryProcessor.update(11L, null, "저고리(최상위)", 0, true);
+
+        Category expected = new Category(11L, null, "저고리(최상위)", 0, true);
+        assertThat(updated).isEqualTo(expected);
+        verify(categoryRepositoryPort).update(expected);
+        verifyNoInteractions(snowflakeIdGenerator);
+    }
+
+    @Test
+    @DisplayName("delete 는 아이디로 지운다")
+    void delete() {
+        categoryProcessor.delete(11L);
+
+        verify(categoryRepositoryPort).deleteById(11L);
     }
 }
