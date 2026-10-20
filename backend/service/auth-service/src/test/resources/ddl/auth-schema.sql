@@ -123,7 +123,7 @@
         '국가 코드 (ISO 3166-1 alpha-2 대문자)';
 
     comment on column auth.shipping_address.default_member_id is
-        '기본 배송지면 member_id 와 같은 값, 아니면 null — 회원당 기본 하나를 유니크 키로 강제한다 (FK: member.id)';
+        '기본 배송지면 member_id 와 같은 값, 아니면 null — 회원당 기본 하나를 유니크 키로 강제한다 (FK: member.id — member_id 와 같은 값의 복제 칸)';
 
     comment on column auth.shipping_address.label is
         '배송지 별칭 (집 · 회사). 없으면 null';

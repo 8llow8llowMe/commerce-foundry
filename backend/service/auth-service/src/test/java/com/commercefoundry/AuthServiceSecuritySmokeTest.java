@@ -14,9 +14,14 @@ import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 /**
  * 인가 스모크 — security-core Resource Server 가 이 서비스에 실제로 걸렸는지 본다 ({@code security-guide.md} §5-3).
@@ -28,6 +33,9 @@ import org.springframework.mock.web.MockHttpServletResponse;
 class AuthServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
 
     private static final String ME = "/api/v1/members/me";
+    private static final String SHIPPING_ADDRESSES = ME + "/shipping-addresses";
+    private static final String VALID_SHIPPING_ADDRESS = """
+        {"recipientName":"홍길동","recipientPhone":"01012345678","countryCode":"KR","postalCode":"06236","addressLine1":"서울특별시 강남구 테헤란로 123"}""";
 
     @Override
     protected boolean issuerExpected() {
@@ -73,10 +81,40 @@ class AuthServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     @Test
     @DisplayName("배송지 목록은 토큰 없으면 401 · SECURITY_001 · WWW-Authenticate: Bearer 다 (isAuthenticated)")
     void anonymousGetShippingAddresses() throws Exception {
-        MockHttpServletResponse response = perform(get(ME + "/shipping-addresses"));
+        MockHttpServletResponse response = perform(get(SHIPPING_ADDRESSES));
 
         assertEnvelope(response, SecurityErrorCode.UNAUTHORIZED);
         assertWwwAuthenticate(response, "Bearer");
+    }
+
+    /** 쓰기 요청은 올바른 본문으로 보낸다 — 본문 검증(400)이 인가(401)보다 먼저다 ({@code api-design-guide.md} §5). */
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource({
+        "GET, /4611686018427387904",
+        "POST, ''",
+        "PUT, /4611686018427387904",
+        "DELETE, /4611686018427387904",
+        "PUT, /4611686018427387904/default"
+    })
+    @DisplayName("배송지 나머지 경로도 토큰 없으면 401 · SECURITY_001 이다 (isAuthenticated)")
+    void anonymousShippingAddressWrites(String method, String suffix) throws Exception {
+        MockHttpServletRequestBuilder request = MockMvcRequestBuilders.request(HttpMethod.valueOf(method), SHIPPING_ADDRESSES + suffix);
+        if (!"DELETE".equals(method) && !"GET".equals(method) && !suffix.endsWith("/default")) {
+            request.contentType(MediaType.APPLICATION_JSON).content(VALID_SHIPPING_ADDRESS);
+        }
+
+        assertEnvelope(perform(request), SecurityErrorCode.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("익명 배송지 추가에 빈 본문({})을 보내면 401 이 아니라 400 · AUTH_121 이다 — 본문 검증이 인가보다 먼저 돈다(리소스 데이터는 없다)")
+    void anonymousCreateWithEmptyBodyIsValidatedFirst() throws Exception {
+        MockHttpServletResponse response = perform(post(SHIPPING_ADDRESSES).contentType(MediaType.APPLICATION_JSON).content("{}"));
+        String body = response.getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThat(JsonPath.<String>read(body, "$.dataHeader.resultCode")).isEqualTo("AUTH_121");
+        assertThat(JsonPath.<Object>read(body, "$.dataBody")).isNull();
     }
 
     /**

@@ -13,6 +13,8 @@ import com.commercefoundry.domainlayer.member.application.service.processor.Memb
 import com.commercefoundry.domainlayer.shippingaddress.adapter.in.web.dto.response.ShippingAddressListResponse;
 import com.commercefoundry.domainlayer.shippingaddress.adapter.in.web.presenter.ShippingAddressWebPresenter;
 import com.commercefoundry.domainlayer.shippingaddress.application.command.ShippingAddressCommand;
+import com.commercefoundry.domainlayer.shippingaddress.application.exception.ShippingAddressErrorCode;
+import com.commercefoundry.domainlayer.shippingaddress.application.exception.ShippingAddressException;
 import com.commercefoundry.domainlayer.shippingaddress.application.info.ShippingAddressListInfo;
 import com.commercefoundry.domainlayer.shippingaddress.application.service.processor.ShippingAddressProcessor;
 import com.commercefoundry.domainlayer.shippingaddress.domain.model.ShippingAddress;
@@ -24,6 +26,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.transaction.TransactionTimedOutException;
 
 @ExtendWith(MockitoExtension.class)
 class ShippingAddressWebFacadeTest {
@@ -70,6 +74,30 @@ class ShippingAddressWebFacadeTest {
         order.verify(shippingAddressProcessor).setDefault(MEMBER_ID, ADDRESS_ID);
         order.verify(memberLockProcessor).lock(MEMBER_ID);
         order.verify(shippingAddressProcessor).delete(MEMBER_ID, ADDRESS_ID);
+    }
+
+    @Test
+    @DisplayName("잠금 대기가 시간 상한을 넘기면(쿼리 타임아웃) 409 · AUTH_023 이고 배송지를 건드리지 않는다")
+    void lockWaitTimeout() {
+        willThrow(new QueryTimeoutException("canceled")).given(memberLockProcessor).lock(MEMBER_ID);
+
+        assertThatThrownBy(() -> facade.setDefault(MEMBER_ID, ADDRESS_ID))
+            .isInstanceOf(ShippingAddressException.class)
+            .hasCauseInstanceOf(QueryTimeoutException.class)
+            .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+            .isEqualTo(ShippingAddressErrorCode.SHIPPING_ADDRESS_BUSY);
+        verifyNoInteractions(shippingAddressProcessor);
+    }
+
+    @Test
+    @DisplayName("잠근 뒤 작업 중 시간 상한이 지나도(TransactionTimedOutException) AUTH_023 이다")
+    void transactionTimedOutAfterLock() {
+        willThrow(new TransactionTimedOutException("deadline")).given(shippingAddressProcessor).delete(MEMBER_ID, ADDRESS_ID);
+
+        assertThatThrownBy(() -> facade.delete(MEMBER_ID, ADDRESS_ID))
+            .isInstanceOf(ShippingAddressException.class)
+            .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+            .isEqualTo(ShippingAddressErrorCode.SHIPPING_ADDRESS_BUSY);
     }
 
     @Test
