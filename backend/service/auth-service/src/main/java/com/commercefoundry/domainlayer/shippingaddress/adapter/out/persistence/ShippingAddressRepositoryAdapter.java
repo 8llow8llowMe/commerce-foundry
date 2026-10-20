@@ -66,15 +66,11 @@ public class ShippingAddressRepositoryAdapter implements ShippingAddressReposito
     }
 
     @Override
-    public void markDefault(long addressId, long memberId) {
-        int updated;
+    public boolean markDefault(long addressId, long memberId) {
         try {
-            updated = shippingAddressRepository.markDefault(addressId, memberId, Instant.now());
+            return shippingAddressRepository.markDefault(addressId, memberId, Instant.now()) > 0;
         } catch (DataIntegrityViolationException exception) {
             throw translate(exception);
-        }
-        if (updated == 0) {
-            throw new ShippingAddressException(ShippingAddressErrorCode.NOT_FOUND_SHIPPING_ADDRESS);
         }
     }
 
