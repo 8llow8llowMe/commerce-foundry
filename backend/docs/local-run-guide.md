@@ -66,11 +66,13 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 ## 4. 빌드 · 테스트
 
 ```bash
-./gradlew compileJava
-./gradlew check
-./gradlew :core:shared-commerce:cleanTest :core:shared-commerce:test --no-build-cache   # 테스트가 실제로 돈 결과
+./gradlew :service:order-service:test --tests '*CartProcessorTest'                          # 반복 중 — 바꾼 클래스만
+./gradlew :service:order-service:cleanTest :service:order-service:check --no-build-cache    # PR 직전 — 바꾼 모듈만, 테스트가 실제로 돈 결과
+./gradlew compileTestJava                                                                   # 공용 모듈(core 등)을 바꿨을 때 — 전 모듈 컴파일만
 ```
 
+- 로컬 검증은 **바꾼 모듈까지**다(`done-checklist.md` §1). 루트 `./gradlew check` 는 전 모듈(12개) 테스트라 로컬 기본 검증으로 쓰지 않는다 —
+  전 모듈은 CI 가 그룹 병렬로 돌린다(아래). 여러 세션이 같은 PC 를 쓸 때의 규칙은 §4-1.
 - `gradle.properties` 가 빌드 캐시를 켜 둔다. 테스트가 **실제로 돌았는지** 확인할 때는 `cleanTest` + `--no-build-cache` 를 붙인다.
   그냥 `test` 는 `UP-TO-DATE` · `FROM-CACHE` 로 건너뛰고도 성공으로 끝난다.
 - CI(`backend-ci`)는 **테스트가 있어야 하는 모듈마다**(core 가 아닌 실행 모듈 전부 + `src/test/java` 가 있는 모듈) 실제 실행 건수(건너뜀 제외)를 세고,
@@ -86,6 +88,29 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 - 서비스(`service/*`)의 컨텍스트 로딩 테스트(`*ApplicationTests`)는 H2(PostgreSQL 모드) test 프로파일로 돈다. Docker 없이 로컬에서도 실행된다.
   락 · `timestamptz` · 인덱스처럼 엔진에 기대는 동작은 여기서 검증하지 않는다. 리포지토리 테스트는 Testcontainers(PostgreSQL)로 따로 두고
   CI 에서 돌린다 (`bootstrap-conventions.md` "컨텍스트 로딩 테스트").
+
+### 4-1. 같은 PC 에서 여러 세션 · 에이전트가 돌 때
+
+Claude 세션이나 하위 에이전트 여러 개가 worktree 를 나눠 같은 PC 에서 빌드하면, 세션마다 Gradle 데몬과
+모듈별 테스트 JVM(각자 Spring 컨텍스트)이 동시에 떠 PC 가 느려진다.
+
+- 검증 범위를 §4 대로 좁힌다 — 반복 중에는 `--tests`, PR 직전에는 바꾼 모듈만, 전 모듈은 CI.
+- 여러 모듈 check 같은 무거운 빌드는 한 번에 한 세션만 돌린다.
+- 데몬은 켠 채로 쓴다(저장소 기본값). `--no-daemon` 은 매번 JVM 을 새로 띄워 느리다 — JVM 크래시 직후 한 번 다시 돌릴 때만 쓴다(§6).
+  **`./gradlew --stop` 은 쓰지 않는다** — 같은 Gradle 버전의 데몬을 모두 내려 같은 PC 의 다른 세션 빌드까지 끊긴다.
+- 개인 설정 `~/.gradle/gradle.properties`(Windows 는 `%USERPROFILE%\.gradle\gradle.properties`)는 저장소 설정보다 우선하고,
+  팀원 · CI 에는 영향이 없다. 여러 세션을 돌리는 PC 에 권한다.
+
+  ```properties
+  # 빌드 하나가 동시에 쓰는 워커 수 — 코어 수의 절반 이하(예: 8코어면 4)
+  org.gradle.workers.max=4
+  # 쉬는 데몬을 10분 뒤 내린다(기본 3시간) — 세션마다 남는 데몬 메모리를 돌려받는다
+  org.gradle.daemon.idletimeout=600000
+  ```
+
+  - 개인 파일에 `org.gradle.jvmargs` 를 두면 저장소의 `-Xmx2g` 를 통째로 덮는다. 다른 프로젝트 때문에 둬야 하면 데몬 힙이 그 값으로 줄어든다는 점을 알고 쓴다.
+  - 데몬을 끄는 `org.gradle.daemon=false` 는 두지 않는다.
+- JDK 21.0.4(Windows)에서 데몬 · 테스트 JVM 이 `EXCEPTION_ACCESS_VIOLATION` 으로 죽는 일이 반복됐다. 최신 21.0.x 패치로 올린다(§6).
 
 ## 5. 서비스 실행
 
@@ -157,5 +182,6 @@ refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨
 | 게이트웨이 경유 `/health/{service-id}` 가 `503` + `GATEWAY_002` | 서비스가 꺼져 있거나 아직 Eureka 에 등록되지 않았다(기동 후 30초쯤 걸린다) |
 | 게이트웨이 경유 `/health/{service-id}` 가 `503` + `{"status":"DOWN"}` | 서비스는 떠 있지만 DB 같은 구성 요소가 내려갔다. 헬스는 상세를 숨기므로 서비스 로그를 본다 |
 | 게이트웨이 경유 `/health/{service-id}` · `/swagger-ui.html` 이 `404` | local · dev 프로파일이 아니라 dev 라우트가 꺼져 있다 (`gateway.dev-routes.enabled`) |
-| Gradle 데몬·테스트 JVM 이 `EXCEPTION_ACCESS_VIOLATION`(jvm.dll)으로 죽는다 | JDK 21.0.4(Windows)에서 여러 번 관찰됐다(C1 컴파일러 스레드). `./gradlew --stop` 후 다시 돌리고, 재발하면 JDK 21 최신 패치로 올린다. 같은 코드가 재실행에서 통과해 코드 원인으로 보지 않는다 |
+| Gradle 데몬·테스트 JVM 이 `EXCEPTION_ACCESS_VIOLATION`(jvm.dll)으로 죽는다 | JDK 21.0.4(Windows)에서 여러 번 관찰됐다(C1 · C2 컴파일러 스레드). 같은 명령을 `--no-daemon` 으로 한 번 다시 돌리고, 재발하면 JDK 21 최신 패치로 올린다. `./gradlew --stop` 은 같은 PC 의 다른 세션 빌드까지 끊으므로 쓰지 않는다(§4-1). 같은 코드가 재실행에서 통과해 코드 원인으로 보지 않는다 |
+| JVM 크래시 뒤 모든 빌드가 설정 단계에서 `Unexpected lock protocol found in lock file. Expected 3, found 0.` 으로 실패한다 | 크래시 순간 공용 캐시 `~/.gradle/caches/<Gradle 버전>/groovy-dsl/.internal/locks/<해시>.lock` 이 0 으로 채워졌다. `--debug` 로그의 `Waiting to acquire exclusive lock on groovy-dsl` 로 확인하고, 첫 바이트가 `03` 이 아니고 수정 시각이 크래시 시각인 lock 파일과 같은 이름의 `groovy-dsl/<해시>/` 디렉터리를 함께 다른 곳으로 옮긴다(다음 빌드가 다시 만든다). 캐시 전체를 지우지 않는다 — 다른 세션 · 프로젝트도 쓴다 |
 | `./gradlew: Permission denied` | 실행 비트가 빠졌다. `git update-index --chmod=+x backend/gradlew` 로 고쳐 커밋한다 (`chmod` 로 덮지 않는다) |
