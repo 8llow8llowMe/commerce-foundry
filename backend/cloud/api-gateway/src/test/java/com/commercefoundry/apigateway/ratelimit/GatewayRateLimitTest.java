@@ -49,6 +49,8 @@ class GatewayRateLimitTest {
 
     private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service");
     private static final String CART_ITEMS = "/api/v1/carts/me/items";
+    private static final String ORDERS = "/api/v1/orders";
+    private static final String ORDER_QUOTES = "/api/v1/orders/quotes";
     private static final Queue<String> UPSTREAM_PATHS = new ConcurrentLinkedQueue<>();
     private static final HttpServer UPSTREAM = startUpstream();
 
@@ -146,6 +148,31 @@ class GatewayRateLimitTest {
     }
 
     @Test
+    @DisplayName("주문서 미리보기와 주문 생성은 서로 다른 한도로 센다 — 미리보기 한도가 다 차도 주문 생성은 하류로 간다 (#158)")
+    void orderQuoteIsCountedSeparatelyFromOrderWrite() {
+        rateLimiter.deniedPolicy = RateLimitPolicy.ORDER_QUOTE;
+        String token = token();
+
+        post(ORDER_QUOTES, BEARER + token).expectStatus().isEqualTo(429)
+            .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_006");
+        post(ORDERS, BEARER + token).expectStatus().isOk();
+
+        assertThat(rateLimiter.calls).containsExactly("ORDER_QUOTE:member:" + TestTokens.MEMBER_ID, "ORDER_WRITE:member:" + TestTokens.MEMBER_ID);
+        assertThat(UPSTREAM_PATHS).as("미리보기는 끊기고 주문 생성만 하류에 닿는다").containsExactly(ORDERS);
+    }
+
+    @Test
+    @DisplayName("주문 생성 한도가 다 차도 주문서 미리보기는 하류로 간다 — 미리보기가 주문 쓰기 버킷을 쓰지 않는다 (#158)")
+    void orderWriteLimitDoesNotBlockQuote() {
+        rateLimiter.deniedPolicy = RateLimitPolicy.ORDER_WRITE;
+
+        post(ORDER_QUOTES, BEARER + token()).expectStatus().isOk();
+
+        assertThat(rateLimiter.calls).containsExactly("ORDER_QUOTE:member:" + TestTokens.MEMBER_ID);
+        assertThat(UPSTREAM_PATHS).containsExactly(ORDER_QUOTES);
+    }
+
+    @Test
     @DisplayName("장바구니 조회는 세지 않는다")
     void cartReadIsNotCounted() {
         rateLimiter.deny = true;
@@ -220,6 +247,8 @@ class GatewayRateLimitTest {
         private final Queue<String> calls = new ConcurrentLinkedQueue<>();
         private volatile boolean deny;
         private volatile boolean fail;
+        /** 이 정책의 버킷만 비었다고 답한다 — 정책마다 버킷이 따로인지 볼 때 쓴다. */
+        private volatile RateLimitPolicy deniedPolicy;
 
         @Override
         public Mono<Boolean> tryAcquire(RateLimitPolicy policy, RateLimitSubject subject) {
@@ -227,13 +256,14 @@ class GatewayRateLimitTest {
             if (fail) {
                 return Mono.error(new IllegalStateException("simulated outage"));
             }
-            return Mono.just(!deny);
+            return Mono.just(!deny && policy != deniedPolicy);
         }
 
         void reset() {
             calls.clear();
             deny = false;
             fail = false;
+            deniedPolicy = null;
         }
     }
 }
