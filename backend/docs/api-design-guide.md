@@ -67,8 +67,9 @@
 - 처음 만든 곳: product-service `StockInternalController` (#10) — `POST /internal/v1/stock-reservations` · `.../{reservationId}/confirmation` · `.../{reservationId}/release`.
   검증 코드 `PRODUCT_112`~`PRODUCT_122`(수량 상한 10000 은 `PRODUCT_122`), 도메인 코드 `PRODUCT_003` · `PRODUCT_021`~`PRODUCT_026` (`order-flow-guide.md` §3).
 - 결제 후 재고 복원: product-service `StockRestorationInternalController` (#85) — `POST /internal/v1/stock-restorations`. 업무 키는 `claimId`(클레임당 복원 1건),
-  검증 코드 `PRODUCT_127`~`PRODUCT_130`(이름 · 뜻이 같은 `reservationId` 양수 · `items` 이하는 선점 코드 재사용), 도메인 코드 `PRODUCT_003` · `PRODUCT_027`~`PRODUCT_030`.
-  상태 전이가 없는 쓰기라 `@Version` 대신 대상 행(선점 헤더) 비관적 잠금으로 같은 대상의 동시 쓰기를 줄 세운다 (`order-flow-guide.md` §3-2).
+  검증 코드 `PRODUCT_127`~`PRODUCT_130`(이름 · 뜻이 같은 `reservationId` 양수 · `items` 이하는 선점 코드 재사용), 도메인 코드 `PRODUCT_003` · `PRODUCT_027`~`PRODUCT_031`.
+  상태 전이가 없는 쓰기라 `@Version` 대신 대상 행(선점 헤더) 비관적 잠금으로 같은 대상의 동시 쓰기를 줄 세운다. 잠금 대기 상한(2000ms)을 넘으면
+  재시도 가능한 409 `PRODUCT_031` 이다 (`order-flow-guide.md` §3-2, `coding-conventions.md` §9-1).
 
 ## 2. 응답 구조
 

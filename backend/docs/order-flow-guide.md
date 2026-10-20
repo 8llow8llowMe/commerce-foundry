@@ -140,7 +140,7 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 | `stock_reservation_item` | 선점 × SKU — `quantity > 0`, `deducted`. 무제한 SKU 는 `deducted = false` 로 차감하지 않고 해제 때 되돌리지 않는다 |
 | `stock_adjustment_history` | 어드민 조정 이력 (append-only) |
 | `stock_restoration` | 결제 후 재고 복원 — 클레임 하나에 한 행(append-only, #85). `claim_id` 유니크(`uk_stock_restoration_claim_id`)가 **클레임당 복원을 하나**로 막는 멱등 키, `reservation_id`(확정 선점) · `order_id`(선점에서 복사) · `reason`(`CANCELLATION` / `RETURN`) |
-| `stock_restoration_item` | 복원 × SKU — `quantity > 0`, `restored`. 선점 항목이 `deducted = true` 였던 SKU 만 `restored = true` 로 재고를 되돌리고, 무제한 SKU 는 `restored = false` 로 기록만 남긴다. 기록 합이 복원 상한을 정한다 |
+| `stock_restoration_item` | 복원 × SKU — `quantity > 0`, `restored` = **되돌릴 대상(선점 때 차감)이었는가**. 선점 항목이 `deducted = true` 였던 SKU 만 `true` 이고 재고를 되돌린다 — 재고 행이 없으면 WARN 만 남기고 수량은 늘지 않는다(`true` 그대로). 무제한 SKU 는 `false` 로 기록만 남긴다. 기록 합이 복원 상한을 정한다 |
 
 - 어드민 재고 조정(`PATCH /api/v1/admin/stocks/{skuId}`)은 수량 **절대값 + 기대 수량 CAS**(`expectedQuantity`) 다 — 그 사이 주문이 차감했으면 409 `PRODUCT_020`.
   재고 행이 없는 SKU 의 첫 등록은 INSERT 이고, 동시 첫 등록은 PK 충돌로 409 다.
@@ -217,7 +217,8 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 처리 순서 (Facade 트랜잭션 하나, 기본 격리 READ COMMITTED):
 
 1. 같은 `skuId` 는 수량을 합치고 SKU 아이디 오름차순으로 놓는다.
-2. 선점 헤더를 **비관적 쓰기 잠금**(`@Lock(PESSIMISTIC_WRITE)` 정적 JPQL)으로 읽는다. 없으면 404 `PRODUCT_003`.
+2. 선점 헤더를 **비관적 쓰기 잠금**(`@Lock(PESSIMISTIC_WRITE)` 정적 JPQL, PostgreSQL 에서는 `for no key update`)으로 읽는다. 없으면 404 `PRODUCT_003`.
+   잠금 대기는 2000ms(호출자 Feign read timeout 3000ms 보다 짧게)까지이고, 넘으면 아무것도 바꾸지 않고 409 `PRODUCT_031`(재시도)이다.
    복원은 상태 전이가 없어 `@Version` 이 경합을 잡지 못한다 — 잠금이 없으면 같은 선점의 서로 다른 클레임 둘이 "이미 복원한 수량" 을 각자 읽고 함께 상한을 넘긴다.
    같은 클레임의 동시 재요청도 여기서 줄을 서 늦은 쪽이 3단계에서 먼저 커밋된 복원을 본다. 잠금 순서는 선점 헤더 → 재고 행(SKU 오름차순)으로
    해제 · 만료(헤더 UPDATE → 재고 오름차순)와 같아 교착이 없다.
@@ -227,7 +228,8 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
    재고를 되돌리지 않은 무제한 항목도 합에 들어간다 — 상한은 선점 수량 기준이다.
 6. 항목마다 (선점 항목 수량 − 이미 복원한 수량)을 넘으면 — 선점에 없는 SKU 포함 — 모두 모아 409 `PRODUCT_028`("…: [1001, 9999]"). 아무것도 쓰지 않는다.
 7. 복원 기록(헤더 · 항목)을 INSERT 하고 flush 한다. 클레임 유니크 키 위반(2단계 잠금을 비켜 간 동시 생성 — 다른 `reservationId` 로 온 경우)은 409 `PRODUCT_030`.
-8. 선점 항목이 `deducted = true` 였던 SKU 만 오름차순으로 조건부 복원(`available_quantity += qty`)한다 — 무제한 SKU 는 `restored = false` 로 기록만 남는다.
+8. 선점 항목이 `deducted = true` 였던 SKU 만 **SKU 오름차순 가산 UPDATE**(`available_quantity += qty` — 관리 여부 무관, 해제와 같은 쿼리)를 한다 —
+   무제한 SKU 는 `restored = false` 로 기록만 남는다.
    재고 행이 없어 0행이면 해제 경로와 같이 WARN 로그만 남기고 막지 않는다(재고 행은 지우지 않으므로 데이터 오류다).
 
 ### 3-3. 선점 상태 전이
@@ -270,6 +272,7 @@ RESERVED ──확정──▶ CONFIRMED
 | `PRODUCT_028` | 409 | 결제 후 복원 — (선점 수량 − 이미 복원한 수량)을 넘는 SKU(선점에 없는 SKU 포함) — 메시지에 SKU 아이디 목록 |
 | `PRODUCT_029` | 409 | 결제 후 복원 — 같은 클레임의 기존 복원과 선점 · 사유 · 항목이 다르다 |
 | `PRODUCT_030` | 409 | 결제 후 복원 — 같은 클레임의 동시 복원 생성 — 다시 시도한다 |
+| `PRODUCT_031` | 409 | 결제 후 복원 — 선점 헤더 잠금 대기 상한 초과(같은 선점을 처리 중) — 다시 시도한다 |
 | `PRODUCT_112`~`PRODUCT_130` | 400 | 요청 검증 (`ProductValidationMessage`) — 선점 수량 상한 `PRODUCT_122`, 어드민 조정 · 이력 경로의 `skuId` 양수 `PRODUCT_123`, 어드민 재고 조회 `skuIds` `PRODUCT_124`~`PRODUCT_126`, 복원 `claimId` 필수 · 양수 `PRODUCT_127` · `PRODUCT_128`, `reservationId` 필수 `PRODUCT_129`, `reason` 필수 `PRODUCT_130`. 복원의 `reservationId` 양수와 `items` 이하는 선점 코드(`PRODUCT_121` · `PRODUCT_114`~`PRODUCT_120` · `PRODUCT_122`)를 그대로 쓴다 |
 
 - 확정된 선점은 해제하지 않는다(`PRODUCT_024`). 결제 후 취소 · 반품의 재고는 위 "결제 후 복원" 경로로 되돌린다 — 선점 상태는 `CONFIRMED` 그대로다.
@@ -281,19 +284,27 @@ RESERVED ──확정──▶ CONFIRMED
 - **만료 후 확정(409 `PRODUCT_025`)** — 같은 `orderId` 로 다시 선점하고(해제된 주문은 활성 유니크 키에 걸리지 않는다) **곧바로 같은 흐름에서 확정**한다.
   재선점과 확정 사이를 비우면 새 선점도 `ttl` 뒤 다시 만료돼 같은 경합이 되풀이된다. 재선점이 `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면
   결제를 전액 취소한다 (`payment-guide.md` §6).
-- **409 는 `resultCode` 로 분기한다.** `PRODUCT_026`(동시 변경 · 동시 생성) · `PRODUCT_030`(같은 클레임의 동시 복원 생성)만 재시도 대상이고
-  **새 트랜잭션(새 요청)** 으로 다시 부른다 — 다시 부르면 바뀐 상태를 기준으로 답한다(복원은 먼저 끝난 복원으로 200).
+- **409 는 `resultCode` 로 분기한다.** `PRODUCT_026`(동시 변경 · 동시 생성) · `PRODUCT_030`(같은 클레임의 동시 복원 생성) ·
+  `PRODUCT_031`(선점 잠금 대기 초과)만 재시도 대상이고 **새 트랜잭션(새 요청)** 으로 다시 부른다 — 다시 부르면 바뀐 상태를 기준으로 답한다.
+  재시도는 **상한을 둔다(예: 3회, 간격을 늘려 가며)** — 넘으면 영속 재전송(아래 복원 보장)으로 넘긴다.
+  `PRODUCT_030` 재시도는 같은 본문이면 먼저 끝난 복원으로 200, 다른 선점으로 보냈으면 `PRODUCT_029`(같은 claimId 를 두 선점에 쓴 호출자 버그 — 종결)다.
   `PRODUCT_021` · `PRODUCT_022` · `PRODUCT_023` · `PRODUCT_024` · `PRODUCT_025` · `PRODUCT_027` · `PRODUCT_028` · `PRODUCT_029` 는 재시도해도 결과가 같은 종결 오류다.
 - **결제 후 복원(`/internal/v1/stock-restorations`)은 클레임이 확정될 때 부른다** — 결제 후 취소는 취소 확정(환불 요청과 같은 흐름), 반품은 검수 뒤
   어드민이 "재고로 되돌림" 을 고른 경우만(`reason = RETURN`). 되돌리지 않는 반품은 부르지 않는다. **`claimId` 가 멱등 키**다 — 타임아웃 · 재시도는
   같은 `claimId` · 같은 본문으로 다시 부른다(재고는 한 번만 늘고 200). 같은 클레임에 다른 수량을 보내면 `PRODUCT_029` 이므로, 클레임 수량을 바꿔야 하면
   새 클레임으로 다룬다. 항목 수량은 그 클레임의 SKU 별 수량이고 선점의 `reservationId` 는 주문에 저장한 확정 선점이다.
   `PRODUCT_028` 은 호출한 쪽의 클레임 수량 계산 오류(확정 · 이미 복원한 수량 초과)다 — 조용히 완료 처리하지 않는다.
+- **복원의 클레임 아이디는 order-service 가 먼저 만든 클레임 행의 아이디다** (#16 · #17 이 지킬 호출자 계약).
+  - 결제 후 취소는 **경로와 상관없이** — 고객 취소 · 어드민 취소 · PG 웹훅 / PG 콘솔 취소 · 자동 전액 취소(재선점 실패 등) — order-service 가 먼저 클레임 행을
+    만들고 그 `claimId` 로 복원한다. 재시도마다 새 아이디를 만들지 않는다 — 새 아이디면 멱등이 깨져 재고가 두 번 는다(상한 안이면 409 도 나지 않는다).
+  - **복원 호출은 영속적으로 보장한다.** 클레임에 "재고 복원 대기" 표시를 두고 200 을 받으면 지운다. 실패(타임아웃 · 서킷 오픈 · 재시도 대상 409 상한 초과)하면
+    스케줄러가 **같은 claimId · 같은 본문**으로 다시 보낸다 — `payment-guide.md` §6 의 재전송 패턴과 같다. 종결 409 는 어드민에 노출한다.
+  - **복원을 부른 클레임은 철회하지 않는다.** 환불이 실패(`REFUND_FAILED`)해도 환불만 재시도한다 — 재고를 다시 빼는(복원을 되돌리는) API 는 없다.
 - **409 를 같은 트랜잭션 안에서 잡고 계속하지 않는다.** product-service 안에서도 어댑터가 409 로 바꾼 시점에는 flush 가 이미 실패해 트랜잭션이 rollback-only 다 —
   잡고 계속하면 커밋에서 실패한다. order-service 도 Feign 409 를 받은 트랜잭션에서 주문 상태를 바꾸고 재시도까지 하지 말고, 재시도는 새 트랜잭션에서 한다.
 - **확정 · 해제 · 복원은 `reservationId` 로 대상 선점을 식별한다** — 서비스 토큰(`SERVICE_order-service`)을 가진 호출자를 신뢰한다는 전제다. order-service 는 자기 주문의
   `reservationId` 만 저장 · 사용한다.
-- **오류 메시지를 고객 응답에 그대로 넘기지 않는다.** `PRODUCT_021` · `PRODUCT_022` 메시지에는 SKU 아이디 목록이 실린다 — order-service 는 자기 오류 코드
+- **오류 메시지를 고객 응답에 그대로 넘기지 않는다.** `PRODUCT_021` · `PRODUCT_022` · `PRODUCT_028` 메시지에는 SKU 아이디 목록이 실린다 — order-service 는 자기 오류 코드
   (예: `ORDER_*`)와 고객용 문구로 바꾸고, 필요한 SKU 정보는 자기 주문 항목에서 골라 보여 준다.
 
 ## 4. 배송
@@ -323,6 +334,9 @@ RESERVED ──확정──▶ CONFIRMED
 - 환불 실행이 실패하면 클레임은 `REFUND_FAILED` 로 남기고 어드민에 노출한다. 조용히 완료 처리하지 않는다.
 - **재고 복원은 클레임당 한 번이다** — `claimId` 가 product-service 복원 API 의 멱등 키다(§3-2 "결제 후 복원"). 결제 후 취소는 취소 확정 때,
   반품은 검수 뒤 어드민이 재고로 되돌림을 고른 경우만 부른다. 확정 수량을 넘는 복원은 product-service 가 409 로 거절한다.
+  - 결제 후 취소는 경로(고객 · 어드민 · PG 웹훅 / 콘솔 취소 · 자동 전액 취소)와 상관없이 **클레임 행을 먼저 만들고** 그 아이디로 복원한다. 재시도마다 새 아이디를 만들지 않는다.
+  - 클레임에 **"재고 복원 대기"** 를 두고, 복원이 실패하면 스케줄러가 같은 claimId · 같은 본문으로 다시 보낸다 (`payment-guide.md` §6 재전송과 같은 패턴).
+  - 복원을 부른 클레임은 **철회하지 않는다** — `REFUND_FAILED` 면 환불만 재시도한다. 복원을 되돌리는 API 는 없다. 상세는 §3-4.
 - 교환은 v1 에서 "반품 + 재주문" 으로 운영하고, 전용 흐름은 필요해질 때 만든다.
 
 ## 6. 어드민 운영 화면이 보는 것
