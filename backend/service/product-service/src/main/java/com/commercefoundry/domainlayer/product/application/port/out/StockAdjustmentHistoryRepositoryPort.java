@@ -12,8 +12,9 @@ public interface StockAdjustmentHistoryRepositoryPort {
     void append(StockAdjustmentHistory history);
 
     /**
-     * SKU 하나의 조정 이력을 아이디(Snowflake — 시각 순) 내림차순, 곧 최신순으로 한 페이지 읽는다. 목록 1번 + 전체 건수 1번이고
-     * 둘 다 {@code idx_stock_adjustment_history_sku_id_id} 를 탄다. 마지막 페이지를 넘긴 요청은 빈 목록이고 전체 건수는 그대로다.
+     * SKU 하나의 조정 이력을 아이디(Snowflake — 시각 순) 내림차순, 곧 최신순으로 한 페이지 읽는다. 목록 1번에
+     * 전체 건수는 필요할 때만 1번이다 — Spring Data 는 첫 페이지가 size 보다 짧으면 count 를 생략한다. 둘 다 {@code idx_stock_adjustment_history_sku_id_id} 를 탄다.
+     * 마지막 페이지를 넘긴 요청은 빈 목록이고 전체 건수는 그대로다.
      *
      * @param page 0 부터 센다
      */

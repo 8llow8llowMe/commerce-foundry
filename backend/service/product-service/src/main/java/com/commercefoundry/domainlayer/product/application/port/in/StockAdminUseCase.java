@@ -11,6 +11,7 @@ public interface StockAdminUseCase {
 
     /**
      * SKU 재고 목록. 요청 순서(중복 제거 후)이고 없는 SKU 는 빠진다. 재고 행이 없는 SKU 는 품절(관리 true · 수량 0 · 수정 시각 null)이다.
+     * 그 선점 수량은 재고 행이 없으면 차감 선점이 생길 수 없어 정상이면 0 이다 (읽은 값을 그대로 낸다).
      */
     StockAdminListResponse getStocks(List<Long> skuIds);
 

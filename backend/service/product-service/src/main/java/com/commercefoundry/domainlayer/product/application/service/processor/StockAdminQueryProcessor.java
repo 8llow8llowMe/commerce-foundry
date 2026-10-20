@@ -28,7 +28,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>재고 목록의 쿼리는 SKU 존재 확인 → 재고 행 → 선점 수량 합 3번이고 모두 SKU 묶음 in 절이다 — SKU 수와 무관하다.
  *
- * <p><b>재고 행이 없는 SKU 는 품절(관리 true · 수량 0 · 선점 0, 수정 시각 null)로 낸다</b> ({@link StockSnapshot#empty()}).
+ * <p><b>재고 행이 없는 SKU 는 품절(관리 true · 수량 0, 수정 시각 null)로 낸다</b> ({@link StockSnapshot#empty()}). 선점 수량은 재고 행이 없으면
+ * 차감 선점이 생길 수 없어 정상이면 0 이다 (읽은 값을 그대로 낸다).
  * 어드민 조정(PATCH)이 행 없는 SKU 의 기대 수량으로 0 을 요구하므로, 화면은 조회한 {@code availableQuantity} 를 그대로 {@code expectedQuantity} 로 보내면 된다.
  */
 @Component

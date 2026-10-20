@@ -25,7 +25,8 @@ public record StockAdminResponse(
     long availableQuantity,
 
     @Schema(
-        description = "결제를 기다리는 선점(RESERVED)이 차감해 둔 수량 합. 결제되면 판매로 확정되고, 만료 · 취소되면 availableQuantity 로 돌아온다",
+        description = "결제를 기다리는 선점(RESERVED)이 차감해 둔 수량 합. 결제되면 판매로 확정되고, 만료 · 취소되면 availableQuantity 로 돌아온다. "
+            + "재고를 등록하지 않은 SKU 는 차감 선점이 생길 수 없어 정상이면 0 이다 (읽은 값을 그대로 낸다)",
         example = "3"
     )
     long reservedQuantity,
