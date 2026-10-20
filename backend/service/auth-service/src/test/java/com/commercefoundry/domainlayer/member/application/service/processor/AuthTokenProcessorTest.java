@@ -32,12 +32,15 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 /**
  * 발급기 · 지문 생성기는 실제 것(테스트 키 · 고정 시계)을 쓰고 저장소 포트만 mock 이다.
@@ -145,6 +148,23 @@ class AuthTokenProcessorTest {
 
         assertError(() -> processor.reissue(session, CUSTOMER), MemberErrorCode.REFRESH_TOKEN_INVALID);
         verify(store, times(1)).rotate(eq(session), anyString(), eq(TestTokens.NOW), eq(POLICY));
+        verify(store, never()).revokeFamily(anyString());
+        verifyNoInteractions(revocation);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("family 값 손상이면 401 · AUTH_011 이고 warn 한 줄을 남긴다 — memberId · familyId 만, 토큰 지문은 없다. family 폐기는 저장소 스크립트가 이미 했다")
+    void familyCorrupted(CapturedOutput output) {
+        RefreshTokenSession session = session();
+        given(store.rotate(eq(session), anyString(), eq(TestTokens.NOW), eq(POLICY))).willReturn(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_CORRUPTED));
+
+        assertError(() -> processor.reissue(session, CUSTOMER), MemberErrorCode.REFRESH_TOKEN_INVALID);
+
+        assertThat(output.getOut().lines().filter(line -> line.contains("refresh token family value is corrupted")))
+            .singleElement().asString()
+            .contains("WARN", "memberId=" + session.memberId(), "familyId=" + session.familyId())
+            .doesNotContain("fingerprint", session.fingerprint().substring(0, 8));
         verify(store, never()).revokeFamily(anyString());
         verifyNoInteractions(revocation);
     }

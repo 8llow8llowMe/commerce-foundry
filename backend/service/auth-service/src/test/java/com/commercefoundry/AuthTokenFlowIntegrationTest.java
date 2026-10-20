@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
+import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.support.AdjustableClock;
@@ -240,6 +241,19 @@ class AuthTokenFlowIntegrationTest {
         clock.advance(Duration.ofDays(4));
         assertRejected(reissue(third), HttpStatus.UNAUTHORIZED, "AUTH_011", "로그인이 만료되었습니다. 다시 로그인해 주세요.");
         assertRejected(reissue(third), HttpStatus.UNAUTHORIZED, "AUTH_011");
+    }
+
+    @Test
+    @DisplayName("family 의 로그인 시각이 먼 미래로 손상됐으면 상한이 사라지지 않게 재발급이 401 · AUTH_011 이고 그 로그인이 끝난다")
+    void corruptedFutureLoginAtEndsLogin() {
+        String email = uniqueEmail();
+        signUp(email);
+        String refreshToken = JsonPath.read(body(login(email, PASSWORD)), "$.dataBody.refreshToken");
+        String familyId = store.findSession(new OpaqueTokenGenerator().fingerprint(refreshToken)).orElseThrow().familyId();
+        store.corruptFamilyValue(familyId, String.valueOf(clock.instant().plus(Duration.ofDays(365)).toEpochMilli()));
+
+        assertRejected(reissue(refreshToken), HttpStatus.UNAUTHORIZED, "AUTH_011", "로그인이 만료되었습니다. 다시 로그인해 주세요.");
+        assertThat(store.familyAlive(familyId)).isFalse();
     }
 
     @Test

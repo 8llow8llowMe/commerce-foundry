@@ -55,10 +55,17 @@ class AuthTokenBeansConfigTest {
                 .hasMessageContaining("security.jwt.issuance.refresh-token-ttl"));
     }
 
+    @Test
+    @DisplayName("절대 수명이 상한 90일과 같으면 받는다")
+    void equalToUpperBound() {
+        runner.withPropertyValues("auth.token.refresh-family-max-lifetime=90d")
+            .run(context -> assertThat(context.getBean(RefreshTokenRotationPolicy.class).familyMaxLifetime()).isEqualTo(Duration.ofDays(90)));
+    }
+
     @ParameterizedTest
-    @ValueSource(strings = {"0s", "-1d"})
-    @DisplayName("절대 수명이 0 이하면 기동하지 않는다")
-    void notPositiveFailsStartup(String maxLifetime) {
+    @ValueSource(strings = {"0s", "-1d", "91d", "P90DT0.001S", "1000000000000d"})
+    @DisplayName("절대 수명이 0 이하 · 90일 초과(밀리초로 바꾸면 long 을 넘는 1조 일 포함)면 기동하지 않는다")
+    void outOfRangeFailsStartup(String maxLifetime) {
         runner.withPropertyValues("auth.token.refresh-family-max-lifetime=" + maxLifetime)
             .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                 .isInstanceOf(IllegalStateException.class)

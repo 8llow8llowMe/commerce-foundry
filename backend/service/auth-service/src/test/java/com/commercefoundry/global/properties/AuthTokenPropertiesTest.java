@@ -45,11 +45,25 @@ class AuthTokenPropertiesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"PT0S", "PT-1S"})
-    @DisplayName("family 절대 수명이 0 이하 · null 이면 기동하지 않는다")
+    @ValueSource(strings = {"PT0.001S", "P30D", "P90D"})
+    @DisplayName("family 절대 수명은 0 보다 크고 90일 이하면 받는다")
+    void familyMaxLifetimeAccepted(String maxLifetime) {
+        assertThat(new AuthTokenProperties(Duration.ofSeconds(30), 3, Duration.parse(maxLifetime)).refreshFamilyMaxLifetime()).isEqualTo(Duration.parse(maxLifetime));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PT0S", "PT-1S", "P90DT0.001S", "P91D"})
+    @DisplayName("family 절대 수명이 0 이하 · 90일 초과 · null 이면 기동하지 않는다")
     void familyMaxLifetimeRejected(String maxLifetime) {
         assertThatThrownBy(() -> new AuthTokenProperties(Duration.ofSeconds(30), 3, Duration.parse(maxLifetime))).isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("auth.token.refresh-family-max-lifetime");
         assertThatThrownBy(() -> new AuthTokenProperties(Duration.ofSeconds(30), 3, null)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("밀리초로 바꾸면 넘치는 값(Duration.toMillis 오버플로)도 재발급 500 이 아니라 기동 실패다")
+    void millisOverflowRejectedAtStartup() {
+        assertThatThrownBy(() -> new AuthTokenProperties(Duration.ofSeconds(30), 3, Duration.ofSeconds(Long.MAX_VALUE))).isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("auth.token.refresh-family-max-lifetime");
     }
 }

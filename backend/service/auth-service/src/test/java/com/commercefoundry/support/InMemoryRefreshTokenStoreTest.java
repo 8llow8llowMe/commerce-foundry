@@ -8,9 +8,11 @@ import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationR
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -91,25 +93,86 @@ class InMemoryRefreshTokenStoreTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"nan", "inf", "0x10", "1e3", "-1", ""})
-    @DisplayName("family 값이 정수 문자열이 아니면(nan 등) family 를 지우고 INVALID 다")
-    void nonIntegerFamilyValueIsInvalid(String value) {
+    @DisplayName("family 값이 정수 문자열이 아니면(nan 등) family 를 지우고 FAMILY_CORRUPTED 다")
+    void nonIntegerFamilyValueIsCorrupted(String value) {
         RefreshTokenSession session = login("j" + value);
         store.corruptFamilyValue(session.familyId(), value);
 
-        assertThat(store.rotate(session, "j-next" + value, NOW, POLICY)).isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.INVALID));
+        assertThat(store.rotate(session, "j-next" + value, NOW, POLICY)).isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_CORRUPTED));
+        assertThat(store.familyAlive(session.familyId())).isFalse();
+        assertThat(store.findSession("j-next" + value)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @MethodSource("hugeDigitValues")
+    @DisplayName("숫자만으로 된 family 값이라도 무한대로 읽히거나(309자리) long 을 넘으면 예외 없이 FAMILY_CORRUPTED 다 — Lua tonumber 와 같은 결과")
+    void hugeDigitFamilyValueIsCorrupted(String value) {
+        RefreshTokenSession session = login("big" + value.length());
+        store.corruptFamilyValue(session.familyId(), value);
+
+        assertThat(store.rotate(session, "big-next" + value.length(), NOW, POLICY))
+            .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_CORRUPTED));
+        assertThat(store.familyAlive(session.familyId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("로그인 시각이 지금 + 허용 시계 오차(60초)와 같으면 받아 경과 0 으로 TTL 그대로 회전하고, 1ms 넘으면 FAMILY_CORRUPTED 다")
+    void futureLoginAtBoundary() {
+        RefreshTokenSession onBoundary = login("fut1");
+        assertThat(store.rotate(onBoundary, "fut1-next", NOW.minus(RefreshTokenRotationPolicy.CLOCK_SKEW), POLICY))
+            .isEqualTo(new RefreshTokenRotationResult(RefreshTokenRotation.ROTATED, TTL));
+
+        RefreshTokenSession pastBoundary = login("fut2");
+        assertThat(store.rotate(pastBoundary, "fut2-next", NOW.minus(RefreshTokenRotationPolicy.CLOCK_SKEW).minusMillis(1), POLICY))
+            .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_CORRUPTED));
+        assertThat(store.familyAlive(pastBoundary.familyId())).isFalse();
+        assertThat(store.findSession("fut2-next")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("#4 의 옛 family 값 \"1\" 은 1970년 로그인으로 읽혀 FAMILY_EXPIRED 이고 family 를 지운다")
+    void legacyFamilyValueExpires() {
+        RefreshTokenSession session = login("legacy");
+        store.corruptFamilyValue(session.familyId(), "1");
+
+        assertThat(store.rotate(session, "legacy-next", NOW, POLICY)).isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_EXPIRED));
+        assertThat(store.familyAlive(session.familyId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("family 값이 손상됐으면 이미 회전한 토큰이 유예 밖에 와도 재사용(REUSE_DETECTED)보다 FAMILY_CORRUPTED 가 먼저다")
+    void corruptedFamilyBeforeReuseCheck() {
+        RefreshTokenSession session = rotated("cr");
+        store.corruptFamilyValue(session.familyId(), "nan");
+
+        assertThat(store.rotate(session, "cr-again", NOW.plus(GRACE).plusSeconds(1), POLICY))
+            .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_CORRUPTED));
         assertThat(store.familyAlive(session.familyId())).isFalse();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"nan", "inf", "0x10", "1e3"})
-    @DisplayName("rotatedAt 이 정수 문자열이 아니면(nan 등) 재사용으로 보고 family 를 지운다")
-    void nonIntegerRotatedAtIsReuse(String value) {
+    @MethodSource("corruptRotatedAtValues")
+    @DisplayName("rotatedAt 이 정수 문자열이 아니거나 · 무한대 · long 을 넘는 숫자열이면 재사용으로 보고 family 를 지운다")
+    void corruptRotatedAtIsReuse(String value) {
         RefreshTokenSession session = rotated("k" + value);
         store.corruptRotatedAt(session.fingerprint(), value);
 
         assertThat(store.rotate(session, "k-sibling" + value, NOW, POLICY))
             .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED));
         assertThat(store.familyAlive(session.familyId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("rotatedAt 이 지금 + 허용 시계 오차(60초)와 같으면 유예 안 형제 발급이고, 1ms 넘으면 재사용으로 보고 family 를 지운다")
+    void futureRotatedAtBoundary() {
+        RefreshTokenSession onBoundary = rotated("rf1");
+        store.corruptRotatedAt(onBoundary.fingerprint(), String.valueOf(NOW.plus(RefreshTokenRotationPolicy.CLOCK_SKEW).toEpochMilli()));
+        assertThat(store.rotate(onBoundary, "rf1-sibling", NOW, POLICY).rotation()).isEqualTo(RefreshTokenRotation.REISSUED_IN_GRACE);
+
+        RefreshTokenSession pastBoundary = rotated("rf2");
+        store.corruptRotatedAt(pastBoundary.fingerprint(), String.valueOf(NOW.plus(RefreshTokenRotationPolicy.CLOCK_SKEW).plusMillis(1).toEpochMilli()));
+        assertThat(store.rotate(pastBoundary, "rf2-sibling", NOW, POLICY)).isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED));
+        assertThat(store.familyAlive(pastBoundary.familyId())).isFalse();
     }
 
     @Test
@@ -144,5 +207,17 @@ class InMemoryRefreshTokenStoreTest {
         RefreshTokenSession session = login(name);
         assertThat(store.rotate(session, name + "-next", NOW, POLICY).rotation()).isEqualTo(RefreshTokenRotation.ROTATED);
         return session;
+    }
+
+    /**
+     * 숫자만으로 된 큰 값 — 309자리 9(10^309 − 1)는 double 최대(약 1.8 × 10^308)를 넘어 Lua {@code tonumber} 가 무한대로 읽는다.
+     * 20자리는 long 최대(19자리)를 넘지만 double 로는 유한하고 지금 + 허용 오차보다 미래다.
+     */
+    static Stream<String> hugeDigitValues() {
+        return Stream.of("9".repeat(309), "1" + "0".repeat(19));
+    }
+
+    static Stream<String> corruptRotatedAtValues() {
+        return Stream.concat(Stream.of("nan", "inf", "0x10", "1e3"), hugeDigitValues());
     }
 }

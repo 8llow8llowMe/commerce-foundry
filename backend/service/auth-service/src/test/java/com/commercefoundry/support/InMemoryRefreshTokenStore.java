@@ -18,7 +18,8 @@ import java.util.regex.Pattern;
 
 /**
  * 컨텍스트 흐름 테스트용 토큰 저장소(refresh 토큰 + 로그아웃 차단 목록). Lua 스크립트({@code RefreshTokenRedisScripts#ROTATE})와 같은 판정을 메모리로 흉내 낸다 —
- * 저장값은 정수 문자열만(아니면 family 값은 INVALID, rotatedAt 은 재사용 감지) · 절대 수명(남은 시간 1초 미만이면 만료, 경과 음수는 0) ·유예 경계(지금 − rotatedAt ≤ 유예, 음수는 0) · 형제 상한(넘으면 재사용 감지) ·
+ * 저장된 시각은 정수 문자열 · 유한 · 지금 + 허용 시계 오차 이하만(아니면 family 값은 FAMILY_CORRUPTED, rotatedAt 은 재사용 감지) ·
+ * 절대 수명(남은 시간 1초 미만이면 만료, 경과 음수는 0) · 유예 경계(지금 − rotatedAt ≤ 유예, 음수는 0) · 형제 상한(넘으면 재사용 감지) ·
  * 새 TTL {@code min(TTL, 상한 − 경과)} 모두 같다({@code InMemoryRefreshTokenStoreTest} 가 고정한다).
  * TTL 은 기록만 하고 만료시키지 않는다. 실제 Lua · 키 · TTL 은 {@code RefreshTokenRedisAdapterTest}(Testcontainers)가 본다.
  *
@@ -34,7 +35,7 @@ public class InMemoryRefreshTokenStore implements RefreshTokenStorePort, AccessT
     private record StoredFamily(String loginAt, Duration ttl) {
     }
 
-    /** Lua {@code string.match(v, '^%d+$')} 와 같다 — {@code "nan"} · {@code "1e3"} · {@code "0x10"} 은 받지 않는다. */
+    /** Lua {@code string.match(v, '^%d+$')} 와 같다 — {@code "nan"} · {@code "1e3"} · {@code "0x10"} 은 받지 않는다. Java 정규식의 숫자 클래스는 ASCII 숫자만이다. */
     private static final Pattern EPOCH_MILLIS = Pattern.compile("\\d+");
 
     private final Map<String, StoredToken> tokens = new ConcurrentHashMap<>();
@@ -68,11 +69,13 @@ public class InMemoryRefreshTokenStore implements RefreshTokenStorePort, AccessT
         if (token == null || token.memberId() != session.memberId() || !token.familyId().equals(session.familyId()) || family == null) {
             return RefreshTokenRotationResult.rejected(RefreshTokenRotation.INVALID);
         }
-        if (!EPOCH_MILLIS.matcher(family.loginAt()).matches()) {
+        long latest = now.toEpochMilli() + RefreshTokenRotationPolicy.CLOCK_SKEW.toMillis();
+        Long loginAt = epochMillis(family.loginAt(), latest);
+        if (loginAt == null) {
             families.remove(session.familyId());
-            return RefreshTokenRotationResult.rejected(RefreshTokenRotation.INVALID);
+            return RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_CORRUPTED);
         }
-        long age = Math.max(0, now.toEpochMilli() - Long.parseLong(family.loginAt()));
+        long age = Math.max(0, now.toEpochMilli() - loginAt);
         long remaining = policy.familyMaxLifetime().toMillis() - age;
         if (remaining < RefreshTokenRotationPolicy.MIN_REMAINING_LIFETIME.toMillis()) {
             families.remove(session.familyId());
@@ -81,11 +84,12 @@ public class InMemoryRefreshTokenStore implements RefreshTokenStorePort, AccessT
         Duration ttl = Duration.ofMillis(Math.min(policy.ttl().toMillis(), remaining));
         RefreshTokenRotation result = RefreshTokenRotation.ROTATED;
         if (token.rotatedAt() != null) {
-            if (!EPOCH_MILLIS.matcher(token.rotatedAt()).matches()) {
+            Long rotatedAt = epochMillis(token.rotatedAt(), latest);
+            if (rotatedAt == null) {
                 families.remove(session.familyId());
                 return RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED);
             }
-            long elapsed = Math.max(0, now.toEpochMilli() - Long.parseLong(token.rotatedAt()));
+            long elapsed = Math.max(0, now.toEpochMilli() - rotatedAt);
             if (elapsed > policy.reuseGrace().toMillis()) {
                 families.remove(session.familyId());
                 return RefreshTokenRotationResult.rejected(RefreshTokenRotation.REUSE_DETECTED);
@@ -131,7 +135,7 @@ public class InMemoryRefreshTokenStore implements RefreshTokenStorePort, AccessT
         return family == null ? null : Instant.ofEpochMilli(Long.parseLong(family.loginAt()));
     }
 
-    /** family 값을 손상시킨다 — Redis 에 정수가 아닌 값이 들어간 경우를 흉내 낸다. */
+    /** family 값을 손상시킨다 — Redis 에 정수가 아닌 값 · 먼 미래 값이 들어간 경우를 흉내 낸다. */
     public void corruptFamilyValue(String familyId, String value) {
         families.computeIfPresent(familyId, (id, family) -> new StoredFamily(value, family.ttl()));
     }
@@ -145,6 +149,21 @@ public class InMemoryRefreshTokenStore implements RefreshTokenStorePort, AccessT
     public Duration familyTtl(String familyId) {
         StoredFamily family = families.get(familyId);
         return family == null ? null : family.ttl();
+    }
+
+    /**
+     * Lua {@code epochMillis} 와 같다 — 정수 문자열이 아니거나 · {@code tonumber} 가 무한대로 읽거나(309자리 이상) · {@code latest} 보다 크면 null.
+     * Lua 처럼 double 로 읽는다 — {@code Long.parseLong} 은 19자리를 넘으면 예외라 Lua 와 결과가 갈린다. 통과한 값은 {@code latest} 이하라 long 에 정확히 들어간다.
+     */
+    private static Long epochMillis(String value, long latest) {
+        if (!EPOCH_MILLIS.matcher(value).matches()) {
+            return null;
+        }
+        double millis = Double.parseDouble(value);
+        if (Double.isInfinite(millis) || millis > latest) {
+            return null;
+        }
+        return (long) millis;
     }
 
     private void failIfUnavailable() {
