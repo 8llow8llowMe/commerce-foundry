@@ -8,8 +8,9 @@ import reactor.core.publisher.Mono;
 
 /**
  * Spring Cloud Gateway 의 {@link RedisRateLimiter}(토큰 버킷 Lua 스크립트)로 센다. 키는 프레임워크가 정한다 —
- * {@code request_rate_limiter.{<policy>:member:<memberId>}.tokens} · {@code .timestamp}, TTL 은 스크립트가 버킷이 다시 찰 시간만큼 건다
- * ({@code coding-conventions.md} §9-7 예외 표). 키에는 내부 회원 id 만 들어간다 — 이메일 · IP 같은 개인정보는 넣지 않는다.
+ * {@code request_rate_limiter.{<routeId>.<id>}.tokens} · {@code .timestamp} 이고, routeId 에 정책 id · id 에 {@link #bucketId} 를 넣으므로
+ * {@code request_rate_limiter.{<policy>.<policy>:member:<memberId>}.tokens} 가 된다.
+ * TTL 은 스크립트가 버킷이 다시 찰 시간의 두 배로 건다 ({@code coding-conventions.md} §9-7 예외 표). 키에는 내부 회원 id 만 들어간다 — 이메일 · IP 같은 개인정보는 넣지 않는다.
  *
  * <p>정책별 한도는 기동 때 {@link RedisRateLimiter#getConfig()} 에 정책 id 로 넣는다. 프레임워크의 라우트 필터 설정과 같은 표를 쓰지만,
  * 이 게이트웨이는 {@code RequestRateLimiter} 라우트 필터를 쓰지 않아 겹치지 않는다.
@@ -56,7 +57,7 @@ public class RedisMemberRateLimiter implements MemberRateLimiter {
         }
     }
 
-    /** 정책마다 버킷을 나눈다 — 프레임워크 키에는 라우트 id 가 들어가지 않고 이 값만 들어간다. */
+    /** 정책마다 버킷을 나눈다 — 프레임워크 키의 라우트 id 자리에도 정책 id 가 들어가 겹치지만, 이 값만으로도 정책이 갈린다. */
     static String bucketId(RateLimitPolicy policy, long memberId) {
         return policy.getId() + ":member:" + memberId;
     }

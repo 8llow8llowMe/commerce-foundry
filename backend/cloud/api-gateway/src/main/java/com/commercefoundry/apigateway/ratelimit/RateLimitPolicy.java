@@ -24,7 +24,7 @@ public enum RateLimitPolicy {
     CART_WRITE("cart-write", "/api/v1/carts/**", WriteMethods.ALL, GatewayRateLimitProperties::cartWrite),
     ORDER_WRITE("order-write", "/api/v1/orders/**", WriteMethods.ALL, GatewayRateLimitProperties::orderWrite);
 
-    /** Redis 키의 일부다 ({@code request_rate_limiter.{<id>:member:<memberId>}.tokens}). 바꾸면 진행 중인 버킷이 새로 시작된다. */
+    /** Redis 키의 일부다 ({@code request_rate_limiter.{<id>.<id>:member:<memberId>}.tokens}). 바꾸면 진행 중인 버킷이 새로 시작된다. */
     private final String id;
     private final PathPattern pathPattern;
     private final Set<HttpMethod> methods;
