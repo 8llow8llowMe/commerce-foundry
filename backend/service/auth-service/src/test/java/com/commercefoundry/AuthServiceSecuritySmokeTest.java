@@ -70,6 +70,15 @@ class AuthServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
         assertWwwAuthenticate(response, "Bearer");
     }
 
+    @Test
+    @DisplayName("배송지 목록은 토큰 없으면 401 · SECURITY_001 · WWW-Authenticate: Bearer 다 (isAuthenticated)")
+    void anonymousGetShippingAddresses() throws Exception {
+        MockHttpServletResponse response = perform(get(ME + "/shipping-addresses"));
+
+        assertEnvelope(response, SecurityErrorCode.UNAUTHORIZED);
+        assertWwwAuthenticate(response, "Bearer");
+    }
+
     /**
      * 본문은 올바른 값으로 보낸다 — {@code @Valid @RequestBody} 는 인자를 만들 때 돌아 {@code @PreAuthorize}(메서드 호출 시점)보다 먼저다.
      * 익명이 틀린 본문을 보내면 400(AUTH_1xx)이 먼저 나온다 ({@code api-design-guide.md} §5).

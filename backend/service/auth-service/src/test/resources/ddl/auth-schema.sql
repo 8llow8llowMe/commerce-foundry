@@ -76,5 +76,78 @@
     comment on column auth.member_agreement.terms_version is
         '동의 당시 시행 중이던 약관 버전 (auth.agreement.versions.*)';
 
+    create table auth.shipping_address (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        address_line1 varchar(200) not null,
+        address_line2 varchar(200),
+        city varchar(100),
+        country_code varchar(2) not null,
+        default_member_id bigint,
+        label varchar(30),
+        member_id bigint not null,
+        postal_code varchar(20),
+        recipient_name varchar(50) not null,
+        recipient_phone varchar(20) not null,
+        state_province varchar(100),
+        version bigint not null,
+        primary key (id),
+        constraint uk_shipping_address_default_member_id unique (default_member_id),
+        constraint ck_shipping_address_country_code check (char_length(country_code) = 2 and country_code = upper(country_code)),
+        constraint ck_shipping_address_default_member_id check (default_member_id is null or default_member_id = member_id)
+    );
+
+    comment on table auth.shipping_address is
+        '회원 배송지 주소록';
+
+    comment on column auth.shipping_address.id is
+        '배송지 아이디 (Snowflake)';
+
+    comment on column auth.shipping_address.created_at is
+        '생성 시각';
+
+    comment on column auth.shipping_address.updated_at is
+        '수정 시각';
+
+    comment on column auth.shipping_address.address_line1 is
+        '주소 (국내 도로명 · 지번 주소, 해외 street address)';
+
+    comment on column auth.shipping_address.address_line2 is
+        '상세 주소 (동 · 호수 등). 없으면 null';
+
+    comment on column auth.shipping_address.city is
+        '도시 — 해외 주소는 필수, 국내는 없으면 null';
+
+    comment on column auth.shipping_address.country_code is
+        '국가 코드 (ISO 3166-1 alpha-2 대문자)';
+
+    comment on column auth.shipping_address.default_member_id is
+        '기본 배송지면 member_id 와 같은 값, 아니면 null — 회원당 기본 하나를 유니크 키로 강제한다 (FK: member.id)';
+
+    comment on column auth.shipping_address.label is
+        '배송지 별칭 (집 · 회사). 없으면 null';
+
+    comment on column auth.shipping_address.member_id is
+        '회원 아이디 (FK: member.id)';
+
+    comment on column auth.shipping_address.postal_code is
+        '우편번호 — KR 은 숫자 5자리 필수, 해외는 없으면 null';
+
+    comment on column auth.shipping_address.recipient_name is
+        '받는 사람 이름';
+
+    comment on column auth.shipping_address.recipient_phone is
+        '받는 사람 연락처 — 하이픈 · 공백을 뺀 값 (국내 숫자 · 해외 E.164)';
+
+    comment on column auth.shipping_address.state_province is
+        '주 · 도 (state / province). 없으면 null';
+
+    comment on column auth.shipping_address.version is
+        '낙관적 락 버전';
+
     create index idx_member_agreement_member_id_agreement_type 
        on auth.member_agreement (member_id, agreement_type);
+
+    create index idx_shipping_address_member_id 
+       on auth.shipping_address (member_id);
