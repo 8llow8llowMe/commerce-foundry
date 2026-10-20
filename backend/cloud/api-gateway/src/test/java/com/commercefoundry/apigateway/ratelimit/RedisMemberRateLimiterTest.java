@@ -70,13 +70,14 @@ class RedisMemberRateLimiterTest {
     }
 
     @Test
-    @DisplayName("키는 request_rate_limiter.{<policy>:member:<memberId>}.tokens 이고 TTL 이 걸린다 — 개인정보 원문이 없다")
+    @DisplayName("키는 request_rate_limiter.{<policy>.<policy>:member:<memberId>}.tokens 이고 TTL 이 걸린다 — 개인정보 원문이 없다")
     void keyFormatAndTtl() {
         long memberId = randomMemberId();
 
         rateLimiter.tryAcquire(RateLimitPolicy.ORDER_WRITE, memberId).block(TIMEOUT);
 
-        String key = "request_rate_limiter.{order-write:member:" + memberId + "}.tokens";
+        // 프레임워크 키는 {<routeId>.<id>} 다 — routeId 자리에 정책 id 가 한 번 더 들어간다
+        String key = "request_rate_limiter.{order-write.order-write:member:" + memberId + "}.tokens";
         assertThat(redisTemplate.hasKey(key).block(TIMEOUT)).isTrue();
         assertThat(redisTemplate.getExpire(key).block(TIMEOUT)).isPositive();
     }
