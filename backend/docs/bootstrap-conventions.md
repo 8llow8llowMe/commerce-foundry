@@ -171,6 +171,9 @@ class ProductPersistenceAdapterTest {
 - 컨테이너는 테스트 클래스마다 자기 `static` 필드로 둔다. 상위 클래스의 컨테이너를 여러 클래스가 상속해 쓰면 확장이 클래스마다
   컨테이너를 내렸다 다시 띄우는데, 캐시된 스프링 컨텍스트는 처음 포트를 들고 있어 연결이 끊길 수 있다.
 - 데이터는 엔티티 빌더 + 고정 아이디로 `TestEntityManager.persist` 하고 `flush` · `clear` 한 뒤 질의한다 — 1차 캐시가 아니라 DB 를 읽게.
+- **제약 위반은 테스트 하나에 하나만 낸다.** `@DataJpaTest` 는 테스트마다 한 트랜잭션이고, PostgreSQL 은 첫 오류 뒤 그 트랜잭션을 중단(aborted)한다.
+  같은 테스트에서 두 번째 위반을 기대하면 그 문장은 `current transaction is aborted` 로 실패하고, pgjdbc 가 첫 오류를 원인으로 이어 붙여
+  `rootCause()` 는 첫 위반을 가리킨다 — `clear()` 로는 풀리지 않는다. 기대하는 제약 이름은 `@DisplayName` 에 적는다.
 - Boot 4 · Testcontainers 2 패키지: `org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`,
   `org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase`, `org.springframework.boot.jpa.test.autoconfigure.TestEntityManager`,
   `org.springframework.boot.testcontainers.service.connection.ServiceConnection`, `org.testcontainers.postgresql.PostgreSQLContainer`
