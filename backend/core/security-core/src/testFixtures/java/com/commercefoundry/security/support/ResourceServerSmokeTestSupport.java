@@ -154,9 +154,14 @@ public abstract class ResourceServerSmokeTestSupport {
         assertEnvelope(perform(get(encoded).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
     }
 
+    /**
+     * 방화벽은 {@code sendError(400)} 만 한다. MockMvc 는 컨테이너의 {@code /error} 재전송을 하지 않아 여기서는 본문이 비어 있다 —
+     * 실제 서블릿 컨테이너에서는 {@code /error} 를 거쳐 {@code COMMON_004} 봉투가 나가고, 그 모양은 common-core 의
+     * {@code ErrorPageEnvelopeSmokeTestSupport}(RANDOM_PORT) 가 본다 ({@code security-guide.md} §5-1). 여기는 상태와 우회 차단만 본다.
+     */
     @ParameterizedTest
     @MethodSource("nonNormalizedAdminPaths")
-    @DisplayName("정규화되면 어드민 경로가 되는 원문 경로는 무토큰 · CUSTOMER 모두 방화벽이 400 으로 끊는다 — 봉투 없음")
+    @DisplayName("정규화되면 어드민 경로가 되는 원문 경로는 무토큰 · CUSTOMER 모두 방화벽이 400 으로 끊는다 — MockMvc 라 본문 없음(실제 컨테이너는 COMMON_004 봉투)")
     void nonNormalizedPathIsRejectedByFirewall(String path) throws Exception {
         MockHttpServletResponse anonymous = perform(get(URI.create(path)));
         MockHttpServletResponse customer = perform(get(URI.create(path)).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)));

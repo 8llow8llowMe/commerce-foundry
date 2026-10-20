@@ -240,7 +240,8 @@ class ResourceServerSecurityIntegrationTest {
 
     /**
      * 게이트웨이를 거치지 않고 서비스에 바로 닿아도, 정규화되면 어드민 경로가 되는 원문 경로로 URL 규칙을 우회하지 못한다.
-     * Spring Security 의 방화벽(StrictHttpFirewall)이 필터 체인 앞에서 400 으로 끊는다 — 봉투 없는 응답이고 컨트롤러는 돌지 않는다.
+     * Spring Security 의 방화벽(StrictHttpFirewall)이 필터 체인 앞에서 400 으로 끊고 컨트롤러는 돌지 않는다.
+     * MockMvc 라 본문은 비어 있다 — 실제 컨테이너에서는 {@code /error} 를 거쳐 {@code COMMON_004} 봉투다 ({@code security-guide.md} §5-1).
      */
     @ParameterizedTest
     @MethodSource("com.commercefoundry.security.support.ResourceServerSmokeTestSupport#nonNormalizedAdminPaths")
