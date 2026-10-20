@@ -46,18 +46,24 @@ final class RefreshTokenRedisScripts {
      *
      * <ul>
      *   <li>옛 토큰이 없거나 · memberId · familyId 가 읽은 값과 다르거나 · family 가 없다 → {@code INVALID} (아무것도 바꾸지 않는다)</li>
-     *   <li>family 값(로그인 시각)이 정수 문자열({@code ^%d+$})이 아니다 → family 삭제 → {@code INVALID}. 배포 전이라 옛 값 {@code "1"} 은 없지만
+     *   <li>family 값(로그인 시각)이 손상됐다 — 정수 문자열({@code ^%d+$})이 아니다 · 무한대로 읽힌다 · 지금 + 허용 시계 오차(60초)보다 미래다
+     *       → family 삭제 → {@code FAMILY_CORRUPTED}. 재사용 판정보다 먼저다. 배포 전이라 #4 의 옛 값 {@code "1"} 은 없지만
      *       남아 있다면 정수로 읽혀 1970년 로그인이 되고 바로 아래 분기에서 만료된다</li>
-     *   <li>절대 수명 − (지금 − 로그인 시각, 음수는 0 — 인스턴스 간 시계 차이) &lt; 1초 → family 삭제 → {@code FAMILY_EXPIRED}. 재사용 판정보다 먼저다.
+     *   <li>절대 수명 − (지금 − 로그인 시각, 음수는 0 — 허용 오차 안의 시계 차이) &lt; 1초 → family 삭제 → {@code FAMILY_EXPIRED}. 재사용 판정보다 먼저다.
      *       1초 미만은 응답 {@code refreshTokenExpiresIn}(초, 버림)이 0 이 되어 BFF 쿠키가 바로 지워지므로 회전하지 않는다
      *       ({@link com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy#MIN_REMAINING_LIFETIME})</li>
      *   <li>rotatedAt 이 없다 → rotatedAt=지금, 새 토큰 저장, family TTL 다시 걸기 → {@code ROTATED}. 옛 토큰의 TTL 은 그대로다</li>
      *   <li>rotatedAt 이 있고 지금 − rotatedAt ≤ 유예(음수는 0) → siblings 를 하나 올리고,
      *       상한 안이면 새 토큰(형제) 저장 · family TTL 다시 걸기, <b>rotatedAt 은 그대로</b> → {@code REISSUED_IN_GRACE}</li>
-     *   <li>유예 밖 · 형제 상한 초과 · rotatedAt 이 정수 문자열이 아니다 → family 삭제 → {@code REUSE_DETECTED}</li>
+     *   <li>유예 밖 · 형제 상한 초과 · rotatedAt 이 손상됐다(family 값과 같은 규칙) → family 삭제 → {@code REUSE_DETECTED}</li>
      * </ul>
      * 새 토큰 · family 의 TTL 은 {@code min(TTL, 절대 수명 − 경과)} 다. 남은 시간이 1초 미만인 경우는 만료 분기가 먼저 막는다.
-     * 저장값은 {@code tonumber} 만으로 받지 않는다 — strtod 라 {@code "nan"} · {@code "inf"} · {@code "0x10"} · {@code "1e3"} 도 숫자가 된다.
+     *
+     * <p>저장된 시각은 {@code epochMillis} 로만 읽는다. {@code tonumber} 만으로 받지 않는다 — strtod 라 {@code "nan"} · {@code "inf"} · {@code "0x10"} ·
+     * {@code "1e3"} 도 숫자가 된다. {@code ^%d+$} 가 막는 것은 이런 <b>문자</b>뿐이고, 숫자만으로 된 값도 309자리를 넘으면 {@code tonumber} 가
+     * 무한대({@code math.huge})로 읽는다 — 그래서 유한성을 따로 본다. 지금 + 허용 오차보다 미래인 값은 시계가 크게 앞선 인스턴스가 썼거나 손상된 값이라
+     * 받으면 경과가 0 으로 눌려 절대 수명 상한이 사라진다
+     * ({@link com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy#CLOCK_SKEW} 와 같은 {@code 60000}).
      * family 값은 PEXPIRE 만 하고 다시 쓰지 않는다 — 로그인 시각이 회전으로 밀리지 않게.
      * PEXPIRE 에는 TTL 을 정수 문자열로 넘긴다 — Lua 숫자(double)를 그대로 넘기면 Redis 판에 따라 지수 표기로 바뀔 수 있다.
      * HMGET 은 없는 필드를, GET 은 없는 키를 false 로 준다 — 문자열 ARGV 와 같을 수 없어 첫 줄이 없는 토큰 · family 까지 걸러 낸다.
@@ -65,17 +71,28 @@ final class RefreshTokenRedisScripts {
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
     static final RedisScript<List<Object>> ROTATE = (RedisScript) RedisScript.of("""
+        local function epochMillis(value, latest)
+          if not string.match(value, '^%d+$') then
+            return nil
+          end
+          local millis = tonumber(value)
+          if millis == math.huge or millis > latest then
+            return nil
+          end
+          return millis
+        end
         local stored = redis.call('HMGET', KEYS[1], 'memberId', 'familyId', 'rotatedAt')
         local family = redis.call('GET', KEYS[2])
         if stored[1] ~= ARGV[1] or stored[2] ~= ARGV[2] or not family then
           return {'INVALID', 0}
         end
-        if not string.match(family, '^%d+$') then
-          redis.call('DEL', KEYS[2])
-          return {'INVALID', 0}
-        end
-        local loginAt = tonumber(family)
         local now = tonumber(ARGV[3])
+        local latest = now + 60000
+        local loginAt = epochMillis(family, latest)
+        if not loginAt then
+          redis.call('DEL', KEYS[2])
+          return {'FAMILY_CORRUPTED', 0}
+        end
         local maxLifetime = tonumber(ARGV[7])
         local age = now - loginAt
         if age < 0 then
@@ -90,11 +107,11 @@ final class RefreshTokenRedisScripts {
         local ttlArg = string.format('%.0f', ttl)
         local result = 'ROTATED'
         if stored[3] then
-          if not string.match(stored[3], '^%d+$') then
+          local rotatedAt = epochMillis(stored[3], latest)
+          if not rotatedAt then
             redis.call('DEL', KEYS[2])
             return {'REUSE_DETECTED', 0}
           end
-          local rotatedAt = tonumber(stored[3])
           local elapsed = now - rotatedAt
           if elapsed < 0 then
             elapsed = 0

@@ -27,7 +27,8 @@ public interface RefreshTokenStorePort {
 
     /**
      * 읽은 세션을 원자적으로 다시 확인하고 회전한다. 성공(회전 · 유예 안 형제 발급)이면 새 토큰을 같은 family 로 저장하고 family TTL 도 다시 건다 —
-     * TTL 은 {@code min(정책 TTL, family 상한까지 남은 시간)} 이고 결과에 담는다. family 가 절대 수명을 다 썼거나 · 유예 밖 재사용 · 형제 상한 초과면 family 를 지운다.
+     * TTL 은 {@code min(정책 TTL, family 상한까지 남은 시간)} 이고 결과에 담는다. family 가 절대 수명을 다 썼거나 · family 값(로그인 시각)이 손상됐거나
+     * (지금 + {@link RefreshTokenRotationPolicy#CLOCK_SKEW} 보다 미래 포함) · 유예 밖 재사용 · 형제 상한 초과면 family 를 지운다.
      *
      * @param now 회전 시각 — 유예 · 절대 수명 판정의 기준이다
      */

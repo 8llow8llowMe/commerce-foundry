@@ -20,6 +20,14 @@ public record RefreshTokenRotationPolicy(Duration reuseGrace, int maxSiblings, D
      */
     public static final Duration MIN_REMAINING_LIFETIME = Duration.ofSeconds(1);
 
+    /**
+     * 저장된 시각(family 의 로그인 시각 · 토큰의 회전 시각)이 지금보다 미래여도 받아 주는 폭 (#143) — 인스턴스 간 시계 차이다. 이만큼까지는 경과를 0 으로 보고,
+     * 넘으면 손상으로 보고 거절한다(family 를 지운다). 받아 주면 시계가 크게 앞선 인스턴스가 쓴 값이나 먼 미래 값이 절대 수명 상한을 사실상 없앤다.
+     * access 토큰 만료 판정의 기본 시계 오차({@code security.jwt.clock-skew} 60초)와 같은 폭이다 — 같은 인스턴스들의 시계를 같은 크기로 본다.
+     * 상한을 늘려 주는 폭이 많아야 이만큼이라 절대 수명(일 단위)에 비해 무시할 만하다. 저장소(Lua {@code now + 60000})가 같은 값을 쓴다.
+     */
+    public static final Duration CLOCK_SKEW = Duration.ofSeconds(60);
+
     public RefreshTokenRotationPolicy {
         Objects.requireNonNull(reuseGrace, "reuseGrace");
         Objects.requireNonNull(ttl, "ttl");
