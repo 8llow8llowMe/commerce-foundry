@@ -19,6 +19,7 @@
   - `POST /api/v1/orders/{orderId}/cancellation` (주문 취소 요청 — 동사 대신 명사 리소스)
   - `PATCH /api/v1/admin/orders/{orderId}/status`
 - 컬렉션에 대한 계산·요약은 컬렉션 바로 아래 리터럴로 둔다: `POST /api/v1/orders/quotes` (주문서 금액 미리 계산).
+  계산 리터럴을 자주 부르는 화면이면 게이트웨이 요청 제한에서 그 리터럴을 쓰기 정책보다 앞에 따로 둔다 — 미리보기는 `order-quote`, 생성은 `order-write` (`security-guide.md` §7-3).
 
 ### 1-2. 서비스별 경로 소유
 
