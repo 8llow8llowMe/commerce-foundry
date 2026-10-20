@@ -75,18 +75,29 @@ class OrderServiceApplicationTests {
         assertThat(sessionFactory.getSessionFactoryOptions().inClauseParameterPaddingEnabled()).isTrue();
     }
 
-    /** 서킷 · 타임아웃은 yml 키 오타가 조용히 무시된다. 바인딩된 결과를 본다 ({@code coding-conventions.md} §10). */
-    @Test
-    @DisplayName("product-service 서킷은 4xx 를 실패로 세지 않고, Feign 기본 타임아웃은 60초 기본값이 아니다")
-    void internalClientResilience() {
-        CircuitBreakerConfig productService = applicationContext.getBean(CircuitBreakerRegistry.class).circuitBreaker("product-service").getCircuitBreakerConfig();
-        Request request = Request.create(Request.HttpMethod.GET, "http://product-service", Map.of(), null, StandardCharsets.UTF_8, null);
-        Response notFound = Response.builder().status(404).reason("x").request(request).headers(Map.of()).build();
+    /**
+     * 서킷은 yml 키 오타가 조용히 무시된다. 바인딩된 결과를 본다 ({@code coding-conventions.md} §10). 레지스트리는 선언되지 않은 이름도 기본 설정으로 만들어 주므로
+     * 인스턴스 선언은 프로퍼티로 따로 본다.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"product-service", "delivery-service"})
+    @DisplayName("서비스 간 서킷 인스턴스가 선언돼 있고 4xx 를 실패로 세지 않는다 — 업무 거절이 몰려도 서킷이 열리지 않는다")
+    void internalCircuitBreakers(String instance) {
+        assertThat(applicationContext.getEnvironment().getProperty("resilience4j.circuitbreaker.instances." + instance + ".base-config")).isEqualTo("default");
+
+        CircuitBreakerConfig config = applicationContext.getBean(CircuitBreakerRegistry.class).circuitBreaker(instance).getCircuitBreakerConfig();
+        Request request = Request.create(Request.HttpMethod.POST, "http://" + instance, Map.of(), null, StandardCharsets.UTF_8, null);
+        Response conflict = Response.builder().status(409).reason("x").request(request).headers(Map.of()).build();
         Response unavailable = Response.builder().status(503).reason("x").request(request).headers(Map.of()).build();
 
-        assertThat(productService.getIgnoreExceptionPredicate().test(FeignException.errorStatus("m", notFound))).isTrue();
-        assertThat(productService.getIgnoreExceptionPredicate().test(FeignException.errorStatus("m", unavailable))).isFalse();
+        assertThat(config.getIgnoreExceptionPredicate().test(FeignException.errorStatus("m", conflict))).isTrue();
+        assertThat(config.getIgnoreExceptionPredicate().test(FeignException.errorStatus("m", unavailable))).isFalse();
+    }
 
+    /** 타임아웃은 yml 키 오타가 조용히 무시된다. 바인딩된 결과를 본다 ({@code coding-conventions.md} §10). */
+    @Test
+    @DisplayName("Feign 기본 타임아웃은 60초 기본값이 아니고, 전역 인터셉터가 없다")
+    void feignDefaults() {
         FeignClientProperties.FeignClientConfiguration defaults = applicationContext.getBean(FeignClientProperties.class).getConfig().get("default");
         assertThat(defaults.getConnectTimeout()).isEqualTo(2_000);
         assertThat(defaults.getReadTimeout()).isEqualTo(3_000);

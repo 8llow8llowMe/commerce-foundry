@@ -48,12 +48,16 @@ resilience4j:
         wait-duration-in-open-state: 10s
         permitted-number-of-calls-in-half-open-state: 3
         automatic-transition-from-open-to-half-open-enabled: true
-        # 4xx 는 호출한 쪽(우리)의 요청 · 설정 문제다 — 대상 장애로 세지 않는다
+        # 4xx 는 호출한 쪽(우리)의 요청 · 설정 문제이거나 업무 거절(배송할 수 없는 국가 등)이다 — 대상 장애로 세지 않는다.
+        # 4xx 의 resultCode 해석은 support 가 서킷 밖에서 한다 (coding-conventions.md §10)
         ignore-exceptions:
           - feign.FeignException$FeignClientException
     instances:
-      # 장바구니 SKU 조회 (GET /internal/v1/skus)
+      # 장바구니 · 주문 SKU 조회 (GET /internal/v1/skus)
       product-service:
+        base-config: default
+      # 주문서 미리보기 · 주문 생성 배송비 견적 (POST /internal/v1/shipping-fees/quotes, #13)
+      delivery-service:
         base-config: default
 
 eureka:

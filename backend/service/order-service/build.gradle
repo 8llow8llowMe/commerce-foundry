@@ -11,7 +11,7 @@ dependencies {
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
     implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${rootProject.ext.springdocVersion}"
 
-    // product-service internal API 호출 (장바구니 SKU 조회, #12). 버전은 Spring Cloud BOM 이다.
+    // internal API 호출 — product-service SKU 조회(#12), delivery-service 배송비 견적(#13). 버전은 Spring Cloud BOM 이다.
     // security-core 는 Feign 을 compileOnly 로만 둔다 — Feign 클라이언트를 가진 서비스가 직접 선언한다 (security-guide.md §9-5)
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     // 서킷은 adapter/out/client/support 가 직접 감싼다 (coding-conventions.md §10) — spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다
