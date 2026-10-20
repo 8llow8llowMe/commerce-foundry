@@ -1,9 +1,11 @@
 package com.commercefoundry.domainlayer.member.adapter.out.persistence.repository;
 
 import com.commercefoundry.domainlayer.member.adapter.out.persistence.entity.MemberEntity;
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
@@ -13,6 +15,13 @@ public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
 
     /** 로그인. 이메일은 정규화한 값이고 {@code uk_member_email} 인덱스를 탄다. */
     Optional<MemberEntity> findByEmail(String email);
+
+    /**
+     * 회원 행을 쓰기 잠금으로 읽는다({@code select ... for update} 계열). 트랜잭션이 끝날 때까지 같은 회원의 다른 잠금은 기다린다 —
+     * 회원 단위로 줄을 세워야 하는 쓰기(배송지 개수 상한 · 기본 배송지 교체)가 쓴다. 버전은 올리지 않는다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<MemberEntity> findWithLockById(Long id);
 
     /**
      * 읽은 버전일 때만 버전을 하나 올린다 — 조건부 UPDATE 한 문장. 바뀐 행 수가 0 이면 다른 요청이 먼저 고쳤다.

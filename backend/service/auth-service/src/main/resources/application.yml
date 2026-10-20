@@ -101,6 +101,9 @@ auth:
     # 30일 — refresh TTL 14일의 약 두 배로, 자주 쓰는 사용자도 한 달에 한 번은 다시 로그인한다.
     # 0 이하 · 90일 초과(#143)이거나 security.jwt.issuance.refresh-token-ttl 보다 짧으면 기동하지 않는다(AuthTokenProperties · AuthTokenBeansConfig)
     refresh-family-max-lifetime: 30d
+  shipping-address:
+    # 회원당 배송지 수 상한 (1~100). 넘으면 409(AUTH_021). 목록은 페이지 없이 전체를 내므로 응답 크기의 상한이기도 하다
+    max-per-member: 20
 
 swagger:
   # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다

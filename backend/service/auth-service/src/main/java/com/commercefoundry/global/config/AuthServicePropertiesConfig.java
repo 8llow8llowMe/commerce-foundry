@@ -3,6 +3,7 @@ package com.commercefoundry.global.config;
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
 import com.commercefoundry.global.properties.AgreementProperties;
 import com.commercefoundry.global.properties.AuthTokenProperties;
+import com.commercefoundry.global.properties.ShippingAddressProperties;
 import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
 import com.commercefoundry.security.internal.InternalTokenPropertiesConfig;
 import com.commercefoundry.security.issuer.JwtIssuerPropertiesConfig;
@@ -19,7 +20,7 @@ import org.springframework.context.annotation.Import;
     SnowflakePropertiesConfig.class,
     SwaggerPropertiesConfig.class
 })
-@EnableConfigurationProperties({AgreementProperties.class, AuthTokenProperties.class})
+@EnableConfigurationProperties({AgreementProperties.class, AuthTokenProperties.class, ShippingAddressProperties.class})
 public class AuthServicePropertiesConfig {
 
 }

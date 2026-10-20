@@ -39,6 +39,11 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
         return memberRepository.findById(memberId).map(memberMapper::toDomain);
     }
 
+    @Override
+    public Optional<Member> findByIdForUpdate(long memberId) {
+        return memberRepository.findWithLockById(memberId).map(memberMapper::toDomain);
+    }
+
     /**
      * {@code saveAndFlush} 로 바로 내보낸다 — 커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 도메인 오류로 바꿀 자리가 없다.
      * 예외가 나면 트랜잭션은 롤백 전용이 되고, 여기서 던진 도메인 예외가 그대로 롤백시킨다.
