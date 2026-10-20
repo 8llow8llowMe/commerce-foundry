@@ -14,11 +14,15 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
- * auth-service 컨트롤러의 도메인 · 요청 검증 오류를 {@code Response.fail} 봉투로 바꾼다.
+ * 회원 도메인 오류와 <b>auth-service 전체</b>의 요청 검증 오류를 {@code Response.fail} 봉투로 바꾼다.
+ *
+ * <p>검증 예외(본문 · 파라미터 · 타입 불일치 · 필수 파라미터)는 컨텍스트(회원 · 배송지)와 무관하게 여기 하나가 받는다 — 검증 메시지가
+ * 코드({@code AUTH_1xx:...})를 싣고 오므로 컨텍스트를 몰라도 되고, 폴백 · 대역 끝 코드(AUTH_100 · 198 · 199)는 서비스 공용이다.
+ * 다른 컨텍스트의 advice({@code ShippingAddressExceptionHandler})는 자기 도메인 예외만 잡아 같은 예외를 두 advice 가 다투지 않는다.
  *
  * <p>{@code Exception} · {@code RuntimeException} 을 통째로 잡지 않는다 — {@code @PreAuthorize} 거부는 security-core 의
  * {@code SecurityExceptionAdvice}(가장 높은 우선순위)가 받는다 ({@code coding-conventions.md} §8-1, {@code security-guide.md} §5-2).
- * 이 advice 와 잡는 예외 타입이 겹치지 않아 {@code @Order} 를 두지 않는다. 서비스에 advice 가 하나 더 생기면 좁은 쪽에 {@code @Order} 를 단다.
+ * 이 advice 는 범위가 넓은 쪽이라 {@code @Order} 를 두지 않는다(가장 낮은 우선순위) — 좁은 advice 가 {@code @Order} 를 단다.
  */
 @RestControllerAdvice(basePackages = "com.commercefoundry.domainlayer")
 public class MemberExceptionHandler {

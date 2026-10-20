@@ -17,6 +17,13 @@ public interface MemberRepositoryPort {
     Optional<Member> findById(long memberId);
 
     /**
+     * 회원 행을 쓰기 잠금으로 읽는다. 트랜잭션 안에서 부르고, 잠금은 트랜잭션이 끝날 때 풀린다. 회원 버전은 올리지 않는다.
+     *
+     * @return 회원이 없으면 빈 값
+     */
+    Optional<Member> findByIdForUpdate(long memberId);
+
+    /**
      * 새 회원(버전 null)이면 넣고, 아니면 그 버전에 대한 수정으로 저장한다. 바로 flush 해 제약 위반 · 버전 충돌을 여기서 드러낸다.
      *
      * @throws MemberException {@code DUPLICATE_EMAIL} — 이메일 유니크 키 위반(동시 가입). {@code MEMBER_UPDATE_CONFLICT} — 다른 요청이 먼저 고쳤다
