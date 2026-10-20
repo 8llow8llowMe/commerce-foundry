@@ -45,6 +45,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 /**
  * 해외 배송비 정책 영속성 어댑터를 실제 PostgreSQL 에 질의해 본다 — 파생 쿼리 · {@code in} 조회 · 서브쿼리 벌크 DELETE · 조건부 UPDATE 는
  * 컴파일로 검증되지 않는다 ({@code coding-conventions.md} §9-5). 구성은 국내 {@link ShippingPolicyRepositoryAdapterTest} 와 같다.
+ *
+ * <p>제약 위반은 테스트 하나에 하나만 낸다 — 테스트마다 한 트랜잭션이고 PostgreSQL 은 첫 위반 뒤 그 트랜잭션을 중단한다
+ * ({@code bootstrap-conventions.md} 리포지토리 테스트).
  */
 @DataJpaTest
 @Testcontainers
@@ -170,27 +173,35 @@ class InternationalShippingPolicyRepositoryAdapterTest {
     }
 
     @Test
-    @DisplayName("제약: KR · 소문자 국가 코드는 저장되지 않는다")
-    void countryCodeChecks() {
+    @DisplayName("제약: KR 은 해외 그룹 국가로 저장되지 않는다 (ck_shipping_zone_country_country_code_not_domestic)")
+    void domesticCountryCodeIsRejected() {
         assertThatThrownBy(() -> entityManager.persistAndFlush(
             ShippingZoneCountryEntity.builder().id(1L).shippingPolicyId(INTERNATIONAL_POLICY_ID).shippingZoneId(10L).countryCode("KR").build()))
             .rootCause()
             .hasMessageContaining("ck_shipping_zone_country_country_code_not_domestic");
-        entityManager.clear();
+    }
+
+    @Test
+    @DisplayName("제약: 소문자 국가 코드는 저장되지 않는다 (ck_shipping_zone_country_country_code_format)")
+    void lowercaseCountryCodeIsRejected() {
         assertThatThrownBy(() -> entityManager.persistAndFlush(
-            ShippingZoneCountryEntity.builder().id(2L).shippingPolicyId(INTERNATIONAL_POLICY_ID).shippingZoneId(10L).countryCode("jp").build()))
+            ShippingZoneCountryEntity.builder().id(1L).shippingPolicyId(INTERNATIONAL_POLICY_ID).shippingZoneId(10L).countryCode("jp").build()))
             .rootCause()
             .hasMessageContaining("ck_shipping_zone_country_country_code_format");
     }
 
     @Test
-    @DisplayName("제약: 상한 0g 구간 · 한 그룹의 같은 상한은 저장되지 않는다")
-    void rateChecks() {
+    @DisplayName("제약: 상한 0g 구간은 저장되지 않는다 (ck_shipping_zone_rate_max_weight_grams_positive)")
+    void zeroMaxWeightIsRejected() {
         assertThatThrownBy(() -> entityManager.persistAndFlush(
             ShippingZoneRateEntity.builder().id(1L).shippingZoneId(10L).maxWeightGrams(0).feeAmount(1_000L).feeCurrency(USD).build()))
             .rootCause()
             .hasMessageContaining("ck_shipping_zone_rate_max_weight_grams_positive");
-        entityManager.clear();
+    }
+
+    @Test
+    @DisplayName("제약: 한 그룹의 같은 상한은 저장되지 않는다 (uk_shipping_zone_rate_shipping_zone_id_max_weight_grams)")
+    void duplicateMaxWeightIsRejected() {
         entityManager.persistAndFlush(ShippingZoneRateEntity.builder().id(2L).shippingZoneId(10L).maxWeightGrams(500).feeAmount(1_000L).feeCurrency(USD).build());
         assertThatThrownBy(() -> entityManager.persistAndFlush(
             ShippingZoneRateEntity.builder().id(3L).shippingZoneId(10L).maxWeightGrams(500).feeAmount(2_000L).feeCurrency(USD).build()))
