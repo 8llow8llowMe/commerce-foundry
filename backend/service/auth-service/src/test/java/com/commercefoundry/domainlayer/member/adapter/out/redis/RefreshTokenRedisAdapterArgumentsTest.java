@@ -77,6 +77,8 @@ class RefreshTokenRedisAdapterArgumentsTest {
     void rotationResultShape() {
         assertThat(RefreshTokenRedisAdapter.toRotationResult(List.of("FAMILY_EXPIRED", 0L)))
             .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_EXPIRED));
+        assertThat(RefreshTokenRedisAdapter.toRotationResult(List.of("FAMILY_CORRUPTED", 0L)))
+            .isEqualTo(RefreshTokenRotationResult.rejected(RefreshTokenRotation.FAMILY_CORRUPTED));
         assertThatThrownBy(() -> RefreshTokenRedisAdapter.toRotationResult(List.of("ROTATED"))).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> RefreshTokenRedisAdapter.toRotationResult(List.of("ROTATED", "1000"))).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> RefreshTokenRedisAdapter.toRotationResult(null)).isInstanceOf(IllegalStateException.class);
@@ -98,6 +100,8 @@ class RefreshTokenRedisAdapterArgumentsTest {
         assertThat(RefreshTokenRedisScripts.SAVE_NEW_FAMILY.getScriptAsString()).contains("ARGV[4]");
         assertThat(rotate).as("저장값은 정수 문자열만, 최소 남은 수명은 RefreshTokenRotationPolicy 와 같다")
             .contains("'^%d+$'", "remaining < " + RefreshTokenRotationPolicy.MIN_REMAINING_LIFETIME.toMillis());
+        assertThat(rotate).as("저장된 시각은 유한하고 지금 + 허용 시계 오차 이하만 받는다 — 오차는 RefreshTokenRotationPolicy.CLOCK_SKEW 와 같다")
+            .contains("millis == math.huge", "millis > latest", "local latest = now + " + RefreshTokenRotationPolicy.CLOCK_SKEW.toMillis() + "\n");
     }
 
     @Test
