@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync Claude workflows into the repository skills used by Codex and Cursor."""
+"""Sync Claude workflows into the skills, roles and subagents used by Codex and Cursor."""
 
 import argparse
 import json
@@ -58,25 +58,58 @@ rg -n 'set s\.available|available =' backend/service/product-service -g '*.java'
 rg -l '@Version' backend/service/order-service backend/service/product-service backend/service/delivery-service -g '*.java'""",
 }
 
+# 저비용 모델로 돌리는 역할 → Codex reasoning effort. 모델 ID 가 바뀌면 아래 상수만 고치고 --write 한다.
+FAST_ROLES = {"explorer": "medium", "git-ops": "low"}
+CODEX_FAST_MODEL = "gpt-6-luna"
+CURSOR_FAST_MODEL = "claude-haiku-5-5"
+GENERATED_NOTE = "scripts/sync-agent-skills.py 가 .claude/agents/ 에서 생성한다. 직접 고치지 않는다."
+
+ROUTING = """## 모델 라우팅
+
+토큰은 "누가 얼마나 읽느냐" 에서 가장 많이 든다. 메인 세션은 판단에 쓰고, 많이 읽거나 기계적으로 반복하는 일은 저비용 모델 역할로 내린다.
+
+| 일 | 맡는 곳 |
+|----|---------|
+| 분류·계획·범위 결정, 검증 실행·결과 확인, 완료 판단 | 메인 세션 |
+| 위치·호출 흐름을 모르는 탐색, 여러 파일 훑기 | `explorer` (저비용 모델) |
+| 이슈 시작·푸시·PR 생성·머지 후 정리 같은 git·gh 작업 | `git-ops` (Codex `git_ops`, 저비용 모델) |
+| 설계·구현·검토 | 해당 역할 (현재 세션 모델) |
+
+- 저비용 모델은 `.codex/agents/`·`.cursor/agents/` 정의에 있다. 위임할 수 없으면 메인 세션이 같은 순서로 처리한다.
+- 위치를 아는 파일 몇 개 읽기, 단일 git 명령은 메인 세션이 직접 한다. 하위 에이전트는 새 컨텍스트로 시작하므로 띄우는 비용이 더 크다.
+- 하위 에이전트는 대화 기록을 보지 못한다. 경로·브랜치·이슈 번호·검증 결과·원하는 출력 형식을 전달한다.
+- 결과는 요약으로 받는다. diff·파일 원문을 통째로 돌려받지 않는다.
+"""
+
 ORCHESTRATION = """## Codex · Cursor 실행 방식
 
-- 역할은 저장소 루트 기준 `.agents/roles/<역할>.md`를 읽어 적용한다. 이 파일들은 네이티브 하위 에이전트 등록 설정이 아니다.
+- 역할 지침 원문은 저장소 루트 기준 `.agents/roles/<역할>.md`다. 네이티브 하위 에이전트로는
+  Cursor `.cursor/agents/`(전 역할)와 Codex `.codex/agents/`(`explorer`·`git_ops`)가 생성돼 있다.
 - 하위 에이전트를 사용할 수 있고 위임이 허용된 경우에만 역할 지침·범위·기대 출력을 전달해 위임한다.
   그 외에는 메인 세션이 동일한 역할을 순차 수행하고, 실제 수행 방식을 보고한다.
 - 읽기 전용 역할은 소스·설정·문서를 편집하지 않는다. 실행 도구의 권한 제한을 적용할 수 있으면 함께 적용한다.
   검사 명령은 빌드 산출물을 만들 수 있지만, 파괴적인 셸 명령과 외부 변경은 허용되지 않는다.
-- 쓰기는 한 번에 한 역할만 수행한다. 모델은 현재 환경 설정을 따르며 Claude 전용 모델명·tools 키를 복사하지 않는다.
+- 쓰기는 한 번에 한 역할만 수행한다. 하위 에이전트의 모델·읽기 전용 여부는 생성된 정의를 따른다.
 - 범위 밖 이슈 등록·커밋·푸시·PR·머지는 실행하지 않는다. FE 작업은 `fe-implementer`와 `fe-reviewer`를 선택한다.
 
 """
 
 
-def read_body(path):
+def split_source(path):
     text = path.read_text(encoding="utf-8")
-    match = re.match(r"\A---\n.*?\n---\n", text, re.S)
+    match = re.match(r"\A---\n(.*?)\n---\n", text, re.S)
     if not match:
         raise ValueError(f"Invalid source frontmatter: {path.relative_to(ROOT)}")
-    return text[match.end():].lstrip("\n")
+    meta = {}
+    for line in match.group(1).splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            meta[key.strip()] = value.strip().strip('"')
+    return meta, text[match.end():].lstrip("\n")
+
+
+def read_body(path):
+    return split_source(path)[1]
 
 
 def adapt(body):
@@ -113,6 +146,9 @@ def skill_content(path):
             "`be-executor` 한 명", "BE는 `be-executor`, FE는 `fe-implementer` 한 명",
         )
         if name == "dev-orchestrator":
+            body, count = re.subn(r"## 모델 라우팅\n.*?(?=\n## )", lambda _: ROUTING.rstrip() + "\n", body, count=1, flags=re.S)
+            if count != 1:
+                raise ValueError("dev-orchestrator: '## 모델 라우팅' section not found")
             body = body.replace(
                 "## 7. REVIEW",
                 "FE 변경은 `frontend/`에서 `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, `pnpm build`를 실행한다.\n"
@@ -144,6 +180,36 @@ def role_content(path):
     return f"# {path.stem}\n\nCodex·Cursor 공통 역할 지침. 실행 방식은 `docs/ai-agents.md`를 따른다.\n\n{body.rstrip()}\n"
 
 
+def codex_name(role):
+    # Every documented Codex agent name is snake_case.
+    return role.replace("-", "_")
+
+
+def cursor_agent_content(path):
+    meta, _ = split_source(path)
+    tools = {tool.strip() for tool in meta.get("tools", "").split(",") if tool.strip()}
+    # A Claude role with an explicit tool list and no Write/Edit is read-only.
+    readonly = bool(tools) and not tools & {"Write", "Edit"}
+    model = CURSOR_FAST_MODEL if path.stem in FAST_ROLES else "inherit"
+    description = json.dumps(adapt(meta["description"]), ensure_ascii=False)
+    return (f"---\nname: {path.stem}\ndescription: {description}\nmodel: {model}\n"
+            f"readonly: {str(readonly).lower()}\n---\n\n{role_content(path)}")
+
+
+def codex_agent_content(path):
+    meta, _ = split_source(path)
+    body = role_content(path)
+    if "'''" in body:
+        raise ValueError(f"Role body cannot be a TOML literal string: {path.relative_to(ROOT)}")
+    description = json.dumps(adapt(meta["description"]), ensure_ascii=False)
+    return (f"# {GENERATED_NOTE}\n"
+            f'name = "{codex_name(path.stem)}"\n'
+            f"description = {description}\n"
+            f'model = "{CODEX_FAST_MODEL}"\n'
+            f'model_reasoning_effort = "{FAST_ROLES[path.stem]}"\n'
+            f"developer_instructions = '''\n{body}'''\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="Write generated skills and role instructions; otherwise check for drift")
@@ -154,8 +220,14 @@ def main():
         parser.error(f"Update DESCRIPTIONS for source skills: added={sorted(names - set(DESCRIPTIONS))}, missing={sorted(set(DESCRIPTIONS) - names)}")
     expected = {ROOT / ".agents/skills" / p.parent.name / "SKILL.md": skill_content(p) for p in sources}
     roles = sorted((ROOT / ".claude/agents").glob("*.md"))
+    if not set(FAST_ROLES) <= {p.stem for p in roles}:
+        parser.error(f"FAST_ROLES without source agent: {sorted(set(FAST_ROLES) - {p.stem for p in roles})}")
     expected.update({ROOT / ".agents/roles" / p.name: role_content(p) for p in roles})
-    actual = set((ROOT / ".agents/skills").glob("*/SKILL.md")) | set((ROOT / ".agents/roles").glob("*.md"))
+    expected.update({ROOT / ".cursor/agents" / p.name: cursor_agent_content(p) for p in roles})
+    expected.update({ROOT / ".codex/agents" / f"{codex_name(p.stem)}.toml": codex_agent_content(p)
+                     for p in roles if p.stem in FAST_ROLES})
+    actual = (set((ROOT / ".agents/skills").glob("*/SKILL.md")) | set((ROOT / ".agents/roles").glob("*.md"))
+              | set((ROOT / ".cursor/agents").glob("*.md")) | set((ROOT / ".codex/agents").glob("*.toml")))
     stale = actual - set(expected)
     failures = []
     for path, content in expected.items():
@@ -168,7 +240,8 @@ def main():
     if failures:
         print("Out of sync:\n" + "\n".join(failures))
         return 1
-    print(f"{'Synced' if args.write else 'Verified'} {len(sources)} skills and {len(roles)} roles.")
+    print(f"{'Synced' if args.write else 'Verified'} {len(sources)} skills, {len(roles)} roles, "
+          f"{len(roles)} Cursor agents and {len(FAST_ROLES)} Codex agents.")
     return 0
 
 
