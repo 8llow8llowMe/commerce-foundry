@@ -15,6 +15,8 @@ import org.springframework.context.annotation.Configuration;
 public class AuthTokenBeansConfig {
 
     /**
+     * refresh TTL 은 발급 설정에 상한이 없지만 이 검사로 family 절대 수명 상한({@link AuthTokenProperties#MAX_REFRESH_FAMILY_MAX_LIFETIME}) 안에 묶인다.
+     *
      * @throws IllegalStateException family 절대 수명이 refresh TTL 보다 짧다 — 로그인 직후부터 TTL 이 줄어 refresh TTL 설정이 뜻을 잃는다
      */
     @Bean
