@@ -35,7 +35,9 @@ export function SiteHeader({
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-bg">
       <div className="mx-auto max-w-screen-xl px-4 lg:px-8">
-        <div className="grid h-14 grid-cols-3 items-center lg:h-16">
+        {/* 양옆 칸은 내용보다 좁아지지 않는다 — 좁은 화면에서 로고가 가운데 칸을 넘치면 아이콘과 겹치지 않게 로고가 조금 비켜난다.
+            공간이 있으면 양옆이 같은 폭이라 로고는 정가운데다 */}
+        <div className="grid h-14 grid-cols-[minmax(max-content,1fr)_auto_minmax(max-content,1fr)] items-center lg:h-16">
           <div className="flex items-center">
             <MenuPanel
               brandName={brandName}
