@@ -7,6 +7,7 @@ import com.commercefoundry.apigateway.handler.GatewayErrorResponseWriter;
 import com.commercefoundry.apigateway.properties.GatewayRequestBodyProperties;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -299,6 +300,122 @@ class GatewayRequestBodySizeFilterTest {
             .as("배출 상한이 상한보다 작으면 상한을 넘은 본문을 하나도 배출할 수 없다").isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new GatewayRequestBodyProperties(DataSize.ofMegabytes(2), DataSize.ofMegabytes(32), Duration.ofSeconds(10), discard, Duration.ZERO))
             .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new GatewayRequestBodyProperties(DataSize.ofMegabytes(2), DataSize.ofMegabytes(32), Duration.ofSeconds(10),
+            DataSize.ofMegabytes(101), discardTimeout))
+            .as("배출 상한은 100MB 를 넘길 수 없다").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new GatewayRequestBodyProperties(DataSize.ofMegabytes(2), DataSize.ofMegabytes(32), Duration.ofSeconds(10), discard, Duration.ofSeconds(61)))
+            .as("배출 시간은 60초를 넘길 수 없다").isInstanceOf(IllegalArgumentException.class);
+        assertThat(new GatewayRequestBodyProperties(DataSize.ofMegabytes(2), DataSize.ofMegabytes(32), Duration.ofSeconds(10),
+            DataSize.ofMegabytes(100), Duration.ofSeconds(60)))
+            .as("위쪽 상한 값 그대로는 받는다").isNotNull();
+    }
+
+    @Test
+    @DisplayName("1바이트 청크로 상한까지 와도 본문 그대로 넘긴다 — 조각마다 배열을 두지 않고 하나의 배열에 이어 쓴 뒤 버퍼는 모두 해제한다")
+    void passesChunkedBodyOfOneByteChunks() {
+        TrackedBuffers buffers = new TrackedBuffers();
+        MockServerWebExchange exchange = MockServerWebExchange.from(chunked(Flux.range(0, LIMIT).map(index -> buffers.next(1))));
+        AtomicReference<ServerHttpRequest> routed = new AtomicReference<>();
+
+        filter.filter(exchange, chain(routed)).block(TIMEOUT);
+
+        assertThat(routed.get().getHeaders().getContentLength()).isEqualTo(LIMIT);
+        assertThat(bodyOf(routed.get())).isEqualTo("a".repeat(LIMIT));
+        assertThat(buffers.allReleased()).isTrue();
+        assertThat(filter.reservedBytes()).isZero();
+    }
+
+    @Test
+    @DisplayName("1바이트 청크로 상한을 한 바이트 넘으면 413 이다")
+    void rejectsOneByteChunksJustOverLimit() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(chunked(Flux.range(0, LIMIT + 1).map(index -> buffer(1))));
+        AtomicReference<ServerHttpRequest> routed = new AtomicReference<>();
+
+        filter.filter(exchange, chain(routed)).block(TIMEOUT);
+
+        assertThat(routed).hasNullValue();
+        assertRejected(exchange, HttpStatus.CONTENT_TOO_LARGE, "GATEWAY_007");
+        assertThat(filter.reservedBytes()).isZero();
+    }
+
+    @Test
+    @DisplayName("chunked 수집 배열은 청크 크기와 무관하게 상한을 넘지 않고, 상한을 넘으면 바로 놓는다")
+    void chunkedBodyCapacityStaysWithinLimit() {
+        int limit = 100_000;
+        AtomicBoolean overflowed = new AtomicBoolean();
+        GatewayRequestBodySizeFilter.ChunkedBody body = new GatewayRequestBodySizeFilter.ChunkedBody(limit, limit * 2L, () -> overflowed.set(true));
+
+        for (int i = 0; i < limit; i++) {
+            assertThat(body.add(buffer(1))).isTrue();
+            assertThat(body.capacity()).isLessThanOrEqualTo(limit);
+        }
+
+        assertThat(body.tooLarge()).as("상한과 같으면 넘지 않았다").isFalse();
+        assertThat(body.length()).isEqualTo(limit);
+        assertThat(body.capacity()).isEqualTo(limit);
+        assertThat(new String(body.array(), 0, body.length(), StandardCharsets.US_ASCII)).isEqualTo("a".repeat(limit));
+
+        assertThat(body.add(buffer(1))).as("배출 상한 안이라 계속 읽는다").isTrue();
+        assertThat(body.tooLarge()).isTrue();
+        assertThat(overflowed).as("버퍼 자리를 돌려준다").isTrue();
+        assertThat(body.capacity()).as("모은 배열을 놓는다").isZero();
+    }
+
+    @Test
+    @DisplayName("Content-Length 와 chunked 가 함께 오면 길이를 믿지 않고 센다 — 길이가 작다고 적어도 실제 본문이 상한을 넘으면 413 이다")
+    void chunkedWinsOverContentLength() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/api/v1/carts/me/merge")
+            .contentType(MediaType.APPLICATION_JSON).contentLength(10).header(HttpHeaders.TRANSFER_ENCODING, "chunked")
+            .body(Flux.just(buffer(LIMIT), buffer(1))));
+        AtomicReference<ServerHttpRequest> routed = new AtomicReference<>();
+
+        filter.filter(exchange, chain(routed)).block(TIMEOUT);
+
+        assertThat(routed).hasNullValue();
+        assertRejected(exchange, HttpStatus.CONTENT_TOO_LARGE, "GATEWAY_007");
+        assertThat(filter.reservedBytes()).isZero();
+    }
+
+    @Test
+    @DisplayName("Expect 값이 여럿이어도 그중 100-continue 가 있으면(대소문자 무시) 본문을 읽지 않는다")
+    void detectsExpectContinueAmongSeveralValues() {
+        AtomicBoolean subscribed = new AtomicBoolean();
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/api/v1/carts/me/merge")
+            .contentType(MediaType.APPLICATION_JSON).contentLength(LIMIT + 1L).header(HttpHeaders.EXPECT, "x-other", "100-CONTINUE")
+            .body(watched(subscribed)));
+
+        filter.filter(exchange, chain(new AtomicReference<>())).block(TIMEOUT);
+
+        assertThat(subscribed).as("본문을 읽지 않는다").isFalse();
+        assertRejected(exchange, HttpStatus.CONTENT_TOO_LARGE, "GATEWAY_007");
+    }
+
+    @Test
+    @DisplayName("배출 중 읽기가 실패하고 413 쓰기도 실패하면(클라이언트가 끊음) 오류를 올리지 않고 조용히 끝낸다")
+    void swallowsWriteFailureAfterDiscardReadFailure() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/api/v1/carts/me/merge")
+            .contentType(MediaType.APPLICATION_JSON).contentLength(LIMIT + 1L).body(Flux.error(new IOException("connection reset"))));
+        exchange.getResponse().setWriteHandler(body -> Mono.error(new IOException("channel closed")));
+        AtomicReference<ServerHttpRequest> routed = new AtomicReference<>();
+
+        filter.filter(exchange, chain(routed)).block(TIMEOUT);
+
+        assertThat(routed).hasNullValue();
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE);
+    }
+
+    @Test
+    @DisplayName("chunked 가 상한을 넘은 뒤 수신 시간 상한이 배출 시간보다 먼저 끝나면 그때 413 이다 — 408 이 아니고 버퍼 자리도 돌려준다")
+    void readTimeoutDuringChunkedDrainIsTooLarge() {
+        GatewayRequestBodySizeFilter quick = filter(DataSize.ofBytes(LIMIT * 4L), Duration.ofMillis(200), Duration.ofSeconds(2));
+        MockServerWebExchange exchange = MockServerWebExchange.from(chunked(Flux.concat(Flux.just(buffer(LIMIT + 1)), Flux.never())));
+        AtomicReference<ServerHttpRequest> routed = new AtomicReference<>();
+
+        quick.filter(exchange, chain(routed)).block(TIMEOUT);
+
+        assertThat(routed).hasNullValue();
+        assertRejected(exchange, HttpStatus.CONTENT_TOO_LARGE, "GATEWAY_007");
+        assertThat(quick.reservedBytes()).isZero();
     }
 
     private static GatewayRequestBodySizeFilter filter(DataSize budget, Duration readTimeout, Duration discardTimeout) {

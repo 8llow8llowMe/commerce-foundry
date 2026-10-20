@@ -23,6 +23,7 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.MediaType;
@@ -33,6 +34,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import reactor.core.publisher.Flux;
+import reactor.netty.http.client.PrematureCloseException;
 
 /**
  * 본문 크기 상한을 실제 서버(Reactor Netty)로 본다 — {@code Content-Length} 요청과 chunked 요청 둘 다 하류에 닿지 않고 413 이어야 한다 ({@code security-guide.md} §7-4).
@@ -150,7 +152,9 @@ class GatewayRequestBodySizeTest {
                 .expectStatus().isEqualTo(413)
                 .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_007");
         } catch (WebClientRequestException connectionClosed) {
-            assertThat(connectionClosed).as("응답 대신 연결 종료").hasMessageContaining("Connection");
+            // 메시지는 OS 마다 다르다(Linux "Broken pipe" · "Connection reset", Windows "forcibly closed") — 원인 타입으로만 본다
+            assertThat(NestedExceptionUtils.getMostSpecificCause(connectionClosed)).as("응답 대신 연결 종료")
+                .isInstanceOfAny(PrematureCloseException.class, IOException.class);
         }
 
         assertThat(UPSTREAM_BODY_LENGTHS).as("하류에 닿지 않는다").isEmpty();
