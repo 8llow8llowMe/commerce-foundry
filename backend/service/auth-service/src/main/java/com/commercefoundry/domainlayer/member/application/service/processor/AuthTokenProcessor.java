@@ -70,7 +70,8 @@ public class AuthTokenProcessor {
      *
      * @param customer 세션 주인 — 지금도 고객 로그인을 쓸 수 있는 회원({@code MemberLoginProcessor#findCustomer}). 없거나 관리자면 null 이고,
      *                 그때는 family 를 폐기하고 무효로 답한다(고객 로그인은 관리자를 막으므로 정상 흐름에는 없다)
-     * @throws MemberException {@link MemberErrorCode#REFRESH_TOKEN_INVALID} — 주인 없음 · 관리자 · 읽은 뒤 무효가 됐다 · family 절대 수명 초과(family 를 폐기했다).
+     * @throws MemberException {@link MemberErrorCode#REFRESH_TOKEN_INVALID} — 주인 없음 · 관리자 · 읽은 뒤 무효가 됐다 · family 절대 수명 초과 · family 값 손상
+     *                         (뒤의 둘은 family 를 폐기했다).
      *                         {@link MemberErrorCode#REFRESH_TOKEN_REUSED} — 유예 밖 재사용 · 형제 상한 초과, family 를 폐기했다
      */
     public AuthTokenInfo reissue(RefreshTokenSession session, Member customer) {
@@ -93,6 +94,12 @@ public class AuthTokenProcessor {
             // 정상 만료라 재사용(AUTH_012 · warn)과 나눈다. 클라이언트에는 만료 · 폐기와 같은 AUTH_011 — BFF 는 4xx 로 쿠키를 지우고 로그인 화면으로 보낸다
             case FAMILY_EXPIRED -> {
                 log.info("refresh token family reached its max lifetime, family revoked: memberId={}, familyId={}", session.memberId(), session.familyId());
+                throw new MemberException(MemberErrorCode.REFRESH_TOKEN_INVALID);
+            }
+            // 정상 흐름에는 없다 — 저장소를 직접 고쳤거나 시계가 허용 오차보다 앞선 인스턴스가 로그인을 받았다. 받아 주면 절대 수명 상한이 사라지므로 warn 으로 드러낸다.
+            // 사용자에게는 만료와 같은 일이라 응답은 AUTH_011 이다. 손상은 family 의 일이라 토큰 지문은 남기지 않는다
+            case FAMILY_CORRUPTED -> {
+                log.warn("refresh token family value is corrupted, family revoked: memberId={}, familyId={}", session.memberId(), session.familyId());
                 throw new MemberException(MemberErrorCode.REFRESH_TOKEN_INVALID);
             }
             case REUSE_DETECTED -> {

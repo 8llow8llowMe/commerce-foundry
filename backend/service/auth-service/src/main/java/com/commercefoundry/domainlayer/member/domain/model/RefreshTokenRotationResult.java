@@ -22,7 +22,7 @@ public record RefreshTokenRotationResult(RefreshTokenRotation rotation, Duration
         }
     }
 
-    /** 새 토큰을 저장하지 않은 판정(INVALID · REUSE_DETECTED · FAMILY_EXPIRED). */
+    /** 새 토큰을 저장하지 않은 판정(INVALID · REUSE_DETECTED · FAMILY_EXPIRED · FAMILY_CORRUPTED). */
     public static RefreshTokenRotationResult rejected(RefreshTokenRotation rotation) {
         return new RefreshTokenRotationResult(rotation, Duration.ZERO);
     }
