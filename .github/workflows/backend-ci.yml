@@ -3,21 +3,26 @@ name: backend-ci
 # **백엔드 PR 에서 테스트를 돌리고, 실제로 몇 건이 돌았는지 센다.**
 # 초록불이 "테스트가 통과했다" 가 아니라 "테스트가 한 건도 안 돌았다" 를 뜻하는 경우를 막는다
 # (hondigagae 에서 캐시 때문에 테스트가 FROM-CACHE 로 건너뛰어진 채 통과한 일이 있었다).
+#
+# 모듈을 그룹별 병렬 job 으로 나눠 돌린다(#136). job 하나에서 `./gradlew check` 를 돌리면 러너 한 대(4 vCPU)의
+# 워커 4개가 모든 모듈을 나눠 써서 벽시계 시간이 테스트 총량에 비례해 늘었다. 그룹 표는 backend-ci-matrix.py 에 있다.
 
 on:
   pull_request:
     paths:
       - 'backend/**'
       - '.github/workflows/backend-ci.yml'
+      - '.github/scripts/backend-ci-matrix.py'
       - '.github/scripts/backend-test-count.py'
-  # develop 에서도 돈다. Actions 캐시는 기본 브랜치 스코프만 모든 PR 이 상속하므로,
-  # 여기서 한 번 돌아야 PR 들이 의존성 캐시를 받는다. 겸사겸사 머지된 develop 자체도 검사한다.
+  # develop 에서도 돈다. Actions 캐시는 PR 의 base 브랜치 것을 상속하므로, 여기서 한 번 돌아야 PR 들이 Gradle 홈 캐시를 받는다.
+  # 겸사겸사 머지된 develop 자체도 검사한다.
   push:
     branches:
       - develop
     paths:
       - 'backend/**'
       - '.github/workflows/backend-ci.yml'
+      - '.github/scripts/backend-ci-matrix.py'
       - '.github/scripts/backend-test-count.py'
 
 # 같은 PR 에 새 커밋이 올라오면 이전 실행을 버린다.
@@ -29,51 +34,90 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  # settings.gradle 의 모듈을 그룹으로 나눈다. 그룹 표에 없는 모듈(core · cloud · 새 모듈)은 전부 rest 그룹이라 빠지는 모듈이 없다.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 모듈 그룹 matrix
+        id: matrix
+        run: python3 .github/scripts/backend-ci-matrix.py backend
+
+  test:
+    name: test (${{ matrix.group }})
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # 한 그룹이 실패해도 다른 그룹은 끝까지 돈다 — 실패가 다른 모듈의 결과를 가리지 않게
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
-      # **`cache: gradle` 을 쓰지 않는다.** 그 옵션은 `~/.gradle/caches` 를 통째로 담는데 거기에 빌드 캐시가 들어 있어,
-      # 다음 실행에서 test 태스크가 FROM-CACHE 로 건너뛰어진다. 의존성과 wrapper 배포본만 아래에서 따로 캐시한다.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Cache Gradle dependencies
-        uses: actions/cache@v4
+      # Gradle 홈(의존성 · wrapper · 컴파일된 빌드 스크립트)을 캐시한다. **빌드 캐시(`caches/build-cache-1`)는 담지 않는다** —
+      # 담기면 다음 실행에서 test 태스크가 FROM-CACHE 로 건너뛰어진다. `setup-java` 의 `cache: gradle` 을 쓰지 않는 이유도 같다.
+      # 캐시 쓰기는 develop push 에서만 한다. 기본값(기본 브랜치에서만 쓰기)이면 기본 브랜치가 main 이라 아무도 캐시를 못 만든다.
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          path: |
-            ~/.gradle/caches/modules-2
-            ~/.gradle/wrapper
-          key: gradle-deps-${{ runner.os }}-${{ hashFiles('backend/**/*.gradle', 'backend/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-deps-${{ runner.os }}-
+          cache-read-only: ${{ github.ref != 'refs/heads/develop' }}
+          gradle-home-cache-excludes: |
+            caches/build-cache-1
 
       # `gradle.properties` 가 빌드 캐시를 켜 두므로 명시로 끈다. 러너는 매번 새 체크아웃이라 cleanTest 는 필요 없다.
+      # `--continue`: 한 모듈의 테스트가 실패해도 같은 그룹의 다른 모듈을 끝까지 돌린다(#128 때 실패 하나가 product-service 0건을 가렸다).
+      # matrix 값은 `${{ }}` 로 스크립트에 끼워 넣지 않고 env 로 넘긴다(셸 주입 방지). 태스크 목록은 공백으로 나뉘어야 해서 따옴표 없이 쓴다.
       - name: Gradle check
         id: gradle
-        run: ./gradlew check --no-build-cache --stacktrace
+        env:
+          GRADLE_TASKS: ${{ matrix.tasks }}
+        run: ./gradlew $GRADLE_TASKS --continue --no-build-cache --stacktrace
 
-      # **초록불이 거짓인지 확인한다.** 통과했는데 실행 건수가 0 이면 여기서 떨어뜨린다 — 합계뿐 아니라
+      # **초록불이 거짓인지 확인한다.** 통과했는데 실행 건수가 0 이면 여기서 떨어뜨린다 — 그룹 합계뿐 아니라
       # 테스트가 있어야 하는 모듈(실행 모듈 전부 + src/test/java 가 있는 모듈)마다 센다. 로직은 스크립트에 있다(로컬에서도 돌릴 수 있게).
       - name: 실행된 테스트 건수 집계
         if: ${{ !cancelled() }}
         env:
           GRADLE_OUTCOME: ${{ steps.gradle.outcome }}
-        run: python3 ../.github/scripts/backend-test-count.py .
+          CI_GROUP: ${{ matrix.group }}
+          CI_MODULES: ${{ matrix.modules }}
+        run: python3 ../.github/scripts/backend-test-count.py . --group "$CI_GROUP" --modules "$CI_MODULES"
 
       # `working-directory` 는 액션 입력에 적용되지 않는다 — 경로에 backend/ 를 붙인다.
       - name: Upload test reports
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: backend-test-results
+          name: backend-test-results-${{ matrix.group }}
           path: |
             backend/**/build/reports/tests/test/
             backend/**/build/test-results/test/
           retention-days: 7
+
+  # 그룹 결과를 하나로 모은다. PR 화면에서 보던 `check` 이름을 유지하고, plan · test 가 모두 성공해야 통과한다.
+  # `!cancelled()`: 그룹이 실패해도 돌아 실패를 표시하고, 새 커밋으로 실행이 취소되면 돌지 않는다.
+  check:
+    needs: [plan, test]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 그룹 결과 확인
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          echo "plan=$PLAN_RESULT test=$TEST_RESULT"
+          test "$PLAN_RESULT" = success && test "$TEST_RESULT" = success
