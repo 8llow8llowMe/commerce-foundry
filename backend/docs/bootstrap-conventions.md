@@ -116,6 +116,8 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
   기본 프로파일에서 Swagger 경로 404, Swagger 를 연 설정에서 그룹 문서 200 · 기본 문서 404.
 - 새 서비스를 더하면 게이트웨이의 dev 라우트(`GatewayDevRouteConfig` 는 `ServiceRoute` 를 따른다)와 Swagger UI 목록
   (`api-gateway` 의 `application.yml` `springdoc.swagger-ui.urls`)도 같이 늘린다. `GatewayDevRouteTest` 가 어긋나면 잡는다.
+- 새 모듈은 CI 에서 자동으로 `rest` 그룹 job 에 들어간다(`.github/scripts/backend-ci-matrix.py`). 테스트가 길어져 `rest` job 이
+  가장 늦게 끝나면 그 스크립트의 `GROUPS` 에 그룹을 더한다. 모듈 이름을 바꾸면 `GROUPS` 도 같이 고친다 — 어긋나면 plan job 이 실패한다.
 
 ## 리포지토리 테스트 (Testcontainers, 엔티티를 가진 서비스)
 

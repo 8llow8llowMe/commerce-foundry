@@ -71,6 +71,12 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
   그냥 `test` 는 `UP-TO-DATE` · `FROM-CACHE` 로 건너뛰고도 성공으로 끝난다.
 - CI(`backend-ci`)는 **테스트가 있어야 하는 모듈마다**(core 가 아닌 실행 모듈 전부 + `src/test/java` 가 있는 모듈) 실제 실행 건수(건너뜀 제외)를 세고,
   0건인 모듈이 있으면 실패시킨다. 로컬에서 같은 검사: `python ../.github/scripts/backend-test-count.py .`
+  (일부 모듈만: `--modules "service/auth-service service/payment-service"`)
+- CI 는 모듈을 **그룹별 병렬 job** 으로 돌린다(`.github/scripts/backend-ci-matrix.py`).
+  - 테스트가 오래 걸리는 서비스만 이름으로 떼고(`auth` · `product` · `order-payment` · `delivery`), 나머지 core · cloud · 새 모듈은 전부 `rest` 그룹이다.
+  - job 마다 `./gradlew <그룹 모듈>:check --continue --no-build-cache` 로 돌아 한 모듈의 실패가 같은 그룹의 다른 모듈 결과를 가리지 않는다.
+  - 그룹 결과는 `check` job 이 모은다.
+  - Gradle 홈(의존성 · wrapper)은 캐시하지만 빌드 캐시(`caches/build-cache-1`)는 담지 않는다. 캐시는 develop push 실행만 쓰고 PR 은 읽기만 한다.
 - 서비스(`service/*`)의 컨텍스트 로딩 테스트(`*ApplicationTests`)는 H2(PostgreSQL 모드) test 프로파일로 돈다. Docker 없이 로컬에서도 실행된다.
   락 · `timestamptz` · 인덱스처럼 엔진에 기대는 동작은 여기서 검증하지 않는다. 리포지토리 테스트는 Testcontainers(PostgreSQL)로 따로 두고
   CI 에서 돌린다 (`bootstrap-conventions.md` "컨텍스트 로딩 테스트").
