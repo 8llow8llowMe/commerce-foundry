@@ -1,11 +1,17 @@
 ---
 name: pr
 description: "commerce-foundry Pull Request 를 한국어 템플릿으로 작성하고 gh 로 develop 대상 PR 을 만든다. 브랜치명에서 이슈 번호를 읽어 Issue Number 를 채우고, 변경 경로로 서비스 라벨을, assignee 는 @me 로 지정한다. /pr 요청, PR body, pull request 생성, '[BE] feat: ... PR 올려줘' 가 트리거다."
+argument-hint: "검증: <실행한 명령과 결과> [참고: ...] [DDL: ...] [리뷰어: seonghoho] [--draft]"
+context: fork
+agent: git-ops
+model: haiku
+effort: low
+background: false
 ---
 
 # PR
 
-commerce-foundry PR 본문을 작성하고 **gh 로 생성**한다.
+commerce-foundry PR 본문을 작성하고 **gh 로 생성**한다. 대화 기록 없이 실행될 수 있으므로 필요한 정보는 인자와 저장소에서만 얻는다.
 
 ## Read First
 
@@ -18,7 +24,18 @@ commerce-foundry PR 본문을 작성하고 **gh 로 생성**한다.
 |------|------|
 | 기본 (`/pr`) | 본문 작성 → 푸시 → **PR 생성** → URL 출력 |
 | "초안만", `--draft-body` | 제목·본문만 출력 |
-| "드래프트 PR" | `gh pr create --draft` |
+| "드래프트 PR", `--draft` | `gh pr create --draft` |
+
+## 입력 (인자)
+
+호출자(메인 세션)는 저장소에서 알 수 없는 사실을 인자로 넘긴다.
+
+| 인자 | 쓰는 곳 | 없을 때 |
+|------|---------|---------|
+| `검증:` 실제로 돌린 명령과 결과 | `검증 내역` | 본문 파일까지만 만들고 **푸시·생성하지 않는다** — "검증 내역 필요" 로 보고 |
+| `참고:` 리뷰어가 알 점, guard 결과 요약, 30파일 초과 이유 | `참고 사항` | 저장소에서 확인한 사실만 적는다 |
+| `DDL:` 운영 DDL | `운영 DDL` | 엔티티(`@Entity`)가 바뀌었으면 PR 을 만들지 않는다 |
+| `리뷰어:` | `--reviewer` | 아래 4번 규칙으로 판단한다 |
 
 ## 절차
 
@@ -33,10 +50,11 @@ commerce-foundry PR 본문을 작성하고 **gh 로 생성**한다.
    ```
 
    - 커밋되지 않은 변경이 있으면 PR 에 포함되지 않는다고 알린다. 남의 변경일 수 있으니 대신 커밋하지 않는다.
-   - **30파일 / 1,000줄을 넘으면** 쪼갤 수 있는지 먼저 제안하고, 그대로 가면 이유를 `참고 사항` 에 적는다.
+   - **30파일 / 1,000줄을 넘으면** 인자 `참고:` 의 이유를 `참고 사항` 에 적는다. 이유가 없으면 PR 을 만들지 않고
+     파일 수·줄 수를 보고한다 — 쪼갤지는 호출자가 정한다.
 
 2. **이슈 번호** — 브랜치명 `<type>/<영역>/<번호>-<요약>` 의 번호를 쓴다. `gh issue view <번호> --json title` 로
-   제목을 가져와 **PR 제목을 이슈 제목과 같게** 둔다. 번호를 못 찾으면 사용자에게 묻는다 — `Issue Number: #` 를 비워 두지 않는다.
+   제목을 가져와 **PR 제목을 이슈 제목과 같게** 둔다. 번호를 못 찾으면 멈추고 보고한다 — `Issue Number: #` 를 비워 두지 않는다.
 
 3. **라벨** — 변경 경로로 정한다 (`.github/labeler.yml` 과 같은 표).
 
@@ -52,15 +70,24 @@ commerce-foundry PR 본문을 작성하고 **gh 로 생성**한다.
    `[INFRA]` · 루트 `[DOCS]` 는 서비스 라벨을 생략한다.
 
 4. **리뷰어** — `[BE]` PR 이 API 계약(경로·요청/응답 필드·오류 코드)을 바꾸면 `--reviewer seonghoho` 를 붙인다.
+   인자 `리뷰어:` 가 우선이다. 없으면 `*Controller.java`·`*Request.java`·`*Response.java` 변경 여부로 판단한다.
 
 5. **본문 작성** — 템플릿을 채워 Write 도구로 임시 파일에 저장한다.
    - 실제 확인하지 않은 체크박스는 체크하지 않는다.
-   - `검증 내역` 에는 **실제로 돌린 명령과 결과**만 적는다. 미실행·실패를 숨기지 않는다.
-   - 결제·주문·재고를 건드렸으면 `/payment-guard` · `/order-flow-guard` 결과 요약을 `참고 사항` 에 적는다.
-   - 엔티티를 추가·변경했으면 `운영 DDL` 절에 local·dev 에서 뽑은 PostgreSQL DDL 을 적는다 (`coding-conventions.md` §9-8).
+   - `검증 내역` 에는 인자 `검증:` 으로 받은 **실제로 돌린 명령과 결과**만 적는다. 미실행·실패를 숨기지 않는다.
+   - 결제·주문·재고를 건드렸으면 인자로 받은 `/payment-guard` · `/order-flow-guard` 결과 요약을 `참고 사항` 에 적는다.
+   - 엔티티를 추가·변경했으면 `운영 DDL` 절에 인자 `DDL:` 로 받은 PostgreSQL DDL 을 적는다 (`coding-conventions.md` §9-8).
      운영에는 사용자가 직접 적용하므로 이 절이 유일한 근거다. 비어 있으면 PR 을 만들지 않는다.
 
-6. **푸시 · 생성**
+6. **PR 상태 확인 · 푸시 · 생성**
+
+   ```bash
+   gh pr view --json number,state,url   # 현재 브랜치의 PR
+   ```
+
+   - `MERGED`·`CLOSED` 면 **푸시하지 않고** 보고한다. 머지된 PR 의 브랜치에 푸시한 커밋은 develop 에 들어가지 않는다.
+   - `OPEN` 이면 푸시한 뒤 `gh pr edit <번호> --body-file <본문 파일>` 로 본문·라벨을 보정한다.
+   - PR 이 없으면 푸시 · 생성한다.
 
    ```bash
    git push -u origin HEAD
