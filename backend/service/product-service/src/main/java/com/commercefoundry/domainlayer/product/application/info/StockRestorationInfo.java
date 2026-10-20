@@ -18,7 +18,7 @@ public record StockRestorationInfo(long restorationId, long claimId, long reserv
         );
     }
 
-    /** @param restored 재고를 실제로 되돌렸는가. 무제한 SKU 는 false (기록만) */
+    /** @param restored 되돌릴 대상(선점 때 차감)이었는가 — 재고 행이 없으면 warn 만 남기고 수량은 늘지 않는다. 무제한 SKU 는 false(기록만) */
     public record Item(long skuId, int quantity, boolean restored) {
     }
 }

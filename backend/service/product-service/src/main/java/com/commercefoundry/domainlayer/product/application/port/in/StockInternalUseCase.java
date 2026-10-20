@@ -25,7 +25,7 @@ public interface StockInternalUseCase {
     /**
      * 결제 후 취소 · 반품 입고의 재고 복원. 같은 클레임의 복원이 있으면 내용이 같을 때 그대로 돌려준다(멱등, 200) — 다르면 {@code PRODUCT_029}.
      * 선점이 없으면 {@code PRODUCT_003}, 확정(CONFIRMED)이 아니면 {@code PRODUCT_027}, 복원 가능 수량을 넘으면 {@code PRODUCT_028},
-     * 같은 클레임의 동시 생성이면 {@code PRODUCT_030} 이고 아무것도 되돌리지 않는다.
+     * 같은 클레임의 동시 생성이면 {@code PRODUCT_030}, 선점 잠금 대기 초과면 {@code PRODUCT_031} 이고 아무것도 되돌리지 않는다.
      */
     StockRestorationResponse restore(StockRestorationCommand command);
 }

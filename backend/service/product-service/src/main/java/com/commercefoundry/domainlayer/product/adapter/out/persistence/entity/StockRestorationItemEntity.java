@@ -46,7 +46,7 @@ public class StockRestorationItemEntity extends BaseEntity implements Persistabl
     @Column(name = "quantity", nullable = false, comment = "복원 수량 (1 이상). 재고를 되돌리지 않은 무제한 SKU 도 복원 상한 계산에 들어간다")
     private int quantity;
 
-    @Column(name = "restored", nullable = false, comment = "재고를 실제로 되돌렸는가 — 선점 항목이 차감(deducted)이었으면 true. 무제한 SKU 는 false(기록만)")
+    @Column(name = "restored", nullable = false, comment = "되돌릴 대상(선점 때 차감)이었는가 — 재고 행이 없으면 warn 만 남기고 수량은 늘지 않는다. 무제한 SKU 는 false(기록만)")
     private boolean restored;
 
     /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다. */

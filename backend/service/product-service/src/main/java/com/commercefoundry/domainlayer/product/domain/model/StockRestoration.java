@@ -33,7 +33,7 @@ public record StockRestoration(long id, long claimId, long reservationId, long o
         items = List.copyOf(items);
     }
 
-    /** 재고를 실제로 되돌릴 항목 — SKU 아이디 오름차순이다. 무제한 SKU(restored=false)는 기록만 남는다. */
+    /** 재고를 되돌릴 대상 항목(선점 때 차감) — SKU 아이디 오름차순이다. 무제한 SKU(restored=false)는 기록만 남는다. */
     public List<StockRestorationItem> restoredItems() {
         return items.stream().filter(StockRestorationItem::restored).toList();
     }

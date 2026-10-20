@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.domain.Limit;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
@@ -38,9 +39,18 @@ public class StockReservationRepositoryAdapter implements StockReservationReposi
         return stockReservationRepository.findById(reservationId).map(this::withItems);
     }
 
+    /**
+     * 잠금 대기가 상한({@link StockReservationRepository#LOCK_TIMEOUT_MILLIS})을 넘으면 PostgreSQL 이 {@code 55P03}(lock_not_available)으로 끊고,
+     * Spring 이 {@link PessimisticLockingFailureException}(하위 {@code CannotAcquireLockException} 포함)으로 바꾼다 — 재시도 가능한 409 로 알린다.
+     * PostgreSQL 은 문장 오류로 트랜잭션을 중단시키므로 같은 트랜잭션에서 계속하지 않는다.
+     */
     @Override
     public Optional<StockReservation> findByIdForUpdate(long reservationId) {
-        return stockReservationRepository.findByIdForUpdate(reservationId).map(this::withItems);
+        try {
+            return stockReservationRepository.findByIdForUpdate(reservationId).map(this::withItems);
+        } catch (PessimisticLockingFailureException exception) {
+            throw new ProductException(ProductErrorCode.STOCK_RESERVATION_LOCK_TIMEOUT, exception);
+        }
     }
 
     @Override
