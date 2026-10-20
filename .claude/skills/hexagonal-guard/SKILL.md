@@ -21,18 +21,19 @@ description: commerce-foundry 백엔드의 Hexagonal 계층(Controller/UseCase/F
 
 ## 기계로 보는 것 / 사람이 보는 것
 
-계층 의존 9종(H1~H9 — Controller 는 UseCase 만, application → adapter 금지와 예외 3종, Processor → adapter 금지, domain 순수,
-out-port 의 Info 금지, 진입 간 타입 공유 금지, in → out adapter 금지, 컨텍스트 간 허용 목록, Presenter 는 변환만)은
+계층 의존 12종(H1~H12 — Controller 는 UseCase 만, application → adapter 금지와 예외 3종, Processor → adapter 금지, domain 순수,
+out-port 의 Info 금지, 진입 간 타입 공유 금지, in → out adapter 금지, 컨텍스트 간 허용 목록, Presenter 는 변환만,
+스케줄러 · 웹훅 포함 진입 전체가 UseCase 경유, Facade → out-port 금지, Feign · `common.dto` 전송 타입의 application · domain 누수 금지)은
 **빌드가 본다** — 서비스 `<Svc>ArchitectureTest` 가 `HexagonalArchitectureRules` 를 implements 한다 (정본 `architecture-guide.md` §3 "기계로 보는 것").
 `./gradlew :service:<svc>:test --tests '*ArchitectureTest'` 가 통과하면 그 항목은 다시 보지 않는다. 실패 메시지에 고치는 법이 있다.
 
 이 스킬은 **규칙이 보지 못하는 것**에 집중한다 — 아래 What to Check 의 4 · 5 와 2 의 이름 · 반환 의미, 3 의 필드 누출 · isAdmin 분기,
-그리고 §2 패키지 구조를 비켜 간 클래스(규칙은 패키지 이름으로 판정한다).
+그리고 §2 패키지 구조 · 이름 접미사(`*Facade` · `*Processor` · `*ExceptionHandler`)를 비켜 간 클래스, `global` 패키지, H12 패턴 밖의 외부 전송 타입(PG SDK 등).
 
 ## 빠른 탐지
 
 ```bash
-# 계층 의존 규칙 (H1~H9) — 먼저 돌린다
+# 계층 의존 규칙 (H1~H12) — 먼저 돌린다
 cd backend && ./gradlew :service:<svc>:test --tests '*ArchitectureTest'
 
 # application 이 adapter 를 import 하는 곳 (문서화된 예외 3개를 걸러서 본다)
@@ -55,7 +56,7 @@ grep -rn "private final .*\(Facade\|Processor\|Port\|Repository\) " backend/serv
 
 2. **Port / Adapter 경계**
    - `application` 은 `adapter` 타입에 의존하지 않는다. 허용 예외는 셋뿐이다:
-     ① `port/in` 반환 타입이 web/admin dto ② Facade 의 Presenter 주입 ③ `application/mapper` 의 Entity 참조
+     ① `port/in` 의 진입 DTO(web · admin · internal) ② Facade 의 Presenter 주입 ③ `application/mapper` 의 Entity 참조
    - **PG(토스·PayPal) 응답 DTO, Feign 응답 래퍼, 택배사 응답이 application 에 나타나지 않는다**
    - out-port 이름이 전송 기술이 아니라 책임이다 (`PaymentGatewayPort` ○, `TossClientPort` ✕)
    - out-port 반환이 `QueryResult` 또는 domain model 이다 (`Info` ✕)
