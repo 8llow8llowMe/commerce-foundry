@@ -204,8 +204,13 @@ public final class ProductValidationMessage {
   - 예: product-service `StockReservationEntity` · `StockReservationRepositoryAdapter` (#10).
 - **비관적 잠금(`@Lock(PESSIMISTIC_WRITE)`)은 상태를 바꾸지 않는 쓰기가 같은 부모 행 기준으로 합계 · 상한을 판정할 때만 쓴다** — 상태 전이가 없으면
   `@Version` 이 경합을 잡지 못하고, 각자 읽은 합으로 함께 상한을 넘긴다. 정적 JPQL(`select ... where id = :id`)에 `@Lock` 을 달고 이름은 `findByIdForUpdate` 로 둔다
-  (네이티브 `for update` 금지 — §9-5). 잠금 순서는 다른 경로와 같은 순서(부모 행 → 자식 · 재고 행 아이디 오름차순)로 맞춰 교착을 막는다.
-  예: product-service 결제 후 재고 복원이 선점 헤더를 잠근다 (`StockReservationRepository#findByIdForUpdate`, #85 — `order-flow-guide.md` §3-2).
+  (네이티브 `for update` 금지 — §9-5). PostgreSQL 에서는 `for no key update`(Hibernate 7) 다 — 같은 잠금 · 그 행의 UPDATE 와만 충돌하고,
+  FK 검사의 KEY SHARE 는 막지 않는다. 잠금 순서는 다른 경로와 같은 순서(부모 행 → 자식 · 재고 행 아이디 오름차순)로 맞춰 교착을 막는다.
+  - **잠금 대기 상한을 둔다** — `@QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = ...))`. 값은 상수로 두고 호출자 Feign read timeout 보다
+    짧게 잡는다(길면 호출자가 먼저 끊고 재시도해 같은 요청이 또 줄을 선다). 넘으면 어댑터가 `PessimisticLockingFailureException`
+    (`CannotAcquireLockException` 포함, PostgreSQL SQLState `55P03`)을 **재시도 가능한 도메인 409** 로 바꾼다.
+  - 예: product-service 결제 후 재고 복원이 선점 헤더를 잠근다 (`StockReservationRepository#findByIdForUpdate` · 상한 2000ms · 초과 `PRODUCT_031`,
+    #85 — `order-flow-guide.md` §3-2).
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.
