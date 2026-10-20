@@ -142,6 +142,24 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 - 어드민 재고 조정(`PATCH /api/v1/admin/stocks/{skuId}`)은 수량 **절대값 + 기대 수량 CAS**(`expectedQuantity`) 다 — 그 사이 주문이 차감했으면 409 `PRODUCT_020`.
   재고 행이 없는 SKU 의 첫 등록은 INSERT 이고, 동시 첫 등록은 PK 충돌로 409 다.
 
+#### 어드민 재고 조회 · 조정 이력 (#86)
+
+| 경로 | 동작 |
+|------|------|
+| `GET /api/v1/admin/stocks?skuIds=1,2,3` | SKU 재고 목록 — `{ stocks: [{ skuId: String, stockManaged, availableQuantity, reservedQuantity, updatedAt }] }`. 항목은 PATCH 응답과 같은 모양이다 |
+| `GET /api/v1/admin/stocks/{skuId}/adjustments?page=&size=` | 조정 이력 `PageResponse` — 최신순(아이디 내림차순). 항목 `{ id, beforeQuantity, afterQuantity, delta, beforeStockManaged, afterStockManaged, reason{code,name,description}, memo, adminMemberId, createdAt }` |
+
+- **SKU 목록 방식이다 — 상품 단위 조회는 하지 않는다.** 어드민 상품 상세(#9)가 아직 없어 화면이 상품 → SKU 를 고르는 경로가 정해지지 않았다.
+  #9 에서 상품 상세가 SKU 아이디를 내려 주면 화면은 그 묶음으로 이 API 를 부른다. 상품 단위가 필요해지면 그때 따로 연다.
+- skuIds 는 1~100개 · 양수(`PRODUCT_124` 필수 · `PRODUCT_125` 상한 · `PRODUCT_126` 양수), 중복은 첫 등장 한 번이고 요청 순서대로 낸다.
+  **없는 SKU 는 응답에서 빠진다** — 서비스 간 SKU 조회와 같은 관례이고, 지워진 SKU 하나 때문에 나머지 SKU 조정까지 막지 않는다.
+- **재고 행이 없는 SKU 는 품절로 낸다** — `stockManaged=true · availableQuantity=0 · reservedQuantity=0 · updatedAt=null`. 화면은 조회한
+  `availableQuantity` 를 **그대로 PATCH 의 `expectedQuantity` 로 보낸다** — 행 없는 SKU 의 첫 등록이 기대 수량 0 을 요구하는 규칙과 맞물린다.
+- 쿼리는 재고 목록이 SKU 존재(in 1) · 재고 행(in 1) · 선점 합(SKU 묶음 group by 1) 3번, 조정 이력이 SKU 존재 · 목록 · 전체 건수 3번이다.
+  선점 합은 PATCH 도 같은 묶음 쿼리를 SKU 하나로 부른다. 이력은 `idx_stock_adjustment_history_sku_id_id` 를 탄다.
+- 조정 이력의 `adminMemberId` 는 내부 회원 아이디라 그대로 낸다(개인정보 아님). 어드민 이름 표시는 auth-service 조회가 필요해 범위 밖이다.
+- 이력 조회의 없는 SKU 는 404 `PRODUCT_002`, 이력이 없는 SKU 는 빈 목록이다. 두 조회 모두 `hasRole('ADMIN')`, Facade 는 `@Transactional(readOnly = true)` 다.
+
 #### 어드민 조정 운영 규칙
 
 - **`availableQuantity`(요청의 `quantity`)는 선점분을 뺀 판매 가능 수량이다 — 실물 수량이 아니다.** 응답의 `reservedQuantity` 는 그 SKU 의
@@ -214,7 +232,7 @@ RESERVED ──확정──▶ CONFIRMED
 | `PRODUCT_024` | 409 | 이미 확정된 선점의 해제 |
 | `PRODUCT_025` | 409 | 이미 해제 · 만료된 선점의 확정 |
 | `PRODUCT_026` | 409 | 동시 변경(`@Version`) · 같은 주문의 동시 선점 생성 — 다시 시도한다 |
-| `PRODUCT_112`~`PRODUCT_123` | 400 | 요청 검증 (`ProductValidationMessage`) — 선점 수량 상한 `PRODUCT_122`, 어드민 조정 경로의 `skuId` 양수 `PRODUCT_123` |
+| `PRODUCT_112`~`PRODUCT_126` | 400 | 요청 검증 (`ProductValidationMessage`) — 선점 수량 상한 `PRODUCT_122`, 어드민 조정 · 이력 경로의 `skuId` 양수 `PRODUCT_123`, 어드민 재고 조회 `skuIds` `PRODUCT_124`~`PRODUCT_126` |
 
 - **결제 후 취소 · 반품의 재고 복원**(위 표의 "복원")은 이 API 범위 밖이다 — 확정된 선점은 해제하지 않는다. 후속 이슈에서 다룬다.
 
