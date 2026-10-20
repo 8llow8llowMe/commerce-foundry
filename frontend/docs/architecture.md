@@ -24,8 +24,10 @@ pnpm workspace + Turborepo. 앱 둘과 패키지 셋이다.
 [apps/*/src/app/api/[...path]/route.ts]            createProxyHandler (@cf/api-client/server)
   - /api/v1/** 만 전달, 그 외 BFF_001 404
   - Content-Type · Accept · Accept-Language · Idempotency-Key 만 전달
+  - X-Forwarded-For 는 브라우저 값을 버리고 클라이언트 IP 한 값으로 덮어쓴다(아래 클라이언트 IP)
   - access 쿠키 → Authorization: Bearer (클라이언트가 보낸 Authorization 은 버린다)
   - POST · PUT · PATCH · DELETE 는 같은 origin 요청만 받는다(아래 CSRF), 아니면 BFF_003 403
+  - access 쿠키 없음 + refresh 쿠키 → 보내기 전에 재발급 → 새 토큰으로 1회 (토큰 없는 첫 요청을 만들지 않는다)
   - 401 + refresh 쿠키 → 재발급 1회 → 새 쿠키 → 원 요청 1회 재시도 (재발급 결과별 처리는 §3)
   - 게이트웨이 Set-Cookie 는 버린다. 연결 실패는 BFF_002 503
   - 그 밖의 상태(429 + Retry-After 포함)는 재발급 · 재시도 없이 그대로 중계한다
@@ -41,6 +43,27 @@ pnpm workspace + Turborepo. 앱 둘과 패키지 셋이다.
   같은 옛 refresh 토큰에 다시 내준다 — 브라우저가 새 쿠키를 반영하기 전에 옛 쿠키로 온 요청(병렬 요청·다른 탭)이
   회전된 refresh 로 재발급을 시도해 로그아웃되는 것을 막는다. 다른 인스턴스로 간 같은 refresh 는 BE 가 30초 유예 안에 3회까지 새 토큰을 내준다(PR #99, 넷째는 AUTH_012 로 family 폐기).
 - 재발급이 성공한 뒤 재시도가 연결 실패해도 새 쿠키는 심는다(회전된 refresh 토큰을 잃지 않는다).
+- **access 쿠키가 없고 refresh 만 있으면(access 쿠키 만료) 보내기 전에 재발급한다(#134).** 토큰 없이 보내 401 을 받고 재발급하면
+  그 첫 요청이 게이트웨이에서 비로그인(IP 단위) 요청 제한에 세이고, 버킷이 비면 401 대신 429 를 받아 재발급 경로를 못 탄다.
+  재발급 결과별로: 성공 → 새 토큰으로 1회 보내고 새 쿠키(그 응답이 401 이어도 다시 재발급하지 않는다), 거절 → 쿠키를 지우고 토큰 없이 보낸다
+  (공개 조회는 그대로 되고 회원 API 는 401), 일시 장애 → 보내지 않고 BFF_002 503. 동시 요청은 위의 재발급 합치기를 그대로 탄다.
+
+### 클라이언트 IP (#134)
+
+게이트웨이는 토큰 없는 쓰기 요청을 클라이언트 IP 로 센다(`backend/docs/security-guide.md` §7-3, 켜는 일은 #135). BFF 뒤에서는
+게이트웨이가 보는 원격 주소가 늘 BFF 라서, BFF 가 클라이언트 IP 를 `X-Forwarded-For` 로 넘긴다.
+
+- **게이트웨이를 부르는 BFF 의 모든 경로**(중계 · 로그인 · 회원가입 · 재발급 · 로그아웃)가 같은 규칙을 쓴다 — `resolveClientIp` · `setClientIp`(`@cf/api-client/server`).
+- 브라우저가 보낸 `X-Forwarded-For` 는 **버린다**(누구나 정할 수 있다). 앞단(호스팅 플랫폼 · LB)이 정한 헤더 하나에서 IP 를 읽어
+  게이트웨이행 `X-Forwarded-For` 를 **그 한 값으로 덮어쓴다**. 읽을 헤더는 `CLIENT_IP_HEADER`(기본 `x-real-ip`, `none` 이면 끔)다.
+- 그 헤더 값에 쉼표가 있으면 맨 오른쪽(바로 앞 프록시가 붙인 값)만 쓴다. 주소가 아닌 값이거나 헤더가 없으면 `X-Forwarded-For` 를 보내지 않는다
+  — 게이트웨이는 BFF 주소로 센다(그 BFF 뒤가 한 버킷, 닫힌 쪽).
+- **읽는 헤더는 앞단이 반드시 덮어써야 한다.** 그렇지 않으면 브라우저가 그 헤더로 버킷을 고른다.
+  Vercel 은 `x-real-ip` 를 플랫폼이 덮어쓴다. nginx 는 `proxy_set_header X-Real-IP $remote_addr;` 를 둔다.
+  `X-Forwarded-For` 를 덧붙이는(append) L7 LB 한 단 뒤라면 `CLIENT_IP_HEADER=x-forwarded-for` 로 맨 오른쪽을 쓴다. 앞단 없이 BFF 가 직접 받는 구성이면 `none` 으로 끈다.
+- 게이트웨이는 **BFF 송신 주소가 신뢰 프록시(`GATEWAY_TRUSTED_PROXIES`)일 때만** 이 값을 읽는다. 배포 구성이 정해지면 BFF 의 송신 주소 대역을 #135 에 넘긴다.
+- `serverFetch`(Server Component)는 넘기지 않는다. 조회(GET)만 하고 게이트웨이는 조회를 세지 않는다. 요청 헤더를 읽으면 그 렌더가 동적이 되는 것도 이유다.
+  RSC 에서 쓰기를 부르게 되면 이 규칙을 같이 넣는다.
 
 ### CSRF
 
