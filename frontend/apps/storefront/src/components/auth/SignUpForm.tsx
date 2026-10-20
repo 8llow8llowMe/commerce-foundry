@@ -165,7 +165,7 @@ export function SignUpForm({ returnPath }: { returnPath: string }) {
           errors={errors.phone}
         />
 
-        <fieldset className="flex flex-col gap-3 border-t border-border pt-5">
+        <fieldset className="mt-3 flex flex-col gap-3">
           <legend className="sr-only">{t.signUp.agreements}</legend>
           <Checkbox
             label={<span className="font-medium">{t.signUp.agreeAll}</span>}

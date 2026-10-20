@@ -38,7 +38,7 @@ export function CartLineItem({
         : null;
 
   return (
-    <li className="flex flex-col gap-3 border-b border-border py-6 sm:flex-row sm:items-start sm:justify-between">
+    <li className="flex flex-col gap-3 bg-muted px-5 py-6 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
         {line.name ? (
           <Link

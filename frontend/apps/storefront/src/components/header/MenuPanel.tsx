@@ -95,7 +95,7 @@ export function MenuPanel({ brandName, items, labels, languages, signedIn }: Men
             </ul>
           </nav>
 
-          <nav aria-label={labels.accountNav} className="mt-8 border-t border-border pt-6">
+          <nav aria-label={labels.accountNav} className="mt-12">
             <ul className="flex gap-8 text-sm tracking-[0.15em]">
               {signedIn ? (
                 <>
