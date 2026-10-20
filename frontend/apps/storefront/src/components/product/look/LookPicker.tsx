@@ -12,12 +12,14 @@ import {
   type LookProduct,
 } from '@/lib/catalog/look-cart';
 import { selectOption } from '@/lib/catalog/option-selection';
+import { CartActionNotice } from '@/components/cart/CartActionNotice';
+import { useCartAction } from '@/lib/cart/use-cart-action';
 import { fill } from '@/lib/i18n/format';
 
 /**
  * Shop the Look 구성품 목록 — 메인 04 영역과 상품 상세가 함께 쓴다.
  * 상품마다 함께 담기 여부와 옵션을 고르고, lookCartLines 로 담을 SKU 를 정한다.
- * 장바구니 연결은 #26 이다 — 지금은 버튼을 막고 무엇이 남았는지만 알려 준다.
+ * 고른 SKU 를 한 줄씩 차례로 장바구니에 담는다(#26). 중간에 실패하면 담긴 수와 이유를 함께 알린다.
  * 합계는 보이지 않는다(금액은 서버 값만 — 장바구니가 계산한다).
  *
  * floatingAction 이면 모바일에서 목록이 화면에 있는 동안 담기 버튼을 하단에 고정한다(메인 04, #59).
@@ -47,16 +49,20 @@ export function LookPicker({
 
   const baseId = useId();
   const noticeId = useId();
-  const t = useDictionary().look;
+  const dict = useDictionary();
+  const t = dict.look;
+  const cart = useCartAction();
   const formatMoney = useFormatMoney();
   const [picks, setPicks] = useState<LookPick[]>(() =>
     products.map((product) => ({ product, included: lookPickable(product), selection: {} })),
   );
 
-  const update = (productId: string, change: (pick: LookPick) => LookPick) =>
+  const update = (productId: string, change: (pick: LookPick) => LookPick) => {
+    cart.clear();
     setPicks((current) =>
       current.map((pick) => (pick.product.productId === productId ? change(pick) : pick)),
     );
+  };
 
   const { lines, incomplete } = lookCartLines(picks);
   const notice =
@@ -64,7 +70,12 @@ export function LookPicker({
       ? fill(t.selectOptions, { names: incomplete.join(', ') })
       : lines.length === 0
         ? t.pickItems
-        : t.cartPending;
+        : t.ready;
+  const canAdd = incomplete.length === 0 && lines.length > 0;
+  const addAll = () => {
+    if (!canAdd) return;
+    void cart.add(lines.map((line) => ({ ...line, customOptions: [], maxQuantity: null })));
+  };
 
   return (
     <div ref={rootRef} className="flex flex-col gap-6">
@@ -170,14 +181,17 @@ export function LookPicker({
             'pointer-events-none translate-y-full opacity-0 lg:pointer-events-auto lg:translate-y-0 lg:opacity-100',
         )}
       >
-        {/* 장바구니 API(#26)가 생기면 lines 를 담는다 */}
-        <Button disabled variant="secondary" className="h-12 w-full" aria-describedby={noticeId}>
-          {t.addAll}
-          {lines.length > 0 && ` (${lines.length})`}
+        <Button
+          disabled={!canAdd || cart.pending || cart.coolingDown}
+          onClick={addAll}
+          variant="secondary"
+          className="h-12 w-full"
+          aria-describedby={noticeId}
+        >
+          {cart.pending ? dict.product.purchase.adding : t.addAll}
+          {!cart.pending && lines.length > 0 && ` (${lines.length})`}
         </Button>
-        <p id={noticeId} role="status" className="text-center text-xs text-muted-fg">
-          {notice}
-        </p>
+        <CartActionNotice id={noticeId} result={cart.result} notice={notice} />
       </div>
     </div>
   );

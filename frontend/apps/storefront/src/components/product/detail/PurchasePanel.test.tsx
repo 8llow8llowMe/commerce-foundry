@@ -1,9 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ProductSku, SaleStatusCode } from '@/lib/catalog/types';
 import { LocaleProvider } from '@/components/i18n/LocaleProvider';
 import { en } from '@/lib/i18n/dictionaries/en';
 import { PurchasePanel, type PurchaseProduct } from './PurchasePanel';
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 
 const krw = (amount: number) => ({ amount, currency: 'KRW' as const });
 const status = (code: SaleStatusCode, name: string = code) => ({ code, name, description: '' });
@@ -80,11 +82,12 @@ describe('PurchasePanel (첫 렌더)', () => {
     expect(render({ saleStatus: status('STOP_SELLING', '판매 종료') })).toContain('>판매 종료</p>');
   });
 
-  it('옵션 없는 상품은 옵션 줄 없이 하나뿐인 SKU 로 바로 정해진다', () => {
+  it('옵션 없는 상품은 옵션 줄 없이 하나뿐인 SKU 로 바로 정해져 담을 수 있다', () => {
     const html = render({ optionGroups: [], skus: [sku('only', [], 0)] });
     expect(html).not.toContain('type="radio"');
     expect(html).not.toContain('~');
-    expect(html).toContain('장바구니 담기는 준비 중입니다.');
+    expect(html).toContain('선택한 옵션을 담을 수 있습니다.');
+    expect(html).toMatch(/<button(?![^>]*disabled="")[^>]*>장바구니 담기<\/button>/);
   });
 
   it('맞춤 제작이면 제작 기간 · 안내 · 입력 항목(단위 · 필수 · 도움말)을 그린다', () => {
@@ -115,6 +118,32 @@ describe('PurchasePanel (첫 렌더)', () => {
     }
     expect(html).toContain('(cm)');
     expect(html).toContain('배꼽 위치에서 잽니다.');
+  });
+
+  it('맞춤 제작 필수 칸이 비어 있으면 SKU 가 정해져도 담기를 막고 안내한다', () => {
+    const html = render({
+      optionGroups: [],
+      skus: [sku('only', [], 0)],
+      customOrder: {
+        notice: null,
+        leadTimeDays: null,
+        fields: [
+          {
+            fieldKey: 'waist',
+            label: '허리 둘레',
+            inputType: 'NUMBER',
+            unit: 'cm',
+            required: true,
+            min: null,
+            max: null,
+            step: null,
+            helpText: null,
+          },
+        ],
+      },
+    });
+    expect(html).toContain('맞춤 제작 필수 항목을 입력해 주세요.');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>장바구니 담기<\/button>/);
   });
 });
 

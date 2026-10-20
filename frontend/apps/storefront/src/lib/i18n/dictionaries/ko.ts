@@ -127,7 +127,9 @@ export const ko = {
     purchase: {
       selectOptions: '옵션을 선택해 주세요.',
       optionStatus: '선택한 옵션은 {status} 입니다.',
-      cartPending: '장바구니 담기는 준비 중입니다.',
+      ready: '선택한 옵션을 담을 수 있습니다.',
+      fillRequired: '맞춤 제작 필수 항목을 입력해 주세요.',
+      adding: '담는 중…',
       surcharge: '옵션 추가금 +{amount}',
       quantity: '수량',
       decrease: '수량 줄이기',
@@ -148,10 +150,64 @@ export const ko = {
     /** 05 Craft 확대에서 전신으로 돌아가기 */
     craftOverview: '전신 보기',
   },
+  cart: {
+    title: '장바구니',
+    added: '장바구니에 담았습니다.',
+    view: '장바구니 보기',
+    /** 여러 상품을 차례로 담다 일부만 담겼을 때. {count}: 담긴 상품 수 */
+    partlyAdded: '{count}개 상품은 담았습니다.',
+    failed: '장바구니에 담지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    lineLimit: '장바구니에는 최대 50개 상품까지 담을 수 있습니다.',
+    storageUnavailable: '이 브라우저에서는 장바구니를 저장할 수 없습니다. 로그인 후 담아 주세요.',
+    /** 서버 오류 코드별 문구 — 없는 코드는 failed */
+    errors: {
+      CART_001: '장바구니에 없는 상품입니다. 화면을 새로 고쳐 주세요.',
+      CART_002: '판매하지 않는 상품 옵션입니다.',
+      CART_003: '지금은 구매할 수 없는 상품입니다.',
+      CART_004: '맞춤 제작 입력을 담을 수 없는 상품입니다.',
+      CART_005: '한 상품에 담을 수 있는 최대 수량을 넘었습니다.',
+      CART_006: '장바구니에는 최대 50개 상품까지 담을 수 있습니다.',
+      CART_007: '장바구니가 동시에 변경되었습니다. 다시 시도해 주세요.',
+      CART_008: '상품 정보를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.',
+      GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+    } as Record<string, string>,
+    empty: '장바구니가 비어 있습니다.',
+    continueShopping: '쇼핑 계속하기',
+    loading: '장바구니를 불러오는 중입니다.',
+    loadFailed: '장바구니를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    reload: '다시 불러오기',
+    remove: '삭제',
+    /** {name}: 상품명 — 스크린리더용 버튼 이름 */
+    removeItem: '{name} 삭제',
+    quantity: '수량',
+    decrease: '수량 줄이기',
+    increase: '수량 늘리기',
+    /** 비회원 줄은 줄 금액을 계산하지 않고 단가만 보인다 */
+    each: '개당 {amount}',
+    total: '상품 합계',
+    /** 배송비는 주문서에서 정해진다 */
+    totalNote: '배송비는 주문서에서 계산됩니다.',
+    /** {count}: 상한 */
+    exceeded: '최대 {count}개까지 주문할 수 있어 합계에서 빠졌습니다.',
+    excluded: '합계에서 빠집니다.',
+    checkout: '주문하기',
+    checkoutPending: '주문하기는 준비 중입니다.',
+    guestNotice: '로그인하면 담은 상품이 회원 장바구니로 옮겨지고 주문 금액을 확인할 수 있습니다.',
+    login: '로그인하고 주문하기',
+    productUnavailable: '판매하지 않는 상품입니다.',
+    /** 로그인 직후 병합에서 건너뛴 상품. {count}: 건너뛴 수 */
+    mergeSkipped: '담을 수 없는 상품 {count}개는 회원 장바구니로 옮기지 못했습니다.',
+    /** 병합 응답을 받지 못했다(502 · 504) — 두 번 더하지 않으려고 다시 보내지 않는다 */
+    mergeUnknown:
+      '담아 둔 상품을 회원 장바구니로 옮겼는지 확인하지 못했습니다. 장바구니를 확인해 주세요.',
+    /** 회원 장바구니 조회가 401 — 세션이 끝났다 */
+    signInRequired: '로그인이 만료되었습니다. 다시 로그인해 주세요.',
+    dismiss: '닫기',
+  },
   look: {
     selectOptions: '{names} 옵션을 선택해 주세요.',
     pickItems: '함께 담을 상품을 골라 주세요.',
-    cartPending: '장바구니 담기는 준비 중입니다.',
+    ready: '고른 상품을 한 번에 담을 수 있습니다.',
     current: '지금 보는 상품',
     customOrder: '맞춤 제작 상품은 치수를 받아야 해요.',
     orderFromProduct: '상품에서 주문하기',

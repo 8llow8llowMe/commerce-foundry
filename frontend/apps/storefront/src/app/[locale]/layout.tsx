@@ -2,6 +2,8 @@ import { brand } from '@cf/brand';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { SiteFooter } from '@/components/footer/SiteFooter';
+import { SessionProvider } from '@/components/auth/SessionProvider';
+import { CartMerge } from '@/components/cart/CartMerge';
 import { SiteHeader } from '@/components/header/SiteHeader';
 import { LocaleProvider } from '@/components/i18n/LocaleProvider';
 import { hasSession } from '@/lib/auth/session';
@@ -46,21 +48,24 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
       {/* 내용이 짧은 페이지에서도 푸터가 화면 아래에 붙게 한다 */}
       <body className="flex min-h-dvh flex-col bg-bg font-sans text-fg antialiased">
         <LocaleProvider locale={locale} prefix={localePrefix(localeRouting, locale)} dict={dict}>
-          <SiteHeader
-            brandName={brand.name}
-            navigation={content.navigation}
-            labels={dict.header}
-            languages={languages}
-            signedIn={signedIn}
-          />
-          <div className="flex-1">{children}</div>
-          <SiteFooter
-            brandName={brand.name}
-            links={content.footerLinks}
-            business={businessInfo}
-            labels={dict.footer}
-            backdrop={content.footerBackdrop}
-          />
+          <SessionProvider signedIn={signedIn}>
+            <SiteHeader
+              brandName={brand.name}
+              navigation={content.navigation}
+              labels={dict.header}
+              languages={languages}
+              signedIn={signedIn}
+            />
+            <CartMerge />
+            <div className="flex-1">{children}</div>
+            <SiteFooter
+              brandName={brand.name}
+              links={content.footerLinks}
+              business={businessInfo}
+              labels={dict.footer}
+              backdrop={content.footerBackdrop}
+            />
+          </SessionProvider>
         </LocaleProvider>
       </body>
     </html>

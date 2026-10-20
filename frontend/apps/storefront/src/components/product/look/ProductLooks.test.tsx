@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProductDetail, ProductLook } from '@/lib/catalog/types';
 import { ProductLooks } from './ProductLooks';
 
+// LookPicker 의 담기(useAddToCart)가 라우터를 쓴다
+vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
+
 const serverFetch = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/server-api', () => ({ serverFetch }));
 
