@@ -375,7 +375,7 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 | `cart-write` | 그 밖의 `/api/v1/carts/**` 쓰기 (POST · PUT · PATCH · DELETE) | 분당 60회 · 순간 20회 |
 | `order-write` | `/api/v1/orders/**` 쓰기 | 분당 12회 · 순간 5회 |
 
-- **키는 검증된 회원 id 다** — `request_rate_limiter.{<정책>:member:<memberId>}.tokens` · `.timestamp`(Spring Cloud Gateway `RedisRateLimiter` 의 토큰 버킷,
+- **키는 검증된 회원 id 다** — `request_rate_limiter.{<정책>.<정책>:member:<memberId>}.tokens` · `.timestamp`(Spring Cloud Gateway `RedisRateLimiter` 의 토큰 버킷,
   `coding-conventions.md` §9-7). 내부 Snowflake id 만 들어가고 이메일 · IP 같은 개인정보는 넣지 않는다. 요청 하나는 처음 맞는 정책 하나에만 걸리고 정책마다 버킷이 따로다.
 - **토큰 없는 요청은 세지 않는다.** 대상 API 가 모두 `isAuthenticated()` 라 서비스가 401 로 끊고 쓰기가 일어나지 않는다. 조회(GET) · 어드민 경로 · preflight 는 세지 않는다.
   **비로그인으로 쓰는 API(비회원 주문 등)를 대상 경로에 더하는 PR 은 IP 단위 제한(#89 — 신뢰할 프록시 목록 · IP 원문 없는 키)을 먼저 끝낸다.**
