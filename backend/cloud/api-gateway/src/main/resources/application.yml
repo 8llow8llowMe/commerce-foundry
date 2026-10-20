@@ -72,6 +72,10 @@ gateway:
     order-write:
       requests-per-minute: 12
       burst: 5
+    # 주문서 미리보기(POST /api/v1/orders/quotes). 주문서에서 값을 바꿀 때마다 나가므로 주문 생성(order-write)과 따로 센다 (#158)
+    order-quote:
+      requests-per-minute: 60
+      burst: 20
   client-ip:
     # 토큰 없는 요청을 셀 때의 클라이언트 IP 규칙 (security-guide.md §7-3).
     # 토큰 없는 요청을 클라이언트 IP 단위로 셀지. 기본은 끔이다 — BFF 가 클라이언트 IP 를 넘기기 전에는 비로그인 요청 전체가 BFF 주소 한 버킷이 돼

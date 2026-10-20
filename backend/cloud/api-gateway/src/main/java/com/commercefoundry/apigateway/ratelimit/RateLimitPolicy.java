@@ -13,7 +13,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * 회원 · 클라이언트 IP 단위로 요청 수를 세는 고객 쓰기 API ({@code security-guide.md} §7-3). 요청 하나는 <b>선언 순서상 처음 맞는 정책 하나</b>에만 걸린다 —
- * 병합이 일반 장바구니 쓰기보다 앞이라 병합은 병합 한도만 쓴다. 정책마다 버킷이 따로다.
+ * 병합이 일반 장바구니 쓰기보다, 주문서 미리보기가 일반 주문 쓰기보다 앞이라 각자의 한도만 쓴다. 정책마다 버킷이 따로다.
  *
  * <p>조회(GET)는 세지 않는다. 어드민 경로({@code /api/v1/admin/**})는 대상이 아니다. 로그인 · 회원가입 시도 제한은 auth-service 가 맡는다(#66).
  */
@@ -22,6 +22,8 @@ public enum RateLimitPolicy {
 
     CART_MERGE("cart-merge", "/api/v1/carts/*/merge", Set.of(HttpMethod.POST), GatewayRateLimitProperties::cartMerge),
     CART_WRITE("cart-write", "/api/v1/carts/**", WriteMethods.ALL, GatewayRateLimitProperties::cartWrite),
+    // 주문서 미리보기는 수량 · 배송지를 바꿀 때마다 나간다 — 주문 생성과 한도를 나누지 않으면 몇 번 바꾼 뒤 "주문하기" 가 429 를 받는다 (#158)
+    ORDER_QUOTE("order-quote", "/api/v1/orders/quotes", Set.of(HttpMethod.POST), GatewayRateLimitProperties::orderQuote),
     ORDER_WRITE("order-write", "/api/v1/orders/**", WriteMethods.ALL, GatewayRateLimitProperties::orderWrite);
 
     /** Redis 키의 일부다 ({@code request_rate_limiter.{<id>.<id>:member:<memberId>}.tokens} · {@code ...{<id>.<id>:ip:<HMAC>}...}). 바꾸면 진행 중인 버킷이 새로 시작된다. */

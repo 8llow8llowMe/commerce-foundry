@@ -10,13 +10,15 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cartMerge  장바구니 병합(로그인 직후 한 번) — 한 번에 항목을 많이 쓰는 가장 무거운 쓰기라 따로 센다
  * @param cartWrite  그 밖의 장바구니 쓰기 (담기 · 수량 변경 · 삭제)
  * @param orderWrite 주문 쓰기 (생성 · 취소 요청 등)
+ * @param orderQuote 주문서 미리보기 — 주문서에서 값을 바꿀 때마다 나가 주문 생성보다 잦으므로 따로 센다
  */
 @ConfigurationProperties(prefix = "gateway.rate-limit")
 public record GatewayRateLimitProperties(
     @DefaultValue("true") boolean enabled,
     Limit cartMerge,
     Limit cartWrite,
-    Limit orderWrite
+    Limit orderWrite,
+    Limit orderQuote
 ) {
 
     private static final int SECONDS_PER_MINUTE = 60;
@@ -25,11 +27,13 @@ public record GatewayRateLimitProperties(
     static final Limit DEFAULT_CART_MERGE = new Limit(6, 3);
     static final Limit DEFAULT_CART_WRITE = new Limit(60, 20);
     static final Limit DEFAULT_ORDER_WRITE = new Limit(12, 5);
+    static final Limit DEFAULT_ORDER_QUOTE = new Limit(60, 20);
 
     public GatewayRateLimitProperties {
         cartMerge = cartMerge == null ? DEFAULT_CART_MERGE : cartMerge;
         cartWrite = cartWrite == null ? DEFAULT_CART_WRITE : cartWrite;
         orderWrite = orderWrite == null ? DEFAULT_ORDER_WRITE : orderWrite;
+        orderQuote = orderQuote == null ? DEFAULT_ORDER_QUOTE : orderQuote;
     }
 
     /**
