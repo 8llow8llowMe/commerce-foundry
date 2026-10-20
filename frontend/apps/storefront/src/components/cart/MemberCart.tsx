@@ -112,7 +112,7 @@ export function MemberCart({ refreshKey }: { refreshKey: number }) {
 
   return (
     <div className="flex flex-col gap-8">
-      <ul className="border-t border-border">
+      <ul className="flex flex-col gap-2">
         {cart.items.map((line) => (
           <CartLineItem
             key={line.itemId}

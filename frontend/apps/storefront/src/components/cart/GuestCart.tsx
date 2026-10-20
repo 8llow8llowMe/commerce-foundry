@@ -82,7 +82,7 @@ export function GuestCart() {
           {t.loading}
         </p>
       ) : (
-        <ul className="border-t border-border">
+        <ul className="flex flex-col gap-2">
           {lines.map((line) => {
             const product = products.get(line.productId);
             if (product === 'error' || product === undefined) return null;
