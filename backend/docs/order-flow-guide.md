@@ -153,9 +153,12 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
   #9 에서 상품 상세가 SKU 아이디를 내려 주면 화면은 그 묶음으로 이 API 를 부른다. 상품 단위가 필요해지면 그때 따로 연다.
 - skuIds 는 1~100개 · 양수(`PRODUCT_124` 필수 · `PRODUCT_125` 상한 · `PRODUCT_126` 양수), 중복은 첫 등장 한 번이고 요청 순서대로 낸다.
   **없는 SKU 는 응답에서 빠진다** — 서비스 간 SKU 조회와 같은 관례이고, 지워진 SKU 하나 때문에 나머지 SKU 조정까지 막지 않는다.
-- **재고 행이 없는 SKU 는 품절로 낸다** — `stockManaged=true · availableQuantity=0 · reservedQuantity=0 · updatedAt=null`. 화면은 조회한
+- **재고 행이 없는 SKU 는 품절로 낸다** — `stockManaged=true · availableQuantity=0 · updatedAt=null`. `reservedQuantity` 는 재고 행이 없으면
+  차감 선점이 생길 수 없어 정상이면 0 이다 (읽은 값을 그대로 낸다). 화면은 조회한
   `availableQuantity` 를 **그대로 PATCH 의 `expectedQuantity` 로 보낸다** — 행 없는 SKU 의 첫 등록이 기대 수량 0 을 요구하는 규칙과 맞물린다.
-- 쿼리는 재고 목록이 SKU 존재(in 1) · 재고 행(in 1) · 선점 합(SKU 묶음 group by 1) 3번, 조정 이력이 SKU 존재 · 목록 · 전체 건수 3번이다.
+- 재고 목록은 `REPEATABLE_READ` 읽기 전용 트랜잭션이다 — 재고 행과 선점 합을 한 스냅숏으로 읽어 "실물 = 판매 가능 + 선점" 계산이 엇갈리지 않게 한다.
+- 쿼리는 재고 목록이 SKU 존재(in 1) · 재고 행(in 1) · 선점 합(SKU 묶음 group by 1) 3번(SKU 수와 무관), 조정 이력이 SKU 존재 1 · 목록 1 ·
+  전체 건수는 필요할 때만 1번(최대 3번 — Spring Data 는 첫 페이지가 size 보다 짧으면 count 를 생략한다)이다.
   선점 합은 PATCH 도 같은 묶음 쿼리를 SKU 하나로 부른다. 이력은 `idx_stock_adjustment_history_sku_id_id` 를 탄다.
 - 조정 이력의 `adminMemberId` 는 내부 회원 아이디라 그대로 낸다(개인정보 아님). 어드민 이름 표시는 auth-service 조회가 필요해 범위 밖이다.
 - 이력 조회의 없는 SKU 는 404 `PRODUCT_002`, 이력이 없는 SKU 는 빈 목록이다. 두 조회 모두 `hasRole('ADMIN')`, Facade 는 `@Transactional(readOnly = true)` 다.
