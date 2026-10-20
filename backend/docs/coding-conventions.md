@@ -132,6 +132,9 @@ public enum OrderErrorCode {
   싣는다)나 결과 값으로 알리고, Processor 가 받아 `{Domain}Exception` 으로 바꾼다. 바꾸지 않고 흘리면 500 이다.
   예: product-service `StockReservationTransitionException` → `StockReservationProcessor` 가 `PRODUCT_024` · `PRODUCT_025` (#10).
 - 한 서비스에 advice 가 둘 이상이면 좁은 범위 advice 에 `@Order` 를 붙여 우선순위를 확정한다.
+- **요청 검증 예외(`MethodArgumentNotValidException` · `HttpMessageNotReadableException` · 타입 불일치 · 필수 파라미터)는 서비스당 advice 하나가 받는다** —
+  검증 메시지가 코드(`AUTH_121:...`)를 싣고 오므로 컨텍스트를 몰라도 되고, 두 advice 가 같은 예외를 잡으면 순서에 따라 응답이 바뀐다.
+  auth-service 는 `MemberExceptionHandler` 다. 다른 컨텍스트 advice(예: `ShippingAddressExceptionHandler`)는 자기 도메인 예외만 잡는다 (#7).
 - 도메인 `*ExceptionHandler` 는 `Exception` · `RuntimeException` 을 통째로 잡지 않는다. 보안 예외(`@PreAuthorize` 거부)는
   security-core 의 advice 가 처리한다 — 통째로 잡으면 403 이 500 이 될 수 있다 (`security-guide.md` §5-2).
 - 어느 advice 도 받지 않은 오류(매핑 없는 경로 404 · 메서드 405 · 미디어 타입 415 · 처리되지 않은 예외 500)는 common-core 의
