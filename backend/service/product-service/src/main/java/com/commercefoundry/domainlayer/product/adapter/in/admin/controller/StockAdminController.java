@@ -57,7 +57,8 @@ public class StockAdminController {
     @Operation(
         summary = "SKU 재고 조회",
         description = "SKU 아이디 목록으로 재고를 한 번에 읽는다 (1~100개, skuIds=1,2,3). 요청 순서대로이고 중복은 첫 등장 한 번만, 없는 SKU 는 응답에서 빠진다. "
-            + "재고를 등록하지 않은 SKU 는 품절(stockManaged=true, availableQuantity=0, reservedQuantity=0, updatedAt=null)이다. "
+            + "재고를 등록하지 않은 SKU 는 품절(stockManaged=true, availableQuantity=0, updatedAt=null)이다. 그 reservedQuantity 는 재고 행이 없으면 "
+            + "차감 선점이 생길 수 없어 정상이면 0 이다 (읽은 값을 그대로 낸다). "
             + "availableQuantity 를 그대로 조정의 expectedQuantity 로 보내면 된다 (재고 미등록 SKU 는 0)."
     )
     @PreAuthorize("hasRole('ADMIN')")

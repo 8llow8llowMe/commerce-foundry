@@ -20,7 +20,8 @@ public interface StockRepositoryPort {
     List<Stock> findAllBySkuIds(Collection<Long> skuIds);
 
     /**
-     * 재고 행과 수정 시각을 SKU 아이디 in 절 한 번으로 읽는다 (어드민 재고 조회). 재고 행이 없는 SKU 는 결과에 없다 — 품절로 본다. 순서는 정하지 않는다.
+     * 단건 {@link #findBySkuId} 와 짝인 묶음 조회 ({@link StockQueryResult} — 수정 시각 포함, 도메인 {@link Stock} 을 내는 {@link #findAllBySkuIds} 와 구분).
+     * SKU 아이디 in 절 한 번으로 읽는다 (어드민 재고 조회). 재고 행이 없는 SKU 는 결과에 없다 — 품절로 본다. 순서는 정하지 않는다.
      */
     List<StockQueryResult> findAllWithUpdatedAtBySkuIds(Collection<Long> skuIds);
 

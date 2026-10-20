@@ -3,8 +3,10 @@ package com.commercefoundry.domainlayer.product.application.service.processor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.commercefoundry.domainlayer.product.application.command.StockAdjustmentCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
@@ -68,7 +70,7 @@ class StockAdminQueryProcessorTest {
     class GetStocks {
 
         @Test
-        @DisplayName("요청 순서(중복은 첫 등장 한 번)대로 내고 없는 SKU 는 뺀다 — 이후 쿼리는 있는 SKU 만 묻는다")
+        @DisplayName("요청 순서(중복은 첫 등장 한 번)대로 내고 없는 SKU 는 뺀다 — 이후 쿼리는 있는 SKU 만, 포트마다 한 번씩(쿼리 3번, SKU 수와 무관) 묻는다")
         void orderDuplicatesAndMissing() {
             given(skuRepositoryPort.findAllByIds(List.of(3L, 1L, 9L, 2L))).willReturn(List.of(sku(1L), sku(2L), sku(3L)));
             given(stockRepositoryPort.findAllWithUpdatedAtBySkuIds(Set.of(1L, 2L, 3L)))
@@ -78,6 +80,10 @@ class StockAdminQueryProcessorTest {
             List<StockAdminInfo> infos = processor.getStocks(List.of(3L, 1L, 9L, 3L, 2L));
 
             assertThat(infos).extracting(StockAdminInfo::skuId).containsExactly(3L, 1L, 2L);
+            verify(skuRepositoryPort, times(1)).findAllByIds(List.of(3L, 1L, 9L, 2L));
+            verify(stockRepositoryPort, times(1)).findAllWithUpdatedAtBySkuIds(Set.of(1L, 2L, 3L));
+            verify(stockReservationRepositoryPort, times(1)).sumReservedQuantitiesBySkuIds(Set.of(1L, 2L, 3L));
+            verifyNoMoreInteractions(skuRepositoryPort, stockRepositoryPort, stockReservationRepositoryPort);
         }
 
         @Test
