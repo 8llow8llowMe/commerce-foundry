@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.shippingaddress.application.exception.Shi
 import com.commercefoundry.domainlayer.shippingaddress.application.info.ShippingAddressListInfo;
 import com.commercefoundry.domainlayer.shippingaddress.application.port.out.ShippingAddressRepositoryPort;
 import com.commercefoundry.domainlayer.shippingaddress.domain.model.ShippingAddress;
+import com.commercefoundry.domainlayer.shippingaddress.domain.model.ShippingAddressContent;
 import com.commercefoundry.global.properties.ShippingAddressProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -40,12 +41,14 @@ public class ShippingAddressProcessor {
     /**
      * 새 주소를 넣는다. 회원의 첫 주소는 {@code requestedDefault} 와 무관하게 기본이 된다. 회원 행을 잠근 트랜잭션에서 부른다.
      *
-     * <p>기본으로 넣을 때는 기존 기본을 <b>먼저</b> 푼다 — PostgreSQL 은 유니크 검사를 문장 단위로 하므로 새 행을 기본으로 넣은 뒤에
-     * 기존 기본을 풀면 그 INSERT 가 {@code uk_shipping_address_default_member_id} 위반이다.
+     * <p>기본으로 넣을 때는 기존 기본을 <b>먼저</b> 푼다 — PostgreSQL 은 이 유니크 키를 즉시(행 단위) 검사한다(deferrable 이 아니다).
+     * 새 행을 기본으로 넣은 뒤에 기존 기본을 풀면 그 INSERT 가 {@code uk_shipping_address_default_member_id} 위반이다.
      *
-     * @throws ShippingAddressException {@link ShippingAddressErrorCode#SHIPPING_ADDRESS_LIMIT_EXCEEDED} — 상한에 닿았다
+     * @throws ShippingAddressException {@link ShippingAddressErrorCode#SHIPPING_ADDRESS_LIMIT_EXCEEDED} — 상한에 닿았다.
+     *     {@link ShippingAddressErrorCode#INVALID_SHIPPING_ADDRESS} — 도메인 규칙 위반(요청 검증을 비켜 온 값)
      */
     public ShippingAddress create(long memberId, ShippingAddressCommand command, boolean requestedDefault) {
+        ShippingAddressContent content = toContent(command);
         int maxPerMember = shippingAddressProperties.maxPerMember();
         long count = shippingAddressRepositoryPort.countByMemberId(memberId);
         if (count >= maxPerMember) {
@@ -56,7 +59,7 @@ public class ShippingAddressProcessor {
         if (makeDefault && count > 0) {
             shippingAddressRepositoryPort.clearDefault(memberId);
         }
-        return shippingAddressRepositoryPort.save(ShippingAddress.create(snowflakeIdGenerator.generateId(), memberId, command.toContent(), makeDefault));
+        return shippingAddressRepositoryPort.save(ShippingAddress.create(snowflakeIdGenerator.generateId(), memberId, content, makeDefault));
     }
 
     /**
@@ -64,16 +67,17 @@ public class ShippingAddressProcessor {
      * 기본 여부 · 개수가 바뀌지 않아 회원 잠금이 필요 없다 — 기본 교체는 대상 행의 버전을 올려 이 저장이 옛 기본 여부를 되돌려 쓰지 않게 한다.
      *
      * @throws ShippingAddressException {@link ShippingAddressErrorCode#NOT_FOUND_SHIPPING_ADDRESS},
-     *     {@link ShippingAddressErrorCode#SHIPPING_ADDRESS_UPDATE_CONFLICT}
+     *     {@link ShippingAddressErrorCode#SHIPPING_ADDRESS_UPDATE_CONFLICT}, {@link ShippingAddressErrorCode#INVALID_SHIPPING_ADDRESS}
      */
     public ShippingAddress update(long memberId, long addressId, ShippingAddressCommand command) {
+        ShippingAddressContent content = toContent(command);
         ShippingAddress address = getAddress(memberId, addressId);
-        return shippingAddressRepositoryPort.save(address.replaceContent(command.toContent()));
+        return shippingAddressRepositoryPort.save(address.replaceContent(content));
     }
 
     /**
      * 그 주소를 기본 배송지로 지정한다. 이미 기본이면 아무것도 쓰지 않는다(멱등). 회원 행을 잠근 트랜잭션에서 부른다.
-     * 기존 기본 해제 UPDATE 가 새 기본 지정 UPDATE 보다 먼저 나간다 — 문장 단위 유니크 검사라 순서가 바뀌면 위반이다.
+     * 기존 기본 해제 UPDATE 가 새 기본 지정 UPDATE 보다 먼저 나간다 — 유니크 키를 즉시(행 단위) 검사하므로 순서가 바뀌면 위반이다.
      *
      * @throws ShippingAddressException {@link ShippingAddressErrorCode#NOT_FOUND_SHIPPING_ADDRESS}
      */
@@ -83,13 +87,16 @@ public class ShippingAddressProcessor {
             return;
         }
         shippingAddressRepositoryPort.clearDefault(memberId);
-        shippingAddressRepositoryPort.markDefault(addressId, memberId);
+        if (!shippingAddressRepositoryPort.markDefault(addressId, memberId)) {
+            throw new ShippingAddressException(ShippingAddressErrorCode.NOT_FOUND_SHIPPING_ADDRESS);
+        }
     }
 
     /**
      * 주소를 지운다. 기본 배송지를 지웠고 남은 주소가 있으면 가장 최근(아이디 최대) 주소를 기본으로 올린다. 회원 행을 잠근 트랜잭션에서 부른다.
      *
-     * @throws ShippingAddressException {@link ShippingAddressErrorCode#NOT_FOUND_SHIPPING_ADDRESS}
+     * @throws ShippingAddressException {@link ShippingAddressErrorCode#NOT_FOUND_SHIPPING_ADDRESS}.
+     *     {@link ShippingAddressErrorCode#SHIPPING_ADDRESS_UPDATE_CONFLICT} — 올릴 주소가 그 사이 사라졌다(회원 잠금 밖의 쓰기 — 일어나지 않아야 한다)
      */
     public void delete(long memberId, long addressId) {
         ShippingAddress address = getAddress(memberId, addressId);
@@ -97,8 +104,23 @@ public class ShippingAddressProcessor {
             throw new ShippingAddressException(ShippingAddressErrorCode.NOT_FOUND_SHIPPING_ADDRESS);
         }
         if (address.defaultAddress()) {
-            shippingAddressRepositoryPort.findLatestByMemberId(memberId)
-                .ifPresent(latest -> shippingAddressRepositoryPort.markDefault(latest.id(), memberId));
+            shippingAddressRepositoryPort.findLatestByMemberId(memberId).ifPresent(latest -> {
+                if (!shippingAddressRepositoryPort.markDefault(latest.id(), memberId)) {
+                    throw new ShippingAddressException(ShippingAddressErrorCode.SHIPPING_ADDRESS_UPDATE_CONFLICT);
+                }
+            });
+        }
+    }
+
+    /**
+     * 도메인 규칙 위반({@link IllegalArgumentException})을 배송지 예외(400 · AUTH_100)로 바꾼다 — 요청 검증을 거치지 않는 진입로가 생겨도 500 이 되지 않게.
+     * 원인 메시지(어느 칸인지)는 원인 예외로만 남기고 응답에 싣지 않는다. 값은 원래 어디에도 싣지 않는다(개인정보).
+     */
+    private static ShippingAddressContent toContent(ShippingAddressCommand command) {
+        try {
+            return command.toContent();
+        } catch (IllegalArgumentException | NullPointerException exception) {
+            throw new ShippingAddressException(ShippingAddressErrorCode.INVALID_SHIPPING_ADDRESS, exception);
         }
     }
 }

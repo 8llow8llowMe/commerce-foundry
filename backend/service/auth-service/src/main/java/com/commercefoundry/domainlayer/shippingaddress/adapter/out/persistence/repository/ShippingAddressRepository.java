@@ -28,7 +28,7 @@ public interface ShippingAddressRepository extends JpaRepository<ShippingAddress
     long countByMemberId(Long memberId);
 
     /**
-     * 기존 기본 배송지를 푼다 — 조건부 UPDATE 한 문장. 새 기본을 지정하는 쓰기보다 먼저 나가야 한다(문장 단위 유니크 검사).
+     * 기존 기본 배송지를 푼다 — 조건부 UPDATE 한 문장. 새 기본을 지정하는 쓰기보다 먼저 나가야 한다(유니크 키는 즉시(행 단위) 검사 — deferrable 이 아님).
      * 쌓인 엔티티 변경을 먼저 내보내고(flushAutomatically) 영속성 컨텍스트의 옛 상태를 비운다(clearAutomatically).
      * 벌크 UPDATE 라 감사 리스너가 돌지 않아 수정 시각을 직접 넣고, 버전을 올려 옛 버전으로 읽은 전체 교체가 기본 여부를 되돌려 쓰지 않게 한다.
      */

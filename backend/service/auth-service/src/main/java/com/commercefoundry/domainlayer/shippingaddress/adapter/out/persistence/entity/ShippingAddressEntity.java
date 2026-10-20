@@ -24,7 +24,7 @@ import lombok.NoArgsConstructor;
  * JPA 애노테이션으로 선언할 수 없어 DDL 스냅숏 · {@code update} 로 만들어지지 않는다 — 그래서 이 방식을 쓴다.
  * {@code ck_shipping_address_default_member_id} 가 다른 회원 아이디가 들어가는 것을 막는다.
  *
- * <p>PostgreSQL 은 유니크 검사를 문장 단위로 한다. 기본을 옮길 때는 기존 기본을 null 로 푸는 UPDATE 가 새 기본을 지정하는 쓰기보다
+ * <p>PostgreSQL 은 이 유니크 키를 즉시(행 단위) 검사한다 — deferrable 이 아니다. 기본을 옮길 때는 기존 기본을 null 로 푸는 UPDATE 가 새 기본을 지정하는 쓰기보다
  * 먼저 나가야 한다 — 순서가 바뀌면 두 행이 잠깐 같은 값을 가져 위반이다 ({@code ShippingAddressRepositoryAdapter}).
  */
 @Entity
@@ -87,7 +87,7 @@ public class ShippingAddressEntity extends BaseEntity {
     @Column(name = "state_province", length = 100, comment = "주 · 도 (state / province). 없으면 null")
     private String stateProvince;
 
-    @Column(name = "default_member_id", comment = "기본 배송지면 member_id 와 같은 값, 아니면 null — 회원당 기본 하나를 유니크 키로 강제한다 (FK: member.id)")
+    @Column(name = "default_member_id", comment = "기본 배송지면 member_id 와 같은 값, 아니면 null — 회원당 기본 하나를 유니크 키로 강제한다 (FK: member.id — member_id 와 같은 값의 복제 칸)")
     private Long defaultMemberId;
 
     @Version

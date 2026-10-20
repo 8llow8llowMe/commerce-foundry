@@ -37,12 +37,12 @@ public interface ShippingAddressRepositoryPort {
     void clearDefault(long memberId);
 
     /**
-     * 그 회원의 그 주소를 기본으로 지정한다. 조건부 UPDATE 한 문장이고 버전을 올린다.
+     * 그 회원의 그 주소를 기본으로 지정한다. 조건부 UPDATE 한 문장이고 버전을 올린다. 바뀐 행이 없을 때 어떻게 답할지는 Processor 가 정한다.
      *
-     * @throws ShippingAddressException {@code NOT_FOUND_SHIPPING_ADDRESS} — 바뀐 행이 없다(지워졌다).
-     *     {@code SHIPPING_ADDRESS_UPDATE_CONFLICT} — 기본 배송지 유니크 키 위반(기존 기본을 풀지 않았다)
+     * @return 바뀐 행이 있으면 true, 그 회원의 주소가 아니거나 지워졌으면 false
+     * @throws ShippingAddressException {@code SHIPPING_ADDRESS_UPDATE_CONFLICT} — 기본 배송지 유니크 키 위반(기존 기본을 풀지 않았다)
      */
-    void markDefault(long addressId, long memberId);
+    boolean markDefault(long addressId, long memberId);
 
     /** @return 지웠으면 true, 그 회원의 주소가 아니거나 없으면 false */
     boolean deleteByIdAndMemberId(long addressId, long memberId);
