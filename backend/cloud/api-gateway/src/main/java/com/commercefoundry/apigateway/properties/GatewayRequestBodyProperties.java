@@ -13,12 +13,18 @@ import org.springframework.util.unit.DataSize;
  * @param bufferingBudget 길이 모르는(chunked) 본문을 동시에 모을 수 있는 총량. 기본 32MB(상한 2MB 면 동시 16개). 넘으면 411 로 끊는다 — 천천히 보내는 연결을 여러 개 열어
  *                        게이트웨이 메모리를 채우는 공격(slowloris)의 상한
  * @param bodyReadTimeout 길이 모르는 본문을 다 받기까지의 상한. 기본 10초. 넘으면 408 로 끊는다
+ * @param discardMaxSize  상한을 넘은 본문을 413 전에 읽어 버리는(배출) 전체 본문 크기 상한. 기본 4MB. 읽지 않은 본문을 남긴 채 닫으면 커널이 RST 를 보내
+ *                        클라이언트가 413 대신 연결 오류를 보므로(#145) 이 크기까지는 끝까지 받아 버린 뒤 닫는다. 넘으면 지금처럼 바로 끊는다 — 남용 쪽이라 연결 오류를 감수한다.
+ *                        배출은 메모리를 잡지 않는다(받는 즉시 해제). Tomcat {@code maxSwallowSize}(기본 2MB)와 같은 역할이다
+ * @param discardTimeout  배출에 쓰는 시간 상한. 기본 5초. 넘으면 그때 413 을 쓰고 끊는다 — 천천히 보내며 연결을 잡아 두는 쪽의 상한
  */
 @ConfigurationProperties(prefix = "gateway.request-body")
 public record GatewayRequestBodyProperties(
     @DefaultValue("2MB") DataSize maxSize,
     @DefaultValue("32MB") DataSize bufferingBudget,
-    @DefaultValue("10s") Duration bodyReadTimeout
+    @DefaultValue("10s") Duration bodyReadTimeout,
+    @DefaultValue("4MB") DataSize discardMaxSize,
+    @DefaultValue("5s") Duration discardTimeout
 ) {
 
     /** 길이를 모르는 본문은 상한까지 메모리에 모은다 — 버퍼 크기가 int 다. */
@@ -33,6 +39,12 @@ public record GatewayRequestBodyProperties(
         }
         if (bodyReadTimeout == null || bodyReadTimeout.isNegative() || bodyReadTimeout.isZero()) {
             throw new IllegalArgumentException("gateway.request-body.body-read-timeout 은 0 보다 커야 합니다: " + bodyReadTimeout);
+        }
+        if (discardMaxSize == null || discardMaxSize.compareTo(maxSize) < 0) {
+            throw new IllegalArgumentException("gateway.request-body.discard-max-size 는 max-size 이상이어야 합니다: " + discardMaxSize);
+        }
+        if (discardTimeout == null || discardTimeout.isNegative() || discardTimeout.isZero()) {
+            throw new IllegalArgumentException("gateway.request-body.discard-timeout 은 0 보다 커야 합니다: " + discardTimeout);
         }
     }
 }
