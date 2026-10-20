@@ -550,6 +550,79 @@
     comment on column product.stock_reservation_item.sku_id is
         'SKU 아이디 (FK: sku.id)';
 
+    create table product.stock_restoration (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        claim_id bigint not null,
+        order_id bigint not null,
+        reason varchar(20) not null check ((reason in ('CANCELLATION','RETURN'))),
+        reservation_id bigint not null,
+        primary key (id),
+        constraint uk_stock_restoration_claim_id unique (claim_id)
+    );
+
+    comment on table product.stock_restoration is
+        '결제 후 재고 복원 (클레임 하나에 한 행, append-only)';
+
+    comment on column product.stock_restoration.id is
+        '재고 복원 아이디 (Snowflake)';
+
+    comment on column product.stock_restoration.created_at is
+        '생성 시각';
+
+    comment on column product.stock_restoration.updated_at is
+        '수정 시각';
+
+    comment on column product.stock_restoration.claim_id is
+        '클레임 아이디 (외부 FK: order-service 클레임 id). 클레임당 복원 1건 — 멱등 키';
+
+    comment on column product.stock_restoration.order_id is
+        '주문 아이디 (외부 FK: order-service 주문 id). 선점에서 복사한 운영 조회용 값';
+
+    comment on column product.stock_restoration.reason is
+        '복원 사유 (CANCELLATION / RETURN)';
+
+    comment on column product.stock_restoration.reservation_id is
+        '복원 대상 확정 선점 아이디 (FK: stock_reservation.id)';
+
+    create table product.stock_restoration_item (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        quantity integer not null,
+        restoration_id bigint not null,
+        restored boolean not null,
+        sku_id bigint not null,
+        primary key (id),
+        constraint uk_stock_restoration_item_restoration_id_sku_id unique (restoration_id, sku_id),
+        constraint ck_stock_restoration_item_quantity_positive check (quantity > 0)
+    );
+
+    comment on table product.stock_restoration_item is
+        '결제 후 재고 복원 항목 (복원 × SKU)';
+
+    comment on column product.stock_restoration_item.id is
+        '재고 복원 항목 아이디 (Snowflake)';
+
+    comment on column product.stock_restoration_item.created_at is
+        '생성 시각';
+
+    comment on column product.stock_restoration_item.updated_at is
+        '수정 시각';
+
+    comment on column product.stock_restoration_item.quantity is
+        '복원 수량 (1 이상). 재고를 되돌리지 않은 무제한 SKU 도 복원 상한 계산에 들어간다';
+
+    comment on column product.stock_restoration_item.restoration_id is
+        '재고 복원 아이디 (FK: stock_restoration.id)';
+
+    comment on column product.stock_restoration_item.restored is
+        '재고를 실제로 되돌렸는가 — 선점 항목이 차감(deducted)이었으면 true. 무제한 SKU 는 false(기록만)';
+
+    comment on column product.stock_restoration_item.sku_id is
+        'SKU 아이디 (FK: sku.id)';
+
     create index idx_product_visible_sale_price_amount_id
        on product.product (visible, sale_price_amount, id);
 
@@ -567,3 +640,6 @@
 
     create index idx_stock_reservation_order_id
        on product.stock_reservation (order_id);
+
+    create index idx_stock_restoration_reservation_id
+       on product.stock_restoration (reservation_id);

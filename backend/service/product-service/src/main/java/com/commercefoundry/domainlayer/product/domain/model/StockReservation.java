@@ -120,6 +120,27 @@ public record StockReservation(
     }
 
     /**
+     * 결제 후 복원 상한을 넘는 SKU — 요청 수량이 (이 선점의 항목 수량 − 이미 복원한 수량)보다 큰 SKU 를 SKU 아이디 오름차순으로 낸다.
+     * 이 선점에 없는 SKU 는 상한이 0 이라 넘는 것으로 본다. 상태는 보지 않는다 — CONFIRMED 인지는 호출한 쪽이 먼저 확인한다.
+     *
+     * @param requestedBySkuId SKU 아이디 → 복원 요청 수량 (1 이상)
+     * @param restoredBySkuId SKU 아이디 → 이 선점에서 이미 복원한 수량 합. 없는 SKU 는 0 이다
+     * @return 넘는 SKU 가 없으면 빈 목록
+     */
+    public List<Long> skuIdsExceedingRestorable(Map<Long, Integer> requestedBySkuId, Map<Long, Long> restoredBySkuId) {
+        Map<Long, Integer> reservedBySkuId = items.stream().collect(Collectors.toMap(StockReservationItem::skuId, StockReservationItem::quantity));
+        return requestedBySkuId.entrySet().stream()
+            .filter(requested -> {
+                long reserved = reservedBySkuId.getOrDefault(requested.getKey(), 0);
+                long restored = restoredBySkuId.getOrDefault(requested.getKey(), 0L);
+                return requested.getValue() > reserved - restored;
+            })
+            .map(Map.Entry::getKey)
+            .sorted()
+            .toList();
+    }
+
+    /**
      * 전이 결과.
      *
      * @param reservation 전이 뒤 선점. 바뀌지 않았으면 원래 선점이다
