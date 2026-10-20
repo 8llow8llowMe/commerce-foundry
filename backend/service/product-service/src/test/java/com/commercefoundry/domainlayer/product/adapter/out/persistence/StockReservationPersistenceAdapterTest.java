@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductExce
 import com.commercefoundry.domainlayer.product.application.mapper.StockReservationMapperImpl;
 import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuReservedQuantityQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.StockReleaseReason;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservation;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationItem;
@@ -186,20 +187,28 @@ class StockReservationPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("선점 수량: SKU 의 RESERVED 선점 중 차감한 항목 수량만 더한다 — 확정 · 해제 · 무제한(deducted=false) · 다른 SKU 는 빠지고, 없으면 0")
-    void sumReservedQuantity() {
+    @DisplayName("선점 수량: SKU 묶음을 group by 한 번으로 더한다 — RESERVED · 차감 항목만, 확정 · 해제 · 무제한(deducted=false) · 묶음 밖 SKU 는 빠진다")
+    void sumReservedQuantities() {
         create(reserved(7001L, 1L, NOW.plusSeconds(1800)));
         create(reserved(7002L, 2L, NOW.plusSeconds(1800)));
         create(reserved(7003L, 3L, NOW.plusSeconds(1800)));
         create(reserved(7004L, 4L, NOW.plusSeconds(1800)));
+        create(StockReservation.reserve(7005L, 5L, List.of(
+            new StockReservationItem(70051L, 1001L, 1, true),
+            new StockReservationItem(70052L, 1003L, 5, true),
+            new StockReservationItem(70053L, 1004L, 7, true)
+        ), NOW.plusSeconds(1800)));
         entityManager.clear();
         settle(7003L, true);
         settle(7004L, false);
 
-        // 7001 · 7002 의 SKU 1001(차감, 2개씩)만 남는다. SKU 1002 는 무제한(deducted=false)
-        assertThat(stockReservationRepositoryPort.sumReservedQuantityBySkuId(1001L)).isEqualTo(4L);
-        assertThat(stockReservationRepositoryPort.sumReservedQuantityBySkuId(1002L)).isZero();
-        assertThat(stockReservationRepositoryPort.sumReservedQuantityBySkuId(9999L)).isZero();
+        // SKU 1001 = 7001(2) + 7002(2) + 7005(1). 7003(확정) · 7004(해제)의 2개씩은 빠진다. 1002 는 무제한(deducted=false)이라 행이 없다.
+        // 1004 는 RESERVED · 차감이지만 묶음 밖이라 빠지고, 9999 는 선점이 없어 행이 없다
+        assertThat(stockReservationRepositoryPort.sumReservedQuantitiesBySkuIds(List.of(1001L, 1002L, 1003L, 9999L)))
+            .containsExactlyInAnyOrder(new SkuReservedQuantityQueryResult(1001L, 5L), new SkuReservedQuantityQueryResult(1003L, 5L));
+        // 조정(PATCH)이 부르는 SKU 하나 묶음
+        assertThat(stockReservationRepositoryPort.sumReservedQuantitiesBySkuIds(List.of(1002L))).isEmpty();
+        assertThat(stockReservationRepositoryPort.sumReservedQuantitiesBySkuIds(List.of())).isEmpty();
     }
 
     @Test

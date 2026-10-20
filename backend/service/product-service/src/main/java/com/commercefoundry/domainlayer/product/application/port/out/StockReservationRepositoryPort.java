@@ -1,8 +1,10 @@
 package com.commercefoundry.domainlayer.product.application.port.out;
 
 import com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuReservedQuantityQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservation;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,10 +28,11 @@ public interface StockReservationRepositoryPort {
     List<ExpiredStockReservationQueryResult> findExpiredReservations(Instant now, ExpiredStockReservationQueryResult after, int limit);
 
     /**
-     * SKU 하나의 RESERVED 선점 중 재고를 실제로 차감한({@code deducted}) 항목의 수량 합. 없으면 0 이다. 쿼리 1번이다.
-     * 어드민 재고 화면이 "판매 가능 수량 + 선점 수량 = 실물" 을 보여 주는 데 쓴다 — CONFIRMED 는 이미 팔린 수량이라 넣지 않는다.
+     * SKU 별 RESERVED 선점 중 재고를 실제로 차감한({@code deducted}) 항목의 수량 합. SKU 묶음을 group by 한 번(쿼리 1번)으로 읽는다.
+     * 합이 없는 SKU 는 결과에 행이 없다 — 0 으로 본다. 빈 컬렉션이면 쿼리 없이 빈 목록이다. 순서는 정하지 않는다.
+     * 어드민 재고 조회 · 조정이 "판매 가능 수량 + 선점 수량 = 실물" 을 보여 주는 데 쓴다 — CONFIRMED 는 이미 팔린 수량이라 넣지 않는다.
      */
-    long sumReservedQuantityBySkuId(long skuId);
+    List<SkuReservedQuantityQueryResult> sumReservedQuantitiesBySkuIds(Collection<Long> skuIds);
 
     /**
      * 새 선점(RESERVED)의 헤더만 INSERT 하고 바로 flush 한다. 같은 주문의 활성 선점이 그 사이 생겼으면(동시 생성)
