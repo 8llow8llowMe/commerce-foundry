@@ -360,8 +360,8 @@ class ProductPersistenceAdapterTest {
     }
 
     @ParameterizedTest(name = "\"{0}\"")
-    @ValueSource(strings = {"62114", "6211.42.00", "6211-42", "621142 ", "62114A"})
-    @DisplayName("제약: 숫자 6~10자리가 아닌 HS 코드(5자리 · 점 · 하이픈 · 공백 · 문자)는 저장되지 않는다 (ck_sku_hs_code_format)")
+    @ValueSource(strings = {"62114", "6211.42.00", "6211-42", "621142 ", " 621142", "62114A", "６２１１４２"})
+    @DisplayName("제약: 숫자 6~10자리가 아닌 HS 코드(5자리 · 점 · 하이픈 · 앞뒤 공백 · 문자 · 전각 숫자)는 저장되지 않는다 (ck_sku_hs_code_format)")
     void malformedHsCodeIsRejected(String hsCode) {
         assertThatThrownBy(() -> persistAll(skuBuilder(1009L, 101L, "2005", 0L, SaleStatus.ON_SALE).hsCode(hsCode).build()))
             .rootCause()
@@ -384,6 +384,16 @@ class ProductPersistenceAdapterTest {
         assertThat(skuRepositoryPort.findAllByIds(List.of(1009L, 1001L)))
             .extracting(Sku::id, Sku::weightGrams, sku -> sku.hsCode() == null ? null : sku.hsCode().value())
             .containsExactlyInAnyOrder(tuple(1009L, 450, "0621142000"), tuple(1001L, null, null));
+    }
+
+    @Test
+    @DisplayName("제약: 경계값(무게 1g · HS 코드 6자리)은 저장된다")
+    void boundaryWeightAndHsCodeAreAccepted() {
+        persistAll(skuBuilder(1009L, 101L, "2005", 0L, SaleStatus.ON_SALE).weightGrams(1).hsCode("621142").build());
+
+        assertThat(skuRepositoryPort.findAllByIds(List.of(1009L)))
+            .extracting(Sku::weightGrams, sku -> sku.hsCode().value())
+            .containsExactly(tuple(1, "621142"));
     }
 
     @Test
