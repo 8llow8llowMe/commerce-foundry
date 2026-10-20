@@ -11,9 +11,12 @@ import com.commercefoundry.shared.commerce.Money;
  * @param soldOut 판매 상태가 품절(SOLD_OUT)인가
  * @param maxQuantityPerOrder 1회 주문 최대 수량. null 이면 제한 없음
  * @param customOrder 맞춤 제작 상품인가. 스토어 맞춤 제작 기능이 꺼져 있으면 false
+ * @param weightGrams SKU 단위 무게(그램). null 이면 미입력이다 — 해외 주문이면 order 가 거절한다 ({@code order-flow-guide.md} §2-2, #80)
+ * @param hsCode 통관 HS 코드. null 이면 미입력이다 — {@code weightGrams} 와 같은 규칙이다
  */
 public record SkuQueryResult(
     long skuId, long productId, String productName, String optionName, Money salePrice,
-    boolean purchasable, boolean soldOut, Integer maxQuantityPerOrder, boolean customOrder
+    boolean purchasable, boolean soldOut, Integer maxQuantityPerOrder, boolean customOrder,
+    Integer weightGrams, String hsCode
 ) {
 }

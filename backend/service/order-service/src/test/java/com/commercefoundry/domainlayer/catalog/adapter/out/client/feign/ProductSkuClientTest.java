@@ -88,8 +88,12 @@ class ProductSkuClientTest {
         RESPONSE_STATUS.set(200);
     }
 
+    /**
+     * 9004 는 무게 · HS 코드 키가 없는 응답(#80 이전 product-service), 9006 은 칸이 있는 응답, 9007 은 키를 두고 null 로 내린 응답(미입력)이다.
+     * 어느 쪽이든 order 는 값을 검증하지 않고 옮긴다 — 미입력 해외 주문 거절은 order 컨텍스트가 한다 ({@code order-flow-guide.md} §2-2).
+     */
     @Test
-    @DisplayName("ids 를 반복 파라미터로 보내고, 서비스 토큰 하나를 싣고, product-service 봉투를 조회 결과로 바꾼다 — 모르는 칸은 무시한다")
+    @DisplayName("ids 를 반복 파라미터로 보내고, 서비스 토큰 하나를 싣고, product-service 봉투를 조회 결과로 바꾼다 — 모르는 칸은 무시하고, 무게 · HS 코드는 있으면 읽고 없으면 null 이다")
     void roundTrip() {
         RESPONSE_BODY.set("""
             {"dataHeader":{"success":true,"resultCode":null,"resultMessage":null,"fieldErrors":null},
@@ -98,15 +102,25 @@ class ProductSkuClientTest {
                 "optionValues":[{"optionGroupName":"색상","optionValueName":"아이보리"}],"optionName":"아이보리",
                 "salePrice":{"amount":39000,"currency":"KRW"},"additionalPrice":{"amount":0,"currency":"KRW"},
                 "saleStatus":{"code":"SOLD_OUT","name":"품절","description":"재고가 모두 소진되었습니다."},
-                "purchasable":false,"maxQuantityPerOrder":10,"customOrder":true,"futureField":1}
+                "purchasable":false,"maxQuantityPerOrder":10,"customOrder":true,"futureField":1},
+               {"skuId":"9006","productId":"7302","productName":"모코 생활한복 치마","optionValues":[],"optionName":"",
+                "salePrice":{"amount":59000,"currency":"KRW"},"additionalPrice":{"amount":0,"currency":"KRW"},
+                "saleStatus":{"code":"ON_SALE","name":"판매중","description":"구매할 수 있습니다."},
+                "purchasable":true,"maxQuantityPerOrder":null,"customOrder":false,"weightGrams":850,"hsCode":"6211429000"},
+               {"skuId":"9007","productId":"7303","productName":"모코 생활한복 조끼","optionValues":[],"optionName":"",
+                "salePrice":{"amount":29000,"currency":"KRW"},"additionalPrice":{"amount":0,"currency":"KRW"},
+                "saleStatus":{"code":"ON_SALE","name":"판매중","description":"구매할 수 있습니다."},
+                "purchasable":true,"maxQuantityPerOrder":null,"customOrder":false,"weightGrams":null,"hsCode":null}
              ]}}
             """);
 
-        List<SkuQueryResult> results = skuQueryPort.findSkus(List.of(9004L, 9005L));
+        List<SkuQueryResult> results = skuQueryPort.findSkus(List.of(9004L, 9005L, 9006L, 9007L));
 
         assertThat(results).containsExactly(
-            new SkuQueryResult(9004L, 7301L, "모코 생활한복 저고리", "아이보리", Money.of(39_000, CurrencyCode.KRW), false, true, 10, true));
-        assertThat(QUERIES).containsExactly("ids=9004&ids=9005");
+            new SkuQueryResult(9004L, 7301L, "모코 생활한복 저고리", "아이보리", Money.of(39_000, CurrencyCode.KRW), false, true, 10, true, null, null),
+            new SkuQueryResult(9006L, 7302L, "모코 생활한복 치마", "", Money.of(59_000, CurrencyCode.KRW), true, false, null, false, 850, "6211429000"),
+            new SkuQueryResult(9007L, 7303L, "모코 생활한복 조끼", "", Money.of(29_000, CurrencyCode.KRW), true, false, null, false, null, null));
+        assertThat(QUERIES).containsExactly("ids=9004&ids=9005&ids=9006&ids=9007");
         assertThat(AUTHORIZATIONS).singleElement().satisfies(values -> {
             assertThat(values).singleElement().asString().startsWith("Bearer ");
             Jwt token = InternalTokenDecoderFactory.create(TestServiceTokens.properties("product-service"), Clock.systemUTC())

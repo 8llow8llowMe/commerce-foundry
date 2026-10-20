@@ -21,32 +21,32 @@ public final class CartFixtures {
         return Money.of(amount, CurrencyCode.KRW);
     }
 
-    /** 구매 가능 · 제한 없음 · 일반 상품. */
+    /** 구매 가능 · 제한 없음 · 일반 상품. 장바구니는 무게 · HS 코드를 보지 않아 미입력(null)으로 둔다. */
     public static SkuQueryResult onSale(long skuId, long price) {
-        return new SkuQueryResult(skuId, skuId + 7000, "상품" + skuId, "옵션" + skuId, krw(price), true, false, null, false);
+        return new SkuQueryResult(skuId, skuId + 7000, "상품" + skuId, "옵션" + skuId, krw(price), true, false, null, false, null, null);
     }
 
     public static SkuQueryResult soldOut(long skuId, long price) {
-        return new SkuQueryResult(skuId, skuId + 7000, "상품" + skuId, "옵션" + skuId, krw(price), false, true, null, false);
+        return new SkuQueryResult(skuId, skuId + 7000, "상품" + skuId, "옵션" + skuId, krw(price), false, true, null, false, null, null);
     }
 
     public static SkuQueryResult stopSelling(long skuId, long price) {
-        return new SkuQueryResult(skuId, skuId + 7000, "상품" + skuId, "옵션" + skuId, krw(price), false, false, null, false);
+        return new SkuQueryResult(skuId, skuId + 7000, "상품" + skuId, "옵션" + skuId, krw(price), false, false, null, false, null, null);
     }
 
     public static SkuQueryResult withMaxQuantity(SkuQueryResult sku, Integer maxQuantityPerOrder) {
         return new SkuQueryResult(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
-            sku.purchasable(), sku.soldOut(), maxQuantityPerOrder, sku.customOrder());
+            sku.purchasable(), sku.soldOut(), maxQuantityPerOrder, sku.customOrder(), sku.weightGrams(), sku.hsCode());
     }
 
     public static SkuQueryResult customOrder(SkuQueryResult sku) {
         return new SkuQueryResult(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
-            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), true);
+            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), true, sku.weightGrams(), sku.hsCode());
     }
 
     public static CatalogSku catalogSku(SkuQueryResult sku) {
         return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
-            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), sku.customOrder());
+            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), sku.customOrder(), sku.weightGrams(), sku.hsCode());
     }
 
     public static CartItemAddCommand add(long skuId, int quantity) {

@@ -85,7 +85,7 @@ public class ProductInternalResponseSupport {
         return new SkuQueryResult(
             Long.parseLong(item.skuId()), Long.parseLong(item.productId()), item.productName(), item.optionName(), toMoney(item.salePrice()),
             item.purchasable(), item.saleStatus() != null && SOLD_OUT.equals(item.saleStatus().code()),
-            item.maxQuantityPerOrder(), item.customOrder());
+            item.maxQuantityPerOrder(), item.customOrder(), item.weightGrams(), item.hsCode());
     }
 
     private static Money toMoney(MoneyItem money) {

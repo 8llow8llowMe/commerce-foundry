@@ -37,7 +37,7 @@ class ProductSkuClientAdapterTest {
 
     private static ProductSkuInternalItem item(long skuId) {
         return new ProductSkuInternalItem(String.valueOf(skuId), "7301", "저고리", "", MoneyItem.of(39_000, "KRW"),
-            CodeNameDescriptionMetadata.of("ON_SALE", "판매중", "구매할 수 있습니다."), true, null, false);
+            CodeNameDescriptionMetadata.of("ON_SALE", "판매중", "구매할 수 있습니다."), true, null, false, null, null);
     }
 
     /** 흉내 낸 product-service — 받은 아이디를 그대로 돌려준다. */
