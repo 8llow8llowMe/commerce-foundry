@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -19,8 +20,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * 회원 · 클라이언트 IP 단위 제한을 실제 Redis 에서 Spring Cloud Gateway 의 토큰 버킷 Lua 스크립트로 돌려 본다 — 스텁으로는 키 형식 · 한도 변환 · TTL 이 검증되지 않는다.
  * 게이트웨이 컨텍스트를 그대로 띄우고 Redis 접속만 컨테이너로 바꾼다. Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다.
+ * 비로그인 버킷 키를 만들려면 IP 를 해시해야 하므로 비로그인 IP 계수(기본 끔)를 켠다.
  */
 @GatewayIntegrationTest
+@TestPropertySource(properties = {GatewayIntegrationTest.CLIENT_IP_ENABLED, GatewayIntegrationTest.CLIENT_IP_HASH_KEY})
 @Testcontainers
 @EnabledWithDockerOrOnCi
 class RedisBucketRateLimiterTest {
