@@ -31,14 +31,18 @@ import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;
 
 /**
  * 회원 · 클라이언트 IP 단위 요청 제한을 실제 서버 · 보안 체인 · 라우팅으로 본다 ({@code security-guide.md} §7-3). 하류는 받은 경로를 기록하는 가짜 서비스다.
  * 제한기는 스텁({@link StubBucketRateLimiter})으로 바꿔 허용 · 거절을 정한다 — 실제 토큰 버킷은 {@link RedisBucketRateLimiterTest} 가 실제 Redis 로 본다.
+ *
+ * <p>비로그인 IP 계수는 기본 끔이라 여기서 켠다. 끈 기본값에서 토큰 없는 요청을 세지 않는 것은 {@code GatewayRateLimitFilterTest} · {@link ClientIpDefaultDisabledTest} 가 본다.
  */
 @GatewayIntegrationTest
+@TestPropertySource(properties = {GatewayIntegrationTest.CLIENT_IP_ENABLED, GatewayIntegrationTest.CLIENT_IP_HASH_KEY})
 @Import(GatewayRateLimitTest.StubConfig.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class GatewayRateLimitTest {

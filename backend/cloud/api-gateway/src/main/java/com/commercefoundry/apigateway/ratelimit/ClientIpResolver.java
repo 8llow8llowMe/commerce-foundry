@@ -29,6 +29,7 @@ import org.springframework.stereotype.Component;
 public class ClientIpResolver {
 
     static final String X_FORWARDED_FOR = "X-Forwarded-For";
+    private static final int IPV6_BYTES = 16;
 
     private final List<CidrBlock> trustedProxies;
 
@@ -76,8 +77,6 @@ public class ClientIpResolver {
             throw new IllegalStateException(impossible);
         }
     }
-
-    private static final int IPV6_BYTES = 16;
 
     private boolean isTrusted(InetAddress address) {
         return trustedProxies.stream().anyMatch(block -> block.contains(address));

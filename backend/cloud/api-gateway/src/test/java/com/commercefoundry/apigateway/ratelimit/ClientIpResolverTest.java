@@ -24,7 +24,7 @@ class ClientIpResolverTest {
     @Nested
     class WithoutTrustedProxies {
 
-        private final ClientIpResolver resolver = new ClientIpResolver(new GatewayClientIpProperties(List.of(), KEY));
+        private final ClientIpResolver resolver = new ClientIpResolver(new GatewayClientIpProperties(true, List.of(), KEY));
 
         @ParameterizedTest
         @ValueSource(strings = {"198.51.100.1", "198.51.100.1, 10.0.0.1", "unknown", ""})
@@ -43,7 +43,7 @@ class ClientIpResolverTest {
     @Nested
     class WithTrustedProxies {
 
-        private final ClientIpResolver resolver = new ClientIpResolver(new GatewayClientIpProperties(List.of("10.0.0.0/8", "2001:db8::/32"), KEY));
+        private final ClientIpResolver resolver = new ClientIpResolver(new GatewayClientIpProperties(true, List.of("10.0.0.0/8", "2001:db8::/32"), KEY));
 
         @ParameterizedTest
         @CsvSource(delimiter = '|', value = {
@@ -125,22 +125,22 @@ class ClientIpResolverTest {
         @ValueSource(strings = {"10.0.0.0/33", "not-a-cidr", "10.0.0.0/8/1", "0.0.0.0/0", "10.0.0.0/7", "::/0", "2001:db8::/31"})
         @DisplayName("신뢰 프록시 값이 주소 · CIDR 이 아니거나 너무 넓으면(IPv4 /8 · IPv6 /32 미만) 기동하지 않는다")
         void rejectsInvalidTrustedProxy(String proxy) {
-            assertThatThrownBy(() -> new GatewayClientIpProperties(List.of(proxy), KEY)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new GatewayClientIpProperties(true, List.of(proxy), KEY)).isInstanceOf(IllegalArgumentException.class);
         }
 
         @ParameterizedTest
         @ValueSource(strings = {"", " ", "${GATEWAY_CLIENT_IP_HASH_KEY}", "not base64!!"})
-        @DisplayName("HMAC 키가 비었거나 풀리지 않았거나 base64 가 아니면 기동하지 않는다")
+        @DisplayName("켠 상태에서 HMAC 키가 비었거나 풀리지 않았거나 base64 가 아니면 기동하지 않는다")
         void rejectsMissingKey(String key) {
-            assertThatThrownBy(() -> new GatewayClientIpProperties(List.of(), key)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new GatewayClientIpProperties(true, List.of(), key)).isInstanceOf(IllegalArgumentException.class);
         }
 
         @Test
-        @DisplayName("HMAC 키가 32바이트 미만이면 기동하지 않고, 오류 메시지에 키 값을 싣지 않는다")
+        @DisplayName("켠 상태에서 HMAC 키가 32바이트 미만이면 기동하지 않고, 오류 메시지에 키 값을 싣지 않는다")
         void rejectsShortKey() {
             String shortKey = Base64.getEncoder().encodeToString(new byte[31]);
 
-            assertThatThrownBy(() -> new GatewayClientIpProperties(List.of(), shortKey))
+            assertThatThrownBy(() -> new GatewayClientIpProperties(true, List.of(), shortKey))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageNotContaining(shortKey);
         }
@@ -148,14 +148,14 @@ class ClientIpResolverTest {
         @Test
         @DisplayName("toString 에 HMAC 키를 싣지 않는다")
         void toStringMasksKey() {
-            assertThat(new GatewayClientIpProperties(List.of(), KEY).toString()).doesNotContain(KEY).contains("hashKey=****");
+            assertThat(new GatewayClientIpProperties(true, List.of(), KEY).toString()).doesNotContain(KEY).contains("hashKey=****");
         }
 
         @Test
         @DisplayName("빈 항목 · 공백은 버린다 — 환경변수가 비면 신뢰 프록시 없음이다")
         void stripsBlankProxies() {
-            assertThat(new GatewayClientIpProperties(List.of("", " 10.0.0.0/8 "), KEY).trustedProxies()).containsExactly("10.0.0.0/8");
-            assertThat(new GatewayClientIpProperties(null, KEY).trustedProxies()).isEmpty();
+            assertThat(new GatewayClientIpProperties(true, List.of("", " 10.0.0.0/8 "), KEY).trustedProxies()).containsExactly("10.0.0.0/8");
+            assertThat(new GatewayClientIpProperties(true, null, KEY).trustedProxies()).isEmpty();
         }
     }
 

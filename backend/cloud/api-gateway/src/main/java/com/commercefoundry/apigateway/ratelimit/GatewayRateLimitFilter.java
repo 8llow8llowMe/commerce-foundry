@@ -2,6 +2,7 @@ package com.commercefoundry.apigateway.ratelimit;
 
 import com.commercefoundry.apigateway.exception.GatewayErrorCode;
 import com.commercefoundry.apigateway.handler.GatewayErrorResponseWriter;
+import com.commercefoundry.apigateway.properties.GatewayClientIpProperties;
 import com.commercefoundry.apigateway.properties.GatewayRateLimitProperties;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import java.time.Clock;
@@ -28,7 +29,8 @@ import reactor.core.publisher.Mono;
  * <ul>
  *   <li><b>라우트 전역 필터(GlobalFilter)다.</b> 라우트에 걸린 요청만 오고, 보안 체인(토큰 검증 · 차단 목록 · 어드민 인가)이 끝난 뒤라 검증된 회원 id 를 쓴다.</li>
  *   <li><b>로그인한 요청은 회원 id, 토큰 없는 요청은 클라이언트 IP</b>({@link ClientIpResolver} — 신뢰 프록시만 {@code X-Forwarded-For} 를 믿는다)의 HMAC 으로 센다.
- *       같은 정책 한도를 쓰되 버킷이 따로다. 원격 주소조차 모르면 세지 않는다.</li>
+ *       같은 정책 한도를 쓰되 버킷이 따로다. 원격 주소조차 모르면 세지 않는다.
+ *       <b>토큰 없는 요청은 {@code gateway.client-ip.enabled} 일 때만 센다(기본 끔 — §7-3).</b> 끄면 IP 를 해석 · 해시하지 않고 그대로 보낸다.</li>
  *   <li><b>저장소 장애 · 응답 없음이면 통과(fail-open)한다.</b> 제한은 남용 완화 수단이라 장애가 쇼핑 장애가 되지 않게 한다 — 차단 목록 일반 경로와 같은 판단(§7-1).
  *       warn 은 간격마다 한 번만 남긴다.</li>
  * </ul>
@@ -45,6 +47,7 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
     private final ClientIpResolver clientIpResolver;
     private final ClientIpHasher clientIpHasher;
     private final GatewayRateLimitProperties properties;
+    private final GatewayClientIpProperties clientIpProperties;
     private final GatewayErrorResponseWriter errorResponseWriter;
     private final Clock clock;
     private final AtomicLong nextWarnAtMillis = new AtomicLong(Long.MIN_VALUE);
@@ -52,19 +55,20 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
     @Autowired
     public GatewayRateLimitFilter(
         BucketRateLimiter rateLimiter, ClientIpResolver clientIpResolver, ClientIpHasher clientIpHasher,
-        GatewayRateLimitProperties properties, GatewayErrorResponseWriter errorResponseWriter
+        GatewayRateLimitProperties properties, GatewayClientIpProperties clientIpProperties, GatewayErrorResponseWriter errorResponseWriter
     ) {
-        this(rateLimiter, clientIpResolver, clientIpHasher, properties, errorResponseWriter, Clock.systemUTC());
+        this(rateLimiter, clientIpResolver, clientIpHasher, properties, clientIpProperties, errorResponseWriter, Clock.systemUTC());
     }
 
     GatewayRateLimitFilter(
         BucketRateLimiter rateLimiter, ClientIpResolver clientIpResolver, ClientIpHasher clientIpHasher,
-        GatewayRateLimitProperties properties, GatewayErrorResponseWriter errorResponseWriter, Clock clock
+        GatewayRateLimitProperties properties, GatewayClientIpProperties clientIpProperties, GatewayErrorResponseWriter errorResponseWriter, Clock clock
     ) {
         this.rateLimiter = rateLimiter;
         this.clientIpResolver = clientIpResolver;
         this.clientIpHasher = clientIpHasher;
         this.properties = properties;
+        this.clientIpProperties = clientIpProperties;
         this.errorResponseWriter = errorResponseWriter;
         this.clock = clock;
     }
@@ -95,8 +99,14 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
             .flatMap(allowed -> allowed ? chain.filter(exchange) : reject(policy.get(), exchange));
     }
 
-    /** 토큰 없는 요청의 주체 — 클라이언트 IP 의 HMAC. IP 원문은 이 메서드 밖으로 나가지 않는다(키 · 로그 모두). */
+    /**
+     * 토큰 없는 요청의 주체 — 클라이언트 IP 의 HMAC. IP 원문은 이 메서드 밖으로 나가지 않는다(키 · 로그 모두).
+     * 꺼져 있으면(기본) 세지 않는다 — BFF 뒤에서는 비로그인 요청 전체가 BFF 주소 한 버킷이 된다 (§7-3, #134 · #135).
+     */
     private Optional<RateLimitSubject> clientSubject(ServerWebExchange exchange) {
+        if (!clientIpProperties.enabled()) {
+            return Optional.empty();
+        }
         Optional<RateLimitSubject> subject = clientIpResolver.resolve(exchange.getRequest())
             .map(ClientIpResolver::bucketOf)
             .map(clientIpHasher::hash)

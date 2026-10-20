@@ -2,15 +2,21 @@ package com.commercefoundry.apigateway.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
 
+import com.commercefoundry.apigateway.GatewayIntegrationTest;
+import com.commercefoundry.apigateway.properties.GatewayClientIpProperties;
 import com.commercefoundry.apigateway.properties.GatewayRateLimitProperties;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.cloud.gateway.filter.ratelimit.RateLimiter;
 import org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter;
 import reactor.core.publisher.Mono;
@@ -20,6 +26,9 @@ class RedisBucketRateLimiterUnitTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final long MEMBER_ID = 42L;
+    private static final String CLIENT_IP = "203.0.113.7";
+    private static final ClientIpHasher HASHER =
+        new ClientIpHasher(new GatewayClientIpProperties(true, List.of(), GatewayIntegrationTest.TEST_CLIENT_IP_HASH_KEY));
 
     private final RedisRateLimiter redisRateLimiter = mock(RedisRateLimiter.class);
     private final Map<String, RedisRateLimiter.Config> registered = new HashMap<>();
@@ -37,10 +46,32 @@ class RedisBucketRateLimiterUnitTest {
     }
 
     @Test
-    @DisplayName("버킷 id 는 정책 · 회원 id 로 만든다 — 프레임워크 키에는 이 값만 들어간다")
+    @DisplayName("버킷 id 는 정책 · 주체(회원 id 또는 IP 의 HMAC)로 만든다 — 프레임워크 키에는 이 값만 들어간다")
     void bucketIdSeparatesPolicies() {
+        String hash = HASHER.hash(CLIENT_IP);
+
         assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.CART_WRITE, RateLimitSubject.member(MEMBER_ID))).isEqualTo("cart-write:member:42");
         assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.ORDER_WRITE, RateLimitSubject.member(MEMBER_ID))).isEqualTo("order-write:member:42");
+        assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.CART_WRITE, RateLimitSubject.client(hash)))
+            .isEqualTo("cart-write:ip:" + hash)
+            .doesNotContain(CLIENT_IP);
+    }
+
+    @Test
+    @DisplayName("비로그인 주체는 프레임워크에 (정책 id, <정책>:ip:<HMAC>) 로 넘긴다 — Redis 키가 되는 값에 IP 원문이 없다")
+    void clientSubjectReachesFrameworkWithoutRawIp() {
+        RedisBucketRateLimiter limiter = limiter();
+        String hash = HASHER.hash(CLIENT_IP);
+        given(redisRateLimiter.isAllowed(anyString(), anyString()))
+            .willReturn(Mono.just(new RateLimiter.Response(true, Map.of(RedisRateLimiter.REMAINING_HEADER, "19"))));
+
+        assertThat(limiter.tryAcquire(RateLimitPolicy.CART_WRITE, RateLimitSubject.client(hash)).block(TIMEOUT)).isTrue();
+
+        ArgumentCaptor<String> routeId = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> id = ArgumentCaptor.forClass(String.class);
+        then(redisRateLimiter).should().isAllowed(routeId.capture(), id.capture());
+        assertThat(routeId.getValue()).isEqualTo("cart-write");
+        assertThat(id.getValue()).isEqualTo("cart-write:ip:" + hash).doesNotContain(CLIENT_IP);
     }
 
     @Test
