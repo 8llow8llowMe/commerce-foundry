@@ -37,13 +37,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 
 /**
  * 컨트롤러 인가 선언 · 전역 Feign 설정의 정적 규칙(ArchUnit). 서비스 코드만 보고 빌드를 실패시킨다 — 컨텍스트를 띄우지 않는다.
- * 서비스는 애플리케이션 클래스 하나만 알려 주고 상속한다.
+ * 서비스는 애플리케이션 클래스 하나만 알려 주고 상속한다. 헥사고날 계층 규칙(common-core {@code HexagonalArchitectureRules})도 같은 클래스에서 implements 한다 —
+ * 인터페이스 메서드를 함께 구현하므로 {@code applicationClass()} 는 public 이다.
  *
  * <pre>{@code
- * class DeliveryServiceArchitectureTest extends ControllerAuthorizationArchTestSupport {
+ * class DeliveryServiceArchitectureTest extends ControllerAuthorizationArchTestSupport implements HexagonalArchitectureRules {
  *
  *     @Override
- *     protected Class<?> applicationClass() {
+ *     public Class<?> applicationClass() {
  *         return DeliveryServiceApplication.class;
  *     }
  * }
