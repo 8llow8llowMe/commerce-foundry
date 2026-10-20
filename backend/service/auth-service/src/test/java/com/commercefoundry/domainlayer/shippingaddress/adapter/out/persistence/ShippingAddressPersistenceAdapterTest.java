@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.shippingaddress.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.commercefoundry.domainlayer.shippingaddress.adapter.out.persistence.entity.ShippingAddressEntity;
 import com.commercefoundry.domainlayer.shippingaddress.application.exception.ShippingAddressErrorCode;
@@ -132,15 +133,15 @@ class ShippingAddressPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("다른 회원의 주소를 기본으로 지정하면 바뀐 행이 없어 AUTH_020 이다")
+    @DisplayName("다른 회원의 주소를 기본으로 지정하면 바뀐 행이 없어 false 다 — 404 판정은 Processor 가 한다")
     void markDefaultRequiresOwner() {
         shippingAddressRepositoryPort.save(ShippingAddress.create(10L, MEMBER_ID, DOMESTIC, false));
         entityManager.clear();
 
-        assertThatThrownBy(() -> shippingAddressRepositoryPort.markDefault(10L, OTHER_MEMBER_ID))
-            .isInstanceOf(ShippingAddressException.class)
-            .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
-            .isEqualTo(ShippingAddressErrorCode.NOT_FOUND_SHIPPING_ADDRESS);
+        assertThat(shippingAddressRepositoryPort.markDefault(10L, OTHER_MEMBER_ID)).isFalse();
+        entityManager.clear();
+        assertThat(shippingAddressRepositoryPort.findByIdAndMemberId(10L, MEMBER_ID))
+            .hasValueSatisfying(address -> assertThat(address.defaultAddress()).isFalse());
     }
 
     @Test
@@ -234,6 +235,43 @@ class ShippingAddressPersistenceAdapterTest {
         assertThat(shippingAddressRepositoryPort.deleteByIdAndMemberId(10L, MEMBER_ID)).isTrue();
         assertThat(shippingAddressRepositoryPort.deleteByIdAndMemberId(10L, MEMBER_ID)).isFalse();
         assertThat(shippingAddressRepositoryPort.countByMemberId(MEMBER_ID)).isZero();
+    }
+
+    @Test
+    @DisplayName("지운 행을 옛 버전으로 저장하면 되살리지 않고 AUTH_022 다 — 전체 교체가 삭제와 겹친 경우")
+    void savingDeletedRowConflicts() {
+        shippingAddressRepositoryPort.save(ShippingAddress.create(10L, MEMBER_ID, DOMESTIC, false));
+        entityManager.clear();
+        ShippingAddress read = shippingAddressRepositoryPort.findByIdAndMemberId(10L, MEMBER_ID).orElseThrow();
+        shippingAddressRepositoryPort.deleteByIdAndMemberId(10L, MEMBER_ID);
+        entityManager.clear();
+
+        assertThatThrownBy(() -> shippingAddressRepositoryPort.save(read.replaceContent(INTERNATIONAL)))
+            .isInstanceOf(ShippingAddressException.class)
+            .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+            .isEqualTo(ShippingAddressErrorCode.SHIPPING_ADDRESS_UPDATE_CONFLICT);
+        entityManager.clear();
+        assertThat(entityManager.find(ShippingAddressEntity.class, 10L)).isNull();
+    }
+
+    @Test
+    @DisplayName("기본을 지우고 승격하면 남은 주소 중 아이디가 가장 큰 행이 기본이다 (삭제 → 최근 조회 → 지정)")
+    void promoteLatestAfterDeletingDefault() {
+        shippingAddressRepositoryPort.save(ShippingAddress.create(10L, MEMBER_ID, DOMESTIC, true));
+        shippingAddressRepositoryPort.save(ShippingAddress.create(12L, MEMBER_ID, DOMESTIC, false));
+        shippingAddressRepositoryPort.save(ShippingAddress.create(11L, MEMBER_ID, DOMESTIC, false));
+        shippingAddressRepositoryPort.save(ShippingAddress.create(30L, OTHER_MEMBER_ID, DOMESTIC, true));
+        entityManager.clear();
+
+        assertThat(shippingAddressRepositoryPort.deleteByIdAndMemberId(10L, MEMBER_ID)).isTrue();
+        ShippingAddress latest = shippingAddressRepositoryPort.findLatestByMemberId(MEMBER_ID).orElseThrow();
+        assertThat(shippingAddressRepositoryPort.markDefault(latest.id(), MEMBER_ID)).isTrue();
+        entityManager.clear();
+
+        assertThat(shippingAddressRepositoryPort.findAllByMemberId(MEMBER_ID))
+            .extracting(ShippingAddress::id, ShippingAddress::defaultAddress)
+            .containsExactly(tuple(12L, true), tuple(11L, false));
+        assertThat(shippingAddressRepositoryPort.markDefault(10L, MEMBER_ID)).as("지운 행은 바뀌지 않는다").isFalse();
     }
 
     private static ShippingAddressEntity entity(long id, long memberId, Long defaultMemberId, String countryCode) {

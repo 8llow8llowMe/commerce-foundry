@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.shippingaddress;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.commercefoundry.domainlayer.member.adapter.out.persistence.MemberRepositoryAdapter;
 import com.commercefoundry.domainlayer.member.application.mapper.MemberMapperImpl;
@@ -42,15 +43,17 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * 기본 배송지 단일성 · 개수 상한이 <b>동시 요청</b>에서도 지켜지는지 실제 PostgreSQL 에서 본다 — 잠금 · 문장 단위 유니크 검사는 엔진에 기대므로 H2 로는 볼 수 없다.
+ * 기본 배송지 단일성 · 개수 상한이 <b>동시 요청</b>에서도 지켜지는지 실제 PostgreSQL 에서 본다 — 잠금 · 즉시(행 단위) 유니크 검사는 엔진에 기대므로 H2 로는 볼 수 없다.
  *
  * <p>테스트 트랜잭션을 끄고(NOT_SUPPORTED) 스레드마다 실제 Facade 를 불러 각자 트랜잭션 · 커넥션으로 돈다. 회원 아이디는 테스트마다 새로 만든다 —
  * 커밋된 데이터가 컨테이너에 남는다.
@@ -99,6 +102,9 @@ class ShippingAddressConcurrencyTest {
 
     @Autowired
     private MemberRepositoryPort memberRepositoryPort;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @Test
     @DisplayName("두 스레드가 같은 회원의 다른 주소를 동시에 기본으로 지정해도 둘 다 성공하고, 끝난 뒤 기본은 정확히 하나다")
@@ -173,6 +179,71 @@ class ShippingAddressConcurrencyTest {
             List<ShippingAddress> addresses = shippingAddressRepositoryPort.findAllByMemberId(memberId);
             assertThat(addresses).as("round %d", round).hasSize(2);
             assertThat(addresses).filteredOn(ShippingAddress::defaultAddress).as("round %d", round).hasSize(1);
+        }
+    }
+
+    @Test
+    @DisplayName("전체 교체와 기본 지정이 같은 주소에 겹쳐도 기본은 하나이고, 실패는 AUTH_022(옛 버전) 뿐이다")
+    void concurrentUpdateAndSetDefault() throws Exception {
+        ShippingAddressCommand changed =
+            new ShippingAddressCommand("회사", "김철수", "0212345678", "KR", "04524", "서울특별시 중구 세종대로 110", null, null, null);
+        for (int round = 0; round < ROUNDS; round++) {
+            long memberId = newMember();
+            long defaultAddress = Long.parseLong(shippingAddressWebUseCase.create(memberId, COMMAND, false).addressId());
+            long target = Long.parseLong(shippingAddressWebUseCase.create(memberId, COMMAND, false).addressId());
+
+            List<Throwable> failures = runConcurrently(List.of(
+                () -> shippingAddressWebUseCase.update(memberId, target, changed),
+                () -> {
+                    shippingAddressWebUseCase.setDefault(memberId, target);
+                    return null;
+                }
+            ));
+
+            assertThat(failures).as("round %d", round).allSatisfy(failure -> assertThat(failure)
+                .isInstanceOf(ShippingAddressException.class)
+                .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+                .isEqualTo(ShippingAddressErrorCode.SHIPPING_ADDRESS_UPDATE_CONFLICT));
+            List<ShippingAddress> addresses = shippingAddressRepositoryPort.findAllByMemberId(memberId);
+            assertThat(addresses).filteredOn(ShippingAddress::defaultAddress).as("round %d", round).singleElement()
+                .extracting(ShippingAddress::id).isIn(defaultAddress, target);
+        }
+    }
+
+    @Test
+    @DisplayName("다른 트랜잭션이 회원 잠금을 쥐고 있으면 시간 상한(5초) 안에 409 · AUTH_023 으로 끊긴다 — 무한정 기다리지 않는다")
+    void lockWaitIsBounded() throws Exception {
+        long memberId = newMember();
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService holder = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> holding = holder.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                memberRepositoryPort.findByIdForUpdate(memberId);
+                locked.countDown();
+                try {
+                    release.await(20, TimeUnit.SECONDS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+            long startedAt = System.nanoTime();
+            Throwable failure = catchThrowable(() -> shippingAddressWebUseCase.create(memberId, COMMAND, false));
+            long waitedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+            release.countDown();
+            holding.get(30, TimeUnit.SECONDS);
+
+            assertThat(failure).isInstanceOf(ShippingAddressException.class)
+                .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+                .isEqualTo(ShippingAddressErrorCode.SHIPPING_ADDRESS_BUSY);
+            assertThat(failure.getCause()).as("PostgreSQL 이 잠금 대기 문장을 취소한다 — 드라이버 57014 → Spring QueryTimeoutException").isInstanceOf(QueryTimeoutException.class);
+            assertThat(waitedMillis).isBetween(4_000L, 10_000L);
+            assertThat(shippingAddressRepositoryPort.countByMemberId(memberId)).isZero();
+        } finally {
+            release.countDown();
+            holder.shutdownNow();
         }
     }
 

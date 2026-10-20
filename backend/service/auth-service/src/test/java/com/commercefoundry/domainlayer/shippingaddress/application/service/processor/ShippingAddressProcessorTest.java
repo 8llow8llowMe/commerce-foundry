@@ -86,7 +86,7 @@ class ShippingAddressProcessorTest {
     }
 
     @Test
-    @DisplayName("기본으로 추가하면 기존 기본을 먼저 풀고(문장 단위 유니크 검사) 새 주소를 기본으로 넣는다")
+    @DisplayName("기본으로 추가하면 기존 기본을 먼저 풀고(유니크 키는 즉시(행 단위) 검사 — deferrable 이 아님) 새 주소를 기본으로 넣는다")
     void createAsDefaultClearsFirst() {
         given(shippingAddressRepositoryPort.countByMemberId(MEMBER_ID)).willReturn(2L);
         given(snowflakeIdGenerator.generateId()).willReturn(ADDRESS_ID);
@@ -151,12 +151,44 @@ class ShippingAddressProcessorTest {
     @DisplayName("기본 지정은 기존 기본 해제 → 새 기본 지정 순서다")
     void setDefaultOrder() {
         given(shippingAddressRepositoryPort.findByIdAndMemberId(ADDRESS_ID, MEMBER_ID)).willReturn(Optional.of(address(ADDRESS_ID, false)));
+        given(shippingAddressRepositoryPort.markDefault(ADDRESS_ID, MEMBER_ID)).willReturn(true);
 
         processor.setDefault(MEMBER_ID, ADDRESS_ID);
 
         InOrder order = inOrder(shippingAddressRepositoryPort);
         order.verify(shippingAddressRepositoryPort).clearDefault(MEMBER_ID);
         order.verify(shippingAddressRepositoryPort).markDefault(ADDRESS_ID, MEMBER_ID);
+    }
+
+    @Test
+    @DisplayName("지정 UPDATE 가 바꾼 행이 없으면(지워졌다) AUTH_020 이다 — 404 판정은 Processor 가 한다")
+    void setDefaultNoRowUpdated() {
+        given(shippingAddressRepositoryPort.findByIdAndMemberId(ADDRESS_ID, MEMBER_ID)).willReturn(Optional.of(address(ADDRESS_ID, false)));
+        given(shippingAddressRepositoryPort.markDefault(ADDRESS_ID, MEMBER_ID)).willReturn(false);
+
+        assertThatThrownBy(() -> processor.setDefault(MEMBER_ID, ADDRESS_ID))
+            .isInstanceOf(ShippingAddressException.class)
+            .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+            .isEqualTo(ShippingAddressErrorCode.NOT_FOUND_SHIPPING_ADDRESS);
+    }
+
+    @Test
+    @DisplayName("도메인 규칙 위반(요청 검증을 비켜 온 값)은 500 이 아니라 400 · AUTH_100 이고 쓰지 않는다 — 생성 · 전체 교체 모두")
+    void domainRuleViolationBecomesBadRequest() {
+        ShippingAddressCommand invalid = new ShippingAddressCommand(null, "　", "01012345678", "KR", "06236", "주소", null, null, null);
+
+        assertThatThrownBy(() -> processor.create(MEMBER_ID, invalid, false))
+            .isInstanceOf(ShippingAddressException.class)
+            .hasMessage("요청 값이 올바르지 않습니다.")
+            .hasCauseInstanceOf(IllegalArgumentException.class)
+            .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+            .isEqualTo(ShippingAddressErrorCode.INVALID_SHIPPING_ADDRESS);
+        assertThatThrownBy(() -> processor.update(MEMBER_ID, ADDRESS_ID, invalid))
+            .isInstanceOf(ShippingAddressException.class)
+            .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+            .isEqualTo(ShippingAddressErrorCode.INVALID_SHIPPING_ADDRESS);
+        verify(shippingAddressRepositoryPort, never()).save(any());
+        verify(shippingAddressRepositoryPort, never()).countByMemberId(anyLong());
     }
 
     @Test
@@ -185,12 +217,27 @@ class ShippingAddressProcessorTest {
         given(shippingAddressRepositoryPort.findByIdAndMemberId(ADDRESS_ID, MEMBER_ID)).willReturn(Optional.of(address(ADDRESS_ID, true)));
         given(shippingAddressRepositoryPort.deleteByIdAndMemberId(ADDRESS_ID, MEMBER_ID)).willReturn(true);
         given(shippingAddressRepositoryPort.findLatestByMemberId(MEMBER_ID)).willReturn(Optional.of(address(300L, false)));
+        given(shippingAddressRepositoryPort.markDefault(300L, MEMBER_ID)).willReturn(true);
 
         processor.delete(MEMBER_ID, ADDRESS_ID);
 
         InOrder order = inOrder(shippingAddressRepositoryPort);
         order.verify(shippingAddressRepositoryPort).deleteByIdAndMemberId(ADDRESS_ID, MEMBER_ID);
         order.verify(shippingAddressRepositoryPort).markDefault(300L, MEMBER_ID);
+    }
+
+    @Test
+    @DisplayName("승격할 주소가 그 사이 사라졌으면 AUTH_022 다 — 불변식을 깬 채 커밋하지 않는다")
+    void promotionTargetVanished() {
+        given(shippingAddressRepositoryPort.findByIdAndMemberId(ADDRESS_ID, MEMBER_ID)).willReturn(Optional.of(address(ADDRESS_ID, true)));
+        given(shippingAddressRepositoryPort.deleteByIdAndMemberId(ADDRESS_ID, MEMBER_ID)).willReturn(true);
+        given(shippingAddressRepositoryPort.findLatestByMemberId(MEMBER_ID)).willReturn(Optional.of(address(300L, false)));
+        given(shippingAddressRepositoryPort.markDefault(300L, MEMBER_ID)).willReturn(false);
+
+        assertThatThrownBy(() -> processor.delete(MEMBER_ID, ADDRESS_ID))
+            .isInstanceOf(ShippingAddressException.class)
+            .extracting(exception -> ((ShippingAddressException) exception).getErrorCode())
+            .isEqualTo(ShippingAddressErrorCode.SHIPPING_ADDRESS_UPDATE_CONFLICT);
     }
 
     @Test

@@ -32,7 +32,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * 배송지 주소록 API 전체 흐름을 실제 빈 구성(보안 체인 · 두 advice · Facade · 회원 잠금 · 어댑터 · H2)으로 본다.
  * 애노테이션은 {@link AuthServiceApplicationTests} 와 같아 컨텍스트를 같이 쓴다. H2 는 컨텍스트 동안 살아 있으므로 테스트마다 회원을 새로 만든다.
  *
- * <p>동시 요청(잠금 · 문장 단위 유니크 검사)은 PostgreSQL 에서만 의미가 있어 {@code ShippingAddressConcurrencyTest}(Testcontainers)가 본다.
+ * <p>동시 요청(잠금 · 즉시(행 단위) 유니크 검사)은 PostgreSQL 에서만 의미가 있어 {@code ShippingAddressConcurrencyTest}(Testcontainers)가 본다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -114,7 +114,7 @@ class ShippingAddressFlowIntegrationTest {
         String owner = bearer(newMember());
         String other = bearer(newMember());
         String addressId = create(owner, domestic("집", "01012345678", "06236"));
-        create(other, domestic("집", "01012345678", "06236"));
+        String attackersOwn = create(other, domestic("집", "01012345678", "04524"));
 
         assertNotFound(get(other, addressId));
         assertNotFound(put(other, addressId, international()));
@@ -122,10 +122,13 @@ class ShippingAddressFlowIntegrationTest {
         assertNotFound(setDefault(other, addressId));
         assertNotFound(get(other, "4611686018427387904"));
 
-        assertThat(listIds(other)).doesNotContain(addressId);
+        assertThat(listIds(other)).as("공격자 주소록에 남의 주소가 들어오지 않는다").containsExactly(attackersOwn);
+        assertThat(listDefaults(other)).as("공격자 쪽 기본 배송지도 그대로다 — 남의 주소 기본 지정이 내 기본을 풀지 않는다").containsExactly(true);
         MvcTestResult stillThere = get(owner, addressId);
         assertThat(stillThere).hasStatusOk();
         assertThat(stillThere).bodyJson().extractingPath("$.dataBody.countryCode").isEqualTo("KR");
+        assertThat(stillThere).bodyJson().extractingPath("$.dataBody.recipientName").as("PUT 이 반영되지 않았다").isEqualTo("홍길동");
+        assertThat(stillThere).bodyJson().extractingPath("$.dataBody.postalCode").isEqualTo("06236");
         assertThat(stillThere).bodyJson().extractingPath("$.dataBody.isDefault").isEqualTo(true);
     }
 

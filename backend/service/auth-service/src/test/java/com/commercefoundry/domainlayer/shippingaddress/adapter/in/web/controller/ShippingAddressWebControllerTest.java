@@ -190,6 +190,32 @@ class ShippingAddressWebControllerTest {
         }
 
         @Test
+        @DisplayName("전각 공백(U+3000)만 있는 필수 칸은 @NotBlank 를 지나도 400 이다 — 받는 사람 121 · 연락처 122 · 주소 127 (도메인 strip 기준)")
+        void ideographicSpaceOnly() {
+            String blank = "　　";
+            String valid = body("KR", "\"06236\"", "\"01012345678\"", "null");
+
+            assertValidationError(post(valid.replace("\"홍길동\"", "\"" + blank + "\"")), "AUTH_121", "recipientName");
+            assertValidationError(post(body("KR", "\"06236\"", "\"" + blank + "\"", "null")), "AUTH_122", "recipientPhone");
+            assertValidationError(post(valid.replace("\"서울특별시 강남구 테헤란로 123\"", "\"" + blank + "\"")), "AUTH_127", "addressLine1");
+            assertValidationError(post(body("kr", "\"06236\"", "\"01012345678\"", "null").replace("\"홍길동\"", "\"" + blank + "\"")),
+                "AUTH_121", "recipientName");
+            MvcTestResult put = mvc.put().uri(BASE + "/" + ADDRESS_ID).header(HttpHeaders.AUTHORIZATION, bearer()).contentType(MediaType.APPLICATION_JSON)
+                .content(valid.replace("\"홍길동\"", "\"" + blank + "\"")).exchange();
+            assertValidationError(put, "AUTH_121", "recipientName");
+            verifyNoInteractions(shippingAddressWebUseCase);
+        }
+
+        @Test
+        @DisplayName("ASCII 공백만 있는 필수 칸은 @NotBlank 한 번만 거절한다 — 같은 오류가 두 번 나가지 않는다")
+        void asciiBlankReportedOnce() {
+            MvcTestResult result = post(body("KR", "\"06236\"", "\"01012345678\"", "null").replace("\"홍길동\"", "\"   \""));
+
+            assertValidationError(result, "AUTH_121", "recipientName");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors.length()").isEqualTo(1);
+        }
+
+        @Test
         @DisplayName("빈 본문 · 깨진 JSON 은 AUTH_100 이다")
         void unreadable() {
             assertThat(post("{\"countryCode\":")).hasStatus(HttpStatus.BAD_REQUEST).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_100");
