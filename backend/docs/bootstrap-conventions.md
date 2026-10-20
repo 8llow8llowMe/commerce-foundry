@@ -201,7 +201,8 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
 - 발급기를 붙이는 서비스(auth, #4)는 `issuerExpected()` 를 `true` 로 override 한다. 나머지는 상속 한 줄 그대로다.
 - **인가 선언 누락 가드**도 같은 스모크에 있다 — 서비스의 모든 MVC 핸들러를 돌며 `/internal/` 핸들러는 허용 호출자(`hasAuthority('SERVICE_…')`),
   `/api/` 핸들러는 `@PreAuthorize` 가 있는지 본다 (`security-guide.md` §9-4 · §9-10). 패키지 기준 정적 규칙(인가 선언 · 어드민 ADMIN · 전역 Feign 인터셉터 · `RequestContextHolder`)은
-  서비스의 `<Svc>ArchitectureTest`(`ControllerAuthorizationArchTestSupport` 상속 한 파일)가 본다 — 새 서비스도 이 파일을 더한다 (`security-guide.md` §9-11).
+  서비스의 `<Svc>ArchitectureTest`(`ControllerAuthorizationArchTestSupport` 상속 + `HexagonalArchitectureRules` implements 한 파일)가 본다 — 계층 의존 규칙(H1~H9)도 같은 파일이다.
+  새 서비스도 이 파일을 더하고 `applicationClass()` 를 public 으로 구현한다 (`security-guide.md` §9-11, `architecture-guide.md` §3).
 - `@PreAuthorize("isAuthenticated()")` 핸들러가 처음 생기는 이슈에서 그 경로의 익명 401 · `SECURITY_001` 케이스를 서비스의 `*SecuritySmokeTest` 에
   메서드로 더한다 — `perform` · `bearer` · `SecurityEnvelopeAssertions.assertEnvelope` 를 쓰고 같은 컨텍스트를 공유한다.
   `@WebMvcTest` 같은 슬라이스로 쓸 때는 `*BeansConfig` 가 빠지므로 `ResourceServerSecurityConfigurer` · `JwtVerificationPropertiesConfig` 를

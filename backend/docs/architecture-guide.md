@@ -156,7 +156,7 @@ Info → Presenter → Response
 
 ### 컨텍스트 간 의존 규칙 (같은 서비스 안)
 
-한 서비스에 컨텍스트가 여럿이면(product-service 의 `category` · `product`, order-service 의 `catalog` · `cart`) 다른 컨텍스트에서 쓸 수 있는 것은 **둘뿐이다** (허용 목록).
+한 서비스에 컨텍스트가 여럿이면(product-service 의 `category` · `product`, order-service 의 `catalog` · `cart`) 다른 컨텍스트에서 쓸 수 있는 것은 **셋뿐이다** (허용 목록).
 
 1. **그 컨텍스트의 Processor.** Facade 만 주입한다 — Processor 끼리는 컨텍스트를 넘어 주입하지 않는다.
 2. **그 Processor 가 돌려준 domain model.** 읽기 전용이다 — Facade 가 자기 컨텍스트 Processor 의 인자로 넘길 수 있다.

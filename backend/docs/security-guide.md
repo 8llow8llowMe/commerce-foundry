@@ -721,7 +721,8 @@ openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하
 ### 9-11. 정적 규칙 (ArchUnit, #42)
 
 서비스마다 `src/test/java/com/commercefoundry/<Svc>ArchitectureTest.java` 한 파일이 security-core 테스트 픽스처의
-`ControllerAuthorizationArchTestSupport` 를 상속하고 `applicationClass()` 만 구현한다. 서비스의 **main 클래스 위치만** 읽어 검사하고(core jar · 테스트 클래스 제외),
+`ControllerAuthorizationArchTestSupport` 를 상속하고, common-core 테스트 픽스처의 계층 규칙 `HexagonalArchitectureRules`(`architecture-guide.md` §3)를 implements 하며,
+`applicationClass()` 하나를 **public** 으로 구현한다(인터페이스 메서드라 public 이어야 한다 — `implements` 를 빠뜨리면 계층 규칙만 조용히 꺼진다). 서비스의 **main 클래스 위치만** 읽어 검사하고(core jar · 테스트 클래스 제외),
 Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새 서비스를 만들면 이 한 파일을 더한다. api-gateway 는 MVC 컨트롤러가 없는 리액티브라 적용하지 않는다.
 
 | 규칙 | 대상 | 위반하면 이렇게 고친다 |
