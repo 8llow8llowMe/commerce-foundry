@@ -70,8 +70,10 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 - `gradle.properties` 가 빌드 캐시를 켜 둔다. 테스트가 **실제로 돌았는지** 확인할 때는 `cleanTest` + `--no-build-cache` 를 붙인다.
   그냥 `test` 는 `UP-TO-DATE` · `FROM-CACHE` 로 건너뛰고도 성공으로 끝난다.
 - CI(`backend-ci`)는 **테스트가 있어야 하는 모듈마다**(core 가 아닌 실행 모듈 전부 + `src/test/java` 가 있는 모듈) 실제 실행 건수(건너뜀 제외)를 세고,
-  0건인 모듈이 있으면 실패시킨다. 로컬에서 같은 검사: `python ../.github/scripts/backend-test-count.py .`
-  (일부 모듈만: `--modules "service/auth-service service/payment-service"`)
+  0건인 모듈이 있으면 실패시킨다. CI 는 이 검사를 두 단계로 나눠 한다. 로컬에서 같은 검사를 하려면 `backend` 에서 둘 다 돌린다.
+  - `python ../.github/scripts/backend-ci-matrix.py .` — plan 단계. settings.gradle 의 include 가 `*/*/build.gradle` 디렉터리와 같은지 본다.
+    include 를 잊은 모듈은 어느 그룹 job 에도 들어가지 않으므로 여기서만 잡힌다.
+  - `python ../.github/scripts/backend-test-count.py .` — 모듈별 실행 건수. CI 의 그룹 job 은 `--modules "<그룹 모듈>"` 로 자기 그룹만 센다.
 - CI 는 모듈을 **그룹별 병렬 job** 으로 돌린다(`.github/scripts/backend-ci-matrix.py`).
   - 테스트가 오래 걸리는 서비스만 이름으로 떼고(`auth` · `product` · `order-payment` · `delivery`), 나머지 core · cloud · 새 모듈은 전부 `rest` 그룹이다.
   - job 마다 `./gradlew <그룹 모듈>:check --continue --no-build-cache` 로 돌아 한 모듈의 실패가 같은 그룹의 다른 모듈 결과를 가리지 않는다.
