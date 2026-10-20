@@ -8,11 +8,13 @@ import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositor
 import com.commercefoundry.domainlayer.product.application.port.out.StockAdjustmentHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuReservedQuantityQueryResult;
 import com.commercefoundry.domainlayer.product.application.port.out.query.StockQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.domain.model.StockAdjustmentHistory;
 import com.commercefoundry.domainlayer.product.domain.model.StockSnapshot;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
+import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -61,8 +63,11 @@ public class StockAdjustmentProcessor {
         stockAdjustmentHistoryRepositoryPort.append(StockAdjustmentHistory.of(
             snowflakeIdGenerator.generateId(), before, after.toStock(), command.reason(), command.memo(), command.adminMemberId()
         ));
-        // 선점 수량은 행 잠금 밖의 값이다 — 응답 순간의 참고치이고, 조정 판정(CAS)에는 쓰지 않는다
-        long reservedQuantity = stockReservationRepositoryPort.sumReservedQuantityBySkuId(skuId);
+        // 선점 수량은 행 잠금 밖의 값이다 — 응답 순간의 참고치이고, 조정 판정(CAS)에는 쓰지 않는다.
+        // 어드민 재고 조회와 같은 묶음 쿼리를 SKU 하나로 부른다 — 합이 없으면 행이 없어 0 이다
+        long reservedQuantity = stockReservationRepositoryPort.sumReservedQuantitiesBySkuIds(List.of(skuId)).stream()
+            .mapToLong(SkuReservedQuantityQueryResult::quantity)
+            .sum();
         return new StockAdminInfo(after.skuId(), after.stockManaged(), after.availableQuantity(), reservedQuantity, after.updatedAt());
     }
 

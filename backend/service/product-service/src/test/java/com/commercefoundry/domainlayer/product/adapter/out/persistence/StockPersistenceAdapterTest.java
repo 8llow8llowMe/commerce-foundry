@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.StockAdjustmentHistoryEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.StockEntity;
@@ -12,6 +13,7 @@ import com.commercefoundry.domainlayer.product.application.mapper.StockAdjustmen
 import com.commercefoundry.domainlayer.product.application.mapper.StockMapperImpl;
 import com.commercefoundry.domainlayer.product.application.port.out.StockAdjustmentHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.StockAdjustmentHistoryQueryResult;
 import com.commercefoundry.domainlayer.product.application.port.out.query.StockQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.domain.model.StockAdjustmentHistory;
@@ -20,6 +22,7 @@ import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +32,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -209,6 +213,48 @@ class StockPersistenceAdapterTest {
         assertThat(saved.getMemo()).isEqualTo("10월 입고분");
         assertThat(saved.getAdminMemberId()).isEqualTo(4611686018427387904L);
         assertThat(saved.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("어드민 조회: SKU 묶음을 in 절로 읽고 수정 시각을 싣는다 — 재고 행이 없는 SKU 는 결과에 없다")
+    void findAllWithUpdatedAt() {
+        assertThat(stockRepositoryPort.findAllWithUpdatedAtBySkuIds(List.of(MANAGED, UNLIMITED, NO_ROW)))
+            .extracting(StockQueryResult::skuId, StockQueryResult::stockManaged, StockQueryResult::availableQuantity)
+            .containsExactlyInAnyOrder(tuple(MANAGED, true, 5L), tuple(UNLIMITED, false, 0L));
+        assertThat(stockRepositoryPort.findAllWithUpdatedAtBySkuIds(List.of(MANAGED)).getFirst().updatedAt()).isNotNull();
+        assertThat(stockRepositoryPort.findAllWithUpdatedAtBySkuIds(List.of())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("조정 이력 페이지: 그 SKU 의 이력만 아이디 내림차순(최신순)으로 자르고, 전체 건수는 자르기 전 개수다")
+    void findHistoryPage() {
+        appendHistory(9001L, MANAGED, StockAdjustmentReason.RESTOCK);
+        appendHistory(9003L, MANAGED, StockAdjustmentReason.RECOUNT);
+        appendHistory(9002L, MANAGED, StockAdjustmentReason.DAMAGE);
+        appendHistory(9004L, UNLIMITED, StockAdjustmentReason.MANAGEMENT_CHANGE);
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<StockAdjustmentHistoryQueryResult> first = stockAdjustmentHistoryRepositoryPort.findPageBySkuId(MANAGED, 0, 2);
+        assertThat(first.getContent()).extracting(StockAdjustmentHistoryQueryResult::id).containsExactly(9003L, 9002L);
+        assertThat(first.getTotalElements()).isEqualTo(3L);
+        assertThat(first.getTotalPages()).isEqualTo(2);
+        StockAdjustmentHistoryQueryResult latest = first.getContent().getFirst();
+        assertThat(latest.skuId()).isEqualTo(MANAGED);
+        assertThat(latest.reason()).isEqualTo(StockAdjustmentReason.RECOUNT);
+        assertThat(latest.adminMemberId()).isEqualTo(4611686018427387904L);
+        assertThat(latest.createdAt()).isNotNull();
+
+        assertThat(stockAdjustmentHistoryRepositoryPort.findPageBySkuId(MANAGED, 1, 2).getContent())
+            .extracting(StockAdjustmentHistoryQueryResult::id).containsExactly(9001L);
+        Page<StockAdjustmentHistoryQueryResult> beyond = stockAdjustmentHistoryRepositoryPort.findPageBySkuId(MANAGED, 5, 2);
+        assertThat(beyond.getContent()).isEmpty();
+        assertThat(beyond.getTotalElements()).isEqualTo(3L);
+        assertThat(stockAdjustmentHistoryRepositoryPort.findPageBySkuId(NO_ROW, 0, 20).getTotalElements()).isZero();
+    }
+
+    private void appendHistory(long id, long skuId, StockAdjustmentReason reason) {
+        stockAdjustmentHistoryRepositoryPort.append(new StockAdjustmentHistory(id, skuId, 5L, 6L, 1L, true, true, reason, null, 4611686018427387904L));
     }
 
     private void assertTouched(Runnable update) {

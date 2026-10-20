@@ -31,6 +31,14 @@ public class StockRepositoryAdapter implements StockRepositoryPort {
     }
 
     @Override
+    public List<StockQueryResult> findAllWithUpdatedAtBySkuIds(Collection<Long> skuIds) {
+        if (skuIds.isEmpty()) {
+            return List.of();
+        }
+        return stockRepository.findAllById(skuIds).stream().map(stockMapper::toQueryResult).toList();
+    }
+
+    @Override
     public Optional<StockQueryResult> findBySkuId(long skuId) {
         return stockRepository.findById(skuId).map(stockMapper::toQueryResult);
     }

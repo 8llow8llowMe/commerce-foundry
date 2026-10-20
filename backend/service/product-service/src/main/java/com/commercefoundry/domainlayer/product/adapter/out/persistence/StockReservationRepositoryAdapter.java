@@ -8,9 +8,11 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductExce
 import com.commercefoundry.domainlayer.product.application.mapper.StockReservationMapper;
 import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuReservedQuantityQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservation;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationStatus;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -52,9 +54,11 @@ public class StockReservationRepositoryAdapter implements StockReservationReposi
     }
 
     @Override
-    public long sumReservedQuantityBySkuId(long skuId) {
-        Long sum = stockReservationItemRepository.sumDeductedQuantityBySkuIdAndReservationStatus(skuId, StockReservationStatus.RESERVED);
-        return sum == null ? 0L : sum;
+    public List<SkuReservedQuantityQueryResult> sumReservedQuantitiesBySkuIds(Collection<Long> skuIds) {
+        if (skuIds.isEmpty()) {
+            return List.of();
+        }
+        return stockReservationItemRepository.sumDeductedQuantitiesBySkuIdsAndReservationStatus(skuIds, StockReservationStatus.RESERVED);
     }
 
     /**

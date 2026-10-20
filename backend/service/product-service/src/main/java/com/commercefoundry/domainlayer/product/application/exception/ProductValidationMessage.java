@@ -36,6 +36,11 @@ public final class ProductValidationMessage {
     // 어드민 재고 조정 경로 변수 (PATCH /api/v1/admin/stocks/{skuId})
     public static final String STOCK_SKU_ID_POSITIVE = "PRODUCT_123:skuId 는 양수여야 합니다.";
 
+    // 어드민 재고 조회 (GET /api/v1/admin/stocks?skuIds=...). 조정 이력의 page · size 는 PAGE_MIN · SIZE_RANGE, 경로 skuId 는 STOCK_SKU_ID_POSITIVE 다
+    public static final String STOCK_SKU_IDS_REQUIRED = "PRODUCT_124:skuIds 는 필수입니다.";
+    public static final String STOCK_SKU_IDS_SIZE_MAX = "PRODUCT_125:skuIds 는 최대 100개입니다.";
+    public static final String STOCK_SKU_IDS_POSITIVE = "PRODUCT_126:skuIds 는 양수여야 합니다.";
+
     private ProductValidationMessage() {
     }
 }

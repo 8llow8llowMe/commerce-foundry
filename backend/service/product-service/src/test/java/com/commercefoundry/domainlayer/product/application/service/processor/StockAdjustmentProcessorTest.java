@@ -20,12 +20,14 @@ import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositor
 import com.commercefoundry.domainlayer.product.application.port.out.StockAdjustmentHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockReservationRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuReservedQuantityQueryResult;
 import com.commercefoundry.domainlayer.product.application.port.out.query.StockQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.domain.model.StockAdjustmentHistory;
 import com.commercefoundry.domainlayer.product.domain.model.StockAdjustmentReason;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -150,7 +152,7 @@ class StockAdjustmentProcessorTest {
             givenRows(row(true, 7L), row(true, 12L));
             given(stockRepositoryPort.updateQuantityIfMatches(SKU_ID, 5L, 12L)).willReturn(true);
             given(snowflakeIdGenerator.generateId()).willReturn(HISTORY_ID);
-            given(stockReservationRepositoryPort.sumReservedQuantityBySkuId(SKU_ID)).willReturn(3L);
+            given(stockReservationRepositoryPort.sumReservedQuantitiesBySkuIds(List.of(SKU_ID))).willReturn(List.of(new SkuReservedQuantityQueryResult(SKU_ID, 3L)));
 
             StockAdminInfo info = processor.adjust(command(12L, 5L, null));
 
