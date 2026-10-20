@@ -9,8 +9,9 @@ import java.util.stream.Stream;
 /**
  * delivery-service 배송비 견적 한 건. 원격 응답 모양(Feign DTO)은 adapter 밖으로 나오지 않고 이 값으로만 나온다.
  *
- * <p>주문 생성은 {@code shippingFee} 를 총액에 더하고 나머지(기본 배송비 · 무료배송 기준 · 도서산간 · 정책 version, 해외는 국가 그룹 · 무게 요금)를 주문에 스냅숏한다 —
- * 클레임 때 배송비 재부과를 현재 정책이 아니라 이 값으로 계산한다 ({@code order-flow-guide.md} §2).
+ * <p>주문 생성은 {@code shippingFee} 를 총액에 더하고, 나머지(기본 배송비 · 무료배송 기준 · 도서산간 · 정책 version, 해외는 국가 그룹 · 무게 요금)는
+ * Processor 가 domain 값으로 바꿔 주문에 스냅숏한다 — 이 조회 결과를 Info · 도메인이 그대로 들지 않는다.
+ * 클레임 때 배송비 재부과를 현재 정책이 아니라 그 스냅숏으로 계산한다 ({@code order-flow-guide.md} §2).
  *
  * <p>금액은 모두 한 통화다. 섞여 있으면 계약 위반이라 만들지 않는다(adapter 가 503 으로 바꾼다).
  *

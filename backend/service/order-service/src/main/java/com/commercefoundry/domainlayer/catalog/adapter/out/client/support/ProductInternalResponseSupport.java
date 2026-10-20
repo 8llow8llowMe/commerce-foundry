@@ -29,7 +29,7 @@ import org.springframework.stereotype.Component;
  *       ({@code security-guide.md} §9-5).</li>
  * </ul>
  *
- * <p>컴포넌트 이름에 컨텍스트 접두사(Product)를 붙인다 — 같은 단순 이름의 {@code @Component} 가 두 패키지에 있으면 기동이 실패한다.
+ * <p>컴포넌트 이름에 대상 서비스 접두사(Product)를 붙인다 — 같은 단순 이름의 {@code @Component} 가 두 패키지에 있으면 기동이 실패한다.
  */
 @Slf4j
 @Component
@@ -62,6 +62,9 @@ public class ProductInternalResponseSupport {
 
     /**
      * SKU 벌크 조회 응답을 조회 결과로 바꾼다. 봉투가 실패이거나 본문이 비었으면 503 이다 — 성공 응답에는 언제나 목록이 있다.
+     *
+     * <p>{@code weightGrams} 는 여기서 검증하지 않고 옮긴다 — 1 미만은 계약 위반이며 해외 총 무게 계산(주문)에서 거절한다.
+     * 장바구니 조회가 무게 하나로 막히지 않게 경계에서는 검증하지 않는다.
      *
      * @throws CatalogException {@code PRODUCT_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 아이디를 읽을 수 없다
      */
