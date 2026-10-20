@@ -3,7 +3,8 @@ package com.commercefoundry.apigateway.filter;
 import com.commercefoundry.apigateway.exception.GatewayErrorCode;
 import com.commercefoundry.apigateway.handler.GatewayErrorResponseWriter;
 import com.commercefoundry.apigateway.properties.GatewayRequestBodyProperties;
-import java.util.ArrayList;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeoutException;
@@ -33,7 +34,8 @@ import reactor.core.publisher.SynchronousSink;
  * 서비스(Tomcat)의 {@code max-http-form-post-size} 는 폼에만 걸리고 JSON 에는 걸리지 않아, 상한이 없으면 한 요청에 큰 본문을 싣는 남용을 막지 못한다.
  *
  * <ul>
- *   <li><b>{@code Content-Length} 가 있으면</b> 그 값만 보고 정한다. 넘으면 하류로 보내지 않고 413 을 쓴다 — 쓰기 전에 본문을 비우는지는 아래 "배출" 을 본다.</li>
+ *   <li><b>chunked 를 먼저 본다.</b> {@code Content-Length} 와 함께 오면 chunked 가 경계를 정하므로(RFC 9112 §6.3) 길이를 믿지 않고 아래 chunked 경로로 센다.</li>
+ *   <li><b>chunked 가 아니고 {@code Content-Length} 가 있으면</b> 그 값만 보고 정한다. 넘으면 하류로 보내지 않고 413 을 쓴다 — 쓰기 전에 본문을 비우는지는 아래 "배출" 을 본다.</li>
  *   <li><b>chunked 면</b> 상한까지만 모은다. 넘으면 그때까지 받은 것을 버리고 끊는다 — <b>하류에는 한 바이트도 보내지 않는다.</b>
  *       넘지 않으면 모은 본문을 {@code Content-Length} 와 함께 넘긴다. 스트리밍으로 세면서 넘기면 상한을 넘기 전까지의 앞부분이 이미 서비스에 닿는다.
  *       모으는 동안 메모리를 잡으므로 두 상한을 더 건다 — 동시에 모으는 총량({@code buffering-budget}, 넘으면 411)과 수신 시간({@code body-read-timeout}, 넘으면 408).
@@ -57,6 +59,7 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
 
     private static final int LOG_PATH_MAX_LENGTH = 200;
     private static final byte[] EMPTY = new byte[0];
+    private static final String DISCARD_READ_FAILED = "read-failed";
 
     private final GatewayRequestBodyProperties properties;
     private final GatewayErrorResponseWriter errorResponseWriter;
@@ -72,13 +75,11 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         long limit = properties.maxSize().toBytes();
-        long contentLength = request.getHeaders().getContentLength();
-
-        if (contentLength > limit) {
-            return rejectDeclaredTooLarge(exchange, contentLength, limit);
-        }
+        // chunked 를 먼저 본다 — Content-Length 와 함께 오면 chunked 가 경계를 정하므로(RFC 9112 §6.3) 길이를 믿지 않고 센다.
+        // 하위 계층(Reactor Netty)이 이때 Content-Length 를 지우는지에 기대지 않는다
         if (!isChunked(request.getHeaders())) {
-            return chain.filter(exchange);
+            long contentLength = request.getHeaders().getContentLength();
+            return contentLength > limit ? rejectDeclaredTooLarge(exchange, contentLength, limit) : chain.filter(exchange);
         }
         if (!reserve(limit)) {
             log.debug("gateway request rejected. reason=buffering-budget-exhausted, limit={}, method={}, path={}",
@@ -109,7 +110,15 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
             .flatMap(outcome -> {
                 log.debug("gateway request rejected. reason=body-too-large, contentLength={}, limit={}, discard={}, method={}, path={}",
                     contentLength, limit, outcome, request.getMethod(), abbreviate(request.getPath().value()));
-                return rejectTooLarge(exchange);
+                if (!DISCARD_READ_FAILED.equals(outcome)) {
+                    return rejectTooLarge(exchange);
+                }
+                // 읽다 실패했으면 클라이언트가 이미 끊었을 가능성이 크다 — 닫힌 채널에 쓰다 난 오류를 기본 오류 로그로 올리지 않는다
+                return rejectTooLarge(exchange).onErrorResume(error -> {
+                    log.debug("gateway rejection not delivered. reason=body-too-large, error={}, method={}, path={}",
+                        error.getClass().getSimpleName(), request.getMethod(), abbreviate(request.getPath().value()));
+                    return Mono.empty();
+                });
             });
     }
 
@@ -122,7 +131,7 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
             .doOnDiscard(DataBuffer.class, DataBufferUtils::release)
             .then(Mono.just("complete"))
             .timeout(properties.discardTimeout(), Mono.just("timeout"))
-            .onErrorResume(error -> Mono.just("read-failed"));
+            .onErrorResume(error -> Mono.just(DISCARD_READ_FAILED));
     }
 
     /**
@@ -134,7 +143,8 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
         DataBufferFactory bufferFactory = exchange.getResponse().bufferFactory();
         ChunkedBody body = new ChunkedBody(limit, properties.discardMaxSize().toBytes(), releaseReservation);
         return request.getBody()
-            // 배출 시간은 상한을 넘은 때부터 센다. 지나면 본문이 끝난 것으로 보고 413 을 쓴다
+            // 배출 시간은 상한을 넘은 때부터 센다. 지나면 본문이 끝난 것으로 보고 413 을 쓴다.
+            // 아래 수신 시간(body-read-timeout)은 요청 전체에 걸려 있어 그쪽이 먼저 끝나면 배출도 거기서 잘린다 — 그때도 이미 넘었으므로 413 이다
             .takeUntilOther(body.overflowed().then(Mono.delay(properties.discardTimeout())))
             .handle((DataBuffer buffer, SynchronousSink<Object> sink) -> {
                 if (!body.add(buffer)) {
@@ -154,7 +164,7 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
             })
             .flatMap(received -> received.tooLarge()
                 ? rejectChunkedTooLarge(exchange, limit, received)
-                : chain.filter(exchange.mutate().request(withBufferedBody(request, received.bytes(), bufferFactory)).build()));
+                : chain.filter(exchange.mutate().request(withBufferedBody(request, received.array(), received.length(), bufferFactory)).build()));
     }
 
     private Mono<Void> rejectChunkedTooLarge(ServerWebExchange exchange, long limit, ChunkedBody body) {
@@ -189,23 +199,27 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
         return transferEncoding != null && transferEncoding.toLowerCase(Locale.ROOT).contains("chunked");
     }
 
+    /** {@code Expect} 값 중 하나라도 100-continue 면(대소문자 무시) — Reactor Netty 가 100 을 보낼지 정하는 판정({@code is100ContinueExpected})과 맞춘다. */
     private static boolean expectsContinue(HttpHeaders headers) {
-        return "100-continue".equalsIgnoreCase(headers.getFirst(HttpHeaders.EXPECT));
+        List<String> expectations = headers.get(HttpHeaders.EXPECT);
+        return expectations != null && expectations.stream()
+            .flatMap(value -> Arrays.stream(value.split(",")))
+            .anyMatch(value -> "100-continue".equalsIgnoreCase(value.trim()));
     }
 
     /**
-     * 모은 본문을 길이가 정해진 본문으로 바꾼다. 구독할 때마다 바이트 배열을 감싼 새 버퍼를 준다(풀 버퍼가 아니다) —
+     * 모은 본문을 길이가 정해진 본문으로 바꾼다. 구독할 때마다 배열 앞 {@code length} 바이트를 감싼 새 버퍼를 준다(풀 버퍼가 아니고 복사하지 않는다) —
      * 보안 체인이 거절해 아무도 본문을 읽지 않아도 해제할 것이 남지 않는다.
      */
-    private static ServerHttpRequest withBufferedBody(ServerHttpRequest request, byte[] body, DataBufferFactory bufferFactory) {
+    private static ServerHttpRequest withBufferedBody(ServerHttpRequest request, byte[] body, int length, DataBufferFactory bufferFactory) {
         ServerHttpRequest withLength = request.mutate().headers(headers -> {
             headers.remove(HttpHeaders.TRANSFER_ENCODING);
-            headers.setContentLength(body.length);
+            headers.setContentLength(length);
         }).build();
         return new ServerHttpRequestDecorator(withLength) {
             @Override
             public Flux<DataBuffer> getBody() {
-                return body.length == 0 ? Flux.empty() : Flux.defer(() -> Flux.just(bufferFactory.wrap(body)));
+                return length == 0 ? Flux.empty() : Flux.defer(() -> Flux.just(bufferFactory.wrap(ByteBuffer.wrap(body, 0, length))));
             }
         };
     }
@@ -227,20 +241,30 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
     /**
      * chunked 본문을 상한까지 모은다. 넘으면 모은 것을 버리고 버퍼 자리를 바로 돌려준 뒤({@code onOverflow}), 배출 상한까지 세기만 한다 —
      * 배출 중인 연결이 {@code buffering-budget} 을 잡고 있으면 천천히 보내는 연결 몇 개로 다른 chunked 요청을 411 로 막을 수 있다.
-     * 받은 버퍼는 복사하거나 센 즉시 해제한다. {@link #add} 는 Reactor 가 한 번에 하나씩 부르지만 수신 시간 초과는 다른 스레드에서 상태를 읽어 volatile 로 둔다.
+     *
+     * <p>받은 조각은 <b>하나의 연속 배열</b>에 이어 쓰고 바로 해제한다. 조각마다 배열을 따로 두면 1바이트 청크 하나가 객체 머리 · 목록 칸까지 수십 바이트를 잡아
+     * 상한 2MB 에 요청당 수십 MB 가 된다 — {@code buffering-budget} 이 막으려던 메모리 고갈이 다시 열린다.
+     * 배열은 두 배씩 늘리되 상한에서 멈춘다. 그래서 청크 크기와 무관하게 상주 메모리는 상한 이하이고, 늘리는 순간에만 옛 배열과 새 배열이 함께 있어 상한의 2배 미만이다.
+     * 하류로 넘길 때도 복사하지 않고 이 배열의 앞부분을 감싼다.
+     *
+     * <p>{@link #add} 는 Reactor 가 한 번에 하나씩 부르지만 수신 시간 초과는 다른 스레드에서 상태를 읽어 상태 필드를 volatile 로 둔다.
      */
-    private static final class ChunkedBody {
+    static final class ChunkedBody {
 
-        private final long limit;
+        /** 처음 잡는 배열 크기. 작은 본문이 상한만큼 잡지 않게 작게 시작한다. */
+        private static final int INITIAL_CAPACITY = 16 * 1024;
+
+        private final int limit;
         private final long discardLimit;
         private final Runnable onOverflow;
         private final Sinks.Empty<Void> overflowed = Sinks.empty();
-        private List<byte[]> chunks = new ArrayList<>();
+        private byte[] collected = EMPTY;
         private volatile long received;
         private volatile boolean tooLarge;
 
+        /** @param limit 본문 상한 — {@link GatewayRequestBodyProperties} 가 100MB 이하로 묶어 int 에 들어간다 */
         ChunkedBody(long limit, long discardLimit, Runnable onOverflow) {
-            this.limit = limit;
+            this.limit = Math.toIntExact(limit);
             this.discardLimit = discardLimit;
             this.onOverflow = onOverflow;
         }
@@ -253,20 +277,30 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
                 received = total;
                 if (!tooLarge && total > limit) {
                     tooLarge = true;
-                    chunks = null;
+                    collected = EMPTY;
                     onOverflow.run();
                     overflowed.tryEmitEmpty();
                 }
                 if (tooLarge) {
                     return total <= discardLimit;
                 }
-                byte[] bytes = new byte[size];
-                buffer.read(bytes);
-                chunks.add(bytes);
+                int offset = (int) (total - size);
+                ensureCapacity((int) total);
+                buffer.read(collected, offset, size);
                 return true;
             } finally {
                 DataBufferUtils.release(buffer);
             }
+        }
+
+        /** 두 배씩 늘리되 상한을 넘지 않는다. 호출 쪽이 {@code needed <= limit} 을 보장한다. */
+        private void ensureCapacity(int needed) {
+            if (needed <= collected.length) {
+                return;
+            }
+            long doubled = Math.max(INITIAL_CAPACITY, (long) collected.length * 2);
+            int capacity = (int) Math.min(limit, Math.max(needed, doubled));
+            collected = Arrays.copyOf(collected, capacity);
         }
 
         Mono<Void> overflowed() {
@@ -281,19 +315,18 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
             return received;
         }
 
-        /** 상한 이하로 다 모은 본문. 조각을 하나로 합치고 조각 목록은 놓는다. */
-        byte[] bytes() {
-            if (received == 0) {
-                return EMPTY;
-            }
-            byte[] body = new byte[Math.toIntExact(received)];
-            int offset = 0;
-            for (byte[] chunk : chunks) {
-                System.arraycopy(chunk, 0, body, offset, chunk.length);
-                offset += chunk.length;
-            }
-            chunks = null;
-            return body;
+        /** 테스트용 — 지금 잡고 있는 배열 크기. 상한을 넘지 않고, 상한을 넘은 뒤에는 0 이다. */
+        int capacity() {
+            return collected.length;
+        }
+
+        /** 상한 이하로 다 모은 본문의 배열. 앞 {@link #length()} 바이트만 본문이다 — 복사하지 않는다. */
+        byte[] array() {
+            return collected;
+        }
+
+        int length() {
+            return (int) received;
         }
     }
 }
