@@ -97,9 +97,12 @@ description: "Commerce Foundry 개발 작업을 유형과 복잡도 T0–T3로 �
 
 ```bash
 cd backend
-./gradlew :service:<svc>:cleanTest :service:<svc>:test --no-build-cache
-./gradlew check   # 여러 모듈이면
+./gradlew :service:<svc>:cleanTest :service:<svc>:check --no-build-cache   # 바꾼 모듈만(여러 개면 나열)
+./gradlew compileTestJava                                                  # core 등 공용 모듈을 바꿨을 때 — 전 모듈 컴파일만
 ```
+
+- 루트 `./gradlew check`(전 모듈 테스트)는 로컬에서 돌리지 않는다. 전 모듈은 PR 의 CI(`backend-ci` 그룹 job 건수 표)로 확인한다 — 같은 PC 에서 여러 세션이 빌드한다(`backend/docs/local-run-guide.md` §4-1).
+- 데몬을 쓴다. `--no-daemon` 은 JVM 크래시 직후 한 번 다시 돌릴 때만, `./gradlew --stop` 은 쓰지 않는다. 하위 에이전트 프롬프트에도 이 규칙을 넣는다.
 
 FE 변경은 `frontend/`에서 `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, `pnpm build`를 실행한다.
 문서·AI 설정만 바꾼 경우에는 관련 형식·경로·인코딩 검증을 실행한다.

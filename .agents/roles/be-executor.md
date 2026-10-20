@@ -70,10 +70,13 @@ Info → Presenter → Response
 
 ```bash
 cd backend
-./gradlew :service:<svc>:compileJava
-./gradlew :service:<svc>:cleanTest :service:<svc>:test --no-build-cache
-./gradlew check            # 여러 모듈이면
+./gradlew :service:<svc>:test --tests '*XxxTest'                          # 반복 중 — 바꾼 클래스만
+./gradlew :service:<svc>:cleanTest :service:<svc>:check --no-build-cache  # 보고 전 — 바꾼 모듈만(여러 개면 나열)
+./gradlew compileTestJava                                                 # core 등 공용 모듈을 바꿨을 때 — 전 모듈 컴파일만
 ```
+
+- 루트 `./gradlew check` · `./gradlew test`(전 모듈 테스트)는 돌리지 않는다 — 같은 PC 에서 여러 세션이 빌드한다. 전 모듈은 CI 가 본다(`backend/docs/done-checklist.md` §1, `backend/docs/local-run-guide.md` §4-1).
+- 데몬을 쓴다. `--no-daemon` 은 JVM 크래시 직후 한 번 다시 돌릴 때만, **`./gradlew --stop` 은 쓰지 않는다**(다른 세션 빌드까지 끊긴다).
 
 - QueryDSL 커스텀 · JPQL → `@DataJpaTest` 로 실제 질의
 - 상태 전이 → 허용/거절 전이를 모두 단위 테스트

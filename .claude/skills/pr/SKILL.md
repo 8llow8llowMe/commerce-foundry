@@ -159,5 +159,6 @@ Issue Number: #
 
 - 한국어로 쓴다. 기능 단위로 묶고 파일 나열식 changelog 를 피한다.
 - 제목 prefix 는 변경 범위에 맞춘다: `backend/` → `[BE]`, `frontend/` → `[FE]`, 문서만 → `[DOCS]`, 빌드·CI·Claude 설정 → `[INFRA]`.
-- 백엔드 검증 명령: `./gradlew compileJava`, `./gradlew :service:<svc>:cleanTest :service:<svc>:test --no-build-cache`, `./gradlew check`.
+- 백엔드 검증 명령: `./gradlew :service:<svc>:cleanTest :service:<svc>:check --no-build-cache`(바꾼 모듈만), 공용 모듈을 바꿨으면 `./gradlew compileTestJava`.
+  루트 `./gradlew check` 는 로컬에서 돌리지 않는다 — 전 모듈은 CI 다. `검증 내역` 에는 로컬 모듈 결과와 CI run 의 그룹별 건수 표를 근거로 적는다.
 - secret, token, private key, password, 사업자 실정보는 포함하지 않는다.
