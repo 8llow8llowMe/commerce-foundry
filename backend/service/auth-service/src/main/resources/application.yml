@@ -99,7 +99,7 @@ auth:
     # 로그인(family) 하나의 절대 수명 — 최초 로그인 시각부터 잰다 (#67, security-guide.md §2-3). 회전해도 이 시간을 넘겨 이어지지 않고,
     # 넘기면 재발급이 401 AUTH_011(재로그인)이다. 상한이 가까우면 새 refresh 토큰 TTL 을 남은 시간으로 줄인다.
     # 30일 — refresh TTL 14일의 약 두 배로, 자주 쓰는 사용자도 한 달에 한 번은 다시 로그인한다.
-    # 0 이하이거나 security.jwt.issuance.refresh-token-ttl 보다 짧으면 기동하지 않는다(AuthTokenProperties · AuthTokenBeansConfig)
+    # 0 이하 · 90일 초과(#143)이거나 security.jwt.issuance.refresh-token-ttl 보다 짧으면 기동하지 않는다(AuthTokenProperties · AuthTokenBeansConfig)
     refresh-family-max-lifetime: 30d
 
 swagger:
