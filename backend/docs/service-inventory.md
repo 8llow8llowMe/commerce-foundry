@@ -33,7 +33,7 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 | 호출하는 쪽 | 대상 | 용도 |
 |-------------|------|------|
 | order-service | product-service | SKU 가격·판매 상태·무게·HS 코드 벌크 조회, 재고 선점·확정·해제 |
-| order-service | delivery-service | 배송비 계산 |
+| order-service | delivery-service | 배송비 견적(`POST /internal/v1/shipping-fees/quotes` — 주문서 미리보기 · 주문 생성, #13). 업무 거절 `DELIVERY_001/002/003/011` 만 `ORDER_012~015` 로 번역하고 나머지 실패는 503 `ORDER_011` |
 | order-service | payment-service | 클레임 환불 실행 |
 | payment-service | order-service | 결제 준비 시 주문 금액 조회, 결제 완료 알림 |
 | delivery-service | order-service | 송장 등록 시 주문 상태 `SHIPPING` 전이, 배송 완료 반영, 해외 출고 통관 품목(주문 항목 스냅숏) 조회 (#18) |
@@ -50,7 +50,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 |------|-------------|
 | `common-core` | 전부 |
 | `persistence-core` | auth · product · order · payment · delivery |
-| `redis-core` | auth(토큰·소셜 state) · order(멱등 키 — 장바구니는 PostgreSQL `orders` 스키마, #12) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용) |
+| `redis-core` | auth(토큰·소셜 state) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
 | `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
 | `storage-core` | product(상품 이미지) |
 | `shared-commerce` | product · order · payment · delivery |
