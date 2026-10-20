@@ -236,6 +236,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_020` | 404 | 배송지가 없거나 다른 회원의 것이다 — 둘을 구분하지 않는다(§2-2, 존재를 숨긴다) |
 | `AUTH_021` | 409 | 배송지 회원당 상한(`auth.shipping-address.max-per-member`, 기본 20)에 닿았다. 요청 값은 맞고 주소록 상태가 막으므로 400 이 아니라 409 다 |
 | `AUTH_022` | 409 | 같은 배송지를 다른 요청이 먼저 고쳤거나 지웠다(낙관적 락), 또는 기본 배송지 유니크 키 위반. 다시 조회한 뒤 보낸다 |
+| `AUTH_023` | 409 | 같은 회원의 다른 배송지 쓰기가 회원 잠금을 쥐고 있어 5초(트랜잭션 시간 상한) 안에 끝나지 않았다. 그 회원 요청끼리 겹친 것이라 503 이 아니다 |
 | `AUTH_100` | 400 | 깨진 JSON · 본문 없음 · 타입 불일치 (필드는 `fieldErrors` 로 밝힌다) |
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
@@ -270,18 +271,24 @@ return ResponseEntity.ok().body(Response.success(response));
 |-----|------|-----------|
 | `GET …` | 200 `{addresses: [항목], maxCount}` — 기본 먼저, 그다음 최신순(아이디 내림차순). 페이지 없이 전체 | 401 |
 | `GET …/{addressId}` | 200 위 항목 하나 | 404 `AUTH_020` |
-| `POST …` | 201 `{addressId}`. 본문에 `isDefault`(선택, 기본 false) — 회원의 첫 주소는 값과 무관하게 기본이 된다 | 400 `AUTH_120~129` · 404 `AUTH_003` · 409 `AUTH_021` |
+| `POST …` | 201 `{addressId}`. 본문에 `isDefault`(선택, 기본 false) — 회원의 첫 주소는 값과 무관하게 기본이 된다 | 400 `AUTH_120~129` · 404 `AUTH_003` · 409 `AUTH_021` · `AUTH_023` |
 | `PUT …/{addressId}` | 200 바뀐 주소. 전체 교체 — 보내지 않은 선택 칸은 지운다. 기본 여부는 바꾸지 않는다(`isDefault` 를 보내도 무시) | 400 · 404 `AUTH_020` · 409 `AUTH_022` |
-| `DELETE …/{addressId}` | 200, `dataBody: null`. 기본을 지우고 주소가 남으면 가장 최근(아이디 최대) 주소가 기본이 된다 | 404 `AUTH_020` |
-| `PUT …/{addressId}/default` | 200, `dataBody: null`. 기존 기본은 풀린다. 이미 기본이어도 200(멱등) | 404 `AUTH_020` |
+| `DELETE …/{addressId}` | 200, `dataBody: null`. 기본을 지우고 주소가 남으면 가장 최근(아이디 최대) 주소가 기본이 된다 | 404 `AUTH_020` · `AUTH_003` · 409 `AUTH_023` |
+| `PUT …/{addressId}/default` | 200, `dataBody: null`. 기존 기본은 풀린다. 이미 기본이어도 200(멱등) | 404 `AUTH_020` · `AUTH_003` · 409 `AUTH_023` |
 
 - **항목** — `{addressId, label, recipientName, recipientPhone, countryCode, postalCode, addressLine1, addressLine2, city, stateProvince, isDefault}`.
   `addressId` 는 문자열, 없는 선택 칸은 null 이다. 한 검증 코드가 여러 칸에 걸치면(121 · 124 · 126 · 128) `fieldErrors[].field` 로 가린다.
 - **불변식** — 주소가 있으면 기본 배송지는 정확히 하나다. DB 는 `default_member_id`(기본이면 `member_id` 와 같은 값, 아니면 null)의 유니크 키
   `uk_shipping_address_default_member_id` 로 "최대 하나" 를 강제한다(PostgreSQL 부분 인덱스는 JPA 로 선언할 수 없어 이 방식을 쓴다).
 - **동시성** — 추가 · 기본 지정 · 삭제는 같은 트랜잭션 맨 앞에서 회원 행을 잠가(`MemberLockProcessor`, `PESSIMISTIC_WRITE`) 회원 단위로 줄을 세운다.
-  개수 상한 검사와 기본 교체가 경합하지 않는다. 기본 교체는 기존 기본 해제 UPDATE 를 새 기본 지정보다 **먼저** 내보낸다 — PostgreSQL 유니크 검사는 문장 단위다.
+  개수 상한 검사와 기본 교체가 경합하지 않는다. 기본 교체는 기존 기본 해제 UPDATE 를 새 기본 지정보다 **먼저** 내보낸다 —
+  PostgreSQL 은 이 유니크 키를 즉시(행 단위) 검사한다(deferrable 이 아님).
   해제 · 지정 UPDATE 는 행 버전을 올려 옛 버전으로 읽은 전체 교체가 기본 여부를 되돌려 쓰지 못하게 한다(409 `AUTH_022`).
+- **잠금 대기 상한** — 잠그는 세 메서드는 `@Transactional(timeout = 5)` 다. JPA 트랜잭션 관리자가 남은 시간을 쿼리 타임아웃으로 넣어
+  잠금을 기다리는 `select ... for update` 도 5초 안에 드라이버가 취소한다(Spring `QueryTimeoutException`). 상한이 지난 뒤의 쿼리는 `TransactionTimedOutException` 이다.
+  Facade 가 둘(과 `PessimisticLockingFailureException`)을 409 `AUTH_023` 으로 바꾼다. 회원이 없으면 잠금에서 404 `AUTH_003` 이 그대로 나간다.
+- **도메인 규칙 위반** — 요청 검증을 비켜 온 값이 도메인 규칙에 걸리면 Processor 가 400 `AUTH_100`(칸은 밝히지 않는다)으로 바꾼다 — 500 이 되지 않게.
+  필수 칸(받는 사람 · 연락처 · 주소)의 전각 공백(U+3000)처럼 `@NotBlank`(trim 기준)를 지나는 유니코드 공백은 클래스 검증기가 도메인과 같은 `strip()` 기준으로 121 · 122 · 127 로 거절한다.
 - **국가 코드** — ISO 3166-1 alpha-2 대문자 형식만 본다(지원 국가 목록은 보지 않는다). DB 도 `ck_shipping_address_country_code` 로 강제한다.
 - **우편번호** — KR 이면 숫자 5자리 필수, 그 밖은 선택(영문 · 숫자 · 공백 · 하이픈 20자 이하). delivery-service 견적(#92)과 같은 규칙이다.
 - **연락처** — 필수. 하이픈 · 공백을 빼고 저장한다. KR 이면 0 으로 시작하는 숫자 9~11자리 — 휴대폰(01x 10~11자리)과 지역번호 유선(02 · 031 …)을 한 규칙으로 받는다.
