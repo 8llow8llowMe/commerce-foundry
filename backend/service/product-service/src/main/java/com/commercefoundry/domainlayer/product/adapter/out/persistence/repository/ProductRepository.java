@@ -9,4 +9,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
  */
 public interface ProductRepository extends JpaRepository<ProductEntity, Long>, ProductCustomRepository {
 
+    /** 어드민 카테고리 삭제 판정 — 숨김 · 판매 종료 상품도 센다. {@code category_id} 인덱스가 없어 표를 훑는다(드문 어드민 쓰기). */
+    boolean existsByCategoryId(Long categoryId);
 }

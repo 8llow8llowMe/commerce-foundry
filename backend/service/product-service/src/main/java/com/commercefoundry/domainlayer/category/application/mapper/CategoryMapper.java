@@ -13,4 +13,7 @@ public interface CategoryMapper {
     Category toDomain(CategoryEntity entity);
 
     List<Category> toDomains(List<CategoryEntity> entities);
+
+    /** 새 행 INSERT 용. 감사 시각은 INSERT 때 리스너가 채운다. */
+    CategoryEntity toEntity(Category category);
 }

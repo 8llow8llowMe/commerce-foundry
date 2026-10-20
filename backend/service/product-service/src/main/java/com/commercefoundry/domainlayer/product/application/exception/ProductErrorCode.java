@@ -7,7 +7,9 @@ import org.springframework.http.HttpStatus;
 /**
  * 상품 도메인 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link ProductValidationMessage} 에 둔다.
  *
- * <p>대역 — {@code 00x} 없는 리소스(404), {@code 02x} · {@code 03x} 재고(조정 · 선점 · 복원 충돌과 부족, 409), {@code 1xx} 요청 검증(400).
+ * <p>대역 — {@code 00x} 없는 리소스(404), {@code 02x} · {@code 03x} 재고(조정 · 선점 · 복원 충돌과 부족, 409), {@code 04x} 어드민 카테고리 관리,
+ * {@code 1xx} 요청 검증(400).
+ * 카테고리 컨텍스트는 진입 API 가 없어 3종 세트를 두지 않는다 — 어드민 카테고리 관리는 상품 컨텍스트가 받으므로 코드도 여기 있다.
  */
 @Getter
 @RequiredArgsConstructor
@@ -16,6 +18,8 @@ public enum ProductErrorCode {
     NOT_FOUND_PRODUCT("PRODUCT_001", "존재하지 않는 상품입니다.", HttpStatus.NOT_FOUND),
     NOT_FOUND_SKU("PRODUCT_002", "존재하지 않는 SKU 입니다.", HttpStatus.NOT_FOUND),
     NOT_FOUND_STOCK_RESERVATION("PRODUCT_003", "존재하지 않는 재고 선점입니다.", HttpStatus.NOT_FOUND),
+    /** 어드민 카테고리 수정 · 삭제의 경로 아이디가 없다. 본문의 상위 아이디가 없으면 {@link #CATEGORY_PARENT_NOT_FOUND}(400)다. */
+    NOT_FOUND_CATEGORY("PRODUCT_004", "존재하지 않는 카테고리입니다.", HttpStatus.NOT_FOUND),
 
     /** 어드민 재고 조정의 기대 수량(CAS)이 현재 수량과 다르거나, 첫 재고 등록이 동시에 겹쳤다. 다시 읽고 조정한다. */
     STOCK_ADJUSTMENT_CONFLICT("PRODUCT_020", "재고가 그 사이 바뀌었습니다. 현재 재고를 다시 확인한 뒤 조정해 주세요.", HttpStatus.CONFLICT),
@@ -47,6 +51,17 @@ public enum ProductErrorCode {
      * {@code PRODUCT_026} · {@code PRODUCT_030} 과 같이 새 트랜잭션으로 다시 시도하는 오류다.
      */
     STOCK_RESERVATION_LOCK_TIMEOUT("PRODUCT_031", "같은 선점을 처리 중입니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
+
+    /** 상위 아래에 두면 그 카테고리(하위 포함)의 깊이가 3(대·중·소)을 넘는다. 하위를 거느린 카테고리를 옮기면 하위도 같이 내려간다. */
+    CATEGORY_DEPTH_EXCEEDED("PRODUCT_040", "카테고리는 3단계까지만 만들 수 있습니다.", HttpStatus.BAD_REQUEST),
+    /** 자기 자신이나 자기 하위를 상위로 지정했다. */
+    CATEGORY_CYCLE("PRODUCT_041", "자기 자신이나 하위 카테고리를 상위로 지정할 수 없습니다.", HttpStatus.BAD_REQUEST),
+    /** 하위 카테고리가 있으면 지우지 않는다. 하위를 먼저 옮기거나 지운다. 메뉴에서만 감추려면 visible=false 다. */
+    CATEGORY_HAS_CHILDREN("PRODUCT_042", "하위 카테고리가 있어 삭제할 수 없습니다.", HttpStatus.CONFLICT),
+    /** 상품의 대표 또는 진열 카테고리로 연결돼 있으면 지우지 않는다 (자동 해제하지 않는다). 메뉴에서만 감추려면 visible=false 다. */
+    CATEGORY_HAS_PRODUCTS("PRODUCT_043", "카테고리에 연결된 상품이 있어 삭제할 수 없습니다.", HttpStatus.CONFLICT),
+    /** 본문의 상위 아이디(parentId)가 없는 카테고리다. 경로 리소스가 아니라 본문 참조라 404 가 아니라 400 이다. */
+    CATEGORY_PARENT_NOT_FOUND("PRODUCT_044", "상위 카테고리가 존재하지 않습니다.", HttpStatus.BAD_REQUEST),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("PRODUCT_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
