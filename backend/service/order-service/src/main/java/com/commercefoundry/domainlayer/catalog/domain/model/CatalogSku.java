@@ -13,7 +13,8 @@ import java.util.Objects;
  * @param soldOut 판매 상태가 품절인가
  * @param maxQuantityPerOrder 1회 주문 최대 수량. null 이면 제한 없음
  * @param customOrder 맞춤 제작 상품인가 (스토어 기능 플래그 반영)
- * @param weightGrams SKU 단위 무게(그램). null 이면 미입력이다 — 해외 주문이면 order 가 거절하고, 국내 주문은 보지 않는다 ({@code order-flow-guide.md} §2-2, #80)
+ * @param weightGrams SKU 단위 무게(그램). null 이면 미입력이다 — 해외 주문이면 order 가 거절하고, 국내 주문은 보지 않는다 ({@code order-flow-guide.md} §2-2, #80).
+ *     SKU 조회 경계에서는 값을 검증하지 않는다 — 1 미만은 계약 위반이며 해외 총 무게 계산(주문)에서 거절한다
  * @param hsCode 통관 HS 코드. null 이면 미입력이다 — {@code weightGrams} 와 같은 규칙이다
  */
 public record CatalogSku(

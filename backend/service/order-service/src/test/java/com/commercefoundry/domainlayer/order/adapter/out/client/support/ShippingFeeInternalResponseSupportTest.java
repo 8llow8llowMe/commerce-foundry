@@ -27,11 +27,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import tools.jackson.databind.json.JsonMapper;
 
+@ExtendWith(OutputCaptureExtension.class)
 class ShippingFeeInternalResponseSupportTest {
 
     private static final Request REQUEST = Request.create(Request.HttpMethod.POST, "http://delivery-service/internal/v1/shipping-fees/quotes", Map.of(), null,
@@ -208,7 +212,7 @@ class ShippingFeeInternalResponseSupportTest {
         @Test
         @DisplayName("국내 견적의 모든 칸을 조회 결과로 바꾼다")
         void convertsDomestic() {
-            assertThat(support.toShippingFeeQuoteResult(Response.success(domestic()), CurrencyCode.KRW)).isEqualTo(new ShippingFeeQuoteQueryResult(
+            assertThat(support.toShippingFeeQuoteResult(Response.success(domestic()), CurrencyCode.KRW, "KR")).isEqualTo(new ShippingFeeQuoteQueryResult(
                 Money.of(3_000, CurrencyCode.KRW), Money.of(3_000, CurrencyCode.KRW), true, Money.of(3_000, CurrencyCode.KRW), "제주",
                 Money.of(50_000, CurrencyCode.KRW), 3L, ShippingScope.DOMESTIC, null, null));
         }
@@ -216,7 +220,7 @@ class ShippingFeeInternalResponseSupportTest {
         @Test
         @DisplayName("해외 견적 — 무료배송 기준 · 도서산간 이름이 null 이어도 받는다")
         void convertsInternational() {
-            assertThat(support.toShippingFeeQuoteResult(Response.success(international()), CurrencyCode.USD)).isEqualTo(new ShippingFeeQuoteQueryResult(
+            assertThat(support.toShippingFeeQuoteResult(Response.success(international()), CurrencyCode.USD, "US")).isEqualTo(new ShippingFeeQuoteQueryResult(
                 Money.of(4_500, CurrencyCode.USD), Money.of(1_500, CurrencyCode.USD), false, Money.zero(CurrencyCode.USD), null,
                 null, 7L, ShippingScope.INTERNATIONAL, "북미", Money.of(3_000, CurrencyCode.USD)));
         }
@@ -224,10 +228,10 @@ class ShippingFeeInternalResponseSupportTest {
         @Test
         @DisplayName("실패 봉투 · 빈 본문 · 응답 없음은 503 이다")
         void notSuccessEnvelope() {
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.fail("DELIVERY_002", "배송할 수 없는 국가입니다."), CurrencyCode.KRW));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(new Response<>(DataHeader.ok(), null), CurrencyCode.KRW));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(new Response<>(null, domestic()), CurrencyCode.KRW));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(null, CurrencyCode.KRW));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.fail("DELIVERY_002", "배송할 수 없는 국가입니다."), CurrencyCode.KRW, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(new Response<>(DataHeader.ok(), null), CurrencyCode.KRW, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(new Response<>(null, domestic()), CurrencyCode.KRW, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(null, CurrencyCode.KRW, "KR"));
         }
 
         @Test
@@ -260,11 +264,84 @@ class ShippingFeeInternalResponseSupportTest {
                 null, 3L, "DOMESTIC", null, null)));
             assertUnavailable(() -> convert(new ShippingFeeQuoteInternalResponse(valid.shippingFee(), valid.baseFee(), true, valid.remoteAreaSurcharge(), null,
                 MoneyItem.of(50, "USD"), 3L, "DOMESTIC", null, null)));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(valid), CurrencyCode.USD));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(valid), CurrencyCode.USD, "KR"));
+        }
+
+        @Test
+        @DisplayName("견적 범위가 요청 국가와 다르면 503 이다 — KR 요청에 해외 견적, 해외 요청에 국내 견적")
+        void scopeMismatch() {
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(international()), CurrencyCode.USD, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(domestic()), CurrencyCode.KRW, "US"));
+        }
+
+        @Test
+        @DisplayName("국내 견적에 해외 칸(국가 그룹 · 무게 요금)이 있으면 503 이다")
+        void domesticWithInternationalFields() {
+            ShippingFeeQuoteInternalResponse valid = domestic();
+            assertUnavailable(() -> convert(new ShippingFeeQuoteInternalResponse(valid.shippingFee(), valid.baseFee(), true, valid.remoteAreaSurcharge(), "제주",
+                valid.freeShippingThreshold(), 3L, "DOMESTIC", "북미", null)));
+            assertUnavailable(() -> convert(new ShippingFeeQuoteInternalResponse(valid.shippingFee(), valid.baseFee(), true, valid.remoteAreaSurcharge(), "제주",
+                valid.freeShippingThreshold(), 3L, "DOMESTIC", null, MoneyItem.of(1_000, "KRW"))));
+        }
+
+        @Test
+        @DisplayName("해외 견적에 국가 그룹 · 무게 요금이 없거나, 국내 칸(도서산간 추가 배송비 · 구간 이름)이 있으면 503 이다")
+        void internationalFieldViolation() {
+            ShippingFeeQuoteInternalResponse valid = international();
+            assertUnavailable(() -> convertInternational(new ShippingFeeQuoteInternalResponse(valid.shippingFee(), valid.baseFee(), false, valid.remoteAreaSurcharge(),
+                null, null, 7L, "INTERNATIONAL", null, valid.weightFee())));
+            assertUnavailable(() -> convertInternational(new ShippingFeeQuoteInternalResponse(valid.shippingFee(), valid.baseFee(), false, valid.remoteAreaSurcharge(),
+                null, null, 7L, "INTERNATIONAL", "북미", null)));
+            assertUnavailable(() -> convertInternational(new ShippingFeeQuoteInternalResponse(valid.shippingFee(), valid.baseFee(), false, MoneyItem.of(500, "USD"),
+                null, null, 7L, "INTERNATIONAL", "북미", valid.weightFee())));
+            assertUnavailable(() -> convertInternational(new ShippingFeeQuoteInternalResponse(valid.shippingFee(), valid.baseFee(), false, valid.remoteAreaSurcharge(),
+                "제주", null, 7L, "INTERNATIONAL", "북미", valid.weightFee())));
         }
 
         private void convert(ShippingFeeQuoteInternalResponse body) {
-            support.toShippingFeeQuoteResult(Response.success(body), CurrencyCode.KRW);
+            support.toShippingFeeQuoteResult(Response.success(body), CurrencyCode.KRW, "KR");
+        }
+
+        private void convertInternational(ShippingFeeQuoteInternalResponse body) {
+            support.toShippingFeeQuoteResult(Response.success(body), CurrencyCode.USD, "US");
+        }
+    }
+
+    @Nested
+    @DisplayName("로그에 남기는 resultCode")
+    class LoggedResultCode {
+
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(strings = {"DELIVERY_118", "SECURITY_007", "COMMON_005", "A_000"})
+        @DisplayName("코드 모양이면 그대로 남긴다")
+        void keepsCodeShape(String resultCode) {
+            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode(resultCode)).isEqualTo(resultCode);
+        }
+
+        @ParameterizedTest(name = "[{0}]")
+        @ValueSource(strings = {"", " ", "delivery_118", "DELIVERY_1", "DELIVERY-118", "DELIVERY_118 ", "DELIVERY_118\r\nINJECTED level=ERROR", "<script>", "배송_118"})
+        @DisplayName("코드 모양이 아니면(CR/LF · 소문자 · 임의 문자열) <unrecognized> 다")
+        void replacesOtherStrings(String resultCode) {
+            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode(resultCode)).isEqualTo(ShippingFeeInternalResponseSupport.UNRECOGNIZED_RESULT_CODE);
+        }
+
+        @Test
+        @DisplayName("코드 모양이어도 40자를 넘으면 <unrecognized> 다 — 긴 값을 로그에 넣지 않는다. 코드가 없으면 null 그대로다")
+        void longOrAbsent() {
+            String forty = "D".repeat(36) + "_001";
+            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode(forty)).isEqualTo(forty);
+            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode("D" + forty)).isEqualTo(ShippingFeeInternalResponseSupport.UNRECOGNIZED_RESULT_CODE);
+            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode(null)).isNull();
+        }
+
+        @Test
+        @DisplayName("모르는 4xx 의 resultCode 에 CR/LF 가 들어 있어도 로그에 그대로 들어가지 않는다")
+        void unknownRejectionLogIsSanitized(CapturedOutput output) {
+            assertUnavailable(() -> support.call(() -> {
+                throw status(400, failure("DELIVERY_118\\r\\nINJECTED fake log line"));
+            }));
+
+            assertThat(output.getOut()).contains("delivery-service rejected internal request. status=400, resultCode=<unrecognized>").doesNotContain("INJECTED");
         }
     }
 }

@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 /**
  * 주문 도메인 오류 코드 ({@code coding-conventions.md} §8). 번호 대역은 001 주문 조회(#16) · 002~009 주문 항목 검증 · 010 주문 금액 변경 ·
  * 011~015 배송비 견적 · 016~ 생성 · 멱등 · 재고 — 필드별 검증 코드(1xx)는 {@code OrderValidationMessage} 에 둔다.
+ * 002~009 중 002 는 상품 서비스 장애(catalog {@code CATALOG_001} 번역, 503) 자리다.
  *
  * <p>배송비 견적 코드(011~015)는 delivery-service 의 업무 거절({@code DELIVERY_001/002/003/011})을 주문 계약으로 번역한 것이다 —
  * delivery 의 코드는 주문 응답에 그대로 나가지 않는다. 번역은 {@code ShippingFeeInternalResponseSupport} 가 한다.

@@ -17,6 +17,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
@@ -34,16 +35,32 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>그 밖의 4xx — 모르는 코드(본문 검증 {@code DELIVERY_1xx} 등 우리 요청 문제) · 본문을 읽지 못함 · 401 {@code SECURITY_007}(서비스 토큰 비밀 · 서비스 ID 설정 문제라
  *       재시도로 풀리지 않는다, {@code security-guide.md} §9-5) · 403(허용 호출자) — 은 error 로그를 남기고 503 {@code ORDER_011} 이다.</li>
  *   <li>{@code ErrorDecoder} 를 쓰지 않는다 — 예외 타입이 바뀌면 {@code ignore-exceptions} 도 같이 바꿔야 한다.</li>
- *   <li>로그에는 status · resultCode · 예외 타입만 남긴다. 요청 본문(우편번호 — 배송지 일부)과 응답 본문은 남기지 않는다 ({@code coding-conventions.md} §8).</li>
+ *   <li>로그에는 status · resultCode · 예외 타입만 남긴다. resultCode 는 코드 모양일 때만 그대로 남기고 아니면 {@value #UNRECOGNIZED_RESULT_CODE} 다 —
+ *       원격의 임의 문자열(CR/LF · 긴 값)을 로그에 넣지 않는다. 요청 본문(우편번호 — 배송지 일부)과 응답 본문은 남기지 않는다 ({@code coding-conventions.md} §8).
+ *       원인 예외({@code FeignException})의 메시지에는 delivery 응답 본문(최대 200자)이 들어 있으므로, 이 클래스가 던진 {@code OrderException} 을 받는 핸들러는
+ *       원인 예외를 throwable 로 로그하지 않는다(코드 · 원인 타입만).</li>
  * </ul>
  *
- * <p>컴포넌트 이름에 컨텍스트 접두사(ShippingFee)를 붙인다 — 같은 단순 이름의 {@code @Component} 가 두 패키지에 있으면 기동이 실패한다.
+ * <p>컴포넌트 이름에 대상 원격 자원 접두사(ShippingFee)를 붙인다 — 같은 단순 이름의 {@code @Component} 가 두 패키지에 있으면 기동이 실패한다.
+ * catalog 의 {@code ProductInternalResponseSupport} 는 대상 서비스 접두사라, 같은 order-service 에서 product-service 재고 선점 support 는 서비스 이름이 아니라
+ * 원격 자원으로 짓는다(예: {@code StockReservationInternalResponseSupport}).
  */
 @Slf4j
 @Component
 public class ShippingFeeInternalResponseSupport {
 
     static final String CIRCUIT_BREAKER = "delivery-service";
+    static final String UNRECOGNIZED_RESULT_CODE = "<unrecognized>";
+
+    /** 국내 정책으로 견적되는 배송 국가. 그 밖의 국가는 해외 정책이다. */
+    private static final String DOMESTIC_COUNTRY_CODE = "KR";
+
+    /**
+     * 로그에 그대로 남기는 resultCode 의 모양 — common-core {@code ValidationErrorSupport} 의 코드 판정({@code DOMAIN_NNN})과 같다.
+     * 그쪽 판정은 private 이라 가져다 쓰지 않고 같은 식을 둔다.
+     */
+    private static final Pattern RESULT_CODE_SHAPE = Pattern.compile("[A-Z][A-Z0-9_]*_[0-9]{3}");
+    private static final int MAX_LOGGED_RESULT_CODE_LENGTH = 40;
 
     /** delivery 의 업무 거절 중 주문 계약으로 번역하는 것. 여기 없는 4xx 는 우리 요청 · 설정 문제라 503 이다. */
     private static final Map<String, OrderErrorCode> TRANSLATED_REJECTIONS = Map.of(
@@ -81,12 +98,14 @@ public class ShippingFeeInternalResponseSupport {
      * 견적 응답을 조회 결과로 바꾼다. 봉투가 실패이거나 본문이 비었으면 503 이다 — 성공 응답에는 언제나 견적이 있다.
      *
      * @param orderCurrency 요청한 주문 금액의 통화. 견적 통화가 이와 다르면 계약 위반이다 — delivery 는 통화가 다르면 견적하지 않고 {@code DELIVERY_003} 을 낸다(#70)
-     * @throws OrderException {@code DELIVERY_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 통화 · 범위를 읽을 수 없다
+     * @param countryCode 요청한 배송 국가. KR 이면 {@code DOMESTIC} 이고 국가 그룹 · 무게 요금이 없어야 한다. 그 밖이면 {@code INTERNATIONAL} 이고
+     *     국가 그룹 · 무게 요금이 있으며 도서산간 추가 배송비 0 · 구간 이름 없음이어야 한다. 어긋나면 계약 위반이다
+     * @throws OrderException {@code DELIVERY_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 통화 · 범위를 읽을 수 없거나 범위가 요청 국가와 맞지 않는다
      */
-    public ShippingFeeQuoteQueryResult toShippingFeeQuoteResult(Response<ShippingFeeQuoteInternalResponse> response, CurrencyCode orderCurrency) {
+    public ShippingFeeQuoteQueryResult toShippingFeeQuoteResult(Response<ShippingFeeQuoteInternalResponse> response, CurrencyCode orderCurrency, String countryCode) {
         if (response == null || response.dataHeader() == null || !response.dataHeader().success() || response.dataBody() == null) {
             log.error("delivery-service quote response is not a success envelope. resultCode={}",
-                response == null || response.dataHeader() == null ? null : response.dataHeader().resultCode());
+                response == null || response.dataHeader() == null ? null : loggableResultCode(response.dataHeader().resultCode()));
             throw new OrderException(OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
         }
         try {
@@ -94,19 +113,32 @@ public class ShippingFeeInternalResponseSupport {
             if (result.shippingFee().currency() != orderCurrency) {
                 throw new IllegalArgumentException("견적 통화가 주문 통화와 다릅니다");
             }
+            requireScopeOf(result, countryCode);
             return result;
         } catch (RuntimeException exception) {
-            // 금액 · 통화 · 범위 · 정책 version 이 계약과 다르다(빠진 칸 · 모르는 통화 · 음수 · 모르는 범위 · 통화 섞임). 배송비를 추측하지 않는다
+            // 금액 · 통화 · 범위 · 정책 version 이 계약과 다르다(빠진 칸 · 모르는 통화 · 음수 · 모르는 범위 · 통화 섞임 · 요청 국가와 다른 범위). 배송비를 추측하지 않는다
             log.error("delivery-service quote response violates contract. type={}", exception.getClass().getSimpleName());
             throw new OrderException(OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE, exception);
         }
+    }
+
+    /**
+     * 원격이 보낸 resultCode 를 로그에 넣을 값으로 바꾼다. 코드 모양({@code [A-Z][A-Z0-9_]*_[0-9]{3}}, 40자 이하)일 때만 그대로이고,
+     * 아니면(CR/LF · 긴 값 · 임의 문자열) {@value #UNRECOGNIZED_RESULT_CODE} 다. 코드가 없으면(본문 없음 · JSON 아님) null 그대로다 — 원격 문자열이 아니다.
+     */
+    static String loggableResultCode(String resultCode) {
+        if (resultCode == null) {
+            return null;
+        }
+        return resultCode.length() <= MAX_LOGGED_RESULT_CODE_LENGTH && RESULT_CODE_SHAPE.matcher(resultCode).matches()
+            ? resultCode : UNRECOGNIZED_RESULT_CODE;
     }
 
     private OrderException translateRejection(FeignException.FeignClientException exception) {
         String resultCode = resultCodeOf(exception);
         OrderErrorCode errorCode = resultCode == null ? null : TRANSLATED_REJECTIONS.get(resultCode);
         if (errorCode == null) {
-            log.error("delivery-service rejected internal request. status={}, resultCode={}", exception.status(), resultCode);
+            log.error("delivery-service rejected internal request. status={}, resultCode={}", exception.status(), loggableResultCode(resultCode));
             return new OrderException(OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE, exception);
         }
         if (errorCode == OrderErrorCode.SHIPPING_UNAVAILABLE) {
@@ -136,6 +168,17 @@ public class ShippingFeeInternalResponseSupport {
             toMoney(body.remoteAreaSurcharge()), body.remoteAreaName(), toNullableMoney(body.freeShippingThreshold()),
             Objects.requireNonNull(body.shippingPolicyVersion(), "shippingPolicyVersion"), ShippingScope.valueOf(body.scope()),
             body.shippingZoneName(), toNullableMoney(body.weightFee()));
+    }
+
+    /** 견적 범위가 요청 국가와 맞고, 범위별 칸이 계약대로인가. delivery 는 KR 이면 국내 정책, 그 밖이면 해외 정책으로만 견적한다. */
+    private static void requireScopeOf(ShippingFeeQuoteQueryResult result, String countryCode) {
+        boolean consistent = DOMESTIC_COUNTRY_CODE.equals(countryCode)
+            ? result.scope() == ShippingScope.DOMESTIC && result.shippingZoneName() == null && result.weightFee() == null
+            : result.scope() == ShippingScope.INTERNATIONAL && result.shippingZoneName() != null && result.weightFee() != null
+                && result.remoteAreaSurcharge().isZero() && result.remoteAreaName() == null;
+        if (!consistent) {
+            throw new IllegalArgumentException("견적 범위나 범위별 칸이 요청 국가와 맞지 않습니다");
+        }
     }
 
     private static Money toMoney(MoneyItem money) {

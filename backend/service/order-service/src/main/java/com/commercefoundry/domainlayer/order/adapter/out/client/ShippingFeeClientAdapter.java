@@ -23,7 +23,7 @@ public class ShippingFeeClientAdapter implements ShippingFeeQueryPort {
     public ShippingFeeQuoteQueryResult quote(ShippingFeeQuoteQuery query) {
         ShippingFeeQuoteInternalRequest request = toRequest(query);
         return shippingFeeInternalResponseSupport.toShippingFeeQuoteResult(
-            shippingFeeInternalResponseSupport.call(() -> shippingFeeClient.quote(request)), query.orderAmount().currency());
+            shippingFeeInternalResponseSupport.call(() -> shippingFeeClient.quote(request)), query.orderAmount().currency(), query.countryCode());
     }
 
     private static ShippingFeeQuoteInternalRequest toRequest(ShippingFeeQuoteQuery query) {
