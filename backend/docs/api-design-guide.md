@@ -66,6 +66,9 @@
 
 - 처음 만든 곳: product-service `StockInternalController` (#10) — `POST /internal/v1/stock-reservations` · `.../{reservationId}/confirmation` · `.../{reservationId}/release`.
   검증 코드 `PRODUCT_112`~`PRODUCT_122`(수량 상한 10000 은 `PRODUCT_122`), 도메인 코드 `PRODUCT_003` · `PRODUCT_021`~`PRODUCT_026` (`order-flow-guide.md` §3).
+- 결제 후 재고 복원: product-service `StockRestorationInternalController` (#85) — `POST /internal/v1/stock-restorations`. 업무 키는 `claimId`(클레임당 복원 1건),
+  검증 코드 `PRODUCT_127`~`PRODUCT_130`(이름 · 뜻이 같은 `reservationId` 양수 · `items` 이하는 선점 코드 재사용), 도메인 코드 `PRODUCT_003` · `PRODUCT_027`~`PRODUCT_030`.
+  상태 전이가 없는 쓰기라 `@Version` 대신 대상 행(선점 헤더) 비관적 잠금으로 같은 대상의 동시 쓰기를 줄 세운다 (`order-flow-guide.md` §3-2).
 
 ## 2. 응답 구조
 
@@ -373,6 +376,9 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - **서비스 간(internal) 쓰기는 `Idempotency-Key` 대신 업무 키로 멱등을 만든다.** 재고 선점은 `orderId` 가 키다 — 같은 주문의 활성 선점이 있으면
   항목이 같을 때 기존 선점을 그대로 200 으로 돌려주고, 다르면 409(`PRODUCT_023`)다. 주문당 활성 선점 하나는 DB 유니크 키(`uk_stock_reservation_active_order_id`)가
   보장하고, 동시에 겹친 생성은 409(`PRODUCT_026`) 뒤 재시도가 200 이 된다. 확정 · 해제는 선점 행의 상태로 이미 처리됐는지 판단한다 (`order-flow-guide.md` §3).
+  결제 후 재고 복원은 `claimId` 가 키다 — 같은 클레임의 복원이 있으면 선점 · 사유 · 항목이 같을 때 처음 결과를 200 으로, 다르면 409(`PRODUCT_029`)다.
+  클레임당 복원 하나는 DB 유니크 키(`uk_stock_restoration_claim_id`)가 보장하고, 같은 선점의 동시 요청은 선점 헤더 잠금에서 줄을 서 재시도 없이 200 이 된다
+  (잠금을 비켜 간 동시 생성만 409 `PRODUCT_030` 뒤 재시도).
 
 ### 6-1. 설정 전체 교체 (`PUT` + `version`)
 
