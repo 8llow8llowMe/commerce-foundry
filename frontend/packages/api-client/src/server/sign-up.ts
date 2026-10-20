@@ -35,7 +35,7 @@ export function createSignUpHandler(
     if (!isSameOrigin(request, new URL(request.url))) return crossSite();
 
     const raw = await request.text();
-    const headers = forwardedHeaders(request);
+    const headers = forwardedHeaders(request, options.clientIpHeader);
 
     let upstream: Response;
     let payload: unknown;

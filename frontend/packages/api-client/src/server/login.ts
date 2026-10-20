@@ -1,4 +1,5 @@
 import { errorEnvelope, isApiEnvelope, type DataHeader } from '../envelope';
+import { resolveClientIp, setClientIp } from './client-ip';
 import type { AuthCookieConfig } from './cookies';
 import { issueCookies, isSameOrigin } from './proxy';
 import { readTokenPair } from './reissue';
@@ -8,6 +9,8 @@ export type LoginHandlerOptions = {
   gatewayUrl: string;
   cookies: AuthCookieConfig;
   fetch?: typeof fetch;
+  /** 클라이언트 IP 를 읽을 헤더(`ProxyOptions.clientIpHeader` 와 같다) */
+  clientIpHeader?: string | null;
 };
 
 export const LOGIN_PATH = '/api/v1/auth/login';
@@ -31,7 +34,7 @@ export function createLoginHandler(
 
     const attempt = await attemptLogin(
       { gatewayUrl: options.gatewayUrl, cookies: options.cookies, fetch: fetchImpl },
-      forwardedHeaders(request),
+      forwardedHeaders(request, options.clientIpHeader),
       await request.arrayBuffer(),
     );
     if (!attempt.ok) return attempt.response;
@@ -52,7 +55,7 @@ export type LoginAttempt =
  * 실패는 브라우저에 그대로 돌려줄 응답 — 게이트웨이 봉투 · 상태 중계, 연결 실패 · 계약 불일치는 BFF_002 503.
  */
 export async function attemptLogin(
-  options: Required<LoginHandlerOptions>,
+  options: Required<Omit<LoginHandlerOptions, 'clientIpHeader'>>,
   headers: Headers,
   body: BodyInit,
 ): Promise<LoginAttempt> {
@@ -87,14 +90,17 @@ export async function attemptLogin(
   };
 }
 
-/** 인증 요청에서 게이트웨이로 넘기는 헤더만 고른다. 쿠키 · 인증 헤더는 넘기지 않는다 */
-export function forwardedHeaders(request: Request): Headers {
+/**
+ * 인증 요청에서 게이트웨이로 넘기는 헤더만 고른다. 쿠키 · 인증 헤더는 넘기지 않고,
+ * `X-Forwarded-For` 는 브라우저 값 대신 앞단이 정한 클라이언트 IP 한 값으로 둔다(`resolveClientIp`).
+ */
+export function forwardedHeaders(request: Request, clientIpHeader?: string | null): Headers {
   const headers = new Headers({ accept: 'application/json' });
   for (const name of FORWARD_HEADERS) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
   }
-  return headers;
+  return setClientIp(headers, resolveClientIp(request, clientIpHeader));
 }
 
 export function crossSite(): Response {

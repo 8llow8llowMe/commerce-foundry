@@ -1,4 +1,5 @@
 import type { ApiEnvelope } from '../envelope';
+import { resolveClientIp, setClientIp } from './client-ip';
 import { readCookie, type AuthCookieConfig } from './cookies';
 import { crossSite, noStore } from './login';
 import { clearCookies, isSameOrigin } from './proxy';
@@ -9,6 +10,8 @@ export type LogoutHandlerOptions = {
   gatewayUrl: string;
   cookies: AuthCookieConfig;
   fetch?: typeof fetch;
+  /** 클라이언트 IP 를 읽을 헤더(`ProxyOptions.clientIpHeader` 와 같다) */
+  clientIpHeader?: string | null;
 };
 
 export const LOGOUT_PATH = '/api/v1/auth/logout';
@@ -33,15 +36,19 @@ export function createLogoutHandler(
     const cookieHeader = request.headers.get('cookie');
     const accessToken = readCookie(cookieHeader, cookies.accessName);
     const refreshToken = readCookie(cookieHeader, cookies.refreshName);
+    const clientIp = resolveClientIp(request, options.clientIpHeader);
 
     const send = (access: string, refresh: string | null) =>
       fetchImpl(joinUrl(options.gatewayUrl, LOGOUT_PATH), {
         method: 'POST',
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/json',
-          authorization: `Bearer ${access}`,
-        },
+        headers: setClientIp(
+          new Headers({
+            accept: 'application/json',
+            'content-type': 'application/json',
+            authorization: `Bearer ${access}`,
+          }),
+          clientIp,
+        ),
         body: JSON.stringify(refresh ? { refreshToken: refresh } : {}),
         redirect: 'manual',
         cache: 'no-store',
@@ -51,7 +58,7 @@ export function createLogoutHandler(
       const first = accessToken ? await send(accessToken, refreshToken) : null;
       if (first) await first.body?.cancel();
       if ((first === null || first.status === 401) && refreshToken) {
-        const result = await reissueTokens(options.gatewayUrl, refreshToken, fetchImpl);
+        const result = await reissueTokens(options.gatewayUrl, refreshToken, fetchImpl, clientIp);
         // 재발급이 회전시켰으니 새 refresh 로 family 를 지운다. 거절이면 이미 끝난 세션이다
         if (result.status === 'issued') {
           const retried = await send(result.pair.accessToken, result.pair.refreshToken);

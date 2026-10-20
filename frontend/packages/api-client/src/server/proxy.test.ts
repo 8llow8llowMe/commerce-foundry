@@ -70,6 +70,7 @@ describe('createProxyHandler', () => {
           'accept-language': 'ko-KR',
           authorization: 'Bearer forged',
           'x-forwarded-for': '1.2.3.4',
+          'x-real-ip': '203.0.113.7',
         },
       }),
     );
@@ -85,7 +86,28 @@ describe('createProxyHandler', () => {
     expect(headers.get('idempotency-key')).toBe('key-1');
     expect(headers.get('accept-language')).toBe('ko-KR');
     expect(headers.has('cookie')).toBe(false);
-    expect(headers.has('x-forwarded-for')).toBe(false);
+    // 브라우저가 보낸 X-Forwarded-For 는 버리고, 앞단이 정한 클라이언트 IP 한 값으로 덮어쓴다
+    expect(headers.get('x-forwarded-for')).toBe('203.0.113.7');
+    expect(headers.has('x-real-ip')).toBe(false);
+  });
+
+  it('클라이언트 IP 를 모르면(헤더 없음 · 끔) 브라우저가 보낸 X-Forwarded-For 도 넘기지 않는다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, []));
+    const forged = { 'x-forwarded-for': '1.2.3.4', 'x-real-ip': '203.0.113.7' };
+
+    await createProxyHandler({ gatewayUrl: GATEWAY, cookies: COOKIES, fetch: fetchImpl })(
+      request('/api/v1/products', { headers: { 'x-forwarded-for': '1.2.3.4' } }),
+    );
+    await createProxyHandler({
+      gatewayUrl: GATEWAY,
+      cookies: COOKIES,
+      fetch: fetchImpl,
+      clientIpHeader: null,
+    })(request('/api/v1/products', { headers: forged }));
+
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(new Headers(init?.headers).has('x-forwarded-for')).toBe(false);
+    }
   });
 
   it('access 쿠키가 없으면 Authorization 을 붙이지 않는다 (클라이언트가 보낸 값도 버린다)', async () => {
@@ -259,6 +281,157 @@ describe('createProxyHandler', () => {
       'cf_at=access-3; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800',
       'cf_rt=refresh-3; Path=/; HttpOnly; SameSite=Lax; Max-Age=1209600',
     ]);
+  });
+
+  describe('access 쿠키 없이 refresh 만 있으면 보내기 전에 재발급한다', () => {
+    const xffOf = (init?: RequestInit) => new Headers(init?.headers).get('x-forwarded-for');
+
+    it('쓰기 요청이 토큰 없이 가지 않는다 — 재발급 → 새 토큰으로 한 번 보내고 새 쿠키를 심는다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+        urlOf(input).endsWith(REISSUE_PATH)
+          ? envelope(200, true, { accessToken: 'access-pre', refreshToken: 'refresh-pre-2' })
+          : envelope(200, true, {}),
+      );
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(
+        request('/api/v1/carts/me/items', {
+          method: 'POST',
+          body: '{}',
+          cookie: 'cf_rt=refresh-pre',
+          headers: { 'sec-fetch-site': 'same-origin', 'x-real-ip': '203.0.113.7' },
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const [[reissueUrl, reissueInit], [targetUrl, targetInit]] = fetchImpl.mock.calls as [
+        Parameters<typeof fetch>,
+        Parameters<typeof fetch>,
+      ];
+      expect(urlOf(reissueUrl)).toBe(`${GATEWAY}${REISSUE_PATH}`);
+      expect(urlOf(targetUrl)).toBe(`${GATEWAY}/api/v1/carts/me/items`);
+      expect(authOf(targetInit)).toBe('Bearer access-pre');
+      // 재발급 요청도 같은 클라이언트 IP 를 싣는다
+      expect(xffOf(reissueInit)).toBe('203.0.113.7');
+      expect(xffOf(targetInit)).toBe('203.0.113.7');
+      expect(res.headers.getSetCookie()).toEqual([
+        'cf_at=access-pre; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800',
+        'cf_rt=refresh-pre-2; Path=/; HttpOnly; SameSite=Lax; Max-Age=1209600',
+      ]);
+    });
+
+    it('새 토큰이 401 이어도 다시 재발급하지 않고 중계한다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+        urlOf(input).endsWith(REISSUE_PATH)
+          ? envelope(200, true, { accessToken: 'access-p401', refreshToken: 'refresh-p401-2' })
+          : unauthorized(),
+      );
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(request('/api/v1/members/me', { cookie: 'cf_rt=refresh-p401' }));
+
+      expect(res.status).toBe(401);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('같은 refresh 의 동시 요청은 재발급을 한 번만 보내고, 토큰 없는 요청은 하나도 없다', async () => {
+      let reissueCalls = 0;
+      const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+        if (urlOf(input).endsWith(REISSUE_PATH)) {
+          reissueCalls += 1;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return envelope(200, true, { accessToken: 'access-cc', refreshToken: 'refresh-cc-2' });
+        }
+        return envelope(200, true, {});
+      });
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+      const cookie = 'cf_rt=refresh-concurrent';
+      const write = (path: string) =>
+        request(path, {
+          method: 'POST',
+          body: '{}',
+          cookie,
+          headers: { 'sec-fetch-site': 'same-origin' },
+        });
+
+      const results = await Promise.all([
+        handler(write('/api/v1/carts/me/items')),
+        handler(write('/api/v1/carts/me/merge')),
+        handler(request('/api/v1/carts/me', { cookie })),
+      ]);
+
+      expect(results.map((r) => r.status)).toEqual([200, 200, 200]);
+      expect(reissueCalls).toBe(1);
+      const targets = fetchImpl.mock.calls.filter(([url]) => !urlOf(url).endsWith(REISSUE_PATH));
+      expect(targets.map(([, init]) => authOf(init))).toEqual([
+        'Bearer access-cc',
+        'Bearer access-cc',
+        'Bearer access-cc',
+      ]);
+    });
+
+    it('재발급이 거절되면 쿠키를 지우고 비로그인으로 보낸다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+        urlOf(input).endsWith(REISSUE_PATH)
+          ? envelope(401, false, null, 'SECURITY_002')
+          : envelope(200, true, []),
+      );
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(request('/api/v1/products', { cookie: 'cf_rt=refresh-dead' }));
+
+      expect(res.status).toBe(200);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(authOf(fetchImpl.mock.calls[1]![1])).toBeNull();
+      expect(res.headers.getSetCookie()).toEqual([
+        'cf_at=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
+        'cf_rt=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
+      ]);
+    });
+
+    it('재발급이 일시 장애면 요청을 보내지 않고 쿠키도 지우지 않는다 (BFF_002 503)', async () => {
+      const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+        urlOf(input).endsWith(REISSUE_PATH)
+          ? envelope(503, false, null, 'GATEWAY_002')
+          : envelope(200, true, {}),
+      );
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(
+        request('/api/v1/orders', {
+          method: 'POST',
+          body: '{}',
+          cookie: 'cf_rt=refresh-down',
+          headers: { 'sec-fetch-site': 'same-origin' },
+        }),
+      );
+
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'BFF_002' } });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(res.headers.getSetCookie()).toEqual([]);
+    });
   });
 
   describe('재발급 실패 분류 — 일시 장애로는 세션을 지우지 않는다', () => {

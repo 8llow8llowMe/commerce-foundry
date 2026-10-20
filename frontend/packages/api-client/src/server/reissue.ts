@@ -1,4 +1,5 @@
 import { isApiEnvelope } from '../envelope';
+import { setClientIp } from './client-ip';
 import { joinUrl } from './url';
 
 export type TokenPair = {
@@ -33,11 +34,13 @@ const recent = new Map<string, { result: ReissueResult; expiresAt: number }>();
 /**
  * 요청 `{ refreshToken }` → dataBody `{ accessToken, refreshToken, *ExpiresIn }` (BE PR #99 계약).
  * 응답 수명(`*ExpiresIn`, 초)은 `TokenPair` 에 실어 쿠키 수명으로 쓴다(`issueCookies`) — 로그인과 같다.
+ * `clientIp` 는 게이트웨이행 `X-Forwarded-For` 로 간다(`setClientIp`). 같은 refresh 로 겹친 요청은 먼저 온 요청의 IP 로 한 번만 보낸다.
  */
 export function reissueTokens(
   gatewayUrl: string,
   refreshToken: string,
   fetchImpl: typeof fetch,
+  clientIp: string | null,
 ): Promise<ReissueResult> {
   const now = Date.now();
   for (const [key, entry] of recent) {
@@ -49,7 +52,7 @@ export function reissueTokens(
   const running = inFlight.get(refreshToken);
   if (running) return running;
 
-  const task = requestReissue(gatewayUrl, refreshToken, fetchImpl)
+  const task = requestReissue(gatewayUrl, refreshToken, fetchImpl, clientIp)
     .then((result) => {
       if (result.status === 'issued') {
         recent.set(refreshToken, { result, expiresAt: Date.now() + REISSUE_GRACE_MS });
@@ -67,11 +70,13 @@ async function requestReissue(
   gatewayUrl: string,
   refreshToken: string,
   fetchImpl: typeof fetch,
+  clientIp: string | null,
 ): Promise<ReissueResult> {
   try {
+    const headers = new Headers({ 'content-type': 'application/json', accept: 'application/json' });
     const response = await fetchImpl(joinUrl(gatewayUrl, REISSUE_PATH), {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      headers: setClientIp(headers, clientIp),
       body: JSON.stringify({ refreshToken }),
       cache: 'no-store',
     });

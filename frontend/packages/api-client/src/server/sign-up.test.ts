@@ -140,4 +140,24 @@ describe('createSignUpHandler', () => {
       expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'BFF_002' } });
     }
   });
+
+  it('가입과 이어지는 로그인 모두 X-Forwarded-For 를 클라이언트 IP 한 값으로 보낸다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) =>
+      String(input).endsWith(SIGN_UP_PATH)
+        ? envelope(201, true, { memberId: '1' })
+        : envelope(200, true, TOKENS),
+    );
+    await handlerWith(fetchImpl)(
+      signUp({
+        'sec-fetch-site': 'same-origin',
+        'x-forwarded-for': '1.2.3.4',
+        'x-real-ip': '203.0.113.7',
+      }),
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(new Headers(init?.headers).get('x-forwarded-for')).toBe('203.0.113.7');
+    }
+  });
 });
