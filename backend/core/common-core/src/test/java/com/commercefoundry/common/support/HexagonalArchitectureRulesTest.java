@@ -21,8 +21,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 class HexagonalArchitectureRulesTest {
 
     private static final String FIXTURE = "com.commercefoundry.common.support.archfixture";
-    private static final JavaClasses COMPLIANT = new ClassFileImporter().importPackages(FIXTURE + ".compliant");
-    private static final JavaClasses VIOLATING = new ClassFileImporter().importPackages(FIXTURE + ".violating");
+    private static final JavaClasses COMPLIANT = new ClassFileImporter().importPackages(FIXTURE + ".ok");
+    private static final JavaClasses VIOLATING = new ClassFileImporter().importPackages(FIXTURE + ".bad");
 
     static Stream<ArchRule> rules() {
         return Stream.of(
@@ -34,7 +34,10 @@ class HexagonalArchitectureRulesTest {
             HexagonalArchitectureRules.ENTRY_ADAPTERS_DO_NOT_SHARE_TYPES,
             HexagonalArchitectureRules.INBOUND_ADAPTERS_DO_NOT_USE_OUTBOUND_ADAPTERS,
             HexagonalArchitectureRules.CROSS_CONTEXT_DEPENDENCIES_FOLLOW_ALLOW_LIST,
-            HexagonalArchitectureRules.PRESENTERS_ONLY_CONVERT
+            HexagonalArchitectureRules.PRESENTERS_ONLY_CONVERT,
+            HexagonalArchitectureRules.ENTRY_ADAPTERS_GO_THROUGH_USE_CASES,
+            HexagonalArchitectureRules.FACADES_DO_NOT_USE_OUT_PORTS,
+            HexagonalArchitectureRules.APPLICATION_AND_DOMAIN_DO_NOT_USE_TRANSPORT_TYPES
         );
     }
 
@@ -47,14 +50,14 @@ class HexagonalArchitectureRulesTest {
 
     @ParameterizedTest
     @MethodSource("rules")
-    @DisplayName("준수 예시는 모든 규칙을 통과한다 — 문서화된 예외 셋 · Facade 의 중첩 타입 · 컨트롤러의 UseCase 입력 타입(model) · 다른 컨텍스트 Processor · domain model · 예외 번역"
-        + " · adapter/in/support 공용 함수 포함")
+    @DisplayName("준수 예시는 모든 규칙을 통과한다 — 문서화된 예외 셋 · Facade 의 중첩 타입 · 컨트롤러의 UseCase 입력 타입(model) · *ValidationMessage · 다른 컨텍스트 Processor ·"
+        + " domain model · 예외 번역 · support 의 MoneyItem · 스케줄러 · 웹훅 · UseCase · Facade 의 Response · 도메인 enum 의 CodeNameDescribable 포함")
     void compliantFixturesPass(ArchRule rule) {
         assertThatCode(() -> rule.check(COMPLIANT)).doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("H1 컨트롤러가 Processor · Presenter · Repository · Facade · Info 를 쓰면 실패한다 — controller 패키지 밖 @RestController 도 본다")
+    @DisplayName("H1 컨트롤러가 Processor · Presenter · Repository · Facade · Info · domain · *ValidationMessage 아닌 예외 타입을 쓰면 실패한다 — controller 패키지 밖 @RestController 도 본다")
     void controllersUsingMoreThanUseCasesFail() {
         assertThat(violations(HexagonalArchitectureRules.CONTROLLERS_DEPEND_ON_USE_CASES_ONLY))
             .allSatisfy(detail -> assertThat(detail).containsAnyOf(".LeakyWebController.", ".MisplacedWebController."))
@@ -62,6 +65,8 @@ class HexagonalArchitectureRulesTest {
             .anySatisfy(detail -> assertThat(detail).contains(".LeakyWebController.", ".GoodsWebPresenter"))
             .anySatisfy(detail -> assertThat(detail).contains(".LeakyWebController.", ".GoodsJpaRepository"))
             .anySatisfy(detail -> assertThat(detail).contains(".LeakyWebController.describe", "info.GoodsInfo"))
+            .anySatisfy(detail -> assertThat(detail).contains(".LeakyWebController.nameOf", "domain.model.Goods>"))
+            .anySatisfy(detail -> assertThat(detail).contains(".LeakyWebController.notFound", "exception.GoodsErrorCode"))
             .anySatisfy(detail -> assertThat(detail).contains(".MisplacedWebController.", ".GoodsWebFacade"));
     }
 
@@ -101,11 +106,14 @@ class HexagonalArchitectureRulesTest {
     }
 
     @Test
-    @DisplayName("H6 어드민 진입이 고객 응답 DTO 를 쓰면 실패한다")
+    @DisplayName("H6 어드민 · 웹훅 진입이 고객 응답 DTO 를 쓰거나 support 가 진입 DTO 를 만들면 실패한다")
     void entryAdaptersSharingTypesFail() {
         assertThat(violations(HexagonalArchitectureRules.ENTRY_ADAPTERS_DO_NOT_SHARE_TYPES))
-            .isNotEmpty()
-            .allSatisfy(detail -> assertThat(detail).contains(".GoodsAdminPresenter.", "web.dto.response.GoodsResponse", "진입마다 DTO 를 따로"));
+            .allSatisfy(detail -> assertThat(detail).contains("web.dto.response.GoodsResponse", "진입마다 DTO 를 따로")
+                .containsAnyOf(".GoodsAdminPresenter.", ".GoodsWebhookReceiver.", ".GoodsResponseSupport."))
+            .anySatisfy(detail -> assertThat(detail).contains(".GoodsAdminPresenter."))
+            .anySatisfy(detail -> assertThat(detail).contains("webhook.GoodsWebhookReceiver."))
+            .anySatisfy(detail -> assertThat(detail).contains("support.GoodsResponseSupport."));
     }
 
     @Test
@@ -117,10 +125,15 @@ class HexagonalArchitectureRulesTest {
     }
 
     @Test
-    @DisplayName("H8 Processor 끼리의 주입 · 다른 컨텍스트 out-port · domain 필드 · exception 패키지 밖의 다른 컨텍스트 예외는 허용 목록 밖이라 실패한다")
+    @DisplayName("H8 Processor 끼리의 주입 · 다른 컨텍스트 out-port · Processor 의 중첩 타입 · *Processor 아닌 processor 패키지 클래스 · domain 필드 ·"
+        + " *ExceptionHandler 밖의 다른 컨텍스트 예외는 허용 목록 밖이라 실패한다")
     void crossContextDependenciesOutsideAllowListFail() {
         assertThat(violations(HexagonalArchitectureRules.CROSS_CONTEXT_DEPENDENCIES_FOLLOW_ALLOW_LIST))
-            .allSatisfy(detail -> assertThat(detail).containsAnyOf(".GoodsProcessor.", ".GoodsWebFacade.", "model.Goods.", ".GoodsWebAdvice.", ".GoodsExceptionHandler."))
+            .allSatisfy(detail -> assertThat(detail).containsAnyOf(".GoodsProcessor.", ".GoodsWebFacade.", "model.Goods.", ".GoodsWebAdvice.", ".GoodsExceptionHandler.",
+                ".CatalogErrorTranslator."))
+            .anySatisfy(detail -> assertThat(detail).contains(".GoodsWebFacade.", "CatalogProcessor$Snapshot"))
+            .anySatisfy(detail -> assertThat(detail).contains(".GoodsWebFacade.", ".CatalogSkuCache"))
+            .anySatisfy(detail -> assertThat(detail).contains(".CatalogErrorTranslator.", "exception.CatalogException"))
             .anySatisfy(detail -> assertThat(detail).contains(".GoodsProcessor.", ".CatalogProcessor", "용도별 메서드를 자기 Facade 에서"))
             .anySatisfy(detail -> assertThat(detail).contains(".GoodsWebFacade.", ".CatalogReaderPort"))
             .anySatisfy(detail -> assertThat(detail).contains("model.Goods.", "model.Catalog"))
@@ -136,6 +149,38 @@ class HexagonalArchitectureRulesTest {
             .allSatisfy(detail -> assertThat(detail).contains(".GoodsWebPresenter."))
             .anySatisfy(detail -> assertThat(detail).contains(".GoodsProcessor"))
             .anySatisfy(detail -> assertThat(detail).contains(".GoodsQueryResult"));
+    }
+
+    @Test
+    @DisplayName("H10 스케줄러 · 컨트롤러 · Presenter · ExceptionHandler 가 Facade · Processor · out-port · mapper 를 쓰면 실패한다")
+    void entryAdaptersBypassingUseCasesFail() {
+        assertThat(violations(HexagonalArchitectureRules.ENTRY_ADAPTERS_GO_THROUGH_USE_CASES))
+            .allSatisfy(detail -> assertThat(detail).containsAnyOf(".GoodsCleanupScheduler.", ".LeakyWebController.", ".MisplacedWebController.",
+                ".GoodsWebPresenter.", ".GoodsExceptionHandler."))
+            .anySatisfy(detail -> assertThat(detail).contains(".GoodsCleanupScheduler.", "service.GoodsWebFacade"))
+            .anySatisfy(detail -> assertThat(detail).contains(".GoodsCleanupScheduler.", "port.out.GoodsReaderPort"))
+            .anySatisfy(detail -> assertThat(detail).contains(".GoodsCleanupScheduler.", "mapper.GoodsMapper"))
+            .anySatisfy(detail -> assertThat(detail).contains(".LeakyWebController.", "processor.GoodsProcessor"))
+            .anySatisfy(detail -> assertThat(detail).contains(".GoodsExceptionHandler.", "port.out.CatalogReaderPort"));
+    }
+
+    @Test
+    @DisplayName("H11 Facade 가 out-port · QueryResult 를 쓰면 실패한다")
+    void facadesUsingOutPortsFail() {
+        assertThat(violations(HexagonalArchitectureRules.FACADES_DO_NOT_USE_OUT_PORTS))
+            .allSatisfy(detail -> assertThat(detail).contains(".GoodsWebFacade."))
+            .anySatisfy(detail -> assertThat(detail).contains("port.out.CatalogReaderPort", "out-port 호출을 Processor 로"))
+            .anySatisfy(detail -> assertThat(detail).contains("port.out.query.GoodsQueryResult"));
+    }
+
+    @Test
+    @DisplayName("H12 Processor 의 Response · domain 의 MoneyItem 은 실패한다 — Facade 의 Response · 도메인 enum 의 CodeNameDescribable 은 통과한다")
+    void transportTypesInApplicationOrDomainFail() {
+        assertThat(violations(HexagonalArchitectureRules.APPLICATION_AND_DOMAIN_DO_NOT_USE_TRANSPORT_TYPES))
+            .allSatisfy(detail -> assertThat(detail).containsAnyOf(".GoodsProcessor.", "model.Goods."))
+            .anySatisfy(detail -> assertThat(detail).contains(".GoodsProcessor.", "common.dto.Response", "Presenter · 컨트롤러 쪽에"))
+            .anySatisfy(detail -> assertThat(detail).contains("model.Goods.", "common.dto.item.MoneyItem"))
+            .noneSatisfy(detail -> assertThat(detail).containsAnyOf(".GoodsWebFacade.", ".GoodsStatus", "CodeNameDescribable"));
     }
 
     private static List<String> violations(ArchRule rule) {

@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.stereotype.Controller;
 
 /**
- * 헥사고날 계층 의존 규칙(ArchUnit, H1~H9). {@code architecture-guide.md} §2 · §3 · §4 의 의존 방향을 서비스 main 클래스에 걸어 빌드를 실패시킨다 — 컨텍스트를 띄우지 않는다.
+ * 헥사고날 계층 의존 규칙(ArchUnit, H1~H12). {@code architecture-guide.md} §2 · §3 · §4 의 의존 방향을 서비스 main 클래스에 걸어 빌드를 실패시킨다 — 컨텍스트를 띄우지 않는다.
  * 서비스는 기존 {@code <Svc>ArchitectureTest} 에 {@code implements} 만 더한다. JUnit 이 인터페이스의 default {@code @Test} 메서드를 찾아 실행한다.
  *
  * <pre>{@code
@@ -33,8 +33,9 @@ import org.springframework.stereotype.Controller;
  *
  * <ul>
  *   <li>대상은 {@code domainlayer} 아래 클래스뿐이다. {@code global}(설정 · 프로퍼티)과 애플리케이션 클래스는 계층이 아니라 보지 않는다.</li>
- *   <li>패키지 이름으로 계층을 고른다 — {@code adapter.in.<진입>.{controller,dto,presenter}}, {@code application.{port.in,port.out,service,service.processor,mapper,info}},
- *       {@code domain}. 패키지를 비켜 간 클래스는 규칙이 보지 못한다. 컨트롤러는 {@code @Controller}(메타 포함)로도 고른다.</li>
+ *   <li>패키지 이름으로 계층을 고른다 — {@code adapter.in.<진입>.{controller,dto,presenter,exception}}, {@code adapter.in.{support,scheduler}},
+ *       {@code application.{port.in,port.out,service,service.processor,mapper,info,command,model,exception}}, {@code domain}. 패키지를 비켜 간 클래스는 규칙이 보지 못한다.
+ *       컨트롤러는 {@code @Controller}(메타 포함)로도, Facade · Processor · ExceptionHandler · ValidationMessage 는 바깥 클래스 이름 접미사로도 고른다.</li>
  *   <li>import 범위는 security-core 의 {@code ControllerAuthorizationArchTestSupport} 와 같다(애플리케이션 클래스의 코드 소스 하나). 그 지원 클래스의 import 를
  *       나눠 쓰지 않는다 — common-core 픽스처가 security-core 에 의존하게 되기 때문이다. 서비스 테스트 클래스마다 한 번 더 import 한다(수백 ms).</li>
  *   <li>규칙에 걸리는 클래스가 없는 서비스(payment — 아직 {@code domainlayer} 없음)도 통과한다({@code allowEmptyShould}). 대신 애플리케이션 클래스가
@@ -46,19 +47,21 @@ import org.springframework.stereotype.Controller;
 public interface HexagonalArchitectureRules {
 
     /**
-     * H1. 컨트롤러는 application 중 {@code port/in} 의 UseCase 와 그 입력 타입({@code application/command} · {@code application/model} — 정렬 enum 같은
-     * {@code @RequestParam})만 쓴다. Facade · Processor · out-port · Info 를 직접 쓰지 않고, Presenter 로 응답을 만들지 않으며 out-adapter(리포지토리 · Feign · PG)를
-     * 부르지 않는다. 같은 진입의 요청 · 응답 DTO 는 쓴다.
+     * H1. 컨트롤러는 application 중 {@code port/in} 의 UseCase, 그 입력 타입({@code application/command} · {@code application/model} — 정렬 enum 같은
+     * {@code @RequestParam}), 검증 메시지 상수({@code application/exception} 의 {@code *ValidationMessage})만 쓴다. Facade · Processor · out-port · Info · 다른 예외 타입 ·
+     * domain 을 직접 쓰지 않고, Presenter 로 응답을 만들지 않으며 out-adapter(리포지토리 · Feign · PG)를 부르지 않는다. 같은 진입의 요청 · 응답 DTO 는 쓴다.
+     * {@code *ValidationMessage} 는 컴파일 상수라 보통 인라인돼 의존으로 보이지 않지만, 인라인에 기대지 않고 명시적으로 허용한다.
      */
     ArchRule CONTROLLERS_DEPEND_ON_USE_CASES_ONLY = classes()
         .that(Support.controllers())
         .should(Support.notDependOn(
-            "application 은 port/in · command · model 만 · presenter · adapter/out 은 쓰지 않는다",
-            (origin, target) -> Support.in(target, Support.APPLICATION) && !Support.isUseCaseOrInput(target)
-                || Support.in(target, Support.PRESENTER) || Support.in(target, Support.ADAPTER_OUT),
-            "컨트롤러는 *WebUseCase · *AdminUseCase · *InternalUseCase 만 호출합니다 — 조합은 Facade, 응답 변환은 Facade 가 주입한 Presenter 가 합니다"))
-        .because("Controller → UseCase → Facade → Processor → Port 흐름을 지킨다. UseCase 입력 타입(command · model)은 허용 — 정렬 enum 같은 @RequestParam"
-            + " (architecture-guide.md §3 Controller)")
+            "application 은 port/in · command · model · *ValidationMessage 만 · domain · presenter · adapter/out 은 쓰지 않는다",
+            (origin, target) -> Support.in(target, Support.APPLICATION) && !Support.isControllerApplicationType(target)
+                || Support.in(target, Support.DOMAIN) || Support.in(target, Support.PRESENTER) || Support.in(target, Support.ADAPTER_OUT),
+            "컨트롤러는 *WebUseCase · *AdminUseCase · *InternalUseCase 만 호출합니다 — 조합은 Facade, 응답 변환은 Facade 가 주입한 Presenter 가 합니다."
+                + " 요청 값은 진입 DTO · command · model 로 받고 domain 타입은 Processor 가 만듭니다"))
+        .because("Controller → UseCase → Facade → Processor → Port 흐름을 지킨다. UseCase 입력 타입(command · model)과 *ValidationMessage 는 허용 — 정렬 enum 같은"
+            + " @RequestParam (architecture-guide.md §3 Controller)")
         .allowEmptyShould(true);
 
     /**
@@ -97,13 +100,18 @@ public interface HexagonalArchitectureRules {
         .because("out-port 반환은 application/port/out/query 의 *QueryResult 또는 domain model 이다 — Info 는 Processor 가 만든다 (architecture-guide.md §3 Port / Adapter · §4)")
         .allowEmptyShould(true);
 
-    /** H6. 고객 · 어드민 · 서비스 간 진입은 서로의 DTO · Presenter · 컨트롤러를 쓰지 않는다. 같이 쓰는 변환 함수는 {@code adapter/in/support} 에 둔다(DTO 는 두지 않는다). */
+    /**
+     * H6. 고객 · 어드민 · 서비스 간 · 웹훅 진입은 서로의 DTO · Presenter · 컨트롤러를 쓰지 않는다. 같이 쓰는 변환 함수는 {@code adapter/in/support} 에 두되,
+     * support 는 어느 진입의 DTO({@code adapter/in/*}/dto)도 모른다 — 공용 타입(MoneyItem 등)만 만든다.
+     */
     ArchRule ENTRY_ADAPTERS_DO_NOT_SHARE_TYPES = classes()
         .that().resideInAPackage(Support.ADAPTER_IN)
         .should(Support.notDependOn(
-            "다른 진입(web · admin · internal)의 타입에 의존하지 않는다",
-            (origin, target) -> Support.entryOf(origin).flatMap(entry -> Support.entryOf(target).filter(other -> !other.equals(entry))).isPresent(),
-            "진입마다 DTO 를 따로 두세요 — 같은 상품이라도 고객 · 어드민 · 서비스 간 응답의 필드가 다릅니다. 공용 변환 함수는 adapter/in/support 로 옮기세요"))
+            "다른 진입(web · admin · internal · webhook)의 타입에 의존하지 않고, support 는 진입 DTO 에 의존하지 않는다",
+            (origin, target) -> Support.entryOf(origin).flatMap(entry -> Support.entryOf(target).filter(other -> !other.equals(entry))).isPresent()
+                || Support.in(origin, Support.ENTRY_SUPPORT) && Support.in(target, Support.ENTRY_DTO),
+            "진입마다 DTO 를 따로 두세요 — 같은 상품이라도 고객 · 어드민 · 서비스 간 응답의 필드가 다릅니다. 공용 변환 함수는 adapter/in/support 로 옮기고,"
+                + " support 는 진입 DTO 대신 공용 타입을 돌려주세요"))
         .because("고객 · 어드민 · 서비스 간 API 는 진입 패키지부터 나누고 DTO 를 공유하지 않는다 — 공유하면 한쪽 필드가 다른 응답으로 샌다 (architecture-guide.md §2)")
         .allowEmptyShould(true);
 
@@ -118,6 +126,7 @@ public interface HexagonalArchitectureRules {
      * H8. 같은 서비스의 다른 컨텍스트에서 쓸 수 있는 것은 그 컨텍스트의 Processor(Facade 만 주입)와 domain model(Facade · Processor 가 인자로 주고받는다) 둘뿐이다.
      * domain 은 다른 컨텍스트 domain 을 필드로 갖지 않고 아이디로만 가리킨다. 그 Processor 가 던진 예외({@code application/exception})는 부른 컨텍스트의
      * {@code adapter/in/*}/exception 의 {@code *ExceptionHandler} 만 받아 자기 코드로 번역한다 — advice 범위가 자기 컨트롤러 패키지라서다.
+     * Processor 는 최상위 {@code *Processor} 클래스만이다 — 그 중첩 타입 · processor 패키지의 다른 클래스는 쓰지 않는다(돌려받는 것은 domain model 이다).
      */
     ArchRule CROSS_CONTEXT_DEPENDENCIES_FOLLOW_ALLOW_LIST = classes()
         .that().resideInAPackage(Support.DOMAINLAYER)
@@ -138,6 +147,41 @@ public interface HexagonalArchitectureRules {
             + " (architecture-guide.md §3 Presenter · §4)")
         .allowEmptyShould(true);
 
+    /**
+     * H10. 진입 전체({@code adapter/in} — 컨트롤러 · DTO · Presenter · ExceptionHandler · support · scheduler · webhook)는 Facade · Processor({@code application/service}) ·
+     * out-port({@code application/port/out}, QueryResult 포함) · mapper 에 의존하지 않는다 — UseCase 를 거친다. H1 · H9 는 컨트롤러 · Presenter 에 더 좁은 규칙을 건다.
+     */
+    ArchRule ENTRY_ADAPTERS_GO_THROUGH_USE_CASES = noClasses()
+        .that().resideInAPackage(Support.ADAPTER_IN)
+        .should().dependOnClassesThat().resideInAnyPackage(Support.SERVICE, Support.PORT_OUT, Support.MAPPER)
+        .because("진입(스케줄러 · 웹훅 포함)이 Facade · Processor · out-port 를 직접 부르면 UseCase 계약과 Facade 의 트랜잭션 · 조합을 비켜 간다 —"
+            + " *UseCase(port/in)를 호출하세요 (architecture-guide.md §3)")
+        .allowEmptyShould(true);
+
+    /** H11. Facade 는 out-port({@code application/port/out}, QueryResult 포함)를 쓰지 않는다 — 포트 호출과 QueryResult → Info 변환은 Processor 가 한다. */
+    ArchRule FACADES_DO_NOT_USE_OUT_PORTS = classes()
+        .that(Support.facades())
+        .should(Support.notDependOn(
+            "out-port · QueryResult 에 의존하지 않는다",
+            (origin, target) -> Support.in(target, Support.PORT_OUT),
+            "out-port 호출을 Processor 로 옮기고 Facade 는 Processor 가 돌려준 Info · domain model 을 조합하세요"))
+        .because("Facade 는 Processor · Presenter 를 조합하는 오케스트레이터다 — facade · presenter 쪽에는 QueryResult 가 번지지 않게 한다 (architecture-guide.md §3 Facade · §4)")
+        .allowEmptyShould(true);
+
+    /**
+     * H12. application · domain 은 전송 타입(Feign {@code feign..} · {@code org.springframework.cloud.openfeign..}, 공통 응답 {@code com.commercefoundry.common.dto..})을
+     * 모른다. 예외: {@code common.dto.metadata}(도메인 enum 의 {@code CodeNameDescribable}), UseCase({@code port/in}) · Facade 의 응답 봉투 {@code common.dto.Response}.
+     * {@code SliceResponse} · {@code PageResponse} 는 persistence-core({@code com.commercefoundry.persistence.dto})라 이 규칙의 대상이 아니다.
+     */
+    ArchRule APPLICATION_AND_DOMAIN_DO_NOT_USE_TRANSPORT_TYPES = classes()
+        .that().resideInAnyPackage(Support.APPLICATION, Support.DOMAIN)
+        .should(Support.notDependOn(
+            "Feign · 공통 응답 DTO(common.dto — metadata · port/in · Facade 의 Response 제외)에 의존하지 않는다",
+            (origin, target) -> Support.isTransportType(target) && !Support.allowedTransportType(origin, target),
+            "Feign 타입은 adapter/out/client 뒤에, 응답 DTO(MoneyItem · Response 등)는 Presenter · 컨트롤러 쪽에 두세요 — Processor · domain 은 Money · enum 그대로 다룹니다"))
+        .because("application · domain 이 전송 형식을 알면 원격 계약 · 응답 모양이 바뀔 때 안쪽 계층이 같이 깨진다 (architecture-guide.md §3 Port / Adapter · Presenter)")
+        .allowEmptyShould(true);
+
     /** 이 서비스의 {@code @SpringBootApplication} 클래스. 이 클래스가 있는 코드 소스(서비스의 main 클래스 디렉터리)만 import 한다. */
     Class<?> applicationClass();
 
@@ -153,7 +197,7 @@ public interface HexagonalArchitectureRules {
     }
 
     @Test
-    @DisplayName("H1 컨트롤러는 application 중 port/in UseCase · 입력 타입(command · model)만 쓴다 — Facade · Processor · out-port · Info · Presenter · out-adapter 금지")
+    @DisplayName("H1 컨트롤러는 application 중 port/in UseCase · 입력 타입(command · model) · *ValidationMessage 만 쓴다 — domain · Presenter · out-adapter 금지")
     default void controllersDependOnUseCasesOnly() {
         CONTROLLERS_DEPEND_ON_USE_CASES_ONLY.check(hexagonalTargetClasses());
     }
@@ -183,7 +227,7 @@ public interface HexagonalArchitectureRules {
     }
 
     @Test
-    @DisplayName("H6 고객 · 어드민 · internal 진입은 서로의 타입을 쓰지 않는다")
+    @DisplayName("H6 고객 · 어드민 · internal · webhook 진입은 서로의 타입을 쓰지 않고, support 는 진입 DTO 를 쓰지 않는다")
     default void entryAdaptersDoNotShareTypes() {
         ENTRY_ADAPTERS_DO_NOT_SHARE_TYPES.check(hexagonalTargetClasses());
     }
@@ -204,6 +248,24 @@ public interface HexagonalArchitectureRules {
     @DisplayName("H9 Presenter 는 Facade · Processor · port 를 쓰지 않는다 — Info → Response 변환만")
     default void presentersOnlyConvert() {
         PRESENTERS_ONLY_CONVERT.check(hexagonalTargetClasses());
+    }
+
+    @Test
+    @DisplayName("H10 진입 전체(스케줄러 · 웹훅 · ExceptionHandler · support 포함)는 Facade · Processor · out-port · mapper 를 쓰지 않는다")
+    default void entryAdaptersGoThroughUseCases() {
+        ENTRY_ADAPTERS_GO_THROUGH_USE_CASES.check(hexagonalTargetClasses());
+    }
+
+    @Test
+    @DisplayName("H11 Facade 는 out-port · QueryResult 를 쓰지 않는다 — Processor 를 거친다")
+    default void facadesDoNotUseOutPorts() {
+        FACADES_DO_NOT_USE_OUT_PORTS.check(hexagonalTargetClasses());
+    }
+
+    @Test
+    @DisplayName("H12 application · domain 은 Feign · 공통 응답 DTO 를 쓰지 않는다 — metadata · UseCase · Facade 의 Response 만 예외")
+    default void applicationAndDomainDoNotUseTransportTypes() {
+        APPLICATION_AND_DOMAIN_DO_NOT_USE_TRANSPORT_TYPES.check(hexagonalTargetClasses());
     }
 
     // ── 도우미 ────────────────────────────────────────────────────
@@ -234,6 +296,12 @@ public interface HexagonalArchitectureRules {
         static final String MODEL = "..domainlayer..application.model..";
         static final String APPLICATION_EXCEPTION = "..domainlayer..application.exception..";
         static final String ENTRY_EXCEPTION_HANDLER = "..domainlayer..adapter.in.*.exception..";
+        static final String ENTRY_SUPPORT = "..domainlayer..adapter.in.support..";
+        static final String COMMON_DTO = "com.commercefoundry.common.dto..";
+        static final String COMMON_DTO_METADATA = "com.commercefoundry.common.dto.metadata..";
+        static final String COMMON_RESPONSE = "com.commercefoundry.common.dto.Response";
+        static final String FEIGN = "feign..";
+        static final String OPENFEIGN = "org.springframework.cloud.openfeign..";
         static final String PORT_OUT = "..domainlayer..application.port.out..";
         static final String INFO = "..domainlayer..application.info..";
         static final String SERVICE = "..domainlayer..application.service..";
@@ -259,9 +327,28 @@ public interface HexagonalArchitectureRules {
             return in(type, SERVICE) && !in(type, PROCESSOR) && topLevelSimpleName(type).endsWith("Facade");
         }
 
-        /** H1 — 컨트롤러가 쓰는 application 타입: UseCase({@code port/in})와 그 입력({@code command} · {@code model} — 정렬 enum 같은 {@code @RequestParam}). */
-        static boolean isUseCaseOrInput(JavaClass type) {
-            return in(type, PORT_IN) || in(type, COMMAND) || in(type, MODEL);
+        static DescribedPredicate<JavaClass> facades() {
+            return DescribedPredicate.describe("Facade(application/service 의 *Facade)", Support::isFacade);
+        }
+
+        /**
+         * H1 — 컨트롤러가 쓰는 application 타입: UseCase({@code port/in}), 그 입력({@code command} · {@code model} — 정렬 enum 같은 {@code @RequestParam}),
+         * 검증 메시지 상수({@code application/exception} 의 {@code *ValidationMessage}).
+         */
+        static boolean isControllerApplicationType(JavaClass type) {
+            return in(type, PORT_IN) || in(type, COMMAND) || in(type, MODEL)
+                || in(type, APPLICATION_EXCEPTION) && topLevelSimpleName(type).endsWith("ValidationMessage");
+        }
+
+        /** H12 — Feign 타입 또는 공통 응답 DTO({@code com.commercefoundry.common.dto..}). */
+        static boolean isTransportType(JavaClass type) {
+            return in(type, FEIGN) || in(type, OPENFEIGN) || in(type, COMMON_DTO);
+        }
+
+        /** H12 의 예외 — {@code common.dto.metadata} 는 어디서나, 응답 봉투 {@code Response} 는 UseCase · Facade 에서만. */
+        static boolean allowedTransportType(JavaClass origin, JavaClass target) {
+            return in(target, COMMON_DTO_METADATA)
+                || target.getBaseComponentType().getName().equals(COMMON_RESPONSE) && (in(origin, PORT_IN) || isFacade(origin));
         }
 
         static boolean isProcessor(JavaClass type) {
@@ -275,9 +362,9 @@ public interface HexagonalArchitectureRules {
                 || in(origin, MAPPER) && in(target, PERSISTENCE_ENTITY);
         }
 
-        /** {@code adapter.in.web · admin · internal} 중 어느 진입인지. support · webhook · scheduler 는 진입 간 공유 규칙의 대상이 아니다. */
+        /** {@code adapter.in.web · admin · internal · webhook} 중 어느 진입인지. support · scheduler 는 진입이 아니다(support 는 H6 이 따로 본다). */
         static Optional<String> entryOf(JavaClass type) {
-            for (String entry : new String[] {"web", "admin", "internal"}) {
+            for (String entry : new String[] {"web", "admin", "internal", "webhook"}) {
                 if (in(type, "..domainlayer..adapter.in." + entry + "..")) {
                     return Optional.of(entry);
                 }
@@ -302,13 +389,18 @@ public interface HexagonalArchitectureRules {
         }
 
         /**
-         * 다른 컨텍스트의 Processor 는 Facade 에서만, domain model 은 Facade · Processor 에서만, 예외({@code application/exception})는
-         * 자기 {@code adapter/in/*}/exception(*ExceptionHandler — 그 Processor 를 부른 쪽이 번역)에서만 쓴다.
+         * 다른 컨텍스트의 Processor(최상위 {@code *Processor} 클래스 — 중첩 타입 제외)는 Facade 에서만, domain model 은 Facade · Processor 에서만,
+         * 예외({@code application/exception})는 자기 {@code adapter/in/*}/exception 의 {@code *ExceptionHandler}(그 Processor 를 부른 쪽이 번역)에서만 쓴다.
          */
         static boolean allowedAcrossContexts(JavaClass origin, JavaClass target) {
-            return in(target, PROCESSOR) && isFacade(origin)
+            return isTopLevelProcessor(target) && isFacade(origin)
                 || in(target, DOMAIN) && (isFacade(origin) || isProcessor(origin))
-                || in(target, APPLICATION_EXCEPTION) && in(origin, ENTRY_EXCEPTION_HANDLER);
+                || in(target, APPLICATION_EXCEPTION) && in(origin, ENTRY_EXCEPTION_HANDLER) && topLevelSimpleName(origin).endsWith("ExceptionHandler");
+        }
+
+        private static boolean isTopLevelProcessor(JavaClass type) {
+            JavaClass base = type.getBaseComponentType();
+            return in(base, PROCESSOR) && base.getName().indexOf('$') < 0 && base.getSimpleName().endsWith("Processor");
         }
 
         /** 클래스가 직접 의존하는 타입 중 {@code forbidden} 인 것마다 위반을 낸다. 메시지에 의존 위치와 고치는 법을 싣는다. */
