@@ -24,16 +24,19 @@ backend/
 
 | 문서 | 내용 |
 |------|------|
-| [CLAUDE.md](CLAUDE.md) | 저장소 공통 규칙 · 워크스페이스 지도 |
+| [AGENTS.md](AGENTS.md) / [CLAUDE.md](CLAUDE.md) | Codex·Cursor / Claude Code 초기 지침 · 워크스페이스 지도 |
 | [docs/git-workflow.md](docs/git-workflow.md) | 이슈 → 브랜치 → PR → 머지 규칙 |
 | [backend/docs/](backend/docs/README.md) | 백엔드 아키텍처 · 컨벤션 · API · 결제 · 주문 흐름 |
 | [docs/claude-agents.md](docs/claude-agents.md) | Claude Code 하위 에이전트 운영 |
+| [docs/ai-agents.md](docs/ai-agents.md) | Codex·Cursor 스킬 10개 · 역할 10개 · init · 동기화 방법 |
 
 ## 협업
 
 ```text
 /issue → /issue-start <번호> → 작업 → /pr → CI → Rebase and merge
 ```
+
+Codex에서는 `$issue` → `$issue-start <번호>` → 작업 → `$pr`로 호출합니다. Cursor·Claude Code는 위 `/스킬명` 표기를 사용합니다.
 
 - 이슈 담당자: `[BE]`·`[INFRA]`·`[DOCS]` → @shindonggeun, `[FE]` → @seonghoho
 - 모든 작업 PR 의 base 는 `develop` 입니다.
