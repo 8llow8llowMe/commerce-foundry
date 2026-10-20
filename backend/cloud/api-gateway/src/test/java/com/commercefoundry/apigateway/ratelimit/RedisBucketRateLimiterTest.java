@@ -86,13 +86,13 @@ class RedisBucketRateLimiterTest {
     }
 
     @Test
-    @DisplayName("비로그인 버킷 키는 request_rate_limiter.{<policy>:ip:<HMAC>}.tokens 다 — Redis 어디에도 IP 원문이 없다")
+    @DisplayName("비로그인 버킷 키는 request_rate_limiter.{<policy>.<policy>:ip:<HMAC>}.tokens 다 — Redis 어디에도 IP 원문이 없다")
     void clientKeyHasNoRawIp() {
         String ip = "203.0.113." + ThreadLocalRandom.current().nextInt(1, 255);
 
         rateLimiter.tryAcquire(RateLimitPolicy.CART_WRITE, RateLimitSubject.client(clientIpHasher.hash(ip))).block(TIMEOUT);
 
-        assertThat(redisTemplate.hasKey("request_rate_limiter.{cart-write:ip:" + clientIpHasher.hash(ip) + "}.tokens").block(TIMEOUT)).isTrue();
+        assertThat(redisTemplate.hasKey("request_rate_limiter.{cart-write.cart-write:ip:" + clientIpHasher.hash(ip) + "}.tokens").block(TIMEOUT)).isTrue();
         assertThat(redisTemplate.keys("*" + ip + "*").collectList().block(TIMEOUT)).as("IP 원문이 든 키").isEmpty();
     }
 

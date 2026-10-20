@@ -440,8 +440,8 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 | `order-write` | `/api/v1/orders/**` 쓰기 | 분당 12회 · 순간 5회 |
 
 - **주체는 둘이다** — 로그인한 요청은 검증된 회원 id, 토큰 없는 요청은 클라이언트 IP 의 HMAC(#89). 같은 정책 한도를 쓰되 버킷이 따로다.
-  키는 `request_rate_limiter.{<정책>.<정책>:member:<memberId>}` · `request_rate_limiter.{<정책>.<정책>:ip:<HMAC>}` 의 `.tokens` · `.timestamp`(Spring Cloud Gateway `RedisRateLimiter` 의 토큰 버킷,
-  `coding-conventions.md` §9-7). 내부 Snowflake id 또는 IP 의 HMAC 만 들어가고 **이메일 · IP 원문 같은 개인정보는 넣지 않는다.** 요청 하나는 처음 맞는 정책 하나에만 걸린다.
+  키는 `request_rate_limiter.{<정책>.<정책>:member:<memberId>}` · `request_rate_limiter.{<정책>.<정책>:ip:<HMAC>}` 의 `.tokens` · `.timestamp`(Spring Cloud Gateway `RedisRateLimiter` 의 토큰 버킷 —
+  프레임워크 키 `{<routeId>.<id>}` 의 routeId 자리에 정책 id 를 넘긴다, `coding-conventions.md` §9-7). 내부 Snowflake id 또는 IP 의 HMAC 만 들어가고 **이메일 · IP 원문 같은 개인정보는 넣지 않는다.** 요청 하나는 처음 맞는 정책 하나에만 걸린다.
   조회(GET) · 어드민 경로 · preflight 는 세지 않는다.
 - **비로그인 정책은 최소다.** 지금은 비로그인 쓰기 API 가 없어 새 경로를 열지 않고, 위 정책을 토큰 없는 요청에도 IP 로 적용하는 것만 한다 —
   대상 API 가 모두 `isAuthenticated()` 라 정상 사용자는 영향이 없고(어차피 401), 401 을 노리는 익명 폭주가 서비스에 닿는 양만 줄인다.
