@@ -187,15 +187,18 @@ Info → Presenter → Response
 
 | 규칙 | 금지 | 위반하면 이렇게 고친다 |
 |------|------|------------------------|
-| H1 Controller 는 UseCase 만 | 컨트롤러 → application 중 `port.in` · UseCase 입력 타입(`command` · `model`) 밖(Facade · Processor · out-port · Info), Presenter, out-adapter | UseCase 를 거친다. 정렬 enum 같은 `@RequestParam` 입력 타입은 `application.model` 에 두면 된다 |
+| H1 Controller 는 UseCase 만 | 컨트롤러 → 아래 허용 밖의 application(Facade · Processor · out-port · Info · `*ValidationMessage` 가 아닌 예외 타입), domain, Presenter, out-adapter | UseCase 를 거친다. 허용: `port/in` UseCase, 입력 타입(`command` · `model` — 정렬 enum 같은 `@RequestParam`), 검증 메시지 상수 `*ValidationMessage`, 진입 DTO |
 | H2 application → adapter 금지 | 아래 예외 셋 밖의 의존 | 예외: ① `port/in` → 진입 DTO ② Facade(`*Facade`) → Presenter · 진입 DTO ③ `application/mapper` → Entity. 그 밖은 port/out 계약 · QueryResult · domain 으로 바꾼다 |
 | H3 Processor → adapter 금지 | Response DTO · out-adapter 타입 | Info · domain model 을 돌려주고 응답은 Presenter 가 만든다 |
 | H4 domain 은 순수 | domain → application · adapter · Spring · JPA · Hibernate | 프레임워크 타입은 entity · adapter 로 옮긴다 |
 | H5 out-port 는 Info 를 내지 않는다 | `port/out` → `application/info` | QueryResult · domain 을 반환한다 (§4) |
-| H6 진입 간 타입 공유 금지 | `adapter/in/web` ↔ `admin` ↔ `internal` | 진입마다 DTO 를 따로 둔다. 공용 변환 함수는 `adapter/in/support` (§2) |
-| H7 in-adapter → out-adapter 금지 | 컨트롤러 · Presenter 가 리포지토리 · Feign client · Entity 를 직접 씀 | UseCase → Facade → Processor → Port 로 간다 |
-| H8 컨텍스트 간 허용 목록 | 위 허용 목록 1~3 밖의 다른 컨텍스트 의존, domain → 다른 컨텍스트 domain | Processor(Facade 에서) · domain model(Facade · Processor 에서) · 예외(ExceptionHandler 에서)만. domain 끼리는 아이디로 |
-| H9 Presenter 는 변환만 | Presenter → `application/service` · `application/port`(QueryResult 포함) | Facade 가 조회해 Info · domain 을 넘긴다 (§4) |
+| H6 진입 간 타입 공유 금지 | `adapter/in/web` ↔ `admin` ↔ `internal` ↔ `webhook`, `adapter/in/support` → 진입 DTO | 진입마다 DTO 를 따로 둔다. support 에는 공용 변환 함수 · 공용 타입(`MoneyItem`)만 둔다 (§2) |
+| H7 in-adapter → out-adapter 금지 | 진입(컨트롤러 · Presenter · 스케줄러 등)이 리포지토리 · Feign client · Entity 를 직접 씀 | UseCase → Facade → Processor → Port 로 간다 |
+| H8 컨텍스트 간 허용 목록 | 위 허용 목록 1~3 밖의 다른 컨텍스트 의존, domain → 다른 컨텍스트 domain | 최상위 `*Processor`(Facade 에서 — Processor 안의 중첩 타입은 안 된다) · domain model(Facade · Processor 에서) · `application.exception`(`adapter/in/*/exception` 의 `*ExceptionHandler` 에서)만. domain 끼리는 아이디로 |
+| H9 Presenter 는 변환만 | Presenter → `application/service` · `application/port`(UseCase · out-port · QueryResult) | Facade 가 조회해 Info · domain 을 넘긴다 (§4) |
+| H10 진입은 UseCase 를 거친다 | `adapter/in` 전체(컨트롤러 · Presenter · ExceptionHandler · support · **스케줄러 · 웹훅**) → Facade · Processor · out-port · mapper | 스케줄러 · 웹훅도 `port/in` UseCase 를 둔다 — 트랜잭션 경계(Facade)를 비켜 가지 않는다 |
+| H11 Facade 는 Processor 를 거친다 | Facade → `application/port/out`(QueryResult 포함) | 조회 · 저장은 Processor 가 한다. QueryResult 는 Facade · Presenter 로 번지지 않는다 (§4) |
+| H12 전송 타입 누수 금지 | application · domain → `feign..` · `org.springframework.cloud.openfeign..` · `common.dto..` | 예외: `common.dto.metadata`(도메인 enum 의 `CodeNameDescribable`), port/in · Facade 의 `Response` 봉투. Feign 응답 래퍼 · `MoneyItem` 은 adapter 에서 QueryResult · `Money` 로 바꾼다. `SliceResponse` · `PageResponse` 는 persistence-core 라 대상 밖 |
 
 **사람이 보는 것** (리뷰 · `/hexagonal-guard` — 의미 판단이라 규칙화하지 않는다)
 
@@ -204,7 +207,9 @@ Info → Presenter → Response
 - Processor 안의 진입 분기(`if (isAdmin)`), ID(Snowflake) 생성 위치
 - out-port 이름이 책임 기준인지(`PaymentGatewayPort` ○, `TossClientPort` ✕) — `coding-conventions.md` §5-1
 - 진입 DTO 의 필드 누출(고객 응답에 원가 · 재고 수량 · 내부 메모), 다른 컨텍스트 Processor 메서드가 용도별인지(숨김 규칙 비켜 가기)
-- 패키지 구조(§2)를 비켜 간 클래스 — 규칙은 패키지 이름으로 판정하므로 이름이 틀리면 보지 못한다
+- 패키지 구조(§2)를 비켜 간 클래스 — 규칙은 패키지 이름과 바깥 클래스 이름 접미사(`*Facade` · `*Processor` · `*ExceptionHandler` · `*ValidationMessage`)로 판정하므로 이름이 틀리면 보지 못한다.
+  `global` 패키지(설정 · 프로퍼티)는 규칙 대상이 아니다 — application 이 `global.properties` · core 컴포넌트(`SnowflakeIdGenerator`, 토큰 발급기 등)를 쓰는 것은 허용된 상태다
+- PG SDK 처럼 위 H12 패턴에 없는 외부 전송 타입이 application 으로 새지 않는지
 
 ## 4. Query / Model 경계
 
