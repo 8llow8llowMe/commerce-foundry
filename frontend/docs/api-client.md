@@ -49,6 +49,8 @@
 (정책·한도 정본은 `backend/docs/security-guide.md` §7-3). 요청은 서비스에 닿지 않았다.
 
 - BFF 는 429 를 그대로 넘긴다. 재발급 · 재시도 · 쿠키 변경을 하지 않는다 — 로그아웃되지 않는다.
+- 토큰 없는 요청은 클라이언트 IP 로 센다(게이트웨이에서 켰을 때). 그래서 BFF 는 access 쿠키가 만료된 회원의 요청을 토큰 없이 보내지 않고
+  **먼저 재발급**하며, 게이트웨이행 `X-Forwarded-For` 를 클라이언트 IP 한 값으로 덮어쓴다(`architecture.md` §2).
 - 화면은 `message`(기본 "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")를 보여 주고, 스토어프론트의
   `useRetryCooldown()`(`apps/storefront/src/lib/use-retry-cooldown.ts`)으로 **같은 버튼**을 `Retry-After` 동안 막는다.
   `Retry-After` 가 없으면 3초, 최소 1초 · 최대 60초다. 한도가 정책(장바구니 쓰기 · 주문 쓰기)마다 따로라서 훅도 버튼마다 하나다.
