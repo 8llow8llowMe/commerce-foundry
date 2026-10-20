@@ -25,16 +25,18 @@ on:
       - '.github/scripts/backend-ci-matrix.py'
       - '.github/scripts/backend-test-count.py'
 
-# 같은 PR 에 새 커밋이 올라오면 이전 실행을 버린다.
+# 같은 PR 에 새 커밋이 올라오면 이전 실행을 버린다. develop push 는 버리지 않고 차례로 돈다 — Gradle 홈 캐시를 쓰는 유일한 실행이라
+# 연속 머지 때 취소되면 그 커밋의 검증과 캐시 저장이 같이 사라진다.
 concurrency:
   group: backend-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
-  # settings.gradle 의 모듈을 그룹으로 나눈다. 그룹 표에 없는 모듈(core · cloud · 새 모듈)은 전부 rest 그룹이라 빠지는 모듈이 없다.
+  # settings.gradle 의 모듈을 그룹으로 나눈다. 그룹 표에 없는 모듈(core · cloud · 새 모듈)은 전부 rest 그룹이다.
+  # include 집합이 `*/*/build.gradle` 디렉터리와 다르면(include 누락 · 못 읽은 형식) 여기서 실패한다 — 그룹 job 은 그런 모듈을 볼 수 없다.
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -70,11 +72,13 @@ jobs:
       # Gradle 홈(의존성 · wrapper · 컴파일된 빌드 스크립트)을 캐시한다. **빌드 캐시(`caches/build-cache-1`)는 담지 않는다** —
       # 담기면 다음 실행에서 test 태스크가 FROM-CACHE 로 건너뛰어진다. `setup-java` 의 `cache: gradle` 을 쓰지 않는 이유도 같다.
       # 캐시 쓰기는 develop push 에서만 한다. 기본값(기본 브랜치에서만 쓰기)이면 기본 브랜치가 main 이라 아무도 캐시를 못 만든다.
+      # job 요약에는 테스트 건수 표만 남긴다 — Gradle 빌드 표는 실패했을 때만 붙인다.
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/develop' }}
           gradle-home-cache-excludes: |
             caches/build-cache-1
+          add-job-summary: on-failure
 
       # `gradle.properties` 가 빌드 캐시를 켜 두므로 명시로 끈다. 러너는 매번 새 체크아웃이라 cleanTest 는 필요 없다.
       # `--continue`: 한 모듈의 테스트가 실패해도 같은 그룹의 다른 모듈을 끝까지 돌린다(#128 때 실패 하나가 product-service 0건을 가렸다).
@@ -107,10 +111,11 @@ jobs:
           retention-days: 7
 
   # 그룹 결과를 하나로 모은다. PR 화면에서 보던 `check` 이름을 유지하고, plan · test 가 모두 성공해야 통과한다.
-  # `!cancelled()`: 그룹이 실패해도 돌아 실패를 표시하고, 새 커밋으로 실행이 취소되면 돌지 않는다.
+  # `always()`: 그룹이 실패하거나 실행이 취소돼도 이 job 은 돌아 실패로 남는다. 건너뛴(skipped) job 은 필수 체크에서
+  # 통과로 취급되므로, 취소된 실행이 초록불로 보이는 구멍을 막는다.
   check:
     needs: [plan, test]
-    if: ${{ !cancelled() }}
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -8,6 +8,7 @@
 - 환경변수 GRADLE_OUTCOME 이 success 일 때만 0건을 실패로 본다. check 가 이미 실패했다면 원인은 그쪽이다.
 - --modules 를 주면 그 모듈만 센다. CI 는 모듈 그룹별 병렬 job(backend-ci-matrix.py)이라 job 마다 자기 그룹만 본다.
   없는 모듈 이름이면 실패시킨다 — 그룹 표 오타로 검사가 빈 채 통과하지 않게. 주지 않으면 전체 모듈이다(로컬 사용법).
+  그룹 job 은 settings.gradle 에 include 를 잊은 모듈을 볼 수 없다 — 그건 plan 의 backend-ci-matrix.py 가 디렉터리와 대조해 잡는다.
 - GITHUB_STEP_SUMMARY 가 있으면 요약 표를 거기에 쓴다(--group 이 제목에 붙는다). 로컬에서도 그대로 돌려 볼 수 있다.
 """
 import argparse
@@ -35,15 +36,11 @@ def count_tests(backend: Path, modules):
 
 
 def required_modules(backend: Path, modules):
-    required = set()
-    for build_file in backend.glob('*/*/build.gradle'):
-        module_dir = build_file.parent
-        module = module_dir.relative_to(backend).as_posix()
-        if modules is not None and module not in modules:
-            continue
-        if module.split('/')[0] != LIBRARY_GROUP or (module_dir / 'src' / 'test' / 'java').is_dir():
-            required.add(module)
-    return required
+    # --modules 가 있으면 그 목록에서 바로 판정한다(디렉터리 깊이와 무관). 없으면 `*/*/build.gradle` 전체다
+    if modules is None:
+        modules = {build_file.parent.relative_to(backend).as_posix() for build_file in backend.glob('*/*/build.gradle')}
+    return {module for module in modules
+            if module.split('/')[0] != LIBRARY_GROUP or (backend / module / 'src' / 'test' / 'java').is_dir()}
 
 
 def main():
