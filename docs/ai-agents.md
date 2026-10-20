@@ -1,8 +1,8 @@
 # Codex · Cursor 프로젝트 설정
 
-기존 Claude Code의 스킬 10개와 역할 10개를 Codex·Cursor에서도 사용한다.
+기존 Claude Code의 스킬 10개와 역할 11개를 Codex·Cursor에서도 사용한다.
 도메인·개발 규칙의 정본은 `backend/docs/`, `frontend/docs/`, Git 규칙은 [git-workflow.md](git-workflow.md)다.
-Claude의 모델명과 `tools` 메타데이터는 다른 도구의 설정으로 복사하지 않는다.
+Claude의 모델명과 `tools` 메타데이터는 그대로 복사하지 않고, 동기화 스크립트가 도구별 하위 에이전트 정의로 변환한다.
 
 ## 초기화된 구성
 
@@ -11,9 +11,11 @@ AGENTS.md                              저장소 공통 초기 지침
 backend/AGENTS.md                      백엔드 초기 지침
 frontend/AGENTS.md                     프론트엔드 초기 지침
 .agents/skills/<name>/SKILL.md          Codex·Cursor 공통 스킬 10개
-.agents/roles/<name>.md                도구 중립 역할 지침 10개
+.agents/roles/<name>.md                도구 중립 역할 지침 11개
+.cursor/agents/<name>.md                Cursor 하위 에이전트 11개 (생성본)
+.codex/agents/<name>.toml               Codex 하위 에이전트 2개 — explorer·git_ops (생성본)
 .cursor/rules/commerce-foundry.mdc      Cursor의 항상 적용되는 프로젝트 진입 규칙
-scripts/sync-agent-skills.py            Claude 원본 → 공통 스킬·역할 동기화 및 검사
+scripts/sync-agent-skills.py            Claude 원본 → 공통 스킬·역할·하위 에이전트 동기화 및 검사
 ```
 
 Codex와 Cursor가 모두 `.agents/skills/`를 탐색하므로 두 도구가 같은 파일을 사용한다.
@@ -52,17 +54,32 @@ Cursor는 Claude 호환 경로도 탐색하므로 같은 이름의 항목이 함
 | 구분 | 역할 | 작업 범위 |
 |------|------|-----------|
 | 공용 | `explorer`, `architect`, `reviewer` | 탐색·설계·최종 검토, 읽기 전용 |
+| 공용 | `git-ops` (Codex `git_ops`) | 브랜치·워크트리, 지정 경로 커밋·푸시, 이슈·PR, 머지 후 정리. 소스 수정 금지 |
 | BE 구현 | `be-executor` | 명세·계획에 따른 백엔드 구현과 검증 |
 | BE 검토 | `be-hexagonal-reviewer`, `be-db-reviewer`, `be-security-reviewer`, `be-payment-reviewer` | 계층·영속성·보안·결제 검토, 읽기 전용 |
 | FE 구현 | `fe-implementer` | 프론트엔드 구현과 검증 |
 | FE 검토 | `fe-reviewer` | BFF·쿠키·금액·멱등·테마 검토, 읽기 전용 |
 
-`.agents/roles/`는 **역할 지침 파일**이다. 이 디렉터리만으로 Codex·Cursor에 네이티브 하위 에이전트가 등록되지는 않는다.
-메인 세션이 필요한 파일을 읽어 역할을 수행하거나, 현재 도구에서 하위 에이전트를 사용할 수 있고 위임이 허용된 경우 그 지침을 전달한다.
+`.agents/roles/`는 **역할 지침 파일**이고, 네이티브 하위 에이전트는 동기화 스크립트가 아래처럼 생성한다.
+
+| 도구 | 위치 | 역할 | 모델 | 읽기 전용 |
+|------|------|------|------|-----------|
+| Cursor | `.cursor/agents/*.md` | 11개 전부 | `explorer`·`git-ops` 는 `claude-haiku-5-5`, 나머지 `inherit` | Claude 원본에 `Write`·`Edit` 없는 `tools` 가 있으면 `readonly: true` |
+| Codex | `.codex/agents/*.toml` | `explorer`(내장 explorer 대체)·`git_ops` | `gpt-6-luna` (effort `medium`·`low`) | 부모 세션 sandbox 를 상속 — 역할 본문이 편집을 금지한다 |
+
+- Cursor 는 `.claude/agents/` 도 하위 에이전트로 읽는다. 같은 이름이면 `.cursor/agents/` 가 이기므로, 생성본이 Claude 모델명·`tools` 가
+  섞인 정의를 덮어쓴다. 역할을 추가하면 `--write` 로 Cursor 정의도 같이 만든다.
+- Codex 는 프로젝트를 신뢰(trusted)한 경우에만 `.codex/` 를 읽는다. 에이전트 파일은 `sandbox_mode`·승인 정책을 바꿀 수 없다.
+- 모델 ID 는 스크립트의 `CODEX_FAST_MODEL`·`CURSOR_FAST_MODEL` 상수에만 둔다. 모델이 바뀌면 상수를 고치고 `--write` 한다.
+  Cursor 모델 ID 는 모델 피커·`~/.cursor/cli-config.json` 의 ID 형식(`claude-opus-5-5`)과 맞춘다.
+- Cursor 내장 Explore 하위 에이전트의 모델은 사용자 설정(`exploreSubagentModel`)이다. 저장소로는 바꿀 수 없다.
+
+하위 에이전트를 쓸 수 없는 환경에서는 메인 세션이 필요한 역할 파일을 읽어 수행하고, 위임이 허용된 경우 그 지침을 전달한다.
 지원되지 않거나 위임이 허용되지 않으면 동일한 탐색 → 설계 → 구현 → 검증 → 검토를 메인 세션에서 순차 수행한다.
 실제 실행한 역할과 수행 방식을 결과에 기록한다.
 
-- 모델은 현재 도구·세션의 설정을 따른다. Claude의 Fable·Opus·Sonnet 모델명을 Codex·Cursor 모델명으로 치환하지 않는다.
+- 탐색·git/gh 반복 작업만 저비용 모델(`explorer`·`git-ops`)로 내리고, 설계·구현·검토는 현재 세션 모델(`inherit`)을 따른다.
+  단일 명령은 위임하지 않는다 — 하위 에이전트는 새 컨텍스트로 시작하므로 짧은 일에는 띄우는 비용이 더 크다.
 - 검토·탐색·설계 역할은 소스·설정·문서를 편집하지 않는다. 실행 환경이 읽기 전용 도구 제한을 지원하면 함께 적용한다.
   역할 파일 자체가 도구 권한을 강제하는 것은 아니다. 검사 실행은 빌드 산출물을 만들 수 있다.
 - 독립적인 읽기 전용 조사·검토만 병렬로 수행한다. 쓰기 역할은 한 번에 하나만 수행한다.
@@ -80,7 +97,7 @@ python -X utf8 scripts/sync-agent-skills.py
 git diff --check
 ```
 
-첫 명령은 `.agents/skills/`와 `.agents/roles/`를 재생성한다. 공통 스킬·역할을 바꾸려면 원본 또는 변환 스크립트를 수정한다.
+첫 명령은 `.agents/skills/`, `.agents/roles/`, `.cursor/agents/`, `.codex/agents/`를 재생성한다. 공통 스킬·역할을 바꾸려면 원본 또는 변환 스크립트를 수정한다.
 두 번째 명령은 파일을 쓰지 않고 동기화 여부를 검사한다. 새 스킬을 추가하면 스크립트의 `DESCRIPTIONS`에 탐색용 설명도 추가한다.
 삭제된 원본의 결과 파일이 남아 있으면 자동 삭제하지 않고 `stale`로 보고한다.
 `AGENTS.md` 3개와 Cursor 규칙은 직접 관리한다. 공통·워크스페이스 규칙을 바꾸면 대응 `CLAUDE.md`도 함께 확인한다.

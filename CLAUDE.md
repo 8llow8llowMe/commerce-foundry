@@ -90,10 +90,12 @@
 
 | 구분 | 역할 |
 |------|------|
-| 공용 | `explorer`, `architect`, `reviewer` |
+| 공용 | `explorer`, `git-ops`, `architect`, `reviewer` |
 | 백엔드 | `be-executor`, `be-hexagonal-reviewer`, `be-db-reviewer`, `be-security-reviewer`, `be-payment-reviewer` |
 | 프론트엔드 | `fe-implementer`, `fe-reviewer` |
 
 - 검토 역할은 `tools` 로 읽기 전용을 강제한다. Write/Edit 를 부여하지 않는다.
+- **넓은 탐색은 `explorer`, 여러 단계의 git·gh 작업은 `git-ops`(둘 다 Haiku)로 내린다.** `/issue-start`·`/pr` 은 `git-ops` 로 포크되므로
+  `/pr` 에는 검증 결과를 인자로 넘긴다. 단일 명령·위치를 아는 파일 읽기는 메인 세션이 직접 한다.
 - **모든 작업을 병렬화하지 않는다.** 독립적인 읽기 전용 조사·검토만 병렬로 부르고, 쓰기 역할은 한 번에 하나만 실행한다.
 - 프론트엔드 에이전트는 `fe-*` 접두어다. 프론트 전용 스킬은 반복 작업이 생기면 `fe-*` 로 추가한다.

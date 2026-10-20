@@ -28,7 +28,7 @@ backend/
 | [docs/git-workflow.md](docs/git-workflow.md) | 이슈 → 브랜치 → PR → 머지 규칙 |
 | [backend/docs/](backend/docs/README.md) | 백엔드 아키텍처 · 컨벤션 · API · 결제 · 주문 흐름 |
 | [docs/claude-agents.md](docs/claude-agents.md) | Claude Code 하위 에이전트 운영 |
-| [docs/ai-agents.md](docs/ai-agents.md) | Codex·Cursor 스킬 10개 · 역할 10개 · init · 동기화 방법 |
+| [docs/ai-agents.md](docs/ai-agents.md) | Codex·Cursor 스킬 10개 · 역할 11개 · 하위 에이전트 · 동기화 방법 |
 
 ## 협업
 
