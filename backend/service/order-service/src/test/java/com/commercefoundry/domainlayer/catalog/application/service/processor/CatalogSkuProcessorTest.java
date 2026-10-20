@@ -25,7 +25,7 @@ class CatalogSkuProcessorTest {
     }
 
     private static SkuQueryResult sku(long skuId) {
-        return new SkuQueryResult(skuId, skuId + 7000, "상품" + skuId, "옵션" + skuId, Money.of(10_000, CurrencyCode.KRW), false, true, 5, true);
+        return new SkuQueryResult(skuId, skuId + 7000, "상품" + skuId, "옵션" + skuId, Money.of(10_000, CurrencyCode.KRW), false, true, 5, true, 850, "6211429000");
     }
 
     @Test
@@ -36,7 +36,8 @@ class CatalogSkuProcessorTest {
         Map<Long, CatalogSku> skus = catalogSkuProcessor.findSkus(List.of(9001L, 9002L, 9003L));
 
         assertThat(skus).containsOnlyKeys(9001L, 9002L);
-        assertThat(skus.get(9001L)).isEqualTo(new CatalogSku(9001, 16001, "상품9001", "옵션9001", Money.of(10_000, CurrencyCode.KRW), false, true, 5, true));
+        assertThat(skus.get(9001L))
+            .isEqualTo(new CatalogSku(9001, 16001, "상품9001", "옵션9001", Money.of(10_000, CurrencyCode.KRW), false, true, 5, true, 850, "6211429000"));
         assertThat(skuQueryPort.calls()).containsExactly(List.of(9001L, 9002L, 9003L));
     }
 

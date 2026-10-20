@@ -130,7 +130,7 @@ class ProductInternalResponseSupportTest {
 
         private ProductSkuInternalItem item(String skuId, String saleStatus, boolean purchasable, MoneyItem salePrice) {
             return new ProductSkuInternalItem(skuId, "7301", "저고리", "아이보리 / L", salePrice,
-                CodeNameDescriptionMetadata.of(saleStatus, "n", "d"), purchasable, 10, true);
+                CodeNameDescriptionMetadata.of(saleStatus, "n", "d"), purchasable, 10, true, 850, "6211429000");
         }
 
         private Response<ProductSkuInternalResponse> success(ProductSkuInternalItem... items) {
@@ -138,7 +138,7 @@ class ProductInternalResponseSupportTest {
         }
 
         @Test
-        @DisplayName("문자열 아이디 · 금액 · 품절 여부를 조회 결과로 바꾼다")
+        @DisplayName("문자열 아이디 · 금액 · 품절 여부 · 무게 · HS 코드를 조회 결과로 바꾼다")
         void converts() {
             List<SkuQueryResult> results = support.toSkuQueryResults(success(
                 item("9004", "ON_SALE", true, MoneyItem.of(39_000, "KRW")),
@@ -147,8 +147,21 @@ class ProductInternalResponseSupportTest {
 
             assertThat(results).extracting(SkuQueryResult::skuId).containsExactly(9004L, 9005L, 9006L);
             assertThat(results.getFirst()).isEqualTo(
-                new SkuQueryResult(9004L, 7301L, "저고리", "아이보리 / L", Money.of(39_000, CurrencyCode.KRW), true, false, 10, true));
+                new SkuQueryResult(9004L, 7301L, "저고리", "아이보리 / L", Money.of(39_000, CurrencyCode.KRW), true, false, 10, true, 850, "6211429000"));
             assertThat(results).extracting(SkuQueryResult::soldOut).containsExactly(false, true, false);
+        }
+
+        @Test
+        @DisplayName("무게 · HS 코드가 null(미입력)이어도 거절하지 않고 null 로 옮긴다 — 해외 주문 거절은 order 컨텍스트가 한다")
+        void missingWeightAndHsCodeStayNull() {
+            ProductSkuInternalItem unset = new ProductSkuInternalItem("9004", "7301", "저고리", "", MoneyItem.of(39_000, "KRW"),
+                CodeNameDescriptionMetadata.of("ON_SALE", "n", "d"), true, null, false, null, null);
+
+            assertThat(support.toSkuQueryResults(success(unset))).singleElement()
+                .satisfies(result -> {
+                    assertThat(result.weightGrams()).isNull();
+                    assertThat(result.hsCode()).isNull();
+                });
         }
 
         @Test
