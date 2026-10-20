@@ -42,6 +42,11 @@ public enum ProductErrorCode {
     STOCK_RESTORATION_MISMATCH("PRODUCT_029", "이 클레임에는 내용이 다른 재고 복원이 이미 있습니다.", HttpStatus.CONFLICT),
     /** 같은 클레임의 복원 생성이 동시에 겹쳤다. 다시 시도하면 먼저 끝난 복원을 기준으로 답한다. */
     STOCK_RESTORATION_CONFLICT("PRODUCT_030", "재고 복원이 동시에 요청되었습니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /**
+     * 선점 헤더 잠금을 대기 상한 안에 얻지 못했다 — 같은 선점의 다른 처리가 잠금을 오래 쥐고 있다. 아무것도 바꾸지 않았다.
+     * {@code PRODUCT_026} · {@code PRODUCT_030} 과 같이 새 트랜잭션으로 다시 시도하는 오류다.
+     */
+    STOCK_RESERVATION_LOCK_TIMEOUT("PRODUCT_031", "같은 선점을 처리 중입니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("PRODUCT_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

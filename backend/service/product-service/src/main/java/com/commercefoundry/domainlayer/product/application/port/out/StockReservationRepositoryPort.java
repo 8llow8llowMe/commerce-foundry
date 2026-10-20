@@ -20,7 +20,7 @@ public interface StockReservationRepositoryPort {
     /**
      * {@link #findById} 와 같지만 헤더 행을 비관적 쓰기 잠금으로 읽는다 — 트랜잭션이 끝날 때까지 같은 선점을 잠그려는 다른 트랜잭션이 기다린다.
      * 결제 후 재고 복원이 같은 선점의 복원끼리 줄을 세워, "이미 복원한 수량" 을 각자 읽고 함께 상한을 넘기는 것을 막는 데 쓴다.
-     * 버전은 올리지 않는다. 트랜잭션 안에서만 부른다.
+     * 버전은 올리지 않는다. 트랜잭션 안에서만 부른다. 잠금 대기가 상한을 넘으면 {@code STOCK_RESERVATION_LOCK_TIMEOUT}(409, 재시도)이다.
      */
     Optional<StockReservation> findByIdForUpdate(long reservationId);
 

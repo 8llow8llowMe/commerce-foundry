@@ -121,6 +121,7 @@ class StockRestorationInternalControllerTest {
             STOCK_RESTORATION_RESERVATION_NOT_CONFIRMED | 409 | PRODUCT_027 | 확정된 재고 선점만 복원할 수 있습니다.
             STOCK_RESTORATION_MISMATCH                  | 409 | PRODUCT_029 | 이 클레임에는 내용이 다른 재고 복원이 이미 있습니다.
             STOCK_RESTORATION_CONFLICT                  | 409 | PRODUCT_030 | 재고 복원이 동시에 요청되었습니다. 다시 시도해 주세요.
+            STOCK_RESERVATION_LOCK_TIMEOUT              | 409 | PRODUCT_031 | 같은 선점을 처리 중입니다. 다시 시도해 주세요.
             """)
         @DisplayName("업무 오류 코드")
         void errors(ProductErrorCode errorCode, int status, String code, String message) {

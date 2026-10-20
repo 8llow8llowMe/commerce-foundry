@@ -16,6 +16,7 @@ import com.commercefoundry.domainlayer.product.domain.model.StockRestorationItem
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -80,13 +81,14 @@ public class StockRestorationProcessor {
         Map<Long, Boolean> deductedBySkuId = reservation.items().stream()
             .collect(Collectors.toMap(StockReservationItem::skuId, StockReservationItem::deducted));
         List<StockRestorationItem> items = command.items().stream()
-            .map(item -> new StockRestorationItem(snowflakeIdGenerator.generateId(), item.skuId(), item.quantity(), deductedBySkuId.get(item.skuId())))
+            .map(item -> new StockRestorationItem(snowflakeIdGenerator.generateId(), item.skuId(), item.quantity(), deductedOf(deductedBySkuId, item.skuId())))
             .toList();
         StockRestoration restoration = new StockRestoration(
             snowflakeIdGenerator.generateId(), command.claimId(), reservation.id(), reservation.orderId(), command.reason(), items
         );
         stockRestorationRepositoryPort.create(restoration);
 
+        // SKU 별 수량이 달라 벌크 불가 · 오름차순 = 잠금 순서 (§9-5 예외)
         for (StockRestorationItem item : restoration.restoredItems()) {
             if (!stockRepositoryPort.restore(item.skuId(), item.quantity())) {
                 // 해제 · 만료와 같다 — 재고 행은 지우지 않으므로 차감했던 행이 없으면 데이터 오류다. 복원 기록은 남기고 막지 않는다
@@ -95,6 +97,11 @@ public class StockRestorationProcessor {
             }
         }
         return StockRestorationInfo.from(restoration);
+    }
+
+    /** 선점 때 차감했는가. 상한 검사가 앞서 선점에 없는 SKU 를 걸렀다 — 없으면 그 전제가 깨진 것이라 언박싱 NPE 대신 이유를 남기고 실패한다. */
+    private static boolean deductedOf(Map<Long, Boolean> deductedBySkuId, long skuId) {
+        return Objects.requireNonNull(deductedBySkuId.get(skuId), () -> "상한 검사를 지난 복원 SKU 가 선점에 없습니다. skuId=" + skuId);
     }
 
     private static StockRestorationInfo sameClaim(StockRestoration existing, StockRestorationCommand command) {

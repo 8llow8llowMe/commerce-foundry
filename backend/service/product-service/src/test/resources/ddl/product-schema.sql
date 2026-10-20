@@ -618,7 +618,7 @@
         '재고 복원 아이디 (FK: stock_restoration.id)';
 
     comment on column product.stock_restoration_item.restored is
-        '재고를 실제로 되돌렸는가 — 선점 항목이 차감(deducted)이었으면 true. 무제한 SKU 는 false(기록만)';
+        '되돌릴 대상(선점 때 차감)이었는가 — 재고 행이 없으면 warn 만 남기고 수량은 늘지 않는다. 무제한 SKU 는 false(기록만)';
 
     comment on column product.stock_restoration_item.sku_id is
         'SKU 아이디 (FK: sku.id)';
