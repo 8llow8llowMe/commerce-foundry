@@ -365,6 +365,38 @@ return ResponseEntity.ok().body(Response.success(response));
   트리 판정(`CategoryTree.placementViolationOf` · `hasChildren`)과 쓰기는 카테고리 컨텍스트 `CategoryProcessor` 가 하고, 상품 컨텍스트는 그 Processor 와
   domain model 만 쓴다(`architecture-guide.md` §3 컨텍스트 간 의존 규칙, 의존 방향 product → category).
 
+### 2-6. 어드민 상품 목록 (product-service, #9)
+
+`GET /api/v1/admin/products` — `hasRole('ADMIN')`. 고객 목록(`GET /api/v1/products` — 숨김 제외 `SliceResponse`)과 DTO 를 공유하지 않는다.
+
+| 파라미터 | 값 | 오류 |
+|----------|----|------|
+| `keyword` | 상품명 부분 일치 · 대소문자 무시. 원문 100자 이하, 앞뒤 공백을 빼고 비면 조건 없음. `%` · `_` 는 글자로 찾는다 | 400 `PRODUCT_139` |
+| `categoryId` | 진열 카테고리 — **하위 포함**(숨긴 카테고리 포함, 고객 목록과 같다). 없는 카테고리면 빈 페이지(`totalElements` 0) | 400 `PRODUCT_137` · `198` |
+| `saleStatus` | 저장된 판매 상태 `ON_SALE` · `STOP_SELLING` | 400 `PRODUCT_198` |
+| `visible` | `true` · `false`. **없으면 숨김 포함 전체** | 400 `PRODUCT_198` |
+| `availability` | 재고를 반영한 판매 가능 상태 `ON_SALE` · `SOLD_OUT` · `STOP_SELLING` — 아래 규칙 | 400 `PRODUCT_198` |
+| `sortType` | `NEWEST`(기본, 아이디 내림차순) · `NAME_ASC`(상품명 오름차순, DB collation). 동률은 아이디 내림차순 | 400 `PRODUCT_198` |
+| `page` · `size` | 기본 0 · 20, size 1~100 (§4) | 400 `PRODUCT_101` · `102` |
+
+- **응답** — `PageResponse<{productId, name, thumbnailUrl, salePrice, listPrice, saleStatus, visible, availability, skuCount, updatedAt}>`.
+  아이디는 문자열, 금액은 `{amount, currency}`, `saleStatus` · `availability` 는 `{code, name, description}`, `updatedAt` 은 UTC ISO 다.
+- **가격은 저장된 값 그대로다** — `salePrice` 는 기본 판매가(옵션 추가금 · 판매중 옵션 최저가를 반영하지 않는다), `listPrice` 는 정가(없으면 null)다.
+  고객 목록처럼 할인이 아닌 정가를 숨기지 않는다. `thumbnailUrl` 은 대표 이미지 주소(없으면 null), `skuCount` 는 판매 상태와 무관한 SKU 수다.
+  `updatedAt` 은 상품 행의 수정 시각이라 SKU · 재고 · 이미지만 바뀐 것은 반영하지 않는다.
+- **판매 가능 상태** — 고객 뱃지와 같은 규칙(`SaleAvailability.ofProduct`)이고 노출 여부는 보지 않는다. 상품이 판매 종료이거나 판매중 SKU 가 없으면(SKU 0개 포함) `STOP_SELLING`,
+  판매중 SKU 중 재고가 무제한이거나 수량 > 0 인 것이 있으면 `ON_SALE`, 그 밖이면 `SOLD_OUT` 이다. **재고 행이 없는 SKU 는 품절**이다.
+  항목의 값은 SKU 집계로, 필터는 같은 판정을 SQL EXISTS 로 건다 — 둘은 `SkuCustomRepositoryImpl` 의 `onSale` · `inStock` 식을 함께 쓴다.
+- **쿼리** — 목록 1 + count 1 + SKU 집계 1(재고 left join) + 대표 이미지 1, 집계 · 이미지는 그 페이지 상품 아이디 in 절이다. 결과가 비면 집계 · 이미지를 읽지 않고,
+  첫 페이지가 다 차지 않으면 count 를 건너뛴다(`PageableExecutionUtils`). 조건은 product 행 기준 EXISTS(카테고리 · SKU · 재고)라 JOIN 으로 행이 겹치지 않는다.
+  인덱스는 추가하지 않았다 — 카테고리 EXISTS 는 `idx_product_category_category_id_product_id`, SKU EXISTS 는 `uk_sku_product_id_option_value_key` 선두, 재고는 PK 를 탄다.
+  상품명 부분 일치(`lower(name) like '%…%'`)와 이름순은 product 스캔 · 정렬이다(어드민 전용, 상품 수 규모에서 수용).
+- 삭제(soft delete, #9 PR-D)가 생기면 삭제 상품 제외 조건을 `ProductCustomRepositoryImpl#searchForAdmin` 의 조건 배열에 더한다.
+- 계층 — `ProductAdminController` → `ProductAdminUseCase` → `ProductAdminFacade`(읽기 전용 트랜잭션, 카테고리 하위 펼치기는 `CategoryProcessor.subtreeIdsOf`)
+  → `ProductAdminQueryProcessor` → `ProductRepositoryPort#searchForAdmin`. 컨트롤러는 domain enum 을 쓰지 않으므로(H1) 판매 상태 · 판매 가능 상태 · 정렬은
+  `application/model` 의 입력 enum(`ProductSaleStatusFilter` · `ProductAvailabilityFilter` · `ProductAdminSortType`)으로 받고 Processor 가 domain 으로 바꾼다.
+  정렬은 고객 `ProductSortType` 과 나눈다 — 이름순을 고객 목록에 열지 않는다.
+
 ## 3. 계층 흐름
 
 ```text
