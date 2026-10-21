@@ -33,3 +33,8 @@ eureka:
 snowflake:
   datacenter-id: 1
   worker-id: 1
+
+auth:
+  login-guard:
+    # 시도 계수 HMAC 키 — base64("auth-login-guard-test-only-hash-key", 35바이트). 테스트 전용이다. 비밀이 아니다
+    hash-key: YXV0aC1sb2dpbi1ndWFyZC10ZXN0LW9ubHktaGFzaC1rZXk=

@@ -3,14 +3,19 @@ package com.commercefoundry;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.domainlayer.member.adapter.out.redis.AccessTokenRevocationRedisAdapter;
+import com.commercefoundry.domainlayer.member.adapter.out.redis.LoginAttemptRedisAdapter;
 import com.commercefoundry.domainlayer.member.adapter.out.redis.RefreshTokenRedisAdapter;
 import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRevocationPort;
+import com.commercefoundry.domainlayer.member.application.port.out.LoginAttemptCounterPort;
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
+import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptPolicy;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
 import com.commercefoundry.global.properties.AgreementProperties;
+import com.commercefoundry.global.properties.AuthLoginGuardProperties;
 import com.commercefoundry.global.properties.AuthTokenProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.security.issuer.JwtIssuanceProperties;
+import com.commercefoundry.support.TestLoginGuard;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Duration;
@@ -79,6 +84,16 @@ class AuthServiceApplicationTests {
         assertThat(applicationContext.getBean(RefreshTokenStorePort.class)).isInstanceOf(RefreshTokenRedisAdapter.class);
         assertThat(applicationContext.getBean(AccessTokenRevocationPort.class)).isInstanceOf(AccessTokenRevocationRedisAdapter.class);
         assertThat(applicationContext.getEnvironment().getProperty("management.health.redis.enabled")).isEqualTo("false");
+    }
+
+    @Test
+    @DisplayName("시도 제한은 application.yml 값(켬 · 5회 · 15분)과 test 키로 바인딩되어 정책 빈 하나가 되고, 계수기는 Redis 어댑터 하나다")
+    void loginGuard() {
+        AuthLoginGuardProperties properties = applicationContext.getBean(AuthLoginGuardProperties.class);
+        assertThat(properties.enabled()).isTrue();
+        assertThat(properties.hashKeyBytes()).isEqualTo(TestLoginGuard.properties().hashKeyBytes());
+        assertThat(applicationContext.getBean(LoginAttemptPolicy.class)).isEqualTo(new LoginAttemptPolicy(5, Duration.ofMinutes(15)));
+        assertThat(applicationContext.getBean(LoginAttemptCounterPort.class)).isInstanceOf(LoginAttemptRedisAdapter.class);
     }
 
     @Test

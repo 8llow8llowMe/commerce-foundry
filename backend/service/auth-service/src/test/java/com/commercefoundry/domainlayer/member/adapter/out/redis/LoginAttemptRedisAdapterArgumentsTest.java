@@ -1,0 +1,120 @@
+package com.commercefoundry.domainlayer.member.adapter.out.redis;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+
+import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
+import com.commercefoundry.domainlayer.member.application.exception.MemberException;
+import com.commercefoundry.domainlayer.member.domain.model.AttemptKind;
+import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptOutcome;
+import com.commercefoundry.global.properties.AuthLoginGuardProperties;
+import com.commercefoundry.support.TestLoginGuard;
+import java.time.Duration;
+import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+
+/**
+ * Docker 없이 고정하는 부분 — 스크립트에 넘기는 KEYS · ARGV 의 모양, 결과 해석, Redis 오류 변환.
+ * 스크립트 실행 자체는 {@link LoginAttemptRedisAdapterTest}(Testcontainers)가 본다.
+ */
+class LoginAttemptRedisAdapterArgumentsTest {
+
+    private static final String EMAIL = "member@example.com";
+    private static final Duration WINDOW = Duration.ofMinutes(15);
+
+    private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+    private final LoginAttemptKeyHasher hasher = new LoginAttemptKeyHasher(TestLoginGuard.properties());
+    private final LoginAttemptRedisAdapter adapter = new LoginAttemptRedisAdapter(redisTemplate, hasher);
+
+    @Test
+    @DisplayName("기록 — KEYS [auth:login-attempt:{HMAC}], ARGV [창 ms], 결과 {시도 수, 남은 ms} 를 읽는다")
+    void recordArguments() {
+        given(redisTemplate.execute(LoginAttemptRedisScripts.RECORD, List.of("auth:login-attempt:" + hasher.hash(EMAIL)), "900000"))
+            .willReturn(List.of(3L, 600_000L));
+
+        assertThat(adapter.record(AttemptKind.LOGIN, EMAIL, WINDOW)).isEqualTo(new LoginAttemptOutcome(3, Duration.ofMinutes(10)));
+    }
+
+    @Test
+    @DisplayName("회원가입 기록은 auth:sign-up-attempt:{HMAC} 키를 쓴다")
+    void signUpRecordUsesSignUpKey() {
+        given(redisTemplate.execute(LoginAttemptRedisScripts.RECORD, List.of("auth:sign-up-attempt:" + hasher.hash(EMAIL)), "600000"))
+            .willReturn(List.of(1L, 600_000L));
+
+        assertThat(adapter.record(AttemptKind.SIGN_UP, EMAIL, Duration.ofMinutes(10))).isEqualTo(new LoginAttemptOutcome(1, Duration.ofMinutes(10)));
+    }
+
+    @Test
+    @DisplayName("reset 은 그 종류 키 DEL 하나다")
+    void resetDeletesKey() {
+        adapter.reset(AttemptKind.LOGIN, EMAIL);
+
+        verify(redisTemplate).delete("auth:login-attempt:" + hasher.hash(EMAIL));
+    }
+
+    @Test
+    @DisplayName("결과 해석 — 모양이 다르면(하나뿐 · 숫자 아님 · 없음) 스크립트와 코드가 어긋난 것이라 실패한다")
+    void outcomeShape() {
+        assertThat(LoginAttemptRedisAdapter.toOutcome(List.of(1L, 0L))).isEqualTo(new LoginAttemptOutcome(1, Duration.ZERO));
+        assertThatThrownBy(() -> LoginAttemptRedisAdapter.toOutcome(List.of(1L))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> LoginAttemptRedisAdapter.toOutcome(List.of(1L, "1000"))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> LoginAttemptRedisAdapter.toOutcome(null)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> LoginAttemptRedisAdapter.toOutcome(List.of(0L, 1000L))).as("시도 수는 1 이상이다").isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("창이 1ms 미만이면 Redis 를 부르지 않고 거절한다 — PEXPIRE 가 키를 바로 지워 창이 서지 않는다")
+    void subMillisecondWindowRejected() {
+        assertThatThrownBy(() -> adapter.record(AttemptKind.LOGIN, EMAIL, Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> adapter.record(AttemptKind.LOGIN, EMAIL, Duration.ofNanos(999_999))).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(redisTemplate);
+    }
+
+    @Test
+    @DisplayName("Redis 오류(연결 실패 등)는 AUTH_013 이고 원인을 잇는다 — 기록 · reset 모두")
+    void redisFailureBecomesUnavailable() {
+        RedisConnectionFailureException failure = new RedisConnectionFailureException("connection refused");
+        given(redisTemplate.execute(eq(LoginAttemptRedisScripts.RECORD), anyList(), any(Object[].class))).willThrow(failure);
+        given(redisTemplate.delete(anyString())).willThrow(failure);
+
+        assertThatThrownBy(() -> adapter.record(AttemptKind.LOGIN, EMAIL, WINDOW))
+            .isInstanceOf(MemberException.class)
+            .hasCause(failure)
+            .extracting(exception -> ((MemberException) exception).getErrorCode())
+            .isEqualTo(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+        assertThatThrownBy(() -> adapter.reset(AttemptKind.LOGIN, EMAIL))
+            .isInstanceOf(MemberException.class)
+            .extracting(exception -> ((MemberException) exception).getErrorCode())
+            .isEqualTo(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("꺼진 해셔로 부르면 Redis 에 닿기 전에 IllegalStateException 이다 — 꺼진 구성에서는 부르지 않는다")
+    void disabledHasherFailsBeforeRedis() {
+        LoginAttemptKeyHasher disabled = new LoginAttemptKeyHasher(new AuthLoginGuardProperties(false, 5, WINDOW, null));
+        LoginAttemptRedisAdapter disabledAdapter = new LoginAttemptRedisAdapter(redisTemplate, disabled);
+
+        assertThatThrownBy(() -> disabledAdapter.record(AttemptKind.LOGIN, EMAIL, WINDOW)).isInstanceOf(IllegalStateException.class);
+        verifyNoInteractions(redisTemplate);
+    }
+
+    @Test
+    @DisplayName("스크립트는 첫 시도에만 창을 걸고 {시도 수, PTTL} 을 돌려준다")
+    void scriptShape() {
+        String script = LoginAttemptRedisScripts.RECORD.getScriptAsString();
+
+        assertThat(script).contains("'INCR', KEYS[1]", "if count == 1 then", "'PTTL', KEYS[1]", "return {count, ttl}", "ARGV[1]");
+        assertThat(LoginAttemptRedisScripts.RECORD.getResultType()).isEqualTo(List.class);
+    }
+}
