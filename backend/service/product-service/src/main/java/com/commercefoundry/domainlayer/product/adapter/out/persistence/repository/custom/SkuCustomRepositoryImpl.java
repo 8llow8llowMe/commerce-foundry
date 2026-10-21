@@ -3,6 +3,8 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence.reposito
 import static com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.QSkuEntity.skuEntity;
 import static com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.QStockEntity.stockEntity;
 
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.QSkuEntity;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.QStockEntity;
 import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.querydsl.core.Tuple;
@@ -34,6 +36,8 @@ public class SkuCustomRepositoryImpl implements SkuCustomRepository {
      *
      * <p>stock 은 PK 가 {@code sku_id} 라 SKU 행마다 많아야 한 행이 붙는다 — left join 이 SKU 행을 늘리지 않는다.
      *
+     * <p>{@code count(sku.id)} 는 판매 상태와 무관한 SKU 수다(어드민 목록의 skuCount). left join 이 행을 늘리지 않아 그대로 센다.
+     *
      * <p>1 · 0 은 바인드 파라미터가 아니라 리터럴로 넣는다 — 집계 함수 안의 타입 없는 파라미터는 PostgreSQL 이 타입을 정하지 못한다.
      * 집계 결과의 Java 타입(Integer · Long)은 방언 · 버전에 따라 달라질 수 있어 {@link Number} 로 받아 바꾼다.
      *
@@ -45,9 +49,8 @@ public class SkuCustomRepositoryImpl implements SkuCustomRepository {
             return List.of();
         }
 
-        BooleanExpression onSale = skuEntity.saleStatus.eq(SaleStatus.ON_SALE);
-        BooleanExpression inStock = stockEntity.skuId.isNotNull()
-            .and(stockEntity.stockManaged.isFalse().or(stockEntity.availableQuantity.gt(0L)));
+        BooleanExpression onSale = onSale(skuEntity);
+        BooleanExpression inStock = inStock(stockEntity);
         NumberExpression<Integer> hasOnSaleSku = flagMax(onSale);
         NumberExpression<Integer> hasPurchasableSku = flagMax(onSale.and(inStock));
         NumberExpression<Long> onSaleAdditionalAmount = new CaseBuilder()
@@ -57,7 +60,7 @@ public class SkuCustomRepositoryImpl implements SkuCustomRepository {
         NumberExpression<Long> maxOnSaleAdditionalAmount = onSaleAdditionalAmount.max();
 
         List<Tuple> rows = queryFactory
-            .select(skuEntity.productId, hasOnSaleSku, hasPurchasableSku, minOnSaleAdditionalAmount, maxOnSaleAdditionalAmount)
+            .select(skuEntity.productId, hasOnSaleSku, hasPurchasableSku, minOnSaleAdditionalAmount, maxOnSaleAdditionalAmount, skuEntity.id.count())
             .from(skuEntity)
             .leftJoin(stockEntity).on(stockEntity.skuId.eq(skuEntity.id))
             .where(skuEntity.productId.in(productIds))
@@ -70,9 +73,26 @@ public class SkuCustomRepositoryImpl implements SkuCustomRepository {
                 isOne(row.get(1, Number.class)),
                 isOne(row.get(2, Number.class)),
                 toLong(row.get(3, Number.class)),
-                toLong(row.get(4, Number.class))
+                toLong(row.get(4, Number.class)),
+                row.get(5, Number.class).longValue()
             ))
             .toList();
+    }
+
+    /**
+     * 판매중 SKU. 어드민 목록의 판매 가능 상태 조건({@code ProductCustomRepositoryImpl})도 이것을 쓴다 — 집계와 조건이 같은 규칙이어야
+     * 목록에 보이는 상태와 필터 결과가 어긋나지 않는다.
+     */
+    static BooleanExpression onSale(QSkuEntity sku) {
+        return sku.saleStatus.eq(SaleStatus.ON_SALE);
+    }
+
+    /**
+     * 재고 있음 — 재고 행이 있고 무제한이거나 판매 가능 수량 &gt; 0 ({@code StockSnapshot#isSoldOut} 의 부정). 재고 행이 없으면(left join 의 null) 품절이다.
+     * 어드민 목록의 판매 가능 상태 조건도 이것을 쓴다.
+     */
+    static BooleanExpression inStock(QStockEntity stock) {
+        return stock.skuId.isNotNull().and(stock.stockManaged.isFalse().or(stock.availableQuantity.gt(0L)));
     }
 
     /** {@code max(case when condition then 1 else 0 end)} — 조건을 만족하는 행이 하나라도 있으면 1. */

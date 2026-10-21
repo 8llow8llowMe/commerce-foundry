@@ -72,9 +72,9 @@ class ProductListProcessorTest {
     void computesFromAggregates() {
         givenRows(false, row(1, SaleStatus.ON_SALE, false), row(2, SaleStatus.ON_SALE, false), row(3, SaleStatus.STOP_SELLING, false));
         given(skuRepositoryPort.aggregateByProductIds(List.of(1L, 2L, 3L))).willReturn(List.of(
-            new SkuAggregateQueryResult(1, true, true, 1_000L, 5_000L),
-            new SkuAggregateQueryResult(2, true, true, 0L, 0L),
-            new SkuAggregateQueryResult(3, true, true, 0L, 0L)
+            new SkuAggregateQueryResult(1, true, true, 1_000L, 5_000L, 1),
+            new SkuAggregateQueryResult(2, true, true, 0L, 0L, 1),
+            new SkuAggregateQueryResult(3, true, true, 0L, 0L, 1)
         ));
         given(productImageRepositoryPort.findThumbnailsByProductIds(List.of(1L, 2L, 3L)))
             .willReturn(List.of(ProductFixtures.image(10, 1, ImageType.THUMBNAIL, 0)));
@@ -104,7 +104,7 @@ class ProductListProcessorTest {
     @DisplayName("판매중 SKU 는 있지만 구매 가능 SKU 가 없으면(집계의 재고 판정) 품절이고, 가격은 판매중 SKU 추가금으로 계산한다")
     void soldOutFromAggregate() {
         givenRows(false, row(1, SaleStatus.ON_SALE, false));
-        given(skuRepositoryPort.aggregateByProductIds(List.of(1L))).willReturn(List.of(new SkuAggregateQueryResult(1, true, false, 1_000L, 5_000L)));
+        given(skuRepositoryPort.aggregateByProductIds(List.of(1L))).willReturn(List.of(new SkuAggregateQueryResult(1, true, false, 1_000L, 5_000L, 1)));
         given(productImageRepositoryPort.findThumbnailsByProductIds(List.of(1L))).willReturn(List.of());
 
         ProductListItemInfo item = processor(true).search(CRITERIA).getContent().getFirst();

@@ -22,8 +22,9 @@ package com.commercefoundry.domainlayer.product.application.port.out.query;
  * @param hasPurchasableSku 판매중이면서 품절이 아닌 SKU 가 하나라도 있는가 — 재고가 무제한이거나 판매 가능 수량이 0 보다 크다. 재고 행이 없는 SKU 는 품절이다
  * @param minOnSaleAdditionalAmount 판매중 SKU 추가금의 최소값 (최소 화폐 단위, 통화는 상품 기본 판매가와 같다). 판매중 SKU 가 없으면 null
  * @param maxOnSaleAdditionalAmount 판매중 SKU 추가금의 최대값. 판매중 SKU 가 없으면 null
+ * @param skuCount 판매 상태와 무관한 SKU 수 (1 이상 — SKU 가 없는 상품은 행이 없다). 어드민 목록만 쓴다
  */
 public record SkuAggregateQueryResult(
-    long productId, boolean hasOnSaleSku, boolean hasPurchasableSku, Long minOnSaleAdditionalAmount, Long maxOnSaleAdditionalAmount
+    long productId, boolean hasOnSaleSku, boolean hasPurchasableSku, Long minOnSaleAdditionalAmount, Long maxOnSaleAdditionalAmount, long skuCount
 ) {
 }
