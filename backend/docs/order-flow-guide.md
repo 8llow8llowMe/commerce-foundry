@@ -124,10 +124,8 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
    같은 SKU 를 다른 맞춤 입력으로 나눈 줄도 더한다. 장바구니는 줄 단위로만 막으므로(§2-1) 여기서 거절될 수 있다
 5. SKU 판매가 통화가 섞였다 → `ORDER_006`. 주문 통화 = SKU 판매가 통화다(#20 전에는 단일 통화)
 6. 줄 금액 = 단가 × 수량, 상품 합계 = Σ 줄 금액 (`Money.times` · `plus`)
-7. 배송 국가로 국내 · 해외를 가른다(KR 이면 국내, 통화는 보지 않는다 — 판정은 `ShippingScope.ofCountry` 한 곳). order 의 `ShippingScope` 는 임시로,
-   #144(shared-commerce `ShippingScope`)와 이름 · 시그니처(`Optional<ShippingScope> ofCountry`, 형식이 아니면 빈 값)를 같게 맞춰 두었고 #144 머지 후 **#13 에서**
-   지우고 import 를 바꾼다. 빈 값은 요청 검증이 먼저 거르므로 조립 버그(`IllegalArgumentException`)다. 범위 비교는 `==` · `!=` 로만 한다 — 두 enum 이 공존하는 동안
-   잘못 import 한 쪽과 `equals` 로 비교하면 컴파일되고 늘 false 다. 해외면 §2-2 순서대로:
+7. 배송 국가로 국내 · 해외를 가른다(KR 이면 국내, 통화는 보지 않는다 — 판정은 shared-commerce `ShippingScope.ofCountry` 한 곳, #144).
+   형식이 아니면 빈 값인데, 요청 검증이 먼저 거르므로 빈 값은 조립 버그(`IllegalArgumentException`)다. 해외면 §2-2 순서대로:
    1. 무게 또는 HS 코드가 null 인 SKU 가 있으면 **확인용 견적**(아래)으로 배송 가능 국가를 먼저 본다 — 배송할 수 없으면 `ORDER_013`, 있으면 `ORDER_007`.
       국가 판정 전 사유(정책 미설정 · 통화 불일치)로 거절되면 그 코드(`ORDER_012` · `ORDER_014`)다
    2. 무게 < 1 은 product-service 응답 계약 위반이라 error 로그 + `ORDER_002`(503). 모든 줄을 본 뒤 다음 단계로 간다
