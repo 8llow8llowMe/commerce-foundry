@@ -1,10 +1,11 @@
 rootProject.name = 'commerce-foundry-backend'
 
-// Cores — storage-core 는 어드민 상품 이슈(#9)에서 추가한다
+// Cores
 include 'core:common-core'
 include 'core:persistence-core'
 include 'core:redis-core'
 include 'core:security-core'
+include 'core:storage-core'
 include 'core:shared-commerce'
 
 // Cloud

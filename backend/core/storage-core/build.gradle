@@ -1,0 +1,22 @@
+dependencies {
+    // @Bean · BeanFactoryPostProcessor · Binder · @ConfigurationProperties. 웹 스택은 넣지 않는다 — 도메인을 모르는 클라이언트다
+    implementation 'org.springframework.boot:spring-boot'
+    implementation 'org.slf4j:slf4j-api'
+
+    // AWS SDK for Java v2 — S3 호환 API(R2 · S3 · NCP · MinIO)를 endpoint · region 설정으로 공용한다.
+    // implementation 이라 서비스는 SDK 타입을 컴파일 시점에 보지 못하고 ObjectStorageClient 만 본다.
+    // 버전은 BOM 대신 두 아티팩트에 직접 적는다 — 서비스가 이 모듈을 프로젝트 의존으로 받을 때 Boot · Cloud BOM 만 보이므로
+    // 버전 없는 선언은 소비 쪽에서 풀리지 않는다 (querydsl 과 같은 방식). s3 X 는 전이 SDK 모듈을 전부 같은 X 로 고정한다
+    implementation("software.amazon.awssdk:s3:${rootProject.ext.awsSdkVersion}") {
+        // HTTP 클라이언트는 url-connection-client 하나만 쓴다(S3CompatibleObjectStorageClient 가 명시한다).
+        // SDK 가 runtime 으로 딸려 보내는 apache5-client · netty-nio-client 를 뺀다 — Boot BOM 이 HttpClient 5 · Netty 버전을 관리해
+        // SDK 가 기대하는 버전보다 낮게 고정한다(2.55.11 기준 httpclient5 5.6.4 → 5.5.2). 서비스 실행 클래스패스에 끌려가지도 않는다
+        exclude group: 'software.amazon.awssdk', module: 'apache5-client'
+        exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
+    }
+    implementation "software.amazon.awssdk:url-connection-client:${rootProject.ext.awsSdkVersion}"
+
+    // S3 호환 서버 왕복 테스트 (Testcontainers). Docker 없는 로컬은 건너뛰고 CI 는 실패한다 (bootstrap-conventions.md). 버전은 Boot BOM 이 정한다
+    testImplementation 'org.testcontainers:testcontainers'
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+}
