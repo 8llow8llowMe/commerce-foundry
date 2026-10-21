@@ -121,7 +121,7 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
 - 새 서비스를 더하면 게이트웨이의 dev 라우트(`GatewayDevRouteConfig` 는 `ServiceRoute` 를 따른다)와 Swagger UI 목록
   (`api-gateway` 의 `application.yml` `springdoc.swagger-ui.urls`)도 같이 늘린다. `GatewayDevRouteTest` 가 어긋나면 잡는다.
 - 새 모듈은 CI 에서 자동으로 `rest` 그룹 job 에 들어간다(`.github/scripts/backend-ci-matrix.py`). 테스트가 길어져 `rest` job 이
-  가장 늦게 끝나면 그 스크립트의 `GROUPS` 에 그룹을 더한다. 모듈 이름을 바꾸면 `GROUPS` 도 같이 고친다 — 어긋나면 plan job 이 실패한다.
+  가장 늦게 끝나면 그 스크립트의 `GROUPS` 의 기존 그룹에 넣는다 — 그룹을 새로 늘리면 동시 실행 job 한도 때문에 대기가 길어진다(#194). 모듈 이름을 바꾸면 `GROUPS` 도 같이 고친다 — 어긋나면 plan job 이 실패한다.
   PR 의 CI 는 바뀐 모듈과 그 모듈에 의존하는 모듈만 돌린다 — 새 모듈이 core 를 `project(':core:...')` 로 의존하면 그 core 를 바꾼 PR 에서도
   같이 돈다. 모듈 밖 파일을 읽는 테스트는 `inputs.file(rootProject.file('...'))` 로 선언한다(`local-run-guide.md` §4).
 
