@@ -102,8 +102,15 @@ chore/infra/1-repo-bootstrap
 
 ```bash
 git fetch origin
-git switch -c feature/be/12-product-detail-api origin/develop
+git switch --no-track -c feature/be/12-product-detail-api origin/develop
+# 워크트리로 시작할 때
+git worktree add --no-track -b feature/be/12-product-detail-api ../commerce-foundry-wt/12-product-detail-api origin/develop
+# 첫 푸시 — 같은 이름의 원격 브랜치를 upstream 으로 잡는다
+git push -u origin HEAD
 ```
+
+- **`--no-track` 을 붙인다.** 원격 브랜치에서 분기하면 git 이 upstream 을 `origin/develop` 으로 잡아, 맨 `git push` 가 develop 쪽을 향할 수 있다.
+  분기 직후 `git rev-parse --abbrev-ref @{u}` 가 비어 있어야 한다.
 
 `/issue-start 12` 가 이 과정을 대신한다.
 
