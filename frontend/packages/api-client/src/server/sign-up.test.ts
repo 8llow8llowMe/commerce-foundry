@@ -60,7 +60,10 @@ describe('createSignUpHandler', () => {
     expect(res.status).toBe(201);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = await res.json();
-    expect(body.dataBody).toEqual({ signedIn: true });
+    expect(body.dataBody).toEqual({
+      signedIn: true,
+      loginRateLimit: null,
+    });
     expect(JSON.stringify(body)).not.toContain('access-1');
     expect(res.headers.getSetCookie()).toEqual([
       'cf_at=access-1; Path=/; HttpOnly; SameSite=Lax; Max-Age=900',
@@ -117,9 +120,40 @@ describe('createSignUpHandler', () => {
       const res = await handlerWith(fetchImpl)(signUp());
 
       expect(res.status).toBe(201);
-      expect((await res.json()).dataBody).toEqual({ signedIn: false });
+      expect((await res.json()).dataBody).toEqual({
+        signedIn: false,
+        loginRateLimit: null,
+      });
       expect(res.headers.getSetCookie()).toEqual([]);
     }
+  });
+
+  it('가입 시도 제한(429 AUTH_041)은 Retry-After 와 함께 중계하고 로그인하지 않는다', async () => {
+    const limited = envelope(429, false, null, 'AUTH_041');
+    limited.headers.set('retry-after', '120');
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(limited);
+    const res = await handlerWith(fetchImpl)(signUp());
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('120');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('자동 로그인이 시도 제한(429)이면 signedIn false 와 함께 그 Retry-After 를 알린다', async () => {
+    const limited = envelope(429, false, null, 'AUTH_040');
+    limited.headers.set('retry-after', '840');
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(envelope(201, true, { memberId: '7' }))
+      .mockResolvedValueOnce(limited);
+    const res = await handlerWith(fetchImpl)(signUp());
+
+    expect(res.status).toBe(201);
+    expect((await res.json()).dataBody).toEqual({
+      signedIn: false,
+      loginRateLimit: { code: 'AUTH_040', retryAfterSec: 840 },
+    });
+    expect(res.headers.getSetCookie()).toEqual([]);
   });
 
   it('다른 사이트에서 온 요청은 게이트웨이로 보내지 않는다', async () => {

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../api-error';
+import { unwrap } from '../unwrap';
 import type { AuthCookieConfig } from './cookies';
 import { LOGIN_PATH, createLoginHandler } from './login';
 
@@ -86,6 +88,29 @@ describe('createLoginHandler', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'AUTH_001' } });
     expect(res.headers.getSetCookie()).toEqual([]);
+  });
+
+  it('시도 제한(429 AUTH_040)은 상태 · 봉투와 Retry-After 를 함께 중계한다 — 화면 쿨다운이 그 값을 쓴다', async () => {
+    const limited = envelope(429, false, null, 'AUTH_040');
+    limited.headers.set('retry-after', '840');
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(limited);
+    const res = await handlerWith(fetchImpl)(login());
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('840');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'AUTH_040' } });
+    expect(res.headers.getSetCookie()).toEqual([]);
+  });
+
+  it('브라우저 쪽 unwrap 이 그 응답을 retryAfterSec 이 채워진 rateLimited ApiError 로 읽는다', async () => {
+    const limited = envelope(429, false, null, 'AUTH_040');
+    limited.headers.set('retry-after', '840');
+    const res = await handlerWith(vi.fn<typeof fetch>().mockResolvedValue(limited))(login());
+
+    const error = await unwrap(res).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ kind: 'rateLimited', code: 'AUTH_040', retryAfterSec: 840 });
   });
 
   it('다른 사이트에서 온 요청은 게이트웨이로 보내지 않는다(login CSRF)', async () => {
