@@ -12,6 +12,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.UUID;
@@ -35,23 +36,33 @@ import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 
 /**
  * 실제 S3 호환 서버(MinIO)와 왕복한다 — 업로드 서명 PUT(HTTP 클라이언트로 실제 업로드) → HEAD → 앞부분 읽기 → 서버 측 복사(메타데이터 교체) → 삭제.
- * 서명 검증 · Range · CopyObject · 404 처리처럼 오프라인 테스트가 볼 수 없는 것을 본다. Docker 가 없는 로컬은 건너뛰고 CI 에서 돈다.
+ * 서명 검증 · Range · CopyObject · 조건부 요청(ETag) · 404 처리처럼 오프라인 테스트가 볼 수 없는 것을 본다. Docker 가 없는 로컬은 건너뛰고 CI 에서 돈다.
  *
  * <p>MinIO 공식 이미지({@code minio/minio})는 Docker Hub · quay.io 배포가 끝나 받을 수 없다. Bitnami 가 마지막으로 빌드해 둔
- * {@code bitnamilegacy/minio}(MinIO RELEASE.2025-07-23, 갱신 없음)를 고정해 쓰고, Bitnami 설정 스크립트를 거치지 않고 {@code minio server} 를
+ * {@code bitnamilegacy/minio}(MinIO RELEASE.2025-07-23, 갱신 없음)를 digest 로 고정해 쓰고, Bitnami 설정 스크립트를 거치지 않고 {@code minio server} 를
  * 바로 띄운다 — 기동 중 서버를 한 번 껐다 켜는 설정 단계가 없어 준비 판정이 흔들리지 않는다. 이미지를 바꾸면 이 상수만 고친다.
+ *
+ * <p>클라이언트는 공개 팩토리({@code ObjectStorageClients.create})가 아니라 package-private {@code create} 로 만든다 — 팩토리는 http 를 루프백
+ * 호스트에만 허용하는데, Testcontainers 호스트는 루프백이 아닐 수 있다.
  */
 @Testcontainers
 @EnabledWithDockerOrOnCi
 class S3CompatibleObjectStorageRoundTripTest {
 
-    private static final DockerImageName MINIO_IMAGE = DockerImageName.parse("bitnamilegacy/minio:2025.7.23-debian-12-r5");
+    /**
+     * {@code bitnamilegacy/minio:2025.7.23-debian-12-r5} 의 멀티 아키텍처 index digest(linux/amd64 · linux/arm64). 태그는 다시 밀어 넣을 수 있어
+     * digest 로 고정한다 — 이미지가 바뀌면 받지 못해 시끄럽게 실패한다.
+     */
+    private static final DockerImageName MINIO_IMAGE =
+        DockerImageName.parse("bitnamilegacy/minio@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20");
     private static final int S3_PORT = 9000;
     private static final String ACCESS_KEY = "test-access-key";
     private static final String SECRET_KEY = "test-secret-key";
     private static final String BUCKET = "test-bucket";
     private static final String REGION = "us-east-1";
     private static final String CACHE_CONTROL = "public, max-age=31536000, immutable";
+    /** 없는 키에 조건으로 싣는 ETag — 객체가 없으면 조건보다 404 가 먼저다. */
+    private static final String ANY_ETAG = "\"00000000000000000000000000000000\"";
 
     /** PNG 시그니처 + IHDR 앞부분. 형식 판별과 바이트 비교에 쓴다. */
     private static final byte[] PNG_BYTES = concat(
@@ -108,17 +119,16 @@ class S3CompatibleObjectStorageRoundTripTest {
         PresignedUpload upload = client.presignPut(uploadKey, ImageFormat.PNG.contentType(), PNG_BYTES.length);
         assertThat(send(upload, PNG_BYTES).statusCode()).isEqualTo(200);
 
-        assertThat(client.head(uploadKey)).hasValueSatisfying(object -> {
-            assertThat(object.contentLength()).isEqualTo(PNG_BYTES.length);
-            assertThat(object.contentType()).isEqualTo("image/png");
-            assertThat(object.eTag()).isNotBlank();
-        });
+        StoredObject uploaded = client.head(uploadKey).orElseThrow();
+        assertThat(uploaded.contentLength()).isEqualTo(PNG_BYTES.length);
+        assertThat(uploaded.contentType()).isEqualTo("image/png");
+        assertThat(uploaded.eTag()).isNotBlank();
 
-        byte[] head = client.readRange(uploadKey, ImageFormat.DETECTION_LENGTH);
+        byte[] head = client.readRange(uploadKey, ImageFormat.DETECTION_LENGTH, uploaded.eTag());
         assertThat(head).isEqualTo(Arrays.copyOf(PNG_BYTES, ImageFormat.DETECTION_LENGTH));
         assertThat(ImageFormat.detect(head)).hasValue(ImageFormat.PNG);
 
-        client.copy(uploadKey, productKey, ImageFormat.PNG.contentType(), CACHE_CONTROL);
+        client.copy(uploadKey, productKey, ImageFormat.PNG.contentType(), CACHE_CONTROL, uploaded.eTag());
         HeadObjectResponse copied = inspector.headObject(request -> request.bucket(BUCKET).key(productKey));
         assertThat(copied.contentLength()).isEqualTo(PNG_BYTES.length);
         assertThat(copied.contentType()).isEqualTo("image/png");
@@ -131,6 +141,30 @@ class S3CompatibleObjectStorageRoundTripTest {
 
         client.delete(productKey);
         assertThat(client.head(productKey)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("확인(HEAD) 뒤 같은 키에 다른 내용이 올라오면 옛 ETag 로는 읽기 · 복사가 CHANGED 이고, 새 ETag 로는 복사된다")
+    void rejectsObjectChangedAfterHead() {
+        String uploadKey = "uploads/" + UUID.randomUUID() + ".png";
+        String productKey = "products/1/" + UUID.randomUUID() + ".png";
+        client.put(uploadKey, PNG_BYTES, "image/png", null);
+        String checkedETag = client.head(uploadKey).orElseThrow().eTag();
+
+        byte[] replaced = "<html><script>alert(1)</script></html>".getBytes(StandardCharsets.UTF_8);
+        client.put(uploadKey, replaced, "image/png", null);
+
+        assertReason(() -> client.readRange(uploadKey, ImageFormat.DETECTION_LENGTH, checkedETag), Reason.CHANGED);
+        assertReason(() -> client.copy(uploadKey, productKey, "image/png", CACHE_CONTROL, checkedETag), Reason.CHANGED);
+        assertThat(client.head(productKey)).isEmpty();
+
+        String currentETag = client.head(uploadKey).orElseThrow().eTag();
+        assertThat(currentETag).isNotEqualTo(checkedETag);
+        client.copy(uploadKey, productKey, "image/png", CACHE_CONTROL, currentETag);
+        assertThat(client.head(productKey)).hasValueSatisfying(object -> assertThat(object.contentLength()).isEqualTo(replaced.length));
+
+        client.delete(uploadKey);
+        client.delete(productKey);
     }
 
     @Test
@@ -155,8 +189,9 @@ class S3CompatibleObjectStorageRoundTripTest {
 
         client.put(key, PNG_BYTES, "image/png", CACHE_CONTROL);
 
-        assertThat(client.head(key)).hasValueSatisfying(object -> assertThat(object.contentLength()).isEqualTo(PNG_BYTES.length));
-        assertThat(client.readRange(key, PNG_BYTES.length + 100)).isEqualTo(PNG_BYTES);
+        StoredObject stored = client.head(key).orElseThrow();
+        assertThat(stored.contentLength()).isEqualTo(PNG_BYTES.length);
+        assertThat(client.readRange(key, PNG_BYTES.length + 100, stored.eTag())).isEqualTo(PNG_BYTES);
         assertThat(inspector.headObject(request -> request.bucket(BUCKET).key(key)).cacheControl()).isEqualTo(CACHE_CONTROL);
         client.delete(key);
     }
@@ -166,8 +201,9 @@ class S3CompatibleObjectStorageRoundTripTest {
     void readsEmptyObject() {
         String key = "uploads/" + UUID.randomUUID() + ".png";
         client.put(key, new byte[0], "image/png", null);
+        String eTag = client.head(key).orElseThrow().eTag();
 
-        assertThat(client.readRange(key, ImageFormat.DETECTION_LENGTH)).isEmpty();
+        assertThat(client.readRange(key, ImageFormat.DETECTION_LENGTH, eTag)).isEmpty();
         client.delete(key);
     }
 
@@ -177,8 +213,8 @@ class S3CompatibleObjectStorageRoundTripTest {
         String missing = "uploads/" + UUID.randomUUID() + ".png";
 
         assertThat(client.head(missing)).isEmpty();
-        assertReason(() -> client.readRange(missing, ImageFormat.DETECTION_LENGTH), Reason.NOT_FOUND);
-        assertReason(() -> client.copy(missing, "products/1/" + UUID.randomUUID() + ".png", "image/png", null), Reason.NOT_FOUND);
+        assertReason(() -> client.readRange(missing, ImageFormat.DETECTION_LENGTH, ANY_ETAG), Reason.NOT_FOUND);
+        assertReason(() -> client.copy(missing, "products/1/" + UUID.randomUUID() + ".png", "image/png", null, ANY_ETAG), Reason.NOT_FOUND);
         client.delete(missing);
     }
 
@@ -206,7 +242,7 @@ class S3CompatibleObjectStorageRoundTripTest {
 
     private static StorageProperties properties(String endpoint, String secretKey) {
         return new StorageProperties(true, endpoint, REGION, BUCKET, ACCESS_KEY, secretKey, "https://cdn.example.test", true,
-            Duration.ofMinutes(5), Duration.ofSeconds(5), Duration.ofSeconds(30));
+            Duration.ofMinutes(5), Duration.ofSeconds(5), Duration.ofSeconds(30), Duration.ofSeconds(60));
     }
 
     private static byte[] concat(byte[] first, byte[] second) {
