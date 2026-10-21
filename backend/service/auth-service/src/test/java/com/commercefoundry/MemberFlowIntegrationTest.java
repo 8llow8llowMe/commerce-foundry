@@ -193,6 +193,36 @@ class MemberFlowIntegrationTest {
         })).rootCause().message().containsIgnoringCase("ck_member_email_normalized");
     }
 
+    /**
+     * #155 회귀 — 전각 공백(U+3000)만 넣은 값이 요청 검증을 지나 도메인 {@code strip()} 에서 {@link IllegalArgumentException}(500)이 되지 않는다.
+     * 요청 검증과 도메인이 같은 공백 기준({@link Character#isWhitespace})이어야 한다.
+     */
+    @Test
+    @DisplayName("전각 공백만인 이름 · 이메일은 500 이 아니라 400 이다 — 가입 이름 AUTH_107, 내 정보 수정 이름 AUTH_114, 로그인 이메일 AUTH_101")
+    void ideographicSpaceIsBadRequest() throws Exception {
+        String ideographicSpace = "\\u3000";
+        String signUpBody = """
+            {"email":"%s","password":"%s","name":"%s","phone":null,
+             "agreements":{"termsOfService":true,"privacyPolicy":true,"marketing":false}}
+            """.formatted(uniqueEmail(), PASSWORD, ideographicSpace);
+        MvcTestResult signUp = mvc.post().uri("/api/v1/auth/sign-up").contentType(MediaType.APPLICATION_JSON).content(signUpBody).exchange();
+        assertThat(signUp).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(signUp).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_107");
+
+        String created = signUp(uniqueEmail(), null, false).getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long memberId = Long.parseLong(JsonPath.read(created, "$.dataBody.memberId"));
+        MvcTestResult patch = mvc.patch().uri("/api/v1/members/me").header(HttpHeaders.AUTHORIZATION, bearer(memberId))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"%s\"}".formatted(ideographicSpace)).exchange();
+        assertThat(patch).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(patch).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_114");
+        assertThat(memberRepositoryPort.findById(memberId)).hasValueSatisfying(member -> assertThat(member.name()).isEqualTo("홍길동"));
+
+        MvcTestResult login = mvc.post().uri("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(ideographicSpace, PASSWORD)).exchange();
+        assertThat(login).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(login).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_101");
+    }
+
     @Test
     @DisplayName("토큰은 유효하지만 회원이 없으면 404 · AUTH_003 이다")
     void unknownMember() {
