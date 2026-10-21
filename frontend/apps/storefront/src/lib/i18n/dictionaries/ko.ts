@@ -73,6 +73,21 @@ export const ko = {
     } as Record<string, string>,
     /** 연결 실패 · 일시 장애 */
     failed: '로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    /**
+     * 429 요청 제한 — 이유(코드별, 없는 코드는 other) 뒤에 남은 시간(Retry-After)을 붙인다.
+     * 남은 시간을 모르면 retryLater. 계정 유무와 상관없이 같은 문구다(BE 도 같은 응답).
+     */
+    rateLimit: {
+      reasons: {
+        AUTH_040: '로그인 시도가 너무 많습니다.',
+        AUTH_041: '가입 시도가 너무 많습니다.',
+      } as Record<string, string>,
+      other: '요청이 너무 많습니다.',
+      retryIn: '{wait} 뒤에 다시 시도해 주세요.',
+      retryLater: '잠시 후 다시 시도해 주세요.',
+      minutes: '{n}분',
+      seconds: '{n}초',
+    },
   },
   footer: {
     customerLinks: '고객 안내',

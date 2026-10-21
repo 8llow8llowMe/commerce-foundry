@@ -22,6 +22,16 @@ describe('LoginForm', () => {
     expect(html).toContain('href="/signup?next=%2Fshop"');
     expect(renderToStaticMarkup(<LoginForm returnPath="/" />)).toContain('href="/signup"');
   });
+
+  it('가입 직후 자동 로그인이 시도 제한이었으면 처음부터 버튼을 막는다', () => {
+    const button = (html: string) => html.match(/<button[^>]*>/)![0];
+    expect(button(renderToStaticMarkup(<LoginForm returnPath="/" />))).not.toContain('disabled=""');
+    expect(
+      button(
+        renderToStaticMarkup(<LoginForm returnPath="/" rateLimited={{ retryAfterSec: 840 }} />),
+      ),
+    ).toContain('disabled=""');
+  });
 });
 
 describe('loginErrors', () => {
@@ -54,6 +64,18 @@ describe('loginErrors', () => {
       email: ['이메일을 입력해 주세요.'],
       password: ['서버 비밀번호 문구'],
     });
+  });
+
+  it('시도 제한(429 AUTH_040)은 범용 실패가 아니라 남은 시간을 담은 전용 안내다(ko · en)', () => {
+    const cause = new ApiError('rateLimited', 429, 'AUTH_040', '서버 문구', [], 840);
+    expect(loginErrors(cause, t)).toEqual({
+      form: ['로그인 시도가 너무 많습니다. 14분 뒤에 다시 시도해 주세요.'],
+      email: [],
+      password: [],
+    });
+    expect(loginErrors(cause, en.auth).form).toEqual([
+      'Too many sign-in attempts. Please try again in 14 min.',
+    ]);
   });
 
   it('연결 실패 · 일시 장애 · 예상 밖 오류는 다시 시도 안내 한 문구', () => {

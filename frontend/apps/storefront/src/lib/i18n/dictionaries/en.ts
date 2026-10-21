@@ -68,6 +68,17 @@ export const en: Dictionary = {
       AUTH_114: 'Your name cannot be blank.',
     } as Record<string, string>,
     failed: 'We could not sign you in. Please try again in a moment.',
+    rateLimit: {
+      reasons: {
+        AUTH_040: 'Too many sign-in attempts.',
+        AUTH_041: 'Too many sign-up attempts.',
+      } as Record<string, string>,
+      other: 'Too many requests.',
+      retryIn: 'Please try again in {wait}.',
+      retryLater: 'Please try again in a moment.',
+      minutes: '{n} min',
+      seconds: '{n} sec',
+    },
   },
   footer: {
     customerLinks: 'Customer care',
