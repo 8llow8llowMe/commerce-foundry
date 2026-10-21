@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.member.application.service.processor;
 
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
+import com.commercefoundry.domainlayer.member.application.info.AdminAccessTokenInfo;
 import com.commercefoundry.domainlayer.member.application.info.AuthTokenInfo;
 import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRevocationPort;
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
@@ -49,6 +50,21 @@ public class AuthTokenProcessor {
             opaqueTokenGenerator.fingerprint(refreshToken), member.id(), UUID.randomUUID().toString(), clock.instant(), rotationPolicy.ttl()
         );
         return issue(member, refreshToken, rotationPolicy.ttl());
+    }
+
+    /**
+     * 관리자 로그인(#6) — access 토큰만 발급한다. refresh 토큰을 만들지 않고 저장소({@link RefreshTokenStorePort})도 부르지 않는다.
+     * 관리자 세션은 access 수명까지다 — refresh family 를 만들어도 재발급이 고객만 받아({@code MemberLoginProcessor#findCustomer}) 쓰지 못할 키만 남는다.
+     * 로그아웃은 고객과 같은 {@link #logout}(refresh 없이 access 차단만)이다.
+     *
+     * @throws IllegalArgumentException 관리자 계정이 아니다 — 관리자 인증({@code MemberLoginProcessor#authenticateAdmin})을 지난 회원만 온다
+     */
+    public AdminAccessTokenInfo issueAdminAccessToken(Member admin) {
+        if (!admin.isAdmin()) {
+            throw new IllegalArgumentException("관리자 계정만 관리자 access 토큰을 받는다");
+        }
+        IssuedAccessToken accessToken = jwtIssuer.issueAccessToken(admin.id(), admin.role());
+        return new AdminAccessTokenInfo(accessToken.tokenValue(), Math.max(0, Duration.between(clock.instant(), accessToken.expiresAt()).toSeconds()));
     }
 
     /**

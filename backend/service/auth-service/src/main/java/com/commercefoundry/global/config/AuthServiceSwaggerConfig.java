@@ -18,6 +18,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class AuthServiceSwaggerConfig {
 
+    /** 어드민 콘솔이 쓰는 API — {@code /api/v1/admin/**} 와 관리자 로그인({@code /api/v1/auth/admin/**}, #6). 로그인만 인증 경로 아래에 있다. */
+    private static final String[] ADMIN_PATHS = {"/api/v1/admin/**", "/api/v1/auth/admin/**"};
+
     @Bean
     public OpenAPI authServiceOpenApi(Components components, SwaggerProperties swaggerProperties) {
         return new OpenAPI()
@@ -35,7 +38,7 @@ public class AuthServiceSwaggerConfig {
             .group("customer")
             .displayName("인증 — 고객")
             .pathsToMatch("/api/v1/**")
-            .pathsToExclude("/api/v1/admin/**")
+            .pathsToExclude(ADMIN_PATHS)
             .build();
     }
 
@@ -44,7 +47,7 @@ public class AuthServiceSwaggerConfig {
         return GroupedOpenApi.builder()
             .group("admin")
             .displayName("인증 — 어드민")
-            .pathsToMatch("/api/v1/admin/**")
+            .pathsToMatch(ADMIN_PATHS)
             .build();
     }
 }

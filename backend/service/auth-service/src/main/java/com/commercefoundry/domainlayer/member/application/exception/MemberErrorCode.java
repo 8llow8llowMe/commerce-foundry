@@ -7,7 +7,7 @@ import org.springframework.http.HttpStatus;
 /**
  * 회원 · 인증 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link MemberValidationMessage} 에 둔다.
  *
- * <p>접두어는 서비스 단위 {@code AUTH_} 다 — 로그인 · 토큰(#4 A3 · A4)도 같은 코드 공간을 쓴다. 001~009 는 회원, 010~ 은 토큰이다.
+ * <p>접두어는 서비스 단위 {@code AUTH_} 다 — 로그인 · 토큰(#4 A3 · A4)도 같은 코드 공간을 쓴다. 001~009 는 회원, 010~ 은 토큰, 030~ 은 관리자(#6)다.
  * 로그인 실패는 401 이 아니라 400 이다 — 401 은 토큰(access · refresh) 거절에만 쓴다 (#4 결정 5).
  */
 @Getter
@@ -29,6 +29,12 @@ public enum MemberErrorCode {
     REFRESH_TOKEN_REUSED("AUTH_012", "보안을 위해 로그아웃되었습니다. 다시 로그인해 주세요.", HttpStatus.UNAUTHORIZED),
     /** refresh 토큰 · 로그아웃 차단 목록 저장소(Redis)에 닿지 못했다. 로그인 상태는 그대로 두고 다시 시도하게 한다. */
     TOKEN_STORE_UNAVAILABLE("AUTH_013", "일시적으로 로그인을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+
+    /**
+     * 관리자 로그인 실패 (#6) — 이메일 없음 · 비밀번호 틀림 · 고객 계정을 구분하지 않는다. 문구 · 상태는 고객 로그인 실패({@link #LOGIN_FAILED})와 같고
+     * 코드만 관리자 대역이다 — 어드민 콘솔이 고객 화면과 따로 다룰 수 있게. 어느 이유든 이 코드 하나라 계정 종류는 드러나지 않는다.
+     */
+    ADMIN_LOGIN_FAILED("AUTH_030", "이메일 또는 비밀번호가 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
     INVALID_REQUEST("AUTH_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

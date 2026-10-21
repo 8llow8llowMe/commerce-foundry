@@ -1,8 +1,11 @@
 package com.commercefoundry.domainlayer.member.application.port.out;
 
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
+import com.commercefoundry.domainlayer.member.application.port.out.query.MemberListQueryResult;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
+import com.commercefoundry.security.principal.MemberRole;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
 
 /**
  * 회원. 이메일은 정규화한 값({@code Member.normalizeEmail})으로 넘긴다.
@@ -22,6 +25,14 @@ public interface MemberRepositoryPort {
      * @return 회원이 없으면 빈 값
      */
     Optional<Member> findByIdForUpdate(long memberId);
+
+    /**
+     * 어드민 회원 목록 (#6) — 최신순(아이디 내림차순 — Snowflake 라 생성 순서)으로 한 페이지를 읽는다. 총계는 자르기 전 건수다.
+     *
+     * @param role 역할 조건. null 이면 전체
+     * @param page 0 부터
+     */
+    Page<MemberListQueryResult> findPage(MemberRole role, int page, int size);
 
     /**
      * 새 회원(버전 null)이면 넣고, 아니면 그 버전에 대한 수정으로 저장한다. 바로 flush 해 제약 위반 · 버전 충돌을 여기서 드러낸다.

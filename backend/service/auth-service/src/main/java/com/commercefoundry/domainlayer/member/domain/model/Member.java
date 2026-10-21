@@ -42,6 +42,14 @@ public record Member(long id, String email, String passwordHash, String name, St
         return new Member(id, normalizeEmail(email), passwordHash, normalizeName(name), normalizePhone(phone), MemberRole.CUSTOMER, null);
     }
 
+    /**
+     * 관리자 계정 — 초기 관리자 시드(#6)만 쓴다. 이메일 · 이름을 가입과 같은 규칙으로 정규화 · 검증하고, 역할은 언제나 {@link MemberRole#ADMIN},
+     * 전화번호는 없다(null). 고객 가입({@link #signUp})과 달리 동의 이력을 남기지 않는다 — 관리자는 이용약관 동의 대상이 아니다.
+     */
+    public static Member admin(long id, String email, String passwordHash, String name) {
+        return new Member(id, normalizeEmail(email), passwordHash, normalizeName(name), null, MemberRole.ADMIN, null);
+    }
+
     /** 저장된 행을 검증 없이 되살린다 — 영속성 매퍼만 쓴다. 규칙 밖 값(이관 데이터)도 그대로 둔다. */
     public static Member restore(long id, String email, String passwordHash, String name, String phone, MemberRole role, Long version) {
         return new Member(id, email, passwordHash, name, phone, role, version);
@@ -62,6 +70,11 @@ public record Member(long id, String email, String passwordHash, String name, St
     /** 고객 로그인 · 토큰 재발급을 쓸 수 있는 계정인가. 관리자 계정은 고객 로그인으로 들어오지 못한다 (#4 결정 4, 관리자 로그인은 #6). */
     public boolean isCustomer() {
         return role == MemberRole.CUSTOMER;
+    }
+
+    /** 관리자 로그인(#6)을 쓸 수 있는 계정인가. 고객 계정은 관리자 로그인으로 들어오지 못한다 — {@link #isCustomer} 의 반대편이다. */
+    public boolean isAdmin() {
+        return role == MemberRole.ADMIN;
     }
 
     /**
