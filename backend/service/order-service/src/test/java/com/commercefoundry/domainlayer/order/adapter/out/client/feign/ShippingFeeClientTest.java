@@ -42,6 +42,7 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * 실제 Feign 파이프라인(서비스 토큰 Capability · Jackson 3 인코딩 · 디코딩 · 기본 ErrorDecoder · 타임아웃 설정)으로 delivery-service 흉내 서버를 불러 본다.
  * 원격 계약(요청 본문 모양 · 봉투 · 모르는 칸 무시 · 4xx 봉투의 resultCode 번역)과 서비스 토큰({@code aud=delivery-service}, {@code iss=order-service})을 함께 본다.
+ * 배송 가능 국가 확인(1g 확인용 견적)의 요청 본문과 응답 해석도 같은 왕복으로 본다.
  *
  * <p>대상 주소만 {@code spring.cloud.openfeign.client.config.shippingFeeClient.url} 로 바꾼다 — 서비스 토큰의 {@code aud} 는 주소가 아니라 Feign 대상 이름이라 그대로다.
  */
@@ -253,5 +254,80 @@ class ShippingFeeClientTest {
         RESPONSE_BODY.set("{" + SUCCESS_HEADER + ",\"dataBody\":null}");
 
         assertRejected(() -> shippingFeeQueryPort.quote(domestic()), OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("배송 가능 국가 확인 — 같은 견적 엔드포인트에 총 무게 1g 과 받은 금액 · 국가 · 우편번호를 싣고, 견적이 나오면(200) true 다")
+    void destinationCheckSendsOneGram() {
+        RESPONSE_BODY.set("""
+            {%s,
+             "dataBody":{"shippingFee":{"amount":1600,"currency":"USD"},"baseFee":{"amount":1500,"currency":"USD"},"freeShippingApplied":false,
+               "remoteAreaSurcharge":{"amount":0,"currency":"USD"},"remoteAreaName":null,"freeShippingThreshold":null,
+               "shippingPolicyVersion":7,"scope":"INTERNATIONAL","shippingZoneName":"북미","weightFee":{"amount":100,"currency":"USD"}}}
+            """.formatted(SUCCESS_HEADER));
+
+        assertThat(shippingFeeQueryPort.isDestinationSupported(Money.of(12_000, CurrencyCode.USD), "US", "10001")).isTrue();
+
+        assertThat(REQUESTS).containsExactly("POST /internal/v1/shipping-fees/quotes");
+        JsonNode body = JSON.readTree(REQUEST_BODIES.getFirst());
+        assertThat(body.path("weightGrams").asInt()).isEqualTo(1);
+        assertThat(body.path("orderAmount").path("amount").asLong()).isEqualTo(12_000L);
+        assertThat(body.path("orderAmount").path("currency").asString()).isEqualTo("USD");
+        assertThat(body.path("countryCode").asString()).isEqualTo("US");
+        assertThat(body.path("postalCode").asString()).isEqualTo("10001");
+    }
+
+    @ParameterizedTest(name = "{0} {1} → {2}")
+    @CsvSource({
+        "400, DELIVERY_002, false",
+        "409, DELIVERY_001, true",
+        "400, DELIVERY_003, true",
+        "400, DELIVERY_011, true"
+    })
+    @DisplayName("배송 가능 국가 확인 — 배송할 수 없는 국가(DELIVERY_002)만 false 다. 정책 미설정 · 통화 불일치 · 무게 구간 초과는 국가 말고 다른 사유라 true 다")
+    void destinationCheckInterpretsRejections(int status, String resultCode, boolean expected) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(failure(resultCode));
+
+        assertThat(shippingFeeQueryPort.isDestinationSupported(Money.of(12_000, CurrencyCode.USD), "US", null)).isEqualTo(expected);
+        assertThat(JSON.readTree(REQUEST_BODIES.getFirst()).path("weightGrams").asInt()).isEqualTo(1);
+    }
+
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource({
+        "400, DELIVERY_118",
+        "401, SECURITY_007",
+        "500, COMMON_005",
+        "503, DELIVERY_002"
+    })
+    @DisplayName("배송 가능 국가 확인 — 그 밖의 실패(번역하지 않는 4xx · 5xx)는 ORDER_011(503) 을 그대로 던진다. 배송 가능 여부를 추측하지 않는다")
+    void destinationCheckFailureIsUnavailable(int status, String resultCode) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(failure(resultCode));
+
+        assertRejected(() -> shippingFeeQueryPort.isDestinationSupported(Money.of(12_000, CurrencyCode.USD), "US", null),
+            OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("배송 가능 국가 확인 — 200 이어도 견적이 계약과 다르면(해외 요청에 국내 견적) ORDER_011(503) 이다")
+    void destinationCheckContractViolationIsUnavailable() {
+        RESPONSE_BODY.set("""
+            {%s,
+             "dataBody":{"shippingFee":{"amount":3000,"currency":"USD"},"baseFee":{"amount":3000,"currency":"USD"},"freeShippingApplied":false,
+               "remoteAreaSurcharge":{"amount":0,"currency":"USD"},"remoteAreaName":null,"freeShippingThreshold":null,
+               "shippingPolicyVersion":3,"scope":"DOMESTIC","shippingZoneName":null,"weightFee":null}}
+            """.formatted(SUCCESS_HEADER));
+
+        assertRejected(() -> shippingFeeQueryPort.isDestinationSupported(Money.of(12_000, CurrencyCode.USD), "US", null),
+            OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("배송 가능 국가 확인은 국내(KR) 배송지에 쓰지 않는다 — 원격을 부르지 않고 IllegalArgumentException 이다")
+    void destinationCheckRejectsDomestic() {
+        assertThatThrownBy(() -> shippingFeeQueryPort.isDestinationSupported(Money.of(99_000, CurrencyCode.KRW), "KR", "63100"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThat(REQUESTS).isEmpty();
     }
 }

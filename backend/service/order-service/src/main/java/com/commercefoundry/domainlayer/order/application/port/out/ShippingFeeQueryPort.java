@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.application.model.ShippingFeeQuoteQuery;
 import com.commercefoundry.domainlayer.order.application.port.out.query.ShippingFeeQuoteQueryResult;
+import com.commercefoundry.shared.commerce.Money;
 
 /**
  * delivery-service 의 배송비 견적. 정책으로 계산만 하고 아무것도 저장하지 않는 서비스 간 읽기라 {@code *QueryPort} 다 ({@code coding-conventions.md} §5-1).
@@ -18,4 +19,19 @@ public interface ShippingFeeQueryPort {
      *     그 밖의 4xx · 응답 계약 위반
      */
     ShippingFeeQuoteQueryResult quote(ShippingFeeQuoteQuery query);
+
+    /**
+     * 해외 배송 국가로 배송할 수 있는가 — 해외 주문에 무게 · HS 코드가 없는 SKU 가 있을 때만 부른다. 배송할 수 없는 국가라는 사유가
+     * 무게 · HS 미입력보다 앞서야 하는데({@code order-flow-guide.md} §2-2), 그 판정(해외 배송 플래그 · 국가 그룹)은 delivery 에만 있다.
+     * 어떻게 묻는지(어느 요청을 보내고 어느 거절을 "국가는 배송 가능" 으로 읽는지)는 구현이 정한다.
+     *
+     * @param orderAmount 할인 후 상품 합계(배송비 제외) — 실제 견적과 같은 값
+     * @param countryCode 해외 배송 국가 (KR 이 아니다)
+     * @param postalCode 배송지 우편번호. 없으면 null
+     * @return 배송할 수 없는 국가(해외 배송 꺼짐 · 어느 국가 그룹에도 없음)면 false. 국가 말고 다른 사유(정책 미설정 · 통화 불일치 · 무게 구간)로 거절돼도 true 다
+     * @throws IllegalArgumentException 국내(KR) 배송 국가 — 국내 주문은 무게 · HS 를 보지 않아 물을 일이 없다
+     * @throws com.commercefoundry.domainlayer.order.application.exception.OrderException
+     *     {@code DELIVERY_SERVICE_UNAVAILABLE}(503) — 서킷 오픈 · 전송 실패 · 타임아웃 · 5xx · 그 밖의 4xx · 응답 계약 위반
+     */
+    boolean isDestinationSupported(Money orderAmount, String countryCode, String postalCode);
 }
