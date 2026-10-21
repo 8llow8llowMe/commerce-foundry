@@ -323,6 +323,7 @@ public final class ProductValidationMessage {
   |----|---------|----------|
   | `auth:refresh-token:{fingerprint}` | auth `RefreshTokenRedisKeys.token` | HASH `{memberId, familyId, rotatedAt?, siblings?}`. TTL `min(refresh 토큰 TTL, family 상한까지 남은 시간)` — HSET 과 같은 Lua 에서 PEXPIRE (`security-guide.md` §2-3) |
   | `auth:refresh-family:{familyId}` | auth `RefreshTokenRedisKeys.family` | STRING 최초 로그인 시각(epoch ms) — 절대 수명(기본 30일)의 기준이라 회전해도 다시 쓰지 않는다(PEXPIRE 만). 정수 문자열이 아니거나 · 무한대 · 지금 + 60초보다 미래면 손상으로 보고 DEL(#143). TTL `min(refresh 토큰 TTL, 상한까지 남은 시간)`, 회전마다 다시 건다. 폐기 = DEL |
+  | `auth:login-attempt:{emailHmac}` · `auth:sign-up-attempt:{emailHmac}` | auth `LoginAttemptRedisKeys.attempt` | STRING 창 안의 시도 수(로그인 · 회원가입 따로). TTL `auth.login-guard.window` — INCR 과 같은 Lua 에서 첫 시도에만 PEXPIRE(이어지는 시도가 연장하지 않는다), TTL 이 없으면 다음 시도에서 다시 건다. 성공 시 DEL. `emailHmac` 은 정규화 이메일(`Member.canonicalEmail`)의 HMAC-SHA256 앞 16바이트 base64url 22자 — 키 `AUTH_LOGIN_GUARD_HASH_KEY`, 이메일 원문은 키에 없다 (#66) |
 - `:` 가 들어가는 값(IPv6 등)은 정규화한 뒤 인코딩해 넣는다(예: IPv6 → 16바이트 hex).
 - id 에 원문 토큰·개인정보를 넣지 않는다. 해시(SHA-256 base64url 등)로 넣는다 — `RedisKey.toString()` 이 키 전체를 출력하고, 키는 `MONITOR`·슬로로그에도 남는다.
 - `KEYS` · `SCAN` 패턴으로 지우지 않는다. 묶어서 지울 키는 색인 SET(예: 회원별 refresh 토큰 지문)에 모아 두고 그 SET 으로 지운다.
@@ -341,6 +342,7 @@ public final class ProductValidationMessage {
 | refresh 토큰 | refresh 토큰 TTL 과 같게 (`security.jwt.issuance.refresh-token-ttl`) |
 | access 토큰 차단 목록(로그아웃) | 토큰의 남은 수명(`exp − now`) + 시계 오차 허용(`security.jwt.clock-skew`) 이상. 로그아웃 시점엔 `exp` 를 모르므로 **수명 상한(`JwtIssuanceProperties.MAX_ACCESS_TOKEN_TTL`, 1시간) + 시계 오차**를 쓴다(`RevokedAccessTokenKeys.ttl`) — `access-token-ttl` 설정값을 쓰면 TTL 을 줄인 배포 직후 옛 긴 토큰보다 차단 항목이 먼저 사라진다 |
 | 소셜 로그인 state | 짧게(분 단위). 꺼낼 때 `GETDEL` 로 한 번만 쓴다 |
+| 로그인 · 가입 시도 계수 | 창 길이(`auth.login-guard.window`, 기본 15분). 첫 시도부터 재고 이어지는 시도가 연장하지 않는다. 상한 1시간(`LoginAttemptPolicy.MAX_WINDOW`) — 이메일을 바꿔 가며 보내면 키 수 ≈ 처리량 × 창이고, noeviction 이라 메모리가 차면 refresh · 차단 목록 쓰기까지 실패한다 |
 | 멱등 키 | 클라이언트 재시도 창보다 길게. 처리 중 마커는 최대 처리 시간보다 길게 |
 | 캐시 | 짧게. 원본을 쓸 때 무효화한다 |
 
