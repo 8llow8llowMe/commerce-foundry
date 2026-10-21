@@ -1,5 +1,7 @@
 package com.commercefoundry.domainlayer.order.domain.model;
 
+import java.util.Objects;
+
 /**
  * 배송비 견적에 쓴 정책의 배송 범위 — delivery-service 견적 응답의 {@code scope} 다. 국내(KR)는 {@link #DOMESTIC}, 그 밖의 국가는 {@link #INTERNATIONAL} 이다.
  *
@@ -10,5 +12,24 @@ package com.commercefoundry.domainlayer.order.domain.model;
 public enum ShippingScope {
 
     DOMESTIC,
-    INTERNATIONAL
+    INTERNATIONAL;
+
+    /**
+     * 국내 정책으로 견적되는 배송 국가. order-service 에서 국내 · 해외를 가르는 곳은 이 상수와 {@link #ofCountry} 하나다.
+     *
+     * <p>임시 — #144(shared-commerce 로 올림) 머지 후 그것으로 교체한다.
+     */
+    public static final String DOMESTIC_COUNTRY_CODE = "KR";
+
+    /**
+     * 배송 국가로 범위를 정한다 — delivery 가 견적 정책을 고르는 판정과 같다. 통화는 보지 않는다 ({@code order-flow-guide.md} §2-2).
+     *
+     * <p>임시 — #144(shared-commerce 로 올림) 머지 후 그것으로 교체한다.
+     *
+     * @param countryCode ISO 3166-1 alpha-2 대문자 (형식은 요청 검증이 거른다)
+     */
+    public static ShippingScope ofCountry(String countryCode) {
+        Objects.requireNonNull(countryCode, "countryCode");
+        return DOMESTIC_COUNTRY_CODE.equals(countryCode) ? DOMESTIC : INTERNATIONAL;
+    }
 }

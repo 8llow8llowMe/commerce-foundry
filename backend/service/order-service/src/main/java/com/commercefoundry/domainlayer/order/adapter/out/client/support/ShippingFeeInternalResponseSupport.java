@@ -52,9 +52,6 @@ public class ShippingFeeInternalResponseSupport {
     static final String CIRCUIT_BREAKER = "delivery-service";
     static final String UNRECOGNIZED_RESULT_CODE = "<unrecognized>";
 
-    /** 국내 정책으로 견적되는 배송 국가. 그 밖의 국가는 해외 정책이다. */
-    private static final String DOMESTIC_COUNTRY_CODE = "KR";
-
     /**
      * 로그에 그대로 남기는 resultCode 의 모양 — common-core {@code ValidationErrorSupport} 의 코드 판정({@code DOMAIN_NNN})과 같다.
      * 그쪽 판정은 private 이라 가져다 쓰지 않고 같은 식을 둔다.
@@ -172,7 +169,7 @@ public class ShippingFeeInternalResponseSupport {
 
     /** 견적 범위가 요청 국가와 맞고, 범위별 칸이 계약대로인가. delivery 는 KR 이면 국내 정책, 그 밖이면 해외 정책으로만 견적한다. */
     private static void requireScopeOf(ShippingFeeQuoteQueryResult result, String countryCode) {
-        boolean consistent = DOMESTIC_COUNTRY_CODE.equals(countryCode)
+        boolean consistent = ShippingScope.ofCountry(countryCode) == ShippingScope.DOMESTIC
             ? result.scope() == ShippingScope.DOMESTIC && result.shippingZoneName() == null && result.weightFee() == null
             : result.scope() == ShippingScope.INTERNATIONAL && result.shippingZoneName() != null && result.weightFee() != null
                 && result.remoteAreaSurcharge().isZero() && result.remoteAreaName() == null;

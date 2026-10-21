@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.order.application.model;
 
+import com.commercefoundry.domainlayer.order.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.Objects;
 
@@ -28,12 +29,10 @@ import java.util.Objects;
  */
 public record ShippingFeeQuoteQuery(Money orderAmount, String countryCode, String postalCode, Integer weightGrams) {
 
-    private static final String DOMESTIC_COUNTRY_CODE = "KR";
-
     public ShippingFeeQuoteQuery {
         Objects.requireNonNull(orderAmount, "orderAmount");
         Objects.requireNonNull(countryCode, "countryCode");
-        if (DOMESTIC_COUNTRY_CODE.equals(countryCode)) {
+        if (ShippingScope.ofCountry(countryCode) == ShippingScope.DOMESTIC) {
             if (postalCode == null || postalCode.isBlank()) {
                 throw new IllegalArgumentException("국내(KR) 배송비 견적에는 우편번호가 있어야 합니다");
             }
