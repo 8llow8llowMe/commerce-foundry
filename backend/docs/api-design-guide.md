@@ -33,6 +33,11 @@
 
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
 
+- **관리자 로그인은 `POST /api/v1/auth/admin/login` 이다(고객 열의 `/api/v1/auth/**`, #6).** **이슈 #6 원문의 `/api/v1/admin/auth/login` 과 다르다** — `/api/v1/admin/**` 아래에 두지 않는다 —
+  그 경로는 게이트웨이 · 서비스 URL 규칙이 둘 다 ADMIN 토큰을 요구해 토큰을 받으러 오는 익명 요청이 닿지 못한다. 진입 패키지도 `adapter/in/web` 이고
+  `@PreAuthorize("permitAll()")` 다. 어드민 콘솔 화면의 API 는 로그인 하나만 빼고 모두 `/api/v1/admin/**` 이다.
+  Swagger 는 경로가 아니라 쓰는 화면으로 묶어 `/api/v1/auth/admin/**` 을 어드민 그룹에 넣고 고객 그룹에서 뺀다(`AuthServiceSwaggerConfig`).
+
 ### 1-3. 서비스 간 벌크 조회 (`/internal/v1/**`)
 
 여러 건을 한 번에 읽는 internal API(예: `GET /internal/v1/skus?ids=1,2,3`)는 아래를 지킨다. 호출하는 쪽이 루프에서 단건 API 를 부르지 않게 하려는 것이다 (`coding-conventions.md` §9-6).
@@ -213,6 +218,8 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/auth/login` | `permitAll()` | 200 토큰 쌍(아래) · `Cache-Control: no-store` — 본문 `{email, password}` | 400 `AUTH_001` · `AUTH_101` · `AUTH_102` · `AUTH_104` · 503 `AUTH_013` |
 | `POST /api/v1/auth/token/reissue` | `permitAll()` | 200 토큰 쌍 · `Cache-Control: no-store` — 본문 `{refreshToken}`. 보낸 refresh 는 회전돼 더 쓰지 않는다 | 401 `AUTH_010`(없음 · 빈 값 포함) · `AUTH_011` · `AUTH_012` · 503 `AUTH_013` |
 | `POST /api/v1/auth/logout` | `isAuthenticated()` | 200 `dataBody: null` — 본문 `{refreshToken?}`(본문 생략 가능). 모르는 · 남의 refresh 여도 access 는 막고 200(멱등) | 401 `SECURITY_001` · 503 `AUTH_013` |
+| `POST /api/v1/auth/admin/login` (#6) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. refresh 없음 | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` |
+| `GET /api/v1/admin/members` (#6) | `hasRole('ADMIN')` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 
 토큰 쌍 (로그인 · 재발급 공통, #4 결정 1 — 전달은 응답 본문이고 쿠키는 BFF 가 만든다)
 
@@ -226,7 +233,8 @@ return ResponseEntity.ok().body(Response.success(response));
 - 같은 refresh 를 30초 안에 다시 보내면(동시 요청 · 재시도) 새 쌍을 더 준다(토큰당 3개까지). 그 뒤 · 넷째의 재사용은 그 로그인의 토큰을 모두 폐기하고 401 `AUTH_012` 다 (`security-guide.md` §2-3).
 - BFF 는 재발급이 4xx(`success=false`)면 쿠키를 지우고 로그인으로, 503 이면 쿠키를 둔다(§2-1 표).
 
-오류 코드의 정본은 `MemberErrorCode` · `MemberValidationMessage` 다. 접두어는 서비스 단위 `AUTH_` 이고, 001~009 는 회원 · 로그인, 010~ 은 토큰이다.
+오류 코드의 정본은 `MemberErrorCode` · `MemberValidationMessage` 다. 접두어는 서비스 단위 `AUTH_` 이고, 001~009 는 회원 · 로그인, 010~ 은 토큰,
+030~ 은 관리자다(#6). 필드 검증은 101~ 이 고객, 130~ 이 관리자다 — 진입 DTO 를 공유하지 않으므로 같은 뜻이어도 코드를 따로 둔다.
 
 | 코드 | HTTP | 뜻 |
 |------|------|----|
@@ -242,10 +250,13 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_021` | 409 | 배송지 회원당 상한(`auth.shipping-address.max-per-member`, 기본 20)에 닿았다. 요청 값은 맞고 주소록 상태가 막으므로 400 이 아니라 409 다 |
 | `AUTH_022` | 409 | 같은 배송지를 다른 요청이 먼저 고쳤거나 지웠다(낙관적 락), 또는 기본 배송지 유니크 키 위반. 다시 조회한 뒤 보낸다 |
 | `AUTH_023` | 409 | 같은 회원의 다른 배송지 쓰기가 회원 잠금을 쥐고 있어 5초(트랜잭션 시간 상한) 안에 끝나지 않았다. 그 회원 요청끼리 겹친 것이라 503 이 아니다 |
+| `AUTH_030` | 400 | 관리자 로그인 실패 (#6) — 이메일 없음 · 비밀번호 틀림 · 고객 계정을 구분하지 않는다. 문구는 `AUTH_001` 과 같다 (`security-guide.md` §11-1) |
 | `AUTH_100` | 400 | 깨진 JSON · 본문 없음 · 타입 불일치 (필드는 `fieldErrors` 로 밝힌다) |
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
 | `AUTH_120~129` | 400 | 배송지 검증 — 별칭 120 · 받는 사람 121 · 연락처 122 · 123(형식) · 국가 124 · 우편번호 125(KR 필수) · 126(형식) · 주소 127 · 길이 128 · 해외 도시 129 |
+| `AUTH_130~134` | 400 | 관리자 필드 검증 (#6) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132(형식 · 64자 초과는 필드 검증하지 않는다 — `AUTH_030`), 어드민 목록 `page` 0 이상 133 · `size` 1~100 134 |
+| `AUTH_198` · `AUTH_199` | 400 | 파라미터 타입 불일치(`page=x` · 없는 `role`) · 필수 파라미터 누락 |
 
 코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~`, 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.
 요청 검증 예외(본문 · 파라미터 · 타입)는 컨텍스트와 무관하게 `MemberExceptionHandler` 하나가 서비스 공용으로 봉투를 만든다 — 메시지가 코드를 싣고 오므로 컨텍스트를 몰라도 된다.
@@ -259,6 +270,7 @@ return ResponseEntity.ok().body(Response.success(response));
   72바이트까지만 쓰기 때문이다(64자 ASCII = 64바이트). 저장은 `BCryptPasswordEncoder`(강도 10) 해시뿐이고 원문 · 해시를 로그 · 응답에 싣지 않는다.
 - **이름** — 1~50자, 앞뒤 공백을 지우고 저장한다. 공백만인 값은 가입에서는 필수 누락(107), 내 정보 수정에서는 114 다 —
   가입은 필수 칸이라 `@NotBlank` 로, 수정은 선택 칸이라 "보냈다면 공백만은 안 된다" 로 검사한다.
+  "공백" 은 도메인이 지우는 `String#strip()` 과 같은 `Character.isWhitespace` 다 — 전각 공백(U+3000)만인 값도 400 이다(#155, 수정 쪽 정규식이 ASCII 공백만 봐 500 이었다).
 - **전화번호** — 선택. 국내 휴대폰(`01012345678` · `010-1234-5678`)을 받고 숫자만 저장한다. 가입에서 빈 문자열은 109 다.
   내 정보 수정에서는 빈 문자열(`""`)만 "지우기" 이고, 공백만 있는 값은 109 다. 해외 번호는 영문 스토어 회원가입에서 넓힌다.
 - 저장된 값은 검증 없이 읽는다(`Member.restore`) — 이관(#19) 데이터가 지금 규칙 밖이어도 조회 · 로그인은 된다. 규칙은 가입 · 수정 때 바꾸는 칸에만 건다.
@@ -303,6 +315,21 @@ return ResponseEntity.ok().body(Response.success(response));
 - **상한** — 회원당 `auth.shipping-address.max-per-member`(기본 20, 1~100). 목록 응답의 `maxCount` 로 내린다.
 - 받는 사람 · 연락처 · 주소는 개인정보라 요청 · 커맨드 · 도메인 · 응답의 `toString` 에 싣지 않고 로그 · 예외 메시지에도 남기지 않는다.
 - 주문 배송지는 이 API 를 거치지 않는 스냅숏이다 (`order-flow-guide.md` §4).
+
+관리자 로그인 응답 (#6) — `{accessToken, accessTokenExpiresIn}` 두 칸이다. refresh 토큰이 없어 재발급할 수 없고, 만료(기본 1800초)되면 다시 로그인한다.
+로그아웃은 고객과 같은 `POST /api/v1/auth/logout` 을 본문 없이 부른다(access 차단만). 정책은 `security-guide.md` §11.
+
+어드민 회원 조회 (#6) — `GET /api/v1/admin/members`
+
+- `page`(기본 0, 0 이상 — 133) · `size`(기본 20, 1~100 — 134) · `role`(선택, `CUSTOMER` · `ADMIN`, 없으면 전체 · 틀리면 198). 정렬은 최신순 하나(회원 아이디 내림차순 —
+  Snowflake 라 생성 순서다)라 `sortType` 이 없다. 마지막 페이지 너머는 빈 `contents` 다. 조회는 관리자 감사 로그에 남는다(`security-guide.md` §11-4).
+- 항목 `{memberId(string), email, name, phone, role, createdAt}` — **이메일 · 이름 · 전화는 마스킹한 값만 내린다**(원문 조회 API 는 없다). 규칙(`MemberMasking`):
+
+| 칸 | 규칙 | 예 |
+|----|------|-----|
+| `email` | 아이디 앞 2자(2자면 1자, 1자면 0자) + `***` + `@` + 도메인 첫 글자 + `***` + 마지막 점부터(최상위 도메인). `@` 가 없는 이관 값은 앞 1자 + `***` | `customer@example.com` → `cu***@e***.com` |
+| `name` | 3자 이상은 첫 글자 + `*` + 마지막 글자(별은 하나 — 길이를 드러내지 않는다), 2자는 첫 글자 + `*`, 1자는 `*`. 코드 포인트로 센다 | `홍길동` → `홍*동`, `남궁민수` → `남*수` |
+| `phone` | 앞 3자리 + `-****-` + 끝 4자리. 7자 미만 이관 값은 `****`, 없으면 `null` | `01012345678` → `010-****-5678` |
 
 ### 2-5. 어드민 카테고리 관리 (product-service, #9)
 

@@ -37,8 +37,9 @@ public ProductListInfo searchProducts(
 |------|------|
 | Controller | `*WebController` · `*AdminController` · `*InternalController` · `*WebhookController` |
 | Scheduler | `adapter/in/scheduler/*Scheduler` — `@Scheduled` 진입점. `*SchedulerUseCase` 만 부르고, 건별 트랜잭션은 Facade 프록시를 건마다 불러 나눈다 |
-| UseCase | `*WebUseCase` · `*AdminUseCase` · `*InternalUseCase` · `*SchedulerUseCase` (스케줄러 진입점) |
-| Facade | `*WebFacade` · `*AdminFacade` · `*InternalFacade` · `*SchedulerFacade` |
+| Bootstrap | `adapter/in/bootstrap/*Runner` — 기동 진입점(`ApplicationRunner`). 설정을 커맨드로 옮겨 `*SeedUseCase` 만 부른다. 설정 오류는 `IllegalStateException` 으로 기동을 멈춘다 (#6) |
+| UseCase | `*WebUseCase` · `*AdminUseCase` · `*InternalUseCase` · `*SchedulerUseCase` (스케줄러 진입점) · `*SeedUseCase` (기동 진입점) |
+| Facade | `*WebFacade` · `*AdminFacade` · `*InternalFacade` · `*SchedulerFacade` · `*SeedFacade` |
 | Processor / Presenter | `*Processor` / `*Presenter` (고객 응답은 `*WebPresenter`, 어드민 응답은 `*AdminPresenter`, 서비스 간 응답은 `*InternalPresenter`) |
 | Feign interface | `*Client` |
 | 조회 결과 / 조건 | `*QueryResult` / `*Criteria` · `*Query` |
@@ -50,6 +51,7 @@ public ProductListInfo searchProducts(
 | 서비스 간 읽기 / 쓰기 | `*QueryPort` / `*CommandPort` | `*ClientAdapter` (`adapter/out/client/`) |
 | JPA 영속성 | `*RepositoryPort` | `*RepositoryAdapter` (`adapter/out/persistence/`) |
 | 인프라 특화 | 도메인 의미 그대로 — `PaymentGatewayPort`, `StockReservationPort`, `ShipmentTrackingPort`, `ImageStoragePort` | |
+| 관리자 감사 | `AdminAuditPort` — 행위별 메서드(`adminLoginSucceeded` 등). Facade 는 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다(H11) | `*AuditLogAdapter` (`adapter/out/log/`, `security-guide.md` §11-4) |
 
 전송 기술(`Feign`, `Http`, `Toss`)을 포트 이름에 넣지 않는다. 토스는 adapter 이름(`TossPaymentGatewayAdapter`)에만 나온다.
 
