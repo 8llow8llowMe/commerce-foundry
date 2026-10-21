@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { en } from '@/lib/i18n/dictionaries/en';
 import { ko } from '@/lib/i18n/dictionaries/ko';
-import { SignUpForm, signUpErrors } from './SignUpForm';
+import { SignUpForm, signUpErrors, signedUpLoginPath } from './SignUpForm';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 
@@ -63,6 +63,14 @@ describe('signUpErrors', () => {
     expect(signUpErrors(cause, en.auth).email).toEqual(['This email is already registered.']);
   });
 
+  it('가입 시도 제한(429 AUTH_041)은 남은 시간을 담은 전용 안내다', () => {
+    const cause = new ApiError('rateLimited', 429, 'AUTH_041', null, [], 120);
+    expect(signUpErrors(cause, t)).toMatchObject({
+      form: ['가입 시도가 너무 많습니다. 2분 뒤에 다시 시도해 주세요.'],
+      email: [],
+    });
+  });
+
   it('연결 실패 · 일시 장애 · 예상 밖 오류는 다시 시도 안내 한 문구', () => {
     for (const cause of [
       new ApiError('network', null, null, null),
@@ -71,5 +79,26 @@ describe('signUpErrors', () => {
     ]) {
       expect(signUpErrors(cause, t)).toMatchObject({ form: [t.signUp.failed], email: [] });
     }
+  });
+});
+
+describe('signedUpLoginPath', () => {
+  const result = { signedIn: false, loginRateLimit: null };
+
+  it('자동 로그인을 못 했으면 가입 완료 안내와 돌아갈 경로를 싣는다', () => {
+    expect(signedUpLoginPath(result, '/')).toBe('/login?signedUp=1');
+    expect(signedUpLoginPath(result, '/cart')).toBe('/login?signedUp=1&next=%2Fcart');
+  });
+
+  it('자동 로그인이 요청 제한이면 Retry-After 초(모르면 빈 값)와 코드를 싣는다', () => {
+    expect(
+      signedUpLoginPath(
+        { ...result, loginRateLimit: { code: 'AUTH_040', retryAfterSec: 840 } },
+        '/',
+      ),
+    ).toBe('/login?signedUp=1&limited=840&reason=AUTH_040');
+    expect(
+      signedUpLoginPath({ ...result, loginRateLimit: { code: null, retryAfterSec: null } }, '/'),
+    ).toBe('/login?signedUp=1&limited=');
   });
 });

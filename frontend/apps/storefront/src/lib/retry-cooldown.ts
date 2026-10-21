@@ -11,6 +11,11 @@ export const MAX_COOLDOWN_SEC = 60;
  */
 export function cooldownMsFor(error: unknown): number {
   if (!(error instanceof ApiError) || error.kind !== 'rateLimited') return 0;
-  const sec = error.retryAfterSec ?? DEFAULT_COOLDOWN_SEC;
+  return cooldownMsForSec(error.retryAfterSec);
+}
+
+/** Retry-After 초(없으면 null)를 막아 둘 시간(ms)으로 — 기본값 · 최소 1초 · 상한은 위와 같다 */
+export function cooldownMsForSec(retryAfterSec: number | null): number {
+  const sec = retryAfterSec ?? DEFAULT_COOLDOWN_SEC;
   return Math.min(Math.max(sec, 1), MAX_COOLDOWN_SEC) * 1000;
 }
