@@ -15,7 +15,7 @@ backend/
 │   ├── persistence-core     JPA / QueryDSL / Snowflake ID / BaseEntity / Slice·PageResponse
 │   ├── redis-core           Redis 연결 (Boot 자동설정 + 기동 가드) · 키 규칙
 │   ├── security-core        JWT 발급(auth) · 검증(서비스 · 게이트웨이) · 서블릿 Resource Server · 인증 주체 · 보안 오류 코드
-│   ├── storage-core         오브젝트 스토리지 (상품 이미지 업로드 / 삭제 / 키 생성 / 검증)
+│   ├── storage-core         S3 호환 오브젝트 스토리지 클라이언트 (업로드 서명 · HEAD · 앞부분 읽기 · 복사 · 삭제) · 기동 가드 · 이미지 형식 판별
 │   └── shared-commerce      서비스를 가로지르는 커머스 enum·값 (CurrencyCode, Money, ShippingScope, SalesChannel 등)
 ├── cloud/          (실행 모듈 — bootJar on)
 │   ├── api-gateway          Spring Cloud Gateway — 라우팅, JWT 검증, admin 경로 보호
@@ -37,6 +37,7 @@ backend/
 |------|---------|--------------|
 | `common-core` | 도메인 비의존 범용 인프라 | 특정 서비스의 도메인 개념 |
 | `persistence-core` | DB 접근 공통 설정·유틸 | 엔티티 (엔티티는 각 서비스 소유) |
+| `storage-core` | 도메인을 모르는 S3 호환 클라이언트(`ObjectStorageClient`) · 설정 · 기동 가드 · magic bytes 판별(`ImageFormat`). AWS SDK 는 `implementation` 이라 서비스에 드러나지 않는다 | 키 규칙(어느 prefix 에 무엇을 두는가) · 허용 형식 · 용량 상한 · 오류 코드 번역 (쓰는 서비스의 `adapter/out/client/storage` 몫) |
 | `shared-commerce` | **두 서비스 이상이 같은 뜻으로 써야 하는** enum·값 객체 | 한 서비스만 쓰는 enum |
 
 `shared-commerce` 가 필요한 이유: 같은 enum 을 서비스마다 복사하면 뜻이 갈라진다.
