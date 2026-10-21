@@ -100,7 +100,12 @@ class MemberWebControllerTest {
             "비밀번호 영문 없음     | customer@example.com   | 1234567890    | 홍길동 | AUTH_106 | password",
             "비밀번호 공백 포함     | customer@example.com   | abcd 12345    | 홍길동 | AUTH_106 | password",
             "비밀번호 한글 포함     | customer@example.com   | abcd1234가    | 홍길동 | AUTH_106 | password",
-            "이름 공백              | customer@example.com   | mokoyuri2026! | '   '  | AUTH_107 | name"
+            "이름 공백              | customer@example.com   | mokoyuri2026! | '   '  | AUTH_107 | name",
+            "이름 빈 문자열         | customer@example.com   | mokoyuri2026! | ''     | AUTH_107 | name",
+            // #155 회귀 — @NotBlank(Hibernate Validator 9)는 도메인 strip 과 같이 Character.isWhitespace 로 본다. 전각 공백만이면 400 이다
+            "이름 전각 공백만       | customer@example.com   | mokoyuri2026! | '　'      | AUTH_107 | name",
+            "이름 전각 · 탭 섞인 공백 | customer@example.com | mokoyuri2026! | '　\\t　' | AUTH_107 | name",
+            "이메일 전각 공백만     | '　'               | mokoyuri2026! | 홍길동 | AUTH_101 | email"
         })
         @DisplayName("필드별 검증 코드로 400 이고 UseCase 를 부르지 않는다")
         void fieldErrors(String caseName, String email, String password, String name, String code, String field) {
@@ -260,7 +265,11 @@ class MemberWebControllerTest {
         @CsvSource(delimiter = '|', value = {
             "이름 빈 문자열   | {\"name\":\"\"}             | AUTH_108 | name",
             "이름 공백만      | {\"name\":\"   \"}          | AUTH_114 | name",
-            "전화 형식        | {\"phone\":\"010-12\"}      | AUTH_109 | phone"
+            // #155 — 전각 공백만인 이름이 \S 정규식을 지나 도메인 strip 에서 500 이 났다
+            "이름 전각 공백만 | {\"name\":\"\\u3000\"}       | AUTH_114 | name",
+            "이름 전각 · 일반 공백 | {\"name\":\"\\u3000 \\u3000\"} | AUTH_114 | name",
+            "전화 형식        | {\"phone\":\"010-12\"}      | AUTH_109 | phone",
+            "전화 전각 공백만 | {\"phone\":\"\\u3000\"}      | AUTH_109 | phone"
         })
         @DisplayName("필드별 검증 코드로 400 이다")
         void fieldErrors(String caseName, String json, String code, String field) {

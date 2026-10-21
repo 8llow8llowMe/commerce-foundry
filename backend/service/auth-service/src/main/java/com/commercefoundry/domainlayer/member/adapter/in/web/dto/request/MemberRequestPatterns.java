@@ -20,8 +20,12 @@ final class MemberRequestPatterns {
     /** {@link #PHONE} 또는 빈 문자열(번호 지우기) — 내 정보 수정에서만. */
     static final String PHONE_OR_EMPTY = "^$|" + PHONE;
 
-    /** 공백 아닌 문자가 하나 이상 있다. */
-    static final String NOT_BLANK = "(?s).*\\S.*";
+    /**
+     * 공백 아닌 문자가 하나 이상 있다 — "공백" 은 도메인 {@code Member} 가 지우는 {@code String#strip()} 과 같은 {@link Character#isWhitespace} 다
+     * ({@code \p{javaWhitespace}}). {@code \S}(ASCII 공백만 공백으로 본다)로 검사하면 전각 공백(U+3000)만 넣은 이름이 요청 검증을 지나
+     * 도메인에서 {@link IllegalArgumentException}(500)이 됐다 (#155). 필수 칸의 {@code @NotBlank}(Hibernate Validator)도 같은 공백 기준이라 맞는다.
+     */
+    static final String NOT_BLANK = "(?s).*\\P{javaWhitespace}.*";
 
     private MemberRequestPatterns() {
     }
