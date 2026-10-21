@@ -10,7 +10,7 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repos
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repository.ShippingRemoteAreaRepository;
 import com.commercefoundry.domainlayer.shippingfee.application.mapper.ShippingPolicyMapperImpl;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.sql.SQLException;
 import java.util.List;
 import org.hibernate.exception.ConstraintViolationException;

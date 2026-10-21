@@ -11,8 +11,8 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repos
 import com.commercefoundry.domainlayer.shippingfee.application.mapper.InternationalShippingPolicyMapper;
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.InternationalShippingPolicyRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.InternationalShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;

@@ -3,9 +3,9 @@ package com.commercefoundry.domainlayer.shippingfee.adapter.in.internal.dto.requ
 import com.commercefoundry.domainlayer.shippingfee.application.command.ShippingFeeQuoteCommand;
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryValidationMessage;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.PostalCode;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;

@@ -5,10 +5,10 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entit
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingZoneEntity;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingZoneRateEntity;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.InternationalShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZone;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneCountry;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneRate;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;

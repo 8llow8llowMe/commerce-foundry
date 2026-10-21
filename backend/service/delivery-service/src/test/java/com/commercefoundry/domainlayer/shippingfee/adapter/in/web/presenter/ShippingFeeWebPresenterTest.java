@@ -13,7 +13,7 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.item.Shipp
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.response.InternationalShippingPolicyResponse;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.response.ShippingPolicyResponse;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

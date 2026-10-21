@@ -1,8 +1,8 @@
 package com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repository;
 
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingPolicyEntity;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.CurrencyCode;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;

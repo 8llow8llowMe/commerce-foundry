@@ -12,7 +12,7 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entit
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingRemoteAreaEntity;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.RemoteArea;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

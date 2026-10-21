@@ -1,8 +1,8 @@
 package com.commercefoundry.domainlayer.shippingfee.application.command;
 
 import com.commercefoundry.domainlayer.shippingfee.domain.model.PostalCode;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.Objects;
 
 /**
