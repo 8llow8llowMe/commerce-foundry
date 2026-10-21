@@ -91,16 +91,24 @@ PG 호출이 **타임아웃·5xx·서킷 오픈**으로 끝나면 승인 여부�
 ## 5. 결제 상태 모델
 
 ```text
-READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ CANCELED
-  │            │            └────────────────────────▶ CANCELED
-  │            ├──▶ FAILED
+READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ CANCELED   (취소 전이는 취소 이슈에서 연다)
+  │   ◀──────┘ │  │  └────────────────────────────────▶ CANCELED
+  │  (되돌림)  │  └──▶ FAILED
   │            └──▶ UNKNOWN ──▶ DONE | FAILED   (재조회로 확정)
-  └──▶ ABORTED   (금액 변경 · 시간 초과로 버려진 시도)
+  └──▶ ABORTED   (금액 변경 · 재준비 · 주문 만료로 버려진 시도)
 ```
 
-- 상태 전이는 도메인 메서드(`payment.approve(...)`, `payment.cancel(...)`)로만 한다. 허용되지 않은 전이는 예외다.
-- 결제 1건 = 결제 시도 1건. 실패 후 재시도는 **새 결제 시도**(새 `pgOrderId`)로 만든다.
-  `pgOrderId` 규칙(길이·허용 문자, 재사용 가능 여부)은 토스 문서를 따른다.
+- 상태 전이는 `Payment` 의 도메인 메서드로만 한다 — `startApproval` · `abort` · `approve` · `reject` · `markUnknown` · `revertToReady` · `resolve` ·
+  `markOrderSynced` · `markOrderSyncFailed`(#14). 표 밖 전이는 `PaymentTransitionException`(현재 상태 · 시도한 동작)이고 Processor 가 PAYMENT 오류 코드로 바꾼다.
+  주문 반영 기록만 같은 상태 재호출이 멱등이다. 승인 · 거절의 재호출은 예외다 — 중복 승인 경로를 조용히 통과시키지 않는다.
+- `revertToReady`(IN_PROGRESS → READY)는 승인 요청을 **보내지 않은 것이 확실할 때만** 쓴다(서킷 오픈 · 연결 전 실패 · 키 설정 오류). 결제키는 유지한다.
+- 결제 1건 = 결제 시도 1건 = `payment` 행 1건. 실패 후 재시도는 **새 결제 시도**(새 `pgOrderId`)로 만든다.
+  `pgOrderId` 는 결제 시도 아이디(Snowflake) 문자열이다 — 토스 규칙(6~64자, 영문 · 숫자 · `-` · `_`, 승인 · 취소된 번호 재사용 불가 `DUPLICATED_ORDER_ID`)을 만족한다.
+  출처: <https://docs.tosspayments.com/reference> (주문번호 · 결제 승인, 2026-10-21 확인).
+- **주문당 활성 결제 시도는 하나다** — `active_order_id` 유니크 키(FAILED · ABORTED 면 null). 같은 주문의 READY 둘이 동시에 결제창에 올라 두 번 승인되는 길을 DB 가 막는다.
+  UNKNOWN 은 돈이 빠졌을 수 있어 슬롯을 놓지 않는다. 같은 주문에 새 시도를 만들려면 기존 READY 를 먼저 ABORTED 로 둔다. 위반은 포트가 `ActivePaymentConflictException` 으로 알린다.
+- 승인 결과의 금액 · 결제키가 결제 시도와 다르면 도메인이 승인으로 기록하지 않는다 — Processor 가 UNKNOWN(`AMOUNT_MISMATCH_ON_APPROVAL`)으로 돌리고 사람이 본다.
+- PARTIAL_CANCELED · CANCELED 는 enum · check 제약에 미리 둔다(status check 를 나중에 drop/add 하지 않게). 지금은 들어오는 전이가 없다.
 - 취소는 `payment_cancel` 행으로 누적한다. **남은 취소 가능 금액 = 승인 금액 − 취소 누계**이며 이를 넘는 취소를 거절한다.
 
 ## 6. 서비스 간 정합성
