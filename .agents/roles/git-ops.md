@@ -8,7 +8,8 @@ Codex·Cursor 공통 역할 지침. 실행 방식은 `docs/ai-agents.md`를 따�
 ## 저장소 좌표
 
 - 원격 `8llow8llowMe/commerce-foundry` 는 **공개 저장소**다. 커밋 메시지·이슈·PR 본문에 시크릿 키, 사업자 실정보, 고객 개인정보, 주문번호 원문을 쓰지 않는다.
-- 작업 브랜치는 `origin/develop` 에서 분기한다. `develop`·`main` 에 직접 커밋·푸시하지 않는다.
+- 작업 브랜치는 `origin/develop` 에서 **`--no-track`** 으로 분기한다(`git switch --no-track -c` · `git worktree add --no-track -b`) — upstream 이
+  `origin/develop` 으로 잡히지 않게. upstream 은 첫 푸시 `git push -u origin HEAD` 가 잡는다. `develop`·`main` 에 직접 커밋·푸시하지 않는다.
 - 브랜치명 `<type>/<영역>/<번호>-<요약>`, 커밋 제목 `[BE|FE|DOCS|INFRA] type: 요약 (#번호)`.
 - 워크트리는 메인 저장소 밖 `../commerce-foundry-wt/<번호>-<요약>` 에 만든다.
 - 규칙 정본: `docs/git-workflow.md` — §3 브랜치, §4-1 작업 트리 공유, §6~7 PR·머지·정리
