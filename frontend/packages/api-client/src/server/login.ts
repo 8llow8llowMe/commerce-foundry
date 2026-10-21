@@ -20,7 +20,7 @@ const FORWARD_HEADERS = ['content-type', 'accept-language'];
 /**
  * 브라우저 → Next `POST /api/v1/auth/login` → 게이트웨이. BE 는 토큰을 응답 본문으로 주므로(Set-Cookie 없음)
  * BFF 가 받아 httpOnly 쿠키로 심고, 브라우저에는 토큰을 뺀 성공 봉투(dataBody null)만 돌려준다 — JS 가 토큰을 보지 않는다.
- * 실패(400 AUTH_001 · 검증 fieldErrors 등)는 게이트웨이 봉투와 상태를 그대로 중계한다.
+ * 실패(400 AUTH_001 · 검증 fieldErrors · 429 AUTH_040 등)는 게이트웨이 봉투와 상태를(429 면 Retry-After 까지) 그대로 중계한다.
  * 일반 BFF 프록시(`[...path]`)보다 구체적인 경로라 이 핸들러가 먼저 받는다.
  */
 export function createLoginHandler(
@@ -47,8 +47,10 @@ export function createLoginHandler(
   };
 }
 
+/** 실패의 `resultCode` 는 게이트웨이 봉투가 있을 때만 있다(연결 실패 · 계약 불일치는 null) */
 export type LoginAttempt =
-  { ok: true; dataHeader: DataHeader; cookies: string[] } | { ok: false; response: Response };
+  | { ok: true; dataHeader: DataHeader; cookies: string[] }
+  | { ok: false; response: Response; resultCode: string | null };
 
 /**
  * 게이트웨이 로그인을 부르고 토큰을 쿠키 문자열로 바꾼다. 로그인 화면과 가입 직후 자동 로그인(`createSignUpHandler`)이 같이 쓴다.
@@ -71,17 +73,21 @@ export async function attemptLogin(
     });
     payload = await upstream.json();
   } catch {
-    return { ok: false, response: unavailable() };
+    return { ok: false, response: unavailable(), resultCode: null };
   }
-  if (!isApiEnvelope(payload)) return { ok: false, response: unavailable() };
+  if (!isApiEnvelope(payload)) return { ok: false, response: unavailable(), resultCode: null };
 
   if (!upstream.ok || !payload.dataHeader.success) {
-    return { ok: false, response: noStore(Response.json(payload, { status: upstream.status })) };
+    return {
+      ok: false,
+      response: relayFailure(upstream, payload),
+      resultCode: payload.dataHeader.resultCode,
+    };
   }
 
   const tokens = readTokenPair(payload.dataBody);
   // 성공이라면서 토큰이 없으면 계약 불일치 — 로그인된 척하지 않는다
-  if (!tokens) return { ok: false, response: unavailable() };
+  if (!tokens) return { ok: false, response: unavailable(), resultCode: null };
 
   return {
     ok: true,
@@ -116,6 +122,17 @@ export function unavailable(): Response {
       { status: 503 },
     ),
   );
+}
+
+/**
+ * 게이트웨이 실패 봉투와 상태를 그대로 돌려준다. 봉투를 다시 만들어도 429 의 `Retry-After` 는 함께 넘긴다
+ * — 화면 쿨다운(`ApiError.retryAfterSec`)이 그 값을 쓴다. 일반 프록시 `relay()` 와 같다.
+ */
+export function relayFailure(upstream: Response, payload: unknown): Response {
+  const response = noStore(Response.json(payload, { status: upstream.status }));
+  const retryAfter = upstream.headers.get('retry-after');
+  if (retryAfter !== null) response.headers.set('retry-after', retryAfter);
+  return response;
 }
 
 /** 인증 응답은 캐시하지 않는다(BE 도 no-store) */
