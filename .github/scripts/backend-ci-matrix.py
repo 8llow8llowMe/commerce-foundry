@@ -56,7 +56,8 @@ FULL_RUN_PATHS = [
     '.github/workflows/backend-ci.yml',
     '.github/scripts/backend-*',
 ]
-# 테스트가 읽지 않는 backend 파일. 테스트가 읽게 되면 그 모듈 build.gradle 에 `inputs.file(rootProject.file(...))` 로 선언한다(2단계가 먼저 본다)
+# 테스트가 읽지 않는 backend 파일. 테스트가 읽게 되면 그 모듈 build.gradle 에 `inputs.file(rootProject.file(...))` 로 선언한다(2단계가 먼저 본다).
+# backend-ci.yml 의 `paths` 제외 목록과 같게 둔다 — 이 파일들만 바꾼 PR 은 workflow 자체가 뜨지 않는다(#194). 선언 파일을 늘리면 거기서 다시 넣는다
 NO_TEST_PATHS = [
     '{backend}/docs/*',
     '{backend}/*.md',
