@@ -36,7 +36,7 @@ snowflake:
 
 auth:
   login-guard:
-    # 테스트는 켠 상태로 본다 — 키 검증 · 해셔 · 어댑터 빈이 실제로 만들어지는지 확인한다
-    enabled: true
+    # 켜짐(enabled)은 application.yml 값을 그대로 쓴다 — 운영과 같은 켠 상태에서 키 검증 · 해셔 · 어댑터 빈이 실제로 만들어지는지 확인한다.
+    # 키는 application.yml 이 기본값 없이 ${AUTH_LOGIN_GUARD_HASH_KEY} 로 받으므로 여기서 테스트 값을 넣는다.
     # 시도 계수 HMAC 키 — base64("auth-login-guard-test-only-hash-key", 35바이트). 테스트 전용이다. 비밀이 아니다
     hash-key: YXV0aC1sb2dpbi1ndWFyZC10ZXN0LW9ubHktaGFzaC1rZXk=

@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.member.domain.model.AgreementType;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
+import com.commercefoundry.support.InMemoryAuthStoresConfig;
 import com.jayway.jsonpath.JsonPath;
 import jakarta.persistence.EntityManager;
 import java.nio.charset.StandardCharsets;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -35,7 +37,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 회원가입 → 내 정보 조회 → 수정 흐름을 실제 빈 구성(보안 체인 · Facade · Processor · 어댑터 · H2)으로 본다.
- * 애노테이션은 {@link AuthServiceApplicationTests} 와 같아 컨텍스트를 같이 쓴다. H2 는 컨텍스트 동안 살아 있으므로 테스트마다 이메일을 새로 만든다.
+ * 가입이 시도 계수기(Redis 포트, #66)를 부르므로 {@link InMemoryAuthStoresConfig} 로 스텁을 넣는다 — 같은 구성의 흐름 테스트끼리 컨텍스트를 같이 쓴다.
+ * H2 는 컨텍스트 동안 살아 있으므로 테스트마다 이메일을 새로 만든다(시도 창도 이메일마다 따로다).
  *
  * <p>엔진에 기대는 동작(PostgreSQL 제약 이름 · 락)은 리포지토리 테스트({@code MemberPersistenceAdapterTest}, Testcontainers)가 본다.
  * 여기서는 같은 변환이 H2 에서도 도메인 오류로 나오는지만 본다.
@@ -43,6 +46,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @SpringBootTest
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
+@Import(InMemoryAuthStoresConfig.class)
 class MemberFlowIntegrationTest {
 
     private static final String PASSWORD = "mokoyuri2026!";

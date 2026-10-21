@@ -57,6 +57,27 @@ class LoginAttemptRedisAdapterArgumentsTest {
     }
 
     @Test
+    @DisplayName("관리자 로그인 기록은 auth:admin-login-attempt:{HMAC} 키를 쓴다 — 고객 로그인 키와 다르다")
+    void adminLoginRecordUsesAdminKey() {
+        given(redisTemplate.execute(LoginAttemptRedisScripts.RECORD, List.of("auth:admin-login-attempt:" + hasher.hash(EMAIL)), "900000"))
+            .willReturn(List.of(1L, 900_000L));
+
+        assertThat(adapter.record(AttemptKind.ADMIN_LOGIN, EMAIL, WINDOW)).isEqualTo(new LoginAttemptOutcome(1, WINDOW));
+        adapter.reset(AttemptKind.ADMIN_LOGIN, EMAIL);
+        verify(redisTemplate).delete("auth:admin-login-attempt:" + hasher.hash(EMAIL));
+    }
+
+    @Test
+    @DisplayName("로그 꼬리표는 키 HMAC 의 앞 8자이고 변형 이메일도 같다 — 전체 해시 · 이메일 원문이 아니고 Redis 를 부르지 않는다")
+    void subjectTagIsHashPrefix() {
+        String tag = adapter.subjectTag(EMAIL);
+
+        assertThat(tag).hasSize(8).isEqualTo(hasher.hash(EMAIL).substring(0, 8)).doesNotContain("@", "member");
+        assertThat(adapter.subjectTag(" Member@Example.COM ")).isEqualTo(tag);
+        verifyNoInteractions(redisTemplate);
+    }
+
+    @Test
     @DisplayName("reset 은 그 종류 키 DEL 하나다")
     void resetDeletesKey() {
         adapter.reset(AttemptKind.LOGIN, EMAIL);
@@ -123,7 +144,7 @@ class LoginAttemptRedisAdapterArgumentsTest {
     @Test
     @DisplayName("꺼진 해셔로 부르면 Redis 에 닿기 전에 IllegalStateException 이다 — 꺼진 구성에서는 부르지 않는다")
     void disabledHasherFailsBeforeRedis() {
-        LoginAttemptKeyHasher disabled = new LoginAttemptKeyHasher(new AuthLoginGuardProperties(false, 5, WINDOW, null));
+        LoginAttemptKeyHasher disabled = new LoginAttemptKeyHasher(new AuthLoginGuardProperties(false, 5, WINDOW, null, null));
         LoginAttemptRedisAdapter disabledAdapter = new LoginAttemptRedisAdapter(redisTemplate, disabled);
 
         assertThatThrownBy(() -> disabledAdapter.record(AttemptKind.LOGIN, EMAIL, WINDOW)).isInstanceOf(IllegalStateException.class);

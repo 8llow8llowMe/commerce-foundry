@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRe
 import com.commercefoundry.domainlayer.member.application.port.out.LoginAttemptCounterPort;
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
 import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.LoginGuardPolicy;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
 import com.commercefoundry.global.properties.AgreementProperties;
 import com.commercefoundry.global.properties.AuthLoginGuardProperties;
@@ -88,12 +89,13 @@ class AuthServiceApplicationTests {
     }
 
     @Test
-    @DisplayName("시도 제한은 test 프로필이 켜고 test 키를 넣은 값(application-test.yml)과 application.yml 의 5회 · 15분으로 바인딩되어 정책 빈 하나가 되고, 계수기는 Redis 어댑터 하나다")
+    @DisplayName("시도 제한은 application.yml 이 켜고(로그인 5회 · 15분, 가입 5회 · 10분) test 키(application-test.yml)로 바인딩되어 정책 빈 하나가 되고, 계수기는 Redis 어댑터 하나다")
     void loginGuard() {
         AuthLoginGuardProperties properties = applicationContext.getBean(AuthLoginGuardProperties.class);
         assertThat(properties.enabled()).isTrue();
         assertThat(properties.hashKeyBytes()).isEqualTo(TestLoginGuard.properties().hashKeyBytes());
-        assertThat(applicationContext.getBean(LoginAttemptPolicy.class)).isEqualTo(new LoginAttemptPolicy(5, Duration.ofMinutes(15)));
+        assertThat(applicationContext.getBean(LoginGuardPolicy.class)).isEqualTo(new LoginGuardPolicy(true,
+            new LoginAttemptPolicy(5, Duration.ofMinutes(15)), new LoginAttemptPolicy(5, Duration.ofMinutes(10))));
         assertThat(applicationContext.getBean(LoginAttemptCounterPort.class)).isInstanceOf(LoginAttemptRedisAdapter.class);
     }
 

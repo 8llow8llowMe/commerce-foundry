@@ -38,19 +38,26 @@ class MemberLoginProcessorTest {
     }
 
     @Test
-    @DisplayName("이메일은 정규화(앞뒤 공백 제거 · 소문자)해서 찾는다")
+    @DisplayName("이메일은 한 번 정규화(앞뒤 공백 제거 · 소문자)하고, 조회는 그 값을 그대로 쓴다")
     void findByNormalizedEmail() {
         given(memberRepositoryPort.findByEmail("a@example.com")).willReturn(Optional.of(CUSTOMER));
 
-        assertThat(processor.findByEmail("  A@Example.COM ")).contains(CUSTOMER);
+        assertThat(processor.normalizeEmail("  A@Example.COM ")).contains("a@example.com");
+        assertThat(processor.findByEmail("a@example.com")).contains(CUSTOMER);
     }
 
     @Test
-    @DisplayName("정규화할 수 없는 이메일(빈 값 · 254자 초과 · null)은 조회 없이 없는 회원이다")
+    @DisplayName("정규화할 수 없는 이메일(빈 값 · 공백만 · 전각 공백 · 254자 초과 · 소문자화로 254자 초과 · null)은 예외 없이 빈 값이다 — 조회하지 않는다")
     void outOfRuleEmailIsAbsent() {
-        assertThat(processor.findByEmail("   ")).isEmpty();
-        assertThat(processor.findByEmail("a".repeat(255))).isEmpty();
-        assertThat(processor.findByEmail(null)).isEmpty();
+        // U+0130 은 ROOT 소문자화로 2자가 된다 — 요청 검증(254자)을 지나도 정규화 뒤 254자를 넘는다
+        String growsWhenLowercased = "İ".repeat(128) + "@example.com";
+
+        assertThat(processor.normalizeEmail("   ")).isEmpty();
+        assertThat(processor.normalizeEmail("　")).isEmpty();
+        assertThat(processor.normalizeEmail("a".repeat(255))).isEmpty();
+        assertThat(growsWhenLowercased.length()).isLessThanOrEqualTo(Member.EMAIL_MAX_LENGTH);
+        assertThat(processor.normalizeEmail(growsWhenLowercased)).isEmpty();
+        assertThat(processor.normalizeEmail(null)).isEmpty();
         verifyNoInteractions(memberRepositoryPort);
     }
 

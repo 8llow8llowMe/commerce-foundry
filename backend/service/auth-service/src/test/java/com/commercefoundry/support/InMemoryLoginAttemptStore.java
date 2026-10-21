@@ -68,6 +68,12 @@ public class InMemoryLoginAttemptStore implements LoginAttemptCounterPort {
         windows.remove(Key.of(kind, normalizedEmail));
     }
 
+    /** 이메일 원문 대신 8자 16진 꼬리표 — 어댑터처럼 같은 이메일이면 같은 값이다. 저장소 장애와 무관하다(저장소를 부르지 않는다). */
+    @Override
+    public String subjectTag(String normalizedEmail) {
+        return "%08x".formatted(Member.canonicalEmail(normalizedEmail).hashCode());
+    }
+
     /** 지금 창 안의 시도 수. 창이 없거나 지났으면 0. 창 끝과 같은 시각은 아직 창 안이다. */
     public long attempts(AttemptKind kind, String normalizedEmail) {
         Window window = windows.get(Key.of(kind, normalizedEmail));

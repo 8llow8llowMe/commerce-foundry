@@ -24,6 +24,6 @@ public final class TestLoginGuard {
     }
 
     public static AuthLoginGuardProperties properties(String hashKey) {
-        return new AuthLoginGuardProperties(true, 5, Duration.ofMinutes(15), hashKey);
+        return new AuthLoginGuardProperties(true, 5, Duration.ofMinutes(15), hashKey, null);
     }
 }
