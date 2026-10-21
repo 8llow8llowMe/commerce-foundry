@@ -10,7 +10,7 @@ import org.springframework.http.HttpStatus;
  * 002~009 중 002 는 상품 서비스 장애(catalog {@code CATALOG_001} 번역, 503) 자리이고 009 는 비워 둔다.
  *
  * <p>주문 항목 검증 코드(003~008)는 {@code OrderQuoteProcessor} 가 판정 순서대로 처음 걸리는 하나만 낸다 ({@code order-flow-guide.md} §2-3).
- * 메시지의 {@code %s} 는 걸린 줄 모두를 고객이 알아볼 이름("상품명(옵션명)")으로 이은 것이다 — SKU 아이디 · product-service 메시지는 넣지 않는다.
+ * 메시지의 {@code %s} 는 걸린 줄 모두를 고객이 알아볼 이름("상품명(옵션명)")으로 이은 것이다 — SKU 아이디 · product-service 메시지 · 숨긴 상품명은 넣지 않는다.
  *
  * <p>배송비 견적 코드(011~015)는 delivery-service 의 업무 거절({@code DELIVERY_001/002/003/011})을 주문 계약으로 번역한 것이다 —
  * delivery 의 코드는 주문 응답에 그대로 나가지 않는다. 번역은 {@code ShippingFeeInternalResponseSupport} 가 한다.
@@ -25,7 +25,10 @@ public enum OrderErrorCode {
      * ({@code architecture-guide.md} §3). SKU 응답이 계약과 다를 때(해외 주문의 SKU 무게가 1 미만)도 이 코드다 — 값을 추측하지 않는다.
      */
     PRODUCT_SERVICE_UNAVAILABLE("ORDER_002", "상품 정보를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
-    /** 없는 SKU · 품절 · 판매 종료 · 숨김({@code purchasable=false}). {@code %s} 는 그 줄들의 이름이고, 없는 SKU 는 "찾을 수 없는 상품" 이다. */
+    /**
+     * 없는 SKU · 품절 · 판매 종료 · 숨김({@code purchasable=false}). {@code %s} 는 그 줄들의 이름이고, 없는 SKU 는 "찾을 수 없는 상품",
+     * 품절이 아닌 숨김 · 판매 종료는 "판매하지 않는 상품" 이다 — 숨긴 상품명을 내보내지 않는다.
+     */
     ITEM_NOT_PURCHASABLE("ORDER_003", "지금은 구매할 수 없는 상품이 있습니다: %s", HttpStatus.CONFLICT),
     /** 맞춤 제작 상품이 아닌데 맞춤 제작 입력이 있다. {@code %s} 는 그 줄들의 이름이다. */
     CUSTOM_OPTION_NOT_ALLOWED("ORDER_004", "맞춤 제작 상품이 아니어서 맞춤 제작 입력을 받을 수 없습니다: %s", HttpStatus.BAD_REQUEST),

@@ -60,5 +60,7 @@ class OrderQuoteTest {
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new OrderQuote(CurrencyCode.KRW, List.of(JACKET), krw(24_000), DOMESTIC_FEE, krw(27_000), "US"))
             .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new OrderQuote(CurrencyCode.KRW, List.of(JACKET), krw(24_000), DOMESTIC_FEE, krw(27_000), "kr"))
+            .as("국가 코드 형식이 아니면 조립 버그다").isInstanceOf(IllegalArgumentException.class);
     }
 }

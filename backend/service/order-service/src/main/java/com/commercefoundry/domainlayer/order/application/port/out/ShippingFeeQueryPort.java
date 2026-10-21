@@ -28,10 +28,12 @@ public interface ShippingFeeQueryPort {
      * @param orderAmount 할인 후 상품 합계(배송비 제외) — 실제 견적과 같은 값
      * @param countryCode 해외 배송 국가 (KR 이 아니다)
      * @param postalCode 배송지 우편번호. 없으면 null
-     * @return 배송할 수 없는 국가(해외 배송 꺼짐 · 어느 국가 그룹에도 없음)면 false. 국가 말고 다른 사유(정책 미설정 · 통화 불일치 · 무게 구간)로 거절돼도 true 다
-     * @throws IllegalArgumentException 국내(KR) 배송 국가 — 국내 주문은 무게 · HS 를 보지 않아 물을 일이 없다
+     * @return 배송할 수 없는 국가(해외 배송 꺼짐 · 어느 국가 그룹에도 없음)면 false. 국가를 판정한 뒤의 사유(무게 구간)로 거절되거나 견적이 나오면 true 다
+     * @throws IllegalArgumentException 국내(KR) 배송 국가 — 국내 주문은 무게 · HS 를 보지 않아 물을 일이 없다. 국가 코드 형식이 아님 — 요청 검증이 먼저 거르는 조립 버그다
      * @throws com.commercefoundry.domainlayer.order.application.exception.OrderException
-     *     {@code DELIVERY_SERVICE_UNAVAILABLE}(503) — 서킷 오픈 · 전송 실패 · 타임아웃 · 5xx · 그 밖의 4xx · 응답 계약 위반
+     *     {@code SHIPPING_UNAVAILABLE}(409, 정책 미설정) · {@code DESTINATION_CURRENCY_NOT_SUPPORTED}(400) — delivery 가 국가를 보기 전에 거절해 국가를 판정하지 못했다.
+     *     무게 · HS 를 채워도 실제 견적이 같은 이유로 실패하므로 그 코드로 답한다. {@code DELIVERY_SERVICE_UNAVAILABLE}(503) — 서킷 오픈 · 전송 실패 · 타임아웃 · 5xx ·
+     *     그 밖의 4xx · 응답 계약 위반
      */
     boolean isDestinationSupported(Money orderAmount, String countryCode, String postalCode);
 }

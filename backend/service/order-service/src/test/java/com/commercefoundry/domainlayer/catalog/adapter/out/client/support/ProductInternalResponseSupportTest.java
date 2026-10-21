@@ -181,5 +181,18 @@ class ProductInternalResponseSupportTest {
             assertUnavailable(() -> support.toSkuQueryResults(success(item("abc", "ON_SALE", true, MoneyItem.of(1_000, "KRW")))));
             assertUnavailable(() -> support.toSkuQueryResults(success(item("9004", "ON_SALE", true, null))));
         }
+
+        @Test
+        @DisplayName("상품명 · 옵션명이 null 이면 계약 위반이라 503 이다 — 옵션이 없는 SKU 의 옵션명은 빈 문자열로 온다")
+        void missingNames() {
+            ProductSkuInternalItem valid = item("9004", "ON_SALE", true, MoneyItem.of(39_000, "KRW"));
+            ProductSkuInternalItem noProductName = new ProductSkuInternalItem(valid.skuId(), valid.productId(), null, valid.optionName(), valid.salePrice(),
+                valid.saleStatus(), valid.purchasable(), valid.maxQuantityPerOrder(), valid.customOrder(), valid.weightGrams(), valid.hsCode());
+            ProductSkuInternalItem noOptionName = new ProductSkuInternalItem(valid.skuId(), valid.productId(), valid.productName(), null, valid.salePrice(),
+                valid.saleStatus(), valid.purchasable(), valid.maxQuantityPerOrder(), valid.customOrder(), valid.weightGrams(), valid.hsCode());
+
+            assertUnavailable(() -> support.toSkuQueryResults(success(noProductName)));
+            assertUnavailable(() -> support.toSkuQueryResults(success(noOptionName)));
+        }
     }
 }

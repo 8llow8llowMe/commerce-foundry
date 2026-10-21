@@ -30,6 +30,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
@@ -52,6 +54,10 @@ class OrderQuoteProcessorTest {
         return Money.of(amount, CurrencyCode.KRW);
     }
 
+    private static Money usd(long amount) {
+        return Money.of(amount, CurrencyCode.USD);
+    }
+
     /** 구매 가능 · 일반 상품 · 1회 주문 최대 수량 없음 · 해외 정보(무게 500g · HS 코드) 있음. */
     private static CatalogSku sku(long skuId, long productId, String productName, String optionName, Money price) {
         return new CatalogSku(skuId, productId, productName, optionName, price, true, false, null, false, 500, HS_CODE);
@@ -61,9 +67,16 @@ class OrderQuoteProcessorTest {
         return sku(skuId, productId, productName, optionName, krw(priceKrw));
     }
 
-    private static CatalogSku notPurchasable(CatalogSku sku) {
+    /** 품절이라 구매할 수 없다 — 이름은 알린다. */
+    private static CatalogSku soldOut(CatalogSku sku) {
         return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
             false, true, sku.maxQuantityPerOrder(), sku.customOrder(), sku.weightGrams(), sku.hsCode());
+    }
+
+    /** 품절이 아닌데 구매할 수 없다(숨김 · 판매 종료) — 이름을 알리지 않는다. */
+    private static CatalogSku hidden(CatalogSku sku) {
+        return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
+            false, false, sku.maxQuantityPerOrder(), sku.customOrder(), sku.weightGrams(), sku.hsCode());
     }
 
     private static CatalogSku customOrder(CatalogSku sku) {
@@ -142,7 +155,7 @@ class OrderQuoteProcessorTest {
         @DisplayName("없는 SKU · 구매할 수 없는 SKU 를 모두 모아 ORDER_003 이다 — 없는 SKU 는 '찾을 수 없는 상품' 이고 SKU 아이디는 넣지 않는다")
         void itemNotPurchasable() {
             CatalogSku onSale = sku(1001, 7001, "저고리", "S / 남색", 30_000);
-            CatalogSku soldOut = notPurchasable(sku(1002, 7002, "치마", "", 40_000));
+            CatalogSku soldOut = soldOut(sku(1002, 7002, "치마", "", 40_000));
 
             OrderException exception = rejected(
                 () -> processor.quote(domestic(item(1001, 1), item(9999, 1), item(1002, 1), item(9998, 1)), skus(onSale, soldOut)),
@@ -150,6 +163,25 @@ class OrderQuoteProcessorTest {
 
             assertThat(exception.getMessage()).isEqualTo("지금은 구매할 수 없는 상품이 있습니다: %s, 치마".formatted(OrderQuoteProcessor.UNKNOWN_ITEM_NAME));
             assertThat(exception.getMessage()).doesNotContain("9999", "1002");
+            assertNoShippingCall();
+        }
+
+        @Test
+        @DisplayName("품절이 아닌데 구매할 수 없는 SKU(숨김 · 판매 종료)는 '판매하지 않는 상품' 이다 — 숨긴 상품명이 ORDER_003 · ORDER_008 메시지에 없다. 품절은 이름을 알린다")
+        void hiddenItemName() {
+            CatalogSku hidden = hidden(sku(1001, 7001, "비공개 신상 저고리", "S", 30_000));
+            CatalogSku soldOut = soldOut(sku(1002, 7002, "치마", "", 40_000));
+
+            OrderException notPurchasable = rejected(
+                () -> processor.quote(domestic(item(1001, 1), item(1002, 1), item(9999, 1)), skus(hidden, soldOut)), OrderErrorCode.ITEM_NOT_PURCHASABLE);
+            assertThat(notPurchasable.getMessage()).isEqualTo("지금은 구매할 수 없는 상품이 있습니다: %s, 치마, %s"
+                .formatted(OrderQuoteProcessor.NOT_ON_SALE_ITEM_NAME, OrderQuoteProcessor.UNKNOWN_ITEM_NAME));
+            assertThat(notPurchasable.getMessage()).doesNotContain("비공개", "1001");
+
+            // 중복 줄 판정이 판매 가능 판정보다 먼저다 — 중복 메시지도 같은 이름 규칙을 거친다
+            OrderException duplicated = rejected(() -> processor.quote(domestic(item(1001, 1), item(1001, 2)), skus(hidden)), OrderErrorCode.DUPLICATE_LINE);
+            assertThat(duplicated.getMessage()).isEqualTo("같은 상품이 주문에 중복되어 있습니다: " + OrderQuoteProcessor.NOT_ON_SALE_ITEM_NAME);
+            assertThat(duplicated.getMessage()).doesNotContain("비공개", "1001");
             assertNoShippingCall();
         }
 
@@ -195,6 +227,25 @@ class OrderQuoteProcessorTest {
 
             CatalogSku closed = withMaxQuantity(custom, 0);
             rejected(() -> processor.quote(domestic(item(1001, 1, "chest", "96")), skus(closed)), OrderErrorCode.QUANTITY_EXCEEDED);
+        }
+
+        @Test
+        @DisplayName("같은 상품의 SKU 상한이 다르게 오면 작은 쪽(닫힌 쪽)을 쓴다 — 3 과 5 면 3, 제한 없음(null)과 2 면 2. 줄 순서와 무관하다")
+        void quantityLimitTakesStricter() {
+            CatalogSku three = withMaxQuantity(sku(1001, 7001, "치마", "S", 40_000), 3);
+            CatalogSku five = withMaxQuantity(sku(1002, 7001, "치마", "M", 40_000), 5);
+
+            OrderException exceeded = rejected(() -> processor.quote(domestic(item(1002, 2), item(1001, 2)), skus(three, five)), OrderErrorCode.QUANTITY_EXCEEDED);
+            assertThat(exceeded.getMessage()).endsWith(": 치마(최대 3개)");
+            rejected(() -> processor.quote(domestic(item(1001, 2), item(1002, 2)), skus(three, five)), OrderErrorCode.QUANTITY_EXCEEDED);
+
+            CatalogSku unlimited = withMaxQuantity(sku(1003, 7003, "저고리", "S", 30_000), null);
+            CatalogSku two = withMaxQuantity(sku(1004, 7003, "저고리", "M", 30_000), 2);
+            OrderException closed = rejected(() -> processor.quote(domestic(item(1003, 2), item(1004, 1)), skus(unlimited, two)), OrderErrorCode.QUANTITY_EXCEEDED);
+            assertThat(closed.getMessage()).endsWith(": 저고리(최대 2개)");
+            rejected(() -> processor.quote(domestic(item(1004, 1), item(1003, 2)), skus(unlimited, two)), OrderErrorCode.QUANTITY_EXCEEDED);
+            assertNoShippingCall();
+            assertThat(processor.quote(domestic(item(1003, 1), item(1004, 1)), skus(unlimited, two)).lines()).as("합이 작은 상한과 같으면 통과").hasSize(2);
         }
 
         @Test
@@ -268,7 +319,8 @@ class OrderQuoteProcessorTest {
         @Test
         @DisplayName("국내 주문은 무게 · HS 코드가 없어도 거절하지 않는다 — 무료배송이면 총액이 상품 합계다")
         void domesticIgnoresShippingInfo() {
-            shippingFeeQueryPort.willQuote(FakeShippingFeeQueryPort.domesticQuote(CurrencyCode.KRW, 0));
+            shippingFeeQueryPort.willQuote(new ShippingFeeQuoteQueryResult(
+                krw(0), krw(3_000), true, krw(0), null, krw(50_000), 3L, ShippingScope.DOMESTIC, null, null));
             CatalogSku noShippingInfo = withShippingInfo(sku(1001, 7001, "저고리", "S", 60_000), null, null);
             CatalogSku zeroWeight = withShippingInfo(sku(1002, 7002, "치마", "S", 10_000), 0, HS_CODE);
 
@@ -306,6 +358,37 @@ class OrderQuoteProcessorTest {
             assertThat(quote.shippingFeeQuote().scope()).isEqualTo(ShippingScope.INTERNATIONAL);
             assertThat(quote.shippingFeeQuote().totalWeightGrams()).isEqualTo(1_900);
             assertThat(quote.totalAmount()).isEqualTo(krw(180_000 + FakeShippingFeeQueryPort.INTERNATIONAL_BASE_FEE + FakeShippingFeeQueryPort.INTERNATIONAL_WEIGHT_FEE));
+        }
+
+        @Test
+        @DisplayName("해외 무료배송 — 배송비 0 · 기본료 · 무게 요금 · 무료배송 기준을 그대로 옮기고 총 무게를 싣는다. 총액은 상품 합계다")
+        void internationalFreeShipping() {
+            shippingFeeQueryPort.willQuote(new ShippingFeeQuoteQueryResult(
+                usd(0), usd(1_500), true, usd(0), null, usd(10_000), 7L, ShippingScope.INTERNATIONAL, "북미", usd(3_000)));
+            CatalogSku jacket = sku(1001, 7001, "저고리", "S", usd(6_000));
+
+            OrderQuote quote = processor.quote(international(item(1001, 2)), skus(jacket));
+
+            assertThat(shippingFeeQueryPort.quoteCalls()).containsExactly(new ShippingFeeQuoteQuery(usd(12_000), "US", null, 1_000));
+            assertThat(quote.shippingFeeQuote()).isEqualTo(new ShippingFeeQuote(
+                usd(0), usd(1_500), true, usd(0), null, usd(10_000), 7L, ShippingScope.INTERNATIONAL, "북미", usd(3_000), 1_000));
+            assertThat(quote.itemsAmount()).isEqualTo(usd(12_000));
+            assertThat(quote.totalAmount()).isEqualTo(usd(12_000));
+        }
+
+        @Test
+        @DisplayName("무게 · HS 가 모두 있으면 확인 없이 견적하고, 배송할 수 없는 국가는 그 견적의 거절(ORDER_013)로 그대로 전파된다. 총 무게 int 초과(ORDER_015)는 견적 전이라 앞선다")
+        void quoteRejectsUnsupportedCountry() {
+            shippingFeeQueryPort.willRejectQuote(OrderErrorCode.DESTINATION_NOT_SUPPORTED);
+
+            rejected(() -> processor.quote(international(item(1001, 1)), skus(sku(1001, 7001, "저고리", "S", 30_000))), OrderErrorCode.DESTINATION_NOT_SUPPORTED);
+            assertThat(shippingFeeQueryPort.destinationChecks()).isEmpty();
+            assertThat(shippingFeeQueryPort.quoteCalls()).singleElement().satisfies(query -> assertThat(query.weightGrams()).isEqualTo(500));
+            shippingFeeQueryPort.quoteCalls().clear();
+
+            CatalogSku heavy = withShippingInfo(sku(1002, 7002, "궤짝", "", 30_000), 1_000_000_000, HS_CODE);
+            rejected(() -> processor.quote(international(item(1002, 3)), skus(heavy)), OrderErrorCode.SHIPPING_WEIGHT_NOT_SUPPORTED);
+            assertNoShippingCall();
         }
 
         @Test
@@ -368,6 +451,18 @@ class OrderQuoteProcessorTest {
             CatalogSku noHsCode = withShippingInfo(sku(1001, 7001, "저고리", "S", 30_000), 500, null);
 
             rejected(() -> processor.quote(international(item(1001, 1)), skus(noHsCode)), OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
+            assertThat(shippingFeeQueryPort.quoteCalls()).isEmpty();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = OrderErrorCode.class, names = {"SHIPPING_UNAVAILABLE", "DESTINATION_CURRENCY_NOT_SUPPORTED"})
+        @DisplayName("배송 가능 국가 확인이 국가 판정 전 사유(정책 미설정 · 통화 불일치)로 거절되면 그 코드로 답한다 — 미입력(ORDER_007)으로 바꾸지 않는다")
+        void destinationCheckRejectedBeforeCountry(OrderErrorCode rejection) {
+            shippingFeeQueryPort.willFailDestinationCheck(rejection);
+            CatalogSku noWeight = withShippingInfo(sku(1001, 7001, "저고리", "S", 30_000), null, HS_CODE);
+
+            rejected(() -> processor.quote(international(item(1001, 1)), skus(noWeight)), rejection);
+            assertThat(shippingFeeQueryPort.destinationChecks()).hasSize(1);
             assertThat(shippingFeeQueryPort.quoteCalls()).isEmpty();
         }
 

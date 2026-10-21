@@ -17,8 +17,8 @@ import java.util.Objects;
  * 위반은 delivery 의 {@code DELIVERY_1xx}(400)이고 우리 쪽에서는 503 {@code ORDER_011} 이 된다 — 고객 입력 오류가 장애처럼 보인다.
  * 그래서 <b>호출하는 쪽(주문 요청 검증)이 이 규칙보다 느슨하면 안 된다</b>.
  *
- * <p>생성자는 그중 필수 칸만 막는다 — KR 인데 우편번호가 없거나(공백뿐 포함), KR 외인데 1 이상의 총 무게가 없으면 {@link IllegalArgumentException} 이다.
- * 조립 버그가 delivery 400 → 503 으로 가려지지 않고 바로 드러나게. 형식(정규식)은 주문 요청 검증이 본다.
+ * <p>생성자는 그중 필수 칸만 막는다 — 국가 코드가 대문자 두 글자가 아니거나, KR 인데 우편번호가 없거나(공백뿐 포함), KR 외인데 1 이상의 총 무게가 없으면
+ * {@link IllegalArgumentException} 이다. 조립 버그가 delivery 400 → 503 으로 가려지지 않고 바로 드러나게. 우편번호 형식(정규식)은 주문 요청 검증이 본다.
  *
  * <p>{@link #toString()} 은 우편번호를 가린다 — 배송지의 일부라 로그에 남기지 않는다 ({@code coding-conventions.md} §8).
  *
@@ -32,7 +32,10 @@ public record ShippingFeeQuoteQuery(Money orderAmount, String countryCode, Strin
     public ShippingFeeQuoteQuery {
         Objects.requireNonNull(orderAmount, "orderAmount");
         Objects.requireNonNull(countryCode, "countryCode");
-        if (ShippingScope.ofCountry(countryCode) == ShippingScope.DOMESTIC) {
+        // 국가 형식은 주문 요청 검증이 먼저 거른다 — 여기까지 온 형식 오류는 조립 버그다
+        ShippingScope scope = ShippingScope.ofCountry(countryCode)
+            .orElseThrow(() -> new IllegalArgumentException("배송 국가 코드가 ISO 3166-1 alpha-2 대문자 형식이 아닙니다"));
+        if (scope == ShippingScope.DOMESTIC) {
             if (postalCode == null || postalCode.isBlank()) {
                 throw new IllegalArgumentException("국내(KR) 배송비 견적에는 우편번호가 있어야 합니다");
             }
