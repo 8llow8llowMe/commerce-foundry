@@ -147,6 +147,7 @@ Info → Presenter → Response
 - `Info → Response`, `Info → Item` 변환만 담당한다. **식별자 `long → String` 변환 경계다.**
 - 금액 `Money → MoneyItem`, enum → metadata(`toMetadata()`) 변환도 Presenter 경계다. Processor · Info 는 `Money` · enum 그대로 둔다.
 - Processor 가 돌려준 domain model 을 조합·가공 없이 그대로 응답으로 바꿀 때는 Info 를 두지 않고 Presenter 가 domain model 을 받는다 (예: delivery-service `ShippingFeeWebPresenter`, #11).
+  (같은 컨텍스트 domain 만 — 다른 컨텍스트 domain 은 Info 로 옮긴다, H8)
 
 ### Port / Adapter
 
@@ -164,7 +165,7 @@ Info → Presenter → Response
 한 서비스에 컨텍스트가 여럿이면(product-service 의 `category` · `product`, order-service 의 `catalog` · `cart` · `order`) 다른 컨텍스트에서 쓸 수 있는 것은 **셋뿐이다** (허용 목록).
 
 1. **그 컨텍스트의 Processor.** Facade 만 주입한다 — Processor 끼리는 컨텍스트를 넘어 주입하지 않는다.
-2. **그 Processor 가 돌려준 domain model.** 읽기 전용이다 — Facade 가 자기 컨텍스트 Processor 의 인자로 넘길 수 있다.
+2. **그 Processor 가 돌려준 domain model, 그리고 그 메서드가 돌려준 domain 값(예: `CategoryPlacementViolation`).** 읽기 전용이다 — Facade 가 자기 컨텍스트 Processor 의 인자로 넘길 수 있다.
 3. **그 Processor 가 던지는 예외(`application.exception`).** 부른 쪽 컨텍스트의 `adapter/in/*/exception` 의 `*ExceptionHandler` 만 받아 번역한다
    (Processor 를 부르면 그 예외는 반드시 넘어온다). 그 밖의 계층은 다른 컨텍스트 예외를 쓰지 않는다.
 
@@ -177,6 +178,9 @@ Info → Presenter → Response
   예: auth 배송지 Facade 가 부르는 `MemberLockProcessor` 의 `AUTH_003`(회원 없음)은 그 컨텍스트의 advice 가 봉투로 만든다 (#7).
 - 숨김 같은 조회 규칙은 그 컨텍스트가 정한다 — 다른 컨텍스트는 용도별 Processor 메서드만 부른다.
   예: `ProductWebFacade` 는 `CategoryProcessor.subtreeIdsOf(categoryId)`(목록 필터 — 숨김과 무관) · `visiblePathOf(categoryId)`(상세 경로 — 숨김 제외)만 부른다.
+- 다른 컨텍스트의 쓰기도 그 컨텍스트 Processor 로만 한다. 판정에 부른 쪽 데이터가 필요하면 API 를 부른 쪽에 둔다.
+  예: 어드민 카테고리 관리(#9)는 삭제 판정에 "연결된 상품" 이 필요해 상품 컨텍스트에 둔다 — `CategoryAdminFacade` 가 `CategoryProcessor.getTreeForUpdate()`(잠근 트리)를 받아
+  `CategoryAdminProcessor.validate*` 에 넘겨 판정하고, 쓰기는 다시 `CategoryProcessor`(`create` · `update` · `delete`)로 한다. 응답은 `CategoryAdminProcessor` 가 Info 로 옮겨 Presenter 에 넘긴다.
 - 여러 컨텍스트가 같은 원격 조회를 쓰면 그 조회를 공용 컨텍스트 하나로 뽑는다 — 원격 계약 파싱을 두 벌 두지 않는다.
   예: order-service 의 `cart`(그리고 #13 의 `order`)가 `catalog`(`CatalogSkuProcessor` · `CatalogSku`)를 쓴다. `catalog` 는 SKU 조회(Feign · 서킷 · 응답 변환)만 하고,
   담기 가능 판정 · 수량 상한 같은 규칙은 부른 컨텍스트의 Processor 한 곳(`CartProcessor.rejectionOf` · `maxQuantityOf`)에 두고, `CartWebFacade` 는 그 결과를 오류 코드로 바꾸기만 한다.

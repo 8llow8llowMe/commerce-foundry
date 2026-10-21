@@ -311,12 +311,15 @@ return ResponseEntity.ok().body(Response.success(response));
 | API | 성공 | 주요 오류 |
 |-----|------|-----------|
 | `GET …` | 200 `{categories: [노드]}` — 숨김 포함 전체 트리. 같은 상위 안에서 노출 순서 → 아이디 오름차순 | — |
-| `POST …` | 201 `{categoryId, parentId, name, displayOrder, visible}` | 400 `PRODUCT_040` · `PRODUCT_044` · `PRODUCT_131~136` |
-| `PUT …/{categoryId}` | 200 위와 같은 모양. 본문은 생성과 같고 **전체 교체**다 — `parentId` 를 바꾸면 하위까지 함께 옮긴다 | 404 `PRODUCT_004` · 400 `PRODUCT_040` · `041` · `044` · `131~137` |
-| `DELETE …/{categoryId}` | 200, `dataBody: null` | 404 `PRODUCT_004` · 409 `PRODUCT_042` · `PRODUCT_043` · 400 `PRODUCT_137` |
+| `POST …` | 201 `{categoryId, parentId, name, displayOrder, visible}` | 400 `PRODUCT_040` · `PRODUCT_044` · `PRODUCT_131~136` · `138` · 409 `PRODUCT_045` |
+| `PUT …/{categoryId}` | 200 위와 같은 모양. 본문은 생성과 같고 **전체 교체**다 — `parentId` 를 바꾸면 하위까지 함께 옮긴다 | 404 `PRODUCT_004` · 400 `PRODUCT_040` · `041` · `044` · `131~138` · 409 `PRODUCT_045` |
+| `DELETE …/{categoryId}` | 200, `dataBody: null` | 404 `PRODUCT_004` · 409 `PRODUCT_042` · `PRODUCT_043` · `PRODUCT_045` · 400 `PRODUCT_137` |
 
-- **본문** — `{parentId?, name, displayOrder, visible}`. `parentId` 는 문자열로 보내도 되고 없거나 null 이면 최상위다. 이름은 1~50자이고 앞뒤 공백을 빼고 저장한다.
+- **본문** — `{parentId?, name, displayOrder, visible}`. `parentId` 는 문자열로 보내도 되고 없거나 null 이면 최상위다.
   `displayOrder` 는 0 이상이다. 같은 상위 안의 이름 · 순서에 유니크 키가 없어 순서를 맞바꿔도 된다.
+- **이름** — 앞뒤 공백을 `strip()`(유니코드 공백 — 전각 공백 U+3000 포함)으로 빼고 저장하며, 뺀 뒤 코드 포인트 1~50자다(133).
+  공백 · 서식 문자(제로폭 공백 U+200B 등)만이면 필수 누락 132 다 — `@NotBlank`(trim 기준)가 통과시키는 값을 막는다(배송지 #7 과 같은 기준, §2-4).
+  제어 문자(`\p{Cc}` — 개행 · 탭 · NUL)와 서식 문자(`\p{Cf}`)는 어디에 있든 138 이다. 판정은 요청 DTO 전용 검증기 `CategoryNameValidator` 이고 한 값에 위반 하나만 낸다.
 - **노드** — `{categoryId, parentId, name, displayOrder, visible, children[]}`. 아이디는 문자열, 최상위 `parentId` 는 null 이다.
 - **깊이 · 순환** — 깊이는 3단계(대 · 중 · 소)까지다. 하위를 거느린 카테고리를 옮기면 하위 높이까지 센다(옮긴 뒤 넘으면 `PRODUCT_040`).
   자기 자신이나 자기 하위를 상위로 지정하면 `PRODUCT_041` 이다. 상위를 그대로 두는 수정(이름 · 순서 · 노출)은 깊이 · 순환을 다시 보지 않는다.
@@ -326,6 +329,10 @@ return ResponseEntity.ok().body(Response.success(response));
   삭제는 행을 지운다(soft delete 아님). 성공 뒤 같은 요청을 다시 보내면 404 다.
 - **동시성** — 생성 · 수정 · 삭제는 트랜잭션 맨 앞에서 모든 카테고리 행을 아이디 순으로 잠그고(`PESSIMISTIC_WRITE`) 다시 읽어 판정한다. 어드민 쓰기끼리 줄을 서므로
   두 카테고리를 동시에 서로의 아래로 옮겨 순환이 생기거나, 삭제 판정 뒤 그 아래에 하위가 생기지 않는다. 카테고리는 수가 적어 표 전체 잠금의 비용이 작다.
+  잠그는 세 메서드는 `@Transactional(timeout = 5)` 다 — 잠금 대기 문장은 5초 안에 드라이버가 취소한다(`QueryTimeoutException`). 상한 뒤 쿼리의
+  `TransactionTimedOutException`, `PessimisticLockingFailureException` 과 함께 Facade 가 409 `PRODUCT_045` 로 바꾼다(배송지 `AUTH_023` 과 같은 모양, §2-4).
+  잠금 · 쓰기 Processor 메서드(`CategoryProcessor.getTreeForUpdate` · `create` · `update` · `delete`)는 `Propagation.MANDATORY` 라 트랜잭션 밖에서 부르면 바로 실패한다.
+  상품 쓰기(#9 PR-E)는 이 잠금 밖이다 — 카테고리를 참조할 때 같은 잠금(또는 `FOR SHARE`)으로 존재를 확인해야 한다(DB FK 없음).
 - 카테고리 표에 작성자 · 수정자 칸이 없어 어드민 memberId 를 받지 않는다. `version` · `Idempotency-Key` 도 두지 않는다 — 동시 편집은 마지막 쓰기가 이긴다.
 - 계층 — 컨트롤러 · Facade · 판정 Processor 는 상품 컨텍스트에 둔다(`CategoryAdminFacade` · `CategoryAdminProcessor`). "연결된 상품" 을 상품 컨텍스트가 알기 때문이다.
   트리 판정(`CategoryTree.placementViolationOf` · `hasChildren`)과 쓰기는 카테고리 컨텍스트 `CategoryProcessor` 가 하고, 상품 컨텍스트는 그 Processor 와
