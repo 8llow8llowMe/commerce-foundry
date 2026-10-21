@@ -72,19 +72,30 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 ```
 
 - 로컬 검증은 **바꾼 모듈까지**다(`done-checklist.md` §1). 루트 `./gradlew check` 는 전 모듈(12개) 테스트라 로컬 기본 검증으로 쓰지 않는다 —
-  전 모듈은 CI 가 그룹 병렬로 돌린다(아래). 여러 세션이 같은 PC 를 쓸 때의 규칙은 §4-1.
+  PR 의 CI 가 바꾼 모듈과 그 모듈에 의존하는 모듈을, develop 의 CI 가 전 모듈을 그룹 병렬로 돌린다(아래). 여러 세션이 같은 PC 를 쓸 때의 규칙은 §4-1.
 - `gradle.properties` 가 빌드 캐시를 켜 둔다. 테스트가 **실제로 돌았는지** 확인할 때는 `cleanTest` + `--no-build-cache` 를 붙인다.
   그냥 `test` 는 `UP-TO-DATE` · `FROM-CACHE` 로 건너뛰고도 성공으로 끝난다.
 - CI(`backend-ci`)는 **테스트가 있어야 하는 모듈마다**(core 가 아닌 실행 모듈 전부 + `src/test/java` 가 있는 모듈) 실제 실행 건수(건너뜀 제외)를 세고,
   0건인 모듈이 있으면 실패시킨다. CI 는 이 검사를 두 단계로 나눠 한다. 로컬에서 같은 검사를 하려면 `backend` 에서 둘 다 돌린다.
   - `python ../.github/scripts/backend-ci-matrix.py .` — plan 단계. settings.gradle 의 include 가 `*/*/build.gradle` 디렉터리와 같은지 본다.
     include 를 잊은 모듈은 어느 그룹 job 에도 들어가지 않으므로 여기서만 잡힌다.
+    PR 이 고를 모듈을 미리 보려면 바뀐 파일 목록을 넘긴다:
+    `git diff --name-only --no-renames origin/develop...HEAD | python ../.github/scripts/backend-ci-matrix.py . --changed-files -`
   - `python ../.github/scripts/backend-test-count.py .` — 모듈별 실행 건수. CI 의 그룹 job 은 `--modules "<그룹 모듈>"` 로 자기 그룹만 센다.
 - CI 는 모듈을 **그룹별 병렬 job** 으로 돌린다(`.github/scripts/backend-ci-matrix.py`).
   - 테스트가 오래 걸리는 서비스만 이름으로 떼고(`auth` · `product` · `order-payment` · `delivery`), 나머지 core · cloud · 새 모듈은 전부 `rest` 그룹이다.
   - job 마다 `./gradlew <그룹 모듈>:check --continue --no-build-cache` 로 돌아 한 모듈의 실패가 같은 그룹의 다른 모듈 결과를 가리지 않는다.
   - 그룹 결과는 `check` job 이 모은다.
   - Gradle 홈(의존성 · wrapper)은 캐시하지만 빌드 캐시(`caches/build-cache-1`)는 담지 않는다. 캐시는 develop push 실행만 쓰고 PR 은 읽기만 한다.
+- **PR 은 바꾼 모듈과 그 모듈에 의존하는 모듈만 돌린다**(#179). develop push 는 전 모듈이다. plan job 요약에 고른 모듈과 이유가 남는다.
+  - 모듈 안 파일 → 그 모듈. 모듈 의존은 각 `build.gradle` 의 `project(':...')` 로 읽어, 바꾼 모듈에 직 · 간접으로 의존하는 모듈을 더한다
+    (예: `core/shared-commerce` 를 바꾸면 product · order · payment · delivery 도 돈다).
+  - 빌드 설정(`build.gradle` · `settings.gradle` · `gradle.properties` · `gradle/**` · `gradlew*`)이나 `backend-ci.yml` · `.github/scripts/backend-*` 를
+    바꾸면 전 모듈이다. 판단하지 못한 backend 파일도 전 모듈로 둔다.
+  - 문서(`docs/**` · `*.md`) · 로컬 인프라(`.env.example` · `docker-compose-local.yml` · `docker/**`)만 바꾸면 테스트 job 없이 `check` 가 통과한다.
+  - **모듈 밖 파일을 읽는 테스트는 그 모듈 `build.gradle` 에 `inputs.file(rootProject.file('...'))` 로 선언한다**
+    (예: api-gateway 의 `docs/api-design-guide.md` 경로 소유 표 대조). CI 는 이 선언으로 그 파일만 바뀐 PR 에서도 그 모듈을 돌리고,
+    Gradle 도 이 선언으로 테스트를 다시 돌릴지 판단한다. 선언이 없으면 문서만 바뀐 PR 에서 그 테스트가 돌지 않는다.
 - 서비스(`service/*`)의 컨텍스트 로딩 테스트(`*ApplicationTests`)는 H2(PostgreSQL 모드) test 프로파일로 돈다. Docker 없이 로컬에서도 실행된다.
   락 · `timestamptz` · 인덱스처럼 엔진에 기대는 동작은 여기서 검증하지 않는다. 리포지토리 테스트는 Testcontainers(PostgreSQL)로 따로 두고
   CI 에서 돌린다 (`bootstrap-conventions.md` "컨텍스트 로딩 테스트").
