@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
+import com.commercefoundry.domainlayer.member.application.info.AdminAccessTokenInfo;
 import com.commercefoundry.domainlayer.member.application.info.AuthTokenInfo;
 import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRevocationPort;
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
@@ -27,6 +28,7 @@ import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
+import com.nimbusds.jwt.SignedJWT;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
@@ -73,6 +75,27 @@ class AuthTokenProcessorTest {
         assertThat(info.accessTokenExpiresIn()).isEqualTo(1800);
         assertThat(info.refreshTokenExpiresIn()).isEqualTo(REFRESH_TTL.toSeconds());
         assertThat(info.toString()).doesNotContain(info.accessToken(), info.refreshToken());
+    }
+
+    @Test
+    @DisplayName("관리자 로그인은 access 만 발급한다 — role=ADMIN · 30분(1800초)이고 refresh 저장소 · 차단 목록을 부르지 않는다 (#6)")
+    void issueAdminAccessToken() throws Exception {
+        Member admin = Member.restore(TestTokens.MEMBER_ID, "admin@example.com", "$2a$10$hash", "관리자", null, MemberRole.ADMIN, 0L);
+
+        AdminAccessTokenInfo info = processor.issueAdminAccessToken(admin);
+
+        assertThat(info.accessTokenExpiresIn()).isEqualTo(1800);
+        assertThat(SignedJWT.parse(info.accessToken()).getJWTClaimsSet().getStringClaim(MemberRole.CLAIM_NAME)).isEqualTo("ADMIN");
+        assertThat(SignedJWT.parse(info.accessToken()).getJWTClaimsSet().getSubject()).isEqualTo(String.valueOf(TestTokens.MEMBER_ID));
+        assertThat(info.toString()).doesNotContain(info.accessToken());
+        verifyNoInteractions(store, revocation);
+    }
+
+    @Test
+    @DisplayName("고객 계정으로 관리자 access 를 만들지 않는다 — 호출 코드의 오류다")
+    void adminAccessTokenRequiresAdmin() {
+        assertThatThrownBy(() -> processor.issueAdminAccessToken(CUSTOMER)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(store, revocation);
     }
 
     @ParameterizedTest

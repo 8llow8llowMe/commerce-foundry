@@ -195,6 +195,37 @@ class MemberPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("어드민 회원 목록은 아이디 내림차순(최신순) 페이지이고 총계는 자르기 전 건수다 — 역할 조건 · 마지막 페이지 너머 (#6)")
+    void findPage() {
+        memberRepositoryPort.save(Member.signUp(1L, "c1@example.com", HASH, "고객1", "01012345678"));
+        memberRepositoryPort.save(Member.admin(5L, "admin@example.com", HASH, "관리자"));
+        memberRepositoryPort.save(Member.signUp(3L, "c3@example.com", HASH, "고객3", null));
+        memberRepositoryPort.save(Member.signUp(4L, "c4@example.com", HASH, "고객4", null));
+        memberRepositoryPort.save(Member.signUp(2L, "c2@example.com", HASH, "고객2", null));
+        entityManager.clear();
+
+        var first = memberRepositoryPort.findPage(null, 0, 2);
+        assertThat(first.getContent()).extracting(row -> row.memberId()).containsExactly(5L, 4L);
+        assertThat(first.getTotalElements()).isEqualTo(5);
+        assertThat(first.getTotalPages()).isEqualTo(3);
+        assertThat(memberRepositoryPort.findPage(null, 2, 2).getContent()).extracting(row -> row.memberId()).containsExactly(1L);
+
+        var customers = memberRepositoryPort.findPage(MemberRole.CUSTOMER, 0, 3);
+        assertThat(customers.getContent()).extracting(row -> row.memberId()).containsExactly(4L, 3L, 2L);
+        assertThat(customers.getTotalElements()).isEqualTo(4);
+        assertThat(memberRepositoryPort.findPage(MemberRole.ADMIN, 0, 20).getContent()).singleElement().satisfies(row -> {
+            assertThat(row.email()).isEqualTo("admin@example.com");
+            assertThat(row.role()).isEqualTo(MemberRole.ADMIN);
+            assertThat(row.phone()).isNull();
+            assertThat(row.createdAt()).isNotNull();
+        });
+
+        var beyond = memberRepositoryPort.findPage(null, 9, 2);
+        assertThat(beyond.getContent()).isEmpty();
+        assertThat(beyond.getTotalElements()).isEqualTo(5);
+    }
+
+    @Test
     @DisplayName("빈 목록은 쿼리 없이 끝난다")
     void appendNothing() {
         memberAgreementRepositoryPort.appendAll(List.of());

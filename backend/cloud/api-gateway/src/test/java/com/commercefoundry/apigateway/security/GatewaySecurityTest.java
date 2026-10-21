@@ -70,6 +70,8 @@ class GatewaySecurityTest {
 
     private static final String PUBLIC_PATH = "/api/v1/products/1";
     private static final String ADMIN_PATH = "/api/v1/admin/orders/1";
+    private static final String ADMIN_MEMBERS_PATH = "/api/v1/admin/members";
+    private static final String ADMIN_LOGIN_PATH = "/api/v1/auth/admin/login";
 
     private static final String BEARER = "Bearer ";
     private static final String INVALID_TOKEN = "Bearer error=\"invalid_token\"";
@@ -200,6 +202,82 @@ class GatewaySecurityTest {
             assertThat(request.path()).isEqualTo(ADMIN_PATH);
             assertThat(request.header(HttpHeaders.AUTHORIZATION)).isEqualTo(BEARER + adminToken);
             assertThat(request.header("X-Member-Id")).isNull();
+        });
+    }
+
+    // ── 어드민 회원 조회 · 관리자 로그인 (#6) ─────────────────────
+
+    @Test
+    @DisplayName("어드민 회원 조회(/api/v1/admin/members)는 무토큰 401(001) · CUSTOMER 403(005)이고 하류에 닿지 않는다")
+    void adminMembersRejectsAnonymousAndCustomer() {
+        assertRejected(webTestClient.get().uri(ADMIN_MEMBERS_PATH).exchange(), SecurityErrorCode.UNAUTHORIZED, "Bearer");
+        assertRejected(get(ADMIN_MEMBERS_PATH, token(MemberRole.CUSTOMER)), SecurityErrorCode.FORBIDDEN, null);
+    }
+
+    @Test
+    @DisplayName("ADMIN 토큰의 어드민 회원 조회는 auth-service 라우트로 쿼리 문자열과 함께 그대로 간다")
+    void adminMembersIsRoutedForAdmin() {
+        get(ADMIN_MEMBERS_PATH + "?page=0&size=20", token(MemberRole.ADMIN)).expectStatus().isOk();
+
+        assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(ADMIN_MEMBERS_PATH));
+    }
+
+    /**
+     * 하류 Tomcat 이 정규화하면 {@code /api/v1/admin/members} 가 되는 원문 경로. 고객 라우트({@code /api/v1/members/**})에 걸려도 요청 가드가 라우팅 ·
+     * 인가 전에 끊는다 — 어드민 판정이 원문 경로 접두어로 비껴가지 않는다 (#3 메모).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/api/v1/members/../admin/members",
+        "/api/v1/members/%2e%2e/admin/members",
+        "/api/v1/members/%2E%2E/admin/members",
+        "/api/v1/members/..;/admin/members",
+        "/api/v1/admin;x=1/members",
+        "/api/v1/members/me/..%2f..%2fadmin/members",
+        "/api/v1/members/me/..%2F..%2Fadmin/members",
+        "/api/v1/admin%2Fmembers",
+        "/api/v1/members/%252e%252e/admin/members"
+    })
+    @DisplayName("어드민 회원 조회로 정규화되는 우회 경로(.. · %2e%2e · ; · %2f/%2F · 이중 인코딩 %252e)는 CUSTOMER · 무토큰 모두 400 + GATEWAY_004 이고 하류에 닿지 않는다")
+    void adminMembersBypassPathsAreRejected(String rawPath) {
+        for (String authorization : new String[] {null, BEARER + token(MemberRole.CUSTOMER)}) {
+            WebTestClient.RequestHeadersSpec<?> request = webTestClient.get().uri(rawUri(rawPath));
+            if (authorization != null) {
+                request = request.header(HttpHeaders.AUTHORIZATION, authorization);
+            }
+            request.exchange()
+                .expectStatus().isBadRequest()
+                .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_004");
+        }
+
+        assertThat(UPSTREAM_REQUESTS).as("하류에 닿지 않는다").isEmpty();
+    }
+
+    @Test
+    @DisplayName("인코딩한 어드민 회원 경로(/api/v1/%61dmin/members)도 어드민으로 본다 — 무토큰 401 · CUSTOMER 403")
+    void encodedAdminMembersPathIsProtected() {
+        assertRejected(webTestClient.get().uri(rawUri("/api/v1/%61dmin/members")).exchange(), SecurityErrorCode.UNAUTHORIZED, "Bearer");
+        assertRejected(webTestClient.get().uri(rawUri("/api/v1/%61dmin/members")).header(HttpHeaders.AUTHORIZATION, BEARER + token(MemberRole.CUSTOMER)).exchange(),
+            SecurityErrorCode.FORBIDDEN, null);
+    }
+
+    @Test
+    @DisplayName("끝 슬래시 어드민 회원 경로(/api/v1/admin/members/)도 어드민으로 본다 — 무토큰 401 · CUSTOMER 403, 하류에 닿지 않는다")
+    void trailingSlashAdminMembersPathIsProtected() {
+        String trailing = ADMIN_MEMBERS_PATH + "/";
+
+        assertRejected(webTestClient.get().uri(trailing).exchange(), SecurityErrorCode.UNAUTHORIZED, "Bearer");
+        assertRejected(get(trailing, token(MemberRole.CUSTOMER)), SecurityErrorCode.FORBIDDEN, null);
+    }
+
+    @Test
+    @DisplayName("관리자 로그인(/api/v1/auth/admin/login)은 어드민 패턴 밖이라 토큰 없이 하류로 간다 — 판정은 auth-service 가 한다")
+    void adminLoginIsRoutedWithoutToken() {
+        webTestClient.post().uri(ADMIN_LOGIN_PATH).contentType(MediaType.APPLICATION_JSON).bodyValue("{}").exchange().expectStatus().isOk();
+
+        assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> {
+            assertThat(request.path()).isEqualTo(ADMIN_LOGIN_PATH);
+            assertThat(request.header(HttpHeaders.AUTHORIZATION)).isNull();
         });
     }
 

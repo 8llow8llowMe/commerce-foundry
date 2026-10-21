@@ -3,6 +3,8 @@ package com.commercefoundry.domainlayer.member.application.service.processor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -105,10 +107,64 @@ class MemberLoginProcessorTest {
         assertThat(processor.findCustomer(3L)).isEmpty();
     }
 
+    @Test
+    @DisplayName("관리자 로그인 — 관리자이고 비밀번호가 맞으면 그 회원이다 (#6)")
+    void adminAuthenticated() {
+        given(passwordEncoder.matches("admin-password-1", "$2a$10$admin")).willReturn(true);
+
+        assertThat(processor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).isEqualTo(ADMIN);
+    }
+
+    @Test
+    @DisplayName("관리자 로그인 — 고객 계정은 비밀번호가 맞아도 AUTH_030 이다. 비교는 똑같이 한다")
+    void customerIsRejectedOnAdminLogin() {
+        given(passwordEncoder.matches("mokoyuri2026!", "$2a$10$customer")).willReturn(true);
+
+        assertAdminLoginFailed(() -> processor.authenticateAdmin(Optional.of(CUSTOMER), "mokoyuri2026!"));
+        verify(passwordEncoder).matches("mokoyuri2026!", "$2a$10$customer");
+    }
+
+    @Test
+    @DisplayName("관리자 로그인 — 비밀번호가 틀리면 AUTH_030, 회원이 없어도 더미 해시로 한 번 비교한 뒤 AUTH_030 이다")
+    void adminWrongPasswordOrAbsent() {
+        given(passwordEncoder.matches("wrong", "$2a$10$admin")).willReturn(false);
+
+        assertAdminLoginFailed(() -> processor.authenticateAdmin(Optional.of(ADMIN), "wrong"));
+        assertAdminLoginFailed(() -> processor.authenticateAdmin(Optional.empty(), "admin-password-1"));
+        verify(passwordEncoder).matches("admin-password-1", DUMMY_HASH);
+    }
+
+    @Test
+    @DisplayName("관리자 로그인 — 비밀번호가 null 이거나 인코더가 거절해도 AUTH_030 이다 (500 아님)")
+    void adminNullOrRejectedPassword() {
+        given(passwordEncoder.matches(anyString(), anyString())).willThrow(new IllegalArgumentException("password cannot be more than 72 bytes"));
+
+        assertAdminLoginFailed(() -> processor.authenticateAdmin(Optional.of(ADMIN), "x".repeat(100)));
+        assertAdminLoginFailed(() -> processor.authenticateAdmin(Optional.of(ADMIN), null));
+    }
+
+    @Test
+    @DisplayName("관리자 로그인 — 64자를 넘는 비밀번호는 인코더가 맞다고 해도 AUTH_030 이다. 원문 대신 자리값으로 한 번 비교한다")
+    void adminOversizedPassword() {
+        String oversized = "a1" + "b".repeat(63);
+        given(passwordEncoder.matches(anyString(), anyString())).willReturn(true);
+
+        assertAdminLoginFailed(() -> processor.authenticateAdmin(Optional.of(ADMIN), oversized));
+        verify(passwordEncoder).matches(argThat(input -> !input.equals(oversized)), eq("$2a$10$admin"));
+        assertThat(processor.authenticateAdmin(Optional.of(ADMIN), "a1" + "b".repeat(62))).as("64자는 받는다").isEqualTo(ADMIN);
+    }
+
     private static void assertLoginFailed(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {
         assertThatThrownBy(call)
             .isInstanceOf(MemberException.class)
             .extracting(exception -> ((MemberException) exception).getErrorCode())
             .isEqualTo(MemberErrorCode.LOGIN_FAILED);
+    }
+
+    private static void assertAdminLoginFailed(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {
+        assertThatThrownBy(call)
+            .isInstanceOf(MemberException.class)
+            .extracting(exception -> ((MemberException) exception).getErrorCode())
+            .isEqualTo(MemberErrorCode.ADMIN_LOGIN_FAILED);
     }
 }

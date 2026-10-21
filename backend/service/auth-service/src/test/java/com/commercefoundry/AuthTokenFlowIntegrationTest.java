@@ -2,6 +2,8 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.member.application.command.AdminSeedCommand;
+import com.commercefoundry.domainlayer.member.application.port.in.AdminSeedUseCase;
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
@@ -82,6 +84,9 @@ class AuthTokenFlowIntegrationTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private AdminSeedUseCase adminSeedUseCase;
+
     @AfterEach
     void restoreStore() {
         store.unavailable = false;
@@ -129,6 +134,27 @@ class AuthTokenFlowIntegrationTest {
 
         assertRejected(reissue(newRefresh), HttpStatus.UNAUTHORIZED, "AUTH_011");
         assertRejected(reissue(refreshToken), HttpStatus.UNAUTHORIZED, "AUTH_011");
+    }
+
+    /**
+     * 관리자 로그아웃 (#6). 로그아웃은 jti 를 차단 목록에 넣을 뿐이고, 차단 목록은 게이트웨이만 본다(security-guide.md §7-1 · #4 결정 3) —
+     * 서비스에 직접 오는 같은 토큰은 서명 · 만료만 보므로 200 이 정상이다. 게이트웨이의 거부(401 · SECURITY_004)는 {@code GatewaySecurityTest#revokedTokenIsRejected} 가 본다.
+     */
+    @Test
+    @DisplayName("관리자 access 로 본문 없이 로그아웃하면 jti 가 차단 목록에 들어간다 — 서비스 직접 호출은 차단 목록을 보지 않아 회원 조회가 여전히 200 이다")
+    void adminLogoutRevokesJtiOnly() {
+        String email = uniqueEmail();
+        adminSeedUseCase.seed(new AdminSeedCommand(email, "admin-password-1", null));
+        MvcTestResult login = mvc.post().uri("/api/v1/auth/admin/login").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"email\":\"%s\",\"password\":\"admin-password-1\"}".formatted(email)).exchange();
+        assertThat(login).hasStatusOk();
+        String access = JsonPath.read(body(login), "$.dataBody.accessToken");
+
+        assertThat(logout(access, "{}")).hasStatusOk();
+        assertThat(store.accessTokenRevoked(jtiOf(access))).isTrue();
+
+        MvcTestResult afterLogout = mvc.get().uri("/api/v1/admin/members").header(HttpHeaders.AUTHORIZATION, "Bearer " + access).exchange();
+        assertThat(afterLogout).as("서비스는 차단 목록을 보지 않는다 — 막는 곳은 게이트웨이다").hasStatusOk();
     }
 
     @Test

@@ -165,6 +165,15 @@ class AuthServiceApplicationTests {
         }
 
         @Test
+        @DisplayName("관리자 로그인 · 어드민 회원 조회는 어드민 그룹에만 있고 고객 그룹에는 없다 (#6)")
+        void adminApisAreInAdminGroupOnly() {
+            assertThat(mockMvc.get().uri("/v3/api-docs/admin")).bodyJson()
+                .extractingPath("$.paths").asMap().containsKeys("/api/v1/auth/admin/login", "/api/v1/admin/members");
+            assertThat(mockMvc.get().uri("/v3/api-docs/customer")).bodyJson()
+                .extractingPath("$.paths").asMap().containsKey("/api/v1/auth/login").doesNotContainKeys("/api/v1/auth/admin/login", "/api/v1/admin/members");
+        }
+
+        @Test
         @DisplayName("그룹 없는 기본 문서는 내지 않는다 — 그룹 경로 필터를 거치지 않아 /internal/** 까지 담기 때문이다")
         void defaultDocsAreClosed() {
             assertThat(mockMvc.get().uri("/v3/api-docs")).hasStatus(HttpStatus.NOT_FOUND);
