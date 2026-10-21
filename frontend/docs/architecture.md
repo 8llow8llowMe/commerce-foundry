@@ -83,10 +83,15 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
   BE 는 토큰을 응답 본문으로 주므로(Set-Cookie 없음) BFF 가 쿠키로 심고, 브라우저에는 토큰을 뺀 성공 봉투(`dataBody: null`)만 준다.
   쿠키 수명은 응답의 `accessTokenExpiresIn` · `refreshTokenExpiresIn`(초)이고, 없으면 앱 설정값이다. 같은 origin 요청만 받는다(login CSRF).
   실패는 게이트웨이 봉투 · 상태를 그대로 중계한다 — 로그인 실패는 401 이 아니라 **400 `AUTH_001`** 이라 화면은 kind 가 아니라 code 로 본다.
+  봉투를 다시 만들어 돌려주므로 **429 의 `Retry-After` 는 따로 옮겨 싣는다**(`relayFailure`, 일반 프록시 `relay()` 와 같은 결과).
+  시도 제한 **429 `AUTH_040`**(이메일 단위, 비밀번호가 맞아도 · 계정이 없어도 같은 응답. 한도는 BE 문서가 정본, #66)은 화면이 남은 시간 안내와 쿨다운으로 받는다(`api-client.md` §3-1).
 - **회원가입**도 전용 route handler(`app/api/v1/auth/sign-up`, `createSignUpHandler`)다. BE 가입(201 `{ memberId }`)은 토큰을 주지 않으므로
   BFF 가 **같은 요청 안에서 같은 이메일 · 비밀번호로 로그인**해 쿠키를 심는다(가입 후 자동 로그인). 로그인 부분은 `attemptLogin` 을 로그인 핸들러와 같이 쓴다.
   가입이 되면 로그인 결과와 무관하게 201 `{ signedIn }` 이다 — 자동 로그인이 실패해도 계정은 만들어졌으니 가입 실패로 보이지 않게 하고,
-  화면이 `/login?signedUp=1` 로 보내 가입 완료 안내를 띄운다. 가입 실패(검증 fieldErrors · 409 `AUTH_002` 이메일 중복)는 그대로 중계한다.
+  화면이 `/login?signedUp=1` 로 보내 가입 완료 안내를 띄운다. 가입 실패(검증 fieldErrors · 409 `AUTH_002` 이메일 중복 · 429 `AUTH_041` 가입 시도 제한)는
+  `Retry-After` 까지 그대로 중계한다. 자동 로그인이 429 면 `{ signedIn: false, loginRateLimit: { code, retryAfterSec } }` 로 알리고,
+  화면이 `/login?signedUp=1&limited=<초>&reason=<코드>` 로 보내 요청 제한 안내를 덧붙이고 로그인 버튼 쿨다운을 처음부터 건다(#184).
+  주소 값은 `readLoginRateLimit` 이 거른다 — 초는 1 ~ 3600 정수, 코드는 사전에 있는 것만(아니면 "잠시 후" · 일반 문구).
   fieldErrors 의 동의 칸은 `agreements.termsOfService` 처럼 중첩 경로다. 비밀번호 확인 칸은 BE 에 없어 화면에서만 본다.
 - 고객 쿠키 이름 `cf_at` / `cf_rt` 와 대체 수명(30분 / 14일, BE 설정과 같다)은 `apps/storefront/src/lib/auth-cookies.ts`. 어드민은 #29 에서 정한다.
 - 인증 계약은 BE PR #99 기준이다(머지 전): 재발급 `{ refreshToken }` → 로그인과 같은 모양. 로그인 · 재발급 모두 응답의 `*ExpiresIn` 을
