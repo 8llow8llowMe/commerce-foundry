@@ -8,7 +8,7 @@
 - [ ] 응답 DTO 의 식별자가 `String` 이다
 - [ ] Swagger 어노테이션과 한국어 설명이 정리됐다 (어드민 API 는 `[어드민]` 태그)
 - [ ] 예외가 도메인 3종 세트(ErrorCode / Exception / ExceptionHandler)를 따른다
-- [ ] 바꾼 모듈의 compile / test / check 를 로컬에서 통과했고, 전 모듈은 CI(`backend-ci`)가 녹색이다
+- [ ] 바꾼 모듈의 compile / test / check 를 로컬에서 통과했고, PR 의 CI(`backend-ci` — 바꾼 모듈과 그 의존 모듈)가 녹색이다
   - `./gradlew :service:<svc>:test` 만으로는 재실행이 보장되지 않는다 — Gradle 이 `UP-TO-DATE` / `FROM-CACHE` 로
     건너뛰면 테스트가 돌지 않은 채 `BUILD SUCCESSFUL` 이 나온다. 보고할 때는
     `./gradlew :service:<svc>:cleanTest :service:<svc>:check --no-build-cache` 로 실제 실행한 결과를 쓴다.
@@ -16,7 +16,9 @@
   - core 같은 공용 모듈을 바꿨으면 그 모듈 check 에 더해 `./gradlew compileTestJava`(전 모듈 컴파일만)까지 본다.
     다른 모듈의 테스트는 CI 그룹 job 결과(건수 표)로 확인한다.
   - 루트 `./gradlew check` · `./gradlew test`(전 모듈 테스트)는 로컬 기본 검증이 아니다 — 같은 PC 에서 여러 세션이 돌면
-    테스트 JVM 이 겹쳐 뜬다(`local-run-guide.md` §4-1). 전 모듈은 CI 가 그룹 병렬로 돌린다.
+    테스트 JVM 이 겹쳐 뜬다(`local-run-guide.md` §4-1). PR 의 CI 는 바꾼 모듈과 그 의존 모듈을, develop 의 CI 는 전 모듈을 그룹 병렬로 돌린다.
+  - 테스트가 모듈 밖 파일(문서 등)을 읽으면 그 모듈 `build.gradle` 에 `inputs.file(rootProject.file('...'))` 로 선언했다
+    — 선언이 없으면 그 파일만 바뀐 PR 에서 CI 가 그 모듈을 고르지 않는다(`local-run-guide.md` §4).
 
 ## 2. 계층 체크리스트
 
