@@ -10,10 +10,20 @@ name: backend-ci
 # PR 은 바뀐 모듈과 그 모듈에 의존하는 모듈만 돌린다(#179). 빌드 설정 · CI 파일을 바꾼 PR 과 develop push 는 전 모듈을 돌린다.
 # 고르는 규칙은 backend-ci-matrix.py 에 있다(라벨이 아니라 경로 + build.gradle 의 project(...) 의존).
 
+# 테스트가 읽지 않는 backend 파일(문서 · 로컬 인프라)만 바꾼 PR 은 workflow 자체를 띄우지 않는다 — plan · check job 도 동시 실행 슬롯을 쓴다(#194).
+# 목록은 backend-ci-matrix.py 의 NO_TEST_PATHS 와 같게 둔다. 예외: api-gateway 테스트가 오류 코드 표를 대조하는
+# `docs/api-design-guide.md` 는 다시 넣는다(`inputs.file(rootProject.file(...))` 선언 파일 — 그런 선언이 늘면 여기에도 더한다).
+# paths 는 뒤에 오는 패턴이 앞을 덮어쓰므로 순서가 중요하다(제외 뒤에 재포함).
 on:
   pull_request:
     paths:
       - 'backend/**'
+      - '!backend/docs/**'
+      - '!backend/*.md'
+      - '!backend/.env.example'
+      - '!backend/docker-compose-local.yml'
+      - '!backend/docker/**'
+      - 'backend/docs/api-design-guide.md'
       - '.github/workflows/backend-ci.yml'
       - '.github/scripts/backend-ci-matrix.py'
       - '.github/scripts/backend-test-count.py'
@@ -24,6 +34,12 @@ on:
       - develop
     paths:
       - 'backend/**'
+      - '!backend/docs/**'
+      - '!backend/*.md'
+      - '!backend/.env.example'
+      - '!backend/docker-compose-local.yml'
+      - '!backend/docker/**'
+      - 'backend/docs/api-design-guide.md'
       - '.github/workflows/backend-ci.yml'
       - '.github/scripts/backend-ci-matrix.py'
       - '.github/scripts/backend-test-count.py'
