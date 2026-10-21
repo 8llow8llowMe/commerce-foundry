@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMoney, moneyToDecimalString } from './money';
+import { formatMoney, moneyToDecimalString, parseMoneyInput } from './money';
 
 describe('formatMoney', () => {
   it('KRW 는 원 단위 정수를 "129,000원" 으로 표시한다', () => {
@@ -31,5 +31,35 @@ describe('moneyToDecimalString', () => {
     expect(moneyToDecimalString({ amount: 129000, currency: 'KRW' })).toBe('129000');
     expect(moneyToDecimalString({ amount: 8950, currency: 'USD' })).toBe('89.50');
     expect(moneyToDecimalString({ amount: 5, currency: 'USD' })).toBe('0.05');
+  });
+});
+
+describe('parseMoneyInput', () => {
+  it('입력 글자를 최소 단위 정수로 바꾼다 — 쉼표 · 공백은 무시한다', () => {
+    expect(parseMoneyInput(' 3,000 ', 'KRW')).toBe(3000);
+    expect(parseMoneyInput('1,234,567', 'KRW')).toBe(1234567);
+    expect(parseMoneyInput('1,200.5', 'USD')).toBe(120050);
+    expect(parseMoneyInput('12.5', 'USD')).toBe(1250);
+    expect(parseMoneyInput('12', 'USD')).toBe(1200);
+    expect(parseMoneyInput('0', 'KRW')).toBe(0);
+  });
+
+  it('빈 값은 null 이다', () => {
+    expect(parseMoneyInput('  ', 'KRW')).toBeNull();
+  });
+
+  it('숫자가 아니거나 음수 · 소수 자릿수 초과면 NaN 이다', () => {
+    for (const [text, currency] of [
+      ['abc', 'KRW'],
+      ['-100', 'KRW'],
+      ['10.5', 'KRW'],
+      ['1.234', 'USD'],
+      ['1e3', 'KRW'],
+      ['99999999999999999999', 'KRW'],
+      ['12,50', 'USD'],
+      ['3,00', 'KRW'],
+    ] as const) {
+      expect(parseMoneyInput(text, currency)).toBeNaN();
+    }
   });
 });

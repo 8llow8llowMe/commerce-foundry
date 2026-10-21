@@ -39,3 +39,21 @@ export function moneyToDecimalString({ amount, currency }: Money): string {
   const digits = fractionDigits(currency);
   return (amount / 10 ** digits).toFixed(digits);
 }
+
+/**
+ * 어드민 입력칸의 금액 글자를 최소 단위 정수로. 계산이 아니라 표기 변환이다(KRW '3,000' → 3000, USD '12.5' → 1250).
+ * 앞뒤 공백은 무시하고, 쉼표는 세 자리 묶음 자리에 있을 때만 받는다('12,50' 을 1250 으로 읽지 않게).
+ * 빈 값은 null, 숫자가 아니거나 · 음수거나 · 통화의 소수 자릿수를 넘으면 NaN 이다 — 화면이 "금액 형식" 오류로 막는다(서버에 보내지 않는다).
+ */
+export function parseMoneyInput(text: string, currency: Currency): number | null {
+  const raw = text.trim();
+  if (raw === '') return null;
+  if (raw.includes(',') && !/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(raw)) return Number.NaN;
+  const trimmed = raw.replace(/,/g, '');
+  const digits = fractionDigits(currency);
+  const pattern = digits === 0 ? /^\d+$/ : new RegExp(`^\\d+(\\.\\d{1,${digits}})?$`);
+  if (!pattern.test(trimmed)) return Number.NaN;
+  const [whole = '0', fraction = ''] = trimmed.split('.');
+  const minor = Number(whole + fraction.padEnd(digits, '0'));
+  return Number.isSafeInteger(minor) ? minor : Number.NaN;
+}
