@@ -64,6 +64,12 @@ resilience4j:
       delivery-service:
         base-config: default
 
+order:
+  creation:
+    # 주문 요청 기록(order_request)의 처리 중 lease. 그 안의 같은 키 재요청은 409(ORDER_018), 지나면 이어받는다(같은 주문 아이디).
+    # 처리한 실패는 lease 를 바로 끝낸다. 원격 호출(배송비 · 재고 선점) 타임아웃 합보다 넉넉해야 한다 — 짧으면 살아 있는 시도를 가로챈다 (order-flow-guide.md §2-4)
+    processing-lease: 60s
+
 # Hibernate 는 SQL 오류를 SqlExceptionHelper 로거로 남기는데, 제약 위반 메시지의 Detail 에 키 · 행 원문(배송지 등 개인정보)이 들어 있다.
 # 끈다 — 예외는 그대로 위로 가고, 어댑터 · 핸들러가 예외 타입과 제약 이름만 남긴다 (coding-conventions.md §8)
 logging:
