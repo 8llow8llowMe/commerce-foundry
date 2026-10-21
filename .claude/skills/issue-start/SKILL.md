@@ -48,11 +48,14 @@ background: false
    ```bash
    git fetch origin
    # 기본
-   git switch -c <브랜치명> origin/develop
+   git switch --no-track -c <브랜치명> origin/develop
    # 워크트리 모드 — 메인 저장소 밖 commerce-foundry-wt/<번호>-<요약>
    MAIN=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
-   git worktree add -b <브랜치명> "$MAIN/../commerce-foundry-wt/<번호>-<요약>" origin/develop
+   git worktree add --no-track -b <브랜치명> "$MAIN/../commerce-foundry-wt/<번호>-<요약>" origin/develop
    ```
+
+   - **`--no-track` 을 붙인다.** 원격 브랜치에서 분기하면 git 이 upstream 을 `origin/develop` 으로 잡아, 맨 `git push` 가 develop 쪽을 향할 수 있다.
+     upstream 은 첫 푸시 `git push -u origin HEAD` 가 같은 이름의 원격 브랜치로 잡는다. 분기 뒤 `git rev-parse --abbrev-ref @{u}` 가 비어 있어야 한다.
 
    - `origin/develop` 이 없으면 멈추고 알린다 (develop 브랜치 생성은 사용자 확인 후).
    - 같은 이름의 브랜치나 워크트리(`git worktree list`)가 이미 있으면 새로 만들지 않고 멈춰서 보고한다.
