@@ -16,7 +16,7 @@ backend/
 │   ├── redis-core           Redis 연결 (Boot 자동설정 + 기동 가드) · 키 규칙
 │   ├── security-core        JWT 발급(auth) · 검증(서비스 · 게이트웨이) · 서블릿 Resource Server · 인증 주체 · 보안 오류 코드
 │   ├── storage-core         오브젝트 스토리지 (상품 이미지 업로드 / 삭제 / 키 생성 / 검증)
-│   └── shared-commerce      서비스를 가로지르는 커머스 enum·값 (CurrencyCode, Money, SalesChannel 등)
+│   └── shared-commerce      서비스를 가로지르는 커머스 enum·값 (CurrencyCode, Money, ShippingScope, SalesChannel 등)
 ├── cloud/          (실행 모듈 — bootJar on)
 │   ├── api-gateway          Spring Cloud Gateway — 라우팅, JWT 검증, admin 경로 보호
 │   └── service-discovery    Eureka 서버
@@ -41,6 +41,9 @@ backend/
 
 `shared-commerce` 가 필요한 이유: 같은 enum 을 서비스마다 복사하면 뜻이 갈라진다.
 예를 들어 `CurrencyCode` 의 소수 자릿수를 order 와 payment 가 다르게 알면 USD 주문이 100배로 결제된다.
+배송 범위 `ShippingScope`(`DOMESTIC` · `INTERNATIONAL`)와 국내 국가 판정 `ShippingScope.ofCountry`(`KR` 이면 국내)도 여기 둔다 —
+delivery 는 배송비 정책을 범위로 고르고 order 는 해외 주문을 판정하는데, 서비스마다 `"KR"` 을 따로 비교하면 국내 규칙이 갈라진다.
+해외 범위에 든다고 배송할 수 있는 것은 아니다 — 배송 가능 여부는 delivery 가 판정한다(스토어의 해외 배송 설정 · 해외 정책의 국가 그룹).
 
 ## 2. 기본 패키지 구조
 
