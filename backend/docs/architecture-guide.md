@@ -170,7 +170,7 @@ Info → Presenter → Response
 - 그 밖(UseCase · Facade · Presenter · Info · Port · Adapter · Mapper · Entity · Repository · Q 타입)은 쓰지 않는다.
   다른 컨텍스트의 포트 · 리포지토리를 직접 부르면 그 컨텍스트의 조회 규칙(숨김 · 정렬 · 캐시)을 비켜 간다.
 - domain 은 다른 컨텍스트 domain 을 필드로 갖지 않고 아이디로만 가리킨다 (예: `Product.categoryId`).
-- 의존은 한 방향으로만 둔다 (지금 product → category, cart → catalog). 역방향이 필요해지면 컨텍스트 경계를 다시 정한다.
+- 의존은 한 방향으로만 둔다 (지금 product → category, cart → catalog, order → catalog). 역방향이 필요해지면 컨텍스트 경계를 다시 정한다.
 - 트랜잭션은 호출한 Facade 가 건다.
 - 다른 컨텍스트 Processor 가 던진 도메인 예외는 같은 서비스 · 같은 코드 접두어(예: auth 의 `AUTH_`)면 번역하지 않고 그대로 올린다 —
   예: auth 배송지 Facade 가 부르는 `MemberLockProcessor` 의 `AUTH_003`(회원 없음)은 그 컨텍스트의 advice 가 봉투로 만든다 (#7).
@@ -179,6 +179,7 @@ Info → Presenter → Response
 - 여러 컨텍스트가 같은 원격 조회를 쓰면 그 조회를 공용 컨텍스트 하나로 뽑는다 — 원격 계약 파싱을 두 벌 두지 않는다.
   예: order-service 의 `cart`(그리고 #13 의 `order`)가 `catalog`(`CatalogSkuProcessor` · `CatalogSku`)를 쓴다. `catalog` 는 SKU 조회(Feign · 서킷 · 응답 변환)만 하고,
   담기 가능 판정 · 수량 상한 같은 규칙은 부른 컨텍스트의 Processor 한 곳(`CartProcessor.rejectionOf` · `maxQuantityOf`)에 두고, `CartWebFacade` 는 그 결과를 오류 코드로 바꾸기만 한다.
+  주문은 Facade 가 `findSkus` 결과(`Map<Long, CatalogSku>`)를 `OrderQuoteProcessor#quote` 의 인자로 넘기고, 주문 규칙(상품 단위 수량 상한 · 해외 판정)은 그 Processor 에 둔다.
 - 다른 컨텍스트의 예외는 호출한 컨텍스트의 `*ExceptionHandler` 가 자기 코드로 번역한다 — advice 범위가 컨트롤러 패키지(`basePackages`)라서다.
   예: `CatalogException`(`CATALOG_001`, 503)은 advice 를 두지 않고 `CartExceptionHandler` 가 `CART_008`(503)로 번역한다. API 계약은 부른 컨텍스트의 코드다.
 - 다른 서비스의 데이터는 지금처럼 internal API(Feign)로만 받는다 (§7). 다른 서비스 스키마를 직접 조회하지 않는다.

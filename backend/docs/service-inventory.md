@@ -36,7 +36,7 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 | 호출하는 쪽 | 대상 | 용도 |
 |-------------|------|------|
 | order-service | product-service | SKU 가격·판매 상태·무게·HS 코드 벌크 조회, 재고 선점·확정·해제·결제 후 복원 |
-| order-service | delivery-service | 배송비 견적(`POST /internal/v1/shipping-fees/quotes` — 주문서 미리보기 · 주문 생성, #13). 업무 거절 `DELIVERY_001/002/003/011` 만 `ORDER_012~015` 로 번역하고 나머지 실패는 503 `ORDER_011` |
+| order-service | delivery-service | 배송비 견적(`POST /internal/v1/shipping-fees/quotes` — 주문서 미리보기 · 주문 생성, #13). 업무 거절 `DELIVERY_001/002/003/011` 만 `ORDER_012~015` 로 번역하고 나머지 실패는 503 `ORDER_011`. 해외 주문에 무게 · HS 미입력 SKU 가 있으면 실제 견적 대신 같은 엔드포인트로 배송 가능 국가 확인용 견적(총 무게 1g)을 부른다 (`order-flow-guide.md` §2-3) |
 | order-service | payment-service | 클레임 환불 실행 |
 | payment-service | order-service | 결제 준비 시 주문 금액 조회, 결제 완료 알림 |
 | delivery-service | order-service | 송장 등록 시 주문 상태 `SHIPPING` 전이, 배송 완료 반영, 해외 출고 통관 품목(주문 항목 스냅숏) 조회 (#18) |
