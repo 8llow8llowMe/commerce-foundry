@@ -9,8 +9,8 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderExceptio
 import com.commercefoundry.domainlayer.order.application.model.ShippingFeeQuoteQuery;
 import com.commercefoundry.domainlayer.order.application.port.out.ShippingFeeQueryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.ShippingFeeQuoteQueryResult;
-import com.commercefoundry.domainlayer.order.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.EnumSet;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
