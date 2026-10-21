@@ -17,7 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * </ul>
  *
  * <p>{@code @Testcontainers(disabledWithoutDocker = true)} 를 쓰지 않는 이유 — CI 러너에서 Docker 를 못 찾으면 테스트가 조용히 skip 되고
- * 초록불이 난다. 그러면 스냅숏 DDL 을 PostgreSQL 에 적용하는 검증과 QueryDSL · JPQL 실제 질의가 소리 없이 사라진다.
+ * 초록불이 난다. 그러면 실제 S3 호환 서버 왕복(서명 · Range · CopyObject · 조건부 요청) 검증이 소리 없이 사라진다.
  * {@code @Testcontainers}(기본값) 와 함께 붙인다 ({@code bootstrap-conventions.md} 리포지토리 테스트).
  */
 @Target({ElementType.TYPE, ElementType.METHOD})

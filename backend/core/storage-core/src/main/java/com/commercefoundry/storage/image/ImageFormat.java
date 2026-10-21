@@ -9,6 +9,9 @@ import java.util.Optional;
  *
  * <p>판별은 파일 <b>맨 앞</b>만 본다 — 앞이 다른 형식이고 뒤에 JPEG 를 붙인 폴리글롯, SVG · HTML(스크립트를 품을 수 있다) · GIF 는 어느 형식도 아니다.
  * 앞 {@link #DETECTION_LENGTH} 바이트를 {@code ObjectStorageClient.readRange} 로 읽어 {@link #detect} 에 넘긴다.
+ *
+ * <p>유효한 헤더 <b>뒤에</b> HTML · JS 를 품은 파일은 판별로 막지 못한다. 그 방어는 복사본 Content-Type 고정({@code copy} 의 메타데이터 교체) ·
+ * 공개 도메인의 {@code X-Content-Type-Options: nosniff} · 공개 도메인과 스토어 · 어드민 origin 분리다 ({@code bootstrap-conventions.md} Storage).
  */
 public enum ImageFormat {
 

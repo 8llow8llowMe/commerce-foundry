@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.storage.client.ObjectStorageClient;
+import com.commercefoundry.storage.client.ObjectStorageClients;
 import com.commercefoundry.storage.client.StorageException;
 import com.commercefoundry.storage.client.StorageException.Reason;
 import com.commercefoundry.storage.properties.StorageProperties;
@@ -42,8 +43,8 @@ class StorageStartupGuardTest {
             ObjectStorageClient client = context.getBean(ObjectStorageClient.class);
             assertDisabled(() -> client.presignPut("uploads/a.jpg", "image/jpeg", 10));
             assertDisabled(() -> client.head("uploads/a.jpg"));
-            assertDisabled(() -> client.readRange("uploads/a.jpg", 12));
-            assertDisabled(() -> client.copy("uploads/a.jpg", "products/1/2.jpg", "image/jpeg", null));
+            assertDisabled(() -> client.readRange("uploads/a.jpg", 12, "\"etag\""));
+            assertDisabled(() -> client.copy("uploads/a.jpg", "products/1/2.jpg", "image/jpeg", null, "\"etag\""));
             assertDisabled(() -> client.delete("uploads/a.jpg"));
             assertDisabled(() -> client.put("migrated/a.jpg", new byte[] {1}, "image/jpeg", null));
             // 공개 주소가 없으면 공개 URL 도 만들 수 없다
@@ -111,6 +112,7 @@ class StorageStartupGuardTest {
                 StorageProperties properties = context.getBean(StorageProperties.class);
                 assertThat(properties.publicBaseUrl()).isEqualTo("https://cdn.example.test");
                 assertThat(properties.presignTtl()).isEqualTo(Duration.ofMinutes(5));
+                assertThat(properties.apiCallTimeout()).isEqualTo(Duration.ofSeconds(8));
                 assertThat(properties.pathStyleAccess()).isTrue();
                 assertThat(properties.toString()).doesNotContain("test-access-key", "test-secret-key");
 
@@ -131,7 +133,7 @@ class StorageStartupGuardTest {
                 "STORAGE_ACCESS_KEY", "test-access-key",
                 "STORAGE_SECRET_KEY", "test-secret-key",
                 "STORAGE_PUBLIC_BASE_URL", "https://cdn.example.test")))
-            .withPropertyValues("storage.connect-timeout=2s", "storage.read-timeout=10s")
+            .withPropertyValues("storage.connect-timeout=2s", "storage.read-timeout=5s", "storage.api-call-timeout=8s")
             .run(context -> {
                 assertThat(context).hasNotFailed();
                 StorageProperties properties = context.getBean(StorageProperties.class);
@@ -140,6 +142,17 @@ class StorageStartupGuardTest {
                 assertThat(properties.accessKey()).isEqualTo("test-access-key");
                 assertThat(properties.secretKey()).isEqualTo("test-secret-key");
                 assertThat(properties.publicBaseUrl()).isEqualTo("https://cdn.example.test");
+            });
+    }
+
+    @Test
+    @DisplayName("타임아웃은 yml 기본값이지만 환경변수 STORAGE_API_CALL_TIMEOUT 으로도 바꿀 수 있다(relaxed binding)")
+    void bindsApiCallTimeoutFromEnvironment() {
+        runner.withInitializer(systemEnvironment(Map.of("STORAGE_API_CALL_TIMEOUT", "9s")))
+            .withPropertyValues(enabledWithout("storage.api-call-timeout"))
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context.getBean(StorageProperties.class).apiCallTimeout()).isEqualTo(Duration.ofSeconds(9));
             });
     }
 
@@ -183,7 +196,7 @@ class StorageStartupGuardTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"storage.connect-timeout", "storage.read-timeout"})
+    @ValueSource(strings = {"storage.connect-timeout", "storage.read-timeout", "storage.api-call-timeout"})
     @DisplayName("켜져 있는데 타임아웃이 없으면 기동하지 않는다 — 타임아웃 없는 블로킹 호출 금지")
     void failsWithoutTimeout(String property) {
         runner.withPropertyValues(enabledWithout(property))
@@ -194,18 +207,27 @@ class StorageStartupGuardTest {
     @ValueSource(strings = {"0", "0s", "-1s"})
     @DisplayName("타임아웃이 0 이하면 기동하지 않는다")
     void failsWithNonPositiveTimeout(String timeout) {
-        runner.withPropertyValues(enabled("storage.connect-timeout=" + timeout, "storage.read-timeout=" + timeout))
-            .run(context -> assertStartupFailure(context, "storage.connect-timeout", "storage.read-timeout"));
+        runner.withPropertyValues(enabled("storage.connect-timeout=" + timeout, "storage.read-timeout=" + timeout, "storage.api-call-timeout=" + timeout))
+            .run(context -> assertStartupFailure(context, "storage.connect-timeout", "storage.read-timeout", "storage.api-call-timeout"));
+    }
+
+    @Test
+    @DisplayName("호출 전체 시간 상한이 응답 타임아웃보다 짧으면 기동하지 않는다 — 같으면 기동한다")
+    void failsWhenApiCallTimeoutShorterThanReadTimeout() {
+        runner.withPropertyValues(enabled("storage.read-timeout=5s", "storage.api-call-timeout=4s"))
+            .run(context -> assertStartupFailure(context, "storage.api-call-timeout", "storage.read-timeout", "이상"));
+        runner.withPropertyValues(enabled("storage.read-timeout=5s", "storage.api-call-timeout=5s"))
+            .run(context -> assertThat(context).hasNotFailed());
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"storage.connect-timeout", "storage.read-timeout", "storage.presign-ttl"})
-    @DisplayName("시간 형식이 틀리면 Boot 의 바인딩 오류 대신 위반 목록에 넣고, 메시지에 값을 넣지 않는다")
+    @ValueSource(strings = {"storage.connect-timeout", "storage.read-timeout", "storage.api-call-timeout", "storage.presign-ttl"})
+    @DisplayName("시간 형식이 틀리면 Boot 의 바인딩 오류 대신 위반 목록에 넣고, 메시지에 값을 넣지 않는다 — '없음' 위반을 겹쳐 알리지 않는다")
     void reportsMalformedDurationWithoutValue(String property) {
         runner.withPropertyValues(enabled(property + "=bad-duration-value"))
             .run(context -> {
                 assertStartupFailure(context, property, "형식");
-                assertThat(context.getStartupFailure().getMessage()).doesNotContain("bad-duration-value");
+                assertThat(context.getStartupFailure().getMessage()).doesNotContain("bad-duration-value", "0 이하", "15분", "이상이어야");
                 assertThat(context.getStartupFailure()).hasNoCause();
             });
     }
@@ -253,9 +275,56 @@ class StorageStartupGuardTest {
                 "storage.presign-ttl=30m")
             .run(context -> {
                 assertStartupFailure(context, "storage.endpoint", "storage.region", "storage.bucket", "storage.access-key",
-                    "storage.public-base-url", "storage.presign-ttl", "storage.connect-timeout", "storage.read-timeout");
+                    "storage.public-base-url", "storage.presign-ttl", "storage.connect-timeout", "storage.read-timeout", "storage.api-call-timeout");
                 assertThat(context.getStartupFailure().getMessage()).doesNotContain("test-secret-value", "user:pass", "storage.example.test");
             });
+    }
+
+    // ── 공개 팩토리(ObjectStorageClients.create) — 가드를 거치지 않아도 같은 규칙 ──────────
+
+    @Test
+    @DisplayName("공개 팩토리도 가드와 같은 규칙으로 막는다 — 루프백이 아닌 http · TTL 범위 밖 · 타임아웃 없음. 메시지에 값을 넣지 않는다")
+    void factoryRejectsWhatGuardRejects() {
+        StorageProperties properties = new StorageProperties(true, "http://storage.example.test", "us-east-1", "test-bucket", "test-access-key",
+            "test-secret-key", "https://cdn.example.test", true, Duration.ofMinutes(30), Duration.ofSeconds(2), Duration.ofSeconds(5), null);
+
+        assertThatThrownBy(() -> ObjectStorageClients.create(properties))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContainingAll("storage.endpoint", "https", "storage.presign-ttl", "storage.api-call-timeout")
+            .satisfies(e -> assertThat(e.getMessage()).doesNotContain("storage.example.test", "test-access-key", "test-secret-key"));
+    }
+
+    @Test
+    @DisplayName("공개 팩토리 — 호출 전체 상한이 응답 타임아웃보다 짧거나, 꺼져 있는데 채운 공개 주소가 https 가 아니면 막는다")
+    void factoryRejectsTimeoutOrderAndDisabledPublicUrl() {
+        StorageProperties shortCall = new StorageProperties(true, "https://storage.example.test", "us-east-1", "test-bucket", "test-access-key",
+            "test-secret-key", "https://cdn.example.test", true, Duration.ofMinutes(5), Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(4));
+        StorageProperties disabledHttp = new StorageProperties(false, null, null, null, null, null, "http://cdn.example.test", null, null, null, null, null);
+
+        assertThatThrownBy(() -> ObjectStorageClients.create(shortCall))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContainingAll("storage.api-call-timeout", "storage.read-timeout");
+        assertThatThrownBy(() -> ObjectStorageClients.create(disabledHttp))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContainingAll("storage.public-base-url", "https");
+    }
+
+    @Test
+    @DisplayName("공개 팩토리 — 맞는 설정이면 만든다(켜짐은 오프라인 서명, 꺼짐은 I/O 가 DISABLED)")
+    void factoryCreatesWithValidSettings() throws Exception {
+        StorageProperties enabled = new StorageProperties(true, "https://storage.example.test", "us-east-1", "test-bucket", "test-access-key",
+            "test-secret-key", "https://cdn.example.test/", null, Duration.ofMinutes(5), Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(8));
+        StorageProperties disabled = new StorageProperties(null, null, null, null, null, null, null, null, null, null, null, null);
+
+        ObjectStorageClient client = ObjectStorageClients.create(enabled);
+        try {
+            assertThat(client.presignPut("uploads/a.jpg", "image/jpeg", 10).uploadUrl()).startsWith("https://storage.example.test/test-bucket/uploads/a.jpg?");
+        } finally {
+            if (client instanceof AutoCloseable closeable) {
+                closeable.close();
+            }
+        }
+        assertDisabled(() -> ObjectStorageClients.create(disabled).head("uploads/a.jpg"));
     }
 
     private static void assertDisabled(ThrowingCallable call) {
@@ -280,7 +349,8 @@ class StorageStartupGuardTest {
         values.put("storage.secret-key", "test-secret-key");
         values.put("storage.public-base-url", "https://cdn.example.test/");
         values.put("storage.connect-timeout", "2s");
-        values.put("storage.read-timeout", "10s");
+        values.put("storage.read-timeout", "5s");
+        values.put("storage.api-call-timeout", "8s");
         return values;
     }
 

@@ -18,6 +18,11 @@ public class StorageException extends RuntimeException {
         ACCESS_DENIED("스토리지가 접근을 거부했습니다 (키 · 권한 · 서명)"),
         /** 읽거나 복사할 객체가 없다. */
         NOT_FOUND("객체가 없습니다"),
+        /**
+         * 412 — 객체가 확인({@code head}) 뒤 바뀌었다. {@code readRange} · {@code copy} 의 {@code expectedETag} 가 지금 ETag 와 다르다.
+         * 같은 키에 다른 내용이 다시 올라온 경우라 확인 결과를 믿을 수 없다 — 서비스는 다시 확인하라는 4xx(400 · 409)로 번역한다.
+         */
+        CHANGED("객체가 확인한 뒤 바뀌었습니다 (ETag 불일치)"),
         /** 그 밖의 4xx — 요청이나 설정(버킷 등)이 스토리지 규칙에 맞지 않는다. */
         REJECTED("스토리지가 요청을 거절했습니다");
 
