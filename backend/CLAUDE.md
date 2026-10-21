@@ -38,7 +38,7 @@ cd backend
 docker compose -f docker-compose-local.yml up -d --wait   # PostgreSQL + Redis (.env 필요 — docs/local-run-guide.md)
 ```
 
-- 루트 `./gradlew check`(전 모듈 테스트)는 로컬 기본 검증이 아니다 — CI 가 그룹 병렬로 돌린다. 같은 PC 에서 여러 세션이 빌드하므로 범위를 좁힌다(`docs/local-run-guide.md` §4-1).
+- 루트 `./gradlew check`(전 모듈 테스트)는 로컬 기본 검증이 아니다 — CI 가 그룹 병렬로 돌린다(PR 은 바꾼 모듈과 그 의존 모듈, develop 은 전 모듈). 같은 PC 에서 여러 세션이 빌드하므로 범위를 좁힌다(`docs/local-run-guide.md` §4-1).
 - 데몬을 쓴다. `--no-daemon` 은 JVM 크래시 직후 한 번만, **`./gradlew --stop` 은 쓰지 않는다**(다른 세션 빌드까지 끊긴다).
 
 ## 파일 인코딩 규칙 (필수)
