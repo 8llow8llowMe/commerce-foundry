@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.shippingaddress.domain.model;
 
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -34,8 +35,6 @@ public record ShippingAddressContent(
     String city,
     String stateProvince
 ) {
-
-    public static final String DOMESTIC_COUNTRY_CODE = "KR";
 
     public static final int LABEL_MAX_LENGTH = 30;
     public static final int RECIPIENT_NAME_MAX_LENGTH = 50;
@@ -113,8 +112,9 @@ public record ShippingAddressContent(
         return new ShippingAddressContent(label, recipientName, recipientPhone, countryCode, postalCode, addressLine1, addressLine2, city, stateProvince);
     }
 
+    /** 국내 배송지인가 — 국내 국가 코드는 shared-commerce {@link ShippingScope#DOMESTIC_COUNTRY_CODE} 한 곳에 둔다 (#144). */
     public static boolean isDomestic(String countryCode) {
-        return DOMESTIC_COUNTRY_CODE.equals(countryCode);
+        return ShippingScope.DOMESTIC_COUNTRY_CODE.equals(countryCode);
     }
 
     public static boolean isValidCountryCode(String countryCode) {
