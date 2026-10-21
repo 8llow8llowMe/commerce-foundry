@@ -28,8 +28,8 @@ public class ProductServiceApplication {
 
 | 파일 | 담는 것 |
 |------|---------|
-| `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, `ResourceServerSecurityConfigurer` · `InternalResourceServerConfigurer` — 전 서비스, `JwtIssuerConfigurer` — auth 만, `InternalTokenIssuerConfigurer` — internal Feign 클라이언트가 있는 서비스만, `RedisConfigurer` — Redis 를 쓰는 서비스만) |
-| `*PropertiesConfig` | 공통 프로퍼티 `@Import` (`JwtVerificationPropertiesConfig` · `InternalTokenPropertiesConfig` — 전 서비스, `JwtIssuerPropertiesConfig` — auth 만) + 서비스 도메인 프로퍼티 `@EnableConfigurationProperties` |
+| `*BeansConfig` | 공통 Configurer `@Import` (Snowflake, Querydsl, SwaggerSecurity, `ResourceServerSecurityConfigurer` · `InternalResourceServerConfigurer` — 전 서비스, `JwtIssuerConfigurer` — auth 만, `InternalTokenIssuerConfigurer` — internal Feign 클라이언트가 있는 서비스만, `RedisConfigurer` — Redis 를 쓰는 서비스만, `StorageConfigurer` — 오브젝트 스토리지를 쓰는 서비스만) |
+| `*PropertiesConfig` | 공통 프로퍼티 `@Import` (`JwtVerificationPropertiesConfig` · `InternalTokenPropertiesConfig` — 전 서비스, `JwtIssuerPropertiesConfig` — auth 만, `StoragePropertiesConfig` — 오브젝트 스토리지를 쓰는 서비스만) + 서비스 도메인 프로퍼티 `@EnableConfigurationProperties` |
 | `*FeaturesConfig` | JPA Auditing(`BaseEntity` 시각), Scheduling, Async 같은 기능 스위치 |
 | `*FeignConfig` | `@EnableFeignClients` — Feign 클라이언트가 있는 서비스만 (위 Application 절) |
 | `*SwaggerConfig` | 서비스 Swagger 그룹 (고객 / 어드민 그룹 분리) |
@@ -254,6 +254,49 @@ spring:
 - 타임아웃 값은 예시다. 서비스가 정하되 비우지 않는다.
 - `url` · `sentinel` · `cluster` · `masterreplica` 는 쓰지 않는다 — standalone 만 지원하고 가드가 막는다.
 - 키 TTL 은 서비스 프로퍼티로 둔다 (근거는 `coding-conventions.md` §9-7 TTL 표).
+
+## Storage (오브젝트 스토리지를 쓰는 서비스만)
+
+`*BeansConfig` 가 `StorageConfigurer` 를, `*PropertiesConfig` 가 `StoragePropertiesConfig` 를 `@Import` 하고 `build.gradle` 에
+`implementation project(':core:storage-core')` 를 더한다. 서비스가 받는 것은 `ObjectStorageClient` 빈 하나다 — AWS SDK 는 storage-core 의
+`implementation` 이라 서비스 코드에서 보이지 않는다. 처음 쓰는 곳은 product-service 상품 이미지(#9 PR-F)다.
+
+```yaml
+storage:
+  enabled: ${STORAGE_ENABLED:false}   # 닫힌 기본값 — 켜는 것은 배포 설정의 환경변수다(Vault 키 아님)
+  endpoint: ${STORAGE_ENDPOINT:}
+  region: ${STORAGE_REGION:}
+  bucket: ${STORAGE_BUCKET:}
+  access-key: ${STORAGE_ACCESS_KEY:}
+  secret-key: ${STORAGE_SECRET_KEY:}
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL:}
+  presign-ttl: 5m          # 업로드 서명 URL 유효 시간 — 1분 이상 15분 이하
+  connect-timeout: 2s      # 켜면 필수 — 없거나 0 이하면 기동하지 않는다
+  read-timeout: 10s        # 켜면 필수
+```
+
+- **기본값은 꺼짐이다.** 꺼져 있으면 값이 비어 있어도(dev Vault 가 비어도) 기동하고, `ObjectStorageClient` 빈은 그대로 있되 I/O 메서드가 전부
+  `StorageException(DISABLED)` 를 던진다. 어댑터는 빈 유무를 분기하지 않고 이 예외를 도메인 503 으로 번역한다. 공개 주소가 있으면 `publicUrlOf` 는 동작한다.
+- **켜면 `StorageStartupGuard` 가 클라이언트를 만들기 전에 검사한다** — endpoint · region · bucket · access-key · secret-key · public-base-url 이 비었거나
+  `${...}` 가 풀리지 않았는지, endpoint · public-base-url 이 https 인지(루프백 호스트만 http 허용), 버킷 이름 규칙, presign-ttl 1~15분, 타임아웃 양수.
+  위반은 모아서 한 번에 알리고 메시지에 값을 넣지 않는다 (`RedisStartupGuard` 와 같은 방식). public-base-url 끝의 `/` 는 지운다.
+- 체크섬 계산 · 검증은 `WHEN_REQUIRED` 로 낮춰 두었다 — SDK 2.30 부터의 기본값(모든 업로드에 CRC)을 지원하지 않는 S3 호환 스토리지가 있다.
+- 키 규칙(어느 prefix 에 무엇을 두는가) · 허용 형식 · 용량 상한은 서비스가 정한다. storage-core 는 키의 빈 구간 · `.` · `..` · 제어 문자만 막는다.
+  형식은 `ImageFormat.detect(client.readRange(key, ImageFormat.DETECTION_LENGTH))` 로 앞부분 magic bytes 를 본다(JPEG · PNG · WebP, 폴리글롯 · SVG · HTML 거절).
+- `StorageException.reason()` 으로 번역한다 — `UNAVAILABLE`(네트워크 · 타임아웃 · 5xx · 429) · `DISABLED` 는 503, `ACCESS_DENIED` · `REJECTED` 는 설정 문제(503 + 로그),
+  `NOT_FOUND` 는 업로드가 없거나 만료된 것이다. 메시지에는 동작과 원인만 있고 키 · 서명 URL 은 없다.
+- **서비스 테스트는 가짜 포트를 쓴다.** 컨텍스트 로딩 테스트는 기본값(꺼짐)으로 뜨고, 업무 테스트는 서비스의 out-port(`ImageStoragePort` 등) 가짜로 대신한다.
+  실제 S3 호환 서버 왕복은 storage-core 의 `S3CompatibleObjectStorageRoundTripTest`(Testcontainers · `@EnabledWithDockerOrOnCi`)가 본다.
+
+**스토리지 서버에 필요한 설정 (사용자 인프라 MinIO — #9 D2, 설정은 사용자가 한다).** 코드가 대신 걸지 않는다 — 켜기 전에 아래가 되어 있어야 한다.
+
+| 항목 | 필요 조건 | 이유 |
+|------|-----------|------|
+| 주소 | path-style(`{endpoint}/{bucket}/{key}`) 접근, endpoint · 공개 주소는 https | 브라우저가 https 어드민 화면에서 서명 URL 로 바로 올린다 — http 면 막힌다 |
+| 버킷 CORS | 어드민 origin 에 `PUT` 과 `Content-Type` 요청 헤더 허용 | presigned PUT 은 브라우저 → 스토리지 교차 출처 요청이다. MinIO 는 버전에 따라 버킷 CORS 대신 서버 설정 `MINIO_API_CORS_ALLOW_ORIGIN` 으로 건다 |
+| 수명 규칙 | `uploads/` 접두어 객체를 1일 뒤 삭제 (MinIO ILM 만료 규칙) | 올리고 저장하지 않은 임시 업로드를 치운다 — 상품에 붙인 이미지는 `products/` 로 복사해 두므로 지워지지 않는다 |
+| 공개 읽기 | `products/` 접두어 익명 읽기(또는 그 앞의 CDN) | 고객 화면은 `STORAGE_PUBLIC_BASE_URL` + 키로 이미지를 바로 읽는다 |
+| 접근 키 | 그 버킷에 PutObject · GetObject · CopyObject(Get+Put) · DeleteObject 만 | 서비스가 쓰는 동작만 준다 |
 
 ## Reason
 

@@ -55,7 +55,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | `persistence-core` | auth · product · order · payment · delivery |
 | `redis-core` | auth(토큰·소셜 state) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
 | `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
-| `storage-core` | product(상품 이미지) |
+| `storage-core` | product(상품 이미지 — 모듈만 있다(#9 PR-A). 연결은 이미지 업로드 발급 · 첨부(#9 PR-F)에서 한다) |
 | `shared-commerce` | product · order · payment · delivery · auth(배송지 국내 국가 판정 — #144) |
 
 ## 4. 데이터 저장소
@@ -65,6 +65,8 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 - 운영 규모가 커지면 인스턴스를 나눌 수 있게 스키마 간 FK·조인을 만들지 않는다.
 - 스키마 관리: 마이그레이션 도구 없음 — local · dev 는 `ddl-auto: update`, 운영은 `none` 이고 사용자가 DDL 을 직접 적용한다
   (`coding-conventions.md` §9-8).
+- 오브젝트 스토리지(상품 이미지): **사용자 인프라의 S3 호환 MinIO** 를 path-style 로 쓴다 (#9 D2). 코드는 `storage-core` 의 S3 호환 클라이언트 하나라
+  다른 S3 호환 제공자로 바꿔도 endpoint · region 설정만 바뀐다. 접속 값은 Vault, 버킷 CORS · 수명 규칙 설정은 사용자 몫이다 (`bootstrap-conventions.md` Storage).
 
 ### 4-1. 기술 버전
 
@@ -82,6 +84,8 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | MapStruct | 1.6.3 (+ lombok-mapstruct-binding 0.2.0) | Entity ↔ Domain 매퍼 (`coding-conventions.md` §4). Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정 |
 | ArchUnit | 1.4.1 (core 라이브러리만) | 컨트롤러 인가 · Feign 전역 설정 정적 규칙 (`security-guide.md` §9-11). JUnit 엔진(archunit-junit5)은 쓰지 않는다. Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정 |
 | Testcontainers | 2.0.5 (Boot BOM) | 리포지토리 테스트의 PostgreSQL 17. Docker 가 없으면 로컬은 건너뛰고 CI 는 실패한다 (`bootstrap-conventions.md`) |
+| AWS SDK for Java v2 | 2.55.11 (storage-core 만 · `s3` + `url-connection-client`) | Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정. `implementation` 이라 서비스는 SDK 타입을 보지 못한다. 딸려 오는 `apache5-client` · `netty-nio-client` 는 뺀다 (Boot BOM 이 HttpClient 5 를 낮춰 고정한다) |
+| S3 호환 테스트 서버 | MinIO RELEASE.2025-07-23 (`bitnamilegacy/minio:2025.7.23-debian-12-r5`) | storage-core 왕복 테스트(CI 전용). MinIO 공식 이미지 · 바이너리 배포가 끝나 Bitnami 가 마지막으로 빌드한 이미지를 고정한다(갱신 없음). Testcontainers MinIO 모듈은 공식 이미지 기동 방식이라 쓰지 않고 `GenericContainer` 로 띄운다 |
 | PostgreSQL / Redis (로컬) | 17 / 7.4 | `docker-compose-local.yml` |
 
 ## 5. 결정 대기
@@ -92,6 +96,5 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | 비회원 주문 | 지원 / 미지원 | 주문 생성 |
 | USD 가격 | SKU 별 통화 가격표 / 환율 환산 | 해외 판매 |
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
-| 오브젝트 스토리지 | S3 / Cloudflare R2 / NCP Object Storage | 상품 이미지 |
 | 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |
 | 서비스 간 인증 2단계 | 서비스별 RS256 키 / 플랫폼 mTLS — 1단계(공용 HS256, #51)의 호출자 "선언" 을 "증명" 으로 바꾼다 (`security-guide.md` §9-9) | 배포 환경 결정 후 |
