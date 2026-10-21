@@ -29,4 +29,10 @@ public interface LoginAttemptCounterPort {
 
     /** 그 이메일의 창을 지운다 — 다음 시도는 1부터 센다. 이미 없으면 아무 일도 없다. */
     void reset(AttemptKind kind, String normalizedEmail);
+
+    /**
+     * 로그에 남길 수 있는 짧은 꼬리표 — 같은 이메일이면 같은 값이고, 키에 쓰는 해시의 앞 8자 이하다 (#66 A2 전제 7).
+     * 이메일 원문 · 전체 해시는 돌려주지 않는다. 저장소를 부르지 않는다. 잠금으로 바뀌는 순간처럼 드문 로그에만 쓴다.
+     */
+    String subjectTag(String normalizedEmail);
 }

@@ -117,15 +117,21 @@ auth:
     # 회원당 배송지 수 상한 (1~100). 넘으면 409(AUTH_021). 목록은 페이지 없이 전체를 내므로 응답 크기의 상한이기도 하다
     max-per-member: 20
   login-guard:
-    # 로그인 · 회원가입 시도 제한 (#66) — 같은 이메일의 시도를 고정 창으로 센다(auth:login-attempt · auth:sign-up-attempt)
-    # 로그인 · 회원가입 흐름에 연결하기 전이라 끈다 — 끄면 HMAC 키 없이 뜬다. 연결하는 커밋에서 켜고 키를 필수로 한다
-    enabled: false
-    # 창 하나에 허용하는 시도 수. 1 이상 100 이하가 아니면 기동하지 않는다(AuthLoginGuardProperties)
+    # 로그인 · 관리자 로그인 · 회원가입 시도 제한 (#66, security-guide.md §12) — 같은 이메일의 시도를 고정 창으로 센다
+    # (auth:login-attempt · auth:admin-login-attempt · auth:sign-up-attempt). 넘으면 429 AUTH_040(로그인) · AUTH_041(가입) + Retry-After.
+    # 인스턴스 전부 같은 enabled · 같은 hash-key 여야 한다. 끄면 HMAC 키 없이 뜨고 기동 때 warn 을 한 번 남긴다
+    enabled: true
+    # 로그인(고객 · 관리자 — 값은 같고 창은 따로) 창 하나에 허용하는 시도 수. 1 이상 100 이하가 아니면 기동하지 않는다(AuthLoginGuardProperties)
     max-attempts: 5
     # 첫 시도부터 재는 창. 이어지는 시도가 늘리지 않는다. 1분 이상 1시간 이하가 아니면 기동하지 않는다(키가 창만큼 남는다 — LoginAttemptPolicy.MAX_WINDOW)
     window: 15m
-    # 정규화한 이메일을 Redis 키로 바꾸는 HMAC 키 (Vault). 켜면 필수 — base64 32바이트 이상, auth 인스턴스 전부 같은 값. 비었거나 풀리지 않으면 기동하지 않는다
-    hash-key: ${AUTH_LOGIN_GUARD_HASH_KEY:}
+    # 정규화한 이메일을 Redis 키로 바꾸는 HMAC 키 (Vault, secret-management.md). 켜면 필수 — base64 32바이트 이상, auth 인스턴스 전부 같은 값.
+    # 기본값을 두지 않는다 — 비었거나 풀리지 않으면 기동하지 않는다. 바꾸면 진행 중인 창이 모두 새로 시작한다
+    hash-key: ${AUTH_LOGIN_GUARD_HASH_KEY}
+    # 회원가입 창 — 같은 이메일로 반복하는 가입(409 폴링 · BCrypt 반복)을 센다. 범위는 로그인과 같다. Redis 장애면 세지 않고 통과시킨다(fail-open)
+    sign-up:
+      max-attempts: 5
+      window: 10m
 
 swagger:
   # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다

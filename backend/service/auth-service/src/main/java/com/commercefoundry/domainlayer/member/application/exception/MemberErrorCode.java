@@ -7,7 +7,8 @@ import org.springframework.http.HttpStatus;
 /**
  * 회원 · 인증 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link MemberValidationMessage} 에 둔다.
  *
- * <p>접두어는 서비스 단위 {@code AUTH_} 다 — 로그인 · 토큰(#4 A3 · A4)도 같은 코드 공간을 쓴다. 001~009 는 회원, 010~ 은 토큰, 030~ 은 관리자(#6)다.
+ * <p>접두어는 서비스 단위 {@code AUTH_} 다 — 로그인 · 토큰(#4 A3 · A4)도 같은 코드 공간을 쓴다. 001~009 는 회원, 010~ 은 토큰, 030~ 은 관리자(#6),
+ * 040~049 는 시도 제한(#66)이다.
  * 로그인 실패는 401 이 아니라 400 이다 — 401 은 토큰(access · refresh) 거절에만 쓴다 (#4 결정 5).
  */
 @Getter
@@ -35,6 +36,16 @@ public enum MemberErrorCode {
      * 코드만 관리자 대역이다 — 어드민 콘솔이 고객 화면과 따로 다룰 수 있게. 어느 이유든 이 코드 하나라 계정 종류는 드러나지 않는다.
      */
     ADMIN_LOGIN_FAILED("AUTH_030", "이메일 또는 비밀번호가 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
+
+    // ── 시도 제한 (#66, AUTH_040~049) — 예외는 LoginAttemptLimitedException(Retry-After 를 싣는다)
+
+    /**
+     * 같은 이메일의 로그인 시도가 창의 허용 횟수를 넘었다 — 고객 · 관리자 로그인 모두. 비밀번호가 맞아도 거절하고, 계정이 있든 없든 같은 본문 · 헤더다
+     * ({@code security-guide.md} §12). 창이 끝나면 다시 허용한다.
+     */
+    LOGIN_ATTEMPT_LIMITED("AUTH_040", "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.TOO_MANY_REQUESTS),
+    /** 같은 이메일의 회원가입 시도가 창의 허용 횟수를 넘었다. 가입된 이메일이든 아니든 같은 본문 · 헤더다 (BCrypt · 중복 확인 전에 판정). */
+    SIGN_UP_ATTEMPT_LIMITED("AUTH_041", "회원가입 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.TOO_MANY_REQUESTS),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
     INVALID_REQUEST("AUTH_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

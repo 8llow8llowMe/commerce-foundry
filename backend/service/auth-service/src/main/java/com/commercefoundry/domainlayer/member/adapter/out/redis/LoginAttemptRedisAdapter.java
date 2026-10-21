@@ -22,6 +22,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
 
+    static final int SUBJECT_TAG_LENGTH = 8;
+
     private final StringRedisTemplate redisTemplate;
     private final LoginAttemptKeyHasher keyHasher;
 
@@ -40,6 +42,12 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
     public void reset(AttemptKind kind, String normalizedEmail) {
         String key = key(kind, normalizedEmail);
         execute(() -> redisTemplate.delete(key));
+    }
+
+    /** 키에 들어가는 HMAC(22자)의 앞 {@value #SUBJECT_TAG_LENGTH}자 — 전체 해시는 로그에 남기지 않는다. */
+    @Override
+    public String subjectTag(String normalizedEmail) {
+        return keyHasher.hash(Member.canonicalEmail(normalizedEmail)).substring(0, SUBJECT_TAG_LENGTH);
     }
 
     /** 스크립트 반환 {@code {시도 수, 남은 시간(ms)}} — 둘 다 정수 응답(Long)이다. 모양이 다르면 스크립트와 코드가 어긋난 것이라 그대로 실패한다. */

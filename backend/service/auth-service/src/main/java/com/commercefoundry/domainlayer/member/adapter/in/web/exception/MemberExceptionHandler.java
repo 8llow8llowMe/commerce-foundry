@@ -2,8 +2,10 @@ package com.commercefoundry.domainlayer.member.adapter.in.web.exception;
 
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.exception.ValidationErrorSupport;
+import com.commercefoundry.domainlayer.member.application.exception.LoginAttemptLimitedException;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -31,6 +33,18 @@ public class MemberExceptionHandler {
     public ResponseEntity<Response<Void>> handleMemberException(MemberException exception) {
         MemberErrorCode errorCode = exception.getErrorCode();
         return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), exception.getMessage()));
+    }
+
+    /**
+     * 시도 제한 초과 (#66) — 429 {@code AUTH_040} · {@code AUTH_041} 봉투에 {@code Retry-After}(초, {@code max(1, ceil(ms/1000))})를 붙인다.
+     * 게이트웨이 {@code GATEWAY_006} 과 같은 모양이다. 본문 · 헤더는 계정 존재와 무관하다 — 남은 창 시간만 싣는다.
+     */
+    @ExceptionHandler(LoginAttemptLimitedException.class)
+    public ResponseEntity<Response<Void>> handleLoginAttemptLimited(LoginAttemptLimitedException exception) {
+        MemberErrorCode errorCode = exception.getErrorCode();
+        return ResponseEntity.status(errorCode.getHttpStatus())
+            .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.retryAfterSeconds()))
+            .body(Response.fail(errorCode.getCode(), exception.getMessage()));
     }
 
     /** {@code @Valid @RequestBody} 검증 실패. 코드는 {@code MemberValidationMessage} 접두어를 따른다. */
