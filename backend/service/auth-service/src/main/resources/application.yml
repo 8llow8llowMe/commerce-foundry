@@ -104,6 +104,15 @@ auth:
   shipping-address:
     # 회원당 배송지 수 상한 (1~100). 넘으면 409(AUTH_021). 목록은 페이지 없이 전체를 내므로 응답 크기의 상한이기도 하다
     max-per-member: 20
+  login-guard:
+    # 로그인 · 회원가입 시도 제한 (#66) — 같은 이메일의 시도를 고정 창으로 센다(auth:login-attempt · auth:sign-up-attempt)
+    enabled: true
+    # 창 하나에 허용하는 시도 수. 1 이상 100 이하가 아니면 기동하지 않는다(AuthLoginGuardProperties)
+    max-attempts: 5
+    # 첫 시도부터 재는 창. 이어지는 시도가 늘리지 않는다. 1분 이상 24시간 이하가 아니면 기동하지 않는다
+    window: 15m
+    # 정규화한 이메일을 Redis 키로 바꾸는 HMAC 키 (Vault). 켜면 필수 — base64 32바이트 이상, auth 인스턴스 전부 같은 값. 비었거나 풀리지 않으면 기동하지 않는다
+    hash-key: ${AUTH_LOGIN_GUARD_HASH_KEY:}
 
 swagger:
   # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다
