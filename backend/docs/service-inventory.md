@@ -11,7 +11,7 @@
 | `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36), JWT 검증·ADMIN 확인·로그아웃 차단 목록 조회 (#4) | 라우팅(`api-design-guide.md` §1-2), JWT 검증(전역 보안 체인 — `security-guide.md` §7), 로그아웃 차단 목록 조회(Redis, 어드민 경로만 fail-closed), `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
 | `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 회원가입 · 내 정보 · 로그인 · 토큰 재발급 · 로그아웃 (#4) · 배송지 주소록 (#7) · 관리자 계정 (#6) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
 | `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) · 재고 (#10) · 어드민 카테고리 관리 (#9) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제/결제 후 복원), 상품 이미지, 다국어 상품정보, 통화별 가격 |
-| `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 장바구니 (#12) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
+| `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 장바구니 (#12) · 주문서 미리보기 · 주문 생성 (#13) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
 | `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
 | `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 국내 배송비 정책 (#11) · 해외 배송비 (#22) | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
 
@@ -34,12 +34,15 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 "국내 배송비 정책" 은 고객 정책 안내(`/api/v1/shipping-fees/policy`) · 어드민 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/domestic`) · 서비스 간 배송비 견적(`/internal/v1/shipping-fees/quotes`)이 있는 상태다.
 "해외 배송비" 는 고객 해외 정책 안내(`/api/v1/shipping-fees/international-policy`) · 어드민 해외 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/international`)가 있고, 같은 견적 API 가 KR 외 국가를 국가 그룹 · 무게 구간으로 계산하는 상태다. `store.features.international-shipping` 이 꺼지면(기본값) 고객 안내는 null, KR 외 견적은 `DELIVERY_002` 다(본문 검증 `118` · `119` · `120` 이 플래그 확인보다 먼저다). 견적 무게는 SKU 무게(#80) × 수량 합을 order-service 가 보내고(#13), 통관 신고 금액은 송장 · 출고(#18)다.
 "장바구니" 는 회원 장바구니(`/api/v1/carts/me/**` — 조회 · 담기 · 수량 변경 · 삭제 · 로컬 장바구니 병합)가 있고, 가격 · 판매 상태를 product-service SKU 벌크 조회(Feign, 서비스 토큰 · 서킷)로 매번 읽는 상태다. 정책은 `order-flow-guide.md` §2-1.
+"주문 생성" 은 주문서 금액 미리보기(`POST /api/v1/orders/quotes`) · 주문 생성(`POST /api/v1/orders`, `Idempotency-Key` 필수)이 있고, SKU 조회 → 배송비 견적 → 재고 선점 → 저장 순서로
+주문을 결제 대기(PENDING_PAYMENT)로 만드는 상태다(새 주문 201 · 같은 키 재생 200). 테이블은 `orders.orders` · `order_shipping_address` · `order_item` · `order_item_custom_option` · `order_status_history` · `order_request`(멱등 요청 기록 · 처리 중 lease) 다.
+결제 완료 · 장바구니 줄 제거는 #14, 만료 스윕은 #96, 주문 조회는 #16 이다 (`order-flow-guide.md` §2-4).
 
 ## 2. 서비스 간 호출 (동기, Feign)
 
 | 호출하는 쪽 | 대상 | 용도 |
 |-------------|------|------|
-| order-service | product-service | SKU 가격·판매 상태·무게·HS 코드 벌크 조회, 재고 선점·확정·해제·결제 후 복원 |
+| order-service | product-service | SKU 가격·판매 상태·무게·HS 코드 벌크 조회, 재고 선점·확정·해제·결제 후 복원. 주문 생성(#13)은 선점만 부르고 실패해도 해제하지 않는다(해제는 만료 · 취소 #96 · 클레임, 확정은 #14). 선점 거절 `PRODUCT_021 · 022 · 026 · 023` 을 `ORDER_016 · 003 · 018 · 017(500)` 으로 번역하고(다시 보내지 않는다) 나머지 실패는 503 `ORDER_002` |
 | order-service | delivery-service | 배송비 견적(`POST /internal/v1/shipping-fees/quotes` — 주문서 미리보기 · 주문 생성, #13). 업무 거절 `DELIVERY_001/002/003/011` 만 `ORDER_012~015` 로 번역하고 나머지 실패는 503 `ORDER_011`. 해외 주문에 무게 · HS 미입력 SKU 가 있으면 실제 견적 대신 같은 엔드포인트로 배송 가능 국가 확인용 견적(총 무게 1g)을 부른다 (`order-flow-guide.md` §2-3) |
 | order-service | payment-service | 클레임 환불 실행 |
 | payment-service | order-service | 결제 준비 시 주문 금액 조회, 결제 완료 알림 |
@@ -94,10 +97,11 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 
 ## 5. 결정 대기
 
+결정됨: **비회원 주문은 v1 에서 지원하지 않는다** (#13, `api-design-guide.md` §5). 주문서 미리보기 · 주문 생성은 로그인 회원만이다.
+
 | 항목 | 선택지 | 결정할 이슈 |
 |------|--------|-------------|
 | 서비스 간 비동기 메시징 | 없음(동기 + 재전송) / RabbitMQ / Kafka | 결제 연동 이후 |
-| 비회원 주문 | 지원 / 미지원 | 주문 생성 |
 | USD 가격 | SKU 별 통화 가격표 / 환율 환산 | 해외 판매 |
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
 | 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |

@@ -38,4 +38,17 @@ class OrderServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
         assertEnvelope(response, SecurityErrorCode.UNAUTHORIZED);
         assertWwwAuthenticate(response, "Bearer");
     }
+
+    /** 주문 생성(#13). 헤더 바인딩 · 본문 검증이 메서드 보안보다 먼저라 올바른 멱등 키 · 본문으로 보낸다. */
+    @Test
+    @DisplayName("토큰 없이 주문을 만들면 401 · SECURITY_001 봉투 · WWW-Authenticate: Bearer")
+    void anonymousOnOrderCreate() throws Exception {
+        MockHttpServletResponse response = perform(post("/api/v1/orders").contentType(MediaType.APPLICATION_JSON)
+            .header("Idempotency-Key", "3f2b8c1e-6a4d-4e2f-9b1a-7c5d2e8f0a11")
+            .content("{\"items\":[{\"skuId\":1,\"quantity\":1}],\"shippingAddress\":{\"recipientName\":\"테스트수령인\",\"recipientPhone\":\"010-0000-0001\","
+                + "\"countryCode\":\"KR\",\"postalCode\":\"63100\",\"addressLine1\":\"테스트시 테스트로 1\"}}"));
+
+        assertEnvelope(response, SecurityErrorCode.UNAUTHORIZED);
+        assertWwwAuthenticate(response, "Bearer");
+    }
 }

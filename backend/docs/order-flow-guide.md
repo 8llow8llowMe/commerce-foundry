@@ -10,12 +10,19 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
       │               │  └─▶ MAKING ─┘(주문 제작)            │
       ▼               ▼                                       ▼
    EXPIRED      CANCEL_REQUESTED ──▶ CANCELED         RETURN_REQUESTED ──▶ RETURNED
+      └──▶ PAID (만료 뒤 결제 완료 + 재선점 · 확정 성공, #14)
 ```
+
+허용 전이 표의 정본은 order-service `OrderStatus` 다(#13) — `PENDING_PAYMENT → PAID · EXPIRED`, `EXPIRED → PAID`, `PAID → MAKING · PREPARING · CANCEL_REQUESTED`,
+`MAKING → PREPARING · CANCEL_REQUESTED`, `PREPARING → SHIPPING · CANCEL_REQUESTED`, `SHIPPING → DELIVERED`, `DELIVERED → PURCHASE_CONFIRMED · RETURN_REQUESTED`,
+`CANCEL_REQUESTED → CANCELED`, `RETURN_REQUESTED → RETURNED`. 나머지는 전부 409 `ORDER_020`(`ORDER_STATUS_TRANSITION_INVALID`)이다.
+상태는 도메인 메서드로만 바꾼다 — 지금은 `Order.place`(→ `PENDING_PAYMENT`)와 `Order.expire(now)`(`PENDING_PAYMENT` 이고 기한이 지났을 때만 `EXPIRED`, 이미 `EXPIRED` 면 그대로)다.
+**결제 전 취소(`PENDING_PAYMENT → CANCELED`) · 요청 거절 후 복귀(`CANCEL_REQUESTED → PAID` 등)는 표에 넣지 않았다 — 클레임 이슈에서 정한다.**
 
 | 상태 | 뜻 | 누가 바꾸나 |
 |------|-----|-------------|
 | `PENDING_PAYMENT` | 주문 생성, 결제 대기 (재고 선점 중) | 고객 |
-| `EXPIRED` | 결제 없이 선점 시간 초과 | 스케줄러 |
+| `EXPIRED` | 결제 없이 선점 시간 초과. 그 뒤 결제가 완료되고 재고를 다시 잡으면 `PAID` 로 간다(#14) | 스케줄러 (#96) |
 | `PAID` | 결제 완료 | payment-service (internal) |
 | `MAKING` | 맞춤 제작 중 — `store.features.custom-order` 가 켜진 상품만 | 어드민 |
 | `PREPARING` | 출고 준비 | 어드민 |
@@ -167,6 +174,43 @@ delivery 에 배송 가능 국가 조회를 새로 여는 안(서비스 변경 �
   배송지 형식이 delivery 견적 본문 규칙보다 느슨하면 고객 입력 오류가 503 `ORDER_011` 로 보인다.
 - 로그에 배송지(우편번호) · 맞춤 제작 입력 값을 남기지 않는다 — 우편번호를 싣는 값(`ShippingFeeQuoteQuery` · `OrderQuoteCommand`)과 맞춤 입력(`OrderCustomOption`)의 `toString` 이 가린다.
 
+### 2-4. 주문서 미리보기 API · 주문 생성 (#13)
+
+고객 API 는 `POST /api/v1/orders/quotes`(미리보기, 저장 없음)와 `POST /api/v1/orders`(생성, `Idempotency-Key` 필수)다. 둘 다 `isAuthenticated()` — **v1 은 비회원 주문을 받지 않는다**.
+게이트웨이 `order-quote` 한도(#158)는 로그인 회원 기준으로 센다 — 미리보기를 비로그인으로 열지 않는다(`security-guide.md` §7-3). 끝 슬래시 경로(`/api/v1/orders/quotes/`)는 서비스에 매핑하지 않는다(404).
+두 API 모두 금액은 §2-3 의 같은 계산(`OrderQuoteProcessor#quote`)이다. SKU 를 직접 받는다(장바구니 줄 아이디가 아니다) — 장바구니에서 산 줄의 제거는 결제 완료(PAID, #14) 때
+맞춤 입력 해시(장바구니와 같은 알고리즘)로 찾아 지운다.
+
+| 항목 | 규칙 |
+|------|------|
+| 요청 형식 (`ORDER_1xx`) | 줄 1~50 · 수량 1~99(줄마다) · 맞춤 입력 최대 20개 · `fieldKey` 중복 불가 · 값은 **NFC 정규화 뒤 길이** 500자 이하(컬럼 초과가 500 이 되지 않게). 같은 (SKU, 입력) 줄 중복은 요청 검증이 아니라 §2-3 의 1단계(`ORDER_008`)가 본다 |
+| 배송지 | 미리보기는 `destination {countryCode, postalCode}`, 생성은 `shippingAddress {recipientName, recipientPhone, countryCode, postalCode, addressLine1, addressLine2, deliveryMemo}`. 국가 대문자 2자, KR 우편번호 숫자 5자리(필수), 해외 우편번호는 **선택**(영문 · 숫자 · 공백 · 하이픈 20자 이하, 비면 null). 주문자 · 별도 주문번호는 두지 않는다 — 식별자는 Snowflake 문자열 `orderId` 하나다 |
+| 생성 순서 | 0 헤더를 UUID 로 바인딩(형식 400 `ORDER_198`, 없음 400 `ORDER_199`) → 1 요청 기록 조회(트랜잭션 없음) → 2 SKU 조회 → §2-3 계산(배송비 견적 포함) → `expectedTotalAmount` 대조 → 3 기록 INSERT 또는 인수(각각 짧은 트랜잭션) → 4 **재고 선점**(마지막 원격, 주문 아이디가 업무 키, SKU 별 수량 합) → 5 [tx] 기록 COMPLETED(인수 때 버전과 비교) + 주문 · 배송지 · 항목 · 입력 · 상태 이력(null → PENDING_PAYMENT, CUSTOMER). 견적이 선점보다 먼저다 — 배송비 거절에 재고를 잡지 않게. Facade 에는 트랜잭션이 없다 |
+| 기대 총액 | `expectedTotalAmount {amount, currency}` 는 선택이다. 보내면 계산한 총액과 대조해 다르면 **선점 전에** 409 `ORDER_010` — 계산에는 쓰지 않는다 |
+| 결제 기한 | `payment_due_at` = 선점 응답의 `expiresAt`(지금 이하이면 결과 모름 503 `ORDER_002`). 지나면 만료 스윕(#96)이 EXPIRED 로 바꾼다. 스윕 인덱스(`idx_orders_status_payment_due_at`)는 #96 이 만든다 |
+| 실패 처리 | **보상 해제(release)를 하지 않는다** — 선점은 주문 아이디로 시도 사이에 공유되므로 풀면 다른 시도가 커밋한 주문의 재고를 깰 수 있다. 처리한 실패(선점 거절 · 결과 모름 · 저장 실패)는 기록의 lease 를 **바로 끝낸다**(주문 아이디는 남는다) — 같은 키의 재시도가 곧바로 이어받아 같은 주문 아이디로 다시 선점하고 product 는 기존 선점을 준다. 재시도가 없으면 선점 TTL 이 푼다. 재고 부족(`PRODUCT_021`)은 product 가 선점 전체를 롤백했다. 5 에서 같은 주문 아이디(PK) · 같은 선점(`uk_orders_stock_reservation_id`)이 이미 저장됐으면 그 주문을 200 으로 재생한다. 5 직전에 다른 시도가 기록을 이어받았으면(버전 불일치) 409 `ORDER_018` |
+| 재고 호출 | order 는 다시 보내지 않는다(§3-4 의 026 재시도는 고객의 같은 키 재시도가 맡는다). 021 → 409 `ORDER_016`, 022 → 409 `ORDER_003`(product 메시지의 SKU 목록은 쓰지 않고 주문서 줄 이름을 모두 싣는다), 026 → 409 `ORDER_018`, 023 → 500 `ORDER_017` + error 로그, 그 밖(타임아웃 · 5xx · 서킷 · 계약 위반) → 503 `ORDER_002`. 선점 수량은 SKU 별 합계라 10,000 상한을 넘지 않는다(50줄 × 99 = 4,950). 확정 · 재선점 · 전액 취소는 #14 가 §3-4 대로 한다 |
+| 멱등 | DB `orders.order_request`(회원 × 키 유니크, `@Version`, Redis 아님). 상태 `PROCESSING` · `COMPLETED`, 미리 발급한 `order_id`, `lease_expires_at`(`order.creation.processing-lease`, 기본 60s — 0 · 음수면 기동 실패). 본문 지문(SHA-256)만 저장한다 — 원문은 남지 않는다. 지문이 다르면 상태와 무관하게 409 `ORDER_019`(인수하지 않는다). `COMPLETED` 면 **같은 주문을 지금 상태로 다시 읽어** 200. `PROCESSING` 이고 lease 안이면 409 `ORDER_018`, lease 가 지났으면 같은 주문 아이디로 이어받는다. INSERT 유니크 · 인수 버전 충돌이면 다시 읽어 같은 규칙으로 답한다 |
+| 응답 | 새 주문 **201**, 재생 200(같은 모양, 현재 상태) — `{orderId, status, paymentDueAt, currency, items, amounts, shipping, shippingAddress, createdAt}`. 미리보기는 200 `{currency, items, amounts, shipping}` |
+| FE 계약 | 키(UUID)는 **결제 페이지 세션 동안 유지**한다. 5xx · 409 `ORDER_018` 은 같은 키로 다시 보내고, 그 밖의 4xx(종결 오류) 뒤에는 새 키를 쓴다. 같은 키로 본문을 바꾸면 409 `ORDER_019` 다 |
+| 스냅숏 | 주문서(`OrderQuote`) 그대로 — 항목 `orders.order_item`(상품명 · 옵션명 · 단가 · 줄 금액 · 맞춤 제작 여부 · 단위 무게 `unit_weight_grams` · `hs_code` · 입력 해시)과 입력 `order_item_custom_option`, 배송비 견적은 `orders.orders` 의 `shipping_*` 칸(범위 · 기본 배송비 · 무료배송 기준 · 도서산간 · 정책 version · 국가 그룹 · 무게 요금 · 총 무게 `shipping_weight_grams`, 국내 null), 배송지 `orders.order_shipping_address`(1:1 — 개인정보를 한 테이블에, 본문으로 받는다 — 주소록 #7 연동 전). 읽어 올 때 주문서로 다시 조립해 금액 불변식을 다시 본다 |
+
+§2-3 의 코드에 더해 진입 API · 주문 생성이 쓰는 코드:
+
+| 코드 | HTTP | 뜻 |
+|------|------|----|
+| `ORDER_001` | 404 | 없거나 남의 주문 (생성의 재생도 이 조회) |
+| `ORDER_002` | 503 | (§2-3 에 더해) 재고 선점 결과 모름 · 예상하지 못한 거절 |
+| `ORDER_003` | 409 | (§2-3 에 더해) 재고 선점의 판매 불가(`PRODUCT_022`) — 주문서 줄 이름 모두 |
+| `ORDER_010` | 409 | 주문 금액 변경 (`expectedTotalAmount` 불일치) |
+| `ORDER_016` | 409 | 재고 부족 (`PRODUCT_021`) |
+| `ORDER_017` | 500 | 재고 선점 불일치 (`PRODUCT_023`, 문의) |
+| `ORDER_018` | 409 | 같은 주문 처리 중 (lease 안 · `PRODUCT_026` · 저장 직전 이어받힘) — 같은 키로 재시도 |
+| `ORDER_019` | 409 | 같은 키 다른 본문 — 새 키 |
+| `ORDER_020` | 409 | 허용 전이 표 밖 |
+| `ORDER_021` | 500 | 주문 저장 실패 (DB 거절 — 원인 메시지는 싣지 않는다) |
+| `ORDER_100` · `ORDER_101`~`ORDER_131` · `ORDER_198` · `ORDER_199` | 400 | 요청 검증 (`OrderValidationMessage`, 115 는 비어 있다) · 파라미터 형식(`Idempotency-Key` UUID 아님) · 필수 파라미터 · 헤더 없음 |
+
 ## 3. 재고
 
 재고는 product-service 의 SKU(상품 × 옵션 조합) 단위로 관리한다.
@@ -243,7 +287,7 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 |------|------|
 | `POST /internal/v1/stock-reservations` | 선점 — 요청 `{ orderId, items: [{ skuId, quantity }] }` (항목 1~100개, 수량 1~10000) |
 | `POST /internal/v1/stock-reservations/{reservationId}/confirmation` | 확정 (결제 완료) |
-| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (결제 전 취소 · 주문 생성 실패) |
+| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (결제 전 만료 · 취소 — 주문 생성 실패에는 부르지 않는다, §2-3) |
 | `POST /internal/v1/stock-restorations` | 결제 후 복원 (결제 후 취소 · 반품 입고, #85) — 아래 "결제 후 복원" |
 
 선점 · 확정 · 해제 응답은 같은 모양이고 신규 · 기존 모두 200 이다 —
@@ -350,6 +394,7 @@ RESERVED ──확정──▶ CONFIRMED
   재시도는 **상한을 둔다(예: 3회, 간격을 늘려 가며)** — 넘으면 영속 재전송(아래 복원 보장)으로 넘긴다.
   `PRODUCT_030` 재시도는 같은 본문이면 먼저 끝난 복원으로 200, 다른 선점으로 보냈으면 `PRODUCT_029`(같은 claimId 를 두 선점에 쓴 호출자 버그 — 종결)다.
   `PRODUCT_021` · `PRODUCT_022` · `PRODUCT_023` · `PRODUCT_024` · `PRODUCT_025` · `PRODUCT_027` · `PRODUCT_028` · `PRODUCT_029` 는 재시도해도 결과가 같은 종결 오류다.
+  주문 생성(#13)은 026 을 직접 다시 부르지 않는다 — 409 `ORDER_018` 로 내리고 고객의 같은 키 재시도가 새 요청이 된다(§2-3).
 - **결제 후 복원(`/internal/v1/stock-restorations`)은 클레임이 확정될 때 부른다** — 결제 후 취소는 취소 확정(환불 요청과 같은 흐름), 반품은 검수 뒤
   어드민이 "재고로 되돌림" 을 고른 경우만(`reason = RETURN`). 되돌리지 않는 반품은 부르지 않는다. **`claimId` 가 멱등 키**다 — 타임아웃 · 재시도는
   같은 `claimId` · 같은 본문으로 다시 부른다(재고는 한 번만 늘고 200). 같은 클레임에 다른 수량을 보내면 `PRODUCT_029` 이므로, 클레임 수량을 바꿔야 하면

@@ -2,6 +2,7 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.global.properties.OrderProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import feign.FeignException;
@@ -11,6 +12,9 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import jakarta.persistence.EntityManagerFactory;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.Map;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.DisplayName;
@@ -102,6 +106,15 @@ class OrderServiceApplicationTests {
         assertThat(defaults.getConnectTimeout()).isEqualTo(2_000);
         assertThat(defaults.getReadTimeout()).isEqualTo(3_000);
         assertThat(defaults.getRequestInterceptors()).as("전역 인터셉터를 두지 않는다 (security-guide.md §9-5)").isNullOrEmpty();
+    }
+
+    @Test
+    @DisplayName("주문 설정이 yml 기본값으로 묶인다 — 주문 요청 기록 lease 60s, 시계는 UTC")
+    void orderProperties() {
+        OrderProperties properties = applicationContext.getBean(OrderProperties.class);
+
+        assertThat(properties.creation().processingLease()).isEqualTo(Duration.ofSeconds(60));
+        assertThat(applicationContext.getBean(Clock.class).getZone()).isEqualTo(ZoneOffset.UTC);
     }
 
     @Test

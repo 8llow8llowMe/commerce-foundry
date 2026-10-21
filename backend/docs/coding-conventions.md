@@ -131,7 +131,7 @@ public record ProductDetailResponse(
 public enum OrderErrorCode {
 
     NOT_FOUND_ORDER("ORDER_001", "존재하지 않는 주문입니다.", HttpStatus.NOT_FOUND),
-    ORDER_AMOUNT_MISMATCH("ORDER_010", "주문 금액이 변경되었습니다. 다시 시도해주세요.", HttpStatus.CONFLICT);
+    ORDER_AMOUNT_CHANGED("ORDER_010", "주문 금액이 변경되었습니다. 주문서를 다시 확인해 주세요.", HttpStatus.CONFLICT);
 
     private final String code;
     private final String message;
@@ -144,6 +144,9 @@ public enum OrderErrorCode {
 - **domain 은 application(예외 포함)을 import 하지 않는다. 업무 오류 코드는 Processor 가 붙인다** — 도메인 규칙 위반은 domain 소유 예외(현재 상태 · 시도한 동작을
   싣는다)나 결과 값으로 알리고, Processor 가 받아 `{Domain}Exception` 으로 바꾼다. 바꾸지 않고 흘리면 500 이다.
   예: product-service `StockReservationTransitionException` → `StockReservationProcessor` 가 `PRODUCT_024` · `PRODUCT_025` (#10).
+- **부른 쪽이 사유로 분기해야 하는 out-port 실패는 port 계약 예외(`*Exception` + 사유 enum)로 알린다. 응답 코드는 Processor · Facade 가 붙인다** —
+  어댑터가 `{Domain}Exception`(응답 코드)을 던지면 부른 쪽이 코드 문자열로 분기하게 된다. 계약 예외에는 원격 · DB 원문 메시지를 싣지 않는다(원인 타입명만).
+  예: order-service `StockReservationException.Failure` → `OrderStockProcessor`, `OrderSaveException.Reason`(`ALREADY_SAVED` → 재생, `REJECTED` → `ORDER_021`) (#13).
 - 한 서비스에 advice 가 둘 이상이면 좁은 범위 advice 에 `@Order` 를 붙여 우선순위를 확정한다.
 - **요청 검증 예외(`MethodArgumentNotValidException` · `HttpMessageNotReadableException` · 타입 불일치 · 필수 파라미터)는 서비스당 advice 하나가 받는다** —
   검증 메시지가 코드(`AUTH_121:...`)를 싣고 오므로 컨텍스트를 몰라도 되고, 두 advice 가 같은 예외를 잡으면 순서에 따라 응답이 바뀐다.
@@ -188,6 +191,10 @@ public final class ProductValidationMessage {
   `HandlerMethodValidationException` 으로 낸다 — 그대로 `ValidationErrorSupport` 에 넘기면 본문 필드명이 파라미터 이름(`request`)으로 뭉개진다.
   도메인 핸들러가 bean 결과가 있을 때 `MethodArgumentNotValidException` 모양(필드명 · record 선언 순서)으로 옮기고 파라미터 오류를 함께 싣는다.
   예: product-service `ProductExceptionHandler` · `PATCH /api/v1/admin/stocks/{skuId}` (#10).
+  헤더 하나뿐이면 제약 애노테이션을 달지 않고 **타입으로 바인딩**하는 쪽이 단순하다 — 형식 오류는 타입 불일치(`MethodArgumentTypeMismatchException` → `{DOMAIN}_198`),
+  누락은 `MissingRequestHeaderException` → `ValidationErrorSupport.toMissingParameterResponse(exception.getHeaderName(), {DOMAIN}_199)` 이고,
+  본문 검증은 `MethodArgumentNotValidException` 그대로 남는다.
+  예: order-service `OrderWebController` 의 `@RequestHeader("Idempotency-Key") UUID`(UUID 아님 400 `ORDER_198`, 없음 400 `ORDER_199`, #13).
 - 한 필드의 여러 오류는 순서를 고정한다: 필드 선언 순서 → 필수 → 길이 → 범위 → 형식.
 - 컬렉션 원소는 `@NotNull` 과 값 제약을 쌍으로 건다 — `List<@Positive Long>` 만 걸면 `[null]` 이 통과한다.
 
@@ -250,6 +257,9 @@ public final class ProductValidationMessage {
 - **금액은 `long` 최소 화폐 단위 + `CurrencyCode` 로 저장한다.** KRW 는 원, USD 는 센트.
 - `double` / `float` 로 금액을 다루지 않는다. `BigDecimal` 은 환산·비율 계산 중간값에만 쓰고 저장 전에 최소 단위로 확정한다.
 - 금액 컬럼은 항상 통화 컬럼과 짝을 이룬다: `sale_price_amount` + `sale_price_currency`.
+  **한 행의 금액이 모두 같은 통화여도 금액마다 통화 컬럼을 둔다** — 예: `orders.orders` 의 `items_amount` · `shipping_fee_amount` · `total_amount` 는
+  각자 `*_currency` 를 갖고, 같은 통화라는 불변식은 check 제약(`ck_orders_total_amount_consistent`)이 강제한다(#13). nullable 금액은 쌍이 함께 null 인지 check 로 막는다
+  (`ck_orders_shipping_free_shipping_threshold_pair`).
 - 반올림 규칙(할인·환산)은 한 곳(`shared-commerce` 의 `Money`)에만 둔다.
   - 비율 계산(`Money.multiply` — 할인액·수수료)은 최소 단위 미만을 **버린다**(`RoundingMode.DOWN`). 할인액이 원가를 넘지 않는다.
   - 소수 표현 변환(`Money.ofMajorUnit` — PG 응답 `89.50`)은 **반올림하지 않는다.** 자릿수가 넘치면 실패한다.

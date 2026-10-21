@@ -115,6 +115,7 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   확정이 409 `PRODUCT_025`(이미 해제 · 만료)면 같은 주문으로 재선점(`POST /internal/v1/stock-reservations`)하고 **곧바로 확정**한다. 재선점이
   `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면 전액 취소다. **주문은 선점 확정 200(`CONFIRMED`)을 받은 뒤에만 PAID 로 둔다** — 결제 완료 재전송 때도
   확정을 멱등으로 다시 부른다 (`order-flow-guide.md` §3-4).
+  주문 상태로는 **EXPIRED → PAID** 가 허용 전이다(#13 `OrderStatus`) — 재선점 · 확정이 성공했을 때만 그 전이를 하고, 실패하면 EXPIRED 그대로 두고 전액 취소한다(구현 #14).
 - 메시지 브로커(Kafka/RabbitMQ) + outbox 로 바꿀지는 트래픽을 보고 별도 이슈에서 결정한다. 그 전까지는 위의
   "동기 호출 + 재전송 플래그 + 스케줄러" 가 기본이다.
 

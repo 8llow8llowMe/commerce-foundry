@@ -83,6 +83,8 @@
 - 내부 `Info` 를 응답 타입으로 직접 노출하지 않는다. 응답 모양은 Presenter 가 마무리한다.
 - HTML 을 담는 응답 필드(상품 상세 설명 `descriptionHtml`)는 서버가 정제하지 않은 원문이다. 클라이언트가 렌더 전에 허용 목록으로 sanitize 한다.
   쓰기 시점 서버 sanitize 는 상품 등록(#9) · 이관(#19)이 맡는다.
+- HTML 이 아닌 문자열 필드(배송지 · 배송 메모 · 맞춤 제작 입력)는 원문으로 저장 · 응답한다. 클라이언트 화면 · 메일 · CSV 는 **텍스트로 이스케이프**한다 —
+  CSV 내보내기는 `=` · `+` · `-` · `@` 로 시작하는 값의 수식 주입에 주의한다.
 - 시각 필드는 `Instant` 그대로 내린다 — **UTC ISO-8601 문자열**(`"2026-10-18T09:30:00Z"`)이다. 화면 시간대 변환은 클라이언트(또는 고객 응답의 Presenter)가 한다.
 
 ```java
@@ -426,7 +428,9 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
   익명이 틀린 본문을 보내면 401 이 아니라 400(`{DOMAIN}_1xx`)이 나온다 — 검증 규칙은 공개 정보라 막지 않는다. 인가 스모크의 익명 401 케이스는
   올바른 본문으로 보낸다 (예: `AuthServiceSecuritySmokeTest`).
 - 소유 확인은 Facade 첫 줄에서 한다 — 주문 상세는 `orderId` 와 JWT 의 memberId 가 모두 맞아야 조회된다.
-- 비회원 주문을 지원하면 주문번호 + 주문 비밀번호(해시)로 조회한다. 별도 이슈에서 확정한다.
+- 비회원 주문을 지원하면 주문 식별자 + 주문 비밀번호(해시)로 조회한다. 별도 이슈에서 확정한다.
+- **v1 은 비회원 주문을 받지 않는다(#13).** 주문서 미리보기 · 주문 생성은 `isAuthenticated()` 다. 비회원 장바구니는 프론트 로컬에 두고 로그인 뒤 주문한다.
+  게이트웨이 `order-quote` 한도(#158)는 로그인 회원 기준으로 센다 — 미리보기를 비로그인으로 열지 않는다(`security-guide.md` §7-3).
 
 ## 6. 멱등성 (쓰기 API)
 
@@ -435,6 +439,11 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - 주문 생성·결제 승인·결제 취소·환불은 **멱등**이어야 한다.
 - 클라이언트는 `Idempotency-Key` 헤더(UUID)를 보낸다. 서버는 `(memberId, key)` 로 결과를 저장하고, 같은 키의
   재요청에는 **처음 결과를 그대로** 돌려준다. 처리 중인 같은 키가 오면 `409` 로 답한다.
+- **주문 생성(#13)** 은 DB 요청 기록(`orders.order_request` 의 `uk_order_request_member_id_idempotency_key`, 처리 중 lease 60s)으로 보장한다 — Redis 를 쓰지 않는다.
+  헤더는 `UUID` 로 바인딩해 uuid 칼럼에 저장하고 본문은 지문(SHA-256)만 둔다. "처음 결과를 그대로" 는 저장한 응답이 아니라 **같은 주문을 다시 읽어 같은 모양으로** 돌려주는 것이다
+  (상태는 지금 값). 새 주문은 201, 재생은 200. 같은 키 · 다른 본문은 409(`ORDER_019`), lease 안의 처리 중은 409(`ORDER_018`). 헤더가 없으면 400 `ORDER_199`(필드 = 헤더 이름),
+  UUID 가 아니면 400 `ORDER_198` 이다 — 헤더에 제약 애노테이션을 달지 않는다(본문 필드 경로를 잃는다, `coding-conventions.md` §8-2).
+  FE 는 키를 **결제 페이지 세션 동안 유지**하고, 5xx · 409 `ORDER_018` 은 같은 키로, 그 밖의 4xx(종결) 뒤에는 새 키로 보낸다 (`order-flow-guide.md` §2-4).
 - 결제 승인은 PG 쪽 멱등 키와 별개로 우리 쪽 상태(`payment.status`)로도 중복을 막는다 (`payment-guide.md` §3).
 - **서비스 간(internal) 쓰기는 `Idempotency-Key` 대신 업무 키로 멱등을 만든다.** 재고 선점은 `orderId` 가 키다 — 같은 주문의 활성 선점이 있으면
   항목이 같을 때 기존 선점을 그대로 200 으로 돌려주고, 다르면 409(`PRODUCT_023`)다. 주문당 활성 선점 하나는 DB 유니크 키(`uk_stock_reservation_active_order_id`)가
