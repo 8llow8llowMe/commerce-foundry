@@ -21,6 +21,10 @@ spring:
         query:
           # IN 절 바인드 파라미터 수를 2의 거듭제곱으로 채운다 — 개수마다 다른 SQL 이 생겨 쿼리 계획 · PreparedStatement 캐시가 늘어나지 않게 (coding-conventions.md §9-6)
           in_clause_parameter_padding: true
+        # 주문 저장은 항목 · 맞춤 입력 · 이력 여러 행을 한 번에 넣는다 — insert 를 묶어 왕복을 줄인다(테이블별로 정렬해야 묶인다)
+        jdbc:
+          batch_size: 50
+        order_inserts: true
   web:
     resources:
       # 정적 리소스를 내지 않는다. 켜 두면 Swagger 를 닫아도 /webjars/swagger-ui/** 가 그대로 열린다 (Swagger UI 는 springdoc 이 따로 낸다)
@@ -59,6 +63,12 @@ resilience4j:
       # 주문서 미리보기 · 주문 생성 배송비 견적 (POST /internal/v1/shipping-fees/quotes, #13)
       delivery-service:
         base-config: default
+
+# Hibernate 는 SQL 오류를 SqlExceptionHelper 로거로 남기는데, 제약 위반 메시지의 Detail 에 키 · 행 원문(배송지 등 개인정보)이 들어 있다.
+# 끈다 — 예외는 그대로 위로 가고, 어댑터 · 핸들러가 예외 타입과 제약 이름만 남긴다 (coding-conventions.md §8)
+logging:
+  level:
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: "OFF"
 
 eureka:
   client:
