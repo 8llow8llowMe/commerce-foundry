@@ -4,6 +4,8 @@ dependencies {
     // refresh 토큰 저장 · 회전과 로그아웃 차단 목록 쓰기 (StringRedisTemplate · 기동 가드)
     implementation project(':core:redis-core')
     implementation project(':core:security-core')
+    // 배송지 국가별 규칙의 국내 국가 판정 (ShippingScope.DOMESTIC_COUNTRY_CODE)
+    implementation project(':core:shared-commerce')
 
     // security-core 는 서블릿 · Boot 보안 자동설정을 compileOnly 로만 둔다 — 서블릿 서비스가 직접 선언한다 (security-guide.md §5-3)
     implementation 'org.springframework.boot:spring-boot-starter-security'
