@@ -291,6 +291,14 @@ export const en: Dictionary = {
       GATEWAY_006: 'Too many requests. Please try again shortly.',
     },
   },
+  shipping: {
+    baseFee: 'Shipping {fee}',
+    free: 'Free shipping',
+    freeOver: 'Free shipping on orders of {amount} or more',
+    remote: 'Remote areas such as Jeju have an extra fee ({areas}), even with free shipping.',
+    remoteArea: '{name} {fee}',
+    internationalBase: 'International shipping from {fee} (plus a weight-based rate)',
+  },
   look: {
     selectOptions: 'Please select options for {names}.',
     pickItems: 'Choose the pieces to add together.',

@@ -19,7 +19,13 @@ const CART_PATH = '/api/v1/carts/me';
  * 401(세션 끝남)이면 화면을 다시 그려 비회원 장바구니로 내려간다. 429 는 Retry-After 동안 줄 버튼을 막는다.
  * `refreshKey` 가 바뀌면 다시 읽는다 — 로그인 직후 병합이 끝났을 때.
  */
-export function MemberCart({ refreshKey }: { refreshKey: number }) {
+export function MemberCart({
+  refreshKey,
+  freeShipping,
+}: {
+  refreshKey: number;
+  freeShipping: string | null;
+}) {
   const t = useDictionary().cart;
   const formatMoney = useFormatMoney();
   const router = useRouter();
@@ -136,7 +142,10 @@ export function MemberCart({ refreshKey }: { refreshKey: number }) {
           <span className="text-sm">{t.total}</span>
           <span className="text-lg">{cart.totalAmount ? formatMoney(cart.totalAmount) : '—'}</span>
         </div>
-        <p className="text-xs text-muted-fg">{t.totalNote}</p>
+        <div className="flex flex-col gap-1 text-xs text-muted-fg">
+          {freeShipping && <p>{freeShipping}</p>}
+          <p>{t.totalNote}</p>
+        </div>
         {/* 주문서 · 주문 생성은 주문 API(#13) 뒤에 붙인다 */}
         <Button disabled className="h-12 w-full" aria-describedby="checkout-pending">
           {t.checkout}

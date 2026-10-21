@@ -39,7 +39,7 @@ function fetchProducts(ids: string[]): Promise<[string, ProductState][]> {
  * (보통 몇 개라 상품 수만큼 부른다). 없거나 숨긴 상품(404)은 판매하지 않는 상품으로 남겨 지울 수 있게 한다.
  * 합계는 보이지 않는다 — 금액은 서버가 계산한 값만 보이는 규칙이라, 로그인하면 회원 장바구니가 합계를 낸다.
  */
-export function GuestCart() {
+export function GuestCart({ freeShipping }: { freeShipping: string | null }) {
   const t = useDictionary().cart;
   const lines = useSyncExternalStore(subscribeLocalCart, readLocalCart, serverLocalCart);
   const [products, setProducts] = useState<Map<string, ProductState>>(new Map());
@@ -113,6 +113,7 @@ export function GuestCart() {
 
       <div className="flex flex-col gap-4 sm:ml-auto sm:w-80">
         <p className="text-sm text-muted-fg">{t.guestNotice}</p>
+        {freeShipping && <p className="text-xs text-muted-fg">{freeShipping}</p>}
         <Link
           href="/login?next=%2Fcart"
           className="inline-flex h-12 w-full items-center justify-center bg-primary text-sm font-medium text-primary-fg hover:opacity-90"
