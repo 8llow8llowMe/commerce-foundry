@@ -85,6 +85,52 @@ class MemberTest {
             assertThatThrownBy(() -> Member.normalizeEmail("a".repeat(243) + "@example.com")).isInstanceOf(IllegalArgumentException.class);
             assertThat(Member.normalizeEmail("a".repeat(242) + "@example.com")).hasSize(254);
         }
+
+        @Test
+        @DisplayName("null 은 NullPointerException 이다 — 검증 없는 canonicalEmail 과 달리")
+        void rejectsNull() {
+            assertThatThrownBy(() -> Member.normalizeEmail(null)).isInstanceOf(NullPointerException.class);
+        }
+    }
+
+    @Nested
+    @DisplayName("이메일 비교 형태(canonicalEmail)")
+    class CanonicalEmail {
+
+        @ParameterizedTest
+        @ValueSource(strings = {"Member@Example.com ", " MEMBER@example.com", "member@example.com", "\tMember@EXAMPLE.COM\n"})
+        @DisplayName("대소문자 · 앞뒤 공백만 다른 변형은 같은 값이 된다")
+        void variantsCollapse(String email) {
+            assertThat(Member.canonicalEmail(email)).isEqualTo("member@example.com");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"Member@Example.com ", " MEMBER@example.com", "member@example.com"})
+        @DisplayName("멱등이다 — 이미 정규화한 값은 그대로 나온다")
+        void idempotent(String email) {
+            String once = Member.canonicalEmail(email);
+
+            assertThat(Member.canonicalEmail(once)).isEqualTo(once);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"Member@Example.com ", " MEMBER@example.com", "member@example.com", " 회원@예시.한국 "})
+        @DisplayName("규칙 안 값이면 normalizeEmail 과 같다 — normalizeEmail 은 canonicalEmail 에 길이 검증만 더한다")
+        void sameAsNormalizeWithinRule(String email) {
+            assertThat(Member.canonicalEmail(email)).isEqualTo(Member.normalizeEmail(email));
+        }
+
+        @Test
+        @DisplayName("검증하지 않는다 — null 은 빈 문자열, 공백만이면 빈 문자열, 254자를 넘어도 그대로다(normalizeEmail 은 거절한다)")
+        void doesNotValidate() {
+            String tooLong = "A".repeat(243) + "@example.com";
+
+            assertThat(Member.canonicalEmail(null)).isEmpty();
+            assertThat(Member.canonicalEmail("   ")).isEmpty();
+            assertThat(Member.canonicalEmail(tooLong)).isEqualTo("a".repeat(243) + "@example.com");
+            assertThatThrownBy(() -> Member.normalizeEmail("   ")).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> Member.normalizeEmail(tooLong)).isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Nested

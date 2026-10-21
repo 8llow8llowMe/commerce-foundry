@@ -42,16 +42,40 @@ class InMemoryLoginAttemptStoreTest {
     }
 
     @Test
-    @DisplayName("창 끝 1ms 전까지는 같은 창이고, 창 끝과 같은 시각부터는 새 창(1)이다 — 만료는 주입된 시계로 재현한다")
+    @DisplayName("창 끝과 같은 시각까지는 같은 창(남은 0)이고, 1ms 지나면 새 창(1)이다 — Redis 처럼 지금 > 만료일 때만 만료다")
     void windowExpiresAtBoundary() {
         store.record(AttemptKind.LOGIN, EMAIL, WINDOW);
 
         clock.set(NOW.plus(WINDOW).minusMillis(1));
-        assertThat(store.record(AttemptKind.LOGIN, EMAIL, WINDOW)).isEqualTo(new LoginAttemptOutcome(2, Duration.ofMillis(1)));
+        assertThat(store.attempts(AttemptKind.LOGIN, EMAIL)).isEqualTo(1);
 
         clock.set(NOW.plus(WINDOW));
+        assertThat(store.attempts(AttemptKind.LOGIN, EMAIL)).as("창 끝과 같은 시각은 아직 창 안이다").isEqualTo(1);
+        assertThat(store.record(AttemptKind.LOGIN, EMAIL, WINDOW)).isEqualTo(new LoginAttemptOutcome(2, Duration.ZERO));
+
+        clock.set(NOW.plus(WINDOW).plusMillis(1));
         assertThat(store.attempts(AttemptKind.LOGIN, EMAIL)).as("창이 지나면 센 값이 없다").isZero();
         assertThat(store.record(AttemptKind.LOGIN, EMAIL, WINDOW)).isEqualTo(new LoginAttemptOutcome(1, WINDOW));
+    }
+
+    @Test
+    @DisplayName("대소문자 · 앞뒤 공백만 다른 이메일은 한 창에 모인다 — 어댑터처럼 Member.canonicalEmail 을 적용한다")
+    void emailVariantsShareWindow() {
+        assertThat(store.record(AttemptKind.LOGIN, "Member@Example.com ", WINDOW).count()).isEqualTo(1);
+        assertThat(store.record(AttemptKind.LOGIN, " MEMBER@example.com", WINDOW).count()).isEqualTo(2);
+        assertThat(store.record(AttemptKind.LOGIN, "member@example.com", WINDOW).count()).isEqualTo(3);
+        assertThat(store.attempts(AttemptKind.LOGIN, "MEMBER@EXAMPLE.COM")).isEqualTo(3);
+
+        store.reset(AttemptKind.LOGIN, " Member@example.com ");
+        assertThat(store.attempts(AttemptKind.LOGIN, EMAIL)).as("변형으로 reset 해도 같은 창이 지워진다").isZero();
+    }
+
+    @Test
+    @DisplayName("창이 1ms 미만이면 어댑터처럼 거절하고 세지 않는다")
+    void subMillisecondWindowRejected() {
+        assertThatThrownBy(() -> store.record(AttemptKind.LOGIN, EMAIL, Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> store.record(AttemptKind.LOGIN, EMAIL, Duration.ofNanos(999_999))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(store.attempts(AttemptKind.LOGIN, EMAIL)).isZero();
     }
 
     @Test

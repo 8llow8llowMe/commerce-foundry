@@ -16,7 +16,8 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 
 /**
- * 시도 제한 프로퍼티의 기본값 · 범위 · 키 검증 시점을 본다 (#66). 기본은 켬이라 키가 있어야 뜨고, 끈 상태에서는 HMAC 키 없이 뜬다.
+ * 시도 제한 프로퍼티의 기본값 · 범위 · 키 검증 시점을 본다 (#66). 레코드 기본값은 켬(닫힌 기본값)이라 키가 있어야 뜨고, 끈 상태에서는 HMAC 키 없이 뜬다.
+ * application.yml 이 끄는 것은 흐름에 연결하기 전이라서다 — 여기서는 yml 없이 바인딩한다.
  */
 class AuthLoginGuardPropertiesTest {
 
@@ -64,14 +65,14 @@ class AuthLoginGuardPropertiesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"1m", "15m", "24h"})
-    @DisplayName("창은 1분 이상 24시간 이하면 받는다")
+    @ValueSource(strings = {"1m", "15m", "1h", "60m"})
+    @DisplayName("창은 1분 이상 1시간 이하면 받는다")
     void windowAccepted(String window) {
-        assertThat(bind(Map.of(HASH_KEY, KEY, "auth.login-guard.window", window)).window()).isBetween(Duration.ofMinutes(1), Duration.ofHours(24));
+        assertThat(bind(Map.of(HASH_KEY, KEY, "auth.login-guard.window", window)).window()).isBetween(Duration.ofMinutes(1), Duration.ofHours(1));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"59s", "0s", "-1m", "1441m"})
+    @ValueSource(strings = {"59s", "0s", "-1m", "61m", "3601s", "24h"})
     @DisplayName("창이 범위 밖이면 바인딩에서 실패한다 — 꺼져 있어도")
     void windowRejected(String window) {
         assertThatThrownBy(() -> bind(Map.of(HASH_KEY, KEY, "auth.login-guard.window", window)))
