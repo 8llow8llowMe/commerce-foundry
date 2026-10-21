@@ -10,9 +10,9 @@ import com.commercefoundry.domainlayer.order.adapter.out.client.feign.dto.Shippi
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.port.out.query.ShippingFeeQuoteQueryResult;
-import com.commercefoundry.domainlayer.order.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import feign.FeignException;
 import feign.Request;
 import feign.RetryableException;

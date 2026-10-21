@@ -1,7 +1,7 @@
 package com.commercefoundry.domainlayer.order.application.model;
 
-import com.commercefoundry.domainlayer.order.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.Objects;
 
 /**

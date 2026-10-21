@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.domain.model;
 
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.Objects;
 import java.util.stream.Stream;
 

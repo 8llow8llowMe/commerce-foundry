@@ -7,9 +7,9 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCod
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.port.out.query.ShippingFeeQuoteQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.ShippingFeeQuote;
-import com.commercefoundry.domainlayer.order.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import feign.FeignException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;

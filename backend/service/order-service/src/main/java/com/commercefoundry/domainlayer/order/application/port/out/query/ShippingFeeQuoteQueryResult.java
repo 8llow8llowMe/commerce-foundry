@@ -1,8 +1,8 @@
 package com.commercefoundry.domainlayer.order.application.port.out.query;
 
-import com.commercefoundry.domainlayer.order.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.Objects;
 import java.util.stream.Stream;
 
