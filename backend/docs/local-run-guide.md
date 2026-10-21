@@ -90,6 +90,9 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
   - 그룹 결과는 `check` job 이 모은다.
   - Gradle 홈(의존성 · wrapper)은 캐시하지만 빌드 캐시(`caches/build-cache-1`)는 담지 않는다. 캐시는 develop push 실행만 쓰고 PR 은 읽기만 한다.
 - **PR 은 바꾼 모듈과 그 모듈에 의존하는 모듈만 돌린다**(#179). develop push 는 전 모듈이다. plan job 요약에 고른 모듈과 이유가 남는다.
+  - 문서(`backend/docs/**` · `backend/*.md`) · 로컬 인프라(`.env.example` · `docker-compose-local.yml` · `docker/**`)만 바꾼 PR 은 backend-ci 가 아예 뜨지 않는다(#194).
+    예외로 `docs/api-design-guide.md` 는 api-gateway 테스트가 오류 코드 표를 대조하므로 바꾸면 rest 그룹(api-gateway)이 돈다.
+  - frontend 만 바꾼 PR 은 frontend-ci 만, backend 만 바꾼 PR 은 backend-ci 만 돈다(각 workflow 의 `paths`).
   - 모듈 안 파일 → 그 모듈. 모듈 의존은 각 `build.gradle` 의 `project(':...')` 로 읽어, 바꾼 모듈에 직 · 간접으로 의존하는 모듈을 더한다
     (예: `core/shared-commerce` 를 바꾸면 product · order · payment · delivery 도 돈다).
   - 빌드 설정(`build.gradle` · `settings.gradle` · `gradle.properties` · `gradle/**` · `gradlew*`)이나 `backend-ci.yml` · `.github/scripts/backend-*` 를
