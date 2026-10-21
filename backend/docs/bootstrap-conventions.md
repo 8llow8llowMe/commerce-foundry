@@ -165,7 +165,7 @@ class ProductPersistenceAdapterTest {
   | 없음 | `true` (GitHub Actions 가 넣는다) | 돈다 — 컨테이너 기동 실패로 **시끄럽게 실패**한다 |
   | 없음 | 없음 · 그 밖 | 건너뛴다 — 사유 "Docker 없음 — CI 에서 실행된다" |
 
-  지원 클래스는 서비스 test 소스(`src/test/java/com/commercefoundry/support/`)에 둔다. 처음 만든 것은 product-service 이고,
+  지원 클래스는 Testcontainers 를 쓰는 모듈의 test 소스(`src/test/java/com/commercefoundry/support/`)에 둔다. 처음 만든 것은 product-service 이고,
   `DockerOrCiConditionTest` 가 판정표와 "모든 `@Testcontainers` 테스트가 이 애노테이션을 쓴다" 를 검사한다.
   로컬에서 건너뛴 건은 CI 실행 건수에 세지 않는다(`backend-test-count.py`). 로컬에서 쿼리를 확인하려면 Docker 를 켜고 돌린다.
 - 슬라이스는 `@Component` 를 스캔하지 않는다. 테스트할 어댑터와 MapStruct 구현(`*MapperImpl`), `QuerydslConfigurer`(커스텀 리포지토리가
@@ -272,31 +272,59 @@ storage:
   public-base-url: ${STORAGE_PUBLIC_BASE_URL:}
   presign-ttl: 5m          # 업로드 서명 URL 유효 시간 — 1분 이상 15분 이하
   connect-timeout: 2s      # 켜면 필수 — 없거나 0 이하면 기동하지 않는다
-  read-timeout: 10s        # 켜면 필수
+  read-timeout: 5s         # 켜면 필수 — 바이트 사이 대기의 상한
+  api-call-timeout: 8s     # 켜면 필수, read-timeout 이상 — SDK 호출 한 번(재시도 · 백오프 포함)의 전체 시간 상한
 ```
 
 - **기본값은 꺼짐이다.** 꺼져 있으면 값이 비어 있어도(dev Vault 가 비어도) 기동하고, `ObjectStorageClient` 빈은 그대로 있되 I/O 메서드가 전부
   `StorageException(DISABLED)` 를 던진다. 어댑터는 빈 유무를 분기하지 않고 이 예외를 도메인 503 으로 번역한다. 공개 주소가 있으면 `publicUrlOf` 는 동작한다.
 - **켜면 `StorageStartupGuard` 가 클라이언트를 만들기 전에 검사한다** — endpoint · region · bucket · access-key · secret-key · public-base-url 이 비었거나
-  `${...}` 가 풀리지 않았는지, endpoint · public-base-url 이 https 인지(루프백 호스트만 http 허용), 버킷 이름 규칙, presign-ttl 1~15분, 타임아웃 양수.
-  위반은 모아서 한 번에 알리고 메시지에 값을 넣지 않는다 (`RedisStartupGuard` 와 같은 방식). public-base-url 끝의 `/` 는 지운다.
+  `${...}` 가 풀리지 않았는지, endpoint · public-base-url 이 https 인지(루프백 호스트만 http 허용), 버킷 이름 규칙, presign-ttl 1~15분,
+  타임아웃 양수 · api-call-timeout 이 read-timeout 이상인지. 위반은 모아서 한 번에 알리고 메시지에 값을 넣지 않는다 (`RedisStartupGuard` 와 같은 방식).
+  public-base-url 끝의 `/` 는 지운다. 규칙은 `StorageProperties.violations()` 한 곳에 있고 공개 팩토리 `ObjectStorageClients.create` 도 같은 규칙을 부른다 —
+  가드를 거치지 않고 만들어도 http endpoint · 긴 TTL 의 클라이언트가 생기지 않는다(위반이면 `IllegalArgumentException`, 값은 메시지에 없다).
+- **타임아웃은 한 호출의 전체 시간 < 게이트웨이 response-timeout 10s 로 맞추고, 재시도는 최대 2회 시도다**(storage-core 가 고정한다).
+  connect · read 타임아웃은 시도 하나의 멈춤만 끊어서, 이것만 두면 SDK 기본 재시도(시도 3~4회) · 백오프와 겹쳐 스토리지가 멈췄을 때 호출 한 번이
+  수십 초 동안 요청 스레드를 잡는다. `api-call-timeout` 이 재시도까지 포함한 상한이다. 타임아웃은 yml 기본값이고 `.env.example` 에 두지 않는다
+  (connect · read 와 같은 취급 — 바꿔야 하면 relaxed binding 의 `STORAGE_API_CALL_TIMEOUT` 등으로 넣는다).
 - 체크섬 계산 · 검증은 `WHEN_REQUIRED` 로 낮춰 두었다 — SDK 2.30 부터의 기본값(모든 업로드에 CRC)을 지원하지 않는 S3 호환 스토리지가 있다.
 - 키 규칙(어느 prefix 에 무엇을 두는가) · 허용 형식 · 용량 상한은 서비스가 정한다. storage-core 는 키의 빈 구간 · `.` · `..` · 제어 문자만 막는다.
-  형식은 `ImageFormat.detect(client.readRange(key, ImageFormat.DETECTION_LENGTH))` 로 앞부분 magic bytes 를 본다(JPEG · PNG · WebP, 폴리글롯 · SVG · HTML 거절).
+  형식은 `head()` 로 크기 · ETag 를 얻은 뒤 `ImageFormat.detect(client.readRange(key, ImageFormat.DETECTION_LENGTH, stored.eTag()))` 로 앞부분 magic bytes 를 본다
+  (JPEG · PNG · WebP).
+- **판별이 막는 것은 앞부분이 다른 형식인 파일이다** — SVG · HTML · GIF, 앞이 다른 형식이고 뒤에 JPEG 를 붙인 폴리글롯.
+  유효한 이미지 헤더 뒤에 HTML · JS 를 품은 파일은 판별로 막지 못한다. 그 파일에 대한 실제 방어는 아래다.
+  - copy 의 `MetadataDirective.REPLACE` 로 복사본의 Content-Type 을 판별한 이미지 형식으로 고정한다.
+  - 공개 도메인에 `X-Content-Type-Options: nosniff` 를 둔다 — 브라우저가 내용을 보고 HTML 로 해석하지 않게.
+  - 공개 도메인을 스토어 · 어드민 origin 과 분리한다 — 같은 origin 이면 해석된 스크립트가 그 화면의 쿠키 · DOM 에 닿는다.
+  - 재인코딩(이미지를 다시 그려 뒤에 붙은 바이트를 버린다)은 후속이다.
 - `StorageException.reason()` 으로 번역한다 — `UNAVAILABLE`(네트워크 · 타임아웃 · 5xx · 429) · `DISABLED` 는 503, `ACCESS_DENIED` · `REJECTED` 는 설정 문제(503 + 로그),
-  `NOT_FOUND` 는 업로드가 없거나 만료된 것이다. 메시지에는 동작과 원인만 있고 키 · 서명 URL 은 없다.
+  `NOT_FOUND` 는 업로드가 없거나 만료된 것이다. `CHANGED`(412 — `head()` 로 확인한 뒤 같은 키에 다른 내용이 올라왔다)는 다시 확인하라는 4xx(400 · 409)로
+  번역한다 — 어느 쪽인지는 서비스(#9 PR-F)가 정한다. 메시지에는 동작과 원인만 있고 키 · 서명 URL 은 없다.
 - **서비스 테스트는 가짜 포트를 쓴다.** 컨텍스트 로딩 테스트는 기본값(꺼짐)으로 뜨고, 업무 테스트는 서비스의 out-port(`ImageStoragePort` 등) 가짜로 대신한다.
   실제 S3 호환 서버 왕복은 storage-core 의 `S3CompatibleObjectStorageRoundTripTest`(Testcontainers · `@EnabledWithDockerOrOnCi`)가 본다.
+
+**서비스가 지켜야 할 것 (#9 PR-F 필수).** storage-core 는 도메인을 몰라 대신 막지 못한다 — 어댑터 · Processor 가 지킨다.
+
+- **클라이언트가 보낸 키는 서버가 정한 패턴(예: `uploads/{UUID}.{ext}`) 정규식을 통과한 뒤에만** head · readRange · copy · delete 에 넘긴다.
+  prefix 밖 키로 공개 객체(`products/…`)를 지우거나 복사 원본으로 쓰지 못하게 하기 위해서다. storage-core 의 키 검사는 경로 조작(`..` 등)만 막는다.
+- presignPut 의 contentType 은 `ImageFormat.ofContentType(...)` 으로 정규화한 형식의 MIME(`ImageFormat.contentType()`)만 넘긴다.
+  길이 상한은 서명 전에 서비스가 확인한다.
+- copy 의 contentType 은 판별한 형식(magic bytes)에서 가져온다. HEAD 의 Content-Type 이나 요청 값은 쓰지 않는다 — 업로더가 정한 값이다.
+- 검증 → 복사는 `head()` 의 eTag 로 묶는다 — readRange · copy 에 같은 eTag 를 넘기면, 그 사이 같은 키에 다른 내용이 올라온 경우 `CHANGED` 로 끊긴다.
+- 서명 URL 은 로그에 남기지 않는다. `PresignedUpload.toString()` 은 서명을 가리지만, 서비스의 응답 DTO(record)는 기본 `toString` 에 서명 URL 이
+  그대로 들어가므로 `toString` 을 가리거나 로그에 쓰지 않는다.
 
 **스토리지 서버에 필요한 설정 (사용자 인프라 MinIO — #9 D2, 설정은 사용자가 한다).** 코드가 대신 걸지 않는다 — 켜기 전에 아래가 되어 있어야 한다.
 
 | 항목 | 필요 조건 | 이유 |
 |------|-----------|------|
 | 주소 | path-style(`{endpoint}/{bucket}/{key}`) 접근, endpoint · 공개 주소는 https | 브라우저가 https 어드민 화면에서 서명 URL 로 바로 올린다 — http 면 막힌다 |
-| 버킷 CORS | 어드민 origin 에 `PUT` 과 `Content-Type` 요청 헤더 허용 | presigned PUT 은 브라우저 → 스토리지 교차 출처 요청이다. MinIO 는 버전에 따라 버킷 CORS 대신 서버 설정 `MINIO_API_CORS_ALLOW_ORIGIN` 으로 건다 |
+| 버킷 CORS | 어드민 origin 으로 **좁혀** `PUT` 과 `Content-Type` 요청 헤더를 허용 | presigned PUT 은 브라우저 → 스토리지 교차 출처 요청이다. MinIO 서버 CORS 기본값은 모든 origin(`*`)이다. 버전에 따라 버킷 CORS 대신 서버 설정 `MINIO_API_CORS_ALLOW_ORIGIN` 으로 건다 |
 | 수명 규칙 | `uploads/` 접두어 객체를 1일 뒤 삭제 (MinIO ILM 만료 규칙) | 올리고 저장하지 않은 임시 업로드를 치운다 — 상품에 붙인 이미지는 `products/` 로 복사해 두므로 지워지지 않는다 |
-| 공개 읽기 | `products/` 접두어 익명 읽기(또는 그 앞의 CDN) | 고객 화면은 `STORAGE_PUBLIC_BASE_URL` + 키로 이미지를 바로 읽는다 |
-| 접근 키 | 그 버킷에 PutObject · GetObject · CopyObject(Get+Put) · DeleteObject 만 | 서비스가 쓰는 동작만 준다 |
+| 공개 읽기 | `products/` 접두어에 **익명 GetObject 만** 준다(예: `mc anonymous set download <alias>/<bucket>/products`). 또는 그 앞의 CDN | 고객 화면은 `STORAGE_PUBLIC_BASE_URL` + 키로 이미지를 바로 읽는다. `public` 이나 버킷 전체를 열면 익명 쓰기 · 목록과 `uploads/`(검증 전 업로드)가 노출된다 |
+| 접근 키 | 루트 계정 · 루트의 service account 가 아닌 **별도 사용자**에, 그 버킷으로 한정한 정책: GetObject · PutObject · DeleteObject(객체) + ListBucket(버킷) | 서비스가 쓰는 동작만 준다(CopyObject 는 원본 Get + 대상 Put). ListBucket 이 없으면 S3 계열이 없는 키 HEAD 에 404 대신 403 을 줘서 "업로드 없음" 이 설정 오류(`ACCESS_DENIED`)로 바뀐다 |
+| 버전 | 보안 패치가 반영된 최신 MinIO 릴리스 | 익명 읽기 · 서명 검증을 맡는 서버다 |
+| 리버스 프록시 (TLS 종료를 nginx 등에서 하면) | 원래 `Host` 를 그대로 넘긴다. 본문 상한은 업로드 상한(10MB) 이상. 공개 도메인에 `X-Content-Type-Options: nosniff` | `Host` 를 바꾸면 서명 검증이 403 이다. nginx 기본 본문 상한(1m)이면 413 이고 브라우저에는 CORS 오류로 보인다. nosniff 는 위 판별 한계의 방어다 |
 
 ## Reason
 
