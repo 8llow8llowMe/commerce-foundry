@@ -19,6 +19,8 @@ import com.commercefoundry.domainlayer.product.application.mapper.ProductMapperI
 import com.commercefoundry.domainlayer.product.application.mapper.ProductOptionMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.SkuMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.StockMapperImpl;
+import com.commercefoundry.domainlayer.product.application.model.ProductAdminSearchCriteria;
+import com.commercefoundry.domainlayer.product.application.model.ProductAdminSortType;
 import com.commercefoundry.domainlayer.product.application.model.ProductSearchCriteria;
 import com.commercefoundry.domainlayer.product.application.model.ProductSortType;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
@@ -27,6 +29,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductOptio
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.ProductAdminListQueryResult;
 import com.commercefoundry.domainlayer.product.application.port.out.query.ProductListQueryResult;
 import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
@@ -36,6 +39,7 @@ import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
+import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
@@ -57,6 +61,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Slice;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -284,19 +289,19 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("SKU 집계: 상품별 판매중 · 구매 가능 SKU 유무와 판매중 SKU 추가금 최소 · 최대를 한 번에 내고, 판매 종료 SKU 추가금 · 재고는 무시한다")
+    @DisplayName("SKU 집계: 상품별 판매중 · 구매 가능 SKU 유무와 판매중 SKU 추가금 최소 · 최대를 한 번에 내고, 판매 종료 SKU 추가금 · 재고는 무시한다 — SKU 수는 판매 상태와 무관하게 센다")
     void aggregateSkus() {
         List<SkuAggregateQueryResult> aggregates = skuRepositoryPort.aggregateByProductIds(List.of(101L, 102L, 103L, 104L, 105L));
 
         assertThat(aggregates).containsExactlyInAnyOrder(
             // 최소 = 최대 — 판매 종료 SKU(1002)의 추가금 5,000 은 섞이지 않는다. 1001 은 수량 3 이라 구매 가능하다
-            new SkuAggregateQueryResult(101L, true, true, 0L, 0L),
+            new SkuAggregateQueryResult(101L, true, true, 0L, 0L, 2),
             // 판매중 SKU 가 없으면 최소 · 최대가 null 이고 구매 가능 SKU 도 없다
-            new SkuAggregateQueryResult(102L, false, false, null, null),
+            new SkuAggregateQueryResult(102L, false, false, null, null, 1),
             // 최소 ≠ 최대 — 옵션에 따라 가격이 다르다. 수량 0(1004) · 재고 행 없음(1005)은 품절이라 구매 가능 SKU 가 없다
-            new SkuAggregateQueryResult(103L, true, false, 0L, 1_000L),
+            new SkuAggregateQueryResult(103L, true, false, 0L, 1_000L, 2),
             // 무제한 SKU 는 수량 0 이어도 구매 가능하다
-            new SkuAggregateQueryResult(104L, true, true, 0L, 0L)
+            new SkuAggregateQueryResult(104L, true, true, 0L, 0L, 1)
         );
         assertThat(aggregates).extracting(SkuAggregateQueryResult::productId).as("SKU 없는 상품은 행이 없다").doesNotContain(105L);
     }
@@ -307,7 +312,116 @@ class ProductPersistenceAdapterTest {
         persistAll(stock(1005L, true, 2L));
 
         assertThat(skuRepositoryPort.aggregateByProductIds(List.of(103L)))
-            .containsExactly(new SkuAggregateQueryResult(103L, true, true, 0L, 1_000L));
+            .containsExactly(new SkuAggregateQueryResult(103L, true, true, 0L, 1_000L, 2));
+    }
+
+    // 어드민 목록 — 판매 가능 상태: 101 판매중 · 102 판매 종료(상품) · 103 품절(수량 0 · 재고 행 없음) · 104 판매중(숨김, 무제한) · 105 판매 종료(SKU 없음)
+
+    @Test
+    @DisplayName("어드민 목록: 조건이 없으면 숨김 상품까지 전체이고 최신순이며, 행에 저장된 가격 · 판매 상태 · 노출 · 수정 시각을 담는다")
+    void adminSearchAll() {
+        Page<ProductAdminListQueryResult> page = productRepositoryPort.searchForAdmin(adminCriteria().build());
+
+        assertThat(page.getContent()).extracting(ProductAdminListQueryResult::productId).containsExactly(105L, 104L, 103L, 102L, 101L);
+        assertThat(page.getTotalElements()).isEqualTo(5);
+        ProductAdminListQueryResult row = page.getContent().get(3);
+        assertThat(row.name()).isEqualTo("상품 102");
+        assertThat(row.salePrice()).isEqualTo(Money.of(20_000, KRW));
+        assertThat(row.listPrice()).isEqualTo(Money.of(25_000, KRW));
+        assertThat(row.saleStatus()).isEqualTo(SaleStatus.STOP_SELLING);
+        assertThat(row.visible()).isTrue();
+        assertThat(row.updatedAt()).isNotNull();
+        assertThat(page.getContent().get(1).visible()).isFalse();
+    }
+
+    @Test
+    @DisplayName("어드민 목록: 노출 여부 · 저장된 판매 상태로 거른다")
+    void adminSearchByVisibleAndSaleStatus() {
+        assertThat(adminIds(adminCriteria().visible(false))).containsExactly(104L);
+        assertThat(adminIds(adminCriteria().visible(true))).containsExactly(105L, 103L, 102L, 101L);
+        assertThat(adminIds(adminCriteria().saleStatus(SaleStatus.STOP_SELLING))).containsExactly(102L);
+        assertThat(adminIds(adminCriteria().saleStatus(SaleStatus.ON_SALE))).containsExactly(105L, 104L, 103L, 101L);
+    }
+
+    @Test
+    @DisplayName("어드민 목록: 판매 가능 상태는 고객 뱃지와 같은 규칙이다 — 재고 행 없음 · 수량 0 은 품절, 무제한은 판매중, 상품 판매 종료 · SKU 없음은 판매 종료")
+    void adminSearchByAvailability() {
+        assertThat(adminIds(adminCriteria().availability(SaleAvailability.ON_SALE))).containsExactly(104L, 101L);
+        assertThat(adminIds(adminCriteria().availability(SaleAvailability.SOLD_OUT))).containsExactly(103L);
+        assertThat(adminIds(adminCriteria().availability(SaleAvailability.STOP_SELLING))).containsExactly(105L, 102L);
+    }
+
+    @Test
+    @DisplayName("어드민 목록: 판매중 SKU 하나에 재고가 생기면 품절에서 판매중으로 옮겨 가고, 판매 종료 SKU 의 재고는 판매 가능 상태에 들지 않는다")
+    void adminAvailabilityFollowsStock() {
+        persistAll(
+            stock(1005L, true, 2L),
+            product(106L, 1_000L, true, SaleStatus.ON_SALE).build(),
+            sku(1007L, 106L, "", 0L, SaleStatus.STOP_SELLING),
+            sku(1008L, 106L, "9001", 0L, SaleStatus.ON_SALE),
+            stock(1007L, true, 5L)
+        );
+
+        assertThat(adminIds(adminCriteria().availability(SaleAvailability.ON_SALE))).containsExactly(104L, 103L, 101L);
+        assertThat(adminIds(adminCriteria().availability(SaleAvailability.SOLD_OUT))).containsExactly(106L);
+    }
+
+    @Test
+    @DisplayName("어드민 목록: 상품명 부분 일치는 대소문자를 무시하고, 검색어의 % · _ · ! 는 와일드카드가 아니라 글자다")
+    void adminSearchByKeyword() {
+        persistAll(product(106L, 1_000L, true, SaleStatus.ON_SALE).name("MOKO 저고리 100%").build());
+
+        assertThat(adminIds(adminCriteria().keyword("103"))).containsExactly(103L);
+        assertThat(adminIds(adminCriteria().keyword("상품 10"))).containsExactly(105L, 104L, 103L, 102L, 101L);
+        assertThat(adminIds(adminCriteria().keyword("moko"))).containsExactly(106L);
+        assertThat(adminIds(adminCriteria().keyword("100%"))).containsExactly(106L);
+        assertThat(adminIds(adminCriteria().keyword("%"))).containsExactly(106L);
+        assertThat(adminIds(adminCriteria().keyword("_"))).isEmpty();
+        assertThat(adminIds(adminCriteria().keyword("!"))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("어드민 목록: 카테고리는 고른 집합 중 한 곳에라도 진열된 상품이고 여러 곳에 진열돼도 한 번만 세며, 조건을 함께 걸면 모두 만족해야 한다")
+    void adminSearchByCategoriesAndCombination() {
+        Page<ProductAdminListQueryResult> page = productRepositoryPort.searchForAdmin(adminCriteria().categoryIds(Set.of(11L, 12L)).build());
+
+        assertThat(page.getContent()).extracting(ProductAdminListQueryResult::productId).containsExactly(105L, 103L, 102L);
+        assertThat(page.getTotalElements()).isEqualTo(3);
+        assertThat(adminIds(adminCriteria().categoryIds(Set.of(10L)))).containsExactly(104L, 102L, 101L);
+        assertThat(adminIds(adminCriteria().categoryIds(Set.of(10L)).visible(true).availability(SaleAvailability.ON_SALE))).containsExactly(101L);
+        assertThat(adminIds(adminCriteria().categoryIds(Set.of(10L)).keyword("104").saleStatus(SaleStatus.ON_SALE).visible(false))).containsExactly(104L);
+        assertThat(adminIds(adminCriteria().categoryIds(Set.of(12L)).availability(SaleAvailability.ON_SALE))).isEmpty();
+        assertThat(adminIds(adminCriteria().categoryIds(Set.of(10L)).availability(SaleAvailability.STOP_SELLING))).as("판매 종료 조건의 or 가 다른 조건 밖으로 새지 않는다")
+            .containsExactly(102L);
+    }
+
+    @Test
+    @DisplayName("어드민 목록: 이름순은 같은 이름을 아이디 내림차순으로 끊는다")
+    void adminSortByName() {
+        persistAll(
+            product(106L, 1_000L, true, SaleStatus.ON_SALE).name("가방").build(),
+            product(107L, 1_000L, false, SaleStatus.ON_SALE).name("가방").build()
+        );
+
+        assertThat(adminIds(adminCriteria().sortType(ProductAdminSortType.NAME_ASC))).containsExactly(107L, 106L, 101L, 102L, 103L, 104L, 105L);
+    }
+
+    @Test
+    @DisplayName("어드민 목록: 페이지를 자르고 전체 건수는 자르기 전 개수다 — 마지막 페이지를 넘기면 빈 목록이고 전체 건수는 그대로다")
+    void adminPaging() {
+        Page<ProductAdminListQueryResult> second = productRepositoryPort.searchForAdmin(adminCriteria().page(1).size(2).build());
+
+        assertThat(second.getContent()).extracting(ProductAdminListQueryResult::productId).containsExactly(103L, 102L);
+        assertThat(second.getTotalElements()).isEqualTo(5);
+        assertThat(second.getTotalPages()).isEqualTo(3);
+
+        Page<ProductAdminListQueryResult> beyond = productRepositoryPort.searchForAdmin(adminCriteria().page(5).size(2).build());
+        assertThat(beyond.getContent()).isEmpty();
+        assertThat(beyond.getTotalElements()).isEqualTo(5);
+
+        Page<ProductAdminListQueryResult> filtered = productRepositoryPort.searchForAdmin(adminCriteria().visible(true).size(3).build());
+        assertThat(filtered.getContent()).extracting(ProductAdminListQueryResult::productId).containsExactly(105L, 103L, 102L);
+        assertThat(filtered.getTotalElements()).as("count 도 같은 조건이다").isEqualTo(4);
     }
 
     @Test
@@ -474,6 +588,15 @@ class ProductPersistenceAdapterTest {
 
     private static ProductSearchCriteria criteria(Set<Long> categoryIds, ProductSortType sortType, int page, int size) {
         return new ProductSearchCriteria(categoryIds, sortType, page, size);
+    }
+
+    /** 어드민 목록 조건 — 기본은 조건 없음 · 최신순 · 0페이지 · 20건. */
+    private static ProductAdminSearchCriteria.ProductAdminSearchCriteriaBuilder adminCriteria() {
+        return ProductAdminSearchCriteria.builder().sortType(ProductAdminSortType.NEWEST).page(0).size(20);
+    }
+
+    private List<Long> adminIds(ProductAdminSearchCriteria.ProductAdminSearchCriteriaBuilder criteria) {
+        return productRepositoryPort.searchForAdmin(criteria.build()).getContent().stream().map(ProductAdminListQueryResult::productId).toList();
     }
 
     private static ProductEntity.ProductEntityBuilder product(Long id, long salePriceAmount, boolean visible, SaleStatus saleStatus) {

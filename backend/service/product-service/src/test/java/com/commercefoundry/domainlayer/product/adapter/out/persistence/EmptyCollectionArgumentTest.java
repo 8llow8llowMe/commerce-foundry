@@ -17,14 +17,18 @@ import com.commercefoundry.domainlayer.product.application.mapper.ProductMapper;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductOptionMapper;
 import com.commercefoundry.domainlayer.product.application.mapper.SkuMapper;
 import com.commercefoundry.domainlayer.product.application.mapper.StockMapper;
+import com.commercefoundry.domainlayer.product.application.model.ProductAdminSearchCriteria;
+import com.commercefoundry.domainlayer.product.application.model.ProductAdminSortType;
 import com.commercefoundry.domainlayer.product.application.model.ProductSearchCriteria;
 import com.commercefoundry.domainlayer.product.application.model.ProductSortType;
+import com.commercefoundry.domainlayer.product.application.port.out.query.ProductAdminListQueryResult;
 import com.commercefoundry.domainlayer.product.application.port.out.query.ProductListQueryResult;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Slice;
 
 /**
@@ -56,6 +60,22 @@ class EmptyCollectionArgumentTest {
         assertThat(slice.hasNext()).isFalse();
         assertThat(slice.getNumber()).isEqualTo(2);
         assertThat(slice.getSize()).isEqualTo(20);
+        verifyNoInteractions(repository, mapper);
+    }
+
+    @Test
+    @DisplayName("어드민 상품 목록: 빈 카테고리 집합이면 요청한 페이지의 빈 Page 이고 전체 건수는 0 이다 (count 도 가지 않는다)")
+    void adminProductsInEmptyCategories() {
+        ProductRepository repository = mock(ProductRepository.class);
+        ProductMapper mapper = mock(ProductMapper.class);
+
+        Page<ProductAdminListQueryResult> page = new ProductRepositoryAdapter(repository, mapper)
+            .searchForAdmin(ProductAdminSearchCriteria.builder().categoryIds(Set.of()).sortType(ProductAdminSortType.NAME_ASC).page(2).size(20).build());
+
+        assertThat(page.getContent()).isEmpty();
+        assertThat(page.getTotalElements()).isZero();
+        assertThat(page.getNumber()).isEqualTo(2);
+        assertThat(page.getSize()).isEqualTo(20);
         verifyNoInteractions(repository, mapper);
     }
 

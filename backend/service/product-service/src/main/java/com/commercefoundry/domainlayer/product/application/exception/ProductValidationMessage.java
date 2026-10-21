@@ -58,6 +58,9 @@ public final class ProductValidationMessage {
     public static final String CATEGORY_ID_POSITIVE = "PRODUCT_137:categoryId 는 양수여야 합니다.";
     public static final String CATEGORY_NAME_INVALID_CHARACTER = "PRODUCT_138:name 에는 제어 문자 · 서식 문자(개행 · 탭 · 제로폭 공백 등)를 쓸 수 없습니다.";
 
+    // 어드민 상품 목록 (GET /api/v1/admin/products). page · size 는 PAGE_MIN · SIZE_RANGE, categoryId 는 CATEGORY_ID_POSITIVE 다
+    public static final String PRODUCT_KEYWORD_SIZE_MAX = "PRODUCT_139:keyword 는 100자 이하여야 합니다.";
+
     private ProductValidationMessage() {
     }
 }
