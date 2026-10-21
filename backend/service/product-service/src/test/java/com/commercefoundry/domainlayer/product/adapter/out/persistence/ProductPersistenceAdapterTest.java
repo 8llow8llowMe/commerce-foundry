@@ -369,11 +369,16 @@ class ProductPersistenceAdapterTest {
     @Test
     @DisplayName("어드민 목록: 상품명 부분 일치는 대소문자를 무시하고, 검색어의 % · _ · ! 는 와일드카드가 아니라 글자다")
     void adminSearchByKeyword() {
-        persistAll(product(106L, 1_000L, true, SaleStatus.ON_SALE).name("MOKO 저고리 100%").build());
+        persistAll(
+            product(106L, 1_000L, true, SaleStatus.ON_SALE).name("MOKO 저고리 100%").build(),
+            product(107L, 1_000L, true, SaleStatus.ON_SALE).name("mokoyuri 바지").build()
+        );
 
         assertThat(adminIds(adminCriteria().keyword("103"))).containsExactly(103L);
         assertThat(adminIds(adminCriteria().keyword("상품 10"))).containsExactly(105L, 104L, 103L, 102L, 101L);
-        assertThat(adminIds(adminCriteria().keyword("moko"))).containsExactly(106L);
+        // 양방향 — 소문자 검색어로 대문자 이름을, 대문자 검색어로 소문자 이름을 찾는다
+        assertThat(adminIds(adminCriteria().keyword("moko"))).containsExactly(107L, 106L);
+        assertThat(adminIds(adminCriteria().keyword("MOKO"))).containsExactly(107L, 106L);
         assertThat(adminIds(adminCriteria().keyword("100%"))).containsExactly(106L);
         assertThat(adminIds(adminCriteria().keyword("%"))).containsExactly(106L);
         assertThat(adminIds(adminCriteria().keyword("_"))).isEmpty();
