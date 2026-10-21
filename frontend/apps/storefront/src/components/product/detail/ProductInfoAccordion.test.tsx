@@ -54,4 +54,25 @@ describe('ProductInfoAccordion', () => {
     expect(html).toContain('Size guide');
     expect(html).toContain('Shipping &amp; returns');
   });
+
+  it('배송비 정책 줄이 있으면 브랜드 문단이 없어도 배송 · 교환 항목을 그리고, 정책 줄을 먼저 둔다', () => {
+    const feeOnly = renderToStaticMarkup(
+      <ProductInfoAccordion
+        info={{ sizeGuide: null, shipping: null }}
+        shippingFee={['배송비 3,000원']}
+        labels={ko.product.info}
+      />,
+    );
+    expect(feeOnly).toMatch(/<summary[^>]*>배송 · 교환/);
+    expect(feeOnly).toContain('<p>배송비 3,000원</p>');
+
+    const both = renderToStaticMarkup(
+      <ProductInfoAccordion
+        info={FULL}
+        shippingFee={['배송비 3,000원']}
+        labels={ko.product.info}
+      />,
+    );
+    expect(both.indexOf('배송비 3,000원')).toBeLessThan(both.indexOf('첫 단락'));
+  });
 });

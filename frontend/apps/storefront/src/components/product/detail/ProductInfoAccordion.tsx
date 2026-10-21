@@ -4,7 +4,8 @@ import type { Dictionary } from '@/lib/i18n/dictionaries';
 
 /**
  * 상품 상세 구매 정보 아래 공통 안내 아코디언(#60). 사이즈 가이드 · 배송 · 교환은 상점 공통이라 브랜드 설정
- * `content[locale].productInfo` 에서 받고, 값이 없는 항목은 그리지 않는다(고객사 값 받기 전). 상품마다 다른
+ * `content[locale].productInfo` 에서 받고, 값이 없는 항목은 그리지 않는다(고객사 값 받기 전).
+ * 배송비 줄(`shippingFee`)은 delivery 정책 API 값이다(#171) — 배송 · 교환 항목 맨 위에 두고, 브랜드 문단이 없어도 그린다. 상품마다 다른
  * 소재 · 관리 · 사이즈 · 핏은 상품 데이터가 생기면 같은 모양으로 더한다.
  *
  * 네이티브 <details> 라 스크립트 없이 열고 닫히고, 키보드 · 화면 읽기 동작을 브라우저가 맡는다.
@@ -12,13 +13,17 @@ import type { Dictionary } from '@/lib/i18n/dictionaries';
  */
 export function ProductInfoAccordion({
   info,
+  shippingFee = [],
   labels,
 }: {
   info: ProductInfo;
+  /** 배송비 정책 안내 줄. 정책이 없으면 빈 배열 */
+  shippingFee?: readonly string[];
   labels: Dictionary['product']['info'];
 }) {
-  const { sizeGuide, shipping } = info;
-  if (!sizeGuide && !shipping) return null;
+  const { sizeGuide } = info;
+  const shipping = [...shippingFee, ...(info.shipping ?? [])];
+  if (!sizeGuide && shipping.length === 0) return null;
 
   return (
     <div className="mt-4 flex flex-col">
@@ -59,7 +64,7 @@ export function ProductInfoAccordion({
         </Item>
       )}
 
-      {shipping && (
+      {shipping.length > 0 && (
         <Item title={labels.shipping}>
           <div className="flex flex-col gap-3 text-sm leading-7">
             {shipping.map((paragraph, index) => (

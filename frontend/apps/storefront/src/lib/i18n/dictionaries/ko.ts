@@ -312,6 +312,17 @@ export const ko = {
       GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
     } as Record<string, string>,
   },
+  /** 배송비 정책 안내(상품 상세 · 장바구니). 금액은 서버 정책 값이다 */
+  shipping: {
+    baseFee: '배송비 {fee}',
+    free: '무료배송',
+    freeOver: '{amount} 이상 구매 시 무료배송',
+    /** {areas}: remoteArea 를 쉼표로 이은 것 */
+    remote: '제주 · 도서산간 지역은 추가 배송비가 있습니다({areas}). 무료배송이어도 붙습니다.',
+    remoteArea: '{name} {fee}',
+    /** 해외 배송비 = 기본료 + 무게 요금 */
+    internationalBase: '해외 배송비 {fee}부터(무게에 따라 더해집니다)',
+  },
   look: {
     selectOptions: '{names} 옵션을 선택해 주세요.',
     pickItems: '함께 담을 상품을 골라 주세요.',

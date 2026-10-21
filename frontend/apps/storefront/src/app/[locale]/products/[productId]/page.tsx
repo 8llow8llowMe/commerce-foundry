@@ -7,6 +7,7 @@ import { ProductGallery } from '@/components/product/detail/ProductGallery';
 import { ProductInfoAccordion } from '@/components/product/detail/ProductInfoAccordion';
 import { PurchasePanel, type PurchaseProduct } from '@/components/product/detail/PurchasePanel';
 import { ProductLooks } from '@/components/product/look/ProductLooks';
+import { loadShippingNotice } from '@/lib/catalog/load-shipping-notice';
 import { productJsonLd } from '@/lib/catalog/product-jsonld';
 import { shopHref } from '@/lib/catalog/shop-query';
 import type { ProductDetail } from '@/lib/catalog/types';
@@ -58,6 +59,8 @@ export async function generateMetadata({
 export default async function ProductPage({ params }: PageProps<'/[locale]/products/[productId]'>) {
   const { productId } = await params;
   const { href, dict, content } = await getI18n();
+  // 상품과 함께 읽는다 — 실패해도 null 이라 상품 화면을 막지 않는다
+  const shippingNotice = loadShippingNotice();
 
   let product: ProductDetail | null;
   try {
@@ -115,7 +118,11 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
             {product.summary && <p className="text-sm text-muted-fg">{product.summary}</p>}
           </div>
           <PurchasePanel product={purchaseProduct} />
-          <ProductInfoAccordion info={content.productInfo} labels={dict.product.info} />
+          <ProductInfoAccordion
+            info={content.productInfo}
+            shippingFee={(await shippingNotice)?.lines ?? []}
+            labels={dict.product.info}
+          />
         </div>
       </div>
 
