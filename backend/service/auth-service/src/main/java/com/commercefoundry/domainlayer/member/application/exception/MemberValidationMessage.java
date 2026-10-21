@@ -2,7 +2,8 @@ package com.commercefoundry.domainlayer.member.application.exception;
 
 /**
  * 회원 요청 검증 메시지 — {@code "AUTH_1xx:사용자 메시지"} ({@code coding-conventions.md} §8-2). DTO 는 이 상수만 참조한다.
- * 대역 끝 198 · 199 는 {@link MemberErrorCode} 의 타입 불일치 · 필수 파라미터 누락이다. 로그인 요청은 같은 뜻의 101 · 102 · 104 를 다시 쓴다. 토큰 요청의 refresh 토큰은 필드 검증 대신 401(AUTH_010)로 거절한다.
+ * 101~ 은 고객, 130~ 은 관리자다. 대역 끝 198 · 199 는 {@link MemberErrorCode} 의 타입 불일치 · 필수 파라미터 누락이다.
+ * 로그인 요청은 같은 뜻의 101 · 102 · 104 를 다시 쓴다. 토큰 요청의 refresh 토큰은 필드 검증 대신 401(AUTH_010)로 거절한다.
  */
 public final class MemberValidationMessage {
 
@@ -21,6 +22,16 @@ public final class MemberValidationMessage {
     public static final String MARKETING_REQUIRED = "AUTH_113:마케팅 정보 수신 동의 여부는 필수입니다.";
     public static final String NAME_BLANK = "AUTH_114:이름은 공백만으로 입력할 수 없습니다.";
     public static final String PROFILE_UPDATE_EMPTY = "AUTH_115:변경할 항목이 없습니다.";
+
+    /*
+     * 130~ 은 관리자(#6)다 — 관리자 로그인 요청 · 어드민 회원 조회 파라미터. 고객 DTO 와 공유하지 않으므로 같은 뜻이어도 코드를 따로 둔다.
+     * 관리자 로그인도 비밀번호 형식은 보지 않는다 — 틀리면 AUTH_030 이다.
+     */
+    public static final String ADMIN_EMAIL_REQUIRED = "AUTH_130:이메일은 필수입니다.";
+    public static final String ADMIN_EMAIL_LENGTH_INVALID = "AUTH_131:이메일은 254자 이하여야 합니다.";
+    public static final String ADMIN_PASSWORD_REQUIRED = "AUTH_132:비밀번호는 필수입니다.";
+    public static final String ADMIN_PAGE_MIN = "AUTH_133:페이지는 0 이상이어야 합니다.";
+    public static final String ADMIN_SIZE_RANGE = "AUTH_134:페이지 크기는 1 이상 100 이하여야 합니다.";
 
     private MemberValidationMessage() {
     }
