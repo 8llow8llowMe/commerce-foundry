@@ -1,8 +1,8 @@
 package com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity;
 
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.persistence.entity.BaseEntity;
 import com.commercefoundry.shared.commerce.CurrencyCode;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import jakarta.persistence.CheckConstraint;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

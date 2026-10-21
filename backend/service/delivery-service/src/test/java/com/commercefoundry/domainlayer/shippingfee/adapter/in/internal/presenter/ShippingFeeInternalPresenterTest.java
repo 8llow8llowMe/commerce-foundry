@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.internal.dto.response.ShippingFeeQuoteInternalResponse;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingFeeQuote;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

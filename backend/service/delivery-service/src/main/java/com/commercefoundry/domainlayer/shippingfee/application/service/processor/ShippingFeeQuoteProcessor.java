@@ -8,11 +8,11 @@ import com.commercefoundry.domainlayer.shippingfee.application.port.out.Shipping
 import com.commercefoundry.domainlayer.shippingfee.domain.model.InternationalShippingPolicy;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingFeeQuote;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZone;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

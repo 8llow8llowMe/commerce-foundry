@@ -20,12 +20,12 @@ import com.commercefoundry.domainlayer.shippingfee.application.port.out.Internat
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.ShippingPolicyRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.InternationalShippingPolicy;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZone;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneCountry;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneRate;
 import com.commercefoundry.global.config.DeliveryServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;

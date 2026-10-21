@@ -15,7 +15,7 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repos
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repository.ShippingZoneRateRepository;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repository.ShippingZoneRepository;
 import com.commercefoundry.domainlayer.shippingfee.application.mapper.InternationalShippingPolicyMapperImpl;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;

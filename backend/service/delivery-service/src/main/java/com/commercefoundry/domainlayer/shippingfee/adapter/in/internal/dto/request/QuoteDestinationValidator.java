@@ -1,7 +1,7 @@
 package com.commercefoundry.domainlayer.shippingfee.adapter.in.internal.dto.request;
 
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryValidationMessage;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
 import java.util.regex.Pattern;

@@ -7,7 +7,6 @@ import com.commercefoundry.domainlayer.shippingfee.application.exception.Deliver
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryException;
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.InternationalShippingPolicyRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.InternationalShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZone;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneCountry;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneRate;
@@ -15,6 +14,7 @@ import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;

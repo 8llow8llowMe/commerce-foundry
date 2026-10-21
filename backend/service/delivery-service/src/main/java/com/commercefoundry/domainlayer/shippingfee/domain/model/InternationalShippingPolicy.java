@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.shippingfee.domain.model;
 
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;

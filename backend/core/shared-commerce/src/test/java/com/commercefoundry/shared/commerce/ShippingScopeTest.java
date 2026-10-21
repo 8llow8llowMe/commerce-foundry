@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.shippingfee.domain.model;
+package com.commercefoundry.shared.commerce;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

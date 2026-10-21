@@ -15,10 +15,10 @@ import com.commercefoundry.domainlayer.shippingfee.application.mapper.ShippingPo
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.ShippingPolicyRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.RemoteArea;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.global.config.DeliveryServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;

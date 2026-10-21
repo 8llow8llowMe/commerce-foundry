@@ -7,11 +7,11 @@ import com.commercefoundry.domainlayer.shippingfee.domain.model.InternationalShi
 import com.commercefoundry.domainlayer.shippingfee.domain.model.PostalCode;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.RemoteArea;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
-import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingScope;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZone;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneCountry;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneRate;
 import com.commercefoundry.shared.commerce.Money;
+import com.commercefoundry.shared.commerce.ShippingScope;
 import java.time.Instant;
 import java.util.List;
 
