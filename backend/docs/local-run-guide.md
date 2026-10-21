@@ -83,7 +83,9 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
     `git diff --name-only --no-renames origin/develop...HEAD | python ../.github/scripts/backend-ci-matrix.py . --changed-files -`
   - `python ../.github/scripts/backend-test-count.py .` — 모듈별 실행 건수. CI 의 그룹 job 은 `--modules "<그룹 모듈>"` 로 자기 그룹만 센다.
 - CI 는 모듈을 **그룹별 병렬 job** 으로 돌린다(`.github/scripts/backend-ci-matrix.py`).
-  - 테스트가 오래 걸리는 서비스만 이름으로 떼고(`auth` · `product` · `order-payment` · `delivery`), 나머지 core · cloud · 새 모듈은 전부 `rest` 그룹이다.
+  - 서비스를 묶어 그룹을 만들고(`product-delivery` · `auth-order`), 나머지 core · cloud · 새 모듈은 전부 `rest` 그룹이다.
+    그룹 = job 하나다. 무료 Organization 의 동시 실행 job 한도(20) 때문에 그룹을 늘리면 PR 이 몰릴 때 Queued 대기가 길어진다(#194) —
+    그룹을 쪼개기보다 job 안 병렬(`org.gradle.parallel`)에 맡긴다.
   - job 마다 `./gradlew <그룹 모듈>:check --continue --no-build-cache` 로 돌아 한 모듈의 실패가 같은 그룹의 다른 모듈 결과를 가리지 않는다.
   - 그룹 결과는 `check` job 이 모은다.
   - Gradle 홈(의존성 · wrapper)은 캐시하지만 빌드 캐시(`caches/build-cache-1`)는 담지 않는다. 캐시는 develop push 실행만 쓰고 PR 은 읽기만 한다.
