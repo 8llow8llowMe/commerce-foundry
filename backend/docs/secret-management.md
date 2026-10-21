@@ -15,7 +15,7 @@
 
 | 구분 | 예 | 위치 |
 |------|----|------|
-| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 5종 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키 | Vault |
+| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 5종 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 를 켤 때만 필요), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키 | Vault |
 | 배포용 공개값 | JWT 공개키(전 서비스 · 게이트웨이). 비밀은 아니지만 교체를 한 곳에서 하려고 Vault 로 배포한다 | Vault |
 | 고객사 실정보 | 상호, 대표자, 사업자등록번호, 통신판매업 신고번호, 사업장 주소, CS 연락처 | Vault |
 | 일반 설정 | 포트, 타임아웃, `store.features.*`, 로케일, 통화 | `application*.yml` |
