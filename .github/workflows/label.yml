@@ -3,9 +3,11 @@ name: label
 # **라벨을 사람 손에 맡기지 않는다.**
 # 경로를 보고 서비스 라벨을 붙인다. 매핑은 `.github/labeler.yml`.
 
+# PR 을 열 때만 돈다. 커밋 push(synchronize)마다 돌면 동시 실행 job 슬롯을 써서 다른 체크를 Queued 로 밀어낸다(#194).
+# 나중 커밋이 새 서비스 경로를 건드려 라벨이 모자라면 손으로 붙이거나 PR 을 닫았다 다시 연다.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, reopened, ready_for_review]
 
 # 기본 토큰은 읽기 전용이다. 라벨을 붙이려면 이 권한이 필요하다
 permissions:

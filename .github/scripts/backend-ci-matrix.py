@@ -36,11 +36,11 @@ from collections import deque
 from pathlib import Path
 
 # 그룹 이름 → 모듈(backend 기준 경로). 시간 근거: #136 측정(auth 100s · delivery 94s · order 60s, product 가 가장 크다)
+# 그룹은 job 하나다. 무료 Organization 은 동시 실행 job 이 20개라 그룹을 늘릴수록 PR 이 몰릴 때 Queued 대기가 길어진다(#194).
+# 그래서 서비스를 묶는다 — job 안에서는 `org.gradle.parallel=true` 로 모듈이 병렬로 돈다.
 GROUPS = {
-    'auth': ['service/auth-service'],
-    'product': ['service/product-service'],
-    'order-payment': ['service/order-service', 'service/payment-service'],
-    'delivery': ['service/delivery-service'],
+    'product-delivery': ['service/product-service', 'service/delivery-service'],
+    'auth-order': ['service/auth-service', 'service/order-service', 'service/payment-service'],
 }
 REST_GROUP = 'rest'
 
