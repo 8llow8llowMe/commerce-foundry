@@ -42,8 +42,9 @@ backend/
 `shared-commerce` 가 필요한 이유: 같은 enum 을 서비스마다 복사하면 뜻이 갈라진다.
 예를 들어 `CurrencyCode` 의 소수 자릿수를 order 와 payment 가 다르게 알면 USD 주문이 100배로 결제된다.
 배송 범위 `ShippingScope`(`DOMESTIC` · `INTERNATIONAL`)와 국내 국가 판정 `ShippingScope.ofCountry`(`KR` 이면 국내)도 여기 둔다 —
-delivery 는 배송비 정책을 범위로 고르고 order 는 해외 주문을 판정하는데, 서비스마다 `"KR"` 을 따로 비교하면 국내 규칙이 갈라진다.
+delivery 는 배송비 정책을 범위로 고르고 order 는 해외 주문을, auth 는 배송지 국가별 규칙을 판정하는데, 서비스마다 `"KR"` 을 따로 비교하면 국내 규칙이 갈라진다.
 해외 범위에 든다고 배송할 수 있는 것은 아니다 — 배송 가능 여부는 delivery 가 판정한다(스토어의 해외 배송 설정 · 해외 정책의 국가 그룹).
+국내 국가(`KR`)는 지금 엔진 공통 코드에 고정한다 — 스토어별 국내 국가 설정이 필요해지면 별도 이슈로 `store.*` 설정 쪽으로 옮긴다(§9 멀티 스토어 기준).
 
 ## 2. 기본 패키지 구조
 

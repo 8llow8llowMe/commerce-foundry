@@ -56,7 +56,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | `redis-core` | auth(토큰·소셜 state) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
 | `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
 | `storage-core` | product(상품 이미지) |
-| `shared-commerce` | product · order · payment · delivery |
+| `shared-commerce` | product · order · payment · delivery · auth(배송지 국내 국가 판정 — #144) |
 
 ## 4. 데이터 저장소
 
