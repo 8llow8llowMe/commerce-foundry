@@ -14,15 +14,18 @@ import org.springframework.http.HttpStatus;
  *
  * <p>배송비 견적 코드(011~015)는 delivery-service 의 업무 거절({@code DELIVERY_001/002/003/011})을 주문 계약으로 번역한 것이다 —
  * delivery 의 코드는 주문 응답에 그대로 나가지 않는다. 번역은 {@code ShippingFeeInternalResponseSupport} 가 한다.
- * 응답 봉투로 바꾸는 {@code OrderExceptionHandler} 는 주문 진입 API(주문서 미리보기, #13)와 함께 생긴다.
+ * 응답 봉투로 바꾸는 것은 {@code OrderExceptionHandler} 다(주문 진입 API, #13).
  */
 @Getter
 @RequiredArgsConstructor
 public enum OrderErrorCode {
 
+    /** 없거나 다른 회원의 주문 — 존재를 숨기려고 둘 다 404 다 ({@code api-design-guide.md} §2-2). 주문 생성의 재생(같은 키 재요청)도 이 조회를 쓴다. */
+    NOT_FOUND_ORDER("ORDER_001", "존재하지 않는 주문입니다.", HttpStatus.NOT_FOUND),
     /**
      * product-service 서킷 오픈 · 전송 실패 · 5xx — catalog 의 {@code CATALOG_001} 을 {@code OrderExceptionHandler} 가 이 코드로 번역한다
      * ({@code architecture-guide.md} §3). SKU 응답이 계약과 다를 때(해외 주문의 SKU 무게가 1 미만)도 이 코드다 — 값을 추측하지 않는다.
+     * 주문 생성의 재고 선점 결과 모름(타임아웃 · 5xx · 서킷 · 응답 계약 위반) · 예상하지 못한 거절도 이 코드다 — 같은 키로 다시 보낸다 (#13).
      */
     PRODUCT_SERVICE_UNAVAILABLE("ORDER_002", "상품 정보를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
     /**
@@ -46,6 +49,8 @@ public enum OrderErrorCode {
     INTERNATIONAL_SHIPPING_INFO_MISSING("ORDER_007", "해외 배송 정보가 준비되지 않아 해외로 주문할 수 없는 상품이 있습니다: %s", HttpStatus.CONFLICT),
     /** 같은 SKU · 같은 맞춤 제작 입력(정규화한 값)의 줄이 요청 안에 두 번 이상 있다 — 프론트가 한 줄로 합쳐 보낸다. {@code %s} 는 그 줄들의 이름이다. */
     DUPLICATE_LINE("ORDER_008", "같은 상품이 주문에 중복되어 있습니다: %s", HttpStatus.BAD_REQUEST),
+    /** 주문 생성 요청의 {@code expectedTotalAmount} 가 지금 계산한 총액과 다르다 — 가격 · 배송비가 그 사이 바뀌었다. 재고를 잡기 전에 거절한다. */
+    ORDER_AMOUNT_CHANGED("ORDER_010", "주문 금액이 변경되었습니다. 주문서를 다시 확인해 주세요.", HttpStatus.CONFLICT),
     /**
      * delivery-service 서킷 오픈 · 전송 실패 · 타임아웃 · 5xx, 번역하지 않는 4xx(우리 요청 · 서비스 토큰 설정 문제), 응답 계약 위반
      * ({@code coding-conventions.md} §10). 같은 요청을 다시 보내면 풀릴 수 있다.
@@ -61,7 +66,27 @@ public enum OrderErrorCode {
      * 총 무게가 가장 큰 무게 구간을 넘는다({@code DELIVERY_011}). 총 무게가 int 범위를 넘어 견적을 부르지 않을 때도 같은 코드다
      * ({@code order-flow-guide.md} §2-2).
      */
-    SHIPPING_WEIGHT_NOT_SUPPORTED("ORDER_015", "배송할 수 있는 무게를 넘었습니다. 주문 수량을 줄여 주세요.", HttpStatus.BAD_REQUEST);
+    SHIPPING_WEIGHT_NOT_SUPPORTED("ORDER_015", "배송할 수 있는 무게를 넘었습니다. 주문 수량을 줄여 주세요.", HttpStatus.BAD_REQUEST),
+
+    /** 재고 부족(PRODUCT_021). product-service 가 선점 전체를 한 트랜잭션으로 되돌려 선점이 남지 않는다. */
+    STOCK_INSUFFICIENT("ORDER_016", "재고가 부족한 상품이 있습니다.", HttpStatus.CONFLICT),
+    /** 같은 주문 아이디의 활성 선점과 항목이 다르다(PRODUCT_023) — 같은 요청 지문이면 항목도 같아야 하므로 버그 · 데이터 이상이다. error 로그를 남긴다. */
+    STOCK_RESERVATION_INCONSISTENT("ORDER_017", "주문을 접수하지 못했습니다. 고객센터에 문의해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
+    /** 같은 키의 주문 생성이 처리 중이다(lease 안) · 같은 주문의 재고 선점이 동시에 겹쳤다(PRODUCT_026). 같은 키로 잠시 뒤 다시 보낸다. */
+    IDEMPOTENCY_IN_PROGRESS("ORDER_018", "같은 주문이 처리 중입니다. 잠시 후 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /** 같은 키를 다른 본문으로 다시 썼다 — 상태와 무관하다. 새 키를 쓴다. */
+    IDEMPOTENCY_KEY_REUSED("ORDER_019", "같은 Idempotency-Key 로 다른 주문을 요청할 수 없습니다.", HttpStatus.CONFLICT),
+    /** 허용 전이 표 밖 상태 변경 ({@code order-flow-guide.md} §1-1). {@code %s} 는 현재 상태다. */
+    ORDER_STATUS_TRANSITION_INVALID("ORDER_020", "현재 주문 상태(%s)에서는 할 수 없는 요청입니다.", HttpStatus.CONFLICT),
+    /** DB 가 주문 저장을 거절했다(제약 위반 등 버그 · 데이터 이상). 원인 메시지(제약 위반 행 값)는 싣지 않는다 — 개인정보가 로그 · 응답에 남지 않게. */
+    ORDER_SAVE_FAILED("ORDER_021", "주문을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
+
+    /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
+    INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
+    /** 타입 불일치 — {@code Idempotency-Key} 가 UUID 가 아닌 경우도 여기다. */
+    PARAMETER_TYPE_INVALID("ORDER_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
+    /** 필수 파라미터 · 헤더 누락 — {@code Idempotency-Key} 헤더가 없는 경우도 여기다. */
+    PARAMETER_REQUIRED("ORDER_199", "필수 요청 파라미터가 없습니다.", HttpStatus.BAD_REQUEST);
 
     private final String code;
     private final String message;
