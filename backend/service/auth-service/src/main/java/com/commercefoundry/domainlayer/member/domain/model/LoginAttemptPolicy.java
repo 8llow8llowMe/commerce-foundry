@@ -18,8 +18,12 @@ public record LoginAttemptPolicy(int maxAttempts, Duration window) {
     /** 창의 하한. 짧으면 추측 속도가 거의 줄지 않는다. */
     public static final Duration MIN_WINDOW = Duration.ofMinutes(1);
 
-    /** 창의 상한. 길수록 한도를 넘긴 이메일이 오래 묶인다. */
-    public static final Duration MAX_WINDOW = Duration.ofHours(24);
+    /**
+     * 창의 상한. 길수록 한도를 넘긴 이메일이 오래 묶이고, 키가 오래 남는다 — 이메일을 바꿔 가며 보내면 키 수 ≈ 처리량 × 창(키당 약 120B)이다.
+     * 운영 Redis 는 {@code noeviction} 이라 메모리가 차면 퇴출 대신 쓰기가 실패하고, 같은 Redis 의 refresh 회전 · 로그아웃 차단 목록 쓰기까지 막힌다
+     * ({@code coding-conventions.md} §9-7). 그래서 1시간으로 묶는다. 기본값은 15분({@code auth.login-guard.window}).
+     */
+    public static final Duration MAX_WINDOW = Duration.ofHours(1);
 
     public LoginAttemptPolicy {
         Objects.requireNonNull(window, "window");
@@ -27,7 +31,7 @@ public record LoginAttemptPolicy(int maxAttempts, Duration window) {
             throw new IllegalArgumentException("maxAttempts 는 1 이상 " + MAX_ATTEMPTS_CAP + " 이하여야 한다");
         }
         if (window.compareTo(MIN_WINDOW) < 0 || window.compareTo(MAX_WINDOW) > 0) {
-            throw new IllegalArgumentException("window 는 1분 이상 24시간 이하여야 한다");
+            throw new IllegalArgumentException("window 는 1분 이상 1시간 이하여야 한다");
         }
     }
 }

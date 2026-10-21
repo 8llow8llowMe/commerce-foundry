@@ -28,15 +28,15 @@ class LoginAttemptPolicyTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"PT1M", "PT15M", "PT24H"})
-    @DisplayName("창은 1분 이상 24시간 이하면 받는다")
+    @ValueSource(strings = {"PT1M", "PT15M", "PT1H"})
+    @DisplayName("창은 1분 이상 1시간 이하면 받는다")
     void windowAccepted(String window) {
         assertThat(new LoginAttemptPolicy(5, Duration.parse(window)).window()).isEqualTo(Duration.parse(window));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"PT59.999S", "PT0S", "PT-1M", "PT24H0.001S"})
-    @DisplayName("창이 범위 밖이면 받지 않는다")
+    @ValueSource(strings = {"PT59.999S", "PT0S", "PT-1M", "PT1H0.001S", "PT24H"})
+    @DisplayName("창이 범위 밖이면 받지 않는다 — 상한은 1시간이다(키가 창만큼 남는다)")
     void windowRejected(String window) {
         assertThatThrownBy(() -> new LoginAttemptPolicy(5, Duration.parse(window))).isInstanceOf(IllegalArgumentException.class);
     }

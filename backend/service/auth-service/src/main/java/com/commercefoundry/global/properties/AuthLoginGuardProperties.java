@@ -16,7 +16,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *       대입해 되돌릴 수 있다. auth 인스턴스가 모두 같은 값을 써야 같은 이메일이 같은 창에 모인다.</li>
  * </ul>
  *
- * @param enabled     시도를 셀지. 기본 켬
+ * @param enabled     시도를 셀지. 레코드 기본값({@code @DefaultValue})은 켬(닫힌 기본값)이고, application.yml 은 흐름에 연결하기 전이라 끈다
  * @param maxAttempts 창 하나에 허용하는 시도 수. 기본 5
  * @param window      첫 시도부터 재는 창의 길이. 이어지는 시도가 늘리지 않는다. 기본 15분
  * @param hashKey     base64 HMAC 키. 켤 때만 필수
@@ -36,7 +36,7 @@ public record AuthLoginGuardProperties(
             throw new IllegalStateException("auth.login-guard.max-attempts 는 1 이상 " + LoginAttemptPolicy.MAX_ATTEMPTS_CAP + " 이하여야 합니다");
         }
         if (window == null || window.compareTo(LoginAttemptPolicy.MIN_WINDOW) < 0 || window.compareTo(LoginAttemptPolicy.MAX_WINDOW) > 0) {
-            throw new IllegalStateException("auth.login-guard.window 는 1분 이상 24시간 이하여야 합니다");
+            throw new IllegalStateException("auth.login-guard.window 는 1분 이상 1시간 이하여야 합니다");
         }
         // 키는 쓸 때만 본다 — 끈 구성에서는 키 없이 뜬다
         if (enabled) {

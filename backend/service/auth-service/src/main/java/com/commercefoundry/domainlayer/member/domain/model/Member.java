@@ -65,17 +65,26 @@ public record Member(long id, String email, String passwordHash, String name, St
     }
 
     /**
-     * 저장 · 조회 키로 쓰는 이메일 — 앞뒤 공백 제거 + 소문자({@link Locale#ROOT}). 로그인(#4 A3)도 이 함수로 찾는다.
+     * 저장 · 조회 키로 쓰는 이메일 — {@link #canonicalEmail} 에 길이 검증을 더한다. 로그인(#4 A3)도 이 함수로 찾는다.
      *
      * @throws IllegalArgumentException 비었거나 {@value #EMAIL_MAX_LENGTH}자를 넘는다
      */
     public static String normalizeEmail(String email) {
         Objects.requireNonNull(email, "email");
-        String normalized = email.strip().toLowerCase(Locale.ROOT);
+        String normalized = canonicalEmail(email);
         if (normalized.isEmpty() || normalized.length() > EMAIL_MAX_LENGTH) {
             throw new IllegalArgumentException("email 길이가 규칙을 벗어났다");
         }
         return normalized;
+    }
+
+    /**
+     * 같은 계정이면 같은 값이 되는 이메일 형태 — 앞뒤 공백 제거 + 소문자({@link Locale#ROOT}). 검증하지 않는 순수 함수이고 null 은 빈 문자열이다.
+     * 멱등이라 이미 정규화한 값은 그대로 나온다. 거절하면 안 되는 쪽(시도 계수기 #66 — 카운터 키가 DB 조회 키와 같아야 한다)이 쓰고,
+     * 저장 · 조회 키는 검증까지 하는 {@link #normalizeEmail} 로 만든다.
+     */
+    public static String canonicalEmail(String email) {
+        return email == null ? "" : email.strip().toLowerCase(Locale.ROOT);
     }
 
     private static String normalizeName(String name) {

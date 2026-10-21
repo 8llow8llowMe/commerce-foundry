@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -61,6 +62,26 @@ class LoginAttemptRedisAdapterArgumentsTest {
         adapter.reset(AttemptKind.LOGIN, EMAIL);
 
         verify(redisTemplate).delete("auth:login-attempt:" + hasher.hash(EMAIL));
+    }
+
+    @Test
+    @DisplayName("대소문자 · 앞뒤 공백만 다른 이메일은 Member.canonicalEmail 을 거쳐 같은 키로 간다 — 부르는 쪽이 정규화를 빠뜨려도 새 창을 열지 못한다")
+    void emailVariantsUseSameKey() {
+        List<String> sameKey = List.of("auth:login-attempt:" + hasher.hash(EMAIL));
+        // 다른 키로 가면 스텁이 없어 결과 모양 오류(IllegalStateException)로 실패한다
+        given(redisTemplate.execute(LoginAttemptRedisScripts.RECORD, sameKey, "900000"))
+            .willReturn(List.of(1L, 900_000L))
+            .willReturn(List.of(2L, 800_000L))
+            .willReturn(List.of(3L, 700_000L));
+
+        assertThat(adapter.record(AttemptKind.LOGIN, "Member@Example.com ", WINDOW).count()).isEqualTo(1);
+        assertThat(adapter.record(AttemptKind.LOGIN, " MEMBER@example.com", WINDOW).count()).isEqualTo(2);
+        assertThat(adapter.record(AttemptKind.LOGIN, EMAIL, WINDOW).count()).isEqualTo(3);
+        verify(redisTemplate, times(3)).execute(LoginAttemptRedisScripts.RECORD, sameKey, "900000");
+
+        adapter.reset(AttemptKind.LOGIN, " Member@EXAMPLE.com ");
+        verify(redisTemplate).delete(sameKey.get(0));
+        assertThat(hasher.hash("Member@Example.com ")).as("해셔는 받은 값을 그대로 해시한다 — 정규화는 어댑터 한 곳에서 한다").isNotEqualTo(hasher.hash(EMAIL));
     }
 
     @Test

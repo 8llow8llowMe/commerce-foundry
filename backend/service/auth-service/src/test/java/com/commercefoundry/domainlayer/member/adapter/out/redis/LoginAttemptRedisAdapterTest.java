@@ -11,9 +11,17 @@ import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptOutcome;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import com.commercefoundry.support.TestLoginGuard;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.LongStream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -123,6 +131,61 @@ class LoginAttemptRedisAdapterTest {
 
         adapter.reset(AttemptKind.SIGN_UP, email);
         assertThat(redisTemplate.opsForValue().get(loginKey(email))).isEqualTo("2");
+    }
+
+    @Test
+    @DisplayName("대소문자 · 앞뒤 공백만 다른 이메일은 한 키 · 한 수로 모인다 — 변형마다 새 창이 열리지 않고, 변형으로 reset 해도 그 키가 지워진다")
+    void emailVariantsShareOneKey() {
+        String email = email();
+        String upper = email.toUpperCase(Locale.ROOT);
+        String mixed = Character.toUpperCase(email.charAt(0)) + email.substring(1);
+
+        assertThat(adapter.record(AttemptKind.LOGIN, mixed + " ", WINDOW).count()).isEqualTo(1);
+        assertThat(adapter.record(AttemptKind.LOGIN, " " + upper, WINDOW).count()).isEqualTo(2);
+        assertThat(adapter.record(AttemptKind.LOGIN, email, WINDOW).count()).isEqualTo(3);
+
+        assertThat(redisTemplate.opsForValue().get(loginKey(email))).isEqualTo("3");
+        assertThat(redisTemplate.hasKey(loginKey(upper))).as("변형 그대로의 키는 생기지 않는다").isFalse();
+        assertThat(redisTemplate.hasKey(loginKey(mixed + " "))).isFalse();
+
+        adapter.reset(AttemptKind.LOGIN, " " + mixed);
+        assertThat(redisTemplate.hasKey(loginKey(email))).isFalse();
+    }
+
+    @Test
+    @DisplayName("같은 이메일 32회 동시 기록 — 돌려받은 수는 정확히 1..32, 저장 값은 32, 창은 한 번만 걸려 TTL · 남은 시간이 창을 넘지 않는다")
+    void concurrentRecordsCountExactly() throws Exception {
+        String email = email();
+        int attempts = 32;
+        ExecutorService executor = Executors.newFixedThreadPool(attempts);
+        CountDownLatch ready = new CountDownLatch(attempts);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<LoginAttemptOutcome>> futures = new ArrayList<>();
+            for (int i = 0; i < attempts; i++) {
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    start.await(10, TimeUnit.SECONDS);
+                    return adapter.record(AttemptKind.LOGIN, email, WINDOW);
+                }));
+            }
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            List<LoginAttemptOutcome> outcomes = new ArrayList<>();
+            for (Future<LoginAttemptOutcome> future : futures) {
+                outcomes.add(future.get(10, TimeUnit.SECONDS));
+            }
+
+            // INCR 이 원자라 같은 수를 두 번 받거나 빠뜨린 수가 없다
+            assertThat(outcomes.stream().map(LoginAttemptOutcome::count).sorted().toList())
+                .containsExactlyElementsOf(LongStream.rangeClosed(1, attempts).boxed().toList());
+            assertThat(outcomes).extracting(LoginAttemptOutcome::retryAfter).allSatisfy(retryAfter -> assertThat(retryAfter).isPositive().isLessThanOrEqualTo(WINDOW));
+            assertThat(redisTemplate.opsForValue().get(loginKey(email))).isEqualTo(String.valueOf(attempts));
+            assertThat(redisTemplate.getExpire(loginKey(email), TimeUnit.MILLISECONDS)).isPositive().isLessThanOrEqualTo(WINDOW.toMillis());
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test

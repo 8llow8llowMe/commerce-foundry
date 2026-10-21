@@ -11,7 +11,8 @@ import org.springframework.stereotype.Component;
 /**
  * 정규화한 이메일을 Redis 키에 넣을 값으로 바꾼다 — HMAC-SHA256 의 앞 16바이트를 base64url(패딩 없음, 22자)로 쓴다 (#66).
  * 형식은 게이트웨이 {@code ClientIpHasher} 와 같다. 키 없는 해시는 흔한 이메일 목록을 대입하면 되돌릴 수 있어 쓰지 않는다.
- * 같은 키를 쓰는 auth 인스턴스끼리 같은 이메일은 같은 값이 된다.
+ * 같은 키를 쓰는 auth 인스턴스끼리 같은 이메일은 같은 값이 된다. 받은 값을 그대로 해시한다 — 정규화({@code Member.canonicalEmail})는
+ * {@link LoginAttemptRedisAdapter} 가 키를 만들 때 한 곳에서 한다.
  *
  * <p>{@code auth.login-guard.enabled} 가 꺼져 있으면 키 없이 뜨고, {@link #hash} 를 부르면 {@link IllegalStateException} 이다 —
  * 꺼진 상태에서는 부르지 않는다.

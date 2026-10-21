@@ -5,6 +5,7 @@ import static com.commercefoundry.domainlayer.member.adapter.out.redis.TokenStor
 import com.commercefoundry.domainlayer.member.application.port.out.LoginAttemptCounterPort;
 import com.commercefoundry.domainlayer.member.domain.model.AttemptKind;
 import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptOutcome;
+import com.commercefoundry.domainlayer.member.domain.model.Member;
 import java.time.Duration;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -13,8 +14,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * 로그인 · 회원가입 시도 계수기(Redis). 키는 {@link LoginAttemptRedisKeys}, 원자 처리는 {@link LoginAttemptRedisScripts} 다.
- * 이메일은 {@link LoginAttemptKeyHasher} 의 HMAC 으로만 키에 들어간다. Boot 가 만드는 {@link StringRedisTemplate} 만 쓴다 ({@code coding-conventions.md} §9-7).
- * Redis 오류는 {@link TokenStoreRedisSupport} 가 {@code AUTH_013} 으로 바꾼다.
+ * 이메일은 {@link Member#canonicalEmail} 을 한 번 더 적용한 뒤 {@link LoginAttemptKeyHasher} 의 HMAC 으로만 키에 들어간다 — 부르는 쪽이 정규화를 빠뜨려도
+ * 대소문자 · 앞뒤 공백만 다른 변형이 새 창을 열지 못한다(DB 조회는 같은 계정을 찾는다). Boot 가 만드는 {@link StringRedisTemplate} 만 쓴다
+ * ({@code coding-conventions.md} §9-7). Redis 오류는 {@link TokenStoreRedisSupport} 가 {@code AUTH_013} 으로 바꾼다.
  */
 @Component
 @RequiredArgsConstructor
@@ -48,7 +50,8 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
         return new LoginAttemptOutcome(count.longValue(), Duration.ofMillis(ttlMillis.longValue()));
     }
 
+    /** 기록 · reset 이 같이 쓰는 유일한 키 경로 — 멱등이라 이미 정규화한 값은 같은 키가 된다. */
     private String key(AttemptKind kind, String normalizedEmail) {
-        return LoginAttemptRedisKeys.attempt(kind, keyHasher.hash(normalizedEmail)).value();
+        return LoginAttemptRedisKeys.attempt(kind, keyHasher.hash(Member.canonicalEmail(normalizedEmail))).value();
     }
 }

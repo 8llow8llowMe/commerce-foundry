@@ -87,7 +87,7 @@ class AuthServiceApplicationTests {
     }
 
     @Test
-    @DisplayName("시도 제한은 application.yml 값(켬 · 5회 · 15분)과 test 키로 바인딩되어 정책 빈 하나가 되고, 계수기는 Redis 어댑터 하나다")
+    @DisplayName("시도 제한은 test 프로필이 켜고 test 키를 넣은 값(application-test.yml)과 application.yml 의 5회 · 15분으로 바인딩되어 정책 빈 하나가 되고, 계수기는 Redis 어댑터 하나다")
     void loginGuard() {
         AuthLoginGuardProperties properties = applicationContext.getBean(AuthLoginGuardProperties.class);
         assertThat(properties.enabled()).isTrue();
