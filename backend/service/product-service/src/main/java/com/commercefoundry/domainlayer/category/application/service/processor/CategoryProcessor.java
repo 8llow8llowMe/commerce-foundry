@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 카테고리 읽기 · 쓰기. 카테고리는 수가 적어 전체를 한 번 읽고 {@link CategoryTree} 로 메모리에서 탐색한다.
@@ -59,26 +61,33 @@ public class CategoryProcessor {
     /**
      * 어드민 쓰기 판정용 트리 — 모든 카테고리 행을 잠근 뒤 읽는다. 호출한 Facade 의 트랜잭션이 끝날 때까지 다른 어드민 쓰기가 기다리므로,
      * 이 트리로 한 깊이 · 순환 · 하위 판정이 저장할 때까지 유효하다.
+     *
+     * <p>{@code MANDATORY} — 트랜잭션 밖에서 부르면 바로 실패한다. 잠금은 문장이 끝나면 풀려 판정과 쓰기 사이를 지키지 못하기 때문이다.
+     * 아래 쓰기 메서드도 같은 이유로 {@code MANDATORY} 다 — 잠금 없는 쓰기를 막는다.
      */
+    @Transactional(propagation = Propagation.MANDATORY)
     public CategoryTree getTreeForUpdate() {
         return CategoryTree.of(categoryRepositoryPort.findAllForUpdate());
     }
 
-    /** 새 카테고리 — 아이디를 발급해 저장한다. 깊이 · 상위 판정은 호출한 쪽이 {@link #getTreeForUpdate()} 트리로 끝냈다. */
+    /** 새 카테고리 — 아이디를 발급해 저장한다. 깊이 · 상위 판정은 호출한 쪽이 {@link #getTreeForUpdate()} 트리로 끝냈다. 트랜잭션 밖이면 실패한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
     public Category create(Long parentId, String name, int displayOrder, boolean visible) {
         Category category = new Category(snowflakeIdGenerator.generateId(), parentId, name, displayOrder, visible);
         categoryRepositoryPort.insert(category);
         return category;
     }
 
-    /** 이미 있는 카테고리를 통째로 바꾼다(상위 이동 포함). 존재 · 깊이 · 순환 판정은 호출한 쪽이 끝냈다. */
+    /** 이미 있는 카테고리를 통째로 바꾼다(상위 이동 포함). 존재 · 깊이 · 순환 판정은 호출한 쪽이 끝냈다. 트랜잭션 밖이면 실패한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
     public Category update(long categoryId, Long parentId, String name, int displayOrder, boolean visible) {
         Category category = new Category(categoryId, parentId, name, displayOrder, visible);
         categoryRepositoryPort.update(category);
         return category;
     }
 
-    /** 하위 · 연결 상품 판정은 호출한 쪽이 끝냈다. */
+    /** 하위 · 연결 상품 판정은 호출한 쪽이 끝냈다. 트랜잭션 밖이면 실패한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
     public void delete(long categoryId) {
         categoryRepositoryPort.deleteById(categoryId);
     }
