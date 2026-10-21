@@ -17,6 +17,7 @@ import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.security.issuer.JwtIssuanceProperties;
 import com.commercefoundry.support.TestLoginGuard;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import com.zaxxer.hikari.HikariDataSource;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Duration;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
@@ -174,5 +175,17 @@ class AuthServiceApplicationTests {
         void servesSwaggerUi() {
             assertThat(mockMvc.get().uri("/swagger-ui/index.html")).hasStatusOk();
         }
+    }
+
+    /**
+     * 키 이름 · 들여쓰기가 틀려도 오류 없이 드라이버 기본값(true)으로 돈다. yml 값이 아니라 실제로 만들어진 커넥션 풀이 드라이버에 넘기는 속성을 본다.
+     * PostgreSQL 에서의 효과(로그 · 예외 메시지에 행 값이 없다)는 {@code ShippingAddressPersistenceAdapterTest} 가 본다.
+     */
+    @Test
+    @DisplayName("커넥션 풀이 드라이버에 logServerErrorDetail=false 를 넘긴다 — 제약 위반 로그에 행 값(DETAIL)이 실리지 않는다 (coding-conventions.md §8)")
+    void driverOmitsServerErrorDetail() {
+        HikariDataSource dataSource = applicationContext.getBean(HikariDataSource.class);
+
+        assertThat(dataSource.getDataSourceProperties()).containsEntry("logServerErrorDetail", "false");
     }
 }

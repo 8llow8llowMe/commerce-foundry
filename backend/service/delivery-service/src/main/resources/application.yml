@@ -9,6 +9,11 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+    hikari:
+      data-source-properties:
+        # 제약 위반 같은 서버 오류 메시지에 행 값(DETAIL)을 싣지 않는다 — Hibernate 가 예외를 바꾸기 전에 그 메시지를 WARN 로그로 남긴다 (#173, coding-conventions.md §8).
+        # pgjdbc 속성 이름 그대로 쓴다 — 대소문자가 다르거나 오타면 드라이버가 조용히 무시한다. H2(컨텍스트 테스트)도 모르는 속성이라 무시한다
+        logServerErrorDetail: false
   jpa:
     open-in-view: false
     hibernate:
