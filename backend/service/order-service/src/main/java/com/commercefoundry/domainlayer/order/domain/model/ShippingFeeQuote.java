@@ -11,6 +11,9 @@ import java.util.stream.Stream;
  *
  * <p>금액은 모두 한 통화다. 총 무게는 해외 견적에만 있다 — 견적 요청에 실은 값(Σ SKU 무게 × 수량)이다 ({@code order-flow-guide.md} §2-2).
  *
+ * <p>받을 배송비는 {@link #expectedShippingFee} 산식대로이고, 무료배송이면 무료배송 기준이 있다. 원격 응답의 같은 검사(주문 금액 대비 무료 판정 포함)는
+ * adapter({@code ShippingFeeInternalResponseSupport})가 먼저 503 으로 거절한다 — 여기는 조립 버그를 막는 마지막 선이다.
+ *
  * @param shippingFee 받을 배송비 — 주문 총액에 더한다
  * @param baseFee 정책 기본 배송비 (해외는 기본료)
  * @param freeShippingApplied 주문 금액이 무료배송 기준 이상이라 기본 배송비(해외는 기본료 + 무게 요금)를 받지 않았는가
@@ -42,5 +45,37 @@ public record ShippingFeeQuote(
         if (!weightConsistent) {
             throw new IllegalArgumentException("총 무게는 해외 견적에만 있고 1 이상입니다: scope=%s, totalWeightGrams=%s".formatted(scope, totalWeightGrams));
         }
+        if (freeShippingApplied && freeShippingThreshold == null) {
+            throw new IllegalArgumentException("무료배송 기준 없이 무료배송이 적용됐습니다");
+        }
+        Money expected = expectedShippingFee(scope, baseFee, freeShippingApplied, remoteAreaSurcharge, weightFee);
+        if (!shippingFee.equals(expected)) {
+            throw new IllegalArgumentException("배송비가 산식과 다릅니다: scope=%s, shippingFee=%s, expected=%s".formatted(scope, shippingFee, expected));
+        }
+    }
+
+    /**
+     * 받을 배송비의 산식 — delivery-service {@code ShippingPolicy#quote}(국내) · {@code InternationalShippingPolicy#quote}(해외)와 같다.
+     *
+     * <ul>
+     *   <li>국내 — (무료배송이면 0, 아니면 기본 배송비) + 도서산간 추가 배송비. 도서산간 추가 배송비는 무료배송이어도 받는다</li>
+     *   <li>해외 — 무료배송이면 0, 아니면 기본료 + 무게 요금</li>
+     * </ul>
+     *
+     * @throws IllegalArgumentException 해외인데 무게 요금이 없거나, 금액 통화가 섞였다
+     */
+    public static Money expectedShippingFee(ShippingScope scope, Money baseFee, boolean freeShippingApplied, Money remoteAreaSurcharge, Money weightFee) {
+        Objects.requireNonNull(scope, "scope");
+        Objects.requireNonNull(baseFee, "baseFee");
+        Money zero = Money.zero(baseFee.currency());
+        return switch (scope) {
+            case DOMESTIC -> (freeShippingApplied ? zero : baseFee).plus(Objects.requireNonNull(remoteAreaSurcharge, "remoteAreaSurcharge"));
+            case INTERNATIONAL -> {
+                if (weightFee == null) {
+                    throw new IllegalArgumentException("해외 견적에는 무게 요금이 있어야 합니다");
+                }
+                yield freeShippingApplied ? zero : baseFee.plus(weightFee);
+            }
+        };
     }
 }

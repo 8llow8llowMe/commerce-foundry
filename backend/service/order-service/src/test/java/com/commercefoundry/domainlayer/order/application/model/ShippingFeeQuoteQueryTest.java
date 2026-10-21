@@ -55,4 +55,11 @@ class ShippingFeeQuoteQueryTest {
         assertThatThrownBy(() -> new ShippingFeeQuoteQuery(USD, "US", null, weightGrams)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new ShippingFeeQuoteQuery(USD, "US", "10001", weightGrams)).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @ParameterizedTest(name = "countryCode=[{0}]")
+    @ValueSource(strings = {"", "kr", "USA", "K1"})
+    @DisplayName("국가 코드가 대문자 두 글자가 아니면 만들지 않는다 — 요청 검증이 먼저 거르므로 조립 버그다. 소문자 kr 을 해외로 보내지 않는다")
+    void countryCodeFormat(String countryCode) {
+        assertThatThrownBy(() -> new ShippingFeeQuoteQuery(KRW, countryCode, "63100", 1_200)).isInstanceOf(IllegalArgumentException.class);
+    }
 }

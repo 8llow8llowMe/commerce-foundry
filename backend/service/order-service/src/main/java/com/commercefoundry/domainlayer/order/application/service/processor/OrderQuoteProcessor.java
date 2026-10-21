@@ -44,12 +44,20 @@ public class OrderQuoteProcessor {
     /** 찾을 수 없는 SKU 의 표시 이름 — 상품명을 알 수 없고, SKU 아이디는 고객 메시지에 넣지 않는다. */
     static final String UNKNOWN_ITEM_NAME = "찾을 수 없는 상품";
 
+    /**
+     * 품절이 아닌데 구매할 수 없는 SKU(숨김 · 판매 종료 — 응답으로는 둘을 가를 수 없다)의 표시 이름. 숨긴 상품의 이름이 아이디만 넣은 요청으로
+     * 새지 않게 상품명을 넣지 않는다.
+     */
+    static final String NOT_ON_SALE_ITEM_NAME = "판매하지 않는 상품";
+
     private static final String NAME_DELIMITER = ", ";
 
     private final ShippingFeeQueryPort shippingFeeQueryPort;
 
     /**
      * 주문서를 계산한다. 아래 순서로 처음 걸리는 단계 하나로 거절하고, 그 단계에 걸린 줄은 모두 모아 메시지에 싣는다(같은 이름은 한 번).
+     * 줄 이름은 없는 SKU → {@value #UNKNOWN_ITEM_NAME}, 품절이 아닌데 구매할 수 없는 SKU(숨김 · 판매 종료) → {@value #NOT_ON_SALE_ITEM_NAME},
+     * 그 밖(구매 가능 · 품절) → "상품명(옵션명)" 이다. 중복 줄 판정이 판매 가능 판정보다 먼저라 중복 메시지도 같은 규칙을 거친다.
      *
      * <ol>
      *   <li>같은 (SKU, 정규화한 맞춤 제작 입력) 줄이 두 번 이상 — {@code DUPLICATE_LINE}(400)</li>
@@ -60,8 +68,11 @@ public class OrderQuoteProcessor {
      *   <li>줄 금액 = 단가 × 수량, 상품 합계 = Σ 줄 금액</li>
      *   <li>배송 국가로 국내 · 해외를 가른다({@link ShippingScope#ofCountry}, 통화는 보지 않는다). 해외면 배송 가능 국가 → 무게 · HS 미입력 → 총 무게 순이다
      *       ({@code order-flow-guide.md} §2-2) — 무게 또는 HS 가 없는 SKU 가 있으면 배송 가능 국가를 먼저 확인해 false 면 {@code DESTINATION_NOT_SUPPORTED}(400),
-     *       true 면 {@code INTERNATIONAL_SHIPPING_INFO_MISSING}(409). 무게 1 미만은 SKU 응답 계약 위반이라 {@code PRODUCT_SERVICE_UNAVAILABLE}(503).
-     *       Σ(무게 × 수량)이 int 범위를 넘으면 견적을 부르지 않고 {@code SHIPPING_WEIGHT_NOT_SUPPORTED}(400). 국내면 무게 · HS 를 보지 않는다</li>
+     *       true 면 {@code INTERNATIONAL_SHIPPING_INFO_MISSING}(409). 확인이 국가 판정 전 사유(정책 미설정 {@code SHIPPING_UNAVAILABLE} ·
+     *       통화 불일치 {@code DESTINATION_CURRENCY_NOT_SUPPORTED})로 거절되면 그 코드로 답한다 — 무게 · HS 를 채워도 실제 견적이 같은 이유로 실패한다.
+     *       무게 · HS 가 모두 있으면 무게 1 미만은 SKU 응답 계약 위반이라 {@code PRODUCT_SERVICE_UNAVAILABLE}(503),
+     *       Σ(무게 × 수량)이 int 범위를 넘으면 견적을 부르지 않고 {@code SHIPPING_WEIGHT_NOT_SUPPORTED}(400) — 둘 다 견적 전이라 배송할 수 없는 국가(견적의 거절)보다
+     *       앞선다. 국내면 무게 · HS 를 보지 않는다</li>
      *   <li>배송비 견적 — 기준 금액은 상품 합계. 국내는 우편번호를 싣고 무게는 (SKU 에 값이 있어도) 싣지 않는다. 해외는 총 무게를 싣고 우편번호는 있을 때만 싣는다</li>
      *   <li>총액 = 상품 합계 + 배송비</li>
      * </ol>
@@ -140,7 +151,10 @@ public class OrderQuoteProcessor {
     }
 
     private ShippingFeeQuote quoteShippingFee(List<OrderQuoteLine> lines, Money itemsAmount, String countryCode, String postalCode) {
-        if (ShippingScope.ofCountry(countryCode) == ShippingScope.DOMESTIC) {
+        // 국가 형식은 주문 요청 검증이 먼저 거른다 — 여기까지 온 형식 오류는 조립 버그다
+        ShippingScope scope = ShippingScope.ofCountry(countryCode)
+            .orElseThrow(() -> new IllegalArgumentException("배송 국가 코드가 ISO 3166-1 alpha-2 대문자 형식이 아닙니다"));
+        if (scope == ShippingScope.DOMESTIC) {
             // 국내는 무게 · HS 를 보지 않는다 — SKU 에 값이 있어도 견적에 무게를 싣지 않는다
             return toShippingFeeQuote(shippingFeeQueryPort.quote(new ShippingFeeQuoteQuery(itemsAmount, countryCode, postalCode, null)), null);
         }
@@ -153,6 +167,10 @@ public class OrderQuoteProcessor {
     /**
      * 해외 주문에 무게 또는 HS 코드가 없는 SKU 가 있으면 거절한다 — 견적을 부르기 전이다(무게 없이 부르면 delivery 의 무게 필수 오류가 나 원인이 흐려진다).
      * 다만 배송할 수 없는 국가라는 사유가 앞선다 — 해외 판매 전에는 대부분의 SKU 가 미입력이라 순서가 바뀌면 엉뚱한 사유가 보인다 ({@code order-flow-guide.md} §2-2).
+     *
+     * <p>배송 가능 국가 확인({@link ShippingFeeQueryPort#isDestinationSupported})이 던지는 거절은 그대로 전파한다 — 정책 미설정({@code SHIPPING_UNAVAILABLE}) ·
+     * 통화 불일치({@code DESTINATION_CURRENCY_NOT_SUPPORTED})는 delivery 가 국가를 보기 전 사유라 국가가 배송 가능하다는 뜻이 아니고, 무게 · HS 를 채워도
+     * 실제 견적이 같은 이유로 실패한다. 그래서 미입력({@code INTERNATIONAL_SHIPPING_INFO_MISSING})으로 바꾸지 않는다.
      */
     private void rejectMissingInternationalShippingInfo(List<OrderQuoteLine> lines, Money itemsAmount, String countryCode, String postalCode) {
         Set<String> missing = new LinkedHashSet<>();
@@ -203,8 +221,18 @@ public class OrderQuoteProcessor {
         }
     }
 
+    /**
+     * 판정 메시지에 싣는 SKU 이름. 없는 SKU → {@value #UNKNOWN_ITEM_NAME}, 품절이 아닌데 구매할 수 없는 SKU(숨김 · 판매 종료) → {@value #NOT_ON_SALE_ITEM_NAME},
+     * 그 밖(구매 가능 · 품절) → "상품명(옵션명)". 숨긴 상품도 품절이면 품절로 보이는 장바구니 조회 상태({@code order-flow-guide.md} §2-1)와 같은 경계다.
+     */
     private static String nameOf(CatalogSku sku) {
-        return sku == null ? UNKNOWN_ITEM_NAME : nameOf(sku.productName(), sku.optionName());
+        if (sku == null) {
+            return UNKNOWN_ITEM_NAME;
+        }
+        if (!sku.purchasable() && !sku.soldOut()) {
+            return NOT_ON_SALE_ITEM_NAME;
+        }
+        return nameOf(sku.productName(), sku.optionName());
     }
 
     /** 고객이 알아볼 줄 이름 — "상품명(옵션명)", 옵션이 없으면 상품명. */

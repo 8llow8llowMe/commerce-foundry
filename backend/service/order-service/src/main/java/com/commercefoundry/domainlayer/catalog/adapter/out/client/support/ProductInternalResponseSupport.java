@@ -14,6 +14,7 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -66,7 +67,9 @@ public class ProductInternalResponseSupport {
      * <p>{@code weightGrams} 는 여기서 검증하지 않고 옮긴다 — 1 미만은 계약 위반이며 해외 총 무게 계산(주문)에서 거절한다.
      * 장바구니 조회가 무게 하나로 막히지 않게 경계에서는 검증하지 않는다.
      *
-     * @throws CatalogException {@code PRODUCT_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 아이디를 읽을 수 없다
+     * <p>상품명 · 옵션명은 늘 있다(옵션이 없으면 옵션명은 빈 문자열) — null 이면 계약 위반이다. 주문 · 장바구니가 이름을 메시지 · 스냅숏에 쓰므로 추측하지 않는다.
+     *
+     * @throws CatalogException {@code PRODUCT_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 아이디 · 이름을 읽을 수 없다
      */
     public List<SkuQueryResult> toSkuQueryResults(Response<ProductSkuInternalResponse> response) {
         if (response == null || response.dataHeader() == null || !response.dataHeader().success()
@@ -78,7 +81,7 @@ public class ProductInternalResponseSupport {
         try {
             return response.dataBody().skus().stream().map(ProductInternalResponseSupport::toSkuQueryResult).toList();
         } catch (RuntimeException exception) {
-            // 아이디 · 금액 · 통화가 계약과 다르다(숫자 아님 · 음수 · 모르는 통화 · 빠진 칸). 가격을 추측하지 않는다
+            // 아이디 · 금액 · 통화 · 이름이 계약과 다르다(숫자 아님 · 음수 · 모르는 통화 · 빠진 칸). 가격 · 이름을 추측하지 않는다
             log.error("product-service sku response violates contract. type={}", exception.getClass().getSimpleName());
             throw new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
         }
@@ -86,7 +89,8 @@ public class ProductInternalResponseSupport {
 
     private static SkuQueryResult toSkuQueryResult(ProductSkuInternalItem item) {
         return new SkuQueryResult(
-            Long.parseLong(item.skuId()), Long.parseLong(item.productId()), item.productName(), item.optionName(), toMoney(item.salePrice()),
+            Long.parseLong(item.skuId()), Long.parseLong(item.productId()),
+            Objects.requireNonNull(item.productName(), "productName"), Objects.requireNonNull(item.optionName(), "optionName"), toMoney(item.salePrice()),
             item.purchasable(), item.saleStatus() != null && SOLD_OUT.equals(item.saleStatus().code()),
             item.maxQuantityPerOrder(), item.customOrder(), item.weightGrams(), item.hsCode());
     }

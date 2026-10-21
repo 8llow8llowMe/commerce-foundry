@@ -42,7 +42,9 @@ public record OrderQuote(
         if (!totalAmount.equals(itemsAmount.plus(shippingFeeQuote.shippingFee()))) {
             throw new IllegalArgumentException("총액이 상품 합계 + 배송비와 다릅니다: %s".formatted(totalAmount));
         }
-        if (shippingFeeQuote.scope() != ShippingScope.ofCountry(countryCode)) {
+        ShippingScope requested = ShippingScope.ofCountry(countryCode)
+            .orElseThrow(() -> new IllegalArgumentException("배송 국가 코드가 ISO 3166-1 alpha-2 대문자 형식이 아닙니다"));
+        if (shippingFeeQuote.scope() != requested) {
             throw new IllegalArgumentException("배송비 견적 범위가 배송 국가와 맞지 않습니다: %s, %s".formatted(shippingFeeQuote.scope(), countryCode));
         }
     }

@@ -14,7 +14,8 @@ import java.util.List;
 /**
  * delivery-service 견적을 흉내 낸다. 호출마다 받은 조건을 남긴다 — 테스트가 "견적을 불렀는가 · 무엇을 실었는가" 를 본다.
  *
- * <p>견적 결과를 정하지 않으면 요청 국가 범위의 기본 견적(주문 통화)을 돌려준다 — 국내 3,000 · 해외 기본료 1,500 + 무게 요금 3,000.
+ * <p>견적 결과를 정하지 않으면 요청 국가 범위의 기본 견적(주문 통화)을 돌려준다 — 국내 3,000 · 해외 기본료 1,500 + 무게 요금 3,000, 둘 다 무료배송 기준 없음.
+ * 정한 견적도 delivery 산식대로여야 한다 — Processor 가 domain {@code ShippingFeeQuote} 로 바꿀 때 산식을 다시 확인한다.
  */
 public class FakeShippingFeeQueryPort implements ShippingFeeQueryPort {
 
@@ -78,14 +79,15 @@ public class FakeShippingFeeQueryPort implements ShippingFeeQueryPort {
         return destinationChecks;
     }
 
-    public static ShippingFeeQuoteQueryResult domesticQuote(CurrencyCode currency, long fee) {
+    private static ShippingFeeQuoteQueryResult domesticQuote(CurrencyCode currency, long fee) {
         return new ShippingFeeQuoteQueryResult(
             Money.of(fee, currency), Money.of(fee, currency), false, Money.zero(currency), null, null, 1L, ShippingScope.DOMESTIC, null, null);
     }
 
     private static ShippingFeeQuoteQueryResult defaultQuote(ShippingFeeQuoteQuery query) {
         CurrencyCode currency = query.orderAmount().currency();
-        if (ShippingScope.ofCountry(query.countryCode()) == ShippingScope.DOMESTIC) {
+        ShippingScope scope = ShippingScope.ofCountry(query.countryCode()).orElseThrow(() -> new IllegalArgumentException("배송 국가 코드 형식이 아닙니다"));
+        if (scope == ShippingScope.DOMESTIC) {
             return domesticQuote(currency, DOMESTIC_FEE);
         }
         return new ShippingFeeQuoteQueryResult(

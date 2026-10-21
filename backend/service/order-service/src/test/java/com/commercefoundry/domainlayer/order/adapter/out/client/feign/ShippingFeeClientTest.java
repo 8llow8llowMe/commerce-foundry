@@ -280,16 +280,28 @@ class ShippingFeeClientTest {
     @ParameterizedTest(name = "{0} {1} → {2}")
     @CsvSource({
         "400, DELIVERY_002, false",
-        "409, DELIVERY_001, true",
-        "400, DELIVERY_003, true",
         "400, DELIVERY_011, true"
     })
-    @DisplayName("배송 가능 국가 확인 — 배송할 수 없는 국가(DELIVERY_002)만 false 다. 정책 미설정 · 통화 불일치 · 무게 구간 초과는 국가 말고 다른 사유라 true 다")
+    @DisplayName("배송 가능 국가 확인 — 배송할 수 없는 국가(DELIVERY_002)는 false, 국가 그룹을 찾은 뒤의 무게 구간 초과(DELIVERY_011)는 국가가 배송 가능이라 true 다")
     void destinationCheckInterpretsRejections(int status, String resultCode, boolean expected) {
         RESPONSE_STATUS.set(status);
         RESPONSE_BODY.set(failure(resultCode));
 
         assertThat(shippingFeeQueryPort.isDestinationSupported(Money.of(12_000, CurrencyCode.USD), "US", null)).isEqualTo(expected);
+        assertThat(JSON.readTree(REQUEST_BODIES.getFirst()).path("weightGrams").asInt()).isEqualTo(1);
+    }
+
+    @ParameterizedTest(name = "{0} {1} → {2}")
+    @CsvSource({
+        "409, DELIVERY_001, SHIPPING_UNAVAILABLE",
+        "400, DELIVERY_003, DESTINATION_CURRENCY_NOT_SUPPORTED"
+    })
+    @DisplayName("배송 가능 국가 확인 — 정책 미설정 · 통화 불일치는 delivery 가 국가를 보기 전 사유라 국가를 판정하지 못했다. 번역한 코드(ORDER_012 · 014)를 그대로 던진다")
+    void destinationCheckRejectsBeforeCountry(int status, String resultCode, OrderErrorCode expected) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(failure(resultCode));
+
+        assertRejected(() -> shippingFeeQueryPort.isDestinationSupported(Money.of(12_000, CurrencyCode.USD), "US", null), expected);
         assertThat(JSON.readTree(REQUEST_BODIES.getFirst()).path("weightGrams").asInt()).isEqualTo(1);
     }
 

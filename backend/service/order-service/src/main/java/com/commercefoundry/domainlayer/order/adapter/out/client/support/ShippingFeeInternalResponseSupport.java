@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.order.adapter.out.client.feign.dto.Shippi
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.port.out.query.ShippingFeeQuoteQueryResult;
+import com.commercefoundry.domainlayer.order.domain.model.ShippingFeeQuote;
 import com.commercefoundry.domainlayer.order.domain.model.ShippingScope;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
@@ -59,7 +60,11 @@ public class ShippingFeeInternalResponseSupport {
     private static final Pattern RESULT_CODE_SHAPE = Pattern.compile("[A-Z][A-Z0-9_]*_[0-9]{3}");
     private static final int MAX_LOGGED_RESULT_CODE_LENGTH = 40;
 
-    /** delivery 의 업무 거절 중 주문 계약으로 번역하는 것. 여기 없는 4xx 는 우리 요청 · 설정 문제라 503 이다. */
+    /**
+     * delivery 의 업무 거절 중 주문 계약으로 번역하는 것. 여기 없는 4xx 는 우리 요청 · 설정 문제라 503 이다.
+     *
+     * <p>번역 대상이 늘면 {@code ShippingFeeClientAdapter} 의 {@code DESTINATION_SUPPORTED_REJECTIONS}(확인용 견적의 거절 중 "국가는 배송 가능" 으로 읽는 것)도 본다.
+     */
     private static final Map<String, OrderErrorCode> TRANSLATED_REJECTIONS = Map.of(
         "DELIVERY_001", OrderErrorCode.SHIPPING_UNAVAILABLE,
         "DELIVERY_002", OrderErrorCode.DESTINATION_NOT_SUPPORTED,
@@ -94,12 +99,14 @@ public class ShippingFeeInternalResponseSupport {
     /**
      * 견적 응답을 조회 결과로 바꾼다. 봉투가 실패이거나 본문이 비었으면 503 이다 — 성공 응답에는 언제나 견적이 있다.
      *
-     * @param orderCurrency 요청한 주문 금액의 통화. 견적 통화가 이와 다르면 계약 위반이다 — delivery 는 통화가 다르면 견적하지 않고 {@code DELIVERY_003} 을 낸다(#70)
+     * @param orderAmount 요청한 주문 금액(할인 후 상품 합계). 견적 통화가 이 통화와 다르면 계약 위반이다 — delivery 는 통화가 다르면 견적하지 않고
+     *     {@code DELIVERY_003} 을 낸다(#70). 무료배송 판정이 이 금액 · 기준과 맞지 않거나 배송비가 산식과 달라도 계약 위반이다
      * @param countryCode 요청한 배송 국가. KR 이면 {@code DOMESTIC} 이고 국가 그룹 · 무게 요금이 없어야 한다. 그 밖이면 {@code INTERNATIONAL} 이고
      *     국가 그룹 · 무게 요금이 있으며 도서산간 추가 배송비 0 · 구간 이름 없음이어야 한다. 어긋나면 계약 위반이다
-     * @throws OrderException {@code DELIVERY_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 통화 · 범위를 읽을 수 없거나 범위가 요청 국가와 맞지 않는다
+     * @throws OrderException {@code DELIVERY_SERVICE_UNAVAILABLE} — 봉투 · 본문이 계약과 다르거나 금액 · 통화 · 범위를 읽을 수 없거나 범위가 요청 국가와 맞지 않거나
+     *     배송비가 산식과 다르다
      */
-    public ShippingFeeQuoteQueryResult toShippingFeeQuoteResult(Response<ShippingFeeQuoteInternalResponse> response, CurrencyCode orderCurrency, String countryCode) {
+    public ShippingFeeQuoteQueryResult toShippingFeeQuoteResult(Response<ShippingFeeQuoteInternalResponse> response, Money orderAmount, String countryCode) {
         if (response == null || response.dataHeader() == null || !response.dataHeader().success() || response.dataBody() == null) {
             log.error("delivery-service quote response is not a success envelope. resultCode={}",
                 response == null || response.dataHeader() == null ? null : loggableResultCode(response.dataHeader().resultCode()));
@@ -107,13 +114,15 @@ public class ShippingFeeInternalResponseSupport {
         }
         try {
             ShippingFeeQuoteQueryResult result = toQueryResult(response.dataBody());
-            if (result.shippingFee().currency() != orderCurrency) {
+            if (result.shippingFee().currency() != orderAmount.currency()) {
                 throw new IllegalArgumentException("견적 통화가 주문 통화와 다릅니다");
             }
             requireScopeOf(result, countryCode);
+            requireFeeFormula(result, orderAmount);
             return result;
         } catch (RuntimeException exception) {
-            // 금액 · 통화 · 범위 · 정책 version 이 계약과 다르다(빠진 칸 · 모르는 통화 · 음수 · 모르는 범위 · 통화 섞임 · 요청 국가와 다른 범위). 배송비를 추측하지 않는다
+            // 금액 · 통화 · 범위 · 정책 version 이 계약과 다르다(빠진 칸 · 모르는 통화 · 음수 · 모르는 범위 · 통화 섞임 · 요청 국가와 다른 범위 · 산식 · 무료배송 판정 불일치).
+            // 배송비를 추측하지 않는다
             log.error("delivery-service quote response violates contract. type={}", exception.getClass().getSimpleName());
             throw new OrderException(OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE, exception);
         }
@@ -167,14 +176,37 @@ public class ShippingFeeInternalResponseSupport {
             body.shippingZoneName(), toNullableMoney(body.weightFee()));
     }
 
-    /** 견적 범위가 요청 국가와 맞고, 범위별 칸이 계약대로인가. delivery 는 KR 이면 국내 정책, 그 밖이면 해외 정책으로만 견적한다. */
+    /**
+     * 견적 범위가 요청 국가와 맞고, 범위별 칸이 계약대로인가. delivery 는 KR 이면 국내 정책, 그 밖이면 해외 정책으로만 견적한다.
+     * 요청 국가는 {@code ShippingFeeQuoteQuery} 가 형식을 이미 확인했다 — 형식이 아니면(조립 버그) 여기서도 {@link IllegalArgumentException} 이고 부른 쪽의 계약 위반 경로(503)로 간다.
+     */
     private static void requireScopeOf(ShippingFeeQuoteQueryResult result, String countryCode) {
-        boolean consistent = ShippingScope.ofCountry(countryCode) == ShippingScope.DOMESTIC
+        ShippingScope requested = ShippingScope.ofCountry(countryCode)
+            .orElseThrow(() -> new IllegalArgumentException("요청 배송 국가 코드가 ISO 3166-1 alpha-2 대문자 형식이 아닙니다"));
+        boolean consistent = requested == ShippingScope.DOMESTIC
             ? result.scope() == ShippingScope.DOMESTIC && result.shippingZoneName() == null && result.weightFee() == null
             : result.scope() == ShippingScope.INTERNATIONAL && result.shippingZoneName() != null && result.weightFee() != null
                 && result.remoteAreaSurcharge().isZero() && result.remoteAreaName() == null;
         if (!consistent) {
             throw new IllegalArgumentException("견적 범위나 범위별 칸이 요청 국가와 맞지 않습니다");
+        }
+    }
+
+    /**
+     * 받을 배송비가 delivery 의 산식({@link ShippingFeeQuote#expectedShippingFee})대로이고, 무료배송 판정이 요청한 주문 금액과 맞는가.
+     * delivery 는 기준이 있고 주문 금액이 기준 <b>이상</b>이면 무료배송이다 — {@code ShippingPolicy#quote} · {@code InternationalShippingPolicy#quote} 의
+     * {@code freeShippingThreshold != null && !freeShippingThreshold.isGreaterThan(orderAmount)} 와 같은 방향으로 비교한다.
+     */
+    private static void requireFeeFormula(ShippingFeeQuoteQueryResult result, Money orderAmount) {
+        Money threshold = result.freeShippingThreshold();
+        boolean expectedFreeShipping = threshold != null && !threshold.isGreaterThan(orderAmount);
+        if (result.freeShippingApplied() != expectedFreeShipping) {
+            throw new IllegalArgumentException("무료배송 판정이 무료배송 기준 · 주문 금액과 맞지 않습니다");
+        }
+        Money expected = ShippingFeeQuote.expectedShippingFee(
+            result.scope(), result.baseFee(), result.freeShippingApplied(), result.remoteAreaSurcharge(), result.weightFee());
+        if (!result.shippingFee().equals(expected)) {
+            throw new IllegalArgumentException("배송비가 산식과 다릅니다");
         }
     }
 

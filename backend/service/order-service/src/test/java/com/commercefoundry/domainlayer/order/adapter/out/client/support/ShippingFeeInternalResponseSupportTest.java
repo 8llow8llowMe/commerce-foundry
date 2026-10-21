@@ -197,6 +197,10 @@ class ShippingFeeInternalResponseSupportTest {
     @DisplayName("응답 변환")
     class Convert {
 
+        /** 요청한 주문 금액 — 국내 픽스처의 무료배송 기준(50,000) 이상이다. */
+        private static final Money KRW_ORDER = Money.of(99_000, CurrencyCode.KRW);
+        private static final Money USD_ORDER = Money.of(12_000, CurrencyCode.USD);
+
         private ShippingFeeQuoteInternalResponse domestic() {
             return new ShippingFeeQuoteInternalResponse(
                 MoneyItem.of(3_000, "KRW"), MoneyItem.of(3_000, "KRW"), true, MoneyItem.of(3_000, "KRW"), "제주",
@@ -212,7 +216,7 @@ class ShippingFeeInternalResponseSupportTest {
         @Test
         @DisplayName("국내 견적의 모든 칸을 조회 결과로 바꾼다")
         void convertsDomestic() {
-            assertThat(support.toShippingFeeQuoteResult(Response.success(domestic()), CurrencyCode.KRW, "KR")).isEqualTo(new ShippingFeeQuoteQueryResult(
+            assertThat(support.toShippingFeeQuoteResult(Response.success(domestic()), KRW_ORDER, "KR")).isEqualTo(new ShippingFeeQuoteQueryResult(
                 Money.of(3_000, CurrencyCode.KRW), Money.of(3_000, CurrencyCode.KRW), true, Money.of(3_000, CurrencyCode.KRW), "제주",
                 Money.of(50_000, CurrencyCode.KRW), 3L, ShippingScope.DOMESTIC, null, null));
         }
@@ -220,7 +224,7 @@ class ShippingFeeInternalResponseSupportTest {
         @Test
         @DisplayName("해외 견적 — 무료배송 기준 · 도서산간 이름이 null 이어도 받는다")
         void convertsInternational() {
-            assertThat(support.toShippingFeeQuoteResult(Response.success(international()), CurrencyCode.USD, "US")).isEqualTo(new ShippingFeeQuoteQueryResult(
+            assertThat(support.toShippingFeeQuoteResult(Response.success(international()), USD_ORDER, "US")).isEqualTo(new ShippingFeeQuoteQueryResult(
                 Money.of(4_500, CurrencyCode.USD), Money.of(1_500, CurrencyCode.USD), false, Money.zero(CurrencyCode.USD), null,
                 null, 7L, ShippingScope.INTERNATIONAL, "북미", Money.of(3_000, CurrencyCode.USD)));
         }
@@ -228,10 +232,10 @@ class ShippingFeeInternalResponseSupportTest {
         @Test
         @DisplayName("실패 봉투 · 빈 본문 · 응답 없음은 503 이다")
         void notSuccessEnvelope() {
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.fail("DELIVERY_002", "배송할 수 없는 국가입니다."), CurrencyCode.KRW, "KR"));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(new Response<>(DataHeader.ok(), null), CurrencyCode.KRW, "KR"));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(new Response<>(null, domestic()), CurrencyCode.KRW, "KR"));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(null, CurrencyCode.KRW, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.fail("DELIVERY_002", "배송할 수 없는 국가입니다."), KRW_ORDER, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(new Response<>(DataHeader.ok(), null), KRW_ORDER, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(new Response<>(null, domestic()), KRW_ORDER, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(null, KRW_ORDER, "KR"));
         }
 
         @Test
@@ -264,14 +268,14 @@ class ShippingFeeInternalResponseSupportTest {
                 null, 3L, "DOMESTIC", null, null)));
             assertUnavailable(() -> convert(new ShippingFeeQuoteInternalResponse(valid.shippingFee(), valid.baseFee(), true, valid.remoteAreaSurcharge(), null,
                 MoneyItem.of(50, "USD"), 3L, "DOMESTIC", null, null)));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(valid), CurrencyCode.USD, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(valid), USD_ORDER, "KR"));
         }
 
         @Test
         @DisplayName("견적 범위가 요청 국가와 다르면 503 이다 — KR 요청에 해외 견적, 해외 요청에 국내 견적")
         void scopeMismatch() {
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(international()), CurrencyCode.USD, "KR"));
-            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(domestic()), CurrencyCode.KRW, "US"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(international()), USD_ORDER, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(domestic()), KRW_ORDER, "US"));
         }
 
         @Test
@@ -298,12 +302,60 @@ class ShippingFeeInternalResponseSupportTest {
                 "제주", null, 7L, "INTERNATIONAL", "북미", valid.weightFee())));
         }
 
+        @Test
+        @DisplayName("배송비가 delivery 산식과 다르면 503 이다 — 국내 (무료면 0, 아니면 기본) + 도서산간, 해외 무료면 0, 아니면 기본료 + 무게 요금")
+        void feeFormulaViolation() {
+            // 국내: 무료배송이 아닌데 도서산간 추가 배송비를 빠뜨렸다 · 무료배송인데 기본 배송비를 받았다
+            assertUnavailable(() -> convert(new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(3_000, "KRW"), MoneyItem.of(3_000, "KRW"), false, MoneyItem.of(3_000, "KRW"), "제주", null, 3L, "DOMESTIC", null, null)));
+            assertUnavailable(() -> convert(new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(6_000, "KRW"), MoneyItem.of(3_000, "KRW"), true, MoneyItem.of(3_000, "KRW"), "제주", MoneyItem.of(50_000, "KRW"), 3L, "DOMESTIC", null, null)));
+            // 해외: 무게 요금을 빠뜨렸다 · 무료배송인데 무게 요금을 받았다
+            assertUnavailable(() -> convertInternational(new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(1_500, "USD"), MoneyItem.of(1_500, "USD"), false, MoneyItem.of(0, "USD"), null, null, 7L, "INTERNATIONAL", "북미", MoneyItem.of(3_000, "USD"))));
+            assertUnavailable(() -> convertInternational(new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(3_000, "USD"), MoneyItem.of(1_500, "USD"), true, MoneyItem.of(0, "USD"), null, MoneyItem.of(10_000, "USD"), 7L, "INTERNATIONAL", "북미",
+                MoneyItem.of(3_000, "USD"))));
+        }
+
+        @Test
+        @DisplayName("무료배송 기준 없이 무료배송이 적용됐으면 503 이다")
+        void freeShippingWithoutThreshold() {
+            assertUnavailable(() -> convert(new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(0, "KRW"), MoneyItem.of(3_000, "KRW"), true, MoneyItem.of(0, "KRW"), null, null, 3L, "DOMESTIC", null, null)));
+            assertUnavailable(() -> convertInternational(new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(0, "USD"), MoneyItem.of(1_500, "USD"), true, MoneyItem.of(0, "USD"), null, null, 7L, "INTERNATIONAL", "북미", MoneyItem.of(3_000, "USD"))));
+        }
+
+        @Test
+        @DisplayName("무료배송 판정은 주문 금액이 기준 이상인가와 같아야 한다 — 기준과 같으면 무료, 1 모자라면 유료. 어긋나면 503 이다")
+        void freeShippingMatchesOrderAmount() {
+            ShippingFeeQuoteInternalResponse free = new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(0, "KRW"), MoneyItem.of(3_000, "KRW"), true, MoneyItem.of(0, "KRW"), null, MoneyItem.of(50_000, "KRW"), 3L, "DOMESTIC", null, null);
+            ShippingFeeQuoteInternalResponse paid = new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(3_000, "KRW"), MoneyItem.of(3_000, "KRW"), false, MoneyItem.of(0, "KRW"), null, MoneyItem.of(50_000, "KRW"), 3L, "DOMESTIC", null, null);
+            Money atThreshold = Money.of(50_000, CurrencyCode.KRW);
+            Money belowThreshold = Money.of(49_999, CurrencyCode.KRW);
+
+            assertThat(support.toShippingFeeQuoteResult(Response.success(free), atThreshold, "KR").freeShippingApplied()).isTrue();
+            assertThat(support.toShippingFeeQuoteResult(Response.success(paid), belowThreshold, "KR").freeShippingApplied()).isFalse();
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(free), belowThreshold, "KR"));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(paid), atThreshold, "KR"));
+
+            ShippingFeeQuoteInternalResponse internationalFree = new ShippingFeeQuoteInternalResponse(
+                MoneyItem.of(0, "USD"), MoneyItem.of(1_500, "USD"), true, MoneyItem.of(0, "USD"), null, MoneyItem.of(10_000, "USD"), 7L, "INTERNATIONAL", "북미",
+                MoneyItem.of(3_000, "USD"));
+            assertThat(support.toShippingFeeQuoteResult(Response.success(internationalFree), Money.of(10_000, CurrencyCode.USD), "US").shippingFee())
+                .isEqualTo(Money.zero(CurrencyCode.USD));
+            assertUnavailable(() -> support.toShippingFeeQuoteResult(Response.success(internationalFree), Money.of(9_999, CurrencyCode.USD), "US"));
+        }
+
         private void convert(ShippingFeeQuoteInternalResponse body) {
-            support.toShippingFeeQuoteResult(Response.success(body), CurrencyCode.KRW, "KR");
+            support.toShippingFeeQuoteResult(Response.success(body), KRW_ORDER, "KR");
         }
 
         private void convertInternational(ShippingFeeQuoteInternalResponse body) {
-            support.toShippingFeeQuoteResult(Response.success(body), CurrencyCode.USD, "US");
+            support.toShippingFeeQuoteResult(Response.success(body), USD_ORDER, "US");
         }
     }
 
