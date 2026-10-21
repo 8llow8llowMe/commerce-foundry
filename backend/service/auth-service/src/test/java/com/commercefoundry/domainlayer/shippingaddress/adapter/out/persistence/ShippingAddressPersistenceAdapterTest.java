@@ -16,10 +16,13 @@ import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
@@ -195,6 +198,32 @@ class ShippingAddressPersistenceAdapterTest {
         entityManager.persist(entity(10L, MEMBER_ID, null, "kr"));
 
         assertThatThrownBy(() -> entityManager.flush()).rootCause().message().contains("ck_shipping_address_country_code");
+    }
+
+    /**
+     * Hibernate 는 예외를 바꾸기 전에 드라이버 메시지를 WARN 으로 남기고, pgjdbc 기본값은 그 메시지에 서버 DETAIL({@code Failing row contains (...)})을
+     * 붙인다. main {@code application.yml} 의 {@code logServerErrorDetail: false} 가 이 슬라이스의 커넥션 풀을 거쳐 드라이버까지 가는지 본다 (#173,
+     * {@code coding-conventions.md} §8). 로그는 그대로 남아 제약 이름은 보여야 한다 — 로그를 끈 것이 아니다.
+     * 픽스처 값은 ASCII 다. 콘솔 인코딩이 달라 한글이 깨지면 "없다" 단언이 값이 새도 통과한다.
+     */
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("check 제약 위반(ck_shipping_address_country_code)의 로그 · 예외 메시지에 행 값(받는 사람 · 연락처)이 없고 제약 이름은 남는다")
+    void constraintViolationLogOmitsRowValues(CapturedOutput output) {
+        String probeName = "LogLeakProbe Recipient";
+        String probePhone = "01099998888";
+        ShippingAddressEntity lowercaseCountry = ShippingAddressEntity.builder()
+            .id(10L).memberId(MEMBER_ID).recipientName(probeName).recipientPhone(probePhone).countryCode("kr").postalCode("06236")
+            .addressLine1("1 LogLeakProbe St")
+            .build();
+
+        assertThatThrownBy(() -> entityManager.persistAndFlush(lowercaseCountry))
+            .rootCause().message()
+            .contains("ck_shipping_address_country_code")
+            .doesNotContain("Failing row contains").doesNotContain(probeName).doesNotContain(probePhone);
+        assertThat(output.getAll())
+            .contains("ck_shipping_address_country_code")
+            .doesNotContain("Failing row contains").doesNotContain(probeName).doesNotContain(probePhone).doesNotContain("LogLeakProbe St");
     }
 
     @Test
