@@ -40,7 +40,7 @@
 
 - `nbf` 는 넣지 않는다. iss 가 URL 이 아니므로 `Jwt#getIssuer()`(URL 변환)를 쓰지 않는다.
 - TTL 기본 30분, **최대 1시간**(`security.jwt.issuance.access-token-ttl`). access 토큰은 발급 뒤 거둘 수 없어 길수록 탈취 시 악용 창과
-  로그아웃 블랙리스트(#4) 보관 기간이 늘어난다. 긴 로그인 유지는 refresh 토큰으로 한다.
+  로그아웃 블랙리스트(#4) 보관 기간이 늘어난다. 긴 로그인 유지는 refresh 토큰으로 한다. 관리자 토큰도 같은 TTL 이고 refresh 가 없다(§11-1).
 - 시계 오차 허용 기본 60초(`security.jwt.clock-skew`, 0 이상 5분 이하).
 - 위반은 한 번에 모두 모아 판정한다 (§4-1).
 
@@ -781,9 +781,94 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
 |------|------|------|
 | 회원가입 `POST /api/v1/auth/sign-up` | 이미 가입된 이메일이면 409 `AUTH_002` | **계정 존재를 드러낸다 — UX 를 위해 감수하는 위험이다.** "이미 가입된 이메일" 을 알려 주지 않으면 사용자가 왜 가입이 안 되는지 모른다. 그 대신 이메일로 가입 여부를 하나씩 확인(열거)할 수 있다 |
 | 로그인 `POST /api/v1/auth/login` (#4 A3) | 이메일 없음 · 비밀번호 틀림 · 관리자 계정 모두 400 `AUTH_001` 같은 문구 | 숨긴다. 이메일이 없을 때도 더미 해시(기동 때 같은 인코더로 만든 BCrypt)로 비교하고, 관리자 계정도 비교한 뒤 거절해 응답 시간 차이를 없앤다 (`MemberLoginProcessor`) |
+| 관리자 로그인 `POST /api/v1/auth/admin/login` (#6) | 이메일 없음 · 비밀번호 틀림 · 고객 계정 모두 400 `AUTH_030` 같은 문구 | 숨긴다. 고객 로그인의 거울이다 — 더미 해시로 비교하고 고객 계정도 비교한 뒤 거절한다(`MemberLoginProcessor#authenticateAdmin`) |
 
 - 회원가입은 비밀번호 해시를 중복 확인보다 **먼저** 한다(`MemberWebFacade#signUp`) — 409 응답이 해시를 건너뛰어 빨리 끝나면 응답 시간으로도 존재가 드러나기 때문이다.
   409 자체가 존재를 알리므로 이것은 시간 차이를 더하지 않게 하는 것뿐이다.
 - 열거 · 무차별 대입 완화(가입 · 로그인 요청 제한, 계정 잠금)는 후속 #66 에서 다룬다. 그때까지 가입 409 로 가입 여부를 대량으로 확인할 수 있다.
+  관리자 로그인(#6)도 #66 의 대상이다 — 그때까지는 관리자 계정을 노린 실패가 감사 로그(§11-4 `target=member:<id>`)로만 드러난다.
 - 타인 리소스는 반대로 **존재를 숨긴다** — 배송지(#7)는 (주소 아이디, JWT memberId) 로만 찾고, 없거나 남의 주소면 GET · PUT · DELETE · 기본 지정 모두 같은 404 `AUTH_020` 이다.
   배송지의 받는 사람 · 연락처 · 주소는 `toString` · 로그 · 예외 메시지에 싣지 않는다 (§8).
+
+## 11. 관리자 계정 (#6)
+
+### 11-1. 로그인 · 토큰
+
+- 경로는 `POST /api/v1/auth/admin/login`(`permitAll()`, `adapter/in/web` 의 `AdminAuthWebController`)이다. `/api/v1/admin/**` 아래에 두지 않는다 —
+  게이트웨이(§7) · 서비스(§5-1) URL 규칙이 그 경로에 ADMIN 토큰을 요구해 토큰을 받으러 오는 익명 요청이 닿지 못한다 (`api-design-guide.md` §1-2).
+  소셜 로그인은 없다. 실패는 §10 과 같은 규칙으로 400 `AUTH_030` 하나다. 64자를 넘는 비밀번호도 필드 검증이 아니라 같은 `AUTH_030` 이다
+  (비교는 자리값으로 한 번 해 시간도 같다 — `MemberLoginProcessor#authenticateAdmin`).
+- **알려진 위험 — 관리자 로그인에 요청 제한 · 계정 잠금이 없다.** 게이트웨이 요청 제한(§7-3)은 로그인 경로를 세지 않고, 로그인 시도 제한은 #66 이 맡는다 —
+  **#66 에서 관리자 로그인(`/api/v1/auth/admin/login`)도 대상으로 한다.** 그때까지는 대입 시도가 감사 로그(§11-4, `target=member:<id> result=FAILURE`)로만 드러나므로
+  운영은 그 줄의 빈도를 경보로 건다. 관리자 비밀번호를 12자 이상으로 둔 것(§11-3)이 그동안의 완화다.
+- **access 토큰만 낸다(refresh 없음).** 관리자 세션은 access 수명까지이고, 만료되면 다시 로그인한다 — 재발급 경로(`/token/reissue`)는 고객만 받으므로
+  refresh family 를 만들어도 쓰지 못할 키만 남는다. 로그아웃은 고객과 같은 `POST /api/v1/auth/logout` 을 본문 없이 부른다(jti 차단, §7-1).
+- **TTL 은 고객과 같은 `security.jwt.issuance.access-token-ttl`(기본 30분, 최대 1시간)이다 — 관리자 전용으로 줄이지 않았다.** 발급기(security-core
+  `JwtIssuer`)가 역할별 TTL 을 받지 않아 줄이려면 core 를 바꿔야 하고, refresh 가 없어 30분이 곧 관리자 세션 상한이라 이미 고객(14일 refresh)보다 짧다.
+  더 줄이려면(예: 15분) 발급기에 역할별 TTL 을 더하는 후속 이슈로 한다.
+- 고객 로그인(`/api/v1/auth/login`)은 관리자 계정을 `AUTH_001` 로, 관리자 로그인은 고객 계정을 `AUTH_030` 으로 거절한다 — 한 계정이 두 종류 토큰을 받지 않는다.
+
+### 11-2. 식별자 공간 (`sub`)
+
+- 관리자와 고객은 **같은 `auth.member` 테이블 · 같은 Snowflake 아이디 공간**이고 `role` 칸(`CUSTOMER` · `ADMIN`)으로만 나뉜다 (#4 결정 4).
+  access 토큰의 `sub` 은 어느 쪽이든 `member.id` 이고 `role` claim 이 같은 행의 값이다 — 관리자 테이블을 따로 두지 않으므로 `sub` 이 겹칠 일이 없다.
+- 이메일 유니크(`uk_member_email`)도 공유한다. 한 이메일은 고객이거나 관리자이고 둘 다일 수 없다. 역할을 바꾸는 API 는 없다.
+- 감사 · 이력에 남는 "조정한 관리자"(재고 조정 `adminMemberId` 등)도 같은 `member.id` 다.
+
+### 11-3. 초기 관리자 시드
+
+| 설정 (`auth.admin-seed.*`) | 환경변수 | 규칙 |
+|-----------------------------|----------|------|
+| `email` | `ADMIN_SEED_EMAIL` | 비면 시드하지 않는다. 254자 이하 · 도메인에 점이 있는 형식, 소문자로 저장 |
+| `password` | `ADMIN_SEED_PASSWORD` | 12~64자, 영문 · 숫자를 1자 이상씩 포함한 공백 없는 ASCII(가입은 8자 — 관리자는 탈취 비용이 커 길게) |
+| `name` | `ADMIN_SEED_NAME` | 비면 `관리자`, 앞뒤 공백 제거 후 50자 이하 |
+
+- 값은 Vault 에서 받는다(`secret-management.md`). yml 은 `${ADMIN_SEED_EMAIL:}` 플레이스홀더뿐이고 실제 값을 저장소에 쓰지 않는다.
+- 기동 직후 `adapter/in/bootstrap/AdminSeedRunner`(ApplicationRunner)가 한 번 부른다. **멱등이다** — 같은 이메일의 관리자가 있으면 아무것도 바꾸지 않는다(비밀번호를
+  덮어쓰지 않는다). 그래서 첫 배포 뒤 값을 지워도 되고, 남겨 둬도 매 기동이 같은 결과다. 동시에 뜬 다른 인스턴스가 먼저 넣었으면(유니크 키) 건너뛴다.
+- **설정이 틀리면 기동을 멈춘다** — 이메일 · 비밀번호 중 하나만 있음, 비밀번호 · 이메일 · 이름 규칙 위반. 예외 메시지에 값을 싣지 않는다.
+- **같은 이메일의 고객이 있으면 승격하지 않고 warn 만 남긴 채 기동한다(`CUSTOMER_EXISTS`).** 기동을 멈추지 않는 이유 — 이것은 설정이 아니라 데이터 상태이고,
+  관리자 이메일을 아는 누군가 먼저 고객 가입을 해 두는 것만으로 auth-service(고객 로그인 포함) 기동을 막을 수 있게 되기 때문이다. 다른 이메일로 다시 시드한다.
+- 로그는 진입점(`AdminSeedRunner`)이 남기는 결과 한 줄뿐이다 — `admin seed result=CREATED email=ad***@e***.com`(`CUSTOMER_EXISTS` 만 warn).
+  이메일은 마스킹(`MemberMasking`, `api-design-guide.md` §2-4)하고 비밀번호 · 이름은 남기지 않는다. `AdminSeedProcessor` 는 memberId 를 debug 로만 남긴다.
+- 규칙 판정은 `AdminSeedProcessor#validate`, 순서(판정 → 트랜잭션 밖 BCrypt → 저장 트랜잭션)는 `AdminSeedFacade` 다.
+- **운영 주의**
+  - 시드 이메일은 외부에 알려지지 않은 주소로 한다 — 대표 메일 · CS 주소처럼 공개된 주소는 남이 먼저 고객으로 가입해 시드를 막거나(`CUSTOMER_EXISTS`) 대입 대상이 된다.
+  - **`CUSTOMER_EXISTS` warn 은 경보로 받는다.** 정상 배포에서는 나지 않고, 나면 관리자 계정이 만들어지지 않은 채 기동한 것이다(누군가 그 이메일을 선점했을 수 있다).
+- 관리자 추가 · 비밀번호 변경 API 는 아직 없다(후속).
+
+### 11-4. 관리자 감사 로그 (1단계 — 공통 방식)
+
+관리자 행위는 **구조화된 감사 로그 한 줄**로 남긴다. DB 감사 테이블 · 보관 정책 · 조회 화면은 후속이다(그때 포트 구현만 바꾼다).
+
+```text
+action=ADMIN_LOGIN actorMemberId=- target=member:4611686018427387904 result=FAILURE
+action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&page=0&size=20 result=SUCCESS
+```
+
+- **로거 이름은 `admin.audit`, 수준은 INFO** 다 — 로그 수집기가 로거 이름으로 따로 모아 보관 기간을 앱 로그와 다르게 둘 수 있게 나눈다.
+- 칸은 언제나 `action · actorMemberId · target · result` 넷이고 이 순서다. 모르는 칸은 `-`, 값에 공백을 넣지 않는다.
+  - `action` — 대문자 스네이크(`ADMIN_LOGIN` · `MEMBER_SEARCH`). 로그 검색 키라 한번 정한 이름을 바꾸지 않는다.
+  - `actorMemberId` — 행위한 관리자의 `member.id`(access 토큰의 `sub`). 요청 본문 값을 쓰지 않는다.
+  - `target` — 대상 리소스 · 조건(`member:<id>` · `members?role=..&page=..&size=..`).
+  - `result` — `SUCCESS` · `FAILURE`. 실패 이유(회원 없음 · 비밀번호 틀림 · 고객 계정)는 나누지 않는다.
+- **개인정보 · 비밀을 싣지 않는다** — 이메일 · 이름 · 전화 원문, 비밀번호 · 토큰, 검색어 원문. 관리자 로그인 실패는 이메일 원문 대신 그 이메일이 관리자 계정일 때만
+  `target=member:<id>` 를 남긴다(고객 memberId 는 남기지 않는다) — 한 관리자 계정에 몰리는 대입을 찾을 수 있게.
+- 쓰는 방식 — 컨텍스트의 out-port(`AdminAuditPort`)에 행위별 메서드를 두고, **Facade 는 포트를 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다**
+  (ArchUnit H11 — Facade 는 out-port 를 쓰지 않는다). 업무가 끝난 뒤(트랜잭션 밖) 부르고, 실패 로그의 대상 선택 같은 감사 정책도 Processor 에 둔다.
+  어댑터는 `adapter/out/log/*AuditLogAdapter` 다.
+  다른 서비스도 어드민 쓰기 API 를 만들 때 같은 로거 이름 · 칸으로 남긴다. 업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 등)는 그 이력이 감사의 정본이다.
+- 적용 대상 (#6): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade`), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
+
+### 11-5. 이중 방어 확인
+
+CUSTOMER 토큰으로 어드민 경로에 오면 게이트웨이와 서비스가 각각 거부한다. 회귀 테스트는 실제 회원 경로(`/api/v1/admin/members`)로 둔다.
+
+| 층 | 테스트 | 보는 것 |
+|----|--------|---------|
+| 게이트웨이 | `GatewaySecurityTest` (`adminMembers*` · `*AdminMembersPath*`) | 무토큰 401 · CUSTOMER 403 · ADMIN 은 auth 라우트로. `..` · `%2e%2e` · `..;` · `;` · `%2f`/`%2F` · `%252e` 는 400 `GATEWAY_004`, `%61dmin` · 끝 슬래시는 401 · 403, 모두 하류 미도달 |
+| 서비스 | `AuthServiceSecuritySmokeTest` (`adminMembers*` · `bypassPaths*` · `*AdminMembersPath`) | 무토큰 401 · CUSTOMER 403 · ADMIN 200. 우회 경로(위와 같음)는 방화벽 400, `%61dmin` 은 401 · 403, 끝 슬래시는 401 · 403 · ADMIN 404 |
+| 서비스 슬라이스 · 흐름 | `MemberAdminControllerTest` · `AdminFlowIntegrationTest` · `AuthTokenFlowIntegrationTest#adminLogoutRevokesJtiOnly` | `hasRole('ADMIN')` · 시드 → 로그인 → 조회 · 로그아웃은 jti 차단(서비스 직접 호출은 200 — 차단 목록은 게이트웨이만 본다) |
+
+- 서비스 스모크의 "컨트롤러 미도달" 은 감사 로그(`action=MEMBER_SEARCH`)가 stdout 에 없는 것으로 판정한다 — 로깅 설정이 그 로거를 콘솔에서 빼면 거짓 통과하므로,
+  같은 테스트의 ADMIN 200 케이스가 그 줄이 잡히는 것(`contains`)을 함께 단언한다.

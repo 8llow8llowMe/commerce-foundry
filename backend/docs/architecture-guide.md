@@ -72,12 +72,14 @@ com.commercefoundry
   |  |  |- in/support           진입 adapter 들이 같이 쓰는 변환 함수 (예: Money → MoneyItem). DTO 는 두지 않는다
   |  |  |- in/webhook           외부 시스템 콜백 — PG 웹훅 등 (payment-service)
   |  |  |- in/scheduler         시각이 부르는 진입점 (@Scheduled — 재고 선점 만료, 미결제 주문 정리 등)
+  |  |  |- in/bootstrap         기동이 부르는 진입점 (ApplicationRunner — 초기 관리자 시드 #6). 설정을 커맨드로 옮겨 UseCase 만 부른다
   |  |  \- out
   |  |     |- persistence
   |  |     |  |- entity
   |  |     |  |- repository
   |  |     |  |  \- custom      (*CustomRepository + Impl — QueryDSL 동적 쿼리·조인)
   |  |     |  \- *RepositoryAdapter
+  |  |     |- log               (*AuditLogAdapter — 관리자 감사 로그 한 줄, security-guide.md §11-4)
   |  |     \- client
   |  |        |- feign          (내부 서비스 Feign *Client)
   |  |        |- pg             (PG 연동 — toss / paypal, payment-service)
@@ -243,7 +245,8 @@ Info → Presenter → Response
   토큰 사양 · 오류 코드 · 키 배포와 교체의 정본은 [security-guide.md](security-guide.md) 다.
 - **게이트웨이는 검증 결과를 헤더(`X-Member-Id` 등)로 넘기지 않고, 서비스가 JWT 를 직접 검증한다.** 서비스가 헤더를 믿으면
   게이트웨이를 거치지 않은 요청이 그 헤더를 위조해 아무 회원이나 될 수 있다.
-- 역할: `CUSTOMER`, `ADMIN`. 관리자 계정은 소셜 로그인 없이 별도 발급한다.
+- 역할: `CUSTOMER`, `ADMIN`. 관리자 계정은 소셜 로그인 없이 별도 발급한다 — 같은 `auth.member` 테이블 · 같은 아이디 공간이고, 초기 관리자는 환경변수 시드,
+  로그인은 `POST /api/v1/auth/admin/login`(access 만)이다. 관리자 행위는 감사 로그 한 줄(`admin.audit`)로 남긴다 — 정본은 [security-guide.md](security-guide.md) §11.
 - 게이트웨이는 JWT 유효성 검증과 라우팅에 집중한다. **단 `/api/v1/admin/**` 은 게이트웨이에서도
   `ADMIN` 역할을 확인한다(이중 방어).** 서비스 안에서도 `@PreAuthorize("hasRole('ADMIN')")` 를 건다.
 - 토큰이 없는 요청은 게이트웨이가 거부하지 않는다 — 상품 조회처럼 비로그인으로도 되는 API 가 있다.

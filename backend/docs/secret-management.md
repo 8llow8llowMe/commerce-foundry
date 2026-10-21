@@ -15,7 +15,7 @@
 
 | 구분 | 예 | 위치 |
 |------|----|------|
-| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 5종 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 를 켤 때만 필요), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키 | Vault |
+| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 5종 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 를 켤 때만 필요), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키, 초기 관리자 시드(`ADMIN_SEED_*` — auth 전용) | Vault |
 | 배포용 공개값 | JWT 공개키(전 서비스 · 게이트웨이). 비밀은 아니지만 교체를 한 곳에서 하려고 Vault 로 배포한다 | Vault |
 | 고객사 실정보 | 상호, 대표자, 사업자등록번호, 통신판매업 신고번호, 사업장 주소, CS 연락처 | Vault |
 | 일반 설정 | 포트, 타임아웃, `store.features.*`, 로케일, 통화 | `application*.yml` |
@@ -33,6 +33,10 @@
 - JWT 키 만들기 · 환경변수 한 줄 변환 · 교체 순서는 [security-guide.md](security-guide.md) §6 이 정본이다.
 - 서비스 토큰 비밀(`INTERNAL_JWT_SECRET`)은 `openssl rand -base64 32` 로 만들고 서비스 5종에 **같은 값**을 넣는다. 게이트웨이에는 넣지 않는다.
   교체는 `INTERNAL_JWT_SECRET_PREVIOUS` 로 3단계를 밟는다 — 정본은 [security-guide.md](security-guide.md) §9-6 · §9-7.
+- **초기 관리자 시드(`ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` · `ADMIN_SEED_NAME`, auth 전용, #6)는 Vault 등록 필요(dev/prod)다.**
+  실제 관리자 이메일 · 비밀번호를 yml · 테스트 픽스처 · 이슈 · PR 에 쓰지 않는다 — yml 은 `${ADMIN_SEED_EMAIL:}` 플레이스홀더만 둔다.
+  비밀번호는 12~64자, 영문 · 숫자 포함 공백 없는 ASCII 이고(`openssl rand -base64 24` 로 만들고 영문 · 숫자가 모두 들었는지 본다), 같은 이메일의 관리자가 이미 있으면 덮어쓰지 않으므로
+  첫 배포로 관리자를 만든 뒤 Vault 값을 지워도 된다. 비밀번호 교체 API 는 아직 없다 — 바꾸려면 후속 이슈를 쓴다. 규칙 정본은 [security-guide.md](security-guide.md) §11-3.
 
 ## 3. 환경별 값의 출처
 
