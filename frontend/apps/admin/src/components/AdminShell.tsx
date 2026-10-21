@@ -7,7 +7,7 @@ import { NavLinks, type NavGroup } from './NavLinks';
 const NAV: NavGroup[] = [
   {
     title: '상품',
-    items: [{ label: '재고' }],
+    items: [{ label: '재고', href: '/stocks' }],
   },
   {
     title: '배송',
