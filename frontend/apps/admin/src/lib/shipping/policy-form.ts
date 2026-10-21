@@ -1,4 +1,5 @@
 import { moneyToDecimalString, parseMoneyInput, type Currency, type Money } from '@cf/api-client';
+import type { FormErrors } from '@/lib/api-errors';
 import type {
   DomesticPolicy,
   DomesticPolicyRequest,
@@ -13,8 +14,7 @@ import type {
  * 형식 검증 정본은 서버다. 화면은 서버에 보낼 수 없는 글자(금액 · 무게 형식)만 막는다.
  */
 
-/** 칸 이름 → 오류 문구. 키는 `remoteAreas.0.postalCodeFrom` 처럼 점으로 잇는다(`fieldKey`), 폼 전체는 `form` */
-export type FormErrors = Record<string, string[]>;
+export type { FormErrors };
 
 export const MONEY_FORMAT_ERROR = '금액 형식이 올바르지 않습니다.';
 export const WEIGHT_FORMAT_ERROR = '무게는 g 단위 정수로 입력해 주세요.';

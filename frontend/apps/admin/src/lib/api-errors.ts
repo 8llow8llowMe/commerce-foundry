@@ -6,6 +6,9 @@ import { ApiError } from '@cf/api-client';
  */
 export type AccessDenied = 'unauthorized' | 'forbidden';
 
+/** 칸 이름 → 오류 문구. 키는 `remoteAreas.0.postalCodeFrom` 처럼 점으로 잇는다(`fieldKey`), 폼 전체는 `form` */
+export type FormErrors = Record<string, string[]>;
+
 /** 401 · 403 이면 그 종류, 아니면 null */
 export function accessDeniedOf(cause: unknown): AccessDenied | null {
   if (!(cause instanceof ApiError)) return null;
