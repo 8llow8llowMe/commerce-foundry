@@ -4,20 +4,20 @@ import { gatewayUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
-// 임시 화면 — #29 에서 어드민 로그인·대시보드로 바꾼다.
+// 임시 홈 — #29 에서 대시보드로 바꾼다.
 export default async function AdminHomePage() {
   const gateway = await checkGateway(gatewayUrl);
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-4 px-4">
-      <h1 className="text-2xl font-semibold">{brand.name} 어드민</h1>
-      <p className="text-muted-fg">어드민 콘솔 초기 구성</p>
-      <p>
+    <div className="flex max-w-xl flex-col gap-3">
+      <h1 className="text-xl font-semibold">{brand.name} 어드민</h1>
+      <p className="text-sm text-muted-fg">왼쪽 메뉴에서 관리할 화면을 고르세요.</p>
+      <p className="text-sm">
         게이트웨이:{' '}
         <span className={gateway === 'UP' ? 'font-medium text-primary' : 'font-medium text-danger'}>
           {gateway}
         </span>
       </p>
-    </main>
+    </div>
   );
 }
