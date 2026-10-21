@@ -214,4 +214,32 @@ class MemberTest {
         assertThat(Member.restore(1L, "a@example.com", HASH, "홍길동", null, MemberRole.CUSTOMER, 0L).isCustomer()).isTrue();
         assertThat(Member.restore(1L, "a@example.com", HASH, "관리자", null, MemberRole.ADMIN, 0L).isCustomer()).isFalse();
     }
+
+    @Test
+    @DisplayName("관리자 로그인은 ADMIN 만 쓸 수 있다 — 고객 계정은 관리자 로그인 대상이 아니다 (#6)")
+    void onlyAdminCanUseAdminLogin() {
+        assertThat(Member.restore(1L, "a@example.com", HASH, "관리자", null, MemberRole.ADMIN, 0L).isAdmin()).isTrue();
+        assertThat(Member.restore(1L, "a@example.com", HASH, "홍길동", null, MemberRole.CUSTOMER, 0L).isAdmin()).isFalse();
+    }
+
+    @Nested
+    @DisplayName("관리자 계정 (#6)")
+    class Admin {
+
+        @Test
+        @DisplayName("역할은 언제나 ADMIN, 전화 없음, 버전 null 이고 이메일 · 이름을 가입과 같이 정규화한다")
+        void admin() {
+            Member admin = Member.admin(1L, "  Admin@Example.COM ", HASH, " 관리자 ");
+
+            assertThat(admin).extracting(Member::email, Member::name, Member::phone, Member::role, Member::version)
+                .containsExactly("admin@example.com", "관리자", null, MemberRole.ADMIN, null);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"", "   ", "　"})
+        @DisplayName("이름이 공백만이면(전각 공백 포함) 거절한다")
+        void blankName(String name) {
+            assertThatThrownBy(() -> Member.admin(1L, "admin@example.com", HASH, name)).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
 }
