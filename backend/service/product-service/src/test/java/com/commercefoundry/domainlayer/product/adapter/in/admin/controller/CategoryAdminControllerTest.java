@@ -194,6 +194,14 @@ class CategoryAdminControllerTest {
             assertFailure(exchange(HttpMethod.PUT, ITEM_PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, code, message);
         }
 
+        @Test
+        @DisplayName("다른 카테고리 쓰기가 잠금을 쥐고 있어 상한을 넘기면 409 · PRODUCT_045")
+        void busy() {
+            given(categoryAdminUseCase.createCategory(any())).willThrow(new ProductException(ProductErrorCode.CATEGORY_BUSY));
+
+            assertFailure(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "PRODUCT_045", "다른 카테고리 변경을 처리 중입니다. 다시 시도해 주세요.");
+        }
+
         @ParameterizedTest(name = "{0}")
         @CsvSource(delimiter = '|', value = {
             "CATEGORY_HAS_CHILDREN | PRODUCT_042 | 하위 카테고리가 있어 삭제할 수 없습니다.",
@@ -217,14 +225,21 @@ class CategoryAdminControllerTest {
             "{\"parentId\": -1, \"name\": \"a\", \"displayOrder\": 0, \"visible\": true} | PRODUCT_131 | parentId | parentId 는 양수여야 합니다.",
             "{\"displayOrder\": 0, \"visible\": true} | PRODUCT_132 | name | name 은 필수입니다.",
             "{\"name\": \"   \", \"displayOrder\": 0, \"visible\": true} | PRODUCT_132 | name | name 은 필수입니다.",
-            "{\"name\": \"NAME_51\", \"displayOrder\": 0, \"visible\": true} | PRODUCT_133 | name | name 은 50자 이하여야 합니다.",
+            "{\"name\": \"\\u3000\\u3000\", \"displayOrder\": 0, \"visible\": true} | PRODUCT_132 | name | name 은 필수입니다.",
+            "{\"name\": \" \\u200B \", \"displayOrder\": 0, \"visible\": true} | PRODUCT_132 | name | name 은 필수입니다.",
+            "{\"name\": \"NAME_51\", \"displayOrder\": 0, \"visible\": true} | PRODUCT_133 | name | name 은 앞뒤 공백을 뺀 뒤 50자 이하여야 합니다.",
+            "{\"name\": \"저\\u0000고리\", \"displayOrder\": 0, \"visible\": true} | PRODUCT_138 | name | NAME_138",
+            "{\"name\": \"저\\n고리\", \"displayOrder\": 0, \"visible\": true} | PRODUCT_138 | name | NAME_138",
+            "{\"name\": \"\\t저고리\", \"displayOrder\": 0, \"visible\": true} | PRODUCT_138 | name | NAME_138",
+            "{\"name\": \"저\\u200B고리\", \"displayOrder\": 0, \"visible\": true} | PRODUCT_138 | name | NAME_138",
             "{\"name\": \"a\", \"visible\": true} | PRODUCT_134 | displayOrder | displayOrder 는 필수입니다.",
             "{\"name\": \"a\", \"displayOrder\": -1, \"visible\": true} | PRODUCT_135 | displayOrder | displayOrder 는 0 이상이어야 합니다.",
             "{\"name\": \"a\", \"displayOrder\": 0} | PRODUCT_136 | visible | visible 은 필수입니다."
         })
         @DisplayName("본문 필드별 검증 코드 — 생성 · 수정 공통")
-        void fieldErrors(String body, String code, String field, String message) {
+        void fieldErrors(String body, String code, String field, String expectedMessage) {
             String resolved = body.replace("NAME_51", "가".repeat(51));
+            String message = expectedMessage.replace("NAME_138", "name 에는 제어 문자 · 서식 문자(개행 · 탭 · 제로폭 공백 등)를 쓸 수 없습니다.");
             for (MvcTestResult result : List.of(
                 exchange(HttpMethod.POST, PATH, resolved, MemberRole.ADMIN), exchange(HttpMethod.PUT, ITEM_PATH, resolved, MemberRole.ADMIN)
             )) {
@@ -242,6 +257,17 @@ class CategoryAdminControllerTest {
 
             assertThat(exchange(HttpMethod.POST, PATH, "{\"name\": \"" + "가".repeat(50) + "\", \"displayOrder\": 0, \"visible\": true}", MemberRole.ADMIN))
                 .hasStatus(HttpStatus.CREATED);
+        }
+
+        @Test
+        @DisplayName("50자는 앞뒤 공백(전각 포함)을 뺀 뒤 센다 — 공백을 붙인 50자는 통과하고, 뺀 값을 넘긴다")
+        void lengthCountsAfterStrip() {
+            given(categoryAdminUseCase.createCategory(any())).willReturn(response("5001", null));
+            String fifty = "가".repeat(50);
+
+            assertThat(exchange(HttpMethod.POST, PATH, "{\"name\": \"\\u3000 " + fifty + " \", \"displayOrder\": 0, \"visible\": true}", MemberRole.ADMIN))
+                .hasStatus(HttpStatus.CREATED);
+            verify(categoryAdminUseCase).createCategory(new CategoryUpsertCommand(null, fifty, 0, true));
         }
 
         @Test

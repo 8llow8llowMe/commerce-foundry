@@ -51,11 +51,12 @@ public final class ProductValidationMessage {
     // 어드민 카테고리 생성 · 수정 (POST /api/v1/admin/categories, PUT · DELETE /api/v1/admin/categories/{categoryId})
     public static final String CATEGORY_PARENT_ID_POSITIVE = "PRODUCT_131:parentId 는 양수여야 합니다.";
     public static final String CATEGORY_NAME_REQUIRED = "PRODUCT_132:name 은 필수입니다.";
-    public static final String CATEGORY_NAME_SIZE_MAX = "PRODUCT_133:name 은 50자 이하여야 합니다.";
+    public static final String CATEGORY_NAME_SIZE_MAX = "PRODUCT_133:name 은 앞뒤 공백을 뺀 뒤 50자 이하여야 합니다.";
     public static final String CATEGORY_DISPLAY_ORDER_REQUIRED = "PRODUCT_134:displayOrder 는 필수입니다.";
     public static final String CATEGORY_DISPLAY_ORDER_MIN = "PRODUCT_135:displayOrder 는 0 이상이어야 합니다.";
     public static final String CATEGORY_VISIBLE_REQUIRED = "PRODUCT_136:visible 은 필수입니다.";
     public static final String CATEGORY_ID_POSITIVE = "PRODUCT_137:categoryId 는 양수여야 합니다.";
+    public static final String CATEGORY_NAME_INVALID_CHARACTER = "PRODUCT_138:name 에는 제어 문자 · 서식 문자(개행 · 탭 · 제로폭 공백 등)를 쓸 수 없습니다.";
 
     private ProductValidationMessage() {
     }

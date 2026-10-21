@@ -1,13 +1,12 @@
 package com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request;
 
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.validation.ValidCategoryName;
 import com.commercefoundry.domainlayer.product.application.command.CategoryUpsertCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
-import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 /**
@@ -25,9 +24,12 @@ public record CategoryUpsertRequest(
     @Positive(message = ProductValidationMessage.CATEGORY_PARENT_ID_POSITIVE)
     Long parentId,
 
-    @Schema(description = "카테고리 이름 (50자 이하, 앞뒤 공백은 빼고 저장한다)", example = "저고리")
-    @NotBlank(message = ProductValidationMessage.CATEGORY_NAME_REQUIRED)
-    @Size(max = 50, message = ProductValidationMessage.CATEGORY_NAME_SIZE_MAX)
+    @Schema(
+        description = "카테고리 이름. 앞뒤 공백(전각 공백 포함)을 빼고 저장하며 뺀 뒤 1~50자다. 공백 · 서식 문자만이면 PRODUCT_132, "
+            + "제어 · 서식 문자(개행 · 탭 · 제로폭 공백 등)가 있으면 PRODUCT_138 이다",
+        example = "저고리"
+    )
+    @ValidCategoryName
     String name,
 
     @Schema(description = "같은 상위 안의 노출 순서 (0 이상, 오름차순). 같으면 아이디 오름차순이다", example = "1")

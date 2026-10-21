@@ -9,7 +9,8 @@ import org.springframework.http.HttpStatus;
  *
  * <p>대역 — {@code 00x} 없는 리소스(404), {@code 02x} · {@code 03x} 재고(조정 · 선점 · 복원 충돌과 부족, 409), {@code 04x} 어드민 카테고리 관리,
  * {@code 1xx} 요청 검증(400).
- * 카테고리 컨텍스트는 진입 API 가 없어 3종 세트를 두지 않는다 — 어드민 카테고리 관리는 상품 컨텍스트가 받으므로 코드도 여기 있다.
+ * 카테고리 컨텍스트는 업무 오류를 던지지 않는다(고객 트리는 실패하지 않고, 판정은 {@code CategoryPlacementViolation} 값으로 돌려준다). 어드민 카테고리 관리는
+ * 상품 컨텍스트가 받고 상품 Processor 가 코드를 붙이므로 여기 둔다.
  */
 @Getter
 @RequiredArgsConstructor
@@ -62,6 +63,8 @@ public enum ProductErrorCode {
     CATEGORY_HAS_PRODUCTS("PRODUCT_043", "카테고리에 연결된 상품이 있어 삭제할 수 없습니다.", HttpStatus.CONFLICT),
     /** 본문의 상위 아이디(parentId)가 없는 카테고리다. 경로 리소스가 아니라 본문 참조라 404 가 아니라 400 이다. */
     CATEGORY_PARENT_NOT_FOUND("PRODUCT_044", "상위 카테고리가 존재하지 않습니다.", HttpStatus.BAD_REQUEST),
+    /** 다른 어드민의 카테고리 쓰기가 카테고리 잠금을 쥐고 있어 시간 상한(5초) 안에 끝나지 않았다. 요청끼리 겹친 것이라 503 이 아니다. */
+    CATEGORY_BUSY("PRODUCT_045", "다른 카테고리 변경을 처리 중입니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("PRODUCT_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
