@@ -65,7 +65,7 @@ FULL_RUN_PATHS = [
     '{backend}/gradlew.bat',
     '.github/workflows/backend-ci.yml',
     '.github/scripts/backend-*',
-    # workflow 가 쓰는 로컬 composite action. backend-ci.yml 의 `paths` 에도 있다
+    # 로컬 composite action(지금은 없다 — 생기면 backend-ci 가 쓸 수 있으므로 전체로 본다). backend-ci.yml 의 `paths` 에도 있다
     '.github/actions/*',
 ]
 # 테스트가 읽지 않는 backend 파일. 테스트가 읽게 되면 그 모듈 build.gradle 에 `inputs.file(rootProject.file(...))` 로 선언한다(3단계가 먼저 본다).
@@ -91,13 +91,21 @@ PROJECT_REFERENCE = re.compile(r"""\b(?:project|findProject|evaluationDependsOn)
 SCRIPT_APPLY = re.compile(r"""\bapply\s*\(?\s*from\b""")
 ROOT_FILE_CALL = re.compile(r"""\brootProject\s*\.\s*file\s*\(""")
 ROOT_FILE_INPUT = re.compile(r"""\brootProject\s*\.\s*file\s*\(\s*['"]([^'"\n]+)['"]\s*\)""")
-# 이 스크립트가 경로를 풀 수 없는 모듈 밖 파일 참조. `layout.buildDirectory` 는 모듈 자기 출력이라 뺀다
+# 이 스크립트가 경로를 풀 수 없는 모듈 밖 파일 참조 · 다른 모듈 참조. 나열한 형식만 잡으므로 넓게 둔다 — 걸리면 전체로 가고,
+# 놓치면 테스트가 빠진다. `layout.buildDirectory` 는 모듈 자기 출력이라 뺀다. 루트 build.gradle 의 `project.parent.name` 처럼
+# 이름만 읽는 `.parent` 는 잡지 않는다
 OPAQUE_FILE_REFERENCE = re.compile(
-    r"""\b(?:rootDir|settingsDir|getRootDir|getSettingsDir)\b"""
+    r"""\b(?:rootDir|settingsDir|getRootDir|getSettingsDir|getRootProject|isolated|projectDirectory)\b"""
     r"""|\brootProject\s*\.\s*(?:projectDir|getProjectDir|layout|getLayout|files|fileTree)\b"""
     r"""|\blayout\s*\.(?!\s*buildDirectory\b)"""
     r"""|\bparent\s*\.\s*(?:projectDir|layout|file|files|fileTree)\b"""
+    r"""|\b(?:parentFile|getParentFile)\b|\bgetParent\s*\("""
+    r"""|\bnew\s+File\s*\(|\bPaths\s*\.\s*get\s*\(|\bPath\s*\.\s*of\s*\("""
+    r"""|\bchildProjects\b"""
+    r"""|\$/"""
     r"""|['"][^'"\n]*\.\.[/\\]|['"]\.\.['"]""")
+# GString 보간 안에 큰따옴표가 중첩되면(`"${x.split("//")[0]}"`) 문자열 경계를 잘못 읽어 뒤의 코드를 주석으로 지울 수 있다
+NESTED_GSTRING_QUOTE = re.compile(r'''\$\{[^}\n]*"''')
 # 경로에 이 범주의 문자가 있으면 그대로 믿지 않는다: 제어 · 서식(BOM · 방향 제어 등) · 서로게이트(UTF-8 로 못 읽은 바이트) ·
 # 사용자 정의 · 미할당 · 줄 · 문단 구분
 UNSAFE_CATEGORIES = {'Cc', 'Cf', 'Cs', 'Co', 'Cn', 'Zl', 'Zp'}
@@ -182,9 +190,12 @@ class BuildGraph:
 
 
 def read_code(build_file: Path, name, problems):
-    code, unclosed = scan_code(build_file.read_text(encoding='utf-8-sig'))
+    raw = build_file.read_text(encoding='utf-8-sig')
+    code, unclosed = scan_code(raw)
     if unclosed:
         problems.append('%s 의 %s 이 닫히지 않음' % (name, unclosed))
+    if NESTED_GSTRING_QUOTE.search(raw):
+        problems.append('%s 의 GString 보간 안에 큰따옴표가 중첩됨(문자열 경계를 믿을 수 없음)' % name)
     if SCRIPT_APPLY.search(code):
         problems.append('%s 가 apply from 으로 다른 스크립트를 읽음' % name)
     opaque = OPAQUE_FILE_REFERENCE.search(code)
@@ -262,6 +273,8 @@ def untrusted_path(path):
         return '제어 · 서식 문자가 든 경로'
     if path != path.strip():
         return '앞뒤 공백이 있는 경로'
+    if path.startswith('./') or '\\' in path:
+        return '정규화되지 않은 경로(./ · \\)'
     return None
 
 
