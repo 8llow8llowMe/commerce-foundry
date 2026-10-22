@@ -221,6 +221,38 @@ class SkuInternalProcessorTest {
         assertThat(skus.get(1).optionName()).isEmpty();
     }
 
+    /**
+     * order-service 계약을 바꾸지 않는다 — 삭제 상품의 SKU 를 "없는 SKU" 로 빼지 않고, 숨김 · 판매 종료와 같은 줄(장바구니 STOP_SELLING · 주문서 ORDER_003)로 보낸다.
+     * order-service 는 optionName 이 비면 줄을 끊으므로 은퇴한 옵션의 이름도 그대로 싣는다.
+     */
+    @Test
+    @DisplayName("삭제된 상품의 SKU 도 행을 내리고 purchasable=false · STOP_SELLING 이다 — 은퇴한 옵션 그룹 · 값의 이름도 optionName 에 그대로 싣는다")
+    void deletedProductSkuKeepsRowAndRetiredOptionNames() {
+        given(skuRepositoryPort.findAllByIds(List.of(1L))).willReturn(List.of(ProductFixtures.sku(1, PRODUCT_ID, "5011,9001", 2_000, SaleStatus.ON_SALE)));
+        given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(PRODUCT_ID))).willReturn(List.of(ProductFixtures.deletedProduct(PRODUCT_ID)));
+        given(stockRepositoryPort.findAllBySkuIds(List.of(1L))).willReturn(ProductFixtures.stocks(1));
+        given(productOptionRepositoryPort.findValuesByIds(Set.of(5011L, 9001L))).willReturn(List.of(
+            ProductFixtures.retiredValue(5011, COLOR, PRODUCT_ID, "쪽빛", 1),
+            ProductFixtures.value(9001, SIZE, PRODUCT_ID, "M", 1)
+        ));
+        given(productOptionRepositoryPort.findGroupsByIds(Set.of(COLOR, SIZE))).willReturn(List.of(
+            ProductFixtures.retiredGroup(COLOR, PRODUCT_ID, "색상", 2),
+            ProductFixtures.group(SIZE, PRODUCT_ID, "사이즈", 1)
+        ));
+
+        List<SkuInternalInfo> skus = processor(true).getSkus(List.of(1L));
+
+        assertThat(skus).singleElement().satisfies(sku -> {
+            assertThat(sku.skuId()).isEqualTo(1L);
+            assertThat(sku.purchasable()).isFalse();
+            assertThat(sku.saleStatus()).isEqualTo(SaleAvailability.STOP_SELLING);
+            assertThat(sku.productName()).isEqualTo("상품7");
+            assertThat(sku.salePrice()).isEqualTo(Money.of(ProductFixtures.BASE_PRICE + 2_000, KRW));
+            assertThat(sku.optionValues()).containsExactly(new SkuOptionValueInfo("사이즈", "M"), new SkuOptionValueInfo("색상", "쪽빛"));
+            assertThat(sku.optionName()).isEqualTo("M / 쪽빛");
+        });
+    }
+
     @Test
     @DisplayName("옵션 값이나 그룹이 없으면(데이터 오류) 그 칸만 빼고 나머지는 낸다")
     void skipsMissingValueOrGroup() {

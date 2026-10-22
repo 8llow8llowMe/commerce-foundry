@@ -108,6 +108,6 @@ class DisplayPreviewAdminFacadeTest {
 
     private static Product product(long id, boolean visible) {
         return new Product(id, 1L, "상품", null, null, SaleStatus.ON_SALE, visible, Money.of(39000, CurrencyCode.KRW), null, null,
-            false, null, null, false, null);
+            false, null, null, false, null, 0L, null, null);
     }
 }

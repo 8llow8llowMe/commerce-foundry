@@ -17,6 +17,7 @@ import com.commercefoundry.domainlayer.product.domain.model.SkuStocks;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
@@ -32,6 +33,8 @@ public final class ProductFixtures {
     public static final long CATEGORY_ID = 11L;
     /** {@link #stock} 의 판매 가능 수량. */
     public static final long IN_STOCK_QUANTITY = 10L;
+    /** 삭제 상품 · 은퇴 옵션의 삭제 · 은퇴 시각. */
+    public static final Instant REMOVED_AT = Instant.parse("2026-10-20T00:00:00Z");
 
     private ProductFixtures() {
     }
@@ -43,19 +46,29 @@ public final class ProductFixtures {
 
     /** 대표 카테고리만 다른 상품. */
     public static Product product(long id, long categoryId) {
-        return product(id, categoryId, SaleStatus.ON_SALE, true, false);
+        return product(id, categoryId, SaleStatus.ON_SALE, true, false, null);
     }
 
     public static Product product(long id, SaleStatus saleStatus, boolean visible, boolean customOrder) {
-        return product(id, CATEGORY_ID, saleStatus, visible, customOrder);
+        return product(id, CATEGORY_ID, saleStatus, visible, customOrder, null);
     }
 
-    private static Product product(long id, long categoryId, SaleStatus saleStatus, boolean visible, boolean customOrder) {
+    /** 삭제(soft delete)된 상품 — DB check({@code ck_product_deleted_hidden})가 허용하는 유일한 모양인 숨김 · 판매 종료다. */
+    public static Product deletedProduct(long id) {
+        return deletedProduct(id, SaleStatus.STOP_SELLING, false);
+    }
+
+    /** 삭제 시각만 있고 노출 · 판매 상태는 고른 상품 — DB check 를 비켜 온 행에서도 삭제 조건 하나로 막히는지 볼 때 쓴다. */
+    public static Product deletedProduct(long id, SaleStatus saleStatus, boolean visible) {
+        return product(id, CATEGORY_ID, saleStatus, visible, false, REMOVED_AT);
+    }
+
+    private static Product product(long id, long categoryId, SaleStatus saleStatus, boolean visible, boolean customOrder, Instant deletedAt) {
         return new Product(
             id, categoryId, "상품" + id, "요약" + id, "<p>설명</p>",
             saleStatus, visible, Money.of(BASE_PRICE, KRW), Money.of(LIST_PRICE, KRW), 10,
             customOrder, customOrder ? "제작 착수 후 취소 불가" : null, customOrder ? 14 : null,
-            false, null
+            false, null, 0L, deletedAt, null
         );
     }
 
@@ -65,7 +78,7 @@ public final class ProductFixtures {
             id, CATEGORY_ID, "상품" + id, "요약" + id, "<p>설명</p>",
             SaleStatus.ON_SALE, true, Money.of(BASE_PRICE, KRW), Money.of(LIST_PRICE, KRW), 10,
             false, null, null,
-            true, expectedShipDate
+            true, expectedShipDate, 0L, null, null
         );
     }
 
@@ -100,11 +113,21 @@ public final class ProductFixtures {
     }
 
     public static OptionGroup group(long id, long productId, String name, int displayOrder) {
-        return new OptionGroup(id, productId, name, displayOrder);
+        return new OptionGroup(id, productId, name, displayOrder, null);
+    }
+
+    /** 은퇴한 옵션 그룹. */
+    public static OptionGroup retiredGroup(long id, long productId, String name, int displayOrder) {
+        return new OptionGroup(id, productId, name, displayOrder, REMOVED_AT);
     }
 
     public static OptionValue value(long id, long groupId, long productId, String name, int displayOrder) {
-        return new OptionValue(id, groupId, productId, name, displayOrder);
+        return new OptionValue(id, groupId, productId, name, displayOrder, null);
+    }
+
+    /** 은퇴한 옵션 값. */
+    public static OptionValue retiredValue(long id, long groupId, long productId, String name, int displayOrder) {
+        return new OptionValue(id, groupId, productId, name, displayOrder, REMOVED_AT);
     }
 
     public static ProductImage image(long id, long productId, ImageType imageType, int displayOrder) {

@@ -48,7 +48,7 @@ class ProductTest {
     private static Product product(boolean preorder, LocalDate expectedShipDate) {
         return new Product(
             1L, 11L, "상품", null, null, SaleStatus.ON_SALE, true, Money.of(39_000, KRW), null, null,
-            false, null, null, preorder, expectedShipDate
+            false, null, null, preorder, expectedShipDate, 0L, null, null
         );
     }
 }
