@@ -21,6 +21,10 @@ const NAV: NavGroup[] = [
       { label: '해외 배송비 정책', href: '/shipping-policies/international' },
     ],
   },
+  {
+    title: '회원',
+    items: [{ label: '회원 목록', href: '/members' }],
+  },
 ];
 
 /**
