@@ -76,7 +76,7 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
 ## 3. 쿠키
 
 - `HttpOnly; SameSite=Lax; Path=/`, 운영은 `Secure`.
-- 고객 `cf_at` / `cf_rt`, 어드민 `cf_admin_at` / `cf_admin_rt` — 세션을 섞지 않는다.
+- 고객 `cf_at` / `cf_rt`, 어드민 `cf_admin_at`(refresh 없음, §9) — 세션을 섞지 않는다.
 - 쿠키를 지우는 조건은 **재발급 명시적 거절**(4xx 또는 `success=false`)뿐이다. 재발급 5xx · 연결 실패 · 봉투 아님 ·
   토큰 누락은 일시 장애로 보고 쿠키를 그대로 둔 채 BFF_002 503 을 준다(일시 장애로 세션을 날리지 않는다).
 - **로그인**은 전용 route handler(`app/api/v1/auth/login`, `createLoginHandler`)가 받는다 — 일반 프록시보다 구체적인 경로라 먼저 잡힌다.
@@ -93,7 +93,12 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
   화면이 `/login?signedUp=1&limited=<초>&reason=<코드>` 로 보내 요청 제한 안내를 덧붙이고 로그인 버튼 쿨다운을 처음부터 건다(#184).
   주소 값은 `readLoginRateLimit` 이 거른다 — 초는 1 ~ 3600 정수, 코드는 사전에 있는 것만(아니면 "잠시 후" · 일반 문구).
   fieldErrors 의 동의 칸은 `agreements.termsOfService` 처럼 중첩 경로다. 비밀번호 확인 칸은 BE 에 없어 화면에서만 본다.
-- 고객 쿠키 이름 `cf_at` / `cf_rt` 와 대체 수명(30분 / 14일, BE 설정과 같다)은 `apps/storefront/src/lib/auth-cookies.ts`. 어드민은 #29 에서 정한다.
+- 고객 쿠키 이름 `cf_at` / `cf_rt` 와 대체 수명(30분 / 14일, BE 설정과 같다)은 `apps/storefront/src/lib/auth-cookies.ts`.
+  어드민은 `apps/admin/src/lib/auth-cookies.ts` — `cf_admin_at` 하나, 대체 수명 30분이다(#204, §9).
+- **토큰을 주는 인증 경로는 전용 route handler 만 받는다** — 로그인 · 관리자 로그인 · 재발급 · 로그아웃 · 가입(`DEDICATED_AUTH_PATHS`)은 일반 프록시가 404 `BFF_001` 로 막는다
+  (대소문자 · 끝 슬래시 · 퍼센트 인코딩 변형 포함). 전용 핸들러가 없는 앱(스토어프론트의 관리자 로그인, 어드민의 고객 로그인 · 재발급)에서 토큰이 JS 로 새지 않게 한다.
+- **refresh 쿠키가 없는 설정**(`AuthCookieConfig.refreshName: null`)이면 프록시 · 로그아웃은 refresh 쿠키를 읽지 않고(같은 이름 쿠키가 와도 무시) 재발급하지 않는다
+  — 401 은 그대로 중계하고, 로그아웃은 Bearer + 본문 `{}` 로 access 만 막는다(BE `LogoutRequest.refreshToken` 은 선택). 쿠키 정리도 access 하나다.
 - 인증 계약은 BE PR #99 기준이다(머지 전): 재발급 `{ refreshToken }` → 로그인과 같은 모양. 로그인 · 재발급 모두 응답의 `*ExpiresIn` 을
   `TokenPair` 에 실어(`readTokenPair`) 쿠키 수명으로 쓴다(`issueCookies`). 없으면 앱 설정값이다.
 - **로그아웃**은 전용 route handler(`app/api/v1/auth/logout`, `createLogoutHandler`)다 — refresh 는 httpOnly 쿠키라 일반 프록시로는 본문에 실을 수 없다.
@@ -218,11 +223,27 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 ## 9. 어드민 콘솔 (#187)
 
 - **화면 틀** — 콘솔 화면은 `app/(console)/` 아래에 두고 `AdminShell`(상단 바 · 왼쪽 메뉴 · 본문)을 같이 쓴다. 메뉴는 `AdminShell` 의 `NAV` 한 곳에서 더한다
-  (화면이 아직 없으면 `href` 없이 "준비 중"). 어드민 로그인 화면(#29)은 이 그룹 밖에 둔다. 어드민은 국문만이고 i18n 사전을 두지 않는다.
-- **읽기 · 쓰기는 클라이언트에서 BFF 로** — 편집 화면은 `apiFetch` 로 같은 origin BFF(`app/api/[...path]`, 어드민 쿠키 `cf_admin_*`)를 부른다.
-  재발급 · CSRF 규칙은 스토어프론트와 같다(§2).
-- **401 · 403 은 오류가 아니라 상태다** — `accessDeniedOf` 로 가르고 `AccessNotice`("관리자 로그인이 필요합니다" · "관리자 권한이 없습니다")를 그린다.
-  어드민 로그인(#29 · BE #6) 전에는 모든 어드민 API 가 401 이라 화면도 이 안내다.
+  (화면이 아직 없으면 `href` 없이 "준비 중"). 로그인 화면(`app/login`)은 이 그룹 밖이다. 상단 바에 로그아웃이 있다. 어드민은 국문만이고 i18n 사전을 두지 않는다.
+- **읽기 · 쓰기는 클라이언트에서 BFF 로** — 편집 화면은 `apiFetch` 로 같은 origin BFF(`app/api/[...path]`, 어드민 쿠키 `cf_admin_at`)를 부른다.
+  CSRF 규칙은 스토어프론트와 같고(§2), 재발급은 하지 않는다(§3 refresh 쿠키가 없는 설정).
+- **401 · 403 은 오류가 아니라 상태다** — `accessDeniedOf` 로 가르고 `AccessNotice` 를 그린다. 401(세션 끝 — 만료 · 로그아웃 · 차단)이면
+  지금 경로를 `next` 로 붙인 로그인 화면으로 바로 보낸다(이동이 늦어도 누를 수 있게 로그인 링크를 같이 둔다). 403(ADMIN 아닌 토큰)은 "관리자 권한이 없습니다" 안내와 로그인 링크만 둔다.
+  **저장(쓰기) 중 401 은 예외다** — 세션이 30분뿐이라 폼을 오래 쓰면 생기는데, 로그인 화면으로 보내면 입력이 사라진다. 폼을 그대로 두고
+  `SESSION_EXPIRED_ON_SAVE`("새 탭에서 다시 로그인한 뒤 저장해 주세요")를 폼 전체 오류로 둔다. 401 은 서버가 처리하지 않은 요청이라 다시 저장해도 안전하다.
+
+### 로그인 · 세션 (`/login`, #204)
+
+- **세션은 access 토큰 하나다** — 관리자 로그인 `POST /api/v1/auth/admin/login`(BE #191)은 `{ accessToken, accessTokenExpiresIn }` 만 주고 refresh 를 주지 않는다.
+  BFF 전용 route handler(`app/api/v1/auth/admin/login`, `createAdminLoginHandler`)가 `cf_admin_at` 하나를 응답 수명으로 심고, 브라우저에는 토큰 없는 성공 봉투만 준다.
+  만료되면(기본 30분) 다시 로그인한다 — 프록시는 재발급하지 않는다(§3 refresh 쿠키가 없는 설정).
+- **진입 확인** — `src/proxy.ts` 가 `cf_admin_at` 쿠키가 없으면 `/login?next=<경로>` 로 보낸다(`/api` · `/_next` · 정적 파일 · `/login` 은 제외).
+  쿠키 수명이 토큰 수명이라 만료된 세션은 다음 화면 이동에서 여기 걸린다. 쿠키가 있어도 토큰이 무효일 수 있어(로그아웃 · 차단) 그때는 API 401 → `AccessNotice` 가 보낸다.
+  토큰 유효성 · 권한의 정본은 게이트웨이 · BE 다.
+- **`next`** 는 `safeReturnPath`(`lib/auth/return-path.ts`)로 거른다 — 같은 사이트 경로만, `//` · 역슬래시 · 제어 문자 · `/login` · `/api/` 는 콘솔 홈으로.
+- **로그인 실패** — 400 `AUTH_030`(이메일 없음 · 비밀번호 틀림 · 고객 계정 모두)은 칸을 짚지 않는 서버 문구 하나, 필드 검증(`AUTH_130~132`)은 그 칸에,
+  429 는 남은 시간 안내, 그 밖은 한 문구다(`loginErrors`). 어드민은 국문만이라 서버 문구를 그대로 쓴다.
+- **로그아웃** — 상단 바 버튼이 `POST /api/v1/auth/logout`(`createLogoutHandler`, Bearer + `{}`)을 부르고 `/login` 으로 간다.
+  BFF 는 서버 결과와 무관하게 쿠키를 지우고 200 이다. 요청 자체가 실패하면(연결 끊김) 쿠키가 남으므로 이동하지 않고 버튼 옆에 알린다.
 - **오류를 칸에 붙인다** — 서버 fieldErrors 의 `field`(요청 본문 경로)를 `fieldKey` 로 폼 칸 키로 바꾼다.
   `remoteAreas[0].surcharge.amount` → `remoteAreas.0.surcharge`(금액은 amount · currency 를 한 칸으로), `zones[0].countryCodes[2]` → `zones.0.countryCodes`(목록 원소는 목록 칸으로).
   줄을 알려 주지 않는 도메인 오류는 그 묶음 칸에 붙이고, 문구는 서버 문구를 쓴다. 폼이 그리지 않는 키(`request` 등)와 모르는 오류 · 연결 실패는
