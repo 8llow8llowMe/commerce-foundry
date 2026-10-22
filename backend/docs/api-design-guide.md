@@ -396,7 +396,8 @@ return ResponseEntity.ok().body(Response.success(response));
   자기 자신이나 자기 하위를 상위로 지정하면 `PRODUCT_041` 이다. 상위를 그대로 두는 수정(이름 · 순서 · 노출)은 깊이 · 순환을 다시 보지 않는다.
 - **없는 상위** — 본문의 `parentId` 가 없는 카테고리면 404 가 아니라 400 `PRODUCT_044` 다. 경로 리소스가 아니라 본문 참조라서다(§2-2).
 - **삭제** — 하위 카테고리가 있으면 409 `PRODUCT_042`, 상품의 대표(`product.category_id`) · 진열(`product_category`) 카테고리로 쓰이면 숨김 · 판매 종료 상품까지 세어
-  409 `PRODUCT_043` 이다. 진열 연결을 자동으로 풀지 않는다. 메뉴에서만 감추려면 삭제 대신 `visible=false` 로 수정한다 — 하위까지 메뉴에서 빠지고 상품 노출은 막지 않는다.
+  409 `PRODUCT_043` 이다. 삭제(soft delete, §2-13)된 상품은 세지 않는다 — 삭제 상품만 연결된 카테고리는 지울 수 있고, 그 뒤 삭제 상품의 대표 · 진열 카테고리는
+  없는 카테고리를 가리킬 수 있다(삭제 상품은 어느 목록에도 나오지 않고 v1 에 복구가 없어 받아들인다). 진열 연결을 자동으로 풀지 않는다. 메뉴에서만 감추려면 삭제 대신 `visible=false` 로 수정한다 — 하위까지 메뉴에서 빠지고 상품 노출은 막지 않는다.
   삭제는 행을 지운다(soft delete 아님). 성공 뒤 같은 요청을 다시 보내면 404 다.
 - **숨김과 상품 상세 breadcrumb (#164)** — 고객 상품 상세의 `categoryPath` 는 메뉴(`GET /api/v1/categories`)와 **같은 규칙**이다. 최상위부터 따라가다 처음 숨긴
   카테고리에서 끊고, 그 아래는 보이는 카테고리여도 내지 않는다 — 메뉴로 갈 수 없는 카테고리 이름을 드러내지 않는다. 대표 카테고리 자체나 그 위가 숨김이면 그 위까지만,
@@ -416,13 +417,14 @@ return ResponseEntity.ok().body(Response.success(response));
 ### 2-6. 어드민 상품 목록 (product-service, #9)
 
 `GET /api/v1/admin/products` — `hasRole('ADMIN')`. 고객 목록(`GET /api/v1/products` — 숨김 제외 `SliceResponse`)과 DTO 를 공유하지 않는다.
+삭제(soft delete, §2-13)된 상품은 **늘 뺀다** — 어떤 파라미터로도 볼 수 없다(필터 없음).
 
 | 파라미터 | 값 | 오류 |
 |----------|----|------|
 | `keyword` | 상품명 부분 일치 · 대소문자 무시. 원문 100자 이하, 앞뒤 공백을 빼고 비면 조건 없음. `%` · `_` 는 글자로 찾는다 | 400 `PRODUCT_139` |
 | `categoryId` | 진열 카테고리 — **하위 포함**(숨긴 카테고리 포함, 고객 목록과 같다). 없는 카테고리면 빈 페이지(`totalElements` 0) | 400 `PRODUCT_137` · `198` |
 | `saleStatus` | 저장된 판매 상태 `ON_SALE` · `STOP_SELLING` | 400 `PRODUCT_198` |
-| `visible` | `true` · `false`. **없으면 숨김 포함 전체** | 400 `PRODUCT_198` |
+| `visible` | `true` · `false`. **없으면 숨김 포함 전체**(삭제 상품은 빼고) | 400 `PRODUCT_198` |
 | `availability` | 재고를 반영한 판매 가능 상태 `ON_SALE` · `SOLD_OUT` · `STOP_SELLING` — 아래 규칙 | 400 `PRODUCT_198` |
 | `sortType` | `NEWEST`(기본, 아이디 내림차순) · `NAME_ASC`(상품명 오름차순, DB collation). 동률은 아이디 내림차순 | 400 `PRODUCT_198` |
 | `page` · `size` | 기본 0 · 20, size 1~100 (§4) | 400 `PRODUCT_101` · `102` |
@@ -439,7 +441,7 @@ return ResponseEntity.ok().body(Response.success(response));
   첫 페이지가 다 차지 않으면 count 를 건너뛴다(`PageableExecutionUtils`). 조건은 product 행 기준 EXISTS(카테고리 · SKU · 재고)라 JOIN 으로 행이 겹치지 않는다.
   인덱스는 추가하지 않았다 — 카테고리 EXISTS 는 `idx_product_category_category_id_product_id`, SKU EXISTS 는 `uk_sku_product_id_option_value_key` 선두, 재고는 PK 를 탄다.
   상품명 부분 일치(`lower(name) like '%…%'`)와 이름순은 product 스캔 · 정렬이다(어드민 전용, 상품 수 규모에서 수용).
-- 삭제(soft delete, #9 PR-D)가 생기면 삭제 상품 제외 조건을 `ProductCustomRepositoryImpl#searchForAdmin` 의 조건 배열에 더한다.
+- **삭제 제외** — `deleted_at is null` 을 `ProductCustomRepositoryImpl#searchForAdmin` 의 조건 배열(목록 · count 공용)에 건다. 전체 건수에도 들지 않는다.
 - 계층 — `ProductAdminController` → `ProductAdminUseCase` → `ProductAdminFacade`(읽기 전용 트랜잭션, 카테고리 하위 펼치기는 `CategoryProcessor.subtreeIdsOf`)
   → `ProductAdminQueryProcessor` → `ProductRepositoryPort#searchForAdmin`. 컨트롤러는 domain enum 을 쓰지 않으므로(H1) 판매 상태 · 판매 가능 상태 · 정렬은
   `application/model` 의 입력 enum(`ProductSaleStatusFilter` · `ProductAvailabilityFilter` · `ProductAdminSortType`)으로 받고 Processor 가 domain 으로 바꾼다.
@@ -653,6 +655,30 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   `PRODUCT_1xx` 검증 대역이 차서 컨텍스트 접두어 `SKU_COST_` 를 새로 열었다(룩 §2-11 과 같다, `coding-conventions.md` §8-2). 깨진 JSON · 타입 불일치 · 필수 파라미터는 서비스 공용 `PRODUCT_100` · `198` · `199`,
   page · size 는 서비스 공용 `PRODUCT_101` · `PRODUCT_102` 다. 오류 메시지 · 로그에 금액을 넣지 않는다.
 - **게이트웨이**: 새 접두어 `/api/v1/admin/skus/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 서비스 간 시점 원가 벌크 조회(`/internal/v1/sku-costs/query`)는 #361 PR-B 다.
+
+### 2-13. 상품 삭제 (soft delete) · 옵션 은퇴 (product-service, #9)
+
+상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
+`ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다
+(주문 · 장바구니가 계속 읽는다). **v1 에는 복구 기능이 없다** — 되살리려면 운영 SQL 이다. 삭제 API 는 #9 PR-E2 에서 연다.
+
+| 경로 | 삭제 상품 |
+|------|-----------|
+| 고객 상세 `GET /api/v1/products/{productId}` | 404 `PRODUCT_001` — 숨김과 같다(존재를 드러내지 않는다, §2-2) |
+| 고객 목록 `GET /api/v1/products` | 뺀다 |
+| 어드민 목록 `GET /api/v1/admin/products` | 늘 뺀다 — 필터 없음(§2-6) |
+| 서비스 간 SKU 조회 `GET /internal/v1/skus` | **행을 그대로 낸다** — `purchasable=false`, `saleStatus=STOP_SELLING`. "없는 SKU" 로 빼지 않는다 — order-service 는 숨김 · 판매 종료와 같은 줄로 다룬다(`order-flow-guide.md` §2-1 · §2-3) |
+| 재고 선점 `POST /internal/v1/stock-reservations` | 409 `PRODUCT_022` (`order-flow-guide.md` §3) |
+| 어드민 카테고리 삭제의 연결 상품 판정 | 세지 않는다(§2-5) |
+
+- **판정은 한 곳이다** — 서비스 간 SKU 의 `purchasable` 과 재고 선점의 판매 불가는 `SaleAvailability.isOpenForSale`(삭제 안 됨 · 노출 · 상품 판매중 · SKU 판매중)이 정한다.
+  두 경로가 상품을 읽는 `ProductRepositoryPort#findAllByIdsIncludingHidden` 은 숨김 · 삭제 상품을 거르지 않는다. 고객 조회는 check 에 기대지 않고 삭제 조건을 명시한다
+  (`ProductCustomRepositoryImpl#visibleToCustomer`).
+- **옵션 은퇴** — 옵션 그룹 · 값에 `retired_at` 이 있다(쓰기는 #9 PR-E2). 고객 상세는 은퇴한 그룹 · 값과, 은퇴 값(은퇴 그룹의 값 포함)을 하나라도 쓰는 SKU 를 빼고
+  상단 가격 · 판매 상태도 남은 SKU 로 계산한다. 살아 있는 값만 쓰는 판매 종료 SKU 는 그대로 보인다. 서비스 간 SKU 조회는 은퇴 값의 이름을 그대로 낸다 —
+  order-service 는 `optionName` 이 비면 줄을 끊는다. 고객 목록의 SKU 집계는 은퇴를 보지 않는다 — "은퇴 값을 쓰는 SKU 는 판매 종료" 를 쓰기(E2)가 보장한다.
+- **버전** — `product.version`(`@Version`)은 어드민 수정의 낙관적 락이다(#9 PR-E2). 고객 응답에는 버전 · 삭제 · 은퇴 칸을 싣지 않는다 —
+  고객 응답 칸은 `ProductWebResponseComponentsTest` 가 허용 목록으로 고정한다(`architecture-guide.md` §2).
 
 ## 3. 계층 흐름
 
