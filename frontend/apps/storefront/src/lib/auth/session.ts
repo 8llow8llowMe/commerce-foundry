@@ -8,5 +8,6 @@ import { authCookies } from '@/lib/auth-cookies';
  */
 export async function hasSession(): Promise<boolean> {
   const store = await cookies();
-  return store.has(authCookies.accessName) || store.has(authCookies.refreshName);
+  const { accessName, refreshName } = authCookies;
+  return store.has(accessName) || (refreshName !== null && store.has(refreshName));
 }

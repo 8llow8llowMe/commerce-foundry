@@ -151,4 +151,50 @@ describe('createLogoutHandler', () => {
       expect(new Headers(init?.headers).get('x-forwarded-for')).toBe('203.0.113.7');
     }
   });
+
+  describe('refresh 쿠키가 없는 설정(어드민)', () => {
+    const adminHandlerWith = (fetchImpl: typeof fetch) =>
+      createLogoutHandler({
+        gatewayUrl: GATEWAY,
+        cookies: {
+          accessName: 'cf_admin_at',
+          refreshName: null,
+          accessMaxAgeSec: 1800,
+          secure: false,
+        },
+        fetch: fetchImpl,
+      });
+
+    it('access 를 Bearer 로, 본문은 {} 로 보내고 access 쿠키만 지운다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true));
+      const res = await adminHandlerWith(fetchImpl)(logout('cf_admin_at=admin-1; cf_rt=refresh-1'));
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(urlOf(fetchImpl.mock.calls[0]![0])).toBe(`${GATEWAY}${LOGOUT_PATH}`);
+      expect(authOf(fetchImpl.mock.calls[0]![1])).toBe('Bearer admin-1');
+      expect(bodyOf(fetchImpl.mock.calls[0]![1])).toEqual({});
+      expect(res.status).toBe(200);
+      expect(res.headers.getSetCookie()).toEqual([
+        'cf_admin_at=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0',
+      ]);
+    });
+
+    it('401 이어도 재발급하지 않는다', async () => {
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(envelope(401, false, null, 'SECURITY_001'));
+      const res = await adminHandlerWith(fetchImpl)(logout('cf_admin_at=expired'));
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(200);
+    });
+
+    it('access 쿠키도 없으면 게이트웨이를 부르지 않고 쿠키만 지운다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>();
+      const res = await adminHandlerWith(fetchImpl)(logout(null));
+
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+    });
+  });
 });

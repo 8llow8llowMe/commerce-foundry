@@ -100,13 +100,14 @@ export function readTokenPair(body: unknown): TokenPair | null {
   const value = body as Record<string, unknown>;
   if (typeof value.accessToken !== 'string' || typeof value.refreshToken !== 'string') return null;
   const pair: TokenPair = { accessToken: value.accessToken, refreshToken: value.refreshToken };
-  const access = lifetime(value.accessTokenExpiresIn);
-  const refresh = lifetime(value.refreshTokenExpiresIn);
+  const access = readLifetime(value.accessTokenExpiresIn);
+  const refresh = readLifetime(value.refreshTokenExpiresIn);
   if (access !== undefined) pair.accessTokenExpiresIn = access;
   if (refresh !== undefined) pair.refreshTokenExpiresIn = refresh;
   return pair;
 }
 
-function lifetime(value: unknown): number | undefined {
+/** 토큰 수명(초). 양의 정수일 때만 값이다 */
+export function readLifetime(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }

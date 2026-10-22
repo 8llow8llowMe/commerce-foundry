@@ -1,12 +1,28 @@
-// 인증 쿠키 이름·수명은 앱이 넘긴다. 정확한 값은 #25(고객) · #29(어드민)에서 확정한다.
-export type AuthCookieConfig = {
+// 인증 쿠키 이름·수명은 앱이 넘긴다. 고객은 #25, 어드민은 #204 에서 정했다.
+type AccessCookie = {
   accessName: string;
-  refreshName: string;
   accessMaxAgeSec: number;
-  refreshMaxAgeSec: number;
   /** 운영(https)에서는 true. 로컬 http 에서는 false. */
   secure: boolean;
 };
+
+/**
+ * refresh 쿠키가 있으면(고객) BFF 가 재발급한다. `refreshName: null`(어드민 — 관리자 로그인은 refresh 를 주지 않는다, BE #191)이면
+ * access 하나가 세션의 전부다 — 프록시 · 로그아웃은 refresh 쿠키를 읽지도 재발급하지도 않는다.
+ */
+export type AuthCookieConfig = AccessCookie &
+  (
+    | { refreshName: string; refreshMaxAgeSec: number }
+    | { refreshName: null; refreshMaxAgeSec?: undefined }
+  );
+
+/** 설정에 refresh 쿠키가 없으면 null — 요청에 같은 이름의 쿠키가 있어도 보지 않는다 */
+export function readRefreshCookie(
+  cookieHeader: string | null,
+  config: AuthCookieConfig,
+): string | null {
+  return config.refreshName === null ? null : readCookie(cookieHeader, config.refreshName);
+}
 
 export function readCookie(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) return null;

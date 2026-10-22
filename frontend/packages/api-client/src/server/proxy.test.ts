@@ -51,6 +51,37 @@ describe('createProxyHandler', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it.each([
+    '/api/v1/auth/login',
+    '/api/v1/auth/admin/login',
+    '/api/v1/auth/token/reissue',
+    '/api/v1/auth/logout',
+    '/api/v1/auth/sign-up',
+    '/api/v1/auth/admin/login/',
+    '/api/v1/AUTH/Admin/Login',
+    '/api/v1/auth/admin%2Flogin',
+    '/api/v1/auth//login',
+    '/api/v1/auth/login;x',
+    '/api/v1/auth/%E0%A4%A',
+  ])(
+    '토큰을 주는 인증 경로 %s 는 전용 핸들러만 받는다 — 게이트웨이로 보내지 않고 BFF_001 404 다',
+    async (path) => {
+      const fetchImpl = vi.fn<typeof fetch>();
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(
+        request(path, { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } }),
+      );
+
+      expect(res.status).toBe(404);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
   it('경로·쿼리·메서드·본문을 유지하고, 허용 헤더만 넘기고, 쿠키를 Authorization 으로 바꾼다', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, { ok: 1 }));
     const handler = createProxyHandler({
@@ -602,6 +633,49 @@ describe('createProxyHandler', () => {
       );
 
       expect([post.status, get.status]).toEqual([200, 200]);
+    });
+  });
+
+  describe('refresh 쿠키가 없는 설정(어드민)', () => {
+    const ADMIN_COOKIES: AuthCookieConfig = {
+      accessName: 'cf_admin_at',
+      refreshName: null,
+      accessMaxAgeSec: 1800,
+      secure: false,
+    };
+
+    it('401 이어도 재발급하지 않고 그대로 중계한다 — 같은 이름의 refresh 쿠키가 있어도 보지 않는다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(unauthorized());
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: ADMIN_COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(
+        request('/api/v1/admin/stocks', { cookie: 'cf_admin_at=expired; cf_rt=refresh-1' }),
+      );
+
+      expect(res.status).toBe(401);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(urlOf(fetchImpl.mock.calls[0]![0])).not.toContain(REISSUE_PATH);
+      expect(authOf(fetchImpl.mock.calls[0]![1])).toBe('Bearer expired');
+      expect(res.headers.getSetCookie()).toEqual([]);
+    });
+
+    it('access 쿠키가 없으면 토큰 없이 보낸다', async () => {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(unauthorized());
+      const handler = createProxyHandler({
+        gatewayUrl: GATEWAY,
+        cookies: ADMIN_COOKIES,
+        fetch: fetchImpl,
+      });
+
+      const res = await handler(request('/api/v1/admin/stocks'));
+
+      expect(res.status).toBe(401);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(authOf(fetchImpl.mock.calls[0]![1])).toBeNull();
     });
   });
 });
