@@ -206,7 +206,6 @@ export const ko = {
     exceeded: '최대 {count}개까지 주문할 수 있어 합계에서 빠졌습니다.',
     excluded: '합계에서 빠집니다.',
     checkout: '주문하기',
-    checkoutPending: '주문하기는 준비 중입니다.',
     guestNotice: '로그인하면 담은 상품이 회원 장바구니로 옮겨지고 주문 금액을 확인할 수 있습니다.',
     login: '로그인하고 주문하기',
     productUnavailable: '판매하지 않는 상품입니다.',
@@ -218,6 +217,80 @@ export const ko = {
     /** 회원 장바구니 조회가 401 — 세션이 끝났다 */
     signInRequired: '로그인이 만료되었습니다. 다시 로그인해 주세요.',
     dismiss: '닫기',
+  },
+  /** 주문서(#26) — 금액은 서버 견적 값이다 */
+  checkout: {
+    title: '주문서',
+    loading: '주문서를 불러오는 중입니다.',
+    loadFailed: '주문서를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    reload: '다시 불러오기',
+    /** 장바구니 · 배송지 · 견적 API 가 401 — 세션이 끝났다 */
+    signInRequired: '로그인이 만료되었습니다. 다시 로그인해 주세요.',
+    login: '로그인',
+    destination: '배송지',
+    /** 배송지 고르기 라디오 묶음 이름 */
+    chooseAddress: '배송지 선택',
+    noSavedAddress: '저장한 배송지가 없습니다. 이 주문의 배송지를 입력해 주세요.',
+    newAddress: '새 배송지 입력',
+    newAddressTitle: '새 배송지',
+    /** 새로 입력한 배송지는 이 주문에만 쓴다 */
+    newAddressNote: '이 주문에만 쓰고 배송지 목록에는 저장하지 않습니다.',
+    useAddress: '이 배송지 사용',
+    editNewAddress: '수정',
+    manageAddresses: '배송지 관리',
+    items: '주문 상품',
+    /** {count}: 수량 */
+    quantity: '수량 {count}',
+    /** {count}: 주문서에서 뺀 장바구니 줄 수 */
+    excluded:
+      '구매할 수 없거나 한 번에 주문할 수 있는 수량을 넘은 상품 {count}개는 주문서에서 빠졌습니다.',
+    backToCart: '장바구니로 돌아가기',
+    noLines: '주문할 수 있는 상품이 없습니다.',
+    amounts: '결제 금액',
+    itemsAmount: '상품 합계',
+    shippingFee: '배송비',
+    totalAmount: '총 결제 금액',
+    freeShipping: '무료배송',
+    baseFee: '기본 배송비 {amount}',
+    /** {amount}: 무료배송 기준 */
+    freeShippingThreshold: '{amount} 이상 무료배송',
+    /** {name}: 도서산간 구간 이름, {amount}: 추가금 */
+    remoteArea: '도서산간 추가 {amount} ({name})',
+    remoteAreaUnnamed: '도서산간 추가 {amount}',
+    /** {zone}: 해외 국가 그룹 이름, {amount}: 무게 요금 */
+    weightFee: '무게 요금 {amount} ({zone})',
+    weightFeeUnnamed: '무게 요금 {amount}',
+    selectDestination: '배송지를 고르면 배송비와 결제 금액을 계산합니다.',
+    calculating: '금액을 계산하는 중입니다.',
+    recalculate: '다시 계산',
+    quoteFailed: '금액을 계산하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    cartInvalid: '장바구니 상품 정보를 확인할 수 없습니다. 장바구니를 확인해 주세요.',
+    destinationInvalid: '이 배송지로는 금액을 계산할 수 없습니다. 배송지를 확인해 주세요.',
+    /** 배송지 실패일 때 금액 칸 — 배송지를 바꾸거나 고치면 다시 계산한다 */
+    destinationRetry: '배송지를 바꾸거나 고치면 다시 계산합니다.',
+    /** 금액이 바뀌었을 때 스크린리더 안내. {amount}: 총 결제 금액 */
+    totalAnnounce: '총 결제 금액 {amount}',
+    /** 주문 생성은 BE #13 D2 뒤에 붙인다 */
+    placeOrder: '주문하기',
+    placeOrderPending: '주문하기는 준비 중입니다. 지금은 결제 금액만 확인할 수 있습니다.',
+    /**
+     * 견적 오류 코드별 문구. 상품 이름 목록이 붙는 코드(ORDER_003 · 004 · 005 · 007 · 008)는 국문에서 비워 서버 문구(이름 포함)를 쓴다.
+     * 없는 코드는 서버 문구다.
+     */
+    errors: {
+      ORDER_002: '상품 정보를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.',
+      ORDER_006: '통화가 다른 상품은 함께 주문할 수 없습니다. 장바구니를 확인해 주세요.',
+      ORDER_011: '배송비를 잠시 계산할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+      ORDER_012: '지금은 이 배송지로 주문할 수 없습니다. 고객센터에 문의해 주세요.',
+      ORDER_013: '배송할 수 없는 국가입니다. 다른 배송지를 골라 주세요.',
+      ORDER_014: '이 스토어의 통화로는 이 배송지에 배송할 수 없습니다. 다른 배송지를 골라 주세요.',
+      ORDER_015: '배송할 수 있는 무게를 넘었습니다. 주문 수량을 줄여 주세요.',
+      ORDER_121: '배송지의 국가를 확인해 주세요.',
+      ORDER_122: '배송지의 국가를 확인해 주세요.',
+      ORDER_123: '국내 배송지는 우편번호가 필요합니다. 배송지를 수정해 주세요.',
+      ORDER_124: '우편번호 형식이 올바르지 않습니다. 국내는 숫자 5자리입니다.',
+      GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 계산해 주세요.',
+    } as Record<string, string>,
   },
   account: {
     title: '마이페이지',

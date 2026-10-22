@@ -8,11 +8,9 @@ import { useDictionary, useFormatMoney } from '@/components/i18n/LocaleProvider'
 import { Link } from '@/components/i18n/Link';
 import { cartErrorText } from '@/lib/cart/cart-errors';
 import { memberLineView } from '@/lib/cart/line-view';
-import type { CartResponse } from '@/lib/cart/types';
+import { CART_PATH, type CartResponse } from '@/lib/cart/types';
 import { useRetryCooldown } from '@/lib/use-retry-cooldown';
 import { CartLineItem } from './CartLineItem';
-
-const CART_PATH = '/api/v1/carts/me';
 
 /**
  * 회원 장바구니(`/api/v1/carts/me`). 가격 · 상태 · 합계는 조회 시점의 서버 값이고, 수량 변경 · 삭제는 갱신된 장바구니 전체를 돌려받아 바꿔 끼운다.
@@ -146,13 +144,19 @@ export function MemberCart({
           {freeShipping && <p>{freeShipping}</p>}
           <p>{t.totalNote}</p>
         </div>
-        {/* 주문서 · 주문 생성은 주문 API(#13) 뒤에 붙인다 */}
-        <Button disabled className="h-12 w-full" aria-describedby="checkout-pending">
-          {t.checkout}
-        </Button>
-        <p id="checkout-pending" className="text-center text-xs text-muted-fg">
-          {t.checkoutPending}
-        </p>
+        {/* 주문서는 구매 가능한 줄만 견적한다 — 그런 줄이 없으면 갈 곳이 없다. 주문 생성은 주문서에서(BE #13 D2 뒤) */}
+        {cart.purchasableCount > 0 ? (
+          <Link
+            href="/checkout"
+            className="inline-flex h-12 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-fg transition hover:opacity-90"
+          >
+            {t.checkout}
+          </Link>
+        ) : (
+          <Button disabled className="h-12 w-full">
+            {t.checkout}
+          </Button>
+        )}
       </div>
     </div>
   );
