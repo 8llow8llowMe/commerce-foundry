@@ -4,7 +4,7 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**"],
-      "env": ["GATEWAY_URL", "NEXT_PUBLIC_SITE_URL"]
+      "env": ["GATEWAY_URL", "NEXT_PUBLIC_SITE_URL", "LOCALE_HOSTS", "BUSINESS_*"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
