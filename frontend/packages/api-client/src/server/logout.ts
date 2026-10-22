@@ -1,6 +1,6 @@
 import type { ApiEnvelope } from '../envelope';
 import { resolveClientIp, setClientIp } from './client-ip';
-import { readCookie, type AuthCookieConfig } from './cookies';
+import { readCookie, readRefreshCookie, type AuthCookieConfig } from './cookies';
 import { crossSite, noStore } from './login';
 import { clearCookies, isSameOrigin } from './proxy';
 import { reissueTokens } from './reissue';
@@ -22,6 +22,7 @@ export const LOGOUT_PATH = '/api/v1/auth/logout';
  * access 가 만료됐으면(401 · 쿠키 없음) 재발급한 뒤 한 번 다시 부른다 — 그러지 않으면 서버의 refresh family 가 지워지지 않고 남는다.
  * 서버 결과와 무관하게 쿠키를 지우고 200 이다: 사용자가 로그아웃을 눌렀으면 이 브라우저는 로그아웃돼야 한다.
  * 서버 쪽 정리가 실패해도(503 AUTH_013 · 연결 실패) access 는 길어야 수명만큼, refresh 는 이 브라우저에서 사라진다.
+ * refresh 쿠키가 없는 설정(어드민)이면 본문 `{}` 으로 access 만 막고(BE `LogoutRequest.refreshToken` 은 선택), 재발급하지 않는다.
  */
 export function createLogoutHandler(
   options: LogoutHandlerOptions,
@@ -35,7 +36,7 @@ export function createLogoutHandler(
 
     const cookieHeader = request.headers.get('cookie');
     const accessToken = readCookie(cookieHeader, cookies.accessName);
-    const refreshToken = readCookie(cookieHeader, cookies.refreshName);
+    const refreshToken = readRefreshCookie(cookieHeader, cookies);
     const clientIp = resolveClientIp(request, options.clientIpHeader);
 
     const send = (access: string, refresh: string | null) =>

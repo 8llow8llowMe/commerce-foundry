@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api-error';
 import { unwrap } from '../unwrap';
 import type { AuthCookieConfig } from './cookies';
-import { LOGIN_PATH, createLoginHandler } from './login';
+import { ADMIN_LOGIN_PATH, LOGIN_PATH, createAdminLoginHandler, createLoginHandler } from './login';
 
 const GATEWAY = 'http://gateway.test:8000';
 const COOKIES: AuthCookieConfig = {
@@ -147,5 +147,79 @@ describe('createLoginHandler', () => {
     expect(new Headers(fetchImpl.mock.calls[0]![1]?.headers).get('x-forwarded-for')).toBe(
       '203.0.113.7',
     );
+  });
+});
+
+describe('createAdminLoginHandler', () => {
+  const ADMIN_COOKIES: AuthCookieConfig = {
+    accessName: 'cf_admin_at',
+    refreshName: null,
+    accessMaxAgeSec: 1800,
+    secure: false,
+  };
+  const adminLogin = (headers: Record<string, string> = { 'sec-fetch-site': 'same-origin' }) =>
+    new Request(`http://localhost:3001${ADMIN_LOGIN_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ email: 'admin@test.com', password: 'pw' }),
+    });
+  const adminHandlerWith = (fetchImpl: typeof fetch) =>
+    createAdminLoginHandler({ gatewayUrl: GATEWAY, cookies: ADMIN_COOKIES, fetch: fetchImpl });
+
+  it('관리자 로그인 경로를 부르고 access 쿠키 하나만 서버가 준 수명으로 심는다', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        envelope(200, true, { accessToken: 'admin-1', accessTokenExpiresIn: 1200 }),
+      );
+    const res = await adminHandlerWith(fetchImpl)(adminLogin());
+
+    expect(fetchImpl.mock.calls[0]![0]).toBe(`${GATEWAY}${ADMIN_LOGIN_PATH}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = await res.json();
+    expect(body.dataBody).toBeNull();
+    expect(JSON.stringify(body)).not.toContain('admin-1');
+    expect(res.headers.getSetCookie()).toEqual([
+      'cf_admin_at=admin-1; Path=/; HttpOnly; SameSite=Lax; Max-Age=1200',
+    ]);
+  });
+
+  it('응답에 수명이 없으면 앱 설정 수명을 쓴다', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(envelope(200, true, { accessToken: 'admin-1' }));
+    const res = await adminHandlerWith(fetchImpl)(adminLogin());
+
+    expect(res.headers.getSetCookie()).toEqual([
+      'cf_admin_at=admin-1; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800',
+    ]);
+  });
+
+  it('AUTH_030 은 봉투와 400 을 그대로 중계하고 쿠키를 심지 않는다', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(envelope(400, false, null, 'AUTH_030'));
+    const res = await adminHandlerWith(fetchImpl)(adminLogin());
+
+    expect(res.status).toBe(400);
+    expect(res.headers.getSetCookie()).toEqual([]);
+    await expect(unwrap(res)).rejects.toMatchObject({ code: 'AUTH_030' });
+  });
+
+  it('성공인데 access 토큰이 없으면 로그인된 척하지 않고 BFF_002 503 이다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, {}));
+    const res = await adminHandlerWith(fetchImpl)(adminLogin());
+
+    expect(res.status).toBe(503);
+    expect(res.headers.getSetCookie()).toEqual([]);
+  });
+
+  it('다른 사이트에서 온 요청은 게이트웨이로 보내지 않는다(login CSRF)', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const res = await adminHandlerWith(fetchImpl)(adminLogin({ 'sec-fetch-site': 'cross-site' }));
+
+    expect(res.status).toBe(403);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

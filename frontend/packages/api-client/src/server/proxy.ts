@@ -1,6 +1,6 @@
 import { errorEnvelope } from '../envelope';
 import { resolveClientIp, setClientIp } from './client-ip';
-import { readCookie, serializeCookie, type AuthCookieConfig } from './cookies';
+import { readCookie, readRefreshCookie, serializeCookie, type AuthCookieConfig } from './cookies';
 import { reissueTokens, type TokenPair } from './reissue';
 import { joinUrl } from './url';
 
@@ -13,6 +13,18 @@ export type ProxyOptions = {
 };
 
 const API_PREFIX = '/api/v1/';
+/**
+ * 일반 프록시가 받지 않는 인증 경로. 토큰을 응답 본문으로 주거나(로그인 · 재발급) refresh 쿠키가 필요한(로그아웃) 경로는
+ * 전용 route handler 만 받는다 — 일반 프록시가 중계하면 토큰이 브라우저 JS 로 간다. 전용 핸들러가 없는 앱(스토어프론트의
+ * 관리자 로그인, 어드민의 고객 로그인 · 재발급)에서는 이 목록이 그 경로를 404 로 막는다.
+ */
+const DEDICATED_AUTH_PATHS = new Set([
+  '/api/v1/auth/login',
+  '/api/v1/auth/admin/login',
+  '/api/v1/auth/token/reissue',
+  '/api/v1/auth/logout',
+  '/api/v1/auth/sign-up',
+]);
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // 게이트웨이로 넘기는 요청 헤더. Cookie·Authorization·X-Forwarded-* 등은 넘기지 않는다(X-Forwarded-For 는 BFF 가 정한 한 값으로 덮어쓴다).
 const FORWARD_REQUEST_HEADERS = ['content-type', 'accept', 'accept-language', 'idempotency-key'];
@@ -39,7 +51,7 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
 
   return async (request) => {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith(API_PREFIX)) {
+    if (!url.pathname.startsWith(API_PREFIX) || isDedicatedAuthPath(url.pathname)) {
       return Response.json(errorEnvelope('BFF_001', '존재하지 않는 경로입니다.'), { status: 404 });
     }
 
@@ -55,7 +67,7 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
         : await request.arrayBuffer();
     const cookieHeader = request.headers.get('cookie');
     const accessToken = readCookie(cookieHeader, cookies.accessName);
-    const refreshToken = readCookie(cookieHeader, cookies.refreshName);
+    const refreshToken = readRefreshCookie(cookieHeader, cookies);
     const target = joinUrl(options.gatewayUrl, url.pathname + url.search);
     const clientIp = resolveClientIp(request, options.clientIpHeader);
 
@@ -108,6 +120,22 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
   };
 }
 
+/** 대소문자 · 끝 슬래시 · 퍼센트 인코딩 · 경로 매개변수(;) 변형도 같은 경로로 본다. 디코드할 수 없는 경로는 막는다 */
+function isDedicatedAuthPath(pathname: string): boolean {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return true;
+  }
+  const normalized = decoded
+    .toLowerCase()
+    .split(';')[0]!
+    .replace(/\/{2,}/g, '/')
+    .replace(/\/+$/, '');
+  return DEDICATED_AUTH_PATHS.has(normalized);
+}
+
 /**
  * 브라우저는 Sec-Fetch-Site 를 보낸다. 없으면(구형 브라우저) Origin 으로 판단하고,
  * 둘 다 없으면 브라우저 요청이 아니므로 통과시킨다(쿠키를 자동으로 실어 오는 주체가 없다).
@@ -139,27 +167,43 @@ function relay(upstream: Response, setCookies: string[]): Response {
   return new Response(upstream.body, { status: upstream.status, headers });
 }
 
-/** 토큰 쌍을 쿠키로. 수명은 서버가 준 값(`*ExpiresIn`, 초)이 있으면 그것을, 없으면 앱 설정값을 쓴다 */
+/**
+ * 토큰 쌍을 쿠키로. 수명은 서버가 준 값(`*ExpiresIn`, 초)이 있으면 그것을, 없으면 앱 설정값을 쓴다.
+ * refresh 쿠키가 없는 설정(어드민)이면 access 하나만 심는다 — 그런 설정은 재발급하지 않으므로 이 경로에 오지 않는다.
+ */
 export function issueCookies(config: AuthCookieConfig, pair: TokenPair): string[] {
-  return [
-    serializeCookie(
-      config.accessName,
-      pair.accessToken,
-      pair.accessTokenExpiresIn ?? config.accessMaxAgeSec,
-      config.secure,
-    ),
-    serializeCookie(
-      config.refreshName,
-      pair.refreshToken,
-      pair.refreshTokenExpiresIn ?? config.refreshMaxAgeSec,
-      config.secure,
-    ),
-  ];
+  const cookies = [accessCookie(config, pair.accessToken, pair.accessTokenExpiresIn)];
+  if (config.refreshName !== null) {
+    cookies.push(
+      serializeCookie(
+        config.refreshName,
+        pair.refreshToken,
+        pair.refreshTokenExpiresIn ?? config.refreshMaxAgeSec,
+        config.secure,
+      ),
+    );
+  }
+  return cookies;
+}
+
+/** access 쿠키 하나. 수명은 서버 값(`accessTokenExpiresIn`, 초)이 있으면 그것을, 없으면 앱 설정값을 쓴다 */
+export function accessCookie(
+  config: AuthCookieConfig,
+  accessToken: string,
+  expiresInSec: number | undefined,
+): string {
+  return serializeCookie(
+    config.accessName,
+    accessToken,
+    expiresInSec ?? config.accessMaxAgeSec,
+    config.secure,
+  );
 }
 
 export function clearCookies(config: AuthCookieConfig): string[] {
-  return [
-    serializeCookie(config.accessName, '', 0, config.secure),
-    serializeCookie(config.refreshName, '', 0, config.secure),
-  ];
+  const cookies = [serializeCookie(config.accessName, '', 0, config.secure)];
+  if (config.refreshName !== null) {
+    cookies.push(serializeCookie(config.refreshName, '', 0, config.secure));
+  }
+  return cookies;
 }

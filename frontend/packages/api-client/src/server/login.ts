@@ -1,8 +1,8 @@
 import { errorEnvelope, isApiEnvelope, type DataHeader } from '../envelope';
 import { resolveClientIp, setClientIp } from './client-ip';
 import type { AuthCookieConfig } from './cookies';
-import { issueCookies, isSameOrigin } from './proxy';
-import { readTokenPair } from './reissue';
+import { accessCookie, issueCookies, isSameOrigin } from './proxy';
+import { readLifetime, readTokenPair } from './reissue';
 import { joinUrl } from './url';
 
 export type LoginHandlerOptions = {
@@ -14,6 +14,7 @@ export type LoginHandlerOptions = {
 };
 
 export const LOGIN_PATH = '/api/v1/auth/login';
+export const ADMIN_LOGIN_PATH = '/api/v1/auth/admin/login';
 
 const FORWARD_HEADERS = ['content-type', 'accept-language'];
 
@@ -27,22 +28,58 @@ export function createLoginHandler(
   options: LoginHandlerOptions,
 ): (request: Request) => Promise<Response> {
   const fetchImpl = options.fetch ?? fetch;
+  return loginHandler(options, (headers, body) =>
+    attemptLogin(
+      { gatewayUrl: options.gatewayUrl, cookies: options.cookies, fetch: fetchImpl },
+      headers,
+      body,
+    ),
+  );
+}
 
+/**
+ * 브라우저 → Next `POST /api/v1/auth/admin/login` → 게이트웨이 관리자 로그인(BE #191). 고객 로그인과 같지만
+ * 응답이 `{ accessToken, accessTokenExpiresIn }` 뿐이다(refresh 없음) — access 쿠키 하나만 심는다. 세션은 그 수명이 전부다.
+ * 실패(400 AUTH_030 한 문구 · 검증 fieldErrors)는 게이트웨이 봉투와 상태를 그대로 중계한다.
+ */
+export function createAdminLoginHandler(
+  options: LoginHandlerOptions,
+): (request: Request) => Promise<Response> {
+  const fetchImpl = options.fetch ?? fetch;
+  return loginHandler(options, (headers, body) =>
+    requestLogin(
+      fetchImpl,
+      joinUrl(options.gatewayUrl, ADMIN_LOGIN_PATH),
+      headers,
+      body,
+      (data) => {
+        const token = readAccessToken(data);
+        return token
+          ? [accessCookie(options.cookies, token.accessToken, token.accessTokenExpiresIn)]
+          : null;
+      },
+    ),
+  );
+}
+
+function loginHandler(
+  options: LoginHandlerOptions,
+  attempt: (headers: Headers, body: BodyInit) => Promise<LoginAttempt>,
+): (request: Request) => Promise<Response> {
   return async (request) => {
     // 로그인 성공은 쿠키를 심는다 — 다른 사이트가 사용자 브라우저에 공격자 계정을 심지 못하게(login CSRF) 같은 origin 만
     if (!isSameOrigin(request, new URL(request.url))) return crossSite();
 
-    const attempt = await attemptLogin(
-      { gatewayUrl: options.gatewayUrl, cookies: options.cookies, fetch: fetchImpl },
+    const result = await attempt(
       forwardedHeaders(request, options.clientIpHeader),
       await request.arrayBuffer(),
     );
-    if (!attempt.ok) return attempt.response;
+    if (!result.ok) return result.response;
 
     const response = noStore(
-      Response.json({ dataHeader: attempt.dataHeader, dataBody: null }, { status: 200 }),
+      Response.json({ dataHeader: result.dataHeader, dataBody: null }, { status: 200 }),
     );
-    for (const cookie of attempt.cookies) response.headers.append('set-cookie', cookie);
+    for (const cookie of result.cookies) response.headers.append('set-cookie', cookie);
     return response;
   };
 }
@@ -61,10 +98,30 @@ export async function attemptLogin(
   headers: Headers,
   body: BodyInit,
 ): Promise<LoginAttempt> {
+  return requestLogin(
+    options.fetch,
+    joinUrl(options.gatewayUrl, LOGIN_PATH),
+    headers,
+    body,
+    (data) => {
+      const tokens = readTokenPair(data);
+      return tokens ? issueCookies(options.cookies, tokens) : null;
+    },
+  );
+}
+
+/** 로그인 요청을 보내고 성공 dataBody 를 쿠키로 바꾼다. `toCookies` 가 null 이면(토큰 없음) 계약 불일치다 */
+async function requestLogin(
+  fetchImpl: typeof fetch,
+  url: string,
+  headers: Headers,
+  body: BodyInit,
+  toCookies: (dataBody: unknown) => string[] | null,
+): Promise<LoginAttempt> {
   let upstream: Response;
   let payload: unknown;
   try {
-    upstream = await options.fetch(joinUrl(options.gatewayUrl, LOGIN_PATH), {
+    upstream = await fetchImpl(url, {
       method: 'POST',
       headers,
       body,
@@ -85,15 +142,24 @@ export async function attemptLogin(
     };
   }
 
-  const tokens = readTokenPair(payload.dataBody);
+  const cookies = toCookies(payload.dataBody);
   // 성공이라면서 토큰이 없으면 계약 불일치 — 로그인된 척하지 않는다
-  if (!tokens) return { ok: false, response: unavailable(), resultCode: null };
+  if (!cookies) return { ok: false, response: unavailable(), resultCode: null };
 
-  return {
-    ok: true,
-    dataHeader: payload.dataHeader,
-    cookies: issueCookies(options.cookies, tokens),
-  };
+  return { ok: true, dataHeader: payload.dataHeader, cookies };
+}
+
+/** 관리자 로그인 dataBody `{ accessToken, accessTokenExpiresIn? }`(BE #191, 수명은 초). 토큰이 없으면 null */
+export function readAccessToken(
+  body: unknown,
+): { accessToken: string; accessTokenExpiresIn?: number } | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const value = body as Record<string, unknown>;
+  if (typeof value.accessToken !== 'string' || value.accessToken === '') return null;
+  const expiresIn = readLifetime(value.accessTokenExpiresIn);
+  return expiresIn === undefined
+    ? { accessToken: value.accessToken }
+    : { accessToken: value.accessToken, accessTokenExpiresIn: expiresIn };
 }
 
 /**
