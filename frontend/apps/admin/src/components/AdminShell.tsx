@@ -4,11 +4,14 @@ import type { ReactNode } from 'react';
 import { LogoutButton } from './LogoutButton';
 import { NavLinks, type NavGroup } from './NavLinks';
 
-/** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 · 카테고리 · 주문은 #29 · #30) */
+/** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 목록은 #29, 주문은 #30) */
 const NAV: NavGroup[] = [
   {
     title: '상품',
-    items: [{ label: '재고', href: '/stocks' }],
+    items: [
+      { label: '카테고리', href: '/categories' },
+      { label: '재고', href: '/stocks' },
+    ],
   },
   {
     title: '배송',
