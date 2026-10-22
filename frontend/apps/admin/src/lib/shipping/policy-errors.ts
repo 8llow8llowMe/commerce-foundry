@@ -1,5 +1,11 @@
 import { ApiError } from '@cf/api-client';
-import { accessDeniedOf, fieldKey, SAVE_FAILED, type AccessDenied } from '@/lib/api-errors';
+import {
+  accessDeniedOf,
+  fieldKey,
+  SAVE_FAILED,
+  SESSION_EXPIRED_ON_SAVE,
+  type AccessDenied,
+} from '@/lib/api-errors';
 import type { FormErrors } from './policy-form';
 
 /** 다른 곳에서 먼저 저장했다(조회한 version 과 다르다) — 최신 값을 다시 읽는다 */
@@ -37,9 +43,11 @@ export type SaveFailure =
   | { kind: 'unknownOutcome' }
   | { kind: 'errors'; errors: FormErrors };
 
-/** 정책 저장(PUT) 실패를 화면 처리로 가른다 */
+/** 정책 저장(PUT) 실패를 화면 처리로 가른다. 401 은 폼을 지키고 다시 로그인을 안내한다(`SESSION_EXPIRED_ON_SAVE`) */
 export function policySaveFailure(cause: unknown): SaveFailure {
   const denied = accessDeniedOf(cause);
+  if (denied === 'unauthorized')
+    return { kind: 'errors', errors: { form: [SESSION_EXPIRED_ON_SAVE] } };
   if (denied) return { kind: 'access', denied };
   if (!(cause instanceof ApiError)) return { kind: 'errors', errors: { form: [SAVE_FAILED] } };
   if (cause.code === VERSION_CONFLICT) return { kind: 'conflict' };

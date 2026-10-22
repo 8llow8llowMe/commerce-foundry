@@ -1,13 +1,17 @@
 import { ApiError } from '@cf/api-client';
 import { describe, expect, it } from 'vitest';
-import { SAVE_FAILED } from '@/lib/api-errors';
+import { SAVE_FAILED, SESSION_EXPIRED_ON_SAVE } from '@/lib/api-errors';
 import { CHECK_FIELDS, policySaveFailure, withSummary } from './policy-errors';
 
 describe('policySaveFailure', () => {
-  it('401 · 403 은 로그인 · 권한 안내다', () => {
+  it('401 은 폼을 지키고 다시 로그인을 안내하고, 403 은 권한 안내다', () => {
     expect(policySaveFailure(new ApiError('unauthorized', 401, 'GATEWAY_001', null))).toEqual({
+      kind: 'errors',
+      errors: { form: [SESSION_EXPIRED_ON_SAVE] },
+    });
+    expect(policySaveFailure(new ApiError('forbidden', 403, 'GATEWAY_002', null))).toEqual({
       kind: 'access',
-      denied: 'unauthorized',
+      denied: 'forbidden',
     });
   });
 
