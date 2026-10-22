@@ -1,6 +1,7 @@
 import { brand } from '@cf/brand';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { LogoutButton } from './LogoutButton';
 import { NavLinks, type NavGroup } from './NavLinks';
 
 /** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 · 카테고리 · 주문은 #29 · #30) */
@@ -19,16 +20,17 @@ const NAV: NavGroup[] = [
 ];
 
 /**
- * 어드민 콘솔 화면 틀 — 상단 바 · 왼쪽 메뉴 · 본문. 좁은 화면에서는 메뉴가 본문 위로 온다.
- * 로그인 · 로그아웃은 어드민 로그인(#29)에서 상단 바에 붙인다.
+ * 어드민 콘솔 화면 틀 — 상단 바(홈 · 로그아웃) · 왼쪽 메뉴 · 본문. 좁은 화면에서는 메뉴가 본문 위로 온다.
+ * 로그인 화면은 이 틀 밖이다(`app/login`).
  */
 export function AdminShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="flex h-14 items-center bg-primary px-4 text-primary-fg">
+      <header className="flex h-14 items-center justify-between gap-4 bg-primary px-4 text-primary-fg">
         <Link href="/" className="text-sm font-semibold">
           {brand.name} 어드민
         </Link>
+        <LogoutButton />
       </header>
       <div className="flex flex-1 flex-col md:flex-row">
         <aside className="bg-muted px-3 py-6 md:w-56 md:shrink-0">

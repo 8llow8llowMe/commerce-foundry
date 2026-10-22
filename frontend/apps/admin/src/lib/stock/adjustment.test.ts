@@ -1,6 +1,6 @@
 import { ApiError } from '@cf/api-client';
 import { describe, expect, it } from 'vitest';
-import { SAVE_FAILED } from '@/lib/api-errors';
+import { SAVE_FAILED, SESSION_EXPIRED_ON_SAVE } from '@/lib/api-errors';
 import {
   adjustForm,
   adjustmentFailure,
@@ -106,10 +106,14 @@ describe('adjustmentRequest', () => {
 });
 
 describe('adjustmentFailure', () => {
-  it('401 · 403 은 로그인 · 권한 안내, 409 PRODUCT_020 은 다시 읽기, 502 · 504 는 결과 모름이다', () => {
+  it('401 은 폼을 지키고 다시 로그인 안내, 403 은 권한 안내, 409 PRODUCT_020 은 다시 읽기, 502 · 504 는 결과 모름이다', () => {
     expect(adjustmentFailure(new ApiError('unauthorized', 401, 'GATEWAY_001', null))).toEqual({
+      kind: 'errors',
+      errors: { form: [SESSION_EXPIRED_ON_SAVE] },
+    });
+    expect(adjustmentFailure(new ApiError('forbidden', 403, 'GATEWAY_002', null))).toEqual({
       kind: 'access',
-      denied: 'unauthorized',
+      denied: 'forbidden',
     });
     expect(adjustmentFailure(new ApiError('conflict', 409, 'PRODUCT_020', null))).toEqual({
       kind: 'conflict',

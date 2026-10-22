@@ -37,7 +37,7 @@ export type PolicyEditor<Form> = {
  * 배송비 정책 편집 한 화면의 상태 — 읽기 · 폼 · 저장(전체 교체 PUT + version).
  * - GET 이 null 이면 처음 만들기 폼(version null)이다.
  * - 409 DELIVERY_006(다른 곳에서 먼저 저장)이면 최신 값을 다시 읽어 폼을 바꾸고 안내한다 — 덮어쓰지 않는다.
- * - 401 · 403 은 로그인 · 권한 안내 상태로 바꾼다(어드민 로그인은 #29).
+ * - 401 · 403 은 로그인 · 권한 안내 상태로 바꾼다(401 이면 로그인 화면으로 간다, #204).
  */
 export function usePolicyEditor<Policy, Form, Request>({
   path,

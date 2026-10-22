@@ -1,5 +1,11 @@
 import { ApiError } from '@cf/api-client';
-import { accessDeniedOf, SAVE_FAILED, type AccessDenied, type FormErrors } from '@/lib/api-errors';
+import {
+  accessDeniedOf,
+  SAVE_FAILED,
+  SESSION_EXPIRED_ON_SAVE,
+  type AccessDenied,
+  type FormErrors,
+} from '@/lib/api-errors';
 import type {
   AdjustmentReason,
   ProductForStock,
@@ -91,9 +97,12 @@ export type AdjustFailure =
 /**
  * 조정(PATCH) 실패를 화면 처리로 가른다. 409 PRODUCT_020 은 최신 수량을 다시 읽는다(덮어쓰지 않는다).
  * 칸을 특정하는 검증 오류는 그 칸에, 클래스 수준 검증(targetPresent · expectedQuantityPresent)과 그 밖은 폼 전체 오류다.
+ * 401 은 폼을 지키고 다시 로그인을 안내한다(`SESSION_EXPIRED_ON_SAVE`).
  */
 export function adjustmentFailure(cause: unknown): AdjustFailure {
   const denied = accessDeniedOf(cause);
+  if (denied === 'unauthorized')
+    return { kind: 'errors', errors: { form: [SESSION_EXPIRED_ON_SAVE] } };
   if (denied) return { kind: 'access', denied };
   if (!(cause instanceof ApiError)) return { kind: 'errors', errors: { form: [SAVE_FAILED] } };
   if (cause.code === STOCK_CONFLICT) return { kind: 'conflict' };
