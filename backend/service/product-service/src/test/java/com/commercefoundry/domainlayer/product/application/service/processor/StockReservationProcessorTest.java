@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.service.processor;
 
+import static com.commercefoundry.domainlayer.product.support.ProductFixtures.deletedProduct;
 import static com.commercefoundry.domainlayer.product.support.ProductFixtures.product;
 import static com.commercefoundry.domainlayer.product.support.ProductFixtures.sku;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -207,6 +208,26 @@ class StockReservationProcessorTest {
             assertFailsWith(
                 () -> processor.reserve(command(item(1001L, 1), item(1002L, 1), item(1003L, 1), item(1004L, 1), item(1005L, 1), item(1006L, 1))),
                 ProductErrorCode.STOCK_SKU_NOT_PURCHASABLE, "[1002, 1003, 1004, 1005, 1006]"
+            );
+            verify(stockReservationRepositoryPort, never()).createHeader(anyLong(), anyLong(), any());
+            verify(stockRepositoryPort, never()).deduct(anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("삭제된 상품의 SKU 는 STOCK_SKU_NOT_PURCHASABLE 이다 — DB check 를 비켜 노출 · 판매중으로 남은 행이어도 삭제 조건 하나로 막는다")
+        void deletedProductIsNotPurchasable() {
+            given(skuRepositoryPort.findAllByIds(List.of(1001L, 1002L))).willReturn(List.of(
+                sku(1001L, 502L, "", 0L, SaleStatus.ON_SALE),
+                sku(1002L, 503L, "", 0L, SaleStatus.ON_SALE)
+            ));
+            // 502 는 저장될 수 있는 삭제 상품(숨김 · 판매 종료), 503 은 삭제 시각만 있고 노출 · 판매중인 행
+            given(productRepositoryPort.findAllByIdsIncludingHidden(List.of(502L, 503L))).willReturn(List.of(
+                deletedProduct(502L),
+                deletedProduct(503L, SaleStatus.ON_SALE, true)
+            ));
+
+            assertFailsWith(
+                () -> processor.reserve(command(item(1001L, 1), item(1002L, 1))), ProductErrorCode.STOCK_SKU_NOT_PURCHASABLE, "[1001, 1002]"
             );
             verify(stockReservationRepositoryPort, never()).createHeader(anyLong(), anyLong(), any());
             verify(stockRepositoryPort, never()).deduct(anyLong(), anyLong());

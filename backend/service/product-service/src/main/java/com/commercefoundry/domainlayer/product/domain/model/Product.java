@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.product.domain.model;
 
 import com.commercefoundry.shared.commerce.Money;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Objects;
 
@@ -16,12 +17,16 @@ import java.util.Objects;
  * @param maxQuantityPerOrder 1회 주문 최대 수량. null 이면 제한 없음
  * @param preorder 프리오더(예약 판매) 상품 여부
  * @param expectedShipDate 발송 예정일 ("○월 ○일 순차 발송"). 프리오더가 아니면 반드시 null, 프리오더인데 null 이면 "발송일 추후 안내" 다
+ * @param version 낙관적 락 버전. 아직 저장하지 않은 상품은 null 이다
+ * @param deletedAt 삭제(soft delete) 시각. null 이면 삭제되지 않았다. 저장된 삭제 상품은 숨김 · 판매 종료다(DB check) —
+ *     판매 가능 판정은 그 check 에 기대지 않고 이 값도 본다 ({@link SaleAvailability#isOpenForSale})
+ * @param createdByMemberId 등록한 어드민 회원 아이디 (auth-service member.id). 이관 · 시드 상품은 null. 수정 · 삭제로 바뀌지 않는다
  */
 public record Product(
     long id, long categoryId, String name, String summary, String descriptionHtml,
     SaleStatus saleStatus, boolean visible, Money salePrice, Money listPrice, Integer maxQuantityPerOrder,
     boolean customOrder, String customOrderNotice, Integer customOrderLeadTimeDays,
-    boolean preorder, LocalDate expectedShipDate
+    boolean preorder, LocalDate expectedShipDate, Long version, Instant deletedAt, Long createdByMemberId
 ) {
 
     public Product {
@@ -32,5 +37,10 @@ public record Product(
         if (!preorder && expectedShipDate != null) {
             throw new IllegalArgumentException("expectedShipDate requires preorder. productId=" + id);
         }
+    }
+
+    /** 삭제(soft delete)된 상품인가. */
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 }

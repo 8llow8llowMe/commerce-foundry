@@ -34,7 +34,7 @@ public record SkuInternalItem(
     @Schema(description = "판매 상태 — ON_SALE · SOLD_OUT · STOP_SELLING")
     CodeNameDescriptionMetadata saleStatus,
 
-    @Schema(description = "지금 주문할 수 있는가 — 상품이 노출 중이고 판매 상태가 ON_SALE 일 때만 true", example = "true")
+    @Schema(description = "지금 주문할 수 있는가 — 상품이 삭제되지 않았고 노출 중이며 판매 상태가 ON_SALE 일 때만 true. 숨긴 · 삭제된 상품의 SKU 도 행은 내린다", example = "true")
     boolean purchasable,
 
     @Schema(description = "1회 주문 최대 수량. null 이면 제한 없음", example = "10", nullable = true)

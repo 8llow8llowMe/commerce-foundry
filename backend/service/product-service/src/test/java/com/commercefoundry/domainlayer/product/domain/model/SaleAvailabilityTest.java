@@ -103,6 +103,19 @@ class SaleAvailabilityTest {
     }
 
     @Test
+    @DisplayName("삭제된 상품은 노출 중 · 판매중이어도(DB check 를 비켜 온 행) 판매 가능 조건 · 구매 가능이 아니다 — 무제한 재고도 같다")
+    void deletedProductIsNotOpenForSale() {
+        Sku sku = ProductFixtures.sku(2L, 1L, "", 0L, ON_SALE);
+        Product deletedButVisible = ProductFixtures.deletedProduct(1L, ON_SALE, true);
+
+        assertThat(deletedButVisible.isDeleted()).isTrue();
+        assertThat(SaleAvailability.isOpenForSale(deletedButVisible, sku)).isFalse();
+        assertThat(SaleAvailability.isPurchasable(deletedButVisible, sku, UNLIMITED)).isFalse();
+        assertThat(SaleAvailability.isOpenForSale(ProductFixtures.deletedProduct(1L), sku)).isFalse();
+        assertThat(SaleAvailability.isOpenForSale(ProductFixtures.product(1L), sku)).as("삭제 시각이 없으면 그대로 판매 가능").isTrue();
+    }
+
+    @Test
     @DisplayName("구매 가능(서비스 간 SKU 조회의 purchasable) = 판매 가능 조건 && 품절 아님 — 무제한은 수량 0 이어도 구매 가능")
     void isPurchasable() {
         Product product = ProductFixtures.product(1L);

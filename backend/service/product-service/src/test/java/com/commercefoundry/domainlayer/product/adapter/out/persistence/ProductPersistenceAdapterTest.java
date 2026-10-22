@@ -48,6 +48,7 @@ import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
@@ -98,14 +99,16 @@ class ProductPersistenceAdapterTest {
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/product-schema.sql");
 
-    // 고객에게 보이는 상품은 101 · 102 · 103 · 105 다. 104 는 숨김이다.
+    // 고객에게 보이는 상품은 101 · 102 · 103 · 105 다. 104 는 숨김이다. 108 은 삭제(soft delete)라 고객 · 어드민 목록 어디에도 없다.
     //   상품  판매가   노출  판매 상태      진열 카테고리
     //   101  10,000   O    ON_SALE       10
     //   102  20,000   O    STOP_SELLING  10, 11   ← 두 카테고리에 진열
     //   103  10,000   O    ON_SALE       11       ← 101 과 같은 가격 (동률은 아이디 내림차순)
     //   104   5,000   X    ON_SALE       10
     //   105  30,000   O    ON_SALE       12
+    //   108   1,000   X    STOP_SELLING  10       ← 삭제. 이름 "상품 108" 이 키워드 "상품 10" 에도 걸리지만 빠진다
     private static final String LONG_DESCRIPTION = "<p>" + "가".repeat(5_000) + "</p>";
+    private static final Instant DELETED_AT = Instant.parse("2026-10-20T00:00:00Z");
 
     @Autowired
     private TestEntityManager entityManager;
@@ -140,6 +143,7 @@ class ProductPersistenceAdapterTest {
             product(103L, 10_000L, true, SaleStatus.ON_SALE).build(),
             product(104L, 5_000L, false, SaleStatus.ON_SALE).build(),
             product(105L, 30_000L, true, SaleStatus.ON_SALE).build(),
+            deletedProduct(108L).build(),
 
             displayedIn(9001L, 101L, 10L),
             displayedIn(9002L, 102L, 10L),
@@ -147,6 +151,7 @@ class ProductPersistenceAdapterTest {
             displayedIn(9004L, 103L, 11L),
             displayedIn(9005L, 104L, 10L),
             displayedIn(9006L, 105L, 12L),
+            displayedIn(9007L, 108L, 10L),
 
             // 101: 판매중 SKU 추가금 0 하나 + 판매 종료 SKU 추가금 5,000 (집계에서 빠진다)
             // 102: 판매 종료 SKU 하나뿐   103: 판매중 SKU 추가금 0 · 1,000   104: 판매중 SKU 하나   105: SKU 없음
@@ -185,13 +190,65 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("스키마: 스냅숏 DDL 위에서 validate 로 컨텍스트가 뜨고, 감사 시각과 긴 상세 설명(text)이 저장된다")
+    @DisplayName("스키마: 스냅숏 DDL 위에서 validate 로 컨텍스트가 뜨고, 감사 시각과 긴 상세 설명(text)이 저장되며 새 행의 버전은 0 이다")
     void schema() {
         ProductEntity saved = entityManager.find(ProductEntity.class, 102L);
 
         assertThat(saved.getCreatedAt()).isNotNull();
         assertThat(saved.getUpdatedAt()).isNotNull();
         assertThat(saved.getDescriptionHtml()).isEqualTo(LONG_DESCRIPTION);
+        assertThat(saved.getVersion()).as("버전이 null 인 새 행은 persist 되고 0 으로 저장된다").isZero();
+        assertThat(saved.getDeletedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("삭제 상품: 고객 상세 · 목록과 어드민 목록(목록 · count)에서 빠지고, internal · 어드민 아이디 조회에는 남는다")
+    void deletedProductVisibility() {
+        assertThat(productRepositoryPort.findVisibleById(108L)).isEmpty();
+        assertThat(productRepositoryPort.searchVisible(criteria(null, ProductSortType.NEWEST, 0, 20)).getContent())
+            .extracting(ProductListQueryResult::productId)
+            .doesNotContain(108L);
+
+        Page<ProductAdminListQueryResult> admin = productRepositoryPort.searchForAdmin(adminCriteria().build());
+        assertThat(admin.getContent()).extracting(ProductAdminListQueryResult::productId).doesNotContain(108L);
+        assertThat(admin.getTotalElements()).as("삭제 상품은 전체 건수에도 들지 않는다 (6 → 5)").isEqualTo(5);
+        assertThat(productRepositoryPort.searchForAdmin(adminCriteria().page(0).size(1).build()).getTotalElements())
+            .as("첫 페이지가 다 차서 따로 보내는 count 질의도 같은 조건이다")
+            .isEqualTo(5);
+        assertThat(adminIds(adminCriteria().visible(false))).as("삭제 상품은 숨김이지만 숨김 필터에도 나오지 않는다").containsExactly(104L);
+        assertThat(adminIds(adminCriteria().saleStatus(SaleStatus.STOP_SELLING))).containsExactly(102L);
+
+        assertThat(productRepositoryPort.findAllByIdsIncludingHidden(List.of(101L, 108L)))
+            .as("서비스 간 SKU 조회 · 재고 선점이 쓰는 조회는 삭제 상품을 거르지 않는다 — 판정은 isOpenForSale")
+            .extracting(Product::id, Product::isDeleted, Product::deletedAt)
+            .containsExactlyInAnyOrder(tuple(101L, false, null), tuple(108L, true, DELETED_AT));
+    }
+
+    @Test
+    @DisplayName("제약: 숨김 · 판매 종료인 삭제 상품은 저장된다 (ck_product_deleted_hidden)")
+    void deletedHiddenStopSellingIsAccepted() {
+        persistAll(deletedProduct(109L).build());
+
+        ProductEntity saved = entityManager.find(ProductEntity.class, 109L);
+        assertThat(saved.getDeletedAt()).isEqualTo(DELETED_AT);
+        assertThat(saved.isVisible()).isFalse();
+        assertThat(saved.getSaleStatus()).isEqualTo(SaleStatus.STOP_SELLING);
+    }
+
+    @Test
+    @DisplayName("제약: 노출 중인 삭제 상품은 저장되지 않는다 (ck_product_deleted_hidden)")
+    void deletedVisibleIsRejected() {
+        assertThatThrownBy(() -> persistAll(product(109L, 1_000L, true, SaleStatus.STOP_SELLING).deletedAt(DELETED_AT).build()))
+            .rootCause()
+            .hasMessageContaining("ck_product_deleted_hidden");
+    }
+
+    @Test
+    @DisplayName("제약: 판매중인 삭제 상품은 숨김이어도 저장되지 않는다 (ck_product_deleted_hidden)")
+    void deletedOnSaleIsRejected() {
+        assertThatThrownBy(() -> persistAll(product(109L, 1_000L, false, SaleStatus.ON_SALE).deletedAt(DELETED_AT).build()))
+            .rootCause()
+            .hasMessageContaining("ck_product_deleted_hidden");
     }
 
     @Test
@@ -295,11 +352,11 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("internal · 어드민: 아이디 목록 조회는 숨김 상품까지 읽는다")
+    @DisplayName("internal · 어드민: 아이디 목록 조회는 숨김 · 삭제 상품까지 읽는다")
     void findAllByIdsIncludingHidden() {
-        assertThat(productRepositoryPort.findAllByIdsIncludingHidden(List.of(101L, 104L, 999L)))
+        assertThat(productRepositoryPort.findAllByIdsIncludingHidden(List.of(101L, 104L, 108L, 999L)))
             .extracting(Product::id)
-            .containsExactlyInAnyOrder(101L, 104L);
+            .containsExactlyInAnyOrder(101L, 104L, 108L);
     }
 
     @Test
@@ -571,6 +628,25 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("옵션: 은퇴 시각을 저장하고 읽는다 — 포트는 은퇴 그룹 · 값을 거르지 않는다(고객 상세가 거르고, 서비스 간 SKU 조회는 이름을 계속 읽는다)")
+    void retiredOptions() {
+        persistAll(
+            ProductOptionGroupEntity.builder().id(3004L).productId(103L).name("소재").displayOrder(1).retiredAt(DELETED_AT).build(),
+            ProductOptionValueEntity.builder().id(2006L).optionGroupId(3004L).productId(103L).name("면").displayOrder(0).retiredAt(DELETED_AT).build(),
+            ProductOptionValueEntity.builder().id(2007L).optionGroupId(3003L).productId(103L).name("L").displayOrder(2).retiredAt(DELETED_AT).build()
+        );
+
+        assertThat(productOptionRepositoryPort.findGroupsByIds(List.of(3003L, 3004L)))
+            .extracting(OptionGroup::id, OptionGroup::retiredAt)
+            .containsExactlyInAnyOrder(tuple(3003L, null), tuple(3004L, DELETED_AT));
+        assertThat(productOptionRepositoryPort.findValuesByIds(List.of(2004L, 2006L, 2007L)))
+            .extracting(OptionValue::id, OptionValue::isRetired)
+            .containsExactlyInAnyOrder(tuple(2004L, false), tuple(2006L, true), tuple(2007L, true));
+        assertThat(productOptionRepositoryPort.findGroupsByProductId(103L)).extracting(OptionGroup::id).containsExactly(3003L, 3004L);
+        assertThat(productOptionRepositoryPort.findValuesByProductId(103L)).extracting(OptionValue::id).containsExactly(2003L, 2006L, 2004L, 2007L);
+    }
+
+    @Test
     @DisplayName("이미지: 상품의 이미지는 노출 순서 → 아이디 오름차순이고, 대표 이미지는 상품 목록으로 한 번에 읽는다")
     void findImages() {
         assertThat(productImageRepositoryPort.findAllByProductId(101L))
@@ -721,6 +797,11 @@ class ProductPersistenceAdapterTest {
             .visible(visible)
             .salePriceAmount(salePriceAmount)
             .salePriceCurrency(KRW);
+    }
+
+    /** 삭제(soft delete) 상품 — check 가 허용하는 숨김 · 판매 종료다. */
+    private static ProductEntity.ProductEntityBuilder deletedProduct(Long id) {
+        return product(id, 1_000L, false, SaleStatus.STOP_SELLING).deletedAt(DELETED_AT);
     }
 
     private static ProductCategoryEntity displayedIn(Long id, Long productId, Long categoryId) {
