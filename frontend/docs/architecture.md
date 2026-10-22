@@ -297,6 +297,15 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - 표는 서버 값을 표시만 한다 — 판매가 · 정가(`formatMoney`, 저장된 기본가 그대로), 판매 상태 · 판매 가능은 서버 `name`(설명은 `title`). 재고 링크는 노출 상품만이다(§9 재고와 같은 이유).
   표는 `relative overflow-x-auto` 상자 안에서만 가로로 스크롤된다.
 
+### 회원 목록 (`/members`, #241)
+
+- 어드민 회원 목록 `GET /api/v1/admin/members`(BE #6 · #191) — 최신 가입순, 페이지 20개. 조회는 서버 감사 로그에 남는다.
+- **개인정보는 서버가 마스킹한 값을 그대로 보인다** — 이메일 · 이름 · 휴대폰(`backend/docs/api-design-guide.md` §2-4). 화면은 원문을 받지도, 볼 길을 두지도 않는다. 휴대폰이 없으면 `—`.
+- **조건은 주소가 정본이다**(상품 목록과 같은 규칙) — `parseMemberQuery` 가 역할(`CUSTOMER` · `ADMIN`, 대소문자까지 같을 때만)과 페이지(숫자 글자 6자리까지)를 읽고
+  나머지는 "전체" 로 본다(손으로 고친 주소가 400 `AUTH_198` 이 되지 않게). 기본값은 주소에서 뺀다(`membersHref`).
+- 조건이 역할 하나라 폼 없이 링크(전체 · 고객 · 관리자)로 고르고, 고르면 페이지는 처음으로 간다. 페이지가 범위를 넘으면 첫 페이지 링크를 보인다.
+- 역할은 국문 이름으로 보이고(`roleLabel`), 모르는 값이 오면 이름 그대로 보인다. 역할 링크의 선택 표시는 `aria-current="true"` 다(2페이지 이상이면 링크가 지금 주소와 다르다).
+
 ### 카테고리 (`/categories`, #206)
 
 - 어드민 카테고리 API(#9, `backend/docs/api-design-guide.md` §2-5) — `GET /api/v1/admin/categories`(숨김 포함 트리), `POST`(만들기), `PUT /{categoryId}`(**전체 교체** — 이름 · 상위 · 노출 순서 · 노출 여부를 다 보낸다), `DELETE /{categoryId}`(행 삭제).
