@@ -51,6 +51,7 @@ class ProductDetailProcessorTest {
     // 사이즈(602) 가 색상(601) 보다 먼저 보인다. 값 아이디는 색상이 작아 조합 키("5011,9001")에서는 색상이 앞이다
     private static final long COLOR = 601L;
     private static final long SIZE = 602L;
+    private static final long FABRIC = 603L;
     private static final List<Category> PATH = List.of(new Category(1, null, "상의", 0, true), new Category(11, 1L, "저고리", 0, true));
 
     @Mock
@@ -227,6 +228,61 @@ class ProductDetailProcessorTest {
         }
 
         @Test
+        @DisplayName("은퇴: 은퇴 그룹 · 값과 은퇴 값(은퇴 그룹의 값 포함)을 쓰는 SKU 는 빠지고, 살아 있는 값만 쓰는 판매 종료 SKU 는 남는다 — 재고 · 요약도 남은 SKU 로만 본다")
+        void excludesRetiredOptionsAndSkus() {
+            // 소재(603) 그룹은 은퇴했고 그 값 7001 은 값 자신은 은퇴하지 않았다. 색상 값 5012 는 값만 은퇴했다
+            given(productOptionRepositoryPort.findGroupsByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.group(SIZE, PRODUCT_ID, "사이즈", 1),
+                ProductFixtures.group(COLOR, PRODUCT_ID, "색상", 2),
+                ProductFixtures.retiredGroup(FABRIC, PRODUCT_ID, "소재", 3)
+            ));
+            given(productOptionRepositoryPort.findValuesByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.value(5011, COLOR, PRODUCT_ID, "쪽빛", 1),
+                ProductFixtures.value(7001, FABRIC, PRODUCT_ID, "면", 1),
+                ProductFixtures.value(9001, SIZE, PRODUCT_ID, "M", 1),
+                ProductFixtures.retiredValue(5012, COLOR, PRODUCT_ID, "아이보리", 2),
+                ProductFixtures.value(9002, SIZE, PRODUCT_ID, "L", 2)
+            ));
+            // 판매중 최저 추가금(0)은 은퇴 값을 쓰는 2 · 4 에만 있다 — 요약이 거르기 전 목록으로 계산하면 기본 판매가가 나온다
+            given(skuRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.sku(1, PRODUCT_ID, "5011,9001", 5_000, SaleStatus.ON_SALE),
+                ProductFixtures.sku(2, PRODUCT_ID, "5012,9002", 0, SaleStatus.ON_SALE),
+                ProductFixtures.sku(3, PRODUCT_ID, "5011,9002", 3_000, SaleStatus.STOP_SELLING),
+                ProductFixtures.sku(4, PRODUCT_ID, "5011,7001,9001", 0, SaleStatus.ON_SALE)
+            ));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(1L, 3L))).willReturn(ProductFixtures.stocks(1, 3));
+            given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of());
+
+            ProductDetailInfo detail = processor(true).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
+
+            assertThat(detail.optionGroups()).extracting(ProductOptionGroupInfo::optionGroupId).containsExactly(SIZE, COLOR);
+            assertThat(detail.optionGroups().get(0).values()).extracting(ProductOptionValueInfo::optionValueId).containsExactly(9001L, 9002L);
+            assertThat(detail.optionGroups().get(1).values()).extracting(ProductOptionValueInfo::optionValueId).containsExactly(5011L);
+            assertThat(detail.skus()).extracting(ProductSkuInfo::skuId).containsExactly(1L, 3L);
+            assertThat(detail.skus()).extracting(ProductSkuInfo::saleStatus).containsExactly(SaleAvailability.ON_SALE, SaleAvailability.STOP_SELLING);
+            assertThat(detail.salePrice()).as("남은 판매중 SKU(1)의 추가금 5,000 기준").isEqualTo(Money.of(ProductFixtures.BASE_PRICE + 5_000, KRW));
+            assertThat(detail.saleStatus()).isEqualTo(SaleAvailability.ON_SALE);
+            verify(stockRepositoryPort).findAllBySkuIds(List.of(1L, 3L));
+        }
+
+        @Test
+        @DisplayName("은퇴: 판매중 SKU 가 모두 은퇴 값을 쓰면 남은 SKU 에 판매중이 없어 상품은 판매 종료다")
+        void allOnSaleSkusRetired() {
+            givenOptionsWithRetiredValue();
+            given(skuRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.sku(1, PRODUCT_ID, "5012,9001", 0, SaleStatus.ON_SALE),
+                ProductFixtures.sku(2, PRODUCT_ID, "5011,9001", 0, SaleStatus.STOP_SELLING)
+            ));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(2L))).willReturn(ProductFixtures.stocks(2));
+            given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of());
+
+            ProductDetailInfo detail = processor(true).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
+
+            assertThat(detail.skus()).extracting(ProductSkuInfo::skuId).containsExactly(2L);
+            assertThat(detail.saleStatus()).isEqualTo(SaleAvailability.STOP_SELLING);
+        }
+
+        @Test
         @DisplayName("SKU 가 0건이면 skus 는 비고 판매 종료 · 기본 판매가다. 이미지가 없으면 대표 이미지는 null 이다")
         void noSku() {
             given(productOptionRepositoryPort.findGroupsByProductId(PRODUCT_ID)).willReturn(List.of());
@@ -319,6 +375,19 @@ class ProductDetailProcessorTest {
             ProductFixtures.value(9001, SIZE, PRODUCT_ID, "M", 1),
             ProductFixtures.value(5012, COLOR, PRODUCT_ID, "아이보리", 2),
             ProductFixtures.value(9002, SIZE, PRODUCT_ID, "L", 2)
+        ));
+    }
+
+    /** 사이즈 M · 색상 쪽빛과 은퇴한 색상 값 아이보리(5012). */
+    private void givenOptionsWithRetiredValue() {
+        given(productOptionRepositoryPort.findGroupsByProductId(PRODUCT_ID)).willReturn(List.of(
+            ProductFixtures.group(SIZE, PRODUCT_ID, "사이즈", 1),
+            ProductFixtures.group(COLOR, PRODUCT_ID, "색상", 2)
+        ));
+        given(productOptionRepositoryPort.findValuesByProductId(PRODUCT_ID)).willReturn(List.of(
+            ProductFixtures.value(5011, COLOR, PRODUCT_ID, "쪽빛", 1),
+            ProductFixtures.value(9001, SIZE, PRODUCT_ID, "M", 1),
+            ProductFixtures.retiredValue(5012, COLOR, PRODUCT_ID, "아이보리", 2)
         ));
     }
 

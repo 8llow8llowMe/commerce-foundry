@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.product.domain.model;
 
 import com.commercefoundry.shared.commerce.Money;
+import java.time.Instant;
 import java.util.Objects;
 
 /**
@@ -11,16 +12,24 @@ import java.util.Objects;
  * @param salePrice 기본 판매가. SKU 추가금의 기준이자 목록 최저가
  * @param listPrice 정가 (할인 전). null 이면 할인 표시 없음
  * @param maxQuantityPerOrder 1회 주문 최대 수량. null 이면 제한 없음
+ * @param version 낙관적 락 버전. 아직 저장하지 않은 상품은 null 이다
+ * @param deletedAt 삭제(soft delete) 시각. null 이면 삭제되지 않았다. 저장된 삭제 상품은 숨김 · 판매 종료다(DB check) —
+ *     판매 가능 판정은 그 check 에 기대지 않고 이 값도 본다 ({@link SaleAvailability#isOpenForSale})
  */
 public record Product(
     long id, long categoryId, String name, String summary, String descriptionHtml,
     SaleStatus saleStatus, boolean visible, Money salePrice, Money listPrice, Integer maxQuantityPerOrder,
-    boolean customOrder, String customOrderNotice, Integer customOrderLeadTimeDays
+    boolean customOrder, String customOrderNotice, Integer customOrderLeadTimeDays, Long version, Instant deletedAt
 ) {
 
     public Product {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(saleStatus, "saleStatus");
         Objects.requireNonNull(salePrice, "salePrice");
+    }
+
+    /** 삭제(soft delete)된 상품인가. */
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 }

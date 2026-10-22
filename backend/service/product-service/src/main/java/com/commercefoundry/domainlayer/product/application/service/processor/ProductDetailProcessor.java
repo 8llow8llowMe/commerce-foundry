@@ -35,6 +35,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,9 @@ import org.springframework.stereotype.Component;
 /**
  * 고객 상품 상세. 쿼리는 상품 → (Facade 가 부르는 카테고리 전체) → 옵션 그룹 → 옵션 값 → SKU → 재고 → 이미지 → (맞춤 제작일 때만) 입력 항목이고,
  * 재고는 그 상품 SKU 아이디의 in 절 한 번, 나머지는 상품 아이디 단건 조건이다. 나누기 · 정렬은 메모리에서 한다.
+ *
+ * <p>은퇴한 옵션 그룹 · 값과 은퇴 값을 하나라도 쓰는 SKU 는 고객에게 내지 않는다 — 은퇴 그룹의 값은 값 자신이 은퇴하지 않았어도 은퇴로 본다.
+ * 판매 가격 · 상태 요약도 남은 SKU 로만 계산한다. 은퇴 행을 거르는 곳은 여기뿐이다 — 서비스 간 SKU 조회는 주문 · 장바구니 줄의 옵션명을 위해 은퇴 값도 읽는다.
  */
 @Slf4j
 @Component
@@ -60,7 +64,7 @@ public class ProductDetailProcessor {
     /**
      * 고객에게 보이는 상품. 판매 종료 상품도 돌려준다 — 화면은 "판매 종료" 로 보인다.
      *
-     * @throws ProductException {@link ProductErrorCode#NOT_FOUND_PRODUCT} — 없거나 숨긴 상품. 숨김은 존재를 드러내지 않고 404 다
+     * @throws ProductException {@link ProductErrorCode#NOT_FOUND_PRODUCT} — 없거나 숨긴 · 삭제된 상품. 존재를 드러내지 않고 404 다
      */
     public Product getVisibleProduct(long productId) {
         return productRepositoryPort.findVisibleById(productId).orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND_PRODUCT));
@@ -70,9 +74,14 @@ public class ProductDetailProcessor {
      * @param categoryPath 대표 카테고리의 보이는 경로 ({@code CategoryProcessor#visiblePathOf} — Facade 가 넘긴다). 대표 카테고리가 없는 데이터 오류면 빈 목록
      */
     public ProductDetailInfo getDetail(Product product, List<Category> categoryPath) {
-        List<OptionGroup> groups = productOptionRepositoryPort.findGroupsByProductId(product.id());
-        List<OptionValue> values = productOptionRepositoryPort.findValuesByProductId(product.id());
-        List<Sku> skus = skuRepositoryPort.findAllByProductId(product.id());
+        List<OptionGroup> allGroups = productOptionRepositoryPort.findGroupsByProductId(product.id());
+        List<OptionValue> allValues = productOptionRepositoryPort.findValuesByProductId(product.id());
+        Set<Long> retiredValueIds = retiredValueIds(allGroups, allValues);
+        List<OptionGroup> groups = allGroups.stream().filter(group -> !group.isRetired()).toList();
+        List<OptionValue> values = allValues.stream().filter(value -> !retiredValueIds.contains(value.id())).toList();
+        List<Sku> skus = skuRepositoryPort.findAllByProductId(product.id()).stream()
+            .filter(sku -> sku.optionKey().valueIds().stream().noneMatch(retiredValueIds::contains))
+            .toList();
         SkuStocks stocks = SkuStocks.of(stockRepositoryPort.findAllBySkuIds(skus.stream().map(Sku::id).toList()));
         List<ProductImage> images = productImageRepositoryPort.findAllByProductId(product.id());
 
@@ -97,6 +106,18 @@ public class ProductDetailProcessor {
             .skus(toSkuInfos(product, skus, stocks, optionValueRanks(groups, valuesByGroupId)))
             .customOrder(customOrderOf(product))
             .build();
+    }
+
+    /**
+     * 고객에게 내지 않는 옵션 값 — 은퇴한 값과 은퇴한 그룹의 값. 상품의 값 목록에 없는 아이디(데이터 오류)는 은퇴로 보지 않는다 —
+     * 그 SKU 는 지금처럼 남기고 {@link #orderedOptionValueIds} 가 경고를 남긴다.
+     */
+    private static Set<Long> retiredValueIds(List<OptionGroup> groups, List<OptionValue> values) {
+        Set<Long> retiredGroupIds = groups.stream().filter(OptionGroup::isRetired).map(OptionGroup::id).collect(Collectors.toSet());
+        return values.stream()
+            .filter(value -> value.isRetired() || retiredGroupIds.contains(value.optionGroupId()))
+            .map(OptionValue::id)
+            .collect(Collectors.toUnmodifiableSet());
     }
 
     /** 대표 이미지는 상품당 최대 1건이다. 이미지는 노출 순서 → 아이디 오름차순으로 읽으므로 데이터 오류로 둘 이상이면 앞의 것이다. */

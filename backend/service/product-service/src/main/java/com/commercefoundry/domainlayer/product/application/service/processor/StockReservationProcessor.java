@@ -183,7 +183,8 @@ public class StockReservationProcessor {
 
     /**
      * 판매 가능 확인 — 서비스 간 SKU 조회의 {@code purchasable} 과 같은 규칙({@link SaleAvailability#isOpenForSale})에서 재고만 뺀다.
-     * 수량은 조건부 차감이 판정한다. 없는 SKU · 없거나 숨긴 상품 · 판매 종료를 모두 모아 한 번에 알린다.
+     * 수량은 조건부 차감이 판정한다. 없는 SKU · 없거나 숨긴 · 삭제된 상품 · 판매 종료를 모두 모아 한 번에 알린다.
+     * 상품은 숨김 · 삭제를 포함해 읽고({@code findAllByIdsIncludingHidden}) 삭제 판정은 {@code isOpenForSale} 이 한다.
      */
     private void validatePurchasable(List<Long> skuIds) {
         List<Sku> skus = skuRepositoryPort.findAllByIds(skuIds);

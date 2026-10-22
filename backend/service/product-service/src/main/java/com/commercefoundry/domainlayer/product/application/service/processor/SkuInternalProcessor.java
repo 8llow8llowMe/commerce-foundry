@@ -29,9 +29,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * 서비스 간 SKU 벌크 조회 (주문 생성 · 장바구니 가격 확인). 쿼리는 SKU → 상품(숨김 포함) → 재고 → 옵션 값 → 옵션 그룹 5번이고 모두 in 절이다.
+ * 서비스 간 SKU 벌크 조회 (주문 생성 · 장바구니 가격 확인). 쿼리는 SKU → 상품(숨김 · 삭제 포함) → 재고 → 옵션 값 → 옵션 그룹 5번이고 모두 in 절이다.
  *
- * <p>없는 아이디는 응답에서 뺀다 — 호출한 쪽이 누락을 보고 거절한다. 숨긴 상품의 SKU 도 행을 내리고 {@code purchasable=false} 로 알린다.
+ * <p>없는 아이디는 응답에서 뺀다 — 호출한 쪽이 누락을 보고 거절한다. 숨긴 · 삭제(soft delete)된 상품의 SKU 도 행을 내리고 {@code purchasable=false} 로 알린다.
+ * 삭제 상품은 DB check 로 판매 종료라 판매 상태도 {@code STOP_SELLING} 이다. 판정은 {@link SaleAvailability#isOpenForSale} 한 곳이다 — 여기서 삭제를 따로 거르지 않는다.
+ * 은퇴한 옵션 그룹 · 값도 이름을 그대로 읽는다 — 주문 · 장바구니 줄의 옵션명이 끊기지 않게 한다(은퇴 제외는 고객 상세만 한다).
  *
  * <p>판매 상태는 상세와 같은 규칙({@link SaleAvailability#ofSku})으로 실제 재고에서 낸다 — 재고 행이 없는 SKU 는 품절이다.
  * 판매 가능 수량은 응답에 싣지 않는다 (주문 생성 #12 와의 계약을 바꾸지 않는다). 수량 부족은 재고 선점이 알린다.

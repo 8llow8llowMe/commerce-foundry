@@ -26,7 +26,7 @@ public enum ProductErrorCode {
     STOCK_ADJUSTMENT_CONFLICT("PRODUCT_020", "재고가 그 사이 바뀌었습니다. 현재 재고를 다시 확인한 뒤 조정해 주세요.", HttpStatus.CONFLICT),
     /** 선점 수량만큼 재고가 없는 SKU 가 있다 — 재고 행이 없는 SKU(품절)도 여기다. 메시지에 부족한 SKU 아이디를 모두 싣는다. 선점 전체가 롤백된다. */
     STOCK_INSUFFICIENT("PRODUCT_021", "재고가 부족한 SKU 가 있습니다: %s", HttpStatus.CONFLICT),
-    /** 없는 SKU · 없거나 숨긴 상품 · 판매 종료(상품 또는 SKU). 메시지에 해당 SKU 아이디를 모두 싣는다. */
+    /** 없는 SKU · 없거나 숨긴 · 삭제된 상품 · 판매 종료(상품 또는 SKU). 메시지에 해당 SKU 아이디를 모두 싣는다. 판정은 {@code SaleAvailability#isOpenForSale} 이다. */
     STOCK_SKU_NOT_PURCHASABLE("PRODUCT_022", "주문할 수 없는 SKU 가 있습니다: %s", HttpStatus.CONFLICT),
     /** 같은 주문의 활성 선점이 이미 있는데 SKU · 수량이 다르다. 같으면 기존 선점을 그대로 돌려준다(멱등). */
     STOCK_RESERVATION_ITEMS_MISMATCH("PRODUCT_023", "이 주문에는 항목이 다른 재고 선점이 이미 있습니다.", HttpStatus.CONFLICT),

@@ -43,6 +43,7 @@
         custom_order boolean not null,
         custom_order_lead_time_days integer,
         custom_order_notice varchar(500),
+        deleted_at timestamp(6) with time zone,
         description_html text,
         list_price_amount bigint,
         list_price_currency varchar(3) check ((list_price_currency in ('KRW','USD'))),
@@ -52,12 +53,14 @@
         sale_price_currency varchar(3) not null check ((sale_price_currency in ('KRW','USD'))),
         sale_status varchar(20) not null check ((sale_status in ('ON_SALE','STOP_SELLING'))),
         summary varchar(200),
+        version bigint not null,
         visible boolean not null,
         primary key (id),
         constraint ck_product_sale_price_non_negative check (sale_price_amount >= 0),
         constraint ck_product_list_price_pair check ((list_price_amount is null and list_price_currency is null) or (list_price_amount is not null and list_price_currency is not null)),
         constraint ck_product_list_price_currency check (list_price_currency is null or list_price_currency = sale_price_currency),
-        constraint ck_product_list_price_non_negative check (list_price_amount is null or list_price_amount >= 0)
+        constraint ck_product_list_price_non_negative check (list_price_amount is null or list_price_amount >= 0),
+        constraint ck_product_deleted_hidden check (deleted_at is null or (visible = false and sale_status = 'STOP_SELLING'))
     );
 
     comment on table product.product is
@@ -83,6 +86,9 @@
 
     comment on column product.product.custom_order_notice is
         '맞춤 제작 안내 문구';
+
+    comment on column product.product.deleted_at is
+        '삭제 시각 (soft delete). null 이면 삭제되지 않은 상품. 삭제되면 숨김 · 판매 종료로 고정된다(ck_product_deleted_hidden)';
 
     comment on column product.product.description_html is
         '상세 설명 HTML. 표시 전 sanitize 대상';
@@ -110,6 +116,9 @@
 
     comment on column product.product.summary is
         '한 줄 요약';
+
+    comment on column product.product.version is
+        '낙관적 락 버전';
 
     comment on column product.product.visible is
         '스토어프론트 노출 여부. false 면 상세 404 · 목록 제외';
@@ -266,6 +275,7 @@
         display_order integer not null,
         name varchar(50) not null,
         product_id bigint not null,
+        retired_at timestamp(6) with time zone,
         primary key (id),
         constraint uk_product_option_group_product_id_name unique (product_id, name)
     );
@@ -291,6 +301,9 @@
     comment on column product.product_option_group.product_id is
         '상품 아이디 (FK: product.id)';
 
+    comment on column product.product_option_group.retired_at is
+        '은퇴 시각. null 이면 사용 중. 은퇴한 그룹은 고객 상세에서 빠지고, 행은 주문 · 장바구니의 옵션명 표시용으로 남는다';
+
     create table product.product_option_value (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -299,6 +312,7 @@
         name varchar(50) not null,
         option_group_id bigint not null,
         product_id bigint not null,
+        retired_at timestamp(6) with time zone,
         primary key (id),
         constraint uk_product_option_value_option_group_id_name unique (option_group_id, name)
     );
@@ -326,6 +340,9 @@
 
     comment on column product.product_option_value.product_id is
         '상품 아이디 (FK: product.id) — 상세를 상품 단위로 한 번에 읽기 위한 비정규화';
+
+    comment on column product.product_option_value.retired_at is
+        '은퇴 시각. null 이면 사용 중. 은퇴한 값과 그 값을 쓰는 SKU 는 고객 상세에서 빠지고, 행은 주문 · 장바구니의 옵션명 표시용으로 남는다';
 
     create table product.sku (
         id bigint not null,

@@ -16,4 +16,6 @@ public interface ProductCustomRepository {
     Optional<ProductEntity> findVisibleById(long productId);
 
     Page<ProductAdminListQueryResult> searchForAdmin(ProductAdminSearchCriteria criteria);
+
+    boolean existsLiveProductInCategory(long categoryId);
 }

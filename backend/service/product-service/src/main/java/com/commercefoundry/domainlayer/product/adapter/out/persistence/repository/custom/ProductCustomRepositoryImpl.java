@@ -80,8 +80,8 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
     }
 
     /**
-     * 어드민 상품 목록 — 숨김 상품을 포함하고 전체 건수를 센다. 목록 1번 + count 1번이고, 첫 페이지가 다 차지 않으면 count 를 건너뛴다
-     * ({@link PageableExecutionUtils#getPage}).
+     * 어드민 상품 목록 — 숨김 상품을 포함하고 삭제(soft delete) 상품은 늘 뺀다(삭제 상품을 보는 필터는 없다). 전체 건수를 센다.
+     * 목록 1번 + count 1번이고, 첫 페이지가 다 차지 않으면 count 를 건너뛴다 ({@link PageableExecutionUtils#getPage}).
      *
      * <p>조건은 모두 product 행 기준이다. 카테고리는 {@code product_category} EXISTS({@code idx_product_category_category_id_product_id}),
      * 판매 가능 상태는 sku EXISTS({@code uk_sku_product_id_option_value_key} 선두 product_id) · stock PK 로 건다 — JOIN 하지 않아 행이 겹치지 않고
@@ -97,8 +97,9 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
             return new PageImpl<>(List.of(), pageRequest, 0);
         }
 
-        // #9 PR-D(soft delete)에서 삭제 상품 제외 조건(productEntity.deletedAt.isNull())을 여기 더한다 — 목록 · count 가 같은 배열을 쓴다
+        // 목록 · count 가 같은 배열을 쓴다 — 삭제 제외도 여기 한 번만 건다
         Predicate[] conditions = {
+            notDeleted(),
             nameContains(criteria.keyword()),
             displayedInAny(categoryIds),
             criteria.saleStatus() == null ? null : productEntity.saleStatus.eq(criteria.saleStatus()),
@@ -124,10 +125,40 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
     }
 
     /**
-     * 고객에게 보이는 상품 조건. <b>모든 고객 쿼리가 이것을 쓴다</b> — 삭제(soft delete) 같은 노출 조건이 늘면 여기만 고친다.
+     * 삭제되지 않은 상품이 이 카테고리를 진열 또는 대표 카테고리로 쓰는가 (어드민 카테고리 삭제 판정) — 숨김 · 판매 종료 상품은 센다.
+     *
+     * <p>진열 카테고리({@code product_category} → product 조인, {@code idx_product_category_category_id_product_id} 선두)를 먼저 보고,
+     * 없을 때만 대표 카테고리를 본다 — 불변식(대표는 진열에도 있다)이 지켜진 데이터면 첫 질의에서 끝난다. {@code product.category_id} 에는 인덱스가 없어
+     * 두 번째 질의는 표를 훑는다. 어드민 카테고리 삭제에서만 부르므로 인덱스를 더하지 않는다. 둘 다 한 행만 읽는다({@code limit 1}).
+     */
+    @Override
+    public boolean existsLiveProductInCategory(long categoryId) {
+        Integer displayed = queryFactory
+            .selectOne()
+            .from(productCategoryEntity)
+            .innerJoin(productEntity).on(productEntity.id.eq(productCategoryEntity.productId))
+            .where(productCategoryEntity.categoryId.eq(categoryId), notDeleted())
+            .fetchFirst();
+        if (displayed != null) {
+            return true;
+        }
+        return queryFactory
+            .selectOne()
+            .from(productEntity)
+            .where(productEntity.categoryId.eq(categoryId), notDeleted())
+            .fetchFirst() != null;
+    }
+
+    /**
+     * 고객에게 보이는 상품 조건 — 노출 중이고 삭제되지 않았다. <b>모든 고객 쿼리가 이것을 쓴다</b> — 노출 조건이 늘면 여기만 고친다.
+     * 삭제 상품은 DB check({@code ck_product_deleted_hidden})로 숨김이지만, 고객 경로는 그 check 에 기대지 않고 삭제 조건을 명시한다.
      */
     private static BooleanExpression visibleToCustomer() {
-        return productEntity.visible.isTrue();
+        return productEntity.visible.isTrue().and(notDeleted());
+    }
+
+    private static BooleanExpression notDeleted() {
+        return productEntity.deletedAt.isNull();
     }
 
     private static BooleanExpression displayedInAny(Set<Long> categoryIds) {
