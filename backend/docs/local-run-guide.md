@@ -106,7 +106,11 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
     (예: api-gateway 의 `docs/api-design-guide.md` 경로 소유 표 대조). CI 는 이 선언으로 그 파일(디렉터리면 그 아래 파일)만 바뀐 PR 에서도
     그 모듈을 돌리고(그 파일이 다른 모듈 안에 있으면 두 모듈 다), Gradle 도 이 선언으로 테스트를 다시 돌릴지 판단한다.
     선언이 없으면 문서만 바뀐 PR 에서 그 테스트가 돌지 않는다. CI 는 `rootProject.file('<backend 기준 경로>')` 의 문자열 인자만 읽는다 —
-    `rootDir` · `layout.projectDirectory` · `file('../...')` · 변수 인자처럼 경로를 풀 수 없게 쓰면 PR 마다 전 모듈이 돈다.
+    `rootDir` · `layout.projectDirectory` · `getRootProject()` · `isolated.rootProject` · `parentFile` · `new File(...)` · `Path.of(...)` ·
+    `file('../...')` · 변수 인자처럼 경로를 풀 수 없게 쓰면 PR 마다 전 모듈이 돈다(CI 는 형식을 나열해 잡으므로 이 밖의 형식도 쓰지 않는다).
+    **선언한 파일이 `backend/docs/**` · `backend/*.md` · `.env.example` · `docker-compose-local.yml` · `backend/docker/**` 아래면**
+    `backend-ci.yml` 의 `paths`(pull_request · push 두 곳)에 그 파일 재포함 패턴도 더한다(제외 패턴 뒤에) — 그러지 않으면 그 파일만 바뀐 PR 에서
+    workflow 자체가 뜨지 않는다(`api-design-guide.md` 가 그 예다).
 - 서비스(`service/*`)의 컨텍스트 로딩 테스트(`*ApplicationTests`)는 H2(PostgreSQL 모드) test 프로파일로 돈다. Docker 없이 로컬에서도 실행된다.
   락 · `timestamptz` · 인덱스처럼 엔진에 기대는 동작은 여기서 검증하지 않는다. 리포지토리 테스트는 Testcontainers(PostgreSQL)로 따로 두고
   CI 에서 돌린다 (`bootstrap-conventions.md` "컨텍스트 로딩 테스트").
