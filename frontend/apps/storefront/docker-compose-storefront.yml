@@ -1,0 +1,53 @@
+# storefront 배포 compose — 배포 agent 가 호스트에서 이미지를 만들고 띄운다 (docs/deploy.md).
+#
+#   docker compose -f apps/storefront/docker-compose-storefront.yml -p commerce-storefront-dev up -d --build --remove-orphans storefront-dev
+#
+# 아래 변수는 배포 파이프라인이 넣는다. 값(포트 · 네트워크 이름)은 Infra 등록(#197) · 백엔드 compose(#196) 와 맞춰 정한다.
+#   STOREFRONT_DEV_PORT / STOREFRONT_PROD_PORT              호스트에 여는 포트
+#   STOREFRONT_DEV_MEM_LIMIT / STOREFRONT_PROD_MEM_LIMIT    컨테이너 메모리 상한 (기본 512m)
+#   COMMERCE_DOCKER_NETWORK                     백엔드 게이트웨이와 같은 외부 네트워크 이름 (BFF → 게이트웨이)
+#   RUNTIME_ENV_FILE                            Vault 에서 만든 런타임 env 파일 (기본 .env.runtime, 커밋하지 않는다)
+
+x-storefront-common: &storefront-common
+  image: commerce-storefront:${IMAGE_TAG:-latest}
+  build:
+    context: ../..
+    dockerfile: apps/storefront/storefront.Dockerfile
+  env_file:
+    - ${RUNTIME_ENV_FILE:-.env.runtime}
+  restart: unless-stopped
+  networks:
+    - commerce
+  # 프로세스가 HTTP 를 받는지만 본다. /api/health 는 게이트웨이가 죽으면 503 이라 컨테이너 상태와 섞지 않는다.
+  healthcheck:
+    test:
+      [
+        'CMD',
+        'node',
+        '-e',
+        "fetch('http://127.0.0.1:3000/api/health').then(() => process.exit(0), () => process.exit(1))",
+      ]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
+
+services:
+  storefront-dev:
+    <<: *storefront-common
+    container_name: commerce-storefront-dev
+    ports:
+      - '${STOREFRONT_DEV_PORT}:3000'
+    mem_limit: ${STOREFRONT_DEV_MEM_LIMIT:-512m}
+
+  storefront-prod:
+    <<: *storefront-common
+    container_name: commerce-storefront-prod
+    ports:
+      - '${STOREFRONT_PROD_PORT}:3000'
+    mem_limit: ${STOREFRONT_PROD_MEM_LIMIT:-512m}
+
+networks:
+  commerce:
+    name: ${COMMERCE_DOCKER_NETWORK}
+    external: true
