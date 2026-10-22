@@ -84,7 +84,9 @@ def main():
 
     if os.environ.get('GRADLE_OUTCOME', 'success') != 'success':
         return 0
-    if total == 0:
+    # 테스트가 있어야 하는 모듈이 하나도 없는 그룹(PR 이 테스트 없는 core 모듈만 고른 경우)은 0건이 정상이다.
+    # 하나라도 있으면 그 모듈이 아래 `empty` 에도 걸리지만, 합계 0 은 더 분명한 메시지로 먼저 알린다
+    if total == 0 and required:
         print('테스트가 한 건도 실행되지 않았는데 check 가 통과했다 — 이 초록불은 믿을 수 없다.', file=sys.stderr)
         return 1
     if empty:
