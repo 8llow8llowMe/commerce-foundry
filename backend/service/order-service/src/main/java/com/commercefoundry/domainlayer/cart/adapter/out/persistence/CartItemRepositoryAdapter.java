@@ -9,18 +9,17 @@ import com.commercefoundry.domainlayer.cart.application.exception.CartException;
 import com.commercefoundry.domainlayer.cart.application.mapper.CartItemMapper;
 import com.commercefoundry.domainlayer.cart.application.port.out.CartItemRepositoryPort;
 import com.commercefoundry.domainlayer.cart.domain.model.CartItem;
+import com.commercefoundry.global.persistence.ConstraintViolations;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.persistence.PersistenceException;
 import java.util.Collection;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
@@ -89,15 +88,9 @@ public class CartItemRepositoryAdapter implements CartItemRepositoryPort {
         return new CartException(CartErrorCode.CART_CONCURRENTLY_MODIFIED, cause);
     }
 
-    /** 원인 사슬에 Hibernate 제약 위반이 있고 그 제약 이름이 {@code constraintName} 인가 (DB 가 대소문자 · 따옴표를 붙여 돌려줘도 같게 본다). */
+    /** 원인 사슬에 그 이름의 제약 위반이 있는가 — PostgreSQL 서버 오류 필드를 먼저 본다(로케일과 무관하게) ({@link ConstraintViolations}). */
     static boolean violates(Throwable exception, String constraintName) {
-        for (Throwable cause = exception; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
-            if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null
-                && violation.getConstraintName().toLowerCase(Locale.ROOT).contains(constraintName)) {
-                return true;
-            }
-        }
-        return false;
+        return ConstraintViolations.violates(exception, constraintName);
     }
 
     @Override
