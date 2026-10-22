@@ -4,6 +4,9 @@ import type { SaleStatus } from '@/lib/catalog/types';
 // order-service 회원 장바구니 API 계약 (`/api/v1/carts/me/**`, BE #12). 정본은 BE DTO(@Schema)다.
 // 가격 · 상품명은 저장하지 않고 조회할 때마다 현재 SKU 값으로 내려온다 — 합계도 서버 값만 쓴다.
 
+/** 회원 장바구니 경로 — 장바구니 화면과 주문서가 같이 읽는다 */
+export const CART_PATH = '/api/v1/carts/me';
+
 export type CustomOption = { fieldKey: string; value: string };
 
 export type CartLine = {

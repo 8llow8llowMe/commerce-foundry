@@ -25,6 +25,8 @@ export function AddressForm({
   firstAddress,
   onSave,
   onCancel,
+  submitLabel,
+  cancelable = true,
 }: {
   title: string;
   initial: AddressDraft;
@@ -35,6 +37,10 @@ export function AddressForm({
   firstAddress: boolean;
   onSave: (draft: AddressDraft) => Promise<AddressErrors | null>;
   onCancel: () => void;
+  /** 저장 버튼 문구 — 주문서처럼 저장하지 않고 쓰기만 할 때 바꾼다. 기본은 "저장" */
+  submitLabel?: string;
+  /** false 면 취소 버튼을 두지 않는다 — 돌아갈 곳이 없을 때(주문서에 저장된 배송지가 없음) */
+  cancelable?: boolean;
 }) {
   const t = useDictionary().account.address;
   const [draft, setDraft] = useState(initial);
@@ -211,11 +217,13 @@ export function AddressForm({
       <FieldError messages={errors.form} />
       <div className="flex gap-2">
         <Button type="submit" disabled={saving} className="h-12 flex-1 tracking-[0.15em]">
-          {saving ? t.saving : t.save}
+          {saving ? t.saving : (submitLabel ?? t.save)}
         </Button>
-        <Button variant="secondary" onClick={onCancel} disabled={saving} className="h-12 px-6">
-          {t.cancel}
-        </Button>
+        {cancelable && (
+          <Button variant="secondary" onClick={onCancel} disabled={saving} className="h-12 px-6">
+            {t.cancel}
+          </Button>
+        )}
       </div>
     </form>
   );
