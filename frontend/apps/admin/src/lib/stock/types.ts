@@ -9,7 +9,7 @@ import type { Money } from '@cf/api-client';
  */
 
 export const STOCKS_PATH = '/api/v1/admin/stocks';
-export const ADMIN_PRODUCTS_PATH = '/api/v1/admin/products';
+export { ADMIN_PRODUCTS_PATH } from '@/lib/product/query';
 /** 재고 목록 조회 한 번에 넣을 수 있는 SKU 수(BE `@Size(max=100)`) */
 export const MAX_SKU_IDS = 100;
 
