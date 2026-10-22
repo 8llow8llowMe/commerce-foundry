@@ -12,15 +12,24 @@
 - 표에 적은 모듈이 settings.gradle 에 없으면(이름 변경 · 오타) 실패시킨다.
 - **PR 은 바뀐 모듈과 그 모듈에 의존하는 모듈만 고른다**(#179). `--changed-files` 에 저장소 루트 기준 경로를 한 줄에 하나씩 준다
   (`-` 면 stdin). 옵션이 없거나 첫 줄이 `__ALL__` 이면 전체다(develop push). 라벨이 아니라 경로로 정한다 — 라벨은 별도 workflow 라
-  순서가 보장되지 않고 손으로 바뀐다.
-  1. 빌드 설정 · CI 파일(`FULL_RUN_PATHS`)이 바뀌면 전체.
-  2. 모듈 `build.gradle` 이 `rootProject.file('...')` 로 읽는 파일이면 그 모듈(예: api-gateway 가 대조하는 `docs/api-design-guide.md`).
-     모듈 밖 파일을 읽는 테스트는 이렇게 선언해야 한다 — 선언이 없으면 그 파일만 바뀐 PR 에서 그 테스트가 돌지 않는다.
-  3. `<그룹>/<모듈>/` 아래 파일이면 그 모듈.
+  순서가 보장되지 않고 손으로 바뀐다. **판단이 서지 않으면 덜 돌지 않고 전체로 간다**(#211).
+  목록은 `git -c core.quotePath=false diff --name-only --no-renames` 로 만든다. git 기본값(`core.quotePath=true`)은 한글 경로를
+  `"backend/...\\355..."` 처럼 따옴표로 감싸 출력해, 감싼 채로 읽으면 backend 밖 파일이 되어 테스트가 0개가 된다.
+  1. 그대로 믿을 수 없는 경로면 전체 — 따옴표로 시작하는 경로(`"` · `\\` · 제어문자가 든 경로는 quotePath=false 여도 git 이 감싼다),
+     제어 · 서식 문자가 든 경로, UTF-8 로 읽지 못한 경로, 앞뒤 공백이 있는 경로. 목록이 비어 있어도 전체.
+  2. 빌드 설정 · CI 파일(`FULL_RUN_PATHS`)이면 전체.
+  3. 모듈 `build.gradle` 이 `rootProject.file('...')` 로 읽는 파일이거나 그 디렉터리 아래 파일이면 그 모듈(reader), `<그룹>/<모듈>/`
+     아래 파일이면 그 모듈(owner) — 둘 다면 합친다. 모듈 밖 파일을 읽는 테스트는 이렇게 선언해야 한다(예: api-gateway 가 대조하는
+     `docs/api-design-guide.md`) — 선언이 없으면 그 파일만 바뀐 PR 에서 그 테스트가 돌지 않는다.
+     루트 · 그룹 `build.gradle` 이 읽는 파일은 어느 모듈이 읽는지 몰라 전체.
   4. 테스트가 읽지 않는 파일(`NO_TEST_PATHS` — 문서 · 로컬 인프라)이면 없음. backend 밖 파일(frontend 등)도 없음.
   5. 그 밖에 판단하지 못한 backend 파일이면 전체(안전한 쪽).
   그다음 각 모듈 `build.gradle` 의 `project(':...')` 의존을 거꾸로 따라가 바뀐 모듈에 직 · 간접으로 의존하는 모듈을 더한다
   (`implementation` · `compileOnly` · `testFixtures` 모두 — 어느 쪽이든 깨질 수 있다).
+  **build.gradle 을 다 읽었다고 믿을 수 없으면 PR 도 전체다**(`BuildGraph.problems`): 모듈 파일의 project 참조(`project(` · `projects.` ·
+  `findProject(` 등) 수와 읽어 낸 의존 수가 다를 때, 루트 · 그룹 `build.gradle` 에 project 참조가 있을 때, `apply from` 으로 다른 스크립트를
+  읽을 때, `rootDir` · `layout.` · `'../'` · 변수 인자 `rootProject.file(x)` 처럼 이 스크립트가 경로를 풀 수 없게 파일을 읽을 때,
+  주석 · 문자열이 닫히지 않았을 때.
 - 결과는 GITHUB_OUTPUT 에 `matrix=` · `run_tests=` 로 쓰고, 고른 이유를 stdout 과 GITHUB_STEP_SUMMARY 에 남긴다.
   고를 모듈이 없으면(문서만 바꾼 PR) `run_tests=false` 이고 test job 을 건너뛴다. 로컬에서도 그대로 돌려 볼 수 있다.
 """
@@ -32,6 +41,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import unicodedata
 from collections import deque
 from pathlib import Path
 
@@ -55,8 +65,10 @@ FULL_RUN_PATHS = [
     '{backend}/gradlew.bat',
     '.github/workflows/backend-ci.yml',
     '.github/scripts/backend-*',
+    # workflow 가 쓰는 로컬 composite action. backend-ci.yml 의 `paths` 에도 있다
+    '.github/actions/*',
 ]
-# 테스트가 읽지 않는 backend 파일. 테스트가 읽게 되면 그 모듈 build.gradle 에 `inputs.file(rootProject.file(...))` 로 선언한다(2단계가 먼저 본다).
+# 테스트가 읽지 않는 backend 파일. 테스트가 읽게 되면 그 모듈 build.gradle 에 `inputs.file(rootProject.file(...))` 로 선언한다(3단계가 먼저 본다).
 # backend-ci.yml 의 `paths` 제외 목록과 같게 둔다 — 이 파일들만 바꾼 PR 은 workflow 자체가 뜨지 않는다(#194). 선언 파일을 늘리면 거기서 다시 넣는다
 NO_TEST_PATHS = [
     '{backend}/docs/*',
@@ -66,18 +78,67 @@ NO_TEST_PATHS = [
     '{backend}/docker/*',
 ]
 
-BLOCK_COMMENT = re.compile(r'/\*.*?\*/', re.S)
-LINE_COMMENT = re.compile(r'//[^\n]*')
 # `include 'a', 'b'` · 여러 줄에 걸친 `include 'a',\n 'b'` · `include('a', 'b')` 를 읽는다. 인자에 변수 · 표현식을 쓰면 못 읽는데,
 # 그때는 아래 교차 검사가 실패시킨다
 INCLUDE = re.compile(r"""\binclude\b\s*\(?\s*((?:['"][^'"\n]+['"]\s*,?\s*)+)\)?""")
 QUOTED = re.compile(r"""['"]([^'"\n]+)['"]""")
-PROJECT_DEPENDENCY = re.compile(r"""\bproject\(\s*['"]:?([^'"\n]+)['"]\s*\)""")
-ROOT_FILE_INPUT = re.compile(r"""\brootProject\.file\(\s*['"]([^'"\n]+)['"]\s*\)""")
+# 읽어 내는 의존 형식: project(':a') · project(":a") · project('a') · project(path: ':a', ...). 여러 줄에 걸쳐도 된다
+PROJECT_DEPENDENCY = re.compile(r"""\bproject\s*\(\s*(?:path\s*:\s*)?['"]:?([^'"\n]+)['"]\s*[,)]""")
+# 다른 모듈을 가리킬 수 있는 참조 전부. 모듈 파일에서 이 수가 위에서 읽어 낸 수와 다르면(`projects.x` 타입 세이프 접근 ·
+# 괄호 없는 `project ':a'` · 변수 인자 · findProject 등) 의존 그래프를 믿지 않는다
+PROJECT_REFERENCE = re.compile(r"""\b(?:project|findProject|evaluationDependsOn)\s*\(|\bproject\s+['"]|\bprojects\s*\.""")
+# 다른 스크립트를 끌어오면 그 안의 의존 · 파일 입력을 읽지 못한다
+SCRIPT_APPLY = re.compile(r"""\bapply\s*\(?\s*from\b""")
+ROOT_FILE_CALL = re.compile(r"""\brootProject\s*\.\s*file\s*\(""")
+ROOT_FILE_INPUT = re.compile(r"""\brootProject\s*\.\s*file\s*\(\s*['"]([^'"\n]+)['"]\s*\)""")
+# 이 스크립트가 경로를 풀 수 없는 모듈 밖 파일 참조. `layout.buildDirectory` 는 모듈 자기 출력이라 뺀다
+OPAQUE_FILE_REFERENCE = re.compile(
+    r"""\b(?:rootDir|settingsDir|getRootDir|getSettingsDir)\b"""
+    r"""|\brootProject\s*\.\s*(?:projectDir|getProjectDir|layout|getLayout|files|fileTree)\b"""
+    r"""|\blayout\s*\.(?!\s*buildDirectory\b)"""
+    r"""|\bparent\s*\.\s*(?:projectDir|layout|file|files|fileTree)\b"""
+    r"""|['"][^'"\n]*\.\.[/\\]|['"]\.\.['"]""")
+# 경로에 이 범주의 문자가 있으면 그대로 믿지 않는다: 제어 · 서식(BOM · 방향 제어 등) · 서로게이트(UTF-8 로 못 읽은 바이트) ·
+# 사용자 정의 · 미할당 · 줄 · 문단 구분
+UNSAFE_CATEGORIES = {'Cc', 'Cf', 'Cs', 'Co', 'Cn', 'Zl', 'Zp'}
+
+
+def scan_code(text):
+    """`//` · `/* */` 주석을 지운 코드와, 닫히지 않은 것(없으면 None)을 돌려준다.
+
+    문자열('…' · "…" · '''…''' · \"\"\"…\"\"\") 안의 `/*` · `//`(예: `'**/*.yml'` · `'https://…'`)는 주석으로 보지 않는다.
+    정규식으로 주석을 먼저 지우면 문자열 속 `/*` 부터 다음 `*/` 까지가 통째로 사라져 그 사이의 project(...) 를 놓친다.
+    """
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text.startswith('//', i):
+            end = text.find('\n', i)
+            i = n if end < 0 else end
+            continue
+        if text.startswith('/*', i):
+            end = text.find('*/', i + 2)
+            if end < 0:
+                return ''.join(out), '/* 주석'
+            out.append(' ')
+            i = end + 2
+            continue
+        if text[i] in '\'"':
+            quote = text[i:i + 3] if text[i:i + 3] in ("'''", '"""') else text[i]
+            j = i + len(quote)
+            while j < n and not text.startswith(quote, j):
+                j += 2 if text[j] == '\\' else 1
+            if j >= n:
+                return ''.join(out) + text[i:], '문자열'
+            out.append(text[i:j + len(quote)])
+            i = j + len(quote)
+            continue
+        out.append(text[i])
+        i += 1
+    return ''.join(out), None
 
 
 def strip_comments(text):
-    return LINE_COMMENT.sub('', BLOCK_COMMENT.sub('', text))
+    return scan_code(text)[0]
 
 
 def included_modules(settings: Path):
@@ -110,17 +171,68 @@ def check_modules(modules, dirs):
     return errors
 
 
-def read_build_files(backend: Path, modules):
-    """모듈 → (의존 모듈 집합, rootProject.file 로 읽는 파일 집합). 주석 안의 project(...) 는 세지 않는다."""
-    dependencies, root_inputs = {}, {}
+class BuildGraph:
+    """build.gradle 에서 읽은 모듈 의존 · 모듈 밖 파일 입력. `problems` 가 하나라도 있으면 PR 도 전체로 간다."""
+
+    def __init__(self):
+        self.dependencies = {}      # 모듈 → 의존 모듈 집합. 주석 안의 project(...) 는 세지 않는다
+        self.inputs = {}            # 모듈 → rootProject.file 로 읽는 저장소 루트 기준 경로 집합(파일 · 디렉터리)
+        self.shared_inputs = set()  # 루트 · 그룹 build.gradle 이 rootProject.file 로 읽는 경로 — 어느 모듈이 읽는지 모른다
+        self.problems = []          # 다 읽었다고 믿을 수 없는 이유
+
+
+def read_code(build_file: Path, name, problems):
+    code, unclosed = scan_code(build_file.read_text(encoding='utf-8-sig'))
+    if unclosed:
+        problems.append('%s 의 %s 이 닫히지 않음' % (name, unclosed))
+    if SCRIPT_APPLY.search(code):
+        problems.append('%s 가 apply from 으로 다른 스크립트를 읽음' % name)
+    opaque = OPAQUE_FILE_REFERENCE.search(code)
+    if opaque:
+        problems.append('%s 가 경로를 풀 수 없게 파일을 읽음(%s)' % (name, opaque.group(0).strip()))
+    return code
+
+
+def read_file_inputs(code, name, backend_rel, problems):
+    """rootProject.file('<backend 기준 경로>') → 저장소 루트 기준 경로 집합. 풀 수 없는 인자는 problems 에 남긴다."""
+    paths = ROOT_FILE_INPUT.findall(code)
+    if len(ROOT_FILE_CALL.findall(code)) != len(paths):
+        problems.append('%s 의 rootProject.file(...) 인자를 다 읽지 못함(문자열 하나가 아님)' % name)
+    inputs = set()
+    for path in paths:
+        normalized = posixpath.normpath(posixpath.join(backend_rel, path))
+        if re.search(r'[$\\:]', path) or path.startswith('/') or normalized in ('.', '..') or normalized.startswith('../'):
+            problems.append('%s 의 rootProject.file(%r) 경로를 풀 수 없음' % (name, path))
+        else:
+            inputs.add(normalized)
+    return inputs
+
+
+def read_build_graph(backend: Path, backend_rel, modules):
+    graph = BuildGraph()
     for module in modules:
-        text = strip_comments((backend / module / 'build.gradle').read_text(encoding='utf-8-sig'))
-        dependencies[module] = {path.strip(':').replace(':', '/') for path in PROJECT_DEPENDENCY.findall(text)} - {module}
-        root_inputs[module] = {posixpath.normpath(path) for path in ROOT_FILE_INPUT.findall(text)}
-    unknown = sorted('%s → %s' % (module, dep) for module, deps in dependencies.items() for dep in deps if dep not in dependencies)
+        name = '%s/build.gradle' % module
+        code = read_code(backend / module / 'build.gradle', name, graph.problems)
+        found = PROJECT_DEPENDENCY.findall(code)
+        references = len(PROJECT_REFERENCE.findall(code))
+        if references != len(found):
+            graph.problems.append('%s 의 project 참조 %d개 중 %d개만 의존으로 읽음' % (name, references, len(found)))
+        graph.dependencies[module] = {path.strip(':').replace(':', '/') for path in found} - {module}
+        graph.inputs[module] = read_file_inputs(code, name, backend_rel, graph.problems)
+    # 루트 · 그룹 build.gradle 은 subprojects · allprojects 블록으로 여러 모듈에 걸린다 — project 참조가 어느 모듈의 의존인지 모른다
+    for build_file in [backend / 'build.gradle'] + sorted(backend.glob('*/build.gradle')):
+        if not build_file.is_file():
+            continue
+        name = build_file.relative_to(backend).as_posix()
+        code = read_code(build_file, name, graph.problems)
+        if PROJECT_REFERENCE.search(code):
+            graph.problems.append('%s 에 project 참조가 있음(어느 모듈의 의존인지 모름)' % name)
+        graph.shared_inputs |= read_file_inputs(code, name, backend_rel, graph.problems)
+    unknown = sorted('%s → %s' % (module, dep) for module, deps in graph.dependencies.items()
+                     for dep in deps if dep not in graph.dependencies)
     if unknown:
         raise ValueError('build.gradle 이 settings.gradle 에 없는 모듈을 의존한다: %s' % ', '.join(unknown))
-    return dependencies, root_inputs
+    return graph
 
 
 def dependents_closure(seeds, dependencies):
@@ -140,43 +252,71 @@ def dependents_closure(seeds, dependencies):
     return added
 
 
-def classify(path, backend_rel, modules, root_inputs):
-    """바뀐 파일 하나 → ('all' | 'module' | 'none', 모듈, 이유)."""
+def untrusted_path(path):
+    """경로를 그대로 믿을 수 없으면 이유, 믿을 수 있으면 None."""
+    if path.startswith('"'):
+        return 'git 이 따옴표로 감싼 경로(core.quotePath 이스케이프)'
+    if any(0xDC80 <= ord(ch) <= 0xDCFF for ch in path):
+        return 'UTF-8 로 읽지 못한 경로'
+    if any(unicodedata.category(ch) in UNSAFE_CATEGORIES for ch in path):
+        return '제어 · 서식 문자가 든 경로'
+    if path != path.strip():
+        return '앞뒤 공백이 있는 경로'
+    return None
+
+
+def covers(declared, path):
+    """선언한 입력(파일 또는 디렉터리)이 path 를 덮는가. 디렉터리면 그 아래 파일 전부다."""
+    return path == declared or path.startswith(declared + '/')
+
+
+def classify(path, backend_rel, modules, graph):
+    """바뀐 파일 하나 → ('all' | 'module' | 'none', 모듈 목록, 이유)."""
     def matches(patterns):
         return any(fnmatch.fnmatchcase(path, pattern.format(backend=backend_rel)) for pattern in patterns)
 
+    problem = untrusted_path(path)
+    if problem:
+        return 'all', None, problem
     if matches(FULL_RUN_PATHS):
         return 'all', None, '빌드 설정 · CI 파일'
-    if path.startswith(backend_rel + '/'):
-        inside = path[len(backend_rel) + 1:]
-        readers = sorted(module for module, inputs in root_inputs.items() if inside in inputs)
-        if readers:
-            return 'module', readers, 'build.gradle 이 rootProject.file 로 읽는 파일'
-        owner = next((module for module in modules if inside.startswith(module + '/')), None)
-        if owner:
-            return 'module', [owner], '모듈 안 파일'
-        if matches(NO_TEST_PATHS):
-            return 'none', None, '테스트가 읽지 않는 파일'
-        return 'all', None, '판단하지 못한 backend 파일(안전하게 전체)'
-    return 'none', None, 'backend 밖 파일'
+    if any(covers(item, path) for item in graph.shared_inputs):
+        return 'all', None, '루트 · 그룹 build.gradle 이 rootProject.file 로 읽는 파일'
+    in_backend = path.startswith(backend_rel + '/')
+    # reader(모듈 밖 파일을 읽는 모듈)와 owner(파일이 든 모듈)는 둘 중 하나가 아니라 합집합이다
+    readers = {module for module, inputs in graph.inputs.items() if any(covers(item, path) for item in inputs)}
+    inside = path[len(backend_rel) + 1:] if in_backend else None
+    owner = next((module for module in modules if inside.startswith(module + '/')), None) if in_backend else None
+    if readers or owner:
+        reasons = (['build.gradle 이 rootProject.file 로 읽는 파일'] if readers else []) + (['모듈 안 파일'] if owner else [])
+        return 'module', sorted(readers | ({owner} if owner else set())), ' · '.join(reasons)
+    if not in_backend:
+        return 'none', None, 'backend 밖 파일'
+    if matches(NO_TEST_PATHS):
+        return 'none', None, '테스트가 읽지 않는 파일'
+    return 'all', None, '판단하지 못한 backend 파일(안전하게 전체)'
 
 
-def select_modules(changed, backend_rel, modules, dependencies, root_inputs):
+def select_modules(changed, backend_rel, modules, graph):
     """반환: (전체 여부, 전체 사유, 고른 모듈 → 더한 이유, 파일별 판정 목록)."""
     if changed is None or (changed and changed[0] == ALL_MARKER):
         reason = '바뀐 파일 목록 없음(develop push 등)' if changed is None else 'PR diff 를 만들지 못함'
         return True, reason, {}, []
+    if not changed:
+        return True, '바뀐 파일 목록이 비어 있음(판단 못 함)', {}, []
     decisions, seeds, full_reason = [], set(), None
     for path in changed:
-        kind, owners, reason = classify(path, backend_rel, modules, root_inputs)
+        kind, owners, reason = classify(path, backend_rel, modules, graph)
         decisions.append((path, kind, owners, reason))
         if kind == 'all' and full_reason is None:
-            full_reason = '%s — %s' % (reason, path)
+            full_reason = '%s — `%s`' % (reason, cell(path))
         elif kind == 'module':
             seeds.update(owners)
     if full_reason:
         return True, full_reason, {}, decisions
-    return False, None, dependents_closure(seeds, dependencies), decisions
+    if graph.problems:
+        return True, 'build.gradle 을 다 읽지 못함 — %s' % '; '.join(graph.problems), {}, decisions
+    return False, None, dependents_closure(seeds, graph.dependencies), decisions
 
 
 def build_matrix(modules, selected=None):
@@ -209,8 +349,13 @@ def build_matrix(modules, selected=None):
 def read_changed_files(source):
     if source is None:
         return None
-    text = sys.stdin.read() if source == '-' else Path(source).read_text(encoding='utf-8')
-    return [line.strip() for line in text.splitlines() if line.strip()]
+    data = sys.stdin.buffer.read() if source == '-' else Path(source).read_bytes()
+    # UTF-8 이 아닌 바이트는 예외로 plan 을 죽이지 않고 서로게이트로 남겨 classify 가 전체로 보낸다.
+    # utf-8-sig: Windows 편집기 · PowerShell 이 붙인 BOM 을 뗀다 — 남기면 첫 경로가 backend 밖이 된다
+    text = data.decode('utf-8-sig', errors='surrogateescape')
+    # splitlines() 는 U+2028 · U+0085 같은 문자에서도 끊어 경로 하나를 둘로 만든다 — 줄바꿈으로만 나눈다. 공백은 지우지 않는다(경로의 일부)
+    lines = (line[:-1] if line.endswith('\r') else line for line in text.split('\n'))
+    return [line for line in lines if line.strip()]
 
 
 def repo_relative(backend: Path):
@@ -219,6 +364,17 @@ def repo_relative(backend: Path):
         return backend.relative_to(Path(top.stdout.strip()).resolve()).as_posix()
     except (OSError, subprocess.CalledProcessError, ValueError):
         return backend.name
+
+
+def cell(text):
+    """요약 표에 쓸 수 있게 바꾼다 — 못 읽은 바이트 · 제어문자는 `\\xNN` 꼴로(그대로 쓰면 출력 인코딩에서 예외가 난다), 표를 깨는 `|` · `` ` `` 도."""
+    def safe(ch):
+        if 0xDC80 <= ord(ch) <= 0xDCFF:
+            return '\\x%02x' % (ord(ch) - 0xDC00)
+        if unicodedata.category(ch) in UNSAFE_CATEGORIES:
+            return ch.encode('unicode_escape').decode('ascii')
+        return ch
+    return ''.join(safe(ch) for ch in text).replace('|', '\\|').replace('`', "'")
 
 
 def report(full, full_reason, selected, decisions, matrix):
@@ -233,7 +389,7 @@ def report(full, full_reason, selected, decisions, matrix):
         lines += ['', '| 바뀐 파일 | 판정 | 모듈 |', '|------|------|------|']
         shown = decisions[:60]
         for path, kind, owners, reason in shown:
-            lines.append('| `%s` | %s | %s |' % (path, reason, ', '.join('`%s`' % o for o in owners) if owners else '-'))
+            lines.append('| `%s` | %s | %s |' % (cell(path), cell(reason), ', '.join('`%s`' % o for o in owners) if owners else '-'))
         if len(decisions) > len(shown):
             lines.append('| … 외 %d개 | | |' % (len(decisions) - len(shown)))
     added = sorted((module, via) for module, via in selected.items() if via)
@@ -265,9 +421,10 @@ def main():
         print('\n'.join(errors), file=sys.stderr)
         return 1
     try:
-        dependencies, root_inputs = read_build_files(backend, modules)
+        backend_rel = repo_relative(backend)
+        graph = read_build_graph(backend, backend_rel, modules)
         full, full_reason, selected, decisions = select_modules(
-            read_changed_files(args.changed_files), repo_relative(backend), modules, dependencies, root_inputs)
+            read_changed_files(args.changed_files), backend_rel, modules, graph)
         matrix = build_matrix(modules, None if full else set(selected))
     except ValueError as error:
         print(error, file=sys.stderr)
