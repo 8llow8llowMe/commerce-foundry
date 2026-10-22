@@ -39,7 +39,7 @@ export function cartActionResult(
 
 /**
  * 담기 버튼 하나의 상태 — 진행 중 · 429 쿨다운 · 결과 문구. 상세 구매 패널과 Shop the Look 이 같이 쓴다.
- * 선택을 바꾸면 이전 결과 문구는 지운다(clear).
+ * 선택을 바꾸면 이전 결과 문구는 지운다(clear). 다만 429 쿨다운 중에는 남긴다 — 버튼이 막힌 이유가 사라지지 않게.
  */
 export function useCartAction(): {
   pending: boolean;
@@ -69,6 +69,8 @@ export function useCartAction(): {
     coolingDown: cooldown.coolingDown,
     result,
     add,
-    clear: () => setResult(null),
+    clear: () => {
+      if (!cooldown.coolingDown) setResult(null);
+    },
   };
 }
