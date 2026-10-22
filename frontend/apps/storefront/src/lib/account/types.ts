@@ -13,6 +13,9 @@ export type MemberProfile = {
 /** `PATCH /api/v1/members/me` — 보낸 칸만 바꾼다. phone 은 빈 문자열이 "지우기" 다 */
 export type ProfilePatch = Partial<{ name: string; phone: string; marketingAgreed: boolean }>;
 
+/** 회원 배송지 경로 — 배송지 관리와 주문서가 같이 읽는다 */
+export const ADDRESSES_PATH = '/api/v1/members/me/shipping-addresses';
+
 export type ShippingAddress = {
   addressId: string;
   label: string | null;

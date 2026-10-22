@@ -6,11 +6,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDictionary, useLocale } from '@/components/i18n/LocaleProvider';
 import {
   accountErrorText,
-  DOMESTIC_COUNTRY,
   addressErrors,
   draftFrom,
   emptyDraft,
-  formatPhone,
   isStaleAddress,
   isUnknownOutcome,
   toAddressBody,
@@ -18,11 +16,15 @@ import {
   type AddressErrors,
 } from '@/lib/account/address-form';
 import { countryOptions, defaultCountry, type CountryOption } from '@/lib/account/countries';
-import type { ShippingAddress, ShippingAddressList } from '@/lib/account/types';
+import {
+  ADDRESSES_PATH,
+  type ShippingAddress,
+  type ShippingAddressList,
+} from '@/lib/account/types';
+import { AddressDetails } from './AddressDetails';
 import { AddressForm } from './AddressForm';
 import { SignedOutNotice } from './SignedOutNotice';
 
-const ADDRESSES_PATH = '/api/v1/members/me/shipping-addresses';
 const RETURN_PATH = '/mypage/addresses';
 
 type Load = { status: 'loading' } | { status: 'failed' } | { status: 'signedOut' };
@@ -268,8 +270,6 @@ function AddressItem({
 }) {
   const t = useDictionary().account.address;
   const name = address.label ?? address.recipientName;
-  const country = countries.find((option) => option.code === address.countryCode)?.name;
-  const region = [address.city, address.stateProvince].filter(Boolean).join(', ');
   const action = 'text-sm underline-offset-4 hover:underline disabled:opacity-50';
 
   return (
@@ -280,18 +280,7 @@ function AddressItem({
           <span className="bg-accent px-2 py-0.5 text-xs text-accent-fg">{t.default}</span>
         )}
       </div>
-      <div className="flex flex-col gap-0.5 text-sm text-muted-fg">
-        {address.label && <span>{address.recipientName}</span>}
-        <span>{formatPhone(address.recipientPhone, address.countryCode)}</span>
-        <span>
-          {address.postalCode && `[${address.postalCode}] `}
-          {address.addressLine1}
-          {address.addressLine2 && ` ${address.addressLine2}`}
-        </span>
-        {address.countryCode !== DOMESTIC_COUNTRY && (
-          <span>{[region, country ?? address.countryCode].filter(Boolean).join(', ')}</span>
-        )}
-      </div>
+      <AddressDetails address={address} countries={countries} />
       {confirming ? (
         <div className="flex flex-wrap items-center gap-4">
           <span role="alert" className="text-sm">
