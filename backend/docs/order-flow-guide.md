@@ -85,9 +85,9 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 | 저장 | PostgreSQL `orders.cart_item` · `orders.cart_item_custom_option` (Redis 아님) |
 | 줄 동일성 | (회원, SKU, 맞춤 제작 입력 해시). 같은 줄을 다시 담으면 수량을 더한다. 키 · 값은 앞뒤 공백을 자르고 Unicode NFC 로 정규화한다(저장값과 해시 모두 — NFD 로 온 한글도 같은 줄). 해시는 fieldKey 순으로 정렬한 정규화 입력의 SHA-256, 입력이 없으면 빈 문자열. 유니크 키가 동시 담기 중복을 막는다(409 `CART_007`) |
 | 상한 | 줄 50개, 줄당 수량 1~99 이고 상품의 `maxQuantityPerOrder`(1회 주문 최대 수량 — 상품 컬럼)가 더 작으면 그것. 장바구니는 **줄 단위로만** 막는다 — 같은 상품의 다른 SKU(S · M) · 다른 맞춤 입력 줄의 합은 보지 않으므로, 담긴 그대로 주문하면 상품 단위 상한(§2-3 `ORDER_005`)에서 거절될 수 있다. **50줄은 느슨한 상한이다** — 줄 수를 센 뒤 넣으므로 동시 담기 · 병합에서 소폭 넘을 수 있다. SKU 조회는 100개씩 나눠 불러 넘어도 조회 · 쓰기 응답 · 삭제가 막히지 않는다 |
-| 담기 거절 | 없는 SKU 404, `purchasable=false`(품절 · 판매 종료 · 숨김) 409, 맞춤 제작이 아닌데 입력이 있음 400, 수량 · 줄 상한 초과 409. 입력값이 상품 입력 항목 정의에 맞는지는 주문 생성(#13)이 본다 |
+| 담기 거절 | 없는 SKU 404, `purchasable=false`(품절 · 판매 종료 · 숨김 · 삭제) 409, 맞춤 제작이 아닌데 입력이 있음 400, 수량 · 줄 상한 초과 409. 입력값이 상품 입력 항목 정의에 맞는지는 주문 생성(#13)이 본다 |
 | 수량 변경 · 삭제 | 품절 · 판매 종료 줄도 허용한다. 수량 변경은 트랜잭션 두 구간(소유 확인 → 원격 상한 조회 → 다시 읽어 쓰기)이라 사이의 변경은 마지막 쓰기가 이긴다. `@Version` 409(`CART_007`)는 쓰기 구간 안의 동시 수정에서만 난다 |
-| 조회 상태 | SKU 없음 → `STOP_SELLING`, `purchasable` → `ON_SALE`, 판매 상태 `SOLD_OUT` → `SOLD_OUT`(숨긴 상품이라도 품절이면 품절), 그 밖(판매 종료 · 품절이 아닌 숨김) → `STOP_SELLING`. 합계는 `ON_SALE` 이고 수량이 현재 상한 안인 줄만 더한다(없으면 null) |
+| 조회 상태 | SKU 없음 → `STOP_SELLING`, `purchasable` → `ON_SALE`, 판매 상태 `SOLD_OUT` → `SOLD_OUT`(숨긴 상품이라도 품절이면 품절), 그 밖(판매 종료 · 품절이 아닌 숨김) → `STOP_SELLING`. 삭제(soft delete)된 상품의 SKU 도 행이 오고 숨김 + 판매 종료와 같은 결이라 `STOP_SELLING` 이다 — "없는 SKU" 가 되지 않아 줄의 이름 · 가격이 남는다(`api-design-guide.md` §2-7). 합계는 `ON_SALE` 이고 수량이 현재 상한 안인 줄만 더한다(없으면 null) |
 | 병합 | 로그인 직후 로컬 장바구니를 한 번 보낸다(최대 50개, 오래 전에 담은 것부터 — 새 줄은 요청 순서로 아이디가 커져 나중 항목이 위에 보인다). 담을 수 없는 항목은 **항목 단위로** 건너뛰어 `skippedItems: [{index, skuId, reason}]` 로 알린다 — reason 은 `SKU_NOT_FOUND` · `NOT_PURCHASABLE` · `CUSTOM_OPTION_NOT_ALLOWED` · `LINE_LIMIT_EXCEEDED` · `QUANTITY_LIMIT_EXCEEDED`(1회 주문 최대 수량 0) 순으로 판정한다. 같은 SKU 라도 항목마다 따로 판정한다. 같은 줄은 더한 뒤 상한에서 자른다(거절하지 않는다, 이미 넘은 줄을 줄이지 않는다). **멱등하지 않다** — 재전송하면 한 번 더 더해진다. 결제 · 재고와 무관하고 상한이 피해를 제한해 멱등 키를 두지 않는다 |
 | 원격 호출 | SKU 는 `catalog` 컨텍스트(`CatalogSkuProcessor`, 주문 생성과 공용)가 `GET /internal/v1/skus` 로 몇 줄이든 100개씩 묶어 부른다(보통 한 번, 장바구니가 비면 호출하지 않는다). Facade 에 트랜잭션을 걸지 않고 DB 구간만 Processor 에서 좁힌다. product-service 장애는 503 `CART_008` 이다(`CATALOG_001` 을 `CartExceptionHandler` 가 번역) — 쓰기 뒤 장바구니 재조회가 실패해도 쓰기는 커밋돼 있다 |
 
@@ -113,8 +113,8 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 넘기고(컨텍스트 간 Processor 주입 금지 — `architecture-guide.md` §3), 계산 Processor 는 배송비 견적(delivery)만 부른다. DB 를 쓰지 않아 트랜잭션이 없다.
 
 판정은 아래 순서로 **처음 걸리는 단계 하나**로 거절하고, 그 단계에 걸린 줄은 모두 모아 고객이 알아볼 이름("상품명(옵션명)", 옵션이 없으면 상품명, 없는 SKU 는
-"찾을 수 없는 상품")으로 메시지에 싣는다. SKU 아이디 · product-service 메시지는 넣지 않는다. 품절이 아닌데 `purchasable=false` 인 SKU(숨김 · 판매 종료 —
-응답으로는 둘을 가를 수 없다)는 "판매하지 않는 상품" 이다 — 아이디만 넣은 요청으로 숨긴 상품명이 새지 않게. 품절은 이름을 알린다(§2-1 조회 상태와 같은 경계).
+"찾을 수 없는 상품")으로 메시지에 싣는다. SKU 아이디 · product-service 메시지는 넣지 않는다. 품절이 아닌데 `purchasable=false` 인 SKU(숨김 · 판매 종료 · 삭제 —
+응답으로는 가를 수 없다)는 "판매하지 않는 상품" 이다 — 아이디만 넣은 요청으로 숨긴 상품명이 새지 않게. 품절은 이름을 알린다(§2-1 조회 상태와 같은 경계).
 중복 줄(1)이 판매 가능(2)보다 먼저라 중복 메시지도 이 규칙을 거친다.
 
 1. 맞춤 제작 입력을 정규화(§2-1 "줄 동일성" 과 같은 규칙 — order 의 `OrderCustomOptions`)한 뒤 같은 (SKU, 입력 해시) 줄이 두 번 이상 → `ORDER_008`
@@ -253,8 +253,8 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 
 1. 같은 `skuId` 는 수량을 합치고 SKU 아이디 오름차순으로 놓는다.
 2. 같은 주문의 활성 선점이 있으면 — SKU 별 수량이 같으면 그 선점을 그대로 200(멱등), 다르면 409 `PRODUCT_023`.
-3. SKU · 상품(숨김 포함)을 in 절로 읽어 판매 가능 조건(상품 노출 · 판매중 && SKU 판매중 — internal SKU 조회의 `purchasable` 과 같은 규칙에서 재고만 뺀 것)을
-   확인한다. 없는 SKU · 숨긴 상품 · 판매 종료는 모두 모아 409 `PRODUCT_022`.
+3. SKU · 상품(숨김 · 삭제 포함)을 in 절로 읽어 판매 가능 조건(상품 삭제 안 됨 · 노출 · 판매중 && SKU 판매중 — internal SKU 조회의 `purchasable` 과 같은 규칙에서
+   재고만 뺀 것, `SaleAvailability.isOpenForSale`)을 확인한다. 없는 SKU · 숨긴 상품 · 삭제된 상품 · 판매 종료는 모두 모아 409 `PRODUCT_022`.
 4. 선점 **헤더만** INSERT 하고 flush 한다(RESERVED, `expires_at = now + ttl`) — 같은 주문의 동시 생성은 유니크 키에서 먼저 커밋된 쪽을 기다렸다가
    409 `PRODUCT_026` 로 끝나 **재고를 건드리지 않는다**. 차감을 먼저 하면 재고가 빠듯할 때 중복 요청이 409 대신 `PRODUCT_021` 을 받는다.
 5. **모든 항목**에 SKU 오름차순으로 조건부 차감(`stock_managed = true and available_quantity >= qty`)을 시도한다. 1행이면 `deducted = true`.
@@ -324,7 +324,7 @@ RESERVED ──확정──▶ CONFIRMED
 |------|------|----|
 | `PRODUCT_003` | 404 | 없는 재고 선점 |
 | `PRODUCT_021` | 409 | 재고 부족 (행 없는 SKU 포함) — 메시지에 SKU 아이디 목록 |
-| `PRODUCT_022` | 409 | 판매 불가 SKU (없는 SKU · 숨긴 상품 · 판매 종료) — 메시지에 SKU 아이디 목록 |
+| `PRODUCT_022` | 409 | 판매 불가 SKU (없는 SKU · 숨긴 상품 · 삭제된 상품 · 판매 종료) — 메시지에 SKU 아이디 목록 |
 | `PRODUCT_023` | 409 | 같은 주문의 활성 선점과 항목이 다르다 |
 | `PRODUCT_024` | 409 | 이미 확정된 선점의 해제 |
 | `PRODUCT_025` | 409 | 이미 해제 · 만료된 선점의 확정 |

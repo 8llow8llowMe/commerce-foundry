@@ -105,7 +105,8 @@ com.commercefoundry
 - 예외 3종 세트 구성은 `coding-conventions.md` §8 을 따른다.
 - **고객 · 어드민 · 서비스 간 API 는 진입 패키지(`in/web` / `in/admin` / `in/internal`)부터 나누고 DTO 를 공유하지 않는다.**
   같은 상품이라도 고객 응답에는 원가·재고 수량·내부 메모가 없고, 어드민 응답에는 있다.
-  서비스 간 SKU 조회는 숨긴 상품의 SKU 행과 `purchasable` 을 내리는데, 이것이 고객 응답에 나가면 안 된다.
+  서비스 간 SKU 조회는 숨긴 · 삭제된 상품의 SKU 행과 `purchasable` 을 내리는데, 이것이 고객 응답에 나가면 안 된다.
+  고객 상품 응답의 칸은 허용 목록 테스트(`ProductWebResponseComponentsTest`)로 고정한다 — 버전 · 삭제 · 은퇴 · 무게 · HS 코드 같은 칸이 들어오면 실패한다.
   DTO 를 공유하면 언젠가 한쪽 필드가 다른 응답으로 샌다.
 - Processor·Port·Domain 은 고객/어드민/서비스 간이 **공유한다.** 나누는 것은 진입·응답 모양까지다.
 
