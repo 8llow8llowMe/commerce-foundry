@@ -54,6 +54,7 @@
 
 1. `backend/.env.example` 에 이름과 설명 주석을 추가한다. **값은 비운다** (로컬 기본 호스트·포트처럼 비밀이 아닌 값만 예외).
 2. 쓰는 서비스의 `application*.yml` 에 플레이스홀더를 추가한다.
+   같은 PR 에서 그 모듈의 배포 compose(`docker-compose-<module>.yml`) environment 에도 키를 더한다 — 빠뜨리면 배포 컨테이너에 값이 들어가지 않는다 ([deploy-guide.md](deploy-guide.md) §8).
 3. PR 본문에 `Vault 등록 필요: KEY_NAME (dev/prod)` 를 적는다. **값은 적지 않는다.**
 4. 머지 전에 Vault 에 dev 값을, 배포 전에 prod 값을 등록한다.
 5. 이름을 바꾸면 위 세 곳을 같은 PR 에서 바꾼다.
