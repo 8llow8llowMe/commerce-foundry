@@ -47,7 +47,7 @@ import reactor.core.publisher.Mono;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class GatewayRateLimitTest {
 
-    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service");
+    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service");
     private static final String CART_ITEMS = "/api/v1/carts/me/items";
     private static final String ORDERS = "/api/v1/orders";
     private static final String ORDER_QUOTES = "/api/v1/orders/quotes";

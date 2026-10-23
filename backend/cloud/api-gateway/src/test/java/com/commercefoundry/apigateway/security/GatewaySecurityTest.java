@@ -56,7 +56,7 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * 게이트웨이 보안 체인 — 실제 서버 + 실제 디코더(테스트 픽스처 키)로 본다 ({@code security-guide.md} §7).
  *
- * <p>서비스 대신 JDK {@link HttpServer} 하나를 서비스 5종의 인스턴스로 등록해(simple discovery) 하류에 닿았는지 · 넘어간 헤더를 기록한다.
+ * <p>서비스 대신 JDK {@link HttpServer} 하나를 서비스 전부의 인스턴스로 등록해(simple discovery) 하류에 닿았는지 · 넘어간 헤더를 기록한다.
  * 차단 목록 조회기는 스텁({@link StubRevocationChecker})으로 바꿔 차단 · 저장소 장애를 흉내 낸다. Redis 구현은 단위 테스트가 본다.
  *
  * <p>토큰은 지금 시각으로 만든다 — 게이트웨이 디코더는 시스템 시계를 쓴다. 테스트는 순차 실행을 가정한다 (스텁 상태 · 하류 기록을 테스트마다 비운다).
@@ -66,12 +66,13 @@ import tools.jackson.databind.json.JsonMapper;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class GatewaySecurityTest {
 
-    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service");
+    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service");
 
     private static final String PUBLIC_PATH = "/api/v1/products/1";
     private static final String ADMIN_PATH = "/api/v1/admin/orders/1";
     private static final String ADMIN_MEMBERS_PATH = "/api/v1/admin/members";
     private static final String ADMIN_LOGIN_PATH = "/api/v1/auth/admin/login";
+    private static final String ADMIN_JOBS_PATH = "/api/v1/admin/jobs/1";
 
     private static final String BEARER = "Bearer ";
     private static final String INVALID_TOKEN = "Bearer error=\"invalid_token\"";
@@ -279,6 +280,19 @@ class GatewaySecurityTest {
             assertThat(request.path()).isEqualTo(ADMIN_LOGIN_PATH);
             assertThat(request.header(HttpHeaders.AUTHORIZATION)).isNull();
         });
+    }
+
+    // ── 어드민 작업 (#212) ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("어드민 작업(/api/v1/admin/jobs/**)은 무토큰 401(001) · CUSTOMER 403(005)이고, ADMIN 은 operations-service 라우트로 그대로 간다")
+    void adminJobsIsProtectedAndRoutedForAdmin() {
+        assertRejected(webTestClient.get().uri(ADMIN_JOBS_PATH).exchange(), SecurityErrorCode.UNAUTHORIZED, "Bearer");
+        assertRejected(get(ADMIN_JOBS_PATH, token(MemberRole.CUSTOMER)), SecurityErrorCode.FORBIDDEN, null);
+
+        get(ADMIN_JOBS_PATH, token(MemberRole.ADMIN)).expectStatus().isOk();
+
+        assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(ADMIN_JOBS_PATH));
     }
 
     @Test

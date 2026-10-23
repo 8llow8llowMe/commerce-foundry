@@ -40,7 +40,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 /**
  * dev 라우트(헬스 · 문서)와 Swagger UI 를 켠 게이트웨이 (local · dev 프로파일과 같은 스위치 셋).
  *
- * <p>서비스 대신 JDK {@link HttpServer} 하나를 띄워 서비스 5종의 인스턴스로 등록한다 (Eureka 대신 simple discovery).
+ * <p>서비스 대신 JDK {@link HttpServer} 하나를 띄워 서비스 전부의 인스턴스로 등록한다 (Eureka 대신 simple discovery).
  * 게이트웨이가 하류에 넘긴 경로를 기록해 rewrite 결과를 직접 확인한다.
  *
  * <p>하류 서버는 이 클래스의 수명과 같다. 클래스가 끝나면 서버를 닫고 컨텍스트도 캐시에서 내린다 — 닫힌 서버를 가리키는
@@ -56,7 +56,7 @@ class GatewayDevRouteTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
-    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service");
+    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service");
 
     /** 서비스 {@code *SwaggerConfig} 의 그룹 이름 ({@code bootstrap-conventions.md}). */
     private static final List<String> SWAGGER_GROUPS = List.of("customer", "admin");
@@ -93,14 +93,14 @@ class GatewayDevRouteTest {
     // ── 라우트 ────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("플래그를 켜면 라우트는 서비스 5종 + 서비스마다 헬스 · 문서 라우트 하나씩이다")
+    @DisplayName("플래그를 켜면 라우트는 서비스 6종 + 서비스마다 헬스 · 문서 라우트 하나씩이다")
     void routeIdsAreServicesPlusDevRoutes() {
         List<String> routeIds = routeLocator.getRoutes().map(Route::getId).collectList().block(TIMEOUT);
 
         assertThat(routeIds).containsExactlyInAnyOrder(
-            "auth-service", "product-service", "order-service", "payment-service", "delivery-service",
-            "auth-service-health", "product-service-health", "order-service-health", "payment-service-health", "delivery-service-health",
-            "auth-service-docs", "product-service-docs", "order-service-docs", "payment-service-docs", "delivery-service-docs");
+            "auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service",
+            "auth-service-health", "product-service-health", "order-service-health", "payment-service-health", "delivery-service-health", "operations-service-health",
+            "auth-service-docs", "product-service-docs", "order-service-docs", "payment-service-docs", "delivery-service-docs", "operations-service-docs");
     }
 
     @ParameterizedTest(name = "{0} → {1} → 하류 {2}")
@@ -110,6 +110,7 @@ class GatewayDevRouteTest {
         /health/order-service                          | order-service-health    | /actuator/health
         /health/payment-service                        | payment-service-health  | /actuator/health
         /health/delivery-service                       | delivery-service-health | /actuator/health
+        /health/operations-service                     | operations-service-health | /actuator/health
         /docs/auth-service/v3/api-docs/customer        | auth-service-docs       | /v3/api-docs/customer
         /docs/auth-service/v3/api-docs/admin           | auth-service-docs       | /v3/api-docs/admin
         /docs/product-service/v3/api-docs/customer     | product-service-docs    | /v3/api-docs/customer
@@ -120,6 +121,8 @@ class GatewayDevRouteTest {
         /docs/payment-service/v3/api-docs/admin        | payment-service-docs    | /v3/api-docs/admin
         /docs/delivery-service/v3/api-docs/customer    | delivery-service-docs   | /v3/api-docs/customer
         /docs/delivery-service/v3/api-docs/admin       | delivery-service-docs   | /v3/api-docs/admin
+        /docs/operations-service/v3/api-docs/customer  | operations-service-docs | /v3/api-docs/customer
+        /docs/operations-service/v3/api-docs/admin     | operations-service-docs | /v3/api-docs/admin
         """)
     @DisplayName("헬스 · 문서 경로는 정해진 라우트 하나에만 걸리고, 하류에는 고정된 경로로만 간다")
     void devPathGoesToFixedDownstreamPath(String path, String routeId, String downstreamPath) {

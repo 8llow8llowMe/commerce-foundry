@@ -47,7 +47,7 @@ import reactor.netty.http.client.PrematureCloseException;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class GatewayRequestBodySizeTest {
 
-    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service");
+    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service");
     private static final String PATH = "/api/v1/products";
     /** 기본 상한 2MB 보다 크고 기본 배출 상한 4MB 이하다 — 게이트웨이가 본문을 비운 뒤 413 을 쓰는 쪽. */
     private static final int TOO_LARGE = 2 * 1024 * 1024 + 1;
