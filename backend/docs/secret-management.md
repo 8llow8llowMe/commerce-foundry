@@ -50,6 +50,8 @@
 | prod | Vault | `live_sk_` 만 |
 
 - 주입 방식(Spring Cloud Vault / Vault Agent → 환경변수)과 Vault 경로·인증 방식은 #32 에서 확정하고 이 절을 갱신한다.
+- 배포 파이프라인(#198)은 Vault KV v2 `kv/commerce-foundry/backend/{dev,prod}/env`(환경당 secret 하나)를 AppRole 로 읽는다 —
+  Jenkins credential `commerce-foundry-vault-role-id` / `commerce-foundry-vault-secret-id`, Vault 주소는 Jenkins 전역 env `VAULT_ADDR` ([jenkins-cicd-guide.md](jenkins-cicd-guide.md) §6).
 - **개발자 계정은 테스트 키만 다룬다.** 라이브 키는 고객사 계정 소유이고 Vault 에만 있다.
 - 키가 뒤바뀐 채로 기동하면 실패시킨다 (`payment-guide.md` §2).
 

@@ -19,6 +19,7 @@
 | `local-run-guide.md` | 로컬 빌드·테스트, PostgreSQL·Redis compose, 서비스 실행·게이트웨이 경유 헬스 체크·Swagger UI, 문제 해결 |
 | `secret-management.md` | Vault 시크릿 관리 — 키 이름 규칙(`../.env.example`), 환경별 출처, 키 추가 절차, 유출 대응 |
 | `service-inventory.md` | 서비스 책임·포트·호출 관계·결정 대기 항목 |
+| `jenkins-cicd-guide.md` | Jenkins 멀티브랜치 배포 — Actions 와의 역할 분담, 잡 · agent · lock · Vault, 변경 경로 · 라벨 게이트, FORCE_DEPLOY · 되돌리기, 실패 대응 |
 | `done-checklist.md` | 기능 단위 완료 기준 |
 
 ## 권장 읽기 순서
