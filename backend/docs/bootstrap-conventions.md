@@ -99,6 +99,7 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
 | order-service | 1 | 3 |
 | payment-service | 1 | 4 |
 | delivery-service | 1 | 5 |
+| operations-service | 1 | 6 |
 
 ## 컨텍스트 로딩 테스트
 

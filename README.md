@@ -17,7 +17,7 @@ order management, and payment integrations.
 backend/
 ├── cloud/     api-gateway · service-discovery
 ├── core/      common · persistence · redis · security · storage · shared-commerce
-└── service/   auth · product · order · payment · delivery
+└── service/   auth · product · order · payment · delivery · operations
 ```
 
 ## 문서

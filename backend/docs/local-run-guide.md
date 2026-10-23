@@ -20,7 +20,7 @@ cp .env.example .env
 - `.env` 는 커밋되지 않는다 (`.gitignore`). 값의 정본은 Vault 이고, 로컬에는 **테스트 값만** 넣는다 (`secret-management.md`).
 - 미들웨어만 띄울 때 필요한 칸은 `DB_USERNAME` · `DB_PASSWORD` · `REDIS_PASSWORD` 셋이다. 로컬 전용이니 아무 값이나 정해 넣는다.
 - 토스 키는 `test_sk_` 로 시작하는 테스트 키만 쓴다. 라이브 키는 로컬에 두지 않는다.
-- **#41 부터 서비스 5종은, #4 부터 게이트웨이도 `JWT_PUBLIC_KEY` 가 비면 뜨지 않는다**(§6). `JWT_PUBLIC_KEY_PREVIOUS` 는 비워 둔다.
+- **#41 부터 서비스 전부는, #4 부터 게이트웨이도 `JWT_PUBLIC_KEY` 가 비면 뜨지 않는다**(§6). `JWT_PUBLIC_KEY_PREVIOUS` 는 비워 둔다.
 - JWT 키는 로컬에서 openssl 로 직접 만든 RSA 2048 쌍을 넣는다. dev · prod 키를 가져오지 않는다. **로컬은 쌍을 만들 때 `JWT_PRIVATE_KEY` 와
   `JWT_PUBLIC_KEY` 를 둘 다 `.env` 에 채워 둔다** — 개인키는 auth 가 토큰을 발급하는 #4 부터 읽지만, 그때 쌍을 다시 만들 필요가 없게 한다
   (쌍이 다르면 auth 가 `JWT_PRIVATE_KEY 와 JWT_PUBLIC_KEY 가 한 쌍이 아닙니다` 로 뜨지 않는다).
@@ -38,8 +38,8 @@ cp .env.example .env
 
   `.env` 에는 이렇게 **아머 없는 본문 한 줄이 따옴표 없이** 들어간다. 서비스는 `.env` 를 properties 로 읽어 따옴표도 값이 된다.
   값 뒤에 주석을 붙이지 않는다.
-- **#51 부터 서비스 5종은 `INTERNAL_JWT_SECRET`(서비스 토큰 비밀)이 비면 뜨지 않는다.** 빈 `INTERNAL_JWT_SECRET=` 줄을 지우고
-  `printf 'INTERNAL_JWT_SECRET=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다(서비스 5종이 같은 `.env` 를 읽는다).
+- **#51 부터 서비스 전부는 `INTERNAL_JWT_SECRET`(서비스 토큰 비밀)이 비면 뜨지 않는다.** 빈 `INTERNAL_JWT_SECRET=` 줄을 지우고
+  `printf 'INTERNAL_JWT_SECRET=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다(서비스 전부가 같은 `.env` 를 읽는다).
   `INTERNAL_JWT_SECRET_PREVIOUS` 는 비워 둔다 (`security-guide.md` §9-6).
 - `GATEWAY_CLIENT_IP_HASH_KEY`(비로그인 요청 IP 의 HMAC 키, #89)는 **게이트웨이의 `gateway.client-ip.enabled` 를 켤 때만 필요하다** — 기본은 꺼짐이라 비워도 뜬다.
   켜서 확인하려면 빈 줄을 지우고 `printf 'GATEWAY_CLIENT_IP_HASH_KEY=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로 로컬 값을 만든 뒤
@@ -56,11 +56,13 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 
 | 서비스 | 주소 | 비고 |
 |--------|------|------|
-| PostgreSQL 17 | `localhost:5432/commerce_foundry` | 스키마 `auth` · `product` · `orders` · `payment` · `delivery` |
+| PostgreSQL 17 | `localhost:5432/commerce_foundry` | 스키마 `auth` · `product` · `orders` · `payment` · `delivery` · `operations` |
 | Redis 7.4 | `localhost:${REDIS_PORT}` (기본 6379) | 비밀번호 필수 |
 
 - 스키마는 `docker/postgres/init/01-create-schemas.sql` 이 **빈 볼륨으로 처음 뜰 때만** 만든다.
   스키마를 추가했다면 `down -v` 후 다시 올린다.
+  데이터를 지우지 않으려면 떠 있는 컨테이너에서 그 스키마만 만든다 (`backend/` 에서, 예: operations):
+  `docker compose -f docker-compose-local.yml exec postgres sh -c 'psql -U "$POSTGRES_USER" -d commerce_foundry -c "CREATE SCHEMA IF NOT EXISTS operations"'`
 - compose 파일이 바뀐 PR 은 `backend-local-infra` 워크플로가 실제로 띄워 스키마·Redis 인증을 확인한다.
 
 ## 4. 빌드 · 테스트
@@ -155,6 +157,7 @@ refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨
 ./gradlew :service:order-service:bootRun      # 8083
 ./gradlew :service:payment-service:bootRun    # 8084
 ./gradlew :service:delivery-service:bootRun   # 8085
+./gradlew :service:operations-service:bootRun # 8086
 ```
 
 - **`bootRun` 은 `SPRING_PROFILES_ACTIVE` 가 없거나 비어 있으면 `local` 프로파일로 뜬다** (`backend/build.gradle`). 빌드한 jar 를 `java -jar` 로
@@ -165,11 +168,11 @@ refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨
 |------|-------------------------------------|
 | service-discovery | `server.address: 127.0.0.1` (같은 LAN 에서 레지스트리를 조작하지 못하게), self-preservation 끔 |
 | api-gateway | `backend/.env` 읽기(#4), CORS 허용 origin 기본값 `http://localhost:3000`. 공통 `application.yml` 의 기본값은 비어 있다(닫힘). dev 라우트(헬스 · Swagger UI) 켬 |
-| 서비스 5종 | `backend/.env` 읽기, `ddl-auto: update`, Snowflake 고정값(`bootstrap-conventions.md` 배정표), Swagger 열기 |
+| 서비스 전부 | `backend/.env` 읽기, `ddl-auto: update`, Snowflake 고정값(`bootstrap-conventions.md` 배정표), Swagger 열기 |
 
 | 확인 URL | 기대 |
 |----------|------|
-| `http://localhost:8761` | Eureka 대시보드. 띄우고 30초쯤 지나면 `API-GATEWAY` 와 서비스 5종이 등록된다 |
+| `http://localhost:8761` | Eureka 대시보드. 띄우고 30초쯤 지나면 `API-GATEWAY` 와 서비스 6종이 등록된다 |
 | `http://localhost:8761/actuator/health` | `"status":"UP"` |
 | `http://localhost:8000/actuator/health` | `"status":"UP"` (actuator 는 `health` 만 노출한다) |
 | `http://localhost:8000/health/{service-id}` (예: `/health/product-service`) | `"status":"UP"` — 게이트웨이 경유 서비스 헬스 체크. local · dev 만 |

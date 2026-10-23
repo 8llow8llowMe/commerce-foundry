@@ -15,7 +15,7 @@
 
 | 구분 | 예 | 위치 |
 |------|----|------|
-| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 5종 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 를 켤 때만 필요), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키, 초기 관리자 시드(`ADMIN_SEED_*` — auth 전용) | Vault |
+| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 전부 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 를 켤 때만 필요), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키, 초기 관리자 시드(`ADMIN_SEED_*` — auth 전용) | Vault |
 | 배포용 공개값 | JWT 공개키(전 서비스 · 게이트웨이). 비밀은 아니지만 교체를 한 곳에서 하려고 Vault 로 배포한다 | Vault |
 | 고객사 실정보 | 상호, 대표자, 사업자등록번호, 통신판매업 신고번호, 사업장 주소, CS 연락처 | Vault |
 | 일반 설정 | 포트, 타임아웃, `store.features.*`, 로케일, 통화 | `application*.yml` |
@@ -31,7 +31,7 @@
   `STORAGE_ENABLED` 는 비밀이 아니라 설정 스위치다 — `store.features.*` 처럼 배포 설정의 환경변수로 넣고 Vault 에 등록하지 않는다.
   기본값은 꺼짐이고, 켜면 여섯 값이 다 있어야 기동한다 (`bootstrap-conventions.md` Storage).
 - JWT 키 만들기 · 환경변수 한 줄 변환 · 교체 순서는 [security-guide.md](security-guide.md) §6 이 정본이다.
-- 서비스 토큰 비밀(`INTERNAL_JWT_SECRET`)은 `openssl rand -base64 32` 로 만들고 서비스 5종에 **같은 값**을 넣는다. 게이트웨이에는 넣지 않는다.
+- 서비스 토큰 비밀(`INTERNAL_JWT_SECRET`)은 `openssl rand -base64 32` 로 만들고 서비스 전부에 **같은 값**을 넣는다. 게이트웨이에는 넣지 않는다.
   교체는 `INTERNAL_JWT_SECRET_PREVIOUS` 로 3단계를 밟는다 — 정본은 [security-guide.md](security-guide.md) §9-6 · §9-7.
 - **초기 관리자 시드(`ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` · `ADMIN_SEED_NAME`, auth 전용, #6)는 Vault 등록 필요(dev/prod)다.**
   실제 관리자 이메일 · 비밀번호를 yml · 테스트 픽스처 · 이슈 · PR 에 쓰지 않는다 — yml 은 `${ADMIN_SEED_EMAIL:}` 플레이스홀더만 둔다.
@@ -68,6 +68,6 @@
 ## 6. 유출됐을 때
 
 1. **키를 먼저 폐기·재발급한다** (토스 상점관리자, 카카오·네이버 개발자 콘솔, DB·스토리지).
-   서비스 토큰 비밀은 새 값으로 바꾸고 `INTERNAL_JWT_SECRET_PREVIOUS` 를 비운 채 서비스 5종을 바로 재기동한다 (`security-guide.md` §9-7).
+   서비스 토큰 비밀은 새 값으로 바꾸고 `INTERNAL_JWT_SECRET_PREVIOUS` 를 비운 채 서비스 전부를 바로 재기동한다 (`security-guide.md` §9-7).
 2. Vault 값을 갱신하고 서비스를 재기동한다.
 3. 커밋 히스토리 정리는 그다음이다. public 저장소에 한 번 올라간 값은 지워도 **이미 공개된 것으로 본다.**
