@@ -9,6 +9,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    // 토스페이먼츠 API 클라이언트 (adapter/out/client/pg/toss). 외부 API 라 서비스 토큰 설정을 붙이지 않는다 (coding-conventions.md §10)
+    implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
+    // 서킷은 TossPaymentsResponseSupport 가 직접 감싼다 — spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다 (order-service 와 같은 방식)
+    implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
     implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${rootProject.ext.springdocVersion}"
 
     // Q 클래스 생성기. persistence-core 의 annotationProcessor 는 전이되지 않아 엔티티를 가진 모듈마다 선언한다
@@ -38,4 +42,6 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
+    // 토스 어댑터 테스트 — 가짜 토스 서버로 성공 · 거절 · 타임아웃 · 5xx · 연결 실패를 재현한다 (payment-guide.md §11). Docker 없이 돈다
+    testImplementation "org.wiremock:wiremock-standalone:${rootProject.ext.wiremockVersion}"
 }
