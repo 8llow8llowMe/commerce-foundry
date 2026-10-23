@@ -425,10 +425,11 @@ Info → Presenter → Response
   - 방향이 따로 의미를 갖는 경우(같은 기준을 사용자가 오름 · 내림으로 뒤집는 표 등)만 `orderType` 을 더한다.
   - 모든 정렬은 마지막에 아이디 내림차순(최신순)으로 동률을 끊는다. 페이지 경계에서 같은 항목이 두 번 나오거나 빠지지 않게 한다.
 - `totalCount` 를 내리는 응답은 **자르기 전 개수**여야 한다. Presenter 가 `items.size()` 로 채우지 않는다.
-- 페이지 파라미터는 `page`(기본 0, 0 이상) · `size`(기본 20, 1~100)이고 검증 코드는 도메인의 `page` · `size` 공용 코드를 쓴다(product 는 `PRODUCT_101` · `PRODUCT_102`).
+- 페이지 파라미터는 `page`(기본 0, 0 이상) · `size`(기본 20, 1~100)이고 검증 코드는 도메인의 `page` · `size` 공용 코드를 쓴다
+  (product 는 `PRODUCT_101` · `PRODUCT_102`, delivery 는 `DELIVERY_137` · `DELIVERY_138`).
   마지막 페이지를 넘긴 요청은 400 이 아니라 빈 `contents` 와 그대로인 `totalElements` 다.
   정렬을 고를 수 없는 목록(감사 이력처럼 최신순 하나뿐)은 `sortType` 을 두지 않고 아이디 내림차순으로 고정한다 —
-  처음 만든 곳: 어드민 재고 조정 이력 `GET /api/v1/admin/stocks/{skuId}/adjustments` (#86).
+  처음 만든 곳: 어드민 재고 조정 이력 `GET /api/v1/admin/stocks/{skuId}/adjustments` (#86). 배송비 정책 교체 이력(§6-2, #69)도 같다.
 - 어드민 화면이 아이디 묶음으로 한 번에 읽는 조회(`?skuIds=1,2,3`)는 서비스 간 벌크 조회와 같은 규칙이다 — 1~100개(중복 포함 원문 개수), 양수,
   중복은 첫 등장 한 번, 요청 순서대로 응답, **없는 아이디는 빼고 404 로 묶음 전체를 막지 않는다**(호출한 쪽이 누락을 판단한다).
   처음 만든 곳: 어드민 재고 조회 `GET /api/v1/admin/stocks` (#86).
@@ -487,6 +488,31 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - 하위 행(도서산간 구간 등)은 교체마다 아이디가 새로 발급된다. 클라이언트는 하위 행 아이디를 보관하지 않는다.
 - 처음 만든 곳: delivery-service `ShippingPolicyAdminController` (#11, `DELIVERY_006`). 해외 정책(`InternationalShippingPolicyAdminController`, #22)도 같은 규칙이다.
 - 설정의 기준 값 중 바꾸면 기존 흐름이 한꺼번에 깨지는 것(배송비 정책 통화)은 `PUT` 으로 바꾸지 않고 `409` 로 거절한다(`DELIVERY_012`, `order-flow-guide.md` §2).
+
+### 6-2. 설정 교체 이력 (delivery-service 국내 배송비 정책, #69)
+
+전체 교체 `PUT` 이 성공하면 **같은 트랜잭션에서 이력 한 건을 append** 한다 — 교체 전 · 후 값, 교체한 어드민, 시각, 교체 전 · 후 `version`.
+이력 저장이 실패하면 교체도 롤백된다(이력 insert 를 `saveAndFlush` 로 바로 내보내 실패가 트랜잭션 안에서 드러난다). 버전 충돌 · 검증 실패로 교체가 거절되면 이력도 없다.
+
+| API | 성공 | 주요 오류 |
+|-----|------|-----------|
+| `GET /api/v1/admin/shipping-policies/domestic/histories?page=&size=` | 200 `PageResponse<{historyId, adminMemberId, changedAt, before, after}>` — 최신순(아이디 내림차순) 고정 | 400 `DELIVERY_137`(page) · `138`(size) · `198`(형식) |
+
+- `before` · `after` 는 `{baseFee, freeShippingThreshold, remoteAreas[{name, postalCodeFrom, postalCodeTo, surcharge}], version}` 이다. 금액은 `{amount, currency}`,
+  무료배송 기준이 없으면 `null`, 구간은 시작 우편번호 오름차순이다. 정책을 처음 만든 교체는 `before` 가 `null` 이다.
+  구간 아이디는 싣지 않는다 — 교체마다 새로 발급돼(§6-1) 이력에서 뜻이 없다.
+- `historyId` · `adminMemberId` 는 문자열, `changedAt` 은 UTC ISO 다. `adminMemberId` 는 access 토큰의 memberId 이고 요청 본문으로 받지 않는다.
+  내부 회원 아이디라 마스킹하지 않는다(재고 조정 이력 #86 과 같다). 어드민 이름 표시는 auth-service 조회가 필요해 범위 밖이다.
+- **값이 그대로인 교체(같은 본문 재전송)도 이력을 남긴다** — `version` 이 오르므로 교체 사실 자체가 있고, 누가 언제 눌렀는지가 감사 대상이다. 화면이 "변경 없음" 을
+  가리고 싶으면 `before` · `after` 의 값(버전 제외)을 비교한다.
+- page · size 는 §4 공용 규칙(기본 0 · 20, size 1~100)이고 delivery 의 공용 코드는 `DELIVERY_137` · `138` 이다.
+- 저장은 delivery 전용 테이블 `shipping_policy_history`(교체 전 · 후 금액 · 버전 칸) + `shipping_policy_history_area`(구간 스냅숏, 쪽 `BEFORE` · `AFTER`)다.
+  JSON 스냅숏 한 칸이 아니라 행으로 둔 이유 — 금액 · 통화 짝과 우편번호 형식을 정책 테이블과 같은 check 제약으로 막고, 스냅숏 테스트 · `validate` 가 모양을 대조하게 하려고다
+  (저장소에 JSON 컬럼 선례가 없고, 직렬화 호환을 따로 관리하지 않아도 된다). 조회는 목록 1 + 건수 1 + 그 페이지 이력의 구간 in 절 1 이다.
+- **어드민 공통 감사 로그가 아직 없어 전용 테이블로 둔다** (`security-guide.md` §11-4 — DB 에 업무 이력이 있으면 그것이 감사의 정본). 공통 감사 로그(#163 · #192)가
+  생기면 교체 행위를 그쪽에도 함께 남길지 재검토한다.
+- **해외 정책(#22) 이력은 아직 남기지 않는다.** 이력 테이블에 범위(`scope`) 칸과 `(scope, id)` 인덱스를 둬 같은 테이블에 넣을 수 있게 했지만, 국가 그룹 · 무게 구간
+  스냅숏 설계와 해외용 조회 API 는 해외 이력을 더할 때 정한다.
 
 ## 7. 비동기 작업
 
