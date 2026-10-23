@@ -6,7 +6,9 @@
 # compose 는 파일 전체를 보간하므로 dev 배포에도 _PROD 키(포트)가 있어야 한다. 반대도 같다.
 #
 # 컨테이너 안 포트는 dev · prod 같다(8000, application.yml 의 server.port). 호스트 포트만 env 로 다르고 값은 #197 에서 정한다.
-# 외부 진입점이라 호스트의 모든 인터페이스에 연다. 앞단(BFF · LB) 밖으로의 노출은 호스트 방화벽 · Infra 가 막는다.
+# 외부 진입점이지만 바인드 주소는 env(API_GATEWAY_BIND_{DEV,PROD})로 받고 기본값은 루프백(닫힌 쪽)이다. 앞단(BFF · LB)이 닿아야 하는
+# 주소만 연다. Docker 가 게시한 포트는 iptables DOCKER 체인으로 들어와 ufw · firewalld 를 우회하므로 호스트 방화벽으로는 막을 수 없다
+# (deploy-guide.md §6). dev 는 dev 라우트(헬스 · 문서)와 Swagger 가 열려 있어 IP 제한 뒤에 둔다.
 #
 # 값은 저장소에 쓰지 않는다. 시크릿은 Vault, 이름은 backend/.env.example 과 같다(secret-management.md).
 # environment 에는 이 모듈이 실제로 읽는 키만 넘긴다. yml 에 키를 더하면 여기와 .env.example 을 같은 PR 에서 맞춘다.
@@ -66,7 +68,7 @@ services:
     image: commerce-api-gateway:dev
     container_name: commerce-api-gateway-dev
     ports:
-      - "${API_GATEWAY_PORT_DEV:?deploy-guide.md 4절}:8000" # host:container
+      - "${API_GATEWAY_BIND_DEV:-127.0.0.1}:${API_GATEWAY_PORT_DEV:?deploy-guide.md 4절}:8000" # bind:host:container
     environment:
       <<: *api_gateway_environment
       # 서비스 이름에 환경을 묶는다. env 파일 값에 맡기면 prod 컨테이너가 dev 프로파일(ddl-auto update · Swagger 열림)로 뜰 수 있다
@@ -82,7 +84,7 @@ services:
     image: commerce-api-gateway:prod
     container_name: commerce-api-gateway-prod
     ports:
-      - "${API_GATEWAY_PORT_PROD:?deploy-guide.md 4절}:8000" # host:container
+      - "${API_GATEWAY_BIND_PROD:-127.0.0.1}:${API_GATEWAY_PORT_PROD:?deploy-guide.md 4절}:8000" # bind:host:container
     environment:
       <<: *api_gateway_environment
       # prod 프로파일 yml 은 없다 — 공통 application.yml 의 닫힌 기본값(ddl-auto none · Swagger 닫힘 · dev 라우트 꺼짐)으로 뜬다
