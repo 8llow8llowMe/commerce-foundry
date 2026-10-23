@@ -38,10 +38,10 @@ jobs:
 
       - name: 서비스별 스키마가 만들어졌는지 확인
         run: |
-          actual=$(echo "select string_agg(schema_name, ' ' order by schema_name) from information_schema.schemata where schema_name in ('auth','product','orders','payment','delivery');" \
+          actual=$(echo "select string_agg(schema_name, ' ' order by schema_name) from information_schema.schemata where schema_name in ('auth','product','orders','payment','delivery','operations');" \
             | docker compose -f docker-compose-local.yml exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d commerce_foundry -tA')
           echo "schemas: $actual"
-          test "$actual" = "auth delivery orders payment product"
+          test "$actual" = "auth delivery operations orders payment product"
 
       - name: Redis 가 비밀번호를 요구하는지 확인
         run: |
