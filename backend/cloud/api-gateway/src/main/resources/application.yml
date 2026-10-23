@@ -101,7 +101,7 @@ gateway:
 # 게이트웨이 자신은 API 문서가 없다. Swagger UI 만 띄워 서비스 문서(/docs/**)를 고르게 한다.
 # 스위치는 리터럴로 둔다. ${gateway.dev-routes.enabled} 로 묶으면 "0" · "no" 같은 값에서 라우트는 닫히고 UI 만 열린다
 # (springdoc 은 "false" 가 아니면 켠다).
-# 목록은 서비스 5종 × 고객 / 어드민 그룹이다. 서비스를 더하면 여기도 더한다 (GatewayDevRouteTest 가 ServiceRoute 와 대조한다).
+# 목록은 서비스 전부 × 고객 / 어드민 그룹이다. 서비스를 더하면 여기도 더한다 (GatewayDevRouteTest 가 ServiceRoute 와 대조한다).
 springdoc:
   enable-default-api-docs: false
   api-docs:
@@ -132,6 +132,10 @@ springdoc:
         url: /docs/delivery-service/v3/api-docs/customer
       - name: 배송 — 어드민
         url: /docs/delivery-service/v3/api-docs/admin
+      - name: 운영 — 고객
+        url: /docs/operations-service/v3/api-docs/customer
+      - name: 운영 — 어드민
+        url: /docs/operations-service/v3/api-docs/admin
 
 management:
   endpoints:
