@@ -231,6 +231,8 @@ Info → Presenter → Response
 - `Processor` 는 필요 시 `QueryResult → application/model` 변환을 수행한다.
 - facade, presenter 쪽에는 `QueryResult` 가 직접 번지지 않게 유지한다.
 - 목록 out-port 는 `Slice<QueryResult>` · `Page<QueryResult>` 를 반환할 수 있다. 원소는 Processor 가 Info 로 바꾸고 Presenter 는 `SliceResponse.of(...).map(...)` 만 한다.
+  같은 컨텍스트 domain 을 가공 없이 내리는 목록은 out-port 가 `Page<domain>` 을 돌려줘도 된다 — Processor 가 그대로 넘기고 Presenter 가 domain 을 받는다
+  (예: delivery `ShippingPolicyHistoryRepositoryPort.findDomesticPage`, #69).
 
 ## 5. Write 경계
 

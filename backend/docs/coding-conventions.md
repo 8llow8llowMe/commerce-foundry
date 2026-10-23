@@ -227,8 +227,10 @@ public final class ProductValidationMessage {
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.
-  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity` · `StockAdjustmentHistoryEntity` · `StockRestorationEntity` · `StockRestorationItemEntity` · `CategoryEntity`.
+  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity` · `StockAdjustmentHistoryEntity` · `StockRestorationEntity` · `StockRestorationItemEntity` · `CategoryEntity`, delivery `ShippingPolicyHistoryEntity` · `ShippingPolicyHistoryAreaEntity`.
   - Snowflake 를 직접 넣는 Persistable 엔티티의 새 행 저장 포트 메서드는 `insert` 다 — persist 의미(아이디 충돌은 PK 위반)를 이름에 드러낸다 (예: `CategoryRepositoryPort.insert`, #9).
+  - append-only 이력도 Persistable 이면 포트 메서드는 `insert` 다 (예: delivery `ShippingPolicyHistoryRepositoryPort.insert`, #69).
+    product 재고 조정 이력의 `append` 는 이 규칙 전에 만든 이름이다.
 - 유니크 키 위반 · 버전 충돌을 도메인 오류(409)로 바꿔야 하는 저장은 어댑터에서 `saveAndFlush` 로 바로 내보내고 그 자리에서 바꾼다 —
   커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 바꿀 자리가 없다. 제약은 예외 메시지가 아니라 Hibernate 가 준 제약 이름으로 가린다 (예: auth `MemberRepositoryAdapter`).
 
