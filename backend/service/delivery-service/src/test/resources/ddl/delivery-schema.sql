@@ -54,6 +54,134 @@
     comment on column delivery.shipping_policy.version is
         '낙관적 락 버전. 교체마다 1 증가';
 
+    create table delivery.shipping_policy_history (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        admin_member_id bigint not null,
+        after_base_fee_amount bigint not null,
+        after_base_fee_currency varchar(3) not null check ((after_base_fee_currency in ('KRW','USD'))),
+        after_free_shipping_threshold_amount bigint,
+        after_free_shipping_threshold_currency varchar(3) check ((after_free_shipping_threshold_currency in ('KRW','USD'))),
+        after_version bigint not null,
+        before_base_fee_amount bigint,
+        before_base_fee_currency varchar(3) check ((before_base_fee_currency in ('KRW','USD'))),
+        before_free_shipping_threshold_amount bigint,
+        before_free_shipping_threshold_currency varchar(3) check ((before_free_shipping_threshold_currency in ('KRW','USD'))),
+        before_version bigint,
+        scope varchar(20) not null check ((scope in ('DOMESTIC','INTERNATIONAL'))),
+        shipping_policy_id bigint not null,
+        primary key (id),
+        constraint ck_shipping_policy_history_before_snapshot check ((before_version is null and before_base_fee_amount is null and before_base_fee_currency is null and before_free_shipping_threshold_amount is null and before_free_shipping_threshold_currency is null) or (before_version is not null and before_base_fee_amount is not null and before_base_fee_currency is not null)),
+        constraint ck_shipping_policy_history_before_base_fee_non_negative check (before_base_fee_amount is null or before_base_fee_amount >= 0),
+        constraint ck_shipping_policy_history_before_threshold_pair check ((before_free_shipping_threshold_amount is null and before_free_shipping_threshold_currency is null) or (before_free_shipping_threshold_amount is not null and before_free_shipping_threshold_currency is not null)),
+        constraint ck_shipping_policy_history_before_threshold_positive check (before_free_shipping_threshold_amount is null or before_free_shipping_threshold_amount > 0),
+        constraint ck_shipping_policy_history_after_base_fee_non_negative check (after_base_fee_amount >= 0),
+        constraint ck_shipping_policy_history_after_threshold_pair check ((after_free_shipping_threshold_amount is null and after_free_shipping_threshold_currency is null) or (after_free_shipping_threshold_amount is not null and after_free_shipping_threshold_currency is not null)),
+        constraint ck_shipping_policy_history_after_threshold_positive check (after_free_shipping_threshold_amount is null or after_free_shipping_threshold_amount > 0)
+    );
+
+    comment on table delivery.shipping_policy_history is
+        '배송비 정책 교체 이력 (append-only)';
+
+    comment on column delivery.shipping_policy_history.id is
+        '배송비 정책 이력 아이디 (Snowflake)';
+
+    comment on column delivery.shipping_policy_history.created_at is
+        '생성 시각';
+
+    comment on column delivery.shipping_policy_history.updated_at is
+        '수정 시각';
+
+    comment on column delivery.shipping_policy_history.admin_member_id is
+        '교체한 어드민 회원 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column delivery.shipping_policy_history.after_base_fee_amount is
+        '교체 후 기본 배송비 (0 이상, 최소 화폐 단위)';
+
+    comment on column delivery.shipping_policy_history.after_base_fee_currency is
+        '교체 후 정책 통화';
+
+    comment on column delivery.shipping_policy_history.after_free_shipping_threshold_amount is
+        '교체 후 무료배송 기준 주문 금액 (0 초과, 최소 화폐 단위). null 이면 무료배송 없음';
+
+    comment on column delivery.shipping_policy_history.after_free_shipping_threshold_currency is
+        '교체 후 무료배송 기준 통화';
+
+    comment on column delivery.shipping_policy_history.after_version is
+        '교체 후 정책 버전';
+
+    comment on column delivery.shipping_policy_history.before_base_fee_amount is
+        '교체 전 기본 배송비 (0 이상, 최소 화폐 단위). 처음 만든 교체면 null';
+
+    comment on column delivery.shipping_policy_history.before_base_fee_currency is
+        '교체 전 정책 통화. 처음 만든 교체면 null';
+
+    comment on column delivery.shipping_policy_history.before_free_shipping_threshold_amount is
+        '교체 전 무료배송 기준 주문 금액 (0 초과, 최소 화폐 단위). null 이면 무료배송 없음 또는 처음 만든 교체';
+
+    comment on column delivery.shipping_policy_history.before_free_shipping_threshold_currency is
+        '교체 전 무료배송 기준 통화';
+
+    comment on column delivery.shipping_policy_history.before_version is
+        '교체 전 정책 버전. 정책을 처음 만든 교체면 null';
+
+    comment on column delivery.shipping_policy_history.scope is
+        '배송 범위 (DOMESTIC · INTERNATIONAL). 지금은 DOMESTIC 만 남긴다';
+
+    comment on column delivery.shipping_policy_history.shipping_policy_id is
+        '배송비 정책 아이디 (FK: shipping_policy.id)';
+
+    create table delivery.shipping_policy_history_area (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        name varchar(50) not null,
+        postal_code_from varchar(5) not null,
+        postal_code_to varchar(5) not null,
+        shipping_policy_history_id bigint not null,
+        snapshot_side varchar(10) not null check ((snapshot_side in ('BEFORE','AFTER'))),
+        surcharge_amount bigint not null,
+        surcharge_currency varchar(3) not null check ((surcharge_currency in ('KRW','USD'))),
+        primary key (id),
+        constraint ck_shipping_policy_history_area_postal_code_format check (char_length(postal_code_from) = 5 and ltrim(postal_code_from, '0123456789') = '' and char_length(postal_code_to) = 5 and ltrim(postal_code_to, '0123456789') = ''),
+        constraint ck_shipping_policy_history_area_postal_code_range check (postal_code_from <= postal_code_to),
+        constraint ck_shipping_policy_history_area_surcharge_non_negative check (surcharge_amount >= 0)
+    );
+
+    comment on table delivery.shipping_policy_history_area is
+        '배송비 정책 이력의 도서산간 구간 스냅숏 (append-only)';
+
+    comment on column delivery.shipping_policy_history_area.id is
+        '이력 구간 아이디 (Snowflake)';
+
+    comment on column delivery.shipping_policy_history_area.created_at is
+        '생성 시각';
+
+    comment on column delivery.shipping_policy_history_area.updated_at is
+        '수정 시각';
+
+    comment on column delivery.shipping_policy_history_area.name is
+        '구간 이름 (예: 제주)';
+
+    comment on column delivery.shipping_policy_history_area.postal_code_from is
+        '시작 우편번호 (포함, 숫자 5자리)';
+
+    comment on column delivery.shipping_policy_history_area.postal_code_to is
+        '끝 우편번호 (포함, 숫자 5자리)';
+
+    comment on column delivery.shipping_policy_history_area.shipping_policy_history_id is
+        '배송비 정책 이력 아이디 (FK: shipping_policy_history.id)';
+
+    comment on column delivery.shipping_policy_history_area.snapshot_side is
+        '어느 쪽 구간인가 (BEFORE 교체 전 · AFTER 교체 후)';
+
+    comment on column delivery.shipping_policy_history_area.surcharge_amount is
+        '추가 배송비 (0 이상, 최소 화폐 단위)';
+
+    comment on column delivery.shipping_policy_history_area.surcharge_currency is
+        '추가 배송비 통화';
+
     create table delivery.shipping_remote_area (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -65,6 +193,7 @@
         surcharge_amount bigint not null,
         surcharge_currency varchar(3) not null check ((surcharge_currency in ('KRW','USD'))),
         primary key (id),
+        constraint ck_shipping_remote_area_postal_code_format check (char_length(postal_code_from) = 5 and ltrim(postal_code_from, '0123456789') = '' and char_length(postal_code_to) = 5 and ltrim(postal_code_to, '0123456789') = ''),
         constraint ck_shipping_remote_area_postal_code_range check (postal_code_from <= postal_code_to),
         constraint ck_shipping_remote_area_surcharge_non_negative check (surcharge_amount >= 0)
     );
@@ -203,6 +332,12 @@
 
     comment on column delivery.shipping_zone_rate.shipping_zone_id is
         '국가 그룹 아이디 (FK: shipping_zone.id)';
+
+    create index idx_shipping_policy_history_scope_id 
+       on delivery.shipping_policy_history (scope, id);
+
+    create index idx_shipping_policy_history_area_shipping_policy_history_id 
+       on delivery.shipping_policy_history_area (shipping_policy_history_id);
 
     create index idx_shipping_remote_area_shipping_policy_id 
        on delivery.shipping_remote_area (shipping_policy_id);

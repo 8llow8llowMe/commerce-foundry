@@ -30,6 +30,7 @@ class DeliveryServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
 
     private static final String POLICY_PATH = "/api/v1/shipping-fees/policy";
     private static final String ADMIN_POLICY_PATH = "/api/v1/admin/shipping-policies/domestic";
+    private static final String ADMIN_POLICY_HISTORIES_PATH = "/api/v1/admin/shipping-policies/domestic/histories";
     private static final String INTERNATIONAL_POLICY_PATH = "/api/v1/shipping-fees/international-policy";
     private static final String ADMIN_INTERNATIONAL_POLICY_PATH = "/api/v1/admin/shipping-policies/international";
     private static final String QUOTE_PATH = "/internal/v1/shipping-fees/quotes";
@@ -58,8 +59,8 @@ class DeliveryServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {ADMIN_POLICY_PATH, ADMIN_INTERNATIONAL_POLICY_PATH})
-    @DisplayName("어드민 배송비 정책(국내 · 해외)은 ADMIN 만 200 이고, 토큰 없음 401 · SECURITY_001 · CUSTOMER 403 · SECURITY_005 다")
+    @ValueSource(strings = {ADMIN_POLICY_PATH, ADMIN_INTERNATIONAL_POLICY_PATH, ADMIN_POLICY_HISTORIES_PATH})
+    @DisplayName("어드민 배송비 정책(국내 · 해외 · 국내 교체 이력)은 ADMIN 만 200 이고, 토큰 없음 401 · SECURITY_001 · CUSTOMER 403 · SECURITY_005 다")
     void adminPolicyRequiresAdmin(String path) throws Exception {
         assertThat(perform(get(path).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).getStatus()).isEqualTo(200);
         assertEnvelope(perform(get(path)), SecurityErrorCode.UNAUTHORIZED);
