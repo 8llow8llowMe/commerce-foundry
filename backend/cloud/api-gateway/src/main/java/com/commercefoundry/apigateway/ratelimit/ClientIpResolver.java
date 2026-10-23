@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 
@@ -25,6 +26,7 @@ import org.springframework.stereotype.Component;
  * <p>{@code Forwarded}(RFC 7239) 헤더는 보지 않는다. 프레임워크가 전달 헤더로 원격 주소를 바꾸지 않도록 {@code server.forward-headers-strategy: none} 이다.
  * 주소는 리터럴만 받고 호스트 이름은 DNS 를 찾지 않고 버린다({@link CidrBlock#literal}).
  */
+@Slf4j
 @Component
 public class ClientIpResolver {
 
@@ -35,6 +37,19 @@ public class ClientIpResolver {
 
     public ClientIpResolver(GatewayClientIpProperties properties) {
         this.trustedProxies = properties.trustedProxies().stream().map(CidrBlock::parse).toList();
+        warnIfNoTrustedProxy(properties);
+    }
+
+    /**
+     * 켰는데 신뢰 프록시가 없으면 기동 때 한 줄 남긴다 — BFF · LB 뒤라면 비로그인 요청 전체가 그 프록시 주소 한 버킷이 되고,
+     * 하류 {@code X-Client-Subject} 도 모든 요청이 같은 값이 된다 (§7-3). 프록시 없이 직접 받는 배포도 있을 수 있어 기동은 막지 않는다.
+     * 빈 하나가 기동 때 한 번 만들어지므로 한 줄이다.
+     */
+    private static void warnIfNoTrustedProxy(GatewayClientIpProperties properties) {
+        if (properties.enabled() && properties.trustedProxies().isEmpty()) {
+            log.warn("gateway.client-ip.enabled=true but gateway.client-ip.trusted-proxies(GATEWAY_TRUSTED_PROXIES) is empty. "
+                + "X-Forwarded-For is ignored and the socket peer is the client; behind a BFF or LB every anonymous request shares one subject.");
+        }
     }
 
     /** @return 클라이언트 IP 문자열(정규화된 표기). 원격 주소조차 모르면 비어 있다 */

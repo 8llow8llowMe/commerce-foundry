@@ -81,10 +81,12 @@ gateway:
       requests-per-minute: 60
       burst: 20
   client-ip:
-    # 토큰 없는 요청을 셀 때의 클라이언트 IP 규칙 (security-guide.md §7-3).
-    # 토큰 없는 요청을 클라이언트 IP 단위로 셀지. 기본은 끔이다 — BFF 가 클라이언트 IP 를 넘기기 전에는 비로그인 요청 전체가 BFF 주소 한 버킷이 돼
-    # access 쿠키가 만료된 회원(BFF 가 첫 요청을 토큰 없이 보낸다)이 401 재발급 대신 429 를 받는다 (#134 · #135)
-    enabled: false
+    # 토큰 없는 요청을 셀 때의 클라이언트 IP 규칙과 하류 X-Client-Subject 헤더 (security-guide.md §7-3).
+    # 토큰 없는 요청을 클라이언트 IP 단위로 셀지, 하류에 X-Client-Subject(IP 의 HMAC)를 실을지. 기본은 끔이다 — 신뢰 프록시 · 키를 채우기 전에 켜면
+    # 비로그인 요청 전체가 BFF 주소 한 버킷이 돼 access 쿠키가 만료된 회원(BFF 가 첫 요청을 토큰 없이 보낸다)이 401 재발급 대신 429 를 받는다 (#134 · #135).
+    # 켜는 순서는 dev 먼저(GATEWAY_TRUSTED_PROXIES · GATEWAY_CLIENT_IP_HASH_KEY 를 채운 뒤), 운영은 BFF · LB 주소가 정해진 뒤다.
+    # Spring 불리언 값(true · false, on · off, yes · no, 1 · 0)이 아니거나 빈 값이면 기동하지 않는다. 켰는데 신뢰 프록시가 비면 기동 때 WARN 한 줄을 남긴다
+    enabled: ${GATEWAY_CLIENT_IP_ENABLED:false}
     # 믿는 프록시의 주소 · CIDR. 기본은 비어 있다 — X-Forwarded-For 를 무시하고 소켓의 원격 주소를 쓴다.
     # 우리가 운영하는 BFF · L7 LB 중 XFF 를 덧붙이거나 한 값으로 덮어쓰는 것만 넣는다. 공용 CDN 대역은 넣지 않는다
     trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:}

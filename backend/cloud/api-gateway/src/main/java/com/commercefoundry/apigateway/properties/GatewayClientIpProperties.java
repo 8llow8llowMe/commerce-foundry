@@ -12,7 +12,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * <ul>
  *   <li>{@code enabled} 는 토큰 없는 요청을 클라이언트 IP 단위로 셀지다. <b>기본은 끔</b>이고, 끄면 토큰 없는 요청은 세지 않는다(#89 이전과 같다).
  *       스토어프론트는 Next BFF 를 거쳐 오는데 BFF 가 클라이언트 IP 를 넘기지 않아 게이트웨이가 보는 원격 주소는 늘 BFF 다 —
- *       켜면 비로그인 요청 전체가 버킷 하나가 되고, access 쿠키가 만료된 회원(BFF 가 첫 요청을 토큰 없이 보낸다)이 401 재발급 대신 429 를 받는다 (#134 · #135).</li>
+ *       켜면 비로그인 요청 전체가 버킷 하나가 되고, access 쿠키가 만료된 회원(BFF 가 첫 요청을 토큰 없이 보낸다)이 401 재발급 대신 429 를 받는다 (#134 · #135).
+ *       같은 스위치로 하류 {@code X-Client-Subject}(IP 의 HMAC)를 싣는다 — 꺼져 있으면 싣지 않는다. yml 은 {@code GATEWAY_CLIENT_IP_ENABLED}(기본 false)로 켠다.</li>
  *   <li>{@code trusted-proxies} 가 비면(기본) 어떤 프록시도 믿지 않는다 — {@code X-Forwarded-For} 를 무시하고 소켓의 원격 주소를 쓴다.
  *       우리가 운영하는 BFF · L7 LB 중 XFF 를 덧붙이거나 한 값으로 덮어쓰는 것의 주소 대역만 넣는다(공용 CDN 대역 금지)
  *       ({@code GATEWAY_TRUSTED_PROXIES}, 콤마로 CIDR · 단일 주소). 잘못된 값이면 꺼져 있어도 기동하지 않는다.</li>
