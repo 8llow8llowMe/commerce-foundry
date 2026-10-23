@@ -58,6 +58,16 @@ public final class PaymentFixtures {
         return ready().abort(PaymentAbortReason.REPREPARED);
     }
 
+    /** 승인 요청을 보내지 못해 되돌린 READY — 결제키 · 승인 시작 시각이 흔적으로 남아 있다. */
+    public static Payment reverted() {
+        return inProgress().revertToReady();
+    }
+
+    /** 거절로 끝낸 뒤 PG 가 승인을 알려 온 시도. */
+    public static Payment lateApproved() {
+        return failed().recordLateApproval(approval(krw(129_000)));
+    }
+
     public static PaymentApproval approval(Money amount) {
         return approval(PAYMENT_KEY, amount);
     }

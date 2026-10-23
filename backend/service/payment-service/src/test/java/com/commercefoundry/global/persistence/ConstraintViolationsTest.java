@@ -29,12 +29,14 @@ class ConstraintViolationsTest {
     }
 
     @Test
-    @DisplayName("서버 필드가 있으면 Hibernate 가 뽑은 이름보다 서버 필드의 이름을 싣는다")
+    @DisplayName("서버 필드가 있으면 Hibernate 가 뽑은 이름은 보지 않는다 — 판정 · 메시지 이름 모두 서버 필드다")
     void constraintNamePrefersServerField() {
         PSQLException server = psql("x", "uk_payment_payment_key");
         DataIntegrityViolationException exception = new DataIntegrityViolationException("x", new ConstraintViolationException("x", server, "something_else"));
 
         assertThat(ConstraintViolations.constraintNameOf(exception)).isEqualTo("uk_payment_payment_key");
+        assertThat(ConstraintViolations.violates(exception, "uk_payment_payment_key")).isTrue();
+        assertThat(ConstraintViolations.violates(exception, "something_else")).isFalse();
     }
 
     @Test
