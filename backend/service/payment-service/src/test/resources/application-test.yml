@@ -24,3 +24,9 @@ eureka:
 snowflake:
   datacenter-id: 1
   worker-id: 1
+
+toss:
+  # 실키가 아니다 — 기동 가드의 형식(test_sk_ + 영문 · 숫자)만 맞춘 더미다. 토스에 보내도 401 이다 (secret-management.md §5)
+  secret-key: test_sk_dummyForContextTestsOnly000
+  # 컨텍스트 테스트가 실수로 토스를 부르지 않게 닫힌 포트(discard)를 가리킨다. 어댑터 테스트는 WireMock 주소로 덮는다
+  base-url: http://127.0.0.1:9
