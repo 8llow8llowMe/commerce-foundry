@@ -15,6 +15,7 @@ public interface ShippingPolicyHistoryRepository extends JpaRepository<ShippingP
      * 범위 하나의 이력을 아이디 내림차순(최신순)으로 한 페이지. 목록은 {@code idx_shipping_policy_history_scope_id} 를 {@code scope} 등치 +
      * {@code id} 역순 스캔으로 타서 따로 정렬하지 않고 앞에서 자르고, 파생 count 쿼리({@code where scope = ?})도 같은 인덱스 접두를 탄다.
      * 정렬은 메서드 이름이 고정한다 — {@code pageable} 에는 정렬을 싣지 않는다.
+     * 교체는 버전 검사로 직렬화되므로 id 순서가 교체 순서다.
      */
     Page<ShippingPolicyHistoryEntity> findAllByScopeOrderByIdDesc(ShippingScope scope, Pageable pageable);
 }

@@ -185,6 +185,20 @@ class ShippingPolicyAdminControllerTest {
             verify(shippingPolicyAdminUseCase).replaceDomesticPolicy(new ShippingPolicyReplaceCommand(Money.of(0, CurrencyCode.KRW), null, List.of(), null, TestTokens.MEMBER_ID));
         }
 
+        /** 본문 위조 회귀 방지 — 이력에 남는 관리자는 토큰으로만 정해진다 (#69). */
+        @Test
+        @DisplayName("본문에 adminMemberId 를 실어도 무시하고 토큰의 memberId 를 넘긴다")
+        void ignoresAdminMemberIdInBody() {
+            given(shippingPolicyAdminUseCase.replaceDomesticPolicy(any())).willReturn(response());
+
+            assertThat(put("""
+                {"baseFee": {"amount": 0, "currency": "KRW"}, "remoteAreas": [], "adminMemberId": 999}
+                """)).hasStatusOk();
+            ArgumentCaptor<ShippingPolicyReplaceCommand> command = ArgumentCaptor.forClass(ShippingPolicyReplaceCommand.class);
+            verify(shippingPolicyAdminUseCase).replaceDomesticPolicy(command.capture());
+            assertThat(command.getValue().adminMemberId()).isEqualTo(TestTokens.MEMBER_ID);
+        }
+
         @Test
         @DisplayName("버전 충돌은 409 · DELIVERY_006")
         void versionConflict() {
@@ -391,12 +405,12 @@ class ShippingPolicyAdminControllerTest {
     class Histories {
 
         private static PageResponse<ShippingPolicyHistoryAdminItem> page() {
-            ShippingPolicyHistoryAdminItem.Snapshot before = ShippingPolicyHistoryAdminItem.Snapshot.builder()
+            ShippingPolicyHistoryAdminItem.SnapshotItem before = ShippingPolicyHistoryAdminItem.SnapshotItem.builder()
                 .baseFee(MoneyItem.of(3_000, "KRW")).freeShippingThreshold(null).remoteAreas(List.of()).version(2)
                 .build();
-            ShippingPolicyHistoryAdminItem.Snapshot after = ShippingPolicyHistoryAdminItem.Snapshot.builder()
+            ShippingPolicyHistoryAdminItem.SnapshotItem after = ShippingPolicyHistoryAdminItem.SnapshotItem.builder()
                 .baseFee(MoneyItem.of(3_500, "KRW")).freeShippingThreshold(MoneyItem.of(50_000, "KRW"))
-                .remoteAreas(List.of(ShippingPolicyHistoryAdminItem.RemoteArea.builder()
+                .remoteAreas(List.of(ShippingPolicyHistoryAdminItem.RemoteAreaSnapshotItem.builder()
                     .name("제주").postalCodeFrom("63000").postalCodeTo("63644").surcharge(MoneyItem.of(3_000, "KRW"))
                     .build()))
                 .version(3)
@@ -433,19 +447,19 @@ class ShippingPolicyAdminControllerTest {
         }
 
         @Test
-        @DisplayName("page · size 를 그대로 넘긴다 (경계값 size=100)")
+        @DisplayName("page · size 를 그대로 넘긴다 (경계값 size=20)")
         void passesPaging() {
-            given(shippingPolicyAdminUseCase.getDomesticPolicyHistories(3, 100)).willReturn(new PageResponse<>(List.of(), 3, 100, 0L, 0));
+            given(shippingPolicyAdminUseCase.getDomesticPolicyHistories(3, 20)).willReturn(new PageResponse<>(List.of(), 3, 20, 0L, 0));
 
-            assertThat(get(HISTORIES_PATH + "?page=3&size=100", MemberRole.ADMIN)).hasStatusOk();
-            verify(shippingPolicyAdminUseCase).getDomesticPolicyHistories(3, 100);
+            assertThat(get(HISTORIES_PATH + "?page=3&size=20", MemberRole.ADMIN)).hasStatusOk();
+            verify(shippingPolicyAdminUseCase).getDomesticPolicyHistories(3, 20);
         }
 
         @ParameterizedTest(name = "{0} → {1}")
         @CsvSource(delimiter = '|', value = {
             "?page=-1 | DELIVERY_137 | page 는 0 이상이어야 합니다.",
-            "?size=0 | DELIVERY_138 | size 는 1 이상 100 이하여야 합니다.",
-            "?size=101 | DELIVERY_138 | size 는 1 이상 100 이하여야 합니다.",
+            "?size=0 | DELIVERY_138 | size 는 1 이상 20 이하여야 합니다.",
+            "?size=21 | DELIVERY_138 | size 는 1 이상 20 이하여야 합니다.",
             "?page=abc | DELIVERY_198 | page 파라미터 형식이 올바르지 않습니다."
         })
         @DisplayName("page · size 검증 코드 — 유스케이스를 부르지 않는다")

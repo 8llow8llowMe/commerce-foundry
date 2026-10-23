@@ -25,7 +25,8 @@ import org.springframework.data.domain.Persistable;
  * <p>범위별 최신순({@code where scope = ? order by id desc})으로 읽으므로 {@code (scope, id)} 인덱스를 둔다. 지금은 국내만 쓴다 —
  * 해외 정책 이력을 더할 때 같은 테이블에 다른 범위 행으로 넣는다.
  *
- * <p>check 제약은 정책 테이블과 같은 금액 규칙(짝 · 음수 금지)과 "교체 전 값은 통째로 있거나 통째로 없다" 를 DB 에서도 막는다 —
+ * <p>check 제약은 정책 테이블과 같은 금액 규칙(짝 · 음수 금지 · 무료배송 기준 통화 = 기본 배송비 통화), "교체 전 값은 통째로 있거나 통째로 없다",
+ * "교체 후 버전이 교체 전보다 크다" 를 DB 에서도 막는다 —
  * 매퍼({@code MoneyColumns})가 읽을 때 실패하는 행이 애초에 들어오지 않게.
  *
  * <p>{@link Persistable} 로 새 행이면 {@code persist}(INSERT) 하게 한다 — 아이디(Snowflake)를 직접 넣는 엔티티라 기본 {@code save} 는
@@ -56,6 +57,10 @@ import org.springframework.data.domain.Persistable;
             name = "ck_shipping_policy_history_before_threshold_positive",
             constraint = "before_free_shipping_threshold_amount is null or before_free_shipping_threshold_amount > 0"
         ),
+        @CheckConstraint(
+            name = "ck_shipping_policy_history_before_threshold_currency",
+            constraint = "before_free_shipping_threshold_currency is null or before_free_shipping_threshold_currency = before_base_fee_currency"
+        ),
         @CheckConstraint(name = "ck_shipping_policy_history_after_base_fee_non_negative", constraint = "after_base_fee_amount >= 0"),
         @CheckConstraint(
             name = "ck_shipping_policy_history_after_threshold_pair",
@@ -65,7 +70,12 @@ import org.springframework.data.domain.Persistable;
         @CheckConstraint(
             name = "ck_shipping_policy_history_after_threshold_positive",
             constraint = "after_free_shipping_threshold_amount is null or after_free_shipping_threshold_amount > 0"
-        )
+        ),
+        @CheckConstraint(
+            name = "ck_shipping_policy_history_after_threshold_currency",
+            constraint = "after_free_shipping_threshold_currency is null or after_free_shipping_threshold_currency = after_base_fee_currency"
+        ),
+        @CheckConstraint(name = "ck_shipping_policy_history_version_order", constraint = "before_version is null or before_version < after_version")
     }
 )
 @Getter
