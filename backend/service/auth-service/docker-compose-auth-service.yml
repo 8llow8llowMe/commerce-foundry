@@ -1,0 +1,113 @@
+# auth-service 배포 정의 (backend/docs/deploy-guide.md).
+#
+# 한 파일에 dev · prod 두 서비스를 두고, 배포 agent 는 환경마다 env 파일과 compose 프로젝트를 갈라 하나만 올린다.
+#   docker compose -p commerce-auth-service-dev --env-file .env.runtime -f docker-compose-auth-service.yml up -d --build --wait auth-service-dev
+# -p 를 빼지 않는다 — 빠지면 디렉터리 이름이 프로젝트가 돼 다른 compose 와 섞이고 --remove-orphans 가 남의 컨테이너를 지울 수 있다.
+# compose 는 파일 전체를 보간하므로 dev 배포에도 _PROD 키(포트)가 있어야 한다. 반대도 같다.
+#
+# 컨테이너 안 포트는 dev · prod 같다(8081, application.yml 의 server.port). 호스트 포트만 env 로 다르고 값은 #197 에서 정한다.
+# 호스트 포트는 루프백에만 연다 — 서비스 · Eureka 는 사설망 전용이고 외부에는 게이트웨이만 연다(architecture-guide.md §6).
+# 게이트웨이 라우팅 · Eureka 등록 · 서비스 간 호출은 같은 docker 네트워크 안에서 닿으므로 호스트 포트가 필요 없다. 호스트 포트는 점검용이다.
+#
+# 값은 저장소에 쓰지 않는다. 시크릿은 Vault, 이름은 backend/.env.example 과 같다(secret-management.md).
+# environment 에는 이 모듈이 실제로 읽는 키만 넘긴다. yml 에 키를 더하면 여기와 .env.example 을 같은 PR 에서 맞춘다.
+
+x-auth-service-environment: &auth_service_environment
+  # JVM 시간대(로그 시각만 바뀐다). 비우면 UTC
+  TIME_ZONE: ${TIME_ZONE:-UTC}
+  # Eureka 서버 주소. 기본값을 두지 않는다 — yml 기본값(localhost)은 컨테이너 안에서 자기 자신이라 등록이 조용히 실패한다
+  EUREKA_DEFAULT_ZONE: ${EUREKA_DEFAULT_ZONE:?deploy-guide.md 4절}
+  # 컨테이너 호스트 이름(컨테이너 ID)이 아니라 네트워크 IP 로 등록한다 — 게이트웨이 lb:// · Feign 이 이름을 풀지 못하는 일을 막는다.
+  # 배포 전용 설정이라 yml 대신 여기서 넣는다(relaxed binding: eureka.instance.prefer-ip-address)
+  EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+  # 서비스 전부 같은 DB 다. 스키마는 서비스마다 다르고 yml(hibernate.default_schema)이 정한다
+  DB_URL: ${DB_URL:?deploy-guide.md 4절}
+  DB_USERNAME: ${DB_USERNAME:?deploy-guide.md 4절}
+  DB_PASSWORD: ${DB_PASSWORD:?deploy-guide.md 4절}
+  # auth 와 api-gateway 는 같은 Redis 를 가리켜야 한다 — 다르면 로그아웃한 토큰이 그대로 통과한다
+  REDIS_HOST: ${REDIS_HOST:?deploy-guide.md 4절}
+  REDIS_PORT: ${REDIS_PORT:?deploy-guide.md 4절}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?deploy-guide.md 4절}
+  # (datacenter, worker) 쌍이 인스턴스마다 달라야 한다. datacenter 는 환경이 정하고, worker 는 서비스마다 고정한다(local 과 같은 번호 —
+  # auth 1 · product 2 · order 3 · payment 4 · delivery 5). 서비스당 컨테이너가 하나(container_name 고정)라 겹치지 않는다
+  SNOWFLAKE_DATACENTER_ID: ${SNOWFLAKE_DATACENTER_ID:?deploy-guide.md 4절}
+  SNOWFLAKE_WORKER_ID: "1"
+  # access 토큰 검증 공개키(PEM 본문 한 줄). 이전 키는 교체 중에만 채운다 — 비면 yml 기본값(빈 값)과 같다
+  JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?deploy-guide.md 4절}
+  JWT_PUBLIC_KEY_PREVIOUS: ${JWT_PUBLIC_KEY_PREVIOUS:-}
+  # 토큰 서명 개인키 — auth 에만 넣는다. JWT_PUBLIC_KEY 와 한 쌍이 아니면 기동하지 않는다
+  JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?deploy-guide.md 4절}
+  # 초기 관리자 시드. 이메일 · 비밀번호 둘 다 비면 건너뛴다(yml 기본값과 같다, security-guide.md §11-3)
+  ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}
+  ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
+  ADMIN_SEED_NAME: ${ADMIN_SEED_NAME:-}
+  # auth.login-guard.enabled 를 켤 때만 필수다(기본 꺼짐)
+  AUTH_LOGIN_GUARD_HASH_KEY: ${AUTH_LOGIN_GUARD_HASH_KEY:-}
+  # 서비스 간 토큰 비밀(서비스 5종 같은 값, 게이트웨이 제외). 이전 비밀은 교체 중에만 채운다
+  INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:?deploy-guide.md 4절}
+  INTERNAL_JWT_SECRET_PREVIOUS: ${INTERNAL_JWT_SECRET_PREVIOUS:-}
+
+x-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# dev · prod 공통. 서비스마다 다른 것(이미지 태그 · 컨테이너 이름 · 포트 · 프로파일 · 메모리)만 아래에서 덮는다
+x-auth-service-common: &auth_service_common
+  build:
+    context: .
+    dockerfile: auth-service.Dockerfile
+  # 컨테이너 안에서 헬스를 본다. /actuator/health 는 익명으로 열려 있고(deploy-guide.md §5) DOWN 이면 503 이라 curl -f 가 실패한다
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8081/actuator/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 4
+    # JVM · Spring Cloud 기동 시간. 이 안의 실패는 retries 에 세지 않는다
+    start_period: 120s
+  # Spring Boot graceful shutdown(단계당 30초)이 끝나기 전에 SIGKILL 하지 않게 docker 기본 10초보다 길게 둔다
+  stop_grace_period: 40s
+  restart: unless-stopped
+  logging: *default_logging
+  networks:
+    - backend
+
+services:
+  auth-service-dev:
+    <<: *auth_service_common
+    # 이미지 이름은 dev · prod 가 같고 환경은 태그로 가른다 — 같은 호스트에서 dev 빌드가 prod 가 쓰는 이미지를 덮지 않게
+    image: commerce-auth-service:dev
+    container_name: commerce-auth-service-dev
+    ports:
+      - "127.0.0.1:${AUTH_SERVICE_PORT_DEV:?deploy-guide.md 4절}:8081" # host:container
+    environment:
+      <<: *auth_service_environment
+      # 서비스 이름에 환경을 묶는다. env 파일 값에 맡기면 prod 컨테이너가 dev 프로파일(ddl-auto update · Swagger 열림)로 뜰 수 있다
+      SPRING_PROFILES_ACTIVE: dev
+    # 컨테이너 메모리 상한. JVM 힙은 Dockerfile 의 MaxRAMPercentage 가 이 값을 기준으로 정한다
+    deploy:
+      resources:
+        limits:
+          memory: ${AUTH_SERVICE_MEM_LIMIT_DEV:-768m}
+
+  auth-service-prod:
+    <<: *auth_service_common
+    image: commerce-auth-service:prod
+    container_name: commerce-auth-service-prod
+    ports:
+      - "127.0.0.1:${AUTH_SERVICE_PORT_PROD:?deploy-guide.md 4절}:8081" # host:container
+    environment:
+      <<: *auth_service_environment
+      # prod 프로파일 yml 은 없다 — 공통 application.yml 의 닫힌 기본값(ddl-auto none · Swagger 닫힘 · dev 라우트 꺼짐)으로 뜬다
+      SPRING_PROFILES_ACTIVE: prod
+    deploy:
+      resources:
+        limits:
+          memory: ${AUTH_SERVICE_MEM_LIMIT_PROD:-1g}
+
+# 외부 네트워크 — 이름은 Infra 에서 정하고(#197) env 로 받는다. 배포 agent 가 없으면 만든다(deploy-guide.md §6)
+networks:
+  backend:
+    name: ${COMMERCE_DOCKER_NETWORK:?deploy-guide.md 4절}
+    external: true

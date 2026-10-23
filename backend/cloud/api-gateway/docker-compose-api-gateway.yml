@@ -1,0 +1,99 @@
+# api-gateway 배포 정의 (backend/docs/deploy-guide.md).
+#
+# 한 파일에 dev · prod 두 서비스를 두고, 배포 agent 는 환경마다 env 파일과 compose 프로젝트를 갈라 하나만 올린다.
+#   docker compose -p commerce-api-gateway-dev --env-file .env.runtime -f docker-compose-api-gateway.yml up -d --build --wait api-gateway-dev
+# -p 를 빼지 않는다 — 빠지면 디렉터리 이름이 프로젝트가 돼 다른 compose 와 섞이고 --remove-orphans 가 남의 컨테이너를 지울 수 있다.
+# compose 는 파일 전체를 보간하므로 dev 배포에도 _PROD 키(포트)가 있어야 한다. 반대도 같다.
+#
+# 컨테이너 안 포트는 dev · prod 같다(8000, application.yml 의 server.port). 호스트 포트만 env 로 다르고 값은 #197 에서 정한다.
+# 외부 진입점이라 호스트의 모든 인터페이스에 연다. 앞단(BFF · LB) 밖으로의 노출은 호스트 방화벽 · Infra 가 막는다.
+#
+# 값은 저장소에 쓰지 않는다. 시크릿은 Vault, 이름은 backend/.env.example 과 같다(secret-management.md).
+# environment 에는 이 모듈이 실제로 읽는 키만 넘긴다. yml 에 키를 더하면 여기와 .env.example 을 같은 PR 에서 맞춘다.
+
+x-api-gateway-environment: &api_gateway_environment
+  # JVM 시간대(로그 시각만 바뀐다). 비우면 UTC
+  TIME_ZONE: ${TIME_ZONE:-UTC}
+  # Eureka 서버 주소. 기본값을 두지 않는다 — yml 기본값(localhost)은 컨테이너 안에서 자기 자신이라 등록이 조용히 실패한다
+  EUREKA_DEFAULT_ZONE: ${EUREKA_DEFAULT_ZONE:?deploy-guide.md 4절}
+  # 컨테이너 호스트 이름(컨테이너 ID)이 아니라 네트워크 IP 로 등록한다 — 게이트웨이 lb:// · Feign 이 이름을 풀지 못하는 일을 막는다.
+  # 배포 전용 설정이라 yml 대신 여기서 넣는다(relaxed binding: eureka.instance.prefer-ip-address)
+  EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+  # auth 와 api-gateway 는 같은 Redis 를 가리켜야 한다 — 다르면 로그아웃한 토큰이 그대로 통과한다
+  REDIS_HOST: ${REDIS_HOST:?deploy-guide.md 4절}
+  REDIS_PORT: ${REDIS_PORT:?deploy-guide.md 4절}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?deploy-guide.md 4절}
+  # access 토큰 검증 공개키(PEM 본문 한 줄). 이전 키는 교체 중에만 채운다 — 비면 yml 기본값(빈 값)과 같다
+  JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?deploy-guide.md 4절}
+  JWT_PUBLIC_KEY_PREVIOUS: ${JWT_PUBLIC_KEY_PREVIOUS:-}
+  # 비면 어떤 origin 도 허용하지 않는다(yml 의 닫힌 기본값). 배포 환경은 프론트 origin 을 채운다
+  GATEWAY_CORS_ALLOWED_ORIGINS: ${GATEWAY_CORS_ALLOWED_ORIGINS:-}
+  # 비면 X-Forwarded-For 를 믿지 않는다. BFF · LB 구성이 정해지면 채운다(security-guide.md §7-3)
+  GATEWAY_TRUSTED_PROXIES: ${GATEWAY_TRUSTED_PROXIES:-}
+  # gateway.client-ip.enabled 를 켤 때만 필수다(기본 꺼짐)
+  GATEWAY_CLIENT_IP_HASH_KEY: ${GATEWAY_CLIENT_IP_HASH_KEY:-}
+
+x-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# dev · prod 공통. 서비스마다 다른 것(이미지 태그 · 컨테이너 이름 · 포트 · 프로파일 · 메모리)만 아래에서 덮는다
+x-api-gateway-common: &api_gateway_common
+  build:
+    context: .
+    dockerfile: api-gateway.Dockerfile
+  # 컨테이너 안에서 헬스를 본다. /actuator/health 는 익명으로 열려 있고(deploy-guide.md §5) DOWN 이면 503 이라 curl -f 가 실패한다
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8000/actuator/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 4
+    # JVM · Spring Cloud 기동 시간. 이 안의 실패는 retries 에 세지 않는다
+    start_period: 120s
+  # Spring Boot graceful shutdown(단계당 30초)이 끝나기 전에 SIGKILL 하지 않게 docker 기본 10초보다 길게 둔다
+  stop_grace_period: 40s
+  restart: unless-stopped
+  logging: *default_logging
+  networks:
+    - backend
+
+services:
+  api-gateway-dev:
+    <<: *api_gateway_common
+    # 이미지 이름은 dev · prod 가 같고 환경은 태그로 가른다 — 같은 호스트에서 dev 빌드가 prod 가 쓰는 이미지를 덮지 않게
+    image: commerce-api-gateway:dev
+    container_name: commerce-api-gateway-dev
+    ports:
+      - "${API_GATEWAY_PORT_DEV:?deploy-guide.md 4절}:8000" # host:container
+    environment:
+      <<: *api_gateway_environment
+      # 서비스 이름에 환경을 묶는다. env 파일 값에 맡기면 prod 컨테이너가 dev 프로파일(ddl-auto update · Swagger 열림)로 뜰 수 있다
+      SPRING_PROFILES_ACTIVE: dev
+    # 컨테이너 메모리 상한. JVM 힙은 Dockerfile 의 MaxRAMPercentage 가 이 값을 기준으로 정한다
+    deploy:
+      resources:
+        limits:
+          memory: ${API_GATEWAY_MEM_LIMIT_DEV:-512m}
+
+  api-gateway-prod:
+    <<: *api_gateway_common
+    image: commerce-api-gateway:prod
+    container_name: commerce-api-gateway-prod
+    ports:
+      - "${API_GATEWAY_PORT_PROD:?deploy-guide.md 4절}:8000" # host:container
+    environment:
+      <<: *api_gateway_environment
+      # prod 프로파일 yml 은 없다 — 공통 application.yml 의 닫힌 기본값(ddl-auto none · Swagger 닫힘 · dev 라우트 꺼짐)으로 뜬다
+      SPRING_PROFILES_ACTIVE: prod
+    deploy:
+      resources:
+        limits:
+          memory: ${API_GATEWAY_MEM_LIMIT_PROD:-768m}
+
+# 외부 네트워크 — 이름은 Infra 에서 정하고(#197) env 로 받는다. 배포 agent 가 없으면 만든다(deploy-guide.md §6)
+networks:
+  backend:
+    name: ${COMMERCE_DOCKER_NETWORK:?deploy-guide.md 4절}
+    external: true

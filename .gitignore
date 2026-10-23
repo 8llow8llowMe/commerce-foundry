@@ -12,6 +12,8 @@ Thumbs.db
 
 # Java / Gradle (backend)
 backend/**/build/
+# 배포 agent 가 모듈 디렉터리에 두는 bootJar 사본 — Dockerfile 이 복사하는 빌드 산출물이다 (deploy-guide.md)
+backend/**/app.jar
 # Eclipse·VS Code Java 확장의 컴파일 출력. src/main/resources 복사본이 섞여 커밋 대상이 아니다
 backend/**/bin/
 backend/.gradle/
