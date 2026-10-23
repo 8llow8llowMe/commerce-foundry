@@ -93,22 +93,36 @@ PG 호출이 **타임아웃·5xx·서킷 오픈**으로 끝나면 승인 여부�
 ```text
 READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ CANCELED   (취소 전이는 취소 이슈에서 연다)
   │   ◀──────┘ │  │  └────────────────────────────────▶ CANCELED
-  │  (되돌림)  │  └──▶ FAILED
-  │            └──▶ UNKNOWN ──▶ DONE | FAILED   (재조회로 확정)
-  └──▶ ABORTED   (금액 변경 · 재준비 · 주문 만료로 버려진 시도)
+  │  (되돌림)  │  └──▶ FAILED ──┐
+  │            └──▶ UNKNOWN ──▶ DONE | FAILED   (재조회로 확정 · UNKNOWN 안에서 사람 확인 표시)
+  └──▶ ABORTED ──────────────────┴──▶ LATE_APPROVED   (종결 뒤 PG 승인 확인 — 전액 취소 대상)
+      (금액 변경 · 재준비 · 주문 만료로 버려진 시도)
 ```
 
-- 상태 전이는 `Payment` 의 도메인 메서드로만 한다 — `startApproval` · `abort` · `approve` · `reject` · `markUnknown` · `revertToReady` · `resolve` ·
-  `markOrderSynced` · `markOrderSyncFailed`(#14). 표 밖 전이는 `PaymentTransitionException`(현재 상태 · 시도한 동작)이고 Processor 가 PAYMENT 오류 코드로 바꾼다.
-  주문 반영 기록만 같은 상태 재호출이 멱등이다. 승인 · 거절의 재호출은 예외다 — 중복 승인 경로를 조용히 통과시키지 않는다.
-- `revertToReady`(IN_PROGRESS → READY)는 승인 요청을 **보내지 않은 것이 확실할 때만** 쓴다(서킷 오픈 · 연결 전 실패 · 키 설정 오류). 결제키는 유지한다.
+- 상태 전이는 `Payment` 의 도메인 메서드로만 한다 — `startApproval` · `abort` · `abortAfterInquiry` · `approve` · `reject` · `markUnknown` · `revertToReady` ·
+  `resolve` · `flagForManualReview` · `recordLateApproval` · `markOrderSynced` · `markOrderSyncFailed`(#14). 표 밖 전이는 `PaymentTransitionException`(현재 상태 · 시도한 동작)이고
+  Processor 가 PAYMENT 오류 코드로 바꾼다. 같은 상태 재호출이 멱등인 것은 주문 반영 기록 · `flagForManualReview` 뿐이다. 승인 · 거절의 재호출은 예외다 — 중복 승인 경로를 조용히 통과시키지 않는다.
+  멱등 no-op(같은 인스턴스 반환)이면 저장하지 않는다(쓸데없는 버전 증가 · 충돌 방지).
+- **되돌린 READY** — `revertToReady`(IN_PROGRESS → READY)는 승인 요청을 **보내지 않은 것이 확실할 때만** 쓴다(서킷 오픈 · 연결 전 실패 · 키 설정 오류).
+  결제키 · `approval_started_at` 을 흔적으로 남긴다. 이 READY 는 **같은 결제키로만** 다시 승인을 시작하고(다른 키면 `PaymentApprovalMismatchException`),
+  버릴 때는 PG 조회로 미승인을 확인한 뒤 `abortAfterInquiry` 로만 버린다 — `abort` 는 결제키가 없는 READY 만이다.
+  "보내지 않았다" 는 판정이 틀려 이전 키가 이미 승인됐는데 바로 버리면, 슬롯이 풀려 새 시도가 또 승인되어 **이중 결제**가 된다.
+- **LATE_APPROVED** — FAILED · ABORTED 로 종결한 시도를 PG 가 승인했다고 알려 오면(웹훅 · 재조회 · 대사) `recordLateApproval` 로 남긴다.
+  돈이 빠졌으니 승인 칸(`payment_key` · `method` · `approved_at`)을 기록하고, 종결 이유(`failure_code` 또는 `abort_reason`)는 이력으로 둔다.
+  주문에 반영하지 않고 활성 슬롯도 다시 잡지 않는다 — **전액 취소 대상**이다(취소 전이는 취소 이슈, "허용되지 않은 전이라 무시" 로 버리지 않는다).
 - 결제 1건 = 결제 시도 1건 = `payment` 행 1건. 실패 후 재시도는 **새 결제 시도**(새 `pgOrderId`)로 만든다.
   `pgOrderId` 는 결제 시도 아이디(Snowflake) 문자열이다 — 토스 규칙(6~64자, 영문 · 숫자 · `-` · `_`, 승인 · 취소된 번호 재사용 불가 `DUPLICATED_ORDER_ID`)을 만족한다.
   출처: <https://docs.tosspayments.com/reference> (주문번호 · 결제 승인, 2026-10-21 확인).
-- **주문당 활성 결제 시도는 하나다** — `active_order_id` 유니크 키(FAILED · ABORTED 면 null). 같은 주문의 READY 둘이 동시에 결제창에 올라 두 번 승인되는 길을 DB 가 막는다.
-  UNKNOWN 은 돈이 빠졌을 수 있어 슬롯을 놓지 않는다. 같은 주문에 새 시도를 만들려면 기존 READY 를 먼저 ABORTED 로 둔다. 위반은 포트가 `ActivePaymentConflictException` 으로 알린다.
-- 승인 결과의 금액 · 결제키가 결제 시도와 다르면 도메인이 승인으로 기록하지 않는다 — Processor 가 UNKNOWN(`AMOUNT_MISMATCH_ON_APPROVAL`)으로 돌리고 사람이 본다.
-- PARTIAL_CANCELED · CANCELED 는 enum · check 제약에 미리 둔다(status check 를 나중에 drop/add 하지 않게). 지금은 들어오는 전이가 없다.
+- **주문당 활성 결제 시도는 하나다** — `active_order_id` 유니크 키(FAILED · ABORTED · LATE_APPROVED 면 null, 그 밖이면 반드시 `order_id` — check 가 NULL 도 막는다).
+  같은 주문의 READY 둘이 동시에 결제창에 올라 두 번 승인되는 길을 DB 가 막는다. UNKNOWN 은 돈이 빠졌을 수 있어 슬롯을 놓지 않는다.
+  같은 주문에 새 시도를 만들려면 기존 READY 를 먼저 ABORTED 로 둔다(되돌린 READY 는 위 규칙대로 조회 뒤에만).
+- 저장 충돌은 포트가 `PaymentPersistenceConflictException`(kind = `ACTIVE_SLOT` · `PAYMENT_KEY` · `VERSION`) 하나로 알린다 — 원인 예외는 싣지 않는다(#173).
+  충돌 뒤 다시 읽기는 **새 트랜잭션**에서 한다(PostgreSQL 트랜잭션이 aborted 라 같은 트랜잭션에서 읽으면 실패한다). `PAYMENT_KEY` 충돌은 다른 시도의 결제키를 붙인 것이라 변조 신호다.
+- 승인 결과의 금액 · 결제키가 결제 시도와 다르면 `PaymentApprovalMismatchException`(어긋난 항목만, 값은 싣지 않음)이고 승인으로 기록하지 않는다.
+  승인 응답이면 UNKNOWN(`APPROVAL_MISMATCH`), 재조회 결과면 UNKNOWN 그대로 `flagForManualReview(MANUAL_REVIEW)` — 재조회 스케줄러는 MANUAL_REVIEW 를 건너뛰고 알림한다.
+  IN_PROGRESS 로 오래 남은 행(승인 뒤 기록 실패 · 프로세스 종료)은 복구 스케줄러가 `markUnknown(STALE_IN_PROGRESS)` 로 재조회 대상에 넣는다.
+- PARTIAL_CANCELED · CANCELED · WAITING_FOR_DEPOSIT(가상계좌, §7)는 enum · check 제약에 미리 둔다(status check 를 나중에 drop/add 하지 않게). 지금은 들어오는 전이가 없다.
+- 금액 컬럼은 `total_amount` + `total_currency` 짝이다(`coding-conventions.md` §9-3).
 - 취소는 `payment_cancel` 행으로 누적한다. **남은 취소 가능 금액 = 승인 금액 − 취소 누계**이며 이를 넘는 취소를 거절한다.
 
 ## 6. 서비스 간 정합성
@@ -116,7 +130,15 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 결제 완료를 order-service 에 알리는 단계가 실패할 수 있다.
 
 - payment-service 는 `DONE` 기록과 함께 **`order_synced = false`** 를 남기고, 알림이 성공하면 `true` 로 바꾼다.
-- 스케줄러가 `DONE && !order_synced` 를 주기적으로 재전송한다. order-service 의 결제 완료 처리는 **멱등**이어야 한다
+  `order_synced` · `order_sync_failure_code` 조합의 뜻(DONE 계열만 쓴다 — LATE_APPROVED 는 주문에 반영하지 않는다, #14):
+
+  | `order_synced` | `order_sync_failure_code` | 뜻 | 처리 |
+  |----------------|---------------------------|----|------|
+  | false | null | 아직 반영하지 않았다 | 재전송 대상 |
+  | true | null | 반영 완료(order-service 가 PAID 확정) | 없음 |
+  | false | 코드 | order-service 가 종결 거절(주문 취소됨 · 재고 없음 · 금액 불일치 등 — 재전송해도 바뀌지 않는다) | 재전송에서 빼고 **자동 전액 취소 · 어드민 확인** 대상(취소 이슈 전까지는 알림) |
+  | true | 코드 | 금지(check) — 반영 성공 뒤 늦게 온 실패는 무시한다 | — |
+- 스케줄러가 `DONE && !order_synced && order_sync_failure_code is null` 을 주기적으로 재전송한다. order-service 의 결제 완료 처리는 **멱등**이어야 한다
   (이미 PAID 면 성공으로 응답).
 - 재고 선점이 만료된 뒤 결제가 완료되는 경우(고객이 결제창을 오래 열어 둠)가 있다. order-service 가 재고를 다시
   잡지 못하면 **자동 전액 취소** 후 고객에게 안내한다 — 돈만 받고 상품이 없는 주문을 남기지 않는다.
