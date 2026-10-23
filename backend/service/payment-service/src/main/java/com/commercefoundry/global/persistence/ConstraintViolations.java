@@ -18,23 +18,17 @@ public final class ConstraintViolations {
     private ConstraintViolations() {
     }
 
-    /** 원인 사슬에 {@code constraintName} 제약 위반이 있는가. */
+    /**
+     * 위반한 제약이 {@code constraintName} 인가. 이름은 {@link #constraintNameOf} 하나로 정한 뒤 정확히 비교한다 — 서버 필드가 있으면 Hibernate 이름은 보지 않는다.
+     * (order-service 복사본은 원인마다 두 이름을 모두 비교한다 — #247 에서 이 방식으로 맞춘다)
+     */
     public static boolean violates(Throwable exception, String constraintName) {
-        String expected = constraintName.toLowerCase(Locale.ROOT);
-        for (Throwable cause = exception; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
-            if (cause instanceof PSQLException psql && matches(serverConstraintOf(psql), expected)) {
-                return true;
-            }
-            if (cause instanceof ConstraintViolationException violation && matches(violation.getConstraintName(), expected)) {
-                return true;
-            }
-        }
-        return false;
+        return constraintName.toLowerCase(Locale.ROOT).equals(constraintNameOf(exception));
     }
 
     /**
-     * 위반한 제약 이름 — 예상 밖 위반을 다시 던질 때 메시지에 싣는다. {@link #violates} 와 같은 우선순위(서버 필드 → Hibernate 이름)로 고르고,
-     * 소문자로 바꾼 뒤 따옴표 · 스키마 접두사를 뗀다.
+     * 위반한 제약 이름 — 원인 사슬 전체에서 서버 필드를 먼저 찾고, 없으면 Hibernate 이름을 쓴다. 소문자로 바꾼 뒤 따옴표 · 스키마 접두사를 뗀다.
+     * 예상 밖 위반을 다시 던질 때 메시지에도 싣는다.
      *
      * @return 이름을 알 수 없으면 null
      */
@@ -55,14 +49,6 @@ public final class ConstraintViolations {
     private static String serverConstraintOf(PSQLException exception) {
         ServerErrorMessage serverError = exception.getServerErrorMessage();
         return serverError == null ? null : serverError.getConstraint();
-    }
-
-    private static boolean matches(String actual, String expected) {
-        if (actual == null) {
-            return false;
-        }
-        String name = actual.toLowerCase(Locale.ROOT).replace("\"", "");
-        return name.equals(expected) || name.endsWith("." + expected);
     }
 
     private static String normalize(String actual) {

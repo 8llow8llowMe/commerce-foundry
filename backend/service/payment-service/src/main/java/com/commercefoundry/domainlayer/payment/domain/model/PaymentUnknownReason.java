@@ -14,6 +14,10 @@ public enum PaymentUnknownReason {
     ALREADY_PROCESSED,
     /** PG 응답이 계약과 다르다(필수 칸 누락 · 해석 불가) — 승인 여부를 응답으로 판단할 수 없다 */
     CONTRACT,
-    /** PG 가 승인했다고 답했지만 승인 금액이 결제 금액과 다르다 — 승인으로 기록하지 않고 확인한다 */
-    AMOUNT_MISMATCH_ON_APPROVAL
+    /** PG 가 승인했다고 답했지만 금액 · 결제키가 이 결제 시도와 다르다({@link PaymentApprovalMismatchException}) — 승인으로 기록하지 않고 확인한다 */
+    APPROVAL_MISMATCH,
+    /** 승인 요청 중(IN_PROGRESS)으로 너무 오래 남은 행 — 승인 기록 단계가 죽었을 수 있어 복구 스케줄러가 재조회 대상으로 돌린다 */
+    STALE_IN_PROGRESS,
+    /** 재조회로 확정할 수 없어 사람이 확인한다 — 재조회 스케줄러는 건너뛰고 알림만 한다 ({@link Payment#flagForManualReview}) */
+    MANUAL_REVIEW
 }

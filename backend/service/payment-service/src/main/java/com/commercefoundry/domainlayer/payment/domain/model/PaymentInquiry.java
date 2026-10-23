@@ -3,9 +3,9 @@ package com.commercefoundry.domainlayer.payment.domain.model;
 import java.util.Objects;
 
 /**
- * 결과 미확정({@link PaymentStatus#UNKNOWN}) 결제를 PG 에 다시 조회해 확정한 결과 ({@code payment-guide.md} §4). PG 어댑터가 만들고 {@link Payment#resolve} 가 받는다.
+ * 결제 시도를 PG 에 다시 조회해 확정한 결과 ({@code payment-guide.md} §4). PG 어댑터가 만들고 {@link Payment#resolve} · {@link Payment#abortAfterInquiry} 가 받는다.
  *
- * <p>PG 도 아직 처리 중이라고 답하거나 조회 자체가 실패하면 이 값을 만들지 않는다 — 확정할 수 없으니 UNKNOWN 그대로 두고 다음 재조회를 기다린다.
+ * <p>PG 도 아직 처리 중이라고 답하거나 조회 자체가 실패하면 이 값을 만들지 않는다 — 확정할 수 없으니 지금 상태 그대로 두고 다음 재조회를 기다린다.
  */
 public sealed interface PaymentInquiry {
 
@@ -27,6 +27,12 @@ public sealed interface PaymentInquiry {
 
         public Failed {
             Objects.requireNonNull(failureCode, "failureCode");
+        }
+
+        /** PG 메시지는 결제수단 · 고객 상황을 담을 수 있어 로그에 남기지 않는다 — 코드만 찍는다. */
+        @Override
+        public String toString() {
+            return "Failed[failureCode=" + failureCode + "]";
         }
     }
 }
