@@ -1,0 +1,29 @@
+// commerce-foundry api-gateway 배포 잡. 라우팅 · 인증 진입점. discovery 다음에 배포한다. 외부에 여는 유일한 모듈이다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-api-gateway (Script Path: Jenkinsfile-api-gateway)
+// 배포 대상 PR 라벨:                  backend-api-gateway
+//   develop -> dev  (agent deploy-backend-dev2)
+//   main    -> prod (agent deploy-backend-prod)
+// 규칙: backend/docs/jenkins-cicd-guide.md · 배포 단위: backend/docs/deploy-guide.md
+def backendPipeline
+node('builder-backend') {
+    checkout scm
+    backendPipeline = load 'Jenkinsfile.backend-common.groovy'
+}
+
+backendPipeline.run([
+    serviceGroup       : 'cloud',
+    serviceName        : 'api-gateway',
+    modulePath         : 'cloud:api-gateway',
+    fsPath             : 'backend/cloud/api-gateway',
+    dockerfile         : 'api-gateway.Dockerfile',
+    composeFile        : 'docker-compose-api-gateway.yml',
+    composeServiceName : 'api-gateway',
+    containerNamePrefix: 'commerce-api-gateway',
+    deploySubdir       : 'cloud/api-gateway',
+    buildAgentLabel    : 'builder-backend',
+    deployAgentLabels  : [
+        dev : 'deploy-backend-dev2',
+        prod: 'deploy-backend-prod'
+    ]
+])

@@ -1,0 +1,29 @@
+// commerce-foundry service-discovery 배포 잡. Eureka 레지스트리. 처음 띄울 때 가장 먼저 배포한다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-service-discovery (Script Path: Jenkinsfile-service-discovery)
+// 배포 대상 PR 라벨:                  backend-service-discovery
+//   develop -> dev  (agent deploy-backend-dev2)
+//   main    -> prod (agent deploy-backend-prod)
+// 규칙: backend/docs/jenkins-cicd-guide.md · 배포 단위: backend/docs/deploy-guide.md
+def backendPipeline
+node('builder-backend') {
+    checkout scm
+    backendPipeline = load 'Jenkinsfile.backend-common.groovy'
+}
+
+backendPipeline.run([
+    serviceGroup       : 'cloud',
+    serviceName        : 'service-discovery',
+    modulePath         : 'cloud:service-discovery',
+    fsPath             : 'backend/cloud/service-discovery',
+    dockerfile         : 'service-discovery.Dockerfile',
+    composeFile        : 'docker-compose-service-discovery.yml',
+    composeServiceName : 'service-discovery',
+    containerNamePrefix: 'commerce-service-discovery',
+    deploySubdir       : 'cloud/service-discovery',
+    buildAgentLabel    : 'builder-backend',
+    deployAgentLabels  : [
+        dev : 'deploy-backend-dev2',
+        prod: 'deploy-backend-prod'
+    ]
+])

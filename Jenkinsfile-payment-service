@@ -1,0 +1,29 @@
+// commerce-foundry payment-service 배포 잡. 결제(토스페이먼츠). order 와 같은 차례에 배포한다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-payment-service (Script Path: Jenkinsfile-payment-service)
+// 배포 대상 PR 라벨:                  backend-payment-service
+//   develop -> dev  (agent deploy-backend-dev2)
+//   main    -> prod (agent deploy-backend-prod)
+// 규칙: backend/docs/jenkins-cicd-guide.md · 배포 단위: backend/docs/deploy-guide.md
+def backendPipeline
+node('builder-backend') {
+    checkout scm
+    backendPipeline = load 'Jenkinsfile.backend-common.groovy'
+}
+
+backendPipeline.run([
+    serviceGroup       : 'service',
+    serviceName        : 'payment-service',
+    modulePath         : 'service:payment-service',
+    fsPath             : 'backend/service/payment-service',
+    dockerfile         : 'payment-service.Dockerfile',
+    composeFile        : 'docker-compose-payment-service.yml',
+    composeServiceName : 'payment-service',
+    containerNamePrefix: 'commerce-payment-service',
+    deploySubdir       : 'service/payment-service',
+    buildAgentLabel    : 'builder-backend',
+    deployAgentLabels  : [
+        dev : 'deploy-backend-dev2',
+        prod: 'deploy-backend-prod'
+    ]
+])

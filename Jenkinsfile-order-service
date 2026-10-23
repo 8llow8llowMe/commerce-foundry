@@ -1,0 +1,29 @@
+// commerce-foundry order-service 배포 잡. 주문. product · delivery 다음에 배포한다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-order-service (Script Path: Jenkinsfile-order-service)
+// 배포 대상 PR 라벨:                  backend-order-service
+//   develop -> dev  (agent deploy-backend-dev2)
+//   main    -> prod (agent deploy-backend-prod)
+// 규칙: backend/docs/jenkins-cicd-guide.md · 배포 단위: backend/docs/deploy-guide.md
+def backendPipeline
+node('builder-backend') {
+    checkout scm
+    backendPipeline = load 'Jenkinsfile.backend-common.groovy'
+}
+
+backendPipeline.run([
+    serviceGroup       : 'service',
+    serviceName        : 'order-service',
+    modulePath         : 'service:order-service',
+    fsPath             : 'backend/service/order-service',
+    dockerfile         : 'order-service.Dockerfile',
+    composeFile        : 'docker-compose-order-service.yml',
+    composeServiceName : 'order-service',
+    containerNamePrefix: 'commerce-order-service',
+    deploySubdir       : 'service/order-service',
+    buildAgentLabel    : 'builder-backend',
+    deployAgentLabels  : [
+        dev : 'deploy-backend-dev2',
+        prod: 'deploy-backend-prod'
+    ]
+])
