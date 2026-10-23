@@ -205,4 +205,29 @@ class ShippingPolicyRepositoryAdapterTest {
             .rootCause()
             .hasMessageContaining("ck_shipping_remote_area_surcharge_non_negative");
     }
+
+    /** 형식이 틀린 우편번호가 들어가면 읽을 때 PostalCode 생성이 실패해 정책 조회 · 견적이 500 이 된다 (#69). */
+    @Test
+    @DisplayName("제약: 네 자리 시작 우편번호 구간은 저장되지 않는다 (ck_shipping_remote_area_postal_code_format)")
+    void shortPostalCodeIsRejected() {
+        ShippingRemoteAreaEntity entity = ShippingRemoteAreaEntity.builder()
+            .id(7101L).shippingPolicyId(POLICY_ID).name("제주").postalCodeFrom("6300").postalCodeTo("63644").surchargeAmount(3_000L).surchargeCurrency(KRW)
+            .build();
+
+        assertThatThrownBy(() -> entityManager.persistAndFlush(entity))
+            .rootCause()
+            .hasMessageContaining("ck_shipping_remote_area_postal_code_format");
+    }
+
+    @Test
+    @DisplayName("제약: 숫자가 아닌 끝 우편번호 구간은 저장되지 않는다 (ck_shipping_remote_area_postal_code_format)")
+    void nonNumericPostalCodeIsRejected() {
+        ShippingRemoteAreaEntity entity = ShippingRemoteAreaEntity.builder()
+            .id(7101L).shippingPolicyId(POLICY_ID).name("제주").postalCodeFrom("63000").postalCodeTo("6364A").surchargeAmount(3_000L).surchargeCurrency(KRW)
+            .build();
+
+        assertThatThrownBy(() -> entityManager.persistAndFlush(entity))
+            .rootCause()
+            .hasMessageContaining("ck_shipping_remote_area_postal_code_format");
+    }
 }

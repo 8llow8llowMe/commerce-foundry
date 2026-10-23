@@ -10,8 +10,9 @@ import java.util.Objects;
  *
  * @param freeShippingThreshold null 이면 무료배송 없음
  * @param version 호출자가 조회한 정책 버전. 정책이 아직 없으면 null — 있는데 null 이거나 다르면 버전 충돌이다
+ * @param adminMemberId 교체하는 어드민 회원 아이디 — access 토큰의 memberId 다(요청 본문으로 받지 않는다). 교체 이력에 남는다 (#69)
  */
-public record ShippingPolicyReplaceCommand(Money baseFee, Money freeShippingThreshold, List<RemoteAreaCommand> remoteAreas, Long version) {
+public record ShippingPolicyReplaceCommand(Money baseFee, Money freeShippingThreshold, List<RemoteAreaCommand> remoteAreas, Long version, long adminMemberId) {
 
     public ShippingPolicyReplaceCommand {
         Objects.requireNonNull(baseFee, "baseFee");

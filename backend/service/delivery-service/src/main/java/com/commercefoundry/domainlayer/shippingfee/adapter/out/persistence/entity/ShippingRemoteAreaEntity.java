@@ -31,6 +31,13 @@ import org.springframework.data.domain.Persistable;
     comment = "도서산간 우편번호 구간 (배송비 정책별)",
     indexes = @Index(name = "idx_shipping_remote_area_shipping_policy_id", columnList = "shipping_policy_id"),
     check = {
+        // 형식이 틀린 값(4자리 · 문자)이 들어가면 읽을 때 PostalCode 생성이 실패해 정책 조회 · 견적이 500 이 된다 (#69). 정규식은 H2 · PostgreSQL 문법이 달라
+        // ltrim 으로 숫자를 걷어낸 나머지가 비었는지 본다 (coding-conventions.md §9-4)
+        @CheckConstraint(
+            name = "ck_shipping_remote_area_postal_code_format",
+            constraint = "char_length(postal_code_from) = 5 and ltrim(postal_code_from, '0123456789') = ''"
+                + " and char_length(postal_code_to) = 5 and ltrim(postal_code_to, '0123456789') = ''"
+        ),
         @CheckConstraint(name = "ck_shipping_remote_area_postal_code_range", constraint = "postal_code_from <= postal_code_to"),
         @CheckConstraint(name = "ck_shipping_remote_area_surcharge_non_negative", constraint = "surcharge_amount >= 0")
     }

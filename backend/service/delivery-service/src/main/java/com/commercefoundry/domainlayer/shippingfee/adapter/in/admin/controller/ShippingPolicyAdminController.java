@@ -2,26 +2,38 @@ package com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.controller;
 
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.request.ShippingPolicyReplaceRequest;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.ShippingPolicyAdminResponse;
+import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryValidationMessage;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingPolicyAdminUseCase;
+import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 어드민 국내 배송비 정책. 해외 배송비 정책(#22)은 {@code InternationalShippingPolicyAdminController}({@code /api/v1/admin/shipping-policies/international})가 나란히 둔다.
+ * 교체한 어드민은 access 토큰의 memberId 로만 이력에 남긴다 — 본문으로 받지 않는다 (#69).
  *
- * <p>본문 검증은 {@code @Valid @RequestBody} 가 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
+ * <p>본문 검증은 {@code @Valid @RequestBody}, 파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다
+ * ({@code coding-conventions.md} §8-2).
  */
 @Tag(name = "[어드민] 배송비 정책", description = "국내 기본 배송비 · 무료배송 기준 · 도서산간 구간, 해외 기본료 · 국가 그룹별 무게 요금 관리")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
@@ -29,6 +41,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/admin/shipping-policies/domestic")
 public class ShippingPolicyAdminController {
+
+    private static final int MAX_PAGE_SIZE = 100;
 
     private final ShippingPolicyAdminUseCase shippingPolicyAdminUseCase;
 
@@ -47,11 +61,30 @@ public class ShippingPolicyAdminController {
         description = "기본 배송비 · 무료배송 기준 · 도서산간 구간을 통째로 바꾼다(구간은 모두 지우고 새로 넣는다 — 구간 아이디가 새로 발급된다). "
             + "조회한 version 을 그대로 보내고, 그 사이 다른 곳에서 바꿨으면 409(DELIVERY_006)로 아무것도 바꾸지 않는다. 정책이 없을 때는 version 을 비워 처음 만든다. "
             + "금액의 통화가 섞이면 400(DELIVERY_003), 구간의 시작이 끝보다 크면 400(DELIVERY_004), 구간이 겹치면 400(DELIVERY_005)이다. 맞닿은 구간은 겹치지 않는다. "
-            + "저장된 정책과 통화가 다르면 409(DELIVERY_012)다 — 정책 통화는 처음 만들 때 정한다."
+            + "저장된 정책과 통화가 다르면 409(DELIVERY_012)다 — 정책 통화는 처음 만들 때 정한다. "
+            + "성공하면 교체 전 · 후 값과 교체한 어드민으로 이력을 한 건 남긴다(값이 그대로인 교체도 남긴다)."
     )
     @PreAuthorize("hasRole('ADMIN')")
     @PutMapping
-    public ResponseEntity<Response<ShippingPolicyAdminResponse>> replaceDomesticPolicy(@Valid @RequestBody ShippingPolicyReplaceRequest request) {
-        return ResponseEntity.ok().body(Response.success(shippingPolicyAdminUseCase.replaceDomesticPolicy(request.toCommand())));
+    public ResponseEntity<Response<ShippingPolicyAdminResponse>> replaceDomesticPolicy(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Valid @RequestBody ShippingPolicyReplaceRequest request
+    ) {
+        return ResponseEntity.ok().body(Response.success(shippingPolicyAdminUseCase.replaceDomesticPolicy(request.toCommand(member.memberId()))));
+    }
+
+    @Operation(
+        summary = "국내 배송비 정책 교체 이력 조회",
+        description = "교체 이력을 최신순으로 페이지 단위로 읽는다. 항목은 교체 전(처음 만든 교체면 null) · 후 정책 값, 교체한 어드민 회원 아이디, 교체 시각이다. "
+            + "이력이 없으면 빈 목록이다."
+    )
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/histories")
+    public ResponseEntity<Response<PageResponse<ShippingPolicyHistoryAdminItem>>> getDomesticPolicyHistories(
+        @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0") @PositiveOrZero(message = DeliveryValidationMessage.PAGE_MIN) int page,
+        @Parameter(description = "페이지 크기 (1~100)") @RequestParam(defaultValue = "20")
+        @Min(value = 1, message = DeliveryValidationMessage.SIZE_RANGE) @Max(value = MAX_PAGE_SIZE, message = DeliveryValidationMessage.SIZE_RANGE) int size
+    ) {
+        return ResponseEntity.ok().body(Response.success(shippingPolicyAdminUseCase.getDomesticPolicyHistories(page, size)));
     }
 }

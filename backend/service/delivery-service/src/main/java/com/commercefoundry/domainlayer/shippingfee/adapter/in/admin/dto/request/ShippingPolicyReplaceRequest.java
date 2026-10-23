@@ -47,12 +47,14 @@ public record ShippingPolicyReplaceRequest(
      */
     static final long MAX_AMOUNT = 100_000_000L;
 
-    public ShippingPolicyReplaceCommand toCommand() {
+    /** @param adminMemberId access 토큰의 memberId — 본문으로 받지 않는다 */
+    public ShippingPolicyReplaceCommand toCommand(long adminMemberId) {
         return new ShippingPolicyReplaceCommand(
             baseFee.toMoney(),
             freeShippingThreshold == null ? null : freeShippingThreshold.toMoney(),
             remoteAreas.stream().map(RemoteAreaRequest::toCommand).toList(),
-            version
+            version,
+            adminMemberId
         );
     }
 

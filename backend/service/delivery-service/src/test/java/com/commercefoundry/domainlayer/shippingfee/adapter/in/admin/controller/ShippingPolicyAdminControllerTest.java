@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.RemoteAreaAdminItem;
+import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.ShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.application.command.ShippingPolicyReplaceCommand;
 import com.commercefoundry.domainlayer.shippingfee.application.command.ShippingPolicyReplaceCommand.RemoteAreaCommand;
@@ -15,9 +16,12 @@ import com.commercefoundry.domainlayer.shippingfee.application.exception.Deliver
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryException;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingPolicyAdminUseCase;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.PostalCode;
+import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.error.SecurityErrorCode;
+import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
+import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
@@ -28,26 +32,30 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
- * 어드민 국내 배송비 정책 API 의 HTTP 계약 — 권한 · 본문 검증 코드 · 도메인 오류 봉투. 슬라이스라 보안 구성을 직접 import 하고,
- * 인증 주체는 {@code @WithMockUser} 로 넣는다. 실제 JWT 로 어드민 URL 규칙을 거치는 경로는 {@code DeliveryServiceSecuritySmokeTest} 가 본다.
+ * 어드민 국내 배송비 정책 API 의 HTTP 계약 — 권한 · 교체한 어드민(토큰의 memberId) 전달 · 본문 · 파라미터 검증 코드 · 도메인 오류 봉투 · 이력 응답 모양.
+ * 슬라이스라 보안 구성을 직접 import 한다. 교체가 {@code @AuthenticationPrincipal MemberPrincipal} 을 받으므로 {@code @WithMockUser} 대신
+ * 테스트 키로 서명한 실제 access 토큰을 보낸다 ({@code security-guide.md} §5-3). 어드민 URL 규칙 전체는 {@code DeliveryServiceSecuritySmokeTest} 가 본다.
  */
 @WebMvcTest(ShippingPolicyAdminController.class)
 @Import({ResourceServerSecurityConfigurer.class, JwtVerificationPropertiesConfig.class})
 class ShippingPolicyAdminControllerTest {
 
     private static final String PATH = "/api/v1/admin/shipping-policies/domestic";
+    private static final String HISTORIES_PATH = PATH + "/histories";
     private static final String VALID_BODY = """
         {
           "baseFee": {"amount": 3000, "currency": "KRW"},
@@ -78,8 +86,20 @@ class ShippingPolicyAdminControllerTest {
             .build();
     }
 
+    private MvcTestResult get(String uri, MemberRole role) {
+        return mvc.get().uri(uri).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange();
+    }
+
     private MvcTestResult put(String body) {
-        return mvc.put().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+        return put(body, MemberRole.ADMIN);
+    }
+
+    private MvcTestResult put(String body, MemberRole role) {
+        return mvc.put().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(role)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    }
+
+    private static String bearer(MemberRole role) {
+        return "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, role).tokenValue();
     }
 
     @Nested
@@ -87,12 +107,11 @@ class ShippingPolicyAdminControllerTest {
     class Authorization {
 
         @Test
-        @WithMockUser(roles = "ADMIN")
         @DisplayName("ADMIN 이면 조회 200 — 아이디는 문자열, 버전은 숫자, 수정 시각은 ISO-8601 문자열")
         void adminCanRead() {
             given(shippingPolicyAdminUseCase.getDomesticPolicy()).willReturn(response());
 
-            MvcTestResult result = mvc.get().uri(PATH).exchange();
+            MvcTestResult result = get(PATH, MemberRole.ADMIN);
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody.shippingPolicyId").asString().isEqualTo("4611686018427387904");
@@ -102,42 +121,43 @@ class ShippingPolicyAdminControllerTest {
         }
 
         @Test
-        @WithMockUser(roles = "ADMIN")
         @DisplayName("정책이 아직 없으면 200 이고 dataBody 가 null 이다")
         void notConfiguredIsNull() {
             given(shippingPolicyAdminUseCase.getDomesticPolicy()).willReturn(null);
 
-            MvcTestResult result = mvc.get().uri(PATH).exchange();
+            MvcTestResult result = get(PATH, MemberRole.ADMIN);
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
         }
 
         @Test
-        @WithMockUser(roles = "CUSTOMER")
-        @DisplayName("CUSTOMER 면 조회 · 교체 모두 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")
+        @DisplayName("CUSTOMER 면 조회 · 교체 · 이력 모두 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")
         void customerIsForbidden() {
-            SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
-            SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(get(PATH, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(get(HISTORIES_PATH, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
             verifyNoInteractions(shippingPolicyAdminUseCase);
         }
 
         @Test
-        @DisplayName("토큰이 없으면 401 · SECURITY_001 이다")
+        @DisplayName("토큰이 없으면 조회 · 교체 · 이력 모두 401 · SECURITY_001 이고 유스케이스를 부르지 않는다")
         void anonymousIsUnauthorized() {
             SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
-            SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY).getResponse(), SecurityErrorCode.UNAUTHORIZED);
+            SecurityEnvelopeAssertions.assertEnvelope(
+                mvc.put().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(VALID_BODY).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED
+            );
+            SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(HISTORIES_PATH).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
             verifyNoInteractions(shippingPolicyAdminUseCase);
         }
     }
 
     @Nested
     @DisplayName("교체")
-    @WithMockUser(roles = "ADMIN")
     class Replace {
 
         @Test
-        @DisplayName("본문을 command 로 바꿔 넘기고 200 으로 저장 결과를 낸다")
+        @DisplayName("본문을 command 로 바꿔 넘기고 200 으로 저장 결과를 낸다 — 교체한 어드민은 토큰의 memberId 다")
         void replaces() {
             given(shippingPolicyAdminUseCase.replaceDomesticPolicy(any())).willReturn(response());
 
@@ -150,7 +170,7 @@ class ShippingPolicyAdminControllerTest {
             assertThat(command.getValue()).isEqualTo(new ShippingPolicyReplaceCommand(
                 Money.of(3_000, CurrencyCode.KRW), Money.of(50_000, CurrencyCode.KRW),
                 List.of(new RemoteAreaCommand("제주", new PostalCode("63000"), new PostalCode("63644"), Money.of(3_000, CurrencyCode.KRW))),
-                3L
+                3L, TestTokens.MEMBER_ID
             ));
         }
 
@@ -162,7 +182,7 @@ class ShippingPolicyAdminControllerTest {
             assertThat(put("""
                 {"baseFee": {"amount": 0, "currency": "KRW"}, "remoteAreas": []}
                 """)).hasStatusOk();
-            verify(shippingPolicyAdminUseCase).replaceDomesticPolicy(new ShippingPolicyReplaceCommand(Money.of(0, CurrencyCode.KRW), null, List.of(), null));
+            verify(shippingPolicyAdminUseCase).replaceDomesticPolicy(new ShippingPolicyReplaceCommand(Money.of(0, CurrencyCode.KRW), null, List.of(), null, TestTokens.MEMBER_ID));
         }
 
         @Test
@@ -208,7 +228,6 @@ class ShippingPolicyAdminControllerTest {
 
     @Nested
     @DisplayName("본문 검증")
-    @WithMockUser(roles = "ADMIN")
     class BodyValidation {
 
         @Test
@@ -362,6 +381,81 @@ class ShippingPolicyAdminControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
             assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].code").isEqualTo(code);
             assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo(field);
+            assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
+            verifyNoInteractions(shippingPolicyAdminUseCase);
+        }
+    }
+
+    @Nested
+    @DisplayName("교체 이력 GET /histories")
+    class Histories {
+
+        private static PageResponse<ShippingPolicyHistoryAdminItem> page() {
+            ShippingPolicyHistoryAdminItem.Snapshot before = ShippingPolicyHistoryAdminItem.Snapshot.builder()
+                .baseFee(MoneyItem.of(3_000, "KRW")).freeShippingThreshold(null).remoteAreas(List.of()).version(2)
+                .build();
+            ShippingPolicyHistoryAdminItem.Snapshot after = ShippingPolicyHistoryAdminItem.Snapshot.builder()
+                .baseFee(MoneyItem.of(3_500, "KRW")).freeShippingThreshold(MoneyItem.of(50_000, "KRW"))
+                .remoteAreas(List.of(ShippingPolicyHistoryAdminItem.RemoteArea.builder()
+                    .name("제주").postalCodeFrom("63000").postalCodeTo("63644").surcharge(MoneyItem.of(3_000, "KRW"))
+                    .build()))
+                .version(3)
+                .build();
+            ShippingPolicyHistoryAdminItem item = ShippingPolicyHistoryAdminItem.builder()
+                .historyId("4611686018427388100").adminMemberId("4611686018427387904").changedAt(Instant.parse("2026-10-18T03:00:00Z"))
+                .before(before).after(after)
+                .build();
+            return new PageResponse<>(List.of(item), 0, 20, 21L, 2);
+        }
+
+        @Test
+        @DisplayName("ADMIN 이면 200 이고 PageResponse 모양이다 — 아이디는 String, 금액은 {amount, currency}, 시각은 ISO-8601, page · size 기본값 0 · 20")
+        void adminIsAllowed() {
+            given(shippingPolicyAdminUseCase.getDomesticPolicyHistories(0, 20)).willReturn(page());
+
+            MvcTestResult result = get(HISTORIES_PATH, MemberRole.ADMIN);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.page").isEqualTo(0);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.size").isEqualTo(20);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.totalElements").isEqualTo(21);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.totalPages").isEqualTo(2);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].historyId").isEqualTo("4611686018427388100");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].adminMemberId").isEqualTo("4611686018427387904");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].changedAt").isEqualTo("2026-10-18T03:00:00Z");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].before.version").isEqualTo(2);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].before.freeShippingThreshold").isNull();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].after.version").isEqualTo(3);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].after.baseFee.amount").isEqualTo(3500);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].after.baseFee.currency").isEqualTo("KRW");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].after.remoteAreas[0].postalCodeFrom").isEqualTo("63000");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].after.remoteAreas[0].surcharge.amount").isEqualTo(3000);
+        }
+
+        @Test
+        @DisplayName("page · size 를 그대로 넘긴다 (경계값 size=100)")
+        void passesPaging() {
+            given(shippingPolicyAdminUseCase.getDomesticPolicyHistories(3, 100)).willReturn(new PageResponse<>(List.of(), 3, 100, 0L, 0));
+
+            assertThat(get(HISTORIES_PATH + "?page=3&size=100", MemberRole.ADMIN)).hasStatusOk();
+            verify(shippingPolicyAdminUseCase).getDomesticPolicyHistories(3, 100);
+        }
+
+        @ParameterizedTest(name = "{0} → {1}")
+        @CsvSource(delimiter = '|', value = {
+            "?page=-1 | DELIVERY_137 | page 는 0 이상이어야 합니다.",
+            "?size=0 | DELIVERY_138 | size 는 1 이상 100 이하여야 합니다.",
+            "?size=101 | DELIVERY_138 | size 는 1 이상 100 이하여야 합니다.",
+            "?page=abc | DELIVERY_198 | page 파라미터 형식이 올바르지 않습니다."
+        })
+        @DisplayName("page · size 검증 코드 — 유스케이스를 부르지 않는다")
+        void invalid(String query, String code, String message) {
+            MvcTestResult result = get(HISTORIES_PATH + query, MemberRole.ADMIN);
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(false);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo(message);
             assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
             verifyNoInteractions(shippingPolicyAdminUseCase);
         }

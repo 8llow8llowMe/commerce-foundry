@@ -45,6 +45,10 @@ public final class DeliveryValidationMessage {
     public static final String RATE_FEE_REQUIRED = "DELIVERY_135:무게 구간 요금(fee)은 필수입니다.";
     public static final String REMOTE_AREAS_NOT_ALLOWED = "DELIVERY_136:해외 배송비 정책에는 도서산간 구간(remoteAreas)을 둘 수 없습니다.";
 
+    // 어드민 페이지 목록 공용 (첫 사용: 국내 배송비 정책 이력 GET /api/v1/admin/shipping-policies/domestic/histories, #69)
+    public static final String PAGE_MIN = "DELIVERY_137:page 는 0 이상이어야 합니다.";
+    public static final String SIZE_RANGE = "DELIVERY_138:size 는 1 이상 100 이하여야 합니다.";
+
     private DeliveryValidationMessage() {
     }
 }
