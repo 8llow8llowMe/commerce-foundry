@@ -7,6 +7,7 @@
 
 ```text
 이슈 생성 → 브랜치 생성 → 작업·커밋 → PR 생성 → CI 통과 → Rebase and merge → 브랜치 삭제 → 이슈 갱신
+                                                          └→ (백엔드) Jenkins 가 배포 라벨이 붙은 모듈만 dev 에 배포 (§8)
 ```
 
 | 단계 | 지킬 것 | 스킬 |
@@ -217,3 +218,19 @@ git branch -D <머지된 브랜치>          # 리베이스 머지라 SHA 가 �
 - Windows 에서 `git worktree remove` 가 `Filename too long` 으로 실패하면 **등록은 풀리고 폴더만 남는다** (Gradle 빌드 산출물의 긴 경로).
   위 diff 확인을 마친 뒤 PowerShell `Remove-Item -LiteralPath '\\?\<절대 경로>' -Recurse -Force` 로 남은 폴더를 지우고
   `git worktree prune` 한다. 다시 겪지 않으려면 `git config --global core.longpaths true` 를 켠다.
+
+## 8. 머지 → 배포
+
+배포는 GitHub Actions 가 아니라 Jenkins 멀티브랜치 파이프라인이 한다. 백엔드 정본은 [`backend/docs/jenkins-cicd-guide.md`](../backend/docs/jenkins-cicd-guide.md) 다.
+
+| 브랜치에 들어오면 | 배포 환경 | 무엇이 나가는가 |
+|-------------------|-----------|-----------------|
+| `develop` (작업 PR 의 Rebase and merge) | dev | 머지된 PR 에 **배포 라벨**(`backend-<module>`)이 있고 그 모듈에 영향이 있는 변경 |
+| `main` (릴리스 PR 의 merge commit) | prod | 릴리스 PR 에 배포 라벨이 있는 모듈 |
+| 그 밖의 브랜치 · PR | 없음 | PR 은 빌드 · 테스트만 한다 |
+
+- **라벨이 곧 배포 대상이다.** 라벨이 없으면 아무것도 배포하지 않는다(fail-closed). `label.yml` 이 PR 을 열 때 경로로 붙이지만, 머지 전에 확인한다.
+- `backend-core` · `backend-docs` 는 배포 라벨이 아니다. core 만 바꾼 PR 은 다시 올릴 모듈의 `backend-<module>` 라벨을 작성자가 더한다.
+- 릴리스 PR 은 열린 뒤 develop 에 들어온 변경의 라벨이 자동으로 붙지 않는다. 머지 전에 이번 릴리스의 배포 모듈과 라벨을 맞춘다.
+- 라벨을 빠뜨리고 머지했거나 이전 커밋으로 되돌릴 때는 Jenkins 잡을 `FORCE_DEPLOY` 로 실행한다. main(prod) 은 입력 승인을 한 번 더 받는다.
+- 백엔드 배포는 lock `commerce-foundry-backend-deploy` 로 한 번에 하나씩 나간다.
