@@ -2,6 +2,8 @@ package com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.presenter;
 
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.RemoteAreaAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem;
+import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem.RemoteAreaSnapshotItem;
+import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem.SnapshotItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.ShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.support.MoneyItems;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.RemoteArea;
@@ -53,8 +55,8 @@ public class ShippingPolicyAdminPresenter {
             .build();
     }
 
-    private ShippingPolicyHistoryAdminItem.Snapshot toSnapshotItem(Snapshot snapshot) {
-        return ShippingPolicyHistoryAdminItem.Snapshot.builder()
+    private SnapshotItem toSnapshotItem(Snapshot snapshot) {
+        return SnapshotItem.builder()
             .baseFee(MoneyItems.of(snapshot.baseFee()))
             .freeShippingThreshold(MoneyItems.of(snapshot.freeShippingThreshold()))
             .remoteAreas(snapshot.remoteAreas().stream().map(this::toHistoryAreaItem).toList())
@@ -62,8 +64,8 @@ public class ShippingPolicyAdminPresenter {
             .build();
     }
 
-    private ShippingPolicyHistoryAdminItem.RemoteArea toHistoryAreaItem(RemoteArea remoteArea) {
-        return ShippingPolicyHistoryAdminItem.RemoteArea.builder()
+    private RemoteAreaSnapshotItem toHistoryAreaItem(RemoteArea remoteArea) {
+        return RemoteAreaSnapshotItem.builder()
             .name(remoteArea.name())
             .postalCodeFrom(remoteArea.postalCodeFrom().value())
             .postalCodeTo(remoteArea.postalCodeTo().value())

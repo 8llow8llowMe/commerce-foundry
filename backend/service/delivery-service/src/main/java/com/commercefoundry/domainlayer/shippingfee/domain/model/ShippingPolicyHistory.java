@@ -31,6 +31,13 @@ public record ShippingPolicyHistory(
         if (before != null && before.version() >= after.version()) {
             throw new IllegalArgumentException("교체 후 버전이 교체 전보다 커야 합니다: before=%d, after=%d".formatted(before.version(), after.version()));
         }
+        if (before != null && before.baseFee().currency() != after.baseFee().currency()) {
+            // 정책 통화는 처음 만들 때 정하고 바꾸지 않는다 (DELIVERY_012) — 다르면 저장 흐름의 오류다
+            throw new IllegalArgumentException("교체 전 · 후 정책 통화가 다릅니다: before=%s, after=%s".formatted(before.baseFee().currency(), after.baseFee().currency()));
+        }
+        if (adminMemberId <= 0) {
+            throw new IllegalArgumentException("교체한 어드민 회원 아이디는 양수여야 합니다: " + adminMemberId);
+        }
     }
 
     /**

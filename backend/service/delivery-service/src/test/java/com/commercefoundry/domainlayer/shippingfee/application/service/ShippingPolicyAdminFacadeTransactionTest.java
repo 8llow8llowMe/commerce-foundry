@@ -94,7 +94,7 @@ class ShippingPolicyAdminFacadeTransactionTest {
         assertThat(latest.before().baseFee().amount()).isEqualTo(3_000L);
         assertThat(latest.after().version()).isEqualTo(1L);
         assertThat(latest.after().baseFee().amount()).isEqualTo(3_500L);
-        assertThat(latest.after().remoteAreas()).extracting(ShippingPolicyHistoryAdminItem.RemoteArea::name).containsExactly("제주");
+        assertThat(latest.after().remoteAreas()).extracting(ShippingPolicyHistoryAdminItem.RemoteAreaSnapshotItem::name).containsExactly("제주");
         assertThat(histories.contents().get(1).before()).isNull();
         assertThat(count("shipping_policy_history_area")).as("교체 전 1 + 교체 후 1 + 처음 만든 교체 후 1").isEqualTo(3L);
     }

@@ -6,6 +6,7 @@ import static com.commercefoundry.domainlayer.shippingfee.support.ShippingFeeFix
 import static com.commercefoundry.domainlayer.shippingfee.support.ShippingFeeFixtures.remoteArea;
 import static com.commercefoundry.domainlayer.shippingfee.support.ShippingFeeFixtures.ulleung;
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
+import static com.commercefoundry.shared.commerce.CurrencyCode.USD;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -193,5 +194,72 @@ class ShippingPolicyHistoryRepositoryAdapterTest {
         assertThatThrownBy(() -> entityManager.persistAndFlush(entity))
             .rootCause()
             .hasMessageContaining("ck_shipping_policy_history_area_postal_code_range");
+    }
+
+    /** 교체 전 값이 있는 이력 행 — 버전 2 → 3, 기본 배송비 3,000원. */
+    private static ShippingPolicyHistoryEntity.ShippingPolicyHistoryEntityBuilder validReplaceRow() {
+        return validHistoryRow().beforeVersion(2L).beforeBaseFeeAmount(3_000L).beforeBaseFeeCurrency(KRW).afterVersion(3L);
+    }
+
+    private void assertRejectedBy(Object entity, String constraintName) {
+        assertThatThrownBy(() -> entityManager.persistAndFlush(entity))
+            .rootCause()
+            .hasMessageContaining(constraintName);
+    }
+
+    @Test
+    @DisplayName("제약: 교체 전 기본 배송비가 음수면 저장되지 않는다 (ck_shipping_policy_history_before_base_fee_non_negative)")
+    void negativeBeforeBaseFeeIsRejected() {
+        assertRejectedBy(validReplaceRow().beforeBaseFeeAmount(-1L).build(), "ck_shipping_policy_history_before_base_fee_non_negative");
+    }
+
+    @Test
+    @DisplayName("제약: 교체 전 무료배송 기준 금액만 있고 통화가 없으면 저장되지 않는다 (ck_shipping_policy_history_before_threshold_pair)")
+    void halfBeforeThresholdIsRejected() {
+        assertRejectedBy(validReplaceRow().beforeFreeShippingThresholdAmount(50_000L).build(), "ck_shipping_policy_history_before_threshold_pair");
+    }
+
+    @Test
+    @DisplayName("제약: 교체 전 무료배송 기준 0원은 저장되지 않는다 (ck_shipping_policy_history_before_threshold_positive)")
+    void zeroBeforeThresholdIsRejected() {
+        ShippingPolicyHistoryEntity entity = validReplaceRow().beforeFreeShippingThresholdAmount(0L).beforeFreeShippingThresholdCurrency(KRW).build();
+
+        assertRejectedBy(entity, "ck_shipping_policy_history_before_threshold_positive");
+    }
+
+    @Test
+    @DisplayName("제약: 교체 전 무료배송 기준 통화가 교체 전 기본 배송비 통화와 다르면 저장되지 않는다 (ck_shipping_policy_history_before_threshold_currency)")
+    void beforeThresholdCurrencyMismatchIsRejected() {
+        ShippingPolicyHistoryEntity entity = validReplaceRow().beforeFreeShippingThresholdAmount(50_000L).beforeFreeShippingThresholdCurrency(USD).build();
+
+        assertRejectedBy(entity, "ck_shipping_policy_history_before_threshold_currency");
+    }
+
+    @Test
+    @DisplayName("제약: 교체 후 무료배송 기준 0원은 저장되지 않는다 (ck_shipping_policy_history_after_threshold_positive)")
+    void zeroAfterThresholdIsRejected() {
+        ShippingPolicyHistoryEntity entity = validHistoryRow().afterFreeShippingThresholdAmount(0L).afterFreeShippingThresholdCurrency(KRW).build();
+
+        assertRejectedBy(entity, "ck_shipping_policy_history_after_threshold_positive");
+    }
+
+    @Test
+    @DisplayName("제약: 교체 후 무료배송 기준 통화가 교체 후 기본 배송비 통화와 다르면 저장되지 않는다 (ck_shipping_policy_history_after_threshold_currency)")
+    void afterThresholdCurrencyMismatchIsRejected() {
+        ShippingPolicyHistoryEntity entity = validHistoryRow().afterFreeShippingThresholdAmount(50_000L).afterFreeShippingThresholdCurrency(USD).build();
+
+        assertRejectedBy(entity, "ck_shipping_policy_history_after_threshold_currency");
+    }
+
+    @Test
+    @DisplayName("제약: 교체 후 버전이 교체 전보다 크지 않으면 저장되지 않는다 (ck_shipping_policy_history_version_order)")
+    void nonIncreasingVersionIsRejected() {
+        assertRejectedBy(validReplaceRow().afterVersion(2L).build(), "ck_shipping_policy_history_version_order");
+    }
+
+    @Test
+    @DisplayName("제약: 음수 추가 배송비 구간 스냅숏은 저장되지 않는다 (ck_shipping_policy_history_area_surcharge_non_negative)")
+    void negativeAreaSurchargeIsRejected() {
+        assertRejectedBy(validAreaRow().surchargeAmount(-1L).build(), "ck_shipping_policy_history_area_surcharge_non_negative");
     }
 }

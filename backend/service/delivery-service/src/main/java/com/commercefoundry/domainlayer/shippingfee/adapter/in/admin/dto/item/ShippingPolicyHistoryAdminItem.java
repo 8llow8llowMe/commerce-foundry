@@ -24,15 +24,15 @@ public record ShippingPolicyHistoryAdminItem(
     Instant changedAt,
 
     @Schema(description = "교체 전 정책. 정책을 처음 만든 교체면 null", nullable = true)
-    Snapshot before,
+    SnapshotItem before,
 
     @Schema(description = "교체 후 정책. 값이 그대로인 교체(같은 본문 재전송)도 이력이 남고 version 만 오른다")
-    Snapshot after
+    SnapshotItem after
 ) {
 
     @Builder
     @Schema(description = "그 시점의 국내 배송비 정책 값")
-    public record Snapshot(
+    public record SnapshotItem(
 
         @Schema(description = "기본 배송비")
         MoneyItem baseFee,
@@ -41,7 +41,7 @@ public record ShippingPolicyHistoryAdminItem(
         MoneyItem freeShippingThreshold,
 
         @Schema(description = "도서산간 구간. 시작 우편번호 오름차순. 없으면 빈 배열 — 구간 아이디는 싣지 않는다(교체마다 새로 발급돼 이력에서 뜻이 없다)")
-        List<RemoteArea> remoteAreas,
+        List<RemoteAreaSnapshotItem> remoteAreas,
 
         @Schema(description = "그 시점의 정책 version", example = "3")
         long version
@@ -50,7 +50,7 @@ public record ShippingPolicyHistoryAdminItem(
 
     @Builder
     @Schema(description = "도서산간 우편번호 구간 — 양 끝을 포함한다")
-    public record RemoteArea(
+    public record RemoteAreaSnapshotItem(
 
         @Schema(description = "구간 이름", example = "제주")
         String name,

@@ -24,7 +24,10 @@ public class ShippingPolicyHistoryRepositoryAdapter implements ShippingPolicyHis
     private final ShippingPolicyHistoryAreaRepository shippingPolicyHistoryAreaRepository;
     private final ShippingPolicyHistoryMapper shippingPolicyHistoryMapper;
 
-    /** 이력 행 → 구간 행 순서로 바로 내보낸다 — 실패가 커밋 시점이 아니라 이 호출에서 드러나 호출자 트랜잭션(정책 교체)과 함께 롤백된다. */
+    /**
+     * 이력 행({@code saveAndFlush}) → 구간 행({@code saveAllAndFlush}) 순서로 바로 내보낸다 — 제약 위반 · 아이디 충돌이 커밋 시점이 아니라 이 호출에서
+     * {@link org.springframework.dao.DataAccessException} 으로 드러나 호출자 트랜잭션(정책 교체)과 함께 롤백된다.
+     */
     @Override
     public void insert(ShippingPolicyHistory history) {
         shippingPolicyHistoryRepository.saveAndFlush(shippingPolicyHistoryMapper.toEntity(history));
@@ -34,6 +37,10 @@ public class ShippingPolicyHistoryRepositoryAdapter implements ShippingPolicyHis
         }
     }
 
+    /**
+     * 쿼리는 목록 1 + 전체 건수 1(첫 페이지가 다 차지 않으면 Spring Data 가 생략) + 그 페이지 이력의 구간 in 절 1 이다 — 이력이 없으면 구간을 읽지 않는다.
+     * 정렬 전제는 아이디 내림차순이다 — 교체는 버전 검사로 직렬화되므로 id 순서가 교체 순서다.
+     */
     @Override
     public Page<ShippingPolicyHistory> findDomesticPage(int page, int size) {
         Page<ShippingPolicyHistoryEntity> histories = shippingPolicyHistoryRepository.findAllByScopeOrderByIdDesc(ShippingScope.DOMESTIC, PageRequest.of(page, size));

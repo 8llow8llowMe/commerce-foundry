@@ -76,9 +76,12 @@
         constraint ck_shipping_policy_history_before_base_fee_non_negative check (before_base_fee_amount is null or before_base_fee_amount >= 0),
         constraint ck_shipping_policy_history_before_threshold_pair check ((before_free_shipping_threshold_amount is null and before_free_shipping_threshold_currency is null) or (before_free_shipping_threshold_amount is not null and before_free_shipping_threshold_currency is not null)),
         constraint ck_shipping_policy_history_before_threshold_positive check (before_free_shipping_threshold_amount is null or before_free_shipping_threshold_amount > 0),
+        constraint ck_shipping_policy_history_before_threshold_currency check (before_free_shipping_threshold_currency is null or before_free_shipping_threshold_currency = before_base_fee_currency),
         constraint ck_shipping_policy_history_after_base_fee_non_negative check (after_base_fee_amount >= 0),
         constraint ck_shipping_policy_history_after_threshold_pair check ((after_free_shipping_threshold_amount is null and after_free_shipping_threshold_currency is null) or (after_free_shipping_threshold_amount is not null and after_free_shipping_threshold_currency is not null)),
-        constraint ck_shipping_policy_history_after_threshold_positive check (after_free_shipping_threshold_amount is null or after_free_shipping_threshold_amount > 0)
+        constraint ck_shipping_policy_history_after_threshold_positive check (after_free_shipping_threshold_amount is null or after_free_shipping_threshold_amount > 0),
+        constraint ck_shipping_policy_history_after_threshold_currency check (after_free_shipping_threshold_currency is null or after_free_shipping_threshold_currency = after_base_fee_currency),
+        constraint ck_shipping_policy_history_version_order check (before_version is null or before_version < after_version)
     );
 
     comment on table delivery.shipping_policy_history is

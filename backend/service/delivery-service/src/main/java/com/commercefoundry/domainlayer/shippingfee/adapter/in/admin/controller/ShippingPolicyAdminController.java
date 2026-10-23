@@ -42,7 +42,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/admin/shipping-policies/domestic")
 public class ShippingPolicyAdminController {
 
-    private static final int MAX_PAGE_SIZE = 100;
+    /** 이력 한 건이 도서산간 구간을 최대 400행(교체 전 · 후 200개씩) 펼치므로 공용 상한(100)보다 작게 둔다 — 한 페이지 최대 8,000행. */
+    private static final int MAX_HISTORY_PAGE_SIZE = 20;
 
     private final ShippingPolicyAdminUseCase shippingPolicyAdminUseCase;
 
@@ -82,8 +83,9 @@ public class ShippingPolicyAdminController {
     @GetMapping("/histories")
     public ResponseEntity<Response<PageResponse<ShippingPolicyHistoryAdminItem>>> getDomesticPolicyHistories(
         @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0") @PositiveOrZero(message = DeliveryValidationMessage.PAGE_MIN) int page,
-        @Parameter(description = "페이지 크기 (1~100)") @RequestParam(defaultValue = "20")
-        @Min(value = 1, message = DeliveryValidationMessage.SIZE_RANGE) @Max(value = MAX_PAGE_SIZE, message = DeliveryValidationMessage.SIZE_RANGE) int size
+        @Parameter(description = "페이지 크기 (1~20)") @RequestParam(defaultValue = "20")
+        @Min(value = 1, message = DeliveryValidationMessage.HISTORY_SIZE_RANGE)
+        @Max(value = MAX_HISTORY_PAGE_SIZE, message = DeliveryValidationMessage.HISTORY_SIZE_RANGE) int size
     ) {
         return ResponseEntity.ok().body(Response.success(shippingPolicyAdminUseCase.getDomesticPolicyHistories(page, size)));
     }
