@@ -1,0 +1,33 @@
+// commerce-foundry operations-service 배포 잡. 운영 기능(#212).
+//
+// **자리만 둔 잡이다.** 모듈 · Dockerfile · docker-compose-operations-service.yml 이 아직 없다.
+// #212 가 모듈과 compose 를 추가하고(deploy-guide.md §2 · §4) .github/labeler.yml 에 backend-operations-service 를 더한 뒤 잡을 등록한다.
+// 그 전에 실행하면 첫 단계가 "배포 단위 파일이 없습니다" 로 멈춘다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-operations-service (Script Path: Jenkinsfile-operations-service)
+// 배포 대상 PR 라벨:                  backend-operations-service
+//   develop -> dev  (agent deploy-backend-dev2)
+//   main    -> prod (agent deploy-backend-prod)
+// 규칙: backend/docs/jenkins-cicd-guide.md · 배포 단위: backend/docs/deploy-guide.md
+def backendPipeline
+node('builder-backend') {
+    checkout scm
+    backendPipeline = load 'Jenkinsfile.backend-common.groovy'
+}
+
+backendPipeline.run([
+    serviceGroup       : 'service',
+    serviceName        : 'operations-service',
+    modulePath         : 'service:operations-service',
+    fsPath             : 'backend/service/operations-service',
+    dockerfile         : 'operations-service.Dockerfile',
+    composeFile        : 'docker-compose-operations-service.yml',
+    composeServiceName : 'operations-service',
+    containerNamePrefix: 'commerce-operations-service',
+    deploySubdir       : 'service/operations-service',
+    buildAgentLabel    : 'builder-backend',
+    deployAgentLabels  : [
+        dev : 'deploy-backend-dev2',
+        prod: 'deploy-backend-prod'
+    ]
+])

@@ -1,0 +1,29 @@
+// commerce-foundry product-service 배포 잡. 상품 · 재고. order 가 Feign 으로 부르므로 order 보다 먼저 배포한다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-product-service (Script Path: Jenkinsfile-product-service)
+// 배포 대상 PR 라벨:                  backend-product-service
+//   develop -> dev  (agent deploy-backend-dev2)
+//   main    -> prod (agent deploy-backend-prod)
+// 규칙: backend/docs/jenkins-cicd-guide.md · 배포 단위: backend/docs/deploy-guide.md
+def backendPipeline
+node('builder-backend') {
+    checkout scm
+    backendPipeline = load 'Jenkinsfile.backend-common.groovy'
+}
+
+backendPipeline.run([
+    serviceGroup       : 'service',
+    serviceName        : 'product-service',
+    modulePath         : 'service:product-service',
+    fsPath             : 'backend/service/product-service',
+    dockerfile         : 'product-service.Dockerfile',
+    composeFile        : 'docker-compose-product-service.yml',
+    composeServiceName : 'product-service',
+    containerNamePrefix: 'commerce-product-service',
+    deploySubdir       : 'service/product-service',
+    buildAgentLabel    : 'builder-backend',
+    deployAgentLabels  : [
+        dev : 'deploy-backend-dev2',
+        prod: 'deploy-backend-prod'
+    ]
+])

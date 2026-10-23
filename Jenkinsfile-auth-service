@@ -1,0 +1,29 @@
+// commerce-foundry auth-service 배포 잡. 토큰 발급 · 회원. gateway 다음에 배포한다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-auth-service (Script Path: Jenkinsfile-auth-service)
+// 배포 대상 PR 라벨:                  backend-auth-service
+//   develop -> dev  (agent deploy-backend-dev2)
+//   main    -> prod (agent deploy-backend-prod)
+// 규칙: backend/docs/jenkins-cicd-guide.md · 배포 단위: backend/docs/deploy-guide.md
+def backendPipeline
+node('builder-backend') {
+    checkout scm
+    backendPipeline = load 'Jenkinsfile.backend-common.groovy'
+}
+
+backendPipeline.run([
+    serviceGroup       : 'service',
+    serviceName        : 'auth-service',
+    modulePath         : 'service:auth-service',
+    fsPath             : 'backend/service/auth-service',
+    dockerfile         : 'auth-service.Dockerfile',
+    composeFile        : 'docker-compose-auth-service.yml',
+    composeServiceName : 'auth-service',
+    containerNamePrefix: 'commerce-auth-service',
+    deploySubdir       : 'service/auth-service',
+    buildAgentLabel    : 'builder-backend',
+    deployAgentLabels  : [
+        dev : 'deploy-backend-dev2',
+        prod: 'deploy-backend-prod'
+    ]
+])
