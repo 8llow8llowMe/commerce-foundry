@@ -1,0 +1,3 @@
+# docker build 컨텍스트는 이 모듈 디렉터리다. 이미지에 넣는 것은 app.jar 하나뿐이라 나머지(src · build 등)는 보내지 않는다
+*
+!app.jar
