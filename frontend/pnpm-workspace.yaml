@@ -4,7 +4,7 @@ packages:
 
 # 공유 의존성 버전은 여기 한 곳에만 적는다. 패키지는 "catalog:" 로 참조한다.
 catalog:
-  next: 16.4.1
+  next: 16.4.2
   react: 19.3.1
   react-dom: 19.3.1
   typescript: 6.0.3
@@ -19,5 +19,5 @@ catalog:
   '@fontsource/cormorant-garamond': 5.3.0
   '@fontsource/noto-serif-kr': 5.3.1
   # 상품 상세 HTML(BE 가 정제하지 않은 원문)을 허용 목록으로 거른다
-  sanitize-html: 2.18.0
+  sanitize-html: 2.18.1
   '@types/sanitize-html': 2.16.2
