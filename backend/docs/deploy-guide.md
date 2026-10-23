@@ -10,7 +10,7 @@
 GitHub (develop / main)
 -> Jenkins 빌드 agent   ./gradlew :<group>:<module>:bootJar
 -> Jenkins 배포 agent   모듈 디렉터리 + jar 를 배포 경로로 옮기고 jar 를 app.jar 로 둔다
-                         Vault 값 → .env.runtime (KEY=value)
+                         Vault 값 → .env.runtime (KEY='value', chmod 600, up 뒤 삭제)
                          docker compose -p commerce-<module>-<env> --env-file .env.runtime \
                            -f docker-compose-<module>.yml up -d --build --wait <module>-<env>
 -> 헬스 확인             --wait 가 healthcheck 가 healthy 가 될 때까지 기다린다(§5)
@@ -20,6 +20,12 @@ GitHub (develop / main)
 - bootJar 산출물은 `backend/<group>/<module>/build/libs/<module>-<version>.jar` 하나다(예: `service-discovery-0.0.1-SNAPSHOT.jar`). `-plain.jar` 는 만들지 않는다.
 - 빌드 컨텍스트는 모듈 디렉터리다. `.dockerignore` 가 `app.jar` 말고는 보내지 않는다.
 - 애플리케이션은 `.env` 파일을 읽지 않는다(local 프로파일만 읽는다). 값은 compose 의 `environment` 로만 들어간다.
+- **`.env.runtime` 규칙** (#198 파이프라인도 이 형식으로 쓴다)
+  - 값은 작은따옴표로 감싼다 — `KEY='value'`. compose 는 따옴표 없는 값의 `$` 를 보간하고 ` #` 뒤를 주석으로 잘라, 시크릿에 그 문자가 들면 값이 조용히 바뀐다.
+    작은따옴표 안에서는 보간 · 주석 처리가 없다. 값에 작은따옴표가 들면 안 된다(만들 때 거른다).
+  - 파일은 `chmod 600` 으로 만들고 `up` 이 끝나면(성공 · 실패 모두) 지운다. 배포 경로에 시크릿 파일을 남기지 않는다.
+- **시크릿 노출 한계** — 값이 컨테이너 환경변수로 들어가므로 호스트에서 docker 권한이 있으면 `docker inspect` 로 보인다.
+  배포 호스트의 docker 그룹 · sudo 권한을 시크릿 열람 권한으로 다룬다. docker secrets · 파일 마운트로 바꿀지는 #32 에서 검토한다.
 
 ## 2. 이름 규칙
 
@@ -32,6 +38,7 @@ GitHub (develop / main)
 | 컨테이너 | `commerce-<module>-{dev\|prod}` | `commerce-auth-service-dev` |
 | compose 프로젝트 | `commerce-<module>-{dev\|prod}` (`-p` 로 반드시 준다) | `commerce-auth-service-dev` |
 
+- dev · prod 는 다른 서버에 올릴 수도, 한 호스트에 함께 올릴 수도 있다. 아래 규칙은 둘 다에서 안전하게 정했다.
 - **이미지 이름은 dev · prod 가 같고 환경은 태그로 가른다.** 같은 호스트에 dev · prod 가 함께 있어도 dev 빌드가 prod 가 쓰는 이미지를 덮지 않는다
   (태그까지 같으면 prod 를 `--build` 없이 다시 올릴 때 dev jar 로 뜬다).
 - **compose 프로젝트는 환경마다 다르다.** `up --remove-orphans` 가 다른 환경 · 다른 모듈의 컨테이너를 지우지 않는다.
@@ -46,7 +53,7 @@ GitHub (develop / main)
 | 모듈 | 컨테이너 포트 | 호스트 포트 키 (값은 #197) | 호스트 바인딩 | 메모리 상한 키 | 기본값 dev / prod |
 |------|---------------|----------------------------|----------------|----------------|-------------------|
 | service-discovery | 8761 | `SERVICE_DISCOVERY_PORT_{DEV,PROD}` | 루프백 | `SERVICE_DISCOVERY_MEM_LIMIT_{DEV,PROD}` | 384m / 512m |
-| api-gateway | 8000 | `API_GATEWAY_PORT_{DEV,PROD}` | 모든 인터페이스 | `API_GATEWAY_MEM_LIMIT_{DEV,PROD}` | 512m / 768m |
+| api-gateway | 8000 | `API_GATEWAY_PORT_{DEV,PROD}` | `API_GATEWAY_BIND_{DEV,PROD}` (기본 루프백) | `API_GATEWAY_MEM_LIMIT_{DEV,PROD}` | 512m / 768m |
 | auth-service | 8081 | `AUTH_SERVICE_PORT_{DEV,PROD}` | 루프백 | `AUTH_SERVICE_MEM_LIMIT_{DEV,PROD}` | 768m / 1g |
 | product-service | 8082 | `PRODUCT_SERVICE_PORT_{DEV,PROD}` | 루프백 | `PRODUCT_SERVICE_MEM_LIMIT_{DEV,PROD}` | 768m / 1g |
 | order-service | 8083 | `ORDER_SERVICE_PORT_{DEV,PROD}` | 루프백 | `ORDER_SERVICE_MEM_LIMIT_{DEV,PROD}` | 768m / 1g |
@@ -56,8 +63,9 @@ GitHub (develop / main)
 - **외부에는 게이트웨이만 연다**(`architecture-guide.md` §6). Eureka · 서비스는 호스트 루프백(`127.0.0.1`)에만 포트를 연다 — 게이트웨이 라우팅 ·
   Eureka 등록 · 서비스 간 호출은 같은 docker 네트워크 안에서 닿으므로 호스트 포트는 호스트 안 점검용이다. Eureka 레지스트리는 인증이 없다.
   모듈을 다른 호스트로 나눠야 하면 바인딩과 Eureka 인증을 같이 정한다(#197 · #32).
-- 게이트웨이도 앞단(BFF · LB) 밖으로의 노출은 호스트 방화벽 · Infra 가 막는다.
+- 게이트웨이 바인드 주소는 `API_GATEWAY_BIND_{DEV,PROD}` 로 받고 기본값은 루프백이다(닫힌 쪽). 앞단(BFF · LB)이 닿아야 하는 주소만 넣는다 — 외부 노출 규칙은 §6.
 - **한 compose 파일에 dev · prod 가 같이 있고 compose 는 파일 전체를 보간한다.** 포트 키는 `:?`(비면 실패)라 dev 배포의 env 에도 `_PROD` 값이 있어야 한다(반대도 같다).
+  dev · prod 가 다른 서버여도 같다. 환경 공통 키로 합치거나 compose 파일을 환경별로 나눌지는 #197 · #198 에서 검토한다.
 - 힙은 Dockerfile 의 `-XX:MaxRAMPercentage=70.0` 이 메모리 상한의 70% 로 정한다. 나머지 30% 는 메타스페이스 · 스레드 · 다이렉트 버퍼 몫이다.
   기본값은 출발점이다 — 실제 RSS 를 보고 조정하고, 상한을 줄이면 비율 때문에 non-heap 이 같이 줄어드는 것을 감안한다. OOM 이면 `-XX:+ExitOnOutOfMemoryError` 로 끝나 `restart` 가 다시 띄운다.
 
@@ -121,12 +129,15 @@ compose 가 env 파일과 무관하게 고정하는 값:
 |----|--------|
 | `COMMERCE_DOCKER_NETWORK` · `<MODULE>_PORT_{DEV,PROD}` | compose 해석 실패로 배포 중단 |
 | `EUREKA_DEFAULT_ZONE` | compose 해석 실패 |
-| `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` | compose 해석 실패. dev 와 prod 는 다른 DB 서버라 값은 환경별 secret 에서 갈라 넣는다(키 이름은 같다). 서비스 5종은 한 DB 의 서비스별 스키마(`auth` · `product` · `order` · `payment` · `delivery`, yml `hibernate.default_schema`)를 쓰므로 URL 은 환경당 하나다. 스키마는 미리 만들어 둔다 — JPA 는 스키마를 만들지 않는다 |
+| `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` | compose 해석 실패. dev 와 prod 는 다른 DB 서버라 값은 환경별 secret 에서 갈라 넣는다(키 이름은 같다). 서비스 5종은 한 DB 의 서비스별 스키마(`auth` · `product` · `orders` · `payment` · `delivery`, yml `hibernate.default_schema`)를 쓰므로 URL 은 환경당 하나다. 스키마는 미리 만들어 둔다 — JPA 는 스키마를 만들지 않는다. 정본은 [`docker/postgres/init/01-create-schemas.sql`](../docker/postgres/init/01-create-schemas.sql) 이다 |
 | `REDIS_*` | compose 해석 실패. auth 와 gateway 는 같은 Redis 여야 한다 |
 | `SNOWFLAKE_DATACENTER_ID` | compose 해석 실패. 0~31 |
 | `JWT_PUBLIC_KEY` · `JWT_PRIVATE_KEY` | compose 해석 실패. 만들기 · 교체: `security-guide.md` §6 |
 | `INTERNAL_JWT_SECRET` | compose 해석 실패. 서비스 5종 같은 값: `security-guide.md` §9-6 |
 | `GATEWAY_CORS_ALLOWED_ORIGINS` | 뜨지만 브라우저 요청이 전부 CORS 로 막힌다 |
+
+- **`ADMIN_SEED_*` 는 최초 시드 뒤 secret 에서 비우고 다시 배포한다**(`security-guide.md` §11-3). 관리자가 이미 있으면 시드는 아무것도 하지 않으므로,
+  남겨 둘 이유 없이 비밀번호만 컨테이너 env 에 계속 노출된다.
 
 ## 5. 헬스 체크 · 기동 순서
 
@@ -155,18 +166,31 @@ compose 가 env 파일과 무관하게 고정하는 값:
 - 처음 띄울 때와 Eureka 를 다시 띄운 뒤에만 순서가 의미 있다. 서비스 하나만 다시 배포할 때는 그 모듈만 올린다.
 - 다시 배포한 직후 게이트웨이가 Eureka 의 옛 인스턴스(옛 IP)를 잠시 볼 수 있다(lease 만료 기본 90초). 그동안 그 서비스로 가는 요청 일부가 실패할 수 있다.
 
-## 6. 네트워크
+## 6. 네트워크 · 외부 노출
 
+**네트워크 (필수)**
+
+- 백엔드 docker 네트워크는 **환경마다 따로 둔다** — dev · prod 가 한 네트워크를 공유하지 않는다.
+- 그 네트워크에는 **이 프로젝트의 백엔드 컨테이너만** 붙인다.
+- 이유: Eureka 는 인증이 없어 같은 네트워크의 컨테이너면 누구나 인스턴스를 등록 · 삭제할 수 있다. 가짜 인스턴스가 등록되면 게이트웨이가 요청(토큰 포함)을 그쪽으로 보낸다.
+  Eureka 인증은 후속 이슈에서 정한다.
 - 백엔드 컨테이너는 외부 docker 네트워크 하나(`COMMERCE_DOCKER_NETWORK`, `external: true`)에 붙는다. 이름은 Infra 에서 정한다(#197).
   compose 는 네트워크를 만들지 않는다 — 배포 agent 가 없으면 만든다: `docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET"`.
 - 같은 네트워크 안에서는 컨테이너 이름으로 닿는다(Eureka 주소 · DB · Redis 가 같은 네트워크의 컨테이너면 그 이름).
   다른 호스트의 DB · Redis 는 Vault 에 넣은 주소로 닿는다 — 그 값을 저장소에 쓰지 않는다.
 
+**외부 노출**
+
+- **호스트 방화벽(ufw · firewalld)으로는 Docker 가 게시한 포트를 막을 수 없다.** 게시 포트는 iptables `DOCKER` 체인으로 들어와 호스트 방화벽 규칙을 거치지 않는다.
+  다음 중 하나로 막는다 — 클라우드 보안그룹 · 네트워크 ACL, iptables `DOCKER-USER` 체인, 바인드 주소 env(`API_GATEWAY_BIND_*`, Eureka · 서비스는 루프백 고정).
+- **dev 게이트웨이는 IP 제한 뒤에 둔다.** dev 프로파일은 dev 라우트(`/health/**` · `/docs/**`)와 Swagger UI 가 인증 없이 열려 있다.
+  dev 게이트웨이 앞단의 IP 제한은 #197 의 완료 기준이다.
+
 ## 7. 베이스 이미지
 
 `eclipse-temurin:21.0.12.1_1-jre-noble` (Eclipse Temurin 21 JRE, Ubuntu 24.04).
 
-- **멀티 아키텍처** — 배포 대상은 dev = arm64 서버, prod = x86_64 서버다. 같은 태그가 arm64 · amd64(+ ppc64le · s390x · riscv64)를 내므로
+- **멀티 아키텍처** — dev · prod 호스트 아키텍처가 다를 수 있다(arm64 · amd64 모두 지원). 같은 태그가 arm64 · amd64(+ ppc64le · s390x · riscv64)를 내므로
   Dockerfile 하나로 두 환경을 덮고, 이미지는 배포 호스트에서 빌드하므로 docker 가 그 호스트 아키텍처의 베이스를 받는다. jar 는 아키텍처와 무관하다.
   베이스를 바꿀 때는 arm64 · amd64 둘 다 있는 태그인지 먼저 확인한다.
 - **CI 와 같은 JVM** — GitHub Actions 가 `setup-java` temurin 21 로 테스트한다. 테스트한 HotSpot 과 같은 배포판으로 운영한다.
@@ -200,15 +224,19 @@ docker compose -f docker-compose-local.yml up -d --wait          # 네트워크 
 cp cloud/service-discovery/build/libs/service-discovery-*.jar cloud/service-discovery/app.jar
 ```
 
-배포용 env 파일을 저장소 밖에 만든다(`.env.example` 을 복사해 테스트 값만). 로컬에서 달라지는 값만 적으면:
+배포용 env 파일을 **저장소 밖에 빈 파일로 새로 만들고** 필요한 키만 쓴다. `.env.example` · `backend/.env` 를 복사하지 않는다 —
+거기 든 `localhost` 값(`EUREKA_DEFAULT_ZONE` · `DB_URL` · `REDIS_HOST`)은 컨테이너 안에서 자기 자신을 가리켜, Eureka 등록이 조용히 실패하고
+게이트웨이가 503 을 낸다. 복사해서 쓰겠다면 이 세 키는 반드시 아래 값으로 덮는다. 값은 §1 의 `.env.runtime` 규칙대로 작은따옴표로 감싼다.
 
 ```text
-COMMERCE_DOCKER_NETWORK=commerce-foundry-local_default
-EUREKA_DEFAULT_ZONE=http://commerce-service-discovery-dev:8761/eureka/
-DB_URL=jdbc:postgresql://postgres:5432/commerce_foundry
-REDIS_HOST=redis
-REDIS_PORT=6379
-SNOWFLAKE_DATACENTER_ID=1
+COMMERCE_DOCKER_NETWORK='commerce-foundry-local_default'
+EUREKA_DEFAULT_ZONE='http://commerce-service-discovery-dev:8761/eureka/'
+DB_URL='jdbc:postgresql://postgres:5432/commerce_foundry'
+DB_USERNAME · DB_PASSWORD · REDIS_PASSWORD — backend/.env 의 로컬 테스트 값
+REDIS_HOST='redis'
+REDIS_PORT='6379'
+SNOWFLAKE_DATACENTER_ID='1'
+JWT_PUBLIC_KEY · JWT_PRIVATE_KEY · INTERNAL_JWT_SECRET — 로컬에서 만든 테스트 값(local-run-guide.md §2)
 <MODULE>_PORT_DEV / _PROD 7쌍 — 로컬에서 비어 있는 아무 포트
 ```
 
@@ -219,5 +247,5 @@ docker compose -p commerce-service-discovery-dev --env-file <env 파일> \
 docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) 확인
 ```
 
-- `app.jar` 는 `.gitignore` 대상이 아니다. **커밋하지 않는다** — 확인이 끝나면 지운다.
+- `app.jar` 는 `.gitignore` 대상이다(`backend/**/app.jar`). 확인이 끝나면 지운다.
 - 정리: `docker compose -p commerce-<module>-dev -f <compose> down` (모듈마다).
