@@ -9,7 +9,7 @@
 |------|------|----------|
 | 발급 | auth-service 만 | 개인키(`JWT_PRIVATE_KEY`) · `JwtIssuer` · `OpaqueTokenGenerator` |
 | 검증 | 서비스 전부 · auth · api-gateway | 공개키(`JWT_PUBLIC_KEY`, 교체 중 `JWT_PUBLIC_KEY_PREVIOUS`) |
-| 서비스 토큰 (internal API) | 서비스 5종이 서로 — 게이트웨이 제외 | 공용 HS256 비밀(`INTERNAL_JWT_SECRET`, 교체 중 `INTERNAL_JWT_SECRET_PREVIOUS`) · `InternalTokenIssuer` · internal 체인 (§9) |
+| 서비스 토큰 (internal API) | 서비스 전부가 서로 — 게이트웨이 제외 | 공용 HS256 비밀(`INTERNAL_JWT_SECRET`, 교체 중 `INTERNAL_JWT_SECRET_PREVIOUS`) · `InternalTokenIssuer` · internal 체인 (§9) |
 
 - 서명은 **RS256**(RSA 2048비트 이상)이다. 공개키가 새도 토큰을 만들 수 없다 — 검증하는 곳마다 서명 키를 나눠 줄 필요가 없다.
 - 라이브러리는 Spring Security JOSE(Nimbus `JwtEncoder` / `JwtDecoder`)만 쓴다. jjwt 를 쓰지 않는다.
@@ -217,7 +217,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | `/api/v1/admin/**` | URL 규칙으로 `ADMIN` 을 요구한다. 컨트롤러의 `@PreAuthorize("hasRole('ADMIN')")` 와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
 | `/internal/**` | 이 체인에서는 **`denyAll`**(익명 001 · 로그인 005)이다. 앞 순서의 서비스 인증 체인(§9-3)만 서비스 토큰으로 연다 — 서비스가 그 Configurer 를 빠뜨려도 internal API 가 열리지 않는다(fail-closed). **internal 컨트롤러 메서드마다 허용 호출자를 `@PreAuthorize("hasAuthority('SERVICE_<service-id>')")` 로 선언한다**(§9-4). 사설망 전제(게이트웨이가 라우팅하지 않고 서비스 포트를 외부에 열지 않는다, 아래 강제 수단)는 그대로 둔다 — 1단계 서비스 토큰은 그 위의 두 번째 방어다 |
 | 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고(default-allow) 메서드의 `@PreAuthorize` 가 정한다. 비로그인 상품 조회 같은 API 가 있다 (아래 보완 규칙) |
-| `/actuator/**` | `health`(하위 경로 포함)만 `permitAll` 이다. 웹에 노출된 다른 엔드포인트와 링크(`/actuator`)는 `denyAll` — 토큰 없으면 401(001), 로그인했으면 403(005). 노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — **노출 설정(`exposure.include: health`)이 1차, URL 규칙이 2차** 방어다. 경로는 Boot 의 `EndpointRequest` 로 잡아 management base-path 를 바꿔도 따라간다. **어느 서비스도 `heapdump` 를 노출하지 않는다** — 서비스 5종의 힙에 `INTERNAL_JWT_SECRET` 이 있고, auth 의 힙에는 개인키도 있다 |
+| `/actuator/**` | `health`(하위 경로 포함)만 `permitAll` 이다. 웹에 노출된 다른 엔드포인트와 링크(`/actuator`)는 `denyAll` — 토큰 없으면 401(001), 로그인했으면 403(005). 노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — **노출 설정(`exposure.include: health`)이 1차, URL 규칙이 2차** 방어다. 경로는 Boot 의 `EndpointRequest` 로 잡아 management base-path 를 바꿔도 따라간다. **어느 서비스도 `heapdump` 를 노출하지 않는다** — 서비스 전부의 힙에 `INTERNAL_JWT_SECRET` 이 있고, auth 의 힙에는 개인키도 있다 |
 | Swagger (`/v3/api-docs/**` · `/swagger-ui/**`) | 명시 `permitAll` 을 두지 않는다. URL 단계는 default-allow 로 열려 있고, springdoc 스위치(기본 닫힘, local · dev 만 켬 — `bootstrap-conventions.md`)가 닫는다 |
 
 - health 는 익명에 열려 있으므로 `management.endpoint.health.show-details` · `show-components` 는 기본값 `never` 를 유지한다.
@@ -316,7 +316,7 @@ security:
       private-key: ${JWT_PRIVATE_KEY}
       access-token-ttl: 30m
       refresh-token-ttl: 14d
-  internal:                                # 서비스 간 인증 (§9-6) — 서비스 5종
+  internal:                                # 서비스 간 인증 (§9-6) — 서비스 전부
     service-id: ${spring.application.name}
     secret: ${INTERNAL_JWT_SECRET}
     previous-secret: ${INTERNAL_JWT_SECRET_PREVIOUS:}
@@ -437,7 +437,7 @@ auth 는 기동할 때 자기 `JWT_PRIVATE_KEY` 와 `JWT_PUBLIC_KEY` 가 한 쌍
 
 - 키 `auth:revoked-access-token:{jti}` — `security-core` 의 `RevokedAccessTokenKeys` 하나로만 만든다. auth 가 로그아웃 때 쓰고(TTL = access 수명 상한 1시간 + 시계 오차),
   게이트웨이가 존재 여부만 읽는다 (`coding-conventions.md` §9-7).
-- **차단 목록은 게이트웨이만 본다.** 서비스 5종은 서명 · 만료만 본다(#4 결정 3). 사설망 안에서 서비스에 직접 붙는 요청은 로그아웃한 토큰도
+- **차단 목록은 게이트웨이만 본다.** 서비스 전부는 서명 · 만료만 본다(#4 결정 3). 사설망 안에서 서비스에 직접 붙는 요청은 로그아웃한 토큰도
   만료까지(`access-token-ttl` + `clock-skew` — 기본 31분, 상한 61분) 통과한다 — 서비스 포트를 외부에 열지 않는 사설망 전제(§5-1)가 이 잔여 위험을 막는 수단이다.
 - 조회 상한은 Redis 명령 타임아웃(`spring.data.redis.timeout`, 1s)이고, 게이트웨이 쪽 뒤쪽 방어로 2초 상한(`RevocationCheckingAuthenticationManager.CHECK_TIMEOUT`)이 하나 더 있다.
 - **Redis 에 닿지 못하는 동안은 토큰이 붙은 요청마다 최대 약 2초 지연된다.** 연결 거부(포트 닫힘)는 바로 실패하지만, 응답 없는 호스트는 연결 타임아웃
@@ -625,7 +625,7 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 
 ### 9-1. 방식
 
-- 서비스 5종이 **같은 HS256 비밀**(`INTERNAL_JWT_SECRET`)로 짧은 서비스 토큰에 서명하고, 받는 쪽이 같은 비밀로 검증한다. Nimbus(security-core)를 그대로 쓴다.
+- 서비스 전부가 **같은 HS256 비밀**(`INTERNAL_JWT_SECRET`)로 짧은 서비스 토큰에 서명하고, 받는 쪽이 같은 비밀로 검증한다. Nimbus(security-core)를 그대로 쓴다.
 - auth-service 가 서비스 토큰을 발급하는 방식은 쓰지 않는다 — auth 가 멈추면 주문까지 막힌다. mTLS 를 직접 운영하는 방식도 쓰지 않는다 — 인증서 만료 관리 부담.
 - 게이트웨이는 internal API 를 부르지도 받지도 않으므로 비밀을 갖지 않는다.
 
@@ -660,7 +660,7 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 
 ### 9-4. 호출자 허용 목록 (필수)
 
-internal 컨트롤러의 **모든 핸들러 메서드**에 허용 호출자를 선언한다. 체인은 "서비스 토큰이 있다" 까지만 보므로, 선언이 없으면 서비스 5종 누구나 부를 수 있다.
+internal 컨트롤러의 **모든 핸들러 메서드**에 허용 호출자를 선언한다. 체인은 "서비스 토큰이 있다" 까지만 보므로, 선언이 없으면 어느 서비스나 부를 수 있다.
 
 ```java
 @PreAuthorize("hasAuthority('SERVICE_order-service')")
@@ -721,7 +721,7 @@ security:
 openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하면 32바이트
 ```
 
-- 값은 Vault 에 두고 서비스 5종이 **같은 값**을 받는다. 저장소 밖에서 만들고 터미널 기록에 남기지 않는다 (`secret-management.md`).
+- 값은 Vault 에 두고 서비스 전부가 **같은 값**을 받는다. 저장소 밖에서 만들고 터미널 기록에 남기지 않는다 (`secret-management.md`).
 
 | 기동을 멈추는 조건 | 메시지가 가리키는 것 |
 |--------------------|----------------------|
@@ -735,9 +735,9 @@ openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하
 
 ### 9-7. 비밀 교체 런북
 
-받는 쪽이 새 비밀을 **먼저** 받아들인 뒤 서명 비밀을 바꾼다. 서비스 5종 모두 같은 값을 쓴다.
+받는 쪽이 새 비밀을 **먼저** 받아들인 뒤 서명 비밀을 바꾼다. 서비스 전부가 같은 값을 쓴다.
 
-| 단계 | 서비스 5종 | 결과 |
+| 단계 | 서비스 전부 | 결과 |
 |------|-----------|------|
 | ① 새 비밀 수락 | `PREVIOUS` ← **새** 비밀. `SECRET` 은 그대로(옛 비밀로 계속 서명) | 롤링 재기동. 모두가 옛 · 새 비밀 토큰을 받는다 |
 | ② 서명 비밀 교체 | `SECRET` ← 새 비밀, `PREVIOUS` ← 옛 비밀 | 롤링 재기동. 옛 · 새 인스턴스가 서로의 토큰을 받는다 |

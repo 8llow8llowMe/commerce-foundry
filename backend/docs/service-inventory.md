@@ -14,6 +14,7 @@
 | `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 장바구니 (#12) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
 | `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
 | `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 국내 배송비 정책 (#11) · 해외 배송비 (#22) | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
+| `service/operations-service` | 8086 | 골격 · Resource Server · 서비스 간 인증 (#212 PR-A) | 백그라운드 작업(등록 · 실행 · 재시도 · 진행률 · 결과 · 취소), 정기 작업, 어드민 작업 API(`/api/v1/admin/jobs/**`), 어드민 알림 센터(#213). 전에 후순위로 두었던 batch · notification 을 흡수한다 (`architecture-guide.md` §1) |
 
 "골격" 은 실행·Eureka 등록·헬스 체크·Swagger 그룹까지 갖추고 도메인 코드는 없는 상태다 (`bootstrap-conventions.md`).
 "Resource Server" 는 JWT 검증 · `/api/v1/admin/**` ADMIN 규칙 · 보안 오류 봉투가 걸려 있고 인가 스모크가 도는 상태다 (`security-guide.md` §5).
@@ -58,15 +59,15 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | core | 사용 서비스 |
 |------|-------------|
 | `common-core` | 전부 |
-| `persistence-core` | auth · product · order · payment · delivery |
+| `persistence-core` | auth · product · order · payment · delivery · operations |
 | `redis-core` | auth(토큰·소셜 state) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
-| `security-core` | 서비스 5종(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
+| `security-core` | 서비스 전부(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
 | `storage-core` | product(상품 이미지 — 모듈만 있다(#9 PR-A). 연결은 이미지 업로드 발급 · 첨부(#9 PR-F)에서 한다) |
 | `shared-commerce` | product · order · payment · delivery · auth(배송지 국내 국가 판정 — #144) |
 
 ## 4. 데이터 저장소
 
-- PostgreSQL 한 인스턴스에 **서비스별 스키마**를 둔다 (`auth`, `product`, `orders`, `payment`, `delivery`).
+- PostgreSQL 한 인스턴스에 **서비스별 스키마**를 둔다 (`auth`, `product`, `orders`, `payment`, `delivery`, `operations`).
   다른 서비스 스키마를 직접 조회하지 않는다 — 필요한 데이터는 내부 API 로 받는다.
 - 운영 규모가 커지면 인스턴스를 나눌 수 있게 스키마 간 FK·조인을 만들지 않는다.
 - 스키마 관리: 마이그레이션 도구 없음 — local · dev 는 `ddl-auto: update`, 운영은 `none` 이고 사용자가 DDL 을 직접 적용한다

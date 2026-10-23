@@ -25,11 +25,13 @@ backend/
     ├── product-service      카테고리 · 상품 · 옵션(SKU) · 재고 · 상품 이미지 · 다국어 상품정보
     ├── order-service        장바구니 · 주문 · 주문 금액 계산 · 클레임(취소/반품/교환)
     ├── payment-service      PG 결제 승인/취소 · 웹훅 · 대사 (토스페이먼츠: 카드·카카오페이·네이버페이·PayPal)
-    └── delivery-service     배송비 정책(국내/해외) · 송장 · 배송 상태 추적
+    ├── delivery-service     배송비 정책(국내/해외) · 송장 · 배송 상태 추적
+    └── operations-service   백그라운드 작업(등록 · 실행 · 재시도 · 진행률 · 결과) · 정기 작업 · 어드민 알림 센터(#213)
 ```
 
-후순위(필요해지면 추가): `batch-service`(자동 구매확정·결제 대사 배치·카페24 이관),
-`notification-service`(알림톡·메일), 쿠폰/프로모션 컨텍스트.
+후순위(필요해지면 추가): 쿠폰/프로모션 컨텍스트.
+전에 후순위로 두었던 `batch-service`(자동 구매확정·결제 대사 배치·카페24 이관) · `notification-service`(알림)는 `operations-service` 가 흡수한다(#212) —
+배치는 작업 엔진의 핸들러 · 정기 작업으로, 어드민 알림은 같은 서비스의 알림 센터(#213)로 붙인다.
 
 ### 1-1. core 모듈 포함 기준
 
@@ -254,7 +256,7 @@ Info → Presenter → Response
 - **로그아웃 차단 목록(Redis)은 게이트웨이만 본다(#4).** 저장소 장애 시 일반 경로는 통과(fail-open), `/api/v1/admin/**` 만 503 이다.
   서비스는 서명 · 만료만 보므로 사설망 직접 호출에는 로그아웃이 적용되지 않는다 — 정본은 [security-guide.md](security-guide.md) §7.
 - `/internal/**` 은 게이트웨이 라우트에 넣지 않는다. 외부에서 닿지 않아야 한다.
-- **서비스 간 internal API 는 서비스 토큰으로 인증한다(1단계, #43 · #51).** 서비스 5종이 공용 HS256 비밀로 짧은 토큰(`typ=svc+jwt`,
+- **서비스 간 internal API 는 서비스 토큰으로 인증한다(1단계, #43 · #51).** 서비스 전부가 공용 HS256 비밀로 짧은 토큰(`typ=svc+jwt`,
   `iss`=호출 서비스, `aud`=대상 서비스, 60초)에 서명하고, 대상은 `/internal/**` 전용 체인에서 검증한다 — 실패는 401 · `SECURITY_007`.
   엔드포인트마다 허용 호출자를 `@PreAuthorize("hasAuthority('SERVICE_<service-id>')")` 로 선언하고 403(`SECURITY_005`)으로 강제한다.
   1단계에서 호출자는 "선언" 이라 사설망 전제를 그대로 두고, 배포 환경이 정해지면 서비스별 키 · mTLS(2단계)로 "증명" 한다.
