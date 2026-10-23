@@ -30,6 +30,44 @@ spring:
     resources:
       # 정적 리소스를 내지 않는다. 켜 두면 Swagger 를 닫아도 /webjars/swagger-ui/** 가 그대로 열린다 (Swagger UI 는 springdoc 이 따로 낸다)
       add-mappings: false
+  cloud:
+    openfeign:
+      client:
+        config:
+          # 토스페이먼츠 클라이언트(TossPaymentsClient)만의 타임아웃 (ms). 기본 read timeout 60초를 그대로 두지 않는다 (coding-conventions.md §10, architecture-guide.md §8).
+          # read 는 게이트웨이 응답 타임아웃(10s)보다 짧아야 한다 — 게이트웨이가 먼저 끊으면 고객은 실패를 보는데 승인은 계속 진행된다. TossPaymentsStartupGuard 가 본다.
+          # 승인은 카드사 응답을 기다려 수 초 걸릴 수 있어 내부 호출(3s)보다 길게 둔다. 넘으면 실패가 아니라 UNKNOWN 이다 (payment-guide.md §4).
+          # request-interceptors 는 두지 않는다 — 인증 헤더는 클라이언트 메서드 인자다. logger-level 도 두지 않는다(설정 클래스가 NONE 으로 고정한다)
+          toss-payments:
+            connect-timeout: 2000
+            read-timeout: 6000
+
+# 외부 호출 서킷 (coding-conventions.md §10). TossPaymentsResponseSupport 가 인스턴스 이름으로 감싼다.
+# spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다 — 서킷과 결과 분류를 한 곳(support)에서 한다
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        # 4xx 는 우리 요청 · 설정 문제이거나 업무 거절(카드 거절 등)이다 — PG 장애로 세지 않는다. 5xx · 429 · 타임아웃 · 연결 실패만 센다
+        ignore-exceptions:
+          - feign.FeignException$FeignClientException
+    instances:
+      # 토스페이먼츠 승인 · 조회. 열려 있으면 승인 요청을 보내지 않는다 — 결제 시도는 READY 로 되돌린다 (payment-guide.md §4)
+      toss:
+        base-config: default
+
+# 토스페이먼츠 (payment-guide.md §2). 키 형식 · 프로파일 조건은 TossPaymentsStartupGuard 가 기동 때 본다
+toss:
+  # 시크릿 키 — Vault TOSS_SECRET_KEY (secret-management.md). local · dev 는 test_ 키, 그 밖은 live_ 키만 받는다. 기본값을 두지 않는다
+  secret-key: ${TOSS_SECRET_KEY}
+  base-url: https://api.tosspayments.com
 
 eureka:
   client:

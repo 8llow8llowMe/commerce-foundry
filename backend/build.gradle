@@ -23,6 +23,9 @@ ext {
     archunitVersion = '1.4.1'
     // S3 호환 오브젝트 스토리지 클라이언트 (storage-core). Boot BOM 이 관리하지 않아 여기서 고정한다. s3 · url-connection-client 를 같은 버전으로 맞춘다
     awsSdkVersion = '2.55.11'
+    // PG 어댑터 테스트용 가짜 HTTP 서버 (payment-service). Boot BOM 이 관리하지 않아 여기서 고정한다.
+    // standalone 은 Jetty · Jackson 을 재배치(shaded)해 서비스의 Jackson 3 · 서블릿 컨테이너와 섞이지 않는다. 4.x 는 아직 beta 라 3.x 마지막 GA 를 쓴다
+    wiremockVersion = '3.13.2'
 }
 
 allprojects {
