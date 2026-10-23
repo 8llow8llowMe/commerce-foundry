@@ -258,6 +258,9 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
   `/internal` · `/api/v1/admin` 이 만들어질 수 없다. 예: local · dev 전용 `GatewayDevRouteConfig`(`/health/{service-id}` · `/docs/{service-id}/v3/api-docs/{group}`).
   접두어만 떼는 라우트(`/docs/{service-id}/**` + `StripPrefix`)는 만들지 않는다.
 - 서비스 간 인증은 §9 다(결정 #43, 구현 #51). 1단계는 공용 키라 호출자가 "선언" 이므로 사설망 전제를 걷어 내지 않는다.
+- **게이트웨이가 만드는 하류 헤더(`X-Client-Subject`, §7-3)도 이 전제 위에 있다.** 게이트웨이는 클라이언트가 보낸 같은 이름 헤더를 늘 지우고 자기 값을 싣지만,
+  게이트웨이를 거치지 않은 요청(사설망 직접 호출)은 누구든 그 헤더를 붙일 수 있다. 서비스는 출처를 구별할 수 없으므로 그 값을 인증 · 인가 · 차단의 근거로 쓰지 않고 남용 완화(시도 계수)의 차원으로만 쓴다.
+  서비스 간 호출(internal)은 게이트웨이를 거치지 않으므로 이 헤더를 Feign 으로 전파하지 않고 internal 핸들러에서 읽지 않는다.
 
 ### 5-2. 도메인 advice 와의 관계
 
@@ -401,7 +404,8 @@ auth 는 기동할 때 자기 `JWT_PRIVATE_KEY` 와 `JWT_PUBLIC_KEY` 가 한 쌍
 한 라우트(`ServiceRoute`)가 고객 · 어드민 패턴을 섞어 갖고, dev 라우트(`/health/**` · `/docs/**`)도 덮어야 한다.
 
 **필터 순서** — `GatewayRequestGuardFilter`(가장 앞, 비정규 경로 거절) → `GatewayRequestBodySizeFilter`(본문 크기 상한, §7-4) →
-보안 체인(`WebFilterChainProxy`, -100: CORS → Bearer 인증 → 인가) → 라우팅.
+보안 체인(`WebFilterChainProxy`, -100: CORS → Bearer 인증 → 인가) → 라우트 전역 필터(`GatewayRateLimitFilter` HIGHEST+100 요청 제한 →
+`ClientSubjectHeaderFilter` HIGHEST+200 하류 `X-Client-Subject`, §7-3) → 라우팅.
 정규화되지 않은 경로로 인가 판정을 하지 않는다.
 
 | 요청 | 게이트웨이 판정 |
@@ -496,7 +500,9 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
     **한 값으로 게이트웨이행 `X-Forwarded-For` 를 덮어쓴다** — 게이트웨이를 부르는 BFF 의 모든 경로(중계 · 로그인 · 회원가입 · 재발급 · 로그아웃).
     그다음 BFF 의 송신 주소를 `GATEWAY_TRUSTED_PROXIES` 에 넣는다. 브라우저 값을 그대로 넘기면 누구나 버킷을 고르거나 남의 버킷을 소진시킨다.
     (2) BFF 가 access 쿠키는 없고 refresh 쿠키만 있으면 요청 전에 먼저 재발급한다 — 로그인한 회원의 요청이 토큰 없이 와 IP 버킷을 쓰지 않게.
-    **켜는 일(신뢰 프록시 · Vault 키 · `enabled: true`)은 #134 뒤에 #135 가 한다.**
+    **켜는 스위치는 `GATEWAY_CLIENT_IP_ENABLED`(기본 `false`)다(#135).** 순서는 dev 먼저 — `GATEWAY_TRUSTED_PROXIES` · `GATEWAY_CLIENT_IP_HASH_KEY`(Vault)를 채운 뒤 켠다.
+    운영은 BFF · LB 송신 주소가 정해진 뒤 켠다(배포 환경 결정). 불리언이 아니거나 빈 값이면 기동하지 않는다.
+    켰는데 `trusted-proxies` 가 비면 기동 때 WARN 을 한 줄 남긴다(`ClientIpResolver`) — 프록시 없이 직접 받는 배포도 있을 수 있어 기동은 막지 않는다.
   - 켜도 정책은 최소다. 지금은 비로그인 쓰기 API 가 없어 새 경로를 열지 않고, 위 정책을 토큰 없는 요청에도 IP 로 적용하는 것만 한다 —
     대상 API 가 모두 `isAuthenticated()` 라 401 을 노리는 익명 폭주가 서비스에 닿는 양만 줄인다.
     **비로그인으로 쓰는 API(비회원 주문 등)를 만들면 그 경로 · 한도를 `RateLimitPolicy` 에 더한다.** 한 IP 뒤 여러 사용자(회사 · 통신사 NAT)를 고려해 한도를 정한다.
@@ -521,7 +527,29 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
   게이트웨이 정책에 `/api/v1/auth/**` 를 넣지 않는다. 그 시도 제한이 IP 를 쓰게 되면 같은 신뢰 프록시 규칙(이 절)을 따르고, **신뢰 설정을 두 곳으로 가르지 않는다.**
   - Spring Cloud Gateway 의 `spring.cloud.gateway.server.webflux.trusted-proxies` 는 설정하지 않는다. 미설정이면 SCG 가 하류로 가는 `X-Forwarded-*` · `Forwarded` 를 지운다
     (`RemoveXForwardedHeadersFilter` · `RemoveForwardedHeadersFilter`) — 클라이언트가 보낸 값이 서비스에 닿지 않는다.
-  - 하류에 클라이언트 IP 가 필요해지면 게이트웨이가 `ClientIpResolver` 결과를 전용 헤더로 **덮어써** 넘긴다(클라이언트가 보낸 같은 이름 헤더는 지운다, #135).
+    **SCG 는 지운 뒤 다시 쓰지도 않는다** — `XForwardedHeadersFilter` 는 소켓 피어가 SCG 신뢰 프록시가 아니면 지우고 끝난다(5.0.3, 게이트웨이 신뢰 프록시
+    `gateway.client-ip.trusted-proxies` 와 무관). 그래서 지금 하류 요청에는 `X-Forwarded-*` · `Forwarded` 가 없다 — 실제 Netty 테스트(`ClientSubject*Test`)가 고정한다.
+    SCG `x-forwarded` 설정은 건드리지 않는다. 하류가 전달 헤더를 받더라도(설정이 바뀌어 생기더라도) **신뢰하지 않는 정보성 값**이고, 클라이언트 식별은 아래 `X-Client-Subject` 로만 한다.
+  - 하류에 넘기는 것은 **IP 원문이 아니라 게이트웨이가 만든 HMAC** 이다(#135) — 하류 서비스에 IP 원문이 들어오지 않아 로그 · Redis 키 규칙(원문 금지, `coding-conventions.md` §9-7)이 단순해지고,
+    해시 키를 서비스마다 둘 필요가 없으며, 신뢰 프록시 해석 · IPv6 묶음이 게이트웨이 한 곳에서 끝난다. 원문 IP 가 꼭 필요한 하류(감사 로그 등)가 생기면 그때 따로 정한다.
+
+**하류 헤더 계약 — `X-Client-Subject` (#135, `ClientSubjectHeaderFilter`)**
+
+| 항목 | 값 |
+|------|----|
+| 이름 | `X-Client-Subject` (`ClientSubjectHeaderFilter.HEADER`) |
+| 값 | 게이트웨이 HMAC-SHA256 앞 16바이트 base64url(패딩 없음, 22자). IPv6 는 /64 로 묶은 뒤 해시. **비로그인 버킷 키(`ip:<HMAC>`)와 같은 값**(`ClientSubjectResolver`). 불투명 id — 하류는 해석하지 않는다 |
+| 언제 | `gateway.client-ip.enabled=true` 이고 클라이언트 IP 를 정할 수 있을 때, 게이트웨이를 지나는 모든 라우트 요청(로그인 요청 포함). 한 개만 싣는다 |
+| 위조 | 클라이언트가 보낸 같은 이름 헤더는 게이트웨이가 **늘 지운다** — 꺼져 있어도, 토큰이 있어도, 대소문자가 달라도, 여러 개여도 |
+| 하류의 신뢰 | 하류는 값의 출처(게이트웨이 · 사설망 직접 호출)를 구별할 수 없다. 그래서 **인증 · 인가 · 차단의 근거로 쓰지 않고** 남용 완화(시도 계수)에만 쓴다 |
+| 직접 호출 | 사설망 직접 호출자는 헤더를 빼 IP 차원을 건너뛰거나, 남의 값을 넣어 그 버킷을 소진시킬 수 있다 — 사설망 전제(§5-1), 호출자 증명은 §9 2단계(§9-9) |
+| 로그 | 하류도 값을 로그에 그대로 남기지 않는다(필요하면 앞 8자). Redis 키 id 로는 그대로 쓴다 — 원문이 아니고 id 문자 집합 안이다(`coding-conventions.md` §9-7) |
+| 없을 때 | 하류는 IP 차원을 건너뛴다 (꺼짐 · 원격 주소 모름) |
+
+- **이 표를 #66(auth 로그인 · 가입 시도 제한의 IP 차원)이 읽는다.** 행을 바꾸면 #66 쪽 구현 · 문서도 같이 본다.
+
+- 라우트 전역 필터(`GlobalFilter`, HIGHEST+200)다 — 요청 제한(HIGHEST+100) 뒤라 제한에 걸린 요청은 꾸미지 않고, SCG 라우팅이 읽는 요청을 바꾼다. 이 필터는 헤더 값 · IP 원문을 로그에 남기지 않는다.
+- 계수를 켜도 신뢰 프록시가 비어 있으면 BFF · LB 뒤의 모든 요청이 같은 값이다(위 "켜는 전제"). 하류는 이 값으로 회원을 막을 때 그 경우를 고려한다(#66).
 - 한도를 넘으면 하류로 보내지 않고 **429 `GATEWAY_006`** + `Retry-After`(초, 요청 한 번만큼 버킷이 다시 차는 시간의 근사)로 답한다. CORS 헤더는 실린다(보안 체인 뒤라서).
   프레임워크의 `X-RateLimit-*` 헤더는 내보내지 않는다.
 - **Redis 장애 · 응답 없음이면 통과(fail-open)** 한다 — 제한은 남용 완화 수단이라 장애가 쇼핑 장애가 되지 않게 한다(차단 목록 일반 경로와 같은 판단, §7-1).
@@ -569,11 +597,14 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
   - `Expect: 100-continue` 요청은 배출하지 않는다(본문을 구독하면 100 이 나간다) — 본문이 오기 전에 413 으로 끝난다.
     `Expect` 값 중 하나라도 100-continue 면(대소문자 무시) 그렇게 본다 — Reactor Netty 가 100 을 보낼지 정하는 판정과 맞춘다.
   - 배출 중 클라이언트가 끊어 읽기가 실패하면 413 을 쓰지 못해도 오류로 올리지 않는다(debug 로그만).
-  - 배출 중인 연결은 최대 `discard-timeout` · `discard-max-size` 만큼 대역폭을 쓰지만 메모리는 잡지 않는다. 느린 연결 수 자체의 상한은 LB · #135 의 몫이다.
+  - 배출 중인 연결은 최대 `discard-timeout` · `discard-max-size` 만큼 대역폭을 쓰지만 메모리는 잡지 않는다. 느린 연결 수 자체의 상한은 LB 의 몫이다(아래).
   - 상한(`max-size`)을 올리면 `discard-max-size` 도 함께 본다.
 - 413 · 408 · 411 처리는 본문을 모으는 단계에만 건다 — 하류(코덱 등)에서 난 같은 종류의 오류를 이 코드로 바꾸지 않는다.
 - 상한과 배출 상한은 100MB 이하, 총량과 배출 상한은 상한 이상, 수신 시간은 0 초과, 배출 시간은 0 초과 60초 이하여야 한다(어긋나면 기동하지 않는다).
-  **전역 익명 요청 폭주는 아직 다루지 않는다** — #89 의 IP 단위 제한은 기본 꺼짐이고, 켜도 `RateLimitPolicy` 의 쓰기 경로만 센다(§7-3). LB 단 제한 또는 #135 에서 검토한다.
+- **정책 밖 전역 익명 요청 폭주는 LB 에서 막는다(#135 결정).** 게이트웨이 IP 단위 제한은 기본 꺼짐이고, 켜도 `RateLimitPolicy` 의 쓰기 경로만 센다(§7-3).
+  조회 · `/api/v1/auth/**` 를 포함한 경로 전체의 익명 폭주와 느린 연결 수는 앞단 LB(L7 rate limit · WAF · 연결 수 상한)가 맡고, 게이트웨이 정책은 더하지 않는다.
+  로그인 · 회원가입 시도는 auth 의 이메일 카운터와 `X-Client-Subject` IP 차원(#66, §7-3 하류 헤더 계약)이 맡는다.
+  LB 설정은 배포 환경(`service-inventory.md` §5)이 정해질 때 함께 정한다.
 
 ## 8. 로그
 

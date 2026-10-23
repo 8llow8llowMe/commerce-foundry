@@ -191,6 +191,7 @@ return ResponseEntity.ok().body(Response.success(response));
 - 응답 본문에 예외 메시지·스택을 싣지 않는다. 경로·라우트·예외 타입은 게이트웨이 로그에만 남는다.
 - 허용되지 않은 origin 은 preflight 뿐 아니라 **실제 요청도** 라우팅 전에 봉투 없이 `403` 으로 거부된다(브라우저가 막는 응답이다).
   허용 목록에 없는 요청 헤더를 쓴 preflight 도 `403` 이다.
+- 클라이언트가 보낸 `X-Client-Subject` 는 게이트웨이가 늘 지운다. 하류 서비스에는 게이트웨이가 만든 값(클라이언트 IP 의 HMAC)만 닿는다 — 계약은 `security-guide.md` §7-3.
 
 ### 2-2. 부재는 언제 200 + null 이고 언제 404 인가
 

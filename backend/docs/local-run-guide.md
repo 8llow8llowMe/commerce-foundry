@@ -41,10 +41,12 @@ cp .env.example .env
 - **#51 부터 서비스 5종은 `INTERNAL_JWT_SECRET`(서비스 토큰 비밀)이 비면 뜨지 않는다.** 빈 `INTERNAL_JWT_SECRET=` 줄을 지우고
   `printf 'INTERNAL_JWT_SECRET=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다(서비스 5종이 같은 `.env` 를 읽는다).
   `INTERNAL_JWT_SECRET_PREVIOUS` 는 비워 둔다 (`security-guide.md` §9-6).
-- `GATEWAY_CLIENT_IP_HASH_KEY`(비로그인 요청 IP 의 HMAC 키, #89)는 **게이트웨이의 `gateway.client-ip.enabled` 를 켤 때만 필요하다** — 기본은 꺼짐이라 비워도 뜬다.
-  켜서 확인하려면 빈 줄을 지우고 `printf 'GATEWAY_CLIENT_IP_HASH_KEY=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로 로컬 값을 만든 뒤
-  `GATEWAY_CLIENTIP_ENABLED=true ./gradlew :cloud:api-gateway:bootRun` 으로 띄운다(Spring 환경변수 이름 규칙 — 점은 `_`, `-` 는 뺀다).
-  `GATEWAY_TRUSTED_PROXIES` 는 비워 둔다 — 로컬은 프록시 없이 붙는다. 프론트 BFF 를 거치면 비로그인 요청이 모두 BFF 주소 한 버킷이 된다 (`security-guide.md` §7-3).
+- `GATEWAY_CLIENT_IP_HASH_KEY`(클라이언트 IP 의 HMAC 키, #89)는 **게이트웨이의 `GATEWAY_CLIENT_IP_ENABLED`(`gateway.client-ip.enabled`)를 켤 때만 필요하다** —
+  기본은 꺼짐이라 비워도 뜬다. 켜서 확인하려면 빈 줄을 지우고 `printf 'GATEWAY_CLIENT_IP_HASH_KEY=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로
+  로컬 값을 만든 뒤 `GATEWAY_CLIENT_IP_ENABLED=true ./gradlew :cloud:api-gateway:bootRun` 으로 띄운다(`.env` 의 `GATEWAY_CLIENT_IP_ENABLED=false` 를 `=true` 로 바꿔도 된다 —
+  OS 환경변수가 `.env` 보다 우선한다). 켜면 비로그인 쓰기 요청을 IP 로 세고, 하류 서비스에 `X-Client-Subject`(IP 의 HMAC)가 실린다 (`security-guide.md` §7-3).
+  `GATEWAY_TRUSTED_PROXIES` 는 비워 둔다 — 로컬은 프록시 없이 붙는다(켰는데 비어 있다는 WARN 한 줄이 기동 로그에 남는 것은 정상이다).
+  프론트 BFF 를 거치면 비로그인 요청이 모두 BFF 주소 한 버킷 · 같은 `X-Client-Subject` 가 된다.
 
 ## 3. 미들웨어 (PostgreSQL · Redis)
 
