@@ -2,6 +2,8 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
+import com.commercefoundry.global.config.TossPaymentsStartupGuard;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.zaxxer.hikari.HikariDataSource;
@@ -44,6 +46,9 @@ class PaymentServiceApplicationTests {
         assertThat(applicationContext.getBeanNamesForType(SnowflakeIdGenerator.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(JPAQueryFactory.class)).hasSize(1);
         assertThat(applicationContext.containsBean("jpaAuditingHandler")).isTrue();
+        // 토스 어댑터 · 키 기동 가드 — test 프로파일의 더미 test_ 키로 가드를 통과한다
+        assertThat(applicationContext.getBeanNamesForType(PaymentGatewayPort.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(TossPaymentsStartupGuard.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(GroupedOpenApi.class).values())
             .extracting(GroupedOpenApi::getGroup)
             .containsExactlyInAnyOrder("customer", "admin");
