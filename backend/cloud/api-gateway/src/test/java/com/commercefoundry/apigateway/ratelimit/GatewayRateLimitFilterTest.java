@@ -43,6 +43,7 @@ class GatewayRateLimitFilterTest {
     private static final GatewayClientIpProperties CLIENT_IP_DISABLED = new GatewayClientIpProperties(false, List.of(), null);
     private static final ClientIpResolver RESOLVER = new ClientIpResolver(CLIENT_IP);
     private static final ClientIpHasher HASHER = new ClientIpHasher(CLIENT_IP);
+    private static final ClientSubjectResolver SUBJECTS = new ClientSubjectResolver(CLIENT_IP, RESOLVER, HASHER);
 
     private final StubLimiter limiter = new StubLimiter();
     private final GatewayRateLimitFilter filter = filter(true);
@@ -194,7 +195,7 @@ class GatewayRateLimitFilterTest {
     @Test
     @DisplayName("fail-open warn 은 간격마다 한 번만 남긴다")
     void failOpenWarnIsThrottled() {
-        GatewayRateLimitFilter fixedClockFilter = new GatewayRateLimitFilter(limiter, RESOLVER, HASHER, properties(true), CLIENT_IP, new GatewayErrorResponseWriter(JSON),
+        GatewayRateLimitFilter fixedClockFilter = new GatewayRateLimitFilter(limiter, SUBJECTS, properties(true), new GatewayErrorResponseWriter(JSON),
             Clock.fixed(Instant.parse("2026-10-18T00:00:00Z"), ZoneOffset.UTC));
 
         assertThat(fixedClockFilter.claimWarnSlot()).isTrue();
@@ -214,12 +215,12 @@ class GatewayRateLimitFilterTest {
     }
 
     private GatewayRateLimitFilter filter(boolean enabled) {
-        return new GatewayRateLimitFilter(limiter, RESOLVER, HASHER, properties(enabled), CLIENT_IP, new GatewayErrorResponseWriter(JSON));
+        return new GatewayRateLimitFilter(limiter, SUBJECTS, properties(enabled), new GatewayErrorResponseWriter(JSON));
     }
 
     /** 운영처럼 해석기 · 해시기 · 필터가 같은 클라이언트 IP 설정을 받는다. */
     private GatewayRateLimitFilter filter(boolean enabled, GatewayClientIpProperties clientIp) {
-        return new GatewayRateLimitFilter(limiter, new ClientIpResolver(clientIp), new ClientIpHasher(clientIp), properties(enabled), clientIp,
+        return new GatewayRateLimitFilter(limiter, new ClientSubjectResolver(clientIp, new ClientIpResolver(clientIp), new ClientIpHasher(clientIp)), properties(enabled),
             new GatewayErrorResponseWriter(JSON));
     }
 
