@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.payment.adapter.out.persistence;
 
+import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.APPROVED_AT;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.MEMBER_ID;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.ORDER_ID;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.ORDER_NAME;
@@ -12,21 +13,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.entity.PaymentEntity;
-import com.commercefoundry.domainlayer.payment.application.exception.ActivePaymentConflictException;
+import com.commercefoundry.domainlayer.payment.application.exception.PaymentPersistenceConflictException;
+import com.commercefoundry.domainlayer.payment.application.exception.PaymentPersistenceConflictException.Kind;
 import com.commercefoundry.domainlayer.payment.application.mapper.PaymentMapperImpl;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentRepositoryPort;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentAbortReason;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentGateway;
+import com.commercefoundry.domainlayer.payment.domain.model.PaymentInquiry;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentMethod;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentUnknownReason;
 import com.commercefoundry.domainlayer.payment.support.PaymentFixtures;
 import com.commercefoundry.global.config.PaymentServiceFeaturesConfig;
+import com.commercefoundry.global.persistence.ConstraintViolations;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
-import java.time.Instant;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,7 +40,6 @@ import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -44,7 +47,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * 결제 시도 영속성 어댑터를 실제 PostgreSQL 에 질의해 본다 — 파생 쿼리 · 유니크 키 · check 제약 · 버전 검사는 컴파일로 검증되지 않는다
- * ({@code coding-conventions.md} §9-5).
+ * ({@code coding-conventions.md} §9-5). 제약 이름은 PostgreSQL 서버 오류 필드에서 읽는다({@link ConstraintViolations}).
  *
  * <p>스키마는 DDL 스냅숏을 init script 로 적용하고 {@code ddl-auto=validate} 로 엔티티와 대조한다. 컨텍스트가 뜨면 스냅숏과 매핑이 맞는 것이다.
  * Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다 ({@link EnabledWithDockerOrOnCi}).
@@ -107,7 +110,7 @@ class PaymentRepositoryAdapterTest {
     }
 
     @Test
-    @DisplayName("버전 충돌: 같은 READY 를 읽은 두 요청 중 나중 저장은 충돌이다 — 중복 승인 시작을 막는다")
+    @DisplayName("버전 충돌: 같은 READY 를 읽은 두 요청 중 나중 저장은 VERSION 충돌이다 — 중복 승인 시작을 막는다. 원인은 싣지 않는다")
     void staleVersionIsRejected() {
         paymentRepositoryPort.save(PaymentFixtures.ready());
         entityManager.clear();
@@ -116,18 +119,15 @@ class PaymentRepositoryAdapterTest {
         paymentRepositoryPort.save(first.startApproval(PAYMENT_KEY, STARTED_AT));
         entityManager.clear();
 
-        assertThatThrownBy(() -> paymentRepositoryPort.save(second.startApproval(PAYMENT_KEY, STARTED_AT)))
-            .isInstanceOf(ObjectOptimisticLockingFailureException.class);
+        assertConflict(() -> paymentRepositoryPort.save(second.startApproval(PAYMENT_KEY, STARTED_AT)), Kind.VERSION);
     }
 
     @Test
-    @DisplayName("같은 주문에 활성 결제 시도를 둘 만들 수 없다 (uk_payment_active_order_id → ActivePaymentConflictException)")
+    @DisplayName("같은 주문에 활성 결제 시도를 둘 만들 수 없다 (uk_payment_active_order_id → ACTIVE_SLOT)")
     void secondActivePaymentIsRejected() {
         paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
 
-        assertThatThrownBy(() -> paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, ORDER_ID)))
-            .isInstanceOfSatisfying(ActivePaymentConflictException.class, exception -> assertThat(exception.getOrderId()).isEqualTo(ORDER_ID))
-            .hasNoCause();
+        assertConflict(() -> paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, ORDER_ID)), Kind.ACTIVE_SLOT);
     }
 
     @Test
@@ -145,7 +145,40 @@ class PaymentRepositoryAdapterTest {
     }
 
     @Test
-    @DisplayName("PG 주문번호는 겹칠 수 없다 — 그 밖의 제약 위반은 원인 없이 제약 이름만 싣는다 (uk_payment_pg_order_id)")
+    @DisplayName("되돌린 READY 는 결제키 · 승인 시작 시각을 남긴 채 저장되고, 조회로 미승인을 확인해 버리면 슬롯을 놓는다")
+    void revertedReadyIsStoredAndAbortedAfterInquiry() {
+        Payment ready = paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
+        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, STARTED_AT));
+        Payment reverted = paymentRepositoryPort.save(inProgress.revertToReady());
+        entityManager.clear();
+
+        assertThat(paymentRepositoryPort.findActiveByOrderId(ORDER_ID)).contains(reverted);
+        assertThat(reverted.approvalStartedAt()).isEqualTo(STARTED_AT);
+
+        paymentRepositoryPort.save(reverted.abortAfterInquiry(new PaymentInquiry.Failed("NOT_FOUND_PAYMENT_SESSION", null), PaymentAbortReason.REPREPARED));
+        Payment retry = paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, ORDER_ID));
+        entityManager.clear();
+
+        assertThat(paymentRepositoryPort.findActiveByOrderId(ORDER_ID)).contains(retry);
+    }
+
+    @Test
+    @DisplayName("늦은 승인은 슬롯을 다시 잡지 않는다 — 같은 주문의 새 활성 시도와 함께 저장된다")
+    void lateApprovalDoesNotRetakeSlot() {
+        Payment ready = paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
+        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, STARTED_AT));
+        Payment failed = paymentRepositoryPort.save(inProgress.reject("REJECT_CARD_COMPANY", null));
+        Payment retry = paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, ORDER_ID));
+        Payment late = paymentRepositoryPort.save(failed.recordLateApproval(approval(krw(129_000))));
+        entityManager.clear();
+
+        assertThat(late.status()).isEqualTo(PaymentStatus.LATE_APPROVED);
+        assertThat(paymentRepositoryPort.findById(PAYMENT_ID)).contains(late);
+        assertThat(paymentRepositoryPort.findActiveByOrderId(ORDER_ID)).contains(retry);
+    }
+
+    @Test
+    @DisplayName("PG 주문번호는 겹칠 수 없다 — 업무 충돌이 아닌 위반은 원인 없이 제약 이름만 싣는다 (uk_payment_pg_order_id)")
     void duplicatePgOrderIdIsRejected() {
         paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
         Payment sameNumber = new Payment(
@@ -155,26 +188,24 @@ class PaymentRepositoryAdapterTest {
 
         assertThatThrownBy(() -> paymentRepositoryPort.save(sameNumber))
             .isExactlyInstanceOf(DataIntegrityViolationException.class)
-            .hasMessageContaining("uk_payment_pg_order_id")
+            .hasMessageContaining("constraint=uk_payment_pg_order_id")
             .hasNoCause();
     }
 
     @Test
-    @DisplayName("결제키는 겹칠 수 없다 — 승인 전 행의 null 은 겹쳐도 된다 (uk_payment_payment_key)")
+    @DisplayName("결제키는 겹칠 수 없다 — 승인 전 행의 null 은 겹쳐도 된다 (uk_payment_payment_key → PAYMENT_KEY)")
     void duplicatePaymentKeyIsRejected() {
         Payment first = paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
         Payment second = paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, OTHER_ORDER_ID));
         paymentRepositoryPort.save(first.startApproval(PAYMENT_KEY, STARTED_AT));
 
-        assertThatThrownBy(() -> paymentRepositoryPort.save(second.startApproval(PAYMENT_KEY, STARTED_AT)))
-            .isExactlyInstanceOf(DataIntegrityViolationException.class)
-            .hasMessageContaining("uk_payment_payment_key");
+        assertConflict(() -> paymentRepositoryPort.save(second.startApproval(PAYMENT_KEY, STARTED_AT)), Kind.PAYMENT_KEY);
     }
 
     @Test
-    @DisplayName("제약: 금액 0 은 저장되지 않는다 (ck_payment_amount_positive)")
+    @DisplayName("제약: 금액 0 은 저장되지 않는다 (ck_payment_total_amount_positive)")
     void zeroAmountIsRejected() {
-        assertViolates(base(PaymentStatus.READY).amount(0L), "ck_payment_amount_positive");
+        assertViolates(base(PaymentStatus.READY).totalAmount(0L), "ck_payment_total_amount_positive");
     }
 
     @Test
@@ -193,9 +224,21 @@ class PaymentRepositoryAdapterTest {
     }
 
     @Test
+    @DisplayName("제약: 활성 상태인데 슬롯이 null 이면 저장되지 않는다 — 3값 논리 구멍 (ck_payment_active_order_id_status)")
+    void activeStatusWithNullSlotIsRejected() {
+        assertViolates(base(PaymentStatus.READY).activeOrderId(null), "ck_payment_active_order_id_status");
+    }
+
+    @Test
+    @DisplayName("제약: 결제키 없이 승인 시작 시각만 있으면 저장되지 않는다 (ck_payment_approval_started_at_key)")
+    void startedAtWithoutKeyIsRejected() {
+        assertViolates(base(PaymentStatus.READY).approvalStartedAt(STARTED_AT), "ck_payment_approval_started_at_key");
+    }
+
+    @Test
     @DisplayName("제약: 결제키 없는 IN_PROGRESS 는 저장되지 않는다 (ck_payment_in_progress_fields)")
     void inProgressWithoutKeyIsRejected() {
-        assertViolates(base(PaymentStatus.IN_PROGRESS).approvalStartedAt(STARTED_AT), "ck_payment_in_progress_fields");
+        assertViolates(base(PaymentStatus.IN_PROGRESS), "ck_payment_in_progress_fields");
     }
 
     @Test
@@ -205,9 +248,21 @@ class PaymentRepositoryAdapterTest {
     }
 
     @Test
+    @DisplayName("제약: 승인 전 결제에 결제수단이 있으면 저장되지 않는다 (ck_payment_approved_fields)")
+    void methodBeforeApprovalIsRejected() {
+        assertViolates(base(PaymentStatus.READY).method(PaymentMethod.CARD), "ck_payment_approved_fields");
+    }
+
+    @Test
     @DisplayName("제약: 거절 코드 없는 FAILED 는 저장되지 않는다 (ck_payment_failed_fields)")
     void failedWithoutCodeIsRejected() {
         assertViolates(base(PaymentStatus.FAILED).activeOrderId(null), "ck_payment_failed_fields");
+    }
+
+    @Test
+    @DisplayName("제약: READY 에 거절 코드가 있으면 저장되지 않는다 (ck_payment_failed_fields)")
+    void failureCodeOnReadyIsRejected() {
+        assertViolates(base(PaymentStatus.READY).failureCode("REJECT_CARD_COMPANY"), "ck_payment_failed_fields");
     }
 
     @Test
@@ -217,9 +272,24 @@ class PaymentRepositoryAdapterTest {
     }
 
     @Test
+    @DisplayName("제약: READY 에 미확정 이유가 있으면 저장되지 않는다 (ck_payment_unknown_fields)")
+    void unknownReasonOnReadyIsRejected() {
+        assertViolates(base(PaymentStatus.READY).unknownReason(PaymentUnknownReason.TIMEOUT), "ck_payment_unknown_fields");
+    }
+
+    @Test
     @DisplayName("제약: 사유 없는 ABORTED 는 저장되지 않는다 (ck_payment_abort_reason_status)")
     void abortedWithoutReasonIsRejected() {
         assertViolates(base(PaymentStatus.ABORTED).activeOrderId(null), "ck_payment_abort_reason_status");
+    }
+
+    @Test
+    @DisplayName("제약: 종결 이유(거절 코드 · 중단 사유)가 없는 LATE_APPROVED 는 저장되지 않는다 (ck_payment_late_approved_origin)")
+    void lateApprovedWithoutOriginIsRejected() {
+        assertViolates(
+            base(PaymentStatus.LATE_APPROVED).activeOrderId(null).paymentKey(PAYMENT_KEY).method(PaymentMethod.CARD).approvedAt(APPROVED_AT),
+            "ck_payment_late_approved_origin"
+        );
     }
 
     @Test
@@ -232,7 +302,7 @@ class PaymentRepositoryAdapterTest {
     @DisplayName("제약: 반영된 결제의 주문 반영 실패 코드는 저장되지 않는다 (ck_payment_order_sync_failure_code_status)")
     void syncFailureCodeAfterSyncIsRejected() {
         assertViolates(
-            base(PaymentStatus.DONE).paymentKey(PAYMENT_KEY).method(PaymentMethod.CARD).approvedAt(Instant.parse("2026-10-21T01:00:03Z"))
+            base(PaymentStatus.DONE).paymentKey(PAYMENT_KEY).method(PaymentMethod.CARD).approvedAt(APPROVED_AT)
                 .orderSynced(true).orderSyncFailureCode("ORDER_030"),
             "ck_payment_order_sync_failure_code_status"
         );
@@ -241,7 +311,7 @@ class PaymentRepositoryAdapterTest {
     @Test
     @DisplayName("UNKNOWN 이유 컬럼은 enum 값 중 가장 긴 것을 담는다")
     void longestUnknownReasonFits() {
-        Payment unknown = paymentRepositoryPort.save(PaymentFixtures.inProgress().markUnknown(PaymentUnknownReason.AMOUNT_MISMATCH_ON_APPROVAL));
+        Payment unknown = paymentRepositoryPort.save(PaymentFixtures.inProgress().markUnknown(PaymentUnknownReason.STALE_IN_PROGRESS));
         entityManager.clear();
 
         assertThat(paymentRepositoryPort.findById(PAYMENT_ID)).contains(unknown);
@@ -251,12 +321,18 @@ class PaymentRepositoryAdapterTest {
     private static PaymentEntity.PaymentEntityBuilder base(PaymentStatus status) {
         return PaymentEntity.builder()
             .id(PAYMENT_ID).orderId(ORDER_ID).memberId(MEMBER_ID).pgOrderId(Long.toString(PAYMENT_ID)).gateway(PaymentGateway.TOSS)
-            .amount(1_000L).currency(CurrencyCode.KRW).orderName(ORDER_NAME).status(status).activeOrderId(ORDER_ID);
+            .totalAmount(1_000L).totalCurrency(CurrencyCode.KRW).orderName(ORDER_NAME).status(status).activeOrderId(ORDER_ID);
     }
 
+    /** 제약 이름을 메시지 문구가 아니라 어댑터와 같은 판정({@link ConstraintViolations#constraintNameOf})으로 본다 — 서버 필드가 있으면 그 이름이다. */
     private void assertViolates(PaymentEntity.PaymentEntityBuilder entity, String constraintName) {
         assertThatThrownBy(() -> entityManager.persistAndFlush(entity.build()))
-            .rootCause()
-            .hasMessageContaining(constraintName);
+            .satisfies(exception -> assertThat(ConstraintViolations.constraintNameOf(exception)).isEqualTo(constraintName));
+    }
+
+    private static void assertConflict(ThrowingCallable save, Kind kind) {
+        assertThatThrownBy(save)
+            .isInstanceOfSatisfying(PaymentPersistenceConflictException.class, exception -> assertThat(exception.getKind()).isEqualTo(kind))
+            .hasNoCause();
     }
 }
