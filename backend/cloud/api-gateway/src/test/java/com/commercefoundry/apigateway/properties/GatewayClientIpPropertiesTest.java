@@ -4,6 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.apigateway.GatewayIntegrationTest;
+import com.commercefoundry.apigateway.config.GatewayRateLimitConfig;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
@@ -13,6 +17,11 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
 
 /**
  * 비로그인 IP 계수 스위치의 기본값과 키 검증 시점을 본다 ({@code security-guide.md} §7-3). 기본은 끔이고, 끈 상태에서는 HMAC 키 없이 뜬다 —
@@ -83,7 +92,74 @@ class GatewayClientIpPropertiesTest {
             .doesNotContain(KEY);
     }
 
+    @Test
+    @DisplayName("application.yml 의 enabled 는 GATEWAY_CLIENT_IP_ENABLED 로 켜고, 없으면 꺼져 있다 (#135)")
+    void enabledBindsFromEnvironmentVariable() {
+        assertThat(bindApplicationYml(Map.of()).enabled()).isFalse();
+        assertThat(bindApplicationYml(Map.of("GATEWAY_CLIENT_IP_ENABLED", "false")).enabled()).isFalse();
+        assertThat(bindApplicationYml(Map.of("GATEWAY_CLIENT_IP_ENABLED", "true", "GATEWAY_CLIENT_IP_HASH_KEY", KEY)).enabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("GATEWAY_CLIENT_IP_ENABLED 로 켰는데 키가 없으면 바인딩에서 실패한다")
+    void enabledFromEnvironmentRequiresKey() {
+        assertThatThrownBy(() -> bindApplicationYml(Map.of("GATEWAY_CLIENT_IP_ENABLED", "true")))
+            .isInstanceOf(BindException.class)
+            .hasRootCauseInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"maybe", "ture", "enabled"})
+    @DisplayName("GATEWAY_CLIENT_IP_ENABLED 가 불리언이 아니면 바인딩에서 실패한다 — 꺼진 채로 조용히 뜨지 않는다")
+    void invalidEnabledValueFailsBinding(String value) {
+        assertThatThrownBy(() -> bindApplicationYml(Map.of("GATEWAY_CLIENT_IP_ENABLED", value))).isInstanceOf(BindException.class);
+    }
+
+    @Test
+    @DisplayName("GATEWAY_CLIENT_IP_ENABLED= (빈 값)이면 바인딩에서 실패한다 — 기본값(false)으로 떨어지지 않고 기동하지 않는다")
+    void emptyEnabledValueFailsBinding() {
+        assertThatThrownBy(() -> bindApplicationYml(Map.of("GATEWAY_CLIENT_IP_ENABLED", "")))
+            .isInstanceOf(BindException.class)
+            .hasMessageContaining("gateway.client-ip.enabled");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0.0.0.0/0", "::/0"})
+    @DisplayName("접두 길이 0 인 신뢰 프록시는 기동을 거부한다 — 누구의 X-Forwarded-For 든 믿게 된다")
+    void zeroPrefixTrustedProxyIsRejected(String cidr) {
+        assertThatThrownBy(() -> bind(Map.of("gateway.client-ip.trusted-proxies", cidr)))
+            .isInstanceOf(BindException.class)
+            .rootCause()
+            .hasMessageContaining("prefix length out of range");
+        assertThatThrownBy(() -> new GatewayClientIpProperties(false, List.of(cidr), null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining(cidr);
+    }
+
+    @Test
+    @DisplayName("enabled 가 불리언이 아니면 설정 클래스가 뜨지 않는다 — 기동 실패")
+    void invalidEnabledValueFailsStartup() {
+        new ApplicationContextRunner()
+            .withUserConfiguration(GatewayRateLimitConfig.class)
+            .withPropertyValues("gateway.client-ip.enabled=maybe")
+            .run(context -> assertThat(context).hasFailed());
+    }
+
     private static GatewayClientIpProperties bind(Map<String, String> properties) {
         return new Binder(new MapConfigurationPropertySource(properties)).bindOrCreate("gateway.client-ip", GatewayClientIpProperties.class);
+    }
+
+    /** 실제 {@code application.yml} 위에 환경변수 자리를 얹어 바인딩한다. 셸 환경변수 · 시스템 프로퍼티는 빼 결과가 셸에 따라 바뀌지 않게 한다. */
+    private static GatewayClientIpProperties bindApplicationYml(Map<String, String> environment) {
+        StandardEnvironment env = new StandardEnvironment();
+        env.getPropertySources().remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
+        env.getPropertySources().remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
+        env.getPropertySources().addFirst(new MapPropertySource("test-environment", new HashMap<String, Object>(environment)));
+        try {
+            new YamlPropertySourceLoader().load("application.yml", new ClassPathResource("application.yml")).forEach(env.getPropertySources()::addLast);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return Binder.get(env).bindOrCreate("gateway.client-ip", GatewayClientIpProperties.class);
     }
 }
