@@ -95,7 +95,7 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 | `ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` | O | `:-` 빈 값 | | | O | | | | |
 | `ADMIN_SEED_NAME` | - | `:-` 빈 값 | | | O | | | | |
 | `AUTH_LOGIN_GUARD_HASH_KEY` | O | `:-` 빈 값 | | | O | | | | |
-| `STORE_FEATURES_CUSTOM_ORDER` | - | `:-false` | | | | O | | | |
+| `STORE_FEATURES_CUSTOM_ORDER` · `STORE_FEATURES_PREORDER` · `STORE_FEATURES_PRODUCT_VIDEO` | - | `:-false` | | | | O | | | |
 | `STORE_FEATURES_INTERNATIONAL_SHIPPING` | - | `:-false` | | | | | | | O |
 | `TIME_ZONE` | - | `:-UTC` | O | O | O | O | O | O | O |
 | `COMMERCE_DOCKER_NETWORK` · 포트 · 메모리 (§3) | - | 네트워크 · 포트 `:?`, 메모리 `:-` | O | O | O | O | O | O | O |

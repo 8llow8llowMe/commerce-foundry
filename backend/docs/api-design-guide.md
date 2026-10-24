@@ -408,6 +408,24 @@ return ResponseEntity.ok().body(Response.success(response));
   `application/model` 의 입력 enum(`ProductSaleStatusFilter` · `ProductAvailabilityFilter` · `ProductAdminSortType`)으로 받고 Processor 가 domain 으로 바꾼다.
   정렬은 고객 `ProductSortType` 과 나눈다 — 이름순을 고객 목록에 열지 않는다.
 
+### 2-7. 고객 상품의 프리오더 · 영상 필드 (product-service, #61)
+
+| 응답 | 필드 | 뜻 |
+|------|------|----|
+| 목록 `GET /api/v1/products` | `preorder: boolean` | 프리오더(예약 판매) 상품인가. `store.features.preorder` 가 꺼져 있으면 언제나 `false` |
+| 상세 `GET /api/v1/products/{productId}` | `preorder: { expectedShipDate } \| null` | 프리오더가 아니거나 플래그가 꺼지면 `null`. `expectedShipDate` 가 `null` 이면 "발송일 추후 안내" |
+| 상세 | `images[].mediaType` | `IMAGE` · `VIDEO`. 화면 분기용 제어 코드라 metadata 객체가 아니라 문자열이다(§11 예외) |
+| 상세 | `images[].posterUrl` | VIDEO 의 재생 전 정지 이미지 URL. IMAGE 면 `null` |
+
+- **날짜만 있는 값(`LocalDate`)은 ISO 날짜 문자열 `yyyy-MM-dd`(스토어 현지 날짜)로 내린다.** 시각(`Instant`)과 달리 시간대를 붙이지 않는다.
+- 발송 예정은 고정 날짜("○월 ○일 순차 발송")다. 주문일 기준 일수는 맞춤 제작 `customOrder.leadTimeDays` 이고 서로 겹치지 않는다.
+- 상세 `images[]` 는 갤러리 이미지와(`store.features.product-video` 가 켜져 있으면) 영상을 `displayOrder` → 아이디 오름차순으로 섞는다. 꺼지면 VIDEO 를 뺀다.
+  대표 이미지(`thumbnail`)는 THUMBNAIL 만이다 — VIDEO 가 대표가 되지 않는다.
+- 프리오더 상품의 판매 가능 · 품절 판정과 재고 선점은 일반 상품과 같다. 화면에 발송 예정 안내만 더한다.
+- 어드민 입력(#9 몫): 영상 · 포스터 URL 은 우리 오브젝트 스토리지 공개 URL(`STORAGE_PUBLIC_BASE_URL` 접두)만 받는다 — 외부 영상 URL 은 받지 않는다.
+  VIDEO 는 포스터 필수(빈 문자열 거절), 그 밖에는 포스터를 받지 않는다. 프리오더가 아니면 발송 예정일을 받지 않는다(DB check 와 같은 규칙).
+  유일 키는 유형별 `display_order` 라 GALLERY 와 VIDEO 가 같은 값을 가질 수 있다 — 어드민 등록은 갤러리 이미지 · 영상을 합친 순번을 매겨 동률을 만들지 않는다.
+
 ## 3. 계층 흐름
 
 ```text

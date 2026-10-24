@@ -322,6 +322,8 @@ store:
   default-currency: KRW
   features:
     custom-order: true            # 맞춤 제작 옵션 (치수 입력·제작 단계)
+    preorder: true                # 프리오더(예약 판매) · 발송 예정일 안내
+    product-video: true           # 상품 상세 갤러리 영상
     international-shipping: true  # 해외 배송비·USD 결제
     reviews: false
 ```
@@ -329,6 +331,7 @@ store:
 - `store.*` 는 쓰는 서비스의 `global/properties/StoreProperties` 로 바인딩한다 — 처음 쓰는 곳은 product-service 의 `store.features.custom-order`(#8)이고, delivery-service 가 `store.features.international-shipping`(#22)을 쓴다.
   두 번째 서비스가 **같은 프로퍼티**를 쓰게 되면 common-core 로 올린다 — 두 서비스가 서로 다른 플래그를 읽는 지금은 각 서비스에 둔다. 플래그 기본값은 꺼짐(닫힌 쪽)이고 local · dev 프로파일 yml 만 켠다.
   플래그가 꺼지면 데이터는 그대로 두고 응답에서만 숨긴다 (맞춤 제작: 목록 `customOrder=false`, 상세 `customOrder=null`).
+  product-service 는 `preorder`(목록 `preorder=false`, 상세 `preorder=null`) · `product-video`(상세 `images[]` 에서 VIDEO 제외)도 같은 방식으로 읽는다(#61).
 - 상호·대표자·사업자등록번호·통신판매업 신고번호 같은 **법정 표시 정보는 Vault 에 등록하고 주입**한다
   (`STORE_*` — `secret-management.md`). 저장소가 public 이므로 yml 에 실값을 쓰지 않는다.
 - 브랜드 특화 요구가 생기면 먼저 "다른 쇼핑몰에도 의미가 있는 일반 기능인가" 를 묻는다. 그렇다면
