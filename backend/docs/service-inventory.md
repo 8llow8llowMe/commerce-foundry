@@ -62,6 +62,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 
 | core | 사용 서비스 |
 |------|-------------|
+| `ai-core` | operations(예정 — AI 호출은 작업 엔진(#212) 핸들러에서 돈다. 모듈만 있다(#215 PR-A). 사용량 원장 · 월 한도 · 연결은 이후 PR) |
 | `common-core` | 전부 |
 | `persistence-core` | auth · product · order · payment · delivery · operations |
 | `redis-core` | auth(토큰·소셜 state) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
@@ -100,6 +101,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | datasource-proxy | 1.11.1 (delivery-service `testImplementation` 만) | JDBC 왕복 · 배치 실행 횟수 측정(`coding-conventions.md` §9-6, #255). Boot BOM 이 관리하지 않아 서비스 build.gradle 에서 고정 |
 | AWS SDK for Java v2 | 2.55.11 (storage-core 만 · `s3` + `url-connection-client`) | Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정. `implementation` 이라 서비스는 SDK 타입을 보지 못한다. 딸려 오는 `apache5-client` · `netty-nio-client` 는 뺀다 (Boot BOM 이 HttpClient 5 를 낮춰 고정한다) |
 | S3 호환 테스트 서버 | MinIO RELEASE.2025-07-23 (`bitnamilegacy/minio:2025.7.23-debian-12-r5`, digest 고정) | storage-core 왕복 테스트(CI 전용). MinIO 공식 이미지 · 바이너리 배포가 끝나 Bitnami 가 마지막으로 빌드한 이미지를 고정한다(갱신 없음). 태그는 다시 밀어 넣을 수 있어 멀티 아키텍처 index digest 로 고정하고 태그는 주석으로 남긴다 — 이미지를 바꾸면 테스트의 `MINIO_IMAGE` 상수와 이 행을 같이 고친다. Testcontainers MinIO 모듈은 공식 이미지 기동 방식이라 쓰지 않고 `GenericContainer` 로 띄운다 |
+| Anthropic Java SDK | 2.34.0 (ai-core 만 · `anthropic-java`) | Claude API 공식 클라이언트. Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정. `implementation` 이라 서비스는 SDK 타입을 보지 못한다. OkHttp 4.12 · Jackson 2(`com.fasterxml`)를 끌고 온다 — Jackson 3 와 패키지가 달라 섞이지 않고, Boot BOM 은 Jackson 2 를 올려(2.21.x) 맞출 뿐 낮추지 않는다 |
 | PostgreSQL / Redis (로컬) | 17 / 7.4 | `docker-compose-local.yml` |
 
 ### 4-2. 환경별 DB 분리 (#82)
