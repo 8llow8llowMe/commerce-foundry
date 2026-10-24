@@ -14,7 +14,7 @@ public enum ServiceRoute {
 
     AUTH("auth-service",
         "/api/v1/auth/**", "/api/v1/members/**",
-        "/api/v1/admin/members/**"),
+        "/api/v1/admin/members/**", "/api/v1/admin/audit-logs/**"),
     PRODUCT("product-service",
         "/api/v1/categories/**", "/api/v1/products/**",
         "/api/v1/admin/categories/**", "/api/v1/admin/products/**", "/api/v1/admin/stocks/**"),
