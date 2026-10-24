@@ -42,7 +42,7 @@ public final class AiStartupGuard implements BeanFactoryPostProcessor {
         AiProperties properties;
         try {
             properties = binder.bind("ai", Bindable.of(AiProperties.class)).orElseGet(() -> new AiProperties(true,
-                null, null, null, null, null, null, null, null, null, null, null, null, null));
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         } catch (BindException e) {
             // 원인을 잇지 않는다 — 메시지에 설정값이 들어 있다. 어긋난 항목 이름만 알린다
             String property = e.getProperty() == null ? "ai.*" : e.getProperty().getName().toString();

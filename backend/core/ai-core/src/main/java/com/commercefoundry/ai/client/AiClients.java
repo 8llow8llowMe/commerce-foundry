@@ -1,6 +1,7 @@
 package com.commercefoundry.ai.client;
 
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
+import com.anthropic.core.LogLevel;
 import com.anthropic.core.Timeout;
 import com.commercefoundry.ai.masking.PiiMasker;
 import com.commercefoundry.ai.properties.AiProperties;
@@ -33,6 +34,8 @@ public final class AiClients {
             return new DisabledAiClient();
         }
         AnthropicOkHttpClient.Builder builder = AnthropicOkHttpClient.builder()
+            // SDK 빌더는 fromEnv() 없이도 ANTHROPIC_LOG 를 읽어, debug 면 요청 · 응답 본문을 slf4j 를 거치지 않고 stderr 로 낸다. 명시적으로 끈다
+            .logLevel(LogLevel.OFF)
             .apiKey(properties.apiKey())
             .maxRetries(properties.maxRetries())
             .timeout(Timeout.builder()

@@ -21,14 +21,15 @@ import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 공식 Java SDK 로 Messages API 를 부른다. 순서가 고정이다 — 마스킹 → 동시 상한 자리 얻기 → 호출(SDK 재시도 포함) → 결과 · 오류 번역.
+ * 공식 Java SDK 로 Messages API 를 부른다. 순서가 고정이다 — 길이 상한 → 마스킹 → 동시 상한 자리 얻기 → 호출(SDK 재시도 포함) → 결과 · 오류 번역.
+ * 마스킹은 길이에 비례하는 시간만 쓰고({@code PiiMasker}), 길이 상한이 그 앞에서 입력 크기를 묶는다.
  *
  * <ul>
  *   <li><b>재시도</b>는 SDK 가 한다({@code ai.max-retries}, 408 · 409 · 429 · 5xx · 연결 오류, {@code retry-after} 존중). 여기서 다시 감싸지 않는다.</li>
  *   <li><b>동시 상한</b>은 프로세스 단위 세마포어다. 자리를 {@code ai.acquire-timeout} 안에 못 얻으면 {@link Reason#BUSY} — 호출하지 않는다.</li>
  *   <li><b>거절 대체</b>({@code ai.refusal-fallback})는 API 의 server-side fallback 을 켠다. 대체 모델까지 거절하면 {@link Reason#REFUSED} 다.</li>
  *   <li><b>로그</b>에는 기능 · 모델 · 토큰 수 · 멈춘 이유 · 상태 코드만 남긴다. 프롬프트 · 응답 원문 · SDK 예외 메시지는 어떤 레벨에도 남기지 않는다
- *       ({@code coding-conventions.md} §8). SDK 의 자체 요청 로그({@code ANTHROPIC_LOG})는 배포 환경에서 켜지 않는다.</li>
+ *       ({@code coding-conventions.md} §8). SDK 의 자체 요청 로그는 {@code AiClients} 가 끈다 — {@code ANTHROPIC_LOG} 환경변수가 있어도 본문이 stderr 로 나가지 않는다.</li>
  * </ul>
  */
 @Slf4j
@@ -53,6 +54,11 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
     @Override
     public AiResult complete(AiRequest request) {
         String feature = request.feature();
+        long inputChars = (request.system() == null ? 0L : request.system().length()) + request.prompt().length();
+        if (inputChars > properties.maxInputChars()) {
+            log.warn("ai call rejected. feature={}, reason={}, inputChars={}, maxInputChars={}", feature, Reason.INPUT_TOO_LONG, inputChars, properties.maxInputChars());
+            throw new AiException(Reason.INPUT_TOO_LONG, feature);
+        }
         ResolvedFeature settings = properties.resolve(feature);
         MessageCreateParams params = params(request, settings);
 
