@@ -17,6 +17,7 @@ import com.commercefoundry.domainlayer.product.domain.model.SkuStocks;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
 
@@ -53,7 +54,18 @@ public final class ProductFixtures {
         return new Product(
             id, categoryId, "상품" + id, "요약" + id, "<p>설명</p>",
             saleStatus, visible, Money.of(BASE_PRICE, KRW), Money.of(LIST_PRICE, KRW), 10,
-            customOrder, customOrder ? "제작 착수 후 취소 불가" : null, customOrder ? 14 : null
+            customOrder, customOrder ? "제작 착수 후 취소 불가" : null, customOrder ? 14 : null,
+            false, null
+        );
+    }
+
+    /** 노출 중 · 판매중 프리오더 상품. @param expectedShipDate 발송 예정일. null 이면 "발송일 추후 안내" */
+    public static Product preorderProduct(long id, LocalDate expectedShipDate) {
+        return new Product(
+            id, CATEGORY_ID, "상품" + id, "요약" + id, "<p>설명</p>",
+            SaleStatus.ON_SALE, true, Money.of(BASE_PRICE, KRW), Money.of(LIST_PRICE, KRW), 10,
+            false, null, null,
+            true, expectedShipDate
         );
     }
 
@@ -96,7 +108,15 @@ public final class ProductFixtures {
     }
 
     public static ProductImage image(long id, long productId, ImageType imageType, int displayOrder) {
-        return new ProductImage(id, productId, imageType, "https://cdn.example.com/" + id + ".jpg", 600, 800, "이미지" + id, displayOrder);
+        return new ProductImage(id, productId, imageType, "https://cdn.example.com/" + id + ".jpg", 600, 800, "이미지" + id, displayOrder, null);
+    }
+
+    /** 상세 갤러리 영상 — 포스터 이미지가 있다. */
+    public static ProductImage video(long id, long productId, int displayOrder) {
+        return new ProductImage(
+            id, productId, ImageType.VIDEO, "https://cdn.example.com/" + id + ".mp4", 1080, 1920, "영상" + id, displayOrder,
+            "https://cdn.example.com/" + id + "-poster.jpg"
+        );
     }
 
     public static CustomOrderField numberField(long id, long productId, String fieldKey, int displayOrder) {

@@ -48,6 +48,7 @@ import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -255,13 +256,13 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("목록: 행에 가격 · 정가 · 판매 상태 · 맞춤 제작 여부를 담는다")
+    @DisplayName("목록: 행에 가격 · 정가 · 판매 상태 · 맞춤 제작 · 프리오더 여부를 담는다")
     void listRow() {
         List<ProductListQueryResult> rows = productRepositoryPort.searchVisible(criteria(Set.of(11L), ProductSortType.NEWEST, 0, 20)).getContent();
 
         assertThat(rows).containsExactly(
-            new ProductListQueryResult(103L, "상품 103", 10_000L, KRW, null, null, SaleStatus.ON_SALE, false),
-            new ProductListQueryResult(102L, "상품 102", 20_000L, KRW, 25_000L, KRW, SaleStatus.STOP_SELLING, true)
+            new ProductListQueryResult(103L, "상품 103", 10_000L, KRW, null, null, SaleStatus.ON_SALE, false, false),
+            new ProductListQueryResult(102L, "상품 102", 20_000L, KRW, 25_000L, KRW, SaleStatus.STOP_SELLING, true, false)
         );
     }
 
@@ -568,6 +569,91 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("영상: 갤러리 이미지와 같은 노출 순서여도 저장되고(유니크 키는 유형별), 상품 미디어는 유형을 가리지 않고 노출 순서 → 아이디 오름차순이다")
+    void findImagesWithVideo() {
+        persistAll(
+            video(4006L, 101L, 0, "https://cdn.example.com/products/101/4006.jpg"),
+            video(4005L, 101L, 1, "https://cdn.example.com/products/101/4005.jpg")
+        );
+
+        assertThat(productImageRepositoryPort.findAllByProductId(101L))
+            .extracting(ProductImage::id, ProductImage::imageType, ProductImage::displayOrder)
+            .containsExactly(
+                tuple(4001L, ImageType.THUMBNAIL, 0), tuple(4003L, ImageType.GALLERY, 0), tuple(4006L, ImageType.VIDEO, 0),
+                tuple(4002L, ImageType.GALLERY, 1), tuple(4005L, ImageType.VIDEO, 1)
+            );
+        assertThat(productImageRepositoryPort.findAllByProductId(101L))
+            .filteredOn(image -> image.id() == 4005L)
+            .singleElement()
+            .satisfies(video -> {
+                assertThat(video.url()).isEqualTo("https://cdn.example.com/products/101/4005.mp4");
+                assertThat(video.posterUrl()).isEqualTo("https://cdn.example.com/products/101/4005.jpg");
+            });
+    }
+
+    @Test
+    @DisplayName("영상: 대표 이미지 일괄 조회(고객 · 어드민 목록)에 영상은 들지 않는다 — 순서 0 의 영상이 있어도 THUMBNAIL 만이다")
+    void thumbnailsExcludeVideo() {
+        persistAll(video(4006L, 101L, 0, "https://cdn.example.com/products/101/4006.jpg"), video(4007L, 105L, 0, "https://cdn.example.com/products/105/4007.jpg"));
+
+        assertThat(productImageRepositoryPort.findThumbnailsByProductIds(List.of(101L, 105L)))
+            .extracting(ProductImage::id, ProductImage::imageType)
+            .containsExactly(tuple(4001L, ImageType.THUMBNAIL));
+    }
+
+    @Test
+    @DisplayName("제약: 포스터 없는 영상은 저장되지 않는다 (ck_product_image_poster_url)")
+    void videoWithoutPosterIsRejected() {
+        assertThatThrownBy(() -> persistAll(video(4006L, 101L, 0, null)))
+            .rootCause()
+            .hasMessageContaining("ck_product_image_poster_url");
+    }
+
+    @Test
+    @DisplayName("제약: 포스터 있는 이미지는 저장되지 않는다 (ck_product_image_poster_url)")
+    void imageWithPosterIsRejected() {
+        assertThatThrownBy(() -> persistAll(imageBuilder(4007L, 105L, ImageType.GALLERY, 0).posterUrl("https://cdn.example.com/poster.jpg").build()))
+            .rootCause()
+            .hasMessageContaining("ck_product_image_poster_url");
+    }
+
+    @Test
+    @DisplayName("프리오더: 목록 행에 프리오더 여부를, 상세 상품에 발송 예정일을 담는다 — 발송 예정일 없는 프리오더도 저장된다")
+    void preorder() {
+        LocalDate shipDate = LocalDate.of(2026, 11, 20);
+        persistAll(
+            product(106L, 10_000L, true, SaleStatus.ON_SALE).preorder(true).expectedShipDate(shipDate).build(),
+            product(107L, 10_000L, true, SaleStatus.ON_SALE).preorder(true).build(),
+            displayedIn(9007L, 106L, 12L),
+            displayedIn(9008L, 107L, 12L)
+        );
+
+        assertThat(productRepositoryPort.searchVisible(criteria(Set.of(12L), ProductSortType.NEWEST, 0, 20)).getContent())
+            .extracting(ProductListQueryResult::productId, ProductListQueryResult::preorder)
+            .containsExactly(tuple(107L, true), tuple(106L, true), tuple(105L, false));
+        assertThat(productRepositoryPort.findVisibleById(106L)).hasValueSatisfying(product -> {
+            assertThat(product.preorder()).isTrue();
+            assertThat(product.expectedShipDate()).isEqualTo(shipDate);
+        });
+        assertThat(productRepositoryPort.findVisibleById(107L)).hasValueSatisfying(product -> {
+            assertThat(product.preorder()).isTrue();
+            assertThat(product.expectedShipDate()).isNull();
+        });
+        assertThat(productRepositoryPort.findVisibleById(105L)).hasValueSatisfying(product -> {
+            assertThat(product.preorder()).isFalse();
+            assertThat(product.expectedShipDate()).isNull();
+        });
+    }
+
+    @Test
+    @DisplayName("제약: 프리오더가 아닌 상품에는 발송 예정일이 저장되지 않는다 (ck_product_expected_ship_date_preorder)")
+    void shipDateRequiresPreorder() {
+        assertThatThrownBy(() -> persistAll(product(106L, 10_000L, true, SaleStatus.ON_SALE).expectedShipDate(LocalDate.of(2026, 11, 20)).build()))
+            .rootCause()
+            .hasMessageContaining("ck_product_expected_ship_date_preorder");
+    }
+
+    @Test
     @DisplayName("맞춤 제작: 입력 항목은 노출 순서 → 아이디 오름차순이고 numeric(10,2) 범위 값을 그대로 읽는다")
     void findCustomOrderFields() {
         List<CustomOrderField> fields = productCustomOrderFieldRepositoryPort.findAllByProductId(102L);
@@ -650,6 +736,10 @@ class ProductPersistenceAdapterTest {
     }
 
     private static ProductImageEntity image(Long id, Long productId, ImageType imageType, int displayOrder) {
+        return imageBuilder(id, productId, imageType, displayOrder).build();
+    }
+
+    private static ProductImageEntity.ProductImageEntityBuilder imageBuilder(Long id, Long productId, ImageType imageType, int displayOrder) {
         return ProductImageEntity.builder()
             .id(id)
             .productId(productId)
@@ -658,7 +748,14 @@ class ProductPersistenceAdapterTest {
             .width(800)
             .height(800)
             .altText("상품 %d 이미지".formatted(productId))
-            .displayOrder(displayOrder)
+            .displayOrder(displayOrder);
+    }
+
+    /** 상세 갤러리 영상. @param posterUrl null 이면 제약 위반 데이터다 */
+    private static ProductImageEntity video(Long id, Long productId, int displayOrder, String posterUrl) {
+        return imageBuilder(id, productId, ImageType.VIDEO, displayOrder)
+            .url("https://cdn.example.com/products/%d/%d.mp4".formatted(productId, id))
+            .posterUrl(posterUrl)
             .build();
     }
 
