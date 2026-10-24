@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.adapter.in.web.exception;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
@@ -14,6 +15,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 /**
  * 5xx 로그는 코드와 원인 예외 타입만 남긴다 — 원인 메시지(DB 행 값 · 대상 응답 본문)와 스택트레이스는 남지 않는다 ({@code coding-conventions.md} §8, #277).
@@ -31,8 +33,10 @@ class OrderExceptionHandlerLogTest {
     void orderExceptionLogsCodeAndCauseTypeOnly(CapturedOutput output) {
         OrderException exception = new OrderException(OrderErrorCode.ORDER_SAVE_FAILED, new DataIntegrityViolationException(SECRET_DETAIL));
 
-        assertThat(handler.handleOrderException(exception).getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        ResponseEntity<Response<Void>> response = handler.handleOrderException(exception);
 
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(response.getBody().dataHeader().resultMessage()).as("원인 메시지는 응답에도 실리지 않는다").doesNotContain("secret-row-value");
         assertThat(lines(output)).singleElement().asString()
             .contains("code=" + OrderErrorCode.ORDER_SAVE_FAILED.getCode())
             .contains("causeType=" + DataIntegrityViolationException.class.getSimpleName());
@@ -44,8 +48,10 @@ class OrderExceptionHandlerLogTest {
     void catalogExceptionLogsCodeAndCauseTypeOnly(CapturedOutput output) {
         CatalogException exception = new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE, new IllegalStateException(SECRET_DETAIL));
 
-        assertThat(handler.handleCatalogException(exception).getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        ResponseEntity<Response<Void>> response = handler.handleCatalogException(exception);
 
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody().dataHeader().resultMessage()).as("원인 메시지는 응답에도 실리지 않는다").doesNotContain("secret-row-value");
         assertThat(lines(output)).singleElement().asString()
             .contains("code=" + OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE.getCode())
             .contains("cause=" + CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE.getCode())
