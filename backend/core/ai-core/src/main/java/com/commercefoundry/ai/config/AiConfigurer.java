@@ -2,10 +2,12 @@ package com.commercefoundry.ai.config;
 
 import com.commercefoundry.ai.client.AiClient;
 import com.commercefoundry.ai.client.AiClients;
+import com.commercefoundry.ai.prompt.PromptTemplates;
 import com.commercefoundry.ai.properties.AiProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
+import org.springframework.core.io.ResourceLoader;
 
 /**
  * AI 를 쓰는 서비스의 {@code *BeansConfig} 가 {@code @Import} 한다 ({@code bootstrap-conventions.md} AI). 프로퍼티는
@@ -30,5 +32,11 @@ public class AiConfigurer {
             log.info("ai client disabled. ai.enabled=false");
         }
         return AiClients.create(aiProperties);
+    }
+
+    /** 설정에 버전이 있는 기능의 템플릿을 지금 모두 읽는다 — 파일이 없거나 표기가 틀리면 기동이 멈춘다. 꺼져 있어도 검사한다(배포 전에 드러나게). */
+    @Bean
+    public PromptTemplates promptTemplates(AiProperties aiProperties, ResourceLoader resourceLoader) {
+        return new PromptTemplates(resourceLoader.getClassLoader(), aiProperties);
     }
 }

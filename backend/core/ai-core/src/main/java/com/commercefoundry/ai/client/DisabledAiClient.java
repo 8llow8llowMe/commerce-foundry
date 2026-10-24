@@ -7,4 +7,9 @@ final class DisabledAiClient implements AiClient {
     public AiResult complete(AiRequest request) {
         throw new AiException(AiException.Reason.DISABLED, request.feature());
     }
+
+    @Override
+    public <T> AiStructuredResult<T> complete(AiRequest request, Class<T> type, AiOutputValidator<T> validator) {
+        throw new AiException(AiException.Reason.DISABLED, request.feature());
+    }
 }
