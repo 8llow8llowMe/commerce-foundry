@@ -2,6 +2,7 @@ package com.commercefoundry.common.web.servlet;
 
 import static com.commercefoundry.common.support.ErrorPageEnvelopeSmokeTestSupport.assertEnvelope;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.common.exception.CommonErrorCode;
 import jakarta.servlet.FilterChain;
@@ -62,7 +63,7 @@ class FallbackErrorControllerContainerTest {
     }
 
     @Test
-    @DisplayName("필터가 던진 예외는 500 · COMMON_000 봉투이고 원인을 응답에 싣지 않는다 — 이 컨트롤러의 로그에는 원인 타입 · 스택과 가린 경로만 남고 메시지는 없다")
+    @DisplayName("필터가 던진 예외는 500 · COMMON_000 봉투이고 원인을 응답에 싣지 않는다 — 출력 전체에 원래 메시지가 없고(Tomcat 줄 포함, #283) 이 컨트롤러의 로그에 원인 타입 · 스택과 가린 경로가 남는다")
     void filterException(CapturedOutput output) throws Exception {
         String path = ThrowingFilter.FAILURE_PATH + "/4611686018427387904";
         HttpResponse<byte[]> response = send(port, "GET", path, null);
@@ -70,11 +71,25 @@ class FallbackErrorControllerContainerTest {
         assertEnvelope(response, path, 500, CommonErrorCode.INTERNAL_ERROR);
         assertThat(new String(response.body())).doesNotContain(ThrowingFilter.FAILURE_DETAIL).doesNotContain("IllegalStateException");
         assertThat(output).doesNotContain("4611686018427387904");
-        // 출력 전체가 아니라 이 컨트롤러의 로그 항목(다음 로그 줄 전까지)만 본다. Tomcat 은 에러 디스패치 전에 원래 예외를 자기 로거로 한 번 남긴다 —
-        // 그 줄은 이 컨트롤러 밖이다 (#283)
+        // 출력 전체에 원래 메시지가 없다 — Tomcat StandardWrapperValve 의 "Servlet.service() ... threw exception" 줄도 나오지 않는다 (#283)
+        assertThat(output.getAll())
+            .doesNotContain(ThrowingFilter.FAILURE_DETAIL).doesNotContain("password=container-smoke").doesNotContain("db.internal")
+            .doesNotContain("threw exception");
         assertThat(logEntry(output, "unhandled exception answered by error page envelope"))
-            .contains("path=/container-smoke/failure/x/…").contains(IllegalStateException.class.getName()).contains("ThrowingFilter.doFilterInternal")
-            .doesNotContain(ThrowingFilter.FAILURE_DETAIL).doesNotContain("password=container-smoke").doesNotContain("db.internal");
+            .contains("path=/container-smoke/failure/x/…").contains(IllegalStateException.class.getName()).contains("ThrowingFilter.doFilterInternal");
+    }
+
+    @Test
+    @DisplayName("응답이 커밋된 뒤 필터가 던진 예외는 연결을 끊어 클라이언트가 잘린 본문을 정상 응답으로 받지 않는다 — 출력 전체에 원래 메시지가 없고 타입 · 스택만 남는다")
+    void filterExceptionAfterCommit(CapturedOutput output) {
+        // 컨테이너가 오류로 끝낸 커밋된 응답은 종료 청크 없이 끊긴다 — 클라이언트에는 불완전한 응답(IOException)이다
+        assertThatThrownBy(() -> send(port, "GET", ThrowingFilter.COMMITTED_PATH, null)).isInstanceOf(IOException.class);
+
+        assertThat(output.getAll()).doesNotContain(ThrowingFilter.FAILURE_DETAIL).doesNotContain("db.internal");
+        // Tomcat 은 다시 던진 예외를 자기 로거로 남긴다 — 메시지 없는 사본(타입 · 스택)이다
+        assertThat(logEntry(output, "threw exception"))
+            .contains(UnhandledFilterExceptionFilter.CommittedResponseFailure.class.getSimpleName())
+            .contains(IllegalStateException.class.getName()).contains("ThrowingFilter.doFilterInternal");
     }
 
     /** {@code message} 로 시작하는 로그 항목 — 그 줄부터 다음 로그 줄(타임스탬프로 시작) 전까지, 즉 이어 찍힌 스택까지다. */
@@ -140,12 +155,18 @@ class FallbackErrorControllerContainerTest {
 
         static final String FAILURE_PATH = "/container-smoke/failure/x";
         static final String REJECT_PATH = "/container-smoke/reject";
+        static final String COMMITTED_PATH = "/container-smoke/committed";
         static final String FAILURE_DETAIL = "jdbc:postgresql://db.internal:5432/orders password=container-smoke";
 
         @Override
         protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException {
             String path = request.getRequestURI();
             if (path.startsWith(FAILURE_PATH)) {
+                throw new IllegalStateException(FAILURE_DETAIL);
+            }
+            if (path.startsWith(COMMITTED_PATH)) {
+                response.getWriter().write("partial");
+                response.flushBuffer();
                 throw new IllegalStateException(FAILURE_DETAIL);
             }
             if (path.startsWith(REJECT_PATH)) {
