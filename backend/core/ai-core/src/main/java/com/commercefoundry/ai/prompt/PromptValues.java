@@ -7,7 +7,10 @@ import java.util.Objects;
 
 /**
  * 템플릿 자리에 넣을 값. 개인정보 자리({@code {{pii:이름}}})는 {@link #putSensitive} 로만, 일반 자리({@code {{이름}}})는 {@link #put} 으로만 채운다 —
- * 섞어 넣으면 렌더링이 실패한다. 개인정보 값은 요청의 {@code sensitiveValues} 로도 넘어가 보내기 전에 {@code [PII]} 로 가려진다.
+ * 섞어 넣으면 렌더링이 실패한다. 개인정보 자리에는 렌더링 때 값 대신 {@code [PII]} 가 들어가고, 값은 요청의 {@code sensitiveValues} 로만 넘어가
+ * 다른 자리에 같은 값이 섞여 나오면 보내기 전에 가려진다.
+ *
+ * <p>일반 값은 기본 정규식 패턴(이메일 · 전화 · 주소 등)으로만 가려진다 — 고객 자유 텍스트 속 이름 · 형식 없는 주소는 잡히지 않을 수 있다.
  */
 public final class PromptValues {
 

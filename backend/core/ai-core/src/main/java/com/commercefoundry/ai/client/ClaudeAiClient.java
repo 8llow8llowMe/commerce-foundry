@@ -19,6 +19,7 @@ import com.commercefoundry.ai.properties.AiProperties;
 import com.commercefoundry.ai.properties.AiProperties.ResolvedFeature;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -77,6 +78,9 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
 
     @Override
     public <T> AiStructuredResult<T> complete(AiRequest request, Class<T> type, AiOutputValidator<T> validator) {
+        // 호출 전에 막는다 — null validator 면 비용을 쓴 뒤에야 실패한다
+        Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(validator, "validator");
         JsonOutputFormat format = formatOf(type);
         return call(request, format, (message, stopReason) -> {
             // 잘린 JSON 은 파싱할 수 없다 — 부분 결과를 쓰지 않는다
@@ -94,10 +98,19 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
                 // SDK 의 파싱 예외 메시지에는 응답 조각이 들어 있다 — 타입만 남긴다
                 throw invalid(request.feature(), "parse " + e.getClass().getSimpleName());
             }
-            List<String> problems = validator.validate(value);
-            if (value == null || (problems != null && !problems.isEmpty())) {
-                // 문제 설명은 응답 값을 품을 수 있어 개수만 남긴다
-                throw invalid(request.feature(), "validation problems=" + (problems == null ? 0 : problems.size()));
+            if (value == null) {
+                throw invalid(request.feature(), "null value");
+            }
+            List<String> problems;
+            try {
+                problems = validator.validate(value);
+            } catch (RuntimeException e) {
+                // validator 예외 메시지는 응답 값을 품을 수 있다 — 타입만 남기고 원인을 잇지 않는다(AiException 계약 밖으로 내보내지 않는다)
+                throw invalid(request.feature(), "validator " + e.getClass().getSimpleName());
+            }
+            if (problems == null || !problems.isEmpty()) {
+                // null 은 통과가 아니다(구현 실수로 검증이 빠지지 않게). 문제 설명은 응답 값을 품을 수 있어 개수만 남긴다
+                throw invalid(request.feature(), "validation problems=" + (problems == null ? "null" : problems.size()));
             }
             return new AiStructuredResult<>(value, message.model().asString(), message.usage().inputTokens(), message.usage().outputTokens(),
                 stopReason, message.id());

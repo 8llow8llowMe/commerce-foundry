@@ -1,5 +1,6 @@
 package com.commercefoundry.ai.prompt;
 
+import com.commercefoundry.ai.client.AiRequest;
 import com.commercefoundry.ai.properties.AiProperties;
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,13 +30,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class PromptTemplates {
 
     public static final String ROOT = "ai/prompts";
+    /** UTF-8 BOM(U+FEFF). 소스에 보이지 않는 문자를 넣지 않으려고 코드 값으로 적는다. */
+    private static final char BOM = (char) 0xFEFF;
 
     private final ClassLoader classLoader;
+    private final int maxInputChars;
     private final Map<String, Integer> versions;
     private final Map<String, PromptTemplate> cache = new ConcurrentHashMap<>();
 
     public PromptTemplates(ClassLoader classLoader, AiProperties properties) {
         this.classLoader = Objects.requireNonNull(classLoader, "classLoader");
+        this.maxInputChars = properties.maxInputChars();
         Map<String, Integer> configured = new HashMap<>();
         properties.features().forEach((name, feature) -> {
             if (feature != null && feature.promptVersion() != null) {
@@ -64,14 +69,27 @@ public final class PromptTemplates {
         return load(feature, version);
     }
 
+    /** 기능 이름 · 버전을 검사한 뒤에만 경로를 만든다 — 설정이 꺼져 있어 {@code AiProperties} 검사가 돌지 않아도, 호출자가 다른 값을 넘겨도 같다. */
     private PromptTemplate load(String feature, int version) {
+        if (feature == null || !AiRequest.FEATURE_NAME.matcher(feature).matches()) {
+            throw new IllegalArgumentException("기능 이름은 소문자 · 숫자 · '-' 로 1~63자여야 합니다");
+        }
+        if (version < 1) {
+            throw new IllegalArgumentException("프롬프트 버전은 1 이상이어야 합니다");
+        }
         return cache.computeIfAbsent(feature + "@" + version, key -> {
             String base = ROOT + "/" + feature + "/v" + version + "/";
             String user = read(base + "user.txt");
             if (user == null || user.isBlank()) {
                 throw new IllegalStateException("프롬프트 템플릿이 없습니다: classpath:" + base + "user.txt");
             }
-            return new PromptTemplate(feature, version, read(base + "system.txt"), user);
+            String system = read(base + "system.txt");
+            int length = user.length() + (system == null ? 0 : system.length());
+            if (length > maxInputChars) {
+                // 그대로 두면 기동은 되고 모든 호출이 INPUT_TOO_LONG 이 된다
+                throw new IllegalStateException("프롬프트 템플릿이 ai.max-input-chars 보다 깁니다: classpath:" + base);
+            }
+            return new PromptTemplate(feature, version, system, user);
         });
     }
 
@@ -85,7 +103,7 @@ public final class PromptTemplates {
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
                 .decode(ByteBuffer.wrap(in.readAllBytes()))
                 .toString();
-            return text.startsWith("﻿") ? text.substring(1) : text;
+            return !text.isEmpty() && text.charAt(0) == BOM ? text.substring(1) : text;
         } catch (CharacterCodingException e) {
             throw new IllegalStateException("프롬프트 템플릿이 UTF-8 이 아닙니다: classpath:" + path);
         } catch (IOException e) {
