@@ -24,3 +24,19 @@ eureka:
 snowflake:
   datacenter-id: 1
   worker-id: 1
+
+# 작업 엔진을 빠른 값으로 덮는다 — 흐름 테스트가 재시도 · lease · 취소를 몇 초 안에 본다. 컨텍스트 테스트에는 핸들러가 없어 폴링이 조회하지 않는다
+operations:
+  jobs:
+    worker:
+      poll-interval: 100ms
+      initial-delay: 100ms
+      default-lease: 2s
+      heartbeat-interval: 200ms
+      default-max-run-duration: 30s
+      shutdown-grace: 2s
+    retry:
+      base-delay: 50ms
+      multiplier: 2
+      max-delay: 200ms
+      jitter-ratio: 0
