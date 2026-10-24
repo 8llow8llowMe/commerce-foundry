@@ -1,7 +1,5 @@
 package com.commercefoundry.domainlayer.member.adapter.out.redis;
 
-import static com.commercefoundry.domainlayer.member.adapter.out.redis.TokenStoreRedisSupport.execute;
-
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotation;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
@@ -24,11 +22,12 @@ import org.springframework.stereotype.Component;
 public class RefreshTokenRedisAdapter implements RefreshTokenStorePort {
 
     private final StringRedisTemplate redisTemplate;
+    private final TokenStoreRedisSupport tokenStore;
 
     @Override
     public void saveNewFamily(String fingerprint, long memberId, String familyId, Instant loginAt, Duration ttl) {
         List<String> keys = List.of(RefreshTokenRedisKeys.token(fingerprint).value(), RefreshTokenRedisKeys.family(familyId).value());
-        execute(() -> redisTemplate.execute(
+        tokenStore.execute(() -> redisTemplate.execute(
             RefreshTokenRedisScripts.SAVE_NEW_FAMILY, keys, String.valueOf(memberId), familyId, millis(ttl), String.valueOf(loginAt.toEpochMilli())
         ));
     }
@@ -40,7 +39,7 @@ public class RefreshTokenRedisAdapter implements RefreshTokenStorePort {
     @Override
     public Optional<RefreshTokenSession> findSession(String fingerprint) {
         String tokenKey = RefreshTokenRedisKeys.token(fingerprint).value();
-        return execute(() -> {
+        return tokenStore.execute(() -> {
             List<Object> stored = redisTemplate.opsForHash().multiGet(tokenKey, List.<Object>of(RefreshTokenRedisScripts.MEMBER_ID, RefreshTokenRedisScripts.FAMILY_ID));
             Optional<RefreshTokenSession> session = toSession(fingerprint, stored);
             if (session.isEmpty() || !Boolean.TRUE.equals(redisTemplate.hasKey(RefreshTokenRedisKeys.family(session.get().familyId()).value()))) {
@@ -57,7 +56,7 @@ public class RefreshTokenRedisAdapter implements RefreshTokenStorePort {
             RefreshTokenRedisKeys.family(session.familyId()).value(),
             RefreshTokenRedisKeys.token(newFingerprint).value()
         );
-        List<Object> result = execute(() -> redisTemplate.execute(
+        List<Object> result = tokenStore.execute(() -> redisTemplate.execute(
             RefreshTokenRedisScripts.ROTATE, keys,
             String.valueOf(session.memberId()), session.familyId(), String.valueOf(now.toEpochMilli()),
             millis(policy.reuseGrace()), millis(policy.ttl()), String.valueOf(policy.maxSiblings()), millis(policy.familyMaxLifetime())
@@ -68,7 +67,7 @@ public class RefreshTokenRedisAdapter implements RefreshTokenStorePort {
     @Override
     public void revokeFamily(String familyId) {
         String familyKey = RefreshTokenRedisKeys.family(familyId).value();
-        execute(() -> redisTemplate.delete(familyKey));
+        tokenStore.execute(() -> redisTemplate.delete(familyKey));
     }
 
     /** 스크립트 반환 {@code {이름, TTL(ms)}} — 이름은 문자열, TTL 은 정수 응답(Long)이다. 모양이 다르면 스크립트와 코드가 어긋난 것이라 그대로 실패한다. */

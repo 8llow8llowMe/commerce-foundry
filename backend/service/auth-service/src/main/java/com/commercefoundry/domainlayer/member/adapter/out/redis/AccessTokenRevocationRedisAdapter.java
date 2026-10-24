@@ -1,7 +1,5 @@
 package com.commercefoundry.domainlayer.member.adapter.out.redis;
 
-import static com.commercefoundry.domainlayer.member.adapter.out.redis.TokenStoreRedisSupport.execute;
-
 import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRevocationPort;
 import com.commercefoundry.security.token.JwtVerificationProperties;
 import com.commercefoundry.security.token.revocation.RevokedAccessTokenKeys;
@@ -23,13 +21,14 @@ public class AccessTokenRevocationRedisAdapter implements AccessTokenRevocationP
 
     private final StringRedisTemplate redisTemplate;
     private final JwtVerificationProperties jwtVerificationProperties;
+    private final TokenStoreRedisSupport tokenStore;
 
     /** 같은 명령(SET … PX)에서 TTL 을 준다. */
     @Override
     public void revoke(String tokenId) {
         String key = RevokedAccessTokenKeys.of(tokenId).value();
         Duration ttl = RevokedAccessTokenKeys.ttl(jwtVerificationProperties.clockSkew());
-        execute(() -> {
+        tokenStore.execute(() -> {
             redisTemplate.opsForValue().set(key, REVOKED, ttl);
             return null;
         });

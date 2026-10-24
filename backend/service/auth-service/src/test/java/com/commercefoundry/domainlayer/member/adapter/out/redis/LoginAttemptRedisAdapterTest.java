@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.member.domain.model.AttemptKind;
 import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptOutcome;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import com.commercefoundry.support.TestLoginGuard;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,7 +72,7 @@ class LoginAttemptRedisAdapterTest {
 
     @BeforeEach
     void setUp() {
-        adapter = new LoginAttemptRedisAdapter(redisTemplate, hasher);
+        adapter = new LoginAttemptRedisAdapter(redisTemplate, hasher, new TokenStoreRedisSupport(Clock.systemUTC()));
     }
 
     @Test
@@ -234,7 +235,7 @@ class LoginAttemptRedisAdapterTest {
     void wrongPasswordBecomesUnavailable() {
         LettuceConnectionFactory wrong = connectionFactory("wrong-password");
         try {
-            LoginAttemptRedisAdapter failing = new LoginAttemptRedisAdapter(new StringRedisTemplate(wrong), hasher);
+            LoginAttemptRedisAdapter failing = new LoginAttemptRedisAdapter(new StringRedisTemplate(wrong), hasher, new TokenStoreRedisSupport(Clock.systemUTC()));
 
             assertThatThrownBy(() -> failing.record(AttemptKind.LOGIN, email(), WINDOW))
                 .isInstanceOf(MemberException.class)
