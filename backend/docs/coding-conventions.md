@@ -227,6 +227,7 @@ public final class ProductValidationMessage {
 - 필드 설명은 JPA 3.2 의 `@Column(comment = ...)`, 테이블 설명은 `@Table(comment = ...)` 로 단다.
   Hibernate `@Comment` 는 Hibernate 7 에서 deprecated 라 쓰지 않는다.
   FK 컬럼은 `(FK: target_table.id)` 를 명시한다: `@Column(name = "product_id", comment = "상품 아이디 (FK: product.id)")`.
+  코멘트에 작은따옴표(`'`)를 쓰지 않는다 — Hibernate 가 DDL 의 `comment on ... is '...'` 안에서 이스케이프하지 않아 스냅숏 · 운영 DDL 이 깨진다(#63).
   다른 서비스 테이블을 가리키면 `(외부 FK: product-service product.id)` 로 적는다 — DB 제약은 걸 수 없다.
 - 상태가 있는 엔티티(주문·결제·재고)는 **낙관적 락(`@Version`)** 을 기본으로 검토한다.
   - 버전은 **`Long`(wrapper)** 으로 두고 도메인 모델도 `Long version` 을 들고 다닌다. 쓰기는 `domain → mapper.toEntity → repository.save` 다 —

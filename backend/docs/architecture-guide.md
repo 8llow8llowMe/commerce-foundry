@@ -335,6 +335,8 @@ store:
   두 번째 서비스가 **같은 프로퍼티**를 쓰게 되면 common-core 로 올린다 — 두 서비스가 서로 다른 플래그를 읽는 지금은 각 서비스에 둔다. 플래그 기본값은 꺼짐(닫힌 쪽)이고 local · dev 프로파일 yml 만 켠다.
   플래그가 꺼지면 데이터는 그대로 두고 응답에서만 숨긴다 (맞춤 제작: 목록 `customOrder=false`, 상세 `customOrder=null`).
   product-service 는 `preorder`(목록 `preorder=false`, 상세 `preorder=null`) · `product-video`(상세 `images[]` 에서 VIDEO 제외)도 같은 방식으로 읽는다(#61).
+- 메인 화면 구성 · 문구는 코드가 아니라 **전시 데이터**(product-service 메인 전시, #63 — `api-design-guide.md` §2-8)다. 섹션 유형은 브랜드 무관한 블록 이름이고
+  고객사 문구는 제목 값으로만 들어간다. 미디어 주소의 허용 범위는 `store.media.public-base-url`(스토리지 공개 주소, 비면 미디어 쓰기를 닫는다)로 정한다.
 - 상호·대표자·사업자등록번호·통신판매업 신고번호 같은 **법정 표시 정보는 Vault 에 등록하고 주입**한다
   (`STORE_*` — `secret-management.md`). 저장소가 public 이므로 yml 에 실값을 쓰지 않는다.
 - 브랜드 특화 요구가 생기면 먼저 "다른 쇼핑몰에도 의미가 있는 일반 기능인가" 를 묻는다. 그렇다면
