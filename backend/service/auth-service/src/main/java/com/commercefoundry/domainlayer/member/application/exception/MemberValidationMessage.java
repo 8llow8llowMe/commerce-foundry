@@ -32,6 +32,7 @@ public final class MemberValidationMessage {
     public static final String ADMIN_PASSWORD_REQUIRED = "AUTH_132:비밀번호는 필수입니다.";
     public static final String ADMIN_PAGE_MIN = "AUTH_133:페이지는 0 이상이어야 합니다.";
     public static final String ADMIN_SIZE_RANGE = "AUTH_134:페이지 크기는 1 이상 100 이하여야 합니다.";
+    public static final String ADMIN_AUDIT_ACTOR_ID_POSITIVE = "AUTH_135:actorMemberId 는 양수여야 합니다.";
 
     private MemberValidationMessage() {
     }

@@ -4,8 +4,8 @@ import com.commercefoundry.security.principal.MemberRole;
 import java.util.OptionalLong;
 
 /**
- * 관리자 감사 기록 (#6, 1단계). 지금은 구조화 로그 한 줄({@code admin.audit} 로거)이고, 영속 감사(테이블 · 보관 기간 · 조회 화면)는 후속이다 —
- * 그때 이 포트의 구현만 바꾼다 ({@code security-guide.md} §11-4).
+ * 관리자 감사 기록 (#6). #192 부터 구현은 {@code AdminAuditLogRepositoryAdapter} 다 — 구조화 로그 한 줄({@code admin.audit} 로거)을 먼저 남기고
+ * {@code auth.admin_audit_log} 에 행을 더한다 ({@code security-guide.md} §11-4).
  *
  * <p>이메일 · 이름 · 전화 원문과 비밀번호 · 토큰을 넘기지 않는다. 남기는 것은 행위 · 행위자 memberId · 대상 · 결과뿐이다.
  * 감사 기록 실패가 업무 응답을 바꾸지 않게 구현은 예외를 던지지 않는다.
