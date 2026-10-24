@@ -109,6 +109,8 @@ public record ProductDetailResponse(
   - 2차 방어(새 어댑터에 권장)는 예상 밖 위반을 다시 던질 때 원인(cause)도, 원래 예외의 메시지(`[SQLException 메시지]` 가 들어 있다)도 싣지 않고
     제약 이름만 싣는 것이다. Hibernate WARN 줄은 막지 못하고(1차 방어만 막는다), 그 뒤 예외 메시지 · 스택(전역 핸들러의 500 로그 등)으로 퍼지는 것만 줄인다.
     지금 어댑터들은 원인을 그대로 던지며, 1차 방어로 메시지에 행 값은 없다.
+  - 도메인 `*ExceptionHandler` 의 5xx 로그는 코드와 원인 예외 타입(`causeType`, 단순 클래스명)만 남기고 예외를 throwable 로 넘기지 않는다 (#277) —
+    스택 · 원인 사슬에 원인 메시지(행 값 · Feign 대상 응답 본문)가 실린다. `*ExceptionHandlerLogTest` 가 `OutputCaptureExtension` 으로 원인 메시지 · 스택이 없음을 본다.
   - 로깅 레벨 · `hibernate.jdbc.log.errors` 로 끄지 않는다 — 다른 SQL 오류의 진단까지 사라진다.
   - dev · 운영에서 `org.hibernate.orm.jdbc.bind` · `org.postgresql` TRACE 와 show-sql 바인드 출력을 켜지 않는다 — 이 옵션과 상관없이 바인드 값 · DETAIL 이 남는다.
 - 사용자 노출 메시지와 내부 로그 메시지는 분리한다.
