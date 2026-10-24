@@ -9,6 +9,8 @@ spring:
 store:
   features:
     custom-order: true
+    preorder: true
+    product-video: true
 
 springdoc:
   api-docs:

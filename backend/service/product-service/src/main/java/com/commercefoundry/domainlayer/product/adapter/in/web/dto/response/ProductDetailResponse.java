@@ -4,6 +4,7 @@ import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CategoryPathItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CustomOrderItem;
+import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.PreorderItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductImageItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductOptionGroupItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductSkuItem;
@@ -31,7 +32,7 @@ public record ProductDetailResponse(
     @Schema(description = "대표 이미지. 없으면 null", nullable = true)
     ProductThumbnailItem thumbnail,
 
-    @Schema(description = "상세 갤러리 이미지. 노출 순서 오름차순")
+    @Schema(description = "상세 갤러리 미디어. 이미지와 (스토어 영상 기능이 켜져 있으면) 영상을 노출 순서 → 아이디 오름차순으로 섞는다. 대표 이미지는 들어가지 않는다")
     List<ProductImageItem> images,
 
     @Schema(
@@ -63,6 +64,9 @@ public record ProductDetailResponse(
     List<ProductSkuItem> skus,
 
     @Schema(description = "맞춤 제작 안내. 스토어 맞춤 제작 기능이 꺼져 있거나 맞춤 제작 상품이 아니면 null", nullable = true)
-    CustomOrderItem customOrder
+    CustomOrderItem customOrder,
+
+    @Schema(description = "프리오더(예약 판매) 안내. 스토어 프리오더 기능이 꺼져 있거나 프리오더 상품이 아니면 null", nullable = true)
+    PreorderItem preorder
 ) {
 }

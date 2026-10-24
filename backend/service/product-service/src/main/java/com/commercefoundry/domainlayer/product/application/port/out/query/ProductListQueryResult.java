@@ -12,10 +12,11 @@ import com.commercefoundry.shared.commerce.Money;
  * 금액 · 통화 짝 검증은 {@link MoneyColumns} 한 곳에서 한다.
  *
  * @param listPriceAmount 정가. null 이면 할인 표시 없음 — 통화도 함께 null 이다
+ * @param preorder 프리오더 상품 여부. 목록은 발송 예정일을 보이지 않으므로 날짜는 읽지 않는다
  */
 public record ProductListQueryResult(
     long productId, String name, long salePriceAmount, CurrencyCode salePriceCurrency,
-    Long listPriceAmount, CurrencyCode listPriceCurrency, SaleStatus saleStatus, boolean customOrder
+    Long listPriceAmount, CurrencyCode listPriceCurrency, SaleStatus saleStatus, boolean customOrder, boolean preorder
 ) {
 
     /** 기본 판매가. */

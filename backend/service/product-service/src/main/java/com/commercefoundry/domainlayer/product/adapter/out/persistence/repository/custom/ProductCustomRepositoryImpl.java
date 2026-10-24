@@ -57,7 +57,8 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
             .select(Projections.constructor(
                 ProductListQueryResult.class,
                 productEntity.id, productEntity.name, productEntity.salePriceAmount, productEntity.salePriceCurrency,
-                productEntity.listPriceAmount, productEntity.listPriceCurrency, productEntity.saleStatus, productEntity.customOrder
+                productEntity.listPriceAmount, productEntity.listPriceCurrency, productEntity.saleStatus, productEntity.customOrder,
+                productEntity.preorder
             ))
             .from(productEntity)
             .where(visibleToCustomer(), displayedInAny(categoryIds))
