@@ -106,7 +106,10 @@ compose 가 env 파일과 무관하게 고정하는 값:
 |----|----|------|
 | `SPRING_PROFILES_ACTIVE` | 서비스마다 `dev` / `prod` | §2 |
 | `SNOWFLAKE_WORKER_ID` | auth 1 · product 2 · order 3 · payment 4 · delivery 5 | (datacenter, worker) 쌍이 인스턴스마다 달라야 한다. env 하나로 넣으면 서비스 5종이 같은 값을 받는다. local 배정표(`bootstrap-conventions.md`)와 같은 번호이고, 서비스당 컨테이너가 하나(`container_name` 고정)라 겹치지 않는다. 인스턴스를 늘리면 다시 정한다 |
-| `EUREKA_INSTANCE_PREFER_IP_ADDRESS` | `true` (gateway · 서비스 5종) | 기본은 컨테이너 호스트 이름(컨테이너 ID)으로 등록돼 게이트웨이 `lb://` · Feign 이 이름을 풀지 못할 수 있다. docker 네트워크 IP 로 등록한다 |
+
+- Eureka 에 IP 로 등록하는 설정(`eureka.instance.prefer-ip-address: true`)은 env 가 아니라 **각 모듈 `application.yml`** 에 있다 (#249).
+  기본은 컨테이너 호스트 이름(컨테이너 ID)으로 등록돼 게이트웨이 `lb://` · Feign 이 이름을 풀지 못할 수 있어서, dev · prod 모두 docker 네트워크 IP 로 등록한다.
+  compose 밖에서 띄워도 같다. local 만 `application-local.yml` 이 `false` 로 끈다(호스트 이름 등록).
 
 ### 4-2. 보간 규칙
 
