@@ -28,6 +28,8 @@ ext {
     wiremockVersion = '3.13.2'
     // 외부 쇼핑몰 내보내기 CSV 읽기 (operations-service 이관, #19). Boot BOM 이 관리하지 않아 여기서 고정한다. 전이 의존이 없다
     commonsCsvVersion = '1.14.1'
+    // Claude API 공식 Java SDK (ai-core). Boot BOM 이 관리하지 않아 여기서 고정한다
+    anthropicSdkVersion = '2.34.0'
 }
 
 allprojects {
