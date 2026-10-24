@@ -47,6 +47,7 @@
 - [ ] 중복 요청(더블 클릭, 재시도, 웹훅 재전송)에 멱등하다
 - [ ] PG 호출 결과가 불명확할 때 `UNKNOWN` 으로 남고 재조회 경로가 있다
 - [ ] `/payment-guard`, `/order-flow-guard` 를 돌렸다
+- [ ] 백그라운드 작업 핸들러(`JobHandler`)라면: 시도 단위로 멱등이다 · 오래 걸리는 구간에서 `checkpoint` 를 부른다 · payload · 결과 · 오류 · 진행 문구에 개인정보 원문이 없다 · 다른 서비스 호출은 internal API 이고 대상의 허용 호출자에 `SERVICE_operations-service` 가 있다 (`architecture-guide.md` §10)
 
 ## 5. 보안 / 운영 체크리스트
 
