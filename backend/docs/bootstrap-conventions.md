@@ -363,6 +363,7 @@ ai:
       model: claude-opus-5-5
       max-tokens: 4000
       effort: medium             # low · medium · high · xhigh · max. 비우면 모델 기본값
+      prompt-version: 1          # 템플릿 classpath:ai/prompts/size-chart/v1/ — 바꾸려면 새 버전 디렉터리를 만들고 이 값을 올린다
   masking:
     patterns:
       order-number: "CF-\\d{8}-\\d{4}"   # 브랜드마다 다른 형식은 여기 — [ORDER_NUMBER] 로 바뀐다
@@ -387,10 +388,41 @@ ai:
   최악 비용은 (1 + `max-retries`) × 작업 재시도 횟수, 호출 하나가 동시 상한 자리를 잡는 최악 시간은 (1 + `max-retries`) × `request-timeout` 이다.
   작업은 타임아웃 재시도 상한을 낮게 두고, 월 한도(이후 PR)가 마지막 상한이다.
 - **응답은 신뢰할 수 없는 출력이다.** 고객 입력이 프롬프트에 들어가므로 프롬프트 주입으로 조작된 응답이 올 수 있다 — 화면에 그릴 때 이스케이프하고,
-  상태를 바꾸는 판단에 쓰기 전에 구조화 출력 검증(이후 PR)과 사람 확인을 거친다. `refusal-fallback` 을 켜면 답한 모델이 바뀔 수 있으니 사용량은 `AiResult.model` 로 기록한다.
+  상태를 바꾸는 판단에 쓰기 전에 구조화 출력 검증과 사람 확인을 거친다. `refusal-fallback` 을 켜면 답한 모델이 바뀔 수 있으니 사용량은 `AiResult.model` 로 기록한다.
+
+**프롬프트 템플릿 (#215 PR-C).** 문구는 코드 · 설정이 아니라 **쓰는 서비스의 리소스 파일**에 둔다 — 브랜드 · 고객사 몫의 문구라 ai-core 에 두지 않고,
+여러 줄 문구를 yml 에 넣으면 들여쓰기 · 이스케이프가 깨지기 쉽고 리뷰 diff 가 읽기 어렵다.
+
+```text
+src/main/resources/ai/prompts/<기능>/v<버전>/user.txt     필수 — 사용자 메시지
+src/main/resources/ai/prompts/<기능>/v<버전>/system.txt   선택 — 시스템 프롬프트
+```
+
+- **버전 규칙**: 버전은 1부터 오르는 정수이고 디렉터리 `v<버전>` 이다. **배포된 버전의 파일은 고치지 않는다** — 문구를 바꾸면 `v<버전+1>` 을 새로 만들고
+  `ai.features.<기능>.prompt-version` 을 올린다. 되돌리기는 설정값만 내린다. 호출 로그의 `promptVersion` 으로 결과를 문구와 대조한다. 지난 버전 디렉터리는
+  되돌릴 일이 없을 때 지운다. 파일은 UTF-8(BOM 없음)이다 — 아니면 기동이 멈춘다.
+- **자리 표기**: `{{이름}}`(일반 값, `PromptValues.put`)과 `{{pii:이름}}`(개인정보, `PromptValues.putSensitive`) 두 가지다. **개인정보는 `pii:` 자리로만 들어간다** —
+  일반 자리에 넣거나 반대로 넣으면 렌더링이 실패하고, `pii:` 값은 요청의 `sensitiveValues` 로 넘어가 보내기 전에 `[PII]` 로 가려진다(모델은 원문을 보지 않는다).
+  자리가 빠졌거나 · 없는 자리에 값을 넘겼거나 · 표기가 틀리면(`{{ name }}` 등) 실패한다. 값 안의 `{{...}}` 는 다시 바뀌지 않는다(한 번만 훑는다).
+- **설정에 버전이 있는 기능은 `PromptTemplates` 빈을 만들 때 모두 읽어 검사한다** — 파일이 없으면 `ai.enabled=false` 여도 기동이 멈춘다(배포 전에 드러나게).
+- 기능 쪽 호출은 `aiClient.complete(promptTemplates.get("size-chart").render(values), SizeChart.class, validator)` 한 줄이다.
+
+**구조화 출력 (#215 PR-C).** `AiClient.complete(request, 결과타입, validator)` 는 API 의 JSON 출력(`output_config.format`)을 쓴다 — 스키마는 SDK 가 결과 타입
+(record 권장)에서 만들어 API 가 그 스키마대로 생성하고, 응답은 SDK 가 파싱한다. Opus 5.5 는 강제 도구 호출(`tool_choice` any/tool)을 400 으로 거절해 도구 방식은 쓰지 않는다.
+API 가 받지 않는 스키마(재귀 · 숫자 · 길이 제약 등)는 SDK 가 로컬에서 거절한다 — 호스트 결함이다.
+
+- **스키마가 맞아도 값의 뜻은 보장되지 않는다** — 범위 · 허용 값 · 합계 같은 업무 규칙은 `AiOutputValidator` 로 본다. 문제가 하나라도 있으면 쓰지 않는다.
+- 다음은 모두 `INVALID_RESPONSE` 이고 **재시도하지 않는다**: 잘림(`stop_reason=max_tokens` — 부분 JSON 은 쓰지 않는다) · 텍스트 블록이 하나가 아님 · 파싱 실패 ·
+  검증 실패. 근거: JSON 출력은 스키마대로 생성을 제한하므로 이 실패는 우연이 아니라 **설정(`max-tokens` 부족) · 프롬프트 · 검증 규칙의 문제**이고,
+  같은 입력을 다시 보내면 같은 비용을 다시 쓰고 같은 결과가 나올 가능성이 높다. 고칠 곳은 설정 · 템플릿 새 버전이다. 검증 실패를 한 번 더 보내 볼 가치가
+  있는 기능이면 그 판단은 호출하는 서비스가 한다(작업 재시도와 별도로 상한을 둔다).
+- 거절(`stop_reason=refusal`)은 스키마와 맞지 않을 수 있어 파싱하지 않고 `REFUSED` 다.
+- 로그에는 원인 구분(`truncated` · `blocks=n` · `parse <예외 타입>` · `validation problems=n`)만 남는다 — 응답 값 · SDK 파싱 예외 메시지 · 검증 문제 설명은 남기지 않는다.
+  `AiStructuredResult.toString` 은 값의 타입만 싣는다.
+
 - **서비스 테스트는 가짜 포트를 쓴다.** 컨텍스트 로딩 테스트는 기본값(꺼짐)으로 뜨고, 업무 테스트는 서비스의 out-port 가짜로 대신한다.
-  SDK 를 거친 요청 · 재시도 · 응답 해석은 ai-core 의 `ClaudeAiClientTest`(루프백 스텁 서버)가 본다 — 실제 API 는 부르지 않는다.
-- 이후 PR(#215): 사용량 원장 · 월 한도(operations-service), 프롬프트 템플릿 버전 · 구조화 출력 검증, 이미지 입력.
+  SDK 를 거친 요청 · 재시도 · 응답 해석 · 구조화 출력은 ai-core 의 `ClaudeAiClientTest` · `ClaudeAiStructuredTest`(루프백 스텁 서버)가 본다 — 실제 API 는 부르지 않는다.
+- 이후 PR(#215): 사용량 원장 · 월 한도(operations-service), 이미지 입력.
 
 ## Reason
 
