@@ -7,12 +7,11 @@ import com.commercefoundry.domainlayer.shippingaddress.application.exception.Shi
 import com.commercefoundry.domainlayer.shippingaddress.application.mapper.ShippingAddressMapper;
 import com.commercefoundry.domainlayer.shippingaddress.application.port.out.ShippingAddressRepositoryPort;
 import com.commercefoundry.domainlayer.shippingaddress.domain.model.ShippingAddress;
+import com.commercefoundry.persistence.util.ConstraintViolations;
 import java.time.Instant;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
@@ -79,24 +78,14 @@ public class ShippingAddressRepositoryAdapter implements ShippingAddressReposito
         return shippingAddressRepository.deleteByIdAndMemberIdInBulk(addressId, memberId) > 0;
     }
 
-    /** 기본 배송지 유니크 키 위반은 수정 충돌(AUTH_022)이다. 그 밖의 제약 위반은 호출 코드의 오류라 그대로 올린다. */
+    /**
+     * 기본 배송지 유니크 키 위반은 수정 충돌(AUTH_022)이다. 그 밖의 제약 위반은 호출 코드의 오류라 그대로 올린다.
+     * 제약은 이름의 정확 일치로 가린다({@link ConstraintViolations} — PostgreSQL 서버 오류 필드 우선, 메시지 문구로 가리지 않는다).
+     */
     private static RuntimeException translate(DataIntegrityViolationException exception) {
-        if (violates(exception, ShippingAddressEntity.UK_DEFAULT_MEMBER_ID)) {
+        if (ConstraintViolations.violates(exception, ShippingAddressEntity.UK_DEFAULT_MEMBER_ID)) {
             return new ShippingAddressException(ShippingAddressErrorCode.SHIPPING_ADDRESS_UPDATE_CONFLICT, exception);
         }
         return exception;
-    }
-
-    /**
-     * 원인 사슬의 Hibernate 제약 위반이 그 제약인가. 예외 메시지가 아니라 드라이버가 알려 준 제약 이름으로 본다.
-     * PostgreSQL 은 이름 그대로, H2(컨텍스트 테스트)는 이름 뒤에 인덱스 접미사를 붙여 포함 여부로 비교한다.
-     */
-    private static boolean violates(DataIntegrityViolationException exception, String constraintName) {
-        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
-            if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null) {
-                return violation.getConstraintName().toLowerCase(Locale.ROOT).contains(constraintName);
-            }
-        }
-        return false;
     }
 }
