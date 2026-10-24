@@ -10,4 +10,8 @@ dependencies {
     // persistence-core 를 쓰는 서비스는 postgresql 드라이버가 runtime 에 있어야 한다 — 없으면 제약 위반 시 `instanceof PSQLException` 에서 NoClassDefFoundError
     compileOnly 'org.postgresql:postgresql'
     testImplementation 'org.postgresql:postgresql'
+
+    // ServerErrorDetailAutoConfiguration 이 @DataJpaTest 슬라이스에도 걸리는지 H2 로 본다 (#279)
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testRuntimeOnly 'com.h2database:h2'
 }
