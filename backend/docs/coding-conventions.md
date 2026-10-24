@@ -103,12 +103,15 @@ public record ProductDetailResponse(
 - **DB 제약 위반 로그에 행 값을 남기지 않는다 (#173).** Hibernate 는 예외를 바꾸기 전에 `SQLException` 메시지를 WARN(`org.hibernate.orm.jdbc.error`)으로
   남기고, pgjdbc 기본값은 그 메시지에 행 값(DETAIL `Failing row contains (...)` · `Key (email)=(...)`)을 싣는다 — 어댑터가 나중에 원인을 떼도 이미 늦다.
   - 1차 방어는 드라이버 옵션 `logServerErrorDetail=false` 다 — persistence-core 자동 구성(`ServerErrorDetailAutoConfiguration`)이 모든 `HikariDataSource` 에
-    넣는다(yml 이 `true` 여도 덮는다). 서비스 yml 에 두지 않는다 — 서비스마다 두는 방식은 한 곳에서 빠져도 조용히 기본값(true)으로 돌았다(#269 · #279)
-    (`DB_URL` 은 Vault 값이라 URL 파라미터로 넣지 않는다 — 거꾸로 `DB_URL` · 프로파일 yml 에 이 속성을 넣거나 덮지 않는다. URL 값이 이기고 테스트가 못 잡는다). 이 옵션은 메시지의 DETAIL 만 빼고
+    넣는다(yml 이 `true` 여도 덮는다. 감싼 DataSource 도 풀어서 찾는다. `@DataJpaTest` 슬라이스 목록에도 등록해 리포지토리 테스트도 같다).
+    서비스 yml 에 두지 않는다 — 서비스마다 두는 방식은 한 곳에서 빠져도 조용히 기본값(true)으로 돌았다(#269 · #279).
+    이 자동 구성을 `spring.autoconfigure.exclude` 하지 않는다. DataSource 를 직접 만들면 `DataSourceBuilder` · 무인자 `HikariDataSource` 를 쓴다 —
+    `new HikariDataSource(HikariConfig)` 는 만들자마자 풀을 열어 속성을 넣지 못하고 기동이 실패한다.
+    `DB_URL` 에 이 파라미터를 넣지 않는다 — URL 값이 속성보다 이기므로 자동 구성이 URL 에서 이 이름을 찾으면 기동을 실패시킨다. 이 옵션은 메시지의 DETAIL 만 빼고
     서버 오류 필드(제약 이름)는 그대로 두므로 persistence-core `ConstraintViolations` 의 판정(§9-1)은 그대로다 — 서버 필드라 `lc_messages` 로케일과도 무관하다.
     단 delivery `ShippingPolicyRepositoryAdapter` 는 #255 머지 뒤 옮길 때까지 Hibernate `getConstraintName()`(영문 본문 `constraint "…"` 에서 꺼낸다)을 써,
     그때까지 운영 PostgreSQL `lc_messages` 는 C/영문이어야 한다(아니면 이름이 null 이 되어 409 대신 500).
-    `ServerErrorDetailAutoConfigurationTest` 가 자동 구성을, 서비스 `*ApplicationTests` 가 실제 커넥션 풀의 속성을, auth `ShippingAddressPersistenceAdapterTest` 가 PostgreSQL 의 로그 · 예외 메시지를 본다.
+    `ServerErrorDetailAutoConfigurationTest` · `ServerErrorDetailDataJpaSliceTest` 가 자동 구성을, 서비스 `*ApplicationTests` 가 실제 커넥션 풀의 속성을, auth `ShippingAddressPersistenceAdapterTest` 가 PostgreSQL 의 로그 · 예외 메시지를 본다.
   - 2차 방어(새 어댑터에 권장)는 예상 밖 위반을 다시 던질 때 원인(cause)도, 원래 예외의 메시지(`[SQLException 메시지]` 가 들어 있다)도 싣지 않고
     제약 이름만 싣는 것이다. Hibernate WARN 줄은 막지 못하고(1차 방어만 막는다), 그 뒤 예외 메시지 · 스택(전역 핸들러의 500 로그 등)으로 퍼지는 것만 줄인다.
     지금 어댑터들은 원인을 그대로 던지며, 1차 방어로 메시지에 행 값은 없다.
