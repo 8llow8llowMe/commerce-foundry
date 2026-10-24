@@ -38,7 +38,7 @@ import org.springframework.data.domain.SliceImpl;
 class ProductWebFacadeTest {
 
     // 숨김 규칙 자체는 CategoryProcessorTest 가 본다. 여기서는 Facade 가 용도별 메서드의 결과를 그대로 넘기는지만 본다
-    private static final List<Category> VISIBLE_PATH = List.of(new Category(1, null, "상의", 0, true), new Category(1111, 111L, "숨김-하위", 0, true));
+    private static final List<Category> VISIBLE_PATH = List.of(new Category(1, null, "상의", 0, true), new Category(11, 1L, "저고리", 0, true));
     private static final Slice<ProductListItemInfo> EMPTY = new SliceImpl<>(List.of(), PageRequest.of(0, 20), false);
 
     @Mock
