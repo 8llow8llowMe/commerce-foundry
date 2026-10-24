@@ -61,6 +61,26 @@ class PromptTemplatesTest {
         assertThatThrownBy(() -> templates.get("size-chart")).isInstanceOf(IllegalStateException.class).hasMessageContaining("prompt-version");
     }
 
+    @Test
+    @DisplayName("기능 이름 · 버전을 경로에 넣기 전에 검사한다 — 설정이 꺼져 있어도, 호출자가 다른 값을 넘겨도 같다")
+    void validatesFeatureAndVersion() {
+        PromptTemplates templates = new PromptTemplates(classLoader, properties(Map.of()));
+
+        assertThatThrownBy(() -> templates.get("../../x", 1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> templates.get("size-chart", 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new PromptTemplates(classLoader, properties(Map.of("../x", new Feature(null, null, null, 1)))))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("템플릿이 ai.max-input-chars 보다 길면 기동 때 실패한다 — 그대로 두면 모든 호출이 INPUT_TOO_LONG 이다")
+    void rejectsTemplateLongerThanInputLimit() {
+        AiProperties tight = new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null,
+            Map.of("size-chart", new Feature(null, null, null, 1)), null, 10, null);
+
+        assertThatThrownBy(() -> new PromptTemplates(classLoader, tight)).isInstanceOf(IllegalStateException.class).hasMessageContaining("max-input-chars");
+    }
+
     /** 깨진 인코딩 · BOM 파일은 저장소 인코딩 규칙(UTF-8, BOM 없음)과 맞지 않아 커밋하지 않고 임시 디렉터리에 만든다. */
     @Test
     @DisplayName("UTF-8 이 아닌 파일은 실패하고, UTF-8 BOM 은 지운다")

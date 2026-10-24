@@ -87,6 +87,37 @@ class ClaudeAiStructuredTest {
     }
 
     @Test
+    @DisplayName("validator 가 예외를 던지면 INVALID_RESPONSE 로 감싼다 — 예외 메시지(응답 값)는 로그에 없고 AiException 계약 밖으로 나가지 않는다")
+    void validatorException(CapturedOutput output) {
+        server.reply(ok(VALID, "end_turn"));
+        AiOutputValidator<SizeChart> throwing = chart -> {
+            throw new IllegalArgumentException("invalid size ValidatorLeakProbe " + chart.rows().getFirst().size());
+        };
+
+        assertInvalid(() -> client(Map.of()).complete(AiRequest.of("size-chart", null, "치수 정리"), SizeChart.class, throwing));
+        assertThat(output.getAll()).contains("detail=validator IllegalArgumentException").doesNotContain("ValidatorLeakProbe");
+    }
+
+    @Test
+    @DisplayName("validator 가 null 을 돌려주면 통과가 아니라 INVALID_RESPONSE 다")
+    void validatorReturningNull() {
+        server.reply(ok(VALID, "end_turn"));
+
+        assertInvalid(() -> client(Map.of()).complete(AiRequest.of("size-chart", null, "치수 정리"), SizeChart.class, chart -> null));
+    }
+
+    @Test
+    @DisplayName("JSON null 응답은 validator 를 부르기 전에 INVALID_RESPONSE 다")
+    void nullValue() {
+        server.reply(ok("null", "end_turn"));
+        AiOutputValidator<SizeChart> mustNotRun = chart -> {
+            throw new AssertionError("validator 가 불리면 안 된다");
+        };
+
+        assertInvalid(() -> client(Map.of()).complete(AiRequest.of("size-chart", null, "치수 정리"), SizeChart.class, mustNotRun));
+    }
+
+    @Test
     @DisplayName("최대 토큰에서 잘린 JSON 은 쓰지 않는다 — INVALID_RESPONSE")
     void truncated() {
         server.reply(ok("{\"rows\":[{\"size\":\"M\"", "max_tokens"));
