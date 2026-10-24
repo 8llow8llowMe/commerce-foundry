@@ -36,6 +36,8 @@ x-product-service-environment: &product_service_environment
   INTERNAL_JWT_SECRET_PREVIOUS: ${INTERNAL_JWT_SECRET_PREVIOUS:-}
   # 기능 플래그 — yml 기본값과 같은 false. dev 프로파일은 yml 이 켜 두어 이 값을 읽지 않는다
   STORE_FEATURES_CUSTOM_ORDER: ${STORE_FEATURES_CUSTOM_ORDER:-false}
+  # 미디어 공개 주소(store.media.public-base-url) — 전시 미디어 주소 허용 판정(#63). 비면 yml 기본값(빈 값)과 같고 미디어 쓰기만 거절한다
+  STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:-}
 
 x-logging: &default_logging
   driver: json-file

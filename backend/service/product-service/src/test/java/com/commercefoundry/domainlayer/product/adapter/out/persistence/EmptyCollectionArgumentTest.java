@@ -48,6 +48,16 @@ class EmptyCollectionArgumentTest {
     }
 
     @Test
+    @DisplayName("고객에게 보이는 상품의 아이디 묶음 목록 행 (전시)")
+    void visibleListRows() {
+        ProductRepository repository = mock(ProductRepository.class);
+        ProductMapper mapper = mock(ProductMapper.class);
+
+        assertThat(new ProductRepositoryAdapter(repository, mapper).findVisibleListRowsByIds(List.of())).isEmpty();
+        verifyNoInteractions(repository, mapper);
+    }
+
+    @Test
     @DisplayName("상품 목록: 빈 카테고리 집합이면 요청한 페이지의 빈 Slice 다")
     void productsInEmptyCategories() {
         ProductRepository repository = mock(ProductRepository.class);

@@ -332,7 +332,7 @@ storage:
 | 주소 | path-style(`{endpoint}/{bucket}/{key}`) 접근, endpoint · 공개 주소는 https | 브라우저가 https 어드민 화면에서 서명 URL 로 바로 올린다 — http 면 막힌다 |
 | 버킷 CORS | 어드민 origin 으로 **좁혀** `PUT` 과 `Content-Type` 요청 헤더를 허용 | presigned PUT 은 브라우저 → 스토리지 교차 출처 요청이다. MinIO 서버 CORS 기본값은 모든 origin(`*`)이다. 버전에 따라 버킷 CORS 대신 서버 설정 `MINIO_API_CORS_ALLOW_ORIGIN` 으로 건다 |
 | 수명 규칙 | `uploads/` 접두어 객체를 1일 뒤 삭제 (MinIO ILM 만료 규칙) | 올리고 저장하지 않은 임시 업로드를 치운다 — 상품에 붙인 이미지는 `products/` 로 복사해 두므로 지워지지 않는다 |
-| 공개 읽기 | `products/` 접두어에 **익명 GetObject 만** 준다(예: `mc anonymous set download <alias>/<bucket>/products`). 또는 그 앞의 CDN | 고객 화면은 `STORAGE_PUBLIC_BASE_URL` + 키로 이미지를 바로 읽는다. `public` 이나 버킷 전체를 열면 익명 쓰기 · 목록과 `uploads/`(검증 전 업로드)가 노출된다 |
+| 공개 읽기 | `products/` · `displays/`(메인 전시 미디어, #63) 접두어에 **익명 GetObject 만** 준다(예: `mc anonymous set download <alias>/<bucket>/products`). 또는 그 앞의 CDN | 고객 화면은 `STORAGE_PUBLIC_BASE_URL` + 키로 이미지를 바로 읽는다. `public` 이나 버킷 전체를 열면 익명 쓰기 · 목록과 `uploads/`(검증 전 업로드)가 노출된다 |
 | 접근 키 | 루트 계정 · 루트의 service account 가 아닌 **별도 사용자**에, 그 버킷으로 한정한 정책: GetObject · PutObject · DeleteObject(객체) + ListBucket(버킷) | 서비스가 쓰는 동작만 준다(CopyObject 는 원본 Get + 대상 Put). ListBucket 이 없으면 S3 계열이 없는 키 HEAD 에 404 대신 403 을 줘서 "업로드 없음" 이 설정 오류(`ACCESS_DENIED`)로 바뀐다 |
 | 버전 | 보안 패치가 반영된 최신 MinIO 릴리스 | 익명 읽기 · 서명 검증을 맡는 서버다 |
 | 리버스 프록시 (TLS 종료를 nginx 등에서 하면) | 원래 `Host` 를 그대로 넘긴다. 본문 상한은 업로드 상한(10MB) 이상. 공개 도메인에 `X-Content-Type-Options: nosniff` | `Host` 를 바꾸면 서명 검증이 403 이다. nginx 기본 본문 상한(1m)이면 413 이고 브라우저에는 CORS 오류로 보인다. nosniff 는 위 판별 한계의 방어다 |

@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.info;
 
+import com.commercefoundry.domainlayer.product.domain.model.ProductSummary;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.shared.commerce.Money;
 import lombok.Builder;
@@ -18,4 +19,19 @@ public record ProductListItemInfo(
     Money salePrice, Money listPrice, Integer discountRate, boolean hasOptionSurcharge,
     SaleAvailability saleStatus, boolean customOrder
 ) {
+
+    /** 상품 카드 값을 그대로 옮긴다 — 목록과 전시(메인)가 같은 {@link ProductSummary} 에서 나와 값이 갈라지지 않는다. */
+    public static ProductListItemInfo from(ProductSummary summary) {
+        return ProductListItemInfo.builder()
+            .productId(summary.productId())
+            .name(summary.name())
+            .thumbnail(summary.thumbnail() == null ? null : ProductImageInfo.from(summary.thumbnail()))
+            .salePrice(summary.salePrice())
+            .listPrice(summary.listPrice())
+            .discountRate(summary.discountRate())
+            .hasOptionSurcharge(summary.hasOptionSurcharge())
+            .saleStatus(summary.saleStatus())
+            .customOrder(summary.customOrder())
+            .build();
+    }
 }

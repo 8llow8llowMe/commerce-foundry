@@ -2,6 +2,7 @@ package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
 import com.commercefoundry.global.properties.StockProperties;
+import com.commercefoundry.global.properties.StoreMediaProperties;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
 import com.commercefoundry.security.internal.InternalTokenPropertiesConfig;
@@ -17,7 +18,7 @@ import org.springframework.context.annotation.Import;
     SnowflakePropertiesConfig.class,
     SwaggerPropertiesConfig.class
 })
-@EnableConfigurationProperties({StockProperties.class, StoreProperties.class})
+@EnableConfigurationProperties({StockProperties.class, StoreProperties.class, StoreMediaProperties.class})
 public class ProductServicePropertiesConfig {
 
 }
