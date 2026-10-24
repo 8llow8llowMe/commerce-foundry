@@ -4,4 +4,8 @@ dependencies {
     // com.querydsl 원본은 2024년 이후 릴리스가 없다. 유지되는 OpenFeign 포크를 쓴다
     api "io.github.openfeign.querydsl:querydsl-jpa:${rootProject.ext.querydslVersion}"
     annotationProcessor "io.github.openfeign.querydsl:querydsl-apt:${rootProject.ext.querydslVersion}:jpa"
+
+    // ServerErrorDetailAutoConfiguration 이 @DataJpaTest 슬라이스에도 걸리는지 H2 로 본다 (#279)
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testRuntimeOnly 'com.h2database:h2'
 }
