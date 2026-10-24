@@ -283,7 +283,8 @@ public final class ProductValidationMessage {
 
 - **재고 차감은 조건부 UPDATE 한 문장으로 한다** — `update Stock s set s.available = s.available - :qty
   where s.skuId = :skuId and s.available >= :qty`. 조회 후 차감(read-modify-write)은 동시 주문에서 초과 판매를 만든다.
-- 조건부 UPDATE 는 `@Modifying(flushAutomatically = true, clearAutomatically = true)` 로 둔다 — 앞서 쌓인 쓰기를 먼저 내보내고, 뒤이은 조회가 옛 값을 읽지 않게 한다.
+- 조건부 UPDATE · bulk DELETE 는 `@Modifying(flushAutomatically = true, clearAutomatically = true)` 로 둔다 — 앞서 쌓인 쓰기를 먼저 내보내고, 뒤이은 조회가 옛 값을 읽지 않게 한다.
+  clear 뒤에는 앞서 읽은 엔티티가 분리되므로 다시 쓰지 말고 다시 읽는다 (예: delivery `ShippingPolicyRepositoryAdapter.replace` 의 `findById`).
   **bulk UPDATE 는 감사 리스너를 거치지 않으므로 `updatedAt` 을 인자로 받아 쿼리에서 직접 세팅한다** (`StockRepository`).
 - 조건부 UPDATE 는 대상마다 한 문장이라 여러 SKU 를 루프에서 부르는 것은 §9-6 의 예외다. 대신 **SKU 아이디 오름차순**으로 부른다 — 행 잠금 순서를 맞춰 교착을 막는다.
 - 상태 엔티티의 상태를 JPQL bulk UPDATE 로 바꾸지 않는다 — 도메인 전이 → merge(`@Version`) 로만 바꾼다 (§9-1).
@@ -297,6 +298,12 @@ public final class ProductValidationMessage {
   (예: 장바구니 상품 20개 가격 조회 → `GET /internal/v1/skus?ids=...` 한 번).
 - 서비스 `application.yml` 은 `spring.jpa.properties.hibernate.query.in_clause_parameter_padding: true` 를 둔다. IN 절 파라미터 수를 2의 거듭제곱으로
   채워(3개 → 4개, 5개 → 8개) 개수마다 다른 SQL 이 생기지 않게 한다 — 그대로면 쿼리 계획 캐시와 PreparedStatement 캐시가 개수만큼 늘어난다 (#8 DB 검토).
+- 한 요청에서 행을 수십~수백 개 INSERT 하는 서비스는 `spring.jpa.properties.hibernate.jdbc.batch_size: 50` · `order_inserts: true` · `order_updates: true` 를 둔다.
+  아이디를 Snowflake 로 직접 넣으므로 IDENTITY 처럼 배치가 막히지 않는다. 지금은 delivery-service 만 둔다(#255 — 배송비 정책 교체 1회 607 → 19 왕복).
+  다른 서비스는 경로를 측정한 뒤 서비스별로 더한다 — 공통 설정으로 두지 않는다.
+  **설정값이 아니라 실측 왕복으로 확인한다** — 방언 기본값 때문에 `getJdbcBatchSize()` 가 0 이 아니어도 배치가 하나도 안 나갈 수 있다
+  (datasource-proxy 로 `executeBatch` 를 세는 delivery `ShippingPolicyReplaceStatementCountTest`).
+  배치가 켜지면 단건 `saveAndFlush` 도 `executeBatch` 로 나가 제약 위반이 `BatchUpdateException` 으로 감싸인다 — 제약 이름 판정은 원인 체인을 따라가야 한다.
 
 ### 9-7. Redis
 
