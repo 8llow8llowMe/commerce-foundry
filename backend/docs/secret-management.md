@@ -45,9 +45,9 @@
 
 | 환경 | 출처 | 토스 키 |
 |------|------|---------|
-| local | `backend/.env` — `.env.example` 을 복사해 채운다 (커밋 금지) | `test_sk_` 만 |
-| dev | Vault | `test_sk_` 만 |
-| prod | Vault | `live_sk_` 만 |
+| local | `backend/.env` — `.env.example` 을 복사해 채운다 (커밋 금지) | `test_sk_` 또는 `test_gsk_`(결제위젯) 만 |
+| dev | Vault | `test_sk_` 또는 `test_gsk_` 만 |
+| prod | Vault | `live_sk_` 또는 `live_gsk_` 만 |
 
 - 주입 방식(Spring Cloud Vault / Vault Agent → 환경변수)과 Vault 경로·인증 방식은 #32 에서 확정하고 이 절을 갱신한다.
 - 배포 파이프라인(#198)은 Vault KV v2 `kv/commerce-foundry/backend/{dev,prod}/env`(환경당 secret 하나)를 AppRole 로 읽는다 —
@@ -57,7 +57,9 @@
   지금 경로는 환경당 secret 하나(`kv/commerce-foundry/backend/<env>/env`)다. 서비스별 DB 계정으로 나누면(#258) 서비스 축을 더할지(`.../<env>/<service>`) 또는 서비스별 키 이름으로 둘지를
   #32 에서 정한다. dev 와 prod 의 DB 계정 · 비밀번호를 같은 값으로 두지 않는다.
 - **개발자 계정은 테스트 키만 다룬다.** 라이브 키는 고객사 계정 소유이고 Vault 에만 있다.
-- 키가 뒤바뀐 채로 기동하면 실패시킨다 (`payment-guide.md` §2).
+- 키가 뒤바뀐 채로 기동하면 실패시킨다 (`payment-guide.md` §2 — `TossPaymentsStartupGuard`).
+- payment-service `application-test.yml` 의 `test_sk_dummyForContextTestsOnly000` · 테스트 코드의 `test_sk_abc123XYZ` 같은 값은 **형식만 맞춘 더미**다 —
+  §5 가 금지하는 "실제 테스트 키" 가 아니다. 실제 테스트 키는 테스트 · yml 어디에도 넣지 않는다.
 
 ## 4. 키를 추가·변경할 때
 

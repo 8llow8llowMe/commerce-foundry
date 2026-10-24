@@ -20,6 +20,8 @@ public class ProductServiceApplication {
   슬라이스 테스트(`@WebMvcTest` · `@DataJpaTest`)는 Application 클래스를 설정으로 쓰고 리포지토리 테스트는 `*FeaturesConfig` 를 import 하는데,
   거기 있으면 Feign 자동설정이 없는 슬라이스가 클라이언트를 만들려다 실패한다. 스캔으로 잡히는 `*FeignConfig` 는 슬라이스에서 빠진다 (처음 둔 곳: order-service, #12).
   `defaultConfiguration` 은 두지 않는다 (`security-guide.md` §9-5).
+  외부 API 클라이언트의 설정 클래스(예: payment `TossPaymentsClientConfiguration`, #14)는 `@Configuration` 을 붙이지 않고 `@FeignClient(configuration = ...)` 로만 건다 —
+  스캔되면 Retryer · Logger 같은 빈이 모든 Feign 클라이언트로 퍼진다. 키 · 타임아웃 기동 가드는 `*BeansConfig` 의 static `@Bean` 으로 둔다(`RedisStartupGuard` 와 같은 방식).
 - 스케줄러가 있는 서비스만 `@EnableScheduling` 을 더한다 (`global.config.*FeaturesConfig` 에 두는 것을 우선).
 
 ## Global Config
