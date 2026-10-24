@@ -21,6 +21,7 @@ import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -69,6 +70,24 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
         boolean hasNext = rows.size() > criteria.size();
         List<ProductListQueryResult> contents = hasNext ? rows.subList(0, criteria.size()) : rows;
         return new SliceImpl<>(List.copyOf(contents), pageRequest, hasNext);
+    }
+
+    /**
+     * 목록과 같은 프로젝션 · 같은 노출 조건({@link #visibleToCustomer()})으로 아이디 묶음을 읽는다 — PK in 절이다.
+     * 빈 컬렉션 검사는 어댑터({@code ProductRepositoryAdapter})가 한다.
+     */
+    @Override
+    public List<ProductListQueryResult> findVisibleListRowsByIds(Collection<Long> productIds) {
+        return List.copyOf(queryFactory
+            .select(Projections.constructor(
+                ProductListQueryResult.class,
+                productEntity.id, productEntity.name, productEntity.salePriceAmount, productEntity.salePriceCurrency,
+                productEntity.listPriceAmount, productEntity.listPriceCurrency, productEntity.saleStatus, productEntity.customOrder
+            ))
+            .from(productEntity)
+            .where(productEntity.id.in(productIds), visibleToCustomer())
+            .orderBy(productEntity.id.asc())
+            .fetch());
     }
 
     @Override
