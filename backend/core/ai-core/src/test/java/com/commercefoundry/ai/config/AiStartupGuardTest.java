@@ -57,6 +57,29 @@ class AiStartupGuardTest {
     }
 
     @Test
+    @DisplayName("루프백 http 도 allow-insecure-loopback 없이는 막는다 — 운영은 https 만. 켜면(테스트 스텁) 허용한다")
+    void loopbackHttpNeedsFlag() {
+        runner.withPropertyValues(enabled()).withPropertyValues("ai.base-url=http://127.0.0.1:8089")
+            .run(context -> assertThat(context).hasFailed().getFailure().hasMessageContaining("ai.base-url"));
+        runner.withPropertyValues(enabled()).withPropertyValues("ai.base-url=http://127.0.0.1:8089", "ai.allow-insecure-loopback=true")
+            .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    @DisplayName("기본 패턴과 이름이 겹치는 마스킹 패턴(email 등)은 막는다 — 조용히 무시되지 않게")
+    void rejectsReservedPatternName() {
+        runner.withPropertyValues(enabled()).withPropertyValues("ai.masking.patterns.email=x@y")
+            .run(context -> assertThat(context).hasFailed().getFailure().hasMessageContaining("ai.masking.patterns.email"));
+    }
+
+    @Test
+    @DisplayName("거절 대체(refusal-fallback)는 기본 꺼짐이다 — 닫힌 기본값")
+    void refusalFallbackIsOffByDefault() {
+        runner.withPropertyValues(enabled())
+            .run(context -> assertThat(context.getBean(com.commercefoundry.ai.properties.AiProperties.class).refusalFallback()).isFalse());
+    }
+
+    @Test
     @DisplayName("형식이 틀린 시간은 이름만 알린다 — Boot 바인딩 오류의 값이 메시지에 없다")
     void malformedDuration() {
         runner.withPropertyValues(enabled()).withPropertyValues("ai.read-timeout=ten-seconds")
