@@ -392,7 +392,7 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
 | 환경 | `spring.jpa.hibernate.ddl-auto` | 스키마를 만드는 쪽 |
 |------|---------------------------------|--------------------|
 | local · dev | `update` | 서비스 기동 시 Hibernate |
-| 운영 (공통 `application.yml` 기본값) | `none` | 사용자가 DDL 을 직접 적용한다 |
+| 운영 (공통 `application.yml` 기본값) | `none` | 사용자가 DDL 적용 계정으로 직접 적용한다(앱 계정에는 DDL 권한이 없다 — `service-inventory.md` §4-2). staging 을 두면 그곳에 먼저 적용해 본다 |
 | 컨텍스트 테스트 (H2) | `create-drop` | 테스트 컨텍스트 |
 | 리포지토리 테스트 (Testcontainers PostgreSQL) | `validate` | DDL 스냅숏을 init script 로 적용 (`bootstrap-conventions.md` 리포지토리 테스트) |
 

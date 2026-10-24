@@ -66,6 +66,8 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
   데이터를 지우지 않으려면 떠 있는 컨테이너에서 그 스키마만 만든다 (`backend/` 에서, 예: operations):
   `docker compose -f docker-compose-local.yml exec postgres sh -c 'psql -U "$POSTGRES_USER" -d commerce_foundry -c "CREATE SCHEMA IF NOT EXISTS operations"'`
 - compose 파일이 바뀐 PR 은 `backend-local-infra` 워크플로가 실제로 띄워 스키마·Redis 인증을 확인한다.
+- database · 스키마 이름은 dev · prod 와 같다 — 환경 차이는 접속 정보뿐이다(`service-inventory.md` §4-2). 로컬 스키마에 `_local` 같은 접미사를 붙이지 않는다.
+  로컬은 예외로 `DB_USERNAME` 하나(컨테이너 소유자 계정)가 스키마 전부를 쓴다 — 서비스별 앱 계정 · DDL 적용 계정 분리는 dev · prod 에만 적용한다.
 
 ## 4. 빌드 · 테스트
 
