@@ -5,11 +5,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.commercefoundry.common.dto.DataHeader;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.dto.ValidationErrorItem;
+import com.commercefoundry.common.validation.ConstraintPriority;
+import com.commercefoundry.common.validation.ConstraintPriority.Level;
+import jakarta.validation.Constraint;
+import jakarta.validation.ConstraintValidator;
+import jakarta.validation.ConstraintValidatorContext;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Payload;
+import jakarta.validation.Valid;
+import jakarta.validation.Validation;
+import jakarta.validation.ValidatorFactory;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Pattern;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.DefaultParameterNameDiscoverer;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -17,6 +36,10 @@ import org.springframework.mock.http.MockHttpInputMessage;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.beanvalidation.MethodValidationAdapter;
+import org.springframework.validation.beanvalidation.SpringValidatorAdapter;
+import org.springframework.validation.method.MethodValidationResult;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -158,6 +181,147 @@ class ValidationErrorSupportTest {
         assertThat(errors).hasSize(1);
         assertThat(errors.getFirst().code()).isEqualTo(DEFAULT_CODE);
         assertThat(errors.getFirst().message()).isEqualTo("이메일 형식이 올바르지 않습니다.");
+    }
+
+    // ── 커스텀 제약의 정렬 자리 (@ConstraintPriority, #261) ─────────────────────────
+
+    @ConstraintPriority(Level.LENGTH)
+    @Target({ElementType.FIELD, ElementType.PARAMETER})
+    @Retention(RetentionPolicy.RUNTIME)
+    @Constraint(validatedBy = DeclaredLengthValidator.class)
+    @interface DeclaredLength {
+        String message();
+
+        Class<?>[] groups() default {};
+
+        Class<? extends Payload>[] payload() default {};
+    }
+
+    /** 자리를 밝히지 않은 커스텀 제약. */
+    @Target(ElementType.FIELD)
+    @Retention(RetentionPolicy.RUNTIME)
+    @Constraint(validatedBy = UndeclaredValidator.class)
+    @interface Undeclared {
+        String message();
+
+        Class<?>[] groups() default {};
+
+        Class<? extends Payload>[] payload() default {};
+    }
+
+    public static class DeclaredLengthValidator implements ConstraintValidator<DeclaredLength, String> {
+        @Override
+        public boolean isValid(String value, ConstraintValidatorContext context) {
+            return false;
+        }
+    }
+
+    public static class UndeclaredValidator implements ConstraintValidator<Undeclared, String> {
+        @Override
+        public boolean isValid(String value, ConstraintValidatorContext context) {
+            return false;
+        }
+    }
+
+    private record ProfileRequest(
+        @Email(message = "MEMBER_103:이메일 형식이 올바르지 않습니다.")
+        @DeclaredLength(message = "MEMBER_102:이메일이 너무 깁니다.")
+        String email,
+
+        @Undeclared(message = "MEMBER_109:닉네임에 쓸 수 없는 문자가 있습니다.")
+        @Pattern(regexp = "[a-z]+", message = "MEMBER_108:닉네임 형식이 올바르지 않습니다.")
+        String nickname
+    ) {
+    }
+
+    private static final ProfileRequest INVALID_PROFILE = new ProfileRequest("not-an-email", "NICK");
+
+    @Test
+    @DisplayName("@ConstraintPriority(LENGTH) 커스텀 제약은 형식(@Email)보다 앞이고, 자리를 밝히지 않은 제약은 형식(@Pattern)보다 뒤다 — 본문 검증")
+    void customConstraintPriorityOnRequestBody() throws Exception {
+        BindingResult bindingResult = new BeanPropertyBindingResult(INVALID_PROFILE, "profileRequest");
+        // 실제 Spring 검증기로 만든 FieldError — 원본 ConstraintViolation 을 품는다
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            new SpringValidatorAdapter(factory.getValidator()).validate(INVALID_PROFILE, bindingResult);
+        }
+
+        List<ValidationErrorItem> errors = headerOf(bindingResult).fieldErrors();
+
+        assertThat(errors).extracting(ValidationErrorItem::code).containsExactly("MEMBER_102", "MEMBER_103", "MEMBER_108", "MEMBER_109");
+    }
+
+    @Test
+    @DisplayName("ConstraintViolationException 경로도 같은 자리로 정렬한다")
+    void customConstraintPriorityOnConstraintViolations() {
+        Set<ConstraintViolation<ProfileRequest>> violations;
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            violations = factory.getValidator().validate(INVALID_PROFILE);
+        }
+
+        ResponseEntity<Response<Void>> response = ValidationErrorSupport.toResponse(new ConstraintViolationException(violations), DEFAULT_CODE);
+        DataHeader header = response.getBody().dataHeader();
+
+        // 이 경로는 필드 선언 순서를 모른다 — 같은 필드 안의 자리만 본다
+        assertThat(header.fieldErrors()).filteredOn(error -> error.field().equals("email"))
+            .extracting(ValidationErrorItem::code).containsExactly("MEMBER_102", "MEMBER_103");
+        assertThat(header.fieldErrors()).filteredOn(error -> error.field().equals("nickname"))
+            .extracting(ValidationErrorItem::code).containsExactly("MEMBER_108", "MEMBER_109");
+    }
+
+    /** property node 없이 위반을 내는 클래스 수준 제약 — {@code @Valid} 빈의 전역 {@code ObjectError} 가 된다. */
+    @Target(ElementType.TYPE)
+    @Retention(RetentionPolicy.RUNTIME)
+    @Constraint(validatedBy = GlobalCheckValidator.class)
+    @interface GlobalCheck {
+        String message();
+
+        Class<?>[] groups() default {};
+
+        Class<? extends Payload>[] payload() default {};
+    }
+
+    public static class GlobalCheckValidator implements ConstraintValidator<GlobalCheck, Object> {
+        @Override
+        public boolean isValid(Object value, ConstraintValidatorContext context) {
+            return false;
+        }
+    }
+
+    @GlobalCheck(message = "MEMBER_120:요청 조합이 올바르지 않습니다.")
+    public record FilterRequest(String sort) {
+    }
+
+    /** 직접 호출하지 않는다 — Spring MVC 메서드 검증이 보는 컨트롤러 메서드 자리다. */
+    public static class SearchController {
+        public void search(
+            @DeclaredLength(message = "MEMBER_102:검색어가 너무 깁니다.")
+            @Pattern(regexp = "[a-z]+", message = "MEMBER_103:검색어 형식이 올바르지 않습니다.")
+            String keyword,
+            @Valid FilterRequest filter
+        ) {
+        }
+    }
+
+    @Test
+    @DisplayName("HandlerMethodValidationException 경로도 커스텀 제약 자리를 지키고, @Valid 빈의 전역 오류로 500 이 되지 않는다")
+    void customConstraintPriorityOnHandlerMethodValidation() throws Exception {
+        Method method = SearchController.class.getMethod("search", String.class, FilterRequest.class);
+        MethodParameter[] parameters = {new MethodParameter(method, 0), new MethodParameter(method, 1)};
+        for (MethodParameter parameter : parameters) {
+            parameter.initParameterNameDiscovery(new DefaultParameterNameDiscoverer());
+        }
+        MethodValidationResult result;
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            result = new MethodValidationAdapter(factory.getValidator())
+                .validateArguments(new SearchController(), method, parameters, new Object[] {"KEYWORD", new FilterRequest("x")}, new Class<?>[0]);
+        }
+
+        ResponseEntity<Response<Void>> response = ValidationErrorSupport.toResponse(new HandlerMethodValidationException(result), DEFAULT_CODE);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(response.getBody().dataHeader().fieldErrors()).extracting(ValidationErrorItem::code)
+            .containsExactlyInAnyOrder("MEMBER_102", "MEMBER_103", "MEMBER_120")
+            .containsSubsequence("MEMBER_102", "MEMBER_103");
     }
 
     // ── 필수 요청 파라미터 누락 (서블릿 MissingServletRequestParameterException) ──────
