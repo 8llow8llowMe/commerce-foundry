@@ -1,6 +1,7 @@
 package com.commercefoundry.common.web.servlet;
 
 import com.commercefoundry.common.exception.CommonErrorCode;
+import com.commercefoundry.common.exception.RedactedThrowable;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,7 +31,7 @@ import tools.jackson.databind.json.JsonMapper;
  *       ({@link CommonErrorCode#of})다. 속성이 없으면 에러 디스패치가 아니라 {@code GET /error} 같은 직접 요청이다 — 매핑 없는 경로처럼 404 {@code COMMON_001}.
  *       4xx · 5xx 가 아닌 값은 서버 결함으로 보고 500 {@code COMMON_000} 이다.</li>
  *   <li><b>Accept 와 무관하게 언제나 JSON 봉투</b>다. HTML 화이트라벨을 내지 않는다 — 메시지 변환기를 거치지 않고 직접 써서 {@code Accept: text/html} 에도 406 이 되지 않는다.</li>
- *   <li>500 의 원인 · 스택은 응답에 싣지 않고 로그에만 남긴다. 로그 경로는 원래 요청 경로({@link RequestDispatcher#ERROR_REQUEST_URI})를
+ *   <li>500 의 원인 · 스택은 응답에 싣지 않고 로그에만 남긴다 — 로그에도 메시지는 버리고 타입 · 스택 프레임만 남긴다({@link RedactedThrowable}, #280). 로그 경로는 원래 요청 경로({@link RequestDispatcher#ERROR_REQUEST_URI})를
  *       {@link FallbackErrorResolver#maskPath} 로 가린다 — 방화벽이 거부한 경로에는 공격 문자열 · 식별자가 들어온다.</li>
  *   <li>{@code @PreAuthorize} 를 달지 않는다. 오류 응답은 원래 요청의 인증 여부와 무관하게 나가야 한다 — 메서드 보안이 ERROR 디스패치의 익명 요청을 거부하면
  *       401 이 400 · 500 을 덮는다. URL 규칙도 {@code /error} 를 막지 않는다(사용자 체인 {@code anyRequest().permitAll()}).</li>
@@ -78,7 +79,7 @@ public class FallbackErrorController implements ErrorController {
         try {
             FallbackErrorResolver.write(jsonMapper, response, status, HttpHeaders.EMPTY, errorCode);
         } catch (IOException writeFailure) {
-            log.warn("error page envelope write failed. code={}, method={}, path={}", errorCode.getCode(), request.getMethod(), path, writeFailure);
+            log.warn("error page envelope write failed. code={}, method={}, path={}", errorCode.getCode(), request.getMethod(), path, RedactedThrowable.of(writeFailure));
         }
     }
 
@@ -105,11 +106,11 @@ public class FallbackErrorController implements ErrorController {
         Throwable cause = causeOf(request);
         if (status.value() != code) {
             log.error("error page reached with non-error status. code={}, rawStatus={}, method={}, path={}",
-                errorCode.getCode(), rawStatus, request.getMethod(), path, cause);
+                errorCode.getCode(), rawStatus, request.getMethod(), path, RedactedThrowable.of(cause));
         } else if (status.is5xxServerError() && cause != null) {
-            // 필터 · 컨테이너 단계의 처리되지 않은 예외. 응답에는 싣지 않는 원인 · 스택을 여기서만 남긴다
+            // 필터 · 컨테이너 단계의 처리되지 않은 예외. 응답에는 싣지 않는 원인 사슬의 타입 · 스택을 여기서만 남긴다 — 메시지는 버린다 (#280)
             log.error("unhandled exception answered by error page envelope. code={}, status={}, method={}, path={}",
-                errorCode.getCode(), status.value(), request.getMethod(), path, cause);
+                errorCode.getCode(), status.value(), request.getMethod(), path, RedactedThrowable.of(cause));
         } else if (status.is5xxServerError()) {
             // 예외 없이 sendError(5xx) 로 끝낸 경우 — 원인은 보낸 쪽이 남겼어야 한다
             log.warn("5xx without exception answered by error page envelope. code={}, status={}, method={}, path={}",
