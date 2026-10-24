@@ -215,6 +215,8 @@ public final class ProductValidationMessage {
   - 도메인은 생성 시각을 들고 다니지 않는다. `created_at` 이 `updatable = false` 라 merge 가 덮어쓰지 않는다.
   - 상태 저장(버전 검사)을 **먼저** 하고 그 결과에 딸린 쓰기(재고 복원 등)를 뒤에 한다 — 동시 요청에서 진 쪽이 딸린 쓰기까지 가지 않는다.
   - 예: product-service `StockReservationEntity` · `StockReservationRepositoryAdapter` (#10).
+  - lease · 진행률처럼 **상태가 아닌 칸**의 잦은 갱신은 다시 읽어 merge 하지 않고 조건부 UPDATE 한 문장(§9-5)으로 한다 — 조건에 주인(워커 · 시도)을 넣고 영향 행 수로 "아직 주인인가" 를 판정한다.
+    다른 쓰기가 버전 비교로 이 칸을 덮지 않게 해야 하면 그 UPDATE 도 버전을 올린다. 예: operations `JobRepository` 의 heartbeat — 올리지 않으면 lease 회수가 옛 버전으로 merge 에 성공해 방금 연장한 lease 를 빼앗는다 (#212).
 - **비관적 잠금(`@Lock(PESSIMISTIC_WRITE)`)은 상태를 바꾸지 않는 쓰기가 같은 부모 행 기준으로 합계 · 상한을 판정할 때만 쓴다** — 상태 전이가 없으면
   `@Version` 이 경합을 잡지 못하고, 각자 읽은 합으로 함께 상한을 넘긴다. 정적 JPQL(`select ... where id = :id`)에 `@Lock` 을 달고 이름은 `findByIdForUpdate` 로 둔다
   (네이티브 `for update` 금지 — §9-5). PostgreSQL 에서는 `for no key update`(Hibernate 7) 다 — 같은 잠금 · 그 행의 UPDATE 와만 충돌하고,
