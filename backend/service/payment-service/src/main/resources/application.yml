@@ -76,6 +76,10 @@ eureka:
   client:
     service-url:
       defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
+  instance:
+    # 컨테이너 호스트 이름(컨테이너 ID)이 아니라 네트워크 IP 로 등록한다 — 게이트웨이 lb:// · Feign 이 이름을 풀지 못하는 일을 막는다 (#249).
+    # 배포(dev · prod) 기본값이다. local 은 application-local.yml 이 끈다
+    prefer-ip-address: true
 
 management:
   endpoints:

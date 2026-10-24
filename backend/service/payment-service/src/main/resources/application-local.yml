@@ -19,3 +19,8 @@ springdoc:
     enabled: true
   swagger-ui:
     enabled: true
+
+eureka:
+  instance:
+    # 로컬은 호스트 이름으로 등록한다 — IP 로 등록하면 VPN · WSL 같은 가상 어댑터의 주소가 잡혀 lb:// 가 닿지 않을 수 있다 (#249)
+    prefer-ip-address: false
