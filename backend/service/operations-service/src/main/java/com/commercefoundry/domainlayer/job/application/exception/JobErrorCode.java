@@ -7,11 +7,11 @@ import org.springframework.http.HttpStatus;
 /**
  * 백그라운드 작업 오류 코드 ({@code coding-conventions.md} §8).
  *
- * <p>대역 — {@code 00x} 없는 리소스(404) · 등록 입력(400), {@code 02x} 동시성 · 상태 충돌(409).
+ * <p>대역 — {@code 00x} 없는 리소스(404) · 등록 입력(400), {@code 02x} 동시성 · 상태 충돌(409), {@code 1xx} 어드민 작업 API 요청 검증(400,
+ * 필드별 문구는 {@link JobValidationMessage}).
  *
- * <p>{@code JobExceptionHandler} 는 아직 두지 않는다 — 이 컨텍스트에 응답 진입(컨트롤러)이 없다. 등록은 같은 서비스의 기능 Facade 가 부르고,
- * 그 Facade 의 진입 핸들러가 자기 코드로 번역한다 ({@code architecture-guide.md} §3 컨텍스트 간 의존 규칙). 어드민 작업 API(#212 PR-C)가
- * 생기면 핸들러와 요청 검증 코드(1xx)를 함께 둔다.
+ * <p>어드민 작업 API 의 응답은 {@code JobExceptionHandler} 가 봉투로 만든다. 다른 컨텍스트의 기능 Facade 가 등록하다 받은 오류는
+ * 그 Facade 의 진입 핸들러가 자기 코드로 번역한다 ({@code architecture-guide.md} §3 컨텍스트 간 의존 규칙).
  */
 @Getter
 @RequiredArgsConstructor
@@ -32,7 +32,10 @@ public enum JobErrorCode {
     /** 읽은 뒤 다른 워커 · 요청이 같은 작업을 바꿨다 ({@code @Version}). 워커는 진 쪽을 "다른 워커가 가져감" 으로 보고 넘어간다. */
     JOB_CONFLICT("JOB_021", "작업이 그 사이 바뀌었습니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
     /** 끝난(SUCCEEDED · FAILED · CANCELLED) 작업을 취소하려 했다. */
-    JOB_ALREADY_FINISHED("JOB_022", "이미 끝난 작업입니다.", HttpStatus.CONFLICT);
+    JOB_ALREADY_FINISHED("JOB_022", "이미 끝난 작업입니다.", HttpStatus.CONFLICT),
+
+    INVALID_REQUEST("JOB_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
+    PARAMETER_TYPE_INVALID("JOB_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST);
 
     private final String code;
     private final String message;

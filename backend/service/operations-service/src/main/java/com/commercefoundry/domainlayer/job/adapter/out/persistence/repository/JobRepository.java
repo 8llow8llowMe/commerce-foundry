@@ -8,6 +8,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -23,6 +25,18 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
 
     /** 같은 종류 · 같은 키의 활성 작업 — {@code uk_job_type_active_dedup_key} 로 찾는다. 끝난 작업은 키가 null 이라 걸리지 않는다. */
     Optional<JobEntity> findByTypeAndActiveDedupKey(String type, String activeDedupKey);
+
+    /** 어드민 목록 — 조건 없음. 아이디 내림차순(등록 최신순). */
+    Page<JobEntity> findAllByOrderByIdDesc(Pageable pageable);
+
+    /** 어드민 목록 — 상태 조건. */
+    Page<JobEntity> findAllByStatusOrderByIdDesc(JobStatus status, Pageable pageable);
+
+    /** 어드민 목록 — 종류 조건. {@code idx_job_type_id} 순서 그대로 읽는다. */
+    Page<JobEntity> findAllByTypeOrderByIdDesc(String type, Pageable pageable);
+
+    /** 어드민 목록 — 상태 · 종류 조건. */
+    Page<JobEntity> findAllByStatusAndTypeOrderByIdDesc(JobStatus status, String type, Pageable pageable);
 
     /**
      * 예약 시각이 지난 QUEUED 후보 — {@code idx_job_status_priority_scheduled_at_id} 의 순서(우선순위 내림차순 → 예약 시각 → 아이디) 그대로 읽어
