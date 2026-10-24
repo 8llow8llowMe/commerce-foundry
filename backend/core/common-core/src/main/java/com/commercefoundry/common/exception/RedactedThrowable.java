@@ -4,6 +4,7 @@ import java.sql.SQLException;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 로그 전용 사본 — 원래 예외 사슬의 <b>타입 · 스택 프레임</b>만 남기고 메시지를 버린다 ({@code coding-conventions.md} §8, #280).
@@ -18,14 +19,26 @@ import java.util.Set;
  */
 public final class RedactedThrowable extends Throwable {
 
+    private static final Pattern SQL_STATE = Pattern.compile("[0-9A-Z]{5}");
+
     private RedactedThrowable(String originalType, StackTraceElement[] frames, RedactedThrowable cause) {
         super(originalType, cause, true, true);
         setStackTrace(frames);
     }
 
-    /** {@code null} 이면 {@code null} 이다 — 원인이 없을 수 있는 자리에 그대로 넘긴다. */
+    /**
+     * {@code null} 이면 {@code null} 이다 — 원인이 없을 수 있는 자리에 그대로 넘긴다.
+     * 사본을 만들다 실패하면(스택을 {@code null} 로 돌려주는 비정상 예외 등) 타입만 담은 사본이다 — 로그 인자를 만드는 중에 오류 처리기가 깨지지 않게.
+     */
     public static RedactedThrowable of(Throwable throwable) {
-        return throwable == null ? null : redact(throwable, Collections.newSetFromMap(new IdentityHashMap<>()));
+        if (throwable == null) {
+            return null;
+        }
+        try {
+            return redact(throwable, Collections.newSetFromMap(new IdentityHashMap<>()));
+        } catch (RuntimeException redactionFailure) {
+            return new RedactedThrowable(throwable.getClass().getName() + " [redaction failed]", new StackTraceElement[0], null);
+        }
     }
 
     private static RedactedThrowable redact(Throwable throwable, Set<Throwable> visited) {
@@ -41,9 +54,10 @@ public final class RedactedThrowable extends Throwable {
         return copy;
     }
 
+    /** SQLState 는 생성자 인자라 아무 문자열이나 들어올 수 있다. 표준 모양(5자리 숫자 · 대문자)일 때만 싣는다. */
     private static String typeOf(Throwable throwable) {
         String type = throwable.getClass().getName();
-        return throwable instanceof SQLException sqlException && sqlException.getSQLState() != null
+        return throwable instanceof SQLException sqlException && sqlException.getSQLState() != null && SQL_STATE.matcher(sqlException.getSQLState()).matches()
             ? type + " [sqlState=" + sqlException.getSQLState() + "]"
             : type;
     }

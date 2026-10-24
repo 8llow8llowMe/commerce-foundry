@@ -47,6 +47,30 @@ class RedactedThrowableTest {
     }
 
     @Test
+    @DisplayName("표준 모양(5자리 숫자 · 대문자)이 아닌 SQLState 는 싣지 않는다 — 생성자 인자라 아무 문자열이나 들어올 수 있다")
+    void dropsNonStandardSqlState() {
+        RedactedThrowable redacted = RedactedThrowable.of(new SQLException(SECRET, "member@example.com"));
+
+        assertThat(redacted.getMessage()).isEqualTo(SQLException.class.getName());
+    }
+
+    @Test
+    @DisplayName("사본을 만들다 실패하면 타입만 담은 사본이다 — 오류 처리기의 로그 인자 만들기가 깨지지 않는다")
+    void fallsBackToTypeOnlyOnFailure() {
+        IllegalStateException broken = new IllegalStateException(SECRET) {
+            @Override
+            public StackTraceElement[] getStackTrace() {
+                return null;
+            }
+        };
+
+        RedactedThrowable redacted = RedactedThrowable.of(broken);
+
+        assertThat(redacted.getMessage()).isEqualTo(broken.getClass().getName() + " [redaction failed]").doesNotContain("member@example.com");
+        assertThat(redacted.getStackTrace()).isEmpty();
+    }
+
+    @Test
     @DisplayName("순환하는 원인 사슬도 한 번만 따라가고 끝난다")
     void stopsOnCycle() {
         IllegalStateException first = new IllegalStateException(SECRET);
