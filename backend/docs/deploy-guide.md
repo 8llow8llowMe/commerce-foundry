@@ -128,7 +128,8 @@ compose 가 env 파일과 무관하게 고정하는 값:
   영문 · 숫자 · `. _ ~ -` 밖의 문자가 있거나 32자 미만이면 Eureka 가 뜨지 않는다(`security-guide.md` §12).
 - `GATEWAY_CORS_ALLOWED_ORIGINS` 는 비어도 뜨지만 어떤 origin 도 허용하지 않는다(닫힌 기본값). 배포 환경은 프론트 origin 을 채운다.
 - `STORE_FEATURES_*` 는 dev 프로파일 yml 이 `true` 로 덮어 dev 에서는 env 를 읽지 않는다.
-- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `KAKAO_*` · `NAVER_*` · `STORAGE_*` · `STORE_BUSINESS_*`)는 compose 에 넘기지 않는다.
+- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `KAKAO_*` · `NAVER_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*`)는 compose 에 넘기지 않는다.
+  `STORAGE_PUBLIC_BASE_URL` 은 product-service 가 메인 전시 미디어 주소 판정에 읽는다(#63, `:-` 빈 값 — 비면 미디어 쓰기만 503).
   해당 기능이 yml(또는 `storage.*` 같은 relaxed binding)로 키를 읽기 시작하는 PR 에서 그 모듈 compose 의 `environment` 에 같이 더한다(§8).
 
 ### 4-3. 배포 전 반드시 채울 것
