@@ -474,7 +474,8 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
     서킷 안에서는 `FeignClientException` 을 그대로 두어 `ignore-exceptions` 를 지킨다 — 안에서 다른 예외로 바꾸면 업무 거절(배송할 수 없는 국가 등)이 서킷 실패로 세어져 서킷이 열린다.
     아는 코드만 자기 코드로 바꾸고, 모르는 코드 · 파싱 실패(본문 없음 · JSON 아님) · 401 `SECURITY_007` 은 error 로그를 남기고 503 이다.
     `ErrorDecoder` 는 쓰지 않는다 — 예외 타입이 바뀌면 `ignore-exceptions` 도 같이 바꿔야 한다. 본문은 서비스의 `JsonMapper` 빈(Jackson 3)으로 읽고, 로그에는 status · resultCode 만 남긴다.
-    resultCode 는 코드 모양(`[A-Z][A-Z0-9_]*_[0-9]{3}`)일 때만 그대로 남기고, 아니면 `<unrecognized>` 다 — 원격의 임의 문자열(CR/LF · 긴 값)을 로그에 넣지 않는다.
+    resultCode 는 코드 모양(`[A-Z][A-Z0-9_]*_[0-9]{3}`, 40자 이하)일 때만 그대로 남기고, 아니면 `<unrecognized>` 다 — 원격의 임의 문자열(CR/LF · 긴 값)을 로그에 넣지 않는다.
+    성공 봉투가 아닌 응답의 resultCode 도 같다. 판정은 서비스의 `global/support` 한 곳에 둔다(order-service `RemoteResultCodes` — product · delivery 응답 support 가 함께 쓴다, #281).
     예: order-service `ShippingFeeInternalResponseSupport`(#13) — `DELIVERY_001/002/003/011` 만 `ORDER_012~015` 로 번역한다.
     Feign 예외 메시지에는 대상 응답 본문이 들어 있다 — 받는 핸들러는 원인 예외를 throwable 로 로그하지 않는다. Feign `logger-level` 을 `FULL` · `HEADERS` 로 두지 않는다(요청 본문 · 헤더가 로그에 남는다).
 - **PG 호출에는 서킷을 걸되, 서킷 오픈을 승인 "실패" 로 다루지 않는다.** 서킷 오픈은 호출 전에 막힌 것이라 "보내지 않음"(`READY` 로 되돌림)이고,

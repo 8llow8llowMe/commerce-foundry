@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.Prod
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
 import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.global.support.RemoteResultCodes;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import feign.FeignException;
@@ -75,7 +76,7 @@ public class ProductInternalResponseSupport {
         if (response == null || response.dataHeader() == null || !response.dataHeader().success()
             || response.dataBody() == null || response.dataBody().skus() == null) {
             log.error("product-service sku response is not a success envelope. resultCode={}",
-                response == null || response.dataHeader() == null ? null : response.dataHeader().resultCode());
+                response == null || response.dataHeader() == null ? null : RemoteResultCodes.loggable(response.dataHeader().resultCode()));
             throw new CatalogException(CatalogErrorCode.PRODUCT_SERVICE_UNAVAILABLE);
         }
         try {
