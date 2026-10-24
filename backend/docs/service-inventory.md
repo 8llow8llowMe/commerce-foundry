@@ -28,7 +28,7 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 주문은 배송지 값을 요청에 실어 스냅숏으로 저장하므로 배송지 internal API 는 두지 않는다 — 필요해지면 #13 에서 연다 (`order-flow-guide.md` §4).
 "관리자 계정" 은 초기 관리자 시드(환경변수 `ADMIN_SEED_*`, 기동 시 멱등) · 관리자 로그인(`POST /api/v1/auth/admin/login`, access 만) ·
 어드민 회원 조회(`GET /api/v1/admin/members`, 마스킹 · `PageResponse`) · 관리자 감사 로그(`admin.audit` 로거 한 줄)가 있는 상태다 (`security-guide.md` §11).
-관리자 비밀번호 변경 · 관리자 추가 API · 영속 감사 테이블은 없다.
+관리자 비밀번호 변경 · 관리자 추가 API 는 없다. 관리자 감사는 로그 한 줄과 `auth.admin_audit_log` 에 함께 남고 `GET /api/v1/admin/audit-logs` 로 본다 (#192).
 "카탈로그 조회" 는 고객 카테고리 트리 · 상품 목록 · 상품 상세(`/api/v1/categories` · `/api/v1/products/**`)와 서비스 간 SKU 벌크 조회(`/internal/v1/skus`)가 있는 상태다.
 상품은 프리오더 여부 · 발송 예정일(`product.preorder` · `expected_ship_date`)을, 상품 미디어는 영상(`ImageType.VIDEO` + `poster_url`)을 가진다 — 플래그 `store.features.preorder` ·
 `store.features.product-video`(기본 꺼짐, local · dev 켬)로 응답에서 숨긴다 (#61, `api-design-guide.md` §2-7). 입력은 어드민 상품 쓰기(#9)에서 연다. "재고" 는 SKU 재고 · 어드민 재고 조회 · 조정 · 조정 이력(`/api/v1/admin/stocks/**`, #10 · #86) · 서비스 간 재고 선점 · 확정 · 해제(`/internal/v1/stock-reservations/**`) · 결제 후 취소 · 반품 재고 복원(`/internal/v1/stock-restorations`, 클레임당 1회, #85) · 선점 만료 스케줄러가 있는 상태다 (`order-flow-guide.md` §3).
