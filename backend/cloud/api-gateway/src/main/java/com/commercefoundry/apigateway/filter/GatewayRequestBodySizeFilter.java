@@ -2,6 +2,7 @@ package com.commercefoundry.apigateway.filter;
 
 import com.commercefoundry.apigateway.exception.GatewayErrorCode;
 import com.commercefoundry.apigateway.handler.GatewayErrorResponseWriter;
+import com.commercefoundry.apigateway.log.GatewayLogRedaction;
 import com.commercefoundry.apigateway.properties.GatewayRequestBodyProperties;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -83,7 +84,7 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
         }
         if (!reserve(limit)) {
             log.debug("gateway request rejected. reason=buffering-budget-exhausted, limit={}, method={}, path={}",
-                limit, request.getMethod(), abbreviate(request.getPath().value()));
+                limit, request.getMethod(), loggablePath(request));
             return reject(exchange, HttpStatus.LENGTH_REQUIRED, GatewayErrorCode.BAD_REQUEST);
         }
         AtomicBoolean released = new AtomicBoolean();
@@ -103,20 +104,20 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
             : contentLength > properties.discardMaxSize().toBytes() ? "over-discard-max-size" : null;
         if (skipReason != null) {
             log.debug("gateway request rejected. reason=body-too-large, contentLength={}, limit={}, discard=skipped-{}, method={}, path={}",
-                contentLength, limit, skipReason, request.getMethod(), abbreviate(request.getPath().value()));
+                contentLength, limit, skipReason, request.getMethod(), loggablePath(request));
             return rejectTooLarge(exchange);
         }
         return discard(request.getBody())
             .flatMap(outcome -> {
                 log.debug("gateway request rejected. reason=body-too-large, contentLength={}, limit={}, discard={}, method={}, path={}",
-                    contentLength, limit, outcome, request.getMethod(), abbreviate(request.getPath().value()));
+                    contentLength, limit, outcome, request.getMethod(), loggablePath(request));
                 if (!DISCARD_READ_FAILED.equals(outcome)) {
                     return rejectTooLarge(exchange);
                 }
                 // 읽다 실패했으면 클라이언트가 이미 끊었을 가능성이 크다 — 닫힌 채널에 쓰다 난 오류를 기본 오류 로그로 올리지 않는다
                 return rejectTooLarge(exchange).onErrorResume(error -> {
                     log.debug("gateway rejection not delivered. reason=body-too-large, error={}, method={}, path={}",
-                        error.getClass().getSimpleName(), request.getMethod(), abbreviate(request.getPath().value()));
+                        error.getClass().getSimpleName(), request.getMethod(), loggablePath(request));
                     return Mono.empty();
                 });
             });
@@ -159,7 +160,7 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
                     return rejectChunkedTooLarge(exchange, limit, body).then(Mono.<ChunkedBody>empty());
                 }
                 log.debug("gateway request rejected. reason=body-read-timeout, timeout={}, method={}, path={}",
-                    properties.bodyReadTimeout(), request.getMethod(), abbreviate(request.getPath().value()));
+                    properties.bodyReadTimeout(), request.getMethod(), loggablePath(request));
                 return reject(exchange, HttpStatus.REQUEST_TIMEOUT, GatewayErrorCode.BAD_REQUEST).then(Mono.<ChunkedBody>empty());
             })
             .flatMap(received -> received.tooLarge()
@@ -170,7 +171,7 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
     private Mono<Void> rejectChunkedTooLarge(ServerWebExchange exchange, long limit, ChunkedBody body) {
         ServerHttpRequest request = exchange.getRequest();
         log.debug("gateway request rejected. reason=body-too-large, contentLength=chunked, limit={}, received={}, method={}, path={}",
-            limit, body.received(), request.getMethod(), abbreviate(request.getPath().value()));
+            limit, body.received(), request.getMethod(), loggablePath(request));
         return rejectTooLarge(exchange);
     }
 
@@ -234,7 +235,9 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
         return errorResponseWriter.write(exchange.getResponse(), status, errorCode);
     }
 
-    private static String abbreviate(String path) {
+    /** 가린 경로(앞 3구간 — {@link GatewayLogRedaction#maskPath}). 남기는 구간이 길면 자른다. 거절 사유가 본문이라 경로 원문은 판단에 필요 없다. */
+    private static String loggablePath(ServerHttpRequest request) {
+        String path = GatewayLogRedaction.maskPath(request.getPath().value());
         return path.length() <= LOG_PATH_MAX_LENGTH ? path : path.substring(0, LOG_PATH_MAX_LENGTH) + "...(length=" + path.length() + ")";
     }
 

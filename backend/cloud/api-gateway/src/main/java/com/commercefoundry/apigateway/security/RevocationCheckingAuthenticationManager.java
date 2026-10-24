@@ -1,5 +1,6 @@
 package com.commercefoundry.apigateway.security;
 
+import com.commercefoundry.apigateway.log.GatewayLogRedaction;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import java.time.Clock;
@@ -108,7 +109,7 @@ public final class RevocationCheckingAuthenticationManager {
     /** 토큰 원문 · 예외 메시지는 남기지 않는다 — jti · 마스킹 경로 · 예외 타입만. */
     private void logFailOpen(String jti, ServerWebExchange exchange, Throwable failure) {
         String method = exchange.getRequest().getMethod().name();
-        String path = GatewaySecurityErrorResponder.maskPath(exchange.getRequest().getPath().value());
+        String path = GatewayLogRedaction.maskPath(exchange.getRequest().getPath().value());
         String reason = failure.getClass().getSimpleName();
         if (claimWarnSlot()) {
             log.warn("revocation list unavailable, token passed (fail-open). jti={}, method={}, path={}, reason={}, nextWarnIn={}",

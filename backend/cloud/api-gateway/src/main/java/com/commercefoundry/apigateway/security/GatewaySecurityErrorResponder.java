@@ -1,10 +1,10 @@
 package com.commercefoundry.apigateway.security;
 
+import com.commercefoundry.apigateway.log.GatewayLogRedaction;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.error.SecurityErrorEnvelope;
 import com.commercefoundry.security.error.SecurityErrorResolver;
 import com.commercefoundry.security.principal.MemberPrincipal;
-import java.util.Arrays;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.CacheControl;
@@ -27,15 +27,11 @@ import reactor.core.publisher.Mono;
  * 서비스의 {@code SecurityErrorResponder} 와 같은 {@link SecurityErrorResolver} · {@link SecurityErrorEnvelope} 로 <b>같은 코드 · 같은 바이트 ·
  * 같은 {@code WWW-Authenticate}</b> 를 쓴다 ({@code api-design-guide.md} §2-1). {@code GATEWAY_*} 는 라우팅 오류에만 쓴다.
  *
- * <p>로그 수준 · 마스킹도 서비스와 같다 — 코드 · 메서드 · 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간 경로 · 예외 타입만,
+ * <p>로그 수준 · 마스킹도 서비스와 같다 — 코드 · 메서드 · 가린 경로({@link GatewayLogRedaction#maskPath}, 앞 3구간) · 예외 타입만,
  * 로그인한 회원의 권한 거부는 memberId · jti 를 더한다. 토큰 원문과 예외 메시지(토큰 조각이 섞일 수 있다)는 남기지 않는다.
  */
 @Slf4j
 public final class GatewaySecurityErrorResponder implements ServerAuthenticationEntryPoint, ServerAccessDeniedHandler {
-
-    /** {@code SecurityErrorResponder.VISIBLE_PATH_SEGMENTS} 와 같은 값이다. 서블릿 패키지라 그 클래스를 가져오지 않는다. */
-    static final int VISIBLE_PATH_SEGMENTS = 3;
-    private static final String MASKED_REST = "/…";
 
     private final SecurityErrorEnvelope envelope;
 
@@ -85,23 +81,8 @@ public final class GatewaySecurityErrorResponder implements ServerAuthentication
         }
     }
 
-    /**
-     * 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남기고 나머지를 {@code /…} 로 가린다 — 서비스 {@code SecurityErrorResponder#maskPath} 와 같은 규칙.
-     * {@code /api/v1/orders/4611686018427387904} → {@code /api/v1/orders/…}. 쿼리 문자열은 원래 싣지 않는다.
-     */
-    static String maskPath(String path) {
-        if (path == null) {
-            return null;
-        }
-        String[] parts = path.split("/", VISIBLE_PATH_SEGMENTS + 2);
-        if (parts.length < VISIBLE_PATH_SEGMENTS + 2 || parts[VISIBLE_PATH_SEGMENTS + 1].isEmpty()) {
-            return path;
-        }
-        return String.join("/", Arrays.copyOf(parts, VISIBLE_PATH_SEGMENTS + 1)) + MASKED_REST;
-    }
-
     private static String maskedPath(ServerHttpRequest request) {
-        return maskPath(request.getPath().value());
+        return GatewayLogRedaction.maskPath(request.getPath().value());
     }
 
     private static String reason(AuthenticationException exception) {

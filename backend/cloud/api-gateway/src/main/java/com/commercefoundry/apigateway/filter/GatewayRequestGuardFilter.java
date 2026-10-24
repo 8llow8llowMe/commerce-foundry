@@ -2,6 +2,7 @@ package com.commercefoundry.apigateway.filter;
 
 import com.commercefoundry.apigateway.exception.GatewayErrorCode;
 import com.commercefoundry.apigateway.handler.GatewayErrorResponseWriter;
+import com.commercefoundry.apigateway.log.GatewayLogRedaction;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -85,6 +86,7 @@ public class GatewayRequestGuardFilter implements WebFilter, Ordered {
         String rawPath = request.getURI().getRawPath();
         Optional<String> violation = findViolation(rawPath);
         if (violation.isPresent()) {
+            // 경로 규칙 위반 · internal 경로 거절은 원문을 남긴다(DEBUG) — 공격 문자열 자체가 판단 근거다. 정상 경로의 거절은 가린다
             log.debug("gateway request rejected. reason={}, path={}", violation.get(), abbreviate(rawPath));
             return errorResponseWriter.write(response, HttpStatus.BAD_REQUEST, GatewayErrorCode.BAD_REQUEST);
         }
@@ -97,7 +99,7 @@ public class GatewayRequestGuardFilter implements WebFilter, Ordered {
 
         List<String> authorizations = request.getHeaders().get(HttpHeaders.AUTHORIZATION);
         if (authorizations != null && authorizations.size() > 1) {
-            log.debug("gateway request rejected. reason=multiple-authorization-headers, count={}, path={}", authorizations.size(), abbreviate(rawPath));
+            log.debug("gateway request rejected. reason=multiple-authorization-headers, count={}, path={}", authorizations.size(), abbreviate(GatewayLogRedaction.maskPath(rawPath)));
             return errorResponseWriter.write(response, HttpStatus.BAD_REQUEST, GatewayErrorCode.BAD_REQUEST);
         }
         return chain.filter(exchange);

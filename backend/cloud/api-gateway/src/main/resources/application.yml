@@ -164,3 +164,6 @@ logging:
     # Eureka 에 닿지 않으면 이 데코레이터가 INFO · WARN 로그에 defaultZone 원문(비밀번호 포함)을 남긴다 (#248, security-guide.md §12-3).
     # 연결 실패 신호는 RetryableEurekaHttpClient 의 WARN 이 남긴다. com.netflix.discovery 를 DEBUG 로 올리지 않는다 — 같은 이유로 비밀번호가 나온다
     com.netflix.discovery.shared.transport.decorator.RedirectingEurekaHttpClient: ERROR
+    # 응답이 커밋된 뒤의 오류를 원래 예외 메시지 · 원문 경로 · 쿼리째 ERROR 로 찍는다("Error [...] for HTTP GET \"/path?query\", but ServerHttpResponse already committed").
+    # GatewayErrorWebExceptionHandler 가 먼저 가린 한 줄(경로 앞 3구간 · 예외 타입과 프레임)을 남기므로 끈다 (coding-conventions.md §8, #285)
+    org.springframework.web.server.adapter.HttpWebHandlerAdapter: OFF
