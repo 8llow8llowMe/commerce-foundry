@@ -277,8 +277,8 @@ Info → Presenter → Response
   게이트웨이는 원문 경로로 라우트를 고르고 그대로 넘기는데, 하류 Tomcat 은 그 경로를 정규화한다 —
   `/api/v1/products/../../internal/...` 이 내부 API 로, `/api/v1/orders/../admin/...` 이 어드민 경로로 바뀌어 판정을 우회한다.
 - **Eureka(8761) · 서비스 포트 · 게이트웨이 → 서비스 평문 HTTP 는 사설망 전용이다.** 외부에는 게이트웨이 포트만 연다.
-  Eureka 레지스트리는 인증이 없어 닿기만 하면 인스턴스를 등록·삭제할 수 있다. 운영 Eureka 인증은 배포 이슈 · #32 에서 정한다.
-  로컬은 `service-discovery` 의 `local` 프로파일이 루프백(127.0.0.1)에만 묶는다.
+  Eureka 레지스트리는 HTTP Basic(공유 비밀번호 `EUREKA_PASSWORD`)으로 등록 · 조회를 닫는다 — `health` 만 익명, 대시보드는 local 만 연다(#248, `security-guide.md` §12).
+  평문이라 도청은 막지 못한다. 로컬은 `service-discovery` 의 `local` 프로파일이 루프백(127.0.0.1)에도 묶는다.
 - 게이트웨이의 개발용 라우트(서비스 헬스 체크 · Swagger 문서, `api-design-guide.md` §1)는 local · dev 에서만 켠다 (`gateway.dev-routes.enabled`).
   서비스마다 **정확한 경로만** 열고 하류 경로를 고정한다(`/actuator/health`, `/v3/api-docs/{customer|admin}`).
   `/docs/{service-id}/**` 처럼 접두어만 떼는 라우트를 만들지 않는다 — `/internal/**` 에 닿고 어드민 경로 판정을 우회한다.

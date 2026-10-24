@@ -763,6 +763,7 @@ openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하
 ### 9-9. 2단계 (예정)
 
 - 배포 환경이 정해지면(`service-inventory.md` §5) **서비스별 RS256 키** 또는 **플랫폼 mTLS** 로 바꾼다. 그때 호출자가 "증명" 된다.
+  Eureka 레지스트리 인증(§12, 공유 비밀번호 Basic)도 이때 서비스별 신원 · mTLS 로 함께 본다.
 - 바꾸는 것은 검증기 · 발급기뿐이다. 주체(`ServicePrincipal`) · 권한 이름(`SERVICE_<service-id>`) · 허용 목록 선언 · Feign Capability 경계 · 오류 코드는 그대로 둔다.
 
 ### 9-10. 테스트
@@ -933,3 +934,69 @@ CUSTOMER 토큰으로 어드민 경로에 오면 게이트웨이와 서비스가
 
 - 서비스 스모크의 "컨트롤러 미도달" 은 감사 로그(`action=MEMBER_SEARCH`)가 stdout 에 없는 것으로 판정한다 — 로깅 설정이 그 로거를 콘솔에서 빼면 거짓 통과하므로,
   같은 테스트의 ADMIN 200 케이스가 그 줄이 잡히는 것(`contains`)을 함께 단언한다.
+
+## 12. Eureka 레지스트리 인증 (#248)
+
+같은 docker 네트워크에 붙은 컨테이너면 누구나 Eureka 에 아무 서비스 이름으로 인스턴스를 등록할 수 있었다. 가짜 `PAYMENT-SERVICE` 가 등록되면
+게이트웨이 `lb://` 가 사용자 요청 일부를 그쪽으로 보내고, 그 인스턴스가 `Authorization` 토큰과 요청 본문을 받는다. 네트워크 분리(`deploy-guide.md` §6)에 더해 레지스트리를 인증으로 닫는다.
+
+### 12-1. 방식 — HTTP Basic
+
+| 방식 | 판단 |
+|------|------|
+| **HTTP Basic** (채택) | Spring Cloud 가 공식 지원하는 경로다. 클라이언트는 `defaultZone` URL 의 userinfo 를 Basic 헤더로 바꿔 싣고(userinfo 를 뗀 URL 로 요청), 코드가 없다. 서버는 보안 체인 하나와 기동 가드다. 새 시크릿은 하나다 |
+| mTLS | CA · 서비스별 인증서 발급 · 갱신을 2인이 운영해야 하고, 게이트웨이 → 서비스 · 서비스 간 호출까지 TLS 가 아니면 반쪽이다. §9-9(2단계)와 함께 본다 |
+| 네트워크 정책만 | 이미 적용돼 있고(#196) 잘못 붙은 컨테이너 · 호스트 안 프로세스를 막지 못한다. 테스트로 증명할 수 없다 |
+
+- 평문 HTTP 위 Basic 이라 도청에는 무력하다 — 사설망 평문 HTTP 전제(`architecture-guide.md` §6)와 같은 한계다.
+- 틀린 자격 증명마다 BCrypt 를 돌리므로 같은 네트워크 안에서는 Eureka CPU 를 소모시킬 수 있다. 정상 부하(heartbeat · 조회 약 0.5 rps)는 문제가 없고, 네트워크 분리가 1차 방어다.
+- **계정은 하나다** — 사용자 `eureka`(고정, 비밀 아님), 비밀번호 `EUREKA_PASSWORD`. service-discovery · 게이트웨이 · 서비스 전부 같은 값, 환경(dev · prod)마다 다른 값이다.
+  Eureka 는 계정과 서비스 이름을 묶지 않아 서비스별 계정은 효과가 없다.
+
+### 12-2. 서버 (`cloud/service-discovery`)
+
+- `DiscoverySecurityConfig` — 세션 · CSRF · 폼 로그인을 끄고 HTTP Basic 을 켠다. `/actuator/health` 만 익명(compose healthcheck), 다른 actuator 는 막고, 나머지
+  (`/eureka/**` 등록 · 조회 · heartbeat, 대시보드)는 인증이 필요하다. 무자격 · 틀린 자격 증명은 401 + `WWW-Authenticate: Basic` 이다.
+- 비밀번호는 BCrypt 로 해시해 메모리에 둔다. `spring.security.user.*` 는 쓰지 않는다(`{noop}` 평문 저장).
+- **대시보드는 기본 닫힘**(`eureka.dashboard.enabled: false`) — 브라우저가 Basic 자격 증명을 기억하는 유일한 경로다. 로컬만 연다.
+  배포 환경은 ssh 터널로 `curl -u eureka:<비밀번호> http://127.0.0.1:<호스트 포트>/eureka/apps` 를 본다.
+- **기동 가드**(`DiscoveryPasswordStartupGuard`) — `EUREKA_PASSWORD` 가 비었거나 · 플레이스홀더가 풀리지 않았거나 · 32자 미만이거나 ·
+  영문 · 숫자 · `. _ ~ -` 밖의 문자가 있으면 뜨지 않는다. 메시지에 값을 싣지 않는다. 인증을 끄는 스위치 · 기본값은 없다.
+
+### 12-3. 클라이언트 (게이트웨이 · 서비스 전부)
+
+```yaml
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka:${EUREKA_PASSWORD}@${EUREKA_HOST:localhost}:8761/eureka/
+    should-enforce-registration-at-init: true
+```
+
+- URL 은 yml 이 조립한다. env 는 호스트(`EUREKA_HOST`)와 비밀번호만 준다 — 비밀번호를 URL 째 Vault 에 두면 서버용과 두 벌이 돼 교체 때 어긋난다.
+- **비밀번호 문자 규칙이 필수인 이유** — Eureka 클라이언트는 userinfo 를 디코딩해 `:` 로 나누고, 두 조각이 아니거나 URL 이 파싱되지 않으면
+  **예외 없이 인증 없이** 요청한다. `:` 는 `%3A` 로도 안 된다. 인코딩을 풀지 않고 `openssl rand -hex 32` 로 문제 자체를 없앤다. 서버 가드가 같은 규칙을 강제해
+  잘못된 값은 Eureka 배포 단계에서 먼저 드러난다.
+- `should-enforce-registration-at-init` — 기동 때 등록이 실패하면(401 · 연결 불가) 클라이언트가 뜨지 않는다. 비밀번호가 틀린 채 "등록 안 된 UP" 으로 숨지 않는다.
+  그래서 **Eureka 가 먼저 떠 있어야 한다**(`deploy-guide.md` §5 기동 순서). 테스트는 `eureka.client.enabled=false` 라 영향이 없다.
+- `EUREKA_PASSWORD` 는 기본값이 없다. 로컬도 `backend/.env` 에 넣는다(`local-run-guide.md` §2).
+- **로그에 비밀번호가 나오지 않게 한다** — Eureka 에 닿지 않으면 `RedirectingEurekaHttpClient` 가 INFO · WARN 으로 `defaultZone` 원문(userinfo 포함)을 남긴다.
+  7개 모듈 yml 이 그 로거를 `ERROR` 로 둔다(연결 실패 신호는 `RetryableEurekaHttpClient` 의 WARN 이 남긴다). `com.netflix.discovery` 를 DEBUG 로 올리지 않는다 —
+  `ConfigClusterResolver` 등이 같은 URL 을 찍는다. 요청 자체는 userinfo 를 뗀 URL 로 나가 예외 메시지에는 실리지 않는다.
+
+### 12-4. 비밀번호 교체 런북
+
+이전 값을 함께 받는 `_PREVIOUS` 는 두지 않았다. 교체 중 잠깐의 등록 실패를 감수한다.
+
+1. 새 값을 만든다 — `openssl rand -hex 32`. 그 환경 Vault secret 의 `EUREKA_PASSWORD` 를 바꾼다.
+2. service-discovery 를 다시 배포한다. 레지스트리는 메모리라 비워지고, 이때부터 옛 비밀번호의 heartbeat 는 401 이다.
+3. 게이트웨이 → 서비스 순서로 다시 배포한다. 새 값으로 30초 안에 다시 등록된다.
+- 2~3 사이에는 게이트웨이가 마지막으로 받아 둔 레지스트리로 **살아 있는** 옛 인스턴스에 계속 라우팅한다. 새로 뜨는 인스턴스는 3 이 끝나야 보인다.
+- 비밀번호가 새면 같은 절차를 바로 밟는다. 새 값이 들어가기 전까지 그 값을 아는 컨테이너는 인스턴스를 등록할 수 있다 — 네트워크 분리가 1차 방어다.
+
+### 12-5. 테스트
+
+| 위치 | 테스트 | 고정하는 것 |
+|------|--------|-------------|
+| service-discovery | `DiscoverySecurityTest` (실제 포트 HTTP) | 무자격 조회 401 + `WWW-Authenticate: Basic` · 무자격 / 틀린 비밀번호 / 다른 사용자 등록 401 이고 레지스트리에 없음 · 올바른 자격 증명 등록 204 · 조회 200 · health 익명 UP · 다른 actuator 401 · 대시보드 익명 401 · 인증해도 기본 꺼짐 404 |
+| service-discovery | `DiscoveryPasswordStartupGuardTest` | hex 64자 통과 · 없음 · 공백 · 풀리지 않은 플레이스홀더 · 31자 · `:` `@` `%3A` 공백 포함 시 기동 실패, 메시지에 값 없음 |
