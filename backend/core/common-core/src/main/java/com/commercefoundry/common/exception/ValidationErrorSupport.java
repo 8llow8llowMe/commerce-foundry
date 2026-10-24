@@ -2,8 +2,11 @@ package com.commercefoundry.common.exception;
 
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.dto.ValidationErrorItem;
+import com.commercefoundry.common.validation.ConstraintPriority;
+import com.commercefoundry.common.validation.ConstraintPriority.Level;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
+import java.lang.annotation.Annotation;
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -18,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
+import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -40,7 +44,8 @@ import tools.jackson.databind.exc.MismatchedInputException;
  * 평가 순서를 보장하지 않으므로 정렬하지 않으면 같은 요청에 resultCode 가 바뀔 수 있다.
  *
  * <p>정렬 기준은 (1) DTO 선언 순서 → (2) 제약 우선순위(필수 → 길이 → 범위 → 형식) →
- * (3) 메시지 순이다. resultCode 와 대표 메시지는 정렬된 첫 번째 오류를 사용한다.
+ * (3) 메시지 순이다. resultCode 와 대표 메시지는 정렬된 첫 번째 오류를 사용한다. 서비스가 만든 제약은
+ * {@link ConstraintPriority} 로 자기 자리를 밝힌다 — 밝히지 않으면 표준 제약 모두의 뒤에 선다.
  *
  * <p><b>응답 모양은 다른 오류와 같다</b> — 대표 메시지는 {@code dataHeader.resultMessage} 에
  * 문자열로, 필드별 목록은 {@code dataHeader.fieldErrors} 에 담긴다.
@@ -51,28 +56,29 @@ public final class ValidationErrorSupport {
     private static final String UNKNOWN_FIELD = "request";
 
     /**
-     * 제약 애노테이션별 표시 우선순위. 값이 작을수록 먼저 보여준다.
-     * 값이 비어 있는지(필수) → 길이 → 범위 → 형식 순으로, 사용자가 먼저 고쳐야 하는 것을 앞에 둔다.
+     * 표준 제약 애노테이션별 표시 우선순위. 값이 비어 있는지(필수) → 길이 → 범위 → 형식 순으로, 사용자가 먼저 고쳐야 하는 것을 앞에 둔다.
+     * 서비스가 만든 제약은 여기에 적지 않고 제약 애노테이션에 {@link ConstraintPriority} 를 달아 스스로 밝힌다 (#261).
      */
-    private static final Map<String, Integer> CONSTRAINT_PRIORITY = Map.ofEntries(
-        Map.entry("NotNull", 0),
-        Map.entry("NotBlank", 0),
-        Map.entry("NotEmpty", 0),
-        Map.entry("Size", 1),
-        Map.entry("Length", 1),
-        Map.entry("Min", 2),
-        Map.entry("Max", 2),
-        Map.entry("DecimalMin", 2),
-        Map.entry("DecimalMax", 2),
-        Map.entry("Positive", 2),
-        Map.entry("PositiveOrZero", 2),
-        Map.entry("Negative", 2),
-        Map.entry("NegativeOrZero", 2),
-        Map.entry("Range", 2),
-        Map.entry("Email", 3),
-        Map.entry("Pattern", 3),
-        Map.entry("URL", 3)
+    private static final Map<String, Level> CONSTRAINT_PRIORITY = Map.ofEntries(
+        Map.entry("NotNull", Level.REQUIRED),
+        Map.entry("NotBlank", Level.REQUIRED),
+        Map.entry("NotEmpty", Level.REQUIRED),
+        Map.entry("Size", Level.LENGTH),
+        Map.entry("Length", Level.LENGTH),
+        Map.entry("Min", Level.RANGE),
+        Map.entry("Max", Level.RANGE),
+        Map.entry("DecimalMin", Level.RANGE),
+        Map.entry("DecimalMax", Level.RANGE),
+        Map.entry("Positive", Level.RANGE),
+        Map.entry("PositiveOrZero", Level.RANGE),
+        Map.entry("Negative", Level.RANGE),
+        Map.entry("NegativeOrZero", Level.RANGE),
+        Map.entry("Range", Level.RANGE),
+        Map.entry("Email", Level.FORMAT),
+        Map.entry("Pattern", Level.FORMAT),
+        Map.entry("URL", Level.FORMAT)
     );
+    /** 자리를 밝히지 않은 제약 — 표준 제약 모두의 뒤에 선다. */
     private static final int UNKNOWN_CONSTRAINT_PRIORITY = 9;
 
     private ValidationErrorSupport() {
@@ -82,7 +88,7 @@ public final class ValidationErrorSupport {
         List<RawError> rawErrors = new ArrayList<>();
         for (ObjectError error : exception.getBindingResult().getAllErrors()) {
             String field = error instanceof FieldError fieldError ? fieldError.getField() : error.getObjectName();
-            rawErrors.add(new RawError(field, error.getDefaultMessage(), resolveConstraint(error)));
+            rawErrors.add(new RawError(field, error.getDefaultMessage(), priorityOf(error)));
         }
         // record DTO 면 컴포넌트 선언 순서를 알 수 있어 필드 순서까지 고정할 수 있다.
         return build(rawErrors, resolveFieldOrder(exception.getBindingResult().getTarget()), defaultCode);
@@ -91,7 +97,7 @@ public final class ValidationErrorSupport {
     public static ResponseEntity<Response<Void>> toResponse(ConstraintViolationException exception, String defaultCode) {
         List<RawError> rawErrors = new ArrayList<>();
         for (ConstraintViolation<?> violation : exception.getConstraintViolations()) {
-            rawErrors.add(new RawError(resolveLeafField(violation), violation.getMessage(), resolveConstraint(violation)));
+            rawErrors.add(new RawError(resolveLeafField(violation), violation.getMessage(), priorityOf(violation)));
         }
         return build(rawErrors, Map.of(), defaultCode);
     }
@@ -103,7 +109,7 @@ public final class ValidationErrorSupport {
             String parameterName = result.getMethodParameter().getParameterName();
             String field = parameterName == null ? UNKNOWN_FIELD : parameterName;
             result.getResolvableErrors()
-                .forEach(error -> rawErrors.add(new RawError(field, error.getDefaultMessage(), resolveConstraint(error))));
+                .forEach(error -> rawErrors.add(new RawError(field, error.getDefaultMessage(), priorityOf(result, error))));
         });
         return build(rawErrors, Map.of(), defaultCode);
     }
@@ -202,10 +208,53 @@ public final class ValidationErrorSupport {
     }
 
     /**
+     * Spring 이 Bean Validation 결과로 만든 오류는 원본 {@link ConstraintViolation} 을 품고 있어 제약 애노테이션 타입까지 본다.
+     * 품고 있지 않으면(호출부가 직접 만든 오류) 코드에서 애노테이션 이름만 읽는다.
+     */
+    private static int priorityOf(MessageSourceResolvable error) {
+        if (error instanceof ObjectError objectError && objectError.contains(ConstraintViolation.class)) {
+            return priorityOf(objectError.unwrap(ConstraintViolation.class));
+        }
+        return standardPriorityOf(constraintNameOf(error));
+    }
+
+    /**
+     * 단순 파라미터의 오류는 {@link ObjectError} 가 아니라 결과 객체가 원본 위반을 들고 있다.
+     * {@code @Valid} 빈의 오류({@link ObjectError})는 결과 객체의 unwrap 이 {@code FieldError} 로 캐스트해 전역 오류에서 깨지므로 오류 자신에게 묻는다.
+     */
+    private static int priorityOf(ParameterValidationResult result, MessageSourceResolvable error) {
+        if (error instanceof ObjectError) {
+            return priorityOf(error);
+        }
+        try {
+            return priorityOf(result.unwrap(error, ConstraintViolation.class));
+        } catch (IllegalArgumentException noViolation) {
+            return priorityOf(error);
+        }
+    }
+
+    private static int priorityOf(ConstraintViolation<?> violation) {
+        if (violation.getConstraintDescriptor() == null || violation.getConstraintDescriptor().getAnnotation() == null) {
+            return UNKNOWN_CONSTRAINT_PRIORITY;
+        }
+        Class<? extends Annotation> type = violation.getConstraintDescriptor().getAnnotation().annotationType();
+        ConstraintPriority declared = type.getAnnotation(ConstraintPriority.class);
+        if (declared != null) {
+            return declared.value().order();
+        }
+        return standardPriorityOf(type.getSimpleName());
+    }
+
+    private static int standardPriorityOf(String constraintName) {
+        Level level = CONSTRAINT_PRIORITY.get(constraintName);
+        return level == null ? UNKNOWN_CONSTRAINT_PRIORITY : level.order();
+    }
+
+    /**
      * 제약 애노테이션 단순명을 뽑아낸다. Spring 은 코드를 {@code "Size.dto.field"} 처럼 만들어 두므로
      * 첫 마디만 취하면 애노테이션 이름이 된다.
      */
-    private static String resolveConstraint(MessageSourceResolvable error) {
+    private static String constraintNameOf(MessageSourceResolvable error) {
         String[] codes = error.getCodes();
         if (codes == null || codes.length == 0 || codes[0] == null) {
             return "";
@@ -213,13 +262,6 @@ public final class ValidationErrorSupport {
         String code = codes[0];
         int dotIndex = code.indexOf('.');
         return dotIndex < 0 ? code : code.substring(0, dotIndex);
-    }
-
-    private static String resolveConstraint(ConstraintViolation<?> violation) {
-        if (violation.getConstraintDescriptor() == null || violation.getConstraintDescriptor().getAnnotation() == null) {
-            return "";
-        }
-        return violation.getConstraintDescriptor().getAnnotation().annotationType().getSimpleName();
     }
 
     /**
@@ -287,7 +329,7 @@ public final class ValidationErrorSupport {
         List<RawError> sorted = new ArrayList<>(rawErrors);
         sorted.sort(Comparator
             .comparingInt((RawError rawError) -> fieldIndex(rawError.field(), fieldOrder, appearanceOrder))
-            .thenComparingInt(rawError -> CONSTRAINT_PRIORITY.getOrDefault(rawError.constraint(), UNKNOWN_CONSTRAINT_PRIORITY))
+            .thenComparingInt(RawError::priority)
             // 같은 필드에 같은 우선순위 제약이 둘 이상이어도 순서가 흔들리지 않도록 메시지로 마무리한다.
             .thenComparing(rawError -> rawError.rawMessage() == null ? "" : rawError.rawMessage()));
 
@@ -318,8 +360,8 @@ public final class ValidationErrorSupport {
     }
 
     /**
-     * 정렬 전 원본 오류. 제약 애노테이션 이름을 함께 들고 있어야 우선순위를 매길 수 있다.
+     * 정렬 전 원본 오류와 그 제약의 우선순위.
      */
-    private record RawError(String field, String rawMessage, String constraint) {
+    private record RawError(String field, String rawMessage, int priority) {
     }
 }
