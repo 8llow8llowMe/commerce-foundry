@@ -11,6 +11,7 @@
 ```text
 backend/
 ├── core/           (라이브러리 — jar, bootJar off)
+│   ├── ai-core              Claude API 클라이언트(공식 Java SDK) · 개인정보 마스킹 · 동시 호출 상한 · 기동 가드 (#215)
 │   ├── common-core          Response 래퍼, 오류 봉투, 검증 유틸, Swagger 공통
 │   ├── persistence-core     JPA / QueryDSL / Snowflake ID / BaseEntity / Slice·PageResponse
 │   ├── redis-core           Redis 연결 (Boot 자동설정 + 기동 가드) · 키 규칙
@@ -37,6 +38,7 @@ backend/
 
 | 모듈 | 넣는 것 | 넣지 않는 것 |
 |------|---------|--------------|
+| `ai-core` | 도메인을 모르는 Claude 클라이언트(`AiClient`) · 개인정보 마스킹(`PiiMasker`) · 동시 호출 상한 · 설정 · 기동 가드. 공식 SDK 는 `implementation` 이라 서비스에 드러나지 않는다 | 프롬프트 문구 · 결과 해석 · 사용량 원장(엔티티) · 월 한도 정책 · 오류 번역 (쓰는 서비스 몫 — 원장 · 한도는 operations-service, #215 이후 PR) |
 | `common-core` | 도메인 비의존 범용 인프라 | 특정 서비스의 도메인 개념 |
 | `persistence-core` | DB 접근 공통 설정·유틸 | 엔티티 (엔티티는 각 서비스 소유) |
 | `storage-core` | 도메인을 모르는 S3 호환 클라이언트(`ObjectStorageClient`) · 설정 · 기동 가드 · magic bytes 판별(`ImageFormat`). AWS SDK 는 `implementation` 이라 서비스에 드러나지 않는다 | 키 규칙(어느 prefix 에 무엇을 두는가) · 허용 형식 · 용량 상한 · 오류 코드 번역 (쓰는 서비스의 `adapter/out/client/storage` 몫) |
