@@ -6,6 +6,7 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.assertj.AssertableApplicationContext;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -49,10 +50,50 @@ class TossPaymentsStartupGuardTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"test_sk_abc123XYZ", "test_gsk_abc123XYZ"})
-    @DisplayName("API 개별 연동 키(sk)와 결제위젯 키(gsk)를 둘 다 받는다")
+    @ValueSource(strings = {"test_sk_abc123XYZ", "test_gsk_abc123XYZ", "test_gsk_docs_dummyKey0001"})
+    @DisplayName("API 개별 연동 키(sk)와 결제위젯 키(gsk)를 둘 다 받고, 문서 예시 키처럼 밑줄이 섞여도 받는다")
     void acceptsApiAndWidgetSecretKeys(String key) {
         runWith("local", key).run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://api.tosspayments.com/", "http://api.tosspayments.com", "https://api.tosspayments.com.example.org", "http://127.0.0.1:8089"})
+    @DisplayName("live_ 키면 base-url 은 정확히 https://api.tosspayments.com 이어야 한다 — 라이브 키의 인증 헤더가 다른 호스트로 나가지 않게")
+    void failsWithLiveKeyOnOtherBaseUrl(String baseUrl) {
+        runWith("prod", LIVE_KEY)
+            .withPropertyValues("toss.base-url=" + baseUrl)
+            .run(context -> assertStartupFailure(context, LIVE_KEY, "toss.base-url", "https://api.tosspayments.com"));
+    }
+
+    @Test
+    @DisplayName("test_ 키는 가짜 서버(WireMock 등) 주소를 쓸 수 있다")
+    void testKeyAllowsOtherBaseUrl() {
+        runWith("test", TEST_KEY)
+            .withPropertyValues("toss.base-url=http://127.0.0.1:8089")
+            .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "spring.cloud.openfeign.client.config.default.logger-level, HEADERS",
+        "spring.cloud.openfeign.client.config.default.logger-level, FULL",
+        "spring.cloud.openfeign.client.config.toss-payments.logger-level, HEADERS",
+        "spring.cloud.openfeign.client.config.toss-payments.logger-level, full"
+    })
+    @DisplayName("Feign 로그 수준이 HEADERS · FULL 이면 기동하지 않는다 — Basic 헤더(시크릿 키)가 로그에 남는다")
+    void failsWithHeaderLogging(String property, String level) {
+        runWith("local", TEST_KEY)
+            .withPropertyValues(property + "=" + level)
+            .run(context -> assertStartupFailure(context, TEST_KEY, property, "HEADERS"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"NONE", "BASIC"})
+    @DisplayName("Feign 로그 수준 NONE · BASIC 은 헤더를 남기지 않아 받는다")
+    void acceptsNonHeaderLogging(String level) {
+        runWith("local", TEST_KEY)
+            .withPropertyValues("spring.cloud.openfeign.client.config.toss-payments.logger-level=" + level)
+            .run(context -> assertThat(context).hasNotFailed());
     }
 
     @Test

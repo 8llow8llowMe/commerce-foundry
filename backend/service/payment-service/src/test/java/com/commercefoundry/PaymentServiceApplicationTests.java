@@ -28,10 +28,14 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
  * 컨텍스트 로딩 게이트. test 프로파일(H2, Eureka 꺼짐)에서 빈 정의가 끝까지 조립되는지와 Swagger 노출 범위를 본다.
+ *
+ * <p>토스 키는 여기서 고정한다 — OS 환경변수 TOSS_SECRET_KEY 는 {@code toss.secret-key} 로 바로 묶여 yml 보다 우선하므로, 개발 PC 에 다른 형식의 키가 있으면
+ * 가드가 기동을 막아 이 게이트가 환경에 따라 달라진다. 값은 형식만 맞춘 더미다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
+@TestPropertySource(properties = {"toss.secret-key=test_sk_dummyForContextTestsOnly000", "toss.base-url=http://127.0.0.1:9"})
 class PaymentServiceApplicationTests {
 
     @Autowired

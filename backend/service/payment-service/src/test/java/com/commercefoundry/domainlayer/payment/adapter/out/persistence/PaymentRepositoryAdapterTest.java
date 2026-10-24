@@ -155,7 +155,7 @@ class PaymentRepositoryAdapterTest {
         assertThat(paymentRepositoryPort.findActiveByOrderId(ORDER_ID)).contains(reverted);
         assertThat(reverted.approvalStartedAt()).isEqualTo(STARTED_AT);
 
-        paymentRepositoryPort.save(reverted.abortAfterInquiry(new PaymentInquiry.Failed("NOT_FOUND_PAYMENT_SESSION", null), PaymentAbortReason.REPREPARED));
+        paymentRepositoryPort.save(reverted.abortAfterInquiry(new PaymentInquiry.Failed(PAYMENT_KEY, "NOT_FOUND_PAYMENT_SESSION", null), PaymentAbortReason.REPREPARED));
         Payment retry = paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, ORDER_ID));
         entityManager.clear();
 
