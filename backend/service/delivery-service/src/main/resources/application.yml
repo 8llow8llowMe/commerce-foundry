@@ -23,6 +23,13 @@ spring:
       hibernate:
         # 서비스별 스키마 (service-inventory.md §4). 다른 서비스 스키마를 직접 조회하지 않는다
         default_schema: delivery
+        jdbc:
+          # INSERT · UPDATE 를 50개씩 묶어 왕복 1회로 보낸다 — 국내 정책 교체(구간 최대 200)가 구간 · 이력 구간 INSERT 601행을 행마다 따로 보내지 않게 (#255).
+          # 아이디를 직접 넣는(Snowflake) 엔티티라 IDENTITY 처럼 배치가 꺼지지 않는다. 문장 수는 ShippingPolicyReplaceStatementCountTest 가 지킨다
+          batch_size: 50
+        # 같은 엔티티의 INSERT · UPDATE 를 모아 배치가 엔티티가 바뀔 때마다 끊기지 않게 한다
+        order_inserts: true
+        order_updates: true
         query:
           # IN 절 바인드 파라미터 수를 2의 거듭제곱으로 채운다 — 개수마다 다른 SQL 이 생겨 쿼리 계획 · PreparedStatement 캐시가 늘어나지 않게 (coding-conventions.md §9-6)
           in_clause_parameter_padding: true
