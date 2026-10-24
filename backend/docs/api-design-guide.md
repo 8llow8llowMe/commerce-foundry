@@ -111,6 +111,9 @@ return ResponseEntity.ok().body(Response.success(response));
   "fieldErrors":[{"code":"MEMBER_103","field":"phone","message":"휴대폰 번호 형식이 올바르지 않습니다."}]},"dataBody":null}
 ```
 
+- 검증 오류가 여럿이면 `fieldErrors` 를 필드 선언 순서 → 필수 → 길이 → 범위 → 형식으로 정렬하고, 첫 항목이 `resultCode` · `resultMessage` 가 된다.
+  서비스가 만든 제약은 `@ConstraintPriority` 로 이 자리를 밝힌다 — 정본은 [coding-conventions.md](coding-conventions.md) §8-2 (#261).
+
 - **게이트웨이가 끊은 응답(JWT 거부, ADMIN 아님)도 같은 봉투로 나간다.** 클라이언트는 어디서 끊겼는지 모른다.
 - 인증·인가 오류 코드는 `SECURITY_00x` 하나로 통일한다. **게이트웨이도 JWT 거부는 `SECURITY_*` 를 쓴다.**
   코드 표와 `WWW-Authenticate` 값의 정본은 [security-guide.md](security-guide.md) §4 다.

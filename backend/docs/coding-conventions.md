@@ -189,6 +189,11 @@ public final class ProductValidationMessage {
   도메인 핸들러가 bean 결과가 있을 때 `MethodArgumentNotValidException` 모양(필드명 · record 선언 순서)으로 옮기고 파라미터 오류를 함께 싣는다.
   예: product-service `ProductExceptionHandler` · `PATCH /api/v1/admin/stocks/{skuId}` (#10).
 - 한 필드의 여러 오류는 순서를 고정한다: 필드 선언 순서 → 필수 → 길이 → 범위 → 형식.
+  `ValidationErrorSupport` 는 표준 제약(`@NotBlank` · `@Size` · `@Email` …)의 자리만 이름으로 안다. **서비스가 만든 제약은
+  애노테이션 위에 `@ConstraintPriority(Level.LENGTH)` 처럼 자기 자리를 밝힌다** — 밝히지 않으면 표준 제약 모두의 뒤에 서서,
+  형식도 틀리고 정규화 뒤 길이도 넘을 때 대표 코드가 길이가 아니라 형식이 된다. common-core 에 서비스 제약 이름을 적지 않는다 (#261).
+  예: auth `@ValidNormalizedEmailLength` · order `@NormalizedMaxLength`. 자리는 원본 `ConstraintViolation` 에서 읽으므로,
+  핸들러가 오류를 새 `FieldError` 로 옮겨 담을 때는 `wrap(violation)` 으로 원본을 실어야 한다 — 싣지 않으면 이름으로만 판정해 맨 뒤에 선다.
 - 컬렉션 원소는 `@NotNull` 과 값 제약을 쌍으로 건다 — `List<@Positive Long>` 만 걸면 `[null]` 이 통과한다.
 
 ### 8-3. 하드코딩된 문자열 금지
