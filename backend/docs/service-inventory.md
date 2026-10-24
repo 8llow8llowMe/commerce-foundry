@@ -95,6 +95,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | ArchUnit | 1.4.1 (core 라이브러리만) | 컨트롤러 인가 · Feign 전역 설정 정적 규칙 (`security-guide.md` §9-11). JUnit 엔진(archunit-junit5)은 쓰지 않는다. Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정 |
 | WireMock | 3.13.2 (`wiremock-standalone`, 테스트 전용) | 외부 API(토스) 어댑터 테스트. Jetty · Jackson 을 shaded 로 품어 Boot 4 · Jackson 3 와 섞이지 않는다. Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정 |
 | Testcontainers | 2.0.5 (Boot BOM) | 리포지토리 테스트의 PostgreSQL 17. Docker 가 없으면 로컬은 건너뛰고 CI 는 실패한다 (`bootstrap-conventions.md`) |
+| datasource-proxy | 1.11.1 (delivery-service `testImplementation` 만) | JDBC 왕복 · 배치 실행 횟수 측정(`coding-conventions.md` §9-6, #255). Boot BOM 이 관리하지 않아 서비스 build.gradle 에서 고정 |
 | AWS SDK for Java v2 | 2.55.11 (storage-core 만 · `s3` + `url-connection-client`) | Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정. `implementation` 이라 서비스는 SDK 타입을 보지 못한다. 딸려 오는 `apache5-client` · `netty-nio-client` 는 뺀다 (Boot BOM 이 HttpClient 5 를 낮춰 고정한다) |
 | S3 호환 테스트 서버 | MinIO RELEASE.2025-07-23 (`bitnamilegacy/minio:2025.7.23-debian-12-r5`, digest 고정) | storage-core 왕복 테스트(CI 전용). MinIO 공식 이미지 · 바이너리 배포가 끝나 Bitnami 가 마지막으로 빌드한 이미지를 고정한다(갱신 없음). 태그는 다시 밀어 넣을 수 있어 멀티 아키텍처 index digest 로 고정하고 태그는 주석으로 남긴다 — 이미지를 바꾸면 테스트의 `MINIO_IMAGE` 상수와 이 행을 같이 고친다. Testcontainers MinIO 모듈은 공식 이미지 기동 방식이라 쓰지 않고 `GenericContainer` 로 띄운다 |
 | PostgreSQL / Redis (로컬) | 17 / 7.4 | `docker-compose-local.yml` |
