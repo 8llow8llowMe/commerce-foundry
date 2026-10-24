@@ -2,10 +2,15 @@ package com.commercefoundry.domainlayer.job.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.job.adapter.in.admin.dto.item.JobAdminItem;
+import com.commercefoundry.domainlayer.job.adapter.in.admin.dto.response.JobAdminResponse;
+import com.commercefoundry.domainlayer.job.application.command.JobAdminSearchCommand;
 import com.commercefoundry.domainlayer.job.application.command.JobRegisterCommand;
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.info.JobRegistrationInfo;
+import com.commercefoundry.domainlayer.job.application.model.JobStatusFilter;
+import com.commercefoundry.domainlayer.job.application.port.in.JobAdminUseCase;
 import com.commercefoundry.domainlayer.job.application.port.in.JobRegisterUseCase;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobRunProcessor;
@@ -47,6 +52,9 @@ class JobWorkerFlowTest {
 
     @Autowired
     private JobRegisterUseCase jobRegisterUseCase;
+
+    @Autowired
+    private JobAdminUseCase jobAdminUseCase;
 
     @Autowired
     private JobRepositoryPort jobRepositoryPort;
@@ -123,6 +131,23 @@ class JobWorkerFlowTest {
         assertThat(job.attempt()).isEqualTo(1);
         assertThat(finishedEvents.of(jobId)).singleElement()
             .satisfies(event -> assertThat(event.status()).isEqualTo(JobStatus.CANCELLED));
+    }
+
+    @Test
+    @DisplayName("어드민 API 로 예약된 작업을 목록 · 상세에서 보고 취소하면 CANCELLED 로 끝난다 (실제 저장소 질의)")
+    void adminListsAndCancels() {
+        Instant later = clock.instant().plus(Duration.ofHours(1));
+        long jobId = jobRegisterUseCase.register(new JobRegisterCommand(FlowHandlers.OK, "{}", null, 1L, 0, later)).jobId();
+
+        assertThat(jobAdminUseCase.getJobs(new JobAdminSearchCommand(JobStatusFilter.QUEUED, FlowHandlers.OK, 0, 100)).contents())
+            .extracting(JobAdminItem::jobId).contains(String.valueOf(jobId));
+        assertThat(jobAdminUseCase.getJob(jobId).status().code()).isEqualTo("QUEUED");
+
+        JobAdminResponse cancelled = jobAdminUseCase.cancel(jobId, 9L);
+
+        assertThat(cancelled.status().code()).isEqualTo("CANCELLED");
+        assertThat(jobRepositoryPort.findById(jobId)).hasValueSatisfying(job -> assertThat(job.status()).isEqualTo(JobStatus.CANCELLED));
+        assertThat(finishedEvents.of(jobId)).hasSize(1);
     }
 
     @Test

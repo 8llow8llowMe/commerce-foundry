@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.job.adapter.out.persistence;
 
+import com.commercefoundry.domainlayer.job.adapter.out.persistence.entity.JobEntity;
 import com.commercefoundry.domainlayer.job.adapter.out.persistence.repository.JobRepository;
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
@@ -17,6 +18,8 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
@@ -36,6 +39,23 @@ public class JobRepositoryAdapter implements JobRepositoryPort {
     @Override
     public Optional<Job> findById(long jobId) {
         return jobRepository.findById(jobId).map(jobMapper::toDomain);
+    }
+
+    /** 조건 조합마다 파생 쿼리 하나 — 종류 조건은 {@code idx_job_type_id} 를 그대로 탄다. 상태 조건은 상태 선두 인덱스로 거른 뒤 정렬한다(어드민 전용). */
+    @Override
+    public Page<Job> findPage(JobStatus status, String type, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size);
+        Page<JobEntity> jobs;
+        if (status != null && type != null) {
+            jobs = jobRepository.findAllByStatusAndTypeOrderByIdDesc(status, type, pageable);
+        } else if (status != null) {
+            jobs = jobRepository.findAllByStatusOrderByIdDesc(status, pageable);
+        } else if (type != null) {
+            jobs = jobRepository.findAllByTypeOrderByIdDesc(type, pageable);
+        } else {
+            jobs = jobRepository.findAllByOrderByIdDesc(pageable);
+        }
+        return jobs.map(jobMapper::toDomain);
     }
 
     @Override

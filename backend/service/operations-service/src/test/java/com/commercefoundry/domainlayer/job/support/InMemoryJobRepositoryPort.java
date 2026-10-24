@@ -14,6 +14,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 /**
  * Processor · Facade 단위 테스트용 가짜 저장소. 실제 어댑터와 같은 계약을 흉내 낸다 — INSERT 는 활성 멱등 키 유일성을, merge 는 버전 비교를,
@@ -43,6 +46,18 @@ public class InMemoryJobRepositoryPort implements JobRepositoryPort {
     @Override
     public Optional<Job> findById(long jobId) {
         return Optional.ofNullable(jobs.get(jobId));
+    }
+
+    /** 어댑터와 같은 순서 — 아이디 내림차순. */
+    @Override
+    public Page<Job> findPage(JobStatus status, String type, int page, int size) {
+        List<Job> matched = jobs.values().stream()
+            .filter(job -> status == null || job.status() == status)
+            .filter(job -> type == null || type.equals(job.type()))
+            .sorted(Comparator.comparingLong(Job::id).reversed())
+            .toList();
+        List<Job> content = matched.stream().skip((long) page * size).limit(size).toList();
+        return new PageImpl<>(content, PageRequest.of(page, size), matched.size());
     }
 
     @Override
