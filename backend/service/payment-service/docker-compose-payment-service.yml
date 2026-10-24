@@ -17,9 +17,6 @@ x-payment-service-environment: &payment_service_environment
   TIME_ZONE: ${TIME_ZONE:-UTC}
   # Eureka 서버 주소. 기본값을 두지 않는다 — yml 기본값(localhost)은 컨테이너 안에서 자기 자신이라 등록이 조용히 실패한다
   EUREKA_DEFAULT_ZONE: ${EUREKA_DEFAULT_ZONE:?deploy-guide.md 4절}
-  # 컨테이너 호스트 이름(컨테이너 ID)이 아니라 네트워크 IP 로 등록한다 — 게이트웨이 lb:// · Feign 이 이름을 풀지 못하는 일을 막는다.
-  # 배포 전용 설정이라 yml 대신 여기서 넣는다(relaxed binding: eureka.instance.prefer-ip-address)
-  EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
   # 서비스 전부 같은 DB 다. 스키마는 서비스마다 다르고 yml(hibernate.default_schema)이 정한다
   DB_URL: ${DB_URL:?deploy-guide.md 4절}
   DB_USERNAME: ${DB_USERNAME:?deploy-guide.md 4절}
