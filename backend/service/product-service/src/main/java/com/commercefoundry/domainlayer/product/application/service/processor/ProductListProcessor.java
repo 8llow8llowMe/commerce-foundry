@@ -69,6 +69,7 @@ public class ProductListProcessor {
             .hasOptionSurcharge(summary.hasOptionSurcharge())
             .saleStatus(summary.saleStatus())
             .customOrder(storeProperties.features().customOrder() && row.customOrder())
+            .preorder(storeProperties.features().preorder() && row.preorder())
             .build();
     }
 }

@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductExce
 import com.commercefoundry.domainlayer.product.application.info.CategoryPathInfo;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldInfo;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderInfo;
+import com.commercefoundry.domainlayer.product.application.info.PreorderInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductDetailInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductImageInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductOptionGroupInfo;
@@ -86,7 +87,7 @@ public class ProductDetailProcessor {
             .summary(product.summary())
             .categoryPath(categoryPath.stream().map(category -> new CategoryPathInfo(category.id(), category.name())).toList())
             .thumbnail(thumbnailOf(images))
-            .images(images.stream().filter(image -> image.imageType() == ImageType.GALLERY).map(ProductImageInfo::from).toList())
+            .images(galleryOf(images))
             .descriptionHtml(product.descriptionHtml())
             .salePrice(summary.salePrice())
             .listPrice(summary.listPrice())
@@ -96,10 +97,27 @@ public class ProductDetailProcessor {
             .optionGroups(groups.stream().map(group -> toGroupInfo(group, valuesByGroupId.getOrDefault(group.id(), List.of()))).toList())
             .skus(toSkuInfos(product, skus, stocks, optionValueRanks(groups, valuesByGroupId)))
             .customOrder(customOrderOf(product))
+            .preorder(preorderOf(product))
             .build();
     }
 
-    /** 대표 이미지는 상품당 최대 1건이다. 이미지는 노출 순서 → 아이디 오름차순으로 읽으므로 데이터 오류로 둘 이상이면 앞의 것이다. */
+    /**
+     * 상세 갤러리 — 갤러리 이미지와, 영상 플래그가 켜졌을 때만 영상. 포트가 유형을 가리지 않고 노출 순서 → 아이디 오름차순으로 주므로 거르기만 한다.
+     * 유니크 키가 유형별 순서라 이미지와 영상의 순서가 같을 수 있는데, 그때도 아이디 순이라 결과는 매번 같다.
+     * 플래그가 꺼지면 영상 데이터는 그대로 두고 응답에서만 뺀다.
+     */
+    private List<ProductImageInfo> galleryOf(List<ProductImage> images) {
+        boolean productVideo = storeProperties.features().productVideo();
+        return images.stream()
+            .filter(image -> image.imageType() == ImageType.GALLERY || (productVideo && image.imageType().isVideo()))
+            .map(ProductImageInfo::from)
+            .toList();
+    }
+
+    /**
+     * 대표 이미지는 상품당 최대 1건이다. 이미지는 노출 순서 → 아이디 오름차순으로 읽으므로 데이터 오류로 둘 이상이면 앞의 것이다.
+     * THUMBNAIL 만 본다 — 갤러리 이미지 · 영상은 대표 이미지가 없어도 대신 쓰지 않는다.
+     */
     private static ProductImageInfo thumbnailOf(List<ProductImage> images) {
         return images.stream()
             .filter(image -> image.imageType() == ImageType.THUMBNAIL)
@@ -170,6 +188,14 @@ public class ProductDetailProcessor {
             .map(ProductDetailProcessor::toFieldInfo)
             .toList();
         return new CustomOrderInfo(product.customOrderNotice(), product.customOrderLeadTimeDays(), fields);
+    }
+
+    /** 스토어 기능 플래그와 상품 설정이 모두 켜졌을 때만 만든다. 발송 예정일이 없으면 날짜만 null 이다("발송일 추후 안내"). */
+    private PreorderInfo preorderOf(Product product) {
+        if (!storeProperties.features().preorder() || !product.preorder()) {
+            return null;
+        }
+        return new PreorderInfo(product.expectedShipDate());
     }
 
     private static CustomOrderFieldInfo toFieldInfo(CustomOrderField field) {

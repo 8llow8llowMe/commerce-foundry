@@ -138,6 +138,22 @@ class ProductListProcessorTest {
         assertThat(processor(flag).search(CRITERIA).getContent().getFirst().customOrder()).isEqualTo(expected);
     }
 
+    @ParameterizedTest(name = "스토어 플래그 {0} · 상품 {1} → {2}")
+    @CsvSource({"true, true, true", "false, true, false", "true, false, false", "false, false, false"})
+    @DisplayName("preorder 는 스토어 기능 플래그와 상품 설정이 모두 켜졌을 때만 true 다 — 판매 상태 · 가격 계산은 일반 상품과 같다")
+    void preorderNeedsFlagAndProduct(boolean flag, boolean productPreorder, boolean expected) {
+        givenRows(false, row(1, SaleStatus.ON_SALE, false, productPreorder));
+        given(skuRepositoryPort.aggregateByProductIds(anyCollection())).willReturn(List.of(new SkuAggregateQueryResult(1, true, true, 0L, 0L, 1)));
+        given(productImageRepositoryPort.findThumbnailsByProductIds(anyCollection())).willReturn(List.of());
+
+        ProductListItemInfo item = processor(false, flag).search(CRITERIA).getContent().getFirst();
+
+        assertThat(item.preorder()).isEqualTo(expected);
+        assertThat(item.customOrder()).isFalse();
+        assertThat(item.saleStatus()).isEqualTo(SaleAvailability.ON_SALE);
+        assertThat(item.salePrice()).isEqualTo(Money.of(ProductFixtures.BASE_PRICE, KRW));
+    }
+
     @Test
     @DisplayName("목록이 비면 집계 · 썸네일 포트를 부르지 않는다")
     void emptyPageSkipsFollowUpQueries() {
@@ -152,8 +168,12 @@ class ProductListProcessorTest {
     }
 
     private ProductListProcessor processor(boolean customOrderFeature) {
+        return processor(customOrderFeature, false);
+    }
+
+    private ProductListProcessor processor(boolean customOrderFeature, boolean preorderFeature) {
         return new ProductListProcessor(
-            productRepositoryPort, skuRepositoryPort, productImageRepositoryPort, new StoreProperties(new StoreProperties.Features(customOrderFeature))
+            productRepositoryPort, skuRepositoryPort, productImageRepositoryPort, new StoreProperties(new StoreProperties.Features(customOrderFeature, preorderFeature, false))
         );
     }
 
@@ -162,8 +182,12 @@ class ProductListProcessorTest {
     }
 
     private static ProductListQueryResult row(long productId, SaleStatus saleStatus, boolean customOrder) {
+        return row(productId, saleStatus, customOrder, false);
+    }
+
+    private static ProductListQueryResult row(long productId, SaleStatus saleStatus, boolean customOrder, boolean preorder) {
         return new ProductListQueryResult(
-            productId, "상품" + productId, ProductFixtures.BASE_PRICE, KRW, ProductFixtures.LIST_PRICE, KRW, saleStatus, customOrder
+            productId, "상품" + productId, ProductFixtures.BASE_PRICE, KRW, ProductFixtures.LIST_PRICE, KRW, saleStatus, customOrder, preorder
         );
     }
 }

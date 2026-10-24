@@ -266,7 +266,7 @@ class SkuInternalProcessorTest {
     private SkuInternalProcessor processor(boolean customOrderFeature) {
         return new SkuInternalProcessor(
             skuRepositoryPort, productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort,
-            new StoreProperties(new StoreProperties.Features(customOrderFeature))
+            new StoreProperties(new StoreProperties.Features(customOrderFeature, false, false))
         );
     }
 

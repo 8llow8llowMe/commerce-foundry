@@ -32,9 +32,9 @@ class MoneyColumnsTest {
     @Test
     @DisplayName("목록 행의 판매가 · 정가도 같은 규칙으로 꺼낸다")
     void listQueryResult() {
-        ProductListQueryResult discounted = new ProductListQueryResult(101L, "상품", 39_000L, KRW, 45_000L, KRW, SaleStatus.ON_SALE, false);
-        ProductListQueryResult regular = new ProductListQueryResult(102L, "상품", 39_000L, KRW, null, null, SaleStatus.ON_SALE, false);
-        ProductListQueryResult broken = new ProductListQueryResult(103L, "상품", 39_000L, KRW, 45_000L, null, SaleStatus.ON_SALE, false);
+        ProductListQueryResult discounted = new ProductListQueryResult(101L, "상품", 39_000L, KRW, 45_000L, KRW, SaleStatus.ON_SALE, false, false);
+        ProductListQueryResult regular = new ProductListQueryResult(102L, "상품", 39_000L, KRW, null, null, SaleStatus.ON_SALE, false, false);
+        ProductListQueryResult broken = new ProductListQueryResult(103L, "상품", 39_000L, KRW, 45_000L, null, SaleStatus.ON_SALE, false, false);
 
         assertThat(discounted.salePrice()).isEqualTo(Money.of(39_000, KRW));
         assertThat(discounted.listPrice()).isEqualTo(Money.of(45_000, KRW));

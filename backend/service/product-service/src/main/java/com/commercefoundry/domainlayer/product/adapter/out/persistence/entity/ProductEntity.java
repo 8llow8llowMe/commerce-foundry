@@ -11,6 +11,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import java.time.LocalDate;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -24,6 +25,7 @@ import org.hibernate.type.SqlTypes;
  * 최신순은 PK(Snowflake) 내림차순이라 별도 인덱스가 없다. 가격순 인덱스는 동률을 끊는 정렬 키({@code id})까지 담는다.
  *
  * <p>check 제약은 금액 · 통화 짝과 음수 금지를 DB 에서도 막는다 — 매퍼({@code MoneyColumns})가 읽을 때 실패하는 데이터가 애초에 들어오지 않게.
+ * 발송 예정일이 프리오더 상품에만 있게 하는 제약도 같은 이유다 — 도메인({@code Product})이 거절하는 조합이 저장되지 않게.
  */
 @Entity
 @Table(
@@ -37,7 +39,8 @@ import org.hibernate.type.SqlTypes;
             constraint = "(list_price_amount is null and list_price_currency is null) or (list_price_amount is not null and list_price_currency is not null)"
         ),
         @CheckConstraint(name = "ck_product_list_price_currency", constraint = "list_price_currency is null or list_price_currency = sale_price_currency"),
-        @CheckConstraint(name = "ck_product_list_price_non_negative", constraint = "list_price_amount is null or list_price_amount >= 0")
+        @CheckConstraint(name = "ck_product_list_price_non_negative", constraint = "list_price_amount is null or list_price_amount >= 0"),
+        @CheckConstraint(name = "ck_product_expected_ship_date_preorder", constraint = "preorder = true or expected_ship_date is null")
     }
 )
 @Getter
@@ -97,4 +100,10 @@ public class ProductEntity extends BaseEntity {
 
     @Column(name = "custom_order_lead_time_days", comment = "맞춤 제작 소요일")
     private Integer customOrderLeadTimeDays;
+
+    @Column(name = "preorder", nullable = false, comment = "프리오더(예약 판매) 상품 여부. 판매 가능 판정 · 재고는 일반 상품과 같다")
+    private boolean preorder;
+
+    @Column(name = "expected_ship_date", comment = "발송 예정일 (순차 발송 시작일). 프리오더 상품만 갖는다. 프리오더인데 null 이면 발송일 추후 안내")
+    private LocalDate expectedShipDate;
 }

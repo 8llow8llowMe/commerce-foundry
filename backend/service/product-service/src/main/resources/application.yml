@@ -54,6 +54,10 @@ store:
   features:
     # 맞춤 제작(치수 입력 · 제작 안내)
     custom-order: ${STORE_FEATURES_CUSTOM_ORDER:false}
+    # 프리오더(예약 판매) · 발송 예정 안내
+    preorder: ${STORE_FEATURES_PREORDER:false}
+    # 상품 상세 갤러리 영상
+    product-video: ${STORE_FEATURES_PRODUCT_VIDEO:false}
 
 # 재고 (order-flow-guide.md §3)
 stock:

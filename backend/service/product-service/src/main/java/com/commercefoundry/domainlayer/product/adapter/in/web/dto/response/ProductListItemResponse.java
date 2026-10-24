@@ -35,6 +35,9 @@ public record ProductListItemResponse(
     CodeNameDescriptionMetadata saleStatus,
 
     @Schema(description = "맞춤 제작 상품인가. 스토어 맞춤 제작 기능이 꺼져 있으면 false", example = "false")
-    boolean customOrder
+    boolean customOrder,
+
+    @Schema(description = "프리오더(예약 판매) 상품인가. 스토어 프리오더 기능이 꺼져 있으면 false. 발송 예정일은 상세에서만 내린다", example = "false")
+    boolean preorder
 ) {
 }
