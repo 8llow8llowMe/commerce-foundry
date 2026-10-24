@@ -37,7 +37,9 @@ spring:
           # 토스페이먼츠 클라이언트(TossPaymentsClient)만의 타임아웃 (ms). 기본 read timeout 60초를 그대로 두지 않는다 (coding-conventions.md §10, architecture-guide.md §8).
           # read 는 게이트웨이 응답 타임아웃(10s)보다 짧아야 한다 — 게이트웨이가 먼저 끊으면 고객은 실패를 보는데 승인은 계속 진행된다. TossPaymentsStartupGuard 가 본다.
           # 승인은 카드사 응답을 기다려 수 초 걸릴 수 있어 내부 호출(3s)보다 길게 둔다. 넘으면 실패가 아니라 UNKNOWN 이다 (payment-guide.md §4).
-          # request-interceptors 는 두지 않는다 — 인증 헤더는 클라이언트 메서드 인자다. logger-level 도 두지 않는다(설정 클래스가 NONE 으로 고정한다)
+          # request-interceptors 는 두지 않는다 — 인증 헤더는 클라이언트 메서드 인자다.
+          # logger-level 도 두지 않는다. 설정 클래스(TossPaymentsClientConfiguration)의 기본은 NONE 이지만 yml 값(default · toss-payments)이 있으면 그쪽이 이긴다 —
+          # HEADERS · FULL 이면 Basic 헤더(시크릿 키)가 로그에 남으므로 TossPaymentsStartupGuard 가 기동을 막는다
           toss-payments:
             connect-timeout: 2000
             read-timeout: 6000
@@ -55,13 +57,14 @@ resilience4j:
         wait-duration-in-open-state: 10s
         permitted-number-of-calls-in-half-open-state: 3
         automatic-transition-from-open-to-half-open-enabled: true
-        # 4xx 는 우리 요청 · 설정 문제이거나 업무 거절(카드 거절 등)이다 — PG 장애로 세지 않는다. 5xx · 429 · 타임아웃 · 연결 실패만 센다
-        ignore-exceptions:
-          - feign.FeignException$FeignClientException
     instances:
       # 토스페이먼츠 승인 · 조회. 열려 있으면 승인 요청을 보내지 않는다 — 결제 시도는 READY 로 되돌린다 (payment-guide.md §4)
       toss:
         base-config: default
+        # 4xx 는 우리 요청 · 설정 문제이거나 업무 거절(카드 거절 등)이다 — PG 장애로 세지 않는다. 5xx · 429 · 타임아웃 · 연결 실패는 센다.
+        # ignore-exceptions(FeignClientException) 로 두면 그 하위인 429(TooManyRequests)까지 빠지고, Retry-After 가 붙은 429(RetryableException)만 세어져
+        # 같은 429 가 헤더에 따라 달리 세어진다 — 술어로 429 만 빼고 무시한다. default 에 ignore-exceptions 를 두지 않는다(둘은 OR 로 합쳐진다)
+        ignore-exception-predicate: com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.TossCircuitBreakerIgnorePredicate
 
 # 토스페이먼츠 (payment-guide.md §2). 키 형식 · 프로파일 조건은 TossPaymentsStartupGuard 가 기동 때 본다
 toss:

@@ -41,4 +41,8 @@ public interface TossPaymentsClient {
     /** 주문번호로 결제 조회. */
     @GetMapping(value = "/v1/payments/orders/{orderId}", produces = MediaType.APPLICATION_JSON_VALUE)
     byte[] getPaymentByOrderId(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization, @PathVariable("orderId") String orderId);
+
+    /** 결제키로 결제 조회 — 어느 결제키가 승인되지 않았는지 확인할 때 쓴다. */
+    @GetMapping(value = "/v1/payments/{paymentKey}", produces = MediaType.APPLICATION_JSON_VALUE)
+    byte[] getPaymentByPaymentKey(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization, @PathVariable("paymentKey") String paymentKey);
 }

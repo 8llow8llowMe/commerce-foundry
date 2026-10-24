@@ -19,6 +19,10 @@ public class TossPaymentsClientConfiguration {
      * 자동 재시도를 하지 않는다. 승인은 멱등 키가 있어도 같은 요청을 다시 보내면 409 {@code IDEMPOTENT_REQUEST_PROCESSING} · 400 {@code ALREADY_PROCESSED_PAYMENT}
      * 같은 응답이 섞여 첫 요청의 결과를 해석할 수 없게 된다. 다시 보낼지는 Processor 가 결제 시도 상태로 정한다.
      * Spring Cloud OpenFeign 기본값도 재시도 없음이지만, 기본값이 바뀌거나 전역 {@code Retryer} 빈이 생겨도 이 클라이언트는 따르지 않게 명시한다.
+     *
+     * <p>HTTP 클라이언트 단계의 POST 재전송이 없다는 것은 기본 {@code feign.Client.Default}(JDK {@code HttpURLConnection}, Content-Length 가 있으면
+     * 고정 길이 스트리밍 — 요청 본문을 버퍼링하지 않아 JDK 가 다시 보내지 못한다)를 전제로 한다. feign-hc5 · okhttp 같은 다른 클라이언트를 붙이면
+     * 그 클라이언트의 재시도 전략과 연결 단계 예외 타입(연결 실패 = NotSent 판정)을 다시 확인한다.
      */
     @Bean
     public Retryer tossPaymentsRetryer() {
