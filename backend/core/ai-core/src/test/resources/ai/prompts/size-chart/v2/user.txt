@@ -1,0 +1,2 @@
+상품 {{productName}} 의 치수를 사이즈별 표로 정리한다:
+{{measurements}}
