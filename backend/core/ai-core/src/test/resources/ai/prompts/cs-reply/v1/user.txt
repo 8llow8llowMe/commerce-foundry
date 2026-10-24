@@ -1,0 +1,2 @@
+고객 {{pii:customerName}} 님의 문의에 답한다. 문의:
+{{inquiry}}

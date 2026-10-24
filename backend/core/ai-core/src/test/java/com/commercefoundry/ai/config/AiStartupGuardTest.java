@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.commercefoundry.ai.client.AiClient;
 import com.commercefoundry.ai.client.AiException;
 import com.commercefoundry.ai.client.AiRequest;
+import com.commercefoundry.ai.prompt.PromptTemplates;
+import com.commercefoundry.ai.properties.AiProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -76,7 +78,7 @@ class AiStartupGuardTest {
     @DisplayName("거절 대체(refusal-fallback)는 기본 꺼짐이다 — 닫힌 기본값")
     void refusalFallbackIsOffByDefault() {
         runner.withPropertyValues(enabled())
-            .run(context -> assertThat(context.getBean(com.commercefoundry.ai.properties.AiProperties.class).refusalFallback()).isFalse());
+            .run(context -> assertThat(context.getBean(AiProperties.class).refusalFallback()).isFalse());
     }
 
     @Test
@@ -102,6 +104,34 @@ class AiStartupGuardTest {
         runner.withPropertyValues(enabled()).withPropertyValues("ai.max-retries=9", "ai.max-concurrency=0")
             .run(context -> assertThat(context).hasFailed().getFailure()
                 .hasMessageContaining("ai.max-retries").hasMessageContaining("ai.max-concurrency"));
+    }
+
+    @Test
+    @DisplayName("기능 설정이 실제로 바인딩되고, 설정 버전의 템플릿을 기동 때 읽는다 — 기능 설정이 조용히 빠지지 않는다")
+    void bindsFeaturesAndLoadsTemplates() {
+        runner.withPropertyValues("ai.features.size-chart.model=claude-haiku-5-5", "ai.features.size-chart.max-tokens=2000",
+                "ai.features.size-chart.prompt-version=2")
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                AiProperties properties = context.getBean(AiProperties.class);
+                assertThat(properties.resolve("size-chart").model()).isEqualTo("claude-haiku-5-5");
+                assertThat(properties.resolve("size-chart").maxTokens()).isEqualTo(2000);
+                assertThat(context.getBean(PromptTemplates.class).get("size-chart").version()).isEqualTo(2);
+            });
+    }
+
+    @Test
+    @DisplayName("설정 버전의 템플릿 파일이 없으면 꺼져 있어도 기동을 멈춘다 — 배포 전에 드러나게")
+    void failsWithoutTemplateFile() {
+        runner.withPropertyValues("ai.features.size-chart.prompt-version=9")
+            .run(context -> assertThat(context).hasFailed().getFailure().rootCause().hasMessageContaining("ai/prompts/size-chart/v9/user.txt"));
+    }
+
+    @Test
+    @DisplayName("prompt-version 은 1 이상이다")
+    void rejectsPromptVersionZero() {
+        runner.withPropertyValues(enabled()).withPropertyValues("ai.features.size-chart.prompt-version=0")
+            .run(context -> assertThat(context).hasFailed().getFailure().hasMessageContaining("ai.features.size-chart.prompt-version"));
     }
 
     private static String[] enabled() {
