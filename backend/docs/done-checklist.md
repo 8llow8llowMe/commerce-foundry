@@ -38,6 +38,9 @@
 - [ ] 루프 안 단건 조회(N+1)가 없다
 - [ ] 동적 쿼리·JPQL 은 `@DataJpaTest` 로 실제 질의를 검증했다
 - [ ] 엔티티를 추가·변경했다면 DDL 스냅숏을 같은 PR 에서 갱신하고, PR 본문 `운영 DDL` 절에 Hibernate 가 만든 PostgreSQL DDL(local·dev `update` 결과 또는 스냅숏)을 적었다 (`coding-conventions.md` §9-8)
+- [ ] DB 를 쓰는 서비스는 `application.yml` 에 `spring.datasource.hikari.data-source-properties.logServerErrorDetail: false` 가 있고,
+  `*ServiceApplicationTests` 가 실제 커넥션 풀 속성(`HikariDataSource#getDataSourceProperties`)으로 그 값을 확인한다 — 빠지면 제약 위반 로그에 행 값이 남는다
+  (`coding-conventions.md` §8, `bootstrap-conventions.md`, #269)
 
 ## 4. 커머스 흐름 체크리스트 (해당 시)
 
