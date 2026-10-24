@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
@@ -115,12 +116,20 @@ public record AiProperties(
      * @param model     모델 ID. 비우면 {@code default-model}
      * @param maxTokens 최대 출력 토큰. 비우면 {@code default-max-tokens}
      * @param effort    {@code low} · {@code medium} · {@code high} · {@code xhigh} · {@code max}. 비우면 모델 기본값
+     * @param promptVersion 쓸 프롬프트 템플릿 버전 — 리소스 {@code ai/prompts/<기능>/v<버전>/}. 1 이상. 템플릿을 쓰는 기능은 필수다.
+     *                  배포된 버전의 파일은 고치지 않고 새 버전을 만들어 이 값을 올린다 — 되돌리기도 이 값이다 ({@code bootstrap-conventions.md} AI)
      */
-    public record Feature(String model, Integer maxTokens, String effort) {
+    public record Feature(String model, Integer maxTokens, String effort, Integer promptVersion) {
 
+        /** 생성자가 둘이라 바인딩할 생성자를 지정한다 — 없으면 Binder 가 고르지 못해 기능 설정이 조용히 빠진다. */
+        @ConstructorBinding
         public Feature {
             model = isAbsent(model) ? null : model.strip();
             effort = isAbsent(effort) ? null : effort.strip().toLowerCase(Locale.ROOT);
+        }
+
+        public Feature(String model, Integer maxTokens, String effort) {
+            this(model, maxTokens, effort, null);
         }
     }
 
@@ -241,6 +250,9 @@ public record AiProperties(
         }
         if (feature.effort() != null && !EFFORTS.contains(feature.effort())) {
             violations.add(new Violation(property, property + ".effort 는 " + String.join(" · ", EFFORTS.stream().sorted().toList()) + " 중 하나여야 합니다"));
+        }
+        if (feature.promptVersion() != null && feature.promptVersion() < 1) {
+            violations.add(new Violation(property, property + ".prompt-version 은 1 이상이어야 합니다"));
         }
     }
 
