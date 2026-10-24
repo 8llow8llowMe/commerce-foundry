@@ -15,8 +15,11 @@
 x-delivery-service-environment: &delivery_service_environment
   # JVM 시간대(로그 시각만 바뀐다). 비우면 UTC
   TIME_ZONE: ${TIME_ZONE:-UTC}
-  # Eureka 서버 주소. 기본값을 두지 않는다 — yml 기본값(localhost)은 컨테이너 안에서 자기 자신이라 등록이 조용히 실패한다
-  EUREKA_DEFAULT_ZONE: ${EUREKA_DEFAULT_ZONE:?deploy-guide.md 4절}
+  # Eureka 서버 호스트(컨테이너 이름 commerce-service-discovery-<env>). 기본값을 두지 않는다 — yml 기본값(localhost)은 컨테이너 안에서 자기 자신이라 등록이 실패한다.
+  # 포트(8761) · 경로는 yml 이 붙인다
+  EUREKA_HOST: ${EUREKA_HOST:?deploy-guide.md 4절}
+  # 레지스트리 비밀번호(service-discovery 와 같은 값, #248). yml 이 defaultZone URL 에 싣는다
+  EUREKA_PASSWORD: ${EUREKA_PASSWORD:?deploy-guide.md 4절}
   # 서비스 전부 같은 DB 다. 스키마는 서비스마다 다르고 yml(hibernate.default_schema)이 정한다
   DB_URL: ${DB_URL:?deploy-guide.md 4절}
   DB_USERNAME: ${DB_USERNAME:?deploy-guide.md 4절}
