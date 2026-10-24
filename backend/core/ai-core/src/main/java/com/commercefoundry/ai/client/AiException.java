@@ -17,7 +17,10 @@ public class AiException extends RuntimeException {
         BUSY(true, "동시 호출 상한이 차 있습니다"),
         /** 429 — 요청 제한. SDK 재시도를 다 쓴 뒤다. */
         RATE_LIMITED(true, "API 요청 제한에 걸렸습니다"),
-        /** 5xx · 529(과부하) · 연결 오류 · 타임아웃 — SDK 재시도를 다 쓴 뒤다. 타임아웃이면 과금됐을 수 있다. */
+        /**
+         * 5xx · 529(과부하) · 연결 오류 · 타임아웃 — SDK 재시도를 다 쓴 뒤다. 타임아웃({@code statusCode} 가 {@code null})이면 시도마다 과금됐을 수 있다 —
+         * 최악 비용은 (1 + max-retries) × 작업 재시도 횟수다. 작업은 이 경우의 재시도 상한을 낮게 둔다.
+         */
         UNAVAILABLE(true, "API 에 닿지 못했거나 API 가 일시적으로 응답하지 못했습니다"),
         /** 401 · 402 · 403 — 키 · 권한 · 결제 문제다. 다시 시도해도 풀리지 않는다. */
         UNAUTHORIZED(false, "API 가 키 · 권한 · 결제 문제로 거부했습니다"),
@@ -25,8 +28,10 @@ public class AiException extends RuntimeException {
         REJECTED(false, "API 가 요청을 거절했습니다"),
         /** 모델이 안전 분류로 답하지 않았다({@code stop_reason=refusal}, 대체 모델까지 거절). 같은 입력으로는 다시 거절된다. */
         REFUSED(false, "모델이 요청에 답하지 않았습니다 (refusal)"),
-        /** 응답에 텍스트가 없거나 형식이 기대와 다르다. */
-        INVALID_RESPONSE(true, "응답 형식이 기대와 다릅니다"),
+        /** 응답에 텍스트가 없거나 형식이 기대와 다르다. 같은 입력이면 다시 같을 가능성이 높아 재시도하지 않는다. */
+        INVALID_RESPONSE(false, "응답 형식이 기대와 다릅니다"),
+        /** 입력이 {@code ai.max-input-chars} 를 넘는다 — 보내지 않았다. */
+        INPUT_TOO_LONG(false, "입력이 길이 상한을 넘어 보내지 않았습니다"),
         /** 개인정보 마스킹에 실패했다 — 보내지 않았다. */
         MASKING_FAILED(false, "개인정보 마스킹에 실패해 보내지 않았습니다");
 
