@@ -202,8 +202,8 @@ class ShippingAddressPersistenceAdapterTest {
 
     /**
      * Hibernate 는 예외를 바꾸기 전에 드라이버 메시지를 WARN 으로 남기고, pgjdbc 기본값은 그 메시지에 서버 DETAIL({@code Failing row contains (...)})을
-     * 붙인다. main {@code application.yml} 의 {@code logServerErrorDetail: false} 가 이 슬라이스의 커넥션 풀을 거쳐 드라이버까지 가는지 본다 (#173,
-     * {@code coding-conventions.md} §8). 로그는 그대로 남아 제약 이름은 보여야 한다 — 로그를 끈 것이 아니다.
+     * 붙인다. persistence-core 자동 구성({@code ServerErrorDetailAutoConfiguration} — {@code @DataJpaTest} 슬라이스 목록에도 등록돼 있다)이 넣는
+     * {@code logServerErrorDetail=false} 가 이 슬라이스의 커넥션 풀을 거쳐 드라이버까지 가는지 본다 (#173 · #279, {@code coding-conventions.md} §8). 로그는 그대로 남아 제약 이름은 보여야 한다 — 로그를 끈 것이 아니다.
      * 픽스처 값은 ASCII 다. 콘솔 인코딩이 달라 한글이 깨지면 "없다" 단언이 값이 새도 통과한다.
      */
     @Test
