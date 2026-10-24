@@ -154,15 +154,26 @@ public final class CategoryTree {
     }
 
     /**
-     * 스토어프론트 상세 화면 breadcrumb — {@link #pathTo} 에서 숨긴 카테고리만 뺀다. 순서는 그대로다.
+     * 스토어프론트 상세 화면 breadcrumb — <b>메뉴({@link #visibleRoots()})에서 닿을 수 있는 경로</b>만 낸다 (#164).
+     * {@link #pathTo} 를 최상위부터 따라가다 처음 숨긴 노드에서 멈춘다. 숨긴 노드 아래는 보이는 노드여도 메뉴에 없으므로 빠진다 —
+     * 고객이 메뉴로 갈 수 없는 카테고리 이름을 breadcrumb 이 드러내지 않게 한다(시즌 종료 · 준비 중 같은 숨김 의도).
      *
-     * <p>카테고리 숨김은 "메뉴에서만 숨김" 이다. 숨긴 카테고리 아래 상품도 노출되므로 경로에서는 숨긴 노드만 빠지고
-     * 그 하위 노드는 남는다 ({@link #visibleRoots()} 가 숨긴 노드의 하위까지 빼는 것과 다르다).
+     * <p>숨김 판정은 메뉴와 같은 {@link #shownInMenu} 하나다. 상위가 목록에 없거나 순환이라 최상위에서 닿지 않는 노드도 메뉴에 없으므로 빈 목록이다.
+     * 카테고리를 숨겨도 상품 노출은 막지 않는다 — 상품 상세는 열리고 breadcrumb 만 짧아진다(최상위가 숨김이면 비어 있다).
      *
-     * @return 없는 아이디면 빈 목록
+     * @return 없는 아이디 · 최상위에서 닿지 않는 노드면 빈 목록
      */
     public List<Category> visiblePathTo(long categoryId) {
-        return pathTo(categoryId).stream().filter(Category::visible).toList();
+        List<Category> path = pathTo(categoryId);
+        if (path.isEmpty() || !path.get(0).isRoot()) {
+            return List.of();
+        }
+        return path.stream().takeWhile(CategoryTree::shownInMenu).toList();
+    }
+
+    /** 메뉴 · breadcrumb 공통 숨김 판정 — 숨긴 노드는 그 하위까지 메뉴에서 빠진다. */
+    private static boolean shownInMenu(Category category) {
+        return category.visible();
     }
 
     /** 대상 카테고리를 꼭대기로 한 하위 트리의 층 수 — 리프면 1, 없는 아이디도 1(새 카테고리와 같다). 순환 데이터에서도 끝난다. */
@@ -188,7 +199,7 @@ public final class CategoryTree {
     private List<CategoryNode> nodes(List<Category> categories, Set<Long> visited, boolean visibleOnly) {
         List<CategoryNode> nodes = new ArrayList<>();
         for (Category category : categories) {
-            if ((visibleOnly && !category.visible()) || !visited.add(category.id())) {
+            if ((visibleOnly && !shownInMenu(category)) || !visited.add(category.id())) {
                 continue;
             }
             nodes.add(new CategoryNode(category, nodes(childrenOf(category.id()), visited, visibleOnly)));

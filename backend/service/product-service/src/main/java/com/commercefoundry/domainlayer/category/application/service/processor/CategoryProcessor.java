@@ -45,9 +45,9 @@ public class CategoryProcessor {
     }
 
     /**
-     * 상품 상세 breadcrumb — 최상위부터 대상까지의 경로에서 숨긴 카테고리만 뺀다. 순서는 그대로다.
+     * 상품 상세 breadcrumb — 메뉴에서 닿을 수 있는 경로만 낸다. 최상위부터 따라가다 처음 숨긴 카테고리에서 멈춘다({@link CategoryTree#visiblePathTo}, #164).
      *
-     * @return 없는 아이디(대표 카테고리 데이터 오류)면 빈 목록
+     * @return 없는 아이디(대표 카테고리 데이터 오류) · 최상위가 숨김이면 빈 목록
      */
     public List<Category> visiblePathOf(long categoryId) {
         return loadTree().visiblePathTo(categoryId);
