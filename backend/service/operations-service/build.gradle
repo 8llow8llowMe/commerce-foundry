@@ -9,6 +9,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
     implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${rootProject.ext.springdocVersion}"
+    // 외부 쇼핑몰 내보내기 CSV 읽기 — 데이터 이관(migration-guide.md, #19)
+    implementation "org.apache.commons:commons-csv:${rootProject.ext.commonsCsvVersion}"
 
     // Q 클래스 생성기. persistence-core 의 annotationProcessor 는 전이되지 않아 엔티티를 가진 모듈마다 선언한다
     annotationProcessor "io.github.openfeign.querydsl:querydsl-apt:${rootProject.ext.querydslVersion}:jpa"
