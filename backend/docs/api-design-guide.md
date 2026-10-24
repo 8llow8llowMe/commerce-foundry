@@ -26,7 +26,7 @@
 | 서비스 | 고객 | 어드민 |
 |--------|------|--------|
 | auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**` |
-| product-service | `/api/v1/categories/**`, `/api/v1/products/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**` |
+| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**` |
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
@@ -400,6 +400,44 @@ return ResponseEntity.ok().body(Response.success(response));
   → `ProductAdminQueryProcessor` → `ProductRepositoryPort#searchForAdmin`. 컨트롤러는 domain enum 을 쓰지 않으므로(H1) 판매 상태 · 판매 가능 상태 · 정렬은
   `application/model` 의 입력 enum(`ProductSaleStatusFilter` · `ProductAvailabilityFilter` · `ProductAdminSortType`)으로 받고 Processor 가 domain 으로 바꾼다.
   정렬은 고객 `ProductSortType` 과 나눈다 — 이름순을 고객 목록에 열지 않는다.
+
+### 2-8. 메인 전시 (product-service, #63)
+
+메인 화면의 섹션(블록)을 어드민이 바꾼다. 섹션 유형은 브랜드와 무관한 블록 이름(`HERO` · `PRODUCT_PICK` · `STORY` · `LOOK` · `DETAIL`)이고,
+브랜드 문구는 섹션의 **제목 값**이다 — 코드에 고객사 이름 · 문구를 두지 않는다(`architecture-guide.md` §9). 이 유형은 페이지 빌더(#74)의 블록으로 그대로 옮긴다.
+
+| 경로 | 권한 | 성공 | 주요 오류 |
+|------|------|------|-----------|
+| `GET /api/v1/displays/main` | `permitAll()` | 200 노출 중인 섹션 목록 · `Cache-Control: max-age=60, public` | — |
+| `GET /api/v1/admin/displays/sections` | ADMIN | 200 전체 섹션(비노출 · 기간 밖 포함, `isLive` 파생) | — |
+| `GET /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 | 404 `PRODUCT_046` |
+| `POST /api/v1/admin/displays/sections` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `PRODUCT_047~054` · 409 `PRODUCT_056` · `PRODUCT_058` · 503 `PRODUCT_055` |
+| `PUT /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 — 섹션 필드 · 아이템 전체 교체 | 위와 같음 + 404 `PRODUCT_046` |
+| `DELETE /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 — 아이템도 지운다. 남은 순서를 다시 매기지 않는다 | 404 `PRODUCT_046` · 409 `PRODUCT_058` |
+| `PATCH /api/v1/admin/displays/sections/order` | ADMIN | 200 새 순서의 전체 목록 — 본문 `{sectionIds}` 는 현재 전체 집합과 같아야 한다 | 400 `PRODUCT_057` · 409 `PRODUCT_058` |
+
+- **노출 조건**: `visible` 이고 `startAt ≤ now < endAt`(둘 다 비면 제한 없음). 섹션 · 아이템은 순서 → 아이디 오름차순이다.
+  시각은 마이크로초로 잘라 저장 · 판정한다(DB `timestamp(6)` 과 같은 값). 0001 ~ 9999년 밖은 400 `PRODUCT_165`.
+- **아이템**: `MEDIA`(PC · 모바일 주소 따로, 모바일이 없으면 PC, VIDEO 는 PC 포스터 필수) 또는 `PRODUCT`(상품 아이디). 유형별 허용 아이템 · 개수는
+  HERO 미디어 1~10 · PRODUCT_PICK 상품 1~20 · STORY 미디어 0~10 · LOOK 미디어 1~10 + 상품 0~20 · DETAIL 미디어 1~10, 섹션당 아이템 30 · 섹션 50 상한이다.
+  LOOK 은 룩 API(#62)가 생기면 바뀔 수 있다.
+- **상품 카드**는 고객 상품 목록 항목과 같은 필드 · 같은 계산(`ProductSaleSummary`)이다 — `DisplayProductCardParityTest` 가 두 응답을 비교한다.
+  숨긴 상품 아이템은 고객 응답에서 빠지고, 그래서 `PRODUCT_PICK` 이 비어도 섹션은 남는다. 숨긴 상품도 등록은 된다(없는 상품만 400 `PRODUCT_050`).
+- **미디어 주소**는 스토리지 공개 주소(`store.media.public-base-url` ← `STORAGE_PUBLIC_BASE_URL`) 아래만 받는다. 키는 `[A-Za-z0-9._~-/]` 와 `%XX` 만,
+  `..` · `//` · 쿼리 · 프래그먼트 금지(400 `PRODUCT_054`). 공개 주소가 없으면 미디어가 있는 쓰기를 503 `PRODUCT_055` 로 닫는다. 판정은 쓰기 시점에만 한다 —
+  공개 주소(CDN)를 바꾸면 저장된 주소는 그대로다.
+- **링크**는 `/` 로 시작하는 상대 경로 또는 https 만(`//host` · `javascript:` · 백슬래시 · 공백 거절). https 의 호스트는 가리지 않는다 — FE 는 외부 링크에
+  `rel="noopener noreferrer"` 를 붙인다.
+- **모든 문구(제목 · 부제 · 본문 · 링크 문구 · caption · altText)는 평문이다.** HTML 로 해석하지 않는다 — FE 는 텍스트 노드로만 렌더하고 개행은
+  `white-space` 로 처리한다. 제어 문자는 400 `PRODUCT_164`(본문만 개행 · 탭 허용). 길이는 UTF-16 코드 유닛 기준이다.
+- **동시성**: 쓰기 4종은 전체 섹션 행 잠금(5초) 뒤 다시 읽어 판정하고 마지막 쓰기가 이긴다(§2-5 카테고리와 같다). 섹션이 0개일 때만 동시 생성이 직렬화되지 않아
+  둘 다 순서 0 을 받는다 — 아이디 순으로 정렬되고 순서 변경으로 정리된다.
+- **캐시**: `public` 은 공개 · 사용자 무관 · 개인정보 없는 응답에만 쓴다. 고객 메인은 1분 늦어도 가격 · 재고를 상세 · 주문이 다시 계산하므로 결제 금액을 바꾸지 않는다.
+  어드민 미리보기는 어드민 API 를 쓴다. 언어 · 통화별 응답이 생기면 `Vary` 를 두거나 경로를 나눈다.
+- 오류 코드: `PRODUCT_046`(섹션 없음 404) · `047`(유형이 받지 않는 아이템) · `048`(아이템 수 범위) · `049`(상품 중복) · `050`(없는 상품) · `051`(기간) ·
+  `052`(링크 주소) · `053`(문구만 있는 링크) · `054`(미디어 주소) · `055`(공개 주소 미설정 503) · `056`(섹션 상한 409) · `057`(순서 변경 집합) · `058`(잠금 409).
+  검증 코드는 `PRODUCT_140~165`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` 와 `DisplayErrorCode` 가 나눠 쓴다 — 새 번호는 두 클래스를 모두 보고 고른다.
+- 계층 — display 컨텍스트는 product 컨텍스트의 Processor(`ProductListProcessor.summarizeVisible` · `ProductLookupProcessor`)와 domain(`ProductSummary`)만 쓴다(H8).
 
 ## 3. 계층 흐름
 
