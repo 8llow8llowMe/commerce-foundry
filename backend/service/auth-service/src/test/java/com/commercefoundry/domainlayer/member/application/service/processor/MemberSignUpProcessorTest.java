@@ -125,6 +125,34 @@ class MemberSignUpProcessorTest {
         verifyNoInteractions(memberAgreementRepositoryPort, snowflakeIdGenerator);
     }
 
+    @Test
+    @DisplayName("#233 경계 — İ 로 소문자화 뒤 정확히 254자가 되는 이메일은 정규화한 값으로 가입한다")
+    void lowercasedEmailAtMaxLengthIsRegistered() {
+        // 원문 253자(İ 1 + u + @ + a 246 + .com) → 소문자화로 254자
+        String email = "İu@" + "a".repeat(246) + ".com";
+        String normalized = "i̇u@" + "a".repeat(246) + ".com";
+        given(memberRepositoryPort.existsByEmail(normalized)).willReturn(false);
+        given(snowflakeIdGenerator.generateId()).willReturn(1000L, 1001L, 1002L, 1003L);
+        given(memberRepositoryPort.save(any())).willAnswer(invocation -> invocation.getArgument(0));
+
+        processor.register(command(email, new SignUpAgreements(true, true, false)), HASH);
+
+        assertThat(email).hasSize(253);
+        verify(memberRepositoryPort).save(memberCaptor.capture());
+        assertThat(memberCaptor.getValue().email()).isEqualTo(normalized).hasSize(Member.EMAIL_MAX_LENGTH);
+    }
+
+    @Test
+    @DisplayName("#233 경계 — 소문자화 뒤 255자는 저장 전에 IllegalArgumentException 이다(요청 검증이 AUTH_102 로 먼저 막는 값)")
+    void lowercasedEmailOverMaxLengthNeverReachesPorts() {
+        String email = "İu@" + "a".repeat(247) + ".com";
+
+        assertThatThrownBy(() -> processor.register(command(email, new SignUpAgreements(true, true, false)), HASH))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(memberRepositoryPort, memberAgreementRepositoryPort, snowflakeIdGenerator);
+    }
+
     private static SignUpCommand command(String email, SignUpAgreements agreements) {
         return new SignUpCommand(email, "mokoyuri2026!", "홍길동", "010-1234-5678", agreements);
     }

@@ -38,6 +38,9 @@ public class MemberSignUpProcessor {
      *
      * <p>Facade 가 아니라 여기서 트랜잭션을 건다 — 해시를 트랜잭션 안에서 하면 BCrypt 시간(수십~수백 ms)만큼 DB 커넥션을 쥐고 있게 된다.
      *
+     * <p>{@link Member#normalizeEmail} 의 {@link IllegalArgumentException}(비었거나 정규화 뒤 254자 초과)은 잡지 않는다 — 요청 검증이 원문 길이({@code @Size})와
+     * 정규화(앞뒤 공백 제거 · 소문자) 뒤 길이({@code @ValidNormalizedEmailLength}, #233)까지 AUTH_102 로 막아 여기에 닿지 않는다. 닿으면 요청 검증의 결함이다.
+     *
      * @throws MemberException {@link MemberErrorCode#DUPLICATE_EMAIL} — 이미 가입된 이메일. 사전 조회를 함께 지난 동시 가입은 유니크 키가 막는다
      */
     @Transactional
