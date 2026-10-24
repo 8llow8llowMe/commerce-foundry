@@ -18,6 +18,7 @@ import com.commercefoundry.domainlayer.member.domain.model.AttemptKind;
 import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptOutcome;
 import com.commercefoundry.global.properties.AuthLoginGuardProperties;
 import com.commercefoundry.support.TestLoginGuard;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -36,7 +37,7 @@ class LoginAttemptRedisAdapterArgumentsTest {
 
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     private final LoginAttemptKeyHasher hasher = new LoginAttemptKeyHasher(TestLoginGuard.properties());
-    private final LoginAttemptRedisAdapter adapter = new LoginAttemptRedisAdapter(redisTemplate, hasher);
+    private final LoginAttemptRedisAdapter adapter = new LoginAttemptRedisAdapter(redisTemplate, hasher, new TokenStoreRedisSupport(Clock.systemUTC()));
 
     @Test
     @DisplayName("기록 — KEYS [auth:login-attempt:{HMAC}], ARGV [창 ms], 결과 {시도 수, 남은 ms} 를 읽는다")
@@ -124,7 +125,7 @@ class LoginAttemptRedisAdapterArgumentsTest {
     @DisplayName("꺼진 해셔로 부르면 Redis 에 닿기 전에 IllegalStateException 이다 — 꺼진 구성에서는 부르지 않는다")
     void disabledHasherFailsBeforeRedis() {
         LoginAttemptKeyHasher disabled = new LoginAttemptKeyHasher(new AuthLoginGuardProperties(false, 5, WINDOW, null));
-        LoginAttemptRedisAdapter disabledAdapter = new LoginAttemptRedisAdapter(redisTemplate, disabled);
+        LoginAttemptRedisAdapter disabledAdapter = new LoginAttemptRedisAdapter(redisTemplate, disabled, new TokenStoreRedisSupport(Clock.systemUTC()));
 
         assertThatThrownBy(() -> disabledAdapter.record(AttemptKind.LOGIN, EMAIL, WINDOW)).isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(redisTemplate);

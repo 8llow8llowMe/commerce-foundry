@@ -1,7 +1,5 @@
 package com.commercefoundry.domainlayer.member.adapter.out.redis;
 
-import static com.commercefoundry.domainlayer.member.adapter.out.redis.TokenStoreRedisSupport.execute;
-
 import com.commercefoundry.domainlayer.member.application.port.out.LoginAttemptCounterPort;
 import com.commercefoundry.domainlayer.member.domain.model.AttemptKind;
 import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptOutcome;
@@ -24,6 +22,7 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
 
     private final StringRedisTemplate redisTemplate;
     private final LoginAttemptKeyHasher keyHasher;
+    private final TokenStoreRedisSupport tokenStore;
 
     /** 창은 밀리초 정수 문자열로 넘긴다 — 1ms 미만이면 PEXPIRE 가 키를 바로 지워 창이 서지 않으므로 받지 않는다. */
     @Override
@@ -32,14 +31,14 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
             throw new IllegalArgumentException("window 는 1ms 이상이어야 한다");
         }
         List<String> keys = List.of(key(kind, normalizedEmail));
-        List<Object> result = execute(() -> redisTemplate.execute(LoginAttemptRedisScripts.RECORD, keys, String.valueOf(window.toMillis())));
+        List<Object> result = tokenStore.execute(() -> redisTemplate.execute(LoginAttemptRedisScripts.RECORD, keys, String.valueOf(window.toMillis())));
         return toOutcome(result);
     }
 
     @Override
     public void reset(AttemptKind kind, String normalizedEmail) {
         String key = key(kind, normalizedEmail);
-        execute(() -> redisTemplate.delete(key));
+        tokenStore.execute(() -> redisTemplate.delete(key));
     }
 
     /** 스크립트 반환 {@code {시도 수, 남은 시간(ms)}} — 둘 다 정수 응답(Long)이다. 모양이 다르면 스크립트와 코드가 어긋난 것이라 그대로 실패한다. */

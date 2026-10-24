@@ -133,7 +133,7 @@
   키에 같은 hash tag(예: `{familyId}`)를 넣어야 한다.
 - 저장소(Redis) 장애 · 타임아웃은 503 `AUTH_013` 이다. BFF 는 재발급 401(4xx)이면 쿠키를 지우고, 503 이면 쿠키를 둔다.
 - Redis 헬스는 끈다(`management.health.redis.enabled: false`) — 인스턴스가 모두 같이 쓰는 의존이라 DOWN 이면 모든 인스턴스가 함께 빠지고
-  Redis 와 무관한 회원가입 · 내 정보까지 끊긴다. 재시작으로 낫는 장애도 아니다. 장애는 503 `AUTH_013` 응답과 어댑터의 warn 로그(예외 타입만)로 드러난다.
+  Redis 와 무관한 회원가입 · 내 정보까지 끊긴다. 재시작으로 낫는 장애도 아니다. 장애는 503 `AUTH_013` 응답과 어댑터의 warn 로그(예외 타입만, 1분에 한 번 — §8)로 드러난다.
 
 #### 로그아웃 (`POST /api/v1/auth/logout`, `isAuthenticated()`)
 
@@ -618,6 +618,11 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 - 게이트웨이의 거부 로그 수준은 서비스와 같다 — 001 · 002 · 003 · 004 는 debug, 006 은 warn, 로그인한 회원의 005 는 info(memberId · jti).
 - **차단 목록 fail-open 통과 로그**(§7-1)는 warn 이지만 **1분에 한 번만** warn 이고 나머지는 debug 다 — 장애 동안 토큰 붙은 요청마다 warn 을 쓰면 로그가 폭주한다.
   jti · 메서드 · 마스킹 경로 · 예외 타입만 남긴다(`revocation list unavailable, token passed (fail-open)`). 어드민 경로의 006 은 응답 로그(warn)로 남는다.
+- **auth 토큰 저장소(Redis) 장애 로그**(§2-3 · 503 `AUTH_013`)도 **1분에 한 번만** warn 이고 나머지는 debug 다(#234) — 로그인 · 가입 · 재발급 · 로그아웃이 모두
+  Redis 를 불러 장애 동안 요청 하나가 warn 한 줄이 되기 때문이다. refresh 토큰 · 차단 목록 쓰기 · 시도 계수 세 어댑터가 `TokenStoreRedisSupport` 빈 하나를
+  같이 써서 간격을 공유한다(같은 Redis 의 공통 장애라 어댑터별로 세지 않는다). 간격은 CAS 로 잡아 동시에 실패해도 간격당 warn 은 한 건이다.
+  예외 타입만 남긴다 — warn `token store unavailable: <예외 타입>, nextWarnIn=PT1M`, debug `token store unavailable: <예외 타입>`.
+  예외 메시지 · 키 · 이메일 · 지문은 어느 레벨에도 남기지 않는다(메시지에 키가 섞일 수 있다).
 
 ## 9. 서비스 간 인증 (internal API, 1단계)
 
