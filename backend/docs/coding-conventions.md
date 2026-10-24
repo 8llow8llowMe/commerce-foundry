@@ -51,7 +51,7 @@ public ProductListInfo searchProducts(
 | 서비스 간 읽기 / 쓰기 | `*QueryPort` / `*CommandPort` | `*ClientAdapter` (`adapter/out/client/`) |
 | JPA 영속성 | `*RepositoryPort` | `*RepositoryAdapter` (`adapter/out/persistence/`) |
 | 인프라 특화 | 도메인 의미 그대로 — `PaymentGatewayPort`, `StockReservationPort`, `ShipmentTrackingPort`, `ImageStoragePort` | |
-| 관리자 감사 | `AdminAuditPort` — 행위별 메서드(`adminLoginSucceeded` 등). Facade 는 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다(H11) | `*AuditLogAdapter` (`adapter/out/log/`, `security-guide.md` §11-4) |
+| 관리자 감사 | `AdminAuditPort` — 행위별 메서드(`adminLoginSucceeded` 등). Facade 는 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다(H11) | `*AuditLogAdapter` (`adapter/out/log/` — 로그 한 줄). auth 는 `AdminAuditLogRepositoryAdapter`(`adapter/out/persistence/` — 로그 줄 뒤 DB 행, #192) (`security-guide.md` §11-4) |
 
 전송 기술(`Feign`, `Http`, `Toss`)을 포트 이름에 넣지 않는다. 토스는 adapter 이름(`TossPaymentGatewayAdapter`)에만 나온다.
 
