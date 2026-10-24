@@ -15,7 +15,10 @@ import com.commercefoundry.domainlayer.cart.domain.model.CustomOptions;
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
+import jakarta.persistence.PersistenceException;
+import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +30,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -183,6 +187,46 @@ class CartItemPersistenceAdapterTest {
         assertThat(cartItemRepositoryPort.findAllByMemberId(MEMBER)).extracting(CartItem::id).containsExactly(103L, 102L);
         assertThat(entityManager.find(CartItemCustomOptionEntity.class, 1011L)).isNull();
         assertThat(entityManager.find(CartItemCustomOptionEntity.class, 1031L)).isNotNull();
+    }
+
+    /**
+     * #232 원인 재현 — PostgreSQL text 는 NUL(0x00)을 받지 않는다(SQLSTATE 22021 {@code invalid byte sequence for encoding "UTF8": 0x00}).
+     * 어댑터는 제약 위반이 아니라 그대로 던지므로 요청 검증({@code CART_115})이 없으면 500 이다. 요청 경로의 400 · 미저장은 {@code CartWebControllerTest} 가 본다.
+     */
+    @Test
+    @DisplayName("NUL 이 든 입력값을 저장하면 PostgreSQL 이 거절한다(22021) — CART_CONCURRENTLY_MODIFIED 로 바뀌지 않고 그대로 던진다")
+    void nulInValueIsRejectedByPostgres() {
+        CustomOptions options = CustomOptions.of(List.of(CustomOption.of("memo", "a\u0000b"))).withIds(ids::incrementAndGet);
+
+        assertThatThrownBy(() -> cartItemRepositoryPort.saveAll(List.of(CartItem.create(305L, MEMBER, 9005L, 1, options, 99))))
+            .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class)
+            .satisfies(exception -> assertThat(sqlStatesOf(exception)).contains("22021"));
+    }
+
+    /**
+     * 짝 없는 서로게이트는 PostgreSQL 이 거절하지 않는다 — pgjdbc 가 {@code String.getBytes(UTF_8)} 로 보내며 {@code ?} 로 치환해, 오류 없이 다른 값이 저장된다.
+     * 그래서 요청 검증({@code CART_115})이 제어 문자와 함께 막는다.
+     */
+    @Test
+    @DisplayName("짝 없는 서로게이트는 오류 없이 '?' 로 바뀌어 저장된다 — 입력과 다른 값이라 요청 단계에서 막는다")
+    void loneSurrogateIsSilentlyReplaced() {
+        CustomOptions options = CustomOptions.of(List.of(CustomOption.of("memo", "a\uD800b"))).withIds(ids::incrementAndGet);
+
+        cartItemRepositoryPort.saveAll(List.of(CartItem.create(306L, MEMBER, 9006L, 1, options, 99)));
+        entityManager.clear();
+
+        CartItem saved = cartItemRepositoryPort.findByIdAndMemberId(306L, MEMBER).orElseThrow();
+        assertThat(saved.customOptions().values()).extracting(CustomOption::value).containsExactly("a?b");
+    }
+
+    private static List<String> sqlStatesOf(Throwable exception) {
+        List<String> states = new ArrayList<>();
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sqlException) {
+                states.add(sqlException.getSQLState());
+            }
+        }
+        return states;
     }
 
     @Test
