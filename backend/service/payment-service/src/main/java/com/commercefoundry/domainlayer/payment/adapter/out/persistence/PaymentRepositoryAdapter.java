@@ -5,7 +5,7 @@ import com.commercefoundry.domainlayer.payment.application.exception.PaymentPers
 import com.commercefoundry.domainlayer.payment.application.mapper.PaymentMapper;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentRepositoryPort;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
-import com.commercefoundry.global.persistence.ConstraintViolations;
+import com.commercefoundry.persistence.util.ConstraintViolations;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -44,13 +44,13 @@ public class PaymentRepositoryAdapter implements PaymentRepositoryPort {
         } catch (OptimisticLockingFailureException exception) {
             throw conflict(PaymentPersistenceConflictException.Kind.VERSION, payment);
         } catch (DataIntegrityViolationException exception) {
-            String constraintName = ConstraintViolations.constraintNameOf(exception);
-            if (ACTIVE_ORDER_CONSTRAINT.equals(constraintName)) {
+            if (ConstraintViolations.violates(exception, ACTIVE_ORDER_CONSTRAINT)) {
                 throw conflict(PaymentPersistenceConflictException.Kind.ACTIVE_SLOT, payment);
             }
-            if (PAYMENT_KEY_CONSTRAINT.equals(constraintName)) {
+            if (ConstraintViolations.violates(exception, PAYMENT_KEY_CONSTRAINT)) {
                 throw conflict(PaymentPersistenceConflictException.Kind.PAYMENT_KEY, payment);
             }
+            String constraintName = ConstraintViolations.constraintNameOf(exception);
             throw new DataIntegrityViolationException("결제 시도 저장이 제약을 위반했습니다. paymentId=%d, constraint=%s".formatted(payment.id(), constraintName));
         }
     }

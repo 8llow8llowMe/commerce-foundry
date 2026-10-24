@@ -8,13 +8,12 @@ import com.commercefoundry.domainlayer.member.application.mapper.MemberMapper;
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.application.port.out.query.MemberListQueryResult;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
+import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.security.principal.MemberRole;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
@@ -72,6 +71,7 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
     /**
      * {@code saveAndFlush} 로 바로 내보낸다 — 커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 도메인 오류로 바꿀 자리가 없다.
      * 예외가 나면 트랜잭션은 롤백 전용이 되고, 여기서 던진 도메인 예외가 그대로 롤백시킨다.
+     * 제약은 이름의 정확 일치로 가린다({@link ConstraintViolations} — PostgreSQL 서버 오류 필드 우선, 메시지 문구로 가리지 않는다).
      */
     @Override
     public Member save(Member member) {
@@ -80,7 +80,7 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
         } catch (OptimisticLockingFailureException exception) {
             throw new MemberException(MemberErrorCode.MEMBER_UPDATE_CONFLICT, exception);
         } catch (DataIntegrityViolationException exception) {
-            if (violates(exception, MemberEntity.UK_EMAIL)) {
+            if (ConstraintViolations.violates(exception, MemberEntity.UK_EMAIL)) {
                 throw new MemberException(MemberErrorCode.DUPLICATE_EMAIL, exception);
             }
             throw exception;
@@ -93,18 +93,5 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
         if (memberRepository.incrementVersion(member.id(), member.version(), Instant.now()) == 0) {
             throw new MemberException(MemberErrorCode.MEMBER_UPDATE_CONFLICT);
         }
-    }
-
-    /**
-     * 원인 사슬의 Hibernate 제약 위반이 그 제약인가. 예외 메시지가 아니라 드라이버가 알려 준 제약 이름으로 본다.
-     * PostgreSQL 은 이름 그대로({@code uk_member_email}), H2(컨텍스트 테스트)는 이름 뒤에 인덱스 접미사를 붙여 포함 여부로 비교한다.
-     */
-    private static boolean violates(DataIntegrityViolationException exception, String constraintName) {
-        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
-            if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null) {
-                return violation.getConstraintName().toLowerCase(Locale.ROOT).contains(constraintName);
-            }
-        }
-        return false;
     }
 }

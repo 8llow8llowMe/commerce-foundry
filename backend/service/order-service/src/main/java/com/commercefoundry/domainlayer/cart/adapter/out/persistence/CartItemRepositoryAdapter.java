@@ -9,7 +9,7 @@ import com.commercefoundry.domainlayer.cart.application.exception.CartException;
 import com.commercefoundry.domainlayer.cart.application.mapper.CartItemMapper;
 import com.commercefoundry.domainlayer.cart.application.port.out.CartItemRepositoryPort;
 import com.commercefoundry.domainlayer.cart.domain.model.CartItem;
-import com.commercefoundry.global.persistence.ConstraintViolations;
+import com.commercefoundry.persistence.util.ConstraintViolations;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.persistence.PersistenceException;
