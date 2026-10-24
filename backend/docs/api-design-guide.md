@@ -268,6 +268,8 @@ return ResponseEntity.ok().body(Response.success(response));
 
 - **이메일** — 254자 이하, 도메인에 점이 있는 형식. 앞뒤를 포함해 공백이 있으면 거절한다(103 — 프론트가 trim 해서 보낸다).
   소문자로 바꿔 저장 · 조회하므로(`Member.normalizeEmail`) 대소문자만 다른 이메일은 같은 회원이다. DB 도 `ck_member_email_normalized`(`email = lower(email)`)로 강제한다.
+  가입에서 길이는 원문과 정규화(앞뒤 공백 제거 · 소문자 — `Member.canonicalEmail`) 뒤 모두 254자 이하다. `İ`(U+0130)처럼 소문자로 바꾸면 길어지는 글자 때문에
+  정규화 뒤에만 넘는 값도 102 다(`@ValidNormalizedEmailLength`, #233 — 이전에는 500 이었다). 로그인은 같은 값을 "없는 회원"(`AUTH_001` · `AUTH_030`)으로 끝낸다(#66).
 - **비밀번호** — 8~64자, 영문 · 숫자를 1자 이상씩 포함하고 공백 없는 ASCII 출력 문자(영문 · 숫자 · 특수문자)만. ASCII 로 묶는 이유는 BCrypt 가
   72바이트까지만 쓰기 때문이다(64자 ASCII = 64바이트). 저장은 `BCryptPasswordEncoder`(강도 10) 해시뿐이고 원문 · 해시를 로그 · 응답에 싣지 않는다.
 - **이름** — 1~50자, 앞뒤 공백을 지우고 저장한다. 공백만인 값은 가입에서는 필수 누락(107), 내 정보 수정에서는 114 다 —
