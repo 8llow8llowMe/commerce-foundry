@@ -36,6 +36,9 @@
 - **클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY`, 게이트웨이 전용, #89 · #135)는 Vault 등록 필요(dev/prod)다.** `openssl rand -base64 32` 로 만들고
   게이트웨이 인스턴스 전부에 같은 값을 넣는다. 비로그인 버킷 키와 하류 `X-Client-Subject` 값(security-guide.md §7-3)을 만든다 — 서비스에는 넣지 않는다.
   스위치 `GATEWAY_CLIENT_IP_ENABLED` 와 `GATEWAY_TRUSTED_PROXIES`(BFF · LB 송신 주소)는 비밀이 아니라 배포 설정의 환경변수다 — Vault 에 등록하지 않는다.
+- **Eureka 레지스트리 비밀번호(`EUREKA_PASSWORD`, #248)는 Vault 등록 필요(dev/prod)다.** `openssl rand -hex 32` 로 만들고 service-discovery · 게이트웨이 · 서비스 전부에
+  **같은 값**을 넣는다(환경마다 다른 값). 클라이언트 URL 에 실리는 값이라 영문 · 숫자 · `. _ ~ -` 만 쓴다 — 다른 문자가 있으면 Eureka 가 뜨지 않는다.
+  호스트 `EUREKA_HOST` 는 비밀이 아니지만 배포 env 로 같이 넣는다. 교체 순서는 [security-guide.md](security-guide.md) §12-4.
 - **초기 관리자 시드(`ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` · `ADMIN_SEED_NAME`, auth 전용, #6)는 Vault 등록 필요(dev/prod)다.**
   실제 관리자 이메일 · 비밀번호를 yml · 테스트 픽스처 · 이슈 · PR 에 쓰지 않는다 — yml 은 `${ADMIN_SEED_EMAIL:}` 플레이스홀더만 둔다.
   비밀번호는 12~64자, 영문 · 숫자 포함 공백 없는 ASCII 이고(`openssl rand -base64 24` 로 만들고 영문 · 숫자가 모두 들었는지 본다), 같은 이메일의 관리자가 이미 있으면 덮어쓰지 않으므로
