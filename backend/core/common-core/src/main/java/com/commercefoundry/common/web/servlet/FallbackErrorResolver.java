@@ -2,6 +2,7 @@ package com.commercefoundry.common.web.servlet;
 
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.exception.CommonErrorCode;
+import com.commercefoundry.common.exception.RedactedThrowable;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -30,7 +31,8 @@ import tools.jackson.databind.json.JsonMapper;
  * 여기는 아무도 받지 않은 오류만 온다 — advice 로 {@code Exception} 을 잡으면 도메인 advice 와 같은 순위라 도메인 예외를 가로챌 수 있다.
  * 빈으로 등록하지 않는다 — 빈이면 {@code DispatcherServlet} 이 사슬 밖에서 한 번 더 찾아 순서가 흐려진다.
  *
- * <p>500 은 원인 · 스택을 응답에 싣지 않고 로그에만 남긴다. 로그 경로는 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남긴다 —
+ * <p>500 은 원인 · 스택을 응답에 싣지 않고 로그에만 남긴다. 로그에도 예외 메시지는 남기지 않고 원인 사슬의 타입 · 스택 프레임만 남긴다
+ * ({@link RedactedThrowable}, #280). 로그 경로는 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남긴다 —
  * 주문번호 같은 식별자가 경로에 들어간다 (security-core {@code SecurityErrorResponder} 와 같은 규칙, {@code coding-conventions.md} §8).
  */
 @Slf4j
@@ -67,7 +69,7 @@ public class FallbackErrorResolver implements HandlerExceptionResolver {
             write(jsonMapper, response, status, headersOf(exception), errorCode);
         } catch (IOException writeFailure) {
             log.warn("fallback error response write failed. code={}, method={}, path={}",
-                errorCode.getCode(), request.getMethod(), maskPath(request.getRequestURI()), writeFailure);
+                errorCode.getCode(), request.getMethod(), maskPath(request.getRequestURI()), RedactedThrowable.of(writeFailure));
         }
         return new ModelAndView();
     }
@@ -101,9 +103,9 @@ public class FallbackErrorResolver implements HandlerExceptionResolver {
             log.warn("framework 5xx answered by fallback envelope. code={}, status={}, method={}, path={}, exception={}",
                 errorCode.getCode(), status.value(), request.getMethod(), path, exception.getClass().getName());
         } else if (status.is5xxServerError()) {
-            // 응답에는 싣지 않는 원인 · 스택을 여기서만 남긴다
+            // 응답에는 싣지 않는 원인 사슬의 타입 · 스택을 여기서만 남긴다. 메시지는 버린다 — DB 행 값 · 대상 응답 본문이 들어 있을 수 있다 (#280)
             log.error("unhandled exception answered by fallback envelope. code={}, status={}, method={}, path={}",
-                errorCode.getCode(), status.value(), request.getMethod(), path, exception);
+                errorCode.getCode(), status.value(), request.getMethod(), path, RedactedThrowable.of(exception));
         } else if (status.value() == 401 || status.value() == 403) {
             // 인증 · 인가 오류는 SECURITY_00x 로 통일한다 (security-guide.md §4). 여기로 오면 COMMON_004 로 나가 클라이언트의 재인증 분기가 어긋난다 —
             // ResponseStatusException(401/403) 대신 보안 예외를 던지라는 신호다

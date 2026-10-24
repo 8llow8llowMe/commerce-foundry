@@ -3,14 +3,18 @@ package com.commercefoundry.common.web.servlet;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.common.exception.CommonErrorCode;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -29,6 +33,7 @@ import org.springframework.web.servlet.mvc.support.DefaultHandlerExceptionResolv
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@ExtendWith(OutputCaptureExtension.class)
 class FallbackErrorResolverTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -42,6 +47,20 @@ class FallbackErrorResolverTest {
 
         assertEnvelope(response, 500, CommonErrorCode.INTERNAL_ERROR);
         assertThat(response.getContentAsString()).doesNotContain("password=secret").doesNotContain("IllegalStateException");
+    }
+
+    @Test
+    @DisplayName("처리되지 않은 예외의 로그는 원인 사슬의 타입 · 스택 · SQLState 만 남기고 메시지(행 값)는 남기지 않는다 (#280)")
+    void unhandledExceptionLogIsRedacted(CapturedOutput output) {
+        SQLException rowValues = new SQLException("ERROR: duplicate key\n  Detail: Key (email)=(member@example.com) already exists.", "23505");
+
+        resolve(new IllegalStateException("could not execute statement [password=secret]", rowValues));
+
+        assertThat(output).contains("unhandled exception answered by fallback envelope")
+            .contains(IllegalStateException.class.getName())
+            .contains(SQLException.class.getName() + " [sqlState=23505]")
+            .contains("\tat " + FallbackErrorResolverTest.class.getName() + ".unhandledExceptionLogIsRedacted")
+            .doesNotContain("member@example.com").doesNotContain("password=secret").doesNotContain("duplicate key");
     }
 
     @Test
