@@ -52,6 +52,10 @@
 - 주입 방식(Spring Cloud Vault / Vault Agent → 환경변수)과 Vault 경로·인증 방식은 #32 에서 확정하고 이 절을 갱신한다.
 - 배포 파이프라인(#198)은 Vault KV v2 `kv/commerce-foundry/backend/{dev,prod}/env`(환경당 secret 하나)를 AppRole 로 읽는다 —
   Jenkins credential `commerce-foundry-vault-role-id` / `commerce-foundry-vault-secret-id`, Vault 주소는 Jenkins 전역 env `VAULT_ADDR` ([jenkins-cicd-guide.md](jenkins-cicd-guide.md) §6).
+- **DB 접속 정보(`DB_URL` · `DB_USERNAME` · `DB_PASSWORD`)는 환경 축으로 나눈다** — 키 이름은 모든 환경에서 같고 값만 환경별 secret 에 다르게 둔다.
+  환경은 DB 서버로 나뉘고 database · 스키마 이름은 같으므로(`service-inventory.md` §4-2), 환경마다 바뀌는 것은 호스트 · 계정 · 비밀번호뿐이다.
+  지금 경로는 환경당 secret 하나(`kv/commerce-foundry/backend/<env>/env`)다. 서비스별 DB 계정으로 나누면(#258) 서비스 축을 더할지(`.../<env>/<service>`) 또는 서비스별 키 이름으로 둘지를
+  #32 에서 정한다. dev 와 prod 의 DB 계정 · 비밀번호를 같은 값으로 두지 않는다.
 - **개발자 계정은 테스트 키만 다룬다.** 라이브 키는 고객사 계정 소유이고 Vault 에만 있다.
 - 키가 뒤바뀐 채로 기동하면 실패시킨다 (`payment-guide.md` §2).
 

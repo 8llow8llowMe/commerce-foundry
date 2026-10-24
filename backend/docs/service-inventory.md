@@ -69,11 +69,12 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 
 ## 4. 데이터 저장소
 
-- PostgreSQL 한 인스턴스에 **서비스별 스키마**를 둔다 (`auth`, `product`, `orders`, `payment`, `delivery`, `operations`).
+- PostgreSQL 한 database(`commerce_foundry`)에 **서비스별 스키마**를 둔다 (`auth`, `product`, `orders`, `payment`, `delivery`, `operations`).
   다른 서비스 스키마를 직접 조회하지 않는다 — 필요한 데이터는 내부 API 로 받는다.
 - 운영 규모가 커지면 인스턴스를 나눌 수 있게 스키마 간 FK·조인을 만들지 않는다.
 - 스키마 관리: 마이그레이션 도구 없음 — local · dev 는 `ddl-auto: update`, 운영은 `none` 이고 사용자가 DDL 을 직접 적용한다
   (`coding-conventions.md` §9-8).
+- 환경을 어떻게 나누고 DB 계정을 어떻게 두는지는 §4-2 다.
 - 오브젝트 스토리지(상품 이미지): **사용자 인프라의 S3 호환 MinIO** 를 path-style 로 쓴다 (#9 D2). 코드는 `storage-core` 의 S3 호환 클라이언트 하나라
   다른 S3 호환 제공자로 바꿔도 endpoint · region 설정만 바뀐다. 접속 값은 Vault, 버킷 CORS · 수명 규칙 설정은 사용자 몫이다 (`bootstrap-conventions.md` Storage).
 
@@ -96,6 +97,76 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | AWS SDK for Java v2 | 2.55.11 (storage-core 만 · `s3` + `url-connection-client`) | Boot BOM 이 관리하지 않아 루트 `ext` 에서 고정. `implementation` 이라 서비스는 SDK 타입을 보지 못한다. 딸려 오는 `apache5-client` · `netty-nio-client` 는 뺀다 (Boot BOM 이 HttpClient 5 를 낮춰 고정한다) |
 | S3 호환 테스트 서버 | MinIO RELEASE.2025-07-23 (`bitnamilegacy/minio:2025.7.23-debian-12-r5`, digest 고정) | storage-core 왕복 테스트(CI 전용). MinIO 공식 이미지 · 바이너리 배포가 끝나 Bitnami 가 마지막으로 빌드한 이미지를 고정한다(갱신 없음). 태그는 다시 밀어 넣을 수 있어 멀티 아키텍처 index digest 로 고정하고 태그는 주석으로 남긴다 — 이미지를 바꾸면 테스트의 `MINIO_IMAGE` 상수와 이 행을 같이 고친다. Testcontainers MinIO 모듈은 공식 이미지 기동 방식이라 쓰지 않고 `GenericContainer` 로 띄운다 |
 | PostgreSQL / Redis (로컬) | 17 / 7.4 | `docker-compose-local.yml` |
+
+### 4-2. 환경별 DB 분리 (#82)
+
+**환경은 DB 서버(인스턴스)로 나누고, database · 스키마 이름은 모든 환경에서 같게 둔다.** 환경 차이는 접속 정보(`DB_URL` · `DB_USERNAME` · `DB_PASSWORD`)로만 갈린다.
+`delivery_dev` · `auth_prod` 같은 환경 접미사 스키마를 만들지 않는다.
+
+| 환경 | DB 서버 | database · 스키마 | `ddl-auto` | 접속 정보 출처 |
+|------|---------|-------------------|------------|----------------|
+| local | 개발자 PC 의 `docker-compose-local.yml` PostgreSQL | `commerce_foundry` · 서비스별 스키마 (init 스크립트) | `update` | `backend/.env` (`local-run-guide.md` §2) |
+| test (컨텍스트) | H2 메모리 (PostgreSQL 모드) | 서비스 스키마 하나 (`INIT=CREATE SCHEMA ...`) | `create-drop` | `application-test.yml` (비밀 아님) |
+| test (리포지토리) | Testcontainers PostgreSQL 17 | DDL 스냅숏(`src/test/resources/ddl/<서비스>-schema.sql`)이 만드는 스키마 | `validate` | 컨테이너가 준다 |
+| dev | **dev 전용 DB 서버** | `commerce_foundry` · 서비스별 스키마 | `update` | Vault (`kv/commerce-foundry/backend/dev/env`) |
+| prod | **prod 전용 DB 서버** | `commerce_foundry` · 서비스별 스키마 | `none` | Vault (`kv/commerce-foundry/backend/prod/env`) |
+| staging (도입 시) | **prod 와 같은 구성의 별도 서버** | 같음 | `none` | Vault (`.../staging/env`) |
+
+이렇게 정한 이유:
+
+- **스키마 이름이 코드에 고정돼 있다.** 서비스 `application.yml` 의 `hibernate.default_schema` 가 리터럴이고, 엔티티 · JPQL 은 스키마를 따로 적지 않는다.
+  환경마다 스키마 이름이 다르면 yml 을 환경별로 갈라야 하고, 한 곳만 빠뜨려도 다른 환경의 스키마에 쓴다.
+- **DDL 이 환경과 무관해야 한다.** DDL 스냅숏과 PR 본문의 운영 DDL(`coding-conventions.md` §9-8)은 `auth.member` 처럼 스키마를 붙여 쓴다.
+  스키마 이름이 같으면 같은 스크립트를 dev · staging · prod 에 그대로 적용하고 리허설할 수 있다.
+- **dev 와 prod 가 한 서버를 쓰면 안 된다.** dev 의 부하 시험 · 잘못된 쿼리가 운영을 느리게 만들고, 권한을 잘못 주면 dev 계정이 운영 데이터를 읽는다.
+  dev 에는 테스트 데이터만, 운영 개인정보는 운영 서버에만 둔다.
+
+**차선책 — 서버를 나눌 예산이 없을 때**: 같은 인스턴스 안에서 **database** 를 `commerce_dev` · `commerce_prod` 로 나눈다(스키마 이름은 그대로).
+PostgreSQL 은 database 사이를 조인 · 조회할 수 없어 데이터 경계는 지켜지지만, CPU · 메모리 · 디스크 · 연결 수는 나뉘지 않는다.
+임시로만 쓰고, prod 트래픽이 생기기 전에 서버를 나눈다. database 이름이 달라지는 것은 `DB_URL` 뿐이라 코드 · yml 은 그대로다.
+
+**staging** 을 도입하면 prod 와 같은 PostgreSQL 메이저 버전 · 같은 계정 구성 · `ddl-auto: none` 으로 두고, **운영 DDL 을 prod 보다 먼저 적용해 보는 곳**으로 쓴다.
+prod 데이터를 복사해 쓰지 않는다(개인정보) — 필요하면 마스킹한 데이터만 넣는다.
+
+#### DB 계정
+
+| 계정 | 쓰는 쪽 | 권한 |
+|------|---------|------|
+| 서비스별 앱 계정 (예: `auth_app`) | 서비스 하나 | **자기 스키마만** — `USAGE` 와 테이블 `SELECT` · `INSERT` · `UPDATE` · `DELETE`. 다른 서비스 스키마에는 아무 권한이 없다. prod · staging 은 DDL 권한(`CREATE` · `ALTER` · `DROP`)이 없다 |
+| DDL 적용 계정 (예: `commerce_ddl`) | 사람(운영 DDL 을 적용하는 사용자) | 서비스 스키마 소유자. 앱에는 주지 않는다 |
+| 슈퍼유저 | 서버 관리 | 계정 · database 생성에만. 앱 · DDL 적용에 쓰지 않는다 |
+
+- 앱 계정을 서비스마다 나누면 **"다른 서비스 스키마를 직접 조회하지 않는다"(§4)를 권한으로 강제**한다. 코드 리뷰가 놓쳐도 DB 가 거절한다.
+- dev 는 `ddl-auto: update` 라 앱 계정이 **자기 스키마에 한해** `CREATE` 권한을 가져야 한다(테이블 · 컬럼 추가). 다른 스키마 권한은 dev 에서도 주지 않는다.
+- prod 앱 계정에 DDL 권한이 없으므로 `ddl-auto` 를 실수로 `update` 로 켜도 DB 가 DDL 을 거절해 스키마가 바뀌지 않는다
+  (Hibernate 는 기본값 `hibernate.hbm2ddl.halt_on_error=false` 라 경고 로그만 남기고 뜬다 — 기동 로그의 DDL 실패 경고를 신호로 본다). 운영 DDL 은 DDL 적용 계정으로 사람이 넣는다.
+- DDL 적용 계정이 만든 테이블에 앱 계정 권한이 붙도록 `ALTER DEFAULT PRIVILEGES` 를 같이 건다. 아래는 형식 예다 — 비밀번호는 Vault 에서 만들고 여기 적지 않는다.
+
+  ```sql
+  -- 슈퍼유저로, 서비스마다 (auth 예)
+  create role auth_app login;                           -- 비밀번호는 \password 로 따로
+  grant connect on database commerce_foundry to auth_app;
+  grant usage on schema auth to auth_app;
+  grant select, insert, update, delete on all tables in schema auth to auth_app;
+  alter default privileges for role commerce_ddl in schema auth
+      grant select, insert, update, delete on tables to auth_app;
+  -- dev 에서만: ddl-auto update 용
+  -- grant create on schema auth to auth_app;
+  ```
+
+- 식별자는 Snowflake 라 시퀀스 권한은 필요 없다. 시퀀스를 쓰는 테이블이 생기면 `usage` · `select` on sequences 를 같이 준다.
+- **현재 상태 (#82 시점)**: 배포 env 의 `DB_USERNAME` · `DB_PASSWORD` 는 서비스 공통 키라(`deploy-guide.md` §4-1) 한 환경 안에서 서비스들이 계정 하나를 같이 쓴다.
+  서비스별 계정은 키를 서비스별로 나누는 설정 변경(compose · `.env.example` · Vault)이 필요해 #258 에서 한다. 그 전까지 공용 계정에는 서비스 스키마 전부의 DML(dev 는 `CREATE` 포함)만 주고,
+  스키마 소유자 · 슈퍼유저 권한은 주지 않는다.
+
+#### 새 서비스 · 새 환경을 더할 때
+
+| 무엇을 | 어디에 |
+|--------|--------|
+| 스키마 이름 | 서비스의 짧은 이름 하나(`delivery`). SQL 예약어면 복수형(`orders`). 모든 환경에서 같다 — `application.yml` `hibernate.default_schema`, `docker/postgres/init/01-create-schemas.sql`, 이 절과 §4 의 목록, `coding-conventions.md` §9-8 의 스키마 목록 |
+| 스키마 만들기 | local 은 init 스크립트(`local-run-guide.md` §3). dev · staging · prod 는 DDL 적용 계정으로 `create schema` 를 먼저 적용한다 — JPA 는 스키마를 만들지 않는다 |
+| 앱 계정 | 위 SQL 로 그 환경 DB 에 만든다. 이름은 `<스키마>_app` |
+| 접속 정보 | 그 환경의 Vault secret(`kv/commerce-foundry/backend/<env>/env`)에 키 이름 그대로 넣는다(`secret-management.md` §3). 새 환경은 secret 경로를 하나 더 만든다 |
 
 ## 5. 결정 대기
 
