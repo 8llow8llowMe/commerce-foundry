@@ -920,7 +920,7 @@ test -s .dockerignore
 
 # ── 네트워크는 compose 가 만들지 않는다(external). 없으면 만든다(deploy-guide.md §6)
 docker network inspect "${DOCKER_NETWORK}" >/dev/null 2>&1 || docker network create "${DOCKER_NETWORK}" >/dev/null
-# dev · prod 는 네트워크를 공유하지 않는다 — Eureka 는 인증이 없어 같은 네트워크면 반대 환경 인스턴스가 섞인다
+# dev · prod 는 네트워크를 공유하지 않는다 — Eureka 인증(#248)은 환경마다 다른 비밀번호지만, 같은 네트워크면 그 값 하나로 반대 환경에 닿는다(심층 방어)
 for attached in $(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "${DOCKER_NETWORK}"); do
   case "${attached}" in
     commerce-*-"${OPPOSITE_ENV}")

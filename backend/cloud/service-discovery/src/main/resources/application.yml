@@ -20,6 +20,16 @@ eureka:
     service-url:
       defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
   # self-preservation 은 기본값(켜짐)을 둔다. 로컬에서만 끈다 (application-local.yml).
+  dashboard:
+    # 대시보드(/)는 기본 닫힘 — 브라우저가 Basic 자격 증명을 기억하는 유일한 경로다. 배포 환경은 ssh 터널 + curl -u 로 /eureka/apps 를 본다.
+    # 로컬만 연다 (application-local.yml)
+    enabled: false
+
+# 레지스트리 인증 (#248, security-guide.md §12). 사용자는 eureka 고정, 비밀번호는 기본값이 없다 — 비면 기동하지 않는다.
+# 클라이언트(게이트웨이 · 서비스)가 defaultZone URL 에 같은 값을 싣는다. 영문 · 숫자 · . _ ~ - 만, 32자 이상 (openssl rand -hex 32)
+discovery:
+  auth:
+    password: ${EUREKA_PASSWORD}
 
 management:
   endpoints:

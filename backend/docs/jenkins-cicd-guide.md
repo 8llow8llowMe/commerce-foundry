@@ -210,7 +210,7 @@ PR 에서 파이프라인을 바꿔 그 잡이 닿는 credential(Vault AppRole �
 | `필수 키가 없거나 비어 있습니다: ...` | 그 환경 Vault secret 에 키를 넣는다(`deploy-guide.md` §4-3). 다시 실행한다 |
 | `작은따옴표 · 줄바꿈이 있어 ... 쓸 수 없는 키` | 그 값을 작은따옴표 없는 한 줄 값으로 다시 만든다(PEM 은 `security-guide.md` §6 의 한 줄 형식) |
 | `반대 환경 컨테이너 ... 가 붙어 있습니다` | dev · prod 가 같은 네트워크를 쓴다. 환경마다 `COMMERCE_DOCKER_NETWORK` 를 다르게 둔다 |
-| `--wait` 실패 · `안정되지 않았습니다` | 아래 가린 로그에 원인이 있다. 키 값(DB 주소 · Eureka 주소)을 확인하거나 §7 로 직전 커밋으로 되돌린다 |
+| `--wait` 실패 · `안정되지 않았습니다` | 아래 가린 로그에 원인이 있다. 키 값(DB 주소 · Eureka 호스트 · `EUREKA_PASSWORD` — 7개 모듈 같은 값)을 확인하거나 §7 로 직전 커밋으로 되돌린다 |
 | `승인자 ... 가 없어 멈춥니다` · `실행자가 직접 승인` | `COMMERCE_PROD_DEPLOY_APPROVERS` 를 등록하거나 다른 승인자가 승인한다(§7) |
 | `jq: command not found` | 배포 agent 에 jq 가 없다(§3) |
 | Jenkins 가 노드를 기다리며 멈춤 | 그 라벨의 agent 가 없다(실패가 아니라 대기다) |
@@ -253,7 +253,8 @@ Jenkins · Vault 에 등록할 것. 값은 저장소에 쓰지 않는다.
 - [ ] Markup Formatter 는 **Plain text**(§11)
 - [ ] 플러그인: Pipeline Utility Steps(`readJSON`), Lockable Resources(`lock`), JUnit, GitHub Branch Source
 - [ ] agent `builder-backend`(Docker 포함) · `deploy-backend-dev2` · `deploy-backend-prod`(jq 포함) — §3 도구
-- [ ] Vault secret `kv/commerce-foundry/backend/dev/env` · `.../prod/env` — `deploy-guide.md` §4-3 의 키, 환경마다 다른 `COMMERCE_DOCKER_NETWORK`
+- [ ] Vault secret `kv/commerce-foundry/backend/dev/env` · `.../prod/env` — `deploy-guide.md` §4-3 의 키, 환경마다 다른 `COMMERCE_DOCKER_NETWORK`.
+      #248 부터 `EUREKA_HOST`(`commerce-service-discovery-<env>`) · `EUREKA_PASSWORD`(`openssl rand -hex 32`, 환경마다 다른 값)가 필요하고 `EUREKA_DEFAULT_ZONE` 은 쓰지 않는다
 - [ ] 멀티브랜치 잡 7개(§3, operations-service 는 #212 뒤) — 소스 설정은 §3 표, **Suppress automatic SCM triggering** 을 켠 채 등록
 - [ ] **첫 배포** — 잡을 등록한 뒤 각 잡의 `develop` 을 **FORCE_DEPLOY** 로 한 번씩, 순서대로 실행한다:
       service-discovery → api-gateway → auth → product · delivery → order · payment (`deploy-guide.md` §5).

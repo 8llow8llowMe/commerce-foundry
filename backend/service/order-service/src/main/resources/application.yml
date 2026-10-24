@@ -62,8 +62,16 @@ resilience4j:
 
 eureka:
   client:
+    # 레지스트리는 HTTP Basic 이다 (#248, security-guide.md §12). 사용자는 eureka 고정, 비밀번호 EUREKA_PASSWORD 는 기본값이 없다.
+    # 클라이언트가 URL 의 userinfo 를 Basic 헤더로 바꿔 싣는다 — 비밀번호는 영문 · 숫자 · . _ ~ - 만 (openssl rand -hex 32)
     service-url:
-      defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
+      defaultZone: http://eureka:${EUREKA_PASSWORD}@${EUREKA_HOST:localhost}:8761/eureka/
+    # 기동 때 등록이 실패하면(401 · 연결 불가) 기동을 멈춘다 — 자격 증명이 틀린 채 "등록 안 된 UP" 으로 숨지 않게
+    should-enforce-registration-at-init: true
+  instance:
+    # 컨테이너 호스트 이름(컨테이너 ID)이 아니라 네트워크 IP 로 등록한다 — 게이트웨이 lb:// · Feign 이 이름을 풀지 못하는 일을 막는다 (#249).
+    # 배포(dev · prod) 기본값이다. local 은 application-local.yml 이 끈다
+    prefer-ip-address: true
 
 management:
   endpoints:
@@ -108,3 +116,9 @@ springdoc:
     enabled: false
     # 외부 검증 배지(validator.swagger.io)로 문서 주소를 보내지 않는다
     validator-url: none
+
+logging:
+  level:
+    # Eureka 에 닿지 않으면 이 데코레이터가 INFO · WARN 로그에 defaultZone 원문(비밀번호 포함)을 남긴다 (#248, security-guide.md §12-3).
+    # 연결 실패 신호는 RetryableEurekaHttpClient 의 WARN 이 남긴다. com.netflix.discovery 를 DEBUG 로 올리지 않는다 — 같은 이유로 비밀번호가 나온다
+    com.netflix.discovery.shared.transport.decorator.RedirectingEurekaHttpClient: ERROR
