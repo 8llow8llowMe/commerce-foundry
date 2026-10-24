@@ -40,6 +40,8 @@ public class ProductServiceApplication {
 - **예외: 폴백 오류 봉투(`FallbackErrorAutoConfiguration`, common-core)는 `@Import` 하지 않는다 — 자동 구성이다.** 빠뜨려도 기동은 되고
   Boot 기본 오류 JSON 만 조용히 나가므로, 서블릿 서비스면 고르지 않고 언제나 걸리게 했다. 리액티브 게이트웨이는 조건에서 빠진다.
   걸렸는지는 서비스의 `*FallbackErrorSmokeTest` · `*ErrorPageEnvelopeSmokeTest` 가 본다 (아래 보안 절). `/error` 컨트롤러(#81)도 같은 자동 구성이 등록한다.
+- **같은 이유로 DB 드라이버 속성 `logServerErrorDetail=false`(`ServerErrorDetailAutoConfiguration`, persistence-core)도 자동 구성이다** —
+  빠뜨려도 기동은 되고 제약 위반 로그에 행 값만 조용히 남는다(#269). persistence-core 를 의존하면 언제나 걸린다. 걸렸는지는 서비스의 `*ApplicationTests` 가 본다.
 
 ```java
 @Configuration
@@ -70,7 +72,7 @@ public class PaymentServicePropertiesConfig {
 
 | 파일 | 담는 것 |
 |------|---------|
-| `application.yml` | 포트, 서비스 이름, DB 플레이스홀더, DB 드라이버 속성(`logServerErrorDetail: false`), 스키마, Eureka 주소, actuator, Snowflake 플레이스홀더, `security.jwt.*` 플레이스홀더(`${JWT_PUBLIC_KEY}` · `${JWT_PUBLIC_KEY_PREVIOUS:}`), `security.internal.*`(`${spring.application.name}` · `${INTERNAL_JWT_SECRET}` · `${INTERNAL_JWT_SECRET_PREVIOUS:}`), Swagger 기본값 |
+| `application.yml` | 포트, 서비스 이름, DB 플레이스홀더, 스키마, Eureka 주소, actuator, Snowflake 플레이스홀더, `security.jwt.*` 플레이스홀더(`${JWT_PUBLIC_KEY}` · `${JWT_PUBLIC_KEY_PREVIOUS:}`), `security.internal.*`(`${spring.application.name}` · `${INTERNAL_JWT_SECRET}` · `${INTERNAL_JWT_SECRET_PREVIOUS:}`), Swagger 기본값 |
 | `application-local.yml` | `backend/.env` import, `ddl-auto: update`, Snowflake 고정값, Swagger 열기 |
 | `application-dev.yml` | `ddl-auto: update`, Swagger 열기. 값은 Vault 에서 환경변수로 받는다 (`secret-management.md`) |
 | `src/test/resources/application-test.yml` | 컨텍스트 로딩 테스트용 H2 · Eureka 끄기 (아래 "컨텍스트 로딩 테스트") |
@@ -80,9 +82,8 @@ public class PaymentServicePropertiesConfig {
 - `ddl-auto` 는 기본 `none`, local · dev 만 `update`. 운영은 애플리케이션이 스키마를 건드리지 않고 사람이 DDL 을 적용한다.
   마이그레이션 도구는 쓰지 않는다 (`coding-conventions.md` §9-8).
 - 스키마는 `spring.jpa.properties.hibernate.default_schema` 로 서비스마다 지정한다. 다른 서비스 스키마를 직접 조회하지 않는다.
-- DB 를 쓰는 서비스는 `spring.datasource.hikari.data-source-properties.logServerErrorDetail: false` 를 둔다 — 제약 위반 로그에 행 값(개인정보)이
-  실리지 않게 (`coding-conventions.md` §8). H2(컨텍스트 테스트)는 모르는 속성이라 무시하므로 test 프로파일에서 뺄 필요가 없다.
-  order-service 는 아직 없다 — #13 C 에서 yml 과 `OrderServiceApplicationTests` 단언을 함께 넣는다.
+- DB 드라이버 속성 `logServerErrorDetail=false` 는 서비스 yml 에 두지 않는다 — persistence-core 자동 구성이 넣는다(위 `@Import` 예외 절, `coding-conventions.md` §8).
+  H2(컨텍스트 테스트)는 모르는 속성이라 무시한다.
 - actuator 는 `health` 만 노출한다.
 - Snowflake 는 base 에 `${SNOWFLAKE_DATACENTER_ID}` · `${SNOWFLAKE_WORKER_ID}` 를 **기본값 없이** 둔다. 값이 빠지면 0/0 으로
   뜨지 않고 기동에 실패한다.
@@ -118,7 +119,7 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
 - 락 · `timestamptz` · 인덱스처럼 **엔진에 기대는 동작은 여기서 검증되지 않는다.** 리포지토리 테스트는 Testcontainers(PostgreSQL)로
   따로 두고 CI 에서 돌린다 (아래 "리포지토리 테스트").
 - 단언: 공통 빈(Snowflake · `JPAQueryFactory` · JPA Auditing · Swagger 그룹), 서비스 이름 · 포트 · 스키마,
-  커넥션 풀이 드라이버에 넘기는 `logServerErrorDetail=false`(`HikariDataSource#getDataSourceProperties`),
+  커넥션 풀이 드라이버에 넘기는 `logServerErrorDetail=false`(`HikariDataSource#getDataSourceProperties` — 자동 구성이 걸렸는지 본다),
   `/actuator/health` 는 상태만(`components` · `details` 없음) · 다른 actuator 경로 404,
   기본 프로파일에서 Swagger 경로 404, Swagger 를 연 설정에서 그룹 문서 200 · 기본 문서 404.
 - 새 서비스를 더하면 게이트웨이의 dev 라우트(`GatewayDevRouteConfig` 는 `ServiceRoute` 를 따른다)와 Swagger UI 목록
