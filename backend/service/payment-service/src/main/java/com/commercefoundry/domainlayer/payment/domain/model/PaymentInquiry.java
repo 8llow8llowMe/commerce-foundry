@@ -18,21 +18,24 @@ public sealed interface PaymentInquiry {
     }
 
     /**
-     * PG 가 승인하지 않았다(거절 · 인증 만료 등).
+     * PG 가 승인하지 않았다(거절 · 인증 만료 등). <b>어느 결제키</b>가 승인되지 않았는지를 함께 싣는다 — 결제 시도의 결제키와 다른 결제의 실패로는
+     * 이 결제 시도를 확정하지 않는다({@link Payment#abortAfterInquiry} · {@link Payment#resolve} 가 대조한다).
      *
+     * @param paymentKey PG 가 승인하지 않았다고 답한 결제의 결제키
      * @param failureCode PG 오류 코드
      * @param failureMessage PG 오류 메시지. 없으면 null
      */
-    record Failed(String failureCode, String failureMessage) implements PaymentInquiry {
+    record Failed(String paymentKey, String failureCode, String failureMessage) implements PaymentInquiry {
 
         public Failed {
+            Objects.requireNonNull(paymentKey, "paymentKey");
             Objects.requireNonNull(failureCode, "failureCode");
         }
 
-        /** PG 메시지는 결제수단 · 고객 상황을 담을 수 있어 로그에 남기지 않는다 — 코드만 찍는다. */
+        /** PG 메시지는 결제수단 · 고객 상황을 담을 수 있어 로그에 남기지 않는다 — 코드만 찍는다. 결제키도 앞 8자만 남긴다. */
         @Override
         public String toString() {
-            return "Failed[failureCode=" + failureCode + "]";
+            return "Failed[paymentKey=" + Payment.maskPaymentKey(paymentKey) + ", failureCode=" + failureCode + "]";
         }
     }
 }

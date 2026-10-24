@@ -172,14 +172,15 @@ public record Payment(
      * 되돌린 READY(결제키 있음) → ABORTED. PG 조회로 이 결제키가 승인되지 않았음을 확인했을 때만 버린다 — 인자가 그 확인이다.
      * 조회가 승인을 돌려주면 이 메서드가 아니라 다시 승인 흐름(같은 결제키로 {@link #startApproval})이다.
      *
-     * @param notApproved PG 조회 결과 — 승인되지 않음
+     * @param notApproved PG 조회 결과 — 승인되지 않음. 이 결제 시도의 결제키에 대한 결과여야 한다 — 다른 결제키의 실패는 이 결제키가 미승인이라는 증거가 아니다
+     * @throws PaymentTransitionException READY 가 아니거나, 결제키가 없거나, 조회 결과의 결제키가 이 결제 시도의 결제키와 다를 때
      */
     public Payment abortAfterInquiry(PaymentInquiry.Failed notApproved, PaymentAbortReason reason) {
         Objects.requireNonNull(notApproved, "notApproved");
         Objects.requireNonNull(reason, "reason");
         requireStatus(PaymentStatus.READY, PaymentTransitionException.Action.ABORT_AFTER_INQUIRY);
-        if (paymentKey == null) {
-            // 승인을 시도한 적이 없으면 조회할 결제키도 없다 — abort 를 쓴다
+        if (paymentKey == null || !paymentKey.equals(notApproved.paymentKey())) {
+            // 승인을 시도한 적이 없으면 조회할 결제키도 없다 — abort 를 쓴다. 다른 결제키의 실패로는 버리지 않는다
             throw new PaymentTransitionException(status, PaymentTransitionException.Action.ABORT_AFTER_INQUIRY);
         }
         return aborted(reason);
@@ -236,15 +237,20 @@ public record Payment(
      * UNKNOWN → DONE · FAILED. PG 조회 결과로 확정한다 — 승인됐으면 {@link #approve}, 승인되지 않았으면 {@link #reject} 와 같은 칸을 채운다.
      * UNKNOWN 으로 둔 이유({@link #unknownReason()})는 이력으로 남긴다.
      *
-     * @throws PaymentApprovalMismatchException 승인 결과의 결제키 · 금액이 이 결제 시도와 다를 때 — UNKNOWN 그대로 두고
-     *     Processor 가 {@link #flagForManualReview} 로 사람 확인에 넘긴다
+     * @throws PaymentApprovalMismatchException 승인 결과의 결제키 · 금액, 또는 실패 결과의 결제키가 이 결제 시도와 다를 때 — UNKNOWN 그대로 두고
+     *     Processor 가 {@link #flagForManualReview} 로 사람 확인에 넘긴다. 다른 결제키의 실패로 FAILED 를 확정하면 이 결제키의 승인을 놓친다
      */
     public Payment resolve(PaymentInquiry inquiry) {
         Objects.requireNonNull(inquiry, "inquiry");
         requireStatus(PaymentStatus.UNKNOWN, PaymentTransitionException.Action.RESOLVE);
         return switch (inquiry) {
             case PaymentInquiry.Approved approvedInquiry -> approved(approvedInquiry.approval());
-            case PaymentInquiry.Failed failedInquiry -> failed(failedInquiry.failureCode(), failedInquiry.failureMessage());
+            case PaymentInquiry.Failed failedInquiry -> {
+                if (!paymentKey.equals(failedInquiry.paymentKey())) {
+                    throw new PaymentApprovalMismatchException(id, PaymentApprovalMismatchException.Field.PAYMENT_KEY);
+                }
+                yield failed(failedInquiry.failureCode(), failedInquiry.failureMessage());
+            }
         };
     }
 

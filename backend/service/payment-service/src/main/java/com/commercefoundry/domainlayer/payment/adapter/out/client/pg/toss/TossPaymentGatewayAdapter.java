@@ -34,7 +34,15 @@ public class TossPaymentGatewayAdapter implements PaymentGatewayPort {
     @Override
     public PgInquiryQueryResult inquire(String pgOrderId) {
         Objects.requireNonNull(pgOrderId, "pgOrderId");
-        return tossPaymentsResponseSupport.inquire(pgOrderId,
+        return tossPaymentsResponseSupport.inquire(pgOrderId, null,
             () -> tossPaymentsClient.getPaymentByOrderId(tossPaymentsProperties.basicAuthorization(), pgOrderId));
+    }
+
+    @Override
+    public PgInquiryQueryResult inquireByPaymentKey(String paymentKey, String pgOrderId) {
+        Objects.requireNonNull(paymentKey, "paymentKey");
+        Objects.requireNonNull(pgOrderId, "pgOrderId");
+        return tossPaymentsResponseSupport.inquire(pgOrderId, paymentKey,
+            () -> tossPaymentsClient.getPaymentByPaymentKey(tossPaymentsProperties.basicAuthorization(), paymentKey));
     }
 }

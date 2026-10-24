@@ -38,22 +38,38 @@ import tools.jackson.databind.json.JsonMapper;
  *   <caption>승인 요청 결과 분류 ({@link #approve})</caption>
  *   <tr><th>토스 응답</th><th>결과</th></tr>
  *   <tr><td>2xx · status DONE · 필수 칸(paymentKey · orderId(요청과 같음) · totalAmount · currency · approvedAt) 있음</td><td>Approved — 금액 · 결제키 대조는 도메인</td></tr>
- *   <tr><td>2xx 인데 status ≠ DONE · 필수 칸 누락 · 해석 불가 · 다른 주문번호 · 모르는 통화</td><td>Unknown(CONTRACT)</td></tr>
- *   <tr><td>409(IDEMPOTENT_REQUEST_PROCESSING) · 400 ALREADY_PROCESSED_PAYMENT · ALREADY_PROCESSING_REQUEST</td><td>Unknown(ALREADY_PROCESSED)</td></tr>
- *   <tr><td>401 · 400 INVALID_API_KEY · 403 INCORRECT_BASIC_AUTH_FORMAT · FORBIDDEN_REQUEST</td><td>NotSent(CONFIG_ERROR) — error 로그</td></tr>
- *   <tr><td>그 밖의 400 · 403 · 404 (코드를 읽었을 때)</td><td>Rejected(code, message)</td></tr>
+ *   <tr><td>2xx 인데 status ≠ DONE · 필수 칸 누락 · 해석 불가(approvedAt 형식 포함) · 다른 주문번호 · 모르는 통화</td><td>Unknown(CONTRACT)</td></tr>
+ *   <tr><td>409 · ALREADY_PROCESSED_PAYMENT · ALREADY_PROCESSING_REQUEST · DUPLICATED_ORDER_ID</td><td>Unknown(ALREADY_PROCESSED) — 앞선 요청이 승인됐을 수 있다</td></tr>
+ *   <tr><td>401 · INVALID_API_KEY · INCORRECT_BASIC_AUTH_FORMAT</td><td>NotSent(CONFIG_ERROR) — 인증 단계에서 막혔다, error 로그</td></tr>
+ *   <tr><td>PROVIDER_ERROR · CARD_PROCESSING_ERROR</td><td>Unknown(SERVER_ERROR) — 결제기관 쪽 처리 중 오류라 처리됐는지 모른다</td></tr>
+ *   <tr><td>{@link #REJECTION_CODES}(토스 승인 오류표의 처리 전 거절 — 카드 거절 · 한도 초과 · 잘못된 요청 · 인증 만료 등)</td><td>Rejected(code, message)</td></tr>
  *   <tr><td>429 · 5xx</td><td>Unknown(SERVER_ERROR)</td></tr>
- *   <tr><td>그 밖의 4xx · 코드를 읽지 못한 4xx · 3xx</td><td>Unknown(CONTRACT)</td></tr>
+ *   <tr><td>오류표에 없는 4xx 코드 · 코드를 읽지 못한 4xx · 3xx</td><td>Unknown(CONTRACT)</td></tr>
  *   <tr><td>서킷 오픈</td><td>NotSent(CIRCUIT_OPEN)</td></tr>
  *   <tr><td>연결 실패 — 원인 체인에 {@link ConnectException} · {@link UnknownHostException} · {@link NoRouteToHostException}</td><td>NotSent(CONNECT_FAILED)</td></tr>
  *   <tr><td>read timeout · 그 밖의 I/O 오류(보내는 중 끊김 등) · 연결 단계인지 가를 수 없는 오류(연결 타임아웃 포함)</td><td>Unknown(TIMEOUT)</td></tr>
  * </table>
  *
+ * <table>
+ *   <caption>조회 결과 분류 ({@link #inquire}) — 주문번호 조회 · 결제키 조회 공통</caption>
+ *   <tr><th>토스 응답</th><th>결과</th></tr>
+ *   <tr><td>DONE (필수 칸 있음)</td><td>Approved</td></tr>
+ *   <tr><td>ABORTED · EXPIRED</td><td>Failed(paymentKey, failure.code — 없으면 status)</td></tr>
+ *   <tr><td>READY · IN_PROGRESS</td><td>Pending(paymentKey)</td></tr>
+ *   <tr><td>404 NOT_FOUND_PAYMENT</td><td>NotFound — 미승인의 증거가 아니다</td></tr>
+ *   <tr><td>CANCELED · PARTIAL_CANCELED · WAITING_FOR_DEPOSIT</td><td>Unknown(MANUAL_REVIEW)</td></tr>
+ *   <tr><td>5xx · 429 · 403 FORBIDDEN_CONSECUTIVE_REQUEST · 서킷 · 연결 실패</td><td>Unknown(SERVER_ERROR)</td></tr>
+ *   <tr><td>타임아웃 · I/O 오류</td><td>Unknown(TIMEOUT)</td></tr>
+ *   <tr><td>다른 주문번호 · 다른 결제키(결제키 조회) · 결제키 없음 · 모르는 상태 · 해석 불가 · 그 밖의 4xx</td><td>Unknown(CONTRACT)</td></tr>
+ * </table>
+ *
  * <ul>
  *   <li>보냈는지 조금이라도 모르면 Unknown 이다 — NotSent 는 승인이 일어나지 않은 것이 확실할 때만이다. 연결 타임아웃은 JDK 클라이언트가 read timeout 과 같은 예외
  *       ({@code SocketTimeoutException})로 내서 가르지 않고 Unknown 으로 둔다(보수적).</li>
- *   <li>서킷 인스턴스는 {@value #CIRCUIT_BREAKER}. 4xx({@code FeignClientException})는 서킷 안에서 그대로 던져 실패로 세지 않는다({@code ignore-exceptions}) —
- *       카드 거절이 몰려도 서킷이 열리지 않는다. 응답 본문 해석은 서킷 밖에서 한다.</li>
+ *   <li>Rejected 는 토스 승인 오류표에 있는 "처리 전 거절" 코드만이다. 표에 없는 코드는 뜻을 모르니 거절로 확정하지 않는다(Unknown(CONTRACT)) — 거절로 확정해
+ *       활성 슬롯을 놓았는데 실은 승인됐으면 이중 결제가 된다. 토스가 코드를 더하면 {@link #REJECTION_CODES} 를 고친다.</li>
+ *   <li>서킷 인스턴스는 {@value #CIRCUIT_BREAKER}. 4xx({@code FeignClientException})는 서킷 안에서 그대로 던져 실패로 세지 않는다
+ *       ({@link TossCircuitBreakerIgnorePredicate}) — 카드 거절이 몰려도 서킷이 열리지 않는다. 429 만은 실패로 센다. 응답 본문 해석은 서킷 밖에서 한다.</li>
  *   <li>응답 값은 저장 칸 길이에 맞게 코드 포인트 기준으로 자른다(오류 코드 · PG 상태 · 간편결제 제공자) — 길어서 DONE 기록이 실패하면 돈이 빠진 뒤 기록을 잃는다.
  *       거절 메시지 길이는 도메인이 자른다.</li>
  *   <li>로그에는 PG 주문번호 · HTTP status · 오류 코드 · 예외 타입만 남긴다. 시크릿 키 · Authorization · 결제키 · 오류 메시지 · 응답 본문은 남기지 않는다
@@ -69,10 +85,32 @@ public class TossPaymentsResponseSupport {
     static final String UNRECOGNIZED_CODE = "<unrecognized>";
     static final String STATUS_DONE = "DONE";
 
-    private static final Set<String> ALREADY_PROCESSED_CODES = Set.of("ALREADY_PROCESSED_PAYMENT", "ALREADY_PROCESSING_REQUEST");
-    private static final Set<String> CONFIG_ERROR_CODES = Set.of("UNAUTHORIZED_KEY", "INVALID_API_KEY", "INCORRECT_BASIC_AUTH_FORMAT", "FORBIDDEN_REQUEST");
-    private static final Set<Integer> REJECTION_STATUSES = Set.of(400, 403, 404);
+    private static final Set<String> ALREADY_PROCESSED_CODES = Set.of("ALREADY_PROCESSED_PAYMENT", "ALREADY_PROCESSING_REQUEST", "DUPLICATED_ORDER_ID");
+    private static final Set<String> CONFIG_ERROR_CODES = Set.of("UNAUTHORIZED_KEY", "INVALID_API_KEY", "INCORRECT_BASIC_AUTH_FORMAT");
+    /** 결제기관 처리 중 오류 — 거절로 확정하지 않는다. */
+    private static final Set<String> PROVIDER_FAILURE_CODES = Set.of("PROVIDER_ERROR", "CARD_PROCESSING_ERROR");
+
+    /**
+     * 토스 결제 승인 오류표(2026-10-21 확인)의 "처리 전 거절" 코드 — 이 코드만 Rejected(FAILED) 로 확정한다.
+     * 이미 처리됨 · 인증 · 결제기관 오류 · 5xx 코드는 위 집합이 따로 가른다.
+     */
+    static final Set<String> REJECTION_CODES = Set.of(
+        // 400
+        "EXCEED_MAX_CARD_INSTALLMENT_PLAN", "INVALID_REQUEST", "NOT_ALLOWED_POINT_USE", "INVALID_REJECT_CARD", "BELOW_MINIMUM_AMOUNT", "INVALID_CARD_EXPIRATION",
+        "INVALID_STOPPED_CARD", "EXCEED_MAX_DAILY_PAYMENT_COUNT", "NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT", "INVALID_CARD_INSTALLMENT_PLAN",
+        "NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN", "EXCEED_MAX_PAYMENT_AMOUNT", "NOT_FOUND_TERMINAL_ID", "INVALID_AUTHORIZE_AUTH", "INVALID_CARD_LOST_OR_STOLEN",
+        "RESTRICTED_TRANSFER_ACCOUNT", "INVALID_CARD_NUMBER", "INVALID_UNREGISTERED_SUBMALL", "NOT_REGISTERED_BUSINESS", "EXCEED_MAX_ONE_DAY_WITHDRAW_AMOUNT",
+        "EXCEED_MAX_ONE_TIME_WITHDRAW_AMOUNT", "EXCEED_MAX_AMOUNT", "INVALID_ACCOUNT_INFO_RE_REGISTER", "NOT_AVAILABLE_PAYMENT", "UNAPPROVED_ORDER_ID",
+        "EXCEED_MAX_MONTHLY_PAYMENT_AMOUNT",
+        // 403
+        "REJECT_ACCOUNT_PAYMENT", "REJECT_CARD_PAYMENT", "REJECT_CARD_COMPANY", "FORBIDDEN_REQUEST", "REJECT_TOSSPAY_INVALID_ACCOUNT", "EXCEED_MAX_AUTH_COUNT",
+        "EXCEED_MAX_ONE_DAY_AMOUNT", "NOT_AVAILABLE_BANK", "INVALID_PASSWORD", "FDS_ERROR",
+        // 404
+        "NOT_FOUND_PAYMENT", "NOT_FOUND_PAYMENT_SESSION");
+
     private static final String NOT_FOUND_PAYMENT = "NOT_FOUND_PAYMENT";
+    /** 조회의 연속 요청 제한 — 잠시 뒤 다시 물으면 된다. */
+    private static final String FORBIDDEN_CONSECUTIVE_REQUEST = "FORBIDDEN_CONSECUTIVE_REQUEST";
     private static final Set<String> PENDING_STATUSES = Set.of("READY", "IN_PROGRESS");
     private static final Set<String> TERMINATED_STATUSES = Set.of("ABORTED", "EXPIRED");
     /** 승인 뒤 취소됨 · 가상계좌 입금 대기 — 승인 · 실패 어느 쪽으로도 이 흐름에서 확정하지 않는다. */
@@ -126,14 +164,15 @@ public class TossPaymentsResponseSupport {
     }
 
     /**
-     * 주문번호 조회를 서킷으로 감싸 부르고 결과를 가른다. 예외를 던지지 않는다.
+     * 조회를 서킷으로 감싸 부르고 결과를 가른다. 예외를 던지지 않는다.
      *
-     * @param pgOrderId 조회한 PG 주문번호 — 응답의 주문번호와 대조한다
+     * @param pgOrderId 결제 시도의 PG 주문번호 — 응답의 주문번호와 대조하고 로그에 남긴다
+     * @param expectedPaymentKey 결제키 조회면 요청한 결제키 — 응답의 결제키와 대조한다. 주문번호 조회면 null
      * @param remoteCall 조회 요청 (응답 본문 바이트)
      */
-    public PgInquiryQueryResult inquire(String pgOrderId, Supplier<byte[]> remoteCall) {
+    public PgInquiryQueryResult inquire(String pgOrderId, String expectedPaymentKey, Supplier<byte[]> remoteCall) {
         return switch (exchange(remoteCall)) {
-            case Exchange.Success success -> inquiryOf(pgOrderId, success.body());
+            case Exchange.Success success -> inquiryOf(pgOrderId, expectedPaymentKey, success.body());
             case Exchange.ClientError clientError -> inquiryOfClientError(pgOrderId, clientError);
             case Exchange.ServerError serverError -> {
                 log.warn("toss inquiry server error. pgOrderId={}, status={}", pgOrderId, serverError.status());
@@ -236,7 +275,8 @@ public class TossPaymentsResponseSupport {
             PaymentApproval approval = toApproval(pgOrderId, response);
             log.info("toss confirm approved. pgOrderId={}, method={}", pgOrderId, approval.method());
             return new PgApprovalQueryResult.Approved(approval);
-        } catch (JacksonException | IllegalArgumentException | NullPointerException exception) {
+        } catch (RuntimeException exception) {
+            // 해석 실패 전부(JSON · 필수 칸 누락 · approvedAt 형식 · 통화 · 금액 · 주문번호) — 승인 여부를 응답으로 판단할 수 없다. 예외를 밖으로 내지 않는다
             log.error("toss confirm response violates contract. pgOrderId={}, type={}", pgOrderId, exception.getClass().getSimpleName());
             return new PgApprovalQueryResult.Unknown(PaymentUnknownReason.CONTRACT);
         }
@@ -254,19 +294,28 @@ public class TossPaymentsResponseSupport {
             log.error("toss rejected credentials. check TOSS_SECRET_KEY. pgOrderId={}, status={}, code={}", pgOrderId, status, loggableCode(code));
             return new PgApprovalQueryResult.NotSent(NotSentReason.CONFIG_ERROR);
         }
-        if (code == null || !REJECTION_STATUSES.contains(status)) {
+        if (code != null && PROVIDER_FAILURE_CODES.contains(code)) {
+            log.warn("toss confirm provider error. pgOrderId={}, status={}, code={}", pgOrderId, status, code);
+            return new PgApprovalQueryResult.Unknown(PaymentUnknownReason.SERVER_ERROR);
+        }
+        if (code == null || !REJECTION_CODES.contains(code)) {
             log.error("toss confirm client error is not recognized. pgOrderId={}, status={}, code={}", pgOrderId, status, loggableCode(code));
             return new PgApprovalQueryResult.Unknown(PaymentUnknownReason.CONTRACT);
         }
-        log.info("toss confirm rejected. pgOrderId={}, status={}, code={}", pgOrderId, status, loggableCode(code));
+        log.info("toss confirm rejected. pgOrderId={}, status={}, code={}", pgOrderId, status, code);
         return new PgApprovalQueryResult.Rejected(normalize(code, Payment.FAILURE_CODE_MAX_LENGTH), clientError.message());
     }
 
-    private PgInquiryQueryResult inquiryOf(String pgOrderId, byte[] body) {
+    private PgInquiryQueryResult inquiryOf(String pgOrderId, String expectedPaymentKey, byte[] body) {
         try {
             TossPaymentResponse response = jsonMapper.readValue(body, TossPaymentResponse.class);
             if (response == null || !pgOrderId.equals(response.orderId())) {
                 log.error("toss inquiry returned another order. pgOrderId={}", pgOrderId);
+                return new PgInquiryQueryResult.Unknown(PaymentUnknownReason.CONTRACT);
+            }
+            String paymentKey = response.paymentKey();
+            if (paymentKey == null || paymentKey.isBlank() || (expectedPaymentKey != null && !expectedPaymentKey.equals(paymentKey))) {
+                log.error("toss inquiry returned missing or another payment key. pgOrderId={}", pgOrderId);
                 return new PgInquiryQueryResult.Unknown(PaymentUnknownReason.CONTRACT);
             }
             String status = response.status() == null ? "" : response.status();
@@ -274,12 +323,14 @@ public class TossPaymentsResponseSupport {
                 return new PgInquiryQueryResult.Approved(toApproval(pgOrderId, response));
             }
             if (PENDING_STATUSES.contains(status)) {
-                return new PgInquiryQueryResult.Pending();
+                return new PgInquiryQueryResult.Pending(paymentKey);
             }
             if (TERMINATED_STATUSES.contains(status)) {
                 TossPaymentResponse.Failure failure = response.failure();
                 String failureCode = failure == null ? null : normalize(failure.code(), Payment.FAILURE_CODE_MAX_LENGTH);
-                return new PgInquiryQueryResult.Failed(failureCode == null ? status : failureCode, failure == null || failureCode == null ? null : failure.message());
+                return failureCode == null
+                    ? new PgInquiryQueryResult.Failed(paymentKey, status, null)
+                    : new PgInquiryQueryResult.Failed(paymentKey, failureCode, failure.message());
             }
             if (MANUAL_REVIEW_STATUSES.contains(status)) {
                 log.warn("toss inquiry status needs manual review. pgOrderId={}, pgStatus={}", pgOrderId, status);
@@ -287,7 +338,8 @@ public class TossPaymentsResponseSupport {
             }
             log.error("toss inquiry status is not recognized. pgOrderId={}, pgStatus={}", pgOrderId, loggableCode(status));
             return new PgInquiryQueryResult.Unknown(PaymentUnknownReason.CONTRACT);
-        } catch (JacksonException | IllegalArgumentException | NullPointerException exception) {
+        } catch (RuntimeException exception) {
+            // 해석 실패 전부(JSON · 필수 칸 누락 · approvedAt 형식 · 통화 · 금액) — 예외를 밖으로 내지 않는다
             log.error("toss inquiry response violates contract. pgOrderId={}, type={}", pgOrderId, exception.getClass().getSimpleName());
             return new PgInquiryQueryResult.Unknown(PaymentUnknownReason.CONTRACT);
         }
@@ -296,6 +348,10 @@ public class TossPaymentsResponseSupport {
     private PgInquiryQueryResult inquiryOfClientError(String pgOrderId, Exchange.ClientError clientError) {
         if (clientError.status() == HTTP_NOT_FOUND && NOT_FOUND_PAYMENT.equals(clientError.code())) {
             return new PgInquiryQueryResult.NotFound();
+        }
+        if (FORBIDDEN_CONSECUTIVE_REQUEST.equals(clientError.code())) {
+            log.warn("toss inquiry throttled. pgOrderId={}, status={}, code={}", pgOrderId, clientError.status(), FORBIDDEN_CONSECUTIVE_REQUEST);
+            return new PgInquiryQueryResult.Unknown(PaymentUnknownReason.SERVER_ERROR);
         }
         boolean configError = clientError.status() == HTTP_UNAUTHORIZED || (clientError.code() != null && CONFIG_ERROR_CODES.contains(clientError.code()));
         log.error("toss inquiry client error{}. pgOrderId={}, status={}, code={}",
@@ -306,8 +362,7 @@ public class TossPaymentsResponseSupport {
     /**
      * 승인 상태(DONE) 응답 → 도메인 승인 결과. 필수 칸이 없거나 해석할 수 없으면 예외다 — 부른 쪽이 계약 위반(UNKNOWN)으로 돌린다.
      *
-     * @throws IllegalArgumentException 주문번호가 요청과 다르다 · 모르는 통화 · 금액이 통화의 소수 자릿수를 넘거나 음수다
-     * @throws NullPointerException 필수 칸이 없다
+     * @throws RuntimeException 주문번호가 요청과 다르다 · 필수 칸이 없다 · 모르는 통화 · 금액이 통화의 소수 자릿수를 넘거나 음수다 · approvedAt 형식이 틀렸다
      */
     private static PaymentApproval toApproval(String pgOrderId, TossPaymentResponse response) {
         if (!pgOrderId.equals(response.orderId())) {
