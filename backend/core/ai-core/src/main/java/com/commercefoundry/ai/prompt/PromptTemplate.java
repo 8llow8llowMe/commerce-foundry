@@ -1,6 +1,7 @@
 package com.commercefoundry.ai.prompt;
 
 import com.commercefoundry.ai.client.AiRequest;
+import com.commercefoundry.ai.masking.PiiMasker;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -30,7 +31,10 @@ public record PromptTemplate(String feature, int version, String system, String 
         checkSlots(feature, version, user);
     }
 
-    /** 값을 채워 요청을 만든다. 개인정보 자리에 들어간 값은 요청의 {@code sensitiveValues} 로 넘어가 보내기 전에 가려진다. */
+    /**
+     * 값을 채워 요청을 만든다. 개인정보 자리({@code {{pii:이름}}})에는 값 대신 {@code [PII]} 가 들어가고 — 모델은 원문을 보지 않는다 —
+     * 값은 요청의 {@code sensitiveValues} 로 넘어가 다른 자리 · 문구에 같은 값이 나오면 보내기 전에 가려진다.
+     */
     public AiRequest render(PromptValues values) {
         Set<String> used = new HashSet<>();
         String renderedSystem = system == null ? null : fill(system, values, used);
@@ -73,7 +77,9 @@ public record PromptTemplate(String feature, int version, String system, String 
                     : describe() + " 의 자리 '" + slotName(pii, name) + "' 에 값이 없습니다");
             }
             used.add(slotName(pii, name));
-            matcher.appendReplacement(out, Matcher.quoteReplacement(value));
+            // 개인정보 자리는 원문을 넣지 않고 곧바로 자리표시를 넣는다 — 본문 검색 마스킹(두 글자 미만 무시 · 정규화 차이)에 기대지 않게.
+            // 원문은 sensitiveValues 로만 넘겨, 일반 값 · 문구에 같은 값이 다시 나오는 경우를 마스커가 잡게 한다
+            matcher.appendReplacement(out, Matcher.quoteReplacement(pii ? PiiMasker.KNOWN_VALUE : value));
         }
         matcher.appendTail(out);
         return out.toString();

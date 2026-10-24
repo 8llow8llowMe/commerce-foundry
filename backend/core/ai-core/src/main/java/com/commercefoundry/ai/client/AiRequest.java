@@ -16,11 +16,12 @@ import java.util.regex.Pattern;
  */
 public record AiRequest(String feature, String system, String prompt, List<String> sensitiveValues, Integer promptVersion) {
 
-    private static final Pattern FEATURE = Pattern.compile("[a-z0-9][a-z0-9-]{0,62}");
+    /** 기능 이름 규칙 — 소문자 · 숫자 · {@code -}, 1~63자. 템플릿 경로에도 들어가므로 한 곳에서 정한다. */
+    public static final Pattern FEATURE_NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,62}");
 
     public AiRequest {
         Objects.requireNonNull(feature, "feature");
-        if (!FEATURE.matcher(feature).matches()) {
+        if (!FEATURE_NAME.matcher(feature).matches()) {
             throw new IllegalArgumentException("feature 는 소문자 · 숫자 · '-' 로 1~63자여야 합니다");
         }
         if (prompt == null || prompt.isBlank()) {

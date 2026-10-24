@@ -34,10 +34,10 @@ public final class PiiMasker {
     public static final Set<String> RESERVED_NAMES = Set.of("pii", "email", "rrn", "card", "phone", "account", "address");
 
     /** 숫자 묶음 사이 구분자 — 하이픈 · 점 · 공백 · 밑줄 · 괄호 · en/em 대시(NFKC 가 대시 변형을 바꾸지 않는다). */
-    private static final String SEPARATOR = "[-.\\s_)(–—]{0,3}";
+    private static final String SEPARATOR = "[-.\\s_)(\\x{2013}\\x{2014}]{0,3}";
     private static final List<Rule> DEFAULT_RULES = List.of(
         new Rule("[EMAIL]", Pattern.compile("(?<![\\p{L}\\p{N}._%+-])[\\p{L}\\p{N}._%+-]{1,64}\\s?@\\s?[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){0,5}\\.[A-Za-z]{2,24}")),
-        new Rule("[RRN]", Pattern.compile("(?<!\\d)\\d{6}\\s?[-–—]?\\s?[1-8]\\d{6}(?!\\d)")),
+        new Rule("[RRN]", Pattern.compile("(?<!\\d)\\d{6}\\s?[-\\x{2013}\\x{2014}]?\\s?[1-8]\\d{6}(?!\\d)")),
         // 13~19 자리, 4자리 묶음 구분 허용
         new Rule("[CARD]", Pattern.compile("(?<!\\d)\\d{4}(?:[-\\s]?\\d{4}){2}[-\\s]?\\d{1,7}(?!\\d)")),
         // 국내 휴대폰 · 지역번호((02) 포함) · +82/82 국제 표기 · 대표번호, 그 밖의 + 국제 번호
