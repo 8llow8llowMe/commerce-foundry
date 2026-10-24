@@ -16,6 +16,12 @@ public interface ProductRepositoryPort {
     /** 고객에게 보이는 상품 목록. 판매 종료 상품도 포함한다 — 숨김 상품만 뺀다. 카테고리 조건이 빈 집합이면 쿼리 없이 빈 Slice 다. */
     Slice<ProductListQueryResult> searchVisible(ProductSearchCriteria criteria);
 
+    /**
+     * 고객에게 보이는 상품의 목록 행을 아이디 목록으로 읽는다 — 숨김 상품 · 없는 아이디는 빠진다. 순서는 아이디 오름차순이다.
+     * 빈 컬렉션이면 쿼리 없이 빈 목록이다. 같은 서비스의 전시 컨텍스트가 상품 카드를 만들 때 쓴다 ({@code ProductListProcessor#summarizeVisible}).
+     */
+    List<ProductListQueryResult> findVisibleListRowsByIds(Collection<Long> productIds);
+
     /** 고객에게 보이는 상품 한 건. 숨김 상품은 없는 것으로 본다. */
     Optional<Product> findVisibleById(long productId);
 

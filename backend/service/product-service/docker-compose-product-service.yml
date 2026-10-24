@@ -38,6 +38,8 @@ x-product-service-environment: &product_service_environment
   STORE_FEATURES_CUSTOM_ORDER: ${STORE_FEATURES_CUSTOM_ORDER:-false}
   STORE_FEATURES_PREORDER: ${STORE_FEATURES_PREORDER:-false}
   STORE_FEATURES_PRODUCT_VIDEO: ${STORE_FEATURES_PRODUCT_VIDEO:-false}
+  # 미디어 공개 주소(store.media.public-base-url) — 전시 미디어 주소 허용 판정(#63). 비면 yml 기본값(빈 값)과 같고 미디어 쓰기만 거절한다
+  STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:-}
 
 x-logging: &default_logging
   driver: json-file

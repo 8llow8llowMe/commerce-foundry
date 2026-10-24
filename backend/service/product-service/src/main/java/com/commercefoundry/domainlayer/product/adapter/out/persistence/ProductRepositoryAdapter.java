@@ -37,6 +37,14 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
     }
 
     @Override
+    public List<ProductListQueryResult> findVisibleListRowsByIds(Collection<Long> productIds) {
+        if (productIds.isEmpty()) {
+            return List.of();
+        }
+        return productRepository.findVisibleListRowsByIds(productIds);
+    }
+
+    @Override
     public Optional<Product> findVisibleById(long productId) {
         return productRepository.findVisibleById(productId).map(productMapper::toDomain);
     }
