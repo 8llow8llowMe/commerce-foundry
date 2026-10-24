@@ -10,7 +10,8 @@ package com.commercefoundry.domainlayer.job.domain.model;
  *   <li><b>트랜잭션 밖에서 불린다.</b> DB 쓰기가 필요하면 자기 Processor 의 {@code @Transactional} 메서드로 짧게 끊는다 — 오래 걸리는 작업이
  *       커넥션을 쥐고 있지 않게.</li>
  *   <li>오래 걸리면 {@link JobExecution#checkpoint} 를 자주 부른다. 취소 요청 · lease 상실 · 실행 시간 초과를 그 자리에서 알린다.</li>
- *   <li>payload · 결과 · 오류 메시지 · 진행 메시지에 <b>개인정보 원문을 두지 않는다.</b> 아이디만 싣고 실행 시점에 원본 서비스(internal API)에서 읽는다.</li>
+ *   <li>payload · 결과 · 오류 메시지 · 진행 메시지에 <b>개인정보 원문을 두지 않는다.</b> 아이디만 싣고 실행 시점에 원본 서비스(internal API)에서 읽는다.
+ *       어드민 작업 상세 API 가 이 값들을 원문으로 내리고 조회는 감사하지 않는다 — 개인정보가 꼭 필요한 결과는 결과 JSON 이 아니라 결과 파일(링크 발급이 감사 대상)로 낸다.</li>
  * </ul>
  */
 public interface JobHandler {

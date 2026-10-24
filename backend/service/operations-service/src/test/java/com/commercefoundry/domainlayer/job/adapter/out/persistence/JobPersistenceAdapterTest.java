@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.job.application.mapper.JobMapperImpl;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
 import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
+import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.domainlayer.job.domain.model.RetryPolicy;
 import com.commercefoundry.global.config.OperationsServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
@@ -25,6 +26,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -109,6 +111,27 @@ class JobPersistenceAdapterTest {
         assertThat(jobRepositoryPort.findClaimable(List.of("REPORT"), NOW, 2)).extracting(ClaimableJobQueryResult::jobId).containsExactly(16L, 12L);
         assertThat(jobRepositoryPort.findClaimable(List.of("OTHER"), NOW, 1)).extracting(ClaimableJobQueryResult::jobId).containsExactly(15L);
         assertThat(jobRepositoryPort.findClaimable(List.of(), NOW, 10)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("어드민 목록: 아이디 내림차순, 상태 · 종류 조건, 전체 건수는 자르기 전 개수, 마지막 페이지를 넘기면 빈 목록이다")
+    void search() {
+        jobRepositoryPort.insert(queued(31L, "REPORT", 0, NOW, null));
+        jobRepositoryPort.insert(queued(32L, "OTHER", 0, NOW, null));
+        jobRepositoryPort.update(jobRepositoryPort.insert(queued(33L, "REPORT", 0, NOW, null)).claim(WORKER, NOW, LEASE));
+        jobRepositoryPort.insert(queued(34L, "REPORT", 0, NOW, null));
+        entityManager.clear();
+
+        Page<Job> all = jobRepositoryPort.findPage(null, null, 0, 3);
+
+        assertThat(all.getContent()).extracting(Job::id).containsExactly(34L, 33L, 32L);
+        assertThat(all.getTotalElements()).isEqualTo(4);
+        assertThat(jobRepositoryPort.findPage(JobStatus.QUEUED, null, 0, 10).getContent()).extracting(Job::id).containsExactly(34L, 32L, 31L);
+        assertThat(jobRepositoryPort.findPage(null, "REPORT", 0, 10).getContent()).extracting(Job::id).containsExactly(34L, 33L, 31L);
+        assertThat(jobRepositoryPort.findPage(JobStatus.RUNNING, "REPORT", 0, 10).getContent()).extracting(Job::id).containsExactly(33L);
+        Page<Job> beyond = jobRepositoryPort.findPage(null, null, 5, 3);
+        assertThat(beyond.getContent()).isEmpty();
+        assertThat(beyond.getTotalElements()).isEqualTo(4);
     }
 
     @Test
