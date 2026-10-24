@@ -103,8 +103,10 @@ public record ProductDetailResponse(
 - **DB 제약 위반 로그에 행 값을 남기지 않는다 (#173).** Hibernate 는 예외를 바꾸기 전에 `SQLException` 메시지를 WARN(`org.hibernate.orm.jdbc.error`)으로
   남기고, pgjdbc 기본값은 그 메시지에 행 값(DETAIL `Failing row contains (...)` · `Key (email)=(...)`)을 싣는다 — 어댑터가 나중에 원인을 떼도 이미 늦다.
   - 1차 방어는 드라이버 옵션이다 — 서비스 `application.yml` 의 `spring.datasource.hikari.data-source-properties.logServerErrorDetail: false`
-    (`DB_URL` 은 Vault 값이라 URL 파라미터로 넣지 않는다 — 거꾸로 `DB_URL` · 프로파일 yml 에 이 속성을 넣거나 덮지 않는다. URL 값이 이기고 테스트가 못 잡는다). 제약 이름은 메시지 본문에 남아 `getConstraintName()` 기반 번역은 그대로다 —
-    Hibernate 가 영문 본문(`constraint "…"`)에서 이름을 꺼내므로 운영 PostgreSQL `lc_messages` 는 C/영문이어야 한다(아니면 이름이 null 이 되어 409 대신 500).
+    (`DB_URL` 은 Vault 값이라 URL 파라미터로 넣지 않는다 — 거꾸로 `DB_URL` · 프로파일 yml 에 이 속성을 넣거나 덮지 않는다. URL 값이 이기고 테스트가 못 잡는다). 이 옵션은 메시지의 DETAIL 만 빼고
+    서버 오류 필드(제약 이름)는 그대로 두므로 persistence-core `ConstraintViolations` 의 판정(§9-1)은 그대로다 — 서버 필드라 `lc_messages` 로케일과도 무관하다.
+    단 delivery `ShippingPolicyRepositoryAdapter` 는 #255 머지 뒤 옮길 때까지 Hibernate `getConstraintName()`(영문 본문 `constraint "…"` 에서 꺼낸다)을 써,
+    그때까지 운영 PostgreSQL `lc_messages` 는 C/영문이어야 한다(아니면 이름이 null 이 되어 409 대신 500).
     `*ApplicationTests` 가 커넥션 풀의 속성을, auth `ShippingAddressPersistenceAdapterTest` 가 PostgreSQL 의 로그 · 예외 메시지를 본다.
   - 2차 방어(새 어댑터에 권장)는 예상 밖 위반을 다시 던질 때 원인(cause)도, 원래 예외의 메시지(`[SQLException 메시지]` 가 들어 있다)도 싣지 않고
     제약 이름만 싣는 것이다. Hibernate WARN 줄은 막지 못하고(1차 방어만 막는다), 그 뒤 예외 메시지 · 스택(전역 핸들러의 500 로그 등)으로 퍼지는 것만 줄인다.
@@ -239,7 +241,13 @@ public final class ProductValidationMessage {
   - append-only 이력도 Persistable 이면 포트 메서드는 `insert` 다 (예: delivery `ShippingPolicyHistoryRepositoryPort.insert`, #69).
     product 재고 조정 이력의 `append` 는 이 규칙 전에 만든 이름이다.
 - 유니크 키 위반 · 버전 충돌을 도메인 오류(409)로 바꿔야 하는 저장은 어댑터에서 `saveAndFlush` 로 바로 내보내고 그 자리에서 바꾼다 —
-  커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 바꿀 자리가 없다. 제약은 예외 메시지가 아니라 Hibernate 가 준 제약 이름으로 가린다 (예: auth `MemberRepositoryAdapter`).
+  커밋 때 터지면 예외가 Facade 밖(트랜잭션 프록시)에서 나 바꿀 자리가 없다. 제약은 예외 메시지가 아니라 persistence-core `ConstraintViolations` 로 가린다 —
+  PostgreSQL 서버 오류 필드(`PSQLException#getServerErrorMessage().getConstraint()`) 우선(없을 때만 Hibernate `getConstraintName()`), 로케일 무관, 정확 일치
+  (소문자 · 따옴표 · 스키마 접두사만 무시, 부분 일치 금지 — `payment_pkey` 는 `payment_cancel_pkey` 가 아니다). 예: auth `MemberRepositoryAdapter`, order `CartItemRepositoryAdapter`, payment `PaymentRepositoryAdapter`.
+  - H2 는 서버 필드가 없고 Hibernate 가 메시지 조각(`auth.uk_member_email INDEX auth.uk_member_email_INDEX_B`, auth H2 실측)을 넘겨 이름이 `uk_member_email_index_b` 가 되어 판정에 걸리지 않는다 — 허용하지 않는다. H2 는 컨텍스트 로딩용이라
+    유니크 위반의 도메인 오류 변환은 Testcontainers(PostgreSQL) 리포지토리 테스트에서 본다.
+  - persistence-core 를 쓰는 서비스는 postgresql 드라이버가 runtime 에 있어야 한다 — 없으면 제약 위반 시 `instanceof PSQLException` 에서 NoClassDefFoundError (지금은 서비스마다 `runtimeOnly`).
+  - delivery `ShippingPolicyRepositoryAdapter` 는 아직 Hibernate 이름 + 부분 일치다 — #255 머지 뒤 이 판정으로 옮긴다 (#247).
 
 ### 9-2. 필드 타입
 
