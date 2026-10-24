@@ -152,6 +152,22 @@ class MemberWebControllerTest {
             verifyNoInteractions(memberWebUseCase);
         }
 
+        /*
+         * #261 — 형식도 틀리고 소문자화 뒤 길이도 넘으면 커스텀 길이 제약(@ValidNormalizedEmailLength)이 형식(@Email)보다 먼저다.
+         * 원문 254자 초과로 @Size 가 걸릴 때와 같은 대표 코드여야 한다. 원문 142자(@ 없음) · 정규화 272자.
+         */
+        @Test
+        @DisplayName("형식 오류와 소문자화 길이 초과가 겹치면 대표 코드는 길이(AUTH_102)이고 형식(AUTH_103)이 뒤에 온다")
+        void lowercasedLengthComesBeforeFormat() {
+            String email = "\\u0130".repeat(130) + ".example.com";
+
+            MvcTestResult result = signUp(body(email, "mokoyuri2026!", "홍길동", "null", "true", "true", "false"));
+
+            assertValidationError(result, "AUTH_102", "email");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[*].code").asArray().containsExactly("AUTH_102", "AUTH_103");
+            verifyNoInteractions(memberWebUseCase);
+        }
+
         @Test
         @DisplayName("국내 휴대폰 형식이 아니거나 빈 문자열이면 AUTH_109 다 — 가입에서 빈 문자열은 '없음' 이 아니다")
         void phoneFormat() {
