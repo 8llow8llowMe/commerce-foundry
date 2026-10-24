@@ -1,3 +1,5 @@
 dependencies {
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-server'
+    // 레지스트리 HTTP Basic 인증 (#248, security-guide.md §12)
+    implementation 'org.springframework.boot:spring-boot-starter-security'
 }
