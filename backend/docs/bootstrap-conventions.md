@@ -355,7 +355,9 @@ ai:
   max-retries: 2                 # SDK 재시도(408 · 409 · 429 · 5xx · 연결 오류, retry-after 존중), 0~5
   max-concurrency: 4             # 이 프로세스의 동시 호출 상한
   acquire-timeout: 10s           # 상한이 차 있으면 이만큼 기다린 뒤 BUSY
-  refusal-fallback: true         # 모델이 거절하면 API 가 다른 모델로 다시 시도(server-side fallback)
+  max-input-chars: 200000        # 시스템 + 사용자 프롬프트 글자 수 상한 — 넘으면 보내지 않는다(INPUT_TOO_LONG)
+  refusal-fallback: false        # 기본 꺼짐. 켜면 거절 시 API 가 다른 모델로 다시 시도(server-side fallback 베타, 공식 API 만)
+  # allow-insecure-loopback: true  # 루프백 http base-url 허용 — 테스트 스텁 전용. 운영은 https 만
   features:
     size-chart:                  # 기능 이름 — AiRequest.feature 와 같다
       model: claude-opus-5-5
@@ -367,16 +369,25 @@ ai:
 ```
 
 - **기본값은 꺼짐이다.** 꺼져 있으면 값이 비어도 기동하고 `AiClient` 빈은 그대로 있되 `complete` 가 `AiException(DISABLED)` 를 던진다.
-  켜면 `AiStartupGuard` 가 클라이언트를 만들기 전에 키 · base-url(https, 루프백만 http) · 타임아웃 양수와 순서 · 재시도 0~5 · 동시 상한 ≥ 1 ·
-  기능 이름 · effort · 마스킹 정규식을 검사하고, 위반을 모아 이름만 알린다(값 · 패턴 원문은 메시지에 없다).
-- **보내기 전에 언제나 가린다** (`PiiMasker`) — 순서는 ① 호출자가 넘긴 값(`AiRequest.sensitiveValues` — 받는 사람 이름 · 주소 · 연락처 · 주문번호,
-  정확히 일치 → `[PII]`) ② 설정 패턴 ③ 기본 패턴(이메일 · 주민번호 · 전화 · 도로명/지번/동호수 주소). 이름 · 형식 없는 주소는 정규식으로 못 잡으니
-  **호출자가 아는 개인정보는 반드시 `sensitiveValues` 로 넘긴다.** 마스킹이 실패하면 보내지 않는다(`MASKING_FAILED`).
+  켜면 `AiStartupGuard` 가 클라이언트를 만들기 전에 키 · base-url(https — 루프백 http 는 `allow-insecure-loopback` 일 때만) · 타임아웃 양수와 순서 ·
+  재시도 0~5 · 동시 상한 ≥ 1 · 입력 상한 ≥ 1 · 기능 이름 · effort · 마스킹 정규식과 이름(기본 패턴 이름 `pii` · `email` · `rrn` · `card` · `phone` ·
+  `account` · `address` 는 못 쓴다)을 검사하고, 위반을 모아 이름만 알린다(값 · 패턴 원문은 메시지에 없다).
+- **보내기 전에 언제나 가린다** (`PiiMasker`) — 입력을 NFKC 로 정규화한 뒤(전각 숫자 · `＠`) ① 호출자가 넘긴 값(`AiRequest.sensitiveValues` — 받는 사람 이름 ·
+  주소 · 연락처 · 주문번호, 대소문자 · 공백 무시 → `[PII]`) ② 설정 패턴 ③ 기본 패턴(이메일 · 주민번호 · 카드 · 전화 · 계좌 · 도로명/지번/동호수 주소)의
+  일치 구간을 모두 찾아 **겹치는 구간을 합쳐** 한 번에 바꾼다. 이름 · 형식 없는 주소는 정규식으로 못 잡으니 **호출자가 아는 개인정보는 반드시
+  `sensitiveValues` 로 넘긴다.** 기본 패턴은 시작 경계 · 반복 길이를 묶어 처리 시간이 입력 길이에 비례하고(되추적 폭주 없음), 입력은 `max-input-chars` 로
+  묶인다. 마스킹이 실패하면 보내지 않는다(`MASKING_FAILED`).
 - **로그에는 기능 · 모델 · 토큰 수 · 멈춘 이유 · 상태 코드만 남는다.** 프롬프트 · 응답 원문 · SDK 예외 메시지(API 오류 본문)는 어떤 레벨에도 남기지 않고,
-  `AiException` 은 SDK 예외를 원인으로 잇지 않는다. `AiRequest` · `AiResult` 의 `toString` 은 길이만 싣는다. SDK 자체 요청 로그(`ANTHROPIC_LOG`)는 배포 환경에서 켜지 않는다.
-- `AiException.reason()` 으로 번역한다 — `retryable()` 이 참(`BUSY` · `RATE_LIMITED` · `UNAVAILABLE` · `INVALID_RESPONSE`)이면 작업 재시도,
-  거짓(`DISABLED` · `UNAUTHORIZED` · `REJECTED` · `REFUSED` · `MASKING_FAILED`)이면 실패로 끝낸다. 타임아웃(`UNAVAILABLE`)은 과금됐을 수 있다.
+  `AiException` 은 SDK 예외를 원인으로 잇지 않는다. `AiRequest` · `AiResult` 의 `toString` 은 길이만 싣는다. SDK 자체 요청 로그는 `AiClients` 가
+  `LogLevel.OFF` 로 끈다 — SDK 빌더는 `ANTHROPIC_LOG` 를 스스로 읽어 debug 면 본문을 stderr 로 내기 때문이다.
+- `AiException.reason()` 으로 번역한다 — `retryable()` 이 참(`BUSY` · `RATE_LIMITED` · `UNAVAILABLE`)이면 작업 재시도,
+  거짓(`DISABLED` · `UNAUTHORIZED` · `REJECTED` · `REFUSED` · `INVALID_RESPONSE` · `INPUT_TOO_LONG` · `MASKING_FAILED`)이면 실패로 끝낸다.
   `AiResult.truncated()` 면 최대 토큰에서 잘린 것이다.
+- **비용 · 점유의 최악값을 알고 설정한다.** 타임아웃(`UNAVAILABLE`, `statusCode` 가 `null`)은 이미 생성 · 과금된 요청을 SDK 가 다시 보낸다 —
+  최악 비용은 (1 + `max-retries`) × 작업 재시도 횟수, 호출 하나가 동시 상한 자리를 잡는 최악 시간은 (1 + `max-retries`) × `request-timeout` 이다.
+  작업은 타임아웃 재시도 상한을 낮게 두고, 월 한도(이후 PR)가 마지막 상한이다.
+- **응답은 신뢰할 수 없는 출력이다.** 고객 입력이 프롬프트에 들어가므로 프롬프트 주입으로 조작된 응답이 올 수 있다 — 화면에 그릴 때 이스케이프하고,
+  상태를 바꾸는 판단에 쓰기 전에 구조화 출력 검증(이후 PR)과 사람 확인을 거친다. `refusal-fallback` 을 켜면 답한 모델이 바뀔 수 있으니 사용량은 `AiResult.model` 로 기록한다.
 - **서비스 테스트는 가짜 포트를 쓴다.** 컨텍스트 로딩 테스트는 기본값(꺼짐)으로 뜨고, 업무 테스트는 서비스의 out-port 가짜로 대신한다.
   SDK 를 거친 요청 · 재시도 · 응답 해석은 ai-core 의 `ClaudeAiClientTest`(루프백 스텁 서버)가 본다 — 실제 API 는 부르지 않는다.
 - 이후 PR(#215): 사용량 원장 · 월 한도(operations-service), 프롬프트 템플릿 버전 · 구조화 출력 검증, 이미지 입력.
