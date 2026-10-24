@@ -24,14 +24,24 @@
 
 | 키 | 위치 | 노출 |
 |----|------|------|
-| 클라이언트 키 (`test_ck_` / `live_ck_`) | 프론트 환경변수 | 공개돼도 된다 |
-| 시크릿 키 (`test_sk_` / `live_sk_`) | Vault `TOSS_SECRET_KEY` → payment-service | **절대 커밋·로그 금지** |
+| 클라이언트 키 (`test_ck_` / `live_ck_`, 결제위젯 `test_gck_` / `live_gck_`) | 프론트 환경변수 | 공개돼도 된다 |
+| 시크릿 키 (`test_sk_` / `live_sk_`, 결제위젯 `test_gsk_` / `live_gsk_`) | Vault `TOSS_SECRET_KEY` → payment-service | **절대 커밋·로그 금지** |
 | 웹훅 시크릿 (사용 시) | Vault `TOSS_WEBHOOK_SECRET` → payment-service | 절대 커밋·로그 금지 |
 
 - 키 이름·등록 절차는 `secret-management.md` 를 따른다.
 
 - **prod 프로파일에서 `test_` 키로 기동하면 실패시킨다.** 반대로 local/dev 에 `live_` 키가 들어와도 실패시킨다.
   키가 뒤바뀐 배포는 "결제는 되는데 돈이 안 들어오는" 사고가 된다.
+  - `TossPaymentsStartupGuard`(payment `*BeansConfig` 의 static `@Bean`, `RedisStartupGuard` 와 같은 방식)가 기동 전에 본다(#14).
+    비었거나 플레이스홀더가 남으면 실패, 시크릿 키 형식(`(test|live)_g?sk_…`)이 아니면 실패(클라이언트 키 `ck` · `gck` 를 넣는 실수 포함).
+  - **활성 프로파일이 모두 local · dev · test 일 때만 `test_` 키를 받고, 그 밖(prod · 다른 프로파일 · 프로파일 없음 · 혼합)은 `live_` 키만 받는다** — 프로파일을 빠뜨린 배포가 테스트 키로 뜨지 않게 닫힌 쪽이 기본이다.
+  - 토스 Feign 타임아웃(`spring.cloud.openfeign.client.config.toss-payments.*`)이 없거나 read 가 10s(게이트웨이 응답 타임아웃) 이상이어도 실패한다.
+    가드는 read 타임아웃만 본다 — DNS · TLS · DB 시간까지 더한 승인 API 전체가 10s 안이라는 보장은 아니다. 게이트웨이 504 는 FE 가 "확인 중 → 상태 조회" 로 다룬다.
+  - Feign `logger-level` 이 `default` 나 `toss-payments` 어느 쪽에서든 `HEADERS` · `FULL` 이면 실패한다 — Basic 인증 헤더(시크릿 키)가 로그에 남는다.
+  - `live_` 키일 때 base-url 은 정확히 `https://api.tosspayments.com` 이어야 한다 — 다른 호스트 · http 로 라이브 키가 나가지 않게 한다.
+  - 위반은 모아서 한 번에 알리고 메시지에는 값이 아니라 키 이름만 싣는다. 키 본문은 영문 · 숫자 · 밑줄을 받는다(문서용 키 `test_gsk_docs_…` 포함).
+  - `test` 프로파일과 `application-test.yml` 의 더미 키는 **자동 테스트 전용**이다. 로컬 기동 · 배포에 쓰지 않는다.
+  - 결제위젯(`gsk`)과 API 개별 연동(`sk`) 중 무엇을 쓸지는 FE 연동에서 정한다 — 가드는 둘 다 받는다. 키 출처: <https://docs.tosspayments.com/reference/using-api/api-keys> (2026-10-21 확인).
 - 계약 주체(사업자)와 키 소유는 고객사(MOKOYURI) 계정이다. 개발자 계정은 테스트 키만 다룬다.
 
 ## 3. 결제 승인 흐름 (필수)
@@ -87,6 +97,34 @@ PG 호출이 **타임아웃·5xx·서킷 오픈**으로 끝나면 승인 여부�
 
 - `UNKNOWN` 은 스케줄러가 **PG 조회 API 로 재조회**해서 `DONE` 또는 `FAILED` 로 확정한다.
 - 서킷이 열렸을 때 confirm 을 아예 보내지 않았다면 `READY` 로 되돌릴 수 있다. **보냈는지 모르면 UNKNOWN 이다.**
+
+### 4-1. 토스 승인 응답 분류 (#14 — `TossPaymentsResponseSupport` 가 정본)
+
+어댑터는 예외를 던지지 않고 `PgApprovalQueryResult` 네 가지 중 하나를 돌려준다. 애매하면 언제나 `Unknown` 쪽이다.
+
+| 토스 결과 | 포트 결과 | 결제 상태 |
+|-----------|-----------|-----------|
+| 2xx + `status=DONE` + 주문번호 · 통화 · 금액 · `approvedAt` 해석 성공 | `Approved` | `DONE` (금액 · 결제키 대조는 도메인) |
+| 2xx 인데 위 조건 중 하나라도 어긋남(형식 오류 포함) | `Unknown(CONTRACT)` | `UNKNOWN` |
+| 승인 오류표의 "처리 전 거절" 코드(4xx — 카드 거절 · 한도 초과 · 잘못된 요청 · `FORBIDDEN_REQUEST` 등) | `Rejected` | `FAILED` |
+| 오류표에 없는 4xx 코드 · 코드 없는 4xx | `Unknown(CONTRACT)` | `UNKNOWN` |
+| 409 · `ALREADY_PROCESSED_PAYMENT` · `ALREADY_PROCESSING_REQUEST` · `DUPLICATED_ORDER_ID` | `Unknown(ALREADY_PROCESSED)` | `UNKNOWN` |
+| 일시 오류 코드(`PROVIDER_ERROR` · `CARD_PROCESSING_ERROR`) · 429 · 5xx · 타임아웃 · 보낸 뒤 연결 끊김 | `Unknown(SERVER_ERROR / TIMEOUT)` | `UNKNOWN` |
+| 401 · `UNAUTHORIZED_KEY` · `INVALID_API_KEY` · `INCORRECT_BASIC_AUTH_FORMAT` · 연결 거부 · DNS 실패 · 서킷 오픈 | `NotSent` | `READY` 로 되돌림(결제키 유지) |
+
+- 거절 코드 목록은 `TossPaymentsResponseSupport.REJECTION_CODES` 한 곳이고, 토스 core API "결제 승인" 오류표(2026-10 스크랩)에서 뽑았다.
+  판정은 HTTP status 가 아니라 코드로 한다. 토스가 오류표에 코드를 더하면 그 코드는 목록에 넣기 전까지 `UNKNOWN` 으로 쌓인다 — 돈 쪽으로 안전한 기본값이다.
+- 조회(`GET /v1/payments/{paymentKey}` · `/v1/payments/orders/{orderId}`)는 `ABORTED` · `EXPIRED` 만 `Failed`, `READY` · `IN_PROGRESS` 는 `Pending`,
+  404 `NOT_FOUND_PAYMENT` 는 `NotFound`, 취소 · 입금 대기 계열은 `Unknown(MANUAL_REVIEW)` 다. 403 `FORBIDDEN_CONSECUTIVE_REQUEST` · 429 · 5xx 는 `Unknown(SERVER_ERROR)`,
+  응답의 결제키 · 주문번호가 요청과 다르면 `Unknown(CONTRACT)` 다.
+
+- Feign 재시도는 끈다(`Retryer.NEVER_RETRY`). 같은 결제 시도는 언제나 같은 `Idempotency-Key`(결제 시도 id)로 보내므로,
+  토스는 15일 동안 첫 응답을 그대로 돌려준다 — 재승인에 `Approved` 가 다시 와도 오류가 아니라 멱등 성공이다.
+- 서킷은 5xx · 429 · 타임아웃 · 연결 실패만 실패로 센다. 4xx 거절은 세지 않는다.
+- **되돌린 `READY` 를 버릴 근거는 결제키 단위 조회(`GET /v1/payments/{paymentKey}`)의 `Failed` 뿐이다.** 주문번호 조회는 같은 주문번호로 재인증한
+  다른 결제키를 돌려줄 수 있고, `NotFound` 는 미승인 증거가 아니다.
+  `PaymentInquiry.Failed` 는 결제키를 싣고, `abortAfterInquiry` 는 결제키가 다르면 전이 예외, `resolve(Failed)` 는 결제키가 다르면 `PaymentApprovalMismatchException` 이다
+  — 다른 결제키의 실패로 `FAILED` 를 확정하면 이 결제키의 승인을 놓친다. 불일치는 Processor 가 사람 확인(`flagForManualReview`)으로 돌린다.
 
 ## 5. 결제 상태 모델
 
@@ -179,4 +217,7 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 
 - PG 는 adapter 단위에서 가짜 서버(WireMock 등)로 성공·거절·타임아웃·5xx 를 모두 재현한다.
 - **UNKNOWN 경로와 중복 승인 경로는 반드시 테스트한다** — 평소에는 절대 지나가지 않는 길이라 운영에서 처음 터진다.
+  - payment-service `TossPaymentGatewayAdapterWireMockTest` 가 §4-1 표의 행마다 한 번 이상 지나간다. POST 가 재전송되지 않는지 `verify(1, ...)` 로 본다
+    — 기본 `Client.Default`(요청 버퍼링 끔) 전제라 feign-hc5 · okhttp 를 넣으면 다시 확인한다.
+  - 중복 승인은 토스 실제 동작대로 "같은 멱등 키 → 같은 200 DONE" 을 재현한다. READY→IN_PROGRESS 원자성은 승인 Processor 테스트가 본다.
 - 테스트 키로 실제 토스 샌드박스 승인 → 취소까지 한 번 돌린 결과를 PR 검증 내역에 남긴다.

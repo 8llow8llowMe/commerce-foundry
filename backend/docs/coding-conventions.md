@@ -477,8 +477,10 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
     resultCode 는 코드 모양(`[A-Z][A-Z0-9_]*_[0-9]{3}`)일 때만 그대로 남기고, 아니면 `<unrecognized>` 다 — 원격의 임의 문자열(CR/LF · 긴 값)을 로그에 넣지 않는다.
     예: order-service `ShippingFeeInternalResponseSupport`(#13) — `DELIVERY_001/002/003/011` 만 `ORDER_012~015` 로 번역한다.
     Feign 예외 메시지에는 대상 응답 본문이 들어 있다 — 받는 핸들러는 원인 예외를 throwable 로 로그하지 않는다. Feign `logger-level` 을 `FULL` · `HEADERS` 로 두지 않는다(요청 본문 · 헤더가 로그에 남는다).
-- **PG 호출에는 서킷을 걸되, 승인(confirm) 요청은 서킷 오픈 시 "실패" 가 아니라 "결과 미확정" 으로 다룬다**
-  (`payment-guide.md` §4).
+- **PG 호출에는 서킷을 걸되, 서킷 오픈을 승인 "실패" 로 다루지 않는다.** 서킷 오픈은 호출 전에 막힌 것이라 "보내지 않음"(`READY` 로 되돌림)이고,
+  보냈는지 모르는 타임아웃 · 5xx 는 "결과 미확정"(`UNKNOWN`)이다 (`payment-guide.md` §4-1).
+  PG 서킷은 `ignore-exceptions` 대신 `ignore-exception-predicate`(payment `TossCircuitBreakerIgnorePredicate`)로 429 가 아닌 4xx 만 무시한다 —
+  두 설정은 OR 로 합쳐지므로 같은 인스턴스에 `ignore-exceptions: FeignClientException` 을 같이 두면 429 가 다시 빠진다.
 
 ## 11. Enum Metadata
 

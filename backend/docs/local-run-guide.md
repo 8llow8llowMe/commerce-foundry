@@ -19,7 +19,8 @@ cp .env.example .env
 
 - `.env` 는 커밋되지 않는다 (`.gitignore`). 값의 정본은 Vault 이고, 로컬에는 **테스트 값만** 넣는다 (`secret-management.md`).
 - 미들웨어만 띄울 때 필요한 칸은 `DB_USERNAME` · `DB_PASSWORD` · `REDIS_PASSWORD` 셋이다. 로컬 전용이니 아무 값이나 정해 넣는다.
-- 토스 키는 `test_sk_` 로 시작하는 테스트 키만 쓴다. 라이브 키는 로컬에 두지 않는다.
+- 토스 키는 `test_sk_`(또는 결제위젯 `test_gsk_`)로 시작하는 테스트 키만 쓴다. 라이브 키는 로컬에 두지 않는다.
+  **#14 부터 payment-service 는 `TOSS_SECRET_KEY` 가 비었거나 형식이 틀리면 뜨지 않는다**(`payment-guide.md` §2) — 실제 결제를 하지 않을 때도 토스 상점관리자의 테스트 시크릿 키를 넣는다.
 - **#41 부터 서비스 전부는, #4 부터 게이트웨이도 `JWT_PUBLIC_KEY` 가 비면 뜨지 않는다**(§6). `JWT_PUBLIC_KEY_PREVIOUS` 는 비워 둔다.
 - JWT 키는 로컬에서 openssl 로 직접 만든 RSA 2048 쌍을 넣는다. dev · prod 키를 가져오지 않는다. **로컬은 쌍을 만들 때 `JWT_PRIVATE_KEY` 와
   `JWT_PUBLIC_KEY` 를 둘 다 `.env` 에 채워 둔다** — 개인키는 auth 가 토큰을 발급하는 #4 부터 읽지만, 그때 쌍을 다시 만들 필요가 없게 한다
