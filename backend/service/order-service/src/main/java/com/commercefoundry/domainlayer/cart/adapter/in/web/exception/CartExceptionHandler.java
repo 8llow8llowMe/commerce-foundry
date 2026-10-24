@@ -22,6 +22,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *
  * <p>{@code Exception} · {@code RuntimeException} 을 통째로 잡지 않는다 — {@code @PreAuthorize} 거부는 security-core 의
  * {@code SecurityExceptionAdvice}(가장 높은 우선순위)가 받는다 ({@code coding-conventions.md} §8-1, {@code security-guide.md} §5-2).
+ *
+ * <p>로그에 요청 본문(맞춤 입력값 등)을 남기지 않는다. 예외를 throwable 로 로그하지 않는다 — 서비스 간 호출 실패의 원인({@code FeignException})
+ * 메시지에는 대상 응답 본문이, DB 제약 위반에는 행 값이 들어 있다 ({@code coding-conventions.md} §8 · §10, #277). 코드와 원인 예외 타입만 남긴다.
  */
 @Slf4j
 @RestControllerAdvice(basePackages = "com.commercefoundry.domainlayer.cart")
@@ -31,7 +34,7 @@ public class CartExceptionHandler {
     public ResponseEntity<Response<Void>> handleCartException(CartException exception) {
         CartErrorCode errorCode = exception.getErrorCode();
         if (errorCode.getHttpStatus().is5xxServerError()) {
-            log.warn("cart request failed. code={}", errorCode.getCode(), exception);
+            log.warn("cart request failed. code={}, causeType={}", errorCode.getCode(), causeTypeOf(exception));
         }
         return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), exception.getMessage()));
     }
@@ -43,7 +46,7 @@ public class CartExceptionHandler {
     @ExceptionHandler(CatalogException.class)
     public ResponseEntity<Response<Void>> handleCatalogException(CatalogException exception) {
         CartErrorCode errorCode = CartErrorCode.CART_PRODUCT_SERVICE_UNAVAILABLE;
-        log.warn("cart request failed. code={}, cause={}", errorCode.getCode(), exception.getErrorCode().getCode(), exception);
+        log.warn("cart request failed. code={}, cause={}, causeType={}", errorCode.getCode(), exception.getErrorCode().getCode(), causeTypeOf(exception));
         return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), errorCode.getMessage()));
     }
 
@@ -73,5 +76,9 @@ public class CartExceptionHandler {
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<Response<Void>> handleMissingParameter(MissingServletRequestParameterException exception) {
         return ValidationErrorSupport.toMissingParameterResponse(exception.getParameterName(), CartErrorCode.PARAMETER_REQUIRED.getCode());
+    }
+
+    private static String causeTypeOf(Throwable exception) {
+        return exception.getCause() == null ? null : exception.getCause().getClass().getSimpleName();
     }
 }
