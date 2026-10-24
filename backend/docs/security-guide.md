@@ -895,6 +895,8 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   조회는 `GET /api/v1/admin/shipping-policies/domestic/histories`(ADMIN, `api-design-guide.md` §6-2). append-only 라 고치거나 지우는 API 가 없다.
   공통 감사 로그(#163 · #192)가 생기면 이 행위를 그쪽에도 함께 남길지 재검토한다.
 - 적용 대상 (#6): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade`), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
+- 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` — `action=JOB_CANCEL target=job:<id>`, operations-service `JobAdminAuditLogAdapter`). 작업 목록 · 상세 조회는 남기지 않는다 —
+  payload · 결과 · 오류에 개인정보 원문을 두지 않는 규칙(`architecture-guide.md` §10)이라 읽기가 개인정보 열람이 아니다. 결과 파일 링크 발급(#212 PR-E)은 남긴다.
 
 ### 11-5. 이중 방어 확인
 
