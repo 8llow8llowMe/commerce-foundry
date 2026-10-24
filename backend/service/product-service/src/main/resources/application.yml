@@ -66,6 +66,10 @@ store:
     preorder: ${STORE_FEATURES_PREORDER:false}
     # 상품 상세 갤러리 영상
     product-video: ${STORE_FEATURES_PRODUCT_VIDEO:false}
+  # 어드민이 저장하는 미디어(전시 섹션 이미지 · 영상) 주소는 이 공개 주소 아래만 받는다 (MediaUrlPolicy).
+  # 오브젝트 스토리지 공개 읽기 주소와 같은 환경변수다. 비면 미디어가 있는 쓰기를 모두 거절한다(닫힌 기본값) — local 은 backend/.env 값을 쓴다
+  media:
+    public-base-url: ${STORAGE_PUBLIC_BASE_URL:}
 
 # 재고 (order-flow-guide.md §3)
 stock:
