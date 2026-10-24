@@ -519,13 +519,34 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 ## 7. 비동기 작업
 
-엑셀 일괄 등록(카페24 이관), 대량 송장 등록처럼 오래 걸리는 작업은 다음 패턴을 따른다.
+리포트 · 정산 대사 · 집계 · AI 생성 · 엑셀 일괄 등록처럼 오래 걸리는 어드민 작업은 operations-service 의 작업 엔진에 맡긴다 (`architecture-guide.md` §10, #212).
 
-- 제출 `POST {resource}` → `202 Accepted` + `jobId`. 같은 사용자의 같은 요청이 진행 중이면 기존 `jobId` 재사용.
-- 상태 조회 `GET /jobs/{jobId}` — 본인(또는 ADMIN) 작업만. 남의 jobId 는 404.
+- 제출은 각 기능 API 다 — `POST {resource}` → `202 Accepted` + `jobId`. 기능 Facade 가 작업을 등록한다(같은 서비스면 `JobRegistrationProcessor`).
+  같은 요청이 진행 중이면 멱등 키(`dedupKey`, 종류마다 따로)로 기존 `jobId` 를 돌려준다. **범용 등록 API 는 두지 않는다.**
+- 상태 조회 · 취소는 어드민 작업 API 하나로 한다 — `GET /api/v1/admin/jobs` · `GET /api/v1/admin/jobs/{jobId}` · `POST /api/v1/admin/jobs/{jobId}/cancel`
+  (ADMIN, operations-service). 계약은 아래 §7-1.
 - 작업 실패는 `200 OK` + `status=FAILED` + `errorCode/errorMessage` 로 답한다 (HTTP 5xx 가 아니다).
-- 워커는 서비스 전용 `ThreadPoolTaskExecutor` 빈 + `@Async("<빈이름>")`. 전역 기본 executor 를 공유하지 않는다.
-  빈 이름 `{도메인}{용도}TaskExecutor`, 풀 크기·큐·graceful shutdown 을 명시한다.
+- 워커는 `@Async` 가 아니라 엔진의 전용 실행기 · 폴러가 돈다 — 기능은 domain `JobHandler` 만 구현한다(`architecture-guide.md` §10).
+- 고객이 자기 작업을 보는 API(본인 작업만, 남의 jobId 는 404)는 필요한 기능이 생길 때 그 기능 서비스에 둔다.
+
+### 7-1. 어드민 작업 API (operations-service, #212 PR-C)
+
+모두 `hasRole('ADMIN')` 이다. 게이트웨이 라우트는 `ServiceRoute.OPERATIONS`(`/api/v1/admin/jobs/**`).
+
+| API | 응답 | 오류 |
+|-----|------|------|
+| `GET /api/v1/admin/jobs?status=&type=&page=&size=` | `PageResponse<{jobId, type, status, progressPercent, attempt, maxAttempts, cancelRequested, errorCode, requestedByMemberId, scheduledAt, startedAt, finishedAt}>` — 아이디 내림차순(등록 최신순) 고정 | 400 `JOB_101`(page) · `102`(size 1~100) · `103`(type `[A-Z0-9_]{1,64}`) · `198`(없는 status · 형식) |
+| `GET /api/v1/admin/jobs/{jobId}` | 목록 항목 + `priority` · `progressMessage` · `cancelRequestedByMemberId` · `dedupKey` · `payloadJson` · `resultJson` · `errorMessage` | 404 `JOB_001`, 400 `JOB_104`(양수) · `198` |
+| `POST /api/v1/admin/jobs/{jobId}/cancel` | 상세와 같다. QUEUED 는 바로 `CANCELLED`, RUNNING 은 `cancelRequested=true` 로 남고 상태는 그대로(멱등) | 404 `JOB_001`, 409 `JOB_022`(이미 끝남) · `JOB_021`(워커와 계속 겹침 — 다시 시도) |
+
+- `status` 는 `{code, name, description}`, 아이디(작업 · 회원)는 문자열, 시각은 UTC ISO 다. `payloadJson` · `resultJson` 은 JSON 원문 문자열이다.
+  워커 아이디(호스트 · pid)는 내리지 않는다.
+- 상태 · 종류는 `application/model` 의 `JobStatusFilter` · 문자열로 받는다(H1). 조건 조합마다 파생 쿼리 하나다 — 종류 조건은 `idx_job_type_id` 를 그대로 타고,
+  상태 조건은 상태 선두 인덱스로 거른 뒤 정렬한다(어드민 전용). 이 비용은 끝난 작업을 90일 뒤 지우는 보존 정리(`JOB_RETENTION_CLEANUP`, #212 PR-D)를 전제로 한다 —
+  그 전까지는 끝난 작업이 쌓이므로, 정리 없이 행이 크게 늘면 `(status, id)` 인덱스를 검토한다.
+- 그 밖의 요청 검증 실패(메시지에 코드가 없는 제약)는 400 `JOB_100` 이다.
+- 취소는 `JobAdminFacade` 가 `JobRunProcessor.requestCancel` 을 시도마다 새 트랜잭션으로 부른다 — 워커의 가져가기 · 종료와 겹쳐 버전에서 지면 다시 읽어 최대 3번 시도한다.
+  취소한 어드민은 access 토큰의 memberId 다. 성공 · 실패 모두 감사 로그 `action=JOB_CANCEL target=job:<id>` 를 남긴다(`security-guide.md` §11-4).
 
 ## 8. Swagger
 

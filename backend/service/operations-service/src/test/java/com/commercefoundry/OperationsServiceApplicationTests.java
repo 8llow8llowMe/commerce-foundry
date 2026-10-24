@@ -2,12 +2,15 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.job.adapter.in.scheduler.JobWorkerScheduler;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -21,6 +24,11 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import org.springframework.scheduling.config.FixedDelayTask;
+import org.springframework.scheduling.config.ScheduledTask;
+import org.springframework.scheduling.config.ScheduledTaskHolder;
 import org.springframework.scheduling.config.TaskManagementConfigUtils;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
@@ -58,6 +66,42 @@ class OperationsServiceApplicationTests {
         assertThat(applicationContext.getBeanNamesForType(Clock.class)).hasSize(1);
         assertThat(applicationContext.getBean(Clock.class).getZone()).isEqualTo(ZoneOffset.UTC);
         assertThat(applicationContext.containsBean(TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME)).isTrue();
+    }
+
+    @Test
+    @DisplayName("작업 실행 스레드는 core = max = concurrency(2) · 큐 0 이고, heartbeat 스케줄러는 스레드 하나다")
+    void jobWorkerExecutorsAreSized() {
+        ThreadPoolTaskExecutor executor = applicationContext.getBean("jobWorkerTaskExecutor", ThreadPoolTaskExecutor.class);
+        ThreadPoolTaskScheduler leaseScheduler = applicationContext.getBean("jobLeaseTaskScheduler", ThreadPoolTaskScheduler.class);
+
+        assertThat(executor.getCorePoolSize()).isEqualTo(2);
+        assertThat(executor.getMaxPoolSize()).isEqualTo(2);
+        assertThat(executor.getQueueCapacity()).isZero();
+        assertThat(executor.getThreadNamePrefix()).isEqualTo("job-worker-");
+        assertThat(leaseScheduler.getScheduledThreadPoolExecutor().getCorePoolSize()).isEqualTo(1);
+    }
+
+    /**
+     * 작업 워커 전용 실행기 · 스케줄러 빈이 Boot 기본 빈을 밀어내지 않는다 — {@code applicationTaskExecutor} 는 Executor 빈이 하나라도 있으면,
+     * {@code taskScheduler} 는 TaskScheduler 빈이 하나라도 있으면 빠지는 조건이다. 밀려나면 {@code @Scheduled} 폴러가 heartbeat 스레드를 같이 쓴다.
+     */
+    @Test
+    @DisplayName("Boot 기본 applicationTaskExecutor · taskScheduler 가 그대로 있고, 폴러는 그 스케줄러에서 설정 주기(test 100ms)로 돈다")
+    void bootDefaultsSurviveAndPollerIsScheduled() {
+        assertThat(applicationContext.containsBean("applicationTaskExecutor")).as("applicationTaskExecutor").isTrue();
+        assertThat(applicationContext.containsBean("taskScheduler")).as("taskScheduler").isTrue();
+        assertThat(applicationContext.getBean("taskScheduler")).isNotSameAs(applicationContext.getBean("jobLeaseTaskScheduler"));
+
+        List<FixedDelayTask> pollers = applicationContext.getBeansOfType(ScheduledTaskHolder.class).values().stream()
+            .flatMap(holder -> holder.getScheduledTasks().stream())
+            .map(ScheduledTask::getTask)
+            .filter(FixedDelayTask.class::isInstance)
+            .map(FixedDelayTask.class::cast)
+            .filter(task -> task.toString().contains(JobWorkerScheduler.class.getName()))
+            .toList();
+        assertThat(pollers).hasSize(1);
+        assertThat(pollers.getFirst().getIntervalDuration()).isEqualTo(Duration.ofMillis(100));
+        assertThat(pollers.getFirst().getInitialDelayDuration()).isEqualTo(Duration.ofMillis(100));
     }
 
     @Test

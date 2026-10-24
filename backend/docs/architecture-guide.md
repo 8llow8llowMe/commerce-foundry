@@ -66,6 +66,7 @@ com.commercefoundry
   |  |  |- in/admin             어드민 콘솔 API — /api/v1/admin/** (ADMIN 전용)
   |  |  |  |- controller
   |  |  |  |- dto/{request,response,item}
+  |  |  |  |- exception         (*ExceptionHandler — 그 컨텍스트에 in/web 이 없을 때만. 예: operations-service job)
   |  |  |  \- presenter
   |  |  |- in/internal          서비스 간 전용 — /internal/v1/** (게이트웨이가 라우팅하지 않는다)
   |  |  |  |- controller
@@ -75,6 +76,7 @@ com.commercefoundry
   |  |  |- in/webhook           외부 시스템 콜백 — PG 웹훅 등 (payment-service)
   |  |  |- in/scheduler         시각이 부르는 진입점 (@Scheduled — 재고 선점 만료, 미결제 주문 정리 등)
   |  |  |- in/bootstrap         기동이 부르는 진입점 (ApplicationRunner — 초기 관리자 시드 #6). 설정을 커맨드로 옮겨 UseCase 만 부른다
+  |  |  |- in/event             같은 서비스 안 ApplicationEvent 가 부르는 진입점 (작업 종료 → 알림 #213). UseCase 만 부른다
   |  |  \- out
   |  |     |- persistence
   |  |     |  |- entity
@@ -101,6 +103,8 @@ com.commercefoundry
   |     \- model
   \- global
      |- config                  (*BeansConfig, *PropertiesConfig, *FeaturesConfig, *SwaggerConfig)
+     |- persistence             서비스 공용 영속성 도우미 (예: ConstraintViolations — 제약 이름 판정)
+     |- support                 계층이 아닌 공용 값 · 도우미 (예: WarnThrottle, JobWorkerIdentity)
      \- properties
 ```
 
@@ -139,6 +143,8 @@ Info → Presenter → Response
   두고 DB 구간만 Processor 단위로 `@Transactional` 을 건다. **왜 좁혔는지 메서드 주석으로 남긴다.**
 - **의도적으로 느린 CPU 작업(비밀번호 해시 — BCrypt)** 도 같은 예외다. 트랜잭션 안에서 하면 해시 시간만큼 DB 커넥션을 쥔다.
   해시는 트랜잭션 밖에서 만들고 저장 구간만 Processor 에 `@Transactional` 을 건다 (예: auth `MemberWebFacade#signUp`).
+- **같은 행을 워커 · 다른 요청과 다투는 낙관적 충돌 재시도** 도 예외다. 버전에서 지면 새 트랜잭션에서 다시 읽어야 바뀐 상태로 판정되므로
+  트랜잭션은 시도마다 Processor 가 열고 Facade 는 재시도만 한다 (예: operations `JobAdminFacade#cancel`, 작업 등록 `JobRegisterFacade`).
 
 ### Processor
 
@@ -166,12 +172,15 @@ Info → Presenter → Response
 
 ### 컨텍스트 간 의존 규칙 (같은 서비스 안)
 
-한 서비스에 컨텍스트가 여럿이면(product-service 의 `category` · `product`, order-service 의 `catalog` · `cart` · `order`) 다른 컨텍스트에서 쓸 수 있는 것은 **셋뿐이다** (허용 목록).
+한 서비스에 컨텍스트가 여럿이면(product-service 의 `category` · `product`, order-service 의 `catalog` · `cart` · `order`) 다른 컨텍스트에서 쓸 수 있는 것은 **넷뿐이다** (허용 목록).
 
 1. **그 컨텍스트의 Processor.** Facade 만 주입한다 — Processor 끼리는 컨텍스트를 넘어 주입하지 않는다.
 2. **그 Processor 가 돌려준 domain model, 그리고 그 메서드가 돌려준 domain 값(예: `CategoryPlacementViolation`).** 읽기 전용이다 — Facade 가 자기 컨텍스트 Processor 의 인자로 넘길 수 있다.
 3. **그 Processor 가 던지는 예외(`application.exception`).** 부른 쪽 컨텍스트의 `adapter/in/*/exception` 의 `*ExceptionHandler` 만 받아 번역한다
    (Processor 를 부르면 그 예외는 반드시 넘어온다). 그 밖의 계층은 다른 컨텍스트 예외를 쓰지 않는다.
+4. **그 컨텍스트 domain 이 연 확장 지점 — domain 인터페이스 구현과 domain 입력 값.** 엔진형 컨텍스트가 기능을 받아들이는 자리다.
+   예: operations-service 의 `job` 은 domain `JobHandler` 를 열어 두고, 기능 컨텍스트의 `*JobProcessor` 가 구현한다.
+   기능 Facade 는 `JobRegistrationProcessor.register(JobRequest)` 로 등록한다 — `JobRegisterCommand`(`application.command`)는 넘지 않는다 (§10).
 
 - 그 밖(UseCase · Facade · Presenter · Info · Port · Adapter · Mapper · Entity · Repository · Q 타입)은 쓰지 않는다.
   다른 컨텍스트의 포트 · 리포지토리를 직접 부르면 그 컨텍스트의 조회 규칙(숨김 · 정렬 · 캐시)을 비켜 간다.
@@ -327,3 +336,44 @@ store:
   (`STORE_*` — `secret-management.md`). 저장소가 public 이므로 yml 에 실값을 쓰지 않는다.
 - 브랜드 특화 요구가 생기면 먼저 "다른 쇼핑몰에도 의미가 있는 일반 기능인가" 를 묻는다. 그렇다면
   플래그가 있는 공통 기능으로, 아니라면 확장 지점(전략 인터페이스)으로 만든다.
+
+## 10. 백그라운드 작업 실행 (operations-service, #212)
+
+몇 초 ~ 몇 분 걸리는 어드민 작업(리포트 · 정산 대사 · 집계 · AI 생성 · 발송)은 요청 안에서 끝내지 않는다. 게이트웨이 응답 타임아웃(10s)에 끊긴다.
+기능 API 가 작업을 등록하고 `202 + jobId` 로 바로 답하면(`api-design-guide.md` §7), operations-service 의 워커가 처리한다.
+
+- **저장소는 PostgreSQL `operations.job` 하나다.** Redis Streams 는 쓰지 않는다 — 상태 조회 · 감사 · 멱등이 한 테이블에서 끝나고, 영구 키 금지 · TTL 필수(`coding-conventions.md` §9-7)와 맞지 않는다.
+- **가져가기는 `@Version` 경합이다.** 후보를 읽고(lease 가 끝난 `RUNNING` 먼저, 남은 자리를 `QUEUED && scheduled_at <= now` 로) 건마다 다시 읽어 도메인 `Job.claim` 으로 바꿔 저장한다.
+  버전에서 진 워커는 그 작업을 건너뛴다 — 여러 인스턴스에서도 한 시도는 한 워커만 돈다. 분산 락 · `SKIP LOCKED` 는 쓰지 않는다(재고 선점 만료 스케줄러 #10 과 같은 방식).
+  후보는 빈 칸의 4배까지 읽는다 — 같은 주기에 폴링한 인스턴스끼리 상위 후보를 두고 지면 다음 후보로 넘어간다.
+- **등록** — 같은 job 컨텍스트의 진입(어드민 재등록 · 정기 플래너)은 `JobRegisterUseCase` 에 `JobRegisterCommand` 를, 다른 컨텍스트의 기능 Facade 는
+  `JobRegistrationProcessor.register(JobRequest)`(domain 입력 값)를 부른다 (§3 허용 목록 4).
+- **핸들러 계약** — `JobHandler { type(); options(); execute(JobExecution) }`. 각 기능 컨텍스트의 `*JobProcessor` 가 구현하고 빈으로 두면 엔진이 종류(`[A-Z0-9_]{1,64}`)로 찾는다
+  (domain 인터페이스 구현 — §3 허용 목록 4).
+  - **트랜잭션 밖에서 실행한다.** 핸들러 안의 DB 쓰기는 **다른 빈**의 `@Transactional` 메서드(자기 컨텍스트의 다른 Processor)로 한다 —
+    핸들러 Processor 가 자기 `@Transactional` 메서드를 직접 부르면(self-invocation) 프록시를 거치지 않아 트랜잭션이 걸리지 않는다 (§3 Facade).
+  - **시도(attempt) 단위로 멱등이어야 한다.** lease 를 잃은 옛 실행과 회수한 새 실행이 잠시 겹칠 수 있다 — 결과를 쓸 때 업서트 키를 작업 아이디 · 슬롯으로 잡는다.
+    엔진은 끝낼 때 다시 읽어 아직 이 워커의 이 시도인지 확인하고, 아니면 늦게 끝난 결과를 버린다.
+    lease 판정은 각 인스턴스의 시계로 한다 — 인스턴스 시계는 NTP 로 맞춘다(어긋난 만큼 회수가 일찍 · 늦게 일어난다).
+  - 오래 걸리면 `checkpoint(percent, message)` 를 부른다 — 진행률을 남기고, 취소 요청 · lease 상실 · 실행 시간 초과면 멈춤 신호(`JobCancelledException`)를 받는다.
+  - 실패는 `JobExecutionException(errorCode, retryable)` 로 던진다. 예상 밖 예외는 재시도할 수 있는 `HANDLER_ERROR` 다(메시지는 저장하지 않는다).
+  - **payload · 결과 · 오류 · 진행 문구에 개인정보 원문을 두지 않는다.** payload 는 식별자 · 날짜 · 설정값만 담고, 핸들러가 실행 시점에 원본 서비스에서 읽는다.
+  - 다른 서비스 데이터는 internal API 로만 읽고 쓴다(§7). 대상 서비스는 허용 호출자에 `SERVICE_operations-service` 를 더한다.
+- **lease · heartbeat** — 가져갈 때 `lease_expires_at = now + lease`(기본 5m), 전용 스케줄러가 heartbeat(기본 1m, lease 의 1/3 이하)마다 연장한다.
+  워커가 죽으면 lease 가 끝난 뒤 다른 워커가 다음 시도로 회수한다. heartbeat 예약이 거절되면 실행하지 않고 돌려놓는다.
+  실행 시간 상한(기본 30m)을 넘으면 heartbeat 가 그 자리에서 FAILED(`RUN_TIMEOUT`, 재시도 없음)로 끝내고 멈춤 신호를 준다 —
+  checkpoint 를 부르지 않는 핸들러도 작업은 끝나지만, 실행 스레드는 핸들러가 돌아올 때까지 칸을 쥔다.
+- **재시도** — 재시도할 수 있는 실패는 지수 백오프(기본 30s × 4^(n−1), 상한 30m, jitter 0.2) 뒤 다시 QUEUED, 시도 상한(기본 3)이면 FAILED 다.
+- **멱등 등록** — `dedup_key` 가 있으면 활성(QUEUED · RUNNING) 동안 유니크 키 `(type, active_dedup_key)` 가 같은 종류 · 같은 키의 중복 등록을 막고 기존 작업을 돌려준다.
+  종류가 다르면 같은 키여도 막지 않는다. 끝나면 같은 키로 다시 등록할 수 있다.
+  동시 등록에서 유니크 키에 지면(`JOB_DEDUP_CONFLICT`) 그 트랜잭션은 이미 롤백 대상이다 — 기능 트랜잭션 안에서 등록하면 이 예외를 잡아 이어 가지 말고 요청 전체를 다시 시도한다.
+- **취소는 협조적이다** — QUEUED 는 바로 CANCELLED, RUNNING 은 플래그만 세우고 핸들러가 다음 checkpoint 에서 멈춘다. 플래그를 무시하는 핸들러는 실행 시간 상한까지 돈다.
+- **종료 이벤트** — 끝난 상태(SUCCEEDED · FAILED · CANCELLED)를 저장하는 트랜잭션 안에서 `JobFinishedEvent`(domain)를 한 번 낸다.
+  알림(#213)이 `adapter/in/event` 로 받는 구조는 #213 에서 정한다 — 다른 컨텍스트의 진입 adapter 가 job domain 이벤트를 받는 것은 §3 허용 목록 밖이라
+  (a) 허용 목록에 이벤트를 더하거나 (b) 이벤트를 공용 위치로 옮기거나 (c) job 쪽 리스너가 알림 Processor 를 부르는 것 중 하나를 고른다.
+- **실행 스레드** — 전용 `jobWorkerTaskExecutor`(core = max = `worker.concurrency`, 큐 0)와 heartbeat 전용 `jobLeaseTaskScheduler` 를 둔다. `@Async` 는 쓰지 않는다.
+  두 빈은 `@Bean(defaultCandidate = false)` 다 — 일반 빈으로 두면 Boot 가 `applicationTaskExecutor` · `taskScheduler` 를 만들지 않는다.
+  워커 아이디(`{앱}:{호스트}:{pid}:{난수}`)는 `JobWorkerIdentity` 빈 하나로 만든다.
+- **graceful shutdown** — 워커 lifecycle(단계 `Integer.MAX_VALUE`)이 폴링을 멈추고, 실행 중인 시도를 `shutdown-grace` 까지 기다린 뒤, 남은 시도를 QUEUED 로 돌려놓는다(시도 번호를 되돌린다).
+  실행기 · 스케줄러는 그 뒤 단계(`Integer.MAX_VALUE - 1`)에 멈추고, 남은 실행 스레드는 더 기다리지 않고 interrupt 한다. 강제 종료면 lease 만료가 대신한다.
+- 설정은 `operations.jobs.*`(`JobProperties`)다. `operations.jobs.worker.enabled=false` 면 폴러를 만들지 않는다(API 전용 인스턴스). 결과 JSON 상한은 최대 1MiB 다.
