@@ -12,7 +12,7 @@
 backend/
 ├── core/           (라이브러리 — jar, bootJar off)
 │   ├── common-core          Response 래퍼, 오류 봉투, 검증 유틸, Swagger 공통
-│   ├── persistence-core     JPA / QueryDSL / Snowflake ID / BaseEntity / Slice·PageResponse
+│   ├── persistence-core     JPA / QueryDSL / Snowflake ID / BaseEntity / Slice·PageResponse / 제약 위반 판정(ConstraintViolations)
 │   ├── redis-core           Redis 연결 (Boot 자동설정 + 기동 가드) · 키 규칙
 │   ├── security-core        JWT 발급(auth) · 검증(서비스 · 게이트웨이) · 서블릿 Resource Server · 인증 주체 · 보안 오류 코드
 │   ├── storage-core         S3 호환 오브젝트 스토리지 클라이언트 (업로드 서명 · HEAD · 앞부분 읽기 · 복사 · 삭제) · 기동 가드 · 이미지 형식 판별

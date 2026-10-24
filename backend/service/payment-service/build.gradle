@@ -24,10 +24,6 @@ dependencies {
     annotationProcessor "org.mapstruct:mapstruct-processor:${rootProject.ext.mapstructVersion}"
 
     runtimeOnly 'org.postgresql:postgresql'
-    // 제약 위반의 제약 이름을 서버 오류 필드(PSQLException#getServerErrorMessage)에서 읽는다 — 메시지 문구는 lc_messages 로케일을 따라 바뀐다.
-    // 컴파일에만 둔다(런타임은 위 runtimeOnly). 테스트는 오류 필드를 꾸며 판정을 본다 (global/persistence/ConstraintViolations)
-    compileOnly 'org.postgresql:postgresql'
-    testImplementation 'org.postgresql:postgresql'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     // 테스트 키 · 토큰 · 인가 스모크(ResourceServerSmokeTestSupport). 테스트 클래스패스에만 들어간다

@@ -4,4 +4,10 @@ dependencies {
     // com.querydsl 원본은 2024년 이후 릴리스가 없다. 유지되는 OpenFeign 포크를 쓴다
     api "io.github.openfeign.querydsl:querydsl-jpa:${rootProject.ext.querydslVersion}"
     annotationProcessor "io.github.openfeign.querydsl:querydsl-apt:${rootProject.ext.querydslVersion}:jpa"
+
+    // 제약 위반의 제약 이름을 서버 오류 필드(PSQLException#getServerErrorMessage)에서 읽는다 — 메시지 문구는 lc_messages 로케일을 따라 바뀐다 (util/ConstraintViolations).
+    // 컴파일에만 둔다 — 런타임 드라이버는 서비스마다 runtimeOnly 로 둔다. Hibernate 는 위 starter-data-jpa(api)가 이미 가져온다. 테스트는 오류 필드를 꾸며 판정을 본다
+    // persistence-core 를 쓰는 서비스는 postgresql 드라이버가 runtime 에 있어야 한다 — 없으면 제약 위반 시 `instanceof PSQLException` 에서 NoClassDefFoundError
+    compileOnly 'org.postgresql:postgresql'
+    testImplementation 'org.postgresql:postgresql'
 }

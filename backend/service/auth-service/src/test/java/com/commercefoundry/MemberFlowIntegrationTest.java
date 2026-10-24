@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -38,7 +39,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * 애노테이션은 {@link AuthServiceApplicationTests} 와 같아 컨텍스트를 같이 쓴다. H2 는 컨텍스트 동안 살아 있으므로 테스트마다 이메일을 새로 만든다.
  *
  * <p>엔진에 기대는 동작(PostgreSQL 제약 이름 · 락)은 리포지토리 테스트({@code MemberPersistenceAdapterTest}, Testcontainers)가 본다.
- * 여기서는 같은 변환이 H2 에서도 도메인 오류로 나오는지만 본다.
+ * 유니크 키 위반의 도메인 오류 변환은 PostgreSQL 서버 오류 필드의 정확한 제약 이름으로 가리므로({@code ConstraintViolations}) H2 에서는 일어나지 않는다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -127,15 +128,14 @@ class MemberFlowIntegrationTest {
     }
 
     @Test
-    @DisplayName("사전 조회를 지나 유니크 키에 걸려도 AUTH_002 다 (H2 제약 이름)")
-    void uniqueKeyViolationBecomesDuplicate() {
+    @DisplayName("H2 에서는 유니크 키 위반을 AUTH_002 로 바꾸지 않는다 — H2 는 인덱스 접미사가 붙은 이름을 넘기고 판정은 정확 일치다 (PostgreSQL 변환은 MemberPersistenceAdapterTest)")
+    void h2UniqueKeyNameIsNotTranslated() {
         String email = uniqueEmail();
         memberRepositoryPort.save(Member.signUp(System.nanoTime(), email, "$2a$10$hash", "홍길동", null));
 
         assertThatThrownBy(() -> memberRepositoryPort.save(Member.signUp(System.nanoTime(), email, "$2a$10$hash", "김철수", null)))
-            .isInstanceOf(MemberException.class)
-            .extracting(exception -> ((MemberException) exception).getErrorCode())
-            .isEqualTo(MemberErrorCode.DUPLICATE_EMAIL);
+            .isInstanceOf(DataIntegrityViolationException.class)
+            .isNotInstanceOf(MemberException.class);
     }
 
     @Test
