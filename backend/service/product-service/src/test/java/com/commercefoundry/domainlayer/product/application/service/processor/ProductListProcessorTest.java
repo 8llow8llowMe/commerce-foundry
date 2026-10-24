@@ -151,6 +151,35 @@ class ProductListProcessorTest {
         verifyNoInteractions(skuRepositoryPort, productImageRepositoryPort);
     }
 
+    @Test
+    @DisplayName("전시용 summarizeVisible 은 같은 행 · 집계 · 이미지로 목록 search 와 같은 카드를 만든다 — 행 · 집계 · 이미지를 한 번씩 읽는다")
+    void summarizeVisibleMatchesSearch() {
+        ProductListQueryResult[] rows = {row(1, SaleStatus.ON_SALE, true), row(2, SaleStatus.STOP_SELLING, false)};
+        givenRows(false, rows);
+        given(productRepositoryPort.findVisibleListRowsByIds(List.of(1L, 2L, 3L))).willReturn(List.of(rows));
+        given(skuRepositoryPort.aggregateByProductIds(anyCollection())).willReturn(List.of(new SkuAggregateQueryResult(1, true, false, 1_000L, 5_000L, 2)));
+        given(productImageRepositoryPort.findThumbnailsByProductIds(anyCollection())).willReturn(List.of(ProductFixtures.image(10, 2, ImageType.THUMBNAIL, 0)));
+        ProductListProcessor processor = processor(true);
+
+        List<ProductListItemInfo> listed = processor.search(CRITERIA).getContent();
+        var summaries = processor.summarizeVisible(List.of(1L, 2L, 3L));
+
+        assertThat(summaries.keySet()).as("숨김 · 없는 상품(3)은 빠진다").containsExactly(1L, 2L);
+        assertThat(summaries.values().stream().map(ProductListItemInfo::from).toList()).isEqualTo(listed);
+        verify(productRepositoryPort, times(1)).findVisibleListRowsByIds(anyCollection());
+    }
+
+    @Test
+    @DisplayName("summarizeVisible 은 빈 아이디 · 보이는 상품 없음이면 집계 · 이미지를 읽지 않는다")
+    void summarizeVisibleSkipsFollowUpQueries() {
+        assertThat(processor(true).summarizeVisible(List.of())).isEmpty();
+        verifyNoInteractions(productRepositoryPort);
+
+        given(productRepositoryPort.findVisibleListRowsByIds(List.of(9L))).willReturn(List.of());
+        assertThat(processor(true).summarizeVisible(List.of(9L))).isEmpty();
+        verifyNoInteractions(skuRepositoryPort, productImageRepositoryPort);
+    }
+
     private ProductListProcessor processor(boolean customOrderFeature) {
         return new ProductListProcessor(
             productRepositoryPort, skuRepositoryPort, productImageRepositoryPort, new StoreProperties(new StoreProperties.Features(customOrderFeature))
