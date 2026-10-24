@@ -64,8 +64,9 @@ GitHub (develop / main)
   Eureka 등록 · 서비스 간 호출은 같은 docker 네트워크 안에서 닿으므로 호스트 포트는 호스트 안 점검용이다. Eureka 레지스트리는 인증이 없다.
   모듈을 다른 호스트로 나눠야 하면 바인딩과 Eureka 인증을 같이 정한다(#197 · #32).
 - 게이트웨이 바인드 주소는 `API_GATEWAY_BIND_{DEV,PROD}` 로 받고 기본값은 루프백이다(닫힌 쪽). 앞단(BFF · LB)이 닿아야 하는 주소만 넣는다 — 외부 노출 규칙은 §6.
-- **한 compose 파일에 dev · prod 가 같이 있고 compose 는 파일 전체를 보간한다.** 포트 키는 `:?`(비면 실패)라 dev 배포의 env 에도 `_PROD` 값이 있어야 한다(반대도 같다).
-  dev · prod 가 다른 서버여도 같다. 환경 공통 키로 합치거나 compose 파일을 환경별로 나눌지는 #197 · #198 에서 검토한다.
+- **한 compose 파일에 dev · prod 가 같이 있고 compose 는 파일 전체를 보간한다.** 포트 키는 `:?`(비면 실패)라 dev 배포의 env 에도 `_PROD` 키가 있어야 한다(반대도 같다).
+  파이프라인(#198)은 반대 환경의 `<MODULE>_PORT_{DEV|PROD}` 를 `'0'` 자리값으로 채운다 — 그 서비스는 올리지 않아 포트를 잡지 않으므로
+  **Vault 에는 자기 환경 포트만 넣는다.** `_BIND_` · `_MEM_LIMIT_` 은 compose 기본값이 있어 채우지 않는다(`jenkins-cicd-guide.md`). 손으로 배포할 때도 같은 방식으로 채운다.
 - 힙은 Dockerfile 의 `-XX:MaxRAMPercentage=70.0` 이 메모리 상한의 70% 로 정한다. 나머지 30% 는 메타스페이스 · 스레드 · 다이렉트 버퍼 몫이다.
   기본값은 출발점이다 — 실제 RSS 를 보고 조정하고, 상한을 줄이면 비율 때문에 non-heap 이 같이 줄어드는 것을 감안한다. OOM 이면 `-XX:+ExitOnOutOfMemoryError` 로 끝나 `restart` 가 다시 띄운다.
 
@@ -127,7 +128,7 @@ compose 가 env 파일과 무관하게 고정하는 값:
 
 | 키 | 없으면 |
 |----|--------|
-| `COMMERCE_DOCKER_NETWORK` · `<MODULE>_PORT_{DEV,PROD}` | compose 해석 실패로 배포 중단 |
+| `COMMERCE_DOCKER_NETWORK` · 자기 환경의 `<MODULE>_PORT_{DEV|PROD}` | compose 해석 실패로 배포 중단. 반대 환경 포트는 파이프라인이 `'0'` 자리값으로 채운다(§3) |
 | `EUREKA_DEFAULT_ZONE` | compose 해석 실패 |
 | `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` | compose 해석 실패. dev 와 prod 는 다른 DB 서버라 값은 환경별 secret 에서 갈라 넣는다(키 이름은 같다). 서비스 5종은 한 DB 의 서비스별 스키마(`auth` · `product` · `orders` · `payment` · `delivery`, yml `hibernate.default_schema`)를 쓰므로 URL 은 환경당 하나다. 스키마는 미리 만들어 둔다 — JPA 는 스키마를 만들지 않는다. 정본은 [`docker/postgres/init/01-create-schemas.sql`](../docker/postgres/init/01-create-schemas.sql) 이다 |
 | `REDIS_*` | compose 해석 실패. auth 와 gateway 는 같은 Redis 여야 한다 |
