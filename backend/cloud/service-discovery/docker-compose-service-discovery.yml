@@ -15,6 +15,8 @@
 x-service-discovery-environment: &service_discovery_environment
   # JVM 시간대(로그 시각만 바뀐다). 비우면 UTC
   TIME_ZONE: ${TIME_ZONE:-UTC}
+  # 레지스트리 HTTP Basic 비밀번호(#248). 게이트웨이 · 서비스와 같은 값이다. 영문 · 숫자 · . _ ~ - 만, 32자 이상 — 어긋나면 기동하지 않는다
+  EUREKA_PASSWORD: ${EUREKA_PASSWORD:?deploy-guide.md 4절}
 
 x-logging: &default_logging
   driver: json-file
