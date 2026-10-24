@@ -18,7 +18,8 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <ul>
  *   <li>MVC 예외 처리 사슬에 {@link FallbackErrorResolver} 를 넣는다 — 컨트롤러 · MVC 단계의 오류.</li>
- *   <li>Boot 의 {@code BasicErrorController} 대신 {@link FallbackErrorController} 를 {@code /error} 에 둔다 — 필터 예외 · 방화벽 거부처럼 MVC 밖의 오류.</li>
+ *   <li>Boot 의 {@code BasicErrorController} 대신 {@link FallbackErrorController} 를 {@code /error} 에 둔다 — 필터 예외 · 방화벽 거부처럼 MVC 밖의 오류.
+ *       필터 예외는 가장 바깥의 {@link UnhandledFilterExceptionFilter} 가 받아 {@code sendError(500)} 으로 넘긴다 — Tomcat 이 원래 메시지째 로그하지 않게 (#283).</li>
  * </ul>
  *
  * <p><b>공통 Configurer 중 유일하게 {@code *BeansConfig} 의 {@code @Import} 가 아니라 자동 구성이다</b> ({@code bootstrap-conventions.md}).
@@ -74,6 +75,15 @@ public class FallbackErrorAutoConfiguration {
         @Bean
         public FallbackErrorController fallbackErrorController(JsonMapper jsonMapper, ObjectProvider<ErrorAttributes> errorAttributes) {
             return new FallbackErrorController(jsonMapper, errorAttributes.getIfAvailable());
+        }
+
+        /**
+         * 필터 단계 예외를 컨테이너까지 올리지 않고 위 컨트롤러로 넘긴다 (#283). 컨트롤러와 같은 조건에 둔다 — {@code /error} 가 봉투를 쓸 때만
+         * {@code sendError(500)} 으로 바꾸는 의미가 있다. Boot 가 {@code Filter} 빈을 {@code getOrder()} 순서로 컨테이너에 등록한다.
+         */
+        @Bean
+        public UnhandledFilterExceptionFilter unhandledFilterExceptionFilter() {
+            return new UnhandledFilterExceptionFilter();
         }
     }
 }
