@@ -8,6 +8,7 @@ import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CategoryPathItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CustomOrderFieldItem;
+import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.PreorderItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductImageItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductOptionGroupItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductOptionValueItem;
@@ -18,6 +19,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.web.dto.response.Produ
 import com.commercefoundry.domainlayer.product.application.info.CategoryPathInfo;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldInfo;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderInfo;
+import com.commercefoundry.domainlayer.product.application.info.PreorderInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductDetailInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductImageInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductListItemInfo;
@@ -25,10 +27,12 @@ import com.commercefoundry.domainlayer.product.application.info.ProductOptionGro
 import com.commercefoundry.domainlayer.product.application.info.ProductOptionValueInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductSkuInfo;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderInputType;
+import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.persistence.dto.SliceResponse;
 import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,13 +53,14 @@ class ProductWebPresenterTest {
         ProductListItemInfo info = ProductListItemInfo.builder()
             .productId(SNOWFLAKE_ID)
             .name("저고리")
-            .thumbnail(new ProductImageInfo(SNOWFLAKE_ID + 1, "https://cdn.example.com/t.jpg", 600, null, "정면", 0))
+            .thumbnail(new ProductImageInfo(SNOWFLAKE_ID + 1, ImageType.THUMBNAIL, "https://cdn.example.com/t.jpg", 600, null, "정면", 0, null))
             .salePrice(Money.of(39_000, KRW))
             .listPrice(Money.of(45_000, KRW))
             .discountRate(13)
             .hasOptionSurcharge(true)
             .saleStatus(SaleAvailability.ON_SALE)
             .customOrder(true)
+            .preorder(true)
             .build();
 
         SliceResponse<ProductListItemResponse> response = presenter.toListResponse(new SliceImpl<>(List.of(info), PageRequest.of(0, 20), true));
@@ -72,6 +77,7 @@ class ProductWebPresenterTest {
             .hasOptionSurcharge(true)
             .saleStatus(ON_SALE)
             .customOrder(true)
+            .preorder(true)
             .build());
     }
 
@@ -86,6 +92,7 @@ class ProductWebPresenterTest {
         assertThat(item.thumbnail()).isNull();
         assertThat(item.listPrice()).isNull();
         assertThat(item.discountRate()).isNull();
+        assertThat(item.preorder()).isFalse();
         assertThat(item.salePrice()).isEqualTo(MoneyItem.of(8_950, "USD"));
         assertThat(item.saleStatus().code()).isEqualTo("STOP_SELLING");
     }
@@ -100,15 +107,18 @@ class ProductWebPresenterTest {
     }
 
     @Test
-    @DisplayName("상세의 모든 아이디(상품 · 카테고리 · 이미지 · 옵션 그룹 · 값 · SKU · SKU 의 값 목록)는 문자열이고 순서를 그대로 둔다")
+    @DisplayName("상세의 모든 아이디(상품 · 카테고리 · 이미지 · 옵션 그룹 · 값 · SKU · SKU 의 값 목록)는 문자열이고 순서를 그대로 둔다. 영상은 VIDEO · 포스터, 이미지는 IMAGE 다")
     void detailResponse() {
         ProductDetailInfo info = ProductDetailInfo.builder()
             .productId(SNOWFLAKE_ID)
             .name("저고리")
             .summary("요약")
             .categoryPath(List.of(new CategoryPathInfo(101, "상의"), new CategoryPathInfo(102, "저고리")))
-            .thumbnail(new ProductImageInfo(88000, "https://cdn.example.com/t.jpg", 600, 800, "대표", 0))
-            .images(List.of(new ProductImageInfo(88001, "https://cdn.example.com/1.jpg", 1200, 1600, "정면", 1)))
+            .thumbnail(new ProductImageInfo(88000, ImageType.THUMBNAIL, "https://cdn.example.com/t.jpg", 600, 800, "대표", 0, null))
+            .images(List.of(
+                new ProductImageInfo(88001, ImageType.GALLERY, "https://cdn.example.com/1.jpg", 1200, 1600, "정면", 1, null),
+                new ProductImageInfo(88002, ImageType.VIDEO, "https://cdn.example.com/2.mp4", 1080, 1920, "착용 영상", 1, "https://cdn.example.com/2.jpg")
+            ))
             .descriptionHtml("<p>설명</p>")
             .salePrice(Money.of(39_000, KRW))
             .listPrice(null)
@@ -121,6 +131,7 @@ class ProductWebPresenterTest {
                 .fieldKey("chest").label("가슴둘레").inputType(CustomOrderInputType.NUMBER).unit("cm").required(true)
                 .min(new BigDecimal("60")).max(new BigDecimal("150")).step(new BigDecimal("0.5")).helpText(null)
                 .build())))
+            .preorder(new PreorderInfo(LocalDate.of(2026, 11, 20)))
             .build();
 
         ProductDetailResponse response = presenter.toDetailResponse(info);
@@ -132,7 +143,10 @@ class ProductWebPresenterTest {
         );
         assertThat(response.thumbnail().imageId()).isEqualTo("88000");
         assertThat(response.images()).containsExactly(ProductImageItem.builder()
-            .imageId("88001").url("https://cdn.example.com/1.jpg").width(1200).height(1600).altText("정면").displayOrder(1).build());
+            .imageId("88001").mediaType("IMAGE").url("https://cdn.example.com/1.jpg").posterUrl(null)
+            .width(1200).height(1600).altText("정면").displayOrder(1).build(), ProductImageItem.builder()
+            .imageId("88002").mediaType("VIDEO").url("https://cdn.example.com/2.mp4").posterUrl("https://cdn.example.com/2.jpg")
+            .width(1080).height(1920).altText("착용 영상").displayOrder(1).build());
         assertThat(response.salePrice()).isEqualTo(MoneyItem.of(39_000, "KRW"));
         assertThat(response.listPrice()).isNull();
         assertThat(response.discountRate()).isNull();
@@ -149,6 +163,7 @@ class ProductWebPresenterTest {
             .salePrice(MoneyItem.of(44_000, "KRW"))
             .saleStatus(ON_SALE)
             .build());
+        assertThat(response.preorder()).isEqualTo(PreorderItem.builder().expectedShipDate(LocalDate.of(2026, 11, 20)).build());
         assertThat(response.customOrder().notice()).isEqualTo("고지");
         assertThat(response.customOrder().leadTimeDays()).isEqualTo(14);
         assertThat(response.customOrder().fields()).containsExactly(CustomOrderFieldItem.builder()
@@ -158,7 +173,7 @@ class ProductWebPresenterTest {
     }
 
     @Test
-    @DisplayName("맞춤 제작 안내 · 대표 이미지가 없으면 null 그대로다")
+    @DisplayName("맞춤 제작 · 프리오더 안내 · 대표 이미지가 없으면 null 그대로다")
     void detailKeepsNulls() {
         ProductDetailInfo info = ProductDetailInfo.builder()
             .productId(1L).name("하의").categoryPath(List.of()).images(List.of()).salePrice(Money.of(1_000, KRW))
@@ -169,6 +184,7 @@ class ProductWebPresenterTest {
 
         assertThat(response.thumbnail()).isNull();
         assertThat(response.customOrder()).isNull();
+        assertThat(response.preorder()).isNull();
         assertThat(response.skus()).isEmpty();
         assertThat(response.optionGroups()).isEmpty();
     }

@@ -44,10 +44,12 @@
         custom_order_lead_time_days integer,
         custom_order_notice varchar(500),
         description_html text,
+        expected_ship_date date,
         list_price_amount bigint,
         list_price_currency varchar(3) check ((list_price_currency in ('KRW','USD'))),
         max_quantity_per_order integer,
         name varchar(100) not null,
+        preorder boolean not null,
         sale_price_amount bigint not null,
         sale_price_currency varchar(3) not null check ((sale_price_currency in ('KRW','USD'))),
         sale_status varchar(20) not null check ((sale_status in ('ON_SALE','STOP_SELLING'))),
@@ -57,7 +59,8 @@
         constraint ck_product_sale_price_non_negative check (sale_price_amount >= 0),
         constraint ck_product_list_price_pair check ((list_price_amount is null and list_price_currency is null) or (list_price_amount is not null and list_price_currency is not null)),
         constraint ck_product_list_price_currency check (list_price_currency is null or list_price_currency = sale_price_currency),
-        constraint ck_product_list_price_non_negative check (list_price_amount is null or list_price_amount >= 0)
+        constraint ck_product_list_price_non_negative check (list_price_amount is null or list_price_amount >= 0),
+        constraint ck_product_expected_ship_date_preorder check (preorder = true or expected_ship_date is null)
     );
 
     comment on table product.product is
@@ -87,6 +90,9 @@
     comment on column product.product.description_html is
         '상세 설명 HTML. 표시 전 sanitize 대상';
 
+    comment on column product.product.expected_ship_date is
+        '발송 예정일 (순차 발송 시작일). 프리오더 상품만 갖는다. 프리오더인데 null 이면 발송일 추후 안내';
+
     comment on column product.product.list_price_amount is
         '정가 (할인 전, 최소 화폐 단위). null 이면 할인 표시 없음';
 
@@ -98,6 +104,9 @@
 
     comment on column product.product.name is
         '상품명';
+
+    comment on column product.product.preorder is
+        '프리오더(예약 판매) 상품 여부. 판매 가능 판정 · 재고는 일반 상품과 같다';
 
     comment on column product.product.sale_price_amount is
         '기본 판매가 (최소 화폐 단위). SKU 추가금의 기준이자 목록 최저가';
@@ -217,13 +226,15 @@
         alt_text varchar(200),
         display_order integer not null,
         height integer,
-        image_type varchar(20) not null check ((image_type in ('THUMBNAIL','GALLERY'))),
+        image_type varchar(20) not null check ((image_type in ('THUMBNAIL','GALLERY','VIDEO'))),
+        poster_url varchar(500),
         product_id bigint not null,
         url varchar(500) not null,
         width integer,
         primary key (id),
         constraint uk_product_image_product_id_image_type_display_order unique (product_id, image_type, display_order),
-        constraint ck_product_image_thumbnail_display_order check (image_type <> 'THUMBNAIL' or display_order = 0)
+        constraint ck_product_image_thumbnail_display_order check (image_type <> 'THUMBNAIL' or display_order = 0),
+        constraint ck_product_image_poster_url check ((image_type = 'VIDEO' and poster_url is not null) or (image_type <> 'VIDEO' and poster_url is null))
     );
 
     comment on table product.product_image is
@@ -248,13 +259,16 @@
         '원본 세로 px. 모르면 null';
 
     comment on column product.product_image.image_type is
-        '이미지 유형 — THUMBNAIL(목록 대표, 상품당 1개) / GALLERY(상세 갤러리)';
+        '이미지 유형 — THUMBNAIL(목록 대표, 상품당 1개) / GALLERY(상세 갤러리) / VIDEO(상세 갤러리 영상)';
+
+    comment on column product.product_image.poster_url is
+        '영상 포스터 이미지 URL. VIDEO 면 필수, 그 밖에는 null';
 
     comment on column product.product_image.product_id is
         '상품 아이디 (FK: product.id)';
 
     comment on column product.product_image.url is
-        '이미지 URL';
+        '이미지 URL. VIDEO 면 영상 파일 URL';
 
     comment on column product.product_image.width is
         '원본 가로 px. 모르면 null';

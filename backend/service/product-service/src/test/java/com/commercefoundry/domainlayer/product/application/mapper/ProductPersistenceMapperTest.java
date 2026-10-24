@@ -5,12 +5,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductEntity;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductImageEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
 import com.commercefoundry.domainlayer.product.domain.model.HsCode;
+import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
+import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.shared.commerce.Money;
+import java.time.LocalDate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -24,6 +28,7 @@ class ProductPersistenceMapperTest {
 
     private final ProductMapper productMapper = new ProductMapperImpl();
     private final SkuMapper skuMapper = new SkuMapperImpl();
+    private final ProductImageMapper productImageMapper = new ProductImageMapperImpl();
 
     @Test
     @DisplayName("상품: 금액 · 통화 컬럼 쌍을 Money 로 묶는다")
@@ -36,6 +41,31 @@ class ProductPersistenceMapperTest {
         assertThat(product.listPrice()).isEqualTo(Money.of(45_000, KRW));
         assertThat(product.maxQuantityPerOrder()).isNull();
         assertThat(product.customOrder()).isTrue();
+    }
+
+    @Test
+    @DisplayName("상품: 프리오더 여부 · 발송 예정일을 읽는다. 일반 상품은 false · null 이다")
+    void productPreorder() {
+        Product preorder = productMapper.toDomain(product().preorder(true).expectedShipDate(LocalDate.of(2026, 11, 20)).build());
+        Product regular = productMapper.toDomain(product().build());
+
+        assertThat(preorder.preorder()).isTrue();
+        assertThat(preorder.expectedShipDate()).isEqualTo(LocalDate.of(2026, 11, 20));
+        assertThat(regular.preorder()).isFalse();
+        assertThat(regular.expectedShipDate()).isNull();
+    }
+
+    @Test
+    @DisplayName("상품 이미지: 영상은 유형 VIDEO 와 포스터 URL 을, 이미지는 포스터 null 을 읽는다")
+    void productImageVideo() {
+        ProductImage video = productImageMapper.toDomain(image(ImageType.VIDEO, "https://cdn.example.com/1.mp4", "https://cdn.example.com/1.jpg"));
+        ProductImage gallery = productImageMapper.toDomain(image(ImageType.GALLERY, "https://cdn.example.com/2.jpg", null));
+
+        assertThat(video.imageType()).isEqualTo(ImageType.VIDEO);
+        assertThat(video.url()).isEqualTo("https://cdn.example.com/1.mp4");
+        assertThat(video.posterUrl()).isEqualTo("https://cdn.example.com/1.jpg");
+        assertThat(gallery.imageType()).isEqualTo(ImageType.GALLERY);
+        assertThat(gallery.posterUrl()).isNull();
     }
 
     @Test
@@ -132,6 +162,17 @@ class ProductPersistenceMapperTest {
             .salePriceAmount(39_000L)
             .salePriceCurrency(KRW)
             .customOrder(true);
+    }
+
+    private static ProductImageEntity image(ImageType imageType, String url, String posterUrl) {
+        return ProductImageEntity.builder()
+            .id(201L)
+            .productId(101L)
+            .imageType(imageType)
+            .url(url)
+            .displayOrder(1)
+            .posterUrl(posterUrl)
+            .build();
     }
 
     private static SkuEntity sku(String optionValueKey) {

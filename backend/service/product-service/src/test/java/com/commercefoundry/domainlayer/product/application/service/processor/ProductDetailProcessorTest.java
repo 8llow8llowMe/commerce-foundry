@@ -14,6 +14,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.info.CategoryPathInfo;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldInfo;
+import com.commercefoundry.domainlayer.product.application.info.PreorderInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductDetailInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductImageInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductOptionGroupInfo;
@@ -35,6 +36,7 @@ import com.commercefoundry.domainlayer.product.support.ProductFixtures;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -51,7 +53,8 @@ class ProductDetailProcessorTest {
     // 사이즈(602) 가 색상(601) 보다 먼저 보인다. 값 아이디는 색상이 작아 조합 키("5011,9001")에서는 색상이 앞이다
     private static final long COLOR = 601L;
     private static final long SIZE = 602L;
-    private static final List<Category> PATH = List.of(new Category(1, null, "상의", 0, true), new Category(11, 1L, "저고리", 0, true));
+    private static final LocalDate SHIP_DATE = LocalDate.of(2026, 11, 20);
+    private static final List<Category> PATH =List.of(new Category(1, null, "상의", 0, true), new Category(11, 1L, "저고리", 0, true));
 
     @Mock
     private ProductRepositoryPort productRepositoryPort;
@@ -301,11 +304,130 @@ class ProductDetailProcessorTest {
         }
     }
 
+    @Nested
+    @DisplayName("getDetail — 프리오더")
+    class Preorder {
+
+        @Test
+        @DisplayName("스토어 플래그와 상품 설정이 모두 켜지면 발송 예정일을 담은 안내를 만든다 — 판매 상태는 일반 상품처럼 재고로 정한다")
+        void preorderWithShipDate() {
+            given(productOptionRepositoryPort.findGroupsByProductId(PRODUCT_ID)).willReturn(List.of());
+            given(productOptionRepositoryPort.findValuesByProductId(PRODUCT_ID)).willReturn(List.of());
+            given(skuRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(ProductFixtures.sku(1, PRODUCT_ID, "", 0, SaleStatus.ON_SALE)));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(1L))).willReturn(List.of(new Stock(1, true, 0)));
+            given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of());
+
+            ProductDetailInfo detail = processor(features(false, true, false)).getDetail(ProductFixtures.preorderProduct(PRODUCT_ID, SHIP_DATE), PATH);
+
+            assertThat(detail.preorder()).isEqualTo(new PreorderInfo(SHIP_DATE));
+            assertThat(detail.saleStatus()).as("프리오더여도 재고가 없으면 품절이다").isEqualTo(SaleAvailability.SOLD_OUT);
+            assertThat(detail.customOrder()).isNull();
+        }
+
+        @Test
+        @DisplayName("발송 예정일이 없는 프리오더 상품은 날짜만 null 인 안내다 — '발송일 추후 안내'")
+        void preorderWithoutShipDate() {
+            givenNoOptionsSkusOrImages();
+
+            ProductDetailInfo detail = processor(features(false, true, false)).getDetail(ProductFixtures.preorderProduct(PRODUCT_ID, null), PATH);
+
+            assertThat(detail.preorder()).isNotNull();
+            assertThat(detail.preorder().expectedShipDate()).isNull();
+        }
+
+        @Test
+        @DisplayName("스토어 플래그가 꺼지면 프리오더 상품이어도 null 이다")
+        void preorderFlagOff() {
+            givenNoOptionsSkusOrImages();
+
+            ProductDetailInfo detail = processor(features(true, false, true)).getDetail(ProductFixtures.preorderProduct(PRODUCT_ID, SHIP_DATE), PATH);
+
+            assertThat(detail.preorder()).isNull();
+        }
+
+        @Test
+        @DisplayName("프리오더 상품이 아니면 플래그가 켜져 있어도 null 이다")
+        void notPreorderProduct() {
+            givenNoOptionsSkusOrImages();
+
+            ProductDetailInfo detail = processor(features(false, true, false)).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
+
+            assertThat(detail.preorder()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("getDetail — 갤러리 영상")
+    class GalleryVideo {
+
+        /** 포트 계약대로 유형을 가리지 않고 노출 순서 → 아이디 오름차순이다. 이미지 12 와 영상 21 은 순서가 같다(유니크 키가 유형별이라 가능). */
+        private void givenMixedMedia() {
+            givenNoOptionsOrSkus();
+            given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.image(10, PRODUCT_ID, ImageType.THUMBNAIL, 0),
+                ProductFixtures.video(20, PRODUCT_ID, 0),
+                ProductFixtures.image(11, PRODUCT_ID, ImageType.GALLERY, 1),
+                ProductFixtures.image(12, PRODUCT_ID, ImageType.GALLERY, 2),
+                ProductFixtures.video(21, PRODUCT_ID, 2),
+                ProductFixtures.image(13, PRODUCT_ID, ImageType.GALLERY, 3)
+            ));
+        }
+
+        @Test
+        @DisplayName("플래그가 켜지면 영상을 이미지와 노출 순서 → 아이디 순으로 섞고 포스터를 담는다. 대표 이미지는 THUMBNAIL 만이다")
+        void videoFlagOn() {
+            givenMixedMedia();
+
+            ProductDetailInfo detail = processor(features(false, false, true)).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
+
+            assertThat(detail.images()).extracting(ProductImageInfo::imageId).containsExactly(20L, 11L, 12L, 21L, 13L);
+            assertThat(detail.images()).extracting(ProductImageInfo::imageType)
+                .containsExactly(ImageType.VIDEO, ImageType.GALLERY, ImageType.GALLERY, ImageType.VIDEO, ImageType.GALLERY);
+            assertThat(detail.images().getFirst().posterUrl()).isEqualTo("https://cdn.example.com/20-poster.jpg");
+            assertThat(detail.images().get(1).posterUrl()).isNull();
+            assertThat(detail.thumbnail().imageId()).isEqualTo(10L);
+        }
+
+        @Test
+        @DisplayName("플래그가 꺼지면 영상을 뺀다 — 이미지 순서는 그대로다")
+        void videoFlagOff() {
+            givenMixedMedia();
+
+            ProductDetailInfo detail = processor(features(true, true, false)).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
+
+            assertThat(detail.images()).extracting(ProductImageInfo::imageId).containsExactly(11L, 12L, 13L);
+            assertThat(detail.images()).extracting(ProductImageInfo::imageType).containsOnly(ImageType.GALLERY);
+        }
+
+        @Test
+        @DisplayName("대표 이미지가 없으면 순서 0 의 영상이 있어도 대표 이미지는 null 이다 — 영상 · 갤러리 이미지로 대신하지 않는다")
+        void videoNeverBecomesThumbnail() {
+            givenNoOptionsOrSkus();
+            given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.video(20, PRODUCT_ID, 0),
+                ProductFixtures.image(11, PRODUCT_ID, ImageType.GALLERY, 0)
+            ));
+
+            ProductDetailInfo detail = processor(features(false, false, true)).getDetail(ProductFixtures.product(PRODUCT_ID), PATH);
+
+            assertThat(detail.thumbnail()).isNull();
+            assertThat(detail.images()).extracting(ProductImageInfo::imageId).containsExactly(20L, 11L);
+        }
+    }
+
     private ProductDetailProcessor processor(boolean customOrderFeature) {
+        return processor(features(customOrderFeature, false, false));
+    }
+
+    private ProductDetailProcessor processor(StoreProperties.Features features) {
         return new ProductDetailProcessor(
             productRepositoryPort, productOptionRepositoryPort, skuRepositoryPort, stockRepositoryPort, productImageRepositoryPort, productCustomOrderFieldRepositoryPort,
-            new StoreProperties(new StoreProperties.Features(customOrderFeature))
+            new StoreProperties(features)
         );
+    }
+
+    private static StoreProperties.Features features(boolean customOrder, boolean preorder, boolean productVideo) {
+        return new StoreProperties.Features(customOrder, preorder, productVideo);
     }
 
     /** 포트 계약대로 노출 순서 → 아이디 오름차순으로 준다. 값은 그룹을 가리지 않고 한 줄로 정렬돼 온다. */
