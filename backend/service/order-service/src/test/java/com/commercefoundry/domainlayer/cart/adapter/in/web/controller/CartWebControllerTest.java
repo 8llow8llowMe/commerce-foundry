@@ -193,6 +193,55 @@ class CartWebControllerTest {
             assertThat(command.getValue().customOptions().isEmpty()).isTrue();
         }
 
+        /** JSON 유니코드 이스케이프로 보내 Jackson 이 NUL 등으로 읽게 한다. 고치기 전에는 저장에서 PostgreSQL 이 NUL 을 거절해 500 이었다(#232). */
+        @ParameterizedTest(name = "{0}")
+        @CsvSource(delimiter = '|', value = {
+            "가운데 NUL         | 96\\u00005",
+            "앞 NUL             | \\u000096.5",
+            "뒤 NUL             | 96.5\\u0000",
+            "SOH                | a\\u0001b",
+            "탭                 | 소매\\t길게",
+            "개행               | 소매\\n길게",
+            "DEL                | a\\u007fb",
+            "C1 NEL             | a\\u0085b",
+            "짝 없는 서로게이트 | a\\ud800b"
+        })
+        @DisplayName("value 의 제어 문자 · 짝 없는 서로게이트는 위치와 상관없이 400 CART_115 이고 유스케이스(저장)에 닿지 않는다")
+        void controlCharacterInValue(String caseName, String escapedValue) {
+            MvcTestResult result = post("/api/v1/carts/me/items",
+                "{\"skuId\":1,\"quantity\":1,\"customOptions\":[{\"fieldKey\":\"memo\",\"value\":\"" + escapedValue + "\"}]}");
+
+            assertFailure(result, HttpStatus.BAD_REQUEST, "CART_115");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors").asArray().hasSize(1);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo("customOptions[0].value");
+            verifyNoInteractions(cartWebUseCase);
+        }
+
+        @Test
+        @DisplayName("제어 문자만인 value 는 필수(CART_110)가 먼저다 · fieldKey 의 제어 문자는 형식(CART_109)이 막는다")
+        void controlCharacterOrderAndFieldKey() {
+            MvcTestResult tabOnly = post("/api/v1/carts/me/items", "{\"skuId\":1,\"quantity\":1,\"customOptions\":[{\"fieldKey\":\"memo\",\"value\":\"\\t\"}]}");
+            assertFailure(tabOnly, HttpStatus.BAD_REQUEST, "CART_110");
+            assertThat(tabOnly).bodyJson().extractingPath("$.dataHeader.fieldErrors[1].code").isEqualTo("CART_115");
+
+            MvcTestResult fieldKey = post("/api/v1/carts/me/items", "{\"skuId\":1,\"quantity\":1,\"customOptions\":[{\"fieldKey\":\"chest\\u0000\",\"value\":\"96\"}]}");
+            assertFailure(fieldKey, HttpStatus.BAD_REQUEST, "CART_109");
+            assertThat(fieldKey).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo("customOptions[0].fieldKey");
+            verifyNoInteractions(cartWebUseCase);
+        }
+
+        @Test
+        @DisplayName("이모지 ZWJ 시퀀스 · 피부색 · 전각 공백은 정상 입력이라 통과한다")
+        void emojiIsAccepted() {
+            given(cartWebUseCase.addItem(anyLong(), any())).willReturn(EMPTY_CART);
+            String value = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67 \uD83D\uDC4D\uD83C\uDFFD 소매\u3000길게";
+
+            assertThat(post("/api/v1/carts/me/items", "{\"skuId\":1,\"quantity\":1,\"customOptions\":[{\"fieldKey\":\"memo\",\"value\":\"" + value + "\"}]}")).hasStatusOk();
+            ArgumentCaptor<CartItemAddCommand> command = ArgumentCaptor.forClass(CartItemAddCommand.class);
+            verify(cartWebUseCase).addItem(eq(MEMBER_ID), command.capture());
+            assertThat(command.getValue().customOptions().values()).extracting(CustomOption::value).containsExactly(value);
+        }
+
         @ParameterizedTest(name = "{0}")
         @CsvSource(delimiter = '|', value = {
             "skuId 없음                 | {\"quantity\":1}                                                                   | CART_101 | skuId",
@@ -335,6 +384,17 @@ class CartWebControllerTest {
             MvcTestResult nested = post("/api/v1/carts/me/merge", "{\"items\":[{\"skuId\":1,\"quantity\":0}]}");
             assertFailure(nested, HttpStatus.BAD_REQUEST, "CART_104");
             assertThat(nested).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo("items[0].quantity");
+            verifyNoInteractions(cartWebUseCase);
+        }
+
+        @Test
+        @DisplayName("한 항목의 value 에 NUL 이 있으면 항목 단위로 건너뛰지 않고 요청 전체가 400 CART_115 다")
+        void controlCharacterRejectsWholeRequest() {
+            MvcTestResult result = post("/api/v1/carts/me/merge",
+                "{\"items\":[{\"skuId\":1,\"quantity\":1},{\"skuId\":2,\"quantity\":1,\"customOptions\":[{\"fieldKey\":\"memo\",\"value\":\"a\\u0000b\"}]}]}");
+
+            assertFailure(result, HttpStatus.BAD_REQUEST, "CART_115");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo("items[1].customOptions[0].value");
             verifyNoInteractions(cartWebUseCase);
         }
     }
