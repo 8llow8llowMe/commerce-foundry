@@ -72,16 +72,32 @@ class FallbackErrorControllerTest {
     }
 
     @Test
-    @DisplayName("필터 예외의 500 은 원인 메시지 · 예외 타입을 응답에 싣지 않고 로그에만 남긴다")
-    void causeStaysInLog(CapturedOutput output) throws Exception {
+    @DisplayName("필터 예외의 500 은 예외 타입 · 스택을 응답에 싣지 않고 로그에만 남긴다 — 로그에도 원인 사슬의 메시지는 없다 (#280)")
+    void causeTypeAndStackStayInLog(CapturedOutput output) throws Exception {
         MockHttpServletRequest request = errorDispatch(500);
-        request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, new IllegalStateException("password=secret"));
+        request.setAttribute(RequestDispatcher.ERROR_EXCEPTION,
+            new IllegalStateException("password=secret", new IllegalArgumentException("Key (email)=(member@example.com) already exists")));
 
         MockHttpServletResponse response = handle(request);
 
         assertEnvelope(response, 500, "COMMON_000");
         assertThat(response.getContentAsString()).doesNotContain("password=secret").doesNotContain("IllegalStateException").doesNotContain("trace");
-        assertThat(output).contains("unhandled exception answered by error page envelope").contains("password=secret");
+        assertThat(output).contains("unhandled exception answered by error page envelope")
+            .contains(IllegalStateException.class.getName()).contains(IllegalArgumentException.class.getName())
+            .contains("\tat " + FallbackErrorControllerTest.class.getName() + ".causeTypeAndStackStayInLog")
+            .doesNotContain("password=secret").doesNotContain("member@example.com");
+    }
+
+    @Test
+    @DisplayName("오류가 아닌 상태로 온 오류 페이지의 원인 로그에도 메시지가 없다")
+    void nonErrorStatusCauseIsRedacted(CapturedOutput output) throws Exception {
+        MockHttpServletRequest request = errorDispatch(200);
+        request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, new IllegalStateException("password=secret"));
+
+        handle(request);
+
+        assertThat(output).contains("error page reached with non-error status").contains(IllegalStateException.class.getName())
+            .doesNotContain("password=secret");
     }
 
     @Test

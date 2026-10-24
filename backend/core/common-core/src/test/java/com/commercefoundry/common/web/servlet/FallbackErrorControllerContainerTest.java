@@ -14,6 +14,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,6 +45,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 class FallbackErrorControllerContainerTest {
 
     private static final HttpClient CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    /** 다음 로그 줄의 시작 — 줄바꿈 뒤 ISO 타임스탬프(Boot 기본 콘솔 패턴). */
+    private static final Pattern NEXT_LOG_LINE = Pattern.compile("\\R\\d{4}-\\d{2}-\\d{2}T");
 
     @Value("${local.server.port}")
     private int port;
@@ -58,15 +62,28 @@ class FallbackErrorControllerContainerTest {
     }
 
     @Test
-    @DisplayName("필터가 던진 예외는 500 · COMMON_000 봉투이고 원인을 응답에 싣지 않는다 — 로그에는 원인과 가린 경로가 남는다")
+    @DisplayName("필터가 던진 예외는 500 · COMMON_000 봉투이고 원인을 응답에 싣지 않는다 — 이 컨트롤러의 로그에는 원인 타입 · 스택과 가린 경로만 남고 메시지는 없다")
     void filterException(CapturedOutput output) throws Exception {
         String path = ThrowingFilter.FAILURE_PATH + "/4611686018427387904";
         HttpResponse<byte[]> response = send(port, "GET", path, null);
 
         assertEnvelope(response, path, 500, CommonErrorCode.INTERNAL_ERROR);
         assertThat(new String(response.body())).doesNotContain(ThrowingFilter.FAILURE_DETAIL).doesNotContain("IllegalStateException");
-        assertThat(output).contains("unhandled exception answered by error page envelope").contains(ThrowingFilter.FAILURE_DETAIL)
-            .contains("path=/container-smoke/failure/x/…").doesNotContain("4611686018427387904");
+        assertThat(output).doesNotContain("4611686018427387904");
+        // 출력 전체가 아니라 이 컨트롤러의 로그 항목(다음 로그 줄 전까지)만 본다. Tomcat 은 에러 디스패치 전에 원래 예외를 자기 로거로 한 번 남긴다 —
+        // 그 줄은 이 컨트롤러 밖이다 (#283)
+        assertThat(logEntry(output, "unhandled exception answered by error page envelope"))
+            .contains("path=/container-smoke/failure/x/…").contains(IllegalStateException.class.getName()).contains("ThrowingFilter.doFilterInternal")
+            .doesNotContain(ThrowingFilter.FAILURE_DETAIL).doesNotContain("password=container-smoke").doesNotContain("db.internal");
+    }
+
+    /** {@code message} 로 시작하는 로그 항목 — 그 줄부터 다음 로그 줄(타임스탬프로 시작) 전까지, 즉 이어 찍힌 스택까지다. */
+    private static String logEntry(CapturedOutput output, String message) {
+        String all = output.getAll();
+        int start = all.indexOf(message);
+        assertThat(start).as("로그 항목이 캡처돼야 한다: %s", message).isNotNegative();
+        Matcher next = NEXT_LOG_LINE.matcher(all);
+        return next.find(start) ? all.substring(start, next.start()) : all.substring(start);
     }
 
     @Test
