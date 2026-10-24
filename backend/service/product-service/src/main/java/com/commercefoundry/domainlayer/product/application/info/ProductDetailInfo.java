@@ -8,7 +8,7 @@ import lombok.Builder;
 /**
  * 고객 상품 상세.
  *
- * @param categoryPath 대표 카테고리의 최상위 → 대상 경로 중 보이는 카테고리
+ * @param categoryPath 대표 카테고리의 최상위 → 대상 경로 중 메뉴에서 닿는 부분 (처음 숨긴 카테고리에서 끊긴다, #164)
  * @param thumbnail 대표 이미지. 없으면 null
  * @param images 갤러리 이미지 — 노출 순서 → 아이디 오름차순
  * @param maxQuantityPerOrder 1회 주문 최대 수량. null 이면 제한 없음

@@ -67,7 +67,8 @@ public class ProductDetailProcessor {
     }
 
     /**
-     * @param categoryPath 대표 카테고리의 보이는 경로 ({@code CategoryProcessor#visiblePathOf} — Facade 가 넘긴다). 대표 카테고리가 없는 데이터 오류면 빈 목록
+     * @param categoryPath 대표 카테고리 경로 중 메뉴에서 닿는 부분 — 처음 숨긴 카테고리에서 끊긴다 ({@code CategoryProcessor#visiblePathOf} — Facade 가 넘긴다, #164).
+     *                     대표 카테고리가 없는 데이터 오류 · 최상위가 숨김이면 빈 목록
      */
     public ProductDetailInfo getDetail(Product product, List<Category> categoryPath) {
         List<OptionGroup> groups = productOptionRepositoryPort.findGroupsByProductId(product.id());
