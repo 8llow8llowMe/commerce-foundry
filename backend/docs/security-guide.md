@@ -873,9 +873,9 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
   - **`CUSTOMER_EXISTS` warn 은 경보로 받는다.** 정상 배포에서는 나지 않고, 나면 관리자 계정이 만들어지지 않은 채 기동한 것이다(누군가 그 이메일을 선점했을 수 있다).
 - 관리자 추가 · 비밀번호 변경 API 는 아직 없다(후속).
 
-### 11-4. 관리자 감사 로그 (1단계 — 공통 방식)
+### 11-4. 관리자 감사 로그 (공통 방식 · auth 영속화 #192)
 
-관리자 행위는 **구조화된 감사 로그 한 줄**로 남긴다. DB 감사 테이블 · 보관 정책 · 조회 화면은 후속이다(그때 포트 구현만 바꾼다).
+관리자 행위는 **구조화된 감사 로그 한 줄**로 남긴다. auth-service 는 같은 네 칸을 DB(`auth.admin_audit_log`)에도 남기고 조회 API 를 연다 (#192, 아래 "영속화").
 
 ```text
 action=ADMIN_LOGIN actorMemberId=- target=member:4611686018427387904 result=FAILURE
@@ -894,6 +894,24 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   (ArchUnit H11 — Facade 는 out-port 를 쓰지 않는다). 업무가 끝난 뒤(트랜잭션 밖) 부르고, 실패 로그의 대상 선택 같은 감사 정책도 Processor 에 둔다.
   어댑터는 `adapter/out/log/*AuditLogAdapter` 다.
   다른 서비스도 어드민 쓰기 API 를 만들 때 같은 로거 이름 · 칸으로 남긴다. 업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 등)는 그 이력이 감사의 정본이다.
+- **영속화 (auth-service, #192)** — `AdminAuditPort` 계약은 그대로이고 구현이 `adapter/out/persistence/AdminAuditLogRepositoryAdapter` 다.
+  - 순서: `admin.audit` 로그 한 줄(`AdminAuditLogAdapter`)을 **먼저** 남기고 `auth.admin_audit_log` 에 한 행을 더한다. 칸 값은 `AdminAuditRecord` 팩토리 한 곳에서 만든다 —
+    로그 줄과 행이 같은 값이다. 로그 어댑터는 지우지 않는다(수집기 형식 · 다른 서비스와 같은 줄 · DB 장애 때의 증거).
+  - DB 쓰기는 `REQUIRES_NEW` 짧은 트랜잭션이고 예외는 그 바깥에서 삼킨다 — 감사 저장 실패가 로그인 · 조회 응답을 바꾸지 않는다(로그인 실패 응답이 달라지면
+    계정 존재가 드러난다). 실패하면 error 한 줄(행위 · 관리자만)을 남기고 그 기간은 로그 줄이 정본이다. 뒷날 업무 트랜잭션 안에서 불려도 업무를 rollback-only 로
+    만들지 않고, 업무가 롤백돼도 감사 행은 남는다. 단 업무 트랜잭션 안에서 부르면 스레드가 커넥션 2개를 잡는다 — 지금 호출자는 모두 트랜잭션 밖이다.
+  - **행위자도 대상도 없는 기록은 행을 만들지 않는다** — 없는 이메일 · 고객 계정으로 관리자 로그인에 실패하면 로그 한 줄(`target=-`)만 남는다.
+    인증 전 요청이라 이메일을 바꿔 가며 반복하면 행이 끝없이 쌓이기 때문이다. 노린 관리자 계정이 있는 실패(`target=member:<id>`)는 행으로 남는다.
+  - 테이블은 append-only 이고 개인정보가 없다 — 행위 · 관리자 memberId(모르면 null) · 대상 · 결과 · 시각. 엔티티는 `@Immutable`, 리포지토리는 `JpaRepository` 가 아니라
+    `Repository` 를 상속해 `saveAndFlush` 와 조회만 연다(삭제 메서드 없음). 운영 DB 앱 계정에는 이 테이블의 INSERT · SELECT 만 주고 UPDATE · DELETE 는 주지 않는다
+    (정리 스케줄러가 생길 때 DELETE 를 따로 준다). 행위는 문자열 칼럼이다(행위를 더할 때 check 제약 DDL 이 생기지 않게). 결과만 check 로 막는다.
+  - **보관 기간은 2년**으로 정한다 — 개인정보의 안전성 확보조치 기준의 접속기록 **최소** 보관 기간(1년, 대규모 · 고유식별 · 민감정보를 처리하면 2년)을 넉넉히 덮는다.
+    다만 이 테이블은 접속지(IP) · 처리한 정보주체 칸이 없어 그 기준의 접속기록 요건을 혼자 채우지 않는다(후속). 지난 행을 지우는 정리 스케줄러도 후속이다 —
+    2년 안에는 지울 행이 없고, Snowflake 아이디에 시각이 있어 `id < 컷오프 아이디` 범위로 지우면 `created_at` 인덱스가 필요 없다.
+  - **남은 위험** — 관리자 로그인에는 아직 시도 제한이 없다(#66). 노린 관리자 계정이 있는 실패는 반복하면 행이 늘어난다. #66 이 관리자 로그인을 대상으로 삼을 때
+    IP 단위 제한도 함께 본다.
+  - 조회는 `GET /api/v1/admin/audit-logs`(ADMIN, `api-design-guide.md` §2-4). 이 조회 자체는 감사하지 않는다 — 행에 개인정보가 없고, 남기면 조회마다 행이 늘어난다.
+  - 다른 서비스(operations `JOB_CANCEL` 등)는 지금 로그 한 줄만 남긴다. DB 영속화를 서비스마다 어떻게 둘지(서비스별 같은 모양 테이블 · core 공유 안 함 권고)는 #163 에서 정한다.
 - **서비스 전용 이력 테이블 사례 — delivery-service 배송비 정책 교체 이력 (#69).** 어드민 공통 감사 로그(DB)가 아직 없어 `delivery.shipping_policy_history`
   (+ 구간 스냅숏 `shipping_policy_history_area`)에 교체 전 · 후 값 · 교체한 관리자(`admin_member_id` — access 토큰의 memberId, 본문 값을 쓰지 않는다) · 시각을 남긴다.
   교체와 **같은 트랜잭션**이라 이력 저장이 실패하면 교체도 롤백된다 — 기록 없는 변경이 생기지 않는다(로그 한 줄 방식은 트랜잭션 밖이라 이 보장이 없다).

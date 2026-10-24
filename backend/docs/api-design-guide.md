@@ -25,7 +25,7 @@
 
 | 서비스 | 고객 | 어드민 |
 |--------|------|--------|
-| auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**` |
+| auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**`, `/api/v1/admin/audit-logs/**` |
 | product-service | `/api/v1/categories/**`, `/api/v1/products/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**` |
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
@@ -225,6 +225,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/auth/logout` | `isAuthenticated()` | 200 `dataBody: null` — 본문 `{refreshToken?}`(본문 생략 가능). 모르는 · 남의 refresh 여도 access 는 막고 200(멱등) | 401 `SECURITY_001` · 503 `AUTH_013` |
 | `POST /api/v1/auth/admin/login` (#6) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. refresh 없음 | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` |
 | `GET /api/v1/admin/members` (#6) | `hasRole('ADMIN')` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `GET /api/v1/admin/audit-logs` (#192) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, target, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 
 토큰 쌍 (로그인 · 재발급 공통, #4 결정 1 — 전달은 응답 본문이고 쿠키는 BFF 가 만든다)
 
@@ -337,6 +338,14 @@ return ResponseEntity.ok().body(Response.success(response));
 | `email` | 아이디 앞 2자(2자면 1자, 1자면 0자) + `***` + `@` + 도메인 첫 글자 + `***` + 마지막 점부터(최상위 도메인). `@` 가 없는 이관 값은 앞 1자 + `***` | `customer@example.com` → `cu***@e***.com` |
 | `name` | 3자 이상은 첫 글자 + `*` + 마지막 글자(별은 하나 — 길이를 드러내지 않는다), 2자는 첫 글자 + `*`, 1자는 `*`. 코드 포인트로 센다 | `홍길동` → `홍*동`, `남궁민수` → `남*수` |
 | `phone` | 앞 3자리 + `-****-` + 끝 4자리. 7자 미만 이관 값은 `****`, 없으면 `null` | `01012345678` → `010-****-5678` |
+
+어드민 감사 로그 조회 (#192) — `GET /api/v1/admin/audit-logs`
+
+- `action`(선택, `ADMIN_LOGIN` · `MEMBER_SEARCH`, 틀리면 198) · `actorMemberId`(선택, 양수 — 135) · `page` · `size`(회원 조회와 같은 133 · 134).
+  정렬은 최신순 하나(감사 로그 아이디 내림차순)라 `sortType` 이 없다. 조건 조합마다 파생 쿼리 하나이고 `(action, id)` · `(actor_member_id, id)` 인덱스를 탄다.
+- 항목 `{auditLogId(string), action, actorMemberId(string | null), target(string | null), result, createdAt}` — 값은 `admin.audit` 로그 한 줄과 같고
+  개인정보가 없어 마스킹하지 않는다. 로그인 실패는 행위자를 모르므로 `actorMemberId` 가 null 이고 노린 관리자 계정이 `target` 에 남는다.
+- 이 조회 자체는 감사하지 않는다 — 행에 개인정보가 없고, 남기면 조회마다 행이 늘어난다. 기록 방식은 `security-guide.md` §11-4.
 
 ### 2-5. 어드민 카테고리 관리 (product-service, #9)
 
