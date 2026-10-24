@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCod
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.port.out.query.ShippingFeeQuoteQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.ShippingFeeQuote;
+import com.commercefoundry.global.support.RemoteResultCodes;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.shared.commerce.ShippingScope;
@@ -18,7 +19,6 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
@@ -36,7 +36,7 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>그 밖의 4xx — 모르는 코드(본문 검증 {@code DELIVERY_1xx} 등 우리 요청 문제) · 본문을 읽지 못함 · 401 {@code SECURITY_007}(서비스 토큰 비밀 · 서비스 ID 설정 문제라
  *       재시도로 풀리지 않는다, {@code security-guide.md} §9-5) · 403(허용 호출자) — 은 error 로그를 남기고 503 {@code ORDER_011} 이다.</li>
  *   <li>{@code ErrorDecoder} 를 쓰지 않는다 — 예외 타입이 바뀌면 {@code ignore-exceptions} 도 같이 바꿔야 한다.</li>
- *   <li>로그에는 status · resultCode · 예외 타입만 남긴다. resultCode 는 코드 모양일 때만 그대로 남기고 아니면 {@value #UNRECOGNIZED_RESULT_CODE} 다 —
+ *   <li>로그에는 status · resultCode · 예외 타입만 남긴다. resultCode 는 코드 모양일 때만 그대로 남기고 아니면 {@code <unrecognized>} 다({@link RemoteResultCodes}) —
  *       원격의 임의 문자열(CR/LF · 긴 값)을 로그에 넣지 않는다. 요청 본문(우편번호 — 배송지 일부)과 응답 본문은 남기지 않는다 ({@code coding-conventions.md} §8).
  *       원인 예외({@code FeignException})의 메시지에는 delivery 응답 본문(최대 200자)이 들어 있으므로, 이 클래스가 던진 {@code OrderException} 을 받는 핸들러는
  *       원인 예외를 throwable 로 로그하지 않는다(코드 · 원인 타입만).</li>
@@ -51,14 +51,6 @@ import tools.jackson.databind.json.JsonMapper;
 public class ShippingFeeInternalResponseSupport {
 
     static final String CIRCUIT_BREAKER = "delivery-service";
-    static final String UNRECOGNIZED_RESULT_CODE = "<unrecognized>";
-
-    /**
-     * 로그에 그대로 남기는 resultCode 의 모양 — common-core {@code ValidationErrorSupport} 의 코드 판정({@code DOMAIN_NNN})과 같다.
-     * 그쪽 판정은 private 이라 가져다 쓰지 않고 같은 식을 둔다.
-     */
-    private static final Pattern RESULT_CODE_SHAPE = Pattern.compile("[A-Z][A-Z0-9_]*_[0-9]{3}");
-    private static final int MAX_LOGGED_RESULT_CODE_LENGTH = 40;
 
     /**
      * delivery 의 업무 거절 중 주문 계약으로 번역하는 것. 여기 없는 4xx 는 우리 요청 · 설정 문제라 503 이다.
@@ -109,7 +101,7 @@ public class ShippingFeeInternalResponseSupport {
     public ShippingFeeQuoteQueryResult toShippingFeeQuoteResult(Response<ShippingFeeQuoteInternalResponse> response, Money orderAmount, String countryCode) {
         if (response == null || response.dataHeader() == null || !response.dataHeader().success() || response.dataBody() == null) {
             log.error("delivery-service quote response is not a success envelope. resultCode={}",
-                response == null || response.dataHeader() == null ? null : loggableResultCode(response.dataHeader().resultCode()));
+                response == null || response.dataHeader() == null ? null : RemoteResultCodes.loggable(response.dataHeader().resultCode()));
             throw new OrderException(OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
         }
         try {
@@ -128,23 +120,11 @@ public class ShippingFeeInternalResponseSupport {
         }
     }
 
-    /**
-     * 원격이 보낸 resultCode 를 로그에 넣을 값으로 바꾼다. 코드 모양({@code [A-Z][A-Z0-9_]*_[0-9]{3}}, 40자 이하)일 때만 그대로이고,
-     * 아니면(CR/LF · 긴 값 · 임의 문자열) {@value #UNRECOGNIZED_RESULT_CODE} 다. 코드가 없으면(본문 없음 · JSON 아님) null 그대로다 — 원격 문자열이 아니다.
-     */
-    static String loggableResultCode(String resultCode) {
-        if (resultCode == null) {
-            return null;
-        }
-        return resultCode.length() <= MAX_LOGGED_RESULT_CODE_LENGTH && RESULT_CODE_SHAPE.matcher(resultCode).matches()
-            ? resultCode : UNRECOGNIZED_RESULT_CODE;
-    }
-
     private OrderException translateRejection(FeignException.FeignClientException exception) {
         String resultCode = resultCodeOf(exception);
         OrderErrorCode errorCode = resultCode == null ? null : TRANSLATED_REJECTIONS.get(resultCode);
         if (errorCode == null) {
-            log.error("delivery-service rejected internal request. status={}, resultCode={}", exception.status(), loggableResultCode(resultCode));
+            log.error("delivery-service rejected internal request. status={}, resultCode={}", exception.status(), RemoteResultCodes.loggable(resultCode));
             return new OrderException(OrderErrorCode.DELIVERY_SERVICE_UNAVAILABLE, exception);
         }
         if (errorCode == OrderErrorCode.SHIPPING_UNAVAILABLE) {

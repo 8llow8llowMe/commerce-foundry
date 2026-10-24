@@ -363,29 +363,6 @@ class ShippingFeeInternalResponseSupportTest {
     @DisplayName("로그에 남기는 resultCode")
     class LoggedResultCode {
 
-        @ParameterizedTest(name = "{0}")
-        @ValueSource(strings = {"DELIVERY_118", "SECURITY_007", "COMMON_005", "A_000"})
-        @DisplayName("코드 모양이면 그대로 남긴다")
-        void keepsCodeShape(String resultCode) {
-            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode(resultCode)).isEqualTo(resultCode);
-        }
-
-        @ParameterizedTest(name = "[{0}]")
-        @ValueSource(strings = {"", " ", "delivery_118", "DELIVERY_1", "DELIVERY-118", "DELIVERY_118 ", "DELIVERY_118\r\nINJECTED level=ERROR", "<script>", "배송_118"})
-        @DisplayName("코드 모양이 아니면(CR/LF · 소문자 · 임의 문자열) <unrecognized> 다")
-        void replacesOtherStrings(String resultCode) {
-            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode(resultCode)).isEqualTo(ShippingFeeInternalResponseSupport.UNRECOGNIZED_RESULT_CODE);
-        }
-
-        @Test
-        @DisplayName("코드 모양이어도 40자를 넘으면 <unrecognized> 다 — 긴 값을 로그에 넣지 않는다. 코드가 없으면 null 그대로다")
-        void longOrAbsent() {
-            String forty = "D".repeat(36) + "_001";
-            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode(forty)).isEqualTo(forty);
-            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode("D" + forty)).isEqualTo(ShippingFeeInternalResponseSupport.UNRECOGNIZED_RESULT_CODE);
-            assertThat(ShippingFeeInternalResponseSupport.loggableResultCode(null)).isNull();
-        }
-
         @Test
         @DisplayName("모르는 4xx 의 resultCode 에 CR/LF 가 들어 있어도 로그에 그대로 들어가지 않는다")
         void unknownRejectionLogIsSanitized(CapturedOutput output) {

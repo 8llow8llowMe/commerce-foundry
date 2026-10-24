@@ -29,8 +29,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 class ProductInternalResponseSupportTest {
 
@@ -162,6 +165,20 @@ class ProductInternalResponseSupportTest {
                     assertThat(result.weightGrams()).isNull();
                     assertThat(result.hsCode()).isNull();
                 });
+        }
+
+        @Test
+        @ExtendWith(OutputCaptureExtension.class)
+        @DisplayName("실패 봉투의 resultCode 는 코드 모양일 때만 로그에 남는다 — CR/LF · 긴 값은 <unrecognized> 로 바뀐다 (#281)")
+        void notSuccessEnvelopeLogIsSanitized(CapturedOutput output) {
+            String longCode = "P".repeat(37) + "_104";
+            assertUnavailable(() -> support.toSkuQueryResults(Response.fail("PRODUCT_104\r\nINJECTED fake log line", "x")));
+            assertUnavailable(() -> support.toSkuQueryResults(Response.fail(longCode, "x")));
+            assertUnavailable(() -> support.toSkuQueryResults(Response.fail("PRODUCT_104", "x")));
+
+            assertThat(output.getOut())
+                .contains("resultCode=<unrecognized>", "resultCode=PRODUCT_104")
+                .doesNotContain("INJECTED", longCode);
         }
 
         @Test
