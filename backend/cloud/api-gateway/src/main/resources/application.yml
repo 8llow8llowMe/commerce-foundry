@@ -153,3 +153,6 @@ logging:
     # Redis 장애 때 Spring Cloud Gateway 의 RedisRateLimiter 가 요청마다 스택과 함께 error 를 남긴다 (오류는 삼키고 허용한다).
     # 그 신호는 RedisBucketRateLimiter 가 장애로 바꿔 GatewayRateLimitFilter 가 1분에 한 번 warn 으로 남기므로 프레임워크 로그는 끈다 (security-guide.md §7-3)
     org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter: OFF
+    # 응답이 커밋된 뒤의 오류를 원래 예외 메시지 · 원문 경로 · 쿼리째 ERROR 로 찍는다("Error [...] for HTTP GET \"/path?query\", but ServerHttpResponse already committed").
+    # GatewayErrorWebExceptionHandler 가 먼저 가린 한 줄(경로 앞 3구간 · 예외 타입과 프레임)을 남기므로 끈다 (coding-conventions.md §8, #285)
+    org.springframework.web.server.adapter.HttpWebHandlerAdapter: OFF

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
+import com.commercefoundry.apigateway.log.GatewayLogRedaction;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
@@ -13,9 +14,12 @@ import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.cloud.gateway.support.NotFoundException;
 import org.springframework.cloud.gateway.support.TimeoutException;
 import org.springframework.http.HttpMethod;
@@ -113,6 +117,49 @@ class GatewayErrorWebExceptionHandlerTest {
         IllegalStateException ex = new IllegalStateException("after commit");
 
         assertThatThrownBy(() -> handler.handle(exchange, ex).block(TIMEOUT)).isSameAs(ex);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("커밋 뒤 오류도 가린 한 줄을 남긴다 — 예외 메시지 · 넷째 구간 이후 경로 없이 타입 · 프레임만")
+    void redactsCommittedFailureLog(CapturedOutput output) {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/orders/ORDER-SECRET-123?paymentKey=MARKER-QUERY"));
+        exchange.getResponse().setComplete().block(TIMEOUT);
+        IllegalStateException ex = new IllegalStateException("stream broken MARKER-BODY");
+
+        assertThatThrownBy(() -> handler.handle(exchange, ex).block(TIMEOUT)).isSameAs(ex);
+
+        assertThat(output.getOut())
+            .contains("gateway response failed after commit", "path=/api/v1/orders/…", GatewayLogRedaction.class.getName() + "$Redacted: java.lang.IllegalStateException")
+            .doesNotContain("MARKER-BODY", "MARKER-QUERY", "ORDER-SECRET-123");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("500 로그에는 예외 메시지 · 넷째 구간 이후 경로가 없고, 예외 타입 · 스택 프레임 · 가린 경로는 남는다")
+    void redactsUnexpectedFailureLog(CapturedOutput output) {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/orders/ORDER-SECRET-123;jsessionid=abc"));
+        IllegalStateException ex = new IllegalStateException("header Authorization=Bearer MARKER-TOKEN", new IllegalArgumentException("body MARKER-BODY"));
+
+        handler.handle(exchange, ex).block(TIMEOUT);
+
+        assertThat(output.getOut())
+            .contains("status=500", "path=/api/v1/orders/…", "exception=java.lang.IllegalStateException")
+            .contains(GatewayLogRedaction.class.getName() + "$Redacted: java.lang.IllegalStateException")
+            .contains("Caused by: " + GatewayLogRedaction.class.getName() + "$Redacted: java.lang.IllegalArgumentException")
+            .contains("at " + GatewayErrorWebExceptionHandlerTest.class.getName() + ".redactsUnexpectedFailureLog")
+            .doesNotContain("MARKER-TOKEN", "MARKER-BODY", "ORDER-SECRET-123", "jsessionid");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("502 · 503 · 504 로그도 경로를 가린다")
+    void masksPathForUpstreamFailures(CapturedOutput output) {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/orders/ORDER-SECRET-123/cancel"));
+
+        handler.handle(exchange, new ConnectException("Connection refused 10.0.0.12")).block(TIMEOUT);
+
+        assertThat(output.getOut()).contains("status=503", "path=/api/v1/orders/…").doesNotContain("ORDER-SECRET-123", "10.0.0.12");
     }
 
     private static MockServerWebExchange exchange() {
