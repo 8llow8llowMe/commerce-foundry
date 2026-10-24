@@ -20,6 +20,7 @@ public final class CartValidationMessage {
     public static final String ITEMS_REQUIRED = "CART_112:items 는 필수입니다.";
     public static final String ITEMS_SIZE_MAX = "CART_113:items 는 최대 50개입니다.";
     public static final String ITEM_REQUIRED = "CART_114:items 의 항목은 비어 있을 수 없습니다.";
+    public static final String VALUE_INVALID_CHARACTER = "CART_115:value 에는 제어 문자(NUL · 개행 · 탭 등)나 깨진 문자를 쓸 수 없습니다.";
 
     private CartValidationMessage() {
     }
