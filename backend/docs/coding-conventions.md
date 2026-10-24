@@ -112,13 +112,18 @@ public record ProductDetailResponse(
   - 로깅 레벨 · `hibernate.jdbc.log.errors` 로 끄지 않는다 — 다른 SQL 오류의 진단까지 사라진다.
   - dev · 운영에서 `org.hibernate.orm.jdbc.bind` · `org.postgresql` TRACE 와 show-sql 바인드 출력을 켜지 않는다 — 이 옵션과 상관없이 바인드 값 · DETAIL 이 남는다.
 - 사용자 노출 메시지와 내부 로그 메시지는 분리한다.
-- **처리되지 않은 5xx 의 로그 기준 (#280).** 남기는 것: 오류 코드 · 상태 · 메서드 · 가린 경로(앞 3구간) · 원인 사슬의 **예외 타입과 스택 프레임** ·
-  `SQLException` 의 SQLState. 남기지 않는 것: 원인 사슬 어디의 **예외 메시지**든 — DB 행 값(DETAIL) · Feign 대상 응답 본문 · 요청 값이 들어 있다.
+- **5xx 의 원인을 로그에 남기는 기준 (#280).** 처리되지 않은 500 이든 도메인 핸들러가 번역한 5xx 든 같다.
+  남기는 것: 오류 코드 · 상태 · 메서드 · 가린 경로(앞 3구간) · 원인 사슬의 **예외 타입과 스택 프레임** · `SQLException` 의 SQLState(표준 5자리 모양일 때만).
+  남기지 않는 것: 원인 사슬 어디의 **예외 메시지**든 — DB 행 값(DETAIL) · Feign 대상 응답 본문 · 요청 값이 들어 있다.
   - 예외를 로그 인자로 넘겨야 하면 원래 예외 대신 common-core `RedactedThrowable.of(exception)` 을 넘긴다 — 타입 · 프레임 · SQLState 만 남은 사본이다.
-    공통 폴백(`FallbackErrorResolver` · `FallbackErrorController`)이 이렇게 남긴다.
+    공통 폴백(`FallbackErrorResolver` · `FallbackErrorController`)이 이렇게 남긴다. 스택이 필요 없으면 원인 타입 이름만 남긴다(도메인 핸들러의 `causeType`).
   - 미지의 500 은 로그의 타입 · 프레임(어느 클래스 · 줄에서 났는지)과 코드 · 경로 · 시각으로 좁힌다. 값이 필요하면 재현으로 확인한다 — 로그에 값을 남겨 풀지 않는다.
     요청 상관 id 는 아직 없다 — 같은 요청의 로그 줄은 시각 · 스레드로 묶는다(#284).
+  - 받아들인 손실: 값이 없는 JDK 메시지(Helpful NPE 의 "because ... is null" 등)도 함께 버린다 — 한 줄에 역참조가 여럿이면 줄 번호만으로 좁히지 못한다.
+    스택을 끈 예외는 타입만 남는다. 로그 이벤트의 예외 클래스는 언제나 `RedactedThrowable` 이고 원래 타입은 메시지 자리에 있다 —
+    예외 타입으로 묶는 수집 도구(Sentry · OTel appender 등)를 붙이면 원래 타입을 키로 매핑해야 한다.
   - 남은 경로: 필터 단계 예외는 에러 디스패치 전에 Tomcat(`StandardWrapperValve`)이 원래 예외를 자기 로거로 한 번 남긴다 — 폴백 밖이다(#283).
+    게이트웨이 500 로그는 원래 예외 · 원문 경로를 남긴다(#285).
 
 ### 8-1. 예외 패턴 (필수)
 
