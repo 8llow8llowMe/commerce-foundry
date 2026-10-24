@@ -18,6 +18,7 @@ import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationP
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationResult;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import com.commercefoundry.security.support.TestTokens;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
@@ -41,7 +42,7 @@ class RefreshTokenRedisAdapterArgumentsTest {
     private static final String FAMILY_ID = "3f2b8f2e-6a0e-4a52-9a43-2f7f8a3b1c11";
 
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-    private final RefreshTokenRedisAdapter adapter = new RefreshTokenRedisAdapter(redisTemplate);
+    private final RefreshTokenRedisAdapter adapter = new RefreshTokenRedisAdapter(redisTemplate, new TokenStoreRedisSupport(Clock.systemUTC()));
 
     @Test
     @DisplayName("로그인 저장 — KEYS [토큰, family], ARGV [memberId, familyId, TTL ms, 로그인 시각 ms]")
@@ -162,7 +163,7 @@ class RefreshTokenRedisAdapterArgumentsTest {
         given(redisTemplate.opsForValue()).willReturn(values);
         String jti = UUID.randomUUID().toString();
 
-        new AccessTokenRevocationRedisAdapter(redisTemplate, TestTokens.verification()).revoke(jti);
+        new AccessTokenRevocationRedisAdapter(redisTemplate, TestTokens.verification(), new TokenStoreRedisSupport(Clock.systemUTC())).revoke(jti);
 
         verify(values).set("auth:revoked-access-token:" + jti, "1", Duration.ofMinutes(61));
     }

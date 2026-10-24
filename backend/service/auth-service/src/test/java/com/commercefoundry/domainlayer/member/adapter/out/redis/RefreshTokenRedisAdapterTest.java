@@ -12,6 +12,7 @@ import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenSession;
 import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -76,7 +77,7 @@ class RefreshTokenRedisAdapterTest {
 
     @BeforeEach
     void setUp() {
-        adapter = new RefreshTokenRedisAdapter(redisTemplate);
+        adapter = new RefreshTokenRedisAdapter(redisTemplate, new TokenStoreRedisSupport(Clock.systemUTC()));
     }
 
     @Test
@@ -428,7 +429,7 @@ class RefreshTokenRedisAdapterTest {
     void revokeAccessToken() {
         String jti = UUID.randomUUID().toString();
 
-        new AccessTokenRevocationRedisAdapter(redisTemplate, TestTokens.verification()).revoke(jti);
+        new AccessTokenRevocationRedisAdapter(redisTemplate, TestTokens.verification(), new TokenStoreRedisSupport(Clock.systemUTC())).revoke(jti);
 
         assertThat(redisTemplate.opsForValue().get("auth:revoked-access-token:" + jti)).isEqualTo("1");
         assertTtlAbout("auth:revoked-access-token:" + jti, Duration.ofMinutes(61));
@@ -439,7 +440,7 @@ class RefreshTokenRedisAdapterTest {
     void wrongPasswordBecomesUnavailable() {
         LettuceConnectionFactory wrong = connectionFactory("wrong-password");
         try {
-            RefreshTokenRedisAdapter failing = new RefreshTokenRedisAdapter(new StringRedisTemplate(wrong));
+            RefreshTokenRedisAdapter failing = new RefreshTokenRedisAdapter(new StringRedisTemplate(wrong), new TokenStoreRedisSupport(Clock.systemUTC()));
 
             assertThatThrownBy(() -> failing.revokeFamily(familyId()))
                 .isInstanceOf(MemberException.class)
