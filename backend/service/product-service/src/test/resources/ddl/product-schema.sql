@@ -35,6 +35,136 @@
     comment on column product.category.visible is
         '스토어프론트 노출 여부';
 
+    create table product.display_item (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        alt_text varchar(200),
+        caption varchar(200),
+        display_order integer not null,
+        item_type varchar(20) not null check ((item_type in ('MEDIA','PRODUCT'))),
+        media_type varchar(20) check ((media_type in ('IMAGE','VIDEO'))),
+        mobile_poster_url varchar(500),
+        mobile_url varchar(500),
+        pc_poster_url varchar(500),
+        pc_url varchar(500),
+        product_id bigint,
+        section_id bigint not null,
+        primary key (id),
+        constraint uk_display_item_section_id_display_order unique (section_id, display_order),
+        constraint ck_display_item_media_fields check (item_type <> 'MEDIA' or (media_type is not null and pc_url is not null and product_id is null)),
+        constraint ck_display_item_product_fields check (item_type <> 'PRODUCT' or (product_id is not null and media_type is null and pc_url is null and mobile_url is null and pc_poster_url is null and mobile_poster_url is null and alt_text is null)),
+        constraint ck_display_item_video_poster check (media_type is null or (media_type = 'VIDEO' and pc_poster_url is not null) or (media_type = 'IMAGE' and pc_poster_url is null and mobile_poster_url is null)),
+        constraint ck_display_item_display_order_non_negative check (display_order >= 0)
+    );
+
+    comment on table product.display_item is
+        '메인 전시 아이템 (미디어 또는 상품)';
+
+    comment on column product.display_item.id is
+        '전시 아이템 아이디 (Snowflake). 섹션 수정마다 새로 발급한다';
+
+    comment on column product.display_item.created_at is
+        '생성 시각';
+
+    comment on column product.display_item.updated_at is
+        '수정 시각';
+
+    comment on column product.display_item.alt_text is
+        '미디어 대체 텍스트';
+
+    comment on column product.display_item.caption is
+        '아이템 설명 문구';
+
+    comment on column product.display_item.display_order is
+        '섹션 안의 순서 (0 부터, 오름차순)';
+
+    comment on column product.display_item.item_type is
+        '아이템 유형 (MEDIA · PRODUCT)';
+
+    comment on column product.display_item.media_type is
+        '미디어 종류 (IMAGE · VIDEO). 미디어 아이템만';
+
+    comment on column product.display_item.mobile_poster_url is
+        '영상 포스터 (모바일). 없으면 PC 포스터를 쓴다';
+
+    comment on column product.display_item.mobile_url is
+        '모바일 미디어 주소. 없으면 PC 주소를 쓴다';
+
+    comment on column product.display_item.pc_poster_url is
+        '영상 포스터 (PC). 영상이면 필수';
+
+    comment on column product.display_item.pc_url is
+        'PC 미디어 주소. 미디어 아이템만';
+
+    comment on column product.display_item.product_id is
+        '상품 아이디 (FK: product.id). 상품 아이템만';
+
+    comment on column product.display_item.section_id is
+        '전시 섹션 아이디 (FK: display_section.id)';
+
+    create table product.display_section (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        body text,
+        display_order integer not null,
+        end_at timestamp(6) with time zone,
+        link_label varchar(50),
+        link_url varchar(500),
+        section_type varchar(20) not null check ((section_type in ('HERO','PRODUCT_PICK','STORY','LOOK','DETAIL'))),
+        start_at timestamp(6) with time zone,
+        subtitle varchar(200),
+        title varchar(200),
+        visible boolean not null,
+        primary key (id),
+        constraint ck_display_section_period check (end_at is null or start_at is null or end_at > start_at),
+        constraint ck_display_section_body_length check (body is null or char_length(body) <= 2000),
+        constraint ck_display_section_display_order_non_negative check (display_order >= 0)
+    );
+
+    comment on table product.display_section is
+        '메인 전시 섹션';
+
+    comment on column product.display_section.id is
+        '전시 섹션 아이디 (Snowflake)';
+
+    comment on column product.display_section.created_at is
+        '생성 시각';
+
+    comment on column product.display_section.updated_at is
+        '수정 시각';
+
+    comment on column product.display_section.body is
+        '본문 (개행 허용, 2000자 이하)';
+
+    comment on column product.display_section.display_order is
+        '메인 화면 안의 노출 순서 (오름차순, 같으면 아이디 오름차순)';
+
+    comment on column product.display_section.end_at is
+        '노출 종료 시각 (제외). null 이면 제한 없음';
+
+    comment on column product.display_section.link_label is
+        '이동 버튼 문구';
+
+    comment on column product.display_section.link_url is
+        '이동 주소 — 슬래시로 시작하는 상대 경로 또는 https';
+
+    comment on column product.display_section.section_type is
+        '섹션 유형 (HERO · PRODUCT_PICK · STORY · LOOK · DETAIL)';
+
+    comment on column product.display_section.start_at is
+        '노출 시작 시각 (포함). null 이면 제한 없음';
+
+    comment on column product.display_section.subtitle is
+        '부제목';
+
+    comment on column product.display_section.title is
+        '제목';
+
+    comment on column product.display_section.visible is
+        '고객 메인 노출 여부';
+
     create table product.product (
         id bigint not null,
         created_at timestamp(6) with time zone not null,

@@ -204,6 +204,19 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("아이디 묶음 목록 행(전시): 숨김(104) · 없는 아이디는 빠지고 아이디 오름차순이며, 목록과 같은 칸을 읽는다")
+    void findVisibleListRowsByIds() {
+        List<ProductListQueryResult> rows = productRepositoryPort.findVisibleListRowsByIds(List.of(105L, 104L, 102L, 999L));
+
+        assertThat(rows).extracting(ProductListQueryResult::productId).containsExactly(102L, 105L);
+        ProductListQueryResult discounted = rows.getFirst();
+        assertThat(discounted.saleStatus()).isEqualTo(SaleStatus.STOP_SELLING);
+        assertThat(discounted.listPriceAmount()).isEqualTo(25_000L);
+        assertThat(discounted.customOrder()).isTrue();
+        assertThat(productRepositoryPort.findVisibleListRowsByIds(List.of())).isEmpty();
+    }
+
+    @Test
     @DisplayName("목록: 가격순은 같은 가격을 아이디 내림차순으로 끊는다")
     void searchByPrice() {
         assertThat(productRepositoryPort.searchVisible(criteria(null, ProductSortType.PRICE_ASC, 0, 20)).getContent())
