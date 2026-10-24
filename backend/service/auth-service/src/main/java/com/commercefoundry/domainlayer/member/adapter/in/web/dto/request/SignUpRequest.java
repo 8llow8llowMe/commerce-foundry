@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.member.adapter.in.web.dto.request;
 
+import com.commercefoundry.domainlayer.member.adapter.in.web.dto.validation.ValidNormalizedEmailLength;
 import com.commercefoundry.domainlayer.member.application.command.SignUpCommand;
 import com.commercefoundry.domainlayer.member.application.exception.MemberValidationMessage;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
@@ -14,9 +15,10 @@ import jakarta.validation.constraints.Size;
 @Schema(description = "회원가입 요청. 역할은 받지 않는다 — 언제나 고객(CUSTOMER)으로 가입한다")
 public record SignUpRequest(
 
-    @Schema(description = "로그인 이메일 — 254자 이하. 앞뒤 공백을 지우고 소문자로 저장한다", example = "customer@example.com")
+    @Schema(description = "로그인 이메일 — 앞뒤 공백을 지우고 소문자로 저장한다. 길이는 원문과 소문자로 바꾼 뒤 모두 254자 이하", example = "customer@example.com")
     @NotBlank(message = MemberValidationMessage.EMAIL_REQUIRED)
     @Size(max = Member.EMAIL_MAX_LENGTH, message = MemberValidationMessage.EMAIL_LENGTH_INVALID)
+    @ValidNormalizedEmailLength(message = MemberValidationMessage.EMAIL_LENGTH_INVALID)
     @Email(regexp = MemberRequestPatterns.EMAIL, message = MemberValidationMessage.EMAIL_FORMAT_INVALID)
     String email,
 

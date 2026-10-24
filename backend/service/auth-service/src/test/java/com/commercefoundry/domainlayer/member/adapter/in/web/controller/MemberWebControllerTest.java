@@ -123,6 +123,35 @@ class MemberWebControllerTest {
             assertValidationError(signUp(body("a@example.com", "a1" + "b".repeat(63), "홍길동", "null", "true", "true", "false")), "AUTH_105", "password");
         }
 
+        /*
+         * #233 — İ(U+0130)는 소문자로 바꾸면 i̇(2글자)다. 원문 204자 · 정규화 268자가 @Size · @Email 을 지나 도메인 normalizeEmail 에서 500 이 났다.
+         * İ 는 JSON 유니코드 이스케이프로 보낸다. 로컬 파트 64자 · 도메인 라벨 63자 이하라 @Email(Hibernate) 은 통과한다.
+         */
+        @Test
+        @DisplayName("소문자화로 254자를 넘는 이메일은 AUTH_102 · email 로 400 이고 UseCase 를 부르지 않는다")
+        void lowercasedEmailTooLong() {
+            String email = "\\u0130".repeat(64) + "@" + "a".repeat(63) + "." + "b".repeat(63) + ".example.com";
+
+            MvcTestResult result = signUp(body(email, "mokoyuri2026!", "홍길동", "null", "true", "true", "false"));
+
+            assertValidationError(result, "AUTH_102", "email");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors").asArray().hasSize(1);
+            verifyNoInteractions(memberWebUseCase);
+        }
+
+        @Test
+        @DisplayName("원문이 254자를 넘으면 AUTH_102 는 한 건뿐이다 — 정규화 길이 검증은 @Size 몫을 겹쳐 내지 않는다")
+        void rawEmailTooLongReportsOnce() {
+            // 원문 255자(로컬 64 + @ + 도메인 190) — 형식은 맞아 @Size 만 걸린다
+            String email = "\\u0130".repeat(64) + "@" + "a".repeat(63) + "." + "b".repeat(63) + "." + "c".repeat(58) + ".com";
+
+            MvcTestResult result = signUp(body(email, "mokoyuri2026!", "홍길동", "null", "true", "true", "false"));
+
+            assertValidationError(result, "AUTH_102", "email");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors").asArray().hasSize(1);
+            verifyNoInteractions(memberWebUseCase);
+        }
+
         @Test
         @DisplayName("국내 휴대폰 형식이 아니거나 빈 문자열이면 AUTH_109 다 — 가입에서 빈 문자열은 '없음' 이 아니다")
         void phoneFormat() {
