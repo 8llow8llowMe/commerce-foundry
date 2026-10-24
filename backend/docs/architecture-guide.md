@@ -66,6 +66,7 @@ com.commercefoundry
   |  |  |- in/admin             어드민 콘솔 API — /api/v1/admin/** (ADMIN 전용)
   |  |  |  |- controller
   |  |  |  |- dto/{request,response,item}
+  |  |  |  |- exception         (*ExceptionHandler — 그 컨텍스트에 in/web 이 없을 때만. 예: operations-service job)
   |  |  |  \- presenter
   |  |  |- in/internal          서비스 간 전용 — /internal/v1/** (게이트웨이가 라우팅하지 않는다)
   |  |  |  |- controller
@@ -142,6 +143,8 @@ Info → Presenter → Response
   두고 DB 구간만 Processor 단위로 `@Transactional` 을 건다. **왜 좁혔는지 메서드 주석으로 남긴다.**
 - **의도적으로 느린 CPU 작업(비밀번호 해시 — BCrypt)** 도 같은 예외다. 트랜잭션 안에서 하면 해시 시간만큼 DB 커넥션을 쥔다.
   해시는 트랜잭션 밖에서 만들고 저장 구간만 Processor 에 `@Transactional` 을 건다 (예: auth `MemberWebFacade#signUp`).
+- **같은 행을 워커 · 다른 요청과 다투는 낙관적 충돌 재시도** 도 예외다. 버전에서 지면 새 트랜잭션에서 다시 읽어야 바뀐 상태로 판정되므로
+  트랜잭션은 시도마다 Processor 가 열고 Facade 는 재시도만 한다 (예: operations `JobAdminFacade#cancel`, 작업 등록 `JobRegisterFacade`).
 
 ### Processor
 
