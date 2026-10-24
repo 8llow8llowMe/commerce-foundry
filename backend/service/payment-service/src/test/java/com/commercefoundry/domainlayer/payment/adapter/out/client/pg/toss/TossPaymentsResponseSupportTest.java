@@ -77,7 +77,7 @@ class TossPaymentsResponseSupportTest {
         @Test
         @DisplayName("조회의 연결 실패는 '조회 못 함' 이다 — Unknown(SERVER_ERROR)")
         void inquiryConnectFailureIsUnknown() {
-            assertThat(support.inquire(PG_ORDER_ID, throwing(ioFailure(new ConnectException("refused")))))
+            assertThat(support.inquire(PG_ORDER_ID, null, throwing(ioFailure(new ConnectException("refused")))))
                 .isEqualTo(new PgInquiryQueryResult.Unknown(PaymentUnknownReason.SERVER_ERROR));
         }
     }

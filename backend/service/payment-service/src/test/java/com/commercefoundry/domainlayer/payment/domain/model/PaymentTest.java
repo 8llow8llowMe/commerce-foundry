@@ -38,7 +38,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class PaymentTest {
 
     private static final Instant NOW = Instant.parse("2026-10-21T02:00:00Z");
-    private static final PaymentInquiry.Failed NOT_APPROVED = new PaymentInquiry.Failed("NOT_FOUND_PAYMENT_SESSION", "결제 시간이 만료되었습니다.");
+    private static final PaymentInquiry.Failed NOT_APPROVED = new PaymentInquiry.Failed(PAYMENT_KEY, "NOT_FOUND_PAYMENT_SESSION", "결제 시간이 만료되었습니다.");
 
     /**
      * 시작 상태 — 전이 표의 행. 결제키가 없는 READY 와 되돌린 READY(결제키 있음)는 허용 전이가 달라 따로 둔다.
@@ -343,6 +343,19 @@ class PaymentTest {
             assertThat(aborted.failureCode()).as("조회 결과의 거절 코드는 FAILED 칸이라 남기지 않는다").isNull();
             assertThat(aborted.activeOrderId()).isNull();
         }
+
+        @Test
+        @DisplayName("다른 결제키의 미승인 결과로는 버리지 않는다 — 이 결제키가 승인되지 않았다는 증거가 아니다")
+        void revertedDoesNotAbortWithOtherPaymentKey() {
+            Payment reverted = PaymentFixtures.reverted();
+            PaymentInquiry.Failed otherKey = new PaymentInquiry.Failed(PAYMENT_KEY + "X", "NOT_FOUND_PAYMENT_SESSION", null);
+
+            assertThatThrownBy(() -> reverted.abortAfterInquiry(otherKey, PaymentAbortReason.REPREPARED))
+                .isInstanceOfSatisfying(PaymentTransitionException.class, exception -> {
+                    assertThat(exception.getCurrentStatus()).isEqualTo(PaymentStatus.READY);
+                    assertThat(exception.getAttemptedAction()).isEqualTo(Action.ABORT_AFTER_INQUIRY);
+                });
+        }
     }
 
     @Nested
@@ -453,6 +466,14 @@ class PaymentTest {
             Payment unknown = PaymentFixtures.unknown();
 
             assertMismatch(() -> unknown.resolve(new PaymentInquiry.Approved(approval(krw(129_001)))), Field.AMOUNT);
+        }
+
+        @Test
+        @DisplayName("다른 결제키의 실패 결과로는 FAILED 를 확정하지 않는다 (PAYMENT_KEY 불일치)")
+        void otherPaymentKeyFailureIsRejected() {
+            Payment unknown = PaymentFixtures.unknown();
+
+            assertMismatch(() -> unknown.resolve(new PaymentInquiry.Failed(PAYMENT_KEY + "X", "REJECT_CARD_COMPANY", null)), Field.PAYMENT_KEY);
         }
 
         @Test
@@ -638,7 +659,7 @@ class PaymentTest {
         @Test
         @DisplayName("조회 실패 결과 · 거절된 결제의 toString 은 PG 메시지를 찍지 않는다")
         void hidesFailureMessage() {
-            assertThat(NOT_APPROVED.toString()).isEqualTo("Failed[failureCode=NOT_FOUND_PAYMENT_SESSION]");
+            assertThat(NOT_APPROVED.toString()).isEqualTo("Failed[paymentKey=tgen_202***, failureCode=NOT_FOUND_PAYMENT_SESSION]");
             assertThat(PaymentFixtures.failed().toString()).doesNotContain("카드사에서 거절했습니다.");
         }
     }
