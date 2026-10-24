@@ -1,5 +1,37 @@
     create schema auth;
 
+    create table auth.admin_audit_log (
+        id bigint not null,
+        action varchar(40) not null,
+        actor_member_id bigint,
+        created_at timestamp(6) with time zone not null,
+        result varchar(10) not null,
+        target varchar(200),
+        primary key (id),
+        constraint ck_admin_audit_log_result check (result in ('SUCCESS', 'FAILURE'))
+    );
+
+    comment on table auth.admin_audit_log is
+        '관리자 감사 로그 (추가만 한다 — admin.audit 로거 한 줄과 같은 네 칸)';
+
+    comment on column auth.admin_audit_log.id is
+        '감사 로그 아이디 (Snowflake — 시각순)';
+
+    comment on column auth.admin_audit_log.action is
+        '행위 (ADMIN_LOGIN / MEMBER_SEARCH …) — 로그 검색 키와 같은 이름';
+
+    comment on column auth.admin_audit_log.actor_member_id is
+        '행위한 관리자 회원 아이디 (FK: member.id). 로그인 실패처럼 모르면 null';
+
+    comment on column auth.admin_audit_log.created_at is
+        '행위 시각 (동기 기록이라 기록 시각과 같다)';
+
+    comment on column auth.admin_audit_log.result is
+        '결과 (SUCCESS / FAILURE) — 실패 이유는 나누지 않는다';
+
+    comment on column auth.admin_audit_log.target is
+        '대상 (member:<id> · members?role=..&page=..&size=..). 없으면 null. 개인정보 없음';
+
     create table auth.member (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -145,6 +177,12 @@
 
     comment on column auth.shipping_address.version is
         '낙관적 락 버전';
+
+    create index idx_admin_audit_log_action_id 
+       on auth.admin_audit_log (action, id);
+
+    create index idx_admin_audit_log_actor_member_id_id 
+       on auth.admin_audit_log (actor_member_id, id);
 
     create index idx_member_agreement_member_id_agreement_type 
        on auth.member_agreement (member_id, agreement_type);
