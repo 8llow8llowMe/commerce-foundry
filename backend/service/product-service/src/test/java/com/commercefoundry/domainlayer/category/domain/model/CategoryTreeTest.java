@@ -2,7 +2,9 @@ package com.commercefoundry.domainlayer.category.domain.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -123,15 +125,15 @@ class CategoryTreeTest {
         }
 
         @Test
-        @DisplayName("숨긴 중간 노드만 빠지고 그 하위와 상위는 순서대로 남는다 — 숨김은 메뉴에서만 뺀다")
-        void dropsHiddenMiddleNodeOnly() {
-            assertThat(tree.visiblePathTo(121)).extracting(Category::id).containsExactly(1L, 121L);
+        @DisplayName("숨긴 중간 노드에서 끊긴다 — 그 아래 보이는 하위는 메뉴에 없으므로 빠진다 (#164)")
+        void stopsAtHiddenMiddleNode() {
+            assertThat(tree.visiblePathTo(121)).extracting(Category::id).containsExactly(1L);
         }
 
         @Test
-        @DisplayName("숨긴 최상위만 빠진다")
-        void dropsHiddenRoot() {
-            assertThat(tree.visiblePathTo(31)).extracting(Category::id).containsExactly(31L);
+        @DisplayName("최상위가 숨김이면 그 아래 보이는 하위까지 빈 목록이다 (#164)")
+        void emptyUnderHiddenRoot() {
+            assertThat(tree.visiblePathTo(31)).isEmpty();
         }
 
         @Test
@@ -145,6 +147,48 @@ class CategoryTreeTest {
         @DisplayName("없는 아이디(대표 카테고리 데이터 오류)면 빈 목록이다")
         void unknownId() {
             assertThat(tree.visiblePathTo(999)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("상위가 목록에 없어 최상위에서 닿지 않는 노드는 메뉴에 없으므로 빈 목록이다")
+        void emptyForOrphan() {
+            CategoryTree orphanTree = CategoryTree.of(List.of(category(51, 999L, "고아", 0, true), category(52, 51L, "고아-하위", 0, true)));
+
+            assertThat(orphanTree.visiblePathTo(52)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("메뉴와 같은 규칙이다 — 모든 노드에 대해 breadcrumb 은 경로 중 메뉴에 있는 가장 긴 앞부분이다 (정상 · 고아 · 순환 트리)")
+        void sameRuleAsMenu() {
+            assertBreadcrumbIsLongestMenuPrefix(tree, CATEGORIES);
+
+            List<Category> orphanAndCycle = List.of(
+                category(1, null, "정상", 0, true),
+                category(51, 999L, "고아", 0, true),
+                category(52, 51L, "고아-하위", 0, true),
+                category(41, 42L, "순환-A", 0, true),
+                category(42, 41L, "순환-B", 0, true));
+            assertBreadcrumbIsLongestMenuPrefix(CategoryTree.of(orphanAndCycle), orphanAndCycle);
+        }
+
+        /** 메뉴에 나오는 아이디로 경로의 앞부분을 자른 것과 breadcrumb 이 같아야 한다 — 숨김 판정이 갈라지면 실패한다. */
+        private static void assertBreadcrumbIsLongestMenuPrefix(CategoryTree target, List<Category> categories) {
+            Set<Long> menuIds = new HashSet<>();
+            collectIds(target.visibleRoots(), menuIds);
+
+            for (Category category : categories) {
+                List<Long> breadcrumb = target.visiblePathTo(category.id()).stream().map(Category::id).toList();
+                List<Long> longestMenuPrefix = target.pathTo(category.id()).stream().map(Category::id).takeWhile(menuIds::contains).toList();
+
+                assertThat(breadcrumb).as("category %d", category.id()).isEqualTo(longestMenuPrefix);
+            }
+        }
+
+        private static void collectIds(List<CategoryNode> nodes, Set<Long> ids) {
+            for (CategoryNode node : nodes) {
+                ids.add(node.category().id());
+                collectIds(node.children(), ids);
+            }
         }
     }
 
@@ -181,6 +225,14 @@ class CategoryTreeTest {
         @DisplayName("최상위에서 닿지 않는 순환 노드는 visibleRoots 에 나오지 않는다")
         void visibleRootsSkipsCycles() {
             assertThat(cyclicTree.visibleRoots()).extracting(node -> node.category().id()).containsExactly(1L);
+        }
+
+        @Test
+        @Timeout(value = 1, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+        @DisplayName("최상위에서 닿지 않는 순환 노드의 breadcrumb 은 빈 목록이다 — 메뉴와 같다")
+        void visiblePathToIsEmptyForCycles() {
+            assertThat(cyclicTree.visiblePathTo(41)).isEmpty();
+            assertThat(cyclicTree.visiblePathTo(43)).isEmpty();
         }
 
         @Test

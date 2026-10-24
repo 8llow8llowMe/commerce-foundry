@@ -93,11 +93,19 @@ class CategoryProcessorTest {
     }
 
     @Test
-    @DisplayName("visiblePathOf 는 최상위부터의 경로에서 숨긴 카테고리만 뺀다")
-    void visiblePathDropsHidden() {
+    @DisplayName("visiblePathOf 는 처음 숨긴 카테고리에서 끊는다 — 숨긴 카테고리 아래 하위 이름은 breadcrumb 에 나오지 않는다 (#164)")
+    void visiblePathStopsAtHidden() {
         given(categoryRepositoryPort.findAll()).willReturn(CHAIN);
 
-        assertThat(categoryProcessor.visiblePathOf(1111)).extracting(Category::id).containsExactly(1L, 11L, 1111L);
+        assertThat(categoryProcessor.visiblePathOf(1111)).extracting(Category::id).containsExactly(1L, 11L);
+    }
+
+    @Test
+    @DisplayName("visiblePathOf 는 모두 보이면 최상위부터 대상까지 전부다")
+    void visiblePathAllVisible() {
+        given(categoryRepositoryPort.findAll()).willReturn(CHAIN);
+
+        assertThat(categoryProcessor.visiblePathOf(11)).extracting(Category::id).containsExactly(1L, 11L);
     }
 
     @Test

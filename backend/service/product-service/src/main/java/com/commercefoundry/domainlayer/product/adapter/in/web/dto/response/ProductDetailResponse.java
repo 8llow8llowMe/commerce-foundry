@@ -25,7 +25,7 @@ public record ProductDetailResponse(
     @Schema(description = "한 줄 요약 (메타 description 에도 쓴다)", example = "데일리로 입는 면 저고리", nullable = true)
     String summary,
 
-    @Schema(description = "대표 카테고리 경로 (최상위 → 대표 카테고리). 숨긴 카테고리는 빠진다")
+    @Schema(description = "대표 카테고리 경로 (최상위 → 대표 카테고리). 메뉴에서 닿을 수 있는 경로만 — 처음 숨긴 카테고리에서 끊기고 그 아래는 빠진다. 최상위가 숨김이면 빈 목록")
     List<CategoryPathItem> categoryPath,
 
     @Schema(description = "대표 이미지. 없으면 null", nullable = true)
