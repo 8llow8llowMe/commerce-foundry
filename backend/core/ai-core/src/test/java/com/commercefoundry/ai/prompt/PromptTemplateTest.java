@@ -14,7 +14,7 @@ class PromptTemplateTest {
         "고객 {{pii:customerName}} 님({{pii:orderNumber}})의 문의:\n{{inquiry}}");
 
     @Test
-    @DisplayName("값을 채워 요청을 만든다 — 개인정보 자리 값은 sensitiveValues 로 넘어가고 버전이 실린다")
+    @DisplayName("값을 채워 요청을 만든다 — 개인정보 자리에는 [PII] 가 들어가고 원문은 sensitiveValues 로만 넘어가며 버전이 실린다")
     void renders() {
         AiRequest request = template.render(PromptValues.create()
             .put("productName", "철릭 원피스").put("inquiry", "사이즈 문의입니다")
@@ -23,8 +23,17 @@ class PromptTemplateTest {
         assertThat(request.feature()).isEqualTo("cs-reply");
         assertThat(request.promptVersion()).isEqualTo(3);
         assertThat(request.system()).isEqualTo("답변 도우미다. 상품은 철릭 원피스 이다.");
-        assertThat(request.prompt()).isEqualTo("고객 Hong Gildong 님(CF-20261024-0001)의 문의:\n사이즈 문의입니다");
+        assertThat(request.prompt()).isEqualTo("고객 [PII] 님([PII])의 문의:\n사이즈 문의입니다");
         assertThat(request.sensitiveValues()).containsExactlyInAnyOrder("Hong Gildong", "CF-20261024-0001");
+    }
+
+    @Test
+    @DisplayName("한 글자 · 공백뿐인 개인정보 값도 본문에 원문으로 남지 않는다 — 본문 검색 마스킹(두 글자 미만 무시)에 기대지 않는다")
+    void shortSensitiveValueNeverRendered() {
+        AiRequest request = template.render(PromptValues.create()
+            .put("productName", "p").put("inquiry", "q").putSensitive("customerName", "훈").putSensitive("orderNumber", " "));
+
+        assertThat(request.prompt()).isEqualTo("고객 [PII] 님([PII])의 문의:\nq").doesNotContain("훈");
     }
 
     @Test
