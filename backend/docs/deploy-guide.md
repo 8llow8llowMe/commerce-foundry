@@ -61,8 +61,8 @@ GitHub (develop / main)
 | delivery-service | 8085 | `DELIVERY_SERVICE_PORT_{DEV,PROD}` | 루프백 | `DELIVERY_SERVICE_MEM_LIMIT_{DEV,PROD}` | 768m / 1g |
 
 - **외부에는 게이트웨이만 연다**(`architecture-guide.md` §6). Eureka · 서비스는 호스트 루프백(`127.0.0.1`)에만 포트를 연다 — 게이트웨이 라우팅 ·
-  Eureka 등록 · 서비스 간 호출은 같은 docker 네트워크 안에서 닿으므로 호스트 포트는 호스트 안 점검용이다. Eureka 레지스트리는 인증이 없다.
-  모듈을 다른 호스트로 나눠야 하면 바인딩과 Eureka 인증을 같이 정한다(#197 · #32).
+  Eureka 등록 · 서비스 간 호출은 같은 docker 네트워크 안에서 닿으므로 호스트 포트는 호스트 안 점검용이다. Eureka 레지스트리는 HTTP Basic 이다(#248, `security-guide.md` §12).
+  평문 HTTP 라 모듈을 다른 호스트로 나눠야 하면 바인딩과 전송 암호화를 같이 정한다(#197 · #32).
 - 게이트웨이 바인드 주소는 `API_GATEWAY_BIND_{DEV,PROD}` 로 받고 기본값은 루프백이다(닫힌 쪽). 앞단(BFF · LB)이 닿아야 하는 주소만 넣는다 — 외부 노출 규칙은 §6.
 - **한 compose 파일에 dev · prod 가 같이 있고 compose 는 파일 전체를 보간한다.** 포트 키는 `:?`(비면 실패)라 dev 배포의 env 에도 `_PROD` 키가 있어야 한다(반대도 같다).
   파이프라인(#198)은 반대 환경의 `<MODULE>_PORT_{DEV|PROD}` 를 `'0'` 자리값으로 채운다 — 그 서비스는 올리지 않아 포트를 잡지 않으므로
@@ -79,7 +79,8 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 
 | 키 | 시크릿 | compose 보간 | discovery | gateway | auth | product | order | payment | delivery |
 |----|--------|--------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `EUREKA_DEFAULT_ZONE` | - | `:?` 필수 (§4-2) | | O | O | O | O | O | O |
+| `EUREKA_HOST` | - | `:?` 필수 (§4-2) | | O | O | O | O | O | O |
+| `EUREKA_PASSWORD` | O | `:?` 필수 | O | O | O | O | O | O | O |
 | `DB_URL` · `DB_USERNAME` | - | `:?` 필수 | | | O | O | O | O | O |
 | `DB_PASSWORD` | O | `:?` 필수 | | | O | O | O | O | O |
 | `REDIS_HOST` · `REDIS_PORT` | - | `:?` 필수 | | O | O | | | | |
@@ -120,8 +121,11 @@ compose 가 env 파일과 무관하게 고정하는 값:
 | `${KEY:-false}` 등 | yml 기본값이 있는 키 | **yml 기본값과 같은 값**만 쓴다. 다르게 두면 정본이 둘이 된다 |
 | 시크릿 | - | **빈 값이 아닌 기본값을 두지 않는다.** |
 
-- `EUREKA_DEFAULT_ZONE` 은 yml 기본값(`http://localhost:8761/eureka/`)이 있지만 compose 에서는 필수로 바꿨다. 컨테이너 안의 localhost 는 자기 자신이라
-  기본값으로 뜨면 등록이 조용히 실패한다. 같은 네트워크면 Eureka 컨테이너 이름을 쓴다 — `http://commerce-service-discovery-<env>:8761/eureka/`.
+- `EUREKA_HOST` 는 yml 기본값(`localhost`)이 있지만 compose 에서는 필수로 바꿨다. 컨테이너 안의 localhost 는 자기 자신이라
+  기본값으로 뜨면 등록이 실패한다. 같은 네트워크면 Eureka 컨테이너 이름을 쓴다 — `commerce-service-discovery-<env>`.
+  `defaultZone` URL(`http://eureka:${EUREKA_PASSWORD}@${EUREKA_HOST}:8761/eureka/`)은 yml 이 조립한다(#248 전의 `EUREKA_DEFAULT_ZONE` 은 없어졌다).
+- `EUREKA_PASSWORD` 는 service-discovery · 게이트웨이 · 서비스 전부 **같은 값**이고 환경마다 다르다. `openssl rand -hex 32` 로 만든다 —
+  영문 · 숫자 · `. _ ~ -` 밖의 문자가 있거나 32자 미만이면 Eureka 가 뜨지 않는다(`security-guide.md` §12).
 - `GATEWAY_CORS_ALLOWED_ORIGINS` 는 비어도 뜨지만 어떤 origin 도 허용하지 않는다(닫힌 기본값). 배포 환경은 프론트 origin 을 채운다.
 - `STORE_FEATURES_*` 는 dev 프로파일 yml 이 `true` 로 덮어 dev 에서는 env 를 읽지 않는다.
 - 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `KAKAO_*` · `NAVER_*` · `STORAGE_*` · `STORE_BUSINESS_*`)는 compose 에 넘기지 않는다.
@@ -132,7 +136,8 @@ compose 가 env 파일과 무관하게 고정하는 값:
 | 키 | 없으면 |
 |----|--------|
 | `COMMERCE_DOCKER_NETWORK` · 자기 환경의 `<MODULE>_PORT_{DEV|PROD}` | compose 해석 실패로 배포 중단. 반대 환경 포트는 파이프라인이 `'0'` 자리값으로 채운다(§3) |
-| `EUREKA_DEFAULT_ZONE` | compose 해석 실패 |
+| `EUREKA_HOST` | compose 해석 실패 |
+| `EUREKA_PASSWORD` | compose 해석 실패. 7개 모듈 같은 값, 형식이 틀리면 Eureka 가 기동하지 않는다: `security-guide.md` §12 |
 | `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` | compose 해석 실패. dev 와 prod 는 다른 DB 서버라 값은 환경별 secret 에서 갈라 넣는다(키 이름은 같다). 서비스 5종은 한 DB 의 서비스별 스키마(`auth` · `product` · `orders` · `payment` · `delivery`, yml `hibernate.default_schema`)를 쓰므로 URL 은 환경당 하나다. 스키마는 미리 만들어 둔다 — JPA 는 스키마를 만들지 않는다. 정본은 [`docker/postgres/init/01-create-schemas.sql`](../docker/postgres/init/01-create-schemas.sql) 이다. 환경 분리 · 계정 원칙은 [`service-inventory.md`](service-inventory.md) §4-2 |
 | `REDIS_*` | compose 해석 실패. auth 와 gateway 는 같은 Redis 여야 한다 |
 | `SNOWFLAKE_DATACENTER_ID` | compose 해석 실패. 0~31 |
@@ -149,7 +154,7 @@ compose 가 env 파일과 무관하게 고정하는 값:
 
 - 7개 모듈 모두 actuator 가 있고(`backend/build.gradle` 이 실행 모듈마다 넣는다) `management.endpoints.web.exposure.include: health` 다.
 - 익명으로 열려 있다 — 서비스 5종은 security-core(`ResourceServerSecurityConfigurer`)가 `health` 만 `permitAll`, 게이트웨이는 `/api/v1/admin/**` 밖을 `permitAll`,
-  Eureka 는 보안 체인이 없다. 응답은 상태만 낸다(`{"status":"UP"}`), DOWN 이면 503 이라 `curl -f` 가 실패한다.
+  Eureka 는 `health` 만 익명이고 나머지는 HTTP Basic 이다(#248). 응답은 상태만 낸다(`{"status":"UP"}`), DOWN 이면 503 이라 `curl -f` 가 실패한다.
 - 서비스 헬스에는 DB 가 들어 있다(DB 가 내려가면 unhealthy). Redis 는 auth · 게이트웨이 모두 헬스에서 뺐다(`management.health.redis.enabled: false`) — Redis 장애로 컨테이너를 빼지 않는다.
 - `curl` 은 베이스 이미지(§7)에 들어 있다. 간격 15초 · 제한 5초 · 4회, 기동 유예 120초.
 
@@ -165,8 +170,10 @@ compose 가 env 파일과 무관하게 고정하는 값:
 
 - compose 파일이 모듈마다 따로라 `depends_on` 으로 묶을 수 없다. **배포마다 `up -d --wait` 로 그 컨테이너가 healthy 가 될 때까지 기다리고 다음 모듈로 간다.**
   `--wait` 는 healthcheck 가 healthy 가 아니면 0 이 아닌 값으로 끝나므로 파이프라인이 거기서 멈춘다. 제한 시간은 `--wait-timeout 300` 처럼 준다.
-- 순서를 어겨도 죽지는 않는다 — Eureka 클라이언트는 서버가 뜰 때까지 다시 시도하고, 등록 전 게이트웨이는 그 서비스로 가는 요청에 503(`GATEWAY_002`)을 낸다.
-  Eureka 등록 · 게이트웨이 레지스트리 갱신에 30초쯤 걸린다.
+- **Eureka 가 떠 있지 않으면 게이트웨이 · 서비스가 뜨지 않는다** — 기동 때 등록이 실패하면 멈춘다(`should-enforce-registration-at-init`, #248).
+  비밀번호가 틀려도 같다. `restart: unless-stopped` 가 다시 띄우므로 Eureka 가 올라오면 이어서 뜨지만, 그 사이 `--wait` 는 실패할 수 있다.
+  등록 전 게이트웨이는 그 서비스로 가는 요청에 503(`GATEWAY_002`)을 낸다. Eureka 등록 · 게이트웨이 레지스트리 갱신에 30초쯤 걸린다.
+- 이미 떠 있는 게이트웨이 · 서비스는 Eureka 를 다시 띄워도 멈추지 않는다 — 등록 강제는 기동 때만이고, 이후에는 다시 시도해 재등록한다.
 - 처음 띄울 때와 Eureka 를 다시 띄운 뒤에만 순서가 의미 있다. 서비스 하나만 다시 배포할 때는 그 모듈만 올린다.
 - 다시 배포한 직후 게이트웨이가 Eureka 의 옛 인스턴스(옛 IP)를 잠시 볼 수 있다(lease 만료 기본 90초). 그동안 그 서비스로 가는 요청 일부가 실패할 수 있다.
 
@@ -176,8 +183,8 @@ compose 가 env 파일과 무관하게 고정하는 값:
 
 - 백엔드 docker 네트워크는 **환경마다 따로 둔다** — dev · prod 가 한 네트워크를 공유하지 않는다.
 - 그 네트워크에는 **이 프로젝트의 백엔드 컨테이너만** 붙인다.
-- 이유: Eureka 는 인증이 없어 같은 네트워크의 컨테이너면 누구나 인스턴스를 등록 · 삭제할 수 있다. 가짜 인스턴스가 등록되면 게이트웨이가 요청(토큰 포함)을 그쪽으로 보낸다.
-  Eureka 인증은 후속 이슈에서 정한다.
+- 이유: 가짜 인스턴스가 Eureka 에 등록되면 게이트웨이가 요청(토큰 포함)을 그쪽으로 보낸다. 레지스트리는 HTTP Basic 으로 닫혀 있지만(#248, `security-guide.md` §12)
+  평문 HTTP · 공유 비밀번호라, 같은 네트워크에 낯선 컨테이너를 두지 않는 것이 1차 방어다.
 - 백엔드 컨테이너는 외부 docker 네트워크 하나(`COMMERCE_DOCKER_NETWORK`, `external: true`)에 붙는다. 이름은 Infra 에서 정한다(#197).
   compose 는 네트워크를 만들지 않는다 — 배포 agent 가 없으면 만든다: `docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET"`.
 - 같은 네트워크 안에서는 컨테이너 이름으로 닿는다(Eureka 주소 · DB · Redis 가 같은 네트워크의 컨테이너면 그 이름).
@@ -229,12 +236,13 @@ cp cloud/service-discovery/build/libs/service-discovery-*.jar cloud/service-disc
 ```
 
 배포용 env 파일을 **저장소 밖에 빈 파일로 새로 만들고** 필요한 키만 쓴다. `.env.example` · `backend/.env` 를 복사하지 않는다 —
-거기 든 `localhost` 값(`EUREKA_DEFAULT_ZONE` · `DB_URL` · `REDIS_HOST`)은 컨테이너 안에서 자기 자신을 가리켜, Eureka 등록이 조용히 실패하고
+거기 든 `localhost` 값(`EUREKA_HOST` · `DB_URL` · `REDIS_HOST`)은 컨테이너 안에서 자기 자신을 가리켜, Eureka 등록이 실패하고
 게이트웨이가 503 을 낸다. 복사해서 쓰겠다면 이 세 키는 반드시 아래 값으로 덮는다. 값은 §1 의 `.env.runtime` 규칙대로 작은따옴표로 감싼다.
 
 ```text
 COMMERCE_DOCKER_NETWORK='commerce-foundry-local_default'
-EUREKA_DEFAULT_ZONE='http://commerce-service-discovery-dev:8761/eureka/'
+EUREKA_HOST='commerce-service-discovery-dev'
+EUREKA_PASSWORD — backend/.env 의 로컬 값(openssl rand -hex 32)
 DB_URL='jdbc:postgresql://postgres:5432/commerce_foundry'
 DB_USERNAME · DB_PASSWORD · REDIS_PASSWORD — backend/.env 의 로컬 테스트 값
 REDIS_HOST='redis'
