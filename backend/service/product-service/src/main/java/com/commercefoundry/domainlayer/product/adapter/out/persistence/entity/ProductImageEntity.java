@@ -18,6 +18,9 @@ import lombok.NoArgsConstructor;
 
 /**
  * 대표 이미지(THUMBNAIL)는 순서가 항상 0 이라(check 제약) 유니크 키가 "상품당 1개" 를 보장한다.
+ *
+ * <p>상세 갤러리 영상(VIDEO)도 이 테이블에 둔다 — url 이 영상 파일이고 포스터 이미지 URL 이 반드시 있다(check 제약).
+ * 유니크 키가 유형별 순서라 갤러리 이미지와 영상은 같은 순서를 가질 수 있고, 상세는 순서 → 아이디 오름차순으로 섞어 보인다.
  */
 @Entity
 @Table(
@@ -26,7 +29,13 @@ import lombok.NoArgsConstructor;
     uniqueConstraints = @UniqueConstraint(
         name = "uk_product_image_product_id_image_type_display_order", columnNames = {"product_id", "image_type", "display_order"}
     ),
-    check = @CheckConstraint(name = "ck_product_image_thumbnail_display_order", constraint = "image_type <> 'THUMBNAIL' or display_order = 0")
+    check = {
+        @CheckConstraint(name = "ck_product_image_thumbnail_display_order", constraint = "image_type <> 'THUMBNAIL' or display_order = 0"),
+        @CheckConstraint(
+            name = "ck_product_image_poster_url",
+            constraint = "(image_type = 'VIDEO' and poster_url is not null) or (image_type <> 'VIDEO' and poster_url is null)"
+        )
+    }
 )
 @Getter
 @Builder
@@ -42,10 +51,10 @@ public class ProductImageEntity extends BaseEntity {
     private Long productId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "image_type", nullable = false, length = 20, comment = "이미지 유형 — THUMBNAIL(목록 대표, 상품당 1개) / GALLERY(상세 갤러리)")
+    @Column(name = "image_type", nullable = false, length = 20, comment = "이미지 유형 — THUMBNAIL(목록 대표, 상품당 1개) / GALLERY(상세 갤러리) / VIDEO(상세 갤러리 영상)")
     private ImageType imageType;
 
-    @Column(name = "url", nullable = false, length = 500, comment = "이미지 URL")
+    @Column(name = "url", nullable = false, length = 500, comment = "이미지 URL. VIDEO 면 영상 파일 URL")
     private String url;
 
     @Column(name = "width", comment = "원본 가로 px. 모르면 null")
@@ -59,4 +68,7 @@ public class ProductImageEntity extends BaseEntity {
 
     @Column(name = "display_order", nullable = false, comment = "같은 유형 안의 순서. THUMBNAIL 은 항상 0")
     private int displayOrder;
+
+    @Column(name = "poster_url", length = 500, comment = "영상 포스터 이미지 URL. VIDEO 면 필수, 그 밖에는 null")
+    private String posterUrl;
 }

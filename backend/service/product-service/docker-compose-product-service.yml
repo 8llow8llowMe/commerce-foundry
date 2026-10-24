@@ -36,6 +36,8 @@ x-product-service-environment: &product_service_environment
   INTERNAL_JWT_SECRET_PREVIOUS: ${INTERNAL_JWT_SECRET_PREVIOUS:-}
   # 기능 플래그 — yml 기본값과 같은 false. dev 프로파일은 yml 이 켜 두어 이 값을 읽지 않는다
   STORE_FEATURES_CUSTOM_ORDER: ${STORE_FEATURES_CUSTOM_ORDER:-false}
+  STORE_FEATURES_PREORDER: ${STORE_FEATURES_PREORDER:-false}
+  STORE_FEATURES_PRODUCT_VIDEO: ${STORE_FEATURES_PRODUCT_VIDEO:-false}
 
 x-logging: &default_logging
   driver: json-file

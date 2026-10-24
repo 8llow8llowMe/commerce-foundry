@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.support.MoneyItems;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CategoryPathItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CustomOrderFieldItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CustomOrderItem;
+import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.PreorderItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductImageItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductOptionGroupItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductOptionValueItem;
@@ -14,6 +15,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.web.dto.response.Produ
 import com.commercefoundry.domainlayer.product.application.info.CategoryPathInfo;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldInfo;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderInfo;
+import com.commercefoundry.domainlayer.product.application.info.PreorderInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductDetailInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductImageInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductListItemInfo;
@@ -25,10 +27,13 @@ import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Component;
 
 /**
- * 고객 상품 응답. 식별자 {@code long → String}, 금액 {@code Money → MoneyItem}, 판매 상태 → metadata 변환만 한다.
+ * 고객 상품 응답. 식별자 {@code long → String}, 금액 {@code Money → MoneyItem}, 판매 상태 → metadata, 미디어 유형 → 화면 종류(IMAGE · VIDEO) 변환만 한다.
  */
 @Component
 public class ProductWebPresenter {
+
+    private static final String MEDIA_TYPE_IMAGE = "IMAGE";
+    private static final String MEDIA_TYPE_VIDEO = "VIDEO";
 
     public SliceResponse<ProductListItemResponse> toListResponse(Slice<ProductListItemInfo> slice) {
         return SliceResponse.of(slice).map(this::toListItem);
@@ -51,6 +56,7 @@ public class ProductWebPresenter {
             .optionGroups(info.optionGroups().stream().map(this::toOptionGroupItem).toList())
             .skus(info.skus().stream().map(this::toSkuItem).toList())
             .customOrder(toCustomOrderItem(info.customOrder()))
+            .preorder(toPreorderItem(info.preorder()))
             .build();
     }
 
@@ -65,6 +71,7 @@ public class ProductWebPresenter {
             .hasOptionSurcharge(info.hasOptionSurcharge())
             .saleStatus(info.saleStatus().toMetadata())
             .customOrder(info.customOrder())
+            .preorder(info.preorder())
             .build();
     }
 
@@ -81,10 +88,13 @@ public class ProductWebPresenter {
             .build();
     }
 
+    /** 영상만 VIDEO 이고 갤러리 이미지는 IMAGE 다. 포스터는 영상일 때만 값이 있다(도메인 · DB check 가 보장). */
     private ProductImageItem toImageItem(ProductImageInfo image) {
         return ProductImageItem.builder()
             .imageId(String.valueOf(image.imageId()))
+            .mediaType(image.imageType().isVideo() ? MEDIA_TYPE_VIDEO : MEDIA_TYPE_IMAGE)
             .url(image.url())
+            .posterUrl(image.posterUrl())
             .width(image.width())
             .height(image.height())
             .altText(image.altText())
@@ -134,6 +144,15 @@ public class ProductWebPresenter {
             .notice(customOrder.notice())
             .leadTimeDays(customOrder.leadTimeDays())
             .fields(customOrder.fields().stream().map(this::toCustomOrderFieldItem).toList())
+            .build();
+    }
+
+    private PreorderItem toPreorderItem(PreorderInfo preorder) {
+        if (preorder == null) {
+            return null;
+        }
+        return PreorderItem.builder()
+            .expectedShipDate(preorder.expectedShipDate())
             .build();
     }
 
