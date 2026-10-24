@@ -98,7 +98,7 @@ public record ProductDetailResponse(
 ## 8. 예외 / 로그
 
 - 로그는 검색 가능한 영어 키 + 값 조합을 쓴다: `log.warn("payment confirm failed. orderId={}, code={}", ...)`
-- **로그에 남기지 않는 것**: PG 시크릿 키, 결제키 전체, 카드 정보, 고객 이름·전화번호·주소, JWT 원문.
+- **로그에 남기지 않는 것**: PG 시크릿 키, 결제키 전체, 카드 정보, 고객 이름·전화번호·주소, JWT 원문, AI 프롬프트 · 응답 원문(#215 — 기능 · 모델 · 토큰 수만).
   식별이 필요하면 마스킹하거나 내부 ID 만 남긴다. 토큰은 `jti` 와 memberId 만 남긴다 — refresh 토큰도 원문 대신 핑거프린트다.
 - **DB 제약 위반 로그에 행 값을 남기지 않는다 (#173).** Hibernate 는 예외를 바꾸기 전에 `SQLException` 메시지를 WARN(`org.hibernate.orm.jdbc.error`)으로
   남기고, pgjdbc 기본값은 그 메시지에 행 값(DETAIL `Failing row contains (...)` · `Key (email)=(...)`)을 싣는다 — 어댑터가 나중에 원인을 떼도 이미 늦다.
