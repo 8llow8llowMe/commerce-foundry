@@ -1,3 +1,4 @@
+import { stripRejectedCharacters } from './custom-input';
 import { CART_MAX_LINES, CART_MAX_QUANTITY, type CustomOption } from './types';
 
 /**
@@ -17,12 +18,16 @@ export type LocalCartLine = {
 
 export const LOCAL_CART_KEY = 'cf_cart';
 
-/** 같은 줄 판정 — BE 와 같이 키 · 값의 앞뒤 공백을 자르고 NFC 로 맞춘 뒤 키 순으로 비교한다 */
+/**
+ * 같은 줄 판정 — BE 와 같이 키 · 값의 앞뒤 공백을 자르고 NFC 로 맞춘 뒤 키 순으로 비교한다.
+ * 값의 제어 문자 · 짝 없는 서로게이트는 먼저 지운다 — BE 가 400 `CART_115` 로 거절하는 값을 로컬에 두지 않는다(#263).
+ * 지우고 나서 비는 값은 입력이 없는 칸으로 본다.
+ */
 export function normalizeOptions(options: CustomOption[]): CustomOption[] {
   return options
     .map((option) => ({
       fieldKey: option.fieldKey.trim().normalize('NFC'),
-      value: option.value.trim().normalize('NFC'),
+      value: stripRejectedCharacters(option.value).trim().normalize('NFC'),
     }))
     .filter((option) => option.value !== '')
     .sort((a, b) => (a.fieldKey < b.fieldKey ? -1 : a.fieldKey > b.fieldKey ? 1 : 0));
@@ -63,16 +68,42 @@ export function addLines(
   return next;
 }
 
-/** 저장 값을 믿지 않는다 — 모양이 틀린 줄은 버린다 */
+/**
+ * 저장 값을 믿지 않는다 — 모양이 틀린 줄은 버린다. 맞춤 제작 입력은 담을 때와 같이 정규화한다 —
+ * 입력 문자 규칙(#263) 전에 담긴 줄의 탭 · 개행을 지워 병합이 400 이 되지 않게. 정규화로 같은 줄이 되면 하나로 합친다
+ * (수량은 더해 99 에서 자르고, 담은 시각은 이른 쪽).
+ */
 export function parseLines(raw: string | null): LocalCartLine[] {
   if (!raw) return [];
   try {
     const value: unknown = JSON.parse(raw);
     if (!Array.isArray(value)) return [];
-    return value.filter(isLine).slice(0, CART_MAX_LINES);
+    return combineSameLines(value.filter(isLine)).slice(0, CART_MAX_LINES);
   } catch {
     return [];
   }
+}
+
+function combineSameLines(lines: LocalCartLine[]): LocalCartLine[] {
+  const byKey = new Map<string, LocalCartLine>();
+  for (const line of lines) {
+    const normalized: LocalCartLine = {
+      skuId: line.skuId,
+      productId: line.productId,
+      quantity: line.quantity,
+      customOptions: normalizeOptions(line.customOptions),
+      addedAt: line.addedAt,
+    };
+    const key = lineKey(normalized.skuId, normalized.customOptions);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, normalized);
+      continue;
+    }
+    existing.quantity = Math.min(existing.quantity + normalized.quantity, CART_MAX_QUANTITY);
+    existing.addedAt = Math.min(existing.addedAt, normalized.addedAt);
+  }
+  return [...byKey.values()];
 }
 
 // BE `CartItemAddRequest` · `CustomOptionRequest` 와 같은 제약 — 하나라도 어긋나면 병합 요청 전체가 400 이라 미리 버린다

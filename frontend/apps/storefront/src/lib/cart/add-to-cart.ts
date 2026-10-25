@@ -4,7 +4,7 @@ import { ApiError, apiFetch } from '@cf/api-client';
 import { useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import { useSignedIn } from '@/components/auth/SessionProvider';
-import { addToLocalCart } from './local-cart';
+import { addToLocalCart, normalizeOptions } from './local-cart';
 import type { CartItemRequest, CartResponse, CustomOption } from './types';
 
 export type AddLine = {
@@ -70,7 +70,9 @@ export async function addMemberLines(
   let firstError: unknown = null;
   for (const [index, line] of lines.entries()) {
     const body: CartItemRequest = { skuId: line.skuId, quantity: line.quantity };
-    if (line.customOptions.length > 0) body.customOptions = line.customOptions;
+    // 로컬 담기와 같은 정규화 — 제어 문자가 남은 값은 BE 가 400 CART_115 로 거절한다(#263)
+    const customOptions = normalizeOptions(line.customOptions);
+    if (customOptions.length > 0) body.customOptions = customOptions;
     try {
       await post(body);
       addedCount += 1;

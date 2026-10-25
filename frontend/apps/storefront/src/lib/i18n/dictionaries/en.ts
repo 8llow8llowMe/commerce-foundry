@@ -172,6 +172,8 @@ export const en: Dictionary = {
       CART_006: 'Your bag can hold up to 50 items.',
       CART_007: 'Your bag was changed at the same time. Please try again.',
       CART_008: 'We could not load product details. Please try again in a moment.',
+      CART_115:
+        'Your made-to-order details contain characters we cannot accept (such as tabs or line breaks). Please check your entry.',
       GATEWAY_006: 'Too many requests. Please try again in a moment.',
     } as Record<string, string>,
     empty: 'Your bag is empty.',

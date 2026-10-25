@@ -79,6 +79,68 @@ describe('parseLines', () => {
     });
     expect(parseLines(JSON.stringify([ok, ...bad, tooMany]))).toEqual([ok]);
   });
+
+  it('입력 문자 규칙(#263) 전에 담긴 탭 · NUL 은 읽을 때 지운다 — 다른 줄은 그대로 둔다', () => {
+    const plain = line({ skuId: '1', addedAt: 1 });
+    const tabbed = line({
+      skuId: '2',
+      addedAt: 2,
+      customOptions: [
+        { fieldKey: 'memo', value: '소매\t길게' },
+        { fieldKey: 'chest', value: '96\u0000' },
+      ],
+    });
+    expect(parseLines(JSON.stringify([plain, tabbed]))).toEqual([
+      plain,
+      line({
+        skuId: '2',
+        addedAt: 2,
+        customOptions: [
+          { fieldKey: 'chest', value: '96' },
+          { fieldKey: 'memo', value: '소매 길게' },
+        ],
+      }),
+    ]);
+  });
+
+  it('지우고 나서 빈 값은 입력 없는 칸으로 빼고 줄은 남긴다', () => {
+    const onlyControl = line({ customOptions: [{ fieldKey: 'memo', value: '\u0000' }] });
+    expect(parseLines(JSON.stringify([onlyControl]))).toEqual([line()]);
+  });
+
+  it('지운 뒤 같은 줄이 되면 하나로 합친다 — 수량은 99 에서 자르고 담은 시각은 이른 쪽', () => {
+    const a = line({
+      quantity: 60,
+      addedAt: 5,
+      customOptions: [{ fieldKey: 'memo', value: 'a\tb' }],
+    });
+    const b = line({
+      quantity: 60,
+      addedAt: 3,
+      customOptions: [{ fieldKey: 'memo', value: 'a b' }],
+    });
+    expect(parseLines(JSON.stringify([a, b]))).toEqual([
+      line({ quantity: 99, addedAt: 3, customOptions: [{ fieldKey: 'memo', value: 'a b' }] }),
+    ]);
+  });
+});
+
+describe('addLines — 입력 문자 규칙', () => {
+  it('새 줄의 맞춤 입력에서 제어 문자를 지워 저장하고, 지운 값이 같으면 같은 줄이다', () => {
+    const added = addLines(
+      [],
+      [{ ...line(), customOptions: [{ fieldKey: 'memo', value: '긴\t소매\u0000' }] }],
+      9,
+    );
+    expect(added?.[0]?.customOptions).toEqual([{ fieldKey: 'memo', value: '긴 소매' }]);
+    const again = addLines(
+      added ?? [],
+      [{ ...line(), customOptions: [{ fieldKey: 'memo', value: '긴 소매' }] }],
+      10,
+    );
+    expect(again).toHaveLength(1);
+    expect(again?.[0]?.quantity).toBe(2);
+  });
 });
 
 describe('withoutMerged', () => {

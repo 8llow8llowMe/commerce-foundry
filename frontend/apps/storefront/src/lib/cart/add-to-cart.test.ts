@@ -23,6 +23,27 @@ describe('addMemberLines', () => {
     expect(post.mock.calls[0]![0]).toEqual({ skuId: '1', quantity: 1 });
   });
 
+  it('맞춤 입력은 로컬 담기와 같이 정규화해 보낸다 — 제어 문자로 400 CART_115 가 되지 않게', async () => {
+    const post = vi.fn().mockResolvedValue({});
+    await addMemberLines(
+      [
+        {
+          ...line('1'),
+          customOptions: [
+            { fieldKey: 'memo', value: '소매\t길게\u0000' },
+            { fieldKey: 'note', value: '\n' },
+          ],
+        },
+      ],
+      post,
+    );
+    expect(post.mock.calls[0]![0]).toEqual({
+      skuId: '1',
+      quantity: 1,
+      customOptions: [{ fieldKey: 'memo', value: '소매 길게' }],
+    });
+  });
+
   it('한 줄이 거절돼도(409) 나머지는 담고, 첫 거절과 담긴 수를 돌려준다', async () => {
     const conflict = error('conflict', 409);
     const post = vi.fn().mockRejectedValueOnce(conflict).mockResolvedValue({});

@@ -1,6 +1,9 @@
 import { ApiError } from '@cf/api-client';
-import { describe, expect, it } from 'vitest';
-import { mergeBatch, mergeLocalCart, mergeRequestItems } from './merge';
+import { describe, expect, it, vi } from 'vitest';
+import { hasRejectedCharacters } from './custom-input';
+import { parseLines } from './local-cart';
+import { mergeBatch, mergeLocalCart, mergeRequestItems, rejectedItemIndexes } from './merge';
+import type { CartItemRequest } from './types';
 
 const line = (skuId: string, addedAt: number) => ({
   skuId,
@@ -30,6 +33,51 @@ describe('mergeRequestItems', () => {
       { skuId: '1', quantity: 1 },
       { skuId: '2', quantity: 1, customOptions: [{ fieldKey: 'waist', value: '70' }] },
     ]);
+  });
+});
+
+describe('mergeRequestItems — 입력 문자 규칙(#263)', () => {
+  it('맞춤 입력의 제어 문자를 지워 싣고, 지워서 비는 칸은 뺀다', () => {
+    expect(
+      mergeRequestItems([
+        {
+          ...line('2', 2),
+          customOptions: [
+            { fieldKey: 'memo', value: '소매\t길게' },
+            { fieldKey: 'note', value: '\u0000' },
+          ],
+        },
+      ]),
+    ).toEqual([
+      { skuId: '2', quantity: 1, customOptions: [{ fieldKey: 'memo', value: '소매 길게' }] },
+    ]);
+  });
+});
+
+describe('rejectedItemIndexes', () => {
+  const invalid = (...fields: string[]) =>
+    new ApiError(
+      'validation',
+      400,
+      'CART_115',
+      null,
+      fields.map((field) => ({ code: 'CART_115', field, message: 'x' })),
+    );
+
+  it('fieldErrors 의 items[i] 경로에서 항목 번호를 모은다', () => {
+    expect(
+      rejectedItemIndexes(
+        invalid('items[1].customOptions[0].value', 'items[3].quantity', 'items[1].skuId'),
+        5,
+      ),
+    ).toEqual(new Set([1, 3]));
+  });
+
+  it('요청 전체 오류 · 보낸 수를 넘는 번호 · 오류 없음이면 null 이다', () => {
+    expect(rejectedItemIndexes(invalid('items'), 5)).toBeNull();
+    expect(rejectedItemIndexes(invalid('items[0].quantity', 'request'), 5)).toBeNull();
+    expect(rejectedItemIndexes(invalid('items[5].quantity'), 5)).toBeNull();
+    expect(rejectedItemIndexes(invalid(), 5)).toBeNull();
   });
 });
 
@@ -76,7 +124,7 @@ describe('mergeLocalCart', () => {
     }
   });
 
-  it('400(형식 오류)은 다시 보내도 같아서 보낸 줄을 버리고 수를 알린다', async () => {
+  it('400 이 어느 항목인지 가리키지 않으면(fieldErrors 없음) 다시 보내도 같아서 보낸 줄을 버리고 수를 알린다', async () => {
     const { run, removed } = setup(fail('validation', 400));
     expect(await run()).toEqual({ kind: 'invalid', dropped: 2 });
     expect(removed).toHaveLength(1);
@@ -100,5 +148,104 @@ describe('mergeLocalCart', () => {
       expect(await run()).toEqual({ kind: 'retryLater' });
       expect(removed).toEqual([]);
     }
+  });
+
+  describe('400 이 항목을 가리키면 그 줄만 빼고 한 번 다시 보낸다', () => {
+    const three = [line('1', 1), line('2', 2), line('3', 3)];
+    const rejectItem = (index: number) =>
+      new ApiError('validation', 400, 'CART_115', null, [
+        { code: 'CART_115', field: `items[${index}].customOptions[0].value`, message: 'x' },
+      ]);
+    const run = (post: (items: CartItemRequest[]) => Promise<unknown>) => {
+      const removed: unknown[] = [];
+      const result = mergeLocalCart({
+        read: () => three,
+        remove: (batch) => removed.push(batch),
+        post: post as never,
+      });
+      return { result, removed };
+    };
+
+    it('다시 보낸 것이 성공하면 뺀 줄을 건너뛴 수에 더한다', async () => {
+      const post = vi
+        .fn()
+        .mockRejectedValueOnce(rejectItem(1))
+        .mockResolvedValueOnce({ cart: {}, skippedItems: [] });
+      const { result, removed } = run(post);
+      expect(await result).toEqual({ kind: 'merged', skipped: 1 });
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(post.mock.calls[1]![0]).toEqual([
+        { skuId: '1', quantity: 1 },
+        { skuId: '3', quantity: 1 },
+      ]);
+      expect(removed).toEqual([[line('2', 2)], [line('1', 1), line('3', 3)]]);
+    });
+
+    it('다시 보낸 것도 400 이면 더 보내지 않고 남은 줄을 버린다', async () => {
+      const post = vi
+        .fn()
+        .mockRejectedValueOnce(rejectItem(1))
+        .mockRejectedValueOnce(rejectItem(0));
+      const { result, removed } = run(post);
+      expect(await result).toEqual({ kind: 'invalid', dropped: 3 });
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(removed).toEqual([[line('2', 2)], [line('1', 1), line('3', 3)]]);
+    });
+
+    it('다시 보낸 것이 429 면 뺀 줄만 지우고 나머지는 다음에 보낸다', async () => {
+      const post = vi
+        .fn()
+        .mockRejectedValueOnce(rejectItem(2))
+        .mockRejectedValueOnce(new ApiError('rateLimited', 429, 'GATEWAY_006', null));
+      const { result, removed } = run(post);
+      expect(await result).toEqual({ kind: 'retryLater' });
+      expect(removed).toEqual([[line('3', 3)]]);
+    });
+
+    it('모든 항목이 거절되면 다시 보내지 않는다', async () => {
+      const post = vi.fn().mockRejectedValueOnce(
+        new ApiError('validation', 400, 'CART_115', null, [
+          { code: 'CART_115', field: 'items[0].customOptions[0].value', message: 'x' },
+          { code: 'CART_115', field: 'items[1].customOptions[0].value', message: 'x' },
+          { code: 'CART_115', field: 'items[2].customOptions[0].value', message: 'x' },
+        ]),
+      );
+      const { result, removed } = run(post);
+      expect(await result).toEqual({ kind: 'invalid', dropped: 3 });
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(removed).toEqual([three]);
+    });
+  });
+
+  it('완료 기준(#263): 탭이 섞인 맞춤 입력이 있는 로컬 장바구니로 로그인해도 다른 줄이 사라지지 않는다', async () => {
+    // 입력 문자 규칙 전에 저장된 로컬 장바구니 — BE 처럼 제어 문자가 있으면 요청 전체를 400 CART_115 로 거절하는 서버로 보낸다
+    const stored = JSON.stringify([
+      line('1', 1),
+      { ...line('2', 2), customOptions: [{ fieldKey: 'memo', value: '소매\t길게' }] },
+      line('3', 3),
+    ]);
+    const post = vi.fn(async (items: CartItemRequest[]) => {
+      const index = items.findIndex((item) =>
+        (item.customOptions ?? []).some((option) => hasRejectedCharacters(option.value)),
+      );
+      if (index >= 0) {
+        throw new ApiError('validation', 400, 'CART_115', null, [
+          { code: 'CART_115', field: `items[${index}].customOptions[0].value`, message: 'x' },
+        ]);
+      }
+      return { cart: {}, skippedItems: [] };
+    });
+    const removed: unknown[] = [];
+    const result = await mergeLocalCart({
+      read: () => parseLines(stored),
+      remove: (batch) => removed.push(batch),
+      post: post as never,
+    });
+    expect(result).toEqual({ kind: 'merged', skipped: 0 });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0]![0].map((item) => item.skuId)).toEqual(['1', '2', '3']);
+    expect(post.mock.calls[0]![0][1]?.customOptions).toEqual([
+      { fieldKey: 'memo', value: '소매 길게' },
+    ]);
   });
 });
