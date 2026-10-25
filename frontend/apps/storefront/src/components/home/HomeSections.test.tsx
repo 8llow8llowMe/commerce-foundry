@@ -45,6 +45,7 @@ const listItem = (productId: string): ProductListItem => ({
   productId,
   name: `상품 ${productId}`,
   thumbnail: null,
+  hoverImage: null,
   salePrice: { amount: 1000, currency: 'KRW' },
   listPrice: null,
   discountRate: null,
@@ -322,6 +323,30 @@ describe('메인 전시 API 블록', () => {
     expect(html).toContain('aria-labelledby="display-1-title"');
     // 외부 링크는 opener · referrer 를 넘기지 않는다
     expect(html).toMatch(/<a rel="noopener noreferrer"[^>]*href="https:\/\/example.com\/lookbook"/);
+  });
+
+  it('상품 픽(API) 카드도 두 번째 이미지(hoverImage)가 있으면 hover · 포커스 때 겹쳐 보인다', async () => {
+    const image = (imageId: string) => ({
+      imageId,
+      url: `https://img.test/${imageId}.jpg`,
+      width: 900,
+      height: 1200,
+      altText: null,
+    });
+    const html = renderToStaticMarkup(
+      await ProductPickSection({
+        section: {
+          type: 'PRODUCT_PICK',
+          id: 'display-2',
+          title: 'The Edit',
+          viewAll: null,
+          products: [{ ...listItem('7'), thumbnail: image('a'), hoverImage: image('b') }],
+        },
+      }),
+    );
+    const hover = html.match(/<img[^>]*src="https:\/\/img.test\/b.jpg"[^>]*>/)?.[0] ?? '';
+    expect(hover).toContain('group-hover:opacity-100');
+    expect(hover).toContain('group-focus-visible:opacity-100');
   });
 
   it('상품 픽(API)의 상품이 비면 그리지 않고, 제목이 없으면 제목 · 이름 연결을 빼고 그린다', async () => {

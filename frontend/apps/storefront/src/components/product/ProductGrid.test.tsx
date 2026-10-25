@@ -7,6 +7,7 @@ const item = (productId: string): ProductListItem => ({
   productId,
   name: `상품 ${productId}`,
   thumbnail: null,
+  hoverImage: null,
   salePrice: { amount: 1000, currency: 'KRW' },
   listPrice: null,
   discountRate: null,

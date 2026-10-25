@@ -472,7 +472,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   | 유형 | 그리는 것 | 건너뜀 |
   |------|-----------|--------|
   | `HERO` | 첫 미디어만(여러 장 넘기기는 화보 촬영 후). IMAGE 는 PC · 모바일 사진(`<picture>`), VIDEO 는 PC 주소 재생 + 포스터. 제목은 한 줄 값이라 폭에 맞춰 줄바꿈하고, 없으면 h1 을 그리지 않는다. 링크가 주 버튼, `/shop` 이 아니면 SHOP 보조 버튼을 함께 둔다. 링크가 없으면 SHOP 이 주 버튼이다(모바일 첫 화면 버튼, #59 완료 기준) | 그릴 미디어 없음 |
-  | `PRODUCT_PICK` | 응답의 상품 카드를 `ProductCard` 로 그대로(목록 API 를 다시 부르지 않는다). 링크는 VIEW ALL | 상품 0개(숨긴 상품이 빠져 빈 배열로 올 수 있다) |
+  | `PRODUCT_PICK` | 응답의 상품 카드를 `ProductCard` 로 그대로(목록 API 를 다시 부르지 않는다 — 상품 카드는 목록 항목과 같은 모양이라 hover 용 `hoverImage` 도 함께 온다). 링크는 VIEW ALL | 상품 0개(숨긴 상품이 빠져 빈 배열로 올 수 있다) |
   | `STORY` | 레이아웃은 브랜드 설정의 STORY 순서를 따른다 — 응답의 n 번째 STORY 가 설정의 n 번째 STORY 레이아웃(curtain · panel …), 넘치면 asymmetric. 사진이 없으면 패널 외에는 centered | 제목 · 본문 · 미디어 모두 없음 |
   | `DETAIL` | 확대 지점(focus)이 API 에 없어 확대 무대 없이 클로즈업 + 캡션을 세로로(`frame: null`) | 미디어 없음 |
   | `LOOK` | 룩 API(#62) 전까지 응답 자리에 **브랜드 설정의 LOOK** 을 한 번 그린다(운영 값은 아직 쓰지 않는다) | 설정에 LOOK 없음 · 두 번째 LOOK |

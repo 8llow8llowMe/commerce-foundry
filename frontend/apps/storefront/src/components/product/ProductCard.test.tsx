@@ -15,6 +15,7 @@ const product = (overrides: Partial<ProductListItem> = {}): ProductListItem => (
     height: 1200,
     altText: '정면 착용컷',
   },
+  hoverImage: null,
   salePrice: { amount: 129000, currency: 'KRW' },
   listPrice: null,
   discountRate: null,

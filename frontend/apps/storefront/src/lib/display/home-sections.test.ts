@@ -39,6 +39,7 @@ const product = (productId: string): DisplayProductItem => ({
   productId,
   name: `상품 ${productId}`,
   thumbnail: null,
+  hoverImage: null,
   salePrice: { amount: 1000, currency: 'KRW' },
   listPrice: null,
   discountRate: null,
@@ -221,6 +222,29 @@ describe('toHomeBlocks — 매핑', () => {
       viewAll: { label: 'VIEW ALL', href: '/shop?categoryId=3' },
     });
     expect(pick && 'products' in pick && pick.products.map((p) => p.productId)).toEqual(['2', '1']);
+  });
+
+  it('상품 픽: 상품 카드의 hover 이미지(두 번째 정지 이미지)를 그대로 넘기고, 없으면 null 이다', () => {
+    const thumb = (imageId: string) => ({
+      imageId,
+      url: `https://cdn.test/${imageId}.jpg`,
+      width: 900,
+      height: 1200,
+      altText: null,
+    });
+    const withHover: DisplayElementItem = {
+      ...productItem('1'),
+      product: { ...product('1'), thumbnail: thumb('a'), hoverImage: thumb('b') },
+    };
+    const [pick] = toHomeBlocks(
+      [section('PRODUCT_PICK', '20', { items: [withHover, productItem('2')] })],
+      TEMPLATE,
+      labels,
+    );
+    expect(pick && 'products' in pick && pick.products.map((p) => p.hoverImage)).toEqual([
+      thumb('b'),
+      null,
+    ]);
   });
 
   it('스토리: 설정의 STORY 레이아웃을 순서대로 쓰고, 넘치면 asymmetric · 사진이 없으면 centered', () => {
