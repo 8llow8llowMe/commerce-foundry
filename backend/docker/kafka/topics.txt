@@ -9,3 +9,6 @@
 #     적어 Infra 선언 스크립트 반영을 요청한다.
 #
 # 예) order.order-expired 604800000
+
+# 백그라운드 작업 실행 신호 (#307) — 컨슈머 그룹 <ns>.operations.job-runner
+operations.job-run 604800000

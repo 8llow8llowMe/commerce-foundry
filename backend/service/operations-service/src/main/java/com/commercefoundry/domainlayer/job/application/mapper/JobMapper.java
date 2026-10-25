@@ -12,10 +12,11 @@ public interface JobMapper {
 
     /**
      * 활성 멱등 키는 상태에서 유도하므로 읽지 않는다 ({@link Job#activeDedupKey()}). 도메인은 canonical 생성자로 만든다 — 인자 하나를 받아 {@code Job} 을
-     * 돌려주는 전이 메서드({@code cancel} · {@code release})를 MapStruct 가 fluent setter 로 읽으므로 대상에서 뺀다.
+     * 돌려주는 전이 메서드({@code cancel} · {@code release} · {@code expireLease})를 MapStruct 가 fluent setter 로 읽으므로 대상에서 뺀다.
      */
     @Mapping(target = "cancel", ignore = true)
     @Mapping(target = "release", ignore = true)
+    @Mapping(target = "expireLease", ignore = true)
     Job toDomain(JobEntity entity);
 
     /**

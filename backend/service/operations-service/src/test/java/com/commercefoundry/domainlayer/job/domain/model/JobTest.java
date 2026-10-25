@@ -81,38 +81,47 @@ class JobTest {
         }
 
         @Test
-        @DisplayName("예약 시각 전 QUEUED · lease 가 유효한 RUNNING 은 가져갈 수 없다")
+        @DisplayName("예약 시각 전 QUEUED · RUNNING(lease 가 끝났어도)은 가져갈 수 없다 — 만료 회수는 expireLease 다")
         void rejectsNotClaimable() {
             Job scheduled = Job.register(1L, "REPORT", "{}", null, null, 0, NOW.plusSeconds(60), 3);
             Job running = queued(3, null).claim(WORKER, NOW, LEASE);
 
             assertThatThrownBy(() -> scheduled.claim(WORKER, NOW, LEASE)).isInstanceOf(JobTransitionException.class);
-            assertThatThrownBy(() -> running.claim(OTHER_WORKER, NOW.plus(LEASE), LEASE))
-                .as("lease 만료 시각과 같으면 아직 유효하다")
+            assertThatThrownBy(() -> running.claim(OTHER_WORKER, NOW.plus(LEASE).plusSeconds(1), LEASE))
                 .isInstanceOf(JobTransitionException.class);
+            assertThat(running.isClaimable(NOW.plus(LEASE).plusSeconds(1))).isFalse();
         }
+    }
+
+    @Nested
+    @DisplayName("expireLease")
+    class ExpireLease {
 
         @Test
-        @DisplayName("lease 가 만료된 RUNNING 은 새 워커가 다음 시도로 회수한다 — 이전 워커는 더 이상 주인이 아니다")
-        void reclaimsExpiredLease() {
-            Job running = queued(3, null).claim(WORKER, NOW, LEASE);
+        @DisplayName("lease 가 끝난 RUNNING 은 같은 시도 번호로 QUEUED(LEASE_EXPIRED)가 된다 — 지금 바로 다시 실행하고, 이전 워커는 더 이상 주인이 아니다")
+        void requeuesExpiredLease() {
+            Job running = queued(3, "KEY").claim(WORKER, NOW, LEASE);
             Instant later = NOW.plus(LEASE).plusSeconds(1);
 
-            Job reclaimed = running.claim(OTHER_WORKER, later, LEASE);
+            Job requeued = running.expireLease(later);
 
-            assertThat(reclaimed.status()).isEqualTo(JobStatus.RUNNING);
-            assertThat(reclaimed.attempt()).isEqualTo(2);
-            assertThat(reclaimed.workerId()).isEqualTo(OTHER_WORKER);
-            assertThat(reclaimed.errorCode()).isEqualTo(Job.LEASE_EXPIRED);
-            assertThat(reclaimed.isOwnedBy(WORKER, 1)).isFalse();
+            assertThat(requeued.status()).isEqualTo(JobStatus.QUEUED);
+            assertThat(requeued.attempt()).as("잃은 시도도 센다").isEqualTo(1);
+            assertThat(requeued.scheduledAt()).isEqualTo(later);
+            assertThat(requeued.workerId()).isNull();
+            assertThat(requeued.leaseExpiresAt()).isNull();
+            assertThat(requeued.errorCode()).isEqualTo(Job.LEASE_EXPIRED);
+            assertThat(requeued.activeDedupKey()).isEqualTo("KEY");
+            assertThat(requeued.isOwnedBy(WORKER, 1)).isFalse();
+            assertThat(requeued.claim(OTHER_WORKER, later, LEASE).attempt()).isEqualTo(2);
         }
 
         @Test
-        @DisplayName("lease 가 만료됐는데 시도 상한이면 FAILED(LEASE_EXPIRED)로 끝내고 활성 멱등 키를 비운다")
+        @DisplayName("lease 가 끝났는데 시도 상한이면 FAILED(LEASE_EXPIRED)로 끝내고 활성 멱등 키를 비운다")
         void failsExpiredLeaseAtLimit() {
             Job running = queued(1, "KEY").claim(WORKER, NOW, LEASE);
 
-            Job failed = running.claim(OTHER_WORKER, NOW.plus(LEASE).plusSeconds(1), LEASE);
+            Job failed = running.expireLease(NOW.plus(LEASE).plusSeconds(1));
 
             assertThat(failed.status()).isEqualTo(JobStatus.FAILED);
             assertThat(failed.errorCode()).isEqualTo(Job.LEASE_EXPIRED);
@@ -123,11 +132,21 @@ class JobTest {
         }
 
         @Test
-        @DisplayName("취소 요청을 받은 채 lease 가 만료되면 CANCELLED 로 끝낸다")
+        @DisplayName("취소 요청을 받은 채 lease 가 끝나면 CANCELLED 로 끝낸다")
         void cancelsExpiredLeaseWithCancelRequest() {
             Job running = queued(3, null).claim(WORKER, NOW, LEASE).requestCancel(7L, NOW);
 
-            assertThat(running.claim(OTHER_WORKER, NOW.plus(LEASE).plusSeconds(1), LEASE).status()).isEqualTo(JobStatus.CANCELLED);
+            assertThat(running.expireLease(NOW.plus(LEASE).plusSeconds(1)).status()).isEqualTo(JobStatus.CANCELLED);
+        }
+
+        @Test
+        @DisplayName("lease 가 아직 유효하거나(만료 시각과 같아도) RUNNING 이 아니면 회수할 수 없다")
+        void rejectsNotExpired() {
+            Job running = queued(3, null).claim(WORKER, NOW, LEASE);
+
+            assertThat(running.isLeaseExpired(NOW.plus(LEASE))).isFalse();
+            assertThatThrownBy(() -> running.expireLease(NOW.plus(LEASE))).isInstanceOf(JobTransitionException.class);
+            assertThatThrownBy(() -> queued(3, null).expireLease(NOW.plus(LEASE).plusSeconds(1))).isInstanceOf(JobTransitionException.class);
         }
     }
 

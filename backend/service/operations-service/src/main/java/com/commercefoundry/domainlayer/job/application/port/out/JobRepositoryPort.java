@@ -1,11 +1,10 @@
 package com.commercefoundry.domainlayer.job.application.port.out;
 
-import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.ExpiredJobLeaseQueryResult;
 import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import java.time.Instant;
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -36,11 +35,11 @@ public interface JobRepositoryPort {
     Optional<Job> findActiveByDedupKey(String type, String dedupKey);
 
     /**
-     * 지금 가져갈 수 있는 작업 — 예약 시각이 지난 QUEUED 와 lease 가 만료된 RUNNING. 우선순위 내림차순 → 예약 시각 → 아이디 오름차순으로 {@code limit} 건까지.
+     * lease 가 끝난 RUNNING(워커가 죽었다) — 만료 판정 트리거가 읽는다. {@code (lease_expires_at, id)} 오름차순 keyset 으로 {@code after} 다음부터 {@code limit} 건까지.
      *
-     * @param types 이 인스턴스가 실행할 수 있는 종류. 비었으면 조회하지 않고 빈 목록이다
+     * @param after 앞 배치의 마지막 건. 처음이면 null
      */
-    List<ClaimableJobQueryResult> findClaimable(Collection<String> types, Instant now, int limit);
+    List<ExpiredJobLeaseQueryResult> findExpiredLeases(Instant now, ExpiredJobLeaseQueryResult after, int limit);
 
     /**
      * 새 작업(버전 null)을 INSERT 한다.

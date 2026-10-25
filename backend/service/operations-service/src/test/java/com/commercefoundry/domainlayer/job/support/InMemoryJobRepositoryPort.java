@@ -3,18 +3,16 @@ package com.commercefoundry.domainlayer.job.support;
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
-import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.ExpiredJobLeaseQueryResult;
 import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import java.time.Instant;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -80,18 +78,17 @@ public class InMemoryJobRepositoryPort implements JobRepositoryPort {
         return jobs.values().stream().filter(job -> type.equals(job.type()) && dedupKey.equals(job.activeDedupKey())).findFirst();
     }
 
-    /** 어댑터와 같은 순서 — lease 만료 RUNNING(만료 시각 순)을 먼저, 남은 자리를 QUEUED(우선순위 내림차순 → 예약 시각 → 아이디)로 채운다. */
+    /** 어댑터와 같은 순서 — lease 만료 시각 → 아이디 오름차순, {@code after} 다음부터(keyset). */
     @Override
-    public List<ClaimableJobQueryResult> findClaimable(Collection<String> types, Instant now, int limit) {
-        Stream<Job> expired = jobs.values().stream()
-            .filter(job -> types.contains(job.type()) && job.status() == JobStatus.RUNNING && job.isClaimable(now))
-            .sorted(Comparator.comparing(Job::leaseExpiresAt).thenComparingLong(Job::id));
-        Stream<Job> queued = jobs.values().stream()
-            .filter(job -> types.contains(job.type()) && job.status() == JobStatus.QUEUED && job.isClaimable(now))
-            .sorted(Comparator.comparingInt(Job::priority).reversed().thenComparing(Job::scheduledAt).thenComparingLong(Job::id));
-        return Stream.concat(expired, queued)
+    public List<ExpiredJobLeaseQueryResult> findExpiredLeases(Instant now, ExpiredJobLeaseQueryResult after, int limit) {
+        Comparator<ExpiredJobLeaseQueryResult> order = Comparator.comparing(ExpiredJobLeaseQueryResult::leaseExpiresAt)
+            .thenComparingLong(ExpiredJobLeaseQueryResult::jobId);
+        return jobs.values().stream()
+            .filter(job -> job.isLeaseExpired(now))
+            .map(job -> new ExpiredJobLeaseQueryResult(job.id(), job.leaseExpiresAt()))
+            .filter(candidate -> after == null || order.compare(candidate, after) > 0)
+            .sorted(order)
             .limit(limit)
-            .map(job -> new ClaimableJobQueryResult(job.id(), job.type()))
             .toList();
     }
 

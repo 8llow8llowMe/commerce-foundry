@@ -19,9 +19,9 @@ public final class JobFixtures {
     public static JobProperties properties() {
         return new JobProperties(
             new JobProperties.Worker(
-                true, 2, Duration.ofSeconds(2), Duration.ofSeconds(10), Duration.ofMinutes(5),
-                Duration.ofMinutes(1), Duration.ofMinutes(30), Duration.ofSeconds(30)
+                true, 2, Duration.ofSeconds(2), Duration.ofMinutes(5), Duration.ofMinutes(1), Duration.ofMinutes(30), Duration.ofSeconds(30)
             ),
+            new JobProperties.LeaseSweep(Duration.ofSeconds(30), Duration.ofSeconds(30), 100, 10),
             new JobProperties.Retry(3, Duration.ofSeconds(30), 4, Duration.ofMinutes(30), 0.2),
             new JobProperties.Result(65536)
         );

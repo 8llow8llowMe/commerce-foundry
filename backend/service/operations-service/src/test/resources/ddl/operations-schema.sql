@@ -71,7 +71,7 @@
         '종료 시각 (SUCCEEDED / FAILED / CANCELLED 일 때만)';
 
     comment on column operations.job.lease_expires_at is
-        'lease 만료 시각 (RUNNING 일 때만) — 지나면 다른 워커가 회수한다';
+        'lease 만료 시각 (RUNNING 일 때만) — 지나면 만료 판정 트리거가 회수한다';
 
     comment on column operations.job.max_attempts is
         '시도 횟수 상한 (첫 실행 포함)';
@@ -80,7 +80,7 @@
         '핸들러 입력 JSON (16KiB 이하, 개인정보 원문 없음)';
 
     comment on column operations.job.priority is
-        '우선순위 — 클수록 먼저 가져간다';
+        '우선순위 — 등록 기록용. 실행 순서는 Kafka 파티션 도착 순서다';
 
     comment on column operations.job.progress_message is
         '진행 문구 (개인정보 원문 없음)';
@@ -95,7 +95,7 @@
         '작은 결과 JSON (기본 64KiB 이하, 개인정보 원문 없음)';
 
     comment on column operations.job.scheduled_at is
-        '이 시각부터 가져갈 수 있다 — 재시도면 백오프가 더해진 시각';
+        '이 시각부터 실행할 수 있다 — 재시도면 백오프가 더해진 시각';
 
     comment on column operations.job.started_at is
         '이번 시도를 가져간 시각';
@@ -112,11 +112,93 @@
     comment on column operations.job.worker_id is
         '작업을 쥔 워커 ({앱}:{호스트}:{pid}:{난수}). 끝난 작업은 마지막 워커, QUEUED 는 null';
 
-    create index idx_job_status_priority_scheduled_at_id 
-       on operations.job (status, priority desc, scheduled_at, id);
+    create table operations.outbox (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        aggregate_id varchar(100) not null,
+        aggregate_type varchar(50) not null,
+        available_at timestamp(6) with time zone not null,
+        event_type varchar(100) not null,
+        last_error_code varchar(100),
+        payload text not null,
+        publish_attempts integer not null,
+        published_at timestamp(6) with time zone,
+        schema_version integer not null,
+        version bigint not null,
+        primary key (id)
+    );
+
+    comment on table operations.outbox is
+        '이벤트 발행 대기열 (transactional outbox)';
+
+    comment on column operations.outbox.id is
+        'outbox 행 아이디 (Snowflake — 시간순, 같은 키의 발행 순서)';
+
+    comment on column operations.outbox.created_at is
+        '생성 시각';
+
+    comment on column operations.outbox.updated_at is
+        '수정 시각';
+
+    comment on column operations.outbox.aggregate_id is
+        '집합 아이디 — Kafka 키(같은 키는 같은 파티션 · 순서)';
+
+    comment on column operations.outbox.aggregate_type is
+        '집합 종류 (예: job)';
+
+    comment on column operations.outbox.available_at is
+        '이 시각부터 보낸다 — 예약 · 재시도 백오프 같은 지연 발행';
+
+    comment on column operations.outbox.event_type is
+        '이벤트 종류 — 토픽 끝 토막 (예: job-run)';
+
+    comment on column operations.outbox.last_error_code is
+        '마지막 발행 실패 코드 (예외 타입 · Kafka 오류 코드만, 메시지 원문 없음)';
+
+    comment on column operations.outbox.payload is
+        '이벤트 봉투 JSON (개인정보 원문 없음)';
+
+    comment on column operations.outbox.publish_attempts is
+        '실패한 발행 시도 수';
+
+    comment on column operations.outbox.published_at is
+        'Kafka 에 보낸 시각. 아직이면 null';
+
+    comment on column operations.outbox.schema_version is
+        '페이로드 계약 버전 (1부터)';
+
+    comment on column operations.outbox.version is
+        '낙관적 락 버전 — 발행 표시 · 실패 기록이 올린다';
+
+    create table operations.shedlock (
+        name varchar(64) not null,
+        lock_until timestamp(6) with time zone not null,
+        locked_at timestamp(6) with time zone not null,
+        locked_by varchar(255) not null,
+        primary key (name)
+    );
+
+    comment on table operations.shedlock is
+        '단일 실행 락 (ShedLock — outbox 릴레이)';
+
+    comment on column operations.shedlock.name is
+        '락 이름';
+
+    comment on column operations.shedlock.lock_until is
+        '이 시각까지 락을 쥔다';
+
+    comment on column operations.shedlock.locked_at is
+        '락을 잡은 시각';
+
+    comment on column operations.shedlock.locked_by is
+        '락을 잡은 인스턴스 (호스트 이름)';
 
     create index idx_job_status_lease_expires_at 
        on operations.job (status, lease_expires_at);
 
     create index idx_job_type_id 
        on operations.job (type, id);
+
+    create index idx_outbox_published_at_available_at 
+       on operations.outbox (published_at, available_at);

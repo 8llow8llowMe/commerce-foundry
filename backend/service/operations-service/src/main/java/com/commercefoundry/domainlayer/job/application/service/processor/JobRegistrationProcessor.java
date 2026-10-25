@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.job.application.service.processor;
 
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
+import com.commercefoundry.domainlayer.job.application.port.out.JobDispatchPort;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobHandlerProcessor.RegisteredJobHandler;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
@@ -20,13 +21,15 @@ import org.springframework.transaction.annotation.Transactional;
  * 주고받는 것은 domain({@link JobRequest} · {@link JobRegistration})이다.
  *
  * <p>트랜잭션을 이 Processor 에 건다 — 기능 Facade 가 자기 트랜잭션 안에서 부르면 그 트랜잭션에 합류해, 업무 변경과 작업 등록이 함께 커밋되거나
- * 함께 롤백된다. 트랜잭션 없이 부르면({@code JobRegisterUseCase}) 여기서 새로 연다.
+ * 함께 롤백된다. 트랜잭션 없이 부르면({@code JobRegisterUseCase}) 여기서 새로 연다. 새로 만든 작업의 실행 신호({@link JobDispatchPort})도 같은 트랜잭션에
+ * 쓰인다 — 등록이 롤백되면 신호도 나가지 않는다.
  */
 @Component
 @RequiredArgsConstructor
 public class JobRegistrationProcessor {
 
     private final JobRepositoryPort jobRepositoryPort;
+    private final JobDispatchPort jobDispatchPort;
     private final JobHandlerProcessor jobHandlerProcessor;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final Clock clock;
@@ -58,7 +61,9 @@ public class JobRegistrationProcessor {
             snowflakeIdGenerator.generateId(), request.type(), request.payloadJson(), request.dedupKey(), request.requestedByMemberId(),
             request.priority(), request.scheduledAt() != null ? request.scheduledAt() : now, handler.options().maxAttempts()
         );
-        return new JobRegistration(jobRepositoryPort.insert(job), true);
+        Job saved = jobRepositoryPort.insert(job);
+        jobDispatchPort.dispatch(saved);
+        return new JobRegistration(saved, true);
     }
 
     /** 같은 종류 · 같은 멱등 키의 활성 작업 — 동시 등록에서 진 쪽이 새 트랜잭션으로 이긴 작업을 읽는다. */

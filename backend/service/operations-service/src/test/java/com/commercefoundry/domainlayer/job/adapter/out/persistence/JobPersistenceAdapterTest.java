@@ -8,7 +8,7 @@ import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.mapper.JobMapperImpl;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
-import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.ExpiredJobLeaseQueryResult;
 import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
@@ -34,7 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * 작업의 저장 · merge(버전 검사) · 멱등 키 유니크 키 · 가져갈 후보 조회 · 조건부 UPDATE(heartbeat · 취소 요청)를 실제 PostgreSQL 에 질의해 본다
+ * 작업의 저장 · merge(버전 검사) · 멱등 키 유니크 키 · 리스 만료 후보 조회 · 조건부 UPDATE(heartbeat · 취소 요청)를 실제 PostgreSQL 에 질의해 본다
  * ({@code coding-conventions.md} §9-5). 스키마는 DDL 스냅숏 + {@code ddl-auto=validate} 다. Docker 없는 로컬은 건너뛰고 CI 에서는 Docker 가 없으면 실패한다.
  *
  * <p>여러 워커의 동시 가져가기는 실제 Processor 트랜잭션 경계로 {@code JobClaimConcurrencyTest} 가 본다.
@@ -91,27 +91,30 @@ class JobPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("가져갈 후보: lease 가 만료된 RUNNING 을 먼저, 남은 자리를 예약 시각이 지난 QUEUED(우선순위 내림차순 → 예약 시각 → 아이디)로 limit 건까지 채운다")
-    void findClaimableOrderAndFilters() {
-        jobRepositoryPort.insert(queued(11L, "REPORT", 0, NOW.minusSeconds(30), null));
-        jobRepositoryPort.insert(queued(12L, "REPORT", 5, NOW.minusSeconds(10), null));
-        jobRepositoryPort.insert(queued(13L, "REPORT", 0, NOW.minusSeconds(30), null));
-        jobRepositoryPort.insert(queued(14L, "REPORT", 0, NOW.plusSeconds(60), null));
-        jobRepositoryPort.insert(queued(15L, "OTHER", 9, NOW.minusSeconds(60), null));
-        // lease 가 만료된 RUNNING (워커가 죽었다) · 유효한 RUNNING · 끝난 작업
-        jobRepositoryPort.update(jobRepositoryPort.insert(queued(16L, "REPORT", 0, NOW.minusSeconds(600), null)).claim(WORKER, NOW.minusSeconds(600), LEASE));
+    @DisplayName("리스 만료 후보: lease 가 지난 RUNNING 만 (lease 만료 시각 → 아이디) 순으로 limit 건씩, 마지막 행 다음부터 이어 읽는다")
+    void findExpiredLeasesKeyset() {
+        // lease 가 지난 RUNNING — 16 · 19 는 같은 시각에 가져갔다
+        jobRepositoryPort.update(jobRepositoryPort.insert(queued(16L, "REPORT", 0, NOW.minusSeconds(900), null)).claim(WORKER, NOW.minusSeconds(900), LEASE));
+        jobRepositoryPort.update(jobRepositoryPort.insert(queued(19L, "OTHER", 0, NOW.minusSeconds(900), null)).claim(WORKER, NOW.minusSeconds(900), LEASE));
+        jobRepositoryPort.update(jobRepositoryPort.insert(queued(15L, "REPORT", 0, NOW.minusSeconds(600), null)).claim(WORKER, NOW.minusSeconds(600), LEASE));
+        // 유효한 RUNNING · 예약 시각이 지난 QUEUED · 끝난 작업은 후보가 아니다
         jobRepositoryPort.update(jobRepositoryPort.insert(queued(17L, "REPORT", 9, NOW.minusSeconds(60), null)).claim(WORKER, NOW.minusSeconds(60), LEASE));
-        Job running = jobRepositoryPort.update(jobRepositoryPort.insert(queued(18L, "REPORT", 9, NOW.minusSeconds(60), null)).claim(WORKER, NOW.minusSeconds(60), LEASE));
-        jobRepositoryPort.update(running.fail("E", null, false, NOW.minusSeconds(30), RETRY));
+        jobRepositoryPort.insert(queued(11L, "REPORT", 0, NOW.minusSeconds(600), null));
+        Job running = jobRepositoryPort.update(jobRepositoryPort.insert(queued(18L, "REPORT", 9, NOW.minusSeconds(900), null)).claim(WORKER, NOW.minusSeconds(900), LEASE));
+        jobRepositoryPort.update(running.fail("E", null, false, NOW.minusSeconds(800), RETRY));
         entityManager.clear();
 
-        List<ClaimableJobQueryResult> candidates = jobRepositoryPort.findClaimable(List.of("REPORT"), NOW, 10);
+        List<ExpiredJobLeaseQueryResult> all = jobRepositoryPort.findExpiredLeases(NOW, null, 10);
 
-        assertThat(candidates).extracting(ClaimableJobQueryResult::jobId).containsExactly(16L, 12L, 11L, 13L);
-        assertThat(candidates).extracting(ClaimableJobQueryResult::type).containsOnly("REPORT");
-        assertThat(jobRepositoryPort.findClaimable(List.of("REPORT"), NOW, 2)).extracting(ClaimableJobQueryResult::jobId).containsExactly(16L, 12L);
-        assertThat(jobRepositoryPort.findClaimable(List.of("OTHER"), NOW, 1)).extracting(ClaimableJobQueryResult::jobId).containsExactly(15L);
-        assertThat(jobRepositoryPort.findClaimable(List.of(), NOW, 10)).isEmpty();
+        assertThat(all).extracting(ExpiredJobLeaseQueryResult::jobId).containsExactly(16L, 19L, 15L);
+        assertThat(all.getFirst().leaseExpiresAt()).isEqualTo(NOW.minusSeconds(900).plus(LEASE));
+
+        List<ExpiredJobLeaseQueryResult> first = jobRepositoryPort.findExpiredLeases(NOW, null, 1);
+        assertThat(first).extracting(ExpiredJobLeaseQueryResult::jobId).containsExactly(16L);
+        assertThat(jobRepositoryPort.findExpiredLeases(NOW, first.getFirst(), 1)).as("같은 lease 시각 안에서는 아이디로 잇는다")
+            .extracting(ExpiredJobLeaseQueryResult::jobId).containsExactly(19L);
+        assertThat(jobRepositoryPort.findExpiredLeases(NOW, all.get(1), 10)).extracting(ExpiredJobLeaseQueryResult::jobId).containsExactly(15L);
+        assertThat(jobRepositoryPort.findExpiredLeases(NOW, all.getLast(), 10)).isEmpty();
     }
 
     @Test
@@ -170,12 +173,12 @@ class JobPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("merge 버전 검사: heartbeat 가 버전을 올린 뒤 옛 버전으로 저장하면 JOB_CONFLICT — 만료로 회수하려던 다른 워커가 진다")
+    @DisplayName("merge 버전 검사: heartbeat 가 버전을 올린 뒤 옛 버전으로 저장하면 JOB_CONFLICT — 옛 lease 로 만료 판정한 쪽이 진다")
     void staleUpdateConflicts() {
         Job running = jobRepositoryPort.update(jobRepositoryPort.insert(queued(31L, "REPORT", 0, NOW, null)).claim(WORKER, NOW, LEASE));
         jobRepositoryPort.heartbeat(31L, WORKER, 1, 10, null, NOW.plus(LEASE).plusSeconds(60), NOW.plusSeconds(60));
 
-        Job staleReclaim = running.claim(OTHER_WORKER, NOW.plus(LEASE).plusSeconds(1), LEASE);
+        Job staleReclaim = running.expireLease(NOW.plus(LEASE).plusSeconds(1));
 
         assertThatThrownBy(() -> jobRepositoryPort.update(staleReclaim))
             .isInstanceOfSatisfying(JobException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(JobErrorCode.JOB_CONFLICT));

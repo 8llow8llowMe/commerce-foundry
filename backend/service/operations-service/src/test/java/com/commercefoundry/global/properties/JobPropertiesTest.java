@@ -22,12 +22,15 @@ class JobPropertiesTest {
     private static final Map<String, String> VALID = Map.ofEntries(
         Map.entry("operations.jobs.worker.enabled", "true"),
         Map.entry("operations.jobs.worker.concurrency", "2"),
-        Map.entry("operations.jobs.worker.poll-interval", "2s"),
-        Map.entry("operations.jobs.worker.initial-delay", "10s"),
+        Map.entry("operations.jobs.worker.redelivery-delay", "2s"),
         Map.entry("operations.jobs.worker.default-lease", "5m"),
         Map.entry("operations.jobs.worker.heartbeat-interval", "1m"),
         Map.entry("operations.jobs.worker.default-max-run-duration", "30m"),
         Map.entry("operations.jobs.worker.shutdown-grace", "30s"),
+        Map.entry("operations.jobs.lease-sweep.initial-delay", "30s"),
+        Map.entry("operations.jobs.lease-sweep.fixed-delay", "30s"),
+        Map.entry("operations.jobs.lease-sweep.batch-size", "100"),
+        Map.entry("operations.jobs.lease-sweep.max-batches-per-run", "10"),
         Map.entry("operations.jobs.retry.max-attempts", "3"),
         Map.entry("operations.jobs.retry.base-delay", "30s"),
         Map.entry("operations.jobs.retry.multiplier", "4"),
@@ -44,6 +47,8 @@ class JobPropertiesTest {
         assertThat(properties.worker().concurrency()).isEqualTo(2);
         assertThat(properties.worker().heartbeatInterval()).isEqualTo(Duration.ofMinutes(1));
         assertThat(properties.worker().shutdownGrace()).isEqualTo(Duration.ofSeconds(30));
+        assertThat(properties.worker().redeliveryDelay()).isEqualTo(Duration.ofSeconds(2));
+        assertThat(properties.leaseSweep()).isEqualTo(new JobProperties.LeaseSweep(Duration.ofSeconds(30), Duration.ofSeconds(30), 100, 10));
         assertThat(properties.result().maxJsonBytes()).isEqualTo(65536);
         assertThat(properties.defaultHandlerOptions())
             .isEqualTo(new JobHandlerOptions(Duration.ofMinutes(5), 3, Duration.ofMinutes(30), 2));
@@ -53,12 +58,16 @@ class JobPropertiesTest {
     @ParameterizedTest(name = "{0}={1}")
     @CsvSource({
         "operations.jobs.worker.concurrency, 0",
-        "operations.jobs.worker.poll-interval, 0s",
-        "operations.jobs.worker.initial-delay, -1s",
+        "operations.jobs.worker.redelivery-delay, 0s",
+        "operations.jobs.worker.redelivery-delay, 61s",
         "operations.jobs.worker.default-lease, 0s",
         "operations.jobs.worker.heartbeat-interval, 0s",
         "operations.jobs.worker.default-max-run-duration, 0s",
         "operations.jobs.worker.shutdown-grace, 0s",
+        "operations.jobs.lease-sweep.initial-delay, 0s",
+        "operations.jobs.lease-sweep.fixed-delay, -1s",
+        "operations.jobs.lease-sweep.batch-size, 0",
+        "operations.jobs.lease-sweep.max-batches-per-run, 0",
         "operations.jobs.retry.max-attempts, 0",
         "operations.jobs.retry.base-delay, 0s",
         "operations.jobs.retry.multiplier, 0.5",

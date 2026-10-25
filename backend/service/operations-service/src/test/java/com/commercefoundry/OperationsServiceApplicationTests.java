@@ -2,7 +2,9 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.commercefoundry.domainlayer.job.adapter.in.scheduler.JobWorkerScheduler;
+import com.commercefoundry.domainlayer.job.adapter.in.event.JobRunEventListener;
+import com.commercefoundry.domainlayer.job.adapter.in.scheduler.JobLeaseExpiryScheduler;
+import com.commercefoundry.messaging.outbox.OutboxStore;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.zaxxer.hikari.HikariDataSource;
@@ -24,6 +26,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.scheduling.config.FixedDelayTask;
@@ -61,7 +64,7 @@ class OperationsServiceApplicationTests {
     }
 
     @Test
-    @DisplayName("업무 시각 Clock 은 UTC 하나이고, 작업 워커 폴러가 쓸 @Scheduled 처리기가 켜져 있다")
+    @DisplayName("업무 시각 Clock 은 UTC 하나이고, 리스 만료 판정이 쓸 @Scheduled 처리기가 켜져 있다")
     void clockAndSchedulingAreConfigured() {
         assertThat(applicationContext.getBeanNamesForType(Clock.class)).hasSize(1);
         assertThat(applicationContext.getBean(Clock.class).getZone()).isEqualTo(ZoneOffset.UTC);
@@ -83,25 +86,33 @@ class OperationsServiceApplicationTests {
 
     /**
      * 작업 워커 전용 실행기 · 스케줄러 빈이 Boot 기본 빈을 밀어내지 않는다 — {@code applicationTaskExecutor} 는 Executor 빈이 하나라도 있으면,
-     * {@code taskScheduler} 는 TaskScheduler 빈이 하나라도 있으면 빠지는 조건이다. 밀려나면 {@code @Scheduled} 폴러가 heartbeat 스레드를 같이 쓴다.
+     * {@code taskScheduler} 는 TaskScheduler 빈이 하나라도 있으면 빠지는 조건이다. 밀려나면 {@code @Scheduled} 만료 판정이 heartbeat 스레드를 같이 쓴다.
      */
     @Test
-    @DisplayName("Boot 기본 applicationTaskExecutor · taskScheduler 가 그대로 있고, 폴러는 그 스케줄러에서 설정 주기(test 100ms)로 돈다")
-    void bootDefaultsSurviveAndPollerIsScheduled() {
+    @DisplayName("Boot 기본 applicationTaskExecutor · taskScheduler 가 그대로 있고, 리스 만료 판정은 그 스케줄러에서 설정 주기(test 200ms)로 돈다")
+    void bootDefaultsSurviveAndLeaseSweepIsScheduled() {
         assertThat(applicationContext.containsBean("applicationTaskExecutor")).as("applicationTaskExecutor").isTrue();
         assertThat(applicationContext.containsBean("taskScheduler")).as("taskScheduler").isTrue();
         assertThat(applicationContext.getBean("taskScheduler")).isNotSameAs(applicationContext.getBean("jobLeaseTaskScheduler"));
 
-        List<FixedDelayTask> pollers = applicationContext.getBeansOfType(ScheduledTaskHolder.class).values().stream()
+        List<FixedDelayTask> sweeps = applicationContext.getBeansOfType(ScheduledTaskHolder.class).values().stream()
             .flatMap(holder -> holder.getScheduledTasks().stream())
             .map(ScheduledTask::getTask)
             .filter(FixedDelayTask.class::isInstance)
             .map(FixedDelayTask.class::cast)
-            .filter(task -> task.toString().contains(JobWorkerScheduler.class.getName()))
+            .filter(task -> task.toString().contains(JobLeaseExpiryScheduler.class.getName()))
             .toList();
-        assertThat(pollers).hasSize(1);
-        assertThat(pollers.getFirst().getIntervalDuration()).isEqualTo(Duration.ofMillis(100));
-        assertThat(pollers.getFirst().getInitialDelayDuration()).isEqualTo(Duration.ofMillis(100));
+        assertThat(sweeps).hasSize(1);
+        assertThat(sweeps.getFirst().getIntervalDuration()).isEqualTo(Duration.ofMillis(200));
+        assertThat(sweeps.getFirst().getInitialDelayDuration()).isEqualTo(Duration.ofMillis(100));
+    }
+
+    @Test
+    @DisplayName("메시징이 꺼져 있어도 outbox 저장소는 조립되고, 실행 신호 리스너는 만들지 않는다 — 컨텍스트를 재시작해도 컨슈머가 뜨지 않는다")
+    void outboxStoreIsWiredAndListenerIsAbsent() {
+        assertThat(applicationContext.getBeanNamesForType(OutboxStore.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(JobRunEventListener.class)).isEmpty();
+        assertThat(applicationContext.getBean(KafkaListenerEndpointRegistry.class).getListenerContainer("job-runner")).isNull();
     }
 
     @Test

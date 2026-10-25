@@ -14,27 +14,31 @@ import lombok.Builder;
  *
  * <table>
  *   <caption>허용 전이 (표 밖은 {@link JobTransitionException} — Processor 가 409 오류 코드로 바꾼다)</caption>
- *   <tr><th>현재</th><th>claim</th><th>succeed</th><th>fail</th><th>cancel</th><th>requestCancel</th><th>release</th></tr>
- *   <tr><td>QUEUED (예약 시각 지남)</td><td>RUNNING (attempt+1)</td><td>✕</td><td>✕</td><td>CANCELLED</td><td>CANCELLED</td><td>✕</td></tr>
- *   <tr><td>QUEUED (예약 시각 전)</td><td>✕</td><td>✕</td><td>✕</td><td>CANCELLED</td><td>CANCELLED</td><td>✕</td></tr>
+ *   <tr><th>현재</th><th>claim</th><th>succeed</th><th>fail</th><th>cancel</th><th>requestCancel</th><th>release</th><th>expireLease</th></tr>
+ *   <tr><td>QUEUED (예약 시각 지남)</td><td>RUNNING (attempt+1)</td><td>✕</td><td>✕</td><td>CANCELLED</td><td>CANCELLED</td><td>✕</td><td>✕</td></tr>
+ *   <tr><td>QUEUED (예약 시각 전)</td><td>✕</td><td>✕</td><td>✕</td><td>CANCELLED</td><td>CANCELLED</td><td>✕</td><td>✕</td></tr>
  *   <tr><td>RUNNING (lease 유효)</td><td>✕</td><td>SUCCEEDED</td><td>QUEUED(재시도) · FAILED · CANCELLED(취소 요청됨)</td><td>CANCELLED</td>
- *       <td>그대로 + 취소 요청 플래그 (멱등)</td><td>QUEUED (attempt−1) · CANCELLED(취소 요청됨)</td></tr>
- *   <tr><td>RUNNING (lease 만료)</td><td>RUNNING (새 워커, attempt+1) · 상한이면 FAILED({@link #LEASE_EXPIRED}) · 취소 요청됨이면 CANCELLED</td>
- *       <td colspan="5">lease 유효와 같다 — 끝내기 전에 Processor 가 {@link #isOwnedBy} 로 아직 자기 실행인지 확인한다</td></tr>
- *   <tr><td>SUCCEEDED · FAILED · CANCELLED</td><td colspan="6">✕ (끝난 작업)</td></tr>
+ *       <td>그대로 + 취소 요청 플래그 (멱등)</td><td>QUEUED (attempt−1) · CANCELLED(취소 요청됨)</td><td>✕</td></tr>
+ *   <tr><td>RUNNING (lease 만료)</td><td>✕</td>
+ *       <td colspan="5">lease 유효와 같다 — 끝내기 전에 Processor 가 {@link #isOwnedBy} 로 아직 자기 실행인지 확인한다</td>
+ *       <td>QUEUED (attempt 유지 — 쓴 시도) · 상한이면 FAILED({@link #LEASE_EXPIRED}) · 취소 요청됨이면 CANCELLED</td></tr>
+ *   <tr><td>SUCCEEDED · FAILED · CANCELLED</td><td colspan="7">✕ (끝난 작업)</td></tr>
  * </table>
+ *
+ * <p>실행 신호는 Kafka 가 나르고 정본은 이 행이다 — 가져가기({@link #claim})는 신호가 가리킨 시도({@link #attempt})와 같을 때만 한다(Processor).
+ * 워커가 죽어 lease 가 끝난 RUNNING 은 만료 판정 트리거가 {@link #expireLease} 로 QUEUED 로 되돌리고 다시 신호를 낸다.
  *
  * <p>{@link #activeDedupKey()} 는 QUEUED · RUNNING 동안만 멱등 키이고 끝나면 null 이다. 유니크 키({@code uk_job_type_active_dedup_key})가 같은 키의 활성 작업을
  * 하나로 막고, 끝난 키는 다시 등록할 수 있다 — PostgreSQL 유니크 키는 null 을 겹치게 둔다 ({@code uk_stock_reservation_active_order_id} 와 같은 방식).
  *
- * @param priority 클수록 먼저 가져간다
+ * @param priority 등록 순서의 뜻만 남는다 — 실행 신호(Kafka)에는 우선순위가 없다
  * @param payloadJson 핸들러 입력 JSON ({@link #MAX_PAYLOAD_BYTES} 이하). 개인정보 원문을 싣지 않는다
  * @param dedupKey 멱등 키. 없으면 null
  * @param requestedByMemberId 등록한 어드민 (auth-service member id). 시스템 등록이면 null
  * @param scheduledAt 이 시각부터 가져갈 수 있다. 재시도면 백오프가 더해진 시각이다
  * @param attempt 지금까지 가져간 시도 수 (0 부터). RUNNING 이면 지금 실행 중인 시도 번호다
  * @param workerId RUNNING 이면 쥔 워커. 끝난 작업은 마지막에 실행한 워커를 남긴다. QUEUED 는 null
- * @param leaseExpiresAt RUNNING 일 때만 있다. heartbeat 가 연장하고, 이 시각이 지나면 다른 워커가 회수한다
+ * @param leaseExpiresAt RUNNING 일 때만 있다. heartbeat 가 연장하고, 이 시각이 지나면 만료 판정 트리거가 회수한다
  * @param startedAt RUNNING 이면 이번 시도를 가져간 시각
  * @param finishedAt 끝난 작업(SUCCEEDED · FAILED · CANCELLED)만 있다
  * @param progressPercent 0 ~ 100. 보고 전이면 null
@@ -132,10 +136,14 @@ public record Job(
         return status.isActive() ? dedupKey : null;
     }
 
-    /** 지금 워커가 가져갈 수 있는가 — 예약 시각이 지난 QUEUED, 또는 lease 가 만료된 RUNNING. */
+    /** 지금 워커가 가져갈 수 있는가 — 예약 시각이 지난 QUEUED. */
     public boolean isClaimable(Instant now) {
-        return status == JobStatus.QUEUED && !scheduledAt.isAfter(now)
-            || status == JobStatus.RUNNING && leaseExpiresAt.isBefore(now);
+        return status == JobStatus.QUEUED && !scheduledAt.isAfter(now);
+    }
+
+    /** 워커가 죽었는가 — lease 가 끝난 RUNNING. 만료 판정 트리거가 {@link #expireLease} 로 회수한다. */
+    public boolean isLeaseExpired(Instant now) {
+        return status == JobStatus.RUNNING && leaseExpiresAt.isBefore(now);
     }
 
     /** 아직 이 워커의 이 시도인가 — 끝내기 전 확인. 다른 워커가 회수했거나 끝났으면 늦게 끝난 실행의 결과를 버린다. */
@@ -144,8 +152,7 @@ public record Job(
     }
 
     /**
-     * 워커가 가져간다. 예약 시각이 지난 QUEUED 면 새 시도를 시작한다. lease 가 만료된 RUNNING(워커가 죽었다)이면 새 워커가 다음 시도로 회수하는데,
-     * 시도 상한이면 FAILED({@link #LEASE_EXPIRED}), 취소 요청을 받았으면 CANCELLED 로 끝낸다. 결과가 RUNNING 일 때만 실행한다.
+     * 워커가 가져간다 — 예약 시각이 지난 QUEUED 의 새 시도를 시작한다.
      *
      * @throws JobTransitionException 가져갈 수 없다 ({@link #isClaimable} 이 false)
      */
@@ -159,24 +166,35 @@ public record Job(
         if (!isClaimable(now)) {
             throw new JobTransitionException(status, JobTransitionException.Action.CLAIM);
         }
-        if (status == JobStatus.RUNNING && cancelRequested) {
-            return finish(JobStatus.CANCELLED, now).build();
-        }
-        if (status == JobStatus.RUNNING && attempt >= maxAttempts) {
-            return finish(JobStatus.FAILED, now).errorCode(LEASE_EXPIRED).errorMessage("워커 응답이 끊겨 lease 가 만료됐고 시도 상한에 닿았습니다.").build();
-        }
-        JobBuilder next = toBuilder()
+        return toBuilder()
             .status(JobStatus.RUNNING)
             .attempt(attempt + 1)
             .workerId(workerId)
             .leaseExpiresAt(now.plus(lease))
             .startedAt(now)
             .progressPercent(null)
-            .progressMessage(null);
-        if (status == JobStatus.RUNNING) {
-            next.errorCode(LEASE_EXPIRED).errorMessage("이전 시도의 워커 응답이 끊겨 lease 가 만료돼 다시 실행합니다.");
+            .progressMessage(null)
+            .build();
+    }
+
+    /**
+     * lease 가 끝난 RUNNING(워커가 죽었다)을 회수한다. 그 시도는 쓴 것으로 보고 attempt 를 그대로 두고 바로 다시 가져갈 수 있는 QUEUED 로 되돌린다 —
+     * 시도 상한이면 FAILED({@link #LEASE_EXPIRED}), 취소 요청을 받았으면 CANCELLED 로 끝낸다. 죽은 워커가 늦게 끝내도 {@link #isOwnedBy} 가 막는다.
+     *
+     * @throws JobTransitionException lease 가 끝난 RUNNING 이 아니다 ({@link #isLeaseExpired} 가 false)
+     */
+    public Job expireLease(Instant now) {
+        Objects.requireNonNull(now, "now");
+        if (!isLeaseExpired(now)) {
+            throw new JobTransitionException(status, JobTransitionException.Action.EXPIRE_LEASE);
         }
-        return next.build();
+        if (cancelRequested) {
+            return finish(JobStatus.CANCELLED, now).build();
+        }
+        if (attempt >= maxAttempts) {
+            return finish(JobStatus.FAILED, now).errorCode(LEASE_EXPIRED).errorMessage("워커 응답이 끊겨 lease 가 만료됐고 시도 상한에 닿았습니다.").build();
+        }
+        return toQueued(now, attempt).errorCode(LEASE_EXPIRED).errorMessage("이전 시도의 워커 응답이 끊겨 lease 가 만료돼 다시 실행합니다.").build();
     }
 
     /**

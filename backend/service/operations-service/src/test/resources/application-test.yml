@@ -2,6 +2,7 @@
 #   - DB: H2 인메모리(PostgreSQL 모드). Docker 없이 로컬과 CI 가 같은 결과를 낸다.
 #     락 · timestamptz · 인덱스처럼 엔진에 기대는 동작은 여기서 검증되지 않는다 — 리포지토리 테스트는 Testcontainers 로 따로 둔다.
 #   - Eureka: 끈다. 등록·조회를 시도하면 CI 에서 연결 오류로 늘어진다.
+#   - Kafka: 메시징을 끈다(기본값). 실행 신호는 outbox 에 쌓이기만 한다 — 흐름 테스트(JobWorkerFlowTest)가 내장 Kafka 로 켠다.
 # 값은 전부 테스트 전용이다. 비밀이 아니다.
 
 spring:
@@ -25,16 +26,18 @@ snowflake:
   datacenter-id: 1
   worker-id: 1
 
-# 작업 엔진을 빠른 값으로 덮는다 — 흐름 테스트가 재시도 · lease · 취소를 몇 초 안에 본다. 컨텍스트 테스트에는 핸들러가 없어 폴링이 조회하지 않는다
+# 작업 엔진을 빠른 값으로 덮는다 — 흐름 테스트가 재시도 · lease · 취소를 몇 초 안에 본다
 operations:
   jobs:
     worker:
-      poll-interval: 100ms
-      initial-delay: 100ms
+      redelivery-delay: 200ms
       default-lease: 2s
       heartbeat-interval: 200ms
       default-max-run-duration: 30s
       shutdown-grace: 2s
+    lease-sweep:
+      initial-delay: 100ms
+      fixed-delay: 200ms
     retry:
       base-delay: 50ms
       multiplier: 2

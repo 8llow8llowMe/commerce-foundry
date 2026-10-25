@@ -15,7 +15,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  *
  * <p>두 빈 모두 {@code defaultCandidate = false} 다 — 타입으로 주입되지 않고 {@code @Qualifier} 로만 받는다. 일반 빈으로 두면 Boot 가
  * "Executor 빈이 이미 있다" 며 {@code applicationTaskExecutor} 를 만들지 않는다(실험으로 확인, #212). TaskScheduler 빈도 같아서 {@code taskScheduler} 가
- * 빠지면 {@code @Scheduled} 폴러가 heartbeat 스레드를 같이 쓰게 된다. Boot 의 빈 조건은 기본 후보가 아닌 빈을 세지 않는다
+ * 빠지면 {@code @Scheduled} lease 만료 판정이 heartbeat 스레드를 같이 쓰게 된다. Boot 의 빈 조건은 기본 후보가 아닌 빈을 세지 않는다
  * ({@code OperationsServiceApplicationTests} 가 두 기본 빈이 남는지 본다).
  */
 @Slf4j
@@ -35,7 +35,7 @@ public class JobWorkerExecutorConfig {
     }
 
     /**
-     * 핸들러 실행 스레드. core = max = {@code worker.concurrency}, 큐 0 — 쌓아 두지 않고 빈 스레드가 있을 때만 받는다(워커는 빈 칸만큼만 가져간다).
+     * 핸들러 실행 스레드. core = max = {@code worker.concurrency}, 큐 0 — 쌓아 두지 않고 빈 스레드가 있을 때만 받는다(워커는 빈 칸이 있을 때만 가져간다).
      * 기다리기는 워커 lifecycle 이 이미 했다 — 그 뒤 남은 스레드는 돌려놓은 시도라 빈을 닫을 때 더 기다리지 않고 interrupt 한다.
      */
     @Bean(defaultCandidate = false)
@@ -53,7 +53,7 @@ public class JobWorkerExecutorConfig {
     }
 
     /**
-     * heartbeat(lease 연장 · 진행률 기록) 스레드 하나. 폴러(@Scheduled)와 나눠, 폴링이 늦어져도 lease 가 끊기지 않게 한다.
+     * heartbeat(lease 연장 · 진행률 기록) 스레드 하나. @Scheduled 스레드와 나눠, 만료 판정이 늦어져도 lease 가 끊기지 않게 한다.
      * 컨텍스트 종료 이벤트 뒤에도 받는다 — 종료 lifecycle 이 실행 중인 작업을 기다리는 동안 lease 를 계속 연장해야 한다.
      */
     @Bean(defaultCandidate = false)
