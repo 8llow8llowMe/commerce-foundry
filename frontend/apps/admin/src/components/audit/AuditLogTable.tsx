@@ -1,19 +1,12 @@
 import { cx } from '@cf/ui';
-import type { AdminDirectory } from '@/lib/audit/admins';
 import type { AuditLogItem } from '@/lib/audit/types';
 import { describeAuditLog, formatAuditTime } from '@/lib/audit/view';
 
 /**
  * 관리자 감사 로그 표(#320 · #305). 운영자 문구만 보인다 — 행위 · 결과는 업무 이름, 대상은 문장(`targetText`),
- * 관리자는 마스킹한 이름(이름표에 없으면 "관리자"). 행위 · 결과 코드, 대상 원문, 회원 · 감사 로그 아이디는 내지 않는다.
+ * 관리자는 "관리자"(이름은 BE #322 뒤). 행위 · 결과 코드, 대상 원문, 회원 · 감사 로그 아이디는 내지 않는다.
  */
-export function AuditLogTable({
-  logs,
-  admins,
-}: {
-  logs: AuditLogItem[];
-  admins: AdminDirectory | null;
-}) {
+export function AuditLogTable({ logs }: { logs: AuditLogItem[] }) {
   return (
     // sr-only 같은 absolute 요소가 스크롤 상자 밖으로 나가지 않게 relative 를 준다
     <div className="relative overflow-x-auto">
@@ -40,7 +33,7 @@ export function AuditLogTable({
         </thead>
         <tbody>
           {logs.map((log) => {
-            const view = describeAuditLog(log, admins);
+            const view = describeAuditLog(log);
             return (
               <tr key={log.auditLogId} className="border-t border-border align-top">
                 <th
