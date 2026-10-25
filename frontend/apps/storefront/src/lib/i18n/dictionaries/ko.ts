@@ -152,6 +152,12 @@ export const ko = {
       maxPerOrder: '한 번에 최대 {count}개까지 주문할 수 있습니다.',
       addToCart: '장바구니 담기',
       buy: '구매하기',
+      /** 모바일 구매 바텀시트 닫기 */
+      closeSheet: '옵션 선택 닫기',
+    },
+    delivery: {
+      /** 맞춤 제작 상품의 제작 기간 — 가격 아래 · 하단 구매 바 */
+      madeToOrder: '주문 후 약 {days}일 제작 뒤 발송',
     },
     option: { soldOut: '품절', unavailable: '선택 불가' },
     customOrder: {

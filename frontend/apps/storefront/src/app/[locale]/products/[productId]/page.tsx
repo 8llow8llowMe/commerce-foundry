@@ -7,6 +7,7 @@ import { ProductGallery } from '@/components/product/detail/ProductGallery';
 import { ProductInfoAccordion } from '@/components/product/detail/ProductInfoAccordion';
 import { PurchasePanel, type PurchaseProduct } from '@/components/product/detail/PurchasePanel';
 import { ProductLooks } from '@/components/product/look/ProductLooks';
+import { deliveryNote } from '@/lib/catalog/delivery-note';
 import { loadShippingNotice } from '@/lib/catalog/load-shipping-notice';
 import { productJsonLd } from '@/lib/catalog/product-jsonld';
 import { shopHref } from '@/lib/catalog/shop-query';
@@ -81,13 +82,16 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
   // 클라이언트 컴포넌트에는 필요한 것만 넘긴다(원문 HTML · 갤러리는 서버에서만 쓴다)
   const { descriptionHtml, images, categoryPath, ...purchase } = product;
   const purchaseProduct: PurchaseProduct = purchase;
+  const shipping = await shippingNotice;
 
   return (
-    <main className="mx-auto max-w-screen-xl px-4 pt-6 pb-24 lg:px-8 lg:pt-10">
+    // 모바일은 첫 화면에 사진 · 이름 · 가격 · 배송 안내가 함께 들어오도록 사진을 헤더 바로 아래에 붙이고
+    // 경로(breadcrumb)는 PC 에서만 보인다(#60, 390×844 기준)
+    <main className="mx-auto max-w-screen-xl px-4 pb-24 lg:px-8 lg:pt-10">
       {categoryPath.length > 0 && (
         <nav
           aria-label={dict.product.breadcrumb}
-          className="mb-6 text-xs tracking-[0.15em] text-muted-fg"
+          className="mb-6 hidden text-xs tracking-[0.15em] text-muted-fg lg:block"
         >
           <ol className="flex flex-wrap gap-2">
             {categoryPath.map((category, index) => (
@@ -112,15 +116,16 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
         </div>
 
         {/* PC 에서는 이미지를 내리는 동안 구매 정보가 따라온다(헤더 높이만큼 띄운다) */}
-        <div className="mt-8 flex flex-col gap-6 lg:sticky lg:col-span-5 lg:top-[calc(var(--site-header-h)+1.5rem)] lg:mt-0 lg:self-start">
-          <div className="flex flex-col gap-3">
-            <h1 className="font-serif text-2xl leading-snug lg:text-3xl">{product.name}</h1>
-            {product.summary && <p className="text-sm text-muted-fg">{product.summary}</p>}
-          </div>
-          <PurchasePanel product={purchaseProduct} />
+        <div className="mt-5 flex flex-col gap-4 lg:sticky lg:col-span-5 lg:top-[calc(var(--site-header-h)+1.5rem)] lg:mt-0 lg:self-start">
+          <h1 className="font-serif text-xl leading-snug">{product.name}</h1>
+          <PurchasePanel
+            product={purchaseProduct}
+            delivery={deliveryNote(product.customOrder, shipping, dict.product.delivery)}
+          />
+          {product.summary && <p className="text-sm text-muted-fg">{product.summary}</p>}
           <ProductInfoAccordion
             info={content.productInfo}
-            shippingFee={(await shippingNotice)?.lines ?? []}
+            shippingFee={shipping?.lines ?? []}
             labels={dict.product.info}
           />
         </div>
