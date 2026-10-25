@@ -1017,3 +1017,4 @@ eureka:
 |------|--------|-------------|
 | service-discovery | `DiscoverySecurityTest` (실제 포트 HTTP) | 무자격 조회 401 + `WWW-Authenticate: Basic` · 무자격 / 틀린 비밀번호 / 다른 사용자 등록 401 이고 레지스트리에 없음 · 올바른 자격 증명 등록 204 · 조회 200 · health 익명 UP · 다른 actuator 401 · 대시보드 익명 401 · 인증해도 기본 꺼짐 404 |
 | service-discovery | `DiscoveryPasswordStartupGuardTest` | hex 64자 통과 · 없음 · 공백 · 풀리지 않은 플레이스홀더 · 31자 · `:` `@` `%3A` 공백 포함 시 기동 실패, 메시지에 값 없음 |
+| service-discovery | `EurekaClientCredentialTest` | 클라이언트가 `http://eureka:<비밀번호>@localhost:<port>/eureka/` userinfo 를 Basic 으로 실어 등록한다 · 틀린 비밀번호는 Basic 으로 실려도 등록되지 않는다 · userinfo 에 `:` 가 더 있으면 등록되지 않고 클라이언트가 뜨지 않는다 · 연결 거부 로그에 비밀번호가 없다(`RedirectingEurekaHttpClient` ERROR, 7개 모듈 yml 과 같은 설정) |
