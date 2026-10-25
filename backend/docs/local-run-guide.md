@@ -52,7 +52,7 @@ cp .env.example .env
   `GATEWAY_TRUSTED_PROXIES` 는 비워 둔다 — 로컬은 프록시 없이 붙는다(켰는데 비어 있다는 WARN 한 줄이 기동 로그에 남는 것은 정상이다).
   프론트 BFF 를 거치면 비로그인 요청이 모두 BFF 주소 한 버킷 · 같은 `X-Client-Subject` 가 된다.
 
-## 3. 미들웨어 (PostgreSQL · Redis)
+## 3. 미들웨어 (PostgreSQL · Redis · Kafka)
 
 ```bash
 docker compose -f docker-compose-local.yml up -d --wait   # healthcheck 통과까지 기다린다
@@ -64,12 +64,18 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 |--------|------|------|
 | PostgreSQL 17 | `localhost:5432/commerce_foundry` | 스키마 `auth` · `product` · `orders` · `payment` · `delivery` · `operations` |
 | Redis 7.4 | `localhost:${REDIS_PORT}` (기본 6379) | 비밀번호 필수 |
+| Kafka 4.3 (KRaft 단일 노드) | `localhost:${KAFKA_PORT}` (기본 9092) — 서비스는 `KAFKA_BOOTSTRAP_SERVERS` | 인증 없음(로컬 전용). 토픽 자동 생성 꺼짐 |
 
 - 스키마는 `docker/postgres/init/01-create-schemas.sql` 이 **빈 볼륨으로 처음 뜰 때만** 만든다.
   스키마를 추가했다면 `down -v` 후 다시 올린다.
   데이터를 지우지 않으려면 떠 있는 컨테이너에서 그 스키마만 만든다 (`backend/` 에서, 예: operations):
   `docker compose -f docker-compose-local.yml exec postgres sh -c 'psql -U "$POSTGRES_USER" -d commerce_foundry -c "CREATE SCHEMA IF NOT EXISTS operations"'`
-- compose 파일이 바뀐 PR 은 `backend-local-infra` 워크플로가 실제로 띄워 스키마·Redis 인증을 확인한다.
+- **Kafka 토픽은 앱이 만들지 않는다**(#310) — 브로커 자동 생성을 꺼 두었다. `docker/kafka/topics.txt` 에 적은 토픽을 스크립트로 만든다(`backend/` 에서):
+  `sh docker/kafka/create-topics.sh` — 이미 있는 토픽은 건너뛰므로 여러 번 돌려도 된다. 토픽 이름 규칙은 #304 설계를 따르고, 규칙이 정해지기 전에는 목록이 비어 있다.
+  Kafka 는 볼륨이 없다 — 컨테이너를 다시 시작해도 남지만 `down` 하면 토픽 · 메시지가 사라지니 다시 올린 뒤 스크립트를 돌린다.
+  토픽 · 메시지 확인: `docker compose -f docker-compose-local.yml exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list`
+  (컨테이너 안 도구는 내부 리스너 `localhost:19092` 를 쓴다 — `KAFKA_PORT` 를 바꿔도 같다).
+- compose 파일이 바뀐 PR 은 `backend-local-infra` 워크플로가 실제로 띄워 스키마 · Redis 인증 · Kafka(토픽 스크립트 · 자동 생성 꺼짐 · HOST 리스너 왕복)를 확인한다.
 - database · 스키마 이름은 dev · prod 와 같다 — 환경 차이는 접속 정보뿐이다(`service-inventory.md` §4-2). 로컬 스키마에 `_local` 같은 접미사를 붙이지 않는다.
   로컬은 예외로 `DB_USERNAME` 하나(컨테이너 소유자 계정)가 스키마 전부를 쓴다 — 서비스별 앱 계정 · DDL 적용 계정 분리는 dev · prod 에만 적용한다.
 
