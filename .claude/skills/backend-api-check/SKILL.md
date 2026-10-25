@@ -43,6 +43,7 @@ git status --short -- backend
    - 어드민 DTO 를 고객 Controller 가 쓰지 않는다 (반대도)
    - 고객 응답에 원가·재고 수량·내부 메모·다른 회원 정보 같은 **어드민 전용 필드가 없다**
    - 어드민 Controller 에 `@PreAuthorize("hasRole('ADMIN')")` 가 있다
+   - **어드민 응답은 운영자 업무 언어만 낸다** (`api-design-guide.md` §2-8) — 시도 횟수 · 오류 코드 · 오류 원문 · 입력/결과 원문(JSON) · 멱등 키 · 워커 정보가 없고, 실패는 안내 문구로 나간다
 
 4. **응답 계약**
    - 응답 DTO 의 모든 `*Id` 가 `String` (§7-1), `@Schema example` 도 문자열
