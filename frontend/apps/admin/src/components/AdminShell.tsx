@@ -25,6 +25,10 @@ const NAV: NavGroup[] = [
     title: '회원',
     items: [{ label: '회원 목록', href: '/members' }],
   },
+  {
+    title: '운영',
+    items: [{ label: '백그라운드 작업', href: '/jobs' }],
+  },
 ];
 
 /**
