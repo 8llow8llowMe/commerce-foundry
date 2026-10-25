@@ -118,11 +118,12 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
         {/* PC 에서는 이미지를 내리는 동안 구매 정보가 따라온다(헤더 높이만큼 띄운다) */}
         <div className="mt-5 flex flex-col gap-4 lg:sticky lg:col-span-5 lg:top-[calc(var(--site-header-h)+1.5rem)] lg:mt-0 lg:self-start">
           <h1 className="font-serif text-xl leading-snug">{product.name}</h1>
-          <PurchasePanel
-            product={purchaseProduct}
-            delivery={deliveryNote(product.customOrder, shipping, dict.product.delivery)}
-          />
-          {product.summary && <p className="text-sm text-muted-fg">{product.summary}</p>}
+          {/* 요약은 PC 에서 상품명 아래, 모바일은 첫 화면에 가격 · 배송 안내가 들어오도록 구매 패널 아래 */}
+          {product.summary && (
+            <p className="hidden text-sm text-muted-fg lg:block">{product.summary}</p>
+          )}
+          <PurchasePanel product={purchaseProduct} delivery={deliveryNote(shipping)} />
+          {product.summary && <p className="text-sm text-muted-fg lg:hidden">{product.summary}</p>}
           <ProductInfoAccordion
             info={content.productInfo}
             shippingFee={shipping?.lines ?? []}

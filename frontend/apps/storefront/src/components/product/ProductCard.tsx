@@ -52,8 +52,11 @@ export function ProductCard({ product }: { product: ProductListItem }) {
             loading="lazy"
             decoding="async"
             className={cx(
-              'absolute inset-0 size-full object-cover opacity-0 transition-opacity duration-500 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none',
-              !available && 'group-hover:opacity-60 group-focus-visible:opacity-60',
+              'absolute inset-0 size-full object-cover opacity-0 transition-opacity duration-500 motion-reduce:transition-none',
+              // 판매중이 아니면 대표 이미지처럼 흐리게 바꾼다
+              available
+                ? 'group-hover:opacity-100 group-focus-visible:opacity-100'
+                : 'group-hover:opacity-60 group-focus-visible:opacity-60',
             )}
           />
         )}
