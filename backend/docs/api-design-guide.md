@@ -426,6 +426,21 @@ return ResponseEntity.ok().body(Response.success(response));
   VIDEO 는 포스터 필수(빈 문자열 거절), 그 밖에는 포스터를 받지 않는다. 프리오더가 아니면 발송 예정일을 받지 않는다(DB check 와 같은 규칙).
   유일 키는 유형별 `display_order` 라 GALLERY 와 VIDEO 가 같은 값을 가질 수 있다 — 어드민 등록은 갤러리 이미지 · 영상을 합친 순번을 매겨 동률을 만들지 않는다.
 
+### 2-8. 어드민 응답 원칙 — 사용자는 쇼핑몰 운영자다 (#305)
+
+어드민 콘솔을 쓰는 사람은 개발자가 아니라 **쇼핑몰 운영자(비개발자)** 다. 어드민 응답은 운영자가 읽고 판단하는 **업무 언어**만 담는다.
+
+| 내는 것 | 내지 않는 것 (개발자 도구의 몫) |
+|---------|------------------------------|
+| 이름 · 상태(`{code, name, description}`) · 진행률 · 진행 문구 · 사람이 읽는 안내 문구 · 업무 시각 · 업무 금액 · 결과 파일 링크 · 운영자가 할 수 있는 동작 여부(예: `cancellable`) | 시도 횟수 · 재시도 상한 · 우선순위 · 멱등 키 · 입력 · 결과 원문(JSON) · 오류 코드 · 오류 원문 · 스택 · 워커 · 호스트 정보 · 내부 버전 |
+
+- **실패는 안내 문구로 알린다** — 오류 코드를 그대로 내지 않고, 운영자가 다음에 할 일(다시 요청 · 범위 줄이기 · 파일 확인 · 관리자 문의)을 적은 문장으로 바꾼다.
+  코드 → 문구 매핑은 그 기능이 갖는다(예: 작업은 핸들러의 `failureNotice` → 엔진 공통 문구 → 일반 문구 순, `JobQueryProcessor`).
+- 기술 진단(왜 실패했나 · 몇 번 시도했나 · 어떤 입력이었나)은 로그 · 대시보드(Grafana) · 메시징 콘솔(Kafka UI, #304)에서 본다 — 어드민 API 로 열지 않는다.
+- 운영자가 거를 때 쓰는 코드 값(작업 종류 코드 · 상태 코드)은 낼 수 있다 — 표시는 이름(`typeName` · `status.name`)으로 한다.
+- 이미 있는 어드민 API 도 이 기준으로 본다. 검토는 `/backend-api-check` 의 점검 항목이다.
+- 처음 적용한 곳: 어드민 작업 API(§7-1).
+
 ## 3. 계층 흐름
 
 ```text
@@ -560,12 +575,15 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 | API | 응답 | 오류 |
 |-----|------|------|
-| `GET /api/v1/admin/jobs?status=&type=&page=&size=` | `PageResponse<{jobId, type, status, progressPercent, attempt, maxAttempts, cancelRequested, errorCode, requestedByMemberId, scheduledAt, startedAt, finishedAt}>` — 아이디 내림차순(등록 최신순) 고정 | 400 `JOB_101`(page) · `102`(size 1~100) · `103`(type `[A-Z0-9_]{1,64}`) · `198`(없는 status · 형식) |
-| `GET /api/v1/admin/jobs/{jobId}` | 목록 항목 + `priority` · `progressMessage` · `cancelRequestedByMemberId` · `dedupKey` · `payloadJson` · `resultJson` · `errorMessage` | 404 `JOB_001`, 400 `JOB_104`(양수) · `198` |
-| `POST /api/v1/admin/jobs/{jobId}/cancel` | 상세와 같다. QUEUED 는 바로 `CANCELLED`, RUNNING 은 `cancelRequested=true` 로 남고 상태는 그대로(멱등) | 404 `JOB_001`, 409 `JOB_022`(이미 끝남) · `JOB_021`(워커와 계속 겹침 — 다시 시도) |
+| `GET /api/v1/admin/jobs?status=&type=&page=&size=` | `PageResponse<{jobId, type, typeName, status, progressPercent, progressMessage, notice, cancellable, requestedAt, finishedAt}>` — 아이디 내림차순(등록 최신순) 고정 | 400 `JOB_101`(page) · `102`(size 1~100) · `103`(type `[A-Z0-9_]{1,64}`) · `198`(없는 status · 형식) |
+| `GET /api/v1/admin/jobs/{jobId}` | 목록 항목과 같은 칸 — 진행 중인 작업 하나를 다시 읽을 때 쓴다 | 404 `JOB_001`, 400 `JOB_104`(양수) · `198` |
+| `POST /api/v1/admin/jobs/{jobId}/cancel` | 상세와 같다. QUEUED 는 바로 `CANCELLED`, RUNNING 은 상태 그대로 취소 요청 안내 문구가 붙고 `cancellable=false`(멱등) | 404 `JOB_001`, 409 `JOB_022`(이미 끝남) · `JOB_021`(워커와 계속 겹침 — 다시 시도) |
 
-- `status` 는 `{code, name, description}`, 아이디(작업 · 회원)는 문자열, 시각은 UTC ISO 다. `payloadJson` · `resultJson` 은 JSON 원문 문자열이다.
-  워커 아이디(호스트 · pid)는 내리지 않는다.
+- **운영자 칸만 낸다(§2-8, #305)** — 작업 이름(`typeName`, 핸들러의 `displayName`, 없으면 종류 코드) · 상태 `{code, name, description}` · 진행률 · 진행 문구 ·
+  안내 문구(`notice`) · 취소 가능 여부 · 요청 시각(행의 생성 시각) · 끝난 시각. 시도 · 우선순위 · 멱등 키 · 입력 · 결과 원문 · 오류 코드 · 오류 원문 · 워커 · 요청자 · 취소자 아이디는 내리지 않는다.
+- 안내 문구 — 실패면 핸들러 `failureNotice(errorCode)` → 엔진 공통 문구(실행 시간 초과 · 결과 과대 · 일시 오류) → 일반 문구 순, 재시도를 기다리는 대기면 "잠시 뒤 다시 시도",
+  취소를 요청한 대기 · 실행이면 "취소를 요청했습니다". 성공 · 취소로 끝났으면 없다(null). 결과 파일 링크는 결과 파일(#212 PR-E)이 생기면 더한다.
+- 아이디는 문자열, 시각은 UTC ISO 다. 조회는 운영자 칸만 읽는 읽기 모델(`JobSummaryQueryResult`)로 한다 — 도메인 `Job` 을 통째로 읽지 않는다.
 - 상태 · 종류는 `application/model` 의 `JobStatusFilter` · 문자열로 받는다(H1). 조건 조합마다 파생 쿼리 하나다 — 종류 조건은 `idx_job_type_id` 를 그대로 타고,
   상태 조건은 상태 선두 인덱스로 거른 뒤 정렬한다(어드민 전용). 이 비용은 끝난 작업을 90일 뒤 지우는 보존 정리(`JOB_RETENTION_CLEANUP`, #212 PR-D)를 전제로 한다 —
   그 전까지는 끝난 작업이 쌓이므로, 정리 없이 행이 크게 늘면 `(status, id)` 인덱스를 검토한다.
