@@ -33,6 +33,8 @@
 - Claude API 키(#215, `ai.*`)는 `AI_API_KEY` 하나를 Vault 에 둔다 — AI 를 쓰는 서비스(operations 예정)에만 넣는다. 툴링이 자동으로 읽는
   `ANTHROPIC_API_KEY` 이름을 쓰지 않는다(개발 PC 셸의 개인 키가 서비스로 섞이지 않게). `AI_ENABLED` 는 비밀이 아니라 설정 스위치다 —
   배포 설정의 환경변수로 넣고 Vault 에 등록하지 않는다. 기본값은 꺼짐이고, 켜면 키 · 타임아웃이 있어야 기동한다 (`bootstrap-conventions.md` AI).
+- Kafka(#304 · #310) 접속 주소 `KAFKA_BOOTSTRAP_SERVERS` 는 Vault 에 둔다 — 비밀은 아니지만 공유 클러스터의 서버 주소라 저장소에 쓰지 않는다.
+  dev 의 인증 방식(SASL · TLS)이 정해지면 그 계정 · 비밀번호 키를 시크릿으로 더한다(`deploy-guide.md` §4-4). `KAFKA_PORT` 는 로컬 compose 전용이다.
 - JWT 키 만들기 · 환경변수 한 줄 변환 · 교체 순서는 [security-guide.md](security-guide.md) §6 이 정본이다.
 - 서비스 토큰 비밀(`INTERNAL_JWT_SECRET`)은 `openssl rand -base64 32` 로 만들고 서비스 전부에 **같은 값**을 넣는다. 게이트웨이에는 넣지 않는다.
   교체는 `INTERNAL_JWT_SECRET_PREVIOUS` 로 3단계를 밟는다 — 정본은 [security-guide.md](security-guide.md) §9-6 · §9-7.

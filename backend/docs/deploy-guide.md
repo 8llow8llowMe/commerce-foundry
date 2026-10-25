@@ -128,9 +128,23 @@ compose 가 env 파일과 무관하게 고정하는 값:
   영문 · 숫자 · `. _ ~ -` 밖의 문자가 있거나 32자 미만이면 Eureka 가 뜨지 않는다(`security-guide.md` §12).
 - `GATEWAY_CORS_ALLOWED_ORIGINS` 는 비어도 뜨지만 어떤 origin 도 허용하지 않는다(닫힌 기본값). 배포 환경은 프론트 origin 을 채운다.
 - `STORE_FEATURES_*` 는 dev 프로파일 yml 이 `true` 로 덮어 dev 에서는 env 를 읽지 않는다.
-- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `KAKAO_*` · `NAVER_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*`)는 compose 에 넘기지 않는다.
+- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `KAKAO_*` · `NAVER_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `KAFKA_BOOTSTRAP_SERVERS`)는 compose 에 넘기지 않는다.
   `STORAGE_PUBLIC_BASE_URL` 은 product-service 가 메인 전시 미디어 주소 판정에 읽는다(#63, `:-` 빈 값 — 비면 미디어 쓰기만 503).
   해당 기능이 yml(또는 `storage.*` 같은 relaxed binding)로 키를 읽기 시작하는 PR 에서 그 모듈 compose 의 `environment` 에 같이 더한다(§8).
+  `KAFKA_PORT` 는 로컬 compose(`docker-compose-local.yml`) 전용이라 배포 compose 에 넘기지 않는다.
+
+### 4-4. Kafka (dev 공유 클러스터, #310)
+
+Infra 의 Kafka 는 3노드 KRaft 클러스터(apache/kafka 4.3 · RF 3 · min ISR 2)를 여러 프로젝트가 공유한다. 서비스는 messaging-core(#306)가 생긴 뒤
+`KAFKA_BOOTSTRAP_SERVERS` 를 읽는다 — 그 PR 이 Kafka 를 쓰는 모듈의 yml · compose(`:?` 필수, §4-2)에 키를 더하고, Jenkins 필수 키는 compose 의 `:?` 에서
+자동으로 잡힌다(`jenkins-cicd-guide.md`). **주소 · 계정 값은 저장소에 쓰지 않는다** — Vault 키 `KAFKA_BOOTSTRAP_SERVERS`(dev/prod).
+
+| 항목 | 정한 것 | 정할 것 (Infra · #304 와) |
+|------|---------|---------------------------|
+| 접속 주소 | 키 이름 `KAFKA_BOOTSTRAP_SERVERS`(쉼표로 브로커 여럿), 값은 Vault | backend-1(dev) → 공유 클러스터로 닿는 주소 · 네트워크 경로 |
+| 보안 방식 | 로컬은 인증 없음(PLAINTEXT) | dev 의 인증 · 암호화(SASL · TLS 여부). 정해지면 필요한 키(`KAFKA_SECURITY_PROTOCOL` 등)를 `.env.example` · 이 표에 더한다 |
+| 토픽 생성 | 앱 자동 생성 금지. 로컬은 `docker/kafka/topics.txt` + `create-topics.sh` | dev 토픽을 누가 · 어떻게 만드는지(Infra 절차), 복제 수(클러스터 기본 RF 3) |
+| 이름 | — | 토픽 · 컨슈머 그룹 이름의 프로젝트 prefix 규칙(#304 설계) — 공유 클러스터라 다른 프로젝트와 겹치지 않게 |
 
 ### 4-3. 배포 전 반드시 채울 것
 
