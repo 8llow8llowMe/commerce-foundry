@@ -80,6 +80,21 @@ class MessagingStartupGuardTest {
     }
 
     @Test
+    @DisplayName("SASL 계정은 둘 다 있거나 둘 다 없고, 있으면 PLAINTEXT 가 아니어야 한다 — 값은 내지 않는다")
+    void saslPair() {
+        MockEnvironment userOnly = enabled("dev", "commerce-foundry.dev").withProperty("KAFKA_SASL_USERNAME", "secret-user");
+        assertThat(new MessagingStartupGuard(userOnly).check()).singleElement().asString().contains("둘 다").doesNotContain("secret-user");
+
+        MockEnvironment plaintext = enabled("dev", "commerce-foundry.dev")
+            .withProperty("KAFKA_SASL_USERNAME", "u").withProperty("KAFKA_SASL_PASSWORD", "p").withProperty("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT");
+        assertThat(new MessagingStartupGuard(plaintext).check()).singleElement().asString().contains("PLAINTEXT");
+
+        MockEnvironment sasl = enabled("dev", "commerce-foundry.dev")
+            .withProperty("KAFKA_SASL_USERNAME", "u").withProperty("KAFKA_SASL_PASSWORD", "p").withProperty("KAFKA_SECURITY_PROTOCOL", "SASL_SSL");
+        assertThat(new MessagingStartupGuard(sasl).check()).isEmpty();
+    }
+
+    @Test
     @DisplayName("NewTopic 빈은 꺼져 있어도 기동 실패다 — 앱은 토픽을 만들지 않는다")
     void rejectsNewTopicBeans() {
         DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
