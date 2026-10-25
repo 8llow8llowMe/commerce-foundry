@@ -48,6 +48,21 @@ jobs:
           test "$(docker compose -f docker-compose-local.yml exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping')" = "PONG"
           test "$(docker compose -f docker-compose-local.yml exec -T redis redis-cli ping)" != "PONG"
 
+      # 토픽은 앱이 만들지 않는다 — 스크립트가 만들고, 브로커 자동 생성은 꺼져 있어야 한다 (#310)
+      - name: Kafka 토픽 스크립트가 돌고 자동 생성이 꺼져 있는지 확인
+        run: |
+          sh docker/kafka/create-topics.sh
+          docker compose -f docker-compose-local.yml exec -T kafka /opt/kafka/bin/kafka-configs.sh --bootstrap-server localhost:19092 \
+            --describe --entity-type brokers --entity-name 1 --all | grep -q 'auto.create.topics.enable=false'
+
+      # PC 의 서비스가 붙는 HOST 리스너(localhost:KAFKA_PORT)로 메시지가 오가는지 — 광고 주소가 틀리면 여기서 멈춘다
+      - name: Kafka HOST 리스너로 메시지가 오가는지 확인
+        run: |
+          k="docker compose -f docker-compose-local.yml exec -T kafka /opt/kafka/bin"
+          $k/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic local-infra-check --partitions 1 --replication-factor 1
+          echo "ping" | $k/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic local-infra-check
+          test "$($k/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic local-infra-check --from-beginning --max-messages 1 --timeout-ms 30000)" = "ping"
+
       - name: compose down
         if: ${{ always() }}
         run: docker compose -f docker-compose-local.yml down -v
