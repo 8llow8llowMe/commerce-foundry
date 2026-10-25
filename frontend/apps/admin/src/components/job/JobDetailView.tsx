@@ -1,115 +1,44 @@
 'use client';
 
-import { apiFetch } from '@cf/api-client';
 import { Button } from '@cf/ui';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
-import { LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
+import { LOAD_FAILED } from '@/lib/api-errors';
 import {
-  cancelFailure,
-  cancelJobApiPath,
-  cancelNotice,
   canCancel,
-  isActiveJob,
   isCancelPending,
-  isJobId,
   JOB_NOT_FOUND_TEXT,
-  JOB_POLL_INTERVAL_MS,
-  jobApiPath,
-  loadFailure,
   POLL_FAILED_NOTICE,
 } from '@/lib/job/detail';
+import { createJobDetailController } from '@/lib/job/detail-controller';
 import type { JobDetail } from '@/lib/job/types';
 import { JobFields } from './JobFields';
 
-type View =
-  | { kind: 'loading' }
-  | { kind: 'denied'; denied: AccessDenied }
-  | { kind: 'notFound' }
-  | { kind: 'failed' }
-  | { kind: 'ready'; job: JobDetail };
-
 /**
  * 어드민 작업 상세(#272) — `GET /api/v1/admin/jobs/{jobId}`.
- * 실행 중(QUEUED · RUNNING)이면 `JOB_POLL_INTERVAL_MS` 마다 다시 읽고, 끝나면(SUCCEEDED · FAILED · CANCELLED) 멈춘다.
- * 다시 읽다 일시 오류가 나면 마지막 상태를 둔 채 안내하고 계속 시도한다. 취소는 `POST .../cancel` 이다.
+ * 읽기 · 주기 갱신 · 취소는 `createJobDetailController` 가 하고 이 화면은 그 상태를 그린다
+ * (실행 중이면 다시 읽고 끝나면 멈춘다, 숨은 탭에서는 쉬고, 일시 오류는 마지막 상태를 둔 채 간격을 늘려 계속 읽는다).
+ * 페이지가 `key={jobId}` 로 붙여 작업마다 새 컨트롤러다.
  */
 export function JobDetailView({ jobId }: { jobId: string }) {
-  const valid = isJobId(jobId);
-  const [view, setView] = useState<View>({ kind: 'loading' });
-  /** 읽을 때마다 하나 올린다 — 주기 갱신 · 다시 불러오기 · 취소 뒤 다시 읽기 */
-  const [tick, setTick] = useState(0);
-  const [pollFailed, setPollFailed] = useState(false);
+  const [controller] = useState(() => createJobDetailController(jobId));
+  const { view, pollFailed, cancelling, notice } = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState,
+  );
   const [confirming, setConfirming] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [notice, setNotice] = useState('');
-  /** 응답 콜백에서 "이미 보인 작업이 있는지" 를 본다 — 있으면 일시 오류에도 화면을 지우지 않고 안내만 한다 */
-  const shown = useRef(false);
 
-  // 상태는 응답 콜백에서만 바꾼다. tick 이 바뀌면 이전 응답 · 예약한 다음 읽기를 버린다(cleanup)
   useEffect(() => {
-    if (!valid) return;
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const next = () => {
-      timer = setTimeout(() => setTick((n) => n + 1), JOB_POLL_INTERVAL_MS);
-    };
-    apiFetch<JobDetail>(jobApiPath(jobId)).then(
-      (job) => {
-        if (!alive) return;
-        shown.current = true;
-        setView({ kind: 'ready', job });
-        setPollFailed(false);
-        if (isActiveJob(job)) next();
-      },
-      (cause: unknown) => {
-        if (!alive) return;
-        const failure = loadFailure(cause);
-        if (failure.kind === 'failed' && shown.current) {
-          setPollFailed(true);
-          next();
-          return;
-        }
-        shown.current = false;
-        setView(failure);
-      },
-    );
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [jobId, valid, tick]);
-
-  const reload = () => setTick((n) => n + 1);
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
 
   const cancel = async () => {
-    if (cancelling) return;
-    setCancelling(true);
-    setNotice('');
-    try {
-      const job = await apiFetch<JobDetail>(cancelJobApiPath(jobId), { method: 'POST' });
-      setView({ kind: 'ready', job });
-      setNotice(cancelNotice(job));
-      // 취소 전에 보낸 읽기가 늦게 와서 덮어쓰지 않게 다시 읽는다(주기도 새로 시작한다)
-      reload();
-    } catch (cause) {
-      const failure = cancelFailure(cause);
-      if (failure.kind === 'denied') setView({ kind: 'denied', denied: failure.denied });
-      else if (failure.kind === 'notFound') {
-        shown.current = false;
-        setView({ kind: 'notFound' });
-      } else {
-        setNotice(failure.notice);
-        if (failure.kind === 'refresh') reload();
-      }
-    } finally {
-      setCancelling(false);
-      setConfirming(false);
-    }
+    await controller.cancel();
+    setConfirming(false);
   };
-
-  const current: View = valid ? view : { kind: 'notFound' };
 
   return (
     <div className="flex max-w-4xl flex-col gap-6">
@@ -118,48 +47,39 @@ export function JobDetailView({ jobId }: { jobId: string }) {
           작업 목록
         </Link>
         <h1 className="text-xl font-semibold">
-          {current.kind === 'ready' ? `${current.job.type} #${current.job.jobId}` : '작업'}
+          {view.kind === 'ready' ? `${view.job.type} #${view.job.jobId}` : '작업'}
         </h1>
       </div>
 
-      {current.kind === 'loading' && <p className="text-sm text-muted-fg">불러오는 중…</p>}
-      {current.kind === 'denied' && <AccessNotice denied={current.denied} />}
-      {current.kind === 'notFound' && <p className="text-sm text-muted-fg">{JOB_NOT_FOUND_TEXT}</p>}
-      {current.kind === 'failed' && (
+      {view.kind === 'loading' && <p className="text-sm text-muted-fg">불러오는 중…</p>}
+      {view.kind === 'denied' && <AccessNotice denied={view.denied} />}
+      {view.kind === 'notFound' && <p className="text-sm text-muted-fg">{JOB_NOT_FOUND_TEXT}</p>}
+      {view.kind === 'failed' && (
         <div role="alert" className="flex items-center gap-4">
           <p className="text-sm text-danger">{LOAD_FAILED}</p>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setView({ kind: 'loading' });
-              reload();
-            }}
-          >
+          <Button variant="secondary" onClick={controller.reload}>
             다시 불러오기
           </Button>
         </div>
       )}
 
-      {/* live region 은 늘 두고 내용만 바꾼다 — 처음 나타날 때도 읽히게 */}
+      {/* live region 은 늘 두고 내용만 바꾼다 — 처음 나타날 때도 읽히게. 확인 단계에서는 이전 안내를 숨긴다 */}
       <p role="status" className="text-sm empty:hidden">
-        {current.kind === 'ready' ? notice : ''}
+        {view.kind === 'ready' && !(confirming && canCancel(view.job)) ? notice : ''}
       </p>
 
-      {current.kind === 'ready' && (
+      {view.kind === 'ready' && (
         <>
           {pollFailed && <p className="text-sm text-danger">{POLL_FAILED_NOTICE}</p>}
           <CancelControl
-            job={current.job}
+            job={view.job}
             confirming={confirming}
             cancelling={cancelling}
-            onAsk={() => {
-              setNotice('');
-              setConfirming(true);
-            }}
+            onAsk={() => setConfirming(true)}
             onDismiss={() => setConfirming(false)}
             onConfirm={() => void cancel()}
           />
-          <JobFields job={current.job} />
+          <JobFields job={view.job} />
         </>
       )}
     </div>

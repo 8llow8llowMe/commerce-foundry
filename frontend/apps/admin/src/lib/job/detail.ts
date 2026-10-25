@@ -4,6 +4,13 @@ import { ADMIN_JOBS_PATH, type JobDetail, type JobListItem } from './types';
 
 /** 실행 중(QUEUED · RUNNING) 작업 상세를 다시 읽는 간격 */
 export const JOB_POLL_INTERVAL_MS = 3000;
+/** 다시 읽기가 연달아 실패할 때 늘린 간격의 상한 */
+export const JOB_POLL_MAX_INTERVAL_MS = 30_000;
+
+/** 다음 읽기까지 기다릴 시간. 연속 실패 n 번이면 기본 간격을 2^n 배로 늘리되 30초를 넘지 않는다 */
+export function pollDelay(failures: number): number {
+  return Math.min(JOB_POLL_MAX_INTERVAL_MS, JOB_POLL_INTERVAL_MS * 2 ** Math.max(0, failures));
+}
 
 /** 서버 오류 코드 — `JobErrorCode` */
 export const JOB_NOT_FOUND = 'JOB_001';
@@ -113,4 +120,15 @@ export function cancelFailure(cause: unknown): CancelFailure {
 /** 취소 성공 응답 → 안내. QUEUED 는 바로 CANCELLED, RUNNING 은 상태 그대로 cancelRequested 다 */
 export function cancelNotice(job: JobDetail): string {
   return job.status.code === 'CANCELLED' ? CANCELLED_NOTICE : CANCEL_REQUESTED_NOTICE;
+}
+
+/**
+ * 다시 읽은 작업에 맞춰 안내를 고친다. "취소를 요청했습니다" 를 보이던 중 작업이 끝났으면
+ * 취소로 끝났는지, 취소가 닿기 전에 다른 결과로 끝났는지로 바꾼다. 그 밖의 안내는 그대로 둔다.
+ */
+export function settledNotice(notice: string, job: Pick<JobListItem, 'status'>): string {
+  if (notice !== CANCEL_REQUESTED_NOTICE || isActiveJob(job)) return notice;
+  return job.status.code === 'CANCELLED'
+    ? CANCELLED_NOTICE
+    : `취소가 반영되기 전에 작업이 끝났습니다 (${job.status.name}).`;
 }
