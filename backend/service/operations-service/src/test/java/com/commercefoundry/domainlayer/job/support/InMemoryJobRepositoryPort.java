@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
 import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import java.time.Instant;
@@ -25,6 +26,7 @@ import org.springframework.data.domain.PageRequest;
 public class InMemoryJobRepositoryPort implements JobRepositoryPort {
 
     private final Map<Long, Job> jobs = new ConcurrentHashMap<>();
+    private final Map<Long, Instant> requestedAt = new ConcurrentHashMap<>();
 
     /** 다음 {@link #insert} 를 멱등 키 충돌로 실패시킨다 — 동시 등록에서 진 쪽을 흉내 낸다. 실패 전에 {@code winner} 를 저장한다. */
     private Job pendingDedupWinner;
@@ -50,14 +52,27 @@ public class InMemoryJobRepositoryPort implements JobRepositoryPort {
 
     /** 어댑터와 같은 순서 — 아이디 내림차순. */
     @Override
-    public Page<Job> findPage(JobStatus status, String type, int page, int size) {
+    public Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, String type, int page, int size) {
         List<Job> matched = jobs.values().stream()
             .filter(job -> status == null || job.status() == status)
             .filter(job -> type == null || type.equals(job.type()))
             .sorted(Comparator.comparingLong(Job::id).reversed())
             .toList();
-        List<Job> content = matched.stream().skip((long) page * size).limit(size).toList();
+        List<JobSummaryQueryResult> content = matched.stream().skip((long) page * size).limit(size).map(this::toSummary).toList();
         return new PageImpl<>(content, PageRequest.of(page, size), matched.size());
+    }
+
+    @Override
+    public Optional<JobSummaryQueryResult> findSummary(long jobId) {
+        return findById(jobId).map(this::toSummary);
+    }
+
+    /** 요청 시각은 넣은 때의 예약 시각으로 흉내 낸다(실제 어댑터는 행의 생성 시각). */
+    private JobSummaryQueryResult toSummary(Job job) {
+        return new JobSummaryQueryResult(
+            job.id(), job.type(), job.status(), job.progressPercent(), job.progressMessage(), job.cancelRequested(), job.errorCode(),
+            requestedAt.get(job.id()), job.finishedAt()
+        );
     }
 
     @Override
@@ -92,6 +107,7 @@ public class InMemoryJobRepositoryPort implements JobRepositoryPort {
         }
         Job saved = withVersion(job, 0L);
         jobs.put(job.id(), saved);
+        requestedAt.put(job.id(), job.scheduledAt());
         return saved;
     }
 
