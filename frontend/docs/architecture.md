@@ -437,6 +437,34 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 - 취소가 401 · 403 · 404 로 끝날 때도 그 전에 나간 읽기는 버린다(세대 번호).
 
+### 관리자 감사 로그 (`/audit-logs`, #320)
+
+메뉴 `운영 > 관리자 감사 로그`. auth-service 감사 로그 조회 `GET /api/v1/admin/audit-logs?action=&actorMemberId=&page=&size=`(BE #192, ADMIN,
+계약 정본 `backend/docs/api-design-guide.md` §2-4 · 기록 방식 `security-guide.md` §11-4) — 최신순 `PageResponse`, 페이지 20개, 읽기만 있다.
+코드는 `lib/audit/`(계약 `types.ts` · 조건 `query.ts` · 문구 `view.ts` · 이름표 `admins.ts` · 읽기 `load.ts`), 화면은 `components/audit/` 다.
+
+- **응답 칸** — `auditLogId` · `action`(`ADMIN_LOGIN` · `MEMBER_SEARCH`) · `actorMemberId`(로그인 실패는 null) · `target`(원문, null 가능) · `result`(`SUCCESS` · `FAILURE`) · `createdAt`.
+  기록하는 행위는 관리자 로그인 성공 · 실패와 어드민 회원 목록 조회다. 이 조회 자체는 기록되지 않는다.
+- **운영자 문구만 보인다(#305)** — 행위 · 결과 코드, `target` 원문, 회원 · 감사 로그 아이디를 화면에 내지 않는다(`describeAuditLog`).
+  - 행위는 업무 이름(`AUDIT_ACTION_LABELS` — 서버가 이름을 주지 않아 화면 사본이다. BE 가 행위를 더하면 같이 더한다), 모르는 행위는 "기타" 다. 결과는 성공 · 실패(실패는 `text-danger`), 모르는 값은 "알 수 없음".
+  - 대상은 BE `AdminAuditRecord` 가 만드는 두 형식만 문장으로 바꾼다(`targetText`). 그 밖의 형식 · 값(모르는 역할 · 남는 칸 · 겹친 칸)은 원문 대신 "기타", 없으면 `—`.
+
+    | 원문 | 화면 |
+    |------|------|
+    | `members?role=<ALL\|CUSTOMER\|ADMIN>&page=<0부터>&size=<n>` | `역할: 전체 · 1쪽` (역할은 `roleLabel`, 쪽은 +1) |
+    | `member:<id>` (관리자 로그인 — 성공은 자기 계정, 실패는 노린 관리자 계정) | `관리자 계정: 김*수` · 이름표에 없으면 `관리자 계정` |
+
+  - 관리자 칸은 이름표의 마스킹한 이름, 이름표에 없으면 "관리자"(설명은 `title`), `actorMemberId` 가 null 이면 "확인 안 됨"(로그인 실패는 누가 시도했는지 모른다).
+- **관리자 이름표** — 감사 로그 응답에는 이름이 없다. 화면에 들어올 때 어드민 회원 목록 `GET /api/v1/admin/members?role=ADMIN&page=0&size=100`(§9 회원 목록)을
+  **한 번** 읽어 아이디 → 마스킹한 이름 · 이메일을 짝짓는다(`loadAdminDirectory`). 페이지 · 조건을 바꿔도 다시 읽지 않고, 줄마다 회원을 읽지 않는다(N+1 금지).
+  - 이 읽기도 회원 목록 조회라 **감사 로그에 "회원 목록 조회 · 역할: 관리자 · 1쪽" 한 줄이 남는다** — 화면에 들어올 때마다 한 줄이다.
+    BE 가 감사 로그 항목에 관리자 표시 이름(마스킹)을 주면 이름표를 걷어낸다.
+  - 이름표를 못 읽어도(연결 · 5xx) 감사 로그는 "관리자" 로 보이고 관리자 필터만 막는다. 101명 이상이면 앞의 100명만 고를 수 있다고 알린다.
+- **조건은 주소가 정본이다**(상품 목록과 같은 규칙) — 화면 주소는 `?action=&actor=&page=`, `parseAuditLogQuery` 가 행위(enum 이름 그대로) · 관리자(Long 범위 양의 정수) ·
+  페이지(숫자 6자리)만 받고 나머지는 "전체" 다(손으로 고친 주소가 400 `AUTH_198` · `AUTH_135` 가 되지 않게). BFF 로는 서버 이름 `actorMemberId` 로 보낸다.
+  필터는 행위 고르기 · 관리자 고르기(마스킹한 이름 + 이메일 — 마스킹한 이름이 겹칠 수 있다)이고 "검색" 을 눌러야 주소로 간다. 주소의 관리자가 이름표에 없으면 "선택한 관리자" 로 남겨 실제 조건을 보인다.
+- **실패** — 401 · 403 은 `AccessNotice`, 그 밖(400 · 5xx · 연결)은 "다시 불러오기" 다(`loadAuditLogs`). 400 서버 문구는 영문 파라미터 이름이 들어 있어 보이지 않는다.
+
 ## 10. 메인 전시 (#59 · BE #63)
 
 스토어프론트 메인은 product-service 고객 메인 전시 `GET /api/v1/displays/main`(공개, 계약 정본 `backend/docs/api-design-guide.md` §2-9)을 서버에서 읽어 그린다.
