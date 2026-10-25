@@ -146,9 +146,6 @@ export const en: Dictionary = {
       /** Mobile purchase bottom sheet */
       closeSheet: 'Close options',
     },
-    delivery: {
-      madeToOrder: 'Made to order in about {days} days, then shipped',
-    },
     option: { soldOut: 'sold out', unavailable: 'unavailable' },
     customOrder: {
       title: 'Made to measure',
