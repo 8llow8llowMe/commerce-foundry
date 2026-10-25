@@ -143,6 +143,11 @@ export const en: Dictionary = {
       maxPerOrder: 'You can order up to {count} per order.',
       addToCart: 'Add to bag',
       buy: 'Buy now',
+      /** Mobile purchase bottom sheet */
+      closeSheet: 'Close options',
+    },
+    delivery: {
+      madeToOrder: 'Made to order in about {days} days, then shipped',
     },
     option: { soldOut: 'sold out', unavailable: 'unavailable' },
     customOrder: {

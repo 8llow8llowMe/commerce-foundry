@@ -2,12 +2,14 @@
 
 import { Button, cx } from '@cf/ui';
 import { useEffect, useId, useRef, useState } from 'react';
+import { CloseIcon } from '@/components/header/HeaderIcons';
 import {
   displayPrice,
   resolveSku,
   selectOption,
   type OptionSelection,
 } from '@/lib/catalog/option-selection';
+import type { DeliveryNote } from '@/lib/catalog/delivery-note';
 import type { ProductDetail } from '@/lib/catalog/types';
 import { useDictionary, useFormatMoney } from '@/components/i18n/LocaleProvider';
 import { CartActionNotice } from '@/components/cart/CartActionNotice';
@@ -27,10 +29,18 @@ const QUANTITY_CAP = 99;
  * 판매중 SKU 가 정해지고 맞춤 제작 필수 칸이 채워지면 장바구니에 담는다(#26 — 회원은 서버, 비회원은 로컬).
  * 담은 뒤에는 버튼 아래에 결과와 장바구니 링크를 보인다. 입력값이 상품 정의에 맞는지는 주문 생성이 본다.
  *
- * 모바일에서는 갤러리가 첫 화면을 차지하므로 하단에 가격 + 구매 버튼 바를 고정한다(#60).
- * 패널이 화면에 들어오면 바를 숨기고, 버튼은 패널로 스크롤해 첫 옵션에 포커스를 준다.
+ * 모바일에서는 갤러리가 첫 화면을 차지하므로 하단에 가격 · 배송 안내 + 구매 버튼 바를 고정한다(#60).
+ * 패널이 화면에 들어오면 바를 숨긴다. 바의 구매하기는 옵션 · 수량 · 담기를 담은 바텀시트(<dialog>)를 연다 —
+ * 시트와 패널은 같은 선택 상태를 쓴다. 맞춤 제작 상품은 입력칸이 길어 시트 대신 패널로 스크롤한다.
  */
-export function PurchasePanel({ product }: { product: PurchaseProduct }) {
+export function PurchasePanel({
+  product,
+  delivery = null,
+}: {
+  product: PurchaseProduct;
+  /** 가격 아래 배송 안내. 첫 줄은 하단 구매 바에도 보인다 */
+  delivery?: DeliveryNote | null;
+}) {
   const groups = product.optionGroups;
   const dict = useDictionary();
   const t = dict.product.purchase;
@@ -41,7 +51,11 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
   const quantityLabelId = useId();
   const noticeId = useId();
   const radioPrefix = useId();
+  const sheetRadioPrefix = useId();
+  const sheetNoticeId = useId();
+  const sheetTitleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDialogElement>(null);
   const [panelInView, setPanelInView] = useState(false);
   const cart = useCartAction();
 
@@ -74,6 +88,10 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
   const price = displayPrice(product, sku);
   const maxQuantity = product.maxQuantityPerOrder ?? QUANTITY_CAP;
   const productOnSale = product.saleStatus.code === 'ON_SALE';
+  const openPurchase = () => {
+    if (product.customOrder || !productOnSale) goToPanel();
+    else sheetRef.current?.showModal();
+  };
 
   const select = (groupId: string, valueId: string) => {
     cart.clear();
@@ -115,31 +133,95 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
     ]);
   };
 
+  const priceText = (
+    <>
+      {formatMoney(price.salePrice)}
+      {price.from && (
+        <>
+          <span aria-hidden>~</span>
+          <span className="sr-only"> {dict.price.from}</span>
+        </>
+      )}
+    </>
+  );
+  const quantityField = (labelId: string) => (
+    <>
+      <div className="flex items-center justify-between">
+        <span className="text-xs tracking-[0.15em] uppercase" id={labelId}>
+          {t.quantity}
+        </span>
+        <div
+          className="flex items-center border border-border"
+          role="group"
+          aria-labelledby={labelId}
+        >
+          <button
+            type="button"
+            aria-label={t.decrease}
+            disabled={quantity <= 1}
+            onClick={() => changeQuantity(quantity - 1)}
+            className="size-10 disabled:text-muted-fg"
+          >
+            −
+          </button>
+          <output aria-live="polite" className="w-10 text-center text-sm">
+            {quantity}
+          </output>
+          <button
+            type="button"
+            aria-label={t.increase}
+            disabled={quantity >= maxQuantity}
+            onClick={() => changeQuantity(quantity + 1)}
+            className="size-10 disabled:text-muted-fg"
+          >
+            +
+          </button>
+        </div>
+      </div>
+      {product.maxQuantityPerOrder !== null && (
+        <p className="text-xs text-muted-fg">
+          {fill(t.maxPerOrder, { count: product.maxQuantityPerOrder })}
+        </p>
+      )}
+    </>
+  );
+  const addButton = (describedBy: string) => (
+    <Button
+      disabled={!canAdd || cart.pending || cart.coolingDown}
+      onClick={addToCart}
+      className="h-12 w-full"
+      aria-describedby={describedBy}
+    >
+      {cart.pending ? t.adding : t.addToCart}
+    </Button>
+  );
+
   return (
     <div ref={panelRef} className="flex scroll-mt-32 flex-col gap-6">
-      <p className="flex flex-wrap items-baseline gap-x-3 text-lg">
-        {price.discountRate !== null && (
-          <span className="font-medium">
-            <span className="sr-only">{dict.price.discountRate} </span>
-            {price.discountRate}%
-          </span>
-        )}
-        <span>
-          {formatMoney(price.salePrice)}
-          {price.from && (
-            <>
-              <span aria-hidden>~</span>
-              <span className="sr-only"> {dict.price.from}</span>
-            </>
+      <div className="flex flex-col gap-2">
+        <p className="flex flex-wrap items-baseline gap-x-3 text-lg">
+          {price.discountRate !== null && (
+            <span className="font-medium">
+              <span className="sr-only">{dict.price.discountRate} </span>
+              {price.discountRate}%
+            </span>
           )}
-        </span>
-        {price.listPrice && (
-          <del className="text-sm text-muted-fg">
-            <span className="sr-only">{dict.price.listPrice} </span>
-            {formatMoney(price.listPrice)}
-          </del>
+          <span>{priceText}</span>
+          {price.listPrice && (
+            <del className="text-sm text-muted-fg">
+              <span className="sr-only">{dict.price.listPrice} </span>
+              {formatMoney(price.listPrice)}
+            </del>
+          )}
+        </p>
+        {delivery && (
+          <ul className="flex flex-col gap-1 text-sm text-muted-fg">
+            {delivery.lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         )}
-      </p>
+      </div>
 
       <OptionGroupsField
         groups={groups}
@@ -167,52 +249,8 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
       )}
 
       <div className="flex flex-col gap-3 pt-4">
-        <div className="flex items-center justify-between">
-          <span className="text-xs tracking-[0.15em] uppercase" id={quantityLabelId}>
-            {t.quantity}
-          </span>
-          <div
-            className="flex items-center border border-border"
-            role="group"
-            aria-labelledby={quantityLabelId}
-          >
-            <button
-              type="button"
-              aria-label={t.decrease}
-              disabled={quantity <= 1}
-              onClick={() => changeQuantity(quantity - 1)}
-              className="size-10 disabled:text-muted-fg"
-            >
-              −
-            </button>
-            <output aria-live="polite" className="w-10 text-center text-sm">
-              {quantity}
-            </output>
-            <button
-              type="button"
-              aria-label={t.increase}
-              disabled={quantity >= maxQuantity}
-              onClick={() => changeQuantity(quantity + 1)}
-              className="size-10 disabled:text-muted-fg"
-            >
-              +
-            </button>
-          </div>
-        </div>
-        {product.maxQuantityPerOrder !== null && (
-          <p className="text-xs text-muted-fg">
-            {fill(t.maxPerOrder, { count: product.maxQuantityPerOrder })}
-          </p>
-        )}
-
-        <Button
-          disabled={!canAdd || cart.pending || cart.coolingDown}
-          onClick={addToCart}
-          className="h-12 w-full"
-          aria-describedby={noticeId}
-        >
-          {cart.pending ? t.adding : t.addToCart}
-        </Button>
+        {quantityField(quantityLabelId)}
+        {addButton(noticeId)}
         <CartActionNotice id={noticeId} result={cart.result} notice={notice} />
       </div>
 
@@ -225,20 +263,58 @@ export function PurchasePanel({ product }: { product: PurchaseProduct }) {
         )}
       >
         <p className="min-w-0 flex-1 text-sm">
-          <span className="block truncate text-xs text-muted-fg">{product.name}</span>
-          <span>
-            {formatMoney(price.salePrice)}
-            {price.from && <span aria-hidden>~</span>}
-          </span>
+          <span className="block">{priceText}</span>
+          {delivery && (
+            <span className="block truncate text-xs text-muted-fg">{delivery.lines[0]}</span>
+          )}
         </p>
         <Button
           className="h-11 shrink-0 px-6"
           tabIndex={panelInView ? -1 : undefined}
-          onClick={goToPanel}
+          onClick={openPurchase}
         >
           {productOnSale ? t.buy : product.saleStatus.name}
         </Button>
       </div>
+
+      {/* 모바일 구매 바텀시트 — 바깥(배경)을 누르거나 ESC 로 닫는다. 담은 결과도 시트 안에 보인다 */}
+      <dialog
+        ref={sheetRef}
+        aria-labelledby={sheetTitleId}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) event.currentTarget.close();
+        }}
+        className="inset-x-0 top-auto bottom-0 m-0 max-h-[85svh] w-full max-w-none overflow-y-auto bg-bg px-4 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] text-fg backdrop:bg-fg/40 lg:hidden"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <p id={sheetTitleId} className="min-w-0 text-sm">
+            <span className="block truncate">{product.name}</span>
+            <span className="block">{priceText}</span>
+          </p>
+          <button
+            type="button"
+            aria-label={t.closeSheet}
+            onClick={() => sheetRef.current?.close()}
+            className="-mt-2 -mr-2 inline-flex size-10 shrink-0 items-center justify-center"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+        <div className="mt-6 flex flex-col gap-6">
+          <OptionGroupsField
+            groups={groups}
+            skus={product.skus}
+            selection={selection}
+            namePrefix={sheetRadioPrefix}
+            onSelect={select}
+          />
+          <div className="flex flex-col gap-3">
+            {quantityField(`${sheetTitleId}-quantity`)}
+            {addButton(sheetNoticeId)}
+            <CartActionNotice id={sheetNoticeId} result={cart.result} notice={notice} />
+          </div>
+        </div>
+      </dialog>
     </div>
   );
 }
