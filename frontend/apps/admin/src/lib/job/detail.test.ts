@@ -16,8 +16,10 @@ import {
   isJobId,
   jobApiPath,
   loadFailure,
+  pollDelay,
   prettyJson,
   progressText,
+  settledNotice,
 } from './detail';
 import type { JobDetail } from './types';
 
@@ -182,6 +184,37 @@ describe('cancelNotice', () => {
     expect(cancelNotice(job({ status: status('CANCELLED') }))).toBe(CANCELLED_NOTICE);
     expect(cancelNotice(job({ status: status('RUNNING'), cancelRequested: true }))).toBe(
       CANCEL_REQUESTED_NOTICE,
+    );
+  });
+});
+
+describe('pollDelay', () => {
+  it('연속 실패마다 두 배, 30초가 상한이다', () => {
+    expect(pollDelay(0)).toBe(3000);
+    expect(pollDelay(1)).toBe(6000);
+    expect(pollDelay(3)).toBe(24_000);
+    expect(pollDelay(4)).toBe(30_000);
+    expect(pollDelay(50)).toBe(30_000);
+  });
+});
+
+describe('settledNotice', () => {
+  it('취소 요청 안내는 작업이 끝나면 최종 상태에 맞게 바뀐다', () => {
+    expect(settledNotice(CANCEL_REQUESTED_NOTICE, job({ status: status('RUNNING') }))).toBe(
+      CANCEL_REQUESTED_NOTICE,
+    );
+    expect(settledNotice(CANCEL_REQUESTED_NOTICE, job({ status: status('CANCELLED') }))).toBe(
+      CANCELLED_NOTICE,
+    );
+    expect(settledNotice(CANCEL_REQUESTED_NOTICE, job({ status: status('FAILED') }))).toBe(
+      '취소가 반영되기 전에 작업이 끝났습니다 (FAILED).',
+    );
+  });
+
+  it('다른 안내는 그대로 둔다', () => {
+    expect(settledNotice('', job({ status: status('SUCCEEDED') }))).toBe('');
+    expect(settledNotice(CANCELLED_NOTICE, job({ status: status('CANCELLED') }))).toBe(
+      CANCELLED_NOTICE,
     );
   });
 });
