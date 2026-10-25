@@ -424,6 +424,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 | 응답 | 필드 | 뜻 |
 |------|------|----|
+| 목록 `GET /api/v1/products` | `hoverImage` | 목록 카드 hover 용 두 번째 정지 이미지. 모양은 `thumbnail`(`ProductThumbnailItem`)과 같다. 대표 · 갤러리를 노출 순서 → 아이디 오름차순으로 세어 두 번째이고, 영상은 세지 않는다. 1장 이하면 `null` |
 | 목록 `GET /api/v1/products` | `preorder: boolean` | 프리오더(예약 판매) 상품인가. `store.features.preorder` 가 꺼져 있으면 언제나 `false` |
 | 상세 `GET /api/v1/products/{productId}` | `preorder: { expectedShipDate } \| null` | 프리오더가 아니거나 플래그가 꺼지면 `null`. `expectedShipDate` 가 `null` 이면 "발송일 추후 안내" |
 | 상세 | `images[].mediaType` | `IMAGE` · `VIDEO`. 화면 분기용 제어 코드라 metadata 객체가 아니라 문자열이다(§11 예외) |
@@ -433,6 +434,7 @@ return ResponseEntity.ok().body(Response.success(response));
 - 발송 예정은 고정 날짜("○월 ○일 순차 발송")다. 주문일 기준 일수는 맞춤 제작 `customOrder.leadTimeDays` 이고 서로 겹치지 않는다.
 - 상세 `images[]` 는 갤러리 이미지와(`store.features.product-video` 가 켜져 있으면) 영상을 `displayOrder` → 아이디 오름차순으로 섞는다. 꺼지면 VIDEO 를 뺀다.
   대표 이미지(`thumbnail`)는 THUMBNAIL 만이다 — VIDEO 가 대표가 되지 않는다.
+  목록 `hoverImage` 도 정지 이미지만 본다. 그 페이지 상품의 정지 이미지는 아이디 in 절 쿼리 한 번으로 읽고, 상품마다 다시 읽지 않는다.
 - 프리오더 상품의 판매 가능 · 품절 판정과 재고 선점은 일반 상품과 같다. 화면에 발송 예정 안내만 더한다.
 - 어드민 입력(#9 몫): 영상 · 포스터 URL 은 우리 오브젝트 스토리지 공개 URL(`STORAGE_PUBLIC_BASE_URL` 접두)만 받는다 — 외부 영상 URL 은 받지 않는다.
   VIDEO 는 포스터 필수(빈 문자열 거절), 그 밖에는 포스터를 받지 않는다. 프리오더가 아니면 발송 예정일을 받지 않는다(DB check 와 같은 규칙).
@@ -473,7 +475,7 @@ return ResponseEntity.ok().body(Response.success(response));
 - **아이템**: `MEDIA`(PC · 모바일 주소 따로, 모바일이 없으면 PC, VIDEO 는 PC 포스터 필수) 또는 `PRODUCT`(상품 아이디). 유형별 허용 아이템 · 개수는
   HERO 미디어 1~10 · PRODUCT_PICK 상품 1~20 · STORY 미디어 0~10 · LOOK 미디어 1~10 + 상품 0~20 · DETAIL 미디어 1~10, 섹션당 아이템 30 · 섹션 50 상한이다.
   LOOK 은 룩 API(#62)가 생기면 바뀔 수 있다.
-- **상품 카드**는 고객 상품 목록 항목과 같은 필드 · 같은 계산(`ProductSaleSummary`)이다 — `DisplayProductCardParityTest` 가 두 응답을 비교한다.
+- **상품 카드**는 고객 상품 목록 항목과 같은 필드 · 같은 계산(`ProductSaleSummary`)이다 — `hoverImage` 포함. `DisplayProductCardParityTest` 가 두 응답을 비교한다.
   숨긴 상품 아이템은 고객 응답에서 빠지고, 그래서 `PRODUCT_PICK` 이 비어도 섹션은 남는다. 숨긴 상품도 등록은 된다(없는 상품만 400 `PRODUCT_050`).
 - **미디어 주소**는 스토리지 공개 주소(`store.media.public-base-url` ← `STORAGE_PUBLIC_BASE_URL`) 아래만 받는다. 키는 `[A-Za-z0-9._~-/]` 와 `%XX` 만,
   `..` · `//` · 쿼리 · 프래그먼트 금지(400 `PRODUCT_054`). 공개 주소가 없으면 미디어가 있는 쓰기를 503 `PRODUCT_055` 로 닫는다. 판정은 쓰기 시점에만 한다 —

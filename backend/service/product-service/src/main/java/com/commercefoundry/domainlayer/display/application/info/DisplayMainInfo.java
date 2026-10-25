@@ -33,11 +33,12 @@ public record DisplayMainInfo(List<Section> sections) {
      * 전시 Presenter 가 상품 컨텍스트 domain enum 을 쓰지 않게 한다 ({@code architecture-guide.md} §3).
      *
      * @param thumbnail 대표 이미지. 없으면 null
+     * @param hoverImage 정지 이미지 정렬의 두 번째. 1장 이하면 null. 목록 항목과 같다
      * @param listPrice 정가. 할인이 없으면 null
      * @param discountRate 할인율(%). 할인이 없으면 null
      */
     public record Product(
-        long productId, String name, Thumbnail thumbnail,
+        long productId, String name, Thumbnail thumbnail, Thumbnail hoverImage,
         Money salePrice, Money listPrice, Integer discountRate, boolean hasOptionSurcharge,
         CodeNameDescribable saleStatus, boolean customOrder, boolean preorder
     ) {

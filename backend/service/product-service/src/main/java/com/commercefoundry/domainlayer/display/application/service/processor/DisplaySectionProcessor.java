@@ -298,9 +298,11 @@ public class DisplaySectionProcessor {
 
     private static DisplayMainInfo.Product toProduct(ProductSummary summary) {
         ProductImage thumbnail = summary.thumbnail();
+        ProductImage hoverImage = summary.hoverImage();
         return new DisplayMainInfo.Product(
             summary.productId(), summary.name(),
             thumbnail == null ? null : new DisplayMainInfo.Thumbnail(thumbnail.id(), thumbnail.url(), thumbnail.width(), thumbnail.height(), thumbnail.altText()),
+            hoverImage == null ? null : new DisplayMainInfo.Thumbnail(hoverImage.id(), hoverImage.url(), hoverImage.width(), hoverImage.height(), hoverImage.altText()),
             summary.salePrice(), summary.listPrice(), summary.discountRate(), summary.hasOptionSurcharge(),
             summary.saleStatus(), summary.customOrder(), summary.preorder()
         );

@@ -9,6 +9,7 @@ import lombok.Builder;
  * 고객 상품 목록 한 항목.
  *
  * @param thumbnail 대표 이미지. 없으면 null
+ * @param hoverImage 정지 이미지 정렬의 두 번째. 1장 이하면 null
  * @param listPrice 정가. 없으면 null
  * @param discountRate 할인율(%). 할인이 없으면 null
  * @param customOrder 스토어 기능 플래그와 상품 설정이 모두 켜졌을 때만 true
@@ -16,7 +17,7 @@ import lombok.Builder;
  */
 @Builder
 public record ProductListItemInfo(
-    long productId, String name, ProductImageInfo thumbnail,
+    long productId, String name, ProductImageInfo thumbnail, ProductImageInfo hoverImage,
     Money salePrice, Money listPrice, Integer discountRate, boolean hasOptionSurcharge,
     SaleAvailability saleStatus, boolean customOrder, boolean preorder
 ) {
@@ -27,6 +28,7 @@ public record ProductListItemInfo(
             .productId(summary.productId())
             .name(summary.name())
             .thumbnail(summary.thumbnail() == null ? null : ProductImageInfo.from(summary.thumbnail()))
+            .hoverImage(summary.hoverImage() == null ? null : ProductImageInfo.from(summary.hoverImage()))
             .salePrice(summary.salePrice())
             .listPrice(summary.listPrice())
             .discountRate(summary.discountRate())

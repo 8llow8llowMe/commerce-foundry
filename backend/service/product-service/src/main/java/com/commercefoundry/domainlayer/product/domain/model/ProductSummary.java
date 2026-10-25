@@ -9,6 +9,7 @@ import java.util.Objects;
  * ({@code architecture-guide.md} §3 컨텍스트 간 의존 규칙).
  *
  * @param thumbnail 대표 이미지. 없으면 null
+ * @param hoverImage 정지 이미지 정렬의 두 번째. 1장 이하면 null. 영상은 세지 않는다
  * @param listPrice 정가. 할인이 없으면 null — {@code discountRate} 와 함께 null 이다
  * @param discountRate 할인율(%). 할인이 없으면 null
  * @param hasOptionSurcharge 판매중 SKU 끼리 추가금이 다른가
@@ -16,7 +17,7 @@ import java.util.Objects;
  * @param preorder 스토어 기능 플래그와 상품 설정이 모두 켜졌을 때만 true
  */
 public record ProductSummary(
-    long productId, String name, ProductImage thumbnail,
+    long productId, String name, ProductImage thumbnail, ProductImage hoverImage,
     Money salePrice, Money listPrice, Integer discountRate, boolean hasOptionSurcharge,
     SaleAvailability saleStatus, boolean customOrder, boolean preorder
 ) {

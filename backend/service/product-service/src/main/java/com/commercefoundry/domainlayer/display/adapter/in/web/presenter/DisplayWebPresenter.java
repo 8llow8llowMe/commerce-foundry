@@ -70,6 +70,7 @@ public class DisplayWebPresenter {
             .productId(String.valueOf(product.productId()))
             .name(product.name())
             .thumbnail(toThumbnailItem(product.thumbnail()))
+            .hoverImage(toThumbnailItem(product.hoverImage()))
             .salePrice(toMoneyItem(product.salePrice()))
             .listPrice(toMoneyItem(product.listPrice()))
             .discountRate(product.discountRate())

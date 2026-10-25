@@ -29,4 +29,14 @@ public class ProductImageRepositoryAdapter implements ProductImageRepositoryPort
         }
         return productImageMapper.toDomains(productImageRepository.findAllByProductIdInAndImageType(productIds, ImageType.THUMBNAIL));
     }
+
+    @Override
+    public List<ProductImage> findStillImagesByProductIds(Collection<Long> productIds) {
+        if (productIds.isEmpty()) {
+            return List.of();
+        }
+        return productImageMapper.toDomains(productImageRepository.findAllByProductIdInAndImageTypeInOrderByProductIdAscDisplayOrderAscIdAsc(
+            productIds, List.of(ImageType.THUMBNAIL, ImageType.GALLERY)
+        ));
+    }
 }

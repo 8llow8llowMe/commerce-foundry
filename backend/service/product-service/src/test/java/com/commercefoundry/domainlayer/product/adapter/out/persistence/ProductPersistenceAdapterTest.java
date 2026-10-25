@@ -579,6 +579,9 @@ class ProductPersistenceAdapterTest {
         assertThat(productImageRepositoryPort.findThumbnailsByProductIds(List.of(101L, 103L, 105L)))
             .extracting(ProductImage::id, ProductImage::productId, ProductImage::width, ProductImage::altText)
             .containsExactlyInAnyOrder(tuple(4001L, 101L, 800, "상품 101 이미지"), tuple(4004L, 103L, 800, "상품 103 이미지"));
+        assertThat(productImageRepositoryPort.findStillImagesByProductIds(List.of(101L, 103L, 105L)))
+            .extracting(ProductImage::id, ProductImage::productId)
+            .containsExactly(tuple(4001L, 101L), tuple(4003L, 101L), tuple(4002L, 101L), tuple(4004L, 103L));
     }
 
     @Test
@@ -612,6 +615,9 @@ class ProductPersistenceAdapterTest {
         assertThat(productImageRepositoryPort.findThumbnailsByProductIds(List.of(101L, 105L)))
             .extracting(ProductImage::id, ProductImage::imageType)
             .containsExactly(tuple(4001L, ImageType.THUMBNAIL));
+        assertThat(productImageRepositoryPort.findStillImagesByProductIds(List.of(101L, 105L)))
+            .extracting(ProductImage::imageType)
+            .doesNotContain(ImageType.VIDEO);
     }
 
     @Test
