@@ -178,7 +178,7 @@ describe('mergeLocalCart', () => {
         { skuId: '1', quantity: 1 },
         { skuId: '3', quantity: 1 },
       ]);
-      expect(removed).toEqual([[line('2', 2)], [line('1', 1), line('3', 3)]]);
+      expect(removed).toEqual([three]);
     });
 
     it('다시 보낸 것도 400 이면 더 보내지 않고 남은 줄을 버린다', async () => {
@@ -189,17 +189,57 @@ describe('mergeLocalCart', () => {
       const { result, removed } = run(post);
       expect(await result).toEqual({ kind: 'invalid', dropped: 3 });
       expect(post).toHaveBeenCalledTimes(2);
-      expect(removed).toEqual([[line('2', 2)], [line('1', 1), line('3', 3)]]);
+      expect(removed).toEqual([three]);
     });
 
-    it('다시 보낸 것이 429 면 뺀 줄만 지우고 나머지는 다음에 보낸다', async () => {
+    it('다시 보낸 것이 서버가 처리하지 않은 실패(429 · 503 · 연결)면 뺀 줄까지 모두 남겨 다음에 다시 판정한다', async () => {
+      for (const cause of [
+        new ApiError('rateLimited', 429, 'GATEWAY_006', null),
+        new ApiError('unavailable', 503, null, null),
+        new ApiError('network', null, null, null),
+        new Error('aborted'),
+      ]) {
+        const post = vi.fn().mockRejectedValueOnce(rejectItem(2)).mockRejectedValueOnce(cause);
+        const { result, removed } = run(post);
+        expect(await result).toEqual({ kind: 'retryLater' });
+        expect(removed).toEqual([]);
+      }
+    });
+
+    it('다시 보낸 것이 502 · 504(결과 모름)면 다시 보낸 줄만 지우고 뺀 줄은 남긴다', async () => {
+      for (const status of [502, 504]) {
+        const post = vi
+          .fn()
+          .mockRejectedValueOnce(rejectItem(1))
+          .mockRejectedValueOnce(new ApiError('unknownOutcome', status, null, null));
+        const { result, removed } = run(post);
+        expect(await result).toEqual({ kind: 'unknown' });
+        expect(removed).toEqual([[line('1', 1), line('3', 3)]]);
+      }
+    });
+
+    it('다시 보낸 것이 401 이면 아무것도 지우지 않고 세션이 끝났다고 알린다', async () => {
       const post = vi
         .fn()
-        .mockRejectedValueOnce(rejectItem(2))
-        .mockRejectedValueOnce(new ApiError('rateLimited', 429, 'GATEWAY_006', null));
+        .mockRejectedValueOnce(rejectItem(1))
+        .mockRejectedValueOnce(new ApiError('unauthorized', 401, null, null));
       const { result, removed } = run(post);
-      expect(await result).toEqual({ kind: 'retryLater' });
-      expect(removed).toEqual([[line('3', 3)]]);
+      expect(await result).toEqual({ kind: 'signedOut' });
+      expect(removed).toEqual([]);
+    });
+
+    it('fieldErrors 가 항목을 가리켜도 400 이 아니면 다시 보내지 않는다', async () => {
+      const post = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new ApiError('validation', 409, 'CART_115', null, [
+            { code: 'CART_115', field: 'items[1].customOptions[0].value', message: 'x' },
+          ]),
+        );
+      const { result, removed } = run(post);
+      expect(await result).toEqual({ kind: 'invalid', dropped: 3 });
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(removed).toEqual([three]);
     });
 
     it('모든 항목이 거절되면 다시 보내지 않는다', async () => {

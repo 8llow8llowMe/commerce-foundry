@@ -57,46 +57,69 @@ export type MergeResult =
  * 연결 실패(status 없음)는 대개 요청이 나가지 않은 경우(오프라인)라 다시 보낸다 — 드물게 두 번 더해질 수 있지만
  * 상한(99 · 1회 최대 수량)에서 잘리고, 비회원 장바구니를 잃는 것보다 낫다고 본다.
  *
- * 400(형식 오류)은 요청 전체가 거절돼 아무것도 반영되지 않았다. `fieldErrors` 가 가리키는 항목만 버리고 나머지를
- * **한 번** 다시 보낸다 — 한 줄(예: 제어 문자 `CART_115`, #263) 때문에 다른 줄까지 잃지 않게. 항목을 가릴 수 없거나
- * 다시 보낸 것도 400 이면 보낸 줄을 버린다.
+ * 400(형식 오류)은 요청 전체가 거절돼 아무것도 반영되지 않았다. `fieldErrors` 가 가리키는 항목을 빼고 나머지를
+ * **한 번** 다시 보낸다 — 한 줄(예: 제어 문자 `CART_115`, #263) 때문에 다른 줄까지 잃지 않게. 뺀 줄은 다시 보낸 결과가
+ * 성공이거나 다시 400 일 때만 지운다(그때 알림에 센다). 그 밖의 결과면 뺀 줄을 남겨 다음 병합에서 다시 판정한다.
+ * 항목을 가릴 수 없거나 다시 보낸 것도 400 이면 보낸 줄을 모두 버린다.
  */
 export async function mergeLocalCart(deps: {
   read: () => LocalCartLine[];
   remove: (batch: LocalCartLine[]) => void;
   post: (items: CartItemRequest[]) => Promise<CartMergeResponse>;
 }): Promise<MergeResult> {
-  let batch = mergeBatch(deps.read());
+  const batch = mergeBatch(deps.read());
   if (batch.length === 0) return { kind: 'empty' };
-  let dropped = 0;
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      const result = await deps.post(mergeRequestItems(batch));
+  try {
+    const result = await deps.post(mergeRequestItems(batch));
+    deps.remove(batch);
+    return { kind: 'merged', skipped: result.skippedItems.length };
+  } catch (cause) {
+    if (!(cause instanceof ApiError)) return { kind: 'retryLater' };
+    if (cause.kind !== 'validation') return settleFailure(cause, batch, deps.remove);
+    const rejected = cause.status === 400 ? rejectedItemIndexes(cause, batch.length) : null;
+    const rest = rejected ? batch.filter((_, index) => !rejected.has(index)) : [];
+    if (!rejected || rest.length === 0) {
       deps.remove(batch);
-      return { kind: 'merged', skipped: result.skippedItems.length + dropped };
-    } catch (cause) {
-      if (!(cause instanceof ApiError)) return { kind: 'retryLater' };
-      switch (cause.kind) {
-        case 'unauthorized':
-          return { kind: 'signedOut' };
-        case 'validation': {
-          const rejected = attempt === 0 ? rejectedItemIndexes(cause, batch.length) : null;
-          const rest = rejected ? batch.filter((_, index) => !rejected.has(index)) : [];
-          if (!rejected || rest.length === 0) {
-            deps.remove(batch);
-            return { kind: 'invalid', dropped: dropped + batch.length };
-          }
-          deps.remove(batch.filter((_, index) => rejected.has(index)));
-          dropped += rejected.size;
-          batch = rest;
-          continue;
-        }
-        case 'unknownOutcome':
-          deps.remove(batch);
-          return { kind: 'unknown' };
-        default:
-          return { kind: 'retryLater' };
-      }
+      return { kind: 'invalid', dropped: batch.length };
     }
+    return resendWithout(batch, rest, deps);
+  }
+}
+
+/** 문제 줄을 뺀 나머지(rest)를 한 번 다시 보낸다. 뺀 줄은 성공 · 다시 400 일 때만 원래 batch 와 함께 지운다 */
+async function resendWithout(
+  batch: LocalCartLine[],
+  rest: LocalCartLine[],
+  deps: Pick<Parameters<typeof mergeLocalCart>[0], 'remove' | 'post'>,
+): Promise<MergeResult> {
+  const dropped = batch.length - rest.length;
+  try {
+    const result = await deps.post(mergeRequestItems(rest));
+    deps.remove(batch);
+    return { kind: 'merged', skipped: result.skippedItems.length + dropped };
+  } catch (cause) {
+    if (!(cause instanceof ApiError)) return { kind: 'retryLater' };
+    if (cause.kind === 'validation') {
+      deps.remove(batch);
+      return { kind: 'invalid', dropped: batch.length };
+    }
+    return settleFailure(cause, rest, deps.remove);
+  }
+}
+
+/** 400 이 아닌 실패. 502 · 504 는 서버가 반영했을 수 있어 보낸 줄(sent)만 지운다 */
+function settleFailure(
+  cause: ApiError,
+  sent: LocalCartLine[],
+  remove: (batch: LocalCartLine[]) => void,
+): MergeResult {
+  switch (cause.kind) {
+    case 'unauthorized':
+      return { kind: 'signedOut' };
+    case 'unknownOutcome':
+      remove(sent);
+      return { kind: 'unknown' };
+    default:
+      return { kind: 'retryLater' };
   }
 }
