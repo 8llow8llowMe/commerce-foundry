@@ -6,14 +6,13 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repos
 import com.commercefoundry.domainlayer.shippingfee.application.mapper.ShippingPolicyMapper;
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.ShippingPolicyRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
+import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.shared.commerce.ShippingScope;
 import java.time.Instant;
-import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
@@ -22,8 +21,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class ShippingPolicyRepositoryAdapter implements ShippingPolicyRepositoryPort {
 
-    /** 동시 최초 생성이 부딪히는 제약 — 범위 유일 키와 PostgreSQL 기본 키({@code <테이블>_pkey}). */
-    private static final List<String> DUPLICATE_POLICY_CONSTRAINTS = List.of("uk_shipping_policy_scope", "shipping_policy_pkey");
+    /** 동시 최초 생성이 부딪히는 제약 — 범위 유일 키와 PostgreSQL 기본 키({@code <테이블>_pkey}). 소문자 · 스키마 없는 이름이다. */
+    private static final Set<String> DUPLICATE_POLICY_CONSTRAINTS = Set.of("uk_shipping_policy_scope", "shipping_policy_pkey");
 
     private final ShippingPolicyRepository shippingPolicyRepository;
     private final ShippingRemoteAreaRepository shippingRemoteAreaRepository;
@@ -69,17 +68,13 @@ public class ShippingPolicyRepositoryAdapter implements ShippingPolicyRepository
     }
 
     /**
-     * 원인 체인의 Hibernate {@link ConstraintViolationException} 이 알려 준 제약 이름으로 판정한다. 이름을 모르면 충돌로 보지 않는다.
+     * 위반한 제약 이름을 persistence-core {@link ConstraintViolations} 로 정하고(PostgreSQL 서버 오류 필드 우선 — {@code lc_messages} 로케일과 무관) 정확히 비교한다.
+     * 이름을 모르면 충돌로 보지 않는다 ({@code coding-conventions.md} §9-1, #247 · #159).
      * 해외 정책 어댑터({@link InternationalShippingPolicyRepositoryAdapter})도 같은 정책 행을 만들므로 같은 판정을 쓴다.
      */
     static boolean isDuplicatePolicy(DataIntegrityViolationException exception) {
-        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
-            if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null) {
-                String constraintName = violation.getConstraintName().toLowerCase(Locale.ROOT);
-                return DUPLICATE_POLICY_CONSTRAINTS.stream().anyMatch(constraintName::contains);
-            }
-        }
-        return false;
+        String constraintName = ConstraintViolations.constraintNameOf(exception);
+        return constraintName != null && DUPLICATE_POLICY_CONSTRAINTS.contains(constraintName);
     }
 
     private void update(ShippingPolicy policy) {

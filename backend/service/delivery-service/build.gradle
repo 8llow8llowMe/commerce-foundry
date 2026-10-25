@@ -20,6 +20,8 @@ dependencies {
     annotationProcessor "org.mapstruct:mapstruct-processor:${rootProject.ext.mapstructVersion}"
 
     runtimeOnly 'org.postgresql:postgresql'
+    // 제약 이름 판정 테스트가 PostgreSQL 서버 오류 필드(PSQLException · ServerErrorMessage)를 꾸민다 (#247). 메인 코드는 드라이버를 컴파일에 쓰지 않는다
+    testImplementation 'org.postgresql:postgresql'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     // @WebMvcTest 의 @WithMockUser — 컨트롤러 슬라이스에서 어드민 역할 · 서비스 권한(SERVICE_*) 인증 주체를 직접 넣는다
