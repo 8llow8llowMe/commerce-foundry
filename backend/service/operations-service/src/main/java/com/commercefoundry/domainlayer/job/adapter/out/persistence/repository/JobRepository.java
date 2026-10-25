@@ -1,10 +1,9 @@
 package com.commercefoundry.domainlayer.job.adapter.out.persistence.repository;
 
 import com.commercefoundry.domainlayer.job.adapter.out.persistence.entity.JobEntity;
-import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.ExpiredJobLeaseQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import java.time.Instant;
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Limit;
@@ -18,7 +17,7 @@ import org.springframework.data.jpa.repository.Query;
  * 백그라운드 작업. 상태를 바꾸는 JPQL 을 두지 않는다 — 도메인 전이 뒤 {@code saveAndFlush}(merge, {@code @Version} 검사)로만 바꾼다.
  *
  * <p>상태가 아닌 칸(lease · 진행률 · 취소 요청 플래그)은 조건부 UPDATE 한 문장이다 ({@code coding-conventions.md} §9-1 · §9-5). 반환값은 바뀐 행 수(0 또는 1)다.
- * 이 쓰기도 {@code version} 을 직접 올린다 — 그 사이 같은 행을 읽은 쪽(lease 만료로 회수하려는 다른 워커, 종료를 쓰는 워커)의 merge 가
+ * 이 쓰기도 {@code version} 을 직접 올린다 — 그 사이 같은 행을 읽은 쪽(lease 만료를 판정하는 트리거, 종료를 쓰는 워커)의 merge 가
  * 옛 lease · 플래그로 덮지 못하고 버전 충돌로 진다. bulk UPDATE 는 감사 리스너를 거치지 않아 {@code updatedAt} 을 인자로 받아 직접 세팅한다.
  */
 public interface JobRepository extends JpaRepository<JobEntity, Long> {
@@ -38,26 +37,26 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     /** 어드민 목록 — 상태 · 종류 조건. */
     Page<JobEntity> findAllByStatusAndTypeOrderByIdDesc(JobStatus status, String type, Pageable pageable);
 
-    /**
-     * 예약 시각이 지난 QUEUED 후보 — {@code idx_job_status_priority_scheduled_at_id} 의 순서(우선순위 내림차순 → 예약 시각 → 아이디) 그대로 읽어
-     * 정렬을 인덱스에서 얻는다. 만료 RUNNING 과 OR 로 묶으면 두 인덱스를 합친 뒤 따로 정렬해야 해서 나눴다.
-     */
+    /** lease 가 만료된 RUNNING(워커가 죽었다)의 첫 배치 — {@code idx_job_status_lease_expires_at}. 오래 만료된 것부터. */
     @Query("""
-        select new com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult(j.id, j.type)
+        select new com.commercefoundry.domainlayer.job.application.port.out.query.ExpiredJobLeaseQueryResult(j.id, j.leaseExpiresAt)
           from JobEntity j
-         where j.status = :queued and j.scheduledAt <= :now and j.type in :types
-         order by j.priority desc, j.scheduledAt asc, j.id asc
-        """)
-    List<ClaimableJobQueryResult> findClaimableQueued(Collection<String> types, JobStatus queued, Instant now, Limit limit);
-
-    /** lease 가 만료된 RUNNING 후보(워커가 죽었다) — {@code idx_job_status_lease_expires_at}. 오래 만료된 것부터. */
-    @Query("""
-        select new com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult(j.id, j.type)
-          from JobEntity j
-         where j.status = :running and j.leaseExpiresAt < :now and j.type in :types
+         where j.status = :running and j.leaseExpiresAt < :now
          order by j.leaseExpiresAt asc, j.id asc
         """)
-    List<ClaimableJobQueryResult> findClaimableExpired(Collection<String> types, JobStatus running, Instant now, Limit limit);
+    List<ExpiredJobLeaseQueryResult> findExpiredLeases(JobStatus running, Instant now, Limit limit);
+
+    /** 다음 배치 — 앞 배치의 마지막 {@code (lease_expires_at, id)} 다음부터 읽는다(keyset). 회수에 실패해 남은 건을 다시 읽지 않는다. */
+    @Query("""
+        select new com.commercefoundry.domainlayer.job.application.port.out.query.ExpiredJobLeaseQueryResult(j.id, j.leaseExpiresAt)
+          from JobEntity j
+         where j.status = :running and j.leaseExpiresAt < :now
+           and (j.leaseExpiresAt > :afterLeaseExpiresAt or (j.leaseExpiresAt = :afterLeaseExpiresAt and j.id > :afterId))
+         order by j.leaseExpiresAt asc, j.id asc
+        """)
+    List<ExpiredJobLeaseQueryResult> findExpiredLeasesAfter(
+        JobStatus running, Instant now, Instant afterLeaseExpiresAt, Long afterId, Limit limit
+    );
 
     /** heartbeat — 아직 이 워커의 이 시도이고 취소 요청이 없을 때만 lease 를 연장하고 진행률을 쓴다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)

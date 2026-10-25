@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.info.JobRegistrationInfo;
 import com.commercefoundry.domainlayer.job.application.port.in.JobRegisterUseCase;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobClaimProcessor;
+import com.commercefoundry.domainlayer.job.application.service.processor.JobClaimProcessor.ClaimResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandler;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
@@ -17,7 +18,6 @@ import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -44,7 +44,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * 테스트 메서드는 트랜잭션 밖이다({@code @SpringBootTest} 기본) — 스레드마다 호출 하나가 트랜잭션 하나다.
  *
  * <p>스키마는 DDL 스냅숏 + {@code ddl-auto=validate} 다. 커넥션 풀은 동시 스레드 수보다 크게 둔다 — 풀이 작으면 경합이 풀 대기로 바뀌어 행 경합을 보지 못한다.
- * 워커 폴링은 끈다 — 이 테스트가 직접 가져간다. Docker 없는 로컬은 건너뛰고 CI 에서는 Docker 가 없으면 실패한다.
+ * 워커 리스너는 끈다 — 이 테스트가 직접 가져간다. Docker 없는 로컬은 건너뛰고 CI 에서는 Docker 가 없으면 실패한다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -89,16 +89,21 @@ class JobClaimConcurrencyTest {
     }
 
     @Test
-    @DisplayName("① 워커 20개가 같은 작업을 동시에 가져가면 정확히 하나만 RUNNING 으로 가져가고, 나머지는 빈 값이거나 버전 충돌(JOB_CONFLICT)이다")
+    @DisplayName("① 같은 실행 신호를 워커 20개가 동시에 받으면 정확히 하나만 RUNNING 으로 가져가고, 나머지는 STALE 이거나 버전 충돌(JOB_CONFLICT)이다")
     void exactlyOneWorkerClaims() throws Exception {
         for (int round = 0; round < 5; round++) {
             long jobId = jobRegisterUseCase.register(JobRegisterCommand.now(TYPE, "{}", null)).jobId();
 
-            List<Outcome<Optional<Job>>> outcomes = runConcurrently(index -> jobClaimProcessor.claim(jobId, "worker-" + index, LEASE));
+            List<Outcome<ClaimResult>> outcomes = runConcurrently(index -> jobClaimProcessor.claim(jobId, 0, TYPE, "worker-" + index, LEASE));
 
-            List<Job> claimed = outcomes.stream().map(Outcome::result).filter(result -> result != null && result.isPresent()).map(Optional::get).toList();
+            List<Job> claimed = outcomes.stream()
+                .map(Outcome::result)
+                .filter(result -> result != null && result.outcome() == ClaimResult.Outcome.CLAIMED)
+                .map(ClaimResult::job)
+                .toList();
             assertThat(claimed).as("가져간 워커").hasSize(1);
-            assertThat(outcomes).allMatch(outcome -> outcome.errorCode() == null || outcome.errorCode() == JobErrorCode.JOB_CONFLICT);
+            assertThat(outcomes).allMatch(outcome -> outcome.errorCode() == JobErrorCode.JOB_CONFLICT
+                || outcome.errorCode() == null && outcome.result().outcome() != ClaimResult.Outcome.NOT_DUE);
             var stored = jobRepository.findById(jobId).orElseThrow();
             assertThat(stored.getStatus()).isEqualTo(JobStatus.RUNNING);
             assertThat(stored.getAttempt()).as("시도는 한 번만 늘었다").isEqualTo(1);

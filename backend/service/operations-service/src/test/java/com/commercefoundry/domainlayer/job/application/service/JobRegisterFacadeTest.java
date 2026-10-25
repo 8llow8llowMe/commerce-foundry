@@ -16,6 +16,7 @@ import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandlerOptions;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.domainlayer.job.support.InMemoryJobRepositoryPort;
+import com.commercefoundry.domainlayer.job.support.RecordingJobDispatchPort;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
 import java.time.Duration;
@@ -31,22 +32,24 @@ class JobRegisterFacadeTest {
     private static final Instant NOW = Instant.parse("2026-10-24T09:00:00Z");
 
     private InMemoryJobRepositoryPort repository;
+    private RecordingJobDispatchPort dispatchPort;
     private JobRegisterFacade facade;
 
     @BeforeEach
     void setUp() {
         repository = new InMemoryJobRepositoryPort();
+        dispatchPort = new RecordingJobDispatchPort();
         JobHandlerProcessor handlerProcessor = new JobHandlerProcessor(
             handlers(handler("REPORT_EXPORT"), handler("ONCE", new JobHandlerOptions(null, 1, null, null))), properties()
         );
         JobRegistrationProcessor registrationProcessor = new JobRegistrationProcessor(
-            repository, handlerProcessor, new SnowflakeIdGenerator(1, 1), Clock.fixed(NOW, ZoneOffset.UTC)
+            repository, dispatchPort, handlerProcessor, new SnowflakeIdGenerator(1, 1), Clock.fixed(NOW, ZoneOffset.UTC)
         );
         facade = new JobRegisterFacade(registrationProcessor);
     }
 
     @Test
-    @DisplayName("새 작업은 QUEUED · 예약 시각 now · 시도 상한은 핸들러 옵션(없으면 기본 3)이다")
+    @DisplayName("새 작업은 QUEUED · 예약 시각 now · 시도 상한은 핸들러 옵션(없으면 기본 3)이고, 시도 0 의 실행 신호를 한 번 낸다")
     void registers() {
         JobRegistrationInfo info = facade.register(JobRegisterCommand.now("REPORT_EXPORT", "{\"month\":\"2026-09\"}", 9L));
         JobRegistrationInfo once = facade.register(JobRegisterCommand.now("ONCE", "{}", null));
@@ -58,10 +61,14 @@ class JobRegisterFacadeTest {
         assertThat(saved.maxAttempts()).isEqualTo(3);
         assertThat(saved.requestedByMemberId()).isEqualTo(9L);
         assertThat(repository.get(once.jobId()).maxAttempts()).isEqualTo(1);
+        assertThat(dispatchPort.dispatchedOf(info.jobId())).singleElement().satisfies(signal -> {
+            assertThat(signal.attempt()).isZero();
+            assertThat(signal.type()).isEqualTo("REPORT_EXPORT");
+        });
     }
 
     @Test
-    @DisplayName("같은 멱등 키의 활성 작업이 있으면 새로 만들지 않고 그 작업을 돌려준다")
+    @DisplayName("같은 멱등 키의 활성 작업이 있으면 새로 만들지 않고 그 작업을 돌려준다 — 실행 신호도 다시 내지 않는다")
     void returnsActiveJobForSameDedupKey() {
         JobRegistrationInfo first = facade.register(command("REPORT_EXPORT@2026-09"));
 
@@ -69,6 +76,7 @@ class JobRegisterFacadeTest {
 
         assertThat(second.jobId()).isEqualTo(first.jobId());
         assertThat(second.created()).isFalse();
+        assertThat(dispatchPort.dispatched()).hasSize(1);
     }
 
     @Test
@@ -117,7 +125,7 @@ class JobRegisterFacadeTest {
     }
 
     @Test
-    @DisplayName("예약 시각을 주면 그 시각부터 가져갈 수 있다")
+    @DisplayName("예약 시각을 주면 그 시각부터 가져갈 수 있고, 실행 신호에도 그 예약 시각이 실린다(발행이 그때까지 미뤄진다)")
     void scheduled() {
         JobRegistrationInfo info = facade.register(new JobRegisterCommand("REPORT_EXPORT", "{}", null, null, 5, NOW.plus(Duration.ofHours(1))));
 
@@ -125,6 +133,8 @@ class JobRegisterFacadeTest {
         assertThat(saved.priority()).isEqualTo(5);
         assertThat(saved.isClaimable(NOW)).isFalse();
         assertThat(saved.isClaimable(NOW.plus(Duration.ofHours(1)))).isTrue();
+        assertThat(dispatchPort.dispatchedOf(info.jobId())).singleElement()
+            .satisfies(signal -> assertThat(signal.scheduledAt()).isEqualTo(NOW.plus(Duration.ofHours(1))));
     }
 
     private static JobRegisterCommand command(String dedupKey) {

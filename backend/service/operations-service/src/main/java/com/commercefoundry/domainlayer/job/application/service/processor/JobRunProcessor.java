@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.job.application.service.processor;
 
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
+import com.commercefoundry.domainlayer.job.application.port.out.JobDispatchPort;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobFinishedEvent;
@@ -23,9 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
  * 실행 중인 시도의 기록 — heartbeat, 종료(성공 · 실패 · 취소), 돌려놓기, 취소 요청. 메서드마다 짧은 트랜잭션이다 — 핸들러 실행은 트랜잭션 밖이고,
  * 워커 Facade 가 그 앞뒤로 이 메서드들을 부른다.
  *
- * <p>종료는 <b>다시 읽어 아직 이 워커의 이 시도인지</b>({@link Job#isOwnedBy}) 확인한 뒤에만 쓴다. lease 를 잃은 사이 다른 워커가 회수했거나
+ * <p>종료는 <b>다시 읽어 아직 이 워커의 이 시도인지</b>({@link Job#isOwnedBy}) 확인한 뒤에만 쓴다. lease 를 잃은 사이 만료 판정이 회수했거나
  * 돌려놓았으면, 늦게 끝난 실행의 결과를 버리고 warn 을 남긴다 — 한 시도의 결과가 다른 시도를 덮지 않는다.
  * 끝났으면 같은 트랜잭션 안에서 {@link JobFinishedEvent} 를 한 번 발행한다(#213 알림이 함께 커밋 · 롤백된다).
+ * 다시 QUEUED 가 됐으면(재시도 · 돌려놓기) 같은 트랜잭션 안에서 다음 시도의 실행 신호를 낸다({@link JobDispatchPort}) — 신호는 예약 시각(백오프)까지 미뤄 나간다.
  *
  * <p>로그에는 아이디 · 종류 · 시도 · 오류 코드만 남긴다. payload · 결과 · 오류 메시지는 남기지 않는다.
  */
@@ -35,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class JobRunProcessor {
 
     private final JobRepositoryPort jobRepositoryPort;
+    private final JobDispatchPort jobDispatchPort;
     private final JobProperties jobProperties;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
@@ -143,6 +146,8 @@ public class JobRunProcessor {
         Job saved = jobRepositoryPort.update(transition.apply(found.get()));
         if (saved.status().isFinished()) {
             eventPublisher.publishEvent(JobFinishedEvent.of(saved));
+        } else if (saved.status() == JobStatus.QUEUED) {
+            jobDispatchPort.dispatch(saved);
         }
         log.info("job attempt recorded. jobId={}, type={}, attempt={}, action={}, status={}, errorCode={}",
             saved.id(), saved.type(), attempt, action, saved.status(), saved.errorCode());
@@ -155,7 +160,7 @@ public class JobRunProcessor {
         ALIVE,
         /** 취소 요청을 받았다 — 다음 checkpoint 에서 멈춘다 */
         CANCEL_REQUESTED,
-        /** 이 시도가 더 이상 주인이 아니다(다른 워커가 회수 · 끝남) — 결과를 버린다 */
+        /** 이 시도가 더 이상 주인이 아니다(lease 만료로 회수됨 · 끝남) — 결과를 버린다 */
         LOST
     }
 }

@@ -28,6 +28,7 @@ public class JobTransitionException extends RuntimeException {
         FAIL,
         CANCEL,
         REQUEST_CANCEL,
-        RELEASE
+        RELEASE,
+        EXPIRE_LEASE
     }
 }

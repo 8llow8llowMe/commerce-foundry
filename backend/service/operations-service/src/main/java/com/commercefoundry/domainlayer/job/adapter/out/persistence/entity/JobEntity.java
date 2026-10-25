@@ -31,8 +31,8 @@ import org.hibernate.type.SqlTypes;
  * <p>{@code active_dedup_key} 는 QUEUED · RUNNING 동안만 {@code dedup_key} 와 같고 끝나면 null 이다. 유니크 키 {@code (type, active_dedup_key)} 가
  * 같은 종류 · 같은 키의 활성 작업을 하나로 막고 — 종류가 다르면 같은 키를 써도 서로 막지 않는다 — 끝난 키는 다시 등록할 수 있다(PostgreSQL 유니크 키는 null 을 겹치게 둔다).
  *
- * <p>인덱스 — 가져갈 후보 스캔({@code status, priority desc, scheduled_at, id}), 회수 스캔({@code status, lease_expires_at}),
- * 어드민 목록의 종류 필터 · 아이디 내림차순({@code type, id}).
+ * <p>인덱스 — lease 만료 스캔({@code status, lease_expires_at}), 어드민 목록의 종류 필터 · 아이디 내림차순({@code type, id}).
+ * 실행 대상은 Kafka 신호가 아이디로 가리키므로 가져갈 후보 스캔 인덱스를 두지 않는다 ({@code architecture-guide.md} §10).
  */
 @Entity
 @Table(
@@ -40,7 +40,6 @@ import org.hibernate.type.SqlTypes;
     comment = "백그라운드 작업",
     uniqueConstraints = @UniqueConstraint(name = "uk_job_type_active_dedup_key", columnNames = {"type", "active_dedup_key"}),
     indexes = {
-        @Index(name = "idx_job_status_priority_scheduled_at_id", columnList = "status, priority desc, scheduled_at, id"),
         @Index(name = "idx_job_status_lease_expires_at", columnList = "status, lease_expires_at"),
         @Index(name = "idx_job_type_id", columnList = "type, id")
     },
@@ -67,7 +66,7 @@ public class JobEntity extends BaseEntity {
     @Column(name = "status", nullable = false, length = 20, comment = "작업 상태 (QUEUED / RUNNING / SUCCEEDED / FAILED / CANCELLED)")
     private JobStatus status;
 
-    @Column(name = "priority", nullable = false, comment = "우선순위 — 클수록 먼저 가져간다")
+    @Column(name = "priority", nullable = false, comment = "우선순위 — 등록 기록용. 실행 순서는 Kafka 파티션 도착 순서다")
     private int priority;
 
     /** 앱 상한 16KiB. {@code text} 로 두어 길이 변경에 DDL 이 따라오지 않게 한다. */
@@ -84,7 +83,7 @@ public class JobEntity extends BaseEntity {
     @Column(name = "requested_by_member_id", comment = "등록한 어드민 (외부 FK: auth-service member.id). 시스템 등록이면 null")
     private Long requestedByMemberId;
 
-    @Column(name = "scheduled_at", nullable = false, comment = "이 시각부터 가져갈 수 있다 — 재시도면 백오프가 더해진 시각")
+    @Column(name = "scheduled_at", nullable = false, comment = "이 시각부터 실행할 수 있다 — 재시도면 백오프가 더해진 시각")
     private Instant scheduledAt;
 
     @Column(name = "attempt", nullable = false, comment = "가져간 시도 수 (0 부터). RUNNING 이면 실행 중인 시도 번호")
@@ -96,7 +95,7 @@ public class JobEntity extends BaseEntity {
     @Column(name = "worker_id", length = 100, comment = "작업을 쥔 워커 ({앱}:{호스트}:{pid}:{난수}). 끝난 작업은 마지막 워커, QUEUED 는 null")
     private String workerId;
 
-    @Column(name = "lease_expires_at", comment = "lease 만료 시각 (RUNNING 일 때만) — 지나면 다른 워커가 회수한다")
+    @Column(name = "lease_expires_at", comment = "lease 만료 시각 (RUNNING 일 때만) — 지나면 만료 판정 트리거가 회수한다")
     private Instant leaseExpiresAt;
 
     @Column(name = "started_at", comment = "이번 시도를 가져간 시각")

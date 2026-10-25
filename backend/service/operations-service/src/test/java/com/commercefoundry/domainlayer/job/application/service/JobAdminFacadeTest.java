@@ -27,6 +27,7 @@ import com.commercefoundry.domainlayer.job.domain.model.JobOutcome;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.domainlayer.job.domain.model.RetryPolicy;
 import com.commercefoundry.domainlayer.job.support.InMemoryJobRepositoryPort;
+import com.commercefoundry.domainlayer.job.support.RecordingJobDispatchPort;
 import com.commercefoundry.persistence.dto.PageResponse;
 import java.time.Clock;
 import java.time.Duration;
@@ -66,7 +67,7 @@ class JobAdminFacadeTest {
         JobHandlerProcessor handlerProcessor = new JobHandlerProcessor(handlers(new ReportHandler()), properties());
         return new JobAdminFacade(
             new JobQueryProcessor(repository, handlerProcessor),
-            new JobRunProcessor(repository, properties(), events::add, clock),
+            new JobRunProcessor(repository, new RecordingJobDispatchPort(), properties(), events::add, clock),
             new JobAdminAuditProcessor(auditPort),
             new JobAdminPresenter()
         );

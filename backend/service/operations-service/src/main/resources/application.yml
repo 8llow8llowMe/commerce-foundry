@@ -25,6 +25,27 @@ spring:
     resources:
       # 정적 리소스를 내지 않는다. 켜 두면 Swagger 를 닫아도 /webjars/swagger-ui/** 가 그대로 열린다 (Swagger UI 는 springdoc 이 따로 낸다)
       add-mappings: false
+  # Kafka 접속 (deploy-guide.md §4-4). 주소는 Vault 값이다 — 저장소에 쓰지 않는다. 앱은 토픽을 만들지 않는다
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+    security:
+      protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+    admin:
+      auto-create: false
+
+# Kafka 메시징 (core/messaging-core/README.md). 꺼져 있으면 실행 신호는 outbox 에 쌓이기만 하고 작업이 실행되지 않는다 — 켜면 쌓인 신호부터 나간다
+commerce:
+  messaging:
+    enabled: ${MESSAGING_ENABLED:false}
+    namespace: ${KAFKA_NAMESPACE:}
+    # 토픽 · 그룹 이름의 서비스 토막 — 토픽 <ns>.operations.job-run, 그룹 <ns>.operations.job-runner (docker/kafka/topics.txt)
+    service: operations
+    required-topics:
+      - operations.job-run
+      - operations.job-run.dlt
+    outbox:
+      relay:
+        lock-table: operations.shedlock
 
 eureka:
   client:
@@ -51,17 +72,18 @@ snowflake:
   datacenter-id: ${SNOWFLAKE_DATACENTER_ID}
   worker-id: ${SNOWFLAKE_WORKER_ID}
 
-# 백그라운드 작업 엔진 (architecture-guide.md "백그라운드 작업 실행"). 값이 빠지거나 0 · 음수면 기동하지 않는다 (JobProperties)
+# 백그라운드 작업 엔진 (architecture-guide.md §10). 값이 빠지거나 0 · 음수면 기동하지 않는다 (JobProperties)
 operations:
   jobs:
     worker:
-      # false 면 이 인스턴스는 폴링하지 않는다(등록만). 다른 인스턴스가 실행한다
+      # false 면 이 인스턴스는 실행 신호를 받지 않는다(등록만). 다른 인스턴스가 실행한다
       enabled: true
       # 인스턴스 하나에서 동시에 실행하는 작업 수 — 실행 스레드 수와 같고 큐는 두지 않는다
       concurrency: 2
-      poll-interval: 2s
-      initial-delay: 10s
-      # 워커가 작업을 쥐는 시간. heartbeat 가 연장하고, 끊기면 이 시간 뒤 다른 워커가 회수한다
+      # 전체 실행 칸이 찼거나 종료 중일 때 신호를 늦춰 다시 받는 간격 (1m 이하) — 그동안 이 인스턴스의 컨슈머가 멈춘다.
+      # 종류별 칸만 찬 신호는 이만큼 늦게 다시 낸다(outbox)
+      redelivery-delay: 2s
+      # 워커가 작업을 쥐는 시간. heartbeat 가 연장하고, 끊기면 이 시간 뒤 만료 판정이 회수한다
       default-lease: 5m
       # lease 의 1/3 이하여야 한다 — 한두 번 놓쳐도 lease 가 남게
       heartbeat-interval: 1m
@@ -69,6 +91,12 @@ operations:
       default-max-run-duration: 30m
       # 종료 때 실행 중인 작업을 기다리는 시간. 넘으면 남은 작업을 QUEUED 로 돌려놓는다
       shutdown-grace: 30s
+    # lease 만료 판정 — 모든 인스턴스가 돈다(분산 락 없음). 워커가 죽은 작업을 다시 QUEUED 로 돌리고 실행 신호를 다시 낸다
+    lease-sweep:
+      initial-delay: 30s
+      fixed-delay: 30s
+      batch-size: 100
+      max-batches-per-run: 10
     retry:
       # 시도 횟수 상한 (첫 실행 포함). 핸들러 옵션이 덮는다
       max-attempts: 3
@@ -118,3 +146,7 @@ logging:
     # Eureka 에 닿지 않으면 이 데코레이터가 INFO · WARN 로그에 defaultZone 원문(비밀번호 포함)을 남긴다 (#248, security-guide.md §12-3).
     # 연결 실패 신호는 RetryableEurekaHttpClient 의 WARN 이 남긴다. com.netflix.discovery 를 DEBUG 로 올리지 않는다 — 같은 이유로 비밀번호가 나온다
     com.netflix.discovery.shared.transport.decorator.RedirectingEurekaHttpClient: ERROR
+    # kafka-clients 의 "*Config values" INFO 로그에 접속 주소가 찍힌다 (messaging-core README)
+    org.apache.kafka.clients.producer.ProducerConfig: WARN
+    org.apache.kafka.clients.consumer.ConsumerConfig: WARN
+    org.apache.kafka.clients.admin.AdminClientConfig: WARN

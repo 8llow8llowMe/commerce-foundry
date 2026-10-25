@@ -11,6 +11,7 @@ import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobFinishedEvent;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.domainlayer.job.support.InMemoryJobRepositoryPort;
+import com.commercefoundry.domainlayer.job.support.RecordingJobDispatchPort;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,7 +23,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 실행 중인 시도의 기록 — heartbeat 판정, 주인 확인 뒤 종료, 재시도 · 상한, 취소 요청. 종료(끝난 상태)일 때만 종료 이벤트가 한 번 나간다.
+ * 실행 중인 시도의 기록 — heartbeat 판정, 주인 확인 뒤 종료, 재시도 · 상한, 취소 요청. 종료(끝난 상태)일 때만 종료 이벤트가 한 번 나가고,
+ * 다시 QUEUED 가 됐을 때(재시도 · 돌려놓기)만 다음 시도의 실행 신호가 나간다.
  */
 class JobRunProcessorTest {
 
@@ -31,14 +33,16 @@ class JobRunProcessorTest {
     private static final Duration LEASE = Duration.ofMinutes(5);
 
     private InMemoryJobRepositoryPort repository;
+    private RecordingJobDispatchPort dispatchPort;
     private List<Object> events;
     private JobRunProcessor processor;
 
     @BeforeEach
     void setUp() {
         repository = new InMemoryJobRepositoryPort();
+        dispatchPort = new RecordingJobDispatchPort();
         events = new ArrayList<>();
-        processor = new JobRunProcessor(repository, properties(), events::add, Clock.fixed(NOW, ZoneOffset.UTC));
+        processor = new JobRunProcessor(repository, dispatchPort, properties(), events::add, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -73,6 +77,7 @@ class JobRunProcessorTest {
             assertThat(event.jobId()).isEqualTo(1L);
             assertThat(event.status()).isEqualTo(JobStatus.SUCCEEDED);
         });
+        assertThat(dispatchPort.dispatched()).as("끝난 작업은 실행 신호를 내지 않는다").isEmpty();
     }
 
     @Test
@@ -100,12 +105,17 @@ class JobRunProcessorTest {
         assertThat(queued.scheduledAt()).isAfter(NOW);
         assertThat(queued.errorCode()).isEqualTo("UPSTREAM_TIMEOUT");
         assertThat(events).isEmpty();
+        assertThat(dispatchPort.dispatched()).as("다음 시도 신호 — 시도 번호 1 · 백오프 뒤 예약 시각").singleElement().satisfies(signal -> {
+            assertThat(signal.attempt()).isEqualTo(1);
+            assertThat(signal.scheduledAt()).isEqualTo(queued.scheduledAt());
+        });
 
         repository.overwrite(queued.claim(WORKER, queued.scheduledAt(), LEASE));
         assertThat(processor.fail(1L, WORKER, 2, "UPSTREAM_TIMEOUT", "응답 없음", true)).isTrue();
         assertThat(repository.get(1L).status()).isEqualTo(JobStatus.FAILED);
         assertThat(events).singleElement().isInstanceOfSatisfying(JobFinishedEvent.class,
             event -> assertThat(event.errorCode()).isEqualTo("UPSTREAM_TIMEOUT"));
+        assertThat(dispatchPort.dispatched()).hasSize(1);
     }
 
     @Test
@@ -152,6 +162,18 @@ class JobRunProcessorTest {
         assertThat(released.attempt()).isZero();
         assertThat(released.isClaimable(NOW)).isTrue();
         assertThat(events).isEmpty();
+        assertThat(dispatchPort.dispatched()).singleElement().satisfies(signal -> assertThat(signal.attempt()).isZero());
+    }
+
+    @Test
+    @DisplayName("결과를 버린 기록(이 워커의 시도가 아님)은 실행 신호도 내지 않는다")
+    void discardedResultDoesNotDispatch() {
+        insertRunning(1L, 3);
+
+        assertThat(processor.fail(1L, "other-worker", 1, "X", null, true)).isFalse();
+        assertThat(processor.release(1L, WORKER, 2)).isFalse();
+
+        assertThat(dispatchPort.dispatched()).isEmpty();
     }
 
     private Job insertRunning(long jobId, int maxAttempts) {

@@ -2,6 +2,8 @@ dependencies {
     implementation project(':core:common-core')
     implementation project(':core:persistence-core')
     implementation project(':core:security-core')
+    // 작업 실행 신호 — outbox · 릴레이 · 컨슈머 재시도 · DLT (#307, architecture-guide.md §10)
+    implementation project(':core:messaging-core')
 
     // security-core 는 서블릿 · Boot 보안 자동설정을 compileOnly 로만 둔다 — 서블릿 서비스가 직접 선언한다 (security-guide.md §5-3)
     implementation 'org.springframework.boot:spring-boot-starter-security'
@@ -36,6 +38,10 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
+    // 가짜 outbox 저장소(InMemoryOutboxStore) — 단위 테스트가 실행 신호 발행을 단언한다
+    testImplementation testFixtures(project(':core:messaging-core'))
+    // 작업 흐름 테스트는 내장 Kafka(KRaft)로 돈다 — Docker 없는 로컬에서도 신호 발행 · 소비 · nack · DLT 를 실제로 본다(messaging-core 와 같다)
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
 }
 
 // 테스트 JVM 힙을 작게 둔다 — 같은 PC 에서 여러 세션이 빌드하면 가상 메모리(commit)가 바닥나 테스트 JVM 이 뜨지 못한다(#212 작업 중 실제로 났다).

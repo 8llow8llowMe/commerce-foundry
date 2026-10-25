@@ -6,14 +6,12 @@ import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.mapper.JobMapper;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
-import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.ExpiredJobLeaseQueryResult;
 import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -77,19 +75,15 @@ public class JobRepositoryAdapter implements JobRepositoryPort {
         return jobRepository.findByTypeAndActiveDedupKey(type, dedupKey).map(jobMapper::toDomain);
     }
 
-    /** 만료 RUNNING(드물다 — 워커가 죽은 경우)을 먼저, 남은 자리를 QUEUED 로 채운다. 두 쿼리가 각자 인덱스 순서로 읽는다. */
     @Override
-    public List<ClaimableJobQueryResult> findClaimable(Collection<String> types, Instant now, int limit) {
-        if (types.isEmpty() || limit <= 0) {
+    public List<ExpiredJobLeaseQueryResult> findExpiredLeases(Instant now, ExpiredJobLeaseQueryResult after, int limit) {
+        if (limit <= 0) {
             return List.of();
         }
-        List<ClaimableJobQueryResult> expired = jobRepository.findClaimableExpired(types, JobStatus.RUNNING, now, Limit.of(limit));
-        if (expired.size() >= limit) {
-            return expired;
+        if (after == null) {
+            return jobRepository.findExpiredLeases(JobStatus.RUNNING, now, Limit.of(limit));
         }
-        List<ClaimableJobQueryResult> candidates = new ArrayList<>(expired);
-        candidates.addAll(jobRepository.findClaimableQueued(types, JobStatus.QUEUED, now, Limit.of(limit - expired.size())));
-        return candidates;
+        return jobRepository.findExpiredLeasesAfter(JobStatus.RUNNING, now, after.leaseExpiresAt(), after.jobId(), Limit.of(limit));
     }
 
     /**
