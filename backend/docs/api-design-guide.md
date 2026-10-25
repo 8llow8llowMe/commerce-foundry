@@ -458,7 +458,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
 | `GET /api/v1/displays/main` | `permitAll()` | 200 노출 중인 섹션 목록 · `Cache-Control: max-age=60, public` | — |
-| `GET /api/v1/admin/displays/sections` | ADMIN | 200 전체 섹션(비노출 · 기간 밖 포함, `isLive` 파생) | — |
+| `GET /api/v1/admin/displays/sections` | ADMIN | 200 전체 섹션(비노출 · 기간 밖 포함, 배열 순서 = 노출 순서, `liveStatus` 파생) | — |
 | `GET /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 | 404 `PRODUCT_046` |
 | `POST /api/v1/admin/displays/sections` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `PRODUCT_047~054` · 409 `PRODUCT_056` · `PRODUCT_058` · 503 `PRODUCT_055` |
 | `PUT /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 — 섹션 필드 · 아이템 전체 교체 | 위와 같음 + 404 `PRODUCT_046` |
@@ -488,6 +488,10 @@ return ResponseEntity.ok().body(Response.success(response));
   검증 코드는 `PRODUCT_140~165`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` 와 `DisplayErrorCode` 가 나눠 쓴다 — 새 번호는 두 클래스를 모두 보고 고른다.
 - 계층 — display 컨텍스트는 product 컨텍스트의 Processor(`ProductListProcessor.summarizeVisible` · `ProductLookupProcessor`)와 domain(`ProductSummary`)만 쓴다(H8).
   상품 카드의 `customOrder` · `preorder` 는 목록과 같은 플래그 판정(#61)이다.
+- **어드민 응답은 운영자 언어다(#305).** 순서는 배열 순서로만 전하고 내부 순서 번호(`displayOrder`, 삭제 뒤 빈 번호가 남는다) · 저장마다 새로 발급되는
+  아이템 아이디는 내지 않는다. `itemType` · `mediaType` 은 `{code,name,description}`(미디어 · 상품, 이미지 · 영상)이고 — 고객 응답은 분기용 문자열 그대로 —
+  노출 상태는 `liveStatus`(LIVE 노출 중 · HIDDEN 숨김 · SCHEDULED 예정 · ENDED 종료, 숨김이 기간보다 앞선다)로 낸다. 고객 메인 노출과 같은 판정(`DisplaySection.liveStatusAt`)이다.
+  요청은 code 문자열로 받는다.
 
 ## 3. 계층 흐름
 
