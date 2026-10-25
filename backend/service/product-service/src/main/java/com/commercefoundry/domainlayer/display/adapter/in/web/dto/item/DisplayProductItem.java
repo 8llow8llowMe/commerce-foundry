@@ -22,6 +22,12 @@ public record DisplayProductItem(
     @Schema(description = "대표 이미지. 없으면 null", nullable = true)
     DisplayProductThumbnailItem thumbnail,
 
+    @Schema(
+        description = "hover 용 두 번째 정지 이미지. 상품 목록 항목과 같다. 1장 이하면 null",
+        nullable = true
+    )
+    DisplayProductThumbnailItem hoverImage,
+
     @Schema(description = "판매가 — 판매중 옵션 중 최저가. hasOptionSurcharge 가 true 면 '129,000원~' 처럼 표시한다")
     MoneyItem salePrice,
 

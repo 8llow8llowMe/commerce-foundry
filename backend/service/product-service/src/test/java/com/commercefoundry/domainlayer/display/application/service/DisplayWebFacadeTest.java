@@ -74,6 +74,7 @@ class DisplayWebFacadeTest {
         verify(productPort, times(1)).findVisibleListRowsByIds(ids.capture());
         verify(skuPort, times(1)).aggregateByProductIds(List.of(700L, 800L));
         verify(imagePort, times(1)).findThumbnailsByProductIds(List.of(700L, 800L));
+        verify(imagePort, times(1)).findStillImagesByProductIds(List.of(700L, 800L));
         assertThat(ids.getValue()).containsExactly(700L, 800L, 900L);
     }
 

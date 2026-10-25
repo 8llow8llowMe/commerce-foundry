@@ -65,6 +65,7 @@ public class ProductWebPresenter {
             .productId(String.valueOf(info.productId()))
             .name(info.name())
             .thumbnail(toThumbnailItem(info.thumbnail()))
+            .hoverImage(toThumbnailItem(info.hoverImage()))
             .salePrice(MoneyItems.of(info.salePrice()))
             .listPrice(MoneyItems.of(info.listPrice()))
             .discountRate(info.discountRate())

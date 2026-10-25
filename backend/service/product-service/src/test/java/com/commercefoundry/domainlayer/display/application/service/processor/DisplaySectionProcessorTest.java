@@ -326,7 +326,7 @@ class DisplaySectionProcessorTest {
 
     private static ProductSummary summary(long productId) {
         return new ProductSummary(
-            productId, "상품" + productId, ProductFixtures.image(5L, productId, com.commercefoundry.domainlayer.product.domain.model.ImageType.THUMBNAIL, 0),
+            productId, "상품" + productId, ProductFixtures.image(5L, productId, com.commercefoundry.domainlayer.product.domain.model.ImageType.THUMBNAIL, 0), null,
             Money.of(39_000, KRW), Money.of(45_000, KRW), 13, false, SaleAvailability.ON_SALE, false, false
         );
     }

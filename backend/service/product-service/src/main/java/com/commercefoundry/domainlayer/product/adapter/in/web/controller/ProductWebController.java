@@ -39,7 +39,7 @@ public class ProductWebController {
     @Operation(
         summary = "상품 목록 조회",
         description = "숨긴 상품은 빠지고 판매 종료 상품은 포함한다(saleStatus 로 뱃지). 카테고리 조건은 하위 카테고리를 포함하며 없는 카테고리면 빈 목록이다. "
-            + "전체 건수를 세지 않는 Slice 다. 로그인 없이 호출할 수 있다."
+            + "전체 건수를 세지 않는 Slice 다. hoverImage 는 정지 이미지 정렬의 두 번째이고 1장 이하면 null 이다. 로그인 없이 호출할 수 있다."
     )
     @PreAuthorize("permitAll()")
     @GetMapping

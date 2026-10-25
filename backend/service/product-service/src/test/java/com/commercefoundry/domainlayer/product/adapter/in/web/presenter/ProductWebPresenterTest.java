@@ -54,6 +54,7 @@ class ProductWebPresenterTest {
             .productId(SNOWFLAKE_ID)
             .name("저고리")
             .thumbnail(new ProductImageInfo(SNOWFLAKE_ID + 1, ImageType.THUMBNAIL, "https://cdn.example.com/t.jpg", 600, null, "정면", 0, null))
+            .hoverImage(new ProductImageInfo(SNOWFLAKE_ID + 2, ImageType.GALLERY, "https://cdn.example.com/h.jpg", 640, 800, "착용", 1, null))
             .salePrice(Money.of(39_000, KRW))
             .listPrice(Money.of(45_000, KRW))
             .discountRate(13)
@@ -71,6 +72,8 @@ class ProductWebPresenterTest {
             .name("저고리")
             .thumbnail(ProductThumbnailItem.builder()
                 .imageId("4611686018427387905").url("https://cdn.example.com/t.jpg").width(600).height(null).altText("정면").build())
+            .hoverImage(ProductThumbnailItem.builder()
+                .imageId("4611686018427387906").url("https://cdn.example.com/h.jpg").width(640).height(800).altText("착용").build())
             .salePrice(MoneyItem.of(39_000, "KRW"))
             .listPrice(MoneyItem.of(45_000, "KRW"))
             .discountRate(13)
@@ -90,6 +93,7 @@ class ProductWebPresenterTest {
         ProductListItemResponse item = presenter.toListResponse(new SliceImpl<>(List.of(info), PageRequest.of(0, 20), false)).contents().getFirst();
 
         assertThat(item.thumbnail()).isNull();
+        assertThat(item.hoverImage()).isNull();
         assertThat(item.listPrice()).isNull();
         assertThat(item.discountRate()).isNull();
         assertThat(item.preorder()).isFalse();

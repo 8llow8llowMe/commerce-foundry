@@ -130,7 +130,9 @@ class EmptyCollectionArgumentTest {
         ProductImageRepository repository = mock(ProductImageRepository.class);
         ProductImageMapper mapper = mock(ProductImageMapper.class);
 
-        assertThat(new ProductImageRepositoryAdapter(repository, mapper).findThumbnailsByProductIds(List.of())).isEmpty();
+        ProductImageRepositoryAdapter adapter = new ProductImageRepositoryAdapter(repository, mapper);
+        assertThat(adapter.findThumbnailsByProductIds(List.of())).isEmpty();
+        assertThat(adapter.findStillImagesByProductIds(List.of())).isEmpty();
         verifyNoInteractions(repository, mapper);
     }
 

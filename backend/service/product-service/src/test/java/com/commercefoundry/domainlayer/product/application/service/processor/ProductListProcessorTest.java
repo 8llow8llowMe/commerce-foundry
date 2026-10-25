@@ -98,6 +98,31 @@ class ProductListProcessorTest {
         assertThat(items.get(2).saleStatus()).as("판매 종료 상품도 목록에 남고 뱃지로 알린다").isEqualTo(SaleAvailability.STOP_SELLING);
         verify(skuRepositoryPort, times(1)).aggregateByProductIds(anyCollection());
         verify(productImageRepositoryPort, times(1)).findThumbnailsByProductIds(anyCollection());
+        verify(productImageRepositoryPort, times(1)).findStillImagesByProductIds(List.of(1L, 2L, 3L));
+    }
+
+    @Test
+    @DisplayName("정지 이미지가 2장 이상이면 노출 순서 → 아이디의 두 번째가 hover 이고, 1장 이하면 null 이다. 영상은 세지 않으며 쿼리는 페이지당 한 번이다")
+    void secondStillImageIsHoverAndQueryIsOncePerPage() {
+        givenRows(false, row(1, SaleStatus.ON_SALE, false), row(2, SaleStatus.ON_SALE, false));
+        given(skuRepositoryPort.aggregateByProductIds(anyCollection())).willReturn(List.of());
+        given(productImageRepositoryPort.findThumbnailsByProductIds(anyCollection())).willReturn(List.of(
+            ProductFixtures.image(10, 1, ImageType.THUMBNAIL, 0),
+            ProductFixtures.image(50, 2, ImageType.THUMBNAIL, 0)
+        ));
+        given(productImageRepositoryPort.findStillImagesByProductIds(List.of(1L, 2L))).willReturn(List.of(
+            ProductFixtures.image(30, 1, ImageType.GALLERY, 1),
+            ProductFixtures.video(40, 1, 0),
+            ProductFixtures.image(10, 1, ImageType.THUMBNAIL, 0),
+            ProductFixtures.image(20, 1, ImageType.GALLERY, 0),
+            ProductFixtures.image(50, 2, ImageType.THUMBNAIL, 0)
+        ));
+
+        List<ProductListItemInfo> items = processor(true).search(CRITERIA).getContent();
+
+        assertThat(items.get(0).hoverImage().imageId()).isEqualTo(20L);
+        assertThat(items.get(1).hoverImage()).isNull();
+        verify(productImageRepositoryPort, times(1)).findStillImagesByProductIds(anyCollection());
     }
 
     @Test

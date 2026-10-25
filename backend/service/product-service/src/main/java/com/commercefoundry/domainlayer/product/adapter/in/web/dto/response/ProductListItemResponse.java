@@ -19,6 +19,12 @@ public record ProductListItemResponse(
     @Schema(description = "대표 이미지. 없으면 null", nullable = true)
     ProductThumbnailItem thumbnail,
 
+    @Schema(
+        description = "hover 용 두 번째 정지 이미지. 대표 · 갤러리를 노출 순서 → 아이디 오름차순으로 세어 두 번째다. 영상은 세지 않고, 1장 이하면 null",
+        nullable = true
+    )
+    ProductThumbnailItem hoverImage,
+
     @Schema(description = "판매가 — 판매중 옵션 중 최저가. hasOptionSurcharge 가 true 면 '129,000원~' 처럼 표시한다")
     MoneyItem salePrice,
 
