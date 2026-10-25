@@ -163,6 +163,9 @@ export const en: Dictionary = {
   },
   home: {
     craftOverview: 'Full view',
+    more: 'Discover',
+    viewAll: 'VIEW ALL',
+    shop: 'SHOP',
   },
   cart: {
     title: 'Bag',
