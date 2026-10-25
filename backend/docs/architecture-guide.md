@@ -302,7 +302,7 @@ Info → Presenter → Response
   (`coding-conventions.md` §10).
 - **서비스 간 정합성** — 결제 승인처럼 "외부에서 이미 일어난 일" 을 다른 서비스에 반영할 때는
   실패해도 잃어버리지 않게 한다. 기본은 동기 호출 + 재시도 가능한 상태 기록 + 대사(reconciliation)이며,
-  메시지 브로커(Kafka/RabbitMQ) 도입은 별도 이슈에서 결정한다 (`payment-guide.md` §6).
+  메시지 브로커는 Kafka 로 정했고(§8-1) 결제 → 주문 반영의 이벤트 전환은 #308 이다 (`payment-guide.md` §6).
 
 ## 8. 외부 연동 기준
 
@@ -311,6 +311,32 @@ Info → Presenter → Response
   (`PaymentGatewayPort`, `ShipmentTrackingPort`, `SocialLoginPort`).
 - 외부 원본 응답은 adapter 밖으로 새지 않는다. adapter 에서 `QueryResult` 또는 domain model 로 변환한다.
 - 모든 외부 호출은 connect/read timeout 을 명시한다. 타임아웃 없는 블로킹 호출을 금지한다.
+
+### 8-1. 메시징 — Kafka (#304)
+
+**서비스 간 비동기 메시징 · 큐 · 작업 분배의 미들웨어는 Kafka 다** (사용자 결정 2026-10-25). Infra 의 공유 Kafka 클러스터(KRaft 3노드, RF 3 / min ISR 2)를 쓴다 —
+호스트 · 포트는 저장소에 쓰지 않고 `KAFKA_BOOTSTRAP_SERVERS`(Vault)로만 받는다. 설계 전문과 하위 이슈(#306 공통 모듈 · #307 작업 엔진 · #308 결제 → 주문 · #309 주문 만료 →
+재고 해제 · #310 연결 · 토픽)는 #304 설계 댓글이 정본이고, 아래는 구현이 따라야 할 규칙이다. 구현 전까지 각 절(§10, `payment-guide.md` §6)의 현재 동작은 그대로다.
+
+- **결과가 필요한 명령은 Feign, 일어난 사실은 Kafka.** 선점 확정 · 해제 · 금액 조회처럼 응답으로 분기하는 호출은 internal API(§7) 그대로다.
+  결제 승인됨 · 주문 만료됨 · 작업 등록됨 같은 사실은 outbox → Kafka → 컨슈머로 전한다.
+- **주기 조회는 두 곳에만 남는다** — ① outbox 릴레이 ② 시간 기준 만료 판정 트리거(주문 만료 · 재고 선점 안전망 · 작업 lease 회수 · 결제 재조회 등).
+  그 밖의 업무 처리는 모두 Kafka 컨슈머가 한다. 만료 트리거는 판정 + 상태 전이 + outbox 발행만 하고(건별 트랜잭션 · `@Version`), 후속 처리는 컨슈머가 한다.
+- **발행 정합성 = transactional outbox + 폴링 릴레이**(CDC · Debezium 은 쓰지 않는다 — 사용자 결정). 업무 트랜잭션과 같은 커밋으로 서비스 스키마의 `outbox` 에 행을 넣고,
+  릴레이가 `published_at is null and available_at <= now` 를 id 순으로 읽어 발행한 뒤 `published_at` 을 조건부 UPDATE 로 기록한다. 발행은 트랜잭션 밖이다.
+  다중 인스턴스는 단일 실행 락(ShedLock)으로 한 인스턴스만 릴레이를 돌려 같은 키의 발행 순서를 지킨다. 지연 발행(작업 예약 · 백오프)은 `available_at` 으로 한다.
+- **컨슈머는 멱등이다** — 수동 ack, at-least-once 전제. 상태를 바꾸는 트랜잭션 안에서 `processed_event(event_id PK)` 를 넣고 유니크 위반이면 이미 처리한 것으로 ack 한다.
+  상태 전이 멱등(이미 PAID · RELEASED 면 no-op)이 2차 방어다. 일시 오류는 컨슈머 안 지수 백오프 뒤 DLT(`<topic>.dlt`), 종결 오류는 바로 DLT 다.
+  `@RetryableTopic`(재시도 토픽 체인)은 쓰지 않는다. DLT 재처리는 사람이 한다.
+- **이름(공유 클러스터)** — namespace `commerce-foundry.<env>`(`KAFKA_NAMESPACE`, 마지막 토막 = 활성 프로파일이 아니면 기동하지 않는다).
+  토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`, 컨슈머 그룹 `<ns>.<소비 서비스>.<목적>`, 파티션 키는 애그리거트 아이디(orderId · jobId).
+  다른 고객사가 같은 클러스터를 쓰면 namespace 만 바꾼다(§9).
+- **토픽은 앱이 만들지 않는다** — `spring.kafka.admin.auto-create=false`, `NewTopic` 빈 금지. 토픽 목록 · 생성 스크립트 · 추가 절차는
+  `deploy-guide.md` §4-4(로컬은 `local-run-guide.md` §3)이고, 앱은 기동 때 존재만 확인한다.
+- **이벤트 봉투** — `{eventId, eventType, schemaVersion, occurredAt, producer, aggregateType, aggregateId, payload}`. 필드는 추가만 하고, 호환을 깨면 `schemaVersion` 과
+  토픽 접미사 `.v2` 를 올린다. **payload 에 이름 · 연락처 · 주소 · 이메일 · 카드 정보 · PG 결제 키 · 오류 원문을 싣지 않는다** — 아이디 · 금액 · 상태 코드 · 시각만 두고
+  세부는 컨슈머가 internal API 로 읽는다(Kafka UI 로 본문이 열람되고 7일 보존된다).
+- 클러스터는 지금 PLAINTEXT · ACL 없음이다 — 이름으로 구분할 뿐 격리가 아니다. SASL · ACL 은 Infra 후속 이슈로 하고 앱은 `KAFKA_SASL_*` 키를 예약만 한다.
 
 ## 9. 멀티 스토어(재사용) 기준
 
@@ -348,6 +374,14 @@ store:
 
 몇 초 ~ 몇 분 걸리는 어드민 작업(리포트 · 정산 대사 · 집계 · AI 생성 · 발송)은 요청 안에서 끝내지 않는다. 게이트웨이 응답 타임아웃(10s)에 끊긴다.
 기능 API 가 작업을 등록하고 `202 + jobId` 로 바로 답하면(`api-design-guide.md` §7), operations-service 의 워커가 처리한다.
+
+> **Kafka 전환 예정 (#307, 설계는 #304 · §8-1).** 아래는 지금의 DB 폴링 구현이다. 전환 뒤에는 다음이 바뀌고 나머지(멱등 등록 · 핸들러 계약 · 취소 · 재시도 백오프 · 종료 이벤트)는 그대로다.
+> - **디스패치는 Kafka 로** — 등록 · 재시도 트랜잭션에서 outbox 행(`available_at = scheduled_at`)을 넣고, 릴레이가 `…operations.job-run`(키 jobId, 본문은 jobId · type · attempt 만)으로 발행한다.
+>   컨슈머(그룹 `…operations-service.job-runner`)가 `claim(jobId, attempt)` 로 가져가 실행 스레드에 넘긴 뒤 바로 ack 한다 — 실행이 길어도 파티션 · 리밸런스를 붙잡지 않는다.
+>   아래의 후보 폴링(빈 칸의 4배)과 `poll-interval` 은 없어진다.
+> - **상태 · 멱등 · 취소 · 진행률 · lease 의 정본은 계속 `operations.job` 이다.** 오프셋은 claim 직후 커밋되므로 실행 중 크래시는 Kafka 가 모른다 — lease · heartbeat 는 남고,
+>   lease 회수는 시간 기준 만료 판정 트리거 하나가 맡는다(만료 RUNNING → QUEUED + outbox 재발행).
+> - "분산 락 · `SKIP LOCKED` 를 쓰지 않는다" 는 **작업 가져가기** 규칙이다. outbox 릴레이와 정기 작업 플래너는 단일 실행 락(ShedLock)을 쓴다.
 
 - **저장소는 PostgreSQL `operations.job` 하나다.** Redis Streams 는 쓰지 않는다 — 상태 조회 · 감사 · 멱등이 한 테이블에서 끝나고, 영구 키 금지 · TTL 필수(`coding-conventions.md` §9-7)와 맞지 않는다.
 - **가져가기는 `@Version` 경합이다.** 후보를 읽고(lease 가 끝난 `RUNNING` 먼저, 남은 자리를 `QUEUED && scheduled_at <= now` 로) 건마다 다시 읽어 도메인 `Job.claim` 으로 바꿔 저장한다.

@@ -183,8 +183,12 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   확정이 409 `PRODUCT_025`(이미 해제 · 만료)면 같은 주문으로 재선점(`POST /internal/v1/stock-reservations`)하고 **곧바로 확정**한다. 재선점이
   `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면 전액 취소다. **주문은 선점 확정 200(`CONFIRMED`)을 받은 뒤에만 PAID 로 둔다** — 결제 완료 재전송 때도
   확정을 멱등으로 다시 부른다 (`order-flow-guide.md` §3-4).
-- 메시지 브로커(Kafka/RabbitMQ) + outbox 로 바꿀지는 트래픽을 보고 별도 이슈에서 결정한다. 그 전까지는 위의
-  "동기 호출 + 재전송 플래그 + 스케줄러" 가 기본이다.
+- **메시지 브로커는 Kafka 로 정했다**(#304, `architecture-guide.md` §8-1). 결제 승인 → 주문 반영은 #308 에서 이렇게 바뀐다 — 그 전까지는 위의 "동기 호출 + 재전송 플래그 + 스케줄러" 가 기본이다.
+  - payment-service 가 `approve`(DONE 기록) 트랜잭션에서 outbox 로 `payment.approved`(키 orderId, 본문은 결제 · 주문 아이디 · 금액 · 통화 · 승인 시각 · 수단 코드 — PG 결제 키 · 카드 정보 없음)를 발행한다.
+  - order-service 컨슈머가 금액 · 통화 · 소유자를 다시 검증하고 선점을 확정(위 재선점 규칙 그대로, Feign 은 트랜잭션 밖)한 뒤 `markPaid` 와 회신 `order.paid` 를 한 트랜잭션에 남긴다.
+    다시 잡지 못하거나 금액이 다르면 `order.payment-rejected(code)` 를 회신한다.
+  - `order_synced` · `order_sync_failure_code` 는 남기고 뜻을 "주문의 회신 이벤트를 받았는가" 로 바꾼다 — `order.paid` 면 synced, `order.payment-rejected` 면 실패 코드 + 자동 전액 취소 대상.
+    **재전송 스케줄러는 만들지 않는다** — 전달은 outbox 릴레이와 컨슈머 재시도 · DLT 가 보장한다. 종결 뒤 승인(LATE_APPROVED)은 `payment.late-approved` 로 알림만 보낸다.
 
 ## 7. 웹훅
 
