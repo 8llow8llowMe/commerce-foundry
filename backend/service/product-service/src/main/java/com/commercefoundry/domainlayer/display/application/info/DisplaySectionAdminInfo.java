@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.display.application.info;
 
 import com.commercefoundry.domainlayer.display.domain.model.DisplayItemType;
+import com.commercefoundry.domainlayer.display.domain.model.DisplayLiveStatus;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayMedia;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
 import java.time.Instant;
@@ -9,13 +10,13 @@ import java.util.List;
 /**
  * 어드민 전시 섹션 한 개 — 숨김 · 기간 밖 섹션과 숨긴 상품의 아이템도 담는다.
  *
- * @param live 지금 고객 메인에 보이는가 ({@code DisplaySection#isLiveAt})
+ * @param liveStatus 지금 노출 상태 ({@code DisplaySection#liveStatusAt} — 고객 메인 필터와 같은 판정)
  * @param items 아이템 전체 (섹션 안의 순서)
  */
 public record DisplaySectionAdminInfo(
     long sectionId, DisplaySectionType sectionType, String title, String subtitle, String body,
     String linkUrl, String linkLabel, int displayOrder, boolean visible, Instant startAt, Instant endAt,
-    boolean live, List<Element> items
+    DisplayLiveStatus liveStatus, List<Element> items
 ) {
 
     /**

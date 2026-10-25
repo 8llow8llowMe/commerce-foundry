@@ -14,6 +14,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.query.Produc
 import com.commercefoundry.domainlayer.product.application.port.out.query.ProductListQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
+import com.querydsl.core.types.ConstructorExpression;
 import com.querydsl.core.types.OrderSpecifier;
 import com.querydsl.core.types.Predicate;
 import com.querydsl.core.types.Projections;
@@ -55,12 +56,7 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
         }
 
         List<ProductListQueryResult> rows = queryFactory
-            .select(Projections.constructor(
-                ProductListQueryResult.class,
-                productEntity.id, productEntity.name, productEntity.salePriceAmount, productEntity.salePriceCurrency,
-                productEntity.listPriceAmount, productEntity.listPriceCurrency, productEntity.saleStatus, productEntity.customOrder,
-                productEntity.preorder
-            ))
+            .select(listRow())
             .from(productEntity)
             .where(visibleToCustomer(), displayedInAny(categoryIds))
             .orderBy(orderOf(criteria.sortType()))
@@ -74,17 +70,13 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
     }
 
     /**
-     * 목록과 같은 프로젝션 · 같은 노출 조건({@link #visibleToCustomer()})으로 아이디 묶음을 읽는다 — PK in 절이다.
+     * 목록과 같은 프로젝션({@link #listRow()}) · 같은 노출 조건({@link #visibleToCustomer()})으로 아이디 묶음을 읽는다 — PK in 절이다.
      * 빈 컬렉션 검사는 어댑터({@code ProductRepositoryAdapter})가 한다.
      */
     @Override
     public List<ProductListQueryResult> findVisibleListRowsByIds(Collection<Long> productIds) {
         return List.copyOf(queryFactory
-            .select(Projections.constructor(
-                ProductListQueryResult.class,
-                productEntity.id, productEntity.name, productEntity.salePriceAmount, productEntity.salePriceCurrency,
-                productEntity.listPriceAmount, productEntity.listPriceCurrency, productEntity.saleStatus, productEntity.customOrder
-            ))
+            .select(listRow())
             .from(productEntity)
             .where(productEntity.id.in(productIds), visibleToCustomer())
             .orderBy(productEntity.id.asc())
@@ -141,6 +133,19 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
 
         JPAQuery<Long> count = queryFactory.select(productEntity.count()).from(productEntity).where(conditions);
         return PageableExecutionUtils.getPage(List.copyOf(rows), pageRequest, count::fetchOne);
+    }
+
+    /**
+     * 고객 상품 카드 한 행의 프로젝션 — 목록({@link #searchVisible})과 전시 상품 카드({@link #findVisibleListRowsByIds})가 함께 쓴다.
+     * {@link ProductListQueryResult} 에 칸을 더하면 여기 한 곳만 고친다 — 두 벌로 두면 한쪽만 고쳐져 런타임에 생성자를 못 찾는다(#61 리베이스에서 실제로 났다).
+     */
+    private static ConstructorExpression<ProductListQueryResult> listRow() {
+        return Projections.constructor(
+            ProductListQueryResult.class,
+            productEntity.id, productEntity.name, productEntity.salePriceAmount, productEntity.salePriceCurrency,
+            productEntity.listPriceAmount, productEntity.listPriceCurrency, productEntity.saleStatus, productEntity.customOrder,
+            productEntity.preorder
+        );
     }
 
     /**

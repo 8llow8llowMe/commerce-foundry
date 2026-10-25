@@ -319,7 +319,7 @@ public class DisplaySectionProcessor {
         return new DisplaySectionAdminInfo(
             section.id(), section.sectionType(), section.title(), section.subtitle(), section.body(),
             section.linkUrl(), section.linkLabel(), section.displayOrder(), section.visible(), section.startAt(), section.endAt(),
-            section.isLiveAt(now), elements
+            section.liveStatusAt(now), elements
         );
     }
 }
