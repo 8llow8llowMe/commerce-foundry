@@ -7,11 +7,14 @@ import com.commercefoundry.common.dto.DataHeader;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductCustomOrderFieldInternalItem;
 import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalItem;
 import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalResponse;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
 import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogCustomOrderField;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogCustomOrderInputType;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import feign.FeignException;
@@ -21,6 +24,7 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -197,6 +201,27 @@ class ProductInternalResponseSupportTest {
             assertUnavailable(() -> support.toSkuQueryResults(success(item("9004", "ON_SALE", true, MoneyItem.of(-1, "KRW")))));
             assertUnavailable(() -> support.toSkuQueryResults(success(item("abc", "ON_SALE", true, MoneyItem.of(1_000, "KRW")))));
             assertUnavailable(() -> support.toSkuQueryResults(success(item("9004", "ON_SALE", true, null))));
+        }
+
+        @Test
+        @DisplayName("맞춤 제작 항목 정의를 옮기고, 칸이 없으면 빈 목록이다. 유형을 모르면 503 이다")
+        void customOrderFields() {
+            ProductCustomOrderFieldInternalItem chest = new ProductCustomOrderFieldInternalItem(
+                "chest", "NUMBER", true, new BigDecimal("60"), new BigDecimal("150"), new BigDecimal("0.5"));
+            ProductSkuInternalItem withFields = new ProductSkuInternalItem(
+                "9004", "7301", "저고리", "", MoneyItem.of(39_000, "KRW"),
+                CodeNameDescriptionMetadata.of("ON_SALE", "n", "d"), true, 10, true, null, null, List.of(chest));
+
+            assertThat(support.toSkuQueryResults(success(withFields))).singleElement()
+                .extracting(SkuQueryResult::customOrderFields)
+                .isEqualTo(List.of(new CatalogCustomOrderField(
+                    "chest", CatalogCustomOrderInputType.NUMBER, true, new BigDecimal("60"), new BigDecimal("150"), new BigDecimal("0.5"))));
+            assertThat(support.toSkuQueryResults(success(item("9004", "ON_SALE", true, MoneyItem.of(39_000, "KRW")))).getFirst().customOrderFields())
+                .isEmpty();
+            assertUnavailable(() -> support.toSkuQueryResults(success(new ProductSkuInternalItem(
+                "9004", "7301", "저고리", "", MoneyItem.of(39_000, "KRW"),
+                CodeNameDescriptionMetadata.of("ON_SALE", "n", "d"), true, 10, true, null, null,
+                List.of(new ProductCustomOrderFieldInternalItem("chest", "SIZE", true, null, null, null))))));
         }
 
         @Test

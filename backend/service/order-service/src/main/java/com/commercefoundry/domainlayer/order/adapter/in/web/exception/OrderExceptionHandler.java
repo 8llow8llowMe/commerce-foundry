@@ -1,11 +1,15 @@
 package com.commercefoundry.domainlayer.order.adapter.in.web.exception;
 
 import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.common.dto.ValidationErrorItem;
 import com.commercefoundry.common.exception.ValidationErrorSupport;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderFieldValidationException;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -37,6 +41,19 @@ public class OrderExceptionHandler {
             log.warn("order request failed. code={}, causeType={}", errorCode.getCode(), causeTypeOf(exception));
         }
         return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), exception.getMessage()));
+    }
+
+    /**
+     * 맞춤 제작 입력이 상품 항목 정의와 다를 때. 대표 코드는 첫 위반이고, 입력값은 응답에 싣지 않는다.
+     * {@code field} 는 {@code items[i].customOptions[j].value} 다.
+     */
+    @ExceptionHandler(OrderFieldValidationException.class)
+    public ResponseEntity<Response<Void>> handleOrderFieldValidation(OrderFieldValidationException exception) {
+        List<ValidationErrorItem> fieldErrors = exception.violations().stream()
+            .map(violation -> new ValidationErrorItem(violation.code(), violation.field(), violation.message()))
+            .toList();
+        ValidationErrorItem first = fieldErrors.getFirst();
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Response.fail(first.code(), first.message(), fieldErrors));
     }
 
     /**

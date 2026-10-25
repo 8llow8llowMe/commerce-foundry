@@ -15,6 +15,7 @@ import com.commercefoundry.domainlayer.order.adapter.in.web.dto.response.OrderQu
 import com.commercefoundry.domainlayer.order.application.command.OrderQuoteCommand;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderFieldValidationException;
 import com.commercefoundry.domainlayer.order.application.port.in.OrderQuoteWebUseCase;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
@@ -147,6 +148,22 @@ class OrderQuoteWebControllerTest {
 
         assertFailure(result, HttpStatus.BAD_REQUEST, "ORDER_008");
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo("같은 상품이 주문에 중복되어 있습니다: 저고리(아이보리)");
+    }
+
+    @Test
+    @DisplayName("맞춤 제작 항목 정의와 다른 입력은 400 이고 fieldErrors 가 items[i].customOptions[j].value 를 짚는다")
+    void customOrderFieldErrors() {
+        given(orderQuoteWebUseCase.quote(any())).willThrow(new OrderFieldValidationException(List.of(
+            new OrderFieldValidationException.Violation("ORDER_132", "items[0].customOptions[0].value", "필수 입력입니다."),
+            new OrderFieldValidationException.Violation("ORDER_135", "items[0].customOptions[1].value", "허용 범위를 벗어났습니다."))));
+
+        MvcTestResult result = quote(QUOTE_BODY);
+
+        assertFailure(result, HttpStatus.BAD_REQUEST, "ORDER_132");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo("items[0].customOptions[0].value");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[1].code").isEqualTo("ORDER_135");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[1].field").isEqualTo("items[0].customOptions[1].value");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo("필수 입력입니다.");
     }
 
     @Test

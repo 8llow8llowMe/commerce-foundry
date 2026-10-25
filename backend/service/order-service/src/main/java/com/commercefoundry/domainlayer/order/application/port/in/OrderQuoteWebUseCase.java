@@ -10,6 +10,7 @@ public interface OrderQuoteWebUseCase {
 
     /**
      * 거절: 판정 순서대로 처음 걸린 하나 — {@code DUPLICATE_LINE}(400) · {@code ITEM_NOT_PURCHASABLE}(409) · {@code CUSTOM_OPTION_NOT_ALLOWED}(400) ·
+     * 맞춤 제작 항목 정의 불일치(400, {@code ORDER_132}~{@code ORDER_137}, {@code fieldErrors}) ·
      * {@code QUANTITY_EXCEEDED}(409) · {@code CURRENCY_MIXED}(409) · 해외 {@code INTERNATIONAL_SHIPPING_INFO_MISSING}(409) · 배송비 견적 거절(011~015) ·
      * 상품 조회 장애 503 ({@code OrderQuoteProcessor#quote}, {@code order-flow-guide.md} §2-3)
      */

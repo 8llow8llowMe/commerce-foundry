@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto;
 
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
+import java.util.List;
 
 /**
  * product-service {@code GET /internal/v1/skus} 응답의 SKU 한 건 중 order-service 가 읽는 칸. product-service 의 DTO 를 가져다 쓰지 않는다 —
@@ -13,10 +14,20 @@ import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
  * @param weightGrams SKU 단위 무게(그램, 1 이상). null 이면 미입력이다 — 해외 주문이면 order 가 거절한다 ({@code order-flow-guide.md} §2-2, #80).
  *     product-service 가 이 칸을 내리기 전에는 키가 없어 null 로 읽힌다. 값은 검증하지 않고 옮긴다
  * @param hsCode 통관 HS 코드(숫자 6~10자리). null 이면 미입력이다 — {@code weightGrams} 와 같은 규칙이다
+ * @param customOrderFields 맞춤 제작 항목 정의. 키가 없거나 null 이면 빈 목록으로 읽는다
  */
 public record ProductSkuInternalItem(
     String skuId, String productId, String productName, String optionName, MoneyItem salePrice,
     CodeNameDescriptionMetadata saleStatus, boolean purchasable, Integer maxQuantityPerOrder, boolean customOrder,
-    Integer weightGrams, String hsCode
+    Integer weightGrams, String hsCode, List<ProductCustomOrderFieldInternalItem> customOrderFields
 ) {
+
+    public ProductSkuInternalItem(
+        String skuId, String productId, String productName, String optionName, MoneyItem salePrice,
+        CodeNameDescriptionMetadata saleStatus, boolean purchasable, Integer maxQuantityPerOrder, boolean customOrder,
+        Integer weightGrams, String hsCode
+    ) {
+        this(skuId, productId, productName, optionName, salePrice, saleStatus, purchasable, maxQuantityPerOrder, customOrder,
+            weightGrams, hsCode, List.of());
+    }
 }

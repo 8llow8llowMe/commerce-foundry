@@ -43,6 +43,9 @@ public record SkuInternalItem(
     @Schema(description = "맞춤 제작 상품인가. 스토어 맞춤 제작 기능이 꺼져 있으면 false", example = "false")
     boolean customOrder,
 
+    @Schema(description = "맞춤 제작 항목 정의. 맞춤 제작이 아니면 빈 배열. 노출 순서 → 아이디 순")
+    List<CustomOrderFieldInternalItem> customOrderFields,
+
     @Schema(
         description = "배송 무게 (그램, 1 이상) — 해외 배송비 견적의 총 무게(Σ 무게 × 수량)에 쓴다. null 이면 미입력이고, 해외 주문이면 호출한 쪽이 거절한다",
         example = "450", nullable = true
@@ -52,4 +55,8 @@ public record SkuInternalItem(
     @Schema(description = "통관 신고용 HS 코드 (숫자 6~10자리). null 이면 미입력이고, 해외 주문이면 호출한 쪽이 거절한다", example = "6211420000", nullable = true)
     String hsCode
 ) {
+
+    public SkuInternalItem {
+        customOrderFields = customOrderFields == null ? List.of() : List.copyOf(customOrderFields);
+    }
 }

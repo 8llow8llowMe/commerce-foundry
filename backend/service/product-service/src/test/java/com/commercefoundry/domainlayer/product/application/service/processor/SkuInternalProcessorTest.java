@@ -5,15 +5,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldDefinition;
 import com.commercefoundry.domainlayer.product.application.info.SkuInternalInfo;
 import com.commercefoundry.domainlayer.product.application.info.SkuOptionValueInfo;
+import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.domain.model.CustomOrderInputType;
 import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
@@ -22,6 +26,7 @@ import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.shared.commerce.Money;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +57,9 @@ class SkuInternalProcessorTest {
     @Mock
     private ProductOptionRepositoryPort productOptionRepositoryPort;
 
+    @Mock
+    private ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
+
     @Test
     @DisplayName("중복은 첫 등장 순서로 한 번만 조회하고, 응답은 요청 순서(중복 제거 후)다 — 포트가 돌려준 순서와 무관하다")
     void deduplicatesAndKeepsRequestOrder() {
@@ -80,7 +88,7 @@ class SkuInternalProcessorTest {
         given(skuRepositoryPort.findAllByIds(List.of(99L))).willReturn(List.of());
 
         assertThat(processor(true).getSkus(List.of(99L))).isEmpty();
-        verifyNoInteractions(productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort);
+        verifyNoInteractions(productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort, productCustomOrderFieldRepositoryPort);
     }
 
     @Test
@@ -245,6 +253,47 @@ class SkuInternalProcessorTest {
     }
 
     @Test
+    @DisplayName("스토어 맞춤 제작이 꺼져 있으면 항목 정의를 읽지 않는다")
+    void customOrderFlagOffSkipsFieldQuery() {
+        given(skuRepositoryPort.findAllByIds(List.of(1L))).willReturn(List.of(noOptionSku(1)));
+        given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(PRODUCT_ID)))
+            .willReturn(List.of(ProductFixtures.product(PRODUCT_ID, SaleStatus.ON_SALE, true, true)));
+        givenNoOptions();
+
+        SkuInternalInfo sku = processor(false).getSkus(List.of(1L)).getFirst();
+
+        assertThat(sku.customOrder()).isFalse();
+        assertThat(sku.customOrderFields()).isEmpty();
+        verify(productCustomOrderFieldRepositoryPort, never()).findAllByProductIds(anyCollection());
+    }
+
+    @Test
+    @DisplayName("맞춤 제작 항목 정의는 상품 아이디로 한 번만 읽고, 맞춤 제작이 아닌 SKU 는 빈 목록이다")
+    void customOrderFieldsOncePerPage() {
+        given(skuRepositoryPort.findAllByIds(List.of(1L, 2L))).willReturn(List.of(noOptionSku(1), ProductFixtures.sku(2, 8L, "", 0, SaleStatus.ON_SALE)));
+        given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(PRODUCT_ID, 8L))).willReturn(List.of(
+            ProductFixtures.product(PRODUCT_ID, SaleStatus.ON_SALE, true, true),
+            ProductFixtures.product(8L)
+        ));
+        given(productCustomOrderFieldRepositoryPort.findAllByProductIds(Set.of(PRODUCT_ID))).willReturn(List.of(
+            ProductFixtures.numberField(10, PRODUCT_ID, "waist", 0),
+            ProductFixtures.numberField(20, PRODUCT_ID, "chest", 1)
+        ));
+        givenNoOptions();
+
+        List<SkuInternalInfo> skus = processor(true).getSkus(List.of(1L, 2L));
+
+        assertThat(skus.get(0).customOrder()).isTrue();
+        assertThat(skus.get(0).customOrderFields()).containsExactly(
+            new CustomOrderFieldDefinition("waist", CustomOrderInputType.NUMBER, true, new BigDecimal("60"), new BigDecimal("150"), new BigDecimal("0.5")),
+            new CustomOrderFieldDefinition("chest", CustomOrderInputType.NUMBER, true, new BigDecimal("60"), new BigDecimal("150"), new BigDecimal("0.5"))
+        );
+        assertThat(skus.get(1).customOrderFields()).isEmpty();
+        verify(productCustomOrderFieldRepositoryPort).findAllByProductIds(Set.of(PRODUCT_ID));
+        verify(productCustomOrderFieldRepositoryPort, never()).findAllByProductId(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
     @DisplayName("상품 · 재고 · 옵션 값 · 옵션 그룹은 SKU 들의 아이디로 한 번씩만 읽는다 (N+1 금지)")
     void bulkQueriesOnce() {
         given(skuRepositoryPort.findAllByIds(List.of(1L, 2L))).willReturn(List.of(
@@ -266,7 +315,7 @@ class SkuInternalProcessorTest {
     private SkuInternalProcessor processor(boolean customOrderFeature) {
         return new SkuInternalProcessor(
             skuRepositoryPort, productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort,
-            new StoreProperties(new StoreProperties.Features(customOrderFeature, false, false))
+            productCustomOrderFieldRepositoryPort, new StoreProperties(new StoreProperties.Features(customOrderFeature, false, false))
         );
     }
 

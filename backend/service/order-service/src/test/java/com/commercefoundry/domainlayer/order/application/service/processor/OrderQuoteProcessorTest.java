@@ -2,12 +2,16 @@ package com.commercefoundry.domainlayer.order.application.service.processor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.assertj.core.api.Assertions.tuple;
 
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogCustomOrderField;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogCustomOrderInputType;
 import com.commercefoundry.domainlayer.catalog.domain.model.CatalogSku;
 import com.commercefoundry.domainlayer.order.application.command.OrderItemCommand;
 import com.commercefoundry.domainlayer.order.application.command.OrderQuoteCommand;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderFieldValidationException;
 import com.commercefoundry.domainlayer.order.application.model.ShippingFeeQuoteQuery;
 import com.commercefoundry.domainlayer.order.application.port.out.query.ShippingFeeQuoteQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCustomOption;
@@ -20,6 +24,7 @@ import com.commercefoundry.domainlayer.order.support.FakeShippingFeeQueryPort;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.shared.commerce.ShippingScope;
+import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -70,28 +75,47 @@ class OrderQuoteProcessorTest {
     /** 품절이라 구매할 수 없다 — 이름은 알린다. */
     private static CatalogSku soldOut(CatalogSku sku) {
         return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
-            false, true, sku.maxQuantityPerOrder(), sku.customOrder(), sku.weightGrams(), sku.hsCode());
+            false, true, sku.maxQuantityPerOrder(), sku.customOrder(), sku.weightGrams(), sku.hsCode(), sku.customOrderFields());
     }
 
     /** 품절이 아닌데 구매할 수 없다(숨김 · 판매 종료) — 이름을 알리지 않는다. */
     private static CatalogSku hidden(CatalogSku sku) {
         return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
-            false, false, sku.maxQuantityPerOrder(), sku.customOrder(), sku.weightGrams(), sku.hsCode());
+            false, false, sku.maxQuantityPerOrder(), sku.customOrder(), sku.weightGrams(), sku.hsCode(), sku.customOrderFields());
     }
 
     private static CatalogSku customOrder(CatalogSku sku) {
         return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
-            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), true, sku.weightGrams(), sku.hsCode());
+            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), true, sku.weightGrams(), sku.hsCode(), sku.customOrderFields());
     }
 
     private static CatalogSku withMaxQuantity(CatalogSku sku, Integer maxQuantityPerOrder) {
         return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
-            sku.purchasable(), sku.soldOut(), maxQuantityPerOrder, sku.customOrder(), sku.weightGrams(), sku.hsCode());
+            sku.purchasable(), sku.soldOut(), maxQuantityPerOrder, sku.customOrder(), sku.weightGrams(), sku.hsCode(), sku.customOrderFields());
     }
 
     private static CatalogSku withShippingInfo(CatalogSku sku, Integer weightGrams, String hsCode) {
         return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
-            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), sku.customOrder(), weightGrams, hsCode);
+            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), sku.customOrder(), weightGrams, hsCode, sku.customOrderFields());
+    }
+
+    private static CatalogSku withFields(CatalogSku sku, CatalogCustomOrderField... fields) {
+        return new CatalogSku(sku.skuId(), sku.productId(), sku.productName(), sku.optionName(), sku.salePrice(),
+            sku.purchasable(), sku.soldOut(), sku.maxQuantityPerOrder(), sku.customOrder(), sku.weightGrams(), sku.hsCode(), List.of(fields));
+    }
+
+    /** 가슴둘레 60~150, 0.5 단위, 필수. */
+    private static CatalogCustomOrderField chestNumber() {
+        return new CatalogCustomOrderField("chest", CatalogCustomOrderInputType.NUMBER, true, new BigDecimal("60"), new BigDecimal("150"), new BigDecimal("0.5"));
+    }
+
+    /** 요청 사항. 선택, 500자. */
+    private static CatalogCustomOrderField memoText() {
+        return new CatalogCustomOrderField("memo", CatalogCustomOrderInputType.TEXT, false, null, new BigDecimal("500"), null);
+    }
+
+    private static CatalogCustomOrderField chestText() {
+        return new CatalogCustomOrderField("chest", CatalogCustomOrderInputType.TEXT, false, null, new BigDecimal("500"), null);
     }
 
     private static Map<Long, CatalogSku> skus(CatalogSku... skus) {
@@ -124,6 +148,12 @@ class OrderQuoteProcessorTest {
         return (OrderException) thrown;
     }
 
+    private static OrderFieldValidationException fieldRejected(ThrowingCallable call) {
+        Throwable thrown = catchThrowable(call);
+        assertThat(thrown).isInstanceOf(OrderFieldValidationException.class);
+        return (OrderFieldValidationException) thrown;
+    }
+
     private void assertNoShippingCall() {
         assertThat(shippingFeeQueryPort.quoteCalls()).isEmpty();
         assertThat(shippingFeeQueryPort.destinationChecks()).isEmpty();
@@ -136,7 +166,7 @@ class OrderQuoteProcessorTest {
         @Test
         @DisplayName("같은 SKU · 같은 맞춤 입력(앞뒤 공백 · NFD 정규화 후)의 줄이 두 번 있으면 ORDER_008 이다 — 입력이 다르면 다른 줄이다")
         void duplicateLine() {
-            CatalogSku jacket = customOrder(sku(1001, 7001, "저고리", "S / 남색", 30_000));
+            CatalogSku jacket = withFields(customOrder(sku(1001, 7001, "저고리", "S / 남색", 30_000)), memoText());
             String memo = "소매 길게";
 
             OrderException duplicated = rejected(() -> processor.quote(domestic(
@@ -200,6 +230,49 @@ class OrderQuoteProcessorTest {
         }
 
         @Test
+        @DisplayName("필수 치수가 빠지거나 범위를 벗어나면 400 이고 field 는 items[i].customOptions[j].value 다 — 입력값은 메시지에 없다")
+        void customOrderFieldDefinition() {
+            CatalogSku custom = withFields(customOrder(sku(1001, 7001, "두루마기", "M", 90_000)), chestNumber(), memoText());
+            OrderItemCommand outOfRange = new OrderItemCommand(1001, 1, OrderCustomOptions.of(List.of(
+                new OrderCustomOption("chest", "999"), new OrderCustomOption("waist", "80"))));
+            OrderItemCommand missing = new OrderItemCommand(1002, 1, OrderCustomOptions.of(List.of(new OrderCustomOption("memo", "소매"))));
+            CatalogSku second = withFields(customOrder(sku(1002, 7002, "저고리", "S", 30_000)), chestNumber());
+
+            OrderFieldValidationException exception = fieldRejected(() -> processor.quote(domestic(outOfRange, missing), skus(custom, second)));
+
+            assertThat(exception.violations()).extracting(OrderFieldValidationException.Violation::code, OrderFieldValidationException.Violation::field)
+                .containsExactly(
+                    tuple("ORDER_135", "items[0].customOptions[0].value"),
+                    tuple("ORDER_133", "items[0].customOptions[1].value"),
+                    tuple("ORDER_133", "items[1].customOptions[0].value"),
+                    tuple("ORDER_132", "items[1].customOptions[1].value"));
+            assertThat(exception.getMessage()).doesNotContain("999", "80", "소매");
+            assertNoShippingCall();
+
+            OrderItemCommand step = item(1001, 1, "chest", "60.2");
+            OrderFieldValidationException stepped = fieldRejected(() -> processor.quote(domestic(step), skus(custom)));
+            assertThat(stepped.violations()).extracting(OrderFieldValidationException.Violation::code).containsExactly("ORDER_136");
+            assertThat(stepped.violations().getFirst().field()).isEqualTo("items[0].customOptions[0].value");
+            assertThat(stepped.getMessage()).doesNotContain("60.2");
+
+            CatalogSku shortMemo = withFields(customOrder(sku(1001, 7001, "두루마기", "M", 90_000)), chestNumber(),
+                new CatalogCustomOrderField("memo", CatalogCustomOrderInputType.TEXT, false, null, new BigDecimal("2"), null));
+            OrderFieldValidationException length = fieldRejected(() -> processor.quote(domestic(
+                new OrderItemCommand(1001, 1, OrderCustomOptions.of(List.of(
+                    new OrderCustomOption("chest", "96"), new OrderCustomOption("memo", "가나다"))))), skus(shortMemo)));
+            assertThat(length.violations()).extracting(OrderFieldValidationException.Violation::code, OrderFieldValidationException.Violation::field)
+                .containsExactly(tuple("ORDER_137", "items[0].customOptions[1].value"));
+            assertThat(length.getMessage()).doesNotContain("가나다");
+
+            OrderItemCommand notANumber = item(1001, 1, "chest", "96cm");
+            assertThat(fieldRejected(() -> processor.quote(domestic(notANumber), skus(custom))).violations())
+                .extracting(OrderFieldValidationException.Violation::code).containsExactly("ORDER_134");
+
+            OrderQuote accepted = processor.quote(domestic(item(1001, 1, "chest", "96.5")), skus(custom));
+            assertThat(accepted.lines()).hasSize(1);
+        }
+
+        @Test
         @DisplayName("1회 주문 최대 수량은 상품 단위로 센다 — 같은 상품의 S 2 + M 2 는 상한 3 을 넘어 ORDER_005 이고, 메시지에 상품명 · 상한이 있다")
         void quantityPerProduct() {
             CatalogSku small = withMaxQuantity(sku(1001, 7001, "치마", "S", 40_000), 3);
@@ -217,7 +290,7 @@ class OrderQuoteProcessorTest {
         @Test
         @DisplayName("같은 SKU 를 다른 맞춤 입력으로 나눈 줄도 더한다 — 상한이 없으면(null) 제한하지 않고, 상한 0 이면 한 벌도 안 된다")
         void quantityAcrossCustomOptionLines() {
-            CatalogSku custom = withMaxQuantity(customOrder(sku(1001, 7001, "두루마기", "M", 90_000)), 2);
+            CatalogSku custom = withMaxQuantity(withFields(customOrder(sku(1001, 7001, "두루마기", "M", 90_000)), chestNumber()), 2);
 
             rejected(() -> processor.quote(domestic(item(1001, 1, "chest", "96"), item(1001, 2, "chest", "100")), skus(custom)),
                 OrderErrorCode.QUANTITY_EXCEEDED);
@@ -285,7 +358,7 @@ class OrderQuoteProcessorTest {
         @Test
         @DisplayName("줄 금액 = 단가 × 수량, 상품 합계 = Σ 줄 금액, 총액 = 상품 합계 + 배송비. 줄은 요청 순서이고 주문 시점 SKU 값을 담는다")
         void amounts() {
-            CatalogSku jacket = customOrder(sku(1001, 7001, "저고리", "S / 남색", 12_000));
+            CatalogSku jacket = withFields(customOrder(sku(1001, 7001, "저고리", "S / 남색", 12_000)), chestNumber());
             CatalogSku skirt = sku(1002, 7002, "치마", "", 30_500);
 
             OrderQuote quote = processor.quote(domestic(item(1002, 1), item(1001, 2, "chest", "96")), skus(jacket, skirt));
@@ -469,7 +542,7 @@ class OrderQuoteProcessorTest {
         @Test
         @DisplayName("무게 1 미만은 product-service 계약 위반이라 ORDER_002(503) 다 — 미입력 사유가 앞서고, 계약 위반은 무게 초과보다 앞선다. 로그에 우편번호 · 맞춤 입력 값이 없다")
         void weightContractViolation(CapturedOutput output) {
-            CatalogSku zeroWeight = customOrder(withShippingInfo(sku(1001, 7001, "저고리", "S", 30_000), 0, HS_CODE));
+            CatalogSku zeroWeight = withFields(customOrder(withShippingInfo(sku(1001, 7001, "저고리", "S", 30_000), 0, HS_CODE)), chestText());
             CatalogSku negativeWeight = withShippingInfo(sku(1002, 7002, "치마", "", 40_000), -1, HS_CODE);
             CatalogSku heavy = withShippingInfo(sku(1003, 7003, "궤짝", "", 30_000), Integer.MAX_VALUE, HS_CODE);
             CatalogSku noHsCode = withShippingInfo(sku(1004, 7004, "배자", "", 50_000), 500, null);

@@ -1,6 +1,8 @@
 package com.commercefoundry.domainlayer.catalog.application.port.out.query;
 
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogCustomOrderField;
 import com.commercefoundry.shared.commerce.Money;
+import java.util.List;
 
 /**
  * product-service 서비스 간 SKU 조회 한 건. 원격 응답 모양(Feign DTO)은 adapter 밖으로 나오지 않고 이 값으로만 나온다.
@@ -13,10 +15,24 @@ import com.commercefoundry.shared.commerce.Money;
  * @param customOrder 맞춤 제작 상품인가. 스토어 맞춤 제작 기능이 꺼져 있으면 false
  * @param weightGrams SKU 단위 무게(그램). null 이면 미입력이다 — 해외 주문이면 order 가 거절한다 ({@code order-flow-guide.md} §2-2, #80)
  * @param hsCode 통관 HS 코드. null 이면 미입력이다 — {@code weightGrams} 와 같은 규칙이다
+ * @param customOrderFields 맞춤 제작 항목 정의. 없으면 빈 목록
  */
 public record SkuQueryResult(
     long skuId, long productId, String productName, String optionName, Money salePrice,
     boolean purchasable, boolean soldOut, Integer maxQuantityPerOrder, boolean customOrder,
-    Integer weightGrams, String hsCode
+    Integer weightGrams, String hsCode, List<CatalogCustomOrderField> customOrderFields
 ) {
+
+    public SkuQueryResult {
+        customOrderFields = customOrderFields == null ? List.of() : List.copyOf(customOrderFields);
+    }
+
+    public SkuQueryResult(
+        long skuId, long productId, String productName, String optionName, Money salePrice,
+        boolean purchasable, boolean soldOut, Integer maxQuantityPerOrder, boolean customOrder,
+        Integer weightGrams, String hsCode
+    ) {
+        this(skuId, productId, productName, optionName, salePrice, purchasable, soldOut, maxQuantityPerOrder, customOrder,
+            weightGrams, hsCode, List.of());
+    }
 }

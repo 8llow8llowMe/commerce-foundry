@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.order.application.command.OrderItemComman
 import com.commercefoundry.domainlayer.order.application.command.OrderQuoteCommand;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderFieldValidationException;
 import com.commercefoundry.domainlayer.order.application.model.ShippingFeeQuoteQuery;
 import com.commercefoundry.domainlayer.order.application.port.out.ShippingFeeQueryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.ShippingFeeQuoteQueryResult;
@@ -63,6 +64,9 @@ public class OrderQuoteProcessor {
      *   <li>같은 (SKU, 정규화한 맞춤 제작 입력) 줄이 두 번 이상 — {@code DUPLICATE_LINE}(400)</li>
      *   <li>없는 SKU · {@code purchasable=false} — {@code ITEM_NOT_PURCHASABLE}(409)</li>
      *   <li>맞춤 제작 상품이 아닌데 맞춤 제작 입력이 있다 — {@code CUSTOM_OPTION_NOT_ALLOWED}(400)</li>
+     *   <li>맞춤 제작 상품이면 입력을 항목 정의와 대조한다 — 필수 누락 · 모르는 fieldKey · NUMBER 범위 · step · TEXT 길이.
+     *       400 {@link OrderFieldValidationException}. {@code fieldErrors[].field} 는 {@code items[i].customOptions[j].value} 다.
+     *       빠진 필수 항목은 그 줄에 있던 입력 개수 다음 칸이다. 입력값은 메시지에 넣지 않는다</li>
      *   <li><b>상품 단위</b> 수량 합이 상품의 {@code maxQuantityPerOrder}(null 이면 제한 없음)를 넘는다 — {@code QUANTITY_EXCEEDED}(409)</li>
      *   <li>판매가 통화가 섞였다 — {@code CURRENCY_MIXED}(409). 주문 통화는 SKU 판매가의 통화다</li>
      *   <li>줄 금액 = 단가 × 수량, 상품 합계 = Σ 줄 금액</li>
@@ -85,6 +89,10 @@ public class OrderQuoteProcessor {
         rejectDuplicateLines(items, skus);
         rejectLines(items, skus, (item, sku) -> sku == null || !sku.purchasable(), OrderErrorCode.ITEM_NOT_PURCHASABLE);
         rejectLines(items, skus, (item, sku) -> !item.customOptions().isEmpty() && !sku.customOrder(), OrderErrorCode.CUSTOM_OPTION_NOT_ALLOWED);
+        List<OrderFieldValidationException.Violation> fieldViolations = OrderCustomOptionRules.violations(items, skus);
+        if (!fieldViolations.isEmpty()) {
+            throw new OrderFieldValidationException(fieldViolations);
+        }
         rejectQuantityOverLimit(items, skus);
         CurrencyCode currency = currencyOf(items, skus);
 

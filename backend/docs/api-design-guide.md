@@ -60,6 +60,8 @@
 - 응답 항목에 칸을 **더하는 것**은 하위 호환이다 — 호출하는 쪽 Feign DTO 는 자기가 읽는 칸만 선언하고 모르는 칸은 무시한다.
   이름 · 타입 변경과 삭제는 호출하는 쪽과 같은 PR 로 바꾼다. 값이 없을 수 있는 칸은 키를 빼지 않고 `null` 로 낸다
   (예: SKU `maxQuantityPerOrder` — `order-flow-guide.md` §2-1, `weightGrams` · `hsCode` — §2-2).
+  `customOrderFields` 는 맞춤 제작 항목 정의(`fieldKey` · `inputType` · `required` · `min` · `max` · `step`)다. 맞춤 제작이 아니면 빈 배열이고,
+  그 페이지의 맞춤 제작 상품 아이디로 in 절 한 번만 읽는다 (`order-flow-guide.md` §2-3, #97).
 - 처음 만든 곳: product-service `SkuInternalController` (#8). 코드 표는 `ProductValidationMessage` (`PRODUCT_103` 빈 목록 · `PRODUCT_104` 100개 초과 · `PRODUCT_105` 양수 아님).
 
 **internal 쓰기 API** 도 같은 자리(`/internal/v1/**`, `@Hidden`, 허용 호출자 `@PreAuthorize`)에 둔다. 아래를 더 지킨다.

@@ -1,9 +1,11 @@
 package com.commercefoundry.domainlayer.product.adapter.in.internal.presenter;
 
+import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.CustomOrderFieldInternalItem;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuInternalItem;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuOptionValueInternalItem;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.support.MoneyItems;
+import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldDefinition;
 import com.commercefoundry.domainlayer.product.application.info.SkuInternalInfo;
 import com.commercefoundry.domainlayer.product.application.info.SkuOptionValueInfo;
 import java.util.List;
@@ -31,8 +33,20 @@ public class SkuInternalPresenter {
             .purchasable(sku.purchasable())
             .maxQuantityPerOrder(sku.maxQuantityPerOrder())
             .customOrder(sku.customOrder())
+            .customOrderFields(sku.customOrderFields().stream().map(this::toCustomOrderField).toList())
             .weightGrams(sku.weightGrams())
             .hsCode(sku.hsCode() == null ? null : sku.hsCode().value())
+            .build();
+    }
+
+    private CustomOrderFieldInternalItem toCustomOrderField(CustomOrderFieldDefinition field) {
+        return CustomOrderFieldInternalItem.builder()
+            .fieldKey(field.fieldKey())
+            .inputType(field.inputType().name())
+            .required(field.required())
+            .min(field.min())
+            .max(field.max())
+            .step(field.step())
             .build();
     }
 

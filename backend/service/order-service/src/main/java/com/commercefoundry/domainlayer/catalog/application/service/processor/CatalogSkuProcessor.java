@@ -44,6 +44,7 @@ public class CatalogSkuProcessor {
     private static CatalogSku toModel(SkuQueryResult result) {
         return new CatalogSku(
             result.skuId(), result.productId(), result.productName(), result.optionName(), result.salePrice(),
-            result.purchasable(), result.soldOut(), result.maxQuantityPerOrder(), result.customOrder(), result.weightGrams(), result.hsCode());
+            result.purchasable(), result.soldOut(), result.maxQuantityPerOrder(), result.customOrder(), result.weightGrams(), result.hsCode(),
+            result.customOrderFields());
     }
 }
