@@ -124,8 +124,12 @@ public record ProductDetailResponse(
   남기지 않는 것: 원인 사슬 어디의 **예외 메시지**든 — DB 행 값(DETAIL) · Feign 대상 응답 본문 · 요청 값이 들어 있다.
   - 예외를 로그 인자로 넘겨야 하면 원래 예외 대신 common-core `RedactedThrowable.of(exception)` 을 넘긴다 — 타입 · 프레임 · SQLState 만 남은 사본이다.
     공통 폴백(`FallbackErrorResolver` · `FallbackErrorController`)이 이렇게 남긴다. 스택이 필요 없으면 원인 타입 이름만 남긴다(도메인 핸들러의 `causeType`).
-  - 미지의 500 은 로그의 타입 · 프레임(어느 클래스 · 줄에서 났는지)과 코드 · 경로 · 시각으로 좁힌다. 값이 필요하면 재현으로 확인한다 — 로그에 값을 남겨 풀지 않는다.
-    요청 상관 id 는 아직 없다 — 같은 요청의 로그 줄은 시각 · 스레드로 묶는다(#284).
+  - 미지의 500 은 로그의 타입 · 프레임(어느 클래스 · 줄에서 났는지)과 코드 · 경로 · 시각 · 상관 id 로 좁힌다. 값이 필요하면 재현으로 확인한다 — 로그에 값을 남겨 풀지 않는다.
+    요청 상관 id(#284)는 Micrometer Tracing 이 아니라 헤더 `X-Correlation-Id` 다. 추적 백엔드가 없고, W3C `traceparent` 는 외부 값을 그대로 믿게 된다.
+    게이트웨이 `GatewayCorrelationIdFilter` 가 가장 앞에서 id 를 정하고 하류로 넘긴다. 서블릿 서비스 `CorrelationIdFilter` 가 MDC `correlationId` 에 넣고,
+    로그 패턴 `logging.pattern.correlation`(`%X{correlationId}`)이 같은 요청의 줄에 싣는다. 에러 디스패치의 500 로그도 같은 값이다.
+    외부 값은 소문자 UUID 하나일 때만 받고, 없거나 둘 이상이거나 형식이 틀리면 버리고 새로 만든다. 틀린 원문(줄바꿈 · 긴 값)은 로그에 남기지 않는다.
+    internal Feign 은 그 MDC 값만 최종 요청에 싣는다(§10). 사용자 `Authorization` 은 복사하지 않는다. 응답 봉투 · 응답 헤더에는 싣지 않는다 — 클라이언트에 보이는 계약은 FE 와 따로 정한다.
   - 받아들인 손실: 값이 없는 JDK 메시지(Helpful NPE 의 "because ... is null" 등)도 함께 버린다 — 한 줄에 역참조가 여럿이면 줄 번호만으로 좁히지 못한다.
     스택을 끈 예외는 타입만 남는다. 로그 이벤트의 예외 클래스는 언제나 `RedactedThrowable` 이고 원래 타입은 메시지 자리에 있다 —
     예외 타입으로 묶는 수집 도구(Sentry · OTel appender 등)를 붙이면 원래 타입을 키로 매핑해야 한다.
@@ -512,6 +516,8 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
     `feign-client.target-services.*` 로 바꿀 때도 대상의 서비스 ID 와 같아야 한다 — 다르면 대상이 401 · `SECURITY_007` 로 거부한다.
   - **사용자 `Authorization` 헤더를 internal 로 넘기지 않는다.** `RequestContextHolder` 로 현재 요청의 헤더(사용자 토큰)를 꺼내 Feign 에 싣지 않는다.
     사용자 식별이 필요하면 memberId 를 요청 본문 · 파라미터로 넘긴다.
+  - **상관 id 는 MDC 에서만 싣는다** (#284). `InternalServiceTokenCapability` 가 최종 요청의 `X-Correlation-Id` 를 지우고, 이 스레드 MDC 에 검증된 id 가 있을 때만 그 값을 하나 넣는다.
+    요청에 실려 있던 값 · 뒤 인터셉터가 넣은 값은 남지 않는다. MDC 가 비어 있으면 헤더를 만들지 않고, 받는 서비스가 새로 만든다. 전역 `RequestInterceptor` 로 붙이지 않는다(위 금지와 같다).
   - **모든 클라이언트에 붙는 설정을 쓰지 않는다** — 전역 `RequestInterceptor` · `Capability` 빈, `@EnableFeignClients(defaultConfiguration = ...)`,
     `spring.cloud.openfeign.client.config.default.request-interceptors`. 외부 API(토스 등)에 사용자 토큰 · 서비스 토큰이 실리거나 그쪽 `Authorization` 을 덮어쓴다.
     외부 클라이언트에는 `InternalFeignClientConfiguration` 을 붙이지 않는다 — 이름이 kebab(`toss-payments`)이면 코드가 막지 못한다.

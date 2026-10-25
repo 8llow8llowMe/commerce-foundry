@@ -35,9 +35,9 @@ class GatewayRequestGuardFilterTest {
     private final GatewayRequestGuardFilter filter = new GatewayRequestGuardFilter(new GatewayErrorResponseWriter(JSON));
 
     @Test
-    @DisplayName("다른 모든 WebFilter(CORS 포함)보다 먼저 돈다")
+    @DisplayName("상관 id 필터 다음, 다른 WebFilter(CORS 포함)보다 먼저 돈다")
     void runsFirst() {
-        assertThat(filter.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE);
+        assertThat(filter.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 1);
     }
 
     @ParameterizedTest

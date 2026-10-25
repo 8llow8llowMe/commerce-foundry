@@ -403,7 +403,7 @@ auth 는 기동할 때 자기 `JWT_PRIVATE_KEY` 와 `JWT_PUBLIC_KEY` 가 한 쌍
 구현은 `cloud/api-gateway` 의 `security` 패키지다. 라우트 필터가 아니라 **전역 `SecurityWebFilterChain`**(`GatewaySecurityConfig`) 이다 —
 한 라우트(`ServiceRoute`)가 고객 · 어드민 패턴을 섞어 갖고, dev 라우트(`/health/**` · `/docs/**`)도 덮어야 한다.
 
-**필터 순서** — `GatewayRequestGuardFilter`(가장 앞, 비정규 경로 거절) → `GatewayRequestBodySizeFilter`(본문 크기 상한, §7-4) →
+**필터 순서** — `GatewayCorrelationIdFilter`(가장 앞, 상관 id, #284) → `GatewayRequestGuardFilter`(비정규 경로 거절) → `GatewayRequestBodySizeFilter`(본문 크기 상한, §7-4) →
 보안 체인(`WebFilterChainProxy`, -100: CORS → Bearer 인증 → 인가) → 라우트 전역 필터(`GatewayRateLimitFilter` HIGHEST+100 요청 제한 →
 `ClientSubjectHeaderFilter` HIGHEST+200 하류 `X-Client-Subject`, §7-3) → 라우팅.
 정규화되지 않은 경로로 인가 판정을 하지 않는다.
@@ -709,6 +709,8 @@ public interface ProductStockClient { ... }
 - **요청마다 새로 서명한다.** 캐시하지 않고 401 을 받아도 다시 발급해 재시도하지 않는다 — HS256 서명은 마이크로초 단위라 캐시 이득이 없고,
   캐시가 없으면 만료 경계 · 키 교체 직후의 낡은 토큰 문제가 사라진다. 받는 쪽 401 · 007 은 설정 · 키 문제이므로 재시도로 풀리지 않는다.
 - 사용자 토큰을 `RequestContextHolder` 로 꺼내 internal 요청에 싣지 않는다 (`coding-conventions.md` §10).
+- 같은 최종 요청에서 `X-Correlation-Id` 도 갈아 끼운다 (#284). 요청에 있던 값은 지우고, 호출 스레드 MDC 의 검증된 상관 id 만 하나 싣는다. MDC 가 없으면 헤더를 만들지 않는다.
+  사용자 토큰 · 외부 키를 이 헤더에 담지 않는다. 받는 서비스는 형식이 틀린 헤더를 버리고 새로 만든다 (`coding-conventions.md` §8).
 - Feign 은 security-core 가 `compileOnly` 로만 둔다. Feign 클라이언트가 생기는 서비스가 openfeign 스타터를 직접 선언한다(#12 · #13).
 
 ### 9-6. 설정 · 비밀 만들기

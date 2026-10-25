@@ -1,1 +1,2 @@
 com.commercefoundry.common.web.servlet.FallbackErrorAutoConfiguration
+com.commercefoundry.common.web.servlet.CorrelationIdAutoConfiguration

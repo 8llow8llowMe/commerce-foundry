@@ -1,5 +1,6 @@
 package com.commercefoundry.security.internal.client;
 
+import com.commercefoundry.common.log.CorrelationIds;
 import com.commercefoundry.security.internal.InternalTokenIssuer;
 import feign.Capability;
 import feign.Client;
@@ -24,7 +25,9 @@ import org.springframework.core.Ordered;
  *
  * <ul>
  *   <li>최종 요청의 {@code Authorization} 을 대소문자와 무관하게 <b>전부 지우고</b> {@code Bearer <서비스 토큰>} 하나만 싣는다.
- *       사용자 식별이 필요하면 요청 본문 · 파라미터로 memberId 를 넘긴다.</li>
+ *       사용자 식별이 필요하면 요청 본문 · 파라미터로 memberId 를 넘긴다. 사용자 {@code Authorization} 은 복사하지 않는다.</li>
+ *   <li>상관 id({@link CorrelationIds#HEADER})도 요청에 실려 있던 값은 지우고, 이 스레드 MDC 에 검증된 id 가 있을 때만 그 값을 하나 싣는다 (#284).
+ *       사용자 토큰을 꺼내지 않는다. MDC 가 비어 있으면(스케줄러 등) 헤더를 만들지 않는다.</li>
  *   <li>{@code aud} 는 Feign 대상 이름({@code @FeignClient(name = ...)} = Eureka 서비스 ID)이다. 대상이 없거나 이름이 비면 요청을 보내지 않고 실패한다.
  *       서비스 ID 모양(소문자 kebab)이 아니면 발급기가 거부한다. 다만 kebab 이름을 가진 외부 클라이언트({@code name = "toss-payments", url = ...})에
  *       잘못 붙이면 막지 못한다 — 외부 클라이언트에 붙이지 않는 것은 리뷰가 본다.</li>
@@ -56,7 +59,7 @@ public final class InternalServiceTokenCapability implements Capability, Ordered
         return Ordered.HIGHEST_PRECEDENCE;
     }
 
-    /** 최종 요청에서 {@code Authorization} 을 모두 지우고 서비스 토큰 하나를 싣는다. 나머지(메서드 · URL · 헤더 · 본문)는 그대로다. */
+    /** 최종 요청에서 {@code Authorization} 을 모두 지우고 서비스 토큰 하나를 싣는다. 상관 id 는 MDC 값으로 바꾼다. 나머지(메서드 · URL · 다른 헤더 · 본문)는 그대로다. */
     Request withServiceToken(Request request) {
         RequestTemplate template = request.requestTemplate();
         Target<?> target = template == null ? null : template.feignTarget();
@@ -67,11 +70,15 @@ public final class InternalServiceTokenCapability implements Capability, Ordered
         }
         Map<String, Collection<String>> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         request.headers().forEach((name, values) -> {
-            if (!AUTHORIZATION.equalsIgnoreCase(name)) {
+            if (!AUTHORIZATION.equalsIgnoreCase(name) && !CorrelationIds.HEADER.equalsIgnoreCase(name)) {
                 headers.put(name, values);
             }
         });
         headers.put(AUTHORIZATION, List.of(BEARER_PREFIX + issuer.issue(audience)));
+        String correlationId = CorrelationIds.current();
+        if (correlationId != null) {
+            headers.put(CorrelationIds.HEADER, List.of(correlationId));
+        }
         return Request.create(request.httpMethod(), request.url(), headers, request.body(), request.charset(), template);
     }
 

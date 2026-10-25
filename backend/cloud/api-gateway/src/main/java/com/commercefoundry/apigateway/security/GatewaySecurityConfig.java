@@ -30,7 +30,7 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>{@code Authorization} 헤더는 그대로 하류로 넘긴다. 서비스가 JWT 를 직접 검증한다. 검증 결과를 {@code X-Member-Id} 같은 헤더로 만들지 않는다.</li>
  * </ul>
  *
- * <p>필터 순서 — {@code GatewayRequestGuardFilter}(가장 앞, 비정규 경로 거절) → 이 체인({@code WebFilterChainProxy}, -100: CORS → 인증 → 인가)
+ * <p>필터 순서 — {@code GatewayCorrelationIdFilter}(가장 앞, 상관 id) → {@code GatewayRequestGuardFilter}(비정규 경로 거절) → 이 체인({@code WebFilterChainProxy}, -100: CORS → 인증 → 인가)
  * → 라우팅. 정규화되지 않은 경로로 인가 판정을 하지 않는다.
  */
 @Configuration
