@@ -13,7 +13,9 @@ const AVAILABILITY: Record<SaleStatusCode, string> = {
  * `</script>` 로 태그를 닫을 수 없게 한다.
  */
 export function productJsonLd(product: ProductDetail): string {
-  const images = [product.thumbnail, ...product.images]
+  // 영상(VIDEO)의 url 은 영상 파일이라 image 에 넣지 않는다
+  const gallery = product.images.filter((media) => media.mediaType !== 'VIDEO');
+  const images = [product.thumbnail, ...gallery]
     .map((image) => image?.url)
     .filter((url): url is string => Boolean(url));
 

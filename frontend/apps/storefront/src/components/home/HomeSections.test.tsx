@@ -49,6 +49,7 @@ const listItem = (productId: string): ProductListItem => ({
   hasOptionSurcharge: false,
   saleStatus: { code: 'ON_SALE', name: '판매중', description: '' },
   customOrder: false,
+  preorder: false,
 });
 
 describe('HeroSection', () => {

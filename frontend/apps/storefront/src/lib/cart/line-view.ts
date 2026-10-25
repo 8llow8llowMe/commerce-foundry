@@ -1,5 +1,5 @@
 import type { Money } from '@cf/api-client';
-import type { ProductDetail, SaleStatus } from '@/lib/catalog/types';
+import type { Preorder, ProductDetail, SaleStatus } from '@/lib/catalog/types';
 import type { LocalCartLine } from './local-cart';
 import { lineKey } from './local-cart';
 import { CART_MAX_QUANTITY, type CartLine } from './types';
@@ -22,6 +22,11 @@ export type CartLineView = {
   /** 상한이 줄어 지금 수량이 상한을 넘는다 */
   quantityExceeded: boolean;
   customOptions: { label: string; value: string }[];
+  /**
+   * 프리오더 안내(발송 예정일). 비회원 줄은 상품 상세에서 알고, 회원 줄은 장바구니 응답에 프리오더 정보가 없어
+   * 언제나 null 이다(BE 장바구니 계약에 생기면 채운다)
+   */
+  preorder: Preorder | null;
 };
 
 export function memberLineView(line: CartLine): CartLineView {
@@ -37,6 +42,7 @@ export function memberLineView(line: CartLine): CartLineView {
     lineAmount: line.lineAmount,
     status: line.status,
     quantityExceeded: line.quantityExceeded,
+    preorder: null,
     // 회원 줄에는 입력 항목 이름이 없다 — 키를 그대로 보인다(BE 응답에 label 이 생기면 바꾼다)
     customOptions: line.customOptions.map((option) => ({
       label: option.fieldKey,
@@ -55,6 +61,7 @@ export function guestLineView(line: LocalCartLine, product: ProductDetail | null
     productId: line.productId,
     quantity: line.quantity,
     lineAmount: null,
+    preorder: product?.preorder ?? null,
   };
   const sku = product?.skus.find((item) => item.skuId === line.skuId);
   if (!product || !sku) {

@@ -8,6 +8,7 @@ import type { ProductListItem } from '@/lib/catalog/types';
 /**
  * 목록의 상품 하나. 큰 이미지 + 작은 상품명 · 가격, 테두리 · 그림자 없이 여백으로 나눈다(#60).
  * 두 번째 이미지(`hoverImage`)가 있으면 hover · 키보드 포커스 때 그 이미지로 바꾸고, 한 장이면 살짝 확대만 한다.
+ * 프리오더 상품은 가격 줄 뒤에 `· 프리오더` 를 글자로 붙인다(발송 예정일은 상세에서만 온다).
  * 금액은 서버 값을 표시만 한다. 메인(서버)과 목록 무한 스크롤(클라이언트) 양쪽에서 쓰여 클라이언트 컴포넌트다.
  */
 export function ProductCard({ product }: { product: ProductListItem }) {
@@ -87,8 +88,12 @@ export function ProductCard({ product }: { product: ProductListItem }) {
               {formatMoney(product.listPrice)}
             </del>
           )}
-          {/* 판매 상태는 이미지 위 뱃지가 아니라 가격 줄 뒤 글자로(#60) */}
-          {!available && <span className="text-muted-fg">· {saleStatus.name}</span>}
+          {/* 판매 상태 · 프리오더는 이미지 위 뱃지가 아니라 가격 줄 뒤 글자로(#60). 살 수 없으면 상태만 보인다 */}
+          {!available ? (
+            <span className="text-muted-fg">· {saleStatus.name}</span>
+          ) : (
+            product.preorder && <span>· {dict.product.preorder.label}</span>
+          )}
         </p>
       </div>
     </Link>

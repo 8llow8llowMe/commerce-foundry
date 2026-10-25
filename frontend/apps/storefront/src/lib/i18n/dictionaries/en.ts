@@ -129,6 +129,13 @@ export const en: Dictionary = {
       closeZoom: 'Close',
       prev: 'Previous image',
       next: 'Next image',
+      play: 'Play video: {alt}',
+      video: 'Video: {alt}',
+    },
+    preorder: {
+      label: 'Pre-order',
+      shipsFrom: 'Pre-order · Ships from {date}',
+      shipDateTbd: 'Pre-order · Ship date to be announced',
     },
     purchase: {
       selectOptions: 'Please select your options.',

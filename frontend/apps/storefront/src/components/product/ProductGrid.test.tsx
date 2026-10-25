@@ -13,6 +13,7 @@ const item = (productId: string): ProductListItem => ({
   hasOptionSurcharge: false,
   saleStatus: { code: 'ON_SALE', name: '판매중', description: '' },
   customOrder: false,
+  preorder: false,
 });
 
 const QUERY = { categoryId: null, sort: 'NEWEST' } as const;

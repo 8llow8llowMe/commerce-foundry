@@ -33,6 +33,7 @@ const detail = (productId: string): ProductDetail => ({
   optionGroups: [],
   skus: [],
   customOrder: null,
+  preorder: null,
 });
 
 const look = (lookId: string, productIds: string[]): ProductLook => ({

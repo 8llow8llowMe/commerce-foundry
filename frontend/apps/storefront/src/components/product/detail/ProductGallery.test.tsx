@@ -13,6 +13,8 @@ const image = (
   width: 900,
   height: 1200,
   altText,
+  mediaType: 'IMAGE',
+  posterUrl: null,
   displayOrder,
 });
 

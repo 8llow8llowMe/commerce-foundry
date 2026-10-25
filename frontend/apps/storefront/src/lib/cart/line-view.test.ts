@@ -59,6 +59,7 @@ const product = (overrides: Partial<ProductDetail> = {}): ProductDetail => ({
       },
     ],
   },
+  preorder: null,
   ...overrides,
 });
 
@@ -91,6 +92,14 @@ describe('guestLineView', () => {
     );
   });
 
+  it('상품 상세의 프리오더 정보를 옮기고, 일반 상품이면 null 이다', () => {
+    const preorder = { expectedShipDate: '2026-11-20' };
+    expect(guestLineView(local, product({ preorder })).preorder).toEqual(preorder);
+    expect(guestLineView(local, product({ preorder, skus: [] })).preorder).toEqual(preorder);
+    expect(guestLineView(local, product()).preorder).toBeNull();
+    expect(guestLineView(local, null).preorder).toBeNull();
+  });
+
   it('상품이 없거나(404) SKU 가 사라졌으면 판매하지 않는 줄이다', () => {
     expect(guestLineView(local, null)).toMatchObject({ name: null, status: null, unitPrice: null });
     expect(guestLineView(local, product({ skus: [] }))).toMatchObject({
@@ -121,6 +130,8 @@ describe('memberLineView', () => {
       key: '5',
       lineAmount: krw(2000),
       maxQuantity: 99,
+      // 장바구니 응답에 프리오더 정보가 없다
+      preorder: null,
     });
   });
 });
