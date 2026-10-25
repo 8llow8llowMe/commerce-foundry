@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import { useDictionary } from '@/components/i18n/LocaleProvider';
+import { stripRejectedCharacters } from '@/lib/cart/custom-input';
 import { fill } from '@/lib/i18n/format';
 import type { CustomOrder } from '@/lib/catalog/types';
 
@@ -12,6 +13,7 @@ const TEXT_MAX = 500;
 /**
  * 맞춤 제작 치수 · 요청 입력. 입력 항목 정의는 상품 데이터(customOrder.fields)가 정한다.
  * 브라우저 검증 속성(min · max · step · maxLength · required)만 건다 — 최종 검증은 주문 생성 때 서버가 한다(#97).
+ * TEXT 칸은 장바구니가 받지 않는 제어 문자(탭 · NUL 등, 붙여넣기 포함)를 입력 단계에서 지운다(#263, BE `CART_115`).
  */
 export function CustomOrderFields({
   customOrder,
@@ -66,7 +68,12 @@ export function CustomOrderFields({
               maxLength={number ? undefined : Math.min(field.max ?? TEXT_MAX, TEXT_MAX)}
               aria-describedby={helpId}
               value={values[field.fieldKey] ?? ''}
-              onChange={(event) => onChange(field.fieldKey, event.target.value)}
+              onChange={(event) =>
+                onChange(
+                  field.fieldKey,
+                  number ? event.target.value : stripRejectedCharacters(event.target.value),
+                )
+              }
               className="h-10 rounded-md border border-border bg-bg px-3 text-fg outline-none focus:ring-2 focus:ring-primary"
             />
             {field.helpText && (
