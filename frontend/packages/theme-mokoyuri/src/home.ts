@@ -2,7 +2,8 @@ import type { HomeSection } from '@cf/ui';
 
 // MOKOYURI 메인 6개 영역 (#59). 문구는 시안이고 고객사 확인 대상이다.
 // 화보는 촬영 전이라 image 가 null 이다 — placeholder 에 필요한 사진 규격을 적어 두고 그대로 고객사에 전달한다.
-// 메인 전시 API(#63)가 생기면 이 파일 대신 API 응답을 쓴다.
+// 메인은 메인 전시 API(#63) 응답을 그린다. 이 파일은 STORY 레이아웃 순서 · LOOK 의 틀이고, API 를 못 쓰거나 그릴 섹션이 없을 때의 기본이다
+// (frontend/docs/architecture.md §10).
 export const home: HomeSection[] = [
   {
     type: 'HERO',

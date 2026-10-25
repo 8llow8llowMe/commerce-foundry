@@ -74,14 +74,17 @@ export function CraftZoom({
   if (!hydrated || !zoomable || !frame) {
     return (
       <div className="mx-auto mt-8 flex max-w-3xl flex-col gap-12 px-4">
-        <p className="text-center leading-7">{intro}</p>
+        {intro && <p className="text-center leading-7 whitespace-pre-line">{intro}</p>}
+        {/* 메인 전시 API 의 디테일은 포인트 = 사진 캡션이라 제목 · 설명이 빌 수 있다 — 빈 줄은 그리지 않는다 */}
         {points.map((point, index) => (
-          <figure key={point.title} className="flex flex-col gap-4">
+          <figure key={index} className="flex flex-col gap-4">
             {closeups[index] && <MediaFrame slot={closeups[index]} className="aspect-[3/4]" />}
-            <figcaption className="flex flex-col gap-2">
-              <span className="font-serif text-lg">{point.title}</span>
-              <span className="leading-7">{point.text}</span>
-            </figcaption>
+            {(point.title || point.text) && (
+              <figcaption className="flex flex-col gap-2">
+                {point.title && <span className="font-serif text-lg">{point.title}</span>}
+                {point.text && <span className="leading-7">{point.text}</span>}
+              </figcaption>
+            )}
           </figure>
         ))}
       </div>

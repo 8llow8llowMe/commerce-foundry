@@ -1,6 +1,8 @@
 import type { StorySection as StorySectionData } from '@cf/ui';
 import { Link } from '@/components/i18n/Link';
+import { linkRel } from '@/lib/display/home-sections';
 import { MediaFrame } from './MediaFrame';
+import { sectionLabel } from './SectionHeading';
 
 /**
  * 06 Our Story — panel (#59). 사이트에서 유일한 어두운 면(Soft Black)에 밝은 글.
@@ -10,22 +12,28 @@ import { MediaFrame } from './MediaFrame';
 export function PanelStory({ section }: { section: StorySectionData }) {
   const headingId = `${section.id}-title`;
   const [photo] = section.media;
-  const paragraphs = section.body.split(/\n{2,}/);
+  // 빈 줄로 단락을 나눈다. 단락 안의 개행은 그대로 둔다(메인 전시 API 본문은 평문 + 개행)
+  const paragraphs = section.body.split(/\n{2,}/).filter((paragraph) => paragraph.trim());
 
   return (
-    <section aria-labelledby={headingId} className="mx-2.5 overflow-hidden bg-fg text-bg lg:mx-5">
+    <section
+      aria-labelledby={sectionLabel(headingId, section.title)}
+      className="mx-2.5 overflow-hidden bg-fg text-bg lg:mx-5"
+    >
       <div className="mx-auto grid max-w-screen-xl gap-10 px-6 pt-16 lg:min-h-[110svh] lg:grid-cols-12 lg:grid-rows-[auto_1fr] lg:gap-x-8 lg:px-12 lg:pt-24">
-        <h2
-          data-reveal="title"
-          id={headingId}
-          className="font-serif text-[1.75rem] leading-[1.25] lg:col-span-5 lg:text-[2.75rem]"
-        >
-          {section.title}
-        </h2>
+        {section.title && (
+          <h2
+            data-reveal="title"
+            id={headingId}
+            className="font-serif text-[1.75rem] leading-[1.25] lg:col-span-5 lg:text-[2.75rem]"
+          >
+            {section.title}
+          </h2>
+        )}
 
         <div className="flex flex-col gap-6 lg:col-span-4 lg:col-start-9 lg:row-span-2">
           {paragraphs.map((paragraph, index) => (
-            <p key={index} data-reveal="text" className="leading-7">
+            <p key={index} data-reveal="text" className="leading-7 whitespace-pre-line">
               {paragraph}
             </p>
           ))}
@@ -33,6 +41,7 @@ export function PanelStory({ section }: { section: StorySectionData }) {
             <Link
               key={link.href}
               href={link.href}
+              rel={linkRel(link.href)}
               className="inline-flex h-12 items-center justify-center self-start bg-bg px-6 text-sm tracking-[0.15em] text-fg uppercase transition hover:opacity-80"
             >
               {link.label}

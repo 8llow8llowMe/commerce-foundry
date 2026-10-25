@@ -1,7 +1,8 @@
 import type { StorySection as StorySectionData } from '@cf/ui';
 import { Link } from '@/components/i18n/Link';
+import { linkRel } from '@/lib/display/home-sections';
 import { MediaFrame } from './MediaFrame';
-import { SectionHeading } from './SectionHeading';
+import { SectionHeading, sectionLabel } from './SectionHeading';
 
 /**
  * 03 Collection Story — curtain (#59). 짧은 글 뒤에 전폭 사진을 스크롤 고정(sticky)으로 쌓는다.
@@ -12,13 +13,15 @@ export function CurtainStory({ section }: { section: StorySectionData }) {
   const headingId = `${section.id}-title`;
 
   return (
-    <section aria-labelledby={headingId}>
+    <section aria-labelledby={sectionLabel(headingId, section.title)}>
       <div className="mx-auto max-w-screen-xl px-4 lg:px-8">
         <div className="flex w-3/5 flex-col gap-4 lg:w-[220px]">
           <SectionHeading id={headingId} title={section.title} />
-          <p data-reveal="text" className="leading-7">
-            {section.body}
-          </p>
+          {section.body && (
+            <p data-reveal="text" className="leading-7 whitespace-pre-line">
+              {section.body}
+            </p>
+          )}
         </div>
       </div>
 
@@ -44,6 +47,7 @@ export function CurtainStory({ section }: { section: StorySectionData }) {
             <Link
               key={link.href}
               href={link.href}
+              rel={linkRel(link.href)}
               className="border-b border-current pb-1 text-xs tracking-[0.2em] uppercase hover:opacity-70"
             >
               {link.label} <span aria-hidden>→</span>

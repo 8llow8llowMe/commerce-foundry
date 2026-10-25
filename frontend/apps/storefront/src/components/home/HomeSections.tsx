@@ -1,4 +1,4 @@
-import type { HomeSection } from '@cf/ui';
+import type { HomeBlock } from '@/lib/display/home-sections';
 import { DetailSection } from './DetailSection';
 import { HeroSection } from './HeroSection';
 import { LookSection } from './LookSection';
@@ -6,8 +6,8 @@ import { ProductPickSection } from './ProductPickSection';
 import { Reveal } from './Reveal';
 import { StorySection } from './StorySection';
 
-/** 메인 섹션을 데이터 순서대로 그린다. 섹션 구성은 브랜드 설정(1차) 또는 메인 전시 API(#63)가 정한다 */
-export function HomeSections({ sections }: { sections: HomeSection[] }) {
+/** 메인 섹션을 데이터 순서대로 그린다. 섹션 구성 · 순서는 메인 전시 API(#63)가, API 를 못 쓰면 브랜드 설정이 정한다(loadHomeBlocks) */
+export function HomeSections({ sections }: { sections: HomeBlock[] }) {
   return (
     // 섹션 간격 — 모바일 96 · 태블릿 120 · PC 160px. 섹션 안의 어떤 간격보다 크게(#57 §3)
     <div className="flex flex-col gap-24 pb-24 md:gap-30 md:pb-30 lg:gap-40 lg:pb-40">
