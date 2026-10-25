@@ -71,7 +71,9 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
   데이터를 지우지 않으려면 떠 있는 컨테이너에서 그 스키마만 만든다 (`backend/` 에서, 예: operations):
   `docker compose -f docker-compose-local.yml exec postgres sh -c 'psql -U "$POSTGRES_USER" -d commerce_foundry -c "CREATE SCHEMA IF NOT EXISTS operations"'`
 - **Kafka 토픽은 앱이 만들지 않는다**(#310) — 브로커 자동 생성을 꺼 두었다. `docker/kafka/topics.txt` 에 적은 토픽을 스크립트로 만든다(`backend/` 에서):
-  `sh docker/kafka/create-topics.sh` — 이미 있는 토픽은 건너뛰므로 여러 번 돌려도 된다. 토픽 이름 규칙은 #304 설계를 따르고, 규칙이 정해지기 전에는 목록이 비어 있다.
+  `sh docker/kafka/create-topics.sh` — 목록 이름 앞에 namespace `commerce-foundry.local` 을 붙이고 DLT(`.dlt`)도 같이 만든다
+  (예: `order.order-expired` → `commerce-foundry.local.order.order-expired`). 이미 있는 토픽은 건너뛰므로 여러 번 돌려도 된다.
+  `.env` 의 `KAFKA_NAMESPACE` 는 `commerce-foundry.local` 그대로 둔다 — 서비스가 그 namespace 의 토픽을 찾는다. 이름 규칙 · 토픽 추가 절차는 `deploy-guide.md` §4-4.
   Kafka 는 볼륨이 없다 — 컨테이너를 다시 시작해도 남지만 `down` 하면 토픽 · 메시지가 사라지니 다시 올린 뒤 스크립트를 돌린다.
   토픽 · 메시지 확인: `docker compose -f docker-compose-local.yml exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list`
   (컨테이너 안 도구는 내부 리스너 `localhost:19092` 를 쓴다 — `KAFKA_PORT` 를 바꿔도 같다).
