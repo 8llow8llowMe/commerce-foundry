@@ -23,6 +23,7 @@ import org.springframework.kafka.core.KafkaAdmin;
  *   <li>namespace 형식 · 마지막 토막 = 활성 환경(local · dev · test, 없으면 prod) — {@link MessagingProperties#violations}</li>
  *   <li>{@code spring.kafka.admin.auto-create=false} — 앱은 토픽을 만들지 않는다. KafkaAdmin 은 브로커 자동 생성이 꺼져도 만들기 때문에 앱에서 막는다</li>
  *   <li>모듈이 강제하는 값을 덮지 않았다 — {@code spring.kafka.producer.acks} 는 {@code all}, {@code spring.kafka.consumer.enable-auto-commit} 은 false</li>
+ *   <li>{@code KAFKA_SASL_USERNAME} · {@code KAFKA_SASL_PASSWORD} 는 둘 다 있거나 둘 다 없고, 있으면 {@code KAFKA_SECURITY_PROTOCOL} 이 PLAINTEXT 가 아니다</li>
  * </ul>
  */
 public final class MessagingStartupGuard implements BeanFactoryPostProcessor {
@@ -78,7 +79,26 @@ public final class MessagingStartupGuard implements BeanFactoryPostProcessor {
         if ("true".equalsIgnoreCase(text(binder, "spring.kafka.consumer.enable-auto-commit"))) {
             violations.add("spring.kafka.consumer.enable-auto-commit 을 true 로 덮었습니다 — 처리 커밋 뒤에만 오프셋을 커밋합니다");
         }
+        // 계정은 둘 다 있거나 둘 다 없다 (#304 A-7, deploy-guide §4-4). 계정이 있으면 평문 프로토콜로 보내지 않는다
+        boolean saslUser = present(environment, "KAFKA_SASL_USERNAME");
+        boolean saslPassword = present(environment, "KAFKA_SASL_PASSWORD");
+        if (saslUser != saslPassword) {
+            violations.add("KAFKA_SASL_USERNAME · KAFKA_SASL_PASSWORD 는 둘 다 채우거나 둘 다 비워야 합니다");
+        } else if (saslUser && (!present(environment, "KAFKA_SECURITY_PROTOCOL")
+            || "PLAINTEXT".equalsIgnoreCase(environment.getProperty("KAFKA_SECURITY_PROTOCOL", "").strip()))) {
+            violations.add("KAFKA_SASL_* 를 채웠으면 KAFKA_SECURITY_PROTOCOL 이 PLAINTEXT 가 아니어야 합니다");
+        }
         return violations;
+    }
+
+    /** 값을 읽지 않고 채워졌는지만 본다. */
+    private static boolean present(Environment environment, String key) {
+        try {
+            String value = environment.getProperty(key);
+            return value != null && !value.isBlank();
+        } catch (RuntimeException unresolved) {
+            return true;
+        }
     }
 
     /** Binder 로 읽는다 — 풀리지 않은 플레이스홀더를 예외 없이 문자 그대로 받아(값을 내지 않고) 비었다고 판정한다. 목록 값은 쉼표로 이은 문자열이다. */
