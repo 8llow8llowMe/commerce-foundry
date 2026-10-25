@@ -25,8 +25,10 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import com.commercefoundry.common.log.CorrelationIds;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -72,6 +74,32 @@ public class InternalServiceTokenCapabilityTest {
         // 나머지는 그대로 간다
         assertThat(request.url()).startsWith("http://product-service/internal/v1/stocks?skuIds=1");
         assertThat(request.headers().get("X-Request-Id")).containsExactly("req-1");
+    }
+
+    @Test
+    @DisplayName("상관 id 는 MDC 의 검증된 값만 싣고, 인터셉터가 넣은 헤더는 지운다 — Authorization 은 여전히 서비스 토큰 하나다")
+    void correlationIdComesFromMdcOnly() {
+        CapturingClient sent = new CapturingClient();
+        ProductStockClient client = Feign.builder()
+            .client(sent)
+            .requestInterceptor(template -> template.header(CorrelationIds.HEADER, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\nforged"))
+            .requestInterceptor(template -> template.header("Authorization", "Bearer user-access-token"))
+            .addCapability(capability)
+            .target(new Target.HardCodedTarget<>(ProductStockClient.class, TARGET, "http://" + TARGET));
+
+        MDC.put(CorrelationIds.MDC_KEY, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        try {
+            assertThat(client.stocks("1")).isEqualTo("ok");
+        } finally {
+            MDC.remove(CorrelationIds.MDC_KEY);
+        }
+
+        Request request = sent.requests.getFirst();
+        assertThat(request.headers().get(CorrelationIds.HEADER)).containsExactly("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        assertThat(authorizationValues(request)).singleElement().asString().startsWith("Bearer ").doesNotContain("user-access-token");
+
+        client.stocks("1");
+        assertThat(sent.requests.get(1).headers().get(CorrelationIds.HEADER)).isNull();
     }
 
     @Test

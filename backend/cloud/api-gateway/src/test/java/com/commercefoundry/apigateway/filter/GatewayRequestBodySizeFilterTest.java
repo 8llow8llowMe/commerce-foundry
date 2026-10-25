@@ -51,7 +51,7 @@ class GatewayRequestBodySizeFilterTest {
     @Test
     @DisplayName("요청 가드 바로 뒤, CORS · 보안 체인보다 앞에서 돈다")
     void runsRightAfterGuard() {
-        assertThat(filter.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 1);
+        assertThat(filter.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);
     }
 
     @Test

@@ -41,7 +41,7 @@ import reactor.core.publisher.Mono;
  *       하류 구성이 바뀌면 게이트웨이가 검증한 토큰과 서비스가 쓰는 토큰이 갈라질 수 있다. 보안 체인보다 앞이라 어느 토큰도 검증하지 않는다.</li>
  * </ul>
  *
- * <p>CORS 필터보다도 먼저 돈다. 거절은 공격 탐지 신호라 로그는 debug 로만, 원문 경로는 길이를 잘라 남긴다(플러딩 방지). 헤더 값(토큰)은 남기지 않는다.
+ * <p>상관 id 필터({@link GatewayCorrelationIdFilter}) 다음, CORS 보다 먼저 돈다. 거절은 공격 탐지 신호라 로그는 debug 로만, 원문 경로는 길이를 잘라 남긴다(플러딩 방지). 헤더 값(토큰)은 남기지 않는다.
  */
 @Slf4j
 @Component
@@ -69,7 +69,7 @@ public class GatewayRequestGuardFilter implements WebFilter, Ordered {
 
     @Override
     public int getOrder() {
-        return Ordered.HIGHEST_PRECEDENCE;
+        return Ordered.HIGHEST_PRECEDENCE + 1;
     }
 
     @Override
