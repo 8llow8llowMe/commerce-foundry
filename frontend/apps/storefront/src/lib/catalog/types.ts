@@ -37,6 +37,11 @@ export type ProductListItem = {
   productId: string;
   name: string;
   thumbnail: ProductThumbnail | null;
+  /**
+   * 목록 hover 때 바꿔 보일 두 번째 이미지(착용컷 · 디테일, #60). BE 목록 계약에 아직 없다 — 응답에 생기면
+   * 이름만 맞춘다. 없거나 null 이면 전환하지 않는다
+   */
+  hoverImage?: ProductThumbnail | null;
   /** 판매중 옵션 중 최저가 */
   salePrice: Money;
   /** 할인 전 정가. discountRate 와 함께 null 이거나 함께 값이 있다 */

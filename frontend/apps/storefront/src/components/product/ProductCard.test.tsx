@@ -48,6 +48,33 @@ describe('ProductCard', () => {
     expect(html).toContain('이미지 준비 중');
   });
 
+  it('두 번째 이미지가 있으면 hover · 포커스 때 겹쳐 보이고, 한 장이면 확대만 한다', () => {
+    const second = { ...product().thumbnail!, imageId: '2', url: 'https://img.test/2.jpg' };
+    const html = render({ hoverImage: second });
+    const hover = html.match(/<img[^>]*src="https:\/\/img.test\/2.jpg"[^>]*>/)?.[0] ?? '';
+    expect(hover).toContain('alt=""');
+    expect(hover).toContain('opacity-0');
+    expect(hover).toContain('group-hover:opacity-100');
+    expect(hover).toContain('group-focus-visible:opacity-100');
+    expect(html).not.toContain('group-hover:scale');
+
+    const single = render({ hoverImage: null });
+    expect(single.match(/<img/g)).toHaveLength(1);
+    expect(single).toContain('group-hover:scale-[1.03]');
+  });
+
+  it('대표 이미지가 없으면 두 번째 이미지도 쓰지 않는다', () => {
+    const html = render({ thumbnail: null, hoverImage: product().thumbnail });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('이미지 준비 중');
+  });
+
+  it('상품명은 모바일 한 줄 말줄임 · 13px, PC 두 줄 · 14px 이다', () => {
+    const html = render();
+    expect(html).toContain('class="mt-3 flex flex-col gap-1 text-xs lg:text-sm"');
+    expect(html).toContain('class="truncate lg:line-clamp-2 lg:whitespace-normal"');
+  });
+
   it('할인이면 할인율 · 정가를, 옵션 추가금이 있으면 ~ 를 붙인다', () => {
     const html = render({
       listPrice: { amount: 159000, currency: 'KRW' },

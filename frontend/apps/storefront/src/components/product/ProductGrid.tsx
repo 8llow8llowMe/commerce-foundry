@@ -84,7 +84,8 @@ export function ProductGrid({ query, initial }: ProductGridProps) {
 
   return (
     <div>
-      <ul className="grid grid-cols-2 gap-x-4 gap-y-10 md:grid-cols-3 lg:grid-cols-4 lg:gap-x-6 lg:gap-y-14">
+      {/* 모바일은 좌우 여백 · 가로 간격 8px 로 사진이 화면을 거의 채운다. PC 4열 24 / 56px (#60) */}
+      <ul className="-mx-2 grid grid-cols-2 gap-x-2 gap-y-10 md:mx-0 md:grid-cols-3 md:gap-x-4 lg:grid-cols-4 lg:gap-x-6 lg:gap-y-14">
         {items.map((product) => (
           <li key={product.productId}>
             <ProductCard product={product} />
