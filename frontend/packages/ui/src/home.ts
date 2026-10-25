@@ -1,5 +1,5 @@
 // 메인 화면 섹션 계약. 유형은 BE 메인 전시 API(#63)의 섹션 유형과 같은 이름으로 둔다 —
-// API 가 생기면 브랜드 설정 대신 응답을 그대로 넘긴다. 유형 이름은 브랜드 무관 블록이고,
+// 스토어프론트가 API 응답을 이 모양으로 바꿔 그리고, 브랜드 설정은 레이아웃 틀 · 안전한 기본이다. 유형 이름은 브랜드 무관 블록이고,
 // 'The Romantic Edit' 같은 브랜드 문구는 title 값이다. 제목 위 작은 라벨(eyebrow)은 두지 않는다(#57 금지 목록).
 
 export type HomeLink = {
@@ -9,6 +9,8 @@ export type HomeLink = {
 
 export type HomeImage = {
   src: string;
+  /** 모바일(1024px 미만)용 사진이 따로 있으면 그 주소(art direction). 없으면 src 하나 */
+  mobileSrc?: string;
   alt: string;
   width?: number;
   height?: number;

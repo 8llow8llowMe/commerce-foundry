@@ -166,6 +166,12 @@ export const ko = {
   home: {
     /** 05 Craft 확대에서 전신으로 돌아가기 */
     craftOverview: '전신 보기',
+    /** 메인 전시 링크에 문구가 없을 때(히어로 · 스토리) */
+    more: '더 보기',
+    /** 메인 전시 상품 픽 링크에 문구가 없을 때 */
+    viewAll: 'VIEW ALL',
+    /** 메인 전시 히어로의 쇼핑 버튼(/shop) */
+    shop: 'SHOP',
   },
   cart: {
     title: '장바구니',
