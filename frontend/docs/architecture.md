@@ -349,12 +349,17 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 ### 백그라운드 작업 (`/jobs` · `/jobs/[jobId]`, #272)
 
-- 어드민 작업 API(operations-service, BE #212 PR-C, 계약 정본 `backend/docs/api-design-guide.md` §7-1) — 모두 ADMIN 이다.
+- 어드민 작업 API(operations-service, BE #212 PR-C · #305, 계약 정본 `backend/docs/api-design-guide.md` §2-8 · §7-1) — 모두 ADMIN 이다.
   - 목록 `GET /api/v1/admin/jobs?status=&type=&page=&size=` — `PageResponse`, 등록 최신순 고정, 페이지 20개
-  - 상세 `GET /api/v1/admin/jobs/{jobId}` — 진행 문구 · 입력 · 결과 JSON 원문 · 오류 설명까지. **작업 실패도 200** 이고 `status=FAILED` + `errorCode` 다
-  - 취소 `POST /api/v1/admin/jobs/{jobId}/cancel` — 본문 없음, 응답은 상세와 같다. QUEUED 는 바로 `CANCELLED`, RUNNING 은 상태 그대로 `cancelRequested=true`(멱등)
-- 각 기능 API 가 `202 + jobId` 로 답하면 그 기능 화면이 `/jobs/{jobId}` 로 보낸다. 범용 등록 화면은 없다. 결과 파일 링크는 #212 PR-E 뒤에 붙인다.
-- **상태는 서버 `status.name` 을 보인다**(설명은 `title` · 상세 본문). 필터 선택지 이름만 목록을 읽기 전에 그려야 해서
+  - 상세 `GET /api/v1/admin/jobs/{jobId}` — **작업 실패도 200** 이고 `status=FAILED` + 서버 안내 문구(`notice`)다
+  - 취소 `POST /api/v1/admin/jobs/{jobId}/cancel` — 본문 없음, 응답은 상세와 같다. QUEUED 는 바로 `CANCELLED`,
+    RUNNING 은 상태 그대로 `notice`("취소를 요청했습니다") · `cancellable=false` 로 온다(멱등)
+- **어드민 사용자는 비개발자 쇼핑몰 운영자다** — 응답 · 화면에 기술 정보(시도 횟수 · 오류 코드 · 오류 원문 · 입력/결과 JSON · 우선순위 · 멱등 키 · 회원 아이디)를 두지 않는다.
+  목록 항목 · 상세 · 취소 응답은 같은 칸이다(`JobItem`, `lib/job/types.ts`): `jobId` · `type`(종류 코드, 거르기에만) · `typeName`(화면에 보이는 작업 이름) ·
+  `status` · `progressPercent` · `progressMessage` · `notice` · `cancellable` · `requestedAt` · `finishedAt`.
+- 각 기능 API 가 `202 + jobId` 로 답하면 그 기능 화면이 `/jobs/{jobId}` 로 보낸다. 범용 등록 화면은 없다. 결과 파일 링크는 #212 PR-E 에서 붙인다(자리를 미리 두지 않는다).
+- **작업은 `typeName`, 상태는 서버 `status.name` 을 보인다**(설명은 `title` · 상세 본문). **실패 이유 · 재시도 대기 · 취소 요청됨은 서버 `notice` 문장을 그대로 보인다**(목록 상태 아래 · 상세 진행 아래) —
+  화면이 상태 · 칸을 조합해 문구를 만들지 않는다. 필터 선택지 이름만 목록을 읽기 전에 그려야 해서
   서버 `JobStatus` 의 이름을 옮긴 사본(`JOB_STATUS_LABELS`, `lib/job/types.ts`)이다 — BE 가 이름을 바꾸면 같이 고친다.
 - **조건은 주소가 정본이다**(상품 목록과 같은 규칙) — `parseJobQuery` 가 상태(enum 이름 그대로)·종류(`[A-Z0-9_]{1,64}`)·페이지(숫자 6자리)만 받고
   나머지는 "전체" 다(손으로 고친 주소가 400 `JOB_103` · `198` 이 되지 않게). 종류 칸은 대문자로 바꿔 보내고, 패턴에 안 맞으면 보내지 않고 칸 오류다.
@@ -366,8 +371,9 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   - **숨은 탭**(`document.visibilityState === 'hidden'`)에서는 예약을 지우고, 다시 보이면 곧바로 한 번 읽은 뒤 이어 간다.
   - 읽기마다 세대 번호를 붙여 늦게 온 이전 응답을 버린다. 취소를 보내는 순간 세대를 올리고 취소 중에는 새 읽기를 시작하지 않는다 —
     그 전에 나간 읽기가 취소 결과(CANCELLED)를 예전 상태(QUEUED)로 덮지 못한다.
-- **취소** — 버튼은 QUEUED · RUNNING 일 때만, 한 번 더 확인한다. RUNNING 이고 이미 취소 요청을 받았으면 버튼 대신 "취소 요청됨" 이다(목록 행에도).
-  "취소를 요청했습니다" 안내는 다시 읽은 작업이 끝나면 최종 상태에 맞게 바뀐다(CANCELLED 면 "취소했습니다", 아니면 "취소가 반영되기 전에 끝났습니다").
+- **취소** — 버튼은 서버 `cancellable` 하나로 보인다(상태로 추론하지 않는다). 한 번 더 확인한다(`JobCancelControl`).
+  성공하면 **응답 본문으로 바로 갱신**한다 — 상태 · `notice` · `cancellable` 이 곧 결과라 화면이 따로 성공 문구를 만들지 않는다. 실행 중이면 주기 갱신이 이어져 최종 상태 · 안내도 서버 값으로 바뀐다.
+  아래 실패만 화면 안내다.
 
 | 취소 실패 | 화면 처리 |
 |-----------|-----------|
