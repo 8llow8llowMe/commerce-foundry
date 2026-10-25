@@ -48,8 +48,8 @@ kafka-clients 의 `*Config values` INFO 로그에 접속 주소가 찍힌다 —
 ```text
 outbox            id(Snowflake PK) · aggregate_type · aggregate_id · event_type · schema_version · payload(봉투 JSON, text)
                   · available_at · created_at · published_at · publish_attempts · last_error_code · version
-                  인덱스: 부분 인덱스 (available_at, id) where published_at is null — 미발행 조회(published_at is null and available_at <= now order by id)
-                          · (published_at) — 정리
+                  인덱스: (published_at, available_at) 하나 — 미발행 조회(published_at is null and available_at <= now order by id) · 정리(published_at < cutoff)를 함께 받는다.
+                          엔티티 @Index 로 표현할 수 없는 부분 인덱스는 쓰지 않는다(서비스 규칙). 미발행 행이 많아 정렬이 무거워지면 그때 운영 DDL 로 더한다
 processed_event   (consumer_group, event_id) 유니크 · event_type · processed_at, 인덱스 (processed_at) — 정리
 shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock JDBC 표준 모양)
 ```
@@ -70,11 +70,13 @@ shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock J
 - **봉투에는 진위 확인 수단이 없다**(PLAINTEXT · ACL 없음 전제, #304 A-2). 돈 · 재고 상태를 바꾸는 컨슈머는 이벤트를 알림으로만 보고 원본 서비스 internal API 로 재조회해 확정한다(웹훅과 같은 원칙).
   서명 헤더를 둘지는 결제 이벤트(#308) 전에 정한다.
 - 지표: `commerce.messaging.outbox.published.total` · `…outbox.publish.failed.total{error}` · `…outbox.publish.latency` · `commerce.messaging.consumer.dlt.total{topic}`.
-  미발행 행 수 · 가장 오래된 미발행 나이 게이지는 서비스 저장소가 생기는 #307 에서 더한다.
+  미발행 행 수 · 가장 오래된 미발행 나이 게이지(`commerce.messaging.outbox.unpublished.count` · `…unpublished.oldest.age`)는 저장소를 가진 서비스가 단다 —
+  operations-service `OutboxMetrics` 참고.
 
 ## 테스트
 
 - 모듈 자체: 단위 테스트 + 내장 Kafka(`spring-kafka-test`, KRaft) 왕복 — 커밋하면 발행 / 롤백하면 미발행, 중복 1회 처리, 재시도 상한 뒤 DLT. Docker 가 필요 없다.
 - testFixtures: `InMemoryOutboxStore` · `InMemoryProcessedEventStore`(트랜잭션 커밋 · 롤백 흉내 — 동시성 · 예외 타입은 흉내 내지 않는다), `NoOpTransactionManager`,
   `MessagingKafkaContainers`(apache/kafka 4.3.1 Testcontainers).
-- 서비스 JPA 어댑터가 SPI 계약(조건부 표시 · id 순 · available_at · 유니크)을 지키는지 보는 재사용 계약 테스트는 첫 사용처(#307)에서 더한다.
+- 서비스 JPA 어댑터의 SPI 계약(조건부 표시 · id 순 · available_at)은 첫 사용처 operations-service 의 `JpaOutboxStoreTest`(PostgreSQL)가 본다.
+  여러 서비스가 함께 쓰는 재사용 계약 테스트는 두 번째 사용처(#308)에서 testFixtures 로 올린다.
