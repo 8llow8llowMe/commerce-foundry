@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.display.adapter.in.admin.dto.item;
 
+import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 
@@ -7,8 +8,11 @@ import lombok.Builder;
 @Schema(description = "어드민 전시 미디어")
 public record DisplayMediaAdminItem(
 
-    @Schema(description = "미디어 종류", allowableValues = {"IMAGE", "VIDEO"}, example = "IMAGE")
-    String mediaType,
+    @Schema(
+        description = "미디어 종류 — IMAGE(이미지) · VIDEO(영상). 수정 요청에는 code 를 그대로 보낸다",
+        example = "{\"code\": \"IMAGE\", \"name\": \"이미지\", \"description\": \"사진 한 장입니다.\"}"
+    )
+    CodeNameDescriptionMetadata mediaType,
 
     @Schema(description = "PC 주소", example = "https://cdn.example.com/displays/hero-pc.jpg")
     String pcUrl,

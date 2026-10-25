@@ -46,7 +46,7 @@ public class DisplayAdminController {
 
     @Operation(
         summary = "전시 섹션 전체 조회",
-        description = "숨김 · 기간 밖 섹션을 포함한 전체(최대 50개)를 노출 순서 → 아이디 오름차순으로 낸다. isLive 는 지금 고객 메인에 보이는지다. "
+        description = "숨김 · 기간 밖 섹션을 포함한 전체(최대 50개)를 노출 순서 → 아이디 오름차순으로 낸다. liveStatus 는 지금 노출 상태(노출 중 · 숨김 · 예정 · 종료)다. "
             + "상품 아이템은 상품 아이디 · 이름 · 노출 여부만 낸다(숨긴 상품 포함)."
     )
     @PreAuthorize("hasRole('ADMIN')")

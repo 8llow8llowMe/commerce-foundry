@@ -31,19 +31,17 @@ public class DisplayAdminPresenter {
             .body(info.body())
             .linkUrl(info.linkUrl())
             .linkLabel(info.linkLabel())
-            .displayOrder(info.displayOrder())
             .visible(info.visible())
             .startAt(info.startAt())
             .endAt(info.endAt())
-            .isLive(info.live())
+            .liveStatus(info.liveStatus().toMetadata())
             .items(info.items().stream().map(this::toElementItem).toList())
             .build();
     }
 
     private DisplayElementAdminItem toElementItem(DisplaySectionAdminInfo.Element element) {
         return DisplayElementAdminItem.builder()
-            .itemId(String.valueOf(element.itemId()))
-            .itemType(element.itemType().name())
+            .itemType(element.itemType().toMetadata())
             .media(toMediaItem(element.media()))
             .product(toProductItem(element.product()))
             .caption(element.caption())
@@ -55,7 +53,7 @@ public class DisplayAdminPresenter {
             return null;
         }
         return DisplayMediaAdminItem.builder()
-            .mediaType(media.mediaType().name())
+            .mediaType(media.mediaType().toMetadata())
             .pcUrl(media.pcUrl())
             .mobileUrl(media.mobileUrl())
             .pcPosterUrl(media.pcPosterUrl())

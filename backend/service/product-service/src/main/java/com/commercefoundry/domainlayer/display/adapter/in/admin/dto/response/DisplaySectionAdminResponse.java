@@ -35,9 +35,6 @@ public record DisplaySectionAdminResponse(
     @Schema(description = "이동 버튼 문구. 없으면 null. 평문이다. HTML 로 해석하지 않는다(텍스트 노드로만 렌더, 개행은 white-space 로)", example = "더 보기", nullable = true)
     String linkLabel,
 
-    @Schema(description = "메인 화면 안의 순서 (0 부터, 오름차순)", example = "0")
-    int displayOrder,
-
     @Schema(description = "노출 여부 설정", example = "true")
     boolean visible,
 
@@ -47,8 +44,12 @@ public record DisplaySectionAdminResponse(
     @Schema(description = "노출 종료 시각(제외, UTC). 없으면 null", example = "2026-12-01T00:00:00Z", nullable = true)
     Instant endAt,
 
-    @Schema(description = "지금 고객 메인에 보이는가 — visible 이고 기간 안이다(시작 포함 · 종료 제외). 서버 시각 기준 파생 값이다", example = "true")
-    boolean isLive,
+    @Schema(
+        description = "지금 노출 상태 — LIVE(노출 중) · HIDDEN(숨김, visible=false) · SCHEDULED(예정, startAt 전) · ENDED(종료, endAt 이후). "
+            + "숨김이 기간보다 앞서고, 시작 시각은 포함 · 종료 시각은 제외다. 서버 시각 기준 파생 값이며 고객 메인 노출과 같은 판정이다",
+        example = "{\"code\": \"SCHEDULED\", \"name\": \"예정\", \"description\": \"노출 시작 전이라 아직 고객 메인에 보이지 않습니다.\"}"
+    )
+    CodeNameDescriptionMetadata liveStatus,
 
     @Schema(description = "아이템 전체 (섹션 안의 순서). 숨긴 상품의 아이템도 담는다")
     List<DisplayElementAdminItem> items

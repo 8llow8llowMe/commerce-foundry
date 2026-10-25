@@ -51,12 +51,27 @@ public record DisplaySection(
         return at == null || !at.isBefore(EARLIEST_PERIOD_AT) && !at.isAfter(LATEST_PERIOD_AT);
     }
 
-    /** 지금 고객 메인에 보이는가 — 위 노출 조건. 어드민 목록의 파생 값({@code live})과 고객 메인 필터가 같은 판정을 쓴다. */
+    /** 지금 고객 메인에 보이는가 — {@link #liveStatusAt} 이 {@link DisplayLiveStatus#LIVE} 인가. 고객 메인 필터와 어드민 노출 상태가 같은 판정을 쓴다. */
     public boolean isLiveAt(Instant now) {
+        return liveStatusAt(now) == DisplayLiveStatus.LIVE;
+    }
+
+    /**
+     * 지금 노출 상태 — 숨김({@code visible=false}) → 예정({@code now < startAt}) → 종료({@code endAt <= now}) → 노출 중 순으로 처음 맞는 것이다.
+     * 시작 시각과 같은 순간은 노출 중(포함), 종료 시각과 같은 순간은 종료(제외)다.
+     */
+    public DisplayLiveStatus liveStatusAt(Instant now) {
         Objects.requireNonNull(now, "now");
-        return visible
-            && (startAt == null || !startAt.isAfter(now))
-            && (endAt == null || now.isBefore(endAt));
+        if (!visible) {
+            return DisplayLiveStatus.HIDDEN;
+        }
+        if (startAt != null && startAt.isAfter(now)) {
+            return DisplayLiveStatus.SCHEDULED;
+        }
+        if (endAt != null && !now.isBefore(endAt)) {
+            return DisplayLiveStatus.ENDED;
+        }
+        return DisplayLiveStatus.LIVE;
     }
 
     /** 종료가 시작보다 뒤다(둘 중 하나라도 없으면 맞다). DB 의 {@code ck_display_section_period} 와 같은 규칙이다. */
