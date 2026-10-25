@@ -217,15 +217,20 @@ class ShippingPolicyReplaceStatementCountTest {
     }
 
     @Test
-    @DisplayName("배치로 나가도 동시 최초 생성(범위 유일 키 위반)은 006 이다 — 제약 이름이 배치 예외 안에서도 읽힌다(H2 기준, PG 는 리포지토리 테스트)")
-    void duplicateCreateUnderBatchingIsConflict() {
+    /**
+     * 006 으로의 변환은 H2 에서 보지 않는다 — 공용 판정(persistence-core {@code ConstraintViolations})은 H2 의 인덱스 접미사 이름
+     * ({@code uk_shipping_policy_scope_INDEX_8})을 받지 않는다(#247). 변환은 배치 예외 모양 단위 테스트({@code ShippingPolicyRepositoryAdapterCreateConflictTest})와
+     * PostgreSQL 리포지토리 테스트({@code ShippingPolicyRepositoryAdapterTest})가 본다. 여기서는 배치로 나가도 위반이 커밋이 아니라 이 호출 안에서 드러나고 아무것도 남지 않는지 본다.
+     */
+    @DisplayName("배치로 나가도 동시 최초 생성(범위 유일 키 위반)은 이 호출 안에서 드러나고 아무것도 저장되지 않는다 (H2)")
+    void duplicateCreateUnderBatchingFailsInCall() {
         shippingPolicyAdminUseCase.replaceDomesticPolicy(command(3_000, null, remoteAreas(1, 3_000)));
         // 다른 요청이 정책이 없을 때 조회한 상황 — 조회 결과를 비워 새로 만들게 한다
         doAnswer(invocation -> Optional.empty()).when(shippingPolicyRepositoryPort).findDomesticPolicy();
 
         assertThatThrownBy(() -> shippingPolicyAdminUseCase.replaceDomesticPolicy(command(3_500, null, remoteAreas(1, 3_000))))
-            .isInstanceOfSatisfying(DeliveryException.class,
-                exception -> assertThat(exception.getErrorCode()).isEqualTo(DeliveryErrorCode.SHIPPING_POLICY_VERSION_CONFLICT));
+            .isInstanceOf(DataIntegrityViolationException.class)
+            .hasMessageContaining("uk_shipping_policy_scope");
 
         assertThat(count("shipping_policy")).isEqualTo(1L);
         assertThat(count("shipping_policy_history")).isEqualTo(1L);
