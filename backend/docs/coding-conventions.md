@@ -137,7 +137,13 @@ public record ProductDetailResponse(
     `VirtualMachineError` 는 삼키지 않는다. Tomcat 로거 레벨로 끄지 않는다 — 로거 이름이 서블릿 이름에 묶여 깨지기 쉽고, 다른 진단까지 사라진다.
     서비스 필터는 `Ordered.HIGHEST_PRECEDENCE` 를 쓰지 않는다 — 같은 순서면 이 필터 바깥에 놓일 수 있다.
     MockMvc 는 에러 디스패치를 하지 않으므로 `@SpringBootTest` + MockMvc 에서 필터 예외는 예외가 아니라 본문 없는 500 으로 보인다 — 원인은 컨테이너 테스트로 본다.
-  - 남은 경로: 게이트웨이 500 로그는 원래 예외 · 원문 경로를 남긴다(#285). ASYNC 디스패치(비동기 MVC) 중의 필터 예외는 여전히 Tomcat 이 메시지째 남긴다 —
+  - 게이트웨이 500 · 커밋 뒤 오류도 같은 기준이다(#285 · #291). 예외는 common-core `RedactedThrowable.of`, 경로는 서블릿에 의존하지 않는 `LogPathMask`(앞 3구간, 남기는 구간의 `;` 는 `;…`)를
+    폴백 · `SecurityErrorResponder` · 게이트웨이가 같이 쓴다. 응답이 이미 커밋됐으면(하류가 본문 스트리밍 중 연결을 끊는 경우) 원래 예외를 다시 던지지 않고 그 사본을 흘린다.
+    실측: 그 상황에서 `Operators.onErrorDropped` 기본 로그(`Operator called default onErrorDropped`)는 나지 않았다. reactor-netty `HttpServerOperations` 는
+    `Error finishing response. Closing connection` 을 ERROR 로 남겼고, 원래 예외를 흘리면 스택 체크포인트에 원문 경로 · 쿼리가 붙었다. 사본을 흘리면 그 줄의 예외는
+    `RedactedThrowable` 이고 경로 · 쿼리 · 원래 메시지는 없다. `Hooks.onErrorDropped` 는 이 로거를 바꾸지 못하므로 걸지 않는다.
+    `HttpWebHandlerAdapter` 는 원래 예외 · 원문 경로 · 쿼리를 찍으므로 끈다.
+  - 남은 경로: ASYNC 디스패치(비동기 MVC) 중의 필터 예외는 여전히 Tomcat 이 메시지째 남긴다 —
     지금 서비스는 비동기 MVC 를 쓰지 않는다. 쓰기 시작하면 이 필터의 ASYNC 디스패치 처리를 함께 정한다.
 
 ### 8-1. 예외 패턴 (필수)

@@ -51,6 +51,7 @@ class SecurityErrorResponderTest {
         "/internal/v1/__security-smoke | /internal/v1/__security-smoke",
         "/api/v1/smoke | /api/v1/smoke",
         "/internal/v1/orders/ | /internal/v1/orders/",
+        "/api/v1/admin;jsessionid=x/y | /api/v1/admin;…/…",
         "/ | /"
     })
     @DisplayName("로그 경로는 앞 세 구간만 남기고 나머지를 /… 로 가린다 — 경로의 주문번호 같은 식별자를 남기지 않는다")

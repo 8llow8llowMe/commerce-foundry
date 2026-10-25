@@ -193,7 +193,8 @@ return ResponseEntity.ok().body(Response.success(response));
   역슬래시, 제어문자가 있으면 라우팅 전에 끊는다. 쿼리 문자열은 보지 않는다. 정상 클라이언트는 이런 경로를 만들지 않는다.
 - 허용 메서드는 `GET` · `HEAD` · `POST` · `PUT` · `PATCH` · `DELETE` · `OPTIONS` 다. `TRACE` · `CONNECT` 등은 405 다.
 - 응답 본문에 예외 메시지·스택을 싣지 않는다. 경로·라우트·예외 타입은 게이트웨이 로그에만 남는다 — 경로는 서비스와 같이 앞 3구간만(`;` 매트릭스 파라미터도 `;…`),
-  500 · 응답 커밋 뒤 오류는 원인 사슬의 예외 타입 · 스택 프레임만 남기고 예외 메시지는 남기지 않는다(`GatewayLogRedaction`, `coding-conventions.md` §8 "5xx 의 원인을 로그에 남기는 기준", #285).
+  500 · 응답 커밋 뒤 오류는 원인 사슬의 예외 타입 · 스택 프레임만 남기고 예외 메시지는 남기지 않는다(`RedactedThrowable` · `LogPathMask`, `coding-conventions.md` §8 "5xx 의 원인을 로그에 남기는 기준", #285 · #291).
+  커밋 뒤에도 원래 예외를 다시 던지지 않는다 — reactor-netty 가 그 예외의 체크포인트(원문 경로 · 쿼리)를 ERROR 로 남긴다.
   원래 예외 · 원문 경로 · 쿼리를 찍는 프레임워크 로거(`HttpWebHandlerAdapter`)는 끈다. 예외 — 요청 가드의 경로 규칙 위반 · internal 경로 거절은 공격 문자열이 판단 근거라 원문(200자까지, DEBUG)을 남긴다.
 - 허용되지 않은 origin 은 preflight 뿐 아니라 **실제 요청도** 라우팅 전에 봉투 없이 `403` 으로 거부된다(브라우저가 막는 응답이다).
   허용 목록에 없는 요청 헤더를 쓴 preflight 도 `403` 이다.

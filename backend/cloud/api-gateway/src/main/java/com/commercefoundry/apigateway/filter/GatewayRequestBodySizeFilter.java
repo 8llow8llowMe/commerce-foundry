@@ -2,7 +2,7 @@ package com.commercefoundry.apigateway.filter;
 
 import com.commercefoundry.apigateway.exception.GatewayErrorCode;
 import com.commercefoundry.apigateway.handler.GatewayErrorResponseWriter;
-import com.commercefoundry.apigateway.log.GatewayLogRedaction;
+import com.commercefoundry.common.log.LogPathMask;
 import com.commercefoundry.apigateway.properties.GatewayRequestBodyProperties;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -235,9 +235,9 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
         return errorResponseWriter.write(exchange.getResponse(), status, errorCode);
     }
 
-    /** 가린 경로(앞 3구간 — {@link GatewayLogRedaction#maskPath}). 남기는 구간이 길면 자른다. 거절 사유가 본문이라 경로 원문은 판단에 필요 없다. */
+    /** 가린 경로(앞 3구간 — {@link LogPathMask}). 남기는 구간이 길면 자른다. 거절 사유가 본문이라 경로 원문은 판단에 필요 없다. */
     private static String loggablePath(ServerHttpRequest request) {
-        String path = GatewayLogRedaction.maskPath(request.getPath().value());
+        String path = LogPathMask.mask(request.getPath().value());
         return path.length() <= LOG_PATH_MAX_LENGTH ? path : path.substring(0, LOG_PATH_MAX_LENGTH) + "...(length=" + path.length() + ")";
     }
 

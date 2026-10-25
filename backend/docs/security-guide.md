@@ -614,7 +614,7 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
   거부 로그에는 호출 서비스 · jti 를 남긴다. 서비스 토큰 원문 · 비밀 · 비밀에서 계산한 값(지문)은 남기지 않는다.
 - internal 체인의 006 은 **error** 다 — 서비스 토큰 검증은 메모리의 비밀만 써서 저장소 장애가 있을 수 없다. 나면 서버 결함 신호다(사용자 체인의 006 은 warn).
 - 보안 거부 로그의 경로는 **앞 세 구간만** 남기고 나머지를 가린다 — `/internal/v1/orders/4611686018427387904` → `/internal/v1/orders/…`.
-  internal · 고객 경로에 주문번호 같은 식별자가 들어가기 때문이다 (`SecurityErrorResponder#maskPath`, 게이트웨이는 `GatewaySecurityErrorResponder#maskPath` — 같은 규칙).
+  internal · 고객 경로에 주문번호 같은 식별자가 들어가기 때문이다. 구현은 common-core `LogPathMask` 이고 `SecurityErrorResponder#maskPath` · 게이트웨이가 같이 쓴다 — 남기는 구간의 `;` 도 `;…` 다(#291).
 - 게이트웨이의 거부 로그 수준은 서비스와 같다 — 001 · 002 · 003 · 004 는 debug, 006 은 warn, 로그인한 회원의 005 는 info(memberId · jti).
 - **차단 목록 fail-open 통과 로그**(§7-1)는 warn 이지만 **1분에 한 번만** warn 이고 나머지는 debug 다 — 장애 동안 토큰 붙은 요청마다 warn 을 쓰면 로그가 폭주한다.
   jti · 메서드 · 마스킹 경로 · 예외 타입만 남긴다(`revocation list unavailable, token passed (fail-open)`). 어드민 경로의 006 은 응답 로그(warn)로 남는다.
