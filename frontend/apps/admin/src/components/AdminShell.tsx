@@ -15,6 +15,10 @@ const NAV: NavGroup[] = [
     ],
   },
   {
+    title: '전시 관리',
+    items: [{ label: '메인', href: '/displays/main' }],
+  },
+  {
     title: '배송',
     items: [
       { label: '국내 배송비 정책', href: '/shipping-policies/domestic' },
