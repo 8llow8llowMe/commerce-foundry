@@ -63,6 +63,18 @@ describe('ProductCard', () => {
     expect(single).toContain('group-hover:scale-[1.03]');
   });
 
+  it('판매중이 아니면 두 번째 이미지도 흐리게(60%)만 바꾼다 — 100% 와 같이 붙지 않는다', () => {
+    const second = { ...product().thumbnail!, imageId: '2', url: 'https://img.test/2.jpg' };
+    const html = render({
+      hoverImage: second,
+      saleStatus: { code: 'SOLD_OUT', name: '품절', description: '' },
+    });
+    const hover = html.match(/<img[^>]*src="https:\/\/img.test\/2.jpg"[^>]*>/)?.[0] ?? '';
+    expect(hover).toContain('group-hover:opacity-60');
+    expect(hover).toContain('group-focus-visible:opacity-60');
+    expect(hover).not.toContain('opacity-100');
+  });
+
   it('대표 이미지가 없으면 두 번째 이미지도 쓰지 않는다', () => {
     const html = render({ thumbnail: null, hoverImage: product().thumbnail });
     expect(html).not.toContain('<img');

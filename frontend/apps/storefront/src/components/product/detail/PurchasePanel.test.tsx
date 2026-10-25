@@ -201,6 +201,11 @@ describe('PurchasePanel 모바일 구매 바텀시트', () => {
     const html = render();
     const body = sheet(html);
     expect(body).not.toContain(' open=""');
+    // 여백은 안쪽 wrapper 에 — dialog 자신을 누른 것만 배경 클릭으로 닫는다
+    const dialogTag = body.match(/<dialog[^>]*>/)?.[0] ?? '';
+    expect(dialogTag).toMatch(/class="[^"]*\bp-0\b/);
+    expect(dialogTag).not.toMatch(/\sp[xytb]-/);
+    expect(dialogTag).toContain('overscroll-contain');
     expect(body).toContain('lg:hidden');
     expect(body).toContain('aria-label="옵션 선택 닫기"');
     expect(body).toContain('윤금 드레스');
