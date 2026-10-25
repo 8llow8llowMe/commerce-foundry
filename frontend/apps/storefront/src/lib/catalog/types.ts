@@ -51,6 +51,8 @@ export type ProductListItem = {
   hasOptionSurcharge: boolean;
   saleStatus: SaleStatus;
   customOrder: boolean;
+  /** 프리오더(예약 판매) 상품인가. 스토어 프리오더 기능이 꺼져 있으면 false. 발송 예정일은 상세에만 온다 */
+  preorder: boolean;
 };
 
 // GET /api/v1/products/{productId}. 없거나 숨긴 상품은 404 PRODUCT_001 이다.
@@ -60,8 +62,24 @@ export type CategoryPathItem = {
   name: string;
 };
 
+/** 상세 갤러리 미디어 종류. 화면 분기용 제어 코드라 metadata 객체가 아니라 문자열이다(BE api-design-guide §2-7) */
+export type ProductMediaType = 'IMAGE' | 'VIDEO';
+
+/**
+ * 상세 갤러리 미디어 하나. 스토어 영상 기능이 켜져 있으면 이미지와 영상이 노출 순서로 섞여 온다.
+ * VIDEO 의 url 은 영상 파일, posterUrl 은 재생 전 정지 이미지다(우리 스토리지 URL 만 온다).
+ */
 export type ProductImage = ProductThumbnail & {
+  mediaType: ProductMediaType;
+  /** VIDEO 의 포스터 이미지 URL. IMAGE 면 null */
+  posterUrl: string | null;
   displayOrder: number;
+};
+
+/** 프리오더(예약 판매) 안내. 판매 · 재고 판정은 일반 상품과 같고, 화면에 발송 예정 안내만 더한다 */
+export type Preorder = {
+  /** 발송 예정일 `yyyy-MM-dd`(순차 발송 시작일, 스토어 현지 날짜). null 이면 '발송일 추후 안내' */
+  expectedShipDate: string | null;
 };
 
 export type ProductOptionValue = {
@@ -114,7 +132,7 @@ export type ProductDetail = {
   /** 최상위 → 대표 카테고리 */
   categoryPath: CategoryPathItem[];
   thumbnail: ProductThumbnail | null;
-  /** 갤러리 이미지, 노출 순서 */
+  /** 갤러리 이미지 · 영상, 노출 순서. 대표 이미지는 들어가지 않는다 */
   images: ProductImage[];
   /** 서버가 정제하지 않은 원문 — 반드시 sanitizeProductHtml 을 거쳐 넣는다 */
   descriptionHtml: string | null;
@@ -128,6 +146,8 @@ export type ProductDetail = {
   skus: ProductSku[];
   /** 맞춤 제작 상품이 아니거나 스토어 기능이 꺼져 있으면 null */
   customOrder: CustomOrder | null;
+  /** 프리오더 상품이 아니거나 스토어 기능이 꺼져 있으면 null */
+  preorder: Preorder | null;
 };
 
 // GET /api/v1/products/{productId}/looks — 이 상품이 들어간 룩(Shop the Look). BE #62 초안 계약이다.

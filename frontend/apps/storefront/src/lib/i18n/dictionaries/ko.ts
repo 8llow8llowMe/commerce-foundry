@@ -138,6 +138,16 @@ export const ko = {
       closeZoom: '크게 보기 닫기',
       prev: '이전 이미지',
       next: '다음 이미지',
+      /** 착용 영상 — 포스터를 누르면 재생한다. {alt}: 대체 텍스트 */
+      play: '{alt} 영상 재생',
+      video: '{alt} 영상',
+    },
+    /** 프리오더(예약 판매). 목록 카드는 가격 줄 뒤 글자, 상세 · 장바구니는 발송 예정 안내 */
+    preorder: {
+      label: '프리오더',
+      /** {date}: 로케일 날짜(예: 11월 20일) */
+      shipsFrom: '프리오더 · {date}부터 순차 발송',
+      shipDateTbd: '프리오더 · 발송일 추후 안내',
     },
     purchase: {
       selectOptions: '옵션을 선택해 주세요.',

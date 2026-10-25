@@ -47,6 +47,7 @@ const product = (overrides: Partial<PurchaseProduct> = {}): PurchaseProduct => (
   ],
   skus: [sku('s', ['s'], 0), sku('m', ['m'], 0, 'SOLD_OUT'), sku('l', ['l'], 10000)],
   customOrder: null,
+  preorder: null,
   ...overrides,
 });
 
@@ -162,7 +163,11 @@ describe('PurchasePanel (첫 렌더)', () => {
 });
 
 describe('PurchasePanel 배송 안내', () => {
-  const delivery: DeliveryNote = { lines: ['배송비 3,000원', '50,000원 이상 구매 시 무료배송'] };
+  const delivery: DeliveryNote = {
+    preorder: null,
+    lines: ['배송비 3,000원', '50,000원 이상 구매 시 무료배송'],
+  };
+  const preorder: DeliveryNote = { ...delivery, preorder: '프리오더 · 11월 20일부터 순차 발송' };
 
   it('가격 바로 아래(옵션 위)에 안내 줄을 모두 보이고, 하단 바에는 첫 줄만 보인다', () => {
     const html = render({}, delivery);
@@ -173,6 +178,43 @@ describe('PurchasePanel 배송 안내', () => {
     const bottom = bar(html);
     expect(bottom).toContain('>배송비 3,000원</span>');
     expect(bottom).not.toContain('무료배송');
+  });
+
+  it('일반 상품은 배경 톤 블록(bg-accent) 없이 배송비 줄만 보인다', () => {
+    const html = render({}, delivery);
+    expect(html).not.toContain('bg-accent');
+    expect(html).not.toContain('프리오더');
+  });
+
+  it('프리오더면 가격 바로 아래에 발송 예정을 배경 톤으로 구분해 보이고, 배송비 줄은 그대로 둔다', () => {
+    const html = render({ preorder: { expectedShipDate: '2026-11-20' } }, preorder);
+    const panel = html.slice(0, html.indexOf('fixed inset-x-0'));
+    const note = panel.indexOf(
+      '<p class="mt-1 bg-accent px-4 py-3 text-sm text-accent-fg">프리오더 · 11월 20일부터 순차 발송</p>',
+    );
+    expect(note).toBeGreaterThan(panel.indexOf('129,000원'));
+    expect(note).toBeLessThan(panel.indexOf('<li>배송비 3,000원</li>'));
+    expect(panel.indexOf('<li>배송비 3,000원</li>')).toBeLessThan(panel.indexOf('type="radio"'));
+  });
+
+  it('프리오더면 하단 바 한 줄은 배송비 대신 발송 예정이고, 바텀시트에도 보인다', () => {
+    const html = render({ preorder: { expectedShipDate: null } }, preorder);
+    const bottom = bar(html);
+    expect(bottom).toContain('>프리오더 · 11월 20일부터 순차 발송</span>');
+    expect(bottom).not.toContain('배송비 3,000원');
+    expect(sheet(html)).toContain(
+      '<p class="mt-4 bg-accent px-4 py-3 text-sm text-accent-fg">프리오더 · 11월 20일부터 순차 발송</p>',
+    );
+  });
+
+  it('일반 상품은 바텀시트에 발송 예정 블록이 없다', () => {
+    expect(sheet(render({}, delivery))).not.toContain('bg-accent');
+  });
+
+  it('배송비 정책이 없어도 프리오더 안내는 보인다', () => {
+    const html = render({}, { preorder: '프리오더 · 발송일 추후 안내', lines: [] });
+    expect(html).toContain('프리오더 · 발송일 추후 안내');
+    expect(html).not.toContain('<ul class="flex flex-col gap-1 text-sm text-muted-fg">');
   });
 
   it('안내가 없으면 줄을 그리지 않는다', () => {

@@ -66,6 +66,7 @@ const product = (overrides: Partial<ProductDetail> = {}): ProductDetail => ({
   optionGroups: GROUPS,
   skus: SKUS,
   customOrder: null,
+  preorder: null,
   ...overrides,
 });
 

@@ -21,6 +21,7 @@ const product = (overrides: Partial<ProductListItem> = {}): ProductListItem => (
   hasOptionSurcharge: false,
   saleStatus: { code: 'ON_SALE', name: '판매중', description: '구매할 수 있습니다.' },
   customOrder: false,
+  preorder: false,
   ...overrides,
 });
 
@@ -105,6 +106,31 @@ describe('ProductCard', () => {
     expect(html).toContain('<span class="text-muted-fg">· 품절</span>');
     expect(html).not.toContain('absolute top-3');
     expect(render()).not.toContain('판매중');
+  });
+
+  it('프리오더 상품은 가격 줄 뒤에 프리오더를 글자로 붙인다(pill · 이미지 위 뱃지 없음)', () => {
+    const html = render({ preorder: true }).replaceAll('<!-- -->', '');
+    expect(html).toContain('<span>· 프리오더</span>');
+    expect(html).not.toContain('rounded');
+    expect(render()).not.toContain('프리오더');
+  });
+
+  it('프리오더여도 살 수 없으면 판매 상태만 보인다', () => {
+    const html = render({
+      preorder: true,
+      saleStatus: { code: 'SOLD_OUT', name: '품절', description: '' },
+    }).replaceAll('<!-- -->', '');
+    expect(html).toContain('· 품절');
+    expect(html).not.toContain('프리오더');
+  });
+
+  it('영문 스토어는 프리오더를 영문으로 붙인다', () => {
+    const html = renderToStaticMarkup(
+      <LocaleProvider locale="en" prefix="/en" dict={en}>
+        <ProductCard product={product({ preorder: true })} />
+      </LocaleProvider>,
+    ).replaceAll('<!-- -->', '');
+    expect(html).toContain('<span>· Pre-order</span>');
   });
 
   it('영문 스토어는 /en 링크 · 통화 기호 금액 · 영문 스크린리더 문구다', () => {

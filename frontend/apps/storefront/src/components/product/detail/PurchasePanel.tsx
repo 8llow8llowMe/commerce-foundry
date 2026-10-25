@@ -9,7 +9,7 @@ import {
   selectOption,
   type OptionSelection,
 } from '@/lib/catalog/option-selection';
-import type { DeliveryNote } from '@/lib/catalog/delivery-note';
+import { deliveryHeadline, type DeliveryNote } from '@/lib/catalog/delivery-note';
 import { purchaseTarget } from '@/lib/catalog/purchase-target';
 import type { ProductDetail } from '@/lib/catalog/types';
 import { useDictionary, useFormatMoney } from '@/components/i18n/LocaleProvider';
@@ -31,6 +31,8 @@ const QUANTITY_CAP = 99;
  * 담은 뒤에는 버튼 아래에 결과와 장바구니 링크를 보인다. 입력값이 상품 정의에 맞는지는 주문 생성이 본다.
  *
  * 모바일에서는 갤러리가 첫 화면을 차지하므로 하단에 가격 · 배송 안내 + 구매 버튼 바를 고정한다(#60).
+ * 프리오더 상품은 가격 아래 · 하단 바 · 바텀시트에 발송 예정 안내를 보인다 — 가격 아래와 시트에서는 배경 톤(`bg-accent`)으로
+ * 일반 배송 안내와 구분한다. 판매 · 재고 판정은 일반 상품과 같다(BE #61).
  * 패널의 담기 버튼이 보이면 바를 숨긴다. 바의 구매하기는 옵션 · 수량 · 담기를 담은 바텀시트(<dialog>)를 연다 —
  * 시트와 패널은 같은 선택 상태를 쓴다. 맞춤 제작 상품은 입력칸이 길어 시트 대신 패널로 스크롤한다.
  */
@@ -39,7 +41,7 @@ export function PurchasePanel({
   delivery = null,
 }: {
   product: PurchaseProduct;
-  /** 가격 아래 배송 안내. 첫 줄은 하단 구매 바에도 보인다 */
+  /** 가격 아래 배송 안내(프리오더 발송 예정 + 배송비). 대표 한 줄은 하단 구매 바에도 보인다 */
   delivery?: DeliveryNote | null;
 }) {
   const groups = product.optionGroups;
@@ -110,6 +112,7 @@ export function PurchasePanel({
   const price = displayPrice(product, sku);
   const maxQuantity = product.maxQuantityPerOrder ?? QUANTITY_CAP;
   const productOnSale = product.saleStatus.code === 'ON_SALE';
+  const headline = delivery ? deliveryHeadline(delivery) : null;
   const openPurchase = () => {
     if (purchaseTarget(product) === 'panel') return goToPanel();
     sheetRef.current?.showModal();
@@ -237,7 +240,11 @@ export function PurchasePanel({
             </del>
           )}
         </p>
-        {delivery && (
+        {delivery?.preorder && (
+          // 일반 배송 안내와 배경 톤 한 단계로 구분한다(#60 — 테두리 · 뱃지 금지)
+          <p className="mt-1 bg-accent px-4 py-3 text-sm text-accent-fg">{delivery.preorder}</p>
+        )}
+        {delivery && delivery.lines.length > 0 && (
           <ul className="flex flex-col gap-1 text-sm text-muted-fg">
             {delivery.lines.map((line) => (
               <li key={line}>{line}</li>
@@ -287,8 +294,15 @@ export function PurchasePanel({
       >
         <p className="min-w-0 flex-1 text-sm">
           <span className="block">{priceText}</span>
-          {delivery && (
-            <span className="block truncate text-xs text-muted-fg">{delivery.lines[0]}</span>
+          {headline && (
+            <span
+              className={cx(
+                'block truncate text-xs',
+                delivery?.preorder ? 'text-fg' : 'text-muted-fg',
+              )}
+            >
+              {headline}
+            </span>
           )}
         </p>
         <Button
@@ -326,6 +340,9 @@ export function PurchasePanel({
               <CloseIcon />
             </button>
           </div>
+          {delivery?.preorder && (
+            <p className="mt-4 bg-accent px-4 py-3 text-sm text-accent-fg">{delivery.preorder}</p>
+          )}
           <div className="mt-6 flex flex-col gap-6">
             <OptionGroupsField
               groups={groups}

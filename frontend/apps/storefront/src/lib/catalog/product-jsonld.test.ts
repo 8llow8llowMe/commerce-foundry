@@ -17,8 +17,8 @@ const product = (overrides: Partial<ProductDetail> = {}): ProductDetail => ({
   categoryPath: [],
   thumbnail: image('main'),
   images: [
-    { ...image('main'), displayOrder: 0 },
-    { ...image('back'), displayOrder: 1 },
+    { ...image('main'), mediaType: 'IMAGE', posterUrl: null, displayOrder: 0 },
+    { ...image('back'), mediaType: 'IMAGE', posterUrl: null, displayOrder: 1 },
   ],
   descriptionHtml: null,
   salePrice: { amount: 429000, currency: 'KRW' },
@@ -29,6 +29,7 @@ const product = (overrides: Partial<ProductDetail> = {}): ProductDetail => ({
   optionGroups: [],
   skus: [],
   customOrder: null,
+  preorder: null,
   ...overrides,
 });
 
@@ -48,6 +49,25 @@ describe('productJsonLd', () => {
         availability: 'https://schema.org/OutOfStock',
       },
     });
+  });
+
+  it('영상(VIDEO)은 이미지 목록에 넣지 않는다', () => {
+    const data = JSON.parse(
+      productJsonLd(
+        product({
+          images: [
+            {
+              ...image('video'),
+              url: 'https://img.test/video.mp4',
+              mediaType: 'VIDEO',
+              posterUrl: 'https://img.test/poster.jpg',
+              displayOrder: 0,
+            },
+          ],
+        }),
+      ),
+    );
+    expect(data.image).toEqual(['https://img.test/main.jpg']);
   });
 
   it('요약 · 이미지가 없으면 그 필드를 빼고, USD 는 소수로 쓴다', () => {

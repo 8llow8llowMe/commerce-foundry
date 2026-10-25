@@ -9,6 +9,7 @@ import { PurchasePanel, type PurchaseProduct } from '@/components/product/detail
 import { ProductLooks } from '@/components/product/look/ProductLooks';
 import { deliveryNote } from '@/lib/catalog/delivery-note';
 import { loadShippingNotice } from '@/lib/catalog/load-shipping-notice';
+import { preorderNote } from '@/lib/catalog/preorder';
 import { productJsonLd } from '@/lib/catalog/product-jsonld';
 import { shopHref } from '@/lib/catalog/shop-query';
 import type { ProductDetail } from '@/lib/catalog/types';
@@ -59,7 +60,7 @@ export async function generateMetadata({
 
 export default async function ProductPage({ params }: PageProps<'/[locale]/products/[productId]'>) {
   const { productId } = await params;
-  const { href, dict, content } = await getI18n();
+  const { href, dict, content, locale } = await getI18n();
   // 상품과 함께 읽는다 — 실패해도 null 이라 상품 화면을 막지 않는다
   const shippingNotice = loadShippingNotice();
 
@@ -83,6 +84,11 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
   const { descriptionHtml, images, categoryPath, ...purchase } = product;
   const purchaseProduct: PurchaseProduct = purchase;
   const shipping = await shippingNotice;
+  // 프리오더 발송 예정일은 서버에서 문구로 만든다 — 올해 여부(연도 표시)를 서버 시계 하나로 정한다
+  const delivery = deliveryNote(
+    shipping,
+    preorderNote(product.preorder, locale, dict.product.preorder, new Date()),
+  );
 
   return (
     // 모바일은 첫 화면에 사진 · 이름 · 가격 · 배송 안내가 함께 들어오도록 사진을 헤더 바로 아래에 붙이고
@@ -122,7 +128,7 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
           {product.summary && (
             <p className="hidden text-sm text-muted-fg lg:block">{product.summary}</p>
           )}
-          <PurchasePanel product={purchaseProduct} delivery={deliveryNote(shipping)} />
+          <PurchasePanel product={purchaseProduct} delivery={delivery} />
           {product.summary && <p className="text-sm text-muted-fg lg:hidden">{product.summary}</p>}
           <ProductInfoAccordion
             info={content.productInfo}
