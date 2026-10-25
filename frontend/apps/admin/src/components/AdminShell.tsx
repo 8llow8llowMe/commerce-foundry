@@ -31,7 +31,10 @@ const NAV: NavGroup[] = [
   },
   {
     title: '운영',
-    items: [{ label: '백그라운드 작업', href: '/jobs' }],
+    items: [
+      { label: '백그라운드 작업', href: '/jobs' },
+      { label: '관리자 감사 로그', href: '/audit-logs' },
+    ],
   },
 ];
 
