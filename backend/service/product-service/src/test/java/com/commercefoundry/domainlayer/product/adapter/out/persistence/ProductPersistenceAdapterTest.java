@@ -686,6 +686,9 @@ class ProductPersistenceAdapterTest {
         assertThat(chest.stepValue()).isEqualByComparingTo("0.5");
         assertThat(fields.get(0).minValue()).isNull();
         assertThat(productCustomOrderFieldRepositoryPort.findAllByProductId(101L)).isEmpty();
+        assertThat(productCustomOrderFieldRepositoryPort.findAllByProductIds(List.of())).isEmpty();
+        assertThat(productCustomOrderFieldRepositoryPort.findAllByProductIds(List.of(101L, 102L)))
+            .extracting(CustomOrderField::fieldKey).containsExactly("memo", "chest");
     }
 
     private void persistAll(Object... entities) {

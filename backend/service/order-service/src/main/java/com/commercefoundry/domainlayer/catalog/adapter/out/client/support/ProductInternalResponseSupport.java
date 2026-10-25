@@ -2,11 +2,14 @@ package com.commercefoundry.domainlayer.catalog.adapter.out.client.support;
 
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.dto.item.MoneyItem;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductCustomOrderFieldInternalItem;
 import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalItem;
 import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalResponse;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogErrorCode;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
 import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogCustomOrderField;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogCustomOrderInputType;
 import com.commercefoundry.global.support.RemoteResultCodes;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
@@ -93,7 +96,23 @@ public class ProductInternalResponseSupport {
             Long.parseLong(item.skuId()), Long.parseLong(item.productId()),
             Objects.requireNonNull(item.productName(), "productName"), Objects.requireNonNull(item.optionName(), "optionName"), toMoney(item.salePrice()),
             item.purchasable(), item.saleStatus() != null && SOLD_OUT.equals(item.saleStatus().code()),
-            item.maxQuantityPerOrder(), item.customOrder(), item.weightGrams(), item.hsCode());
+            item.maxQuantityPerOrder(), item.customOrder(), item.weightGrams(), item.hsCode(), toCustomOrderFields(item.customOrderFields()));
+    }
+
+    /** null 이면 아직 칸이 없는 응답이다 — 빈 목록으로 읽는다. 칸이 있는데 키가 비었거나 유형을 모르면 계약 위반이다. */
+    private static List<CatalogCustomOrderField> toCustomOrderFields(List<ProductCustomOrderFieldInternalItem> fields) {
+        if (fields == null) {
+            return List.of();
+        }
+        return fields.stream().map(ProductInternalResponseSupport::toCustomOrderField).toList();
+    }
+
+    private static CatalogCustomOrderField toCustomOrderField(ProductCustomOrderFieldInternalItem field) {
+        if (field == null || field.fieldKey() == null || field.fieldKey().isBlank() || field.inputType() == null) {
+            throw new IllegalArgumentException("customOrderField");
+        }
+        return new CatalogCustomOrderField(
+            field.fieldKey(), CatalogCustomOrderInputType.valueOf(field.inputType()), field.required(), field.min(), field.max(), field.step());
     }
 
     private static Money toMoney(MoneyItem money) {

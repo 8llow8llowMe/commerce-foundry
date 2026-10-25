@@ -1,11 +1,14 @@
 package com.commercefoundry.domainlayer.product.application.service.processor;
 
+import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldDefinition;
 import com.commercefoundry.domainlayer.product.application.info.SkuInternalInfo;
 import com.commercefoundry.domainlayer.product.application.info.SkuOptionValueInfo;
+import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
@@ -18,6 +21,7 @@ import com.commercefoundry.global.properties.StoreProperties;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +34,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 서비스 간 SKU 벌크 조회 (주문 생성 · 장바구니 가격 확인). 쿼리는 SKU → 상품(숨김 포함) → 재고 → 옵션 값 → 옵션 그룹 5번이고 모두 in 절이다.
+ * 맞춤 제작 상품이 있으면 입력 항목을 상품 아이디 in 절로 한 번 더 읽는다. 없으면 그 쿼리를 보내지 않는다.
  *
  * <p>없는 아이디는 응답에서 뺀다 — 호출한 쪽이 누락을 보고 거절한다. 숨긴 상품의 SKU 도 행을 내리고 {@code purchasable=false} 로 알린다.
  *
@@ -55,6 +60,7 @@ public class SkuInternalProcessor {
     private final ProductRepositoryPort productRepositoryPort;
     private final StockRepositoryPort stockRepositoryPort;
     private final ProductOptionRepositoryPort productOptionRepositoryPort;
+    private final ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
     private final StoreProperties storeProperties;
 
     /**
@@ -78,6 +84,7 @@ public class SkuInternalProcessor {
         Map<Long, OptionValue> valuesById = toMap(values, OptionValue::id);
         List<OptionGroup> groups = productOptionRepositoryPort.findGroupsByIds(distinct(values, value -> List.of(value.optionGroupId())));
         Map<Long, OptionGroup> groupsById = toMap(groups, OptionGroup::id);
+        Map<Long, List<CustomOrderFieldDefinition>> fieldsByProductId = loadCustomOrderFields(products);
 
         List<SkuInternalInfo> infos = new ArrayList<>();
         for (Long skuId : distinctIds) {
@@ -91,13 +98,37 @@ public class SkuInternalProcessor {
                 log.warn("sku product missing. skuId={}, productId={}", sku.id(), sku.productId());
                 continue;
             }
-            infos.add(toInfo(sku, product, stocks.snapshotOf(sku.id()), resolveOptions(sku, valuesById, groupsById)));
+            infos.add(toInfo(sku, product, stocks.snapshotOf(sku.id()), resolveOptions(sku, valuesById, groupsById), fieldsByProductId));
         }
         return infos;
     }
 
-    private SkuInternalInfo toInfo(Sku sku, Product product, StockSnapshot stock, List<ResolvedOption> options) {
+    /** 맞춤 제작이 켜진 상품만. 상품 아이디로 한 번 읽고 SKU 마다 읽지 않는다. */
+    private Map<Long, List<CustomOrderFieldDefinition>> loadCustomOrderFields(List<Product> products) {
+        if (!storeProperties.features().customOrder()) {
+            return Map.of();
+        }
+        Set<Long> productIds = products.stream().filter(Product::customOrder).map(Product::id).collect(Collectors.toCollection(LinkedHashSet::new));
+        if (productIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<CustomOrderFieldDefinition>> fieldsByProductId = new LinkedHashMap<>();
+        for (CustomOrderField field : productCustomOrderFieldRepositoryPort.findAllByProductIds(productIds)) {
+            fieldsByProductId.computeIfAbsent(field.productId(), id -> new ArrayList<>()).add(toFieldDefinition(field));
+        }
+        return fieldsByProductId;
+    }
+
+    private static CustomOrderFieldDefinition toFieldDefinition(CustomOrderField field) {
+        return new CustomOrderFieldDefinition(
+            field.fieldKey(), field.inputType(), field.required(), field.minValue(), field.maxValue(), field.stepValue());
+    }
+
+    private SkuInternalInfo toInfo(
+        Sku sku, Product product, StockSnapshot stock, List<ResolvedOption> options, Map<Long, List<CustomOrderFieldDefinition>> fieldsByProductId
+    ) {
         SaleAvailability saleStatus = SaleAvailability.ofSku(product.saleStatus(), sku.saleStatus(), stock);
+        boolean customOrder = storeProperties.features().customOrder() && product.customOrder();
         return SkuInternalInfo.builder()
             .skuId(sku.id())
             .productId(product.id())
@@ -109,7 +140,8 @@ public class SkuInternalProcessor {
             .saleStatus(saleStatus)
             .purchasable(SaleAvailability.isPurchasable(product, sku, stock))
             .maxQuantityPerOrder(product.maxQuantityPerOrder())
-            .customOrder(storeProperties.features().customOrder() && product.customOrder())
+            .customOrder(customOrder)
+            .customOrderFields(customOrder ? fieldsByProductId.getOrDefault(product.id(), List.of()) : List.of())
             .weightGrams(sku.weightGrams())
             .hsCode(sku.hsCode())
             .build();

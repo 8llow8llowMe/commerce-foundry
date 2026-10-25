@@ -33,7 +33,8 @@ public class OrderQuoteWebController {
     @Operation(
         summary = "주문서 금액 미리보기",
         description = "저장하지 않는 계산이다 — 상품 현재 판매가 × 수량 합계와 배송비(delivery-service 정책)로 결제 금액을 낸다. 주문 생성과 같은 계산이다. "
-            + "없는 SKU 404(ORDER_003), 품절 · 판매 종료 409(ORDER_004), 맞춤 제작이 아닌데 입력 400(ORDER_005), 상품별 수량 상한 초과 409(ORDER_006), "
+            + "없는 SKU 404(ORDER_003), 품절 · 판매 종료 409(ORDER_004), 맞춤 제작이 아닌데 입력 400(ORDER_005), "
+            + "맞춤 제작 입력이 항목 정의와 다르면 400(ORDER_132~137, fieldErrors 의 field 는 items[i].customOptions[j].value), 상품별 수량 상한 초과 409(ORDER_006), "
             + "통화 혼합 409(ORDER_007), 해외 배송 정보(무게 · HS 코드) 없는 상품 409(ORDER_008), 배송비 정책 없음 409(ORDER_012), 배송할 수 없는 국가 400(ORDER_013), "
             + "통화 · 배송지 불일치 400(ORDER_014), 무게 초과 400(ORDER_015), 상품 · 배송 서비스 장애 503(ORDER_002 · ORDER_011)."
     )

@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.product.adapter.out.persistence.repositor
 import com.commercefoundry.domainlayer.product.application.mapper.ProductCustomOrderFieldMapper;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
+import java.util.Collection;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -18,5 +19,14 @@ public class ProductCustomOrderFieldRepositoryAdapter implements ProductCustomOr
     @Override
     public List<CustomOrderField> findAllByProductId(long productId) {
         return productCustomOrderFieldMapper.toDomains(productCustomOrderFieldRepository.findAllByProductIdOrderByDisplayOrderAscIdAsc(productId));
+    }
+
+    @Override
+    public List<CustomOrderField> findAllByProductIds(Collection<Long> productIds) {
+        if (productIds.isEmpty()) {
+            return List.of();
+        }
+        return productCustomOrderFieldMapper.toDomains(
+            productCustomOrderFieldRepository.findAllByProductIdInOrderByProductIdAscDisplayOrderAscIdAsc(productIds));
     }
 }

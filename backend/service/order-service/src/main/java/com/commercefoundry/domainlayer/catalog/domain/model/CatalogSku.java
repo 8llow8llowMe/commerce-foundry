@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.catalog.domain.model;
 
 import com.commercefoundry.shared.commerce.Money;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -16,14 +17,26 @@ import java.util.Objects;
  * @param weightGrams SKU 단위 무게(그램). null 이면 미입력이다 — 해외 주문이면 order 가 거절하고, 국내 주문은 보지 않는다 ({@code order-flow-guide.md} §2-2, #80).
  *     SKU 조회 경계에서는 값을 검증하지 않는다 — 1 미만은 계약 위반이며 해외 총 무게 계산(주문)에서 거절한다
  * @param hsCode 통관 HS 코드. null 이면 미입력이다 — {@code weightGrams} 와 같은 규칙이다
+ * @param customOrderFields 맞춤 제작 항목 정의. 맞춤 제작이 아니면 빈 목록
  */
 public record CatalogSku(
     long skuId, long productId, String productName, String optionName, Money salePrice,
     boolean purchasable, boolean soldOut, Integer maxQuantityPerOrder, boolean customOrder,
-    Integer weightGrams, String hsCode
+    Integer weightGrams, String hsCode, List<CatalogCustomOrderField> customOrderFields
 ) {
 
     public CatalogSku {
         Objects.requireNonNull(salePrice, "salePrice");
+        customOrderFields = customOrderFields == null ? List.of() : List.copyOf(customOrderFields);
+    }
+
+    /** 항목 정의가 없는 조회. 맞춤 제작 대조를 하지 않는 호출(장바구니)이 쓴다. */
+    public CatalogSku(
+        long skuId, long productId, String productName, String optionName, Money salePrice,
+        boolean purchasable, boolean soldOut, Integer maxQuantityPerOrder, boolean customOrder,
+        Integer weightGrams, String hsCode
+    ) {
+        this(skuId, productId, productName, optionName, salePrice, purchasable, soldOut, maxQuantityPerOrder, customOrder,
+            weightGrams, hsCode, List.of());
     }
 }

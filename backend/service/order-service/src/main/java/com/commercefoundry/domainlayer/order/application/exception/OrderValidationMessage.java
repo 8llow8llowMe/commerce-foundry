@@ -36,6 +36,18 @@ public final class OrderValidationMessage {
     public static final String EXPECTED_TOTAL_AMOUNT_REQUIRED = "ORDER_129:expectedTotalAmount 를 보낸다면 amount 는 필수입니다.";
     public static final String EXPECTED_TOTAL_AMOUNT_NON_NEGATIVE = "ORDER_130:expectedTotalAmount.amount 는 0 이상이어야 합니다.";
     public static final String EXPECTED_TOTAL_CURRENCY_REQUIRED = "ORDER_131:expectedTotalAmount 를 보낸다면 currency 는 필수입니다.";
+    /** 맞춤 제작 필수 항목이 요청에 없다. 입력값은 싣지 않는다. */
+    public static final String CUSTOM_ORDER_FIELD_REQUIRED = "ORDER_132:필수 입력입니다.";
+    /** 상품 항목 정의에 없는 fieldKey. */
+    public static final String CUSTOM_ORDER_FIELD_UNKNOWN = "ORDER_133:정의되지 않은 입력 항목입니다.";
+    /** NUMBER 항목인데 값이 숫자가 아니다. */
+    public static final String CUSTOM_ORDER_NUMBER_FORMAT = "ORDER_134:숫자를 입력해 주세요.";
+    /** NUMBER 최소 · 최대를 벗어났다. */
+    public static final String CUSTOM_ORDER_NUMBER_RANGE = "ORDER_135:허용 범위를 벗어났습니다.";
+    /** NUMBER 증분에 맞지 않는다. */
+    public static final String CUSTOM_ORDER_NUMBER_STEP = "ORDER_136:증분 단위에 맞지 않습니다.";
+    /** TEXT 최대 글자 수를 넘었다. */
+    public static final String CUSTOM_ORDER_TEXT_LENGTH = "ORDER_137:최대 글자 수를 넘었습니다.";
 
     private OrderValidationMessage() {
     }
