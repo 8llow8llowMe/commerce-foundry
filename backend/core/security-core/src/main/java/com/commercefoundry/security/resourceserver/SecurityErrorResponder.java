@@ -1,5 +1,6 @@
 package com.commercefoundry.security.resourceserver;
 
+import com.commercefoundry.common.log.LogPathMask;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.error.SecurityErrorEnvelope;
 import com.commercefoundry.security.error.SecurityErrorResolver;
@@ -8,7 +9,6 @@ import com.commercefoundry.security.principal.MemberPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -28,14 +28,10 @@ import org.springframework.security.web.access.AccessDeniedHandler;
  * {@link #forServiceAuthentication}(인증 실패 007)을 쓴다. 권한 거부(005)는 둘이 같다.
  *
  * <p>로그에는 코드 · 경로 · 예외 타입만 남긴다. 토큰 원문과 예외 메시지(토큰 조각이 섞일 수 있다)는 남기지 않는다.
- * 경로는 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남기고 나머지를 가린다({@link #maskPath}) — 주문번호 같은 식별자가 경로에 들어간다.
+ * 경로는 앞 {@value LogPathMask#VISIBLE_PATH_SEGMENTS} 구간만 남기고 나머지를 가린다({@link LogPathMask}) — 주문번호 같은 식별자가 경로에 들어간다.
  */
 @Slf4j
 public final class SecurityErrorResponder implements AuthenticationEntryPoint, AccessDeniedHandler {
-
-    /** 로그에 남기는 경로 구간 수. {@code /internal/v1/orders/4611686018427387904} → {@code /internal/v1/orders/…}. */
-    static final int VISIBLE_PATH_SEGMENTS = 3;
-    private static final String MASKED_REST = "/…";
 
     private final SecurityErrorEnvelope envelope;
     private final Function<AuthenticationException, SecurityErrorCode> authenticationFailureCode;
@@ -125,19 +121,9 @@ public final class SecurityErrorResponder implements AuthenticationEntryPoint, A
         }
     }
 
-    /**
-     * 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남기고 나머지를 {@code /…} 로 가린다. 쿼리 문자열은 원래 싣지 않는다({@code getRequestURI}).
-     * 구간이 그 이하면 그대로 둔다 — {@code /api/v1/admin/x} → {@code /api/v1/admin/…}, {@code /api/v1/smoke} → 그대로.
-     */
+    /** {@link LogPathMask} 로 가린다. 쿼리 문자열은 원래 싣지 않는다({@code getRequestURI}). */
     static String maskPath(String path) {
-        if (path == null) {
-            return null;
-        }
-        String[] parts = path.split("/", VISIBLE_PATH_SEGMENTS + 2);
-        if (parts.length < VISIBLE_PATH_SEGMENTS + 2 || parts[VISIBLE_PATH_SEGMENTS + 1].isEmpty()) {
-            return path;
-        }
-        return String.join("/", Arrays.copyOf(parts, VISIBLE_PATH_SEGMENTS + 1)) + MASKED_REST;
+        return LogPathMask.mask(path);
     }
 
     private static String maskedPath(HttpServletRequest request) {

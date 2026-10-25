@@ -3,10 +3,10 @@ package com.commercefoundry.common.web.servlet;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.exception.CommonErrorCode;
 import com.commercefoundry.common.exception.RedactedThrowable;
+import com.commercefoundry.common.log.LogPathMask;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.Arrays;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.http.HttpHeaders;
@@ -32,16 +32,11 @@ import tools.jackson.databind.json.JsonMapper;
  * 빈으로 등록하지 않는다 — 빈이면 {@code DispatcherServlet} 이 사슬 밖에서 한 번 더 찾아 순서가 흐려진다.
  *
  * <p>500 은 원인 · 스택을 응답에 싣지 않고 로그에만 남긴다. 로그에도 예외 메시지는 남기지 않고 원인 사슬의 타입 · 스택 프레임만 남긴다
- * ({@link RedactedThrowable}, #280). 로그 경로는 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남긴다 —
- * 주문번호 같은 식별자가 경로에 들어간다 (security-core {@code SecurityErrorResponder} 와 같은 규칙, {@code coding-conventions.md} §8).
+ * ({@link RedactedThrowable}, #280). 로그 경로는 앞 {@value LogPathMask#VISIBLE_PATH_SEGMENTS} 구간만 남긴다 —
+ * 주문번호 같은 식별자가 경로에 들어간다 (security-core {@code SecurityErrorResponder} · 게이트웨이와 같은 {@link LogPathMask}, {@code coding-conventions.md} §8).
  */
 @Slf4j
 public class FallbackErrorResolver implements HandlerExceptionResolver {
-
-    /** 로그에 남기는 경로 구간 수. {@code /api/v1/orders/4611686018427387904} → {@code /api/v1/orders/…}. */
-    static final int VISIBLE_PATH_SEGMENTS = 3;
-    private static final String MASKED_REST = "/…";
-    private static final String MASKED_PARAMETERS = ";…";
 
     private final JsonMapper jsonMapper;
 
@@ -129,25 +124,8 @@ public class FallbackErrorResolver implements HandlerExceptionResolver {
         response.flushBuffer();
     }
 
-    /**
-     * 앞 {@value #VISIBLE_PATH_SEGMENTS} 구간만 남기고 나머지를 {@code /…} 로 가린다. 쿼리 문자열은 원래 싣지 않는다({@code getRequestURI}).
-     * 남기는 구간도 {@code ;} 뒤(매트릭스 파라미터 — {@code jsessionid} · 방화벽이 거부한 경로의 공격 문자열)는 {@code ;…} 로 가린다.
-     * 구간이 그 이하면 매트릭스 파라미터만 가리고 그대로 둔다.
-     * {@code /api/v1/admin;jsessionid=x/y} → {@code /api/v1/admin;…/…}, {@code /api;x=y} → {@code /api;…}.
-     */
+    /** {@link LogPathMask} 로 가린다. MVC 밖 오류를 쓰는 {@link FallbackErrorController} 도 이 메서드를 쓴다. */
     static String maskPath(String path) {
-        if (path == null) {
-            return null;
-        }
-        String[] parts = path.split("/", VISIBLE_PATH_SEGMENTS + 2);
-        boolean hasRest = parts.length == VISIBLE_PATH_SEGMENTS + 2 && !parts[VISIBLE_PATH_SEGMENTS + 1].isEmpty();
-        String[] visible = hasRest ? Arrays.copyOf(parts, VISIBLE_PATH_SEGMENTS + 1) : parts;
-        for (int index = 0; index < visible.length; index++) {
-            int parameterStart = visible[index].indexOf(';');
-            if (parameterStart >= 0) {
-                visible[index] = visible[index].substring(0, parameterStart) + MASKED_PARAMETERS;
-            }
-        }
-        return String.join("/", visible) + (hasRest ? MASKED_REST : "");
+        return LogPathMask.mask(path);
     }
 }

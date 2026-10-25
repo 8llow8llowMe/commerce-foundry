@@ -2,7 +2,7 @@ package com.commercefoundry.apigateway.filter;
 
 import com.commercefoundry.apigateway.exception.GatewayErrorCode;
 import com.commercefoundry.apigateway.handler.GatewayErrorResponseWriter;
-import com.commercefoundry.apigateway.log.GatewayLogRedaction;
+import com.commercefoundry.common.log.LogPathMask;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -99,7 +99,7 @@ public class GatewayRequestGuardFilter implements WebFilter, Ordered {
 
         List<String> authorizations = request.getHeaders().get(HttpHeaders.AUTHORIZATION);
         if (authorizations != null && authorizations.size() > 1) {
-            log.debug("gateway request rejected. reason=multiple-authorization-headers, count={}, path={}", authorizations.size(), abbreviate(GatewayLogRedaction.maskPath(rawPath)));
+            log.debug("gateway request rejected. reason=multiple-authorization-headers, count={}, path={}", authorizations.size(), abbreviate(LogPathMask.mask(rawPath)));
             return errorResponseWriter.write(response, HttpStatus.BAD_REQUEST, GatewayErrorCode.BAD_REQUEST);
         }
         return chain.filter(exchange);

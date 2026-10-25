@@ -1,7 +1,8 @@
 package com.commercefoundry.apigateway.handler;
 
 import com.commercefoundry.apigateway.exception.GatewayErrorCode;
-import com.commercefoundry.apigateway.log.GatewayLogRedaction;
+import com.commercefoundry.common.exception.RedactedThrowable;
+import com.commercefoundry.common.log.LogPathMask;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import lombok.RequiredArgsConstructor;
@@ -29,8 +30,9 @@ import reactor.netty.http.client.PrematureCloseException;
  * <p>Boot 기본 핸들러({@code DefaultErrorWebExceptionHandler}, order -1)보다 먼저 받도록 -2 로 둔다.
  * 서비스가 돌려준 오류 응답은 예외가 아니라 그대로 중계되므로 이 핸들러를 지나지 않는다.
  *
- * <p>예외 메시지·스택은 응답에 싣지 않는다. 로그에는 메서드 · 가린 경로(앞 3구간) · 라우트 · 예외 타입을 남기고, 500 이면 타입 · 스택 프레임만 남은
- * 사본({@link GatewayLogRedaction#redact})을 더한다 — 원래 예외 메시지와 넷째 구간 이후 경로는 남기지 않는다 ({@code coding-conventions.md} §8, #285).
+ * <p>예외 메시지·스택은 응답에 싣지 않는다. 로그에는 메서드 · 가린 경로(앞 3구간, {@link LogPathMask}) · 라우트 · 예외 타입을 남기고, 500 이면 타입 · 스택 프레임만 남은
+ * 사본({@link RedactedThrowable#of})을 더한다 — 원래 예외 메시지와 넷째 구간 이후 경로는 남기지 않는다 ({@code coding-conventions.md} §8, #285 · #291).
+ * 응답이 이미 커밋됐으면 그 사본만 다시 던진다. 원래 예외를 흘리면 reactor-netty 가 체크포인트의 원문 경로 · 쿼리를 ERROR 로 남긴다.
  */
 @Slf4j
 @Component
@@ -47,10 +49,12 @@ public class GatewayErrorWebExceptionHandler implements ErrorWebExceptionHandler
     public Mono<Void> handle(ServerWebExchange exchange, Throwable ex) {
         ServerHttpResponse response = exchange.getResponse();
         if (response.isCommitted()) {
-            // 응답이 이미 나간 뒤의 오류(하류가 본문 도중 끊음 · 쓰기 실패)는 고칠 수 없다 — 가린 한 줄을 남기고 그대로 흘려 연결을 비정상 종료시킨다.
+            // 응답이 이미 나간 뒤의 오류(하류가 본문 도중 끊음 · 쓰기 실패)는 고칠 수 없다 — 가린 한 줄을 남기고 연결을 비정상 종료시킨다.
+            // 원래 예외를 다시 던지면 reactor-netty 가 그 사본(체크포인트의 원문 경로 · 쿼리)을 ERROR 로 남긴다(#291). 타입 · 프레임만 남은 사본을 흘린다.
             // 그다음 받는 HttpWebHandlerAdapter 는 원래 예외 메시지 · 원문 경로 · 쿼리를 ERROR 로 찍으므로 application.yml 에서 끈다
-            logCommittedFailure(exchange, ex);
-            return Mono.error(ex);
+            RedactedThrowable redacted = RedactedThrowable.of(ex);
+            logCommittedFailure(exchange, ex, redacted);
+            return Mono.error(redacted);
         }
 
         HttpStatusCode status = resolveStatus(ex);
@@ -122,25 +126,25 @@ public class GatewayErrorWebExceptionHandler implements ErrorWebExceptionHandler
         return false;
     }
 
-    private static void logCommittedFailure(ServerWebExchange exchange, Throwable ex) {
+    private static void logCommittedFailure(ServerWebExchange exchange, Throwable ex, RedactedThrowable redacted) {
         ServerHttpRequest request = exchange.getRequest();
         Route route = exchange.getAttribute(ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR);
         log.error("gateway response failed after commit. method={}, path={}, routeId={}, exception={}",
-            request.getMethod(), GatewayLogRedaction.maskPath(request.getPath().value()), route == null ? NO_ROUTE : route.getId(),
-            ex.getClass().getName(), GatewayLogRedaction.redact(ex));
+            request.getMethod(), LogPathMask.mask(request.getPath().value()), route == null ? NO_ROUTE : route.getId(),
+            ex.getClass().getName(), redacted);
     }
 
     private static void logFailure(ServerWebExchange exchange, HttpStatusCode status, Throwable ex) {
         ServerHttpRequest request = exchange.getRequest();
         Route route = exchange.getAttribute(ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR);
         String routeId = route == null ? NO_ROUTE : route.getId();
-        String path = GatewayLogRedaction.maskPath(request.getPath().value());
+        String path = LogPathMask.mask(request.getPath().value());
         String exceptionType = ex.getClass().getName();
 
         if (status.isSameCodeAs(HttpStatus.INTERNAL_SERVER_ERROR)) {
             // 예상하지 못한 오류만 스택을 남긴다. 502 · 503 · 504 는 원인이 대상 서비스 쪽이라 스택이 정보를 더하지 않는다.
             // 원래 예외 대신 타입 · 프레임만 남은 사본을 넘긴다 — Netty · 코덱 예외 메시지에 헤더 · 본문 조각이 들어갈 수 있다
-            log.error(LOG_FORMAT, status.value(), request.getMethod(), path, routeId, exceptionType, GatewayLogRedaction.redact(ex));
+            log.error(LOG_FORMAT, status.value(), request.getMethod(), path, routeId, exceptionType, RedactedThrowable.of(ex));
         } else if (status.is5xxServerError()) {
             log.warn(LOG_FORMAT, status.value(), request.getMethod(), path, routeId, exceptionType);
         } else {

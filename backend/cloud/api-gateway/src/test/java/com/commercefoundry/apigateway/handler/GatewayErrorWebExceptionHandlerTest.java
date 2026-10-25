@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
-import com.commercefoundry.apigateway.log.GatewayLogRedaction;
+import com.commercefoundry.common.exception.RedactedThrowable;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
@@ -110,13 +110,17 @@ class GatewayErrorWebExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("이미 커밋된 응답이면 덮어쓰지 않고 예외를 그대로 흘려보낸다")
-    void propagatesErrorWhenResponseAlreadyCommitted() {
+    @DisplayName("이미 커밋된 응답이면 덮어쓰지 않고, 메시지 없는 사본만 흘려 연결을 끊는다")
+    void propagatesRedactedErrorWhenResponseAlreadyCommitted() {
         MockServerWebExchange exchange = exchange();
         exchange.getResponse().setComplete().block(TIMEOUT);
-        IllegalStateException ex = new IllegalStateException("after commit");
+        IllegalStateException ex = new IllegalStateException("after commit MARKER");
 
-        assertThatThrownBy(() -> handler.handle(exchange, ex).block(TIMEOUT)).isSameAs(ex);
+        assertThatThrownBy(() -> handler.handle(exchange, ex).block(TIMEOUT))
+            .cause()
+            .isInstanceOf(RedactedThrowable.class)
+            .hasMessage(IllegalStateException.class.getName())
+            .satisfies(redacted -> assertThat(redacted.toString()).doesNotContain("MARKER"));
     }
 
     @Test
@@ -127,10 +131,13 @@ class GatewayErrorWebExceptionHandlerTest {
         exchange.getResponse().setComplete().block(TIMEOUT);
         IllegalStateException ex = new IllegalStateException("stream broken MARKER-BODY");
 
-        assertThatThrownBy(() -> handler.handle(exchange, ex).block(TIMEOUT)).isSameAs(ex);
+        assertThatThrownBy(() -> handler.handle(exchange, ex).block(TIMEOUT))
+            .cause()
+            .isInstanceOf(RedactedThrowable.class)
+            .hasMessage(IllegalStateException.class.getName());
 
         assertThat(output.getOut())
-            .contains("gateway response failed after commit", "path=/api/v1/orders/…", GatewayLogRedaction.class.getName() + "$Redacted: java.lang.IllegalStateException")
+            .contains("gateway response failed after commit", "path=/api/v1/orders/…", RedactedThrowable.class.getName() + ": java.lang.IllegalStateException")
             .doesNotContain("MARKER-BODY", "MARKER-QUERY", "ORDER-SECRET-123");
     }
 
@@ -145,8 +152,8 @@ class GatewayErrorWebExceptionHandlerTest {
 
         assertThat(output.getOut())
             .contains("status=500", "path=/api/v1/orders/…", "exception=java.lang.IllegalStateException")
-            .contains(GatewayLogRedaction.class.getName() + "$Redacted: java.lang.IllegalStateException")
-            .contains("Caused by: " + GatewayLogRedaction.class.getName() + "$Redacted: java.lang.IllegalArgumentException")
+            .contains(RedactedThrowable.class.getName() + ": java.lang.IllegalStateException")
+            .contains("Caused by: " + RedactedThrowable.class.getName() + ": java.lang.IllegalArgumentException")
             .contains("at " + GatewayErrorWebExceptionHandlerTest.class.getName() + ".redactsUnexpectedFailureLog")
             .doesNotContain("MARKER-TOKEN", "MARKER-BODY", "ORDER-SECRET-123", "jsessionid");
     }
