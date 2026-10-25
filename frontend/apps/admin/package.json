@@ -13,6 +13,9 @@
     "@cf/api-client": "workspace:*",
     "@cf/brand": "workspace:@cf/theme-mokoyuri@*",
     "@cf/ui": "workspace:*",
+    "@dnd-kit/core": "catalog:",
+    "@dnd-kit/sortable": "catalog:",
+    "@dnd-kit/utilities": "catalog:",
     "next": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:"
