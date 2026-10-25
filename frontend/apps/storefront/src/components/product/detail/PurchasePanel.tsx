@@ -10,6 +10,7 @@ import {
   type OptionSelection,
 } from '@/lib/catalog/option-selection';
 import type { DeliveryNote } from '@/lib/catalog/delivery-note';
+import { purchaseTarget } from '@/lib/catalog/purchase-target';
 import type { ProductDetail } from '@/lib/catalog/types';
 import { useDictionary, useFormatMoney } from '@/components/i18n/LocaleProvider';
 import { CartActionNotice } from '@/components/cart/CartActionNotice';
@@ -30,7 +31,7 @@ const QUANTITY_CAP = 99;
  * 담은 뒤에는 버튼 아래에 결과와 장바구니 링크를 보인다. 입력값이 상품 정의에 맞는지는 주문 생성이 본다.
  *
  * 모바일에서는 갤러리가 첫 화면을 차지하므로 하단에 가격 · 배송 안내 + 구매 버튼 바를 고정한다(#60).
- * 패널이 화면에 들어오면 바를 숨긴다. 바의 구매하기는 옵션 · 수량 · 담기를 담은 바텀시트(<dialog>)를 연다 —
+ * 패널의 담기 버튼이 보이면 바를 숨긴다. 바의 구매하기는 옵션 · 수량 · 담기를 담은 바텀시트(<dialog>)를 연다 —
  * 시트와 패널은 같은 선택 상태를 쓴다. 맞춤 제작 상품은 입력칸이 길어 시트 대신 패널로 스크롤한다.
  */
 export function PurchasePanel({
@@ -55,23 +56,44 @@ export function PurchasePanel({
   const sheetNoticeId = useId();
   const sheetTitleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const ctaRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDialogElement>(null);
   const [panelInView, setPanelInView] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const cart = useCartAction();
 
   useEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
+    const cta = ctaRef.current;
+    if (!cta) return;
     const observer = new IntersectionObserver(
       ([entry]) => setPanelInView(entry?.isIntersecting ?? false),
       {
-        // 패널 윗부분(가격 · 옵션)이 화면 아래쪽 1/4 안으로 들어오면 보이는 것으로 본다
-        rootMargin: '0px 0px -25% 0px',
+        // 패널의 수량 · 담기 버튼 묶음이 하단 바(약 80px) 위로 올라와 보일 때만 바를 숨긴다.
+        // 가격 줄을 기준으로 하면 화면 높이에 따라 첫 화면부터 바가 숨어 구매 버튼이 사라진다.
+        rootMargin: '0px 0px -80px 0px',
       },
     );
-    observer.observe(panel);
+    observer.observe(cta);
     return () => observer.disconnect();
   }, []);
+
+  // 시트가 열린 동안: 뒤 페이지 스크롤을 막고, lg 이상으로 넓어지면(시트가 display:none 이 된다) 닫는다 —
+  // 보이지 않는 modal 이 남으면 페이지 전체가 inert 가 된다
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const root = document.documentElement;
+    const previousOverflow = root.style.overflow;
+    root.style.overflow = 'hidden';
+    const wide = window.matchMedia('(min-width: 64rem)');
+    const closeOnWide = () => {
+      if (wide.matches) sheetRef.current?.close();
+    };
+    wide.addEventListener('change', closeOnWide);
+    return () => {
+      root.style.overflow = previousOverflow;
+      wide.removeEventListener('change', closeOnWide);
+    };
+  }, [sheetOpen]);
 
   const goToPanel = () => {
     const panel = panelRef.current;
@@ -89,8 +111,9 @@ export function PurchasePanel({
   const maxQuantity = product.maxQuantityPerOrder ?? QUANTITY_CAP;
   const productOnSale = product.saleStatus.code === 'ON_SALE';
   const openPurchase = () => {
-    if (product.customOrder || !productOnSale) goToPanel();
-    else sheetRef.current?.showModal();
+    if (purchaseTarget(product) === 'panel') return goToPanel();
+    sheetRef.current?.showModal();
+    setSheetOpen(true);
   };
 
   const select = (groupId: string, valueId: string) => {
@@ -248,13 +271,13 @@ export function PurchasePanel({
         />
       )}
 
-      <div className="flex flex-col gap-3 pt-4">
+      <div ref={ctaRef} className="flex flex-col gap-3 pt-4">
         {quantityField(quantityLabelId)}
         {addButton(noticeId)}
         <CartActionNotice id={noticeId} result={cart.result} notice={notice} />
       </div>
 
-      {/* 모바일 하단 고정 구매 바 — 패널이 보이면 숨긴다 */}
+      {/* 모바일 하단 고정 구매 바 — 패널의 담기 버튼이 보이면 숨긴다 */}
       <div
         aria-hidden={panelInView || undefined}
         className={cx(
@@ -277,41 +300,45 @@ export function PurchasePanel({
         </Button>
       </div>
 
-      {/* 모바일 구매 바텀시트 — 바깥(배경)을 누르거나 ESC 로 닫는다. 담은 결과도 시트 안에 보인다 */}
+      {/* 모바일 구매 바텀시트 — 바깥(배경)을 누르거나 ESC 로 닫는다. 담은 결과도 시트 안에 보인다.
+          dialog 자신은 여백 없이 두고 안쪽 wrapper 가 여백을 갖는다 — dialog 를 직접 누른 것만 배경 클릭이다 */}
       <dialog
         ref={sheetRef}
         aria-labelledby={sheetTitleId}
         onClick={(event) => {
           if (event.target === event.currentTarget) event.currentTarget.close();
         }}
-        className="inset-x-0 top-auto bottom-0 m-0 max-h-[85svh] w-full max-w-none overflow-y-auto bg-bg px-4 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] text-fg backdrop:bg-fg/40 lg:hidden"
+        onClose={() => setSheetOpen(false)}
+        className="inset-x-0 top-auto bottom-0 m-0 max-h-[85svh] w-full max-w-none overflow-y-auto overscroll-contain bg-bg p-0 text-fg backdrop:bg-fg/40 lg:hidden"
       >
-        <div className="flex items-start justify-between gap-4">
-          <p id={sheetTitleId} className="min-w-0 text-sm">
-            <span className="block truncate">{product.name}</span>
-            <span className="block">{priceText}</span>
-          </p>
-          <button
-            type="button"
-            aria-label={t.closeSheet}
-            onClick={() => sheetRef.current?.close()}
-            className="-mt-2 -mr-2 inline-flex size-10 shrink-0 items-center justify-center"
-          >
-            <CloseIcon />
-          </button>
-        </div>
-        <div className="mt-6 flex flex-col gap-6">
-          <OptionGroupsField
-            groups={groups}
-            skus={product.skus}
-            selection={selection}
-            namePrefix={sheetRadioPrefix}
-            onSelect={select}
-          />
-          <div className="flex flex-col gap-3">
-            {quantityField(`${sheetTitleId}-quantity`)}
-            {addButton(sheetNoticeId)}
-            <CartActionNotice id={sheetNoticeId} result={cart.result} notice={notice} />
+        <div className="px-4 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+          <div className="flex items-start justify-between gap-4">
+            <p id={sheetTitleId} className="min-w-0 text-sm">
+              <span className="block truncate">{product.name}</span>
+              <span className="block">{priceText}</span>
+            </p>
+            <button
+              type="button"
+              aria-label={t.closeSheet}
+              onClick={() => sheetRef.current?.close()}
+              className="-mt-2 -mr-2 inline-flex size-10 shrink-0 items-center justify-center"
+            >
+              <CloseIcon />
+            </button>
+          </div>
+          <div className="mt-6 flex flex-col gap-6">
+            <OptionGroupsField
+              groups={groups}
+              skus={product.skus}
+              selection={selection}
+              namePrefix={sheetRadioPrefix}
+              onSelect={select}
+            />
+            <div className="flex flex-col gap-3">
+              {quantityField(`${sheetTitleId}-quantity`)}
+              {addButton(sheetNoticeId)}
+              <CartActionNotice id={sheetNoticeId} result={cart.result} notice={notice} />
+            </div>
           </div>
         </div>
       </dialog>
