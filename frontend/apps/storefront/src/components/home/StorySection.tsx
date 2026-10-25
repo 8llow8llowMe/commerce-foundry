@@ -1,9 +1,10 @@
 import type { StorySection as StorySectionData } from '@cf/ui';
 import { Link } from '@/components/i18n/Link';
+import { linkRel } from '@/lib/display/home-sections';
 import { CurtainStory } from './CurtainStory';
 import { PanelStory } from './PanelStory';
 import { MediaFrame } from './MediaFrame';
-import { SectionHeading } from './SectionHeading';
+import { SectionHeading, sectionLabel } from './SectionHeading';
 
 /**
  * 03 Collection Story · 06 Our Story. curtain 은 CurtainStory, panel 은 PanelStory, asymmetric 은 큰 화보 + 글 + 작은 컷을 어긋나게,
@@ -22,15 +23,18 @@ export function StorySection({ section }: { section: StorySectionData }) {
         title={section.title}
         align={section.layout === 'centered' ? 'center' : 'left'}
       />
-      <p data-reveal="text" className="font-serif text-base leading-8 whitespace-pre-line">
-        {section.body}
-      </p>
+      {section.body && (
+        <p data-reveal="text" className="font-serif text-base leading-8 whitespace-pre-line">
+          {section.body}
+        </p>
+      )}
       {section.links.length > 0 && (
         <div className={section.layout === 'centered' ? 'flex justify-center gap-6' : 'flex gap-6'}>
           {section.links.map((link) => (
             <Link
               key={link.href}
               href={link.href}
+              rel={linkRel(link.href)}
               className="border-b border-current pb-1 text-xs tracking-[0.2em] uppercase hover:opacity-70"
             >
               {link.label} <span aria-hidden>→</span>
@@ -43,7 +47,10 @@ export function StorySection({ section }: { section: StorySectionData }) {
 
   if (section.layout === 'centered') {
     return (
-      <section aria-labelledby={headingId} className="mx-auto w-full max-w-screen-xl px-4 lg:px-8">
+      <section
+        aria-labelledby={sectionLabel(headingId, section.title)}
+        className="mx-auto w-full max-w-screen-xl px-4 lg:px-8"
+      >
         <div className="mx-auto max-w-xl text-center">{text}</div>
         {first && <MediaFrame slot={first} className="mt-12 aspect-[3/2] lg:mt-16" />}
       </section>
@@ -52,7 +59,7 @@ export function StorySection({ section }: { section: StorySectionData }) {
 
   return (
     <section
-      aria-labelledby={headingId}
+      aria-labelledby={sectionLabel(headingId, section.title)}
       className="mx-auto grid w-full max-w-screen-xl gap-8 px-4 lg:grid-cols-12 lg:gap-x-8 lg:px-8"
     >
       {first && <MediaFrame slot={first} className="aspect-[3/4] lg:col-span-7 lg:row-span-2" />}

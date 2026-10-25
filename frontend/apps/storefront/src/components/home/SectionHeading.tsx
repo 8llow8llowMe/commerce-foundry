@@ -1,6 +1,9 @@
 import { cx } from '@cf/ui';
 
-/** 섹션 제목(display 글꼴). 제목 위 작은 라벨(eyebrow)은 두지 않는다 — 필요한 정보는 제목 · 첫 문장에 넣는다(#57) */
+/**
+ * 섹션 제목(display 글꼴). 제목 위 작은 라벨(eyebrow)은 두지 않는다 — 필요한 정보는 제목 · 첫 문장에 넣는다(#57).
+ * 제목이 비면(메인 전시 API 의 제목은 선택) 그리지 않는다 — 섹션은 aria-labelledby 를 빼야 한다(sectionLabel).
+ */
 export function SectionHeading({
   id,
   title,
@@ -13,6 +16,7 @@ export function SectionHeading({
   /** title: 섹션 제목(28 / 48px), display: 페이지의 대표 제목 하나(40 / 72~96px, #57 §4) */
   size?: 'title' | 'display';
 }) {
+  if (!title) return null;
   return (
     <div
       data-reveal="title"
@@ -31,4 +35,9 @@ export function SectionHeading({
       </h2>
     </div>
   );
+}
+
+/** 제목이 있을 때만 섹션 이름을 제목에 잇는다(빈 제목은 그리지 않는다) */
+export function sectionLabel(id: string, title: string): string | undefined {
+  return title ? id : undefined;
 }

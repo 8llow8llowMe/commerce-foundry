@@ -4,39 +4,58 @@ import { Link } from '@/components/i18n/Link';
 import { ProductCard } from '@/components/product/ProductCard';
 import { productsApiPath } from '@/lib/catalog/shop-query';
 import type { ProductListItem } from '@/lib/catalog/types';
+import { linkRel, type DisplayProductPickSection } from '@/lib/display/home-sections';
 import { serverFetch } from '@/lib/server-api';
-import { SectionHeading } from './SectionHeading';
+import { SectionHeading, sectionLabel } from './SectionHeading';
+
+/** 브랜드 설정의 상품 픽 — 상품 목록 API 에서 고른다. 못 받으면 ApiError 를 던진다 */
+async function fetchPickProducts(section: ProductPickSectionData): Promise<ProductListItem[]> {
+  const slice = await serverFetch<SliceResponse<ProductListItem>>(
+    productsApiPath(
+      { categoryId: section.source.categoryId, sort: 'NEWEST' },
+      0,
+      section.source.limit,
+    ),
+  );
+  return slice.contents.slice(0, section.source.limit);
+}
 
 /**
- * 02 대표 상품. 상품 목록 API 에서 고른다 — 이름 · 가격을 설정에 적지 않는다.
+ * 02 대표 상품. 메인 전시 API 의 상품 픽은 응답의 상품 카드(목록 항목과 같은 모양)를 그대로 그리고,
+ * 브랜드 설정(기본)이면 상품 목록 API 에서 고른다 — 어느 쪽이든 이름 · 가격을 설정에 적지 않는다.
  * 못 받았거나 비었으면 메인을 깨뜨리지 않고 섹션을 그리지 않는다.
  * PC 4열은 짝수 번째를 80px 내려 같은 카드가 줄지어 있는 느낌을 피하고, 모바일은 72vw 가로 스와이프(다음 카드가 보이게)다(#59).
  */
-export async function ProductPickSection({ section }: { section: ProductPickSectionData }) {
+export async function ProductPickSection({
+  section,
+}: {
+  section: ProductPickSectionData | DisplayProductPickSection;
+}) {
   let products: ProductListItem[];
-  try {
-    const slice = await serverFetch<SliceResponse<ProductListItem>>(
-      productsApiPath(
-        { categoryId: section.source.categoryId, sort: 'NEWEST' },
-        0,
-        section.source.limit,
-      ),
-    );
-    products = slice.contents.slice(0, section.source.limit);
-  } catch {
-    return null;
+  if ('products' in section) {
+    products = section.products;
+  } else {
+    try {
+      products = await fetchPickProducts(section);
+    } catch {
+      return null;
+    }
   }
   if (products.length === 0) return null;
 
   const headingId = `${section.id}-title`;
   return (
-    <section aria-labelledby={headingId} className="mx-auto w-full max-w-screen-xl px-4 lg:px-8">
+    <section
+      aria-labelledby={sectionLabel(headingId, section.title)}
+      className="mx-auto w-full max-w-screen-xl px-4 lg:px-8"
+    >
       <div className="mb-8 flex items-end justify-between gap-4 lg:mb-12">
         <SectionHeading id={headingId} title={section.title} />
         {section.viewAll && (
           <Link
             href={section.viewAll.href}
-            className="shrink-0 border-b border-current pb-1 text-xs tracking-[0.2em] uppercase hover:opacity-70"
+            rel={linkRel(section.viewAll.href)}
+            className="ml-auto shrink-0 border-b border-current pb-1 text-xs tracking-[0.2em] uppercase hover:opacity-70"
           >
             {section.viewAll.label} <span aria-hidden>→</span>
           </Link>

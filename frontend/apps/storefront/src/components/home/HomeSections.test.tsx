@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProductDetail, ProductListItem } from '@/lib/catalog/types';
 import { DetailSection } from './DetailSection';
 import { HeroSection } from './HeroSection';
+import { HomeSections } from './HomeSections';
+import { MediaFrame } from './MediaFrame';
 import { LookSection } from './LookSection';
 import { ProductPickSection } from './ProductPickSection';
 import { Reveal } from './Reveal';
@@ -165,7 +167,9 @@ describe('StorySection — panel', () => {
       />,
     );
     expect(html).toContain('bg-fg text-bg');
-    expect(html.match(/<p data-reveal="text" class="leading-7">/g)).toHaveLength(2);
+    expect(
+      html.match(/<p data-reveal="text" class="leading-7 whitespace-pre-line">/g),
+    ).toHaveLength(2);
     expect(html).toContain('href="/our-story"');
     expect(html).toContain('[border-radius:var(--cf-motif-radius)]');
   });
@@ -297,5 +301,138 @@ describe('Reveal (섹션 첫 등장 모션)', () => {
     const order = [...html.matchAll(/data-reveal="(\w+)"/g)].map((m) => m[1]);
     // 지연은 DOM 순서가 아니라 종류로 정한다(globals.css)
     expect(order.sort()).toEqual(['media', 'text', 'title']);
+  });
+});
+
+describe('메인 전시 API 블록', () => {
+  it('상품 픽(API)은 목록 API 를 부르지 않고 응답의 상품 카드를 그대로 재사용한다', async () => {
+    const html = renderToStaticMarkup(
+      await ProductPickSection({
+        section: {
+          type: 'PRODUCT_PICK',
+          id: 'display-1',
+          title: 'The Edit',
+          viewAll: { label: 'VIEW ALL', href: 'https://example.com/lookbook' },
+          products: [listItem('7'), listItem('8')],
+        },
+      }),
+    );
+    expect(serverFetch).not.toHaveBeenCalled();
+    expect(html.match(/href="\/products\//g)).toHaveLength(2);
+    expect(html).toContain('aria-labelledby="display-1-title"');
+    // 외부 링크는 opener · referrer 를 넘기지 않는다
+    expect(html).toMatch(/<a rel="noopener noreferrer"[^>]*href="https:\/\/example.com\/lookbook"/);
+  });
+
+  it('상품 픽(API)의 상품이 비면 그리지 않고, 제목이 없으면 제목 · 이름 연결을 빼고 그린다', async () => {
+    const base = { type: 'PRODUCT_PICK' as const, id: 'p', title: '', viewAll: null };
+    expect(await ProductPickSection({ section: { ...base, products: [] } })).toBeNull();
+    const html = renderToStaticMarkup(
+      await ProductPickSection({ section: { ...base, products: [listItem('1')] } }),
+    );
+    expect(html).not.toContain('<h2');
+    expect(html).not.toContain('aria-labelledby');
+  });
+
+  it('히어로 한 줄 제목(API)은 폭에 맞춰 줄바꿈하고, 제목이 없으면 h1 을 그리지 않는다', () => {
+    const oneLine = renderToStaticMarkup(
+      <HeroSection section={{ ...HERO, title: ['긴 운영 제목 한 줄'] }} />,
+    );
+    expect(oneLine).toContain(
+      '<span class="block text-balance break-keep">긴 운영 제목 한 줄</span>',
+    );
+    expect(oneLine).not.toContain('whitespace-nowrap');
+
+    const untitled = renderToStaticMarkup(<HeroSection section={{ ...HERO, title: [] }} />);
+    expect(untitled).not.toContain('<h1');
+    expect(untitled).not.toContain('aria-labelledby');
+    // 버튼은 그대로 — 모바일 첫 화면의 쇼핑 버튼(#59)
+    expect(untitled).toContain('href="/shop"');
+  });
+
+  it('스토리 제목 · 본문이 없으면 빈 제목 · 단락을 그리지 않는다', () => {
+    const html = renderToStaticMarkup(
+      <StorySection
+        section={{
+          type: 'STORY',
+          id: 's',
+          title: '',
+          body: '',
+          links: [],
+          media: [slot('사진')],
+          layout: 'asymmetric',
+        }}
+      />,
+    );
+    expect(html).not.toContain('<h2');
+    expect(html).not.toContain('<p');
+    expect(html).not.toContain('aria-labelledby');
+  });
+
+  it('디테일(API)은 확대 무대 없이 클로즈업 + 캡션이고, 빈 캡션은 figcaption 을 그리지 않는다', () => {
+    const html = renderToStaticMarkup(
+      <DetailSection
+        section={{
+          type: 'DETAIL',
+          id: 'd',
+          title: 'Craft',
+          body: '',
+          frame: null,
+          points: [
+            { title: '자카드', text: '', focus: null },
+            { title: '', text: '', focus: null },
+          ],
+          media: [slot('클로즈업 1'), slot('클로즈업 2')],
+        }}
+      />,
+    );
+    expect(html.match(/<figure/g)).toHaveLength(2);
+    expect(html.match(/<figcaption/g)).toHaveLength(1);
+    expect(html).toContain('자카드');
+  });
+
+  it('모바일 사진이 따로 있으면 picture 로 1024px 기준 PC 사진을 고른다', () => {
+    const html = renderToStaticMarkup(
+      <MediaFrame
+        slot={{
+          image: { src: 'https://img.test/pc.jpg', mobileSrc: 'https://img.test/m.jpg', alt: '컷' },
+          placeholder: '',
+        }}
+        className="aspect-[3/4]"
+      />,
+    );
+    expect(html).toContain(
+      '<source media="(min-width: 1024px)" srcSet="https://img.test/pc.jpg"/>',
+    );
+    expect(html).toMatch(/<img src="https:\/\/img.test\/m.jpg" alt="컷" loading="lazy"/);
+    // 비율 칸은 그대로(CLS)
+    expect(html).toContain('aspect-[3/4]');
+
+    const single = renderToStaticMarkup(
+      <MediaFrame
+        slot={{ image: { src: 'https://img.test/one.jpg', alt: '' }, placeholder: '' }}
+      />,
+    );
+    expect(single).not.toContain('<source');
+  });
+
+  it('HomeSections 는 받은 순서대로 그리고 히어로만 등장 모션 없이 둔다', () => {
+    const html = renderToStaticMarkup(
+      <HomeSections
+        sections={[
+          {
+            type: 'STORY',
+            id: 'first',
+            title: '먼저',
+            body: '',
+            links: [],
+            media: [],
+            layout: 'centered',
+          },
+          { ...HERO, id: 'hero-2' },
+        ]}
+      />,
+    );
+    expect(html.indexOf('first-title')).toBeLessThan(html.indexOf('hero-2-title'));
   });
 });
