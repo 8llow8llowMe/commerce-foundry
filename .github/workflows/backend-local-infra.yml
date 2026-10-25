@@ -55,6 +55,17 @@ jobs:
           docker compose -f docker-compose-local.yml exec -T kafka /opt/kafka/bin/kafka-configs.sh --bootstrap-server localhost:19092 \
             --describe --entity-type brokers --entity-name 1 --all | grep -q 'auto.create.topics.enable=false'
 
+      # 목록의 이름이 namespace(commerce-foundry.local) 를 붙여 만들어지고 DLT 도 같이 생기는지 — 두 번 돌려도 실패하지 않는지 (#304 A-2)
+      - name: Kafka 토픽 이름 규칙 · DLT · 재실행 확인
+        run: |
+          printf 'order.order-expired 604800000\n' > "$RUNNER_TEMP/topics.txt"
+          TOPICS_FILE="$RUNNER_TEMP/topics.txt" sh docker/kafka/create-topics.sh
+          TOPICS_FILE="$RUNNER_TEMP/topics.txt" sh docker/kafka/create-topics.sh
+          topics=$(docker compose -f docker-compose-local.yml exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list)
+          echo "$topics" | grep -qx 'commerce-foundry.local.order.order-expired'
+          echo "$topics" | grep -qx 'commerce-foundry.local.order.order-expired.dlt'
+          sh docker/kafka/create-topics.sh dev
+
       # PC 의 서비스가 붙는 HOST 리스너(localhost:KAFKA_PORT)로 메시지가 오가는지 — 광고 주소가 틀리면 여기서 멈춘다
       - name: Kafka HOST 리스너로 메시지가 오가는지 확인
         run: |
