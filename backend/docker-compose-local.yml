@@ -1,4 +1,4 @@
-# 로컬 개발용 미들웨어 (PostgreSQL + Redis)
+# 로컬 개발용 미들웨어 (PostgreSQL + Redis + Kafka)
 #
 # 서비스 애플리케이션은 IDE 나 Gradle 로 직접 띄우고, 이 compose 는 미들웨어만 올린다.
 # **계정·비밀번호를 이 파일에 쓰지 않는다** (공개 저장소). compose 는 같은 디렉터리의 `.env` 를 자동으로 읽으므로
@@ -51,6 +51,41 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  # 단일 노드 KRaft(브로커 + 컨트롤러 한 프로세스). dev 공유 클러스터(Infra, 3노드)와 같은 이미지 계열이다 (#310).
+  # 토픽은 앱이 만들지 않는다 — 자동 생성을 끄고 docker/kafka/create-topics.sh 로 만든다(local-run-guide.md §3).
+  # 리스너는 둘이다 — HOST 는 PC 의 서비스가 localhost:${KAFKA_PORT} 로 붙는 주소, INTERNAL 은 컨테이너 안 관리 도구(스크립트 · 헬스 체크)가 쓰는 주소.
+  # 하나만 두면 KAFKA_PORT 를 바꿨을 때 컨테이너 안 도구가 광고 주소(localhost:<바뀐 포트>)로 붙지 못한다
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: commerce-foundry-kafka-local
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: HOST://:9092,INTERNAL://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: HOST://localhost:${KAFKA_PORT:-9092},INTERNAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: HOST:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      # 노드가 하나라 내부 토픽 복제 수를 1 로 둔다(기본 3 이면 컨슈머 그룹 · 트랜잭션이 뜨지 않는다)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      TZ: UTC
+    ports:
+      # 다른 프로젝트의 로컬 Kafka 와 겹치면 .env 의 KAFKA_PORT 를 바꾼다(서비스의 KAFKA_BOOTSTRAP_SERVERS 도 같이)
+      - "${KAFKA_PORT:-9092}:9092"
+    # 볼륨을 두지 않는다 — 이미지가 비루트 사용자로 기본 경로에 쓰므로 빈 이름 볼륨을 붙이면 권한 문제로 뜨지 않을 수 있다.
+    # 컨테이너를 다시 시작해도 데이터는 남고, down 으로 지우면 토픽도 사라지니 create-topics.sh 를 다시 돌린다
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
 
 volumes:
   postgres-data:
