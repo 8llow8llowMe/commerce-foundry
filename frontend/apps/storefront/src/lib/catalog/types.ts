@@ -38,10 +38,10 @@ export type ProductListItem = {
   name: string;
   thumbnail: ProductThumbnail | null;
   /**
-   * 목록 hover 때 바꿔 보일 두 번째 이미지(착용컷 · 디테일, #60). BE 목록 계약에 아직 없다 — #300 초안, 이름
-   * 미확정. BE 가 이름을 정하면 맞춘다. 없거나 null 이면 전환하지 않는다
+   * 목록 hover · 포커스 때 바꿔 보일 두 번째 정지 이미지(착용컷 · 디테일, #60 · BE #300). 대표 · 갤러리를 노출 순서로
+   * 세어 두 번째이고 영상은 세지 않는다. 정지 이미지가 1장 이하면 null — 전환하지 않는다
    */
-  hoverImage?: ProductThumbnail | null;
+  hoverImage: ProductThumbnail | null;
   /** 판매중 옵션 중 최저가 */
   salePrice: Money;
   /** 할인 전 정가. discountRate 와 함께 null 이거나 함께 값이 있다 */

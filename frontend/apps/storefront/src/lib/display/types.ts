@@ -46,6 +46,8 @@ export type DisplayProductItem = {
   productId: string;
   name: string;
   thumbnail: DisplayProductThumbnailItem | null;
+  /** 상품 목록 항목과 같은 hover 용 두 번째 정지 이미지(BE #300). 정지 이미지가 1장 이하면 null */
+  hoverImage: DisplayProductThumbnailItem | null;
   salePrice: Money;
   listPrice: Money | null;
   discountRate: number | null;
