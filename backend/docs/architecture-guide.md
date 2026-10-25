@@ -375,18 +375,23 @@ store:
 몇 초 ~ 몇 분 걸리는 어드민 작업(리포트 · 정산 대사 · 집계 · AI 생성 · 발송)은 요청 안에서 끝내지 않는다. 게이트웨이 응답 타임아웃(10s)에 끊긴다.
 기능 API 가 작업을 등록하고 `202 + jobId` 로 바로 답하면(`api-design-guide.md` §7), operations-service 의 워커가 처리한다.
 
-> **Kafka 전환 예정 (#307, 설계는 #304 · §8-1).** 아래는 지금의 DB 폴링 구현이다. 전환 뒤에는 다음이 바뀌고 나머지(멱등 등록 · 핸들러 계약 · 취소 · 재시도 백오프 · 종료 이벤트)는 그대로다.
-> - **디스패치는 Kafka 로** — 등록 · 재시도 트랜잭션에서 outbox 행(`available_at = scheduled_at`)을 넣고, 릴레이가 `…operations.job-run`(키 jobId, 본문은 jobId · type · attempt 만)으로 발행한다.
->   컨슈머(그룹 `…operations-service.job-runner`)가 `claim(jobId, attempt)` 로 가져가 실행 스레드에 넘긴 뒤 바로 ack 한다 — 실행이 길어도 파티션 · 리밸런스를 붙잡지 않는다.
->   아래의 후보 폴링(빈 칸의 4배)과 `poll-interval` 은 없어진다.
-> - **상태 · 멱등 · 취소 · 진행률 · lease 의 정본은 계속 `operations.job` 이다.** 오프셋은 claim 직후 커밋되므로 실행 중 크래시는 Kafka 가 모른다 — lease · heartbeat 는 남고,
->   lease 회수는 시간 기준 만료 판정 트리거 하나가 맡는다(만료 RUNNING → QUEUED + outbox 재발행).
-> - "분산 락 · `SKIP LOCKED` 를 쓰지 않는다" 는 **작업 가져가기** 규칙이다. outbox 릴레이와 정기 작업 플래너는 단일 실행 락(ShedLock)을 쓴다.
-
 - **저장소는 PostgreSQL `operations.job` 하나다.** Redis Streams 는 쓰지 않는다 — 상태 조회 · 감사 · 멱등이 한 테이블에서 끝나고, 영구 키 금지 · TTL 필수(`coding-conventions.md` §9-7)와 맞지 않는다.
-- **가져가기는 `@Version` 경합이다.** 후보를 읽고(lease 가 끝난 `RUNNING` 먼저, 남은 자리를 `QUEUED && scheduled_at <= now` 로) 건마다 다시 읽어 도메인 `Job.claim` 으로 바꿔 저장한다.
-  버전에서 진 워커는 그 작업을 건너뛴다 — 여러 인스턴스에서도 한 시도는 한 워커만 돈다. 분산 락 · `SKIP LOCKED` 는 쓰지 않는다(재고 선점 만료 스케줄러 #10 과 같은 방식).
-  후보는 빈 칸의 4배까지 읽는다 — 같은 주기에 폴링한 인스턴스끼리 상위 후보를 두고 지면 다음 후보로 넘어간다.
+  상태 · 멱등 · 취소 · 진행률 · lease 의 정본은 이 테이블이고, Kafka 는 "이 시도를 실행하라" 는 신호만 나른다(#307, 설계 #304 · §8-1).
+- **디스패치는 Kafka 실행 신호다(#307).** 작업이 QUEUED 가 되는 트랜잭션(등록 · 재시도 · lease 만료 회수 · 종료 때 돌려놓기 · 실행 거절)이 같은 커밋으로
+  outbox 행(`available_at = scheduled_at`)을 넣고(`JobDispatchPort`), 릴레이가 `<ns>.operations.job-run`(키 jobId, 본문 `JobRunMessage` — jobId · type · attempt · scheduledAt 만)으로 보낸다.
+  컨슈머(`JobRunEventListener`, 그룹 `<ns>.operations.job-runner`, 인스턴스당 스레드 1)가 가져가 실행 스레드에 넘긴 뒤 바로 ack 한다 — 실행이 길어도 파티션 · 리밸런스를 붙잡지 않는다.
+  인스턴스 전체 실행 칸이 찼거나 종료 중이면 `nack(Duration)`(`worker.redelivery-delay`, 1m 이하)으로 늦춰 다시 받는다 — 이 리스너만 ack 모드가
+  MANUAL_IMMEDIATE 다(`JobRunListenerConfig`). nack 은 컨슈머의 모든 파티션을 그동안 멈추므로, 종류별 칸만 찼거나 예약 시각 전(인스턴스 시계 차)이면
+  같은 시도의 신호를 outbox 로 늦게 다시 내고(`available_at` = 지금 + `redelivery-delay` · 예약 시각) 받은 신호는 확인한다 — 다른 종류 신호를 막지 않는다.
+  실행 순서는 파티션 도착 순서이고 `priority` 는 기록용이다.
+- **가져가기는 신호의 시도 번호 + `@Version` 경합이다.** 신호가 가리킨 작업을 다시 읽어 `QUEUED` 이고 시도 번호 · 종류가 신호와 같을 때만 도메인 `Job.claim` 으로 바꿔 저장한다.
+  다르면(이미 가져감 · 끝남 · 다른 시도의 늦은 신호) 버린다 — at-least-once 신호의 중복은 이것으로 거르고 inbox(`processed_event`)를 두지 않는다.
+  같은 신호를 두 인스턴스가 받아도 버전에서 진 쪽은 `JOB_CONFLICT` 로 건너뛴다. 작업 가져가기에는 분산 락 · `SKIP LOCKED` 를 쓰지 않는다(재고 선점 만료 스케줄러 #10 과 같은 방식).
+  outbox 릴레이는 단일 실행 락(ShedLock, `operations.shedlock`)을 쓴다.
+- **신호 오류** — 읽을 수 없는 봉투 · 모르는 새 버전 · 아이디 형식 오류 · 이 인스턴스에 핸들러가 없는 종류는 바로 DLT(`<topic>.dlt`)다. DB 오류 같은 일시 오류는 컨슈머 안 재시도
+  (`commerce.messaging.retry.*`) 뒤 DLT 다. DLT 로 간 신호의 작업은 QUEUED 로 남는다 — 사람이 DLT 메시지를 다시 보내 실행한다(롤링 배포 중 새 종류의 신호를 옛 인스턴스가 받은 경우도 같다).
+- **메시징이 꺼져 있으면(`MESSAGING_ENABLED=false`) 작업은 등록만 되고 실행되지 않는다** — 신호는 outbox 에 쌓이고, 켜면 쌓인 것부터 나간다. 워커를 켠 인스턴스가 메시징이 꺼진 채 뜨면 WARN 을 남긴다.
+  실행 신호 리스너는 만들지 않는다. 작업을 돌리는 환경(local 포함)은 `MESSAGING_ENABLED=true` 와 토픽(`docker/kafka/topics.txt`)이 필요하다.
 - **등록** — 같은 job 컨텍스트의 진입(어드민 재등록 · 정기 플래너)은 `JobRegisterUseCase` 에 `JobRegisterCommand` 를, 다른 컨텍스트의 기능 Facade 는
   `JobRegistrationProcessor.register(JobRequest)`(domain 입력 값)를 부른다 (§3 허용 목록 4).
 - **핸들러 계약** — `JobHandler { type(); options(); execute(JobExecution) }`. 각 기능 컨텍스트의 `*JobProcessor` 가 구현하고 빈으로 두면 엔진이 종류(`[A-Z0-9_]{1,64}`)로 찾는다
@@ -401,7 +406,10 @@ store:
   - **payload · 결과 · 오류 · 진행 문구에 개인정보 원문을 두지 않는다.** payload 는 식별자 · 날짜 · 설정값만 담고, 핸들러가 실행 시점에 원본 서비스에서 읽는다.
   - 다른 서비스 데이터는 internal API 로만 읽고 쓴다(§7). 대상 서비스는 허용 호출자에 `SERVICE_operations-service` 를 더한다.
 - **lease · heartbeat** — 가져갈 때 `lease_expires_at = now + lease`(기본 5m), 전용 스케줄러가 heartbeat(기본 1m, lease 의 1/3 이하)마다 연장한다.
-  워커가 죽으면 lease 가 끝난 뒤 다른 워커가 다음 시도로 회수한다. heartbeat 예약이 거절되면 실행하지 않고 돌려놓는다.
+  오프셋은 가져간 직후 커밋되므로 실행 중 크래시는 Kafka 가 모른다 — **lease 회수는 시간 기준 만료 판정(`JobLeaseExpiryScheduler`, `operations.jobs.lease-sweep.*`) 하나가 맡는다.**
+  모든 인스턴스가 돌고(분산 락 없음) lease 가 끝난 RUNNING 을 `(lease_expires_at, id)` keyset 으로 읽어 건마다 트랜잭션으로 `Job.expireLease` 한다 — 시도가 남았으면 QUEUED + 실행 신호,
+  상한이면 FAILED(`LEASE_EXPIRED`), 취소 요청이 있었으면 CANCELLED. 두 인스턴스가 같은 행을 판정하면 `@Version` 이 하나만 통과시킨다.
+  heartbeat 예약이 거절되면 실행하지 않고 돌려놓는다.
   실행 시간 상한(기본 30m)을 넘으면 heartbeat 가 그 자리에서 FAILED(`RUN_TIMEOUT`, 재시도 없음)로 끝내고 멈춤 신호를 준다 —
   checkpoint 를 부르지 않는 핸들러도 작업은 끝나지만, 실행 스레드는 핸들러가 돌아올 때까지 칸을 쥔다.
 - **재시도** — 재시도할 수 있는 실패는 지수 백오프(기본 30s × 4^(n−1), 상한 30m, jitter 0.2) 뒤 다시 QUEUED, 시도 상한(기본 3)이면 FAILED 다.
@@ -415,6 +423,10 @@ store:
 - **실행 스레드** — 전용 `jobWorkerTaskExecutor`(core = max = `worker.concurrency`, 큐 0)와 heartbeat 전용 `jobLeaseTaskScheduler` 를 둔다. `@Async` 는 쓰지 않는다.
   두 빈은 `@Bean(defaultCandidate = false)` 다 — 일반 빈으로 두면 Boot 가 `applicationTaskExecutor` · `taskScheduler` 를 만들지 않는다.
   워커 아이디(`{앱}:{호스트}:{pid}:{난수}`)는 `JobWorkerIdentity` 빈 하나로 만든다.
-- **graceful shutdown** — 워커 lifecycle(단계 `Integer.MAX_VALUE`)이 폴링을 멈추고, 실행 중인 시도를 `shutdown-grace` 까지 기다린 뒤, 남은 시도를 QUEUED 로 돌려놓는다(시도 번호를 되돌린다).
-  실행기 · 스케줄러는 그 뒤 단계(`Integer.MAX_VALUE - 1`)에 멈추고, 남은 실행 스레드는 더 기다리지 않고 interrupt 한다. 강제 종료면 lease 만료가 대신한다.
-- 설정은 `operations.jobs.*`(`JobProperties`)다. `operations.jobs.worker.enabled=false` 면 폴러를 만들지 않는다(API 전용 인스턴스). 결과 JSON 상한은 최대 1MiB 다.
+- **graceful shutdown** — 워커 lifecycle(단계 `Integer.MAX_VALUE`)이 새 신호를 받지 않게 하고(받은 신호는 nack), 실행 중인 시도를 `shutdown-grace` 까지 기다린 뒤,
+  남은 시도를 QUEUED 로 돌려놓고 실행 신호를 다시 낸다(시도 번호를 되돌린다). 실행기 · 스케줄러는 그 뒤 단계(`Integer.MAX_VALUE - 1`), outbox 릴레이는 `Integer.MAX_VALUE - 2`,
+  Kafka 리스너 컨테이너는 그보다 늦게 멈춘다 — 그래서 nack 한 신호 · 다시 낸 신호는 `shutdown-grace` 와 리밸런스 뒤에 다른 인스턴스로 넘어간다.
+  남은 실행 스레드는 더 기다리지 않고 interrupt 한다. 강제 종료면 lease 만료가 대신한다 — 컨테이너 종료 유예는 `shutdown-grace` 보다 길게 둔다.
+- 설정은 `operations.jobs.*`(`JobProperties`)다. `operations.jobs.worker.enabled=false` 면 실행 신호 리스너를 만들지 않는다(API 전용 인스턴스 — 등록 · 만료 판정만 한다).
+  결과 JSON 상한은 최대 1MiB 다.
+- 정기 작업 플래너(#212 PR-D)는 아직 없다 — 만들 때 단일 실행 락(ShedLock)으로 한 인스턴스만 등록하고, 같은 슬롯은 `dedup_key` 로 막는다.
