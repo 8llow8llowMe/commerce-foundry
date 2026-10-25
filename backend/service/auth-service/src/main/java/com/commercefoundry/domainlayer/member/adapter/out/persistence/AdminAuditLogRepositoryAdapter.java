@@ -13,7 +13,6 @@ import com.commercefoundry.security.principal.MemberRole;
 import java.util.OptionalLong;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -72,21 +71,10 @@ public class AdminAuditLogRepositoryAdapter implements AdminAuditPort, AdminAudi
         record(AdminAuditRecord.membersSearched(adminMemberId, role, page, size));
     }
 
-    /** 조건 조합마다 파생 쿼리 하나 — 모두 아이디 내림차순이다. */
+    /** 조건이 켜지고 꺼지므로 QueryDSL 한 쿼리다 — 모두 아이디 내림차순이다. */
     @Override
-    public Page<AdminAuditLog> findPage(String action, Long actorMemberId, int page, int size) {
-        PageRequest pageable = PageRequest.of(page, size);
-        Page<AdminAuditLogEntity> logs;
-        if (action != null && actorMemberId != null) {
-            logs = adminAuditLogRepository.findAllByActionAndActorMemberIdOrderByIdDesc(action, actorMemberId, pageable);
-        } else if (action != null) {
-            logs = adminAuditLogRepository.findAllByActionOrderByIdDesc(action, pageable);
-        } else if (actorMemberId != null) {
-            logs = adminAuditLogRepository.findAllByActorMemberIdOrderByIdDesc(actorMemberId, pageable);
-        } else {
-            logs = adminAuditLogRepository.findAllByOrderByIdDesc(pageable);
-        }
-        return logs.map(adminAuditLogMapper::toDomain);
+    public Page<AdminAuditLog> findPage(String action, Long actorMemberId, String target, String result, int page, int size) {
+        return adminAuditLogRepository.findPage(action, actorMemberId, target, result, page, size).map(adminAuditLogMapper::toDomain);
     }
 
     private void record(AdminAuditRecord record) {

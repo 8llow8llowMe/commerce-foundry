@@ -184,6 +184,9 @@
     create index idx_admin_audit_log_actor_member_id_id 
        on auth.admin_audit_log (actor_member_id, id);
 
+    create index idx_admin_audit_log_target_id 
+       on auth.admin_audit_log (target, id);
+
     create index idx_member_agreement_member_id_agreement_type 
        on auth.member_agreement (member_id, agreement_type);
 

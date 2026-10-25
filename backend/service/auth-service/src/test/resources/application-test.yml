@@ -40,3 +40,7 @@ auth:
     enabled: true
     # 시도 계수 HMAC 키 — base64("auth-login-guard-test-only-hash-key", 35바이트). 테스트 전용이다. 비밀이 아니다
     hash-key: YXV0aC1sb2dpbi1ndWFyZC10ZXN0LW9ubHktaGFzaC1rZXk=
+  admin-audit:
+    retention:
+      # 보관 정리가 컨텍스트를 공유하는 다른 테스트의 행을 지우지 않게 첫 실행을 미룬다 — 빈 · 스케줄 등록은 그대로 검증된다
+      initial-delay: 24h

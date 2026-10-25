@@ -2,14 +2,18 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.member.adapter.in.scheduler.AdminAuditLogRetentionScheduler;
 import com.commercefoundry.domainlayer.member.adapter.out.redis.AccessTokenRevocationRedisAdapter;
 import com.commercefoundry.domainlayer.member.adapter.out.redis.LoginAttemptRedisAdapter;
 import com.commercefoundry.domainlayer.member.adapter.out.redis.RefreshTokenRedisAdapter;
+import com.commercefoundry.domainlayer.member.application.port.in.AdminAuditLogRetentionSchedulerUseCase;
 import com.commercefoundry.domainlayer.member.application.port.out.AccessTokenRevocationPort;
 import com.commercefoundry.domainlayer.member.application.port.out.LoginAttemptCounterPort;
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
+import com.commercefoundry.domainlayer.member.application.service.AdminAuditLogRetentionSchedulerFacade;
 import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptPolicy;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
+import com.commercefoundry.global.properties.AdminAuditRetentionProperties;
 import com.commercefoundry.global.properties.AgreementProperties;
 import com.commercefoundry.global.properties.AuthLoginGuardProperties;
 import com.commercefoundry.global.properties.AuthTokenProperties;
@@ -19,7 +23,10 @@ import com.commercefoundry.support.TestLoginGuard;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.persistence.EntityManagerFactory;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Period;
+import java.util.List;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -27,13 +34,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springdoc.core.models.GroupedOpenApi;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.config.FixedDelayTask;
+import org.springframework.scheduling.config.ScheduledTask;
+import org.springframework.scheduling.config.ScheduledTaskHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionAttribute;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
@@ -63,6 +76,34 @@ class AuthServiceApplicationTests {
         assertThat(applicationContext.getBeansOfType(GroupedOpenApi.class).values())
             .extracting(GroupedOpenApi::getGroup)
             .containsExactlyInAnyOrder("customer", "admin");
+    }
+
+    @Test
+    @DisplayName("감사 로그 보관은 2년이고, 정리 스케줄러가 등록되며 배치 삭제는 쓰기 트랜잭션이다")
+    void auditRetentionIsScheduled() throws NoSuchMethodException {
+        assertThat(applicationContext.getBean(AdminAuditRetentionProperties.class).period()).isEqualTo(Period.ofYears(2));
+
+        List<FixedDelayTask> tasks = applicationContext.getBeansOfType(ScheduledTaskHolder.class).values().stream()
+            .flatMap(holder -> holder.getScheduledTasks().stream())
+            .map(ScheduledTask::getTask)
+            .filter(FixedDelayTask.class::isInstance)
+            .map(FixedDelayTask.class::cast)
+            .filter(task -> task.toString().contains(AdminAuditLogRetentionScheduler.class.getName()))
+            .toList();
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.getFirst().getIntervalDuration()).isEqualTo(Duration.ofHours(1));
+        assertThat(tasks.getFirst().getInitialDelayDuration()).isEqualTo(Duration.ofHours(24));
+        assertThat(applicationContext.getBeanNamesForType(Clock.class)).hasSize(1);
+        assertThat(AopUtils.isAopProxy(applicationContext.getBean(AdminAuditLogRetentionSchedulerUseCase.class))).isTrue();
+
+        AnnotationTransactionAttributeSource source = new AnnotationTransactionAttributeSource();
+        TransactionAttribute deleteBatch = source.getTransactionAttribute(
+            AdminAuditLogRetentionSchedulerFacade.class.getMethod("deleteBatch", long.class, int.class), AdminAuditLogRetentionSchedulerFacade.class
+        );
+        assertThat(deleteBatch).isNotNull();
+        assertThat(deleteBatch.isReadOnly()).isFalse();
+        assertThat(source.getTransactionAttribute(AdminAuditLogRetentionSchedulerFacade.class.getMethod("cutoffId"), AdminAuditLogRetentionSchedulerFacade.class)).isNull();
     }
 
     @Test

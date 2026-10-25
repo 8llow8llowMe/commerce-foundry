@@ -19,6 +19,7 @@ public class AdminAuditLogQueryProcessor {
 
     public Page<AdminAuditLog> search(AdminAuditLogSearchCommand command) {
         String action = command.action() == null ? null : command.action().name();
-        return adminAuditLogRepositoryPort.findPage(action, command.actorMemberId(), command.page(), command.size());
+        String result = command.result() == null ? null : command.result().name();
+        return adminAuditLogRepositoryPort.findPage(action, command.actorMemberId(), command.target(), result, command.page(), command.size());
     }
 }

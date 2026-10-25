@@ -531,7 +531,7 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
     `gateway.client-ip.trusted-proxies` 와 무관). 그래서 지금 하류 요청에는 `X-Forwarded-*` · `Forwarded` 가 없다 — 실제 Netty 테스트(`ClientSubject*Test`)가 고정한다.
     SCG `x-forwarded` 설정은 건드리지 않는다. 하류가 전달 헤더를 받더라도(설정이 바뀌어 생기더라도) **신뢰하지 않는 정보성 값**이고, 클라이언트 식별은 아래 `X-Client-Subject` 로만 한다.
   - 하류에 넘기는 것은 **IP 원문이 아니라 게이트웨이가 만든 HMAC** 이다(#135) — 하류 서비스에 IP 원문이 들어오지 않아 로그 · Redis 키 규칙(원문 금지, `coding-conventions.md` §9-7)이 단순해지고,
-    해시 키를 서비스마다 둘 필요가 없으며, 신뢰 프록시 해석 · IPv6 묶음이 게이트웨이 한 곳에서 끝난다. 원문 IP 가 꼭 필요한 하류(감사 로그 등)가 생기면 그때 따로 정한다.
+    해시 키를 서비스마다 둘 필요가 없으며, 신뢰 프록시 해석 · IPv6 묶음이 게이트웨이 한 곳에서 끝난다. 원문 IP 를 감사 로그에 넣을지는 #286 에서 정했다 — 넣지 않는다(§11-4 접속기록 범위).
 
 **하류 헤더 계약 — `X-Client-Subject` (#135, `ClientSubjectHeaderFilter`)**
 
@@ -903,15 +903,32 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
     만들지 않고, 업무가 롤백돼도 감사 행은 남는다. 단 업무 트랜잭션 안에서 부르면 스레드가 커넥션 2개를 잡는다 — 지금 호출자는 모두 트랜잭션 밖이다.
   - **행위자도 대상도 없는 기록은 행을 만들지 않는다** — 없는 이메일 · 고객 계정으로 관리자 로그인에 실패하면 로그 한 줄(`target=-`)만 남는다.
     인증 전 요청이라 이메일을 바꿔 가며 반복하면 행이 끝없이 쌓이기 때문이다. 노린 관리자 계정이 있는 실패(`target=member:<id>`)는 행으로 남는다.
-  - 테이블은 append-only 이고 개인정보가 없다 — 행위 · 관리자 memberId(모르면 null) · 대상 · 결과 · 시각. 엔티티는 `@Immutable`, 리포지토리는 `JpaRepository` 가 아니라
-    `Repository` 를 상속해 `saveAndFlush` 와 조회만 연다(삭제 메서드 없음). 운영 DB 앱 계정에는 이 테이블의 INSERT · SELECT 만 주고 UPDATE · DELETE 는 주지 않는다
-    (정리 스케줄러가 생길 때 DELETE 를 따로 준다). 행위는 문자열 칼럼이다(행위를 더할 때 check 제약 DDL 이 생기지 않게). 결과만 check 로 막는다.
-  - **보관 기간은 2년**으로 정한다 — 개인정보의 안전성 확보조치 기준의 접속기록 **최소** 보관 기간(1년, 대규모 · 고유식별 · 민감정보를 처리하면 2년)을 넉넉히 덮는다.
-    다만 이 테이블은 접속지(IP) · 처리한 정보주체 칸이 없어 그 기준의 접속기록 요건을 혼자 채우지 않는다(후속). 지난 행을 지우는 정리 스케줄러도 후속이다 —
-    2년 안에는 지울 행이 없고, Snowflake 아이디에 시각이 있어 `id < 컷오프 아이디` 범위로 지우면 `created_at` 인덱스가 필요 없다.
-  - **남은 위험** — 관리자 로그인에는 아직 시도 제한이 없다(#66). 노린 관리자 계정이 있는 실패는 반복하면 행이 늘어난다. #66 이 관리자 로그인을 대상으로 삼을 때
-    IP 단위 제한도 함께 본다.
-  - 조회는 `GET /api/v1/admin/audit-logs`(ADMIN, `api-design-guide.md` §2-4). 이 조회 자체는 감사하지 않는다 — 행에 개인정보가 없고, 남기면 조회마다 행이 늘어난다.
+  - 테이블은 append-only 이고 개인정보가 없다 — 행위 · 관리자 memberId(모르면 null) · 대상 · 결과 · 시각. 엔티티는 `@Immutable`, 조회 · 추가 리포지토리는 `JpaRepository` 가 아니라
+    `Repository` 를 상속해 `saveAndFlush` 와 조회만 연다. DELETE 문장은 보관 정리 리포지토리(`AdminAuditLogRetentionRepository`)만 연다. 행위는 문자열 칼럼이다
+    (행위를 더할 때 check 제약 DDL 이 생기지 않게). 결과만 check 로 막는다.
+  - **보관 기간은 기본 2년**이다 (`auth.admin-audit.retention.period`, `P2Y`). 개인정보의 안전성 확보조치 기준 접속기록 **최소** 보관(1년, 대규모 · 고유식별 · 민감정보는 2년)을 덮는다.
+    1년 미만이면 기동하지 않는다(`AdminAuditRetentionProperties` — 평년 1월 1일 기준으로 달력 1년 미만을 거절한다. 365일은 통과하고 364일은 막힌다).
+    정리 스케줄러 `AdminAuditLogRetentionScheduler` → `AdminAuditLogRetentionSchedulerUseCase` → `AdminAuditLogRetentionSchedulerFacade`(배치마다 트랜잭션) → Processor 가 `id < 컷오프 아이디` 인 행만 배치로 지운다.
+    컷오프는 `SnowflakeIdGenerator.lowestIdAt(지금 - 보관 기간)` 이라 그 밀리초의 행은 남고, 더 이전 행만 지워진다. `created_at` 인덱스는 두지 않는다.
+    한 번에 `batch-size`(기본 1000)건, 한 실행은 `max-batches-per-run`(기본 50)까지다. 삭제는 멱등이라 인스턴스가 여럿이어도 분산 락을 두지 않는다.
+    한 배치가 실패하면 그 실행은 멈추고 다음 주기가 남은 행을 다시 집는다.
+  - **운영 DB 권한 (#286).** 이 테이블만 스키마 공통 DML(`service-inventory.md` §4-2)에서 좁힌다. UPDATE 는 주지 않는다.
+    DELETE 문장은 정리 배치 한 곳이다. 배포 DB 로그인은 아직 서비스·용도별로 나뉘지 않는다(#82, 분리는 #258)라 정리 배치도 앱과 같은 로그인을 쓴다.
+    그래서 그 로그인에 이 테이블의 **INSERT · SELECT · DELETE** 를 준다. "정리 배치에만 DELETE" 는 코드 경로로 지킨다 — 요청 처리 리포지토리에는 삭제 메서드가 없다.
+    앱 로그인을 INSERT · SELECT 만 두고 DELETE 를 다른 로그인에 주려면 DataSource 가 둘이어야 한다. #258 에서 계정을 나눌 때 이 테이블의 DELETE 를 정리 배치 로그인으로 옮긴다.
+    그 전까지 로그인 둘을 만들지 않는다.
+  - **접속기록 범위 (#286).** 안전성 확보조치 기준의 접속기록 항목은 식별자 · 접속일시 · 접속지 · 처리한 정보주체 · 수행업무다.
+    이 테이블이 맡는 것은 **식별자(`actor_member_id`) · 접속일시(`created_at`, Snowflake 아이디) · 수행업무(`action`) · 대상 리소스(`target`) · 결과** 다.
+    - **접속지(IP) 칸은 넣지 않는다.** 게이트웨이는 하류에 IP 원문을 넘기지 않고 HMAC 만 넘긴다(#135, §8). 원문을 행에 넣으면 하류가 개인정보(접속지)를 저장하고,
+      "행에 개인정보가 없어 이 조회는 감사하지 않는다" 는 전제가 깨진다. 조회마다 행이 늘어나는 순환도 생긴다. HMAC 은 법정 접속지를 대신하지 않는다.
+    - **처리한 정보주체 칸도 새로 두지 않는다.** 로그인 실패의 `target=member:<id>` 는 노린 관리자 계정이지 열람한 정보주체가 아니다.
+      회원 목록 조회의 `target` 은 조건 문자열이라 정보주체 식별자가 아니다.
+    - 그래서 이 테이블은 법정 접속기록을 **혼자 채우지 않는다.** 범위는 관리자 행위 감사다. 접속지와 정보주체 열람 기록은 이 테이블 밖이다.
+  - **남은 위험** — 관리자 로그인에는 아직 시도 제한이 없다(#66). 노린 관리자 계정이 있는 실패는 반복하면 행이 늘어난다. 보관 정리가 기간이 지난 행을 지우므로 무한히 쌓이지는 않는다.
+    #66 이 관리자 로그인을 대상으로 삼을 때 IP 단위 제한은 게이트웨이 시도 제한(#135)을 보고, 이 테이블에 IP 를 넣지 않는다.
+  - 조회는 `GET /api/v1/admin/audit-logs`(ADMIN, `api-design-guide.md` §2-4). 조건은 `action` · `actorMemberId` · `target`(완전 일치) · `result` 다.
+    로그인 실패는 행위자가 null 이라 `actorMemberId` 만으로는 한 계정을 노린 실패를 못 고른다. `action=ADMIN_LOGIN&target=member:<id>&result=FAILURE` 로 고르고,
+    `(target, id)` 인덱스를 둔다. 이 조회 자체는 감사하지 않는다 — 행에 개인정보가 없고, 남기면 조회마다 행이 늘어난다.
   - 다른 서비스(operations `JOB_CANCEL` 등)는 지금 로그 한 줄만 남긴다. DB 영속화를 서비스마다 어떻게 둘지(서비스별 같은 모양 테이블 · core 공유 안 함 권고)는 #163 에서 정한다.
 - **서비스 전용 이력 테이블 사례 — delivery-service 배송비 정책 교체 이력 (#69).** 어드민 공통 감사 로그(DB)가 아직 없어 `delivery.shipping_policy_history`
   (+ 구간 스냅숏 `shipping_policy_history_area`)에 교체 전 · 후 값 · 교체한 관리자(`admin_member_id` — access 토큰의 memberId, 본문 값을 쓰지 않는다) · 시각을 남긴다.

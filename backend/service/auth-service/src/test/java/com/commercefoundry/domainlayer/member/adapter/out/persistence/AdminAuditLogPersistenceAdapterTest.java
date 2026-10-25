@@ -85,7 +85,7 @@ class AdminAuditLogPersistenceAdapterTest {
         adminAuditPort.adminLoginFailed(OptionalLong.empty());
         adminAuditPort.adminLoginFailed(OptionalLong.of(admin));
 
-        Page<AdminAuditLog> all = adminAuditLogRepositoryPort.findPage(null, null, 0, 10);
+        Page<AdminAuditLog> all = adminAuditLogRepositoryPort.findPage(null, null, null, null, 0, 10);
         assertThat(all.getContent()).extracting(AdminAuditLog::action).containsExactly("ADMIN_LOGIN", "MEMBER_SEARCH", "ADMIN_LOGIN");
         assertThat(all.getContent().getFirst()).satisfies(failed -> {
             assertThat(failed.actorMemberId()).isNull();
@@ -95,19 +95,25 @@ class AdminAuditLogPersistenceAdapterTest {
         assertThat(all.getContent()).allSatisfy(log -> assertThat(log.createdAt()).isNotNull());
 
         // page 1 · size 1 이라 count 가 반드시 돈다 — 전체 건수가 내용과 같은 조건인지 본다
-        Page<AdminAuditLog> byActor = adminAuditLogRepositoryPort.findPage(null, admin, 1, 1);
+        Page<AdminAuditLog> byActor = adminAuditLogRepositoryPort.findPage(null, admin, null, null, 1, 1);
         assertThat(byActor.getContent()).extracting(AdminAuditLog::action).containsExactly("ADMIN_LOGIN");
         assertThat(byActor.getTotalElements()).isEqualTo(2);
 
-        Page<AdminAuditLog> logins = adminAuditLogRepositoryPort.findPage("ADMIN_LOGIN", null, 1, 1);
+        Page<AdminAuditLog> logins = adminAuditLogRepositoryPort.findPage("ADMIN_LOGIN", null, null, null, 1, 1);
         assertThat(logins.getContent()).singleElement().satisfies(log -> assertThat(log.result()).isEqualTo("SUCCESS"));
         assertThat(logins.getTotalElements()).isEqualTo(2);
 
-        Page<AdminAuditLog> actorLogins = adminAuditLogRepositoryPort.findPage("ADMIN_LOGIN", admin, 1, 1);
+        Page<AdminAuditLog> actorLogins = adminAuditLogRepositoryPort.findPage("ADMIN_LOGIN", admin, null, null, 1, 1);
         assertThat(actorLogins.getContent()).isEmpty();
         assertThat(actorLogins.getTotalElements()).isEqualTo(1);
 
-        Page<AdminAuditLog> beyond = adminAuditLogRepositoryPort.findPage(null, null, 5, 10);
+        Page<AdminAuditLog> beyond = adminAuditLogRepositoryPort.findPage(null, null, null, null, 5, 10);
+
+        Page<AdminAuditLog> failedAgainstAdmin = adminAuditLogRepositoryPort.findPage(
+            "ADMIN_LOGIN", null, "member:" + admin, "FAILURE", 0, 10
+        );
+        assertThat(failedAgainstAdmin.getContent()).singleElement().satisfies(log -> assertThat(log.actorMemberId()).isNull());
+        assertThat(failedAgainstAdmin.getTotalElements()).isEqualTo(1);
         assertThat(beyond.getContent()).isEmpty();
         assertThat(beyond.getTotalElements()).isEqualTo(3);
     }

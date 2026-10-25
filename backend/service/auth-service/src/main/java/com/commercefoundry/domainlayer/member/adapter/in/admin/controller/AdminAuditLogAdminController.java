@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.item.AdminAud
 import com.commercefoundry.domainlayer.member.application.command.AdminAuditLogSearchCommand;
 import com.commercefoundry.domainlayer.member.application.exception.MemberValidationMessage;
 import com.commercefoundry.domainlayer.member.application.model.AdminAuditAction;
+import com.commercefoundry.domainlayer.member.application.model.AdminAuditResult;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminAuditLogAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -14,6 +15,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.RequiredArgsConstructor;
@@ -42,9 +44,11 @@ public class AdminAuditLogAdminController {
 
     @Operation(
         summary = "관리자 감사 로그 조회",
-        description = "최신순(감사 로그 아이디 내림차순 — Snowflake 라 기록 순서와 같다) 페이지다. 행위 · 관리자로 거를 수 있고, 없으면 전체다. "
+        description = "최신순(감사 로그 아이디 내림차순 — Snowflake 라 기록 순서와 같다) 페이지다. "
+            + "행위 · 관리자 · 대상(완전 일치) · 결과로 거를 수 있고, 없으면 전체다. "
             + "page 는 0부터, size 는 1~100(기본 20)이고 벗어나면 400(AUTH_133 · AUTH_134), actorMemberId 가 양수가 아니면 400(AUTH_135), "
-            + "행위 값이 틀리면 400(AUTH_198)이다. 로그인 실패는 행위자를 모르므로 actorMemberId 가 null 이고, 노린 관리자 계정이 target 에 남는다. "
+            + "target 이 공백이 있거나 1~200자 밖이면 400(AUTH_136), 행위 · 결과 값이 틀리면 400(AUTH_198)이다. "
+            + "로그인 실패는 행위자를 모르므로 actorMemberId 가 null 이고, 노린 관리자 계정은 target=member:<id> · result=FAILURE 로 고른다. "
             + "이 조회 자체는 감사 로그에 남지 않는다."
     )
     @PreAuthorize("hasRole('ADMIN')")
@@ -53,12 +57,15 @@ public class AdminAuditLogAdminController {
         @Parameter(description = "행위 — ADMIN_LOGIN · MEMBER_SEARCH. 없으면 전체") @RequestParam(required = false) AdminAuditAction action,
         @Parameter(description = "행위한 관리자 회원 아이디. 없으면 전체") @RequestParam(required = false)
         @Positive(message = MemberValidationMessage.ADMIN_AUDIT_ACTOR_ID_POSITIVE) Long actorMemberId,
+        @Parameter(description = "대상 완전 일치 (member:<id> 등). 없으면 전체") @RequestParam(required = false)
+        @Pattern(regexp = "[\\x21-\\x7E]{1,200}", message = MemberValidationMessage.ADMIN_AUDIT_TARGET_INVALID) String target,
+        @Parameter(description = "결과 — SUCCESS · FAILURE. 없으면 전체") @RequestParam(required = false) AdminAuditResult result,
         @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0") @PositiveOrZero(message = MemberValidationMessage.ADMIN_PAGE_MIN) int page,
         @Parameter(description = "페이지 크기 (1~100)") @RequestParam(defaultValue = "20")
         @Min(value = 1, message = MemberValidationMessage.ADMIN_SIZE_RANGE) @Max(value = MAX_PAGE_SIZE, message = MemberValidationMessage.ADMIN_SIZE_RANGE) int size
     ) {
         return ResponseEntity.ok().body(Response.success(
-            adminAuditLogAdminUseCase.searchAuditLogs(new AdminAuditLogSearchCommand(action, actorMemberId, page, size))
+            adminAuditLogAdminUseCase.searchAuditLogs(new AdminAuditLogSearchCommand(action, actorMemberId, target, result, page, size))
         ));
     }
 }
