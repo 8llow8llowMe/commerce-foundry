@@ -1,5 +1,11 @@
 import { roleLabel } from '@/lib/member/query';
-import { AUDIT_ACTION_LABELS, AUDIT_ACTIONS, type AuditLogItem } from './types';
+import {
+  AUDIT_ACTION_LABELS,
+  AUDIT_ACTIONS,
+  AUDIT_RESULT_LABELS,
+  AUDIT_RESULTS,
+  type AuditLogItem,
+} from './types';
 
 /**
  * 감사 로그 한 행 → 운영자 문구(#305). 행위 · 결과 코드, 대상 원문, 회원 아이디는 화면에 그대로 내지 않는다.
@@ -25,9 +31,8 @@ export function actionLabel(action: string): string {
 }
 
 export function resultLabel(result: string): string {
-  if (result === 'SUCCESS') return '성공';
-  if (result === 'FAILURE') return '실패';
-  return '알 수 없음';
+  const known = AUDIT_RESULTS.find((item) => item === result);
+  return known ? AUDIT_RESULT_LABELS[known] : '알 수 없음';
 }
 
 function actorText(item: AuditLogItem): Pick<AuditLogView, 'actor' | 'actorHint'> {

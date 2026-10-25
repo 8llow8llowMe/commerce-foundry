@@ -1,6 +1,6 @@
 /**
- * 어드민 관리자 감사 로그 `GET /api/v1/admin/audit-logs?action=&actorMemberId=&page=&size=`
- * (#192, auth-service `AdminAuditLogAdminController`, 계약 정본 `backend/docs/api-design-guide.md` §2-4 · `security-guide.md` §11-4).
+ * 어드민 관리자 감사 로그 `GET /api/v1/admin/audit-logs?action=&actorMemberId=&target=&result=&page=&size=`
+ * (#192 · #286, auth-service `AdminAuditLogAdminController`, 계약 정본 `backend/docs/api-design-guide.md` §2-4 · `security-guide.md` §11-4).
  * ADMIN 이고, 최신순(감사 로그 아이디 내림차순) `PageResponse` 다. 읽기만 있다.
  */
 export const ADMIN_AUDIT_LOGS_PATH = '/api/v1/admin/audit-logs';
@@ -13,6 +13,16 @@ export type AuditActionCode = (typeof AUDIT_ACTIONS)[number];
 export const AUDIT_ACTION_LABELS: Record<AuditActionCode, string> = {
   ADMIN_LOGIN: '관리자 로그인',
   MEMBER_SEARCH: '회원 목록 조회',
+};
+
+/** 서버 `AdminAuditResult` 와 같은 값 — 필터에 보낼 수 있는 값이다(틀리면 400 AUTH_198) */
+export const AUDIT_RESULTS = ['SUCCESS', 'FAILURE'] as const;
+export type AuditResultCode = (typeof AUDIT_RESULTS)[number];
+
+/** 결과의 업무 이름(#305) */
+export const AUDIT_RESULT_LABELS: Record<AuditResultCode, string> = {
+  SUCCESS: '성공',
+  FAILURE: '실패',
 };
 
 /**
