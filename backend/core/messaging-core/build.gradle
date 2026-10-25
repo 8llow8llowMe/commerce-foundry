@@ -1,0 +1,30 @@
+plugins {
+    // 서비스 테스트가 같이 쓰는 가짜 outbox · inbox 저장소와 Kafka 컨테이너 (src/testFixtures).
+    // 소비자는 testImplementation testFixtures(project(':core:messaging-core')) 로만 받는다 — 실행 클래스패스에 들어가지 않는다
+    id 'java-test-fixtures'
+}
+
+dependencies {
+    // Kafka 접속은 Boot 자동설정(spring.kafka.*)을 그대로 쓴다 — @ServiceConnection · 보안 프로토콜이 Boot 키로 끝난다.
+    // 서비스가 @KafkaListener · KafkaTemplate 을 직접 쓰므로 api 다. 버전은 Boot BOM 이 정한다 (spring-kafka 4.0.x)
+    api 'org.springframework.boot:spring-boot-starter-kafka'
+    // 멱등 기록 · outbox 저장을 업무 트랜잭션에 묶는다 (TransactionTemplate · TransactionSynchronization)
+    implementation 'org.springframework:spring-tx'
+    implementation 'org.springframework:spring-jdbc'
+    implementation 'tools.jackson.core:jackson-databind'
+    implementation 'org.slf4j:slf4j-api'
+    // 발행 · DLT 지표. 레지스트리가 없으면 쓰지 않는다
+    implementation 'io.micrometer:micrometer-core'
+
+    // outbox 릴레이 단일 실행 락 — 여러 인스턴스 중 하나만 id 순으로 발행해 같은 키의 순서를 지킨다 (#304 A-3).
+    // 락 테이블은 서비스 스키마에 둔다(README). 서비스가 LockProvider 타입을 보지 않아 implementation 이다
+    implementation "net.javacrumbs.shedlock:shedlock-core:${rootProject.ext.shedlockVersion}"
+    implementation "net.javacrumbs.shedlock:shedlock-provider-jdbc:${rootProject.ext.shedlockVersion}"
+
+    // 서비스 테스트용 Kafka 컨테이너 (testFixtures). 버전은 Boot BOM 이 정한다
+    testFixturesApi 'org.testcontainers:testcontainers-kafka'
+    testFixturesImplementation 'org.springframework:spring-tx'
+
+    // 모듈 자체 왕복 테스트는 내장 Kafka(KRaft)로 돈다 — Docker 없는 로컬에서도 발행 · 소비 · DLT 를 실제로 본다
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+}

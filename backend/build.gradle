@@ -30,6 +30,8 @@ ext {
     commonsCsvVersion = '1.14.1'
     // Claude API 공식 Java SDK (ai-core). Boot BOM 이 관리하지 않아 여기서 고정한다
     anthropicSdkVersion = '2.34.0'
+    // outbox 릴레이 단일 실행 락 (messaging-core, #304 A-3). Boot BOM 이 관리하지 않아 여기서 고정한다. core · jdbc 두 모듈을 같은 버전으로 맞춘다
+    shedlockVersion = '6.10.0'
 }
 
 allprojects {
