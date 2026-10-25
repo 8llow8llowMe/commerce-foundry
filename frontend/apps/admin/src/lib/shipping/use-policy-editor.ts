@@ -29,6 +29,11 @@ export type PolicyEditor<Form> = {
   /** 저장 결과 · 충돌 안내 */
   notice: string | null;
   saving: boolean;
+  /**
+   * 저장 시도 뒤 서버 값이 바뀌었을 수 있으면 오른다 — 저장 성공 · 충돌로 다시 읽음 · 결과 모름으로 다시 읽음.
+   * 변경 이력처럼 같은 정책을 읽는 곁 화면이 `key` 로 써서 다시 읽는다(#319).
+   */
+  revision: number;
   save: () => Promise<void>;
   reload: () => Promise<void>;
 };
@@ -53,6 +58,7 @@ export function usePolicyEditor<Policy, Form, Request>({
   const [errors, setErrors] = useState<FormErrors>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [revision, setRevision] = useState(0);
 
   // 상태는 응답 콜백에서만 바꾼다 — 마운트 effect 가 부르므로 동기 setState 를 두지 않는다
   const load = useCallback(
@@ -91,13 +97,16 @@ export function usePolicyEditor<Policy, Form, Request>({
       const saved = await apiFetch<Policy>(path, { method: 'PUT', json: built.request });
       setForm(toForm(saved));
       setNotice('저장했습니다.');
+      setRevision((n) => n + 1);
     } catch (cause) {
       const failure = policySaveFailure(cause);
       if (failure.kind === 'access') setStatus({ kind: 'denied', denied: failure.denied });
       else if (failure.kind === 'conflict') {
         if (await load()) setNotice(CONFLICT_NOTICE);
+        setRevision((n) => n + 1);
       } else if (failure.kind === 'unknownOutcome') {
         if (await load()) setNotice(UNKNOWN_OUTCOME_NOTICE);
+        setRevision((n) => n + 1);
       } else setErrors(failure.errors);
     } finally {
       setSaving(false);
@@ -122,6 +131,7 @@ export function usePolicyEditor<Policy, Form, Request>({
     errors,
     notice,
     saving,
+    revision,
     save,
     reload,
   };

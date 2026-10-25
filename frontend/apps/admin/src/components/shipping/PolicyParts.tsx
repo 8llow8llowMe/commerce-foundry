@@ -111,7 +111,7 @@ const dateTime = new Intl.DateTimeFormat('ko-KR', {
 
 /**
  * 정책 편집 화면의 틀 — 읽는 중 · 로그인 필요 · 읽기 실패를 그리고, 준비되면 폼(children)을 그린다.
- * 폼 아래에 폼 전체 오류 · 저장 안내 · 저장 버튼을 둔다.
+ * 폼 아래에 폼 전체 오류 · 저장 안내 · 저장 버튼을 둔다. `after` 는 폼이 준비됐을 때 그 아래에 그린다(변경 이력, #319).
  */
 export function PolicyEditorFrame<
   Form extends { version: number | null; updatedAt: string | null },
@@ -119,10 +119,12 @@ export function PolicyEditorFrame<
   title,
   editor,
   children,
+  after,
 }: {
   title: string;
   editor: PolicyEditor<Form>;
   children: (form: Form) => ReactNode;
+  after?: ReactNode;
 }) {
   const { status, form } = editor;
 
@@ -176,6 +178,7 @@ export function PolicyEditorFrame<
           </div>
         </form>
       )}
+      {status.kind === 'ready' && form && after}
     </div>
   );
 }

@@ -10,11 +10,13 @@ import {
 } from '@/lib/shipping/policy-form';
 import { DOMESTIC_POLICY_PATH } from '@/lib/shipping/types';
 import { usePolicyEditor } from '@/lib/shipping/use-policy-editor';
+import { DomesticPolicyHistory } from './DomesticPolicyHistory';
 import { CurrencyField, errorsOf, MoneyField, PolicyEditorFrame, Section } from './PolicyParts';
 
 /**
  * 국내 배송비 정책 편집(#187) — `GET/PUT /api/v1/admin/shipping-policies/domestic`.
  * 기본 배송비 · 무료배송 기준(선택) · 도서산간 우편번호 구간별 추가 배송비. 실제 배송비는 서버 견적이 계산한다.
+ * 폼 아래에 변경 이력(#319)을 둔다 — 저장 뒤 서버 값이 바뀌었을 수 있으면(`revision`) 첫 페이지부터 다시 읽는다.
  */
 export function DomesticPolicyEditor() {
   const editor = usePolicyEditor({
@@ -24,7 +26,11 @@ export function DomesticPolicyEditor() {
   });
 
   return (
-    <PolicyEditorFrame title="국내 배송비 정책" editor={editor}>
+    <PolicyEditorFrame
+      title="국내 배송비 정책"
+      editor={editor}
+      after={<DomesticPolicyHistory key={editor.revision} />}
+    >
       {(form) => {
         const { errors } = editor;
         const set = (patch: Partial<DomesticForm>, rowsChanged = false) =>
