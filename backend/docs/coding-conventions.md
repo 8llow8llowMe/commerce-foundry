@@ -544,3 +544,27 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
 ```
 
 - 다국어 스토어(ko/en)에서 표시명은 `Accept-Language` 기준으로 고른다 — 구현 방식은 i18n 이슈에서 확정한다.
+
+## 12. 메시징 (Kafka, #304 · #306)
+
+일어난 사실(결제 승인됨 · 주문 만료됨 · 작업 등록됨)은 outbox → Kafka → 컨슈머로 전한다. 응답을 보고 분기하는 명령은 지금처럼 internal API(Feign)다 (#304 설계 A-1).
+모듈 사용법 · 설정 키 · 서비스가 둘 테이블은 [`core/messaging-core/README.md`](../core/messaging-core/README.md) 가 정본이다.
+
+- **발행은 `EventPublisher` 만 쓰고, 업무 트랜잭션 안에서 부른다.** Kafka 로 바로 보내지 않는다 — outbox 행이 업무와 같은 커밋으로 저장되고 릴레이가 보낸다.
+  트랜잭션 밖에서 부르면 `NO_TRANSACTION`, 읽기 전용 트랜잭션이면 `READ_ONLY_TRANSACTION` 이다. 롤백되면 이벤트가 나가지 않고, 커밋되면 한 번 이상 나간다.
+- **소비는 멱등이다.** `IdempotentEventProcessor.process(group, envelope, handler)` 가 처리 기록(`processed_event`)과 업무 처리를 한 트랜잭션으로 묶는다.
+  원격 호출을 섞어 트랜잭션을 나누는 컨슈머는 `isProcessed` 로 거르고 상태를 쓰는 트랜잭션 안에서 `record` 한다. 상태 전이 멱등이 2차 방어다.
+- 리스너는 `adapter/in/event/*EventListener` 이고 UseCase 만 부른다. 값은 문자열로 받아 `EventEnvelopeCodec.decode` 로 봉투를 읽고,
+  `requireVersion` 으로 모르는 새 버전을 거른다.
+- **이름은 `TopicNames` 로 만든다** — 토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`, DLT `<topic>.dlt`, 그룹 `<ns>.<소비 서비스>.<목적>`.
+  namespace(`commerce-foundry.<env>`)는 설정값이다. 코드에 namespace · 스토어 이름을 쓰지 않는다. **앱은 토픽을 만들지 않는다**(`spring.kafka.admin.auto-create=false`).
+- **페이로드에는 아이디 · 금액(long)+통화 · 상태 · 사유 코드 · 시각 · SKU · 수량만** 싣는다. 이름 · 연락처 · 주소 · 이메일 · 카드 정보 · PG 키(`paymentKey`) · 오류 원문은
+  싣지 않는다 — Kafka UI 로 본문이 열람되고 7일 보존된다. 세부는 컨슈머가 internal API 로 읽는다. 필드는 추가만 하고, 삭제 · 의미 변경은 `schemaVersion+1` 과 `.v2` 토픽이다.
+  개인정보로 보이는 필드 이름은 `EventEnvelopeCodec` 이 `FORBIDDEN_FIELD` 로 막는다(실수를 잡는 장치이지 허용 목록이 아니다).
+- **리스너 토픽 · 그룹은 `TopicNames` 로 만든 이름만 쓴다.** 켜져 있으면 namespace 로 시작하지 않는 토픽 · 그룹, 토픽 패턴 구독은 기동 실패다. `autoStartup` 은 적지 않는다.
+- **이벤트는 진위가 확인되지 않은 알림이다.** 돈 · 재고 상태를 바꾸는 컨슈머는 원본 서비스 internal API 로 재조회해 확정한다(웹훅과 같은 원칙).
+- **재시도 · DLT** — 일시 오류는 컨슈머 안 지수 백오프(기본 5회) 뒤 `<topic>.dlt`. 다시 해도 같은 실패는 `NonRetryableEventException` 으로 던져 바로 DLT 로 보낸다.
+  업무상 정상적인 거절(금액 불일치 등)은 예외가 아니라 결과 상태 · 보상 이벤트로 처리한다. `@RetryableTopic` 은 쓰지 않는다.
+- 로그 · 예외 · outbox 실패 코드 · DLT 헤더에 봉투 · 페이로드 · 예외 메시지를 싣지 않는다 — eventId · 이벤트 종류 · 예외 타입만 (§8 과 같은 기준).
+- 테스트 — 서비스 단위 테스트는 testFixtures 의 `InMemoryOutboxStore` · `InMemoryProcessedEventStore`(트랜잭션 커밋 · 롤백을 흉내 낸다)를,
+  통합 테스트는 `MessagingKafkaContainers`(Testcontainers, `@EnabledWithDockerOrOnCi`)를 쓴다.
