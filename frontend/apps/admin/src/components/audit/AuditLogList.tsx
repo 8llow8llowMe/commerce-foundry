@@ -13,7 +13,7 @@ import { AuditLogTable } from './AuditLogTable';
 type Loaded = AuditLogsLoad & { path: string; tick: number };
 
 /**
- * 어드민 관리자 감사 로그(#320, BE #192) — 최신순, 조건(행위 · 페이지)은 주소(`query`)가 정본이다.
+ * 어드민 관리자 감사 로그(#320 · #329, BE #192 · #286) — 최신순, 조건(행위 · 결과 · 페이지)은 주소(`query`)가 정본이다.
  * 관리자는 "관리자" 로만 보이고 관리자 조건은 없다 — 이름(마스킹)과 관리자 고르기는 BE #322(감사 로그 표시 이름) 뒤에 붙인다.
  */
 export function AuditLogList({ query }: { query: AuditLogQuery }) {

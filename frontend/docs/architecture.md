@@ -437,9 +437,9 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 - 취소가 401 · 403 · 404 로 끝날 때도 그 전에 나간 읽기는 버린다(세대 번호).
 
-### 관리자 감사 로그 (`/audit-logs`, #320)
+### 관리자 감사 로그 (`/audit-logs`, #320 · #329)
 
-메뉴 `운영 > 관리자 감사 로그`. auth-service 감사 로그 조회 `GET /api/v1/admin/audit-logs?action=&page=&size=`(BE #192, ADMIN,
+메뉴 `운영 > 관리자 감사 로그`. auth-service 감사 로그 조회 `GET /api/v1/admin/audit-logs?action=&result=&page=&size=`(BE #192 · #286, ADMIN,
 계약 정본 `backend/docs/api-design-guide.md` §2-4 · 기록 방식 `security-guide.md` §11-4) — 최신순 `PageResponse`, 페이지 20개, 읽기만 있다.
 코드는 `lib/audit/`(계약 `types.ts` · 조건 `query.ts` · 문구 `view.ts` · 읽기 `load.ts`), 화면은 `components/audit/` 다.
 
@@ -457,9 +457,13 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   - 관리자 칸은 **"관리자" 로만 보인다**. `actorMemberId` 가 null 이면 "확인 안 됨"(로그인 실패는 누가 시도했는지 모른다, 설명은 `title`).
 - **관리자 이름 표시 · 관리자 필터는 BE #322 이후에 한다** — 감사 로그 응답에 이름이 없어서다. BE #322 가 항목에 표시 이름(`actorDisplayName` · `targetDisplayName`, 마스킹)을
   더하면 이름을 보이고 관리자 필터(`actorMemberId`)를 붙인다. 그때까지 관리자 필터는 없고 관리자 조건을 보내지 않는다.
-- **조건은 주소가 정본이다**(상품 목록과 같은 규칙) — 화면 주소는 `?action=&page=`, `parseAuditLogQuery` 가 행위(enum 이름 그대로) · 페이지(숫자 6자리)만 받고
-  나머지는 "전체" 다(손으로 고친 주소가 400 `AUTH_198` 이 되지 않게). 모르는 파라미터(옛 주소의 `actor` 등)는 무시한다. 행위를 고르고 "검색" 을 눌러야 주소로 간다.
+- **조건은 행위 · 결과 두 가지다**(#329) — 행위(전체 · 업무 이름)와 결과(전체 · 성공 · 실패, `AUDIT_RESULT_LABELS`)를 함께 쓸 수 있다. 실패한 관리자 로그인만 보려면 행위 "관리자 로그인" · 결과 "실패" 다.
+  - **대상 조건(`target`, BE #286)은 두지 않는다** — 완전 일치 원문(`member:<id>`)을 입력 · 표시해야 해서 #305(아이디 · 코드 원문을 보이지 않는다)와 맞지 않는다. 보내지도 않는다.
+- **조건은 주소가 정본이다**(상품 목록과 같은 규칙) — 화면 주소는 `?action=&result=&page=`, `parseAuditLogQuery` 가 행위 · 결과(enum 이름 그대로, 대소문자까지) · 페이지(숫자 6자리)만 받고
+  나머지는 "전체" 다(손으로 고친 주소가 400 `AUTH_198` 이 되지 않게). 모르는 파라미터(옛 주소의 `actor`, `target` 등)는 무시한다.
+  조건을 고르고 "검색" 을 눌러야 주소로 가고 1쪽부터 다시 본다. 페이지 이동은 조건을 그대로 둔다.
 - **실패** — 401 · 403 은 `AccessNotice`, 그 밖(400 · 5xx · 연결)은 "다시 불러오기" 다(`loadAuditLogs`). 400 서버 문구는 영문 파라미터 이름이 들어 있어 보이지 않는다.
+  화면이 `target` 을 보내지 않아 `AUTH_136`(대상 형식)은 서버 계약이 바뀐 경우에만 생기고, 다른 400 과 같이 다룬다.
 
 ## 10. 메인 전시 (#59 · BE #63)
 

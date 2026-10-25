@@ -5,22 +5,32 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent } from 'react';
 import { auditLogsHref, DEFAULT_QUERY, hasFilter, type AuditLogQuery } from '@/lib/audit/query';
-import { AUDIT_ACTION_LABELS, AUDIT_ACTIONS } from '@/lib/audit/types';
+import {
+  AUDIT_ACTION_LABELS,
+  AUDIT_ACTIONS,
+  AUDIT_RESULT_LABELS,
+  AUDIT_RESULTS,
+} from '@/lib/audit/types';
 
 /**
- * 감사 로그 조건(#320) — 행위. 고친 조건은 "검색" 을 눌러야 주소로 간다(주소가 조건의 정본이다).
+ * 감사 로그 조건(#320 · #329) — 행위 · 결과. 고친 조건은 "검색" 을 눌러야 주소로 간다(주소가 조건의 정본이다).
  * 부모가 `key` 로 지금 주소를 넘겨, 주소가 바뀌면(뒤로 가기 · 페이지 이동) 폼을 새로 시작한다.
- * 관리자 조건은 두지 않는다 — 관리자 이름을 고를 수단이 BE #322 뒤에 생긴다.
+ * 관리자 조건은 두지 않는다 — 관리자 이름을 고를 수단이 BE #322 뒤에 생긴다. 대상 조건은 원문을 다뤄 두지 않는다(#305).
  */
 export function AuditLogFilters({ query }: { query: AuditLogQuery }) {
   const id = useId();
   const router = useRouter();
   const [action, setAction] = useState<string>(query.action ?? '');
+  const [result, setResult] = useState<string>(query.result ?? '');
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     router.push(
-      auditLogsHref({ action: AUDIT_ACTIONS.find((item) => item === action) ?? null, page: 0 }),
+      auditLogsHref({
+        action: AUDIT_ACTIONS.find((item) => item === action) ?? null,
+        result: AUDIT_RESULTS.find((item) => item === result) ?? null,
+        page: 0,
+      }),
     );
   };
 
@@ -46,6 +56,24 @@ export function AuditLogFilters({ query }: { query: AuditLogQuery }) {
           {AUDIT_ACTIONS.map((value) => (
             <option key={value} value={value}>
               {AUDIT_ACTION_LABELS[value]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex min-w-0 flex-col gap-1 sm:w-40">
+        <label htmlFor={`${id}-result`} className="text-sm font-medium">
+          결과
+        </label>
+        <select
+          id={`${id}-result`}
+          value={result}
+          onChange={(event) => setResult(event.currentTarget.value)}
+          className="h-10 min-w-0 rounded-md border border-border bg-bg px-3"
+        >
+          <option value="">전체</option>
+          {AUDIT_RESULTS.map((value) => (
+            <option key={value} value={value}>
+              {AUDIT_RESULT_LABELS[value]}
             </option>
           ))}
         </select>
