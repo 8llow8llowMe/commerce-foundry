@@ -12,6 +12,11 @@
 
 `@cf/api-client/server` 는 클라이언트 컴포넌트에서 import 하지 않는다.
 
+- `serverFetch` 는 기본으로 access 쿠키를 Bearer 로 싣고 캐시하지 않는다(`cache: 'no-store'`).
+- **공개 · 사용자 무관 조회를 캐시할 때만** 셋째 인자 `{ anonymous: true }` 로 토큰을 빼고 `init` 에 `cache: 'force-cache'` + `next.revalidate` 를 준다.
+  Next 데이터 캐시는 헤더까지 키로 써서 토큰을 실으면 사용자마다 갈린다. 지금 쓰는 곳은 메인 전시(60초, `architecture.md` §10)뿐이다.
+  재검증 시간은 BE 응답의 `Cache-Control: max-age` 와 맞춘다. 회원 API 에는 쓰지 않는다.
+
 ## 2. 성공
 
 - `dataBody` 를 그대로 돌려준다. 선택적 하위 리소스 부재는 `null` 이 정상이다.
