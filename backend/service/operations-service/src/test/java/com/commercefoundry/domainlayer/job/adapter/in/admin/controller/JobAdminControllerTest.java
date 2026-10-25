@@ -62,16 +62,13 @@ class JobAdminControllerTest {
         return JobAdminResponse.builder()
             .jobId("4611686018427387904")
             .type("SALES_REPORT_EXPORT")
+            .typeName("월 매출 리포트 내보내기")
             .status(CodeNameDescriptionMetadata.of("RUNNING", "실행 중", "워커가 가져가 실행하고 있습니다."))
             .progressPercent(40)
-            .attempt(1)
-            .maxAttempts(3)
-            .cancelRequested(true)
-            .cancelRequestedByMemberId(String.valueOf(TestTokens.MEMBER_ID))
-            .requestedByMemberId("4611686018427387903")
-            .payloadJson("{\"month\":\"2026-09\"}")
-            .scheduledAt(Instant.parse("2026-10-24T03:00:00Z"))
-            .startedAt(Instant.parse("2026-10-24T03:00:02Z"))
+            .progressMessage("3/10 구간 집계 중")
+            .notice("취소를 요청했습니다. 진행 중인 단계가 끝나면 멈춥니다.")
+            .cancellable(false)
+            .requestedAt(Instant.parse("2026-10-24T03:00:00Z"))
             .build();
     }
 
@@ -79,11 +76,10 @@ class JobAdminControllerTest {
         return JobAdminItem.builder()
             .jobId("4611686018427387904")
             .type("SALES_REPORT_EXPORT")
+            .typeName("월 매출 리포트 내보내기")
             .status(CodeNameDescriptionMetadata.of("FAILED", "실패", "재시도 상한에 닿았거나 다시 시도할 수 없는 오류로 끝났습니다."))
-            .attempt(3)
-            .maxAttempts(3)
-            .errorCode("UPSTREAM_TIMEOUT")
-            .scheduledAt(Instant.parse("2026-10-24T03:00:00Z"))
+            .notice("작업이 너무 오래 걸려 중단했습니다. 범위를 줄여 다시 요청해 주세요.")
+            .requestedAt(Instant.parse("2026-10-24T03:00:00Z"))
             .finishedAt(Instant.parse("2026-10-24T03:10:00Z"))
             .build();
     }
@@ -144,8 +140,11 @@ class JobAdminControllerTest {
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].jobId").asString().isEqualTo("4611686018427387904");
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].status.code").isEqualTo("FAILED");
-            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].errorCode").isEqualTo("UPSTREAM_TIMEOUT");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].typeName").isEqualTo("월 매출 리포트 내보내기");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].notice").asString().startsWith("작업이 너무 오래 걸려");
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].finishedAt").isEqualTo("2026-10-24T03:10:00Z");
+            assertThat(result).bodyJson().doesNotHavePath("$.dataBody.contents[0].errorCode");
+            assertThat(result).bodyJson().doesNotHavePath("$.dataBody.contents[0].attempt");
             assertThat(result).bodyJson().extractingPath("$.dataBody.totalElements").asNumber().isEqualTo(1);
             verify(jobAdminUseCase).getJobs(new JobAdminSearchCommand(null, null, 0, 20));
         }
@@ -182,16 +181,20 @@ class JobAdminControllerTest {
     class Detail {
 
         @Test
-        @DisplayName("상세를 200 으로 낸다 — 입력 JSON 은 문자열 원문이고 워커 아이디는 없다")
+        @DisplayName("상세를 200 으로 낸다 — 운영자 칸(이름 · 상태 · 진행 · 안내 · 시각)만 있고 기술 칸(시도 · 입력 · 결과 · 오류 원문 · 워커)은 없다")
         void returnsDetail() {
             given(jobAdminUseCase.getJob(4611686018427387904L)).willReturn(response());
 
             MvcTestResult result = get(JOB_PATH, MemberRole.ADMIN);
 
             assertThat(result).hasStatusOk();
-            assertThat(result).bodyJson().extractingPath("$.dataBody.payloadJson").isEqualTo("{\"month\":\"2026-09\"}");
             assertThat(result).bodyJson().extractingPath("$.dataBody.progressPercent").asNumber().isEqualTo(40);
-            assertThat(result).bodyJson().doesNotHavePath("$.dataBody.workerId");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.progressMessage").isEqualTo("3/10 구간 집계 중");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.requestedAt").isEqualTo("2026-10-24T03:00:00Z");
+            for (String technical : List.of("attempt", "maxAttempts", "priority", "dedupKey", "payloadJson", "resultJson", "errorCode", "errorMessage",
+                "workerId", "requestedByMemberId", "cancelRequestedByMemberId")) {
+                assertThat(result).bodyJson().doesNotHavePath("$.dataBody." + technical);
+            }
         }
 
         @Test
@@ -228,7 +231,8 @@ class JobAdminControllerTest {
             MvcTestResult result = post(CANCEL_PATH, MemberRole.ADMIN);
 
             assertThat(result).hasStatusOk();
-            assertThat(result).bodyJson().extractingPath("$.dataBody.cancelRequested").isEqualTo(true);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.cancellable").isEqualTo(false);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.notice").asString().startsWith("취소를 요청했습니다");
             assertThat(result).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("RUNNING");
             verify(jobAdminUseCase).cancel(4611686018427387904L, TestTokens.MEMBER_ID);
         }

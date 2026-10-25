@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.mapper.JobMapper;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
 import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.global.persistence.ConstraintViolations;
@@ -43,7 +44,7 @@ public class JobRepositoryAdapter implements JobRepositoryPort {
 
     /** 조건 조합마다 파생 쿼리 하나 — 종류 조건은 {@code idx_job_type_id} 를 그대로 탄다. 상태 조건은 상태 선두 인덱스로 거른 뒤 정렬한다(어드민 전용). */
     @Override
-    public Page<Job> findPage(JobStatus status, String type, int page, int size) {
+    public Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, String type, int page, int size) {
         PageRequest pageable = PageRequest.of(page, size);
         Page<JobEntity> jobs;
         if (status != null && type != null) {
@@ -55,7 +56,20 @@ public class JobRepositoryAdapter implements JobRepositoryPort {
         } else {
             jobs = jobRepository.findAllByOrderByIdDesc(pageable);
         }
-        return jobs.map(jobMapper::toDomain);
+        return jobs.map(JobRepositoryAdapter::toSummary);
+    }
+
+    @Override
+    public Optional<JobSummaryQueryResult> findSummary(long jobId) {
+        return jobRepository.findById(jobId).map(JobRepositoryAdapter::toSummary);
+    }
+
+    /** 요청 시각은 행의 생성 시각(감사 칸)이다 — 도메인 {@code Job} 에는 없다. */
+    private static JobSummaryQueryResult toSummary(JobEntity entity) {
+        return new JobSummaryQueryResult(
+            entity.getId(), entity.getType(), entity.getStatus(), entity.getProgressPercent(), entity.getProgressMessage(),
+            entity.isCancelRequested(), entity.getErrorCode(), entity.getCreatedAt(), entity.getFinishedAt()
+        );
     }
 
     @Override

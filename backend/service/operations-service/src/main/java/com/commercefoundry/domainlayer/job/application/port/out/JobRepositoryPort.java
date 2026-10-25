@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.job.application.port.out;
 
 import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import java.time.Instant;
@@ -20,12 +21,16 @@ public interface JobRepositoryPort {
 
     /**
      * 어드민 작업 목록 — 아이디(Snowflake) 내림차순, 곧 등록 최신순 한 페이지. 마지막 페이지를 넘긴 요청은 빈 목록이고 전체 건수는 그대로다.
+     * 운영자 화면용 읽기 모델이다 — 시도 · 입력 · 결과 원문은 읽지 않는다 (#305).
      *
      * @param status 없으면 전체
      * @param type 없으면 전체
      * @param page 0 부터 센다
      */
-    Page<Job> findPage(JobStatus status, String type, int page, int size);
+    Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, String type, int page, int size);
+
+    /** 어드민 작업 상세 — 목록과 같은 읽기 모델. */
+    Optional<JobSummaryQueryResult> findSummary(long jobId);
 
     /** 같은 종류 · 같은 멱등 키의 활성(QUEUED · RUNNING) 작업 — {@code uk_job_type_active_dedup_key} 로 찾는다. */
     Optional<Job> findActiveByDedupKey(String type, String dedupKey);

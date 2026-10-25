@@ -53,15 +53,15 @@ public class JobAdminFacade implements JobAdminUseCase {
      */
     @Override
     public JobAdminResponse cancel(long jobId, long adminMemberId) {
-        Job cancelled;
         try {
-            cancelled = requestCancel(jobId, adminMemberId);
+            requestCancel(jobId, adminMemberId);
         } catch (RuntimeException exception) {
             jobAdminAuditProcessor.cancelFailed(adminMemberId, jobId);
             throw exception;
         }
         jobAdminAuditProcessor.cancelSucceeded(adminMemberId, jobId);
-        return jobAdminPresenter.toResponse(cancelled);
+        // 응답은 운영자 칸(요청 시각 · 안내 문구)이 필요해 읽기 모델로 다시 읽는다 — 취소가 커밋된 뒤다
+        return jobAdminPresenter.toResponse(jobQueryProcessor.get(jobId));
     }
 
     private Job requestCancel(long jobId, long adminMemberId) {

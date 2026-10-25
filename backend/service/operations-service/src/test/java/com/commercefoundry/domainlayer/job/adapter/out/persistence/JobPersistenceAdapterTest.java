@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.mapper.JobMapperImpl;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
 import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJobQueryResult;
+import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.domainlayer.job.domain.model.RetryPolicy;
@@ -122,14 +123,19 @@ class JobPersistenceAdapterTest {
         jobRepositoryPort.insert(queued(34L, "REPORT", 0, NOW, null));
         entityManager.clear();
 
-        Page<Job> all = jobRepositoryPort.findPage(null, null, 0, 3);
+        Page<JobSummaryQueryResult> all = jobRepositoryPort.findSummaryPage(null, null, 0, 3);
 
-        assertThat(all.getContent()).extracting(Job::id).containsExactly(34L, 33L, 32L);
+        assertThat(all.getContent()).extracting(JobSummaryQueryResult::jobId).containsExactly(34L, 33L, 32L);
+        assertThat(all.getContent()).allSatisfy(summary -> assertThat(summary.requestedAt()).isNotNull());
         assertThat(all.getTotalElements()).isEqualTo(4);
-        assertThat(jobRepositoryPort.findPage(JobStatus.QUEUED, null, 0, 10).getContent()).extracting(Job::id).containsExactly(34L, 32L, 31L);
-        assertThat(jobRepositoryPort.findPage(null, "REPORT", 0, 10).getContent()).extracting(Job::id).containsExactly(34L, 33L, 31L);
-        assertThat(jobRepositoryPort.findPage(JobStatus.RUNNING, "REPORT", 0, 10).getContent()).extracting(Job::id).containsExactly(33L);
-        Page<Job> beyond = jobRepositoryPort.findPage(null, null, 5, 3);
+        assertThat(jobRepositoryPort.findSummaryPage(JobStatus.QUEUED, null, 0, 10).getContent())
+            .extracting(JobSummaryQueryResult::jobId).containsExactly(34L, 32L, 31L);
+        assertThat(jobRepositoryPort.findSummaryPage(null, "REPORT", 0, 10).getContent())
+            .extracting(JobSummaryQueryResult::jobId).containsExactly(34L, 33L, 31L);
+        assertThat(jobRepositoryPort.findSummaryPage(JobStatus.RUNNING, "REPORT", 0, 10).getContent())
+            .extracting(JobSummaryQueryResult::jobId).containsExactly(33L);
+        assertThat(jobRepositoryPort.findSummary(33L)).hasValueSatisfying(summary -> assertThat(summary.status()).isEqualTo(JobStatus.RUNNING));
+        Page<JobSummaryQueryResult> beyond = jobRepositoryPort.findSummaryPage(null, null, 5, 3);
         assertThat(beyond.getContent()).isEmpty();
         assertThat(beyond.getTotalElements()).isEqualTo(4);
     }
