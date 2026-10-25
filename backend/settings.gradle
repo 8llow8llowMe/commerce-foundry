@@ -7,6 +7,7 @@ include 'core:persistence-core'
 include 'core:redis-core'
 include 'core:security-core'
 include 'core:storage-core'
+include 'core:messaging-core'
 include 'core:shared-commerce'
 
 // Cloud
