@@ -121,8 +121,13 @@ class DisplayAdminConcurrencyTest {
 
         DisplaySectionAdminResponse created = createWhileAnotherCreateHoldsLock();
 
-        assertThat(created.displayOrder()).as("기존 0 · 앞선 생성 1 다음").isEqualTo(2);
+        // 노출 순서는 어드민 응답에 내지 않는 내부 값이다(#305 — 순서는 목록의 배열 순서로 전달한다). 저장된 칸을 직접 본다
+        Integer displayOrder = jdbcTemplate.queryForObject(
+            "select display_order from product.display_section where id = ?", Integer.class, Long.parseLong(created.sectionId())
+        );
+        assertThat(displayOrder).as("기존 0 · 앞선 생성 1 다음").isEqualTo(2);
         assertThat(sectionCount()).isEqualTo(3);
+        assertThat(displayAdminUseCase.getSections().sections()).extracting(DisplaySectionAdminResponse::sectionId).last().as("목록에서도 맨 뒤다").isEqualTo(created.sectionId());
     }
 
     @Test

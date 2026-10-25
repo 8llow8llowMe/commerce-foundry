@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,47 @@ class DisplaySectionTest {
 
             assertThat(first.isLiveAt(NOW)).isFalse();
             assertThat(second.isLiveAt(NOW)).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("노출 상태 liveStatusAt — 숨김 → 예정 → 종료 → 노출 중")
+    class LiveStatus {
+
+        @Test
+        @DisplayName("시작 시각과 같은 순간은 노출 중, 1μs 전은 예정이다")
+        void startBoundary() {
+            assertThat(section(true, NOW, null).liveStatusAt(NOW)).isEqualTo(DisplayLiveStatus.LIVE);
+            assertThat(section(true, NOW, null).liveStatusAt(NOW.minusNanos(1_000))).isEqualTo(DisplayLiveStatus.SCHEDULED);
+        }
+
+        @Test
+        @DisplayName("종료 시각과 같은 순간은 종료, 1μs 전은 노출 중이다")
+        void endBoundary() {
+            assertThat(section(true, null, NOW).liveStatusAt(NOW)).isEqualTo(DisplayLiveStatus.ENDED);
+            assertThat(section(true, null, NOW).liveStatusAt(NOW.minusNanos(1_000))).isEqualTo(DisplayLiveStatus.LIVE);
+        }
+
+        @Test
+        @DisplayName("숨김이 가장 앞선다 — 기간 전 · 안 · 뒤 모두 HIDDEN 이다")
+        void hiddenFirst() {
+            DisplaySection hidden = section(false, NOW, NOW.plusSeconds(60));
+
+            assertThat(hidden.liveStatusAt(NOW.minusSeconds(1))).isEqualTo(DisplayLiveStatus.HIDDEN);
+            assertThat(hidden.liveStatusAt(NOW)).isEqualTo(DisplayLiveStatus.HIDDEN);
+            assertThat(hidden.liveStatusAt(NOW.plusSeconds(60))).isEqualTo(DisplayLiveStatus.HIDDEN);
+        }
+
+        @Test
+        @DisplayName("isLiveAt 은 노출 상태가 LIVE 인가와 언제나 같다 — 고객 메인 필터와 어드민 노출 상태가 갈라지지 않는다")
+        void isLiveMatchesStatus() {
+            List<DisplaySection> sections = List.of(
+                section(true, null, null), section(false, null, null), section(true, NOW, null), section(true, NOW.plusSeconds(1), null),
+                section(true, null, NOW), section(true, null, NOW.plusSeconds(1)), section(true, NOW.minusSeconds(1), NOW.plusSeconds(1))
+            );
+            for (DisplaySection section : sections) {
+                assertThat(section.isLiveAt(NOW)).as(section.toString()).isEqualTo(section.liveStatusAt(NOW) == DisplayLiveStatus.LIVE);
+            }
         }
     }
 

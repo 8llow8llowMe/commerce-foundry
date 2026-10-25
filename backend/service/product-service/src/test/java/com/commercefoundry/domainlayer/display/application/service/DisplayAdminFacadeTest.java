@@ -19,6 +19,7 @@ import com.commercefoundry.domainlayer.display.application.info.DisplaySectionAd
 import com.commercefoundry.domainlayer.display.application.service.processor.DisplaySectionProcessor;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayItem;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayItemType;
+import com.commercefoundry.domainlayer.display.domain.model.DisplayLiveStatus;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySection;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionContent;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
@@ -47,7 +48,7 @@ class DisplayAdminFacadeTest {
     );
 
     private static final DisplaySectionAdminInfo INFO = new DisplaySectionAdminInfo(
-        1L, DisplaySectionType.PRODUCT_PICK, null, null, null, null, null, 0, true, null, null, true, List.of()
+        1L, DisplaySectionType.PRODUCT_PICK, null, null, null, null, null, 0, true, null, null, DisplayLiveStatus.LIVE, List.of()
     );
 
     private final DisplaySectionProcessor processor = mock(DisplaySectionProcessor.class);

@@ -96,6 +96,6 @@ class DisplayWebFacadeTest {
     }
 
     private static ProductListQueryResult row(long productId) {
-        return new ProductListQueryResult(productId, "상품" + productId, 39_000L, CurrencyCode.KRW, null, null, SaleStatus.ON_SALE, false);
+        return new ProductListQueryResult(productId, "상품" + productId, 39_000L, CurrencyCode.KRW, null, null, SaleStatus.ON_SALE, false, false);
     }
 }
