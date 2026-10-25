@@ -3,6 +3,7 @@ package com.commercefoundry.persistence.util;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
@@ -46,6 +47,22 @@ class SnowflakeIdGeneratorTest {
         generator.now = SnowflakeIdGenerator.EPOCH + 999L;
 
         assertThatThrownBy(generator::generateId).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("lowestIdAt 은 그 밀리초의 첫 아이디다 — 이전 밀리초는 더 작고, 에폭 이전이면 0 이다")
+    void lowestIdAtIsTheFirstIdOfThatMillisecond() {
+        long timestamp = SnowflakeIdGenerator.EPOCH + 5_000L;
+        SnowflakeIdGenerator generator = new FixedClockGenerator(timestamp);
+
+        assertThat(generator.generateId()).isEqualTo(SnowflakeIdGenerator.lowestIdAt(Instant.ofEpochMilli(timestamp)));
+        assertThat(SnowflakeIdGenerator.lowestIdAt(Instant.ofEpochMilli(timestamp)))
+            .isGreaterThan(SnowflakeIdGenerator.lowestIdAt(Instant.ofEpochMilli(timestamp - 1)));
+        assertThat(SnowflakeIdGenerator.lowestIdAt(Instant.ofEpochMilli(SnowflakeIdGenerator.EPOCH))).isZero();
+        assertThat(SnowflakeIdGenerator.lowestIdAt(Instant.EPOCH)).isZero();
+        assertThatThrownBy(() -> SnowflakeIdGenerator.lowestIdAt(null)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> SnowflakeIdGenerator.lowestIdAt(Instant.ofEpochMilli(SnowflakeIdGenerator.EPOCH + (1L << 41))))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

@@ -227,7 +227,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/auth/logout` | `isAuthenticated()` | 200 `dataBody: null` — 본문 `{refreshToken?}`(본문 생략 가능). 모르는 · 남의 refresh 여도 access 는 막고 200(멱등) | 401 `SECURITY_001` · 503 `AUTH_013` |
 | `POST /api/v1/auth/admin/login` (#6) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. refresh 없음 | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` |
 | `GET /api/v1/admin/members` (#6) | `hasRole('ADMIN')` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
-| `GET /api/v1/admin/audit-logs` (#192) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, target, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `GET /api/v1/admin/audit-logs` (#192 · #286) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, target, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&target=&result=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_136` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 
 토큰 쌍 (로그인 · 재발급 공통, #4 결정 1 — 전달은 응답 본문이고 쿠키는 BFF 가 만든다)
 
@@ -263,7 +263,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
 | `AUTH_120~129` | 400 | 배송지 검증 — 별칭 120 · 받는 사람 121 · 연락처 122 · 123(형식) · 국가 124 · 우편번호 125(KR 필수) · 126(형식) · 주소 127 · 길이 128 · 해외 도시 129 |
-| `AUTH_130~134` | 400 | 관리자 필드 검증 (#6) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132(형식 · 64자 초과는 필드 검증하지 않는다 — `AUTH_030`), 어드민 목록 `page` 0 이상 133 · `size` 1~100 134 |
+| `AUTH_130~136` | 400 | 관리자 필드 검증 (#6 · #286) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132(형식 · 64자 초과는 필드 검증하지 않는다 — `AUTH_030`), 어드민 목록 `page` 0 이상 133 · `size` 1~100 134, 감사 로그 `actorMemberId` 양수 135 · `target` 공백 없이 1~200자 ASCII 136 |
 | `AUTH_198` · `AUTH_199` | 400 | 파라미터 타입 불일치(`page=x` · 없는 `role`) · 필수 파라미터 누락 |
 
 코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~`, 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.
@@ -343,8 +343,10 @@ return ResponseEntity.ok().body(Response.success(response));
 
 어드민 감사 로그 조회 (#192) — `GET /api/v1/admin/audit-logs`
 
-- `action`(선택, `ADMIN_LOGIN` · `MEMBER_SEARCH`, 틀리면 198) · `actorMemberId`(선택, 양수 — 135) · `page` · `size`(회원 조회와 같은 133 · 134).
-  정렬은 최신순 하나(감사 로그 아이디 내림차순)라 `sortType` 이 없다. 조건 조합마다 파생 쿼리 하나이고 `(action, id)` · `(actor_member_id, id)` 인덱스를 탄다.
+- `action`(선택, `ADMIN_LOGIN` · `MEMBER_SEARCH`, 틀리면 198) · `actorMemberId`(선택, 양수 — 135) · `target`(선택, 완전 일치, 공백 없이 1~200자 ASCII — 136) ·
+  `result`(선택, `SUCCESS` · `FAILURE`, 틀리면 198) · `page` · `size`(회원 조회와 같은 133 · 134).
+  정렬은 최신순 하나(감사 로그 아이디 내림차순)라 `sortType` 이 없다. 조건은 각각 켜지고 꺼지므로 QueryDSL 이고, `(action, id)` · `(actor_member_id, id)` · `(target, id)` 인덱스를 탄다.
+  로그인 실패는 행위자가 없어 `actorMemberId` 만으로는 한 계정을 못 고른다. `target=member:<id>&result=FAILURE` 로 고른다 (#286).
 - 항목 `{auditLogId(string), action, actorMemberId(string | null), target(string | null), result, createdAt}` — 값은 `admin.audit` 로그 한 줄과 같고
   개인정보가 없어 마스킹하지 않는다. 로그인 실패는 행위자를 모르므로 `actorMemberId` 가 null 이고 노린 관리자 계정이 `target` 에 남는다.
 - 이 조회 자체는 감사하지 않는다 — 행에 개인정보가 없고, 남기면 조회마다 행이 늘어난다. 기록 방식은 `security-guide.md` §11-4.

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.item.AdminAuditLogAdminItem;
 import com.commercefoundry.domainlayer.member.application.command.AdminAuditLogSearchCommand;
 import com.commercefoundry.domainlayer.member.application.model.AdminAuditAction;
+import com.commercefoundry.domainlayer.member.application.model.AdminAuditResult;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminAuditLogAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.error.SecurityErrorCode;
@@ -73,17 +74,19 @@ class AdminAuditLogAdminControllerTest {
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].target").isEqualTo("member:4611686018427387904");
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].result").isEqualTo("FAILURE");
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].createdAt").isEqualTo("2026-10-24T03:00:00Z");
-        verify(adminAuditLogAdminUseCase).searchAuditLogs(new AdminAuditLogSearchCommand(null, null, 0, 20));
+        verify(adminAuditLogAdminUseCase).searchAuditLogs(new AdminAuditLogSearchCommand(null, null, null, null, 0, 20));
     }
 
     @Test
-    @DisplayName("행위 · 관리자 · 페이지를 command 로 넘긴다")
+    @DisplayName("행위 · 관리자 · 대상 · 결과 · 페이지를 command 로 넘긴다")
     void passesFilters() {
         given(adminAuditLogAdminUseCase.searchAuditLogs(any())).willReturn(new PageResponse<>(List.of(), 1, 50, 0, 0));
 
-        assertThat(get(PATH + "?action=MEMBER_SEARCH&actorMemberId=7&page=1&size=50", MemberRole.ADMIN)).hasStatusOk();
+        assertThat(get(PATH + "?action=ADMIN_LOGIN&actorMemberId=7&target=member:7&result=FAILURE&page=1&size=50", MemberRole.ADMIN)).hasStatusOk();
 
-        verify(adminAuditLogAdminUseCase).searchAuditLogs(new AdminAuditLogSearchCommand(AdminAuditAction.MEMBER_SEARCH, 7L, 1, 50));
+        verify(adminAuditLogAdminUseCase).searchAuditLogs(
+            new AdminAuditLogSearchCommand(AdminAuditAction.ADMIN_LOGIN, 7L, "member:7", AdminAuditResult.FAILURE, 1, 50)
+        );
     }
 
     @Test
@@ -102,7 +105,9 @@ class AdminAuditLogAdminControllerTest {
         "?actorMemberId=0 | AUTH_135",
         "?actorMemberId=-3 | AUTH_135",
         "?action=LOGOUT | AUTH_198",
-        "?actorMemberId=abc | AUTH_198"
+        "?actorMemberId=abc | AUTH_198",
+        "?target= | AUTH_136",
+        "?result=MAYBE | AUTH_198"
     })
     @DisplayName("파라미터 검증 코드 — 유스케이스를 부르지 않는다")
     void invalid(String query, String code) {
@@ -111,6 +116,24 @@ class AdminAuditLogAdminControllerTest {
         assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
         assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
+        verifyNoInteractions(adminAuditLogAdminUseCase);
+    }
+
+    @Test
+    @DisplayName("target 에 공백·제어 문자·200자 초과가 있으면 400 · AUTH_136 이고 유스케이스를 부르지 않는다")
+    void targetMustBeASingleToken() {
+        assertTargetRejected("member 1");
+        assertTargetRejected("a".repeat(201));
+        assertTargetRejected("a\u0000");
+    }
+
+    private void assertTargetRejected(String target) {
+        MvcTestResult result = mvc.get().uri(PATH).param("target", target)
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, MemberRole.ADMIN).tokenValue())
+            .exchange();
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_136");
         verifyNoInteractions(adminAuditLogAdminUseCase);
     }
 }

@@ -97,6 +97,15 @@ auth:
     email: ${ADMIN_SEED_EMAIL:}
     password: ${ADMIN_SEED_PASSWORD:}
     name: ${ADMIN_SEED_NAME:}
+  admin-audit:
+    # 관리자 감사 로그 보관 (#286, security-guide.md §11-4). 기본 2년. 1년 미만이면 기동하지 않는다(AdminAuditRetentionProperties).
+    # 지난 행은 Snowflake 아이디가 컷오프보다 작은 것만 배치로 지운다. created_at 인덱스는 두지 않는다.
+    retention:
+      period: P2Y
+      initial-delay: 1m
+      fixed-delay: 1h
+      batch-size: 1000
+      max-batches-per-run: 50
   agreement:
     # 시행 중인 약관 버전 — 동의 이력(member_agreement.terms_version)에 남는다. 클라이언트가 보내지 않는다.
     # 약관을 고치면 시행일로 올린다. 비었거나 20자를 넘으면 기동하지 않는다(AgreementProperties). 날짜로 읽히지 않게 따옴표로 감싼다

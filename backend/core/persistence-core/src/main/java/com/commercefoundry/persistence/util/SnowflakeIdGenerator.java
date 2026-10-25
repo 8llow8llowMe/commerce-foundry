@@ -1,5 +1,8 @@
 package com.commercefoundry.persistence.util;
 
+import java.time.Instant;
+import java.util.Objects;
+
 /**
  * 64비트 Snowflake ID — 부호 1 · 시각 41 · datacenter 5 · worker 5 · 시퀀스 12 비트.
  *
@@ -63,6 +66,24 @@ public class SnowflakeIdGenerator {
             | (datacenterId << DATACENTER_ID_SHIFT)
             | (workerId << WORKER_ID_SHIFT)
             | sequence;
+    }
+
+    /**
+     * 이 시각에 발급될 수 있는 가장 작은 아이디(datacenter · worker · 시퀀스 0).
+     * 이 값보다 작은 아이디는 더 이전 밀리초다. 기준 시각과 같은 밀리초의 아이디는 여기에 포함되지 않는다.
+     * 기준이 에폭 이전이면 0 — 그 시각의 아이디는 없다.
+     */
+    public static long lowestIdAt(Instant instant) {
+        Objects.requireNonNull(instant, "instant");
+        long timestamp = instant.toEpochMilli();
+        if (timestamp <= EPOCH) {
+            return 0L;
+        }
+        long delta = timestamp - EPOCH;
+        if (delta >= (1L << 41)) {
+            throw new IllegalArgumentException("Snowflake 시각 범위를 넘었습니다");
+        }
+        return delta << TIMESTAMP_SHIFT;
     }
 
     /** 테스트가 시계를 고정할 수 있게 열어 둔다. */

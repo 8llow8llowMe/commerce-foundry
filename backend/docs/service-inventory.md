@@ -29,6 +29,7 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 "관리자 계정" 은 초기 관리자 시드(환경변수 `ADMIN_SEED_*`, 기동 시 멱등) · 관리자 로그인(`POST /api/v1/auth/admin/login`, access 만) ·
 어드민 회원 조회(`GET /api/v1/admin/members`, 마스킹 · `PageResponse`) · 관리자 감사 로그(`admin.audit` 로거 한 줄)가 있는 상태다 (`security-guide.md` §11).
 관리자 비밀번호 변경 · 관리자 추가 API 는 없다. 관리자 감사는 로그 한 줄과 `auth.admin_audit_log` 에 함께 남고 `GET /api/v1/admin/audit-logs` 로 본다 (#192).
+보관 기간(기본 2년, 하한 1년)이 지난 행은 auth-service 스케줄러가 Snowflake 아이디 범위로 지운다 (#286, `security-guide.md` §11-4).
 "카탈로그 조회" 는 고객 카테고리 트리 · 상품 목록 · 상품 상세(`/api/v1/categories` · `/api/v1/products/**`)와 서비스 간 SKU 벌크 조회(`/internal/v1/skus`)가 있는 상태다.
 상품은 프리오더 여부 · 발송 예정일(`product.preorder` · `expected_ship_date`)을, 상품 미디어는 영상(`ImageType.VIDEO` + `poster_url`)을 가진다 — 플래그 `store.features.preorder` ·
 `store.features.product-video`(기본 꺼짐, local · dev 켬)로 응답에서 숨긴다 (#61, `api-design-guide.md` §2-7). 입력은 어드민 상품 쓰기(#9)에서 연다. "재고" 는 SKU 재고 · 어드민 재고 조회 · 조정 · 조정 이력(`/api/v1/admin/stocks/**`, #10 · #86) · 서비스 간 재고 선점 · 확정 · 해제(`/internal/v1/stock-reservations/**`) · 결제 후 취소 · 반품 재고 복원(`/internal/v1/stock-restorations`, 클레임당 1회, #85) · 선점 만료 스케줄러가 있는 상태다 (`order-flow-guide.md` §3).
@@ -161,6 +162,8 @@ prod 데이터를 복사해 쓰지 않는다(개인정보) — 필요하면 마�
   ```
 
 - 식별자는 Snowflake 라 시퀀스 권한은 필요 없다. 시퀀스를 쓰는 테이블이 생기면 `usage` · `select` on sequences 를 같이 준다.
+- `auth.admin_audit_log` 만 예외다 (#286, `security-guide.md` §11-4). UPDATE 는 주지 않는다. DELETE 는 보관 정리 배치가 내는 문장뿐이다.
+  로그인 분리는 #258 까지 미루므로, 그 전까지 앱 로그인이 이 테이블의 INSERT · SELECT · DELETE 를 함께 가진다.
 - **현재 상태 (#82 시점)**: 배포 env 의 `DB_USERNAME` · `DB_PASSWORD` 는 서비스 공통 키라(`deploy-guide.md` §4-1) 한 환경 안에서 서비스들이 계정 하나를 같이 쓴다.
   서비스별 계정은 키를 서비스별로 나누는 설정 변경(compose · `.env.example` · Vault)이 필요해 #258 에서 한다. 그 전까지 공용 계정에는 서비스 스키마 전부의 DML(dev 는 `CREATE` 포함)만 주고,
   스키마 소유자 · 슈퍼유저 권한은 주지 않는다.
