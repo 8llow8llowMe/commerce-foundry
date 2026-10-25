@@ -10,7 +10,7 @@ import com.commercefoundry.domainlayer.job.application.port.out.query.ClaimableJ
 import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
-import com.commercefoundry.global.persistence.ConstraintViolations;
+import com.commercefoundry.persistence.util.ConstraintViolations;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
