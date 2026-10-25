@@ -18,6 +18,7 @@ import com.commercefoundry.domainlayer.display.application.exception.DisplayErro
 import com.commercefoundry.domainlayer.display.application.exception.DisplayException;
 import com.commercefoundry.domainlayer.display.application.port.in.DisplayAdminUseCase;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayItemType;
+import com.commercefoundry.domainlayer.display.domain.model.DisplayLiveStatus;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayMediaType;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
 import com.commercefoundry.security.error.SecurityErrorCode;
@@ -46,7 +47,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
- * 어드민 메인 전시 관리의 HTTP 계약 — 권한(ADMIN 만), 검증 오류 코드 봉투, 도메인 오류 봉투, 응답 모양(아이디 String · isLive · 201).
+ * 어드민 메인 전시 관리의 HTTP 계약 — 권한(ADMIN 만), 검증 오류 코드 봉투, 도메인 오류 봉투, 응답 모양(아이디 String · 노출 상태 metadata · 201).
  */
 @WebMvcTest(DisplayAdminController.class)
 @Import({ResourceServerSecurityConfigurer.class, JwtVerificationPropertiesConfig.class})
@@ -97,7 +98,7 @@ class DisplayAdminControllerTest {
     class Reads {
 
         @Test
-        @DisplayName("전체 조회는 200 — 아이디는 String, isLive · 숨긴 상품의 visible=false 를 낸다")
+        @DisplayName("전체 조회는 200 — 아이디는 String, 노출 상태 · 아이템 유형은 metadata, 아이템 아이디는 내지 않고 숨긴 상품의 visible=false 를 낸다")
         void list() {
             given(displayAdminUseCase.getSections()).willReturn(DisplaySectionAdminListResponse.builder().sections(List.of(sectionResponse())).build());
 
@@ -106,7 +107,13 @@ class DisplayAdminControllerTest {
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].sectionId").isEqualTo("4611686018427387904");
             assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].sectionType.code").isEqualTo("PRODUCT_PICK");
-            assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].isLive").isEqualTo(false);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].liveStatus.code").isEqualTo("SCHEDULED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].liveStatus.name").isEqualTo("예정");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].items[0].itemType.code").isEqualTo("PRODUCT");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].items[0].itemType.name").isEqualTo("상품");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].items[0].media").isNull();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].items[0]").asMap().doesNotContainKey("itemId");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0]").asMap().doesNotContainKeys("isLive", "displayOrder");
             assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].items[0].product.productId").isEqualTo("700");
             assertThat(result).bodyJson().extractingPath("$.dataBody.sections[0].items[0].product.visible").isEqualTo(false);
         }
@@ -277,11 +284,10 @@ class DisplayAdminControllerTest {
         return DisplaySectionAdminResponse.builder()
             .sectionId("4611686018427387904")
             .sectionType(DisplaySectionType.PRODUCT_PICK.toMetadata())
-            .displayOrder(0)
             .visible(true)
-            .isLive(false)
+            .liveStatus(DisplayLiveStatus.SCHEDULED.toMetadata())
             .items(List.of(DisplayElementAdminItem.builder()
-                .itemId("1").itemType("PRODUCT")
+                .itemType(DisplayItemType.PRODUCT.toMetadata())
                 .product(DisplayProductAdminItem.builder().productId("700").name("숨긴 상품").visible(false).build())
                 .build()))
             .build();

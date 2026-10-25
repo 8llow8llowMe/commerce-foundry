@@ -19,6 +19,7 @@ import com.commercefoundry.domainlayer.display.application.info.DisplaySectionAd
 import com.commercefoundry.domainlayer.display.application.port.out.DisplaySectionRepositoryPort;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayItem;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayItemType;
+import com.commercefoundry.domainlayer.display.domain.model.DisplayLiveStatus;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayMedia;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayMediaType;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySection;
@@ -143,7 +144,7 @@ class DisplaySectionProcessorTest {
     class AdminInfo {
 
         @Test
-        @DisplayName("isLive 는 시계 기준이고, 상품은 숨김 포함 이름 · 노출 여부를 싣는다 — 행이 없는 상품은 이름 null · 노출 false")
+        @DisplayName("노출 상태는 시계 기준이고(고객 메인 필터와 같은 판정), 상품은 숨김 포함 이름 · 노출 여부를 싣는다 — 행이 없는 상품은 이름 null · 노출 false")
         void liveAndProductReference() {
             DisplaySectionContent live = new DisplaySectionContent(section(1L, 0, true, null, null), List.of(productItem(10L, 1L, 0, 700L), productItem(11L, 1L, 1, 701L)));
             DisplaySectionContent ended = new DisplaySectionContent(section(2L, 1, true, null, NOW), List.of());
@@ -151,7 +152,7 @@ class DisplaySectionProcessorTest {
 
             List<DisplaySectionAdminInfo> infos = processor.toAdminInfos(List.of(live, ended), Map.of(700L, hidden));
 
-            assertThat(infos).extracting(DisplaySectionAdminInfo::live).containsExactly(true, false);
+            assertThat(infos).extracting(DisplaySectionAdminInfo::liveStatus).containsExactly(DisplayLiveStatus.LIVE, DisplayLiveStatus.ENDED);
             assertThat(infos.getFirst().items()).extracting(element -> element.product().name(), element -> element.product().visible())
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(hidden.name(), false), org.assertj.core.groups.Tuple.tuple(null, false));
         }
@@ -326,7 +327,7 @@ class DisplaySectionProcessorTest {
     private static ProductSummary summary(long productId) {
         return new ProductSummary(
             productId, "상품" + productId, ProductFixtures.image(5L, productId, com.commercefoundry.domainlayer.product.domain.model.ImageType.THUMBNAIL, 0),
-            Money.of(39_000, KRW), Money.of(45_000, KRW), 13, false, SaleAvailability.ON_SALE, false
+            Money.of(39_000, KRW), Money.of(45_000, KRW), 13, false, SaleAvailability.ON_SALE, false, false
         );
     }
 

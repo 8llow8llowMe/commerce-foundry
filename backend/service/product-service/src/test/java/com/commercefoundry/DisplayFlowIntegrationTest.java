@@ -96,11 +96,16 @@ class DisplayFlowIntegrationTest {
             """.formatted(OTHER_PRODUCT, VISIBLE_PRODUCT));
         assertThat(replaced).as("같은 순서 번호로 다시 넣어도 유니크 키에 걸리지 않는다").hasStatusOk();
         assertThat(body(replaced).at("/dataBody/items/0/product/productId").asString()).isEqualTo(String.valueOf(OTHER_PRODUCT));
-        assertThat(body(replaced).at("/dataBody/displayOrder").asInt()).as("교체는 순서를 지킨다").isEqualTo(1);
+        assertThat(body(replaced).has("displayOrder")).as("노출 순서는 어드민 응답에 내지 않는다(#305) — 배열 순서로 전달한다").isFalse();
+        assertThat(body(replaced).at("/dataBody").has("displayOrder")).isFalse();
 
         JsonNode adminSections = body(exchange("GET", ADMIN_PATH, null)).at("/dataBody/sections");
+        assertThat(adminSections.get(1).at("/sectionId").asString()).as("교체는 순서를 지킨다 — 목록에서 그대로 두 번째").isEqualTo(pick);
         String hidden = adminSections.get(3).at("/sectionId").asString();
-        assertThat(adminSections.get(3).at("/isLive").asBoolean()).isFalse();
+        assertThat(adminSections.get(3).at("/liveStatus/code").asString()).as("숨긴 섹션").isEqualTo("HIDDEN");
+        assertThat(adminSections.get(0).at("/liveStatus/code").asString()).isEqualTo("LIVE");
+        assertThat(adminSections.get(1).at("/items/0/itemType/code").asString()).isEqualTo("PRODUCT");
+        assertThat(adminSections.get(1).at("/items/0").has("itemId")).as("아이템 아이디는 내지 않는다").isFalse();
         MvcTestResult reordered = exchange("PATCH", ADMIN_PATH + "/order", "{\"sectionIds\": [\"%s\", \"%s\", \"%s\", \"%s\"]}".formatted(hero, pick, story, hidden));
         assertThat(reordered).hasStatusOk();
         assertThat(body(reordered).at("/dataBody/sections/0/sectionId").asString()).isEqualTo(hero);

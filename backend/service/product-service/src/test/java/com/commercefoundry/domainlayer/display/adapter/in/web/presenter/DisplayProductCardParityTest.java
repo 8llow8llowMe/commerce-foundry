@@ -38,7 +38,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.SliceImpl;
 import tools.jackson.databind.JsonNode;
@@ -53,14 +54,15 @@ class DisplayProductCardParityTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final ProductSearchCriteria CRITERIA = new ProductSearchCriteria(null, ProductSortType.NEWEST, 0, 20);
 
-    @Test
+    @ParameterizedTest(name = "맞춤 제작 플래그 {0} · 프리오더 플래그 {1}")
+    @CsvSource({"true, true", "true, false", "false, true", "false, false"})
     @DisplayName("같은 상품이면 메인 전시 product 와 상품 목록 항목의 JSON 이 같다")
-    void sameCardAsProductList() {
+    void sameCardAsProductList(boolean customOrderFeature, boolean preorderFeature) {
         List<ProductListQueryResult> rows = List.of(
-            new ProductListQueryResult(1L, "할인 · 옵션 추가금", 39_000L, KRW, 45_000L, KRW, SaleStatus.ON_SALE, true),
-            new ProductListQueryResult(2L, "품절", 20_000L, KRW, null, null, SaleStatus.ON_SALE, false),
-            new ProductListQueryResult(3L, "SKU 없음", 10_000L, KRW, 10_000L, KRW, SaleStatus.ON_SALE, false),
-            new ProductListQueryResult(4L, "판매 종료", 30_000L, KRW, 50_000L, KRW, SaleStatus.STOP_SELLING, true)
+            new ProductListQueryResult(1L, "할인 · 옵션 추가금", 39_000L, KRW, 45_000L, KRW, SaleStatus.ON_SALE, true, true),
+            new ProductListQueryResult(2L, "품절", 20_000L, KRW, null, null, SaleStatus.ON_SALE, false, false),
+            new ProductListQueryResult(3L, "SKU 없음", 10_000L, KRW, 10_000L, KRW, SaleStatus.ON_SALE, false, true),
+            new ProductListQueryResult(4L, "판매 종료", 30_000L, KRW, 50_000L, KRW, SaleStatus.STOP_SELLING, true, false)
         );
         List<SkuAggregateQueryResult> aggregates = List.of(
             new SkuAggregateQueryResult(1L, true, true, 1_000L, 5_000L, 2),
@@ -75,7 +77,8 @@ class DisplayProductCardParityTest {
         given(productPort.findVisibleListRowsByIds(anyCollection())).willReturn(rows);
         given(skuPort.aggregateByProductIds(anyCollection())).willReturn(aggregates);
         given(imagePort.findThumbnailsByProductIds(anyCollection())).willReturn(List.of(ProductFixtures.image(90L, 1L, ImageType.THUMBNAIL, 0)));
-        ProductListProcessor productListProcessor = new ProductListProcessor(productPort, skuPort, imagePort, new StoreProperties(new StoreProperties.Features(true)));
+        StoreProperties storeProperties = new StoreProperties(new StoreProperties.Features(customOrderFeature, preorderFeature, false));
+        ProductListProcessor productListProcessor = new ProductListProcessor(productPort, skuPort, imagePort, storeProperties);
 
         List<ProductListItemResponse> listed = new ProductWebPresenter().toListResponse(productListProcessor.search(CRITERIA)).contents();
 
@@ -96,6 +99,11 @@ class DisplayProductCardParityTest {
             JsonNode actual = JSON.valueToTree(displayed.get(index).product());
             assertThat(actual).as("상품 %s", listed.get(index).productId()).isEqualTo(expected);
         }
+        // 비교가 플래그를 실제로 탔는지 — 상품 1 은 맞춤 제작 · 프리오더가 모두 켜진 상품이라 카드 값이 스토어 플래그를 그대로 따른다
+        assertThat(JSON.valueToTree(displayed.getFirst().product()).has("preorder")).isTrue();
+        assertThat(displayed.getFirst().product().preorder()).isEqualTo(preorderFeature);
+        assertThat(displayed.getFirst().product().customOrder()).isEqualTo(customOrderFeature);
+        assertThat(displayed.get(1).product().preorder()).as("상품 설정이 꺼진 상품은 플래그와 무관하게 false").isFalse();
     }
 
     private static DisplayItem item(long id, int displayOrder, long productId) {
