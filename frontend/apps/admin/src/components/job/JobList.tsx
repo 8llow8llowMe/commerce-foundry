@@ -6,20 +6,19 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
-import { isCancelPending, progressText } from '@/lib/job/detail';
-import { formatJobTime } from '@/lib/job/format';
 import { hasFilter, jobsApiPath, jobsHref, type JobQuery } from '@/lib/job/query';
-import type { JobListItem } from '@/lib/job/types';
+import type { JobItem } from '@/lib/job/types';
 import { JobFilters } from './JobFilters';
+import { JobTable } from './JobTable';
 
 type Loaded =
-  | { path: string; tick: number; kind: 'ok'; data: PageResponse<JobListItem> }
+  | { path: string; tick: number; kind: 'ok'; data: PageResponse<JobItem> }
   | { path: string; tick: number; kind: 'failed' }
   | { path: string; tick: number; kind: 'denied'; denied: AccessDenied };
 
 /**
  * 어드민 백그라운드 작업 목록(#272) — 등록 최신순, 조건(상태 · 종류 · 페이지)은 주소(`query`)가 정본이다.
- * 상태는 서버가 준 `status.name` 을 보이고 설명은 title 로 둔다. 진행 상황은 상세에서 주기적으로 갱신한다 —
+ * 작업은 서버 이름(`typeName`), 상태는 서버 `status.name` 과 서버 안내 문구(`notice`)를 그대로 보인다(`JobTable`). 진행 상황은 상세에서 주기적으로 갱신한다 —
  * 목록은 "새로 고침" 으로만 다시 읽는다.
  */
 export function JobList({ query }: { query: JobQuery }) {
@@ -30,7 +29,7 @@ export function JobList({ query }: { query: JobQuery }) {
   // 상태는 응답 콜백에서만 바꾼다. 읽는 중은 path · tick 이 다른 것으로 그린다(늦게 온 이전 응답은 버린다)
   useEffect(() => {
     let alive = true;
-    apiFetch<PageResponse<JobListItem>>(path).then(
+    apiFetch<PageResponse<JobItem>>(path).then(
       (data) => alive && setLoaded({ path, tick, kind: 'ok', data }),
       (cause: unknown) => {
         if (!alive) return;
@@ -94,76 +93,7 @@ export function JobList({ query }: { query: JobQuery }) {
       {current?.kind === 'ok' && current.data.contents.length > 0 && (
         <>
           <p className="text-sm text-muted-fg">{current.data.totalElements}건</p>
-          {/* sr-only 같은 absolute 요소가 스크롤 상자 밖으로 나가지 않게 relative 를 준다 */}
-          <div className="relative overflow-x-auto">
-            <table className="w-full min-w-[56rem] text-left text-sm">
-              <caption className="sr-only">백그라운드 작업 목록</caption>
-              <thead className="text-muted-fg">
-                <tr>
-                  <th scope="col" className="py-2 pr-4 font-medium">
-                    작업 번호
-                  </th>
-                  <th scope="col" className="py-2 pr-4 font-medium">
-                    종류
-                  </th>
-                  <th scope="col" className="py-2 pr-4 font-medium">
-                    상태
-                  </th>
-                  <th scope="col" className="py-2 pr-4 text-right font-medium">
-                    진행률
-                  </th>
-                  <th scope="col" className="py-2 pr-4 text-right font-medium">
-                    시도
-                  </th>
-                  <th scope="col" className="py-2 pr-4 font-medium">
-                    오류 코드
-                  </th>
-                  <th scope="col" className="py-2 pr-4 font-medium">
-                    예정 시각
-                  </th>
-                  <th scope="col" className="py-2 font-medium">
-                    종료 시각
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {current.data.contents.map((job) => (
-                  <tr key={job.jobId} className="border-t border-border">
-                    <th scope="row" className="py-3 pr-4 font-medium whitespace-nowrap">
-                      <Link
-                        href={`/jobs/${encodeURIComponent(job.jobId)}`}
-                        className="tabular-nums underline underline-offset-4"
-                      >
-                        {job.jobId}
-                      </Link>
-                    </th>
-                    <td className="py-3 pr-4 whitespace-nowrap">{job.type}</td>
-                    <td className="py-3 pr-4 whitespace-nowrap">
-                      <span title={job.status.description}>{job.status.name}</span>
-                      {isCancelPending(job) && (
-                        <span className="ml-2 text-xs text-muted-fg">취소 요청됨</span>
-                      )}
-                    </td>
-                    <td className="py-3 pr-4 text-right tabular-nums">
-                      {progressText(job.progressPercent)}
-                    </td>
-                    <td className="py-3 pr-4 text-right whitespace-nowrap tabular-nums">
-                      {job.attempt} / {job.maxAttempts}
-                    </td>
-                    <td className="py-3 pr-4 whitespace-nowrap">
-                      {job.errorCode ?? <span className="text-muted-fg">—</span>}
-                    </td>
-                    <td className="py-3 pr-4 whitespace-nowrap text-muted-fg">
-                      {formatJobTime(job.scheduledAt)}
-                    </td>
-                    <td className="py-3 whitespace-nowrap text-muted-fg">
-                      {formatJobTime(job.finishedAt)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <JobTable jobs={current.data.contents} />
           {current.data.totalPages > 1 && (
             <nav aria-label="페이지" className="flex items-center gap-3 text-sm">
               <PageLink query={query} page={query.page - 1} disabled={query.page === 0}>

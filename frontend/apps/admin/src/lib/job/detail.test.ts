@@ -4,49 +4,17 @@ import {
   ALREADY_FINISHED_NOTICE,
   CANCEL_CONFLICT_NOTICE,
   CANCEL_FAILED,
-  CANCEL_REQUESTED_NOTICE,
   CANCEL_UNKNOWN_NOTICE,
-  CANCELLED_NOTICE,
   cancelFailure,
   cancelJobApiPath,
-  cancelNotice,
-  canCancel,
   isActiveJob,
-  isCancelPending,
   isJobId,
   jobApiPath,
   loadFailure,
   pollDelay,
-  prettyJson,
   progressText,
-  settledNotice,
 } from './detail';
-import type { JobDetail } from './types';
-
-const status = (code: string) => ({ code, name: code, description: '' });
-
-const job = (overrides: Partial<JobDetail> = {}): JobDetail => ({
-  jobId: '4611686018427387904',
-  type: 'SALES_REPORT_EXPORT',
-  status: status('RUNNING'),
-  progressPercent: 40,
-  attempt: 1,
-  maxAttempts: 3,
-  cancelRequested: false,
-  errorCode: null,
-  requestedByMemberId: '1',
-  scheduledAt: '2026-10-24T03:00:00Z',
-  startedAt: '2026-10-24T03:00:02Z',
-  finishedAt: null,
-  priority: 0,
-  progressMessage: null,
-  cancelRequestedByMemberId: null,
-  dedupKey: null,
-  payloadJson: '{}',
-  resultJson: null,
-  errorMessage: null,
-  ...overrides,
-});
+import { jobItem } from './test-fixtures';
 
 describe('isJobId', () => {
   it('Long 범위 양의 정수 문자열만 받는다', () => {
@@ -67,40 +35,21 @@ describe('경로', () => {
   });
 });
 
-describe('isActiveJob · 취소 가능', () => {
+describe('isActiveJob', () => {
   it('QUEUED · RUNNING 만 실행 중이다 — 끝난 상태 · 모르는 상태는 다시 읽지 않는다', () => {
-    expect(isActiveJob(job({ status: status('QUEUED') }))).toBe(true);
-    expect(isActiveJob(job({ status: status('RUNNING') }))).toBe(true);
+    expect(isActiveJob(jobItem('QUEUED'))).toBe(true);
+    expect(isActiveJob(jobItem('RUNNING'))).toBe(true);
     for (const code of ['SUCCEEDED', 'FAILED', 'CANCELLED', 'ARCHIVED']) {
-      expect(isActiveJob(job({ status: status(code) }))).toBe(false);
+      expect(isActiveJob(jobItem(code))).toBe(false);
     }
-  });
-
-  it('실행 중이고 취소 요청을 받았으면 "취소 요청됨" 이고 버튼은 없다', () => {
-    const pending = job({ status: status('RUNNING'), cancelRequested: true });
-    expect(isCancelPending(pending)).toBe(true);
-    expect(canCancel(pending)).toBe(false);
-  });
-
-  it('대기 · 실행 중이면 취소할 수 있고, 끝난 작업은 없다', () => {
-    expect(canCancel(job({ status: status('QUEUED') }))).toBe(true);
-    expect(canCancel(job({ status: status('RUNNING') }))).toBe(true);
-    // 재시도 대기로 돌아간 작업에 남은 취소 요청 — 다시 보내면 바로 취소된다
-    expect(canCancel(job({ status: status('QUEUED'), cancelRequested: true }))).toBe(true);
-    expect(canCancel(job({ status: status('SUCCEEDED') }))).toBe(false);
   });
 });
 
-describe('progressText · prettyJson', () => {
-  it('보고 전 진행률은 대시다', () => {
+describe('progressText', () => {
+  it('아직 알 수 없는 진행률은 대시다', () => {
     expect(progressText(null)).toBe('—');
     expect(progressText(0)).toBe('0%');
     expect(progressText(100)).toBe('100%');
-  });
-
-  it('JSON 은 들여 쓰고, JSON 이 아니면 원문 그대로다', () => {
-    expect(prettyJson('{"rows":3}')).toBe('{\n  "rows": 3\n}');
-    expect(prettyJson('not json')).toBe('not json');
   });
 });
 
@@ -179,15 +128,6 @@ describe('cancelFailure', () => {
   });
 });
 
-describe('cancelNotice', () => {
-  it('QUEUED 는 바로 취소, RUNNING 은 취소 요청됨', () => {
-    expect(cancelNotice(job({ status: status('CANCELLED') }))).toBe(CANCELLED_NOTICE);
-    expect(cancelNotice(job({ status: status('RUNNING'), cancelRequested: true }))).toBe(
-      CANCEL_REQUESTED_NOTICE,
-    );
-  });
-});
-
 describe('pollDelay', () => {
   it('연속 실패마다 두 배, 30초가 상한이다', () => {
     expect(pollDelay(0)).toBe(3000);
@@ -195,26 +135,5 @@ describe('pollDelay', () => {
     expect(pollDelay(3)).toBe(24_000);
     expect(pollDelay(4)).toBe(30_000);
     expect(pollDelay(50)).toBe(30_000);
-  });
-});
-
-describe('settledNotice', () => {
-  it('취소 요청 안내는 작업이 끝나면 최종 상태에 맞게 바뀐다', () => {
-    expect(settledNotice(CANCEL_REQUESTED_NOTICE, job({ status: status('RUNNING') }))).toBe(
-      CANCEL_REQUESTED_NOTICE,
-    );
-    expect(settledNotice(CANCEL_REQUESTED_NOTICE, job({ status: status('CANCELLED') }))).toBe(
-      CANCELLED_NOTICE,
-    );
-    expect(settledNotice(CANCEL_REQUESTED_NOTICE, job({ status: status('FAILED') }))).toBe(
-      '취소가 반영되기 전에 작업이 끝났습니다 (FAILED).',
-    );
-  });
-
-  it('다른 안내는 그대로 둔다', () => {
-    expect(settledNotice('', job({ status: status('SUCCEEDED') }))).toBe('');
-    expect(settledNotice(CANCELLED_NOTICE, job({ status: status('CANCELLED') }))).toBe(
-      CANCELLED_NOTICE,
-    );
   });
 });

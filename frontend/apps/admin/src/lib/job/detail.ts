@@ -1,6 +1,6 @@
 import { ApiError } from '@cf/api-client';
 import { accessDeniedOf, type AccessDenied } from '@/lib/api-errors';
-import { ADMIN_JOBS_PATH, type JobDetail, type JobListItem } from './types';
+import { ADMIN_JOBS_PATH, type JobItem } from './types';
 
 /** 실행 중(QUEUED · RUNNING) 작업 상세를 다시 읽는 간격 */
 export const JOB_POLL_INTERVAL_MS = 3000;
@@ -20,9 +20,6 @@ export const JOB_ALREADY_FINISHED = 'JOB_022';
 export const JOB_NOT_FOUND_TEXT = '작업을 찾을 수 없습니다. 작업 번호를 확인해 주세요.';
 export const POLL_FAILED_NOTICE =
   '최신 상태를 불러오지 못했습니다. 마지막으로 읽은 상태를 보여 주며 잠시 뒤 다시 읽습니다.';
-export const CANCELLED_NOTICE = '작업을 취소했습니다.';
-export const CANCEL_REQUESTED_NOTICE =
-  '취소를 요청했습니다. 실행 중인 작업은 다음 진행 보고에서 멈추며, 그 전에 끝나면 그 결과로 끝납니다.';
 export const ALREADY_FINISHED_NOTICE =
   '이미 끝난 작업이라 취소하지 않았습니다. 최종 상태를 다시 불러왔습니다.';
 export const CANCEL_CONFLICT_NOTICE =
@@ -48,31 +45,13 @@ export function cancelJobApiPath(jobId: string): string {
 }
 
 /** 아직 끝나지 않았다 — 상세를 계속 다시 읽는다. 모르는 상태(서버에 새로 생긴 값)는 끝난 것으로 보고 멈춘다 */
-export function isActiveJob(job: Pick<JobListItem, 'status'>): boolean {
+export function isActiveJob(job: Pick<JobItem, 'status'>): boolean {
   return job.status.code === 'QUEUED' || job.status.code === 'RUNNING';
-}
-
-/** 실행 중인데 취소 요청을 이미 받았다 — 다시 보내도 같은 응답(멱등)이라 버튼 대신 "취소 요청됨" 을 보인다 */
-export function isCancelPending(job: Pick<JobListItem, 'status' | 'cancelRequested'>): boolean {
-  return job.status.code === 'RUNNING' && job.cancelRequested;
-}
-
-export function canCancel(job: Pick<JobListItem, 'status' | 'cancelRequested'>): boolean {
-  return isActiveJob(job) && !isCancelPending(job);
 }
 
 /** 진행률 표시. 보고 전(null)은 대시 */
 export function progressText(percent: number | null): string {
   return percent === null ? '—' : `${percent}%`;
-}
-
-/** JSON 원문을 읽기 좋게 들여 쓴다. JSON 이 아니면 원문 그대로 */
-export function prettyJson(raw: string): string {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
 }
 
 export type LoadFailure =
@@ -115,20 +94,4 @@ export function cancelFailure(cause: unknown): CancelFailure {
   if (cause.status !== null && cause.status < 500 && cause.code)
     return { kind: 'notice', notice: cause.message };
   return { kind: 'notice', notice: CANCEL_FAILED };
-}
-
-/** 취소 성공 응답 → 안내. QUEUED 는 바로 CANCELLED, RUNNING 은 상태 그대로 cancelRequested 다 */
-export function cancelNotice(job: JobDetail): string {
-  return job.status.code === 'CANCELLED' ? CANCELLED_NOTICE : CANCEL_REQUESTED_NOTICE;
-}
-
-/**
- * 다시 읽은 작업에 맞춰 안내를 고친다. "취소를 요청했습니다" 를 보이던 중 작업이 끝났으면
- * 취소로 끝났는지, 취소가 닿기 전에 다른 결과로 끝났는지로 바꾼다. 그 밖의 안내는 그대로 둔다.
- */
-export function settledNotice(notice: string, job: Pick<JobListItem, 'status'>): string {
-  if (notice !== CANCEL_REQUESTED_NOTICE || isActiveJob(job)) return notice;
-  return job.status.code === 'CANCELLED'
-    ? CANCELLED_NOTICE
-    : `취소가 반영되기 전에 작업이 끝났습니다 (${job.status.name}).`;
 }

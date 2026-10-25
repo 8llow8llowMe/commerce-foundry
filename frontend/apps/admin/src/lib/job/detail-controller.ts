@@ -3,30 +3,31 @@ import type { AccessDenied } from '@/lib/api-errors';
 import {
   cancelFailure,
   cancelJobApiPath,
-  cancelNotice,
   isActiveJob,
   isJobId,
   jobApiPath,
   loadFailure,
   pollDelay,
-  settledNotice,
 } from './detail';
-import type { JobDetail } from './types';
+import type { JobItem } from './types';
 
 export type JobView =
   | { kind: 'loading' }
   | { kind: 'denied'; denied: AccessDenied }
   | { kind: 'notFound' }
   | { kind: 'failed' }
-  | { kind: 'ready'; job: JobDetail };
+  | { kind: 'ready'; job: JobItem };
 
 export type JobDetailState = {
   view: JobView;
   /** 이미 보인 작업을 다시 읽다 일시 오류가 났다 — 마지막 상태를 둔 채 안내하고 간격을 늘려 계속 읽는다 */
   pollFailed: boolean;
   cancelling: boolean;
-  /** 취소 결과 안내. 없으면 '' */
-  notice: string;
+  /**
+   * 취소 요청이 실패했을 때의 안내(JOB_022 · JOB_021 · 결과 모름 등). 없으면 ''.
+   * 성공 결과는 따로 만들지 않는다 — 응답의 상태 · 서버 안내 문구(`notice`)가 곧 결과다.
+   */
+  cancelError: string;
 };
 
 /** 탭이 보이는지. 기본은 `document.visibilityState` 다(서버 · 테스트처럼 document 가 없으면 늘 보인다) */
@@ -76,7 +77,7 @@ export function createJobDetailController(
     view: valid ? { kind: 'loading' } : { kind: 'notFound' },
     pollFailed: false,
     cancelling: false,
-    notice: '',
+    cancelError: '',
   };
   const listeners = new Set<() => void>();
   let generation = 0;
@@ -116,15 +117,11 @@ export function createJobDetailController(
     if (!running || !valid || state.cancelling) return;
     deferred = false;
     const mine = ++generation;
-    apiFetch<JobDetail>(jobApiPath(jobId)).then(
+    apiFetch<JobItem>(jobApiPath(jobId)).then(
       (job) => {
         if (mine !== generation || !running) return;
         failures = 0;
-        set({
-          view: { kind: 'ready', job },
-          pollFailed: false,
-          notice: settledNotice(state.notice, job),
-        });
+        set({ view: { kind: 'ready', job }, pollFailed: false });
         schedule();
       },
       (cause: unknown) => {
@@ -185,20 +182,21 @@ export function createJobDetailController(
       // 그 전에 나간 읽기 · 예약을 버린다 — 늦게 온 응답이 취소 결과를 덮지 못하게
       generation += 1;
       clearTimer();
-      set({ cancelling: true, notice: '' });
+      set({ cancelling: true, cancelError: '' });
       const mine = generation;
       try {
-        const job = await apiFetch<JobDetail>(cancelJobApiPath(jobId), { method: 'POST' });
+        const job = await apiFetch<JobItem>(cancelJobApiPath(jobId), { method: 'POST' });
         if (mine !== generation || !running) return;
         failures = 0;
-        set({ view: { kind: 'ready', job }, pollFailed: false, notice: cancelNotice(job) });
+        // 응답 본문으로 바로 갱신한다 — QUEUED 는 CANCELLED, RUNNING 은 상태 그대로 notice · cancellable=false
+        set({ view: { kind: 'ready', job }, pollFailed: false });
       } catch (cause) {
         if (mine !== generation || !running) return;
         const failure = cancelFailure(cause);
         if (failure.kind === 'denied') set({ view: { kind: 'denied', denied: failure.denied } });
         else if (failure.kind === 'notFound') set({ view: { kind: 'notFound' } });
         else {
-          set({ notice: failure.notice });
+          set({ cancelError: failure.notice });
           if (failure.kind === 'refresh') {
             set({ cancelling: false });
             load();

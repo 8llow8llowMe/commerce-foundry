@@ -1,7 +1,8 @@
 /**
- * 어드민 백그라운드 작업 API(#212 PR-C, operations-service `JobAdminController`). 모두 ADMIN 이다.
- * - 목록 `GET /api/v1/admin/jobs?status=&type=&page=&size=` — `PageResponse<JobListItem>`, 등록 최신순 고정
- * - 상세 `GET /api/v1/admin/jobs/{jobId}` — `JobDetail`. 작업 실패도 200 이고 status FAILED · errorCode 로 알린다
+ * 어드민 백그라운드 작업 API(#212 PR-C · #305, operations-service `JobAdminController`). 모두 ADMIN 이다.
+ * 사용자는 쇼핑몰 운영자라 응답에 기술 정보(시도 횟수 · 오류 코드 · JSON 원문 등)가 없다(`backend/docs/api-design-guide.md` §2-8 · §7-1).
+ * - 목록 `GET /api/v1/admin/jobs?status=&type=&page=&size=` — `PageResponse<JobItem>`, 등록 최신순 고정
+ * - 상세 `GET /api/v1/admin/jobs/{jobId}` — `JobItem`. 작업 실패도 200 이고 status FAILED 와 서버 안내 문구(notice)로 알린다
  * - 취소 `POST /api/v1/admin/jobs/{jobId}/cancel` — 응답은 상세와 같다
  */
 export const ADMIN_JOBS_PATH = '/api/v1/admin/jobs';
@@ -25,39 +26,25 @@ export const JOB_STATUS_LABELS: Record<JobStatusCode, string> = {
 /** 서버 `CodeNameDescriptionMetadata` */
 export type StatusMeta = { code: string; name: string; description: string };
 
-/** `JobAdminItem` — 입력 · 결과 JSON 은 상세에서 본다. 아이디는 문자열, 시각은 UTC ISO 다 */
-export type JobListItem = {
+/**
+ * 작업 하나 — 목록 항목(`JobAdminItem`) · 상세 · 취소 응답(`JobAdminResponse`)이 같은 칸이다.
+ * 아이디는 문자열, 시각은 UTC ISO 다.
+ */
+export type JobItem = {
   jobId: string;
-  /** 핸들러 이름 (예: SALES_REPORT_EXPORT) */
+  /** 종류 코드 (예: SALES_REPORT_EXPORT) — 목록 거르기에만 쓰고 화면에는 `typeName` 을 보인다 */
   type: string;
+  /** 작업 이름 (예: 월 매출 리포트 내보내기) */
+  typeName: string;
   status: StatusMeta;
-  /** 0 ~ 100. 핸들러가 보고하기 전이면 null */
+  /** 0 ~ 100. 아직 알 수 없으면 null */
   progressPercent: number | null;
-  /** 가져간 시도 수(0 부터). RUNNING 이면 실행 중인 시도 번호 */
-  attempt: number;
-  /** 시도 횟수 상한(첫 실행 포함) */
-  maxAttempts: number;
-  cancelRequested: boolean;
-  /** 마지막 실패 코드 — 재시도 대기 중에도 남고 성공하면 비운다 */
-  errorCode: string | null;
-  /** 시스템 등록이면 null */
-  requestedByMemberId: string | null;
-  /** 이 시각부터 가져갈 수 있다(재시도면 백오프가 더해진 시각) */
-  scheduledAt: string;
-  startedAt: string | null;
-  /** SUCCEEDED · FAILED · CANCELLED 일 때만 */
-  finishedAt: string | null;
-};
-
-/** `JobAdminResponse` — 목록 항목 + 진행 문구 · 입력 · 결과 · 오류 설명 */
-export type JobDetail = JobListItem & {
-  priority: number;
   progressMessage: string | null;
-  cancelRequestedByMemberId: string | null;
-  dedupKey: string | null;
-  /** 핸들러 입력 JSON 원문 */
-  payloadJson: string;
-  /** 결과 JSON 원문. 성공 전이거나 결과가 없으면 null */
-  resultJson: string | null;
-  errorMessage: string | null;
+  /** 운영자 안내 문구 — 실패 이유 · 재시도 대기 · 취소 요청됨. 서버 문장을 그대로 보인다. 없으면 null */
+  notice: string | null;
+  /** 지금 취소할 수 있다(대기 · 실행 중이고 아직 취소를 요청하지 않았다). 취소 버튼은 이것 하나로 보인다 */
+  cancellable: boolean;
+  requestedAt: string;
+  /** 성공 · 실패 · 취소일 때만 */
+  finishedAt: string | null;
 };

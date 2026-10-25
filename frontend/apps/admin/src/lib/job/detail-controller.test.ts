@@ -1,14 +1,9 @@
 import { ApiError } from '@cf/api-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  CANCEL_CONFLICT_NOTICE,
-  CANCEL_REQUESTED_NOTICE,
-  CANCELLED_NOTICE,
-  JOB_POLL_INTERVAL_MS,
-  JOB_POLL_MAX_INTERVAL_MS,
-} from './detail';
+import { CANCEL_CONFLICT_NOTICE, JOB_POLL_INTERVAL_MS, JOB_POLL_MAX_INTERVAL_MS } from './detail';
 import { createJobDetailController, type Visibility } from './detail-controller';
-import type { JobDetail } from './types';
+import { jobItem as job } from './test-fixtures';
+import type { JobItem } from './types';
 
 const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('@cf/api-client', async (importOriginal) => ({
@@ -19,29 +14,6 @@ vi.mock('@cf/api-client', async (importOriginal) => ({
 const JOB_ID = '42';
 const DETAIL = `/api/v1/admin/jobs/${JOB_ID}`;
 const CANCEL = `${DETAIL}/cancel`;
-
-const job = (code: string, overrides: Partial<JobDetail> = {}): JobDetail => ({
-  jobId: JOB_ID,
-  type: 'SALES_REPORT_EXPORT',
-  status: { code, name: `${code}-이름`, description: '' },
-  progressPercent: null,
-  attempt: 1,
-  maxAttempts: 3,
-  cancelRequested: false,
-  errorCode: null,
-  requestedByMemberId: null,
-  scheduledAt: '2026-10-24T03:00:00Z',
-  startedAt: null,
-  finishedAt: null,
-  priority: 0,
-  progressMessage: null,
-  cancelRequestedByMemberId: null,
-  dedupKey: null,
-  payloadJson: '{}',
-  resultJson: null,
-  errorMessage: null,
-  ...overrides,
-});
 
 /** 손으로 푸는 응답 */
 function pending<T>() {
@@ -108,7 +80,7 @@ describe('createJobDetailController — 주기 갱신', () => {
   });
 
   it('끝난 작업은 처음 한 번만 읽는다', async () => {
-    apiFetch.mockResolvedValueOnce(job('FAILED', { errorCode: 'UPSTREAM_TIMEOUT' }));
+    apiFetch.mockResolvedValueOnce(job('FAILED', { notice: '외부 연결이 늦어 실패했습니다.' }));
     const controller = createJobDetailController(JOB_ID, fakeVisibility().visibility);
     controller.start();
     await flush();
@@ -123,7 +95,7 @@ describe('createJobDetailController — 주기 갱신', () => {
     await flush();
     expect(vi.getTimerCount()).toBe(1);
 
-    const late = pending<JobDetail>();
+    const late = pending<JobItem>();
     apiFetch.mockReturnValueOnce(late.promise);
     await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
     controller.stop();
@@ -236,7 +208,7 @@ describe('createJobDetailController — 숨은 탭', () => {
 
   it('숨은 동안 도착한 응답은 다음 읽기를 예약하지 않고 보일 때로 미룬다', async () => {
     const tab = fakeVisibility();
-    const first = pending<JobDetail>();
+    const first = pending<JobItem>();
     apiFetch.mockReturnValueOnce(first.promise).mockResolvedValue(job('RUNNING'));
     const controller = createJobDetailController(JOB_ID, tab.visibility);
     controller.start();
@@ -272,10 +244,10 @@ describe('createJobDetailController — 취소', () => {
     await flush();
 
     // 다음 주기 읽기가 나간 채로 취소한다
-    const staleGet = pending<JobDetail>();
+    const staleGet = pending<JobItem>();
     apiFetch.mockReturnValueOnce(staleGet.promise);
     await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
-    const cancelled = pending<JobDetail>();
+    const cancelled = pending<JobItem>();
     apiFetch.mockReturnValueOnce(cancelled.promise);
     const done = controller.cancel();
     expect(controller.getState().cancelling).toBe(true);
@@ -288,7 +260,7 @@ describe('createJobDetailController — 취소', () => {
     expect(apiFetch).toHaveBeenCalledWith(CANCEL, { method: 'POST' });
     expect(controller.getState()).toMatchObject({
       cancelling: false,
-      notice: CANCELLED_NOTICE,
+      cancelError: '',
       view: { kind: 'ready', job: { status: { code: 'CANCELLED' } } },
     });
     expect(vi.getTimerCount()).toBe(0);
@@ -299,49 +271,40 @@ describe('createJobDetailController — 취소', () => {
     const controller = createJobDetailController(JOB_ID, fakeVisibility().visibility);
     controller.start();
     await flush();
-    const cancelled = pending<JobDetail>();
+    const cancelled = pending<JobItem>();
     apiFetch.mockReturnValueOnce(cancelled.promise);
     const done = controller.cancel();
     await vi.advanceTimersByTimeAsync(JOB_POLL_MAX_INTERVAL_MS);
     expect(getCalls()).toBe(1);
-    cancelled.resolve(job('RUNNING', { cancelRequested: true }));
+    cancelled.resolve(job('RUNNING', { cancellable: false, notice: '취소를 요청했습니다' }));
     await done;
     expect(vi.getTimerCount()).toBe(1);
     controller.stop();
   });
 
-  it('RUNNING 취소 요청 뒤 작업이 끝나면 안내를 최종 상태에 맞게 바꾼다', async () => {
+  it('RUNNING 취소는 응답 본문(상태 그대로 · 서버 안내 · cancellable=false)으로 바로 갱신하고 주기 읽기를 이어 간다', async () => {
+    const requested = job('RUNNING', { cancellable: false, notice: '취소를 요청했습니다' });
     apiFetch
-      .mockResolvedValueOnce(job('RUNNING'))
-      .mockResolvedValueOnce(job('RUNNING', { cancelRequested: true }))
-      .mockResolvedValueOnce(job('RUNNING', { cancelRequested: true }))
-      .mockResolvedValueOnce(job('SUCCEEDED'));
+      .mockResolvedValueOnce(job('RUNNING', { progressPercent: 40 }))
+      .mockResolvedValueOnce(requested)
+      .mockResolvedValueOnce(job('CANCELLED', { cancellable: false, notice: null }));
     const controller = createJobDetailController(JOB_ID, fakeVisibility().visibility);
     controller.start();
     await flush();
     await controller.cancel();
-    expect(controller.getState().notice).toBe(CANCEL_REQUESTED_NOTICE);
+    expect(controller.getState()).toMatchObject({
+      cancelError: '',
+      view: { kind: 'ready', job: requested },
+    });
+    expect(getCalls()).toBe(1);
+    expect(vi.getTimerCount()).toBe(1);
 
+    // 서버 안내는 다시 읽은 작업의 값이 그대로 바꾼다 — 클라이언트가 고쳐 쓰지 않는다
     await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
-    expect(controller.getState().notice).toBe(CANCEL_REQUESTED_NOTICE);
-    await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
-    expect(controller.getState().notice).toBe(
-      '취소가 반영되기 전에 작업이 끝났습니다 (SUCCEEDED-이름).',
-    );
+    expect(controller.getState().view).toMatchObject({
+      job: { status: { code: 'CANCELLED' }, notice: null, cancellable: false },
+    });
     expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('RUNNING 취소 요청 뒤 CANCELLED 로 끝나면 "취소했습니다" 로 바꾼다', async () => {
-    apiFetch
-      .mockResolvedValueOnce(job('RUNNING'))
-      .mockResolvedValueOnce(job('RUNNING', { cancelRequested: true }))
-      .mockResolvedValueOnce(job('CANCELLED', { cancelRequested: true }));
-    const controller = createJobDetailController(JOB_ID, fakeVisibility().visibility);
-    controller.start();
-    await flush();
-    await controller.cancel();
-    await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
-    expect(controller.getState().notice).toBe(CANCELLED_NOTICE);
   });
 
   it.each([
@@ -352,7 +315,7 @@ describe('createJobDetailController — 취소', () => {
     const controller = createJobDetailController(JOB_ID, fakeVisibility().visibility);
     controller.start();
     await flush();
-    const staleGet = pending<JobDetail>();
+    const staleGet = pending<JobItem>();
     apiFetch.mockReturnValueOnce(staleGet.promise);
     await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
     apiFetch.mockRejectedValueOnce(error);
@@ -372,7 +335,7 @@ describe('createJobDetailController — 취소', () => {
     await flush();
     await controller.cancel();
     expect(controller.getState()).toMatchObject({
-      notice: CANCEL_CONFLICT_NOTICE,
+      cancelError: CANCEL_CONFLICT_NOTICE,
       view: { kind: 'ready' },
     });
     expect(vi.getTimerCount()).toBe(1);
