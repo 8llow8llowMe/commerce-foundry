@@ -26,4 +26,17 @@ describe('safeReturnPath', () => {
     expect(safeReturnPath('/login?next=/shop')).toBe('/');
     expect(safeReturnPath('/signup')).toBe('/');
   });
+
+  it('. · .. · %2e%2e 마디를 풀어 둔 뒤 검사한다 (#347)', () => {
+    for (const next of [
+      '/shop/../login',
+      '/./signup',
+      '/x/%2e%2e/login',
+      '/a/b/../../signup?x=1',
+    ]) {
+      expect(safeReturnPath(next)).toBe('/');
+    }
+    // 푼 결과가 안전하면 원래 값을 그대로 돌려준다(이동은 브라우저가 같은 규칙으로 푼다)
+    expect(safeReturnPath('/shop/../products/1')).toBe('/shop/../products/1');
+  });
 });
