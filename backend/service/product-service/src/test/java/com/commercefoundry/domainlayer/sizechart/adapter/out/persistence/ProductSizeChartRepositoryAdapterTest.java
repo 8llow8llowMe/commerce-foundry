@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeCell;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeChart;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeRow;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
+import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.math.BigDecimal;
 import java.util.List;
@@ -42,7 +43,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
     "spring.cloud.discovery.enabled=false",
     "eureka.client.enabled=false"
 })
-@Import({ProductServiceFeaturesConfig.class, ProductSizeChartRepositoryAdapter.class})
+@Import({QuerydslConfigurer.class, ProductServiceFeaturesConfig.class, ProductSizeChartRepositoryAdapter.class})
 class ProductSizeChartRepositoryAdapterTest {
 
     @Container
