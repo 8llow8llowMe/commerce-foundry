@@ -1,4 +1,4 @@
-import { safeReturnPath } from '@/lib/auth/return-path';
+import { resolveSitePath, safeReturnPath } from '@/lib/auth/return-path';
 
 /** BE 가 알림 링크에 붙이는 어드민 접두어. 어드민 콘솔은 자기 origin 의 루트에서 돈다 */
 const ADMIN_PREFIX = '/admin';
@@ -18,22 +18,10 @@ export function consolePathOf(linkPath: string | null): string | null {
     path = path.slice(ADMIN_PREFIX.length);
     if (!path.startsWith('/')) path = `/${path}`;
   }
-  // `..` · `.` 마디를 브라우저처럼 풀어 둔 뒤 검사한다(`/admin/../api/x` 가 `/api` 검사를 비켜 가지 않게).
-  // `//` · 역슬래시 · 제어 문자는 풀기 전에 막는다 — URL 해석이 그것들을 다른 주소로 바꿀 수 있어서다
-  if (
-    !path.startsWith('/') ||
-    path.startsWith('//') ||
-    path.includes('\\') ||
-    /[\u0000-\u001f\u007f]/.test(path)
-  )
-    return null;
-  try {
-    const url = new URL(path, 'http://console.invalid');
-    if (url.origin !== 'http://console.invalid') return null;
-    path = url.pathname + url.search + url.hash;
-  } catch {
-    return null;
-  }
+  // `.` · `..` 마디를 풀어 둔 뒤 검사한다(`/admin/../api/x` 가 `/api` 검사를 비켜 가지 않게)
+  const resolved = resolveSitePath(path);
+  if (resolved === null) return null;
+  path = resolved;
   const safe = safeReturnPath(path);
   // 안전하지 않으면 safeReturnPath 가 홈('/')으로 바꾼다 — 원래 홈이 아니었으면 링크를 두지 않는다
   return safe === '/' && path !== '/' ? null : safe;

@@ -7,6 +7,10 @@ describe('safeReturnPath', () => {
     expect(safeReturnPath(['/stocks', '/x'])).toBe('/stocks');
   });
 
+  it('마디를 푼 결과가 안전하면 원래 값을 그대로 돌려준다(이동은 브라우저가 같은 규칙으로 푼다)', () => {
+    expect(safeReturnPath('/jobs/../stocks?q=한복')).toBe('/jobs/../stocks?q=한복');
+  });
+
   it.each([
     undefined,
     '',
@@ -21,6 +25,11 @@ describe('safeReturnPath', () => {
     '/LOGIN',
     '/login;x',
     '/api/v1/auth/logout',
+    '/stocks/../login',
+    '/./login',
+    '/x/%2e%2e/api/v1/admin/jobs',
+    '/x/%2E%2E/LOGIN',
+    '/stocks/../../api',
     `/${'a'.repeat(600)}`,
   ])('%s 는 콘솔 홈으로 바꾼다', (value) => {
     expect(safeReturnPath(value)).toBe('/');
