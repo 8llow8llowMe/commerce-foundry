@@ -1,6 +1,7 @@
 // 서버 전용 진입점. route handler · Server Component 에서만 import 한다. 클라이언트 컴포넌트에서 쓰지 않는다.
 export { clientIpHeaderFromEnv, DEFAULT_CLIENT_IP_HEADER, resolveClientIp } from './client-ip';
 export { readCookie, readRefreshCookie, serializeCookie, type AuthCookieConfig } from './cookies';
+export { createEventStreamProxyHandler, type EventStreamProxyOptions } from './event-stream-proxy';
 export { gatewayRequest, type GatewayRequestOptions } from './gateway-request';
 export { checkGateway, healthResponse, type HealthReport, type HealthStatus } from './health';
 export {

@@ -7,6 +7,7 @@
 | 어디서 | 무엇으로 |
 |--------|----------|
 | Client Component | `apiFetch<T>('/api/v1/...', { method, json, idempotencyKey })` (`@cf/api-client`) |
+| Client Component(SSE) | `readEventStream('/api/v1/...', { signal, onOpen, onEvent })` (`@cf/api-client`) — 실패는 `ApiError`, 끊기면 호출자가 다시 연다(`architecture.md` §2 SSE 중계) |
 | Server Component | `serverFetch<T>('/api/v1/...')` (앱의 `src/lib/server-api.ts`) |
 | route handler | `@cf/api-client/server` 의 함수 |
 

@@ -37,7 +37,7 @@ export type Visibility = {
   subscribe: (listener: () => void) => () => void;
 };
 
-const documentVisibility: Visibility = {
+export const documentVisibility: Visibility = {
   hidden: () => typeof document !== 'undefined' && document.visibilityState === 'hidden',
   subscribe: (listener) => {
     if (typeof document === 'undefined') return () => {};
