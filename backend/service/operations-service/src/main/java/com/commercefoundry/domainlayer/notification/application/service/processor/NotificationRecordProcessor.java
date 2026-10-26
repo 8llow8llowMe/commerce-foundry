@@ -1,6 +1,5 @@
 package com.commercefoundry.domainlayer.notification.application.service.processor;
 
-import com.commercefoundry.domainlayer.notification.application.model.NotificationPush;
 import com.commercefoundry.domainlayer.notification.application.port.out.NotificationPushPort;
 import com.commercefoundry.domainlayer.notification.application.port.out.NotificationRepositoryPort;
 import com.commercefoundry.domainlayer.notification.domain.model.Notification;
@@ -29,7 +28,6 @@ public class NotificationRecordProcessor {
     }
 
     public void push(String sourceType, long sourceId, NotificationKind kind) {
-        notificationRepositoryPort.findBySource(sourceType, sourceId, kind)
-            .ifPresent(notification -> notificationPushPort.push(notification.recipientMemberId(), NotificationPush.from(notification)));
+        notificationRepositoryPort.findBySource(sourceType, sourceId, kind).ifPresent(notificationPushPort::push);
     }
 }

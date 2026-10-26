@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.notification.adapter.out.stream;
 import com.commercefoundry.domainlayer.notification.application.model.NotificationPush;
 import com.commercefoundry.domainlayer.notification.application.model.NotificationStream;
 import com.commercefoundry.domainlayer.notification.application.port.out.NotificationPushPort;
+import com.commercefoundry.domainlayer.notification.domain.model.Notification;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,8 +34,10 @@ public class NotificationPushAdapter implements NotificationPushPort {
     }
 
     @Override
-    public void push(long recipientMemberId, NotificationPush message) {
-        CopyOnWriteArrayList<NotificationStream> group = streams.get(recipientMemberId);
+    public void push(Notification notification) {
+        // 식별자 문자열 · metadata 는 여기서 만든다. 컨트롤러는 Presenter 를 부르지 못하고(H1), 이 전송은 요청 응답이 아니다.
+        NotificationPush message = NotificationPush.from(notification);
+        CopyOnWriteArrayList<NotificationStream> group = streams.get(notification.recipientMemberId());
         if (group == null) {
             return;
         }
@@ -42,7 +45,7 @@ public class NotificationPushAdapter implements NotificationPushPort {
             try {
                 stream.send(message);
             } catch (IOException | RuntimeException exception) {
-                unregister(recipientMemberId, stream);
+                unregister(notification.recipientMemberId(), stream);
             }
         }
     }

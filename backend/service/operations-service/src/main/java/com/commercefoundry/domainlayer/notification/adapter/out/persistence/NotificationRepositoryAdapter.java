@@ -21,7 +21,23 @@ public class NotificationRepositoryAdapter implements NotificationRepositoryPort
 
     @Override
     public Notification save(Notification notification) {
-        return toDomain(notificationRepository.saveAndFlush(toEntity(notification)));
+        Notification stored = toDomain(notificationRepository.saveAndFlush(toEntity(notification)));
+        if (stored.createdAt() != null || notification.createdAt() == null) {
+            return stored;
+        }
+        return new Notification(
+            stored.id(),
+            stored.recipientMemberId(),
+            stored.kind(),
+            stored.severity(),
+            stored.title(),
+            stored.linkPath(),
+            stored.sourceType(),
+            stored.sourceId(),
+            stored.readAt(),
+            notification.createdAt(),
+            stored.version()
+        );
     }
 
     @Override

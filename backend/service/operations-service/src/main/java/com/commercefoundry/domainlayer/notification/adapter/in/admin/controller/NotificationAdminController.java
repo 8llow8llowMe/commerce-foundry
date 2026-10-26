@@ -19,9 +19,11 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import java.time.Instant;
-import lombok.RequiredArgsConstructor;
+import java.util.concurrent.ScheduledFuture;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,12 +41,22 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Tag(name = "[어드민] 알림", description = "작업 완료 · 실패와 운영 알림")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
-@RequiredArgsConstructor
 @RequestMapping("/api/v1/admin/notifications")
 public class NotificationAdminController {
 
     private final NotificationAdminUseCase notificationAdminUseCase;
     private final NotificationProperties notificationProperties;
+    private final TaskScheduler notificationStreamTaskScheduler;
+
+    public NotificationAdminController(
+        NotificationAdminUseCase notificationAdminUseCase,
+        NotificationProperties notificationProperties,
+        @Qualifier("notificationStreamTaskScheduler") TaskScheduler notificationStreamTaskScheduler
+    ) {
+        this.notificationAdminUseCase = notificationAdminUseCase;
+        this.notificationProperties = notificationProperties;
+        this.notificationStreamTaskScheduler = notificationStreamTaskScheduler;
+    }
 
     @Operation(summary = "알림 목록", description = "내 알림을 최신순으로 본다. 없으면 빈 목록이다.")
     @PreAuthorize("hasRole('ADMIN')")
@@ -88,7 +100,17 @@ public class NotificationAdminController {
     public SseEmitter stream(@AuthenticationPrincipal MemberPrincipal member) {
         SseEmitter emitter = new SseEmitter(notificationProperties.streamTimeout().toMillis());
         NotificationStream stream = message -> emitter.send(SseEmitter.event().name("notification").data(message, MediaType.APPLICATION_JSON));
-        Runnable close = () -> notificationAdminUseCase.closeStream(member.memberId(), stream);
+        ScheduledFuture<?> heartbeat = notificationStreamTaskScheduler.scheduleWithFixedDelay(() -> {
+            try {
+                emitter.send(SseEmitter.event().comment("heartbeat"));
+            } catch (Exception exception) {
+                emitter.complete();
+            }
+        }, notificationProperties.streamHeartbeat());
+        Runnable close = () -> {
+            heartbeat.cancel(false);
+            notificationAdminUseCase.closeStream(member.memberId(), stream);
+        };
         emitter.onCompletion(close);
         emitter.onTimeout(close);
         emitter.onError(error -> close.run());

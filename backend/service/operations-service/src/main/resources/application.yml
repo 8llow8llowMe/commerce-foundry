@@ -112,6 +112,8 @@ operations:
   notifications:
     # SSE 연결을 붙잡는 시간. 끊기면 클라이언트는 목록 조회로 따라잡고 다시 연다
     stream-timeout: 5m
+    # 알림이 없어도 이 간격으로 주석을 보낸다. 게이트웨이 response-timeout(10s) 동안 바이트가 없으면 연결이 끊긴다
+    stream-heartbeat: 5s
     retention:
       initial-delay: 1m
       fixed-delay: 1h
