@@ -1,9 +1,16 @@
 package com.commercefoundry.global.properties;
 
+import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandlerOptions;
 import com.commercefoundry.domainlayer.job.domain.model.RetryPolicy;
+import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -13,15 +20,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param leaseSweep lease 만료 판정 트리거
  * @param retry 재시도 기본값 — 핸들러 옵션이 시도 상한을 덮는다
  * @param result 결과
+ * @param planner 정기 작업 등록. 스케줄이 없으면 등록하지 않는다
  */
 @ConfigurationProperties(prefix = "operations.jobs")
-public record JobProperties(Worker worker, LeaseSweep leaseSweep, Retry retry, Result result) {
+public record JobProperties(Worker worker, LeaseSweep leaseSweep, Retry retry, Result result, Planner planner) {
 
     public JobProperties {
         Objects.requireNonNull(worker, "operations.jobs.worker 설정이 없습니다.");
         Objects.requireNonNull(leaseSweep, "operations.jobs.lease-sweep 설정이 없습니다.");
         Objects.requireNonNull(retry, "operations.jobs.retry 설정이 없습니다.");
         Objects.requireNonNull(result, "operations.jobs.result 설정이 없습니다.");
+        Objects.requireNonNull(planner, "operations.jobs.planner 설정이 없습니다.");
     }
 
     /** 핸들러가 비운 옵션 칸을 채울 기본값. 종류별 동시 상한의 기본은 인스턴스 전체 상한이다. */
@@ -126,6 +135,96 @@ public record JobProperties(Worker worker, LeaseSweep leaseSweep, Retry retry, R
         public Result {
             if (maxJsonBytes <= 0 || maxJsonBytes > MAX_JSON_BYTES_LIMIT) {
                 throw new IllegalArgumentException("operations.jobs.result.max-json-bytes 는 1 ~ " + MAX_JSON_BYTES_LIMIT + " 이어야 합니다: " + maxJsonBytes);
+            }
+        }
+    }
+
+    /**
+     * 정기 작업 등록. 인스턴스가 여럿이어도 ShedLock 으로 한 번만 등록하고, 같은 슬롯은 멱등 키로 막는다 ({@code architecture-guide.md} §10).
+     *
+     * @param enabled false 면 이 인스턴스는 등록 주기를 돌리지 않는다
+     * @param initialDelay 기동 뒤 첫 등록까지 기다리는 시간
+     * @param fixedDelay 앞 등록이 끝난 뒤 다음 등록까지 기다리는 시간
+     * @param lockAtMost 락을 쥐는 상한. 등록이 이보다 길면 다른 인스턴스가 이어서 잡을 수 있다
+     * @param catchUp 이 기간보다 오래된 슬롯은 등록하지 않는다. 그 안의 가장 최근 슬롯만 등록한다
+     * @param schedules 비어 있으면 락을 잡지 않고 등록하지 않는다
+     */
+    public record Planner(
+        boolean enabled, Duration initialDelay, Duration fixedDelay, Duration lockAtMost, Duration catchUp, List<Schedule> schedules
+    ) {
+
+        public Planner {
+            requirePositive(initialDelay, "operations.jobs.planner.initial-delay");
+            requirePositive(fixedDelay, "operations.jobs.planner.fixed-delay");
+            requirePositive(lockAtMost, "operations.jobs.planner.lock-at-most");
+            requirePositive(catchUp, "operations.jobs.planner.catch-up");
+            schedules = schedules == null ? List.of() : List.copyOf(schedules);
+            requireDistinctSchedules(schedules);
+        }
+
+        /** 일 · 주 · 월. 시각은 {@link Schedule#time()} 과 {@link Schedule#zone()} 이다. */
+        public enum Cadence {
+            DAILY, WEEKLY, MONTHLY
+        }
+
+        /**
+         * @param type 등록된 핸들러의 종류
+         * @param cadence 일 · 주 · 월
+         * @param time 그 주기 안의 시각
+         * @param zone 시각을 해석하는 시간대
+         * @param dayOfWeek 주 단위일 때만
+         * @param dayOfMonth 월 단위일 때만. 1~28 — 2월에도 있게
+         * @param payloadJson 핸들러 입력. 없으면 {@code {}}
+         * @param priority 기록용. 보통 0
+         */
+        public record Schedule(
+            String type, Cadence cadence, LocalTime time, ZoneId zone, DayOfWeek dayOfWeek, Integer dayOfMonth, String payloadJson, int priority
+        ) {
+
+            public Schedule {
+                Objects.requireNonNull(type, "operations.jobs.planner.schedules.type");
+                Objects.requireNonNull(cadence, "operations.jobs.planner.schedules.cadence");
+                Objects.requireNonNull(time, "operations.jobs.planner.schedules.time");
+                Objects.requireNonNull(zone, "operations.jobs.planner.schedules.zone");
+                if (!Job.TYPE_PATTERN.matcher(type).matches()) {
+                    throw new IllegalArgumentException("operations.jobs.planner.schedules.type 은 [A-Z0-9_]{1,64} 이어야 합니다: " + type);
+                }
+                if (payloadJson == null) {
+                    payloadJson = "{}";
+                }
+                if (payloadJson.isBlank() || Job.payloadBytes(payloadJson) > Job.MAX_PAYLOAD_BYTES) {
+                    throw new IllegalArgumentException(
+                        "operations.jobs.planner.schedules.payload-json 은 비우지 않고 " + Job.MAX_PAYLOAD_BYTES + " 바이트 이하여야 합니다."
+                    );
+                }
+                switch (cadence) {
+                    case DAILY -> {
+                        if (dayOfWeek != null || dayOfMonth != null) {
+                            throw new IllegalArgumentException("일 단위 스케줄에는 day-of-week · day-of-month 를 두지 않습니다: " + type);
+                        }
+                    }
+                    case WEEKLY -> {
+                        if (dayOfWeek == null || dayOfMonth != null) {
+                            throw new IllegalArgumentException("주 단위 스케줄은 day-of-week 만 둡니다: " + type);
+                        }
+                    }
+                    case MONTHLY -> {
+                        if (dayOfWeek != null || dayOfMonth == null || dayOfMonth < 1 || dayOfMonth > 28) {
+                            throw new IllegalArgumentException("월 단위 스케줄은 day-of-month 1~28 만 둡니다: " + type);
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void requireDistinctSchedules(List<Schedule> schedules) {
+            Set<String> seen = new HashSet<>();
+            for (Schedule schedule : schedules) {
+                String identity = schedule.type() + "|" + schedule.cadence() + "|" + schedule.zone() + "|" + schedule.time()
+                    + "|" + schedule.dayOfWeek() + "|" + schedule.dayOfMonth();
+                if (!seen.add(identity)) {
+                    throw new IllegalArgumentException("operations.jobs.planner.schedules 에 같은 슬롯이 두 번 있습니다: " + schedule.type());
+                }
             }
         }
     }

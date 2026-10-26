@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.job.domain.model.JobHandlerOptions;
+import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
@@ -36,7 +39,12 @@ class JobPropertiesTest {
         Map.entry("operations.jobs.retry.multiplier", "4"),
         Map.entry("operations.jobs.retry.max-delay", "30m"),
         Map.entry("operations.jobs.retry.jitter-ratio", "0.2"),
-        Map.entry("operations.jobs.result.max-json-bytes", "65536")
+        Map.entry("operations.jobs.result.max-json-bytes", "65536"),
+        Map.entry("operations.jobs.planner.enabled", "true"),
+        Map.entry("operations.jobs.planner.initial-delay", "1m"),
+        Map.entry("operations.jobs.planner.fixed-delay", "1m"),
+        Map.entry("operations.jobs.planner.lock-at-most", "5m"),
+        Map.entry("operations.jobs.planner.catch-up", "32d")
     );
 
     @Test
@@ -50,6 +58,9 @@ class JobPropertiesTest {
         assertThat(properties.worker().redeliveryDelay()).isEqualTo(Duration.ofSeconds(2));
         assertThat(properties.leaseSweep()).isEqualTo(new JobProperties.LeaseSweep(Duration.ofSeconds(30), Duration.ofSeconds(30), 100, 10));
         assertThat(properties.result().maxJsonBytes()).isEqualTo(65536);
+        assertThat(properties.planner().enabled()).isTrue();
+        assertThat(properties.planner().catchUp()).isEqualTo(Duration.ofDays(32));
+        assertThat(properties.planner().schedules()).isEmpty();
         assertThat(properties.defaultHandlerOptions())
             .isEqualTo(new JobHandlerOptions(Duration.ofMinutes(5), 3, Duration.ofMinutes(30), 2));
         assertThat(properties.retry().toPolicy().delayAfter(2, 0.5)).isEqualTo(Duration.ofMinutes(2));
@@ -73,7 +84,11 @@ class JobPropertiesTest {
         "operations.jobs.retry.multiplier, 0.5",
         "operations.jobs.retry.max-delay, 10s",
         "operations.jobs.retry.jitter-ratio, 1",
-        "operations.jobs.result.max-json-bytes, 0"
+        "operations.jobs.result.max-json-bytes, 0",
+        "operations.jobs.planner.initial-delay, 0s",
+        "operations.jobs.planner.fixed-delay, 0s",
+        "operations.jobs.planner.lock-at-most, 0s",
+        "operations.jobs.planner.catch-up, 0s"
     })
     @DisplayName("0 · 음수 · 범위 밖이면 기동하지 않는다")
     void rejectsInvalid(String key, String value) {
@@ -109,6 +124,70 @@ class JobPropertiesTest {
         properties.remove("operations.jobs.worker.default-lease");
 
         assertThatThrownBy(() -> bind(properties)).isInstanceOf(BindException.class);
+    }
+
+    @Test
+    @DisplayName("일 · 주 · 월 스케줄이 시각 · 시간대 · 요일 · 일자로 바인딩되고, 입력이 없으면 {} 다")
+    void bindsSchedules() {
+        Map<String, String> properties = new HashMap<>(VALID);
+        properties.put("operations.jobs.planner.schedules[0].type", "REPORT_EXPORT");
+        properties.put("operations.jobs.planner.schedules[0].cadence", "DAILY");
+        properties.put("operations.jobs.planner.schedules[0].time", "09:00");
+        properties.put("operations.jobs.planner.schedules[0].zone", "Asia/Seoul");
+        properties.put("operations.jobs.planner.schedules[1].type", "REPORT_EXPORT");
+        properties.put("operations.jobs.planner.schedules[1].cadence", "WEEKLY");
+        properties.put("operations.jobs.planner.schedules[1].time", "09:00");
+        properties.put("operations.jobs.planner.schedules[1].zone", "Asia/Seoul");
+        properties.put("operations.jobs.planner.schedules[1].day-of-week", "MONDAY");
+        properties.put("operations.jobs.planner.schedules[2].type", "REPORT_EXPORT");
+        properties.put("operations.jobs.planner.schedules[2].cadence", "MONTHLY");
+        properties.put("operations.jobs.planner.schedules[2].time", "09:00");
+        properties.put("operations.jobs.planner.schedules[2].zone", "Asia/Seoul");
+        properties.put("operations.jobs.planner.schedules[2].day-of-month", "1");
+
+        assertThat(bind(properties).planner().schedules()).containsExactly(
+            new JobProperties.Planner.Schedule(
+                "REPORT_EXPORT", JobProperties.Planner.Cadence.DAILY, LocalTime.of(9, 0), ZoneId.of("Asia/Seoul"), null, null, "{}", 0
+            ),
+            new JobProperties.Planner.Schedule(
+                "REPORT_EXPORT", JobProperties.Planner.Cadence.WEEKLY, LocalTime.of(9, 0), ZoneId.of("Asia/Seoul"), DayOfWeek.MONDAY, null, "{}", 0
+            ),
+            new JobProperties.Planner.Schedule(
+                "REPORT_EXPORT", JobProperties.Planner.Cadence.MONTHLY, LocalTime.of(9, 0), ZoneId.of("Asia/Seoul"), null, 1, "{}", 0
+            )
+        );
+    }
+
+    @Test
+    @DisplayName("스케줄 요일 · 일자 · 종류 · 같은 슬롯이 맞지 않으면 기동하지 않는다")
+    void rejectsSchedule() {
+        Map<String, String> dailyWithDay = schedule("DAILY");
+        dailyWithDay.put("operations.jobs.planner.schedules[0].day-of-week", "MONDAY");
+        Map<String, String> weeklyWithoutDay = schedule("WEEKLY");
+        Map<String, String> monthlyDay = schedule("MONTHLY");
+        monthlyDay.put("operations.jobs.planner.schedules[0].day-of-month", "31");
+        Map<String, String> badType = schedule("DAILY");
+        badType.put("operations.jobs.planner.schedules[0].type", "report");
+        Map<String, String> duplicate = schedule("DAILY");
+        duplicate.put("operations.jobs.planner.schedules[1].type", "REPORT_EXPORT");
+        duplicate.put("operations.jobs.planner.schedules[1].cadence", "DAILY");
+        duplicate.put("operations.jobs.planner.schedules[1].time", "09:00");
+        duplicate.put("operations.jobs.planner.schedules[1].zone", "Asia/Seoul");
+
+        assertThatThrownBy(() -> bind(dailyWithDay)).isInstanceOf(BindException.class);
+        assertThatThrownBy(() -> bind(weeklyWithoutDay)).isInstanceOf(BindException.class);
+        assertThatThrownBy(() -> bind(monthlyDay)).isInstanceOf(BindException.class);
+        assertThatThrownBy(() -> bind(badType)).isInstanceOf(BindException.class);
+        assertThatThrownBy(() -> bind(duplicate)).isInstanceOf(BindException.class);
+    }
+
+    private static Map<String, String> schedule(String cadence) {
+        Map<String, String> properties = new HashMap<>(VALID);
+        properties.put("operations.jobs.planner.schedules[0].type", "REPORT_EXPORT");
+        properties.put("operations.jobs.planner.schedules[0].cadence", cadence);
+        properties.put("operations.jobs.planner.schedules[0].time", "09:00");
+        properties.put("operations.jobs.planner.schedules[0].zone", "Asia/Seoul");
+        return properties;
     }
 
     private static JobProperties bind(Map<String, String> properties) {

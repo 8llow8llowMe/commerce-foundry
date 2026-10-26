@@ -35,6 +35,12 @@ public interface JobRepositoryPort {
     Optional<Job> findActiveByDedupKey(String type, String dedupKey);
 
     /**
+     * 같은 종류 · 같은 멱등 키로 등록된 작업이 있는지 — 끝난 작업도 포함한다. 정기 슬롯은 활성 멱등(끝나면 키를 다시 쓸 수 있음)과 달리
+     * 한 슬롯을 다시 등록하지 않는다. {@code idx_job_type_dedup_key}.
+     */
+    boolean existsByTypeAndDedupKey(String type, String dedupKey);
+
+    /**
      * lease 가 끝난 RUNNING(워커가 죽었다) — 만료 판정 트리거가 읽는다. {@code (lease_expires_at, id)} 오름차순 keyset 으로 {@code after} 다음부터 {@code limit} 건까지.
      *
      * @param after 앞 배치의 마지막 건. 처음이면 null

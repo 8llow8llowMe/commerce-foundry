@@ -76,6 +76,11 @@ public class JobRepositoryAdapter implements JobRepositoryPort {
     }
 
     @Override
+    public boolean existsByTypeAndDedupKey(String type, String dedupKey) {
+        return jobRepository.existsByTypeAndDedupKey(type, dedupKey);
+    }
+
+    @Override
     public List<ExpiredJobLeaseQueryResult> findExpiredLeases(Instant now, ExpiredJobLeaseQueryResult after, int limit) {
         if (limit <= 0) {
             return List.of();
