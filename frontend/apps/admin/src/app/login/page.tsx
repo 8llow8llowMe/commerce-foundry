@@ -1,6 +1,7 @@
 import { brand } from '@cf/brand';
 import type { Metadata } from 'next';
 import { LoginForm } from '@/components/auth/LoginForm';
+import { loginNotice } from '@/lib/auth/login-notice';
 import { safeReturnPath } from '@/lib/auth/return-path';
 
 export const metadata: Metadata = { title: '로그인' };
@@ -11,11 +12,17 @@ export const metadata: Metadata = { title: '로그인' };
  * 세션은 access 수명(기본 30분)이 전부라 만료되면 다시 로그인한다(BE #191 — refresh 없음).
  */
 export default async function LoginPage({ searchParams }: PageProps<'/login'>) {
-  const { next } = await searchParams;
+  const { next, reason } = await searchParams;
+  const notice = loginNotice(reason);
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-8 px-4 py-16">
       <h1 className="text-center text-xl font-semibold">{brand.name} 어드민</h1>
+      {notice && (
+        <p role="status" className="rounded-md bg-muted px-4 py-3 text-sm">
+          {notice}
+        </p>
+      )}
       <LoginForm returnPath={safeReturnPath(next)} />
     </main>
   );

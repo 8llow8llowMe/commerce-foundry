@@ -312,6 +312,25 @@ const ROUTES: Route[] = [
     },
   },
   {
+    pattern: /^\/admins$/,
+    topic: {
+      title: '관리자 계정',
+      summary:
+        '어드민에 로그인할 운영자를 추가하거나 비활성화합니다. 비활성화한 계정도 목록에 남습니다. 마지막 한 명은 비활성화할 수 없고, 내 계정을 비활성화하면 바로 로그아웃됩니다.',
+      faq: COMMON_FAQ,
+      tour: null,
+    },
+  },
+  {
+    pattern: /^\/account\/password$/,
+    topic: {
+      title: '내 비밀번호 변경',
+      summary: '내 비밀번호를 바꿉니다. 바꾸면 로그아웃되고 새 비밀번호로 다시 로그인합니다.',
+      faq: COMMON_FAQ,
+      tour: null,
+    },
+  },
+  {
     pattern: /^\/audit-logs$/,
     topic: {
       title: '관리자 감사 로그',
