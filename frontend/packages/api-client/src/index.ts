@@ -9,6 +9,12 @@ export {
   type PageResponse,
   type SliceResponse,
 } from './envelope';
+export {
+  createEventStreamParser,
+  readEventStream,
+  type EventStreamOptions,
+  type ServerSentEvent,
+} from './event-stream';
 export { createIdempotencyKey } from './idempotency';
 export {
   formatMoney,

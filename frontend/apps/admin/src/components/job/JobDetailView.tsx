@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
 import { LOAD_FAILED } from '@/lib/api-errors';
-import { JOB_NOT_FOUND_TEXT, POLL_FAILED_NOTICE } from '@/lib/job/detail';
+import { isActiveJob, JOB_NOT_FOUND_TEXT, POLL_FAILED_NOTICE } from '@/lib/job/detail';
 import { createJobDetailController } from '@/lib/job/detail-controller';
+import { trackedJobs } from '@/lib/job/tracked-jobs';
 import { JobCancelControl } from './JobCancelControl';
 import { JobFields } from './JobFields';
 
@@ -15,7 +16,7 @@ import { JobFields } from './JobFields';
  * 읽기 · 주기 갱신 · 취소는 `createJobDetailController` 가 하고 이 화면은 그 상태를 그린다
  * (실행 중이면 다시 읽고 끝나면 멈춘다, 숨은 탭에서는 쉬고, 일시 오류는 마지막 상태를 둔 채 간격을 늘려 계속 읽는다).
  * 취소에 성공하면 응답 본문(상태 · 서버 안내 · cancellable)이 곧 결과라 따로 안내하지 않고, 실패만 안내한다.
- * 페이지가 `key={jobId}` 로 붙여 작업마다 새 컨트롤러다.
+ * 페이지가 `key={jobId}` 로 붙여 작업마다 새 컨트롤러다. 실행 중인 작업은 상단 바 작업 진행 표시(`JobTray`)에 더한다.
  */
 export function JobDetailView({ jobId }: { jobId: string }) {
   const [controller] = useState(() => createJobDetailController(jobId));
@@ -30,6 +31,12 @@ export function JobDetailView({ jobId }: { jobId: string }) {
     controller.start();
     return () => controller.stop();
   }, [controller]);
+
+  // 실행 중인 작업을 열면 상단 바 작업 진행 표시가 지켜본다 — 이 화면을 떠나도 진행 · 완료가 보이게(#214)
+  const activeJobId = view.kind === 'ready' && isActiveJob(view.job) ? view.job.jobId : null;
+  useEffect(() => {
+    if (activeJobId) trackedJobs.track(activeJobId);
+  }, [activeJobId]);
 
   const cancel = async () => {
     await controller.cancel();

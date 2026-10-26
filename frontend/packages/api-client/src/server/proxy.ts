@@ -148,7 +148,7 @@ export function isSameOrigin(request: Request, url: URL): boolean {
   return true;
 }
 
-function forwardHeaders(source: Headers, accessToken: string | null): Headers {
+export function forwardHeaders(source: Headers, accessToken: string | null): Headers {
   const headers = new Headers();
   for (const name of FORWARD_REQUEST_HEADERS) {
     const value = source.get(name);
@@ -158,7 +158,7 @@ function forwardHeaders(source: Headers, accessToken: string | null): Headers {
   return headers;
 }
 
-function relay(upstream: Response, setCookies: string[]): Response {
+export function relay(upstream: Response, setCookies: string[]): Response {
   const headers = new Headers();
   upstream.headers.forEach((value, name) => {
     if (!DROP_RESPONSE_HEADERS.has(name)) headers.set(name, value);

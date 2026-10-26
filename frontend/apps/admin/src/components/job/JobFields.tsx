@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { progressText } from '@/lib/job/detail';
 import { formatJobTime } from '@/lib/job/format';
 import type { JobItem } from '@/lib/job/types';
+import { JobProgressBar } from './JobProgressBar';
 
 /**
  * 작업 상세의 값 묶음(#272 · #305). 운영자가 볼 칸만 있다 — 상태(서버 `status.name` · 설명), 진행률 · 진행 문구,
@@ -18,22 +18,7 @@ export function JobFields({ job }: { job: JobItem }) {
           <span className="font-medium">{job.status.name}</span>
           <span className="ml-2 text-sm text-muted-fg">{job.status.description}</span>
         </p>
-        <div className="flex items-center gap-3">
-          <div
-            role="progressbar"
-            aria-label="진행률"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={job.progressPercent ?? undefined}
-            className="h-2 w-full max-w-sm overflow-hidden rounded-full bg-muted"
-          >
-            <div
-              className="h-full bg-primary"
-              style={{ width: `${Math.min(100, Math.max(0, job.progressPercent ?? 0))}%` }}
-            />
-          </div>
-          <span className="text-sm tabular-nums">{progressText(job.progressPercent)}</span>
-        </div>
+        <JobProgressBar job={job} />
         {job.progressMessage && <p className="text-sm">{job.progressMessage}</p>}
         {/* 서버 안내는 상태가 바뀌면 같이 바뀐다 — 주기 갱신 중 바뀐 문장이 읽히게 live region 으로 둔다 */}
         <p role="status" className="rounded-md bg-muted px-4 py-3 text-sm empty:hidden">

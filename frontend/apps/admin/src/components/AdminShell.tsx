@@ -1,8 +1,10 @@
 import { brand } from '@cf/brand';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { JobTray } from './job/JobTray';
 import { LogoutButton } from './LogoutButton';
 import { NavLinks, type NavGroup } from './NavLinks';
+import { NotificationCenter } from './notification/NotificationCenter';
 
 /** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 등록 · 수정은 #9 PR-D/E 뒤, 주문은 #30) */
 const NAV: NavGroup[] = [
@@ -41,7 +43,8 @@ const NAV: NavGroup[] = [
 ];
 
 /**
- * 어드민 콘솔 화면 틀 — 상단 바(홈 · 로그아웃) · 왼쪽 메뉴 · 본문. 좁은 화면에서는 메뉴가 본문 위로 온다.
+ * 어드민 콘솔 화면 틀 — 상단 바(홈 · 작업 진행 · 알림 · 로그아웃) · 왼쪽 메뉴 · 본문. 좁은 화면에서는 메뉴가 본문 위로 온다.
+ * 작업 진행(`JobTray`)과 알림(`NotificationCenter`)은 이 틀에 붙어 화면을 옮겨도 이어진다(#214).
  * 로그인 화면은 이 틀 밖이다(`app/login`).
  */
 export function AdminShell({ children }: { children: ReactNode }) {
@@ -51,7 +54,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
         <Link href="/" className="text-sm font-semibold">
           {brand.name} 어드민
         </Link>
-        <LogoutButton />
+        <div className="flex items-center gap-1 sm:gap-2">
+          <JobTray />
+          <NotificationCenter />
+          <LogoutButton />
+        </div>
       </header>
       <div className="flex flex-1 flex-col md:flex-row">
         <aside className="bg-muted px-3 py-6 md:w-56 md:shrink-0">
