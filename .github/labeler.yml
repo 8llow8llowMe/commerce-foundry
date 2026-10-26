@@ -8,9 +8,50 @@
 # 여기 없는 경로(루트 문서 · `.github/**` · `.claude/**`)는 라벨이 붙지 않는다.
 # 저장소 공통 변경([DOCS] / [INFRA])은 라벨을 새로 만들지 않고 생략한다.
 
+# ── 프론트엔드
+# `frontend-web` 은 영역 라벨이다(이슈 · PR 분류용). 배포 라벨이 아니다 — Jenkins 는 아래 `frontend-<app>` 만 본다.
 frontend-web:
   - changed-files:
       - any-glob-to-any-file: 'frontend/**'
+
+# 앱 배포 라벨 — 배포 단위가 곧 라벨이다(frontend/docs/deploy.md §4).
+# 공용 패키지(frontend/packages/**)와 frontend/ 바로 아래 빌드 설정(package.json · pnpm-lock.yaml · turbo.json 등)은 두 앱 번들에
+# 모두 들어가므로 두 라벨을 다 붙인다. 백엔드 `backend-core` 와 다르다 — 공용 패키지 변경은 두 앱을 다시 올리는 것이 기본이다.
+# 필요 없으면 PR 에서 라벨을 손으로 뺀다. 문서(*.md)는 배포 대상이 아니라 세지 않는다.
+# 각 항목은 "그 경로이면서 문서가 아닌 파일이 하나라도 있다" 이고(all-globs-to-any-file), 항목끼리는 하나만 맞으면 된다.
+frontend-storefront:
+  - changed-files:
+      - all-globs-to-any-file:
+          - 'frontend/apps/storefront/**'
+          - '!**/*.md'
+          - '!frontend/.env.example'
+  - changed-files:
+      - all-globs-to-any-file:
+          - 'frontend/packages/**'
+          - '!**/*.md'
+          - '!frontend/.env.example'
+  - changed-files:
+      - all-globs-to-any-file:
+          - 'frontend/*'
+          - '!**/*.md'
+          - '!frontend/.env.example'
+
+frontend-admin:
+  - changed-files:
+      - all-globs-to-any-file:
+          - 'frontend/apps/admin/**'
+          - '!**/*.md'
+          - '!frontend/.env.example'
+  - changed-files:
+      - all-globs-to-any-file:
+          - 'frontend/packages/**'
+          - '!**/*.md'
+          - '!frontend/.env.example'
+  - changed-files:
+      - all-globs-to-any-file:
+          - 'frontend/*'
+          - '!**/*.md'
+          - '!frontend/.env.example'
 
 # ── 백엔드 서비스 — 배포 단위가 곧 라벨이다
 backend-auth-service:

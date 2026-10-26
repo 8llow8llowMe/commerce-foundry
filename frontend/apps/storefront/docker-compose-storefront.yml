@@ -1,24 +1,48 @@
-# storefront 배포 compose — 배포 agent 가 호스트에서 이미지를 만들고 띄운다 (docs/deploy.md).
+# storefront 배포 정의 (frontend/docs/deploy.md). 이름 · 포트 키 · 보간 규칙은 백엔드 compose(backend/docs/deploy-guide.md §2~§4)와 같다.
 #
-#   docker compose -f apps/storefront/docker-compose-storefront.yml -p commerce-storefront-dev up -d --build --remove-orphans storefront-dev
+# 한 파일에 dev · prod 두 서비스를 두고, 배포 agent 는 환경마다 env 파일과 compose 프로젝트를 갈라 하나만 올린다.
+#   docker compose -p commerce-storefront-dev --env-file .env.runtime -f apps/storefront/docker-compose-storefront.yml \
+#     up -d --build --wait --remove-orphans storefront-dev
+# -p 를 빼지 않는다 — 빠지면 디렉터리 이름이 프로젝트가 돼 다른 compose 와 섞이고 --remove-orphans 가 남의 컨테이너를 지울 수 있다.
+# compose 는 파일 전체를 보간하므로 dev 배포에도 _PROD 포트 키가 있어야 한다. 파이프라인이 반대 환경 포트를 '0' 자리값으로 채운다.
 #
-# 아래 변수는 배포 파이프라인이 넣는다. 값(포트 · 네트워크 이름)은 Infra 등록(#197) · 백엔드 compose(#196) 와 맞춰 정한다.
-#   STOREFRONT_DEV_PORT / STOREFRONT_PROD_PORT              호스트에 여는 포트
-#   STOREFRONT_DEV_MEM_LIMIT / STOREFRONT_PROD_MEM_LIMIT    컨테이너 메모리 상한 (기본 512m)
-#   COMMERCE_DOCKER_NETWORK                     백엔드 게이트웨이와 같은 외부 네트워크 이름 (BFF → 게이트웨이)
-#   RUNTIME_ENV_FILE                            Vault 에서 만든 런타임 env 파일 (기본 .env.runtime, 커밋하지 않는다)
+# 컨테이너 안 포트는 dev · prod 같다(3000). 호스트 포트만 env 로 다르고 값은 #197 에서 정한다.
+# 바인드 주소는 env(STOREFRONT_BIND_{DEV,PROD})로 받고 기본값은 루프백(닫힌 쪽)이다. 앞단(Nginx · LB)이 닿아야 하는 주소만 연다 —
+# BFF 는 앞단이 덮어쓴 헤더(CLIENT_IP_HEADER)로 클라이언트 IP 를 정하므로, 앞단을 거치지 않고 BFF 에 닿으면 누구나 그 헤더로 IP 를 고른다.
+#
+# 값은 저장소에 쓰지 않는다. 키 이름은 frontend/.env.example, 실값은 Vault(kv/commerce-foundry/frontend/<env>/env).
+# environment 에는 이 앱이 실제로 읽는 런타임 키만 넘긴다. NEXT_PUBLIC_* 는 빌드에 박히므로 여기 두지 않는다(deploy.md §2).
 
-x-storefront-common: &storefront-common
-  image: commerce-storefront:${IMAGE_TAG:-latest}
+x-storefront-environment: &storefront_environment
+  # 같은 네트워크의 게이트웨이(컨테이너 이름 commerce-api-gateway-<env>, 포트 8000). 기본값을 두지 않는다 —
+  # 앱 기본값(localhost)은 컨테이너 안에서 자기 자신이라 모든 BFF 요청이 503 이 된다
+  GATEWAY_URL: ${GATEWAY_URL:?deploy.md 2절}
+  # 클라이언트 IP 를 읽을 헤더. 비면 앱 기본값(x-real-ip)과 같다 — 앞단이 반드시 덮어쓰는 헤더여야 한다(architecture.md §2)
+  CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
+  # 언어 전용 호스트. 비면 영문은 경로 방식. 빌드 때와 같은 값이어야 한다
+  LOCALE_HOSTS: ${LOCALE_HOSTS:-}
+  # 푸터 사업자 정보(Vault). 비면 그 줄을 뺀다. 빌드 때와 같은 값이어야 한다
+  BUSINESS_NAME: ${BUSINESS_NAME:-}
+  BUSINESS_REPRESENTATIVE: ${BUSINESS_REPRESENTATIVE:-}
+  BUSINESS_REGISTRATION_NUMBER: ${BUSINESS_REGISTRATION_NUMBER:-}
+  BUSINESS_MAIL_ORDER_NUMBER: ${BUSINESS_MAIL_ORDER_NUMBER:-}
+  BUSINESS_ADDRESS: ${BUSINESS_ADDRESS:-}
+  BUSINESS_CONTACT: ${BUSINESS_CONTACT:-}
+
+x-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+# dev · prod 공통. 서비스마다 다른 것(이미지 태그 · 컨테이너 이름 · 포트 · 메모리)만 아래에서 덮는다
+x-storefront-common: &storefront_common
   build:
+    # 컨텍스트는 frontend/ 다. storefront.Dockerfile.dockerignore 가 standalone · static · public 말고는 보내지 않는다
     context: ../..
     dockerfile: apps/storefront/storefront.Dockerfile
-  env_file:
-    - ${RUNTIME_ENV_FILE:-.env.runtime}
-  restart: unless-stopped
-  networks:
-    - commerce
-  # 프로세스가 HTTP 를 받는지만 본다. /api/health 는 게이트웨이가 죽으면 503 이라 컨테이너 상태와 섞지 않는다.
+  environment: *storefront_environment
+  # 프로세스가 HTTP 를 받는지만 본다. /api/health 는 게이트웨이가 죽으면 503 이라 상태 코드는 보지 않는다(deploy.md §3)
   healthcheck:
     test:
       [
@@ -31,23 +55,34 @@ x-storefront-common: &storefront-common
     timeout: 5s
     retries: 5
     start_period: 20s
+  # 진행 중인 SSR 응답을 마칠 시간. docker 기본 10초보다 약간 길게 둔다
+  stop_grace_period: 20s
+  restart: unless-stopped
+  logging: *default_logging
+  networks:
+    - commerce
 
 services:
   storefront-dev:
-    <<: *storefront-common
+    <<: *storefront_common
+    # 이미지 이름은 dev · prod 가 같고 환경은 태그로 가른다 — NEXT_PUBLIC_* 가 박힌 번들이라 dev 이미지를 prod 로 쓰면 안 된다
+    image: commerce-storefront:dev
     container_name: commerce-storefront-dev
     ports:
-      - '${STOREFRONT_DEV_PORT}:3000'
-    mem_limit: ${STOREFRONT_DEV_MEM_LIMIT:-512m}
+      - '${STOREFRONT_BIND_DEV:-127.0.0.1}:${STOREFRONT_PORT_DEV:?deploy.md 3절}:3000' # bind:host:container
+    mem_limit: ${STOREFRONT_MEM_LIMIT_DEV:-512m}
 
   storefront-prod:
-    <<: *storefront-common
+    <<: *storefront_common
+    image: commerce-storefront:prod
     container_name: commerce-storefront-prod
     ports:
-      - '${STOREFRONT_PROD_PORT}:3000'
-    mem_limit: ${STOREFRONT_PROD_MEM_LIMIT:-512m}
+      - '${STOREFRONT_BIND_PROD:-127.0.0.1}:${STOREFRONT_PORT_PROD:?deploy.md 3절}:3000' # bind:host:container
+    mem_limit: ${STOREFRONT_MEM_LIMIT_PROD:-512m}
 
+# 백엔드와 같은 외부 네트워크(COMMERCE_DOCKER_NETWORK, 환경마다 다름). BFF 가 게이트웨이를 컨테이너 이름으로 부른다.
+# 프론트 파이프라인은 네트워크를 만들지 않는다 — 없으면 게이트웨이도 없다는 뜻이라 배포를 멈춘다(deploy.md §3)
 networks:
   commerce:
-    name: ${COMMERCE_DOCKER_NETWORK}
+    name: ${COMMERCE_DOCKER_NETWORK:?deploy.md 3절}
     external: true

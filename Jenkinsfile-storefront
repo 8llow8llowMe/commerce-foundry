@@ -1,0 +1,32 @@
+// commerce-foundry storefront 배포 잡. 고객 스토어프론트(국문 · 영문 SSR + BFF). 앞단(Nginx · LB) 뒤에 둔다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-storefront (Script Path: Jenkinsfile-storefront)
+// 배포 대상 PR 라벨:                  frontend-storefront
+//   develop -> dev  (agent deploy-frontend-dev2)
+//   main    -> prod (agent deploy-frontend-prod)
+// 규칙: frontend/docs/deploy.md (파이프라인 구조 · 게이트는 backend/docs/jenkins-cicd-guide.md 와 같다)
+def frontendPipeline
+node('builder-frontend') {
+    checkout scm
+    frontendPipeline = load 'Jenkinsfile.frontend-common.groovy'
+}
+
+frontendPipeline.run([
+    appName            : 'storefront',
+    packageName        : '@cf/storefront',
+    fsPath             : 'frontend/apps/storefront',
+    dockerfile         : 'storefront.Dockerfile',
+    composeFile        : 'docker-compose-storefront.yml',
+    composeServiceName : 'storefront',
+    containerNamePrefix: 'commerce-storefront',
+    deploySubdir       : 'frontend/storefront',
+    // 배포 뒤 컨테이너 안에서 200 을 확인하는 SSR 첫 화면
+    smokePath          : '/',
+    // 빌드 때 Vault 에 반드시 있어야 하는 키. NEXT_PUBLIC_* 는 번들에 박혀 비면 canonical · hreflang 이 localhost 가 된다(deploy.md §2)
+    buildRequiredKeys  : ['NEXT_PUBLIC_SITE_URL'],
+    buildAgentLabel    : 'builder-frontend',
+    deployAgentLabels  : [
+        dev : 'deploy-frontend-dev2',
+        prod: 'deploy-frontend-prod'
+    ]
+])
