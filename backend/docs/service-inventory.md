@@ -10,7 +10,7 @@
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
 | `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36), JWT 검증·ADMIN 확인·로그아웃 차단 목록 조회 (#4) | 라우팅(`api-design-guide.md` §1-2), JWT 검증(전역 보안 체인 — `security-guide.md` §7), 로그아웃 차단 목록 조회(Redis, 어드민 경로만 fail-closed), `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
 | `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 회원가입 · 내 정보 · 로그인 · 토큰 재발급 · 로그아웃 (#4) · 배송지 주소록 (#7) · 관리자 계정 (#6) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
-| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) · 재고 (#10) · 어드민 카테고리 관리 (#9) · 어드민 상품 목록 (#9) · 메인 전시 (#63) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제/결제 후 복원), 상품 이미지, 다국어 상품정보, 통화별 가격, 메인 전시 섹션 |
+| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) · 재고 (#10) · 어드민 카테고리 관리 (#9) · 어드민 상품 목록 (#9) · 메인 전시 (#63) · 상품 사이즈표 (#216) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제/결제 후 복원), 상품 이미지, 다국어 상품정보, 통화별 가격, 메인 전시 섹션, 사이즈표(템플릿 · 상품별 치수) |
 | `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 장바구니 (#12) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
 | `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
 | `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 국내 배송비 정책 (#11) · 해외 배송비 (#22) · 국내 배송비 정책 교체 이력 (#69) | 배송비 정책(국내/해외), 송장, 배송 상태 추적 |
