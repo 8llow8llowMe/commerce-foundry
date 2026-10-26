@@ -26,13 +26,15 @@
 | 서비스 | 고객 | 어드민 |
 |--------|------|--------|
 | auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**`, `/api/v1/admin/audit-logs/**` |
-| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**` |
+| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**` |
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
 | operations-service | — | `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**` |
 
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
+상품 사이즈표(#216)의 고객 · 어드민 조회는 새 접두어가 아니다 — `GET /api/v1/products/{productId}/size-chart`,
+`GET|PUT /api/v1/admin/products/{productId}/size-chart` 는 기존 `products/**` 다. 템플릿 컬렉션만 `/api/v1/admin/size-chart-templates/**` 다.
 
 - **관리자 로그인은 `POST /api/v1/auth/admin/login` 이다(고객 열의 `/api/v1/auth/**`, #6).** **이슈 #6 원문의 `/api/v1/admin/auth/login` 과 다르다** — `/api/v1/admin/**` 아래에 두지 않는다 —
   그 경로는 게이트웨이 · 서비스 URL 규칙이 둘 다 ADMIN 토큰을 요구해 토큰을 받으러 오는 익명 요청이 닿지 못한다. 진입 패키지도 `adapter/in/web` 이고
@@ -501,13 +503,50 @@ return ResponseEntity.ok().body(Response.success(response));
   어드민 미리보기는 어드민 API 를 쓴다. 언어 · 통화별 응답이 생기면 `Vary` 를 두거나 경로를 나눈다.
 - 오류 코드: `PRODUCT_046`(섹션 없음 404) · `047`(유형이 받지 않는 아이템) · `048`(아이템 수 범위) · `049`(상품 중복) · `050`(없는 상품) · `051`(기간) ·
   `052`(링크 주소) · `053`(문구만 있는 링크) · `054`(미디어 주소) · `055`(공개 주소 미설정 503) · `056`(섹션 상한 409) · `057`(순서 변경 집합) · `058`(잠금 409).
-  검증 코드는 `PRODUCT_140~165`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` 와 `DisplayErrorCode` 가 나눠 쓴다 — 새 번호는 두 클래스를 모두 보고 고른다.
+  검증 코드는 `PRODUCT_140~165`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` · `DisplayErrorCode` · `SizeChartErrorCode`(059~, §2-10)가 나눠 쓴다 — 새 번호는 세 클래스를 모두 보고 고른다.
 - 계층 — display 컨텍스트는 product 컨텍스트의 Processor(`ProductListProcessor.summarizeVisible` · `ProductLookupProcessor`)와 domain(`ProductSummary`)만 쓴다(H8).
   상품 카드의 `customOrder` · `preorder` 는 목록과 같은 플래그 판정(#61)이다.
 - **어드민 응답은 운영자 언어다(#305).** 순서는 배열 순서로만 전하고 내부 순서 번호(`displayOrder`, 삭제 뒤 빈 번호가 남는다) · 저장마다 새로 발급되는
   아이템 아이디는 내지 않는다. `itemType` · `mediaType` 은 `{code,name,description}`(미디어 · 상품, 이미지 · 영상)이고 — 고객 응답은 분기용 문자열 그대로 —
   노출 상태는 `liveStatus`(LIVE 노출 중 · HIDDEN 숨김 · SCHEDULED 예정 · ENDED 종료, 숨김이 기간보다 앞선다)로 낸다. 고객 메인 노출과 같은 판정(`DisplaySection.liveStatusAt`)이다.
   요청은 code 문자열로 받는다.
+
+### 2-10. 상품 사이즈표 (product-service, #216)
+
+상품 상세 본문에는 사이즈표를 넣지 않는다. 공개 상품 상세 계약(#9)과 갈라 두어, 표가 없어도 상세 응답이 바뀌지 않게 한다.
+부모 상품당 0~1개인 선택 하위 리소스다(§2-2). 고객 · 어드민 DTO 를 공유하지 않는다. 아이디는 문자열이다.
+Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numeric(10,2)` JSON number 다.
+
+| 경로 | 권한 | 성공 | 주요 오류 |
+|------|------|------|-----------|
+| `GET /api/v1/admin/size-chart-templates?page=&size=` | ADMIN | 200 `PageResponse` 요약 `{templateId, name, baseUnit, columnCount}` — 최신순(아이디 내림차순). page/size 기본 0/20, size 1~100 | 400 `PRODUCT_101` · `PRODUCT_102` |
+| `GET /api/v1/admin/size-chart-templates/{templateId}` | ADMIN | 200 항목 포함 | 404 `PRODUCT_059` |
+| `POST /api/v1/admin/size-chart-templates` | ADMIN | 201 생성한 템플릿 | 400 `PRODUCT_060` · `PRODUCT_061` · `PRODUCT_100` · `PRODUCT_170~182` |
+| `PUT /api/v1/admin/size-chart-templates/{templateId}` | ADMIN | 200 전체 교체 | 404 `PRODUCT_059` · 409 `PRODUCT_062` · `PRODUCT_072` · 400 `PRODUCT_060` · `PRODUCT_061` · `PRODUCT_071` |
+| `DELETE /api/v1/admin/size-chart-templates/{templateId}` | ADMIN | 200 `dataBody: null` — 항목까지 행 삭제 | 404 `PRODUCT_059` · 409 `PRODUCT_063` · `PRODUCT_072` |
+| `GET /api/v1/admin/products/{productId}/size-chart` | ADMIN | 200 저장 값. 숨긴 상품 포함. 표가 없으면 `dataBody: null` | 404 `PRODUCT_064` |
+| `PUT /api/v1/admin/products/{productId}/size-chart` | ADMIN | 200 전체 교체(없으면 생성). 값은 저장 단위 그대로 | 404 `PRODUCT_064` · 400 `PRODUCT_065~070` · `PRODUCT_183~197` · 409 `PRODUCT_072` · `PRODUCT_073` |
+| `GET /api/v1/products/{productId}/size-chart?unit=` | `permitAll()` | 200. `unit` 생략 시 저장 단위. `unit=CM\|INCH` 이면 그 단위로 바꾼 값. 표가 없으면 `dataBody: null` | 404 `PRODUCT_001`(없거나 숨긴 상품) · 400 `PRODUCT_198`(unit) |
+
+- **템플릿**: `{name, baseUnit, columns:[{name, description?, displayOrder}]}`. 항목 1~20. 이름 1~50, 항목 이름 1~30, 설명 200(nullable), `displayOrder` 0 이상.
+  이름 · 순서가 템플릿 안에서 겹치면 400 `PRODUCT_060` · `PRODUCT_061`. `baseUnit` 은 `CM` · `INCH` 이고 치수를 저장하는 단위다.
+- **쓰는 중인 템플릿 수정**: 상품 사이즈표가 이 템플릿을 쓰면 `baseUnit` 변경과 항목 추가 · 삭제는 409 `PRODUCT_062` 다. 본문에 기존 `columnId` 를 실어 이름 · 설명 · 순서만 바꾼다.
+  아무도 안 쓰면 항목을 새 아이디로 통째로 다시 만든다(요청의 `columnId` 는 쓰지 않는다).
+- **상품 사이즈표**: `{templateId, note?, rows:[{sizeLabel, displayOrder, cells:[{columnId, value}]}]}`. 행 1~30. 사이즈 이름 1~20, note 500(nullable).
+  각 행은 그 템플릿의 항목을 빠짐없이 한 번씩 담는다. 모르는 `columnId` · 누락 · 한 행 안의 중복은 400 `PRODUCT_066` · `PRODUCT_067` · `PRODUCT_068`.
+  사이즈 이름 · 순서 중복은 400 `PRODUCT_069` · `PRODUCT_070`. 값은 0 초과 9999.99 이하, 소수 둘째 자리까지(400 `PRODUCT_197`).
+  템플릿이 없으면 경로가 아니라 본문 참조라 400 `PRODUCT_065` 다. 어드민 경로의 상품이 없으면 404 `PRODUCT_064` — 상품 상세의 `PRODUCT_001` 을 재사용하지 않는다. 숨긴 상품은 있는 상품이다.
+- **고객 조회**: 없거나 숨긴 상품은 상품 상세와 같이 404 `PRODUCT_001` 이다. 보이는 상품에 표가 없으면 200 · `dataBody: null` 이다. 어드민 조회도 표가 없으면 200 · `dataBody: null` 이다(상품 자체가 없을 때만 404).
+- **단위**: 저장은 템플릿 `baseUnit` 그대로다. 변환은 고객 응답에서만 한다. `unit` 을 빼면 `displayUnit` 은 저장 단위와 같고 값은 그대로다(scale 을 다시 매기지 않는다).
+  `unit=CM` 또는 `INCH` 이면 1 인치 = 2.54 센티미터, 소수 둘째 자리 반올림(`HALF_UP`)한 값을 `displayUnit` 기준으로 낸다. 어드민 응답은 항상 저장 값이고 `displayUnit` 을 내지 않는다.
+  단위는 판매 상태와 같이 `{code, name, description}` 다. 잘못된 `unit` 은 400 `PRODUCT_198` 이고, 본문 enum 이 아니면 400 `PRODUCT_100` 이다.
+- **순서 번호는 응답에 넣는다.** 수정 본문이 `displayOrder` · `columnId` 를 다시 받아야 해서다(전시 §2-8 이 내부 순서를 숨기는 것과 다르다). 표 · 행 아이디는 저장마다 다시 매길 수 있어 내지 않는다.
+- **동시성**: 템플릿 행을 먼저 잠그고 그다음 상품 표 행을 잠근다(5초). 잠금을 못 얻으면 409 `PRODUCT_072`. 다른 템플릿 잠금을 잡은 저장이 같은 상품에 먼저 커밋되면 409 `PRODUCT_073` 이다. 마지막 쓰기가 이긴다.
+- 오류 코드: `PRODUCT_059`(템플릿 없음 404) · `060`(항목 이름 중복) · `061`(항목 순서 중복) · `062`(사용 중 구조 변경 409) · `063`(사용 중 삭제 409) ·
+  `064`(어드민 상품 없음 404) · `065`(본문 템플릿 없음 400) · `066`(모르는 항목) · `067`(항목 누락) · `068`(행 안 항목 중복) · `069`(사이즈 이름 중복) ·
+  `070`(사이즈 순서 중복) · `071`(항목 아이디 중복) · `072`(잠금 409) · `073`(상품 표 유니크 409).
+  필드 검증은 `PRODUCT_170~197`(`SizeChartValidationMessage`). page · size 는 서비스 공용 `PRODUCT_101` · `PRODUCT_102` 다.
+- **게이트웨이**: 상품 사이즈표는 기존 `products/**` 로 라우팅된다. 템플릿 접두어 `/api/v1/admin/size-chart-templates/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다.
 
 ## 3. 계층 흐름
 

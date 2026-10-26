@@ -1,3 +1,4 @@
+
     create schema product;
 
     create table product.category (
@@ -471,6 +472,170 @@
     comment on column product.product_option_value.product_id is
         '상품 아이디 (FK: product.id) — 상세를 상품 단위로 한 번에 읽기 위한 비정규화';
 
+    create table product.product_size_cell (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        cell_value numeric(10,2) not null,
+        column_id bigint not null,
+        row_id bigint not null,
+        primary key (id),
+        constraint uk_product_size_cell_row_id_column_id unique (row_id, column_id),
+        constraint ck_product_size_cell_value_range check (cell_value > 0 and cell_value <= 9999.99)
+    );
+
+    comment on table product.product_size_cell is
+        '상품 사이즈표 칸';
+
+    comment on column product.product_size_cell.id is
+        '사이즈 칸 아이디 (Snowflake)';
+
+    comment on column product.product_size_cell.created_at is
+        '생성 시각';
+
+    comment on column product.product_size_cell.updated_at is
+        '수정 시각';
+
+    comment on column product.product_size_cell.cell_value is
+        '치수 값. 0 초과 9999.99 이하, 소수 둘째 자리. 템플릿 저장 단위 그대로';
+
+    comment on column product.product_size_cell.column_id is
+        '템플릿 항목 아이디 (FK: size_chart_template_column.id)';
+
+    comment on column product.product_size_cell.row_id is
+        '사이즈 행 아이디 (FK: product_size_row.id)';
+
+    create table product.product_size_chart (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        note varchar(500),
+        product_id bigint not null,
+        template_id bigint not null,
+        primary key (id),
+        constraint uk_product_size_chart_product_id unique (product_id)
+    );
+
+    comment on table product.product_size_chart is
+        '상품 사이즈표';
+
+    comment on column product.product_size_chart.id is
+        '상품 사이즈표 아이디 (Snowflake)';
+
+    comment on column product.product_size_chart.created_at is
+        '생성 시각';
+
+    comment on column product.product_size_chart.updated_at is
+        '수정 시각';
+
+    comment on column product.product_size_chart.note is
+        '사이즈표 비고. 없으면 null';
+
+    comment on column product.product_size_chart.product_id is
+        '상품 아이디 (FK: product.id)';
+
+    comment on column product.product_size_chart.template_id is
+        '사이즈표 템플릿 아이디 (FK: size_chart_template.id)';
+
+    create table product.product_size_row (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        display_order integer not null,
+        size_chart_id bigint not null,
+        size_label varchar(20) not null,
+        primary key (id),
+        constraint uk_product_size_row_size_chart_id_size_label unique (size_chart_id, size_label),
+        constraint uk_product_size_row_size_chart_id_display_order unique (size_chart_id, display_order),
+        constraint ck_product_size_row_display_order_non_negative check (display_order >= 0)
+    );
+
+    comment on table product.product_size_row is
+        '상품 사이즈표 행';
+
+    comment on column product.product_size_row.id is
+        '사이즈 행 아이디 (Snowflake)';
+
+    comment on column product.product_size_row.created_at is
+        '생성 시각';
+
+    comment on column product.product_size_row.updated_at is
+        '수정 시각';
+
+    comment on column product.product_size_row.display_order is
+        '사이즈 노출 순서 (같은 표 안에서 유일, 오름차순)';
+
+    comment on column product.product_size_row.size_chart_id is
+        '상품 사이즈표 아이디 (FK: product_size_chart.id)';
+
+    comment on column product.product_size_row.size_label is
+        '사이즈 이름';
+
+    create table product.size_chart_template (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        base_unit varchar(10) not null check ((base_unit in ('CM','INCH'))),
+        name varchar(50) not null,
+        primary key (id),
+        constraint ck_size_chart_template_base_unit check (base_unit in ('CM', 'INCH'))
+    );
+
+    comment on table product.size_chart_template is
+        '사이즈표 템플릿';
+
+    comment on column product.size_chart_template.id is
+        '사이즈표 템플릿 아이디 (Snowflake)';
+
+    comment on column product.size_chart_template.created_at is
+        '생성 시각';
+
+    comment on column product.size_chart_template.updated_at is
+        '수정 시각';
+
+    comment on column product.size_chart_template.base_unit is
+        '치수 저장 단위 (CM 또는 INCH). 화면 변환은 응답에서만 한다';
+
+    comment on column product.size_chart_template.name is
+        '템플릿 이름';
+
+    create table product.size_chart_template_column (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        description varchar(200),
+        display_order integer not null,
+        name varchar(30) not null,
+        template_id bigint not null,
+        primary key (id),
+        constraint uk_size_chart_template_column_template_id_name unique (template_id, name),
+        constraint ck_size_chart_template_column_display_order_non_negative check (display_order >= 0)
+    );
+
+    comment on table product.size_chart_template_column is
+        '사이즈표 템플릿 항목';
+
+    comment on column product.size_chart_template_column.id is
+        '템플릿 항목 아이디 (Snowflake)';
+
+    comment on column product.size_chart_template_column.created_at is
+        '생성 시각';
+
+    comment on column product.size_chart_template_column.updated_at is
+        '수정 시각';
+
+    comment on column product.size_chart_template_column.description is
+        '항목 설명. 없으면 null';
+
+    comment on column product.size_chart_template_column.display_order is
+        '항목 노출 순서 (오름차순, 같으면 아이디 오름차순)';
+
+    comment on column product.size_chart_template_column.name is
+        '항목 이름';
+
+    comment on column product.size_chart_template_column.template_id is
+        '사이즈표 템플릿 아이디 (FK: size_chart_template.id)';
+
     create table product.sku (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -767,23 +932,29 @@
     comment on column product.stock_restoration_item.sku_id is
         'SKU 아이디 (FK: sku.id)';
 
-    create index idx_product_visible_sale_price_amount_id
+    create index idx_product_visible_sale_price_amount_id 
        on product.product (visible, sale_price_amount, id);
 
-    create index idx_product_category_category_id_product_id
+    create index idx_product_category_category_id_product_id 
        on product.product_category (category_id, product_id);
 
-    create index idx_product_option_value_product_id
+    create index idx_product_option_value_product_id 
        on product.product_option_value (product_id);
 
-    create index idx_stock_adjustment_history_sku_id_id
+    create index idx_product_size_chart_template_id 
+       on product.product_size_chart (template_id);
+
+    create index idx_size_chart_template_column_template_id_display_order 
+       on product.size_chart_template_column (template_id, display_order);
+
+    create index idx_stock_adjustment_history_sku_id_id 
        on product.stock_adjustment_history (sku_id, id);
 
-    create index idx_stock_reservation_status_expires_at_id
+    create index idx_stock_reservation_status_expires_at_id 
        on product.stock_reservation (status, expires_at, id);
 
-    create index idx_stock_reservation_order_id
+    create index idx_stock_reservation_order_id 
        on product.stock_reservation (order_id);
 
-    create index idx_stock_restoration_reservation_id
+    create index idx_stock_restoration_reservation_id 
        on product.stock_restoration (reservation_id);
