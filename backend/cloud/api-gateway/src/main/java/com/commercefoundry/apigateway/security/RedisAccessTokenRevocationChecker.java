@@ -1,6 +1,8 @@
 package com.commercefoundry.apigateway.security;
 
+import com.commercefoundry.security.token.revocation.AdminAccessCutoffKeys;
 import com.commercefoundry.security.token.revocation.RevokedAccessTokenKeys;
+import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -23,5 +25,13 @@ public class RedisAccessTokenRevocationChecker implements AccessTokenRevocationC
     public Mono<Boolean> isRevoked(String jti) {
         String key = RevokedAccessTokenKeys.of(jti).value();
         return redisTemplate.hasKey(key);
+    }
+
+    /** 값이 없으면 empty. 숫자가 아니면 오류로 올려 경로별 fail-open · fail-closed 가 정하게 한다. */
+    @Override
+    public Mono<Instant> adminAccessCutoff(long memberId) {
+        String key = AdminAccessCutoffKeys.of(memberId).value();
+        return redisTemplate.opsForValue().get(key)
+            .map(AdminAccessCutoffKeys::parseEpochMilli);
     }
 }

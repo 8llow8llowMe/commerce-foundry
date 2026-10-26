@@ -63,6 +63,8 @@ class GatewayRouteCoverageTest {
         new Sample("/api/v1/members/me/shipping-addresses", "auth-service"),
         new Sample("/api/v1/admin/members/1", "auth-service"),
         new Sample("/api/v1/admin/audit-logs", "auth-service"),
+        new Sample("/api/v1/admin/admins/1", "auth-service"),
+        new Sample("/api/v1/admin/me/password", "auth-service"),
         new Sample("/api/v1/categories", "product-service"),
         new Sample("/api/v1/products/1/skus", "product-service"),
         new Sample("/api/v1/displays/main", "product-service"),

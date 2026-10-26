@@ -29,4 +29,13 @@ public interface AdminAuditPort {
      * @param role 역할 조건. 없으면 null(전체)
      */
     void membersSearched(long adminMemberId, MemberRole role, int page, int size);
+
+    /** 관리자 계정을 추가했다 (#193). 만들기 전에 거절되면 {@code createdMemberId} 는 null 이고 실패다. */
+    void adminAccountCreated(long actorMemberId, Long createdMemberId, boolean succeeded);
+
+    /** 관리자 계정을 비활성화했다 (#193). */
+    void adminAccountDeactivated(long actorMemberId, long targetMemberId, boolean succeeded);
+
+    /** 로그인한 관리자가 자기 비밀번호를 바꿨다 (#193). */
+    void adminPasswordChanged(long adminMemberId, boolean succeeded);
 }

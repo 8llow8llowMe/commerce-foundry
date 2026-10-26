@@ -121,7 +121,7 @@ class SecurityErrorResolverTest {
     void accessDeniedDependsOnAuthentication() {
         var anonymous = new AnonymousAuthenticationToken("key", "anonymousUser", AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"));
         var member = UsernamePasswordAuthenticationToken.authenticated(
-            new MemberPrincipal(42, MemberRole.CUSTOMER, "jti"), null, AuthorityUtils.createAuthorityList("ROLE_CUSTOMER"));
+            new MemberPrincipal(42, MemberRole.CUSTOMER, "jti", null), null, AuthorityUtils.createAuthorityList("ROLE_CUSTOMER"));
 
         assertThat(SecurityErrorResolver.resolveAccessDenied(null)).isEqualTo(SecurityErrorCode.UNAUTHORIZED);
         assertThat(SecurityErrorResolver.resolveAccessDenied(anonymous)).isEqualTo(SecurityErrorCode.UNAUTHORIZED);

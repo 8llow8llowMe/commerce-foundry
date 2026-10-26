@@ -28,7 +28,8 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 주문은 배송지 값을 요청에 실어 스냅숏으로 저장하므로 배송지 internal API 는 두지 않는다 — 필요해지면 #13 에서 연다 (`order-flow-guide.md` §4).
 "관리자 계정" 은 초기 관리자 시드(환경변수 `ADMIN_SEED_*`, 기동 시 멱등) · 관리자 로그인(`POST /api/v1/auth/admin/login`, access 만) ·
 어드민 회원 조회(`GET /api/v1/admin/members`, 마스킹 · `PageResponse`) · 관리자 감사 로그(`admin.audit` 로거 한 줄)가 있는 상태다 (`security-guide.md` §11).
-관리자 비밀번호 변경 · 관리자 추가 API 는 없다. 관리자 감사는 로그 한 줄과 `auth.admin_audit_log` 에 함께 남고 `GET /api/v1/admin/audit-logs` 로 본다 (#192).
+가게 운영자 계정 추가 · 비활성화 · 본인 비밀번호 변경이 있다 (`POST /api/v1/admin/admins`, `PATCH /api/v1/admin/admins/{memberId}`, `PATCH /api/v1/admin/me/password`, #193).
+고객 이메일은 관리자로 올리지 않고, 마지막 활성 관리자는 끄지 못한다. 관리자 감사는 로그 한 줄과 `auth.admin_audit_log` 에 함께 남고 `GET /api/v1/admin/audit-logs` 로 본다 (#192).
 응답에는 마스킹한 `actorDisplayName` · `targetDisplayName` 을 붙인다 (#322). 감사 로그를 거를 관리자 선택용 경량 목록은 두지 않는다.
 서비스 간 회원 표시 이름은 `GET /internal/v1/member-display-names`(마스킹된 이름만, 허용 호출자 delivery-service)다.
 보관 기간(기본 2년, 하한 1년)이 지난 행은 auth-service 스케줄러가 Snowflake 아이디 범위로 지운다 (#286, `security-guide.md` §11-4).

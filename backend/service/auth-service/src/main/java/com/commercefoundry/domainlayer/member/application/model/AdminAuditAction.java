@@ -7,5 +7,11 @@ package com.commercefoundry.domainlayer.member.application.model;
 public enum AdminAuditAction {
 
     ADMIN_LOGIN,
-    MEMBER_SEARCH
+    MEMBER_SEARCH,
+    /** 가게 운영자 계정을 추가했다 (#193). */
+    ADMIN_CREATE,
+    /** 가게 운영자 계정을 비활성화했다 (#193). */
+    ADMIN_DEACTIVATE,
+    /** 로그인한 운영자가 자기 비밀번호를 바꿨다 (#193). */
+    ADMIN_PASSWORD_CHANGE
 }

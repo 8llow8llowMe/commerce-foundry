@@ -71,14 +71,14 @@ public class MemberLoginProcessor {
      * <p>비밀번호가 {@value #ADMIN_PASSWORD_MAX_LENGTH}자를 넘으면 맞을 수 없다(시드 규칙 상한). 필드 검증 400 으로 따로 답하지 않고 같은 {@code AUTH_030} 으로 끝내되,
      * 비교는 자리값으로 똑같이 한 번 한다 — 응답 · 시간이 "틀린 비밀번호" 와 같다.
      *
-     * @throws MemberException {@link MemberErrorCode#ADMIN_LOGIN_FAILED} — 회원 없음 · 비밀번호 틀림 · 64자 초과 · 고객 계정
+     * @throws MemberException {@link MemberErrorCode#ADMIN_LOGIN_FAILED} — 회원 없음 · 비밀번호 틀림 · 64자 초과 · 고객 계정 · 비활성 관리자
      */
     public Member authenticateAdmin(Optional<Member> candidate, String rawPassword) {
         boolean acceptable = rawPassword != null && rawPassword.length() <= ADMIN_PASSWORD_MAX_LENGTH;
         String hash = candidate.map(Member::passwordHash).orElse(dummyPasswordHash);
         boolean matches = matches(acceptable ? rawPassword : OVERSIZED_PLACEHOLDER, hash) && acceptable;
         return candidate
-            .filter(member -> matches && member.isAdmin())
+            .filter(member -> matches && member.isActiveAdmin())
             .orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_LOGIN_FAILED));
     }
 

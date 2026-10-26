@@ -13,6 +13,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
 
@@ -33,6 +34,11 @@ public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<MemberEntity> findWithLockById(Long id);
+
+    /** 활성 관리자 전부를 쓰기 잠금으로 읽는다. 마지막 관리자 비활성화를 한 트랜잭션에서 막는다 (#193). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from MemberEntity m where m.role = :role and m.deactivatedAt is null")
+    List<MemberEntity> findActiveAdminsForUpdate(@Param("role") MemberRole role);
 
     /**
      * 읽은 버전일 때만 버전을 하나 올린다 — 조건부 UPDATE 한 문장. 바뀐 행 수가 0 이면 다른 요청이 먼저 고쳤다.

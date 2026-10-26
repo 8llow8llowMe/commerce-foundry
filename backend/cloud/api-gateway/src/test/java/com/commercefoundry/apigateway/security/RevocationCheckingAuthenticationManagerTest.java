@@ -8,6 +8,7 @@ import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.error.SecurityErrorResolver;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.security.principal.MemberRole;
+import com.commercefoundry.security.support.TestTokens;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -95,6 +96,71 @@ class RevocationCheckingAuthenticationManagerTest {
     }
 
     @Test
+    @DisplayName("관리자 토큰의 iat 가 컷오프보다 이르면 004 다 (#193)")
+    void adminIssuedBeforeCutoffIs004() {
+        Instant issuedAt = Instant.parse("2026-10-26T01:00:00Z");
+
+        assertThat(resolve(adminManager(issuedAt, memberId -> Mono.just(issuedAt.plusSeconds(1)), FailurePolicy.FAIL_CLOSED)))
+            .isEqualTo(SecurityErrorCode.TOKEN_REVOKED);
+    }
+
+    @Test
+    @DisplayName("관리자 토큰의 iat 가 컷오프와 같거나 컷오프가 없으면 통과다")
+    void adminAtOrWithoutCutoffPasses() {
+        Instant issuedAt = Instant.parse("2026-10-26T01:00:01Z");
+
+        assertThat(adminManager(issuedAt, memberId -> Mono.just(issuedAt), FailurePolicy.FAIL_CLOSED).authenticate(bearer()).block(TIMEOUT)).isNotNull();
+        assertThat(adminManager(issuedAt, memberId -> Mono.empty(), FailurePolicy.FAIL_CLOSED).authenticate(bearer()).block(TIMEOUT)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("고객 토큰은 컷오프를 조회하지 않는다")
+    void customerSkipsAdminCutoff() {
+        AccessTokenRevocationChecker checker = new AccessTokenRevocationChecker() {
+            @Override
+            public Mono<Boolean> isRevoked(String jti) {
+                return Mono.just(false);
+            }
+
+            @Override
+            public Mono<Instant> adminAccessCutoff(long memberId) {
+                return Mono.error(new AssertionError("고객 요청이 컷오프를 조회했다"));
+            }
+        };
+
+        assertThat(manager(checker, FailurePolicy.FAIL_CLOSED).authenticate(bearer()).block(TIMEOUT)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("관리자 토큰에 iat 가 없으면 003 이다 — fail-open 이어도 통과시키지 않는다")
+    void adminWithoutIssuedAtIs003() {
+        ReactiveAuthenticationManager manager = new RevocationCheckingAuthenticationManager(
+            adminDelegate(null), notRevoked(memberId -> Mono.empty()), FailurePolicy.FAIL_OPEN, Clock.systemUTC()).forExchange(EXCHANGE);
+
+        assertThatThrownBy(() -> manager.authenticate(bearer()).block(TIMEOUT)).isInstanceOf(InvalidBearerTokenException.class);
+    }
+
+    @Test
+    @DisplayName("관리자 컷오프 저장소 장애는 fail-closed 면 006 이다")
+    void adminCutoffStorageFailureIs006() {
+        AccessTokenRevocationChecker down = new AccessTokenRevocationChecker() {
+            @Override
+            public Mono<Boolean> isRevoked(String jti) {
+                return Mono.just(false);
+            }
+
+            @Override
+            public Mono<Instant> adminAccessCutoff(long memberId) {
+                return Mono.error(new RedisConnectionFailureException("simulated outage"));
+            }
+        };
+
+        assertThat(resolve(new RevocationCheckingAuthenticationManager(
+            adminDelegate(Instant.parse("2026-10-26T01:00:00Z")), down, FailurePolicy.FAIL_CLOSED, Clock.systemUTC()).forExchange(EXCHANGE)))
+            .isEqualTo(SecurityErrorCode.TOKEN_VERIFICATION_UNAVAILABLE);
+    }
+
+    @Test
     @DisplayName("fail-open warn 은 간격마다 한 번이다 — 간격 안의 나머지는 debug")
     void failOpenWarnIsRateLimited() {
         MutableClock clock = new MutableClock(Instant.parse("2026-10-18T00:00:00Z"));
@@ -113,9 +179,33 @@ class RevocationCheckingAuthenticationManagerTest {
         return new RevocationCheckingAuthenticationManager(delegate(), checker, policy, Clock.systemUTC()).forExchange(EXCHANGE);
     }
 
+    private static ReactiveAuthenticationManager adminManager(Instant issuedAt, java.util.function.LongFunction<Mono<Instant>> cutoff, FailurePolicy policy) {
+        return new RevocationCheckingAuthenticationManager(adminDelegate(issuedAt), notRevoked(cutoff), policy, Clock.systemUTC()).forExchange(EXCHANGE);
+    }
+
+    private static AccessTokenRevocationChecker notRevoked(java.util.function.LongFunction<Mono<Instant>> cutoff) {
+        return new AccessTokenRevocationChecker() {
+            @Override
+            public Mono<Boolean> isRevoked(String jti) {
+                return Mono.just(false);
+            }
+
+            @Override
+            public Mono<Instant> adminAccessCutoff(long memberId) {
+                return cutoff.apply(memberId);
+            }
+        };
+    }
+
+    private static ReactiveAuthenticationManager adminDelegate(Instant issuedAt) {
+        MemberPrincipal principal = new MemberPrincipal(TestTokens.MEMBER_ID, MemberRole.ADMIN, JTI, issuedAt);
+        return authentication -> Mono.just(UsernamePasswordAuthenticationToken.authenticated(
+            principal, null, List.of(new SimpleGrantedAuthority(MemberRole.ADMIN.authority()))));
+    }
+
     /** 서명 · 만료 검증을 통과했다고 치는 위임 매니저. */
     private static ReactiveAuthenticationManager delegate() {
-        MemberPrincipal principal = new MemberPrincipal(4611686018427387904L, MemberRole.CUSTOMER, JTI);
+        MemberPrincipal principal = new MemberPrincipal(4611686018427387904L, MemberRole.CUSTOMER, JTI, null);
         return authentication -> Mono.just(UsernamePasswordAuthenticationToken.authenticated(
             principal, null, List.of(new SimpleGrantedAuthority(MemberRole.CUSTOMER.authority()))));
     }

@@ -137,7 +137,7 @@ class MemberTest {
     @DisplayName("내 정보 변경")
     class ChangeProfile {
 
-        private final Member member = new Member(1L, "a@example.com", HASH, "홍길동", "01012345678", MemberRole.CUSTOMER, 3L);
+        private final Member member = new Member(1L, "a@example.com", HASH, "홍길동", "01012345678", MemberRole.CUSTOMER, 3L, null);
 
         @Test
         @DisplayName("null 인 칸은 그대로다 — 둘 다 null 이면 같은 값(equals)이다")
@@ -203,7 +203,7 @@ class MemberTest {
     @Test
     @DisplayName("toString 에 비밀번호 해시 · 이메일 · 이름 · 전화번호를 싣지 않는다")
     void toStringHidesSecretsAndPersonalData() {
-        Member member = new Member(7L, "secret@example.com", HASH, "홍길동", "01012345678", MemberRole.CUSTOMER, 0L);
+        Member member = new Member(7L, "secret@example.com", HASH, "홍길동", "01012345678", MemberRole.CUSTOMER, 0L, null);
 
         assertThat(member.toString()).contains("7").doesNotContain(HASH, "secret@example.com", "홍길동", "01012345678");
     }

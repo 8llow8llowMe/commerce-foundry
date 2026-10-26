@@ -15,6 +15,7 @@ import com.commercefoundry.domainlayer.member.application.exception.MemberExcept
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
+import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +27,8 @@ class MemberLoginProcessorTest {
     private static final String DUMMY_HASH = "$2a$10$dummy";
     private static final Member CUSTOMER = Member.restore(1L, "a@example.com", "$2a$10$customer", "홍길동", null, MemberRole.CUSTOMER, 0L);
     private static final Member ADMIN = Member.restore(2L, "admin@example.com", "$2a$10$admin", "관리자", null, MemberRole.ADMIN, 0L);
+    private static final Member DEACTIVATED_ADMIN = Member.restore(
+        3L, "former@example.com", "$2a$10$former", "이전운영", null, MemberRole.ADMIN, 0L, Instant.parse("2026-10-26T00:00:00Z"));
 
     private final MemberRepositoryPort memberRepositoryPort = mock(MemberRepositoryPort.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
@@ -113,6 +116,15 @@ class MemberLoginProcessorTest {
         given(passwordEncoder.matches("admin-password-1", "$2a$10$admin")).willReturn(true);
 
         assertThat(processor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).isEqualTo(ADMIN);
+    }
+
+    @Test
+    @DisplayName("관리자 로그인 — 비활성 운영자는 비밀번호가 맞아도 AUTH_030 이다. 비교는 똑같이 하고 계정이 꺼졌는지는 드러내지 않는다")
+    void deactivatedAdminIsRejected() {
+        given(passwordEncoder.matches("admin-password-1", "$2a$10$former")).willReturn(true);
+
+        assertAdminLoginFailed(() -> processor.authenticateAdmin(Optional.of(DEACTIVATED_ADMIN), "admin-password-1"));
+        verify(passwordEncoder).matches("admin-password-1", "$2a$10$former");
     }
 
     @Test

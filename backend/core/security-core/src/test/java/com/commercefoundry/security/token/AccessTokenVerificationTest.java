@@ -48,7 +48,7 @@ class AccessTokenVerificationTest {
 
         Authentication authentication = authenticate(issued.tokenValue(), VERIFIED_AT);
 
-        assertThat(authentication.getPrincipal()).isEqualTo(new MemberPrincipal(MEMBER_ID, MemberRole.CUSTOMER, issued.tokenId()));
+        assertThat(authentication.getPrincipal()).isEqualTo(new MemberPrincipal(MEMBER_ID, MemberRole.CUSTOMER, issued.tokenId(), NOW));
         assertThat(authentication.getName()).isEqualTo(String.valueOf(MEMBER_ID));
         assertThat(authentication.getAuthorities()).extracting(GrantedAuthority::getAuthority).containsExactly("ROLE_CUSTOMER");
     }
