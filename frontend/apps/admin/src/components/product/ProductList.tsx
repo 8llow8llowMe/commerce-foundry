@@ -178,16 +178,25 @@ export function ProductList({ query }: { query: ProductQuery }) {
                       {dateTime.format(new Date(product.updatedAt))}
                     </td>
                     <td className="py-3 whitespace-nowrap">
-                      {/* 숨긴 상품은 옵션 · SKU 를 읽을 어드민 상세 API 가 없어 재고 화면을 열 수 없다(§9 재고) */}
-                      {product.visible && (
+                      <div className="flex gap-3">
+                        {/* 숨긴 상품은 옵션 · SKU 를 읽을 어드민 상세 API 가 없어 재고 화면을 열 수 없다(§9 재고) */}
+                        {product.visible && (
+                          <Link
+                            href={`/stocks/${product.productId}`}
+                            className="underline-offset-4 hover:underline"
+                            aria-label={`${product.name} 재고`}
+                          >
+                            재고
+                          </Link>
+                        )}
                         <Link
-                          href={`/stocks/${product.productId}`}
+                          href={`/size-charts/${product.productId}`}
                           className="underline-offset-4 hover:underline"
-                          aria-label={`${product.name} 재고`}
+                          aria-label={`${product.name} 사이즈표`}
                         >
-                          재고
+                          사이즈표
                         </Link>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}

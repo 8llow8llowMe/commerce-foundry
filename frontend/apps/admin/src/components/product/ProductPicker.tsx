@@ -29,10 +29,23 @@ function productsPath({ keyword, page }: Query): string {
 }
 
 /**
- * 재고를 볼 상품 고르기(#188) — 어드민 상품 목록(#9, 상품명 검색 · 숨김 포함 · 페이지).
- * 숨긴 상품은 옵션 · SKU 를 읽을 어드민 상세 API 가 아직 없어 고를 수 없다고 표시한다.
+ * 상품 하나를 고르는 목록 — 어드민 상품 목록(#9, 상품명 검색 · 숨김 포함 · 페이지).
+ * 재고(#188) · 사이즈표(#218)가 쓴다. 고르면 `{basePath}/{productId}` 로 간다.
+ * `hiddenNote` 를 주면 숨긴 상품은 고를 수 없다고 흐리게 보이고 그 이유를 적는다.
  */
-export function ProductPicker() {
+export function ProductPicker({
+  title,
+  description,
+  basePath,
+  hiddenNote,
+}: {
+  title: string;
+  description: string;
+  /** 고른 뒤 갈 화면의 앞부분(`/stocks`) */
+  basePath: string;
+  /** 숨긴 상품을 고를 수 없는 이유(줄 title · 목록 아래 안내). 없으면 숨긴 상품도 고른다 */
+  hiddenNote?: string;
+}) {
   const [query, setQuery] = useState<Query>({ keyword: '', page: 0 });
   const [draft, setDraft] = useState('');
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -64,8 +77,8 @@ export function ProductPicker() {
   return (
     <div className="flex max-w-3xl flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold">재고</h1>
-        <p className="mt-1 text-sm text-muted-fg">재고를 볼 상품을 고르세요.</p>
+        <h1 className="text-xl font-semibold">{title}</h1>
+        <p className="mt-1 text-sm text-muted-fg">{description}</p>
       </div>
 
       <form role="search" onSubmit={search} className="flex items-end gap-2">
@@ -102,6 +115,8 @@ export function ProductPicker() {
           <p className="text-sm text-muted-fg">{current.data.totalElements}개</p>
           <ul className="flex flex-col gap-1">
             {current.data.contents.map((product) => {
+              const href =
+                hiddenNote && !product.visible ? null : `${basePath}/${product.productId}`;
               const meta = (
                 <span className="shrink-0 text-muted-fg">
                   {product.visible ? product.availability.name : '숨김'} · SKU {product.skuCount}
@@ -109,9 +124,9 @@ export function ProductPicker() {
               );
               return (
                 <li key={product.productId}>
-                  {product.visible ? (
+                  {href ? (
                     <Link
-                      href={`/stocks/${product.productId}`}
+                      href={href}
                       className="flex items-center justify-between gap-4 rounded-md bg-muted/50 px-4 py-3 text-sm hover:bg-muted"
                     >
                       <span className="min-w-0 truncate font-medium">{product.name}</span>
@@ -120,7 +135,7 @@ export function ProductPicker() {
                   ) : (
                     <div
                       className="flex items-center justify-between gap-4 rounded-md px-4 py-3 text-sm text-muted-fg"
-                      title="숨긴 상품은 어드민 상품 상세가 생기면 재고를 볼 수 있습니다."
+                      title={hiddenNote}
                     >
                       <span className="min-w-0 truncate">{product.name}</span>
                       {meta}
@@ -130,10 +145,7 @@ export function ProductPicker() {
               );
             })}
           </ul>
-          <p className="text-xs text-muted-fg">
-            숨긴 상품은 아직 고를 수 없습니다 — 옵션 · SKU 를 읽을 어드민 상품 상세가 생기면 함께 볼
-            수 있습니다.
-          </p>
+          {hiddenNote && <p className="text-xs text-muted-fg">{hiddenNote}</p>}
           {current.data.totalPages > 1 && (
             <div className="flex items-center gap-3 text-sm">
               <Button
