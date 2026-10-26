@@ -123,7 +123,7 @@ export function ProductStocks({ productId }: { productId: string }) {
       {status.kind === 'ready' && (
         <>
           {/* relative — 표 머리의 sr-only(absolute)가 스크롤 상자 밖으로 나가 화면을 가로로 넓히지 않게 */}
-          <div className="relative overflow-x-auto">
+          <div data-tour="stock-table" className="relative overflow-x-auto">
             <table className="w-full min-w-[44rem] text-left text-sm">
               <thead className="text-muted-fg">
                 <tr>

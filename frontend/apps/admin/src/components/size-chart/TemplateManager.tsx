@@ -104,6 +104,7 @@ export function TemplateManager() {
           </p>
         </div>
         <Button
+          data-tour="template-new"
           disabled={busy}
           onClick={() => {
             setNotice(null);
@@ -150,7 +151,7 @@ export function TemplateManager() {
       {current?.kind === 'ok' && current.data.contents.length > 0 && (
         <>
           <p className="text-sm text-muted-fg">{current.data.totalElements}개</p>
-          <div className="relative overflow-x-auto">
+          <div data-tour="template-list" className="relative overflow-x-auto">
             <table className="w-full min-w-[36rem] text-left text-sm">
               <thead className="text-muted-fg">
                 <tr>

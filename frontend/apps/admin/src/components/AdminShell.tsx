@@ -5,6 +5,8 @@ import { JobTray } from './job/JobTray';
 import { LogoutButton } from './LogoutButton';
 import { NavLinks, type NavGroup } from './NavLinks';
 import { NotificationCenter } from './notification/NotificationCenter';
+import { HelpMenu } from './tour/HelpMenu';
+import { TourRunner } from './tour/TourRunner';
 
 /** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 등록 · 수정은 #9 PR-D/E 뒤, 주문은 #30) */
 const NAV: NavGroup[] = [
@@ -45,6 +47,7 @@ const NAV: NavGroup[] = [
 /**
  * 어드민 콘솔 화면 틀 — 상단 바(홈 · 작업 진행 · 알림 · 로그아웃) · 왼쪽 메뉴 · 본문. 좁은 화면에서는 메뉴가 본문 위로 온다.
  * 작업 진행(`JobTray`)과 알림(`NotificationCenter`)은 이 틀에 붙어 화면을 옮겨도 이어진다(#214).
+ * 도움말(`HelpMenu`)과 온보딩 투어(`TourRunner`, #228)도 여기 붙는다 — 투어가 가리키는 요소에는 `data-tour` 를 단다.
  * 로그인 화면은 이 틀 밖이다(`app/login`).
  */
 export function AdminShell({ children }: { children: ReactNode }) {
@@ -56,16 +59,22 @@ export function AdminShell({ children }: { children: ReactNode }) {
         </Link>
         <div className="flex items-center gap-1 sm:gap-2">
           <JobTray />
-          <NotificationCenter />
+          <div data-tour="notifications">
+            <NotificationCenter />
+          </div>
+          <div data-tour="help">
+            <HelpMenu />
+          </div>
           <LogoutButton />
         </div>
       </header>
       <div className="flex flex-1 flex-col md:flex-row">
-        <aside className="bg-muted px-3 py-6 md:w-56 md:shrink-0">
+        <aside data-tour="nav" className="bg-muted px-3 py-6 md:w-56 md:shrink-0">
           <NavLinks groups={NAV} />
         </aside>
         <main className="min-w-0 flex-1 px-4 py-8 md:px-10">{children}</main>
       </div>
+      <TourRunner />
     </div>
   );
 }

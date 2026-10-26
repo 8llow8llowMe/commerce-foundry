@@ -295,7 +295,7 @@ export function SizeChartEditor({ productId }: { productId: string }) {
 
       {/* 저장 · 템플릿 읽기 중에는 입력을 막는다 — 응답이 그사이 고친 값을 덮어쓰지 않게 */}
       <fieldset disabled={saving || switching} className="flex min-w-0 flex-col gap-6">
-        <div className="flex flex-col gap-1">
+        <div data-tour="size-template" className="flex flex-col gap-1">
           <label htmlFor={templateId} className="text-sm font-medium">
             템플릿
           </label>
@@ -366,7 +366,7 @@ export function SizeChartEditor({ productId }: { productId: string }) {
               </p>
             </div>
             {/* relative — 표 머리의 sr-only(absolute)가 스크롤 상자 밖으로 나가 화면을 가로로 넓히지 않게 */}
-            <div className="relative overflow-x-auto">
+            <div data-tour="size-grid" className="relative overflow-x-auto">
               <table className="text-left text-sm">
                 <thead className="text-muted-fg">
                   <tr>
@@ -529,7 +529,7 @@ export function SizeChartEditor({ productId }: { productId: string }) {
         {notice ?? ''}
       </p>
       <FieldError messages={errorsOf(errors, 'form')} />
-      <div>
+      <div data-tour="size-save">
         <Button type="submit" disabled={saving || switching || !form.templateId}>
           {saving ? '저장 중…' : '저장'}
         </Button>
