@@ -76,8 +76,8 @@ public class ShippingPolicyAdminController {
 
     @Operation(
         summary = "국내 배송비 정책 교체 이력 조회",
-        description = "교체 이력을 최신순으로 페이지 단위로 읽는다. 항목은 교체 전(처음 만든 교체면 null) · 후 정책 값, 교체한 어드민 회원 아이디, 교체 시각이다. "
-            + "이력이 없으면 빈 목록이다."
+        description = "교체 이력을 최신순으로 페이지 단위로 읽는다. 항목은 교체 전(처음 만든 교체면 null) · 후 정책 값, 교체한 어드민 회원 아이디, "
+            + "마스킹한 표시 이름(adminDisplayName, 모르면 null), 교체 시각이다. 이력이 없으면 빈 목록이다."
     )
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/histories")

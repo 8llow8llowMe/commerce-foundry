@@ -7,8 +7,8 @@ import java.util.List;
 import lombok.Builder;
 
 /**
- * 어드민 국내 배송비 정책 교체 이력 한 건 (#69). {@code adminMemberId} 는 개인정보가 아니라 내부 회원 아이디라 그대로 낸다 — 마스킹 대상은 이름 · 연락처 ·
- * 주소 같은 고객 개인정보다 ({@code coding-conventions.md} §8). 어드민 이름 표시는 auth-service 조회가 필요해 이 API 범위 밖이다.
+ * 어드민 국내 배송비 정책 교체 이력 한 건 (#69). {@code adminMemberId} 는 내부 회원 아이디라 그대로 낸다.
+ * {@code adminDisplayName} 은 auth-service 가 마스킹해 준 이름이다 (#322). 원문 이름은 받지 않고, 모르면 null 이다.
  */
 @Builder
 @Schema(description = "어드민 국내 배송비 정책 교체 이력 한 건")
@@ -19,6 +19,9 @@ public record ShippingPolicyHistoryAdminItem(
 
     @Schema(description = "교체한 어드민 회원 아이디", example = "4611686018427387904")
     String adminMemberId,
+
+    @Schema(description = "교체한 어드민의 마스킹 이름. 회원을 모르거나 이름이 없으면 null", example = "홍*동", nullable = true)
+    String adminDisplayName,
 
     @Schema(description = "교체 시각 (UTC, ISO-8601)", example = "2026-10-18T03:00:00Z")
     Instant changedAt,

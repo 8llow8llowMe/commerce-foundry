@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 국내 배송비 정책 조회 · 전체 교체 · 교체 이력. 교체는 입력 검증 → 버전 확인 → 아이디 발급 → 저장 → 이력 append 순서다.
@@ -84,9 +85,11 @@ public class ShippingPolicyProcessor {
 
     /**
      * 국내 정책 교체 이력 — 최신순 한 페이지. 정책이 없거나 이력이 없으면 빈 페이지다.
+     * 이어서 auth-service 를 부르므로 Facade 가 아니라 이 조회만 읽기 전용 트랜잭션으로 좁힌다.
      *
      * @param page 0 부터 센다
      */
+    @Transactional(readOnly = true)
     public Page<ShippingPolicyHistory> findDomesticHistories(int page, int size) {
         return shippingPolicyHistoryRepositoryPort.findDomesticPage(page, size);
     }

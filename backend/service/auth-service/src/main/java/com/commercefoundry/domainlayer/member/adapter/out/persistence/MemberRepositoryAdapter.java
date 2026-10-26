@@ -1,16 +1,20 @@
 package com.commercefoundry.domainlayer.member.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.member.adapter.out.persistence.entity.MemberEntity;
+import com.commercefoundry.domainlayer.member.adapter.out.persistence.repository.MemberNameView;
 import com.commercefoundry.domainlayer.member.adapter.out.persistence.repository.MemberRepository;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.mapper.MemberMapper;
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.application.port.out.query.MemberListQueryResult;
+import com.commercefoundry.domainlayer.member.application.port.out.query.MemberNameQueryResult;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.security.principal.MemberRole;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -66,6 +70,19 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
 
     private static MemberListQueryResult toListRow(MemberEntity entity) {
         return new MemberListQueryResult(entity.getId(), entity.getEmail(), entity.getName(), entity.getPhone(), entity.getRole(), entity.getCreatedAt());
+    }
+
+    /** 빈 목록은 {@code in ()} 를 만들지 않는다. 있는 회원만, 이름 원문 그대로다. */
+    @Override
+    public List<MemberNameQueryResult> findNamesByIds(Collection<Long> memberIds) {
+        if (memberIds.isEmpty()) {
+            return List.of();
+        }
+        return memberRepository.findByIdIn(memberIds).stream().map(MemberRepositoryAdapter::toNameRow).toList();
+    }
+
+    private static MemberNameQueryResult toNameRow(MemberNameView view) {
+        return new MemberNameQueryResult(view.getId(), view.getName());
     }
 
     /**

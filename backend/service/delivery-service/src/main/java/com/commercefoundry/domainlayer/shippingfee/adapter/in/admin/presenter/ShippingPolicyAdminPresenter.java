@@ -11,6 +11,7 @@ import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicyHistory;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicyHistory.Snapshot;
 import com.commercefoundry.persistence.dto.PageResponse;
+import java.util.Map;
 import java.util.Objects;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
@@ -30,9 +31,14 @@ public class ShippingPolicyAdminPresenter {
             .build();
     }
 
-    /** 페이지 정보(전체 건수 포함)는 그대로 두고 항목만 바꾼다. 저장된 이력만 받는다 — 교체 시각이 없으면 저장 흐름의 오류다. */
-    public PageResponse<ShippingPolicyHistoryAdminItem> toHistoryPageResponse(Page<ShippingPolicyHistory> histories) {
-        return PageResponse.of(histories).map(this::toHistoryItem);
+    /**
+     * 페이지 정보(전체 건수 포함)는 그대로 두고 항목만 바꾼다. 저장된 이력만 받는다 — 교체 시각이 없으면 저장 흐름의 오류다.
+     * {@code maskedNamesByMemberId} 는 이미 마스킹된 이름이다. 여기서 다시 마스킹하지 않는다.
+     */
+    public PageResponse<ShippingPolicyHistoryAdminItem> toHistoryPageResponse(
+        Page<ShippingPolicyHistory> histories, Map<Long, String> maskedNamesByMemberId
+    ) {
+        return PageResponse.of(histories).map(history -> toHistoryItem(history, maskedNamesByMemberId));
     }
 
     private RemoteAreaAdminItem toItem(RemoteArea remoteArea) {
@@ -45,14 +51,19 @@ public class ShippingPolicyAdminPresenter {
             .build();
     }
 
-    private ShippingPolicyHistoryAdminItem toHistoryItem(ShippingPolicyHistory history) {
+    private ShippingPolicyHistoryAdminItem toHistoryItem(ShippingPolicyHistory history, Map<Long, String> maskedNamesByMemberId) {
         return ShippingPolicyHistoryAdminItem.builder()
             .historyId(String.valueOf(history.id()))
             .adminMemberId(String.valueOf(history.adminMemberId()))
+            .adminDisplayName(blankToNull(maskedNamesByMemberId.get(history.adminMemberId())))
             .changedAt(Objects.requireNonNull(history.changedAt(), "changedAt"))
             .before(history.before() == null ? null : toSnapshotItem(history.before()))
             .after(toSnapshotItem(history.after()))
             .build();
+    }
+
+    private static String blankToNull(String displayName) {
+        return displayName == null || displayName.isBlank() ? null : displayName;
     }
 
     private SnapshotItem toSnapshotItem(Snapshot snapshot) {

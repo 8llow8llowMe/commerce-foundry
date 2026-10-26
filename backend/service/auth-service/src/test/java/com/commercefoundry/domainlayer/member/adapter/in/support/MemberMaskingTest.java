@@ -45,6 +45,15 @@ class MemberMaskingTest {
     }
 
     @Test
+    @DisplayName("표시 이름 칸은 이름이 없으면 null — maskName(null) 의 * 를 쓰지 않는다")
+    void nameIfPresent() {
+        assertThat(MemberMasking.maskNameIfPresent(null)).isNull();
+        assertThat(MemberMasking.maskNameIfPresent("")).isNull();
+        assertThat(MemberMasking.maskNameIfPresent("   ")).isNull();
+        assertThat(MemberMasking.maskNameIfPresent("홍길동")).isEqualTo("홍*동");
+    }
+
+    @Test
     @DisplayName("이름은 코드 포인트로 센다 — 이모지가 반으로 잘리지 않는다")
     void nameByCodePoint() {
         assertThat(MemberMasking.maskName("😀길😀")).isEqualTo("😀*😀");

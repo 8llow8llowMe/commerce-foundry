@@ -26,6 +26,8 @@ public enum DeliveryErrorCode {
     WEIGHT_NOT_SUPPORTED("DELIVERY_011", "배송할 수 있는 무게를 넘었습니다: %sg (최대 %sg)", HttpStatus.BAD_REQUEST),
     /** 저장된 정책의 통화는 PUT 으로 바꾸지 않는다 — 어드민 실수 한 번에 모든 주문 견적이 003 으로 막히지 않게 (#70). */
     SHIPPING_POLICY_CURRENCY_CHANGE_NOT_ALLOWED("DELIVERY_012", "배송비 정책의 통화는 바꿀 수 없습니다. 현재 통화: %s", HttpStatus.CONFLICT),
+    /** auth-service 회원 표시 이름 조회 실패 (#322). 회원을 모르는 것(null)과 구분한다 — 장애를 빈 이름으로 숨기지 않는다. */
+    AUTH_SERVICE_UNAVAILABLE("DELIVERY_013", "관리자 이름을 조회할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 없는 통화)의 폴백. */
     INVALID_REQUEST("DELIVERY_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

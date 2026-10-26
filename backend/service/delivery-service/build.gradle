@@ -9,6 +9,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    // auth-service 회원 표시 이름 벌크 조회(#322). security-core 는 Feign 을 compileOnly 로만 둔다 — 클라이언트를 가진 서비스가 직접 선언한다
+    implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
+    // 서킷은 adapter/out/client/support 가 직접 감싼다 (coding-conventions.md §10) — spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다
+    implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
     implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${rootProject.ext.springdocVersion}"
 
     // Q 클래스 생성기. persistence-core 의 annotationProcessor 는 전이되지 않아 엔티티를 가진 모듈마다 선언한다

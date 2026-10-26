@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.ShippingPolicyAdminResponse;
@@ -13,6 +14,7 @@ import com.commercefoundry.domainlayer.shippingfee.application.command.ShippingP
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryErrorCode;
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryException;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingPolicyAdminUseCase;
+import com.commercefoundry.domainlayer.shippingfee.application.port.out.MemberDisplayNameQueryPort;
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.ShippingPolicyHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.ShippingPolicyRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.PostalCode;
@@ -21,6 +23,7 @@ import jakarta.persistence.EntityManagerFactory;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -32,6 +35,7 @@ import net.ttddyy.dsproxy.support.ProxyDataSource;
 import net.ttddyy.dsproxy.support.ProxyDataSourceBuilder;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -44,6 +48,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /**
@@ -70,6 +75,15 @@ class ShippingPolicyReplaceStatementCountTest {
 
     @Autowired
     private ShippingPolicyAdminUseCase shippingPolicyAdminUseCase;
+
+    /** 이력 조회의 표시 이름은 auth-service 다. 왕복 수를 세는 테스트라 원격 호출을 빈 맵으로 둔다. */
+    @MockitoBean
+    private MemberDisplayNameQueryPort memberDisplayNameQueryPort;
+
+    @BeforeEach
+    void stubDisplayNames() {
+        lenient().when(memberDisplayNameQueryPort.findMaskedDisplayNames(any())).thenReturn(Map.of());
+    }
 
     @Autowired
     private JdbcRoundTrips jdbcRoundTrips;

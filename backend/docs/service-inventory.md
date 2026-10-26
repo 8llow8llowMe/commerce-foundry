@@ -29,6 +29,8 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 "관리자 계정" 은 초기 관리자 시드(환경변수 `ADMIN_SEED_*`, 기동 시 멱등) · 관리자 로그인(`POST /api/v1/auth/admin/login`, access 만) ·
 어드민 회원 조회(`GET /api/v1/admin/members`, 마스킹 · `PageResponse`) · 관리자 감사 로그(`admin.audit` 로거 한 줄)가 있는 상태다 (`security-guide.md` §11).
 관리자 비밀번호 변경 · 관리자 추가 API 는 없다. 관리자 감사는 로그 한 줄과 `auth.admin_audit_log` 에 함께 남고 `GET /api/v1/admin/audit-logs` 로 본다 (#192).
+응답에는 마스킹한 `actorDisplayName` · `targetDisplayName` 을 붙인다 (#322). 감사 로그를 거를 관리자 선택용 경량 목록은 두지 않는다.
+서비스 간 회원 표시 이름은 `GET /internal/v1/member-display-names`(마스킹된 이름만, 허용 호출자 delivery-service)다.
 보관 기간(기본 2년, 하한 1년)이 지난 행은 auth-service 스케줄러가 Snowflake 아이디 범위로 지운다 (#286, `security-guide.md` §11-4).
 "카탈로그 조회" 는 고객 카테고리 트리 · 상품 목록 · 상품 상세(`/api/v1/categories` · `/api/v1/products/**`)와 서비스 간 SKU 벌크 조회(`/internal/v1/skus`)가 있는 상태다.
 상품은 프리오더 여부 · 발송 예정일(`product.preorder` · `expected_ship_date`)을, 상품 미디어는 영상(`ImageType.VIDEO` + `poster_url`)을 가진다 — 플래그 `store.features.preorder` ·
@@ -39,7 +41,8 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullable)를 가지고 서비스 간 SKU 벌크 조회가 그대로 내린다 — 해외 주문 거절은 order-service 몫이다 (#80, `order-flow-guide.md` §2-2).
 "국내 배송비 정책" 은 고객 정책 안내(`/api/v1/shipping-fees/policy`) · 어드민 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/domestic`) · 서비스 간 배송비 견적(`/internal/v1/shipping-fees/quotes`)이 있는 상태다.
 "국내 배송비 정책 교체 이력" 은 교체가 성공할 때 같은 트랜잭션에서 교체 전 · 후 값 · 관리자 · 시각을 `delivery.shipping_policy_history`(+ `shipping_policy_history_area`)에 남기고
-어드민이 최신순 페이지로 조회(`GET /api/v1/admin/shipping-policies/domestic/histories`)하는 상태다 (`api-design-guide.md` §6-2). 해외 정책 이력은 아직 없다.
+어드민이 최신순 페이지로 조회(`GET /api/v1/admin/shipping-policies/domestic/histories`)하는 상태다 (`api-design-guide.md` §6-2).
+항목의 `adminDisplayName` 은 auth-service 표시 이름 벌크 조회로 페이지당 한 번 붙인다 (#322). 해외 정책 이력은 아직 없다.
 "해외 배송비" 는 고객 해외 정책 안내(`/api/v1/shipping-fees/international-policy`) · 어드민 해외 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/international`)가 있고, 같은 견적 API 가 KR 외 국가를 국가 그룹 · 무게 구간으로 계산하는 상태다. `store.features.international-shipping` 이 꺼지면(기본값) 고객 안내는 null, KR 외 견적은 `DELIVERY_002` 다(본문 검증 `118` · `119` · `120` 이 플래그 확인보다 먼저다). 견적 무게는 SKU 무게(#80) × 수량 합을 order-service 가 보내고(#13), 통관 신고 금액은 송장 · 출고(#18)다.
 "장바구니" 는 회원 장바구니(`/api/v1/carts/me/**` — 조회 · 담기 · 수량 변경 · 삭제 · 로컬 장바구니 병합)가 있고, 가격 · 판매 상태를 product-service SKU 벌크 조회(Feign, 서비스 토큰 · 서킷)로 매번 읽는 상태다. 정책은 `order-flow-guide.md` §2-1.
 
@@ -52,6 +55,7 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 | order-service | payment-service | 클레임 환불 실행 |
 | payment-service | order-service | 결제 준비 시 주문 금액 조회, 결제 완료 알림 |
 | delivery-service | order-service | 송장 등록 시 주문 상태 `SHIPPING` 전이, 배송 완료 반영, 해외 출고 통관 품목(주문 항목 스냅숏) 조회 (#18) |
+| delivery-service | auth-service | 회원 표시 이름 벌크 조회(`GET /internal/v1/member-display-names`, #322). 배송비 정책 이력 한 페이지의 관리자 아이디를 한 번에 보낸다. 응답은 마스킹된 이름만이고 원문은 없다. 실패는 503 `DELIVERY_013` |
 
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —
 A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃이 겹친다.

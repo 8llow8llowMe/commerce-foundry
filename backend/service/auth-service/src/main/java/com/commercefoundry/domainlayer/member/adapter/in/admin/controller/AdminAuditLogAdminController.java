@@ -38,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/admin/audit-logs")
 public class AdminAuditLogAdminController {
 
+    // 감사 로그를 거를 관리자 선택용 경량 목록 API 는 두지 않는다 — 회원 목록 조회는 감사 대상이고 size 상한이 100이라 이름이 빠진다 (#322).
     private static final int MAX_PAGE_SIZE = 100;
 
     private final AdminAuditLogAdminUseCase adminAuditLogAdminUseCase;
@@ -49,6 +50,7 @@ public class AdminAuditLogAdminController {
             + "page 는 0부터, size 는 1~100(기본 20)이고 벗어나면 400(AUTH_133 · AUTH_134), actorMemberId 가 양수가 아니면 400(AUTH_135), "
             + "target 이 공백이 있거나 1~200자 밖이면 400(AUTH_136), 행위 · 결과 값이 틀리면 400(AUTH_198)이다. "
             + "로그인 실패는 행위자를 모르므로 actorMemberId 가 null 이고, 노린 관리자 계정은 target=member:<id> · result=FAILURE 로 고른다. "
+            + "actorDisplayName 은 행위한 관리자의 마스킹 이름, targetDisplayName 은 대상이 member:<id> 일 때만 그 회원의 마스킹 이름이다. 모르면 null. "
             + "이 조회 자체는 감사 로그에 남지 않는다."
     )
     @PreAuthorize("hasRole('ADMIN')")
