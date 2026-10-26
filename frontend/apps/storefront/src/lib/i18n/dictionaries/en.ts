@@ -121,7 +121,12 @@ export const en: Dictionary = {
     loadFailed: 'We could not load this product. Please try again in a moment.',
     reload: 'Reload',
     breadcrumb: 'Breadcrumb',
-    info: { sizeGuide: 'Size guide', shipping: 'Shipping & returns' },
+    info: { sizeGuide: 'Size guide', shipping: 'Shipping & returns', measures: 'How to measure' },
+    sizeChart: {
+      size: 'Size',
+      unit: 'Measurements in {unit}',
+      units: { CM: 'cm', INCH: 'inches' },
+    },
     gallery: {
       images: '{name}, {count} images',
       zoom: 'Enlarge {alt}',

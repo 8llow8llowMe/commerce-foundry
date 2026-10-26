@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { en } from '@/lib/i18n/dictionaries/en';
 import { ko } from '@/lib/i18n/dictionaries/ko';
+import type { SizeChartView } from '@/lib/catalog/size-chart';
 import { ProductInfoAccordion } from './ProductInfoAccordion';
 
 // 실제 상점 값이 아닌 자리 값
@@ -20,6 +21,13 @@ const FULL: ProductInfo = {
 
 const render = (info: ProductInfo, labels = ko.product.info) =>
   renderToStaticMarkup(<ProductInfoAccordion info={info} labels={labels} />);
+
+const CHART: SizeChartView = {
+  columns: ['사이즈', '가슴 단면'],
+  rows: [['M', '52']],
+  note: '단위 cm',
+  measures: [{ name: '가슴 단면', description: '겨드랑이 끝에서 끝' }],
+};
 
 describe('ProductInfoAccordion', () => {
   it('값이 모두 없으면 아무것도 그리지 않는다(고객사 값 받기 전)', () => {
@@ -74,5 +82,33 @@ describe('ProductInfoAccordion', () => {
       />,
     );
     expect(both.indexOf('배송비 3,000원')).toBeLessThan(both.indexOf('첫 단락'));
+  });
+
+  it('상품 사이즈표가 있으면 브랜드 가이드 대신 그리고, 재는 방법을 덧붙인다(#218)', () => {
+    const html = renderToStaticMarkup(
+      <ProductInfoAccordion info={FULL} sizeChart={CHART} labels={ko.product.info} />,
+    );
+    expect(html).toContain('가슴 단면');
+    expect(html).not.toContain('가슴둘레');
+    expect(html).toContain('재는 방법');
+    expect(html).toContain('<dd>겨드랑이 끝에서 끝</dd>');
+  });
+
+  it('사이즈표만 있어도 사이즈 가이드 항목을 그린다', () => {
+    const html = renderToStaticMarkup(
+      <ProductInfoAccordion
+        info={{ sizeGuide: null, shipping: null }}
+        sizeChart={CHART}
+        labels={ko.product.info}
+      />,
+    );
+    expect(html).toMatch(/<summary[^>]*>사이즈 가이드/);
+  });
+
+  it('첫 열(사이즈)은 가로 스크롤해도 남도록 sticky 다', () => {
+    const html = render(FULL);
+    expect(html).toMatch(/<th scope="col" class="[^"]*sticky left-0 bg-bg[^"]*">사이즈<\/th>/);
+    expect(html).toMatch(/<th scope="row" class="[^"]*sticky left-0 bg-bg[^"]*">M<\/th>/);
+    expect(html).toContain('<div class="relative overflow-x-auto">');
   });
 });

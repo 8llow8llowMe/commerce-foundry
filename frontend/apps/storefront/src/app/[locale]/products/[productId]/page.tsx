@@ -9,6 +9,7 @@ import { PurchasePanel, type PurchaseProduct } from '@/components/product/detail
 import { ProductLooks } from '@/components/product/look/ProductLooks';
 import { deliveryNote } from '@/lib/catalog/delivery-note';
 import { loadShippingNotice } from '@/lib/catalog/load-shipping-notice';
+import { loadSizeChart } from '@/lib/catalog/load-size-chart';
 import { preorderNote } from '@/lib/catalog/preorder';
 import { productJsonLd } from '@/lib/catalog/product-jsonld';
 import { shopHref } from '@/lib/catalog/shop-query';
@@ -61,8 +62,9 @@ export async function generateMetadata({
 export default async function ProductPage({ params }: PageProps<'/[locale]/products/[productId]'>) {
   const { productId } = await params;
   const { href, dict, content, locale } = await getI18n();
-  // 상품과 함께 읽는다 — 실패해도 null 이라 상품 화면을 막지 않는다
+  // 상품과 함께 읽는다 — 실패해도 null 이라 상품 화면을 막지 않는다(사이즈표도 같다, #218)
   const shippingNotice = loadShippingNotice();
+  const sizeChartLoad = loadSizeChart(productId);
 
   let product: ProductDetail | null;
   try {
@@ -83,7 +85,7 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
   // 클라이언트 컴포넌트에는 필요한 것만 넘긴다(원문 HTML · 갤러리는 서버에서만 쓴다)
   const { descriptionHtml, images, categoryPath, ...purchase } = product;
   const purchaseProduct: PurchaseProduct = purchase;
-  const shipping = await shippingNotice;
+  const [shipping, sizeChart] = await Promise.all([shippingNotice, sizeChartLoad]);
   // 프리오더 발송 예정일은 서버에서 문구로 만든다 — 올해 여부(연도 표시)를 서버 시계 하나로 정한다
   const delivery = deliveryNote(
     shipping,
@@ -133,6 +135,7 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
           <ProductInfoAccordion
             info={content.productInfo}
             shippingFee={shipping?.lines ?? []}
+            sizeChart={sizeChart}
             labels={dict.product.info}
           />
         </div>
