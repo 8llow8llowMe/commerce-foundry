@@ -6,6 +6,9 @@ import com.anthropic.errors.AnthropicException;
 import com.anthropic.errors.AnthropicIoException;
 import com.anthropic.errors.AnthropicRetryableException;
 import com.anthropic.errors.AnthropicServiceException;
+import com.anthropic.models.messages.Base64ImageSource;
+import com.anthropic.models.messages.ContentBlockParam;
+import com.anthropic.models.messages.ImageBlockParam;
 import com.anthropic.models.messages.JsonOutputFormat;
 import com.anthropic.models.messages.Message;
 import com.anthropic.models.messages.MessageCreateParams;
@@ -13,10 +16,13 @@ import com.anthropic.models.messages.OutputConfig;
 import com.anthropic.models.messages.StopReason;
 import com.anthropic.models.messages.StructuredTextBlock;
 import com.anthropic.models.messages.TextBlock;
+import com.anthropic.models.messages.TextBlockParam;
 import com.commercefoundry.ai.client.AiException.Reason;
 import com.commercefoundry.ai.masking.PiiMasker;
 import com.commercefoundry.ai.properties.AiProperties;
 import com.commercefoundry.ai.properties.AiProperties.ResolvedFeature;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -28,7 +34,8 @@ import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 공식 Java SDK 로 Messages API 를 부른다. 순서가 고정이다 — 길이 상한 → 마스킹 → 동시 상한 자리 얻기 → 호출(SDK 재시도 포함) → 결과 · 오류 번역.
+ * 공식 Java SDK 로 Messages API 를 부른다. 순서가 고정이다 — 글자 · 이미지 장수 상한 → 마스킹 → 동시 상한 자리 얻기 → 호출(SDK 재시도 포함) → 결과 · 오류 번역.
+ * 이미지는 사용자 메시지 앞의 base64 블록이다. 바이트는 가리지 못하고 로그에 싣지 않는다.
  * 마스킹은 길이에 비례하는 시간만 쓰고({@code PiiMasker}), 길이 상한이 그 앞에서 입력 크기를 묶는다. 텍스트 · 구조화 호출이 같은 순서를 지난다.
  *
  * <ul>
@@ -126,8 +133,9 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
     private <R> R call(AiRequest request, JsonOutputFormat format, BiFunction<Message, String, R> mapper) {
         String feature = request.feature();
         long inputChars = (request.system() == null ? 0L : request.system().length()) + request.prompt().length();
-        if (inputChars > properties.maxInputChars()) {
-            log.warn("ai call rejected. feature={}, reason={}, inputChars={}, maxInputChars={}", feature, Reason.INPUT_TOO_LONG, inputChars, properties.maxInputChars());
+        if (inputChars > properties.maxInputChars() || request.images().size() > AiImage.MAX_COUNT) {
+            log.warn("ai call rejected. feature={}, reason={}, inputChars={}, maxInputChars={}, imageCount={}, maxImages={}",
+                feature, Reason.INPUT_TOO_LONG, inputChars, properties.maxInputChars(), request.images().size(), AiImage.MAX_COUNT);
             throw new AiException(Reason.INPUT_TOO_LONG, feature);
         }
         MessageCreateParams params = params(request, properties.resolve(feature), format);
@@ -141,9 +149,9 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
                 throw new AiException(Reason.REFUSED, feature);
             }
             R result = mapper.apply(message, stopReason);
-            log.info("ai call completed. feature={}, promptVersion={}, structured={}, model={}, inputTokens={}, outputTokens={}, stopReason={}, elapsedMs={}",
-                feature, request.promptVersion(), format != null, message.model().asString(), message.usage().inputTokens(), message.usage().outputTokens(),
-                stopReason, elapsedMs(startedAt));
+            log.info("ai call completed. feature={}, promptVersion={}, structured={}, imageCount={}, model={}, inputTokens={}, outputTokens={}, stopReason={}, elapsedMs={}",
+                feature, request.promptVersion(), format != null, request.images().size(), message.model().asString(), message.usage().inputTokens(),
+                message.usage().outputTokens(), stopReason, elapsedMs(startedAt));
             return result;
         } catch (AiException e) {
             log.warn("ai call failed. feature={}, promptVersion={}, reason={}, elapsedMs={}", feature, request.promptVersion(), e.reason(), elapsedMs(startedAt));
@@ -174,8 +182,12 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
 
         MessageCreateParams.Builder builder = MessageCreateParams.builder()
             .model(settings.model())
-            .maxTokens(settings.maxTokens())
-            .addUserMessage(prompt);
+            .maxTokens(settings.maxTokens());
+        if (request.images().isEmpty()) {
+            builder.addUserMessage(prompt);
+        } else {
+            builder.addUserMessageOfBlockParams(imageThenText(prompt, request.images()));
+        }
         if (system != null && !system.isBlank()) {
             builder.system(system);
         }
@@ -193,6 +205,31 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
             builder.putAdditionalHeader(BETA_HEADER, FALLBACK_BETA).putAdditionalBodyProperty("fallbacks", JsonValue.from("default"));
         }
         return builder.build();
+    }
+
+    /** 이미지 블록을 먼저 두고 가린 텍스트를 뒤에 둔다. base64 는 여기서만 만들고 로그로 나가지 않는다. */
+    private static List<ContentBlockParam> imageThenText(String prompt, List<AiImage> images) {
+        List<ContentBlockParam> blocks = new ArrayList<>(images.size() + 1);
+        for (AiImage image : images) {
+            blocks.add(ContentBlockParam.ofImage(ImageBlockParam.builder()
+                .source(Base64ImageSource.builder()
+                    .mediaType(mediaType(image.mediaType()))
+                    .data(Base64.getEncoder().encodeToString(image.bytes()))
+                    .build())
+                .build()));
+        }
+        blocks.add(ContentBlockParam.ofText(TextBlockParam.builder().text(prompt).build()));
+        return blocks;
+    }
+
+    private static Base64ImageSource.MediaType mediaType(String mediaType) {
+        return switch (mediaType) {
+            case AiImage.JPEG -> Base64ImageSource.MediaType.IMAGE_JPEG;
+            case AiImage.PNG -> Base64ImageSource.MediaType.IMAGE_PNG;
+            case AiImage.GIF -> Base64ImageSource.MediaType.IMAGE_GIF;
+            case AiImage.WEBP -> Base64ImageSource.MediaType.IMAGE_WEBP;
+            default -> throw new IllegalArgumentException("image mediaType");
+        };
     }
 
     /**

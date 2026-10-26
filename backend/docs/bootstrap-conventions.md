@@ -430,7 +430,10 @@ API 가 받지 않는 스키마(재귀 · 숫자 · 길이 제약 등)는 SDK �
 
 - **서비스 테스트는 가짜 포트를 쓴다.** 컨텍스트 로딩 테스트는 기본값(꺼짐)으로 뜨고, 업무 테스트는 서비스의 out-port 가짜로 대신한다.
   SDK 를 거친 요청 · 재시도 · 응답 해석 · 구조화 출력은 ai-core 의 `ClaudeAiClientTest` · `ClaudeAiStructuredTest`(루프백 스텁 서버)가 본다 — 실제 API 는 부르지 않는다.
-- 이후 PR(#215): 사용량 원장 · 월 한도(operations-service), 이미지 입력.
+- **이미지 입력.** `render` 결과에 `withImages` 로 붙인다. 바이트만 받는다(URL 은 클라이언트가 가져오지 않는다). 형식은 `image/jpeg` · `image/png` · `image/gif` · `image/webp`, 장당 5MiB, 한 요청 {@code AiImage.MAX_COUNT}장(8).
+  장수를 넘으면 `INPUT_TOO_LONG` 이고 보내지 않는다. 사용자 메시지에서는 이미지 블록이 가린 텍스트보다 앞이다. 로그 · `toString` 에는 장수와 바이트 수만 남는다.
+  이미지 안의 글자는 마스킹하지 못한다 — 이름 · 연락처 · 주소가 보이는 이미지는 넣지 않는다.
+- 이후 PR(#215): 사용량 원장 · 월 한도(operations-service).
 
 ## Reason
 
