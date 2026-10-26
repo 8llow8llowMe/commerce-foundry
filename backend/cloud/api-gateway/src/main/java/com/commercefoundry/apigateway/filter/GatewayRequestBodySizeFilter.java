@@ -93,7 +93,11 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
                 reservedBytes.addAndGet(-limit);
             }
         };
+        // 완료·오류는 하류가 종료를 보기 전에 자리를 돌려준다.
+        // Reactor 의 doFinally 는 하류 onComplete 다음에 돌아, 응답이 끝난 직후 읽으면 예약이 아직 남아 있다.
+        // 취소는 하류 신호가 없어 doFinally 에서 돌려준다.
         return bufferAndForward(exchange, chain, limit, releaseReservation)
+            .doOnTerminate(releaseReservation)
             .doFinally(signal -> releaseReservation.run());
     }
 
