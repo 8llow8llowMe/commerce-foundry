@@ -1,8 +1,8 @@
 import { brand } from '@cf/brand';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { AccountMenu } from './AccountMenu';
 import { JobTray } from './job/JobTray';
-import { LogoutButton } from './LogoutButton';
 import { NavLinks, type NavGroup } from './NavLinks';
 import { NotificationCenter } from './notification/NotificationCenter';
 import { HelpMenu } from './tour/HelpMenu';
@@ -39,13 +39,14 @@ const NAV: NavGroup[] = [
     title: '운영',
     items: [
       { label: '백그라운드 작업', href: '/jobs' },
+      { label: '관리자 계정', href: '/admins' },
       { label: '관리자 감사 로그', href: '/audit-logs' },
     ],
   },
 ];
 
 /**
- * 어드민 콘솔 화면 틀 — 상단 바(홈 · 작업 진행 · 알림 · 로그아웃) · 왼쪽 메뉴 · 본문. 좁은 화면에서는 메뉴가 본문 위로 온다.
+ * 어드민 콘솔 화면 틀 — 상단 바(홈 · 작업 진행 · 알림 · 도움말 · 계정 메뉴) · 왼쪽 메뉴 · 본문. 좁은 화면에서는 메뉴가 본문 위로 온다.
  * 작업 진행(`JobTray`)과 알림(`NotificationCenter`)은 이 틀에 붙어 화면을 옮겨도 이어진다(#214).
  * 도움말(`HelpMenu`)과 온보딩 투어(`TourRunner`, #228)도 여기 붙는다 — 투어가 가리키는 요소에는 `data-tour` 를 단다.
  * 로그인 화면은 이 틀 밖이다(`app/login`).
@@ -65,7 +66,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <div data-tour="help">
             <HelpMenu />
           </div>
-          <LogoutButton />
+          <AccountMenu />
         </div>
       </header>
       <div className="flex flex-1 flex-col md:flex-row">

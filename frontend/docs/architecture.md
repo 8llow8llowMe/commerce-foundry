@@ -297,7 +297,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 ## 9. 어드민 콘솔 (#187)
 
 - **화면 틀** — 콘솔 화면은 `app/(console)/` 아래에 두고 `AdminShell`(상단 바 · 왼쪽 메뉴 · 본문)을 같이 쓴다. 메뉴는 `AdminShell` 의 `NAV` 한 곳에서 더한다
-  (화면이 아직 없으면 `href` 없이 "준비 중"). 로그인 화면(`app/login`)은 이 그룹 밖이다. 상단 바에 작업 진행 · 알림(아래 #214) · 로그아웃이 있다. 어드민은 국문만이고 i18n 사전을 두지 않는다.
+  (화면이 아직 없으면 `href` 없이 "준비 중"). 로그인 화면(`app/login`)은 이 그룹 밖이다. 상단 바에 작업 진행 · 알림(아래 #214) · 도움말 · 계정 메뉴(내 비밀번호 변경 · 로그아웃, #352)가 있다. 어드민은 국문만이고 i18n 사전을 두지 않는다.
 - **읽기 · 쓰기는 클라이언트에서 BFF 로** — 편집 화면은 `apiFetch` 로 같은 origin BFF(`app/api/[...path]`, 어드민 쿠키 `cf_admin_at`)를 부른다.
   CSRF 규칙은 스토어프론트와 같고(§2), 재발급은 하지 않는다(§3 refresh 쿠키가 없는 설정).
 - **401 · 403 은 오류가 아니라 상태다** — `accessDeniedOf` 로 가르고 `AccessNotice` 를 그린다. 401(세션 끝 — 만료 · 로그아웃 · 차단)이면
@@ -334,7 +334,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   브라우저가 같은 규칙으로 풀어 도착지가 검사한 경로다. 스토어프론트 `safeReturnPath`(로그인 · 가입 화면 → 메인)도 같은 방식이다.
 - **로그인 실패** — 400 `AUTH_030`(이메일 없음 · 비밀번호 틀림 · 고객 계정 모두)은 칸을 짚지 않는 서버 문구 하나, 필드 검증(`AUTH_130~132`)은 그 칸에,
   429 는 남은 시간 안내, 그 밖은 한 문구다(`loginErrors`). 어드민은 국문만이라 서버 문구를 그대로 쓴다.
-- **로그아웃** — 상단 바 버튼이 `POST /api/v1/auth/logout`(`createLogoutHandler`, Bearer + `{}`)을 부르고 `/login` 으로 간다.
+- **로그아웃** — 상단 바 계정 메뉴의 버튼이 `POST /api/v1/auth/logout`(`createLogoutHandler`, Bearer + `{}`)을 부르고 `/login` 으로 간다.
   BFF 는 서버 결과와 무관하게 쿠키를 지우고 200 이다. 요청 자체가 실패하면(연결 끊김) 쿠키가 남으므로 이동하지 않고 버튼 옆에 알린다.
 - **오류를 칸에 붙인다** — 서버 fieldErrors 의 `field`(요청 본문 경로)를 `fieldKey` 로 폼 칸 키로 바꾼다.
   `remoteAreas[0].surcharge.amount` → `remoteAreas.0.surcharge`(금액은 amount · currency 를 한 칸으로), `zones[0].countryCodes[2]` → `zones.0.countryCodes`(목록 원소는 목록 칸으로).
@@ -343,6 +343,24 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   오류 키가 줄 순번이라 줄을 더하거나 지우면 오류를 지운다. 저장 중에는 폼을 잠근다(`fieldset disabled`).
 - **금액 입력** — 칸은 정책 통화의 주 단위 글자로 받고, 보낼 때 `parseMoneyInput`(`@cf/api-client`)으로 최소 단위 정수로 바꾼다(표기 변환일 뿐 계산이 아니다).
   형식이 틀린 글자(음수 · 소수 자릿수 초과 등)는 보내지 않고 그 칸에 오류를 붙인다. 빈 필수 칸은 amount null 로 보내 서버 검증(정본)에 맡긴다.
+
+### 관리자 계정 · 내 비밀번호 (`/admins` · `/account/password`, #352 · BE #193)
+
+- **목록은 회원 목록의 `role=ADMIN`** 이다(`GET /api/v1/admin/members`, 마스킹 값 · 최신순 · 주소의 `page` 가 정본). 전용 목록 API 가 없고
+  **응답에 활성 여부가 없어 비활성화한 계정도 목록에 남는다** — 이번 방문에서 끈 계정만 "비활성화함" 표시를 붙이고 버튼을 거둔다. 다시 끄면 404 `AUTH_033` 이다.
+- **추가** — `POST /api/v1/admin/admins` `{email, password, name}`. 폼 칸 이름은 `staffEmail` · `initialPassword` 이고 보낼 때 BE 이름으로 바꾼다
+  (브라우저가 남의 처음 비밀번호를 내 로그인 자격 증명으로 저장하자고 하는 일을 줄인다). fieldErrors(`AUTH_130~132` · `140~144`)는 칸에, 409 `AUTH_002` 는 이메일 칸에 서버 문구로.
+- **비활성화** — 줄 안 확인("비활성화할까요?") 뒤 `PATCH /api/v1/admin/admins/{memberId}`(본문 없음). 409 `AUTH_031`(마지막 관리자) · 400 `AUTH_146` 은 줄에 서버 문구,
+  404 `AUTH_033` 은 "이미 꺼진 계정" 으로 표시한다. **503 `AUTH_013` 은 실패가 아니다** — BE 는 계정을 끈 뒤(커밋) 옛 토큰 컷오프(Redis)를 하므로 꺼진 것으로 표시하고
+  "기존 로그인을 끊지 못해 최대 30분 쓸 수 있다" 고 알린다. 연결 실패 · 결과를 모르는 실패는 줄에 알리고 목록을 다시 읽는다. 추가 폼이 열린 동안에는 줄 버튼을 막는다(비활성화 401 이 입력을 지우지 않게).
+  자기 계정도 끌 수 있다(BE 허용) — 끄면 토큰이 막혀 다음 조회에서 로그인 화면으로 간다(도움말에 적는다).
+  포커스는 카테고리와 같은 규칙이다 — 확인이 열리면 "취소" 로, 취소하면 그 줄 "비활성화" 로, 폼이 열리면 이메일 칸으로, 닫히거나 끄고 나면 "관리자 추가" 로.
+- **내 비밀번호 변경** — 상단 바 계정 메뉴에서 연다. `PATCH /api/v1/admin/me/password` `{currentPassword, newPassword}` 뒤 BE 가 지금 토큰을 끊으므로
+  로그아웃(쿠키 삭제)하고 `/login?reason=password-changed` 로 간다. 로그아웃 요청이 실패해도 토큰은 이미 막혔으니 이동한다. `reason` 은 허용한 이름만 문구로 바꾼다(`loginNotice`).
+  400 `AUTH_032`(현재 비밀번호 틀림)는 현재 비밀번호 칸에, `AUTH_141` · `142` · `145` 는 그 칸에. 새 비밀번호 확인 칸은 화면에서만 맞춰 본다.
+  503 `AUTH_013` 은 새 비밀번호가 이미 저장된 뒤라 성공과 같이 로그아웃 · 로그인 화면으로 보낸다(실패로 두면 같은 값을 다시 보내 `AUTH_032` 를 받는다).
+- **비밀번호는 React 상태 · 주소 · 저장소 · 로그에 두지 않는다** — 두 폼 모두 제어하지 않는 칸이고 제출할 때만 `FormData` 로 읽는다. 보내기 전 규칙 확인(`passwordProblem`, 12~64자 ·
+  영문과 숫자 · 공백 없는 ASCII — BE `AdminRequestPatterns` 와 같다)은 고정 문구만 돌려준다. 결과를 모르는 실패(`unknownOutcome`)는 다시 보내기 전에 결과를 확인하게 안내한다.
 
 ### 배송비 정책 (`/shipping-policies/domestic` · `/international`)
 
