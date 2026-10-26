@@ -672,11 +672,11 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | `GET /api/v1/admin/notifications/unread-count` | `{count}` — 읽지 않은 수 | — |
 | `POST /api/v1/admin/notifications/{notificationId}/read` | 목록 항목과 같다. 이미 읽었으면 그대로(멱등) | 404 `NOTIFICATION_001`, 400 `NOTIFICATION_103`(양수) · `198`, 409 `NOTIFICATION_020`(버전 충돌) |
 | `POST /api/v1/admin/notifications/read-all` | `{count}` — 처리 뒤 읽지 않은 수(0) | — |
-| `GET /api/v1/admin/notifications/stream` | `text/event-stream`. 이벤트 이름 `notification`, data 는 목록 항목과 같은 JSON(봉투 없음). 끊기면 목록으로 따라잡는다 | 무토큰 401 · CUSTOMER 403 |
+| `GET /api/v1/admin/notifications/stream` | `text/event-stream`. 이벤트 이름 `notification`, data 는 목록 항목과 같은 JSON(봉투 없음). 알림이 없어도 5초마다 주석(`: heartbeat`)을 보낸다 — 게이트웨이 response-timeout(10초) 동안 바이트가 없으면 연결이 끊긴다. 끊기면 목록으로 따라잡는다 | 무토큰 401 · CUSTOMER 403 |
 
 - 종류 · 심각도는 `{code, name, description}` 다. 제목 · 링크에 고객 개인정보 원문을 넣지 않는다. `linkPath` 는 어드민 화면 경로(`/admin/jobs/{jobId}` 처럼 `/` 로 시작)이거나 null 이다.
 - 작업이 끝나면(#212 종료 이벤트) 요청한 어드민에게 알림 한 건이 생긴다. 같은 작업 · 같은 종류의 재전달은 새 행을 만들지 않는다. 요청자가 없는 시스템 작업은 알림을 만들지 않는다.
-- 다른 기능은 `NotificationProcessor.record(NotificationRequest)` 만 부른다. 보존(기본 90일)이 지난 행은 스케줄러가 지운다.
+- 다른 기능의 Facade 는 `NotificationRecordProcessor.record(NotificationRequest)` 만 부른다. 보존(기본 90일)이 지난 행은 스케줄러가 지운다.
 - 모두 읽음은 그 어드민의 읽지 않은 행만 조건부 UPDATE 한 문장으로 처리한다(`read_at` · `updated_at` · 버전). 한 건 읽음은 도메인 전이 뒤 버전 비교 merge 다.
 - 아이디는 문자열, 시각은 UTC ISO 다.
 

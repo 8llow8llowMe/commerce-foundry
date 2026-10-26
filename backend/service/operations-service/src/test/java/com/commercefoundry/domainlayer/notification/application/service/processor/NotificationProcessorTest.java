@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.notification.application.exception.NotificationException;
-import com.commercefoundry.domainlayer.notification.application.model.NotificationPush;
 import com.commercefoundry.domainlayer.notification.application.port.out.NotificationPushPort;
 import com.commercefoundry.domainlayer.notification.application.port.out.NotificationRepositoryPort;
 import com.commercefoundry.domainlayer.notification.domain.model.Notification;
@@ -30,7 +29,7 @@ class NotificationProcessorTest {
     @DisplayName("같은 작업 · 같은 종류의 알림은 한 번만 저장한다")
     void recordIsIdempotentPerSource() {
         MemoryPort port = new MemoryPort();
-        List<NotificationPush> pushed = new ArrayList<>();
+        List<Notification> pushed = new ArrayList<>();
         NotificationRecordProcessor processor = new NotificationRecordProcessor(port, pushInto(pushed), new SnowflakeIdGenerator(0, 1));
         NotificationRequest request = request(NotificationKind.JOB_FAILED, NotificationSeverity.WARNING);
 
@@ -39,10 +38,10 @@ class NotificationProcessorTest {
         processor.push("JOB", 10L, NotificationKind.JOB_FAILED);
 
         assertThat(port.saved.get()).isEqualTo(1);
-        assertThat(pushed).singleElement().satisfies(message -> {
-            assertThat(message.kind().code()).isEqualTo("JOB_FAILED");
-            assertThat(message.read()).isFalse();
-            assertThat(message.title()).isEqualTo("작업이 실패했습니다");
+        assertThat(pushed).singleElement().satisfies(notification -> {
+            assertThat(notification.kind()).isEqualTo(NotificationKind.JOB_FAILED);
+            assertThat(notification.unread()).isTrue();
+            assertThat(notification.title()).isEqualTo("작업이 실패했습니다");
         });
     }
 
@@ -64,7 +63,7 @@ class NotificationProcessorTest {
         assertThat(processor.list(7L, 0, 20).getTotalElements()).isEqualTo(2);
     }
 
-    private static NotificationPushPort pushInto(List<NotificationPush> pushed) {
+    private static NotificationPushPort pushInto(List<Notification> pushed) {
         return new NotificationPushPort() {
             @Override
             public void register(long recipientMemberId, com.commercefoundry.domainlayer.notification.application.model.NotificationStream stream) {
@@ -75,8 +74,8 @@ class NotificationProcessorTest {
             }
 
             @Override
-            public void push(long recipientMemberId, NotificationPush message) {
-                pushed.add(message);
+            public void push(Notification notification) {
+                pushed.add(notification);
             }
         };
     }
