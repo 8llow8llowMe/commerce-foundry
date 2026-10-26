@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { previewFramePolicy, parseOrigin } from '@/lib/display/preview';
 import { adminOrigin } from '@/lib/env';
+import { setFramePolicy } from '@/lib/frame-policy';
 import { localeRouting } from '@/lib/i18n/config';
 import { routeRequest } from '@/lib/i18n/routing';
 
@@ -21,13 +22,14 @@ export function proxy(request: NextRequest) {
   const url = request.nextUrl.clone();
   url.pathname = decision.pathname;
   const response = NextResponse.rewrite(url);
-  // 메인 전시 미리보기(#71)만 어드민 iframe 에 열린다
-  const framePolicy = previewFramePolicy(decision.pathname, parseOrigin(adminOrigin));
-  if (framePolicy) response.headers.set('Content-Security-Policy', framePolicy);
+  // 모든 페이지는 같은 출처만 감쌀 수 있고(클릭재킹, #345), 메인 전시 미리보기(#71)만 어드민 iframe 에 열린다
+  const preview = previewFramePolicy(decision.pathname, parseOrigin(adminOrigin));
+  setFramePolicy(response.headers, preview ?? undefined);
   return response;
 }
 
 export const config = {
-  // BFF(/api) · Next 내부(/_next) · 확장자가 있는 정적 파일은 언어와 무관하다
+  // BFF(/api) · Next 내부(/_next) · 확장자가 있는 정적 파일은 언어와 무관하다.
+  // 이 경로들은 화면이 아니라(JSON · JS · CSS · 이미지) 감싸도 누를 것이 없어 frame 정책도 붙이지 않는다(docs/architecture.md §2)
   matcher: ['/((?!api|_next|.*\\..*).*)'],
 };

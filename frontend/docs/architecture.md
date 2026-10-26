@@ -88,6 +88,25 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
 - `Sec-Fetch-Site` 가 없으면(구형 브라우저) `Origin` 이 요청 origin 과 같아야 한다. 둘 다 없으면 브라우저 요청이 아니므로 통과한다.
 - SameSite=Lax 쿠키는 이 검사의 보조 수단이다. GET 은 부수 효과가 없어야 한다(BE 규칙).
 
+### 클릭재킹 (iframe 허용 범위, #345)
+
+다른 사이트가 화면을 iframe 으로 감싸 누르게 만드는 것을 막는다. 정본은 CSP `frame-ancestors` 고,
+`X-Frame-Options` 는 그걸 모르는 구형 브라우저용으로 같이 싣는다.
+
+| 앱 | 범위 | 값 | 붙이는 곳 |
+|----|------|----|-----------|
+| 스토어프론트 | 모든 페이지(proxy matcher 안) | `frame-ancestors 'self'` + `X-Frame-Options: SAMEORIGIN` | `src/proxy.ts` → `setFramePolicy`(`lib/frame-policy.ts`) |
+| 스토어프론트 | 메인 전시 미리보기(#71) | `frame-ancestors <ADMIN_ORIGIN>`, XFO 없음 | 같은 함수에 `previewFramePolicy` 결과를 넘긴다 |
+| 어드민 | 전 경로(`/login` · `/api` 포함) | `frame-ancestors 'none'` + `X-Frame-Options: DENY` | `next.config.ts` `headers()` |
+
+- 스토어프론트를 proxy 에서 붙이는 이유: 미리보기 경로만 다른 값이어야 하는데, 그 경로는 언어 접두어 · 언어 호스트를 푼 뒤의
+  앱 경로(`/[locale]/preview/*`)로만 알 수 있다. `next.config` `headers()` 는 바깥 경로로 맞추고 proxy 보다 먼저 돌아 덮어쓰기가 꼬인다.
+- XFO 는 특정 출처를 허용할 수 없다. 기본값이 아닌 정책에는 XFO 를 싣지 않는다 — 실으면 CSP 를 모르는 브라우저가 그 출처까지 막는다.
+- 스토어프론트 proxy matcher 밖(`/api` · `/_next` · 확장자 있는 정적 파일)은 붙이지 않는다. JSON · JS · CSS · 이미지는 감싸도 누를 화면이 없다.
+  matcher 밖에서 HTML 화면을 내게 되면(예: `/api` 아래 HTML 응답) 그 경로에 같은 값을 붙인다.
+- 어드민은 자기 화면을 iframe 으로 감싸지 않는다(미리보기는 스토어프론트를 감싼다). proxy matcher 가 `/login` 을 건너뛰므로 `headers()` 로 둔다.
+- 전체 CSP(script-src 등)는 아직 없다. 넣을 때 `frame-ancestors` 를 같은 헤더에 합친다 — `Content-Security-Policy` 를 두 번 보내면 둘 다 적용돼 더 좁은 쪽이 된다.
+
 ## 3. 쿠키
 
 - `HttpOnly; SameSite=Lax; Path=/`, 운영은 `Secure`.
@@ -604,7 +623,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   BE 미리보기 API(#340, 저장 없이 고객 응답 모양)가 생기면 카드 공급을 그것으로 바꾼다. 어드민 안내 문구에도 "가격 · 사진이 조금 다를 수 있다" 를 적는다.
 - **캐시** — 초안은 공개 전시 데이터 캐시(60초)를 지나지 않는다. 상품 상세는 `no-store` 다. 저장하지 않으면 실제 메인은 그대로다.
 - **iframe 허용** — proxy 가 `/[locale]/preview/*` 에만 `Content-Security-Policy: frame-ancestors <ADMIN_ORIGIN>` 을 붙인다(`previewFramePolicy`).
-  `ADMIN_ORIGIN` 이 없으면 개발은 `http://localhost:3001`, 운영은 `'none'` 이다. 페이지는 `noindex` 다. 다른 경로의 iframe 차단은 아직 없다(후속).
+  `ADMIN_ORIGIN` 이 없으면 개발은 `http://localhost:3001`, 운영은 `'none'` 이다. 페이지는 `noindex` 다. 다른 경로는 같은 출처만 감쌀 수 있다(§2 클릭재킹, #345).
 - 어드민 iframe 은 `sandbox="allow-scripts allow-same-origin"` 이라 미리보기 안 링크가 어드민 창을 옮기지 못한다. 미리보기 블록 안의 링크 · 버튼은 누르지 않는다
   (`MainPreview` 가 클릭을 막는다 — 실제 페이지 이동 · 장바구니 담기 방지). 머리글 · 바닥글(레이아웃)의 링크는 iframe 안에서 그 페이지로 옮겨 간다.
 - 어드민은 기본 언어(국문) 미리보기만 연다. 영문 메인 미리보기는 `/en/preview/main` 이 있지만 어드민에 고르는 칸이 없다.
