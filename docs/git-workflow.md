@@ -56,7 +56,8 @@
 
 | 범위 | 서비스 라벨 |
 |------|-------------|
-| `frontend/` | `frontend-web` |
+| `frontend/` | `frontend-web` (영역 라벨) |
+| `frontend/apps/<app>` · 공용 `packages/**` · 빌드 설정 | `frontend-storefront` / `frontend-admin` (배포 라벨, `frontend/docs/deploy.md` §4 — labeler 가 붙인다) |
 | `backend/service/<name>-service` | `backend-<name>-service` (`auth` / `product` / `order` / `payment` / `delivery`) |
 | `backend/core/**` | `backend-core` |
 | 게이트웨이 / 유레카 | `backend-api-gateway` / `backend-service-discovery` |

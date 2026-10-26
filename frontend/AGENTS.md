@@ -19,7 +19,7 @@
 - [styling-theme.md](docs/styling-theme.md) — 토큰·브랜드 설정
 - [conventions.md](docs/conventions.md) — 네이밍·import·테스트
 - [local-run.md](docs/local-run.md) — Node·pnpm·환경변수·게이트웨이
-- [deploy.md](docs/deploy.md) — standalone 이미지·배포 compose·빌드/런타임 env
+- [deploy.md](docs/deploy.md) — standalone 이미지·배포 compose·빌드/런타임 env·Jenkins·배포 라벨·클라이언트 IP 앞단
 
 ## 핵심 규칙
 
