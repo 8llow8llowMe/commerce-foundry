@@ -20,3 +20,12 @@ export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:30
   /\/+$/,
   '',
 );
+
+/**
+ * 서버 전용. 메인 전시 미리보기(#71)를 iframe 으로 여는 어드민 origin(예: https://admin.example.com).
+ * `/preview/*` 의 `frame-ancestors` 와 postMessage 발신자 확인에 쓴다. 비우면 개발에서는 http://localhost:3001,
+ * 운영에서는 미리보기를 닫는다(어느 사이트도 iframe 으로 열 수 없다). proxy 도 읽으므로 빌드 · 실행 모두에 같은 값을 준다.
+ */
+export const adminOrigin =
+  process.env.ADMIN_ORIGIN ||
+  (process.env.NODE_ENV === 'production' ? undefined : 'http://localhost:3001');

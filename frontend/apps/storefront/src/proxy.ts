@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { previewFramePolicy, parseOrigin } from '@/lib/display/preview';
+import { adminOrigin } from '@/lib/env';
 import { localeRouting } from '@/lib/i18n/config';
 import { routeRequest } from '@/lib/i18n/routing';
 
@@ -18,7 +20,11 @@ export function proxy(request: NextRequest) {
   }
   const url = request.nextUrl.clone();
   url.pathname = decision.pathname;
-  return NextResponse.rewrite(url);
+  const response = NextResponse.rewrite(url);
+  // 메인 전시 미리보기(#71)만 어드민 iframe 에 열린다
+  const framePolicy = previewFramePolicy(decision.pathname, parseOrigin(adminOrigin));
+  if (framePolicy) response.headers.set('Content-Security-Policy', framePolicy);
+  return response;
 }
 
 export const config = {

@@ -184,6 +184,11 @@ export const ko = {
     viewAll: 'VIEW ALL',
     /** 메인 전시 히어로의 쇼핑 버튼(/shop) */
     shop: 'SHOP',
+    /** 어드민 메인 전시 미리보기(#71, /preview/main) — 운영자만 보는 화면 */
+    preview: {
+      waiting: '어드민 메인 전시 화면에서 미리보기를 열면 편집 중인 메인이 여기에 보입니다.',
+      failed: '미리보기를 그리지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    },
   },
   cart: {
     title: '장바구니',

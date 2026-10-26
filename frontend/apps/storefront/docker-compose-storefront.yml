@@ -21,6 +21,8 @@ x-storefront-environment: &storefront_environment
   CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
   # 언어 전용 호스트. 비면 영문은 경로 방식. 빌드 때와 같은 값이어야 한다
   LOCALE_HOSTS: ${LOCALE_HOSTS:-}
+  # 메인 전시 미리보기(#71)를 iframe 으로 여는 어드민 origin. 비면 미리보기를 닫는다. 빌드 때와 같은 값이어야 한다
+  ADMIN_ORIGIN: ${ADMIN_ORIGIN:-}
   # 푸터 사업자 정보(Vault). 비면 그 줄을 뺀다. 빌드 때와 같은 값이어야 한다
   BUSINESS_NAME: ${BUSINESS_NAME:-}
   BUSINESS_REPRESENTATIVE: ${BUSINESS_REPRESENTATIVE:-}

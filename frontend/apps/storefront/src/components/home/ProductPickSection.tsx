@@ -9,14 +9,22 @@ import { serverFetch } from '@/lib/server-api';
 import { SectionHeading, sectionLabel } from './SectionHeading';
 
 /** 브랜드 설정의 상품 픽 — 상품 목록 API 에서 고른다. 못 받으면 ApiError 를 던진다 */
-async function fetchPickProducts(section: ProductPickSectionData): Promise<ProductListItem[]> {
-  const slice = await serverFetch<SliceResponse<ProductListItem>>(
-    productsApiPath(
-      { categoryId: section.source.categoryId, sort: 'NEWEST' },
-      0,
-      section.source.limit,
-    ),
+async function fetchPickProducts(
+  section: ProductPickSectionData,
+  fetchLocale: string | undefined,
+): Promise<ProductListItem[]> {
+  const path = productsApiPath(
+    { categoryId: section.source.categoryId, sort: 'NEWEST' },
+    0,
+    section.source.limit,
   );
+  const slice = await (fetchLocale
+    ? serverFetch<SliceResponse<ProductListItem>>(
+        path,
+        { headers: { 'accept-language': fetchLocale } },
+        { anonymous: true },
+      )
+    : serverFetch<SliceResponse<ProductListItem>>(path));
   return slice.contents.slice(0, section.source.limit);
 }
 
@@ -28,15 +36,18 @@ async function fetchPickProducts(section: ProductPickSectionData): Promise<Produ
  */
 export async function ProductPickSection({
   section,
+  fetchLocale,
 }: {
   section: ProductPickSectionData | DisplayProductPickSection;
+  /** 요청 언어(root params)를 읽을 수 없는 서버 액션(메인 미리보기)에서 설정 상품 픽을 부를 언어 */
+  fetchLocale?: string;
 }) {
   let products: ProductListItem[];
   if ('products' in section) {
     products = section.products;
   } else {
     try {
-      products = await fetchPickProducts(section);
+      products = await fetchPickProducts(section, fetchLocale);
     } catch {
       return null;
     }
