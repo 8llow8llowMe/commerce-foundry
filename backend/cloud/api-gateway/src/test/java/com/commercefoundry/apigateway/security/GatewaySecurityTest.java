@@ -73,6 +73,7 @@ class GatewaySecurityTest {
     private static final String ADMIN_MEMBERS_PATH = "/api/v1/admin/members";
     private static final String ADMIN_LOGIN_PATH = "/api/v1/auth/admin/login";
     private static final String ADMIN_JOBS_PATH = "/api/v1/admin/jobs/1";
+    private static final String ADMIN_NOTIFICATIONS_PATH = "/api/v1/admin/notifications/1";
 
     private static final String BEARER = "Bearer ";
     private static final String INVALID_TOKEN = "Bearer error=\"invalid_token\"";
@@ -293,6 +294,17 @@ class GatewaySecurityTest {
         get(ADMIN_JOBS_PATH, token(MemberRole.ADMIN)).expectStatus().isOk();
 
         assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(ADMIN_JOBS_PATH));
+    }
+
+    @Test
+    @DisplayName("어드민 알림(/api/v1/admin/notifications/**)은 무토큰 401(001) · CUSTOMER 403(005)이고, ADMIN 은 operations-service 라우트로 그대로 간다")
+    void adminNotificationsIsProtectedAndRoutedForAdmin() {
+        assertRejected(webTestClient.get().uri(ADMIN_NOTIFICATIONS_PATH).exchange(), SecurityErrorCode.UNAUTHORIZED, "Bearer");
+        assertRejected(get(ADMIN_NOTIFICATIONS_PATH, token(MemberRole.CUSTOMER)), SecurityErrorCode.FORBIDDEN, null);
+
+        get(ADMIN_NOTIFICATIONS_PATH, token(MemberRole.ADMIN)).expectStatus().isOk();
+
+        assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(ADMIN_NOTIFICATIONS_PATH));
     }
 
     @Test

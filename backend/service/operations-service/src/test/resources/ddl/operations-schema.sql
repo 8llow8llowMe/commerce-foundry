@@ -112,6 +112,62 @@
     comment on column operations.job.worker_id is
         '작업을 쥔 워커 ({앱}:{호스트}:{pid}:{난수}). 끝난 작업은 마지막 워커, QUEUED 는 null';
 
+    create table operations.notification (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        kind varchar(32) not null check ((kind in ('JOB_SUCCEEDED','JOB_FAILED','JOB_CANCELLED','ANOMALY','LOW_STOCK','CS_HANDOFF'))),
+        link_path varchar(200),
+        read_at timestamp(6) with time zone,
+        recipient_member_id bigint not null,
+        severity varchar(16) not null check ((severity in ('INFO','WARNING','CRITICAL'))),
+        source_id bigint not null,
+        source_type varchar(32) not null,
+        title varchar(120) not null,
+        version bigint not null,
+        primary key (id),
+        constraint uk_notification_source_type_source_id_kind unique (source_type, source_id, kind)
+    );
+
+    comment on table operations.notification is
+        '어드민 알림';
+
+    comment on column operations.notification.id is
+        '알림 아이디 (Snowflake)';
+
+    comment on column operations.notification.created_at is
+        '생성 시각';
+
+    comment on column operations.notification.updated_at is
+        '수정 시각';
+
+    comment on column operations.notification.kind is
+        '알림 종류';
+
+    comment on column operations.notification.link_path is
+        '어드민 화면 경로. 없으면 null';
+
+    comment on column operations.notification.read_at is
+        '읽은 시각. 아직이면 null';
+
+    comment on column operations.notification.recipient_member_id is
+        '받는 어드민 (외부 FK: auth-service member.id)';
+
+    comment on column operations.notification.severity is
+        '심각도';
+
+    comment on column operations.notification.source_id is
+        '출처 아이디. 작업이면 job.id';
+
+    comment on column operations.notification.source_type is
+        '출처 종류 (JOB 등)';
+
+    comment on column operations.notification.title is
+        '제목 (개인정보 원문 없음)';
+
+    comment on column operations.notification.version is
+        '낙관적 락 버전';
+
     create table operations.outbox (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -199,6 +255,15 @@
 
     create index idx_job_type_id 
        on operations.job (type, id);
+
+    create index idx_notification_recipient_member_id_id 
+       on operations.notification (recipient_member_id, id);
+
+    create index idx_notification_recipient_member_id_read_at 
+       on operations.notification (recipient_member_id, read_at);
+
+    create index idx_notification_created_at 
+       on operations.notification (created_at);
 
     create index idx_outbox_published_at_available_at 
        on operations.outbox (published_at, available_at);

@@ -174,7 +174,7 @@ Info → Presenter → Response
 
 ### 컨텍스트 간 의존 규칙 (같은 서비스 안)
 
-한 서비스에 컨텍스트가 여럿이면(product-service 의 `category` · `product`, order-service 의 `catalog` · `cart` · `order`) 다른 컨텍스트에서 쓸 수 있는 것은 **넷뿐이다** (허용 목록).
+한 서비스에 컨텍스트가 여럿이면(product-service 의 `category` · `product`, order-service 의 `catalog` · `cart` · `order`) 다른 컨텍스트에서 쓸 수 있는 것은 **다섯이다** (허용 목록).
 
 1. **그 컨텍스트의 Processor.** Facade 만 주입한다 — Processor 끼리는 컨텍스트를 넘어 주입하지 않는다.
 2. **그 Processor 가 돌려준 domain model, 그리고 그 메서드가 돌려준 domain 값(예: `CategoryPlacementViolation`).** 읽기 전용이다 — Facade 가 자기 컨텍스트 Processor 의 인자로 넘길 수 있다.
@@ -183,6 +183,8 @@ Info → Presenter → Response
 4. **그 컨텍스트 domain 이 연 확장 지점 — domain 인터페이스 구현과 domain 입력 값.** 엔진형 컨텍스트가 기능을 받아들이는 자리다.
    예: operations-service 의 `job` 은 domain `JobHandler` 를 열어 두고, 기능 컨텍스트의 `*JobProcessor` 가 구현한다.
    기능 Facade 는 `JobRegistrationProcessor.register(JobRequest)` 로 등록한다 — `JobRegisterCommand`(`application.command`)는 넘지 않는다 (§10).
+5. **`adapter/in/event` 가 다른 컨텍스트의 domain model 을 읽는 것.** 같은 서비스 안에서 발행된 종료 이벤트를 받기 위해서다 (#213).
+   리스너는 자기 `port/in` UseCase 만 부른다. 다른 컨텍스트의 application · adapter 는 쓰지 않는다.
 
 - 그 밖(UseCase · Facade · Presenter · Info · Port · Adapter · Mapper · Entity · Repository · Q 타입)은 쓰지 않는다.
   다른 컨텍스트의 포트 · 리포지토리를 직접 부르면 그 컨텍스트의 조회 규칙(숨김 · 정렬 · 캐시)을 비켜 간다.
@@ -219,7 +221,7 @@ Info → Presenter → Response
 | H5 out-port 는 Info 를 내지 않는다 | `port/out` → `application/info` | QueryResult · domain 을 반환한다 (§4) |
 | H6 진입 간 타입 공유 금지 | `adapter/in/web` ↔ `admin` ↔ `internal` ↔ `webhook`, `adapter/in/support` → 진입 DTO | 진입마다 DTO 를 따로 둔다. support 에는 공용 변환 함수 · 공용 타입(`MoneyItem`)만 둔다 (§2) |
 | H7 in-adapter → out-adapter 금지 | 진입(컨트롤러 · Presenter · 스케줄러 등)이 리포지토리 · Feign client · Entity 를 직접 씀 | UseCase → Facade → Processor → Port 로 간다 |
-| H8 컨텍스트 간 허용 목록 | 위 허용 목록 1~3 밖의 다른 컨텍스트 의존, domain → 다른 컨텍스트 domain | 최상위 `*Processor`(Facade 에서 — Processor 안의 중첩 타입은 안 된다) · domain model(Facade · Processor 에서) · `application.exception`(`adapter/in/*/exception` 의 `*ExceptionHandler` 에서)만. domain 끼리는 아이디로 |
+| H8 컨텍스트 간 허용 목록 | 위 허용 목록 밖의 다른 컨텍스트 의존, domain → 다른 컨텍스트 domain | 최상위 `*Processor`(Facade 에서 — Processor 안의 중첩 타입은 안 된다) · domain model(Facade · Processor · `adapter/in/event` 에서) · `application.exception`(`adapter/in/*/exception` 의 `*ExceptionHandler` 에서)만. domain 끼리는 아이디로 |
 | H9 Presenter 는 변환만 | Presenter → `application/service` · `application/port`(UseCase · out-port · QueryResult) | Facade 가 조회해 Info · domain 을 넘긴다 (§4) |
 | H10 진입은 UseCase 를 거친다 | `adapter/in` 전체(컨트롤러 · Presenter · ExceptionHandler · support · **스케줄러 · 웹훅**) → Facade · Processor · out-port · mapper | 스케줄러 · 웹훅도 `port/in` UseCase 를 둔다 — 트랜잭션 경계(Facade)를 비켜 가지 않는다 |
 | H11 Facade 는 Processor 를 거친다 | Facade → `application/port/out`(QueryResult 포함) | 조회 · 저장은 Processor 가 한다. QueryResult 는 Facade · Presenter 로 번지지 않는다 (§4) |
@@ -418,8 +420,8 @@ store:
   동시 등록에서 유니크 키에 지면(`JOB_DEDUP_CONFLICT`) 그 트랜잭션은 이미 롤백 대상이다 — 기능 트랜잭션 안에서 등록하면 이 예외를 잡아 이어 가지 말고 요청 전체를 다시 시도한다.
 - **취소는 협조적이다** — QUEUED 는 바로 CANCELLED, RUNNING 은 플래그만 세우고 핸들러가 다음 checkpoint 에서 멈춘다. 플래그를 무시하는 핸들러는 실행 시간 상한까지 돈다.
 - **종료 이벤트** — 끝난 상태(SUCCEEDED · FAILED · CANCELLED)를 저장하는 트랜잭션 안에서 `JobFinishedEvent`(domain)를 한 번 낸다.
-  알림(#213)이 `adapter/in/event` 로 받는 구조는 #213 에서 정한다 — 다른 컨텍스트의 진입 adapter 가 job domain 이벤트를 받는 것은 §3 허용 목록 밖이라
-  (a) 허용 목록에 이벤트를 더하거나 (b) 이벤트를 공용 위치로 옮기거나 (c) job 쪽 리스너가 알림 Processor 를 부르는 것 중 하나를 고른다.
+  알림 센터(#213)의 `adapter/in/event` 가 받는다 — 다른 컨텍스트 domain 만 읽고 자기 UseCase 만 부른다 (§3 허용 목록 5).
+  같은 트랜잭션에서 알림 행을 만들고, 커밋 뒤에 그 어드민의 SSE 연결로 민다. 요청한 어드민이 없으면(시스템 등록) 알림을 만들지 않는다.
 - **실행 스레드** — 전용 `jobWorkerTaskExecutor`(core = max = `worker.concurrency`, 큐 0)와 heartbeat 전용 `jobLeaseTaskScheduler` 를 둔다. `@Async` 는 쓰지 않는다.
   두 빈은 `@Bean(defaultCandidate = false)` 다 — 일반 빈으로 두면 Boot 가 `applicationTaskExecutor` · `taskScheduler` 를 만들지 않는다.
   워커 아이디(`{앱}:{호스트}:{pid}:{난수}`)는 `JobWorkerIdentity` 빈 하나로 만든다.
