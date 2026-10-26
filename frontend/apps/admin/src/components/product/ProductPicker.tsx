@@ -81,7 +81,12 @@ export function ProductPicker({
         <p className="mt-1 text-sm text-muted-fg">{description}</p>
       </div>
 
-      <form role="search" onSubmit={search} className="flex items-end gap-2">
+      <form
+        role="search"
+        data-tour="product-search"
+        onSubmit={search}
+        className="flex items-end gap-2"
+      >
         <TextField
           label="상품명 검색"
           type="search"
@@ -113,7 +118,7 @@ export function ProductPicker({
       {current?.kind === 'ok' && current.data.contents.length > 0 && (
         <>
           <p className="text-sm text-muted-fg">{current.data.totalElements}개</p>
-          <ul className="flex flex-col gap-1">
+          <ul data-tour="product-list" className="flex flex-col gap-1">
             {current.data.contents.map((product) => {
               const href =
                 hiddenNote && !product.visible ? null : `${basePath}/${product.productId}`;

@@ -25,3 +25,5 @@ catalog:
   '@dnd-kit/core': 6.3.1
   '@dnd-kit/sortable': 10.0.0
   '@dnd-kit/utilities': 3.2.2
+  # 어드민 온보딩 투어 — 화면 요소 강조 · 단계 안내(MIT, 의존성 없음), #228
+  driver.js: 1.9.0
