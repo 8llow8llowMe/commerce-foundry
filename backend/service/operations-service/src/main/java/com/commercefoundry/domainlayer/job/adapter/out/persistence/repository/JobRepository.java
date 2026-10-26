@@ -25,6 +25,9 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     /** 같은 종류 · 같은 키의 활성 작업 — {@code uk_job_type_active_dedup_key} 로 찾는다. 끝난 작업은 키가 null 이라 걸리지 않는다. */
     Optional<JobEntity> findByTypeAndActiveDedupKey(String type, String activeDedupKey);
 
+    /** 같은 종류 · 같은 멱등 키의 작업 — 끝난 작업의 {@code dedup_key} 도 포함한다. {@code idx_job_type_dedup_key}. */
+    boolean existsByTypeAndDedupKey(String type, String dedupKey);
+
     /** 어드민 목록 — 조건 없음. 아이디 내림차순(등록 최신순). */
     Page<JobEntity> findAllByOrderByIdDesc(Pageable pageable);
 

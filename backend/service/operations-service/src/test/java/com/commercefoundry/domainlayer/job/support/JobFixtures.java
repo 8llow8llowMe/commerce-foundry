@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.job.domain.model.JobHandlerOptions;
 import com.commercefoundry.domainlayer.job.domain.model.JobOutcome;
 import com.commercefoundry.global.properties.JobProperties;
 import java.time.Duration;
+import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
@@ -23,7 +24,8 @@ public final class JobFixtures {
             ),
             new JobProperties.LeaseSweep(Duration.ofSeconds(30), Duration.ofSeconds(30), 100, 10),
             new JobProperties.Retry(3, Duration.ofSeconds(30), 4, Duration.ofMinutes(30), 0.2),
-            new JobProperties.Result(65536)
+            new JobProperties.Result(65536),
+            new JobProperties.Planner(true, Duration.ofMinutes(1), Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofDays(32), List.of())
         );
     }
 

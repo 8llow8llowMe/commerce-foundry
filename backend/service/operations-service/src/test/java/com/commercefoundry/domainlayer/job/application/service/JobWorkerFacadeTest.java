@@ -385,7 +385,7 @@ class JobWorkerFacadeTest {
         JobProperties shortGrace = new JobProperties(
             new JobProperties.Worker(worker.enabled(), worker.concurrency(), worker.redeliveryDelay(), worker.defaultLease(), worker.heartbeatInterval(),
                 worker.defaultMaxRunDuration(), Duration.ofMillis(100)),
-            defaults.leaseSweep(), defaults.retry(), defaults.result()
+            defaults.leaseSweep(), defaults.retry(), defaults.result(), defaults.planner()
         );
         JobWorkerFacade facade = facade(held::add, shortGrace, handler(execution -> JobOutcome.empty()));
         facade.dispatch(1L, 0, TYPE);

@@ -4,6 +4,9 @@ dependencies {
     implementation project(':core:security-core')
     // 작업 실행 신호 — outbox · 릴레이 · 컨슈머 재시도 · DLT (#307, architecture-guide.md §10)
     implementation project(':core:messaging-core')
+    // 정기 작업 플래너의 단일 실행 락. messaging-core 와 같은 테이블(operations.shedlock)을 쓰고, 의존은 전이되지 않아 여기서 선언한다
+    implementation "net.javacrumbs.shedlock:shedlock-core:${rootProject.ext.shedlockVersion}"
+    implementation "net.javacrumbs.shedlock:shedlock-provider-jdbc:${rootProject.ext.shedlockVersion}"
 
     // security-core 는 서블릿 · Boot 보안 자동설정을 compileOnly 로만 둔다 — 서블릿 서비스가 직접 선언한다 (security-guide.md §5-3)
     implementation 'org.springframework.boot:spring-boot-starter-security'

@@ -236,7 +236,7 @@
     );
 
     comment on table operations.shedlock is
-        '단일 실행 락 (ShedLock — outbox 릴레이)';
+        '단일 실행 락 (ShedLock — outbox 릴레이 · 정기 작업 플래너)';
 
     comment on column operations.shedlock.name is
         '락 이름';
@@ -252,6 +252,9 @@
 
     create index idx_job_status_lease_expires_at 
        on operations.job (status, lease_expires_at);
+
+    create index idx_job_type_dedup_key 
+       on operations.job (type, dedup_key);
 
     create index idx_job_type_id 
        on operations.job (type, id);

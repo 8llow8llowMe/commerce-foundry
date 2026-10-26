@@ -108,6 +108,23 @@ operations:
     result:
       # 결과 JSON 상한 (UTF-8 바이트, 64KiB). 큰 결과는 결과 파일로 낸다
       max-json-bytes: 65536
+    # 정기 작업 (#212). ShedLock 으로 인스턴스 하나만 등록한다. 같은 슬롯은 끝난 작업까지 dedup_key 로 막는다
+    planner:
+      enabled: true
+      initial-delay: 1m
+      fixed-delay: 1m
+      # 등록이 이 시간보다 길면 다른 인스턴스가 이어서 잡을 수 있다. 등록 자체는 짧다
+      lock-at-most: 5m
+      # 이 기간보다 오래된 슬롯은 등록하지 않는다. 32일은 월 1회를 한 번 놓쳐도 따라간다. 더 오래된 슬롯은 채우지 않는다
+      catch-up: 32d
+      # 비어 있으면 락을 잡지 않는다. 핸들러가 있는 종류만 넣는다
+      # - type: REPORT_EXPORT
+      #   cadence: DAILY
+      #   time: "09:00"
+      #   zone: Asia/Seoul
+      #   payload-json: "{}"
+      # WEEKLY 는 day-of-week(MONDAY), MONTHLY 는 day-of-month(1~28)만 더한다
+      schedules: []
   # 어드민 알림 센터 (#213). 값이 빠지거나 0 · 음수면 기동하지 않는다 (NotificationProperties)
   notifications:
     # SSE 연결을 붙잡는 시간. 끊기면 클라이언트는 목록 조회로 따라잡고 다시 연다

@@ -41,6 +41,7 @@ import org.hibernate.type.SqlTypes;
     uniqueConstraints = @UniqueConstraint(name = "uk_job_type_active_dedup_key", columnNames = {"type", "active_dedup_key"}),
     indexes = {
         @Index(name = "idx_job_status_lease_expires_at", columnList = "status, lease_expires_at"),
+        @Index(name = "idx_job_type_dedup_key", columnList = "type, dedup_key"),
         @Index(name = "idx_job_type_id", columnList = "type, id")
     },
     check = {

@@ -78,6 +78,11 @@ public class InMemoryJobRepositoryPort implements JobRepositoryPort {
         return jobs.values().stream().filter(job -> type.equals(job.type()) && dedupKey.equals(job.activeDedupKey())).findFirst();
     }
 
+    @Override
+    public boolean existsByTypeAndDedupKey(String type, String dedupKey) {
+        return jobs.values().stream().anyMatch(job -> type.equals(job.type()) && dedupKey.equals(job.dedupKey()));
+    }
+
     /** 어댑터와 같은 순서 — lease 만료 시각 → 아이디 오름차순, {@code after} 다음부터(keyset). */
     @Override
     public List<ExpiredJobLeaseQueryResult> findExpiredLeases(Instant now, ExpiredJobLeaseQueryResult after, int limit) {

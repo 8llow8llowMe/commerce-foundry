@@ -10,13 +10,13 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * outbox 릴레이의 단일 실행 락 (ShedLock JDBC 표준 모양, messaging-core README). 행은 ShedLock({@code JdbcLockProvider})이 직접 읽고 쓴다 — 앱 코드는 이 엔티티로
+ * outbox 릴레이 · 정기 작업 플래너의 단일 실행 락 (ShedLock JDBC 표준 모양, messaging-core README). 행은 ShedLock({@code JdbcLockProvider})이 직접 읽고 쓴다 — 앱 코드는 이 엔티티로
  * 읽거나 쓰지 않는다. 테이블을 DDL 스냅숏 · local/dev {@code ddl-auto} 에 싣기 위해서만 둔다.
  *
  * <p>감사 칸 · 버전을 두지 않는다 — ShedLock 이 쓰는 칸 밖의 NOT NULL 칸이 있으면 락 INSERT 가 실패한다.
  */
 @Entity
-@Table(name = "shedlock", comment = "단일 실행 락 (ShedLock — outbox 릴레이)")
+@Table(name = "shedlock", comment = "단일 실행 락 (ShedLock — outbox 릴레이 · 정기 작업 플래너)")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ShedLockEntity {

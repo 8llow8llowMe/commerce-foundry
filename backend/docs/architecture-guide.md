@@ -431,4 +431,8 @@ store:
   남은 실행 스레드는 더 기다리지 않고 interrupt 한다. 강제 종료면 lease 만료가 대신한다 — 컨테이너 종료 유예는 `shutdown-grace` 보다 길게 둔다.
 - 설정은 `operations.jobs.*`(`JobProperties`)다. `operations.jobs.worker.enabled=false` 면 실행 신호 리스너를 만들지 않는다(API 전용 인스턴스 — 등록 · 만료 판정만 한다).
   결과 JSON 상한은 최대 1MiB 다.
-- 정기 작업 플래너(#212 PR-D)는 아직 없다 — 만들 때 단일 실행 락(ShedLock)으로 한 인스턴스만 등록하고, 같은 슬롯은 `dedup_key` 로 막는다.
+- **정기 작업** (#212) — `operations.jobs.planner.schedules` 의 일 · 주 · 월 시각에 맞춰 `JobRegisterUseCase` 로 등록한다.
+  단일 실행 락은 ShedLock(`operations-job-planner`, 테이블 `operations.shedlock` — outbox 릴레이와 같은 테이블)이다.
+  슬롯 멱등 키는 `planner:{주기}:{존}:{로컬 시각}` 이고, 활성 작업만이 아니라 같은 키로 등록된 적이 있으면(`dedup_key`, `idx_job_type_dedup_key`) 다시 만들지 않는다.
+  엔진의 활성 멱등(끝나면 같은 키를 다시 쓸 수 있음)과는 다르다. 요청한 어드민은 없다(시스템 등록 — 알림을 만들지 않는다).
+  목록이 비어 있으면 락을 잡지 않는다. `catch-up`(기본 32일)보다 오래된 슬롯은 건너뛰고, 그 안의 가장 최근 슬롯만 등록한다. 결과 파일은 아직 없다.
