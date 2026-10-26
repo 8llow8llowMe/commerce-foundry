@@ -61,7 +61,8 @@ pnpm workspace + Turborepo. 앱 둘과 패키지 셋이다.
 - **읽는 헤더는 앞단이 반드시 덮어써야 한다.** 그렇지 않으면 브라우저가 그 헤더로 버킷을 고른다.
   Vercel 은 `x-real-ip` 를 플랫폼이 덮어쓴다. nginx 는 `proxy_set_header X-Real-IP $remote_addr;` 를 둔다.
   `X-Forwarded-For` 를 덧붙이는(append) L7 LB 한 단 뒤라면 `CLIENT_IP_HEADER=x-forwarded-for` 로 맨 오른쪽을 쓴다. 앞단 없이 BFF 가 직접 받는 구성이면 `none` 으로 끈다.
-- 게이트웨이는 **BFF 송신 주소가 신뢰 프록시(`GATEWAY_TRUSTED_PROXIES`)일 때만** 이 값을 읽는다. 배포 구성이 정해지면 BFF 의 송신 주소 대역을 #135 에 넘긴다.
+- 게이트웨이는 **BFF 송신 주소가 신뢰 프록시(`GATEWAY_TRUSTED_PROXIES`)일 때만** 이 값을 읽는다. 배포 구성별 `CLIENT_IP_HEADER` 와
+  BFF 송신 주소(= 그 환경 docker 네트워크 서브넷)는 `docs/deploy.md` §8 이다.
 - `serverFetch`(Server Component)는 넘기지 않는다. 조회(GET)만 하고 게이트웨이는 조회를 세지 않는다. 요청 헤더를 읽으면 그 렌더가 동적이 되는 것도 이유다.
   RSC 에서 쓰기를 부르게 되면 이 규칙을 같이 넣는다.
 

@@ -31,7 +31,7 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 | [docs/api-client.md](docs/api-client.md) | 봉투·ApiError kind 처리·멱등 키·금액 표시 |
 | [docs/styling-theme.md](docs/styling-theme.md) | 토큰 두 층·임의 색 금지·새 브랜드 추가 |
 | [docs/local-run.md](docs/local-run.md) | Node·pnpm·env·게이트웨이와 함께 띄우기 |
-| [docs/deploy.md](docs/deploy.md) | standalone 이미지·배포 compose·빌드 시점 vs 런타임 env |
+| [docs/deploy.md](docs/deploy.md) | standalone 이미지·배포 compose·빌드 시점 vs 런타임 env·Jenkins 파이프라인·배포 라벨·클라이언트 IP 앞단 |
 | [docs/conventions.md](docs/conventions.md) | 파일·네이밍·import·테스트 규칙 |
 
 ## 핵심 규칙
