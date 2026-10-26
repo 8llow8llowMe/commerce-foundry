@@ -35,6 +35,11 @@ public final class MemberValidationMessage {
     public static final String ADMIN_AUDIT_ACTOR_ID_POSITIVE = "AUTH_135:actorMemberId 는 양수여야 합니다.";
     public static final String ADMIN_AUDIT_TARGET_INVALID = "AUTH_136:target 은 공백 없이 1자 이상 200자 이하의 ASCII 여야 합니다.";
 
+    /** 서비스 간 회원 표시 이름 벌크 조회 ({@code /internal/v1/member-display-names}, {@code api-design-guide.md} §1-3). */
+    public static final String DISPLAY_NAME_IDS_REQUIRED = "AUTH_137:ids 는 필수입니다.";
+    public static final String DISPLAY_NAME_IDS_SIZE_MAX = "AUTH_138:ids 는 최대 100개입니다.";
+    public static final String DISPLAY_NAME_ID_POSITIVE = "AUTH_139:id 는 양수여야 합니다.";
+
     private MemberValidationMessage() {
     }
 }

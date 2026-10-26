@@ -931,11 +931,13 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   - 조회는 `GET /api/v1/admin/audit-logs`(ADMIN, `api-design-guide.md` §2-4). 조건은 `action` · `actorMemberId` · `target`(완전 일치) · `result` 다.
     로그인 실패는 행위자가 null 이라 `actorMemberId` 만으로는 한 계정을 노린 실패를 못 고른다. `action=ADMIN_LOGIN&target=member:<id>&result=FAILURE` 로 고르고,
     `(target, id)` 인덱스를 둔다. 이 조회 자체는 감사하지 않는다 — 행에 개인정보가 없고, 남기면 조회마다 행이 늘어난다.
+    응답의 `actorDisplayName` · `targetDisplayName` 은 저장된 행이 아니라 조회 시 회원 이름을 마스킹해 붙인다 (#322, `api-design-guide.md` §2-4). 회원 목록 API 는 쓰지 않는다.
   - 다른 서비스(operations `JOB_CANCEL` 등)는 지금 로그 한 줄만 남긴다. DB 영속화를 서비스마다 어떻게 둘지(서비스별 같은 모양 테이블 · core 공유 안 함 권고)는 #163 에서 정한다.
 - **서비스 전용 이력 테이블 사례 — delivery-service 배송비 정책 교체 이력 (#69).** 어드민 공통 감사 로그(DB)가 아직 없어 `delivery.shipping_policy_history`
   (+ 구간 스냅숏 `shipping_policy_history_area`)에 교체 전 · 후 값 · 교체한 관리자(`admin_member_id` — access 토큰의 memberId, 본문 값을 쓰지 않는다) · 시각을 남긴다.
   교체와 **같은 트랜잭션**이라 이력 저장이 실패하면 교체도 롤백된다 — 기록 없는 변경이 생기지 않는다(로그 한 줄 방식은 트랜잭션 밖이라 이 보장이 없다).
   조회는 `GET /api/v1/admin/shipping-policies/domestic/histories`(ADMIN, `api-design-guide.md` §6-2). append-only 라 고치거나 지우는 API 가 없다.
+  `adminDisplayName` 은 auth-service 표시 이름 벌크 조회가 마스킹해 준 값이다 (#322). 원문 이름은 delivery 에 들어오지 않는다.
   공통 감사 로그(#163 · #192)가 생기면 이 행위를 그쪽에도 함께 남길지 재검토한다.
 - 적용 대상 (#6): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade`), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
 - 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` — `action=JOB_CANCEL target=job:<id>`, operations-service `JobAdminAuditLogAdapter`). 작업 목록 · 상세 조회는 남기지 않는다 —

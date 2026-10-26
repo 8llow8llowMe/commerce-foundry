@@ -2,8 +2,11 @@ package com.commercefoundry.domainlayer.member.application.port.out;
 
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.port.out.query.MemberListQueryResult;
+import com.commercefoundry.domainlayer.member.application.port.out.query.MemberNameQueryResult;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 
@@ -33,6 +36,12 @@ public interface MemberRepositoryPort {
      * @param page 0 부터
      */
     Page<MemberListQueryResult> findPage(MemberRole role, int page, int size);
+
+    /**
+     * 회원 아이디로 이름만 한 번에 읽는다. 없는 아이디는 빠지고, 이름이 없는 회원은 name 이 null 이다.
+     * 빈 목록이면 조회하지 않고 빈 목록을 돌려준다.
+     */
+    List<MemberNameQueryResult> findNamesByIds(Collection<Long> memberIds);
 
     /**
      * 새 회원(버전 null)이면 넣고, 아니면 그 버전에 대한 수정으로 저장한다. 바로 flush 해 제약 위반 · 버전 충돌을 여기서 드러낸다.

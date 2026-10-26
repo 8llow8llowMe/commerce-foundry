@@ -4,6 +4,8 @@ import com.commercefoundry.domainlayer.member.adapter.out.persistence.entity.Mem
 import com.commercefoundry.security.principal.MemberRole;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -21,6 +23,9 @@ public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
 
     /** 어드민 회원 목록 (#6) — 역할 조건. 정렬은 {@link Pageable} 이 정한다. 역할 없는 전체 목록은 {@code findAll(Pageable)} 이다. */
     Page<MemberEntity> findAllByRole(MemberRole role, Pageable pageable);
+
+    /** 표시 이름용 — 기본 키 {@code in} 절 한 번. 아이디 · 이름만 읽는다 (#322). */
+    List<MemberNameView> findByIdIn(Collection<Long> ids);
 
     /**
      * 회원 행을 쓰기 잠금으로 읽는다({@code select ... for update} 계열). 트랜잭션이 끝날 때까지 같은 회원의 다른 잠금은 기다린다 —

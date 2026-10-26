@@ -46,7 +46,8 @@ class AdminAuditLogAdminControllerTest {
 
     private static final String PATH = "/api/v1/admin/audit-logs";
     private static final PageResponse<AdminAuditLogAdminItem> PAGE = new PageResponse<>(List.of(AdminAuditLogAdminItem.builder()
-        .auditLogId("4611686018427387906").action("ADMIN_LOGIN").actorMemberId(null).target("member:4611686018427387904").result("FAILURE")
+        .auditLogId("4611686018427387906").action("ADMIN_LOGIN").actorMemberId(null).actorDisplayName(null)
+        .target("member:4611686018427387904").targetDisplayName("관*자").result("FAILURE")
         .createdAt(Instant.parse("2026-10-24T03:00:00Z")).build()), 0, 20, 1, 1);
 
     @Autowired
@@ -71,7 +72,9 @@ class AdminAuditLogAdminControllerTest {
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].auditLogId").isEqualTo("4611686018427387906");
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].action").isEqualTo("ADMIN_LOGIN");
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].actorMemberId").isNull();
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].actorDisplayName").isNull();
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].target").isEqualTo("member:4611686018427387904");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].targetDisplayName").isEqualTo("관*자");
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].result").isEqualTo("FAILURE");
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].createdAt").isEqualTo("2026-10-24T03:00:00Z");
         verify(adminAuditLogAdminUseCase).searchAuditLogs(new AdminAuditLogSearchCommand(null, null, null, null, 0, 20));

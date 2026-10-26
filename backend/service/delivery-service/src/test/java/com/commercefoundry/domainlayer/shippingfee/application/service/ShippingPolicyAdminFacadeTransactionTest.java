@@ -5,19 +5,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.ShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.application.command.ShippingPolicyReplaceCommand;
 import com.commercefoundry.domainlayer.shippingfee.application.command.ShippingPolicyReplaceCommand.RemoteAreaCommand;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingPolicyAdminUseCase;
+import com.commercefoundry.domainlayer.shippingfee.application.port.out.MemberDisplayNameQueryPort;
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.ShippingPolicyHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.PostalCode;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +31,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -58,6 +63,15 @@ class ShippingPolicyAdminFacadeTransactionTest {
 
     @MockitoSpyBean
     private ShippingPolicyHistoryRepositoryPort shippingPolicyHistoryRepositoryPort;
+
+    /** 이력 조회의 표시 이름은 auth-service 다. 이 테스트는 트랜잭션 경계만 보므로 원격 호출을 빈 맵으로 둔다. */
+    @MockitoBean
+    private MemberDisplayNameQueryPort memberDisplayNameQueryPort;
+
+    @BeforeEach
+    void stubDisplayNames() {
+        lenient().when(memberDisplayNameQueryPort.findMaskedDisplayNames(any())).thenReturn(Map.of());
+    }
 
     @Autowired
     private JdbcTemplate jdbcTemplate;

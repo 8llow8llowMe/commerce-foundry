@@ -416,7 +416,8 @@ class ShippingPolicyAdminControllerTest {
                 .version(3)
                 .build();
             ShippingPolicyHistoryAdminItem item = ShippingPolicyHistoryAdminItem.builder()
-                .historyId("4611686018427388100").adminMemberId("4611686018427387904").changedAt(Instant.parse("2026-10-18T03:00:00Z"))
+                .historyId("4611686018427388100").adminMemberId("4611686018427387904").adminDisplayName("홍*동")
+                .changedAt(Instant.parse("2026-10-18T03:00:00Z"))
                 .before(before).after(after)
                 .build();
             return new PageResponse<>(List.of(item), 0, 20, 21L, 2);
@@ -436,6 +437,7 @@ class ShippingPolicyAdminControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataBody.totalPages").isEqualTo(2);
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].historyId").isEqualTo("4611686018427388100");
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].adminMemberId").isEqualTo("4611686018427387904");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].adminDisplayName").isEqualTo("홍*동");
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].changedAt").isEqualTo("2026-10-18T03:00:00Z");
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].before.version").isEqualTo(2);
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].before.freeShippingThreshold").isNull();

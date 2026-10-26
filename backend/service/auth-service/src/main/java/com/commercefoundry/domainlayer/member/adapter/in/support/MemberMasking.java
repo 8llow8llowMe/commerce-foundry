@@ -46,6 +46,17 @@ public final class MemberMasking {
         };
     }
 
+    /**
+     * 표시 이름 칸용. 이름이 없으면 null 이다 — {@link #maskName} 은 null · 빈 문자열을 {@code *} 로 바꾸므로 여기서는 마스킹하지 않는다.
+     * 공백만 있는 값(이관 데이터)도 이름이 없는 것으로 본다.
+     */
+    public static String maskNameIfPresent(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        return maskName(name);
+    }
+
     public static String maskPhone(String phone) {
         if (phone == null) {
             return null;

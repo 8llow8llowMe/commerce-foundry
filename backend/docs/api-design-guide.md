@@ -63,6 +63,9 @@
   `customOrderFields` 는 맞춤 제작 항목 정의(`fieldKey` · `inputType` · `required` · `min` · `max` · `step`)다. 맞춤 제작이 아니면 빈 배열이고,
   그 페이지의 맞춤 제작 상품 아이디로 in 절 한 번만 읽는다 (`order-flow-guide.md` §2-3, #97).
 - 처음 만든 곳: product-service `SkuInternalController` (#8). 코드 표는 `ProductValidationMessage` (`PRODUCT_103` 빈 목록 · `PRODUCT_104` 100개 초과 · `PRODUCT_105` 양수 아님).
+- 회원 표시 이름: auth-service `GET /internal/v1/member-display-names?ids=` (#322). 허용 호출자는 delivery-service.
+  항목은 `{memberId, displayName}` 이고 `displayName` 은 마스킹된 이름만이다(원문 이름은 없다). 회원이 있으나 이름이 없으면 `displayName` 은 null, 없는 아이디는 빠진다.
+  검증 코드는 `AUTH_137`(빈 목록) · `AUTH_138`(100개 초과) · `AUTH_139`(양수 아님). 배송비 정책 이력은 이 조회로 페이지당 한 번 이름을 붙이고, 실패하면 503 `DELIVERY_013` 이다.
 
 **internal 쓰기 API** 도 같은 자리(`/internal/v1/**`, `@Hidden`, 허용 호출자 `@PreAuthorize`)에 둔다. 아래를 더 지킨다.
 
@@ -230,7 +233,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/auth/logout` | `isAuthenticated()` | 200 `dataBody: null` — 본문 `{refreshToken?}`(본문 생략 가능). 모르는 · 남의 refresh 여도 access 는 막고 200(멱등) | 401 `SECURITY_001` · 503 `AUTH_013` |
 | `POST /api/v1/auth/admin/login` (#6) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. refresh 없음 | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` |
 | `GET /api/v1/admin/members` (#6) | `hasRole('ADMIN')` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
-| `GET /api/v1/admin/audit-logs` (#192 · #286) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, target, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&target=&result=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_136` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `GET /api/v1/admin/audit-logs` (#192 · #286 · #322) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, actorDisplayName, target, targetDisplayName, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&target=&result=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_136` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 
 토큰 쌍 (로그인 · 재발급 공통, #4 결정 1 — 전달은 응답 본문이고 쿠키는 BFF 가 만든다)
 
@@ -266,7 +269,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
 | `AUTH_120~129` | 400 | 배송지 검증 — 별칭 120 · 받는 사람 121 · 연락처 122 · 123(형식) · 국가 124 · 우편번호 125(KR 필수) · 126(형식) · 주소 127 · 길이 128 · 해외 도시 129 |
-| `AUTH_130~136` | 400 | 관리자 필드 검증 (#6 · #286) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132(형식 · 64자 초과는 필드 검증하지 않는다 — `AUTH_030`), 어드민 목록 `page` 0 이상 133 · `size` 1~100 134, 감사 로그 `actorMemberId` 양수 135 · `target` 공백 없이 1~200자 ASCII 136 |
+| `AUTH_130~139` | 400 | 관리자 · 표시 이름 필드 검증 (#6 · #286 · #322) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132(형식 · 64자 초과는 필드 검증하지 않는다 — `AUTH_030`), 어드민 목록 `page` 0 이상 133 · `size` 1~100 134, 감사 로그 `actorMemberId` 양수 135 · `target` 공백 없이 1~200자 ASCII 136, 회원 표시 이름 벌크 `ids` 필수 137 · 100개 초과 138 · 양수 아님 139 |
 | `AUTH_198` · `AUTH_199` | 400 | 파라미터 타입 불일치(`page=x` · 없는 `role`) · 필수 파라미터 누락 |
 
 코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~`, 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.
@@ -350,9 +353,13 @@ return ResponseEntity.ok().body(Response.success(response));
   `result`(선택, `SUCCESS` · `FAILURE`, 틀리면 198) · `page` · `size`(회원 조회와 같은 133 · 134).
   정렬은 최신순 하나(감사 로그 아이디 내림차순)라 `sortType` 이 없다. 조건은 각각 켜지고 꺼지므로 QueryDSL 이고, `(action, id)` · `(actor_member_id, id)` · `(target, id)` 인덱스를 탄다.
   로그인 실패는 행위자가 없어 `actorMemberId` 만으로는 한 계정을 못 고른다. `target=member:<id>&result=FAILURE` 로 고른다 (#286).
-- 항목 `{auditLogId(string), action, actorMemberId(string | null), target(string | null), result, createdAt}` — 값은 `admin.audit` 로그 한 줄과 같고
-  개인정보가 없어 마스킹하지 않는다. 로그인 실패는 행위자를 모르므로 `actorMemberId` 가 null 이고 노린 관리자 계정이 `target` 에 남는다.
-- 이 조회 자체는 감사하지 않는다 — 행에 개인정보가 없고, 남기면 조회마다 행이 늘어난다. 기록 방식은 `security-guide.md` §11-4.
+- 항목 `{auditLogId(string), action, actorMemberId(string | null), actorDisplayName(string | null), target(string | null), targetDisplayName(string | null), result, createdAt}`.
+  저장된 칸은 `admin.audit` 로그 한 줄과 같다. `actorDisplayName` 은 행위한 관리자의 마스킹 이름, `targetDisplayName` 은 `target` 이 `member:<id>` 일 때만 그 회원의 마스킹 이름이다 (#322).
+  회원이 없거나 이름이 없으면 null 이다(`maskName(null)` 의 `*` 를 쓰지 않는다). 그 외 target(`members?role=...` 등)은 `targetDisplayName` 이 null 이다.
+  이름은 그 페이지의 아이디를 모아 회원 테이블을 한 번만 읽고 Presenter 에서 마스킹한다. 어드민 회원 목록으로 이름을 붙이지 않는다 — 그 조회는 감사 대상이고 size 상한이 100이다.
+  감사 로그를 거를 관리자 선택용 경량 목록 API 도 두지 않는다. 로그인 실패는 행위자를 모르므로 `actorMemberId` · `actorDisplayName` 이 null 이고 노린 관리자 계정이 `target` 에 남는다.
+- 이 조회 자체는 감사하지 않는다 — 저장된 행에 개인정보 원문이 없고, 남기면 조회마다 행이 늘어난다. 표시 이름을 읽는 것도 회원 목록 조회가 아니라서 `MEMBER_SEARCH` 행이 생기지 않는다.
+  기록 방식은 `security-guide.md` §11-4. 화면(#320)은 `actorDisplayName` · `targetDisplayName` 이 있으면 그 이름을, null 이면 관리자로 보인다. FE 코드는 이 변경에 포함하지 않는다.
 
 ### 2-5. 어드민 카테고리 관리 (product-service, #9)
 
@@ -599,13 +606,15 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 | API | 성공 | 주요 오류 |
 |-----|------|-----------|
-| `GET /api/v1/admin/shipping-policies/domestic/histories?page=&size=` | 200 `PageResponse<{historyId, adminMemberId, changedAt, before, after}>` — 최신순(아이디 내림차순) 고정 | 400 `DELIVERY_137`(page) · `138`(size 1~20) · `198`(형식) |
+| `GET /api/v1/admin/shipping-policies/domestic/histories?page=&size=` | 200 `PageResponse<{historyId, adminMemberId, adminDisplayName, changedAt, before, after}>` — 최신순(아이디 내림차순) 고정 | 400 `DELIVERY_137`(page) · `138`(size 1~20) · `198`(형식) · 503 `DELIVERY_013`(표시 이름 조회 실패) |
 
 - `before` · `after` 는 `{baseFee, freeShippingThreshold, remoteAreas[{name, postalCodeFrom, postalCodeTo, surcharge}], version}` 이다. 금액은 `{amount, currency}`,
   무료배송 기준이 없으면 `null`, 구간은 시작 우편번호 오름차순이다. 정책을 처음 만든 교체는 `before` 가 `null` 이다.
   구간 아이디는 싣지 않는다 — 교체마다 새로 발급돼(§6-1) 이력에서 뜻이 없다.
 - `historyId` · `adminMemberId` 는 문자열, `changedAt` 은 UTC ISO 다. `adminMemberId` 는 access 토큰의 memberId 이고 요청 본문으로 받지 않는다.
-  내부 회원 아이디라 마스킹하지 않는다(재고 조정 이력 #86 과 같다). 어드민 이름 표시는 auth-service 조회가 필요해 범위 밖이다.
+  내부 회원 아이디라 마스킹하지 않는다(재고 조정 이력 #86 과 같다). `adminDisplayName` 은 그 관리자의 마스킹 이름이다 (#322).
+  페이지의 `adminMemberId` 를 `GET /internal/v1/member-display-names` 로 한 번에 읽고, delivery 는 마스킹된 값만 받는다. 회원을 모르거나 이름이 없으면 null 이다.
+  auth-service 가 실패하면 이름을 null 로 숨기지 않고 503 `DELIVERY_013` 이다. 화면(#319)은 이름이 있으면 그 값을, null 이면 관리자로 보인다. FE 코드는 이 변경에 포함하지 않는다.
 - **값이 그대로인 교체(같은 본문 재전송)도 이력을 남긴다** — `version` 이 오르므로 교체 사실 자체가 있고, 누가 언제 눌렀는지가 감사 대상이다. 화면이 "변경 없음" 을
   가리고 싶으면 `before` · `after` 의 값(버전 제외)을 비교한다.
 - page 는 §4 공용 규칙(기본 0, `DELIVERY_137`)이다. **size 는 기본 20 · 상한 20(`DELIVERY_138`)** 으로 공용 상한(100)보다 작다 — 이력 한 건이 구간을
