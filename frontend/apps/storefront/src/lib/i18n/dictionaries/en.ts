@@ -171,6 +171,11 @@ export const en: Dictionary = {
     more: 'Discover',
     viewAll: 'VIEW ALL',
     shop: 'SHOP',
+    preview: {
+      waiting:
+        'Open the preview from the admin main display screen to see the edited home page here.',
+      failed: 'We could not render the preview. Please try again in a moment.',
+    },
   },
   cart: {
     title: 'Bag',

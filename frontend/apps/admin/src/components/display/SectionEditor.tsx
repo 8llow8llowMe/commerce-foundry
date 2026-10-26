@@ -40,6 +40,7 @@ export function SectionEditor({
   onReload,
   onDenied,
   onCancel,
+  onFormChange,
 }: {
   heading: string;
   /** 고칠 섹션. null 이면 새로 만든다 */
@@ -50,6 +51,8 @@ export function SectionEditor({
   onReload: (notice: string) => void;
   onDenied: (denied: AccessDenied) => void;
   onCancel: () => void;
+  /** 입력이 바뀔 때마다 지금 폼(저장 전) — 미리보기(#71)가 쓴다 */
+  onFormChange?: (form: SectionForm) => void;
 }) {
   const id = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -61,6 +64,13 @@ export function SectionEditor({
   const [saving, setSaving] = useState(false);
   const errorsOf = (key: string) => errors[key] ?? [];
   const set = (patch: Partial<SectionForm>) => setForm((current) => ({ ...current, ...patch }));
+  const formChanged = useRef(onFormChange);
+  useEffect(() => {
+    formChanged.current = onFormChange;
+  });
+  useEffect(() => {
+    formChanged.current?.(form);
+  }, [form]);
   const fields = FIELDS_BY_TYPE[form.sectionType];
 
   const submit = async () => {

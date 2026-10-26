@@ -230,6 +230,33 @@ export function sectionRequest(form: SectionForm): BuildResult {
   };
 }
 
+/**
+ * 미리보기(#71)용 본문 — 저장 전 폼을 그대로 싣는다. 저장(`sectionRequest`)과 달리 칸 오류가 있어도 막지 않는다:
+ * 문구는 앞뒤 공백만 빼고, 읽을 수 없는 기간 칸은 비운 것(제한 없음)으로 본다. 스토어프론트가 평문 · 안전한 링크로만 그린다.
+ */
+export function draftRequest(form: SectionForm): DisplaySectionRequest {
+  const text = {} as Record<TextFieldKey, string | null>;
+  for (const key of Object.keys(TEXT_LABELS) as TextFieldKey[])
+    text[key] = normalizeText(form[key]);
+  return {
+    sectionType: form.sectionType,
+    ...text,
+    visible: form.visible,
+    startAt: periodValue(form.startAt, form.loadedPeriod.startAt) ?? null,
+    endAt: periodValue(form.endAt, form.loadedPeriod.endAt) ?? null,
+    items: [
+      ...form.media.map((item) =>
+        mediaRequest(item.media, normalizeText(item.altText), item.caption),
+      ),
+      ...form.products.map((item): DisplayItemRequest => ({
+        itemType: 'PRODUCT',
+        productId: item.productId,
+        caption: item.caption,
+      })),
+    ],
+  };
+}
+
 function mediaRequest(
   media: DisplayMediaAdmin,
   altText: string | null,

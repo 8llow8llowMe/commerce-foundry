@@ -19,6 +19,8 @@ x-admin-environment: &admin_environment
   GATEWAY_URL: ${GATEWAY_URL:?deploy.md 2절}
   # 클라이언트 IP 를 읽을 헤더. 비면 앱 기본값(x-real-ip)과 같다 — 앞단이 반드시 덮어쓰는 헤더여야 한다(architecture.md §2)
   CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
+  # 메인 전시 미리보기(#71)가 iframe 으로 여는 스토어프론트 origin. 비면 미리보기 버튼이 없다
+  STOREFRONT_ORIGIN: ${STOREFRONT_ORIGIN:-}
 
 x-logging: &default_logging
   driver: json-file

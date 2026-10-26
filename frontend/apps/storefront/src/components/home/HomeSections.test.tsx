@@ -198,6 +198,16 @@ describe('ProductPickSection (서버 데이터)', () => {
     expect(html).toContain('href="/shop"');
   });
 
+  it('fetchLocale 을 주면 그 언어로 토큰 없이 부른다(메인 미리보기 서버 액션)', async () => {
+    serverFetch.mockResolvedValue({ contents: [listItem('1')], hasNext: false });
+    await ProductPickSection({ section, fetchLocale: 'en' });
+    expect(serverFetch).toHaveBeenCalledWith(
+      '/api/v1/products?categoryId=7&sortType=NEWEST&page=0&size=2',
+      { headers: { 'accept-language': 'en' } },
+      { anonymous: true },
+    );
+  });
+
   it('못 받았거나 비었으면 섹션을 그리지 않는다', async () => {
     serverFetch.mockRejectedValue(new ApiError('unavailable', 503, 'GATEWAY_002', null));
     expect(await ProductPickSection({ section })).toBeNull();
@@ -239,6 +249,16 @@ describe('LookSection (서버 데이터)', () => {
     expect(html).toContain('href="/products/1"');
     expect(html).toContain('89,000원 · 품절');
     expect(html).not.toContain('/products/3');
+  });
+
+  it('fetchLocale 을 주면 구성품을 그 언어로 토큰 없이 부른다(메인 미리보기 서버 액션)', async () => {
+    serverFetch.mockResolvedValue(detail('1', 'ON_SALE', '판매중'));
+    await LookSection({ section: { ...section, productIds: ['1'] }, fetchLocale: 'en' });
+    expect(serverFetch).toHaveBeenCalledWith(
+      '/api/v1/products/1',
+      { headers: { 'accept-language': 'en' } },
+      { anonymous: true },
+    );
   });
 
   it('구성품이 없으면 화보와 전체 보기 링크만 그린다', async () => {

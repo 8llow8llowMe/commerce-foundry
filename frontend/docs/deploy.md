@@ -51,6 +51,8 @@ standalone 의 `node_modules` 에는 `sharp`(이미지 최적화) 네이티브 �
 |----|----|:---:|:---:|------|
 | `NEXT_PUBLIC_SITE_URL` | storefront | **필수** | - | 번들에 박힌다. 비면 canonical · hreflang 이 localhost 가 되므로 storefront 배포 빌드는 없으면 멈춘다 |
 | `LOCALE_HOSTS` | storefront | O | `:-` | proxy 가 읽는다. 빌드 · 실행에 같은 값 |
+| `ADMIN_ORIGIN` | storefront | O | `:-` | 메인 전시 미리보기(#71)를 iframe 으로 여는 어드민 origin. proxy · 미리보기 화면이 읽어 빌드 · 실행에 같은 값. 비면 운영에서는 미리보기를 닫는다(`frame-ancestors 'none'`) |
+| `STOREFRONT_ORIGIN` | admin | - | `:-` | 미리보기가 여는 스토어프론트 origin(요청 시점에 읽어 빌드에는 쓰지 않는다). 비면 운영에서는 미리보기 버튼이 없다 |
 | `BUSINESS_*` (6개) | storefront | O | `:-` | 푸터. 정적으로 미리 그리는 페이지에 들어갈 수 있어 빌드 · 실행에 같은 값. 비면 그 줄을 뺀다 |
 | `GATEWAY_URL` | 둘 다 | O | **`:?` 필수** | `http://commerce-api-gateway-<env>:8000` (같은 네트워크의 게이트웨이 컨테이너 이름, §3) |
 | `CLIENT_IP_HEADER` | 둘 다 | - | `:-` | 앞단 구성에 맞춘다(§8). 비면 앱 기본값 `x-real-ip` |

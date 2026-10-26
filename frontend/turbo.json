@@ -4,7 +4,7 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**"],
-      "env": ["GATEWAY_URL", "NEXT_PUBLIC_SITE_URL", "LOCALE_HOSTS", "BUSINESS_*"]
+      "env": ["GATEWAY_URL", "NEXT_PUBLIC_SITE_URL", "LOCALE_HOSTS", "BUSINESS_*", "ADMIN_ORIGIN"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
@@ -13,7 +13,7 @@
     "dev": {
       "cache": false,
       "persistent": true,
-      "passThroughEnv": ["GATEWAY_URL", "NEXT_PUBLIC_SITE_URL"]
+      "passThroughEnv": ["GATEWAY_URL", "NEXT_PUBLIC_SITE_URL", "ADMIN_ORIGIN", "STOREFRONT_ORIGIN"]
     }
   }
 }

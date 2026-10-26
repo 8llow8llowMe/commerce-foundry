@@ -17,6 +17,9 @@ pnpm install
 키 목록은 `frontend/.env.example`. 기본값으로 로컬에서 그대로 뜬다. 바꿀 때만 앱 디렉터리에 `.env.local` 을 만든다
 (예: `apps/storefront/.env.local` 에 `GATEWAY_URL=http://localhost:8000`). `.env.local` 은 커밋되지 않는다.
 
+메인 전시 미리보기(#71)는 어드민(:3001)이 스토어프론트(:3000) `/preview/main` 을 iframe 으로 연다. 개발에서는 두 origin(`ADMIN_ORIGIN` · `STOREFRONT_ORIGIN`)이
+기본값이라 따로 넣지 않는다. 포트를 바꿔 띄우면 두 값을 짝으로 넣는다.
+
 영문 스토어는 `http://localhost:3000/en` 이다. 호스트 방식(`LOCALE_HOSTS=en=en.localhost`)을 로컬에서 보려면 `http://en.localhost:3000` 으로 연다(`*.localhost` 는 브라우저가 자기 자신으로 푼다).
 
 ## 3. 실행

@@ -10,8 +10,15 @@ import { SectionHeading } from './SectionHeading';
  * (룩 API #62 전 1차). 못 받은 상품은 빼고, 하나도 없으면 화보와 전체 보기 링크만 둔다.
  * 구성품 목록 · 함께 담기는 상품 상세 SHOP THE LOOK 과 같은 LookPicker 다.
  */
-export async function LookSection({ section }: { section: LookSectionData }) {
-  const found = await fetchLookProducts(section.productIds);
+export async function LookSection({
+  section,
+  fetchLocale,
+}: {
+  section: LookSectionData;
+  /** 요청 언어(root params)를 읽을 수 없는 서버 액션(메인 미리보기)에서 구성품을 부를 언어 */
+  fetchLocale?: string;
+}) {
+  const found = await fetchLookProducts(section.productIds, fetchLocale);
   const products = section.productIds.flatMap((id) => found.get(id) ?? []);
   const headingId = `${section.id}-title`;
 
