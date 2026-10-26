@@ -123,19 +123,21 @@ public interface HexagonalArchitectureRules {
         .allowEmptyShould(true);
 
     /**
-     * H8. 같은 서비스의 다른 컨텍스트에서 쓸 수 있는 것은 그 컨텍스트의 Processor(Facade 만 주입)와 domain model(Facade · Processor 가 인자로 주고받는다) 둘뿐이다.
-     * domain 은 다른 컨텍스트 domain 을 필드로 갖지 않고 아이디로만 가리킨다. 그 Processor 가 던진 예외({@code application/exception})는 부른 컨텍스트의
-     * {@code adapter/in/*}/exception 의 {@code *ExceptionHandler} 만 받아 자기 코드로 번역한다 — advice 범위가 자기 컨트롤러 패키지라서다.
+     * H8. 같은 서비스의 다른 컨텍스트에서 쓸 수 있는 것은 Processor(Facade 만 주입), domain model(Facade · Processor · {@code adapter/in/event}),
+     * 예외({@code application/exception} 는 부른 컨텍스트의 {@code *ExceptionHandler} 만)다.
+     * domain 은 다른 컨텍스트 domain 을 필드로 갖지 않고 아이디로만 가리킨다. advice 범위가 자기 컨트롤러 패키지라서다.
      * Processor 는 최상위 {@code *Processor} 클래스만이다 — 그 중첩 타입 · processor 패키지의 다른 클래스는 쓰지 않는다(돌려받는 것은 domain model 이다).
+     * {@code adapter/in/event} 는 종료 이벤트의 domain 만 읽고 자기 UseCase 만 부른다 (#213).
      */
     ArchRule CROSS_CONTEXT_DEPENDENCIES_FOLLOW_ALLOW_LIST = classes()
         .that().resideInAPackage(Support.DOMAINLAYER)
         .should(Support.notDependOn(
-            "다른 컨텍스트는 Processor(Facade 에서) · domain model(Facade · Processor 에서) · 예외(ExceptionHandler 에서)만 쓴다",
+            "다른 컨텍스트는 Processor(Facade 에서) · domain model(Facade · Processor · adapter/in/event 에서) · 예외(ExceptionHandler 에서)만 쓴다",
             (origin, target) -> Support.crossContext(origin, target) && !Support.allowedAcrossContexts(origin, target),
             "다른 컨텍스트의 UseCase · Facade · Presenter · Info · Port · Adapter · Mapper · Entity · Repository 를 쓰지 마세요."
                 + " 그 컨텍스트 Processor 의 용도별 메서드를 자기 Facade 에서 부르고, 돌려받은 domain model 만 자기 Processor 에 넘깁니다."
-                + " 그 컨텍스트 예외는 자기 adapter.in.<진입>.exception 의 *ExceptionHandler 에서만 번역합니다"))
+                + " 그 컨텍스트 예외는 자기 adapter.in.<진입>.exception 의 *ExceptionHandler 에서만 번역합니다."
+                + " adapter/in/event 만 다른 컨텍스트 domain(종료 이벤트)을 읽고 자기 UseCase 를 부릅니다."))
         .because("다른 컨텍스트의 포트 · 리포지토리를 직접 부르면 그 컨텍스트의 조회 규칙(숨김 · 정렬 · 캐시)을 비켜 간다 (architecture-guide.md §3 컨텍스트 간 의존 규칙)")
         .allowEmptyShould(true);
 
@@ -297,6 +299,8 @@ public interface HexagonalArchitectureRules {
         static final String APPLICATION_EXCEPTION = "..domainlayer..application.exception..";
         static final String ENTRY_EXCEPTION_HANDLER = "..domainlayer..adapter.in.*.exception..";
         static final String ENTRY_SUPPORT = "..domainlayer..adapter.in.support..";
+        /** 같은 서비스 안 종료 이벤트를 받는 진입 (#213). 다른 컨텍스트 domain 만 읽을 수 있다. */
+        static final String EVENT_ENTRY = "..domainlayer..adapter.in.event..";
         static final String COMMON_DTO = "com.commercefoundry.common.dto..";
         static final String COMMON_DTO_METADATA = "com.commercefoundry.common.dto.metadata..";
         static final String COMMON_RESPONSE = "com.commercefoundry.common.dto.Response";
@@ -391,10 +395,11 @@ public interface HexagonalArchitectureRules {
         /**
          * 다른 컨텍스트의 Processor(최상위 {@code *Processor} 클래스 — 중첩 타입 제외)는 Facade 에서만, domain model 은 Facade · Processor 에서만,
          * 예외({@code application/exception})는 자기 {@code adapter/in/*}/exception 의 {@code *ExceptionHandler}(그 Processor 를 부른 쪽이 번역)에서만 쓴다.
+         * {@code adapter/in/event} 는 다른 컨텍스트 domain(종료 이벤트)만 읽을 수 있다 (#213).
          */
         static boolean allowedAcrossContexts(JavaClass origin, JavaClass target) {
             return isTopLevelProcessor(target) && isFacade(origin)
-                || in(target, DOMAIN) && (isFacade(origin) || isProcessor(origin))
+                || in(target, DOMAIN) && (isFacade(origin) || isProcessor(origin) || in(origin, EVENT_ENTRY))
                 || in(target, APPLICATION_EXCEPTION) && in(origin, ENTRY_EXCEPTION_HANDLER) && topLevelSimpleName(origin).endsWith("ExceptionHandler");
         }
 

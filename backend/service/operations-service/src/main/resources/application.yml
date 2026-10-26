@@ -108,6 +108,15 @@ operations:
     result:
       # 결과 JSON 상한 (UTF-8 바이트, 64KiB). 큰 결과는 결과 파일로 낸다
       max-json-bytes: 65536
+  # 어드민 알림 센터 (#213). 값이 빠지거나 0 · 음수면 기동하지 않는다 (NotificationProperties)
+  notifications:
+    # SSE 연결을 붙잡는 시간. 끊기면 클라이언트는 목록 조회로 따라잡고 다시 연다
+    stream-timeout: 5m
+    retention:
+      initial-delay: 1m
+      fixed-delay: 1h
+      # 이 일수보다 오래된 알림을 지운다
+      days: 90
 
 security:
   jwt:

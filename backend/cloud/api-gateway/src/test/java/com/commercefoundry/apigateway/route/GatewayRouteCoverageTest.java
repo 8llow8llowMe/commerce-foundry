@@ -80,7 +80,8 @@ class GatewayRouteCoverageTest {
         new Sample("/api/v1/shipping-fees", "delivery-service"),
         new Sample("/api/v1/admin/deliveries/1", "delivery-service"),
         new Sample("/api/v1/admin/shipping-policies", "delivery-service"),
-        new Sample("/api/v1/admin/jobs/1", "operations-service")
+        new Sample("/api/v1/admin/jobs/1", "operations-service"),
+        new Sample("/api/v1/admin/notifications/1", "operations-service")
     );
 
     @Autowired
