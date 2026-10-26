@@ -1,0 +1,30 @@
+// commerce-foundry admin 배포 잡. 어드민 콘솔(SSR + BFF). HTTPS 앞단 뒤에 둔다 — 쿠키가 Secure 다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-admin (Script Path: Jenkinsfile-admin)
+// 배포 대상 PR 라벨:                  frontend-admin
+//   develop -> dev  (agent deploy-frontend-dev2)
+//   main    -> prod (agent deploy-frontend-prod)
+// 규칙: frontend/docs/deploy.md (파이프라인 구조 · 게이트는 backend/docs/jenkins-cicd-guide.md 와 같다)
+def frontendPipeline
+node('builder-frontend') {
+    checkout scm
+    frontendPipeline = load 'Jenkinsfile.frontend-common.groovy'
+}
+
+frontendPipeline.run([
+    appName            : 'admin',
+    packageName        : '@cf/admin',
+    fsPath             : 'frontend/apps/admin',
+    dockerfile         : 'admin.Dockerfile',
+    composeFile        : 'docker-compose-admin.yml',
+    composeServiceName : 'admin',
+    containerNamePrefix: 'commerce-admin',
+    deploySubdir       : 'frontend/admin',
+    // 배포 뒤 컨테이너 안에서 200 을 확인하는 SSR 첫 화면
+    smokePath          : '/login',
+    buildAgentLabel    : 'builder-frontend',
+    deployAgentLabels  : [
+        dev : 'deploy-frontend-dev2',
+        prod: 'deploy-frontend-prod'
+    ]
+])

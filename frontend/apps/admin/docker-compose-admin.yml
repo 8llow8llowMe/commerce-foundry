@@ -1,24 +1,39 @@
-# admin 배포 compose — 배포 agent 가 호스트에서 이미지를 만들고 띄운다 (docs/deploy.md).
+# admin 배포 정의 (frontend/docs/deploy.md). 이름 · 포트 키 · 보간 규칙은 백엔드 compose(backend/docs/deploy-guide.md §2~§4)와 같다.
 #
-#   docker compose -f apps/admin/docker-compose-admin.yml -p commerce-admin-dev up -d --build --remove-orphans admin-dev
+# 한 파일에 dev · prod 두 서비스를 두고, 배포 agent 는 환경마다 env 파일과 compose 프로젝트를 갈라 하나만 올린다.
+#   docker compose -p commerce-admin-dev --env-file .env.runtime -f apps/admin/docker-compose-admin.yml \
+#     up -d --build --wait --remove-orphans admin-dev
+# -p 를 빼지 않는다 — 빠지면 디렉터리 이름이 프로젝트가 돼 다른 compose 와 섞이고 --remove-orphans 가 남의 컨테이너를 지울 수 있다.
+# compose 는 파일 전체를 보간하므로 dev 배포에도 _PROD 포트 키가 있어야 한다. 파이프라인이 반대 환경 포트를 '0' 자리값으로 채운다.
 #
-# 아래 변수는 배포 파이프라인이 넣는다. 값(포트 · 네트워크 이름)은 Infra 등록(#197) · 백엔드 compose(#196) 와 맞춰 정한다.
-#   ADMIN_DEV_PORT / ADMIN_PROD_PORT              호스트에 여는 포트
-#   ADMIN_DEV_MEM_LIMIT / ADMIN_PROD_MEM_LIMIT    컨테이너 메모리 상한 (기본 512m)
-#   COMMERCE_DOCKER_NETWORK                     백엔드 게이트웨이와 같은 외부 네트워크 이름 (BFF → 게이트웨이)
-#   RUNTIME_ENV_FILE                            Vault 에서 만든 런타임 env 파일 (기본 .env.runtime, 커밋하지 않는다)
+# 컨테이너 안 포트는 dev · prod 같다(3000). 호스트 포트만 env 로 다르고 값은 #197 에서 정한다.
+# 바인드 주소는 env(ADMIN_BIND_{DEV,PROD})로 받고 기본값은 루프백(닫힌 쪽)이다. 앞단(Nginx · LB)이 닿아야 하는 주소만 연다.
+# 어드민은 NODE_ENV=production 이라 쿠키가 Secure 다 — HTTPS 앞단 없이 http 로 열면 로그인이 안 된다(deploy.md §2).
+#
+# 값은 저장소에 쓰지 않는다. 키 이름은 frontend/.env.example, 실값은 Vault(kv/commerce-foundry/frontend/<env>/env).
+# environment 에는 이 앱이 실제로 읽는 런타임 키만 넘긴다.
 
-x-admin-common: &admin-common
-  image: commerce-admin:${IMAGE_TAG:-latest}
+x-admin-environment: &admin_environment
+  # 같은 네트워크의 게이트웨이(컨테이너 이름 commerce-api-gateway-<env>, 포트 8000). 기본값을 두지 않는다 —
+  # 앱 기본값(localhost)은 컨테이너 안에서 자기 자신이라 모든 BFF 요청이 503 이 된다
+  GATEWAY_URL: ${GATEWAY_URL:?deploy.md 2절}
+  # 클라이언트 IP 를 읽을 헤더. 비면 앱 기본값(x-real-ip)과 같다 — 앞단이 반드시 덮어쓰는 헤더여야 한다(architecture.md §2)
+  CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
+
+x-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+# dev · prod 공통. 서비스마다 다른 것(이미지 태그 · 컨테이너 이름 · 포트 · 메모리)만 아래에서 덮는다
+x-admin-common: &admin_common
   build:
+    # 컨텍스트는 frontend/ 다. admin.Dockerfile.dockerignore 가 standalone · static · public 말고는 보내지 않는다
     context: ../..
     dockerfile: apps/admin/admin.Dockerfile
-  env_file:
-    - ${RUNTIME_ENV_FILE:-.env.runtime}
-  restart: unless-stopped
-  networks:
-    - commerce
-  # 프로세스가 HTTP 를 받는지만 본다. /api/health 는 게이트웨이가 죽으면 503 이라 컨테이너 상태와 섞지 않는다.
+  environment: *admin_environment
+  # 프로세스가 HTTP 를 받는지만 본다. /api/health 는 게이트웨이가 죽으면 503 이라 상태 코드는 보지 않는다(deploy.md §3)
   healthcheck:
     test:
       [
@@ -31,23 +46,34 @@ x-admin-common: &admin-common
     timeout: 5s
     retries: 5
     start_period: 20s
+  # 진행 중인 SSR 응답을 마칠 시간. docker 기본 10초보다 약간 길게 둔다
+  stop_grace_period: 20s
+  restart: unless-stopped
+  logging: *default_logging
+  networks:
+    - commerce
 
 services:
   admin-dev:
-    <<: *admin-common
+    <<: *admin_common
+    # 이미지 이름은 dev · prod 가 같고 환경은 태그로 가른다 — 같은 호스트에서 dev 빌드가 prod 가 쓰는 이미지를 덮지 않게
+    image: commerce-admin:dev
     container_name: commerce-admin-dev
     ports:
-      - '${ADMIN_DEV_PORT}:3000'
-    mem_limit: ${ADMIN_DEV_MEM_LIMIT:-512m}
+      - '${ADMIN_BIND_DEV:-127.0.0.1}:${ADMIN_PORT_DEV:?deploy.md 3절}:3000' # bind:host:container
+    mem_limit: ${ADMIN_MEM_LIMIT_DEV:-512m}
 
   admin-prod:
-    <<: *admin-common
+    <<: *admin_common
+    image: commerce-admin:prod
     container_name: commerce-admin-prod
     ports:
-      - '${ADMIN_PROD_PORT}:3000'
-    mem_limit: ${ADMIN_PROD_MEM_LIMIT:-512m}
+      - '${ADMIN_BIND_PROD:-127.0.0.1}:${ADMIN_PORT_PROD:?deploy.md 3절}:3000' # bind:host:container
+    mem_limit: ${ADMIN_MEM_LIMIT_PROD:-512m}
 
+# 백엔드와 같은 외부 네트워크(COMMERCE_DOCKER_NETWORK, 환경마다 다름). BFF 가 게이트웨이를 컨테이너 이름으로 부른다.
+# 프론트 파이프라인은 네트워크를 만들지 않는다 — 없으면 게이트웨이도 없다는 뜻이라 배포를 멈춘다(deploy.md §3)
 networks:
   commerce:
-    name: ${COMMERCE_DOCKER_NETWORK}
+    name: ${COMMERCE_DOCKER_NETWORK:?deploy.md 3절}
     external: true
