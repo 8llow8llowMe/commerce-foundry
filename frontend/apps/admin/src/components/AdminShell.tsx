@@ -12,6 +12,8 @@ const NAV: NavGroup[] = [
       { label: '상품 목록', href: '/products' },
       { label: '카테고리', href: '/categories' },
       { label: '재고', href: '/stocks' },
+      { label: '사이즈표', href: '/size-charts' },
+      { label: '사이즈표 템플릿', href: '/size-chart-templates' },
     ],
   },
   {
