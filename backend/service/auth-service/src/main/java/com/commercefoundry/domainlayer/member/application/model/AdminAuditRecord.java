@@ -28,6 +28,23 @@ public record AdminAuditRecord(AdminAuditAction action, Long actorMemberId, Stri
     }
 
     /** @param role 역할 조건. 없으면 null(전체) */
+    public static AdminAuditRecord adminCreated(long actorMemberId, long createdMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_CREATE, actorMemberId, member(createdMemberId), succeeded);
+    }
+
+    /** 계정을 만들기 전에 거절된 경우. 이메일 원문은 남기지 않는다. */
+    public static AdminAuditRecord adminCreateRejected(long actorMemberId) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_CREATE, actorMemberId, null, false);
+    }
+
+    public static AdminAuditRecord adminDeactivated(long actorMemberId, long targetMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_DEACTIVATE, actorMemberId, member(targetMemberId), succeeded);
+    }
+
+    public static AdminAuditRecord adminPasswordChanged(long adminMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_PASSWORD_CHANGE, adminMemberId, member(adminMemberId), succeeded);
+    }
+
     public static AdminAuditRecord membersSearched(long adminMemberId, MemberRole role, int page, int size) {
         String target = "members?role=" + (role == null ? "ALL" : role.name()) + "&page=" + page + "&size=" + size;
         return new AdminAuditRecord(AdminAuditAction.MEMBER_SEARCH, adminMemberId, target, true);

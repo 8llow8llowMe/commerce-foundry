@@ -11,6 +11,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
+import java.time.Instant;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -59,6 +60,9 @@ public class MemberEntity extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20, comment = "역할 (CUSTOMER / ADMIN) — access 토큰 role claim 값")
     private MemberRole role;
+
+    @Column(name = "deactivated_at", comment = "관리자 비활성화 시각 (#193). 고객 · 활성 관리자는 null")
+    private Instant deactivatedAt;
 
     @Version
     @Column(name = "version", nullable = false, comment = "낙관적 락 버전")

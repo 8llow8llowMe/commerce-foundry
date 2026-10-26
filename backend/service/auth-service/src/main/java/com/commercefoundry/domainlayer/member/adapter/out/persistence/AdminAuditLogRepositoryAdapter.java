@@ -71,6 +71,23 @@ public class AdminAuditLogRepositoryAdapter implements AdminAuditPort, AdminAudi
         record(AdminAuditRecord.membersSearched(adminMemberId, role, page, size));
     }
 
+    @Override
+    public void adminAccountCreated(long actorMemberId, Long createdMemberId, boolean succeeded) {
+        record(createdMemberId == null
+            ? AdminAuditRecord.adminCreateRejected(actorMemberId)
+            : AdminAuditRecord.adminCreated(actorMemberId, createdMemberId, succeeded));
+    }
+
+    @Override
+    public void adminAccountDeactivated(long actorMemberId, long targetMemberId, boolean succeeded) {
+        record(AdminAuditRecord.adminDeactivated(actorMemberId, targetMemberId, succeeded));
+    }
+
+    @Override
+    public void adminPasswordChanged(long adminMemberId, boolean succeeded) {
+        record(AdminAuditRecord.adminPasswordChanged(adminMemberId, succeeded));
+    }
+
     /** 조건이 켜지고 꺼지므로 QueryDSL 한 쿼리다 — 모두 아이디 내림차순이다. */
     @Override
     public Page<AdminAuditLog> findPage(String action, Long actorMemberId, String target, String result, int page, int size) {

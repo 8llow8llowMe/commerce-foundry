@@ -25,7 +25,7 @@
 
 | 서비스 | 고객 | 어드민 |
 |--------|------|--------|
-| auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**`, `/api/v1/admin/audit-logs/**` |
+| auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**`, `/api/v1/admin/audit-logs/**`, `/api/v1/admin/admins/**`, `/api/v1/admin/me/**` |
 | product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**` |
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
@@ -233,7 +233,10 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/auth/login` | `permitAll()` | 200 토큰 쌍(아래) · `Cache-Control: no-store` — 본문 `{email, password}` | 400 `AUTH_001` · `AUTH_101` · `AUTH_102` · `AUTH_104` · 503 `AUTH_013` |
 | `POST /api/v1/auth/token/reissue` | `permitAll()` | 200 토큰 쌍 · `Cache-Control: no-store` — 본문 `{refreshToken}`. 보낸 refresh 는 회전돼 더 쓰지 않는다 | 401 `AUTH_010`(없음 · 빈 값 포함) · `AUTH_011` · `AUTH_012` · 503 `AUTH_013` |
 | `POST /api/v1/auth/logout` | `isAuthenticated()` | 200 `dataBody: null` — 본문 `{refreshToken?}`(본문 생략 가능). 모르는 · 남의 refresh 여도 access 는 막고 200(멱등) | 401 `SECURITY_001` · 503 `AUTH_013` |
-| `POST /api/v1/auth/admin/login` (#6) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. refresh 없음 | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` |
+| `POST /api/v1/auth/admin/login` (#6) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. refresh 없음. 비활성 관리자도 `AUTH_030` | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` |
+| `POST /api/v1/admin/admins` (#193) | `hasRole('ADMIN')` | 201 `{memberId}` — 본문 `{email, password, name}`. 비밀번호는 응답에 없다. 고객 이메일은 승격하지 않는다 | 400 `AUTH_130` · `AUTH_131` · `AUTH_132` · `AUTH_140`~`144` · 409 `AUTH_002` · 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `PATCH /api/v1/admin/admins/{memberId}` (#193) | `hasRole('ADMIN')` | 200 `dataBody: null` — 활성 관리자를 끈다. 마지막 한 명은 거절. 옛 access 토큰은 게이트웨이 컷오프 | 404 `AUTH_033` · 409 `AUTH_031` · 400 `AUTH_146` · 503 `AUTH_013` |
+| `PATCH /api/v1/admin/me/password` (#193) | `hasRole('ADMIN')` | 200 `dataBody: null` — 본문 `{currentPassword, newPassword}`. 본인만. 바꾼 뒤 다시 로그인 | 400 `AUTH_032` · `AUTH_141` · `AUTH_142` · `AUTH_145` · 503 `AUTH_013` |
 | `GET /api/v1/admin/members` (#6) | `hasRole('ADMIN')` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 | `GET /api/v1/admin/audit-logs` (#192 · #286 · #322) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, actorDisplayName, target, targetDisplayName, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&target=&result=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_136` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 
@@ -271,7 +274,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
 | `AUTH_120~129` | 400 | 배송지 검증 — 별칭 120 · 받는 사람 121 · 연락처 122 · 123(형식) · 국가 124 · 우편번호 125(KR 필수) · 126(형식) · 주소 127 · 길이 128 · 해외 도시 129 |
-| `AUTH_130~139` | 400 | 관리자 · 표시 이름 필드 검증 (#6 · #286 · #322) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132(형식 · 64자 초과는 필드 검증하지 않는다 — `AUTH_030`), 어드민 목록 `page` 0 이상 133 · `size` 1~100 134, 감사 로그 `actorMemberId` 양수 135 · `target` 공백 없이 1~200자 ASCII 136, 회원 표시 이름 벌크 `ids` 필수 137 · 100개 초과 138 · 양수 아님 139 |
+| `AUTH_130~146` | 400 | 관리자 · 표시 이름 · 운영자 계정 필드 검증 (#6 · #286 · #322 · #193) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132, 어드민 목록 `page` 133 · `size` 134, 감사 로그 `actorMemberId` 135 · `target` 136, 표시 이름 `ids` 137 · 100개 138 · 양수 139, 운영자 추가 이메일 형식 140 · 비밀번호 12~64자 141 · 비밀번호 형식 142 · 이름 필수 143 · 이름 길이 144 · 현재 비밀번호 필수 145 · 관리자 아이디 양수 146 |
 | `AUTH_198` · `AUTH_199` | 400 | 파라미터 타입 불일치(`page=x` · 없는 `role`) · 필수 파라미터 누락 |
 
 코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~`, 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.

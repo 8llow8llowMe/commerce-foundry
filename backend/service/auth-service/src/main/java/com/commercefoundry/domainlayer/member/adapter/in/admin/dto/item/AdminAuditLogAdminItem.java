@@ -12,7 +12,9 @@ public record AdminAuditLogAdminItem(
     @Schema(description = "감사 로그 아이디", example = "4611686018427387905")
     String auditLogId,
 
-    @Schema(description = "행위 — 로그 검색 키와 같은 이름", allowableValues = {"ADMIN_LOGIN", "MEMBER_SEARCH"}, example = "ADMIN_LOGIN")
+    @Schema(description = "행위 — 로그 검색 키와 같은 이름", allowableValues = {
+        "ADMIN_LOGIN", "MEMBER_SEARCH", "ADMIN_CREATE", "ADMIN_DEACTIVATE", "ADMIN_PASSWORD_CHANGE"
+    }, example = "ADMIN_LOGIN")
     String action,
 
     @Schema(description = "행위한 관리자 회원 아이디. 로그인 실패처럼 모르면 null", example = "4611686018427387904", nullable = true)

@@ -3,6 +3,7 @@ package com.commercefoundry.apigateway.security;
 import com.commercefoundry.common.log.LogPathMask;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberPrincipal;
+import com.commercefoundry.security.principal.MemberRole;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
@@ -82,8 +83,28 @@ public final class RevocationCheckingAuthenticationManager {
             .timeout(CHECK_TIMEOUT)
             .onErrorResume(failure -> !(failure instanceof AuthenticationException), failure -> onStorageFailure(jti, exchange, failure))
             .flatMap(revoked -> revoked
-                ? Mono.error(new OAuth2AuthenticationException(new OAuth2Error(SecurityErrorCode.TOKEN_REVOKED.getCode())))
-                : Mono.just(authenticated));
+                ? Mono.error(revokedToken())
+                : rejectIfAdminCutoff(authenticated, member, exchange));
+    }
+
+    /** 관리자만 컷오프를 본다 (#193). 고객 요청에 Redis 를 한 번 더 치지 않는다. 발급 시각이 없으면 잘못된 토큰(003)이다. */
+    private Mono<Authentication> rejectIfAdminCutoff(Authentication authenticated, MemberPrincipal member, ServerWebExchange exchange) {
+        if (member.role() != MemberRole.ADMIN) {
+            return Mono.just(authenticated);
+        }
+        if (member.issuedAt() == null) {
+            return Mono.error(new InvalidBearerTokenException("admin access token has no issued-at"));
+        }
+        return revocationChecker.adminAccessCutoff(member.memberId())
+            .timeout(CHECK_TIMEOUT)
+            .map(cutoff -> member.issuedAt().isBefore(cutoff))
+            .defaultIfEmpty(false)
+            .onErrorResume(failure -> !(failure instanceof AuthenticationException), failure -> onStorageFailure(member.tokenId(), exchange, failure))
+            .flatMap(revoked -> revoked ? Mono.error(revokedToken()) : Mono.just(authenticated));
+    }
+
+    private static OAuth2AuthenticationException revokedToken() {
+        return new OAuth2AuthenticationException(new OAuth2Error(SecurityErrorCode.TOKEN_REVOKED.getCode()));
     }
 
     /** 키 규칙에 맞지 않는 jti 는 저장소 장애가 아니라 잘못된 토큰(003)이다 — fail-open 으로 통과시키지 않는다. */

@@ -1,3 +1,4 @@
+
     create schema auth;
 
     create table auth.admin_audit_log (
@@ -36,6 +37,7 @@
         id bigint not null,
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
+        deactivated_at timestamp(6) with time zone,
         email varchar(254) not null,
         name varchar(50) not null,
         password_hash varchar(100) not null,
@@ -58,6 +60,9 @@
 
     comment on column auth.member.updated_at is
         '수정 시각';
+
+    comment on column auth.member.deactivated_at is
+        '관리자 비활성화 시각 (#193). 고객 · 활성 관리자는 null';
 
     comment on column auth.member.email is
         '로그인 이메일 — 앞뒤 공백 제거 + 소문자로 정규화한 값';

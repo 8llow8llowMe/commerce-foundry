@@ -29,6 +29,9 @@ public interface MemberRepositoryPort {
      */
     Optional<Member> findByIdForUpdate(long memberId);
 
+    /** 활성 관리자(역할 ADMIN, 비활성화 시각 없음)를 쓰기 잠금으로 읽는다 (#193). */
+    List<Member> findActiveAdminsForUpdate();
+
     /**
      * 어드민 회원 목록 (#6) — 최신순(아이디 내림차순 — Snowflake 라 생성 순서)으로 한 페이지를 읽는다. 총계는 자르기 전 건수다.
      *

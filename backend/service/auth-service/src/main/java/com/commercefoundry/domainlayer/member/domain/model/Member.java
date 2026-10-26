@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.member.domain.model;
 
 import com.commercefoundry.security.principal.MemberRole;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -20,8 +21,9 @@ import java.util.regex.Pattern;
  * @param passwordHash BCrypt 해시. 원문은 어디에도 두지 않는다 — {@link #toString()} 에도 싣지 않는다
  * @param phone 숫자만({@code 01012345678}). 없으면 null
  * @param version 낙관적 락 버전. 아직 저장하지 않은 회원은 null
+ * @param deactivatedAt 관리자 비활성화 시각 (#193). 고객은 null. null 이면 활성 관리자다
  */
-public record Member(long id, String email, String passwordHash, String name, String phone, MemberRole role, Long version) {
+public record Member(long id, String email, String passwordHash, String name, String phone, MemberRole role, Long version, Instant deactivatedAt) {
 
     public static final int EMAIL_MAX_LENGTH = 254;
     public static final int NAME_MAX_LENGTH = 50;
@@ -39,20 +41,27 @@ public record Member(long id, String email, String passwordHash, String name, St
 
     /** 고객 회원가입. 값을 정규화 · 검증한다. 역할은 언제나 {@link MemberRole#CUSTOMER} 다 — 요청으로 역할을 받지 않는다. */
     public static Member signUp(long id, String email, String passwordHash, String name, String phone) {
-        return new Member(id, normalizeEmail(email), passwordHash, normalizeName(name), normalizePhone(phone), MemberRole.CUSTOMER, null);
+        return new Member(id, normalizeEmail(email), passwordHash, normalizeName(name), normalizePhone(phone), MemberRole.CUSTOMER, null, null);
     }
 
     /**
-     * 관리자 계정 — 초기 관리자 시드(#6)만 쓴다. 이메일 · 이름을 가입과 같은 규칙으로 정규화 · 검증하고, 역할은 언제나 {@link MemberRole#ADMIN},
+     * 관리자 계정 — 초기 시드(#6)와 가게 운영자 추가(#193)가 쓴다. 이메일 · 이름을 가입과 같은 규칙으로 정규화 · 검증하고, 역할은 언제나 {@link MemberRole#ADMIN},
      * 전화번호는 없다(null). 고객 가입({@link #signUp})과 달리 동의 이력을 남기지 않는다 — 관리자는 이용약관 동의 대상이 아니다.
      */
     public static Member admin(long id, String email, String passwordHash, String name) {
-        return new Member(id, normalizeEmail(email), passwordHash, normalizeName(name), null, MemberRole.ADMIN, null);
+        return new Member(id, normalizeEmail(email), passwordHash, normalizeName(name), null, MemberRole.ADMIN, null, null);
     }
 
-    /** 저장된 행을 검증 없이 되살린다 — 영속성 매퍼만 쓴다. 규칙 밖 값(이관 데이터)도 그대로 둔다. */
+    /** 저장된 행을 검증 없이 되살린다 — 영속성 매퍼만 쓴다. 규칙 밖 값(이관 데이터)도 그대로 둔다. 비활성화 시각은 없다. */
     public static Member restore(long id, String email, String passwordHash, String name, String phone, MemberRole role, Long version) {
-        return new Member(id, email, passwordHash, name, phone, role, version);
+        return restore(id, email, passwordHash, name, phone, role, version, null);
+    }
+
+    /** 저장된 행을 검증 없이 되살린다. {@code deactivatedAt} 이 있으면 비활성 관리자다 (#193). */
+    public static Member restore(
+        long id, String email, String passwordHash, String name, String phone, MemberRole role, Long version, Instant deactivatedAt
+    ) {
+        return new Member(id, email, passwordHash, name, phone, role, version, deactivatedAt);
     }
 
     /**
@@ -64,7 +73,26 @@ public record Member(long id, String email, String passwordHash, String name, St
     public Member changeProfile(String newName, String newPhone) {
         String changedName = newName == null ? name : normalizeName(newName);
         String changedPhone = newPhone == null ? phone : normalizePhone(newPhone);
-        return new Member(id, email, passwordHash, changedName, changedPhone, role, version);
+        return new Member(id, email, passwordHash, changedName, changedPhone, role, version, deactivatedAt);
+    }
+
+    /** 비밀번호 해시를 바꾼 회원. 원문은 받지 않는다. */
+    public Member changePassword(String newPasswordHash) {
+        Objects.requireNonNull(newPasswordHash, "passwordHash");
+        return new Member(id, email, newPasswordHash, name, phone, role, version, deactivatedAt);
+    }
+
+    /**
+     * 비활성화한 관리자. 고객에게 부르면 호출 코드의 오류다.
+     *
+     * @throws IllegalArgumentException 관리자가 아니거나 시각이 없다
+     */
+    public Member deactivate(Instant at) {
+        Objects.requireNonNull(at, "deactivatedAt");
+        if (!isAdmin()) {
+            throw new IllegalArgumentException("관리자만 비활성화한다");
+        }
+        return new Member(id, email, passwordHash, name, phone, role, version, at);
     }
 
     /** 고객 로그인 · 토큰 재발급을 쓸 수 있는 계정인가. 관리자 계정은 고객 로그인으로 들어오지 못한다 (#4 결정 4, 관리자 로그인은 #6). */
@@ -75,6 +103,11 @@ public record Member(long id, String email, String passwordHash, String name, St
     /** 관리자 로그인(#6)을 쓸 수 있는 계정인가. 고객 계정은 관리자 로그인으로 들어오지 못한다 — {@link #isCustomer} 의 반대편이다. */
     public boolean isAdmin() {
         return role == MemberRole.ADMIN;
+    }
+
+    /** 관리자 로그인 · 어드민 API 를 아직 쓸 수 있는 계정인가. 비활성화(#193)된 관리자는 아니다. */
+    public boolean isActiveAdmin() {
+        return isAdmin() && deactivatedAt == null;
     }
 
     /**
@@ -127,6 +160,6 @@ public record Member(long id, String email, String passwordHash, String name, St
     /** 비밀번호 해시 · 개인정보(이메일 · 이름 · 전화)를 싣지 않는다 — 로그 · 예외 메시지로 새지 않게 ({@code coding-conventions.md} §8). */
     @Override
     public String toString() {
-        return "Member[id=" + id + ", role=" + role + ", version=" + version + "]";
+        return "Member[id=" + id + ", role=" + role + ", version=" + version + ", deactivatedAt=" + deactivatedAt + "]";
     }
 }

@@ -35,6 +35,12 @@ public enum MemberErrorCode {
      * 코드만 관리자 대역이다 — 어드민 콘솔이 고객 화면과 따로 다룰 수 있게. 어느 이유든 이 코드 하나라 계정 종류는 드러나지 않는다.
      */
     ADMIN_LOGIN_FAILED("AUTH_030", "이메일 또는 비밀번호가 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
+    /** 활성 관리자가 한 명뿐이면 그 계정을 끄지 않는다 (#193). 가게 운영 계정이 0이 되면 어드민에 다시 들어갈 수 없다. */
+    LAST_ACTIVE_ADMIN("AUTH_031", "마지막 관리자는 비활성화할 수 없습니다.", HttpStatus.CONFLICT),
+    /** 로그인한 관리자가 자기 비밀번호를 바꿀 때 현재 비밀번호가 틀린 경우 (#193). */
+    ADMIN_PASSWORD_MISMATCH("AUTH_032", "현재 비밀번호가 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
+    /** 없거나 고객이거나 이미 비활성화된 회원. 어느 쪽인지 나누지 않는다 (#193). */
+    ADMIN_ACCOUNT_NOT_FOUND("AUTH_033", "관리자 계정을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
     INVALID_REQUEST("AUTH_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

@@ -32,4 +32,16 @@ public class AdminAuditProcessor {
     public void membersSearched(long adminMemberId, MemberRole role, int page, int size) {
         adminAuditPort.membersSearched(adminMemberId, role, page, size);
     }
+
+    public void adminAccountCreated(long actorMemberId, Long createdMemberId, boolean succeeded) {
+        adminAuditPort.adminAccountCreated(actorMemberId, createdMemberId, succeeded);
+    }
+
+    public void adminAccountDeactivated(long actorMemberId, long targetMemberId, boolean succeeded) {
+        adminAuditPort.adminAccountDeactivated(actorMemberId, targetMemberId, succeeded);
+    }
+
+    public void adminPasswordChanged(long adminMemberId, boolean succeeded) {
+        adminAuditPort.adminPasswordChanged(adminMemberId, succeeded);
+    }
 }

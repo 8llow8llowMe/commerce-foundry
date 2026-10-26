@@ -237,7 +237,7 @@ class GatewayRateLimitFilterTest {
     }
 
     private static Authentication member() {
-        TestingAuthenticationToken authentication = new TestingAuthenticationToken(new MemberPrincipal(MEMBER_ID, MemberRole.CUSTOMER, "jti-1"), null, "ROLE_CUSTOMER");
+        TestingAuthenticationToken authentication = new TestingAuthenticationToken(new MemberPrincipal(MEMBER_ID, MemberRole.CUSTOMER, "jti-1", null), null, "ROLE_CUSTOMER");
         authentication.setAuthenticated(true);
         return authentication;
     }

@@ -37,7 +37,7 @@ class MemberProfileProcessorTest {
     private static final long MEMBER_ID = 4611686018427387904L;
     private static final AgreementProperties AGREEMENT_PROPERTIES =
         new AgreementProperties(new AgreementProperties.Versions("tos-2026-10", "privacy-2026-10", "marketing-2026-10"));
-    private static final Member MEMBER = new Member(MEMBER_ID, "customer@example.com", "$2a$10$hash", "홍길동", "01012345678", MemberRole.CUSTOMER, 2L);
+    private static final Member MEMBER = new Member(MEMBER_ID, "customer@example.com", "$2a$10$hash", "홍길동", "01012345678", MemberRole.CUSTOMER, 2L, null);
 
     @Mock
     private MemberRepositoryPort memberRepositoryPort;
@@ -105,13 +105,13 @@ class MemberProfileProcessorTest {
         void savesChangedProfile() {
             given(memberRepositoryPort.save(any())).willAnswer(invocation -> {
                 Member saved = invocation.getArgument(0);
-                return new Member(saved.id(), saved.email(), saved.passwordHash(), saved.name(), saved.phone(), saved.role(), saved.version() + 1);
+                return new Member(saved.id(), saved.email(), saved.passwordHash(), saved.name(), saved.phone(), saved.role(), saved.version() + 1, saved.deactivatedAt());
             });
             given(memberAgreementRepositoryPort.findLatest(MEMBER_ID, AgreementType.MARKETING)).willReturn(Optional.of(marketing(false)));
 
             MemberProfileInfo info = processor.updateProfile(MEMBER_ID, new MemberProfileUpdateCommand("김철수", "", null));
 
-            verify(memberRepositoryPort).save(new Member(MEMBER_ID, "customer@example.com", "$2a$10$hash", "김철수", null, MemberRole.CUSTOMER, 2L));
+            verify(memberRepositoryPort).save(new Member(MEMBER_ID, "customer@example.com", "$2a$10$hash", "김철수", null, MemberRole.CUSTOMER, 2L, null));
             assertThat(info).isEqualTo(new MemberProfileInfo(MEMBER_ID, "customer@example.com", "김철수", null, false));
             verify(memberAgreementRepositoryPort, never()).appendAll(any());
         }

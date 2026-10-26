@@ -1,5 +1,6 @@
 package com.commercefoundry.apigateway.security;
 
+import java.time.Instant;
 import reactor.core.publisher.Mono;
 
 /**
@@ -13,4 +14,12 @@ public interface AccessTokenRevocationChecker {
 
     /** @param jti access 토큰의 {@code jti}. 차단돼 있으면 {@code true}. */
     Mono<Boolean> isRevoked(String jti);
+
+    /**
+     * 관리자 access 컷오프 (#193). 키가 없으면 empty. 토큰 {@code iat} 가 이 시각보다 이르면 차단한다.
+     * 기본은 컷오프 없음 — 로그아웃 차단만 보는 스텁이 그대로 컴파일되게.
+     */
+    default Mono<Instant> adminAccessCutoff(long memberId) {
+        return Mono.empty();
+    }
 }

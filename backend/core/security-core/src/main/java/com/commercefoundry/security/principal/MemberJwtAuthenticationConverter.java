@@ -29,7 +29,7 @@ public final class MemberJwtAuthenticationConverter implements Converter<Jwt, Ab
         try {
             long memberId = Long.parseLong(jwt.getSubject());
             MemberRole role = MemberRole.fromClaim(jwt.getClaimAsString(MemberRole.CLAIM_NAME));
-            return new MemberPrincipal(memberId, role, jwt.getId());
+            return new MemberPrincipal(memberId, role, jwt.getId(), jwt.getIssuedAt());
         } catch (IllegalArgumentException invalid) {
             throw new InvalidBearerTokenException("access token claims are malformed");
         }
