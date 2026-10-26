@@ -8,7 +8,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.commercefoundry.ai.client.AiException.Reason;
 import com.commercefoundry.ai.properties.AiProperties;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -212,7 +215,7 @@ class ClaudeAiClientTest {
         AiRequest request = new AiRequest("size-chart", SECRET_PROMPT, SECRET_PROMPT, List.of("Hong Gildong"));
         AiResult result = new AiResult(SECRET_RESPONSE, "m", 1, 1, "end_turn", "id");
 
-        assertThat(request.toString()).doesNotContain(SECRET_PROMPT).doesNotContain("Hong Gildong");
+        assertThat(request.toString()).doesNotContain(SECRET_PROMPT).doesNotContain("Hong Gildong").contains("images=0");
         assertThat(result.toString()).doesNotContain(SECRET_RESPONSE);
         assertThat(new AiException(Reason.REJECTED, "size-chart", 400, "invalid_request_error").getMessage()).doesNotContain(SECRET_PROMPT);
     }
@@ -223,6 +226,37 @@ class ClaudeAiClientTest {
         AiClient client = AiClients.create(new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
 
         assertFailure(() -> client.complete(AiRequest.of("size-chart", null, "prompt")), Reason.DISABLED, null);
+        assertThat(server.received()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("이미지는 base64 블록으로 텍스트보다 앞에 실리고, 텍스트의 개인정보는 그대로 가려진다. 로그와 toString 에는 바이트가 없다")
+    void sendsImageWithoutLeakingBytes(CapturedOutput output) {
+        server.reply(ok("ok", "end_turn"));
+        byte[] bytes = "ImageLeakProbe".getBytes(StandardCharsets.UTF_8);
+        String encoded = Base64.getEncoder().encodeToString(bytes);
+        AiRequest request = new AiRequest("size-chart", null, "연락처 010-1234-5678", List.of())
+            .withImages(List.of(new AiImage(AiImage.JPEG, bytes)));
+
+        client(properties(Map.of(), 0, 4, false)).complete(request);
+
+        String body = server.received().getFirst().body();
+        assertThat(body).contains("\"type\":\"image\"").contains("image/jpeg").contains(encoded).contains("[PHONE]").doesNotContain("010-1234-5678");
+        assertThat(body.indexOf("image/jpeg")).isLessThan(body.indexOf("[PHONE]"));
+        assertThat(request.toString()).doesNotContain(encoded).contains("images=1");
+        assertThat(output.getAll()).contains("imageCount=1").doesNotContain(encoded).doesNotContain("ImageLeakProbe");
+    }
+
+    @Test
+    @DisplayName("이미지가 장수 상한을 넘으면 INPUT_TOO_LONG 이고 호출하지 않는다")
+    void rejectsTooManyImages() {
+        List<AiImage> images = new ArrayList<>();
+        for (int i = 0; i <= AiImage.MAX_COUNT; i++) {
+            images.add(new AiImage(AiImage.PNG, new byte[] {1, 2, 3}));
+        }
+
+        assertFailure(() -> client(properties(Map.of(), 0, 4, false)).complete(AiRequest.of("size-chart", null, "prompt").withImages(images)),
+            Reason.INPUT_TOO_LONG, null);
         assertThat(server.received()).isEmpty();
     }
 
