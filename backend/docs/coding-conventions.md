@@ -427,7 +427,7 @@ public final class ProductValidationMessage {
 |------|-----|
 | refresh 토큰 | refresh 토큰 TTL 과 같게 (`security.jwt.issuance.refresh-token-ttl`) |
 | access 토큰 차단 목록(로그아웃) | 토큰의 남은 수명(`exp − now`) + 시계 오차 허용(`security.jwt.clock-skew`) 이상. 로그아웃 시점엔 `exp` 를 모르므로 **수명 상한(`JwtIssuanceProperties.MAX_ACCESS_TOKEN_TTL`, 1시간) + 시계 오차**를 쓴다(`RevokedAccessTokenKeys.ttl`) — `access-token-ttl` 설정값을 쓰면 TTL 을 줄인 배포 직후 옛 긴 토큰보다 차단 항목이 먼저 사라진다 |
-| 소셜 로그인 state | 짧게(분 단위). 꺼낼 때 `GETDEL` 로 한 번만 쓴다 |
+| 소셜 로그인 state | 짧게(분 단위). provider · 브라우저 verifier 해시 일치 검증과 삭제를 Lua 로 원자 실행해 한 번만 쓴다. 불일치는 삭제하지 않는다 |
 | 로그인 · 가입 시도 계수 | 창 길이(`auth.login-guard.window`, 기본 15분). 첫 시도부터 재고 이어지는 시도가 연장하지 않는다. 상한 1시간(`LoginAttemptPolicy.MAX_WINDOW`) — 이메일을 바꿔 가며 보내면 키 수 ≈ 처리량 × 창이고, noeviction 이라 메모리가 차면 refresh · 차단 목록 쓰기까지 실패한다 |
 | 멱등 키 | 클라이언트 재시도 창보다 길게. 처리 중 마커는 최대 처리 시간보다 길게 |
 | 캐시 | 짧게. 원본을 쓸 때 무효화한다 |

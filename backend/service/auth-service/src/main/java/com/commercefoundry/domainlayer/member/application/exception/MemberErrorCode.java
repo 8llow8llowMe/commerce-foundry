@@ -43,6 +43,15 @@ public enum MemberErrorCode {
     ADMIN_ACCOUNT_NOT_FOUND("AUTH_033", "관리자 계정을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
+    SOCIAL_PROVIDER_UNSUPPORTED("AUTH_050", "지원하지 않는 소셜 로그인 제공자입니다.", HttpStatus.BAD_REQUEST),
+    SOCIAL_DISABLED("AUTH_051", "소셜 로그인을 사용할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
+    SOCIAL_STATE_INVALID("AUTH_052", "소셜 로그인 요청이 만료되었거나 올바르지 않습니다. 다시 시작해 주세요.", HttpStatus.BAD_REQUEST),
+    SOCIAL_CODE_INVALID("AUTH_053", "소셜 인가 코드가 올바르지 않습니다. 다시 시작해 주세요.", HttpStatus.BAD_REQUEST),
+    SOCIAL_PROVIDER_UNAVAILABLE("AUTH_054", "소셜 로그인 제공자에 연결할 수 없습니다. 잠시 후 다시 시작해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    SOCIAL_EMAIL_REQUIRED("AUTH_055", "가입에 사용할 수 있는 소셜 이메일이 필요합니다.", HttpStatus.BAD_REQUEST),
+    SOCIAL_AGREEMENTS_REQUIRED("AUTH_056", "신규 가입에는 필수 약관 동의가 필요합니다.", HttpStatus.BAD_REQUEST),
+    SOCIAL_IDENTITY_CONFLICT("AUTH_057", "소셜 계정 등록이 다른 요청과 겹쳤습니다. 다시 시작해 주세요.", HttpStatus.CONFLICT),
+
     INVALID_REQUEST("AUTH_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_TYPE_INVALID("AUTH_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_REQUIRED("AUTH_199", "필수 요청 파라미터가 없습니다.", HttpStatus.BAD_REQUEST);

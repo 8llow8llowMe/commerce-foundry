@@ -1027,3 +1027,25 @@ eureka:
 | service-discovery | `DiscoverySecurityTest` (실제 포트 HTTP) | 무자격 조회 401 + `WWW-Authenticate: Basic` · 무자격 / 틀린 비밀번호 / 다른 사용자 등록 401 이고 레지스트리에 없음 · 올바른 자격 증명 등록 204 · 조회 200 · health 익명 UP · 다른 actuator 401 · 대시보드 익명 401 · 인증해도 기본 꺼짐 404 |
 | service-discovery | `DiscoveryPasswordStartupGuardTest` | hex 64자 통과 · 없음 · 공백 · 풀리지 않은 플레이스홀더 · 31자 · `:` `@` `%3A` 공백 포함 시 기동 실패, 메시지에 값 없음 |
 | service-discovery | `EurekaClientCredentialTest` | 클라이언트가 `http://eureka:<비밀번호>@localhost:<port>/eureka/` userinfo 를 Basic 으로 실어 등록한다 · 틀린 비밀번호는 Basic 으로 실려도 등록되지 않는다 · userinfo 에 `:` 가 더 있으면 등록되지 않고 클라이언트가 뜨지 않는다 · 연결 거부 로그에 비밀번호가 없다(`RedirectingEurekaHttpClient` ERROR, 7개 모듈 yml 과 같은 설정) |
+
+## 13. 소셜 고객 로그인 (#5)
+
+인가 코드는 auth-service가 Kakao/Naver 공식 REST API에 교환한다. 외부 HTTP와 BCrypt는 DB 트랜잭션 밖이다.
+고정 HTTPS endpoints에만 접속하고 redirect를 따르지 않으며 connect/request timeout과 제공자별 kakao/naver 서킷을 적용한다.
+4xx(429 제외)는 인가 거절로 분류하고 서킷 실패로 세지 않는다. provider 토큰/본문/HTTP 예외 원문은 저장하거나 로그에 남기지 않는다.
+
+state와 별도 verifier는 각각 SecureRandom 256비트다. Redis 키에는 state SHA-256 지문을, 값에는 provider와 verifier SHA-256 지문을 둔다.
+저장 SET NX와 TTL(기본 5분)은 같은 명령이며, Lua가 provider/verifier 일치 검증과 삭제를 원자 수행한다.
+틀린 verifier/provider는 state를 삭제하지 않는다. 일치 후 실패한 흐름도 재사용할 수 없으며 인가를 다시 시작한다.
+FE는 verifier를 같은 탭 sessionStorage에만 보관하고 제공자 인가 URL에는 보내지 않는다.
+이는 OAuth PKCE를 대체하는 provider 파라미터가 아니라 이 애플리케이션의 브라우저 바인딩 비밀이다.
+
+social_identity(provider, subject) 유니크 제약으로 계정을 식별한다. 이메일은 기존 계정 연결 근거가 아니며 충돌은 409다.
+Kakao 이메일 신뢰 플래그 두 가지가 true인 경우에만 신규 가입하며 Naver는 email_verified가 없으므로 id 중심으로 처리한다.
+기존 identity는 이메일이 바뀌거나 없어도 CUSTOMER 역할을 확인해 로그인하며 저장된 이메일을 덮어쓰지 않는다.
+신규 회원·identity·약관 이력은 한 트랜잭션이다. 경합 실패 트랜잭션이 끝난 뒤 동일 provider/subject만 다시 찾아 로그인한다.
+Member의 비밀번호 필수 구조는 유지하되 임의 256비트 비밀의 BCrypt 해시만 저장한다.
+현재 비밀번호 재설정 API는 없다. 향후 재설정/계정 연결 도입 시 소셜 계정의 이메일만으로 인증수단이 전환되지 않도록 별도 검토한다.
+
+공식 계약: [Kakao REST API](https://developers.kakao.com/docs/ko/kakaologin/rest-api),
+[Naver 로그인 API](https://developers.naver.com/docs/login/api/api.md).

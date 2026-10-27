@@ -48,6 +48,9 @@ public final class MemberValidationMessage {
     public static final String ADMIN_ACCOUNT_NAME_LENGTH = "AUTH_144:이름은 1자 이상 50자 이하여야 합니다.";
     public static final String ADMIN_ACCOUNT_CURRENT_PASSWORD_REQUIRED = "AUTH_145:현재 비밀번호는 필수입니다.";
     public static final String ADMIN_ACCOUNT_ID_POSITIVE = "AUTH_146:관리자 아이디는 양수여야 합니다.";
+    public static final String SOCIAL_CODE_INVALID = "AUTH_150:인가 코드가 올바르지 않습니다.";
+    public static final String SOCIAL_STATE_INVALID = "AUTH_151:state가 올바르지 않습니다.";
+    public static final String SOCIAL_VERIFIER_INVALID = "AUTH_152:verifier가 올바르지 않습니다.";
 
     private MemberValidationMessage() {
     }

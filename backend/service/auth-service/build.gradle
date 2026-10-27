@@ -8,6 +8,7 @@ dependencies {
     implementation project(':core:shared-commerce')
 
     // security-core 는 서블릿 · Boot 보안 자동설정을 compileOnly 로만 둔다 — 서블릿 서비스가 직접 선언한다 (security-guide.md §5-3)
+    implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'

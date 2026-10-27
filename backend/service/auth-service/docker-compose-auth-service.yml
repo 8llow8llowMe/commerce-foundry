@@ -43,6 +43,16 @@ x-auth-service-environment: &auth_service_environment
   ADMIN_SEED_NAME: ${ADMIN_SEED_NAME:-}
   # auth.login-guard.enabled 를 켤 때만 필수다(기본 꺼짐)
   AUTH_LOGIN_GUARD_HASH_KEY: ${AUTH_LOGIN_GUARD_HASH_KEY:-}
+  # 소셜 로그인은 기본 꺼짐. 켠 제공자의 자격 증명/redirect URI는 auth 기동 가드가 필수 검증한다.
+  AUTH_SOCIAL_ENABLED: ${AUTH_SOCIAL_ENABLED:-false}
+  KAKAO_LOGIN_ENABLED: ${KAKAO_LOGIN_ENABLED:-false}
+  KAKAO_CLIENT_ID: ${KAKAO_CLIENT_ID:-}
+  KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
+  KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:-}
+  NAVER_LOGIN_ENABLED: ${NAVER_LOGIN_ENABLED:-false}
+  NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+  NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+  NAVER_REDIRECT_URI: ${NAVER_REDIRECT_URI:-}
   # 서비스 간 토큰 비밀(서비스 5종 같은 값, 게이트웨이 제외). 이전 비밀은 교체 중에만 채운다
   INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:?deploy-guide.md 4절}
   INTERNAL_JWT_SECRET_PREVIOUS: ${INTERNAL_JWT_SECRET_PREVIOUS:-}

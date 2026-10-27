@@ -183,17 +183,52 @@
     comment on column auth.shipping_address.version is
         '낙관적 락 버전';
 
-    create index idx_admin_audit_log_action_id 
+    create table auth.social_identity (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        member_id bigint not null,
+        provider varchar(20) not null check ((provider in ('KAKAO','NAVER'))),
+        subject varchar(255) not null,
+        primary key (id),
+        constraint uk_social_identity_provider_subject unique (provider, subject)
+    );
+
+    comment on table auth.social_identity is
+        '소셜 로그인 식별자 — 이메일 자동 연결 금지';
+
+    comment on column auth.social_identity.id is
+        '소셜 식별자 아이디 (Snowflake)';
+
+    comment on column auth.social_identity.created_at is
+        '생성 시각';
+
+    comment on column auth.social_identity.updated_at is
+        '수정 시각';
+
+    comment on column auth.social_identity.member_id is
+        '회원 아이디 (FK: member.id)';
+
+    comment on column auth.social_identity.provider is
+        '소셜 제공자 (KAKAO / NAVER)';
+
+    comment on column auth.social_identity.subject is
+        '제공자가 발급한 사용자 식별자';
+
+    create index idx_admin_audit_log_action_id
        on auth.admin_audit_log (action, id);
 
-    create index idx_admin_audit_log_actor_member_id_id 
+    create index idx_admin_audit_log_actor_member_id_id
        on auth.admin_audit_log (actor_member_id, id);
 
-    create index idx_admin_audit_log_target_id 
+    create index idx_admin_audit_log_target_id
        on auth.admin_audit_log (target, id);
 
-    create index idx_member_agreement_member_id_agreement_type 
+    create index idx_member_agreement_member_id_agreement_type
        on auth.member_agreement (member_id, agreement_type);
 
-    create index idx_shipping_address_member_id 
+    create index idx_shipping_address_member_id
        on auth.shipping_address (member_id);
+
+    create index idx_social_identity_member_id
+       on auth.social_identity (member_id);

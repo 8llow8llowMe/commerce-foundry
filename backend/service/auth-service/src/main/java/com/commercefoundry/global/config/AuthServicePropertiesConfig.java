@@ -29,6 +29,7 @@ import org.springframework.context.annotation.Import;
     AgreementProperties.class,
     AuthLoginGuardProperties.class,
     AuthTokenProperties.class,
+    com.commercefoundry.global.properties.SocialLoginProperties.class,
     ShippingAddressProperties.class
 })
 public class AuthServicePropertiesConfig {
