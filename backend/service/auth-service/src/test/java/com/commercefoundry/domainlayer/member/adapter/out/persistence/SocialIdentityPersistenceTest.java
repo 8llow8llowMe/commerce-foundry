@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.member.application.exception.*;
 import com.commercefoundry.domainlayer.member.application.port.out.SocialIdentityRepositoryPort;
 import com.commercefoundry.domainlayer.member.domain.model.SocialProvider;
 import com.commercefoundry.global.config.AuthServiceFeaturesConfig;
+import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,7 +25,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.jpa.properties.hibernate.default_schema=auth",
     "spring.cloud.discovery.enabled=false", "eureka.client.enabled=false"})
-@Import({AuthServiceFeaturesConfig.class, SocialIdentityRepositoryAdapter.class})
+@Import({AuthServiceFeaturesConfig.class, QuerydslConfigurer.class, SocialIdentityRepositoryAdapter.class})
 class SocialIdentityPersistenceTest {
     @Container
     @ServiceConnection
