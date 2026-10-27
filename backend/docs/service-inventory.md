@@ -192,3 +192,11 @@ prod 데이터를 복사해 쓰지 않는다(개인정보) — 필요하면 마�
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
 | 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |
 | 서비스 간 인증 2단계 | 서비스별 RS256 키 / 플랫폼 mTLS — 1단계(공용 HS256, #51)의 호출자 "선언" 을 "증명" 으로 바꾼다 (`security-guide.md` §9-9) | 배포 환경 결정 후 |
+
+### 소셜 로그인 구현 범위 (#5)
+
+auth-service가 고객 Kakao/Naver 소셜 인가 URL 발급과 code 교환 로그인을 제공한다
+(GET /api/v1/auth/oauth/{provider}/authorize-url · POST /api/v1/auth/oauth/{provider}/login).
+auth.social_identity 테이블과 auth:oauth-state:{SHA-256 지문} Redis 키를 소유한다.
+회원/identity/약관 신규 저장은 원자적이며 이메일 자동 연결은 제공하지 않는다.
+전체 및 제공자 플래그는 기본 false이며 활성화·Vault 키·배포 compose 규칙은 deploy-guide.md 소셜 로그인 절을 따른다.

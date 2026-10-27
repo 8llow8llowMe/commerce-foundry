@@ -726,3 +726,41 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 - `@Tag` 는 고객/어드민을 나눠 단다: `@Tag(name = "상품")`, `@Tag(name = "[어드민] 상품 관리")`.
 - 사유 코드처럼 문자열로 내리는 enum 값은 `@Schema(allowableValues = {...})` 로 허용값을 밝힌다.
+
+## 소셜 로그인 계약 (#5)
+
+고객 공개 API이며 provider는 kakao 또는 naver다. 두 응답 모두 Cache-Control: no-store다.
+
+| 메서드 · 경로 | 입력 | 응답 dataBody |
+|---|---|---|
+| GET /api/v1/auth/oauth/{provider}/authorize-url | provider | authorizeUrl · state · verifier |
+| POST /api/v1/auth/oauth/{provider}/login | code · state · verifier · agreements(신규 가입만 필수) | 기존 AuthTokenResponse와 같은 accessToken · accessTokenExpiresIn · refreshToken · refreshTokenExpiresIn |
+
+FE는 응답 state/verifier를 같은 탭 sessionStorage에 보관한 뒤 authorizeUrl로 이동한다.
+콜백의 state와 보관한 state가 일치하는지 먼저 확인하고 code/state/verifier를 서버로 보낸다.
+verifier는 인가 URL·쿼리·로그에 넣지 않는다. 완료/실패/거절 후 sessionStorage 값을 지운다.
+state는 기본 5분이고 provider와 verifier가 모두 일치할 때만 원자 소비된다. 불일치는 소비하지 않는다.
+소비 후 provider 오류·약관 누락·이메일 충돌·토큰 저장 장애 등이 나면 인가 URL부터 새로 시작한다.
+
+최초 가입의 agreements는 기존 일반 가입과 같은 termsOfService=true · privacyPolicy=true · marketing=true/false다.
+기존 identity 로그인은 agreements를 생략할 수 있다. provider+subject로만 식별하며 기존 이메일은 변경하지 않는다.
+같은 이메일인 일반/관리자/다른 소셜 계정에는 자동 연결하지 않고 409 AUTH_002를 반환한다.
+Kakao 신규 가입 이메일은 is_email_valid와 is_email_verified가 모두 true여야 한다.
+Naver는 공식 email_verified 필드가 없으며 id로 식별하고 신규 가입에 email이 없으면 거절한다.
+휴대폰은 자동 수집하지 않는다. 신규 비밀번호는 추측할 수 없는 임의 비밀의 BCrypt 해시만 저장하며 사용자에게 발급하지 않는다.
+
+| 오류 | HTTP | 의미 |
+|---|---|---|
+| AUTH_050 | 400 | 지원하지 않는 provider |
+| AUTH_051 | 503 | 전체 또는 해당 제공자 비활성화 |
+| AUTH_052 | 400 | state 만료·재사용·provider/verifier 불일치 |
+| AUTH_053 | 400 | 제공자 인가 코드 거절 |
+| AUTH_054 | 503 | 제공자 timeout·서킷 열림·응답 계약 오류 |
+| AUTH_055 | 400 | 신규 가입에 사용할 수 있는 이메일 없음 |
+| AUTH_056 | 400 | 신규 가입 필수 약관 없음 |
+| AUTH_057 | 409 | 동일 identity 등록 경합 뒤 일치 계정을 찾지 못함 |
+| AUTH_150/151/152 | 400 | code/state/verifier 요청 필드 검증 |
+| AUTH_111/112/113 | 400 | 기존 약관 동의 요청 검증 |
+
+FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가하고 재시작 오류를 안내한다.
+인증 계약 변경이므로 PR에 FE 리뷰어 seonghoho를 요청한다.

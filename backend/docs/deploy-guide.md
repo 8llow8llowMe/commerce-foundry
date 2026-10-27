@@ -96,6 +96,9 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 | `ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` | O | `:-` 빈 값 | | | O | | | | |
 | `ADMIN_SEED_NAME` | - | `:-` 빈 값 | | | O | | | | |
 | `AUTH_LOGIN_GUARD_HASH_KEY` | O | `:-` 빈 값 | | | O | | | | |
+| `AUTH_SOCIAL_ENABLED` · `KAKAO_LOGIN_ENABLED` · `NAVER_LOGIN_ENABLED` | - | `:-false` | | | O | | | | |
+| `KAKAO_CLIENT_ID` · `NAVER_CLIENT_ID` · `KAKAO_REDIRECT_URI` · `NAVER_REDIRECT_URI` | - | `:-` 빈 값 | | | O | | | | |
+| `KAKAO_CLIENT_SECRET` · `NAVER_CLIENT_SECRET` | O | `:-` 빈 값 | | | O | | | | |
 | `STORE_FEATURES_CUSTOM_ORDER` · `STORE_FEATURES_PREORDER` · `STORE_FEATURES_PRODUCT_VIDEO` | - | `:-false` | | | | O | | | |
 | `STORE_FEATURES_INTERNATIONAL_SHIPPING` | - | `:-false` | | | | | | | O |
 | `TIME_ZONE` | - | `:-UTC` | O | O | O | O | O | O | O |
@@ -128,7 +131,7 @@ compose 가 env 파일과 무관하게 고정하는 값:
   영문 · 숫자 · `. _ ~ -` 밖의 문자가 있거나 32자 미만이면 Eureka 가 뜨지 않는다(`security-guide.md` §12).
 - `GATEWAY_CORS_ALLOWED_ORIGINS` 는 비어도 뜨지만 어떤 origin 도 허용하지 않는다(닫힌 기본값). 배포 환경은 프론트 origin 을 채운다.
 - `STORE_FEATURES_*` 는 dev 프로파일 yml 이 `true` 로 덮어 dev 에서는 env 를 읽지 않는다.
-- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `KAKAO_*` · `NAVER_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `MESSAGING_ENABLED` · `KAFKA_*`(§4-4))는 compose 에 넘기지 않는다.
+- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `MESSAGING_ENABLED` · `KAFKA_*`(§4-4))는 compose 에 넘기지 않는다.
   `STORAGE_PUBLIC_BASE_URL` 은 product-service 가 메인 전시 미디어 주소 판정에 읽는다(#63, `:-` 빈 값 — 비면 미디어 쓰기만 503).
   해당 기능이 yml(또는 `storage.*` 같은 relaxed binding)로 키를 읽기 시작하는 PR 에서 그 모듈 compose 의 `environment` 에 같이 더한다(§8).
   `KAFKA_PORT` 는 로컬 compose(`docker-compose-local.yml`) 전용이라 배포 compose 에 넘기지 않는다.
@@ -285,3 +288,12 @@ docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) �
 
 - `app.jar` 는 `.gitignore` 대상이다(`backend/**/app.jar`). 확인이 끝나면 지운다.
 - 정리: `docker compose -p commerce-<module>-dev -f <compose> down` (모듈마다).
+
+### 소셜 로그인 활성화 (#5)
+
+auth 배포 compose만 소셜 키를 전달한다. 기본은 전체/제공자 플래그 모두 false다.
+Vault에 활성 제공자의 CLIENT_ID · CLIENT_SECRET과 고정 REDIRECT_URI를 준비한 뒤 AUTH_SOCIAL_ENABLED와 해당 LOGIN_ENABLED를 함께 켠다.
+활성 제공자의 값이 비었거나 미해결 플레이스홀더, 허용하지 않는 redirect URI이면 auth가 기동하지 않는다.
+redirect URI는 제공자 콘솔과 정확히 일치해야 한다. HTTPS가 기본이며 로컬 개발만 loopback HTTP를 허용한다.
+Kakao는 콘솔에서 Client Secret 사용을 활성화해야 한다. 클라이언트 비밀은 auth에만 전달하며 FE에는 전달하지 않는다.
+운영 적용 전에 PR의 Hibernate 생성 DDL 중 auth.social_identity 테이블·제약·인덱스를 적용한다. 기본 ddl-auto=none이므로 자동 생성되지 않는다.

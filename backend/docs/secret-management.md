@@ -92,3 +92,11 @@
    서비스 토큰 비밀은 새 값으로 바꾸고 `INTERNAL_JWT_SECRET_PREVIOUS` 를 비운 채 서비스 전부를 바로 재기동한다 (`security-guide.md` §9-7).
 2. Vault 값을 갱신하고 서비스를 재기동한다.
 3. 커밋 히스토리 정리는 그다음이다. public 저장소에 한 번 올라간 값은 지워도 **이미 공개된 것으로 본다.**
+
+### 소셜 로그인 자격 증명 (#5)
+
+KAKAO_CLIENT_SECRET · NAVER_CLIENT_SECRET은 Vault에서 auth-service에만 주입한다.
+CLIENT_ID · REDIRECT_URI도 환경마다 Vault 배포 설정으로 관리하며 .env.example에는 키 이름과 빈 값만 둔다.
+AUTH_SOCIAL_ENABLED 및 제공자 LOGIN_ENABLED는 기본 false다. 켠 제공자는 ID · secret · 고정 redirect URI가 모두 있어야 기동한다.
+provider access/refresh 토큰, 인가 code, state, verifier는 DB/로그/감사로그에 저장하지 않는다.
+Redis에는 state SHA-256 지문과 provider/verifier SHA-256 바인딩만 5분 동안 둔다.
