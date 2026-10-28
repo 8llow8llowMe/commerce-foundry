@@ -215,18 +215,23 @@ class LoginAttemptRedisAdapterTest {
     }
 
     @Test
-    @DisplayName("Redis 에 이메일 원문이 남지 않는다 — 키는 auth:login-attempt:{22자 HMAC} 이다")
+    @DisplayName("모든 시도 키는 종류별 접두사와 22자 HMAC 이고 이메일 원문이 남지 않는다")
     void storedKeyHasNoRawEmail() {
         String email = email();
         adapter.record(AttemptKind.LOGIN, email, WINDOW);
         adapter.record(AttemptKind.SIGN_UP, email, WINDOW);
+        adapter.record(AttemptKind.ADMIN_LOGIN, email, WINDOW);
+        String clientSubject = "AbCdEfGhIjKlMnOpQrStUw";
+        adapter.record(AttemptKind.SIGN_UP_IP, clientSubject, WINDOW);
 
         Set<String> keys = redisTemplate.keys("auth:*-attempt:*");
         String localPart = email.substring(0, email.indexOf('@'));
 
-        assertThat(keys).contains(loginKey(email), signUpKey(email));
+        assertThat(keys).contains(
+            loginKey(email), signUpKey(email), "auth:admin-login-attempt:" + hasher.hash(email), "auth:sign-up-ip-attempt:" + clientSubject
+        );
         assertThat(keys).allSatisfy(key -> assertThat(key)
-            .matches("auth:(login|sign-up)-attempt:[A-Za-z0-9_-]{22}")
+            .matches("auth:(login|admin-login|sign-up|sign-up-ip)-attempt:[A-Za-z0-9_-]{22}")
             .doesNotContain("@", localPart, "example"));
     }
 
