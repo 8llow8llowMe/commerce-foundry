@@ -181,7 +181,7 @@ class ProductWebFeatureFlagControllerTest {
     }
 
     private void givenFeatures(boolean customOrder, boolean preorder, boolean productVideo) {
-        given(storeProperties.features()).willReturn(new StoreProperties.Features(customOrder, preorder, productVideo));
+        given(storeProperties.features()).willReturn(new StoreProperties.Features(customOrder, preorder, productVideo, false));
     }
 
     private void givenListRows(ProductListQueryResult... rows) {

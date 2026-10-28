@@ -77,9 +77,10 @@ class ProductServiceApplicationTests {
     }
 
     @Test
-    @DisplayName("store.* 가 StoreProperties 로 바인딩된다 — test 프로파일은 맞춤 제작을 켠다")
+    @DisplayName("store.* 가 StoreProperties 로 바인딩된다 — test 프로파일은 맞춤 제작 · 룩을 켠다")
     void storePropertiesBound() {
         assertThat(applicationContext.getBean(StoreProperties.class).features().customOrder()).isTrue();
+        assertThat(applicationContext.getBean(StoreProperties.class).features().looks()).isTrue();
     }
 
     @Test

@@ -359,6 +359,7 @@ store:
     custom-order: true            # 맞춤 제작 옵션 (치수 입력·제작 단계)
     preorder: true                # 프리오더(예약 판매) · 발송 예정일 안내
     product-video: true           # 상품 상세 갤러리 영상
+    looks: true                   # 룩(Shop the Look) 고객 노출 — 어드민 룩 관리는 플래그와 무관
     international-shipping: true  # 해외 배송비·USD 결제
     reviews: false
 ```
@@ -367,6 +368,7 @@ store:
   두 번째 서비스가 **같은 프로퍼티**를 쓰게 되면 common-core 로 올린다 — 두 서비스가 서로 다른 플래그를 읽는 지금은 각 서비스에 둔다. 플래그 기본값은 꺼짐(닫힌 쪽)이고 local · dev 프로파일 yml 만 켠다.
   플래그가 꺼지면 데이터는 그대로 두고 응답에서만 숨긴다 (맞춤 제작: 목록 `customOrder=false`, 상세 `customOrder=null`).
   product-service 는 `preorder`(목록 `preorder=false`, 상세 `preorder=null`) · `product-video`(상세 `images[]` 에서 VIDEO 제외)도 같은 방식으로 읽는다(#61).
+  `looks`(#62)는 고객 룩 조회만 본다(고객 API 와 판정 위치는 #62 PR-B 예정) — 어드민 룩 관리는 플래그와 무관하게 동작해 켜기 전에 룩을 미리 만들어 둘 수 있다.
 - 메인 화면 구성 · 문구는 코드가 아니라 **전시 데이터**(product-service 메인 전시, #63 — `api-design-guide.md` §2-9)다. 섹션 유형은 브랜드 무관한 블록 이름이고
   고객사 문구는 제목 값으로만 들어간다. 미디어 주소의 허용 범위는 `store.media.public-base-url`(스토리지 공개 주소, 비면 미디어 쓰기를 닫는다)로 정한다.
 - 상호·대표자·사업자등록번호·통신판매업 신고번호 같은 **법정 표시 정보는 Vault 에 등록하고 주입**한다

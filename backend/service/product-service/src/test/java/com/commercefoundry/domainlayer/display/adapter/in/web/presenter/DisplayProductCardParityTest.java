@@ -77,7 +77,7 @@ class DisplayProductCardParityTest {
         given(productPort.findVisibleListRowsByIds(anyCollection())).willReturn(rows);
         given(skuPort.aggregateByProductIds(anyCollection())).willReturn(aggregates);
         given(imagePort.findThumbnailsByProductIds(anyCollection())).willReturn(List.of(ProductFixtures.image(90L, 1L, ImageType.THUMBNAIL, 0)));
-        StoreProperties storeProperties = new StoreProperties(new StoreProperties.Features(customOrderFeature, preorderFeature, false));
+        StoreProperties storeProperties = new StoreProperties(new StoreProperties.Features(customOrderFeature, preorderFeature, false, false));
         ProductListProcessor productListProcessor = new ProductListProcessor(productPort, skuPort, imagePort, storeProperties);
 
         List<ProductListItemResponse> listed = new ProductWebPresenter().toListResponse(productListProcessor.search(CRITERIA)).contents();

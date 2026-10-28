@@ -21,6 +21,7 @@ class StorePropertiesTest {
         assertThat(properties.features().customOrder()).isFalse();
         assertThat(properties.features().preorder()).isFalse();
         assertThat(properties.features().productVideo()).isFalse();
+        assertThat(properties.features().looks()).isFalse();
     }
 
     @Test
@@ -31,6 +32,7 @@ class StorePropertiesTest {
         assertThat(features.customOrder()).isFalse();
         assertThat(features.preorder()).isFalse();
         assertThat(features.productVideo()).isFalse();
+        assertThat(features.looks()).isFalse();
     }
 
     @Test
@@ -53,9 +55,20 @@ class StorePropertiesTest {
         assertThat(videoOnly.customOrder()).isFalse();
     }
 
+    @Test
+    @DisplayName("store.features.looks=true 면 룩만 켜진다 — 다른 플래그는 꺼진 채다")
+    void looksFlagIsIndependent() {
+        StoreProperties.Features looksOnly = bind(Map.of("store.features.looks", "true")).features();
+
+        assertThat(looksOnly.looks()).isTrue();
+        assertThat(looksOnly.customOrder()).isFalse();
+        assertThat(looksOnly.preorder()).isFalse();
+        assertThat(looksOnly.productVideo()).isFalse();
+    }
+
     /** {@code .env.example} 이 "비우면 꺼짐" 이라고 안내한다 — 빈 환경변수가 플레이스홀더 기본값 대신 빈 문자열로 풀려도 기동하고 꺼진다. */
     @ParameterizedTest
-    @ValueSource(strings = {"custom-order", "preorder", "product-video"})
+    @ValueSource(strings = {"custom-order", "preorder", "product-video", "looks"})
     @DisplayName("값이 빈 문자열이면 기동을 막지 않고 꺼진다")
     void blankMeansDisabled(String flag) {
         assertThat(bind(Map.of("store.features." + flag, "")).features()).isEqualTo(StoreProperties.Features.DISABLED);
@@ -64,7 +77,7 @@ class StorePropertiesTest {
     @Test
     @DisplayName("Features 를 null 로 만들어도 꺼짐으로 정규화한다")
     void nullFlagMeansDisabled() {
-        assertThat(new StoreProperties.Features(null, null, null)).isEqualTo(StoreProperties.Features.DISABLED);
+        assertThat(new StoreProperties.Features(null, null, null, null)).isEqualTo(StoreProperties.Features.DISABLED);
     }
 
     private static StoreProperties bind(Map<String, String> properties) {

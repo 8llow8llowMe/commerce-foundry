@@ -3,7 +3,9 @@ package com.commercefoundry;
 import static com.commercefoundry.security.support.SecurityEnvelopeAssertions.assertEnvelope;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 
+import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.ResourceServerSmokeTestSupport;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 
 /**
  * 인가 스모크 — security-core Resource Server 가 이 서비스에 실제로 걸렸는지 본다 ({@code security-guide.md} §5-3).
@@ -33,6 +36,31 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     @DisplayName("공개 상세는 익명이어도 인증 오류가 아니라 도메인 404 · PRODUCT_001 이다")
     void publicDetailReachesDomain() throws Exception {
         assertEnvelope(perform(get("/api/v1/products/1")), 404, "PRODUCT_001", "존재하지 않는 상품입니다.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/admin/looks", "/api/v1/admin/looks/1"})
+    @DisplayName("어드민 룩 경로는 익명 401 · SECURITY_001, CUSTOMER 403 · SECURITY_005 다")
+    void adminLooksRequireAdmin(String path) throws Exception {
+        assertEnvelope(perform(get(path)), SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(perform(get(path).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("어드민 룩 쓰기(순서 변경)도 CUSTOMER 는 403 · SECURITY_005 다 — 본문이 맞아도 인가에서 끊긴다")
+    void adminLookWriteForbiddenForCustomer() throws Exception {
+        assertEnvelope(
+            perform(patch("/api/v1/admin/looks/order").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"lookIds\": []}")),
+            SecurityErrorCode.FORBIDDEN
+        );
+    }
+
+    @Test
+    @DisplayName("ADMIN 은 실제 빈 구성(Facade · Processor · 어댑터 · H2)으로 룩 도메인까지 닿는다 — 목록 200, 없는 룩 404 · LOOK_001")
+    void adminLooksReachDomain() throws Exception {
+        assertThat(perform(get("/api/v1/admin/looks").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).getStatus()).isEqualTo(200);
+        assertEnvelope(perform(get("/api/v1/admin/looks/1").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))), 404, "LOOK_001", "존재하지 않는 룩입니다.");
     }
 
     @Test

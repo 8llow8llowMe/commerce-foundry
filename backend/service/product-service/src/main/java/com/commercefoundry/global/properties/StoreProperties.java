@@ -24,16 +24,18 @@ public record StoreProperties(Features features) {
      * @param customOrder 맞춤 제작(치수 입력 · 제작 안내). 꺼지면 목록 {@code customOrder=false}, 상세 {@code customOrder=null}
      * @param preorder 프리오더(예약 판매) · 발송 예정 안내. 꺼지면 목록 {@code preorder=false}, 상세 {@code preorder=null}
      * @param productVideo 상품 상세 갤러리 영상. 꺼지면 상세 {@code images} 에서 영상을 뺀다
+     * @param looks 룩(Shop the Look, #62) 고객 노출. 고객 조회 API 만 본다 — 어드민 룩 관리는 플래그와 무관하게 동작한다
      */
-    public record Features(Boolean customOrder, Boolean preorder, Boolean productVideo) {
+    public record Features(Boolean customOrder, Boolean preorder, Boolean productVideo, Boolean looks) {
 
         /** 모두 꺼짐 — 닫힌 기본값 ({@code bootstrap-conventions.md} 설정 파일). */
-        public static final Features DISABLED = new Features(false, false, false);
+        public static final Features DISABLED = new Features(false, false, false, false);
 
         public Features {
             customOrder = Boolean.TRUE.equals(customOrder);
             preorder = Boolean.TRUE.equals(preorder);
             productVideo = Boolean.TRUE.equals(productVideo);
+            looks = Boolean.TRUE.equals(looks);
         }
     }
 }
