@@ -203,6 +203,56 @@
     comment on column orders.order_item_custom_option.order_item_id is
         '주문 항목 아이디 (FK: order_item.id)';
 
+    create table orders.order_request (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        idempotency_key uuid not null,
+        lease_expires_at timestamp(6) with time zone not null,
+        member_id bigint not null,
+        order_id bigint not null,
+        request_hash varchar(64) not null,
+        status varchar(20) not null check ((status in ('PROCESSING','COMPLETED'))),
+        version bigint not null,
+        primary key (id),
+        constraint uk_order_request_member_id_idempotency_key unique (member_id, idempotency_key),
+        constraint ck_order_request_identifiers_positive check (id > 0 and member_id > 0 and order_id > 0 and version >= 0),
+        constraint ck_order_request_hash_format check (char_length(request_hash) = 64 and ltrim(request_hash, '0123456789abcdef') = '')
+    );
+
+    comment on table orders.order_request is
+        '주문 요청 기록 (회원 × Idempotency-Key)';
+
+    comment on column orders.order_request.id is
+        '기록 아이디 (Snowflake)';
+
+    comment on column orders.order_request.created_at is
+        '생성 시각';
+
+    comment on column orders.order_request.updated_at is
+        '수정 시각';
+
+    comment on column orders.order_request.idempotency_key is
+        'Idempotency-Key 헤더 (UUID)';
+
+    comment on column orders.order_request.lease_expires_at is
+        '처리 중 lease 가 끝나는 시각 — 지나면 같은 키의 재요청이 이어받는다';
+
+    comment on column orders.order_request.member_id is
+        '회원 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column orders.order_request.order_id is
+        '미리 발급한 주문 아이디 (FK: orders.id — 주문이 저장되기 전에도 있다)';
+
+    comment on column orders.order_request.request_hash is
+        '요청 본문 지문 (정규화한 items · 배송지 · expectedTotalAmount 의 SHA-256 hex). 원문은 남지 않는다';
+
+    comment on column orders.order_request.status is
+        '처리 상태 (PROCESSING / COMPLETED)';
+
+    comment on column orders.order_request.version is
+        '낙관적 락 버전';
+
     create table orders.order_shipping_address (
         order_id bigint not null,
         created_at timestamp(6) with time zone not null,
