@@ -8,6 +8,8 @@ import com.commercefoundry.security.resourceserver.InternalResourceServerConfigu
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Bean;
+import java.time.Clock;
 
 @Configuration
 @Import({
@@ -19,5 +21,8 @@ import org.springframework.context.annotation.Import;
     SwaggerSecurityConfigurer.class
 })
 public class OrderServiceBeansConfig {
-
+    @Bean
+    public Clock orderClock() {
+        return Clock.systemUTC();
+    }
 }

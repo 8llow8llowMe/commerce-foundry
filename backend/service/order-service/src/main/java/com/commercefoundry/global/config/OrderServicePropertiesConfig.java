@@ -6,8 +6,11 @@ import com.commercefoundry.security.internal.InternalTokenPropertiesConfig;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import com.commercefoundry.global.properties.OrderProperties;
 
 @Configuration
+@EnableConfigurationProperties(OrderProperties.class)
 @Import({
     InternalTokenPropertiesConfig.class,
     JwtVerificationPropertiesConfig.class,
