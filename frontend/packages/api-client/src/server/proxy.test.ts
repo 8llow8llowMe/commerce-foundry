@@ -63,6 +63,16 @@ describe('createProxyHandler', () => {
     '/api/v1/auth//login',
     '/api/v1/auth/login;x',
     '/api/v1/auth/%E0%A4%A',
+    '/api/v1/auth/oauth/kakao/login',
+    '/api/v1/auth/oauth/naver/login/',
+    '/api/v1/auth/OAuth/Kakao/Login',
+    '/api/v1/auth/oauth/unknown/login',
+    '/api/v1/auth/oauth%2Fnaver%2Flogin',
+    '/api/v1/auth/oauth/kakao;x/login',
+    '/api/v1/auth/oauth;a/naver;b/login;c',
+    '/api/v1/auth;x/sign-up',
+    '/api/v1/auth/token;x/reissue',
+    '/api/v1/auth/admin;x/login;y/',
   ])(
     '토큰을 주는 인증 경로 %s 는 전용 핸들러만 받는다 — 게이트웨이로 보내지 않고 BFF_001 404 다',
     async (path) => {
@@ -81,6 +91,24 @@ describe('createProxyHandler', () => {
       expect(fetchImpl).not.toHaveBeenCalled();
     },
   );
+
+  it('소셜 인가 URL 발급(GET authorize-url)은 토큰을 주지 않으므로 일반 프록시가 중계한다', async () => {
+    const issued = { authorizeUrl: 'https://provider.test/authorize', state: 's', verifier: 'v' };
+    const upstream = envelope(200, true, issued);
+    // BE 는 state · verifier 응답을 캐시하지 않게 한다 — 중계 응답에도 남아야 한다
+    upstream.headers.set('cache-control', 'no-store');
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(upstream);
+    const handler = createProxyHandler({ gatewayUrl: GATEWAY, cookies: COOKIES, fetch: fetchImpl });
+
+    const res = await handler(request('/api/v1/auth/oauth/kakao/authorize-url'));
+
+    expect(res.status).toBe(200);
+    expect(urlOf(fetchImpl.mock.calls[0]![0])).toBe(
+      `${GATEWAY}/api/v1/auth/oauth/kakao/authorize-url`,
+    );
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect((await res.json()).dataBody).toEqual(issued);
+  });
 
   it('경로·쿼리·메서드·본문을 유지하고, 허용 헤더만 넘기고, 쿠키를 Authorization 으로 바꾼다', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, { ok: 1 }));

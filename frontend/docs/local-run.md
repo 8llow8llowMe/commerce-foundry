@@ -47,6 +47,10 @@ cd backend
 
 BFF 구조라 브라우저가 게이트웨이를 직접 부르지 않는다. 게이트웨이 CORS 설정은 로컬 개발에 영향이 없다.
 
+소셜 로그인(카카오 · 네이버)을 로컬에서 보려면 BE env 와 제공자 콘솔의 콜백 주소를 스토어프론트 콜백 경로로 맞춘다 —
+**redirect URI = `<스토어프론트 origin>/login/oauth/{provider}`**(예: `KAKAO_REDIRECT_URI=http://localhost:3000/login/oauth/kakao`,
+`NAVER_REDIRECT_URI=http://localhost:3000/login/oauth/naver`). 기본 언어 경로 하나만 등록한다 — 영문 스토어에서 시작한 흐름은 콜백이 `/en/...` 으로 넘긴다(`architecture.md` §3-1).
+
 ## 5. 검사
 
 ```bash

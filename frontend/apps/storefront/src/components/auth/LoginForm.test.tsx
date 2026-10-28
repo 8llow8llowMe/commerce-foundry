@@ -34,6 +34,17 @@ describe('LoginForm', () => {
   });
 });
 
+describe('LoginForm 간편 로그인', () => {
+  it('카카오 · 네이버 버튼을 폼 제출 버튼이 아닌 일반 버튼으로 둔다', () => {
+    const html = renderToStaticMarkup(<LoginForm returnPath="/" />);
+    expect(html).toContain(t.social.heading);
+    expect(html).toContain(t.social.providers.kakao);
+    expect(html).toContain(t.social.providers.naver);
+    expect(html.match(/<button type="submit"/g)).toHaveLength(1);
+    expect(html.match(/<button type="button"/g)).toHaveLength(2);
+  });
+});
+
 describe('loginErrors', () => {
   it('400 AUTH_001 은 칸을 짚지 않고 폼 위에 한 문구로', () => {
     const cause = new ApiError('server', 400, 'AUTH_001', '서버 문구');

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { useDictionary, useLocalizedHref } from '@/components/i18n/LocaleProvider';
 import { Link } from '@/components/i18n/Link';
+import { SocialLoginButtons } from './SocialLoginButtons';
 import { rateLimitTextOf } from '@/lib/auth/rate-limit';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { useRetryCooldown } from '@/lib/use-retry-cooldown';
@@ -92,6 +93,9 @@ export function LoginForm({
           {submitting ? t.login.submitting : t.login.submit}
         </Button>
       </form>
+
+      {/* 간편 로그인은 동의 없이 시작한다 — 신규 가입이면 콜백 화면이 동의를 받아 다시 시작한다 */}
+      <SocialLoginButtons returnPath={returnPath} heading={t.social.heading} />
 
       <p className="flex justify-center gap-2 text-sm text-muted-fg">
         {t.login.noAccount}

@@ -24,4 +24,5 @@ export {
   type Money,
 } from './money';
 export { parseRetryAfter } from './retry-after';
+export { isSocialProvider, SOCIAL_PROVIDERS, type SocialProvider } from './social-provider';
 export { unwrap } from './unwrap';

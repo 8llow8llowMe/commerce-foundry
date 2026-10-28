@@ -30,6 +30,14 @@ describe('SignUpForm', () => {
     const html = renderToStaticMarkup(<SignUpForm returnPath="/shop?category=1" />);
     expect(html).toContain('href="/login?next=%2Fshop%3Fcategory%3D1"');
   });
+
+  it('간편 가입 버튼은 가입 폼 밖의 일반 버튼이다(필수 입력에 막히지 않고 약관 동의만 먼저 본다)', () => {
+    const html = renderToStaticMarkup(<SignUpForm returnPath="/" />);
+    expect(html).toContain(t.social.signUpHeading);
+    const formEnd = html.indexOf('</form>');
+    expect(html.indexOf(t.social.providers.kakao)).toBeGreaterThan(formEnd);
+    expect(html.match(/<button type="button"/g)).toHaveLength(2);
+  });
 });
 
 describe('signUpErrors', () => {
