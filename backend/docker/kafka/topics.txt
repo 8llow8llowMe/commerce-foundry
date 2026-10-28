@@ -12,3 +12,7 @@
 
 # 백그라운드 작업 실행 신호 (#307) — 컨슈머 그룹 <ns>.operations.job-runner
 operations.job-run 604800000
+
+# 주문 만료 · 취소 → 재고 선점 해제 (#309) — 컨슈머 그룹 <ns>.product.order-stock-release. 발행은 order-service(#13 뒤 후속 PR)
+order.order-expired 604800000
+order.order-canceled 604800000

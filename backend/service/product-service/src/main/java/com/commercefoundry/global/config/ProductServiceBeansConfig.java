@@ -3,6 +3,7 @@ package com.commercefoundry.global.config;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.global.media.MediaUrlPolicy;
 import com.commercefoundry.global.properties.StoreMediaProperties;
+import com.commercefoundry.messaging.config.MessagingConfigurer;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
 import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
@@ -15,6 +16,7 @@ import org.springframework.context.annotation.Import;
 @Configuration
 @Import({
     InternalResourceServerConfigurer.class,
+    MessagingConfigurer.class,
     QuerydslConfigurer.class,
     ResourceServerSecurityConfigurer.class,
     SnowflakeConfigurer.class,

@@ -56,6 +56,8 @@ shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock J
 
 - `markPublished` 는 `published_at is null` 조건부 UPDATE, `markFailed` 는 `publish_attempts + 1` 조건부 UPDATE — 메서드마다 자기 트랜잭션이다(릴레이가 트랜잭션 밖에서 부른다).
 - `append` · `ProcessedEventStore.exists` · `record` 는 호출자 트랜잭션에 합류한다.
+- inbox 첫 구현은 product-service `JpaProcessedEventStore`(#309)다. **처리 기록 정리(`deleteProcessedBefore`)는 outbox 릴레이 안에서만 돈다** — outbox 가 없는 서비스(지금 product)는
+  기록이 지워지지 않는다(후속 PR-0 에서 inbox 단독 정리를 더한다).
 
 ## 운영 전제
 

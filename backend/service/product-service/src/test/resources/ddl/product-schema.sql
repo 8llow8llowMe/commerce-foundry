@@ -253,6 +253,42 @@
     comment on column product.look_item.product_id is
         '상품 아이디 (FK: product.id)';
 
+    create table product.processed_event (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        consumer_group varchar(200) not null,
+        event_id uuid not null,
+        event_type varchar(100) not null,
+        processed_at timestamp(6) with time zone not null,
+        primary key (id),
+        constraint uk_processed_event_consumer_group_event_id unique (consumer_group, event_id)
+    );
+
+    comment on table product.processed_event is
+        '처리한 이벤트 기록 (멱등 컨슈머 inbox)';
+
+    comment on column product.processed_event.id is
+        '처리 기록 아이디 (Snowflake)';
+
+    comment on column product.processed_event.created_at is
+        '생성 시각';
+
+    comment on column product.processed_event.updated_at is
+        '수정 시각';
+
+    comment on column product.processed_event.consumer_group is
+        '컨슈머 그룹 (예: commerce-foundry.prod.product.order-stock-release)';
+
+    comment on column product.processed_event.event_id is
+        '이벤트 아이디 (봉투 eventId)';
+
+    comment on column product.processed_event.event_type is
+        '이벤트 종류 (예: order-expired)';
+
+    comment on column product.processed_event.processed_at is
+        '처리 시각 — 보존 기간 정리 기준';
+
     create table product.product (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -865,7 +901,7 @@
         confirmed_at timestamp(6) with time zone,
         expires_at timestamp(6) with time zone not null,
         order_id bigint not null,
-        release_reason varchar(20) check ((release_reason in ('EXPIRED','RELEASED_BY_CALLER'))),
+        release_reason varchar(20) check ((release_reason in ('EXPIRED','RELEASED_BY_CALLER','ORDER_EXPIRED','ORDER_CANCELED'))),
         released_at timestamp(6) with time zone,
         status varchar(20) not null check ((status in ('RESERVED','CONFIRMED','RELEASED'))),
         version bigint not null,
@@ -898,7 +934,7 @@
         '주문 아이디 (외부 FK: order-service 주문 id)';
 
     comment on column product.stock_reservation.release_reason is
-        '해제 사유 (EXPIRED / RELEASED_BY_CALLER). RELEASED 일 때만';
+        '해제 사유 (EXPIRED / RELEASED_BY_CALLER / ORDER_EXPIRED / ORDER_CANCELED). RELEASED 일 때만';
 
     comment on column product.stock_reservation.released_at is
         '해제 시각 (RELEASED 일 때만)';
@@ -1021,6 +1057,9 @@
 
     create index idx_look_item_product_id_look_id 
        on product.look_item (product_id, look_id);
+
+    create index idx_processed_event_processed_at 
+       on product.processed_event (processed_at);
 
     create index idx_product_visible_sale_price_amount_id 
        on product.product (visible, sale_price_amount, id);

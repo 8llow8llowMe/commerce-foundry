@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.info.ExpiredStockReservationInfo;
 import com.commercefoundry.domainlayer.product.application.info.StockReservationInfo;
+import com.commercefoundry.domainlayer.product.application.model.StockReleaseOutcome;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
@@ -132,6 +133,39 @@ public class StockReservationProcessor {
             saveAndRestore(transition.reservation());
         }
         return StockReservationInfo.from(transition.reservation());
+    }
+
+    /**
+     * 주문 만료 · 결제 전 취소 이벤트의 해제 ({@code order-flow-guide.md} §3-5). {@link #release} 와 전이 · 저장 순서(상태 먼저 저장 → 복원)는 같고,
+     * 전이 표 밖 · 없음 · 주문 불일치를 예외가 아니라 결과로 돌려준다 — 이벤트는 확정된 선점에 늦게 올 수 있고(결제가 먼저 끝남), 그건 오류가 아니다.
+     * 동시 변경은 {@link #release} 와 같이 어댑터의 409({@code STOCK_RESERVATION_CONFLICT})로 롤백된다.
+     *
+     * @param orderId 이벤트의 주문 아이디 — 선점의 주문 아이디와 다르면 아무것도 바꾸지 않는다
+     */
+    public StockReleaseOutcome releaseByOrder(long reservationId, long orderId, StockReleaseReason reason) {
+        Optional<StockReservation> found = stockReservationRepositoryPort.findById(reservationId);
+        if (found.isEmpty()) {
+            return StockReleaseOutcome.NOT_FOUND;
+        }
+        StockReservation reservation = found.get();
+        if (reservation.orderId() != orderId) {
+            return StockReleaseOutcome.ORDER_MISMATCH;
+        }
+        StockReservation.Transition transition;
+        try {
+            transition = reservation.release(clock.instant(), reason);
+        } catch (StockReservationTransitionException exception) {
+            // 해제가 거절되는 상태는 지금 CONFIRMED 하나다(전이 표). 상태가 늘면 이 switch 가 컴파일에서 알린다 — 모르는 거절은 삼키지 않고 다시 던진다
+            return switch (exception.getCurrentStatus()) {
+                case CONFIRMED -> StockReleaseOutcome.CONFIRMED;
+                case RESERVED, RELEASED -> throw exception;
+            };
+        }
+        if (!transition.changed()) {
+            return StockReleaseOutcome.ALREADY_RELEASED;
+        }
+        saveAndRestore(transition.reservation());
+        return StockReleaseOutcome.RELEASED;
     }
 
     /**

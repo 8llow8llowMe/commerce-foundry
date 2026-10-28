@@ -70,7 +70,7 @@ public class StockReservationEntity extends BaseEntity {
     private Instant releasedAt;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "release_reason", length = 20, comment = "해제 사유 (EXPIRED / RELEASED_BY_CALLER). RELEASED 일 때만")
+    @Column(name = "release_reason", length = 20, comment = "해제 사유 (EXPIRED / RELEASED_BY_CALLER / ORDER_EXPIRED / ORDER_CANCELED). RELEASED 일 때만")
     private StockReleaseReason releaseReason;
 
     @Version

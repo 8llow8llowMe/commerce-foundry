@@ -578,8 +578,13 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
   개인정보로 보이는 필드 이름은 `EventEnvelopeCodec` 이 `FORBIDDEN_FIELD` 로 막는다(실수를 잡는 장치이지 허용 목록이 아니다).
 - **리스너 토픽 · 그룹은 `TopicNames` 로 만든 이름만 쓴다.** 켜져 있으면 namespace 로 시작하지 않는 토픽 · 그룹, 토픽 패턴 구독은 기동 실패다. `autoStartup` 은 적지 않는다.
 - **이벤트는 진위가 확인되지 않은 알림이다.** 돈 · 재고 상태를 바꾸는 컨슈머는 원본 서비스 internal API 로 재조회해 확정한다(웹훅과 같은 원칙).
+  - 예외: product-service 의 주문 만료 · 취소 → 선점 해제 컨슈머는 재조회하지 않는다 — RESERVED 를 푸는 일만 해 효과가 TTL 만료와 같고 CONFIRMED 는 건드리지 않아,
+    위조 이벤트의 최대 피해가 "결제 대기 재고가 TTL 보다 일찍 풀림"(확정은 재선점으로 흡수)이다(`order-flow-guide.md` §3-5). SASL · ACL · 서명은 #308 전에 다시 본다.
+    새 예외는 이 근거(효과 상한 · 되돌릴 수 있음)를 문서에 적고 사람이 승인한다.
 - **재시도 · DLT** — 일시 오류는 컨슈머 안 지수 백오프(기본 5회) 뒤 `<topic>.dlt`. 다시 해도 같은 실패는 `NonRetryableEventException` 으로 던져 바로 DLT 로 보낸다.
   업무상 정상적인 거절(금액 불일치 등)은 예외가 아니라 결과 상태 · 보상 이벤트로 처리한다. `@RetryableTopic` 은 쓰지 않는다.
 - 로그 · 예외 · outbox 실패 코드 · DLT 헤더에 봉투 · 페이로드 · 예외 메시지를 싣지 않는다 — eventId · 이벤트 종류 · 예외 타입만 (§8 과 같은 기준).
 - 테스트 — 서비스 단위 테스트는 testFixtures 의 `InMemoryOutboxStore` · `InMemoryProcessedEventStore`(트랜잭션 커밋 · 롤백을 흉내 낸다)를,
-  통합 테스트는 `MessagingKafkaContainers`(Testcontainers, `@EnabledWithDockerOrOnCi`)를 쓴다.
+  흐름 테스트는 내장 Kafka(`spring-kafka-test` `@EmbeddedKafka`, KRaft — Docker 없이 로컬에서도 돈다)를 쓴다 — 예: operations `JobWorkerFlowTest`,
+  product `OrderStockReleaseFlowTest`. PostgreSQL 이 필요한 것(inbox 유니크 키 · 잠금)만 Testcontainers(`@EnabledWithDockerOrOnCi`)로 따로 둔다.
+  실제 브로커 동작이 필요하면 `MessagingKafkaContainers`(Testcontainers)를 쓴다.

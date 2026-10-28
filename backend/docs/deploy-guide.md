@@ -131,8 +131,10 @@ compose 가 env 파일과 무관하게 고정하는 값:
   영문 · 숫자 · `. _ ~ -` 밖의 문자가 있거나 32자 미만이면 Eureka 가 뜨지 않는다(`security-guide.md` §12).
 - `GATEWAY_CORS_ALLOWED_ORIGINS` 는 비어도 뜨지만 어떤 origin 도 허용하지 않는다(닫힌 기본값). 배포 환경은 프론트 origin 을 채운다.
 - `STORE_FEATURES_*` 는 dev 프로파일 yml 이 `true` 로 덮어 dev 에서는 env 를 읽지 않는다.
-- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `MESSAGING_ENABLED` · `KAFKA_*`(§4-4))는 compose 에 넘기지 않는다.
+- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `KAFKA_SASL_*`(§4-4))는 compose 에 넘기지 않는다.
   `STORAGE_PUBLIC_BASE_URL` 은 product-service 가 메인 전시 미디어 주소 판정에 읽는다(#63, `:-` 빈 값 — 비면 미디어 쓰기만 503).
+  `MESSAGING_ENABLED` · `KAFKA_NAMESPACE` · `KAFKA_BOOTSTRAP_SERVERS` · `KAFKA_SECURITY_PROTOCOL` 은 product-service compose 가 넘긴다(#309 주문 만료 · 취소 컨슈머, `:-` 기본 꺼짐).
+  operations-service yml 도 같은 키를 읽지만 배포 compose 가 아직 없다 — compose 를 만드는 PR 에서 같이 넘긴다.
   해당 기능이 yml(또는 `storage.*` 같은 relaxed binding)로 키를 읽기 시작하는 PR 에서 그 모듈 compose 의 `environment` 에 같이 더한다(§8).
   `KAFKA_PORT` 는 로컬 compose(`docker-compose-local.yml`) 전용이라 배포 compose 에 넘기지 않는다.
 
@@ -169,7 +171,7 @@ Infra 의 Kafka 는 3노드 KRaft 클러스터(apache/kafka 4.3 · RF 3 · min I
 
 | 항목 | 정한 것 | 결정 대기 |
 |------|---------|-----------|
-| 이름 | **namespace `commerce-foundry.<env>`**(local · dev · prod). 토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`(예: `commerce-foundry.dev.order.order-expired`), DLT `<토픽>.dlt`, 컨슈머 그룹 `<ns>.<소비 서비스>.<목적>`(예: `commerce-foundry.dev.order-service.payment-approved`). 다른 고객사가 같은 클러스터를 쓰면 namespace 만 바꾼다 — 코드에 스토어 이름을 넣지 않는다 | prefix 를 `commerce-foundry` 로 둘지 `cf` 로 줄일지(#304 Q7 — 권장 `commerce-foundry`) |
+| 이름 | **namespace `commerce-foundry.<env>`**(local · dev · prod). 토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`(예: `commerce-foundry.dev.order.order-expired`), DLT `<토픽>.dlt`, 컨슈머 그룹 `<ns>.<소비 서비스>.<목적>`(예: `commerce-foundry.dev.product.order-stock-release`). 다른 고객사가 같은 클러스터를 쓰면 namespace 만 바꾼다 — 코드에 스토어 이름을 넣지 않는다 | prefix 를 `commerce-foundry` 로 둘지 `cf` 로 줄일지(#304 Q7 — 권장 `commerce-foundry`) |
 | 토픽 생성 | **앱은 만들지 않는다**(브로커 자동 생성 끔 · `spring.kafka.admin.auto-create=false` · `NewTopic` 빈 금지 — #306). 목록의 정본은 `backend/docker/kafka/topics.txt`(`<생산 서비스>.<aggregate>-<event> <보존 ms>`). 로컬은 `create-topics.sh` 가 만들고, dev · prod 는 `create-topics.sh dev` · `prod` 가 출력한 목록을 Infra 레포의 선언 스크립트가 `--if-not-exists` 로 만든다. 파티션 local 3 · dev 3 · prod 6, 복제 local 1 · dev · prod 3, DLT 는 같이 만든다 | prod 파티션 6 · 보존 168h 확정, dev · prod 가 한 클러스터를 namespace 로만 나눠 써도 되는지(#304 Q6) |
 | 토픽 추가 절차 | **이벤트를 정의하는 PR(#307 · #308 · #309 …)이 `topics.txt` 에 그 토픽을 더하고**, PR 본문에 `create-topics.sh dev` · `prod` 출력을 붙여 Infra 반영을 요청한다. 앱은 기동 때 토픽이 있는지 보고 없으면 뜨지 않는다(#306) — Infra 반영이 배포보다 먼저다 | — |
 | 접속 주소 | 키 이름 `KAFKA_BOOTSTRAP_SERVERS`, 값은 Vault | **결정 대기** — backend 컨테이너가 공유 클러스터에 닿는 방식(EXTERNAL 리스너 [권장] vs Infra 공유 네트워크 합류, #304 Q1) |
