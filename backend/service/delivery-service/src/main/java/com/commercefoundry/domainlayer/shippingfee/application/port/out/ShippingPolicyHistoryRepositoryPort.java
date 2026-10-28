@@ -1,6 +1,8 @@
 package com.commercefoundry.domainlayer.shippingfee.application.port.out;
 
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicyHistory;
+import java.time.Instant;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 
 /**
@@ -19,4 +21,10 @@ public interface ShippingPolicyHistoryRepositoryPort {
      * @param page 0 부터 센다
      */
     Page<ShippingPolicyHistory> findDomesticPage(int page, int size);
+
+    /**
+     * 그 운영자가 국내 정책을 처음 저장한 시각 — 그 운영자의 국내 이력 중 가장 이른 교체 시각이다 (운영자 온보딩 사실, #357).
+     * 다른 운영자의 이력은 보지 않는다. 그 운영자의 이력이 없으면 비어 있다.
+     */
+    Optional<Instant> findDomesticFirstSavedAt(long adminMemberId);
 }

@@ -68,6 +68,8 @@
 - 회원 표시 이름: auth-service `GET /internal/v1/member-display-names?ids=` (#322). 허용 호출자는 delivery-service.
   항목은 `{memberId, displayName}` 이고 `displayName` 은 마스킹된 이름만이다(원문 이름은 없다). 회원이 있으나 이름이 없으면 `displayName` 은 null, 없는 아이디는 빠진다.
   검증 코드는 `AUTH_137`(빈 목록) · `AUTH_138`(100개 초과) · `AUTH_139`(양수 아님). 배송비 정책 이력은 이 조회로 페이지당 한 번 이름을 붙이고, 실패하면 503 `DELIVERY_013` 이다.
+- 운영자 온보딩 사실(단건): delivery-service `GET /internal/v1/onboarding-facts/shipping-policy?memberId=` (#357). 허용 호출자는 operations-service.
+  운영자 한 명의 사실이라 `ids` 벌크가 아니다. `memberId` 는 양수(`DELIVERY_139`), 숫자가 아니면 `DELIVERY_198`, 없으면 `DELIVERY_199` 다. 계약은 아래 "운영자 온보딩 계약 (#357)".
 
 **internal 쓰기 API** 도 같은 자리(`/internal/v1/**`, `@Hidden`, 허용 호출자 `@PreAuthorize`)에 둔다. 아래를 더 지킨다.
 
@@ -938,3 +940,13 @@ FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가�
 | ONBOARDING_105 | 400 | currentStep 0 ~ 200 |
 | ONBOARDING_198 | 400 | 파라미터 타입 불일치 |
 | ONBOARDING_199 | 400 | 필수 파라미터 없음 |
+
+### 업무 사실 internal — 배송 (#357 PR-B1)
+
+배송 업무는 **국내 배송비 정책 저장**이다(행위자 이력이 있는 쪽만 — 해외 정책 교체는 이력을 남기지 않아 보지 않는다).
+delivery-service `GET /internal/v1/onboarding-facts/shipping-policy?memberId={id}` 가 사실을 내고, 허용 호출자는 `SERVICE_operations-service` 하나다
+(`@Hidden`, 서비스 토큰 없음 · 사용자 토큰 401 `SECURITY_007`, 다른 서비스 403 `SECURITY_005`). `memberId` 는 operations 가 access 토큰으로 확인한 운영자이고
+양수가 아니면 400 `DELIVERY_139`, 숫자가 아니면 `DELIVERY_198`, 없으면 `DELIVERY_199` 다. 응답 dataBody 는 `{storeReady, memberFirstSavedAt}` 이다.
+`storeReady` 는 국내(`DOMESTIC`) 정책 행이 있는가(누가 저장했든), `memberFirstSavedAt` 은 `delivery.shipping_policy_history` 에서 scope `DOMESTIC` ·
+`admin_member_id = memberId` 인 행의 가장 이른 저장 시각(UTC ISO)이고 없으면 null(키는 남긴다)이다. 다른 운영자가 만든 정책이 있으면 `storeReady=true` ·
+`memberFirstSavedAt=null` 일 수 있다 — 둘을 어떻게 `tasks` 로 합칠지와 원천 장애 시 `UNAVAILABLE` 처리는 operations(PR-B2)가 정한다.

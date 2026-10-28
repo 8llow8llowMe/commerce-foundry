@@ -13,6 +13,8 @@ public interface ShippingPolicyRepository extends JpaRepository<ShippingPolicyEn
 
     Optional<ShippingPolicyEntity> findByScope(ShippingScope scope);
 
+    boolean existsByScope(ShippingScope scope);
+
     /**
      * 버전이 {@code version} 일 때만 금액을 바꾸고 버전을 1 올린다. 확인과 증가가 한 문장이라 동시 교체 중 하나만 1건을 얻는다.
      *

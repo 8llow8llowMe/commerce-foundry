@@ -33,6 +33,12 @@ public class ShippingPolicyRepositoryAdapter implements ShippingPolicyRepository
         return shippingPolicyRepository.findByScope(ShippingScope.DOMESTIC).map(this::toDomain);
     }
 
+    /** 범위 유일 키({@code uk_shipping_policy_scope})를 타는 존재 확인 한 문장이다. */
+    @Override
+    public boolean existsDomesticPolicy() {
+        return shippingPolicyRepository.existsByScope(ShippingScope.DOMESTIC);
+    }
+
     /**
      * 정책 행 → 구간 삭제 → 구간 삽입 → 다시 읽기 순서다. 모든 쓰기를 여기서 flush 해 충돌이 커밋 시점이 아니라 이 호출에서 드러나게 한다
      * (Processor 가 충돌을 도메인 오류로 바꿀 수 있게).

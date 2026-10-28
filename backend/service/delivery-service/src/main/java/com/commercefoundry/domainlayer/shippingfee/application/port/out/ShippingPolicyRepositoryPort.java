@@ -12,6 +12,9 @@ public interface ShippingPolicyRepositoryPort {
     /** 국내({@code DOMESTIC}) 정책. 도서산간 구간은 시작 우편번호 오름차순이다. */
     Optional<ShippingPolicy> findDomesticPolicy();
 
+    /** 국내({@code DOMESTIC}) 정책 행이 있는가. 도서산간 구간은 읽지 않는다 — 있는지만 알면 되는 호출(운영자 온보딩 사실, #357)용이다. */
+    boolean existsDomesticPolicy();
+
     /**
      * 정책을 통째로 바꾼다 — 정책 행을 만들거나 고치고, 도서산간 구간은 모두 지운 뒤 새로 넣는다. 호출자의 트랜잭션 안에서 돈다.
      *

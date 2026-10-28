@@ -50,6 +50,9 @@ public final class DeliveryValidationMessage {
     public static final String PAGE_MIN = "DELIVERY_137:page 는 0 이상이어야 합니다.";
     public static final String HISTORY_SIZE_RANGE = "DELIVERY_138:size 는 1 이상 20 이하여야 합니다.";
 
+    // 서비스 간 운영자 온보딩 사실(#357). 누락은 DELIVERY_199, 숫자가 아니면 DELIVERY_198 이다
+    public static final String MEMBER_ID_POSITIVE = "DELIVERY_139:memberId 는 1 이상이어야 합니다.";
+
     private DeliveryValidationMessage() {
     }
 }
