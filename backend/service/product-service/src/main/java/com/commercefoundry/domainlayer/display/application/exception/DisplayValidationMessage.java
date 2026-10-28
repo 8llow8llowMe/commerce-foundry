@@ -39,6 +39,11 @@ public final class DisplayValidationMessage {
     public static final String SECTION_IDS_SIZE_MAX = "PRODUCT_162:sectionIds 는 최대 50개입니다.";
     public static final String SECTION_IDS_POSITIVE = "PRODUCT_163:sectionIds 의 원소는 양수여야 합니다.";
 
+    // 저장하지 않는 전시 전체 초안 (POST /api/v1/admin/displays/preview)
+    public static final String PREVIEW_SECTIONS_REQUIRED = "PRODUCT_166:sections 는 필수입니다 (섹션이 없으면 빈 배열).";
+    public static final String PREVIEW_SECTIONS_SIZE_MAX = "PRODUCT_167:sections 는 최대 50개입니다.";
+    public static final String PREVIEW_SECTION_REQUIRED = "PRODUCT_168:sections 의 원소는 비어 있을 수 없습니다.";
+
     private DisplayValidationMessage() {
     }
 }

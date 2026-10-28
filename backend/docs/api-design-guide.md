@@ -479,6 +479,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
 | `GET /api/v1/displays/main` | `permitAll()` | 200 노출 중인 섹션 목록 · `Cache-Control: max-age=60, public` | — |
+| `POST /api/v1/admin/displays/preview` | ADMIN | 200 현재 노출 가능한 초안 · 고객 메인과 같은 JSON · `Cache-Control: no-store` | 400 `PRODUCT_047~054` · 검증 `140~168` · 503 `PRODUCT_055` |
 | `GET /api/v1/admin/displays/sections` | ADMIN | 200 전체 섹션(비노출 · 기간 밖 포함, 배열 순서 = 노출 순서, `liveStatus` 파생) | — |
 | `GET /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 | 404 `PRODUCT_046` |
 | `POST /api/v1/admin/displays/sections` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `PRODUCT_047~054` · 409 `PRODUCT_056` · `PRODUCT_058` · 503 `PRODUCT_055` |
@@ -486,6 +487,16 @@ return ResponseEntity.ok().body(Response.success(response));
 | `DELETE /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 — 아이템도 지운다. 남은 순서를 다시 매기지 않는다 | 404 `PRODUCT_046` · 409 `PRODUCT_058` |
 | `PATCH /api/v1/admin/displays/sections/order` | ADMIN | 200 새 순서의 전체 목록 — 본문 `{sectionIds}` 는 현재 전체 집합과 같아야 한다 | 400 `PRODUCT_057` · 409 `PRODUCT_058` |
 
+- **저장 전 미리보기(#340)**: 본문 `{sections: [DisplaySectionUpsertRequest, ...]}` 은 전체 초안이며 최대 50개, 빈 배열을 허용한다.
+  `sections` 누락 · null 은 400 `PRODUCT_166`, 50개 초과는 `PRODUCT_167`, null 원소는 `PRODUCT_168`이다. 중첩 요청은 기존 `PRODUCT_140~165` 검증을 그대로 쓴다.
+  숨김 · 기간 밖 초안도 모든 섹션 규칙(`PRODUCT_047~054`, 미디어 미설정 `055`)과 상품 존재를 확인한다. 없는 상품은 `050`, 숨긴 상품은 허용 후 고객 카드에서 제외한다.
+  응답은 `DisplayMainResponse`와 같은 섹션 · 미디어 · 상품 카드 JSON 형태다. 현재 서버 Clock으로 노출을 판정하며 임의 시각 파라미터는 받지 않는다.
+  섹션과 아이템은 요청 배열 순서다. `sectionId`는 `preview-section-<섹션 인덱스>`, `itemId`는 `preview-item-<섹션 인덱스 * 30 + 아이템 인덱스>`인 임시 문자열이다.
+  필터 전 배열 위치를 쓰므로 필터 후 번호가 건너뛸 수 있다. 저장 식별자가 아니므로 저장 · 수정 요청의 식별자로 쓰면 안 된다. 상품 · 이미지 식별자는 실제 식별자다.
+  전시 DB 읽기 · 쓰기 · 잠금과 Snowflake 발급은 없고 상품만 bulk 조회한다. DB의 현재 전시 구성과 합치지 않는다. 응답은 `no-store`다.
+  FE 영향 · 계약 리뷰어: `seonghoho` — 어드민 인증 BFF에서 preview를 호출하고 결과를 기존 미리보기 렌더러에 전달한다. 임시 ID는 저장 ID와 구분한다.
+  storefront 공개 action으로 ADMIN 자격증명을 전달하거나 해당 API 인가를 완화하지 않는다. 어드민 관리 조회의 metadata 형태와 달리
+  미리보기의 `itemType` · `mediaType`은 고객 메인처럼 문자열이며 고객/어드민 DTO·Presenter는 분리한다.
 - **노출 조건**: `visible` 이고 `startAt ≤ now < endAt`(둘 다 비면 제한 없음). 섹션 · 아이템은 순서 → 아이디 오름차순이다.
   시각은 마이크로초로 잘라 저장 · 판정한다(DB `timestamp(6)` 과 같은 값). 0001 ~ 9999년 밖은 400 `PRODUCT_165`.
 - **아이템**: `MEDIA`(PC · 모바일 주소 따로, 모바일이 없으면 PC, VIDEO 는 PC 포스터 필수) 또는 `PRODUCT`(상품 아이디). 유형별 허용 아이템 · 개수는
@@ -503,10 +514,10 @@ return ResponseEntity.ok().body(Response.success(response));
 - **동시성**: 쓰기 4종은 전체 섹션 행 잠금(5초) 뒤 다시 읽어 판정하고 마지막 쓰기가 이긴다(§2-5 카테고리와 같다). 섹션이 0개일 때만 동시 생성이 직렬화되지 않아
   둘 다 순서 0 을 받는다 — 아이디 순으로 정렬되고 순서 변경으로 정리된다.
 - **캐시**: `public` 은 공개 · 사용자 무관 · 개인정보 없는 응답에만 쓴다. 고객 메인은 1분 늦어도 가격 · 재고를 상세 · 주문이 다시 계산하므로 결제 금액을 바꾸지 않는다.
-  어드민 미리보기는 어드민 API 를 쓴다. 언어 · 통화별 응답이 생기면 `Vary` 를 두거나 경로를 나눈다.
+  어드민 미리보기는 `POST /api/v1/admin/displays/preview` 를 쓴다. 언어 · 통화별 응답이 생기면 `Vary` 를 두거나 경로를 나눈다.
 - 오류 코드: `PRODUCT_046`(섹션 없음 404) · `047`(유형이 받지 않는 아이템) · `048`(아이템 수 범위) · `049`(상품 중복) · `050`(없는 상품) · `051`(기간) ·
   `052`(링크 주소) · `053`(문구만 있는 링크) · `054`(미디어 주소) · `055`(공개 주소 미설정 503) · `056`(섹션 상한 409) · `057`(순서 변경 집합) · `058`(잠금 409).
-  검증 코드는 `PRODUCT_140~165`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` · `DisplayErrorCode` · `SizeChartErrorCode`(059~, §2-10)가 나눠 쓴다 — 새 번호는 세 클래스를 모두 보고 고른다.
+  검증 코드는 `PRODUCT_140~168`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` · `DisplayErrorCode` · `SizeChartErrorCode`(059~, §2-10)가 나눠 쓴다 — 새 번호는 세 클래스를 모두 보고 고른다.
 - 계층 — display 컨텍스트는 product 컨텍스트의 Processor(`ProductListProcessor.summarizeVisible` · `ProductLookupProcessor`)와 domain(`ProductSummary`)만 쓴다(H8).
   상품 카드의 `customOrder` · `preorder` 는 목록과 같은 플래그 판정(#61)이다.
 - **어드민 응답은 운영자 언어다(#305).** 순서는 배열 순서로만 전하고 내부 순서 번호(`displayOrder`, 삭제 뒤 빈 번호가 남는다) · 저장마다 새로 발급되는
