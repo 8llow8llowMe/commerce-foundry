@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.order.support.OrderRequestPersistenceCont
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
+import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -25,7 +26,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.jpa.properties.hibernate.default_schema=orders",
     "spring.cloud.discovery.enabled=false", "eureka.client.enabled=false", "snowflake.datacenter-id=1", "snowflake.worker-id=2"})
-@Import({QuerydslConfigurer.class, OrderServiceFeaturesConfig.class, SnowflakeConfigurer.class, OrderRepositoryAdapter.class,
+@Import({QuerydslConfigurer.class, OrderServiceFeaturesConfig.class, SnowflakePropertiesConfig.class, SnowflakeConfigurer.class, OrderRepositoryAdapter.class,
     OrderRequestRepositoryAdapter.class, OrderMapperImpl.class, OrderRequestMapperImpl.class})
 class OrderRequestPersistenceTest extends OrderRequestPersistenceContract {
     @Container @ServiceConnection
