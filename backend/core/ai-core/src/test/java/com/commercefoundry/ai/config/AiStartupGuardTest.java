@@ -6,6 +6,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.commercefoundry.ai.client.AiClient;
 import com.commercefoundry.ai.client.AiException;
 import com.commercefoundry.ai.client.AiRequest;
+import com.commercefoundry.ai.metering.AiCallContext;
+import com.commercefoundry.ai.metering.AiCallHandle;
+import com.commercefoundry.ai.metering.AiCallInterceptor;
+import com.commercefoundry.ai.metering.AiCallOutcome;
 import com.commercefoundry.ai.prompt.PromptTemplates;
 import com.commercefoundry.ai.properties.AiProperties;
 import org.junit.jupiter.api.DisplayName;
@@ -17,7 +21,9 @@ class AiStartupGuardTest {
     private static final String KEY = "sk-test-guard-probe";
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-        .withUserConfiguration(AiPropertiesConfig.class, AiConfigurer.class);
+        .withUserConfiguration(AiPropertiesConfig.class, AiConfigurer.class)
+        // 활성 프로파일이 없으면 prod 로 본다 — 테스트 전용 스위치(allow-unmetered 등)를 쓰려면 test 를 켠다
+        .withPropertyValues("spring.profiles.active=test");
 
     @Test
     @DisplayName("ai.* 가 하나도 없으면 꺼진 채 기동하고, 클라이언트는 DISABLED 다")
@@ -134,7 +140,92 @@ class AiStartupGuardTest {
             .run(context -> assertThat(context).hasFailed().getFailure().hasMessageContaining("ai.features.size-chart.prompt-version"));
     }
 
-    private static String[] enabled() {
+    @Test
+    @DisplayName("켰는데 계량 인터셉터 빈이 없으면 기동을 멈춘다 — 사용량 원장 · 월 한도 없이 부르지 않게")
+    void failsWhenUnmetered() {
+        runner.withPropertyValues(required())
+            .run(context -> assertThat(context).hasFailed().getFailure()
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("AiCallInterceptor").hasMessageContaining("ai.allow-unmetered"));
+    }
+
+    @Test
+    @DisplayName("allow-unmetered=true 를 명시하면 인터셉터 없이 기동한다")
+    void allowsUnmeteredWhenExplicit() {
+        runner.withPropertyValues(required()).withPropertyValues("ai.allow-unmetered=true")
+            .run(context -> assertThat(context).hasNotFailed().hasSingleBean(AiClient.class));
+    }
+
+    @Test
+    @DisplayName("계량 인터셉터 빈이 하나면 기동한다")
+    void startsWithInterceptor() {
+        runner.withPropertyValues(required()).withBean(AiCallInterceptor.class, NoopInterceptor::new)
+            .run(context -> assertThat(context).hasNotFailed().hasSingleBean(AiClient.class));
+    }
+
+    @Test
+    @DisplayName("계량 인터셉터 빈이 둘 이상이면 기동을 멈춘다 — 보상 순서를 정하지 않으려고 하나만 둔다")
+    void failsWithTwoInterceptors() {
+        runner.withPropertyValues(required())
+            .withBean("first", AiCallInterceptor.class, NoopInterceptor::new)
+            .withBean("second", AiCallInterceptor.class, NoopInterceptor::new)
+            .run(context -> assertThat(context).hasFailed().getFailure().hasMessageContaining("AiCallInterceptor").hasMessageContaining("2개"));
+    }
+
+    @Test
+    @DisplayName("꺼져 있으면 인터셉터가 없어도 기동한다 — 닫힌 기본값")
+    void disabledNeedsNoInterceptor() {
+        runner.withPropertyValues("ai.enabled=false").run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    @DisplayName("운영(prod — local · dev · test 프로파일이 없음)에서는 allow-unmetered 를 켜지 못한다")
+    void prodRejectsAllowUnmetered() {
+        runner.withPropertyValues(enabled()).withPropertyValues("spring.profiles.active=prod")
+            .run(context -> assertThat(context).hasFailed().getFailure()
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("ai.allow-unmetered").hasMessageContaining("prod"));
+        runner.withPropertyValues(enabled()).withPropertyValues("spring.profiles.active=")
+            .run(context -> assertThat(context).hasFailed().getFailure().hasMessageContaining("ai.allow-unmetered"));
+    }
+
+    @Test
+    @DisplayName("운영에서는 allow-insecure-loopback 도 켜지 못한다 — 인터셉터가 있어도")
+    void prodRejectsInsecureLoopback() {
+        runner.withPropertyValues(required()).withPropertyValues("spring.profiles.active=prod", "ai.allow-insecure-loopback=true")
+            .withBean(AiCallInterceptor.class, NoopInterceptor::new)
+            .run(context -> assertThat(context).hasFailed().getFailure().hasMessageContaining("ai.allow-insecure-loopback"));
+    }
+
+    @Test
+    @DisplayName("운영에서도 인터셉터가 있고 테스트 스위치가 꺼져 있으면 기동한다. local · dev 는 스위치를 허용한다")
+    void prodStartsWithInterceptor() {
+        runner.withPropertyValues(required()).withPropertyValues("spring.profiles.active=prod")
+            .withBean(AiCallInterceptor.class, NoopInterceptor::new)
+            .run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues(enabled()).withPropertyValues("spring.profiles.active=local")
+            .run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues(enabled()).withPropertyValues("spring.profiles.active=dev")
+            .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    private static String[] required() {
         return new String[] {"ai.enabled=true", "ai.api-key=" + KEY, "ai.connect-timeout=2s", "ai.read-timeout=120s", "ai.request-timeout=180s"};
+    }
+
+    /** 인터셉터 없이 클라이언트 동작만 보는 테스트 — 미계량을 명시한다. */
+    private static String[] enabled() {
+        return new String[] {"ai.enabled=true", "ai.api-key=" + KEY, "ai.connect-timeout=2s", "ai.read-timeout=120s", "ai.request-timeout=180s",
+            "ai.allow-unmetered=true"};
+    }
+
+    private static final class NoopInterceptor implements AiCallInterceptor {
+
+        @Override
+        public AiCallHandle before(AiCallContext context) {
+            return null;
+        }
+
+        @Override
+        public void after(AiCallHandle handle, AiCallOutcome outcome) {
+        }
     }
 }

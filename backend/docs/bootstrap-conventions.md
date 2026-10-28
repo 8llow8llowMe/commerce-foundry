@@ -344,6 +344,7 @@ storage:
 `implementation project(':core:ai-core')` 를 더한다. 서비스가 받는 것은 `AiClient` 빈 하나다 — 공식 SDK(`anthropic-java`)는 ai-core 의
 `implementation` 이라 서비스 코드에서 보이지 않는다. 쓰는 곳은 operations-service 의 작업 핸들러(#212) 예정이다 —
 AI 호출을 한 서비스에 모아 키 · 사용량 원장 · 동시 상한이 한 곳에 있게 한다(별도 ai-service 를 두지 않는 근거는 #215 PR-A).
+**AI 호출은 operations 작업 핸들러로 모은다** — 원장 · 월 한도(계량 인터셉터, 아래 "계량")를 가진 곳이 operations 하나뿐이고, 켜진 서비스에 인터셉터가 없으면 기동이 멈춘다.
 
 ```yaml
 ai:
@@ -358,7 +359,8 @@ ai:
   acquire-timeout: 10s           # 상한이 차 있으면 이만큼 기다린 뒤 BUSY
   max-input-chars: 200000        # 시스템 + 사용자 프롬프트 글자 수 상한 — 넘으면 보내지 않는다(INPUT_TOO_LONG)
   refusal-fallback: false        # 기본 꺼짐. 켜면 거절 시 API 가 다른 모델로 다시 시도(server-side fallback 베타, 공식 API 만)
-  # allow-insecure-loopback: true  # 루프백 http base-url 허용 — 테스트 스텁 전용. 운영은 https 만
+  # allow-insecure-loopback: true  # 루프백 http base-url 허용 — 테스트 스텁 전용. 운영은 https 만(prod 에서 켜면 기동 실패)
+  # allow-unmetered: true          # 계량 인터셉터 없이 켜기 허용 — 로컬 실험 · 테스트 전용. 기본 false(없으면 기동 실패). prod 에서 켜면 기동 실패
   features:
     size-chart:                  # 기능 이름 — AiRequest.feature 와 같다
       model: claude-opus-5-5
@@ -382,14 +384,15 @@ ai:
 - **로그에는 기능 · 모델 · 토큰 수 · 멈춘 이유 · 상태 코드만 남는다.** 프롬프트 · 응답 원문 · SDK 예외 메시지(API 오류 본문)는 어떤 레벨에도 남기지 않고,
   `AiException` 은 SDK 예외를 원인으로 잇지 않는다. `AiRequest` · `AiResult` 의 `toString` 은 길이만 싣는다. SDK 자체 요청 로그는 `AiClients` 가
   `LogLevel.OFF` 로 끈다 — SDK 빌더는 `ANTHROPIC_LOG` 를 스스로 읽어 debug 면 본문을 stderr 로 내기 때문이다.
-- `AiException.reason()` 으로 번역한다 — `retryable()` 이 참(`BUSY` · `RATE_LIMITED` · `UNAVAILABLE`)이면 작업 재시도,
-  거짓(`DISABLED` · `UNAUTHORIZED` · `REJECTED` · `REFUSED` · `INVALID_RESPONSE` · `INPUT_TOO_LONG` · `MASKING_FAILED`)이면 실패로 끝낸다.
+- `AiException.reason()` 으로 번역한다 — `retryable()` 이 참(`BUSY` · `RATE_LIMITED` · `UNAVAILABLE` · `METERING_FAILED`)이면 작업 재시도,
+  거짓(`DISABLED` · `UNAUTHORIZED` · `REJECTED` · `REFUSED` · `INVALID_RESPONSE` · `INPUT_TOO_LONG` · `MASKING_FAILED` · `BUDGET_EXCEEDED`)이면 실패로 끝낸다.
   `AiResult.truncated()` 면 최대 토큰에서 잘린 것이다.
 - **비용 · 점유의 최악값을 알고 설정한다.** 타임아웃(`UNAVAILABLE`, `statusCode` 가 `null`)은 이미 생성 · 과금된 요청을 SDK 가 다시 보낸다 —
   최악 비용은 (1 + `max-retries`) × 작업 재시도 횟수, 호출 하나가 동시 상한 자리를 잡는 최악 시간은 (1 + `max-retries`) × `request-timeout` 이다.
-  작업은 타임아웃 재시도 상한을 낮게 두고, 월 한도(이후 PR)가 마지막 상한이다.
+  작업은 타임아웃 재시도 상한을 낮게 두고, 월 한도가 마지막 상한이다. 원장은 실측 사용량이 없는 타임아웃 호출(`TIMEOUT`, 아래 "계량")을 **예약한 예상치 1회**로 남긴다 —
+  SDK 재시도로 실제 과금이 그보다 클 수 있다(위 최악값). 보수적으로 잡으려면 `max-retries` 를 낮춘다.
 - **응답은 신뢰할 수 없는 출력이다.** 고객 입력이 프롬프트에 들어가므로 프롬프트 주입으로 조작된 응답이 올 수 있다 — 화면에 그릴 때 이스케이프하고,
-  상태를 바꾸는 판단에 쓰기 전에 구조화 출력 검증과 사람 확인을 거친다. `refusal-fallback` 을 켜면 답한 모델이 바뀔 수 있으니 사용량은 `AiResult.model` 로 기록한다.
+  상태를 바꾸는 판단에 쓰기 전에 구조화 출력 검증과 사람 확인을 거친다. `refusal-fallback` 을 켜면 답한 모델이 바뀔 수 있으니 사용량은 답한 모델(`AiCallOutcome.model`)로 기록한다.
 
 **프롬프트 템플릿 (#215 PR-C).** 문구는 코드 · 설정이 아니라 **쓰는 서비스의 리소스 파일**에 둔다 — 브랜드 · 고객사 몫의 문구라 ai-core 에 두지 않고,
 여러 줄 문구를 yml 에 넣으면 들여쓰기 · 이스케이프가 깨지기 쉽고 리뷰 diff 가 읽기 어렵다.
@@ -429,11 +432,42 @@ API 가 받지 않는 스키마(재귀 · 숫자 · 길이 제약 등)는 SDK �
   `AiStructuredResult.toString` 은 값의 타입만 싣는다.
 
 - **서비스 테스트는 가짜 포트를 쓴다.** 컨텍스트 로딩 테스트는 기본값(꺼짐)으로 뜨고, 업무 테스트는 서비스의 out-port 가짜로 대신한다.
-  SDK 를 거친 요청 · 재시도 · 응답 해석 · 구조화 출력은 ai-core 의 `ClaudeAiClientTest` · `ClaudeAiStructuredTest`(루프백 스텁 서버)가 본다 — 실제 API 는 부르지 않는다.
+  SDK 를 거친 요청 · 재시도 · 응답 해석 · 구조화 출력 · 계량은 ai-core 의 `ClaudeAiClientTest` · `ClaudeAiStructuredTest` · `ClaudeAiMeteringTest`(루프백 스텁 서버)가 본다
+  — 실제 API 는 부르지 않는다. 다른 모듈이 SDK 를 거친 흐름(원장 기록 등)을 볼 때는 ai-core 테스트 픽스처의 `StubMessagesServer` 를
+  `testImplementation testFixtures(project(':core:ai-core'))` 로 받아 `ai.base-url` · `ai.allow-insecure-loopback=true` 로 가리킨다.
 - **이미지 입력.** `render` 결과에 `withImages` 로 붙인다. 바이트만 받는다(URL 은 클라이언트가 가져오지 않는다). 형식은 `image/jpeg` · `image/png` · `image/gif` · `image/webp`, 장당 5MiB, 한 요청 {@code AiImage.MAX_COUNT}장(8).
   장수를 넘으면 `INPUT_TOO_LONG` 이고 보내지 않는다. 사용자 메시지에서는 이미지 블록이 가린 텍스트보다 앞이다. 로그 · `toString` 에는 장수와 바이트 수만 남는다.
   이미지 안의 글자는 마스킹하지 못한다 — 이름 · 연락처 · 주소가 보이는 이미지는 넣지 않는다.
-- 이후 PR(#215): 사용량 원장 · 월 한도(operations-service).
+
+**계량 (#215 PR-B).** ai-core 는 호출 앞뒤에 끼는 SPI `AiCallInterceptor`(`com.commercefoundry.ai.metering`)만 두고, 원장 · 월 한도 · 단가는 호스트 서비스(operations)가 구현한다.
+
+```text
+길이 · 이미지 장수 검사 → 마스킹 → before(context) → 동시 상한 자리 → 호출(SDK 재시도) → 자리 반납 → after(handle, outcome)
+```
+
+- **`before`** 는 마스킹 뒤 · 자리 얻기 전에 불린다. `AiException` 을 던지면 그대로 호출자에게 가고 자리도 HTTP 요청도 없다 — 한도 초과는 `BUDGET_EXCEEDED`(재시도 안 함),
+  원장 장애는 `METERING_FAILED`(재시도). 다른 예외는 `METERING_FAILED` 로 바뀐다(메시지는 남기지 않는다). 컨텍스트(`AiCallContext`)에는 호출 ID · 기능 · 프롬프트 버전 ·
+  `callerRef` · 요청 모델 · `max-tokens` · **마스킹 뒤** 글자 수 · 이미지 장수 · 구조화 여부만 있고 원문은 없다.
+- **`after`** 는 `before` 가 돌아온 호출마다 정확히 한 번, **자리를 반납한 뒤** 불린다(원장 기록이 느려도 다른 호출을 막지 않는다). 던진 예외는 WARN(타입만)으로 남고
+  결과 · 원래 예외를 바꾸지 않는다 — 놓친 기록은 원장의 회수 스케줄러가 정리한다. 길이 · 마스킹에서 막힌 호출은 `before` · `after` 둘 다 없다.
+- **결과 분류(`AiCallOutcome.Status`)** — 원장은 이 구분으로 무엇을 비용으로 남길지 고른다.
+
+| Status | 언제 | `usage` | 원장 |
+|--------|------|---------|------|
+| `COMPLETED` | 응답을 받아 결과로 썼다 | 실측(캐시 토큰 포함) | 실측 비용 |
+| `UNUSABLE` | 응답을 받았지만 못 썼다 — 거절(`REFUSED`) · 잘림 · 형식 오류 · 검증 실패 · 사용량을 읽은 뒤 해석 실패(`INVALID_RESPONSE`) | 실측 | 실측 비용(과금됐다) |
+| `FAILED` | 오류 응답(4xx · 429 · 5xx · 529, `statusCode` 있음) | 없음 | 0 — SDK 재시도 중 앞선 타임아웃 시도분은 빠질 수 있다(`max-retries` 를 낮게) |
+| `TIMEOUT` | 쓸 수 있는 응답이 없다(연결 오류 · 타임아웃 · 사용량조차 읽지 못한 응답, `statusCode` 없음) | 없음 | 예약한 예상치 1회(위 최악 비용 문단) |
+| `NOT_SENT` | 동시 상한 자리를 못 얻었다(`BUSY`) — 보내지 않았다 | 없음 | 0, 예약 해제 |
+
+- **사용량.** `AiResult` · `AiStructuredResult` 의 `usage()`(`AiUsage`)에 입력 · 출력 · 캐시 생성 · 캐시 읽기 토큰이 있다(캐시 토큰은 API 가 싣지 않으면 0).
+  `inputTokens()` · `outputTokens()` 는 그대로 있다. 사용량은 인터셉터가 원장에 남긴다 — 호출자가 다시 기록하지 않는다.
+- **미계량 가드.** `ai.enabled=true` 인데 `AiCallInterceptor` 빈이 없으면 `AiStartupGuard` 가 기동을 멈춘다 — `ai.allow-unmetered=true`(로컬 실험 · 테스트 전용)일 때만 허용한다.
+  운영(활성 프로파일에 `local` · `dev` · `test` 가 없으면 prod — messaging 가드와 같은 판정)에서는 `allow-unmetered` · `allow-insecure-loopback` 을 켜면 기동이 멈춘다.
+  인터셉터는 **하나만** 둔다(둘 이상이면 기동 실패 — 앞선 `before` 의 예약을 뒤 `before` 실패 때 되돌리는 순서를 정하지 않으려고). `AiClients.create` 도 같은 규칙을 본다.
+- **`callerRef`** (`AiRequest.withCallerRef`) 는 원장 행을 작업과 잇는 키다. **내부 PK(jobId 등)만** 넣는다 — `소문자 접두어:토막`(토막 1~3개, 영문 · 숫자 · `_` · `-`, 전체 100자 이하, 예 `job:123` · `job:123:2`).
+  **주문번호 · 연락처 · 이메일 · 이름은 넣지 않는다.** 원장 식별자라 로그 · `AiRequest.toString` 에 그대로 실린다. 형식이 틀리면 요청을 만들 때 `IllegalArgumentException` 이고 메시지에 값이 없다.
+- 원장 · 월 한도 · 단가 · 알림은 operations-service 의 다음 PR(#215 PR-B2 · B3)이다.
 
 ## Reason
 

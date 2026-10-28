@@ -2,9 +2,12 @@ package com.commercefoundry.ai.config;
 
 import com.commercefoundry.ai.client.AiClient;
 import com.commercefoundry.ai.client.AiClients;
+import com.commercefoundry.ai.metering.AiCallInterceptor;
 import com.commercefoundry.ai.prompt.PromptTemplates;
 import com.commercefoundry.ai.properties.AiProperties;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
@@ -25,13 +28,20 @@ public class AiConfigurer {
         return new AiStartupGuard(environment);
     }
 
-    /** 켜져 있으면 SDK 클라이언트를 품는다 — 스프링이 종료 때 {@code close()} 를 추론해 부른다. */
+    /**
+     * 켜져 있으면 SDK 클라이언트를 품는다 — 스프링이 종료 때 {@code close()} 를 추론해 부른다. 계량 인터셉터는 호스트 서비스(사용량 원장)가 빈으로 둔다 —
+     * 개수 규칙은 {@link AiStartupGuard} 가 기동 때 먼저 본다.
+     */
     @Bean
-    public AiClient aiClient(AiProperties aiProperties) {
+    public AiClient aiClient(AiProperties aiProperties, ObjectProvider<AiCallInterceptor> interceptors) {
         if (!aiProperties.enabled()) {
             log.info("ai client disabled. ai.enabled=false");
         }
-        return AiClients.create(aiProperties);
+        List<AiCallInterceptor> registered = interceptors.orderedStream().toList();
+        if (aiProperties.enabled() && registered.isEmpty()) {
+            log.warn("ai client unmetered. ai.allow-unmetered=true — 사용량 원장 · 월 한도 없이 부릅니다");
+        }
+        return AiClients.create(aiProperties, registered);
     }
 
     /** 설정에 버전이 있는 기능의 템플릿을 지금 모두 읽는다 — 파일이 없거나 표기가 틀리면 기동이 멈춘다. 꺼져 있어도 검사한다(배포 전에 드러나게). */

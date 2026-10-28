@@ -1,6 +1,6 @@
 package com.commercefoundry.ai.client;
 
-import static com.commercefoundry.ai.client.StubMessagesServer.ok;
+import static com.commercefoundry.ai.support.StubMessagesServer.ok;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -9,6 +9,7 @@ import com.commercefoundry.ai.prompt.PromptTemplate;
 import com.commercefoundry.ai.prompt.PromptValues;
 import com.commercefoundry.ai.properties.AiProperties;
 import com.commercefoundry.ai.properties.AiProperties.Feature;
+import com.commercefoundry.ai.support.StubMessagesServer;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -162,14 +163,14 @@ class ClaudeAiStructuredTest {
         AiStructuredResult<SizeChart> result = new AiStructuredResult<>(new SizeChart(List.of(new Row("ResponseLeakProbe", 1, 1))), "m", 1, 1, "end_turn", "id");
         assertThat(result.toString()).doesNotContain("ResponseLeakProbe").contains("SizeChart");
 
-        AiClient disabled = AiClients.create(new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
+        AiClient disabled = AiClients.create(new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         assertThatThrownBy(() -> disabled.complete(AiRequest.of("size-chart", null, "p"), SizeChart.class))
             .isInstanceOfSatisfying(AiException.class, e -> assertThat(e.reason()).isEqualTo(Reason.DISABLED));
     }
 
     private AiClient client(Map<String, Feature> features) {
         return AiClients.create(new AiProperties(true, "test-key", server.baseUrl(), null, null,
-            Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(5), 0, 4, Duration.ofSeconds(1), false, features, null, null, true));
+            Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(5), 0, 4, Duration.ofSeconds(1), false, features, null, null, true, true));
     }
 
     private static void assertInvalid(Runnable call) {

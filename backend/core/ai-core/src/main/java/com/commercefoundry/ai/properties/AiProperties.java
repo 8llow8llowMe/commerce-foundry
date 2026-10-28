@@ -43,6 +43,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param masking          보내기 전 가리는 추가 패턴(주문번호 형식처럼 브랜드마다 다른 것). 기본 패턴은 언제나 적용된다
  * @param maxInputChars    시스템 + 사용자 프롬프트 글자 수 상한. 넘으면 보내지 않는다({@code INPUT_TOO_LONG}). 기본 200,000
  * @param allowInsecureLoopback 루프백 http {@code base-url} 을 허용한다 — 테스트 스텁 전용. 기본 false(운영은 https 만)
+ * @param allowUnmetered   켜져 있는데 계량 인터셉터({@code AiCallInterceptor}) 빈이 없어도 기동하게 한다 — 사용량 원장 · 월 한도 없이 부르게 된다.
+ *                         기본 false(닫힌 기본값). 로컬 실험 · 테스트 전용이다 — 운영(prod)에서 켜면 기동이 멈춘다
  */
 @ConfigurationProperties(prefix = "ai")
 public record AiProperties(
@@ -59,7 +61,8 @@ public record AiProperties(
     Map<String, Feature> features,
     Masking masking,
     @DefaultValue("200000") Integer maxInputChars,
-    @DefaultValue("false") Boolean allowInsecureLoopback
+    @DefaultValue("false") Boolean allowInsecureLoopback,
+    @DefaultValue("false") Boolean allowUnmetered
 ) {
 
     /** Binder 는 풀리지 않은 {@code ${...}} 를 문자 그대로 남긴다. 환경변수가 없으면 값이 이 문자열을 품는다. */
@@ -79,6 +82,8 @@ public record AiProperties(
     public static final String FEATURES = "ai.features";
     public static final String MASKING_PATTERNS = "ai.masking.patterns";
     public static final String MAX_INPUT_CHARS = "ai.max-input-chars";
+    public static final String ALLOW_UNMETERED = "ai.allow-unmetered";
+    public static final String ALLOW_INSECURE_LOOPBACK = "ai.allow-insecure-loopback";
     public static final int DEFAULT_MAX_INPUT_CHARS = 200_000;
     /** 기본 마스킹 패턴의 자리표시와 겹치는 이름 — 설정 패턴으로 쓰지 못한다 ({@code PiiMasker.RESERVED_NAMES} 와 같다). */
     public static final Set<String> RESERVED_PATTERN_NAMES = Set.of("pii", "email", "rrn", "card", "phone", "account", "address");
@@ -108,6 +113,7 @@ public record AiProperties(
         masking = masking == null ? new Masking(null) : masking;
         maxInputChars = maxInputChars == null ? DEFAULT_MAX_INPUT_CHARS : maxInputChars;
         allowInsecureLoopback = Boolean.TRUE.equals(allowInsecureLoopback);
+        allowUnmetered = Boolean.TRUE.equals(allowUnmetered);
     }
 
     /**
@@ -205,6 +211,27 @@ public record AiProperties(
         return violations;
     }
 
+    /**
+     * 계량 인터셉터 개수가 맞는지 본다 — 켜져 있으면 정확히 하나여야 한다({@link #allowUnmetered()} 면 0 도 된다). 꺼져 있으면 통과다.
+     * 기동 때는 {@code AiStartupGuard} 가 빈 정의 개수로, 직접 만들 때는 {@code AiClients.create} 가 넘긴 목록 크기로 부른다.
+     *
+     * <p>둘 이상을 막는 이유: 앞선 인터셉터의 {@code before} 가 예약한 뒤 다음 {@code before} 가 거절하면 앞선 예약을 풀 보상 순서를 정해야 한다.
+     * 원장 · 한도는 한 서비스(operations)에 하나뿐이라 그 복잡도를 지금 들이지 않는다.
+     */
+    public Optional<Violation> meteringViolation(int interceptorCount) {
+        if (!enabled) {
+            return Optional.empty();
+        }
+        if (interceptorCount > 1) {
+            return Optional.of(new Violation(ALLOW_UNMETERED, "계량 인터셉터(AiCallInterceptor) 빈이 " + interceptorCount + "개입니다 — 하나만 둡니다"));
+        }
+        if (interceptorCount == 0 && !allowUnmetered) {
+            return Optional.of(new Violation(ALLOW_UNMETERED, "ai.enabled=true 인데 계량 인터셉터(AiCallInterceptor) 빈이 없습니다 — 사용량 원장 · 월 한도 없이 부르게 됩니다. "
+                + "원장을 가진 서비스(operations)에서만 켜거나, 로컬 실험이면 " + ALLOW_UNMETERED + "=true 를 명시하세요"));
+        }
+        return Optional.empty();
+    }
+
     /** 값이 없거나 공백뿐이거나 플레이스홀더가 풀리지 않았으면 {@code true} 다. */
     public static boolean isAbsent(String value) {
         return value == null || value.isBlank() || value.contains(PLACEHOLDER_PREFIX);
@@ -223,7 +250,7 @@ public record AiProperties(
             + ", connectTimeout=" + connectTimeout + ", readTimeout=" + readTimeout + ", requestTimeout=" + requestTimeout
             + ", maxRetries=" + maxRetries + ", maxConcurrency=" + maxConcurrency + ", acquireTimeout=" + acquireTimeout
             + ", refusalFallback=" + refusalFallback + ", features=" + features + ", maskingPatterns=" + masking.patterns().size()
-            + ", maxInputChars=" + maxInputChars + ", allowInsecureLoopback=" + allowInsecureLoopback + "]";
+            + ", maxInputChars=" + maxInputChars + ", allowInsecureLoopback=" + allowInsecureLoopback + ", allowUnmetered=" + allowUnmetered + "]";
     }
 
     /**
