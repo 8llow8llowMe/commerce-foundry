@@ -66,6 +66,32 @@ public class DisplaySectionProcessor {
         return withItems(displaySectionRepositoryPort.findAll().stream().filter(section -> section.isLiveAt(now)).toList());
     }
 
+    /** 모든 초안을 검증하고 요청 위치 기반 임시 식별자를 부여한다. 전시 저장소와 ID 발급기는 호출하지 않는다. */
+    public List<DisplaySectionContent> previewDraftsOf(List<DisplaySectionUpsertCommand> commands) {
+        List<DisplaySectionContent> drafts = new ArrayList<>(commands.size());
+        for (int index = 0; index < commands.size(); index++) {
+            DisplaySectionContent draft = draftOf(commands.get(index));
+            DisplaySection source = draft.section();
+            long sectionIndex = index;
+            DisplaySection section = new DisplaySection(
+                sectionIndex, source.sectionType(), source.title(), source.subtitle(), source.body(),
+                source.linkUrl(), source.linkLabel(), index, source.visible(), source.startAt(), source.endAt()
+            );
+            // 요청 DTO의 섹션당 아이템 상한은 30개다. 필터 전 위치로 섹션 간 중복 없이 매긴다.
+            List<DisplayItem> items = draft.items().stream().map(item -> new DisplayItem(
+                sectionIndex * 30 + item.displayOrder(), sectionIndex, item.displayOrder(), item.itemType(), item.media(), item.productId(), item.caption()
+            )).toList();
+            drafts.add(new DisplaySectionContent(section, items));
+        }
+        return List.copyOf(drafts);
+    }
+
+    /** 고객 메인과 같은 시작 포함 · 종료 제외 규칙으로 현재 시각에 보이는 초안을 고른다. */
+    public List<DisplaySectionContent> liveContentsOf(List<DisplaySectionContent> contents) {
+        Instant now = clock.instant();
+        return contents.stream().filter(content -> content.section().isLiveAt(now)).toList();
+    }
+
     /** 어드민 목록 — 숨김 · 기간 밖 포함 전체 섹션과 아이템. */
     public List<DisplaySectionContent> getAllContents() {
         return withItems(displaySectionRepositoryPort.findAll());

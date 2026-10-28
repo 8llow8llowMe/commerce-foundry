@@ -6,6 +6,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.commercefoundry.domainlayer.display.adapter.out.persistence.repository.DisplayItemRepository;
 import com.commercefoundry.domainlayer.display.adapter.out.persistence.repository.DisplaySectionRepository;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductEntity;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductImageEntity;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.ProductImageRepository;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.SkuRepository;
+import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.ProductRepository;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.security.principal.MemberRole;
@@ -32,7 +37,7 @@ import tools.jackson.databind.json.JsonMapper;
  * 메인 전시 어드민 쓰기 → 고객 메인 조회를 실제 빈 구성(Facade · Processor · 어댑터 · H2)으로 잇는다 — 매퍼 · 잠금 조회 · 아이템 bulk 삭제 뒤 같은 순서 번호로 다시 넣기
  * (유니크 키와 flush 순서) · 노출 필터 · 숨긴 상품 제외를 본다. 엔진 고유 동작(check 제약 · 잠금 대기)은 PostgreSQL 리포지토리 테스트가 본다.
  */
-@SpringBootTest(properties = "store.media.public-base-url=https://cdn.example.com/media/")
+@SpringBootTest(properties = {"store.media.public-base-url=https://cdn.example.com/media/", "store.features.preorder=true"})
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
 class DisplayFlowIntegrationTest {
@@ -50,6 +55,12 @@ class DisplayFlowIntegrationTest {
     private ProductRepository productRepository;
 
     @Autowired
+    private SkuRepository skuRepository;
+
+    @Autowired
+    private ProductImageRepository productImageRepository;
+
+    @Autowired
     private DisplaySectionRepository displaySectionRepository;
 
     @Autowired
@@ -64,6 +75,8 @@ class DisplayFlowIntegrationTest {
     void tearDown() {
         displayItemRepository.deleteAllInBatch();
         displaySectionRepository.deleteAllInBatch();
+        skuRepository.deleteAllById(List.of(9_101L, 9_102L));
+        productImageRepository.deleteAllById(List.of(9_201L, 9_202L));
         productRepository.deleteAllById(List.of(VISIBLE_PRODUCT, HIDDEN_PRODUCT, OTHER_PRODUCT));
     }
 
@@ -154,6 +167,88 @@ class DisplayFlowIntegrationTest {
         assertThat(body(foreign).at("/dataHeader/resultCode").asString()).isEqualTo("PRODUCT_054");
         assertThat(body(foreign).at("/dataHeader/resultMessage").asString()).doesNotContain("cdn.example.com");
         assertThat(displaySectionRepository.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("미리보기는 저장 메인과 ID 외 전체 JSON 값이 같고 기존 섹션 · 아이템 · 순서를 바꾸지 않는다")
+    void previewMatchesSavedMainWithoutChangingDatabase() {
+        productRepository.save(ProductEntity.builder().id(VISIBLE_PRODUCT).categoryId(10L).name("할인 프리오더")
+            .saleStatus(SaleStatus.ON_SALE).visible(true).salePriceAmount(39_000).salePriceCurrency(KRW)
+            .listPriceAmount(60_000L).listPriceCurrency(KRW).customOrder(true).preorder(true).build());
+        skuRepository.saveAll(List.of(
+            SkuEntity.builder().id(9_101L).productId(VISIBLE_PRODUCT).optionValueKey("1").additionalPriceAmount(1000)
+                .additionalPriceCurrency(KRW).saleStatus(SaleStatus.ON_SALE).build(),
+            SkuEntity.builder().id(9_102L).productId(VISIBLE_PRODUCT).optionValueKey("2").additionalPriceAmount(3000)
+                .additionalPriceCurrency(KRW).saleStatus(SaleStatus.ON_SALE).build()
+        ));
+        productImageRepository.saveAll(List.of(
+            ProductImageEntity.builder().id(9_201L).productId(VISIBLE_PRODUCT).imageType(ImageType.THUMBNAIL)
+                .url("https://cdn.example.com/media/thumb.jpg").width(800).height(1000).altText("대표").displayOrder(0).build(),
+            ProductImageEntity.builder().id(9_202L).productId(VISIBLE_PRODUCT).imageType(ImageType.GALLERY)
+                .url("https://cdn.example.com/media/hover.jpg").width(800).height(1000).altText("두 번째").displayOrder(1).build()
+        ));
+        String story = """
+            {"sectionType":"STORY","title":"  이야기  ","body":"본문","linkUrl":"/products","linkLabel":"보기","visible":true,"items":[]}
+            """;
+        String look = """
+            {"sectionType":"LOOK","title":"룩","visible":true,"items":[
+              {"itemType":"MEDIA","caption":"영상","media":{"mediaType":"VIDEO","pcUrl":"https://cdn.example.com/media/look.mp4",
+               "mobileUrl":"https://cdn.example.com/media/mobile.mp4","pcPosterUrl":"https://cdn.example.com/media/poster.jpg","altText":"룩 영상"}},
+              {"itemType":"PRODUCT","productId":"%d","caption":"상품"}, {"itemType":"PRODUCT","productId":"%d"}]}
+            """.formatted(VISIBLE_PRODUCT, HIDDEN_PRODUCT);
+        String hidden = "{\"sectionType\":\"STORY\",\"visible\":false,\"items\":[]}";
+        String future = "{\"sectionType\":\"STORY\",\"visible\":true,\"startAt\":\"9999-01-01T00:00:00Z\",\"items\":[]}";
+        String ended = "{\"sectionType\":\"STORY\",\"visible\":true,\"endAt\":\"2000-01-01T00:00:00Z\",\"items\":[]}";
+        String emptyPick = "{\"sectionType\":\"PRODUCT_PICK\",\"visible\":true,\"items\":[{\"itemType\":\"PRODUCT\",\"productId\":%d}]}".formatted(HIDDEN_PRODUCT);
+        List<String> drafts = List.of(story, hidden, look, future, ended, emptyPick);
+        drafts.forEach(this::post);
+        var sectionsBefore = displaySectionRepository.findAll();
+        var itemsBefore = displayItemRepository.findAll();
+        JsonNode mainBefore = body(mvc.get().uri("/api/v1/displays/main").exchange()).at("/dataBody");
+
+        MvcTestResult preview = exchange("POST", "/api/v1/admin/displays/preview", "{\"sections\":[" + String.join(",", drafts) + "]}");
+
+        assertThat(preview).hasStatusOk();
+        assertThat(preview.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        JsonNode previewBody = body(preview).at("/dataBody");
+        assertThat(previewBody.at("/sections/1/sectionId").asString()).isEqualTo("preview-section-2");
+        assertThat(previewBody.at("/sections/1/items/0/itemId").asString()).isEqualTo("preview-item-60");
+        assertThat(previewBody.at("/sections/2/items").size()).isZero();
+        JsonNode card = previewBody.at("/sections/1/items/1/product");
+        assertThat(card.at("/salePrice/amount").asLong()).isEqualTo(40_000L);
+        assertThat(card.at("/listPrice/amount").asLong()).isEqualTo(60_000L);
+        assertThat(card.at("/discountRate").asInt()).isEqualTo(33);
+        assertThat(card.at("/hasOptionSurcharge").asBoolean()).isTrue();
+        assertThat(card.at("/customOrder").asBoolean()).isTrue();
+        assertThat(card.at("/preorder").asBoolean()).isTrue();
+        assertThat(card.at("/hoverImage/imageId").asString()).isEqualTo("9202");
+        assertThat(withoutDisplayIds(previewBody)).isEqualTo(withoutDisplayIds(mainBefore));
+        assertThat(displaySectionRepository.findAll()).usingRecursiveComparison().isEqualTo(sectionsBefore);
+        assertThat(displayItemRepository.findAll()).usingRecursiveComparison().isEqualTo(itemsBefore);
+        assertThat(body(mvc.get().uri("/api/v1/displays/main").exchange()).at("/dataBody")).isEqualTo(mainBefore);
+    }
+
+    @Test
+    void previewRejectsUnknownProductsEvenInHiddenOrExpiredDraftsWithoutWrites() {
+        for (String condition : List.of("\"visible\":false", "\"visible\":true,\"endAt\":\"2000-01-01T00:00:00Z\"")) {
+            var result = exchange("POST", "/api/v1/admin/displays/preview",
+                "{\"sections\":[{\"sectionType\":\"PRODUCT_PICK\"," + condition + ",\"items\":[{\"itemType\":\"PRODUCT\",\"productId\":1}]}]}");
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(body(result).at("/dataHeader/resultCode").asString()).isEqualTo("PRODUCT_050");
+        }
+        assertThat(displaySectionRepository.count()).isZero();
+        assertThat(displayItemRepository.count()).isZero();
+    }
+
+    private static JsonNode withoutDisplayIds(JsonNode value) {
+        JsonNode copy = value.deepCopy();
+        for (JsonNode section : copy.at("/sections")) {
+            ((tools.jackson.databind.node.ObjectNode) section).remove("sectionId");
+            for (JsonNode item : section.at("/items")) {
+                ((tools.jackson.databind.node.ObjectNode) item).remove("itemId");
+            }
+        }
+        return copy;
     }
 
     private MvcTestResult post(String body) {
