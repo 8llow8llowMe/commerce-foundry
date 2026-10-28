@@ -30,7 +30,7 @@ public enum ServiceRoute {
         "/api/v1/deliveries/**", "/api/v1/shipping-fees/**",
         "/api/v1/admin/deliveries/**", "/api/v1/admin/shipping-policies/**"),
     OPERATIONS("operations-service",
-        "/api/v1/admin/jobs/**", "/api/v1/admin/notifications/**");
+        "/api/v1/admin/jobs/**", "/api/v1/admin/notifications/**", "/api/v1/admin/onboarding/**");
 
     /** Eureka 에 등록되는 {@code spring.application.name}. 라우트 id 로도 쓴다. */
     private final String serviceId;

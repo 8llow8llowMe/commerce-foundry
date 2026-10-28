@@ -137,6 +137,23 @@ operations:
       fixed-delay: 1h
       # 이 일수보다 오래된 알림을 지운다
       days: 90
+  # 운영자 온보딩 (#357). 서버에 기록할 수 있는 안내 투어 허용 목록 — 순서가 조회 응답 순서다 (OnboardingProperties).
+  # key 는 어드민 FE 투어 id(frontend/apps/admin/src/lib/tour/tours.ts)에서 -v1 꼬리를 뗀 것이다. 안내를 바꿔 다시 보여 주려면 version 을 올린다.
+  # 비었거나 key 형식(^[a-z][a-z0-9-]{0,63}$) · 중복 · version(1 이상)이 틀리면 기동하지 않는다
+  onboarding:
+    guides:
+      - key: console
+        version: 1
+      - key: stocks
+        version: 1
+      - key: stock-detail
+        version: 1
+      - key: size-charts
+        version: 1
+      - key: size-chart-editor
+        version: 1
+      - key: size-chart-templates
+        version: 1
 
 security:
   jwt:
