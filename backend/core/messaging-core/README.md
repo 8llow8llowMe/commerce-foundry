@@ -13,7 +13,7 @@ Kafka 메시징 공통 모듈 (#306). 설계 기준은 #304 설계 댓글 A 절�
 1. `implementation project(':core:messaging-core')`, 테스트는 `testImplementation testFixtures(project(':core:messaging-core'))`.
 2. `*PropertiesConfig` 에 `@Import(MessagingPropertiesConfig.class)`, `*BeansConfig` 에 `@Import(MessagingConfigurer.class)`.
 3. 서비스 스키마에 아래 세 테이블의 **엔티티 · 리포지토리 · 어댑터**를 두고, 어댑터가 SPI 를 구현해 빈으로 둔다 (엔티티는 서비스가 소유한다 — #304 A-3).
-   - 이벤트를 내면 `OutboxStore`, 받으면 `ProcessedEventStore`. 릴레이 단일 실행 락은 ShedLock 테이블이다.
+   - 이벤트를 내면 `OutboxStore`, 받으면 `ProcessedEventStore`. 릴레이 · 기록 정리의 단일 실행 락은 ShedLock 테이블이다 — 받기만 하는 서비스도 둔다(정리가 쓴다).
 4. `application.yml` 에 아래 설정을 둔다. 운영 DDL 은 서비스 DDL 스냅숏에서 나온다.
 
 ## 설정 (`commerce.messaging.*`, 0 이하 수치는 기동 실패)
@@ -25,12 +25,12 @@ Kafka 메시징 공통 모듈 (#306). 설계 기준은 #304 설계 댓글 A 절�
 | `service` | `spring.application.name` | 토픽 · 그룹 이름의 서비스 토막 |
 | `required-topics` | [] | 기동 때 있는지 확인할 토픽(`<서비스>.<이벤트>`). 없으면 뜨지 않는다 |
 | `max-payload-bytes` | 65536 | 봉투 한 건 상한 |
-| `outbox.relay.enabled` | true | 인스턴스 단위 스위치(API 전용 인스턴스는 끈다) |
+| `outbox.relay.enabled` | true | 인스턴스 단위 스위치(API 전용 인스턴스는 끈다). 끄면 릴레이와 기록 정리(outbox · inbox) 둘 다 이 인스턴스에서 돌지 않는다 |
 | `outbox.relay.interval` · `batch-size` · `max-batches-per-run` | 1s · 100 · 10 | |
 | `outbox.relay.publish-timeout` | 5s | 한 건 발행 응답 대기. 프로듀서 `max.block.ms`(토픽 메타데이터 대기)도 이 값이다 |
 | `outbox.relay.lock-at-most-for` | 30s | 단일 실행 락 상한. `publish-timeout` 의 두 배 이상이어야 하고, 한 주기는 이 값의 절반 안에서 끝난다 |
-| `outbox.relay.lock-table` | `shedlock` | 서비스 스키마를 붙인다(예 `orders.shedlock`) |
-| `outbox.cleanup.enabled` · `interval` · `retention` · `batch-size` | true · 1h · 7d · 1000 | 발행 완료 행 정리. 보존은 Kafka 보존(7일)과 맞춘다 |
+| `outbox.relay.lock-table` | `shedlock` | 서비스 스키마를 붙인다(예 `orders.shedlock`). 기록 정리 락도 이 테이블 · `lock-at-most-for` 를 쓴다 — outbox 없는 서비스도 적는다 |
+| `outbox.cleanup.enabled` · `interval` · `retention` · `batch-size` | true · 1h · 7d · 1000 | 발행 완료 outbox 행과 처리 기록(inbox) 정리. 키는 outbox 아래지만 inbox 정리에도 적용된다(하위 호환). `retention` 은 outbox 보존이고 Kafka 보존(7일)과 맞춘다 — 처리 기록 보존은 `inbox.retention` |
 | `inbox.retention` | 7d | 처리 기록 보존 — 토픽 보존 + 재시도 창 이상 |
 | `retry.attempts` · `initial-backoff` · `multiplier` · `max-backoff` | 5 · 1s · 2.0 · 30s | 컨슈머 재시도 |
 
@@ -56,8 +56,12 @@ shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock J
 
 - `markPublished` 는 `published_at is null` 조건부 UPDATE, `markFailed` 는 `publish_attempts + 1` 조건부 UPDATE — 메서드마다 자기 트랜잭션이다(릴레이가 트랜잭션 밖에서 부른다).
 - `append` · `ProcessedEventStore.exists` · `record` 는 호출자 트랜잭션에 합류한다.
-- inbox 첫 구현은 product-service `JpaProcessedEventStore`(#309)다. **처리 기록 정리(`deleteProcessedBefore`)는 outbox 릴레이 안에서만 돈다** — outbox 가 없는 서비스(지금 product)는
-  기록이 지워지지 않는다(후속 PR-0 에서 inbox 단독 정리를 더한다).
+- inbox 첫 구현은 product-service `JpaProcessedEventStore`(#309)다.
+- **기록 정리(`MessagingCleanup`)는 릴레이와 따로 돈다**(#378) — 서비스가 둔 저장소만 정리한다. outbox 가 있으면 발행 완료 행(`deletePublishedBefore`),
+  inbox 가 있으면 처리 기록(`deleteProcessedBefore`)을 `batch-size` 씩 지운다(한 주기 최대 100 배치). 받기만 하는 서비스(지금 product)도 정리가 돈다.
+  락 이름은 `commerce-messaging-outbox-cleanup` 이다(릴레이에 있던 때와 같다 — 롤링 배포 중 구 · 신 인스턴스가 같은 락을 쓴다).
+- 릴레이 · 정리는 전용 스레드 하나(`messaging-background`, `MessagingBackgroundLifecycle`)에서 돈다. 메시징(`enabled`) · 인스턴스 스위치(`outbox.relay.enabled`) 중
+  하나라도 꺼져 있으면 둘 다 돌지 않는다.
 
 ## 운영 전제
 

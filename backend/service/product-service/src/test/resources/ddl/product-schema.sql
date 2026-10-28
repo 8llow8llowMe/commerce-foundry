@@ -694,6 +694,29 @@
     comment on column product.product_size_row.size_label is
         '사이즈 이름';
 
+    create table product.shedlock (
+        name varchar(64) not null,
+        lock_until timestamp(6) with time zone not null,
+        locked_at timestamp(6) with time zone not null,
+        locked_by varchar(255) not null,
+        primary key (name)
+    );
+
+    comment on table product.shedlock is
+        '단일 실행 락 (ShedLock — 메시징 정리)';
+
+    comment on column product.shedlock.name is
+        '락 이름';
+
+    comment on column product.shedlock.lock_until is
+        '이 시각까지 락을 쥔다';
+
+    comment on column product.shedlock.locked_at is
+        '락을 잡은 시각';
+
+    comment on column product.shedlock.locked_by is
+        '락을 잡은 인스턴스 (호스트 이름)';
+
     create table product.size_chart_template (
         id bigint not null,
         created_at timestamp(6) with time zone not null,

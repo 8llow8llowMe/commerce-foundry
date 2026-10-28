@@ -128,13 +128,14 @@ public record MessagingProperties(
     }
 
     /**
-     * @param enabled 인스턴스 단위 스위치 — API 전용 인스턴스는 끈다. 전체 스위치는 {@code commerce.messaging.enabled}
+     * @param enabled 인스턴스 단위 스위치 — API 전용 인스턴스는 끈다. 끄면 릴레이와 기록 정리(outbox · inbox) 둘 다 이 인스턴스에서 돌지 않는다.
+     *                전체 스위치는 {@code commerce.messaging.enabled}
      * @param interval 릴레이 주기
      * @param batchSize 한 번에 읽는 행 수
      * @param maxBatchesPerRun 한 주기에 도는 배치 수 — 밀린 행을 한 주기에 다 비우려 하지 않는다
      * @param publishTimeout 한 건 발행 응답 대기 상한 — 프로듀서 {@code max.block.ms}(토픽 메타데이터 대기)도 이 값으로 맞춘다
-     * @param lockAtMostFor 단일 실행 락 상한 — 락을 쥔 인스턴스가 죽으면 이 시간 뒤 다른 인스턴스가 잇는다. 한 주기는 이 값의 절반 안에서 끝난다
-     * @param lockTable ShedLock 테이블(서비스 스키마, 예 {@code orders.shedlock})
+     * @param lockAtMostFor 단일 실행 락 상한 — 락을 쥔 인스턴스가 죽으면 이 시간 뒤 다른 인스턴스가 잇는다. 한 주기는 이 값의 절반 안에서 끝난다. 기록 정리 락도 이 값이다
+     * @param lockTable ShedLock 테이블(서비스 스키마, 예 {@code orders.shedlock}). 기록 정리도 같은 테이블을 쓴다 — 받기만 하는 서비스도 둔다
      */
     public record Relay(
         @DefaultValue("true") boolean enabled,
@@ -148,7 +149,13 @@ public record MessagingProperties(
     }
 
     /**
+     * 기록 정리 — 발행 완료 outbox 행과 처리 기록(inbox, 보존은 {@link Inbox#retention()})을 함께 지운다. 키는 {@code outbox} 아래지만
+     * 받기만 하는 서비스(outbox 없음)의 처리 기록 정리에도 적용된다(#378 — 하위 호환으로 키 이름을 두었다).
+     *
+     * @param enabled 끄면 outbox · inbox 정리 둘 다 돌지 않는다
+     * @param interval 정리 주기
      * @param retention 발행 완료 행 보존 — Kafka 보존(7일)과 맞춰 DLT 복구 때 outbox 에서 다시 낼 수 있게 한다
+     * @param batchSize 한 번에 지우는 행 수(outbox · inbox 각각)
      */
     public record Cleanup(
         @DefaultValue("true") boolean enabled,

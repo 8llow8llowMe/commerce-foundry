@@ -19,6 +19,7 @@ import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.StockReleaseReason;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationStatus;
 import com.commercefoundry.global.messaging.ProcessedEventRepository;
+import com.commercefoundry.messaging.config.MessagingBackgroundLifecycle;
 import com.commercefoundry.messaging.event.EventEnvelope;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
 import java.time.Duration;
@@ -105,6 +106,17 @@ class OrderStockReleaseFlowTest {
 
     @Autowired
     private DeadLetters deadLetters;
+
+    @Autowired
+    private MessagingBackgroundLifecycle messagingBackgroundLifecycle;
+
+    @Test
+    @DisplayName("받기만 하는 서비스라 릴레이는 없고 처리 기록 정리만 걸린다(#378)")
+    void runsInboxCleanupOnly() {
+        assertThat(messagingBackgroundLifecycle.runsCleanup()).isTrue();
+        assertThat(messagingBackgroundLifecycle.runsRelay()).isFalse();
+        assertThat(messagingBackgroundLifecycle.isRunning()).isTrue();
+    }
 
     @Test
     @DisplayName("order-expired 를 받으면 선점이 RELEASED(ORDER_EXPIRED) 가 되고 재고가 선점 수량만큼 한 번 돌아오며, 처리 기록이 한 행 남는다")
