@@ -168,6 +168,56 @@
     comment on column operations.notification.version is
         '낙관적 락 버전';
 
+    create table operations.onboarding_tour_progress (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        current_step integer,
+        finished_at timestamp(6) with time zone,
+        guide_key varchar(64) not null,
+        guide_version integer not null,
+        member_id bigint not null,
+        status varchar(16) not null check ((status in ('NOT_STARTED','IN_PROGRESS','COMPLETED','SKIPPED'))),
+        version bigint not null,
+        primary key (id),
+        constraint uk_onboarding_tour_progress_member_id_guide_key unique (member_id, guide_key),
+        constraint ck_onboarding_tour_progress_status check (status in ('IN_PROGRESS','COMPLETED','SKIPPED')),
+        constraint ck_onboarding_tour_progress_current_step check (current_step is null or current_step >= 0)
+    );
+
+    comment on table operations.onboarding_tour_progress is
+        '운영자별 안내 투어 진행 기록';
+
+    comment on column operations.onboarding_tour_progress.id is
+        '진행 기록 아이디 (Snowflake)';
+
+    comment on column operations.onboarding_tour_progress.created_at is
+        '생성 시각';
+
+    comment on column operations.onboarding_tour_progress.updated_at is
+        '수정 시각';
+
+    comment on column operations.onboarding_tour_progress.current_step is
+        '마지막으로 본 단계 (0부터). 모르면 null';
+
+    comment on column operations.onboarding_tour_progress.finished_at is
+        '완료 · 건너뜀이 된 시각. 끝나지 않았으면 null';
+
+    comment on column operations.onboarding_tour_progress.guide_key is
+        '안내 키 — 설정 허용 목록의 key ([a-z][a-z0-9-]{0,63})';
+
+    comment on column operations.onboarding_tour_progress.guide_version is
+        '기록한 안내 버전 (1부터). 설정 버전과 다르면 미시작으로 보인다';
+
+    comment on column operations.onboarding_tour_progress.member_id is
+        '운영자 (외부 FK: auth-service member.id)';
+
+    comment on column operations.onboarding_tour_progress.status is
+        '안내 상태 (IN_PROGRESS / COMPLETED / SKIPPED). 미시작은 행이 없다';
+
+    comment on column operations.onboarding_tour_progress.version is
+        '낙관적 락 버전';
+
     create table operations.outbox (
         id bigint not null,
         created_at timestamp(6) with time zone not null,

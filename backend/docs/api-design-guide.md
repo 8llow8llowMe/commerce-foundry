@@ -30,7 +30,7 @@
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
-| operations-service | — | `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**` |
+| operations-service | — | `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**`, `/api/v1/admin/onboarding/**` |
 
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
 상품 사이즈표(#216)의 고객 · 어드민 조회는 새 접두어가 아니다 — `GET /api/v1/products/{productId}/size-chart`,
@@ -883,3 +883,58 @@ COMMIT;
 
 FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가하고 재시작 오류를 안내한다.
 인증 계약 변경이므로 PR에 FE 리뷰어 seonghoho를 요청한다.
+
+## 운영자 온보딩 계약 (#357)
+
+어드민 안내 투어(#228)의 진행을 브라우저가 아니라 운영자별로 서버에 둔다. 두 API 모두 `hasRole('ADMIN')` 이고 operations-service 다(게이트웨이 `ServiceRoute.OPERATIONS`,
+`/api/v1/admin/onboarding/**`). 운영자는 access 토큰의 memberId 로만 정한다 — 경로 · 본문으로 받지 않아 남의 기록을 읽거나 쓸 수 없다.
+
+| API | 입력 | 응답 dataBody |
+|---|---|---|
+| `GET /api/v1/admin/onboarding/me` | — | `{tours, tasks}` — `tours` 는 배포된 투어 전부(설정 순서), `tasks` 는 아직 항상 `[]` |
+| `PUT /api/v1/admin/onboarding/me/tours/{guideKey}` | `{guideVersion, status, currentStep}` | tour 항목 하나 |
+
+- tour 항목은 `{guideKey, guideVersion, status{code,name,description}, currentStep, finishedAt}` 다. `guideVersion` 은 지금 배포된 버전, `finishedAt` 은 UTC ISO 다.
+  status 는 `NOT_STARTED` · `IN_PROGRESS` · `COMPLETED` · `SKIPPED` 다. **안내를 본 기록일 뿐 실제 업무 완료가 아니다** — 업무 완료(`tasks`)는 담당 서비스의 사실로만 판정한다(#357 PR-B).
+- 허용 목록은 yml `operations.onboarding.guides`(key · version)다. key 는 FE 투어 id(`tours.ts`)에서 `-v1` 꼬리를 뗀 것이다. 안내를 바꿔 다시 보여 주려면 version 을 올린다.
+- **미시작은 행이 없다.** 기록이 없거나 기록 버전이 배포 버전과 다르면 응답에서 `NOT_STARTED` + 배포 버전이다.
+- 기록은 합친다(다른 기기 · 동시 탭). 같은 본문을 다시 보내도 결과가 같다(멱등).
+  - 같은 버전 — 순위 `NOT_STARTED < IN_PROGRESS < {COMPLETED, SKIPPED}` 가 내려가지 않는다. 끝난 기록에 `IN_PROGRESS` 가 오면 그대로다. `SKIPPED → COMPLETED` 만 허용하고
+    `COMPLETED → SKIPPED` 는 그대로다. 진행 중끼리는 `currentStep` 이 큰 쪽이다. 완료 · 건너뜀이 되는 순간 `finishedAt` 을 남긴다.
+  - `status=NOT_STARTED` 는 재실행 — **버전과 관계없이** 그 투어 기록을 지우고 배포 버전의 `NOT_STARTED` 를 낸다(없어도 같다). 실제 상품 · 설정과 업무 사실은 건드리지 않는다.
+- **버전 규칙** (재실행이 아닌 기록) — 요청 버전은 배포 버전과 같아야 한다.
+
+  | 요청 버전 vs 배포 버전 | 결과 |
+  |---|---|
+  | 요청 > 배포 | 400 `ONBOARDING_103` (배포되지 않은 안내) |
+  | 요청 < 배포 | 409 `ONBOARDING_020` (옛 번들 — 저장하지 않는다) |
+  | 요청 = 배포, 기록 없음 | 새 기록 |
+  | 요청 = 배포, 기록 버전 < 요청 | 요청으로 교체 (안내가 새 버전으로 바뀜) |
+  | 요청 = 배포, 기록 버전 = 요청 | 위 규칙으로 병합 |
+  | 요청 = 배포, 기록 버전 > 배포 | 그 기록을 없는 것으로 보고 요청으로 교체 (배포 버전 롤백) |
+
+- **배포 버전은 내리지 않는 것을 권장한다.** 내려도 위 마지막 줄로 복구된다 — 롤백 직후 GET 은 그 투어를 `NOT_STARTED` 로 보이고, 첫 기록이 옛 행을 교체한다.
+- 동시 갱신은 낙관 락(`version`)과 `(member_id, guide_key)` 유니크 키로 막는다. 진 쪽은 새 트랜잭션에서 다시 읽어 합치고(최대 3번), 그래도 지면 409 `ONBOARDING_021` 이다.
+- **FE 동작별 요청**
+  - "다시 보기" — 그 투어에 `status=NOT_STARTED` 를 보낸 뒤 진행을 기록한다.
+  - "전체 초기화" — 투어마다 `status=NOT_STARTED` 를 하나씩 보낸다(일괄 API 없음). 일부가 실패하면 실패한 투어만 다시 보낸다 — 재실행은 멱등이다.
+  - 재실행 뒤에도 열려 있던 다른 탭이 이후 진행을 보고하면 다시 기록된다. 의도한 동작이다 — 재실행은 "지금까지 본 기록을 지운다" 이지 이후 기록을 막지 않는다.
+- **FE 폴백 · 오류 대응**
+  - 404 `ONBOARDING_001`(허용 목록에 없는 투어 · 아직 배포되지 않은 서버) — 서버 기록 없이 기존처럼 로컬 저장으로 진행한다.
+  - 409 `ONBOARDING_020` — GET 을 **한 번** 다시 불러온다. 응답의 `guideVersion` 이 여전히 번들의 투어 버전과 다르면 번들 갱신 대상이다(새로고침 안내).
+    재로드를 무한 반복하지 않는다 — 그 세션에서는 서버 기록 없이 로컬 상태로 진행한다.
+  - 409 `ONBOARDING_021` · 5xx · 네트워크 오류 — 로컬 상태를 유지한 채 나중에 다시 보낸다.
+
+| 오류 | HTTP | 의미 |
+|---|---|---|
+| ONBOARDING_001 | 404 | 허용 목록에 없는 guideKey |
+| ONBOARDING_020 | 409 | 배포 버전보다 오래된 guideVersion (옛 번들) |
+| ONBOARDING_021 | 409 | 다른 기기 · 탭과 계속 겹쳐 반영하지 못함 — 다시 시도 |
+| ONBOARDING_100 | 400 | 깨진 JSON · 범위 밖 enum · 타입 불일치(폴백) |
+| ONBOARDING_101 | 400 | guideKey 형식(`^[a-z][a-z0-9-]{0,63}$`) |
+| ONBOARDING_102 | 400 | guideVersion 필수 · 1 이상 |
+| ONBOARDING_103 | 400 | 배포되지 않은 guideVersion |
+| ONBOARDING_104 | 400 | status 필수 |
+| ONBOARDING_105 | 400 | currentStep 0 ~ 200 |
+| ONBOARDING_198 | 400 | 파라미터 타입 불일치 |
+| ONBOARDING_199 | 400 | 필수 파라미터 없음 |
