@@ -33,7 +33,11 @@ public class AiException extends RuntimeException {
         /** 입력이 {@code ai.max-input-chars} 를 넘는다 — 보내지 않았다. */
         INPUT_TOO_LONG(false, "입력이 길이 상한을 넘어 보내지 않았습니다"),
         /** 개인정보 마스킹에 실패했다 — 보내지 않았다. */
-        MASKING_FAILED(false, "개인정보 마스킹에 실패해 보내지 않았습니다");
+        MASKING_FAILED(false, "개인정보 마스킹에 실패해 보내지 않았습니다"),
+        /** 계량 인터셉터가 사용 한도(월 한도 등)를 넘는다고 막았다 — 보내지 않았다. 한도가 풀리기 전에는 다시 시도해도 같다. */
+        BUDGET_EXCEEDED(false, "AI 사용 한도를 넘어 보내지 않았습니다"),
+        /** 계량 인터셉터가 사용량을 기록 · 예약하지 못했다(원장 장애) — 보내지 않았다. 일시적이라 다시 시도한다. */
+        METERING_FAILED(true, "사용량을 기록하지 못해 보내지 않았습니다");
 
         private final boolean retryable;
         private final String description;

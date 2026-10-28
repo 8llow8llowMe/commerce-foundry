@@ -1,3 +1,9 @@
+plugins {
+    // 다른 모듈 테스트가 같이 쓰는 Messages API 루프백 스텁 (src/testFixtures — 사용량 원장 흐름 테스트 등).
+    // 소비자는 testImplementation testFixtures(project(':core:ai-core')) 로만 받는다 — 실행 클래스패스에 들어가지 않는다
+    id 'java-test-fixtures'
+}
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot'
     implementation 'org.slf4j:slf4j-api'

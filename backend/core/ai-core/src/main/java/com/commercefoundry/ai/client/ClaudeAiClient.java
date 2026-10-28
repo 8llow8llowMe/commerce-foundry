@@ -17,8 +17,14 @@ import com.anthropic.models.messages.StopReason;
 import com.anthropic.models.messages.StructuredTextBlock;
 import com.anthropic.models.messages.TextBlock;
 import com.anthropic.models.messages.TextBlockParam;
+import com.anthropic.models.messages.Usage;
 import com.commercefoundry.ai.client.AiException.Reason;
 import com.commercefoundry.ai.masking.PiiMasker;
+import com.commercefoundry.ai.metering.AiCallContext;
+import com.commercefoundry.ai.metering.AiCallHandle;
+import com.commercefoundry.ai.metering.AiCallInterceptor;
+import com.commercefoundry.ai.metering.AiCallOutcome;
+import com.commercefoundry.ai.metering.AiCallOutcome.Status;
 import com.commercefoundry.ai.properties.AiProperties;
 import com.commercefoundry.ai.properties.AiProperties.ResolvedFeature;
 import java.util.ArrayList;
@@ -26,6 +32,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -34,7 +41,8 @@ import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 공식 Java SDK 로 Messages API 를 부른다. 순서가 고정이다 — 글자 · 이미지 장수 상한 → 마스킹 → 동시 상한 자리 얻기 → 호출(SDK 재시도 포함) → 결과 · 오류 번역.
+ * 공식 Java SDK 로 Messages API 를 부른다. 순서가 고정이다 — 글자 · 이미지 장수 상한 → 마스킹 → 계량 {@code before} → 동시 상한 자리 얻기 → 호출(SDK 재시도 포함)
+ * → 결과 · 오류 번역 → 자리 반납 → 계량 {@code after}({@link AiCallInterceptor}).
  * 이미지는 사용자 메시지 앞의 base64 블록이다. 바이트는 가리지 못하고 로그에 싣지 않는다.
  * 마스킹은 길이에 비례하는 시간만 쓰고({@code PiiMasker}), 길이 상한이 그 앞에서 입력 크기를 묶는다. 텍스트 · 구조화 호출이 같은 순서를 지난다.
  *
@@ -58,14 +66,19 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
     private final AnthropicClient client;
     private final AiProperties properties;
     private final PiiMasker masker;
+    private final AiCallInterceptor interceptor;
     private final Semaphore permits;
     /** 결과 타입 → SDK 가 만든 JSON 스키마 형식. 스키마 생성 · 지원 여부 검사는 타입마다 한 번만 한다. */
     private final Map<Class<?>, JsonOutputFormat> formats = new ConcurrentHashMap<>();
 
-    ClaudeAiClient(AnthropicClient client, AiProperties properties, PiiMasker masker) {
+    /**
+     * @param interceptor 계량 인터셉터. {@code null} 이면 계량하지 않는다 — {@code ai.allow-unmetered} 일 때만 {@code AiClients} 가 이렇게 만든다
+     */
+    ClaudeAiClient(AnthropicClient client, AiProperties properties, PiiMasker masker, AiCallInterceptor interceptor) {
         this.client = client;
         this.properties = properties;
         this.masker = masker;
+        this.interceptor = interceptor;
         this.permits = new Semaphore(properties.maxConcurrency(), true);
     }
 
@@ -79,7 +92,7 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
             if (text.isEmpty()) {
                 throw new AiException(Reason.INVALID_RESPONSE, request.feature());
             }
-            return new AiResult(text, message.model().asString(), message.usage().inputTokens(), message.usage().outputTokens(), stopReason, message.id());
+            return new AiResult(text, message.model().asString(), usageOf(message), stopReason, message.id());
         });
     }
 
@@ -119,8 +132,7 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
                 // null 은 통과가 아니다(구현 실수로 검증이 빠지지 않게). 문제 설명은 응답 값을 품을 수 있어 개수만 남긴다
                 throw invalid(request.feature(), "validation problems=" + (problems == null ? "null" : problems.size()));
             }
-            return new AiStructuredResult<>(value, message.model().asString(), message.usage().inputTokens(), message.usage().outputTokens(),
-                stopReason, message.id());
+            return new AiStructuredResult<>(value, message.model().asString(), usageOf(message), stopReason, message.id());
         });
     }
 
@@ -138,47 +150,131 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
                 feature, Reason.INPUT_TOO_LONG, inputChars, properties.maxInputChars(), request.images().size(), AiImage.MAX_COUNT);
             throw new AiException(Reason.INPUT_TOO_LONG, feature);
         }
-        MessageCreateParams params = params(request, properties.resolve(feature), format);
+        ResolvedFeature settings = properties.resolve(feature);
+        Masked masked = mask(request);
+        MessageCreateParams params = params(request, masked, settings, format);
+        AiCallContext context = new AiCallContext(UUID.randomUUID().toString(), feature, request.promptVersion(), request.callerRef(), settings.model(),
+            settings.maxTokens(), masked.length(), request.images().size(), format != null);
 
-        acquire(feature);
+        // 계량 → 자리 순서다. 한도에 막힌 호출이 동시 상한 자리를 잡지 않게 한다
+        AiCallHandle handle = before(context);
+        try {
+            acquire(feature);
+        } catch (AiException busy) {
+            // 보내지 않았다 — 예약을 풀 수 있게 알린다(비용 0)
+            after(handle, new AiCallOutcome(Status.NOT_SENT, null, settings.model(), busy.reason(), null, null, 0L), feature);
+            throw busy;
+        }
+
         long startedAt = System.nanoTime();
+        Status status = null;
+        Reason reason = null;
+        Integer statusCode = null;
+        AiUsage usage = null;
+        String answeredModel = settings.model();
+        String messageId = null;
         try {
             Message message = client.messages().create(params);
+            // mapper 가 거절 · 잘림 · 형식 오류로 던지기 전에 사용량을 잡는다 — 그 응답도 과금됐다
+            usage = usageOf(message);
+            answeredModel = message.model().asString();
+            messageId = message.id();
             String stopReason = message.stopReason().map(StopReason::asString).orElse(null);
             if (StopReason.REFUSAL.asString().equals(stopReason)) {
                 throw new AiException(Reason.REFUSED, feature);
             }
             R result = mapper.apply(message, stopReason);
-            log.info("ai call completed. feature={}, promptVersion={}, structured={}, imageCount={}, model={}, inputTokens={}, outputTokens={}, stopReason={}, elapsedMs={}",
-                feature, request.promptVersion(), format != null, request.images().size(), message.model().asString(), message.usage().inputTokens(),
-                message.usage().outputTokens(), stopReason, elapsedMs(startedAt));
+            status = Status.COMPLETED;
+            log.info("ai call completed. feature={}, promptVersion={}, structured={}, imageCount={}, model={}, inputTokens={}, outputTokens={}, "
+                    + "cacheCreationInputTokens={}, cacheReadInputTokens={}, stopReason={}, elapsedMs={}",
+                feature, request.promptVersion(), format != null, request.images().size(), answeredModel, usage.inputTokens(), usage.outputTokens(),
+                usage.cacheCreationInputTokens(), usage.cacheReadInputTokens(), stopReason, elapsedMs(startedAt));
             return result;
         } catch (AiException e) {
+            // 응답은 받았지만 쓰지 못했다 — 과금됐다
+            status = Status.UNUSABLE;
+            reason = e.reason();
             log.warn("ai call failed. feature={}, promptVersion={}, reason={}, elapsedMs={}", feature, request.promptVersion(), e.reason(), elapsedMs(startedAt));
             throw e;
         } catch (AnthropicServiceException e) {
-            throw failed(request, reasonOf(e.statusCode()), e.statusCode(), e.errorType().map(Object::toString).orElse(null), startedAt);
+            status = Status.FAILED;
+            reason = reasonOf(e.statusCode());
+            statusCode = e.statusCode();
+            throw failed(request, reason, statusCode, e.errorType().map(Object::toString).orElse(null), startedAt);
         } catch (AnthropicIoException | AnthropicRetryableException e) {
-            throw failed(request, Reason.UNAVAILABLE, null, null, startedAt);
+            status = Status.TIMEOUT;
+            reason = Reason.UNAVAILABLE;
+            throw failed(request, reason, null, null, startedAt);
         } catch (AnthropicException e) {
-            // 응답을 해석하지 못했다(AnthropicInvalidDataException 등)
-            throw failed(request, Reason.INVALID_RESPONSE, null, null, startedAt);
+            // 응답을 해석하지 못했다(AnthropicInvalidDataException 등). 사용량을 이미 읽었으면 과금된 응답이다(UNUSABLE, 실측),
+            // 사용량부터 못 읽었으면 과금 여부를 모르니 타임아웃과 같이 예상치로 남긴다
+            status = usage != null ? Status.UNUSABLE : Status.TIMEOUT;
+            reason = Reason.INVALID_RESPONSE;
+            throw failed(request, reason, null, null, startedAt);
         } finally {
             permits.release();
+            // 자리를 반납한 뒤 알린다 — 원장 기록이 느려도 다른 호출을 막지 않는다. 예상 밖 예외(status 없음)는 응답을 받았는지로 나눈다
+            Status resolved = status != null ? status : (usage != null ? Status.UNUSABLE : Status.TIMEOUT);
+            AiUsage measured = resolved == Status.COMPLETED || resolved == Status.UNUSABLE ? usage : null;
+            after(handle, new AiCallOutcome(resolved, measured, answeredModel, reason, statusCode, messageId, elapsedMs(startedAt)), feature);
+        }
+    }
+
+    /** 인터셉터가 없으면(허용된 미계량) {@code null} 핸들이다. {@link AiException} 이 아닌 예외는 {@code METERING_FAILED} 로 바꾼다 — 타입만 남긴다. */
+    private AiCallHandle before(AiCallContext context) {
+        if (interceptor == null) {
+            return null;
+        }
+        try {
+            return interceptor.before(context);
+        } catch (AiException e) {
+            log.warn("ai call rejected. feature={}, promptVersion={}, reason={}", context.feature(), context.promptVersion(), e.reason());
+            throw e;
+        } catch (RuntimeException e) {
+            log.warn("ai metering failed. feature={}, stage=before, cause={}", context.feature(), e.getClass().getName());
+            throw new AiException(Reason.METERING_FAILED, context.feature());
+        }
+    }
+
+    /** 결과 · 원래 예외를 깨지 않는다 — 기록 실패는 WARN(타입만)이고, 남은 예약은 호스트의 회수 스케줄러가 정리한다. */
+    private void after(AiCallHandle handle, AiCallOutcome outcome, String feature) {
+        if (interceptor == null) {
+            return;
+        }
+        try {
+            interceptor.after(handle, outcome);
+        } catch (RuntimeException e) {
+            log.warn("ai metering failed. feature={}, stage=after, status={}, cause={}", feature, outcome.status(), e.getClass().getName());
+        }
+    }
+
+    /** SDK 의 사용량을 옮긴다. 캐시 토큰은 API 가 싣지 않으면 0 이다. */
+    static AiUsage usageOf(Message message) {
+        Usage usage = message.usage();
+        return new AiUsage(usage.inputTokens(), usage.outputTokens(), usage.cacheCreationInputTokens().orElse(0L), usage.cacheReadInputTokens().orElse(0L));
+    }
+
+    /** 가린 시스템 · 사용자 프롬프트. */
+    private record Masked(String system, String prompt) {
+
+        long length() {
+            return (system == null ? 0L : system.length()) + prompt.length();
         }
     }
 
     /** 마스킹은 여기서 한다 — 실패하면 보내지 않는다. 원인 예외는 잇지 않는다(메시지에 입력 조각이 들어갈 수 있다). */
-    private MessageCreateParams params(AiRequest request, ResolvedFeature settings, JsonOutputFormat format) {
-        String system;
-        String prompt;
+    private Masked mask(AiRequest request) {
         try {
-            system = masker.mask(request.system(), request.sensitiveValues());
-            prompt = masker.mask(request.prompt(), request.sensitiveValues());
+            return new Masked(masker.mask(request.system(), request.sensitiveValues()), masker.mask(request.prompt(), request.sensitiveValues()));
         } catch (RuntimeException | StackOverflowError e) {
             log.warn("ai masking failed. feature={}, cause={}", request.feature(), e.getClass().getName());
             throw new AiException(Reason.MASKING_FAILED, request.feature());
         }
+    }
+
+    private MessageCreateParams params(AiRequest request, Masked masked, ResolvedFeature settings, JsonOutputFormat format) {
+        String system = masked.system();
+        String prompt = masked.prompt();
 
         MessageCreateParams.Builder builder = MessageCreateParams.builder()
             .model(settings.model())

@@ -76,7 +76,7 @@ class PromptTemplatesTest {
     @DisplayName("템플릿이 ai.max-input-chars 보다 길면 기동 때 실패한다 — 그대로 두면 모든 호출이 INPUT_TOO_LONG 이다")
     void rejectsTemplateLongerThanInputLimit() {
         AiProperties tight = new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null,
-            Map.of("size-chart", new Feature(null, null, null, 1)), null, 10, null);
+            Map.of("size-chart", new Feature(null, null, null, 1)), null, 10, null, null);
 
         assertThatThrownBy(() -> new PromptTemplates(classLoader, tight)).isInstanceOf(IllegalStateException.class).hasMessageContaining("max-input-chars");
     }
@@ -107,6 +107,6 @@ class PromptTemplatesTest {
     }
 
     private static AiProperties properties(Map<String, Feature> features) {
-        return new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null, features, null, null, null);
+        return new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null, features, null, null, null, null);
     }
 }

@@ -1,12 +1,13 @@
 package com.commercefoundry.ai.client;
 
-import static com.commercefoundry.ai.client.StubMessagesServer.error;
-import static com.commercefoundry.ai.client.StubMessagesServer.ok;
+import static com.commercefoundry.ai.support.StubMessagesServer.error;
+import static com.commercefoundry.ai.support.StubMessagesServer.ok;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.ai.client.AiException.Reason;
 import com.commercefoundry.ai.properties.AiProperties;
+import com.commercefoundry.ai.support.StubMessagesServer;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -155,7 +156,7 @@ class ClaudeAiClientTest {
     void readTimeoutIsUnavailable() {
         server.reply(ok("late", "end_turn").delayed(1_500));
         AiProperties properties = new AiProperties(true, "test-key", server.baseUrl(), null, null,
-            Duration.ofSeconds(2), Duration.ofMillis(300), Duration.ofSeconds(2), 0, 4, Duration.ofSeconds(1), false, Map.of(), null, null, true);
+            Duration.ofSeconds(2), Duration.ofMillis(300), Duration.ofSeconds(2), 0, 4, Duration.ofSeconds(1), false, Map.of(), null, null, true, true);
 
         assertFailure(() -> AiClients.create(properties).complete(AiRequest.of("size-chart", null, "prompt")), Reason.UNAVAILABLE, null);
     }
@@ -183,7 +184,7 @@ class ClaudeAiClientTest {
         CountDownLatch release = new CountDownLatch(1);
         server.reply(ok("first", "end_turn").heldUntil(release));
         AiProperties properties = new AiProperties(true, "test-key", server.baseUrl(), null, null,
-            Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(5), 0, 1, Duration.ofMillis(200), false, Map.of(), null, null, true);
+            Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(5), 0, 1, Duration.ofMillis(200), false, Map.of(), null, null, true, true);
         AiClient client = AiClients.create(properties);
 
         CompletableFuture<AiResult> first = CompletableFuture.supplyAsync(() -> client.complete(AiRequest.of("size-chart", null, "prompt")));
@@ -223,7 +224,7 @@ class ClaudeAiClientTest {
     @Test
     @DisplayName("꺼져 있으면 언제나 DISABLED(재시도 불가)이고 API 에 닿지 않는다")
     void disabled() {
-        AiClient client = AiClients.create(new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
+        AiClient client = AiClients.create(new AiProperties(false, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
 
         assertFailure(() -> client.complete(AiRequest.of("size-chart", null, "prompt")), Reason.DISABLED, null);
         assertThat(server.received()).isEmpty();
@@ -264,7 +265,7 @@ class ClaudeAiClientTest {
     @DisplayName("시스템 + 사용자 프롬프트가 글자 수 상한을 넘으면 INPUT_TOO_LONG(재시도 불가)이고 마스킹 · 호출을 하지 않는다")
     void rejectsTooLongInput() {
         AiProperties properties = new AiProperties(true, "test-key", server.baseUrl(), null, null,
-            Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(5), 0, 4, Duration.ofSeconds(1), false, Map.of(), null, 10, true);
+            Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(5), 0, 4, Duration.ofSeconds(1), false, Map.of(), null, 10, true, true);
 
         assertFailure(() -> AiClients.create(properties).complete(AiRequest.of("size-chart", "12345", "678901")), Reason.INPUT_TOO_LONG, null);
         assertThat(server.received()).isEmpty();
@@ -283,7 +284,7 @@ class ClaudeAiClientTest {
     private AiProperties properties(Map<String, AiProperties.Feature> features, int maxRetries, int maxConcurrency, boolean refusalFallback) {
         return new AiProperties(true, "test-key", server.baseUrl(), null, null,
             Duration.ofSeconds(2), Duration.ofSeconds(5), Duration.ofSeconds(5), maxRetries, maxConcurrency, Duration.ofSeconds(1), refusalFallback,
-            features, null, null, true);
+            features, null, null, true, true);
     }
 
     private static AiClient client(AiProperties properties) {
