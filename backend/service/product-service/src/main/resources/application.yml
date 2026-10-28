@@ -25,6 +25,27 @@ spring:
     resources:
       # 정적 리소스를 내지 않는다. 켜 두면 Swagger 를 닫아도 /webjars/swagger-ui/** 가 그대로 열린다 (Swagger UI 는 springdoc 이 따로 낸다)
       add-mappings: false
+  # Kafka 접속 (deploy-guide.md §4-4). 주소는 Vault 값이다 — 저장소에 쓰지 않는다. 앱은 토픽을 만들지 않는다
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+    security:
+      protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+    admin:
+      auto-create: false
+
+# Kafka 메시징 (core/messaging-core/README.md). product-service 는 받기만 한다(outbox 없음).
+# 꺼져 있으면 주문 만료 · 취소 이벤트 컨슈머가 뜨지 않고, 선점은 지금처럼 만료 스윕 · internal 해제가 푼다 (order-flow-guide.md §3-5)
+commerce:
+  messaging:
+    enabled: ${MESSAGING_ENABLED:false}
+    namespace: ${KAFKA_NAMESPACE:}
+    # 토픽 · 그룹 이름의 서비스 토막 — 그룹 <ns>.product.order-stock-release (docker/kafka/topics.txt)
+    service: product
+    required-topics:
+      - order.order-expired
+      - order.order-expired.dlt
+      - order.order-canceled
+      - order.order-canceled.dlt
 
 eureka:
   client:
@@ -117,3 +138,7 @@ logging:
     # Eureka 에 닿지 않으면 이 데코레이터가 INFO · WARN 로그에 defaultZone 원문(비밀번호 포함)을 남긴다 (#248, security-guide.md §12-3).
     # 연결 실패 신호는 RetryableEurekaHttpClient 의 WARN 이 남긴다. com.netflix.discovery 를 DEBUG 로 올리지 않는다 — 같은 이유로 비밀번호가 나온다
     com.netflix.discovery.shared.transport.decorator.RedirectingEurekaHttpClient: ERROR
+    # kafka-clients 의 "*Config values" INFO 로그에 접속 주소가 찍힌다 (messaging-core README)
+    org.apache.kafka.clients.producer.ProducerConfig: WARN
+    org.apache.kafka.clients.consumer.ConsumerConfig: WARN
+    org.apache.kafka.clients.admin.AdminClientConfig: WARN

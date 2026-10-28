@@ -249,7 +249,7 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 |------|------|
 | `POST /internal/v1/stock-reservations` | 선점 — 요청 `{ orderId, items: [{ skuId, quantity }] }` (항목 1~100개, 수량 1~10000) |
 | `POST /internal/v1/stock-reservations/{reservationId}/confirmation` | 확정 (결제 완료) |
-| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (결제 전 취소 · 주문 생성 실패) |
+| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (주문 생성 실패 보상. 주문 만료 · 결제 전 취소는 이벤트 — §3-5, 발행 전까지는 이 API) |
 | `POST /internal/v1/stock-restorations` | 결제 후 복원 (결제 후 취소 · 반품 입고, #85) — 아래 "결제 후 복원" |
 
 선점 · 확정 · 해제 응답은 같은 모양이고 신규 · 기존 모두 200 이다 —
@@ -303,8 +303,14 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 
 ```text
 RESERVED ──확정──▶ CONFIRMED
-   └──────해제 · 만료──▶ RELEASED (release_reason = RELEASED_BY_CALLER / EXPIRED)
+   └──────해제 · 만료──▶ RELEASED (release_reason = RELEASED_BY_CALLER / EXPIRED / ORDER_EXPIRED / ORDER_CANCELED)
 ```
+
+| `release_reason` | 누가 |
+|------------------|------|
+| `RELEASED_BY_CALLER` | internal 해제 API (주문 생성 실패 보상) |
+| `EXPIRED` | 만료 스윕 (안전망) |
+| `ORDER_EXPIRED` · `ORDER_CANCELED` | 주문 만료 · 결제 전 취소 이벤트 컨슈머 (§3-5) |
 
 | 현재 | confirm | release |
 |------|---------|---------|
@@ -322,6 +328,8 @@ RESERVED ──확정──▶ CONFIRMED
   같은 실행이 그 건으로 배치를 다시 채우지 않는다(head-of-line blocking 없음). 실패한 건은 다음 실행이 다시 읽는다.
   한 건의 실패는 로그만 남기고 다음 건으로 간다 — 409 `PRODUCT_026`(확정 · 다른 인스턴스와 경합)은 WARN, 그 밖의 업무 오류 · 예상 못 한 예외는 ERROR 이고
   업무 오류면 오류 코드를 남긴다. 확정과 만료가 겹치면 `@Version` 이 하나만 통과시킨다. 인스턴스가 여럿이어도 분산 락을 두지 않는다.
+  **역할은 안전망이다** — 주문 만료 · 결제 전 취소 이벤트(§3-5)가 먼저 풀고, 이벤트가 오지 않은 선점(발행 전 과도기 · order-service 장애 · DLT)을 TTL 뒤 푼다.
+  order-service 가 이벤트를 내기 시작하면 grace(TTL 뒤 여유) · 이벤트보다 먼저 푼 건의 ERROR 로그를 그 PR 에서 더한다.
 - **만료 후 확정** — 스케줄러가 먼저 풀었으면 확정은 409 `PRODUCT_025` 다. order-service 의 처리는 아래 §3-4 를 따른다.
 - 허용 전이 표 밖의 요청은 도메인이 `StockReservationTransitionException`(현재 상태 · 시도한 동작)으로 알리고, `StockReservationProcessor` 가
   `PRODUCT_024` · `PRODUCT_025` 를 붙인다 — domain 은 application 의 오류 코드를 모른다 (`coding-conventions.md` §8-1).
@@ -371,8 +379,45 @@ RESERVED ──확정──▶ CONFIRMED
   잡고 계속하면 커밋에서 실패한다. order-service 도 Feign 409 를 받은 트랜잭션에서 주문 상태를 바꾸고 재시도까지 하지 말고, 재시도는 새 트랜잭션에서 한다.
 - **확정 · 해제 · 복원은 `reservationId` 로 대상 선점을 식별한다** — 서비스 토큰(`SERVICE_order-service`)을 가진 호출자를 신뢰한다는 전제다. order-service 는 자기 주문의
   `reservationId` 만 저장 · 사용한다.
+- **주문 만료 · 결제 전 취소의 해제는 이벤트다** (§3-5) — 주문 상태 전이와 같은 트랜잭션으로 outbox 에 `order-expired` · `order-canceled` 를 낸다.
+  internal 해제(`/release`)는 응답으로 분기해야 하는 **주문 생성 실패 보상**에 남는다. 이벤트 발행(#13 뒤 후속 PR) 전까지는 지금처럼 internal 해제 · 만료 스윕이 푼다.
 - **오류 메시지를 고객 응답에 그대로 넘기지 않는다.** `PRODUCT_021` · `PRODUCT_022` · `PRODUCT_028` 메시지에는 SKU 아이디 목록이 실린다 — order-service 는 자기 오류 코드
   (예: `ORDER_*`)와 고객용 문구로 바꾸고, 필요한 SKU 정보는 자기 주문 항목에서 골라 보여 준다.
+
+### 3-5. 주문 만료 · 취소 이벤트 → 선점 해제 (#309)
+
+order-service 가 낸 주문 만료 · 결제 전 취소를 product-service 컨슈머(`OrderStockReleaseEventListener`)가 받아 선점을 푼다. 공통 규칙은 `coding-conventions.md` §12 ·
+`core/messaging-core/README.md` 다. `MESSAGING_ENABLED=false`(기본)면 컨슈머가 뜨지 않고 지금처럼 internal 해제 · 만료 스윕이 푼다.
+
+| 항목 | 값 |
+|------|----|
+| 토픽 | `<ns>.order.order-expired` · `<ns>.order.order-canceled` (+ `.dlt`, `docker/kafka/topics.txt`) — 파티션 키는 주문 아이디 문자열 |
+| 봉투 | `eventType` = `order-expired` / `order-canceled`, `aggregateType` = `order`, `aggregateId` = 주문 아이디, `schemaVersion` = 1, `producer` = `order`. 발생 시각은 봉투 `occurredAt` |
+| 컨슈머 그룹 | `<ns>.product.order-stock-release` (두 토픽을 한 그룹이 받는다) |
+| 해제 사유 | `order-expired` → `ORDER_EXPIRED`, `order-canceled` → `ORDER_CANCELED` |
+
+payload (두 이벤트 모두 같은 모양 — **이 JSON 이 계약 정본이다**. product-service 리스너 테스트가 이 블록을 읽어 역직렬화한다):
+
+```json
+{ "orderId": "1840000000000000001", "reservationId": "1840000000000000002", "reason": "PAYMENT_TIMEOUT" }
+```
+
+- 아이디는 문자열이다(JS 정밀도, `JobRunMessage` 와 같다). **`reservationId` 가 해제 키**이고 `orderId` 는 교차 검증이다 — 주문 아이디로 풀면 §3-4 "만료 후 확정 → 같은 `orderId` 로 재선점"
+  뒤에 늦게 온 옛 `order-expired` 가 새 RESERVED 선점을 푼다. `reason` 은 order-service 소유 코드이고 product-service 는 읽지 않는다(모르는 필드는 무시).
+  SKU · 수량은 싣지 않는다 — product-service 가 선점 항목을 갖고 있다.
+- 처리 — 처리 기록(`processed_event`)과 해제 · 재고 복원이 한 트랜잭션이다(`IdempotentEventProcessor.process`). 전이 · 저장 순서는 §3-3 과 같다(상태 먼저 저장 → 복원).
+
+  | 결과 | 처리 |
+  |------|------|
+  | RESERVED → RELEASED + 재고 복원 | 정상 |
+  | 이미 RELEASED (스윕 · internal 해제가 먼저 풂, 같은 이벤트 재전달) | 정상 — 아무것도 바꾸지 않는다 |
+  | CONFIRMED (결제가 먼저 끝남) | WARN(eventId · reservationId · orderId) 후 정상 — 기록을 남기고 풀지 않는다 |
+  | 선점 없음 · `orderId` 불일치 · 아이디 형식 오류 · 모르는 새 버전 · 읽을 수 없는 봉투 | 계약 위반 — 재시도 없이 DLT, 기록 롤백 |
+  | 동시 변경 `PRODUCT_026` · DB 오류 | 컨슈머 안 재시도(`commerce.messaging.retry.*`) 뒤 DLT |
+- **internal 재조회를 하지 않는다** — `coding-conventions.md` §12 "재고를 바꾸는 컨슈머는 원본 서비스로 재조회" 의 예외다. 이 컨슈머는 RESERVED 를 푸는 일만 해 효과가 TTL 만료와 같고,
+  CONFIRMED 는 건드리지 않는다. 위조 이벤트의 최대 피해는 결제 대기 재고가 TTL 보다 일찍 풀리는 것이고, 그 주문의 확정은 `PRODUCT_025` → 재선점(§3-4)으로 흡수된다.
+  클러스터는 PLAINTEXT · ACL 없음이다 — SASL · ACL · 서명 헤더는 결제 이벤트(#308) 전에 다시 본다.
+- DLT 재처리는 사람이 한다(messaging-core README). DLT 에 남은 선점은 만료 스윕(안전망, §3-3)이 TTL 뒤 푼다.
 
 ## 4. 배송
 

@@ -3,6 +3,8 @@ dependencies {
     implementation project(':core:persistence-core')
     implementation project(':core:security-core')
     implementation project(':core:shared-commerce')
+    // 주문 만료 · 취소 이벤트 → 재고 선점 해제 컨슈머 · inbox (#309, order-flow-guide.md §3-5). 이벤트를 내지 않아 outbox · ShedLock 은 두지 않는다
+    implementation project(':core:messaging-core')
 
     // security-core 는 서블릿 · Boot 보안 자동설정을 compileOnly 로만 둔다 — 서블릿 서비스가 직접 선언한다 (security-guide.md §5-3)
     implementation 'org.springframework.boot:spring-boot-starter-security'
@@ -36,4 +38,15 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
+    // 가짜 inbox 저장소(InMemoryProcessedEventStore) · NoOpTransactionManager — 리스너 단위 테스트가 멱등 처리를 단언한다
+    testImplementation testFixtures(project(':core:messaging-core'))
+    // 재고 해제 흐름 테스트는 내장 Kafka(KRaft)로 돈다 — Docker 없는 로컬에서도 소비 · 중복 · DLT 를 실제로 본다(operations-service 와 같다)
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+}
+
+// 주문 만료 · 취소 이벤트의 계약 JSON 정본은 문서다(order-flow-guide.md §3-5) — OrderStockReleaseEventListenerTest 가 그 블록을 읽는다.
+// 문서만 바뀌어도 테스트가 빌드 캐시 · up-to-date 로 건너뛰어지지 않게 입력으로 선언한다. 경로는 구성 시점에 File 로 풀어 넘긴다(configuration cache 호환)
+def orderFlowContract = rootProject.file('docs/order-flow-guide.md')
+tasks.named('test') {
+    inputs.file(orderFlowContract).withPropertyName('orderFlowContract').withPathSensitivity(PathSensitivity.RELATIVE)
 }

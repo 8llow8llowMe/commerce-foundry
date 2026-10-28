@@ -78,7 +78,7 @@ com.commercefoundry
   |  |  |- in/webhook           외부 시스템 콜백 — PG 웹훅 등 (payment-service)
   |  |  |- in/scheduler         시각이 부르는 진입점 (@Scheduled — 재고 선점 만료, 미결제 주문 정리 등)
   |  |  |- in/bootstrap         기동이 부르는 진입점 (ApplicationRunner — 초기 관리자 시드 #6). 설정을 커맨드로 옮겨 UseCase 만 부른다
-  |  |  |- in/event             같은 서비스 안 ApplicationEvent 가 부르는 진입점 (작업 종료 → 알림 #213). UseCase 만 부른다
+  |  |  |- in/event             이벤트가 부르는 진입점 — 같은 서비스 안 ApplicationEvent(작업 종료 → 알림 #213)와 Kafka *EventListener(주문 만료 → 재고 해제 #309). UseCase 만 부른다
   |  |  \- out
   |  |     |- persistence
   |  |     |  |- entity
@@ -98,10 +98,10 @@ com.commercefoundry
   |  |  |- info
   |  |  |- mapper
   |  |  |- model
-  |  |  |- port/in              (*WebUseCase, *AdminUseCase, *InternalUseCase)
+  |  |  |- port/in              (*WebUseCase, *AdminUseCase, *InternalUseCase, *SchedulerUseCase, *EventUseCase)
   |  |  |- port/out             (+ query/*QueryResult)
   |  |  \- service
-  |  |     |- *WebFacade / *AdminFacade / *InternalFacade
+  |  |     |- *WebFacade / *AdminFacade / *InternalFacade / *SchedulerFacade / *EventFacade
   |  |     \- processor
   |  \- domain
   |     \- model
@@ -135,7 +135,8 @@ Info → Presenter → Response
 ### UseCase (port/in)
 
 - 진입점에서 필요한 유스케이스 계약을 정의한다. Controller 와 1:1 또는 매우 가까운 단위로 맞춘다.
-- 이름: `*WebUseCase`(고객) · `*AdminUseCase`(어드민) · `*InternalUseCase`(서비스 간)
+- 이름: `*WebUseCase`(고객) · `*AdminUseCase`(어드민) · `*InternalUseCase`(서비스 간) · `*SchedulerUseCase`(스케줄러, `in/scheduler`) ·
+  `*EventUseCase`(Kafka 이벤트 리스너, `in/event` — 예: product `StockEventUseCase`). 구현 Facade 도 같은 접두로 짓는다(`*SchedulerFacade` · `*EventFacade`).
 
 ### Facade
 
@@ -329,9 +330,11 @@ Info → Presenter → Response
 - **발행 정합성 = transactional outbox + 폴링 릴레이**(CDC · Debezium 은 쓰지 않는다 — 사용자 결정). 업무 트랜잭션과 같은 커밋으로 서비스 스키마의 `outbox` 에 행을 넣고,
   릴레이가 `published_at is null and available_at <= now` 를 id 순으로 읽어 발행한 뒤 `published_at` 을 조건부 UPDATE 로 기록한다. 발행은 트랜잭션 밖이다.
   다중 인스턴스는 단일 실행 락(ShedLock)으로 한 인스턴스만 릴레이를 돌려 같은 키의 발행 순서를 지킨다. 지연 발행(작업 예약 · 백오프)은 `available_at` 으로 한다.
-- **컨슈머는 멱등이다** — 수동 ack, at-least-once 전제. 상태를 바꾸는 트랜잭션 안에서 `processed_event(event_id PK)` 를 넣고 유니크 위반이면 이미 처리한 것으로 ack 한다.
+- **컨슈머는 멱등이다** — 수동 ack, at-least-once 전제. 상태를 바꾸는 트랜잭션 안에서 `processed_event` 를 넣는다 — `(consumer_group, event_id)` 유니크다.
+  처리 전에 `exists` 로 이미 처리한 이벤트를 건너뛰고, 동시에 두 번 받아 유니크 위반이 나면 그 트랜잭션이 롤백 → 컨슈머 재시도 → `exists` 로 건너뛴다.
   상태 전이 멱등(이미 PAID · RELEASED 면 no-op)이 2차 방어다. 일시 오류는 컨슈머 안 지수 백오프 뒤 DLT(`<topic>.dlt`), 종결 오류는 바로 DLT 다.
   `@RetryableTopic`(재시도 토픽 체인)은 쓰지 않는다. DLT 재처리는 사람이 한다.
+  inbox 의 첫 구현은 product-service 의 주문 만료 · 취소 컨슈머다(`global/messaging/JpaProcessedEventStore`, `order-flow-guide.md` §3-5).
 - **이름(공유 클러스터)** — namespace `commerce-foundry.<env>`(`KAFKA_NAMESPACE`, 마지막 토막 = 활성 프로파일이 아니면 기동하지 않는다).
   토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`, 컨슈머 그룹 `<ns>.<소비 서비스>.<목적>`, 파티션 키는 애그리거트 아이디(orderId · jobId).
   다른 고객사가 같은 클러스터를 쓰면 namespace 만 바꾼다(§9).

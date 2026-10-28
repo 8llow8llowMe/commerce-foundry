@@ -19,6 +19,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.info.ExpiredStockReservationInfo;
 import com.commercefoundry.domainlayer.product.application.info.StockReservationInfo;
+import com.commercefoundry.domainlayer.product.application.model.StockReleaseOutcome;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
@@ -373,6 +374,95 @@ class StockReservationProcessorTest {
             doThrow(new ProductException(ProductErrorCode.STOCK_RESERVATION_CONFLICT)).when(stockReservationRepositoryPort).update(any());
 
             assertFailsWith(() -> processor.release(RESERVATION_ID), ProductErrorCode.STOCK_RESERVATION_CONFLICT, "");
+            verifyNoInteractions(stockRepositoryPort);
+        }
+    }
+
+    @Nested
+    @DisplayName("주문 이벤트 해제")
+    class ReleaseByOrder {
+
+        @Test
+        @DisplayName("RESERVED 면 RELEASED(이벤트 사유) 를 먼저 저장하고 차감한 항목만 SKU 오름차순으로 되돌린다 — RELEASED")
+        void releases() {
+            givenReservation(StockReservationStatus.RESERVED, item(1001L, 2, true), item(1002L, 1, false), item(1003L, 4, true));
+            given(stockRepositoryPort.restore(anyLong(), anyLong())).willReturn(true);
+
+            assertThat(processor.releaseByOrder(RESERVATION_ID, ORDER_ID, StockReleaseReason.ORDER_CANCELED)).isEqualTo(StockReleaseOutcome.RELEASED);
+
+            StockReservation updated = updatedReservation();
+            assertThat(updated.status()).isEqualTo(StockReservationStatus.RELEASED);
+            assertThat(updated.releaseReason()).isEqualTo(StockReleaseReason.ORDER_CANCELED);
+            assertThat(updated.releasedAt()).isEqualTo(NOW);
+            InOrder order = inOrder(stockReservationRepositoryPort, stockRepositoryPort);
+            order.verify(stockReservationRepositoryPort).update(any());
+            order.verify(stockRepositoryPort).restore(1001L, 2L);
+            order.verify(stockRepositoryPort).restore(1003L, 4L);
+            verify(stockRepositoryPort, never()).restore(Mockito.eq(1002L), anyLong());
+        }
+
+        @Test
+        @DisplayName("이미 RELEASED 면 저장 · 복원 없이 ALREADY_RELEASED — 같은 이벤트가 다시 와도 재고가 늘지 않는다")
+        void alreadyReleased() {
+            givenReservation(StockReservationStatus.RELEASED);
+
+            assertThat(processor.releaseByOrder(RESERVATION_ID, ORDER_ID, StockReleaseReason.ORDER_EXPIRED)).isEqualTo(StockReleaseOutcome.ALREADY_RELEASED);
+            verify(stockReservationRepositoryPort, never()).update(any());
+            verifyNoInteractions(stockRepositoryPort);
+        }
+
+        @Test
+        @DisplayName("CONFIRMED 면 예외 없이 CONFIRMED — 확정된 선점은 풀지 않는다")
+        void confirmed() {
+            givenReservation(StockReservationStatus.CONFIRMED);
+
+            assertThat(processor.releaseByOrder(RESERVATION_ID, ORDER_ID, StockReleaseReason.ORDER_EXPIRED)).isEqualTo(StockReleaseOutcome.CONFIRMED);
+            verify(stockReservationRepositoryPort, never()).update(any());
+            verifyNoInteractions(stockRepositoryPort);
+        }
+
+        @Test
+        @DisplayName("전이 거절의 현재 상태가 CONFIRMED 가 아니면 CONFIRMED 로 삼키지 않고 다시 던진다")
+        void otherRejectionIsRethrown() {
+            StockReservation reservation = Mockito.mock(StockReservation.class);
+            given(reservation.orderId()).willReturn(ORDER_ID);
+            StockReservationTransitionException rejection =
+                new StockReservationTransitionException(StockReservationStatus.RELEASED, StockReservationTransitionException.Action.RELEASE);
+            given(reservation.release(any(), any())).willThrow(rejection);
+            given(stockReservationRepositoryPort.findById(RESERVATION_ID)).willReturn(Optional.of(reservation));
+
+            assertThatThrownBy(() -> processor.releaseByOrder(RESERVATION_ID, ORDER_ID, StockReleaseReason.ORDER_EXPIRED)).isSameAs(rejection);
+            verify(stockReservationRepositoryPort, never()).update(any());
+            verifyNoInteractions(stockRepositoryPort);
+        }
+
+        @Test
+        @DisplayName("없으면 예외 없이 NOT_FOUND")
+        void notFound() {
+            given(stockReservationRepositoryPort.findById(RESERVATION_ID)).willReturn(Optional.empty());
+
+            assertThat(processor.releaseByOrder(RESERVATION_ID, ORDER_ID, StockReleaseReason.ORDER_EXPIRED)).isEqualTo(StockReleaseOutcome.NOT_FOUND);
+            verifyNoInteractions(stockRepositoryPort);
+        }
+
+        @Test
+        @DisplayName("선점의 주문 아이디가 이벤트와 다르면 RESERVED 여도 풀지 않고 ORDER_MISMATCH")
+        void orderMismatch() {
+            givenReservation(StockReservationStatus.RESERVED);
+
+            assertThat(processor.releaseByOrder(RESERVATION_ID, ORDER_ID + 1, StockReleaseReason.ORDER_EXPIRED)).isEqualTo(StockReleaseOutcome.ORDER_MISMATCH);
+            verify(stockReservationRepositoryPort, never()).update(any());
+            verifyNoInteractions(stockRepositoryPort);
+        }
+
+        @Test
+        @DisplayName("버전 충돌(409)은 그대로 올리고 복원하지 않는다 — 이긴 쪽만 재고를 되돌린다")
+        void versionConflictDoesNotRestore() {
+            givenReservation(StockReservationStatus.RESERVED);
+            doThrow(new ProductException(ProductErrorCode.STOCK_RESERVATION_CONFLICT)).when(stockReservationRepositoryPort).update(any());
+
+            assertFailsWith(() -> processor.releaseByOrder(RESERVATION_ID, ORDER_ID, StockReleaseReason.ORDER_EXPIRED),
+                ProductErrorCode.STOCK_RESERVATION_CONFLICT, "");
             verifyNoInteractions(stockRepositoryPort);
         }
     }

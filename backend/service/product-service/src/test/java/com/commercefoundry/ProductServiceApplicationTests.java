@@ -2,6 +2,7 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.product.adapter.in.event.OrderStockReleaseEventListener;
 import com.commercefoundry.domainlayer.product.adapter.in.scheduler.StockReservationExpiryScheduler;
 import com.commercefoundry.domainlayer.product.application.command.StockReservationCommand;
 import com.commercefoundry.domainlayer.product.application.command.StockRestorationCommand;
@@ -14,6 +15,7 @@ import com.commercefoundry.domainlayer.product.application.service.StockInternal
 import com.commercefoundry.domainlayer.product.application.service.StockSchedulerFacade;
 import com.commercefoundry.global.properties.StockProperties;
 import com.commercefoundry.global.properties.StoreProperties;
+import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.zaxxer.hikari.HikariDataSource;
@@ -40,6 +42,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.scheduling.config.FixedDelayTask;
 import org.springframework.scheduling.config.ScheduledTask;
 import org.springframework.scheduling.config.ScheduledTaskHolder;
@@ -164,6 +167,14 @@ class ProductServiceApplicationTests {
     }
 
     @Test
+    @DisplayName("메시징이 꺼져 있어도 inbox 저장소는 조립되고, 주문 이벤트 리스너는 만들지 않는다 — 컨텍스트를 재시작해도 컨슈머가 뜨지 않는다")
+    void processedEventStoreIsWiredAndListenerIsAbsent() {
+        assertThat(applicationContext.getBeanNamesForType(ProcessedEventStore.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(OrderStockReleaseEventListener.class)).isEmpty();
+        assertThat(applicationContext.getBean(KafkaListenerEndpointRegistry.class).getListenerContainer("order-stock-release")).isNull();
+    }
+
+    @Test
     @DisplayName("서비스 이름 · 포트 · 스키마가 service-inventory.md 와 같다")
     void serviceIdentity() {
         Environment environment = applicationContext.getEnvironment();
@@ -188,7 +199,7 @@ class ProductServiceApplicationTests {
         assertThat(tables).contains(
             "category", "product", "product_category", "product_option_group", "product_option_value",
             "sku", "stock", "stock_adjustment_history", "stock_reservation", "stock_reservation_item", "stock_restoration", "stock_restoration_item",
-            "product_image", "product_custom_order_field"
+            "product_image", "product_custom_order_field", "processed_event"
         );
     }
 

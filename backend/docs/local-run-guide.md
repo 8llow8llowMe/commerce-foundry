@@ -79,6 +79,7 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
   (컨테이너 안 도구는 내부 리스너 `localhost:19092` 를 쓴다 — `KAFKA_PORT` 를 바꿔도 같다).
 - **operations-service 의 백그라운드 작업은 Kafka 실행 신호로 돈다**(#307). `.env` 의 `MESSAGING_ENABLED=false`(기본)면 작업이 등록만 되고 QUEUED 로 남는다 —
   작업을 실행해 보려면 Kafka 를 띄우고 토픽 스크립트를 돌린 뒤 `MESSAGING_ENABLED=true` 로 띄운다. 켜면 그동안 outbox 에 쌓인 신호부터 나간다.
+- `MESSAGING_ENABLED=true` 면 product-service 의 주문 만료 · 취소 이벤트 컨슈머도 뜬다(#309) — `topics.txt` 가 바뀌었으면 `create-topics.sh` 를 다시 돌린다(없는 토픽이면 기동 실패).
 - compose 파일이 바뀐 PR 은 `backend-local-infra` 워크플로가 실제로 띄워 스키마 · Redis 인증 · Kafka(토픽 스크립트 · 자동 생성 꺼짐 · HOST 리스너 왕복)를 확인한다.
 - database · 스키마 이름은 dev · prod 와 같다 — 환경 차이는 접속 정보뿐이다(`service-inventory.md` §4-2). 로컬 스키마에 `_local` 같은 접미사를 붙이지 않는다.
   로컬은 예외로 `DB_USERNAME` 하나(컨테이너 소유자 계정)가 스키마 전부를 쓴다 — 서비스별 앱 계정 · DDL 적용 계정 분리는 dev · prod 에만 적용한다.
