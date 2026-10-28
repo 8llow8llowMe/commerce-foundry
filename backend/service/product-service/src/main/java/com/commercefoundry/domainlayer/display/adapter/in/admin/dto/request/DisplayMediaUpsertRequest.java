@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.display.adapter.in.admin.dto.request;
 
+import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.validation.DisplayRequiredText;
 import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.validation.DisplayText;
 import com.commercefoundry.domainlayer.display.application.command.DisplaySectionUpsertCommand;
 import com.commercefoundry.domainlayer.display.application.exception.DisplayValidationMessage;
@@ -7,7 +8,6 @@ import com.commercefoundry.domainlayer.display.domain.model.DisplayMediaType;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.AssertTrue;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Builder;
@@ -27,7 +27,7 @@ public record DisplayMediaUpsertRequest(
     DisplayMediaType mediaType,
 
     @Schema(description = "PC 주소 (500자 이하) — 스토어 미디어 저장소의 공개 주소 아래여야 한다", example = "https://cdn.example.com/displays/hero-pc.jpg")
-    @NotBlank(message = DisplayValidationMessage.MEDIA_PC_URL_REQUIRED)
+    @DisplayRequiredText(message = DisplayValidationMessage.MEDIA_PC_URL_REQUIRED)
     @Size(max = 500, message = DisplayValidationMessage.MEDIA_URL_SIZE_MAX)
     String pcUrl,
 

@@ -217,6 +217,7 @@ class DisplayAdminControllerTest {
             {"sectionType": "HERO", "visible": true, "items": [{"itemType": "PRODUCT", "productId": 0}]}             | PRODUCT_155
             {"sectionType": "HERO", "visible": true, "items": [{"itemType": "MEDIA", "media": {"mediaType": "VIDEO", "pcUrl": "https://c/v.mp4"}}]} | PRODUCT_159
             {"sectionType": "HERO", "visible": true, "items": [{"itemType": "MEDIA", "media": {"mediaType": "IMAGE", "pcUrl": " "}}]}               | PRODUCT_152
+            {"sectionType": "HERO", "visible": true, "items": [{"itemType": "MEDIA", "media": {"mediaType": "IMAGE", "pcUrl": "\\u3000"}}]}          | PRODUCT_152
             {"sectionType": "HERO", "visible": true, "items": [{"itemType": "MEDIA", "media": {"pcUrl": "https://c/a.jpg"}}]}                       | PRODUCT_151
             {"sectionType": "HERO", "visible": true, "title": "a\\u0000b", "items": []}                              | PRODUCT_164
             {"sectionType": "HERO", "visible": true, "body": "a\\u0007b", "items": []}                               | PRODUCT_164
