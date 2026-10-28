@@ -1,9 +1,15 @@
-import { ApiError } from '@cf/api-client';
+import { brand } from '@cf/brand';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocaleProvider } from '@/components/i18n/LocaleProvider';
-import type { DisplayProductPickSection } from '@/lib/display/home-sections';
+import { ProductPickSection } from '@/components/home/ProductPickSection';
+import {
+  resolveHomeBlocks,
+  type DisplayProductPickSection,
+  type HomeBlock,
+} from '@/lib/display/home-sections';
+import { readPreviewDisplay } from '@/lib/display/preview';
 import { getDictionary } from '@/lib/i18n/dictionaries';
 import { renderMainPreview } from './actions';
 
@@ -13,102 +19,119 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), refres
 const serverFetch = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/server-api', () => ({ serverFetch }));
 
+const fetchSpy = vi.fn<typeof fetch>();
+
 beforeEach(() => {
   serverFetch.mockReset();
+  fetchSpy.mockReset();
+  vi.stubGlobal('fetch', fetchSpy);
 });
 
-const won = (amount: number) => ({ amount, currency: 'KRW' as const });
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-const story = (sectionId: string, title: string, visible = true) => ({
-  sectionId,
-  sectionType: 'STORY',
+// 테스트용 가짜 데이터 — 실데이터를 쓰지 않는다(공개 저장소).
+
+const story = (index: number, title: string) => ({
+  sectionId: `preview-section-${index}`,
+  sectionType: { code: 'STORY', name: '스토리', description: '' },
   title,
   subtitle: null,
   body: null,
-  linkUrl: null,
-  linkLabel: null,
-  visible,
-  startAt: null,
-  endAt: null,
+  link: null,
   items: [],
 });
 
-const render = async (draft: unknown) => {
-  const result = await renderMainPreview('ko', draft);
-  if (!result.ok) throw new Error('미리보기 실패');
-  return renderToStaticMarkup(
-    <LocaleProvider locale="ko" prefix="" dict={getDictionary('ko')}>
-      {result.node}
-    </LocaleProvider>,
-  );
+const pick = {
+  sectionId: 'preview-section-2',
+  sectionType: { code: 'PRODUCT_PICK', name: '상품 픽', description: '' },
+  title: '이번 주 추천',
+  subtitle: null,
+  body: null,
+  link: { url: '/shop', label: null },
+  items: [
+    {
+      itemId: 'preview-item-60',
+      itemType: 'PRODUCT',
+      media: null,
+      product: {
+        productId: '11',
+        name: '미리보기 상품',
+        thumbnail: null,
+        hoverImage: null,
+        salePrice: { amount: 90000, currency: 'KRW' },
+        listPrice: null,
+        discountRate: null,
+        hasOptionSurcharge: true,
+        saleStatus: { code: 'ON_SALE', name: '판매중', description: '' },
+        customOrder: false,
+        preorder: false,
+      },
+      caption: null,
+    },
+  ],
 };
 
+const blocksOf = (result: Awaited<ReturnType<typeof renderMainPreview>>) =>
+  result.ok ? (result.node as ReactElement<{ sections: HomeBlock[] }>).props.sections : null;
+
+const html = (node: unknown) =>
+  renderToStaticMarkup(
+    <LocaleProvider locale="ko" prefix="" dict={getDictionary('ko')}>
+      {node as ReactElement}
+    </LocaleProvider>,
+  );
+
 describe('renderMainPreview', () => {
-  it('노출 중인 섹션만 받은 순서대로 메인 블록으로 그린다', async () => {
-    const html = await render({
-      sections: [
-        story('2', '둘째 스토리'),
-        story('1', '첫째 스토리'),
-        story('3', '숨긴 스토리', false),
-      ],
+  it('받은 응답 순서대로 메인 블록으로 그린다', async () => {
+    const result = await renderMainPreview('ko', {
+      sections: [story(1, '둘째 스토리'), story(0, '첫째 스토리')],
     });
-    expect(html.indexOf('둘째 스토리')).toBeLessThan(html.indexOf('첫째 스토리'));
-    expect(html).not.toContain('숨긴 스토리');
-    expect(serverFetch).not.toHaveBeenCalled();
+    const markup = html(result.ok ? result.node : null);
+    expect(markup.indexOf('둘째 스토리')).toBeLessThan(markup.indexOf('첫째 스토리'));
   });
 
-  it('상품은 그 언어로 토큰 없이 공개 상세에서 받고, 받지 못한 상품은 뺀다', async () => {
-    serverFetch.mockImplementation(async (path: string) => {
-      if (path === '/api/v1/products/11') {
-        return {
-          productId: '11',
-          name: '보이는 상품',
-          summary: null,
-          categoryPath: [],
-          thumbnail: null,
-          images: [],
-          descriptionHtml: null,
-          salePrice: won(100000),
-          listPrice: null,
-          discountRate: null,
-          saleStatus: { code: 'ON_SALE', name: '판매중', description: '' },
-          maxQuantityPerOrder: null,
-          optionGroups: [],
-          skus: [],
-          customOrder: null,
-          preorder: null,
-        };
-      }
-      throw new ApiError('notFound', 404, 'PRODUCT_001', null);
-    });
-    const result = await renderMainPreview('ko', {
-      sections: [
-        {
-          ...story('1', '이번 주 추천'),
-          sectionType: 'PRODUCT_PICK',
-          items: [
-            { itemType: 'PRODUCT', productId: '11', caption: null },
-            { itemType: 'PRODUCT', productId: '12', caption: null },
-          ],
-        },
-      ],
-    });
-    // 상품 픽은 async 서버 컴포넌트라 문자열로 그리지 않고 넘긴 블록을 본다
-    const node = result.ok
-      ? (result.node as ReactElement<{ sections: DisplayProductPickSection[] }>)
-      : null;
-    const [block] = node?.props.sections ?? [];
-    expect(block?.type).toBe('PRODUCT_PICK');
-    expect(block?.products.map((product) => product.name)).toEqual(['보이는 상품']);
-    expect(serverFetch).toHaveBeenCalledWith(
-      '/api/v1/products/11',
-      { headers: { 'accept-language': 'ko' } },
-      { anonymous: true },
+  it('메인과 같은 경로(resolveHomeBlocks)로 블록을 만든다', async () => {
+    const display = { sections: [story(0, '스토리'), pick] };
+    const blocks = blocksOf(await renderMainPreview('ko', display));
+    expect(blocks).toEqual(
+      resolveHomeBlocks(
+        readPreviewDisplay(display),
+        brand.content.ko.home,
+        getDictionary('ko').home,
+      ),
     );
+    // 상품 카드는 응답 값 그대로다(다시 받거나 근사하지 않는다)
+    const product = blocks?.find((block) => block.type === 'PRODUCT_PICK') as
+      DisplayProductPickSection | undefined;
+    expect(product?.products).toEqual([pick.items[0]!.product]);
+  });
+
+  it('게이트웨이를 부르지 않는다', async () => {
+    const result = await renderMainPreview('ko', { sections: [story(0, '스토리'), pick] });
+    // 상품 픽은 async 서버 컴포넌트라 문자열로 그리지 않고 직접 불러 본다
+    const rendered: string[] = [];
+    for (const block of blocksOf(result) ?? []) {
+      if (block.type === 'PRODUCT_PICK')
+        rendered.push(html(await ProductPickSection({ section: block })));
+    }
+    expect(rendered.join('')).toContain('미리보기 상품');
+    expect(serverFetch).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('그릴 섹션이 없으면 메인처럼 브랜드 설정 메인이다', async () => {
+    const blocks = blocksOf(await renderMainPreview('ko', { sections: [] }));
+    expect(blocks).toEqual(brand.content.ko.home);
   });
 
   it('모르는 언어 · 모양이 다른 본문이면 그리지 않는다', async () => {
     expect(await renderMainPreview('xx', { sections: [] })).toEqual({ ok: false });
     expect(await renderMainPreview('ko', null)).toEqual({ ok: false });
+    // 지난 메시지 모양(편집 상태 본문)도 그리지 않는다
+    expect(await renderMainPreview('ko', { type: 'cf:main-preview:draft' })).toEqual({
+      ok: false,
+    });
   });
 });

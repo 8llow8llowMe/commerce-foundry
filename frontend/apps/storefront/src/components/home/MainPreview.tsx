@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PreviewRenderResult } from '@/app/[locale]/preview/main/actions';
 import { useDictionary } from '@/components/i18n/LocaleProvider';
-import { isPreviewDraft, PREVIEW_READY } from '@/lib/display/preview';
+import { isPreviewDisplay, PREVIEW_READY } from '@/lib/display/preview';
 
 /**
- * 어드민 메인 전시 미리보기(#71)의 iframe 쪽. 부모 창이 허용한 어드민 origin 일 때만 편집 상태를 받는다
- * (`event.origin` · `event.source` 둘 다 본다) — 받은 상태는 서버 액션이 메인과 같은 블록으로 그려 돌려준다.
+ * 어드민 메인 전시 미리보기(#71)의 iframe 쪽. 부모 창이 허용한 어드민 origin 일 때만 미리보기 응답을 받는다
+ * (`event.origin` · `event.source` 둘 다 본다) — 어드민이 BE 미리보기에서 받은 응답을 서버 액션이 메인과 같은 블록으로 그려 돌려준다.
  * 새 상태를 그리는 동안에는 앞 화면을 둔다. 늦게 온 이전 결과는 버린다.
  * 미리보기 안의 링크 · 버튼은 누르지 않는다 — 실제 페이지로 옮기거나 장바구니에 담지 않게(보기 전용).
  */
@@ -19,10 +19,10 @@ export function MainPreview({
   locale: string;
   adminOrigin: string | null;
   /**
-   * 편집 상태를 그리는 서버 액션. 페이지(서버)가 넘긴다 — 액션이 돌려주는 블록의 클라이언트 컴포넌트가
+   * 미리보기 응답을 그리는 서버 액션. 페이지(서버)가 넘긴다 — 액션이 돌려주는 블록의 클라이언트 컴포넌트가
    * 이 페이지의 클라이언트 매니페스트에 들어가려면 액션 모듈이 페이지의 서버 그래프에 있어야 한다
    */
-  render: (locale: string, draft: unknown) => Promise<PreviewRenderResult>;
+  render: (locale: string, display: unknown) => Promise<PreviewRenderResult>;
 }) {
   const dict = useDictionary();
   const [node, setNode] = useState<ReactNode>(null);
@@ -32,9 +32,9 @@ export function MainPreview({
   useEffect(() => {
     if (!adminOrigin || window.parent === window) return;
     const onMessage = (event: MessageEvent) => {
-      if (!isPreviewDraft(event, adminOrigin, window.parent)) return;
+      if (!isPreviewDisplay(event, adminOrigin, window.parent)) return;
       const current = ++generation.current;
-      render(locale, event.data).then(
+      render(locale, event.data.display).then(
         (result) => {
           if (current !== generation.current) return;
           setFailed(!result.ok);

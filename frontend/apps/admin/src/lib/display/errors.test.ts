@@ -9,8 +9,16 @@ import {
   MEDIA_STORAGE_UNAVAILABLE,
   ORDER_CHANGED_NOTICE,
   orderFailure,
+  PREVIEW_CHECK_INPUT,
+  previewCooldownSec,
+  PREVIEW_FAILED,
+  PREVIEW_FORBIDDEN,
+  previewFailure,
+  PREVIEW_MEDIA_STORAGE,
+  PREVIEW_TITLE_MAX,
   PRODUCT_MISSING,
   rowFailure,
+  SESSION_EXPIRED_ON_PREVIEW,
   saveFailure,
   SECTION_GONE_NOTICE,
   SECTION_LIMIT,
@@ -190,5 +198,139 @@ describe('orderFailure', () => {
       kind: 'message',
       message: SAVE_FAILED,
     });
+  });
+});
+
+describe('previewFailure', () => {
+  const sections = [
+    { title: '첫 히어로', items: [{ itemType: 'MEDIA' }, { itemType: 'MEDIA' }] },
+    { title: null, items: [{ itemType: 'PRODUCT' }] },
+  ];
+  const field = (path: string, code: string) => ({ field: path, code, message: 'raw' });
+
+  it('칸 오류는 섹션 위치 · 제목과 칸 문구로 짚는다', () => {
+    const failure = previewFailure(
+      apiError('validation', 400, 'COMMON_001', null, [
+        field('sections[0].title', 'PRODUCT_141'),
+        field('sections[0].items[1].media.altText', 'PRODUCT_154'),
+        field('sections[1].linkUrl', 'PRODUCT_164'),
+        field('sections[1].linkUrl', 'PRODUCT_164'),
+        field('sections', 'PRODUCT_167'),
+      ]),
+      sections,
+    );
+    expect(failure).toEqual({
+      message: PREVIEW_CHECK_INPUT,
+      details: [
+        `1번째 섹션(첫 히어로) — ${TOO_LONG.title}`,
+        `1번째 섹션(첫 히어로) — ${TOO_LONG.altText}`,
+        `2번째 섹션 — ${SINGLE_LINE_ONLY}`,
+        CHECK_FIELDS,
+      ],
+      retry: false,
+      cooldownSec: null,
+    });
+  });
+
+  it('섹션 규칙 오류는 코드별 문구다', () => {
+    expect(previewFailure(apiError('server', 400, 'PRODUCT_052'), sections)).toEqual({
+      message: PREVIEW_CHECK_INPUT,
+      details: [LINK_RULE],
+      retry: false,
+      cooldownSec: null,
+    });
+    expect(previewFailure(apiError('server', 400, 'PRODUCT_050'), sections).details).toEqual([
+      PRODUCT_MISSING,
+    ]);
+    expect(previewFailure(apiError('server', 400, 'PRODUCT_051'), sections).details).toEqual([
+      PERIOD_ORDER,
+    ]);
+    expect(previewFailure(apiError('server', 400, 'PRODUCT_999'), sections)).toEqual({
+      message: PREVIEW_CHECK_INPUT,
+      details: [],
+      retry: false,
+      cooldownSec: null,
+    });
+  });
+
+  it('401 은 입력을 지키고, 403 은 권한 안내다', () => {
+    expect(previewFailure(apiError('unauthorized', 401, null), sections)).toEqual({
+      message: SESSION_EXPIRED_ON_PREVIEW,
+      details: [],
+      retry: true,
+      cooldownSec: null,
+    });
+    expect(previewFailure(apiError('forbidden', 403, null), sections)).toEqual({
+      message: PREVIEW_FORBIDDEN,
+      details: [],
+      retry: false,
+      cooldownSec: null,
+    });
+  });
+
+  it('미디어 저장소 설정 오류는 저장과 같은 안내, 그 밖은 다시 시도다', () => {
+    expect(previewFailure(apiError('unavailable', 503, 'PRODUCT_055'), sections)).toEqual({
+      message: PREVIEW_MEDIA_STORAGE,
+      details: [],
+      retry: true,
+      cooldownSec: null,
+    });
+    // 미디어 주소가 저장소 공개 주소 밖(공개 주소를 바꾼 뒤)이면 그 주소가 바뀌어야 풀린다
+    expect(previewFailure(apiError('validation', 400, 'PRODUCT_054'), sections)).toEqual({
+      message: PREVIEW_MEDIA_STORAGE,
+      details: [],
+      retry: false,
+      cooldownSec: null,
+    });
+    // 저장용 문구는 그대로다
+    expect(PREVIEW_MEDIA_STORAGE).not.toBe(MEDIA_STORAGE_UNAVAILABLE);
+    for (const cause of [
+      apiError('unavailable', 503, 'GATEWAY_001'),
+      apiError('network', null, null),
+      apiError('server', 500, null),
+      new Error('x'),
+    ]) {
+      expect(previewFailure(cause, sections)).toEqual({
+        message: PREVIEW_FAILED,
+        details: [],
+        retry: true,
+        cooldownSec: null,
+      });
+    }
+    expect(previewFailure(apiError('rateLimited', 429, null, '잠시 후'), sections)).toEqual({
+      message: '잠시 후',
+      details: [],
+      retry: true,
+      cooldownSec: 3,
+    });
+  });
+
+  it('429 는 Retry-After 동안 다시 시도를 막는다(1 ~ 60초)', () => {
+    const limited = (sec: number | null) =>
+      new ApiError('rateLimited', 429, 'GATEWAY_006', '잠시 후', [], sec);
+    expect(previewFailure(limited(12), sections).cooldownSec).toBe(12);
+    expect(previewFailure(limited(0), sections).cooldownSec).toBe(1);
+    expect(previewFailure(limited(600), sections).cooldownSec).toBe(60);
+    expect(previewCooldownSec(null)).toBe(3);
+  });
+
+  it('긴 섹션 제목은 20자에서 줄인다', () => {
+    const title = '가'.repeat(PREVIEW_TITLE_MAX + 5);
+    const failure = previewFailure(
+      apiError('validation', 400, 'COMMON_001', null, [field('sections[0].title', 'PRODUCT_141')]),
+      [{ title, items: [] }],
+    );
+    expect(failure.details).toEqual([
+      `1번째 섹션(${'가'.repeat(PREVIEW_TITLE_MAX)}…) — ${TOO_LONG.title}`,
+    ]);
+    // 20자 이하는 그대로
+    expect(
+      previewFailure(
+        apiError('validation', 400, 'COMMON_001', null, [
+          field('sections[0].title', 'PRODUCT_141'),
+        ]),
+        [{ title: '가'.repeat(PREVIEW_TITLE_MAX), items: [] }],
+      ).details[0],
+    ).toContain(`(${'가'.repeat(PREVIEW_TITLE_MAX)})`);
   });
 });
