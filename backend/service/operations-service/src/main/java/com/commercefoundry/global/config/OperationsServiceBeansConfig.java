@@ -2,11 +2,15 @@ package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.messaging.config.MessagingConfigurer;
+import com.commercefoundry.messaging.properties.MessagingProperties;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
 import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import java.time.Clock;
+import javax.sql.DataSource;
+import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.provider.jdbc.JdbcLockProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -26,5 +30,14 @@ public class OperationsServiceBeansConfig {
     @Bean
     public Clock clock() {
         return Clock.systemUTC();
+    }
+
+    /**
+     * 단일 실행 락 — outbox 릴레이({@link MessagingConfigurer} 가 이 빈을 받는다)와 정기 작업 플래너가 같은 ShedLock 테이블
+     * ({@code commerce.messaging.outbox.relay.lock-table})을 쓰고 락 이름만 다르다.
+     */
+    @Bean
+    public LockProvider lockProvider(DataSource dataSource, MessagingProperties messagingProperties) {
+        return new JdbcLockProvider(dataSource, messagingProperties.outbox().relay().lockTable());
     }
 }

@@ -31,7 +31,8 @@ import org.hibernate.type.SqlTypes;
  * <p>{@code active_dedup_key} 는 QUEUED · RUNNING 동안만 {@code dedup_key} 와 같고 끝나면 null 이다. 유니크 키 {@code (type, active_dedup_key)} 가
  * 같은 종류 · 같은 키의 활성 작업을 하나로 막고 — 종류가 다르면 같은 키를 써도 서로 막지 않는다 — 끝난 키는 다시 등록할 수 있다(PostgreSQL 유니크 키는 null 을 겹치게 둔다).
  *
- * <p>인덱스 — lease 만료 스캔({@code status, lease_expires_at}), 어드민 목록의 종류 필터 · 아이디 내림차순({@code type, id}).
+ * <p>인덱스 — lease 만료 스캔({@code status, lease_expires_at}), 어드민 목록의 종류 필터 · 아이디 내림차순({@code type, id}),
+ * 정기 슬롯 등록 확인 — 끝난 작업 포함({@code idx_job_type_dedup_key}).
  * 실행 대상은 Kafka 신호가 아이디로 가리키므로 가져갈 후보 스캔 인덱스를 두지 않는다 ({@code architecture-guide.md} §10).
  */
 @Entity

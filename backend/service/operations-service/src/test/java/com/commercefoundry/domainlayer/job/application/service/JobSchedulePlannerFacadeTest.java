@@ -24,24 +24,21 @@ class JobSchedulePlannerFacadeTest {
     private static final Instant NOW = Instant.parse("2026-10-26T01:00:00Z");
 
     @Test
-    @DisplayName("스케줄이 없거나 꺼져 있으면 등록을 부르지 않는다")
+    @DisplayName("스케줄이 없으면 등록을 부르지 않는다")
     void skipsWhenThereIsNothingToPlan() {
         JobSchedulePlannerProcessor processor = mock(JobSchedulePlannerProcessor.class);
-        JobSchedulePlannerFacade empty = facade(processor, properties());
-        JobSchedulePlannerFacade disabled = facade(processor, planner(false, daily()));
 
-        assertThat(empty.plan()).isZero();
-        assertThat(disabled.plan()).isZero();
+        assertThat(facade(processor, properties()).plan()).isZero();
         verifyNoInteractions(processor);
     }
 
     @Test
-    @DisplayName("켜져 있고 스케줄이 있으면 지금 시각으로 등록한다")
+    @DisplayName("스케줄이 있으면 지금 시각으로 등록한다")
     void plansAtTheClock() {
         JobSchedulePlannerProcessor processor = mock(JobSchedulePlannerProcessor.class);
         when(processor.plan(NOW)).thenReturn(1);
 
-        assertThat(facade(processor, planner(true, daily())).plan()).isEqualTo(1);
+        assertThat(facade(processor, planner(daily())).plan()).isEqualTo(1);
         verify(processor).plan(NOW);
     }
 
@@ -49,11 +46,11 @@ class JobSchedulePlannerFacadeTest {
         return new JobSchedulePlannerFacade(processor, jobProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
-    private static JobProperties planner(boolean enabled, JobProperties.Planner.Schedule... schedules) {
+    private static JobProperties planner(JobProperties.Planner.Schedule... schedules) {
         JobProperties defaults = properties();
         return new JobProperties(
             defaults.worker(), defaults.leaseSweep(), defaults.retry(), defaults.result(),
-            new JobProperties.Planner(enabled, Duration.ofMinutes(1), Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofDays(32), List.of(schedules))
+            new JobProperties.Planner(true, Duration.ofMinutes(1), Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofDays(32), List.of(schedules))
         );
     }
 

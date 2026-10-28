@@ -2,20 +2,19 @@ package com.commercefoundry.domainlayer.job.adapter.out.lock;
 
 import com.commercefoundry.domainlayer.job.application.port.out.JobPlannerLockPort;
 import com.commercefoundry.global.properties.JobProperties;
-import com.commercefoundry.messaging.properties.MessagingProperties;
 import java.time.Clock;
 import java.time.Duration;
-import javax.sql.DataSource;
+import java.util.Optional;
+import java.util.function.Supplier;
 import net.javacrumbs.shedlock.core.DefaultLockingTaskExecutor;
 import net.javacrumbs.shedlock.core.LockConfiguration;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.core.LockingTaskExecutor;
-import net.javacrumbs.shedlock.provider.jdbc.JdbcLockProvider;
-import org.springframework.beans.factory.ObjectProvider;
+import net.javacrumbs.shedlock.core.LockingTaskExecutor.TaskResult;
 import org.springframework.stereotype.Component;
 
 /**
- * 정기 작업 등록의 단일 실행 락. outbox 릴레이와 같은 ShedLock 테이블을 쓰고 락 이름만 다르다 — {@code LockProvider} 빈이 있으면 그것을 쓴다.
+ * 정기 작업 등록의 단일 실행 락. outbox 릴레이와 같은 {@link LockProvider} 빈(ShedLock 테이블, {@code OperationsServiceBeansConfig})을 쓰고 락 이름만 다르다.
  */
 @Component
 public class JobPlannerLockAdapter implements JobPlannerLockPort {
@@ -27,26 +26,23 @@ public class JobPlannerLockAdapter implements JobPlannerLockPort {
     private final Duration lockAtMost;
     private final Clock clock;
 
-    public JobPlannerLockAdapter(
-        ObjectProvider<LockProvider> lockProvider, ObjectProvider<DataSource> dataSource, MessagingProperties messagingProperties,
-        JobProperties jobProperties, Clock clock
-    ) {
-        this.lockingTaskExecutor = new DefaultLockingTaskExecutor(lockProvider.getIfAvailable(() -> jdbcLockProvider(dataSource, messagingProperties)));
+    public JobPlannerLockAdapter(LockProvider lockProvider, JobProperties jobProperties, Clock clock) {
+        this.lockingTaskExecutor = new DefaultLockingTaskExecutor(lockProvider);
         this.lockAtMost = jobProperties.planner().lockAtMost();
         this.clock = clock;
     }
 
     @Override
-    public void runLocked(Runnable action) {
-        lockingTaskExecutor.executeWithLock((Runnable) action, new LockConfiguration(clock.instant(), LOCK_NAME, lockAtMost, Duration.ZERO));
-    }
-
-    /** 서비스가 LockProvider 빈을 따로 두지 않았으면 서비스 DataSource 의 ShedLock 테이블을 쓴다. */
-    private static LockProvider jdbcLockProvider(ObjectProvider<DataSource> dataSource, MessagingProperties messagingProperties) {
-        DataSource lockDataSource = dataSource.getIfAvailable();
-        if (lockDataSource == null) {
-            throw new IllegalStateException("정기 작업 플래너의 단일 실행 락에 DataSource 가 필요합니다.");
+    public <T> Optional<T> runLocked(Supplier<T> action) {
+        TaskResult<T> result;
+        try {
+            result = lockingTaskExecutor.executeWithLock(action::get, new LockConfiguration(clock.instant(), LOCK_NAME, lockAtMost, Duration.ZERO));
+        } catch (RuntimeException | Error exception) {
+            throw exception;
+        } catch (Throwable throwable) {
+            // Supplier 는 checked 예외를 던지지 않는다 — ShedLock 시그니처가 Throwable 이라 남는 갈래다
+            throw new IllegalStateException("정기 작업 등록 락 안에서 예상 밖 예외가 났습니다.", throwable);
         }
-        return new JdbcLockProvider(lockDataSource, messagingProperties.outbox().relay().lockTable());
+        return result.wasExecuted() ? Optional.ofNullable(result.getResult()) : Optional.empty();
     }
 }

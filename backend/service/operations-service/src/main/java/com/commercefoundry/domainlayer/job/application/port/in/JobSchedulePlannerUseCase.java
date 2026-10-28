@@ -1,7 +1,7 @@
 package com.commercefoundry.domainlayer.job.application.port.in;
 
 /**
- * 정기 작업 등록 (진입점 — 스케줄러). 같은 서비스의 기능 Facade 가 자기 작업을 등록할 때는 이 UseCase 가 아니라 {@code JobRegistrationProcessor} 를 부른다.
+ * 정기 작업 등록 (진입점 — 스케줄러).
  */
 public interface JobSchedulePlannerUseCase {
 

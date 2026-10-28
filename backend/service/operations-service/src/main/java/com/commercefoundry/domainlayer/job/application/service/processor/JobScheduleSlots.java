@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.job.application.service;
+package com.commercefoundry.domainlayer.job.application.service.processor;
 
 import com.commercefoundry.domainlayer.job.application.model.JobScheduleSlot;
 import com.commercefoundry.global.properties.JobProperties;

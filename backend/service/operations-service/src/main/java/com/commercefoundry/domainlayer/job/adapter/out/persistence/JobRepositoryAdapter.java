@@ -76,7 +76,7 @@ public class JobRepositoryAdapter implements JobRepositoryPort {
     }
 
     @Override
-    public boolean existsByTypeAndDedupKey(String type, String dedupKey) {
+    public boolean existsByDedupKey(String type, String dedupKey) {
         return jobRepository.existsByTypeAndDedupKey(type, dedupKey);
     }
 
