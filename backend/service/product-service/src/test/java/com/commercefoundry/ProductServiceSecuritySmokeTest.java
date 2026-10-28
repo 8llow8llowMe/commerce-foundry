@@ -25,7 +25,7 @@ import org.springframework.http.MediaType;
 class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
 
     @ParameterizedTest
-    @ValueSource(strings = {"/api/v1/categories", "/api/v1/products", "/api/v1/products?categoryId=1&sortType=PRICE_ASC", "/api/v1/displays/main"})
+    @ValueSource(strings = {"/api/v1/categories", "/api/v1/products", "/api/v1/products?categoryId=1&sortType=PRICE_ASC", "/api/v1/displays/main", "/api/v1/looks"})
     @DisplayName("공개 조회 API 는 익명 · 회원 모두 200 이다 (permitAll)")
     void publicCatalogIsOpen(String path) throws Exception {
         assertThat(perform(get(path)).getStatus()).as("익명 " + path).isEqualTo(200);
@@ -36,6 +36,14 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     @DisplayName("공개 상세는 익명이어도 인증 오류가 아니라 도메인 404 · PRODUCT_001 이다")
     void publicDetailReachesDomain() throws Exception {
         assertEnvelope(perform(get("/api/v1/products/1")), 404, "PRODUCT_001", "존재하지 않는 상품입니다.");
+    }
+
+    @Test
+    @DisplayName("고객 룩 3경로는 익명으로 도메인까지 닿는다(permitAll) — 목록 200 · 상세 404 LOOK_001 · 없는 상품의 룩 404 PRODUCT_001, 목록은 공유 캐시 헤더를 지킨다")
+    void publicLooksReachDomain() throws Exception {
+        assertThat(perform(get("/api/v1/looks")).getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("max-age=60, public");
+        assertEnvelope(perform(get("/api/v1/looks/1")), 404, "LOOK_001", "존재하지 않는 룩입니다.");
+        assertEnvelope(perform(get("/api/v1/products/1/looks")), 404, "PRODUCT_001", "존재하지 않는 상품입니다.");
     }
 
     @ParameterizedTest

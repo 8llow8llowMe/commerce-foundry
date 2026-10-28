@@ -16,11 +16,17 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
 public class LookRepositoryAdapter implements LookRepositoryPort {
+
+    /** 고객 목록 정렬 — 노출 순서 → 아이디 오름차순. 어드민 목록({@code findAllByOrderByDisplayOrderAscIdAsc})과 같은 순서라 어드민이 본 배열 순서가 고객 순서다. */
+    private static final Sort VISIBLE_ORDER = Sort.by(Sort.Order.asc("displayOrder"), Sort.Order.asc("id"));
 
     private final LookRepository lookRepository;
     private final LookItemRepository lookItemRepository;
@@ -44,6 +50,16 @@ public class LookRepositoryAdapter implements LookRepositoryPort {
     public List<Look> findAllForUpdate() {
         lookRepository.findAllForUpdateByOrderByIdAsc();
         return lookMapper.toDomains(lookRepository.findAllByOrderByDisplayOrderAscIdAsc());
+    }
+
+    @Override
+    public Slice<Look> findVisibleSlice(int page, int size) {
+        return lookRepository.findAllByVisibleTrue(PageRequest.of(page, size, VISIBLE_ORDER)).map(lookMapper::toDomain);
+    }
+
+    @Override
+    public List<Look> findVisibleByProductId(long productId) {
+        return lookMapper.toDomains(lookRepository.findVisibleByProductId(productId));
     }
 
     @Override

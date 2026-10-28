@@ -26,7 +26,7 @@
 | 서비스 | 고객 | 어드민 |
 |--------|------|--------|
 | auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**`, `/api/v1/admin/audit-logs/**`, `/api/v1/admin/admins/**`, `/api/v1/admin/me/**` |
-| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**`, `/api/v1/admin/looks/**` |
+| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**`, `/api/v1/looks/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**`, `/api/v1/admin/looks/**` |
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
@@ -566,12 +566,14 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 ### 2-11. 룩 — Shop the Look (product-service, #62)
 
 룩은 대표 이미지 한 장과 구성 상품 1~20개의 묶음이다. 어드민이 만들고 순서를 정한다. 메인 전시의 `LOOK` 섹션(§2-9)과는 별도 리소스다.
-**고객 조회 API 는 PR-B 예정이다** — 이 절은 어드민 계약과 저장 규칙만 정한다. 고객 노출은 기능 플래그 `store.features.looks`(기본 꺼짐)가 정하고,
-어드민 API 는 플래그와 무관하게 동작한다(켜기 전에 미리 만들어 둔다, `architecture-guide.md` §9). PR-A 는 플래그 값(`StoreProperties.Features.looks`)만 두고,
-플래그 판정 위치 · 고객용 조회(보이는 룩 목록 · 상품이 든 룩)의 out-port 는 PR-B 에서 고객 API 와 함께 연다.
+고객 노출은 기능 플래그 `store.features.looks`(기본 꺼짐)가 정하고, 어드민 API 는 플래그와 무관하게 동작한다(켜기 전에 미리 만들어 둔다, `architecture-guide.md` §9).
+플래그 · 숨긴 룩 판정은 고객 조회 Processor(`LookWebProcessor`) 한 곳에서만 한다 — 어드민 Processor(`LookProcessor`)에 섞지 않는다.
 
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
+| `GET /api/v1/looks?page=&size=` | `permitAll()` | 200 `SliceResponse` `{contents:[{lookId, title, image, products}], hasNext}` — 보이는 룩, 노출 순서. page/size 기본 0/20, size 1~100 · `Cache-Control: max-age=60, public` | 400 `PRODUCT_101` · `PRODUCT_102` · `PRODUCT_198` |
+| `GET /api/v1/looks/{lookId}` | `permitAll()` | 200 `{lookId, title, description, image, products}` · 같은 캐시 | 404 `LOOK_001`(없음 · 숨김 · 플래그 꺼짐) · 400 `LOOK_118` · `PRODUCT_198`(숫자 아님) |
+| `GET /api/v1/products/{productId}/looks` | `permitAll()` | 200 `{looks:[...목록 항목과 같은 모양]}` — 상품이 든 보이는 룩 전체, 노출 순서 · 같은 캐시 | 404 `PRODUCT_001`(없거나 숨긴 상품, 플래그보다 먼저) · 400 `PRODUCT_198`(숫자 아님) |
 | `GET /api/v1/admin/looks` | ADMIN | 200 전체(숨김 포함, 최대 100개, 배열 순서 = 노출 순서) `{looks:[...]}` | — |
 | `GET /api/v1/admin/looks/{lookId}` | ADMIN | 200 | 404 `LOOK_001` · 400 `LOOK_118` |
 | `POST /api/v1/admin/looks` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `LOOK_003~005` · `LOOK_101~117` · 409 `LOOK_002` · `LOOK_008` · 503 `LOOK_006` |
@@ -585,7 +587,16 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
   순서는 배열 순서로만 전하고 내부 순서 번호(`displayOrder`) · 아이템 아이디는 내지 않는다(§2-8). `saleStatus` 는 `{code, name, description}`(판매중 · 판매 종료)이다.
 - **비노출 · 판매 종료 상품**: 어드민 쓰기는 숨김 · 판매 종료 상품을 받는다 — 없는 상품만 400 `LOOK_004`(메시지에 없는 아이디를 모두 싣는다).
   어드민 조회는 상품마다 `visible` · `saleStatus` 를 내고, 상품 행이 없으면(데이터 오류) `name` · `saleStatus` 가 null · `visible=false` 다.
-  고객 화면에서 어떻게 보일지는 PR-B 가 정한다.
+- **고객 응답 규칙**:
+  - 기능 플래그가 꺼지면 데이터는 그대로 두고 응답에서만 숨긴다 — 목록 200 빈 `contents`(저장소를 읽지 않는다), 상세 404 `LOOK_001`, 상품별 200 `looks: []`.
+    상품별 룩은 상품 확인(없거나 숨긴 상품 404 `PRODUCT_001`)이 플래그보다 먼저다 — 상품 상세와 같은 존재 판정을 지킨다.
+  - 숨긴 룩은 목록에 없고 상세는 없는 룩과 같은 404 `LOOK_001` 이다(존재를 드러내지 않는다).
+  - `products` 는 상품 목록 항목(`GET /api/v1/products`)과 같은 카드 · 같은 계산(`ProductListProcessor.summarizeVisible`)이다 — `LookProductCardParityTest` 가 JSON 을 비교한다.
+    숨긴 상품은 빠지고, 판매 종료 · 품절은 `saleStatus` 로 남는다. **상품이 모두 빠져도 룩은 남는다(`products: []`)** — 그때 FE 는 "함께 담기" 를 숨긴다.
+  - 정렬은 `display_order` 오름차순 → 아이디 오름차순으로 **어드민 목록과 같다** — 어드민이 본 배열 순서가 고객 순서다.
+  - 읽기는 잠그지 않는다. 룩 행을 읽은 뒤 아이템을 읽기 전에 삭제가 커밋되어 아이템이 비면 그 룩은 목록에서 빠지고(한 쪽이 size 보다 작을 수 있다) 상세는 404 `LOOK_001` 이다.
+    상품별 룩도 같다 — 상품 확인 · 룩 · 아이템을 각각 다른 문장으로 읽고 응답은 공유 캐시(60초)에 담기므로, 어드민 변경 · 상품 숨김이 최대 캐시 시간 수준 늦게 보일 수 있다.
+  - `Cache-Control: max-age=60, public` — 메인 전시(§2-9)와 같은 판단이다. 어드민 변경 · 상품 숨김이 최대 1분 늦게 보인다.
 - **이미지 주소**는 메인 전시와 같은 규칙(`MediaUrlPolicy`, §2-9)이다 — 공개 주소 밖은 400 `LOOK_005`(메시지에 공개 주소를 싣지 않는다), 공개 주소가 없으면 이미지가 필수라
   모든 쓰기가 503 `LOOK_006` 이다.
 - **`title` · `description` · `image.altText` 는 평문이다.** 서버가 HTML 을 정제하지 않으므로 FE 는 텍스트 노드로만 렌더한다(`description` 의 개행은 `white-space` 로).
@@ -596,8 +607,10 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 - 오류 코드: `LOOK_001`(룩 없음 404) · `002`(룩 100개 상한 409) · `003`(같은 상품 중복) · `004`(없는 상품) · `005`(이미지 주소) · `006`(공개 주소 미설정 503) ·
   `007`(순서 변경 집합) · `008`(잠금 409). 검증은 `LOOK_101~122`(`LookValidationMessage`). 깨진 JSON · 타입 불일치 · 필수 파라미터는 서비스 공용 `PRODUCT_100` · `198` · `199` 다.
   `PRODUCT_1xx` 검증 대역이 다 차서 컨텍스트 접두어 `LOOK_` 를 새로 열었다(`coding-conventions.md` §8-2).
-- 계층 — look 컨텍스트는 product 컨텍스트의 `ProductLookupProcessor`(숨김 포함 in 절 한 번)와 domain(`Product`)만 쓴다(H8). 판매 상태는 Info 로 옮겨 Presenter 에 넘긴다.
-- **게이트웨이**: `/api/v1/admin/looks/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 고객 경로는 PR-B 에서 정한다.
+- 계층 — look 컨텍스트는 product 컨텍스트의 Processor(어드민 `ProductLookupProcessor`, 고객 `ProductListProcessor.summarizeVisible` · `ProductDetailProcessor.getVisibleProduct`)와
+  domain(`Product` · `ProductSummary`)만 쓴다(H8). 판매 상태 · 상품 카드는 Info 로 옮겨 Presenter 에 넘긴다.
+- **게이트웨이**: `/api/v1/looks/**` · `/api/v1/admin/looks/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 상품별 룩은 기존 `/api/v1/products/**` 다.
+  게이트웨이 · 서비스 모두 `/api/v1/admin/**` 밖은 익명 허용이고, 고객 3경로는 메서드의 `permitAll()` 로 연다(메인 전시와 같다).
 
 ## 3. 계층 흐름
 

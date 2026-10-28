@@ -28,14 +28,15 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Slice;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * PostgreSQL 컨테이너에 DDL 스냅숏을 적용하고 {@code ddl-auto=validate} 로 엔티티와 대조한 뒤 실제로 질의한다 — 정렬 · in 절 한 번 · 아이템 교체 · 유니크 키 · check 제약
- * ({@code bootstrap-conventions.md} "리포지토리 테스트"). Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다.
+ * PostgreSQL 컨테이너에 DDL 스냅숏을 적용하고 {@code ddl-auto=validate} 로 엔티티와 대조한 뒤 실제로 질의한다 — 정렬 · in 절 한 번 · 아이템 교체 · 유니크 키 · check 제약 ·
+ * 고객용 보이는 룩(한 쪽 · 상품이 든 룩 조인) ({@code bootstrap-conventions.md} "리포지토리 테스트"). Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다.
  */
 @DataJpaTest
 @Testcontainers
@@ -115,6 +116,40 @@ class LookRepositoryAdapterTest {
         assertThat(reloaded.visible()).isFalse();
         assertThat(reloaded.image().url()).isEqualTo("https://cdn.example.com/media/new.jpg");
         assertThat(port.findItemsByLookIds(List.of(1L))).extracting(LookItem::productId).containsExactly(701L, 700L);
+    }
+
+    @Test
+    @DisplayName("상품이 든 룩은 보이는 룩만 노출 순서로 낸다 — 숨긴 룩 · 다른 상품의 룩은 빠진다")
+    void visibleLooksByProduct() {
+        port.insert(content(look(1L, 2, true), item(11L, 1L, 700L, 0)));
+        port.insert(content(look(2L, 0, false), item(21L, 2L, 700L, 0)));
+        port.insert(content(look(3L, 1, true), item(31L, 3L, 701L, 0), item(32L, 3L, 700L, 1)));
+        port.insert(content(look(4L, 0, true), item(41L, 4L, 701L, 0)));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(port.findVisibleByProductId(700L)).extracting(Look::id).containsExactly(3L, 1L);
+        assertThat(port.findVisibleByProductId(700L).getFirst().image()).isEqualTo(new LookImage("https://cdn.example.com/media/3.jpg", 1200, 1600, "대체3"));
+        assertThat(port.findVisibleByProductId(999L)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("고객 목록 한 쪽은 보이는 룩만 노출 순서 → 아이디(어드민 목록과 같은 순서)로 자르고 다음 쪽 여부를 안다")
+    void visibleSlice() {
+        port.insert(content(look(1L, 1, true), item(11L, 1L, 700L, 0)));
+        port.insert(content(look(2L, 0, false), item(21L, 2L, 700L, 0)));
+        port.insert(content(look(3L, 0, true), item(31L, 3L, 700L, 0)));
+        port.insert(content(look(4L, 1, true), item(41L, 4L, 700L, 0)));
+        entityManager.flush();
+        entityManager.clear();
+
+        Slice<Look> first = port.findVisibleSlice(0, 2);
+        Slice<Look> second = port.findVisibleSlice(1, 2);
+
+        assertThat(first.getContent()).extracting(Look::id).containsExactly(3L, 1L);
+        assertThat(first.hasNext()).isTrue();
+        assertThat(second.getContent()).extracting(Look::id).containsExactly(4L);
+        assertThat(second.hasNext()).isFalse();
     }
 
     @Test
