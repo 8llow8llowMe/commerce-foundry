@@ -13,7 +13,6 @@ import com.commercefoundry.messaging.event.EventEnvelopeCodec;
 import com.commercefoundry.messaging.event.TopicNames;
 import com.commercefoundry.messaging.properties.MessagingProperties;
 import com.commercefoundry.messaging.support.InMemoryOutboxStore;
-import com.commercefoundry.messaging.support.InMemoryProcessedEventStore;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
@@ -33,7 +32,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.support.SendResult;
 
-/** 릴레이 — 아이디 순으로 키 · 헤더를 실어 보내고 표시한다. 첫 실패에서 멈춰 순서를 지키고, 정리는 보존 기간을 본다. */
+/** 릴레이 — 아이디 순으로 키 · 헤더를 실어 보내고 표시한다. 실패한 키만 멈춰 순서를 지킨다. 정리는 MessagingCleanupTest. */
 class OutboxRelayTest {
 
     private static final Instant NOW = Instant.parse("2026-10-25T03:00:00Z");
@@ -41,7 +40,6 @@ class OutboxRelayTest {
 
     private final EventEnvelopeCodec codec = new EventEnvelopeCodec(65536);
     private InMemoryOutboxStore store;
-    private InMemoryProcessedEventStore processed;
     private KafkaOperations<String, String> kafka;
     private OutboxRelay relay;
 
@@ -49,10 +47,9 @@ class OutboxRelayTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         store = new InMemoryOutboxStore();
-        processed = new InMemoryProcessedEventStore();
         kafka = mock(KafkaOperations.class);
         MessagingProperties properties = new MessagingProperties(true, "commerce-foundry.test", "messaging-test", List.of(), 65536, null, null, null);
-        relay = new OutboxRelay(store, processed, kafka, new DefaultLockingTaskExecutor(configuration -> Optional.of(() -> { })),
+        relay = new OutboxRelay(store, kafka, new DefaultLockingTaskExecutor(configuration -> Optional.of(() -> { })),
             TOPICS, codec, properties, Clock.fixed(NOW, ZoneOffset.UTC), null);
     }
 
@@ -137,19 +134,5 @@ class OutboxRelayTest {
         relay.relayOnce();
 
         verify(kafka, never()).send(any(ProducerRecord.class));
-    }
-
-    @Test
-    @DisplayName("정리 — 보존 기간(7일)이 지난 발행 완료 행 · 처리 기록만 지운다")
-    void cleanup() {
-        store.put(row("old", "sample-created"), NOW.minusSeconds(8 * 24 * 3600));
-        store.put(row("recent", "sample-created"), NOW.minusSeconds(3600));
-        processed.record("group", UUID.randomUUID(), "sample-created", NOW.minusSeconds(8 * 24 * 3600));
-        processed.record("group", UUID.randomUUID(), "sample-created", NOW);
-
-        relay.cleanupOnce();
-
-        assertThat(store.rows()).extracting(OutboxRow::aggregateId).containsExactly("recent");
-        assertThat(processed.size()).isEqualTo(1);
     }
 }

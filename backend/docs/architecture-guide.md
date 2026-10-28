@@ -336,6 +336,7 @@ Info → Presenter → Response
   상태 전이 멱등(이미 PAID · RELEASED 면 no-op)이 2차 방어다. 일시 오류는 컨슈머 안 지수 백오프 뒤 DLT(`<topic>.dlt`), 종결 오류는 바로 DLT 다.
   `@RetryableTopic`(재시도 토픽 체인)은 쓰지 않는다. DLT 재처리는 사람이 한다.
   inbox 의 첫 구현은 product-service 의 주문 만료 · 취소 컨슈머다(`global/messaging/JpaProcessedEventStore`, `order-flow-guide.md` §3-5).
+  처리 기록은 보존 기간(`inbox.retention`) 뒤 messaging-core 기록 정리가 지운다 — 릴레이와 따로 돌아 outbox 없는 서비스도 지워진다(#378, 락은 서비스 스키마의 `shedlock`).
 - **이름(공유 클러스터)** — namespace `commerce-foundry.<env>`(`KAFKA_NAMESPACE`, 마지막 토막 = 활성 프로파일이 아니면 기동하지 않는다).
   토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`, 컨슈머 그룹 `<ns>.<소비 서비스>.<목적>`, 파티션 키는 애그리거트 아이디(orderId · jobId).
   다른 고객사가 같은 클러스터를 쓰면 namespace 만 바꾼다(§9).
@@ -397,7 +398,7 @@ store:
 - **가져가기는 신호의 시도 번호 + `@Version` 경합이다.** 신호가 가리킨 작업을 다시 읽어 `QUEUED` 이고 시도 번호 · 종류가 신호와 같을 때만 도메인 `Job.claim` 으로 바꿔 저장한다.
   다르면(이미 가져감 · 끝남 · 다른 시도의 늦은 신호) 버린다 — at-least-once 신호의 중복은 이것으로 거르고 inbox(`processed_event`)를 두지 않는다.
   같은 신호를 두 인스턴스가 받아도 버전에서 진 쪽은 `JOB_CONFLICT` 로 건너뛴다. 작업 가져가기에는 분산 락 · `SKIP LOCKED` 를 쓰지 않는다(재고 선점 만료 스케줄러 #10 과 같은 방식).
-  outbox 릴레이는 단일 실행 락(ShedLock, `operations.shedlock`)을 쓴다.
+  outbox 릴레이 · 기록 정리는 단일 실행 락(ShedLock, `operations.shedlock`)을 쓴다.
 - **신호 오류** — 읽을 수 없는 봉투 · 모르는 새 버전 · 아이디 형식 오류 · 이 인스턴스에 핸들러가 없는 종류는 바로 DLT(`<topic>.dlt`)다. DB 오류 같은 일시 오류는 컨슈머 안 재시도
   (`commerce.messaging.retry.*`) 뒤 DLT 다. DLT 로 간 신호의 작업은 QUEUED 로 남는다 — 사람이 DLT 메시지를 다시 보내 실행한다(롤링 배포 중 새 종류의 신호를 옛 인스턴스가 받은 경우도 같다).
 - **메시징이 꺼져 있으면(`MESSAGING_ENABLED=false`) 작업은 등록만 되고 실행되지 않는다** — 신호는 outbox 에 쌓이고, 켜면 쌓인 것부터 나간다. 워커를 켠 인스턴스가 메시징이 꺼진 채 뜨면 WARN 을 남긴다.
@@ -435,13 +436,13 @@ store:
   두 빈은 `@Bean(defaultCandidate = false)` 다 — 일반 빈으로 두면 Boot 가 `applicationTaskExecutor` · `taskScheduler` 를 만들지 않는다.
   워커 아이디(`{앱}:{호스트}:{pid}:{난수}`)는 `JobWorkerIdentity` 빈 하나로 만든다.
 - **graceful shutdown** — 워커 lifecycle(단계 `Integer.MAX_VALUE`)이 새 신호를 받지 않게 하고(받은 신호는 nack), 실행 중인 시도를 `shutdown-grace` 까지 기다린 뒤,
-  남은 시도를 QUEUED 로 돌려놓고 실행 신호를 다시 낸다(시도 번호를 되돌린다). 실행기 · 스케줄러는 그 뒤 단계(`Integer.MAX_VALUE - 1`), outbox 릴레이는 `Integer.MAX_VALUE - 2`,
+  남은 시도를 QUEUED 로 돌려놓고 실행 신호를 다시 낸다(시도 번호를 되돌린다). 실행기 · 스케줄러는 그 뒤 단계(`Integer.MAX_VALUE - 1`), 메시징 백그라운드(outbox 릴레이 · 기록 정리)는 `Integer.MAX_VALUE - 2`,
   Kafka 리스너 컨테이너는 그보다 늦게 멈춘다 — 그래서 nack 한 신호 · 다시 낸 신호는 `shutdown-grace` 와 리밸런스 뒤에 다른 인스턴스로 넘어간다.
   남은 실행 스레드는 더 기다리지 않고 interrupt 한다. 강제 종료면 lease 만료가 대신한다 — 컨테이너 종료 유예는 `shutdown-grace` 보다 길게 둔다.
 - 설정은 `operations.jobs.*`(`JobProperties`)다. `operations.jobs.worker.enabled=false` 면 실행 신호 리스너를 만들지 않는다(API 전용 인스턴스 — 등록 · 만료 판정만 한다).
   결과 JSON 상한은 최대 1MiB 다.
 - **정기 작업** (#212) — `operations.jobs.planner.schedules` 의 일 · 주 · 월 시각에 맞춰 `JobRegistrationProcessor` 로 등록한다.
-  단일 실행 락은 ShedLock(`operations-job-planner`, 테이블 `operations.shedlock` — outbox 릴레이와 같은 `LockProvider` 빈 · 테이블)이다.
+  단일 실행 락은 ShedLock(`operations-job-planner`, 테이블 `operations.shedlock` — outbox 릴레이 · 기록 정리와 같은 `LockProvider` 빈 · 테이블)이다.
   슬롯 멱등 키는 `planner:{주기}:{존}:{로컬 시각}` 이고, 활성 작업만이 아니라 같은 키로 등록된 적이 있으면(`dedup_key`, `idx_job_type_dedup_key`) 다시 만들지 않는다.
   엔진의 활성 멱등(끝나면 같은 키를 다시 쓸 수 있음)과는 다르다. 요청한 어드민은 없다(시스템 등록 — 알림을 만들지 않는다).
   목록이 비어 있으면 락을 잡지 않는다. `catch-up`(기본 32일)보다 오래된 슬롯은 건너뛰고, 그 안의 가장 최근 슬롯만 등록한다. 결과 파일은 아직 없다.

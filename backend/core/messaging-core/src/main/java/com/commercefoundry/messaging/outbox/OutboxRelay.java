@@ -1,6 +1,5 @@
 package com.commercefoundry.messaging.outbox;
 
-import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
 import com.commercefoundry.messaging.event.TopicNames;
 import com.commercefoundry.messaging.properties.MessagingProperties;
@@ -8,14 +7,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.IntSupplier;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.core.LockConfiguration;
 import net.javacrumbs.shedlock.core.LockingTaskExecutor;
@@ -39,15 +36,11 @@ import org.springframework.kafka.core.KafkaOperations;
 public class OutboxRelay {
 
     static final String RELAY_LOCK = "commerce-messaging-outbox-relay";
-    static final String CLEANUP_LOCK = "commerce-messaging-outbox-cleanup";
     private static final int MAX_ERROR_CODE_LENGTH = 50;
     /** 이 시도 수부터 ERROR 로 남긴다. */
     static final int ALERT_ATTEMPTS = 10;
-    /** 정리 한 번에 도는 최대 배치 수 — 밀린 정리가 릴레이 스레드를 오래 잡지 않게 한다(남은 것은 다음 주기). */
-    static final int MAX_CLEANUP_BATCHES = 100;
 
     private final OutboxStore outboxStore;
-    private final ProcessedEventStore processedEventStore;
     private final KafkaOperations<String, String> kafka;
     private final LockingTaskExecutor lockingTaskExecutor;
     private final TopicNames topicNames;
@@ -57,12 +50,10 @@ public class OutboxRelay {
     private final MeterRegistry meterRegistry;
 
     /**
-     * @param processedEventStore 정리할 inbox. 받기만 하지 않는 서비스면 null
      * @param meterRegistry 지표. 없으면 null
      */
     public OutboxRelay(
         OutboxStore outboxStore,
-        ProcessedEventStore processedEventStore,
         KafkaOperations<String, String> kafka,
         LockingTaskExecutor lockingTaskExecutor,
         TopicNames topicNames,
@@ -72,7 +63,6 @@ public class OutboxRelay {
         MeterRegistry meterRegistry
     ) {
         this.outboxStore = outboxStore;
-        this.processedEventStore = processedEventStore;
         this.kafka = kafka;
         this.lockingTaskExecutor = lockingTaskExecutor;
         this.topicNames = topicNames;
@@ -207,36 +197,5 @@ public class OutboxRelay {
         if (meterRegistry != null) {
             meterRegistry.counter("commerce.messaging.outbox.publish.failed.total", "error", errorCode).increment();
         }
-    }
-
-    /** 정리 — 보존 기간이 지난 발행 완료 outbox 행과 처리 기록을 지운다. 단일 실행 락 아래에서 돈다. */
-    public void cleanupOnce() {
-        MessagingProperties properties = this.properties;
-        try {
-            lockingTaskExecutor.executeWithLock((Runnable) () -> {
-                Instant now = clock.instant();
-                int batchSize = properties.outbox().cleanup().batchSize();
-                int deleted = drain(() -> outboxStore.deletePublishedBefore(now.minus(properties.outbox().cleanup().retention()), batchSize), batchSize);
-                int processed = processedEventStore == null ? 0
-                    : drain(() -> processedEventStore.deleteProcessedBefore(now.minus(properties.inbox().retention()), batchSize), batchSize);
-                if (deleted + processed > 0) {
-                    log.info("messaging cleanup. outboxDeleted={}, processedEventDeleted={}", deleted, processed);
-                }
-            }, new LockConfiguration(clock.instant(), CLEANUP_LOCK, properties.outbox().relay().lockAtMostFor(), Duration.ZERO));
-        } catch (RuntimeException exception) {
-            log.warn("messaging cleanup failed. error={}", exception.getClass().getSimpleName());
-        }
-    }
-
-    /** 한 번에 {@code batchSize} 씩, 덜 지워지거나 {@link #MAX_CLEANUP_BATCHES} 까지 — 한 문장으로 대량 삭제하지 않는다. */
-    private static int drain(IntSupplier deleteBatch, int batchSize) {
-        int total = 0;
-        int deleted;
-        int batches = 0;
-        do {
-            deleted = deleteBatch.getAsInt();
-            total += deleted;
-        } while (deleted >= batchSize && ++batches < MAX_CLEANUP_BATCHES);
-        return total;
     }
 }

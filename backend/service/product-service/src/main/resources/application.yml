@@ -46,6 +46,11 @@ commerce:
       - order.order-expired.dlt
       - order.order-canceled
       - order.order-canceled.dlt
+    # 처리 기록(processed_event) 정리의 단일 실행 락 테이블 — outbox 는 없지만 정리가 이 락 아래에서 한 인스턴스만 돈다(#378).
+    # 키 이름은 하위 호환으로 outbox.relay 아래에 있다. operations-service 처럼 서비스 스키마를 붙인다
+    outbox:
+      relay:
+        lock-table: product.shedlock
 
 eureka:
   client:

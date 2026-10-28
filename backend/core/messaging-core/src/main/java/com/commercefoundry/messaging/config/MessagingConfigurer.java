@@ -1,12 +1,12 @@
 package com.commercefoundry.messaging.config;
 
+import com.commercefoundry.messaging.cleanup.MessagingCleanup;
 import com.commercefoundry.messaging.consume.IdempotentEventProcessor;
 import com.commercefoundry.messaging.consume.MessagingErrorHandlers;
 import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
 import com.commercefoundry.messaging.event.TopicNames;
 import com.commercefoundry.messaging.outbox.OutboxRelay;
-import com.commercefoundry.messaging.outbox.OutboxRelayLifecycle;
 import com.commercefoundry.messaging.outbox.OutboxStore;
 import com.commercefoundry.messaging.properties.MessagingProperties;
 import com.commercefoundry.messaging.publish.EventPublisher;
@@ -18,6 +18,7 @@ import javax.sql.DataSource;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.core.DefaultLockingTaskExecutor;
 import net.javacrumbs.shedlock.core.LockProvider;
+import net.javacrumbs.shedlock.core.LockingTaskExecutor;
 import net.javacrumbs.shedlock.provider.jdbc.JdbcLockProvider;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -170,25 +171,42 @@ public class MessagingConfigurer {
     }
 
     /**
-     * outbox 릴레이 — 메시징 · 릴레이가 켜져 있고 이 서비스가 {@link OutboxStore} 를 두었을 때만 돈다. 단일 실행 락은 ShedLock JDBC 테이블
-     * ({@code commerce.messaging.outbox.relay.lock-table}, 서비스 스키마)이다. {@code LockProvider} 빈이 있으면 그것을 쓴다(테스트 · 다른 락 저장소).
+     * 메시징 백그라운드 — outbox 릴레이와 기록 정리(outbox · inbox)를 한 스레드에서 돌린다.
+     * <ul>
+     *   <li>메시징({@code enabled}) · 인스턴스 스위치({@code outbox.relay.enabled}) 중 하나라도 꺼져 있으면 둘 다 돌지 않는다.</li>
+     *   <li>릴레이는 이 서비스가 {@link OutboxStore} 를 두었을 때만 돈다.</li>
+     *   <li>정리는 {@code outbox.cleanup.enabled} 이고 {@link OutboxStore} · {@link ProcessedEventStore} 중 하나라도 있으면 돈다 —
+     *       받기만 하는 서비스도 처리 기록이 지워진다(#378).</li>
+     * </ul>
+     * 단일 실행 락은 ShedLock JDBC 테이블({@code commerce.messaging.outbox.relay.lock-table}, 서비스 스키마)이고 릴레이 · 정리가 함께 쓴다.
+     * {@code LockProvider} 빈이 있으면 그것을 쓴다(테스트 · 다른 락 저장소).
      */
     @Bean
     @SuppressWarnings("unchecked")
-    public OutboxRelayLifecycle outboxRelayLifecycle(
+    public MessagingBackgroundLifecycle messagingBackgroundLifecycle(
         MessagingProperties messagingProperties, ObjectProvider<OutboxStore> outboxStore, ObjectProvider<ProcessedEventStore> processedEventStore,
         ObjectProvider<KafkaTemplate<?, ?>> kafkaTemplate, ObjectProvider<LockProvider> lockProvider, ObjectProvider<DataSource> dataSource, TopicNames topicNames,
         EventEnvelopeCodec eventEnvelopeCodec, ObjectProvider<Clock> clock, ObjectProvider<MeterRegistry> meterRegistry
     ) {
-        OutboxStore store = outboxStore.getIfAvailable();
-        if (!messagingProperties.enabled() || !messagingProperties.outbox().relay().enabled() || store == null) {
-            return new OutboxRelayLifecycle(null, messagingProperties);
+        if (!messagingProperties.enabled() || !messagingProperties.outbox().relay().enabled()) {
+            return new MessagingBackgroundLifecycle(null, null, messagingProperties);
         }
-        OutboxRelay relay = new OutboxRelay(store, processedEventStore.getIfAvailable(),
-            (KafkaOperations<String, String>) kafkaTemplate.getObject(),
-            new DefaultLockingTaskExecutor(lockProvider.getIfAvailable(() -> jdbcLockProvider(dataSource, messagingProperties))),
-            topicNames, eventEnvelopeCodec, messagingProperties, clock.getIfAvailable(Clock::systemUTC), meterRegistry.getIfAvailable());
-        return new OutboxRelayLifecycle(relay, messagingProperties);
+        OutboxStore store = outboxStore.getIfAvailable();
+        ProcessedEventStore processed = processedEventStore.getIfAvailable();
+        boolean runRelay = store != null;
+        boolean runCleanup = messagingProperties.outbox().cleanup().enabled() && (store != null || processed != null);
+        if (!runRelay && !runCleanup) {
+            return new MessagingBackgroundLifecycle(null, null, messagingProperties);
+        }
+        Clock runClock = clock.getIfAvailable(Clock::systemUTC);
+        LockingTaskExecutor lockingTaskExecutor =
+            new DefaultLockingTaskExecutor(lockProvider.getIfAvailable(() -> jdbcLockProvider(dataSource, messagingProperties)));
+        OutboxRelay relay = runRelay
+            ? new OutboxRelay(store, (KafkaOperations<String, String>) kafkaTemplate.getObject(), lockingTaskExecutor, topicNames, eventEnvelopeCodec,
+                messagingProperties, runClock, meterRegistry.getIfAvailable())
+            : null;
+        MessagingCleanup cleanup = runCleanup ? new MessagingCleanup(store, processed, lockingTaskExecutor, messagingProperties, runClock) : null;
+        return new MessagingBackgroundLifecycle(relay, cleanup, messagingProperties);
     }
 
     /** 켜져 있으면 쓰는 토픽이 있는지 기동 때 본다 — 앱은 토픽을 만들지 않는다. */
@@ -204,7 +222,7 @@ public class MessagingConfigurer {
     private static LockProvider jdbcLockProvider(ObjectProvider<DataSource> dataSource, MessagingProperties messagingProperties) {
         DataSource lockDataSource = dataSource.getIfAvailable();
         if (lockDataSource == null) {
-            throw new IllegalStateException("outbox 릴레이의 단일 실행 락에 DataSource 가 필요합니다.");
+            throw new IllegalStateException("메시징 릴레이 · 정리의 단일 실행 락에 DataSource 가 필요합니다.");
         }
         return new JdbcLockProvider(lockDataSource, messagingProperties.outbox().relay().lockTable());
     }
