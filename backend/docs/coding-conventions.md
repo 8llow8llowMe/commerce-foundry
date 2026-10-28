@@ -232,6 +232,9 @@ public final class ProductValidationMessage {
   예: auth `@ValidNormalizedEmailLength` · order `@NormalizedMaxLength`. 자리는 원본 `ConstraintViolation` 에서 읽으므로,
   핸들러가 오류를 새 `FieldError` 로 옮겨 담을 때는 `wrap(violation)` 으로 원본을 실어야 한다 — 싣지 않으면 이름으로만 판정해 맨 뒤에 선다.
 - 컬렉션 원소는 `@NotNull` 과 값 제약을 쌍으로 건다 — `List<@Positive Long>` 만 걸면 `[null]` 이 통과한다.
+- **검증 `1xx` 대역이 다 찬 서비스는 컨텍스트 접두어를 새로 연다** (order-service 의 `CART_` · `ORDER_` 선례). 새 컨텍스트는 업무 오류 `{CONTEXT}_001~` 과
+  검증 `{CONTEXT}_101~` 을 자기 `ErrorCode` · `ValidationMessage` 에 두고, 폴백 · 타입 불일치 · 필수 파라미터(`_100` · 대역 끝 2개)는 서비스 공용 코드를 그대로 쓴다.
+  서비스 공용 검증 핸들러는 메시지 앞의 코드를 읽으므로 접두어가 달라도 고칠 것이 없다. 예: product-service 룩(#62) — `PRODUCT_1xx` 소진, `LOOK_001~008` · `LOOK_101~122`.
 
 ### 8-3. 하드코딩된 문자열 금지
 

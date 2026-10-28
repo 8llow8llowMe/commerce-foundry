@@ -99,7 +99,7 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 | `AUTH_SOCIAL_ENABLED` · `KAKAO_LOGIN_ENABLED` · `NAVER_LOGIN_ENABLED` | - | `:-false` | | | O | | | | |
 | `KAKAO_CLIENT_ID` · `NAVER_CLIENT_ID` · `KAKAO_REDIRECT_URI` · `NAVER_REDIRECT_URI` | - | `:-` 빈 값 | | | O | | | | |
 | `KAKAO_CLIENT_SECRET` · `NAVER_CLIENT_SECRET` | O | `:-` 빈 값 | | | O | | | | |
-| `STORE_FEATURES_CUSTOM_ORDER` · `STORE_FEATURES_PREORDER` · `STORE_FEATURES_PRODUCT_VIDEO` | - | `:-false` | | | | O | | | |
+| `STORE_FEATURES_CUSTOM_ORDER` · `STORE_FEATURES_PREORDER` · `STORE_FEATURES_PRODUCT_VIDEO` · `STORE_FEATURES_LOOKS` | - | `:-false` | | | | O | | | |
 | `STORE_FEATURES_INTERNATIONAL_SHIPPING` | - | `:-false` | | | | | | | O |
 | `TIME_ZONE` | - | `:-UTC` | O | O | O | O | O | O | O |
 | `COMMERCE_DOCKER_NETWORK` · 포트 · 메모리 (§3) | - | 네트워크 · 포트 `:?`, 메모리 `:-` | O | O | O | O | O | O | O |

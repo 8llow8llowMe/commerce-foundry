@@ -227,7 +227,8 @@ class ProductListProcessorTest {
 
     private ProductListProcessor processor(boolean customOrderFeature, boolean preorderFeature) {
         return new ProductListProcessor(
-            productRepositoryPort, skuRepositoryPort, productImageRepositoryPort, new StoreProperties(new StoreProperties.Features(customOrderFeature, preorderFeature, false))
+            productRepositoryPort, skuRepositoryPort, productImageRepositoryPort,
+            new StoreProperties(new StoreProperties.Features(customOrderFeature, preorderFeature, false, false))
         );
     }
 

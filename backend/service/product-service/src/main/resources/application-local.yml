@@ -19,6 +19,7 @@ store:
     custom-order: true
     preorder: true
     product-video: true
+    looks: true
 
 springdoc:
   api-docs:

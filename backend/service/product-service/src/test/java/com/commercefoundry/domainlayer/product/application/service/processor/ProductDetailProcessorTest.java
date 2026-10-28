@@ -427,7 +427,7 @@ class ProductDetailProcessorTest {
     }
 
     private static StoreProperties.Features features(boolean customOrder, boolean preorder, boolean productVideo) {
-        return new StoreProperties.Features(customOrder, preorder, productVideo);
+        return new StoreProperties.Features(customOrder, preorder, productVideo, false);
     }
 
     /** 포트 계약대로 노출 순서 → 아이디 오름차순으로 준다. 값은 그룹을 가리지 않고 한 줄로 정렬돼 온다. */

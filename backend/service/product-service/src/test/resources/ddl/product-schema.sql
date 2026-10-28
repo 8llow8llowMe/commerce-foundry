@@ -166,6 +166,93 @@
     comment on column product.display_section.visible is
         '고객 메인 노출 여부';
 
+    create table product.look (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        description text,
+        display_order integer not null,
+        image_alt_text varchar(200),
+        image_height integer,
+        image_url varchar(500) not null,
+        image_width integer,
+        title varchar(100) not null,
+        visible boolean not null,
+        primary key (id),
+        constraint ck_look_description_length check (description is null or char_length(description) <= 1000),
+        constraint ck_look_display_order_non_negative check (display_order >= 0)
+    );
+
+    comment on table product.look is
+        '룩 (Shop the Look)';
+
+    comment on column product.look.id is
+        '룩 아이디 (Snowflake)';
+
+    comment on column product.look.created_at is
+        '생성 시각';
+
+    comment on column product.look.updated_at is
+        '수정 시각';
+
+    comment on column product.look.description is
+        '설명 (평문, 개행 허용, 1000자 이하)';
+
+    comment on column product.look.display_order is
+        '룩 목록 안의 노출 순서 (오름차순, 같으면 아이디 오름차순)';
+
+    comment on column product.look.image_alt_text is
+        '대표 이미지 대체 텍스트';
+
+    comment on column product.look.image_height is
+        '대표 이미지 원본 세로 px. 모르면 null';
+
+    comment on column product.look.image_url is
+        '대표 이미지 주소 — 스토어 미디어 저장소의 공개 주소 아래';
+
+    comment on column product.look.image_width is
+        '대표 이미지 원본 가로 px. 모르면 null';
+
+    comment on column product.look.title is
+        '제목 (평문)';
+
+    comment on column product.look.visible is
+        '고객 노출 여부';
+
+    create table product.look_item (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        display_order integer not null,
+        look_id bigint not null,
+        product_id bigint not null,
+        primary key (id),
+        constraint uk_look_item_look_id_display_order unique (look_id, display_order),
+        constraint uk_look_item_look_id_product_id unique (look_id, product_id),
+        constraint ck_look_item_display_order_non_negative check (display_order >= 0)
+    );
+
+    comment on table product.look_item is
+        '룩 구성 상품';
+
+    comment on column product.look_item.id is
+        '룩 아이템 아이디 (Snowflake). 룩 수정마다 새로 발급한다';
+
+    comment on column product.look_item.created_at is
+        '생성 시각';
+
+    comment on column product.look_item.updated_at is
+        '수정 시각';
+
+    comment on column product.look_item.display_order is
+        '룩 안의 순서 (0 부터, 오름차순)';
+
+    comment on column product.look_item.look_id is
+        '룩 아이디 (FK: look.id)';
+
+    comment on column product.look_item.product_id is
+        '상품 아이디 (FK: product.id)';
+
     create table product.product (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -931,6 +1018,9 @@
 
     comment on column product.stock_restoration_item.sku_id is
         'SKU 아이디 (FK: sku.id)';
+
+    create index idx_look_item_product_id_look_id 
+       on product.look_item (product_id, look_id);
 
     create index idx_product_visible_sale_price_amount_id 
        on product.product (visible, sale_price_amount, id);
