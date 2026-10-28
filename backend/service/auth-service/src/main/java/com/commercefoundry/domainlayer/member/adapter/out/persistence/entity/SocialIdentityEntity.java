@@ -18,13 +18,16 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "social_identity", comment = "소셜 로그인 식별자 — 이메일 자동 연결 금지",
-    uniqueConstraints = @UniqueConstraint(name = SocialIdentityEntity.UK_PROVIDER_SUBJECT, columnNames = {"provider", "subject"}),
+    uniqueConstraints = {
+        @UniqueConstraint(name = SocialIdentityEntity.UK_PROVIDER_SUBJECT, columnNames = {"provider", "subject"}),
+        @UniqueConstraint(name = SocialIdentityEntity.UK_MEMBER_PROVIDER, columnNames = {"member_id", "provider"})},
     indexes = @Index(name = "idx_social_identity_member_id", columnList = "member_id"))
 @Getter
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class SocialIdentityEntity extends BaseEntity {
+    public static final String UK_MEMBER_PROVIDER = "uk_social_identity_member_id_provider";
     public static final String UK_PROVIDER_SUBJECT = "uk_social_identity_provider_subject";
 
     @Id

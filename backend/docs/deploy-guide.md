@@ -96,6 +96,7 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 | `ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` | O | `:-` 빈 값 | | | O | | | | |
 | `ADMIN_SEED_NAME` | - | `:-` 빈 값 | | | O | | | | |
 | `AUTH_LOGIN_GUARD_HASH_KEY` | O | `:-` 빈 값 | | | O | | | | |
+| `AUTH_LOGIN_GUARD_ENABLED` | - | `:-false` | | | O | | | | |
 | `AUTH_SOCIAL_ENABLED` · `KAKAO_LOGIN_ENABLED` · `NAVER_LOGIN_ENABLED` | - | `:-false` | | | O | | | | |
 | `KAKAO_CLIENT_ID` · `NAVER_CLIENT_ID` · `KAKAO_REDIRECT_URI` · `NAVER_REDIRECT_URI` | - | `:-` 빈 값 | | | O | | | | |
 | `KAKAO_CLIENT_SECRET` · `NAVER_CLIENT_SECRET` | O | `:-` 빈 값 | | | O | | | | |
@@ -299,3 +300,8 @@ Vault에 활성 제공자의 CLIENT_ID · CLIENT_SECRET과 고정 REDIRECT_URI�
 redirect URI는 제공자 콘솔과 정확히 일치해야 한다. HTTPS가 기본이며 로컬 개발만 loopback HTTP를 허용한다.
 Kakao는 콘솔에서 Client Secret 사용을 활성화해야 한다. 클라이언트 비밀은 auth에만 전달하며 FE에는 전달하지 않는다.
 운영 적용 전에 PR의 Hibernate 생성 DDL 중 auth.social_identity 테이블·제약·인덱스를 적용한다. 기본 ddl-auto=none이므로 자동 생성되지 않는다.
+
+기존 일반 계정 연결(#355)은 추가로 `AUTH_LOGIN_GUARD_ENABLED=true`와 Vault의 `AUTH_LOGIN_GUARD_HASH_KEY`(base64 32바이트 이상)가 필요하다.
+compose는 기본 false를 유지한다. 끄면 기존 로그인은 유지되지만 연결 시작은 503 `AUTH_060`으로 차단한다.
+켜면 동일 이메일의 LOGIN 카운터를 비밀번호 재인증 전 기록하며 저장소 장애 시 연결을 차단한다. 기존 일반 로그인·가입 제한 흐름 연결은 #66 범위다.
+기존 데이터의 회원·제공자 중복 사전 점검 후 `uk_social_identity_member_id_provider`도 추가한다 (`api-design-guide.md` #355 운영 DDL).

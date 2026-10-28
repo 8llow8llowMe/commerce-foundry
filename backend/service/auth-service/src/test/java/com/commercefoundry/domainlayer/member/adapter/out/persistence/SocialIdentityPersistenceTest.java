@@ -31,6 +31,54 @@ class SocialIdentityPersistenceTest {
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/auth-schema.sql");
     @Autowired SocialIdentityRepositoryPort identities;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
+
+    @Test
+    void concurrentPostgresTransactionsArbitrateBothUniqueKeys() throws Exception {
+        for (boolean sameMember : new boolean[]{false, true}) {
+            long id = Math.abs(java.util.UUID.randomUUID().getMostSignificantBits() >>> 2);
+            String subject = java.util.UUID.randomUUID().toString();
+            var start = new java.util.concurrent.CountDownLatch(1);
+            try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+                var one = pool.submit(() -> appendAfter(start, id, id, subject));
+                var two = pool.submit(() -> appendAfter(start, id + 1, sameMember ? id : id + 1, sameMember ? subject + "-other" : subject));
+                start.countDown();
+                assertThat(java.util.List.of(one.get(10, java.util.concurrent.TimeUnit.SECONDS), two.get(10, java.util.concurrent.TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(true, false);
+            }
+            if (sameMember) {
+                assertThat(identities.findProviders(id)).containsExactly(SocialProvider.KAKAO);
+                assertThat(java.util.stream.Stream.of(subject, subject + "-other")
+                    .filter(value -> identities.findMemberId(SocialProvider.KAKAO, value).isPresent()).count()).isEqualTo(1);
+            } else {
+                assertThat(identities.findMemberId(SocialProvider.KAKAO, subject).orElseThrow()).isIn(id, id + 1);
+                assertThat(identities.findProviders(id).size() + identities.findProviders(id + 1).size()).isEqualTo(1);
+            }
+        }
+    }
+
+    private boolean appendAfter(java.util.concurrent.CountDownLatch start, long id, long memberId, String subject) throws Exception {
+        start.await();
+        try {
+            new org.springframework.transaction.support.TransactionTemplate(transactions)
+                .executeWithoutResult(status -> identities.append(id, memberId, SocialProvider.KAKAO, subject));
+            return true;
+        } catch (MemberException conflict) {
+            assertThat(conflict.getErrorCode()).isEqualTo(MemberErrorCode.SOCIAL_IDENTITY_CONFLICT);
+            return false;
+        }
+    }
+
+    @Test
+    void memberProviderUniqueConstraintAndProviderProjection() {
+        identities.append(11, 111, SocialProvider.KAKAO, "first");
+        identities.append(12, 111, SocialProvider.NAVER, "second");
+        assertThat(identities.findProviders(111)).containsExactly(SocialProvider.KAKAO, SocialProvider.NAVER);
+        assertThat(identities.findSubject(111, SocialProvider.KAKAO)).contains("first");
+        assertThat(identities.findSubject(222, SocialProvider.KAKAO)).isEmpty();
+        assertThatThrownBy(() -> identities.append(13, 111, SocialProvider.KAKAO, "third")).isInstanceOf(MemberException.class)
+            .extracting("errorCode").isEqualTo(MemberErrorCode.SOCIAL_IDENTITY_CONFLICT);
+    }
 
     @Test
     void providerAndSubjectUniqueConstraintMapsToDomainConflict() {

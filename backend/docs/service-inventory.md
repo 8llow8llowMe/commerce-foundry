@@ -200,3 +200,12 @@ auth-service가 고객 Kakao/Naver 소셜 인가 URL 발급과 code 교환 로�
 auth.social_identity 테이블과 auth:oauth-state:{SHA-256 지문} Redis 키를 소유한다.
 회원/identity/약관 신규 저장은 원자적이며 이메일 자동 연결은 제공하지 않는다.
 전체 및 제공자 플래그는 기본 false이며 활성화·Vault 키·배포 compose 규칙은 deploy-guide.md 소셜 로그인 절을 따른다.
+
+기존 고객 계정의 소셜 연결·목록도 auth-service가 소유한다 (#355):
+`GET /api/v1/members/me/social-accounts`, `POST .../{provider}/authorize-url`, `POST .../{provider}`.
+CUSTOMER JWT와 기존 비밀번호 재인증으로 기존 member_id에만 연결한다. 회원·프로필·약관 변경이나 토큰 발급은 없다.
+목록은 제공자 제어 코드만 반환하고 FE #356이 표시 이름·아이콘과 목적별 콜백 분기를 맡는다.
+기존 LOGIN 시도 정책·HMAC 카운터를 재사용하며 guard가 꺼졌거나 Redis가 실패하면 연결 시작을 차단한다.
+`auth:oauth-link-state:{SHA-256 지문}`과 LINK/member/provider/verifier 바인딩을 소유한다. 로그인 state 형식은 유지한다.
+회원별 잠금·5초 DB 상한과 identity의 두 유니크 키로 제공자별 단일 연결과 경합을 보장한다.
+운영 제약 추가 SQL·중복 사전 점검과 FE 계약은 `api-design-guide.md`의 #355 절을 따른다.

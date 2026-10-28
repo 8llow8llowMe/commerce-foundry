@@ -23,11 +23,22 @@ public class SocialIdentityRepositoryAdapter implements SocialIdentityRepository
     }
 
     @Override
+    public java.util.List<SocialProvider> findProviders(long memberId) {
+        return repository.findProvidersByMemberId(memberId);
+    }
+
+    @Override
+    public Optional<String> findSubject(long memberId, SocialProvider provider) {
+        return repository.findByMemberIdAndProvider(memberId, provider).map(SocialIdentityEntity::getSubject);
+    }
+
+    @Override
     public void append(long id, long memberId, SocialProvider provider, String subject) {
         try {
             repository.saveAndFlush(SocialIdentityEntity.builder().id(id).memberId(memberId).provider(provider).subject(subject).build());
         } catch (DataIntegrityViolationException conflict) {
-            if (ConstraintViolations.violates(conflict, SocialIdentityEntity.UK_PROVIDER_SUBJECT)) {
+            if (ConstraintViolations.violates(conflict, SocialIdentityEntity.UK_PROVIDER_SUBJECT)
+                || ConstraintViolations.violates(conflict, SocialIdentityEntity.UK_MEMBER_PROVIDER)) {
                 throw new MemberException(MemberErrorCode.SOCIAL_IDENTITY_CONFLICT);
             }
             throw conflict;

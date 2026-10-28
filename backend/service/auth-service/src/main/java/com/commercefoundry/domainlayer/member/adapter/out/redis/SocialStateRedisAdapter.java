@@ -32,6 +32,24 @@ public class SocialStateRedisAdapter implements SocialStateStorePort {
         return support.execute(() -> Long.valueOf(1).equals(redis.execute(CONSUME, List.of(key(stateHash)), binding(provider, verifierHash))));
     }
 
+    @Override
+    public boolean saveLink(String stateHash, long memberId, SocialProvider provider, String verifierHash, Duration ttl) {
+        return support.execute(() -> Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(linkKey(stateHash), linkBinding(memberId, provider, verifierHash), ttl)));
+    }
+
+    @Override
+    public boolean consumeLink(String stateHash, long memberId, SocialProvider provider, String verifierHash) {
+        return support.execute(() -> Long.valueOf(1).equals(redis.execute(CONSUME, List.of(linkKey(stateHash)), linkBinding(memberId, provider, verifierHash))));
+    }
+
+    private static String linkKey(String stateHash) {
+        return com.commercefoundry.redis.key.RedisKey.of("auth", "oauth-link-state", stateHash).value();
+    }
+
+    private static String linkBinding(long memberId, SocialProvider provider, String verifierHash) {
+        return "LINK:" + memberId + ":" + provider.name() + ":" + verifierHash;
+    }
+
     private static String key(String stateHash) {
         return com.commercefoundry.redis.key.RedisKey.of("auth", "oauth-state", stateHash).value();
     }
