@@ -10,6 +10,8 @@ import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.support.AdjustableClock;
+import com.commercefoundry.support.InMemoryAuthStoresConfig;
+import com.commercefoundry.support.InMemoryLoginAttemptStore;
 import com.commercefoundry.support.InMemoryRefreshTokenStore;
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
@@ -22,10 +24,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -37,12 +37,13 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 /**
  * 로그인 → access 만료 → 재발급 → 로그아웃 → 재사용 거부 흐름을 실제 빈 구성(보안 체인 · Facade · Processor · 발급기 · H2)으로 본다 (#4 완료 기준).
  *
- * <p>토큰 저장소 포트만 인메모리 스텁({@link InMemoryRefreshTokenStore}, {@code @Primary})으로 바꾼다 — 그래서 다른 {@code @SpringBootTest} 와 컨텍스트를 같이 쓰지 않는다.
+ * <p>Redis 포트(토큰 저장소 · 시도 계수기)만 인메모리 스텁으로 바꾼다({@link InMemoryAuthStoresConfig}) — 같은 구성의 흐름 테스트끼리 컨텍스트를 같이 쓴다.
  * 실제 Lua · 키 · TTL 은 {@code RefreshTokenRedisAdapterTest}(Testcontainers)가 본다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
+@Import(InMemoryAuthStoresConfig.class)
 class AuthTokenFlowIntegrationTest {
 
     private static final String PASSWORD = "mokoyuri2026!";
@@ -52,28 +53,14 @@ class AuthTokenFlowIntegrationTest {
     private static final String LOGOUT = "/api/v1/auth/logout";
     private static final String ME = "/api/v1/members/me";
 
-    @TestConfiguration
-    static class StoreConfig {
-
-        @Bean
-        @Primary
-        InMemoryRefreshTokenStore inMemoryRefreshTokenStore() {
-            return new InMemoryRefreshTokenStore();
-        }
-
-        /** 회전 판정 시계(Processor 의 {@code Clock}). access 토큰 발급 · 검증은 각자 시스템 시계라 앞당겨도 영향이 없다. */
-        @Bean
-        @Primary
-        AdjustableClock adjustableClock() {
-            return new AdjustableClock();
-        }
-    }
-
     @Autowired
     private MockMvcTester mvc;
 
     @Autowired
     private InMemoryRefreshTokenStore store;
+
+    @Autowired
+    private InMemoryLoginAttemptStore attemptStore;
 
     @Autowired
     private AdjustableClock clock;
@@ -90,6 +77,8 @@ class AuthTokenFlowIntegrationTest {
     @AfterEach
     void restoreStore() {
         store.unavailable = false;
+        attemptStore.unavailable = false;
+        attemptStore.clear();
         clock.reset();
     }
 

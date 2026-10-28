@@ -148,6 +148,8 @@ return ResponseEntity.ok().body(Response.success(response));
 - 토큰을 보냈는데 틀리면 **비로그인으로 되는 공개 API 여도 401** 이다. 틀린 토큰을 익명으로 취급하지 않는다.
 - **401 은 토큰(access · refresh) 거절에만 쓴다.** 로그인 실패(이메일 없음 · 비밀번호 틀림 · 관리자 계정)는 400 `AUTH_001` 이다 (#4 결정 5) —
   BFF 가 401 을 "재발급 후 재시도" 신호로 쓰므로 자격 증명 오류가 그 경로에 섞이지 않게 한다. refresh 거절은 401 `AUTH_010~012`, 토큰 저장소 장애는 503 `AUTH_013` (§2-4).
+- **429 는 요청 수 제한에만 쓴다** — 게이트웨이 `GATEWAY_006`, 로그인 · 가입 시도 제한 `AUTH_040` · `AUTH_041`(#66). 모두 `Retry-After`(초)를 싣고,
+  재발급 · 로그아웃 신호가 아니다. 클라이언트는 그 초만큼 버튼을 막고 안내한다.
 
 #### 공통 오류 코드 (서비스)
 
@@ -229,13 +231,13 @@ return ResponseEntity.ok().body(Response.success(response));
 
 | API | 인가 | 성공 | 주요 오류 |
 |-----|------|------|-----------|
-| `POST /api/v1/auth/sign-up` | `permitAll()` | 201 `{memberId}` — 토큰은 주지 않는다(로그인을 따로 한다) | 400 `AUTH_1xx` · 409 `AUTH_002` |
+| `POST /api/v1/auth/sign-up` | `permitAll()` | 201 `{memberId}` — 토큰은 주지 않는다(로그인을 따로 한다) | 400 `AUTH_1xx` · 409 `AUTH_002` · 429 `AUTH_041` + `Retry-After` |
 | `GET /api/v1/members/me` | `isAuthenticated()` | 200 `{memberId, email, name, phone, marketingAgreed}` | 401 `SECURITY_001` · 404 `AUTH_003` |
 | `PATCH /api/v1/members/me` | `isAuthenticated()` | 200 바뀐 내 정보 — `{name?, phone?, marketingAgreed?}` 중 보낸 칸만 바꾼다 | 400 `AUTH_1xx` · 404 `AUTH_003` · 409 `AUTH_004` |
-| `POST /api/v1/auth/login` | `permitAll()` | 200 토큰 쌍(아래) · `Cache-Control: no-store` — 본문 `{email, password}` | 400 `AUTH_001` · `AUTH_101` · `AUTH_102` · `AUTH_104` · 503 `AUTH_013` |
+| `POST /api/v1/auth/login` | `permitAll()` | 200 토큰 쌍(아래) · `Cache-Control: no-store` — 본문 `{email, password}` | 400 `AUTH_001` · `AUTH_101` · `AUTH_102` · `AUTH_104` · 429 `AUTH_040` + `Retry-After` · 503 `AUTH_013` |
 | `POST /api/v1/auth/token/reissue` | `permitAll()` | 200 토큰 쌍 · `Cache-Control: no-store` — 본문 `{refreshToken}`. 보낸 refresh 는 회전돼 더 쓰지 않는다 | 401 `AUTH_010`(없음 · 빈 값 포함) · `AUTH_011` · `AUTH_012` · 503 `AUTH_013` |
 | `POST /api/v1/auth/logout` | `isAuthenticated()` | 200 `dataBody: null` — 본문 `{refreshToken?}`(본문 생략 가능). 모르는 · 남의 refresh 여도 access 는 막고 200(멱등) | 401 `SECURITY_001` · 503 `AUTH_013` |
-| `POST /api/v1/auth/admin/login` (#6) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. refresh 없음. 비활성 관리자도 `AUTH_030` | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` |
+| `POST /api/v1/auth/admin/login` (#6) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. refresh 없음. 비활성 관리자도 `AUTH_030` | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` · 429 `AUTH_040` + `Retry-After` · 503 `AUTH_013` |
 | `POST /api/v1/admin/admins` (#193) | `hasRole('ADMIN')` | 201 `{memberId}` — 본문 `{email, password, name}`. 비밀번호는 응답에 없다. 고객 이메일은 승격하지 않는다 | 400 `AUTH_130` · `AUTH_131` · `AUTH_132` · `AUTH_140`~`144` · 409 `AUTH_002` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 | `PATCH /api/v1/admin/admins/{memberId}` (#193) | `hasRole('ADMIN')` | 200 `dataBody: null` — 활성 관리자를 끈다. 마지막 한 명은 거절. 옛 access 토큰은 게이트웨이 컷오프 | 404 `AUTH_033` · 409 `AUTH_031` · 400 `AUTH_146` · 503 `AUTH_013` |
 | `PATCH /api/v1/admin/me/password` (#193) | `hasRole('ADMIN')` | 200 `dataBody: null` — 본문 `{currentPassword, newPassword}`. 본인만. 바꾼 뒤 다시 로그인 | 400 `AUTH_032` · `AUTH_141` · `AUTH_142` · `AUTH_145` · 503 `AUTH_013` |
@@ -255,7 +257,7 @@ return ResponseEntity.ok().body(Response.success(response));
 - BFF 는 재발급이 4xx(`success=false`)면 쿠키를 지우고 로그인으로, 503 이면 쿠키를 둔다(§2-1 표).
 
 오류 코드의 정본은 `MemberErrorCode` · `MemberValidationMessage` 다. 접두어는 서비스 단위 `AUTH_` 이고, 001~009 는 회원 · 로그인, 010~ 은 토큰,
-030~ 은 관리자다(#6). 필드 검증은 101~ 이 고객, 130~ 이 관리자다 — 진입 DTO 를 공유하지 않으므로 같은 뜻이어도 코드를 따로 둔다.
+030~ 은 관리자(#6), 040~049 는 시도 제한(#66)이다. 필드 검증은 101~ 이 고객, 130~ 이 관리자다 — 진입 DTO 를 공유하지 않으므로 같은 뜻이어도 코드를 따로 둔다.
 
 | 코드 | HTTP | 뜻 |
 |------|------|----|
@@ -266,12 +268,14 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_010` | 401 | refresh 토큰이 없거나 발급 모양(base64url 43자)이 아니다 — 저장소를 보기 전에 거절한다. 필드 검증(400)을 따로 두지 않는다 |
 | `AUTH_011` | 401 | refresh 토큰 무효 — 만료 · 로그아웃 · 폐기 · 회원 없음 · 로그인 절대 수명(최초 로그인부터, 기본 30일 `auth.token.refresh-family-max-lifetime`) 초과 · 저장값 손상을 구분하지 않는다 (손상은 서버 warn 로그로만 나눈다) |
 | `AUTH_012` | 401 | refresh 토큰 재사용 감지 — 이미 회전한 토큰이 유예(30초) 밖에서 다시 왔거나 유예 안 형제가 3개를 넘었거나, 저장된 회전 시각이 손상(정수 아님 · 지금 + 60초보다 미래)이다. 그 로그인(family)의 토큰을 모두 폐기했다 |
-| `AUTH_013` | 503 | 토큰 저장소(Redis) 장애 — 로그인 · 재발급 · 로그아웃. 로그인 상태(쿠키)는 그대로 두고 다시 시도한다 |
+| `AUTH_013` | 503 | 토큰 · 시도 계수 저장소(Redis) 장애 — 로그인 · 관리자 로그인 · 재발급 · 로그아웃. 로그인 상태(쿠키)는 그대로 두고 다시 시도한다. 회원가입은 계수기 장애에도 이 코드를 내지 않는다(fail-open) |
 | `AUTH_020` | 404 | 배송지가 없거나 다른 회원의 것이다 — 둘을 구분하지 않는다(§2-2, 존재를 숨긴다) |
 | `AUTH_021` | 409 | 배송지 회원당 상한(`auth.shipping-address.max-per-member`, 기본 20)에 닿았다. 요청 값은 맞고 주소록 상태가 막으므로 400 이 아니라 409 다 |
 | `AUTH_022` | 409 | 같은 배송지를 다른 요청이 먼저 고쳤거나 지웠다(낙관적 락), 또는 기본 배송지 유니크 키 위반. 다시 조회한 뒤 보낸다 |
 | `AUTH_023` | 409 | 같은 회원의 다른 배송지 쓰기가 회원 잠금을 쥐고 있어 5초(트랜잭션 시간 상한) 안에 끝나지 않았다. 그 회원 요청끼리 겹친 것이라 503 이 아니다 |
 | `AUTH_030` | 400 | 관리자 로그인 실패 (#6) — 이메일 없음 · 비밀번호 틀림 · 고객 계정을 구분하지 않는다. 문구는 `AUTH_001` 과 같다 (`security-guide.md` §11-1) |
+| `AUTH_040` | 429 + `Retry-After` | 로그인 시도 초과 (#66) — 고객 · 관리자 로그인. 같은 이메일(정규화)의 시도가 창(기본 15분)의 허용 횟수(기본 5회)를 넘었다. 비밀번호가 맞아도 거절하고, 계정이 있든 없든 같은 본문 · 헤더다. 관리자 로그인은 성공한 시도도 창에서 지우지 않는다. `Retry-After` 초 뒤 다시 허용한다 (`security-guide.md` §12) |
+| `AUTH_041` | 429 + `Retry-After` | 회원가입 시도 초과 (#66) — 같은 이메일의 가입 시도가 창(기본 10분)의 허용 횟수(기본 5회)를 넘었다. 가입된 이메일이든 아니든 같다 |
 | `AUTH_100` | 400 | 깨진 JSON · 본문 없음 · 타입 불일치 (필드는 `fieldErrors` 로 밝힌다) |
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
@@ -279,7 +283,9 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_130~146` | 400 | 관리자 · 표시 이름 · 운영자 계정 필드 검증 (#6 · #286 · #322 · #193) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132, 어드민 목록 `page` 133 · `size` 134, 감사 로그 `actorMemberId` 135 · `target` 136, 표시 이름 `ids` 137 · 100개 138 · 양수 139, 운영자 추가 이메일 형식 140 · 비밀번호 12~64자 141 · 비밀번호 형식 142 · 이름 필수 143 · 이름 길이 144 · 현재 비밀번호 필수 145 · 관리자 아이디 양수 146 |
 | `AUTH_198` · `AUTH_199` | 400 | 파라미터 타입 불일치(`page=x` · 없는 `role`) · 필수 파라미터 누락 |
 
-코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~`, 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.
+코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~039` · 시도 제한(#66) `040~049`, 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.
+`AUTH_042` 는 BCrypt 동시 실행 상한(bulkhead, 503)용으로 남겨 둔다(아직 없다).
+시도 제한 429 는 `Retry-After`(초, `max(1, ceil(남은 ms / 1000))`)를 싣는다 — 게이트웨이 `GATEWAY_006` 과 같은 모양이다. BFF 는 이 헤더를 클라이언트로 중계한다.
 요청 검증 예외(본문 · 파라미터 · 타입)는 컨텍스트와 무관하게 `MemberExceptionHandler` 하나가 서비스 공용으로 봉투를 만든다 — 메시지가 코드를 싣고 오므로 컨텍스트를 몰라도 된다.
 다른 컨텍스트의 advice(`ShippingAddressExceptionHandler`)는 자기 도메인 예외만 잡고 `@Order` 로 앞에 선다. 같은 예외를 두 advice 가 다투지 않는다.
 
@@ -950,3 +956,11 @@ delivery-service `GET /internal/v1/onboarding-facts/shipping-policy?memberId={id
 `storeReady` 는 국내(`DOMESTIC`) 정책 행이 있는가(누가 저장했든), `memberFirstSavedAt` 은 `delivery.shipping_policy_history` 에서 scope `DOMESTIC` ·
 `admin_member_id = memberId` 인 행의 가장 이른 저장 시각(UTC ISO)이고 없으면 null(키는 남긴다)이다. 다른 운영자가 만든 정책이 있으면 `storeReady=true` ·
 `memberFirstSavedAt=null` 일 수 있다 — 둘을 어떻게 `tasks` 로 합칠지와 원천 장애 시 `UNAVAILABLE` 처리는 operations(PR-B2)가 정한다.
+
+## 로그인·회원가입 시도 제한 (#66)
+
+고객·관리자 로그인은 429 `AUTH_040`, 회원가입은 429 `AUTH_041`과 `Retry-After`(남은 고정 창의 초 단위 올림, 최소 1초)를 반환한다.
+로그인 카운터 장애는 503 `AUTH_013`이고 회원가입 카운터 장애는 fail-open이다.
+회원가입의 선택적 `X-Client-Subject` 헤더는 게이트웨이 전용 불투명 IP 식별자이며 FE가 만들거나 저장하지 않는다.
+이메일과 별도 30회·10분 IP 창을 먼저 검사한다. 헤더가 없으면 IP 차원만 건너뛴다. 요청 JSON·성공 응답 형식은 그대로다.
+FE는 기존 400·409와 별도로 429 안내 및 Retry-After 대기를 처리해야 한다. API 리뷰 대상은 `seonghoho`다.

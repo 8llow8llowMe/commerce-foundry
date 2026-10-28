@@ -20,6 +20,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
 
+    static final int SUBJECT_TAG_LENGTH = 8;
+
     private final StringRedisTemplate redisTemplate;
     private final LoginAttemptKeyHasher keyHasher;
     private final TokenStoreRedisSupport tokenStore;
@@ -41,6 +43,12 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
         tokenStore.execute(() -> redisTemplate.delete(key));
     }
 
+    /** 키에 들어가는 HMAC(22자)의 앞 {@value #SUBJECT_TAG_LENGTH}자 — 전체 해시는 로그에 남기지 않는다. */
+    @Override
+    public String subjectTag(String normalizedEmail) {
+        return keyHasher.hash(Member.canonicalEmail(normalizedEmail)).substring(0, SUBJECT_TAG_LENGTH);
+    }
+
     /** 스크립트 반환 {@code {시도 수, 남은 시간(ms)}} — 둘 다 정수 응답(Long)이다. 모양이 다르면 스크립트와 코드가 어긋난 것이라 그대로 실패한다. */
     static LoginAttemptOutcome toOutcome(List<Object> result) {
         if (result == null || result.size() != 2 || !(result.get(0) instanceof Number count) || !(result.get(1) instanceof Number ttlMillis)) {
@@ -51,6 +59,6 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
 
     /** 기록 · reset 이 같이 쓰는 유일한 키 경로 — 멱등이라 이미 정규화한 값은 같은 키가 된다. */
     private String key(AttemptKind kind, String normalizedEmail) {
-        return LoginAttemptRedisKeys.attempt(kind, keyHasher.hash(Member.canonicalEmail(normalizedEmail))).value();
+        return LoginAttemptRedisKeys.attempt(kind, kind == AttemptKind.SIGN_UP_IP ? normalizedEmail : keyHasher.hash(Member.canonicalEmail(normalizedEmail))).value();
     }
 }

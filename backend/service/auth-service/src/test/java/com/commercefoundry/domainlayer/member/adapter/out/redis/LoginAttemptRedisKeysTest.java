@@ -15,13 +15,17 @@ class LoginAttemptRedisKeysTest {
     private final LoginAttemptKeyHasher hasher = new LoginAttemptKeyHasher(TestLoginGuard.properties());
 
     @Test
-    @DisplayName("로그인은 auth:login-attempt:{22자}, 회원가입은 auth:sign-up-attempt:{22자}이고 이메일 원문이 없다")
+    @DisplayName("로그인은 auth:login-attempt:{22자}, 관리자 로그인은 auth:admin-login-attempt:{22자}, 회원가입은 auth:sign-up-attempt:{22자}이고 이메일 원문이 없다")
     void keyFormat() {
         String hash = hasher.hash(EMAIL);
 
         assertThat(LoginAttemptRedisKeys.attempt(AttemptKind.LOGIN, hash).value())
             .isEqualTo("auth:login-attempt:" + hash)
             .matches("auth:login-attempt:[A-Za-z0-9_-]{22}")
+            .doesNotContain("@", "member", "example");
+        assertThat(LoginAttemptRedisKeys.attempt(AttemptKind.ADMIN_LOGIN, hash).value())
+            .isEqualTo("auth:admin-login-attempt:" + hash)
+            .matches("auth:admin-login-attempt:[A-Za-z0-9_-]{22}")
             .doesNotContain("@", "member", "example");
         assertThat(LoginAttemptRedisKeys.attempt(AttemptKind.SIGN_UP, hash).value())
             .isEqualTo("auth:sign-up-attempt:" + hash)

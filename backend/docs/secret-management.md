@@ -15,7 +15,7 @@
 
 | 구분 | 예 | 위치 |
 |------|----|------|
-| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 전부 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 를 켤 때만 필요), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키, 초기 관리자 시드(`ADMIN_SEED_*` — auth 전용) | Vault |
+| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 전부 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 기본 켬이라 필수), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키, 초기 관리자 시드(`ADMIN_SEED_*` — auth 전용) | Vault |
 | 배포용 공개값 | JWT 공개키(전 서비스 · 게이트웨이). 비밀은 아니지만 교체를 한 곳에서 하려고 Vault 로 배포한다 | Vault |
 | 고객사 실정보 | 상호, 대표자, 사업자등록번호, 통신판매업 신고번호, 사업장 주소, CS 연락처 | Vault |
 | 일반 설정 | 포트, 타임아웃, `store.features.*`, 로케일, 통화 | `application*.yml` |
@@ -45,6 +45,13 @@
 - **Eureka 레지스트리 비밀번호(`EUREKA_PASSWORD`, #248)는 Vault 등록 필요(dev/prod)다.** `openssl rand -hex 32` 로 만들고 service-discovery · 게이트웨이 · 서비스 전부에
   **같은 값**을 넣는다(환경마다 다른 값). 클라이언트 URL 에 실리는 값이라 영문 · 숫자 · `. _ ~ -` 만 쓴다 — 다른 문자가 있으면 Eureka 가 뜨지 않는다.
   호스트 `EUREKA_HOST` 는 비밀이 아니지만 배포 env 로 같이 넣는다. 교체 순서는 [security-guide.md](security-guide.md) §12-4.
+- **로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY`, auth 전용, #66)는 Vault 등록 필요(dev/prod)다.** `openssl rand -base64 32` 로 만들고
+  auth 인스턴스 전부에 **같은 값**을 넣는다. `auth.login-guard.enabled` 가 기본 켬이고 yml 에 기본값이 없어(`${AUTH_LOGIN_GUARD_HASH_KEY}`) 비었거나 32바이트 미만이면
+  auth 가 뜨지 않는다. 바꾸면 진행 중인 시도 창이 모두 초기화된다 — 교체 · 운영 주의는 [security-guide.md](security-guide.md) §14-4.
+  다른 키(`INTERNAL_JWT_SECRET` · `GATEWAY_CLIENT_IP_HASH_KEY`)를 재사용하지 않는다.
+  시도 제한을 끄는 운영 kill switch 는 **`AUTH_LOGIN_GUARD_ENABLED=false`(`.env` 또는 OS 환경변수) 하나**다 — 비밀이 아니라 설정 스위치라 Vault 에 등록하지 않는다.
+  넣지 않으면 켬이고, `.env.example` 에는 빈 값 줄 없이 주석 예시만 둔다(빈 문자열은 기본값으로 가지 않고 바인딩에 실패해 auth 가 뜨지 않는다).
+  끄면 모든 이메일의 무차별 대입이 열리므로 승인자 · 최대 시간을 정해 짧게만 쓴다 — 절차는 [security-guide.md](security-guide.md) §14-4 비상 절차.
 - **초기 관리자 시드(`ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` · `ADMIN_SEED_NAME`, auth 전용, #6)는 Vault 등록 필요(dev/prod)다.**
   실제 관리자 이메일 · 비밀번호를 yml · 테스트 픽스처 · 이슈 · PR 에 쓰지 않는다 — yml 은 `${ADMIN_SEED_EMAIL:}` 플레이스홀더만 둔다.
   비밀번호는 12~64자, 영문 · 숫자 포함 공백 없는 ASCII 이고(`openssl rand -base64 24` 로 만들고 영문 · 숫자가 모두 들었는지 본다), 같은 이메일의 관리자가 이미 있으면 덮어쓰지 않으므로

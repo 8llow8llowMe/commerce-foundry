@@ -8,6 +8,7 @@ import com.commercefoundry.redis.key.RedisKey;
  *
  * <ul>
  *   <li>{@code auth:login-attempt:{emailHmac}} — STRING 창 안의 로그인 시도 수</li>
+ *   <li>{@code auth:admin-login-attempt:{emailHmac}} — STRING 창 안의 관리자 로그인 시도 수 (고객 로그인과 따로 센다)</li>
  *   <li>{@code auth:sign-up-attempt:{emailHmac}} — STRING 창 안의 회원가입 시도 수</li>
  * </ul>
  * {@code emailHmac} 은 {@link LoginAttemptKeyHasher} 의 값(base64url 22자)이다 — 이메일 원문은 키에 넣지 않는다.
@@ -28,7 +29,9 @@ final class LoginAttemptRedisKeys {
     private static String domain(AttemptKind kind) {
         return switch (kind) {
             case LOGIN -> "login-attempt";
+            case ADMIN_LOGIN -> "admin-login-attempt";
             case SIGN_UP -> "sign-up-attempt";
+            case SIGN_UP_IP -> "sign-up-ip-attempt";
         };
     }
 }

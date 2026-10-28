@@ -178,6 +178,9 @@ public enum OrderErrorCode {
 
 - 생성자는 `(errorCode)` 필수, 필요 시 `(errorCode, Object... args)`(메시지의 `%s` 채움), `(errorCode, Throwable cause)`.
   **임의 문자열을 잇는 `(errorCode, String detail)` 은 만들지 않는다.**
+- 응답 헤더가 필요한 오류(429 `Retry-After` 등)는 `{Domain}Exception` 의 하위 클래스가 그 값을 타입으로 싣고(예: auth `LoginAttemptLimitedException` 의 `Duration retryAfter`),
+  같은 `*ExceptionHandler` 의 더 좁은 `@ExceptionHandler` 가 헤더를 붙인다 — 본문 봉투는 상위 예외와 같다. 메시지에 값을 잇지 않는다.
+  예외는 원값만 싣고, **초 변환 · 최소값 같은 헤더 형식은 핸들러가 한다**(예: `MemberExceptionHandler` 의 `Retry-After = max(1, ceil(ms/1000))`).
 - **domain 은 application(예외 포함)을 import 하지 않는다. 업무 오류 코드는 Processor 가 붙인다** — 도메인 규칙 위반은 domain 소유 예외(현재 상태 · 시도한 동작을
   싣는다)나 결과 값으로 알리고, Processor 가 받아 `{Domain}Exception` 으로 바꾼다. 바꾸지 않고 흘리면 500 이다.
   예: product-service `StockReservationTransitionException` → `StockReservationProcessor` 가 `PRODUCT_024` · `PRODUCT_025` (#10).
@@ -411,7 +414,7 @@ public final class ProductValidationMessage {
   |----|---------|----------|
   | `auth:refresh-token:{fingerprint}` | auth `RefreshTokenRedisKeys.token` | HASH `{memberId, familyId, rotatedAt?, siblings?}`. TTL `min(refresh 토큰 TTL, family 상한까지 남은 시간)` — HSET 과 같은 Lua 에서 PEXPIRE (`security-guide.md` §2-3) |
   | `auth:refresh-family:{familyId}` | auth `RefreshTokenRedisKeys.family` | STRING 최초 로그인 시각(epoch ms) — 절대 수명(기본 30일)의 기준이라 회전해도 다시 쓰지 않는다(PEXPIRE 만). 정수 문자열이 아니거나 · 무한대 · 지금 + 60초보다 미래면 손상으로 보고 DEL(#143). TTL `min(refresh 토큰 TTL, 상한까지 남은 시간)`, 회전마다 다시 건다. 폐기 = DEL |
-  | `auth:login-attempt:{emailHmac}` · `auth:sign-up-attempt:{emailHmac}` | auth `LoginAttemptRedisKeys.attempt` | STRING 창 안의 시도 수(로그인 · 회원가입 따로). TTL `auth.login-guard.window` — INCR 과 같은 Lua 에서 첫 시도에만 PEXPIRE(이어지는 시도가 연장하지 않는다), TTL 이 없으면 다음 시도에서 다시 건다. 성공 시 DEL. `emailHmac` 은 정규화 이메일(`Member.canonicalEmail`)의 HMAC-SHA256 앞 16바이트 base64url 22자 — 키 `AUTH_LOGIN_GUARD_HASH_KEY`, 이메일 원문은 키에 없다 (#66) |
+  | `auth:login-attempt:{emailHmac}` · `auth:admin-login-attempt:{emailHmac}` · `auth:sign-up-attempt:{emailHmac}` | auth `LoginAttemptRedisKeys.attempt` | STRING 창 안의 시도 수(고객 로그인 · 관리자 로그인 · 회원가입 따로). TTL 로그인 `auth.login-guard.window` · 가입 `auth.login-guard.sign-up.window` — INCR 과 같은 Lua 에서 첫 시도에만 PEXPIRE(이어지는 시도가 연장하지 않는다), TTL 이 없으면 다음 시도에서 다시 건다. 고객 로그인 성공 시 DEL(관리자 로그인 · 가입은 지우지 않는다 — `security-guide.md` §12-2). `emailHmac` 은 정규화 이메일(`Member.canonicalEmail`)의 HMAC-SHA256 앞 16바이트 base64url 22자 — 키 `AUTH_LOGIN_GUARD_HASH_KEY`, 이메일 원문은 키에 없다 (#66) |
 - `:` 가 들어가는 값(IPv6 등)은 정규화한 뒤 인코딩해 넣는다(예: IPv6 → 16바이트 hex).
 - id 에 원문 토큰·개인정보를 넣지 않는다. 해시(SHA-256 base64url 등)로 넣는다 — `RedisKey.toString()` 이 키 전체를 출력하고, 키는 `MONITOR`·슬로로그에도 남는다.
 - 게이트웨이가 넘긴 `X-Client-Subject`(클라이언트 IP 의 HMAC, base64url 22자)는 이미 해시라 id 로 그대로 쓴다. 로그에는 앞 8자만 남긴다 (`security-guide.md` §7-3 하류 헤더 계약).
@@ -431,7 +434,7 @@ public final class ProductValidationMessage {
 | refresh 토큰 | refresh 토큰 TTL 과 같게 (`security.jwt.issuance.refresh-token-ttl`) |
 | access 토큰 차단 목록(로그아웃) | 토큰의 남은 수명(`exp − now`) + 시계 오차 허용(`security.jwt.clock-skew`) 이상. 로그아웃 시점엔 `exp` 를 모르므로 **수명 상한(`JwtIssuanceProperties.MAX_ACCESS_TOKEN_TTL`, 1시간) + 시계 오차**를 쓴다(`RevokedAccessTokenKeys.ttl`) — `access-token-ttl` 설정값을 쓰면 TTL 을 줄인 배포 직후 옛 긴 토큰보다 차단 항목이 먼저 사라진다 |
 | 소셜 로그인 state | 짧게(분 단위). provider · 브라우저 verifier 해시 일치 검증과 삭제를 Lua 로 원자 실행해 한 번만 쓴다. 불일치는 삭제하지 않는다 |
-| 로그인 · 가입 시도 계수 | 창 길이(`auth.login-guard.window`, 기본 15분). 첫 시도부터 재고 이어지는 시도가 연장하지 않는다. 상한 1시간(`LoginAttemptPolicy.MAX_WINDOW`) — 이메일을 바꿔 가며 보내면 키 수 ≈ 처리량 × 창이고, noeviction 이라 메모리가 차면 refresh · 차단 목록 쓰기까지 실패한다 |
+| 로그인 · 가입 시도 계수 | 창 길이(로그인 `auth.login-guard.window` 기본 15분 · 가입 `auth.login-guard.sign-up.window` 기본 10분). 첫 시도부터 재고 이어지는 시도가 연장하지 않는다. 상한 1시간(`LoginAttemptPolicy.MAX_WINDOW`) — 이메일을 바꿔 가며 보내면 키 수 ≈ 처리량 × 창이고, noeviction 이라 메모리가 차면 refresh · 차단 목록 쓰기까지 실패한다 |
 | 멱등 키 | 클라이언트 재시도 창보다 길게. 처리 중 마커는 최대 처리 시간보다 길게 |
 | 캐시 | 짧게. 원본을 쓸 때 무효화한다 |
 
@@ -588,3 +591,6 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
   흐름 테스트는 내장 Kafka(`spring-kafka-test` `@EmbeddedKafka`, KRaft — Docker 없이 로컬에서도 돈다)를 쓴다 — 예: operations `JobWorkerFlowTest`,
   product `OrderStockReleaseFlowTest`. PostgreSQL 이 필요한 것(inbox 유니크 키 · 잠금)만 Testcontainers(`@EnabledWithDockerOrOnCi`)로 따로 둔다.
   실제 브로커 동작이 필요하면 `MessagingKafkaContainers`(Testcontainers)를 쓴다.
+
+#66 회원가입 IP 카운터는 `auth:sign-up-ip-attempt:{clientSubject}`다. clientSubject는 게이트웨이가 만든 22자 base64url HMAC 값으로,
+이메일 카운터와 별개다. 원문 IP·이메일은 키에 넣지 않는다. 대소문자를 보존하며 창은 기본 10분이고 첫 기록과 TTL을 같은 Lua 실행에서 설정한다.

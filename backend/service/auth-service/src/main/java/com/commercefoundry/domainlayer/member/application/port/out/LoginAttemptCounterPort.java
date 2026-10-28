@@ -14,8 +14,8 @@ import java.time.Duration;
  *
  * <p>지금 주체는 이메일 하나다. 게이트웨이가 클라이언트 IP 를 넘기게 되면(#135) IP 주체를 더한다.
  *
- * <p>모든 메서드는 저장소에 닿지 못하면 {@link MemberException}({@code TOKEN_STORE_UNAVAILABLE}, 503)을 던진다.
- * 그때 요청을 막을지 통과시킬지는 부르는 쪽이 정한다. 허용 횟수 판정도 부르는 쪽이 한다 — 저장소는 세기만 한다.
+ * <p>{@link #subjectTag} 를 뺀 모든 메서드는 저장소에 닿지 못하면 {@link MemberException}({@code TOKEN_STORE_UNAVAILABLE}, 503)을 던진다
+ * ({@link #subjectTag} 는 저장소를 부르지 않는다). 그때 요청을 막을지 통과시킬지는 부르는 쪽이 정한다. 허용 횟수 판정도 부르는 쪽이 한다 — 저장소는 세기만 한다.
  */
 public interface LoginAttemptCounterPort {
 
@@ -29,4 +29,10 @@ public interface LoginAttemptCounterPort {
 
     /** 그 이메일의 창을 지운다 — 다음 시도는 1부터 센다. 이미 없으면 아무 일도 없다. */
     void reset(AttemptKind kind, String normalizedEmail);
+
+    /**
+     * 로그에 남길 수 있는 짧은 꼬리표 — 같은 이메일이면 같은 값이고, 이메일로 되돌릴 수 없는 짧은 값이다 (#66 A2 전제 7).
+     * 이메일 원문 · 키 전체는 돌려주지 않는다. 저장소를 부르지 않아 저장소 장애에도 던지지 않는다. 잠금으로 바뀌는 순간처럼 드문 로그에만 쓴다.
+     */
+    String subjectTag(String normalizedEmail);
 }

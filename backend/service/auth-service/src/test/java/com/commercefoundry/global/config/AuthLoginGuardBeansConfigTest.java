@@ -2,20 +2,29 @@ package com.commercefoundry.global.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.member.domain.model.AttemptKind;
 import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.LoginGuardPolicy;
 import com.commercefoundry.global.properties.AuthLoginGuardProperties;
 import com.commercefoundry.support.TestLoginGuard;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Configuration;
 
 /**
  * 시도 제한 정책 빈 — {@code auth.login-guard.*} 바인딩에서 정책 값 묶음이 만들어지는지 본다. 범위 · 키 규칙은 {@code AuthLoginGuardPropertiesTest} 가 본다.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class AuthLoginGuardBeansConfigTest {
+
+    /** 꺼짐 기동 warn 의 검색 키 — 운영 경보가 이 문구로 건다 (security-guide.md §12-4). */
+    private static final String DISABLED_WARNING = "login guard disabled. property=auth.login-guard.enabled";
 
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(AuthLoginGuardProperties.class)
@@ -27,26 +36,61 @@ class AuthLoginGuardBeansConfigTest {
         .withPropertyValues("auth.login-guard.hash-key=" + TestLoginGuard.HASH_KEY);
 
     @Test
-    @DisplayName("기본값 — 5회 · 15분")
-    void defaults() {
-        runner.run(context -> assertThat(context).hasNotFailed().getBean(LoginAttemptPolicy.class)
-            .isEqualTo(new LoginAttemptPolicy(5, Duration.ofMinutes(15))));
+    @DisplayName("기본값 — 켬 · 로그인(고객 · 관리자) 5회 · 15분 · 가입 5회 · 10분. 켜져 있으면 꺼짐 경고를 남기지 않는다")
+    void defaults(CapturedOutput output) {
+        runner.run(context -> {
+            assertThat(context).hasNotFailed();
+            LoginGuardPolicy policy = context.getBean(LoginGuardPolicy.class);
+            assertThat(policy.enabled()).isTrue();
+            assertThat(policy.of(AttemptKind.LOGIN)).isEqualTo(new LoginAttemptPolicy(5, Duration.ofMinutes(15)));
+            assertThat(policy.of(AttemptKind.ADMIN_LOGIN)).isEqualTo(new LoginAttemptPolicy(5, Duration.ofMinutes(15)));
+            assertThat(policy.of(AttemptKind.SIGN_UP)).isEqualTo(new LoginAttemptPolicy(5, Duration.ofMinutes(10)));
+        });
+        assertThat(output.getOut()).doesNotContain(DISABLED_WARNING);
     }
 
     @Test
-    @DisplayName("프로퍼티 값이 그대로 정책이 된다")
+    @DisplayName("프로퍼티 값이 그대로 정책이 된다 — 로그인 · 가입을 따로 정한다")
     void bindsConfiguredValues() {
-        runner.withPropertyValues("auth.login-guard.max-attempts=10", "auth.login-guard.window=5m")
-            .run(context -> assertThat(context.getBean(LoginAttemptPolicy.class)).isEqualTo(new LoginAttemptPolicy(10, Duration.ofMinutes(5))));
+        runner.withPropertyValues("auth.login-guard.max-attempts=10", "auth.login-guard.window=5m",
+                "auth.login-guard.sign-up.max-attempts=3", "auth.login-guard.sign-up.window=20m")
+            .run(context -> {
+                LoginGuardPolicy policy = context.getBean(LoginGuardPolicy.class);
+                assertThat(policy.login()).isEqualTo(new LoginAttemptPolicy(10, Duration.ofMinutes(5)));
+                assertThat(policy.signUp()).isEqualTo(new LoginAttemptPolicy(3, Duration.ofMinutes(20)));
+            });
     }
 
     @Test
-    @DisplayName("꺼져 있으면 키 없이 뜨고 정책 빈도 만들어진다")
-    void disabledStartsWithoutKey() {
+    @DisplayName("꺼져 있으면 키 없이 뜨고 정책 빈은 꺼짐이며, 기동 로그를 한 번 남긴다")
+    void disabledStartsWithoutKey(CapturedOutput output) {
         new ApplicationContextRunner()
             .withUserConfiguration(AuthLoginGuardPropertiesOnly.class, AuthLoginGuardBeansConfig.class)
             .withPropertyValues("auth.login-guard.enabled=false")
-            .run(context -> assertThat(context).hasNotFailed().hasSingleBean(LoginAttemptPolicy.class));
+            .run(context -> assertThat(context).hasNotFailed().getBean(LoginGuardPolicy.class).extracting(LoginGuardPolicy::enabled).isEqualTo(false));
+        assertThat(output.getOut().split(DISABLED_WARNING, -1)).hasSize(2);
+    }
+
+    /** {@code .env}(local 이 import 한다) · OS 환경변수 모두 이름 그대로 환경 프로퍼티가 된다 — 여기서는 같은 이름의 프로퍼티로 넣는다. */
+    @Test
+    @DisplayName("application.yml 과 같은 플레이스홀더면 AUTH_LOGIN_GUARD_ENABLED 가 없을 때 켬, false 면 꺼짐이다 — 끄는 방법은 이 이름 하나다")
+    void enabledFollowsEnvironmentPlaceholder(CapturedOutput output) {
+        ApplicationContextRunner placeholder = runner.withPropertyValues("auth.login-guard.enabled=${AUTH_LOGIN_GUARD_ENABLED:true}");
+
+        placeholder.run(context -> assertThat(context).hasNotFailed().getBean(LoginGuardPolicy.class).extracting(LoginGuardPolicy::enabled).isEqualTo(true));
+        assertThat(output.getOut()).doesNotContain(DISABLED_WARNING);
+
+        placeholder.withPropertyValues("AUTH_LOGIN_GUARD_ENABLED=false")
+            .run(context -> assertThat(context).hasNotFailed().getBean(LoginGuardPolicy.class).extracting(LoginGuardPolicy::enabled).isEqualTo(false));
+        assertThat(output.getOut().split(DISABLED_WARNING, -1)).hasSize(2);
+    }
+
+    /** 빈 값은 플레이스홀더 기본값(true)으로 가지 않고 빈 문자열로 풀린다 — 그래서 {@code .env.example} 에는 빈 값 줄 없이 주석 예시만 둔다. */
+    @Test
+    @DisplayName("AUTH_LOGIN_GUARD_ENABLED 를 빈 값으로 두면 바인딩에서 실패해 기동하지 않는다")
+    void emptyEnabledFailsStartup() {
+        runner.withPropertyValues("auth.login-guard.enabled=${AUTH_LOGIN_GUARD_ENABLED:true}", "AUTH_LOGIN_GUARD_ENABLED=")
+            .run(context -> assertThat(context).hasFailed().getFailure().hasMessageContaining("auth.login-guard"));
     }
 
     @Test
@@ -58,4 +102,17 @@ class AuthLoginGuardBeansConfigTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("auth.login-guard.hash-key"));
     }
+
+    @Test
+    @DisplayName("가입 IP 정책은 이메일 한도와 분리해 설정하며 범위를 검증한다")
+    void ipPolicyBindingAndValidation() {
+        runner.withPropertyValues("auth.login-guard.sign-up.client-ip.max-attempts=17", "auth.login-guard.sign-up.client-ip.window=3m")
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context.getBean(LoginGuardPolicy.class).signUpIp()).isEqualTo(new LoginAttemptPolicy(17, Duration.ofMinutes(3)));
+            });
+        runner.withPropertyValues("auth.login-guard.sign-up.client-ip.max-attempts=0")
+            .run(context -> assertThat(context).hasFailed());
+    }
+
 }

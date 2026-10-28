@@ -135,6 +135,19 @@ class LoginAttemptRedisAdapterTest {
     }
 
     @Test
+    @DisplayName("고객 · 관리자 로그인은 키가 따로다 — 고객 로그인 시도가 관리자 창을 채우지 못하고, 고객 reset 이 관리자 창을 지우지 않는다 (#66 A2)")
+    void adminLoginUsesSeparateKey() {
+        String email = email();
+        for (int i = 0; i < 6; i++) {
+            adapter.record(AttemptKind.LOGIN, email, WINDOW);
+        }
+
+        assertThat(adapter.record(AttemptKind.ADMIN_LOGIN, email, WINDOW).count()).isEqualTo(1);
+        adapter.reset(AttemptKind.LOGIN, email);
+        assertThat(redisTemplate.opsForValue().get("auth:admin-login-attempt:" + hasher.hash(email))).isEqualTo("1");
+    }
+
+    @Test
     @DisplayName("대소문자 · 앞뒤 공백만 다른 이메일은 한 키 · 한 수로 모인다 — 변형마다 새 창이 열리지 않고, 변형으로 reset 해도 그 키가 지워진다")
     void emailVariantsShareOneKey() {
         String email = email();

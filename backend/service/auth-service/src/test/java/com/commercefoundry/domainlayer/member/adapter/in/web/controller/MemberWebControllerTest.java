@@ -11,6 +11,7 @@ import com.commercefoundry.domainlayer.member.adapter.in.web.dto.response.Member
 import com.commercefoundry.domainlayer.member.adapter.in.web.dto.response.SignUpResponse;
 import com.commercefoundry.domainlayer.member.application.command.MemberProfileUpdateCommand;
 import com.commercefoundry.domainlayer.member.application.command.SignUpCommand;
+import com.commercefoundry.domainlayer.member.application.exception.LoginAttemptLimitedException;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.port.in.AuthWebUseCase;
@@ -20,6 +21,7 @@ import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
+import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -216,6 +218,21 @@ class MemberWebControllerTest {
             assertThat(result).hasStatus(HttpStatus.CONFLICT);
             assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_002");
             assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo("이미 가입된 이메일입니다.");
+        }
+
+        @Test
+        @DisplayName("가입 시도 초과는 429 · AUTH_041 + Retry-After 다 (#66)")
+        void attemptLimited() {
+            given(memberWebUseCase.signUp(any()))
+                .willThrow(new LoginAttemptLimitedException(MemberErrorCode.SIGN_UP_ATTEMPT_LIMITED, Duration.ofSeconds(42)));
+
+            MvcTestResult result = signUp(body("customer@example.com", "mokoyuri2026!", "홍길동", "null", "true", "true", "false"));
+
+            assertThat(result).hasStatus(HttpStatus.TOO_MANY_REQUESTS);
+            assertThat(result.getResponse().getHeader(HttpHeaders.RETRY_AFTER)).isEqualTo("42");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_041");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo("회원가입 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+            assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
         }
 
         private MvcTestResult signUp(String json) {

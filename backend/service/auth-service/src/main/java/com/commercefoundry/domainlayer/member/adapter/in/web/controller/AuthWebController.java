@@ -24,6 +24,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -44,18 +45,23 @@ public class AuthWebController {
     @Operation(
         summary = "회원가입",
         description = "고객(CUSTOMER)으로 가입한다. 이용약관 · 개인정보 동의가 true 가 아니면 400(AUTH_111 · AUTH_112), 이미 가입된 이메일이면 409(AUTH_002)다. "
-            + "동의 3종은 서버가 정한 약관 버전과 함께 이력으로 남는다. 토큰은 주지 않는다 — 로그인을 따로 한다. 로그인 없이 호출한다."
+            + "동의 3종은 서버가 정한 약관 버전과 함께 이력으로 남는다. 토큰은 주지 않는다 — 로그인을 따로 한다. "
+            + "같은 이메일의 가입 시도가 창(기본 10분)의 허용 횟수(기본 5회)를 넘으면 429(AUTH_041) + Retry-After(초)다. 로그인 없이 호출한다."
     )
     @PreAuthorize("permitAll()")
     @PostMapping("/sign-up")
-    public ResponseEntity<Response<SignUpResponse>> signUp(@Valid @RequestBody SignUpRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(memberWebUseCase.signUp(request.toCommand())));
+    public ResponseEntity<Response<SignUpResponse>> signUp(
+        @Valid @RequestBody SignUpRequest request,
+        @Parameter(hidden = true) @RequestHeader(name = "X-Client-Subject", required = false) String clientSubject
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(memberWebUseCase.signUp(request.toCommand().withClientSubject(clientSubject))));
     }
 
     @Operation(
         summary = "로그인",
         description = "고객 이메일 · 비밀번호로 로그인하고 access · refresh 토큰을 받는다. 이메일 없음 · 비밀번호 틀림 · 관리자 계정은 모두 400(AUTH_001) 같은 문구다 — "
-            + "401 은 토큰 거절에만 쓴다. 토큰 저장소 장애는 503(AUTH_013)이다. 로그인 없이 호출한다."
+            + "401 은 토큰 거절에만 쓴다. 같은 이메일의 로그인 시도가 창(기본 15분)의 허용 횟수(기본 5회)를 넘으면 비밀번호가 맞아도 429(AUTH_040) + Retry-After(초)다. "
+            + "토큰 · 시도 계수 저장소 장애는 503(AUTH_013)이다. 로그인 없이 호출한다."
     )
     @PreAuthorize("permitAll()")
     @PostMapping("/login")

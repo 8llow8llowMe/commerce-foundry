@@ -523,7 +523,7 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
   키를 바꾸면 진행 중인 비로그인 버킷이 새로 시작될 뿐 다른 영향은 없다 — 롤링 배포 중에는 인스턴스마다 키가 달라 한도가 잠시 최대 두 배가 될 수 있다.
   로그에도 IP 원문 대신 HMAC 을 남긴다. **IPv6 는 /64 로 묶어** 센다 — 한 가입자가 보통 /64 를 받아 그 안에서 주소를 바꿔 가며 새 버킷을 얻을 수 있어서다.
   다만 /56 · /48 을 위임받는 가입자는 /64 를 바꿔 가며 버킷을 늘릴 수 있다. 완화 수단일 뿐이며, 익명 쓰기 API 가 생기면 더 넓은 묶음을 검토한다.
-- **로그인 · 회원가입 시도 제한은 auth-service 가 맡는다(#66)** — 계정 잠금처럼 회원 상태와 묶여 있어 게이트웨이가 아니라 소유 서비스가 판정한다.
+- **로그인 · 회원가입 시도 제한은 auth-service 가 맡는다(#66, §12)** — 계정 잠금처럼 회원 상태와 묶여 있어 게이트웨이가 아니라 소유 서비스가 판정한다.
   게이트웨이 정책에 `/api/v1/auth/**` 를 넣지 않는다. 그 시도 제한이 IP 를 쓰게 되면 같은 신뢰 프록시 규칙(이 절)을 따르고, **신뢰 설정을 두 곳으로 가르지 않는다.**
   - Spring Cloud Gateway 의 `spring.cloud.gateway.server.webflux.trusted-proxies` 는 설정하지 않는다. 미설정이면 SCG 가 하류로 가는 `X-Forwarded-*` · `Forwarded` 를 지운다
     (`RemoveXForwardedHeadersFilter` · `RemoveForwardedHeadersFilter`) — 클라이언트가 보낸 값이 서비스에 닿지 않는다.
@@ -824,8 +824,10 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
 
 - 회원가입은 비밀번호 해시를 중복 확인보다 **먼저** 한다(`MemberWebFacade#signUp`) — 409 응답이 해시를 건너뛰어 빨리 끝나면 응답 시간으로도 존재가 드러나기 때문이다.
   409 자체가 존재를 알리므로 이것은 시간 차이를 더하지 않게 하는 것뿐이다.
-- 열거 · 무차별 대입 완화(가입 · 로그인 요청 제한, 계정 잠금)는 후속 #66 에서 다룬다. 그때까지 가입 409 로 가입 여부를 대량으로 확인할 수 있다.
-  관리자 로그인(#6)도 #66 의 대상이다 — 그때까지는 관리자 계정을 노린 실패가 감사 로그(§11-4 `target=member:<id>`)로만 드러난다.
+- 열거 · 무차별 대입 완화는 §14(#66)다 — 같은 이메일의 로그인 · 관리자 로그인 · 가입 시도를 고정 창으로 세고 넘으면 429 다.
+  잠금 판정은 계정 존재와 무관하게 이메일 해시로만 해서 **단일 응답 기준으로** 429 의 본문 · 헤더 · 시간은 계정 존재를 드러내지 않는다.
+  카운터는 요청 사이에 이어지므로 여러 요청에 걸친 관측(성공 시 창 지우기로 드러나는 로그인 시점)은 따로 감수한다(§14-5).
+  게이트웨이의 유효한 `X-Client-Subject`가 있으면 회원가입은 이메일과 별도로 IP 차원도 먼저 센다(§14). 헤더가 없는 배포에서는 이메일 교체를 통한 가입 시도를 막지 못한다.
 - 타인 리소스는 반대로 **존재를 숨긴다** — 배송지(#7)는 (주소 아이디, JWT memberId) 로만 찾고, 없거나 남의 주소면 GET · PUT · DELETE · 기본 지정 모두 같은 404 `AUTH_020` 이다.
   배송지의 받는 사람 · 연락처 · 주소는 `toString` · 로그 · 예외 메시지에 싣지 않는다 (§8).
 
@@ -837,9 +839,13 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
   게이트웨이(§7) · 서비스(§5-1) URL 규칙이 그 경로에 ADMIN 토큰을 요구해 토큰을 받으러 오는 익명 요청이 닿지 못한다 (`api-design-guide.md` §1-2).
   소셜 로그인은 없다. 실패는 §10 과 같은 규칙으로 400 `AUTH_030` 하나다. 64자를 넘는 비밀번호도 필드 검증이 아니라 같은 `AUTH_030` 이다
   (비교는 자리값으로 한 번 해 시간도 같다 — `MemberLoginProcessor#authenticateAdmin`).
-- **알려진 위험 — 관리자 로그인에 요청 제한 · 계정 잠금이 없다.** 게이트웨이 요청 제한(§7-3)은 로그인 경로를 세지 않고, 로그인 시도 제한은 #66 이 맡는다 —
-  **#66 에서 관리자 로그인(`/api/v1/auth/admin/login`)도 대상으로 한다.** 그때까지는 대입 시도가 감사 로그(§11-4, `target=member:<id> result=FAILURE`)로만 드러나므로
-  운영은 그 줄의 빈도를 경보로 건다. 관리자 비밀번호를 12자 이상으로 둔 것(§11-3)이 그동안의 완화다.
+- **시도 제한 — 같은 이메일의 관리자 로그인이 창(기본 15분)의 허용 횟수(기본 5회)를 넘으면 비밀번호가 맞아도 429 `AUTH_040` + `Retry-After` 다** (§14, #66).
+  고객 로그인과 **창을 따로 센다**(`auth:admin-login-attempt:*`) — 한 창이면 고객 로그인 경로에 관리자 이메일을 거듭 보내는 것만으로 관리자를 잠글 수 있다.
+  **성공해도 창을 지우지 않는다**(고객 로그인과 다르다, 사용자 결정 2026-10-22) — 성공 시 지우면 그 이메일이 관리자 계정인지와 로그인 시점이 드러난다(§14-2).
+  계수기 장애면 503 `AUTH_013`(fail-closed)이다. 잠금으로 거절한 시도도 감사 로그에 `target=- result=FAILURE` 로 남긴다 — 거절은 DB 를 보지 않아
+  노린 계정을 모르고, 그 계정은 잠기기 전의 실패 줄들(`target=member:<id>`)이 이미 가리킨다(§11-4). 운영은 그 줄의 빈도를 경보로 건다.
+  **남은 위험** — 이메일만 알면 허용 횟수(기본 5)만큼의 요청으로 그 이메일의 다음 관리자 로그인 시도를 429 로 만들 수 있고, 창마다 되풀이할 수 있다
+  (피해자 잠금, §14-5 D3′). 관리자 이메일을 공개하지 않는 것(§11-3)이 완화다.
 - **access 토큰만 낸다(refresh 없음).** 관리자 세션은 access 수명까지이고, 만료되면 다시 로그인한다 — 재발급 경로(`/token/reissue`)는 고객만 받으므로
   refresh family 를 만들어도 쓰지 못할 키만 남는다. 로그아웃은 고객과 같은 `POST /api/v1/auth/logout` 을 본문 없이 부른다(jti 차단, §7-1).
 - **TTL 은 고객과 같은 `security.jwt.issuance.access-token-ttl`(기본 30분, 최대 1시간)이다 — 관리자 전용으로 줄이지 않았다.** 발급기(security-core
@@ -1073,3 +1079,142 @@ provider code 교환은 기존 timeout·서킷·오류 변환을 사용하고 DB
 `(provider,subject)`와 `(member_id,provider)`로 다른 회원 및 제공자 경합도 막는다. 잠금 대기·교착·시간 상한은 롤백 뒤 409 `AUTH_004`로 변환한다.
 같은 회원·같은 identity는 성공하고 기존 행을 유지한다. 다른 회원의 identity 또는 같은 제공자의 다른 subject는 409 `AUTH_057`다.
 신규 회원·약관·프로필 수정·토큰 발급은 없고, 목록은 제공자 제어 코드만 반환한다. 연결 해제·기존 회원 병합은 지원하지 않는다.
+
+## 14. 로그인 · 회원가입 시도 제한 (#66)
+
+같은 이메일로 반복하는 비밀번호 추측 · 가입 시도를 auth-service 가 이메일 단위 고정 창으로 센다. 게이트웨이 요청 제한(§7-3)과 겹치지 않는다 —
+게이트웨이는 장바구니 · 주문 쓰기를 회원 id · IP 로 세고 `/api/v1/auth/**` 를 세지 않는다.
+
+**회원가입 IP 차원 보완 (#66 인계)** — `POST /api/v1/auth/sign-up`은 `X-Client-Subject`를 Command에 옮기고
+Facade가 BCrypt·이메일 카운터보다 먼저 IP 창을 검사한다. `auth:sign-up-ip-attempt:{clientSubject}` 키를 쓰며
+기본 한도는 30회·10분(`auth.login-guard.sign-up.client-ip.max-attempts/window`)이다. 한도와 창 검증 범위는 이메일 정책과 같다.
+IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존한다. 이메일 정규화·추가 HMAC은 적용하지 않는다.
+없거나 잘못된 헤더는 IP 차원만 건너뛰며 이메일 제한은 유지한다. 원문 IP·XFF·remoteAddress를 신뢰하거나 대체값으로 사용하지 않는다.
+넘으면 이메일 제한과 같은 429 `AUTH_041`·`Retry-After`이고 가입 계수기 장애는 fail-open이다. 성공해도 IP 창은 지우지 않는다.
+값은 인증·인가 근거가 아니고 로그에는 앞 8자만 남는다. 사설망 직접 호출·꺼진 게이트웨이 IP 해석의 한계는 §7-3과 같다.
+게이트웨이 `GATEWAY_CLIENT_IP_ENABLED=true`, 신뢰 프록시 및 HMAC 키 배포는 #135에서 수행한다. 설정 전에는 IP 보호가 활성화됐다고 간주하지 않는다.
+고객·관리자 로그인은 이번 인계에서도 이메일 카운터를 사용하며 IP 기반 password spraying 제한은 남은 운영 보완이다.
+
+### 14-1. 대상 · 기본값
+
+| 종류 (`AttemptKind`) | 경로 | Redis 키 | 기본 (`auth.login-guard.*`) | 넘으면 | 성공 시 창 | 계수기 장애 |
+|----------------------|------|----------|-----------------------------|--------|------------|-------------|
+| `LOGIN` | `POST /api/v1/auth/login` | `auth:login-attempt:{emailHmac}` | 5회 · 15분 (`max-attempts` · `window`) | 429 `AUTH_040` | 지운다(DEL) | 503 `AUTH_013` (fail-closed) |
+| `ADMIN_LOGIN` | `POST /api/v1/auth/admin/login` | `auth:admin-login-attempt:{emailHmac}` | 로그인과 같은 값, 창은 따로 | 429 `AUTH_040` | **지우지 않는다** (§14-2) | 503 `AUTH_013` (fail-closed) |
+| `SIGN_UP` | `POST /api/v1/auth/sign-up` | `auth:sign-up-attempt:{emailHmac}` | 5회 · 10분 (`sign-up.max-attempts` · `sign-up.window`) | 429 `AUTH_041` | 지우지 않는다 | 세지 않고 통과 (fail-open) |
+
+- 횟수는 1~100, 창은 1분~1시간이다(`LoginAttemptPolicy` — 벗어나면 기동하지 않는다). 키 형식 · TTL 은 `coding-conventions.md` §9-7 이다.
+- **단위는 정규화한 이메일의 HMAC** 이다 — 로그인 · 관리자 로그인 Facade 는 `strip().toLowerCase(ROOT)` 를 한 번 하고 같은 값을 시도 제한 · 회원 조회(고객 로그인은 창 지우기도)에 넘긴다.
+  가입 Facade 는 받은 이메일을 그대로 넘긴다 — `LoginGuardProcessor` 가 받은 값에 언제나 `Member.canonicalEmail` 을 적용하므로(멱등) 두 경로 모두 저장 · 조회 키와 같은 형태로 센다.
+  대소문자 · 앞뒤 공백만 바꿔 새 창을 열 수 없다. 해시는 HMAC-SHA256 앞 16바이트 base64url 22자(`AUTH_LOGIN_GUARD_HASH_KEY`, 게이트웨이 `ClientIpHasher` 와 같은 형식)이고
+  이메일 원문은 키 · 로그에 남지 않는다.
+- 응답은 429 봉투 + `Retry-After` 초다. 예외(`LoginAttemptLimitedException`, 429 코드만 받는다)는 남은 창 시간 원값(`Duration`)만 싣고,
+  헤더 형식 — `max(1, ceil(남은 ms / 1000))` 초 — 은 `MemberExceptionHandler` 가 헤더를 만들 때 정한다(`coding-conventions.md` §8-1).
+  문구는 "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요."(가입은 "회원가입 시도가 너무 많습니다. …")이고,
+  **단일 응답 기준으로** 있는 계정 · 없는 계정이 같은 본문 · 같은 헤더다(요청 사이에 이어지는 관측은 §14-5).
+
+### 14-2. 판정 순서
+
+```text
+고객 로그인:   정규화(1회) → admit → findByEmail → BCrypt 비교 → (성공 시) clear → 토큰 발급
+관리자 로그인: 정규화(1회) → admit → findByEmail → BCrypt 비교 · 관리자 확인 → 토큰 발급   (clear 없음)
+회원가입:      admit(Processor 가 정규화) → BCrypt 해시 → existsByEmail · 저장
+```
+
+- **인증 전에 센다(admit = INCR).** 그래야 동시 요청이 몰려도 BCrypt 가 허용 횟수로 묶인다 — 같은 이메일 기준으로 창 하나에 허용 횟수만큼이고,
+  고객 로그인은 성공한 `clear` 뒤 새 창이 열리므로 그 뒤 시도를 다시 센다. 정규화할 수 없는 입력은 세지 않는다(아래 — 그 입력의 더미 BCrypt 는 묶이지 않는다).
+  초과면 DB · BCrypt · 발급 없이 429 다 — 잠금 판정이 계정 존재와 무관하므로 응답 시간으로도 존재가 갈리지 않는다(구조는 Facade 테스트의 무호출 검증이 고정한다).
+- **잠금 중에는 맞는 비밀번호도 거절한다(D3).** 잠금 시간은 창의 남은 TTL 이고 별도 잠금 키는 없다. **해제는 시간 경과뿐이다**(운영은 키를 직접 지운다 — §14-4 비상 절차 1).
+  `clear` 는 잠기기 전의 누적만 지운다 — 잠긴 뒤에는 admit 이 먼저 429 를 내 인증 · `clear` 까지 가지 않는다. 어드민 잠금 해제 · 비밀번호 재설정 API 는 없다.
+- **`clear`(DEL)는 고객 로그인이 인증에 성공했을 때만** 부른다. 저장소 장애(`AUTH_013`)는 응답을 바꾸지 않는다(best-effort, warn 1분 1회) —
+  맞는 비밀번호에서만 나오는 새 응답은 그 자체로 오라클이다. 저장소 장애가 아닌 오류(버그)는 삼키지 않고 그대로 올린다.
+- **관리자 로그인은 성공해도 창 안의 시도 수를 지우지 않는다 — 성공 DEL 이 관리자 여부를 드러내지 않게(사용자 결정 2026-10-22).**
+  성공 시 지우면 같은 이메일로 시도를 쌓던 쪽이 카운터가 0 으로 돌아간 것(429 가 예상보다 늦게 오는 것)으로 그 이메일이 관리자 계정인지와 로그인 시점을 알아낸다.
+  대가로 관리자도 창(기본 15분) 안에서 성공 · 실패를 합쳐 허용 횟수(기본 5회)를 넘겨 시도하면 6번째부터 창이 끝날 때까지 429 다 —
+  1인 운영이라 감수하고, 비상 시 §14-4 비상 절차 1(키 직접 삭제)로 푼다.
+- 정규화할 수 없는 이메일(공백만 · 소문자화로 254자 초과)은 세지 않고 "없는 회원" 과 같은 더미 BCrypt 로 400 `AUTH_001`(관리자 `AUTH_030`)이다 — 어떤 계정과도 맞지 않는다.
+- 판정은 `LoginGuardProcessor`(`admit` · `clear`)가 하고 Facade 는 계수기 포트를 직접 쓰지 않는다(ArchUnit H11).
+  종류별 장애 정책은 `LoginGuardProcessor#failOpen` 의 switch 하나다 — 종류가 늘면 컴파일이 그 종류의 정책을 정하라고 요구한다.
+
+### 14-3. Redis 장애 (D5)
+
+- **고객 로그인은 fail-closed(503 `AUTH_013`)** 다. fail-open 이면 "맞는 비밀번호 → refresh 저장 503, 틀린 비밀번호 → 400" 으로 비밀번호 오라클이 열린다.
+  고객 로그인은 refresh 저장 때문에 원래 Redis 없이 성공하지 못한다.
+- **관리자 로그인도 fail-closed(503 `AUTH_013`)** 다. 근거는 오라클이 아니라 통일이다 — 관리자 로그인은 refresh 를 저장하지 않아 위 오라클이 없지만,
+  어드민 경로는 게이트웨이 차단 목록(§7-1)처럼 fail-closed 로 맞춘다. **이번(#66)부터 Redis 장애면 관리자 로그인도 503 이다** — 전에는 Redis 없이도 됐다.
+- 장애 동안 두 로그인은 없는 이메일 · 틀린 비밀번호 · 맞는 비밀번호가 모두 같은 503 이고 BCrypt 도 돌지 않는다. 예외는 정규화할 수 없는 입력이다 —
+  admit 을 건너뛰므로 장애와 무관하게 400(`AUTH_001` · `AUTH_030`)이다. 어떤 계정과도 맞지 않아 오라클이 되지 않는다.
+- **회원가입은 fail-open** 이다. 가입은 Redis 와 무관한 API 라 시도 제한 장애가 가입 장애가 되지 않게 한다. 대신 **장애 동안은 같은 이메일의 가입 한도도,
+  그 이메일로 도는 BCrypt 의 상한도 없다** — fail-open warn(`attempt counter unavailable kind=SIGN_UP`)을 경보로 건다.
+- **warn 빈도** — `LoginGuardProcessor` 의 warn(가입 fail-open `attempt counter unavailable` · clear 실패 `attempt counter reset failed`)은 warn 마다 1분에 한 번이다.
+  저장소 어댑터 공통 warn(`TokenStoreRedisSupport`, `token store unavailable: <예외 타입>`)은 따로이고 **실패마다** 남는다 — 장애 중 로그 양은 이 줄이 정한다.
+  로그인은 원래도 refresh 저장에서 요청마다 이 warn 을 남겼다.
+
+### 14-4. 로그 · 운영 (런북)
+
+- 잠금으로 바뀌는 순간(창 안 허용 + 1 번째)에만 info 한 줄 — `attempt limit reached kind=LOGIN subject=<꼬리표 8자> retryAfterMs=900000`. 이후 거절은 debug 다.
+  `retryAfterMs` 는 남은 창 원값이다(헤더의 초가 아니다). 이메일 원문 · 전체 해시 · 키는 남기지 않는다.
+- **`subject` 꼬리표로 한 계정 집중과 다수 계정 잠금을 가른다.** 꼬리표는 키에 쓰는 HMAC 의 앞 8자(`LoginAttemptRedisAdapter#subjectTag`)라
+  같은 이메일이면 종류 · 창과 무관하게 같은 값이다(키를 바꾸기 전까지). 같은 `subject` 가 창마다 되풀이되면 한 계정 집중(대입 · 피해자 잠금),
+  짧은 시간에 서로 다른 `subject` 가 많으면 다수 계정 잠금(스프레이 · 대량 잠금)이다. 잠금 info 는 (이메일, 종류)마다 창당 한 줄이라 줄 수가 곧 잠긴 수다.
+- 관리자 잠금 거절은 감사 로그에도 남는다(§11-1). **관리자 429 는 요청마다 `admin.audit` 한 줄(`target=- result=FAILURE`)을 남긴다** —
+  잠긴 뒤에도 요청이 이어지면 감사 줄이 요청 수만큼 쌓이니 수집기 용량 · 보관 비용을 확인한다.
+- **켜고 끄기** — 기본 켬이다(application.yml `enabled: ${AUTH_LOGIN_GUARD_ENABLED:true}`, 프로파일 yml 은 덮지 않는다).
+  끄는 방법은 **`AUTH_LOGIN_GUARD_ENABLED=false`(`.env` 또는 OS 환경변수) 하나**다(비밀이 아니라 Vault 에 두지 않는다 — `secret-management.md` §2).
+  꺼진 채 뜨면 기동 때 warn 한 줄(`login guard disabled. property=auth.login-guard.enabled`)을 남긴다 — 운영은 이 줄을 경보로 건다.
+  켜면 `AUTH_LOGIN_GUARD_HASH_KEY` 가 필수다(base64 32바이트 이상, 비었거나 풀리지 않으면 기동하지 않는다 — 검증은 프로퍼티 compact 생성자라 거절된 값이 로그에 찍히지 않는다).
+- **인스턴스 전부 같은 `enabled` · 같은 `hash-key` 여야 한다.** 키가 다르면 같은 이메일이 인스턴스마다 다른 창에 들어가 한도가 인스턴스 수만큼 늘어난다.
+- **키를 바꾸면 진행 중인 창이 모두 초기화된다**(잠긴 이메일도 풀린다). 롤링 배포 중에는 키가 섞여 한도가 잠시 최대 두 배가 될 수 있다. 교체는 공격이 없는 시간에 한 번에 한다.
+- **고객 로그인 성공의 DEL 은 공격자의 누적 횟수도 지운다** — 단위가 이메일이라 피해자가 로그인에 성공하면 그때까지 쌓인 공격자 시도도 함께 사라진다.
+  관리자 로그인은 성공해도 지우지 않으므로 해당하지 않는다.
+- 키는 창 길이만큼만 남는다(키당 약 120B). 이메일을 바꿔 가며 보내면 키 수 ≈ 처리량 × 창이다 — 운영 Redis 는 `noeviction` 이라 창 상한을 1시간으로 묶었다(`coding-conventions.md` §9-7).
+
+**비상 절차**
+
+1. **특정 이메일 잠금 해제** — 키 이름이 이메일의 HMAC 이라 auth 의 키(`AUTH_LOGIN_GUARD_HASH_KEY`)로 계산해 그 키 하나만 지운다(운영 도구는 후속).
+   이메일은 앞뒤 공백을 지우고 소문자로 바꾼 값(정규화)을 넣는다. 아래 값은 `LoginAttemptKeyHasher` 와 같다(HMAC-SHA256 앞 16바이트 base64url, 패딩 없음 22자).
+
+   ```bash
+   # Vault 의 AUTH_LOGIN_GUARD_HASH_KEY(base64)를 디코드한 키의 hex
+   HEXKEY=$(printf '%s' "$AUTH_LOGIN_GUARD_HASH_KEY" | base64 -d | xxd -p -c 256)
+   printf '%s' "<정규화 이메일>" | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$HEXKEY" -binary | head -c 16 | base64 | tr '+/' '-_' | tr -d '='
+   # redis-cli — 종류에 맞는 키 하나(LoginAttemptRedisKeys)
+   DEL auth:<login|admin-login|sign-up>-attempt:<위 값>
+   ```
+
+   이메일 · 키 · 계산한 값은 티켓 · 채팅 · 작업 기록에 남기지 않는다(셸 기록도 지운다). 공격이 이어지면 곧 다시 잠긴다 — 2 를 같이 본다.
+2. **지속 공격** — 같은 `subject` 의 잠금이 창마다 되풀이되면(특히 관리자) LB · WAF 에서 관리자 로그인 경로(`/api/v1/auth/admin/login`)로 오는 공격 IP 를 막거나
+   관리자 IP 허용 목록을 둔다(후속 — 지금 코드 · 게이트웨이에는 없다).
+3. **guard 끄기(`AUTH_LOGIN_GUARD_ENABLED=false`)는 최후 수단이다** — 모든 이메일의 무차별 대입 · 가입 반복을 한꺼번에 연다.
+   승인자와 최대 시간을 정해 짧게만 쓰고, 인스턴스 전부를 같은 값으로 재기동하며, 끈 동안 로그인 실패율을 지켜본 뒤 바로 되돌린다.
+4. **대량 잠금의 긴급 초기화** — 다수 계정이 한꺼번에 잠겼으면 키(`AUTH_LOGIN_GUARD_HASH_KEY`)를 새 값으로 바꿔 인스턴스 전부를 재기동한다 — 모든 창이 새로 시작한다
+   (옛 키의 창은 TTL 로 사라진다). Vault 값 교체라 `secret-management.md` 절차를 따른다. **한계** — 공격자는 같은 요청으로 바로 다시 잠근다.
+   원인(2)을 막지 않으면 잠깐 숨을 돌리는 것뿐이고, 롤링 중 키가 섞인 동안은 한도가 늘어난다.
+
+### 14-5. 알려진 한계 (D3′ · D11 · #135)
+
+- **피해자 계정 잠금(D3′, 감수)** — 이메일만 알면 허용 횟수(기본 5)만큼의 요청이면 피해자의 다음 시도가 429 이고, 창마다 되풀이해 계속 잠글 수 있다.
+  한 번 잠그면 상한은 창 하나(연장 없음)다. IP 차원이 없는 지금은 근본 완화가 없고, #135 뒤에 "IP 한도 우선, 이메일 잠금은 보조" 로 다시 조정한다.
+- **요청 사이의 관측(감수)** — 카운터가 요청 사이에 이어진다. 단일 응답은 계정 존재를 드러내지 않지만, 같은 이메일로 시도를 나눠 보내는 쪽은
+  고객 로그인의 성공 DEL 로 카운터가 0 으로 돌아간 것(429 가 예상보다 늦게 오거나 `Retry-After` 가 새 창 값으로 커짐)을 보고
+  그 이메일의 로그인 활동 시점 — 곧 그 이메일이 실제 계정이라는 것 — 을 관측한다. 고객 로그인은 이것을 감수한다.
+  관리자 로그인에서 관리자 계정인지까지 판별되던 문제는 성공해도 지우지 않는 결정(2026-10-22, §14-2)으로 해소됐다.
+  관리자 이메일을 노린 탐침은 잠기기 전 `target=member:<id>` 감사 줄(§11-4)로 드러나니 운영은 그 빈도를 경보로 건다.
+- **이메일을 바꿔 가며 하는 공격은 막지 못한다** — 가입 409 로 가입 여부를 하나씩 확인하는 열거(§10), 서로 다른 이메일로 BCrypt 를 돌리게 하는 CPU 소모,
+  흔한 비밀번호 하나로 여러 계정을 찔러 보는 password spraying 이다. 이메일마다 창이 따로라서다. IP 차원(#135) 전까지의 한계다.
+- **전역 익명 폭주 공백(D11)** — 회원가입은 유효한 게이트웨이 식별자가 있을 때 IP 창으로 이메일 교체를 제한한다. 그 밖의 전역 익명 폭주는 별도 보호가 필요하다. 게이트웨이 IP 단위 제한은 기본 꺼짐이고 켜도 쓰기 경로만 센다(§7-3 · §7-4).
+  LB 단 제한 또는 #135 에서 다룬다.
+- 전역 가입 상한은 두지 않는다 — 공격자 한 명이 모든 가입을 막게 된다. BCrypt 동시 실행 상한(bulkhead, `AUTH_042` 예약)은 아직 없다.
+
+### 14-6. 테스트
+
+| 테스트 | 보는 것 |
+|--------|---------|
+| `LoginGuardProcessorTest` | 꺼짐이면 포트 무호출 · 정규화(`canonicalEmail`) · 허용/초과 경계 · 종류별 코드 · 남은 시간 원값 · 전이 순간만 info · 로그인 fail-closed · 가입 fail-open · clear 는 저장소 장애만 삼킴 · warn 1분 1회 |
+| `LoginAttemptLimitedExceptionTest` | 429 코드만 받음(그 밖 IAE) · 음수 · null 거절 |
+| `AuthWebFacadeTest` · `AdminAuthWebFacadeTest` · `MemberWebFacadeTest` | 호출 순서(InOrder) · 초과 · 장애 시 조회 · BCrypt · 발급 · existsByEmail 무호출 · 관리자 잠금 감사 · 관리자 성공 시 clear 없음 |
+| `AuthWebControllerTest` · `AdminAuthWebControllerTest` · `MemberWebControllerTest` | 429 봉투 + `Retry-After` — 초 변환 경계(0 · 1 · 999 · 1000 · 1001 · 1500ms)는 `AuthWebControllerTest` |
+| `AuthServiceApplicationTests` | 켬은 `${AUTH_LOGIN_GUARD_ENABLED:true}` 기본값 · 프로파일 yml(local · dev · test)이 스위치를 덮지 않음 |
+| `AuthLoginGuardBeansConfigTest` | `AUTH_LOGIN_GUARD_ENABLED` 없음 → 켬, `false` → 꺼짐 + 기동 warn(`login guard disabled`), 빈 값 → 기동 실패 |
+| `LoginGuardFlowIntegrationTest` | 5회 실패 → 맞는 비밀번호도 429 → 창 뒤 200, 없는 이메일 같은 429, 변형 이메일 한 창, 고객 성공 시 리셋, 관리자 성공은 리셋 없음, 고객 · 관리자 창 분리, 가입 429, fail-closed · fail-open |
+| `LoginAttemptRedisAdapterTest` (Testcontainers) | Lua 원자성 · TTL 비연장 · 종류별 키 분리(관리자 포함) |
