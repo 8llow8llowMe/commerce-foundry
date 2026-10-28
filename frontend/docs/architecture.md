@@ -127,10 +127,14 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
   화면이 `/login?signedUp=1&limited=<초>&reason=<코드>` 로 보내 요청 제한 안내를 덧붙이고 로그인 버튼 쿨다운을 처음부터 건다(#184).
   주소 값은 `readLoginRateLimit` 이 거른다 — 초는 1 ~ 3600 정수, 코드는 사전에 있는 것만(아니면 "잠시 후" · 일반 문구).
   fieldErrors 의 동의 칸은 `agreements.termsOfService` 처럼 중첩 경로다. 비밀번호 확인 칸은 BE 에 없어 화면에서만 본다.
+- **소셜 로그인**(카카오 · 네이버, #25 · BE #5)도 전용 route handler(`app/api/v1/auth/oauth/[provider]/login`, `createSocialLoginHandler`)다.
+  응답이 이메일 로그인과 같은 토큰 쌍이라 로그인 핸들러와 같은 틀(`loginHandler` · `requestLogin`)로 쿠키를 심고 토큰 없는 성공 봉투만 준다.
+  같은 origin 요청만 받고(login CSRF), 제공자는 `kakao` · `naver` 만(허용 목록은 `@cf/api-client` 루트의 `SOCIAL_PROVIDERS` · `isSocialProvider` 하나를 화면과 같이 쓴다) — 그 밖은 게이트웨이를 부르지 않고 404 `BFF_001` 이다. 실패는 봉투 · 상태 · `Retry-After` 그대로 중계한다.
+  인가 URL 발급(`GET /api/v1/auth/oauth/{provider}/authorize-url`)은 토큰이 없는 응답이라 일반 프록시가 중계한다. 화면 흐름은 §3-1.
 - 고객 쿠키 이름 `cf_at` / `cf_rt` 와 대체 수명(30분 / 14일, BE 설정과 같다)은 `apps/storefront/src/lib/auth-cookies.ts`.
   어드민은 `apps/admin/src/lib/auth-cookies.ts` — `cf_admin_at` 하나, 대체 수명 30분이다(#204, §9).
-- **토큰을 주는 인증 경로는 전용 route handler 만 받는다** — 로그인 · 관리자 로그인 · 재발급 · 로그아웃 · 가입(`DEDICATED_AUTH_PATHS`)은 일반 프록시가 404 `BFF_001` 로 막는다
-  (대소문자 · 끝 슬래시 · 퍼센트 인코딩 변형 포함). 전용 핸들러가 없는 앱(스토어프론트의 관리자 로그인, 어드민의 고객 로그인 · 재발급)에서 토큰이 JS 로 새지 않게 한다.
+- **토큰을 주는 인증 경로는 전용 route handler 만 받는다** — 로그인 · 관리자 로그인 · 재발급 · 로그아웃 · 가입(`DEDICATED_AUTH_PATHS`), 소셜 로그인(`/api/v1/auth/oauth/*/login`, 제공자 값 무관)은 일반 프록시가 404 `BFF_001` 로 막는다
+  (대소문자 · 끝 슬래시 · 퍼센트 인코딩 · 마디마다 붙은 경로 매개변수 `;…` 변형 포함). 전용 핸들러가 없는 앱(스토어프론트의 관리자 로그인, 어드민의 고객 로그인 · 재발급)에서 토큰이 JS 로 새지 않게 한다.
 - **refresh 쿠키가 없는 설정**(`AuthCookieConfig.refreshName: null`)이면 프록시 · 로그아웃은 refresh 쿠키를 읽지 않고(같은 이름 쿠키가 와도 무시) 재발급하지 않는다
   — 401 은 그대로 중계하고, 로그아웃은 Bearer + 본문 `{}` 로 access 만 막는다(BE `LogoutRequest.refreshToken` 은 선택). 쿠키 정리도 access 하나다.
 - 인증 계약은 BE PR #99 기준이다(머지 전): 재발급 `{ refreshToken }` → 로그인과 같은 모양. 로그인 · 재발급 모두 응답의 `*ExpiresIn` 을
@@ -142,6 +146,29 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
 - **로그인 상태 표시**는 레이아웃이 `hasSession()`(`lib/auth/session.ts`, 인증 쿠키 존재 여부)으로 정해 헤더에 넘긴다. 토큰 유효성은 보지 않는다 —
   진입점(로그인 ↔ 마이페이지 · 로그아웃)만 바꾸고, 권한이 걸린 화면은 API 응답으로 판단한다. `[locale]` 화면은 이미 요청마다 렌더링되므로
   쿠키를 읽어도 정적 생성을 잃지 않는다. RSC 는 쿠키를 쓰지 못하므로 여기서 지우거나 재발급하지 않는다.
+
+### 3-1. 소셜 로그인 화면 (#25 · BE #5)
+
+| 단계 | 어디서 | 하는 일 |
+|------|--------|---------|
+| 시작 | 로그인 · 가입 화면 `SocialLoginButtons` | authorize-url 을 받아 흐름을 **같은 탭 sessionStorage** 키 `cf-social-login` 에 두고 `authorizeUrl` 로 이동 |
+| 콜백 | `/login/oauth/{kakao\|naver}` `SocialCallback` | 쿼리 state 를 흐름과 비교 → 맞으면 BFF 소셜 로그인 1회 → 돌아갈 경로로 `router.replace` + `refresh` |
+
+- **redirect URI = `<스토어프론트 origin>/login/oauth/{provider}`** (기본 언어 경로). BE `KAKAO_REDIRECT_URI` · `NAVER_REDIRECT_URI` 와 제공자 콘솔에 같은 값을 넣는다(`local-run.md` §4).
+- 흐름 값 `{ provider, state, verifier, returnPath, localePrefix, agreements }` — verifier 는 브라우저 바인딩 비밀이라 URL · 로그에 넣지 않는다(BE security-guide §13).
+  `returnPath` 는 `safeReturnPath`(로그인 · 가입 화면과 그 아래 경로 — 콜백 `/login/oauth/*` 포함 — 는 메인으로 바꾼다), `localePrefix` 는 `''` · `/en` 모양만 받는다(읽을 때 다시 거른다). 새로 시작하면 덮어쓴다.
+- **수명** — 콜백이 읽자마자(보내기 전에) 지운다. BE 는 요청마다 state 를 먼저 소비하므로 그 뒤의 실패는 모두 인가 URL 부터 다시 시작한다. 콜백까지 가지 않은 흐름은 탭을 닫을 때 사라지고, BE state TTL(기본 5분)이 지나면 AUTH_052 다.
+- **콜백 처리** — 서버는 쿼리를 읽지 않는다. 브라우저가 먼저 `history.replaceState` 로 쿼리(code · state)를 주소에서 지워 기록 · 새로고침에 남지 않게 하고,
+  StrictMode effect 이중 실행은 ref 로 막아 한 번만 보낸다. 순서(언어 넘기기 → 쿼리 지우기 → 흐름 지우기 → 보내기 → 이동)는 `runSocialCallback`(`lib/auth/social.ts`, 의존성 주입)이 정하고 컴포넌트는 부르기만 한다. 흐름이 없거나 state · 제공자가 다르거나 code 가 없으면 BE 를 부르지 않고 다시 시작 안내다.
+  제공자 `error` 쿼리(사용자 취소 `access_denied` 등)도 BE 를 부르지 않는다.
+- **언어** — redirect URI 가 하나라 영문 스토어에서 시작해도 기본 언어 콜백으로 돌아온다. 흐름의 `localePrefix` 가 지금 언어와 다르면 같은 쿼리로 그 언어의 콜백으로 `location.replace` 한다(기록을 늘리지 않는다).
+  호스트 방식 언어(`LOCALE_HOSTS`)는 origin 이 달라 sessionStorage 가 갈리므로 그 호스트에서 시작한 소셜 로그인은 콜백에서 흐름을 찾지 못한다 — 호스트 방식을 켜면 언어 호스트별 redirect URI 가 필요하다(BE 과제).
+- **신규 가입 약관 동의** — 로그인 화면은 동의 없이 시작한다. AUTH_056 이면 콜백이 가입 폼과 같은 동의 칸(`AgreementsFieldset`)을 보이고, 필수 두 칸에 동의하면 동의를 흐름에 담아
+  **인가부터 다시 시작**한다(두 번째 콜백이 `agreements` 를 함께 보낸다). 가입 화면의 간편 가입 버튼은 그 화면의 필수 동의를 먼저 요구하고 동의를 담아 시작한다(기존 회원이면 BE 가 무시).
+- **오류** — 코드별 사전 문구 `dict.auth.social.errors`(AUTH_050 ~ 057, AUTH_150 ~ 152 검증, 같은 이메일의 기존 계정 409 AUTH_002), 429 는 `rateLimitTextOf`, 그 밖은 한 문구.
+  콜백 오류 화면의 "로그인 화면으로" 는 돌아갈 경로를 이은 `/login?next=` 다. AUTH_055 는 제공자 화면에서 이메일 제공에 동의하라는 안내다.
+- **버튼 색** — 제공자 브랜드 색 토큰이 없어 중립 보조 버튼(`secondary`)이다. 제공자 디자인 가이드(색 · 로고)를 맞추려면 `tokens.css` 에 제공자 토큰을 더하는 결정이 먼저다(`styling-theme.md` §1).
+- 비로그인 장바구니 병합은 로그인 뒤 레이아웃의 `CartMerge` 가 그대로 맡는다(§6). 마이페이지 계정 연결은 #356.
 
 ## 4. 헬스체크
 

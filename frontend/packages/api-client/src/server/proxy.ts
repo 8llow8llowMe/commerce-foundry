@@ -25,6 +25,8 @@ const DEDICATED_AUTH_PATHS = new Set([
   '/api/v1/auth/logout',
   '/api/v1/auth/sign-up',
 ]);
+// 소셜 로그인(BE #5)도 토큰을 본문으로 준다 — 제공자 값과 상관없이 막는다(전용 핸들러가 없는 어드민 · 모르는 제공자 포함)
+const DEDICATED_AUTH_PATTERN = /^\/api\/v1\/auth\/oauth\/[^/]+\/login$/;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // 게이트웨이로 넘기는 요청 헤더. Cookie·Authorization·X-Forwarded-* 등은 넘기지 않는다(X-Forwarded-For 는 BFF 가 정한 한 값으로 덮어쓴다).
 const FORWARD_REQUEST_HEADERS = ['content-type', 'accept', 'accept-language', 'idempotency-key'];
@@ -120,7 +122,7 @@ export function createProxyHandler(options: ProxyOptions): (request: Request) =>
   };
 }
 
-/** 대소문자 · 끝 슬래시 · 퍼센트 인코딩 · 경로 매개변수(;) 변형도 같은 경로로 본다. 디코드할 수 없는 경로는 막는다 */
+/** 대소문자 · 끝 슬래시 · 퍼센트 인코딩 · 마디별 경로 매개변수(;) 변형도 같은 경로로 본다. 디코드할 수 없는 경로는 막는다 */
 function isDedicatedAuthPath(pathname: string): boolean {
   let decoded: string;
   try {
@@ -130,10 +132,11 @@ function isDedicatedAuthPath(pathname: string): boolean {
   }
   const normalized = decoded
     .toLowerCase()
-    .split(';')[0]!
+    // 마디마다 붙은 경로 매개변수(;…)를 지운다 — 경로 전체를 자르면 '/oauth/kakao;x/login' 이 '/oauth/kakao' 가 돼 빠져나간다
+    .replace(/;[^/]*/g, '')
     .replace(/\/{2,}/g, '/')
     .replace(/\/+$/, '');
-  return DEDICATED_AUTH_PATHS.has(normalized);
+  return DEDICATED_AUTH_PATHS.has(normalized) || DEDICATED_AUTH_PATTERN.test(normalized);
 }
 
 /**

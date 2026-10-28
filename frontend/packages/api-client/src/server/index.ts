@@ -14,6 +14,7 @@ export {
 export { createLogoutHandler, LOGOUT_PATH, type LogoutHandlerOptions } from './logout';
 export { createProxyHandler, type ProxyOptions } from './proxy';
 export { createSignUpHandler, SIGN_UP_PATH, type SignUpResult } from './sign-up';
+export { createSocialLoginHandler, socialLoginPath, type SocialLoginContext } from './social-login';
 export {
   REISSUE_GRACE_MS,
   REISSUE_PATH,

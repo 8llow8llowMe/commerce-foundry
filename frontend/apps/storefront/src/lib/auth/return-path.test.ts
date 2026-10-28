@@ -27,6 +27,21 @@ describe('safeReturnPath', () => {
     expect(safeReturnPath('/signup')).toBe('/');
   });
 
+  it('그 아래 경로(소셜 로그인 콜백 등)로도 되돌아가지 않는다', () => {
+    for (const next of [
+      '/login/oauth/kakao',
+      '/login/oauth/naver?code=c&state=s',
+      '/login/',
+      '/signup/x',
+      '/shop/../login/oauth/kakao',
+    ]) {
+      expect(safeReturnPath(next)).toBe('/');
+    }
+    // 이름만 비슷한 경로는 그대로다
+    expect(safeReturnPath('/login-help')).toBe('/login-help');
+    expect(safeReturnPath('/signups')).toBe('/signups');
+  });
+
   it('. · .. · %2e%2e 마디를 풀어 둔 뒤 검사한다 (#347)', () => {
     for (const next of [
       '/shop/../login',

@@ -62,7 +62,8 @@ export function createAdminLoginHandler(
   );
 }
 
-function loginHandler(
+/** 로그인 응답을 받아 토큰을 쿠키로 심는 공통 틀 — 고객 · 관리자 · 소셜 로그인(`createSocialLoginHandler`)이 같이 쓴다 */
+export function loginHandler(
   options: LoginHandlerOptions,
   attempt: (headers: Headers, body: BodyInit) => Promise<LoginAttempt>,
 ): (request: Request) => Promise<Response> {
@@ -111,7 +112,7 @@ export async function attemptLogin(
 }
 
 /** 로그인 요청을 보내고 성공 dataBody 를 쿠키로 바꾼다. `toCookies` 가 null 이면(토큰 없음) 계약 불일치다 */
-async function requestLogin(
+export async function requestLogin(
   fetchImpl: typeof fetch,
   url: string,
   headers: Headers,

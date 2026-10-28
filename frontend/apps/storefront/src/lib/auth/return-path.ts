@@ -1,3 +1,6 @@
+/** 돌아갈 경로로 받지 않는 인증 화면(그 아래 경로 포함) */
+const AUTH_PAGES = ['/login', '/signup'];
+
 /** 브라우저가 풀어 이동할 경로를 미리 구할 때 쓰는 가짜 origin */
 const SITE_ORIGIN = 'http://site.invalid';
 
@@ -22,7 +25,7 @@ export function resolveSitePath(value: string): string | null {
 /**
  * 로그인 뒤 돌아갈 앱 경로(`?next=`). 언어 접두어 없는 같은 사이트 경로만 받는다 —
  * 외부 주소 · 프로토콜 상대 주소(`//evil`) · 역슬래시 우회를 받으면 열린 리다이렉트가 된다.
- * 로그인 · 회원가입 화면으로 되돌아가는 경로도 메인으로 바꾼다. `.` · `..` 마디를 풀어 둔 뒤 검사한다(#347).
+ * 로그인 · 회원가입 화면(그 아래 경로 포함)으로 되돌아가는 경로도 메인으로 바꾼다. `.` · `..` 마디를 풀어 둔 뒤 검사한다(#347).
  */
 export function safeReturnPath(next: string | string[] | undefined): string {
   const value = Array.isArray(next) ? next[0] : next;
@@ -30,6 +33,7 @@ export function safeReturnPath(next: string | string[] | undefined): string {
   const resolved = resolveSitePath(value);
   if (resolved === null) return '/';
   const path = resolved.split(/[?#]/)[0]!;
-  if (path === '/login' || path === '/signup') return '/';
+  // 그 아래 경로(소셜 로그인 콜백 `/login/oauth/{provider}` 등)도 — 로그인 뒤 콜백 화면으로 돌아가면 다시 시작 안내만 보인다
+  if (AUTH_PAGES.some((page) => path === page || path.startsWith(`${page}/`))) return '/';
   return value;
 }

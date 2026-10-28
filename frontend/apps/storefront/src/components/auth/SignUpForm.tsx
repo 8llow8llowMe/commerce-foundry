@@ -1,14 +1,17 @@
 'use client';
 
 import { ApiError, apiFetch } from '@cf/api-client';
-import { Button, Checkbox, FieldError, TextField } from '@cf/ui';
+import { Button, FieldError, TextField } from '@cf/ui';
 import { useRouter } from 'next/navigation';
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useDictionary, useLocalizedHref } from '@/components/i18n/LocaleProvider';
 import { Link } from '@/components/i18n/Link';
+import { NO_AGREEMENTS, type SignUpAgreements } from '@/lib/auth/agreements';
 import { rateLimitTextOf } from '@/lib/auth/rate-limit';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { useRetryCooldown } from '@/lib/use-retry-cooldown';
+import { AgreementsFieldset } from './AgreementsFieldset';
+import { SocialLoginButtons } from './SocialLoginButtons';
 
 type Field =
   | 'email'
@@ -47,8 +50,6 @@ const SERVER_FIELDS: Record<string, Field> = {
   'agreements.marketing': 'marketing',
 };
 
-type Agreements = { termsOfService: boolean; privacyPolicy: boolean; marketing: boolean };
-
 /**
  * 이메일 회원가입 폼(#25). BFF `POST /api/v1/auth/sign-up` 이 가입 뒤 같은 이메일 · 비밀번호로 로그인까지 해 쿠키를 심는다.
  * `signedIn` 이면 돌아갈 경로로, 자동 로그인을 못 했으면(계정은 만들어짐) 가입 완료 안내와 함께 로그인 화면으로 보낸다.
@@ -63,12 +64,7 @@ export function SignUpForm({ returnPath }: { returnPath: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<SignUpErrors>(NO_ERRORS);
   const cooldown = useRetryCooldown();
-  const [agreements, setAgreements] = useState<Agreements>({
-    termsOfService: false,
-    privacyPolicy: false,
-    marketing: false,
-  });
-  const allAgreed = agreements.termsOfService && agreements.privacyPolicy && agreements.marketing;
+  const [agreements, setAgreements] = useState<SignUpAgreements>(NO_AGREEMENTS);
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -108,10 +104,6 @@ export function SignUpForm({ returnPath }: { returnPath: string }) {
     }
   };
 
-  const toggle = (key: keyof Agreements) => (event: ChangeEvent<HTMLInputElement>) => {
-    const checked = event.currentTarget.checked;
-    setAgreements((current) => ({ ...current, [key]: checked }));
-  };
   const loginHref = returnPath === '/' ? '/login' : `/login?next=${encodeURIComponent(returnPath)}`;
 
   return (
@@ -169,47 +161,7 @@ export function SignUpForm({ returnPath }: { returnPath: string }) {
           errors={errors.phone}
         />
 
-        <fieldset className="mt-3 flex flex-col gap-3">
-          <legend className="sr-only">{t.signUp.agreements}</legend>
-          <Checkbox
-            label={<span className="font-medium">{t.signUp.agreeAll}</span>}
-            checked={allAgreed}
-            onChange={(event) => {
-              const checked = event.currentTarget.checked;
-              setAgreements({
-                termsOfService: checked,
-                privacyPolicy: checked,
-                marketing: checked,
-              });
-            }}
-            errors={errors.agreements}
-          />
-          <div className="flex flex-col gap-3 pl-7">
-            <Checkbox
-              label={t.signUp.termsOfService}
-              name="termsOfService"
-              checked={agreements.termsOfService}
-              onChange={toggle('termsOfService')}
-              required
-              errors={errors.termsOfService}
-            />
-            <Checkbox
-              label={t.signUp.privacyPolicy}
-              name="privacyPolicy"
-              checked={agreements.privacyPolicy}
-              onChange={toggle('privacyPolicy')}
-              required
-              errors={errors.privacyPolicy}
-            />
-            <Checkbox
-              label={t.signUp.marketing}
-              name="marketing"
-              checked={agreements.marketing}
-              onChange={toggle('marketing')}
-              errors={errors.marketing}
-            />
-          </div>
-        </fieldset>
+        <AgreementsFieldset value={agreements} onChange={setAgreements} errors={errors} />
 
         {/* 폼 전체 오류는 버튼 바로 위 — 누른 자리 가까이에서 읽힌다 */}
         <FieldError messages={errors.form} />
@@ -221,6 +173,16 @@ export function SignUpForm({ returnPath }: { returnPath: string }) {
           {submitting ? t.signUp.submitting : t.signUp.submit}
         </Button>
       </form>
+
+      {/* 간편 가입은 위 약관 동의를 먼저 받고 그 동의를 담아 시작한다(신규 가입이면 BE 가 쓴다) */}
+      <SocialLoginButtons
+        returnPath={returnPath}
+        heading={t.social.signUpHeading}
+        agreements={agreements}
+        onAgreementsMissing={() =>
+          setErrors({ ...NO_ERRORS, agreements: [t.social.agreementsRequired] })
+        }
+      />
 
       <p className="flex justify-center gap-2 text-sm text-muted-fg">
         {t.signUp.hasAccount}
