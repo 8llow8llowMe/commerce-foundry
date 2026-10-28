@@ -10,6 +10,8 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
       │               │  └─▶ MAKING ─┘(주문 제작)            │
       ▼               ▼                                       ▼
    EXPIRED      CANCEL_REQUESTED ──▶ CANCELED         RETURN_REQUESTED ──▶ RETURNED
+
+EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 ```
 
 | 상태 | 뜻 | 누가 바꾸나 |
@@ -36,10 +38,20 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 
 ### 1-2. 동시성
 
+- `EXPIRED → PAID`는 만료 후 결제 확인, 같은 주문의 재선점, 선점 확정의 **200 · CONFIRMED 응답**을 모두 확인한 경우에만 허용한다. 위 도식의 만료에서 PAID로 복귀하는 조건부 경로다 (`payment-guide.md` §6 · 이 문서 §3-4). 재선점 실패 시 전액 취소한다.
+- #13 C1은 주문 값 · 전이 표 · `expire(now)`와 영속성 기반만 제공한다. 결제 전이는 후속 연동에서 증거를 확인한 뒤 구현하며 현재 호출 가능한 `markPaid` 메서드는 없다.
+
 - 주문 행에 `@Version` 을 둔다. 고객 취소와 어드민 출고 처리가 동시에 오면 하나만 성공해야 한다.
 - 결제 완료 알림(internal)은 재전송될 수 있다 — **이미 `PAID` 이후 상태면 성공으로 응답**하고 아무것도 바꾸지 않는다.
 
 ## 2. 주문 금액
+
+### 주문 저장 기반 (#13 C1)
+
+- `orders`, `order_shipping_address`, `order_item`, `order_item_custom_option`, `order_status_history` 다섯 테이블을 주문 하나의 저장 단위로 둔다. 주소 · SKU · 맞춤 입력 · 배송비는 주문 시점의 불변 스냅숏이며 이력은 추가만 한다. raw FK만 저장하고 JPA 연관관계는 쓰지 않는다.
+- 저장은 신규 `PENDING_PAYMENT` 주문과 같은 주문 · 회원의 `null → PENDING_PAYMENT` 생성 이력만 받는다. 어댑터는 기존 트랜잭션을 필수로 요구한다(`MANDATORY`). 후속 Processor가 주문 · 스냅숏 · 이력을 한 번에 커밋하며 뒤쪽 저장 실패도 모두 롤백한다. 외부 호출은 그 트랜잭션 밖에서 한다.
+- `orders.version`으로 동시 수정을 검출한다. 조회는 주문 · 회원 아이디를 함께 제한하며 스냅숏은 묶음 조회한다. 주문 PK 중복만 `ALREADY_SAVED`, 다른 주문의 선점 중복 등은 `REJECTED`다. 로그는 주문 아이디 · 예외 타입만 남기고 원인 예외 · 행 값 · 제약 문자열은 싣지 않는다.
+- 요청 lease/멱등 기록(C2), 주문 생성 API · 재고 선점/보상 오케스트레이션(C3), 결제 확정 연동은 후속 단계다. C1은 #13 전체 완료를 뜻하지 않는다. 운영 DDL 정본은 `service/order-service/src/test/resources/ddl/order-schema.sql`이며 자동 적용하지 않는다.
 
 - 주문 금액은 **order-service 가 서버에서 계산한다**: Σ(SKU 판매가(기본 판매가 + 옵션 추가금) × 수량) − 할인 + 배송비.
   SKU 판매가에 옵션 추가금이 이미 들어 있다(product-service `SkuInternalProcessor` · order `CatalogSku.salePrice`) — 추가금을 따로 더하지 않는다.
