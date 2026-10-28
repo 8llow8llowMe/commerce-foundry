@@ -7,6 +7,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.data.domain.Slice;
 
 public interface LookRepositoryPort {
 
@@ -20,6 +21,12 @@ public interface LookRepositoryPort {
      * 트랜잭션 안에서 부른다.
      */
     List<Look> findAllForUpdate();
+
+    /** 고객 룩 목록 — 보이는 룩만, 노출 순서 → 아이디 오름차순(어드민 목록과 같은 순서) 한 쪽. 아이템은 읽지 않는다. */
+    Slice<Look> findVisibleSlice(int page, int size);
+
+    /** 상품이 든 보이는 룩 — 노출 순서 → 아이디 오름차순. 숨긴 룩은 뺀다. 아이템은 읽지 않는다. */
+    List<Look> findVisibleByProductId(long productId);
 
     /** 룩 묶음의 아이템 전체 — 한 번(룩 아이디 in 절)에 읽는다. 룩 → 노출 순서 → 아이디 오름차순. 빈 컬렉션이면 쿼리 없이 빈 목록이다. */
     List<LookItem> findItemsByLookIds(Collection<Long> lookIds);

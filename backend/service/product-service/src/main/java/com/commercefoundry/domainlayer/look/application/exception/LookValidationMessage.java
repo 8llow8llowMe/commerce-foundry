@@ -26,8 +26,12 @@ public final class LookValidationMessage {
     public static final String PRODUCT_ID_REQUIRED = "LOOK_116:productIds 의 원소는 비어 있을 수 없습니다.";
     public static final String PRODUCT_ID_POSITIVE = "LOOK_117:productIds 의 원소는 양수여야 합니다.";
 
-    // 경로 변수 (/api/v1/admin/looks/{lookId})
+    // 경로 변수 (/api/v1/admin/looks/{lookId}, 고객 /api/v1/looks/{lookId})
     public static final String LOOK_ID_POSITIVE = "LOOK_118:lookId 는 양수여야 합니다.";
+
+    // 고객 룩 목록 (GET /api/v1/looks) — page · size 는 서비스 공용 PRODUCT_101 · 102 다 (api-design-guide.md §4, 선례: SizeChartValidationMessage)
+    public static final String PAGE_MIN = "PRODUCT_101:page 는 0 이상이어야 합니다.";
+    public static final String SIZE_RANGE = "PRODUCT_102:size 는 1 이상 100 이하여야 합니다.";
 
     // 어드민 룩 순서 변경 (PATCH /api/v1/admin/looks/order)
     public static final String LOOK_IDS_REQUIRED = "LOOK_119:lookIds 는 필수입니다.";

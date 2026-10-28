@@ -16,10 +16,8 @@ import com.commercefoundry.global.media.MediaUrlPolicy;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -69,11 +67,9 @@ public class LookProcessor {
         return new LookContent(look, items);
     }
 
-    /** 룩들의 구성 상품 아이디 — 모든 룩을 합쳐 중복 없이. Facade 가 상품 조회를 한 번에 하게 한다. */
+    /** 룩들의 구성 상품 아이디 — 모든 룩을 합쳐 중복 없이({@link LookContent#productIdsOf}). Facade 가 상품 조회를 한 번에 하게 한다. */
     public Set<Long> productIdsOf(Collection<LookContent> contents) {
-        Set<Long> productIds = new LinkedHashSet<>();
-        contents.forEach(content -> productIds.addAll(content.productIds()));
-        return productIds;
+        return LookContent.productIdsOf(contents);
     }
 
     /** @param products 구성 상품 (숨김 · 판매 종료 포함) */
@@ -199,22 +195,12 @@ public class LookProcessor {
 
     // ── 내부 ────────────────────────────────────────────────────
 
-    /**
-     * 룩마다 아이템을 붙인다. 아이템이 없는 룩은 결과에서 뺀다 — 룩 행을 읽은 뒤 아이템을 읽기 전에 다른 어드민의 삭제가 커밋된 경우다
-     * (잠그지 않는 읽기, 문장별 스냅숏). 구성 상품 1개 이상 불변식으로 500 이 나지 않게 하고, 지워진 룩은 목록에 없는 것이 맞다.
-     */
+    /** 룩마다 아이템을 붙인다(in 절 한 번). 아이템이 없는 룩(읽는 사이 삭제됨)은 뺀다 — {@link LookContent#assemble}. */
     private List<LookContent> withItems(List<Look> looks) {
         if (looks.isEmpty()) {
             return List.of();
         }
-        Map<Long, List<LookItem>> itemsByLook = new HashMap<>();
-        for (LookItem item : lookRepositoryPort.findItemsByLookIds(looks.stream().map(Look::id).toList())) {
-            itemsByLook.computeIfAbsent(item.lookId(), lookId -> new ArrayList<>()).add(item);
-        }
-        return looks.stream()
-            .filter(look -> itemsByLook.containsKey(look.id()))
-            .map(look -> new LookContent(look, itemsByLook.get(look.id())))
-            .toList();
+        return LookContent.assemble(looks, lookRepositoryPort.findItemsByLookIds(looks.stream().map(Look::id).toList()));
     }
 
     private void validateImageUrl(String url) {

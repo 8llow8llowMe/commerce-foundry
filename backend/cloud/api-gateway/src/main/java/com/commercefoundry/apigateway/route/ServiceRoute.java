@@ -17,7 +17,7 @@ public enum ServiceRoute {
         "/api/v1/admin/members/**", "/api/v1/admin/audit-logs/**",
         "/api/v1/admin/admins/**", "/api/v1/admin/me/**"),
     PRODUCT("product-service",
-        "/api/v1/categories/**", "/api/v1/products/**", "/api/v1/displays/**",
+        "/api/v1/categories/**", "/api/v1/products/**", "/api/v1/displays/**", "/api/v1/looks/**",
         "/api/v1/admin/categories/**", "/api/v1/admin/products/**", "/api/v1/admin/stocks/**", "/api/v1/admin/displays/**",
         "/api/v1/admin/size-chart-templates/**", "/api/v1/admin/looks/**"),
     ORDER("order-service",

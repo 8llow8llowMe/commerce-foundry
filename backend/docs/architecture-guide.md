@@ -198,6 +198,7 @@ Info → Presenter → Response
   예: auth 배송지 Facade 가 부르는 `MemberLockProcessor` 의 `AUTH_003`(회원 없음)은 그 컨텍스트의 advice 가 봉투로 만든다 (#7).
 - 숨김 같은 조회 규칙은 그 컨텍스트가 정한다 — 다른 컨텍스트는 용도별 Processor 메서드만 부른다.
   예: `ProductWebFacade` 는 `CategoryProcessor.subtreeIdsOf(categoryId)`(목록 필터 — 숨김과 무관) · `visiblePathOf(categoryId)`(상세 경로 — 숨김 제외)만 부른다.
+  예: 고객 룩(#62) `LookWebFacade` 는 상품 카드를 `ProductListProcessor.summarizeVisible`(숨김 제외), 상품별 룩의 상품 확인을 `ProductDetailProcessor.getVisibleProduct`(없거나 숨김 → 404 `PRODUCT_001`)로만 받는다.
 - 다른 컨텍스트의 쓰기도 그 컨텍스트 Processor 로만 한다. 판정에 부른 쪽 데이터가 필요하면 API 를 부른 쪽에 둔다.
   예: 어드민 카테고리 관리(#9)는 삭제 판정에 "연결된 상품" 이 필요해 상품 컨텍스트에 둔다 — `CategoryAdminFacade` 가 `CategoryProcessor.getTreeForUpdate()`(잠근 트리)를 받아
   `CategoryAdminProcessor.validate*` 에 넘겨 판정하고, 쓰기는 다시 `CategoryProcessor`(`create` · `update` · `delete`)로 한다. 응답은 `CategoryAdminProcessor` 가 Info 로 옮겨 Presenter 에 넘긴다.
@@ -371,7 +372,7 @@ store:
   두 번째 서비스가 **같은 프로퍼티**를 쓰게 되면 common-core 로 올린다 — 두 서비스가 서로 다른 플래그를 읽는 지금은 각 서비스에 둔다. 플래그 기본값은 꺼짐(닫힌 쪽)이고 local · dev 프로파일 yml 만 켠다.
   플래그가 꺼지면 데이터는 그대로 두고 응답에서만 숨긴다 (맞춤 제작: 목록 `customOrder=false`, 상세 `customOrder=null`).
   product-service 는 `preorder`(목록 `preorder=false`, 상세 `preorder=null`) · `product-video`(상세 `images[]` 에서 VIDEO 제외)도 같은 방식으로 읽는다(#61).
-  `looks`(#62)는 고객 룩 조회만 본다(고객 API 와 판정 위치는 #62 PR-B 예정) — 어드민 룩 관리는 플래그와 무관하게 동작해 켜기 전에 룩을 미리 만들어 둘 수 있다.
+  `looks`(#62)는 고객 룩 조회만 본다(판정은 고객 조회 `LookWebProcessor` 한 곳 — 꺼지면 목록 빈 쪽 · 상세 404 · 상품별 빈 목록) — 어드민 룩 관리는 플래그와 무관하게 동작해 켜기 전에 룩을 미리 만들어 둘 수 있다.
 - 메인 화면 구성 · 문구는 코드가 아니라 **전시 데이터**(product-service 메인 전시, #63 — `api-design-guide.md` §2-9)다. 섹션 유형은 브랜드 무관한 블록 이름이고
   고객사 문구는 제목 값으로만 들어간다. 미디어 주소의 허용 범위는 `store.media.public-base-url`(스토리지 공개 주소, 비면 미디어 쓰기를 닫는다)로 정한다.
 - 상호·대표자·사업자등록번호·통신판매업 신고번호 같은 **법정 표시 정보는 Vault 에 등록하고 주입**한다
