@@ -23,6 +23,9 @@ spring:
       hibernate:
         # 서비스별 스키마 (service-inventory.md §4). 다른 서비스 스키마를 직접 조회하지 않는다
         default_schema: orders
+        jdbc:
+          batch_size: 50
+        order_inserts: true
         query:
           # IN 절 바인드 파라미터 수를 2의 거듭제곱으로 채운다 — 개수마다 다른 SQL 이 생겨 쿼리 계획 · PreparedStatement 캐시가 늘어나지 않게 (coding-conventions.md §9-6)
           in_clause_parameter_padding: true
