@@ -2,12 +2,14 @@ package com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.repo
 
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingPolicyHistoryEntity;
 import com.commercefoundry.shared.commerce.ShippingScope;
+import java.time.Instant;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 /**
- * 배송비 정책 교체 이력 (append-only). 저장과 범위별 최신순 조회만 있다.
+ * 배송비 정책 교체 이력 (append-only). 저장 · 범위별 최신순 조회 · 운영자별 최초 교체 시각(#357)만 있다.
  */
 public interface ShippingPolicyHistoryRepository extends JpaRepository<ShippingPolicyHistoryEntity, Long> {
 
@@ -18,4 +20,16 @@ public interface ShippingPolicyHistoryRepository extends JpaRepository<ShippingP
      * 교체는 버전 검사로 직렬화되므로 id 순서가 교체 순서다.
      */
     Page<ShippingPolicyHistoryEntity> findAllByScopeOrderByIdDesc(ShippingScope scope, Pageable pageable);
+
+    /**
+     * 범위 하나에서 그 운영자 이력의 가장 이른 교체 시각. 행이 없으면 null 이다(집계라 0건이어도 한 행이 온다).
+     *
+     * <p>{@code idx_shipping_policy_history_scope_id} 의 {@code scope} 접두로 그 범위 행을 읽고 운영자는 걸러 낸다 — 이력은 교체 1건당 1행이라
+     * 범위 전체가 작다. {@code (scope, admin_member_id, created_at)} 인덱스는 이력이 수만 건을 넘거나 이 조회가 잦아지면 둔다(#357).
+     */
+    @Query("""
+        select min(h.createdAt) from ShippingPolicyHistoryEntity h
+        where h.scope = :scope and h.adminMemberId = :adminMemberId
+        """)
+    Instant findFirstCreatedAt(ShippingScope scope, Long adminMemberId);
 }

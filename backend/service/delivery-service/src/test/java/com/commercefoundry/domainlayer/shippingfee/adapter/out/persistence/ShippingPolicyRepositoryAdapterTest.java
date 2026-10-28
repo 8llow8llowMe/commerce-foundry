@@ -17,6 +17,7 @@ import com.commercefoundry.domainlayer.shippingfee.domain.model.RemoteArea;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
 import com.commercefoundry.global.config.DeliveryServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
+import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.shared.commerce.ShippingScope;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
@@ -83,6 +84,20 @@ class ShippingPolicyRepositoryAdapterTest {
     @DisplayName("정책이 없으면 빈 값이다")
     void emptyWhenAbsent() {
         assertThat(shippingPolicyRepositoryPort.findDomesticPolicy()).isEmpty();
+        assertThat(shippingPolicyRepositoryPort.existsDomesticPolicy()).isFalse();
+    }
+
+    @Test
+    @DisplayName("국내 정책 존재 확인 — 해외 정책 행만 있으면 false, 국내 정책을 만들면 true 다 (#357)")
+    void existsDomesticPolicyIgnoresInternational() {
+        entityManager.persistAndFlush(ShippingPolicyEntity.builder()
+            .id(7901L).scope(ShippingScope.INTERNATIONAL).baseFeeAmount(500L).baseFeeCurrency(CurrencyCode.USD)
+            .build());
+
+        assertThat(shippingPolicyRepositoryPort.existsDomesticPolicy()).isFalse();
+
+        shippingPolicyRepositoryPort.replace(newPolicy(krw(3_000), null, List.of()));
+        assertThat(shippingPolicyRepositoryPort.existsDomesticPolicy()).isTrue();
     }
 
     @Test

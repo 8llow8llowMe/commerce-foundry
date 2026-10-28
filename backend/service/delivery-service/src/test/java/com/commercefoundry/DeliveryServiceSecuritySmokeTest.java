@@ -37,6 +37,28 @@ class DeliveryServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     private static final String QUOTE_BODY = """
         {"orderAmount": {"amount": 99000, "currency": "KRW"}, "countryCode": "KR", "postalCode": "63100"}
         """;
+    private static final String SHIPPING_POLICY_FACT_PATH = "/internal/v1/onboarding-facts/shipping-policy?memberId=4611686018427387904";
+
+    private MockHttpServletResponse shippingPolicyFactAs(String caller) throws Exception {
+        return perform(get(SHIPPING_POLICY_FACT_PATH).header(HttpHeaders.AUTHORIZATION, TestServiceTokens.bearer(caller, serviceId())));
+    }
+
+    @Test
+    @DisplayName("operations-service 서비스 토큰의 온보딩 사실 조회는 인증 · 인가를 통과해 200 이다 (#357)")
+    void operationsServiceReachesShippingPolicyFact() throws Exception {
+        MockHttpServletResponse response = shippingPolicyFactAs("operations-service");
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(response.getContentAsString()).contains("\"storeReady\":").contains("\"memberFirstSavedAt\":null");
+    }
+
+    @Test
+    @DisplayName("온보딩 사실 조회 — 허용 목록에 없는 order-service 는 403 · SECURITY_005, 서비스 토큰 없음 · 사용자 토큰은 401 · SECURITY_007 이다")
+    void shippingPolicyFactRejectsOthers() throws Exception {
+        assertEnvelope(shippingPolicyFactAs("order-service"), SecurityErrorCode.FORBIDDEN);
+        assertEnvelope(perform(get(SHIPPING_POLICY_FACT_PATH)), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+        assertEnvelope(perform(get(SHIPPING_POLICY_FACT_PATH).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+    }
 
     private MockHttpServletResponse quoteAs(String caller) throws Exception {
         MockHttpServletRequestBuilder request = post(QUOTE_PATH)

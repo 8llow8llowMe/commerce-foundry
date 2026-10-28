@@ -8,8 +8,10 @@ import com.commercefoundry.domainlayer.shippingfee.application.mapper.ShippingPo
 import com.commercefoundry.domainlayer.shippingfee.application.port.out.ShippingPolicyHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicyHistory;
 import com.commercefoundry.shared.commerce.ShippingScope;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -49,5 +51,10 @@ public class ShippingPolicyHistoryRepositoryAdapter implements ShippingPolicyHis
             : shippingPolicyHistoryAreaRepository.findAllByShippingPolicyHistoryIdIn(historyIds).stream()
                 .collect(Collectors.groupingBy(ShippingPolicyHistoryAreaEntity::getShippingPolicyHistoryId));
         return histories.map(history -> shippingPolicyHistoryMapper.toDomain(history, areasByHistoryId.getOrDefault(history.getId(), List.of())));
+    }
+
+    @Override
+    public Optional<Instant> findDomesticFirstSavedAt(long adminMemberId) {
+        return Optional.ofNullable(shippingPolicyHistoryRepository.findFirstCreatedAt(ShippingScope.DOMESTIC, adminMemberId));
     }
 }

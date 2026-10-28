@@ -20,6 +20,7 @@ import com.commercefoundry.global.config.DeliveryServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.shared.commerce.ShippingScope;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -130,6 +131,32 @@ class ShippingPolicyHistoryRepositoryAdapterTest {
         assertThat(second.getTotalPages()).isEqualTo(3);
         assertThat(beyond.getContent()).isEmpty();
         assertThat(beyond.getTotalElements()).isEqualTo(5L);
+    }
+
+    /** 해외 이력은 도메인 모델이 아직 받지 않으므로(국내만) 엔티티로 직접 넣는다 — 테이블은 범위 칸을 가져 해외 행이 들어올 수 있다. */
+    @Test
+    @DisplayName("운영자별 최초 저장 시각 — 그 운영자의 국내 이력 중 가장 이른 교체 시각이고, 다른 운영자 · 해외 이력은 보지 않는다 (#357)")
+    void firstSavedAtPerMemberDomesticOnly() {
+        long otherMemberId = ADMIN_MEMBER_ID + 1;
+        long internationalOnlyMemberId = ADMIN_MEMBER_ID + 2;
+        entityManager.persistAndFlush(validHistoryRow().id(9300L).scope(ShippingScope.INTERNATIONAL).afterBaseFeeCurrency(USD).build());
+        shippingPolicyHistoryRepositoryPort.insert(history(9301L, null, new Snapshot(krw(3_000), null, List.of(), 0L)));
+        shippingPolicyHistoryRepositoryPort.insert(
+            new ShippingPolicyHistory(9302L, POLICY_ID, ShippingScope.DOMESTIC, otherMemberId, null, new Snapshot(krw(3_000), null, List.of(), 1L), null)
+        );
+        shippingPolicyHistoryRepositoryPort.insert(history(9303L, null, new Snapshot(krw(3_500), null, List.of(), 2L)));
+        entityManager.persistAndFlush(
+            validHistoryRow().id(9304L).scope(ShippingScope.INTERNATIONAL).adminMemberId(internationalOnlyMemberId).afterBaseFeeCurrency(USD).build()
+        );
+        entityManager.clear();
+        List<ShippingPolicyHistory> domestic = shippingPolicyHistoryRepositoryPort.findDomesticPage(0, 20).getContent();
+        Instant firstOfMember = domestic.stream().filter(history -> history.id() == 9301L).findFirst().orElseThrow().changedAt();
+        Instant firstOfOther = domestic.stream().filter(history -> history.id() == 9302L).findFirst().orElseThrow().changedAt();
+
+        assertThat(shippingPolicyHistoryRepositoryPort.findDomesticFirstSavedAt(ADMIN_MEMBER_ID)).hasValue(firstOfMember);
+        assertThat(shippingPolicyHistoryRepositoryPort.findDomesticFirstSavedAt(otherMemberId)).hasValue(firstOfOther);
+        assertThat(shippingPolicyHistoryRepositoryPort.findDomesticFirstSavedAt(internationalOnlyMemberId)).isEmpty();
+        assertThat(shippingPolicyHistoryRepositoryPort.findDomesticFirstSavedAt(ADMIN_MEMBER_ID + 3)).isEmpty();
     }
 
     @Test
