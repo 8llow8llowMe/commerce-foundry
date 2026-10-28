@@ -8,7 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 /**
- * 정기 작업 등록 진입. 스케줄이 없거나 이 인스턴스에서 꺼져 있으면 락을 잡지 않는다.
+ * 정기 작업 등록 진입. 스케줄이 없으면 락을 잡지 않는다 — {@code planner.enabled=false} 면 트리거 빈이 없어 여기까지 오지 않는다.
  * 락과 작업 한 건의 트랜잭션은 Processor 가 연다.
  */
 @Service
@@ -21,8 +21,7 @@ public class JobSchedulePlannerFacade implements JobSchedulePlannerUseCase {
 
     @Override
     public int plan() {
-        JobProperties.Planner planner = jobProperties.planner();
-        if (!planner.enabled() || planner.schedules().isEmpty()) {
+        if (jobProperties.planner().schedules().isEmpty()) {
             return 0;
         }
         return jobSchedulePlannerProcessor.plan(clock.instant());

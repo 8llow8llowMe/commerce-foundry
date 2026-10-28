@@ -5,8 +5,8 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 작업 등록 — {@code JobRegisterUseCase} 의 입력. 같은 job 컨텍스트의 진입(어드민 재등록 · 정기 플래너, #212 PR-C · PR-D)이 쓴다.
- * 다른 컨텍스트의 기능 Facade 는 이 커맨드가 아니라 domain {@link JobRequest} 로 {@code JobRegistrationProcessor} 를 부른다(H8).
+ * 작업 등록 — {@code JobRegisterUseCase} 의 입력. 같은 job 컨텍스트의 진입(어드민 재등록, #212 PR-C)이 쓴다.
+ * 정기 플래너는 같은 컨텍스트의 Processor 라 {@code JobRegistrationProcessor} 를 바로 부르고, 다른 컨텍스트의 기능 Facade 는 이 커맨드가 아니라 domain {@link JobRequest} 로 {@code JobRegistrationProcessor} 를 부른다(H8).
  *
  * @param type 등록된 핸들러의 종류 ({@code [A-Z0-9_]{1,64}})
  * @param payloadJson 핸들러 입력 JSON (16KiB 이하). 개인정보 원문 대신 아이디를 싣는다

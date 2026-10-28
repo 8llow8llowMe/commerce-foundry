@@ -86,6 +86,8 @@ com.commercefoundry
   |  |     |  |  \- custom      (*CustomRepository + Impl — QueryDSL 동적 쿼리·조인)
   |  |     |  \- *RepositoryAdapter
   |  |     |- log               (*AuditLogAdapter — 관리자 감사 로그 한 줄, security-guide.md §11-4)
+  |  |     |- event             (*EventAdapter — Kafka 로 나갈 메시지를 outbox 에 쓴다, coding-conventions.md §12)
+  |  |     |- lock              (*LockAdapter — 단일 실행 락 ShedLock, 예: 정기 작업 플래너)
   |  |     \- client
   |  |        |- feign          (내부 서비스 Feign *Client)
   |  |        |- pg             (PG 연동 — toss / paypal, payment-service)
@@ -394,8 +396,9 @@ store:
   (`commerce.messaging.retry.*`) 뒤 DLT 다. DLT 로 간 신호의 작업은 QUEUED 로 남는다 — 사람이 DLT 메시지를 다시 보내 실행한다(롤링 배포 중 새 종류의 신호를 옛 인스턴스가 받은 경우도 같다).
 - **메시징이 꺼져 있으면(`MESSAGING_ENABLED=false`) 작업은 등록만 되고 실행되지 않는다** — 신호는 outbox 에 쌓이고, 켜면 쌓인 것부터 나간다. 워커를 켠 인스턴스가 메시징이 꺼진 채 뜨면 WARN 을 남긴다.
   실행 신호 리스너는 만들지 않는다. 작업을 돌리는 환경(local 포함)은 `MESSAGING_ENABLED=true` 와 토픽(`docker/kafka/topics.txt`)이 필요하다.
-- **등록** — 같은 job 컨텍스트의 진입(어드민 재등록 · 정기 플래너)은 `JobRegisterUseCase` 에 `JobRegisterCommand` 를, 다른 컨텍스트의 기능 Facade 는
+- **등록** — 같은 job 컨텍스트의 진입(어드민 재등록)은 `JobRegisterUseCase` 에 `JobRegisterCommand` 를, 다른 컨텍스트의 기능 Facade 는
   `JobRegistrationProcessor.register(JobRequest)`(domain 입력 값)를 부른다 (§3 허용 목록 4).
+  정기 플래너는 같은 컨텍스트의 Processor 라 `JobRegistrationProcessor` 를 바로 부른다(Processor 가 inbound port 를 부르지 않는다).
 - **핸들러 계약** — `JobHandler { type(); options(); execute(JobExecution) }`. 각 기능 컨텍스트의 `*JobProcessor` 가 구현하고 빈으로 두면 엔진이 종류(`[A-Z0-9_]{1,64}`)로 찾는다
   (domain 인터페이스 구현 — §3 허용 목록 4).
   - **트랜잭션 밖에서 실행한다.** 핸들러 안의 DB 쓰기는 **다른 빈**의 `@Transactional` 메서드(자기 컨텍스트의 다른 Processor)로 한다 —
@@ -431,8 +434,12 @@ store:
   남은 실행 스레드는 더 기다리지 않고 interrupt 한다. 강제 종료면 lease 만료가 대신한다 — 컨테이너 종료 유예는 `shutdown-grace` 보다 길게 둔다.
 - 설정은 `operations.jobs.*`(`JobProperties`)다. `operations.jobs.worker.enabled=false` 면 실행 신호 리스너를 만들지 않는다(API 전용 인스턴스 — 등록 · 만료 판정만 한다).
   결과 JSON 상한은 최대 1MiB 다.
-- **정기 작업** (#212) — `operations.jobs.planner.schedules` 의 일 · 주 · 월 시각에 맞춰 `JobRegisterUseCase` 로 등록한다.
-  단일 실행 락은 ShedLock(`operations-job-planner`, 테이블 `operations.shedlock` — outbox 릴레이와 같은 테이블)이다.
+- **정기 작업** (#212) — `operations.jobs.planner.schedules` 의 일 · 주 · 월 시각에 맞춰 `JobRegistrationProcessor` 로 등록한다.
+  단일 실행 락은 ShedLock(`operations-job-planner`, 테이블 `operations.shedlock` — outbox 릴레이와 같은 `LockProvider` 빈 · 테이블)이다.
   슬롯 멱등 키는 `planner:{주기}:{존}:{로컬 시각}` 이고, 활성 작업만이 아니라 같은 키로 등록된 적이 있으면(`dedup_key`, `idx_job_type_dedup_key`) 다시 만들지 않는다.
   엔진의 활성 멱등(끝나면 같은 키를 다시 쓸 수 있음)과는 다르다. 요청한 어드민은 없다(시스템 등록 — 알림을 만들지 않는다).
   목록이 비어 있으면 락을 잡지 않는다. `catch-up`(기본 32일)보다 오래된 슬롯은 건너뛰고, 그 안의 가장 최근 슬롯만 등록한다. 결과 파일은 아직 없다.
+  - 중복 방어는 락이 1차, `dedup_key` exists 가 2차다. 락의 `lock-at-most` 가 지나 두 인스턴스가 겹친 창에서는 활성 유니크 키만 막는다(진 쪽은 `JOB_DEDUP_CONFLICT` 로 건너뛴다).
+  - 같은 종류 · 주기 · 시각(요일 · 일 · 존 포함)에는 스케줄 하나다 — payload 만 다른 스케줄은 기동에서 실패한다. 핸들러가 없는 종류도 기동에서 실패한다.
+  - 처음 배포하거나 시각을 바꾸면 `catch-up` 안의 직전 슬롯 1건이 바로 등록된다. 존 표기를 바꾸면(`Asia/Seoul` → `+09:00`) 키가 달라져 직전 슬롯이 한 번 더 등록될 수 있다.
+  - 끝난 작업 행을 정리하는 작업이 생기면 보존 기간을 `catch-up` 이상으로 둔다 — 짧으면 지난 슬롯의 키가 사라져 다시 등록된다.

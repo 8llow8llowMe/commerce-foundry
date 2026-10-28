@@ -4,7 +4,7 @@ import com.commercefoundry.domainlayer.job.application.command.JobRegisterComman
 import com.commercefoundry.domainlayer.job.application.info.JobRegistrationInfo;
 
 /**
- * 작업 등록 (진입점용 — 이벤트 리스너 · 정기 작업 플래너 등). 같은 서비스의 기능 Facade 는 이 UseCase 대신 {@code JobRegistrationProcessor} 를 주입해
+ * 작업 등록 (진입점용 — 이벤트 리스너 등). 같은 서비스의 기능 Facade 는 이 UseCase 대신 {@code JobRegistrationProcessor} 를 주입해
  * 자기 트랜잭션 안에서 부른다.
  */
 public interface JobRegisterUseCase {

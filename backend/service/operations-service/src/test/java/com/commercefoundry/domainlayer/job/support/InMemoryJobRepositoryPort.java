@@ -79,7 +79,7 @@ public class InMemoryJobRepositoryPort implements JobRepositoryPort {
     }
 
     @Override
-    public boolean existsByTypeAndDedupKey(String type, String dedupKey) {
+    public boolean existsByDedupKey(String type, String dedupKey) {
         return jobs.values().stream().anyMatch(job -> type.equals(job.type()) && dedupKey.equals(job.dedupKey()));
     }
 

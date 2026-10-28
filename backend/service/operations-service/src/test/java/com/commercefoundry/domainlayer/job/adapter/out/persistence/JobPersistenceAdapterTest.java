@@ -91,6 +91,19 @@ class JobPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("정기 슬롯 확인: 끝난(SUCCEEDED) 작업도 같은 종류 · 같은 키로 등록된 적이 있으면 true 다 — 활성 작업 조회에는 걸리지 않는다")
+    void existsByDedupKeyIncludesFinishedJobs() {
+        Job saved = jobRepositoryPort.insert(queued(51L, "REPORT", 0, NOW, "planner:DAILY:Asia/Seoul:2026-10-24T09:00:00"));
+        Job running = jobRepositoryPort.update(saved.claim(WORKER, NOW, LEASE));
+        jobRepositoryPort.update(running.succeed("{}", NOW.plusSeconds(10)));
+        entityManager.clear();
+
+        assertThat(jobRepositoryPort.existsByDedupKey("REPORT", "planner:DAILY:Asia/Seoul:2026-10-24T09:00:00")).isTrue();
+        assertThat(jobRepositoryPort.findActiveByDedupKey("REPORT", "planner:DAILY:Asia/Seoul:2026-10-24T09:00:00")).isEmpty();
+        assertThat(jobRepositoryPort.existsByDedupKey("OTHER", "planner:DAILY:Asia/Seoul:2026-10-24T09:00:00")).isFalse();
+    }
+
+    @Test
     @DisplayName("리스 만료 후보: lease 가 지난 RUNNING 만 (lease 만료 시각 → 아이디) 순으로 limit 건씩, 마지막 행 다음부터 이어 읽는다")
     void findExpiredLeasesKeyset() {
         // lease 가 지난 RUNNING — 16 · 19 는 같은 시각에 가져갔다
