@@ -37,6 +37,24 @@ class SocialAuthorizationProcessorTest {
     }
 
     @Test
+    void linkAuthorizationBindsJwtMemberAndHashesThenConsumesBeforeProvider() {
+        when(states.saveLink(anyString(), eq(10L), eq(SocialProvider.KAKAO), anyString(), eq(Duration.ofMinutes(5)))).thenReturn(true);
+        when(provider.authorizeUrl(eq(SocialProvider.KAKAO), anyString())).thenReturn("https://example.com");
+        var info = processor.authorizeLink(10, "kakao");
+        verify(states).saveLink(argThat(hash -> !hash.equals(info.state())), eq(10L), eq(SocialProvider.KAKAO),
+            argThat(hash -> !hash.equals(info.verifier())), eq(Duration.ofMinutes(5)));
+        assertThatThrownBy(() -> processor.authenticateLink(11, "kakao", "code", info.state(), info.verifier()))
+            .isInstanceOf(MemberException.class).extracting("errorCode").isEqualTo(MemberErrorCode.SOCIAL_STATE_INVALID);
+        verify(provider, never()).authenticate(any(), any(), any());
+        when(states.consumeLink(anyString(), eq(10L), eq(SocialProvider.KAKAO), anyString())).thenReturn(true);
+        processor.authenticateLink(10, "kakao", "code", info.state(), info.verifier());
+        var ordered = inOrder(states, provider);
+        ordered.verify(states).consumeLink(anyString(), eq(10L), eq(SocialProvider.KAKAO), anyString());
+        ordered.verify(provider).authenticate(SocialProvider.KAKAO, "code", info.state());
+        verify(states, never()).consume(anyString(), any(), anyString());
+    }
+
+    @Test
     void malformedSecretDoesNotAccessStore() {
         assertThatThrownBy(() -> processor.authenticate("kakao", "code", "bad", "b".repeat(43))).isInstanceOf(MemberException.class);
         verifyNoInteractions(states);

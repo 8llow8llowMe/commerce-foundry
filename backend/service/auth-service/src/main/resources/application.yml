@@ -145,8 +145,8 @@ auth:
     max-per-member: 20
   login-guard:
     # 로그인 · 회원가입 시도 제한 (#66) — 같은 이메일의 시도를 고정 창으로 센다(auth:login-attempt · auth:sign-up-attempt)
-    # 로그인 · 회원가입 흐름에 연결하기 전이라 끈다 — 끄면 HMAC 키 없이 뜬다. 연결하는 커밋에서 켜고 키를 필수로 한다
-    enabled: false
+    # 기본 꺼짐. 소셜 계정 연결(#355)을 사용하려면 켜고 HMAC 키를 준비한다. 기존 로그인·가입 흐름은 #66에서 연결한다
+    enabled: ${AUTH_LOGIN_GUARD_ENABLED:false}
     # 창 하나에 허용하는 시도 수. 1 이상 100 이하가 아니면 기동하지 않는다(AuthLoginGuardProperties)
     max-attempts: 5
     # 첫 시도부터 재는 창. 이어지는 시도가 늘리지 않는다. 1분 이상 1시간 이하가 아니면 기동하지 않는다(키가 창만큼 남는다 — LoginAttemptPolicy.MAX_WINDOW)

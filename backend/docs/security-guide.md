@@ -1045,7 +1045,31 @@ Kakao 이메일 신뢰 플래그 두 가지가 true인 경우에만 신규 가�
 기존 identity는 이메일이 바뀌거나 없어도 CUSTOMER 역할을 확인해 로그인하며 저장된 이메일을 덮어쓰지 않는다.
 신규 회원·identity·약관 이력은 한 트랜잭션이다. 경합 실패 트랜잭션이 끝난 뒤 동일 provider/subject만 다시 찾아 로그인한다.
 Member의 비밀번호 필수 구조는 유지하되 임의 256비트 비밀의 BCrypt 해시만 저장한다.
-현재 비밀번호 재설정 API는 없다. 향후 재설정/계정 연결 도입 시 소셜 계정의 이메일만으로 인증수단이 전환되지 않도록 별도 검토한다.
+현재 비밀번호 재설정 API는 없다. 소셜 연결은 아래 §13-1처럼 기존 계정 비밀번호를 확인하며 이메일만으로 인증수단을 전환하지 않는다.
 
 공식 계약: [Kakao REST API](https://developers.kakao.com/docs/ko/kakaologin/rest-api),
 [Naver 로그인 API](https://developers.naver.com/docs/login/api/api.md).
+
+### 13-1. 기존 고객 계정 연결 (#355)
+
+목록·인가 시작·연결 완료 모두 CUSTOMER JWT를 요구하고 memberId를 요청으로 받지 않는다.
+시작 시 DB 조회를 마친 뒤 기존 MemberLoginProcessor로 현재 비밀번호를 BCrypt 비교한다. 64자 초과는 자리값을 비교한 뒤 같은 400 `AUTH_058`로 거절한다.
+비밀번호·인가 코드·state/verifier 원문·provider 토큰은 저장하거나 로그에 싣지 않으며 요청 DTO toString도 가린다.
+
+연결 시작은 `auth.login-guard.enabled=true`와 HMAC 키가 필수다. 꺼져 있으면 503 `AUTH_060`으로 닫는다.
+기존 LoginAttemptPolicy와 LOGIN 종류의 정규화 이메일 HMAC 카운터를 재사용하며 BCrypt **전** 시도를 기록한다.
+허용 횟수까지 비교하고 초과하면 429 `AUTH_059`다. 실패·한도 초과 시 카운터를 초기화하지 않으며 고정 창을 늘리지 않는다.
+올바른 비밀번호일 때만 카운터를 초기화한다. 계수·초기화 저장소 장애도 503으로 연결 시작을 중단한다.
+이 변경은 기존 일반 로그인·회원가입의 제한 흐름을 변경하지 않는다.
+
+연결 state와 verifier는 각각 SecureRandom 256비트, TTL은 로그인과 같은 짧은 설정(기본 5분)이다.
+`auth:oauth-link-state:{state SHA-256}` 키에 `LINK:{memberId}:{provider}:{verifier SHA-256}`을 SET NX + TTL로 한 번에 저장한다.
+로그인용 `auth:oauth-state:*` 키·기존 값 형식은 유지한다. Lua compare-and-delete로 목적·대상 회원·제공자·verifier가 일치할 때만 원자 소비한다.
+다른 회원·제공자·verifier·목적 불일치는 소비하지 않는다. 만료·이미 소비한 증명은 실패하며 소비 뒤 HTTP/DB가 실패해도 재사용하지 않는다.
+FE는 같은 탭 sessionStorage에 목적별로 보관하며 콜백 state 비교 후 JWT와 함께 제출한다 (`api-design-guide.md`, FE #356).
+
+provider code 교환은 기존 timeout·서킷·오류 변환을 사용하고 DB 트랜잭션 밖이다. 이메일 신뢰 여부는 연결 근거로 사용하지 않는다.
+연결 저장은 고객 확인과 회원 행 잠금을 포함한 최대 5초 트랜잭션이다. 동일 회원 요청을 직렬화하고 두 유니크 키
+`(provider,subject)`와 `(member_id,provider)`로 다른 회원 및 제공자 경합도 막는다. 잠금 대기·교착·시간 상한은 롤백 뒤 409 `AUTH_004`로 변환한다.
+같은 회원·같은 identity는 성공하고 기존 행을 유지한다. 다른 회원의 identity 또는 같은 제공자의 다른 subject는 409 `AUTH_057`다.
+신규 회원·약관·프로필 수정·토큰 발급은 없고, 목록은 제공자 제어 코드만 반환한다. 연결 해제·기존 회원 병합은 지원하지 않는다.

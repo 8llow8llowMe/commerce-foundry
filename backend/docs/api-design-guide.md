@@ -823,5 +823,63 @@ Naver는 공식 email_verified 필드가 없으며 id로 식별하고 신규 가
 | AUTH_150/151/152 | 400 | code/state/verifier 요청 필드 검증 |
 | AUTH_111/112/113 | 400 | 기존 약관 동의 요청 검증 |
 
+## 기존 계정의 소셜 연결 계약 (#355, FE #356)
+
+세 API 모두 CUSTOMER access JWT가 필요하다. memberId는 JWT에서만 얻는다. ADMIN은 403, 미인증은 401이며 응답은 공통 봉투다.
+성공 응답은 모두 `Cache-Control: no-store`다. provider는 `kakao` 또는 `naver`다.
+
+| 메서드 · 경로 | JSON 입력 | 응답 dataBody |
+|---|---|---|
+| GET /api/v1/members/me/social-accounts | 없음 | `{"providers":["kakao","naver"]}` (미연결은 빈 배열) |
+| POST /api/v1/members/me/social-accounts/{provider}/authorize-url | `{"currentPassword":"현재 비밀번호"}` | authorizeUrl · state · verifier |
+| POST /api/v1/members/me/social-accounts/{provider} | code · state · verifier | 연결 후 providers 목록 |
+
+providers는 화면 제어용 코드 목록으로 enum 메타데이터 응답의 예외다. FE가 고정 제공자 이름·아이콘을 매핑한다.
+subject · 이메일 · provider 토큰 · memberId를 반환하지 않으며 새 로그인 토큰도 발급하지 않는다.
+code는 공백 불가·2048자 이하, state/verifier는 base64url 43자다. currentPassword는 공백 불가이고 64자 초과도 같은 재인증 실패로 처리한다.
+
+FE #356은 마이페이지에서 현재 비밀번호를 받아 연결용 authorize-url을 호출한다. 응답 state/verifier와 `purpose=LINK`, provider를
+로그인용 저장소 항목과 구분해 같은 탭 sessionStorage에 보관한다. 기존 OAuth redirect-uri를 사용하되 콜백에서 저장한 목적에 따라
+연결 완료 API로 분기하고 CUSTOMER JWT를 보낸다. 콜백 state와 저장한 state를 먼저 비교하며 verifier는 URL·로그에 넣지 않는다.
+로그인/연결 콜백을 혼용하거나, 콜백 중 다른 계정으로 로그인하면 실패한다. 완료·실패·거절 후 해당 저장소 항목을 지운다.
+state 소비 뒤 provider 실패·충돌·DB 타임아웃이 나면 비밀번호 재인증과 새 인가부터 다시 시작한다.
+같은 회원의 같은 provider+subject 재연결은 **새 인가 증명**으로 보내면 200이고 중복 행을 만들지 않는다. 소비된 state의 재전송은 400이다.
+같은 provider의 다른 subject 또는 다른 회원의 identity는 409이며 자동 이전·회원 병합·이메일 기반 연결은 제공하지 않는다.
+연결은 기존 회원의 이메일·프로필·비밀번호·약관·주문 및 배송지 참조를 변경하지 않는다. 연결 해제·비밀번호 복구는 범위 밖이다.
+
+| 오류 | HTTP | 의미 · FE 동작 |
+|---|---|---|
+| AUTH_058 | 400 | 현재 비밀번호 확인 실패. 원인을 구분하지 않는다 |
+| AUTH_059 | 429 | 고정 창의 재인증 시도 한도 초과. 창 만료 후 재시도 (Retry-After는 제공하지 않음) |
+| AUTH_060 | 503 | `auth.login-guard.enabled=false`여서 연결 시작 차단 |
+| AUTH_013 | 503 | 재인증 계수·state 저장소 장애. 연결을 진행하지 않는다 |
+| AUTH_057 | 409 | 다른 회원 identity 또는 같은 회원·제공자의 다른 subject 충돌 |
+| AUTH_004 | 409 | 회원 잠금 경합·DB 처리 5초 상한. 새 인가부터 재시도 |
+| AUTH_003 | 404 | JWT의 고객 회원이 현재 존재하지 않음 |
+| AUTH_050/051/052/053/054 | 기존 소셜 계약과 동일 | 미지원·비활성·state 오류·인가 거절·제공자 장애 |
+| AUTH_104/150/151/152 | 400 | currentPassword/code/state/verifier 필드 검증 |
+
+운영에서는 연결 사용 전에 기존 `AUTH_LOGIN_GUARD_ENABLED=true`와 Vault의 `AUTH_LOGIN_GUARD_HASH_KEY`를 설정해야 한다.
+기존 일반 로그인·가입 제한 흐름의 활성화 방식은 이 변경에서 바꾸지 않는다. 연결 재인증만 기존 LOGIN 카운터·정책을 사용한다.
+
+### #355 운영 DDL
+
+엔티티 전체 PostgreSQL 17 생성 스냅숏은 `service/auth-service/src/test/resources/ddl/auth-schema.sql`이다.
+운영에서는 기존 `(provider, subject)` 제약을 보존하고 아래 제약만 추가한다. 적용 전 중복을 점검하고 결과가 있으면 운영자가 해결한 뒤 적용한다.
+중복 identity를 자동 삭제하거나 다른 회원으로 옮기지 않는다. DDL 적용은 운영자가 수행한다.
+
+```sql
+SELECT member_id, provider, count(*)
+FROM auth.social_identity
+GROUP BY member_id, provider
+HAVING count(*) > 1;
+
+SET client_encoding = 'UTF8';
+BEGIN;
+ALTER TABLE auth.social_identity
+    ADD CONSTRAINT uk_social_identity_member_id_provider UNIQUE (member_id, provider);
+COMMIT;
+```
+
 FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가하고 재시작 오류를 안내한다.
 인증 계약 변경이므로 PR에 FE 리뷰어 seonghoho를 요청한다.

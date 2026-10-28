@@ -74,4 +74,38 @@ class SocialStateRedisAdapterTest {
             assertThat(java.util.List.of(one.get(5, TimeUnit.SECONDS), two.get(5, TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
         }
     }
+
+    @Test
+    void linkBindingSeparatesPurposeMemberProviderAndVerifierWithTtl() {
+        String state = UUID.randomUUID().toString();
+        assertThat(adapter.saveLink(state, 10, SocialProvider.KAKAO, "hash", Duration.ofMinutes(5))).isTrue();
+        assertThat(adapter.saveLink(state, 10, SocialProvider.KAKAO, "hash", Duration.ofMinutes(5))).isFalse();
+        assertThat(redis.getExpire("auth:oauth-link-state:" + state)).isBetween(1L, 300L);
+        assertThat(redis.opsForValue().get("auth:oauth-link-state:" + state)).isEqualTo("LINK:10:KAKAO:hash");
+        assertThat(adapter.consume(state, SocialProvider.KAKAO, "hash")).isFalse();
+        assertThat(adapter.consumeLink(state, 11, SocialProvider.KAKAO, "hash")).isFalse();
+        assertThat(adapter.consumeLink(state, 10, SocialProvider.NAVER, "hash")).isFalse();
+        assertThat(adapter.consumeLink(state, 10, SocialProvider.KAKAO, "wrong")).isFalse();
+        assertThat(adapter.consumeLink(state, 10, SocialProvider.KAKAO, "hash")).isTrue();
+        assertThat(adapter.consumeLink(state, 10, SocialProvider.KAKAO, "hash")).isFalse();
+        adapter.save(state, SocialProvider.KAKAO, "hash", Duration.ofMinutes(5));
+        assertThat(adapter.consumeLink(state, 10, SocialProvider.KAKAO, "hash")).isFalse();
+        assertThat(adapter.consume(state, SocialProvider.KAKAO, "hash")).isTrue();
+        adapter.saveLink(state, 10, SocialProvider.KAKAO, "hash", Duration.ofMinutes(5));
+        redis.expire("auth:oauth-link-state:" + state, Duration.ZERO);
+        assertThat(adapter.consumeLink(state, 10, SocialProvider.KAKAO, "hash")).isFalse();
+    }
+
+    @Test
+    void concurrentLinkConsumeHasExactlyOneWinner() throws Exception {
+        String state = UUID.randomUUID().toString();
+        adapter.saveLink(state, 10, SocialProvider.KAKAO, "hash", Duration.ofMinutes(5));
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Boolean> one = executor.submit(() -> { start.await(); return adapter.consumeLink(state, 10, SocialProvider.KAKAO, "hash"); });
+            Future<Boolean> two = executor.submit(() -> { start.await(); return adapter.consumeLink(state, 10, SocialProvider.KAKAO, "hash"); });
+            start.countDown();
+            assertThat(java.util.List.of(one.get(5, TimeUnit.SECONDS), two.get(5, TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
+        }
+    }
 }

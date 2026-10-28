@@ -46,6 +46,28 @@ public class SocialAuthorizationProcessor {
         return providerPort.authenticate(provider, code, state);
     }
 
+    public SocialAuthorizationInfo authorizeLink(long memberId, String providerName) {
+        SocialProvider provider = provider(providerName);
+        providerPort.requireEnabled(provider);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            String state = randomToken();
+            String verifier = randomToken();
+            if (stateStore.saveLink(hash(state), memberId, provider, hash(verifier), properties.stateTtl())) {
+                return new SocialAuthorizationInfo(providerPort.authorizeUrl(provider, state), state, verifier);
+            }
+        }
+        throw new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+    }
+
+    public SocialProfile authenticateLink(long memberId, String providerName, String code, String state, String verifier) {
+        SocialProvider provider = provider(providerName);
+        providerPort.requireEnabled(provider);
+        if (!tokenShape(state) || !tokenShape(verifier) || !stateStore.consumeLink(hash(state), memberId, provider, hash(verifier))) {
+            throw new MemberException(MemberErrorCode.SOCIAL_STATE_INVALID);
+        }
+        return providerPort.authenticate(provider, code, state);
+    }
+
     private SocialProvider provider(String value) {
         try {
             return SocialProvider.parse(value);

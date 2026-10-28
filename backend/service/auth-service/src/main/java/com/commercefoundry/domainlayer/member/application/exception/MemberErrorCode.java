@@ -52,6 +52,10 @@ public enum MemberErrorCode {
     SOCIAL_AGREEMENTS_REQUIRED("AUTH_056", "신규 가입에는 필수 약관 동의가 필요합니다.", HttpStatus.BAD_REQUEST),
     SOCIAL_IDENTITY_CONFLICT("AUTH_057", "소셜 계정 등록이 다른 요청과 겹쳤습니다. 다시 시작해 주세요.", HttpStatus.CONFLICT),
 
+    SOCIAL_REAUTH_FAILED("AUTH_058", "현재 비밀번호를 확인할 수 없습니다.", HttpStatus.BAD_REQUEST),
+    SOCIAL_REAUTH_LIMITED("AUTH_059", "비밀번호 확인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.TOO_MANY_REQUESTS),
+    SOCIAL_REAUTH_UNAVAILABLE("AUTH_060", "지금은 계정 연결을 시작할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+
     INVALID_REQUEST("AUTH_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_TYPE_INVALID("AUTH_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_REQUIRED("AUTH_199", "필수 요청 파라미터가 없습니다.", HttpStatus.BAD_REQUEST);

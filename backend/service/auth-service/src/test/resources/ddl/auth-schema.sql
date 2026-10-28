@@ -191,7 +191,8 @@
         provider varchar(20) not null check ((provider in ('KAKAO','NAVER'))),
         subject varchar(255) not null,
         primary key (id),
-        constraint uk_social_identity_provider_subject unique (provider, subject)
+        constraint uk_social_identity_provider_subject unique (provider, subject),
+        constraint uk_social_identity_member_id_provider unique (member_id, provider)
     );
 
     comment on table auth.social_identity is
