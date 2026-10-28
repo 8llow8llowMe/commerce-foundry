@@ -1,269 +1,148 @@
 import { describe, expect, it } from 'vitest';
-import type { ProductDetail, ProductSku } from '@/lib/catalog/types';
 import {
-  isLiveAt,
-  isPreviewDraft,
-  PREVIEW_DRAFT,
+  isPreviewDisplay,
   parseOrigin,
+  PREVIEW_DISPLAY,
   PREVIEW_LIMITS,
   previewFramePolicy,
-  previewProductIds,
-  productCardOf,
-  readPreviewDraft,
-  toPreviewResponse,
-  type PreviewSection,
+  readPreviewDisplay,
 } from './preview';
 
 // 테스트용 가짜 데이터 — 실데이터를 쓰지 않는다(공개 저장소).
 
-const won = (amount: number) => ({ amount, currency: 'KRW' as const });
-const status = (code: 'ON_SALE' | 'SOLD_OUT') => ({ code, name: code, description: '' });
+const won = (amount: number) => ({ amount, currency: 'KRW' });
 
-const rawSection = (overrides: Record<string, unknown> = {}) => ({
-  sectionId: '1',
-  sectionType: 'STORY',
+const card = (overrides: Record<string, unknown> = {}) => ({
+  productId: '11',
+  name: '샘플 상품',
+  thumbnail: {
+    imageId: '1',
+    url: 'https://cdn.example.test/1.jpg',
+    width: 600,
+    height: 800,
+    altText: null,
+  },
+  hoverImage: null,
+  salePrice: won(90000),
+  listPrice: won(100000),
+  discountRate: 10,
+  hasOptionSurcharge: true,
+  saleStatus: { code: 'ON_SALE', name: '판매중', description: '' },
+  customOrder: false,
+  preorder: false,
+  ...overrides,
+});
+
+const productItem = (product: unknown) => ({
+  itemId: 'preview-item-0',
+  itemType: 'PRODUCT',
+  media: null,
+  product,
+  caption: null,
+});
+
+const mediaItem = (media: Record<string, unknown> = {}) => ({
+  itemId: 'preview-item-1',
+  itemType: 'MEDIA',
+  media: {
+    mediaType: 'IMAGE',
+    pcUrl: 'https://cdn.example.test/a.jpg',
+    mobileUrl: null,
+    pcPosterUrl: null,
+    mobilePosterUrl: null,
+    altText: '샘플 사진',
+    ...media,
+  },
+  product: null,
+  caption: null,
+});
+
+const section = (overrides: Record<string, unknown> = {}) => ({
+  sectionId: 'preview-section-0',
+  sectionType: { code: 'STORY', name: '스토리', description: '' },
   title: '제목',
   subtitle: null,
   body: null,
-  linkUrl: null,
-  linkLabel: null,
-  visible: true,
-  startAt: null,
-  endAt: null,
+  link: null,
   items: [],
   ...overrides,
 });
 
-const sku = (id: string, price: number, code: 'ON_SALE' | 'SOLD_OUT' = 'ON_SALE'): ProductSku => ({
-  skuId: id,
-  optionValueIds: [],
-  additionalPrice: won(0),
-  salePrice: won(price),
-  saleStatus: status(code),
-});
-
-const image = (id: string) => ({
-  imageId: id,
-  url: `https://cdn.example.test/${id}.jpg`,
-  width: 800,
-  height: 1000,
-  altText: null,
-});
-
-const detail = (overrides: Partial<ProductDetail> = {}): ProductDetail => ({
-  productId: '11',
-  name: '샘플 상품',
-  summary: null,
-  categoryPath: [],
-  thumbnail: image('main'),
-  images: [],
-  descriptionHtml: null,
-  salePrice: won(100000),
-  listPrice: null,
-  discountRate: null,
-  saleStatus: status('ON_SALE'),
-  maxQuantityPerOrder: null,
-  optionGroups: [],
-  skus: [sku('1', 100000)],
-  customOrder: null,
-  preorder: null,
-  ...overrides,
-});
-
-describe('readPreviewDraft', () => {
+describe('readPreviewDisplay', () => {
   it('모양이 다르면 null 이다', () => {
-    expect(readPreviewDraft(null)).toBeNull();
-    expect(readPreviewDraft({})).toBeNull();
-    expect(readPreviewDraft({ sections: 'x' })).toBeNull();
+    expect(readPreviewDisplay(null)).toBeNull();
+    expect(readPreviewDisplay({})).toBeNull();
+    expect(readPreviewDisplay({ sections: 'x' })).toBeNull();
+    expect(readPreviewDisplay([])).toBeNull();
   });
 
-  it('모양이 다른 섹션 · 아이템 하나만 버리고 빈 문구는 null 로 본다', () => {
-    const sections = readPreviewDraft({
+  it('고객 메인 응답 모양을 그대로 읽고 상품 카드 값을 바꾸지 않는다', () => {
+    const response = readPreviewDisplay({
       sections: [
-        rawSection({
-          title: '  ',
-          items: [
-            { itemType: 'PRODUCT', productId: '11', caption: null },
-            // 게이트웨이 경로에 들어가므로 숫자 아이디만 받는다
-            { itemType: 'PRODUCT', productId: '../admin', caption: null },
-            {
-              itemType: 'MEDIA',
-              media: { mediaType: 'IMAGE', pcUrl: 'javascript:alert(1)' },
-              caption: null,
-            },
-            {
-              itemType: 'MEDIA',
-              media: { mediaType: 'IMAGE', pcUrl: 'https://cdn.example.test/a.jpg', altText: '' },
-              caption: '캡션',
-            },
-          ],
+        section({
+          sectionType: { code: 'PRODUCT_PICK', name: '상품 픽', description: '' },
+          link: { url: '/shop', label: '전체' },
+          items: [productItem(card())],
         }),
-        rawSection({ sectionId: '../x' }),
-        'not a section',
       ],
     });
-    expect(sections).toHaveLength(1);
-    expect(sections?.[0]?.title).toBeNull();
-    expect(sections?.[0]?.items).toEqual([
-      { itemType: 'PRODUCT', productId: '11', caption: null },
-      {
-        itemType: 'MEDIA',
-        media: {
-          mediaType: 'IMAGE',
-          pcUrl: 'https://cdn.example.test/a.jpg',
-          mobileUrl: null,
-          pcPosterUrl: null,
-          mobilePosterUrl: null,
-          altText: null,
-        },
-        caption: '캡션',
-      },
-    ]);
+    expect(response?.sections[0]).toMatchObject({
+      sectionId: 'preview-section-0',
+      sectionType: { code: 'PRODUCT_PICK' },
+      link: { url: '/shop', label: '전체' },
+      items: [{ itemType: 'PRODUCT', media: null, product: card() }],
+    });
+  });
+
+  it('모양이 다른 섹션 · 아이템 하나만 버린다', () => {
+    const response = readPreviewDisplay({
+      sections: [
+        section({ sectionId: '<script>' }),
+        section({ sectionType: 'STORY' }),
+        null,
+        section({
+          sectionId: 'preview-section-3',
+          items: [
+            mediaItem({ pcUrl: 'javascript:alert(1)' }),
+            mediaItem({ mobileUrl: 'data:image/png;base64,AAAA' }),
+            { itemType: 'OTHER' },
+            productItem(card({ productId: '../admin' })),
+            productItem(card({ salePrice: { amount: 1.5, currency: 'KRW' } })),
+            productItem(card({ salePrice: { amount: 100, currency: 'XYZ' } })),
+            productItem(card({ saleStatus: null })),
+            productItem(card({ thumbnail: { imageId: '1', url: 'javascript:x' } })),
+          ],
+        }),
+      ],
+    });
+    expect(response?.sections).toHaveLength(1);
+    const items = response?.sections[0]?.items ?? [];
+    // 미디어는 http(s) 주소만, 모바일 주소가 맞지 않으면 그 칸만 비운다
+    expect(items.map((item) => item.itemType)).toEqual(['MEDIA', 'PRODUCT']);
+    expect(items[0]?.media?.mobileUrl).toBeNull();
+    // 사진 주소가 맞지 않은 카드는 사진 없이 그린다
+    expect(items[1]?.product?.thumbnail).toBeNull();
+  });
+
+  it('정가 · 할인율은 함께 있을 때만 싣는다', () => {
+    const [item] =
+      readPreviewDisplay({
+        sections: [section({ items: [productItem(card({ discountRate: null }))] })],
+      })?.sections[0]?.items ?? [];
+    expect(item?.product).toMatchObject({ listPrice: null, discountRate: null });
   });
 
   it('섹션 · 아이템은 BE 상한까지만 읽는다', () => {
-    const items = Array.from({ length: 40 }, (_, index) => ({
-      itemType: 'PRODUCT',
-      productId: String(index + 1),
-      caption: null,
-    }));
-    const sections = readPreviewDraft({
-      sections: Array.from({ length: 60 }, (_, index) =>
-        rawSection({ sectionId: String(index + 1), items }),
+    const response = readPreviewDisplay({
+      sections: Array.from({ length: PREVIEW_LIMITS.sections + 5 }, (_, i) =>
+        section({
+          sectionId: `preview-section-${i}`,
+          items: Array.from({ length: PREVIEW_LIMITS.items + 5 }, () => mediaItem()),
+        }),
       ),
     });
-    expect(sections).toHaveLength(PREVIEW_LIMITS.sections);
-    expect(sections?.[0]?.items).toHaveLength(PREVIEW_LIMITS.items);
-  });
-});
-
-describe('isLiveAt', () => {
-  const now = Date.parse('2026-10-26T00:00:00Z');
-  const at = (overrides: Partial<PreviewSection>) =>
-    ({ ...rawSection(), ...overrides }) as PreviewSection;
-
-  it('메인과 같이 노출 켜짐 · 시작 포함 · 종료 제외로 판정한다', () => {
-    expect(isLiveAt(at({}), now)).toBe(true);
-    expect(isLiveAt(at({ visible: false }), now)).toBe(false);
-    expect(isLiveAt(at({ startAt: '2026-10-26T00:00:00Z' }), now)).toBe(true);
-    expect(isLiveAt(at({ endAt: '2026-10-26T00:00:00Z' }), now)).toBe(false);
-    expect(isLiveAt(at({ startAt: '2026-10-27T00:00:00Z' }), now)).toBe(false);
-    expect(isLiveAt(at({ startAt: '읽을 수 없음' }), now)).toBe(false);
-  });
-});
-
-describe('previewProductIds', () => {
-  it('등장 순서로 중복 없이 상한까지 모은다', () => {
-    const section = (ids: string[]) =>
-      ({
-        ...rawSection(),
-        items: ids.map((productId) => ({ itemType: 'PRODUCT', productId, caption: null })),
-      }) as PreviewSection;
-    expect(previewProductIds([section(['2', '1']), section(['1', '3'])])).toEqual(['2', '1', '3']);
-    const many = Array.from({ length: 30 }, (_, index) => String(index + 1));
-    const sections = Array.from({ length: 5 }, (_, at) =>
-      section(many.map((id) => `${at + 1}${id}`)),
-    );
-    expect(previewProductIds(sections)).toHaveLength(PREVIEW_LIMITS.products);
-  });
-});
-
-describe('productCardOf', () => {
-  it('판매중 SKU 의 가장 낮은 판매가를 고르고 더 비싼 SKU 가 있으면 추가금 표시를 켠다', () => {
-    const card = productCardOf(
-      detail({ skus: [sku('1', 149000), sku('2', 129000), sku('3', 99000, 'SOLD_OUT')] }),
-    );
-    expect(card.salePrice).toEqual(won(129000));
-    expect(card.hasOptionSurcharge).toBe(true);
-  });
-
-  it('고른 판매가가 기본 판매가와 다르면 정가 · 할인율을 싣지 않는다', () => {
-    const discounted = { listPrice: won(150000), discountRate: 20 };
-    const same = productCardOf(
-      detail({ ...discounted, salePrice: won(120000), skus: [sku('1', 120000), sku('2', 140000)] }),
-    );
-    expect(same.listPrice).toEqual(won(150000));
-    expect(same.discountRate).toBe(20);
-    const moved = productCardOf(
-      detail({
-        ...discounted,
-        salePrice: won(120000),
-        skus: [sku('1', 120000, 'SOLD_OUT'), sku('2', 140000)],
-      }),
-    );
-    expect(moved.salePrice).toEqual(won(140000));
-    expect(moved.listPrice).toBeNull();
-    expect(moved.discountRate).toBeNull();
-  });
-
-  it('판매중 SKU 가 없으면 전체 SKU, SKU 도 없으면 기본 판매가다', () => {
-    expect(productCardOf(detail({ skus: [sku('1', 99000, 'SOLD_OUT')] })).salePrice).toEqual(
-      won(99000),
-    );
-    const card = productCardOf(detail({ skus: [] }));
-    expect(card.salePrice).toEqual(won(100000));
-    expect(card.hasOptionSurcharge).toBe(false);
-  });
-
-  it('hover 사진은 대표 다음의 첫 정지 이미지다(영상은 세지 않는다)', () => {
-    const video = {
-      ...image('video'),
-      mediaType: 'VIDEO' as const,
-      posterUrl: null,
-      displayOrder: 1,
-    };
-    const still = {
-      ...image('still'),
-      mediaType: 'IMAGE' as const,
-      posterUrl: null,
-      displayOrder: 2,
-    };
-    expect(productCardOf(detail({ images: [video, still] })).hoverImage?.imageId).toBe('still');
-    expect(productCardOf(detail({ images: [video] })).hoverImage).toBeNull();
-    expect(productCardOf(detail({ thumbnail: null, images: [still] })).hoverImage).toBeNull();
-  });
-
-  it('맞춤 제작 · 프리오더는 여부만 싣는다', () => {
-    const card = productCardOf(
-      detail({
-        customOrder: { notice: null, leadTimeDays: null, fields: [] },
-        preorder: { expectedShipDate: null },
-      }),
-    );
-    expect(card.customOrder).toBe(true);
-    expect(card.preorder).toBe(true);
-  });
-});
-
-describe('toPreviewResponse', () => {
-  it('고객 메인 응답 모양으로 바꾸고 카드를 받지 못한 상품은 뺀다', () => {
-    const [section] = readPreviewDraft({
-      sections: [
-        rawSection({
-          sectionType: 'PRODUCT_PICK',
-          linkUrl: '/shop',
-          linkLabel: '전체',
-          items: [
-            { itemType: 'PRODUCT', productId: '11', caption: null },
-            { itemType: 'PRODUCT', productId: '12', caption: null },
-          ],
-        }),
-      ],
-    })!;
-    const card = productCardOf(detail());
-    const response = toPreviewResponse([section!], new Map([['11', card]]));
-    expect(response.sections[0]).toMatchObject({
-      sectionId: 'preview-1',
-      sectionType: { code: 'PRODUCT_PICK' },
-      link: { url: '/shop', label: '전체' },
-      items: [{ itemType: 'PRODUCT', product: card, media: null }],
-    });
-    expect(response.sections[0]?.items).toHaveLength(1);
-  });
-
-  it('링크 주소가 없으면 링크를 싣지 않는다', () => {
-    const [section] = readPreviewDraft({ sections: [rawSection({ linkLabel: '문구만' })] })!;
-    expect(toPreviewResponse([section!], new Map()).sections[0]?.link).toBeNull();
+    expect(response?.sections).toHaveLength(PREVIEW_LIMITS.sections);
+    expect(response?.sections[0]?.items).toHaveLength(PREVIEW_LIMITS.items);
   });
 });
 
@@ -290,23 +169,34 @@ describe('parseOrigin', () => {
   });
 });
 
-describe('isPreviewDraft', () => {
+describe('isPreviewDisplay', () => {
   const parent = {} as MessageEventSource;
   const admin = 'https://admin.example.test';
   const event = (overrides: Partial<Pick<MessageEvent, 'origin' | 'source' | 'data'>> = {}) => ({
     origin: admin,
     source: parent,
-    data: { type: PREVIEW_DRAFT, sections: [] },
+    data: { type: PREVIEW_DISPLAY, display: { sections: [] } },
     ...overrides,
   });
 
-  it('허용한 어드민 origin 의 부모 창이 보낸 편집 상태만 받는다', () => {
-    expect(isPreviewDraft(event(), admin, parent)).toBe(true);
-    expect(isPreviewDraft(event({ origin: 'https://evil.example.test' }), admin, parent)).toBe(
+  it('허용한 어드민 origin 의 부모 창이 보낸 미리보기 응답만 받는다', () => {
+    expect(isPreviewDisplay(event(), admin, parent)).toBe(true);
+    expect(isPreviewDisplay(event({ origin: 'https://evil.example.test' }), admin, parent)).toBe(
       false,
     );
-    expect(isPreviewDraft(event({ source: {} as MessageEventSource }), admin, parent)).toBe(false);
-    expect(isPreviewDraft(event({ data: { type: 'other' } }), admin, parent)).toBe(false);
-    expect(isPreviewDraft(event({ data: null }), admin, parent)).toBe(false);
+    expect(isPreviewDisplay(event({ source: {} as MessageEventSource }), admin, parent)).toBe(
+      false,
+    );
+    expect(isPreviewDisplay(event({ data: { type: 'other' } }), admin, parent)).toBe(false);
+    expect(isPreviewDisplay(event({ data: null }), admin, parent)).toBe(false);
+    // 지난 메시지 모양(편집 상태)은 받지 않는다
+    expect(
+      isPreviewDisplay(
+        event({ data: { type: 'cf:main-preview:draft', sections: [] } }),
+        admin,
+        parent,
+      ),
+    ).toBe(false);
+    expect(isPreviewDisplay(event({ data: { type: PREVIEW_DISPLAY } }), admin, parent)).toBe(false);
   });
 });

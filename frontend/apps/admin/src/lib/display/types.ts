@@ -5,6 +5,8 @@
 /** 섹션 목록 · 생성은 이 경로, 단건은 `/{sectionId}`, 순서 변경은 `/order` */
 export const DISPLAY_SECTIONS_PATH = '/api/v1/admin/displays/sections';
 export const DISPLAY_ORDER_PATH = `${DISPLAY_SECTIONS_PATH}/order`;
+/** 저장하지 않는 미리보기(#340) — 본문 `{sections}`, 응답은 고객 메인 응답과 같은 모양 */
+export const DISPLAY_PREVIEW_PATH = '/api/v1/admin/displays/preview';
 
 export const SECTION_TYPES = ['HERO', 'PRODUCT_PICK', 'STORY', 'LOOK', 'DETAIL'] as const;
 export type SectionTypeCode = (typeof SECTION_TYPES)[number];
