@@ -8,7 +8,11 @@ import com.commercefoundry.domainlayer.member.application.command.LoginCommand;
  */
 public interface AuthWebUseCase {
 
-    /** 이메일 · 비밀번호 로그인. 실패는 이유와 무관하게 {@code AUTH_001}(400) 이다. */
+    /**
+     * 이메일 · 비밀번호 로그인. 실패는 이유와 무관하게 {@code AUTH_001}(400) 이다.
+     * 같은 이메일의 시도가 허용 횟수를 넘으면 비밀번호가 맞아도 {@code AUTH_040}(429, {@code LoginAttemptLimitedException}) 이다 (#66).
+     * 토큰 · 시도 계수 저장소 장애는 {@code AUTH_013}(503) 이다(fail-closed).
+     */
     AuthTokenResponse login(LoginCommand command);
 
     /** refresh 토큰 회전. 형식 오류 {@code AUTH_010} · 무효 {@code AUTH_011} · 재사용 감지 {@code AUTH_012} 는 모두 401 이다. */

@@ -2,8 +2,11 @@ package com.commercefoundry.domainlayer.member.adapter.in.web.exception;
 
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.exception.ValidationErrorSupport;
+import com.commercefoundry.domainlayer.member.application.exception.LoginAttemptLimitedException;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
+import java.time.Duration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -31,6 +34,27 @@ public class MemberExceptionHandler {
     public ResponseEntity<Response<Void>> handleMemberException(MemberException exception) {
         MemberErrorCode errorCode = exception.getErrorCode();
         return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), exception.getMessage()));
+    }
+
+    /**
+     * 시도 제한 초과 (#66) — 429 {@code AUTH_040} · {@code AUTH_041} 봉투에 {@code Retry-After}(초, {@link #retryAfterSeconds})를 붙인다.
+     * 게이트웨이 {@code GATEWAY_006} 과 같은 모양이다. 본문 · 헤더는 계정 존재와 무관하다 — 남은 창 시간만 싣는다.
+     */
+    @ExceptionHandler(LoginAttemptLimitedException.class)
+    public ResponseEntity<Response<Void>> handleLoginAttemptLimited(LoginAttemptLimitedException exception) {
+        MemberErrorCode errorCode = exception.getErrorCode();
+        return ResponseEntity.status(errorCode.getHttpStatus())
+            .header(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds(exception.getRetryAfter())))
+            .body(Response.fail(errorCode.getCode(), exception.getMessage()));
+    }
+
+    /**
+     * {@code Retry-After} 헤더 값(초) — {@code max(1, ceil(ms / 1000))}. 헤더 형식이라 예외가 아니라 여기서 정한다 ({@code coding-conventions.md} §8-1).
+     * 창 끝과 같은 시각(남은 0ms)도 1초다: 0 이면 클라이언트가 바로 다시 보내 같은 창에 부딪힌다.
+     */
+    private static long retryAfterSeconds(Duration retryAfter) {
+        long millis = Math.max(0, retryAfter.toMillis());
+        return Math.max(1, (millis + 999) / 1000);
     }
 
     /** {@code @Valid @RequestBody} 검증 실패. 코드는 {@code MemberValidationMessage} 접두어를 따른다. */

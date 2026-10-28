@@ -54,7 +54,7 @@ class LoginAttemptKeyHasherTest {
     @ValueSource(strings = {"", "${AUTH_LOGIN_GUARD_HASH_KEY}"})
     @DisplayName("꺼져 있으면 키 없이 만들어지고, hash 를 부르면 IllegalStateException 이다 — 메시지에 이메일을 싣지 않는다")
     void disabledHasherNeedsNoKeyAndRefusesToHash(String key) {
-        LoginAttemptKeyHasher disabled = new LoginAttemptKeyHasher(new AuthLoginGuardProperties(false, 5, Duration.ofMinutes(15), key));
+        LoginAttemptKeyHasher disabled = new LoginAttemptKeyHasher(new AuthLoginGuardProperties(false, 5, Duration.ofMinutes(15), key, null));
 
         assertThatThrownBy(() -> disabled.hash(EMAIL))
             .isInstanceOf(IllegalStateException.class)

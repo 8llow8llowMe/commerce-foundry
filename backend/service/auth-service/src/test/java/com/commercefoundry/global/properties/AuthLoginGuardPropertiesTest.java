@@ -17,7 +17,7 @@ import org.springframework.boot.context.properties.source.MapConfigurationProper
 
 /**
  * 시도 제한 프로퍼티의 기본값 · 범위 · 키 검증 시점을 본다 (#66). 레코드 기본값은 켬(닫힌 기본값)이라 키가 있어야 뜨고, 끈 상태에서는 HMAC 키 없이 뜬다.
- * application.yml 이 끄는 것은 흐름에 연결하기 전이라서다 — 여기서는 yml 없이 바인딩한다.
+ * 여기서는 yml 없이 바인딩한다 — application.yml 도 켠다(#66 A2).
  */
 class AuthLoginGuardPropertiesTest {
 
@@ -25,14 +25,35 @@ class AuthLoginGuardPropertiesTest {
     private static final String HASH_KEY = "auth.login-guard.hash-key";
 
     @Test
-    @DisplayName("키만 넣으면 기본값 — 켬 · 5회 · 15분")
+    @DisplayName("키만 넣으면 기본값 — 켬 · 로그인 5회 · 15분 · 가입 5회 · 10분")
     void defaults() {
         AuthLoginGuardProperties properties = bind(Map.of(HASH_KEY, KEY));
 
         assertThat(properties.enabled()).isTrue();
         assertThat(properties.maxAttempts()).isEqualTo(5);
         assertThat(properties.window()).isEqualTo(Duration.ofMinutes(15));
+        assertThat(properties.signUp()).isEqualTo(new AuthLoginGuardProperties.SignUp(5, Duration.ofMinutes(10)));
         assertThat(properties.hashKeyBytes()).hasSizeGreaterThanOrEqualTo(32);
+    }
+
+    @Test
+    @DisplayName("가입 창은 sign-up.* 로 따로 바인딩하고, 직접 만들 때 생략하면 기본값이다")
+    void signUpBindsSeparately() {
+        AuthLoginGuardProperties properties = bind(Map.of(HASH_KEY, KEY, "auth.login-guard.sign-up.max-attempts", "3", "auth.login-guard.sign-up.window", "30m"));
+
+        assertThat(properties.signUp()).isEqualTo(new AuthLoginGuardProperties.SignUp(3, Duration.ofMinutes(30)));
+        assertThat(properties.maxAttempts()).isEqualTo(5);
+        assertThat(TestLoginGuard.properties().signUp()).isEqualTo(new AuthLoginGuardProperties.SignUp(5, Duration.ofMinutes(10)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sign-up.max-attempts=0", "sign-up.max-attempts=101", "sign-up.window=59s", "sign-up.window=61m"})
+    @DisplayName("가입 창의 횟수 · 길이도 로그인과 같은 범위다 — 벗어나면 바인딩에서 실패하고 메시지가 sign-up 을 가리킨다")
+    void signUpRangeRejected(String entry) {
+        String[] pair = entry.split("=");
+        assertThatThrownBy(() -> bind(Map.of(HASH_KEY, KEY, "auth.login-guard." + pair[0], pair[1])))
+            .isInstanceOf(BindException.class)
+            .rootCause().isInstanceOf(IllegalStateException.class).hasMessageContaining("auth.login-guard.sign-up.");
     }
 
     @Test
@@ -85,7 +106,7 @@ class AuthLoginGuardPropertiesTest {
     @Test
     @DisplayName("창이 null 이면(직접 생성) 실패한다")
     void nullWindowRejected() {
-        assertThatThrownBy(() -> new AuthLoginGuardProperties(true, 5, null, KEY)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> new AuthLoginGuardProperties(true, 5, null, KEY, null)).isInstanceOf(IllegalStateException.class);
     }
 
     @ParameterizedTest
@@ -95,9 +116,9 @@ class AuthLoginGuardPropertiesTest {
         assertThatThrownBy(() -> bind(Map.of("auth.login-guard.enabled", "true", HASH_KEY, key)))
             .isInstanceOf(BindException.class)
             .rootCause().isInstanceOf(IllegalArgumentException.class).hasMessageContaining("auth.login-guard.hash-key");
-        assertThatThrownBy(() -> new AuthLoginGuardProperties(true, 5, Duration.ofMinutes(15), key)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AuthLoginGuardProperties(true, 5, Duration.ofMinutes(15), key, null)).isInstanceOf(IllegalArgumentException.class);
         if (!key.isBlank()) {
-            assertThatThrownBy(() -> new AuthLoginGuardProperties(true, 5, Duration.ofMinutes(15), key)).hasMessageNotContaining(key);
+            assertThatThrownBy(() -> new AuthLoginGuardProperties(true, 5, Duration.ofMinutes(15), key, null)).hasMessageNotContaining(key);
         }
     }
 
@@ -130,7 +151,7 @@ class AuthLoginGuardPropertiesTest {
     @Test
     @DisplayName("꺼진 상태에서 키를 꺼내면 규칙대로 던진다 — 키를 쓰는 쪽이 꺼진 것을 모르고 부르면 드러난다")
     void disabledKeyBytesStillValidated() {
-        AuthLoginGuardProperties properties = new AuthLoginGuardProperties(false, 5, Duration.ofMinutes(15), null);
+        AuthLoginGuardProperties properties = new AuthLoginGuardProperties(false, 5, Duration.ofMinutes(15), null, null);
 
         assertThatThrownBy(properties::hashKeyBytes).isInstanceOf(IllegalArgumentException.class);
     }

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.domainlayer.member.adapter.in.web.dto.request.AdminLoginRequest;
 import com.commercefoundry.domainlayer.member.adapter.in.web.dto.response.AdminLoginResponse;
 import com.commercefoundry.domainlayer.member.application.command.AdminLoginCommand;
+import com.commercefoundry.domainlayer.member.application.exception.LoginAttemptLimitedException;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminAuthWebUseCase;
@@ -16,6 +17,7 @@ import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
+import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -113,6 +115,20 @@ class AdminAuthWebControllerTest {
         assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_030");
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo(MemberErrorCode.LOGIN_FAILED.getMessage());
+    }
+
+    @Test
+    @DisplayName("시도 초과는 고객 로그인과 같은 429 · AUTH_040 봉투 + Retry-After 다")
+    void attemptLimited() {
+        given(adminAuthWebUseCase.login(any())).willThrow(new LoginAttemptLimitedException(MemberErrorCode.LOGIN_ATTEMPT_LIMITED, Duration.ofSeconds(899).plusMillis(1)));
+
+        MvcTestResult result = login("{\"email\":\"admin@example.com\",\"password\":\"admin-password-1\"}");
+
+        assertThat(result).hasStatus(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(result.getResponse().getHeader(HttpHeaders.RETRY_AFTER)).isEqualTo("900");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_040");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo("로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+        assertThat(result).bodyJson().doesNotHavePath("$.dataBody.accessToken");
     }
 
     @Test

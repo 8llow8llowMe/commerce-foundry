@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.member.application.command.AdminSeedComma
 import com.commercefoundry.domainlayer.member.application.port.in.AdminSeedUseCase;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminAuditPort;
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
+import com.commercefoundry.support.InMemoryAuthStoresConfig;
 import com.jayway.jsonpath.JsonPath;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -36,6 +38,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 @SpringBootTest
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
+@Import(InMemoryAuthStoresConfig.class)
 @ExtendWith(OutputCaptureExtension.class)
 class AdminAuditPersistenceFlowIntegrationTest {
 

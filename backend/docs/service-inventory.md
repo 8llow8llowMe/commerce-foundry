@@ -9,7 +9,7 @@
 |------|------|------|------|
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
 | `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36), JWT 검증·ADMIN 확인·로그아웃 차단 목록 조회 (#4) | 라우팅(`api-design-guide.md` §1-2), JWT 검증(전역 보안 체인 — `security-guide.md` §7), 로그아웃 차단 목록 조회(Redis, 어드민 경로만 fail-closed), `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
-| `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 회원가입 · 내 정보 · 로그인 · 토큰 재발급 · 로그아웃 (#4) · 배송지 주소록 (#7) · 관리자 계정 (#6) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
+| `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 회원가입 · 내 정보 · 로그인 · 토큰 재발급 · 로그아웃 (#4) · 배송지 주소록 (#7) · 관리자 계정 (#6) · 로그인 · 가입 시도 제한 (#66) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
 | `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) · 재고 (#10) · 어드민 카테고리 관리 (#9) · 어드민 상품 목록 (#9) · 메인 전시 (#63) · 상품 사이즈표 (#216) · 룩 — 어드민 관리 · 고객 조회 (#62) · 주문 만료 · 취소 이벤트 → 선점 해제 컨슈머 (#309) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제/결제 후 복원 · 주문 만료 · 취소 이벤트 소비), 상품 이미지, 다국어 상품정보, 통화별 가격, 메인 전시 섹션, 사이즈표(템플릿 · 상품별 치수), 룩(Shop the Look) |
 | `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 장바구니 (#12) · 주문 도메인/스냅숏 영속성 기반 (#13 C1) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
 | `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
@@ -22,7 +22,9 @@
 "회원가입 · 내 정보" 는 고객 회원가입(`POST /api/v1/auth/sign-up`)과 내 정보 조회 · 수정(`/api/v1/members/me`)이 있는 상태다 (`api-design-guide.md` §2-4).
 테이블은 `auth.member`(고객 · 관리자 한 테이블, `role` CUSTOMER / ADMIN — #4 결정 4)와 `auth.member_agreement`(동의 이력, 추가만 한다)다.
 "로그인 · 토큰" 은 고객 로그인 · 토큰 재발급 · 로그아웃(`/api/v1/auth/login` · `/token/reissue` · `/logout`)이 있고
-refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초 유예)하는 상태다 (`security-guide.md` §2-3). 로그인은 최초 로그인부터 30일이 절대 상한이다(#67). 요청 제한은 #66 이다.
+refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초 유예)하는 상태다 (`security-guide.md` §2-3). 로그인은 최초 로그인부터 30일이 절대 상한이다(#67).
+"로그인 · 가입 시도 제한" 은 고객 로그인 · 관리자 로그인 · 회원가입을 같은 이메일(HMAC) 단위 고정 창(Redis)으로 세어 넘으면 429 `AUTH_040` · `AUTH_041` + `Retry-After` 를 내는 상태다
+(기본 켬, 로그인 fail-closed · 가입 fail-open — `security-guide.md` §12).
 "배송지 주소록" 은 내 배송지 목록 · 단건 · 추가 · 전체 교체 · 삭제 · 기본 지정(`/api/v1/members/me/shipping-addresses/**`)이 있는 상태다 (`api-design-guide.md` §2-4).
 테이블은 `auth.shipping_address`(회원당 상한 20, 기본 배송지는 `default_member_id` 유니크 키로 최대 하나)다.
 주문은 배송지 값을 요청에 실어 스냅숏으로 저장하므로 배송지 internal API 는 두지 않는다 — 필요해지면 #13 에서 연다 (`order-flow-guide.md` §4).
@@ -72,7 +74,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | `ai-core` | operations(예정 — AI 호출은 작업 엔진(#212) 핸들러에서 돈다. 모듈만 있다(#215 PR-A). 사용량 원장 · 월 한도 · 연결은 이후 PR) |
 | `common-core` | 전부 |
 | `persistence-core` | auth · product · order · payment · delivery · operations |
-| `redis-core` | auth(토큰·소셜 state) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
+| `redis-core` | auth(토큰·소셜 state · 로그인 · 가입 시도 계수기 — #66) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
 | `security-core` | 서비스 전부(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
 | `storage-core` | product(상품 이미지 — 모듈만 있다(#9 PR-A). 연결은 이미지 업로드 발급 · 첨부(#9 PR-F)에서 한다) |
 | `shared-commerce` | product · order · payment · delivery · auth(배송지 국내 국가 판정 — #144) |

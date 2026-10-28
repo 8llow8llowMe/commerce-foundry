@@ -34,7 +34,9 @@ public class AdminAuthWebController {
         summary = "관리자 로그인",
         description = "관리자 이메일 · 비밀번호로 로그인하고 access 토큰(role=ADMIN)을 받는다. refresh 토큰은 주지 않는다 — "
             + "세션은 access 수명(기본 30분)까지이고 만료되면 다시 로그인한다. 이메일 없음 · 비밀번호 틀림 · 고객 계정은 모두 400(AUTH_030) 같은 문구다. "
-            + "필드 검증은 AUTH_130~132 다. 로그인 없이 호출한다."
+            + "필드 검증은 AUTH_130~132 다. 같은 이메일의 관리자 로그인 시도가 창(기본 15분)의 허용 횟수(기본 5회)를 넘으면 비밀번호가 맞아도 "
+            + "429(AUTH_040) + Retry-After(초)다 — 고객 로그인과 따로 세고, 고객 로그인과 달리 성공한 로그인도 창에서 지우지 않는다. "
+            + "시도 계수 저장소 장애는 503(AUTH_013)이다. 로그인 없이 호출한다."
     )
     @PreAuthorize("permitAll()")
     @PostMapping("/login")

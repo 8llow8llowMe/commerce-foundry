@@ -37,19 +37,26 @@ public class MemberLoginProcessor {
         this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
     }
 
-    /** 정규화한 이메일로 찾는다. 정규화할 수 없는 값(빈 값 · 254자 초과)은 없는 회원과 같다 — 실패 이유를 나누지 않는다. */
-    @Transactional(readOnly = true)
-    public Optional<Member> findByEmail(String email) {
+    /**
+     * 로그인 이메일을 한 번 정규화한다(앞뒤 공백 제거 · 소문자, {@link Member#normalizeEmail}). Facade 는 이 값 하나를 시도 제한 · 조회 · 창 지우기에
+     * 똑같이 넘긴다 (#66 A2 전제 1). 정규화할 수 없는 값(null · 빈 값 · 공백만 · 소문자화로 254자 초과)은 빈 값이다 — 부르는 쪽은 "없는 회원" 과 같게
+     * {@link #authenticate}(더미 비교)로 끝낸다. 500 으로 새지 않게 예외를 여기서 흡수한다.
+     */
+    public Optional<String> normalizeEmail(String email) {
         if (email == null) {
             return Optional.empty();
         }
-        String normalized;
         try {
-            normalized = Member.normalizeEmail(email);
+            return Optional.of(Member.normalizeEmail(email));
         } catch (IllegalArgumentException outOfRule) {
             return Optional.empty();
         }
-        return memberRepositoryPort.findByEmail(normalized);
+    }
+
+    /** @param normalizedEmail {@link #normalizeEmail} 의 값. 다시 정규화하지 않는다 */
+    @Transactional(readOnly = true)
+    public Optional<Member> findByEmail(String normalizedEmail) {
+        return memberRepositoryPort.findByEmail(normalizedEmail);
     }
 
     /**

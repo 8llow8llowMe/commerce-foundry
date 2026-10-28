@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.member.application.port.out.MemberReposit
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
+import com.commercefoundry.support.InMemoryAuthStoresConfig;
 import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jwt.SignedJWT;
 import jakarta.persistence.EntityManager;
@@ -26,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -36,12 +38,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 관리자 흐름 (#6) — 초기 관리자 시드 → 관리자 로그인(access 만) → 어드민 회원 조회(마스킹 · 최신순 · 페이지)를 실제 빈 구성(보안 체인 · Facade · Processor ·
- * 어댑터 · H2)으로 본다. 애노테이션은 {@link AuthServiceApplicationTests} 와 같아 컨텍스트를 같이 쓴다. 관리자 로그인은 refresh 저장소(Redis)를 부르지 않아
- * 스텁 없이 돈다. H2 는 컨텍스트 동안 살아 있으므로 이메일 · 아이디를 테스트마다 새로 만든다.
+ * 어댑터 · H2)으로 본다. 관리자 로그인은 refresh 저장소를 부르지 않지만 시도 계수기(Redis 포트, #66)를 부르므로 {@link InMemoryAuthStoresConfig} 로 스텁을 넣는다 —
+ * 같은 구성의 흐름 테스트끼리 컨텍스트를 같이 쓴다. H2 는 컨텍스트 동안 살아 있으므로 이메일 · 아이디를 테스트마다 새로 만든다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
+@Import(InMemoryAuthStoresConfig.class)
 @ExtendWith(OutputCaptureExtension.class)
 class AdminFlowIntegrationTest {
 

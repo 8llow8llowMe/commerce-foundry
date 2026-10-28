@@ -12,6 +12,7 @@ import com.commercefoundry.domainlayer.member.application.port.out.LoginAttemptC
 import com.commercefoundry.domainlayer.member.application.port.out.RefreshTokenStorePort;
 import com.commercefoundry.domainlayer.member.application.service.AdminAuditLogRetentionSchedulerFacade;
 import com.commercefoundry.domainlayer.member.domain.model.LoginAttemptPolicy;
+import com.commercefoundry.domainlayer.member.domain.model.LoginGuardPolicy;
 import com.commercefoundry.domainlayer.member.domain.model.RefreshTokenRotationPolicy;
 import com.commercefoundry.global.properties.AdminAuditRetentionProperties;
 import com.commercefoundry.global.properties.AgreementProperties;
@@ -23,6 +24,7 @@ import com.commercefoundry.support.TestLoginGuard;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.persistence.EntityManagerFactory;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Period;
@@ -36,10 +38,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springdoc.core.models.GroupedOpenApi;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.config.FixedDelayTask;
 import org.springframework.scheduling.config.ScheduledTask;
@@ -129,13 +134,32 @@ class AuthServiceApplicationTests {
     }
 
     @Test
-    @DisplayName("시도 제한은 test 프로필이 켜고 test 키를 넣은 값(application-test.yml)과 application.yml 의 5회 · 15분으로 바인딩되어 정책 빈 하나가 되고, 계수기는 Redis 어댑터 하나다")
-    void loginGuard() {
+    @DisplayName("시도 제한은 application.yml 이 켜고(플레이스홀더 기본값 true, 로그인 5회 · 15분, 가입 5회 · 10분) test 키(application-test.yml)로 바인딩되어 "
+        + "정책 빈 하나가 되고, 계수기는 Redis 어댑터 하나다")
+    void loginGuard() throws IOException {
+        // 켬은 환경변수 플레이스홀더의 기본값이다 — AUTH_LOGIN_GUARD_ENABLED 가 없으면 true 로 풀린다
+        assertThat(String.valueOf(loadYaml("application.yml").getFirst().getProperty("auth.login-guard.enabled")))
+            .isEqualTo("${AUTH_LOGIN_GUARD_ENABLED:true}");
         AuthLoginGuardProperties properties = applicationContext.getBean(AuthLoginGuardProperties.class);
         assertThat(properties.enabled()).isTrue();
         assertThat(properties.hashKeyBytes()).isEqualTo(TestLoginGuard.properties().hashKeyBytes());
-        assertThat(applicationContext.getBean(LoginAttemptPolicy.class)).isEqualTo(new LoginAttemptPolicy(5, Duration.ofMinutes(15)));
+        assertThat(applicationContext.getBean(LoginGuardPolicy.class)).isEqualTo(new LoginGuardPolicy(true,
+            new LoginAttemptPolicy(5, Duration.ofMinutes(15)), new LoginAttemptPolicy(5, Duration.ofMinutes(10))));
         assertThat(applicationContext.getBean(LoginAttemptCounterPort.class)).isInstanceOf(LoginAttemptRedisAdapter.class);
+    }
+
+    /** 프로파일 yml 이 스위치를 리터럴로 덮으면 그 프로파일에서는 {@code AUTH_LOGIN_GUARD_ENABLED} 로 끄고 켜는 방법이 조용히 먹지 않는다 (security-guide.md §12-4). */
+    @ParameterizedTest
+    @ValueSource(strings = {"application-local.yml", "application-dev.yml", "application-test.yml"})
+    @DisplayName("프로파일 yml(local · dev · test)은 auth.login-guard.enabled 를 덮지 않는다 — 켜고 끄는 값은 application.yml 의 플레이스홀더 하나다")
+    void profileYamlsDoNotOverrideLoginGuardSwitch(String file) throws IOException {
+        List<PropertySource<?>> sources = loadYaml(file);
+
+        assertThat(sources).isNotEmpty().allSatisfy(source -> assertThat(source.containsProperty("auth.login-guard.enabled")).as(file).isFalse());
+    }
+
+    private static List<PropertySource<?>> loadYaml(String file) throws IOException {
+        return new YamlPropertySourceLoader().load(file, new ClassPathResource(file));
     }
 
     @Test
