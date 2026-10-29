@@ -30,7 +30,7 @@ function productsPath({ keyword, page }: Query): string {
 
 /**
  * 상품 하나를 고르는 목록 — 어드민 상품 목록(#9, 상품명 검색 · 숨김 포함 · 페이지).
- * 재고(#188) · 사이즈표(#218)가 쓴다. 고르면 `{basePath}/{productId}` 로 간다.
+ * 재고(#188) · 사이즈표(#218) · 원가(#395)가 쓴다. 고르면 `{basePath}/{productId}` 로 간다.
  * `hiddenNote` 를 주면 숨긴 상품은 고를 수 없다고 흐리게 보이고 그 이유를 적는다.
  */
 export function ProductPicker({

@@ -189,6 +189,16 @@ export function ProductList({ query }: { query: ProductQuery }) {
                             재고
                           </Link>
                         )}
+                        {/* 원가(#395)도 SKU 를 고객 상세에서 읽어 재고와 같은 이유로 노출 상품만이다 */}
+                        {product.visible && (
+                          <Link
+                            href={`/sku-costs/${product.productId}`}
+                            className="underline-offset-4 hover:underline"
+                            aria-label={`${product.name} 원가`}
+                          >
+                            원가
+                          </Link>
+                        )}
                         <Link
                           href={`/size-charts/${product.productId}`}
                           className="underline-offset-4 hover:underline"
