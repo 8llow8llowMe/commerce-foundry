@@ -277,6 +277,8 @@ public final class ProductValidationMessage {
   - 예: product-service 결제 후 재고 복원이 선점 헤더를 잠근다 (`StockReservationRepository#findByIdForUpdate` · 상한 2000ms · 초과 `PRODUCT_031`,
     #85 — `order-flow-guide.md` §3-2). SKU 원가 이력 추가는 SKU 행을 잠근 뒤 최신 행을 읽어 단조 규칙을 판정한다
     (`SkuRepository#findByIdForUpdate` · 상한 2000ms · 초과 `SKU_COST_005`, #361 — 합계가 아니라 "최신보다 뒤" 판정이지만 같은 이유다).
+    auth 관리자 OTP 는 복구 코드 교체 · 해제를 자격 행 잠금으로 줄 세운다 (`AdminOtpCredentialRepository#findByMemberIdForUpdate` · 상한 2000ms · 초과 `AUTH_044`, #238 —
+    교체가 해제와 엇갈려 자격 없는 코드가 남지 않게. 자격이 없으면 교체는 `AUTH_036`).
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.
@@ -417,6 +419,9 @@ public final class ProductValidationMessage {
   | `auth:refresh-token:{fingerprint}` | auth `RefreshTokenRedisKeys.token` | HASH `{memberId, familyId, rotatedAt?, siblings?}`. TTL `min(refresh 토큰 TTL, family 상한까지 남은 시간)` — HSET 과 같은 Lua 에서 PEXPIRE (`security-guide.md` §2-3) |
   | `auth:refresh-family:{familyId}` | auth `RefreshTokenRedisKeys.family` | STRING 최초 로그인 시각(epoch ms) — 절대 수명(기본 30일)의 기준이라 회전해도 다시 쓰지 않는다(PEXPIRE 만). 정수 문자열이 아니거나 · 무한대 · 지금 + 60초보다 미래면 손상으로 보고 DEL(#143). TTL `min(refresh 토큰 TTL, 상한까지 남은 시간)`, 회전마다 다시 건다. 폐기 = DEL |
   | `auth:login-attempt:{emailHmac}` · `auth:admin-login-attempt:{emailHmac}` · `auth:sign-up-attempt:{emailHmac}` | auth `LoginAttemptRedisKeys.attempt` | STRING 창 안의 시도 수(고객 로그인 · 관리자 로그인 · 회원가입 따로). TTL 로그인 `auth.login-guard.window` · 가입 `auth.login-guard.sign-up.window` — INCR 과 같은 Lua 에서 첫 시도에만 PEXPIRE(이어지는 시도가 연장하지 않는다), TTL 이 없으면 다음 시도에서 다시 건다. 고객 로그인 성공 시 DEL(관리자 로그인 · 가입은 지우지 않는다 — `security-guide.md` §12-2). `emailHmac` 은 정규화 이메일(`Member.canonicalEmail`)의 HMAC-SHA256 앞 16바이트 base64url 22자 — 키 `AUTH_LOGIN_GUARD_HASH_KEY`, 이메일 원문은 키에 없다 (#66) |
+  | `auth:admin-otp-enrollment:{memberId}` | auth (#238 PR-A2 에서 구현) | 미확정 OTP 등록 — 새 비밀(암호화)을 확인 전까지만 둔다. DB 에는 확정된 자격만 쓴다. TTL `auth.admin-otp.enrollment-ttl`(기본 15분, 1분~1시간). 확인 성공 · 다시 시작 시 DEL |
+  | `auth:admin-otp-challenge:{fingerprint}` | auth (#238 PR-B 에서 구현) | 로그인 2단계 챌린지 — 1단계(비밀번호) 통과 후 발급한 챌린지 토큰의 SHA-256 지문. 값은 회원 아이디. TTL `auth.admin-otp.challenge-ttl`(기본 5분, 1분~10분). 2단계 성공 시 DEL(한 번만 쓴다). 토큰 원문은 키에 없다 |
+  | `auth:admin-otp-attempt:{memberId}` | auth (#238 PR-B 에서 구현, `LoginAttemptRedisKeys` 의 `ADMIN_OTP` 종류) | STRING 창 안의 OTP 코드 시도 수. 5회/15분, 넘으면 429 `AUTH_043`. 시도 계수와 같은 Lua(첫 시도에만 PEXPIRE). Redis 장애면 거절(fail-closed), 성공 시 DEL |
 - `:` 가 들어가는 값(IPv6 등)은 정규화한 뒤 인코딩해 넣는다(예: IPv6 → 16바이트 hex).
 - id 에 원문 토큰·개인정보를 넣지 않는다. 해시(SHA-256 base64url 등)로 넣는다 — `RedisKey.toString()` 이 키 전체를 출력하고, 키는 `MONITOR`·슬로로그에도 남는다.
 - 게이트웨이가 넘긴 `X-Client-Subject`(클라이언트 IP 의 HMAC, base64url 22자)는 이미 해시라 id 로 그대로 쓴다. 로그에는 앞 8자만 남긴다 (`security-guide.md` §7-3 하류 헤더 계약).
@@ -437,6 +442,7 @@ public final class ProductValidationMessage {
 | access 토큰 차단 목록(로그아웃) | 토큰의 남은 수명(`exp − now`) + 시계 오차 허용(`security.jwt.clock-skew`) 이상. 로그아웃 시점엔 `exp` 를 모르므로 **수명 상한(`JwtIssuanceProperties.MAX_ACCESS_TOKEN_TTL`, 1시간) + 시계 오차**를 쓴다(`RevokedAccessTokenKeys.ttl`) — `access-token-ttl` 설정값을 쓰면 TTL 을 줄인 배포 직후 옛 긴 토큰보다 차단 항목이 먼저 사라진다 |
 | 소셜 로그인 state | 짧게(분 단위). provider · 브라우저 verifier 해시 일치 검증과 삭제를 Lua 로 원자 실행해 한 번만 쓴다. 불일치는 삭제하지 않는다 |
 | 로그인 · 가입 시도 계수 | 창 길이(로그인 `auth.login-guard.window` 기본 15분 · 가입 `auth.login-guard.sign-up.window` 기본 10분). 첫 시도부터 재고 이어지는 시도가 연장하지 않는다. 상한 1시간(`LoginAttemptPolicy.MAX_WINDOW`) — 이메일을 바꿔 가며 보내면 키 수 ≈ 처리량 × 창이고, noeviction 이라 메모리가 차면 refresh · 차단 목록 쓰기까지 실패한다 |
+| 관리자 OTP 등록 · 챌린지 (#238) | 등록 `auth.admin-otp.enrollment-ttl`(기본 15분, 상한 1시간) · 챌린지 `auth.admin-otp.challenge-ttl`(기본 5분, 상한 10분). 짧게 둘수록 가로챈 챌린지를 쓸 수 있는 시간이 준다 |
 | 멱등 키 | 클라이언트 재시도 창보다 길게. 처리 중 마커는 최대 처리 시간보다 길게 |
 | 캐시 | 짧게. 원본을 쓸 때 무효화한다 |
 

@@ -44,6 +44,10 @@ x-auth-service-environment: &auth_service_environment
   # auth.login-guard.enabled 를 켤 때만 필수다(기본 꺼짐)
   AUTH_LOGIN_GUARD_ENABLED: ${AUTH_LOGIN_GUARD_ENABLED:-false}
   AUTH_LOGIN_GUARD_HASH_KEY: ${AUTH_LOGIN_GUARD_HASH_KEY:-}
+  # 관리자 OTP 비밀 암호화 키(AES-256, #238) — 항상 필수다. 이전 키는 회전 중에만 채운다
+  AUTH_OTP_SECRET_KEY: ${AUTH_OTP_SECRET_KEY:?deploy-guide.md 4절}
+  AUTH_OTP_SECRET_KEY_PREVIOUS: ${AUTH_OTP_SECRET_KEY_PREVIOUS:-}
+  AUTH_OTP_ISSUER: ${AUTH_OTP_ISSUER:-Commerce Foundry Admin}
   # 소셜 로그인은 기본 꺼짐. 켠 제공자의 자격 증명/redirect URI는 auth 기동 가드가 필수 검증한다.
   AUTH_SOCIAL_ENABLED: ${AUTH_SOCIAL_ENABLED:-false}
   KAKAO_LOGIN_ENABLED: ${KAKAO_LOGIN_ENABLED:-false}

@@ -15,7 +15,7 @@
 
 | 구분 | 예 | 위치 |
 |------|----|------|
-| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 전부 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 기본 켬이라 필수), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키, 초기 관리자 시드(`ADMIN_SEED_*` — auth 전용) | Vault |
+| 시크릿 | PG 시크릿 키, JWT 개인키(auth 전용), 서비스 토큰 비밀(`INTERNAL_JWT_SECRET` · `_PREVIOUS` — 서비스 전부 공통, 게이트웨이 제외), 클라이언트 IP HMAC 키(`GATEWAY_CLIENT_IP_HASH_KEY` — 게이트웨이 전용, 인스턴스 공통, `gateway.client-ip.enabled` 를 켤 때만 필요), 로그인 · 가입 시도 이메일 HMAC 키(`AUTH_LOGIN_GUARD_HASH_KEY` — auth 전용, 인스턴스 공통, `auth.login-guard.enabled` 기본 켬이라 필수), DB·Redis 비밀번호, 소셜 client secret, 스토리지 키, 초기 관리자 시드(`ADMIN_SEED_*` — auth 전용), 관리자 OTP 비밀 암호화 키(`AUTH_OTP_SECRET_KEY` · `_PREVIOUS` — auth 전용, 인스턴스 공통, 항상 필수) | Vault |
 | 배포용 공개값 | JWT 공개키(전 서비스 · 게이트웨이). 비밀은 아니지만 교체를 한 곳에서 하려고 Vault 로 배포한다 | Vault |
 | 고객사 실정보 | 상호, 대표자, 사업자등록번호, 통신판매업 신고번호, 사업장 주소, CS 연락처 | Vault |
 | 일반 설정 | 포트, 타임아웃, `store.features.*`, 로케일, 통화 | `application*.yml` |
@@ -52,6 +52,26 @@
   시도 제한을 끄는 운영 kill switch 는 **`AUTH_LOGIN_GUARD_ENABLED=false`(`.env` 또는 OS 환경변수) 하나**다 — 비밀이 아니라 설정 스위치라 Vault 에 등록하지 않는다.
   넣지 않으면 켬이고, `.env.example` 에는 빈 값 줄 없이 주석 예시만 둔다(빈 문자열은 기본값으로 가지 않고 바인딩에 실패해 auth 가 뜨지 않는다).
   끄면 모든 이메일의 무차별 대입이 열리므로 승인자 · 최대 시간을 정해 짧게만 쓴다 — 절차는 [security-guide.md](security-guide.md) §14-4 비상 절차.
+- **관리자 OTP 비밀 암호화 키(`AUTH_OTP_SECRET_KEY` · `AUTH_OTP_SECRET_KEY_PREVIOUS`, auth 전용, #238)는 Vault 등록 필요(dev/prod)다.** `openssl rand -base64 32` 로 만들고
+  auth 인스턴스 전부에 **같은 값**을 넣는다. 관리자 TOTP 비밀을 DB(`auth.admin_otp_credential.secret_ciphertext`)에 AES-256-GCM 으로 저장하는 키다 — AAD 는 용도 · 회원 · 자격(`admin-otp:v1:credential:{memberId}:{credentialId}`,
+  미확정 등록은 `admin-otp:v1:enrollment:{memberId}`)이라 다른 관리자 행 · 같은 관리자의 옛 자격 행 · 다른 용도로 옮겨 붙인 암호문은 복호화되지 않는다.
+  행마다 그 행을 암호화한 키의 식별자(`key_id` = base64url(SHA-256(키) 앞 8바이트), 11자)를 같이 둔다. OTP 를 쓰는 관리자가 없어도 **항상 필수**다 —
+  yml 에 기본값이 없어(`${AUTH_OTP_SECRET_KEY}`) 비었거나 base64 로 정확히 32바이트가 아니면 auth 가 뜨지 않는다. 다른 키를 재사용하지 않는다.
+  **테스트 키를 재사용하지 않는다** — `application-test.yml` · 테스트 코드의 키는 공개 저장소에 있어 누구나 안다. 디코드한 값에 `test-only` 가 들어 있으면 auth 가 기동하지 않고,
+  이 검사를 끄는 `auth.admin-otp.allow-test-only-key` 는 테스트 설정에만 둔다(운영 · 개발 yml · 환경변수 · Vault 에 넣지 않는다).
+  **키를 잃으면 등록된 OTP 를 모두 읽지 못한다**(로그인 2단계가 `AUTH_039` 503) — Vault 백업 대상이다. 발급자 이름 `AUTH_OTP_ISSUER` 는 비밀이 아닌 설정이라 Vault 에 넣지 않는다.
+
+  회전은 서비스 토큰 비밀과 같은 3단계다. `_PREVIOUS` 는 복호화에만 쓰고, 현재 키와 같은 값이면 기동하지 않는다.
+
+  1. `AUTH_OTP_SECRET_KEY_PREVIOUS` = **새 키**(현재 키는 그대로) → auth 전부 재기동. 모든 인스턴스가 새 키를 읽을 수 있게 된다(아직 옛 키로 쓴다)
+  2. `AUTH_OTP_SECRET_KEY` = 새 키, `AUTH_OTP_SECRET_KEY_PREVIOUS` = **옛 키** → auth 전부 재기동. 이후 OTP 로그인이 성공할 때마다 그 행을 새 키로 다시 암호화한다
+     (같은 조건부 UPDATE 에서 `secret_ciphertext` · `key_id` 를 바꾼다). 순서를 지키면 롤링 재기동 중에 어느 인스턴스도 다른 쪽 암호문을 못 읽는 순간이 없다.
+     롤링 재기동 중에는 아직 옛 설정(현재 = 옛 키)인 인스턴스가 새 키 행을 "이전 키" 로 보고 옛 키로 되돌려 암호화할 수 있다 — 읽기는 양쪽 다 되고, 재기동이 끝난 뒤의 로그인이 다시 새 키로 옮기므로 3단계 count 확인으로 수렴한다
+  3. `select count(*) from auth.admin_otp_credential where key_id <> '<새 키의 key_id>'` 가 0 이 되면 `AUTH_OTP_SECRET_KEY_PREVIOUS` 를 비우고 재기동한다.
+     새 키의 `key_id` 는 `printf '%s' "$KEY" | base64 -d | openssl dgst -sha256 -binary | head -c 8 | base64 | tr '+/' '-_' | tr -d '='` 로 구한다.
+     0 이 되기 전에 비우면 남은 관리자는 OTP 로그인이 `AUTH_039` 다 — 오래 로그인하지 않은 관리자는 OTP 초기화(#238 PR-C)로 다시 등록하게 한다
+
+  키가 새면 같은 3단계를 바로 밟는다. 암호문만으로는 비밀을 못 읽지만 DB 와 키가 함께 새면 모든 관리자의 2단계 인증이 무력해진다.
 - **초기 관리자 시드(`ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` · `ADMIN_SEED_NAME`, auth 전용, #6)는 Vault 등록 필요(dev/prod)다.**
   실제 관리자 이메일 · 비밀번호를 yml · 테스트 픽스처 · 이슈 · PR 에 쓰지 않는다 — yml 은 `${ADMIN_SEED_EMAIL:}` 플레이스홀더만 둔다.
   비밀번호는 12~64자, 영문 · 숫자 포함 공백 없는 ASCII 이고(`openssl rand -base64 24` 로 만들고 영문 · 숫자가 모두 들었는지 본다), 같은 이메일의 관리자가 이미 있으면 덮어쓰지 않으므로

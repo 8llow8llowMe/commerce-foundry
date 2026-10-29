@@ -7,8 +7,8 @@ import org.springframework.http.HttpStatus;
 /**
  * 회원 · 인증 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link MemberValidationMessage} 에 둔다.
  *
- * <p>접두어는 서비스 단위 {@code AUTH_} 다 — 로그인 · 토큰(#4 A3 · A4)도 같은 코드 공간을 쓴다. 001~009 는 회원, 010~ 은 토큰, 030~ 은 관리자(#6),
- * 040~049 는 시도 제한(#66)이다.
+ * <p>접두어는 서비스 단위 {@code AUTH_} 다 — 로그인 · 토큰(#4 A3 · A4)도 같은 코드 공간을 쓴다. 001~009 는 회원, 010~ 은 토큰, 030~ 은 관리자(#6) — 034~039 는 관리자 OTP(#238),
+ * 040~049 는 시도 제한(#66 · OTP 시도 043) · OTP 잠금 대기 044 다.
  * 로그인 실패는 401 이 아니라 400 이다 — 401 은 토큰(access · refresh) 거절에만 쓴다 (#4 결정 5).
  */
 @Getter
@@ -43,6 +43,21 @@ public enum MemberErrorCode {
     /** 없거나 고객이거나 이미 비활성화된 회원. 어느 쪽인지 나누지 않는다 (#193). */
     ADMIN_ACCOUNT_NOT_FOUND("AUTH_033", "관리자 계정을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
 
+    // ── 관리자 OTP (#238, AUTH_034~039 · AUTH_043 · AUTH_044)
+
+    /** 로그인 2단계 챌린지가 없다 — 만료 · 이미 씀 · 위조. 어느 쪽인지 밝히지 않는다. 1단계(비밀번호)부터 다시 한다. */
+    OTP_CHALLENGE_INVALID("AUTH_034", "인증 요청이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", HttpStatus.BAD_REQUEST),
+    /** OTP 코드 · 복구 코드가 틀렸거나 이미 쓴 코드다. 어느 쪽인지 밝히지 않는다. */
+    OTP_CODE_INVALID("AUTH_035", "인증 코드가 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
+    /** OTP 를 등록하지 않은 관리자가 해제 · 복구 코드 재발급을 요청했다. */
+    OTP_NOT_ENROLLED("AUTH_036", "등록된 OTP 가 없습니다.", HttpStatus.NOT_FOUND),
+    /** 이미 OTP 를 등록한 관리자가 다시 등록을 시작했다 — 바꾸려면 해제부터 한다. */
+    OTP_ALREADY_ENROLLED("AUTH_037", "이미 OTP 가 등록되어 있습니다.", HttpStatus.CONFLICT),
+    /** 등록 확인 요청인데 진행 중인 등록이 없다(만료 · 확인 완료). 등록을 다시 시작한다. */
+    OTP_ENROLLMENT_NOT_FOUND("AUTH_038", "진행 중인 OTP 등록이 없습니다. 등록을 다시 시작해 주세요.", HttpStatus.BAD_REQUEST),
+    /** OTP 비밀을 읽을 수 없다 — 맞는 암호화 키가 없거나(회전 실수) 암호문이 깨졌다. 운영 조치가 필요하다. */
+    OTP_UNAVAILABLE("AUTH_039", "일시적으로 OTP 인증을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+
     // ── 시도 제한 (#66, AUTH_040~049) — 예외는 LoginAttemptLimitedException(Retry-After 를 싣는다)
 
     /**
@@ -52,6 +67,13 @@ public enum MemberErrorCode {
     LOGIN_ATTEMPT_LIMITED("AUTH_040", "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.TOO_MANY_REQUESTS),
     /** 같은 이메일의 회원가입 시도가 창의 허용 횟수를 넘었다. 가입된 이메일이든 아니든 같은 본문 · 헤더다 (BCrypt · 중복 확인 전에 판정). */
     SIGN_UP_ATTEMPT_LIMITED("AUTH_041", "회원가입 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.TOO_MANY_REQUESTS),
+    /** 같은 관리자의 OTP 코드 시도가 창의 허용 횟수를 넘었다 (#238). 코드가 맞아도 거절한다. AUTH_042 는 BCrypt bulkhead 예약이다. */
+    OTP_ATTEMPT_LIMITED("AUTH_043", "인증 코드 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.TOO_MANY_REQUESTS),
+    /**
+     * 같은 관리자의 다른 OTP 쓰기(복구 코드 교체 · 해제)가 자격 행 잠금을 쥐고 있어 대기 상한 안에 얻지 못했다 (#238). 그 관리자 요청끼리 겹친 것이라
+     * 503 이 아니라 재시도 가능한 409 다.
+     */
+    OTP_BUSY("AUTH_044", "다른 OTP 요청을 처리하고 있습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
     SOCIAL_PROVIDER_UNSUPPORTED("AUTH_050", "지원하지 않는 소셜 로그인 제공자입니다.", HttpStatus.BAD_REQUEST),

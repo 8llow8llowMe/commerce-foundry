@@ -33,6 +33,77 @@
     comment on column auth.admin_audit_log.target is
         '대상 (member:<id> · members?role=..&page=..&size=..). 없으면 null. 개인정보 없음';
 
+    create table auth.admin_otp_credential (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        confirmed_at timestamp(6) with time zone not null,
+        key_id varchar(16) not null,
+        last_used_time_step bigint not null,
+        member_id bigint not null,
+        secret_ciphertext varchar(128) not null,
+        version bigint not null,
+        primary key (id),
+        constraint uk_admin_otp_credential_member_id unique (member_id)
+    );
+
+    comment on table auth.admin_otp_credential is
+        '관리자 OTP 자격 (확정된 등록만, 회원당 하나)';
+
+    comment on column auth.admin_otp_credential.id is
+        'OTP 자격 아이디 (Snowflake)';
+
+    comment on column auth.admin_otp_credential.created_at is
+        '생성 시각';
+
+    comment on column auth.admin_otp_credential.updated_at is
+        '수정 시각';
+
+    comment on column auth.admin_otp_credential.confirmed_at is
+        '등록 확인 시각';
+
+    comment on column auth.admin_otp_credential.key_id is
+        '암호화 키 식별자 — base64url(SHA-256(키) 앞 8바이트). 회전 판단용';
+
+    comment on column auth.admin_otp_credential.last_used_time_step is
+        '마지막으로 받은 TOTP step (Unix 초 / 30). 이 값 이하의 코드는 다시 받지 않는다';
+
+    comment on column auth.admin_otp_credential.member_id is
+        '관리자 회원 아이디 (FK: member.id)';
+
+    comment on column auth.admin_otp_credential.secret_ciphertext is
+        'TOTP 비밀 AES-256-GCM 암호문 — base64(IV ‖ 암호문 ‖ 태그), AAD 는 용도 · 회원 아이디 · 자격 아이디';
+
+    comment on column auth.admin_otp_credential.version is
+        '낙관적 락 버전';
+
+    create table auth.admin_otp_recovery_code (
+        id bigint not null,
+        code_hash varchar(100) not null,
+        created_at timestamp(6) with time zone not null,
+        member_id bigint not null,
+        used_at timestamp(6) with time zone,
+        primary key (id)
+    );
+
+    comment on table auth.admin_otp_recovery_code is
+        '관리자 OTP 복구 코드 (1회용, BCrypt 해시)';
+
+    comment on column auth.admin_otp_recovery_code.id is
+        '복구 코드 아이디 (Snowflake)';
+
+    comment on column auth.admin_otp_recovery_code.code_hash is
+        '정규화한 복구 코드(대문자 10자)의 BCrypt 해시. 원문은 저장하지 않는다';
+
+    comment on column auth.admin_otp_recovery_code.created_at is
+        '발급 시각';
+
+    comment on column auth.admin_otp_recovery_code.member_id is
+        '관리자 회원 아이디 (FK: member.id)';
+
+    comment on column auth.admin_otp_recovery_code.used_at is
+        '사용 시각. 쓰지 않았으면 null';
+
     create table auth.member (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -224,6 +295,9 @@
 
     create index idx_admin_audit_log_target_id
        on auth.admin_audit_log (target, id);
+
+    create index idx_admin_otp_recovery_code_member_id
+       on auth.admin_otp_recovery_code (member_id);
 
     create index idx_member_agreement_member_id_agreement_type
        on auth.member_agreement (member_id, agreement_type);

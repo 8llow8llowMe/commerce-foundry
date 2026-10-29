@@ -40,6 +40,12 @@ auth:
     # 키는 application.yml 이 기본값 없이 ${AUTH_LOGIN_GUARD_HASH_KEY} 로 받으므로 여기서 테스트 값을 넣는다.
     # 시도 계수 HMAC 키 — base64("auth-login-guard-test-only-hash-key", 35바이트). 테스트 전용이다. 비밀이 아니다
     hash-key: YXV0aC1sb2dpbi1ndWFyZC10ZXN0LW9ubHktaGFzaC1rZXk=
+  admin-otp:
+    # application.yml 이 기본값 없이 ${AUTH_OTP_SECRET_KEY} 로 받으므로 여기서 테스트 값을 넣는다.
+    # OTP 비밀 암호화 키 — base64("auth-admin-otp-test-only-key-32b", 32바이트). 테스트 전용이다. 비밀이 아니다
+    secret-key: YXV0aC1hZG1pbi1vdHAtdGVzdC1vbmx5LWtleS0zMmI=
+    # 위 키는 공개 저장소의 테스트 키라 기본은 거절한다(AdminOtpProperties). 테스트 설정에서만 켠다 — 운영 · 개발 yml · 환경변수에 넣지 않는다
+    allow-test-only-key: true
   admin-audit:
     retention:
       # 보관 정리가 컨텍스트를 공유하는 다른 테스트의 행을 지우지 않게 첫 실행을 미룬다 — 빈 · 스케줄 등록은 그대로 검증된다

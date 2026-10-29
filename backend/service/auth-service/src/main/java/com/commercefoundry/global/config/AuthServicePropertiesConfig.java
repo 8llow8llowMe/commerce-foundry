@@ -2,6 +2,7 @@ package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
 import com.commercefoundry.global.properties.AdminAuditRetentionProperties;
+import com.commercefoundry.global.properties.AdminOtpProperties;
 import com.commercefoundry.global.properties.AdminSeedProperties;
 import com.commercefoundry.global.properties.AgreementProperties;
 import com.commercefoundry.global.properties.AuthLoginGuardProperties;
@@ -25,6 +26,7 @@ import org.springframework.context.annotation.Import;
 })
 @EnableConfigurationProperties({
     AdminAuditRetentionProperties.class,
+    AdminOtpProperties.class,
     AdminSeedProperties.class,
     AgreementProperties.class,
     AuthLoginGuardProperties.class,
