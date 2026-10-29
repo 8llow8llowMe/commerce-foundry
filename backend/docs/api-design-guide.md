@@ -1,5 +1,7 @@
 # Backend API Design Guide
 
+주문 생성(#13 C3): `POST /api/v1/orders`는 CUSTOMER 전용이며 UUID `Idempotency-Key`가 필수다(누락 `ORDER_199`, 형식 오류 `ORDER_198`). 새 주문은 201, 동일 회원·키·정규화 본문 재생은 200이다. 본문은 items·shippingAddress·선택적 expectedTotalAmount이며 서버가 공유 주문서 계산으로 금액을 정한다. 배송지는 city·stateProvince를 포함하고 해외 city는 필수다. 응답은 주문·상품·맞춤 입력·배송지·배송비 스냅숏과 문자열 ID, `PENDING_PAYMENT`, 선점 만료와 같은 paymentDueAt을 포함한다. 동일 키 다른 본문은 `ORDER_019`, 유효한 처리 lease는 `ORDER_018`이다. 완료 재생은 원격 재계산 없이 소유 주문을 읽는다. FE는 재시도 동안 키와 본문을 유지한다. 장바구니 자동 비우기·결제 API·만료 스케줄러는 후속 범위다. FE 계약 검토자는 `seonghoho`다.
+
 ## 1. 경로 체계
 
 | 구분 | 접두어 | 사용자 | 게이트웨이 | 진입 패키지 |
