@@ -43,6 +43,16 @@ describe('targetText', () => {
     expect(targetText('member:101', 'SOMETHING_NEW')).toBe('회원 계정');
   });
 
+  it('member 대상에 마스킹 이름이 있으면 이름을 보인다 — 다른 형식에는 쓰지 않는다', () => {
+    expect(targetText('member:101', 'ADMIN_LOGIN', '김*수')).toBe('김*수');
+    expect(targetText('member:101', 'ADMIN_LOGIN', ' ')).toBe('관리자 계정');
+    expect(targetText('member:101', 'SOMETHING_NEW', null)).toBe('회원 계정');
+    expect(targetText('members?role=ALL&page=0&size=20', 'MEMBER_SEARCH', '김*수')).toBe(
+      '역할: 전체 · 1쪽',
+    );
+    expect(targetText('job:7', 'SOMETHING_NEW', '김*수')).toBe(UNKNOWN_TARGET);
+  });
+
   it('대상이 없으면 대시다', () => {
     expect(targetText(null, 'ADMIN_LOGIN')).toBe('—');
     expect(targetText('', 'ADMIN_LOGIN')).toBe('—');
@@ -70,7 +80,7 @@ describe('targetText', () => {
 });
 
 describe('describeAuditLog', () => {
-  it('관리자는 이름 없이 "관리자" 다', () => {
+  it('관리자 이름이 없으면 "관리자" 다', () => {
     expect(describeAuditLog(auditLog())).toEqual({
       action: '회원 목록 조회',
       result: '성공',
@@ -79,6 +89,18 @@ describe('describeAuditLog', () => {
       actorHint: null,
       target: '역할: 전체 · 1쪽',
     });
+  });
+
+  it('관리자 · 대상 계정의 마스킹 이름이 있으면 이름을 보인다', () => {
+    const view = describeAuditLog(
+      auditLog({
+        action: 'ADMIN_LOGIN',
+        actorDisplayName: '김*수',
+        target: 'member:101',
+        targetDisplayName: '김*수',
+      }),
+    );
+    expect(view).toMatchObject({ actor: '김*수', actorHint: null, target: '김*수' });
   });
 
   it('로그인 실패는 행위자를 모른다 — 대상은 노린 관리자 계정이다', () => {

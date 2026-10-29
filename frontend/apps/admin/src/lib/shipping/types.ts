@@ -44,7 +44,10 @@ export type DomesticPolicySnapshot = {
  */
 export type DomesticPolicyHistoryItem = {
   historyId: string;
+  /** 내부 회원 아이디 — 화면에 보이지 않는다(#305) */
   adminMemberId: string;
+  /** 교체한 관리자의 마스킹 이름(#322). 이름이 없으면 null — 조회가 실패하면 null 대신 503 `DELIVERY_013` 이다 */
+  adminDisplayName: string | null;
   /** UTC ISO */
   changedAt: string;
   /** 정책을 처음 만든 교체면 null */

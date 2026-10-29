@@ -1,6 +1,14 @@
 import { ApiError } from '@cf/api-client';
 import { describe, expect, it } from 'vitest';
-import { compareHistory, historyLoadFailure, historyPagePath } from './history';
+import { LOAD_FAILED } from '@/lib/api-errors';
+import {
+  ADMIN_LABEL,
+  ADMIN_NAME_FAILED,
+  compareHistory,
+  historyAdminLabel,
+  historyLoadFailure,
+  historyPagePath,
+} from './history';
 import { historyItem, krw, snapshot } from './history-fixtures';
 
 const fieldOf = (item: ReturnType<typeof historyItem>, key: string) => {
@@ -109,10 +117,31 @@ describe('historyLoadFailure', () => {
     });
     expect(historyLoadFailure(new ApiError('server', 400, 'DELIVERY_138', '크기'))).toEqual({
       kind: 'failed',
+      message: LOAD_FAILED,
     });
     expect(historyLoadFailure(new ApiError('network', null, null, null))).toEqual({
       kind: 'failed',
+      message: LOAD_FAILED,
     });
-    expect(historyLoadFailure(new Error('x'))).toEqual({ kind: 'failed' });
+    expect(historyLoadFailure(new Error('x'))).toEqual({ kind: 'failed', message: LOAD_FAILED });
+  });
+
+  it('503 DELIVERY_013 은 관리자 이름을 불러오지 못했다고 안내하고 다시 불러오기다', () => {
+    expect(historyLoadFailure(new ApiError('server', 503, 'DELIVERY_013', '이름'))).toEqual({
+      kind: 'failed',
+      message: ADMIN_NAME_FAILED,
+    });
+    expect(historyLoadFailure(new ApiError('server', 503, 'GATEWAY_003', null))).toEqual({
+      kind: 'failed',
+      message: LOAD_FAILED,
+    });
+  });
+});
+
+describe('historyAdminLabel', () => {
+  it('마스킹 이름이 있으면 이름, 없거나 비었으면 "관리자" 다', () => {
+    expect(historyAdminLabel(historyItem({ adminDisplayName: '김*수' }))).toBe('김*수');
+    expect(historyAdminLabel(historyItem({ adminDisplayName: null }))).toBe(ADMIN_LABEL);
+    expect(historyAdminLabel(historyItem({ adminDisplayName: '  ' }))).toBe(ADMIN_LABEL);
   });
 });

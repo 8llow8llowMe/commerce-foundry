@@ -14,7 +14,7 @@ type Loaded = AuditLogsLoad & { path: string; tick: number };
 
 /**
  * 어드민 관리자 감사 로그(#320 · #329, BE #192 · #286) — 최신순, 조건(행위 · 결과 · 페이지)은 주소(`query`)가 정본이다.
- * 관리자는 "관리자" 로만 보이고 관리자 조건은 없다 — 이름(마스킹)과 관리자 고르기는 BE #322(감사 로그 표시 이름) 뒤에 붙인다.
+ * 관리자는 서버가 준 마스킹 이름(#322)으로 보이고 관리자 조건은 없다 — BE 가 감사 대상이 아닌 관리자 목록을 주지 않아 고를 수단이 없다.
  */
 export function AuditLogList({ query }: { query: AuditLogQuery }) {
   const path = auditLogsApiPath(query);

@@ -1,5 +1,5 @@
-import { formatMoney, type Money } from '@cf/api-client';
-import { accessDeniedOf, type AccessDenied } from '@/lib/api-errors';
+import { ApiError, formatMoney, type Money } from '@cf/api-client';
+import { accessDeniedOf, LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
 import {
   DOMESTIC_POLICY_HISTORY_PATH,
   type DomesticPolicyHistoryItem,
@@ -9,11 +9,18 @@ import {
 /** 서버 상한(20, `DELIVERY_138`) — 이력 한 건이 구간을 최대 400행 펼친다 */
 export const HISTORY_PAGE_SIZE = 20;
 
-/**
- * 교체한 사람 표시. 응답에는 내부 회원 아이디(`adminMemberId`)만 있고 이름을 얻을 API 가 없어
- * 아이디 원문 대신 이 문구를 보인다(#305). 이름 칸이 생기면 여기를 바꾼다.
- */
+/** 교체한 사람의 이름이 없을 때 문구. 아이디 원문(`adminMemberId`)은 보이지 않는다(#305) */
 export const ADMIN_LABEL = '관리자';
+
+/** 교체한 사람 — 서버가 마스킹한 이름(`adminDisplayName`, #322), 없으면 "관리자" */
+export function historyAdminLabel({ adminDisplayName }: DomesticPolicyHistoryItem): string {
+  const name = adminDisplayName?.trim();
+  return name ? name : ADMIN_LABEL;
+}
+
+/** 503 `DELIVERY_013` — 이력은 있는데 관리자 이름 조회(auth-service)가 실패했다 */
+export const ADMIN_NAME_UNAVAILABLE_CODE = 'DELIVERY_013';
+export const ADMIN_NAME_FAILED = '관리자 이름을 불러오지 못했습니다. 잠시 후 다시 불러와 주세요.';
 
 export const historyPagePath = (page: number) =>
   `${DOMESTIC_POLICY_HISTORY_PATH}?page=${page}&size=${HISTORY_PAGE_SIZE}`;
@@ -139,10 +146,15 @@ export function compareHistory({ before, after }: DomesticPolicyHistoryItem): Hi
   return { kind: fields.some((field) => field.changed) ? 'changed' : 'unchanged', fields };
 }
 
-/** 이력 읽기 실패 — 401 · 403 은 안내 상태, 그 밖(연결 · 서버 · 형식)은 다시 불러오기 */
+/**
+ * 이력 읽기 실패 — 401 · 403 은 안내 상태, 그 밖(연결 · 서버 · 형식)은 다시 불러오기.
+ * 503 `DELIVERY_013`(관리자 이름 조회 실패)은 문구만 달리 한 다시 불러오기다.
+ */
 export function historyLoadFailure(
   cause: unknown,
-): { kind: 'denied'; denied: AccessDenied } | { kind: 'failed' } {
+): { kind: 'denied'; denied: AccessDenied } | { kind: 'failed'; message: string } {
   const denied = accessDeniedOf(cause);
-  return denied ? { kind: 'denied', denied } : { kind: 'failed' };
+  if (denied) return { kind: 'denied', denied };
+  const adminName = cause instanceof ApiError && cause.code === ADMIN_NAME_UNAVAILABLE_CODE;
+  return { kind: 'failed', message: adminName ? ADMIN_NAME_FAILED : LOAD_FAILED };
 }

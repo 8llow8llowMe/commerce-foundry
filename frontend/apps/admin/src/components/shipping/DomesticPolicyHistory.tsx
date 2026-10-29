@@ -4,10 +4,10 @@ import { apiFetch, type PageResponse } from '@cf/api-client';
 import { Button, cx } from '@cf/ui';
 import { useEffect, useState } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
-import { LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
+import type { AccessDenied } from '@/lib/api-errors';
 import {
-  ADMIN_LABEL,
   compareHistory,
+  historyAdminLabel,
   historyLoadFailure,
   historyPagePath,
   type HistoryLine,
@@ -22,7 +22,7 @@ const dateTime = new Intl.DateTimeFormat('ko-KR', {
 
 type Loaded =
   | { page: number; kind: 'ok'; data: PageResponse<DomesticPolicyHistoryItem> }
-  | { page: number; kind: 'failed' }
+  | { page: number; kind: 'failed'; message: string }
   | { page: number; kind: 'denied'; denied: AccessDenied };
 
 /**
@@ -65,7 +65,7 @@ export function DomesticPolicyHistory() {
       {current?.kind === 'denied' && <AccessNotice denied={current.denied} />}
       {current?.kind === 'failed' && (
         <div role="alert" className="flex items-center gap-4">
-          <p className="text-sm text-danger">{LOAD_FAILED}</p>
+          <p className="text-sm text-danger">{current.message}</p>
           <Button variant="secondary" onClick={() => setRetry((n) => n + 1)}>
             다시 불러오기
           </Button>
@@ -140,7 +140,7 @@ export function HistoryEntry({ item }: { item: DomesticPolicyHistoryItem }) {
         <time dateTime={item.changedAt} className="font-medium">
           {dateTime.format(new Date(item.changedAt))}
         </time>
-        <span className="text-muted-fg">{ADMIN_LABEL}</span>
+        <span className="text-muted-fg">{historyAdminLabel(item)}</span>
         <span className="rounded-md bg-muted px-2 py-0.5 text-xs">{KIND_LABEL[kind]}</span>
       </header>
       <div className="overflow-x-auto">
