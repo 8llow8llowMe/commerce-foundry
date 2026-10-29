@@ -10,7 +10,7 @@
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
 | `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36), JWT 검증·ADMIN 확인·로그아웃 차단 목록 조회 (#4) | 라우팅(`api-design-guide.md` §1-2), JWT 검증(전역 보안 체인 — `security-guide.md` §7), 로그아웃 차단 목록 조회(Redis, 어드민 경로만 fail-closed), `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
 | `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 회원가입 · 내 정보 · 로그인 · 토큰 재발급 · 로그아웃 (#4) · 배송지 주소록 (#7) · 관리자 계정 (#6) · 로그인 · 가입 시도 제한 (#66) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
-| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) · 재고 (#10) · 어드민 카테고리 관리 (#9) · 어드민 상품 목록 (#9) · 메인 전시 (#63) · 상품 사이즈표 (#216) · 룩 — 어드민 관리 · 고객 조회 (#62) · 주문 만료 · 취소 이벤트 → 선점 해제 컨슈머 (#309) · SKU 원가 이력 어드민 (#361 PR-A) · 시점 원가 internal 조회 (#361 PR-B) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제/결제 후 복원 · 주문 만료 · 취소 이벤트 소비), 상품 이미지, 다국어 상품정보, 통화별 가격, 메인 전시 섹션, 사이즈표(템플릿 · 상품별 치수), 룩(Shop the Look), SKU 원가 이력(매입 · 제작 원가 · 포장 변동비, append-only · 어드민 전용, 서비스 간에는 operations-service 의 시점 원가 조회 `POST /internal/v1/sku-costs/query` 만) |
+| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) · 재고 (#10) · 어드민 카테고리 관리 (#9) · 어드민 상품 목록 · 상세 (#9) · 메인 전시 (#63) · 상품 사이즈표 (#216) · 룩 — 어드민 관리 · 고객 조회 (#62) · 주문 만료 · 취소 이벤트 → 선점 해제 컨슈머 (#309) · SKU 원가 이력 어드민 (#361 PR-A) · 시점 원가 internal 조회 (#361 PR-B) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제/결제 후 복원 · 주문 만료 · 취소 이벤트 소비), 상품 이미지, 다국어 상품정보, 통화별 가격, 메인 전시 섹션, 사이즈표(템플릿 · 상품별 치수), 룩(Shop the Look), SKU 원가 이력(매입 · 제작 원가 · 포장 변동비, append-only · 어드민 전용, 서비스 간에는 operations-service 의 시점 원가 조회 `POST /internal/v1/sku-costs/query` 만) |
 | `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 장바구니 (#12) · 주문 스냅숏 기반 (#13 C1) · 멱등 요청 기반 (#13 C2a) · 재고 선점 (#13 C2b) · CUSTOMER 주문 생성/멱등 재생 API (#13 C3) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
 | `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
 | `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 국내 배송비 정책 (#11) · 해외 배송비 (#22) · 국내 배송비 정책 교체 이력 (#69) · 운영자 온보딩 사실 internal (#357 PR-B1) | 배송비 정책(국내/해외), 송장, 배송 상태 추적, 운영자 온보딩의 국내 배송비 정책 저장 사실(`GET /internal/v1/onboarding-facts/shipping-policy`, 허용 호출자 operations-service) |
@@ -42,7 +42,8 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 "어드민 카테고리 관리" 는 숨김 포함 트리 조회 · 생성 · 수정(이동 포함) · 삭제(`/api/v1/admin/categories/**`)가 있는 상태다 — 깊이 3단계 · 순환 금지, 하위나 연결 상품이 있으면 삭제 409 (`api-design-guide.md` §2-5).
 "어드민 상품 목록" 은 숨김 포함 상품 페이지 목록(`GET /api/v1/admin/products` — 상품명 · 카테고리(하위 포함) · 판매 상태 · 노출 · 재고 반영 판매 가능 상태 조건,
 최신순 · 이름순)이 있는 상태다 (`api-design-guide.md` §2-6). 상품 soft delete · 옵션 은퇴 · 낙관적 락 버전 · 등록자 컬럼과 그 조회 규칙(삭제 상품은 고객 · 어드민 목록에서 빠지고
-서비스 간 SKU 조회에는 판매 불가로 남는다)이 있고 삭제 · 은퇴를 쓰는 API 는 아직 없다 (`api-design-guide.md` §2-13). 어드민 상품 상세 · 쓰기 · 상태 변경 · 삭제 · 이미지는 #9 의 다음 PR 이다.
+서비스 간 SKU 조회에는 판매 불가로 남는다)이 있고 삭제 · 은퇴를 쓰는 API 는 아직 없다 (`api-design-guide.md` §2-13). 어드민 상품 상세(`GET /api/v1/admin/products/{productId}`)는 숨김 · 은퇴 옵션 · 판매 종료 SKU 와 저장된 설정을 포함하며 삭제 상품은 404 다.
+재고 · 원가는 기존 별도 API 로 조회한다. 상품 쓰기 · 상태 변경 · 삭제 · 이미지 업로드는 #9 의 다음 PR 이다.
 SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullable)를 가지고 서비스 간 SKU 벌크 조회가 그대로 내린다 — 해외 주문 거절은 order-service 몫이다 (#80, `order-flow-guide.md` §2-2).
 "국내 배송비 정책" 은 고객 정책 안내(`/api/v1/shipping-fees/policy`) · 어드민 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/domestic`) · 서비스 간 배송비 견적(`/internal/v1/shipping-fees/quotes`)이 있는 상태다.
 "국내 배송비 정책 교체 이력" 은 교체가 성공할 때 같은 트랜잭션에서 교체 전 · 후 값 · 관리자 · 시각을 `delivery.shipping_policy_history`(+ `shipping_policy_history_area`)에 남기고

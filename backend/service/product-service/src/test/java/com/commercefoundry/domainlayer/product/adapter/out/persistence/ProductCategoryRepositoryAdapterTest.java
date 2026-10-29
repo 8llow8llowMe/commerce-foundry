@@ -96,6 +96,13 @@ class ProductCategoryRepositoryAdapterTest {
         assertThat(productCategoryRepositoryPort.existsProductInCategory(40L)).isFalse();
     }
 
+    @Test
+    void readsOnlySelectedProductCategoriesInIdOrder() {
+        assertThat(productCategoryRepositoryPort.findCategoryIdsByProductId(103L)).containsExactly(20L, 30L, 31L);
+        assertThat(productCategoryRepositoryPort.findCategoryIdsByProductId(101L)).containsExactly(10L, 11L);
+        assertThat(productCategoryRepositoryPort.findCategoryIdsByProductId(102L)).isEmpty();
+    }
+
     /** 삭제(soft delete) 상품 — check({@code ck_product_deleted_hidden})가 허용하는 숨김 · 판매 종료다. */
     private static ProductEntity deletedProduct(Long id, Long categoryId) {
         return ProductEntity.builder()

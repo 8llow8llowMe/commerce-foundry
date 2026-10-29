@@ -475,6 +475,27 @@ return ResponseEntity.ok().body(Response.success(response));
   `application/model` 의 입력 enum(`ProductSaleStatusFilter` · `ProductAvailabilityFilter` · `ProductAdminSortType`)으로 받고 Processor 가 domain 으로 바꾼다.
   정렬은 고객 `ProductSortType` 과 나눈다 — 이름순을 고객 목록에 열지 않는다.
 
+#### 어드민 상품 상세
+
+`GET /api/v1/admin/products/{productId}` — `hasRole('ADMIN')`. 편집 화면이 저장된 설정을 읽는 API 다. 고객 상세 DTO 와 나눈다.
+
+- 숨김 상품은 포함하고, 없거나 삭제된 상품은 404 `PRODUCT_001` 이다. 경로 아이디는 양수여야 한다(400 `PRODUCT_105`), 숫자 변환 실패는 `PRODUCT_198` 이다.
+- 상품 필드: `productId`, `categoryId`, `categoryIds`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`, `salePrice`, `listPrice`,
+  `maxQuantityPerOrder`, `customOrder`, `customOrderNotice`, `customOrderLeadTimeDays`, `preorder`, `expectedShipDate`, `version`, `createdByMemberId`.
+  `categoryId` 는 대표 카테고리, `categoryIds` 는 대표와 진열 연결의 중복 없는 아이디 오름차순 합집합이다(대표 연결이 빠진 과거 데이터도 보존).
+  `descriptionHtml` 은 원문이므로 FE 가 렌더 전에 sanitize 한다(§2-1). 버전은 향후 수정 충돌 확인용이고 조회는 버전을 올리지 않는다.
+- `optionGroups[]` 는 그룹 아이디 · 이름 · 진열 순서 · `retiredAt` 과 `values[]`(값 아이디 · 이름 · 진열 순서 · `retiredAt`)다.
+  은퇴 그룹 · 값도 포함한다. 그룹과 값은 각각 진열 순서 → 아이디 오름차순이다.
+- `skus[]` 는 아이디 오름차순으로 `skuId`, `optionValueIds`, `additionalPrice`, `saleStatus`, `weightGrams`, `hsCode` 를 낸다.
+  판매 종료 SKU 도 포함하고, 추가금은 저장된 값이다. 무게 · HS 코드 미입력은 null 이다. 재고 · 원가는 합치지 않는다 — 화면은 SKU 아이디로 기존 어드민 재고 API(`order-flow-guide.md` §3-1)를 부르고 원가는 별도 SKU 원가 API(§2-12)를 쓴다.
+- `images[]` 는 `imageId`, `imageType`, `url`, `width`, `height`, `altText`, `displayOrder`, `posterUrl`,
+  `customOrderFields[]` 는 `fieldKey`, `label`, `inputType`, `unit`, `required`, `minValue`, `maxValue`, `stepValue`, `helpText`, `displayOrder` 다.
+  둘 다 진열 순서 → 아이디 오름차순이다. 고객 기능 플래그와 무관하게 저장된 프리오더 · 영상 · 맞춤 제작 설정을 그대로 보인다.
+- 모든 리소스 아이디는 문자열이고(버전 · 순서는 숫자), 금액은 `{amount, currency}`, enum 은 `{code, name, description}`, 은퇴 시각은 UTC ISO 다.
+  없는 목록은 `[]`, 선택적 값은 null 이다. 고객용 노출 · 가격 · 옵션 필터를 재사용하지 않는다.
+- `ProductAdminFacade` 의 읽기 전용 `REPEATABLE_READ` 트랜잭션에서 상품 → 카테고리 연결 → 옵션 그룹 · 값 → SKU → 미디어 → 맞춤 필드를 읽는다.
+  상품이 없거나 삭제되었으면 후속 조회를 하지 않는다. 최대 7번의 조회이며 행 개수에 따라 늘지 않는다. 외부 서비스 호출 · 쓰기 · 스키마 변경은 없다.
+
 ### 2-7. 고객 상품의 프리오더 · 영상 필드 (product-service, #61)
 
 | 응답 | 필드 | 뜻 |
@@ -714,6 +735,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 | 고객 상세 `GET /api/v1/products/{productId}` | 404 `PRODUCT_001` — 숨김과 같다(존재를 드러내지 않는다, §2-2) |
 | 고객 목록 `GET /api/v1/products` | 뺀다 |
 | 어드민 목록 `GET /api/v1/admin/products` | 늘 뺀다 — 필터 없음(§2-6) |
+| 어드민 상세 `GET /api/v1/admin/products/{productId}` | 404 `PRODUCT_001` (§2-6). 숨김 상품은 조회 가능 |
 | 서비스 간 SKU 조회 `GET /internal/v1/skus` | **행을 그대로 낸다** — `purchasable=false`, `saleStatus=STOP_SELLING`. "없는 SKU" 로 빼지 않는다 — order-service 는 숨김 · 판매 종료와 같은 줄로 다룬다(`order-flow-guide.md` §2-1 · §2-3) |
 | 재고 선점 `POST /internal/v1/stock-reservations` | 409 `PRODUCT_022` (`order-flow-guide.md` §3) |
 | 어드민 카테고리 삭제의 연결 상품 판정 | 세지 않는다(§2-5) |

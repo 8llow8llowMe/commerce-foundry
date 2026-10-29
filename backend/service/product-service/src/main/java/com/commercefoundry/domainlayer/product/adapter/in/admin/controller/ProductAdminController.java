@@ -3,6 +3,8 @@ package com.commercefoundry.domainlayer.product.adapter.in.admin.controller;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
+import org.springframework.web.bind.annotation.PathVariable;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.model.ProductAdminSortType;
@@ -34,7 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
  * 판매 상태 · 판매 가능 상태 조건은 domain enum 이 아니라 application/model 의 입력 enum 으로 받는다 — 컨트롤러는 domain 을 쓰지 않는다 (H1).
  */
-@Tag(name = "[어드민] 상품 관리", description = "숨김 포함 상품 목록")
+@Tag(name = "[어드민] 상품 관리", description = "숨김 포함 상품 목록 · 상세")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -45,6 +47,16 @@ public class ProductAdminController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final ProductAdminUseCase productAdminUseCase;
+
+    @Operation(summary = "상품 상세 조회 (편집용)", description = "숨김 상품과 은퇴 옵션 · 판매 종료 SKU 를 포함한 저장 설정이다. 삭제 상품은 404 다. 재고 · 원가는 별도 API 로 조회한다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/{productId}")
+    public ResponseEntity<Response<ProductDetailAdminResponse>> getProduct(
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId
+    ) {
+        return ResponseEntity.ok(Response.success(productAdminUseCase.getProduct(productId)));
+    }
+
 
     @Operation(
         summary = "상품 목록 조회 (숨김 포함)",
