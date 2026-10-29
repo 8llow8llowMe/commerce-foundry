@@ -51,7 +51,7 @@ EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 - `orders`, `order_shipping_address`, `order_item`, `order_item_custom_option`, `order_status_history` 다섯 테이블을 주문 하나의 저장 단위로 둔다. 주소 · SKU · 맞춤 입력 · 배송비는 주문 시점의 불변 스냅숏이며 이력은 추가만 한다. raw FK만 저장하고 JPA 연관관계는 쓰지 않는다.
 - 저장은 신규 `PENDING_PAYMENT` 주문과 같은 주문 · 회원의 `null → PENDING_PAYMENT` 생성 이력만 받는다. 어댑터는 기존 트랜잭션을 필수로 요구한다(`MANDATORY`). 후속 Processor가 주문 · 스냅숏 · 이력을 한 번에 커밋하며 뒤쪽 저장 실패도 모두 롤백한다. 외부 호출은 그 트랜잭션 밖에서 한다.
 - `orders.version`으로 동시 수정을 검출한다. 조회는 주문 · 회원 아이디를 함께 제한하며 스냅숏은 묶음 조회한다. 주문 PK 중복만 `ALREADY_SAVED`, 다른 주문의 선점 중복 등은 `REJECTED`다. 로그는 주문 아이디 · 예외 타입만 남기고 원인 예외 · 행 값 · 제약 문자열은 싣지 않는다.
-- 요청 기록은 아래 C2a가 제공한다. 재고 클라이언트(C2b), 주문 생성 API · 재고 선점/복구 오케스트레이션(C3), 결제 확정 연동은 후속 단계다. C1은 #13 전체 완료를 뜻하지 않는다. 운영 DDL 정본은 `service/order-service/src/test/resources/ddl/order-schema.sql`이며 자동 적용하지 않는다.
+- 요청 기록은 아래 C2a, 재고 선점 클라이언트는 C2b가 제공한다. 주문 생성 API · 재고 선점/복구 오케스트레이션(C3), 결제 확정 연동은 후속 단계다. C1은 #13 전체 완료를 뜻하지 않는다. 운영 DDL 정본은 `service/order-service/src/test/resources/ddl/order-schema.sql`이며 자동 적용하지 않는다.
 
 ### 주문 요청 기록 기반 (#13 C2a)
 
@@ -61,7 +61,15 @@ EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 - 설정 `order.creation.processing-lease`는 기본 30초, 1초~5분이다. 처리 중 중복 호출을 줄이는 기한이며 원격 재고 작업의 소유권을 보장하지 않는다. C2b/C3에서 원격 호출 시간과 대조한다. 기한만 갱신해도 버전을 올리고, 인수·종료·완료 UPDATE는 회원·키·지문·주문 ID·버전·상태를 함께 대조한다.
 - `completeOwned`는 기존 쓰기 트랜잭션을 필수로 요구한다(`MANDATORY`). 완료 시점에도 유효한 기한과 동일 버전이어야 한다. **C3는 소유권 검증/완료를 먼저 하고 C1 주문 저장을 같은 트랜잭션에서 수행해야 한다.** 호출자 Processor가 짧은 트랜잭션 시간 상한을 설정한다(MANDATORY 자체는 기존 트랜잭션의 시간 상한을 바꾸지 않는다). 요청 완료만 단독 커밋하거나 실패를 잡고 부분 주문을 커밋하면 안 된다. 저장 실패 시 요청 상태·주문·스냅숏·이력을 모두 롤백한다.
 - 기한을 잃은 옛 시도는 다른 시도의 기한을 끝내거나 완료할 수 없다. 저장 장애로 자신의 기한 종료에 실패하면 원래 오류를 유지하고 고정 기한 만료 뒤 같은 키·주문 ID로 재시도한다. 원격 결과 미확정에는 새 주문 ID 발급이나 자동 선점 해제를 하지 않는다. 이후 C3에서도 옛 시도가 공유 선점을 해제하지 않도록 해야 한다.
-- 이번 단계에는 HTTP API·재고 호출·주문 생성 오케스트레이션·만료 스케줄러가 없다. C2b/C3와 관련 검증을 마칠 때까지 #13은 열린 상태로 유지한다. 신규 테이블의 운영 DDL은 Hibernate 생성 스냅숏 중 `order_request` 부분이며 사용자 적용 후 배포한다.
+- C2a에는 HTTP API·재고 호출·주문 생성 오케스트레이션·만료 스케줄러가 없다. C3와 관련 검증을 마칠 때까지 #13은 열린 상태로 유지한다. 신규 테이블의 운영 DDL은 Hibernate 생성 스냅숏 중 `order_request` 부분이며 사용자 적용 후 배포한다.
+
+### 재고 선점 호출 기반 (#13 C2b)
+
+- `StockReservationPort` · `OrderStockProcessor`는 선점만 제공한다. 동일 SKU 줄은 `Math.addExact`로 수량을 합치고 SKU 아이디 오름차순으로 한 번 보낸다. Processor는 `NEVER`로 기존 트랜잭션을 거절하므로 원격 호출을 DB 트랜잭션에 포함하지 않는다.
+- Feign은 클라이언트별 `contextId`와 서비스 토큰을 쓰며 기존 connect 2초/read 3초, `product-service` 서킷(4xx 제외)을 따른다. 전용 설정의 `Retryer.NEVER_RETRY`와 기본 `Client.Default`의 고정 길이 스트리밍 POST를 전제로 자동 재전송하지 않는다. 전송 구현을 바꾸면 재시도 전략을 다시 확인한다. HTTP 로그는 끈다.
+- HTTP **409**의 `PRODUCT_021/022/023/026`만 각각 `ORDER_016/003/017/018`로 번역한다. `022`는 이후 숨겨진 상품명도 노출하지 않도록 일반 문구를 쓴다. 그 밖의 4xx는 `REJECTED`, 타임아웃 · 전송 실패 · 5xx · 서킷 오픈 · 디코딩 실패는 `UNKNOWN`이며 둘 다 `ORDER_002`다. 로그에는 정제한 resultCode · 상태 · 예외 타입만 싣고 원격 본문 · 메시지 · 원인 throwable은 싣지 않는다.
+- 성공 봉투, 양수 선점/주문 아이디, 요청과 같은 주문 아이디, `RESERVED`, null이 아닌 미래 만료 시각, 요청과 정확히 같은 SKU/수량(오름차순 · 중복/누락/추가/null/비양수 없음)을 확인한다. `deducted`는 product의 재고 관리 정보라 주문은 판단하지 않는다. 계약 위반은 `UNKNOWN` → `ORDER_002`이며 선점이 생겼을 가능성을 보존한다.
+- 결과 불명에 자동 재시도 · 자동 해제 · 새 주문 ID 발급을 하지 않는다. **C3가 request-record의 같은 orderId를 사용해 재조회/복구를 조합해야 한다.** 이번 단계는 그 조합, 고객 HTTP API, 확정/해제, 엔티티/DDL을 추가하지 않는다. C2b 완료가 #13 전체 완료는 아니다.
 
 - 주문 금액은 **order-service 가 서버에서 계산한다**: Σ(SKU 판매가(기본 판매가 + 옵션 추가금) × 수량) − 할인 + 배송비.
   SKU 판매가에 옵션 추가금이 이미 들어 있다(product-service `SkuInternalProcessor` · order `CatalogSku.salePrice`) — 추가금을 따로 더하지 않는다.
