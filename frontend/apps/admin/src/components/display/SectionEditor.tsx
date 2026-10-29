@@ -13,7 +13,12 @@ import {
   type SectionForm,
   type TextFieldKey,
 } from '@/lib/display/form';
-import { DISPLAY_SECTIONS_PATH, LIMITS, type DisplaySectionAdmin } from '@/lib/display/types';
+import {
+  DISPLAY_SECTIONS_PATH,
+  ITEM_RANGES,
+  LIMITS,
+  type DisplaySectionAdmin,
+} from '@/lib/display/types';
 import { MediaFields } from './MediaFields';
 import { ProductPickField } from './ProductPickField';
 
@@ -157,7 +162,8 @@ export function SectionEditor({
 
         {form.sectionType === 'PRODUCT_PICK' && (
           <ProductPickField
-            type={form.sectionType}
+            max={ITEM_RANGES[form.sectionType].product[1]}
+            surface="메인"
             products={form.products}
             errors={errorsOf('products')}
             onChange={(products) => {
@@ -211,8 +217,11 @@ export function SectionEditor({
   );
 }
 
-/** 글자 칸(한 줄 · 여러 줄). 길이는 BE 와 같은 기준(앞뒤 공백을 뺀 UTF-16 길이)으로 센다. 넘어도 자르지 않고 저장할 때 막는다 */
-function TextInput({
+/**
+ * 글자 칸(한 줄 · 여러 줄). 길이는 BE 와 같은 기준(앞뒤 공백을 뺀 UTF-16 길이)으로 센다. 넘어도 자르지 않고 저장할 때 막는다.
+ * 룩 폼(`LookEditor`)도 쓴다.
+ */
+export function TextInput({
   label,
   value,
   max,

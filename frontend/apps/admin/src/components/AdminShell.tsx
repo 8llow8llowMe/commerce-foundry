@@ -23,7 +23,10 @@ const NAV: NavGroup[] = [
   },
   {
     title: '전시 관리',
-    items: [{ label: '메인', href: '/displays/main' }],
+    items: [
+      { label: '메인', href: '/displays/main' },
+      { label: '룩', href: '/displays/looks' },
+    ],
   },
   {
     title: '배송',
