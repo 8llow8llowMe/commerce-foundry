@@ -39,6 +39,12 @@ export default async function MyPage() {
               <span className="text-sm text-muted-fg">{t.addressMenuNote}</span>
             </Link>
           </li>
+          <li>
+            <Link href="/mypage/social" className={`${item} hover:text-primary`}>
+              <span>{t.socialMenu}</span>
+              <span className="text-sm text-muted-fg">{t.socialMenuNote}</span>
+            </Link>
+          </li>
         </ul>
       </nav>
     </main>
