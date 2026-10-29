@@ -12,11 +12,15 @@ import com.commercefoundry.domainlayer.order.adapter.out.persistence.repository.
 import com.commercefoundry.domainlayer.order.application.exception.OrderSaveException;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.domainlayer.order.domain.model.StatusChangedBy;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import jakarta.persistence.PersistenceException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -24,11 +28,10 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
-import com.commercefoundry.domainlayer.order.domain.model.StatusChangedBy;
 
 @Slf4j
 @Component
@@ -94,13 +97,51 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
     /** 주문 1번 + 배송지 1번 + 항목 1번 + 입력 1번 (모두 주문 아이디 하나로). */
     @Override
     public Optional<Order> findByIdAndMemberId(long orderId, long memberId) {
-        return orderRepository.findByIdAndMemberId(orderId, memberId).map(entity -> {
-            OrderShippingAddressEntity address = orderShippingAddressRepository.findById(entity.getId())
-                .orElseThrow(() -> new IllegalStateException("주문의 배송지가 없습니다: orderId=" + entity.getId()));
-            List<OrderItemEntity> items = orderItemRepository.findAllByOrderIdOrderByLineNoAsc(entity.getId());
-            Map<Long, List<OrderItemCustomOptionEntity>> options = orderItemCustomOptionRepository.findAllByOrderIdOrderByOrderItemIdAscDisplayOrderAsc(entity.getId())
-                .stream().collect(Collectors.groupingBy(OrderItemCustomOptionEntity::getOrderItemId));
-            return orderMapper.toDomain(entity, address, items, options);
-        });
+        return orderRepository.findByIdAndMemberId(orderId, memberId).map(this::toDomain);
+    }
+
+    @Override
+    public Optional<Order> findById(long orderId) {
+        return orderRepository.findById(orderId).map(this::toDomain);
+    }
+
+    private Order toDomain(OrderEntity entity) {
+        OrderShippingAddressEntity address = orderShippingAddressRepository.findById(entity.getId())
+            .orElseThrow(() -> new IllegalStateException("주문의 배송지가 없습니다: orderId=" + entity.getId()));
+        List<OrderItemEntity> items = orderItemRepository.findAllByOrderIdOrderByLineNoAsc(entity.getId());
+        Map<Long, List<OrderItemCustomOptionEntity>> options = orderItemCustomOptionRepository.findAllByOrderIdOrderByOrderItemIdAscDisplayOrderAsc(entity.getId())
+            .stream().collect(Collectors.groupingBy(OrderItemCustomOptionEntity::getOrderItemId));
+        return orderMapper.toDomain(entity, address, items, options);
+    }
+
+    /** 첫 배치와 다음 배치를 다른 쿼리로 부른다 — null 커서를 한 쿼리에 넘기지 않는다({@link OrderRepository} 주석). */
+    @Override
+    public List<OrderExpiryCandidateQueryResult> findDueForExpiry(Instant now, int limit) {
+        return orderRepository.findDue(OrderStatus.PENDING_PAYMENT, now, Limit.of(limit));
+    }
+
+    @Override
+    public List<OrderExpiryCandidateQueryResult> findDueForExpiryAfter(Instant now, Instant afterDueAt, long afterOrderId, int limit) {
+        return orderRepository.findDueAfter(OrderStatus.PENDING_PAYMENT, now, afterDueAt, afterOrderId, Limit.of(limit));
+    }
+
+    /**
+     * 주문 헤더만 merge 하고 바로 flush 한 뒤 이력을 넣는다. 배송지 · 항목 · 입력 스냅숏은 바뀌지 않으므로 다시 저장하지 않는다.
+     *
+     * <p>동시성 보호는 merge 의 {@code UPDATE ... where id = ? and version = ?} 다 — 읽은 뒤 결제 완료 · 다른 인스턴스의 만료가 먼저 커밋했으면 0 행이라
+     * (영속성 컨텍스트에 더 새 버전이 있으면 merge 가 먼저) {@code OptimisticLockingFailureException} 을 던지고, 이 트랜잭션(이력 · outbox 포함)이 롤백된다.
+     * 같은 트랜잭션에서 다시 읽어 버전을 견주지 않는다 — Processor 가 읽은 엔티티가 1차 캐시에 있어 늘 같은 값이 나온다.
+     */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void saveExpiry(Order expired, OrderStatusHistory history) {
+        if (expired.isNew() || expired.status() != OrderStatus.EXPIRED || history.orderId() != expired.id()
+            || history.fromStatus() != OrderStatus.PENDING_PAYMENT || history.toStatus() != OrderStatus.EXPIRED
+            || history.changedByType() != StatusChangedBy.SYSTEM || !"PAYMENT_TIMEOUT".equals(history.reason())) {
+            throw new IllegalArgumentException("만료 저장은 결제 대기 → 만료(SYSTEM, PAYMENT_TIMEOUT) 이력과 그 주문이어야 합니다: orderId=" + expired.id() + ", historyOrderId=" + history.orderId());
+        }
+        orderRepository.saveAndFlush(orderMapper.toEntity(expired));
+        orderStatusHistoryRepository.save(orderMapper.toEntity(history));
+        orderStatusHistoryRepository.flush();
     }
 }

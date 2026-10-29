@@ -2,6 +2,8 @@
 #   - DB: H2 인메모리(PostgreSQL 모드). Docker 없이 로컬과 CI 가 같은 결과를 낸다.
 #     락 · timestamptz · 인덱스처럼 엔진에 기대는 동작은 여기서 검증되지 않는다 — 리포지토리 테스트는 Testcontainers 로 따로 둔다.
 #   - Eureka: 끈다. 등록·조회를 시도하면 CI 에서 연결 오류로 늘어진다.
+#   - Kafka: 메시징을 끈다(기본값). outbox 발행 빈은 조립되고 릴레이만 뜨지 않는다.
+#   - 미결제 만료 스윕: 끈다. 컨텍스트를 공유하는 다른 테스트의 주문을 만료하지 않게 스케줄러 빈을 만들지 않는다(OrderServiceApplicationTests 가 단언한다).
 # 값은 전부 테스트 전용이다. 비밀이 아니다.
 
 spring:
@@ -24,3 +26,13 @@ eureka:
 snowflake:
   datacenter-id: 1
   worker-id: 1
+
+commerce:
+  messaging:
+    enabled: false
+    namespace: commerce-foundry.test
+
+order:
+  payment-expiry:
+    sweep:
+      enabled: false

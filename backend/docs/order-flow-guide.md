@@ -44,6 +44,16 @@ EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 - 주문 행에 `@Version` 을 둔다. 고객 취소와 어드민 출고 처리가 동시에 오면 하나만 성공해야 한다.
 - 결제 완료 알림(internal)은 재전송될 수 있다 — **이미 `PAID` 이후 상태면 성공으로 응답**하고 아무것도 바꾸지 않는다.
 
+### 1-3. 미결제 주문 만료 스윕 (#96)
+
+- `OrderExpiryScheduler → OrderSchedulerUseCase → OrderSchedulerFacade → OrderExpiryProcessor` 순서다. `order.payment-expiry.sweep`의 기본값은 `enabled=true`, `interval=30s`, `batch-size=100`, `max-batches-per-run=10`이다. 간격은 양수 밀리초 이상, 건수는 각각 1–100·1–10이며 잘못된 설정은 기동을 막는다. 끄는 env 스위치는 두지 않고(product 선점 만료 스윕과 같다) 테스트 프로파일만 `enabled: false` 로 스케줄러를 끈다.
+- 만료 스윕은 ShedLock을 쓰지 않는다 — 인스턴스마다 훑어도 같은 주문은 `@Version` 검사로 한 건만 커밋한다(product `StockReservationExpiryScheduler` 선례). `orders.shedlock`은 outbox 릴레이·정리용이다.
+- 실행 시작 시각 하나(마이크로초로 자름 — DB `timestamp(6)` 판정과 도메인 `expire(now)` 판정을 같은 값으로)로 기한을 판정하고 `(payment_due_at, id)` 오름차순 키셋을 읽는다. 첫 배치와 다음 배치는 쿼리를 나눈다(null 커서를 `:after is null or …` 로 넘기면 PostgreSQL 이 파라미터 타입을 정하지 못한다). 다음 배치 쿼리는 OR 키셋 조건에 뜻이 같은 하한 `payment_due_at >= :afterDueAt` 을 더해 인덱스 range 시작점으로 쓴다. 조회는 아이디·기한만 투영해 out-port 가 `OrderExpiryCandidateQueryResult` 로 돌려주고, Processor 가 Facade 용 커서(`OrderExpiryCandidate`)로 바꾼다 — 다음 배치는 Processor 가 커서의 (기한, 아이디)를 풀어 넘긴다. `idx_orders_status_payment_due_at_id(status, payment_due_at, id)`를 사용한다. 처리 실패도 커서를 전진시켜 뒤 주문을 계속 처리하고, 다음 실행은 처음부터 읽어 실패 주문을 재시도한다.
+- Facade는 트랜잭션 밖이고 각 주문은 별도 `REQUIRES_NEW`, 제한 5초다. 건별 트랜잭션에서 주문 전체를 재조회하고 도메인 `expire(now)`를 호출한다. 이는 서로 다른 주문을 배치 조립하는 N+1 조회가 아니라 주문별 원자적 전이 경계이며, 각 주문은 기존 집계 조회(주문·배송지·항목·입력) 4문장을 사용한다.
+- 저장은 만료 전용 `OrderRepositoryPort.saveExpiry`다. 주문 헤더만 `@Version`을 포함해 `saveAndFlush`(merge의 `UPDATE … where version = ?`가 실제 보호)한 뒤 `SYSTEM`·`PAYMENT_TIMEOUT` 이력과 `order-expired` outbox를 같은 트랜잭션으로 넣는다. 배송지·항목·맞춤 입력을 다시 저장하지 않는다. 이미 만료·결제 완료·미래 기한이면 건너뛰고 동시 결제·중복 만료는 버전 충돌로 한쪽만 커밋한다. 이력·outbox 실패도 주문 상태와 함께 롤백한다. 버전 충돌(정상 경합)은 WARN, 그 밖의 실패는 ERROR 로 남기고 다음 주문으로 간다. ERROR 는 주문 아이디 · 예외 타입 · 루트 원인 타입과 `RedactedThrowable` 사본(타입 · 스택 프레임 · SQLState)만 남긴다 — 원래 예외를 넘기면 원인 사슬의 메시지(PostgreSQL `Failing row contains (...)` 같은 행 값)가 찍힌다(`coding-conventions.md` §8).
+- 이벤트 계약은 §3-5다. `MESSAGING_ENABLED=false`여도 outbox를 저장하며 릴레이만 멈춘다. order-service가 `orders.outbox`·`orders.shedlock`과 미발행 수·나이 지표를 소유하고 inbox는 두지 않는다. 직접 HTTP 해제·커밋 후 보상·product 선점 TTL 유예 변경은 이 범위에 없다. 현재 product TTL 스윕은 안전망으로 유지한다.
+- 운영 배포 전 Hibernate PostgreSQL 17 생성 스냅숏(`service/order-service/src/test/resources/ddl/order-schema.sql`)의 신규 인덱스·outbox·shedlock DDL을 적용한다. 신규 토픽과 DLT는 인프라가 미리 만들고, 메시징을 켜면 존재 여부를 확인한다. 이 변경에 FE HTTP 계약 영향은 없다.
+
 ## 2. 주문 금액
 
 ### 주문 생성 API (#13 C3)
@@ -53,7 +63,7 @@ EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 - `OrderProcessor#create`는 독립된 5초 트랜잭션에서 현재 시각의 선점 유효성·요청 바인딩을 확인하고 `completeOwned`를 먼저 호출한다. C1 주문·스냅숏·생성 이력까지 같은 트랜잭션에서 커밋하며 뒤쪽 저장 실패는 요청 완료도 롤백한다. 오래된 주인·만료된 lease는 주문을 넣지 못한다.
 - 선점 실패·UNKNOWN·저장 실패는 해당 버전의 lease만 조용히 끝낸다. 동일 키 재시도는 기록의 동일 주문 ID를 인수한다. 자동 재전송·보상 해제·새 주문 ID 발급을 하지 않는다. 주문 PK 중복만 소유 주문 재생으로 처리하며 다른 저장 거절은 `ORDER_021`이다.
 - 배송지는 입력 앞뒤 공백과 빈 선택 칸을 정규화하고 연락처의 공백·하이픈을 제거한다. 국내 연락처는 0으로 시작하는 9~11자리, 해외는 선택적 +와 숫자 7~15자리이며 해외 도시는 필수다. 형식 오류는 원격 호출 전에 `ORDER_1xx`로 반환한다. 요청·응답·command 문자열은 개인정보·맞춤 입력을 가린다.
-- 장바구니 자동 비우기는 제공하지 않는다. 결제 준비/승인 연동과 미결제 만료 스케줄러(#96)는 후속 범위이며 `paymentDueAt`은 선점 만료 시각과 미결제 만료 판정 기준이다.
+- 장바구니 자동 비우기는 제공하지 않는다. 결제 준비/승인 연동은 후속 범위다. 미결제 만료 스케줄러(#96)는 `paymentDueAt <= now`인 `PENDING_PAYMENT` 주문을 `EXPIRED`로 바꾼다.
 
 ### 주문 저장 기반 (#13 C1)
 
@@ -70,7 +80,7 @@ EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 - 설정 `order.creation.processing-lease`는 기본 30초, 1초~5분이다. 처리 중 중복 호출을 줄이는 기한이며 원격 재고 작업의 소유권을 보장하지 않는다. C2b/C3에서 원격 호출 시간과 대조한다. 기한만 갱신해도 버전을 올리고, 인수·종료·완료 UPDATE는 회원·키·지문·주문 ID·버전·상태를 함께 대조한다.
 - `completeOwned`는 기존 쓰기 트랜잭션을 필수로 요구한다(`MANDATORY`). 완료 시점에도 유효한 기한과 동일 버전이어야 한다. **C3는 소유권 검증/완료를 먼저 하고 C1 주문 저장을 같은 트랜잭션에서 수행해야 한다.** 호출자 Processor가 짧은 트랜잭션 시간 상한을 설정한다(MANDATORY 자체는 기존 트랜잭션의 시간 상한을 바꾸지 않는다). 요청 완료만 단독 커밋하거나 실패를 잡고 부분 주문을 커밋하면 안 된다. 저장 실패 시 요청 상태·주문·스냅숏·이력을 모두 롤백한다.
 - 기한을 잃은 옛 시도는 다른 시도의 기한을 끝내거나 완료할 수 없다. 저장 장애로 자신의 기한 종료에 실패하면 원래 오류를 유지하고 고정 기한 만료 뒤 같은 키·주문 ID로 재시도한다. 원격 결과 미확정에는 새 주문 ID 발급이나 자동 선점 해제를 하지 않는다. 이후 C3에서도 옛 시도가 공유 선점을 해제하지 않도록 해야 한다.
-- HTTP API·재고 호출·주문 생성 조합은 위 C3가 담당하고 미결제 만료 스케줄러는 #96이다. C2a 신규 테이블 운영 DDL은 Hibernate 생성 스냅숏 중 `order_request` 부분이며 사용자 적용 후 배포한다.
+- HTTP API·재고 호출·주문 생성 조합은 위 C3가 담당한다. 미결제 만료 스케줄러는 아래 #96 계약을 따른다. C2a 신규 테이블 운영 DDL은 Hibernate 생성 스냅숏 중 `order_request` 부분이며 사용자 적용 후 배포한다.
 
 ### 재고 선점 호출 기반 (#13 C2b)
 
@@ -288,7 +298,7 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 |------|------|
 | `POST /internal/v1/stock-reservations` | 선점 — 요청 `{ orderId, items: [{ skuId, quantity }] }` (항목 1~100개, 수량 1~10000) |
 | `POST /internal/v1/stock-reservations/{reservationId}/confirmation` | 확정 (결제 완료) |
-| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (주문 생성 실패 보상. 주문 만료 · 결제 전 취소는 이벤트 — §3-5, 발행 전까지는 이 API) |
+| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (주문 생성 실패 보상. 만료는 `order-expired` 이벤트(#96, §3-5). 결제 전 취소는 `order-canceled` 발행 전까지 이 API) |
 | `POST /internal/v1/stock-restorations` | 결제 후 복원 (결제 후 취소 · 반품 입고, #85) — 아래 "결제 후 복원" |
 
 선점 · 확정 · 해제 응답은 같은 모양이고 신규 · 기존 모두 200 이다 —
@@ -368,7 +378,8 @@ RESERVED ──확정──▶ CONFIRMED
   한 건의 실패는 로그만 남기고 다음 건으로 간다 — 409 `PRODUCT_026`(확정 · 다른 인스턴스와 경합)은 WARN, 그 밖의 업무 오류 · 예상 못 한 예외는 ERROR 이고
   업무 오류면 오류 코드를 남긴다. 확정과 만료가 겹치면 `@Version` 이 하나만 통과시킨다. 인스턴스가 여럿이어도 분산 락을 두지 않는다.
   **역할은 안전망이다** — 주문 만료 · 결제 전 취소 이벤트(§3-5)가 먼저 풀고, 이벤트가 오지 않은 선점(발행 전 과도기 · order-service 장애 · DLT)을 TTL 뒤 푼다.
-  order-service 가 이벤트를 내기 시작하면 grace(TTL 뒤 여유) · 이벤트보다 먼저 푼 건의 ERROR 로그를 그 PR 에서 더한다.
+  product 선점 TTL grace(TTL 뒤 여유)와 "이벤트보다 먼저 푼 건" ERROR 로그는 후속이다(grace 를 먼저 넣은 뒤 로그) — 지금은 주문 결제 기한이 선점 만료 시각과
+  같아(#13 C3) TTL 스윕이 같은 기한에 함께 돌아 상당수를 이벤트보다 먼저 풀고, 뒤에 온 `order-expired` 는 이미 RELEASED(§3-5 표)로 끝난다.
 - **만료 후 확정** — 스케줄러가 먼저 풀었으면 확정은 409 `PRODUCT_025` 다. order-service 의 처리는 아래 §3-4 를 따른다.
 - 허용 전이 표 밖의 요청은 도메인이 `StockReservationTransitionException`(현재 상태 · 시도한 동작)으로 알리고, `StockReservationProcessor` 가
   `PRODUCT_024` · `PRODUCT_025` 를 붙인다 — domain 은 application 의 오류 코드를 모른다 (`coding-conventions.md` §8-1).
@@ -418,7 +429,7 @@ RESERVED ──확정──▶ CONFIRMED
   잡고 계속하면 커밋에서 실패한다. order-service 도 Feign 409 를 받은 트랜잭션에서 주문 상태를 바꾸고 재시도까지 하지 말고, 재시도는 새 트랜잭션에서 한다.
 - **확정 · 해제 · 복원은 `reservationId` 로 대상 선점을 식별한다** — 서비스 토큰(`SERVICE_order-service`)을 가진 호출자를 신뢰한다는 전제다. order-service 는 자기 주문의
   `reservationId` 만 저장 · 사용한다.
-- **주문 만료 · 결제 전 취소의 해제는 이벤트다** (§3-5) — 주문 상태 전이와 같은 트랜잭션으로 outbox 에 `order-expired` · `order-canceled` 를 내는 연동은 후속 범위다.
+- **주문 만료 · 결제 전 취소의 해제는 이벤트다** (§3-5) — #96이 주문 만료 전이와 같은 트랜잭션으로 `order-expired`를 outbox에 넣는다. 결제 전 취소의 `order-canceled` 발행은 후속 범위다.
   C3 주문 생성 실패는 공유 선점의 보상 해제를 호출하지 않는다. 같은 키·주문 ID로 복구하며 재시도가 없으면 product의 선점 만료 스윕이 푼다. internal 해제(`/release`) API 자체는 product-service 계약으로 유지한다.
 - **오류 메시지를 고객 응답에 그대로 넘기지 않는다.** `PRODUCT_021` · `PRODUCT_022` · `PRODUCT_028` 메시지에는 SKU 아이디 목록이 실린다 — order-service 는 자기 오류 코드
   (예: `ORDER_*`)와 고객용 문구로 바꾸고, 필요한 SKU 정보는 자기 주문 항목에서 골라 보여 준다.
@@ -427,6 +438,7 @@ RESERVED ──확정──▶ CONFIRMED
 
 order-service 가 낸 주문 만료 · 결제 전 취소를 product-service 컨슈머(`OrderStockReleaseEventListener`)가 받아 선점을 푼다. 공통 규칙은 `coding-conventions.md` §12 ·
 `core/messaging-core/README.md` 다. `MESSAGING_ENABLED=false`(기본)면 컨슈머가 뜨지 않고 지금처럼 internal 해제 · 만료 스윕이 푼다.
+메시징이 꺼져 있으면 order-service 는 이벤트를 outbox(`orders.outbox`)에 쌓기만 하고, 켜면 쌓인 것부터 나간다.
 
 | 항목 | 값 |
 |------|----|

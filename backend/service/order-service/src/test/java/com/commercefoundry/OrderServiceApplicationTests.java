@@ -2,6 +2,11 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.order.adapter.in.scheduler.OrderExpiryScheduler;
+import com.commercefoundry.domainlayer.order.application.service.OrderSchedulerFacade;
+import com.commercefoundry.messaging.outbox.OutboxStore;
+import com.commercefoundry.messaging.properties.MessagingProperties;
+import com.commercefoundry.messaging.publish.EventPublisher;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.zaxxer.hikari.HikariDataSource;
@@ -12,6 +17,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import jakarta.persistence.EntityManagerFactory;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.Map;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.DisplayName;
@@ -27,6 +33,7 @@ import org.springframework.cloud.openfeign.FeignClientProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -45,6 +52,18 @@ class OrderServiceApplicationTests {
 
     @Autowired
     private MockMvcTester mockMvc;
+
+    @Test
+    @DisplayName("test 프로파일은 메시징 · 만료 스윕을 끈다 — 스케줄링은 켜져 있어도 등록된 작업이 없고, outbox 발행 빈은 조립된다")
+    void messagingAndExpirySchedulerAreDisabledInTestProfile() {
+        assertThat(applicationContext.getBean(MessagingProperties.class).enabled()).isFalse();
+        assertThat(applicationContext.getBeansOfType(OrderExpiryScheduler.class)).isEmpty();
+        assertThat(applicationContext.getBeansOfType(OrderSchedulerFacade.class)).hasSize(1);
+        assertThat(applicationContext.getBean(ScheduledAnnotationBeanPostProcessor.class).getScheduledTasks()).isEmpty();
+        assertThat(applicationContext.getBeansOfType(EventPublisher.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(OutboxStore.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(Clock.class)).hasSize(1);
+    }
 
     @Test
     @DisplayName("컨텍스트가 뜨고 global.config 가 import 한 공통 빈이 조립된다")
