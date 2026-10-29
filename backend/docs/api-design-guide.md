@@ -673,6 +673,8 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 | 서비스 간 SKU 조회 `GET /internal/v1/skus` | **행을 그대로 낸다** — `purchasable=false`, `saleStatus=STOP_SELLING`. "없는 SKU" 로 빼지 않는다 — order-service 는 숨김 · 판매 종료와 같은 줄로 다룬다(`order-flow-guide.md` §2-1 · §2-3) |
 | 재고 선점 `POST /internal/v1/stock-reservations` | 409 `PRODUCT_022` (`order-flow-guide.md` §3) |
 | 어드민 카테고리 삭제의 연결 상품 판정 | 세지 않는다(§2-5) |
+| 고객 전시 · 룩 · 사이즈표 · 어드민 전시 미리보기의 상품 카드 · 상품 확인 | 뺀다 / 404 — 상품 컨텍스트의 고객 조회(`ProductListProcessor#summarizeVisible` · `ProductDetailProcessor#getVisibleProduct`)를 쓰므로 같은 노출 조건이 걸린다(§2-9 · §2-10 · §2-11) |
+| 어드민 전시 · 룩 · 사이즈표의 상품 확인(`ProductLookupProcessor#findAllIncludingHidden`) | 거르지 않는다 — 삭제 상품은 숨김 상품(`visible=false`)으로 보인다. 삭제 상품을 새로 연결하지 못하게 할지는 삭제 API(#9 PR-E2)에서 정한다 |
 
 - **판정은 한 곳이다** — 서비스 간 SKU 의 `purchasable` 과 재고 선점의 판매 불가는 `SaleAvailability.isOpenForSale`(삭제 안 됨 · 노출 · 상품 판매중 · SKU 판매중)이 정한다.
   두 경로가 상품을 읽는 `ProductRepositoryPort#findAllByIdsIncludingHidden` 은 숨김 · 삭제 상품을 거르지 않는다. 고객 조회는 check 에 기대지 않고 삭제 조건을 명시한다
@@ -682,6 +684,8 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   order-service 는 `optionName` 이 비면 줄을 끊는다. 고객 목록의 SKU 집계는 은퇴를 보지 않는다 — "은퇴 값을 쓰는 SKU 는 판매 종료" 를 쓰기(E2)가 보장한다.
 - **버전** — `product.version`(`@Version`)은 어드민 수정의 낙관적 락이다(#9 PR-E2). 고객 응답에는 버전 · 삭제 · 은퇴 칸을 싣지 않는다 —
   고객 응답 칸은 `ProductWebResponseComponentsTest` 가 허용 목록으로 고정한다(`architecture-guide.md` §2).
+- **등록자** — `product.created_by_member_id`(null 허용, 외부 FK: auth-service `member.id`)는 운영자 온보딩(#357)의 "상품 1건 등록" 판정용이다. 값은 등록 API(#9 PR-E1)가
+  인증 주체의 회원 아이디로 채우고 수정 · 삭제로 바꾸지 않는다. 이관(#19) · 시드 상품은 null 이다 — 등록 증거가 없는 것으로 본다. 고객 응답에 싣지 않는다.
 
 ## 3. 계층 흐름
 

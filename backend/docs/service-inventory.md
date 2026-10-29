@@ -40,7 +40,8 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 `store.features.product-video`(기본 꺼짐, local · dev 켬)로 응답에서 숨긴다 (#61, `api-design-guide.md` §2-7). 입력은 어드민 상품 쓰기(#9)에서 연다. "재고" 는 SKU 재고 · 어드민 재고 조회 · 조정 · 조정 이력(`/api/v1/admin/stocks/**`, #10 · #86) · 서비스 간 재고 선점 · 확정 · 해제(`/internal/v1/stock-reservations/**`) · 결제 후 취소 · 반품 재고 복원(`/internal/v1/stock-restorations`, 클레임당 1회, #85) · 선점 만료 스케줄러가 있는 상태다 (`order-flow-guide.md` §3).
 "어드민 카테고리 관리" 는 숨김 포함 트리 조회 · 생성 · 수정(이동 포함) · 삭제(`/api/v1/admin/categories/**`)가 있는 상태다 — 깊이 3단계 · 순환 금지, 하위나 연결 상품이 있으면 삭제 409 (`api-design-guide.md` §2-5).
 "어드민 상품 목록" 은 숨김 포함 상품 페이지 목록(`GET /api/v1/admin/products` — 상품명 · 카테고리(하위 포함) · 판매 상태 · 노출 · 재고 반영 판매 가능 상태 조건,
-최신순 · 이름순)이 있는 상태다 (`api-design-guide.md` §2-6). 어드민 상품 상세 · 쓰기 · 상태 변경 · 삭제 · 이미지는 #9 의 다음 PR 이다.
+최신순 · 이름순)이 있는 상태다 (`api-design-guide.md` §2-6). 상품 soft delete · 옵션 은퇴 · 낙관적 락 버전 · 등록자 컬럼과 그 조회 규칙(삭제 상품은 고객 · 어드민 목록에서 빠지고
+서비스 간 SKU 조회에는 판매 불가로 남는다)이 있고 삭제 · 은퇴를 쓰는 API 는 아직 없다 (`api-design-guide.md` §2-13). 어드민 상품 상세 · 쓰기 · 상태 변경 · 삭제 · 이미지는 #9 의 다음 PR 이다.
 SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullable)를 가지고 서비스 간 SKU 벌크 조회가 그대로 내린다 — 해외 주문 거절은 order-service 몫이다 (#80, `order-flow-guide.md` §2-2).
 "국내 배송비 정책" 은 고객 정책 안내(`/api/v1/shipping-fees/policy`) · 어드민 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/domestic`) · 서비스 간 배송비 견적(`/internal/v1/shipping-fees/quotes`)이 있는 상태다.
 "국내 배송비 정책 교체 이력" 은 교체가 성공할 때 같은 트랜잭션에서 교체 전 · 후 값 · 관리자 · 시각을 `delivery.shipping_policy_history`(+ `shipping_policy_history_area`)에 남기고
