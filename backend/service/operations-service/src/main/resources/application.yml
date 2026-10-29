@@ -184,6 +184,43 @@ operations:
         version: 1
       - key: size-chart-templates
         version: 1
+  # AI 사용량 원장 · 월 한도 (#215 PR-B, bootstrap-conventions.md AI). 블록이 빠지거나 값이 틀리면 기동하지 않는다 (AiUsageProperties).
+  # 금액 · 단가는 문자열로 적는다 — double 로 읽지 않는다. 비용은 micro-USD(1 USD = 1,000,000)로 쌓는다
+  ai:
+    budget:
+      # 월 한도 (USD, 소수 6자리까지). 비밀이 아니다 — 배포 설정의 환경변수로 넣는다. 비면 예약이 실패한다(AI 를 켤 때 함께 넣는다)
+      monthly-usd: ${AI_MONTHLY_BUDGET_USD:}
+      # 월 경계 시간대 — 한국 시각 1일 00:00 에 새 달이 시작한다
+      zone: Asia/Seoul
+      # 예약 누계가 한도 × 이 비율 이상이 되면 달마다 한 번 경고한다 (0 초과 1 미만)
+      warn-ratio: "0.8"
+      # 경고 · 초과 알림을 받을 어드민 member id (쉼표 구분, 비밀 아님). 비면 로그 · 지표만 남긴다
+      notify-member-ids: ${AI_BUDGET_NOTIFY_MEMBER_IDS:}
+    estimate:
+      # 예상 입력 토큰 = ceil(마스킹 뒤 글자 수 / chars-per-token) + 이미지 장수 × tokens-per-image. 최대 출력 토큰은 전부 출력 단가로 잡는다
+      chars-per-token: 2
+      tokens-per-image: 1600
+    pricing:
+      # 단가표 버전 (20자 이하) — 호출 행에 남아 어느 가격표로 계산했는지 추적한다. 단가를 바꾸면 올린다. 단가가 있으면 필수
+      version: ""
+      # 모델 ID → 단가 (USD / 1M 토큰, 문자열). 설정 밖 모델은 항목별 최고 단가로 계산한다(MAX_FALLBACK).
+      # 공식 가격표 값은 ai-core 연결(PR-B3)에서 채운다. 비어 있으면 예약이 실패한다.
+      # 모델 ID 는 대괄호 키로 적는다 — 그래야 점 · 대소문자가 바뀌지 않고 그대로 맵 키가 된다
+      #   "[claude-example-1-0]":
+      #     input: "..."
+      #     output: "..."
+      #     cache-write: "..."
+      #     cache-read: "..."
+      models: {}
+    reservation-sweep:
+      # 예약 뒤 이 시간이 지나도 결과가 없으면 회수한다(ABANDONED, 예상치를 비용으로 남김). AI 호출 타임아웃 × 재시도보다 넉넉히
+      stale-after: 15m
+      batch-size: 100
+    retention:
+      # 호출 시각이 이 일수보다 오래된 호출 행을 지운다. 월 카운터는 지우지 않는다
+      days: 400
+      batch-size: 500
+      max-batches-per-run: 20
 
 security:
   jwt:

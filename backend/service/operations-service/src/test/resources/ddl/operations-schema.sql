@@ -1,6 +1,187 @@
 
     create schema operations;
 
+    create table operations.ai_usage_call (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        cache_creation_input_tokens bigint not null,
+        cache_read_input_tokens bigint not null,
+        called_at timestamp(6) with time zone not null,
+        caller_ref varchar(100),
+        cost_currency varchar(3) not null,
+        cost_micros bigint,
+        elapsed_ms integer,
+        estimate_cost_micros bigint not null,
+        feature varchar(63) not null,
+        http_status integer,
+        image_count integer not null,
+        input_chars integer not null,
+        input_tokens bigint not null,
+        message_id varchar(64),
+        model varchar(64),
+        output_tokens bigint not null,
+        period varchar(7) not null,
+        priced_by varchar(16) check ((priced_by in ('CONFIG','MAX_FALLBACK'))),
+        pricing_version varchar(20),
+        prompt_version integer,
+        reason varchar(32),
+        requested_model varchar(64) not null,
+        settled_at timestamp(6) with time zone,
+        status varchar(16) not null check ((status in ('PENDING','COMPLETED','UNUSABLE','FAILED','TIMEOUT','NOT_SENT','ABANDONED'))),
+        structured boolean not null,
+        primary key (id),
+        constraint ck_ai_usage_call_non_negative check (image_count >= 0 and input_chars >= 0 and estimate_cost_micros >= 0 and input_tokens >= 0 and output_tokens >= 0 and cache_creation_input_tokens >= 0 and cache_read_input_tokens >= 0 and (cost_micros is null or cost_micros >= 0)),
+        constraint ck_ai_usage_call_settled check ((status = 'PENDING' and cost_micros is null and settled_at is null) or (status <> 'PENDING' and cost_micros is not null and settled_at is not null)),
+        constraint ck_ai_usage_call_period_format check (length(period) = 7 and substr(period, 5, 1) = '-' and ltrim(replace(period, '-', ''), '0123456789') = '')
+    );
+
+    comment on table operations.ai_usage_call is
+        'AI 호출 사용량 · 비용 원장 (호출 단위)';
+
+    comment on column operations.ai_usage_call.id is
+        'AI 호출 아이디 (Snowflake)';
+
+    comment on column operations.ai_usage_call.created_at is
+        '생성 시각';
+
+    comment on column operations.ai_usage_call.updated_at is
+        '수정 시각';
+
+    comment on column operations.ai_usage_call.cache_creation_input_tokens is
+        '실측 캐시 쓰기 입력 토큰. 응답이 없으면 0';
+
+    comment on column operations.ai_usage_call.cache_read_input_tokens is
+        '실측 캐시 읽기 입력 토큰. 응답이 없으면 0';
+
+    comment on column operations.ai_usage_call.called_at is
+        '예약 시각 — 호출 직전';
+
+    comment on column operations.ai_usage_call.caller_ref is
+        '호출한 작업 식별자 (예 job:123, 내부 PK 만). 없으면 null';
+
+    comment on column operations.ai_usage_call.cost_currency is
+        '비용 통화 — 언제나 USD';
+
+    comment on column operations.ai_usage_call.cost_micros is
+        '확정 비용 (micro-USD, cost_currency, 합계 올림). PENDING 이면 null';
+
+    comment on column operations.ai_usage_call.elapsed_ms is
+        '자리를 잡은 뒤 응답 · 실패까지 걸린 시간 (ms, SDK 재시도 포함). PENDING · ABANDONED 면 null';
+
+    comment on column operations.ai_usage_call.estimate_cost_micros is
+        '예약한 예상 비용 (micro-USD, cost_currency) — TIMEOUT · ABANDONED 는 이 값이 확정 비용이다';
+
+    comment on column operations.ai_usage_call.feature is
+        '기능 이름 (ai-core 요청의 feature)';
+
+    comment on column operations.ai_usage_call.http_status is
+        'API 오류 응답의 HTTP 상태 코드. 오류 응답이 아니면 null';
+
+    comment on column operations.ai_usage_call.image_count is
+        '이미지 장수';
+
+    comment on column operations.ai_usage_call.input_chars is
+        '마스킹 뒤 입력 글자 수 — 예상 비용의 입력 몫';
+
+    comment on column operations.ai_usage_call.input_tokens is
+        '실측 입력 토큰 (캐시 제외). 응답이 없으면 0';
+
+    comment on column operations.ai_usage_call.message_id is
+        'API 메시지 ID. 응답이 없으면 null';
+
+    comment on column operations.ai_usage_call.model is
+        '답한 모델 ID. 응답이 없으면 요청한 모델, PENDING · ABANDONED 면 null';
+
+    comment on column operations.ai_usage_call.output_tokens is
+        '실측 출력 토큰. 응답이 없으면 0';
+
+    comment on column operations.ai_usage_call.period is
+        '비용을 매기는 월 YYYY-MM (예약 시각, operations.ai.budget.zone 기준). ai_usage_month.period 와 같다';
+
+    comment on column operations.ai_usage_call.priced_by is
+        '단가 출처 — CONFIG(설정 단가) / MAX_FALLBACK(설정 밖 모델, 항목별 최고 단가)';
+
+    comment on column operations.ai_usage_call.pricing_version is
+        '비용 계산에 쓴 단가표 버전 (operations.ai.pricing.version). PENDING 이면 예상치의 버전';
+
+    comment on column operations.ai_usage_call.prompt_version is
+        '프롬프트 템플릿 버전. 템플릿 없이 만든 요청이면 null';
+
+    comment on column operations.ai_usage_call.reason is
+        '실패 원인 (ai-core AiException.Reason). 없으면 null';
+
+    comment on column operations.ai_usage_call.requested_model is
+        '요청한 모델 ID — 예상 비용의 단가';
+
+    comment on column operations.ai_usage_call.settled_at is
+        '닫은 시각 (정산 · 회수). PENDING 이면 null';
+
+    comment on column operations.ai_usage_call.status is
+        '상태 (PENDING / COMPLETED / UNUSABLE / FAILED / TIMEOUT / NOT_SENT / ABANDONED)';
+
+    comment on column operations.ai_usage_call.structured is
+        '구조화 출력 호출이다';
+
+    create table operations.ai_usage_month (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        call_count bigint not null,
+        cost_currency varchar(3) not null,
+        exceeded_at timestamp(6) with time zone,
+        limit_micros_snapshot bigint not null,
+        period varchar(7) not null,
+        reserved_micros bigint not null,
+        settled_micros bigint not null,
+        version bigint not null,
+        warned_at timestamp(6) with time zone,
+        primary key (id),
+        constraint uk_ai_usage_month_period unique (period),
+        constraint ck_ai_usage_month_non_negative check (reserved_micros >= 0 and settled_micros >= 0 and call_count >= 0 and limit_micros_snapshot >= 0),
+        constraint ck_ai_usage_month_reserved_covers_settled check (reserved_micros >= settled_micros),
+        constraint ck_ai_usage_month_period_format check (length(period) = 7 and substr(period, 5, 1) = '-' and ltrim(replace(period, '-', ''), '0123456789') = '')
+    );
+
+    comment on table operations.ai_usage_month is
+        'AI 사용 월 카운터 (월 한도 예약 · 정산 누계)';
+
+    comment on column operations.ai_usage_month.id is
+        '월 카운터 아이디 (Snowflake)';
+
+    comment on column operations.ai_usage_month.created_at is
+        '생성 시각';
+
+    comment on column operations.ai_usage_month.updated_at is
+        '수정 시각';
+
+    comment on column operations.ai_usage_month.call_count is
+        '닫힌 호출 수 (보내지 않은 NOT_SENT 제외)';
+
+    comment on column operations.ai_usage_month.cost_currency is
+        '금액 칸의 통화 — 언제나 USD';
+
+    comment on column operations.ai_usage_month.exceeded_at is
+        '한도를 처음 넘은 시각(첫 예약 거절 또는 정산 뒤 누계 ≥ 한도). 기간당 한 번. 아직이면 null';
+
+    comment on column operations.ai_usage_month.limit_micros_snapshot is
+        '마지막 예약 때의 월 한도 (micro-USD, cost_currency) — 설정을 바꾸면 다음 예약부터 바뀐다';
+
+    comment on column operations.ai_usage_month.period is
+        '월 YYYY-MM (operations.ai.budget.zone 기준)';
+
+    comment on column operations.ai_usage_month.reserved_micros is
+        '예약 누계 (micro-USD, cost_currency) — 확정 비용 + 진행 중 예약의 예상치. 한도 판정 대상';
+
+    comment on column operations.ai_usage_month.settled_micros is
+        '확정 비용 누계 (micro-USD, cost_currency)';
+
+    comment on column operations.ai_usage_month.version is
+        '낙관적 락 버전 — 조건부 UPDATE 마다 올린다';
+
+    comment on column operations.ai_usage_month.warned_at is
+        '경고 임계(한도 × warn-ratio)를 처음 넘은 시각. 기간당 한 번. 아직이면 null';
+
     create table operations.job (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -299,6 +480,12 @@
 
     comment on column operations.shedlock.locked_by is
         '락을 잡은 인스턴스 (호스트 이름)';
+
+    create index idx_ai_usage_call_called_at_id 
+       on operations.ai_usage_call (called_at, id);
+
+    create index idx_ai_usage_call_status_called_at 
+       on operations.ai_usage_call (status, called_at);
 
     create index idx_job_status_lease_expires_at 
        on operations.job (status, lease_expires_at);

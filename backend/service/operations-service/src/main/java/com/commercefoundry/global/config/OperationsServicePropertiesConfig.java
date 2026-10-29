@@ -1,6 +1,7 @@
 package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
+import com.commercefoundry.global.properties.AiUsageProperties;
 import com.commercefoundry.global.properties.JobProperties;
 import com.commercefoundry.global.properties.NotificationProperties;
 import com.commercefoundry.global.properties.OnboardingProperties;
@@ -20,7 +21,7 @@ import org.springframework.context.annotation.Import;
     SnowflakePropertiesConfig.class,
     SwaggerPropertiesConfig.class
 })
-@EnableConfigurationProperties({JobProperties.class, NotificationProperties.class, OnboardingProperties.class})
+@EnableConfigurationProperties({AiUsageProperties.class, JobProperties.class, NotificationProperties.class, OnboardingProperties.class})
 public class OperationsServicePropertiesConfig {
 
 }
