@@ -86,14 +86,17 @@ export function CurrencyField({
 export function Section({
   title,
   description,
+  tour,
   children,
 }: {
   title: string;
   description?: string;
+  /** 안내 투어가 가리키는 `data-tour` 값 */
+  tour?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-4 rounded-md bg-muted/50 p-5">
+    <section data-tour={tour} className="flex flex-col gap-4 rounded-md bg-muted/50 p-5">
       <div>
         <h2 className="font-semibold">{title}</h2>
         {description && <p className="mt-1 text-sm text-muted-fg">{description}</p>}
@@ -172,7 +175,12 @@ export function PolicyEditorFrame<
                 {editor.notice}
               </p>
             )}
-            <Button type="submit" disabled={editor.saving} className="self-start">
+            <Button
+              type="submit"
+              disabled={editor.saving}
+              className="self-start"
+              data-tour="policy-save"
+            >
               {editor.saving ? '저장 중…' : '저장'}
             </Button>
           </div>

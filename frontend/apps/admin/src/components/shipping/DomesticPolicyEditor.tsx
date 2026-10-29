@@ -1,6 +1,8 @@
 'use client';
 
 import { Button, FieldError, TextField } from '@cf/ui';
+import { useEffect } from 'react';
+import { onboardingTasks } from '@/lib/onboarding/tasks-store';
 import {
   domesticForm,
   domesticRequest,
@@ -16,6 +18,7 @@ import { CurrencyField, errorsOf, MoneyField, PolicyEditorFrame, Section } from 
 /**
  * 국내 배송비 정책 편집(#187) — `GET/PUT /api/v1/admin/shipping-policies/domestic`.
  * 기본 배송비 · 무료배송 기준(선택) · 도서산간 우편번호 구간별 추가 배송비. 실제 배송비는 서버 견적이 계산한다.
+ * 저장하면 시작 체크리스트(#358)의 업무 상태를 서버에서 다시 읽게 한다.
  * 폼 아래에 변경 이력(#319)을 둔다 — 저장 뒤 서버 값이 바뀌었을 수 있으면(`revision`) 첫 페이지부터 다시 읽는다.
  */
 export function DomesticPolicyEditor() {
@@ -24,6 +27,12 @@ export function DomesticPolicyEditor() {
     toForm: domesticForm,
     toRequest: domesticRequest,
   });
+  const { revision } = editor;
+
+  // 저장 뒤 서버 값이 바뀌었을 수 있다 — 시작 체크리스트 업무 상태를 서버에서 다시 읽는다(#358). 화면에서 완료로 바꾸지 않는다
+  useEffect(() => {
+    if (revision > 0) onboardingTasks.invalidate();
+  }, [revision]);
 
   return (
     <PolicyEditorFrame
@@ -44,7 +53,7 @@ export function DomesticPolicyEditor() {
 
         return (
           <>
-            <Section title="기본 배송비">
+            <Section title="기본 배송비" tour="shipping-base-fee">
               <CurrencyField
                 currency={form.currency}
                 editable={form.version === null}
@@ -72,6 +81,7 @@ export function DomesticPolicyEditor() {
 
             <Section
               title="도서산간 추가 배송비"
+              tour="shipping-remote-areas"
               description="우편번호(5자리) 구간별로 더 받는 배송비입니다. 무료배송이어도 붙습니다. 구간은 겹칠 수 없습니다."
             >
               {form.remoteAreas.length === 0 && (

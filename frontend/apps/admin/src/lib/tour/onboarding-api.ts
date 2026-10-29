@@ -18,7 +18,19 @@ export type ServerTourItem = {
   finishedAt: string | null;
 };
 
-export type OnboardingMe = { tours: ServerTourItem[] };
+/**
+ * 서버가 낸 업무 하나(#357 PR-B2). 업무 완료는 담당 서비스의 사실로만 판정한다 — 투어 기록과 다르다.
+ * `taskKey` 는 화면 분기용 제어 코드이고 표시 이름은 FE 가 가진다(`lib/onboarding/start-tasks.ts`).
+ */
+export type ServerTaskItem = {
+  taskKey: string;
+  storeStatus: { code: string };
+  myStatus: { code: string };
+  myCompletedAt: string | null;
+};
+
+/** `tasks` 는 #357 PR-B2 전 서버에서는 빈 배열이다 */
+export type OnboardingMe = { tours: ServerTourItem[]; tasks?: ServerTaskItem[] };
 
 export type TourUpdate = {
   guideVersion: number;

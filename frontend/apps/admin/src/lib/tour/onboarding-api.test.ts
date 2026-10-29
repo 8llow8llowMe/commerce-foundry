@@ -24,6 +24,8 @@ describe('guideOf', () => {
       { key: 'size-charts', version: 1 },
       { key: 'size-chart-editor', version: 1 },
       { key: 'size-chart-templates', version: 1 },
+      // 서버 허용 목록에 아직 없다 — 서버가 모르는 동안은 이 브라우저 기록으로만 정한다(#358)
+      { key: 'shipping-domestic', version: 1 },
     ]);
   });
 });
