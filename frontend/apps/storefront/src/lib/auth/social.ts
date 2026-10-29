@@ -19,12 +19,12 @@ export { isSocialProvider, SOCIAL_PROVIDERS, type SocialProvider } from '@cf/api
 /** sessionStorage 키. 탭마다 진행 중인 흐름 하나 — 새로 시작하면 덮어쓴다 */
 export const SOCIAL_FLOW_KEY = 'cf-social-login';
 
-/** BE state · verifier 모양(SecureRandom 256비트 base64url) */
-const TOKEN = /^[A-Za-z0-9_-]{43}$/;
+/** BE state · verifier 모양(SecureRandom 256비트 base64url). 계정 연결(`social-link.ts`)도 같은 모양이다 */
+export const FLOW_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 /** 언어 경로 접두어('' 또는 '/en') — 다른 값이면 콜백이 엉뚱한 곳으로 보내지 않게 버린다 */
-const LOCALE_PREFIX = /^(\/[a-z]{2}(-[A-Za-z]{2,4})?)?$/;
-/** BE `SocialLoginRequest.code` 상한 */
-const MAX_CODE_LENGTH = 2048;
+export const LOCALE_PREFIX = /^(\/[a-z]{2}(-[A-Za-z]{2,4})?)?$/;
+/** BE `SocialLoginRequest.code` · `SocialAccountLinkRequest.code` 상한 */
+export const MAX_CODE_LENGTH = 2048;
 
 export type SocialFlow = {
   provider: SocialProvider;
@@ -61,8 +61,8 @@ export function parseSocialFlow(raw: string | null): SocialFlow | null {
   const record = value as Record<string, unknown>;
   const { provider, state, verifier, returnPath, localePrefix } = record;
   if (!isSocialProvider(provider)) return null;
-  if (typeof state !== 'string' || !TOKEN.test(state)) return null;
-  if (typeof verifier !== 'string' || !TOKEN.test(verifier)) return null;
+  if (typeof state !== 'string' || !FLOW_TOKEN.test(state)) return null;
+  if (typeof verifier !== 'string' || !FLOW_TOKEN.test(verifier)) return null;
   if (typeof returnPath !== 'string') return null;
   if (typeof localePrefix !== 'string' || !LOCALE_PREFIX.test(localePrefix)) return null;
   return {
@@ -108,7 +108,8 @@ export function readAuthorizeResponse(
   if (typeof value !== 'object' || value === null) return null;
   const { authorizeUrl, state, verifier } = value as Record<string, unknown>;
   if (typeof authorizeUrl !== 'string' || typeof state !== 'string') return null;
-  if (typeof verifier !== 'string' || !TOKEN.test(state) || !TOKEN.test(verifier)) return null;
+  if (typeof verifier !== 'string' || !FLOW_TOKEN.test(state) || !FLOW_TOKEN.test(verifier))
+    return null;
   try {
     if (new URL(authorizeUrl).protocol !== 'https:') return null;
   } catch {
@@ -188,7 +189,7 @@ export function checkCallback(
 
 /** 같은 화면의 다른 언어로 넘길 콜백 주소. 지금 언어와 같으면 null */
 export function localeHandoffPath(
-  flow: SocialFlow | null,
+  flow: Pick<SocialFlow, 'localePrefix'> | null,
   currentPrefix: string,
   provider: SocialProvider,
   search: string,

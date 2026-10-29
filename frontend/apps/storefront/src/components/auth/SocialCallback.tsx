@@ -8,6 +8,13 @@ import { useDictionary, useLocalePrefix, useLocalizedHref } from '@/components/i
 import { Link } from '@/components/i18n/Link';
 import { hasRequiredAgreements, NO_AGREEMENTS, type SignUpAgreements } from '@/lib/auth/agreements';
 import {
+  SOCIAL_ACCOUNTS_PATH,
+  callbackPurpose,
+  runSocialLinkCallback,
+  type SocialLinkBody,
+  type SocialLinkFailure,
+} from '@/lib/auth/social-link';
+import {
   runSocialCallback,
   sessionFlowStorage,
   socialStartErrorText,
@@ -19,16 +26,24 @@ import {
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { useRetryCooldown } from '@/lib/use-retry-cooldown';
 import { AgreementsFieldset, type AgreementErrors } from './AgreementsFieldset';
+import { SocialLinkFailureView } from './SocialLinkFailureView';
 import { navigateToProvider, requestAuthorizeUrl } from './SocialLoginButtons';
 
 type View =
   | { kind: 'working' }
   | { kind: 'agreements'; flow: SocialFlow }
-  | { kind: 'error'; message: string; returnPath: string };
+  | { kind: 'error'; message: string; returnPath: string }
+  /** 계정 연결(#356) 콜백 실패 */
+  | { kind: 'link'; failure: SocialLinkFailure };
 
 /** BFF 소셜 로그인 — 토큰은 httpOnly 쿠키로 심기고 본문에는 없다 */
 function sendSocialLogin(provider: SocialProvider, body: SocialLoginBody): Promise<null> {
   return apiFetch<null>(`/api/v1/auth/oauth/${provider}/login`, { method: 'POST', json: body });
+}
+
+/** 연결 완료 — 일반 BFF 프록시가 고객 access 쿠키를 Bearer 로 붙인다. 응답(연결 목록)에 토큰은 없다 */
+function sendSocialLink(provider: SocialProvider, body: SocialLinkBody): Promise<unknown> {
+  return apiFetch<unknown>(`${SOCIAL_ACCOUNTS_PATH}/${provider}`, { method: 'POST', json: body });
 }
 
 /** 다시 시작할 로그인 화면(돌아갈 경로를 잇는다) */
@@ -37,10 +52,12 @@ export function restartHref(returnPath: string): string {
 }
 
 /**
- * 소셜 로그인 콜백(`/login/oauth/{provider}`, #25). 브라우저에서만 처리한다 — sessionStorage 의 흐름과 콜백 쿼리를 맞춰 본다.
- * 처리 순서(언어 넘기기 → 쿼리 지우기 → 흐름 지우기 → 보내기 → 이동)는 `runSocialCallback` 이 정한다 — 이 컴포넌트는 부르고 결과를 그린다.
+ * 제공자 콜백(`/login/oauth/{provider}`). 브라우저에서만 처리한다 — sessionStorage 의 흐름과 콜백 쿼리를 맞춰 본다.
+ * BE 는 소셜 로그인(#25)과 계정 연결(#356)에 같은 redirect URI 를 쓰므로 먼저 저장한 흐름의 state 로 목적을 가른다(`callbackPurpose`).
+ * 연결 흐름이 없으면 기존 로그인 콜백 그대로다.
+ * 처리 순서(언어 넘기기 → 쿼리 지우기 → 흐름 지우기 → 보내기 → 이동)는 `runSocialCallback` · `runSocialLinkCallback` 이 정한다 — 이 컴포넌트는 부르고 결과를 그린다.
  * StrictMode 의 effect 이중 실행은 ref(`started`)를 가드로 넘겨 한 번만 보낸다.
- * 성공하면 돌아갈 경로로 바꾸고 서버 컴포넌트를 다시 그린다. 신규 가입 동의(AUTH_056)면 동의를 받아 인가부터 다시 시작한다.
+ * 로그인 성공은 돌아갈 경로로, 연결 성공은 연결 화면으로 바꾸고 서버 컴포넌트를 다시 그린다. 신규 가입 동의(AUTH_056)면 동의를 받아 인가부터 다시 시작한다.
  */
 export function SocialCallback({ provider }: { provider: SocialProvider }) {
   const t = useDictionary().auth;
@@ -51,23 +68,28 @@ export function SocialCallback({ provider }: { provider: SocialProvider }) {
   const started = useRef(false);
 
   useEffect(() => {
-    void runSocialCallback(
-      {
-        provider,
-        prefix,
-        storage: sessionFlowStorage(),
-        location: window.location,
-        history: window.history,
-        send: sendSocialLogin,
-        localize,
-        navigate: (href) => {
-          router.replace(href);
-          router.refresh();
-        },
-        t,
+    const storage = sessionFlowStorage();
+    const common = {
+      provider,
+      prefix,
+      storage,
+      location: window.location,
+      history: window.history,
+      localize,
+      navigate: (href: string) => {
+        router.replace(href);
+        router.refresh();
       },
-      started,
-    ).then((result) => {
+      t,
+    };
+    if (callbackPurpose(storage, window.location.search) === 'link') {
+      void runSocialLinkCallback({ ...common, send: sendSocialLink }, started).then((result) => {
+        if (!result || result.kind === 'handoff' || result.kind === 'success') return;
+        setView({ kind: 'link', failure: result });
+      });
+      return;
+    }
+    void runSocialCallback({ ...common, send: sendSocialLogin }, started).then((result) => {
       if (!result || result.kind === 'handoff' || result.kind === 'success') return;
       if (result.kind === 'agreements') {
         setView({ kind: 'agreements', flow: result.flow });
@@ -81,6 +103,9 @@ export function SocialCallback({ provider }: { provider: SocialProvider }) {
     });
   }, [provider, prefix, localize, router, t]);
 
+  if (view.kind === 'link') {
+    return <SocialLinkFailureView failure={view.failure} />;
+  }
   if (view.kind === 'agreements') {
     return <SocialAgreements flow={view.flow} />;
   }
@@ -94,6 +119,7 @@ export function SocialCallback({ provider }: { provider: SocialProvider }) {
       </div>
     );
   }
+  // 로그인인지 연결인지는 effect 에서 정해지므로 둘 다에 맞는 안내다
   return (
     <p role="status" className="text-center text-sm text-muted-fg">
       {t.social.working}

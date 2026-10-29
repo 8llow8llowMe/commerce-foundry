@@ -168,7 +168,33 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
 - **오류** — 코드별 사전 문구 `dict.auth.social.errors`(AUTH_050 ~ 057, AUTH_150 ~ 152 검증, 같은 이메일의 기존 계정 409 AUTH_002), 429 는 `rateLimitTextOf`, 그 밖은 한 문구.
   콜백 오류 화면의 "로그인 화면으로" 는 돌아갈 경로를 이은 `/login?next=` 다. AUTH_055 는 제공자 화면에서 이메일 제공에 동의하라는 안내다.
 - **버튼 색** — 제공자 브랜드 색 토큰이 없어 중립 보조 버튼(`secondary`)이다. 제공자 디자인 가이드(색 · 로고)를 맞추려면 `tokens.css` 에 제공자 토큰을 더하는 결정이 먼저다(`styling-theme.md` §1).
-- 비로그인 장바구니 병합은 로그인 뒤 레이아웃의 `CartMerge` 가 그대로 맡는다(§6). 마이페이지 계정 연결은 #356.
+- 비로그인 장바구니 병합은 로그인 뒤 레이아웃의 `CartMerge` 가 그대로 맡는다(§6). 마이페이지 계정 연결은 §3-2.
+
+### 3-2. 간편 로그인 계정 연결 (`/mypage/social`, #356 · BE #355)
+
+일반(이메일) 계정에 카카오 · 네이버 로그인을 더한다. 이메일이 같아도 자동으로 연결하지 않고, 현재 비밀번호 재인증 → 제공자 인가를 거친다.
+제공자별 1개 연결이며 연결 해제 · 회원 병합 · 소셜 전용 회원의 비밀번호 설정은 범위 밖이다(소셜 전용 회원은 재인증이 `AUTH_058` 로 막힌다 — 화면은 안내 문구만).
+
+| 단계 | 어디서 | 하는 일 |
+|------|--------|---------|
+| 목록 | `SocialAccounts` | `GET /api/v1/members/me/social-accounts` → `{ providers }` 의 아는 코드만(`readLinkedProviders`). 이름은 사전 `dict.auth.socialLink.providers` |
+| 시작 | 같은 화면의 비밀번호 확인 폼 | `POST …/{provider}/authorize-url` `{ currentPassword }` → 흐름을 sessionStorage 키 **`cf-social-link`** 에 두고 `authorizeUrl` 로 이동(`startSocialLink`) |
+| 콜백 | `/login/oauth/{provider}` `SocialCallback` | 목적 판정(`callbackPurpose`) → 연결이면 state 대조 후 `POST …/{provider}` `{ code, state, verifier }` 1회 → `/mypage/social?linked=<provider>` |
+
+- **세 API 모두 고객 access JWT 가 필요하고 응답에 토큰이 없다** — 전용 핸들러 없이 일반 BFF 프록시가 access 쿠키를 Bearer 로 붙여 중계한다(만료면 재발급 · 재시도도 프록시가 한다).
+  새 로그인 토큰을 발급하지 않으므로 쿠키는 바뀌지 않는다. 일반 프록시의 토큰 경로 차단(§3 끝)은 그대로다.
+- **비밀번호** — 컴포넌트 상태에만 잠깐 두고 요청 본문으로만 보낸다. 보내는 순간 상태를 비운다(실패해도 다시 입력). 입력 칸에 `name` 을 주지 않고 폼은 `method="post"` 라
+  스크립트 전에 제출돼도 주소에 실리지 않는다. 흐름 · 로그에 담지 않는다.
+- **흐름 값** `{ purpose: 'LINK', provider, state, verifier, localePrefix }` — 로그인 흐름(`cf-social-login`)과 키가 달라 서로 덮어쓰지 않는다. `parseSocialLinkFlow` 는 `purpose` 가 `LINK` 가 아니면 버린다.
+- **콜백 목적 판정** — BE 는 로그인과 같은 redirect URI 를 쓴다(제공자 콘솔에 주소를 더 등록하지 않는다). 연결 흐름이 없으면 기존 로그인 콜백 그대로이고,
+  있으면 쿼리 state 가 로그인 흐름의 state 와 맞을 때만 로그인, 그 밖은 연결이다. 연결은 저장한 연결 흐름의 state · 제공자와 맞아야만 보낸다 —
+  다른 탭(흐름 없음) · 다른 흐름의 state · verifier 없는 콜백은 BE 를 부르지 않는다. 순서(언어 넘기기 → 쿼리 지우기 → 연결 흐름 지우기 → 보내기 → 이동)는
+  로그인과 같고 `runSocialLinkCallback`(`lib/auth/social-link.ts`)이 정한다. effect 안에서 판정과 실행을 같이 해(set-state-in-effect 금지) 처리 중 안내는 둘에 맞는 문구다.
+- **결과** — 성공은 연결 화면이 목록을 다시 읽고(즉시 반영) `?linked=` 로 완료 안내를 띄운다(목록에 그 제공자가 있을 때만). 실패는 콜백 화면에 안내 + "간편 로그인 연결로 돌아가기"
+  (state 는 이미 소비돼 모두 비밀번호 확인부터 다시). 401 은 `SignedOutNotice`(다시 로그인 뒤 `/mypage/social`).
+- **오류** — 코드별 사전 `dict.auth.socialLink.errors`: 재인증 실패 `AUTH_058`(원인 구분 없음), 연결 꺼짐 `AUTH_060` · 저장소 장애 `AUTH_013`, 충돌 `AUTH_057`(다른 회원 · 같은 제공자의 다른 계정),
+  경합 `AUTH_004`, state 만료 · 재사용 `AUTH_052`, 제공자 `AUTH_050 ~ 054`, 검증 `AUTH_104 · 150 ~ 152`. 시도 제한 429 `AUTH_059` 는 `Retry-After` 가 없어
+  "잠시 후" 문구 + 버튼 기본 쿨다운이다(`rateLimitTextOf`). 사용자 취소(`error=access_denied`)는 BE 를 부르지 않는다.
 
 ## 4. 헬스체크
 
@@ -281,6 +307,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 | `/mypage` | 하위 화면 메뉴. 주문 내역은 주문 조회 API(BE #16) 전까지 "준비 중" | — |
 | `/mypage/profile` | 회원 정보 수정 — 이메일은 읽기만 | `GET` · `PATCH /api/v1/members/me` |
 | `/mypage/addresses` | 배송지 목록 · 추가 · 수정 · 삭제 · 기본 지정 | `/api/v1/members/me/shipping-addresses/**` (BE #7) |
+| `/mypage/social` | 카카오 · 네이버 간편 로그인 연결 — 연결 여부 · 비밀번호 재인증 후 연결(§3-2) | `/api/v1/members/me/social-accounts/**` (BE #355) |
 
 - **진입** — 인증 쿠키가 없으면 서버에서 `/login?next=<경로>` 로 보낸다(`requireSession`, `lib/auth/require-session.ts`).
   쿠키가 있어도 세션이 끝났을 수 있어, 화면의 API 가 401 이면 다시 로그인 안내(`SignedOutNotice`)로 멈춘다.

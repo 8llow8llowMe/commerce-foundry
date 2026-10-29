@@ -74,7 +74,7 @@ export const en: Dictionary = {
       starting: 'Redirecting…',
       agreementsRequired: 'Please accept the required agreements to sign up with this option.',
       callbackTitle: 'Quick sign-in',
-      working: 'Signing you in…',
+      working: 'Just a moment…',
       restart: 'Back to sign in',
       consentTitle: 'Agreements',
       consentDescription: 'Welcome! Please accept the agreements to finish creating your account.',
@@ -101,11 +101,62 @@ export const en: Dictionary = {
         AUTH_152: 'We could not verify this sign-in request. Please start again.',
       } as Record<string, string>,
     },
+    /**
+     * Linking Kakao · Naver to an email account (#356 · BE #355). Password check → provider sign-in → link.
+     * Failures after the state is used restart from the password check. Accounts are never linked by email alone.
+     */
+    socialLink: {
+      title: 'Quick sign-in',
+      description:
+        'Link a Kakao or Naver account to sign in to this account with it. Accounts are never linked automatically, even with the same email.',
+      passwordOnly:
+        'Accounts created with quick sign-in have no password and cannot be linked here.',
+      providers: { kakao: 'Kakao', naver: 'Naver' },
+      linked: 'Linked',
+      notLinked: 'Not linked',
+      link: 'Link',
+      linkItem: 'Link {provider}',
+      passwordTitle: 'Link {provider} — confirm your password',
+      passwordNote:
+        'Enter your current password to continue. You will then be taken to {provider} to sign in.',
+      password: 'Current password',
+      submit: 'Confirm and link',
+      starting: 'Redirecting…',
+      cancel: 'Cancel',
+      done: 'Your {provider} account is linked. You can now sign in to this account with {provider}.',
+      back: 'Back to quick sign-in',
+      cancelled: 'You cancelled linking.',
+      invalid: 'We could not verify this request. Please start again from the password check.',
+      storageUnavailable:
+        'Your browser blocked the storage needed for linking. Please check your browser settings.',
+      startFailed: 'We could not start linking. Please try again in a moment.',
+      failed: 'We could not link your account. Please start again from the password check.',
+      errors: {
+        AUTH_003: 'We could not find your account. Please sign in again.',
+        AUTH_004: 'Another request got in the way. Please start again from the password check.',
+        AUTH_013: 'Linking is unavailable right now. Please try again in a moment.',
+        AUTH_050: 'This sign-in option is not supported.',
+        AUTH_051: 'This sign-in option cannot be linked right now.',
+        AUTH_052:
+          'This request has expired or was already used. Please start again from the password check.',
+        AUTH_053: 'We could not verify the sign-in. Please start again from the password check.',
+        AUTH_054: 'We could not reach the sign-in service. Please try again in a moment.',
+        AUTH_057:
+          'This sign-in account is linked to another member, or this account already has a different one linked.',
+        AUTH_058: 'We could not confirm your current password. Please try again.',
+        AUTH_060: 'Linking cannot be started right now. Please try again in a moment.',
+        AUTH_104: 'Please enter your current password.',
+        AUTH_150: 'We could not verify this request. Please start again from the password check.',
+        AUTH_151: 'We could not verify this request. Please start again from the password check.',
+        AUTH_152: 'We could not verify this request. Please start again from the password check.',
+      } as Record<string, string>,
+    },
     failed: 'We could not sign you in. Please try again in a moment.',
     rateLimit: {
       reasons: {
         AUTH_040: 'Too many sign-in attempts.',
         AUTH_041: 'Too many sign-up attempts.',
+        AUTH_059: 'Too many password attempts.',
       } as Record<string, string>,
       other: 'Too many requests.',
       retryIn: 'Please try again in {wait}.',
@@ -355,6 +406,8 @@ export const en: Dictionary = {
     profileMenuNote: 'Name, phone and marketing preferences',
     addressMenu: 'Address book',
     addressMenuNote: 'Save the addresses you ship to often.',
+    socialMenu: 'Quick sign-in',
+    socialMenuNote: 'Sign in with Kakao or Naver too.',
     back: 'My account',
     loading: 'Loading…',
     loadFailed: 'We couldn’t load your information. Please try again shortly.',
