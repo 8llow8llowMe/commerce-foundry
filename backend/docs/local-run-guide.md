@@ -48,6 +48,10 @@ cp .env.example .env
   (`security-guide.md` §14). 관리자 로그인은 성공도 세고 지우지 않으므로 15분 창 안의 6번째 시도(성공 포함)부터 같은 429 다.
   잠깐 끄려면 `.env` 에 `AUTH_LOGIN_GUARD_ENABLED=false` 를 넣고(`.env.example` 의 주석 줄을 푼다 — 빈 값 줄은 두지 않는다) 다시 띄운다.
   OS 환경변수로 줘도 같다. 기동 때 `login guard disabled` warn 이 남는다.
+- **#238 부터 auth 는 `AUTH_OTP_SECRET_KEY`(관리자 OTP 비밀 암호화 키)가 비면 뜨지 않는다** — OTP 를 등록한 관리자가 없어도 필수다.
+  빈 `AUTH_OTP_SECRET_KEY=` 줄을 지우고 `printf 'AUTH_OTP_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다.
+  `AUTH_OTP_SECRET_KEY_PREVIOUS` 는 비워 둔다(키 회전 중에만 채운다). 테스트 설정(`application-test.yml`)의 키는 공개된 값이라 넣으면 auth 가 뜨지 않는다 —
+  반드시 새로 만든다. 로컬 키를 바꾸면 그 전에 등록한 로컬 OTP 는 읽지 못하므로(`AUTH_039`) 해당 행을 지우고 다시 등록한다 (`secret-management.md`).
 - **#248 부터 Eureka · 게이트웨이 · 서비스 전부는 `EUREKA_PASSWORD`(레지스트리 HTTP Basic 비밀번호)가 비면 뜨지 않는다.** 빈 `EUREKA_PASSWORD=` 줄을 지우고
   `printf 'EUREKA_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다(7개 모듈이 같은 `.env` 를 읽는다).
   hex 로 만든다 — 영문 · 숫자 · `. _ ~ -` 밖의 문자가 있으면 Eureka 가 뜨지 않는다 (`security-guide.md` §12).
@@ -228,6 +232,7 @@ refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨
 | auth 가 `JWT_PRIVATE_KEY 와 JWT_PUBLIC_KEY 가 한 쌍이 아닙니다` 로 뜨지 않는다 | 두 값이 다른 키 쌍에서 왔다. 같은 `jwt-private.pem` 에서 만든 공개키를 넣는다 (`security-guide.md` §6-3) |
 | 서비스가 `security.internal.secret(환경변수 INTERNAL_JWT_SECRET)` 로 시작하는 메시지로 뜨지 않는다 | 서비스 토큰 비밀이 비었거나 base64 32바이트가 아니다. `openssl rand -base64 32` 결과를 넣는다 (§2, `security-guide.md` §9-6) |
 | auth 가 `Failed to bind properties under 'auth.login-guard'` · `auth.login-guard.hash-key(AUTH_LOGIN_GUARD_HASH_KEY)` 로 시작하는 메시지로 뜨지 않는다 | 시도 제한 HMAC 키가 비었거나 base64 32바이트가 아니다. `openssl rand -base64 32` 결과를 넣는다 (§2, `security-guide.md` §12-4) |
+| auth 가 `Failed to bind properties under 'auth.admin-otp'` · `auth.admin-otp.secret-key(AUTH_OTP_SECRET_KEY)` 로 시작하는 메시지로 뜨지 않는다 | 관리자 OTP 암호화 키가 비었거나 base64 32바이트가 아니거나 저장소의 테스트 키다. `openssl rand -base64 32` 결과를 넣는다. `previous-secret-key` 로 시작하는 메시지면 이전 키를 비우거나(회전 중이 아니면) 현재 키와 다른 값을 넣는다 (§2, `secret-management.md`) |
 | 게이트웨이가 `Failed to bind properties under 'gateway.client-ip'` · `gateway.client-ip.hash-key(GATEWAY_CLIENT_IP_HASH_KEY)` 로 시작하는 메시지로 뜨지 않는다 | `gateway.client-ip.enabled` 를 켰는데 HMAC 키가 비었거나 base64 32바이트가 아니다. `openssl rand -base64 32` 결과를 넣거나 다시 끈다 (§2, `security-guide.md` §7-3) |
 | 서비스 간 호출이 가끔 401(`SECURITY_007`)로 거부된다 | 서버 시계가 어긋났다. 받는 쪽은 `iat` 가 30초 넘게 미래거나 만료가 30초 넘게 지난 토큰을 거부한다 — 서버 시계(NTP) 동기화를 확인한다 (`security-guide.md` §9-2) |
 | `bootTestRun` 으로 띄운 서비스가 `.env` 키로 만든 토큰을 401(`SECURITY_003`)로 거부한다 | `bootTestRun` 은 테스트 클래스패스로 뜬다. security-core 테스트 픽스처의 초기화기가 `.env` 의 공개키를 실행 중 만든 테스트 키로 덮는다. 서비스끼리 internal 호출도 JVM 마다 다른 난수 비밀(`INTERNAL_JWT_SECRET`)로 덮여 401(`SECURITY_007`)로 거부된다. `bootTestRun` 을 쓰지 않고 `bootRun` 으로 띄운다 (`security-guide.md` §5-3 테스트 키) |

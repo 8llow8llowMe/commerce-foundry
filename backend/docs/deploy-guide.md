@@ -97,6 +97,9 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 | `ADMIN_SEED_NAME` | - | `:-` 빈 값 | | | O | | | | |
 | `AUTH_LOGIN_GUARD_HASH_KEY` | O | `:-` 빈 값 | | | O | | | | |
 | `AUTH_LOGIN_GUARD_ENABLED` | - | `:-false` | | | O | | | | |
+| `AUTH_OTP_SECRET_KEY` | O | `:?` 필수 | | | O | | | | |
+| `AUTH_OTP_SECRET_KEY_PREVIOUS` | O | `:-` 빈 값 | | | O | | | | |
+| `AUTH_OTP_ISSUER` | - | `:-Commerce Foundry Admin` | | | O | | | | |
 | `AUTH_SOCIAL_ENABLED` · `KAKAO_LOGIN_ENABLED` · `NAVER_LOGIN_ENABLED` | - | `:-false` | | | O | | | | |
 | `KAKAO_CLIENT_ID` · `NAVER_CLIENT_ID` · `KAKAO_REDIRECT_URI` · `NAVER_REDIRECT_URI` | - | `:-` 빈 값 | | | O | | | | |
 | `KAKAO_CLIENT_SECRET` · `NAVER_CLIENT_SECRET` | O | `:-` 빈 값 | | | O | | | | |
@@ -151,6 +154,7 @@ compose 가 env 파일과 무관하게 고정하는 값:
 | `SNOWFLAKE_DATACENTER_ID` | compose 해석 실패. 0~31 |
 | `JWT_PUBLIC_KEY` · `JWT_PRIVATE_KEY` | compose 해석 실패. 만들기 · 교체: `security-guide.md` §6 |
 | `INTERNAL_JWT_SECRET` | compose 해석 실패. 서비스 5종 같은 값: `security-guide.md` §9-6 |
+| `AUTH_OTP_SECRET_KEY` | compose 해석 실패 (#238). 값이 base64 로 정확히 32바이트가 아니거나 저장소의 테스트 키면 auth 가 기동하지 않는다. auth 인스턴스 전부 같은 값이고, 잃으면 등록된 관리자 OTP 를 모두 읽지 못한다(`AUTH_039`). 만들기 · 회전: `secret-management.md` (관리자 OTP 키). 기동 실패 메시지별 조치는 `local-run-guide.md` §6 |
 | `GATEWAY_CORS_ALLOWED_ORIGINS` | 뜨지만 브라우저 요청이 전부 CORS 로 막힌다 |
 
 - **`ADMIN_SEED_*` 는 최초 시드 뒤 secret 에서 비우고 다시 배포한다**(`security-guide.md` §11-3). 관리자가 이미 있으면 시드는 아무것도 하지 않으므로,

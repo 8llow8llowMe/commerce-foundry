@@ -165,6 +165,18 @@ auth:
       client-ip:
         max-attempts: 30
         window: 10m
+  admin-otp:
+    # 관리자 OTP (#238, secret-management.md) — TOTP 비밀을 DB 에 AES-256-GCM 으로 저장하는 키. 항상 필수다(OTP 를 쓰는 관리자가 없어도).
+    # base64 로 정확히 32바이트(openssl rand -base64 32). 기본값을 두지 않는다 — 비었거나 풀리지 않으면 기동하지 않는다(AdminOtpProperties)
+    secret-key: ${AUTH_OTP_SECRET_KEY}
+    # 키 회전 중에만 이전 키를 넣는다(복호화 전용). 평소에는 비어 있다. 현재 키와 같으면 기동하지 않는다
+    previous-secret-key: ${AUTH_OTP_SECRET_KEY_PREVIOUS:}
+    # 인증 앱에 보이는 발급자 이름 — ':' 는 넣을 수 없다
+    issuer: ${AUTH_OTP_ISSUER:Commerce Foundry Admin}
+    # 미확정 등록(Redis auth:admin-otp-enrollment)의 수명. 1분~1시간
+    enrollment-ttl: 15m
+    # 로그인 2단계 챌린지(Redis auth:admin-otp-challenge)의 수명. 1분~10분
+    challenge-ttl: 5m
 
 swagger:
   # 상대 경로라 문서를 불러온 origin(게이트웨이 또는 서비스 직접)으로 "Try it out" 요청이 간다
