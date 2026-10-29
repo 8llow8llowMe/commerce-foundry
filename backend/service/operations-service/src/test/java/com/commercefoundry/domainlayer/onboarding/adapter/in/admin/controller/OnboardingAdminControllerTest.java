@@ -8,12 +8,15 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.commercefoundry.domainlayer.onboarding.adapter.in.admin.dto.item.OnboardingTaskItem;
 import com.commercefoundry.domainlayer.onboarding.adapter.in.admin.dto.item.OnboardingTourItem;
 import com.commercefoundry.domainlayer.onboarding.adapter.in.admin.dto.response.OnboardingAdminResponse;
 import com.commercefoundry.domainlayer.onboarding.application.command.TourProgressUpdateCommand;
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingErrorCode;
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingException;
 import com.commercefoundry.domainlayer.onboarding.application.port.in.OnboardingAdminUseCase;
+import com.commercefoundry.domainlayer.onboarding.domain.model.MemberTaskStatus;
+import com.commercefoundry.domainlayer.onboarding.domain.model.StoreTaskStatus;
 import com.commercefoundry.domainlayer.onboarding.domain.model.TourStatus;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
@@ -68,6 +71,15 @@ class OnboardingAdminControllerTest {
             .build();
     }
 
+    private static OnboardingTaskItem task(StoreTaskStatus storeStatus, MemberTaskStatus myStatus, Instant myCompletedAt) {
+        return OnboardingTaskItem.builder()
+            .taskKey("SHIPPING_POLICY_SAVED")
+            .storeStatus(storeStatus.toMetadata())
+            .myStatus(myStatus.toMetadata())
+            .myCompletedAt(myCompletedAt)
+            .build();
+    }
+
     private MvcTestResult get(MemberRole role) {
         return mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange();
     }
@@ -114,10 +126,12 @@ class OnboardingAdminControllerTest {
     class GetMine {
 
         @Test
-        @DisplayName("ADMIN 은 200 — 운영자는 토큰의 memberId, tours 는 {guideKey, guideVersion, status{code,name,description}, currentStep, finishedAt}, tasks 는 빈 배열")
+        @DisplayName("ADMIN 은 200 — 운영자는 토큰의 memberId, tours 는 {guideKey, guideVersion, status{code,name,description}, currentStep, finishedAt}, "
+            + "tasks 는 {taskKey, storeStatus{...}, myStatus{...}, myCompletedAt}")
         void returnsMine() {
             given(onboardingAdminUseCase.getMine(TestTokens.MEMBER_ID)).willReturn(new OnboardingAdminResponse(
-                List.of(item(TourStatus.COMPLETED, 5, Instant.parse("2026-10-28T01:00:00Z")), item(TourStatus.NOT_STARTED, null, null)), List.of()));
+                List.of(item(TourStatus.COMPLETED, 5, Instant.parse("2026-10-28T01:00:00Z")), item(TourStatus.NOT_STARTED, null, null)),
+                List.of(task(StoreTaskStatus.READY, MemberTaskStatus.COMPLETED, Instant.parse("2026-10-27T02:00:00Z")))));
 
             MvcTestResult result = get(MemberRole.ADMIN);
 
@@ -130,9 +144,33 @@ class OnboardingAdminControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataBody.tours[0].currentStep").asNumber().isEqualTo(5);
             assertThat(result).bodyJson().extractingPath("$.dataBody.tours[0].finishedAt").isEqualTo("2026-10-28T01:00:00Z");
             assertThat(result).bodyJson().extractingPath("$.dataBody.tours[1].status.code").isEqualTo("NOT_STARTED");
-            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks").asArray().isEmpty();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks").asArray().hasSize(1);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].taskKey").isEqualTo("SHIPPING_POLICY_SAVED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].storeStatus.code").isEqualTo("READY");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].storeStatus.name").isEqualTo("준비됨");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].myStatus.code").isEqualTo("COMPLETED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].myStatus.description").isNotNull();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].myCompletedAt").isEqualTo("2026-10-27T02:00:00Z");
             assertThat(result).bodyJson().doesNotHavePath("$.dataBody.tours[0].memberId");
+            assertThat(result).bodyJson().doesNotHavePath("$.dataBody.tasks[0].memberId");
             verify(onboardingAdminUseCase).getMine(TestTokens.MEMBER_ID);
+        }
+
+        @Test
+        @DisplayName("담당 서비스 장애여도 200 — 그 업무는 UNAVAILABLE · UNAVAILABLE 이고 myCompletedAt 은 null(키는 남는다), 투어는 그대로다")
+        void sourceOutageIsStillOk() {
+            given(onboardingAdminUseCase.getMine(TestTokens.MEMBER_ID)).willReturn(new OnboardingAdminResponse(
+                List.of(item(TourStatus.IN_PROGRESS, 2, null)), List.of(task(StoreTaskStatus.UNAVAILABLE, MemberTaskStatus.UNAVAILABLE, null))));
+
+            MvcTestResult result = get(MemberRole.ADMIN);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tours[0].status.code").isEqualTo("IN_PROGRESS");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].storeStatus.code").isEqualTo("UNAVAILABLE");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].myStatus.code").isEqualTo("UNAVAILABLE");
+            assertThat(result).bodyJson().hasPath("$.dataBody.tasks[0].myCompletedAt");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.tasks[0].myCompletedAt").isNull();
         }
     }
 

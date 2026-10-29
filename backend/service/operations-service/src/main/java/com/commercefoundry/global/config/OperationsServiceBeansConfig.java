@@ -5,6 +5,7 @@ import com.commercefoundry.messaging.config.MessagingConfigurer;
 import com.commercefoundry.messaging.properties.MessagingProperties;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
+import com.commercefoundry.security.internal.InternalTokenIssuerConfigurer;
 import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import java.time.Clock;
@@ -18,6 +19,7 @@ import org.springframework.context.annotation.Import;
 @Configuration
 @Import({
     InternalResourceServerConfigurer.class,
+    InternalTokenIssuerConfigurer.class,
     MessagingConfigurer.class,
     QuerydslConfigurer.class,
     ResourceServerSecurityConfigurer.class,

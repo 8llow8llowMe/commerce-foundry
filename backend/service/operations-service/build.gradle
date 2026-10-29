@@ -13,6 +13,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+    // delivery-service 운영자 온보딩 사실 조회(#357 PR-B2). security-core 는 Feign 을 compileOnly 로만 둔다 — 클라이언트를 가진 서비스가 직접 선언한다
+    implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
+    // 서킷은 adapter/out/client/support 가 직접 감싼다 (coding-conventions.md §10) — spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다
+    implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
     implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${rootProject.ext.springdocVersion}"
     // 외부 쇼핑몰 내보내기 CSV 읽기 — 데이터 이관(migration-guide.md, #19)
     implementation "org.apache.commons:commons-csv:${rootProject.ext.commonsCsvVersion}"

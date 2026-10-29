@@ -25,6 +25,15 @@ spring:
     resources:
       # 정적 리소스를 내지 않는다. 켜 두면 Swagger 를 닫아도 /webjars/swagger-ui/** 가 그대로 열린다 (Swagger UI 는 springdoc 이 따로 낸다)
       add-mappings: false
+  cloud:
+    openfeign:
+      client:
+        config:
+          # delivery-service 운영자 온보딩 사실 조회 (GET /internal/v1/onboarding-facts/shipping-policy, #357). 기본 read timeout 60초를 그대로 두지 않는다
+          # request-interceptors 는 여기(default)에 두지 않는다 — 외부 API 클라이언트에도 실린다 (security-guide.md §9-5)
+          default:
+            connect-timeout: 2000
+            read-timeout: 3000
   # Kafka 접속 (deploy-guide.md §4-4). 주소는 Vault 값이다 — 저장소에 쓰지 않는다. 앱은 토픽을 만들지 않는다
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
@@ -46,6 +55,27 @@ commerce:
     outbox:
       relay:
         lock-table: operations.shedlock
+
+# 서비스 간 호출 서킷 (coding-conventions.md §10). adapter/out/client/support 의 *InternalResponseSupport 가 인스턴스 이름으로 감싼다.
+# spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다 — 서킷과 예외 변환을 한 곳(support)에서 한다
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        # 4xx 는 호출한 쪽(우리)의 요청 · 설정 문제다 — 대상 장애로 세지 않는다. 해석은 support 가 서킷 밖에서 한다
+        ignore-exceptions:
+          - feign.FeignException$FeignClientException
+    instances:
+      # 운영자 온보딩 배송 업무 사실 (GET /internal/v1/onboarding-facts/shipping-policy, #357). 열려 있으면 그 업무만 UNAVAILABLE 이고 조회는 200 이다
+      delivery-service:
+        base-config: default
 
 eureka:
   client:

@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.onboarding.application.command.TourProgre
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingErrorCode;
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingException;
 import com.commercefoundry.domainlayer.onboarding.application.port.out.TourProgressRepositoryPort;
+import com.commercefoundry.domainlayer.onboarding.application.service.processor.OnboardingTaskProcessor;
 import com.commercefoundry.domainlayer.onboarding.application.service.processor.OnboardingTourProcessor;
 import com.commercefoundry.domainlayer.onboarding.domain.model.TourProgress;
 import com.commercefoundry.domainlayer.onboarding.domain.model.TourStatus;
@@ -42,7 +43,11 @@ class OnboardingTourProcessorTest {
     private final OnboardingProperties properties = new OnboardingProperties(List.of(new Guide("console", 2), new Guide("stocks", 1)));
     private final OnboardingTourProcessor processor =
         new OnboardingTourProcessor(port, properties, new SnowflakeIdGenerator(0, 1), Clock.fixed(NOW, ZoneOffset.UTC));
-    private final OnboardingAdminFacade facade = new OnboardingAdminFacade(processor, new OnboardingAdminPresenter());
+    /** 업무 사실 원천(delivery)이 늘 장애다 — 투어 진행은 그와 관계없이 정상으로 나와야 한다. */
+    private final OnboardingTaskProcessor taskProcessor = new OnboardingTaskProcessor(memberId -> {
+        throw new OnboardingException(OnboardingErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
+    });
+    private final OnboardingAdminFacade facade = new OnboardingAdminFacade(processor, taskProcessor, new OnboardingAdminPresenter());
 
     private static TourProgressUpdateCommand command(String key, int version, TourStatus status, Integer step) {
         return new TourProgressUpdateCommand(key, version, status, step);
@@ -53,7 +58,7 @@ class OnboardingTourProcessorTest {
     class GetMine {
 
         @Test
-        @DisplayName("설정 순서로 전부 낸다 — 기록이 없거나 설정 버전과 다르면 미시작, 다른 운영자 기록은 섞이지 않는다")
+        @DisplayName("설정 순서로 전부 낸다 — 기록이 없거나 설정 버전과 다르면 미시작, 다른 운영자 기록은 섞이지 않는다. 업무 원천 장애여도 투어는 정상이고 업무만 UNAVAILABLE")
         void synthesizesNotStarted() {
             port.put(new TourProgress(1L, MEMBER, "stocks", 1, TourStatus.COMPLETED, 3, NOW, 0L));
             port.put(new TourProgress(2L, MEMBER, "console", 1, TourStatus.COMPLETED, 9, NOW, 0L));
@@ -62,7 +67,12 @@ class OnboardingTourProcessorTest {
 
             OnboardingAdminResponse response = facade.getMine(MEMBER);
 
-            assertThat(response.tasks()).isEmpty();
+            assertThat(response.tasks()).singleElement().satisfies(task -> {
+                assertThat(task.taskKey()).isEqualTo("SHIPPING_POLICY_SAVED");
+                assertThat(task.storeStatus().code()).isEqualTo("UNAVAILABLE");
+                assertThat(task.myStatus().code()).isEqualTo("UNAVAILABLE");
+                assertThat(task.myCompletedAt()).isNull();
+            });
             assertThat(response.tours()).extracting(OnboardingTourItem::guideKey).containsExactly("console", "stocks");
             OnboardingTourItem console = response.tours().get(0);
             assertThat(console.status().code()).isEqualTo("NOT_STARTED");
