@@ -14,6 +14,7 @@ import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.shared.commerce.Money;
+import java.time.Instant;
 import java.time.LocalDate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,23 @@ class ProductPersistenceMapperTest {
         assertThat(preorder.expectedShipDate()).isEqualTo(LocalDate.of(2026, 11, 20));
         assertThat(regular.preorder()).isFalse();
         assertThat(regular.expectedShipDate()).isNull();
+    }
+
+    @Test
+    @DisplayName("상품: 버전 · 삭제 시각 · 등록자를 읽는다. 삭제 시각이 있으면 isDeleted 다")
+    void productVersionDeletedAndCreator() {
+        Instant deletedAt = Instant.parse("2026-10-20T00:00:00Z");
+        Product deleted = productMapper.toDomain(
+            product().visible(false).saleStatus(SaleStatus.STOP_SELLING).deletedAt(deletedAt).version(3L).createdByMemberId(7L).build()
+        );
+        Product live = productMapper.toDomain(product().build());
+
+        assertThat(deleted.version()).isEqualTo(3L);
+        assertThat(deleted.deletedAt()).isEqualTo(deletedAt);
+        assertThat(deleted.isDeleted()).isTrue();
+        assertThat(deleted.createdByMemberId()).isEqualTo(7L);
+        assertThat(live.isDeleted()).isFalse();
+        assertThat(live.createdByMemberId()).isNull();
     }
 
     @Test
