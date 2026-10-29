@@ -18,6 +18,7 @@ export const historyItem = (
 ): DomesticPolicyHistoryItem => ({
   historyId: '900',
   adminMemberId: '4611686018427387904',
+  adminDisplayName: null,
   changedAt: '2026-10-18T03:00:00Z',
   before: snapshot(),
   after: snapshot({ version: 2 }),

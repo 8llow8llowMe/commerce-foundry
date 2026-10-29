@@ -21,7 +21,7 @@ describe('AuditLogTable', () => {
     );
     expect(html).toContain('회원 목록 조회');
     expect(html).toContain('역할: 고객 · 2쪽');
-    expect(html).toContain('>관리자<');
+    expect(html).toContain('>관리자</span>');
     expect(html).toContain('관리자 로그인');
     expect(html).toContain('관리자 계정');
     expect(html).toContain('확인 안 됨');
@@ -42,6 +42,32 @@ describe('AuditLogTable', () => {
       '900',
       '901',
     ]) {
+      expect(html, raw).not.toContain(raw);
+    }
+  });
+
+  it('마스킹 이름이 오면 관리자 · 대상 계정에 이름을 보인다 — 아이디는 내지 않는다', () => {
+    const html = renderToStaticMarkup(
+      <AuditLogTable
+        logs={[
+          auditLog({ auditLogId: '900', actorDisplayName: '김*수' }),
+          auditLog({
+            auditLogId: '901',
+            action: 'ADMIN_LOGIN',
+            actorMemberId: null,
+            target: 'member:102',
+            targetDisplayName: '이*진',
+            result: 'FAILURE',
+          }),
+        ]}
+      />,
+    );
+    expect(html).toContain('>김*수<');
+    expect(html).toContain('>이*진<');
+    expect(html).toContain('확인 안 됨');
+    expect(html).not.toContain('>관리자</span>');
+    expect(html).not.toContain('관리자 계정');
+    for (const raw of ['member:', '101', '102']) {
       expect(html, raw).not.toContain(raw);
     }
   });

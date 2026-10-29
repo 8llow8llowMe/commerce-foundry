@@ -4,7 +4,7 @@ import { describeAuditLog, formatAuditTime } from '@/lib/audit/view';
 
 /**
  * 관리자 감사 로그 표(#320 · #305). 운영자 문구만 보인다 — 행위 · 결과는 업무 이름, 대상은 문장(`targetText`),
- * 관리자는 "관리자"(이름은 BE #322 뒤). 행위 · 결과 코드, 대상 원문, 회원 · 감사 로그 아이디는 내지 않는다.
+ * 관리자 · 대상 계정은 마스킹 이름(#322, 없으면 "관리자" 등). 행위 · 결과 코드, 대상 원문, 회원 · 감사 로그 아이디는 내지 않는다.
  */
 export function AuditLogTable({ logs }: { logs: AuditLogItem[] }) {
   return (

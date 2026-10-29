@@ -11,7 +11,7 @@ export const PAGE_SIZE = 20;
 
 /**
  * 화면 조건. null 은 "전체"(서버에 보내지 않는다).
- * 관리자 조건(서버 `actorMemberId`)은 두지 않는다 — 관리자 이름을 고를 수단이 BE #322(감사 로그 표시 이름) 뒤에 생긴다.
+ * 관리자 조건(서버 `actorMemberId`)은 두지 않는다 — 관리자를 고를 목록 API 가 없다(BE #322 는 표시 이름만 더했다).
  * 대상 조건(서버 `target`, #286)도 두지 않는다 — 원문(`member:<id>`)을 다뤄야 해서 #305(아이디 · 코드 원문을 보이지 않는다)와 맞지 않는다.
  */
 export type AuditLogQuery = {

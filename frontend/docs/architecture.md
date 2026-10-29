@@ -453,7 +453,8 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **국내 변경 이력(#319)** — 국내 화면 폼 아래 `GET .../domestic/histories?page=&size=20`(BE #69, 최신순, size 상한 20)을 페이지로 보인다. 해외 이력 API 는 없다.
   한 건은 교체 시각 · 교체한 사람 · 칸(기본 배송비 · 무료배송 기준 · 도서산간 구간)별 이전 → 이후다. 바뀐 칸을 강조하고 구간은 반대쪽에 없는 줄만 굵게 한다(`compareHistory`).
   `before` 가 null 이면 "처음 설정"(설정 값만), 값이 같고 version 만 오른 교체는 "값 변경 없음" 이다. 금액은 `formatMoney` 로 옮겨 적기만 한다.
-  교체한 사람은 응답에 내부 회원 아이디(`adminMemberId`)뿐이라 원문 대신 "관리자" 로 보인다(#305) — 아이디로 이름을 찾는 API 가 없다.
+  교체한 사람은 서버가 마스킹한 `adminDisplayName`(BE #322, #405)을 보이고, null 이면 "관리자" 다(`historyAdminLabel`). 내부 회원 아이디(`adminMemberId`) 원문은 보이지 않는다(#305).
+  이름 조회(auth-service)가 실패하면 서버가 이름을 비우지 않고 503 `DELIVERY_013` 을 준다 — "관리자 이름을 불러오지 못했습니다" 와 다시 불러오기로 안내한다(`historyLoadFailure`).
   저장 성공 · 409 · 결과 모름으로 다시 읽은 뒤에는 `usePolicyEditor` 의 `revision` 을 `key` 로 써서 이력을 첫 페이지부터 다시 읽는다.
 
 ### 상품 목록 (`/products`, #208)
@@ -675,13 +676,14 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   - 끝나면 상태와 "결과 보기"(누르면 목록에서 뺀다) · "목록에서 빼기" 를 둔다. 없는 작업(404)은 저절로 뺀다. 화면이 저절로 결과로 이동하지는 않는다 —
     다른 일을 하던 중이라 끼어들지 않고, 요청자에게는 BE 완료 알림이 토스트로 온다(보기 → 결과 화면).
 
-### 관리자 감사 로그 (`/audit-logs`, #320 · #329)
+### 관리자 감사 로그 (`/audit-logs`, #320 · #329 · #405)
 
-메뉴 `운영 > 관리자 감사 로그`. auth-service 감사 로그 조회 `GET /api/v1/admin/audit-logs?action=&result=&page=&size=`(BE #192 · #286, ADMIN,
+메뉴 `운영 > 관리자 감사 로그`. auth-service 감사 로그 조회 `GET /api/v1/admin/audit-logs?action=&result=&page=&size=`(BE #192 · #286 · #322, ADMIN,
 계약 정본 `backend/docs/api-design-guide.md` §2-4 · 기록 방식 `security-guide.md` §11-4) — 최신순 `PageResponse`, 페이지 20개, 읽기만 있다.
 코드는 `lib/audit/`(계약 `types.ts` · 조건 `query.ts` · 문구 `view.ts` · 읽기 `load.ts`), 화면은 `components/audit/` 다.
 
-- **응답 칸** — `auditLogId` · `action`(`ADMIN_LOGIN` · `MEMBER_SEARCH`) · `actorMemberId`(로그인 실패는 null) · `target`(원문, null 가능) · `result`(`SUCCESS` · `FAILURE`) · `createdAt`.
+- **응답 칸** — `auditLogId` · `action`(`ADMIN_LOGIN` · `MEMBER_SEARCH`) · `actorMemberId`(로그인 실패는 null) · `actorDisplayName`(마스킹 이름, null 가능) · `target`(원문, null 가능) ·
+  `targetDisplayName`(`target` 이 `member:<id>` 일 때만 마스킹 이름, 그 밖 · 이름 없음은 null) · `result`(`SUCCESS` · `FAILURE`) · `createdAt`.
   기록하는 행위는 관리자 로그인 성공 · 실패와 어드민 회원 목록 조회다. 이 조회 자체는 기록되지 않는다.
 - **운영자 문구만 보인다(#305)** — 행위 · 결과 코드, `target` 원문, 회원 · 감사 로그 아이디를 화면에 내지 않는다(`describeAuditLog`).
   - 행위는 업무 이름(`AUDIT_ACTION_LABELS` — 서버가 이름을 주지 않아 화면 사본이다. BE 가 행위를 더하면 같이 더한다), 모르는 행위는 "기타" 다. 결과는 성공 · 실패(실패는 `text-danger`), 모르는 값은 "알 수 없음".
@@ -690,11 +692,11 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
     | 원문 | 화면 |
     |------|------|
     | `members?role=<ALL\|CUSTOMER\|ADMIN>&page=<0부터>&size=<n>` | `역할: 전체 · 1쪽` (역할은 `roleLabel`, 쪽은 +1) |
-    | `member:<id>` (관리자 로그인 — 성공은 자기 계정, 실패는 노린 관리자 계정) | `관리자 계정` |
+    | `member:<id>` (관리자 로그인 — 성공은 자기 계정, 실패는 노린 관리자 계정) | `targetDisplayName`(예: `김*수`), null 이면 `관리자 계정`(다른 행위는 `회원 계정`) |
 
-  - 관리자 칸은 **"관리자" 로만 보인다**. `actorMemberId` 가 null 이면 "확인 안 됨"(로그인 실패는 누가 시도했는지 모른다, 설명은 `title`).
-- **관리자 이름 표시 · 관리자 필터는 BE #322 이후에 한다** — 감사 로그 응답에 이름이 없어서다. BE #322 가 항목에 표시 이름(`actorDisplayName` · `targetDisplayName`, 마스킹)을
-  더하면 이름을 보이고 관리자 필터(`actorMemberId`)를 붙인다. 그때까지 관리자 필터는 없고 관리자 조건을 보내지 않는다.
+  - 관리자 칸은 **`actorDisplayName`(마스킹 이름)** 을 보이고, null 이면 "관리자" 다. `actorMemberId` 가 null 이면 "확인 안 됨"(로그인 실패는 누가 시도했는지 모른다, 설명은 `title`).
+  - 이름은 서버가 마스킹한 값을 그대로 쓴다(빈 문자열 · 공백은 없는 것으로 본다, `displayNameOf`). 이름이 없어도 아이디 원문으로 대신하지 않는다(#305).
+- **관리자 필터는 두지 않는다** — BE #322 는 표시 이름만 더했고, 관리자를 고를 경량 목록 API 를 두지 않았다(어드민 회원 목록은 감사 대상이다). 관리자 조건(`actorMemberId`)을 보내지 않는다.
 - **조건은 행위 · 결과 두 가지다**(#329) — 행위(전체 · 업무 이름)와 결과(전체 · 성공 · 실패, `AUDIT_RESULT_LABELS`)를 함께 쓸 수 있다. 실패한 관리자 로그인만 보려면 행위 "관리자 로그인" · 결과 "실패" 다.
   - **대상 조건(`target`, BE #286)은 두지 않는다** — 완전 일치 원문(`member:<id>`)을 입력 · 표시해야 해서 #305(아이디 · 코드 원문을 보이지 않는다)와 맞지 않는다. 보내지도 않는다.
 - **조건은 주소가 정본이다**(상품 목록과 같은 규칙) — 화면 주소는 `?action=&result=&page=`, `parseAuditLogQuery` 가 행위 · 결과(enum 이름 그대로, 대소문자까지) · 페이지(숫자 6자리)만 받고

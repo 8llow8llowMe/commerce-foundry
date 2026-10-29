@@ -10,7 +10,8 @@ import {
 /**
  * 감사 로그 한 행 → 운영자 문구(#305). 행위 · 결과 코드, 대상 원문, 회원 아이디는 화면에 그대로 내지 않는다.
  * 모르는 행위 · 결과 · 대상 형식은 "기타" · "알 수 없음" 으로 보인다(원문을 흘리지 않는다).
- * 관리자 · 대상 계정은 이름 없이 "관리자" · "관리자 계정" 이다 — 이름(마스킹)은 BE #322 가 응답에 표시 이름 칸을 더한 뒤 붙인다.
+ * 관리자 · 대상 계정은 서버가 준 마스킹 이름(#322)을 보이고, 이름이 없으면 "관리자" · "관리자 계정" · "회원 계정" 이다.
+ * 아이디 원문은 이름이 없어도 보이지 않는다.
  */
 export type AuditLogView = {
   action: string;
@@ -35,6 +36,12 @@ export function resultLabel(result: string): string {
   return known ? AUDIT_RESULT_LABELS[known] : '알 수 없음';
 }
 
+/** 서버가 마스킹한 표시 이름. 비었거나 공백뿐이면 없는 것으로 본다 */
+export function displayNameOf(value: string | null | undefined): string | null {
+  const name = value?.trim();
+  return name ? name : null;
+}
+
 function actorText(item: AuditLogItem): Pick<AuditLogView, 'actor' | 'actorHint'> {
   if (item.actorMemberId === null) {
     return {
@@ -45,7 +52,7 @@ function actorText(item: AuditLogItem): Pick<AuditLogView, 'actor' | 'actorHint'
           : '행위한 관리자가 기록되지 않았습니다.',
     };
   }
-  return { actor: '관리자', actorHint: null };
+  return { actor: displayNameOf(item.actorDisplayName) ?? '관리자', actorHint: null };
 }
 
 const MEMBER_TARGET = /^member:[1-9]\d{0,18}$/;
@@ -59,13 +66,19 @@ const SEARCH_ROLES: Record<string, string> = {
 /**
  * 대상 원문 → 문장. 형식은 BE `AdminAuditRecord` 가 만든다.
  * - `member:<id>` — 관리자 로그인의 대상 계정(성공은 자기 계정, 실패는 노린 관리자 계정). 아이디는 보이지 않는다.
+ *   마스킹 이름(`displayName`, #322)이 있으면 그 이름, 없으면 "관리자 계정" · "회원 계정" 이다.
  * - `members?role=<ALL|CUSTOMER|ADMIN>&page=<0부터>&size=<n>` — 회원 목록 조회 조건. 쪽은 1부터 보인다.
  * 그 밖의 형식 · 값(모르는 역할 · 남는 칸 등)은 원문을 보이지 않고 "기타" 다.
  */
-export function targetText(target: string | null, action: string): string {
+export function targetText(
+  target: string | null,
+  action: string,
+  displayName: string | null = null,
+): string {
   if (target === null || target === '') return '—';
 
-  if (MEMBER_TARGET.test(target)) return action === 'ADMIN_LOGIN' ? '관리자 계정' : '회원 계정';
+  if (MEMBER_TARGET.test(target))
+    return displayNameOf(displayName) ?? (action === 'ADMIN_LOGIN' ? '관리자 계정' : '회원 계정');
 
   if (target.startsWith('members?')) {
     const params = new URLSearchParams(target.slice('members?'.length));
@@ -98,7 +111,7 @@ export function describeAuditLog(item: AuditLogItem): AuditLogView {
     result: resultLabel(item.result),
     failed: item.result === 'FAILURE',
     ...actorText(item),
-    target: targetText(item.target, item.action),
+    target: targetText(item.target, item.action, item.targetDisplayName),
   };
 }
 

@@ -23,9 +23,17 @@ describe('HistoryEntry', () => {
   it('교체 시각과 관리자를 보이고 회원 아이디 원문은 내지 않는다', () => {
     const html = renderToStaticMarkup(<HistoryEntry item={historyItem()} />);
     expect(html).toContain('dateTime="2026-10-18T03:00:00Z"');
-    expect(html).toContain('관리자');
+    expect(html).toContain('>관리자<');
     expect(html).not.toContain('4611686018427387904');
     expect(html).toContain('값 변경 없음');
+  });
+
+  it('교체한 사람의 마스킹 이름이 있으면 이름을 보인다 — 아이디는 여전히 내지 않는다', () => {
+    const html = renderToStaticMarkup(
+      <HistoryEntry item={historyItem({ adminDisplayName: '김*수' })} />,
+    );
+    expect(html).toContain('>김*수<');
+    expect(html).not.toContain('4611686018427387904');
   });
 
   it('처음 만든 교체는 처음 설정 — 이전 칸 없이 설정 값만 보인다', () => {
