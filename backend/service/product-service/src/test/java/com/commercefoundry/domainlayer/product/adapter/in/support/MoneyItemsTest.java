@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.adapter.in.support;
 
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static com.commercefoundry.shared.commerce.CurrencyCode.USD;
 import static org.assertj.core.api.Assertions.assertThat;

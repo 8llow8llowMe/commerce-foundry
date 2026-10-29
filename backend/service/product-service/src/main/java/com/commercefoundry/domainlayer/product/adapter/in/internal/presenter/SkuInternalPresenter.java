@@ -4,7 +4,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.Cust
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuInternalItem;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuOptionValueInternalItem;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
-import com.commercefoundry.domainlayer.product.adapter.in.support.MoneyItems;
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldDefinition;
 import com.commercefoundry.domainlayer.product.application.info.SkuInternalInfo;
 import com.commercefoundry.domainlayer.product.application.info.SkuOptionValueInfo;

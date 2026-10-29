@@ -1,7 +1,7 @@
 package com.commercefoundry.domainlayer.product.adapter.in.admin.presenter;
 
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
-import com.commercefoundry.domainlayer.product.adapter.in.support.MoneyItems;
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.product.application.info.ProductAdminListItemInfo;
 import com.commercefoundry.persistence.dto.PageResponse;
 import org.springframework.data.domain.Page;

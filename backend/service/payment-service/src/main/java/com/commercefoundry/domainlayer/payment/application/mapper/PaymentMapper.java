@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.payment.application.mapper;
 
+import com.commercefoundry.commerce.support.persistence.MoneyColumns;
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.entity.PaymentEntity;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import org.mapstruct.Mapper;

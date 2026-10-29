@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.mapper;
 
+import com.commercefoundry.commerce.support.persistence.MoneyColumns;
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

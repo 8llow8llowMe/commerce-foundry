@@ -1,6 +1,6 @@
 package com.commercefoundry.domainlayer.cart.adapter.in.web.presenter;
 
-import com.commercefoundry.domainlayer.cart.adapter.in.support.MoneyItems;
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.cart.adapter.in.web.dto.item.CartLineItem;
 import com.commercefoundry.domainlayer.cart.adapter.in.web.dto.item.CartMergeSkippedItem;
 import com.commercefoundry.domainlayer.cart.adapter.in.web.dto.item.CustomOptionItem;

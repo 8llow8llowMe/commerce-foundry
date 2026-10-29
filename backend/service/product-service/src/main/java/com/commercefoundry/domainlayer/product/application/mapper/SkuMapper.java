@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.mapper;
 
+import com.commercefoundry.commerce.support.persistence.MoneyColumns;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
 import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
@@ -11,7 +12,7 @@ import org.mapstruct.MappingConstants;
 import org.mapstruct.Named;
 import org.mapstruct.ReportingPolicy;
 
-@Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
+@Mapper(imports = MoneyColumns.class, componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface SkuMapper {
 
     @Mapping(target = "optionKey", source = "optionValueKey")

@@ -1,6 +1,6 @@
 package com.commercefoundry.domainlayer.shippingfee.adapter.in.web.presenter;
 
-import com.commercefoundry.domainlayer.shippingfee.adapter.in.support.MoneyItems;
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.item.RemoteAreaItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.item.ShippingZoneItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.web.dto.item.ShippingZoneRateItem;

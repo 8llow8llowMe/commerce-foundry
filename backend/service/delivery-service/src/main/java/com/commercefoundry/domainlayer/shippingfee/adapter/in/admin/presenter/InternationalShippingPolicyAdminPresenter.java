@@ -3,7 +3,7 @@ package com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.presenter;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingZoneAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingZoneRateAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.InternationalShippingPolicyAdminResponse;
-import com.commercefoundry.domainlayer.shippingfee.adapter.in.support.MoneyItems;
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.InternationalShippingPolicy;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZone;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingZoneCountry;

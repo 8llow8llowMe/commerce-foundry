@@ -17,6 +17,7 @@ dependencies {
     implementation "software.amazon.awssdk:url-connection-client:${rootProject.ext.awsSdkVersion}"
 
     // S3 호환 서버 왕복 테스트 (Testcontainers). Docker 없는 로컬은 건너뛰고 CI 는 실패한다 (bootstrap-conventions.md). 버전은 Boot BOM 이 정한다
+    testImplementation testFixtures(project(':core:common-core'))
     testImplementation 'org.testcontainers:testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 }
