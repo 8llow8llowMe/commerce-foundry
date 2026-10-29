@@ -199,6 +199,7 @@ class ProductPersistenceAdapterTest {
         assertThat(saved.getDescriptionHtml()).isEqualTo(LONG_DESCRIPTION);
         assertThat(saved.getVersion()).as("버전이 null 인 새 행은 persist 되고 0 으로 저장된다").isZero();
         assertThat(saved.getDeletedAt()).isNull();
+        assertThat(saved.getCreatedByMemberId()).as("등록자 칸은 null 을 허용한다 — 이관 · 시드 상품").isNull();
     }
 
     @Test
@@ -236,6 +237,16 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("등록자: created_by_member_id 가 저장되고 도메인 Product 로 그대로 읽힌다 (#357 요청, 값 채우기는 등록 API)")
+    void createdByMemberIdRoundTrip() {
+        persistAll(product(110L, 1_000L, true, SaleStatus.ON_SALE).createdByMemberId(7L).build());
+
+        assertThat(productRepositoryPort.findAllByIdsIncludingHidden(List.of(110L, 101L)))
+            .extracting(Product::id, Product::createdByMemberId)
+            .containsExactlyInAnyOrder(tuple(110L, 7L), tuple(101L, null));
+    }
+
+    @Test
     @DisplayName("제약: 노출 중인 삭제 상품은 저장되지 않는다 (ck_product_deleted_hidden)")
     void deletedVisibleIsRejected() {
         assertThatThrownBy(() -> persistAll(product(109L, 1_000L, true, SaleStatus.STOP_SELLING).deletedAt(DELETED_AT).build()))
@@ -261,9 +272,9 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("아이디 묶음 목록 행(전시): 숨김(104) · 없는 아이디는 빠지고 아이디 오름차순이며, 목록과 같은 칸을 읽는다")
+    @DisplayName("아이디 묶음 목록 행(전시 · 룩 · 미리보기): 숨김(104) · 삭제(108) · 없는 아이디는 빠지고 아이디 오름차순이며, 목록과 같은 칸을 읽는다")
     void findVisibleListRowsByIds() {
-        List<ProductListQueryResult> rows = productRepositoryPort.findVisibleListRowsByIds(List.of(105L, 104L, 102L, 999L));
+        List<ProductListQueryResult> rows = productRepositoryPort.findVisibleListRowsByIds(List.of(105L, 104L, 108L, 102L, 999L));
 
         assertThat(rows).extracting(ProductListQueryResult::productId).containsExactly(102L, 105L);
         ProductListQueryResult discounted = rows.getFirst();

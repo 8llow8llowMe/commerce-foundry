@@ -172,9 +172,10 @@ class DisplayFlowIntegrationTest {
     @Test
     @DisplayName("미리보기는 저장 메인과 ID 외 전체 JSON 값이 같고 기존 섹션 · 아이템 · 순서를 바꾸지 않는다")
     void previewMatchesSavedMainWithoutChangingDatabase() {
+        // @BeforeEach 가 저장한 행(버전 0)을 덮어쓴다 — 버전이 null 이면 Spring Data 가 새 행으로 보고 persist 해 PK 가 겹친다
         productRepository.save(ProductEntity.builder().id(VISIBLE_PRODUCT).categoryId(10L).name("할인 프리오더")
             .saleStatus(SaleStatus.ON_SALE).visible(true).salePriceAmount(39_000).salePriceCurrency(KRW)
-            .listPriceAmount(60_000L).listPriceCurrency(KRW).customOrder(true).preorder(true).build());
+            .listPriceAmount(60_000L).listPriceCurrency(KRW).customOrder(true).preorder(true).version(0L).build());
         skuRepository.saveAll(List.of(
             SkuEntity.builder().id(9_101L).productId(VISIBLE_PRODUCT).optionValueKey("1").additionalPriceAmount(1000)
                 .additionalPriceCurrency(KRW).saleStatus(SaleStatus.ON_SALE).build(),

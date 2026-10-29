@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CategoryPathItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CustomOrderFieldItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CustomOrderItem;
+import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.PreorderItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductImageItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductOptionGroupItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductOptionValueItem;
@@ -30,7 +31,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * 고객 상품 응답의 칸을 허용 목록으로 고정한다 — 어드민 · 서비스 간 전용 값(버전 · 삭제 · 은퇴 · 저장 키 · 무게 · HS 코드 · 진열 카테고리 · 초기 재고)이
+ * 고객 상품 응답의 칸을 허용 목록으로 고정한다 — 어드민 · 서비스 간 전용 값(버전 · 삭제 · 은퇴 · 등록자 · 저장 키 · 무게 · HS 코드 · 진열 카테고리 · 초기 재고)이
  * 고객 응답에 새지 않게 한다 ({@code architecture-guide.md} §2 — 고객 · 어드민 · 서비스 간 DTO 비공유, #9 PR-D).
  *
  * <p>칸을 더하면 여기서 실패한다. 고객에게 내도 되는 값인지 확인한 뒤 이 표를 같이 고친다.
@@ -39,26 +40,29 @@ class ProductWebResponseComponentsTest {
 
     /** 고객 응답에 나오면 안 되는 이름 — 어드민 상세 · 쓰기 · 서비스 간 조회에만 있는 값이다. */
     private static final Set<String> ADMIN_OR_INTERNAL_ONLY = Set.of(
-        "version", "deleted", "deletedAt", "retired", "retiredAt", "storageKey", "weightGrams", "hsCode", "categoryIds", "initialStock"
+        "version", "deleted", "deletedAt", "retired", "retiredAt", "storageKey", "weightGrams", "hsCode", "categoryIds", "initialStock",
+        "createdByMemberId"
     );
 
     /** 상품 고객 응답 record → 허용한 칸(선언 순서). */
-    private static final Map<Class<?>, List<String>> ALLOWED = Map.of(
-        ProductDetailResponse.class, List.of(
+    private static final Map<Class<?>, List<String>> ALLOWED = Map.ofEntries(
+        Map.entry(ProductDetailResponse.class, List.of(
             "productId", "name", "summary", "categoryPath", "thumbnail", "images", "descriptionHtml",
-            "salePrice", "listPrice", "discountRate", "saleStatus", "maxQuantityPerOrder", "optionGroups", "skus", "customOrder"
-        ),
-        ProductListItemResponse.class, List.of(
-            "productId", "name", "thumbnail", "salePrice", "listPrice", "discountRate", "hasOptionSurcharge", "saleStatus", "customOrder"
-        ),
-        ProductSkuItem.class, List.of("skuId", "optionValueIds", "additionalPrice", "salePrice", "saleStatus"),
-        ProductOptionGroupItem.class, List.of("optionGroupId", "name", "displayOrder", "values"),
-        ProductOptionValueItem.class, List.of("optionValueId", "name", "displayOrder"),
-        ProductImageItem.class, List.of("imageId", "url", "width", "height", "altText", "displayOrder"),
-        ProductThumbnailItem.class, List.of("imageId", "url", "width", "height", "altText"),
-        CategoryPathItem.class, List.of("categoryId", "name"),
-        CustomOrderItem.class, List.of("notice", "leadTimeDays", "fields"),
-        CustomOrderFieldItem.class, List.of("fieldKey", "label", "inputType", "unit", "required", "min", "max", "step", "helpText")
+            "salePrice", "listPrice", "discountRate", "saleStatus", "maxQuantityPerOrder", "optionGroups", "skus", "customOrder", "preorder"
+        )),
+        Map.entry(ProductListItemResponse.class, List.of(
+            "productId", "name", "thumbnail", "hoverImage", "salePrice", "listPrice", "discountRate", "hasOptionSurcharge", "saleStatus",
+            "customOrder", "preorder"
+        )),
+        Map.entry(ProductSkuItem.class, List.of("skuId", "optionValueIds", "additionalPrice", "salePrice", "saleStatus")),
+        Map.entry(ProductOptionGroupItem.class, List.of("optionGroupId", "name", "displayOrder", "values")),
+        Map.entry(ProductOptionValueItem.class, List.of("optionValueId", "name", "displayOrder")),
+        Map.entry(ProductImageItem.class, List.of("imageId", "mediaType", "url", "posterUrl", "width", "height", "altText", "displayOrder")),
+        Map.entry(ProductThumbnailItem.class, List.of("imageId", "url", "width", "height", "altText")),
+        Map.entry(CategoryPathItem.class, List.of("categoryId", "name")),
+        Map.entry(CustomOrderItem.class, List.of("notice", "leadTimeDays", "fields")),
+        Map.entry(CustomOrderFieldItem.class, List.of("fieldKey", "label", "inputType", "unit", "required", "min", "max", "step", "helpText")),
+        Map.entry(PreorderItem.class, List.of("expectedShipDate"))
     );
 
     static Stream<Arguments> customerRecords() {
