@@ -3,17 +3,21 @@
 import { apiFetch } from '@cf/api-client';
 import { Button, FieldError, TextField } from '@cf/ui';
 import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { loginErrors, NO_LOGIN_ERRORS, type LoginErrors } from '@/lib/auth/login-errors';
+import { tourProgress } from '@/lib/tour/progress';
 
 /**
  * 관리자 로그인 폼(#204). BFF `POST /api/v1/auth/admin/login` 이 access 토큰을 httpOnly 쿠키로 심고 토큰 없는 성공만 돌려준다.
  * 성공하면 돌아갈 경로로 바꾸고 서버 컴포넌트를 다시 그린다. 이동하는 동안 버튼은 막힌 채다.
+ * 로그인 화면에 오면(로그아웃 · 세션 만료 · 계정 전환) 이전 운영자의 안내 투어 기록(#228)을 지운다 — 다른 운영자에게 보이지 않게.
  */
 export function LoginForm({ returnPath }: { returnPath: string }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<LoginErrors>(NO_LOGIN_ERRORS);
+
+  useEffect(() => tourProgress.signOut(), []);
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

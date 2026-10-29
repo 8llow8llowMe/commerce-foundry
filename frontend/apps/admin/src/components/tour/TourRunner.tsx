@@ -13,13 +13,24 @@ const WAIT_MS = 4000;
 
 const exists = (target: string) => document.querySelector(tourSelector(target)) !== null;
 
+/** 운영자가 입력 칸에 쓰고 있다 — 서버 기록이 늦게 와도 그 위로 투어를 띄우지 않는다 */
+const typing = () => {
+  const active = document.activeElement;
+  return (
+    active instanceof HTMLElement &&
+    (active.isContentEditable || active.matches('input, textarea, select'))
+  );
+};
+
 /**
  * 온보딩 투어 실행기(#228) — 콘솔 레이아웃에 하나 붙어 화면이 바뀔 때마다 이 화면에서 볼 투어를 고른다.
- * - 처음이면 콘솔 투어 → 화면 투어 순서로 한 번씩 자동 시작한다. 끝내거나(마치기) 닫으면(×, Esc, 바깥 누르기) 본 것으로 남긴다.
+ * - 붙을 때(로그인 직후) 운영자별 서버 기록(BE #357)을 불러온다. 불러오기 전 · 불러오지 못하면 자동 시작하지 않는다.
+ * - 처음이면 콘솔 투어 → 화면 투어 순서로 한 번씩 자동 시작한다. 시작하면 진행 중, 마지막 단계에서 닫으면 완료,
+ *   그 전에 닫으면(×, Esc, 바깥 누르기) 건너뜀으로 남긴다.
  * - 도움말의 "다시 보기" 는 진행 상태에 요청을 남기고(`requestSeq` 가 오른다), 여기가 그 요청을 받아 시작한다.
  * - 가리킬 요소는 API 응답 뒤에 그려지므로 모두 나타날 때까지(최대 4초) 기다린다. 그때 필수 요소가 없으면 시작하지 않는다.
  *   **기다리는 동안 운영자가 누르거나 입력하면 이번에는 자동 시작하지 않는다** — 조작 중에 오버레이가 덮지 않게(다음에 다시 뜬다).
- *   다시 보기 요청은 운영자가 원한 것이라 이 규칙을 따르지 않는다.
+ *   시작할 때 입력 칸에 포커스가 있어도 마찬가지다(서버 기록이 늦게 온 경우). 다시 보기 요청은 운영자가 원한 것이라 이 규칙을 따르지 않는다.
  * - 화면을 옮기면 진행 중인 투어를 닫되 본 것으로 남기지 않는다(옮긴 화면에서 다시 고른다).
  * - 끝나면 투어를 시작하기 전의 포커스로 돌린다(그 요소가 아직 있으면).
  */
@@ -28,6 +39,10 @@ export function TourRunner() {
   const state = useSyncExternalStore(tourProgress.subscribe, tourProgress.get, serverTourState);
   const tour = nextTour(toursFor(pathname), state);
   const requestSeq = state.requestSeq;
+
+  useEffect(() => {
+    void tourProgress.refresh();
+  }, []);
 
   useEffect(() => {
     if (!tour) return;
@@ -46,6 +61,10 @@ export function TourRunner() {
     const start = () => {
       stopWaiting();
       if (finished) return;
+      if (!requested && typing()) {
+        finished = true;
+        return;
+      }
       const steps = driveSteps(tour, exists);
       if (!steps) {
         tourProgress.clearRequest();
@@ -76,10 +95,15 @@ export function TourRunner() {
           instance?.destroy();
           // driver.js 는 단계마다 이전 팝오버 버튼(이미 빠진 노드)을 돌아갈 곳으로 잡아 포커스를 잃는다
           if (returnFocus instanceof HTMLElement && returnFocus.isConnected) returnFocus.focus();
-          tourProgress.finish(tour.id);
+          tourProgress.finish(
+            tour.id,
+            instance?.isLastStep() ? 'COMPLETED' : 'SKIPPED',
+            instance?.getActiveIndex() ?? null,
+          );
         },
       });
       instance.drive();
+      tourProgress.start(tour.id);
     };
 
     /** 기다리는 동안 운영자가 화면을 쓰기 시작했다 — 이번 방문에는 자동으로 띄우지 않는다 */
