@@ -151,7 +151,7 @@ class ProductPersistenceAdapterTest {
             displayedIn(9004L, 103L, 11L),
             displayedIn(9005L, 104L, 10L),
             displayedIn(9006L, 105L, 12L),
-            displayedIn(9007L, 108L, 10L),
+            displayedIn(9090L, 108L, 10L),
 
             // 101: 판매중 SKU 추가금 0 하나 + 판매 종료 SKU 추가금 5,000 (집계에서 빠진다)
             // 102: 판매 종료 SKU 하나뿐   103: 판매중 SKU 추가금 0 · 1,000   104: 판매중 SKU 하나   105: SKU 없음

@@ -88,7 +88,7 @@ class LookAdminConcurrencyTest {
         Timestamp now = Timestamp.from(Instant.now());
         jdbcTemplate.update(
             "insert into product.product (id, created_at, updated_at, category_id, custom_order, name, preorder, sale_price_amount, sale_price_currency,"
-                + " sale_status, visible) values (?, ?, ?, 1, false, '상품', false, 1000, 'KRW', 'ON_SALE', true)",
+                + " sale_status, visible, version) values (?, ?, ?, 1, false, '상품', false, 1000, 'KRW', 'ON_SALE', true, 0)",
             PRODUCT_ID, now, now
         );
     }
