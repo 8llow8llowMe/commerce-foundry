@@ -88,6 +88,21 @@ public class AdminAuditLogRepositoryAdapter implements AdminAuditPort, AdminAudi
         record(AdminAuditRecord.adminPasswordChanged(adminMemberId, succeeded));
     }
 
+    @Override
+    public void adminOtpEnrolled(long adminMemberId, boolean succeeded) {
+        record(AdminAuditRecord.adminOtpEnrolled(adminMemberId, succeeded));
+    }
+
+    @Override
+    public void adminOtpDisabled(long adminMemberId, boolean succeeded) {
+        record(AdminAuditRecord.adminOtpDisabled(adminMemberId, succeeded));
+    }
+
+    @Override
+    public void adminOtpRecoveryCodesRegenerated(long adminMemberId, boolean succeeded) {
+        record(AdminAuditRecord.adminOtpRecoveryCodesRegenerated(adminMemberId, succeeded));
+    }
+
     /** 조건이 켜지고 꺼지므로 QueryDSL 한 쿼리다 — 모두 아이디 내림차순이다. */
     @Override
     public Page<AdminAuditLog> findPage(String action, Long actorMemberId, String target, String result, int page, int size) {

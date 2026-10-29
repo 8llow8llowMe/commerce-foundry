@@ -32,6 +32,10 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -40,7 +44,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * PostgreSQL 컨테이너에서 관리자 OTP 저장의 유니크 키 · 조건부 UPDATE · 복구 코드 1회 사용 · 자격 잠금을 실제로 돌린다 (#238). 스키마는 DDL 스냅숏으로 만들고
  * {@code validate} 로 엔티티와 대조한다. Docker 가 없으면 건너뛴다(CI 는 돈다).
  *
- * <p>두 트랜잭션이 같은 자격 잠금을 다투는 동시성(대기 상한 → {@code AUTH_044})은 PR-A2 에서 Processor 트랜잭션과 함께 본다.
+ * <p>두 트랜잭션이 같은 자격 잠금을 다투는 동시성(대기 상한 → {@code AUTH_044})은 Processor 트랜잭션과 함께 {@code AdminOtpConcurrencyTest} 가 본다.
  */
 @DataJpaTest
 @Testcontainers
@@ -74,6 +78,7 @@ class AdminOtpPersistenceTest {
 
     @Autowired AdminOtpRepositoryPort port;
     @Autowired AdminOtpCredentialRepository credentialRepository;
+    @Autowired PlatformTransactionManager transactionManager;
 
     private static AdminOtpCredential confirmed(long id, long memberId, long step) {
         return AdminOtpCredential.confirm(id, memberId, SECRET, step, NOW);
@@ -195,5 +200,34 @@ class AdminOtpPersistenceTest {
         assertThat(port.findUnusedRecoveryCodes(1008L)).isEmpty();
         assertThat(port.findByMemberId(1009L)).isPresent();
         assertThat(port.findUnusedRecoveryCodes(1009L)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("상태 조회 — 확인 시각 · 안 쓴 복구 코드 수를 암호문 없이 읽는다. 잠금은 자격이 있을 때만 참이다 (PR-A2)")
+    void statusQueriesAndLock() {
+        port.save(confirmed(5010L, 1010L, 1L));
+        port.replaceRecoveryCodes(1010L, List.of("hash-a", "hash-b", "hash-c"));
+        port.markRecoveryCodeUsed(port.findUnusedRecoveryCodes(1010L).getFirst().id(), 1010L, NOW);
+
+        assertThat(port.findConfirmedAt(1010L)).hasValue(NOW);
+        assertThat(port.countUnusedRecoveryCodes(1010L)).isEqualTo(2L);
+        assertThat(port.findConfirmedAt(1011L)).isEmpty();
+        assertThat(port.countUnusedRecoveryCodes(1011L)).isZero();
+
+        TransactionTemplate inTransaction = new TransactionTemplate(transactionManager);
+        Boolean lockedEnrolled = inTransaction.execute(status -> port.lockByMemberId(1010L));
+        Boolean lockedMissing = inTransaction.execute(status -> port.lockByMemberId(1011L));
+        assertThat(lockedEnrolled).isTrue();
+        assertThat(lockedMissing).isFalse();
+    }
+
+    @Test
+    @DisplayName("자격 잠금은 호출자 트랜잭션이 있어야 한다(MANDATORY) — 트랜잭션 없이 부르면 바로 풀릴 잠금을 걸지 않고 거절한다")
+    void lockRequiresCallerTransaction() {
+        TransactionTemplate withoutTransaction = new TransactionTemplate(transactionManager);
+        withoutTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+
+        assertThatThrownBy(() -> withoutTransaction.executeWithoutResult(status -> port.lockByMemberId(1012L)))
+            .isInstanceOf(IllegalTransactionStateException.class);
     }
 }

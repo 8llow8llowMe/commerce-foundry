@@ -112,4 +112,22 @@ class TotpTest {
     void skipsNegativeSteps() {
         assertThat(Totp.verify(RFC_SECRET, Totp.code(RFC_SECRET, 0), 0)).hasValue(0);
     }
+
+    @Test
+    @DisplayName("등록 URI — 라벨 발급자:계정 · issuer 를 퍼센트 인코딩(공백 %20, @ %40)하고 SHA1 · 6자리 · 30초를 밝힌다")
+    void provisioningUri() {
+        String uri = Totp.provisioningUri("Commerce Foundry Admin", "owner+shop@example.com", "GEZDGNBVGY3TQOJQ");
+
+        assertThat(uri).isEqualTo("otpauth://totp/Commerce%20Foundry%20Admin:owner%2Bshop%40example.com?secret=GEZDGNBVGY3TQOJQ"
+            + "&issuer=Commerce%20Foundry%20Admin&algorithm=SHA1&digits=6&period=30");
+        assertThat(Totp.provisioningUri("모코유리", "a&b=c@example.com", "AAAA")).contains("%EB%AA%A8", "a%26b%3Dc%40example.com").doesNotContain("+");
+    }
+
+    @Test
+    @DisplayName("등록 URI — 발급자에 ':' 가 있거나 비었으면 · 계정이 비었으면 거절한다(라벨 구분자가 둘이 된다)")
+    void provisioningUriRejectsBadLabel() {
+        assertThatThrownBy(() -> Totp.provisioningUri("Shop:Admin", "a@example.com", "AAAA")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Totp.provisioningUri(" ", "a@example.com", "AAAA")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Totp.provisioningUri("Shop", "", "AAAA")).isInstanceOf(IllegalArgumentException.class);
+    }
 }

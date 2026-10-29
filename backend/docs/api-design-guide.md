@@ -242,6 +242,11 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/admin/admins` (#193) | `hasRole('ADMIN')` | 201 `{memberId}` — 본문 `{email, password, name}`. 비밀번호는 응답에 없다. 고객 이메일은 승격하지 않는다 | 400 `AUTH_130` · `AUTH_131` · `AUTH_132` · `AUTH_140`~`144` · 409 `AUTH_002` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 | `PATCH /api/v1/admin/admins/{memberId}` (#193) | `hasRole('ADMIN')` | 200 `dataBody: null` — 활성 관리자를 끈다. 마지막 한 명은 거절. 옛 access 토큰은 게이트웨이 컷오프 | 404 `AUTH_033` · 409 `AUTH_031` · 400 `AUTH_146` · 503 `AUTH_013` |
 | `PATCH /api/v1/admin/me/password` (#193) | `hasRole('ADMIN')` | 200 `dataBody: null` — 본문 `{currentPassword, newPassword}`. 본인만. 바꾼 뒤 다시 로그인 | 400 `AUTH_032` · `AUTH_141` · `AUTH_142` · `AUTH_145` · 503 `AUTH_013` |
+| `GET /api/v1/admin/me/otp` (#238) | `hasRole('ADMIN')` | 200 `{enrolled, confirmedAt, remainingRecoveryCodes}` — `confirmedAt` 은 미등록이면 null. 확인 전 진행 중 등록은 `enrolled=false` | 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `POST /api/v1/admin/me/otp/enrollment` (#238) | `hasRole('ADMIN')` | 200 `{secret, otpauthUri, expiresAt}` · `Cache-Control: no-store` — 본문 없음. 비밀은 이번 한 번만. 다시 부르면 이전 진행 중 등록은 버려진다 | 409 `AUTH_037` · 404 `AUTH_033` · 503 `AUTH_013` · `AUTH_039` |
+| `POST /api/v1/admin/me/otp` (#238) | `hasRole('ADMIN')` | 201 `{recoveryCodes: [8개 xxxxx-xxxxx]}` · `no-store` — 본문 `{currentPassword, code}`(code 는 6자리). 복구 코드 원문은 이번 한 번만 | 400 `AUTH_038` · `AUTH_032` · `AUTH_035` · `AUTH_145` · `AUTH_147` · `AUTH_148` · 404 `AUTH_033` · 409 `AUTH_037` · `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
+| `POST /api/v1/admin/me/otp/deactivation` (#238) | `hasRole('ADMIN')` | 200 `dataBody: null` — 본문 `{currentPassword, code}`(code 는 6자리 또는 복구 코드). 자격 · 복구 코드를 모두 지운다 | 404 `AUTH_036` · `AUTH_033` · 400 `AUTH_032` · `AUTH_035` · `AUTH_145` · `AUTH_147` · `AUTH_149` · 409 `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
+| `POST /api/v1/admin/me/otp/recovery-codes` (#238) | `hasRole('ADMIN')` | 200 `{recoveryCodes}` · `no-store` — 본문은 해제와 같다. 이전 코드는 모두 무효 | 해제와 같다 |
 | `GET /api/v1/admin/members` (#6) | `hasRole('ADMIN')` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 | `GET /api/v1/admin/audit-logs` (#192 · #286 · #322) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, actorDisplayName, target, targetDisplayName, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&target=&result=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_136` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 
@@ -275,16 +280,16 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_022` | 409 | 같은 배송지를 다른 요청이 먼저 고쳤거나 지웠다(낙관적 락), 또는 기본 배송지 유니크 키 위반. 다시 조회한 뒤 보낸다 |
 | `AUTH_023` | 409 | 같은 회원의 다른 배송지 쓰기가 회원 잠금을 쥐고 있어 5초(트랜잭션 시간 상한) 안에 끝나지 않았다. 그 회원 요청끼리 겹친 것이라 503 이 아니다 |
 | `AUTH_030` | 400 | 관리자 로그인 실패 (#6) — 이메일 없음 · 비밀번호 틀림 · 고객 계정을 구분하지 않는다. 문구는 `AUTH_001` 과 같다 (`security-guide.md` §11-1) |
-| `AUTH_034~039` | 400 · 404 · 409 · 503 | 관리자 OTP (#238) — 034 로그인 2단계 챌린지 없음(만료 · 이미 씀, 400) · 035 OTP · 복구 코드 틀림 또는 이미 씀(400) · 036 OTP 미등록(404) · 037 이미 등록(409) · 038 진행 중인 등록 없음(400) · 039 OTP 비밀을 읽을 수 없음(암호화 키 없음 · 손상, 503). API 는 #238 PR-A2 · B 에서 붙는다 |
+| `AUTH_034~039` | 400 · 404 · 409 · 503 | 관리자 OTP (#238) — 034 로그인 2단계 챌린지 없음(만료 · 이미 씀, 400) · 035 OTP · 복구 코드 틀림 또는 이미 씀(400) · 036 OTP 미등록(404) · 037 이미 등록(409) · 038 진행 중인 등록 없음(400) · 039 OTP 비밀을 읽을 수 없음(암호화 키 없음 · 손상, 503). 본인 OTP API 는 PR-A2, 로그인 2단계는 PR-B 다. 응답은 비밀번호(`AUTH_032`)와 코드(`AUTH_035`) 중 어느 쪽이 틀렸는지만 나누고, 코드가 틀렸는지 · 이미 썼는지 · 형식이 다른지는 나누지 않는다 |
 | `AUTH_040` | 429 + `Retry-After` | 로그인 시도 초과 (#66) — 고객 · 관리자 로그인. 같은 이메일(정규화)의 시도가 창(기본 15분)의 허용 횟수(기본 5회)를 넘었다. 비밀번호가 맞아도 거절하고, 계정이 있든 없든 같은 본문 · 헤더다. 관리자 로그인은 성공한 시도도 창에서 지우지 않는다. `Retry-After` 초 뒤 다시 허용한다 (`security-guide.md` §12) |
 | `AUTH_041` | 429 + `Retry-After` | 회원가입 시도 초과 (#66) — 같은 이메일의 가입 시도가 창(기본 10분)의 허용 횟수(기본 5회)를 넘었다. 가입된 이메일이든 아니든 같다 |
-| `AUTH_043` | 429 + `Retry-After` | 관리자 OTP 코드 시도 초과 (#238 PR-B) — 같은 관리자의 2단계 시도가 창(15분)의 허용 횟수(5회)를 넘었다. 코드가 맞아도 거절한다 |
-| `AUTH_044` | 409 | 관리자 OTP 쓰기 잠금 대기 초과 (#238) — 같은 관리자의 복구 코드 교체 · 해제가 겹쳐 자격 행 잠금을 대기 상한(2초) 안에 얻지 못했다. 잠시 뒤 다시 보낸다 |
+| `AUTH_043` | 429 + `Retry-After` | 관리자 OTP 코드 시도 초과 (#238) — 같은 관리자의 OTP 등록 확인 · 해제 · 복구 코드 재발급(PR-A2) · 로그인 2단계(PR-B) 시도가 창(15분)의 허용 횟수(5회)를 넘었다. 비밀번호가 틀린 시도도 센다. 코드가 맞아도 거절한다. 시도 제한 스위치(`auth.login-guard.enabled`)를 꺼도 켜져 있다 |
+| `AUTH_044` | 409 | 관리자 OTP 쓰기 잠금 대기 초과 (#238) — 같은 관리자의 등록 확인 · 복구 코드 재발급 · 해제가 겹쳐 자격 행 잠금을 대기 상한(2초) 안에 얻지 못했다. **재시도 가능** — FE 는 "잠시 뒤 다시 시도" 로 안내하고 같은 요청을 다시 보내면 된다(코드는 소비되지 않았다) |
 | `AUTH_100` | 400 | 깨진 JSON · 본문 없음 · 타입 불일치 (필드는 `fieldErrors` 로 밝힌다) |
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
 | `AUTH_120~129` | 400 | 배송지 검증 — 별칭 120 · 받는 사람 121 · 연락처 122 · 123(형식) · 국가 124 · 우편번호 125(KR 필수) · 126(형식) · 주소 127 · 길이 128 · 해외 도시 129 |
-| `AUTH_130~146` | 400 | 관리자 · 표시 이름 · 운영자 계정 필드 검증 (#6 · #286 · #322 · #193) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132, 어드민 목록 `page` 133 · `size` 134, 감사 로그 `actorMemberId` 135 · `target` 136, 표시 이름 `ids` 137 · 100개 138 · 양수 139, 운영자 추가 이메일 형식 140 · 비밀번호 12~64자 141 · 비밀번호 형식 142 · 이름 필수 143 · 이름 길이 144 · 현재 비밀번호 필수 145 · 관리자 아이디 양수 146 |
+| `AUTH_130~149` | 400 | 관리자 · 표시 이름 · 운영자 계정 · OTP 필드 검증 (#6 · #286 · #322 · #193 · #238) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132, 어드민 목록 `page` 133 · `size` 134, 감사 로그 `actorMemberId` 135 · `target` 136, 표시 이름 `ids` 137 · 100개 138 · 양수 139, 운영자 추가 이메일 형식 140 · 비밀번호 12~64자 141 · 비밀번호 형식 142 · 이름 필수 143 · 이름 길이 144 · 현재 비밀번호 필수 145 · 관리자 아이디 양수 146, OTP 코드 필수 147 · 등록 확인 6자리 148 · 해제 · 재발급 6자리 또는 복구 코드(32자 이하) 149 |
 | `AUTH_198` · `AUTH_199` | 400 | 파라미터 타입 불일치(`page=x` · 없는 `role`) · 필수 파라미터 누락 |
 
 코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~033` · 관리자 OTP(#238) `034~039` · 시도 제한(#66) `040~049`(OTP 시도 `043` · OTP 잠금 대기 `044`), 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.
@@ -311,6 +316,21 @@ return ResponseEntity.ok().body(Response.success(response));
   세 칸 모두 동의 이력(`member_agreement`, 추가만 한다)에 한 줄씩 남고 약관 버전은 서버 설정 `auth.agreement.versions.*` 다 — 클라이언트가 보내지 않는다.
   마케팅 현재 상태는 그 회원의 가장 최근 마케팅 행이고, 내 정보 수정에서 값이 바뀔 때만 한 줄 더한다.
 - 역할은 요청으로 받지 않는다. 가입은 언제나 `CUSTOMER` 다. 관리자 계정은 같은 `member` 테이블에 `role=ADMIN` 으로 따로 만든다(#6).
+
+관리자 본인 OTP (#238 PR-A2) — `/api/v1/admin/me/otp/**`
+
+- 행위자는 access 토큰의 memberId 뿐이다. 다른 관리자의 OTP 는 다루지 않는다(동료 초기화는 PR-C). 등록 여부는 관리자별 선택이다(강제는 #236).
+- 흐름: 등록 시작(`…/enrollment`) → 인증 앱에 `otpauthUri`(QR 은 FE 가 그린다) 또는 `secret` 입력 → `expiresAt`(기본 15분) 안에 등록 확인(`POST …/otp`) → 복구 코드 8개를 받아 보관.
+  `otpauthUri` 는 `otpauth://totp/{issuer}:{관리자 이메일}?secret=..&issuer=..&algorithm=SHA1&digits=6&period=30` 이고 라벨 · issuer 는 퍼센트 인코딩한다.
+  이메일은 이 응답에만 있고 저장 · 로그 · 감사에 남지 않는다. 비밀 · 복구 코드를 싣는 응답은 `Cache-Control: no-store` 다 — BFF 도 저장 · 로그하지 않는다.
+  등록 시작을 다시 부르면 이전 진행 중 등록이 버려진다 — access 토큰 보유자가 진행 중 등록을 방해할 수는 있으나, 확인에 비밀번호가 필요해 탈취로 이어지지 않는다.
+- 확인 · 해제 · 재발급은 **현재 비밀번호 + 코드** 재인증이다 — access 토큰만 훔친 사람이 OTP 를 걸어 진짜 관리자를 잠그거나 해제하지 못하게.
+  확인의 `code` 는 6자리 숫자만(148), 해제 · 재발급의 `code` 는 6자리 또는 복구 코드(`xxxxx-xxxxx`, 소문자 · 하이픈 생략 · 앞뒤 공백 허용, 149)다.
+  같은 TOTP(같은 30초 step)와 쓴 복구 코드는 다시 쓸 수 없다(`AUTH_035`). 코드 소비와 해제 · 교체는 한 트랜잭션이라 한쪽만 반영되지 않는다.
+- 요청마다 먼저 시도 1회를 센다(`AUTH_043`, `security-guide.md` §14-1 `ADMIN_OTP`). 성공하면 창을 비운다.
+- 해제는 `DELETE` 가 아니라 `POST …/otp/deactivation` 이다 — 재인증 본문이 필요한데 `DELETE` 본문은 HTTP 의미가 정해져 있지 않아 프록시 · 클라이언트가 버릴 수 있다.
+  동사 대신 명사 리소스로 둔다(§1-1 `cancellation` 과 같다).
+- 감사: 등록 확인 `ADMIN_OTP_ENROLL` · 해제 `ADMIN_OTP_DISABLE` · 재발급 `ADMIN_OTP_RECOVERY_REGENERATE`(성공 · 실패. 판정 전 실패 — 시도 제한 429 · 계수기 장애 503 — 는 남기지 않는다). 등록 시작은 남기지 않는다.
 
 #### 배송지 주소록 (#7)
 
@@ -366,7 +386,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 어드민 감사 로그 조회 (#192) — `GET /api/v1/admin/audit-logs`
 
-- `action`(선택, `ADMIN_LOGIN` · `MEMBER_SEARCH`, 틀리면 198) · `actorMemberId`(선택, 양수 — 135) · `target`(선택, 완전 일치, 공백 없이 1~200자 ASCII — 136) ·
+- `action`(선택, `AdminAuditAction` 값 — `ADMIN_LOGIN` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE`, 틀리면 198) · `actorMemberId`(선택, 양수 — 135) · `target`(선택, 완전 일치, 공백 없이 1~200자 ASCII — 136) ·
   `result`(선택, `SUCCESS` · `FAILURE`, 틀리면 198) · `page` · `size`(회원 조회와 같은 133 · 134).
   정렬은 최신순 하나(감사 로그 아이디 내림차순)라 `sortType` 이 없다. 조건은 각각 켜지고 꺼지므로 QueryDSL 이고, `(action, id)` · `(actor_member_id, id)` · `(target, id)` 인덱스를 탄다.
   로그인 실패는 행위자가 없어 `actorMemberId` 만으로는 한 계정을 못 고른다. `target=member:<id>&result=FAILURE` 로 고른다 (#286).

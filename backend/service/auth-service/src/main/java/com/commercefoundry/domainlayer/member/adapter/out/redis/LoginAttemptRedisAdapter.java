@@ -28,18 +28,18 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
 
     /** 창은 밀리초 정수 문자열로 넘긴다 — 1ms 미만이면 PEXPIRE 가 키를 바로 지워 창이 서지 않으므로 받지 않는다. */
     @Override
-    public LoginAttemptOutcome record(AttemptKind kind, String normalizedEmail, Duration window) {
+    public LoginAttemptOutcome record(AttemptKind kind, String subject, Duration window) {
         if (window.toMillis() < 1) {
             throw new IllegalArgumentException("window 는 1ms 이상이어야 한다");
         }
-        List<String> keys = List.of(key(kind, normalizedEmail));
+        List<String> keys = List.of(key(kind, subject));
         List<Object> result = tokenStore.execute(() -> redisTemplate.execute(LoginAttemptRedisScripts.RECORD, keys, String.valueOf(window.toMillis())));
         return toOutcome(result);
     }
 
     @Override
-    public void reset(AttemptKind kind, String normalizedEmail) {
-        String key = key(kind, normalizedEmail);
+    public void reset(AttemptKind kind, String subject) {
+        String key = key(kind, subject);
         tokenStore.execute(() -> redisTemplate.delete(key));
     }
 
@@ -58,7 +58,27 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
     }
 
     /** 기록 · reset 이 같이 쓰는 유일한 키 경로 — 멱등이라 이미 정규화한 값은 같은 키가 된다. */
-    private String key(AttemptKind kind, String normalizedEmail) {
-        return LoginAttemptRedisKeys.attempt(kind, kind == AttemptKind.SIGN_UP_IP ? normalizedEmail : keyHasher.hash(Member.canonicalEmail(normalizedEmail))).value();
+    private String key(AttemptKind kind, String subject) {
+        return LoginAttemptRedisKeys.attempt(kind, keySubject(kind, subject)).value();
+    }
+
+    /**
+     * 키에 넣는 주체. 이메일 종류만 HMAC 한다 — IP 차원은 게이트웨이가 이미 불투명 값으로 주고, 관리자 OTP(#238)는 개인정보가 아닌 memberId 라
+     * 해시 키 없이 쓴다({@code auth.login-guard.enabled=false} 로 해시 키가 없어도 OTP 제한은 돈다). 종류가 늘면 switch 가 컴파일에서 막는다.
+     */
+    private String keySubject(AttemptKind kind, String subject) {
+        return switch (kind) {
+            case LOGIN, ADMIN_LOGIN, SIGN_UP -> keyHasher.hash(Member.canonicalEmail(subject));
+            case SIGN_UP_IP -> subject;
+            case ADMIN_OTP -> requireMemberId(subject);
+        };
+    }
+
+    /** 숫자 아닌 값이 키를 만들지 못하게 한다 — 받은 값은 메시지에 넣지 않는다. */
+    private static String requireMemberId(String subject) {
+        if (subject == null || !subject.matches("[1-9][0-9]{0,18}")) {
+            throw new IllegalArgumentException("admin otp attempt subject must be a positive member id");
+        }
+        return subject;
     }
 }

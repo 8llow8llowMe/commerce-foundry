@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.member.domain.model;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -29,6 +30,32 @@ public final class Totp {
     private static final int MODULUS = 1_000_000;
 
     private Totp() {
+    }
+
+    /**
+     * 인증 앱이 읽는 등록 URI (Key Uri Format) — {@code otpauth://totp/{issuer}:{account}?secret=..&issuer=..&algorithm=SHA1&digits=6&period=30}.
+     * 라벨 · {@code issuer} 값은 퍼센트 인코딩한다(공백은 {@code %20} — {@code +} 를 공백으로 읽지 않는 앱이 있다). 라벨 안의 {@code :} 는 발급자와 계정을 나누는
+     * 구분자라 인코딩하지 않고 하나만 둔다 — 그래서 발급자에는 {@code :} 가 올 수 없다({@code AdminOtpProperties} 가 기동에서 막는다).
+     * 결과에 비밀이 들어 있으므로 로그에 남기지 않는다.
+     *
+     * @param secretBase32 {@link Base32#encode} 한 비밀(대문자 · 패딩 없음)
+     */
+    public static String provisioningUri(String issuer, String accountName, String secretBase32) {
+        if (issuer == null || issuer.isBlank() || issuer.contains(":")) {
+            throw new IllegalArgumentException("issuer must not be blank or contain ':'");
+        }
+        if (accountName == null || accountName.isBlank()) {
+            throw new IllegalArgumentException("account name must not be blank");
+        }
+        String encodedIssuer = percentEncode(issuer);
+        return "otpauth://totp/" + encodedIssuer + ":" + percentEncode(accountName)
+            + "?secret=" + secretBase32
+            + "&issuer=" + encodedIssuer
+            + "&algorithm=SHA1&digits=" + DIGITS + "&period=" + PERIOD_SECONDS;
+    }
+
+    private static String percentEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     /** 시각이 속한 step — Unix 초를 30초로 나눈 몫(T0 = 0). */

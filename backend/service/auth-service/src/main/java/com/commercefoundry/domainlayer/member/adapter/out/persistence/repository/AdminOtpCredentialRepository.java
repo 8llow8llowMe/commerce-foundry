@@ -22,6 +22,10 @@ public interface AdminOtpCredentialRepository extends JpaRepository<AdminOtpCred
     /** {@code uk_admin_otp_credential_member_id} 를 탄다. */
     Optional<AdminOtpCredentialEntity> findByMemberId(Long memberId);
 
+    /** 등록 여부 · 상태 조회 — 암호문을 읽지 않는다. {@code uk_admin_otp_credential_member_id} 를 탄다. */
+    @Query("select c.confirmedAt from AdminOtpCredentialEntity c where c.memberId = :memberId")
+    Optional<Instant> findConfirmedAtByMemberId(Long memberId);
+
     /** 사용 기록 전에 저장된 암호문의 키 식별자만 읽는다 — 재암호화가 필요한지 어댑터가 판정한다. 엔티티를 영속성 컨텍스트에 올리지 않는다. */
     @Query("select c.keyId from AdminOtpCredentialEntity c where c.id = :id and c.memberId = :memberId")
     Optional<String> findKeyIdByIdAndMemberId(Long id, Long memberId);

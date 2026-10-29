@@ -28,7 +28,8 @@ public class InMemoryLoginAttemptStore implements LoginAttemptCounterPort {
     private record Key(AttemptKind kind, String canonicalEmail) {
 
         private static Key of(AttemptKind kind, String email) {
-            return new Key(kind, kind == AttemptKind.SIGN_UP_IP ? email : Member.canonicalEmail(email));
+            boolean isEmail = kind != AttemptKind.SIGN_UP_IP && kind != AttemptKind.ADMIN_OTP;
+            return new Key(kind, isEmail ? Member.canonicalEmail(email) : email);
         }
     }
 
@@ -50,22 +51,22 @@ public class InMemoryLoginAttemptStore implements LoginAttemptCounterPort {
     }
 
     @Override
-    public synchronized LoginAttemptOutcome record(AttemptKind kind, String normalizedEmail, Duration window) {
+    public synchronized LoginAttemptOutcome record(AttemptKind kind, String subject, Duration window) {
         if (window.toMillis() < 1) {
             throw new IllegalArgumentException("window 는 1ms 이상이어야 한다");
         }
         failIfUnavailable();
         Instant now = clock.instant();
-        Window updated = windows.compute(Key.of(kind, normalizedEmail), (key, current) -> current == null || current.expiredAt(now)
+        Window updated = windows.compute(Key.of(kind, subject), (key, current) -> current == null || current.expiredAt(now)
             ? new Window(1, now.plus(window))
             : new Window(current.count() + 1, current.expiresAt()));
         return new LoginAttemptOutcome(updated.count(), Duration.between(now, updated.expiresAt()));
     }
 
     @Override
-    public void reset(AttemptKind kind, String normalizedEmail) {
+    public void reset(AttemptKind kind, String subject) {
         failIfUnavailable();
-        windows.remove(Key.of(kind, normalizedEmail));
+        windows.remove(Key.of(kind, subject));
     }
 
     /** 이메일 원문 대신 8자 16진 꼬리표 — 어댑터처럼 같은 이메일이면 같은 값이다. 저장소 장애와 무관하다(저장소를 부르지 않는다). */
@@ -75,8 +76,8 @@ public class InMemoryLoginAttemptStore implements LoginAttemptCounterPort {
     }
 
     /** 지금 창 안의 시도 수. 창이 없거나 지났으면 0. 창 끝과 같은 시각은 아직 창 안이다. */
-    public long attempts(AttemptKind kind, String normalizedEmail) {
-        Window window = windows.get(Key.of(kind, normalizedEmail));
+    public long attempts(AttemptKind kind, String subject) {
+        Window window = windows.get(Key.of(kind, subject));
         return window == null || window.expiredAt(clock.instant()) ? 0 : window.count();
     }
 

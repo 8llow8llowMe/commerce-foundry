@@ -173,4 +173,20 @@ class LoginAttemptRedisAdapterArgumentsTest {
         verify(redisTemplate).delete(keys.getFirst());
     }
 
+    @Test
+    @DisplayName("관리자 OTP 키는 auth:admin-otp-attempt:{memberId} 이고 해시 키가 없어도(시도 제한 꺼짐) 만든다. 숫자가 아닌 주체는 Redis 전에 거절한다")
+    void adminOtpUsesMemberIdWithoutHashKey() {
+        LoginAttemptKeyHasher disabled = new LoginAttemptKeyHasher(new AuthLoginGuardProperties(false, 5, WINDOW, null, null));
+        LoginAttemptRedisAdapter disabledAdapter = new LoginAttemptRedisAdapter(redisTemplate, disabled, new TokenStoreRedisSupport(Clock.systemUTC()));
+        List<String> keys = List.of("auth:admin-otp-attempt:4611686018427387904");
+        given(redisTemplate.execute(LoginAttemptRedisScripts.RECORD, keys, "900000")).willReturn(List.of(2L, 800_000L));
+
+        assertThat(disabledAdapter.record(AttemptKind.ADMIN_OTP, "4611686018427387904", WINDOW)).isEqualTo(new LoginAttemptOutcome(2, Duration.ofMillis(800_000)));
+        disabledAdapter.reset(AttemptKind.ADMIN_OTP, "4611686018427387904");
+        verify(redisTemplate).delete(keys.getFirst());
+
+        assertThatThrownBy(() -> disabledAdapter.record(AttemptKind.ADMIN_OTP, EMAIL, WINDOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> disabledAdapter.reset(AttemptKind.ADMIN_OTP, "0")).isInstanceOf(IllegalArgumentException.class);
+    }
+
 }

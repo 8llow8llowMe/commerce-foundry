@@ -56,7 +56,8 @@ public class AdminAuditLogAdminController {
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
     public ResponseEntity<Response<PageResponse<AdminAuditLogAdminItem>>> searchAuditLogs(
-        @Parameter(description = "행위 — ADMIN_LOGIN · MEMBER_SEARCH. 없으면 전체") @RequestParam(required = false) AdminAuditAction action,
+        @Parameter(description = "행위 — ADMIN_LOGIN · MEMBER_SEARCH · ADMIN_CREATE · ADMIN_DEACTIVATE · ADMIN_PASSWORD_CHANGE · "
+            + "ADMIN_OTP_ENROLL · ADMIN_OTP_DISABLE · ADMIN_OTP_RECOVERY_REGENERATE. 없으면 전체") @RequestParam(required = false) AdminAuditAction action,
         @Parameter(description = "행위한 관리자 회원 아이디. 없으면 전체") @RequestParam(required = false)
         @Positive(message = MemberValidationMessage.ADMIN_AUDIT_ACTOR_ID_POSITIVE) Long actorMemberId,
         @Parameter(description = "대상 완전 일치 (member:<id> 등). 없으면 전체") @RequestParam(required = false)
