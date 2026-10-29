@@ -40,7 +40,7 @@ export function createLoginHandler(
 /**
  * 브라우저 → Next `POST /api/v1/auth/admin/login` → 게이트웨이 관리자 로그인(BE #191). 고객 로그인과 같지만
  * 응답이 `{ accessToken, accessTokenExpiresIn }` 뿐이다(refresh 없음) — access 쿠키 하나만 심는다. 세션은 그 수명이 전부다.
- * 실패(400 AUTH_030 한 문구 · 검증 fieldErrors)는 게이트웨이 봉투와 상태를 그대로 중계한다.
+ * 실패(400 AUTH_030 한 문구 · 검증 fieldErrors · 429 AUTH_040 · 503 AUTH_013)는 게이트웨이 봉투와 상태를(429 면 Retry-After 까지) 그대로 중계한다.
  */
 export function createAdminLoginHandler(
   options: LoginHandlerOptions,

@@ -207,6 +207,34 @@ describe('createAdminLoginHandler', () => {
     await expect(unwrap(res)).rejects.toMatchObject({ code: 'AUTH_030' });
   });
 
+  it('시도 제한(429 AUTH_040)은 상태 · 봉투 · Retry-After 를 중계하고 쿠키를 심지 않는다(#407)', async () => {
+    const limited = envelope(429, false, null, 'AUTH_040');
+    limited.headers.set('retry-after', '840');
+    const res = await adminHandlerWith(vi.fn<typeof fetch>().mockResolvedValue(limited))(
+      adminLogin(),
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('840');
+    expect(res.headers.getSetCookie()).toEqual([]);
+    await expect(unwrap(res)).rejects.toMatchObject({
+      kind: 'rateLimited',
+      code: 'AUTH_040',
+      retryAfterSec: 840,
+    });
+  });
+
+  it('시도 계수기 장애(503 AUTH_013)는 봉투와 503 을 그대로 중계한다', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(envelope(503, false, null, 'AUTH_013'));
+    const res = await adminHandlerWith(fetchImpl)(adminLogin());
+
+    expect(res.status).toBe(503);
+    expect(res.headers.getSetCookie()).toEqual([]);
+    await expect(unwrap(res)).rejects.toMatchObject({ kind: 'unavailable', code: 'AUTH_013' });
+  });
+
   it('성공인데 access 토큰이 없으면 로그인된 척하지 않고 BFF_002 503 이다', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, {}));
     const res = await adminHandlerWith(fetchImpl)(adminLogin());

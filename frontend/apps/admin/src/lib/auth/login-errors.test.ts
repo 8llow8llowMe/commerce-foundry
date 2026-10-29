@@ -1,6 +1,11 @@
 import { ApiError, type FieldErrorItem } from '@cf/api-client';
 import { describe, expect, it } from 'vitest';
-import { LOGIN_FAILED, loginErrors } from './login-errors';
+import {
+  LOGIN_FAILED,
+  LOGIN_RATE_LIMITED,
+  LOGIN_STORE_UNAVAILABLE,
+  loginErrors,
+} from './login-errors';
 
 const apiError = (
   kind: ConstructorParameters<typeof ApiError>[0],
@@ -44,6 +49,21 @@ describe('loginErrors', () => {
     ]);
     expect(loginErrors(apiError('rateLimited', 429, 'GATEWAY_006', '많음')).form).toEqual([
       '요청이 많습니다. 잠시 뒤에 다시 시도해 주세요.',
+    ]);
+  });
+
+  it('로그인 시도 제한(AUTH_040)은 이유와 함께 1분 이상이면 분으로 올려 안내한다', () => {
+    expect(loginErrors(apiError('rateLimited', 429, 'AUTH_040', '많음', [], 840)).form).toEqual([
+      `${LOGIN_RATE_LIMITED} 14분 뒤에 다시 시도해 주세요.`,
+    ]);
+    expect(loginErrors(apiError('rateLimited', 429, 'AUTH_040', '많음')).form).toEqual([
+      `${LOGIN_RATE_LIMITED} 잠시 뒤에 다시 시도해 주세요.`,
+    ]);
+  });
+
+  it('시도 계수기 장애(503 AUTH_013)는 잠시 뒤 다시 시도 안내다', () => {
+    expect(loginErrors(apiError('unavailable', 503, 'AUTH_013', '장애')).form).toEqual([
+      LOGIN_STORE_UNAVAILABLE,
     ]);
   });
 

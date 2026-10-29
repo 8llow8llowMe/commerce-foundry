@@ -4,24 +4,28 @@ import { apiFetch } from '@cf/api-client';
 import { Button, FieldError, TextField } from '@cf/ui';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
+import { formatWait } from '@/lib/auth/login-cooldown';
 import { loginErrors, NO_LOGIN_ERRORS, type LoginErrors } from '@/lib/auth/login-errors';
+import { useLoginCooldown } from '@/lib/auth/use-login-cooldown';
 import { tourProgress } from '@/lib/tour/progress';
 
 /**
  * 관리자 로그인 폼(#204). BFF `POST /api/v1/auth/admin/login` 이 access 토큰을 httpOnly 쿠키로 심고 토큰 없는 성공만 돌려준다.
  * 성공하면 돌아갈 경로로 바꾸고 서버 컴포넌트를 다시 그린다. 이동하는 동안 버튼은 막힌 채다.
+ * 시도 제한(429 `AUTH_040`)이면 안내와 함께 `Retry-After` 동안 제출을 막고 버튼에 남은 시간을 보인다(#407).
  * 로그인 화면에 오면(로그아웃 · 세션 만료 · 계정 전환) 이전 운영자의 안내 투어 기록(#228)을 지운다 — 다른 운영자에게 보이지 않게.
  */
 export function LoginForm({ returnPath }: { returnPath: string }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<LoginErrors>(NO_LOGIN_ERRORS);
+  const cooldown = useLoginCooldown();
 
   useEffect(() => tourProgress.signOut(), []);
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || cooldown.remainingSec > 0) return;
     const data = new FormData(event.currentTarget);
     setSubmitting(true);
     setErrors(NO_LOGIN_ERRORS);
@@ -37,6 +41,7 @@ export function LoginForm({ returnPath }: { returnPath: string }) {
       router.refresh();
     } catch (cause) {
       setSubmitting(false);
+      cooldown.startFrom(cause);
       setErrors(loginErrors(cause));
     }
   };
@@ -63,9 +68,20 @@ export function LoginForm({ returnPath }: { returnPath: string }) {
       />
       {/* 폼 전체 오류는 버튼 바로 위 — 누른 자리 가까이에서 읽힌다 */}
       <FieldError messages={errors.form} />
-      <Button type="submit" disabled={submitting} className="h-11 w-full">
-        {submitting ? '로그인하는 중…' : '로그인'}
+      <Button
+        type="submit"
+        disabled={submitting || cooldown.remainingSec > 0}
+        className="h-11 w-full"
+      >
+        {submitLabel(submitting, cooldown.remainingSec)}
       </Button>
     </form>
   );
+}
+
+/** 제출 버튼 문구 — 보내는 중 · 시도 제한 남은 시간(1분 이상은 분으로 올림) · 기본 */
+export function submitLabel(submitting: boolean, remainingSec: number): string {
+  if (submitting) return '로그인하는 중…';
+  if (remainingSec > 0) return `${formatWait(remainingSec)} 뒤에 다시 시도할 수 있습니다`;
+  return '로그인';
 }
