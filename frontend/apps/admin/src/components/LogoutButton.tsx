@@ -3,6 +3,7 @@
 import { apiFetch } from '@cf/api-client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { onboardingTasks } from '@/lib/onboarding/tasks-store';
 import { tourProgress } from '@/lib/tour/progress';
 
 /**
@@ -23,6 +24,7 @@ export function LogoutButton({ inMenu = false }: { inMenu?: boolean }) {
     try {
       await apiFetch<null>('/api/v1/auth/logout', { method: 'POST' });
       tourProgress.signOut();
+      onboardingTasks.signOut();
       router.replace('/login');
       router.refresh();
     } catch {

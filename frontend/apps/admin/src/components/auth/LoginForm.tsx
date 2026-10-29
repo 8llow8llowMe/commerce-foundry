@@ -7,6 +7,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { formatWait } from '@/lib/auth/login-cooldown';
 import { loginErrors, NO_LOGIN_ERRORS, type LoginErrors } from '@/lib/auth/login-errors';
 import { useLoginCooldown } from '@/lib/auth/use-login-cooldown';
+import { onboardingTasks } from '@/lib/onboarding/tasks-store';
 import { tourProgress } from '@/lib/tour/progress';
 
 /**
@@ -21,7 +22,11 @@ export function LoginForm({ returnPath }: { returnPath: string }) {
   const [errors, setErrors] = useState<LoginErrors>(NO_LOGIN_ERRORS);
   const cooldown = useLoginCooldown();
 
-  useEffect(() => tourProgress.signOut(), []);
+  // 시작 체크리스트(#358) 업무 상태 · 카드 접기도 같이 지운다
+  useEffect(() => {
+    tourProgress.signOut();
+    onboardingTasks.signOut();
+  }, []);
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

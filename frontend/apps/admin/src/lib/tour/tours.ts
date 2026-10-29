@@ -154,6 +154,34 @@ const SIZE_TEMPLATES_TOUR: Tour = {
   ],
 };
 
+/**
+ * 국내 배송비 정책(#358 시작 체크리스트의 업무 화면). 서버 허용 목록(`operations.onboarding.guides`)에 `shipping-domestic` 이 오르기 전에는
+ * 서버가 이 투어를 모르므로 이 브라우저 기록으로만 정한다(`progress.ts` 의 `writableGuide`).
+ */
+export const SHIPPING_DOMESTIC_TOUR: Tour = {
+  id: 'shipping-domestic-v1',
+  steps: [
+    {
+      target: 'shipping-base-fee',
+      title: '기본 배송비',
+      body: '주문 한 건에 붙는 배송비와 무료배송 기준을 넣습니다. 무료배송 기준을 비우면 금액과 관계없이 배송비가 붙습니다.',
+    },
+    {
+      target: 'shipping-remote-areas',
+      title: '도서산간 추가 배송비',
+      body: '우편번호 구간별로 더 받는 배송비입니다. 필요 없으면 비워 두어도 됩니다.',
+      side: 'top',
+      optional: true,
+    },
+    {
+      target: 'policy-save',
+      title: '저장',
+      body: '저장해야 스토어 주문에 반영되고 시작 체크리스트의 업무도 완료됩니다. 이 안내를 끝까지 보는 것만으로는 완료되지 않습니다.',
+      side: 'top',
+    },
+  ],
+};
+
 const COMMON_FAQ = [
   {
     question: '로그인이 자꾸 풀려요.',
@@ -170,7 +198,8 @@ const ROUTES: Route[] = [
     pattern: /^\/$/,
     topic: {
       title: '어드민 홈',
-      summary: '왼쪽 메뉴에서 관리할 화면을 고릅니다.',
+      summary:
+        '처음이라면 시작 체크리스트의 업무부터 해 보세요. 업무는 실제로 저장해야 완료되고, 안내를 본 것만으로는 완료되지 않습니다.',
       faq: COMMON_FAQ,
       tour: null,
     },
@@ -284,7 +313,16 @@ const ROUTES: Route[] = [
     },
   },
   {
-    pattern: /^\/shipping-policies\/(domestic|international)$/,
+    pattern: /^\/shipping-policies\/domestic$/,
+    topic: {
+      title: '국내 배송비 정책',
+      summary: '국내 배송비 기준을 정합니다. 바꾼 기록은 아래 변경 이력에 남습니다.',
+      faq: COMMON_FAQ,
+      tour: SHIPPING_DOMESTIC_TOUR,
+    },
+  },
+  {
+    pattern: /^\/shipping-policies\/international$/,
     topic: {
       title: '배송비 정책',
       summary: '국내 · 해외 배송비 기준을 정합니다. 바꾼 기록은 아래 변경 이력에 남습니다.',
