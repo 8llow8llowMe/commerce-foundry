@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.product.application.mapper;
+package com.commercefoundry.commerce.support.persistence;
 
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;

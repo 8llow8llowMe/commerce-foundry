@@ -73,6 +73,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 |------|-------------|
 | `ai-core` | operations(예정 — AI 호출은 작업 엔진(#212) 핸들러에서 돈다. 모듈만 있다(#215 PR-A). 사용량 원장 · 월 한도 · 연결은 이후 PR) |
 | `common-core` | 전부 |
+| `commerce-support` | product · order · payment · delivery — Money 응답·금액 컬럼 변환. common-core와 shared-commerce를 조합하며 서비스별 DTO·엔티티는 포함하지 않는다 (#68) |
 | `persistence-core` | auth · product · order · payment · delivery · operations |
 | `redis-core` | auth(토큰·소셜 state · 로그인 · 가입 시도 계수기 — #66) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
 | `security-core` | 서비스 전부(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |

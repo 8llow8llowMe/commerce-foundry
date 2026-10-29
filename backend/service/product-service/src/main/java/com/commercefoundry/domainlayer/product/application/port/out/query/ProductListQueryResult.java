@@ -1,6 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.port.out.query;
 
-import com.commercefoundry.domainlayer.product.application.mapper.MoneyColumns;
+import com.commercefoundry.commerce.support.persistence.MoneyColumns;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;

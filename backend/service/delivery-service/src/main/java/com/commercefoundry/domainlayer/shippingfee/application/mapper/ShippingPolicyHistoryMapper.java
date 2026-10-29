@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.shippingfee.application.mapper;
 
+import com.commercefoundry.commerce.support.persistence.MoneyColumns;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingPolicyHistoryAreaEntity;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingPolicyHistoryAreaEntity.Side;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingPolicyHistoryEntity;
@@ -19,7 +20,7 @@ import org.mapstruct.ReportingPolicy;
  * 배송비 정책 이력 Entity ↔ Domain. 구간 행 하나짜리 변환은 MapStruct 가 만들고, 교체 전 · 후 칸 묶기와 구간을 쪽(BEFORE · AFTER)으로 가르는 조립은
  * default 메서드가 한다. 금액 컬럼 쌍은 {@link MoneyColumns} 로만 묶는다.
  */
-@Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
+@Mapper(imports = MoneyColumns.class, componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface ShippingPolicyHistoryMapper {
 
     /** 교체 시각은 INSERT 때 감사 리스너가 채운다. */

@@ -1,0 +1,5 @@
+// Money 와 전송 타입 사이의 변환 경계. shared-commerce 와 common-core 의 기존 의존 방향을 보존한다.
+dependencies {
+    api project(':core:shared-commerce')
+    api project(':core:common-core')
+}

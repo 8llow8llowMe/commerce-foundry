@@ -1,6 +1,6 @@
 package com.commercefoundry.domainlayer.product.adapter.in.web.presenter;
 
-import com.commercefoundry.domainlayer.product.adapter.in.support.MoneyItems;
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CategoryPathItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CustomOrderFieldItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.CustomOrderItem;

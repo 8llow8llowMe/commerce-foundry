@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.shippingfee.application.mapper;
 
+import com.commercefoundry.commerce.support.persistence.MoneyColumns;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingPolicyEntity;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingZoneCountryEntity;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingZoneEntity;
@@ -24,7 +25,7 @@ import org.mapstruct.ReportingPolicy;
  * 해외 배송비 정책 Entity ↔ Domain. 행 하나짜리 변환은 MapStruct 가 만들고, 평평한 하위 행을 국가 그룹으로 묶는 조립은 default 메서드가 한다.
  * 금액 컬럼 쌍은 {@link MoneyColumns} 로만 묶는다.
  */
-@Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR, imports = ShippingScope.class)
+@Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR, imports = {ShippingScope.class, MoneyColumns.class})
 public interface InternationalShippingPolicyMapper {
 
     /**

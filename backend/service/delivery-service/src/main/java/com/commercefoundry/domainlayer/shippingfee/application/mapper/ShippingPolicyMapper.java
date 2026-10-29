@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.shippingfee.application.mapper;
 
+import com.commercefoundry.commerce.support.persistence.MoneyColumns;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingPolicyEntity;
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.persistence.entity.ShippingRemoteAreaEntity;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.PostalCode;
@@ -14,7 +15,7 @@ import org.mapstruct.ReportingPolicy;
 /**
  * 배송비 정책 Entity ↔ Domain. 금액 컬럼 쌍은 {@link MoneyColumns} 로만 묶는다.
  */
-@Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
+@Mapper(imports = MoneyColumns.class, componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface ShippingPolicyMapper {
 
     @Mapping(target = "id", source = "policy.id")

@@ -37,6 +37,8 @@ dependencies {
 
     testFixturesImplementation 'org.springframework.boot:spring-boot-starter-test'
     testFixturesImplementation 'tools.jackson.core:jackson-databind'
+    // Docker 없는 로컬만 skip 하고 CI 는 실패하도록 하는 공통 조건과 소비 모듈 검사. 테스트 전용이다.
+    testFixturesImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     // 서블릿 · MockMvc 는 픽스처도 컴파일에만 쓴다 — 스모크를 쓰는 서블릿 서비스는 이미 spring-boot-starter-webmvc-test 를 가진다
     testFixturesCompileOnly 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testFixturesCompileOnly 'jakarta.servlet:jakarta.servlet-api'

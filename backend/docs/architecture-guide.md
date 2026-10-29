@@ -13,6 +13,7 @@ backend/
 ├── core/           (라이브러리 — jar, bootJar off)
 │   ├── ai-core              Claude API 클라이언트(공식 Java SDK) · 개인정보 마스킹 · 동시 호출 상한 · 기동 가드 · 계량 SPI (#215)
 │   ├── common-core          Response 래퍼, 오류 봉투, 검증 유틸, Swagger 공통
+│   ├── commerce-support     Money 응답·컬럼 변환 (common-core + shared-commerce 의 경계 지원)
 │   ├── persistence-core     JPA / QueryDSL / Snowflake ID / BaseEntity / Slice·PageResponse / 제약 위반 판정(ConstraintViolations)
 │   ├── redis-core           Redis 연결 (Boot 자동설정 + 기동 가드) · 키 규칙
 │   ├── security-core        JWT 발급(auth) · 검증(서비스 · 게이트웨이) · 서블릿 Resource Server · 인증 주체 · 보안 오류 코드
@@ -40,9 +41,15 @@ backend/
 |------|---------|--------------|
 | `ai-core` | 도메인을 모르는 Claude 클라이언트(`AiClient`) · 개인정보 마스킹(`PiiMasker`) · 이미지 바이트(base64, URL 없음) · 동시 호출 상한 · 설정 · 기동 가드 · 계량 SPI(`metering.AiCallInterceptor` — 호출 앞뒤 예약 · 기록 자리). 공식 SDK 는 `implementation` 이라 서비스에 드러나지 않는다 | 프롬프트 문구 · 결과 해석 · 사용량 원장(엔티티) · 월 한도 정책 · 오류 번역 (쓰는 서비스 몫 — 원장 · 한도는 operations-service 가 계량 SPI 를 구현한다, #215 PR-B2 · B3) |
 | `common-core` | 도메인 비의존 범용 인프라 | 특정 서비스의 도메인 개념 |
+| `commerce-support` | `web.MoneyItems`(Money → MoneyItem), `persistence.MoneyColumns`(금액·통화 컬럼 → Money). common-core · shared-commerce 를 조합하는 순수 변환 | 서비스별 DTO · 엔티티 · 가격 계산 정책 |
 | `persistence-core` | DB 접근 공통 설정·유틸 | 엔티티 (엔티티는 각 서비스 소유) |
 | `storage-core` | 도메인을 모르는 S3 호환 클라이언트(`ObjectStorageClient`) · 설정 · 기동 가드 · magic bytes 판별(`ImageFormat`). AWS SDK 는 `implementation` 이라 서비스에 드러나지 않는다 | 키 규칙(어느 prefix 에 무엇을 두는가) · 허용 형식 · 용량 상한 · 오류 코드 번역 (쓰는 서비스의 `adapter/out/client/storage` 몫) |
 | `shared-commerce` | **두 서비스 이상이 같은 뜻으로 써야 하는** enum·값 객체 | 한 서비스만 쓰는 enum |
+
+`commerce-support` 는 `com.commercefoundry.commerce.support` 아래 `web` · `persistence` 패키지로 경계를 나눈다.
+`MoneyItems` 는 진입 adapter 의 Presenter 에서, `MoneyColumns` 는 Entity 매퍼 · QueryResult 에서 쓴다.
+JPA 타입을 쓰지 않아 컬럼 변환만 필요한 서비스에 JPA 의존을 더하지 않는다.
+`common-core` 는 `shared-commerce` 를 의존하지 않고, `shared-commerce` 는 Spring · 웹 타입을 모르는 기존 방향을 보존한다 (#68).
 
 `shared-commerce` 가 필요한 이유: 같은 enum 을 서비스마다 복사하면 뜻이 갈라진다.
 예를 들어 `CurrencyCode` 의 소수 자릿수를 order 와 payment 가 다르게 알면 USD 주문이 100배로 결제된다.

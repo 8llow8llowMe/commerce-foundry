@@ -177,8 +177,10 @@ class ProductPersistenceAdapterTest {
   | 없음 | `true` (GitHub Actions 가 넣는다) | 돈다 — 컨테이너 기동 실패로 **시끄럽게 실패**한다 |
   | 없음 | 없음 · 그 밖 | 건너뛴다 — 사유 "Docker 없음 — CI 에서 실행된다" |
 
-  지원 클래스는 Testcontainers 를 쓰는 모듈의 test 소스(`src/test/java/com/commercefoundry/support/`)에 둔다. 처음 만든 것은 product-service 이고,
-  `DockerOrCiConditionTest` 가 판정표와 "모든 `@Testcontainers` 테스트가 이 애노테이션을 쓴다" 를 검사한다.
+  지원 클래스는 `common-core` 의 testFixtures(`src/testFixtures/java/com/commercefoundry/support/`) 한 곳에 둔다 (#68).
+  소비 모듈은 `testImplementation testFixtures(project(':core:common-core'))` 로 받으며 같은 이름의 로컬 복사본을 두지 않는다.
+  판정표는 common-core 의 `DockerOrCiConditionTest` 가 검사한다. 각 소비 모듈의 `DockerOrCiConditionTest` 는
+  `TestcontainersConditionTestSupport` 를 상속해 그 모듈의 모든 `@Testcontainers` 테스트가 이 애노테이션을 쓰는지 검사한다.
   로컬에서 건너뛴 건은 CI 실행 건수에 세지 않는다(`backend-test-count.py`). 로컬에서 쿼리를 확인하려면 Docker 를 켜고 돌린다.
 - 슬라이스는 `@Component` 를 스캔하지 않는다. 테스트할 어댑터와 MapStruct 구현(`*MapperImpl`), `QuerydslConfigurer`(커스텀 리포지토리가
   `JPAQueryFactory` 를 받는다), `*FeaturesConfig`(JPA Auditing — 빠지면 `created_at` NOT NULL 위반)를 `@Import` 한다.

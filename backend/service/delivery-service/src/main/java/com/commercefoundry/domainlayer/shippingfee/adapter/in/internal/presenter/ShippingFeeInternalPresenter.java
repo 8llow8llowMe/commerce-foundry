@@ -1,7 +1,7 @@
 package com.commercefoundry.domainlayer.shippingfee.adapter.in.internal.presenter;
 
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.internal.dto.response.ShippingFeeQuoteInternalResponse;
-import com.commercefoundry.domainlayer.shippingfee.adapter.in.support.MoneyItems;
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingFeeQuote;
 import org.springframework.stereotype.Component;
 

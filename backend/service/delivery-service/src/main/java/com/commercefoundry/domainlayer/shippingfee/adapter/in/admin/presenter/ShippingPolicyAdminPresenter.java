@@ -5,7 +5,7 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.Shi
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem.RemoteAreaSnapshotItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem.SnapshotItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.ShippingPolicyAdminResponse;
-import com.commercefoundry.domainlayer.shippingfee.adapter.in.support.MoneyItems;
+import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.RemoteArea;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicyHistory;
