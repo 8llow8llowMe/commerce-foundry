@@ -7,7 +7,7 @@ import org.springframework.http.HttpStatus;
 /**
  * 운영자 온보딩 오류 코드 ({@code coding-conventions.md} §8, #357).
  *
- * <p>대역 — {@code 00x} 없는 리소스(404), {@code 02x} 버전 · 동시성 충돌(409), {@code 1xx} 요청 검증(400, 필드별 문구는 {@link OnboardingValidationMessage}).
+ * <p>대역 — {@code 00x} 없는 리소스(404), {@code 02x} 버전 · 동시성 충돌(409), {@code 03x} 담당 서비스 호출 불가(503), {@code 1xx} 요청 검증(400, 필드별 문구는 {@link OnboardingValidationMessage}).
  */
 @Getter
 @RequiredArgsConstructor
@@ -20,6 +20,12 @@ public enum OnboardingErrorCode {
     STALE_GUIDE_VERSION("ONBOARDING_020", "안내가 새 버전으로 바뀌었습니다. 화면을 새로 불러와 주세요.", HttpStatus.CONFLICT),
     /** 다른 기기 · 탭과 계속 겹쳐 반영하지 못했다 (낙관 락 · 첫 행 유니크 키). 다시 시도하면 합쳐진다. */
     CONCURRENT_UPDATE("ONBOARDING_021", "안내 기록이 그 사이 바뀌었습니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
+
+    /**
+     * delivery-service 의 온보딩 사실을 읽지 못했다 — 서킷 오픈 · 전송 실패 · 타임아웃 · 4xx · 5xx · 응답 계약 위반.
+     * 응답으로 나가지 않는다 — {@code OnboardingTaskProcessor} 가 그 업무를 {@code UNAVAILABLE} 로 흡수하고 조회는 200 이다. 분류 · 로그용이다.
+     */
+    DELIVERY_SERVICE_UNAVAILABLE("ONBOARDING_030", "배송 설정 상태를 잠시 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
 
     INVALID_REQUEST("ONBOARDING_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     /** 설정 버전보다 큰 버전 — 아직 배포되지 않은 안내다. */

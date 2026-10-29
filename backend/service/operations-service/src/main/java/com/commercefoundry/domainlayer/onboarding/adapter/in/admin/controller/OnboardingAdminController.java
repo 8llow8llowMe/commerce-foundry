@@ -41,7 +41,8 @@ public class OnboardingAdminController {
     @Operation(
         summary = "내 온보딩 조회",
         description = "배포된 안내 투어 전부를 설정 순서로 낸다. 기록이 없거나 기록 버전이 배포 버전과 다르면 NOT_STARTED 다. "
-            + "tasks(실제 업무 완료)는 아직 항상 빈 배열이다."
+            + "tasks 는 실제 업무 완료로 담당 서비스의 사실로만 판정한다 — 지금은 SHIPPING_POLICY_SAVED(국내 배송비 정책 저장) 하나다. "
+            + "스토어 준비(storeStatus)와 본인 실습(myStatus)을 따로 낸다. 담당 서비스 장애여도 200 이고 그 업무만 UNAVAILABLE 이다."
     )
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping

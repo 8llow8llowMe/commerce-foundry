@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.onboarding.application.command.TourProgre
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingErrorCode;
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingException;
 import com.commercefoundry.domainlayer.onboarding.application.port.in.OnboardingAdminUseCase;
+import com.commercefoundry.domainlayer.onboarding.application.service.processor.OnboardingTaskProcessor;
 import com.commercefoundry.domainlayer.onboarding.application.service.processor.OnboardingTourProcessor;
 import com.commercefoundry.domainlayer.onboarding.domain.model.TourProgress;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +18,8 @@ import org.springframework.stereotype.Service;
  *
  * <p>트랜잭션을 이 Facade 에 걸지 않는다({@code architecture-guide.md} §3 Facade 예외). ① 다른 기기 · 탭과 같은 기록을 다퉈 버전 · 첫 행 유니크 키에서 지면
  * 새 트랜잭션에서 다시 읽어야 이긴 쪽 기록과 합쳐진다 — 트랜잭션은 시도마다 {@link OnboardingTourProcessor} 가 연다.
- * ② 업무 사실 조회(PR-B)가 원격 호출이라 같은 Facade 에 섞여도 트랜잭션이 원격 호출을 붙잡지 않게.
+ * ② 업무 사실 조회({@link OnboardingTaskProcessor}, delivery-service 원격 호출)가 같은 Facade 에 섞여 있어 트랜잭션이 원격 호출을 붙잡지 않게 —
+ * 투어 조회의 읽기 트랜잭션은 투어 Processor 안에서 끝나고, 업무 사실 조회는 트랜잭션 밖이다.
  */
 @Service
 @RequiredArgsConstructor
@@ -27,11 +29,13 @@ public class OnboardingAdminFacade implements OnboardingAdminUseCase {
     static final int UPDATE_ATTEMPTS = 3;
 
     private final OnboardingTourProcessor onboardingTourProcessor;
+    private final OnboardingTaskProcessor onboardingTaskProcessor;
     private final OnboardingAdminPresenter onboardingAdminPresenter;
 
+    /** 담당 서비스 장애여도 실패하지 않는다 — 그 업무만 {@code UNAVAILABLE} 이고 투어 진행은 그대로 낸다. */
     @Override
     public OnboardingAdminResponse getMine(long memberId) {
-        return onboardingAdminPresenter.toResponse(onboardingTourProcessor.getMine(memberId));
+        return onboardingAdminPresenter.toResponse(onboardingTourProcessor.getMine(memberId), onboardingTaskProcessor.getMine(memberId));
     }
 
     @Override

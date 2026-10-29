@@ -14,7 +14,7 @@
 | `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 장바구니 (#12) · 주문 스냅숏 기반 (#13 C1) · 멱등 요청 기반 (#13 C2a) · 재고 선점 (#13 C2b) · CUSTOMER 주문 생성/멱등 재생 API (#13 C3) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
 | `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
 | `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 국내 배송비 정책 (#11) · 해외 배송비 (#22) · 국내 배송비 정책 교체 이력 (#69) · 운영자 온보딩 사실 internal (#357 PR-B1) | 배송비 정책(국내/해외), 송장, 배송 상태 추적, 운영자 온보딩의 국내 배송비 정책 저장 사실(`GET /internal/v1/onboarding-facts/shipping-policy`, 허용 호출자 operations-service) |
-| `service/operations-service` | 8086 | 골격 · Resource Server · 서비스 간 인증 (#212 PR-A) · 작업 엔진 — 등록 · 가져가기 · 워커 · 재시도 · lease (#212 PR-B) · 어드민 작업 목록 · 상세 · 취소 (#212 PR-C) · Kafka 실행 신호 컨슈머 · outbox · lease 만료 판정 (#307) · 어드민 알림 센터(#213) · 운영자 온보딩 투어 진행 (#357 PR-A) | 백그라운드 작업(등록 · 실행 · 재시도 · 진행률 · 결과 · 취소), 정기 작업, 어드민 작업 API(`/api/v1/admin/jobs/**`), 어드민 알림 센터(`/api/v1/admin/notifications/**`, #213), 운영자별 온보딩 안내 투어 진행(`/api/v1/admin/onboarding/**`, #357 — 실제 업무 완료 판정은 PR-B). 전에 후순위로 두었던 batch · notification 을 흡수한다 (`architecture-guide.md` §1) |
+| `service/operations-service` | 8086 | 골격 · Resource Server · 서비스 간 인증 (#212 PR-A) · 작업 엔진 — 등록 · 가져가기 · 워커 · 재시도 · lease (#212 PR-B) · 어드민 작업 목록 · 상세 · 취소 (#212 PR-C) · Kafka 실행 신호 컨슈머 · outbox · lease 만료 판정 (#307) · 어드민 알림 센터(#213) · 운영자 온보딩 투어 진행 (#357 PR-A) · 온보딩 업무 완료 tasks — delivery 사실 Feign 조회 (#357 PR-B2) | 백그라운드 작업(등록 · 실행 · 재시도 · 진행률 · 결과 · 취소), 정기 작업, 어드민 작업 API(`/api/v1/admin/jobs/**`), 어드민 알림 센터(`/api/v1/admin/notifications/**`, #213), 운영자별 온보딩 안내 투어 진행(`/api/v1/admin/onboarding/**`, #357 — 실제 업무 완료 판정 `tasks` 는 담당 서비스 사실로만, 배송 정책 저장은 PR-B2 · 상품 등록은 PR-C). 전에 후순위로 두었던 batch · notification 을 흡수한다 (`architecture-guide.md` §1) |
 
 "골격" 은 실행·Eureka 등록·헬스 체크·Swagger 그룹까지 갖추고 도메인 코드는 없는 상태다 (`bootstrap-conventions.md`).
 "Resource Server" 는 JWT 검증 · `/api/v1/admin/**` ADMIN 규칙 · 보안 오류 봉투가 걸려 있고 인가 스모크가 도는 상태다 (`security-guide.md` §5).
@@ -62,7 +62,7 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 | payment-service | order-service | 결제 준비 시 주문 금액 조회, 결제 완료 알림 |
 | delivery-service | order-service | 송장 등록 시 주문 상태 `SHIPPING` 전이, 배송 완료 반영, 해외 출고 통관 품목(주문 항목 스냅숏) 조회 (#18) |
 | delivery-service | auth-service | 회원 표시 이름 벌크 조회(`GET /internal/v1/member-display-names`, #322). 배송비 정책 이력 한 페이지의 관리자 아이디를 한 번에 보낸다. 응답은 마스킹된 이름만이고 원문은 없다. 실패는 503 `DELIVERY_013` |
-| operations-service | delivery-service | 운영자 온보딩 업무 사실 — 국내 배송비 정책 저장 여부 · 운영자별 최초 저장 시각(`GET /internal/v1/onboarding-facts/shipping-policy`, #357). memberId 는 operations 가 access 토큰으로 확인한 운영자. 호출 구현은 #357 PR-B2 |
+| operations-service | delivery-service | 운영자 온보딩 업무 사실 — 국내 배송비 정책 저장 여부 · 운영자별 최초 저장 시각(`GET /internal/v1/onboarding-facts/shipping-policy`, #357). memberId 는 operations 가 access 토큰으로 확인한 운영자. 호출 구현 #357 PR-B2 (`ShippingPolicyFactClient`, 서킷 `delivery-service`) — 장애면 그 업무만 `UNAVAILABLE`, 조회는 200 |
 | operations-service | product-service | 시점 원가 일괄 조회(`POST /internal/v1/sku-costs/query`, #361 PR-B) — 공헌이익 집계가 주문 항목의 (SKU, 주문 시각) 쌍을 100개씩 보내 그 시각의 유형별 원가를 받는다. 없는 SKU 는 빠지고 원가 미입력은 빈 costs 다. 호출 구현은 #362 |
 
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —

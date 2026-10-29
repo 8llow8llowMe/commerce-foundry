@@ -1032,7 +1032,7 @@ FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가�
 
 | API | 입력 | 응답 dataBody |
 |---|---|---|
-| `GET /api/v1/admin/onboarding/me` | — | `{tours, tasks}` — `tours` 는 배포된 투어 전부(설정 순서), `tasks` 는 아직 항상 `[]` |
+| `GET /api/v1/admin/onboarding/me` | — | `{tours, tasks}` — `tours` 는 배포된 투어 전부(설정 순서), `tasks` 는 업무 전부(고정 순서, 아래 "업무 완료 tasks") |
 | `PUT /api/v1/admin/onboarding/me/tours/{guideKey}` | `{guideVersion, status, currentStep}` | tour 항목 하나 |
 
 - tour 항목은 `{guideKey, guideVersion, status{code,name,description}, currentStep, finishedAt}` 다. `guideVersion` 은 지금 배포된 버전, `finishedAt` 은 UTC ISO 다.
@@ -1071,6 +1071,7 @@ FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가�
 | ONBOARDING_001 | 404 | 허용 목록에 없는 guideKey |
 | ONBOARDING_020 | 409 | 배포 버전보다 오래된 guideVersion (옛 번들) |
 | ONBOARDING_021 | 409 | 다른 기기 · 탭과 계속 겹쳐 반영하지 못함 — 다시 시도 |
+| ONBOARDING_030 | (503) | delivery 사실 조회 불가 — **응답에 나가지 않는다**(그 업무가 `UNAVAILABLE`, 조회는 200). 로그 분류용 |
 | ONBOARDING_100 | 400 | 깨진 JSON · 범위 밖 enum · 타입 불일치(폴백) |
 | ONBOARDING_101 | 400 | guideKey 형식(`^[a-z][a-z0-9-]{0,63}$`) |
 | ONBOARDING_102 | 400 | guideVersion 필수 · 1 이상 |
@@ -1088,7 +1089,27 @@ delivery-service `GET /internal/v1/onboarding-facts/shipping-policy?memberId={id
 양수가 아니면 400 `DELIVERY_139`, 숫자가 아니면 `DELIVERY_198`, 없으면 `DELIVERY_199` 다. 응답 dataBody 는 `{storeReady, memberFirstSavedAt}` 이다.
 `storeReady` 는 국내(`DOMESTIC`) 정책 행이 있는가(누가 저장했든), `memberFirstSavedAt` 은 `delivery.shipping_policy_history` 에서 scope `DOMESTIC` ·
 `admin_member_id = memberId` 인 행의 가장 이른 저장 시각(UTC ISO)이고 없으면 null(키는 남긴다)이다. 다른 운영자가 만든 정책이 있으면 `storeReady=true` ·
-`memberFirstSavedAt=null` 일 수 있다 — 둘을 어떻게 `tasks` 로 합칠지와 원천 장애 시 `UNAVAILABLE` 처리는 operations(PR-B2)가 정한다.
+`memberFirstSavedAt=null` 일 수 있다 — 둘을 `tasks` 로 합치는 규칙과 원천 장애 처리는 아래 "업무 완료 tasks" 다.
+
+### 업무 완료 tasks (#357 PR-B2)
+
+operations-service 가 `GET /api/v1/admin/onboarding/me` 마다 담당 서비스 internal 사실을 Feign 으로 읽어 판정한다(캐시 없음, 트랜잭션 밖).
+운영자는 access 토큰의 memberId 다. task 항목은 `{taskKey, storeStatus{code,name,description}, myStatus{code,name,description}, myCompletedAt}` 다.
+
+- `taskKey` — 화면 분기용 제어 코드(문자열, metadata 아님). 지금은 `SHIPPING_POLICY_SAVED`(국내 배송비 정책 저장, 사실 원천 delivery-service) 하나이고 상품 1건 등록은 PR-C 에서 더한다.
+  FE 는 모르는 `taskKey` 를 건너뛴다.
+- `storeStatus` — 스토어 공통 준비(누가 했든). `myStatus` — 운영자 본인 실습. `myCompletedAt` — 본인이 처음 해낸 시각(UTC ISO), `myStatus=COMPLETED` 일 때만 있고 아니면 null(키는 남긴다).
+
+  | 사실 (`storeReady`, `memberFirstSavedAt`) | storeStatus | myStatus |
+  |---|---|---|
+  | 아무거나, 시각 있음 | `READY` / `NOT_READY` (storeReady 대로) | `COMPLETED` — 해낸 기록은 되돌리지 않는다 |
+  | `true`, null | `READY` | `NO_EVIDENCE` — 스토어엔 있지만 본인 기록 없음(다른 직원 · 이력 이전 설정). **완료가 아니다** |
+  | `false`, null | `NOT_READY` | `NOT_COMPLETED` |
+  | 원천 장애 | `UNAVAILABLE` | `UNAVAILABLE` |
+
+- **원천 장애여도 GET 은 200 이다.** 서킷 오픈 · 전송 실패 · 타임아웃(read 3초) · 4xx · 5xx · 응답 계약 위반(성공 봉투가 아니거나 `storeReady` 없음)이면 그 업무만
+  `UNAVAILABLE` 이고 `tours` 는 그대로다. 내부 분류 코드 `ONBOARDING_030` 은 로그 · 분류용으로 응답에 나가지 않는다.
+- FE — `UNAVAILABLE` 은 "확인 불가, 잠시 후 다시" 로 보이고 완료 · 미완료로 추정하지 않는다. 투어 `COMPLETED` 를 업무 완료로 보이지 않는다.
 
 ## 로그인·회원가입 시도 제한 (#66)
 
