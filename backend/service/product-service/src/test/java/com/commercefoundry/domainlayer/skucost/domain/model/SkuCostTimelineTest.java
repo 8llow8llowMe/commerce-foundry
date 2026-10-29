@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * 원가 타임라인 — 시점 적용 원가는 유형별 "시작이 그 시각 이하인 가장 늦은 행" 이고, 새 행은 미래 한도 · 통화 고정 · 단조를 모두 지켜야 붙는다.
+ * 원가 타임라인 — 시점 적용 원가는 유형별 "시작이 그 시각 이하인 가장 늦은 행" 이고, 새 행은 미래 한도 · 통화 고정 · 소급 금지 · 단조를 모두 지켜야 붙는다.
  */
 class SkuCostTimelineTest {
 
@@ -74,7 +74,7 @@ class SkuCostTimelineTest {
     class ValidateAppend {
 
         @Test
-        @DisplayName("첫 행은 미래 한도만 본다 — 과거 시작도 받는다")
+        @DisplayName("첫 행은 미래 한도만 본다 — 과거 시작(소급)도 받는다: 미입력을 값으로 채울 뿐 이미 알던 원가를 바꾸지 않는다")
         void firstRowAcceptsPast() {
             assertThat(SkuCostTimeline.validateAppend(null, cost(1L, SkuCostType.GOODS, 10_000, "2020-01-01T00:00:00Z"), NOW)).isEmpty();
         }
@@ -90,21 +90,33 @@ class SkuCostTimelineTest {
         }
 
         @Test
-        @DisplayName("최신 행보다 뒤면 지금보다 과거(소급)여도 받는다")
-        void backdatedAfterLatestIsAccepted() {
+        @DisplayName("행이 있으면 최신 행보다 뒤여도 지금보다 앞이면 RETROACTIVE_NOT_ALLOWED 다 — 지난 구간의 원가는 바꾸지 않는다")
+        void retroactiveAfterFirstRowIsRejected() {
             SkuCost latest = cost(1L, SkuCostType.GOODS, 10_000, "2026-09-01T00:00:00Z");
 
-            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, "2026-09-15T00:00:00Z"), NOW)).isEmpty();
+            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, "2026-09-15T00:00:00Z"), NOW))
+                .contains(SkuCostAppendViolation.RETROACTIVE_NOT_ALLOWED);
+            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, NOW.minusNanos(1_000).toString()), NOW))
+                .contains(SkuCostAppendViolation.RETROACTIVE_NOT_ALLOWED);
         }
 
         @Test
-        @DisplayName("최신 행과 시작이 같거나 앞이면 NOT_AFTER_LATEST 다")
-        void notAfterLatestIsRejected() {
-            SkuCost latest = cost(1L, SkuCostType.GOODS, 10_000, "2026-10-01T00:00:00Z");
+        @DisplayName("행이 있어도 시작이 지금과 정확히 같거나 뒤(5분 안)면 받는다")
+        void appendFromNowIsAccepted() {
+            SkuCost latest = cost(1L, SkuCostType.GOODS, 10_000, "2026-09-01T00:00:00Z");
 
-            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, "2026-10-01T00:00:00Z"), NOW))
+            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, NOW.toString()), NOW)).isEmpty();
+            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, NOW.plusSeconds(60).toString()), NOW)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("지금 이후라도 최신 행(미래 오차 안)과 시작이 같거나 앞이면 NOT_AFTER_LATEST 다")
+        void notAfterLatestIsRejected() {
+            SkuCost latest = cost(1L, SkuCostType.GOODS, 10_000, NOW.plusSeconds(120).toString());
+
+            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, NOW.plusSeconds(120).toString()), NOW))
                 .contains(SkuCostAppendViolation.NOT_AFTER_LATEST);
-            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, "2026-09-30T23:59:59.999999Z"), NOW))
+            assertThat(SkuCostTimeline.validateAppend(latest, cost(2L, SkuCostType.GOODS, 12_000, NOW.toString()), NOW))
                 .contains(SkuCostAppendViolation.NOT_AFTER_LATEST);
         }
 
@@ -112,20 +124,23 @@ class SkuCostTimelineTest {
         @DisplayName("기존 행과 통화가 다르면 CURRENCY_MISMATCH 다 — 시작 시각이 맞아도 거절한다")
         void currencyIsFixedByFirstRow() {
             SkuCost latest = cost(1L, SkuCostType.GOODS, 10_000, "2026-09-01T00:00:00Z");
-            SkuCost usd = new SkuCost(2L, 100L, SkuCostType.GOODS, Money.of(900, CurrencyCode.USD), Instant.parse("2026-10-01T00:00:00Z"), "환율", 7L, null);
+            SkuCost usd = new SkuCost(2L, 100L, SkuCostType.GOODS, Money.of(900, CurrencyCode.USD), NOW, "환율", 7L, null);
 
             assertThat(SkuCostTimeline.validateAppend(latest, usd, NOW)).contains(SkuCostAppendViolation.CURRENCY_MISMATCH);
         }
 
         @Test
-        @DisplayName("위반이 여럿이면 미래 한도 → 통화 → 단조 순으로 하나만 낸다")
+        @DisplayName("위반이 여럿이면 미래 한도 → 통화 → 소급 → 단조 순으로 하나만 낸다")
         void violationOrder() {
             SkuCost latest = cost(1L, SkuCostType.GOODS, 10_000, NOW.plus(Duration.ofDays(1)).toString());
             SkuCost futureUsd = new SkuCost(2L, 100L, SkuCostType.GOODS, Money.of(900, CurrencyCode.USD), NOW.plus(Duration.ofHours(1)), "환율", 7L, null);
-            SkuCost pastUsd = new SkuCost(3L, 100L, SkuCostType.GOODS, Money.of(900, CurrencyCode.USD), NOW, "환율", 7L, null);
+            SkuCost pastUsd = new SkuCost(3L, 100L, SkuCostType.GOODS, Money.of(900, CurrencyCode.USD), NOW.minus(Duration.ofDays(1)), "환율", 7L, null);
+            SkuCost pastKrw = cost(4L, SkuCostType.GOODS, 12_000, NOW.minus(Duration.ofDays(1)).toString());
 
             assertThat(SkuCostTimeline.validateAppend(latest, futureUsd, NOW)).contains(SkuCostAppendViolation.IN_FUTURE);
             assertThat(SkuCostTimeline.validateAppend(latest, pastUsd, NOW)).contains(SkuCostAppendViolation.CURRENCY_MISMATCH);
+            // 최신 행 이하이면서 지금보다 앞 — 단조와 소급이 함께 걸리면 소급을 낸다
+            assertThat(SkuCostTimeline.validateAppend(latest, pastKrw, NOW)).contains(SkuCostAppendViolation.RETROACTIVE_NOT_ALLOWED);
         }
     }
 

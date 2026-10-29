@@ -35,7 +35,7 @@
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
 상품 사이즈표(#216)의 고객 · 어드민 조회는 새 접두어가 아니다 — `GET /api/v1/products/{productId}/size-chart`,
 `GET|PUT /api/v1/admin/products/{productId}/size-chart` 는 기존 `products/**` 다. 템플릿 컬렉션만 `/api/v1/admin/size-chart-templates/**` 다.
-SKU 원가 이력(#361)은 SKU 하위 리소스라 `/api/v1/admin/skus/**` 를 새로 둔다(§2-11).
+SKU 원가 이력(#361)은 SKU 하위 리소스라 `/api/v1/admin/skus/**` 를 새로 둔다(§2-12).
 
 - **관리자 로그인은 `POST /api/v1/auth/admin/login` 이다(고객 열의 `/api/v1/auth/**`, #6).** **이슈 #6 원문의 `/api/v1/admin/auth/login` 과 다르다** — `/api/v1/admin/**` 아래에 두지 않는다 —
   그 경로는 게이트웨이 · 서비스 URL 규칙이 둘 다 ADMIN 토큰을 요구해 토큰을 받으러 오는 익명 요청이 닿지 못한다. 진입 패키지도 `adapter/in/web` 이고
@@ -527,7 +527,7 @@ return ResponseEntity.ok().body(Response.success(response));
 - 오류 코드: `PRODUCT_046`(섹션 없음 404) · `047`(유형이 받지 않는 아이템) · `048`(아이템 수 범위) · `049`(상품 중복) · `050`(없는 상품) · `051`(기간) ·
   `052`(링크 주소) · `053`(문구만 있는 링크) · `054`(미디어 주소) · `055`(공개 주소 미설정 503) · `056`(섹션 상한 409) · `057`(순서 변경 집합) · `058`(잠금 409).
   검증 코드는 `PRODUCT_140~168`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` · `DisplayErrorCode` · `SizeChartErrorCode`(059~, §2-10)가 나눠 쓴다 — 새 번호는 세 클래스를 모두 보고 고른다.
-  **검증 대역 `PRODUCT_1xx` 는 소진됐다** — 새 컨텍스트는 자기 접두어를 연다(룩은 `LOOK_`, §2-11 · `coding-conventions.md` §8-2).
+  **검증 대역 `PRODUCT_1xx` 는 소진됐다** — 새 컨텍스트는 자기 접두어를 연다(룩은 `LOOK_`, §2-11 · SKU 원가는 `SKU_COST_`, §2-12 · `coding-conventions.md` §8-2).
 - 계층 — display 컨텍스트는 product 컨텍스트의 Processor(`ProductListProcessor.summarizeVisible` · `ProductLookupProcessor`)와 domain(`ProductSummary`)만 쓴다(H8).
   상품 카드의 `customOrder` · `preorder` 는 목록과 같은 플래그 판정(#61)이다.
 - **어드민 응답은 운영자 언어다(#305).** 순서는 배열 순서로만 전하고 내부 순서 번호(`displayOrder`, 삭제 뒤 빈 번호가 남는다) · 저장마다 새로 발급되는
@@ -620,6 +620,7 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
   domain(`Product` · `ProductSummary`)만 쓴다(H8). 판매 상태 · 상품 카드는 Info 로 옮겨 Presenter 에 넘긴다.
 - **게이트웨이**: `/api/v1/looks/**` · `/api/v1/admin/looks/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 상품별 룩은 기존 `/api/v1/products/**` 다.
   게이트웨이 · 서비스 모두 `/api/v1/admin/**` 밖은 익명 허용이고, 고객 3경로는 메서드의 `permitAll()` 로 연다(메인 전시와 같다).
+
 ### 2-12. SKU 원가 이력 (product-service, #361)
 
 SKU 원가(매입 · 제작 원가, 포장 변동비)를 적용 시작 시각이 있는 이력으로 둔다 — 고치지 않고 행을 더한다(append-only). 주문 시점의 원가를 나중에 그대로 다시 고르기 위해서다.
@@ -628,21 +629,28 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
-| `GET /api/v1/admin/skus/{skuId}/costs` | ADMIN | 200 `{skuId, costs:[항목]}` — 지금 적용되는 유형별 원가, GOODS → PACKAGING 순 | 404 `PRODUCT_002` · 400 `PRODUCT_123` |
-| `GET /api/v1/admin/skus/{skuId}/costs/histories?costType=&page=&size=` | ADMIN | 200 `PageResponse<항목>` — 적용 시작 내림차순 · 아이디 내림차순 고정. page/size 기본 0/20, size 1~100 | 404 `PRODUCT_002` · 400 `PRODUCT_101` · `102` · `123` · `198`(costType) |
-| `POST /api/v1/admin/skus/{skuId}/costs` | ADMIN | 201 추가한 항목 | 404 `PRODUCT_002` · 400 `PRODUCT_074` · `PRODUCT_100` · `PRODUCT_200~208` · 409 `PRODUCT_075~078` |
+| `GET /api/v1/admin/skus/{skuId}/costs` | ADMIN | 200 `{skuId, costs:[항목]}` — 지금 적용되는 유형별 원가, GOODS → PACKAGING 순 | 404 `PRODUCT_002` · 400 `SKU_COST_110` |
+| `GET /api/v1/admin/skus/{skuId}/costs/histories?costType=&page=&size=` | ADMIN | 200 `PageResponse<항목>` — 적용 시작 내림차순 · 아이디 내림차순 고정. page/size 기본 0/20, size 1~100 | 404 `PRODUCT_002` · 400 `PRODUCT_101` · `102` · `198`(costType) · `SKU_COST_110` |
+| `POST /api/v1/admin/skus/{skuId}/costs` | ADMIN | 201 추가한 항목 | 404 `PRODUCT_002` · 400 `SKU_COST_001` · `PRODUCT_100` · `SKU_COST_101~110` · 409 `SKU_COST_002~006` |
 
 - **항목**: `{costId, costType{code,name,description}, amount{amount,currency}, effectiveFrom, reason, adminMemberId, createdAt}`. `createdAt` 은 기록 시각, `effectiveFrom` 은 적용 시작(포함)이다.
 - **본문**: `{costType, amount:{amount,currency}, effectiveFrom?, reason}`. `costType` 은 `GOODS`(매입 · 제작 원가) · `PACKAGING`(포장 변동비)다.
   금액은 최소 화폐 단위 정수 0 이상이다 — **0 은 "0원이라고 명시했다"** 이고 행이 없는 것(미입력)과 다르다. `reason` 은 앞뒤 공백을 빼고 1~200자, 제어 · 서식 문자 금지다.
-- **시간 규칙**: `effectiveFrom` 을 빼면 서버 시각(지금)이다. 마이크로초로 잘라 저장 · 판정한다. 같은 SKU · 유형 안에서 새 행의 시작은 **최신 행 시작보다 반드시 뒤**여야 한다(아니면 409 `PRODUCT_075`).
-  최신보다 뒤이기만 하면 지금보다 과거(소급)도 받는다. 지금 + 5분보다 뒤는 400 `PRODUCT_074` — 예약 적용은 받지 않고 화면 시계 오차만 받는다. 1970-01-01T00:00:00Z 보다 이르면 400 `PRODUCT_208`.
-- **통화 고정**: SKU · 유형 타임라인의 통화는 첫 행 통화다. 다른 통화는 409 `PRODUCT_076`(메시지에 현재 통화). 판매가 통화와 같을 필요는 없다 — 불일치 처리는 #362.
+- **시간 규칙**: `effectiveFrom` 을 빼면 서버 시각(지금)이다. 시작과 지금을 모두 마이크로초로 잘라 저장 · 판정한다. 지금 + 5분보다 뒤는 400 `SKU_COST_001` — 예약 적용은 받지 않고 화면 시계 오차만 받는다.
+  1970-01-01T00:00:00Z 보다 이르면 400 `SKU_COST_109`.
+  - **첫 행**(그 SKU · 유형에 행이 없을 때)만 지금보다 과거 시작을 받는다 — 미입력을 값으로 채울 뿐 이미 알던 원가를 바꾸지 않는다.
+  - **행이 있으면** 시작이 **지금 이후**(`effectiveFrom >= now`)여야 하고(아니면 409 `SKU_COST_006`) **최신 행 시작보다 반드시 뒤**여야 한다(아니면 409 `SKU_COST_002`).
+    지난 구간의 원가(그 구간에 난 주문의 원가)를 나중에 몰래 바꾸지 않기 위해서다(#361 완료 기준).
+  - 판정 순서: 미래 한도(`001`) → 통화(`003`) → 소급(`006`) → 최신보다 뒤(`002`). 소급과 `002` 가 함께 걸리면(지금보다 앞이면서 최신 행 시작 이하) `006` 을 낸다.
+    지금 이후인데 `002` 인 경우는 최신 행이 5분 오차 안의 미래 시작일 때뿐이다.
+  - FE: "지금부터 적용" 은 `effectiveFrom` 을 비워 보낸다(화면 시계로 채우면 서버 시각보다 앞서 `006` 이 날 수 있다).
+- **통화 고정**: SKU · 유형 타임라인의 통화는 첫 행 통화다. 다른 통화는 409 `SKU_COST_003`(메시지에 현재 통화). 판매가 통화와 같을 필요는 없다 — 불일치 처리는 #362.
 - **미입력 = 부재**: 현재 원가 조회에서 한 번도 입력하지 않은 유형은 항목이 없다. 0 으로 채우지 않는다. 시작이 아직 오지 않은 행(5분 오차 안)만 있는 유형도 지금은 항목이 없다.
-- **동시성**: 추가는 SKU 행을 잠그고(`SkuRepository#findByIdForUpdate`, 대기 2초 · 트랜잭션 5초) 최신 행을 읽어 판정한다. 잠금을 못 얻으면 409 `PRODUCT_078`(다시 시도).
-  잠금을 비켜 간 같은 시작 시각의 동시 추가는 유니크 `uk_sku_cost_sku_id_cost_type_effective_from` 이 409 `PRODUCT_077` 로 막는다. 엔티티는 `@Immutable` 이고 `@Version` 이 없다.
-- 오류 코드: `PRODUCT_074`(미래 시작 400) · `075`(최신보다 뒤 아님 409) · `076`(통화 불일치 409) · `077`(유니크 409) · `078`(잠금 409). 없는 SKU 는 상품 컨텍스트의 `PRODUCT_002` 다.
-  필드 검증은 `PRODUCT_200~208`(`SkuCostValidationMessage`) — product-service `1xx` 대역이 차서 이어 쓴다(`coding-conventions.md` §8-2). 경로 skuId 양수는 재고 조정과 같은 `PRODUCT_123`,
+- **동시성**: 추가는 SKU 행을 잠그고(`SkuRepository#findByIdForUpdate`, 대기 2초 · 트랜잭션 5초) 최신 행을 읽어 판정한다. 잠금을 못 얻으면 409 `SKU_COST_005`(다시 시도).
+  잠금을 비켜 간 같은 시작 시각의 동시 추가는 유니크 `uk_sku_cost_sku_id_cost_type_effective_from` 이 409 `SKU_COST_004` 로 막는다. 엔티티는 `@Immutable` 이고 `@Version` 이 없다.
+- 오류 코드: `SKU_COST_001`(미래 시작 400) · `002`(최신보다 뒤 아님 409) · `003`(통화 불일치 409) · `004`(유니크 409) · `005`(잠금 409) · `006`(이미 원가가 있는 유형의 소급 409). 없는 SKU 는 상품 컨텍스트의 `PRODUCT_002` 다.
+  필드 검증은 `SKU_COST_101~109`, 경로 skuId 양수는 `SKU_COST_110`(룩의 `LOOK_118` 과 같은 자기 코드)이다(`SkuCostValidationMessage`).
+  `PRODUCT_1xx` 검증 대역이 차서 컨텍스트 접두어 `SKU_COST_` 를 새로 열었다(룩 §2-11 과 같다, `coding-conventions.md` §8-2). 깨진 JSON · 타입 불일치 · 필수 파라미터는 서비스 공용 `PRODUCT_100` · `198` · `199`,
   page · size 는 서비스 공용 `PRODUCT_101` · `PRODUCT_102` 다. 오류 메시지 · 로그에 금액을 넣지 않는다.
 - **게이트웨이**: 새 접두어 `/api/v1/admin/skus/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 서비스 간 시점 원가 벌크 조회(`/internal/v1/sku-costs/query`)는 #361 PR-B 다.
 

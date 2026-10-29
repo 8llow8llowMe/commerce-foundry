@@ -13,7 +13,7 @@ import org.springframework.data.domain.Page;
 public interface SkuCostRepositoryPort {
 
     /**
-     * 새 행을 persist 하고 바로 flush 한다. 같은 SKU · 유형 · 적용 시작 시각이 먼저 커밋됐으면 409 {@code PRODUCT_077} 이다.
+     * 새 행을 persist 하고 바로 flush 한다. 같은 SKU · 유형 · 적용 시작 시각이 먼저 커밋됐으면 409 {@code SKU_COST_004} 이다.
      *
      * @return 기록 시각({@code recordedAt})이 채워진 행
      */

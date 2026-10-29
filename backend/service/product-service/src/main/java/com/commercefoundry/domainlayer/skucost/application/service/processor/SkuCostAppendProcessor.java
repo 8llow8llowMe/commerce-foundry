@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * SKU 원가 이력 한 행 추가 — 최신 행을 읽어 타임라인 규칙({@link SkuCostTimeline})으로 판정한 뒤 넣는다.
  * 판정과 추가 사이에 다른 추가가 끼지 않도록 Facade 가 먼저 SKU 행을 잠근다. 그래서 트랜잭션 밖이면 실패한다.
- * 잠금을 비켜 간 동시 추가(같은 시작 시각)는 유니크 키가 409 {@code PRODUCT_077} 로 막는다.
+ * 잠금을 비켜 간 동시 추가(같은 시작 시각)는 유니크 키가 409 {@code SKU_COST_004} 로 막는다.
  *
  * <p>시각은 마이크로초로 잘라 판정 · 저장한다 — DB {@code timestamptz(6)} 에 저장되는 값과 같아야 단조 판정이 저장 뒤에도 그대로 맞다.
  */
@@ -56,6 +56,7 @@ public class SkuCostAppendProcessor {
         return switch (violation) {
             case IN_FUTURE -> new SkuCostException(SkuCostErrorCode.EFFECTIVE_FROM_IN_FUTURE);
             case CURRENCY_MISMATCH -> new SkuCostException(SkuCostErrorCode.CURRENCY_MISMATCH, latest.amount().currency().name());
+            case RETROACTIVE_NOT_ALLOWED -> new SkuCostException(SkuCostErrorCode.RETROACTIVE_NOT_ALLOWED);
             case NOT_AFTER_LATEST -> new SkuCostException(SkuCostErrorCode.EFFECTIVE_FROM_NOT_AFTER_LATEST, latest.effectiveFrom().toString());
         };
     }

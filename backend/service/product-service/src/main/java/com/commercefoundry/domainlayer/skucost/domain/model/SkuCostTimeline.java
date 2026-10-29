@@ -15,7 +15,9 @@ import java.util.Optional;
  * <ul>
  *   <li><b>적용 원가</b> — 시각 {@code at} 의 원가는 유형마다 {@code effectiveFrom <= at} 인 행 중 시작이 가장 늦은 행이다. 그런 행이 없는 유형은 결과에 없다
  *       (미입력 — 0 으로 채우지 않는다).</li>
- *   <li><b>단조</b> — 새 행의 시작은 같은 SKU · 유형의 최신 행 시작보다 반드시 뒤다. 최신보다 뒤이기만 하면 지금보다 과거(소급)도 받는다.</li>
+ *   <li><b>단조</b> — 새 행의 시작은 같은 SKU · 유형의 최신 행 시작보다 반드시 뒤다.</li>
+ *   <li><b>소급 금지</b> — 이미 행이 있는 유형은 시작이 지금 이후({@code effectiveFrom >= now})여야 한다. 지난 구간의 원가(그 구간에 난 주문의 원가)를
+ *       나중에 몰래 바꾸지 않기 위해서다. 첫 행만 과거 시작을 받는다 — 미입력을 값으로 채울 뿐 이미 알던 원가를 바꾸지 않는다.</li>
  *   <li><b>미래 한도</b> — 시작은 지금 + {@link #FUTURE_TOLERANCE} 까지다. 예약 적용은 이 범위 밖이다 — 어드민 화면 시계 오차만 받는다.</li>
  *   <li><b>통화 고정</b> — 타임라인 통화는 첫 행 통화다. 이후 행은 같은 통화여야 한다. 판매가 통화와 같을 필요는 없다.</li>
  * </ul>
@@ -45,11 +47,13 @@ public final class SkuCostTimeline {
     }
 
     /**
-     * 새 행을 타임라인 끝에 붙일 수 있는지 본다. 위반이 여럿이면 미래 한도 → 통화 → 단조 순으로 하나만 돌려준다.
+     * 새 행을 타임라인 끝에 붙일 수 있는지 본다. 위반이 여럿이면 미래 한도 → 통화 → 소급 → 단조 순으로 하나만 돌려준다.
+     * 소급과 단조가 함께 걸리는 것은 시작이 지금보다 앞이면서 최신 행 시작 이하일 때다 — 그때는 운영자가 이해하기 쉬운
+     * 소급({@link SkuCostAppendViolation#RETROACTIVE_NOT_ALLOWED})을 낸다. 시작이 지금 이후인데 단조에 걸리는 것은 최신 행이 미래 오차(5분) 안에 있을 때뿐이다.
      *
      * @param latest    같은 SKU · 유형의 최신 행. 첫 행이면 null
      * @param candidate 붙일 행
-     * @param now       판정 기준 시각
+     * @param now       판정 기준 시각. 호출자가 후보 시작과 같은 정밀도(마이크로초)로 잘라 넘긴다
      */
     public static Optional<SkuCostAppendViolation> validateAppend(SkuCost latest, SkuCost candidate, Instant now) {
         if (candidate.effectiveFrom().isAfter(now.plus(FUTURE_TOLERANCE))) {
@@ -60,6 +64,9 @@ public final class SkuCostTimeline {
         }
         if (latest.amount().currency() != candidate.amount().currency()) {
             return Optional.of(SkuCostAppendViolation.CURRENCY_MISMATCH);
+        }
+        if (candidate.effectiveFrom().isBefore(now)) {
+            return Optional.of(SkuCostAppendViolation.RETROACTIVE_NOT_ALLOWED);
         }
         if (!candidate.effectiveFrom().isAfter(latest.effectiveFrom())) {
             return Optional.of(SkuCostAppendViolation.NOT_AFTER_LATEST);
