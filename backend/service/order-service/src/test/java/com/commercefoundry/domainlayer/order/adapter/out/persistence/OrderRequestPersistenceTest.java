@@ -2,7 +2,8 @@ package com.commercefoundry.domainlayer.order.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapperImpl;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderRequestMapperImpl;
-import com.commercefoundry.domainlayer.order.support.OrderRequestPersistenceContract;
+import com.commercefoundry.domainlayer.order.support.OrderCreatePersistenceContract;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderProcessor;
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
@@ -27,8 +28,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @TestPropertySource(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.jpa.properties.hibernate.default_schema=orders",
     "spring.cloud.discovery.enabled=false", "eureka.client.enabled=false", "snowflake.datacenter-id=1", "snowflake.worker-id=2"})
 @Import({QuerydslConfigurer.class, OrderServiceFeaturesConfig.class, SnowflakePropertiesConfig.class, SnowflakeConfigurer.class, OrderRepositoryAdapter.class,
-    OrderRequestRepositoryAdapter.class, OrderMapperImpl.class, OrderRequestMapperImpl.class})
-class OrderRequestPersistenceTest extends OrderRequestPersistenceContract {
+    OrderRequestRepositoryAdapter.class, OrderMapperImpl.class, OrderRequestMapperImpl.class, OrderProcessor.class})
+class OrderRequestPersistenceTest extends OrderCreatePersistenceContract {
     @Container @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/order-schema.sql");
     @Override protected boolean postgres() { return true; }

@@ -18,6 +18,19 @@ import org.springframework.mock.web.MockHttpServletResponse;
  */
 class OrderServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
 
+    @Test
+    void anonymousOnOrderCreate() throws Exception {
+        MockHttpServletResponse response = perform(post("/api/v1/orders").contentType(MediaType.APPLICATION_JSON)
+            .header("Idempotency-Key", "11111111-2222-3333-4444-555555555555")
+            .content("""
+                {"items":[{"skuId":"1","quantity":1}],"shippingAddress":{
+                  "recipientName":"테스트","recipientPhone":"01000000001","countryCode":"KR",
+                  "postalCode":"63100","addressLine1":"테스트로"}}
+                """));
+        assertEnvelope(response, SecurityErrorCode.UNAUTHORIZED);
+        assertWwwAuthenticate(response, "Bearer");
+    }
+
     /** 서비스의 첫 {@code isAuthenticated()} 핸들러(장바구니, #12). 서비스 URL 규칙은 열려 있어 메서드 보안이 막는다. */
     @Test
     @DisplayName("토큰 없이 장바구니를 조회하면 401 · SECURITY_001 봉투 · WWW-Authenticate: Bearer")

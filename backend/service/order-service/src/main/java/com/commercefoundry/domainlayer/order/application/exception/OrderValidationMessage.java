@@ -24,7 +24,7 @@ public final class OrderValidationMessage {
     public static final String RECIPIENT_NAME_REQUIRED = "ORDER_117:recipientName 은 필수입니다.";
     public static final String RECIPIENT_NAME_LENGTH_MAX = "ORDER_118:recipientName 은 50자 이하여야 합니다.";
     public static final String RECIPIENT_PHONE_REQUIRED = "ORDER_119:recipientPhone 은 필수입니다.";
-    public static final String RECIPIENT_PHONE_FORMAT = "ORDER_120:recipientPhone 은 숫자 · + · - · ( ) · 공백으로 된 7~20자여야 합니다.";
+    public static final String RECIPIENT_PHONE_FORMAT = "ORDER_120:recipientPhone 은 공백·하이픈을 제외하고 국내는 0으로 시작하는 9~11자리, 해외는 선택적 +와 숫자 7~15자리여야 합니다.";
     public static final String COUNTRY_CODE_REQUIRED = "ORDER_121:countryCode 는 필수입니다.";
     public static final String COUNTRY_CODE_FORMAT = "ORDER_122:countryCode 는 ISO 3166-1 alpha-2 대문자 2자여야 합니다.";
     public static final String POSTAL_CODE_REQUIRED = "ORDER_123:국내(KR) 배송지는 postalCode 가 필수입니다.";
@@ -48,6 +48,10 @@ public final class OrderValidationMessage {
     public static final String CUSTOM_ORDER_NUMBER_STEP = "ORDER_136:증분 단위에 맞지 않습니다.";
     /** TEXT 최대 글자 수를 넘었다. */
     public static final String CUSTOM_ORDER_TEXT_LENGTH = "ORDER_137:최대 글자 수를 넘었습니다.";
+
+    public static final String CITY_REQUIRED = "ORDER_138:해외 배송지는 city 가 필수입니다.";
+    public static final String CITY_LENGTH_MAX = "ORDER_139:city 는 100자 이하여야 합니다.";
+    public static final String STATE_PROVINCE_LENGTH_MAX = "ORDER_140:stateProvince 는 100자 이하여야 합니다.";
 
     private OrderValidationMessage() {
     }
