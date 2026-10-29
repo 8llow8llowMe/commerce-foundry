@@ -3,6 +3,8 @@ package com.commercefoundry.domainlayer.product.application.service;
 import com.commercefoundry.domainlayer.category.application.service.processor.CategoryProcessor;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.presenter.ProductAdminPresenter;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminDetailProcessor;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminQueryProcessor;
@@ -24,6 +26,14 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final CategoryProcessor categoryProcessor;
     private final ProductAdminQueryProcessor productAdminQueryProcessor;
     private final ProductAdminPresenter productAdminPresenter;
+    private final ProductAdminDetailProcessor productAdminDetailProcessor;
+
+    /** 상품과 자식 조회 사이의 수정 · 삭제가 섞이지 않게 같은 DB 스냅숏으로 읽는다. 외부 I/O 는 없다. */
+    @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public ProductDetailAdminResponse getProduct(long productId) {
+        return productAdminPresenter.toDetailResponse(productAdminDetailProcessor.getProduct(productId));
+    }
 
     /**
      * 카테고리 조건은 하위 카테고리까지 펼친다 — 고객 목록과 같고 숨긴 카테고리도 포함한다. 없는 아이디는 빈 집합이라 어댑터가 쿼리 없이 빈 페이지를 준다.

@@ -258,8 +258,8 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 | `GET /api/v1/admin/stocks?skuIds=1,2,3` | SKU 재고 목록 — `{ stocks: [{ skuId: String, stockManaged, availableQuantity, reservedQuantity, updatedAt }] }`. 항목은 PATCH 응답과 같은 모양이다 |
 | `GET /api/v1/admin/stocks/{skuId}/adjustments?page=&size=` | 조정 이력 `PageResponse` — 최신순(아이디 내림차순). 항목 `{ id, beforeQuantity, afterQuantity, delta, beforeStockManaged, afterStockManaged, reason{code,name,description}, memo, adminMemberId, createdAt }` |
 
-- **SKU 목록 방식이다 — 상품 단위 조회는 하지 않는다.** 어드민 상품 상세(#9)가 아직 없어 화면이 상품 → SKU 를 고르는 경로가 정해지지 않았다.
-  #9 에서 상품 상세가 SKU 아이디를 내려 주면 화면은 그 묶음으로 이 API 를 부른다. 상품 단위가 필요해지면 그때 따로 연다.
+- **SKU 목록 방식이다 — 상품 단위 조회는 하지 않는다.** 어드민 상품 상세(`GET /api/v1/admin/products/{productId}`, #9)가 내려 주는
+  `skus[].skuId` 묶음으로 화면이 이 API 를 부른다. 상품 단위 재고 API 가 필요해지면 그때 따로 연다.
 - skuIds 는 1~100개 · 양수(`PRODUCT_124` 필수 · `PRODUCT_125` 상한 · `PRODUCT_126` 양수), 중복은 첫 등장 한 번이고 요청 순서대로 낸다.
   **없는 SKU 는 응답에서 빠진다** — 서비스 간 SKU 조회와 같은 관례이고, 지워진 SKU 하나 때문에 나머지 SKU 조정까지 막지 않는다.
 - **재고 행이 없는 SKU 는 품절로 낸다** — `stockManaged=true · availableQuantity=0 · updatedAt=null`. `reservedQuantity` 는 재고 행이 없으면

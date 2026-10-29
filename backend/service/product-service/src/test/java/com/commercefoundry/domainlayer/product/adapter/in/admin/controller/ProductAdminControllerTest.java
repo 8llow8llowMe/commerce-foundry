@@ -191,6 +191,47 @@ class ProductAdminControllerTest {
         verifyNoInteractions(productAdminUseCase);
     }
 
+    @Test
+    void adminDetailUsesSeparateEditorContract() {
+        var response = com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse.builder()
+            .productId("4611686018427387904").visible(false).version(7L).categoryIds(List.of("1"))
+            .optionGroups(List.of()).skus(List.of()).images(List.of()).customOrderFields(List.of()).build();
+        given(productAdminUseCase.getProduct(4611686018427387904L)).willReturn(response);
+        MvcTestResult result = adminGet(PATH + "/4611686018427387904");
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataBody.productId").isEqualTo("4611686018427387904");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.visible").isEqualTo(false);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.version").isEqualTo(7);
+        verify(productAdminUseCase).getProduct(4611686018427387904L);
+    }
+
+    @Test
+    void detailRejectsCustomerAndAnonymous() {
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH + "/1").exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH + "/1")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0, PRODUCT_105", "-1, PRODUCT_105", "abc, PRODUCT_198", "9223372036854775808, PRODUCT_198"})
+    void detailRejectsInvalidId(String id, String code) {
+        MvcTestResult result = adminGet(PATH + "/" + id);
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @Test
+    void detailMissingUsesDomain404Envelope() {
+        given(productAdminUseCase.getProduct(1)).willThrow(new com.commercefoundry.domainlayer.product.application.exception.ProductException(
+            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.NOT_FOUND_PRODUCT));
+        MvcTestResult result = adminGet(PATH + "/1");
+        assertThat(result).hasStatus(HttpStatus.NOT_FOUND);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_001");
+        assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
+    }
+
     private void givenEmptyPage() {
         given(productAdminUseCase.searchProducts(any())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
     }

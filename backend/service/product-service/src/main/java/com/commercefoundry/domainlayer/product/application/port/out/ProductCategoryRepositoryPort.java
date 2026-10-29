@@ -1,5 +1,7 @@
 package com.commercefoundry.domainlayer.product.application.port.out;
 
+import java.util.List;
+
 /**
  * 상품 ↔ 카테고리 연결(대표 카테고리 {@code product.category_id} · 진열 카테고리 {@code product_category}). 쓰기는 어드민 상품 등록 · 수정(#9 PR-E)에서 더한다.
  *
@@ -7,6 +9,9 @@ package com.commercefoundry.domainlayer.product.application.port.out;
  * 같은 잠금(또는 {@code FOR SHARE})으로 존재를 확인해야 한다 — DB FK 가 없어, 삭제 판정 직후 연결하면 지워진 카테고리를 가리키는 상품이 생긴다.
  */
 public interface ProductCategoryRepositoryPort {
+
+    /** 저장된 진열 카테고리 아이디를 오름차순으로 읽는다. 대표 카테고리 보완은 호출자가 한다. */
+    List<Long> findCategoryIdsByProductId(long productId);
 
     /**
      * 카테고리를 대표 또는 진열 카테고리로 쓰는 <b>삭제되지 않은</b> 상품이 하나라도 있는가 — 숨김 · 판매 종료 상품은 센다.
