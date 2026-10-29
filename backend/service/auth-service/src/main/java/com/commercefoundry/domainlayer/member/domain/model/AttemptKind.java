@@ -19,5 +19,12 @@ public enum AttemptKind {
     SIGN_UP,
 
     /** 회원가입 IP 차원. 값은 게이트웨이의 불투명 HMAC 식별자다. */
-    SIGN_UP_IP
+    SIGN_UP_IP,
+
+    /**
+     * 관리자 OTP 코드 시도(#238) — 등록 확인 · 해제 · 복구 코드 재발급(PR-A2). 주체는 이메일이 아니라 관리자 memberId(10진 문자열)다.
+     * 6자리 코드 대입을 막는 장치라 {@code auth.login-guard.enabled=false} 여도 센다. 허용 횟수 · 창은 로그인과 같은 값이다.
+     * 로그인 2단계(PR-B) 창을 이 창과 나눌지는 PR-B 착수 전에 정한다 — 같은 창이면 토큰 보유자가 틀린 재인증으로 로그인 2단계를 잠글 수 있다.
+     */
+    ADMIN_OTP
 }

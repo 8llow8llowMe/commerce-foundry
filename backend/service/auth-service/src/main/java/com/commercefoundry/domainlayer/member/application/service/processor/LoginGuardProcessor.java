@@ -25,6 +25,7 @@ import org.springframework.stereotype.Component;
  *       ({@code AdminAuthWebFacade}).</li>
  *   <li>받은 이메일에 {@link Member#canonicalEmail} 을 적용한 값으로 센다 — 저장 · 조회 키와 같은 형태다. 멱등이라 이미 정규화한 값은 그대로다.</li>
  *   <li>꺼져 있으면({@code auth.login-guard.enabled=false}) 두 메서드 모두 포트를 부르지 않는다.</li>
+ *   <li>관리자 OTP 코드 시도(#238)는 {@link #admitAdminOtp} · {@link #clearAdminOtp} 로 따로 받는다 — 주체는 memberId 이고, 꺼져 있어도 센다(fail-closed, 429 {@code AUTH_043}).</li>
  * </ul>
  *
  * <p>저장소(Redis) 장애 — 종류별 정책은 {@link #failOpen} 하나가 정한다(종류가 늘면 switch 가 컴파일에서 결정을 요구한다).
@@ -74,14 +75,35 @@ public class LoginGuardProcessor {
      * @throws MemberException              {@code AUTH_013} — 로그인 · 관리자 로그인에서 저장소에 닿지 못했다(fail-closed). 회원가입은 던지지 않고 통과시킨다
      */
     public void admit(AttemptKind kind, String normalizedEmail) {
+        rejectAdminOtp(kind);
         if (!loginGuardPolicy.enabled()) {
             return;
         }
         String email = kind == AttemptKind.SIGN_UP_IP ? normalizedEmail : Member.canonicalEmail(normalizedEmail);
+        count(kind, email);
+    }
+
+    /**
+     * 관리자 OTP 코드 시도 1회를 세고 허용 횟수를 넘겼으면 거절한다 (#238) — 등록 확인 · 해제 · 복구 코드 재발급이 비밀번호 · 코드를
+     * 보기 전에 부른다(로그인 2단계가 같은 창을 쓸지는 PR-B 착수 전에 정한다 — {@link AttemptKind#ADMIN_OTP}). 주체는 관리자 memberId 다. {@code auth.login-guard.enabled=false} 여도 센다 — 비상 스위치가 6자리 코드 대입까지 열면 안 된다.
+     * 저장소 장애는 fail-closed(503 {@code AUTH_013})다.
+     *
+     * @throws LoginAttemptLimitedException 429 {@code AUTH_043}
+     */
+    public void admitAdminOtp(long adminMemberId) {
+        count(AttemptKind.ADMIN_OTP, String.valueOf(adminMemberId));
+    }
+
+    /** OTP 코드로 성공한 관리자의 창을 지운다 (#238). best-effort 규칙은 {@link #clear} 와 같고, 켜짐 여부와 무관하다. */
+    public void clearAdminOtp(long adminMemberId) {
+        reset(AttemptKind.ADMIN_OTP, String.valueOf(adminMemberId));
+    }
+
+    private void count(AttemptKind kind, String subject) {
         LoginAttemptPolicy policy = loginGuardPolicy.of(kind);
         LoginAttemptOutcome outcome;
         try {
-            outcome = loginAttemptCounterPort.record(kind, email, policy.window());
+            outcome = loginAttemptCounterPort.record(kind, subject, policy.window());
         } catch (MemberException failure) {
             if (isStoreUnavailable(failure) && failOpen(kind)) {
                 if (shouldWarn(lastFailOpenWarnAt)) {
@@ -95,7 +117,12 @@ public class LoginGuardProcessor {
             return;
         }
         if (outcome.count() == policy.maxAttempts() + 1L) {
-            String tag = kind == AttemptKind.SIGN_UP_IP ? email.substring(0, 8) : loginAttemptCounterPort.subjectTag(email);
+            String tag = switch (kind) {
+                case SIGN_UP_IP -> subject.substring(0, 8);
+                // memberId 는 개인정보가 아니고, 감사 로그(target=member:{id})와 맞춰 볼 수 있게 그대로 남긴다
+                case ADMIN_OTP -> subject;
+                case LOGIN, ADMIN_LOGIN, SIGN_UP -> loginAttemptCounterPort.subjectTag(subject);
+            };
             log.info("attempt limit reached kind={} subject={} retryAfterMs={}", kind, tag, outcome.retryAfter().toMillis());
         } else {
             log.debug("attempt limited kind={}", kind);
@@ -108,11 +135,16 @@ public class LoginGuardProcessor {
      * 나오는 새 응답을 만들면 그 자체가 오라클이 된다. 남은 창은 TTL 로 끝난다. warn 은 1분에 한 번이다. 저장소 장애가 아닌 오류(버그)는 삼키지 않고 그대로 던진다.
      */
     public void clear(AttemptKind kind, String normalizedEmail) {
+        rejectAdminOtp(kind);
         if (!loginGuardPolicy.enabled()) {
             return;
         }
+        reset(kind, Member.canonicalEmail(normalizedEmail));
+    }
+
+    private void reset(AttemptKind kind, String subject) {
         try {
-            loginAttemptCounterPort.reset(kind, Member.canonicalEmail(normalizedEmail));
+            loginAttemptCounterPort.reset(kind, subject);
         } catch (MemberException failure) {
             if (!isStoreUnavailable(failure)) {
                 throw failure;
@@ -129,9 +161,16 @@ public class LoginGuardProcessor {
      */
     private static boolean failOpen(AttemptKind kind) {
         return switch (kind) {
-            case LOGIN, ADMIN_LOGIN -> false;
+            case LOGIN, ADMIN_LOGIN, ADMIN_OTP -> false;
             case SIGN_UP, SIGN_UP_IP -> true;
         };
+    }
+
+    /** OTP 시도는 이메일 주체 · 켜짐 스위치를 따르지 않아 {@link #admitAdminOtp} · {@link #clearAdminOtp} 로만 받는다 — 잘못 부르면 조용히 꺼지지 않게 바로 실패한다. */
+    private static void rejectAdminOtp(AttemptKind kind) {
+        if (kind == AttemptKind.ADMIN_OTP) {
+            throw new IllegalArgumentException("ADMIN_OTP attempts go through admitAdminOtp/clearAdminOtp");
+        }
     }
 
     private static boolean isStoreUnavailable(MemberException failure) {
@@ -142,6 +181,7 @@ public class LoginGuardProcessor {
         return switch (kind) {
             case LOGIN, ADMIN_LOGIN -> MemberErrorCode.LOGIN_ATTEMPT_LIMITED;
             case SIGN_UP, SIGN_UP_IP -> MemberErrorCode.SIGN_UP_ATTEMPT_LIMITED;
+            case ADMIN_OTP -> MemberErrorCode.OTP_ATTEMPT_LIMITED;
         };
     }
 

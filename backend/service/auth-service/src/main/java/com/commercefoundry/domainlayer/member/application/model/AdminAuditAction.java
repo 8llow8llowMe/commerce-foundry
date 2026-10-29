@@ -13,5 +13,11 @@ public enum AdminAuditAction {
     /** 가게 운영자 계정을 비활성화했다 (#193). */
     ADMIN_DEACTIVATE,
     /** 로그인한 운영자가 자기 비밀번호를 바꿨다 (#193). */
-    ADMIN_PASSWORD_CHANGE
+    ADMIN_PASSWORD_CHANGE,
+    /** 로그인한 운영자가 OTP 등록을 확인했다 (#238). 등록 시작(비밀 발급)은 남기지 않는다 — 확인 전에는 아무것도 켜지지 않는다. */
+    ADMIN_OTP_ENROLL,
+    /** 로그인한 운영자가 자기 OTP 를 해제했다 (#238). */
+    ADMIN_OTP_DISABLE,
+    /** 로그인한 운영자가 OTP 복구 코드를 다시 발급했다 (#238). 이전 코드는 모두 무효다. */
+    ADMIN_OTP_RECOVERY_REGENERATE
 }

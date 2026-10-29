@@ -53,10 +53,59 @@ class LoginGuardProcessorTest {
         LoginGuardProcessor disabled = new LoginGuardProcessor(port, new LoginGuardPolicy(false, ENABLED.login(), ENABLED.signUp()), clock);
 
         for (AttemptKind kind : AttemptKind.values()) {
+            if (kind == AttemptKind.ADMIN_OTP) {
+                continue;
+            }
             disabled.admit(kind, EMAIL);
             disabled.clear(kind, EMAIL);
         }
 
+        verifyNoInteractions(port);
+    }
+
+    @Test
+    @DisplayName("관리자 OTP 는 꺼져 있어도 memberId 로 센다 — 비상 스위치가 6자리 코드 대입을 열지 않는다. 로그인과 같은 5회 · 15분이다")
+    void adminOtpCountsEvenWhenDisabled() {
+        LoginGuardProcessor disabled = new LoginGuardProcessor(port, new LoginGuardPolicy(false, ENABLED.login(), ENABLED.signUp()), clock);
+        given(port.record(AttemptKind.ADMIN_OTP, "4242", LOGIN_WINDOW)).willReturn(new LoginAttemptOutcome(5, LOGIN_WINDOW));
+
+        disabled.admitAdminOtp(4242L);
+        disabled.clearAdminOtp(4242L);
+
+        verify(port).record(AttemptKind.ADMIN_OTP, "4242", LOGIN_WINDOW);
+        verify(port).reset(AttemptKind.ADMIN_OTP, "4242");
+    }
+
+    @Test
+    @DisplayName("관리자 OTP 초과는 429 AUTH_043 이고, 잠금 전환 로그에는 memberId 를 그대로 남긴다(이메일 꼬리표를 만들지 않는다)")
+    void adminOtpLimited(CapturedOutput output) {
+        given(port.record(AttemptKind.ADMIN_OTP, "4242", LOGIN_WINDOW)).willReturn(new LoginAttemptOutcome(6, Duration.ofMinutes(3)));
+
+        assertThatThrownBy(() -> processor.admitAdminOtp(4242L))
+            .isInstanceOfSatisfying(LoginAttemptLimitedException.class, limited -> {
+                assertThat(limited.getErrorCode()).isEqualTo(MemberErrorCode.OTP_ATTEMPT_LIMITED);
+                assertThat(limited.getRetryAfter()).isEqualTo(Duration.ofMinutes(3));
+            });
+        assertThat(output.getOut()).contains("kind=ADMIN_OTP subject=4242 retryAfterMs=180000");
+        verify(port, never()).subjectTag(anyString());
+    }
+
+    @Test
+    @DisplayName("관리자 OTP 계수기 장애는 fail-closed(AUTH_013), 창 비우기 장애는 삼킨다(best-effort)")
+    void adminOtpFailsClosed() {
+        MemberException unavailable = new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+        willThrow(unavailable).given(port).record(any(), anyString(), any());
+        willThrow(unavailable).given(port).reset(any(), anyString());
+
+        assertThatThrownBy(() -> processor.admitAdminOtp(4242L)).isSameAs(unavailable);
+        assertThatCode(() -> processor.clearAdminOtp(4242L)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("ADMIN_OTP 를 이메일 경로(admit · clear)로 부르면 바로 실패한다 — 켜짐 스위치 · 이메일 정규화를 타지 않게")
+    void adminOtpRejectsEmailPath() {
+        assertThatThrownBy(() -> processor.admit(AttemptKind.ADMIN_OTP, "4242")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> processor.clear(AttemptKind.ADMIN_OTP, "4242")).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(port);
     }
 

@@ -25,7 +25,7 @@ public record LoginGuardPolicy(boolean enabled, LoginAttemptPolicy login, LoginA
     /** 그 종류에 쓰는 허용 횟수 · 창. */
     public LoginAttemptPolicy of(AttemptKind kind) {
         return switch (kind) {
-            case LOGIN, ADMIN_LOGIN -> login;
+            case LOGIN, ADMIN_LOGIN, ADMIN_OTP -> login;
             case SIGN_UP -> signUp;
             case SIGN_UP_IP -> signUpIp;
         };

@@ -44,4 +44,16 @@ public class AdminAuditProcessor {
     public void adminPasswordChanged(long adminMemberId, boolean succeeded) {
         adminAuditPort.adminPasswordChanged(adminMemberId, succeeded);
     }
+
+    public void adminOtpEnrolled(long adminMemberId, boolean succeeded) {
+        adminAuditPort.adminOtpEnrolled(adminMemberId, succeeded);
+    }
+
+    public void adminOtpDisabled(long adminMemberId, boolean succeeded) {
+        adminAuditPort.adminOtpDisabled(adminMemberId, succeeded);
+    }
+
+    public void adminOtpRecoveryCodesRegenerated(long adminMemberId, boolean succeeded) {
+        adminAuditPort.adminOtpRecoveryCodesRegenerated(adminMemberId, succeeded);
+    }
 }

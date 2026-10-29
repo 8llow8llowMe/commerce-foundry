@@ -45,6 +45,19 @@ public record AdminAuditRecord(AdminAuditAction action, Long actorMemberId, Stri
         return new AdminAuditRecord(AdminAuditAction.ADMIN_PASSWORD_CHANGE, adminMemberId, member(adminMemberId), succeeded);
     }
 
+    /** OTP 등록 확인 (#238). 비밀 · 코드 · 복구 코드는 남기지 않는다 — 본인 계정만 바꾸므로 대상은 행위자 자신이다. */
+    public static AdminAuditRecord adminOtpEnrolled(long adminMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_OTP_ENROLL, adminMemberId, member(adminMemberId), succeeded);
+    }
+
+    public static AdminAuditRecord adminOtpDisabled(long adminMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_OTP_DISABLE, adminMemberId, member(adminMemberId), succeeded);
+    }
+
+    public static AdminAuditRecord adminOtpRecoveryCodesRegenerated(long adminMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_OTP_RECOVERY_REGENERATE, adminMemberId, member(adminMemberId), succeeded);
+    }
+
     public static AdminAuditRecord membersSearched(long adminMemberId, MemberRole role, int page, int size) {
         String target = "members?role=" + (role == null ? "ALL" : role.name()) + "&page=" + page + "&size=" + size;
         return new AdminAuditRecord(AdminAuditAction.MEMBER_SEARCH, adminMemberId, target, true);

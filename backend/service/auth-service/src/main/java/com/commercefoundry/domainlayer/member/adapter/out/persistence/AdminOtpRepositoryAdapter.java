@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -32,6 +33,8 @@ import org.springframework.transaction.annotation.Transactional;
  *       유니크 키 위반은 flush 자리에서 {@code AUTH_037} 로 바꾼다</li>
  *   <li>벌크 UPDATE · DELETE 와 잠금이 있는 메서드({@link #recordTimeStep} · {@link #deleteByMemberId} · {@link #markRecoveryCodeUsed} · {@link #replaceRecoveryCodes})는
  *       {@code @Transactional} 이다 — 벌크 문장 · {@code PESSIMISTIC_WRITE} 는 트랜잭션이 있어야 돌고, 여러 문장은 한 단위여야 한다. 호출자 트랜잭션이 있으면 합류한다</li>
+ *   <li>{@link #lockByMemberId} 는 {@code @Transactional(propagation = MANDATORY)} 다 — 잠금은 호출자 트랜잭션이 끝날 때까지 쥐어야 뜻이 있어, 트랜잭션 없이 부르면
+ *       {@code IllegalTransactionStateException} 으로 막는다(혼자 열린 트랜잭션이 바로 커밋하며 잠금을 풀어 버리는 실수를 막는다)</li>
  *   <li>등록 확인(자격 {@link #save} + {@link #replaceRecoveryCodes})은 이 어댑터가 묶지 않는다 — PR-A2 의 Processor 가 한 트랜잭션에서 부른다</li>
  * </ul>
  *
@@ -45,6 +48,23 @@ public class AdminOtpRepositoryAdapter implements AdminOtpRepositoryPort {
     private final AdminOtpRecoveryCodeRepository recoveryCodeRepository;
     private final AdminOtpSecretCipher cipher;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
+
+    @Override
+    public Optional<Instant> findConfirmedAt(long memberId) {
+        return credentialRepository.findConfirmedAtByMemberId(memberId);
+    }
+
+    @Override
+    public long countUnusedRecoveryCodes(long memberId) {
+        return recoveryCodeRepository.countByMemberIdAndUsedAtIsNull(memberId);
+    }
+
+    /** 호출자 트랜잭션이 있어야 한다(MANDATORY) — 잠금은 그 트랜잭션이 끝날 때 풀린다. 혼자 열면 메서드가 끝나며 바로 풀려 뜻이 없으므로 막는다. */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean lockByMemberId(long memberId) {
+        return lockCredential(memberId).isPresent();
+    }
 
     @Override
     public Optional<AdminOtpCredential> findByMemberId(long memberId) {

@@ -898,7 +898,9 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 
 - **로거 이름은 `admin.audit`, 수준은 INFO** 다 — 로그 수집기가 로거 이름으로 따로 모아 보관 기간을 앱 로그와 다르게 둘 수 있게 나눈다.
 - 칸은 언제나 `action · actorMemberId · target · result` 넷이고 이 순서다. 모르는 칸은 `-`, 값에 공백을 넣지 않는다.
-  - `action` — 대문자 스네이크(`ADMIN_LOGIN` · `MEMBER_SEARCH`). 로그 검색 키라 한번 정한 이름을 바꾸지 않는다.
+  - `action` — 대문자 스네이크(`ADMIN_LOGIN` · `MEMBER_SEARCH` 등, 정본은 `AdminAuditAction`). 로그 검색 키라 한번 정한 이름을 바꾸지 않는다.
+    관리자 OTP(#238)는 `ADMIN_OTP_ENROLL`(등록 확인) · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` 이고 대상은 `member:<본인 id>` 다. 성공 · 실패를 모두 남기되
+    판정 전 실패(시도 제한 429 · 계수기 장애 503)는 감사에 남기지 않는다. 비밀 · 코드 · 복구 코드 · 비밀번호는 싣지 않는다. 등록 시작(비밀 발급)은 확인 전에는 아무것도 켜지지 않아 남기지 않는다.
   - `actorMemberId` — 행위한 관리자의 `member.id`(access 토큰의 `sub`). 요청 본문 값을 쓰지 않는다.
   - `target` — 대상 리소스 · 조건(`member:<id>` · `members?role=..&page=..&size=..`).
   - `result` — `SUCCESS` · `FAILURE`. 실패 이유(회원 없음 · 비밀번호 틀림 · 고객 계정)는 나누지 않는다.
@@ -1102,8 +1104,13 @@ IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존
 | `LOGIN` | `POST /api/v1/auth/login` | `auth:login-attempt:{emailHmac}` | 5회 · 15분 (`max-attempts` · `window`) | 429 `AUTH_040` | 지운다(DEL) | 503 `AUTH_013` (fail-closed) |
 | `ADMIN_LOGIN` | `POST /api/v1/auth/admin/login` | `auth:admin-login-attempt:{emailHmac}` | 로그인과 같은 값, 창은 따로 | 429 `AUTH_040` | **지우지 않는다** (§14-2) | 503 `AUTH_013` (fail-closed) |
 | `SIGN_UP` | `POST /api/v1/auth/sign-up` | `auth:sign-up-attempt:{emailHmac}` | 5회 · 10분 (`sign-up.max-attempts` · `sign-up.window`) | 429 `AUTH_041` | 지우지 않는다 | 세지 않고 통과 (fail-open) |
+| `ADMIN_OTP` (#238) | `POST /api/v1/admin/me/otp` · `…/otp/deactivation` · `…/otp/recovery-codes` | `auth:admin-otp-attempt:{memberId}` | 로그인과 같은 값, 창은 따로 | 429 `AUTH_043` | 지운다(DEL) | 503 `AUTH_013` (fail-closed) |
 
 - 횟수는 1~100, 창은 1분~1시간이다(`LoginAttemptPolicy` — 벗어나면 기동하지 않는다). 키 형식 · TTL 은 `coding-conventions.md` §9-7 이다.
+- **관리자 OTP 코드 시도(`ADMIN_OTP`, #238)** 는 6자리 코드 대입을 막는다 — 주체는 이메일이 아니라 access 토큰의 memberId(개인정보가 아니라 HMAC 없이 키에 넣는다)이고,
+  비밀번호 · 코드를 보기 전에 요청마다 1회 센다(비밀번호가 틀려도 센다). **`auth.login-guard.enabled=false` 여도 센다** — 비상 스위치가 OTP 대입까지 열지 않는다.
+  `LoginGuardProcessor#admitAdminOtp` · `#clearAdminOtp` 로만 받고 이메일 경로(`admit` · `clear`)에 넘기면 바로 실패한다. 잠금 전환 로그에는 memberId 를 그대로 남긴다.
+  로그인 2단계(PR-B) 창을 이 창과 나눌지는 PR-B 착수 전에 정한다 — 같은 창이면 access 토큰 보유자가 틀린 재인증을 반복해 진짜 관리자의 로그인 2단계를 잠글 수 있다.
 - **단위는 정규화한 이메일의 HMAC** 이다 — 로그인 · 관리자 로그인 Facade 는 `strip().toLowerCase(ROOT)` 를 한 번 하고 같은 값을 시도 제한 · 회원 조회(고객 로그인은 창 지우기도)에 넘긴다.
   가입 Facade 는 받은 이메일을 그대로 넘긴다 — `LoginGuardProcessor` 가 받은 값에 언제나 `Member.canonicalEmail` 을 적용하므로(멱등) 두 경로 모두 저장 · 조회 키와 같은 형태로 센다.
   대소문자 · 앞뒤 공백만 바꿔 새 창을 열 수 없다. 해시는 HMAC-SHA256 앞 16바이트 base64url 22자(`AUTH_LOGIN_GUARD_HASH_KEY`, 게이트웨이 `ClientIpHasher` 와 같은 형식)이고

@@ -38,4 +38,13 @@ public interface AdminAuditPort {
 
     /** 로그인한 관리자가 자기 비밀번호를 바꿨다 (#193). */
     void adminPasswordChanged(long adminMemberId, boolean succeeded);
+
+    /** 로그인한 관리자가 OTP 등록을 확인했다 (#238). 비밀 · 코드 · 복구 코드 · 비밀번호는 넘기지 않는다. */
+    void adminOtpEnrolled(long adminMemberId, boolean succeeded);
+
+    /** 로그인한 관리자가 자기 OTP 를 해제했다 (#238). */
+    void adminOtpDisabled(long adminMemberId, boolean succeeded);
+
+    /** 로그인한 관리자가 OTP 복구 코드를 다시 발급했다 (#238). */
+    void adminOtpRecoveryCodesRegenerated(long adminMemberId, boolean succeeded);
 }

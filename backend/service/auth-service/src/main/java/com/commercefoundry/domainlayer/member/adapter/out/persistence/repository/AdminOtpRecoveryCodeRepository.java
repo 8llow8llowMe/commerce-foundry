@@ -12,6 +12,9 @@ public interface AdminOtpRecoveryCodeRepository extends JpaRepository<AdminOtpRe
     /** 아직 쓰지 않은 코드 — {@code idx_admin_otp_recovery_code_member_id} 를 탄다. 회원당 최대 8행이다. */
     List<AdminOtpRecoveryCodeEntity> findByMemberIdAndUsedAtIsNullOrderByIdAsc(Long memberId);
 
+    /** 아직 쓰지 않은 코드 수 — 상태 조회. 같은 인덱스를 탄다. */
+    long countByMemberIdAndUsedAtIsNull(Long memberId);
+
     /** 아직 안 쓴 코드일 때만 사용 표시 — 조건부 UPDATE 한 문장. 0행이면 다른 요청이 먼저 썼거나 그 회원의 코드가 아니다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update AdminOtpRecoveryCodeEntity r set r.usedAt = :usedAt where r.id = :id and r.memberId = :memberId and r.usedAt is null")
