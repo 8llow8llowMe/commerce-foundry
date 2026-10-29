@@ -833,6 +833,55 @@
     comment on column product.sku.weight_grams is
         '배송 무게 (그램, 1 이상) — 해외 배송비 견적에 쓴다. 해외 판매 상품만 필수, null 이면 미입력';
 
+    create table product.sku_cost (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        admin_member_id bigint not null,
+        amount bigint not null,
+        cost_type varchar(20) not null check ((cost_type in ('GOODS','PACKAGING'))),
+        currency varchar(3) not null check ((currency in ('KRW','USD'))),
+        effective_from timestamp(6) with time zone not null,
+        reason varchar(200) not null,
+        sku_id bigint not null,
+        primary key (id),
+        constraint uk_sku_cost_sku_id_cost_type_effective_from unique (sku_id, cost_type, effective_from),
+        constraint ck_sku_cost_amount_non_negative check (amount >= 0)
+    );
+
+    comment on table product.sku_cost is
+        'SKU 원가 적용 이력 (append-only)';
+
+    comment on column product.sku_cost.id is
+        'SKU 원가 이력 아이디 (Snowflake)';
+
+    comment on column product.sku_cost.created_at is
+        '생성 시각';
+
+    comment on column product.sku_cost.updated_at is
+        '수정 시각';
+
+    comment on column product.sku_cost.admin_member_id is
+        '기록한 어드민 회원 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column product.sku_cost.amount is
+        '원가 (0 이상, 최소 화폐 단위). 0 은 0원이라고 명시한 값';
+
+    comment on column product.sku_cost.cost_type is
+        '원가 유형 (GOODS 매입 · 제작 원가 / PACKAGING 포장 변동비)';
+
+    comment on column product.sku_cost.currency is
+        '원가 통화 — 같은 SKU · 유형의 첫 행 통화로 고정';
+
+    comment on column product.sku_cost.effective_from is
+        '적용 시작 시각 (포함). 같은 SKU · 유형의 다음 행 시작 전까지 적용';
+
+    comment on column product.sku_cost.reason is
+        '변경 사유';
+
+    comment on column product.sku_cost.sku_id is
+        'SKU 아이디 (FK: sku.id)';
+
     create table product.stock (
         sku_id bigint not null,
         created_at timestamp(6) with time zone not null,

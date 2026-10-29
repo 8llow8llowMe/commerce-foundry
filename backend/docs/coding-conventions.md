@@ -205,6 +205,9 @@ public enum OrderErrorCode {
 | `{DOMAIN}_101~` | `{Domain}ValidationMessage` 상수 | 필드별 개별 코드 |
 | 대역 끝 2개 | ErrorCode `PARAMETER_TYPE_INVALID`, `PARAMETER_REQUIRED` | 타입 불일치, 필수 파라미터 누락 |
 
+- **`1xx` 대역이 차면 `200~` 을 이어 쓴다.** 대역 끝 `198` · `199` 는 옮기지 않는다(이미 나간 계약이다). 판정기(`ValidationErrorSupport`)는 세 자리 숫자면 대역을 가리지 않는다.
+  처음 쓴 곳: product-service SKU 원가 `PRODUCT_200~208`(`SkuCostValidationMessage`, #361) — 101~197 이 상품 · 전시 · 사이즈표로 찼다.
+
 ```java
 public final class ProductValidationMessage {
 
@@ -274,11 +277,12 @@ public final class ProductValidationMessage {
     짧게 잡는다(길면 호출자가 먼저 끊고 재시도해 같은 요청이 또 줄을 선다). 넘으면 어댑터가 `PessimisticLockingFailureException`
     (`CannotAcquireLockException` 포함, PostgreSQL SQLState `55P03`)을 **재시도 가능한 도메인 409** 로 바꾼다.
   - 예: product-service 결제 후 재고 복원이 선점 헤더를 잠근다 (`StockReservationRepository#findByIdForUpdate` · 상한 2000ms · 초과 `PRODUCT_031`,
-    #85 — `order-flow-guide.md` §3-2).
+    #85 — `order-flow-guide.md` §3-2). SKU 원가 이력 추가는 SKU 행을 잠근 뒤 최신 행을 읽어 단조 규칙을 판정한다
+    (`SkuRepository#findByIdForUpdate` · 상한 2000ms · 초과 `PRODUCT_078`, #361 — 합계가 아니라 "최신보다 뒤" 판정이지만 같은 이유다).
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.
-  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity` · `StockAdjustmentHistoryEntity` · `StockRestorationEntity` · `StockRestorationItemEntity` · `CategoryEntity`, delivery `ShippingPolicyHistoryEntity` · `ShippingPolicyHistoryAreaEntity`.
+  예: auth `MemberAgreementEntity`, product `StockEntity` · `StockReservationItemEntity` · `StockAdjustmentHistoryEntity` · `StockRestorationEntity` · `StockRestorationItemEntity` · `CategoryEntity` · `SkuCostEntity`(append-only · `@Immutable`, 포트 `insert`, #361), delivery `ShippingPolicyHistoryEntity` · `ShippingPolicyHistoryAreaEntity`.
   - Snowflake 를 직접 넣는 Persistable 엔티티의 새 행 저장 포트 메서드는 `insert` 다 — persist 의미(아이디 충돌은 PK 위반)를 이름에 드러낸다 (예: `CategoryRepositoryPort.insert`, #9).
   - append-only 이력도 Persistable 이면 포트 메서드는 `insert` 다 (예: delivery `ShippingPolicyHistoryRepositoryPort.insert`, #69).
     product 재고 조정 이력의 `append` 는 이 규칙 전에 만든 이름이다.
