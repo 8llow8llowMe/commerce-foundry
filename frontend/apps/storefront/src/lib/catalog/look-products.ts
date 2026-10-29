@@ -1,6 +1,7 @@
 import { serverFetch } from '@/lib/server-api';
 import type { LookProduct } from './look-cart';
-import type { ProductDetail, ProductLook, ProductLooksResponse } from './types';
+import { normalizeProductLooks } from './product-looks';
+import type { ProductDetail, ProductLook } from './types';
 
 /** 상세 SHOP THE LOOK 에 보여 줄 최대 룩 수 */
 export const PRODUCT_LOOKS_LIMIT = 4;
@@ -50,14 +51,13 @@ export async function fetchLookProducts(
 }
 
 /**
- * 이 상품이 들어간 룩(#62 초안). 룩은 덧붙이는 영역이라 API 가 아직 없거나(404) 실패해도 빈 목록으로 둔다.
+ * 이 상품이 들어간 보이는 룩(BE #62), 노출 순서로 4개까지. 룩은 덧붙이는 영역이라 실패하거나(404 · 장애)
+ * 응답 모양이 어긋나도 빈 목록 · 쓸 수 있는 룩만으로 둔다 — 상품 상세가 깨지지 않게 한다.
  */
 export async function fetchProductLooks(productId: string): Promise<ProductLook[]> {
   try {
-    const { looks } = await serverFetch<ProductLooksResponse>(
-      `/api/v1/products/${productId}/looks`,
-    );
-    return looks.slice(0, PRODUCT_LOOKS_LIMIT);
+    const body = await serverFetch<unknown>(`/api/v1/products/${productId}/looks`);
+    return normalizeProductLooks(body).slice(0, PRODUCT_LOOKS_LIMIT);
   } catch {
     return [];
   }

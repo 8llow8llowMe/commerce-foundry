@@ -150,25 +150,34 @@ export type ProductDetail = {
   preorder: Preorder | null;
 };
 
-// GET /api/v1/products/{productId}/looks — 이 상품이 들어간 룩(Shop the Look). BE #62 초안 계약이다.
-// 룩은 전시용 묶음이라 가격 · 재고 · 주문은 구성 상품(SKU) 각각을 따른다. 확정되면 여기를 맞춘다.
+// GET /api/v1/products/{productId}/looks — 이 상품이 들어간 보이는 룩(Shop the Look, BE #62).
+// 정본은 BE api-design-guide §2-11 · LookSummaryResponse 다. 룩은 전시용 묶음이라 가격 · 재고 · 주문은 구성 상품(SKU) 각각을 따른다.
+// 숨긴 룩 · 숨긴 상품은 서버가 빼고 보낸다. 룩 기능 플래그가 꺼져 있으면 `looks: []` 다.
 
-export type LookItem = {
-  productId: string;
-  name: string;
-  thumbnail: ProductThumbnail | null;
-  salePrice: Money;
-  saleStatus: SaleStatus;
+/** 룩 대표 이미지. 상품 이미지와 달리 imageId 가 없다 */
+export type LookImage = {
+  url: string;
+  width: number | null;
+  height: number | null;
+  /** 평문 — 텍스트로만 쓴다 */
+  altText: string | null;
 };
 
 export type ProductLook = {
   lookId: string;
+  /** 평문 — 텍스트 노드로만 그린다 */
   title: string;
-  description: string | null;
-  /** 대표 착장 화보 */
-  image: ProductThumbnail | null;
-  /** 노출 순서. 비노출 · 판매 종료 상품의 처리 규칙은 #62 에서 정한다 */
-  items: LookItem[];
+  /**
+   * 평문, 개행 · 탭이 들어 있다. 상품별 룩(목록 항목)에는 없고 룩 상세(`GET /api/v1/looks/{lookId}`)에만 온다
+   */
+  description?: string | null;
+  /** 계약상 필수다. 모양이 깨져 오면 정규화(normalizeProductLooks)가 null 로 둔다 */
+  image: LookImage | null;
+  /**
+   * 구성 상품 카드 — 상품 목록 항목(`GET /api/v1/products`)과 같은 모양, 배열 순서 = 구성 순서.
+   * 판매 종료 · 품절은 saleStatus 로 남고, 상품이 모두 빠지면 빈 배열이다(그때 "함께 담기" 를 숨긴다)
+   */
+  products: ProductListItem[];
 };
 
 export type ProductLooksResponse = {

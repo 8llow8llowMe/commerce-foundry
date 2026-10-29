@@ -1,9 +1,9 @@
 import { cx } from '@cf/ui';
 import { fetchLookProducts, fetchProductLooks } from '@/lib/catalog/look-products';
-import type { ProductThumbnail } from '@/lib/catalog/types';
+import type { LookImage as LookImageData } from '@/lib/catalog/types';
 import { LookPicker } from './LookPicker';
 
-function LookImage({ image, title }: { image: ProductThumbnail | null; title: string }) {
+function LookImage({ image, title }: { image: LookImageData | null; title: string }) {
   return (
     <div className="relative aspect-[4/5] overflow-hidden bg-muted">
       {image && (
@@ -24,23 +24,26 @@ function LookImage({ image, title }: { image: ProductThumbnail | null; title: st
 }
 
 /**
- * 상품 상세 SHOP THE LOOK — 이 상품이 들어간 룩(#62)마다 착장 화보 + 구성품 함께 담기.
- * 룩이 없거나 구성품을 하나도 못 받으면 영역을 그리지 않는다.
+ * 상품 상세 SHOP THE LOOK — 이 상품이 들어간 룩(BE #62)마다 착장 화보 + 구성품 함께 담기.
+ * 구성품 카드(`products`)는 순서 · 아이디만 쓰고, 옵션 · SKU 는 상품 상세 API 로 받는다(못 받은 상품은 빠진다).
+ * 판매 종료 · 품절 구성품은 상세의 saleStatus 대로 보이되 고를 수 없다(`lookPickable`).
+ * 구성품이 없으면(`products: []` · 상세를 모두 못 받음) 룩은 남기고 함께 담기만 숨긴다. 화보도 없으면 그 룩은 그리지 않는다.
  * 룩 하나면 화보 | 구성품 두 칸, 여럿이면 PC 3열 · 모바일 가로 스와이프(72vw)로 늘어놓는다.
+ * 제목 · 설명 · 대체 텍스트는 평문이라 텍스트 노드로만 그리고, 설명의 개행은 white-space 로 살린다.
  */
 export async function ProductLooks({ productId }: { productId: string }) {
   const looks = await fetchProductLooks(productId);
   if (looks.length === 0) return null;
 
-  const products = await fetchLookProducts(
-    looks.flatMap((look) => look.items.map((item) => item.productId)),
+  const details = await fetchLookProducts(
+    looks.flatMap((look) => look.products.map((product) => product.productId)),
   );
   const visible = looks
     .map((look) => ({
       ...look,
-      products: look.items.flatMap((item) => products.get(item.productId) ?? []),
+      picks: look.products.flatMap((product) => details.get(product.productId) ?? []),
     }))
-    .filter((look) => look.products.length > 0);
+    .filter((look) => look.image !== null || look.picks.length > 0);
   if (visible.length === 0) return null;
 
   const single = visible.length === 1;
@@ -74,9 +77,13 @@ export async function ProductLooks({ productId }: { productId: string }) {
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <h3 className="font-serif text-lg">{look.title}</h3>
-                {look.description && <p className="leading-7">{look.description}</p>}
+                {look.description && (
+                  <p className="leading-7 whitespace-pre-line">{look.description}</p>
+                )}
               </div>
-              <LookPicker products={look.products} currentProductId={productId} />
+              {look.picks.length > 0 && (
+                <LookPicker products={look.picks} currentProductId={productId} />
+              )}
             </div>
           </li>
         ))}
