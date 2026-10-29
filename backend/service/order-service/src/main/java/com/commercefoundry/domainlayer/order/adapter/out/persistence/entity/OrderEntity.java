@@ -31,14 +31,17 @@ import lombok.NoArgsConstructor;
  * check 식이 NULL 이면 통과하므로 nullable 칸은 {@code is null} · {@code is not null} 로 먼저 가른다.
  *
  * <p>상태는 도메인 메서드로만 바꾸고 {@code @Version} 으로 동시 수정을 막는다 — 버전이 null 이면 새 주문(persist), 아니면 merge(버전 비교 UPDATE).
- * 결제 기한이 지난 결제 대기 주문 스윕의 인덱스({@code status, payment_due_at})는 #96 이 만든다.
+ * 결제 기한이 지난 결제 대기 주문은 {@code status, payment_due_at, id} 키셋 인덱스로 조회한다.
  */
 @Entity
 @Table(
     name = "orders",
     comment = "주문 (금액 · 배송비는 주문 시점 스냅숏, 배송지는 order_shipping_address)",
     uniqueConstraints = @UniqueConstraint(name = "uk_orders_stock_reservation_id", columnNames = "stock_reservation_id"),
-    indexes = @Index(name = "idx_orders_member_id_id", columnList = "member_id, id"),
+    indexes = {
+        @Index(name = "idx_orders_member_id_id", columnList = "member_id, id"),
+        @Index(name = "idx_orders_status_payment_due_at_id", columnList = "status, payment_due_at, id")
+    },
     check = {
         @CheckConstraint(
             name = "ck_orders_amounts_non_negative",

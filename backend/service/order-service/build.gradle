@@ -1,5 +1,6 @@
 dependencies {
     implementation project(':core:common-core')
+    implementation project(':core:messaging-core')
     implementation project(':core:commerce-support')
     implementation project(':core:persistence-core')
     implementation project(':core:security-core')

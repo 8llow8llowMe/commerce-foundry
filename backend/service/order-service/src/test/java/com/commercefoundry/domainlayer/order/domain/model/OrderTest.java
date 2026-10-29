@@ -123,6 +123,24 @@ class OrderTest {
     }
 
     @Test
+    @DisplayName("만료 이력은 저장된 결제 대기 주문에서만 만든다 — PENDING_PAYMENT → EXPIRED, SYSTEM, 바꾼 사람 없음, 사유 PAYMENT_TIMEOUT")
+    void expiryHistoryIsSystemPaymentTimeoutFromStoredPendingOrder() {
+        Order pending = withStatus(OrderStatus.PENDING_PAYMENT);
+
+        OrderStatusHistory expired = OrderStatusHistory.expired(11L, pending);
+
+        assertThat(expired.orderId()).isEqualTo(pending.id());
+        assertThat(expired.fromStatus()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+        assertThat(expired.toStatus()).isEqualTo(OrderStatus.EXPIRED);
+        assertThat(expired.changedByType()).isEqualTo(StatusChangedBy.SYSTEM);
+        assertThat(expired.changedById()).isNull();
+        assertThat(expired.reason()).isEqualTo("PAYMENT_TIMEOUT");
+        assertThatThrownBy(() -> OrderStatusHistory.expired(11L, placed())).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OrderStatusHistory.expired(11L, withStatus(OrderStatus.PAID))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OrderStatusHistory.expired(11L, withStatus(OrderStatus.EXPIRED))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void historyNeverPrintsReason() {
         OrderStatusHistory history = new OrderStatusHistory(1, 2, null, OrderStatus.PENDING_PAYMENT, StatusChangedBy.CUSTOMER, 7L, "private address memo");
         assertThat(history.toString()).doesNotContain("private address memo");

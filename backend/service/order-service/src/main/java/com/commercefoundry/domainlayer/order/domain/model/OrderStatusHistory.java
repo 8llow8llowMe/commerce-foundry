@@ -31,6 +31,15 @@ public record OrderStatusHistory(
         }
         return new OrderStatusHistory(id, order.id(), null, order.status(), StatusChangedBy.CUSTOMER, order.memberId(), null);
     }
+
+    /** 결제 기한이 지나 시스템이 만료했다 — PENDING_PAYMENT → EXPIRED, 사유 {@code PAYMENT_TIMEOUT}. {@code order} 는 전이 전 주문이다. */
+    public static OrderStatusHistory expired(long id, Order order) {
+        if (order.isNew() || order.status() != OrderStatus.PENDING_PAYMENT) {
+            throw new IllegalArgumentException("만료 이력은 저장된 결제 대기 주문에서만 만듭니다: orderId=" + order.id() + ", status=" + order.status());
+        }
+        return new OrderStatusHistory(id, order.id(), OrderStatus.PENDING_PAYMENT, OrderStatus.EXPIRED, StatusChangedBy.SYSTEM, null, "PAYMENT_TIMEOUT");
+    }
+
     @Override
     public String toString() {
         return "OrderStatusHistory[id=" + id + ", orderId=" + orderId + ", fromStatus=" + fromStatus

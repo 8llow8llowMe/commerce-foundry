@@ -137,7 +137,12 @@ compose 가 env 파일과 무관하게 고정하는 값:
 - `STORE_FEATURES_*` 는 dev 프로파일 yml 이 `true` 로 덮어 dev 에서는 env 를 읽지 않는다.
 - 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `KAFKA_SASL_*`(§4-4))는 compose 에 넘기지 않는다.
   `STORAGE_PUBLIC_BASE_URL` 은 product-service 가 메인 전시 미디어 주소 판정에 읽는다(#63, `:-` 빈 값 — 비면 미디어 쓰기만 503).
-  `MESSAGING_ENABLED` · `KAFKA_NAMESPACE` · `KAFKA_BOOTSTRAP_SERVERS` · `KAFKA_SECURITY_PROTOCOL` 은 product-service compose 가 넘긴다(#309 주문 만료 · 취소 컨슈머, `:-` 기본 꺼짐).
+  `MESSAGING_ENABLED` · `KAFKA_NAMESPACE` · `KAFKA_BOOTSTRAP_SERVERS` · `KAFKA_SECURITY_PROTOCOL` 은 product-service · order-service compose 가 넘긴다(#309 주문 만료 · 취소 컨슈머 · #96 `order-expired` outbox 릴레이, `:-` 기본 꺼짐).
+  order-service 는 꺼져 있어도 `orders.outbox` 에 쌓기만 하고 릴레이가 멈춘다 — 켜면 쌓인 것부터 나간다.
+  꺼진 동안 미결제 만료마다 행이 계속 쌓여 `commerce.messaging.outbox.unpublished.count` · `…unpublished.oldest.age` 가 오른다 —
+  메시징을 끈 환경은 이 두 지표를 알림에서 뺀다(켠 환경에서만 릴레이 정지 신호다).
+  켜기 전에 미발행 건수(`select count(*) from orders.outbox where published_at is null`)를 확인하고 — 켜는 순간 그만큼이 한꺼번에 나간다 —
+  토픽 `<ns>.order.order-expired` · `<ns>.order.order-expired.dlt` 를 먼저 만든다(`docker/kafka/topics.txt` · `create-topics.sh`, 앱 · 브로커는 토픽을 만들지 않는다).
   operations-service yml 도 같은 키를 읽지만 배포 compose 가 아직 없다 — compose 를 만드는 PR 에서 같이 넘긴다.
   해당 기능이 yml(또는 `storage.*` 같은 relaxed binding)로 키를 읽기 시작하는 PR 에서 그 모듈 compose 의 `environment` 에 같이 더한다(§8).
   `KAFKA_PORT` 는 로컬 compose(`docker-compose-local.yml`) 전용이라 배포 compose 에 넘기지 않는다.
