@@ -78,6 +78,7 @@ class GatewayRouteCoverageTest {
         new Sample("/api/v1/admin/size-chart-templates/1", "product-service"),
         new Sample("/api/v1/admin/looks", "product-service"),
         new Sample("/api/v1/admin/looks/order", "product-service"),
+        new Sample("/api/v1/admin/skus/1/costs", "product-service"),
         new Sample("/api/v1/carts/items", "order-service"),
         new Sample("/api/v1/orders/quotes", "order-service"),
         new Sample("/api/v1/admin/orders/1/status", "order-service"),

@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAgg
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -33,6 +34,11 @@ public class SkuRepositoryAdapter implements SkuRepositoryPort {
     @Override
     public boolean existsById(long skuId) {
         return skuRepository.existsById(skuId);
+    }
+
+    @Override
+    public Optional<Sku> findByIdForUpdate(long skuId) {
+        return skuRepository.findByIdForUpdate(skuId).map(skuMapper::toDomain);
     }
 
     @Override

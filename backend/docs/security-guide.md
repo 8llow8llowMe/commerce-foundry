@@ -907,7 +907,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - 쓰는 방식 — 컨텍스트의 out-port(`AdminAuditPort`)에 행위별 메서드를 두고, **Facade 는 포트를 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다**
   (ArchUnit H11 — Facade 는 out-port 를 쓰지 않는다). 업무가 끝난 뒤(트랜잭션 밖) 부르고, 실패 로그의 대상 선택 같은 감사 정책도 Processor 에 둔다.
   어댑터는 `adapter/out/log/*AuditLogAdapter` 다.
-  다른 서비스도 어드민 쓰기 API 를 만들 때 같은 로거 이름 · 칸으로 남긴다. 업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 등)는 그 이력이 감사의 정본이다.
+  다른 서비스도 어드민 쓰기 API 를 만들 때 같은 로거 이름 · 칸으로 남긴다. 업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 · SKU 원가 이력 #361 등)는 그 이력이 감사의 정본이다.
 - **영속화 (auth-service, #192)** — `AdminAuditPort` 계약은 그대로이고 구현이 `adapter/out/persistence/AdminAuditLogRepositoryAdapter` 다.
   - 순서: `admin.audit` 로그 한 줄(`AdminAuditLogAdapter`)을 **먼저** 남기고 `auth.admin_audit_log` 에 한 행을 더한다. 칸 값은 `AdminAuditRecord` 팩토리 한 곳에서 만든다 —
     로그 줄과 행이 같은 값이다. 로그 어댑터는 지우지 않는다(수집기 형식 · 다른 서비스와 같은 줄 · DB 장애 때의 증거).

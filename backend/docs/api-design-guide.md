@@ -26,7 +26,7 @@
 | 서비스 | 고객 | 어드민 |
 |--------|------|--------|
 | auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**`, `/api/v1/admin/audit-logs/**`, `/api/v1/admin/admins/**`, `/api/v1/admin/me/**` |
-| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**`, `/api/v1/looks/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**`, `/api/v1/admin/looks/**` |
+| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**`, `/api/v1/looks/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**`, `/api/v1/admin/looks/**`, `/api/v1/admin/skus/**` |
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
@@ -35,6 +35,7 @@
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
 상품 사이즈표(#216)의 고객 · 어드민 조회는 새 접두어가 아니다 — `GET /api/v1/products/{productId}/size-chart`,
 `GET|PUT /api/v1/admin/products/{productId}/size-chart` 는 기존 `products/**` 다. 템플릿 컬렉션만 `/api/v1/admin/size-chart-templates/**` 다.
+SKU 원가 이력(#361)은 SKU 하위 리소스라 `/api/v1/admin/skus/**` 를 새로 둔다(§2-11).
 
 - **관리자 로그인은 `POST /api/v1/auth/admin/login` 이다(고객 열의 `/api/v1/auth/**`, #6).** **이슈 #6 원문의 `/api/v1/admin/auth/login` 과 다르다** — `/api/v1/admin/**` 아래에 두지 않는다 —
   그 경로는 게이트웨이 · 서비스 URL 규칙이 둘 다 ADMIN 토큰을 요구해 토큰을 받으러 오는 익명 요청이 닿지 못한다. 진입 패키지도 `adapter/in/web` 이고
@@ -619,6 +620,31 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
   domain(`Product` · `ProductSummary`)만 쓴다(H8). 판매 상태 · 상품 카드는 Info 로 옮겨 Presenter 에 넘긴다.
 - **게이트웨이**: `/api/v1/looks/**` · `/api/v1/admin/looks/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 상품별 룩은 기존 `/api/v1/products/**` 다.
   게이트웨이 · 서비스 모두 `/api/v1/admin/**` 밖은 익명 허용이고, 고객 3경로는 메서드의 `permitAll()` 로 연다(메인 전시와 같다).
+### 2-12. SKU 원가 이력 (product-service, #361)
+
+SKU 원가(매입 · 제작 원가, 포장 변동비)를 적용 시작 시각이 있는 이력으로 둔다 — 고치지 않고 행을 더한다(append-only). 주문 시점의 원가를 나중에 그대로 다시 고르기 위해서다.
+원가는 **어드민 전용**이다 — 고객 응답 · 서비스 간 SKU 조회(`SkuInternalItem`)에 넣지 않는다. 컨텍스트는 `domainlayer/skucost` 이고 고객 진입(`adapter/in/web`)이 없다.
+Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가 409 로 막는다). 기록한 어드민은 토큰의 memberId 만 남기고 이름을 내지 않는다. 아이디는 문자열이다.
+
+| 경로 | 권한 | 성공 | 주요 오류 |
+|------|------|------|-----------|
+| `GET /api/v1/admin/skus/{skuId}/costs` | ADMIN | 200 `{skuId, costs:[항목]}` — 지금 적용되는 유형별 원가, GOODS → PACKAGING 순 | 404 `PRODUCT_002` · 400 `PRODUCT_123` |
+| `GET /api/v1/admin/skus/{skuId}/costs/histories?costType=&page=&size=` | ADMIN | 200 `PageResponse<항목>` — 적용 시작 내림차순 · 아이디 내림차순 고정. page/size 기본 0/20, size 1~100 | 404 `PRODUCT_002` · 400 `PRODUCT_101` · `102` · `123` · `198`(costType) |
+| `POST /api/v1/admin/skus/{skuId}/costs` | ADMIN | 201 추가한 항목 | 404 `PRODUCT_002` · 400 `PRODUCT_074` · `PRODUCT_100` · `PRODUCT_200~208` · 409 `PRODUCT_075~078` |
+
+- **항목**: `{costId, costType{code,name,description}, amount{amount,currency}, effectiveFrom, reason, adminMemberId, createdAt}`. `createdAt` 은 기록 시각, `effectiveFrom` 은 적용 시작(포함)이다.
+- **본문**: `{costType, amount:{amount,currency}, effectiveFrom?, reason}`. `costType` 은 `GOODS`(매입 · 제작 원가) · `PACKAGING`(포장 변동비)다.
+  금액은 최소 화폐 단위 정수 0 이상이다 — **0 은 "0원이라고 명시했다"** 이고 행이 없는 것(미입력)과 다르다. `reason` 은 앞뒤 공백을 빼고 1~200자, 제어 · 서식 문자 금지다.
+- **시간 규칙**: `effectiveFrom` 을 빼면 서버 시각(지금)이다. 마이크로초로 잘라 저장 · 판정한다. 같은 SKU · 유형 안에서 새 행의 시작은 **최신 행 시작보다 반드시 뒤**여야 한다(아니면 409 `PRODUCT_075`).
+  최신보다 뒤이기만 하면 지금보다 과거(소급)도 받는다. 지금 + 5분보다 뒤는 400 `PRODUCT_074` — 예약 적용은 받지 않고 화면 시계 오차만 받는다. 1970-01-01T00:00:00Z 보다 이르면 400 `PRODUCT_208`.
+- **통화 고정**: SKU · 유형 타임라인의 통화는 첫 행 통화다. 다른 통화는 409 `PRODUCT_076`(메시지에 현재 통화). 판매가 통화와 같을 필요는 없다 — 불일치 처리는 #362.
+- **미입력 = 부재**: 현재 원가 조회에서 한 번도 입력하지 않은 유형은 항목이 없다. 0 으로 채우지 않는다. 시작이 아직 오지 않은 행(5분 오차 안)만 있는 유형도 지금은 항목이 없다.
+- **동시성**: 추가는 SKU 행을 잠그고(`SkuRepository#findByIdForUpdate`, 대기 2초 · 트랜잭션 5초) 최신 행을 읽어 판정한다. 잠금을 못 얻으면 409 `PRODUCT_078`(다시 시도).
+  잠금을 비켜 간 같은 시작 시각의 동시 추가는 유니크 `uk_sku_cost_sku_id_cost_type_effective_from` 이 409 `PRODUCT_077` 로 막는다. 엔티티는 `@Immutable` 이고 `@Version` 이 없다.
+- 오류 코드: `PRODUCT_074`(미래 시작 400) · `075`(최신보다 뒤 아님 409) · `076`(통화 불일치 409) · `077`(유니크 409) · `078`(잠금 409). 없는 SKU 는 상품 컨텍스트의 `PRODUCT_002` 다.
+  필드 검증은 `PRODUCT_200~208`(`SkuCostValidationMessage`) — product-service `1xx` 대역이 차서 이어 쓴다(`coding-conventions.md` §8-2). 경로 skuId 양수는 재고 조정과 같은 `PRODUCT_123`,
+  page · size 는 서비스 공용 `PRODUCT_101` · `PRODUCT_102` 다. 오류 메시지 · 로그에 금액을 넣지 않는다.
+- **게이트웨이**: 새 접두어 `/api/v1/admin/skus/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 서비스 간 시점 원가 벌크 조회(`/internal/v1/sku-costs/query`)는 #361 PR-B 다.
 
 ## 3. 계층 흐름
 
