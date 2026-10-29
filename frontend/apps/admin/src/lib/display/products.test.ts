@@ -22,7 +22,7 @@ const item = (productId: string): ProductFormItem => ({
 
 describe('addProduct', () => {
   it('맨 뒤에 더하고 검색 결과의 노출 · 판매 상태를 함께 담는다', () => {
-    const result = addProduct([item('1')], candidate('2', false, SOLD_OUT), 'PRODUCT_PICK');
+    const result = addProduct([item('1')], candidate('2', false, SOLD_OUT), 20);
     expect(result).toEqual({
       ok: true,
       products: [
@@ -33,7 +33,7 @@ describe('addProduct', () => {
   });
 
   it('이미 넣은 상품은 더하지 않는다', () => {
-    expect(addProduct([item('1')], candidate('1'), 'PRODUCT_PICK')).toEqual({
+    expect(addProduct([item('1')], candidate('1'), 20)).toEqual({
       ok: false,
       reason: 'duplicate',
     });
@@ -41,7 +41,7 @@ describe('addProduct', () => {
 
   it('상한(상품 픽 20개)에 닿으면 더하지 않는다', () => {
     const full = Array.from({ length: 20 }, (_, index) => item(String(index + 1)));
-    expect(addProduct(full, candidate('99'), 'PRODUCT_PICK')).toEqual({
+    expect(addProduct(full, candidate('99'), 20)).toEqual({
       ok: false,
       reason: 'full',
     });
@@ -57,5 +57,14 @@ describe('productNotice', () => {
     );
     expect(productNotice({ ...item('1'), availability: ON_SALE })).toBeNull();
     expect(productNotice(item('1'))).toBeNull();
+  });
+
+  it('고객 화면 이름을 받으면 그 이름으로 알린다(룩)', () => {
+    expect(productNotice({ ...item('1'), visible: false }, '룩')).toBe(
+      '숨긴 상품이라 룩에 보이지 않습니다.',
+    );
+    expect(productNotice({ ...item('1'), availability: SOLD_OUT }, '룩')).toBe(
+      '품절 상품입니다. 룩에 보이지만 지금은 살 수 없습니다.',
+    );
   });
 });

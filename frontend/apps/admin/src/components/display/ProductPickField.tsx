@@ -7,7 +7,6 @@ import { LOAD_FAILED } from '@/lib/api-errors';
 import type { ProductFormItem } from '@/lib/display/form';
 import { moveItem } from '@/lib/display/order';
 import { addProduct, productNotice } from '@/lib/display/products';
-import { ITEM_RANGES, type SectionTypeCode } from '@/lib/display/types';
 import { ADMIN_PRODUCTS_PATH, KEYWORD_MAX, type ProductListItem } from '@/lib/product/query';
 
 const SEARCH_SIZE = 10;
@@ -30,22 +29,25 @@ function searchFailure(cause: unknown): string {
 }
 
 /**
- * 상품 픽의 상품 — 어드민 상품 목록(#9, 숨김 포함)에서 찾아 더하고, 빼고, 순서를 바꾼다. 상한은 BE 유형 규칙(상품 픽 1~20개)이다.
- * 숨긴 상품은 등록은 되지만 메인에서 빠지고, 판매중이 아닌 상품은 메인에 보이지만 살 수 없다 — 두 경우 모두 그 줄에 알린다.
+ * 고른 상품 — 어드민 상품 목록(#9, 숨김 포함)에서 찾아 더하고, 빼고, 순서를 바꾼다. 메인 전시 상품 픽(#71) · 룩(#406)이 쓴다.
+ * 상한(`max`)은 BE 규칙이다. 숨긴 상품은 등록은 되지만 고객 화면(`surface`)에서 빠지고, 판매중이 아닌 상품은 보이지만 살 수 없다
+ * — 두 경우 모두 그 줄에 알린다.
  */
 export function ProductPickField({
-  type,
+  max,
+  surface,
   products,
   errors,
   onChange,
 }: {
-  type: SectionTypeCode;
+  max: number;
+  /** 고객에게 보이는 곳 — 안내 문구에 쓴다(`메인` · `룩`) */
+  surface: string;
   products: ProductFormItem[];
   errors: string[];
   onChange: (products: ProductFormItem[]) => void;
 }) {
   const id = useId();
-  const max = ITEM_RANGES[type].product[1];
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState<Search | null>(null);
   const [result, setResult] = useState<Result | null>(null);
@@ -79,7 +81,7 @@ export function ProductPickField({
   };
 
   const add = (product: ProductListItem) => {
-    const added = addProduct(products, product, type);
+    const added = addProduct(products, product, max);
     if (!added.ok) {
       setMessage(
         added.reason === 'duplicate'
@@ -124,7 +126,7 @@ export function ProductPickField({
         상품 ({products.length} / {max}개)
       </legend>
       <p id={`${id}-hint`} className="text-xs text-muted-fg">
-        메인에 이 순서대로 보입니다. 1개 이상 {max}개까지 넣을 수 있습니다.
+        {surface}에 이 순서대로 보입니다. 1개 이상 {max}개까지 넣을 수 있습니다.
       </p>
 
       {products.length === 0 ? (
@@ -133,7 +135,7 @@ export function ProductPickField({
         <ul ref={listRef} className="flex flex-col gap-1" aria-label="넣은 상품">
           {products.map((item, index) => {
             const name = item.name ?? '찾을 수 없는 상품';
-            const notice = productNotice(item);
+            const notice = productNotice(item, surface);
             return (
               <li
                 key={item.productId}
@@ -228,9 +230,9 @@ export function ProductPickField({
               {current.data.contents.map((product) => {
                 const isAdded = added.has(product.productId);
                 const state = !product.visible
-                  ? '숨김 — 넣어도 메인에 보이지 않습니다'
+                  ? `숨김 — 넣어도 ${surface}에 보이지 않습니다`
                   : product.availability.code !== 'ON_SALE'
-                    ? `${product.availability.name} — 메인에 보이지만 살 수 없습니다`
+                    ? `${product.availability.name} — ${surface}에 보이지만 살 수 없습니다`
                     : product.availability.name;
                 return (
                   <li
