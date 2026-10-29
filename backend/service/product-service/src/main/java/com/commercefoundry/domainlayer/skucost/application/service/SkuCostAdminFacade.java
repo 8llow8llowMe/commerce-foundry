@@ -24,7 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 외부 I/O 가 없어 Facade 에 트랜잭션을 건다.
  *
  * <p>추가는 SKU 행을 잠근 뒤 최신 행을 읽고 판정한다 — 같은 SKU 의 동시 추가가 줄을 서서 단조 규칙을 함께 비켜 가지 못한다. 잠금은 시간 상한
- * ({@value #LOCKING_TIMEOUT_SECONDS}초, 행 잠금 대기 2초) 안에 얻고, 넘기면 409 {@code PRODUCT_078} 이다.
+ * ({@value #LOCKING_TIMEOUT_SECONDS}초, 행 잠금 대기 2초) 안에 얻고, 넘기면 409 {@code SKU_COST_005} 이다.
  */
 @Service
 @RequiredArgsConstructor

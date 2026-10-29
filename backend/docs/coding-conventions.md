@@ -205,9 +205,6 @@ public enum OrderErrorCode {
 | `{DOMAIN}_101~` | `{Domain}ValidationMessage` 상수 | 필드별 개별 코드 |
 | 대역 끝 2개 | ErrorCode `PARAMETER_TYPE_INVALID`, `PARAMETER_REQUIRED` | 타입 불일치, 필수 파라미터 누락 |
 
-- **`1xx` 대역이 차면 `200~` 을 이어 쓴다.** 대역 끝 `198` · `199` 는 옮기지 않는다(이미 나간 계약이다). 판정기(`ValidationErrorSupport`)는 세 자리 숫자면 대역을 가리지 않는다.
-  처음 쓴 곳: product-service SKU 원가 `PRODUCT_200~208`(`SkuCostValidationMessage`, #361) — 101~197 이 상품 · 전시 · 사이즈표로 찼다.
-
 ```java
 public final class ProductValidationMessage {
 
@@ -241,6 +238,7 @@ public final class ProductValidationMessage {
 - **검증 `1xx` 대역이 다 찬 서비스는 컨텍스트 접두어를 새로 연다** (order-service 의 `CART_` · `ORDER_` 선례). 새 컨텍스트는 업무 오류 `{CONTEXT}_001~` 과
   검증 `{CONTEXT}_101~` 을 자기 `ErrorCode` · `ValidationMessage` 에 두고, 폴백 · 타입 불일치 · 필수 파라미터(`_100` · 대역 끝 2개)는 서비스 공용 코드를 그대로 쓴다.
   서비스 공용 검증 핸들러는 메시지 앞의 코드를 읽으므로 접두어가 달라도 고칠 것이 없다. 예: product-service 룩(#62) — `PRODUCT_1xx` 소진, `LOOK_001~008` · `LOOK_101~122`.
+  SKU 원가(#361)도 같다 — `SKU_COST_001~006` · `SKU_COST_101~110`.
 
 ### 8-3. 하드코딩된 문자열 금지
 
@@ -278,7 +276,7 @@ public final class ProductValidationMessage {
     (`CannotAcquireLockException` 포함, PostgreSQL SQLState `55P03`)을 **재시도 가능한 도메인 409** 로 바꾼다.
   - 예: product-service 결제 후 재고 복원이 선점 헤더를 잠근다 (`StockReservationRepository#findByIdForUpdate` · 상한 2000ms · 초과 `PRODUCT_031`,
     #85 — `order-flow-guide.md` §3-2). SKU 원가 이력 추가는 SKU 행을 잠근 뒤 최신 행을 읽어 단조 규칙을 판정한다
-    (`SkuRepository#findByIdForUpdate` · 상한 2000ms · 초과 `PRODUCT_078`, #361 — 합계가 아니라 "최신보다 뒤" 판정이지만 같은 이유다).
+    (`SkuRepository#findByIdForUpdate` · 상한 2000ms · 초과 `SKU_COST_005`, #361 — 합계가 아니라 "최신보다 뒤" 판정이지만 같은 이유다).
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.

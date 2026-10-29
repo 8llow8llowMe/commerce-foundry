@@ -17,7 +17,7 @@ import lombok.Builder;
 
 /**
  * SKU 원가 이력 한 행 추가 요청. 원가가 바뀌면 고치지 않고 새 적용 시작 시각으로 행을 더한다.
- * 단조 · 통화 고정 · 미래 한도는 Processor 가 도메인 오류 코드(074 · 075 · 076)로 본다. 기록한 어드민은 토큰의 memberId 다 — 본문으로 받지 않는다.
+ * 미래 한도 · 단조 · 통화 고정 · 소급 금지는 Processor 가 도메인 오류 코드({@code SKU_COST_001} · {@code 002} · {@code 003} · {@code 006})로 본다. 기록한 어드민은 토큰의 memberId 다 — 본문으로 받지 않는다.
  *
  * <p>교차 검증은 {@code @AssertTrue} 메서드다. 오류의 {@code field} 는 메서드 이름에서 온다({@code effectiveFromInRange}).
  */
@@ -29,21 +29,22 @@ public record SkuCostCreateRequest(
     @NotNull(message = SkuCostValidationMessage.COST_TYPE_REQUIRED)
     SkuCostTypeCode costType,
 
-    @Schema(description = "원가. 같은 SKU · 유형의 기존 이력과 통화가 같아야 한다 (다르면 409 PRODUCT_076)", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "원가. 같은 SKU · 유형의 기존 이력과 통화가 같아야 한다 (다르면 409 SKU_COST_003)", requiredMode = Schema.RequiredMode.REQUIRED)
     @NotNull(message = SkuCostValidationMessage.AMOUNT_REQUIRED)
     @Valid
     MoneyRequest amount,
 
     @Schema(
-        description = "적용 시작 시각 (포함, UTC ISO-8601). 없으면 지금이다. 같은 유형의 최신 이력 시작보다 뒤여야 하고(아니면 409 PRODUCT_075), "
-            + "지금부터 5분 뒤까지만 받는다(넘으면 400 PRODUCT_074). 최신보다 뒤라면 과거로 소급해도 된다. 마이크로초로 잘라 저장한다",
+        description = "적용 시작 시각 (포함, UTC ISO-8601). 없으면 지금이다 — 지금부터 적용하려면 비워 보낸다. 지금부터 5분 뒤까지만 받는다(넘으면 400 SKU_COST_001). "
+            + "같은 유형에 이력이 이미 있으면 지금 이후여야 하고(과거면 409 SKU_COST_006 — 지난 구간의 원가는 바꾸지 않는다) 최신 이력 시작보다 뒤여야 한다"
+            + "(아니면 409 SKU_COST_002). 그 유형의 첫 이력만 과거 시각을 받는다. 마이크로초로 잘라 판정 · 저장한다",
         example = "2026-10-01T00:00:00Z", nullable = true
     )
     Instant effectiveFrom,
 
     @Schema(
-        description = "변경 사유. 앞뒤 공백(전각 공백 포함)을 빼고 저장하며 뺀 뒤 1~200자다. 공백 · 서식 문자만이면 PRODUCT_205, "
-            + "제어 · 서식 문자(개행 · 탭 · 제로폭 공백 등)가 있으면 PRODUCT_207 이다",
+        description = "변경 사유. 앞뒤 공백(전각 공백 포함)을 빼고 저장하며 뺀 뒤 1~200자다. 공백 · 서식 문자만이면 SKU_COST_106, "
+            + "제어 · 서식 문자(개행 · 탭 · 제로폭 공백 등)가 있으면 SKU_COST_108 이다",
         example = "10월 원단 단가 인상", requiredMode = Schema.RequiredMode.REQUIRED
     )
     @ValidSkuCostReason

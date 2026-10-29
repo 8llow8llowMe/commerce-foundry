@@ -86,7 +86,7 @@ class SkuCostAdminConcurrencyTest {
     }
 
     @Test
-    @DisplayName("같은 SKU · 유형 · 시작으로 동시에 추가하면 하나만 저장되고 다른 하나는 409(PRODUCT_075 또는 077)다")
+    @DisplayName("같은 SKU · 유형 · 시작으로 동시에 추가하면 하나만 저장되고 다른 하나는 409(SKU_COST_006 또는 004)다 — 과거 시작이라 늦게 판정한 쪽은 소급 거절")
     void concurrentAppendsKeepOneRow() throws Exception {
         // 첫 질의 준비(쿼리 해석 · 커넥션)가 경합 중에 일어나 먼저 잠근 쪽이 잠금 대기 상한(2초)을 넘기도록 붙들지 않게 미리 한 번 읽는다
         skuCostAdminUseCase.getCurrentCosts(SKU_ID);
@@ -112,7 +112,7 @@ class SkuCostAdminConcurrencyTest {
 
             assertThat(failures).singleElement().isInstanceOf(SkuCostException.class)
                 .extracting(failure -> ((SkuCostException) failure).getErrorCode())
-                .isIn(SkuCostErrorCode.EFFECTIVE_FROM_NOT_AFTER_LATEST, SkuCostErrorCode.COST_CONFLICT);
+                .isIn(SkuCostErrorCode.RETROACTIVE_NOT_ALLOWED, SkuCostErrorCode.COST_CONFLICT);
             assertThat(jdbcTemplate.queryForObject("select count(*) from product.sku_cost where sku_id = ?", Long.class, SKU_ID)).isOne();
         } finally {
             executor.shutdownNow();
@@ -120,7 +120,7 @@ class SkuCostAdminConcurrencyTest {
     }
 
     @Test
-    @DisplayName("다른 트랜잭션이 SKU 행을 잠그고 있으면 시간 상한 안에 409 · PRODUCT_078 로 끊기고 아무것도 쓰지 않는다")
+    @DisplayName("다른 트랜잭션이 SKU 행을 잠그고 있으면 시간 상한 안에 409 · SKU_COST_005 로 끊기고 아무것도 쓰지 않는다")
     void lockWaitIsBounded() throws Exception {
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);

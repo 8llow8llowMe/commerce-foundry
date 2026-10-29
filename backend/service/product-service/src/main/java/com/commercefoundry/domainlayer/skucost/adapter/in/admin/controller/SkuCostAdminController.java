@@ -82,9 +82,10 @@ public class SkuCostAdminController {
 
     @Operation(
         summary = "SKU 원가 이력 추가",
-        description = "새 적용 시작 시각으로 원가 행을 하나 더한다. effectiveFrom 을 생략하면 지금이다. 같은 유형의 최신 이력 시작보다 뒤가 아니면 409(PRODUCT_075), "
-            + "지금부터 5분보다 뒤면 400(PRODUCT_074), 기존 이력과 통화가 다르면 409(PRODUCT_076), 같은 시작 시각이 먼저 저장됐으면 409(PRODUCT_077), "
-            + "다른 원가 저장과 겹쳐 잠금을 얻지 못하면 409(PRODUCT_078 — 다시 시도)다. 없는 SKU 는 404(PRODUCT_002)다."
+        description = "새 적용 시작 시각으로 원가 행을 하나 더한다. effectiveFrom 을 생략하면 지금이다. 지금부터 5분보다 뒤면 400(SKU_COST_001), "
+            + "기존 이력과 통화가 다르면 409(SKU_COST_003), 이미 이력이 있는 유형인데 지금보다 앞이면 409(SKU_COST_006 — 지난 구간의 원가는 바꾸지 않는다, 첫 이력만 과거 허용), "
+            + "같은 유형의 최신 이력 시작보다 뒤가 아니면 409(SKU_COST_002), 같은 시작 시각이 먼저 저장됐으면 409(SKU_COST_004), "
+            + "다른 원가 저장과 겹쳐 잠금을 얻지 못하면 409(SKU_COST_005 — 다시 시도)다. 없는 SKU 는 404(PRODUCT_002)다."
     )
     @PreAuthorize("hasRole('ADMIN')")
     @PostMapping

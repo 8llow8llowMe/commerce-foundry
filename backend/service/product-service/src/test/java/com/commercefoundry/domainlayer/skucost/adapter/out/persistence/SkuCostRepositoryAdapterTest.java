@@ -29,7 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * SKU 원가 이력 저장 · 조회를 PostgreSQL 에서 실제로 질의한다 — 유니크 위반은 409 · PRODUCT_077, 시점 원가는 유형별 한 행, 이력은 시작 내림차순 · 아이디 내림차순과 건수.
+ * SKU 원가 이력 저장 · 조회를 PostgreSQL 에서 실제로 질의한다 — 유니크 위반은 409 · SKU_COST_004, 시점 원가는 유형별 한 행, 이력은 시작 내림차순 · 아이디 내림차순과 건수.
  * 스냅숏 DDL 을 적용하고 {@code ddl-auto=validate} 로 엔티티와 대조한다. Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다.
  */
 @DataJpaTest
@@ -71,7 +71,7 @@ class SkuCostRepositoryAdapterTest {
     }
 
     @Test
-    @DisplayName("같은 SKU · 유형 · 시작 시각이 이미 있으면 409 · PRODUCT_077 이다 — 유형이 다르면 같은 시각이어도 된다")
+    @DisplayName("같은 SKU · 유형 · 시작 시각이 이미 있으면 409 · SKU_COST_004 이다 — 유형이 다르면 같은 시각이어도 된다")
     void uniqueViolationIsConflict() {
         port.insert(cost(1L, SKU_ID, SkuCostType.GOODS, 10_000, "2026-10-01T00:00:00Z"));
         port.insert(cost(2L, SKU_ID, SkuCostType.PACKAGING, 500, "2026-10-01T00:00:00Z"));

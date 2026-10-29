@@ -51,7 +51,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
- * 어드민 SKU 원가의 HTTP 계약 — ADMIN 만, 기록한 어드민은 토큰의 memberId, 필드 검증 코드(200~208), 도메인 오류 봉투(074~078 · 없는 SKU 002), 201 응답 모양.
+ * 어드민 SKU 원가의 HTTP 계약 — ADMIN 만, 기록한 어드민은 토큰의 memberId, 필드 검증 코드(SKU_COST_101~110), 도메인 오류 봉투(SKU_COST_001~006 · 없는 SKU PRODUCT_002), 201 응답 모양.
  */
 @WebMvcTest(SkuCostAdminController.class)
 @Import({ResourceServerSecurityConfigurer.class, JwtVerificationPropertiesConfig.class})
@@ -149,15 +149,16 @@ class SkuCostAdminControllerTest {
 
         @ParameterizedTest(name = "{1}")
         @CsvSource(delimiter = '|', textBlock = """
-            {"amount": {"amount": 1, "currency": "KRW"}, "reason": "r"}                                                      | PRODUCT_200
-            {"costType": "GOODS", "reason": "r"}                                                                             | PRODUCT_201
-            {"costType": "GOODS", "amount": {"currency": "KRW"}, "reason": "r"}                                              | PRODUCT_202
-            {"costType": "GOODS", "amount": {"amount": -1, "currency": "KRW"}, "reason": "r"}                                | PRODUCT_203
-            {"costType": "GOODS", "amount": {"amount": 1}, "reason": "r"}                                                    | PRODUCT_204
-            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}}                                                | PRODUCT_205
-            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}, "reason": "　 "}                           | PRODUCT_205
-            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}, "reason": "a\\nb"}                             | PRODUCT_207
-            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}, "reason": "r", "effectiveFrom": "1969-12-31T23:59:59Z"} | PRODUCT_208
+            {"amount": {"amount": 1, "currency": "KRW"}, "reason": "r"}                                                      | SKU_COST_101
+            {"costType": "GOODS", "reason": "r"}                                                                             | SKU_COST_102
+            {"costType": "GOODS", "amount": {"currency": "KRW"}, "reason": "r"}                                              | SKU_COST_103
+            {"costType": "GOODS", "amount": {"amount": -1, "currency": "KRW"}, "reason": "r"}                                | SKU_COST_104
+            {"costType": "GOODS", "amount": {"amount": 1}, "reason": "r"}                                                    | SKU_COST_105
+            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}}                                                | SKU_COST_106
+            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}, "reason": "　 "}                           | SKU_COST_106
+            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}, "reason": "\\u00A0\\u2007\\u202F"}             | SKU_COST_106
+            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}, "reason": "a\\nb"}                             | SKU_COST_108
+            {"costType": "GOODS", "amount": {"amount": 1, "currency": "KRW"}, "reason": "r", "effectiveFrom": "1969-12-31T23:59:59Z"} | SKU_COST_109
             {"costType": "RENT", "amount": {"amount": 1, "currency": "KRW"}, "reason": "r"}                                  | PRODUCT_100
             {"costType": "GOODS", "amount": {"amount": 1, "currency": "EUR"}, "reason": "r"}                                 | PRODUCT_100
             """)
@@ -172,7 +173,7 @@ class SkuCostAdminControllerTest {
         }
 
         @Test
-        @DisplayName("사유가 앞뒤 공백을 뺀 뒤 200자를 넘으면 PRODUCT_206 — 200자는 받는다")
+        @DisplayName("사유가 앞뒤 공백을 뺀 뒤 200자를 넘으면 SKU_COST_107 — 200자는 받는다")
         void reasonLength() {
             given(skuCostAdminUseCase.createCost(any())).willReturn(item());
             String ok = "가".repeat(200);
@@ -181,26 +182,27 @@ class SkuCostAdminControllerTest {
             assertThat(exchange(HttpMethod.POST, COSTS, body("  " + ok + "  "), MemberRole.ADMIN)).hasStatus(HttpStatus.CREATED);
             MvcTestResult rejected = exchange(HttpMethod.POST, COSTS, body(tooLong), MemberRole.ADMIN);
             assertThat(rejected).hasStatus(HttpStatus.BAD_REQUEST);
-            assertThat(rejected).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_206");
+            assertThat(rejected).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("SKU_COST_107");
         }
 
         @Test
-        @DisplayName("경로 skuId 가 양수가 아니면 400 · PRODUCT_123")
+        @DisplayName("경로 skuId 가 양수가 아니면 400 · SKU_COST_110")
         void skuIdPositive() {
             MvcTestResult result = exchange(HttpMethod.POST, "/api/v1/admin/skus/0/costs", VALID_BODY, MemberRole.ADMIN);
 
             assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
-            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_123");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("SKU_COST_110");
             verifyNoInteractions(skuCostAdminUseCase);
         }
 
         @ParameterizedTest(name = "{0}")
         @CsvSource({
-            "EFFECTIVE_FROM_IN_FUTURE, 400, PRODUCT_074",
-            "EFFECTIVE_FROM_NOT_AFTER_LATEST, 409, PRODUCT_075",
-            "CURRENCY_MISMATCH, 409, PRODUCT_076",
-            "COST_CONFLICT, 409, PRODUCT_077",
-            "SKU_COST_BUSY, 409, PRODUCT_078"
+            "EFFECTIVE_FROM_IN_FUTURE, 400, SKU_COST_001",
+            "EFFECTIVE_FROM_NOT_AFTER_LATEST, 409, SKU_COST_002",
+            "CURRENCY_MISMATCH, 409, SKU_COST_003",
+            "COST_CONFLICT, 409, SKU_COST_004",
+            "SKU_COST_BUSY, 409, SKU_COST_005",
+            "RETROACTIVE_NOT_ALLOWED, 409, SKU_COST_006"
         })
         @DisplayName("도메인 오류는 SkuCostExceptionHandler 가 봉투로 바꾼다")
         void domainErrors(SkuCostErrorCode errorCode, int status, String code) {
