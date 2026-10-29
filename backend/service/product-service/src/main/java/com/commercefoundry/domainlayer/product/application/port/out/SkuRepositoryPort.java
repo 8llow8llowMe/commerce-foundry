@@ -18,6 +18,9 @@ public interface SkuRepositoryPort {
 
     boolean existsById(long skuId);
 
+    /** 아이디 목록 중 있는 SKU 의 아이디. 순서는 정하지 않는다. */
+    List<Long> findExistingIds(Collection<Long> skuIds);
+
     /**
      * SKU 행을 잠그고 읽는다 — 같은 SKU 를 기준으로 판정하는 쓰기(원가 이력 추가)가 줄을 선다. 잠금 대기 상한을 넘기면
      * {@code PessimisticLockingFailureException} · {@code QueryTimeoutException} 이 그대로 올라가고, 호출한 Facade 가 재시도 가능한 409 로 바꾼다.

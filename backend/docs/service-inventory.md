@@ -10,7 +10,7 @@
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
 | `cloud/api-gateway` | 8000 | 라우팅·CORS 구성됨 (#3), local·dev 헬스·Swagger 통합 (#36), JWT 검증·ADMIN 확인·로그아웃 차단 목록 조회 (#4) | 라우팅(`api-design-guide.md` §1-2), JWT 검증(전역 보안 체인 — `security-guide.md` §7), 로그아웃 차단 목록 조회(Redis, 어드민 경로만 fail-closed), `/api/v1/admin/**` ADMIN 확인, CORS, local·dev 헬스 체크·Swagger UI |
 | `service/auth-service` | 8081 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 회원가입 · 내 정보 · 로그인 · 토큰 재발급 · 로그아웃 (#4) · 배송지 주소록 (#7) · 관리자 계정 (#6) · 로그인 · 가입 시도 제한 (#66) | 회원가입·로그인, JWT 발급·재발급·로그아웃, 카카오·네이버 소셜, 관리자 계정, 배송지 주소록 |
-| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) · 재고 (#10) · 어드민 카테고리 관리 (#9) · 어드민 상품 목록 (#9) · 메인 전시 (#63) · 상품 사이즈표 (#216) · 룩 — 어드민 관리 · 고객 조회 (#62) · 주문 만료 · 취소 이벤트 → 선점 해제 컨슈머 (#309) · SKU 원가 이력 어드민 (#361) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제/결제 후 복원 · 주문 만료 · 취소 이벤트 소비), 상품 이미지, 다국어 상품정보, 통화별 가격, 메인 전시 섹션, 사이즈표(템플릿 · 상품별 치수), 룩(Shop the Look), SKU 원가 이력(매입 · 제작 원가 · 포장 변동비, append-only · 어드민 전용) |
+| `service/product-service` | 8082 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 카탈로그 조회 (#8) · 재고 (#10) · 어드민 카테고리 관리 (#9) · 어드민 상품 목록 (#9) · 메인 전시 (#63) · 상품 사이즈표 (#216) · 룩 — 어드민 관리 · 고객 조회 (#62) · 주문 만료 · 취소 이벤트 → 선점 해제 컨슈머 (#309) · SKU 원가 이력 어드민 (#361 PR-A) · 시점 원가 internal 조회 (#361 PR-B) | 카테고리, 상품, 옵션·SKU, 재고(선점/확정/해제/결제 후 복원 · 주문 만료 · 취소 이벤트 소비), 상품 이미지, 다국어 상품정보, 통화별 가격, 메인 전시 섹션, 사이즈표(템플릿 · 상품별 치수), 룩(Shop the Look), SKU 원가 이력(매입 · 제작 원가 · 포장 변동비, append-only · 어드민 전용, 서비스 간에는 operations-service 의 시점 원가 조회 `POST /internal/v1/sku-costs/query` 만) |
 | `service/order-service` | 8083 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 장바구니 (#12) · 주문 스냅숏 기반 (#13 C1) · 멱등 요청 기반 (#13 C2a) · 재고 선점 (#13 C2b) · CUSTOMER 주문 생성/멱등 재생 API (#13 C3) | 장바구니, 주문서 금액 계산, 주문, 주문 상태, 클레임(취소/반품) |
 | `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 주문 동기화 재전송 |
 | `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 국내 배송비 정책 (#11) · 해외 배송비 (#22) · 국내 배송비 정책 교체 이력 (#69) · 운영자 온보딩 사실 internal (#357 PR-B1) | 배송비 정책(국내/해외), 송장, 배송 상태 추적, 운영자 온보딩의 국내 배송비 정책 저장 사실(`GET /internal/v1/onboarding-facts/shipping-policy`, 허용 호출자 operations-service) |
@@ -61,6 +61,7 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 | delivery-service | order-service | 송장 등록 시 주문 상태 `SHIPPING` 전이, 배송 완료 반영, 해외 출고 통관 품목(주문 항목 스냅숏) 조회 (#18) |
 | delivery-service | auth-service | 회원 표시 이름 벌크 조회(`GET /internal/v1/member-display-names`, #322). 배송비 정책 이력 한 페이지의 관리자 아이디를 한 번에 보낸다. 응답은 마스킹된 이름만이고 원문은 없다. 실패는 503 `DELIVERY_013` |
 | operations-service | delivery-service | 운영자 온보딩 업무 사실 — 국내 배송비 정책 저장 여부 · 운영자별 최초 저장 시각(`GET /internal/v1/onboarding-facts/shipping-policy`, #357). memberId 는 operations 가 access 토큰으로 확인한 운영자. 호출 구현은 #357 PR-B2 |
+| operations-service | product-service | 시점 원가 일괄 조회(`POST /internal/v1/sku-costs/query`, #361 PR-B) — 공헌이익 집계가 주문 항목의 (SKU, 주문 시각) 쌍을 100개씩 보내 그 시각의 유형별 원가를 받는다. 없는 SKU 는 빠지고 원가 미입력은 빈 costs 다. 호출 구현은 #362 |
 
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —
 A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃이 겹친다.

@@ -200,7 +200,7 @@ Info → Presenter → Response
 - 그 밖(UseCase · Facade · Presenter · Info · Port · Adapter · Mapper · Entity · Repository · Q 타입)은 쓰지 않는다.
   다른 컨텍스트의 포트 · 리포지토리를 직접 부르면 그 컨텍스트의 조회 규칙(숨김 · 정렬 · 캐시)을 비켜 간다.
 - domain 은 다른 컨텍스트 domain 을 필드로 갖지 않고 아이디로만 가리킨다 (예: `Product.categoryId`).
-- 의존은 한 방향으로만 둔다 (지금 product → category, cart → catalog, order → catalog). 역방향이 필요해지면 컨텍스트 경계를 다시 정한다.
+- 의존은 한 방향으로만 둔다 (지금 product → category, cart → catalog, order → catalog, skucost → product). 역방향이 필요해지면 컨텍스트 경계를 다시 정한다.
 - 트랜잭션은 호출한 Facade 가 건다.
 - 다른 컨텍스트 Processor 가 던진 도메인 예외는 같은 서비스 · 같은 코드 접두어(예: auth 의 `AUTH_`)면 번역하지 않고 그대로 올린다 —
   예: auth 배송지 Facade 가 부르는 `MemberLockProcessor` 의 `AUTH_003`(회원 없음)은 그 컨텍스트의 advice 가 봉투로 만든다 (#7).

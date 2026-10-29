@@ -73,6 +73,9 @@ SKU 원가 이력(#361)은 SKU 하위 리소스라 `/api/v1/admin/skus/**` 를 �
   검증 코드는 `AUTH_137`(빈 목록) · `AUTH_138`(100개 초과) · `AUTH_139`(양수 아님). 배송비 정책 이력은 이 조회로 페이지당 한 번 이름을 붙이고, 실패하면 503 `DELIVERY_013` 이다.
 - 운영자 온보딩 사실(단건): delivery-service `GET /internal/v1/onboarding-facts/shipping-policy?memberId=` (#357). 허용 호출자는 operations-service.
   운영자 한 명의 사실이라 `ids` 벌크가 아니다. `memberId` 는 양수(`DELIVERY_139`), 숫자가 아니면 `DELIVERY_198`, 없으면 `DELIVERY_199` 다. 계약은 아래 "운영자 온보딩 계약 (#357)".
+- 시점 원가(벌크): product-service `POST /internal/v1/sku-costs/query` (#361 PR-B). 허용 호출자는 operations-service(공헌이익 집계 #362).
+  조회 키가 `ids` 가 아니라 (SKU, 시각) 쌍 목록이라 본문으로 받는 **읽기 전용 POST** 다 — 위 표의 상한(원문 100개) · 중복(첫 등장 순서로 합침) · 없는 아이디(뺌) ·
+  순서(요청 순서) · in 절 벌크 규칙은 그대로 따른다. 계약은 §2-12 "서비스 간 시점 원가 조회".
 
 **internal 쓰기 API** 도 같은 자리(`/internal/v1/**`, `@Hidden`, 허용 호출자 `@PreAuthorize`)에 둔다. 아래를 더 지킨다.
 
@@ -632,6 +635,7 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 
 SKU 원가(매입 · 제작 원가, 포장 변동비)를 적용 시작 시각이 있는 이력으로 둔다 — 고치지 않고 행을 더한다(append-only). 주문 시점의 원가를 나중에 그대로 다시 고르기 위해서다.
 원가는 **어드민 전용**이다 — 고객 응답 · 서비스 간 SKU 조회(`SkuInternalItem`)에 넣지 않는다. 컨텍스트는 `domainlayer/skucost` 이고 고객 진입(`adapter/in/web`)이 없다.
+서비스 간에는 공헌이익 집계용 시점 원가 조회 하나만 연다(허용 호출자 operations-service, 아래 "서비스 간 시점 원가 조회").
 Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가 409 로 막는다). 기록한 어드민은 토큰의 memberId 만 남기고 이름을 내지 않는다. 아이디는 문자열이다.
 
 | 경로 | 권한 | 성공 | 주요 오류 |
@@ -659,7 +663,25 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   필드 검증은 `SKU_COST_101~109`, 경로 skuId 양수는 `SKU_COST_110`(룩의 `LOOK_118` 과 같은 자기 코드)이다(`SkuCostValidationMessage`).
   `PRODUCT_1xx` 검증 대역이 차서 컨텍스트 접두어 `SKU_COST_` 를 새로 열었다(룩 §2-11 과 같다, `coding-conventions.md` §8-2). 깨진 JSON · 타입 불일치 · 필수 파라미터는 서비스 공용 `PRODUCT_100` · `198` · `199`,
   page · size 는 서비스 공용 `PRODUCT_101` · `PRODUCT_102` 다. 오류 메시지 · 로그에 금액을 넣지 않는다.
-- **게이트웨이**: 새 접두어 `/api/v1/admin/skus/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 서비스 간 시점 원가 벌크 조회(`/internal/v1/sku-costs/query`)는 #361 PR-B 다.
+- **게이트웨이**: 새 접두어 `/api/v1/admin/skus/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다. 서비스 간 시점 원가 조회(`/internal/v1/sku-costs/query`)는
+  `/internal/**` 이라 게이트웨이가 라우팅하지 않는다(`GatewayRequestGuardFilter` 가 404 `GATEWAY_001`, §1 표).
+
+#### 서비스 간 시점 원가 조회 (#361 PR-B)
+
+`POST /internal/v1/sku-costs/query` — (SKU, 시각) 쌍마다 그 시각에 적용되는 유형별 원가를 한 번에 낸다. 허용 호출자는 `SERVICE_operations-service` 하나다(공헌이익 집계 #362,
+호출 구현은 #362). 다른 서비스 권한은 403 `SECURITY_005`, 서비스 토큰이 없으면 401 `SECURITY_007` 이다. 아무것도 바꾸지 않는 읽기 전용 트랜잭션이다.
+
+- **본문**: `{"items": [{"skuId": "123", "at": "2026-10-29T01:00:00Z"}]}`. `items` 1~100개(합치기 전 원문 개수), `skuId` 양수(문자열 · 숫자 모두 받는다), `at` 필수(UTC ISO-8601).
+- **응답**: `{"items": [{skuId, at, costs:[{costType{code,name,description}, amount{amount,currency}, effectiveFrom, recordedAt}]}]}`.
+  `costs` 는 그 시각에 적용되는 유형별 행 — GOODS → PACKAGING 순이고 유형마다 `effectiveFrom <= at` 인 행 중 시작이 가장 늦은 행이다(시작 포함). `recordedAt` 은 그 행의 기록 시각이다.
+- **정규화**: `at` 은 마이크로초로 잘라 비교하고 응답 `at` 도 자른 값이다(저장 · 현재 원가 조회와 같은 정밀도). 자른 뒤 같은 (skuId, at) 쌍은 하나로 합치고, 응답 순서는 요청에서 처음 나온 순서다.
+- **부재 구분**: **없는 SKU 는 응답 항목에서 빠진다**(404 로 전체를 실패시키지 않는다 — §1-3). SKU 는 있는데 그 시각의 원가가 없으면 `costs` 가 빈 배열이다 —
+  "SKU 없음" 과 "원가 미입력" 을 호출한 쪽이 구분한다. 한 유형만 없으면 그 유형만 빠진다. **0 으로 채우지 않는다.** 숨긴 · 삭제 상품의 SKU 도 있는 SKU 다.
+- **미래 시각**: 거부하지 않는다. 단 지금 이후 시각의 결과는 이후 원가 추가(시작은 지금 + 5분까지)로 바뀔 수 있다 — 확정값이 필요하면 지난 시각으로 부른다. 지난 시각이어도 원가가 미입력인 유형은 이후 첫 입력(첫 행만 과거 시작 허용)으로 채워질 수 있으니, 호출자는 집계 시점 결과를 스냅숏으로 저장한다.
+- **질의**: SKU 존재 확인 in 절 1회(`SkuLookupProcessor#findExistingIds`) + 원가 행 SELECT 1회(`sku_id in (..) and effective_from <= max(at)`)이고,
+  SKU 별로 묶어 쌍마다 메모리에서 `SkuCostTimeline#resolveAt` 으로 고른다. 있는 SKU 가 없으면 원가 질의를 보내지 않는다.
+- **검증 코드**: `SKU_COST_111`(items 없음 · 빈 배열) · `112`(100개 초과) · `113`(원소 null) · `114`(skuId 없음) · `115`(skuId 양수 아님) · `116`(at 없음) ·
+  `117`(at 이 1970-01-01T00:00:00Z ~ 9999-12-31T23:59:59.999999Z 밖 — DB 가 받지 못하는 시각이 500 으로 새지 않게 한다). 깨진 JSON · 시각 형식 오류는 서비스 공용 `PRODUCT_100` 이다.
 
 ### 2-13. 상품 삭제 (soft delete) · 옵션 은퇴 (product-service, #9)
 

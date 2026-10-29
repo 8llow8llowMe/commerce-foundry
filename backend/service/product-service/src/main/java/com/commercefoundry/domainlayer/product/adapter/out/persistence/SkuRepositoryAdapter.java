@@ -37,6 +37,14 @@ public class SkuRepositoryAdapter implements SkuRepositoryPort {
     }
 
     @Override
+    public List<Long> findExistingIds(Collection<Long> skuIds) {
+        if (skuIds.isEmpty()) {
+            return List.of();
+        }
+        return skuRepository.findExistingIds(skuIds);
+    }
+
+    @Override
     public Optional<Sku> findByIdForUpdate(long skuId) {
         return skuRepository.findByIdForUpdate(skuId).map(skuMapper::toDomain);
     }

@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.skucost.adapter.out.persistence.reposito
 import com.commercefoundry.domainlayer.skucost.adapter.out.persistence.entity.SkuCostEntity;
 import com.commercefoundry.domainlayer.skucost.domain.model.SkuCostType;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -35,6 +36,12 @@ public interface SkuCostRepository extends Repository<SkuCostEntity, Long> {
           )
         """)
     List<SkuCostEntity> findCurrentBySkuId(long skuId, Instant at);
+
+    /**
+     * 여러 SKU 의 {@code effective_from <= maxAt} 행 전부 — 서비스 간 시점 원가 조회가 한 번에 읽고 항목마다 메모리에서 시점을 고른다.
+     * {@code sku_id in (..)} 이 유니크 인덱스 {@code (sku_id, cost_type, effective_from)} 접두를 탄다. 정렬은 하지 않는다 — 고르는 쪽이 정한다.
+     */
+    List<SkuCostEntity> findAllBySkuIdInAndEffectiveFromLessThanEqual(Collection<Long> skuIds, Instant maxAt);
 
     /** 모든 유형의 이력 — 적용 시작 내림차순 · 아이디 내림차순. 파생 count 는 {@code where sku_id = ?} 로 유니크 인덱스 접두를 탄다. */
     Page<SkuCostEntity> findAllBySkuIdOrderByEffectiveFromDescIdDesc(Long skuId, Pageable pageable);

@@ -13,7 +13,12 @@ import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
+import jakarta.persistence.EntityManagerFactory;
 import java.time.Instant;
+import java.util.List;
+import java.util.Set;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,7 +34,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * SKU 원가 이력 저장 · 조회를 PostgreSQL 에서 실제로 질의한다 — 유니크 위반은 409 · SKU_COST_004, 시점 원가는 유형별 한 행, 이력은 시작 내림차순 · 아이디 내림차순과 건수.
+ * SKU 원가 이력 저장 · 조회를 PostgreSQL 에서 실제로 질의한다 — 유니크 위반은 409 · SKU_COST_004, 시점 원가는 유형별 한 행, 이력은 시작 내림차순 · 아이디 내림차순과 건수,
+ * 서비스 간 시점 원가의 여러 SKU 일괄 읽기는 SELECT 한 번.
  * 스냅숏 DDL 을 적용하고 {@code ddl-auto=validate} 로 엔티티와 대조한다. Docker 없는 로컬은 건너뛰고, CI 에서는 Docker 가 없으면 실패한다.
  */
 @DataJpaTest
@@ -39,6 +45,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @TestPropertySource(properties = {
     "spring.jpa.hibernate.ddl-auto=validate",
     "spring.jpa.properties.hibernate.default_schema=product",
+    "spring.jpa.properties.hibernate.generate_statistics=true",
     "spring.cloud.discovery.enabled=false",
     "eureka.client.enabled=false"
 })
@@ -56,6 +63,9 @@ class SkuCostRepositoryAdapterTest {
 
     @Autowired
     private SkuCostRepositoryPort port;
+
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
 
     @Test
     @DisplayName("저장한 행은 기록 시각이 채워져 돌아오고, 다시 읽으면 금액 · 통화 · 시작이 그대로다")
@@ -128,6 +138,39 @@ class SkuCostRepositoryAdapterTest {
         Page<SkuCost> goods = port.findHistoryPage(SKU_ID, SkuCostType.GOODS, 0, 20);
         assertThat(goods.getContent()).extracting(SkuCost::id).containsExactly(3L, 1L, 4L);
         assertThat(goods.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("여러 SKU 의 시작이 maxAt 이하인 행을 SELECT 한 번으로 모두 읽는다 — maxAt 과 같은 시작은 포함, 뒤는 빠지고 요청에 없는 SKU 도 빠진다")
+    void findAllUpToReadsOnceAcrossSkus() {
+        port.insert(cost(1L, SKU_ID, SkuCostType.GOODS, 10_000, "2026-09-01T00:00:00Z"));
+        port.insert(cost(2L, SKU_ID, SkuCostType.GOODS, 12_000, "2026-10-01T00:00:00Z"));
+        port.insert(cost(3L, SKU_ID, SkuCostType.PACKAGING, 500, "2026-10-20T00:00:00.000001Z"));
+        port.insert(cost(4L, 2002L, SkuCostType.GOODS, 7_000, "2026-10-20T00:00:00Z"));
+        port.insert(cost(5L, 2002L, SkuCostType.PACKAGING, 300, "2026-08-01T00:00:00Z"));
+        port.insert(cost(6L, 3003L, SkuCostType.GOODS, 1, "2026-08-01T00:00:00Z"));
+        entityManager.clear();
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        List<SkuCost> rows = port.findAllUpTo(Set.of(SKU_ID, 2002L, 4004L), Instant.parse("2026-10-20T00:00:00Z"));
+
+        assertThat(rows).extracting(SkuCost::id).containsExactlyInAnyOrder(1L, 2L, 4L, 5L);
+        assertThat(statistics.getPrepareStatementCount()).as("SKU 셋의 원가 행을 한 쿼리로").isEqualTo(1);
+        assertThat(rows).filteredOn(row -> row.id() == 4L).singleElement().satisfies(row -> {
+            assertThat(row.amount()).isEqualTo(Money.of(7_000, CurrencyCode.KRW));
+            assertThat(row.recordedAt()).isNotNull();
+        });
+    }
+
+    @Test
+    @DisplayName("빈 SKU 목록이면 쿼리 없이 빈 목록이다")
+    void findAllUpToWithEmptyIdsDoesNotQuery() {
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        assertThat(port.findAllUpTo(List.of(), Instant.parse("2026-10-20T00:00:00Z"))).isEmpty();
+        assertThat(statistics.getPrepareStatementCount()).isZero();
     }
 
     private static SkuCost cost(long id, long skuId, SkuCostType type, long amount, String effectiveFrom) {
