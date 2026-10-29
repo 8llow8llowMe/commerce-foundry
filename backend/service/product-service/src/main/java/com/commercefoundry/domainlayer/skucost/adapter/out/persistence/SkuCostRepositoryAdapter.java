@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.skucost.domain.model.SkuCostType;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.shared.commerce.Money;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -50,6 +51,14 @@ public class SkuCostRepositoryAdapter implements SkuCostRepositoryPort {
     @Override
     public List<SkuCost> findCurrent(long skuId, Instant at) {
         return skuCostRepository.findCurrentBySkuId(skuId, at).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<SkuCost> findAllUpTo(Collection<Long> skuIds, Instant maxAt) {
+        if (skuIds.isEmpty()) {
+            return List.of();
+        }
+        return skuCostRepository.findAllBySkuIdInAndEffectiveFromLessThanEqual(skuIds, maxAt).stream().map(this::toDomain).toList();
     }
 
     @Override

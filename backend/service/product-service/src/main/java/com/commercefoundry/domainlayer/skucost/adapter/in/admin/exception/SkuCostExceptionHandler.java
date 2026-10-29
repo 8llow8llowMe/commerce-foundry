@@ -10,7 +10,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
- * SKU 원가 도메인 오류({@link SkuCostException})만 {@code Response.fail} 봉투로 바꾼다. 원가 컨텍스트는 어드민 진입만 있어 {@code adapter/in/admin} 아래에 둔다.
+ * SKU 원가 도메인 오류({@link SkuCostException})만 {@code Response.fail} 봉투로 바꾼다.
+ * 처음 생긴 진입이 어드민이라 {@code adapter/in/admin} 아래에 있다 — 서비스 간 시점 원가 조회({@code adapter/in/internal})는 원가 도메인 오류를 던지지 않는다.
  *
  * <p><b>요청 검증 오류와 없는 SKU(PRODUCT_002)는 여기서 잡지 않는다.</b> product-service 의 검증 예외와 {@code ProductException} 은
  * {@code ProductExceptionHandler} 하나가 서비스 공용으로 처리한다. 잡는 타입이 겹치지 않지만 서비스에 advice 가 여럿이라 좁은 이쪽에 {@code @Order} 를 단다

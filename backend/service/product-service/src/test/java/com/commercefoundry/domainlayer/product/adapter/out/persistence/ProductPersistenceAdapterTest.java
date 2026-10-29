@@ -619,6 +619,13 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("SKU: 있는 아이디만 돌려준다 — 판매 종료 SKU · 숨긴 상품의 SKU 도 있는 SKU 다")
+    void findExistingSkuIds() {
+        assertThat(skuRepositoryPort.findExistingIds(List.of(1002L, 1006L, 9999L, 1001L)))
+            .containsExactlyInAnyOrder(1001L, 1002L, 1006L);
+    }
+
+    @Test
     @DisplayName("옵션: 상품의 그룹 · 값은 노출 순서 → 아이디 오름차순이다")
     void findOptionsByProduct() {
         assertThat(productOptionRepositoryPort.findGroupsByProductId(101L)).extracting(OptionGroup::id).containsExactly(3002L, 3001L);

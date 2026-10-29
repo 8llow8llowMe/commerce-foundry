@@ -4,13 +4,16 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
+import java.util.Collection;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 같은 서비스의 다른 컨텍스트(SKU 원가 어드민)가 SKU 를 아이디로 확인할 때 쓰는 용도별 조회. <b>숨긴 상품 · 판매 중지 SKU 도 있는 SKU 다 — 어드민 · 쓰기 판정 전용이다.</b>
+ * 같은 서비스의 다른 컨텍스트(SKU 원가 — 어드민 · 서비스 간 시점 원가 조회)가 SKU 를 아이디로 확인할 때 쓰는 용도별 조회.
+ * <b>숨긴 · 삭제 상품과 판매 중지 SKU 도 있는 SKU 다 — 어드민 · 쓰기 판정 · 원가 조회 전용이고, 고객 노출 판정에 쓰지 않는다.</b>
  * 없으면 상품 컨텍스트의 404 {@code PRODUCT_002} 를 던지고, 상품 컨텍스트의 {@code ProductExceptionHandler} 가 봉투로 바꾼다
  * ({@code architecture-guide.md} §3 컨텍스트 간 의존 규칙).
  */
@@ -25,6 +28,14 @@ public class SkuLookupProcessor {
         if (!skuRepositoryPort.existsById(skuId)) {
             throw new ProductException(ProductErrorCode.NOT_FOUND_SKU);
         }
+    }
+
+    /**
+     * 아이디 목록 중 있는 SKU 의 아이디 — in 절 한 번이다. 없는 아이디는 빠지고 예외를 던지지 않는다(벌크 조회는 없는 아이디를 응답에서 뺀다,
+     * {@code api-design-guide.md} §1-3). 빈 목록이면 질의 없이 빈 집합이다.
+     */
+    public Set<Long> findExistingIds(Collection<Long> skuIds) {
+        return Set.copyOf(skuRepositoryPort.findExistingIds(skuIds));
     }
 
     /**

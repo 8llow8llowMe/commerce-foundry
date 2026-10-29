@@ -21,6 +21,15 @@ public final class SkuCostValidationMessage {
     // 경로 변수 (/api/v1/admin/skus/{skuId}/costs/**) — 룩의 lookId(LOOK_118)처럼 컨텍스트 자기 코드다
     public static final String SKU_ID_POSITIVE = "SKU_COST_110:skuId 는 양수여야 합니다.";
 
+    // 서비스 간 시점 원가 조회 (POST /internal/v1/sku-costs/query) — 상한 100 은 합치기 전 원문 개수다
+    public static final String QUERY_ITEMS_REQUIRED = "SKU_COST_111:items 는 필수입니다.";
+    public static final String QUERY_ITEMS_SIZE_MAX = "SKU_COST_112:items 는 최대 100개입니다.";
+    public static final String QUERY_ITEM_REQUIRED = "SKU_COST_113:items 의 원소는 비어 있을 수 없습니다.";
+    public static final String QUERY_SKU_ID_REQUIRED = "SKU_COST_114:skuId 는 필수입니다.";
+    public static final String QUERY_SKU_ID_POSITIVE = "SKU_COST_115:skuId 는 양수여야 합니다.";
+    public static final String QUERY_AT_REQUIRED = "SKU_COST_116:at 은 필수입니다.";
+    public static final String QUERY_AT_RANGE = "SKU_COST_117:at 은 1970-01-01 ~ 9999-12-31 (UTC) 범위여야 합니다.";
+
     // 원가 이력 목록 (GET /api/v1/admin/skus/{skuId}/costs/histories) — page · size 는 서비스 공용 PRODUCT_101 · 102 다 (api-design-guide.md §4, 선례: LookValidationMessage)
     public static final String PAGE_MIN = "PRODUCT_101:page 는 0 이상이어야 합니다.";
     public static final String SIZE_RANGE = "PRODUCT_102:size 는 1 이상 100 이하여야 합니다.";

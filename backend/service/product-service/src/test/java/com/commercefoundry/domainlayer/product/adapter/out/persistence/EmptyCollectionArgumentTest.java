@@ -113,13 +113,14 @@ class EmptyCollectionArgumentTest {
     }
 
     @Test
-    @DisplayName("SKU 아이디 목록 조회 · 상품별 집계")
+    @DisplayName("SKU 아이디 목록 조회 · 있는 아이디 조회 · 상품별 집계")
     void skus() {
         SkuRepository repository = mock(SkuRepository.class);
         SkuMapper mapper = mock(SkuMapper.class);
         SkuRepositoryAdapter adapter = new SkuRepositoryAdapter(repository, mapper);
 
         assertThat(adapter.findAllByIds(List.of())).isEmpty();
+        assertThat(adapter.findExistingIds(List.of())).isEmpty();
         assertThat(adapter.aggregateByProductIds(List.of())).isEmpty();
         verifyNoInteractions(repository, mapper);
     }

@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.skucost.application.port.out;
 import com.commercefoundry.domainlayer.skucost.domain.model.SkuCost;
 import com.commercefoundry.domainlayer.skucost.domain.model.SkuCostType;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -24,6 +25,12 @@ public interface SkuCostRepositoryPort {
 
     /** 시각 {@code at} 에 적용되는 유형별 행 — 유형마다 {@code effectiveFrom <= at} 중 가장 늦은 행이다. 한 번의 질의다. */
     List<SkuCost> findCurrent(long skuId, Instant at);
+
+    /**
+     * 여러 SKU 의 적용 시작이 {@code maxAt} 이하인 행 전부 — 한 번의 질의다. 순서는 정하지 않는다. 시점별 적용 원가는 호출한 쪽이
+     * {@code SkuCostTimeline#resolveAt} 으로 고른다. 빈 컬렉션이면 질의 없이 빈 목록이다.
+     */
+    List<SkuCost> findAllUpTo(Collection<Long> skuIds, Instant maxAt);
 
     /**
      * 이력 한 페이지. 적용 시작 내림차순 · 아이디 내림차순으로 고정한다.
