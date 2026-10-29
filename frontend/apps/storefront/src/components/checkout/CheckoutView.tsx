@@ -1,6 +1,6 @@
 'use client';
 
-import { ApiError, apiFetch } from '@cf/api-client';
+import { ApiError, apiFetch, createIdempotencyKey } from '@cf/api-client';
 import { Button } from '@cf/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AddressDetails } from '@/components/account/AddressDetails';
@@ -11,6 +11,17 @@ import { emptyDraft, type AddressDraft } from '@/lib/account/address-form';
 import { countryOptions, defaultCountry } from '@/lib/account/countries';
 import { ADDRESSES_PATH, type ShippingAddressList } from '@/lib/account/types';
 import { CART_PATH, type CartResponse } from '@/lib/cart/types';
+import {
+  draftShippingAddress,
+  nextAttempt,
+  orderFailure,
+  orderRequest,
+  ORDERS_PATH,
+  savedShippingAddress,
+  type OrderAttempt,
+  type OrderCreated,
+  type OrderFailure,
+} from '@/lib/checkout/order';
 import {
   orderLines,
   quoteDestination,
@@ -23,6 +34,7 @@ import {
 } from '@/lib/checkout/quote';
 import { fill } from '@/lib/i18n/format';
 import { useRetryCooldown } from '@/lib/use-retry-cooldown';
+import { OrderPlaced } from './OrderPlaced';
 import { QuoteSummary } from './QuoteSummary';
 
 const RETURN_PATH = '/checkout';
@@ -34,12 +46,18 @@ const FOCUS_NEW_FORM = 'new-address-form';
 
 type Loaded = { cart: CartResponse; addresses: ShippingAddressList };
 type Quoted = { key: string; quote: OrderQuote } | { key: string; failure: QuoteFailure };
+/** 주문 실패 — 같은 배송지 · 줄(scope)에서만 보인다 */
+type OrderError = { scope: string; failure: Exclude<OrderFailure, { kind: 'signedOut' }> };
 
 /**
  * 주문서(#26) — 회원 장바구니의 구매 가능한 줄을 배송지와 함께 견적(`POST /api/v1/orders/quotes`)해 결제 금액을 보인다.
  * 장바구니 · 배송지는 이 화면이 직접 읽는다(장바구니 화면에서 넘겨받지 않는다 — 새로 고쳐도 같은 주문서다).
  * 배송지는 저장된 배송지에서 고르거나(기본 배송지가 먼저 선택된다) 이 주문에만 쓰는 새 배송지를 입력한다(배송지 목록에 저장하지 않는다).
- * 배송지가 바뀔 때마다 다시 견적한다. 금액은 서버 값만 보이고, 주문하기는 주문 생성 API(BE #13 D2) 전까지 막아 둔다.
+ * 배송지가 바뀔 때마다 다시 견적한다. 금액은 서버 값만 보인다.
+ * 주문하기(`POST /api/v1/orders`)는 지금 보이는 견적 총액을 `expectedTotalAmount` 로 함께 보낸다 — 견적이 없으면 누를 수 없다.
+ * 누름 한 번이 시도 하나이고 `Idempotency-Key` 를 하나 만든다. 같은 키로 다시 보내도 되는 실패(5xx · 연결 · 처리 중 · 429)는
+ * 본문이 같으면 다음 누름에 같은 키를 쓴다(`nextAttempt`). 요청 중에는 버튼을 막고(더블 클릭), 429 면 `Retry-After` 동안 막는다.
+ * 주문이 생기면 결제 단계 자리 표시(`OrderPlaced`)로 바뀐다 — 결제위젯은 #27 이다.
  */
 export function CheckoutView({ shippableCountries }: { shippableCountries: string[] }) {
   const t = useDictionary().checkout;
@@ -48,6 +66,8 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
   const formatMoney = useFormatMoney();
   const cooldown = useRetryCooldown();
   const { startFrom } = cooldown;
+  // 주문 쓰기는 견적과 버튼이 달라 쿨다운도 따로 둔다(`docs/api-client.md` §3-1)
+  const orderCooldown = useRetryCooldown();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadKey, setLoadKey] = useState(0);
@@ -62,6 +82,13 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
   const [quoteRetry, setQuoteRetry] = useState(0);
   // 마지막 배송지 실패 — 새 배송지를 고치는 동안(견적이 멈춰 있어도) 이유를 계속 보인다. 배송지를 바꾸거나 견적이 되면 지운다
   const [destinationError, setDestinationError] = useState<string | null>(null);
+  const [placing, setPlacing] = useState(false);
+  const [placed, setPlaced] = useState<OrderCreated | null>(null);
+  const [orderError, setOrderError] = useState<OrderError | null>(null);
+  // 같은 키로 다시 보내도 되는 실패로 끝난 시도 — 다음 누름이 본문이 같으면 이 키를 이어 쓴다
+  const attempt = useRef<OrderAttempt | null>(null);
+  // 상태 반영 전 두 번째 클릭까지 막는다
+  const placingNow = useRef(false);
 
   // 옮길 포커스 — 다음 커밋 뒤(아래 effect) `data-focus` 가 같은 요소로 옮긴다. 한 번 쓰고 비운다
   const pendingFocus = useRef<string | null>(null);
@@ -127,6 +154,13 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
       ? quoteRequest(lines, quoteDestination(destinationSource))
       : null;
   const key = request ? JSON.stringify(request) : null;
+  const shippingAddress = !destinationSource
+    ? null
+    : 'addressId' in destinationSource
+      ? savedShippingAddress(destinationSource)
+      : draftShippingAddress(destinationSource);
+  // 주문 실패를 보일 범위 — 견적 key 는 국가 · 우편번호만 담아 배송지 전체로 다시 묶는다
+  const orderScope = key && shippingAddress ? JSON.stringify([key, shippingAddress]) : null;
 
   // 배송지 · 줄이 바뀔 때마다 견적한다. 늦게 온 이전 견적은 `quoted.key !== key` 로 버린다
   // 본문은 key(직렬화한 본문)에서 다시 만든다 — 매 렌더 새 객체인 request 로는 부르지 않는다
@@ -159,6 +193,7 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
     };
   }, [key, quoteRetry, startFrom, t, locale]);
 
+  if (placed) return <OrderPlaced order={placed} />;
   if (signedOut) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
@@ -219,6 +254,44 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
   const failure = current && 'failure' in current ? current.failure : null;
   const quote = current && 'quote' in current ? current.quote : null;
   const saved = loaded.addresses.addresses;
+  const shownOrderError = orderError && orderError.scope === orderScope ? orderError.failure : null;
+
+  const placeOrder = async () => {
+    if (placingNow.current || !quote || !shippingAddress || !orderScope) return;
+    const body = JSON.stringify(orderRequest(lines, shippingAddress, quote.amounts.totalAmount));
+    const thisAttempt = nextAttempt(attempt.current, body, createIdempotencyKey);
+    attempt.current = thisAttempt;
+    placingNow.current = true;
+    setPlacing(true);
+    setOrderError(null);
+    try {
+      setPlaced(
+        await apiFetch<OrderCreated>(ORDERS_PATH, {
+          method: 'POST',
+          json: JSON.parse(thisAttempt.body) as unknown,
+          idempotencyKey: thisAttempt.idempotencyKey,
+        }),
+      );
+    } catch (cause) {
+      orderCooldown.startFrom(cause);
+      const failure = orderFailure(cause, t, locale);
+      // 이 시도가 끝났으면(그 밖의 4xx) 다음 누름은 새 키다
+      if (!failure.sameKey) attempt.current = null;
+      if (failure.kind === 'signedOut') {
+        setSignedOut(true);
+        return;
+      }
+      setOrderError({ scope: orderScope, failure });
+      // 금액이 바뀌었다 — 견적을 다시 받아 새 총액을 보인다(다음 주문은 새 총액 · 새 키)
+      if (failure.kind === 'amountChanged') {
+        setQuoted(null);
+        setQuoteRetry((n) => n + 1);
+      }
+    } finally {
+      placingNow.current = false;
+      setPlacing(false);
+    }
+  };
 
   const choose = (next: string) => {
     setDestinationError(null);
@@ -267,7 +340,7 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
           {saved.length === 0 ? (
             <p className="text-sm text-muted-fg">{t.noSavedAddress}</p>
           ) : (
-            <fieldset className="flex min-w-0 flex-col gap-2">
+            <fieldset disabled={placing} className="flex min-w-0 flex-col gap-2">
               <legend className="sr-only">{t.chooseAddress}</legend>
               {saved.map((address) => (
                 <label key={address.addressId} className={radioCard}>
@@ -448,13 +521,30 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
             </Button>
           </div>
         )}
-        {/* 주문 생성 · Idempotency-Key 는 주문 생성 API(BE #13 D2) 뒤에 붙인다 */}
-        <Button disabled className="h-12 w-full" aria-describedby="checkout-place-order-pending">
-          {t.placeOrder}
+        <Button
+          className="h-12 w-full"
+          disabled={!quote || !shippingAddress || placing || orderCooldown.coolingDown}
+          aria-busy={placing}
+          aria-describedby={quote ? undefined : 'checkout-place-order-note'}
+          onClick={() => void placeOrder()}
+        >
+          {placing ? t.placingOrder : t.placeOrder}
         </Button>
-        <p id="checkout-place-order-pending" className="text-center text-xs text-muted-fg">
-          {t.placeOrderPending}
-        </p>
+        {!quote && (
+          <p id="checkout-place-order-note" className="text-center text-xs text-muted-fg">
+            {t.placeOrderNeedsQuote}
+          </p>
+        )}
+        {shownOrderError && (
+          <div role="alert" className="flex flex-col gap-2 text-sm">
+            <p className="text-danger">{shownOrderError.message}</p>
+            {(shownOrderError.kind === 'stock' || shownOrderError.kind === 'cart') && (
+              <Link href="/cart" className="underline underline-offset-4">
+                {t.backToCart}
+              </Link>
+            )}
+          </div>
+        )}
       </aside>
     </div>
   );
