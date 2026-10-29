@@ -43,3 +43,21 @@ operations:
       multiplier: 2
       max-delay: 200ms
       jitter-ratio: 0
+  # AI 원장 테스트 값 — 실제 가격표가 아니다. 계산이 눈으로 맞는 단가를 쓴다
+  ai:
+    budget:
+      monthly-usd: "10"
+      notify-member-ids: 7
+    pricing:
+      version: test-1
+      models:
+        test-small:
+          input: "1"
+          output: "5"
+          cache-write: "1.25"
+          cache-read: "0.1"
+        test-large:
+          input: "5"
+          output: "25"
+          cache-write: "6.25"
+          cache-read: "0.5"

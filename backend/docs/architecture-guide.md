@@ -158,6 +158,8 @@ Info → Presenter → Response
   해시는 트랜잭션 밖에서 만들고 저장 구간만 Processor 에 `@Transactional` 을 건다 (예: auth `MemberWebFacade#signUp`).
 - **같은 행을 워커 · 다른 요청과 다투는 낙관적 충돌 재시도** 도 예외다. 버전에서 지면 새 트랜잭션에서 다시 읽어야 바뀐 상태로 판정되므로
   트랜잭션은 시도마다 Processor 가 열고 Facade 는 재시도만 한다 (예: operations `JobAdminFacade#cancel`, 작업 등록 `JobRegisterFacade`).
+- **유니크 키 경합으로 행을 처음 만드는 일** 도 예외다. 진 쪽 트랜잭션은 PostgreSQL 이 중단시켜 같은 트랜잭션에서 다시 시도할 수 없으므로 생성은 adapter 의
+  `REQUIRES_NEW` 로 격리하고, Facade 는 바깥 트랜잭션 없이(`NOT_SUPPORTED`) 시도를 반복한다 (예: operations `AiUsageMeterFacade#reserve`, order 주문 요청).
 
 ### Processor
 

@@ -2,6 +2,15 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.aiusage.adapter.out.persistence.entity.AiUsageMonthEntity;
+import com.commercefoundry.domainlayer.aiusage.adapter.out.persistence.repository.AiUsageMonthRepository;
+import com.commercefoundry.domainlayer.aiusage.application.command.AiUsageReserveCommand;
+import com.commercefoundry.domainlayer.aiusage.application.command.AiUsageSettleCommand;
+import com.commercefoundry.domainlayer.aiusage.application.info.AiUsageReservation;
+import com.commercefoundry.domainlayer.aiusage.application.info.AiUsageSettleResult;
+import com.commercefoundry.domainlayer.aiusage.application.port.in.AiUsageMeterUseCase;
+import com.commercefoundry.domainlayer.aiusage.domain.model.AiTokenUsage;
+import com.commercefoundry.domainlayer.aiusage.domain.model.AiUsageStatus;
 import com.commercefoundry.domainlayer.job.adapter.in.event.JobRunEventListener;
 import com.commercefoundry.domainlayer.job.adapter.in.scheduler.JobLeaseExpiryScheduler;
 import com.commercefoundry.messaging.outbox.OutboxStore;
@@ -172,6 +181,52 @@ class OperationsServiceApplicationTests {
     @DisplayName("Swagger 는 기본 닫힘이다 — 프로파일이 빠진 배포 환경에서 문서가 열리지 않는다")
     void swaggerIsClosedByDefault(String path) {
         assertThat(mockMvc.get().uri(path)).hasStatus(HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * AI 원장 설정(test yml)이 바인딩되고, 예약 → 정산의 JPQL 조건부 UPDATE 가 H2 에서도 돈다. 동시성 · 유니크 키 경합은 {@code AiUsageLedgerPostgresTest}(PostgreSQL).
+     * 단가 test-small = 입력 1 · 출력 5 USD/MTok — 입력 20자 · 최대 출력 100 의 예상치는 10 + 500 = 510 micro.
+     */
+    @Test
+    @DisplayName("AI 원장 — 예약은 월 행을 만들어 예상치를 쥐고, 정산은 실측으로 옮기며 두 번째 정산은 반영하지 않는다 (H2)")
+    void aiUsageReserveAndSettleRoundTrip() {
+        AiUsageMeterUseCase meter = applicationContext.getBean(AiUsageMeterUseCase.class);
+        AiUsageMonthRepository months = applicationContext.getBean(AiUsageMonthRepository.class);
+
+        AiUsageReservation reservation = meter.reserve(new AiUsageReserveCommand("context-test", null, "job:1", "test-small", 100, 20, 0, false));
+        long reservedBefore = months.findByPeriod(reservation.period()).orElseThrow().getReservedMicros();
+        AiUsageSettleCommand completed = new AiUsageSettleCommand(
+            reservation.callId(), AiUsageStatus.COMPLETED, new AiTokenUsage(10, 10, 0, 0), null, null, null, "msg_context", 5
+        );
+
+        AiUsageSettleResult first = meter.settle(completed);
+        AiUsageSettleResult second = meter.settle(completed);
+
+        assertThat(reservation.estimateCostMicros()).isEqualTo(510L);
+        assertThat(first.applied()).isTrue();
+        assertThat(first.costMicros()).isEqualTo(60L);
+        assertThat(second.applied()).isFalse();
+        AiUsageMonthEntity month = months.findByPeriod(reservation.period()).orElseThrow();
+        assertThat(month.getReservedMicros()).isEqualTo(reservedBefore - 510L + 60L);
+        assertThat(month.getLimitMicrosSnapshot()).isEqualTo(10_000_000L);
+    }
+
+    @Test
+    @DisplayName("AI 원장 — 인터럽트 플래그가 켜진 스레드에서도 정산(NOT_SENT)이 실제 커넥션 풀 · 트랜잭션으로 끝나고 플래그는 되살아난다 (H2)")
+    void aiUsageSettleSurvivesInterruptFlag() {
+        AiUsageMeterUseCase meter = applicationContext.getBean(AiUsageMeterUseCase.class);
+        AiUsageReservation reservation = meter.reserve(new AiUsageReserveCommand("context-test", null, null, "test-small", 100, 20, 0, false));
+
+        Thread.currentThread().interrupt();
+        AiUsageSettleResult result;
+        try {
+            result = meter.settle(new AiUsageSettleCommand(reservation.callId(), AiUsageStatus.NOT_SENT, null, null, "BUSY", null, null, 0));
+        } finally {
+            assertThat(Thread.interrupted()).as("플래그를 되살렸다(여기서 내린다)").isTrue();
+        }
+
+        assertThat(result.applied()).isTrue();
+        assertThat(result.costMicros()).isZero();
     }
 
     @Nested
