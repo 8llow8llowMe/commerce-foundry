@@ -1,20 +1,25 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { HeaderMenu } from '@/components/HeaderMenu';
-import { tourProgress } from '@/lib/tour/progress';
-import { CONSOLE_TOUR, helpTopicFor } from '@/lib/tour/tours';
+import { hasNewerGuide, serverTourState, tourProgress } from '@/lib/tour/progress';
+import { ALL_TOURS, CONSOLE_TOUR, helpTopicFor } from '@/lib/tour/tours';
+
+const TOUR_IDS = ALL_TOURS.map((tour) => tour.id);
 
 /**
  * 상단 바 도움말(#228) — 지금 화면의 짧은 설명 · 자주 묻는 질문, 그리고 안내(투어) 다시 보기.
  * 다시 보기는 진행 상태에 요청만 남기고 패널을 닫는다 — 투어는 `TourRunner` 가 시작한다.
+ * 본 안내는 운영자별로 서버에 기록한다(BE #357). 서버가 이 화면보다 새 안내를 내면 새로 고침을 안내한다.
  */
 export function HelpMenu() {
   const pathname = usePathname();
   const topic = helpTopicFor(pathname);
   const screenTour = topic.tour;
   const [open, setOpen] = useState(false);
+  const state = useSyncExternalStore(tourProgress.subscribe, tourProgress.get, serverTourState);
+  const newerGuide = hasNewerGuide(TOUR_IDS, state);
 
   const replay = (tourId: string) => {
     setOpen(false);
@@ -69,8 +74,15 @@ export function HelpMenu() {
               모든 화면 안내 다시 켜기
             </MenuButton>
             <p className="text-xs text-muted-fg">
-              본 안내는 이 브라우저에 기억합니다. 다른 컴퓨터에서는 처음처럼 다시 보입니다.
+              {state.server.mode === 'local'
+                ? '본 안내는 이 브라우저에 기억합니다. 다른 컴퓨터에서는 처음처럼 다시 보입니다.'
+                : '본 안내는 내 계정에 기억합니다. 다른 컴퓨터에서 로그인해도 다시 뜨지 않습니다.'}
             </p>
+            {newerGuide && (
+              <p className="text-xs text-muted-fg">
+                안내가 새로 바뀌었습니다. 페이지를 새로 고치면 바뀐 안내를 볼 수 있습니다.
+              </p>
+            )}
           </div>
         </div>
       )}
