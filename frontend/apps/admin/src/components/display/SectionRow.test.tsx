@@ -70,9 +70,16 @@ describe('SectionRow', () => {
     expect(disabledButton(html, '샘플 제목 아래로')).toBe(true);
   });
 
-  it('LOOK 은 수정 대신 룩 기능 준비 중 안내, 노출 · 삭제는 그대로다', () => {
+  it('LOOK 은 다른 유형처럼 수정할 수 있다', () => {
     const html = render(section('LOOK', { items: [mediaItem()] }));
-    expect(html).toContain('룩 기능 준비 중');
+    expect(html).toContain('aria-label="샘플 제목 수정"');
+    expect(html).not.toContain('편집 준비 중');
+  });
+
+  it('모르는 유형은 수정 대신 편집 준비 중 안내, 노출 · 삭제는 그대로다', () => {
+    const base = section('STORY');
+    const html = render({ ...base, sectionType: { ...base.sectionType, code: 'BANNER' } });
+    expect(html).toContain('편집 준비 중');
     expect(html).not.toContain('aria-label="샘플 제목 수정"');
     expect(html).toContain('aria-label="샘플 제목 삭제"');
     expect(html).toContain('aria-label="샘플 제목 메인에 노출"');

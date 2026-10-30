@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   BODY_CHARACTER,
   createForm,
+  draftRequest,
   editForm,
   LABEL_WITHOUT_URL,
   LINK_RULE,
+  mediaCountMessage,
+  MEDIA_URL_FORMAT,
+  MEDIA_URL_REQUIRED,
+  newImageItem,
   PERIOD_FORMAT,
   PERIOD_ORDER,
   PRODUCT_DUPLICATED,
@@ -73,6 +78,100 @@ describe('editForm', () => {
 describe('createForm', () => {
   it('새 섹션은 숨김 · 빈 칸으로 시작한다', () => {
     expect(createForm('STORY')).toMatchObject({ sectionType: 'STORY', visible: false, title: '' });
+    expect(createForm('STORY').media).toEqual([]);
+  });
+
+  it('룩은 빈 이미지 주소 칸 하나로 시작한다(미디어 하한 1)', () => {
+    expect(createForm('LOOK').media).toEqual([newImageItem()]);
+  });
+});
+
+describe('sectionRequest — 룩(미디어를 주소로 넣는다, #419)', () => {
+  const lookSection = section('LOOK', {
+    body: '본문',
+    items: [
+      mediaItem({ mobileUrl: 'https://cdn.example.test/displays/a-mo.jpg' }),
+      productItem('21'),
+      mediaItem({ pcUrl: 'https://cdn.example.test/displays/b-pc.jpg', altText: null }),
+    ],
+  });
+
+  it('제목 · 본문 · 링크를 고치고, 주소를 바꾼 이미지만 모바일 주소를 버린다(미디어 → 상품 순)', () => {
+    const form = editForm(lookSection, 'LOOK');
+    expect(form.media.map((item) => item.url)).toEqual([
+      'https://cdn.example.test/displays/a-pc.jpg',
+      'https://cdn.example.test/displays/b-pc.jpg',
+    ]);
+    form.media[0]!.url = ' https://cdn.example.test/displays/new.jpg ';
+    const request = okRequest({ ...form, linkUrl: '/shop', linkLabel: '보러 가기' });
+    expect(request).toMatchObject({ body: '본문', linkUrl: '/shop', linkLabel: '보러 가기' });
+    expect(request.items).toEqual([
+      {
+        itemType: 'MEDIA',
+        media: {
+          mediaType: 'IMAGE',
+          pcUrl: 'https://cdn.example.test/displays/new.jpg',
+          mobileUrl: null,
+          pcPosterUrl: null,
+          mobilePosterUrl: null,
+          altText: '샘플 사진',
+        },
+        caption: null,
+      },
+      {
+        itemType: 'MEDIA',
+        media: expect.objectContaining({ pcUrl: 'https://cdn.example.test/displays/b-pc.jpg' }),
+        caption: null,
+      },
+      { itemType: 'PRODUCT', productId: '21', caption: null },
+    ]);
+  });
+
+  it('주소를 고치지 않으면 모바일 주소를 그대로 둔다', () => {
+    const request = okRequest(editForm(lookSection, 'LOOK'));
+    expect(request.items[0]).toMatchObject({
+      media: { mobileUrl: 'https://cdn.example.test/displays/a-mo.jpg' },
+    });
+  });
+
+  it('상품 없이도 저장한다(룩의 상품 하한 0)', () => {
+    const form = {
+      ...createForm('LOOK'),
+      media: [{ ...newImageItem(), url: 'https://cdn.example.test/l.jpg' }],
+    };
+    expect(okRequest(form).items).toHaveLength(1);
+  });
+
+  it('이미지 주소는 필수 · 500자 · 공백 금지, 이미지 수는 1 ~ 10개다', () => {
+    const base = createForm('LOOK');
+    expect(errorsOf(base)).toEqual({ 'media.0.url': [MEDIA_URL_REQUIRED] });
+    const withUrl = (url: string) => ({ ...newImageItem(), url });
+    expect(errorsOf({ ...base, media: [withUrl('https://cdn.example.test/a b.jpg')] })).toEqual({
+      'media.0.url': [MEDIA_URL_FORMAT],
+    });
+    expect(
+      errorsOf({ ...base, media: [withUrl(`https://cdn.example.test/${'a'.repeat(500)}`)] }),
+    ).toEqual({ 'media.0.url': [TOO_LONG.mediaUrl] });
+    expect(errorsOf({ ...base, media: [] })).toEqual({ media: [mediaCountMessage('LOOK')] });
+    const eleven = Array.from({ length: 11 }, () => withUrl('https://cdn.example.test/a.jpg'));
+    expect(errorsOf({ ...base, media: eleven })).toEqual({ media: [mediaCountMessage('LOOK')] });
+  });
+
+  it('다른 유형은 주소 칸을 검사하지 않는다(대체 텍스트만 고친다)', () => {
+    const form = editForm(section('DETAIL', { items: [mediaItem()] }), 'DETAIL');
+    expect(okRequest(form).items).toHaveLength(1);
+  });
+
+  it('미리보기 본문은 주소 칸이 빈 이미지(넣는 중)를 뺀다', () => {
+    const form = {
+      ...createForm('LOOK'),
+      media: [newImageItem(), { ...newImageItem(), url: 'https://cdn.example.test/l.jpg' }],
+    };
+    expect(draftRequest(form).items).toEqual([
+      expect.objectContaining({
+        media: expect.objectContaining({ pcUrl: 'https://cdn.example.test/l.jpg' }),
+      }),
+    ]);
   });
 });
 
@@ -227,6 +326,15 @@ describe('sectionWarnings', () => {
     const form = editForm(pick, 'PRODUCT_PICK');
     expect(sectionWarnings(form)).toEqual([]);
     expect(sectionWarnings({ ...form, products: form.products.slice(1) })).toHaveLength(1);
+  });
+
+  it('룩의 상품이 모두 숨김이면 함께 담기가 없다고 알린다(상품이 없으면 알리지 않는다)', () => {
+    const form = editForm(
+      section('LOOK', { items: [mediaItem(), productItem('1', '숨긴 상품', false)] }),
+      'LOOK',
+    );
+    expect(sectionWarnings(form)).toHaveLength(1);
+    expect(sectionWarnings({ ...form, products: [] })).toEqual([]);
   });
 
   it('스토리의 제목 · 본문 · 미디어가 모두 없으면 메인에서 빠진다고 알린다', () => {

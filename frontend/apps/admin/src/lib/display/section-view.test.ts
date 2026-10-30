@@ -23,9 +23,9 @@ describe('itemSummary', () => {
 });
 
 describe('editableType', () => {
-  it('LOOK · 모르는 유형은 이 화면에서 고치지 않는다', () => {
+  it('아는 유형(LOOK 포함)은 고치고, 모르는 유형은 고치지 않는다', () => {
     expect(editableType(section('HERO'))).toBe('HERO');
-    expect(editableType(section('LOOK'))).toBeNull();
+    expect(editableType(section('LOOK'))).toBe('LOOK');
     const unknown = section('STORY');
     expect(
       editableType({ ...unknown, sectionType: { ...unknown.sectionType, code: 'BANNER' } }),
@@ -34,7 +34,7 @@ describe('editableType', () => {
 });
 
 describe('CREATABLE_TYPES', () => {
-  it('업로드 없이 만들 수 있는 유형(미디어 하한 0, LOOK 제외)만이다', () => {
-    expect(CREATABLE_TYPES).toEqual(['PRODUCT_PICK', 'STORY']);
+  it('업로드 없이 만들 수 있는 유형(미디어 하한 0, 미디어를 주소로 넣는 LOOK)만이다', () => {
+    expect(CREATABLE_TYPES).toEqual(['PRODUCT_PICK', 'STORY', 'LOOK']);
   });
 });

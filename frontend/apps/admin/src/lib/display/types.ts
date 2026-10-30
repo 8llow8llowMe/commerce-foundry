@@ -104,6 +104,8 @@ export const LIMITS = {
   linkUrl: 500,
   linkLabel: 50,
   altText: 200,
+  /** 미디어 주소(pcUrl · mobileUrl · 포스터) */
+  mediaUrl: 500,
   sections: 50,
 } as const;
 
@@ -119,9 +121,15 @@ export const ITEM_RANGES: Record<
   DETAIL: { media: [1, 10], product: [0, 0] },
 };
 
-/** 업로드(#9) 없이 만들 수 있는 유형 — 미디어 하한이 0 인 것. LOOK 은 룩 기능(#62) 전까지 편집하지 않는다 */
+/**
+ * 미디어를 주소로 넣고 · 빼는 유형(#419). 업로드(#9) 전이라 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다(룩 관리 화면과 같다).
+ * 다른 유형의 미디어는 대체 텍스트만 고친다.
+ */
+export const MEDIA_URL_TYPES: readonly SectionTypeCode[] = ['LOOK'];
+
+/** 업로드(#9) 없이 만들 수 있는 유형 — 미디어 하한이 0 이거나 미디어를 주소로 넣는 유형 */
 export const CREATABLE_TYPES = SECTION_TYPES.filter(
-  (type) => type !== 'LOOK' && ITEM_RANGES[type].media[0] === 0,
+  (type) => ITEM_RANGES[type].media[0] === 0 || MEDIA_URL_TYPES.includes(type),
 );
 
 /** 유형 이름 — 섹션을 새로 만들 때(아직 응답이 없을 때)만 쓴다. 목록은 서버 `sectionType.name` 을 보인다 */

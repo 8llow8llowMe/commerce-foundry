@@ -15,6 +15,7 @@ import {
   PREVIEW_FORBIDDEN,
   previewFailure,
   PREVIEW_MEDIA_STORAGE,
+  PREVIEW_MEDIA_URL,
   PREVIEW_TITLE_MAX,
   PRODUCT_MISSING,
   rowFailure,
@@ -24,7 +25,16 @@ import {
   SECTION_LIMIT,
   UNKNOWN_OUTCOME_NOTICE,
 } from './errors';
-import { LINK_RULE, PERIOD_ORDER, productCountMessage, SINGLE_LINE_ONLY, TOO_LONG } from './form';
+import {
+  LINK_RULE,
+  MEDIA_URL_NOT_STORAGE,
+  MEDIA_URL_REQUIRED,
+  mediaCountMessage,
+  PERIOD_ORDER,
+  productCountMessage,
+  SINGLE_LINE_ONLY,
+  TOO_LONG,
+} from './form';
 
 const apiError = (
   kind: ApiErrorKind,
@@ -36,6 +46,7 @@ const apiError = (
 
 const pick = { type: 'PRODUCT_PICK' as const, mediaCount: 0 };
 const hero = { type: 'HERO' as const, mediaCount: 2 };
+const look = { type: 'LOOK' as const, mediaCount: 2 };
 
 describe('saveFailure', () => {
   it('401 은 폼을 지키고 다시 로그인을 안내한다, 403 은 권한 안내다', () => {
@@ -111,6 +122,43 @@ describe('saveFailure', () => {
     expect(errorsFor('PRODUCT_051')).toEqual({ period: [PERIOD_ORDER], form: [CHECK_FIELDS] });
     expect(errorsFor('PRODUCT_052')).toEqual({ linkUrl: [LINK_RULE], form: [CHECK_FIELDS] });
     expect(errorsFor('PRODUCT_054', hero)).toEqual({ form: [MEDIA_STORAGE_UNAVAILABLE] });
+  });
+
+  it('룩(주소로 넣는 미디어): 054 는 이미지 주소 안내, 048 은 이미지 · 상품 수 범위, 055 는 그대로 개발 담당자 안내', () => {
+    const errorsFor = (code: string, status = 400) => {
+      const failure = saveFailure(apiError('server', status, code, '서버 원문'), look);
+      return failure.kind === 'errors' ? failure.errors : null;
+    };
+    expect(errorsFor('PRODUCT_054')).toEqual({
+      media: [MEDIA_URL_NOT_STORAGE],
+      form: [CHECK_FIELDS],
+    });
+    expect(errorsFor('PRODUCT_048')).toEqual({
+      media: [mediaCountMessage('LOOK')],
+      products: [productCountMessage('LOOK')],
+      form: [CHECK_FIELDS],
+    });
+    expect(errorsFor('PRODUCT_055', 503)).toEqual({ form: [MEDIA_STORAGE_UNAVAILABLE] });
+  });
+
+  it('미디어 주소 칸 오류는 그 미디어의 주소 칸에 업무 문구로 붙는다', () => {
+    const failure = saveFailure(
+      apiError('validation', 400, null, null, [
+        { field: 'items[1].media.pcUrl', code: 'PRODUCT_152', message: 'pcUrl 은 필수입니다.' },
+        { field: 'items[0].media.pcUrl', code: 'PRODUCT_153', message: '원문' },
+        { field: 'items[2].productId', code: 'PRODUCT_155', message: '원문' },
+      ]),
+      look,
+    );
+    expect(failure).toEqual({
+      kind: 'errors',
+      errors: {
+        'media.1.url': [MEDIA_URL_REQUIRED],
+        'media.0.url': [TOO_LONG.mediaUrl],
+        products: [CHECK_FIELDS],
+        form: [CHECK_FIELDS],
+      },
+    });
   });
 
   it('409 섹션 상한 · 잠금 대기, 503 저장소 미설정은 폼 전체 문구다', () => {
@@ -275,9 +323,9 @@ describe('previewFailure', () => {
       retry: true,
       cooldownSec: null,
     });
-    // 미디어 주소가 저장소 공개 주소 밖(공개 주소를 바꾼 뒤)이면 그 주소가 바뀌어야 풀린다
+    // 미디어 주소가 저장소 공개 주소 밖(룩에 넣은 주소 · 공개 주소를 바꾼 뒤)이면 그 주소가 바뀌어야 풀린다
     expect(previewFailure(apiError('validation', 400, 'PRODUCT_054'), sections)).toEqual({
-      message: PREVIEW_MEDIA_STORAGE,
+      message: PREVIEW_MEDIA_URL,
       details: [],
       retry: false,
       cooldownSec: null,

@@ -193,9 +193,7 @@ export function SectionRow({
                 수정
               </button>
             ) : (
-              <span className="text-xs text-muted-fg">
-                {section.sectionType.code === 'LOOK' ? '룩 기능 준비 중' : '편집 준비 중'}
-              </span>
+              <span className="text-xs text-muted-fg">편집 준비 중</span>
             )}
             <button
               type="button"

@@ -30,16 +30,19 @@ function searchFailure(cause: unknown): string {
 
 /**
  * 고른 상품 — 어드민 상품 목록(#9, 숨김 포함)에서 찾아 더하고, 빼고, 순서를 바꾼다. 메인 전시 상품 픽(#71) · 룩(#406)이 쓴다.
- * 상한(`max`)은 BE 규칙이다. 숨긴 상품은 등록은 되지만 고객 화면(`surface`)에서 빠지고, 판매중이 아닌 상품은 보이지만 살 수 없다
+ * 하한(`min`) · 상한(`max`)은 BE 규칙이다. 숨긴 상품은 등록은 되지만 고객 화면(`surface`)에서 빠지고, 판매중이 아닌 상품은 보이지만 살 수 없다
  * — 두 경우 모두 그 줄에 알린다.
  */
 export function ProductPickField({
+  min = 1,
   max,
   surface,
   products,
   errors,
   onChange,
 }: {
+  /** 하한 — 0 이면 비워 둘 수 있다(메인 전시 룩) */
+  min?: number;
   max: number;
   /** 고객에게 보이는 곳 — 안내 문구에 쓴다(`메인` · `룩`) */
   surface: string;
@@ -126,7 +129,10 @@ export function ProductPickField({
         상품 ({products.length} / {max}개)
       </legend>
       <p id={`${id}-hint`} className="text-xs text-muted-fg">
-        {surface}에 이 순서대로 보입니다. 1개 이상 {max}개까지 넣을 수 있습니다.
+        {surface}에 이 순서대로 보입니다.{' '}
+        {min > 0
+          ? `${min}개 이상 ${max}개까지 넣을 수 있습니다.`
+          : `${max}개까지 넣을 수 있고 비워 둘 수 있습니다.`}
       </p>
 
       {products.length === 0 ? (

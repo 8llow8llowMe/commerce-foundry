@@ -73,7 +73,7 @@ export type LookSection = {
   title: string;
   body: string | null;
   media: HomeMediaSlot;
-  /** 착장 구성 상품. 상품 상세 API 로 이름 · 가격 · 판매 상태를 받는다(#62 이전 1차) */
+  /** 착장 구성 상품. 옵션 · SKU 까지 고르게 상품 상세 API 로 받는다(메인 전시 LOOK · 브랜드 설정 모두) */
   productIds: string[];
   link: HomeLink | null;
 };
