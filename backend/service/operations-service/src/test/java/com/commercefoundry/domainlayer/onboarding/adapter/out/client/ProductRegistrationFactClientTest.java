@@ -38,6 +38,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * 실제 Feign 파이프라인(서비스 토큰 Capability · Jackson 3 디코딩 · 기본 ErrorDecoder · 타임아웃 설정 · 서킷)으로 product-service 흉내 서버를 불러 본다 (#357 PR-B2).
@@ -48,6 +49,7 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@TestPropertySource(properties = "operations.onboarding.product-registration-enabled=true")
 class ProductRegistrationFactClientTest {
 
     private static final HttpServer SERVER = startServer();
