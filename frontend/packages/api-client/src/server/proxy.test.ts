@@ -73,6 +73,9 @@ describe('createProxyHandler', () => {
     '/api/v1/auth;x/sign-up',
     '/api/v1/auth/token;x/reissue',
     '/api/v1/auth/admin;x/login;y/',
+    '/api/v1/auth/admin/login/otp',
+    '/api/v1/auth/Admin/Login/OTP/',
+    '/api/v1/auth/admin/login%2Fotp',
   ])(
     '토큰을 주는 인증 경로 %s 는 전용 핸들러만 받는다 — 게이트웨이로 보내지 않고 BFF_001 404 다',
     async (path) => {
