@@ -189,4 +189,23 @@ class LoginAttemptRedisAdapterArgumentsTest {
         assertThatThrownBy(() -> disabledAdapter.reset(AttemptKind.ADMIN_OTP, "0")).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    @DisplayName("로그인 2단계 시도는 재인증과 다른 memberId 키이며 숫자가 아닌 주체를 Redis 전에 거절한다")
+    void adminOtpLoginUsesSeparateMemberIdKey() {
+        LoginAttemptKeyHasher disabled = new LoginAttemptKeyHasher(new AuthLoginGuardProperties(false, 5, WINDOW, null, null));
+        LoginAttemptRedisAdapter disabledAdapter = new LoginAttemptRedisAdapter(redisTemplate, disabled, new TokenStoreRedisSupport(Clock.systemUTC()));
+        List<String> keys = List.of("auth:admin-otp-login-attempt:4611686018427387904");
+        given(redisTemplate.execute(LoginAttemptRedisScripts.RECORD, keys, "900000")).willReturn(List.of(1L, 900_000L));
+
+        assertThat(disabledAdapter.record(AttemptKind.ADMIN_OTP_LOGIN, "4611686018427387904", WINDOW))
+            .isEqualTo(new LoginAttemptOutcome(1, WINDOW));
+        disabledAdapter.reset(AttemptKind.ADMIN_OTP_LOGIN, "4611686018427387904");
+        verify(redisTemplate).delete(keys.getFirst());
+
+        assertThatThrownBy(() -> disabledAdapter.record(AttemptKind.ADMIN_OTP_LOGIN, EMAIL, WINDOW))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> disabledAdapter.reset(AttemptKind.ADMIN_OTP_LOGIN, "0"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
 }

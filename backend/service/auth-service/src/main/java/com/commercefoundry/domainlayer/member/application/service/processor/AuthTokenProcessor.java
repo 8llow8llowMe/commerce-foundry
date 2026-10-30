@@ -16,6 +16,8 @@ import com.commercefoundry.security.issuer.JwtIssuer;
 import com.commercefoundry.security.issuer.OpaqueTokenGenerator;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -60,10 +62,24 @@ public class AuthTokenProcessor {
      * @throws IllegalArgumentException 관리자 계정이 아니다 — 관리자 인증({@code MemberLoginProcessor#authenticateAdmin})을 지난 회원만 온다
      */
     public AdminAccessTokenInfo issueAdminAccessToken(Member admin) {
+        requireAdmin(admin);
+        return adminTokenInfo(jwtIssuer.issueAccessToken(admin.id(), admin.role()));
+    }
+
+    /** OTP 2단계 완료 토큰의 iat 를 챌린지 발급 시각에 묶어 이후 관리자 컷오프가 언제나 이 토큰을 끊게 한다. */
+    public AdminAccessTokenInfo issueAdminAccessToken(Member admin, Instant challengeIssuedAt) {
+        requireAdmin(admin);
+        Objects.requireNonNull(challengeIssuedAt, "challengeIssuedAt");
+        return adminTokenInfo(jwtIssuer.issueAccessToken(admin.id(), admin.role(), challengeIssuedAt));
+    }
+
+    private static void requireAdmin(Member admin) {
         if (!admin.isAdmin()) {
             throw new IllegalArgumentException("관리자 계정만 관리자 access 토큰을 받는다");
         }
-        IssuedAccessToken accessToken = jwtIssuer.issueAccessToken(admin.id(), admin.role());
+    }
+
+    private AdminAccessTokenInfo adminTokenInfo(IssuedAccessToken accessToken) {
         return new AdminAccessTokenInfo(accessToken.tokenValue(), Math.max(0, Duration.between(clock.instant(), accessToken.expiresAt()).toSeconds()));
     }
 

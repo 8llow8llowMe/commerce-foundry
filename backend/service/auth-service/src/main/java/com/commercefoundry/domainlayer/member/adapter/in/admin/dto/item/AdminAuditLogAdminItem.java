@@ -13,7 +13,7 @@ public record AdminAuditLogAdminItem(
     String auditLogId,
 
     @Schema(description = "행위 — 로그 검색 키와 같은 이름", allowableValues = {
-        "ADMIN_LOGIN", "MEMBER_SEARCH", "ADMIN_CREATE", "ADMIN_DEACTIVATE", "ADMIN_PASSWORD_CHANGE",
+        "ADMIN_LOGIN", "ADMIN_LOGIN_PASSWORD_VERIFIED", "MEMBER_SEARCH", "ADMIN_CREATE", "ADMIN_DEACTIVATE", "ADMIN_PASSWORD_CHANGE",
         "ADMIN_OTP_ENROLL", "ADMIN_OTP_DISABLE", "ADMIN_OTP_RECOVERY_REGENERATE"
     }, example = "ADMIN_LOGIN")
     String action,

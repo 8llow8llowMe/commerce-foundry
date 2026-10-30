@@ -30,6 +30,7 @@ import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
 import com.nimbusds.jwt.SignedJWT;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -88,6 +89,22 @@ class AuthTokenProcessorTest {
         assertThat(SignedJWT.parse(info.accessToken()).getJWTClaimsSet().getStringClaim(MemberRole.CLAIM_NAME)).isEqualTo("ADMIN");
         assertThat(SignedJWT.parse(info.accessToken()).getJWTClaimsSet().getSubject()).isEqualTo(String.valueOf(TestTokens.MEMBER_ID));
         assertThat(info.toString()).doesNotContain(info.accessToken());
+        verifyNoInteractions(store, revocation);
+    }
+
+    @Test
+    @DisplayName("OTP 2단계 토큰은 챌린지 발급 초를 iat 로 쓰고 실제 서명 초를 만료 기준으로 쓴다 — 이후 컷오프가 옛 챌린지 토큰을 끊는다")
+    void issueAdminAccessTokenForChallenge() throws Exception {
+        Member admin = Member.restore(TestTokens.MEMBER_ID, "admin@example.com", "$2a$10$hash", "관리자", null, MemberRole.ADMIN, 0L);
+        Instant challengeIssuedAt = TestTokens.NOW.minusSeconds(2).plusMillis(800);
+
+        AdminAccessTokenInfo info = processor.issueAdminAccessToken(admin, challengeIssuedAt);
+        var claims = SignedJWT.parse(info.accessToken()).getJWTClaimsSet();
+
+        assertThat(claims.getIssueTime().toInstant()).isEqualTo(TestTokens.NOW.minusSeconds(2));
+        assertThat(claims.getExpirationTime().toInstant()).isEqualTo(TestTokens.NOW.plusSeconds(1800));
+        assertThat(claims.getIssueTime().toInstant()).isBefore(TestTokens.NOW.plusSeconds(1));
+        assertThat(info.accessTokenExpiresIn()).isEqualTo(1800);
         verifyNoInteractions(store, revocation);
     }
 

@@ -7,7 +7,9 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.BDDMockito.willDoNothing;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -16,21 +18,33 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.domainlayer.member.adapter.in.web.dto.response.AdminLoginResponse;
 import com.commercefoundry.domainlayer.member.adapter.in.web.presenter.AdminAuthWebPresenter;
 import com.commercefoundry.domainlayer.member.application.command.AdminLoginCommand;
+import com.commercefoundry.domainlayer.member.application.command.AdminOtpLoginCommand;
 import com.commercefoundry.domainlayer.member.application.exception.LoginAttemptLimitedException;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.info.AdminAccessTokenInfo;
+import com.commercefoundry.domainlayer.member.application.info.AdminLoginChallengeInfo;
+import com.commercefoundry.domainlayer.member.application.model.AdminOtpChallenge;
+import com.commercefoundry.domainlayer.member.application.model.AdminOtpProof;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminAuditPort;
+import com.commercefoundry.domainlayer.member.application.service.processor.AdminAccountProcessor;
+import com.commercefoundry.domainlayer.member.application.service.processor.AdminAccessCutoffProcessor;
 import com.commercefoundry.domainlayer.member.application.service.processor.AdminAuditProcessor;
+import com.commercefoundry.domainlayer.member.application.service.processor.AdminLoginChallengeProcessor;
+import com.commercefoundry.domainlayer.member.application.service.processor.AdminOtpProcessor;
 import com.commercefoundry.domainlayer.member.application.service.processor.AuthTokenProcessor;
 import com.commercefoundry.domainlayer.member.application.service.processor.LoginGuardProcessor;
 import com.commercefoundry.domainlayer.member.application.service.processor.MemberLoginProcessor;
 import com.commercefoundry.domainlayer.member.domain.model.AttemptKind;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +52,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.PessimisticLockingFailureException;
 
 @ExtendWith(MockitoExtension.class)
 class AdminAuthWebFacadeTest {
@@ -46,6 +61,11 @@ class AdminAuthWebFacadeTest {
     private static final Member CUSTOMER = Member.restore(7L, "a@example.com", "$2a$10$hash", "홍길동", null, MemberRole.CUSTOMER, 0L);
     private static final AdminLoginCommand COMMAND = new AdminLoginCommand("Admin@Example.com", "admin-password-1");
     private static final String EMAIL = "admin@example.com";
+    private static final Instant NOW = Instant.parse("2026-10-29T03:00:00Z");
+    private static final String CHALLENGE = "n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg";
+    private static final AdminOtpLoginCommand OTP_COMMAND = new AdminOtpLoginCommand(CHALLENGE, "ABCDE-FGH23");
+    private static final AdminOtpProof PROOF = new AdminOtpProof.RecoveryCodeMatch(55L);
+    private static final AdminOtpChallenge STORED_CHALLENGE = new AdminOtpChallenge(9L, NOW.minusSeconds(30));
 
     @Mock
     private MemberLoginProcessor memberLoginProcessor;
@@ -59,12 +79,25 @@ class AdminAuthWebFacadeTest {
     @Mock
     private AdminAuditPort adminAuditPort;
 
+    @Mock
+    private AdminAccountProcessor adminAccountProcessor;
+
+    @Mock
+    private AdminOtpProcessor adminOtpProcessor;
+
+    @Mock
+    private AdminLoginChallengeProcessor adminLoginChallengeProcessor;
+
+    @Mock
+    private AdminAccessCutoffProcessor adminAccessCutoffProcessor;
+
     private AdminAuthWebFacade facade;
 
     @BeforeEach
     void setUp() {
         facade = new AdminAuthWebFacade(memberLoginProcessor, loginGuardProcessor, authTokenProcessor, new AdminAuditProcessor(adminAuditPort),
-            new AdminAuthWebPresenter());
+            adminAccountProcessor, adminOtpProcessor, adminLoginChallengeProcessor, adminAccessCutoffProcessor,
+            new AdminAuthWebPresenter(), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -77,7 +110,7 @@ class AdminAuthWebFacadeTest {
 
         AdminLoginResponse response = facade.login(COMMAND);
 
-        assertThat(response).isEqualTo(AdminLoginResponse.builder().accessToken("access").accessTokenExpiresIn(1800).build());
+        assertThat(response).isEqualTo(AdminLoginResponse.builder().accessToken("access").accessTokenExpiresIn(1800L).build());
         InOrder order = inOrder(memberLoginProcessor, loginGuardProcessor, authTokenProcessor, adminAuditPort);
         order.verify(loginGuardProcessor).admit(AttemptKind.ADMIN_LOGIN, EMAIL);
         order.verify(memberLoginProcessor).findByEmail(EMAIL);
@@ -164,5 +197,210 @@ class AdminAuthWebFacadeTest {
         verify(memberLoginProcessor, never()).findByEmail(anyString());
         verifyNoInteractions(loginGuardProcessor, authTokenProcessor);
         verify(adminAuditPort).adminLoginFailed(OptionalLong.empty());
+    }
+
+    // ── OTP 등록 관리자 (#238 PR-B)
+
+    @Test
+    @DisplayName("OTP 를 등록한 관리자는 비밀번호가 맞아도 토큰 없이 챌린지만 받는다 — 1단계 통과 감사는 남긴다")
+    void enrolledAdminGetsChallengeOnly() {
+        given(memberLoginProcessor.normalizeEmail(any())).willReturn(Optional.of(EMAIL));
+        given(memberLoginProcessor.findByEmail(EMAIL)).willReturn(Optional.of(ADMIN));
+        given(memberLoginProcessor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).willReturn(ADMIN);
+        given(adminOtpProcessor.isEnrolled(9L)).willReturn(true);
+        given(adminLoginChallengeProcessor.issue(9L, NOW)).willReturn(new AdminLoginChallengeInfo(CHALLENGE, 300));
+
+        AdminLoginResponse response = facade.login(COMMAND);
+
+        assertThat(response).isEqualTo(AdminLoginResponse.builder().otpRequired(true).challengeToken(CHALLENGE).challengeExpiresIn(300L).build());
+        verifyNoInteractions(authTokenProcessor);
+        verify(adminAuditPort).adminLoginPasswordVerified(9L);
+        verify(adminAuditPort, never()).adminLoginSucceeded(anyLong());
+        verify(loginGuardProcessor, never()).clear(any(), any());
+    }
+
+    @Test
+    @DisplayName("비밀번호 확인 중 시간이 넘어가도 챌린지는 회원 조회 전 시각을 쓴다 — 그 사이 변경된 비밀번호의 컷오프가 무효화한다")
+    void challengeIssuedAtPrecedesPasswordLookup() {
+        AtomicReference<Instant> time = new AtomicReference<>(NOW);
+        Clock movingClock = mock(Clock.class);
+        given(movingClock.instant()).willAnswer(ignored -> time.get());
+        facade = new AdminAuthWebFacade(memberLoginProcessor, loginGuardProcessor, authTokenProcessor, new AdminAuditProcessor(adminAuditPort),
+            adminAccountProcessor, adminOtpProcessor, adminLoginChallengeProcessor, adminAccessCutoffProcessor,
+            new AdminAuthWebPresenter(), movingClock);
+        given(memberLoginProcessor.normalizeEmail(any())).willReturn(Optional.of(EMAIL));
+        given(memberLoginProcessor.findByEmail(EMAIL)).willReturn(Optional.of(ADMIN));
+        given(memberLoginProcessor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).willAnswer(ignored -> {
+            time.set(NOW.plusSeconds(2));
+            return ADMIN;
+        });
+        given(adminOtpProcessor.isEnrolled(9L)).willReturn(true);
+        given(adminLoginChallengeProcessor.issue(9L, NOW)).willReturn(new AdminLoginChallengeInfo(CHALLENGE, 300));
+
+        assertThat(facade.login(COMMAND).challengeToken()).isEqualTo(CHALLENGE);
+
+        verify(adminLoginChallengeProcessor).issue(9L, NOW);
+    }
+
+    @Test
+    @DisplayName("비밀번호가 틀리면 OTP 등록 여부를 보지 않는다 — 등록 여부가 비밀번호 확인 전에 드러나지 않게")
+    void wrongPasswordDoesNotLookAtOtp() {
+        given(memberLoginProcessor.normalizeEmail(any())).willReturn(Optional.of(EMAIL));
+        given(memberLoginProcessor.findByEmail(EMAIL)).willReturn(Optional.of(ADMIN));
+        given(memberLoginProcessor.authenticateAdmin(any(), any())).willThrow(new MemberException(MemberErrorCode.ADMIN_LOGIN_FAILED));
+
+        assertThatThrownBy(() -> facade.login(COMMAND)).isInstanceOf(MemberException.class);
+
+        verifyNoInteractions(adminOtpProcessor, adminLoginChallengeProcessor);
+    }
+
+    @Test
+    @DisplayName("2단계는 챌린지 조회 → 시도 제한 → 활성 관리자 → 컷오프 → 코드 확인 → 챌린지 소비 → 코드 소비 → 발급 순서다")
+    void otpLogin() {
+        given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
+        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminOtpProcessor.resolveProof(9L, "ABCDE-FGH23", NOW)).willReturn(PROOF);
+        given(authTokenProcessor.issueAdminAccessToken(ADMIN, STORED_CHALLENGE.issuedAt())).willReturn(new AdminAccessTokenInfo("access", 1800));
+
+        AdminLoginResponse response = facade.loginWithOtp(OTP_COMMAND);
+
+        assertThat(response).isEqualTo(AdminLoginResponse.builder().accessToken("access").accessTokenExpiresIn(1800L).otpRequired(false).build());
+        InOrder order = inOrder(adminLoginChallengeProcessor, loginGuardProcessor, adminAccountProcessor, adminAccessCutoffProcessor,
+            adminOtpProcessor, authTokenProcessor, adminAuditPort);
+        order.verify(adminLoginChallengeProcessor).find(CHALLENGE);
+        order.verify(loginGuardProcessor).admitAdminOtpLogin(9L);
+        order.verify(adminAccountProcessor).findActiveAdmin(9L);
+        order.verify(adminAccessCutoffProcessor).issuedBeforeCutoff(9L, STORED_CHALLENGE.issuedAt());
+        order.verify(adminOtpProcessor).resolveProof(9L, "ABCDE-FGH23", NOW);
+        order.verify(adminLoginChallengeProcessor).consume(CHALLENGE, STORED_CHALLENGE);
+        order.verify(adminOtpProcessor).consumeForLogin(9L, PROOF, NOW);
+        order.verify(authTokenProcessor).issueAdminAccessToken(ADMIN, STORED_CHALLENGE.issuedAt());
+        order.verify(adminAuditPort).adminLoginSucceeded(9L);
+        verify(adminAuditPort, never()).adminLoginFailed(any());
+        verify(loginGuardProcessor, never()).admitAdminOtp(anyLong());
+        verify(loginGuardProcessor, never()).clearAdminOtp(anyLong());
+    }
+
+    @Test
+    @DisplayName("챌린지가 없거나 만료면 400 AUTH_034 — 대상을 모르므로 세지도 감사하지도 않는다")
+    void invalidChallengeIsNotCountedOrAudited() {
+        willThrow(new MemberException(MemberErrorCode.OTP_CHALLENGE_INVALID)).given(adminLoginChallengeProcessor).find(CHALLENGE);
+
+        assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
+            .isEqualTo(MemberErrorCode.OTP_CHALLENGE_INVALID);
+
+        verifyNoInteractions(loginGuardProcessor, adminAccountProcessor, adminOtpProcessor, authTokenProcessor, adminAuditPort);
+    }
+
+    @Test
+    @DisplayName("2단계 시도 초과(429 AUTH_043)는 코드를 보지 않고 감사하지 않는다(판정 전 실패)")
+    void limitedSecondStep() {
+        given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
+        LoginAttemptLimitedException limited = new LoginAttemptLimitedException(MemberErrorCode.OTP_ATTEMPT_LIMITED, Duration.ofMinutes(2));
+        willThrow(limited).given(loginGuardProcessor).admitAdminOtpLogin(9L);
+
+        assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).isSameAs(limited);
+
+        verifyNoInteractions(adminAccountProcessor, adminOtpProcessor, authTokenProcessor, adminAuditPort);
+        verify(adminLoginChallengeProcessor, never()).consume(anyString(), any(AdminOtpChallenge.class));
+    }
+
+    @Test
+    @DisplayName("틀린 코드는 400 AUTH_035 그대로이고 대상 관리자로 실패 감사한다 — 챌린지는 소비하지 않아 TTL 안에서 다시 시도할 수 있다")
+    void wrongCode() {
+        given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
+        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        willThrow(new MemberException(MemberErrorCode.OTP_CODE_INVALID)).given(adminOtpProcessor).resolveProof(9L, "ABCDE-FGH23", NOW);
+
+        assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
+            .isEqualTo(MemberErrorCode.OTP_CODE_INVALID);
+
+        verify(adminAuditPort).adminLoginFailed(OptionalLong.of(9L));
+        verify(adminAuditPort, never()).adminLoginSucceeded(anyLong());
+        verify(adminOtpProcessor, never()).consumeForLogin(anyLong(), any(), any());
+        verify(adminLoginChallengeProcessor, never()).consume(anyString(), any(AdminOtpChallenge.class));
+        verifyNoInteractions(authTokenProcessor);
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 컷오프 이전 챌린지는 AUTH_034 로 거절하고 코드와 토큰을 소비하지 않는다")
+    void oldChallengeAfterPasswordChange() {
+        given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
+        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminAccessCutoffProcessor.issuedBeforeCutoff(9L, STORED_CHALLENGE.issuedAt())).willReturn(true);
+
+        assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
+            .isEqualTo(MemberErrorCode.OTP_CHALLENGE_INVALID);
+
+        verifyNoInteractions(adminOtpProcessor, authTokenProcessor);
+        verify(adminLoginChallengeProcessor, never()).consume(anyString(), any(AdminOtpChallenge.class));
+        verify(adminAuditPort).adminLoginFailed(OptionalLong.of(9L));
+    }
+
+    @Test
+    @DisplayName("GETDEL 동시 패자는 코드를 소비하지 않고 AUTH_034 로 실패 감사한다")
+    void lostChallengeDoesNotConsumeCode() {
+        given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
+        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminOtpProcessor.resolveProof(9L, "ABCDE-FGH23", NOW)).willReturn(PROOF);
+        willThrow(new MemberException(MemberErrorCode.OTP_CHALLENGE_INVALID)).given(adminLoginChallengeProcessor)
+            .consume(CHALLENGE, STORED_CHALLENGE);
+
+        assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
+            .isEqualTo(MemberErrorCode.OTP_CHALLENGE_INVALID);
+
+        verify(adminOtpProcessor, never()).consumeForLogin(anyLong(), any(), any());
+        verifyNoInteractions(authTokenProcessor);
+        verify(adminAuditPort).adminLoginFailed(OptionalLong.of(9L));
+    }
+
+    @Test
+    @DisplayName("대상을 안 뒤 예상 밖 예외도 실패 감사하고 그대로 전파한다")
+    void unexpectedFailureIsAudited() {
+        given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
+        RuntimeException failure = new IllegalStateException("test failure");
+        given(adminAccountProcessor.findActiveAdmin(9L)).willThrow(failure);
+
+        assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).isSameAs(failure);
+
+        verify(adminAuditPort).adminLoginFailed(OptionalLong.of(9L));
+        verifyNoInteractions(adminOtpProcessor, authTokenProcessor);
+    }
+
+    @Test
+    @DisplayName("그 사이 비활성화(AUTH_033) · OTP 해제(AUTH_036 — 확인 · 소비 어느 쪽이든)는 챌린지 무효 AUTH_034 로 답하고 실패 감사한다")
+    void deactivatedOrDisabledMeansInvalidChallenge() {
+        given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
+        given(adminAccountProcessor.findActiveAdmin(9L)).willThrow(new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND)).willReturn(ADMIN);
+        given(adminOtpProcessor.resolveProof(9L, "ABCDE-FGH23", NOW)).willThrow(new MemberException(MemberErrorCode.OTP_NOT_ENROLLED)).willReturn(PROOF);
+        willThrow(new MemberException(MemberErrorCode.OTP_NOT_ENROLLED)).given(adminOtpProcessor).consumeForLogin(9L, PROOF, NOW);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
+                .isEqualTo(MemberErrorCode.OTP_CHALLENGE_INVALID);
+        }
+
+        verify(adminAuditPort, times(3)).adminLoginFailed(OptionalLong.of(9L));
+        verify(adminLoginChallengeProcessor, times(1)).consume(CHALLENGE, STORED_CHALLENGE);
+        verifyNoInteractions(authTokenProcessor);
+    }
+
+    @Test
+    @DisplayName("코드 소비의 잠금 실패는 409 AUTH_044, 챌린지 소비를 진 동시 요청은 400 AUTH_034 — 둘 다 토큰 없이 실패 감사한다")
+    void busyOrLostChallenge() {
+        given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
+        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminOtpProcessor.resolveProof(9L, "ABCDE-FGH23", NOW)).willReturn(PROOF);
+        willThrow(new PessimisticLockingFailureException("lock")).willDoNothing().given(adminOtpProcessor).consumeForLogin(9L, PROOF, NOW);
+        willDoNothing().willThrow(new MemberException(MemberErrorCode.OTP_CHALLENGE_INVALID))
+            .given(adminLoginChallengeProcessor).consume(CHALLENGE, STORED_CHALLENGE);
+
+        assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
+            .isEqualTo(MemberErrorCode.OTP_BUSY);
+        assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
+            .isEqualTo(MemberErrorCode.OTP_CHALLENGE_INVALID);
+
+        verify(adminAuditPort, times(2)).adminLoginFailed(OptionalLong.of(9L));
+        verifyNoInteractions(authTokenProcessor);
     }
 }

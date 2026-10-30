@@ -852,6 +852,18 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
   `JwtIssuer`)가 역할별 TTL 을 받지 않아 줄이려면 core 를 바꿔야 하고, refresh 가 없어 30분이 곧 관리자 세션 상한이라 이미 고객(14일 refresh)보다 짧다.
   더 줄이려면(예: 15분) 발급기에 역할별 TTL 을 더하는 후속 이슈로 한다.
 - 고객 로그인(`/api/v1/auth/login`)은 관리자 계정을 `AUTH_001` 로, 관리자 로그인은 고객 계정을 `AUTH_030` 으로 거절한다 — 한 계정이 두 종류 토큰을 받지 않는다.
+- **OTP 2단계 (#238 PR-B).** OTP 를 등록한 관리자는 비밀번호만으로 토큰을 받지 못한다 — 1단계(`…/admin/login`)가 비밀번호를 확인하면 access 대신 1회용 챌린지
+  (`otpRequired=true` · `challengeToken`)만 주고, 2단계(`POST /api/v1/auth/admin/login/otp`, `permitAll()`)가 TOTP 또는 복구 코드를 확인한 뒤 access 를 준다.
+  미등록 관리자는 지금과 같이 1단계에서 토큰을 받는다(등록은 관리자별 선택, 강제는 #236). 등록 여부는 비밀번호 확인 **뒤**에 본다 — 틀린 비밀번호의 응답이 등록 여부로 갈리지 않는다.
+  - 챌린지 발급 시각은 1단계의 회원 조회·비밀번호 확인 **전**에 잡는다. 2단계 access 의 `iat` 도 그 시각을 사용하고 `exp` 는 실제 서명 시각 기준이다. 그러면 비밀번호 확인 중이나 2단계 발급 중에 변경·비활성화 컷오프가 기록돼도, 게이트웨이가 이전 자격에서 시작한 토큰을 거절한다.
+  - 챌린지는 32바이트 `SecureRandom` 의 base64url(43자)이다. Redis 에는 원문이 아니라 SHA-256 지문을 키로(`auth:admin-otp-challenge:{지문}`, 값 memberId + 발급 시각, TTL
+    `auth.admin-otp.challenge-ttl` 기본 5분) 둔다 — 키를 읽어도 2단계 요청을 만들 수 없다. 원문 · 지문은 로그 · `toString` 에 싣지 않는다. Redis 장애는 503 `AUTH_013`(fail-closed).
+  - 2단계 순서: 챌린지 조회(소비하지 않음) → 시도 1회(`ADMIN_OTP_LOGIN`, §14-1) → 활성 관리자 재확인 → 비밀번호 변경 · 비활성화 컷오프 확인 → 코드 확인(트랜잭션 밖, 복구 코드 BCrypt) →
+    챌린지 GETDEL → 자격 행 잠금 + 코드 소비(조건부 UPDATE, 한 트랜잭션 — 재인증과 같은 잠금) → access 발급. 컷오프 이전에 받은 챌린지 · 그 사이 OTP 해제는 무효 `AUTH_034` 로 답한다.
+  - 코드가 틀려도 챌린지는 TTL 까지 다시 쓸 수 있다(오타마다 비밀번호를 다시 받지 않는다). 만료 · Redis 장애 · 동시 요청 패자로 GETDEL 에 실패하면 코드는 소비하지 않는다. GETDEL 뒤 코드 소비가 잠금 대기 초과(`AUTH_044`)로 실패하면 챌린지가 이미 없어 1단계부터 다시 한다.
+  - 6자리 대입은 2단계 시도 제한이 막는다(창당 5회 — 창당 맞힐 확률 약 5 × 3/10^6). 다만 창이 끝나면 다시 5회 시도할 수 있어 1년 연속 시도의 성공 확률 상한은 약 40%다. 점증 잠금 또는 `ADMIN_OTP_LOGIN` 시도 초과 경보를 후속으로 둔다.
+  - 같은 챌린지의 동시 2단계는 GETDEL 이 한쪽만 통과시킨다. 진 쪽이 낸 복구 코드는 소비되지 않고 남는다.
+  - TOTP 로 로그인할 때 저장된 비밀이 이전 키의 암호문이면 같은 UPDATE 에서 현재 키로 다시 암호화한다(키 회전, `secret-management.md`). 복구 코드 로그인은 다시 암호화하지 않는다.
 
 ### 11-2. 식별자 공간 (`sub`)
 
@@ -901,6 +913,9 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   - `action` — 대문자 스네이크(`ADMIN_LOGIN` · `MEMBER_SEARCH` 등, 정본은 `AdminAuditAction`). 로그 검색 키라 한번 정한 이름을 바꾸지 않는다.
     관리자 OTP(#238)는 `ADMIN_OTP_ENROLL`(등록 확인) · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` 이고 대상은 `member:<본인 id>` 다. 성공 · 실패를 모두 남기되
     판정 전 실패(시도 제한 429 · 계수기 장애 503)는 감사에 남기지 않는다. 비밀 · 코드 · 복구 코드 · 비밀번호는 싣지 않는다. 등록 시작(비밀 발급)은 확인 전에는 아무것도 켜지지 않아 남기지 않는다.
+    **로그인 2단계(#238 PR-B)는 `ADMIN_LOGIN_PASSWORD_VERIFIED`(1단계 비밀번호 통과)와 `ADMIN_LOGIN`(2단계 결과)을 쓴다** — 1단계 통과는 `target=member:<id> result=SUCCESS`, 2단계 성공은 `ADMIN_LOGIN` 성공,
+    대상 관리자를 안 뒤의 2단계 실패(코드 틀림 · 재사용 · 그 사이 비활성화 · 잠금 대기)가 `ADMIN_LOGIN` 실패(`actorMemberId=- target=member:<id>`)다. 챌린지가 무효라 대상을 모르는 실패 ·
+    2단계 시도 제한 429 · 계수기 장애 503 은 남기지 않는다. TOTP 였는지 복구 코드였는지는 싣지 않는다 — 감사 조회 결과로 어떤 코드를 썼는지 드러나지 않게.
   - `actorMemberId` — 행위한 관리자의 `member.id`(access 토큰의 `sub`). 요청 본문 값을 쓰지 않는다.
   - `target` — 대상 리소스 · 조건(`member:<id>` · `members?role=..&page=..&size=..`).
   - `result` — `SUCCESS` · `FAILURE`. 실패 이유(회원 없음 · 비밀번호 틀림 · 고객 계정)는 나누지 않는다.
@@ -952,7 +967,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   조회는 `GET /api/v1/admin/shipping-policies/domestic/histories`(ADMIN, `api-design-guide.md` §6-2). append-only 라 고치거나 지우는 API 가 없다.
   `adminDisplayName` 은 auth-service 표시 이름 벌크 조회가 마스킹해 준 값이다 (#322). 원문 이름은 delivery 에 들어오지 않는다.
   공통 감사 로그(#163 · #192)가 생기면 이 행위를 그쪽에도 함께 남길지 재검토한다.
-- 적용 대상 (#6): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade`), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
+- 적용 대상 (#6 · #238): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade` — 1단계 · 2단계), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
 - 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` — `action=JOB_CANCEL target=job:<id>`, operations-service `JobAdminAuditLogAdapter`). 작업 목록 · 상세 조회는 남기지 않는다 —
   payload · 결과 · 오류에 개인정보 원문을 두지 않는 규칙(`architecture-guide.md` §10)이라 읽기가 개인정보 열람이 아니다. 결과 파일 링크 발급(#212 PR-E)은 남긴다.
 
@@ -1105,12 +1120,17 @@ IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존
 | `ADMIN_LOGIN` | `POST /api/v1/auth/admin/login` | `auth:admin-login-attempt:{emailHmac}` | 로그인과 같은 값, 창은 따로 | 429 `AUTH_040` | **지우지 않는다** (§14-2) | 503 `AUTH_013` (fail-closed) |
 | `SIGN_UP` | `POST /api/v1/auth/sign-up` | `auth:sign-up-attempt:{emailHmac}` | 5회 · 10분 (`sign-up.max-attempts` · `sign-up.window`) | 429 `AUTH_041` | 지우지 않는다 | 세지 않고 통과 (fail-open) |
 | `ADMIN_OTP` (#238) | `POST /api/v1/admin/me/otp` · `…/otp/deactivation` · `…/otp/recovery-codes` | `auth:admin-otp-attempt:{memberId}` | 로그인과 같은 값, 창은 따로 | 429 `AUTH_043` | 지운다(DEL) | 503 `AUTH_013` (fail-closed) |
+| `ADMIN_OTP_LOGIN` (#238 PR-B) | `POST /api/v1/auth/admin/login/otp` | `auth:admin-otp-login-attempt:{memberId}` | 로그인과 같은 값, 재인증과 창은 따로 | 429 `AUTH_043` | **지우지 않는다** | 503 `AUTH_013` (fail-closed) |
 
 - 횟수는 1~100, 창은 1분~1시간이다(`LoginAttemptPolicy` — 벗어나면 기동하지 않는다). 키 형식 · TTL 은 `coding-conventions.md` §9-7 이다.
 - **관리자 OTP 코드 시도(`ADMIN_OTP`, #238)** 는 6자리 코드 대입을 막는다 — 주체는 이메일이 아니라 access 토큰의 memberId(개인정보가 아니라 HMAC 없이 키에 넣는다)이고,
   비밀번호 · 코드를 보기 전에 요청마다 1회 센다(비밀번호가 틀려도 센다). **`auth.login-guard.enabled=false` 여도 센다** — 비상 스위치가 OTP 대입까지 열지 않는다.
   `LoginGuardProcessor#admitAdminOtp` · `#clearAdminOtp` 로만 받고 이메일 경로(`admit` · `clear`)에 넘기면 바로 실패한다. 잠금 전환 로그에는 memberId 를 그대로 남긴다.
-  로그인 2단계(PR-B) 창을 이 창과 나눌지는 PR-B 착수 전에 정한다 — 같은 창이면 access 토큰 보유자가 틀린 재인증을 반복해 진짜 관리자의 로그인 2단계를 잠글 수 있다.
+  **로그인 2단계(`ADMIN_OTP_LOGIN`, PR-B)는 이 창과 나눈다(결정 2026-10-29).** 같은 창이면 access 토큰만 가진 사람이 틀린 재인증을 반복해 진짜 관리자의 로그인 2단계를
+  잠근다(세션이 끝나면 다시 들어오지 못한다). 2단계 창의 주체 · 켜짐 · 장애 규칙은 같고, `LoginGuardProcessor#admitAdminOtpLogin` 으로만 받는다(짝이 되는 clear 가 없다).
+  **2단계는 성공해도 창을 지우지 않는다** — 관리자 로그인(§14-2)과 같은 이유로, 성공 DEL 이 있으면 비밀번호를 아는 쪽이 한 번 맞힐 때마다(예: 훔친 복구 코드) 6자리
+  대입 횟수를 다시 채운다. 대가로 관리자도 창 안에서 2단계를 허용 횟수 넘게 시도하면(성공 포함) 창이 끝날 때까지 429 다 — §14-4 비상 절차 1 로 푼다.
+  챌린지는 1단계를 다시 하면 새로 나오지만 창은 memberId 단위라 챌린지를 바꿔도 새 창이 열리지 않는다.
 - **단위는 정규화한 이메일의 HMAC** 이다 — 로그인 · 관리자 로그인 Facade 는 `strip().toLowerCase(ROOT)` 를 한 번 하고 같은 값을 시도 제한 · 회원 조회(고객 로그인은 창 지우기도)에 넘긴다.
   가입 Facade 는 받은 이메일을 그대로 넘긴다 — `LoginGuardProcessor` 가 받은 값에 언제나 `Member.canonicalEmail` 을 적용하므로(멱등) 두 경로 모두 저장 · 조회 키와 같은 형태로 센다.
   대소문자 · 앞뒤 공백만 바꿔 새 창을 열 수 없다. 해시는 HMAC-SHA256 앞 16바이트 base64url 22자(`AUTH_LOGIN_GUARD_HASH_KEY`, 게이트웨이 `ClientIpHasher` 와 같은 형식)이고
@@ -1124,7 +1144,8 @@ IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존
 
 ```text
 고객 로그인:   정규화(1회) → admit → findByEmail → BCrypt 비교 → (성공 시) clear → 토큰 발급
-관리자 로그인: 정규화(1회) → admit → findByEmail → BCrypt 비교 · 관리자 확인 → 토큰 발급   (clear 없음)
+관리자 로그인: 정규화(1회) → admit → findByEmail → BCrypt 비교 · 관리자 확인 → (OTP 미등록) 토큰 발급 / (OTP 등록) 챌린지 발급   (clear 없음)
+관리자 2단계:  챌린지 조회 → admitAdminOtpLogin → 활성 관리자 → 코드 확인 → 잠금 + 코드 소비 → 챌린지 GETDEL → 토큰 발급   (clear 없음)
 회원가입:      admit(Processor 가 정규화) → BCrypt 해시 → existsByEmail · 저장
 ```
 

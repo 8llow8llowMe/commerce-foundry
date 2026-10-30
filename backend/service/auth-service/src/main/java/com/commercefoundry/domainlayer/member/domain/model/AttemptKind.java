@@ -22,9 +22,16 @@ public enum AttemptKind {
     SIGN_UP_IP,
 
     /**
-     * 관리자 OTP 코드 시도(#238) — 등록 확인 · 해제 · 복구 코드 재발급(PR-A2). 주체는 이메일이 아니라 관리자 memberId(10진 문자열)다.
-     * 6자리 코드 대입을 막는 장치라 {@code auth.login-guard.enabled=false} 여도 센다. 허용 횟수 · 창은 로그인과 같은 값이다.
-     * 로그인 2단계(PR-B) 창을 이 창과 나눌지는 PR-B 착수 전에 정한다 — 같은 창이면 토큰 보유자가 틀린 재인증으로 로그인 2단계를 잠글 수 있다.
+     * 관리자 OTP 재인증 코드 시도(#238) — 등록 확인 · 해제 · 복구 코드 재발급(PR-A2). 주체는 이메일이 아니라 관리자 memberId(10진 문자열)다.
+     * 6자리 코드 대입을 막는 장치라 {@code auth.login-guard.enabled=false} 여도 센다. 허용 횟수 · 창은 로그인과 같은 값이다. 성공하면 창을 지운다.
+     * 로그인 2단계는 이 창을 쓰지 않는다({@link #ADMIN_OTP_LOGIN}).
      */
-    ADMIN_OTP
+    ADMIN_OTP,
+
+    /**
+     * 관리자 로그인 2단계 코드 시도(#238 PR-B) — {@code POST /api/v1/auth/admin/login/otp}. 주체 · 켜짐 규칙 · 허용 횟수 · 창은 {@link #ADMIN_OTP} 와 같다.
+     * <b>재인증 창과 나눈다</b> — 같은 창이면 access 토큰만 가진 사람이 틀린 재인증을 반복해 진짜 관리자의 로그인 2단계를 잠근다.
+     * <b>성공해도 창을 지우지 않는다</b>({@link #ADMIN_LOGIN} 과 같은 이유) — 성공 DEL 이 있으면 비밀번호를 아는 쪽이 한 번 맞힐 때마다 대입 횟수를 다시 채운다.
+     */
+    ADMIN_OTP_LOGIN
 }

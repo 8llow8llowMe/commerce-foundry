@@ -13,7 +13,7 @@ import java.time.Duration;
  * 해시 방식과 키 형식은 구현이 정한다 — 부르는 쪽은 종류와 이메일만 넘기고, 구현은 이메일 원문을 키 · 로그에 남기지 않는다.
  *
  * <p>주체는 종류가 정한다 — 로그인 · 관리자 로그인 · 회원가입은 이메일, {@link AttemptKind#SIGN_UP_IP} 는 게이트웨이의 불투명 IP 식별자,
- * {@link AttemptKind#ADMIN_OTP}(#238)는 관리자 memberId 의 10진 문자열이다. 이메일이 아닌 주체에는 정규화 · 해시를 하지 않는다.
+ * {@link AttemptKind#ADMIN_OTP} · {@link AttemptKind#ADMIN_OTP_LOGIN}(#238)은 관리자 memberId 의 10진 문자열이다. 이메일이 아닌 주체에는 정규화 · 해시를 하지 않는다.
  *
  * <p>{@link #subjectTag} 를 뺀 모든 메서드는 저장소에 닿지 못하면 {@link MemberException}({@code TOKEN_STORE_UNAVAILABLE}, 503)을 던진다
  * ({@link #subjectTag} 는 저장소를 부르지 않는다). 그때 요청을 막을지 통과시킬지는 부르는 쪽이 정한다. 허용 횟수 판정도 부르는 쪽이 한다 — 저장소는 세기만 한다.

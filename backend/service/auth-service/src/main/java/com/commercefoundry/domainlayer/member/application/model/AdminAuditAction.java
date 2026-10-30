@@ -7,6 +7,12 @@ package com.commercefoundry.domainlayer.member.application.model;
 public enum AdminAuditAction {
 
     ADMIN_LOGIN,
+    /**
+     * OTP 를 등록한 관리자가 로그인 1단계(비밀번호)를 통과해 2단계 챌린지를 받았다 (#238 PR-B). 로그인 성공({@code ADMIN_LOGIN})과 다르다 — 아직 토큰이 나가지 않았다.
+     * 성공 행만 있다(1단계 실패는 {@code ADMIN_LOGIN} 실패다). 행위자는 모르는 것으로({@code -}) 두고 대상이 {@code member:<id>} 다 — 인증이 끝나지 않았다.
+     * 이 줄이 늘어나는데 {@code ADMIN_LOGIN} 성공이 따라오지 않으면 비밀번호가 새어 2단계를 대입하는 중일 수 있다.
+     */
+    ADMIN_LOGIN_PASSWORD_VERIFIED,
     MEMBER_SEARCH,
     /** 가게 운영자 계정을 추가했다 (#193). */
     ADMIN_CREATE,

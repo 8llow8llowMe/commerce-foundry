@@ -57,6 +57,9 @@ public final class MemberValidationMessage {
     public static final String SOCIAL_STATE_INVALID = "AUTH_151:state가 올바르지 않습니다.";
     public static final String SOCIAL_VERIFIER_INVALID = "AUTH_152:verifier가 올바르지 않습니다.";
 
+    /** 관리자 로그인 2단계 (#238 PR-B). 코드는 147 · 149 를 다시 쓴다. 챌린지 모양 오류 · 만료는 필드 검증이 아니라 AUTH_034 다. */
+    public static final String ADMIN_OTP_CHALLENGE_REQUIRED = "AUTH_153:인증 요청 토큰(challengeToken)은 필수입니다.";
+
     private MemberValidationMessage() {
     }
 }

@@ -21,6 +21,11 @@ public record AdminAuditRecord(AdminAuditAction action, Long actorMemberId, Stri
         return new AdminAuditRecord(AdminAuditAction.ADMIN_LOGIN, adminMemberId, member(adminMemberId), true);
     }
 
+    /** OTP 등록 관리자의 로그인 1단계 통과 (#238 PR-B) — 인증이 끝나지 않아 행위자는 null 이고 대상이 그 관리자다. */
+    public static AdminAuditRecord adminLoginPasswordVerified(long adminMemberId) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_LOGIN_PASSWORD_VERIFIED, null, member(adminMemberId), true);
+    }
+
     /** 노린 관리자 계정만 대상으로 남긴다 — 회원 없음 · 고객 계정이면 대상이 없다. */
     public static AdminAuditRecord adminLoginFailed(OptionalLong targetAdminMemberId) {
         String target = targetAdminMemberId.isPresent() ? member(targetAdminMemberId.getAsLong()) : null;

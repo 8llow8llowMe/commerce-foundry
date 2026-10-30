@@ -15,6 +15,9 @@ public interface AdminAuditPort {
     /** 관리자 로그인 성공 — {@code AdminAuthWebFacade#login}. */
     void adminLoginSucceeded(long adminMemberId);
 
+    /** OTP 를 등록한 관리자가 로그인 1단계(비밀번호)를 통과해 2단계 챌린지를 받았다 (#238 PR-B). 로그인 성공이 아니다 — 토큰은 2단계 성공 때 나간다. */
+    void adminLoginPasswordVerified(long adminMemberId);
+
     /**
      * 관리자 로그인 실패 — 행위자를 모른다(이메일 원문도 남기지 않는다). 응답은 이유를 나누지 않지만 감사 로그에는 <b>노린 관리자 계정</b>을 남긴다 —
      * 한 관리자 계정에 몰리는 비밀번호 대입을 찾을 수 있게. 회원 없음 · 고객 계정이면 대상이 없다(고객 memberId 는 남기지 않는다).

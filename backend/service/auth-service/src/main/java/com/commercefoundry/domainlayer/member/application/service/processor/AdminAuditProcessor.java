@@ -22,10 +22,23 @@ public class AdminAuditProcessor {
         adminAuditPort.adminLoginSucceeded(adminMemberId);
     }
 
+    /** OTP 등록 관리자의 로그인 1단계 통과 (#238 PR-B) — 로그인 성공과 다른 행위({@code ADMIN_LOGIN_PASSWORD_VERIFIED})다. */
+    public void adminLoginPasswordVerified(long adminMemberId) {
+        adminAuditPort.adminLoginPasswordVerified(adminMemberId);
+    }
+
     /** 노린 계정이 관리자일 때만 그 memberId 를 대상으로 남긴다 — 고객 memberId 는 관리자 감사 로그에 남기지 않는다. */
     public void adminLoginFailed(Optional<Member> candidate) {
         OptionalLong target = candidate.filter(Member::isAdmin).map(member -> OptionalLong.of(member.id())).orElse(OptionalLong.empty());
         adminAuditPort.adminLoginFailed(target);
+    }
+
+    /**
+     * 관리자 로그인 2단계 실패 (#238 PR-B) — 챌린지로 대상 관리자를 안 뒤의 실패다. 1단계 실패와 같은 {@code ADMIN_LOGIN} 실패(대상 {@code member:<id>})로 남긴다.
+     * 코드가 TOTP 였는지 복구 코드였는지는 싣지 않는다.
+     */
+    public void adminLoginSecondFactorFailed(long adminMemberId) {
+        adminAuditPort.adminLoginFailed(OptionalLong.of(adminMemberId));
     }
 
     /** @param role 역할 조건. 없으면 null(전체) */

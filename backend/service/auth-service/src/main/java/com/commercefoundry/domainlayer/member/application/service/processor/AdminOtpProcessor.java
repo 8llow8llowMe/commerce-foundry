@@ -38,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>{@link #disable} · {@link #replaceRecoveryCodes} — 자격 행 잠금 → 코드 소비(조건부 UPDATE) → 삭제 · 교체를 <b>한 트랜잭션</b>에서 한다. 소비가 0행이면(같은 코드
  *       재사용 · 다른 요청이 먼저 씀 · 재발급으로 사라진 복구 코드) {@code AUTH_035} 이고 아무것도 바뀌지 않는다. 소비와 결과가 갈라지지 않는다</li>
  *   <li>{@link #confirm} — 자격 저장 + 복구 코드 넣기를 한 트랜잭션에서 한다. 동시 확인 두 건은 유니크 키로 한쪽이 {@code AUTH_037} 이다</li>
+ *   <li>{@link #consumeForLogin} — 로그인 2단계(PR-B)도 {@link #resolveProof} 로 밖에서 확인하고, 자격 잠금 → 코드 소비만 한 트랜잭션에서 한다</li>
  * </ul>
  */
 @Slf4j
@@ -52,6 +53,12 @@ public class AdminOtpProcessor {
     private final PasswordEncoder passwordEncoder;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final AdminOtpProperties adminOtpProperties;
+
+    /** 확정 자격이 있는가 — 관리자 로그인 1단계가 2단계를 요구할지 정한다 (#238 PR-B). 비밀을 복호화하지 않는다(암호화 키 문제와 무관하다). */
+    @Transactional(readOnly = true)
+    public boolean isEnrolled(long memberId) {
+        return adminOtpRepositoryPort.findConfirmedAt(memberId).isPresent();
+    }
 
     /** 자격과 남은 복구 코드 수를 한 읽기 트랜잭션에서 읽는다. 비밀을 복호화하지 않는다. */
     @Transactional(readOnly = true)
@@ -129,7 +136,7 @@ public class AdminOtpProcessor {
     }
 
     /**
-     * 해제 · 재발급의 두 번째 인자를 트랜잭션 밖에서 확인한다 — 소비는 하지 않는다. 앞뒤 공백은 지운다.
+     * 해제 · 재발급의 두 번째 인자(로그인 2단계의 코드도)를 트랜잭션 밖에서 확인한다 — 소비는 하지 않는다. 앞뒤 공백은 지운다.
      * <ul>
      *   <li>6자리 숫자면 TOTP — 자격의 비밀로 검증하고, 이미 쓴 step 이면 여기서 거절한다</li>
      *   <li>복구 코드 형식이면 정규화한 뒤 미사용 코드와 BCrypt 로 비교한다</li>
@@ -163,6 +170,15 @@ public class AdminOtpProcessor {
     public void disable(long memberId, AdminOtpProof proof, Instant now) {
         lockAndConsume(memberId, proof, now);
         adminOtpRepositoryPort.deleteByMemberId(memberId);
+    }
+
+    /**
+     * 관리자 로그인 2단계의 코드 소비 (#238 PR-B) — 자격 잠금 → 코드 소비(조건부 UPDATE)만 한 트랜잭션에서 한다. 해제 · 재발급과 같은 잠금으로 줄 서므로
+     * 해제와 겹친 로그인이 해제된 자격의 코드로 통과하지 못한다(앞선 해제가 이기면 {@code AUTH_036}). TOTP 소비가 이전 키의 암호문이면 같은 문장에서 현재 키로 다시 암호화한다.
+     */
+    @Transactional
+    public void consumeForLogin(long memberId, AdminOtpProof proof, Instant now) {
+        lockAndConsume(memberId, proof, now);
     }
 
     /** 자격 잠금 → 코드 소비 → 복구 코드 교체(이전 코드는 모두 지운다). 한 트랜잭션이다. */

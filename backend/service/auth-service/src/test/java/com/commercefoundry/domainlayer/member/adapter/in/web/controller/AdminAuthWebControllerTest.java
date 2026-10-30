@@ -7,8 +7,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.domainlayer.member.adapter.in.web.dto.request.AdminLoginRequest;
+import com.commercefoundry.domainlayer.member.adapter.in.web.dto.request.AdminOtpLoginRequest;
 import com.commercefoundry.domainlayer.member.adapter.in.web.dto.response.AdminLoginResponse;
 import com.commercefoundry.domainlayer.member.application.command.AdminLoginCommand;
+import com.commercefoundry.domainlayer.member.application.command.AdminOtpLoginCommand;
 import com.commercefoundry.domainlayer.member.application.exception.LoginAttemptLimitedException;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
@@ -34,7 +36,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
- * 관리자 로그인 API 의 HTTP 계약 (#6) — 익명 공개, access 만 있는 응답 · {@code Cache-Control: no-store}, 검증 코드(130~), 실패 코드(030).
+ * 관리자 로그인 API 의 HTTP 계약 (#6 · #238 PR-B) — 익명 공개, access 또는 2단계 챌린지 응답 · {@code Cache-Control: no-store}, 검증 코드(130~ · 147 · 149 · 153), 실패 코드.
  */
 @WebMvcTest(AdminAuthWebController.class)
 @Import({
@@ -44,6 +46,9 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 class AdminAuthWebControllerTest {
 
     private static final String LOGIN = "/api/v1/auth/admin/login";
+    private static final String LOGIN_OTP = "/api/v1/auth/admin/login/otp";
+    private static final String CHALLENGE = "n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg";
+    private static final AdminLoginResponse OTP_REQUIRED = AdminLoginResponse.builder().otpRequired(true).challengeToken(CHALLENGE).challengeExpiresIn(300L).build();
 
     @Autowired
     private MockMvcTester mvc;
@@ -52,9 +57,9 @@ class AdminAuthWebControllerTest {
     private AdminAuthWebUseCase adminAuthWebUseCase;
 
     @Test
-    @DisplayName("익명으로 200 이고 access 두 칸만 주며(refresh 없음) Cache-Control: no-store 다 — 요청은 그대로 커맨드가 된다")
+    @DisplayName("익명으로 200 이고 access 두 칸을 주며(refresh 없음) Cache-Control: no-store 다 — 요청은 그대로 커맨드가 된다")
     void ok() {
-        given(adminAuthWebUseCase.login(any())).willReturn(AdminLoginResponse.builder().accessToken("access.jwt.value").accessTokenExpiresIn(1800).build());
+        given(adminAuthWebUseCase.login(any())).willReturn(AdminLoginResponse.builder().accessToken("access.jwt.value").accessTokenExpiresIn(1800L).build());
 
         MvcTestResult result = login("{\"email\":\"Admin@Example.com\",\"password\":\"admin-password-1\"}");
 
@@ -70,7 +75,7 @@ class AdminAuthWebControllerTest {
     @Test
     @DisplayName("고객 토큰을 붙여 와도 막지 않는다(permitAll) — 판정은 이메일 · 비밀번호다")
     void customerTokenIsNotRejected() {
-        given(adminAuthWebUseCase.login(any())).willReturn(AdminLoginResponse.builder().accessToken("access.jwt.value").accessTokenExpiresIn(1800).build());
+        given(adminAuthWebUseCase.login(any())).willReturn(AdminLoginResponse.builder().accessToken("access.jwt.value").accessTokenExpiresIn(1800L).build());
         String customer = TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, MemberRole.CUSTOMER).tokenValue();
 
         MvcTestResult result = mvc.post().uri(LOGIN).header(HttpHeaders.AUTHORIZATION, "Bearer " + customer)
@@ -132,13 +137,112 @@ class AdminAuthWebControllerTest {
     }
 
     @Test
-    @DisplayName("요청 · 응답 DTO 의 toString 에 이메일 · 비밀번호 · 토큰 원문이 없다")
+    @DisplayName("요청 · 응답 DTO 의 toString 에 이메일 · 비밀번호 · 토큰 · 챌린지 · 코드 원문이 없다")
     void toStringHidesSecrets() {
         assertThat(new AdminLoginRequest("admin@example.com", "admin-password-1").toString()).doesNotContain("admin@example.com", "admin-password-1");
-        assertThat(AdminLoginResponse.builder().accessToken("access.jwt.value").accessTokenExpiresIn(1800).build().toString()).doesNotContain("access.jwt.value");
+        assertThat(AdminLoginResponse.builder().accessToken("access.jwt.value").accessTokenExpiresIn(1800L).build().toString()).doesNotContain("access.jwt.value");
+        assertThat(OTP_REQUIRED.toString()).doesNotContain(CHALLENGE);
+        assertThat(new AdminOtpLoginRequest(CHALLENGE, "123456").toString()).doesNotContain(CHALLENGE, "123456");
+    }
+
+    @Test
+    @DisplayName("OTP 등록 관리자의 1단계는 200 · no-store 이고 토큰 없이 otpRequired=true · challengeToken · challengeExpiresIn 만 준다 (#238)")
+    void otpRequired() {
+        given(adminAuthWebUseCase.login(any())).willReturn(OTP_REQUIRED);
+
+        MvcTestResult result = login("{\"email\":\"admin@example.com\",\"password\":\"admin-password-1\"}");
+
+        assertThat(result).hasStatusOk();
+        assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.otpRequired").isEqualTo(true);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.challengeToken").isEqualTo(CHALLENGE);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.challengeExpiresIn").asNumber().isEqualTo(300);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.accessToken").isNull();
+        assertThat(result).bodyJson().extractingPath("$.dataBody.accessTokenExpiresIn").isNull();
+    }
+
+    @Test
+    @DisplayName("OTP 미등록 관리자의 1단계는 지금과 같이 토큰이고 otpRequired=false · 챌린지 칸은 null 이다(하위 호환)")
+    void otpNotRequired() {
+        given(adminAuthWebUseCase.login(any()))
+            .willReturn(AdminLoginResponse.builder().accessToken("access.jwt.value").accessTokenExpiresIn(1800L).otpRequired(false).build());
+
+        MvcTestResult result = login("{\"email\":\"admin@example.com\",\"password\":\"admin-password-1\"}");
+
+        assertThat(result).bodyJson().extractingPath("$.dataBody.otpRequired").isEqualTo(false);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.challengeToken").isNull();
+        assertThat(result).bodyJson().extractingPath("$.dataBody.challengeExpiresIn").isNull();
+    }
+
+    @Test
+    @DisplayName("2단계는 익명으로 200 · no-store 이고 토큰을 준다 — 요청은 그대로 커맨드가 된다 (#238)")
+    void otpLogin() {
+        given(adminAuthWebUseCase.loginWithOtp(any()))
+            .willReturn(AdminLoginResponse.builder().accessToken("access.jwt.value").accessTokenExpiresIn(1800L).otpRequired(false).build());
+
+        MvcTestResult result = otp("{\"challengeToken\":\"%s\",\"code\":\" abcde-fgh23 \"}".formatted(CHALLENGE));
+
+        assertThat(result).hasStatusOk();
+        assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.accessToken").isEqualTo("access.jwt.value");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.otpRequired").isEqualTo(false);
+        verify(adminAuthWebUseCase).loginWithOtp(new AdminOtpLoginCommand(CHALLENGE, " abcde-fgh23 "));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+        "챌린지 없음 | {\"code\":\"123456\"}                                                   | AUTH_153 | challengeToken",
+        "챌린지 공백 | {\"challengeToken\":\" \",\"code\":\"123456\"}                          | AUTH_153 | challengeToken",
+        "코드 없음   | {\"challengeToken\":\"x\"}                                             | AUTH_147 | code",
+        "코드 5자리  | {\"challengeToken\":\"x\",\"code\":\"12345\"}                          | AUTH_149 | code",
+        "코드 형식   | {\"challengeToken\":\"x\",\"code\":\"ABCDE-FGH2O\"}                    | AUTH_149 | code",
+        "코드 너무 김 | {\"challengeToken\":\"x\",\"code\":\"123456123456123456123456123456123\"} | AUTH_149 | code"
+    })
+    @DisplayName("2단계 필드 검증은 400 · 챌린지 153 · 코드 147 · 149 다")
+    void otpInvalid(String name, String body, String code, String field) {
+        MvcTestResult result = otp(body);
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo(field);
+        verifyNoInteractions(adminAuthWebUseCase);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+        "OTP_CHALLENGE_INVALID | 400 | AUTH_034",
+        "OTP_CODE_INVALID      | 400 | AUTH_035",
+        "OTP_BUSY              | 409 | AUTH_044",
+        "OTP_UNAVAILABLE       | 503 | AUTH_039",
+        "TOKEN_STORE_UNAVAILABLE | 503 | AUTH_013"
+    })
+    @DisplayName("2단계 실패는 도메인 코드 그대로의 봉투다")
+    void otpFailures(MemberErrorCode errorCode, int status, String code) {
+        given(adminAuthWebUseCase.loginWithOtp(any())).willThrow(new MemberException(errorCode));
+
+        MvcTestResult result = otp("{\"challengeToken\":\"%s\",\"code\":\"123456\"}".formatted(CHALLENGE));
+
+        assertThat(result).hasStatus(status);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+    }
+
+    @Test
+    @DisplayName("2단계 시도 초과는 429 · AUTH_043 + Retry-After 다")
+    void otpAttemptLimited() {
+        given(adminAuthWebUseCase.loginWithOtp(any())).willThrow(new LoginAttemptLimitedException(MemberErrorCode.OTP_ATTEMPT_LIMITED, Duration.ofSeconds(120)));
+
+        MvcTestResult result = otp("{\"challengeToken\":\"%s\",\"code\":\"123456\"}".formatted(CHALLENGE));
+
+        assertThat(result).hasStatus(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(result.getResponse().getHeader(HttpHeaders.RETRY_AFTER)).isEqualTo("120");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("AUTH_043");
     }
 
     private MvcTestResult login(String body) {
         return mvc.post().uri(LOGIN).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    }
+
+    private MvcTestResult otp(String body) {
+        return mvc.post().uri(LOGIN_OTP).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
     }
 }
