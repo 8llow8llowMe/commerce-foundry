@@ -10,6 +10,10 @@ import {
   BODY_CHARACTER,
   LABEL_WITHOUT_URL,
   LINK_RULE,
+  isMediaUrlType,
+  mediaCountMessage,
+  MEDIA_URL_NOT_STORAGE,
+  MEDIA_URL_REQUIRED,
   PERIOD_FORMAT,
   PERIOD_ORDER,
   PRODUCT_DUPLICATED,
@@ -49,14 +53,21 @@ const VALIDATION: Record<string, [string, string]> = {
   PRODUCT_165: ['period', PERIOD_FORMAT],
 };
 
-/** 서버 칸 경로(`items[2].media.altText`) → 폼 칸 키. 아이템은 미디어 → 상품 순으로 보낸다(`sectionRequest`) */
+/**
+ * 서버 칸 경로(`items[2].media.altText`) → 폼 칸 키. 아이템은 미디어 → 상품 순으로 보낸다(`sectionRequest`).
+ * 미디어의 대체 텍스트 · 주소(pcUrl, 주소로 넣는 유형의 이미지 주소 칸)는 그 미디어의 칸, 그 밖은 미디어 묶음이다.
+ */
 function formKey(path: string, mediaCount: number): string {
   if (/^(startAt|endAt|periodInRange)$/.test(path)) return 'period';
   if (/^(title|subtitle|body|linkUrl|linkLabel)$/.test(path)) return path;
   const item = /^items\[(\d+)\]/.exec(path);
   if (item) {
     const index = Number(item[1]);
-    if (index < mediaCount) return path.endsWith('.altText') ? `media.${index}.altText` : 'media';
+    if (index < mediaCount) {
+      if (path.endsWith('.media.altText')) return `media.${index}.altText`;
+      if (path.endsWith('.media.pcUrl')) return `media.${index}.url`;
+      return 'media';
+    }
     return 'products';
   }
   if (path === 'items') return mediaCount > 0 ? 'media' : 'products';
@@ -68,6 +79,8 @@ function fieldMessage(code: string, key: string): string {
     return key === 'body' ? BODY_CHARACTER : SINGLE_LINE_ONLY;
   }
   if (code === 'PRODUCT_154') return TOO_LONG.altText;
+  if (code === 'PRODUCT_152') return MEDIA_URL_REQUIRED;
+  if (code === 'PRODUCT_153') return TOO_LONG.mediaUrl;
   return VALIDATION[code]?.[1] ?? CHECK_FIELDS;
 }
 
@@ -113,10 +126,21 @@ export function saveFailure(
   }
 
   const itemsKey = context.type === 'PRODUCT_PICK' ? 'products' : 'media';
+  // 주소로 넣는 유형(LOOK)의 054 는 운영자가 넣은 주소가 저장소 밖이라는 뜻이다 — 주소 칸을 고치면 풀린다
+  const urlEditable = isMediaUrlType(context.type);
   switch (cause.code) {
     case 'PRODUCT_047':
       return { kind: 'errors', errors: { form: [ITEM_NOT_ALLOWED] } };
     case 'PRODUCT_048':
+      if (context.type === 'LOOK') {
+        return {
+          kind: 'errors',
+          errors: withSummary({
+            media: [mediaCountMessage(context.type)],
+            products: [productCountMessage(context.type)],
+          }),
+        };
+      }
       return {
         kind: 'errors',
         errors: withSummary({
@@ -138,6 +162,10 @@ export function saveFailure(
     case 'PRODUCT_053':
       return { kind: 'errors', errors: withSummary({ linkLabel: [LABEL_WITHOUT_URL] }) };
     case 'PRODUCT_054':
+      if (urlEditable) {
+        return { kind: 'errors', errors: withSummary({ media: [MEDIA_URL_NOT_STORAGE] }) };
+      }
+      return { kind: 'errors', errors: { form: [MEDIA_STORAGE_UNAVAILABLE] } };
     case 'PRODUCT_055':
       return { kind: 'errors', errors: { form: [MEDIA_STORAGE_UNAVAILABLE] } };
     case 'PRODUCT_056':
@@ -220,6 +248,10 @@ const PREVIEW_RULES: Record<string, string> = {
  * 미리보기의 미디어 저장소 오류(503 `PRODUCT_055` · 400 `PRODUCT_054`). 저장용 문구(`MEDIA_STORAGE_UNAVAILABLE`)와 달리 저장하지 않았다고 알린다.
  * BE 는 숨김 섹션까지 미디어 주소를 다시 판정하므로, 공개 주소가 없거나 바뀐 환경에서는 미디어 섹션이 하나라도 있으면 미리보기가 그려지지 않는다
  */
+/** 미리보기 400 `PRODUCT_054` — 저장소 밖 주소. 룩 섹션은 운영자가 주소를 넣으므로(#419) 그 칸을 먼저 보라고 안내한다 */
+export const PREVIEW_MEDIA_URL =
+  '쇼핑몰 이미지 저장소 밖의 이미지 주소가 있어 미리보기를 그리지 못했습니다. 룩 섹션의 이미지 주소를 확인해 주세요. 마지막으로 그린 미리보기를 그대로 두었습니다. 계속되면 개발 담당자에게 문의해 주세요.';
+
 export const PREVIEW_MEDIA_STORAGE =
   '이미지 · 영상 저장소 설정 문제로 미리보기를 그리지 못했습니다. 저장은 하지 않았고 마지막으로 그린 미리보기를 그대로 두었습니다. 계속되면 개발 담당자에게 문의해 주세요.';
 
@@ -271,8 +303,8 @@ const fail = (
  * 미리보기 실패 → 패널 안내. 어떤 실패든 마지막으로 그린 미리보기는 그대로 둔다(호출자).
  * - 400: 입력 확인 안내 + fieldErrors 의 `sections[i]` 로 섹션 위치를 짚는다. 섹션 규칙 오류(`PRODUCT_047~053`)는 코드별 문구
  * - 401: 저장 401 처럼 폼을 지키고 다시 로그인을 안내한다. 403: 권한 안내
- * - 503 `PRODUCT_055` · 400 `054`: 미리보기용 미디어 저장소 안내. 055 는 설정을 고친 뒤 입력을 바꾸지 않고도 다시 그려 볼 수 있게 다시 시도를 둔다
- *   (054 는 그 미디어 주소가 바뀌어야 풀린다)
+ * - 503 `PRODUCT_055`: 미리보기용 미디어 저장소 안내. 설정을 고친 뒤 입력을 바꾸지 않고도 다시 그려 볼 수 있게 다시 시도를 둔다
+ * - 400 `PRODUCT_054`: 저장소 밖 주소 — 룩 이미지 주소를 확인하라고 안내한다. 그 주소가 바뀌어야 풀려 다시 시도를 두지 않는다
  * - 429: 서버 문구 + `Retry-After` 동안 다시 시도를 막는다. 그 밖(503 · 연결 실패 · 5xx)은 다시 시도
  */
 export function previewFailure(
@@ -284,7 +316,7 @@ export function previewFailure(
   if (denied) return fail(PREVIEW_FORBIDDEN);
   if (!(cause instanceof ApiError)) return fail(PREVIEW_FAILED, { retry: true });
   if (cause.code === 'PRODUCT_055') return fail(PREVIEW_MEDIA_STORAGE, { retry: true });
-  if (cause.code === 'PRODUCT_054') return fail(PREVIEW_MEDIA_STORAGE);
+  if (cause.code === 'PRODUCT_054') return fail(PREVIEW_MEDIA_URL);
 
   if (cause.fieldErrors.length > 0) {
     const details: string[] = [];

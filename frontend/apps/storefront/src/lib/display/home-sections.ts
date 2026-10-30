@@ -5,6 +5,7 @@ import type {
   HomeLink,
   HomeMediaSlot,
   HomeSection,
+  LookSection,
   ProductPickSection,
   StorySection,
 } from '@cf/ui';
@@ -16,8 +17,8 @@ import type {
   DisplaySectionItem,
 } from './types';
 
-// 메인 전시 API(#63) 응답 → 메인 섹션(HomeSection). 섹션 노출 · 순서는 응답을 따르고, 레이아웃 변형(curtain · panel)과
-// 아직 API 로 옮기지 않은 블록(LOOK, #62)은 브랜드 설정(content.home)을 틀로 쓴다. 정본 규칙은 frontend/docs/architecture.md §10.
+// 메인 전시 API(#63) 응답 → 메인 섹션(HomeSection). 섹션 노출 · 순서는 응답을 따르고, 레이아웃 변형(curtain · panel)은
+// 브랜드 설정(content.home)을 틀로 쓴다. 그릴 수 없는 LOOK 은 설정의 LOOK 으로 대신한다(#419). 정본 규칙은 frontend/docs/architecture.md §10.
 
 /** 메인 전시 API 의 상품 픽 — 상품 카드를 응답에서 바로 받는다(브랜드 설정의 상품 픽은 source 로 목록 API 를 부른다) */
 export type DisplayProductPickSection = Omit<ProductPickSection, 'source'> & {
@@ -180,6 +181,32 @@ function toDetail(section: DisplaySectionItem): DetailSection | null {
   };
 }
 
+/**
+ * 룩(#419): 첫 그릴 미디어(영상은 포스터) + 입은 상품(응답 순서, 중복 없이). 구성품의 옵션 · SKU 는 응답에 없어 화면이 상품 상세로 받는다.
+ * 숨긴 상품은 BE 가 빼므로 상품이 없을 수 있다 — 그때는 사진 · 글 · 링크만 그린다. 그릴 미디어가 없으면 null(설정 LOOK 으로 대신한다).
+ */
+function toLook(section: DisplaySectionItem, labels: HomeLinkLabels): LookSection | null {
+  const [media] = mediaSlots(section.items);
+  if (!media) return null;
+  const productIds = [
+    ...new Set(
+      section.items.flatMap((item) => {
+        const id = item.itemType === 'PRODUCT' ? item.product?.productId : undefined;
+        return typeof id === 'string' ? [id] : [];
+      }),
+    ),
+  ];
+  return {
+    type: 'LOOK',
+    id: blockId(section),
+    title: section.title ?? '',
+    body: section.body,
+    media: { image: media.image, placeholder: '' },
+    productIds,
+    link: toLink(section.link, labels.more),
+  };
+}
+
 function isSectionItem(value: unknown): value is DisplaySectionItem {
   if (typeof value !== 'object' || value === null) return false;
   const section = value as Partial<DisplaySectionItem>;
@@ -206,7 +233,7 @@ export function readDisplaySections(body: unknown): DisplaySectionItem[] | null 
 /**
  * 응답 섹션을 응답 순서대로 메인 블록으로 바꾼다. 비었거나(상품이 모두 빠진 상품 픽 · 사진 없는 히어로 등) 모르는 유형은 건너뛴다.
  * - STORY 의 레이아웃은 브랜드 설정의 STORY 순서를 따른다(n 번째 STORY → 설정의 n 번째 STORY 레이아웃, 없으면 asymmetric)
- * - LOOK 은 룩 API(#62) 전까지 응답 자리에 브랜드 설정의 LOOK 을 한 번 그린다(설정에 없으면 건너뛴다)
+ * - LOOK 은 응답의 미디어 · 상품으로 그린다(#419). 그릴 미디어가 없으면 그 자리에 브랜드 설정의 LOOK 을 한 번만 그린다(설정에 없으면 건너뛴다)
  */
 export function toHomeBlocks(
   sections: DisplaySectionItem[],
@@ -236,7 +263,8 @@ export function toHomeBlocks(
         block = toDetail(section);
         break;
       case 'LOOK':
-        if (look && !lookUsed) {
+        block = toLook(section, labels);
+        if (!block && look && !lookUsed) {
           lookUsed = true;
           block = look;
         }

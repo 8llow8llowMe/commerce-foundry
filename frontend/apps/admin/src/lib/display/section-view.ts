@@ -17,12 +17,11 @@ export function itemSummary(section: DisplaySectionAdmin): string {
 }
 
 /**
- * 이 화면에서 내용을 고칠 수 있는 유형. LOOK 은 룩 기능(#62) 전까지 순서 · 노출만 바꾼다(스토어프론트도 LOOK 은 브랜드 설정을 그린다).
- * 모르는 유형은 고치지 않는다 — 폼이 그 유형의 규칙을 모른다.
+ * 이 화면에서 내용을 고칠 수 있는 유형. 모르는 유형은 순서 · 노출만 바꾼다 — 폼이 그 유형의 규칙을 모른다.
  */
 export function editableType(section: DisplaySectionAdmin): SectionTypeCode | null {
   const code = section.sectionType.code;
-  return isSectionType(code) && code !== 'LOOK' ? code : null;
+  return isSectionType(code) ? code : null;
 }
 
 export function sectionPeriod(section: DisplaySectionAdmin): string {

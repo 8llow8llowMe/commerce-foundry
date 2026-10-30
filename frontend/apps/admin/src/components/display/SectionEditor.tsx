@@ -7,6 +7,7 @@ import type { AccessDenied, FormErrors } from '@/lib/api-errors';
 import { saveFailure, withSummary } from '@/lib/display/errors';
 import {
   FIELDS_BY_TYPE,
+  isMediaUrlType,
   sectionRequest,
   sectionWarnings,
   TEXT_LABELS,
@@ -20,6 +21,7 @@ import {
   type DisplaySectionAdmin,
 } from '@/lib/display/types';
 import { MediaFields } from './MediaFields';
+import { MediaUrlFields } from './MediaUrlFields';
 import { ProductPickField } from './ProductPickField';
 
 /** 칸 아래 안내 — 스토어프론트 메인이 그 칸을 어떻게 쓰는지(frontend/docs/architecture.md §10) */
@@ -77,6 +79,7 @@ export function SectionEditor({
     formChanged.current?.(form);
   }, [form]);
   const fields = FIELDS_BY_TYPE[form.sectionType];
+  const mediaByUrl = isMediaUrlType(form.sectionType);
 
   const submit = async () => {
     if (saving) return;
@@ -160,8 +163,27 @@ export function SectionEditor({
           onChange={(patch) => set(patch)}
         />
 
-        {form.sectionType === 'PRODUCT_PICK' && (
+        {mediaByUrl && (
+          <MediaUrlFields
+            type={form.sectionType}
+            media={form.media}
+            errorsOf={errorsOf}
+            onChange={(media) => {
+              set({ media });
+              // 미디어 칸 오류 키는 줄 위치(`media.0.url`)라 줄을 넣고 빼면 엉뚱한 줄에 붙는다 — 미디어 오류를 모두 지운다
+              setErrors((current) =>
+                Object.fromEntries(
+                  Object.entries(current).filter(
+                    ([key]) => key !== 'media' && !key.startsWith('media.'),
+                  ),
+                ),
+              );
+            }}
+          />
+        )}
+        {(form.sectionType === 'PRODUCT_PICK' || form.sectionType === 'LOOK') && (
           <ProductPickField
+            min={ITEM_RANGES[form.sectionType].product[0]}
             max={ITEM_RANGES[form.sectionType].product[1]}
             surface="메인"
             products={form.products}
@@ -177,7 +199,7 @@ export function SectionEditor({
             }}
           />
         )}
-        {form.media.length > 0 && (
+        {!mediaByUrl && form.media.length > 0 && (
           <MediaFields
             type={form.sectionType}
             media={form.media}

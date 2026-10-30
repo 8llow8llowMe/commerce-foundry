@@ -332,10 +332,66 @@ describe('toHomeBlocks — 매핑', () => {
     });
   });
 
-  it('룩: 응답 자리에 브랜드 설정의 LOOK 을 한 번만 그린다(#62 전)', () => {
+  it('룩: 첫 그릴 미디어와 입은 상품(순서대로, 중복 없이) · 문구 · 링크를 그린다', () => {
+    const [block] = toHomeBlocks(
+      [
+        section('LOOK', '1', {
+          title: '가을 룩',
+          body: '첫 줄\n둘째 줄',
+          link: { url: '/shop', label: null },
+          items: [
+            productItem('7'),
+            mediaItem(image('https://cdn.test/v.mp4', { mediaType: 'VIDEO', pcPosterUrl: null })),
+            mediaItem(image('https://cdn.test/look.jpg', { altText: '착용 사진' })),
+            mediaItem(image('https://cdn.test/second.jpg')),
+            productItem('3'),
+            productItem('7'),
+          ],
+        }),
+      ],
+      TEMPLATE,
+      labels,
+    );
+    expect(block).toEqual({
+      type: 'LOOK',
+      id: 'display-1',
+      title: '가을 룩',
+      body: '첫 줄\n둘째 줄',
+      media: { image: { src: 'https://cdn.test/look.jpg', alt: '착용 사진' }, placeholder: '' },
+      productIds: ['7', '3'],
+      link: { label: '더 보기', href: '/shop' },
+    });
+  });
+
+  it('룩: 상품이 없어도(모두 숨김) 사진만으로 그리고, 제목이 없으면 빈 제목이다', () => {
+    const [block] = toHomeBlocks(
+      [section('LOOK', '1', { items: [mediaItem(image('https://cdn.test/look.jpg'))] })],
+      TEMPLATE,
+      labels,
+    );
+    expect(block).toMatchObject({ id: 'display-1', title: '', productIds: [], link: null });
+  });
+
+  it('룩: 응답의 룩이 여러 개면 모두 그린다', () => {
+    const look = (id: string) =>
+      section('LOOK', id, { items: [mediaItem(image(`https://cdn.test/${id}.jpg`))] });
+    const blocks = toHomeBlocks([look('1'), look('2')], TEMPLATE, labels);
+    expect(blocks.map((block) => block.id)).toEqual(['display-1', 'display-2']);
+  });
+
+  it('룩: 그릴 미디어가 없으면 그 자리에 브랜드 설정의 LOOK 을 한 번만 그린다', () => {
     const blocks = toHomeBlocks([section('LOOK', '1'), section('LOOK', '2')], TEMPLATE, labels);
     expect(blocks).toEqual([LOOK]);
     expect(toHomeBlocks([section('LOOK', '1')], [], labels)).toEqual([]);
+    const mixed = toHomeBlocks(
+      [
+        section('LOOK', '1', { items: [productItem('1')] }),
+        section('LOOK', '2', { items: [mediaItem(image('https://cdn.test/2.jpg'))] }),
+      ],
+      TEMPLATE,
+      labels,
+    );
+    expect(mixed.map((block) => block.id)).toEqual(['shop-the-look', 'display-2']);
   });
 });
 
