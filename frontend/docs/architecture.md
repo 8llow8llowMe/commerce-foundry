@@ -362,7 +362,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 ## 9. 어드민 콘솔 (#187)
 
 - **화면 틀** — 콘솔 화면은 `app/(console)/` 아래에 두고 `AdminShell`(상단 바 · 왼쪽 메뉴 · 본문)을 같이 쓴다. 메뉴는 `AdminShell` 의 `NAV` 한 곳에서 더한다
-  (화면이 아직 없으면 `href` 없이 "준비 중"). 로그인 화면(`app/login`)은 이 그룹 밖이다. 상단 바에 작업 진행 · 알림(아래 #214) · 도움말 · 계정 메뉴(내 비밀번호 변경 · 로그아웃, #352)가 있다. 어드민은 국문만이고 i18n 사전을 두지 않는다.
+  (화면이 아직 없으면 `href` 없이 "준비 중"). 로그인 화면(`app/login`)은 이 그룹 밖이다. 상단 바에 작업 진행 · 알림(아래 #214) · 도움말 · 계정 메뉴(내 비밀번호 변경 · 2단계 인증 · 로그아웃, #352 · #417)가 있다. 어드민은 국문만이고 i18n 사전을 두지 않는다.
 - **읽기 · 쓰기는 클라이언트에서 BFF 로** — 편집 화면은 `apiFetch` 로 같은 origin BFF(`app/api/[...path]`, 어드민 쿠키 `cf_admin_at`)를 부른다.
   CSRF 규칙은 스토어프론트와 같고(§2), 재발급은 하지 않는다(§3 refresh 쿠키가 없는 설정).
 - **401 · 403 은 오류가 아니라 상태다** — `accessDeniedOf` 로 가르고 `AccessNotice` 를 그린다. 401(세션 끝 — 만료 · 로그아웃 · 차단)이면
@@ -454,6 +454,21 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   503 `AUTH_013` 은 새 비밀번호가 이미 저장된 뒤라 성공과 같이 로그아웃 · 로그인 화면으로 보낸다(실패로 두면 같은 값을 다시 보내 `AUTH_032` 를 받는다).
 - **비밀번호는 React 상태 · 주소 · 저장소 · 로그에 두지 않는다** — 두 폼 모두 제어하지 않는 칸이고 제출할 때만 `FormData` 로 읽는다. 보내기 전 규칙 확인(`passwordProblem`, 12~64자 ·
   영문과 숫자 · 공백 없는 ASCII — BE `AdminRequestPatterns` 와 같다)은 고정 문구만 돌려준다. 결과를 모르는 실패(`unknownOutcome`)는 다시 보내기 전에 결과를 확인하게 안내한다.
+
+### 2단계 인증 (`/account/otp`, #417 · BE #238 PR-A2)
+
+- 상단 바 계정 메뉴에서 연다. 계약 정본은 `backend/docs/api-design-guide.md` "관리자 본인 OTP" 다. 모두 catch-all BFF 를 거친다(`no-store` · `Retry-After` 를 그대로 중계, 본문을 저장 · 로그하지 않는다).
+- **상태** — `GET /api/v1/admin/me/otp` `{enrolled, confirmedAt, remainingRecoveryCodes}` 를 클라이언트에서 읽는다. 사용 중이면 켠 날 · 남은 복구 코드 수(2개 이하면 새로 받으라는 안내).
+  확인 전 진행 중 등록은 `enrolled=false` 라 "사용하지 않음" 으로 보인다.
+- **등록** — `POST …/enrollment` 의 `otpauthUri` 를 화면에서 QR 로 그린다(`uqr`, 의존성 없음 — 외부 QR 서비스로 보내지 않는다, `qrPath`). 직접 입력 키(`secret`)는 4자씩 띄워 보이고 `expiresAt` 을 마감 시각으로 안내한다.
+  이어서 현재 비밀번호 + 6자리로 `POST …/otp`(201) → 복구 코드 8개를 **한 번만** 보인다(`RecoveryCodesPanel`: 모두 복사, "보관했습니다" 체크 뒤 완료, 보이는 동안 창 닫기 경고).
+- **해제 · 복구 코드 다시 받기** — `POST …/deactivation` · `POST …/recovery-codes` `{currentPassword, code}`(6자리 또는 복구 코드). 같은 재인증 폼(`OtpVerifyForm`)을 쓴다.
+- **비밀 키 · 복구 코드는 화면 상태에만 둔다** — 단계를 떠나면 버린다. 저장소 · 주소 · 로그에 남기지 않고, 비밀번호 · 코드 칸은 제어하지 않는 칸이다(`FormData` 로 읽는다).
+- **오류는 운영자 문구다(#305, `otpFailure`)** — `AUTH_032` 는 비밀번호 칸, `AUTH_035` 는 코드 칸, 검증 `AUTH_145` · `147~149` 는 코드로 칸 · 문구를 찾는다.
+  429 `AUTH_043` 은 `useLoginCooldown` 으로 `Retry-After` 창 전체 동안 확인 버튼을 막고 남은 시간을 보인다 — 확인 · 해제 · 재발급이 같은 시도 창이라 쿨다운도 하나다.
+  409 `AUTH_044` 는 코드가 쓰이지 않았으니 같은 내용으로 다시 시도하게 한다. 404 `AUTH_036`(이미 꺼짐) · 409 `AUTH_037`(이미 켜짐) · 400 `AUTH_038`(등록 시간 지남)은 단계를 접고 상태를 다시 읽는다.
+  404 `AUTH_033` 은 다시 로그인 안내, 503 `AUTH_039` 는 시스템 담당자 안내. 결과를 모르는 실패는 상태를 다시 읽고, 등록 확인 · 재발급이면 복구 코드를 다시 받으라고 안내한다.
+- **로그인 2단계(#414)가 먼저 머지돼야 한다** — BFF 가 `otpRequired` 를 처리하기 전에 등록하면 그 관리자는 콘솔에 로그인하지 못한다.
 
 ### 배송비 정책 (`/shipping-policies/domestic` · `/international`)
 

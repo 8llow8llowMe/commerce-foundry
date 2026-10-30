@@ -20,7 +20,8 @@
     "driver.js": "catalog:",
     "next": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "uqr": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "catalog:",
