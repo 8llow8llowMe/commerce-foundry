@@ -13,6 +13,7 @@
 | `apps/admin` | 어드민 콘솔 (:3001, 중립 테마, noindex) |
 | `packages/api-client` | 응답 봉투·ApiError·금액·멱등 키 (`@cf/api-client`), BFF 프록시·재발급·헬스체크 (`@cf/api-client/server`) |
 | `packages/ui` | 브랜드 무관 컴포넌트 + 중립 토큰 (`@cf/ui`, `@cf/ui/tokens.css`) |
+| `packages/sanitize` | 상품 상세 HTML 허용 목록 정제 (`@cf/sanitize`, 서버 컴포넌트 전용) |
 | `packages/theme-<brand>` | 브랜드 토큰 값 + brand config. 앱은 별칭 `@cf/brand` 로만 import 한다 |
 
 ## 명령 (`frontend/` 에서)

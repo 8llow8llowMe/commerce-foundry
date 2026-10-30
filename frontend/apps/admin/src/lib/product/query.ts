@@ -83,7 +83,7 @@ export function parseProductQuery(params: SearchParams): ProductQuery {
 }
 
 /** 양의 정수이고 서버 Long 범위 안인지 — 넘으면 서버 바인딩이 400 이다 */
-function isLongId(value: string): boolean {
+export function isLongId(value: string): boolean {
   return /^[1-9]\d{0,18}$/.test(value) && BigInt(value) <= 9_223_372_036_854_775_807n;
 }
 
