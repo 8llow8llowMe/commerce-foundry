@@ -25,7 +25,8 @@ import org.springframework.stereotype.Component;
  *       ({@code AdminAuthWebFacade}).</li>
  *   <li>받은 이메일에 {@link Member#canonicalEmail} 을 적용한 값으로 센다 — 저장 · 조회 키와 같은 형태다. 멱등이라 이미 정규화한 값은 그대로다.</li>
  *   <li>꺼져 있으면({@code auth.login-guard.enabled=false}) 두 메서드 모두 포트를 부르지 않는다.</li>
- *   <li>관리자 OTP 코드 시도(#238)는 {@link #admitAdminOtp} · {@link #clearAdminOtp} 로 따로 받는다 — 주체는 memberId 이고, 꺼져 있어도 센다(fail-closed, 429 {@code AUTH_043}).</li>
+ *   <li>관리자 OTP 코드 시도(#238)는 {@link #admitAdminOtp} · {@link #clearAdminOtp}(재인증) · {@link #admitAdminOtpLogin}(로그인 2단계, 지우지 않는다)로 따로 받는다 —
+ *       주체는 memberId 이고, 꺼져 있어도 센다(fail-closed, 429 {@code AUTH_043}).</li>
  * </ul>
  *
  * <p>저장소(Redis) 장애 — 종류별 정책은 {@link #failOpen} 하나가 정한다(종류가 늘면 switch 가 컴파일에서 결정을 요구한다).
@@ -85,7 +86,8 @@ public class LoginGuardProcessor {
 
     /**
      * 관리자 OTP 코드 시도 1회를 세고 허용 횟수를 넘겼으면 거절한다 (#238) — 등록 확인 · 해제 · 복구 코드 재발급이 비밀번호 · 코드를
-     * 보기 전에 부른다(로그인 2단계가 같은 창을 쓸지는 PR-B 착수 전에 정한다 — {@link AttemptKind#ADMIN_OTP}). 주체는 관리자 memberId 다. {@code auth.login-guard.enabled=false} 여도 센다 — 비상 스위치가 6자리 코드 대입까지 열면 안 된다.
+     * 보기 전에 부른다. 로그인 2단계는 이 창이 아니라 {@link #admitAdminOtpLogin} 이다({@link AttemptKind#ADMIN_OTP_LOGIN}). 주체는 관리자 memberId 다.
+     * {@code auth.login-guard.enabled=false} 여도 센다 — 비상 스위치가 6자리 코드 대입까지 열면 안 된다.
      * 저장소 장애는 fail-closed(503 {@code AUTH_013})다.
      *
      * @throws LoginAttemptLimitedException 429 {@code AUTH_043}
@@ -97,6 +99,17 @@ public class LoginGuardProcessor {
     /** OTP 코드로 성공한 관리자의 창을 지운다 (#238). best-effort 규칙은 {@link #clear} 와 같고, 켜짐 여부와 무관하다. */
     public void clearAdminOtp(long adminMemberId) {
         reset(AttemptKind.ADMIN_OTP, String.valueOf(adminMemberId));
+    }
+
+    /**
+     * 관리자 로그인 2단계 코드 시도 1회를 세고 허용 횟수를 넘겼으면 거절한다 (#238 PR-B) — 챌린지로 관리자를 안 뒤, 코드를 보기 전에 부른다.
+     * 재인증 창({@link #admitAdminOtp})과 따로 센다 — 같은 창이면 access 토큰만 가진 사람이 틀린 재인증으로 진짜 관리자의 로그인을 잠근다.
+     * 짝이 되는 clear 는 없다 — 성공해도 지우지 않는다({@link AttemptKind#ADMIN_OTP_LOGIN}). 켜짐 · 장애 규칙은 {@link #admitAdminOtp} 와 같다.
+     *
+     * @throws LoginAttemptLimitedException 429 {@code AUTH_043}
+     */
+    public void admitAdminOtpLogin(long adminMemberId) {
+        count(AttemptKind.ADMIN_OTP_LOGIN, String.valueOf(adminMemberId));
     }
 
     private void count(AttemptKind kind, String subject) {
@@ -120,7 +133,7 @@ public class LoginGuardProcessor {
             String tag = switch (kind) {
                 case SIGN_UP_IP -> subject.substring(0, 8);
                 // memberId 는 개인정보가 아니고, 감사 로그(target=member:{id})와 맞춰 볼 수 있게 그대로 남긴다
-                case ADMIN_OTP -> subject;
+                case ADMIN_OTP, ADMIN_OTP_LOGIN -> subject;
                 case LOGIN, ADMIN_LOGIN, SIGN_UP -> loginAttemptCounterPort.subjectTag(subject);
             };
             log.info("attempt limit reached kind={} subject={} retryAfterMs={}", kind, tag, outcome.retryAfter().toMillis());
@@ -161,15 +174,18 @@ public class LoginGuardProcessor {
      */
     private static boolean failOpen(AttemptKind kind) {
         return switch (kind) {
-            case LOGIN, ADMIN_LOGIN, ADMIN_OTP -> false;
+            case LOGIN, ADMIN_LOGIN, ADMIN_OTP, ADMIN_OTP_LOGIN -> false;
             case SIGN_UP, SIGN_UP_IP -> true;
         };
     }
 
-    /** OTP 시도는 이메일 주체 · 켜짐 스위치를 따르지 않아 {@link #admitAdminOtp} · {@link #clearAdminOtp} 로만 받는다 — 잘못 부르면 조용히 꺼지지 않게 바로 실패한다. */
+    /**
+     * OTP 시도는 이메일 주체 · 켜짐 스위치를 따르지 않아 {@link #admitAdminOtp} · {@link #clearAdminOtp} · {@link #admitAdminOtpLogin} 로만 받는다 —
+     * 잘못 부르면 조용히 꺼지지 않게 바로 실패한다.
+     */
     private static void rejectAdminOtp(AttemptKind kind) {
-        if (kind == AttemptKind.ADMIN_OTP) {
-            throw new IllegalArgumentException("ADMIN_OTP attempts go through admitAdminOtp/clearAdminOtp");
+        if (kind == AttemptKind.ADMIN_OTP || kind == AttemptKind.ADMIN_OTP_LOGIN) {
+            throw new IllegalArgumentException("admin otp attempts go through admitAdminOtp/clearAdminOtp/admitAdminOtpLogin");
         }
     }
 
@@ -181,7 +197,7 @@ public class LoginGuardProcessor {
         return switch (kind) {
             case LOGIN, ADMIN_LOGIN -> MemberErrorCode.LOGIN_ATTEMPT_LIMITED;
             case SIGN_UP, SIGN_UP_IP -> MemberErrorCode.SIGN_UP_ATTEMPT_LIMITED;
-            case ADMIN_OTP -> MemberErrorCode.OTP_ATTEMPT_LIMITED;
+            case ADMIN_OTP, ADMIN_OTP_LOGIN -> MemberErrorCode.OTP_ATTEMPT_LIMITED;
         };
     }
 

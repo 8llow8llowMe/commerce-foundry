@@ -62,6 +62,11 @@ public class AdminAuditLogRepositoryAdapter implements AdminAuditPort, AdminAudi
     }
 
     @Override
+    public void adminLoginPasswordVerified(long adminMemberId) {
+        record(AdminAuditRecord.adminLoginPasswordVerified(adminMemberId));
+    }
+
+    @Override
     public void adminLoginFailed(OptionalLong targetAdminMemberId) {
         record(AdminAuditRecord.adminLoginFailed(targetAdminMemberId));
     }

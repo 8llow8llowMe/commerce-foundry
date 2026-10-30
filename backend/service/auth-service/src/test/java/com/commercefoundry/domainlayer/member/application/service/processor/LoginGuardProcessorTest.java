@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
@@ -53,7 +54,7 @@ class LoginGuardProcessorTest {
         LoginGuardProcessor disabled = new LoginGuardProcessor(port, new LoginGuardPolicy(false, ENABLED.login(), ENABLED.signUp()), clock);
 
         for (AttemptKind kind : AttemptKind.values()) {
-            if (kind == AttemptKind.ADMIN_OTP) {
+            if (kind == AttemptKind.ADMIN_OTP || kind == AttemptKind.ADMIN_OTP_LOGIN) {
                 continue;
             }
             disabled.admit(kind, EMAIL);
@@ -102,11 +103,36 @@ class LoginGuardProcessorTest {
     }
 
     @Test
-    @DisplayName("ADMIN_OTP 를 이메일 경로(admit · clear)로 부르면 바로 실패한다 — 켜짐 스위치 · 이메일 정규화를 타지 않게")
+    @DisplayName("ADMIN_OTP · ADMIN_OTP_LOGIN 을 이메일 경로(admit · clear)로 부르면 바로 실패한다 — 켜짐 스위치 · 이메일 정규화를 타지 않게")
     void adminOtpRejectsEmailPath() {
         assertThatThrownBy(() -> processor.admit(AttemptKind.ADMIN_OTP, "4242")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> processor.clear(AttemptKind.ADMIN_OTP, "4242")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> processor.admit(AttemptKind.ADMIN_OTP_LOGIN, "4242")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> processor.clear(AttemptKind.ADMIN_OTP_LOGIN, "4242")).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(port);
+    }
+
+    @Test
+    @DisplayName("로그인 2단계는 재인증과 다른 창(ADMIN_OTP_LOGIN)으로 꺼져 있어도 센다 — 초과는 429 AUTH_043, 계수기 장애는 fail-closed 다")
+    void adminOtpLoginCountsInOwnWindow(CapturedOutput output) {
+        LoginGuardProcessor disabled = new LoginGuardProcessor(port, new LoginGuardPolicy(false, ENABLED.login(), ENABLED.signUp()), clock);
+        given(port.record(AttemptKind.ADMIN_OTP_LOGIN, "4242", LOGIN_WINDOW))
+            .willReturn(new LoginAttemptOutcome(5, LOGIN_WINDOW), new LoginAttemptOutcome(6, Duration.ofMinutes(2)));
+
+        disabled.admitAdminOtpLogin(4242L);
+        assertThatThrownBy(() -> disabled.admitAdminOtpLogin(4242L))
+            .isInstanceOfSatisfying(LoginAttemptLimitedException.class, limited -> {
+                assertThat(limited.getErrorCode()).isEqualTo(MemberErrorCode.OTP_ATTEMPT_LIMITED);
+                assertThat(limited.getRetryAfter()).isEqualTo(Duration.ofMinutes(2));
+            });
+
+        verify(port, never()).record(eq(AttemptKind.ADMIN_OTP), anyString(), any());
+        verify(port, never()).reset(any(), anyString());
+        assertThat(output.getOut()).contains("kind=ADMIN_OTP_LOGIN subject=4242 retryAfterMs=120000");
+
+        MemberException unavailable = new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+        willThrow(unavailable).given(port).record(eq(AttemptKind.ADMIN_OTP_LOGIN), eq("77"), any());
+        assertThatThrownBy(() -> processor.admitAdminOtpLogin(77L)).isSameAs(unavailable);
     }
 
     @ParameterizedTest

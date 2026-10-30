@@ -28,7 +28,7 @@ public class InMemoryLoginAttemptStore implements LoginAttemptCounterPort {
     private record Key(AttemptKind kind, String canonicalEmail) {
 
         private static Key of(AttemptKind kind, String email) {
-            boolean isEmail = kind != AttemptKind.SIGN_UP_IP && kind != AttemptKind.ADMIN_OTP;
+            boolean isEmail = kind != AttemptKind.SIGN_UP_IP && kind != AttemptKind.ADMIN_OTP && kind != AttemptKind.ADMIN_OTP_LOGIN;
             return new Key(kind, isEmail ? Member.canonicalEmail(email) : email);
         }
     }

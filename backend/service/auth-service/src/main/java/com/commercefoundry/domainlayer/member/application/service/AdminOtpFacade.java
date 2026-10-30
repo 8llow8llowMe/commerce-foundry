@@ -112,7 +112,12 @@ public class AdminOtpFacade implements AdminOtpUseCase {
         return adminOtpAdminPresenter.toRecoveryCodes(issued.toInfo());
     }
 
-    /** Processor 의 저장 트랜잭션을 부른다. 잠금 실패 · 시간 상한 초과는 409 {@code AUTH_044} 다 — 트랜잭션은 예외로 롤백된다. */
+    /**
+     * Processor 의 저장 트랜잭션을 부른다. 잠금 실패 · 시간 상한 초과는 409 {@code AUTH_044} 다 — 트랜잭션은 예외로 롤백된다.
+     * 로그인 2단계의 코드 소비가 같은 변환을 복제해 쓴다 — 잡는 예외를 바꾸면 함께 바꾼다.
+     *
+     * @see AdminAuthWebFacade#inOtpQueue
+     */
     private static void inOtpQueue(Runnable work) {
         try {
             work.run();

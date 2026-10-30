@@ -91,6 +91,28 @@ class AdminOtpProcessorTest {
     }
 
     @Test
+    @DisplayName("로그인 1단계는 확정 자격 유무만 확인한다")
+    void isEnrolled() {
+        assertThat(processor.isEnrolled(MEMBER_ID)).isFalse();
+        enroll(NOW_STEP - 2);
+        assertThat(processor.isEnrolled(MEMBER_ID)).isTrue();
+    }
+
+    @Test
+    @DisplayName("로그인 2단계 소비는 자격 잠금 뒤 TOTP 를 한 번만 기록한다 — 해제 뒤 AUTH_036, 재사용은 AUTH_035")
+    void consumeForLogin() {
+        enroll(NOW_STEP - 2);
+        AdminOtpProof proof = processor.resolveProof(MEMBER_ID, Totp.code(SECRET, NOW_STEP), NOW);
+
+        processor.consumeForLogin(MEMBER_ID, proof, NOW);
+
+        assertThat(repository.findByMemberId(MEMBER_ID).orElseThrow().lastUsedTimeStep()).isEqualTo(NOW_STEP);
+        assertCode(catchThrown(() -> processor.consumeForLogin(MEMBER_ID, proof, NOW)), MemberErrorCode.OTP_CODE_INVALID);
+        repository.deleteByMemberId(MEMBER_ID);
+        assertCode(catchThrown(() -> processor.consumeForLogin(MEMBER_ID, proof, NOW)), MemberErrorCode.OTP_NOT_ENROLLED);
+    }
+
+    @Test
     @DisplayName("등록 시작 — 20바이트 비밀을 TTL 15분으로 저장하고, 같은 비밀의 Base32 · 등록 URI(발급자 · 이메일 라벨) · 만료 시각을 돌려준다")
     void startEnrollment() {
         AdminOtpEnrollmentInfo info = processor.startEnrollment(MEMBER_ID, "owner@example.com", NOW);

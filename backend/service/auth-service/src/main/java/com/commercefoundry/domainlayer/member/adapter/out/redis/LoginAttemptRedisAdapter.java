@@ -70,7 +70,7 @@ public class LoginAttemptRedisAdapter implements LoginAttemptCounterPort {
         return switch (kind) {
             case LOGIN, ADMIN_LOGIN, SIGN_UP -> keyHasher.hash(Member.canonicalEmail(subject));
             case SIGN_UP_IP -> subject;
-            case ADMIN_OTP -> requireMemberId(subject);
+            case ADMIN_OTP, ADMIN_OTP_LOGIN -> requireMemberId(subject);
         };
     }
 

@@ -175,7 +175,7 @@ auth:
     issuer: ${AUTH_OTP_ISSUER:Commerce Foundry Admin}
     # 미확정 등록(Redis auth:admin-otp-enrollment)의 수명. 1분~1시간
     enrollment-ttl: 15m
-    # 로그인 2단계 챌린지(Redis auth:admin-otp-challenge)의 수명. 1분~10분
+    # 로그인 2단계 챌린지(Redis auth:admin-otp-challenge:{SHA-256(챌린지)} → memberId, 원문은 저장하지 않는다)의 수명. 1분~10분
     challenge-ttl: 5m
 
 swagger:

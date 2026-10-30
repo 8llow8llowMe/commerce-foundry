@@ -50,13 +50,14 @@ public class AdminAuditLogAdminController {
             + "page 는 0부터, size 는 1~100(기본 20)이고 벗어나면 400(AUTH_133 · AUTH_134), actorMemberId 가 양수가 아니면 400(AUTH_135), "
             + "target 이 공백이 있거나 1~200자 밖이면 400(AUTH_136), 행위 · 결과 값이 틀리면 400(AUTH_198)이다. "
             + "로그인 실패는 행위자를 모르므로 actorMemberId 가 null 이고, 노린 관리자 계정은 target=member:<id> · result=FAILURE 로 고른다. "
+            + "ADMIN_LOGIN_PASSWORD_VERIFIED 는 OTP 등록 관리자의 로그인 1단계(비밀번호) 통과다 — 로그인 성공(ADMIN_LOGIN)이 아니고 actorMemberId 가 null 이다. "
             + "actorDisplayName 은 행위한 관리자의 마스킹 이름, targetDisplayName 은 대상이 member:<id> 일 때만 그 회원의 마스킹 이름이다. 모르면 null. "
             + "이 조회 자체는 감사 로그에 남지 않는다."
     )
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
     public ResponseEntity<Response<PageResponse<AdminAuditLogAdminItem>>> searchAuditLogs(
-        @Parameter(description = "행위 — ADMIN_LOGIN · MEMBER_SEARCH · ADMIN_CREATE · ADMIN_DEACTIVATE · ADMIN_PASSWORD_CHANGE · "
+        @Parameter(description = "행위 — ADMIN_LOGIN · ADMIN_LOGIN_PASSWORD_VERIFIED · MEMBER_SEARCH · ADMIN_CREATE · ADMIN_DEACTIVATE · ADMIN_PASSWORD_CHANGE · "
             + "ADMIN_OTP_ENROLL · ADMIN_OTP_DISABLE · ADMIN_OTP_RECOVERY_REGENERATE. 없으면 전체") @RequestParam(required = false) AdminAuditAction action,
         @Parameter(description = "행위한 관리자 회원 아이디. 없으면 전체") @RequestParam(required = false)
         @Positive(message = MemberValidationMessage.ADMIN_AUDIT_ACTOR_ID_POSITIVE) Long actorMemberId,

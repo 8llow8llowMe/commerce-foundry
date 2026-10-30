@@ -5,7 +5,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
 /**
- * 흐름 테스트가 같이 쓰는 저장소 스텁 — refresh 토큰 저장소 · 시도 계수기(Redis 포트)를 인메모리로, 시계를 {@link AdjustableClock} 으로 바꾼다({@code @Primary}).
+ * 흐름 테스트가 같이 쓰는 저장소 스텁 — refresh 토큰 저장소 · 시도 계수기 · 관리자 로그인 2단계 챌린지(Redis 포트)를 인메모리로, 시계를 {@link AdjustableClock} 으로
+ * 바꾼다({@code @Primary}).
  * {@code @SpringBootTest @ActiveProfiles("test") @AutoConfigureMockMvc @Import(InMemoryAuthStoresConfig.class)} 가 같은 테스트끼리 컨텍스트 하나를 같이 쓴다.
  * 쓰는 테스트는 {@code @AfterEach} 에서 스텁 상태(장애 스위치 · 시계 · 시도 창)를 되돌린다 — 다른 테스트에 번지지 않게.
  * 실제 Lua · 키 · TTL 은 Testcontainers 테스트({@code RefreshTokenRedisAdapterTest} · {@code LoginAttemptRedisAdapterTest})가 본다.
@@ -31,4 +32,18 @@ public class InMemoryAuthStoresConfig {
     InMemoryLoginAttemptStore inMemoryLoginAttemptStore(AdjustableClock adjustableClock) {
         return new InMemoryLoginAttemptStore(adjustableClock);
     }
+
+    /** 관리자 로그인 2단계 챌린지 (#238 PR-B). 만료는 {@link AdjustableClock} 으로 넘긴다. */
+    @Bean
+    @Primary
+    InMemoryAdminOtpChallengeStore inMemoryAdminOtpChallengeStore(AdjustableClock adjustableClock) {
+        return new InMemoryAdminOtpChallengeStore(adjustableClock);
+    }
+
+    @Bean
+    @Primary
+    InMemoryAdminAccessCutoffStore inMemoryAdminAccessCutoffStore() {
+        return new InMemoryAdminAccessCutoffStore();
+    }
+
 }
