@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.Pr
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductOptionValueEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.StockEntity;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.ProductRepository;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductCustomOrderFieldMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductImageMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductMapperImpl;
@@ -112,6 +113,35 @@ class ProductPersistenceAdapterTest {
 
     @Autowired
     private TestEntityManager entityManager;
+
+    @Autowired
+    private ProductRepository factRepository;
+
+    @Test
+    @DisplayName("온보딩 사실: 구매 가능한 노출 상품만 storeReady, 본인 최초 시각은 미삭제 등록 상품만 계산")
+    void productRegistrationFactQueries() {
+        persistAll(product(110L, 1_000L, false, SaleStatus.ON_SALE).createdByMemberId(7L).build());
+        persistAll(product(111L, 1_000L, true, SaleStatus.STOP_SELLING).createdByMemberId(7L).build());
+        persistAll(product(112L, 1_000L, true, SaleStatus.ON_SALE).createdByMemberId(8L).build());
+        persistAll(product(113L, 1_000L, false, SaleStatus.STOP_SELLING).deletedAt(DELETED_AT).createdByMemberId(9L).build());
+        entityManager.flush();
+
+        // 등록 순서와 무관하게 해당 운영자의 가장 이른 미삭제 상품 등록 시각을 낸다.
+        entityManager.getEntityManager().createNativeQuery("update product.product set created_at = '2026-10-02 00:00:00+00' where id = 110")
+            .executeUpdate();
+        entityManager.getEntityManager().createNativeQuery("update product.product set created_at = '2026-10-01 00:00:00+00' where id = 111")
+            .executeUpdate();
+        entityManager.clear();
+
+        assertThat(factRepository.existsPurchasableProduct()).isTrue(); // 101만 구매 가능; 103 품절, 104 숨김
+        assertThat(factRepository.findFirstRegisteredAt(7L)).contains(Instant.parse("2026-10-01T00:00:00Z"));
+        assertThat(factRepository.findFirstRegisteredAt(9L)).isEmpty(); // 삭제 상품 제외
+        assertThat(factRepository.findFirstRegisteredAt(10L)).isEmpty(); // 다른 운영자 · null 등록자 제외
+
+        entityManager.getEntityManager().createNativeQuery("update product.product set visible = false where id = 101").executeUpdate();
+        entityManager.clear();
+        assertThat(factRepository.existsPurchasableProduct()).isFalse();
+    }
 
     @Autowired
     private ProductRepositoryPort productRepositoryPort;

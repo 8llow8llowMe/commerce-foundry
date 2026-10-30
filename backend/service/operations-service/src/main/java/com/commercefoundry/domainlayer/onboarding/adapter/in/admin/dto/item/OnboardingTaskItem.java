@@ -10,7 +10,7 @@ import lombok.Builder;
 @Schema(description = "실제 업무 완료 상태")
 public record OnboardingTaskItem(
 
-    @Schema(description = "업무 키 — 화면 분기용 제어 코드", example = "SHIPPING_POLICY_SAVED", allowableValues = {"SHIPPING_POLICY_SAVED"})
+    @Schema(description = "업무 키 — 화면 분기용 제어 코드", example = "SHIPPING_POLICY_SAVED", allowableValues = {"SHIPPING_POLICY_SAVED", "PRODUCT_REGISTERED"})
     String taskKey,
 
     @Schema(description = "스토어 공통 준비 상태 (READY / NOT_READY / UNAVAILABLE) — 누가 했든 스토어에 설정이 있는가. UNAVAILABLE 은 담당 서비스 장애로 확인하지 못함")

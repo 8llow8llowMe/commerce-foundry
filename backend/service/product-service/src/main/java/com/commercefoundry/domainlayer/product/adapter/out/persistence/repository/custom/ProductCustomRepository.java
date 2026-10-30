@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.query.Produc
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Slice;
 
@@ -22,4 +23,8 @@ public interface ProductCustomRepository {
     Page<ProductAdminListQueryResult> searchForAdmin(ProductAdminSearchCriteria criteria);
 
     boolean existsLiveProductInCategory(long categoryId);
+
+    boolean existsPurchasableProduct();
+
+    Optional<Instant> findFirstRegisteredAt(long memberId);
 }

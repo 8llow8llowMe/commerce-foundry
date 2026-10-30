@@ -22,6 +22,7 @@ import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +39,19 @@ import org.springframework.data.support.PageableExecutionUtils;
 public class ProductCustomRepositoryImpl implements ProductCustomRepository {
 
     private final JPAQueryFactory queryFactory;
+
+    @Override
+    public boolean existsPurchasableProduct() {
+        return queryFactory.selectOne().from(productEntity)
+            .where(visibleToCustomer(), productEntity.saleStatus.eq(SaleStatus.ON_SALE), hasPurchasableSku())
+            .fetchFirst() != null;
+    }
+
+    @Override
+    public Optional<Instant> findFirstRegisteredAt(long memberId) {
+        return Optional.ofNullable(queryFactory.select(productEntity.createdAt.min()).from(productEntity)
+            .where(notDeleted(), productEntity.createdByMemberId.eq(memberId)).fetchOne());
+    }
 
     /**
      * 전체 건수를 세지 않는 Slice 다 — {@code size + 1} 건을 읽어 다음 페이지 유무만 본다.

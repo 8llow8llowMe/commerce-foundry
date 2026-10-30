@@ -18,7 +18,7 @@ import org.springframework.stereotype.Service;
  *
  * <p>트랜잭션을 이 Facade 에 걸지 않는다({@code architecture-guide.md} §3 Facade 예외). ① 다른 기기 · 탭과 같은 기록을 다퉈 버전 · 첫 행 유니크 키에서 지면
  * 새 트랜잭션에서 다시 읽어야 이긴 쪽 기록과 합쳐진다 — 트랜잭션은 시도마다 {@link OnboardingTourProcessor} 가 연다.
- * ② 업무 사실 조회({@link OnboardingTaskProcessor}, delivery-service 원격 호출)가 같은 Facade 에 섞여 있어 트랜잭션이 원격 호출을 붙잡지 않게 —
+ * ② 업무 사실 조회({@link OnboardingTaskProcessor}, delivery-service · product-service 원격 호출)가 같은 Facade 에 섞여 있어 트랜잭션이 원격 호출을 붙잡지 않게 —
  * 투어 조회의 읽기 트랜잭션은 투어 Processor 안에서 끝나고, 업무 사실 조회는 트랜잭션 밖이다.
  */
 @Service
