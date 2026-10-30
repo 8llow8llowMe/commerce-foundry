@@ -40,7 +40,10 @@ import org.hibernate.type.SqlTypes;
 @Table(
     name = "product",
     comment = "상품",
-    indexes = @Index(name = "idx_product_visible_sale_price_amount_id", columnList = "visible, sale_price_amount, id"),
+    indexes = {
+        @Index(name = "idx_product_visible_sale_price_amount_id", columnList = "visible, sale_price_amount, id"),
+        @Index(name = "idx_product_created_by_member_id_deleted_at_created_at", columnList = "created_by_member_id, deleted_at, created_at")
+    },
     check = {
         @CheckConstraint(name = "ck_product_sale_price_non_negative", constraint = "sale_price_amount >= 0"),
         @CheckConstraint(

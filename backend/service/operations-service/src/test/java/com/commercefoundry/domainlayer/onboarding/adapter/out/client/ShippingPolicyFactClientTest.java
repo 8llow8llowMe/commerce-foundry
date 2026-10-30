@@ -207,7 +207,7 @@ class ShippingPolicyFactClientTest {
         RESPONSE_STATUS.set(503);
         RESPONSE_BODY.set(failure("COMMON_005"));
 
-        assertThat(onboardingTaskProcessor.getMine(MEMBER)).singleElement().satisfies(task -> {
+        assertThat(onboardingTaskProcessor.getMine(MEMBER).getFirst()).satisfies(task -> {
             assertThat(task.storeStatus()).isEqualTo(StoreTaskStatus.UNAVAILABLE);
             assertThat(task.myStatus()).isEqualTo(MemberTaskStatus.UNAVAILABLE);
         });

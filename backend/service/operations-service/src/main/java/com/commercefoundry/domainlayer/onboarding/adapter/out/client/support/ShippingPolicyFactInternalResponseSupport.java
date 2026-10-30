@@ -10,7 +10,7 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
+import com.commercefoundry.global.support.RemoteResultCodes;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -33,8 +33,6 @@ public class ShippingPolicyFactInternalResponseSupport {
 
     static final String CIRCUIT_BREAKER = "delivery-service";
 
-    private static final Pattern RESULT_CODE_SHAPE = Pattern.compile("[A-Z][A-Z0-9_]*_[0-9]{3}");
-    private static final int MAX_LOGGED_LENGTH = 40;
 
     private final CircuitBreaker circuitBreaker;
 
@@ -64,17 +62,10 @@ public class ShippingPolicyFactInternalResponseSupport {
         if (response == null || response.dataHeader() == null || !response.dataHeader().success()
             || response.dataBody() == null || response.dataBody().storeReady() == null) {
             log.error("delivery-service shipping policy fact response violates contract. resultCode={}",
-                response == null || response.dataHeader() == null ? null : loggable(response.dataHeader().resultCode()));
+                response == null || response.dataHeader() == null ? null : RemoteResultCodes.loggable(response.dataHeader().resultCode()));
             throw new OnboardingException(OnboardingErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
         }
         return new ShippingPolicyFactQueryResult(response.dataBody().storeReady(), response.dataBody().memberFirstSavedAt());
     }
 
-    /** 코드 모양일 때만 그대로 남긴다. 원격의 임의 문자열을 로그에 넣지 않는다. */
-    private static String loggable(String resultCode) {
-        if (resultCode == null) {
-            return null;
-        }
-        return resultCode.length() <= MAX_LOGGED_LENGTH && RESULT_CODE_SHAPE.matcher(resultCode).matches() ? resultCode : "<unrecognized>";
-    }
 }

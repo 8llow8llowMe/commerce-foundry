@@ -2,7 +2,9 @@ package com.commercefoundry.domainlayer.onboarding.application.service.processor
 
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingErrorCode;
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingException;
+import com.commercefoundry.domainlayer.onboarding.application.port.out.ProductRegistrationFactQueryPort;
 import com.commercefoundry.domainlayer.onboarding.application.port.out.ShippingPolicyFactQueryPort;
+import com.commercefoundry.domainlayer.onboarding.application.port.out.query.ProductRegistrationFactQueryResult;
 import com.commercefoundry.domainlayer.onboarding.application.port.out.query.ShippingPolicyFactQueryResult;
 import com.commercefoundry.domainlayer.onboarding.domain.model.OnboardingTask;
 import com.commercefoundry.domainlayer.onboarding.domain.model.OnboardingTaskKey;
@@ -22,10 +24,23 @@ import org.springframework.stereotype.Component;
 public class OnboardingTaskProcessor {
 
     private final ShippingPolicyFactQueryPort shippingPolicyFactQueryPort;
+    private final ProductRegistrationFactQueryPort productRegistrationFactQueryPort;
 
     /** 업무 전부 — {@link OnboardingTaskKey} 선언 순서. */
     public List<OnboardingTask> getMine(long memberId) {
-        return List.of(shippingPolicySaved(memberId));
+        return List.of(shippingPolicySaved(memberId), productRegistered(memberId));
+    }
+
+    private OnboardingTask productRegistered(long memberId) {
+        try {
+            ProductRegistrationFactQueryResult fact = productRegistrationFactQueryPort.findProductRegistrationFact(memberId);
+            return OnboardingTask.fromFact(OnboardingTaskKey.PRODUCT_REGISTERED, fact.storeReady(), fact.memberFirstRegisteredAt());
+        } catch (OnboardingException exception) {
+            if (exception.getErrorCode() != OnboardingErrorCode.PRODUCT_SERVICE_UNAVAILABLE) {
+                throw exception;
+            }
+            return OnboardingTask.unavailable(OnboardingTaskKey.PRODUCT_REGISTERED);
+        }
     }
 
     private OnboardingTask shippingPolicySaved(long memberId) {

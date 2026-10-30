@@ -72,6 +72,7 @@ SKU 원가 이력(#361)은 SKU 하위 리소스라 `/api/v1/admin/skus/**` 를 �
   항목은 `{memberId, displayName}` 이고 `displayName` 은 마스킹된 이름만이다(원문 이름은 없다). 회원이 있으나 이름이 없으면 `displayName` 은 null, 없는 아이디는 빠진다.
   검증 코드는 `AUTH_137`(빈 목록) · `AUTH_138`(100개 초과) · `AUTH_139`(양수 아님). 배송비 정책 이력은 이 조회로 페이지당 한 번 이름을 붙이고, 실패하면 503 `DELIVERY_013` 이다.
 - 운영자 온보딩 사실(단건): delivery-service `GET /internal/v1/onboarding-facts/shipping-policy?memberId=` (#357). 허용 호출자는 operations-service.
+- 운영자 온보딩 상품 사실(단건): product-service `GET /internal/v1/onboarding-facts/product-registration?memberId=` (#402). 허용 호출자는 operations-service.
   운영자 한 명의 사실이라 `ids` 벌크가 아니다. `memberId` 는 양수(`DELIVERY_139`), 숫자가 아니면 `DELIVERY_198`, 없으면 `DELIVERY_199` 다. 계약은 아래 "운영자 온보딩 계약 (#357)".
 - 시점 원가(벌크): product-service `POST /internal/v1/sku-costs/query` (#361 PR-B). 허용 호출자는 operations-service(공헌이익 집계 #362).
   조회 키가 `ids` 가 아니라 (SKU, 시각) 쌍 목록이라 본문으로 받는 **읽기 전용 POST** 다 — 위 표의 상한(원문 100개) · 중복(첫 등장 순서로 합침) · 없는 아이디(뺌) ·
@@ -1112,24 +1113,35 @@ delivery-service `GET /internal/v1/onboarding-facts/shipping-policy?memberId={id
 `admin_member_id = memberId` 인 행의 가장 이른 저장 시각(UTC ISO)이고 없으면 null(키는 남긴다)이다. 다른 운영자가 만든 정책이 있으면 `storeReady=true` ·
 `memberFirstSavedAt=null` 일 수 있다 — 둘을 `tasks` 로 합치는 규칙과 원천 장애 처리는 아래 "업무 완료 tasks" 다.
 
-### 업무 완료 tasks (#357 PR-B2)
+### 업무 사실 internal — 상품 등록 (#402 PR-C)
+
+product-service `GET /internal/v1/onboarding-facts/product-registration?memberId={id}` 는 `SERVICE_operations-service` 만 호출할 수 있다(`@Hidden`).
+`memberId` 는 operations 가 access 토큰에서 확인한 양수 운영자 ID 다. 응답 dataBody 는 `{storeReady, memberFirstRegisteredAt}` 이다.
+`storeReady` 는 삭제되지 않고 노출·판매중인 상품 중 판매중 SKU와 구매 가능한 재고(무제한 또는 수량 양수)가 있는 상품의 존재 여부다.
+품절·숨김·판매 종료·soft delete 상품만 있으면 false 다. `memberFirstRegisteredAt` 은 삭제되지 않은 `product` 중
+`created_by_member_id = memberId` 인 행의 가장 이른 `created_at`(UTC ISO)이다. 상품의 현재 노출·판매·재고 상태는 본인 등록 기록을 지우지 않는다.
+이관·시드 상품의 null 등록자와 다른 운영자의 상품은 본인 완료 증거가 아니다. 상품 등록 API(#9)는 아직 없으므로 해당 API가 등록자를 채우는지 검증하는 일은 #9 구현 의존이다.
+`memberId` 가 양수가 아니면 400 `PRODUCT_140`, 숫자가 아니면 `PRODUCT_198`, 누락되면 `PRODUCT_199` 다.
+
+### 업무 완료 tasks (#357 PR-B2, #402 PR-C)
 
 operations-service 가 `GET /api/v1/admin/onboarding/me` 마다 담당 서비스 internal 사실을 Feign 으로 읽어 판정한다(캐시 없음, 트랜잭션 밖).
 운영자는 access 토큰의 memberId 다. task 항목은 `{taskKey, storeStatus{code,name,description}, myStatus{code,name,description}, myCompletedAt}` 다.
 
-- `taskKey` — 화면 분기용 제어 코드(문자열, metadata 아님). 지금은 `SHIPPING_POLICY_SAVED`(국내 배송비 정책 저장, 사실 원천 delivery-service) 하나이고 상품 1건 등록은 PR-C 에서 더한다.
+- `taskKey` — 화면 분기용 제어 코드(문자열, metadata 아님). `SHIPPING_POLICY_SAVED`(delivery-service), `PRODUCT_REGISTERED`(product-service) 순서다.
   FE 는 모르는 `taskKey` 를 건너뛴다.
 - `storeStatus` — 스토어 공통 준비(누가 했든). `myStatus` — 운영자 본인 실습. `myCompletedAt` — 본인이 처음 해낸 시각(UTC ISO), `myStatus=COMPLETED` 일 때만 있고 아니면 null(키는 남긴다).
 
-  | 사실 (`storeReady`, `memberFirstSavedAt`) | storeStatus | myStatus |
+  | 사실 (`storeReady`, 업무별 본인 최초 시각) | storeStatus | myStatus |
   |---|---|---|
-  | 아무거나, 시각 있음 | `READY` / `NOT_READY` (storeReady 대로) | `COMPLETED` — 해낸 기록은 되돌리지 않는다 |
+  | 아무거나, 시각 있음 | `READY` / `NOT_READY` (storeReady 대로) | `COMPLETED` — 사실 원천에 본인 기록이 남아 있는 동안 유지된다. 상품은 본인 등록 상품을 모두 삭제하면 증거가 사라진다 |
   | `true`, null | `READY` | `NO_EVIDENCE` — 스토어엔 있지만 본인 기록 없음(다른 직원 · 이력 이전 설정). **완료가 아니다** |
   | `false`, null | `NOT_READY` | `NOT_COMPLETED` |
   | 원천 장애 | `UNAVAILABLE` | `UNAVAILABLE` |
 
-- **원천 장애여도 GET 은 200 이다.** 서킷 오픈 · 전송 실패 · 타임아웃(read 3초) · 4xx · 5xx · 응답 계약 위반(성공 봉투가 아니거나 `storeReady` 없음)이면 그 업무만
-  `UNAVAILABLE` 이고 `tours` 는 그대로다. 내부 분류 코드 `ONBOARDING_030` 은 로그 · 분류용으로 응답에 나가지 않는다.
+- **원천 장애여도 GET 은 200 이다.** 서킷 오픈 · 전송 실패 · 타임아웃(read 3초) · 4xx · 5xx · 응답 계약 위반(성공 봉투가 아니거나 `storeReady` 없음)이면 해당 업무만
+  `UNAVAILABLE` 이고 다른 업무와 `tours` 는 그대로다. 내부 분류 코드 배송 `ONBOARDING_030`, 상품 `ONBOARDING_031` 은 응답에 나가지 않는다.
+- FE 계약 영향 — `tasks` 에 `PRODUCT_REGISTERED` 항목이 추가된다. FE 는 기존 키를 이미 알고 있으며 모르는 키는 건너뛴다.
 - FE — `UNAVAILABLE` 은 "확인 불가, 잠시 후 다시" 로 보이고 완료 · 미완료로 추정하지 않는다. 투어 `COMPLETED` 를 업무 완료로 보이지 않는다.
 
 ## 로그인·회원가입 시도 제한 (#66)

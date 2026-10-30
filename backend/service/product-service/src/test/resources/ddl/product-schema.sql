@@ -1157,6 +1157,9 @@
     create index idx_product_visible_sale_price_amount_id 
        on product.product (visible, sale_price_amount, id);
 
+    create index idx_product_created_by_member_id_deleted_at_created_at
+       on product.product (created_by_member_id, deleted_at, created_at);
+
     create index idx_product_category_category_id_product_id 
        on product.product_category (category_id, product_id);
 

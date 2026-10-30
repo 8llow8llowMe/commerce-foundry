@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingErrorCode;
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingException;
 import com.commercefoundry.domainlayer.onboarding.application.port.out.query.ShippingPolicyFactQueryResult;
+import com.commercefoundry.domainlayer.onboarding.application.port.out.query.ProductRegistrationFactQueryResult;
 import com.commercefoundry.domainlayer.onboarding.application.service.processor.OnboardingTaskProcessor;
 import com.commercefoundry.domainlayer.onboarding.domain.model.MemberTaskStatus;
 import com.commercefoundry.domainlayer.onboarding.domain.model.OnboardingTask;
@@ -27,12 +28,13 @@ class OnboardingTaskProcessorTest {
 
     private static OnboardingTask only(OnboardingTaskProcessor processor) {
         List<OnboardingTask> tasks = processor.getMine(MEMBER);
-        assertThat(tasks).extracting(OnboardingTask::key).containsExactly(OnboardingTaskKey.SHIPPING_POLICY_SAVED);
+        assertThat(tasks).extracting(OnboardingTask::key).containsExactly(OnboardingTaskKey.SHIPPING_POLICY_SAVED, OnboardingTaskKey.PRODUCT_REGISTERED);
         return tasks.getFirst();
     }
 
     private static OnboardingTaskProcessor answering(boolean storeReady, Instant memberFirstSavedAt) {
-        return new OnboardingTaskProcessor(memberId -> new ShippingPolicyFactQueryResult(storeReady, memberFirstSavedAt));
+        return new OnboardingTaskProcessor(memberId -> new ShippingPolicyFactQueryResult(storeReady, memberFirstSavedAt),
+            memberId -> new ProductRegistrationFactQueryResult(true, null));
     }
 
     @Test
@@ -70,7 +72,7 @@ class OnboardingTaskProcessorTest {
         OnboardingTaskProcessor processor = new OnboardingTaskProcessor(memberId -> {
             requested.add(memberId);
             throw new OnboardingException(OnboardingErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
-        });
+        }, memberId -> new ProductRegistrationFactQueryResult(true, null));
 
         assertThat(only(processor))
             .isEqualTo(new OnboardingTask(OnboardingTaskKey.SHIPPING_POLICY_SAVED, StoreTaskStatus.UNAVAILABLE, MemberTaskStatus.UNAVAILABLE, null));
@@ -82,7 +84,7 @@ class OnboardingTaskProcessorTest {
     void otherFailurePropagates() {
         OnboardingTaskProcessor processor = new OnboardingTaskProcessor(memberId -> {
             throw new IllegalStateException("bug");
-        });
+        }, memberId -> new ProductRegistrationFactQueryResult(true, null));
 
         assertThatThrownBy(() -> processor.getMine(MEMBER)).isInstanceOf(IllegalStateException.class);
     }
@@ -94,5 +96,24 @@ class OnboardingTaskProcessorTest {
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new OnboardingTask(OnboardingTaskKey.SHIPPING_POLICY_SAVED, StoreTaskStatus.READY, MemberTaskStatus.NO_EVIDENCE, SAVED_AT))
             .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("다른 운영자의 상품만 있으면 스토어 READY, 본인은 NO_EVIDENCE")
+    void productOfOtherMember() {
+        OnboardingTask product = answering(true, null).getMine(MEMBER).get(1);
+        assertThat(product).isEqualTo(new OnboardingTask(OnboardingTaskKey.PRODUCT_REGISTERED,
+            StoreTaskStatus.READY, MemberTaskStatus.NO_EVIDENCE, null));
+    }
+
+    @Test
+    @DisplayName("상품 서비스 장애는 상품 업무만 UNAVAILABLE, 배송 업무 사실은 유지")
+    void productUnavailableOnly() {
+        OnboardingTaskProcessor processor = new OnboardingTaskProcessor(
+            memberId -> new ShippingPolicyFactQueryResult(true, SAVED_AT),
+            memberId -> { throw new OnboardingException(OnboardingErrorCode.PRODUCT_SERVICE_UNAVAILABLE); });
+        List<OnboardingTask> tasks = processor.getMine(MEMBER);
+        assertThat(tasks.getFirst().myStatus()).isEqualTo(MemberTaskStatus.COMPLETED);
+        assertThat(tasks.get(1)).isEqualTo(OnboardingTask.unavailable(OnboardingTaskKey.PRODUCT_REGISTERED));
     }
 }

@@ -61,6 +61,9 @@ public final class ProductValidationMessage {
     // 어드민 상품 목록 (GET /api/v1/admin/products). page · size 는 PAGE_MIN · SIZE_RANGE, categoryId 는 CATEGORY_ID_POSITIVE 다
     public static final String PRODUCT_KEYWORD_SIZE_MAX = "PRODUCT_139:keyword 는 100자 이하여야 합니다.";
 
+    // 운영자 온보딩 상품 사실 (GET /internal/v1/onboarding-facts/product-registration)
+    public static final String ONBOARDING_MEMBER_ID_POSITIVE = "PRODUCT_140:memberId 는 양수여야 합니다.";
+
     private ProductValidationMessage() {
     }
 }

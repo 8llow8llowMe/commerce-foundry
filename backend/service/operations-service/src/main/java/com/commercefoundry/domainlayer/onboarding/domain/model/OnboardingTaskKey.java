@@ -7,5 +7,7 @@ package com.commercefoundry.domainlayer.onboarding.domain.model;
 public enum OnboardingTaskKey {
 
     /** 국내 배송비 정책 저장 — 사실은 delivery-service 가 낸다(행위자 이력이 있는 국내 정책만, 해외 정책 교체는 보지 않는다). */
-    SHIPPING_POLICY_SAVED
+    SHIPPING_POLICY_SAVED,
+    /** 상품 1건 등록 — 스토어 준비와 운영자 등록 사실은 product-service 가 따로 낸다. */
+    PRODUCT_REGISTERED
 }

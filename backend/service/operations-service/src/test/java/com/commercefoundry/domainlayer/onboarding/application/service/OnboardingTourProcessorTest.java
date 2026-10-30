@@ -46,6 +46,8 @@ class OnboardingTourProcessorTest {
     /** 업무 사실 원천(delivery)이 늘 장애다 — 투어 진행은 그와 관계없이 정상으로 나와야 한다. */
     private final OnboardingTaskProcessor taskProcessor = new OnboardingTaskProcessor(memberId -> {
         throw new OnboardingException(OnboardingErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
+    }, memberId -> {
+        throw new OnboardingException(OnboardingErrorCode.PRODUCT_SERVICE_UNAVAILABLE);
     });
     private final OnboardingAdminFacade facade = new OnboardingAdminFacade(processor, taskProcessor, new OnboardingAdminPresenter());
 
@@ -67,7 +69,8 @@ class OnboardingTourProcessorTest {
 
             OnboardingAdminResponse response = facade.getMine(MEMBER);
 
-            assertThat(response.tasks()).singleElement().satisfies(task -> {
+            assertThat(response.tasks()).hasSize(2);
+            assertThat(response.tasks().getFirst()).satisfies(task -> {
                 assertThat(task.taskKey()).isEqualTo("SHIPPING_POLICY_SAVED");
                 assertThat(task.storeStatus().code()).isEqualTo("UNAVAILABLE");
                 assertThat(task.myStatus().code()).isEqualTo("UNAVAILABLE");

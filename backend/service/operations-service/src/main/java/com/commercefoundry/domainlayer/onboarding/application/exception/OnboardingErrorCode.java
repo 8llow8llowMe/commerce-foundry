@@ -26,6 +26,7 @@ public enum OnboardingErrorCode {
      * 응답으로 나가지 않는다 — {@code OnboardingTaskProcessor} 가 그 업무를 {@code UNAVAILABLE} 로 흡수하고 조회는 200 이다. 분류 · 로그용이다.
      */
     DELIVERY_SERVICE_UNAVAILABLE("ONBOARDING_030", "배송 설정 상태를 잠시 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    PRODUCT_SERVICE_UNAVAILABLE("ONBOARDING_031", "상품 등록 상태를 잠시 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
 
     INVALID_REQUEST("ONBOARDING_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     /** 설정 버전보다 큰 버전 — 아직 배포되지 않은 안내다. */

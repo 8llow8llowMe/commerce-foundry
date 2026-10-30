@@ -76,6 +76,8 @@ resilience4j:
       # 운영자 온보딩 배송 업무 사실 (GET /internal/v1/onboarding-facts/shipping-policy, #357). 열려 있으면 그 업무만 UNAVAILABLE 이고 조회는 200 이다
       delivery-service:
         base-config: default
+      product-service:
+        base-config: default
 
 eureka:
   client:
