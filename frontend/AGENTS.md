@@ -10,6 +10,7 @@
 | `apps/admin` | 어드민 콘솔, 포트 3001, 중립 테마·noindex |
 | `packages/api-client` | `@cf/api-client`: 봉투·ApiError·금액·멱등 키, `/server`: BFF·재발급·헬스체크 |
 | `packages/ui` | 브랜드 무관 컴포넌트·중립 토큰 |
+| `packages/sanitize` | `@cf/sanitize`: 상품 상세 HTML 허용 목록 정제(서버 컴포넌트 전용) |
 | `packages/theme-<brand>` | 브랜드 토큰·설정, 앱은 `@cf/brand` 별칭만 import |
 
 ## 먼저 읽을 문서

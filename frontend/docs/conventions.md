@@ -13,7 +13,7 @@
 - 사용자 문구는 한국어. 서버 `resultMessage` 를 우선한다.
 - 서버 전용 모듈(`@cf/api-client/server`, `next/headers`)을 클라이언트 컴포넌트에서 import 하지 않는다.
 - 환경변수는 앱의 `src/lib/env.ts` 에서만 읽는다.
-- 서버가 준 HTML 원문(상품 상세 `descriptionHtml` 등)은 **서버 컴포넌트에서 `sanitizeProductHtml`(허용 목록)을 거친 뒤에만** `dangerouslySetInnerHTML` 에 넣는다. BE 는 정제하지 않는다.
+- 서버가 준 HTML 원문(상품 상세 `descriptionHtml` 등)은 **서버 컴포넌트에서 `sanitizeProductHtml`(`@cf/sanitize`, 허용 목록 — 스토어프론트 · 어드민 공용)을 거친 뒤에만** `dangerouslySetInnerHTML` 에 넣는다. BE 는 정제하지 않는다.
 - JSON-LD 처럼 `<script>` 안에 운영 데이터를 넣을 때는 `<` 를 `\u003c` 로 이스케이프한다(`productJsonLd`).
 - 스토어프론트 링크는 `next/link` 대신 `@/components/i18n/Link` 를 쓴다(언어 접두어). 사용자 문구는 사전(`lib/i18n/dictionaries`) · 브랜드 `content` 에 두고 컴포넌트에 쓰지 않는다.
 - `<form>` 밖 라디오는 `name` 이 같으면 문서 전체가 한 묶음이다. 같은 페이지에 여러 번 나올 수 있는 옵션 선택(`OptionGroupsField`)은 `useId()` 로 만든 `namePrefix` 를 붙인다.

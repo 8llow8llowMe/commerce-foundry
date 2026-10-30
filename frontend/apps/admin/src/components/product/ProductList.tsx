@@ -74,7 +74,8 @@ export function ProductList({ query }: { query: ProductQuery }) {
       <div>
         <h1 className="text-xl font-semibold">상품</h1>
         <p className="mt-1 text-sm text-muted-fg">
-          숨긴 상품 · 판매 종료 상품까지 모두 보입니다. 상품 등록 · 수정은 준비 중입니다.
+          숨긴 상품 · 판매 종료 상품까지 모두 보입니다. 상품명을 누르면 상세를 봅니다. 상품 등록 ·
+          수정은 준비 중입니다.
         </p>
       </div>
 
@@ -150,7 +151,13 @@ export function ProductList({ query }: { query: ProductQuery }) {
                 {current.data.contents.map((product) => (
                   <tr key={product.productId} className="border-t border-border">
                     <th scope="row" className="max-w-[18rem] py-3 pr-4 font-medium">
-                      <span className="line-clamp-2">{product.name}</span>
+                      {/* 상세(#418)는 숨긴 상품도 열린다 */}
+                      <Link
+                        href={`/products/${product.productId}`}
+                        className="line-clamp-2 underline-offset-4 hover:underline"
+                      >
+                        {product.name}
+                      </Link>
                     </th>
                     <td className="py-3 pr-4 text-right whitespace-nowrap">
                       {formatMoney(product.salePrice)}

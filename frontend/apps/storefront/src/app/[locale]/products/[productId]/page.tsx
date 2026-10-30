@@ -1,4 +1,5 @@
 import { ApiError } from '@cf/api-client';
+import { sanitizeProductHtml } from '@cf/sanitize';
 import type { Metadata } from 'next';
 import { Link } from '@/components/i18n/Link';
 import { notFound } from 'next/navigation';
@@ -15,7 +16,6 @@ import { productJsonLd } from '@/lib/catalog/product-jsonld';
 import { shopHref } from '@/lib/catalog/shop-query';
 import type { ProductDetail } from '@/lib/catalog/types';
 import { getI18n, localeAlternates } from '@/lib/i18n/server';
-import { sanitizeProductHtml } from '@/lib/sanitize-html';
 import { serverFetch } from '@/lib/server-api';
 
 /**
@@ -156,7 +156,7 @@ export default async function ProductPage({ params }: PageProps<'/[locale]/produ
           </h2>
           <div
             className="mt-8 leading-7 [&_a]:underline [&_h2]:mt-10 [&_h2]:font-serif [&_h2]:text-xl [&_h3]:mt-8 [&_h3]:font-serif [&_h3]:text-lg [&_img]:my-6 [&_img]:h-auto [&_img]:w-full [&_li]:ml-5 [&_ol]:list-decimal [&_p]:my-4 [&_table]:my-6 [&_table]:w-full [&_td]:border-b [&_td]:border-border [&_td]:py-2 [&_th]:border-b [&_th]:border-border [&_th]:py-2 [&_th]:text-left [&_ul]:list-disc"
-            // 서버에서 허용 목록으로 거른 HTML 만 넣는다 (lib/sanitize-html.ts)
+            // 서버에서 허용 목록으로 거른 HTML 만 넣는다 (@cf/sanitize)
             dangerouslySetInnerHTML={{ __html: sanitizeProductHtml(descriptionHtml) }}
           />
         </section>

@@ -104,6 +104,9 @@ importers:
       '@cf/brand':
         specifier: workspace:@cf/theme-mokoyuri@*
         version: link:../../packages/theme-mokoyuri
+      '@cf/sanitize':
+        specifier: workspace:*
+        version: link:../../packages/sanitize
       '@cf/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -156,6 +159,9 @@ importers:
       '@cf/brand':
         specifier: workspace:@cf/theme-mokoyuri@*
         version: link:../../packages/theme-mokoyuri
+      '@cf/sanitize':
+        specifier: workspace:*
+        version: link:../../packages/sanitize
       '@cf/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -168,9 +174,6 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
-      sanitize-html:
-        specifier: 'catalog:'
-        version: 2.18.1
     devDependencies:
       '@tailwindcss/postcss':
         specifier: 'catalog:'
@@ -184,9 +187,6 @@ importers:
       '@types/react-dom':
         specifier: 'catalog:'
         version: 19.3.0(@types/react@19.3.0)
-      '@types/sanitize-html':
-        specifier: 'catalog:'
-        version: 2.16.2
       tailwindcss:
         specifier: 'catalog:'
         version: 4.3.3
@@ -199,6 +199,25 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.4(@types/node@24.19.2)(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0))
+
+  packages/sanitize:
+    dependencies:
+      sanitize-html:
+        specifier: 'catalog:'
+        version: 2.18.1
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      '@types/sanitize-html':
+        specifier: 'catalog:'
+        version: 2.16.2
       typescript:
         specifier: 'catalog:'
         version: 6.0.3

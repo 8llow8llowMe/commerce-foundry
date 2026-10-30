@@ -12,18 +12,17 @@
   "dependencies": {
     "@cf/api-client": "workspace:*",
     "@cf/brand": "workspace:@cf/theme-mokoyuri@*",
+    "@cf/sanitize": "workspace:*",
     "@cf/ui": "workspace:*",
     "next": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:",
-    "sanitize-html": "catalog:"
+    "react-dom": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "@types/sanitize-html": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:"
   }

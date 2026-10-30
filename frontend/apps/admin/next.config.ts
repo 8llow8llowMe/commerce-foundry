@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   // 워크스페이스 패키지는 빌드하지 않고 TS 소스를 내보낸다.
-  transpilePackages: ['@cf/api-client', '@cf/ui', '@cf/brand'],
+  transpilePackages: ['@cf/api-client', '@cf/ui', '@cf/sanitize', '@cf/brand'],
   poweredByHeader: false,
   // 배포 이미지는 standalone 번들(server.js + 추적된 node_modules)만 담는다 (docs/deploy.md).
   output: 'standalone',
