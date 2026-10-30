@@ -34,7 +34,7 @@ class OnboardingTaskProcessorTest {
 
     private static OnboardingTaskProcessor answering(boolean storeReady, Instant memberFirstSavedAt) {
         return new OnboardingTaskProcessor(memberId -> new ShippingPolicyFactQueryResult(storeReady, memberFirstSavedAt),
-            memberId -> new ProductRegistrationFactQueryResult(true, null));
+            memberId -> new ProductRegistrationFactQueryResult(true, null), true);
     }
 
     @Test
@@ -72,7 +72,7 @@ class OnboardingTaskProcessorTest {
         OnboardingTaskProcessor processor = new OnboardingTaskProcessor(memberId -> {
             requested.add(memberId);
             throw new OnboardingException(OnboardingErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
-        }, memberId -> new ProductRegistrationFactQueryResult(true, null));
+        }, memberId -> new ProductRegistrationFactQueryResult(true, null), true);
 
         assertThat(only(processor))
             .isEqualTo(new OnboardingTask(OnboardingTaskKey.SHIPPING_POLICY_SAVED, StoreTaskStatus.UNAVAILABLE, MemberTaskStatus.UNAVAILABLE, null));
@@ -84,7 +84,7 @@ class OnboardingTaskProcessorTest {
     void otherFailurePropagates() {
         OnboardingTaskProcessor processor = new OnboardingTaskProcessor(memberId -> {
             throw new IllegalStateException("bug");
-        }, memberId -> new ProductRegistrationFactQueryResult(true, null));
+        }, memberId -> new ProductRegistrationFactQueryResult(true, null), true);
 
         assertThatThrownBy(() -> processor.getMine(MEMBER)).isInstanceOf(IllegalStateException.class);
     }
@@ -111,9 +111,20 @@ class OnboardingTaskProcessorTest {
     void productUnavailableOnly() {
         OnboardingTaskProcessor processor = new OnboardingTaskProcessor(
             memberId -> new ShippingPolicyFactQueryResult(true, SAVED_AT),
-            memberId -> { throw new OnboardingException(OnboardingErrorCode.PRODUCT_SERVICE_UNAVAILABLE); });
+            memberId -> { throw new OnboardingException(OnboardingErrorCode.PRODUCT_SERVICE_UNAVAILABLE); }, true);
         List<OnboardingTask> tasks = processor.getMine(MEMBER);
         assertThat(tasks.getFirst().myStatus()).isEqualTo(MemberTaskStatus.COMPLETED);
         assertThat(tasks.get(1)).isEqualTo(OnboardingTask.unavailable(OnboardingTaskKey.PRODUCT_REGISTERED));
+    }
+
+    @Test
+    @DisplayName("상품 등록 화면이 배포되기 전에는 상품 업무를 응답하지 않고 product-service도 호출하지 않는다")
+    void productTaskIsHiddenUntilRegistrationIsAvailable() {
+        OnboardingTaskProcessor processor = new OnboardingTaskProcessor(
+            memberId -> new ShippingPolicyFactQueryResult(true, SAVED_AT),
+            memberId -> { throw new AssertionError("상품 사실을 조회하면 안 됩니다."); }, false);
+
+        assertThat(processor.getMine(MEMBER)).extracting(OnboardingTask::key)
+            .containsExactly(OnboardingTaskKey.SHIPPING_POLICY_SAVED);
     }
 }

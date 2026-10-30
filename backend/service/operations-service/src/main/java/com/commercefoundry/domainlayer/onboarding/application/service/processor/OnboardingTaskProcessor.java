@@ -9,7 +9,7 @@ import com.commercefoundry.domainlayer.onboarding.application.port.out.query.Shi
 import com.commercefoundry.domainlayer.onboarding.domain.model.OnboardingTask;
 import com.commercefoundry.domainlayer.onboarding.domain.model.OnboardingTaskKey;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,15 +20,24 @@ import org.springframework.stereotype.Component;
  * 실패 원인(status · 서킷)은 어댑터 support 가 이미 로그로 남긴다.
  */
 @Component
-@RequiredArgsConstructor
 public class OnboardingTaskProcessor {
 
     private final ShippingPolicyFactQueryPort shippingPolicyFactQueryPort;
     private final ProductRegistrationFactQueryPort productRegistrationFactQueryPort;
+    private final boolean productRegistrationEnabled;
+
+    public OnboardingTaskProcessor(ShippingPolicyFactQueryPort shippingPolicyFactQueryPort,
+                                   ProductRegistrationFactQueryPort productRegistrationFactQueryPort,
+                                   @Value("${operations.onboarding.product-registration-enabled:false}") boolean productRegistrationEnabled) {
+        this.shippingPolicyFactQueryPort = shippingPolicyFactQueryPort;
+        this.productRegistrationFactQueryPort = productRegistrationFactQueryPort;
+        this.productRegistrationEnabled = productRegistrationEnabled;
+    }
 
     /** 업무 전부 — {@link OnboardingTaskKey} 선언 순서. */
     public List<OnboardingTask> getMine(long memberId) {
-        return List.of(shippingPolicySaved(memberId), productRegistered(memberId));
+        OnboardingTask shipping = shippingPolicySaved(memberId);
+        return productRegistrationEnabled ? List.of(shipping, productRegistered(memberId)) : List.of(shipping);
     }
 
     private OnboardingTask productRegistered(long memberId) {

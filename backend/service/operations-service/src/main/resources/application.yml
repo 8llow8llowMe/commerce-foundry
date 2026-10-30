@@ -173,6 +173,8 @@ operations:
   # key 는 어드민 FE 투어 id(frontend/apps/admin/src/lib/tour/tours.ts)에서 -v1 꼬리를 뗀 것이다. 안내를 바꿔 다시 보여 주려면 version 을 올린다.
   # 비었거나 key 형식(^[a-z][a-z0-9-]{0,63}$) · 중복 · version(1 이상)이 틀리면 기동하지 않는다
   onboarding:
+    # #9 상품 등록 API·어드민 화면이 함께 배포될 때 true 로 켠다. 그전에는 완료할 수 없는 PRODUCT_REGISTERED 업무를 노출하지 않는다.
+    product-registration-enabled: ${ONBOARDING_PRODUCT_REGISTRATION_ENABLED:false}
     guides:
       - key: console
         version: 1

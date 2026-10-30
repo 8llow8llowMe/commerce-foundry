@@ -48,7 +48,7 @@ class OnboardingTourProcessorTest {
         throw new OnboardingException(OnboardingErrorCode.DELIVERY_SERVICE_UNAVAILABLE);
     }, memberId -> {
         throw new OnboardingException(OnboardingErrorCode.PRODUCT_SERVICE_UNAVAILABLE);
-    });
+    }, true);
     private final OnboardingAdminFacade facade = new OnboardingAdminFacade(processor, taskProcessor, new OnboardingAdminPresenter());
 
     private static TourProgressUpdateCommand command(String key, int version, TourStatus status, Integer step) {
