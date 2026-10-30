@@ -21,6 +21,7 @@ const API_PREFIX = '/api/v1/';
 const DEDICATED_AUTH_PATHS = new Set([
   '/api/v1/auth/login',
   '/api/v1/auth/admin/login',
+  '/api/v1/auth/admin/login/otp',
   '/api/v1/auth/token/reissue',
   '/api/v1/auth/logout',
   '/api/v1/auth/sign-up',

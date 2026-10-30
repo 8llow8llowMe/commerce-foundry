@@ -2,7 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api-error';
 import { unwrap } from '../unwrap';
 import type { AuthCookieConfig } from './cookies';
-import { ADMIN_LOGIN_PATH, LOGIN_PATH, createAdminLoginHandler, createLoginHandler } from './login';
+import {
+  ADMIN_LOGIN_OTP_PATH,
+  ADMIN_LOGIN_PATH,
+  LOGIN_PATH,
+  createAdminLoginHandler,
+  createAdminLoginOtpHandler,
+  createLoginHandler,
+  readOtpChallenge,
+} from './login';
 
 const GATEWAY = 'http://gateway.test:8000';
 const COOKIES: AuthCookieConfig = {
@@ -248,6 +256,181 @@ describe('createAdminLoginHandler', () => {
     const res = await adminHandlerWith(fetchImpl)(adminLogin({ 'sec-fetch-site': 'cross-site' }));
 
     expect(res.status).toBe(403);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+const OTP_ADMIN_COOKIES: AuthCookieConfig = {
+  accessName: 'cf_admin_at',
+  refreshName: null,
+  accessMaxAgeSec: 1800,
+  secure: false,
+};
+const CHALLENGE = 'challenge-abcdefghijklmnopqrstuvwxyz0123456';
+const OTP_REQUIRED = {
+  accessToken: null,
+  accessTokenExpiresIn: null,
+  otpRequired: true,
+  challengeToken: CHALLENGE,
+  challengeExpiresIn: 300,
+};
+
+describe('createAdminLoginHandler — OTP 등록 관리자(#414)', () => {
+  const adminLogin = () =>
+    new Request(`http://localhost:3001${ADMIN_LOGIN_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ email: 'admin@test.com', password: 'pw' }),
+    });
+  const handlerWith = (fetchImpl: typeof fetch) =>
+    createAdminLoginHandler({ gatewayUrl: GATEWAY, cookies: OTP_ADMIN_COOKIES, fetch: fetchImpl });
+
+  it('otpRequired=true 면 쿠키를 심지 않고 챌린지 세 칸만 no-store 로 넘긴다', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(envelope(200, true, { ...OTP_REQUIRED, extra: 'x' }));
+    const res = await handlerWith(fetchImpl)(adminLogin());
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect((await res.json()).dataBody).toEqual({
+      otpRequired: true,
+      challengeToken: CHALLENGE,
+      challengeExpiresIn: 300,
+    });
+  });
+
+  it('OTP 미등록 관리자(otpRequired=false + 토큰)는 지금처럼 쿠키를 심고 본문은 null 이다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      envelope(200, true, {
+        accessToken: 'admin-1',
+        accessTokenExpiresIn: 1200,
+        otpRequired: false,
+        challengeToken: null,
+        challengeExpiresIn: null,
+      }),
+    );
+    const res = await handlerWith(fetchImpl)(adminLogin());
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).dataBody).toBeNull();
+    expect(res.headers.getSetCookie()).toEqual([
+      'cf_admin_at=admin-1; Path=/; HttpOnly; SameSite=Lax; Max-Age=1200',
+    ]);
+  });
+
+  it('otpRequired=true 인데 챌린지가 비었거나 수명이 없으면 BFF_002 503 이다', async () => {
+    for (const body of [
+      { ...OTP_REQUIRED, challengeToken: '' },
+      { ...OTP_REQUIRED, challengeToken: null },
+      { ...OTP_REQUIRED, challengeExpiresIn: null },
+      { ...OTP_REQUIRED, challengeExpiresIn: 0 },
+    ]) {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, body));
+      const res = await handlerWith(fetchImpl)(adminLogin());
+      expect(res.status).toBe(503);
+      expect(res.headers.getSetCookie()).toEqual([]);
+      expect(JSON.stringify(await res.json())).not.toContain(CHALLENGE);
+    }
+  });
+});
+
+describe('readOtpChallenge', () => {
+  it('토큰이 함께 오면 챌린지로 읽지 않는다 — 토큰을 브라우저에 넘기지 않게', () => {
+    expect(readOtpChallenge({ ...OTP_REQUIRED, accessToken: 'leak' })).toBeNull();
+    expect(readOtpChallenge({ ...OTP_REQUIRED, otpRequired: 'true' })).toBeNull();
+    expect(readOtpChallenge(null)).toBeNull();
+  });
+});
+
+describe('createAdminLoginOtpHandler', () => {
+  const otpLogin = (headers: Record<string, string> = { 'sec-fetch-site': 'same-origin' }) =>
+    new Request(`http://localhost:3001${ADMIN_LOGIN_OTP_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ challengeToken: CHALLENGE, code: '123456' }),
+    });
+  const handlerWith = (fetchImpl: typeof fetch) =>
+    createAdminLoginOtpHandler({
+      gatewayUrl: GATEWAY,
+      cookies: OTP_ADMIN_COOKIES,
+      fetch: fetchImpl,
+    });
+
+  it('2단계 경로로 본문을 넘기고, 성공하면 access 쿠키만 심고 본문에서 토큰을 뺀다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      envelope(200, true, {
+        accessToken: 'admin-otp-1',
+        accessTokenExpiresIn: 1200,
+        otpRequired: false,
+        challengeToken: null,
+        challengeExpiresIn: null,
+      }),
+    );
+    const res = await handlerWith(fetchImpl)(
+      otpLogin({ 'sec-fetch-site': 'same-origin', cookie: 'x=1' }),
+    );
+
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe(`${GATEWAY}${ADMIN_LOGIN_OTP_PATH}`);
+    expect(new Headers(init?.headers).get('cookie')).toBeNull();
+    expect(new TextDecoder().decode(init?.body as ArrayBuffer)).toContain(CHALLENGE);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = await res.json();
+    expect(body.dataBody).toBeNull();
+    expect(JSON.stringify(body)).not.toContain('admin-otp-1');
+    expect(res.headers.getSetCookie()).toEqual([
+      'cf_admin_at=admin-otp-1; Path=/; HttpOnly; SameSite=Lax; Max-Age=1200',
+    ]);
+  });
+
+  it.each([
+    [400, 'AUTH_034', 'server'],
+    [400, 'AUTH_035', 'server'],
+    [409, 'AUTH_044', 'conflict'],
+    [503, 'AUTH_039', 'unavailable'],
+  ])('%s %s 는 봉투와 상태를 그대로 중계하고 쿠키를 심지 않는다', async (status, code, kind) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(status, false, null, code));
+    const res = await handlerWith(fetchImpl)(otpLogin());
+
+    expect(res.status).toBe(status);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.getSetCookie()).toEqual([]);
+    await expect(unwrap(res)).rejects.toMatchObject({ code, kind });
+  });
+
+  it('시도 제한(429 AUTH_043)은 Retry-After 까지 중계한다', async () => {
+    const limited = envelope(429, false, null, 'AUTH_043');
+    limited.headers.set('retry-after', '600');
+    const res = await handlerWith(vi.fn<typeof fetch>().mockResolvedValue(limited))(otpLogin());
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('600');
+    await expect(unwrap(res)).rejects.toMatchObject({
+      kind: 'rateLimited',
+      code: 'AUTH_043',
+      retryAfterSec: 600,
+    });
+  });
+
+  it('2단계 성공인데 토큰이 없으면(다시 otpRequired 여도) BFF_002 503 이고 챌린지를 넘기지 않는다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(200, true, OTP_REQUIRED));
+    const res = await handlerWith(fetchImpl)(otpLogin());
+
+    expect(res.status).toBe(503);
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(JSON.stringify(await res.json())).not.toContain(CHALLENGE);
+  });
+
+  it('다른 사이트에서 온 요청은 게이트웨이로 보내지 않는다', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const res = await handlerWith(fetchImpl)(otpLogin({ 'sec-fetch-site': 'cross-site' }));
+
+    expect(res.status).toBe(403);
+    expect(res.headers.get('cache-control')).toBe('no-store');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

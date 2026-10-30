@@ -5,10 +5,13 @@ export { createEventStreamProxyHandler, type EventStreamProxyOptions } from './e
 export { gatewayRequest, type GatewayRequestOptions } from './gateway-request';
 export { checkGateway, healthResponse, type HealthReport, type HealthStatus } from './health';
 export {
+  ADMIN_LOGIN_OTP_PATH,
   ADMIN_LOGIN_PATH,
   createAdminLoginHandler,
+  createAdminLoginOtpHandler,
   createLoginHandler,
   LOGIN_PATH,
+  type AdminOtpChallenge,
   type LoginHandlerOptions,
 } from './login';
 export { createLogoutHandler, LOGOUT_PATH, type LogoutHandlerOptions } from './logout';

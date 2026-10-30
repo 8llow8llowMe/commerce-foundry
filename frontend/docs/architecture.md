@@ -133,7 +133,7 @@ BFF 가 브라우저가 자동으로 싣는 쿠키를 Bearer 로 바꿔 주므�
   인가 URL 발급(`GET /api/v1/auth/oauth/{provider}/authorize-url`)은 토큰이 없는 응답이라 일반 프록시가 중계한다. 화면 흐름은 §3-1.
 - 고객 쿠키 이름 `cf_at` / `cf_rt` 와 대체 수명(30분 / 14일, BE 설정과 같다)은 `apps/storefront/src/lib/auth-cookies.ts`.
   어드민은 `apps/admin/src/lib/auth-cookies.ts` — `cf_admin_at` 하나, 대체 수명 30분이다(#204, §9).
-- **토큰을 주는 인증 경로는 전용 route handler 만 받는다** — 로그인 · 관리자 로그인 · 재발급 · 로그아웃 · 가입(`DEDICATED_AUTH_PATHS`), 소셜 로그인(`/api/v1/auth/oauth/*/login`, 제공자 값 무관)은 일반 프록시가 404 `BFF_001` 로 막는다
+- **토큰을 주는 인증 경로는 전용 route handler 만 받는다** — 로그인 · 관리자 로그인(2단계 `/login/otp` 포함) · 재발급 · 로그아웃 · 가입(`DEDICATED_AUTH_PATHS`), 소셜 로그인(`/api/v1/auth/oauth/*/login`, 제공자 값 무관)은 일반 프록시가 404 `BFF_001` 로 막는다
   (대소문자 · 끝 슬래시 · 퍼센트 인코딩 · 마디마다 붙은 경로 매개변수 `;…` 변형 포함). 전용 핸들러가 없는 앱(스토어프론트의 관리자 로그인, 어드민의 고객 로그인 · 재발급)에서 토큰이 JS 로 새지 않게 한다.
 - **refresh 쿠키가 없는 설정**(`AuthCookieConfig.refreshName: null`)이면 프록시 · 로그아웃은 refresh 쿠키를 읽지 않고(같은 이름 쿠키가 와도 무시) 재발급하지 않는다
   — 401 은 그대로 중계하고, 로그아웃은 Bearer + 본문 `{}` 로 access 만 막는다(BE `LogoutRequest.refreshToken` 은 선택). 쿠키 정리도 access 하나다.
@@ -401,9 +401,16 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 ### 로그인 · 세션 (`/login`, #204)
 
-- **세션은 access 토큰 하나다** — 관리자 로그인 `POST /api/v1/auth/admin/login`(BE #191)은 `{ accessToken, accessTokenExpiresIn }` 만 주고 refresh 를 주지 않는다.
+- **세션은 access 토큰 하나다** — 관리자 로그인 `POST /api/v1/auth/admin/login`(BE #191)은 `{ accessToken, accessTokenExpiresIn }` 만 주고 refresh 를 주지 않는다(OTP 등록 관리자는 아래 2단계 뒤에 같은 모양을 받는다).
   BFF 전용 route handler(`app/api/v1/auth/admin/login`, `createAdminLoginHandler`)가 `cf_admin_at` 하나를 응답 수명으로 심고, 브라우저에는 토큰 없는 성공 봉투만 준다.
   만료되면(기본 30분) 다시 로그인한다 — 프록시는 재발급하지 않는다(§3 refresh 쿠키가 없는 설정).
+- **OTP 2단계(#414, BE #238 PR-B)** — OTP 를 등록한 관리자의 1단계 200 은 토큰 없이 `otpRequired=true` · `challengeToken` · `challengeExpiresIn`(초, 기본 300)이다.
+  `createAdminLoginHandler` 는 이때 쿠키를 심지 않고 그 세 칸만(`readOtpChallenge`, 토큰이 함께 오면 계약 불일치 `BFF_002`) 브라우저에 넘긴다. OTP 미등록 관리자는 지금과 같다.
+  `LoginForm` 은 챌린지를 **화면 state 에만** 두고 `OtpForm` 으로 2단계 `POST /api/v1/auth/admin/login/otp`(`createAdminLoginOtpHandler`, 같은 origin · no-store)의 본문에만 싣는다
+  — 쿠키 · localStorage · sessionStorage · URL · 폼 칸 · 로그 · 분석 이벤트에 두지 않는다. 새로 고치면 사라져 1단계부터다. 2단계 성공은 access 쿠키 하나를 심고 토큰 없는 봉투를 준다.
+  코드 칸 하나가 6자리와 복구 코드를 받는다(최대 32자). `challengeExpiresIn` 이 지나거나 `AUTH_034` · `AUTH_044` · 챌린지 칸 검증이면 1단계로 돌아가 안내하고(이메일은 남긴다),
+  `AUTH_035` 는 칸을 비우고 다시 입력, 429 `AUTH_043` 은 1단계와 같은 `useLoginCooldown` 으로 `Retry-After` 동안 막는다(`lib/auth/otp-login.ts`).
+  2단계 경로도 일반 프록시의 `DEDICATED_AUTH_PATHS` 라 전용 핸들러가 없는 스토어프론트에서는 404 `BFF_001` 이다.
 - **진입 확인** — `src/proxy.ts` 가 `cf_admin_at` 쿠키가 없으면 `/login?next=<경로>` 로 보낸다(`/api` · `/_next` · 정적 파일 · `/login` 은 제외).
   쿠키 수명이 토큰 수명이라 만료된 세션은 다음 화면 이동에서 여기 걸린다. 쿠키가 있어도 토큰이 무효일 수 있어(로그아웃 · 차단) 그때는 API 401 → `AccessNotice` 가 보낸다.
   토큰 유효성 · 권한의 정본은 게이트웨이 · BE 다.
