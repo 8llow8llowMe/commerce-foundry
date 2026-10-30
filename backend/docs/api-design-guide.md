@@ -1038,6 +1038,7 @@ FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가�
 - tour 항목은 `{guideKey, guideVersion, status{code,name,description}, currentStep, finishedAt}` 다. `guideVersion` 은 지금 배포된 버전, `finishedAt` 은 UTC ISO 다.
   status 는 `NOT_STARTED` · `IN_PROGRESS` · `COMPLETED` · `SKIPPED` 다. **안내를 본 기록일 뿐 실제 업무 완료가 아니다** — 업무 완료(`tasks`)는 담당 서비스의 사실로만 판정한다(#357 PR-B).
 - 허용 목록은 yml `operations.onboarding.guides`(key · version)다. key 는 FE 투어 id(`tours.ts`)에서 `-v1` 꼬리를 뗀 것이다. 안내를 바꿔 다시 보여 주려면 version 을 올린다.
+- FE 에 투어를 추가할 때 같은 릴리스의 operations-service 허용 목록에도 key · version 을 등록한다. 예를 들어 국내 배송비 투어 `shipping-domestic-v1` 은 `shipping-domestic` version 1 로 등록한다. 누락하면 서버가 404 를 반환해 브라우저 기록만 남는다.
 - **미시작은 행이 없다.** 기록이 없거나 기록 버전이 배포 버전과 다르면 응답에서 `NOT_STARTED` + 배포 버전이다.
 - 기록은 합친다(다른 기기 · 동시 탭). 같은 본문을 다시 보내도 결과가 같다(멱등).
   - 같은 버전 — 순위 `NOT_STARTED < IN_PROGRESS < {COMPLETED, SKIPPED}` 가 내려가지 않는다. 끝난 기록에 `IN_PROGRESS` 가 오면 그대로다. `SKIPPED → COMPLETED` 만 허용하고

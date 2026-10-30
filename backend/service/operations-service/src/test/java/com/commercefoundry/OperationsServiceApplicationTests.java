@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.aiusage.domain.model.AiTokenUsage;
 import com.commercefoundry.domainlayer.aiusage.domain.model.AiUsageStatus;
 import com.commercefoundry.domainlayer.job.adapter.in.event.JobRunEventListener;
 import com.commercefoundry.domainlayer.job.adapter.in.scheduler.JobLeaseExpiryScheduler;
+import com.commercefoundry.global.properties.OnboardingProperties;
 import com.commercefoundry.messaging.outbox.OutboxStore;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
@@ -60,6 +61,16 @@ class OperationsServiceApplicationTests {
 
     @Autowired
     private MockMvcTester mockMvc;
+
+    @Autowired
+    private OnboardingProperties onboardingProperties;
+
+    @Test
+    @DisplayName("국내 배송비 투어가 운영자 온보딩 허용 목록에 배포 버전으로 등록된다")
+    void shippingDomesticTourIsConfigured() {
+        assertThat(onboardingProperties.find("shipping-domestic"))
+            .contains(new OnboardingProperties.Guide("shipping-domestic", 1));
+    }
 
     @Test
     @DisplayName("컨텍스트가 뜨고 global.config 가 import 한 공통 빈이 조립된다")

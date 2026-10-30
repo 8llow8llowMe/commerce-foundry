@@ -184,6 +184,8 @@ operations:
         version: 1
       - key: size-chart-templates
         version: 1
+      - key: shipping-domestic
+        version: 1
   # AI 사용량 원장 · 월 한도 (#215 PR-B, bootstrap-conventions.md AI). 블록이 빠지거나 값이 틀리면 기동하지 않는다 (AiUsageProperties).
   # 금액 · 단가는 문자열로 적는다 — double 로 읽지 않는다. 비용은 micro-USD(1 USD = 1,000,000)로 쌓는다
   ai:
