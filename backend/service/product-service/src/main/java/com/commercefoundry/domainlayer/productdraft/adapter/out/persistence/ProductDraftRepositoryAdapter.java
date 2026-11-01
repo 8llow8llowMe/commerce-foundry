@@ -64,9 +64,12 @@ public class ProductDraftRepositoryAdapter implements ProductDraftRepositoryPort
         );
     }
 
-    /** 방금 INSERT 한 행의 생성 시각은 감사 리스너가 채운 나노초 값이다 — 조회 응답(DB timestamp(6))과 같게 마이크로초로 맞춘다. */
+    /**
+     * 방금 INSERT 한 행의 생성 시각은 감사 리스너가 채운 나노초 값이다 — 조회 응답(DB timestamp(6))과 같게 마이크로초로 맞춘다.
+     * PostgreSQL JDBC 드라이버는 나노초를 버리지 않고 마이크로초로 반올림(half-up)해 보내므로 같은 방식으로 맞춘다. 버리면 반올림된 행과 1µs 어긋난다.
+     */
     private static Instant toDbPrecision(Instant instant) {
-        return instant == null ? null : instant.truncatedTo(ChronoUnit.MICROS);
+        return instant == null ? null : instant.plusNanos(500).truncatedTo(ChronoUnit.MICROS);
     }
 
     private static String writeInput(ProductDraft draft) {
