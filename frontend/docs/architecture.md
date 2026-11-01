@@ -452,7 +452,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   로그아웃(쿠키 삭제)하고 `/login?reason=password-changed` 로 간다. 로그아웃 요청이 실패해도 토큰은 이미 막혔으니 이동한다. `reason` 은 허용한 이름만 문구로 바꾼다(`loginNotice`).
   400 `AUTH_032`(현재 비밀번호 틀림)는 현재 비밀번호 칸에, `AUTH_141` · `142` · `145` 는 그 칸에. 새 비밀번호 확인 칸은 화면에서만 맞춰 본다.
   503 `AUTH_013` 은 새 비밀번호가 이미 저장된 뒤라 성공과 같이 로그아웃 · 로그인 화면으로 보낸다(실패로 두면 같은 값을 다시 보내 `AUTH_032` 를 받는다).
-- **비밀번호는 React 상태 · 주소 · 저장소 · 로그에 두지 않는다** — 두 폼 모두 제어하지 않는 칸이고 제출할 때만 `FormData` 로 읽는다. 보내기 전 규칙 확인(`passwordProblem`, 12~64자 ·
+- **비밀번호는 React 상태 · 주소 · 저장소 · 로그에 두지 않는다** — 두 폼 모두 제어하지 않는 칸이고 제출할 때만 `FormData` 로 읽는다. 보내기 전 규칙 확인(`passwordProblem`, 10~64자 ·
   영문과 숫자 · 공백 없는 ASCII — BE `AdminRequestPatterns` 와 같다)은 고정 문구만 돌려준다. 결과를 모르는 실패(`unknownOutcome`)는 다시 보내기 전에 결과를 확인하게 안내한다.
 
 ### 2단계 인증 (`/account/otp`, #417 · BE #238 PR-A2)
