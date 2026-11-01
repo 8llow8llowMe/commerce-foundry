@@ -19,6 +19,7 @@ import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentAbortReason;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentApprovalMismatchException;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
+import com.commercefoundry.global.properties.PaymentGateProperties;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
@@ -54,10 +55,13 @@ public class PaymentWebFacade implements PaymentWebUseCase {
     private final PaymentProcessor paymentProcessor;
     private final PaymentGatewayProcessor paymentGatewayProcessor;
     private final PaymentWebPresenter paymentWebPresenter;
+    private final PaymentGateProperties paymentGateProperties;
     private final Clock clock;
 
     /**
      * 결제 준비. 업무 키는 주문 아이디 + 주문당 활성 결제 시도 하나(DB 유니크 키)다 — {@code Idempotency-Key} 를 쓰지 않는다.
+     *
+     * <p>결제 게이트({@code payment.enabled})가 닫혀 있으면 아무것도 부르지 않고 503 {@code PAYMENT_015} 다.
      *
      * <ol>
      *   <li>주문 요약(order-service, 트랜잭션 밖) — 없음 404 · 결제 대기 아님 409 · KRW 아님 409 · 기한 임박 409</li>
@@ -71,6 +75,7 @@ public class PaymentWebFacade implements PaymentWebUseCase {
      */
     @Override
     public PrepareResult prepare(long memberId, PaymentPrepareCommand command) {
+        requireEnabled();
         PayableOrder order = orderSummaryProcessor.getPayableOrder(command.orderId(), memberId);
         Optional<Payment> active = paymentProcessor.findActive(order.orderId());
         if (active.isEmpty()) {
@@ -93,11 +98,15 @@ public class PaymentWebFacade implements PaymentWebUseCase {
     /**
      * 결제 승인 ({@code payment-guide.md} §3 · §3-2 · §4). 고객 {@code Idempotency-Key} 는 결제 행에 기록한다 — (회원, 키) 유니크 키가 키의 결과를 가리킨다.
      *
+     * <p>결제 게이트({@code payment.enabled})가 닫혀 있으면 아무것도 부르지 않고 503 {@code PAYMENT_015} 다.
+     *
      * <ol>
      *   <li>회원의 결제 시도(PG 주문번호) — 없거나 남의 것 404 {@code PAYMENT_001}</li>
      *   <li>이 키로 다른 결제 시도를 이미 시작했으면 409 {@code PAYMENT_014}</li>
      *   <li>READY 가 아니면 저장 없이 답한다({@link #answerWithoutApproval}) — 같은 키의 재요청은 처음 결과(현재 상태) 그대로</li>
      *   <li>금액 · 통화가 결제 시도와 다르면 PG 를 부르지 않고 400 {@code PAYMENT_008} + 보안 경고</li>
+     *   <li>주문을 다시 확인한다(order-service, 트랜잭션 밖) — 없음 404 · 결제 대기 아님 409 · 기한 경과 409 · 장애 503 · 금액이 결제 시도와 다름 409 {@code PAYMENT_012}.
+     *       어느 쪽이든 PG 를 부르지 않고 결제 행을 바꾸지 않는다(READY 그대로 — 정리는 #15)</li>
      *   <li>READY → IN_PROGRESS 저장(트랜잭션 1, 커밋) — 동시 요청은 버전에서 진다</li>
      *   <li>PG 승인 요청 — <b>트랜잭션 밖</b></li>
      *   <li>결과 기록(트랜잭션 2) — DONE · FAILED · UNKNOWN 이면 200, READY(보내지 못함)면 503 {@code PAYMENT_010} + {@code Retry-After}</li>
@@ -105,6 +114,7 @@ public class PaymentWebFacade implements PaymentWebUseCase {
      */
     @Override
     public PaymentResponse confirm(long memberId, UUID idempotencyKey, PaymentConfirmCommand command) {
+        requireEnabled();
         String key = idempotencyKey.toString();
         Payment current = paymentProcessor.getOwnedByPgOrderId(memberId, command.pgOrderId());
         Optional<Payment> keyed = paymentProcessor.findByApprovalKey(memberId, key);
@@ -118,6 +128,7 @@ public class PaymentWebFacade implements PaymentWebUseCase {
             log.warn("security: payment confirm amount mismatch. paymentId={}, memberId={}", current.id(), memberId);
             throw new PaymentException(PaymentErrorCode.AMOUNT_MISMATCH);
         }
+        requireOrderStillPayable(current, memberId);
         Payment inProgress = startApproval(current, command, key, memberId);
         if (inProgress.status() != PaymentStatus.IN_PROGRESS) {
             // 동시 요청이 먼저 승인을 시작 · 기록했다 — 다시 읽은 상태로 답한다
@@ -141,7 +152,8 @@ public class PaymentWebFacade implements PaymentWebUseCase {
      * READY 가 아닌 결제 시도에 온 승인 요청 — 저장하지 않고 답한다.
      *
      * <ul>
-     *   <li>DONE · UNKNOWN · FAILED(그리고 승인 계열 확장 상태)에 같은 키 · 같은 결제키 → 현재 상태(멱등). 같은 키인데 결제키가 다르면 409 {@code PAYMENT_014}</li>
+     *   <li>DONE · UNKNOWN · FAILED(그리고 승인 계열 확장 상태)에 같은 키 · 같은 결제키 → 현재 상태(멱등). 같은 키인데 결제키가 다르면 409 {@code PAYMENT_014}.
+     *       DONE · UNKNOWN(취소 계열 포함)에 같은 키 · 같은 결제키인데 금액 · 통화가 다르면 409 {@code PAYMENT_014} + 보안 경고</li>
      *   <li>다른 키 — DONE · UNKNOWN 등에 같은 결제키면 현재 상태(새 키로 재확인), 다른 결제키면 400 {@code PAYMENT_009} + 보안 경고. FAILED 면 409 {@code PAYMENT_006}</li>
      *   <li>IN_PROGRESS → 409 {@code PAYMENT_007}(같은 키든 아니든 — 처리 중인 요청은 409)</li>
      *   <li>ABORTED · LATE_APPROVED → 409 {@code PAYMENT_006}</li>
@@ -160,6 +172,11 @@ public class PaymentWebFacade implements PaymentWebUseCase {
         boolean samePaymentKey = command.paymentKey().equals(current.paymentKey());
         if (key.equals(current.approvalIdempotencyKey())) {
             if (!samePaymentKey) {
+                throw new PaymentException(PaymentErrorCode.IDEMPOTENCY_KEY_REUSED);
+            }
+            if (status != PaymentStatus.FAILED && !sameAmount(current, command)) {
+                // 같은 키 · 같은 결제키인데 본문(금액 · 통화)이 다르다 — 같은 요청의 재전송이 아니다 (api-design-guide.md §6)
+                log.warn("security: payment confirm replay with other amount. paymentId={}, memberId={}", current.id(), current.memberId());
                 throw new PaymentException(PaymentErrorCode.IDEMPOTENCY_KEY_REUSED);
             }
             return current;
@@ -215,10 +232,12 @@ public class PaymentWebFacade implements PaymentWebUseCase {
         try {
             return paymentProcessor.recordApprovalResult(inProgress, outcome);
         } catch (PaymentPersistenceConflictException conflict) {
-            log.error("payment approval result conflicted. paymentId={}, kind={}, outcome={}", inProgress.id(), conflict.getKind(), outcome);
             if (conflict.getKind() != PaymentPersistenceConflictException.Kind.VERSION) {
+                log.error("payment approval result conflicted. paymentId={}, kind={}, outcome={}", inProgress.id(), conflict.getKind(), outcome);
                 throw new PaymentException(PaymentErrorCode.APPROVAL_RECORD_FAILED, conflict);
             }
+            // 재조회 · 웹훅이 먼저 기록한 정상 경합이다 — 다시 읽은 상태로 답한다
+            log.warn("payment approval result conflicted. paymentId={}, kind={}, outcome={}", inProgress.id(), conflict.getKind(), outcome);
             return paymentProcessor.getOwned(inProgress.id(), memberId);
         } catch (PaymentException exception) {
             throw exception;
@@ -240,6 +259,25 @@ public class PaymentWebFacade implements PaymentWebUseCase {
             }
             log.warn("payment prepare conflicted. orderId={}, kind={}", order.orderId(), conflict.getKind());
             throw new PaymentException(PaymentErrorCode.PAYMENT_REQUEST_CONFLICT, conflict);
+        }
+    }
+
+    /** 운영 결제 게이트 — 닫혀 있으면 DB · PG · order 를 부르기 전에 503 {@code PAYMENT_015}. #308 · #15 전에는 운영에서 켜지 않는다 ({@code payment-guide.md} §6). */
+    private void requireEnabled() {
+        if (!paymentGateProperties.enabled()) {
+            throw new PaymentException(PaymentErrorCode.PAYMENTS_DISABLED);
+        }
+    }
+
+    /**
+     * 승인 직전 주문 재확인 — 결제 준비 뒤 주문이 취소 · 만료 · 결제됐으면 PG 에 승인을 보내지 않는다. 트랜잭션 밖이다(order-service 원격 호출).
+     * 결제 행은 바꾸지 않는다 — READY 그대로 두고 정리는 #15 가 한다. 주문 금액은 주문 뒤 바뀌지 않으므로 결제 시도와 다르면 결함 신호라 409 {@code PAYMENT_012} + error 로그다.
+     */
+    private void requireOrderStillPayable(Payment ready, long memberId) {
+        PayableOrder order = orderSummaryProcessor.getConfirmableOrder(ready.orderId(), memberId);
+        if (!order.totalAmount().equals(ready.amount())) {
+            log.error("payment confirm order amount differs from attempt. paymentId={}, orderId={}", ready.id(), ready.orderId());
+            throw new PaymentException(PaymentErrorCode.PAYMENT_REQUEST_CONFLICT);
         }
     }
 

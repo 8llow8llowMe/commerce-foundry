@@ -32,7 +32,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *
  * <p>로그 규칙 ({@code coding-conventions.md} §8): 결제키 · 요청 본문 · 원인 예외 메시지를 남기지 않는다. 5xx 와 번역되지 않은 도메인 예외는 코드와 원인 예외 타입
  * ({@code causeType}, 단순 클래스명)만 남기고 예외를 throwable 로 넘기지 않는다 — 원인 메시지에 DB 행 값 · 대상 응답 본문이, 도메인 예외 메시지에 상태 · 아이디가 실린다.
- * 응답 메시지는 언제나 오류 코드의 고객 문구다.
+ * 응답 메시지는 언제나 오류 코드의 고객 문구다. 예외 메시지(포맷 인자 · 원인)를 응답에 쓰지 않는다 — {@code errorCode.getMessage()} 만 싣는다.
  */
 @Slf4j
 @RestControllerAdvice(basePackages = "com.commercefoundry.domainlayer.payment")
@@ -58,7 +58,7 @@ public class PaymentExceptionHandler {
         if (errorCode.getHttpStatus().is5xxServerError()) {
             log.warn("payment request failed. code={}, causeType={}", errorCode.getCode(), causeTypeOf(exception));
         }
-        return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), exception.getMessage()));
+        return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), errorCode.getMessage()));
     }
 
     /**

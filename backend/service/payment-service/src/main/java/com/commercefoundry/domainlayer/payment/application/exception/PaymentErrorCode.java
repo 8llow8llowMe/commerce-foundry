@@ -41,6 +41,8 @@ public enum PaymentErrorCode {
     APPROVAL_RECORD_FAILED("PAYMENT_013", "결제 결과를 기록하지 못했습니다. 잠시 후 결제 상태를 확인해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
     /** 같은 {@code Idempotency-Key} 를 다른 결제 시도(또는 다른 결제키)의 승인에 다시 썼다 ({@code api-design-guide.md} §6). */
     IDEMPOTENCY_KEY_REUSED("PAYMENT_014", "이미 다른 결제에 사용한 요청입니다. 결제를 처음부터 다시 진행해 주세요.", HttpStatus.CONFLICT),
+    /** 운영 결제 게이트({@code payment.enabled})가 닫혀 있다 — 결제 준비 · 승인을 받지 않는다 ({@code payment-guide.md} §3-4 · §6). */
+    PAYMENTS_DISABLED("PAYMENT_015", "지금은 결제를 받을 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
 
     /** 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON · 타입 불일치)의 폴백. */
     INVALID_REQUEST("PAYMENT_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

@@ -11,3 +11,7 @@ springdoc:
     enabled: true
   swagger-ui:
     enabled: true
+
+# 결제 게이트 (application.yml payment.enabled) — 토스 테스트 키 환경이라 연다. 운영은 #308 · #15 전까지 닫는다
+payment:
+  enabled: true

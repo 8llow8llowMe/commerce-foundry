@@ -1,6 +1,7 @@
 package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
+import com.commercefoundry.global.properties.PaymentGateProperties;
 import com.commercefoundry.global.properties.PaymentPrepareProperties;
 import com.commercefoundry.global.properties.TossPaymentsProperties;
 import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
@@ -17,7 +18,7 @@ import org.springframework.context.annotation.Import;
     SnowflakePropertiesConfig.class,
     SwaggerPropertiesConfig.class
 })
-@EnableConfigurationProperties({PaymentPrepareProperties.class, TossPaymentsProperties.class})
+@EnableConfigurationProperties({PaymentGateProperties.class, PaymentPrepareProperties.class, TossPaymentsProperties.class})
 public class PaymentServicePropertiesConfig {
 
 }
