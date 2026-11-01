@@ -403,9 +403,21 @@ RESERVED ──확정──▶ CONFIRMED
   같은 실행이 그 건으로 배치를 다시 채우지 않는다(head-of-line blocking 없음). 실패한 건은 다음 실행이 다시 읽는다.
   한 건의 실패는 로그만 남기고 다음 건으로 간다 — 409 `PRODUCT_026`(확정 · 다른 인스턴스와 경합)은 WARN, 그 밖의 업무 오류 · 예상 못 한 예외는 ERROR 이고
   업무 오류면 오류 코드를 남긴다. 확정과 만료가 겹치면 `@Version` 이 하나만 통과시킨다. 인스턴스가 여럿이어도 분산 락을 두지 않는다.
-  **역할은 안전망이다** — 주문 만료 · 결제 전 취소 이벤트(§3-5)가 먼저 풀고, 이벤트가 오지 않은 선점(발행 전 과도기 · order-service 장애 · DLT)을 TTL 뒤 푼다.
-  product 선점 TTL grace(TTL 뒤 여유)와 "이벤트보다 먼저 푼 건" ERROR 로그는 후속이다(grace 를 먼저 넣은 뒤 로그) — 지금은 주문 결제 기한이 선점 만료 시각과
-  같아(#13 C3) TTL 스윕이 같은 기한에 함께 돌아 상당수를 이벤트보다 먼저 풀고, 뒤에 온 `order-expired` 는 이미 RELEASED(§3-5 표)로 끝난다.
+  **메시징이 켜져 있으면 역할은 안전망이다 (#309)** — 주문 만료 이벤트(§3-5)가 먼저 풀고, 스윕은 만료 시각 + `stock.reservation.expiry-sweep.event-grace`(기본 2분)가
+  지나도 RESERVED 인 선점만 푼다. 주문 결제 기한이 선점 만료 시각과 같으므로(#13 C3) grace 가 없으면 스윕이 이벤트와 같은 기한에 돌아 상당수를 먼저 푼다 —
+  grace 는 order 만료 스윕(30s) + 릴레이(1s) + 컨슈머 재시도 총 시간(`commerce.messaging.retry.*` 기본 약 15초) + 호스트 간 시계 오차보다 넉넉히 둔다 —
+  짧으면 재시도 중인 이벤트보다 스윕이 먼저 풀어 WARN 오탐이 는다(재고는 틀어지지 않는다). 조회와 건별 재확인이 같은 기준 시각(`StockReservationProcessor.sweepCutoff`)을 쓴다.
+  - 켜는 순서는 order(outbox 릴레이) → product, 끌 때는 반대다. product 만 켜져 있으면 모든 만료 선점이 grace 만큼 늦게 풀리고 WARN 이 매 실행 나온다 —
+    WARN 이 계속되면 order 의 `MESSAGING_ENABLED` · 릴레이 상태부터 본다. order 쪽 발행이 아직 없는 과도기에 product 만 켜야 하면 `event-grace: 0s` 로 둔다.
+  - 회원별 활성 시도 상한(#231)의 창은 선점 TTL 과 같게 두지만, 이벤트가 오지 않은 선점은 TTL + grace + 스윕 주기까지 남아 그 꼬리(약 3분)만큼 한 회원이
+    묶는 재고가 상한을 조금 넘을 수 있다. 이벤트가 정상이면 TTL + 약 30초 안에 풀려 차이가 없다.
+  - 안전망이 실제로 풀면 WARN(`released by safety-net sweep`, 건수 · grace)이다 — 이벤트가 오지 않은 신호다(발행 전 과도기 · order 릴레이 지연 · DLT · 컨슈머 정지).
+    ERROR 가 아닌 이유: 주문 저장 실패로 **주문 없이 남은 선점**(#13 C3 — 같은 키 재시도가 없으면 스윕이 푼다)은 만료 이벤트가 나올 수 없어 늘 이 경로다.
+    WARN 이 평소보다 늘면 order 릴레이 · DLT · `commerce.messaging.consumer.dlt.total` 을 본다.
+  - 이벤트가 오지 않은 선점은 grace 동안 만료 시각이 지난 RESERVED 로 남는다. 확정은 만료 시각을 보지 않으므로 이 사이에 온 결제 확정은 200 `CONFIRMED` 다 —
+    order 의 만료 후 결제(§3-4)는 재선점이 기존 선점을 200 으로 받고 확정한다. 재고가 grace 만큼 늦게 돌아오는 것이 비용이다.
+    이때 재선점 응답의 `expiresAt` 은 이미 지난 기존 값일 수 있다 — 결제 기한으로 쓰지 말고, 재선점 뒤 곧바로 확정한다(§3-4).
+  - **메시징이 꺼져 있으면(기본) 주 경로다** — grace 를 쓰지 않고 만료 시각에 바로 풀며 INFO 다.
 - **만료 후 확정** — 스케줄러가 먼저 풀었으면 확정은 409 `PRODUCT_025` 다. order-service 의 처리는 아래 §3-4 를 따른다.
 - 허용 전이 표 밖의 요청은 도메인이 `StockReservationTransitionException`(현재 상태 · 시도한 동작)으로 알리고, `StockReservationProcessor` 가
   `PRODUCT_024` · `PRODUCT_025` 를 붙인다 — domain 은 application 의 오류 코드를 모른다 (`coding-conventions.md` §8-1).
@@ -455,7 +467,10 @@ RESERVED ──확정──▶ CONFIRMED
   잡고 계속하면 커밋에서 실패한다. order-service 도 Feign 409 를 받은 트랜잭션에서 주문 상태를 바꾸고 재시도까지 하지 말고, 재시도는 새 트랜잭션에서 한다.
 - **확정 · 해제 · 복원은 `reservationId` 로 대상 선점을 식별한다** — 서비스 토큰(`SERVICE_order-service`)을 가진 호출자를 신뢰한다는 전제다. order-service 는 자기 주문의
   `reservationId` 만 저장 · 사용한다.
-- **주문 만료 · 결제 전 취소의 해제는 이벤트다** (§3-5) — #96이 주문 만료 전이와 같은 트랜잭션으로 `order-expired`를 outbox에 넣는다. 결제 전 취소의 `order-canceled` 발행은 후속 범위다.
+- **주문 만료 · 결제 전 취소의 해제는 이벤트다** (§3-5) — #96이 주문 만료 전이와 같은 트랜잭션으로 `order-expired`를 outbox에 넣는다.
+  **`order-canceled` 는 아직 생산자가 없다** — 주문 전이 표(§1)에 결제 전 취소(`PENDING_PAYMENT → CANCELED`)가 없어서다. 고객 취소는 결제 뒤(PAID · MAKING · PREPARING)만 되고
+  그 재고는 선점 해제가 아니라 결제 후 복원(§3-4)이다. 결제 전 취소 전이를 더하는 이슈(#16 고객 · #17 어드민)는 전이와 **같은 트랜잭션으로** `order-canceled` 를
+  `OrderEventPort` 로 outbox 에 넣는다(payload 는 §3-5 와 같고 `reason` 은 취소 사유 코드). 컨슈머 · 토픽은 이미 준비돼 있다.
   C3 주문 생성 실패는 공유 선점의 보상 해제를 호출하지 않는다. 같은 키·주문 ID로 복구하며 재시도가 없으면 product의 선점 만료 스윕이 푼다. internal 해제(`/release`) API 자체는 product-service 계약으로 유지한다.
 - **오류 메시지를 고객 응답에 그대로 넘기지 않는다.** `PRODUCT_021` · `PRODUCT_022` · `PRODUCT_028` 메시지에는 SKU 아이디 목록이 실린다 — order-service 는 자기 오류 코드
   (예: `ORDER_*`)와 고객용 문구로 바꾸고, 필요한 SKU 정보는 자기 주문 항목에서 골라 보여 준다.
