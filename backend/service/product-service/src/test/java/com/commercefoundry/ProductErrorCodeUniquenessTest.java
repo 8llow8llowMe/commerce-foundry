@@ -31,12 +31,6 @@ import org.junit.jupiter.api.Test;
  */
 class ProductErrorCodeUniquenessTest {
 
-    /**
-     * 이 테스트 전부터 있던 충돌 — 고치기 전까지 예외로 둔다. 새 충돌은 여기 더하지 말고 번호를 고친다.
-     * {@code PRODUCT_140}: 운영자 온보딩 memberId 검증(#402)과 메인 전시 sectionType 검증(#63). 후속 이슈에서 한쪽 번호를 옮긴다.
-     */
-    private static final Set<String> KNOWN_CONFLICTS = Set.of("PRODUCT_140");
-
     private static final List<Class<?>> VALIDATION_MESSAGE_CLASSES = List.of(
         ProductValidationMessage.class, DisplayValidationMessage.class, SizeChartValidationMessage.class, LookValidationMessage.class,
         SkuCostValidationMessage.class
@@ -56,7 +50,7 @@ class ProductErrorCodeUniquenessTest {
 
         List<String> conflicts = new ArrayList<>();
         messagesByCode.forEach((code, messages) -> {
-            if (messages.size() > 1 && !KNOWN_CONFLICTS.contains(code)) {
+            if (messages.size() > 1) {
                 conflicts.add(code + " " + messages);
             }
         });
