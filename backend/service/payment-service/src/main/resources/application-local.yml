@@ -24,3 +24,7 @@ eureka:
   instance:
     # 로컬은 호스트 이름으로 등록한다 — IP 로 등록하면 VPN · WSL 같은 가상 어댑터의 주소가 잡혀 lb:// 가 닿지 않을 수 있다 (#249)
     prefer-ip-address: false
+
+# 결제 게이트 (application.yml payment.enabled) — 토스 테스트 키 환경이라 연다. 운영은 #308 · #15 전까지 닫는다
+payment:
+  enabled: true

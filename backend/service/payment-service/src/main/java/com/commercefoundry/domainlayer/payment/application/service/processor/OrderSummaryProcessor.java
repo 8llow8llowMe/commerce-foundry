@@ -46,6 +46,30 @@ public class OrderSummaryProcessor {
         if (remaining.compareTo(paymentPrepareProperties.minRemaining()) < 0) {
             throw new PaymentException(PaymentErrorCode.PAYMENT_DUE_TOO_CLOSE);
         }
+        return toPayableOrder(summary);
+    }
+
+    /**
+     * 승인 직전 재확인 — 결제 준비 뒤 주문이 취소 · 만료 · 결제됐으면 PG 에 승인을 보내지 않는다. 준비와 달리 기한은 "지났는가" 만 본다
+     * (결제창은 이미 열렸고 인증도 끝났다 — {@code min-remaining} 으로 막으면 기한 안의 정상 승인을 거절한다). 통화 · 금액은 Facade 가 결제 시도와 대조한다.
+     *
+     * <p>판정 순서: 주문 없음(404 {@code PAYMENT_002}) → 결제 대기가 아님(409 {@code PAYMENT_003}) → {@code now >= paymentDueAt}(409 {@code PAYMENT_004}).
+     *
+     * @throws PaymentException 위 오류, 또는 order-service 를 부르지 못했을 때 {@code PAYMENT_011}(503)
+     */
+    public PayableOrder getConfirmableOrder(long orderId, long memberId) {
+        OrderPaymentSummaryQueryResult summary = orderPaymentSummaryPort.find(orderId, memberId)
+            .orElseThrow(() -> new PaymentException(PaymentErrorCode.NOT_FOUND_ORDER));
+        if (!PAYABLE_ORDER_STATUS.equals(summary.status())) {
+            throw new PaymentException(PaymentErrorCode.ORDER_NOT_PAYABLE);
+        }
+        if (!clock.instant().isBefore(summary.paymentDueAt())) {
+            throw new PaymentException(PaymentErrorCode.PAYMENT_DUE_TOO_CLOSE);
+        }
+        return toPayableOrder(summary);
+    }
+
+    private static PayableOrder toPayableOrder(OrderPaymentSummaryQueryResult summary) {
         return new PayableOrder(summary.orderId(), summary.totalAmount(), summary.orderName(), summary.paymentDueAt());
     }
 }
