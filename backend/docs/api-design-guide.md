@@ -102,8 +102,8 @@ AI 상품 초안(#359)은 상품이 아직 없는 자원이라 `/api/v1/admin/pr
 
 - 공통 래퍼 `Response<T>` 를 쓰고, Controller 반환은 `ResponseEntity<Response<T>>` 로 통일한다.
 - 내부 `Info` 를 응답 타입으로 직접 노출하지 않는다. 응답 모양은 Presenter 가 마무리한다.
-- HTML 을 담는 응답 필드(상품 상세 설명 `descriptionHtml`)는 서버가 정제하지 않은 원문이다. 클라이언트가 렌더 전에 허용 목록으로 sanitize 한다.
-  쓰기 시점 서버 sanitize 는 상품 등록(#9) · 이관(#19)이 맡는다.
+- HTML 을 담는 응답 필드(상품 상세 설명 `descriptionHtml`)는 **쓰기 시점에 서버가 허용 목록으로 정제해 저장한다**(어드민 등록 #9 E1 부터, 이관 #19 도 같은 정제기).
+  그 전에 들어간 데이터는 원문일 수 있으므로 클라이언트도 렌더 전에 같은 허용 목록으로 sanitize 한다(이중 방어).
 - 시각 필드는 `Instant` 그대로 내린다 — **UTC ISO-8601 문자열**(`"2026-10-18T09:30:00Z"`)이다. 화면 시간대 변환은 클라이언트(또는 고객 응답의 Presenter)가 한다.
 
 ```java
@@ -518,7 +518,7 @@ return ResponseEntity.ok().body(Response.success(response));
 - 상품 필드: `productId`, `categoryId`, `categoryIds`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`, `salePrice`, `listPrice`,
   `maxQuantityPerOrder`, `customOrder`, `customOrderNotice`, `customOrderLeadTimeDays`, `preorder`, `expectedShipDate`, `version`, `createdByMemberId`.
   `categoryId` 는 대표 카테고리, `categoryIds` 는 대표와 진열 연결의 중복 없는 아이디 오름차순 합집합이다(대표 연결이 빠진 과거 데이터도 보존).
-  `descriptionHtml` 은 원문이므로 FE 가 렌더 전에 sanitize 한다(§2-1). 버전은 향후 수정 충돌 확인용이고 조회는 버전을 올리지 않는다.
+  `descriptionHtml` 은 등록(#9 E1) 이후 저장 시점에 정제된 값이지만 그 전 데이터는 원문일 수 있어 FE 가 렌더 전에 sanitize 한다(§2). 버전은 수정 충돌 확인용이고 조회는 버전을 올리지 않는다.
 - `optionGroups[]` 는 그룹 아이디 · 이름 · 진열 순서 · `retiredAt` 과 `values[]`(값 아이디 · 이름 · 진열 순서 · `retiredAt`)다.
   은퇴 그룹 · 값도 포함한다. 그룹과 값은 각각 진열 순서 → 아이디 오름차순이다.
 - `skus[]` 는 아이디 오름차순으로 `skuId`, `optionValueIds`, `additionalPrice`, `saleStatus`, `weightGrams`, `hsCode` 를 낸다.
@@ -530,6 +530,53 @@ return ResponseEntity.ok().body(Response.success(response));
   없는 목록은 `[]`, 선택적 값은 null 이다. 고객용 노출 · 가격 · 옵션 필터를 재사용하지 않는다.
 - `ProductAdminFacade` 의 읽기 전용 `REPEATABLE_READ` 트랜잭션에서 상품 → 카테고리 연결 → 옵션 그룹 · 값 → SKU → 미디어 → 맞춤 필드를 읽는다.
   상품이 없거나 삭제되었으면 후속 조회를 하지 않는다. 최대 7번의 조회이며 행 개수에 따라 늘지 않는다. 외부 서비스 호출 · 쓰기 · 스키마 변경은 없다.
+
+#### 어드민 상품 등록 (#9 E1)
+
+`POST /api/v1/admin/products` — `hasRole('ADMIN')`. 201 `{product: 위 어드민 상세와 같은 모양, descriptionHtmlSanitized}`. 등록한 어드민은 토큰의 memberId 로
+`product.created_by_member_id` 에 남는다(본문으로 받지 않는다, 운영자 온보딩 #357 이 읽는다).
+
+- **이 단계의 범위** — 이미지(#9 F, 업로드 키 발급 · 첨부)와 맞춤 제작 입력(#9 E2)은 아직 받지 않는다. 등록 상품은 이미지 없이, 맞춤 제작 꺼짐으로 생긴다.
+  수정 · 판매 상태 변경 · 삭제는 E2 다. Idempotency-Key 는 없다 — 같은 본문을 두 번 보내면 상품이 두 개 생긴다(지우면 된다, #9 결정).
+- **본문**: `{name, summary?, descriptionHtml?, categoryId, categoryIds?[], saleStatus, visible, salePrice{amount,currency}, listPrice?, maxQuantityPerOrder?,
+  preorder?, expectedShipDate?, optionGroups?[{name, values[]}], skus[{optionValues[], additionalPrice, saleStatus, weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}`.
+  - 문구는 앞뒤 공백을 빼고, 빈 요약은 null 이다. 상품명 · 요약 · 옵션 이름은 제어 · 서식 문자를 받지 않는다.
+  - 진열 카테고리는 중복을 빼고 대표 카테고리가 없으면 더한다(카테고리 안 진열 순서 `display_order` 는 0 으로 넣는다 — 편집 API 없음, 상세는 아이디 오름차순). 대표 · 진열 카테고리 존재는 **카테고리 행을 잠근 트리**로 확인한다
+    (DB FK 가 없어 카테고리 삭제와 엇갈리지 않게) — 없으면 400 `PRODUCT_012`(없는 아이디 모두), 잠금을 시간 안에 얻지 못하면 409 `PRODUCT_045`.
+  - SKU 는 그룹 순서대로 고른 **옵션 값 이름**으로 조합을 가리킨다(값 아이디는 저장할 때 생긴다). 옵션 없는 상품은 `optionGroups` 를 비우고 SKU 한 개(`optionValues: []`).
+    그룹 이름 · 그룹 안 값 이름 중복, 값 수가 그룹 수와 다름, 없는 값 이름은 400 `PRODUCT_013`, 같은 조합 두 번은 400 `PRODUCT_014`.
+  - 금액은 0 이상 100000000 이하(최소 화폐 단위, 넘으면 400 `PRODUCT_037`) — 가격 합 · 주문 금액 곱셈이 넘치지 않게 한다. 발송 예정일은 오늘 이후(400 `PRODUCT_038`).
+  - **가격 규칙**(400 `PRODUCT_016`): 정가 · 추가금 통화는 판매가와 같고, 정가는 판매가보다 높다. 판매중 SKU 가 있으면 그중 하나는 추가금 0 이다 — 기본 판매가 = 판매중 SKU 최저가
+    (`ProductPricing#displaySalePrice` 불변식, 목록 · 상세 표시가와 주문 금액이 같은 규칙으로 나온다).
+  - `hsCode` 는 점 · 하이픈 · 공백을 뺀 뒤 숫자 6~10자리여야 한다(전각 숫자는 고치지 않고 400 `PRODUCT_099`).
+  - `initialStock` 을 준 SKU 는 재고 행과 조정 이력 1건(사유 `RESTOCK`, 메모 "상품 등록 초기 재고", 등록한 어드민)을 같은 트랜잭션에서 만든다(D6).
+    주지 않은 SKU 는 재고 행이 없어 **품절**로 생긴다 — 재고 화면(`order-flow-guide.md` §3-1)에서 등록한다.
+- **상세 HTML 정제(D7)**: jsoup 허용 목록(FE `packages/sanitize/src/sanitize-html.ts` 와 같은 태그 · 속성 · 스킴)으로 정제한 값을 저장한다. 막지 않는다 —
+  허용 목록 밖의 태그 · 속성 · 주소가 있어 뺐거나 HTML 구조(닫히지 않은 태그 · 주석)를 정리했으면 `descriptionHtmlSanitized: true` 이고 화면이 저장된 `descriptionHtml` 을
+  다시 보여 준다. 링크는 `target="_blank"` · `rel="noopener noreferrer"`, 이미지는 `loading="lazy"` · `decoding="async"` 로 고정한다(FE 가 붙인 속성은 "정제됨" 으로 세지 않는다).
+  FE 와 다른 점: 상대 주소(`/x` · `#a`)는 서버가 지운다 — 절대 https · http · mailto 만 남는다. 입력 상한 200000자.
+- **트랜잭션**: 정제 · 구성 · 가격 판정을 잠금 전에 끝내고, Facade 의 한 트랜잭션(5초 상한)에서 카테고리 잠금 → 상품 · 진열 카테고리 · 옵션 · SKU · 처음 재고를 INSERT 한 뒤
+  같은 트랜잭션에서 상세를 읽어 응답한다. 외부 I/O 는 없다(이미지 복사는 F 에서 트랜잭션 밖에 둔다).
+- **오류 코드**: 업무 `PRODUCT_012` · `013` · `014` · `016` · `045`, 필드 검증 `PRODUCT_074~099` · `169`(`initialStock` 칸 누락) · `037`(금액 상한) · `038`(지난 발송 예정일), 금액 · 판매 상태는 칸이 여럿이라 한 코드를
+  쓰고 `fieldErrors.field` 경로(`skus[1].additionalPrice.amount`)로 구분한다. 대표 · 진열 카테고리 아이디 양수는 `PRODUCT_137`, 처음 재고 수량 0 이상은 `PRODUCT_106` 이다.
+  깨진 JSON · 모르는 enum(`saleStatus: SOLD_OUT` 등)은 `PRODUCT_100` 이다.
+- **`PRODUCT_` 번호 공간** — 상품 · 메인 전시(§2-9) · 사이즈표(§2-10)와 검증 메시지 클래스가 나눠 쓴다. 번호 하나는 뜻 하나다(`ProductErrorCodeUniquenessTest` 가 막는다,
+  `PRODUCT_140` 은 이 테스트 전부터 있던 충돌이라 후속 이슈에서 옮긴다).
+
+  | 대역 | 용도 |
+  |------|------|
+  | `001~004` | 없는 리소스(404) |
+  | `010~019` | 어드민 상품 쓰기 — E1 `012~014` · `016`, E2(수정 · 삭제)는 `010` · `011` · `015` · `017` |
+  | `020~031` | 재고(조정 · 선점 · 복원) |
+  | `032~036` | 상품 이미지 업로드 · 스토리지(#9 F) |
+  | `037` · `038` | 어드민 상품 등록 필드 검증(금액 상한 · 지난 발송 예정일) |
+  | `040~045` | 어드민 카테고리 |
+  | `046~073` | 메인 전시 · 사이즈표 |
+  | `074~099` · `169` | 어드민 상품 등록 필드 검증 |
+  | `100` · `198` · `199` | 서비스 공용(본문 · 타입 · 필수 파라미터) |
+  | `101~197` | 필드 검증(상품 · 카테고리 · 재고 · 전시 · 사이즈표, 169 는 위 등록 검증) |
+
+  2026-10-20 에 승인한 업로드 `050~054` · 검증 `131~` 은 그 사이 메인 전시 · 카테고리 · 사이즈표가 먼저 써서 2026-11-01 에 `032~036` · `074~099` 로 옮겼다. 그 뒤 모자란 검증 두 개는 비어 있던 `037` · `038` 을 쓴다.
 
 ### 2-7. 고객 상품의 프리오더 · 영상 필드 (product-service, #61)
 
