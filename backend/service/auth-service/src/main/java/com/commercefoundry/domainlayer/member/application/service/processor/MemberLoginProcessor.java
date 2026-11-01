@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class MemberLoginProcessor {
 
-    /** 관리자 비밀번호 상한 — 시드 규칙({@code AdminSeedProcessor}, 12~64자 ASCII)과 같다. 넘는 입력은 비교하지 않고 실패다. */
+    /** 관리자 비밀번호 상한 — 시드 규칙({@code AdminSeedProcessor}, 10~64자 ASCII)과 같다. 넘는 입력은 비교하지 않고 실패다. */
     public static final int ADMIN_PASSWORD_MAX_LENGTH = 64;
 
     /** 상한을 넘는 입력 대신 비교하는 자리값 — 실패 경로도 BCrypt 비교를 한 번 해 시간이 갈리지 않게. */

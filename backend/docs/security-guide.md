@@ -900,7 +900,7 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
 | 설정 (`auth.admin-seed.*`) | 환경변수 | 규칙 |
 |-----------------------------|----------|------|
 | `email` | `ADMIN_SEED_EMAIL` | 비면 시드하지 않는다. 254자 이하 · 도메인에 점이 있는 형식, 소문자로 저장 |
-| `password` | `ADMIN_SEED_PASSWORD` | 12~64자, 영문 · 숫자를 1자 이상씩 포함한 공백 없는 ASCII(가입은 8자 — 관리자는 탈취 비용이 커 길게) |
+| `password` | `ADMIN_SEED_PASSWORD` | 10~64자, 영문 · 숫자를 1자 이상씩 포함한 공백 없는 ASCII(가입은 8자 — 관리자는 탈취 비용이 커 길게) |
 | `name` | `ADMIN_SEED_NAME` | 비면 `관리자`, 앞뒤 공백 제거 후 50자 이하 |
 
 - 값은 Vault 에서 받는다(`secret-management.md`). yml 은 `${ADMIN_SEED_EMAIL:}` 플레이스홀더뿐이고 실제 값을 저장소에 쓰지 않는다.

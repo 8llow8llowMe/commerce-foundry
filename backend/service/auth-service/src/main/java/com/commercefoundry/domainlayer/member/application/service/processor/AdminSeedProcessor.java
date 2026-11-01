@@ -24,8 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AdminSeedProcessor {
 
-    /** 관리자 비밀번호 — 12~64자, 영문 · 숫자를 1자 이상씩 포함한 공백 없는 ASCII 출력 문자. 가입(8자)보다 길게 — 관리자 계정은 탈취 비용이 크다. */
-    static final Pattern PASSWORD_RULE = Pattern.compile("^(?=.*[A-Za-z])(?=.*[0-9])[\\x21-\\x7E]{12,64}$");
+    /** 관리자 비밀번호 — 10~64자, 영문 · 숫자를 1자 이상씩 포함한 공백 없는 ASCII 출력 문자. 가입(8자)보다 길게 — 관리자 계정은 탈취 비용이 크다. */
+    static final Pattern PASSWORD_RULE = Pattern.compile("^(?=.*[A-Za-z])(?=.*[0-9])[\\x21-\\x7E]{10,64}$");
 
     /** 가입 요청과 같은 이메일 형식 — 도메인에 점이 하나 이상. 정규화(앞뒤 공백 제거 · 소문자)한 값에 건다. */
     private static final Pattern EMAIL_RULE = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
@@ -52,7 +52,7 @@ public class AdminSeedProcessor {
             throw new IllegalStateException("auth.admin-seed.email 과 auth.admin-seed.password 는 함께 넣거나 함께 비워야 합니다");
         }
         if (!PASSWORD_RULE.matcher(command.rawPassword()).matches()) {
-            throw new IllegalStateException("auth.admin-seed.password 는 12~64자, 영문 · 숫자를 1자 이상씩 포함한 공백 없는 영문 · 숫자 · 특수문자여야 합니다");
+            throw new IllegalStateException("auth.admin-seed.password 는 10~64자, 영문 · 숫자를 1자 이상씩 포함한 공백 없는 영문 · 숫자 · 특수문자여야 합니다");
         }
         String email = normalizeEmail(command.email());
         String name = hasText(command.name()) ? command.name().strip() : DEFAULT_NAME;

@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * 바인딩에서 막으면 규칙이 테스트하기 어려운 곳으로 흩어진다.
  *
  * @param email    관리자 이메일. 비면 시드하지 않는다
- * @param password 관리자 비밀번호 원문 — 12~64자, 영문 · 숫자 포함 공백 없는 ASCII. {@link #toString()} 에 싣지 않는다
+ * @param password 관리자 비밀번호 원문 — 10~64자, 영문 · 숫자 포함 공백 없는 ASCII. {@link #toString()} 에 싣지 않는다
  * @param name     관리자 이름. 비면 {@code 관리자}
  */
 @ConfigurationProperties(prefix = "auth.admin-seed")

@@ -51,11 +51,19 @@ class AdminSeedProcessorTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"short-pw-1", "onlyletterspassword", "123456789012345", "has space pw 123", "한글비밀번호12345678"})
-    @DisplayName("비밀번호가 규칙(12~64자, 영문 · 숫자 포함 공백 없는 ASCII) 밖이면 기동을 멈춘다 — 메시지에 값을 싣지 않는다")
+    @ValueSource(strings = {"short-pw1", "onlyletterspassword", "123456789012345", "has space pw 123", "한글비밀번호12345678"})
+    @DisplayName("비밀번호가 규칙(10~64자, 영문 · 숫자 포함 공백 없는 ASCII) 밖이면 기동을 멈춘다 — 메시지에 값을 싣지 않는다")
     void passwordRule(String password) {
         assertThatThrownBy(() -> processor.validate(new AdminSeedCommand(EMAIL, password, null)))
             .isInstanceOf(IllegalStateException.class).message().doesNotContain(password);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"shop-pw-10", "shop-pw-011"})
+    @DisplayName("10자 · 11자 비밀번호는 규칙 안이다 — 하한은 10자다 (#445)")
+    void passwordMinimumTen(String password) {
+        assertThat(AdminSeedProcessor.PASSWORD_RULE.matcher(password).matches()).isTrue();
+        assertThat(AdminSeedProcessor.PASSWORD_RULE.matcher(password.substring(0, 9)).matches()).isFalse();
     }
 
     @ParameterizedTest
