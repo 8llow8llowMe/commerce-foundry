@@ -9,10 +9,10 @@ import {
 } from '@/lib/api-errors';
 
 /**
- * 비밀번호 규칙 — BE `AdminRequestPatterns.PASSWORD` · `@Size(12, 64)` 와 같다. 정본은 서버다.
+ * 비밀번호 규칙 — BE `AdminRequestPatterns.PASSWORD` · `@Size(10, 64)` 와 같다. 정본은 서버다.
  * 영문 · 숫자를 1자 이상씩 포함하고 공백 없는 ASCII(0x21~0x7E).
  */
-export const PASSWORD_MIN = 12;
+export const PASSWORD_MIN = 10;
 export const PASSWORD_MAX = 64;
 const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*[0-9])[\x21-\x7E]+$/;
 

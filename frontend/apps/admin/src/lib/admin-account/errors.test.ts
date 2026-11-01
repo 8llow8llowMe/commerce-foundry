@@ -23,10 +23,12 @@ const apiError = (
 ) => new ApiError(kind, status, code, message, fieldErrors);
 
 describe('passwordProblem', () => {
-  it('BE 규칙(12~64자 · 영문과 숫자 · 공백 없는 ASCII)을 따른다', () => {
+  it('BE 규칙(10~64자 · 영문과 숫자 · 공백 없는 ASCII)을 따른다', () => {
     expect(passwordProblem('shop-staff-2026')).toBeNull();
     expect(passwordProblem('')).toBeNull();
-    expect(passwordProblem('short1a')).toContain('12자 이상');
+    expect(passwordProblem('short1a')).toContain('10자 이상');
+    expect(passwordProblem('shop-pw-1')).toContain('10자 이상');
+    expect(passwordProblem('shop-pw-10')).toBeNull();
     expect(passwordProblem(`a1${'x'.repeat(63)}`)).toContain('64자 이하');
     expect(passwordProblem('onlyletterssss')).toContain('영문과 숫자');
     expect(passwordProblem('123456789012')).toContain('영문과 숫자');
@@ -124,7 +126,7 @@ describe('changePasswordFailure', () => {
           {
             field: 'newPassword',
             code: 'AUTH_141',
-            message: '비밀번호는 12자 이상 64자 이하여야 합니다.',
+            message: '비밀번호는 10자 이상 64자 이하여야 합니다.',
           },
           { field: 'currentPassword', code: 'AUTH_145', message: '현재 비밀번호는 필수입니다.' },
         ]),
@@ -132,7 +134,7 @@ describe('changePasswordFailure', () => {
     ).toEqual({
       kind: 'errors',
       errors: {
-        newPassword: ['비밀번호는 12자 이상 64자 이하여야 합니다.'],
+        newPassword: ['비밀번호는 10자 이상 64자 이하여야 합니다.'],
         currentPassword: ['현재 비밀번호는 필수입니다.'],
       },
     });
