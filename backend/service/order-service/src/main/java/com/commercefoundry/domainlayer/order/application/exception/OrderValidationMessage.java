@@ -52,6 +52,8 @@ public final class OrderValidationMessage {
     public static final String CITY_REQUIRED = "ORDER_138:해외 배송지는 city 가 필수입니다.";
     public static final String CITY_LENGTH_MAX = "ORDER_139:city 는 100자 이하여야 합니다.";
     public static final String STATE_PROVINCE_LENGTH_MAX = "ORDER_140:stateProvince 는 100자 이하여야 합니다.";
+    public static final String ORDER_ID_POSITIVE = "ORDER_141:orderId 는 양수여야 합니다.";
+    public static final String MEMBER_ID_POSITIVE = "ORDER_142:memberId 는 양수여야 합니다.";
 
     private OrderValidationMessage() {
     }
