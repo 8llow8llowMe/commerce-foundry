@@ -34,7 +34,7 @@ public class OrderRequestProcessor {
     }
 
     /**
-     * 회원의 활성 시도 수를 본다 (#231) — 창(선점 TTL) 안에 시작한 <b>다른</b> 요청 기록이 상한 이상이면 거절한다.
+     * 회원의 활성 시도 수를 본다 (#231) — 창(선점 TTL) 안에 움직인(만들거나 이어받거나 끝낸) <b>다른</b> 요청 기록이 상한 이상이면 거절한다.
      * 주문이 아니라 요청 기록으로 센다 — 저장 실패로 주문 없이 남은 선점까지 들어간다.
      *
      * <ul>
@@ -47,7 +47,7 @@ public class OrderRequestProcessor {
      */
     public void requireCapacity(long memberId, OrderRequest own) {
         OrderProperties.Creation creation = properties.creation();
-        long active = repository.countCreatedSince(memberId, clock.instant().minus(creation.activeRequestWindow()), own == null ? 0 : own.id());
+        long active = repository.countActiveSince(memberId, clock.instant().minus(creation.activeRequestWindow()), own == null ? 0 : own.id());
         if (active >= creation.maxActiveRequestsPerMember()) {
             log.info("active order requests exceeded. memberId={}, active={}", memberId, active);
             throw new OrderException(OrderErrorCode.ACTIVE_ORDER_REQUESTS_EXCEEDED);

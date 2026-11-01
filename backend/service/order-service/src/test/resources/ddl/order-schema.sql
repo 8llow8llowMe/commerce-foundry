@@ -571,8 +571,8 @@
     create index idx_order_item_custom_option_order_id_order_item_id
        on orders.order_item_custom_option (order_id, order_item_id);
 
-    create index idx_order_request_member_id_created_at
-       on orders.order_request (member_id, created_at);
+    create index idx_order_request_member_id_updated_at
+       on orders.order_request (member_id, updated_at);
 
     create index idx_order_status_history_order_id_id
        on orders.order_status_history (order_id, id);
