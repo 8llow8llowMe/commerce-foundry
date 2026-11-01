@@ -95,7 +95,7 @@ class LookAdminControllerTest {
         @Test
         @DisplayName("전체 조회는 200 — 아이디는 String, 판매 상태는 metadata, 순서 번호는 내지 않고 숨긴 상품의 visible=false · 없는 상품의 name null 을 낸다")
         void list() {
-            given(lookAdminUseCase.getLooks()).willReturn(LookAdminListResponse.builder().looks(List.of(lookResponse())).build());
+            given(lookAdminUseCase.getLooks()).willReturn(LookAdminListResponse.builder().looks(List.of(lookResponse(true))).build());
 
             MvcTestResult result = exchange(HttpMethod.GET, PATH, null, MemberRole.ADMIN);
 
@@ -105,10 +105,24 @@ class LookAdminControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].image.width").isEqualTo(1200);
             assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].products[0].productId").isEqualTo("700");
             assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].products[0].visible").isEqualTo(false);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].products[0].deleted").isEqualTo(true);
             assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].products[0].saleStatus.code").isEqualTo("STOP_SELLING");
             assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].products[0].saleStatus.name").isEqualTo("판매 종료");
             assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].products[1].name").isNull();
             assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].products[1].saleStatus").isNull();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.looks[0].products[1].deleted").isEqualTo(false);
+        }
+
+        @Test
+        @DisplayName("단건 조회도 기존 삭제 상품을 products 에 deleted=true 로 유지한다")
+        void detailIncludesDeletedProduct() {
+            given(lookAdminUseCase.getLook(1L)).willReturn(lookResponse(true));
+
+            MvcTestResult result = exchange(HttpMethod.GET, PATH + "/1", null, MemberRole.ADMIN);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.products[0].productId").isEqualTo("700");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.products[0].deleted").isEqualTo(true);
         }
 
         @Test
@@ -149,6 +163,7 @@ class LookAdminControllerTest {
 
             assertThat(result).hasStatus(HttpStatus.CREATED);
             assertThat(result).bodyJson().extractingPath("$.dataBody.lookId").isEqualTo("4611686018427387904");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.products[0].deleted").isEqualTo(false);
             ArgumentCaptor<LookUpsertCommand> captor = ArgumentCaptor.forClass(LookUpsertCommand.class);
             verify(lookAdminUseCase).create(captor.capture());
             LookUpsertCommand command = captor.getValue();
@@ -166,7 +181,9 @@ class LookAdminControllerTest {
         void update() {
             given(lookAdminUseCase.update(eq(5L), any())).willReturn(lookResponse());
 
-            assertThat(exchange(HttpMethod.PUT, PATH + "/5", VALID_BODY, MemberRole.ADMIN)).hasStatusOk();
+            MvcTestResult result = exchange(HttpMethod.PUT, PATH + "/5", VALID_BODY, MemberRole.ADMIN);
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.products[0].deleted").isEqualTo(false);
             verify(lookAdminUseCase).update(eq(5L), any());
         }
 
@@ -201,6 +218,12 @@ class LookAdminControllerTest {
 
             willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_NOT_FOUND, "7, 8")).given(lookAdminUseCase).create(any());
             assertFailure(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "LOOK_004", "존재하지 않는 상품이 있습니다: 7, 8");
+
+            willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_DELETED, "7, 8")).given(lookAdminUseCase).create(any());
+            assertFailure(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "LOOK_009", "삭제된 상품이 있습니다: 7, 8");
+
+            given(lookAdminUseCase.update(eq(3L), any())).willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_DELETED, "7"));
+            assertFailure(exchange(HttpMethod.PUT, PATH + "/3", VALID_BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "LOOK_009", "삭제된 상품이 있습니다: 7");
 
             given(lookAdminUseCase.update(eq(1L), any())).willThrow(new LookException(LookErrorCode.LOOK_MEDIA_STORAGE_NOT_CONFIGURED));
             assertFailure(exchange(HttpMethod.PUT, PATH + "/1", VALID_BODY, MemberRole.ADMIN), HttpStatus.SERVICE_UNAVAILABLE, "LOOK_006",
@@ -312,13 +335,18 @@ class LookAdminControllerTest {
     }
 
     private static LookAdminResponse lookResponse() {
+        return lookResponse(false);
+    }
+
+    private static LookAdminResponse lookResponse(boolean deleted) {
         return LookAdminResponse.builder()
             .lookId("4611686018427387904")
             .title("가을 룩")
             .image(LookImageAdminItem.builder().url("https://cdn.example.com/media/looks/a.jpg").width(1200).height(1600).build())
             .visible(true)
             .products(List.of(
-                LookProductAdminItem.builder().productId("700").name("숨긴 상품").visible(false).saleStatus(SaleStatus.STOP_SELLING.toMetadata()).build(),
+                LookProductAdminItem.builder().productId("700").name(deleted ? "삭제 상품" : "숨긴 상품")
+                    .visible(false).saleStatus(SaleStatus.STOP_SELLING.toMetadata()).deleted(deleted).build(),
                 LookProductAdminItem.builder().productId("701").visible(false).build()
             ))
             .build();

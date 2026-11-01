@@ -83,8 +83,8 @@ public class LookProcessor {
         List<LookProductAdminInfo> items = content.items().stream().map(item -> {
             Product found = products.get(item.productId());
             return found == null
-                ? new LookProductAdminInfo(item.productId(), null, false, null)
-                : new LookProductAdminInfo(item.productId(), found.name(), found.visible(), found.saleStatus());
+                ? new LookProductAdminInfo(item.productId(), null, false, null, false)
+                : new LookProductAdminInfo(item.productId(), found.name(), found.visible(), found.saleStatus(), found.isDeleted());
         }).toList();
         return new LookAdminInfo(look.id(), look.title(), look.description(), look.image(), look.visible(), items);
     }
@@ -130,8 +130,8 @@ public class LookProcessor {
     }
 
     /**
-     * 구성 상품이 모두 실제 상품인가(숨김 · 판매 종료 포함). 없는 아이디가 있으면 {@code LOOK_004}(400)이고 메시지에 그 아이디를 모두 싣는다.
-     * 숨김 · 판매 종료 상품은 등록할 수 있다 — 고객 화면에서 어떻게 보일지는 고객 조회가 정한다.
+     * 구성 상품이 모두 실제 상품이며 삭제되지 않았는가(숨김 · 판매 종료 포함). 없는 아이디는 {@code LOOK_004}, 삭제 아이디는 {@code LOOK_009}다.
+     * 둘 다 있으면 없는 상품을 먼저 알린다. 각 메시지의 아이디는 요청 순서다.
      *
      * @param found 숨김 포함 상품 조회 결과
      */
@@ -139,6 +139,10 @@ public class LookProcessor {
         List<String> missing = productIds.stream().filter(productId -> !found.containsKey(productId)).map(String::valueOf).toList();
         if (!missing.isEmpty()) {
             throw new LookException(LookErrorCode.LOOK_PRODUCT_NOT_FOUND, String.join(", ", missing));
+        }
+        List<String> deleted = productIds.stream().filter(productId -> found.get(productId).isDeleted()).map(String::valueOf).toList();
+        if (!deleted.isEmpty()) {
+            throw new LookException(LookErrorCode.LOOK_PRODUCT_DELETED, String.join(", ", deleted));
         }
     }
 

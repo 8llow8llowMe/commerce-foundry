@@ -48,6 +48,7 @@ public class LookAdminPresenter {
             .name(product.name())
             .visible(product.visible())
             .saleStatus(product.saleStatus() == null ? null : product.saleStatus().toMetadata())
+            .deleted(product.deleted())
             .build();
     }
 }

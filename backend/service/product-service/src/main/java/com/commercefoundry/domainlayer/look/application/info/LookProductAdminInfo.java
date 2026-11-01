@@ -8,6 +8,7 @@ import com.commercefoundry.common.dto.metadata.CodeNameDescribable;
  * @param name 상품명. 상품 행이 없으면(데이터 오류) null
  * @param visible 고객 노출 여부. 상품 행이 없으면 false
  * @param saleStatus 저장한 판매 상태(판매중 · 판매 종료). 상품 행이 없으면 null
+ * @param deleted 상품 삭제 여부. 상품 행이 없으면 false
  */
-public record LookProductAdminInfo(long productId, String name, boolean visible, CodeNameDescribable saleStatus) {
+public record LookProductAdminInfo(long productId, String name, boolean visible, CodeNameDescribable saleStatus, boolean deleted) {
 }

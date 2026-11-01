@@ -47,7 +47,7 @@ public class LookAdminController {
     @Operation(
         summary = "룩 전체 조회",
         description = "숨긴 룩을 포함한 전체(최대 100개)를 노출 순서대로 낸다(배열 순서 = 노출 순서). "
-            + "구성 상품은 상품 아이디 · 이름 · 노출 여부 · 판매 상태만 낸다(숨김 · 판매 종료 상품 포함)."
+            + "구성 상품은 상품 아이디 · 이름 · 노출 여부 · 판매 상태 · 삭제 여부를 낸다(숨김 · 판매 종료 · 기존 삭제 상품 포함)."
     )
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
@@ -66,7 +66,7 @@ public class LookAdminController {
 
     @Operation(
         summary = "룩 생성",
-        description = "룩과 구성 상품을 만들고 맨 뒤 순서에 둔다. 같은 상품 중복은 400(LOOK_003), 없는 상품은 400(LOOK_004), 저장소 밖 이미지 주소는 400(LOOK_005), "
+        description = "룩과 구성 상품을 만들고 맨 뒤 순서에 둔다. 같은 상품 중복은 400(LOOK_003), 없는 상품은 400(LOOK_004), 삭제 상품은 400(LOOK_009), 저장소 밖 이미지 주소는 400(LOOK_005), "
             + "미디어 저장소 미설정은 503(LOOK_006), 룩 100개 초과는 409(LOOK_002), 다른 룩 변경과 겹치면 409(LOOK_008)다. 201 과 만든 룩을 돌려준다."
     )
     @PreAuthorize("hasRole('ADMIN')")

@@ -66,7 +66,7 @@ class LookWebFacadeTest {
     }
 
     @Test
-    @DisplayName("상세 — 구성 상품 카드만 내고 숨긴 상품은 빠진다")
+    @DisplayName("상세 — 삭제 상품은 summarizeVisible 결과에서 빠져 고객 products 에 없고 룩은 남는다")
     void detail() {
         given(port.findById(1L)).willReturn(Optional.of(look(1L)));
         given(port.findItemsByLookIds(List.of(1L))).willReturn(List.of(new LookItem(11L, 1L, 200L, 0), new LookItem(12L, 1L, 100L, 1)));
@@ -76,6 +76,7 @@ class LookWebFacadeTest {
 
         assertThat(response.lookId()).isEqualTo("1");
         assertThat(response.products()).singleElement().satisfies(product -> assertThat(product.productId()).isEqualTo("100"));
+        verify(productListProcessor).summarizeVisible(List.of(200L, 100L));
     }
 
     @Test
