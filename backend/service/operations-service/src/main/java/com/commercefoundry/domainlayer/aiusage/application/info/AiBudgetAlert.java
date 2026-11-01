@@ -2,7 +2,7 @@ package com.commercefoundry.domainlayer.aiusage.application.info;
 
 /**
  * 월 한도 임계를 이번에 처음 넘었다는 신호 — 기간당 한 번만 나온다({@code warned_at} · {@code exceeded_at} 조건부 UPDATE).
- * 예약 거절 때는 이 달 첫 거절이 아니어도 실린다({@code exceedCrossed=false}). 알림 · 로그 · 지표는 받은 쪽(PR-B3)이 낸다.
+ * 예약 거절 때는 이 달 첫 거절이 아니어도 실린다({@code exceedCrossed=false}). 받은 쪽(계량 어댑터 {@code AiUsageMeteringInterceptor}, #435)이 WARN 로그로 남긴다 — 어드민 알림(notify-member-ids) · 지표는 아직 없다(후속).
  *
  * @param period         월 ({@code YYYY-MM})
  * @param warnCrossed    경고 임계(한도 × 비율)를 이번에 처음 넘었다

@@ -21,7 +21,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>금액 · 단가는 문자열로 받아 {@link BigDecimal} 로 바꾼다 — {@code double} 바인딩의 이진 오차를 들이지 않는다 ({@code coding-conventions.md} §9-3).
  *
  * <p>월 한도({@code budget.monthly-usd})와 단가({@code pricing.models})는 비어 있어도 기동한다 — AI 가 꺼진 배포에서 값을 강요하지 않으려고.
- * AI 를 켰는데 비어 있으면 막는 가드는 ai-core 연결(PR-B3)이 {@code ai.enabled} 와 묶어 둔다. 비어 있는 채 예약하면 {@link IllegalStateException} 이다.
+ * AI 를 켰는데 비어 있으면 {@code AiMeteringReadinessConfig}(#435)가 기동을 멈춘다. 비어 있는 채 예약하면 {@link IllegalStateException} 이다.
  *
  * @param budget             월 한도
  * @param estimate           보내기 전 예상 비용의 토큰 환산

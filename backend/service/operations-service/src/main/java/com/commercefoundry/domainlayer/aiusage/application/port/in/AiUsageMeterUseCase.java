@@ -7,7 +7,7 @@ import com.commercefoundry.domainlayer.aiusage.application.info.AiUsageReservati
 import com.commercefoundry.domainlayer.aiusage.application.info.AiUsageSettleResult;
 
 /**
- * AI 호출 한 번의 계량 — 보내기 전 예약, 끝난 뒤 정산 (#215 PR-B). 계량 어댑터(ai-core {@code AiCallInterceptor} 구현, PR-B3)가 부른다.
+ * AI 호출 한 번의 계량 — 보내기 전 예약, 끝난 뒤 정산 (#215 PR-B). 계량 어댑터(ai-core {@code AiCallInterceptor} 구현 {@code AiUsageMeteringInterceptor}, #435)가 부른다.
  *
  * <p>DB 장애 등 그 밖의 예외는 그대로 올라간다 — 어댑터가 {@code METERING_FAILED}(재시도)로 번역한다.
  */

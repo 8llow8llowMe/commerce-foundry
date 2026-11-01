@@ -1,5 +1,6 @@
 package com.commercefoundry.global.config;
 
+import com.commercefoundry.ai.config.AiPropertiesConfig;
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
 import com.commercefoundry.global.properties.AiUsageProperties;
 import com.commercefoundry.global.properties.JobProperties;
@@ -15,6 +16,7 @@ import org.springframework.context.annotation.Import;
 
 @Configuration
 @Import({
+    AiPropertiesConfig.class,
     InternalTokenPropertiesConfig.class,
     JwtVerificationPropertiesConfig.class,
     MessagingPropertiesConfig.class,

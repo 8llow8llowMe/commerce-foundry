@@ -7,5 +7,13 @@ plugins {
 dependencies {
     implementation 'org.springframework.boot:spring-boot'
     implementation 'org.slf4j:slf4j-api'
-    implementation "com.anthropic:anthropic-java:${rootProject.ext.anthropicSdkVersion}"
+    implementation("com.anthropic:anthropic-java:${rootProject.ext.anthropicSdkVersion}") {
+        // SDK core 가 끌고 오는 javax 판 swagger-annotations(2.2.31)는 springdoc 의 swagger-annotations-jakarta 와 같은 패키지(io.swagger.v3.oas.annotations)의
+        // 다른 모듈이라 Gradle 이 버전을 맞추지 못하고 둘 다 클래스패스에 오른다. 옛 클래스가 jakarta 판을 가리면 /v3/api-docs 가 NoSuchMethodError 로 500 이 된다
+        // (#435 operations 에서 실제로 났다). javax 판을 빼고 같은 클래스를 가진 jakarta 판을 대신 둔다 — springdoc 을 쓰는 서비스에서는 한 모듈로 합쳐져 높은 버전 하나만 남는다
+        exclude group: 'io.swagger.core.v3', module: 'swagger-annotations'
+    }
+    // 구조화 출력의 스키마 생성(SDK 안의 victools Swagger2Module)이 런타임에 이 애노테이션 클래스를 읽는다 — 빼기만 하면 NoClassDefFoundError 다.
+    // 버전은 SDK(2.34.0)가 끄는 javax 판과 같게 둔다. SDK 를 올리면 함께 본다
+    implementation 'io.swagger.core.v3:swagger-annotations-jakarta:2.2.31'
 }
