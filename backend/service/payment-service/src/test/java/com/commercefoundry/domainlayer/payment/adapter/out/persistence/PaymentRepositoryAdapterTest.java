@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.payment.adapter.out.persistence;
 
+import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.APPROVAL_KEY;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.APPROVED_AT;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.MEMBER_ID;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.ORDER_ID;
@@ -72,6 +73,7 @@ class PaymentRepositoryAdapterTest {
 
     private static final long OTHER_PAYMENT_ID = PAYMENT_ID + 1;
     private static final long OTHER_ORDER_ID = ORDER_ID + 1;
+    private static final String OTHER_APPROVAL_KEY = "9a1b2c3d-0000-4000-8000-000000000002";
 
     @Autowired
     private TestEntityManager entityManager;
@@ -96,7 +98,7 @@ class PaymentRepositoryAdapterTest {
     @DisplayName("전이를 저장하면 버전이 오르고 승인 칸이 남는다 — 생성 시각은 merge 가 덮지 않는다")
     void savesTransitions() {
         Payment ready = paymentRepositoryPort.save(PaymentFixtures.ready());
-        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, STARTED_AT));
+        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT));
         Payment done = paymentRepositoryPort.save(inProgress.approve(approval(krw(129_000))));
         Payment synced = paymentRepositoryPort.save(done.markOrderSynced());
         entityManager.clear();
@@ -116,10 +118,10 @@ class PaymentRepositoryAdapterTest {
         entityManager.clear();
         Payment first = paymentRepositoryPort.findById(PAYMENT_ID).orElseThrow();
         Payment second = paymentRepositoryPort.findById(PAYMENT_ID).orElseThrow();
-        paymentRepositoryPort.save(first.startApproval(PAYMENT_KEY, STARTED_AT));
+        paymentRepositoryPort.save(first.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT));
         entityManager.clear();
 
-        assertConflict(() -> paymentRepositoryPort.save(second.startApproval(PAYMENT_KEY, STARTED_AT)), Kind.VERSION);
+        assertConflict(() -> paymentRepositoryPort.save(second.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT)), Kind.VERSION);
     }
 
     @Test
@@ -134,7 +136,7 @@ class PaymentRepositoryAdapterTest {
     @DisplayName("실패 · 중단된 결제 시도는 활성 슬롯을 놓는다 — 같은 주문에 새 결제 시도를 만들 수 있다")
     void releasedSlotAllowsNewPayment() {
         Payment ready = paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
-        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, STARTED_AT));
+        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT));
         paymentRepositoryPort.save(inProgress.reject("REJECT_CARD_COMPANY", "카드사에서 거절했습니다."));
         Payment retry = paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, ORDER_ID));
         paymentRepositoryPort.save(retry.abort(PaymentAbortReason.REPREPARED));
@@ -148,7 +150,7 @@ class PaymentRepositoryAdapterTest {
     @DisplayName("되돌린 READY 는 결제키 · 승인 시작 시각을 남긴 채 저장되고, 조회로 미승인을 확인해 버리면 슬롯을 놓는다")
     void revertedReadyIsStoredAndAbortedAfterInquiry() {
         Payment ready = paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
-        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, STARTED_AT));
+        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT));
         Payment reverted = paymentRepositoryPort.save(inProgress.revertToReady());
         entityManager.clear();
 
@@ -166,7 +168,7 @@ class PaymentRepositoryAdapterTest {
     @DisplayName("늦은 승인은 슬롯을 다시 잡지 않는다 — 같은 주문의 새 활성 시도와 함께 저장된다")
     void lateApprovalDoesNotRetakeSlot() {
         Payment ready = paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
-        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, STARTED_AT));
+        Payment inProgress = paymentRepositoryPort.save(ready.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT));
         Payment failed = paymentRepositoryPort.save(inProgress.reject("REJECT_CARD_COMPANY", null));
         Payment retry = paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, ORDER_ID));
         Payment late = paymentRepositoryPort.save(failed.recordLateApproval(approval(krw(129_000))));
@@ -183,7 +185,7 @@ class PaymentRepositoryAdapterTest {
         paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
         Payment sameNumber = new Payment(
             OTHER_PAYMENT_ID, OTHER_ORDER_ID, MEMBER_ID, Long.toString(PAYMENT_ID), PaymentGateway.TOSS, krw(1_000), ORDER_NAME, PaymentStatus.READY,
-            null, null, null, null, null, null, null, null, null, false, null, null, null
+            null, null, null, null, null, null, null, null, null, false, null, null, null, null
         );
 
         assertThatThrownBy(() -> paymentRepositoryPort.save(sameNumber))
@@ -197,9 +199,26 @@ class PaymentRepositoryAdapterTest {
     void duplicatePaymentKeyIsRejected() {
         Payment first = paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
         Payment second = paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, OTHER_ORDER_ID));
-        paymentRepositoryPort.save(first.startApproval(PAYMENT_KEY, STARTED_AT));
+        paymentRepositoryPort.save(first.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT));
 
-        assertConflict(() -> paymentRepositoryPort.save(second.startApproval(PAYMENT_KEY, STARTED_AT)), Kind.PAYMENT_KEY);
+        // 고객 멱등 키는 다르게 둔다 — 같으면 uk_payment_member_approval_key 도 함께 걸려 어느 제약이 먼저인지가 테스트를 가른다
+        assertConflict(() -> paymentRepositoryPort.save(second.startApproval(PAYMENT_KEY, OTHER_APPROVAL_KEY, STARTED_AT)), Kind.PAYMENT_KEY);
+    }
+
+    @Test
+    @DisplayName("회원의 고객 멱등 키는 한 결제 시도에만 쓴다 — 다른 회원 · 승인 전 행의 null 은 겹쳐도 된다 (uk_payment_member_approval_key → APPROVAL_KEY)")
+    void duplicateApprovalKeyIsRejected() {
+        Payment first = paymentRepositoryPort.save(PaymentFixtures.ready(PAYMENT_ID, ORDER_ID));
+        Payment second = paymentRepositoryPort.save(PaymentFixtures.ready(OTHER_PAYMENT_ID, OTHER_ORDER_ID));
+        Payment otherMember = paymentRepositoryPort.save(
+            Payment.ready(OTHER_PAYMENT_ID + 1, OTHER_ORDER_ID + 1, MEMBER_ID + 1, krw(1_000), ORDER_NAME));
+        Payment started = paymentRepositoryPort.save(first.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT));
+        paymentRepositoryPort.save(otherMember.startApproval("tgen_otherMember000001", APPROVAL_KEY, STARTED_AT));
+        entityManager.clear();
+
+        assertThat(paymentRepositoryPort.findByApprovalIdempotencyKey(MEMBER_ID, APPROVAL_KEY)).contains(started);
+        assertThat(paymentRepositoryPort.findByApprovalIdempotencyKey(MEMBER_ID, OTHER_APPROVAL_KEY)).isEmpty();
+        assertConflict(() -> paymentRepositoryPort.save(second.startApproval("tgen_secondAttempt00001", APPROVAL_KEY, STARTED_AT)), Kind.APPROVAL_KEY);
     }
 
     @Test

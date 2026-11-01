@@ -7,6 +7,7 @@
         updated_at timestamp(6) with time zone not null,
         abort_reason varchar(30) check ((abort_reason in ('REPREPARED','AMOUNT_CHANGED','ORDER_EXPIRED','ADMIN'))),
         active_order_id bigint,
+        approval_idempotency_key varchar(36),
         approval_started_at timestamp(6) with time zone,
         approved_at timestamp(6) with time zone,
         easy_pay_provider varchar(50),
@@ -31,10 +32,12 @@
         constraint uk_payment_pg_order_id unique (pg_order_id),
         constraint uk_payment_payment_key unique (payment_key),
         constraint uk_payment_active_order_id unique (active_order_id),
+        constraint uk_payment_member_approval_key unique (member_id, approval_idempotency_key),
         constraint ck_payment_total_amount_positive check (total_amount > 0),
         constraint ck_payment_pg_order_id_length check (length(pg_order_id) >= 6),
         constraint ck_payment_active_order_id_status check ((status in ('FAILED','ABORTED','LATE_APPROVED') and active_order_id is null) or (status not in ('FAILED','ABORTED','LATE_APPROVED') and active_order_id is not null and active_order_id = order_id)),
         constraint ck_payment_approval_started_at_key check (approval_started_at is null or payment_key is not null),
+        constraint ck_payment_approval_key_payment_key check (approval_idempotency_key is null or payment_key is not null),
         constraint ck_payment_in_progress_fields check (status not in ('IN_PROGRESS','UNKNOWN') or (payment_key is not null and approval_started_at is not null)),
         constraint ck_payment_approved_fields check ((status in ('DONE','LATE_APPROVED','PARTIAL_CANCELED','CANCELED') and payment_key is not null and method is not null and approved_at is not null) or (status not in ('DONE','LATE_APPROVED','PARTIAL_CANCELED','CANCELED') and method is null and approved_at is null and easy_pay_provider is null and pg_status is null)),
         constraint ck_payment_failed_fields check ((failure_message is null or failure_code is not null) and ((status = 'FAILED' and failure_code is not null) or status = 'LATE_APPROVED' or (status not in ('FAILED','LATE_APPROVED') and failure_code is null))),
@@ -62,6 +65,9 @@
 
     comment on column payment.payment.active_order_id is
         '활성 결제 시도의 주문 아이디 — FAILED · ABORTED · LATE_APPROVED 면 null, 그 밖은 order_id (주문당 활성 결제 시도 1건)';
+
+    comment on column payment.payment.approval_idempotency_key is
+        '마지막 승인 요청의 고객 Idempotency-Key (UUID). 승인 시작 전이면 null — (member_id, 이 값) 유니크로 같은 키의 재요청을 알아본다';
 
     comment on column payment.payment.approval_started_at is
         '마지막 승인 요청 시작 시각 — IN_PROGRESS 로 남은 행을 복구하는 단서. 되돌린 READY 에도 흔적으로 남는다';
