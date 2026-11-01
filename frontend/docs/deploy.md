@@ -40,6 +40,8 @@ standalone 의 `node_modules` 에는 `sharp`(이미지 최적화) 네이티브 �
 - 런타임 베이스는 glibc 계열 `node:24-bookworm-slim` 이다. 빌드 agent 도 glibc 리눅스여야 한다(alpine · macOS 빌드 산출물 금지).
   파이프라인이 빌드 전에 확인한다(Node 메이저 = `frontend/.nvmrc`, glibc).
 - 빌드 agent 와 배포 호스트의 CPU 아키텍처(amd64 / arm64)가 같아야 한다. 빌드가 `uname -m` 을 묶음에 적고, 배포 단계가 배포 호스트와 비교해 다르면 멈춘다.
+  그래서 **배포 빌드는 환경별 빌더**에서 돈다 — Jenkinsfile 의 `buildAgentLabels`(dev `builder-frontend-arm64`: backend-1 aarch64, prod `builder-frontend`: x86_64, #438).
+  PR · 비배포 빌드는 `buildAgentLabel`(`builder-frontend`) 그대로다.
 
 ## 2. 환경변수 — 빌드 시점 vs 런타임
 
@@ -118,7 +120,7 @@ storefront 의 필수 빌드 키는 `Jenkinsfile-storefront` 의 `buildRequiredK
 develop 에 Rebase and merge
   Jenkins develop 잡 (앱마다)
     배포 문맥 확인 (builder-frontend)  브랜치 → 환경, 이전 성공 커밋, 변경 경로, 머지된 PR 라벨, turbo.json 빌드 키 이름
-    검사 · 빌드    (builder-frontend)  도구 확인 → pnpm install --frozen-lockfile → format:check · lint · typecheck · test:ci · 테스트 건수
+    검사 · 빌드    (buildAgentLabels[env], 비배포는 builder-frontend)  도구 확인 → pnpm install --frozen-lockfile → format:check · lint · typecheck · test:ci · 테스트 건수
                                         → sh 하나: Vault 빌드 키 → turbo run build --filter=@cf/<app> → standalone 확인 · public · 아키텍처 기록
                                         → 묶음(tar.gz) stash
     dev 환경 배포  (deploy-frontend-dev2, lock commerce-foundry-frontend-deploy)
@@ -130,7 +132,7 @@ develop 에 Rebase and merge
 
 | 역할 | agent 라벨 ⏳ #197 | 필요한 것 |
 |------|--------------------|-----------|
-| 빌드 | `builder-frontend` | glibc 리눅스, git, Node 24(`.nvmrc`) + corepack, curl, jq — **배포 호스트와 같은 CPU 아키텍처** |
+| 빌드 | `builder-frontend`(x86_64 — PR · prod) · `builder-frontend-arm64`(aarch64 — dev) | glibc 리눅스, git, Node 24(`.nvmrc`) + corepack, curl, jq — **배포 호스트와 같은 CPU 아키텍처** |
 | 배포 dev | `deploy-frontend-dev2` | docker, docker compose v2(`--wait` 지원), rsync, tar, curl, jq 1.6+, bash 4 — **같은 환경 게이트웨이와 같은 docker 호스트** |
 | 배포 prod | `deploy-frontend-prod` | 위와 같다 |
 
@@ -180,7 +182,7 @@ develop 에 Rebase and merge
 | `빌드 agent 의 Node 메이저 ... 가 frontend/.nvmrc ... 와 다릅니다` · `glibc 리눅스여야 합니다` | 빌드 agent 의 도구를 맞춘다(§5) |
 | `빌드 필수 키가 없거나 비어 있습니다: NEXT_PUBLIC_SITE_URL` | 그 환경 Vault secret 에 넣고 다시 실행한다 |
 | `turbo.json build.env 의 ... 를 해석할 수 없습니다` | `build.env` 는 대문자 키 또는 끝 와일드카드(`BUSINESS_*`)만 쓴다 |
-| `빌드 agent 아키텍처 ... 와 배포 호스트 ... 가 다릅니다` | `builder-frontend` 를 배포 호스트와 같은 아키텍처로 둔다(§1) |
+| `빌드 agent 아키텍처 ... 와 배포 호스트 ... 가 다릅니다` | 그 환경의 `buildAgentLabels` 라벨이 배포 호스트와 같은 아키텍처 빌더를 가리키는지 본다(§1) |
 | `네트워크 ... 가 없습니다. 같은 환경의 백엔드(api-gateway)를 먼저 배포합니다` | 백엔드를 먼저 배포하거나 `COMMERCE_DOCKER_NETWORK` 값을 백엔드 secret 과 맞춘다 |
 | 경고 `commerce-api-gateway-<env> 가 없습니다` | 배포는 됐다. BFF 요청은 게이트웨이가 뜰 때까지 503 이다 |
 | `SSR 첫 화면 ... 가 200 이 아닙니다` | 아래 가린 로그를 본다. 307/308 이면 `smokePath` 가 리다이렉트 경로다 |
