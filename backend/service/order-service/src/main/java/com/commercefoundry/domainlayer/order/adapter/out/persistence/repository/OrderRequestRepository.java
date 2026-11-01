@@ -12,8 +12,8 @@ import org.springframework.data.jpa.repository.Query;
 public interface OrderRequestRepository extends JpaRepository<OrderRequestEntity, Long> {
     Optional<OrderRequestEntity> findByMemberIdAndIdempotencyKey(long memberId, UUID idempotencyKey);
 
-    // idx_order_request_member_id_created_at 범위 조회 — 회원 한 명의 창 안 행만 읽는다
-    long countByMemberIdAndCreatedAtGreaterThanEqualAndIdNot(long memberId, Instant since, long id);
+    // idx_order_request_member_id_updated_at 범위 조회 — 회원 한 명의 창 안 행만 읽는다. 창은 마지막 활동 시각(삽입 · 인수 · lease 종료 · 완료가 갱신)으로 본다
+    long countByMemberIdAndUpdatedAtGreaterThanEqualAndIdNot(long memberId, Instant since, long id);
 
     // 기한만 갱신해도 버전을 올려 이전 주인의 완료·종료 요청을 거절한다.
     @Modifying(flushAutomatically = true, clearAutomatically = true)

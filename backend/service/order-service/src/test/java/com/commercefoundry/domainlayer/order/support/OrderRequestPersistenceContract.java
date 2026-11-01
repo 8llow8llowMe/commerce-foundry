@@ -70,11 +70,17 @@ public abstract class OrderRequestPersistenceContract {
         saved(UUID.randomUUID(), member);
         saved(UUID.randomUUID(), id());
 
-        // created_at 은 감사(시스템 시각)로 채워진다 — 상태와 무관하게 회원 · 시각 범위로만 센다
-        assertThat(requests.countCreatedSince(member, before, 0)).isEqualTo(2);
-        assertThat(requests.countCreatedSince(member, before, own.id())).isEqualTo(1);
-        assertThat(requests.countCreatedSince(member, Instant.now().plusSeconds(60), 0)).isZero();
-        assertThat(requests.countCreatedSince(id(), before, 0)).isZero();
+        // 삽입 때 updated_at 은 감사(시스템 시각)로 채워진다 — 상태와 무관하게 회원 · 활동 시각 범위로만 센다
+        assertThat(requests.countActiveSince(member, before, 0)).isEqualTo(2);
+        assertThat(requests.countActiveSince(member, before, own.id())).isEqualTo(1);
+        Instant later = Instant.now().plusSeconds(60);
+        assertThat(requests.countActiveSince(member, later, 0)).isZero();
+        assertThat(requests.countActiveSince(id(), before, 0)).isZero();
+
+        // 창 밖이 된 기록을 이어받으면 활동 시각이 갱신돼 다시 센다 — 휴면 기록을 모아 한꺼번에 이어받아 상한을 넘는 경로를 막는다
+        var takenOver = requests.takeOver(own, later.plusSeconds(1), LEASE).orElseThrow();
+        assertThat(requests.countActiveSince(member, later, 0)).isEqualTo(1);
+        assertThat(requests.countActiveSince(member, later, takenOver.id())).isZero();
     }
 
     @Test

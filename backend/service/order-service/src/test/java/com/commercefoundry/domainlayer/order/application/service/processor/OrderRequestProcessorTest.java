@@ -46,10 +46,10 @@ class OrderRequestProcessorTest {
     @Test
     void activeRequestsAreCountedInTheReservationWindowAndCapIsInclusive() {
         Instant since = NOW.minus(Duration.ofMinutes(30));
-        when(repository.countCreatedSince(7, since, 0)).thenReturn(4L);
+        when(repository.countActiveSince(7, since, 0)).thenReturn(4L);
         assertThatCode(() -> processor.requireCapacity(7, null)).doesNotThrowAnyException();
 
-        when(repository.countCreatedSince(7, since, 0)).thenReturn(5L);
+        when(repository.countActiveSince(7, since, 0)).thenReturn(5L);
         assertThatThrownBy(() -> processor.requireCapacity(7, null)).isInstanceOfSatisfying(OrderException.class,
             ex -> assertThat(ex.getErrorCode()).isEqualTo(OrderErrorCode.ACTIVE_ORDER_REQUESTS_EXCEEDED));
         assertThat(OrderErrorCode.ACTIVE_ORDER_REQUESTS_EXCEEDED.getHttpStatus()).isEqualTo(HttpStatus.CONFLICT);
@@ -59,9 +59,9 @@ class OrderRequestProcessorTest {
     void ownRecordIsExcludedFromTheCount() {
         var own = OrderRequest.start(11, 7, UUID.randomUUID(), "a".repeat(64), 12, NOW, Duration.ofSeconds(30));
         Instant since = NOW.minus(Duration.ofMinutes(30));
-        when(repository.countCreatedSince(7, since, 11)).thenReturn(4L);
+        when(repository.countActiveSince(7, since, 11)).thenReturn(4L);
         assertThatCode(() -> processor.requireCapacity(7, own)).doesNotThrowAnyException();
-        verify(repository).countCreatedSince(7, since, 11);
+        verify(repository).countActiveSince(7, since, 11);
     }
 
     @Test

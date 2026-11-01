@@ -11,8 +11,11 @@ public interface OrderRequestRepositoryPort {
     Optional<OrderRequest> insertIfAbsent(OrderRequest request);
     Optional<OrderRequest> findByMemberIdAndIdempotencyKey(long memberId, UUID key);
 
-    /** 회원이 {@code since} 이후(포함) 만든 요청 기록 중 {@code excludedRequestId} 를 뺀 수 — 상태와 무관하다 (#231 활성 시도 상한). 뺄 기록이 없으면 0. */
-    long countCreatedSince(long memberId, Instant since, long excludedRequestId);
+    /**
+     * 회원의 요청 기록 중 마지막 활동(삽입 · 인수 · lease 종료 · 완료 — {@code updated_at})이 {@code since} 이후(포함)인 것의 수, {@code excludedRequestId} 는 뺀다 (#231 활성 시도 상한).
+     * 상태와 무관하다. 만든 시각이 아니라 활동 시각으로 세야 창 밖 휴면 기록을 이어받은 시도도 창에 다시 들어온다. 뺄 기록이 없으면 0.
+     */
+    long countActiveSince(long memberId, Instant since, long excludedRequestId);
     Optional<OrderRequest> takeOver(OrderRequest expected, Instant now, Duration lease);
     boolean endLease(OrderRequest expected, Instant now);
 

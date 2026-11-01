@@ -61,8 +61,8 @@ public class OrderRequestRepositoryAdapter implements OrderRequestRepositoryPort
     }
 
     @Override
-    public long countCreatedSince(long memberId, Instant since, long excludedRequestId) {
-        Long count = read.execute(status -> repository.countByMemberIdAndCreatedAtGreaterThanEqualAndIdNot(memberId, micros(since), excludedRequestId));
+    public long countActiveSince(long memberId, Instant since, long excludedRequestId) {
+        Long count = read.execute(status -> repository.countByMemberIdAndUpdatedAtGreaterThanEqualAndIdNot(memberId, micros(since), excludedRequestId));
         return count == null ? 0 : count;
     }
 
