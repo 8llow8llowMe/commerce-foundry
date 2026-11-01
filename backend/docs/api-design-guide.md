@@ -578,6 +578,21 @@ return ResponseEntity.ok().body(Response.success(response));
 
   2026-10-20 에 승인한 업로드 `050~054` · 검증 `131~` 은 그 사이 메인 전시 · 카테고리 · 사이즈표가 먼저 써서 2026-11-01 에 `032~036` · `074~099` 로 옮겼다. 그 뒤 모자란 검증 두 개는 비어 있던 `037` · `038` 을 쓴다.
 
+#### 어드민 상품 이미지 업로드 발급 (#9 F1)
+
+`POST /api/v1/admin/products/image-uploads` — `hasRole('ADMIN')`. 본문 `{contentType, contentLength}` → 201 `{uploadKey, uploadUrl, method, headers, expiresAt}`.
+D1(presigned PUT) — 브라우저가 `uploadUrl` 에 `method`(PUT) · `headers`(서명에 든 Content-Type 등) 그대로 파일을 **스토리지에 직접** 올린다. 게이트웨이(2MB 상한) ·
+BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대신한다 — #9 MinIO 체크리스트).
+
+- **형식 · 크기**: `contentType` 은 `image/jpeg` · `image/png` · `image/webp`(대소문자 · 앞뒤 공백만 허용, 매개변수 불가) — 아니면 400 `PRODUCT_033`.
+  `contentLength` 는 1 ~ 10485760(10MB) — 아니거나 없으면 400 `PRODUCT_034`. 서명에 크기가 들어가 다른 크기는 스토리지가 거절한다. 선언은 믿지 않는다 —
+  첨부(F2) 때 실제 크기 · 앞부분 바이트(magic bytes)를 다시 본다.
+- **키**: `uploads/{memberId}/{uuid}.{jpg|png|webp}` — 발급한 어드민 아이디가 키에 묶여 다른 어드민은 첨부하지 못한다(F2 가 400 `PRODUCT_032` 로 거절, 어느 이유인지 알리지 않는다).
+  `uploads/` 는 공개 읽기가 닫힌 임시 접두어이고 버킷 수명 규칙이 1일 뒤 지운다. 서명 유효 시간은 `storage.presign-ttl`(기본 5분).
+- **스토리지 설정** — `storage.*`(storage-core, Vault `STORAGE_*`). **기본 꺼짐**이고, 꺼져 있으면 업로드 발급 · 첨부만 503 `PRODUCT_036` 이고 이미지 없는 등록 · 조회는 그대로다.
+  스토리지 장애(연결 · 권한 · 거절)는 503 `PRODUCT_035` — 원인은 로그(이유 · 동작만)에 남기고 응답에 싣지 않는다. 서명 주소는 로그에 남기지 않는다.
+- 첨부(등록 본문의 `images[{uploadKey, ...}]` → 검증 · `products/{productId}/{imageId}.{ext}` 복사 · 실패 보상 삭제)와 `product_image.storage_key` 는 F2 다.
+
 ### 2-7. 고객 상품의 프리오더 · 영상 필드 (product-service, #61)
 
 | 응답 | 필드 | 뜻 |
