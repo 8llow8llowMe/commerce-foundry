@@ -28,7 +28,7 @@
 | 서비스 | 고객 | 어드민 |
 |--------|------|--------|
 | auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**`, `/api/v1/admin/audit-logs/**`, `/api/v1/admin/admins/**`, `/api/v1/admin/me/**` |
-| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**`, `/api/v1/looks/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**`, `/api/v1/admin/looks/**`, `/api/v1/admin/skus/**` |
+| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**`, `/api/v1/looks/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**`, `/api/v1/admin/looks/**`, `/api/v1/admin/skus/**`, `/api/v1/admin/product-drafts/**` |
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
@@ -38,6 +38,7 @@
 상품 사이즈표(#216)의 고객 · 어드민 조회는 새 접두어가 아니다 — `GET /api/v1/products/{productId}/size-chart`,
 `GET|PUT /api/v1/admin/products/{productId}/size-chart` 는 기존 `products/**` 다. 템플릿 컬렉션만 `/api/v1/admin/size-chart-templates/**` 다.
 SKU 원가 이력(#361)은 SKU 하위 리소스라 `/api/v1/admin/skus/**` 를 새로 둔다(§2-12).
+AI 상품 초안(#359)은 상품이 아직 없는 자원이라 `/api/v1/admin/product-drafts/**` 를 새로 둔다(§2-14).
 
 - **관리자 로그인은 `POST /api/v1/auth/admin/login` 이다(고객 열의 `/api/v1/auth/**`, #6).** **이슈 #6 원문의 `/api/v1/admin/auth/login` 과 다르다** — `/api/v1/admin/**` 아래에 두지 않는다 —
   그 경로는 게이트웨이 · 서비스 URL 규칙이 둘 다 ADMIN 토큰을 요구해 토큰을 받으러 오는 익명 요청이 닿지 못한다. 진입 패키지도 `adapter/in/web` 이고
@@ -787,6 +788,42 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   고객 응답 칸은 `ProductWebResponseComponentsTest` 가 허용 목록으로 고정한다(`architecture-guide.md` §2).
 - **등록자** — `product.created_by_member_id`(null 허용, 외부 FK: auth-service `member.id`)는 운영자 온보딩(#357)의 "상품 1건 등록" 판정용이다. 값은 등록 API(#9 PR-E1)가
   인증 주체의 회원 아이디로 채우고 수정 · 삭제로 바꾸지 않는다. 이관(#19) · 시드 상품은 null 이다 — 등록 증거가 없는 것으로 본다. 고객 응답에 싣지 않는다.
+
+### 2-14. AI 상품 초안 (product-service, #359)
+
+운영자가 올린 사진과 직접 입력한 사실로 한국어 상품 문구 초안을 만들고, **검토한 값만** 상품 등록(#9)에 적용한다. 초안은 상품을 만들거나 바꾸거나 공개하지 않는다.
+컨텍스트는 `domainlayer/productdraft` 이고 어드민 진입만 있다. AI 호출은 operations 작업 핸들러가 하고(`bootstrap-conventions.md` AI 절), 초안 · 적용은 product 가 갖는다.
+응답은 운영자 언어만 쓴다 — 모델 · 프롬프트 · 토큰 · 비용 · 작업 내부 정보를 내지 않는다(§2-8). 초안은 모든 ADMIN 이 보고, 만든 · 거절한 어드민은 토큰의 memberId 로만 남긴다.
+
+| 경로 | 권한 | 성공 | 주요 오류 |
+|------|------|------|-----------|
+| `POST /api/v1/admin/product-drafts` | ADMIN | 201 초안 — 생성 대기(`REQUESTED`) | 400 `PRODUCT_DRAFT_030` · `034` · `035` · `101~126` · `PRODUCT_100` · 503 `PRODUCT_DRAFT_032` |
+| `GET /api/v1/admin/product-drafts/{draftId}` | ADMIN | 200 초안 | 404 `PRODUCT_DRAFT_001` · 400 `PRODUCT_DRAFT_127` |
+| `POST /api/v1/admin/product-drafts/{draftId}/reject` | ADMIN | 200 초안 — 거절(`REJECTED`). 이미 거절했으면 그대로 200 | 404 `PRODUCT_DRAFT_001` · 409 `PRODUCT_DRAFT_020`(적용함) · `022`(만료) · `025`(동시 변경) · 400 `PRODUCT_DRAFT_127` |
+
+- **본문(생성)**: `{nameHint?, categoryId?, materials?[], careNotes?[], measurementsNote?, origin?, certifications?[], tone?, mustInclude?[], mustAvoid?[], images?[{url, imageType, width?, height?}]}`.
+  모든 칸이 선택이다. 문구는 앞뒤 공백을 빼고 빈 문구는 null 이다. 한 줄 문구는 제어 문자를, 치수 메모는 개행 · 탭 외 제어 문자를 받지 않는다(입력은 AI 프롬프트의 데이터 칸으로만 쓰인다).
+  목록 칸은 최대 10개 · 원소 1~100자, 이미지는 최대 8장이다. **여기 적은 값만 사실이다** — 소재 · 세탁 · 치수 · 원산지 · 인증을 AI 가 이미지로 정하지 않는다. 고객 정보를 적지 않는다.
+- **이미지**: 스토어 미디어 저장소의 공개 주소 아래만 받는다(`MediaUrlPolicy`, 밖이면 `030`, 저장소 미설정은 503 `032`). 유형은 `THUMBNAIL`(대표, 한 장까지 — 넘으면 `034`) ·
+  `GALLERY` 뿐이다 — 영상 등 다른 값은 본문 오류 `PRODUCT_100` 이다(초안 전용 유형 `ProductDraftImageType`, 상품 이미지 유형과 이름이 같고 적용 때 옮긴다).
+  같은 주소 두 번은 `035` 다. 판정 순서는 `034` → `035` → `032` → `030`. 업로드 키(#9 이미지 업로드)는 그 API 뒤에 받는다.
+- **응답**: `{draftId, status{code,name,description}, facts{...입력 그대로}, images[{url, imageType, width, height}], missingRequiredInputs[{code,name,description}],
+  requestedByMemberId, requestedAt, expiresAt, rejectedAt}`. `missingRequiredInputs` 는 서버가 운영자 입력으로 계산한다(AI 출력이 아니다) — `PRODUCT_NAME` → `CATEGORY` →
+  `THUMBNAIL_IMAGE` 순이고, 가격 · 옵션 · 재고는 초안이 담지 않아 적용 단계에서 입력한다. 카테고리 존재는 적용 때 상품 등록 검증이 본다.
+- **상태**: `REQUESTED`(생성 대기) → `GENERATING`(생성 중) → `READY`(검토 대기) / `FAILED`(생성 실패) → `APPLIED`(적용 완료) / `REJECTED`(거절). 끝나지 않은 초안
+  (`REQUESTED` · `GENERATING` · `READY` · `FAILED`)이 보관 기간(`product-draft.ttl`, 7일)을 넘으면 저장 값과 상관없이 `EXPIRED`(기간 만료)로 보이고 적용 · 거절할 수 없다 —
+  읽을 때 판정하고 정리 작업은 두지 않는다. 상태는 domain 메서드로만 바뀌고 행의 `@Version` 이 동시 변경을 막는다 — 같은 거절이 **동시에** 겹치면
+  늦은 쪽은 409 `025` 다(다시 조회하면 `REJECTED`). 차례로 다시 보낸 거절만 200 이다.
+- **문구 검증(프롬프트 안전)**: 한 줄 칸은 유니코드 제어 문자(C0 · DEL · C1 — U+0085 포함) · 짝 없는 서로게이트 · 줄/문단 구분자(U+2028 · U+2029) ·
+  방향 제어 문자(U+200E · U+200F · U+202A~202E · U+2066~2069) · 태그 문자(U+E0000~E007F)를 받지 않는다. 치수 메모는 여기에 `\n` · `\r` · 탭만 더 받는다.
+  보이지 않는 지시 · 줄 나눔으로 프롬프트 데이터 칸 경계를 흉내 내지 못하게 하고, 검토 화면에 보이는 값과 저장 값이 같게 한다. 이모지용 ZWJ · 변형 선택자는 받는다.
+- **단계** — 이번 단계는 초안 저장 · 조회 · 거절이다. 새 초안은 생성 작업 연결 전까지 `REQUESTED` 에 머문다. 후속:
+  operations 생성 작업(`PRODUCT_DRAFT_GENERATE`, ai-core 원장 연결 뒤) → product ↔ operations 서비스 간 연결 · 재생성 · AI 제안 응답 칸
+  (상품명 · 설명 · 검색 태그 · SEO · 대체 텍스트 · 확인이 필요한 속성) → 적용(`POST /{draftId}/apply` — 상품 등록 #9 PR-E1 의 검증을 그대로 거치고, 같은 초안의 재시도는 상품을 하나만 만든다).
+- 오류 코드: 업무 `PRODUCT_DRAFT_001`(없음 404) · `020`(적용한 초안 거절 409) · `022`(만료 409) · `025`(동시 변경 409) · `030`(이미지 주소 400) · `032`(저장소 미설정 503) ·
+  `034`(대표 두 장 400) · `035`(같은 이미지 400). 필드 검증 `PRODUCT_DRAFT_101~126`, 경로 draftId 양수 `127`(`ProductDraftValidationMessage`).
+  `PRODUCT_1xx` 검증 대역이 차서 컨텍스트 접두어 `PRODUCT_DRAFT_` 를 새로 열었다(§2-11 · §2-12 와 같다). 깨진 JSON · 타입 불일치(`imageType` 오타 포함)는 서비스 공용 `PRODUCT_100` · `198` 이다.
+- **게이트웨이**: 새 접두어 `/api/v1/admin/product-drafts/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다.
 
 ## 3. 계층 흐름
 
