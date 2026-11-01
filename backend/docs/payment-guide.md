@@ -89,6 +89,11 @@
 고객 전용(`hasRole('CUSTOMER')`)이고 회원은 토큰 주체다. 구현은 `PaymentWebController` → `PaymentWebFacade`(트랜잭션 `NEVER`) →
 `OrderSummaryProcessor`(order-service, 트랜잭션 없음) · `PaymentProcessor`(메서드마다 트랜잭션) · `PaymentGatewayProcessor`(토스, 트랜잭션 없음)다.
 
+**운영 결제 게이트** — `payment.enabled`(기본 **false**, 닫힌 기본값). 공통 `application.yml` 은 false, `application-local.yml` · `application-dev.yml`(토스 테스트 키 환경)만 true 이고
+prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 · 승인 모두 DB · PG · order 를 부르기 전에 503 `PAYMENT_015`("지금은 결제를 받을 수 없습니다.")다 —
+상태 조회는 막지 않는다. **운영에서 켜는 조건은 #308(결제 완료 → 주문 반영)과 #15(UNKNOWN 재조회 · IN_PROGRESS 정체 복구 · 되돌린 READY 정리)가 모두 들어온 뒤**다.
+그 전에 열면 돈은 빠졌는데 주문은 결제 대기로 남고, 미확정 결제를 확정할 경로도 없다(§4 · §6).
+
 | API | 성공 | 응답 |
 |-----|------|------|
 | `POST /api/v1/payments` `{orderId}` | 201 새 결제 시도 · 200 기존 활성 시도 | `PaymentPrepareResponse` — 아래 칸 + 주문의 `paymentDueAt` |
@@ -120,11 +125,14 @@
 
    | 현재 상태 | 같은 키 | 다른 키 |
    |-----------|---------|---------|
-   | DONE · UNKNOWN | 같은 결제키 → 200 현재 상태 · 다른 결제키 → 409 `PAYMENT_014` | 같은 결제키 → 200 현재 상태(새 키로 재확인) · 다른 결제키 → 400 `PAYMENT_009` + 보안 경고 |
+   | DONE · UNKNOWN (취소 계열 PARTIAL_CANCELED · CANCELED · WAITING_FOR_DEPOSIT 도 이 줄) | 같은 결제키 · 같은 금액 · 통화 → 200 현재 상태 · 다른 결제키 → 409 `PAYMENT_014` · 같은 결제키인데 금액 · 통화가 다름 → 409 `PAYMENT_014` + 보안 경고 | 같은 결제키 → 200 현재 상태(새 키로 재확인) · 다른 결제키 → 400 `PAYMENT_009` + 보안 경고 |
    | FAILED | 같은 결제키 → 200 현재 상태 · 다른 결제키 → 409 `PAYMENT_014` | 409 `PAYMENT_006` — 결제 준비부터 다시 |
    | IN_PROGRESS | 409 `PAYMENT_007` | 409 `PAYMENT_007` |
    | ABORTED · LATE_APPROVED | 409 `PAYMENT_006` | 409 `PAYMENT_006` |
 4. READY 면 금액 · 통화를 대조한다 — 다르면 PG 를 부르지 않고 400 `PAYMENT_008` + 보안 경고(§3-1).
+   이어서 **주문을 다시 확인한다**(order-service, 트랜잭션 밖) — 결제 준비 뒤 주문이 취소 · 만료 · 결제됐을 수 있다. 없음 404 `PAYMENT_002` · 결제 대기 아님 409 `PAYMENT_003` ·
+   `now >= paymentDueAt` 409 `PAYMENT_004`(여기서는 `min-remaining` 이 아니라 기한 경과만) · order 장애 503 `PAYMENT_011` · 주문 금액 · 통화가 결제 시도와 다름 409 `PAYMENT_012` + error 로그
+   (주문 금액은 불변이라 결함 신호). 어느 쪽이든 PG 를 부르지 않고 결제 행을 바꾸지 않는다 — READY 그대로 두고 정리는 #15 다. 3번에서 끝나는 요청(READY 가 아님)은 order 를 부르지 않는다.
 5. READY → IN_PROGRESS + 결제키 + 고객 키를 저장해 커밋한다. 되돌린 READY 에 다른 결제키 · 다른 시도의 결제키(`uk_payment_payment_key`)는 400 `PAYMENT_009` + 보안 경고,
    키 유니크 충돌은 409 `PAYMENT_014`, 버전 충돌(동시 승인)은 새 트랜잭션에서 다시 읽어 3번 표대로(대개 409 `PAYMENT_007`).
 6. 트랜잭션 밖에서 토스 승인(§4-1).
@@ -149,6 +157,7 @@
 | `PAYMENT_012` | 409 | 결제 요청이 겹침 — 잠시 후 재시도. 번역되지 않은 도메인 예외의 마지막 안전망도 이 코드다(error 로그) |
 | `PAYMENT_013` | 500 | 승인 결과 기록 실패 — 상태 조회로 확인 |
 | `PAYMENT_014` | 409 | 같은 `Idempotency-Key` 로 다른 결제 승인을 요청할 수 없음 |
+| `PAYMENT_015` | 503 | 운영 결제 게이트가 닫혀 있음(`payment.enabled=false`) — 지금은 결제를 받을 수 없음 |
 | `PAYMENT_100` | 400 | 요청 값 오류(폴백) |
 | `PAYMENT_101` · `102` | 400 | `orderId` 필수 · 양수 |
 | `PAYMENT_103` · `104` | 400 | `paymentKey` 필수 · 1~200자 |
@@ -159,6 +168,10 @@
 | `PAYMENT_113` · `114` | 400 | `Idempotency-Key` 헤더 필수 · UUID 형식 (`fieldErrors[0].field` = 헤더 이름) |
 | `PAYMENT_198` · `199` | 400 | 파라미터 형식(결제 아이디 등) · 필수 파라미터 누락 |
 
+- 응답 메시지는 언제나 오류 코드의 고정 문구다 — 핸들러는 예외 메시지가 아니라 `errorCode.getMessage()` 를 싣는다.
+- **운영 DDL** (#14 — `approval_idempotency_key` 칸 · `uk_payment_member_approval_key` · `ck_payment_approval_key_payment_key`)은 배포 전에 적용한다. dev 도 수동 적용한다 —
+  `ddl-auto=update` 는 칸은 더하지만 기존 테이블에 check · unique 제약을 만들지 않는다.
+- 후속: #440 — 결제 쓰기 요청 제한, `PAYMENT_011` 의 `Retry-After`, 거절 문구 정책.
 - order-service 요약 호출은 서킷 `order-service`(4xx 는 `ignore-exceptions`)로 감싸고, 404 `ORDER_001` 만 "주문 없음" 이다. 다른 4xx · 401 `SECURITY_007` · 응답 계약 위반
   (아이디 불일치 · 금액 0 이하 · 모르는 통화 · 주문명 비었거나 100자 초과 · 기한 없음) · 5xx · 타임아웃 · 서킷 오픈은 503 `PAYMENT_011` 이다(`OrderInternalResponseSupport`).
 - 도메인 예외 메시지 · 결제키 · 원인 예외 메시지는 응답 · 로그에 싣지 않는다. 5xx 로그는 코드와 `causeType` 만이다(`coding-conventions.md` §8). 요청 DTO · 명령의 `toString` 은 결제키 앞 8자만 남긴다.
@@ -175,7 +188,7 @@ PG 호출이 **타임아웃·5xx·서킷 오픈**으로 끝나면 승인 여부�
 | 타임아웃 · 5xx · 서킷 오픈 | **`UNKNOWN`** | "결제 확인 중" — 몇 초 뒤 상태 조회 |
 
 - `UNKNOWN` 은 스케줄러가 **PG 조회 API 로 재조회**해서 `DONE` 또는 `FAILED` 로 확정한다.
-  - 재조회 · 오래된 IN_PROGRESS 복구 스케줄러는 후속 이슈다 — 그 전까지 `UNKNOWN` · 오래 남은 `IN_PROGRESS` 는 토스 상점관리자에서 사람이 확인한다.
+  - 재조회 · 오래된 IN_PROGRESS 복구 · 되돌린 READY 정리 스케줄러는 #15 다 — 그 전까지 `UNKNOWN` · 오래 남은 `IN_PROGRESS` 는 토스 상점관리자에서 사람이 확인한다.
 - 서킷이 열렸을 때 confirm 을 아예 보내지 않았다면 `READY` 로 되돌릴 수 있다. **보냈는지 모르면 UNKNOWN 이다.**
 
 ### 4-1. 토스 승인 응답 분류 (#14 — `TossPaymentsResponseSupport` 가 정본)
@@ -263,7 +276,8 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   확정이 409 `PRODUCT_025`(이미 해제 · 만료)면 같은 주문으로 재선점(`POST /internal/v1/stock-reservations`)하고 **곧바로 확정**한다. 재선점이
   `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면 전액 취소다. **주문은 선점 확정 200(`CONFIRMED`)을 받은 뒤에만 PAID 로 둔다** — 결제 완료 재전송 때도
   확정을 멱등으로 다시 부른다 (`order-flow-guide.md` §3-4).
-- **메시지 브로커는 Kafka 로 정했다**(#304, `architecture-guide.md` §8-1). 결제 승인 → 주문 반영은 #308 에서 이렇게 바뀐다 — 그 전까지는 위의 "동기 호출 + 재전송 플래그 + 스케줄러" 가 기본이다.
+- **메시지 브로커는 Kafka 로 정했다**(#304, `architecture-guide.md` §8-1). 결제 승인 → 주문 반영은 #308 에서 아래처럼 만든다.
+  **아직 주문 반영 경로가 없다 — #308 전에는 운영 결제를 열지 않는다(`payment.enabled=false`, §3-4).** 위의 "동기 호출 + 재전송 플래그 + 스케줄러" 는 구현되지 않았다.
   - payment-service 가 `approve`(DONE 기록) 트랜잭션에서 outbox 로 `payment.approved`(키 orderId, 본문은 결제 · 주문 아이디 · 금액 · 통화 · 승인 시각 · 수단 코드 — PG 결제 키 · 카드 정보 없음)를 발행한다.
   - order-service 컨슈머가 금액 · 통화 · 소유자를 다시 검증하고 선점을 확정(위 재선점 규칙 그대로, Feign 은 트랜잭션 밖)한 뒤 `markPaid` 와 회신 `order.paid` 를 한 트랜잭션에 남긴다.
     다시 잡지 못하거나 금액이 다르면 `order.payment-rejected(code)` 를 회신한다.

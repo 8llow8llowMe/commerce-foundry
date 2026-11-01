@@ -832,8 +832,8 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 
 | API | 성공 | 주요 오류 |
 |-----|------|-----------|
-| `POST /api/v1/payments` `{orderId}` | 새 결제 시도 201 · 이미 있는 활성 시도 200 — `PaymentPrepareResponse`(아래 칸 + `paymentDueAt`) | 404 `PAYMENT_002` · 409 `PAYMENT_003`(결제 대기 아님) · `PAYMENT_004`(기한 임박) · `PAYMENT_005`(KRW 아님) · `PAYMENT_012` · 503 `PAYMENT_011` |
-| `POST /api/v1/payments/confirm` + `Idempotency-Key`(UUID, 필수) `{paymentKey, pgOrderId, amount{amount, currency}}` | 200 — DONE · FAILED · UNKNOWN | 400 `PAYMENT_008`(금액) · `PAYMENT_009`(결제키) · `PAYMENT_113`(키 없음) · `PAYMENT_114`(UUID 아님) · 404 `PAYMENT_001` · 409 `PAYMENT_006` · `PAYMENT_007`(처리 중) · `PAYMENT_014`(키 재사용) · 500 `PAYMENT_013` · 503 `PAYMENT_010` + `Retry-After` |
+| `POST /api/v1/payments` `{orderId}` | 새 결제 시도 201 · 이미 있는 활성 시도 200 — `PaymentPrepareResponse`(아래 칸 + `paymentDueAt`) | 404 `PAYMENT_002` · 409 `PAYMENT_003`(결제 대기 아님) · `PAYMENT_004`(기한 임박) · `PAYMENT_005`(KRW 아님) · `PAYMENT_012` · 503 `PAYMENT_011` · `PAYMENT_015`(결제 게이트 닫힘) |
+| `POST /api/v1/payments/confirm` + `Idempotency-Key`(UUID, 필수) `{paymentKey, pgOrderId, amount{amount, currency}}` | 200 — DONE · FAILED · UNKNOWN | 400 `PAYMENT_008`(금액) · `PAYMENT_009`(결제키) · `PAYMENT_113`(키 없음) · `PAYMENT_114`(UUID 아님) · 404 `PAYMENT_001` · 409 `PAYMENT_006` · `PAYMENT_007`(처리 중) · `PAYMENT_014`(키 재사용) · 500 `PAYMENT_013` · 503 `PAYMENT_010` + `Retry-After` · `PAYMENT_015` · 승인 직전 주문 재확인의 404 `PAYMENT_002` · 409 `PAYMENT_003` · `PAYMENT_004` · `PAYMENT_012` |
 | `GET /api/v1/payments/{paymentId}` | 200 | 404 `PAYMENT_001`(없음 · 남의 결제) |
 
 - 응답 칸: `paymentId` · `orderId` · `pgOrderId`(문자열), `status`(metadata), `amount`(§2-3), `orderName`, `method`(metadata | null), `easyPayProvider` | null,
@@ -841,6 +841,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 - 결제 준비는 `Idempotency-Key` 를 받지 않는다 — 업무 키(주문 아이디 + 주문당 활성 결제 시도 하나, DB 유니크 키)로 멱등이다(§6 의 internal 업무 키와 같은 방식).
 - 결제 승인의 멱등은 §6 그대로다 — `(memberId, Idempotency-Key)` 를 결제 행에 기록하고, 같은 키의 재요청은 처음 결과(현재 상태)를 저장 없이 돌려준다. 처리 중이면 409 `PAYMENT_007`.
   503 `PAYMENT_010` 은 청구가 없었다는 뜻이다 — 같은 본문으로 다시 보낸다(키는 같아도 새로 만들어도 된다). UNKNOWN · 504 · 500 `PAYMENT_013` 은 상태 조회로 확인한다.
+- 결제 준비 · 승인은 운영 결제 게이트(`payment.enabled`, 기본 false — #308 · #15 뒤에 운영에서 켠다)가 닫혀 있으면 503 `PAYMENT_015` 다. 상태 조회는 막지 않는다.
 
 ## 3. 계층 흐름
 
