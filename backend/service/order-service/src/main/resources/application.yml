@@ -161,6 +161,12 @@ commerce:
 # 미결제 주문 만료 스윕 (order-flow-guide.md §1-3, OrderPaymentExpiryProperties). 분산 락 없이 인스턴스마다 돈다 — 버전 검사로 한 건만 커밋한다.
 # 끄는 env 스위치를 두지 않는다(product 재고 선점 만료 스윕과 같다). test 프로파일만 enabled: false 로 끈다
 order:
+  # 주문 생성 (OrderProperties). 회원별 활성 시도 상한(#231) — 창 안에 새 키로 시작한 시도가 상한 이상이면 409 ORDER_022.
+  # 창은 product 의 재고 선점 TTL(stock.reservation.ttl)과 같게 둔다. 상한 1 미만 · 창 1분~24시간 밖이면 기동하지 않는다
+  creation:
+    processing-lease: 30s
+    max-active-requests-per-member: 5
+    active-request-window: 30m
   payment-expiry:
     sweep:
       enabled: true

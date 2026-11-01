@@ -61,6 +61,12 @@ public class OrderRequestRepositoryAdapter implements OrderRequestRepositoryPort
     }
 
     @Override
+    public long countCreatedSince(long memberId, Instant since, long excludedRequestId) {
+        Long count = read.execute(status -> repository.countByMemberIdAndCreatedAtGreaterThanEqualAndIdNot(memberId, micros(since), excludedRequestId));
+        return count == null ? 0 : count;
+    }
+
+    @Override
     public Optional<OrderRequest> takeOver(OrderRequest expected, Instant now, Duration lease) {
         OrderRequest next = expected.takeOver(now, lease);
         return write.execute(status -> repository.takeOver(expected, micros(now), next.leaseExpiresAt(), OrderRequest.Status.PROCESSING) == 1

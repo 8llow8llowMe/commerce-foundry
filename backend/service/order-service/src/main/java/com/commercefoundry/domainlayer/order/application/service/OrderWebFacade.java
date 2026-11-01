@@ -52,10 +52,11 @@ public class OrderWebFacade implements OrderWebUseCase {
      * 생성 순서 (트랜잭션 구간은 [ ] 안, 그 밖은 리포지토리 호출 하나씩 짧은 트랜잭션이거나 원격).
      *
      * <ol>
-     *   <li>기록을 본다 — 다른 본문이면 409, 완료면 저장된 주문을 다시 읽어 200(원격 호출 없음), lease 안의 처리 중이면 409</li>
+     *   <li>기록을 본다 — 다른 본문이면 409, 완료면 저장된 주문을 다시 읽어 200(원격 호출 없음), lease 안의 처리 중이면 409.
+     *       회원의 다른 활성 시도(선점 TTL 창 안 요청 기록, 자기 기록 제외) 수가 상한 이상이면 409 {@code ORDER_022}(원격 호출 없음, #231)</li>
      *   <li>계산 — SKU 조회 → 항목 판정 → <b>배송비 견적</b> → 금액 → {@code expectedTotalAmount} 대조. 부작용이 없다 — 거절이면 아무것도 쓰지 않는다</li>
      *   <li>기록을 잡는다 — 새 기록을 넣거나 lease 가 지난 기록을 같은 주문 아이디로 이어받는다. 충돌이면 다시 읽어 1 의 규칙으로 답한다</li>
-     *   <li>재고 선점 (주문 아이디가 업무 키, 마지막 원격 호출)</li>
+     *   <li>활성 시도 수를 다시 센다(자기 기록 제외 — 동시 넘침 차단) → 재고 선점 (주문 아이디가 업무 키, 마지막 원격 호출)</li>
      *   <li>[저장] 기록 완료(버전 비교) + 주문 · 배송지 · 항목 · 입력 · 상태 이력</li>
      * </ol>
      *
@@ -73,6 +74,8 @@ public class OrderWebFacade implements OrderWebUseCase {
         if (checked.isReplay()) {
             return replay(memberId, checked.orderId());
         }
+        // 원격 호출 전 빠른 거절 — 인수면 자기 기록은 빼고 센다
+        orderRequestProcessor.requireCapacity(memberId, checked.request());
 
         Set<Long> skuIds = new LinkedHashSet<>();
         command.items().stream().map(OrderItemCommand::skuId).forEach(skuIds::add);
@@ -86,6 +89,8 @@ public class OrderWebFacade implements OrderWebUseCase {
         }
         Order order;
         try {
+            // 기록을 잡은 뒤 다시 센다 — 동시에 들어온 새 키들이 앞의 검사를 함께 통과해도 선점 전에 상한으로 자른다(실패하면 아래에서 lease 를 끝낸다)
+            orderRequestProcessor.requireCapacity(memberId, claim.request());
             StockReservation reservation = orderStockProcessor.reserve(claim.orderId(), quote);
             order = orderProcessor.create(memberId, claim.request(), command, quote, reservation);
         } catch (OrderSaveException exception) {

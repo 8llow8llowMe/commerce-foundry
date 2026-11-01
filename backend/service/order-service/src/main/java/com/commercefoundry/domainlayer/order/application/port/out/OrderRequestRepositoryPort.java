@@ -10,6 +10,9 @@ import java.util.UUID;
 public interface OrderRequestRepositoryPort {
     Optional<OrderRequest> insertIfAbsent(OrderRequest request);
     Optional<OrderRequest> findByMemberIdAndIdempotencyKey(long memberId, UUID key);
+
+    /** 회원이 {@code since} 이후(포함) 만든 요청 기록 중 {@code excludedRequestId} 를 뺀 수 — 상태와 무관하다 (#231 활성 시도 상한). 뺄 기록이 없으면 0. */
+    long countCreatedSince(long memberId, Instant since, long excludedRequestId);
     Optional<OrderRequest> takeOver(OrderRequest expected, Instant now, Duration lease);
     boolean endLease(OrderRequest expected, Instant now);
 

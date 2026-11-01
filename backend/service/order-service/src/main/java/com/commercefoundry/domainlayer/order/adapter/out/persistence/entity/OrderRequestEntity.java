@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
@@ -28,6 +29,8 @@ import lombok.NoArgsConstructor;
     name = "order_request",
     comment = "주문 요청 기록 (회원 × Idempotency-Key)",
     uniqueConstraints = @UniqueConstraint(name = "uk_order_request_member_id_idempotency_key", columnNames = {"member_id", "idempotency_key"}),
+    // 회원별 활성 시도 수(#231) — 회원 한 명의 선점 TTL 창 안 행만 범위로 센다
+    indexes = @Index(name = "idx_order_request_member_id_created_at", columnList = "member_id, created_at"),
     check = {
         @CheckConstraint(name = "ck_order_request_identifiers_positive", constraint = "id > 0 and member_id > 0 and order_id > 0 and version >= 0"),
         @CheckConstraint(name = "ck_order_request_hash_format", constraint = "char_length(request_hash) = 64 and ltrim(request_hash, '0123456789abcdef') = ''")
