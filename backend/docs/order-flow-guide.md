@@ -227,6 +227,26 @@ delivery 에 배송 가능 국가 조회를 새로 여는 안(서비스 변경 �
   배송지 형식이 delivery 견적 본문 규칙보다 느슨하면 고객 입력 오류가 503 `ORDER_011` 로 보인다.
 - 로그에 배송지(우편번호) · 맞춤 제작 입력 값을 남기지 않는다 — 우편번호를 싣는 값(`ShippingFeeQuoteQuery` · `OrderQuoteCommand`)과 맞춤 입력(`OrderCustomOption`)의 `toString` 이 가린다.
 
+### 2-5. 결제용 주문 요약 internal (#14)
+
+payment-service 가 결제 준비 때 금액 · 주문명 · 상태를 order-service 에서 읽는다 — 결제 금액은 프론트가 아니라 이 응답(서버가 계산해 스냅숏한 총액)이 정본이다
+(`payment-guide.md`). 진입은 `OrderPaymentSummaryInternalController → OrderInternalUseCase → OrderInternalFacade(readOnly) → OrderProcessor#getOwned →
+OrderPaymentSummaryProcessor` 다.
+
+- **계약**: `GET /internal/v1/orders/{orderId}/payment-summary?memberId={memberId}` (`@Hidden`). 허용 호출자는 `SERVICE_payment-service` 하나다 —
+  서비스 토큰 없음 · 사용자 토큰 · `aud` 불일치는 401 `SECURITY_007`, 다른 서비스는 403 `SECURITY_005` (`security-guide.md` §9).
+  사용자 토큰이 internal 로 오지 않으므로 `memberId` 는 payment-service 가 access 토큰으로 확인한 값을 넘긴다.
+- **응답** `{orderId, memberId, status, totalAmount: {amount, currency}, orderName, paymentDueAt}` — 아이디는 문자열, `status` 는 `OrderStatus` 제어 코드,
+  `paymentDueAt` 은 UTC ISO-8601(재고 선점 만료 시각). 재고 선점 아이디는 내리지 않는다 — 결제는 선점을 직접 다루지 않는다.
+- **상태 판정은 payment 몫이다.** `PENDING_PAYMENT` 가 아니어도(`EXPIRED` · `PAID` 등) 200 으로 지금 상태를 낸다. 결제를 열지 · 막을지는 payment-service 가 정한다.
+- **404 `ORDER_001`**: 없는 주문과 다른 회원의 주문을 가르지 않는다(고객 조회와 같은 `getOwned`).
+- **검증**: `orderId` · `memberId` 양수 아님 `ORDER_141` · `ORDER_142`, 숫자가 아님 `ORDER_198`, `memberId` 누락 `ORDER_199` — 모두 400 이고 유스케이스에 닿지 않는다.
+- **주문명(`orderName`) 규칙** — `OrderPaymentSummaryProcessor` 한 곳에 있다.
+  - 줄 1개 → 그 줄의 주문 시점 상품명(스냅숏). 줄 N개 → `"{첫 줄 상품명} 외 {N-1}건"`. 첫 줄은 저장 순서(`line_no` 오름차순)의 첫 줄이다.
+  - 상품명 앞뒤 공백은 지운다. 비었거나 공백뿐이면 `"주문 {orderId}"` 로 대신한다.
+  - 상한 100자는 **코드포인트**로 센다(토스페이먼츠 `orderName` 상한). 넘으면 **첫 줄 상품명을 먼저 잘라** 접미사 `" 외 N건"` 을 지키고, 자른 끝 공백은 지운다.
+    서로게이트 쌍(이모지) 가운데서 자르지 않는다. 결합 문자 · ZWJ 이모지 같은 자소 묶음은 코드포인트 경계에서 갈릴 수 있다.
+
 ## 3. 재고
 
 재고는 product-service 의 SKU(상품 × 옵션 조합) 단위로 관리한다.
