@@ -583,5 +583,11 @@
     create index idx_orders_status_payment_due_at_id
        on orders.orders (status, payment_due_at, id);
 
+    create index idx_orders_status_created_at_id
+       on orders.orders (status, created_at, id);
+
+    create index idx_orders_created_at_id
+       on orders.orders (created_at, id);
+
     create index idx_outbox_published_at_available_at
        on orders.outbox (published_at, available_at);
