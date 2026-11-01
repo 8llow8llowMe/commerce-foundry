@@ -5,7 +5,7 @@ import com.commercefoundry.domainlayer.aiusage.domain.model.AiUsageStatus;
 import java.util.Objects;
 
 /**
- * 결과 정산 — {@code AiUsageMeterUseCase#settle} 의 입력. 계량 어댑터(PR-B3)가 ai-core {@code AiCallOutcome} 을 옮겨 담는다.
+ * 결과 정산 — {@code AiUsageMeterUseCase#settle} 의 입력. 계량 어댑터({@code AiUsageMeteringInterceptor}, #435)가 ai-core {@code AiCallOutcome} 을 옮겨 담는다.
  *
  * @param callId     예약이 돌려준 원장 호출 아이디
  * @param outcome    결과 구분 — COMPLETED · UNUSABLE · FAILED · TIMEOUT · NOT_SENT

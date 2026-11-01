@@ -194,13 +194,13 @@ operations:
   # 금액 · 단가는 문자열로 적는다 — double 로 읽지 않는다. 비용은 micro-USD(1 USD = 1,000,000)로 쌓는다
   ai:
     budget:
-      # 월 한도 (USD, 소수 6자리까지). 비밀이 아니다 — 배포 설정의 환경변수로 넣는다. 비면 예약이 실패한다(AI 를 켤 때 함께 넣는다)
+      # 월 한도 (USD, 소수 6자리까지). 비밀이 아니다 — 배포 설정의 환경변수로 넣는다. AI 를 켜면(ai.enabled=true) 비어 있을 때 기동하지 않는다(AiMeteringReadinessConfig)
       monthly-usd: ${AI_MONTHLY_BUDGET_USD:}
       # 월 경계 시간대 — 한국 시각 1일 00:00 에 새 달이 시작한다
       zone: Asia/Seoul
       # 예약 누계가 한도 × 이 비율 이상이 되면 달마다 한 번 경고한다 (0 초과 1 미만)
       warn-ratio: "0.8"
-      # 경고 · 초과 알림을 받을 어드민 member id (쉼표 구분, 비밀 아님). 비면 로그 · 지표만 남긴다
+      # 경고 · 초과 알림을 받을 어드민 member id (쉼표 구분, 비밀 아님). 어드민 알림 연결은 후속이다 — 지금은 값과 관계없이 WARN 로그뿐이다
       notify-member-ids: ${AI_BUDGET_NOTIFY_MEMBER_IDS:}
     estimate:
       # 예상 입력 토큰 = ceil(마스킹 뒤 글자 수 / chars-per-token) + 이미지 장수 × tokens-per-image. 최대 출력 토큰은 전부 출력 단가로 잡는다
@@ -208,25 +208,62 @@ operations:
       tokens-per-image: 1600
     pricing:
       # 단가표 버전 (20자 이하) — 호출 행에 남아 어느 가격표로 계산했는지 추적한다. 단가를 바꾸면 올린다. 단가가 있으면 필수
-      version: ""
+      version: "2026-10"
       # 모델 ID → 단가 (USD / 1M 토큰, 문자열). 설정 밖 모델은 항목별 최고 단가로 계산한다(MAX_FALLBACK).
-      # 공식 가격표 값은 ai-core 연결(PR-B3)에서 채운다. 비어 있으면 예약이 실패한다.
+      # Anthropic 공개 가격표 값이다 — 비밀이 아니다. 출처 https://www.anthropic.com/pricing (확인일 2026-11-01).
+      # 가격이 바뀌거나 ai.features 에 다른 모델을 쓰면 항목을 더하고 version 을 올린다.
+      # Opus 5.5 는 캐시 읽기가 입력의 0.05×($0.20)로 다른 모델(보통 0.1×)과 다르다 — 오타가 아니다.
+      # cache-write 는 5분 캐시 쓰기(입력 × 1.25 = $5)다. 1시간 캐시 쓰기(입력 × 2 = $8)는 원장 단가 모델(AiPrice)에 칸이 없다 — 1시간 캐시를 쓰게 되면 칸을 더한다.
+      # ai.enabled=true 인데 비어 있으면 기동하지 않는다 (AiMeteringReadinessConfig).
       # 모델 ID 는 대괄호 키로 적는다 — 그래야 점 · 대소문자가 바뀌지 않고 그대로 맵 키가 된다
-      #   "[claude-example-1-0]":
-      #     input: "..."
-      #     output: "..."
-      #     cache-write: "..."
-      #     cache-read: "..."
-      models: {}
+      models:
+        "[claude-opus-5-5]":
+          input: "4"
+          output: "20"
+          cache-write: "5"
+          cache-read: "0.20"
     reservation-sweep:
-      # 예약 뒤 이 시간이 지나도 결과가 없으면 회수한다(ABANDONED, 예상치를 비용으로 남김). AI 호출 타임아웃 × 재시도보다 넉넉히
+      # 예약 뒤 이 시간이 지나도 결과가 없으면 회수한다(ABANDONED, 예상치를 비용으로 남김).
+      # (1 + ai.max-retries) × ai.request-timeout + ai.acquire-timeout + 재시도 백오프(지금 3 × 240s + 10s ≈ 12m10s + 백오프)보다 길게 둔다 — 짧으면 진행 중인 호출을 회수한다.
+      # AI 를 켜면 AiMeteringReadinessConfig 가 위 값 + 백오프 여유 1분(13m10s)보다 길지 않을 때 기동을 멈춘다
       stale-after: 15m
       batch-size: 100
+      # 회수 주기 (AiUsageMaintenanceScheduler). 모든 인스턴스가 돈다 — 건마다 조건부 UPDATE 라 한 쪽만 닫는다. ai.enabled=false 여도 돈다
+      initial-delay: 1m
+      fixed-delay: 1m
     retention:
+      # 보존 정리 주기 (AiUsageMaintenanceScheduler)
+      initial-delay: 5m
+      fixed-delay: 1h
       # 호출 시각이 이 일수보다 오래된 호출 행을 지운다. 월 카운터는 지우지 않는다
       days: 400
       batch-size: 500
       max-batches-per-run: 20
+
+# Claude API (ai-core, bootstrap-conventions.md AI). 닫힌 기본값 — AI_ENABLED 가 비면 꺼진 채 뜨고 AiClient 호출은 AiException(DISABLED) 다.
+# 켜면 ai-core 기동 가드가 키 · 타임아웃과 계량 인터셉터(AiUsageMeteringInterceptor) 하나를 본다 — 모든 호출이 operations.ai 원장에 예약 · 정산된다.
+# allow-unmetered · allow-insecure-loopback 은 두지 않는다(운영에서 켜면 기동 실패, 테스트 전용)
+ai:
+  enabled: ${AI_ENABLED:false}
+  # Vault 값 (secret-management.md). 켜면 필수
+  api-key: ${AI_API_KEY:}
+  # 기본 모델. 바꾸거나 features 에 다른 모델을 두면 operations.ai.pricing.models 에 단가를 더한다(없으면 최고 단가로 계산)
+  default-model: claude-opus-5-5
+  # 스트리밍이 아니라 생성이 끝날 때까지 응답 바이트가 오지 않는다 — read-timeout 이 생성 시간을 덮어야 한다
+  connect-timeout: 5s
+  read-timeout: 180s
+  # 시도 한 번의 전체 상한 (read-timeout 이상)
+  request-timeout: 240s
+  # SDK 재시도 — 타임아웃 재시도는 과금됐을 수 있다. 바꾸면 operations.ai.reservation-sweep.stale-after 도 다시 본다
+  max-retries: 2
+  max-concurrency: 4
+  acquire-timeout: 10s
+  # 기능별 모델 · 최대 토큰 · effort · 프롬프트 버전. 기능을 붙이는 PR 이 더한다(#359 상품 초안 등) — 템플릿 버전을 적으면 그 파일이 없을 때 기동하지 않는다
+  #   product-draft:
+  #     max-tokens: 4000
+  #     effort: medium
+  #     prompt-version: 1
+  features: {}
 
 security:
   jwt:

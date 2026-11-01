@@ -3,7 +3,7 @@ package com.commercefoundry.domainlayer.aiusage.application.command;
 import java.util.Objects;
 
 /**
- * 보내기 전 예약 — {@code AiUsageMeterUseCase#reserve} 의 입력. 계량 어댑터(PR-B3)가 ai-core {@code AiCallContext} 를 옮겨 담는다. 원문은 없다.
+ * 보내기 전 예약 — {@code AiUsageMeterUseCase#reserve} 의 입력. 계량 어댑터({@code AiUsageMeteringInterceptor}, #435)가 ai-core {@code AiCallContext} 를 옮겨 담는다. 원문은 없다.
  *
  * @param feature        기능 이름 (63자 이하)
  * @param promptVersion  템플릿 버전. 없으면 {@code null}

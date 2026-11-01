@@ -1,6 +1,6 @@
 package com.commercefoundry.domainlayer.aiusage.application.port.in;
 
-/** 원장 정리 — 결과가 오지 않은 예약의 회수와 오래된 호출 행 삭제. 스케줄러(PR-B3)가 부른다. 여러 인스턴스가 같이 돌려도 한 번만 반영된다. */
+/** 원장 정리 — 결과가 오지 않은 예약의 회수와 오래된 호출 행 삭제. 스케줄러({@code AiUsageMaintenanceScheduler}, #435)가 부른다. 여러 인스턴스가 같이 돌려도 한 번만 반영된다. */
 public interface AiUsageMaintenanceUseCase {
 
     /**

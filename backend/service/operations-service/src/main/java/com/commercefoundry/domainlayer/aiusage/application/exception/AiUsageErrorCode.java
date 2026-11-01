@@ -5,7 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 
 /**
- * AI 사용량 원장 오류 코드 ({@code coding-conventions.md} §8). 이 컨텍스트에는 HTTP 진입이 없다 — 계량 어댑터(PR-B3)가 ai-core {@code AiException} 으로 번역하고,
+ * AI 사용량 원장 오류 코드 ({@code coding-conventions.md} §8). 이 컨텍스트에는 HTTP 진입이 없다 — 계량 어댑터({@code AiUsageMeteringInterceptor}, #435)가 ai-core {@code AiException} 으로 번역하고,
  * 작업 핸들러가 작업 실패 코드로 남긴다. 상태 코드는 진입이 생길 때를 위한 값이다.
  */
 @Getter

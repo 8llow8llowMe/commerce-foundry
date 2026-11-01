@@ -1,5 +1,6 @@
 package com.commercefoundry.global.config;
 
+import com.commercefoundry.ai.config.AiConfigurer;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.messaging.config.MessagingConfigurer;
 import com.commercefoundry.messaging.properties.MessagingProperties;
@@ -18,6 +19,7 @@ import org.springframework.context.annotation.Import;
 
 @Configuration
 @Import({
+    AiConfigurer.class,
     InternalResourceServerConfigurer.class,
     InternalTokenIssuerConfigurer.class,
     MessagingConfigurer.class,
