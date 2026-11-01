@@ -169,7 +169,8 @@ export function orderFailure(
   }
   if (CART_CODES.has(code)) return { kind: 'cart', message: textOf(t.cartInvalid), sameKey: false };
   if (cause.kind === 'validation') return { kind: 'cart', message: t.cartInvalid, sameKey: false };
-  // 그 밖의 4xx(019 키 재사용 · 198/199 헤더 · 403 등) — 이 시도는 끝났다. 새 키로 다시 누를 수 있다
+  // 그 밖의 4xx(019 키 재사용 · 022 활성 시도 상한 · 198/199 헤더 · 403 등) — 이 시도는 끝났다. 새 키로 다시 누를 수 있다
+  // 022 는 결제 대기 주문만 세는 게 아니라(30분 창의 모든 시도) 주문 내역으로 보내지 않고 사전 문구로 잠시 뒤를 안내한다(#425)
   return { kind: 'retry', message: t.orderErrors[code] ?? t.orderFailed, sameKey: false };
 }
 

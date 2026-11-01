@@ -364,6 +364,7 @@ export const en: Dictionary = {
       ORDER_017: 'We couldn’t place your order. Please contact customer service.',
       ORDER_018: 'Your order is still being processed. Please try again in a moment.',
       ORDER_021: 'We couldn’t place your order. Please try again in a moment.',
+      ORDER_022: 'Too many order attempts. Please try again in a little while.',
       ORDER_117: 'Please enter the recipient’s name.',
       ORDER_118: 'The recipient’s name must be 50 characters or fewer.',
       ORDER_119: 'Please enter the recipient’s phone number.',
