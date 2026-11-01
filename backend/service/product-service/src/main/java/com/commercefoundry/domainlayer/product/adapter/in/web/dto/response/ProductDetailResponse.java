@@ -36,7 +36,7 @@ public record ProductDetailResponse(
     List<ProductImageItem> images,
 
     @Schema(
-        description = "상세 설명 HTML. 서버가 정제하지 않은 원문이다 — 클라이언트는 허용 목록 방식으로 sanitize 한 뒤 렌더한다"
+        description = "상세 설명 HTML. 등록(#9 E1) 이후 저장분은 서버가 정제한 값이지만 그 전 데이터는 원문일 수 있다 — 클라이언트는 허용 목록 방식으로 sanitize 한 뒤 렌더한다"
             + "(script · on* 속성 · javascript: URL · iframe 제거).",
         example = "<p>...</p>", nullable = true
     )

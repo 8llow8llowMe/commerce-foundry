@@ -7,8 +7,10 @@ import org.springframework.http.HttpStatus;
 /**
  * 상품 도메인 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link ProductValidationMessage} 에 둔다.
  *
- * <p>대역 — {@code 00x} 없는 리소스(404), {@code 02x} · {@code 03x} 재고(조정 · 선점 · 복원 충돌과 부족, 409), {@code 04x} 어드민 카테고리 관리,
- * {@code 1xx} 요청 검증(400).
+ * <p>대역 — {@code 00x} 없는 리소스(404), {@code 01x} 어드민 상품 쓰기(#9 — 등록 012~016, 수정 · 삭제 010 · 011 · 015 · 017 은 E2),
+ * {@code 020~031} 재고(조정 · 선점 · 복원 충돌과 부족, 409), {@code 032~036} 상품 이미지 업로드 · 스토리지(#9 F), {@code 037} · {@code 038} 등록 필드 검증, {@code 040~045} 어드민 카테고리 관리,
+ * {@code 074~099} · {@code 169} · {@code 1xx} 요청 검증(400). {@code 046~073} 은 메인 전시({@code DisplayErrorCode}) · 사이즈표({@code SizeChartErrorCode})가 쓴다 —
+ * 2026-10-20 에 승인한 업로드 050~054 · 검증 131~ 은 먼저 쓰여 032~036 · 074~ 로 옮겼다.
  * 카테고리 컨텍스트는 업무 오류를 던지지 않는다(고객 트리는 실패하지 않고, 판정은 {@code CategoryPlacementViolation} 값으로 돌려준다). 어드민 카테고리 관리는
  * 상품 컨텍스트가 받고 상품 Processor 가 코드를 붙이므로 여기 둔다.
  */
@@ -21,6 +23,18 @@ public enum ProductErrorCode {
     NOT_FOUND_STOCK_RESERVATION("PRODUCT_003", "존재하지 않는 재고 선점입니다.", HttpStatus.NOT_FOUND),
     /** 어드민 카테고리 수정 · 삭제의 경로 아이디가 없다. 본문의 상위 아이디가 없으면 {@link #CATEGORY_PARENT_NOT_FOUND}(400)다. */
     NOT_FOUND_CATEGORY("PRODUCT_004", "존재하지 않는 카테고리입니다.", HttpStatus.NOT_FOUND),
+
+    /** 상품 등록 본문의 대표 · 진열 카테고리 중 없는 것이 있다. 본문 참조라 400 이다 — 메시지에 없는 아이디를 모두 싣는다. */
+    PRODUCT_CATEGORY_NOT_FOUND("PRODUCT_012", "존재하지 않는 카테고리가 있습니다: %s", HttpStatus.BAD_REQUEST),
+    /** 옵션 · SKU 구성이 맞지 않는다 — 옵션 이름 중복, SKU 의 옵션 값 수 · 이름이 그룹과 다름, 옵션 없는 상품의 SKU 수. 메시지에 이유를 싣는다. */
+    PRODUCT_OPTION_COMBINATION_INVALID("PRODUCT_013", "옵션 구성이 올바르지 않습니다: %s", HttpStatus.BAD_REQUEST),
+    /** 같은 옵션 값 조합의 SKU 가 두 번 있다. */
+    PRODUCT_SKU_COMBINATION_DUPLICATED("PRODUCT_014", "같은 옵션 조합의 SKU 가 두 번 있습니다: %s", HttpStatus.BAD_REQUEST),
+    /**
+     * 가격 규칙 위반 — 통화가 기본 판매가와 다르거나, 기본 판매가가 판매중 SKU 의 최저가가 아니다(판매중 SKU 중 추가금 0 이 없다).
+     * 목록 · 상세 표시가와 주문 금액이 같은 규칙({@code ProductPricing})으로 나오게 등록에서 막는다.
+     */
+    PRODUCT_PRICE_RULE_VIOLATED("PRODUCT_016", "가격 설정이 올바르지 않습니다: %s", HttpStatus.BAD_REQUEST),
 
     /** 어드민 재고 조정의 기대 수량(CAS)이 현재 수량과 다르거나, 첫 재고 등록이 동시에 겹쳤다. 다시 읽고 조정한다. */
     STOCK_ADJUSTMENT_CONFLICT("PRODUCT_020", "재고가 그 사이 바뀌었습니다. 현재 재고를 다시 확인한 뒤 조정해 주세요.", HttpStatus.CONFLICT),

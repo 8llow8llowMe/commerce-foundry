@@ -16,6 +16,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Persistable;
 
 /**
  * 재고 수량 · 재고 관리 여부는 별도 {@code stock} 테이블({@link StockEntity})이 가진다. 여기에 두지 않는다.
@@ -41,7 +42,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class SkuEntity extends BaseEntity {
+public class SkuEntity extends BaseEntity implements Persistable<Long> {
 
     @Id
     @Column(name = "id", comment = "SKU 아이디 (Snowflake)")
@@ -73,4 +74,10 @@ public class SkuEntity extends BaseEntity {
     @Column(name = "hs_code", length = 10,
         comment = "통관 신고용 HS 코드 (숫자 6~10자리) — 해외 판매 상품만 필수, null 이면 미입력")
     private String hsCode;
+
+    /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다(새 행은 persist, #9 E1). */
+    @Override
+    public boolean isNew() {
+        return getCreatedAt() == null;
+    }
 }

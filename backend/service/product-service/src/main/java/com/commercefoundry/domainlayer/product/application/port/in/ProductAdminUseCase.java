@@ -1,8 +1,10 @@
 package com.commercefoundry.domainlayer.product.application.port.in;
 
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
+import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
 import com.commercefoundry.persistence.dto.PageResponse;
 
 /**
@@ -18,4 +20,11 @@ public interface ProductAdminUseCase {
      * 카테고리 조건은 하위 카테고리를 포함하고, 없는 카테고리면 빈 페이지(전체 0건)다.
      */
     PageResponse<ProductListAdminItem> searchProducts(ProductAdminSearchCommand command);
+
+    /**
+     * 상품 등록 (#9 E1) — 이미지 없이, 맞춤 제작 꺼짐으로 만든다. 상세 HTML 은 정제해 저장한다.
+     * 없는 카테고리는 {@code PRODUCT_012}, 옵션 · SKU 구성은 {@code 013} · {@code 014}, 가격 규칙은 {@code 016}(400)이다.
+     * 카테고리 쓰기와 겹쳐 잠금을 얻지 못하면 {@code PRODUCT_045}(409)다.
+     */
+    ProductCreateAdminResponse create(ProductCreateCommand command);
 }

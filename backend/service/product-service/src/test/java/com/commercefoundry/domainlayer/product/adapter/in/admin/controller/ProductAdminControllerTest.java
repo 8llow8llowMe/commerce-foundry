@@ -9,11 +9,14 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
+import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
 import com.commercefoundry.domainlayer.product.application.model.ProductAdminSortType;
 import com.commercefoundry.domainlayer.product.application.model.ProductAvailabilityFilter;
 import com.commercefoundry.domainlayer.product.application.model.ProductSaleStatusFilter;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
+import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
@@ -27,11 +30,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -230,6 +235,123 @@ class ProductAdminControllerTest {
         assertThat(result).hasStatus(HttpStatus.NOT_FOUND);
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_001");
         assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
+    }
+
+    private static final String CREATE_BODY = """
+        {"name": "  린넨 저고리  ", "summary": "   ", "descriptionHtml": "<p>본문</p>", "categoryId": "12", "categoryIds": ["30"],
+         "saleStatus": "ON_SALE", "visible": false, "salePrice": {"amount": 59000, "currency": "KRW"}, "preorder": true, "expectedShipDate": "2099-12-01",
+         "optionGroups": [{"name": " 사이즈 ", "values": [" S ", "M"]}],
+         "skus": [{"optionValues": ["S"], "additionalPrice": {"amount": 0, "currency": "KRW"}, "saleStatus": "ON_SALE", "hsCode": "6211.42-10 00",
+                   "initialStock": {"stockManaged": true, "quantity": 30}},
+                  {"optionValues": ["M"], "additionalPrice": {"amount": 0, "currency": "KRW"}, "saleStatus": "STOP_SELLING"}]}
+        """;
+
+    /** 유효한 최소 본문(닫는 괄호 없음) — 검증 테스트가 칸 하나를 뒤에 덧붙여 덮는다. */
+    private static final String MINIMAL_BODY_PREFIX = "{\"name\": \"저고리\", \"categoryId\": 12, \"saleStatus\": \"ON_SALE\", \"visible\": false, "
+        + "\"salePrice\": {\"amount\": 59000, \"currency\": \"KRW\"}, "
+        + "\"skus\": [{\"optionValues\": [], \"additionalPrice\": {\"amount\": 0, \"currency\": \"KRW\"}, \"saleStatus\": \"ON_SALE\"}]";
+
+    @Test
+    @DisplayName("등록 — 최소 본문(옵션 없음 · SKU 하나)은 201 이다")
+    void createMinimal() {
+        given(productAdminUseCase.create(any())).willReturn(ProductCreateAdminResponse.builder().build());
+
+        assertThat(adminPost(MINIMAL_BODY_PREFIX + "}")).hasStatus(HttpStatus.CREATED);
+    }
+
+    @Test
+    @DisplayName("등록 — 201, 등록자는 토큰의 memberId, 문구 · 옵션 이름은 앞뒤 공백을 빼고 빈 요약은 null, HS 코드는 구분자를 뺀다. 응답은 상세 + 정제 여부")
+    void create() {
+        var detail = com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse.builder()
+            .productId("7").visible(false).version(0L).categoryIds(List.of("12", "30"))
+            .optionGroups(List.of()).skus(List.of()).images(List.of()).customOrderFields(List.of()).build();
+        given(productAdminUseCase.create(any())).willReturn(ProductCreateAdminResponse.builder().product(detail).descriptionHtmlSanitized(true).build());
+
+        MvcTestResult result = adminPost(CREATE_BODY);
+
+        assertThat(result).hasStatus(HttpStatus.CREATED);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.product.productId").isEqualTo("7");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.descriptionHtmlSanitized").isEqualTo(true);
+        ArgumentCaptor<ProductCreateCommand> command = ArgumentCaptor.forClass(ProductCreateCommand.class);
+        verify(productAdminUseCase).create(command.capture());
+        ProductCreateCommand captured = command.getValue();
+        assertThat(captured.createdByMemberId()).isEqualTo(TestTokens.MEMBER_ID);
+        assertThat(captured.name()).isEqualTo("린넨 저고리");
+        assertThat(captured.summary()).isNull();
+        assertThat(captured.categoryId()).isEqualTo(12L);
+        assertThat(captured.categoryIds()).containsExactly(30L);
+        assertThat(captured.saleStatus()).isEqualTo(SaleStatus.ON_SALE);
+        assertThat(captured.preorder()).isTrue();
+        assertThat(captured.optionGroups().getFirst()).isEqualTo(new ProductCreateCommand.OptionGroup("사이즈", List.of("S", "M")));
+        assertThat(captured.skus().getFirst().hsCode()).isEqualTo("6211421000");
+        assertThat(captured.skus().getFirst().initialStock()).isEqualTo(new ProductCreateCommand.InitialStock(true, 30));
+        assertThat(captured.skus().get(1).initialStock()).isNull();
+    }
+
+    @Test
+    @DisplayName("등록 — CUSTOMER 는 403 · 토큰 없으면 401 이고 유스케이스를 부르지 않는다")
+    void createRejectsCustomerAndAnonymous() {
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY).exchange().getResponse(),
+            SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @ParameterizedTest(name = "{1}")
+    @CsvSource(delimiter = '|', value = {
+        "\"name\": \"   \"|PRODUCT_074",
+        "\"name\": \"a\\u200Bb\"|PRODUCT_076",
+        "\"categoryId\": null|PRODUCT_079",
+        "\"categoryId\": 0|PRODUCT_137",
+        "\"saleStatus\": null|PRODUCT_082",
+        "\"salePrice\": {\"amount\": -1, \"currency\": \"KRW\"}|PRODUCT_086",
+        "\"maxQuantityPerOrder\": 1000|PRODUCT_088",
+        "\"preorder\": false|PRODUCT_089",
+        "\"optionGroups\": [{\"name\": \"사이즈\", \"values\": []}]|PRODUCT_093",
+        "\"skus\": []|PRODUCT_095",
+        "\"skus\": [{\"optionValues\": [], \"additionalPrice\": {\"amount\": 0, \"currency\": \"KRW\"}, \"saleStatus\": \"ON_SALE\", \"hsCode\": \"６２１１４２\"}]|PRODUCT_099",
+        "\"skus\": [{\"optionValues\": [], \"additionalPrice\": {\"amount\": 0, \"currency\": \"KRW\"}, \"saleStatus\": \"ON_SALE\", \"initialStock\": {\"quantity\": 3}}]|PRODUCT_169",
+        "\"salePrice\": {\"amount\": 100000001, \"currency\": \"KRW\"}|PRODUCT_037",
+        "\"preorder\": true|PRODUCT_038",
+        "\"categoryIds\": [12, null]|PRODUCT_081",
+        "\"skus\": [{\"optionValues\": [null], \"additionalPrice\": {\"amount\": 0, \"currency\": \"KRW\"}, \"saleStatus\": \"ON_SALE\"}]|PRODUCT_097",
+        "\"saleStatus\": \"SOLD_OUT\"|PRODUCT_100"
+    })
+    @DisplayName("등록 검증 실패는 400 · 필드 코드이고 유스케이스를 부르지 않는다 — 본문 칸 하나를 바꿔 본다")
+    void createValidation(String override, String code) {
+        // 최소 유효 본문 뒤에 같은 키를 다시 적어 덮는다 — 같은 키는 마지막 값이 쓰인다
+        MvcTestResult result = adminPost(MINIMAL_BODY_PREFIX + ", " + override + ", \"expectedShipDate\": " + shipDateFor(code) + "}");
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @Test
+    @DisplayName("등록 도메인 오류는 봉투로 — 없는 카테고리 400 · PRODUCT_012")
+    void createDomainError() {
+        given(productAdminUseCase.create(any())).willThrow(new com.commercefoundry.domainlayer.product.application.exception.ProductException(
+            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.PRODUCT_CATEGORY_NOT_FOUND, "30"));
+
+        MvcTestResult result = adminPost(CREATE_BODY);
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_012");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo("존재하지 않는 카테고리가 있습니다: 30");
+    }
+
+    /** 089 는 프리오더 아닌데 날짜, 038 은 프리오더인데 지난 날짜다. 미래 날짜는 오늘에서 1년 뒤로 잡아 테스트가 날짜에 따라 깨지지 않게 한다. */
+    private static String shipDateFor(String code) {
+        return switch (code) {
+            case "PRODUCT_089" -> "\"" + java.time.LocalDate.now().plusYears(1) + "\"";
+            case "PRODUCT_038" -> "\"2020-01-01\"";
+            default -> "null";
+        };
+    }
+
+    private MvcTestResult adminPost(String body) {
+        return mvc.post().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(body).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
     }
 
     private void givenEmptyPage() {

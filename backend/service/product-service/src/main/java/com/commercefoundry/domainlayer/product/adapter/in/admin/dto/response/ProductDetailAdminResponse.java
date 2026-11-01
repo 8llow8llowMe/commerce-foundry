@@ -30,7 +30,7 @@ public record ProductDetailAdminResponse(
     @Schema(description = "요약", nullable = true)
     String summary,
 
-    @Schema(description = "정제하지 않은 상세 설명 HTML. FE에서 sanitize 후 렌더링", nullable = true)
+    @Schema(description = "상세 설명 HTML. 등록(#9 E1) 이후 저장분은 서버가 정제한 값이고 그 전 데이터는 원문일 수 있다 — FE 도 sanitize 후 렌더링", nullable = true)
     String descriptionHtml,
 
     @Schema(description = "저장된 판매 상태")

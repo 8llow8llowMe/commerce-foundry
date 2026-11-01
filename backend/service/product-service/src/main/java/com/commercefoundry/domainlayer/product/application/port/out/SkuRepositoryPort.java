@@ -29,4 +29,7 @@ public interface SkuRepositoryPort {
 
     /** 상품별 SKU 집계. SKU 가 없는 상품은 결과에 행이 없다. */
     List<SkuAggregateQueryResult> aggregateByProductIds(Collection<Long> productIds);
+
+    /** 새 SKU INSERT (#9 E1). 아이디는 호출한 쪽이 발급했다. 같은 상품 안 조합 중복은 호출한 쪽이 막았다(유니크 키가 2차 방어). */
+    void insertAll(List<Sku> skus);
 }

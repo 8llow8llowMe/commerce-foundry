@@ -19,4 +19,7 @@ public interface ProductOptionRepositoryPort {
     List<OptionGroup> findGroupsByIds(Collection<Long> optionGroupIds);
 
     List<OptionValue> findValuesByIds(Collection<Long> optionValueIds);
+
+    /** 새 그룹 · 값 INSERT (#9 E1). 아이디는 호출한 쪽이 발급했다. 그룹을 먼저 넣는다. */
+    void insertAll(List<OptionGroup> groups, List<OptionValue> values);
 }

@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.adapter.out.persistence;
 
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.SkuRepository;
 import com.commercefoundry.domainlayer.product.application.mapper.SkuMapper;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
@@ -55,5 +56,22 @@ public class SkuRepositoryAdapter implements SkuRepositoryPort {
             return List.of();
         }
         return skuRepository.aggregateByProductIds(productIds);
+    }
+
+    /** 엔티티가 {@code Persistable} 이라 새 행은 persist(INSERT) 로 간다 — 같은 조합이면 {@code uk_sku_product_id_option_value_key} 위반이다. */
+    @Override
+    public void insertAll(List<Sku> skus) {
+        skuRepository.saveAll(skus.stream()
+            .map(sku -> SkuEntity.builder()
+                .id(sku.id())
+                .productId(sku.productId())
+                .optionValueKey(sku.optionKey().value())
+                .additionalPriceAmount(sku.additionalPrice().amount())
+                .additionalPriceCurrency(sku.additionalPrice().currency())
+                .saleStatus(sku.saleStatus())
+                .weightGrams(sku.weightGrams())
+                .hsCode(sku.hsCode() == null ? null : sku.hsCode().value())
+                .build())
+            .toList());
     }
 }
