@@ -3,6 +3,7 @@ package com.commercefoundry.global.config;
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
 import com.commercefoundry.global.properties.OrderPaymentExpiryProperties;
 import com.commercefoundry.global.properties.OrderProperties;
+import com.commercefoundry.global.properties.OrderQuantityLimitProperties;
 import com.commercefoundry.messaging.config.MessagingPropertiesConfig;
 import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
 import com.commercefoundry.security.internal.InternalTokenPropertiesConfig;
@@ -12,7 +13,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
 @Configuration
-@EnableConfigurationProperties({OrderProperties.class, OrderPaymentExpiryProperties.class})
+@EnableConfigurationProperties({OrderProperties.class, OrderPaymentExpiryProperties.class, OrderQuantityLimitProperties.class})
 @Import({
     InternalTokenPropertiesConfig.class,
     JwtVerificationPropertiesConfig.class,

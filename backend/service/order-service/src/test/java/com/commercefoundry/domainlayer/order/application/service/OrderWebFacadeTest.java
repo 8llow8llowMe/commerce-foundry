@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.commercefoundry.domainlayer.catalog.application.service.processor.CatalogSkuProcessor;
+import com.commercefoundry.domainlayer.catalog.domain.model.CatalogSku;
 import com.commercefoundry.domainlayer.order.adapter.in.web.presenter.OrderWebPresenter;
 import com.commercefoundry.domainlayer.order.application.command.OrderCreateCommand;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
@@ -21,6 +22,8 @@ import com.commercefoundry.domainlayer.order.support.OrderFixtures;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,7 +48,7 @@ class OrderWebFacadeTest {
         var acquired = new OrderRequestClaim(OrderRequestClaim.Outcome.ACQUIRED, owned);
         when(requests.check(2, key, command.fingerprint())).thenReturn(checked);
         when(requests.acquire(2, key, command.fingerprint(), checked)).thenReturn(acquired);
-        when(quotes.quote(any(), any())).thenReturn(OrderFixtures.domesticQuote(OrderFixtures.quoteLine(101, 1000, 1)));
+        when(quotes.quote(any(), any(), any())).thenReturn(OrderFixtures.domesticQuote(OrderFixtures.quoteLine(101, 1000, 1)));
         when(orders.create(eq(2L), eq(owned), eq(command), any(), any())).thenThrow(new OrderSaveException(reason, "SafeFailureType"));
         if (reason == OrderSaveException.Reason.ALREADY_SAVED) {
             when(orders.getOwned(2, 3)).thenReturn(mock(Order.class));
@@ -58,6 +61,29 @@ class OrderWebFacadeTest {
         }
         verify(requests).endLeaseQuietly(owned);
         verify(stocks, times(1)).reserve(eq(3L), any());
+    }
+
+    @Test
+    @DisplayName("주문 생성은 회원의 결제 대기 주문 수량을 상품별로 읽어 견적의 수량 상한에 넘긴다 (#426)")
+    void passesPendingQuantitiesToQuote() {
+        var catalog = mock(CatalogSkuProcessor.class);
+        var quotes = mock(OrderQuoteProcessor.class);
+        var requests = mock(OrderRequestProcessor.class);
+        var orders = mock(OrderProcessor.class);
+        var facade = new OrderWebFacade(catalog, quotes, requests, mock(OrderStockProcessor.class), orders, mock(OrderWebPresenter.class));
+        var command = new OrderCreateCommand(List.of(OrderFixtures.line(101, 1)), OrderFixtures.address("KR"), null);
+        UUID key = UUID.randomUUID();
+        CatalogSku sku = mock(CatalogSku.class);
+        when(sku.productId()).thenReturn(7101L);
+        when(catalog.findSkus(any())).thenReturn(Map.of(101L, sku));
+        when(requests.check(2, key, command.fingerprint())).thenReturn(OrderRequestClaim.none());
+        when(orders.pendingQuantitiesByProduct(2, Set.of(7101L))).thenReturn(Map.of(7101L, 3));
+        doThrow(new OrderException(OrderErrorCode.QUANTITY_EXCEEDED, "치마(최대 3개, 결제 대기 주문에 3개)"))
+            .when(quotes).quote(any(), any(), eq(Map.of(7101L, 3)));
+
+        assertThatThrownBy(() -> facade.create(2, key, command)).isInstanceOfSatisfying(OrderException.class,
+            ex -> assertThat(ex.getErrorCode()).isEqualTo(OrderErrorCode.QUANTITY_EXCEEDED));
+        verify(requests, never()).acquire(anyLong(), any(), any(), any());
     }
 
     @Test
@@ -95,7 +121,7 @@ class OrderWebFacadeTest {
         when(requests.check(2, key, command.fingerprint())).thenReturn(OrderRequestClaim.none());
         when(requests.acquire(2, key, command.fingerprint(), OrderRequestClaim.none()))
             .thenReturn(new OrderRequestClaim(OrderRequestClaim.Outcome.ACQUIRED, owned));
-        when(quotes.quote(any(), any())).thenReturn(OrderFixtures.domesticQuote(OrderFixtures.quoteLine(101, 1000, 1)));
+        when(quotes.quote(any(), any(), any())).thenReturn(OrderFixtures.domesticQuote(OrderFixtures.quoteLine(101, 1000, 1)));
         doThrow(new OrderException(OrderErrorCode.ACTIVE_ORDER_REQUESTS_EXCEEDED)).when(requests).requireCapacity(2, owned);
 
         assertThatThrownBy(() -> facade.create(2, key, command)).isInstanceOfSatisfying(OrderException.class,
@@ -120,7 +146,7 @@ class OrderWebFacadeTest {
         var takeOver = new OrderRequestClaim(OrderRequestClaim.Outcome.TAKE_OVER, pending);
         when(requests.check(2, key, command.fingerprint())).thenReturn(takeOver);
         when(requests.acquire(2, key, command.fingerprint(), takeOver)).thenReturn(new OrderRequestClaim(OrderRequestClaim.Outcome.ACQUIRED, pending));
-        when(quotes.quote(any(), any())).thenReturn(OrderFixtures.domesticQuote(OrderFixtures.quoteLine(101, 1000, 1)));
+        when(quotes.quote(any(), any(), any())).thenReturn(OrderFixtures.domesticQuote(OrderFixtures.quoteLine(101, 1000, 1)));
         when(orders.create(eq(2L), eq(pending), eq(command), any(), any())).thenReturn(mock(Order.class));
 
         assertThat(facade.create(2, key, command).created()).isTrue();
