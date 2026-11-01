@@ -12,6 +12,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.query.Shipping
 import com.commercefoundry.domainlayer.order.domain.model.OrderQuote;
 import com.commercefoundry.domainlayer.order.domain.model.OrderQuoteLine;
 import com.commercefoundry.domainlayer.order.domain.model.ShippingFeeQuote;
+import com.commercefoundry.global.properties.OrderQuantityLimitProperties;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.shared.commerce.ShippingScope;
@@ -54,6 +55,7 @@ public class OrderQuoteProcessor {
     private static final String NAME_DELIMITER = ", ";
 
     private final ShippingFeeQueryPort shippingFeeQueryPort;
+    private final OrderQuantityLimitProperties quantityLimit;
 
     /**
      * 주문서를 계산한다. 아래 순서로 처음 걸리는 단계 하나로 거절하고, 그 단계에 걸린 줄은 모두 모아 메시지에 싣는다(같은 이름은 한 번).
@@ -67,7 +69,8 @@ public class OrderQuoteProcessor {
      *   <li>맞춤 제작 상품이면 입력을 항목 정의와 대조한다 — 필수 누락 · 모르는 fieldKey · NUMBER 범위 · step · TEXT 길이.
      *       400 {@link OrderFieldValidationException}. {@code fieldErrors[].field} 는 {@code items[i].customOptions[j].value} 다.
      *       빠진 필수 항목은 그 줄에 있던 입력 개수 다음 칸이다. 입력값은 메시지에 넣지 않는다</li>
-     *   <li><b>상품 단위</b> 수량 합이 상품의 {@code maxQuantityPerOrder}(null 이면 제한 없음)를 넘는다 — {@code QUANTITY_EXCEEDED}(409)</li>
+     *   <li><b>상품 단위</b> 수량 합이 상품의 {@code maxQuantityPerOrder}(null 이면 {@code order.quantity-limit.default-per-product})를 넘는다 —
+     *       {@code QUANTITY_EXCEEDED}(409). 주문 생성은 회원의 결제 대기 주문에 담긴 수량을 더한다</li>
      *   <li>판매가 통화가 섞였다 — {@code CURRENCY_MIXED}(409). 주문 통화는 SKU 판매가의 통화다</li>
      *   <li>줄 금액 = 단가 × 수량, 상품 합계 = Σ 줄 금액</li>
      *   <li>배송 국가로 국내 · 해외를 가른다({@link ShippingScope#ofCountry}, 통화는 보지 않는다). 해외면 배송 가능 국가 → 무게 · HS 미입력 → 총 무게 순이다
@@ -85,6 +88,15 @@ public class OrderQuoteProcessor {
      * @throws OrderException 위 거절, 또는 배송비 견적의 거절 · 장애 ({@link ShippingFeeQueryPort#quote})
      */
     public OrderQuote quote(OrderQuoteCommand command, Map<Long, CatalogSku> skus) {
+        return quote(command, skus, Map.of());
+    }
+
+    /**
+     * 주문 생성용 — {@link #quote(OrderQuoteCommand, Map)} 와 같고, 상품 수량 상한에 회원의 결제 대기 주문에 이미 담긴 수량을 더한다 (#426).
+     *
+     * @param pendingQuantityByProduct 상품 아이디 → 결제 대기 주문의 수량 합. 없는 상품은 0 이다
+     */
+    public OrderQuote quote(OrderQuoteCommand command, Map<Long, CatalogSku> skus, Map<Long, Integer> pendingQuantityByProduct) {
         List<OrderItemCommand> items = command.items();
         rejectDuplicateLines(items, skus);
         rejectLines(items, skus, (item, sku) -> sku == null || !sku.purchasable(), OrderErrorCode.ITEM_NOT_PURCHASABLE);
@@ -93,7 +105,7 @@ public class OrderQuoteProcessor {
         if (!fieldViolations.isEmpty()) {
             throw new OrderFieldValidationException(fieldViolations);
         }
-        rejectQuantityOverLimit(items, skus);
+        rejectQuantityOverLimit(items, skus, pendingQuantityByProduct);
         CurrencyCode currency = currencyOf(items, skus);
 
         List<OrderQuoteLine> lines = items.stream().map(item -> toLine(item, skus.get(item.skuId()))).toList();
@@ -127,16 +139,21 @@ public class OrderQuoteProcessor {
         rejectIfAny(names, errorCode);
     }
 
-    /** 1회 주문 최대 수량은 상품 컬럼이다 — SKU 별로 세면 S 2 + M 2 로 상한이 우회되므로 같은 상품의 줄(다른 SKU · 다른 맞춤 입력)을 모두 더한다. */
-    private static void rejectQuantityOverLimit(List<OrderItemCommand> items, Map<Long, CatalogSku> skus) {
+    /**
+     * 1회 주문 최대 수량은 상품 컬럼이다 — SKU 별로 세면 S 2 + M 2 로 상한이 우회되므로 같은 상품의 줄(다른 SKU · 다른 맞춤 입력)을 모두 더한다.
+     * 상품 값이 비어 있으면 엔진 기본값({@code order.quantity-limit.default-per-product})을 쓴다 — 비어 있다고 무제한이면 시도 하나로 재고를 다 잡는다(#426).
+     * 주문 생성은 회원의 결제 대기 주문에 이미 담긴 수량도 더한다 — 결제 대기 주문은 선점을 쥐고 있어, 주문을 나눠 상한을 넘지 못하게 한다.
+     */
+    private void rejectQuantityOverLimit(List<OrderItemCommand> items, Map<Long, CatalogSku> skus, Map<Long, Integer> pendingQuantityByProduct) {
         Map<Long, ProductQuantity> products = new LinkedHashMap<>();
         for (OrderItemCommand item : items) {
             CatalogSku sku = skus.get(item.skuId());
-            products.merge(sku.productId(), new ProductQuantity(sku.productName(), sku.maxQuantityPerOrder(), item.quantity()), ProductQuantity::plus);
+            products.merge(sku.productId(), new ProductQuantity(sku.productName(), quantityLimit.maxPerProduct(sku.maxQuantityPerOrder()), item.quantity(),
+                pendingQuantityByProduct.getOrDefault(sku.productId(), 0)), ProductQuantity::plus);
         }
         List<String> exceeded = products.values().stream()
             .filter(ProductQuantity::exceeded)
-            .map(product -> "%s(최대 %d개)".formatted(product.productName(), product.maxQuantity()))
+            .map(ProductQuantity::describe)
             .toList();
         rejectIfAny(exceeded, OrderErrorCode.QUANTITY_EXCEEDED);
     }
@@ -252,22 +269,25 @@ public class OrderQuoteProcessor {
     private record LineKey(long skuId, String customOptionHash) {
     }
 
-    /** 한 상품의 주문 수량 합. 상한은 상품 컬럼이라 같은 상품의 SKU 는 같은 값이지만, 다르게 오면 작은 쪽(닫힌 쪽)을 쓴다. null 은 제한 없음이다. */
-    private record ProductQuantity(String productName, Integer maxQuantity, int quantity) {
+    /**
+     * 한 상품의 주문 수량 합과 결제 대기 주문에 이미 담긴 수량. 상한은 상품 컬럼이라 같은 상품의 SKU 는 같은 값이지만, 다르게 오면 작은 쪽(닫힌 쪽)을 쓴다.
+     * 결제 대기 수량은 상품 단위 값이라 줄마다 같다 — 더하지 않는다.
+     */
+    private record ProductQuantity(String productName, int maxQuantity, int quantity, int pendingQuantity) {
 
         ProductQuantity plus(ProductQuantity other) {
-            return new ProductQuantity(productName, stricter(maxQuantity, other.maxQuantity), quantity + other.quantity);
+            return new ProductQuantity(productName, Math.min(maxQuantity, other.maxQuantity), quantity + other.quantity, pendingQuantity);
         }
 
         boolean exceeded() {
-            return maxQuantity != null && quantity > maxQuantity;
+            return quantity + pendingQuantity > maxQuantity;
         }
 
-        private static Integer stricter(Integer left, Integer right) {
-            if (left == null) {
-                return right;
-            }
-            return right == null ? left : Integer.valueOf(Math.min(left, right));
+        /** 고객 메시지 — 결제 대기 주문에 담긴 수량이 있으면 함께 알려 이번 주문에서 줄일 수량을 알게 한다. */
+        String describe() {
+            return pendingQuantity > 0
+                ? "%s(최대 %d개, 결제 대기 주문에 %d개)".formatted(productName, maxQuantity, pendingQuantity)
+                : "%s(최대 %d개)".formatted(productName, maxQuantity);
         }
     }
 }

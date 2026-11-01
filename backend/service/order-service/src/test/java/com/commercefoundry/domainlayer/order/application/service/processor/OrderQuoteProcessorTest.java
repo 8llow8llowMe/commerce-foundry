@@ -21,6 +21,7 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderQuoteLine;
 import com.commercefoundry.domainlayer.order.domain.model.ShippingFeeQuote;
 import com.commercefoundry.domainlayer.order.support.FakeShippingFeeQueryPort.DestinationCheck;
 import com.commercefoundry.domainlayer.order.support.FakeShippingFeeQueryPort;
+import com.commercefoundry.global.properties.OrderQuantityLimitProperties;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.shared.commerce.ShippingScope;
@@ -52,7 +53,7 @@ class OrderQuoteProcessorTest {
     @BeforeEach
     void setUp() {
         shippingFeeQueryPort = new FakeShippingFeeQueryPort();
-        processor = new OrderQuoteProcessor(shippingFeeQueryPort);
+        processor = new OrderQuoteProcessor(shippingFeeQueryPort, new OrderQuantityLimitProperties(99));
     }
 
     private static Money krw(long amount) {
@@ -288,15 +289,17 @@ class OrderQuoteProcessorTest {
         }
 
         @Test
-        @DisplayName("같은 SKU 를 다른 맞춤 입력으로 나눈 줄도 더한다 — 상한이 없으면(null) 제한하지 않고, 상한 0 이면 한 벌도 안 된다")
+        @DisplayName("같은 SKU 를 다른 맞춤 입력으로 나눈 줄도 더한다 — 상한이 없으면(null) 엔진 기본값(여기서는 99)으로 막고(#426), 상한 0 이면 한 벌도 안 된다")
         void quantityAcrossCustomOptionLines() {
             CatalogSku custom = withMaxQuantity(withFields(customOrder(sku(1001, 7001, "두루마기", "M", 90_000)), chestNumber()), 2);
 
             rejected(() -> processor.quote(domestic(item(1001, 1, "chest", "96"), item(1001, 2, "chest", "100")), skus(custom)),
                 OrderErrorCode.QUANTITY_EXCEEDED);
 
-            CatalogSku unlimited = withMaxQuantity(custom, null);
-            assertThat(processor.quote(domestic(item(1001, 99, "chest", "96"), item(1001, 99, "chest", "100")), skus(unlimited)).lines()).hasSize(2);
+            CatalogSku unset = withMaxQuantity(custom, null);
+            assertThat(processor.quote(domestic(item(1001, 50, "chest", "96"), item(1001, 49, "chest", "100")), skus(unset)).lines()).hasSize(2);
+            rejected(() -> processor.quote(domestic(item(1001, 50, "chest", "96"), item(1001, 50, "chest", "100")), skus(unset)),
+                OrderErrorCode.QUANTITY_EXCEEDED);
 
             CatalogSku closed = withMaxQuantity(custom, 0);
             rejected(() -> processor.quote(domestic(item(1001, 1, "chest", "96")), skus(closed)), OrderErrorCode.QUANTITY_EXCEEDED);
@@ -319,6 +322,43 @@ class OrderQuoteProcessorTest {
             rejected(() -> processor.quote(domestic(item(1004, 1), item(1003, 2)), skus(unlimited, two)), OrderErrorCode.QUANTITY_EXCEEDED);
             assertNoShippingCall();
             assertThat(processor.quote(domestic(item(1003, 1), item(1004, 1)), skus(unlimited, two)).lines()).as("합이 작은 상한과 같으면 통과").hasSize(2);
+        }
+
+        @Test
+        @DisplayName("상품 상한이 비어 있으면 엔진 기본값을 쓰고, 상품 값이 있으면 상품 값이 이긴다(기본값보다 커도) (#426)")
+        void defaultLimitWhenProductHasNone() {
+            OrderQuoteProcessor withDefault = new OrderQuoteProcessor(shippingFeeQueryPort, new OrderQuantityLimitProperties(3));
+            CatalogSku unset = withMaxQuantity(sku(1001, 7001, "저고리", "S", 30_000), null);
+            CatalogSku explicit = withMaxQuantity(sku(1002, 7002, "치마", "S", 40_000), 5);
+
+            OrderException overDefault = rejected(() -> withDefault.quote(domestic(item(1001, 4)), skus(unset)), OrderErrorCode.QUANTITY_EXCEEDED);
+            assertThat(overDefault.getMessage()).endsWith(": 저고리(최대 3개)");
+            assertThat(withDefault.quote(domestic(item(1001, 3)), skus(unset)).lines()).as("기본값과 같으면 통과").hasSize(1);
+            assertThat(withDefault.quote(domestic(item(1002, 5)), skus(explicit)).lines()).as("상품 값 5 가 기본값 3 을 이긴다").hasSize(1);
+        }
+
+        @Test
+        @DisplayName("기본 상한 설정은 1–99 다 — 밖이면 기동하지 않는다 (#426)")
+        void defaultLimitRange() {
+            for (int invalid : new int[]{0, -1, 100}) {
+                assertThat(catchThrowable(() -> new OrderQuantityLimitProperties(invalid))).isInstanceOf(IllegalArgumentException.class);
+            }
+            assertThat(new OrderQuantityLimitProperties(1).maxPerProduct(null)).isEqualTo(1);
+            assertThat(new OrderQuantityLimitProperties(10).maxPerProduct(30)).isEqualTo(30);
+        }
+
+        @Test
+        @DisplayName("주문 생성은 회원의 결제 대기 주문에 담긴 수량을 더한다 — 넘으면 ORDER_005 이고 메시지에 결제 대기 수량을 싣는다 (#426)")
+        void pendingQuantityCountsTowardLimit() {
+            CatalogSku limited = withMaxQuantity(sku(1001, 7001, "치마", "S", 40_000), 3);
+
+            OrderException exceeded = rejected(() -> processor.quote(domestic(item(1001, 2)), skus(limited), Map.of(7001L, 2)),
+                OrderErrorCode.QUANTITY_EXCEEDED);
+            assertThat(exceeded.getMessage()).endsWith(": 치마(최대 3개, 결제 대기 주문에 2개)");
+            assertNoShippingCall();
+
+            assertThat(processor.quote(domestic(item(1001, 1)), skus(limited), Map.of(7001L, 2)).lines()).as("합이 상한과 같으면 통과").hasSize(1);
+            assertThat(processor.quote(domestic(item(1001, 3)), skus(limited), Map.of(9999L, 5)).lines()).as("다른 상품의 결제 대기 수량은 보지 않는다").hasSize(1);
         }
 
         @Test

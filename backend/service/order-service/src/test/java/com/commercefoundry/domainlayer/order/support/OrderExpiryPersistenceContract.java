@@ -9,9 +9,11 @@ import com.commercefoundry.domainlayer.order.adapter.out.event.OrderEventAdapter
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.repository.OrderStatusHistoryRepository;
 import com.commercefoundry.domainlayer.order.application.model.OrderExpiryCandidate;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.application.service.OrderSchedulerFacade;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderExpiryProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
+import com.commercefoundry.domainlayer.order.domain.model.OrderQuoteLine;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.global.messaging.OutboxRepository;
@@ -174,6 +176,35 @@ public abstract class OrderExpiryPersistenceContract {
         assertThat(row.getPublishedAt()).isNull();
         assertThat(jdbc.queryForObject("select changed_by_type from orders.order_status_history where order_id = ? and to_status = 'EXPIRED'", String.class, id))
             .isEqualTo("SYSTEM");
+    }
+
+    @Test
+    @DisplayName("결제 대기 수량 합은 회원 · 상품별이고 결제 대기 주문만 센다 — 여러 결제 대기 주문을 더하고 결제 완료 · 다른 회원은 빼며, 요청한 상품만 본다 (#426)")
+    void pendingQuantitiesAreSummedPerMemberAndProduct() {
+        long member = IDS.incrementAndGet();
+        long other = IDS.incrementAndGet();
+        // quoteLine 의 상품 아이디는 SKU + 7000 이다
+        placeOrder(member, OrderStatus.PENDING_PAYMENT, quoteLine(101, 1000, 2), quoteLine(102, 1000, 1));
+        placeOrder(member, OrderStatus.PENDING_PAYMENT, quoteLine(101, 1000, 3), quoteLine(103, 1000, 7));
+        placeOrder(member, OrderStatus.PAID, quoteLine(101, 1000, 9));
+        placeOrder(other, OrderStatus.PENDING_PAYMENT, quoteLine(101, 1000, 4));
+
+        var sums = tx().execute(s -> orders.sumPendingQuantitiesByProduct(member, List.of(7101L, 7102L, 7999L)));
+        assertThat(sums).extracting(r -> r.productId(), r -> r.quantity())
+            .containsExactlyInAnyOrder(tuple(7101L, 5L), tuple(7102L, 1L));
+        List<PendingProductQuantityQueryResult> none = tx().execute(s -> orders.sumPendingQuantitiesByProduct(member, List.of()));
+        assertThat(none).isEmpty();
+    }
+
+    private void placeOrder(long memberId, OrderStatus status, OrderQuoteLine... lines) {
+        long id = IDS.incrementAndGet();
+        var order = Order.place(id, memberId, domesticQuote(lines), IDS::incrementAndGet, address("KR"), IDS.incrementAndGet(), NOW.plusSeconds(600));
+        tx().executeWithoutResult(s -> {
+            orders.insert(order, OrderStatusHistory.created(IDS.incrementAndGet(), order));
+            if (status != OrderStatus.PENDING_PAYMENT) {
+                jdbc.update("update orders.orders set status = ?, version = version + 1 where id = ?", status.name(), id);
+            }
+        });
     }
 
     @Test

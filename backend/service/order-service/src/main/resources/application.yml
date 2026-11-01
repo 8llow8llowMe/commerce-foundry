@@ -167,6 +167,10 @@ order:
     processing-lease: 30s
     max-active-requests-per-member: 5
     active-request-window: 30m
+  # 상품 수량 상한 (OrderQuantityLimitProperties, #426). 상품의 1회 주문 최대 수량이 비어 있으면 이 값을 쓴다(1–99) — 비어 있다고 무제한이면
+  # 시도 하나로 재고가 적은 상품을 전부 선점할 수 있다. 주문 생성은 회원의 결제 대기 주문에 담긴 수량도 더한다. 넘으면 409 ORDER_005
+  quantity-limit:
+    default-per-product: 10
   payment-expiry:
     sweep:
       enabled: true

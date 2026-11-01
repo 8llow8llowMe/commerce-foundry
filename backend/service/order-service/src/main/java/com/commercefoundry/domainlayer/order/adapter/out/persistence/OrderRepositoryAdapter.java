@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderSaveExce
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
@@ -21,6 +22,7 @@ import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import jakarta.persistence.PersistenceException;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -112,6 +114,14 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
         Map<Long, List<OrderItemCustomOptionEntity>> options = orderItemCustomOptionRepository.findAllByOrderIdOrderByOrderItemIdAscDisplayOrderAsc(entity.getId())
             .stream().collect(Collectors.groupingBy(OrderItemCustomOptionEntity::getOrderItemId));
         return orderMapper.toDomain(entity, address, items, options);
+    }
+
+    @Override
+    public List<PendingProductQuantityQueryResult> sumPendingQuantitiesByProduct(long memberId, Collection<Long> productIds) {
+        if (productIds.isEmpty()) {
+            return List.of();
+        }
+        return orderRepository.sumQuantityByProduct(memberId, OrderStatus.PENDING_PAYMENT, productIds);
     }
 
     /** 첫 배치와 다음 배치를 다른 쿼리로 부른다 — null 커서를 한 쿼리에 넘기지 않는다({@link OrderRepository} 주석). */

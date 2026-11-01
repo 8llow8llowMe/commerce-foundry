@@ -1,9 +1,11 @@
 package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,6 +29,9 @@ public interface OrderRepositoryPort {
 
     /** 주문 하나(회원 무관) — 시스템 전이(만료 스윕) 전용이다. 고객 · 어드민 조회에 쓰지 않는다. */
     Optional<Order> findById(long orderId);
+
+    /** 회원의 결제 대기 주문에 담긴 상품별 수량 합 (#426). 담긴 적 없는 상품은 결과에 없다. 호출한 쪽 트랜잭션에서 읽는다. */
+    List<PendingProductQuantityQueryResult> sumPendingQuantitiesByProduct(long memberId, Collection<Long> productIds);
 
     /**
      * 결제 기한이 지난({@code paymentDueAt <= now}) 결제 대기 주문을 {@code (paymentDueAt, orderId)} 오름차순으로 {@code limit} 건까지 읽는다.

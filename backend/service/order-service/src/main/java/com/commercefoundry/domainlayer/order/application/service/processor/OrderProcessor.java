@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderSaveExce
 import com.commercefoundry.domainlayer.order.application.model.StockReservation;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRequestRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderQuote;
 import com.commercefoundry.domainlayer.order.domain.model.OrderRequest;
@@ -15,6 +16,9 @@ import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.shared.commerce.Money;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
+import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -78,6 +82,16 @@ public class OrderProcessor {
             }
             throw new OrderException(OrderErrorCode.ORDER_SAVE_FAILED);
         }
+    }
+
+    /**
+     * 회원의 결제 대기 주문에 담긴 상품별 수량 합 (#426) — 주문 생성의 상품 수량 상한에 더한다. 결제 대기 주문은 재고 선점을 쥐고 있다.
+     * 세고 나서 저장하므로 동시 생성만큼 넘칠 수 있다(느슨한 상한 — 회원별 활성 시도 상한 #231 이 폭을 묶는다).
+     */
+    @Transactional(readOnly = true, timeout = 5)
+    public Map<Long, Integer> pendingQuantitiesByProduct(long memberId, Collection<Long> productIds) {
+        return orderRepositoryPort.sumPendingQuantitiesByProduct(memberId, productIds).stream()
+            .collect(Collectors.toMap(PendingProductQuantityQueryResult::productId, result -> Math.toIntExact(result.quantity())));
     }
 
     /** 회원의 주문. 없거나 다른 회원의 주문이면 {@code NOT_FOUND_ORDER}(404). */

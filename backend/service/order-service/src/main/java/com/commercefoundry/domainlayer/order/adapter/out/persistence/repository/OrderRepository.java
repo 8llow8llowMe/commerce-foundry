@@ -2,8 +2,10 @@ package com.commercefoundry.domainlayer.order.adapter.out.persistence.repository
 
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.entity.OrderEntity;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Limit;
@@ -20,6 +22,18 @@ import org.springframework.data.jpa.repository.Query;
 public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
 
     Optional<OrderEntity> findByIdAndMemberId(Long id, Long memberId);
+
+    /**
+     * 회원의 {@code status} 주문에 담긴 상품별 수량 합 (#426). 주문은 {@code idx_orders_member_id_id}, 항목은 {@code uk_order_item_order_id_line_no} 의
+     * 선두 {@code order_id} 로 찾는다 — 결제 대기 주문은 회원당 #231 상한(5건) 안팎이라 읽는 행이 적다.
+     */
+    @Query("""
+        select new com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult(i.productId, sum(i.quantity))
+          from OrderEntity o, OrderItemEntity i
+         where i.orderId = o.id and o.memberId = :memberId and o.status = :status and i.productId in :productIds
+         group by i.productId
+        """)
+    List<PendingProductQuantityQueryResult> sumQuantityByProduct(Long memberId, OrderStatus status, Collection<Long> productIds);
 
     /** 만료 대상의 첫 배치. */
     @Query("""

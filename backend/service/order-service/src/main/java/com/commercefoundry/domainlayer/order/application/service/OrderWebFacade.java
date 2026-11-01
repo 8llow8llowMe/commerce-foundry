@@ -21,6 +21,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -54,7 +55,8 @@ public class OrderWebFacade implements OrderWebUseCase {
      * <ol>
      *   <li>기록을 본다 — 다른 본문이면 409, 완료면 저장된 주문을 다시 읽어 200(원격 호출 없음), lease 안의 처리 중이면 409.
      *       회원의 다른 활성 시도(선점 TTL 창 안 요청 기록, 자기 기록 제외) 수가 상한 이상이면 409 {@code ORDER_022}(원격 호출 없음, #231)</li>
-     *   <li>계산 — SKU 조회 → 항목 판정 → <b>배송비 견적</b> → 금액 → {@code expectedTotalAmount} 대조. 부작용이 없다 — 거절이면 아무것도 쓰지 않는다</li>
+     *   <li>계산 — SKU 조회 → 항목 판정(상품 수량 상한에 회원의 결제 대기 주문 수량을 더한다, #426) → <b>배송비 견적</b> → 금액 → {@code expectedTotalAmount} 대조.
+     *       부작용이 없다 — 거절이면 아무것도 쓰지 않는다</li>
      *   <li>기록을 잡는다 — 새 기록을 넣거나 lease 가 지난 기록을 같은 주문 아이디로 이어받는다. 충돌이면 다시 읽어 1 의 규칙으로 답한다</li>
      *   <li>활성 시도 수를 다시 센다(자기 기록 제외 — 동시 넘침 차단) → 재고 선점 (주문 아이디가 업무 키, 마지막 원격 호출)</li>
      *   <li>[저장] 기록 완료(버전 비교) + 주문 · 배송지 · 항목 · 입력 · 상태 이력</li>
@@ -80,7 +82,9 @@ public class OrderWebFacade implements OrderWebUseCase {
         Set<Long> skuIds = new LinkedHashSet<>();
         command.items().stream().map(OrderItemCommand::skuId).forEach(skuIds::add);
         Map<Long, CatalogSku> skus = catalogSkuProcessor.findSkus(skuIds);
-        OrderQuote quote = orderQuoteProcessor.quote(command.toQuoteCommand(), skus);
+        // 상품 수량 상한에 회원의 결제 대기 주문(선점을 쥔 주문)에 이미 담긴 수량을 더한다 (#426)
+        Set<Long> productIds = skus.values().stream().map(CatalogSku::productId).collect(Collectors.toSet());
+        OrderQuote quote = orderQuoteProcessor.quote(command.toQuoteCommand(), skus, orderProcessor.pendingQuantitiesByProduct(memberId, productIds));
         orderProcessor.requireExpectedTotal(quote, command.expectedTotalAmount());
 
         OrderRequestClaim claim = orderRequestProcessor.acquire(memberId, idempotencyKey, requestHash, checked);
