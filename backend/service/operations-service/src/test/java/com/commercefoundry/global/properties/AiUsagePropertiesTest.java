@@ -76,7 +76,7 @@ class AiUsagePropertiesTest {
     }
 
     @Test
-    @DisplayName("월 한도 · 알림 대상이 비어 있어도 기동한다 — 한도는 '설정 안 됨' 이다(AI 를 켤 때의 가드는 PR-B3)")
+    @DisplayName("월 한도 · 알림 대상이 비어 있어도 기동한다 — 한도는 '설정 안 됨' 이다(AI 를 켤 때의 가드는 AiMeteringReadinessConfig)")
     void emptyBudgetIsAllowed() {
         AiUsageProperties.Budget budget = new AiUsageProperties.Budget("", SEOUL, "0.8", null);
 
