@@ -14,7 +14,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class OrderStatusTransitionTest {
 
     private static final Map<OrderStatus, Set<OrderStatus>> EXPECTED = Map.ofEntries(
-        Map.entry(OrderStatus.PENDING_PAYMENT, EnumSet.of(OrderStatus.PAID, OrderStatus.EXPIRED)),
+        Map.entry(OrderStatus.PENDING_PAYMENT, EnumSet.of(OrderStatus.PAID, OrderStatus.EXPIRED, OrderStatus.CANCELED)),
         Map.entry(OrderStatus.EXPIRED, EnumSet.of(OrderStatus.PAID)),
         Map.entry(OrderStatus.PAID, EnumSet.of(OrderStatus.MAKING, OrderStatus.PREPARING, OrderStatus.CANCEL_REQUESTED)),
         Map.entry(OrderStatus.MAKING, EnumSet.of(OrderStatus.PREPARING, OrderStatus.CANCEL_REQUESTED)),
