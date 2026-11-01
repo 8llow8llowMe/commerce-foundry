@@ -27,7 +27,7 @@ public interface PaymentMapper {
             MoneyColumns.required(entity.getTotalAmount(), entity.getTotalCurrency()), entity.getOrderName(), entity.getStatus(),
             entity.getPaymentKey(), entity.getMethod(), entity.getEasyPayProvider(), entity.getPgStatus(), entity.getApprovalStartedAt(), entity.getApprovedAt(),
             entity.getFailureCode(), entity.getFailureMessage(), entity.getUnknownReason(), entity.isOrderSynced(), entity.getOrderSyncFailureCode(),
-            entity.getAbortReason(), entity.getVersion()
+            entity.getAbortReason(), entity.getApprovalIdempotencyKey(), entity.getVersion()
         );
     }
 

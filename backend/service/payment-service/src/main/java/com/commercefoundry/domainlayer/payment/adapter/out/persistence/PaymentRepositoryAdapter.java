@@ -25,6 +25,7 @@ public class PaymentRepositoryAdapter implements PaymentRepositoryPort {
 
     private static final String ACTIVE_ORDER_CONSTRAINT = "uk_payment_active_order_id";
     private static final String PAYMENT_KEY_CONSTRAINT = "uk_payment_payment_key";
+    private static final String APPROVAL_KEY_CONSTRAINT = "uk_payment_member_approval_key";
 
     private final PaymentRepository paymentRepository;
     private final PaymentMapper paymentMapper;
@@ -34,7 +35,7 @@ public class PaymentRepositoryAdapter implements PaymentRepositoryPort {
      * {@code UPDATE ... where version = ?} 가 충돌로 끝난다.
      *
      * <p>제약 위반은 제약 이름의 정확 일치로 가린다({@link ConstraintViolations} — PostgreSQL 서버 오류 필드 우선, 메시지 문구로 가리지 않는다).
-     * 활성 슬롯 · 결제키 유니크 키만 업무 충돌이고, 그 밖(check · NOT NULL · 다른 유니크 키)은 코드 오류라 제약 이름만 실어 다시 던진다 —
+     * 활성 슬롯 · 결제키 · 승인 멱등 키 유니크 키만 업무 충돌이고, 그 밖(check · NOT NULL · 다른 유니크 키)은 코드 오류라 제약 이름만 실어 다시 던진다 —
      * 어느 쪽이든 원인을 붙이지 않는다. 붙이면 DB 오류 메시지가 예외 메시지 · 스택으로 퍼진다(#173 2차 방어).
      */
     @Override
@@ -49,6 +50,9 @@ public class PaymentRepositoryAdapter implements PaymentRepositoryPort {
             }
             if (ConstraintViolations.violates(exception, PAYMENT_KEY_CONSTRAINT)) {
                 throw conflict(PaymentPersistenceConflictException.Kind.PAYMENT_KEY, payment);
+            }
+            if (ConstraintViolations.violates(exception, APPROVAL_KEY_CONSTRAINT)) {
+                throw conflict(PaymentPersistenceConflictException.Kind.APPROVAL_KEY, payment);
             }
             String constraintName = ConstraintViolations.constraintNameOf(exception);
             throw new DataIntegrityViolationException("결제 시도 저장이 제약을 위반했습니다. paymentId=%d, constraint=%s".formatted(payment.id(), constraintName));
@@ -68,6 +72,11 @@ public class PaymentRepositoryAdapter implements PaymentRepositoryPort {
     @Override
     public Optional<Payment> findActiveByOrderId(long orderId) {
         return paymentRepository.findByActiveOrderId(orderId).map(paymentMapper::toDomain);
+    }
+
+    @Override
+    public Optional<Payment> findByApprovalIdempotencyKey(long memberId, String approvalIdempotencyKey) {
+        return paymentRepository.findByMemberIdAndApprovalIdempotencyKey(memberId, approvalIdempotencyKey).map(paymentMapper::toDomain);
     }
 
     private static PaymentPersistenceConflictException conflict(PaymentPersistenceConflictException.Kind kind, Payment payment) {

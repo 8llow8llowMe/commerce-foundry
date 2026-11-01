@@ -73,6 +73,11 @@ resilience4j:
         ignore-exceptions:
           - feign.FeignException$FeignClientException
 
+# 결제 준비 (payment-guide.md "고객 API 계약"). 주문의 결제 기한까지 이보다 적게 남았으면 결제창을 열지 않는다(409 PAYMENT_004) — 토스 인증 뒤 승인 제한도 10분이다
+payment:
+  prepare:
+    min-remaining: 10m
+
 # 토스페이먼츠 (payment-guide.md §2). 키 형식 · 프로파일 조건은 TossPaymentsStartupGuard 가 기동 때 본다
 toss:
   # 시크릿 키 — Vault TOSS_SECRET_KEY (secret-management.md). local · dev 는 test_ 키, 그 밖은 live_ 키만 받는다. 기본값을 두지 않는다

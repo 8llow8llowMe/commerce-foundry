@@ -30,6 +30,8 @@ public class PaymentPersistenceConflictException extends RuntimeException {
         ACTIVE_SLOT,
         /** 결제키가 다른 결제 시도에 이미 쓰였다 ({@code uk_payment_payment_key}) — 다른 시도의 결제키로 승인을 시작하려 했다(변조 · 잘못된 짝) */
         PAYMENT_KEY,
+        /** 회원이 같은 고객 Idempotency-Key 로 다른 결제 시도의 승인을 이미 시작했다 ({@code uk_payment_member_approval_key}) — 키 재사용 */
+        APPROVAL_KEY,
         /** 읽은 뒤 다른 요청(동시 confirm · 재조회 · 웹훅)이 먼저 바꿨다 (낙관적 락 버전) */
         VERSION
     }

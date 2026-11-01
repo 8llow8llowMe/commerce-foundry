@@ -11,4 +11,7 @@ public interface PaymentRepository extends JpaRepository<PaymentEntity, Long> {
 
     /** {@code uk_payment_active_order_id} 로 찾는다 — 주문당 활성(FAILED · ABORTED 아닌) 결제 시도는 많아야 하나다. */
     Optional<PaymentEntity> findByActiveOrderId(Long activeOrderId);
+
+    /** {@code uk_payment_member_approval_key} 로 찾는다 — 회원이 같은 Idempotency-Key 로 승인을 시작한 결제 시도는 많아야 하나다. */
+    Optional<PaymentEntity> findByMemberIdAndApprovalIdempotencyKey(Long memberId, String approvalIdempotencyKey);
 }
