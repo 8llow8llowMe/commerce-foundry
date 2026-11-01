@@ -994,6 +994,9 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - 적용 대상 (#6 · #238): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade` — 1단계 · 2단계), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
 - 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` — `action=JOB_CANCEL target=job:<id>`, operations-service `JobAdminAuditLogAdapter`). 작업 목록 · 상세 조회는 남기지 않는다 —
   payload · 결과 · 오류에 개인정보 원문을 두지 않는 규칙(`architecture-guide.md` §10)이라 읽기가 개인정보 열람이 아니다. 결과 파일 링크 발급(#212 PR-E)은 남긴다.
+- 적용 대상 (#17): 어드민 주문 목록 · 상세 조회와 상태 변경(`OrderAdminFacade` — order-service `OrderAdminAuditLogAdapter`). 목록은 `action=ORDER_SEARCH target=orders?status=..&from=..&to=..&page=..&size=..`,
+  상세는 `action=ORDER_VIEW target=order:<id>`(마스킹했어도 받는 분 · 기본 주소 · 맞춤 입력값을 읽는 행위다), 상태 변경은 `action=ORDER_STATUS_CHANGE target=order:<id>` 이고
+  일괄 변경은 주문마다 한 줄이다(이미 그 상태라 그대로 둔 것도 `SUCCESS`). 바꾼 상태 · 사유는 감사 줄에 싣지 않는다 — 정본은 같은 트랜잭션의 주문 상태 이력이다.
 
 ### 11-5. 이중 방어 확인
 
