@@ -12,6 +12,7 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
    EXPIRED      CANCEL_REQUESTED ──▶ CANCELED         RETURN_REQUESTED ──▶ RETURNED
 
 EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
+PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해제는 order-canceled 이벤트)
 ```
 
 | 상태 | 뜻 | 누가 바꾸나 |
@@ -25,6 +26,7 @@ EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 | `DELIVERED` | 배송 완료 | 택배사 추적 / 어드민 |
 | `PURCHASE_CONFIRMED` | 구매 확정 (고객 확정 또는 N일 경과 자동) | 고객 / 스케줄러 |
 | `CANCEL_REQUESTED` → `CANCELED` | 출고 전 취소 (환불 포함) | 고객 요청 → 어드민/자동 승인 |
+| `PENDING_PAYMENT` → `CANCELED` | 결제 전 취소 (환불 없음, 선점 해제) | 고객 (#16) |
 | `RETURN_REQUESTED` → `RETURNED` | 배송 후 반품 (회수 후 환불) | 고객 요청 → 어드민 |
 
 ### 1-1. 전이 규칙 (필수)
@@ -34,7 +36,19 @@ EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 - 엔티티에 `setStatus()` 를 두지 않는다. 어드민의 "상태 변경" API 도 도메인 메서드를 거친다 — `Order.changeStatus`(표 검사) 앞에서 `AdminStatusChangePolicy` 가
   어드민이 직접 바꾸는 전이만 허용한다(결제 완료 → 제작 중 · 상품 준비중, 제작 중 → 상품 준비중, 배송 중 → 배송 완료). 결제 · 만료 · 출고(송장) · 취소 · 반품은
   각자의 흐름이 바꾸고, 어드민 화면에서 누르면 `ORDER_023` 이다 (#17, `api-design-guide.md` §2-16).
-- **고객 취소 가능 범위**: `PAID` · `MAKING`(제작 착수 전 정책은 스토어 설정) · `PREPARING`. `SHIPPING` 부터는 반품 경로다.
+- **고객 취소 가능 범위**: 결제 전 `PENDING_PAYMENT`(바로 `CANCELED`, #16 PR-1) · 결제 뒤 `PAID` · `MAKING`(제작 착수 전 정책은 스토어 설정) · `PREPARING`
+  (`CANCEL_REQUESTED` — 환불 · 재고 복원과 함께, #16 PR-2). `SHIPPING` 부터는 반품 경로다. 만료(`EXPIRED`)는 취소할 것이 없어 409 `ORDER_020` 이다.
+- **결제 전 취소** (`Order#cancelBeforePayment`): 상태 · `CUSTOMER` 이력(사유 = 취소 사유 코드) · `order-canceled` outbox 를 한 트랜잭션으로 쓴다(§3-5).
+  이미 취소됐으면 아무것도 쓰지 않고 성공이다. 읽은 뒤 결제 완료 · 만료가 먼저 커밋하면 `@Version` 비교로 롤백하고, 다시 읽어 취소 완료가 아니면 409 `ORDER_020` 이다.
+  **남는 경합**: payment-service 가 승인 직전 주문을 다시 확인한 뒤(`payment-guide.md` §6) 고객이 취소하면 PG 승인이 취소된 주문에 대해 끝날 수 있다 —
+  PG 타임아웃으로 결제가 `UNKNOWN` · `IN_PROGRESS` 로 남은 채(주문은 결제 대기) 주문 내역에서 취소해도 같다 — 창이 분 단위다. 결제 → 주문 반영(#308)이
+  `CANCELED` 주문의 결제 완료를 받으면 확정 · 재선점 없이 거절하고 전액 취소해야 한다(재선점은 `EXPIRED` 만, §3-4). 확정 뒤 `markPaid` 가 `CANCELED` 에 지면
+  결제 후 복원(`stock-restorations`)으로 재고를 되돌린다 — product 는 확정된 선점의 해제 이벤트를 무시한다(§3-5).
+- 결제 기한이 지났지만 만료 스윕 전인 결제 대기 주문도 고객이 취소할 수 있다 — `CANCELED` · 고객 사유로 남고, 이미 풀린 선점의 해제는 product 가 그대로 둔다(§3-5).
+- 결제 전 취소는 #231 활성 시도 수를 돌려주지 않는다(창이 지나야 풀린다 — 취소 · 재주문 반복을 막는다). #426 결제 대기 수량 합은 취소 커밋과 함께 빠지지만,
+  product 의 실제 선점 해제는 이벤트(비동기)라 그 사이 다시 주문하면 잠깐 재고 부족(`ORDER_016`)일 수 있다.
+- 어드민의 결제 전 취소(#17 PR-2)도 `Order#cancelBeforePayment` 와 같은 트랜잭션의 `order-canceled` 를 쓴다 — 전이 표만 보는 일반 상태 변경으로 `CANCELED` 를
+  만들지 않는다(선점이 TTL 까지 묶인다).
 - 맞춤 제작 상품은 **제작 착수 후 단순 변심 취소 불가**가 일반적이다 — 정책 문구와 함께 스토어 설정으로 둔다.
 - 상태 변경 이력은 `order_status_history` 에 남긴다 (언제, 누가, 이전 → 이후, 사유). 어드민이 바꾼 것은 관리자 ID 를 남긴다.
 
@@ -333,7 +347,7 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
 |------|------|
 | `POST /internal/v1/stock-reservations` | 선점 — 요청 `{ orderId, items: [{ skuId, quantity }] }` (항목 1~100개, 수량 1~10000) |
 | `POST /internal/v1/stock-reservations/{reservationId}/confirmation` | 확정 (결제 완료) |
-| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (주문 생성 실패 보상. 만료는 `order-expired` 이벤트(#96, §3-5). 결제 전 취소는 `order-canceled` 발행 전까지 이 API) |
+| `POST /internal/v1/stock-reservations/{reservationId}/release` | 해제 (주문 생성 실패 보상. 만료는 `order-expired` 이벤트(#96, §3-5), 결제 전 취소는 `order-canceled` 이벤트(#16, §3-5)라 order-service 는 부르지 않는다) |
 | `POST /internal/v1/stock-restorations` | 결제 후 복원 (결제 후 취소 · 반품 입고, #85) — 아래 "결제 후 복원" |
 
 선점 · 확정 · 해제 응답은 같은 모양이고 신규 · 기존 모두 200 이다 —
@@ -477,9 +491,9 @@ RESERVED ──확정──▶ CONFIRMED
 - **확정 · 해제 · 복원은 `reservationId` 로 대상 선점을 식별한다** — 서비스 토큰(`SERVICE_order-service`)을 가진 호출자를 신뢰한다는 전제다. order-service 는 자기 주문의
   `reservationId` 만 저장 · 사용한다.
 - **주문 만료 · 결제 전 취소의 해제는 이벤트다** (§3-5) — #96이 주문 만료 전이와 같은 트랜잭션으로 `order-expired`를 outbox에 넣는다.
-  **`order-canceled` 는 아직 생산자가 없다** — 주문 전이 표(§1)에 결제 전 취소(`PENDING_PAYMENT → CANCELED`)가 없어서다. 고객 취소는 결제 뒤(PAID · MAKING · PREPARING)만 되고
-  그 재고는 선점 해제가 아니라 결제 후 복원(§3-4)이다. 결제 전 취소 전이를 더하는 이슈(#16 고객 · #17 어드민)는 전이와 **같은 트랜잭션으로** `order-canceled` 를
-  `OrderEventPort` 로 outbox 에 넣는다(payload 는 §3-5 와 같고 `reason` 은 취소 사유 코드). 컨슈머 · 토픽은 이미 준비돼 있다.
+  `order-canceled` 는 #16 의 결제 전 고객 취소(`PENDING_PAYMENT → CANCELED`, §1-1)가 전이와 **같은 트랜잭션으로** `OrderEventPort` 를 거쳐 outbox 에 넣는다
+  (payload 는 §3-5 와 같고 `reason` 은 취소 사유 코드). 결제 뒤 취소(PAID · MAKING · PREPARING)의 재고는 선점 해제가 아니라 결제 후 복원(§3-4)이라 이 이벤트 대상이 아니다.
+  어드민이 결제 전 취소를 더하면(#17 PR-2) 같은 이벤트를 같은 방식으로 낸다.
   C3 주문 생성 실패는 공유 선점의 보상 해제를 호출하지 않는다. 같은 키·주문 ID로 복구하며 재시도가 없으면 product의 선점 만료 스윕이 푼다. internal 해제(`/release`) API 자체는 product-service 계약으로 유지한다.
 - **오류 메시지를 고객 응답에 그대로 넘기지 않는다.** `PRODUCT_021` · `PRODUCT_022` · `PRODUCT_028` 메시지에는 SKU 아이디 목록이 실린다 — order-service 는 자기 오류 코드
   (예: `ORDER_*`)와 고객용 문구로 바꾸고, 필요한 SKU 정보는 자기 주문 항목에서 골라 보여 준다.
@@ -496,6 +510,7 @@ order-service 가 낸 주문 만료 · 결제 전 취소를 product-service 컨�
 | 봉투 | `eventType` = `order-expired` / `order-canceled`, `aggregateType` = `order`, `aggregateId` = 주문 아이디, `schemaVersion` = 1, `producer` = `order`. 발생 시각은 봉투 `occurredAt` |
 | 컨슈머 그룹 | `<ns>.product.order-stock-release` (두 토픽을 한 그룹이 받는다) |
 | 해제 사유 | `order-expired` → `ORDER_EXPIRED`, `order-canceled` → `ORDER_CANCELED` |
+| `reason` 코드 | `order-expired` → `PAYMENT_TIMEOUT`, `order-canceled` → 고객 취소 사유 `CHANGE_OF_MIND` · `ORDER_MISTAKE` · `PAYMENT_ISSUE` · `OTHER` (`OrderCancelReason`, 더하기만 한다) |
 
 payload (두 이벤트 모두 같은 모양 — **이 JSON 이 계약 정본이다**. product-service 리스너 테스트가 이 블록을 읽어 역직렬화한다):
 
