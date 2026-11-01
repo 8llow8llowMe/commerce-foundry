@@ -78,7 +78,7 @@ public record ProductCreateRequest(
     @Valid
     MoneyRequest listPrice,
 
-    @Schema(description = "1회 주문 최대 수량 (1~999). 없으면 제한 없음", example = "5", nullable = true)
+    @Schema(description = "1회 주문 최대 수량 (1~999). 없으면 주문 엔진 기본값(10, order-flow-guide.md §2-3)이 걸린다 — 재고가 적은 상품은 더 작게 둔다", example = "5", nullable = true)
     @Min(value = 1, message = ProductValidationMessage.PRODUCT_MAX_QUANTITY_PER_ORDER_RANGE)
     @Max(value = 999, message = ProductValidationMessage.PRODUCT_MAX_QUANTITY_PER_ORDER_RANGE)
     Integer maxQuantityPerOrder,
