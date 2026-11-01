@@ -350,6 +350,42 @@ class ProductAdminControllerTest {
         };
     }
 
+    @Test
+    @DisplayName("이미지 업로드 발급 — 201, 발급한 어드민은 토큰의 memberId, 응답에 업로드 키 · 주소 · 헤더 · 만료")
+    void issueImageUpload() {
+        given(productAdminUseCase.issueImageUpload(TestTokens.MEMBER_ID, "image/jpeg", 524_288L)).willReturn(
+            com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse.builder()
+                .uploadKey("uploads/1/k.jpg").uploadUrl("https://storage.example.com/b/uploads/1/k.jpg?sig").method("PUT")
+                .headers(java.util.Map.of("Content-Type", "image/jpeg")).expiresAt(Instant.parse("2026-11-01T03:05:00Z")).build());
+
+        MvcTestResult result = mvc.post().uri(PATH + "/image-uploads").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"contentType\": \"image/jpeg\", \"contentLength\": 524288}")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+
+        assertThat(result).hasStatus(HttpStatus.CREATED);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.uploadKey").isEqualTo("uploads/1/k.jpg");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.method").isEqualTo("PUT");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.headers.Content-Type").isEqualTo("image/jpeg");
+    }
+
+    @Test
+    @DisplayName("이미지 업로드 발급 — CUSTOMER 403 · 토큰 없음 401, 스토리지가 꺼져 있으면 503 · PRODUCT_036 봉투")
+    void issueImageUploadErrors() {
+        String body = "{\"contentType\": \"image/png\", \"contentLength\": 10}";
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH + "/image-uploads").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH + "/image-uploads").contentType(MediaType.APPLICATION_JSON).content(body)
+            .exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        verifyNoInteractions(productAdminUseCase);
+
+        given(productAdminUseCase.issueImageUpload(TestTokens.MEMBER_ID, "image/png", 10L)).willThrow(new com.commercefoundry.domainlayer.product.application.exception.ProductException(
+            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.IMAGE_UPLOAD_DISABLED));
+        MvcTestResult result = mvc.post().uri(PATH + "/image-uploads").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatus(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_036");
+    }
+
     private MvcTestResult adminPost(String body) {
         return mvc.post().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(body).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
     }

@@ -8,6 +8,7 @@ import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
 import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import com.commercefoundry.storage.config.StorageConfigurer;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,6 +21,7 @@ import org.springframework.context.annotation.Import;
     QuerydslConfigurer.class,
     ResourceServerSecurityConfigurer.class,
     SnowflakeConfigurer.class,
+    StorageConfigurer.class,
     SwaggerSecurityConfigurer.class
 })
 public class ProductServiceBeansConfig {

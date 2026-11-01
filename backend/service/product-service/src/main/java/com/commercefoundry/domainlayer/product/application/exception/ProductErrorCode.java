@@ -67,6 +67,20 @@ public enum ProductErrorCode {
      */
     STOCK_RESERVATION_LOCK_TIMEOUT("PRODUCT_031", "같은 선점을 처리 중입니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
+    /**
+     * 첨부할 업로드가 없다 — 키 형식이 틀렸거나, 이 어드민이 발급받은 키가 아니거나, 올리지 않았거나 만료돼 지워졌다(#9 F). 어느 경우인지 알리지 않는다 —
+     * 남의 키가 있는지 떠보지 못하게.
+     */
+    IMAGE_UPLOAD_NOT_FOUND("PRODUCT_032", "업로드한 이미지를 찾을 수 없습니다. 이미지를 다시 올려 주세요.", HttpStatus.BAD_REQUEST),
+    /** JPEG · PNG · WebP 가 아니다 — 업로드 발급의 Content-Type, 또는 첨부 때 파일 앞부분(magic bytes)이 선언과 다르다. */
+    IMAGE_FORMAT_NOT_ALLOWED("PRODUCT_033", "이미지는 JPEG · PNG · WebP 만 올릴 수 있습니다.", HttpStatus.BAD_REQUEST),
+    /** 이미지가 비었거나 10MB 를 넘는다 — 업로드 발급의 크기 선언, 또는 첨부 때 실제 크기. */
+    IMAGE_SIZE_NOT_ALLOWED("PRODUCT_034", "이미지는 10MB 이하로 올려 주세요.", HttpStatus.BAD_REQUEST),
+    /** 스토리지가 응답하지 않거나 거절했다(연결 · 권한 · 설정). 서버 쪽 문제라 503 이다. 원인은 로그에만 남기고 메시지에 싣지 않는다. */
+    IMAGE_STORAGE_UNAVAILABLE("PRODUCT_035", "이미지 저장소에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /** 스토리지 설정이 꺼져 있다({@code storage.enabled=false}, 닫힌 기본값). 이미지 없는 상품 등록은 된다. */
+    IMAGE_UPLOAD_DISABLED("PRODUCT_036", "이미지 업로드가 아직 설정되지 않았습니다. 관리자에게 문의해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+
     /** 상위 아래에 두면 그 카테고리(하위 포함)의 깊이가 3(대·중·소)을 넘는다. 하위를 거느린 카테고리를 옮기면 하위도 같이 내려간다. */
     CATEGORY_DEPTH_EXCEEDED("PRODUCT_040", "카테고리는 3단계까지만 만들 수 있습니다.", HttpStatus.BAD_REQUEST),
     /** 자기 자신이나 자기 하위를 상위로 지정했다. */

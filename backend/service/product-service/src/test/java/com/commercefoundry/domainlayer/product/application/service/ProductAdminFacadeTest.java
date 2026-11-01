@@ -73,7 +73,8 @@ class ProductAdminFacadeTest {
     @BeforeEach
     void setUp() {
         facade = new ProductAdminFacade(categoryProcessor, productAdminQueryProcessor, new ProductAdminPresenter(), productAdminDetailProcessor,
-            productWriteProcessor, new ProductDescriptionSanitizer());
+            productWriteProcessor, new ProductDescriptionSanitizer(), org.mockito.Mockito.mock(
+            com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class));
     }
 
     @Test

@@ -10,6 +10,8 @@ dependencies {
 
     // 어드민이 쓴 상품 상세 HTML 을 저장 전에 허용 목록으로 정제한다 (#9 E1 · D7, FE sanitize-html.ts 와 같은 목록)
     implementation "org.jsoup:jsoup:${rootProject.ext.jsoupVersion}"
+    // 상품 이미지 업로드 발급 · 첨부 (#9 F) — S3 호환 오브젝트 스토리지(MinIO). 기본 꺼짐(storage.enabled), 꺼져 있으면 업로드만 503
+    implementation project(':core:storage-core')
 
     // security-core 는 서블릿 · Boot 보안 자동설정을 compileOnly 로만 둔다 — 서블릿 서비스가 직접 선언한다 (security-guide.md §5-3)
     implementation 'org.springframework.boot:spring-boot-starter-security'

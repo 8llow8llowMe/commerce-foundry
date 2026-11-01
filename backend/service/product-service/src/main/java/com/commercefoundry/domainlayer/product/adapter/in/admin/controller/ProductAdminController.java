@@ -4,8 +4,10 @@ import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCreateRequest;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductImageUploadRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.model.ProductAdminSortType;
@@ -44,7 +46,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
  * 판매 상태 · 판매 가능 상태 조건은 domain enum 이 아니라 application/model 의 입력 enum 으로 받는다 — 컨트롤러는 domain 을 쓰지 않는다 (H1).
  */
-@Tag(name = "[어드민] 상품 관리", description = "숨김 포함 상품 목록 · 상세 · 등록")
+@Tag(name = "[어드민] 상품 관리", description = "숨김 포함 상품 목록 · 상세 · 등록 · 이미지 업로드 발급")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -72,6 +74,24 @@ public class ProductAdminController {
         @RequestBody @Valid ProductCreateRequest request
     ) {
         return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(productAdminUseCase.create(request.toCommand(member.memberId()))));
+    }
+
+    @Operation(
+        summary = "상품 이미지 업로드 발급",
+        description = "브라우저가 스토리지에 직접 올릴 임시 자리(서명 주소)를 준다(201). 받은 uploadUrl 에 method · headers 그대로 파일을 보내고, "
+            + "상품 저장 때 uploadKey 를 넣는다. 키는 발급한 어드민만 쓸 수 있고, 저장하지 않은 업로드는 하루 뒤 지워진다. "
+            + "형식은 JPEG · PNG · WebP(아니면 400 PRODUCT_033), 크기는 1B~10MB(아니면 400 PRODUCT_034)다. "
+            + "스토리지 장애는 503(PRODUCT_035), 스토리지 설정이 꺼져 있으면 503(PRODUCT_036)이다 — 이미지 없는 등록은 된다."
+    )
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/image-uploads")
+    public ResponseEntity<Response<ProductImageUploadAdminResponse>> issueImageUpload(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @RequestBody ProductImageUploadRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(
+            productAdminUseCase.issueImageUpload(member.memberId(), request.contentType(), request.contentLength())
+        ));
     }
 
     @Operation(summary = "상품 상세 조회 (편집용)", description = "숨김 상품과 은퇴 옵션 · 판매 종료 SKU 를 포함한 저장 설정이다. 삭제 상품은 404 다. 재고 · 원가는 별도 API 로 조회한다.")

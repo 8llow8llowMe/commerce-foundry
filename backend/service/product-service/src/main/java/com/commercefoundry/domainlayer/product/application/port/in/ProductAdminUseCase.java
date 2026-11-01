@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.product.application.port.in;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
 import com.commercefoundry.persistence.dto.PageResponse;
@@ -27,4 +28,12 @@ public interface ProductAdminUseCase {
      * 카테고리 쓰기와 겹쳐 잠금을 얻지 못하면 {@code PRODUCT_045}(409)다.
      */
     ProductCreateAdminResponse create(ProductCreateCommand command);
+
+    /**
+     * 상품 이미지 업로드 자리 발급 (#9 F) — 발급한 어드민에게 묶인 임시 키와 서명 주소. 형식은 {@code PRODUCT_033}, 크기는 {@code 034}(400),
+     * 스토리지 장애는 {@code 035} · 꺼짐은 {@code 036}(503)이다.
+     *
+     * @param memberId access 토큰의 memberId
+     */
+    ProductImageUploadAdminResponse issueImageUpload(long memberId, String contentType, Long contentLength);
 }
