@@ -80,6 +80,11 @@ public enum OrderErrorCode {
     ORDER_STATUS_TRANSITION_INVALID("ORDER_020", "현재 주문 상태(%s)에서는 할 수 없는 요청입니다.", HttpStatus.CONFLICT),
     /** DB 가 주문 저장을 거절했다(제약 위반 등 버그 · 데이터 이상). 원인 메시지(제약 위반 행 값)는 싣지 않는다 — 개인정보가 로그 · 응답에 남지 않게. */
     ORDER_SAVE_FAILED("ORDER_021", "주문을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
+    /**
+     * 회원이 선점 TTL 창 안에 새 키로 시작한 주문 생성 시도가 상한을 넘었다 (#231, {@code order.creation.max-active-requests-per-member}).
+     * 시도마다 재고 선점이 생겨 계정 하나로 재고를 묶어 두는 것을 막는다. 원격 호출 전에 거절한다. 같은 키 재시도는 세지 않는다.
+     */
+    ACTIVE_ORDER_REQUESTS_EXCEEDED("ORDER_022", "주문 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

@@ -33,6 +33,27 @@ public class OrderRequestProcessor {
         return repository.findByMemberIdAndIdempotencyKey(memberId, key).map(request -> decide(request, hash)).orElseGet(OrderRequestClaim::none);
     }
 
+    /**
+     * 회원의 활성 시도 수를 본다 (#231) — 창(선점 TTL) 안에 시작한 <b>다른</b> 요청 기록이 상한 이상이면 거절한다.
+     * 주문이 아니라 요청 기록으로 센다 — 저장 실패로 주문 없이 남은 선점까지 들어간다.
+     *
+     * <ul>
+     *   <li>자기 기록은 빼고 센다 — 창 안의 같은 키 재시도(인수)는 이미 센 시도라 막히지 않고, 창 밖 휴면 기록을 이어받으면 새 시도처럼 센다</li>
+     *   <li>퍼사드는 원격 호출 전(빠른 거절)과 기록을 잡은 뒤 · 선점 전(확정 판정) 두 번 부른다. 잡은 뒤에 세면 동시에 넣은 기록끼리
+     *       늦게 센 쪽이 먼저 넣은 쪽을 반드시 보므로(각 기록은 짧은 트랜잭션으로 먼저 커밋된다) 상한을 넘겨 선점하지 않는다</li>
+     * </ul>
+     *
+     * @param own 이 시도의 기록 — 아직 없으면(새 키) null
+     */
+    public void requireCapacity(long memberId, OrderRequest own) {
+        OrderProperties.Creation creation = properties.creation();
+        long active = repository.countCreatedSince(memberId, clock.instant().minus(creation.activeRequestWindow()), own == null ? 0 : own.id());
+        if (active >= creation.maxActiveRequestsPerMember()) {
+            log.info("active order requests exceeded. memberId={}, active={}", memberId, active);
+            throw new OrderException(OrderErrorCode.ACTIVE_ORDER_REQUESTS_EXCEEDED);
+        }
+    }
+
     public OrderRequestClaim acquire(long memberId, UUID key, String hash, OrderRequestClaim checked) {
         validate(memberId, key, hash);
         if (checked == null || (checked.outcome() != Outcome.NONE && checked.outcome() != Outcome.TAKE_OVER)) {

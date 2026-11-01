@@ -45,6 +45,7 @@ public class OrderWebController {
         description = "CUSTOMER가 서버 계산 금액으로 재고를 선점하고 결제 대기(PENDING_PAYMENT) 주문을 만든다 — 201. paymentDueAt은 미결제 만료 판정 기준이며 만료 스케줄러는 후속이다. "
             + "Idempotency-Key(UUID) 헤더가 필수다 — 결제 페이지 세션 동안 같은 키를 쓴다. 같은 키 · 같은 본문의 재요청은 같은 주문을 지금 상태로 200 으로 돌려주고, "
             + "다른 본문이면 409(ORDER_019), 처음 요청이 처리 중이면 409(ORDER_018)다. 5xx · 409(ORDER_018) 는 같은 키로 다시 보내고, 그 밖의 4xx 뒤에는 새 키를 쓴다. "
+            + "선점 TTL 창 안의 다른 주문 생성 시도가 회원 상한 이상이면 409(ORDER_022) — 잠시 뒤 새 키로 다시 누른다. "
             + "미리보기의 오류에 더해 금액 변경 409(ORDER_010 — expectedTotalAmount), 재고 부족 409(ORDER_016), 주문 접수 실패 500(ORDER_017 · ORDER_021). "
             + "헤더 없음 400(ORDER_199) · UUID 아님 400(ORDER_198)."
     )

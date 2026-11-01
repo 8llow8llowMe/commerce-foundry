@@ -58,8 +58,23 @@ public abstract class OrderRequestPersistenceContract {
     }
 
     protected OrderRequestProcessor processor(Instant now) {
-        return new OrderRequestProcessor(requests, new SnowflakeIdGenerator(1, 3), new OrderProperties(new OrderProperties.Creation(LEASE)),
+        return new OrderRequestProcessor(requests, new SnowflakeIdGenerator(1, 3), new OrderProperties(new OrderProperties.Creation(LEASE, 5, Duration.ofMinutes(30))),
             Clock.fixed(now, ZoneOffset.UTC));
+    }
+
+    @Test
+    void activeRequestCountIsPerMemberBoundedBySinceAndExcludesOwnRecord() {
+        long member = id();
+        Instant before = Instant.now().minusSeconds(60);
+        var own = saved(UUID.randomUUID(), member);
+        saved(UUID.randomUUID(), member);
+        saved(UUID.randomUUID(), id());
+
+        // created_at 은 감사(시스템 시각)로 채워진다 — 상태와 무관하게 회원 · 시각 범위로만 센다
+        assertThat(requests.countCreatedSince(member, before, 0)).isEqualTo(2);
+        assertThat(requests.countCreatedSince(member, before, own.id())).isEqualTo(1);
+        assertThat(requests.countCreatedSince(member, Instant.now().plusSeconds(60), 0)).isZero();
+        assertThat(requests.countCreatedSince(id(), before, 0)).isZero();
     }
 
     @Test
