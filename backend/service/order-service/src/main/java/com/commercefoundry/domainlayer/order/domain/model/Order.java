@@ -90,11 +90,13 @@ public record Order(
     /**
      * 표({@link OrderStatus})에 있는 전이로 상태를 바꾼다 — 누가 어떤 전이를 해도 되는지는 부르는 쪽(어드민 정책 · 결제 · 클레임)이 먼저 거른다.
      *
-     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문
+     * 결제 전 취소(결제 대기 → 취소 완료)는 이 메서드로 하지 않는다 — 재고 해제 이벤트가 따라가야 해 {@link #cancelBeforePayment()} 를 쓴다(#16).
+     *
+     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문 · 결제 전 취소
      */
     public Order changeStatus(OrderStatus next) {
         Objects.requireNonNull(next, "next");
-        if (isNew()) {
+        if (isNew() || (status == OrderStatus.PENDING_PAYMENT && next == OrderStatus.CANCELED)) {
             throw new OrderStatusTransitionException(status, next);
         }
         return transitionTo(next);
