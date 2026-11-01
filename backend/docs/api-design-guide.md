@@ -75,7 +75,7 @@ AI 상품 초안(#359)은 상품이 아직 없는 자원이라 `/api/v1/admin/pr
 - 운영자 온보딩 사실(단건): delivery-service `GET /internal/v1/onboarding-facts/shipping-policy?memberId=` (#357). 허용 호출자는 operations-service.
   운영자 한 명의 사실이라 `ids` 벌크가 아니다. `memberId` 는 양수(`DELIVERY_139`), 숫자가 아니면 `DELIVERY_198`, 없으면 `DELIVERY_199` 다. 계약은 아래 "운영자 온보딩 계약 (#357)".
 - 운영자 온보딩 상품 사실(단건): product-service `GET /internal/v1/onboarding-facts/product-registration?memberId=` (#402). 허용 호출자는 operations-service.
-  운영자 한 명의 사실이라 `ids` 벌크가 아니다. `memberId` 는 양수(`PRODUCT_140`), 숫자가 아니면 `PRODUCT_198`, 없으면 `PRODUCT_199` 다. 계약은 아래 "운영자 온보딩 계약 (#357)".
+  운영자 한 명의 사실이라 `ids` 벌크가 아니다. `memberId` 는 양수(`PRODUCT_039`), 숫자가 아니면 `PRODUCT_198`, 없으면 `PRODUCT_199` 다. 계약은 아래 "운영자 온보딩 계약 (#357)".
 - 결제용 주문 요약(단건): order-service `GET /internal/v1/orders/{orderId}/payment-summary?memberId=` (#14). 허용 호출자는 payment-service.
   `orderId` · `memberId` 는 양수(`ORDER_141` · `ORDER_142`), 숫자가 아니면 `ORDER_198`, `memberId` 가 없으면 `ORDER_199` 다. 계약은 `order-flow-guide.md` §2-5.
 - 시점 원가(벌크): product-service `POST /internal/v1/sku-costs/query` (#361 PR-B). 허용 호출자는 operations-service(공헌이익 집계 #362).
@@ -1263,7 +1263,7 @@ product-service `GET /internal/v1/onboarding-facts/product-registration?memberId
 품절·숨김·판매 종료·soft delete 상품만 있으면 false 다. `memberFirstRegisteredAt` 은 삭제되지 않은 `product` 중
 `created_by_member_id = memberId` 인 행의 가장 이른 `created_at`(UTC ISO)이다. 상품의 현재 노출·판매·재고 상태는 본인 등록 기록을 지우지 않는다.
 이관·시드 상품의 null 등록자와 다른 운영자의 상품은 본인 완료 증거가 아니다. 상품 등록 API(#9)는 아직 없으므로 해당 API가 등록자를 채우는지 검증하는 일은 #9 구현 의존이다.
-`memberId` 가 양수가 아니면 400 `PRODUCT_140`, 숫자가 아니면 `PRODUCT_198`, 누락되면 `PRODUCT_199` 다.
+`memberId` 가 양수가 아니면 400 `PRODUCT_039`, 숫자가 아니면 `PRODUCT_198`, 누락되면 `PRODUCT_199` 다.
 
 ### 업무 완료 tasks (#357 PR-B2, #402 PR-C)
 
