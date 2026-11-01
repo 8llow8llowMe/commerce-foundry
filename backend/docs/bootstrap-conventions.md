@@ -344,7 +344,8 @@ storage:
 
 `*BeansConfig` 가 `AiConfigurer` 를, `*PropertiesConfig` 가 `AiPropertiesConfig` 를 `@Import` 하고 `build.gradle` 에
 `implementation project(':core:ai-core')` 를 더한다. 서비스가 받는 것은 `AiClient` 빈 하나다 — 공식 SDK(`anthropic-java`)는 ai-core 의
-`implementation` 이라 서비스 코드에서 보이지 않는다. 쓰는 곳은 operations-service 의 작업 핸들러(#212) 예정이다 —
+`implementation` 이라 서비스 코드에서 보이지 않는다. **첫 사용처는 operations-service 다**(#435 — 연결 · 계량 인터셉터 · 원장 정리 스케줄러, 아래 "operations 연결").
+기능은 operations 의 작업 핸들러(#212)가 부른다(첫 기능은 #359 상품 초안) —
 AI 호출을 한 서비스에 모아 키 · 사용량 원장 · 동시 상한이 한 곳에 있게 한다(별도 ai-service 를 두지 않는 근거는 #215 PR-A).
 **AI 호출은 operations 작업 핸들러로 모은다** — 원장 · 월 한도(계량 인터셉터, 아래 "계량")를 가진 곳이 operations 하나뿐이고, 켜진 서비스에 인터셉터가 없으면 기동이 멈춘다.
 
@@ -469,7 +470,36 @@ API 가 받지 않는 스키마(재귀 · 숫자 · 길이 제약 등)는 SDK �
   인터셉터는 **하나만** 둔다(둘 이상이면 기동 실패 — 앞선 `before` 의 예약을 뒤 `before` 실패 때 되돌리는 순서를 정하지 않으려고). `AiClients.create` 도 같은 규칙을 본다.
 - **`callerRef`** (`AiRequest.withCallerRef`) 는 원장 행을 작업과 잇는 키다. **내부 PK(jobId 등)만** 넣는다 — `소문자 접두어:토막`(토막 1~3개, 영문 · 숫자 · `_` · `-`, 전체 100자 이하, 예 `job:123` · `job:123:2`).
   **주문번호 · 연락처 · 이메일 · 이름은 넣지 않는다.** 원장 식별자라 로그 · `AiRequest.toString` 에 그대로 실린다. 형식이 틀리면 요청을 만들 때 `IllegalArgumentException` 이고 메시지에 값이 없다.
-- 원장 · 월 한도 · 단가 · 알림은 operations-service 의 다음 PR(#215 PR-B2 · B3)이다.
+- 원장 · 월 한도 · 단가는 operations-service 의 `aiusage` 컨텍스트다(#215 PR-B · #403). 연결은 아래 "operations 연결"(#435).
+
+**operations 연결 (#435).** operations-service 가 ai-core 를 쓰는 첫 서비스다 — `build.gradle` 의존 · `AiConfigurer`(`OperationsServiceBeansConfig`) ·
+`AiPropertiesConfig`(`OperationsServicePropertiesConfig`) · `application.yml` 의 `ai` 블록(`AI_ENABLED` 기본 꺼짐 · `AI_API_KEY`, 위 예시와 같은 타임아웃)이다.
+
+| 구성 | 위치 | 하는 일 |
+|------|------|---------|
+| 계량 인터셉터 | `domainlayer/aiusage/adapter/in/metering/AiUsageMeteringInterceptor` | ai-core `AiCallInterceptor` 의 유일한 구현. `before` → `AiUsageMeterUseCase.reserve`, `after` → `settle`(다섯 결과 모두) |
+| 원장 정리 스케줄러 | `domainlayer/aiusage/adapter/in/scheduler/AiUsageMaintenanceScheduler` | 정산이 오지 않은 PENDING 회수(`operations.ai.reservation-sweep.*`) · 보존 정리(`operations.ai.retention.*`) |
+| 켤 때 설정 가드 | `global/config/AiMeteringReadinessConfig` | `ai.enabled=true` 인데 월 한도(`AI_MONTHLY_BUDGET_USD`) · 단가(`operations.ai.pricing.models`)가 비거나 `stale-after` 가 최악 호출 시간 + 백오프 여유(1분) 이하이면 기동을 멈춘다 |
+
+- **인터셉터는 HTTP 가 아닌 진입 어댑터다** — 스케줄러 · 이벤트 리스너처럼 `adapter/in/<진입>` 에 두고 자기 컨텍스트의 UseCase 만 부른다(H10 · H7).
+  `metering` 은 고객 · 어드민 · internal · webhook 진입이 아니어서 H6 진입 간 규칙의 대상이 아니다.
+- **번역**: 한도 초과(`AiBudgetExceededException`) → `AiException(BUDGET_EXCEEDED)`, 예약 경합(`RESERVE_CONTENDED`) · 원장 장애 · 설정 누락 → `AiException(METERING_FAILED)`.
+  예외를 원인으로 잇지 않고, 로그에는 기능 이름 · 원장 호출 아이디 · 금액(micro-USD) · 오류 코드 · 예외 타입만 남긴다(메시지 없음 — SQL · 값이 실릴 수 있다).
+- **정산 실패는 삼킨다** — 타입만 WARN 으로 남기고 결과를 바꾸지 않는다. 놓친 예약은 회수 스케줄러가 `stale-after` 뒤 ABANDONED(예상치를 비용으로)로 닫는다.
+  정산은 인터럽트 플래그가 켜진 채 불릴 수 있다 — 어댑터는 플래그를 건드리지 않고, `AiUsageMeterFacade.settle` 이 트랜잭션 전후로 내렸다 되살린다.
+- **임계 알림**: 경고 · 한도 도달(`AiBudgetAlert`)은 지금 WARN 로그뿐이다. 어드민 알림(`operations.ai.budget.notify-member-ids`)과 지표는 후속이다.
+  한도 거절 자체는 ai-core 가 거절마다 `ai call rejected` WARN 을 남기고, 어댑터는 설정 실수(예상치 하나가 한도 초과)와 이 달 첫 거절에만 누계를 실은 WARN 을 더한다.
+- **`stale-after` 는 호출 하나의 최악 시간보다 길게** — (1 + `ai.max-retries`) × `ai.request-timeout` + `ai.acquire-timeout` + SDK 재시도 백오프(`retry-after` 포함).
+  짧으면 진행 중인 호출을 회수해, 늦게 온 정산이 반영되지 않는다(예상치가 비용으로 남는다). 백오프는 SDK 가 정해 상한을 계산하지 않고,
+  켤 때 `AiMeteringReadinessConfig` 가 앞의 세 항 + 1분보다 길지 않으면 기동을 멈춘다(기본 3 × 240s + 10s + 1m = 13분 10초 < 15분).
+- **단가**: Opus 5.5 는 캐시 읽기가 입력의 0.05×($0.20/MTok)로 다른 모델(보통 0.1×)과 다르다. 5분 캐시 쓰기 1.25× · 1시간 캐시 쓰기 2× — 원장 단가(`AiPrice`)는
+  5분 쓰기 칸만 있다. 출처는 Anthropic 공개 가격표(https://www.anthropic.com/pricing, 확인일 2026-11-01).
+- **스케줄러는 `ai.enabled=false` 여도 돈다** — 끄기 전에 남은 PENDING 이 한도를 쥐지 않게, 보존 기간은 켜고 끄는 것과 관계없이 지키게. 모든 인스턴스가 돈다(분산 락 없음 —
+  회수는 건마다 조건부 UPDATE, 삭제는 겹쳐도 한 번만 없어진다).
+- **단가표**: `operations.ai.pricing.models` 에 기본 모델(`claude-opus-5-5`) 단가가 있다(공개 가격표). 모델을 바꾸거나 `ai.features` 에 다른 모델을 두면 항목을 더하고 `version` 을 올린다 —
+  없는 모델은 항목별 최고 단가(`MAX_FALLBACK`)로 잡는다.
+- **테스트**: `AiUsageMeteringFlowTest` 가 ai-core `StubMessagesServer` 로 켠 컨텍스트에서 예약 → 정산 · 한도 초과(HTTP 없음) · 오류 · 타임아웃 · NOT_SENT 를 원장 행으로 본다.
+  `OperationsServiceAiProdStartupTest` 는 prod 프로파일 · `allow-unmetered` 없이 켜고 기동한다(test yml 을 `spring.config.import` 로 가져와 외부 의존만 끊는다).
 
 ## Reason
 

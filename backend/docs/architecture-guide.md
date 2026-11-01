@@ -39,7 +39,7 @@ backend/
 
 | 모듈 | 넣는 것 | 넣지 않는 것 |
 |------|---------|--------------|
-| `ai-core` | 도메인을 모르는 Claude 클라이언트(`AiClient`) · 개인정보 마스킹(`PiiMasker`) · 이미지 바이트(base64, URL 없음) · 동시 호출 상한 · 설정 · 기동 가드 · 계량 SPI(`metering.AiCallInterceptor` — 호출 앞뒤 예약 · 기록 자리). 공식 SDK 는 `implementation` 이라 서비스에 드러나지 않는다 | 프롬프트 문구 · 결과 해석 · 사용량 원장(엔티티) · 월 한도 정책 · 오류 번역 (쓰는 서비스 몫 — 원장 · 한도는 operations-service 가 계량 SPI 를 구현한다, #215 PR-B2 · B3) |
+| `ai-core` | 도메인을 모르는 Claude 클라이언트(`AiClient`) · 개인정보 마스킹(`PiiMasker`) · 이미지 바이트(base64, URL 없음) · 동시 호출 상한 · 설정 · 기동 가드 · 계량 SPI(`metering.AiCallInterceptor` — 호출 앞뒤 예약 · 기록 자리). 공식 SDK 는 `implementation` 이라 서비스에 드러나지 않는다 | 프롬프트 문구 · 결과 해석 · 사용량 원장(엔티티) · 월 한도 정책 · 오류 번역 (쓰는 서비스 몫 — 원장 · 한도는 operations-service 가 계량 SPI 를 구현한다 — 원장 #403, 연결 #435) |
 | `common-core` | 도메인 비의존 범용 인프라 | 특정 서비스의 도메인 개념 |
 | `commerce-support` | `web.MoneyItems`(Money → MoneyItem), `persistence.MoneyColumns`(금액·통화 컬럼 → Money). common-core · shared-commerce 를 조합하는 순수 변환 | 서비스별 DTO · 엔티티 · 가격 계산 정책 |
 | `persistence-core` | DB 접근 공통 설정·유틸 | 엔티티 (엔티티는 각 서비스 소유) |
@@ -85,6 +85,7 @@ com.commercefoundry
   |  |  |- in/webhook           외부 시스템 콜백 — PG 웹훅 등 (payment-service)
   |  |  |- in/scheduler         시각이 부르는 진입점 (@Scheduled — 재고 선점 만료, 미결제 주문 정리 등)
   |  |  |- in/bootstrap         기동이 부르는 진입점 (ApplicationRunner — 초기 관리자 시드 #6). 설정을 커맨드로 옮겨 UseCase 만 부른다
+  |  |  |- in/metering          ai-core 계량 SPI 구현(AiCallInterceptor — AI 호출 앞뒤 예약 · 정산, operations #435). UseCase 만 부른다
   |  |  |- in/event             이벤트가 부르는 진입점 — 같은 서비스 안 ApplicationEvent(작업 종료 → 알림 #213)와 Kafka *EventListener(주문 만료 → 재고 해제 #309). UseCase 만 부른다
   |  |  \- out
   |  |     |- persistence
