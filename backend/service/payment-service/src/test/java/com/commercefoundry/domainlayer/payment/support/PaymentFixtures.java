@@ -19,6 +19,8 @@ public final class PaymentFixtures {
     public static final long ORDER_ID = 8_000_000_001L;
     public static final long MEMBER_ID = 7_000_000_001L;
     public static final String PAYMENT_KEY = "tgen_20261021000000abcdEFGH";
+    /** 고객 승인 요청의 Idempotency-Key (UUID 소문자). */
+    public static final String APPROVAL_KEY = "3f2b8c1e-6a4d-4e2f-9b1a-7c5d2e8f0a11";
     public static final String ORDER_NAME = "생활한복 저고리 외 2건";
     public static final Instant STARTED_AT = Instant.parse("2026-10-21T01:00:00Z");
     public static final Instant APPROVED_AT = Instant.parse("2026-10-21T01:00:03Z");
@@ -39,7 +41,7 @@ public final class PaymentFixtures {
     }
 
     public static Payment inProgress() {
-        return ready().startApproval(PAYMENT_KEY, STARTED_AT);
+        return ready().startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT);
     }
 
     public static Payment done() {

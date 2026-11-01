@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.payment.domain.model;
 
+import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.APPROVAL_KEY;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.APPROVED_AT;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.MEMBER_ID;
 import static com.commercefoundry.domainlayer.payment.support.PaymentFixtures.ORDER_ID;
@@ -60,7 +61,7 @@ class PaymentTest {
         STATES.put("ABORTED", PaymentFixtures::aborted);
         STATES.put("LATE_APPROVED", PaymentFixtures::lateApproved);
 
-        ACTIONS.put(Action.START_APPROVAL, payment -> payment.startApproval(PAYMENT_KEY, NOW));
+        ACTIONS.put(Action.START_APPROVAL, payment -> payment.startApproval(PAYMENT_KEY, APPROVAL_KEY, NOW));
         ACTIONS.put(Action.ABORT, payment -> payment.abort(PaymentAbortReason.AMOUNT_CHANGED));
         ACTIONS.put(Action.ABORT_AFTER_INQUIRY, payment -> payment.abortAfterInquiry(NOT_APPROVED, PaymentAbortReason.ORDER_EXPIRED));
         ACTIONS.put(Action.APPROVE, payment -> payment.approve(approval(krw(129_000))));
@@ -199,7 +200,7 @@ class PaymentTest {
         private Payment readyWith(String pgOrderId) {
             return new Payment(
                 PAYMENT_ID, ORDER_ID, MEMBER_ID, pgOrderId, PaymentGateway.TOSS, krw(1_000), ORDER_NAME, PaymentStatus.READY,
-                null, null, null, null, null, null, null, null, null, false, null, null, null
+                null, null, null, null, null, null, null, null, null, false, null, null, null, null
             );
         }
 
@@ -258,7 +259,7 @@ class PaymentTest {
         void startsApproval() {
             Payment ready = withVersion(PaymentFixtures.ready(), 3L);
 
-            Payment inProgress = ready.startApproval(PAYMENT_KEY, STARTED_AT);
+            Payment inProgress = ready.startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT);
 
             assertThat(inProgress.status()).isEqualTo(PaymentStatus.IN_PROGRESS);
             assertThat(inProgress.paymentKey()).isEqualTo(PAYMENT_KEY);
@@ -271,14 +272,14 @@ class PaymentTest {
         @ValueSource(ints = {0, 201})
         @DisplayName("빈 결제키 · 200자를 넘는 결제키는 거절한다")
         void invalidPaymentKeyIsRejected(int length) {
-            assertThatThrownBy(() -> PaymentFixtures.ready().startApproval("k".repeat(length), NOW))
+            assertThatThrownBy(() -> PaymentFixtures.ready().startApproval("k".repeat(length), APPROVAL_KEY, NOW))
                 .isInstanceOf(IllegalArgumentException.class);
         }
 
         @Test
         @DisplayName("결제키 200자는 받는다")
         void maxPaymentKeyIsAccepted() {
-            assertThat(PaymentFixtures.ready().startApproval("k".repeat(200), NOW).paymentKey()).hasSize(200);
+            assertThat(PaymentFixtures.ready().startApproval("k".repeat(200), APPROVAL_KEY, NOW).paymentKey()).hasSize(200);
         }
 
         @Test
@@ -295,7 +296,7 @@ class PaymentTest {
         @Test
         @DisplayName("되돌린 READY 는 같은 결제키로만 다시 시작한다 — 승인 시작 시각은 새로 남긴다")
         void revertedRestartsWithSameKey() {
-            Payment restarted = PaymentFixtures.reverted().startApproval(PAYMENT_KEY, NOW);
+            Payment restarted = PaymentFixtures.reverted().startApproval(PAYMENT_KEY, APPROVAL_KEY, NOW);
 
             assertThat(restarted.status()).isEqualTo(PaymentStatus.IN_PROGRESS);
             assertThat(restarted.paymentKey()).isEqualTo(PAYMENT_KEY);
@@ -303,11 +304,43 @@ class PaymentTest {
         }
 
         @Test
+        @DisplayName("승인 시작은 고객 멱등 키를 남기고, 되돌린 READY · 이후 전이에도 그대로 둔다 — 되돌린 READY 를 새 키로 다시 시작하면 바뀐다")
+        void approvalIdempotencyKeyIsRecorded() {
+            Payment inProgress = PaymentFixtures.ready().startApproval(PAYMENT_KEY, APPROVAL_KEY, STARTED_AT);
+            String otherKey = "9a1b2c3d-0000-4000-8000-000000000001";
+
+            assertThat(PaymentFixtures.ready().approvalIdempotencyKey()).isNull();
+            assertThat(inProgress.approvalIdempotencyKey()).isEqualTo(APPROVAL_KEY);
+            assertThat(inProgress.revertToReady().approvalIdempotencyKey()).isEqualTo(APPROVAL_KEY);
+            assertThat(inProgress.approve(approval(krw(129_000))).approvalIdempotencyKey()).isEqualTo(APPROVAL_KEY);
+            assertThat(inProgress.reject("REJECT_CARD_COMPANY", null).approvalIdempotencyKey()).isEqualTo(APPROVAL_KEY);
+            assertThat(inProgress.markUnknown(PaymentUnknownReason.TIMEOUT).approvalIdempotencyKey()).isEqualTo(APPROVAL_KEY);
+            assertThat(inProgress.revertToReady().startApproval(PAYMENT_KEY, otherKey, NOW).approvalIdempotencyKey()).isEqualTo(otherKey);
+        }
+
+        @ParameterizedTest(name = "{0}자")
+        @ValueSource(ints = {0, 37})
+        @DisplayName("빈 멱등 키 · 36자를 넘는 멱등 키는 거절한다")
+        void invalidApprovalIdempotencyKeyIsRejected(int length) {
+            assertThatThrownBy(() -> PaymentFixtures.ready().startApproval(PAYMENT_KEY, "k".repeat(length), NOW))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("결제키 없이 멱등 키만 있는 행은 만들 수 없다 (ck_payment_approval_key_payment_key 와 같은 규칙)")
+        void approvalIdempotencyKeyRequiresPaymentKey() {
+            assertThatThrownBy(() -> new Payment(
+                PAYMENT_ID, ORDER_ID, MEMBER_ID, Long.toString(PAYMENT_ID), PaymentGateway.TOSS, krw(1_000), ORDER_NAME, PaymentStatus.READY,
+                null, null, null, null, null, null, null, null, null, false, null, null, APPROVAL_KEY, null
+            )).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
         @DisplayName("되돌린 READY 에 다른 결제키가 오면 PAYMENT_KEY 불일치다 — 이전 키가 승인됐을 수 있어 바꾸지 않는다")
         void revertedRejectsOtherKey() {
             Payment reverted = PaymentFixtures.reverted();
 
-            assertMismatch(() -> reverted.startApproval("tgen_reauthenticated0001", NOW), Field.PAYMENT_KEY);
+            assertMismatch(() -> reverted.startApproval("tgen_reauthenticated0001", APPROVAL_KEY, NOW), Field.PAYMENT_KEY);
         }
 
         @Test
@@ -620,7 +653,7 @@ class PaymentTest {
         void orderSyncedRequiresReportingStatus() {
             assertThatThrownBy(() -> new Payment(
                 PAYMENT_ID, ORDER_ID, MEMBER_ID, Long.toString(PAYMENT_ID), PaymentGateway.TOSS, krw(1_000), ORDER_NAME, PaymentStatus.LATE_APPROVED,
-                PAYMENT_KEY, PaymentMethod.CARD, null, null, STARTED_AT, APPROVED_AT, "REJECT_CARD_COMPANY", null, null, true, null, null, 0L
+                PAYMENT_KEY, PaymentMethod.CARD, null, null, STARTED_AT, APPROVED_AT, "REJECT_CARD_COMPANY", null, null, true, null, null, null, 0L
             )).isInstanceOf(IllegalArgumentException.class);
         }
 
@@ -630,7 +663,7 @@ class PaymentTest {
         ) {
             assertThatThrownBy(() -> new Payment(
                 PAYMENT_ID, ORDER_ID, MEMBER_ID, Long.toString(PAYMENT_ID), PaymentGateway.TOSS, krw(1_000), ORDER_NAME, status,
-                paymentKey, method, null, null, startedAt, approvedAt, failureCode, null, unknownReason, false, null, abortReason, 0L
+                paymentKey, method, null, null, startedAt, approvedAt, failureCode, null, unknownReason, false, null, abortReason, null, 0L
             )).isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -677,7 +710,7 @@ class PaymentTest {
             payment.id(), payment.orderId(), payment.memberId(), payment.pgOrderId(), payment.gateway(), payment.amount(), payment.orderName(), payment.status(),
             payment.paymentKey(), payment.method(), payment.easyPayProvider(), payment.pgStatus(), payment.approvalStartedAt(), payment.approvedAt(),
             payment.failureCode(), payment.failureMessage(), payment.unknownReason(), payment.orderSynced(), payment.orderSyncFailureCode(),
-            payment.abortReason(), version
+            payment.abortReason(), payment.approvalIdempotencyKey(), version
         );
     }
 }
