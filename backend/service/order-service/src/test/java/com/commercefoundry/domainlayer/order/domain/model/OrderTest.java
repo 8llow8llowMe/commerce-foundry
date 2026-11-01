@@ -34,6 +34,46 @@ class OrderTest {
     }
 
     @Test
+    @DisplayName("cancelBeforePayment — 결제 대기면 CANCELED(나머지 값 그대로), 이미 취소면 그대로다. 고객 취소 가능은 결제 대기만이다")
+    void cancelBeforePayment() {
+        Order pending = withStatus(OrderStatus.PENDING_PAYMENT);
+        Order canceled = pending.cancelBeforePayment();
+
+        assertThat(pending.isCancelableByCustomer()).isTrue();
+        assertThat(canceled.status()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(canceled).usingRecursiveComparison().ignoringFields("status").isEqualTo(pending);
+        assertThat(canceled.isCancelableByCustomer()).isFalse();
+        assertThat(canceled.cancelBeforePayment()).isSameAs(canceled);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PENDING_PAYMENT", "CANCELED"})
+    @DisplayName("결제 대기 · 취소 완료가 아닌 주문의 결제 전 취소는 도메인 전이 예외다 — 결제 뒤 취소는 다른 흐름(#16 PR-2)이다")
+    void cancelBeforePaymentRejected(OrderStatus status) {
+        assertThat(withStatus(status).isCancelableByCustomer()).isFalse();
+        assertThatThrownBy(() -> withStatus(status).cancelBeforePayment()).isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+            assertThat(exception.getCurrentStatus()).isEqualTo(status);
+            assertThat(exception.getTargetStatus()).isEqualTo(OrderStatus.CANCELED);
+        });
+    }
+
+    @Test
+    @DisplayName("결제 전 취소 이력은 저장된 결제 대기 주문에서 고객 · 사유 코드로 만든다")
+    void customerCancelHistory() {
+        Order pending = withStatus(OrderStatus.PENDING_PAYMENT);
+        OrderStatusHistory history = OrderStatusHistory.canceledByCustomer(11L, pending, OrderCancelReason.ORDER_MISTAKE);
+
+        assertThat(history.fromStatus()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+        assertThat(history.toStatus()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(history.changedByType()).isEqualTo(StatusChangedBy.CUSTOMER);
+        assertThat(history.changedById()).isEqualTo(pending.memberId());
+        assertThat(history.reason()).isEqualTo("ORDER_MISTAKE");
+        assertThatThrownBy(() -> OrderStatusHistory.canceledByCustomer(12L, placed(), OrderCancelReason.OTHER)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OrderStatusHistory.canceledByCustomer(12L, withStatus(OrderStatus.PAID), OrderCancelReason.OTHER))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("place 는 결제 대기로 시작하고 버전 · 생성 시각이 없다 — 결제 기한은 받은 선점 만료 시각, 항목 아이디는 줄마다 하나씩 발급한다")
     void place() {
         Order order = placed();
