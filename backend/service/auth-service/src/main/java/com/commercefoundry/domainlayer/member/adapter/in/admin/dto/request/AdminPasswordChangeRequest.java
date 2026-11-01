@@ -13,9 +13,9 @@ public record AdminPasswordChangeRequest(
     @NotBlank(message = MemberValidationMessage.ADMIN_ACCOUNT_CURRENT_PASSWORD_REQUIRED)
     String currentPassword,
 
-    @Schema(description = "새 비밀번호 — 12~64자. 영문 · 숫자를 1자 이상씩 포함하고 공백 없는 ASCII", example = "next-password-2026")
+    @Schema(description = "새 비밀번호 — 10~64자. 영문 · 숫자를 1자 이상씩 포함하고 공백 없는 ASCII", example = "next-password-2026")
     @NotBlank(message = MemberValidationMessage.ADMIN_PASSWORD_REQUIRED)
-    @Size(min = 12, max = 64, message = MemberValidationMessage.ADMIN_ACCOUNT_PASSWORD_LENGTH)
+    @Size(min = 10, max = 64, message = MemberValidationMessage.ADMIN_ACCOUNT_PASSWORD_LENGTH)
     @Pattern(regexp = AdminRequestPatterns.PASSWORD, message = MemberValidationMessage.ADMIN_ACCOUNT_PASSWORD_FORMAT)
     String newPassword
 ) {

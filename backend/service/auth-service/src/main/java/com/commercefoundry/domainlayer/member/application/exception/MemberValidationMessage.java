@@ -42,7 +42,7 @@ public final class MemberValidationMessage {
 
     /** 관리자 계정 추가 · 비밀번호 변경 (#193). */
     public static final String ADMIN_ACCOUNT_EMAIL_FORMAT = "AUTH_140:이메일 형식이 올바르지 않습니다.";
-    public static final String ADMIN_ACCOUNT_PASSWORD_LENGTH = "AUTH_141:비밀번호는 12자 이상 64자 이하여야 합니다.";
+    public static final String ADMIN_ACCOUNT_PASSWORD_LENGTH = "AUTH_141:비밀번호는 10자 이상 64자 이하여야 합니다.";
     public static final String ADMIN_ACCOUNT_PASSWORD_FORMAT = "AUTH_142:비밀번호는 영문과 숫자를 1자 이상씩 포함하고, 공백 없이 영문 · 숫자 · 특수문자로만 입력해 주세요.";
     public static final String ADMIN_ACCOUNT_NAME_REQUIRED = "AUTH_143:이름은 필수입니다.";
     public static final String ADMIN_ACCOUNT_NAME_LENGTH = "AUTH_144:이름은 1자 이상 50자 이하여야 합니다.";
