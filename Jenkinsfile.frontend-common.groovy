@@ -72,6 +72,11 @@ List<String> configErrors(Map config) {
     if (!(agentLabels instanceof Map) || !agentLabels.dev?.toString()?.trim() || !agentLabels.prod?.toString()?.trim()) {
         errors.add('config.deployAgentLabels 에 dev · prod 라벨이 모두 있어야 한다')
     }
+    // 선택. 있으면 dev · prod 모두 채운다 — 한쪽만 있으면 다른 환경이 조용히 기본 빌더로 가서 아키텍처 가드에 걸린다
+    Object buildLabels = config.buildAgentLabels
+    if (buildLabels != null && (!(buildLabels instanceof Map) || !buildLabels.dev?.toString()?.trim() || !buildLabels.prod?.toString()?.trim())) {
+        errors.add('config.buildAgentLabels 를 쓰면 dev · prod 라벨이 모두 있어야 한다')
+    }
     if (!errors.isEmpty()) {
         return errors
     }
@@ -235,6 +240,13 @@ String resolveDeployAgentLabel(Map config, Map ctx) {
         error "배포 agent 라벨을 찾을 수 없습니다. deployEnv=${ctx.deployEnv}"
     }
     return label
+}
+
+// 검사 · 빌드 단계의 agent 라벨. 배포하는 빌드는 배포 호스트와 같은 아키텍처여야 standalone 의 sharp 네이티브 바이너리가 뜬다(deploy.md §1).
+// buildAgentLabels 에 그 환경 라벨이 있으면 그것을, 없거나 배포하지 않는 빌드(PR · 비배포 브랜치 · SKIP_DEPLOY)는 buildAgentLabel 을 쓴다.
+String resolveBuildAgentLabel(Map config, Map ctx, boolean deploying) {
+    String envLabel = deploying ? (config.buildAgentLabels as Map)?.get(ctx.deployEnv)?.toString()?.trim() : null
+    return envLabel ?: config.buildAgentLabel.toString()
 }
 
 // 잡을 사람이 직접 실행했을 때 그 사용자 ID. 웹훅 · 스캔 · 상위 잡이 띄운 빌드면 빈 문자열.
@@ -1265,7 +1277,7 @@ void run(Map config) {
     }
 
     stage('검사 · 빌드') {
-        node(config.buildAgentLabel) {
+        node(resolveBuildAgentLabel(config, ctx, shouldDeploy)) {
             try {
                 deleteDir()
                 checkoutSource()

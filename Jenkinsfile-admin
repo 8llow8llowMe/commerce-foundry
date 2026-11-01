@@ -2,8 +2,8 @@
 //
 // Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-admin (Script Path: Jenkinsfile-admin)
 // 배포 대상 PR 라벨:                  frontend-admin
-//   develop -> dev  (agent deploy-frontend-dev2)
-//   main    -> prod (agent deploy-frontend-prod)
+//   develop -> dev  (빌드 builder-frontend-arm64 · 배포 agent deploy-frontend-dev2)
+//   main    -> prod (빌드 builder-frontend · 배포 agent deploy-frontend-prod)
 // 규칙: frontend/docs/deploy.md (파이프라인 구조 · 게이트는 backend/docs/jenkins-cicd-guide.md 와 같다)
 def frontendPipeline
 node('builder-frontend') {
@@ -23,6 +23,12 @@ frontendPipeline.run([
     // 배포 뒤 컨테이너 안에서 200 을 확인하는 SSR 첫 화면
     smokePath          : '/login',
     buildAgentLabel    : 'builder-frontend',
+    // 배포 빌드는 배포 호스트와 같은 아키텍처 빌더에서 돈다(deploy.md §1) — dev 호스트(backend-1)는 aarch64, prod 는 x86_64.
+    // PR · 비배포 빌드는 위 buildAgentLabel 이다
+    buildAgentLabels   : [
+        dev : 'builder-frontend-arm64',
+        prod: 'builder-frontend'
+    ],
     deployAgentLabels  : [
         dev : 'deploy-frontend-dev2',
         prod: 'deploy-frontend-prod'
