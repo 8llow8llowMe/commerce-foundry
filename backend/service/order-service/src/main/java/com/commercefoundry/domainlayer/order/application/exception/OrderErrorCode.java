@@ -85,6 +85,19 @@ public enum OrderErrorCode {
      * 시도마다 재고 선점이 생겨 계정 하나로 재고를 묶어 두는 것을 막는다. 원격 호출 전에 거절한다. 같은 키 재시도는 세지 않는다.
      */
     ACTIVE_ORDER_REQUESTS_EXCEEDED("ORDER_022", "주문 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /**
+     * 전이 표에는 있지만 어드민 화면에서 바꾸는 단계가 아니다 (#17) — 결제 완료 · 만료 · 출고(송장 등록) · 취소 · 반품은 각자의 흐름이 바꾼다.
+     * {@code %s} 는 바꾸려던 상태 이름이다.
+     */
+    ADMIN_STATUS_CHANGE_NOT_ALLOWED("ORDER_023", "'%s' 상태는 이 화면에서 바꿀 수 없습니다.", HttpStatus.CONFLICT),
+    /** 맞춤 제작 항목이 없는 주문을 제작 중(MAKING)으로 바꾸려 했다 (#17). */
+    MAKING_REQUIRES_CUSTOM_ORDER_ITEM("ORDER_024", "맞춤 제작 상품이 없는 주문은 제작 중으로 바꿀 수 없습니다.", HttpStatus.CONFLICT),
+    /** 읽은 뒤 다른 곳(고객 · 결제 · 다른 운영자)이 먼저 주문 상태를 바꿨다 — {@code @Version} 충돌 (#17). 새로 읽어 다시 판단한다. */
+    ORDER_CONCURRENTLY_CHANGED("ORDER_025", "다른 곳에서 주문이 먼저 바뀌었습니다. 새로고침한 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /** 상태 변경 저장이 예상하지 못한 이유(DB 장애 등)로 실패했다 — 일괄 변경의 한 건 결과에 쓴다 (#17). 원인 메시지는 싣지 않는다. */
+    ORDER_STATUS_CHANGE_FAILED("ORDER_026", "주문 상태를 바꾸지 못했습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
+    /** 배송 완료는 고객의 반품 · 구매 확정 기간에 닿는다 — 운영자가 수동으로 바꿀 때는 확인한 근거를 사유로 남긴다 (#17). */
+    DELIVERED_REASON_REQUIRED("ORDER_027", "배송 완료로 바꿀 때는 배송을 확인한 근거를 사유로 남겨 주세요.", HttpStatus.BAD_REQUEST),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

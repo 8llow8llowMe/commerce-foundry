@@ -12,7 +12,9 @@ import com.commercefoundry.domainlayer.order.adapter.out.persistence.repository.
 import com.commercefoundry.domainlayer.order.application.exception.OrderSaveException;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderAdminSummaryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderStatusHistoryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
@@ -31,6 +33,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -153,5 +158,55 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
         orderRepository.saveAndFlush(orderMapper.toEntity(expired));
         orderStatusHistoryRepository.save(orderMapper.toEntity(history));
         orderStatusHistoryRepository.flush();
+    }
+
+    /** {@link #saveExpiry} 와 같은 방식(헤더 merge · 버전 비교 → 이력)이다. 어떤 전이를 해도 되는지는 호출 Processor 가 거른다. */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void saveStatusChange(Order changed, OrderStatusHistory history) {
+        if (changed.isNew() || history.orderId() != changed.id() || history.toStatus() != changed.status() || history.fromStatus() == null
+            || history.fromStatus() == history.toStatus()) {
+            throw new IllegalArgumentException("상태 변경 저장은 같은 주문의 이전 → 새 상태 이력이어야 합니다: orderId=" + changed.id() + ", historyOrderId=" + history.orderId());
+        }
+        orderRepository.saveAndFlush(orderMapper.toEntity(changed));
+        orderStatusHistoryRepository.save(orderMapper.toEntity(history));
+        orderStatusHistoryRepository.flush();
+    }
+
+    /**
+     * 주문 한 페이지(주문 시각 인덱스 범위 — {@code idx_orders_created_at_id} · {@code idx_orders_status_created_at_id}) + 그 페이지 주문의 항목 1번 · 배송지 1번. 상태가 없으면 상태 조건 없는 쿼리다
+     * — null 일 수 있는 파라미터를 한 쿼리에 두지 않는다({@link OrderRepository} 주석).
+     */
+    @Override
+    public Page<OrderAdminSummaryQueryResult> findAdminSummaryPage(OrderStatus status, Instant from, Instant to, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size);
+        Page<OrderEntity> orders = status == null
+            ? orderRepository.findAllByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(from, to, pageable)
+            : orderRepository.findAllByStatusAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(status, from, to, pageable);
+        if (orders.isEmpty()) {
+            // 범위 밖 페이지도 전체 건수는 그대로 알린다 — 빈 IN 쿼리는 부르지 않는다
+            return new PageImpl<>(List.of(), pageable, orders.getTotalElements());
+        }
+        List<Long> orderIds = orders.stream().map(OrderEntity::getId).toList();
+        Map<Long, List<OrderItemEntity>> items = orderItemRepository.findAllByOrderIdInOrderByOrderIdAscLineNoAsc(orderIds).stream()
+            .collect(Collectors.groupingBy(OrderItemEntity::getOrderId));
+        Map<Long, String> recipients = orderShippingAddressRepository.findAllById(orderIds).stream()
+            .collect(Collectors.toMap(OrderShippingAddressEntity::getOrderId, OrderShippingAddressEntity::getRecipientName));
+        return orders.map(order -> {
+            List<OrderItemEntity> lines = items.getOrDefault(order.getId(), List.of());
+            return new OrderAdminSummaryQueryResult(
+                order.getId(), order.getMemberId(), order.getStatus(), order.getTotalAmount(), order.getTotalCurrency(),
+                lines.isEmpty() ? null : lines.getFirst().getProductName(), lines.size(), recipients.get(order.getId()),
+                order.getCreatedAt(), order.getPaymentDueAt()
+            );
+        });
+    }
+
+    @Override
+    public List<OrderStatusHistoryQueryResult> findHistories(long orderId) {
+        return orderStatusHistoryRepository.findAllByOrderIdOrderByIdAsc(orderId).stream()
+            .map(history -> new OrderStatusHistoryQueryResult(
+                history.getFromStatus(), history.getToStatus(), history.getChangedByType(), history.getChangedById(), history.getReason(), history.getCreatedAt()))
+            .toList();
     }
 }

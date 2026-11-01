@@ -87,6 +87,24 @@ public record Order(
         return transitionTo(OrderStatus.EXPIRED);
     }
 
+    /**
+     * 표({@link OrderStatus})에 있는 전이로 상태를 바꾼다 — 누가 어떤 전이를 해도 되는지는 부르는 쪽(어드민 정책 · 결제 · 클레임)이 먼저 거른다.
+     *
+     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문
+     */
+    public Order changeStatus(OrderStatus next) {
+        Objects.requireNonNull(next, "next");
+        if (isNew()) {
+            throw new OrderStatusTransitionException(status, next);
+        }
+        return transitionTo(next);
+    }
+
+    /** 맞춤 제작 항목이 하나라도 있는가 — 제작 중(MAKING) 단계는 이런 주문만 거친다 ({@code order-flow-guide.md} §1). */
+    public boolean hasCustomOrderItem() {
+        return quote.lines().stream().anyMatch(OrderQuoteLine::customOrder);
+    }
+
     public boolean isNew() {
         return version == null;
     }
