@@ -1,6 +1,6 @@
 package com.commercefoundry.domainlayer.cart.adapter.in.web.dto.request;
 
-import com.commercefoundry.domainlayer.cart.adapter.in.web.dto.validation.NoControlCharacters;
+import com.commercefoundry.global.validation.NoControlCharacters;
 import com.commercefoundry.domainlayer.cart.application.exception.CartValidationMessage;
 import com.commercefoundry.domainlayer.cart.domain.model.CustomOption;
 import io.swagger.v3.oas.annotations.media.Schema;
