@@ -105,6 +105,10 @@ stock:
       fixed-delay: 60s
       batch-size: 100
       max-batches-per-run: 10
+      # 메시징(commerce.messaging.enabled)이 켜져 있으면 만료 시각 + 이 시간이 지난 선점만 푼다 — 주문 만료 이벤트(order-expired)가 먼저 풀고
+      # 스윕은 이벤트가 오지 않은 것만 푸는 안전망이다 (order-flow-guide.md §3-3 · §3-5, #309). 주문 만료 스윕(30s) + 릴레이(1s)보다 넉넉히 둔다.
+      # 꺼져 있으면 스윕이 주 경로라 쓰지 않는다. 0 이상 1시간 이하
+      event-grace: 2m
 
 security:
   jwt:

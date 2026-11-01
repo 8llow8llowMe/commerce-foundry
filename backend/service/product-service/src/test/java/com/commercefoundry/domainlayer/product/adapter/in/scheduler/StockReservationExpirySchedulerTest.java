@@ -18,6 +18,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductExce
 import com.commercefoundry.domainlayer.product.application.info.ExpiredStockReservationInfo;
 import com.commercefoundry.domainlayer.product.application.port.in.StockSchedulerUseCase;
 import com.commercefoundry.global.properties.StockProperties;
+import com.commercefoundry.messaging.properties.MessagingProperties;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
@@ -37,6 +38,7 @@ class StockReservationExpirySchedulerTest {
     private static final int BATCH_SIZE = 2;
     private static final int MAX_BATCHES = 3;
     private static final Instant EXPIRED_AT = Instant.parse("2026-10-18T09:00:00Z");
+    private static final Duration GRACE = Duration.ofMinutes(2);
 
     private StockSchedulerUseCase stockSchedulerUseCase;
     private StockReservationExpiryScheduler scheduler;
@@ -45,9 +47,9 @@ class StockReservationExpirySchedulerTest {
     void setUp() {
         stockSchedulerUseCase = mock(StockSchedulerUseCase.class);
         StockProperties properties = new StockProperties(new StockProperties.Reservation(
-            Duration.ofMinutes(30), new StockProperties.ExpirySweep(Duration.ofSeconds(60), Duration.ofSeconds(60), BATCH_SIZE, MAX_BATCHES)
+            Duration.ofMinutes(30), new StockProperties.ExpirySweep(Duration.ofSeconds(60), Duration.ofSeconds(60), BATCH_SIZE, MAX_BATCHES, GRACE)
         ));
-        scheduler = new StockReservationExpiryScheduler(stockSchedulerUseCase, properties);
+        scheduler = new StockReservationExpiryScheduler(stockSchedulerUseCase, properties, messaging(false));
     }
 
     @Test
@@ -139,6 +141,23 @@ class StockReservationExpirySchedulerTest {
     }
 
     @Test
+    @DisplayName("메시징이 꺼져 있으면 주 경로라 INFO, 켜져 있으면 안전망이 푼 것이라 WARN(이벤트 누락 신호)이다 (#309)")
+    void logsSafetyNetReleaseAsWarnWhenMessagingEnabled(CapturedOutput output) {
+        given(stockSchedulerUseCase.findExpiredReservations(null, BATCH_SIZE)).willReturn(List.of(target(11L)));
+        given(stockSchedulerUseCase.expire(11L)).willReturn(true);
+
+        scheduler.expireReservations();
+        assertThat(output.getOut()).contains("stock reservations expired. count=1");
+
+        StockProperties properties = new StockProperties(new StockProperties.Reservation(
+            Duration.ofMinutes(30), new StockProperties.ExpirySweep(Duration.ofSeconds(60), Duration.ofSeconds(60), BATCH_SIZE, MAX_BATCHES, GRACE)
+        ));
+        new StockReservationExpiryScheduler(stockSchedulerUseCase, properties, messaging(true)).expireReservations();
+        assertThat(output.getOut().lines().filter(line -> line.contains("released by safety-net sweep")).toList())
+            .singleElement().asString().contains("WARN", "count=1", "grace=PT2M");
+    }
+
+    @Test
     @DisplayName("주기는 설정 키(stock.reservation.expiry-sweep.*)에서 읽는다")
     void scheduleUsesProperties() throws NoSuchMethodException {
         Method method = StockReservationExpiryScheduler.class.getMethod("expireReservations");
@@ -146,6 +165,10 @@ class StockReservationExpirySchedulerTest {
 
         assertThat(scheduled.fixedDelayString()).isEqualTo("${stock.reservation.expiry-sweep.fixed-delay}");
         assertThat(scheduled.initialDelayString()).isEqualTo("${stock.reservation.expiry-sweep.initial-delay}");
+    }
+
+    private static MessagingProperties messaging(boolean enabled) {
+        return new MessagingProperties(enabled, "commerce-foundry.test", "product", List.of(), 65536, null, null, null);
     }
 
     /** 만료 시각은 아이디 순으로 1초씩 — 커서 값을 아이디로 구분한다. */

@@ -59,12 +59,12 @@ public class StockReservationRepositoryAdapter implements StockReservationReposi
     }
 
     @Override
-    public List<ExpiredStockReservationQueryResult> findExpiredReservations(Instant now, ExpiredStockReservationQueryResult after, int limit) {
+    public List<ExpiredStockReservationQueryResult> findExpiredReservations(Instant cutoff, ExpiredStockReservationQueryResult after, int limit) {
         if (after == null) {
-            return stockReservationRepository.findExpired(StockReservationStatus.RESERVED, now, Limit.of(limit));
+            return stockReservationRepository.findExpired(StockReservationStatus.RESERVED, cutoff, Limit.of(limit));
         }
         return stockReservationRepository.findExpiredAfter(
-            StockReservationStatus.RESERVED, now, after.expiresAt(), after.reservationId(), Limit.of(limit)
+            StockReservationStatus.RESERVED, cutoff, after.expiresAt(), after.reservationId(), Limit.of(limit)
         );
     }
 

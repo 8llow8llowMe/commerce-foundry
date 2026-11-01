@@ -44,24 +44,28 @@ public interface StockReservationRepository extends JpaRepository<StockReservati
     @Query("select r from StockReservationEntity r where r.id = :id")
     Optional<StockReservationEntity> findByIdForUpdate(Long id);
 
-    /** 만료 대상의 첫 배치. */
+    /** 만료 대상의 첫 배치 — {@code cutoff} 는 스윕 기준 시각이다(메시징이 켜져 있으면 지금 - event-grace). */
     @Query("""
         select new com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult(r.id, r.expiresAt)
           from StockReservationEntity r
-         where r.status = :status and r.expiresAt <= :now
+         where r.status = :status and r.expiresAt <= :cutoff
          order by r.expiresAt, r.id
         """)
-    List<ExpiredStockReservationQueryResult> findExpired(StockReservationStatus status, Instant now, Limit limit);
+    List<ExpiredStockReservationQueryResult> findExpired(StockReservationStatus status, Instant cutoff, Limit limit);
 
-    /** 만료 대상의 다음 배치 — {@code (afterExpiresAt, afterId)} 다음부터. 행 값 비교 대신 OR 로 풀어 H2 · PostgreSQL 모두 같은 뜻이다. */
+    /**
+     * 만료 대상의 다음 배치 — {@code (afterExpiresAt, afterId)} 다음부터. 행 값 비교 대신 OR 로 풀어 H2 · PostgreSQL 모두 같은 뜻이다.
+     * 뜻이 같은 하한 {@code expiresAt >= :afterExpiresAt} 을 더해 OR 키셋이 인덱스 범위의 시작점이 되게 한다(주문 만료 스윕과 같다).
+     */
     @Query("""
         select new com.commercefoundry.domainlayer.product.application.port.out.query.ExpiredStockReservationQueryResult(r.id, r.expiresAt)
           from StockReservationEntity r
-         where r.status = :status and r.expiresAt <= :now
+         where r.status = :status and r.expiresAt <= :cutoff
+           and r.expiresAt >= :afterExpiresAt
            and (r.expiresAt > :afterExpiresAt or (r.expiresAt = :afterExpiresAt and r.id > :afterId))
          order by r.expiresAt, r.id
         """)
     List<ExpiredStockReservationQueryResult> findExpiredAfter(
-        StockReservationStatus status, Instant now, Instant afterExpiresAt, Long afterId, Limit limit
+        StockReservationStatus status, Instant cutoff, Instant afterExpiresAt, Long afterId, Limit limit
     );
 }
