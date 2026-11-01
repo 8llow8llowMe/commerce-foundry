@@ -560,8 +560,8 @@ return ResponseEntity.ok().body(Response.success(response));
 - **오류 코드**: 업무 `PRODUCT_012` · `013` · `014` · `016` · `045`, 필드 검증 `PRODUCT_074~099` · `169`(`initialStock` 칸 누락) · `037`(금액 상한) · `038`(지난 발송 예정일), 금액 · 판매 상태는 칸이 여럿이라 한 코드를
   쓰고 `fieldErrors.field` 경로(`skus[1].additionalPrice.amount`)로 구분한다. 대표 · 진열 카테고리 아이디 양수는 `PRODUCT_137`, 처음 재고 수량 0 이상은 `PRODUCT_106` 이다.
   깨진 JSON · 모르는 enum(`saleStatus: SOLD_OUT` 등)은 `PRODUCT_100` 이다.
-- **`PRODUCT_` 번호 공간** — 상품 · 메인 전시(§2-9) · 사이즈표(§2-10)와 검증 메시지 클래스가 나눠 쓴다. 번호 하나는 뜻 하나다(`ProductErrorCodeUniquenessTest` 가 막는다,
-  `PRODUCT_140` 은 이 테스트 전부터 있던 충돌이라 후속 이슈에서 옮긴다).
+- **`PRODUCT_` 번호 공간** — 상품 · 메인 전시(§2-9) · 사이즈표(§2-10)와 검증 메시지 클래스가 나눠 쓴다. 번호 하나는 뜻 하나다(`ProductErrorCodeUniquenessTest` 가 막는다.
+  예전에 온보딩 memberId 검증과 메인 전시 sectionType 이 함께 쓰던 `PRODUCT_140` 은 #448 에서 온보딩 쪽을 `PRODUCT_039` 로 옮겼다).
 
   | 대역 | 용도 |
   |------|------|
@@ -570,6 +570,7 @@ return ResponseEntity.ok().body(Response.success(response));
   | `020~031` | 재고(조정 · 선점 · 복원) |
   | `032~036` | 상품 이미지 업로드 · 스토리지(#9 F) |
   | `037` · `038` | 어드민 상품 등록 필드 검증(금액 상한 · 지난 발송 예정일) |
+  | `039` | 운영자 온보딩 internal memberId 검증(#448 — 140 에서 옮김) |
   | `040~045` | 어드민 카테고리 |
   | `046~073` | 메인 전시 · 사이즈표 |
   | `074~099` · `169` | 어드민 상품 등록 필드 검증 |

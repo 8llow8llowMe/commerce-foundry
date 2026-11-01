@@ -8,7 +8,7 @@ import org.springframework.http.HttpStatus;
  * 상품 도메인 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link ProductValidationMessage} 에 둔다.
  *
  * <p>대역 — {@code 00x} 없는 리소스(404), {@code 01x} 어드민 상품 쓰기(#9 — 등록 012~016, 수정 · 삭제 010 · 011 · 015 · 017 은 E2),
- * {@code 020~031} 재고(조정 · 선점 · 복원 충돌과 부족, 409), {@code 032~036} 상품 이미지 업로드 · 스토리지(#9 F), {@code 037} · {@code 038} 등록 필드 검증, {@code 040~045} 어드민 카테고리 관리,
+ * {@code 020~031} 재고(조정 · 선점 · 복원 충돌과 부족, 409), {@code 032~036} 상품 이미지 업로드 · 스토리지(#9 F), {@code 037} · {@code 038} 등록 필드 검증, {@code 039} 온보딩 memberId 검증(#448), {@code 040~045} 어드민 카테고리 관리,
  * {@code 074~099} · {@code 169} · {@code 1xx} 요청 검증(400). {@code 046~073} 은 메인 전시({@code DisplayErrorCode}) · 사이즈표({@code SizeChartErrorCode})가 쓴다 —
  * 2026-10-20 에 승인한 업로드 050~054 · 검증 131~ 은 먼저 쓰여 032~036 · 074~ 로 옮겼다.
  * 카테고리 컨텍스트는 업무 오류를 던지지 않는다(고객 트리는 실패하지 않고, 판정은 {@code CategoryPlacementViolation} 값으로 돌려준다). 어드민 카테고리 관리는
