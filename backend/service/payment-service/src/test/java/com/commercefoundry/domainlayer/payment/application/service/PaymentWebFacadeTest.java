@@ -42,6 +42,7 @@ import com.commercefoundry.domainlayer.payment.domain.model.PaymentApprovalMisma
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentUnknownReason;
 import com.commercefoundry.domainlayer.payment.support.PaymentFixtures;
+import com.commercefoundry.global.properties.PaymentGateProperties;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -80,8 +81,9 @@ class PaymentWebFacadeTest {
         paymentProcessor = mock(PaymentProcessor.class);
         paymentGatewayProcessor = mock(PaymentGatewayProcessor.class);
         facade = new PaymentWebFacade(orderSummaryProcessor, paymentProcessor, paymentGatewayProcessor, new PaymentWebPresenter(),
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            new PaymentGateProperties(true), Clock.fixed(NOW, ZoneOffset.UTC));
         given(orderSummaryProcessor.getPayableOrder(ORDER_ID, MEMBER_ID)).willReturn(ORDER);
+        given(orderSummaryProcessor.getConfirmableOrder(ORDER_ID, MEMBER_ID)).willReturn(ORDER);
         given(paymentProcessor.findByApprovalKey(anyLong(), anyString())).willReturn(Optional.empty());
     }
 
@@ -413,6 +415,72 @@ class PaymentWebFacadeTest {
         }
 
         @Test
+        @DisplayName("승인 시작이 버전에서 지고 다시 읽은 상태가 READY(다른 요청이 보내지 못해 되돌림)면 409 PAYMENT_012 — PG 를 부르지 않는다")
+        void startApprovalVersionConflictToReady() {
+            givenCurrent(PaymentFixtures.ready());
+            willThrow(new PaymentPersistenceConflictException(Kind.VERSION, PAYMENT_ID, ORDER_ID)).given(paymentProcessor).startApproval(any(), anyString(), anyString(), any());
+            given(paymentProcessor.getOwned(PAYMENT_ID, MEMBER_ID)).willReturn(PaymentFixtures.reverted());
+
+            assertError(() -> confirm(KEY, CONFIRM), PaymentErrorCode.PAYMENT_REQUEST_CONFLICT);
+            verifyNoInteractions(paymentGatewayProcessor);
+        }
+
+        @Test
+        @DisplayName("같은 키 · 같은 결제키인데 금액 · 통화가 다른 재요청(DONE · UNKNOWN)은 409 PAYMENT_014 — 같은 요청의 재전송이 아니다")
+        void sameKeyReplayWithOtherAmount() {
+            for (Payment payment : new Payment[] {PaymentFixtures.done(), PaymentFixtures.unknown()}) {
+                givenCurrent(payment);
+
+                assertError(() -> confirm(KEY, new PaymentConfirmCommand(PAYMENT_KEY, PG_ORDER_ID, 1_000, "KRW")), PaymentErrorCode.IDEMPOTENCY_KEY_REUSED);
+                assertError(() -> confirm(KEY, new PaymentConfirmCommand(PAYMENT_KEY, PG_ORDER_ID, 129_000, "USD")), PaymentErrorCode.IDEMPOTENCY_KEY_REUSED);
+            }
+            assertNoApproval();
+        }
+
+        @Test
+        @DisplayName("승인 직전 주문 재확인 — 없음 404 · 결제 대기 아님 409 · 기한 경과 409 · 주문 장애 503 은 그대로, PG · 저장 없음")
+        void orderRecheckRejections() {
+            givenCurrent(PaymentFixtures.ready());
+            for (PaymentErrorCode errorCode : new PaymentErrorCode[] {
+                PaymentErrorCode.NOT_FOUND_ORDER, PaymentErrorCode.ORDER_NOT_PAYABLE, PaymentErrorCode.PAYMENT_DUE_TOO_CLOSE, PaymentErrorCode.ORDER_SERVICE_UNAVAILABLE}) {
+                willThrow(new PaymentException(errorCode)).given(orderSummaryProcessor).getConfirmableOrder(ORDER_ID, MEMBER_ID);
+
+                assertError(() -> confirm(KEY, CONFIRM), errorCode);
+            }
+            assertNoApproval();
+            verify(paymentProcessor, never()).recordApprovalResult(any(), any());
+        }
+
+        @Test
+        @DisplayName("주문 요약 금액이 결제 시도와 다르면(결함 신호) 409 PAYMENT_012 — PG · 저장 없음")
+        void orderRecheckAmountDiffers() {
+            givenCurrent(PaymentFixtures.ready());
+            given(orderSummaryProcessor.getConfirmableOrder(ORDER_ID, MEMBER_ID)).willReturn(new PayableOrder(ORDER_ID, krw(100_000), ORDER_NAME, DUE_AT));
+
+            assertError(() -> confirm(KEY, CONFIRM), PaymentErrorCode.PAYMENT_REQUEST_CONFLICT);
+            assertNoApproval();
+        }
+
+        @Test
+        @DisplayName("READY 가 아니어서 상태 분기에서 끝나는 요청은 order-service 를 부르지 않는다")
+        void settledAttemptSkipsOrderRecheck() {
+            givenCurrent(PaymentFixtures.done());
+
+            confirm(KEY, CONFIRM);
+
+            verify(orderSummaryProcessor, never()).getConfirmableOrder(anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("금액 불일치(400)는 주문 재확인보다 먼저다 — order 를 부르지 않는다")
+        void amountMismatchBeforeOrderRecheck() {
+            givenCurrent(PaymentFixtures.ready());
+
+            assertError(() -> confirm(KEY, new PaymentConfirmCommand(PAYMENT_KEY, PG_ORDER_ID, 1_000, "KRW")), PaymentErrorCode.AMOUNT_MISMATCH);
+            verify(orderSummaryProcessor, never()).getConfirmableOrder(anyLong(), anyLong());
+        }
+
+        @Test
         @DisplayName("결과 기록이 버전에서 지면(재조회 · 웹훅이 먼저) 다시 읽은 현재 상태 200")
         void recordVersionConflictRereads() {
             Payment inProgress = givenStarted();
@@ -446,6 +514,20 @@ class PaymentWebFacadeTest {
             assertError(() -> confirm(KEY, CONFIRM), PaymentErrorCode.NOT_FOUND_PAYMENT);
             assertNoApproval();
         }
+    }
+
+    @Test
+    @DisplayName("결제 게이트가 닫혀 있으면 준비 · 승인 모두 503 PAYMENT_015 — order · DB · PG 를 부르지 않는다. 상태 조회는 막지 않는다")
+    void gateClosed() {
+        PaymentWebFacade closed = new PaymentWebFacade(orderSummaryProcessor, paymentProcessor, paymentGatewayProcessor, new PaymentWebPresenter(),
+            new PaymentGateProperties(false), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertError(() -> closed.prepare(MEMBER_ID, new PaymentPrepareCommand(ORDER_ID)), PaymentErrorCode.PAYMENTS_DISABLED);
+        assertError(() -> closed.confirm(MEMBER_ID, KEY, CONFIRM), PaymentErrorCode.PAYMENTS_DISABLED);
+        verifyNoInteractions(orderSummaryProcessor, paymentProcessor, paymentGatewayProcessor);
+
+        given(paymentProcessor.getOwned(PAYMENT_ID, MEMBER_ID)).willReturn(PaymentFixtures.done());
+        assertThat(closed.getPayment(MEMBER_ID, PAYMENT_ID).status().code()).isEqualTo("DONE");
     }
 
     @Test

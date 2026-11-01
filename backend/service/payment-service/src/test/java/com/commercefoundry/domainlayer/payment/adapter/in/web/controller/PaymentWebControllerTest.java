@@ -189,7 +189,7 @@ class PaymentWebControllerTest {
         }
 
         @Test
-        @DisplayName("업무 오류는 코드의 상태로 나간다 — 주문 없음 404 · 기한 임박 409 · 주문 정보 장애 503")
+        @DisplayName("업무 오류는 코드의 상태로 나간다 — 주문 없음 404 · 기한 임박 409 · 주문 정보 장애 503 · 결제 게이트 닫힘 503")
         void businessErrors() {
             willThrow(new PaymentException(PaymentErrorCode.NOT_FOUND_ORDER)).given(paymentWebUseCase).prepare(anyLong(), any());
             assertFailure(prepare("{\"orderId\":1}"), HttpStatus.NOT_FOUND, "PAYMENT_002");
@@ -199,6 +199,11 @@ class PaymentWebControllerTest {
 
             willThrow(new PaymentException(PaymentErrorCode.ORDER_SERVICE_UNAVAILABLE)).given(paymentWebUseCase).prepare(anyLong(), any());
             assertFailure(prepare("{\"orderId\":1}"), HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_011");
+
+            willThrow(new PaymentException(PaymentErrorCode.PAYMENTS_DISABLED)).given(paymentWebUseCase).prepare(anyLong(), any());
+            MvcTestResult disabled = prepare("{\"orderId\":1}");
+            assertFailure(disabled, HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_015");
+            assertThat(disabled).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo("지금은 결제를 받을 수 없습니다.");
         }
     }
 
