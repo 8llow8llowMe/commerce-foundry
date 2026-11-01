@@ -66,6 +66,7 @@ public final class OrderValidationMessage {
     public static final String REASON_INVALID_CHARACTER = "ORDER_151:사유에는 줄바꿈 · 탭 같은 제어 문자나 깨진 문자를 쓸 수 없습니다.";
     public static final String ORDER_ID_FORMAT = "ORDER_152:주문 아이디는 숫자 문자열이어야 합니다.";
     public static final String BULK_DELIVERED_NOT_ALLOWED = "ORDER_153:배송 완료는 사유와 함께 한 건씩 바꿉니다.";
+    public static final String CANCEL_REASON_REQUIRED = "ORDER_154:취소 사유(reason)를 골라 주세요.";
 
     private OrderValidationMessage() {
     }

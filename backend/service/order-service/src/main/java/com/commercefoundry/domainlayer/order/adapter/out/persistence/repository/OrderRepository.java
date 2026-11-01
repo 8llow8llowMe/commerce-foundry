@@ -11,6 +11,7 @@ import java.util.Optional;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -24,6 +25,9 @@ import org.springframework.data.jpa.repository.Query;
 public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
 
     Optional<OrderEntity> findByIdAndMemberId(Long id, Long memberId);
+
+    /** 회원의 주문 최신순 한 조각 (#16) — {@code idx_orders_member_id_id} 를 거꾸로 읽는다(아이디가 시각 순인 Snowflake 다). 건수 쿼리가 없다. */
+    Slice<OrderEntity> findSliceByMemberIdOrderByIdDesc(Long memberId, Pageable pageable);
 
     /**
      * 회원의 {@code status} 주문에 담긴 상품별 수량 합 (#426). 주문은 {@code idx_orders_member_id_id}, 항목은 {@code uk_order_item_order_id_line_no} 의

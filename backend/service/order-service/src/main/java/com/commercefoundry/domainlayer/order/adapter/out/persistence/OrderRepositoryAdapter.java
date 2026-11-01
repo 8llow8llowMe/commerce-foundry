@@ -14,6 +14,7 @@ import com.commercefoundry.domainlayer.order.application.mapper.OrderMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderAdminSummaryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderMemberSummaryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderStatusHistoryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
@@ -36,6 +37,8 @@ import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -208,5 +211,37 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
             .map(history -> new OrderStatusHistoryQueryResult(
                 history.getFromStatus(), history.getToStatus(), history.getChangedByType(), history.getChangedById(), history.getReason(), history.getCreatedAt()))
             .toList();
+    }
+
+    /** 주문 한 조각(회원 아이디 인덱스) + 그 조각 주문의 항목 1번. 비면 IN 쿼리를 부르지 않는다. */
+    @Override
+    public Slice<OrderMemberSummaryQueryResult> findMemberSummarySlice(long memberId, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size);
+        Slice<OrderEntity> orders = orderRepository.findSliceByMemberIdOrderByIdDesc(memberId, pageable);
+        if (orders.isEmpty()) {
+            return new SliceImpl<>(List.of(), pageable, false);
+        }
+        Map<Long, List<OrderItemEntity>> items = orderItemRepository.findAllByOrderIdInOrderByOrderIdAscLineNoAsc(orders.map(OrderEntity::getId).toList())
+            .stream().collect(Collectors.groupingBy(OrderItemEntity::getOrderId));
+        return orders.map(order -> {
+            List<OrderItemEntity> lines = items.getOrDefault(order.getId(), List.of());
+            return new OrderMemberSummaryQueryResult(order.getId(), order.getStatus(), order.getTotalAmount(), order.getTotalCurrency(),
+                lines.isEmpty() ? null : lines.getFirst().getProductName(), lines.size(), order.getCreatedAt(), order.getPaymentDueAt());
+        });
+    }
+
+    /** {@link #saveExpiry} 와 같은 방식 — 헤더 merge(버전 비교) · flush 뒤 이력. 결제 전 고객 취소만 받는다. */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void saveCustomerCancel(Order canceled, OrderStatusHistory history) {
+        if (canceled.isNew() || canceled.status() != OrderStatus.CANCELED || history.orderId() != canceled.id()
+            || history.fromStatus() != OrderStatus.PENDING_PAYMENT || history.toStatus() != OrderStatus.CANCELED
+            || history.changedByType() != StatusChangedBy.CUSTOMER || !Long.valueOf(canceled.memberId()).equals(history.changedById())) {
+            throw new IllegalArgumentException("결제 전 취소 저장은 결제 대기 → 취소 완료(그 주문의 고객) 이력과 그 주문이어야 합니다: orderId=" + canceled.id()
+                + ", historyOrderId=" + history.orderId());
+        }
+        orderRepository.saveAndFlush(orderMapper.toEntity(canceled));
+        orderStatusHistoryRepository.save(orderMapper.toEntity(history));
+        orderStatusHistoryRepository.flush();
     }
 }

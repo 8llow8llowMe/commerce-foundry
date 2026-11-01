@@ -30,7 +30,8 @@ public class OrderWebPresenter {
             .build();
     }
 
-    private static ShippingAddressItem toShippingAddressItem(ShippingAddress address) {
+    /** 배송지 → 고객 응답. 주문 상세(#16)도 같은 모양을 쓴다. */
+    static ShippingAddressItem toShippingAddressItem(ShippingAddress address) {
         return ShippingAddressItem.builder()
             .recipientName(address.recipientName())
             .recipientPhone(address.recipientPhone())

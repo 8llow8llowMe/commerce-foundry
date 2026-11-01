@@ -52,6 +52,15 @@ public record OrderStatusHistory(
         return new OrderStatusHistory(id, before.id(), before.status(), after.status(), StatusChangedBy.ADMIN, adminId, reason);
     }
 
+    /** 고객이 결제 전에 취소했다 — PENDING_PAYMENT → CANCELED, 사유는 취소 사유 코드 (#16). {@code order} 는 전이 전 주문이다. */
+    public static OrderStatusHistory canceledByCustomer(long id, Order order, OrderCancelReason reason) {
+        Objects.requireNonNull(reason, "reason");
+        if (order.isNew() || order.status() != OrderStatus.PENDING_PAYMENT) {
+            throw new IllegalArgumentException("결제 전 취소 이력은 저장된 결제 대기 주문에서만 만듭니다: orderId=" + order.id() + ", status=" + order.status());
+        }
+        return new OrderStatusHistory(id, order.id(), OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELED, StatusChangedBy.CUSTOMER, order.memberId(), reason.name());
+    }
+
     @Override
     public String toString() {
         return "OrderStatusHistory[id=" + id + ", orderId=" + orderId + ", fromStatus=" + fromStatus
