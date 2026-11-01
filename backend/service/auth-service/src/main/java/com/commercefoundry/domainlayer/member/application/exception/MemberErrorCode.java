@@ -43,7 +43,7 @@ public enum MemberErrorCode {
     /** 없거나 고객이거나 이미 비활성화된 회원. 어느 쪽인지 나누지 않는다 (#193). */
     ADMIN_ACCOUNT_NOT_FOUND("AUTH_033", "관리자 계정을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
 
-    // ── 관리자 OTP (#238, AUTH_034~039 · AUTH_043 · AUTH_044)
+    // ── 관리자 OTP (#238, AUTH_034~039 · AUTH_043~045)
 
     /** 로그인 2단계 챌린지가 없다 — 만료 · 이미 씀 · 위조. 어느 쪽인지 밝히지 않는다. 1단계(비밀번호)부터 다시 한다. */
     OTP_CHALLENGE_INVALID("AUTH_034", "인증 요청이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", HttpStatus.BAD_REQUEST),
@@ -74,6 +74,8 @@ public enum MemberErrorCode {
      * 503 이 아니라 재시도 가능한 409 다.
      */
     OTP_BUSY("AUTH_044", "다른 OTP 요청을 처리하고 있습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /** 동료 OTP 복구 엔드포인트는 자신을 대상으로 쓸 수 없다. */
+    OTP_PEER_RECOVERY_SELF("AUTH_045", "본인 OTP는 내 OTP 메뉴에서 관리해 주세요.", HttpStatus.BAD_REQUEST),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
     SOCIAL_PROVIDER_UNSUPPORTED("AUTH_050", "지원하지 않는 소셜 로그인 제공자입니다.", HttpStatus.BAD_REQUEST),

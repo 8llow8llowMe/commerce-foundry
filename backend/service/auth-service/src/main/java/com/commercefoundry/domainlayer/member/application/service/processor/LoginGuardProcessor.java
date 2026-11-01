@@ -112,6 +112,11 @@ public class LoginGuardProcessor {
         count(AttemptKind.ADMIN_OTP_LOGIN, String.valueOf(adminMemberId));
     }
 
+    /** 동료 OTP 복구의 재인증 시도. 본인 재인증·로그인 2단계와 창을 나누고 성공해도 지우지 않는다. */
+    public void admitAdminOtpPeerRecovery(long adminMemberId) {
+        count(AttemptKind.ADMIN_OTP_PEER_RECOVERY, String.valueOf(adminMemberId));
+    }
+
     private void count(AttemptKind kind, String subject) {
         LoginAttemptPolicy policy = loginGuardPolicy.of(kind);
         LoginAttemptOutcome outcome;
@@ -133,7 +138,7 @@ public class LoginGuardProcessor {
             String tag = switch (kind) {
                 case SIGN_UP_IP -> subject.substring(0, 8);
                 // memberId 는 개인정보가 아니고, 감사 로그(target=member:{id})와 맞춰 볼 수 있게 그대로 남긴다
-                case ADMIN_OTP, ADMIN_OTP_LOGIN -> subject;
+                case ADMIN_OTP, ADMIN_OTP_LOGIN, ADMIN_OTP_PEER_RECOVERY -> subject;
                 case LOGIN, ADMIN_LOGIN, SIGN_UP -> loginAttemptCounterPort.subjectTag(subject);
             };
             log.info("attempt limit reached kind={} subject={} retryAfterMs={}", kind, tag, outcome.retryAfter().toMillis());
@@ -174,7 +179,7 @@ public class LoginGuardProcessor {
      */
     private static boolean failOpen(AttemptKind kind) {
         return switch (kind) {
-            case LOGIN, ADMIN_LOGIN, ADMIN_OTP, ADMIN_OTP_LOGIN -> false;
+            case LOGIN, ADMIN_LOGIN, ADMIN_OTP, ADMIN_OTP_LOGIN, ADMIN_OTP_PEER_RECOVERY -> false;
             case SIGN_UP, SIGN_UP_IP -> true;
         };
     }
@@ -184,7 +189,7 @@ public class LoginGuardProcessor {
      * 잘못 부르면 조용히 꺼지지 않게 바로 실패한다.
      */
     private static void rejectAdminOtp(AttemptKind kind) {
-        if (kind == AttemptKind.ADMIN_OTP || kind == AttemptKind.ADMIN_OTP_LOGIN) {
+        if (kind == AttemptKind.ADMIN_OTP || kind == AttemptKind.ADMIN_OTP_LOGIN || kind == AttemptKind.ADMIN_OTP_PEER_RECOVERY) {
             throw new IllegalArgumentException("admin otp attempts go through admitAdminOtp/clearAdminOtp/admitAdminOtpLogin");
         }
     }
@@ -197,7 +202,7 @@ public class LoginGuardProcessor {
         return switch (kind) {
             case LOGIN, ADMIN_LOGIN -> MemberErrorCode.LOGIN_ATTEMPT_LIMITED;
             case SIGN_UP, SIGN_UP_IP -> MemberErrorCode.SIGN_UP_ATTEMPT_LIMITED;
-            case ADMIN_OTP, ADMIN_OTP_LOGIN -> MemberErrorCode.OTP_ATTEMPT_LIMITED;
+            case ADMIN_OTP, ADMIN_OTP_LOGIN, ADMIN_OTP_PEER_RECOVERY -> MemberErrorCode.OTP_ATTEMPT_LIMITED;
         };
     }
 

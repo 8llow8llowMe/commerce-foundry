@@ -54,7 +54,7 @@ class LoginGuardProcessorTest {
         LoginGuardProcessor disabled = new LoginGuardProcessor(port, new LoginGuardPolicy(false, ENABLED.login(), ENABLED.signUp()), clock);
 
         for (AttemptKind kind : AttemptKind.values()) {
-            if (kind == AttemptKind.ADMIN_OTP || kind == AttemptKind.ADMIN_OTP_LOGIN) {
+            if (kind == AttemptKind.ADMIN_OTP || kind == AttemptKind.ADMIN_OTP_LOGIN || kind == AttemptKind.ADMIN_OTP_PEER_RECOVERY) {
                 continue;
             }
             disabled.admit(kind, EMAIL);
@@ -109,6 +109,8 @@ class LoginGuardProcessorTest {
         assertThatThrownBy(() -> processor.clear(AttemptKind.ADMIN_OTP, "4242")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> processor.admit(AttemptKind.ADMIN_OTP_LOGIN, "4242")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> processor.clear(AttemptKind.ADMIN_OTP_LOGIN, "4242")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> processor.admit(AttemptKind.ADMIN_OTP_PEER_RECOVERY, "4242")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> processor.clear(AttemptKind.ADMIN_OTP_PEER_RECOVERY, "4242")).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(port);
     }
 
@@ -133,6 +135,20 @@ class LoginGuardProcessorTest {
         MemberException unavailable = new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
         willThrow(unavailable).given(port).record(eq(AttemptKind.ADMIN_OTP_LOGIN), eq("77"), any());
         assertThatThrownBy(() -> processor.admitAdminOtpLogin(77L)).isSameAs(unavailable);
+    }
+
+    @Test
+    @DisplayName("동료 복구는 독립 창으로 스위치 꺼짐에도 세고 성공한 시도를 지우지 않는다")
+    void peerRecoveryCountsInOwnWindow() {
+        LoginGuardProcessor disabled = new LoginGuardProcessor(port, new LoginGuardPolicy(false, ENABLED.login(), ENABLED.signUp()), clock);
+        given(port.record(AttemptKind.ADMIN_OTP_PEER_RECOVERY, "4242", LOGIN_WINDOW))
+            .willReturn(new LoginAttemptOutcome(5, LOGIN_WINDOW), new LoginAttemptOutcome(6, Duration.ofMinutes(2)));
+
+        disabled.admitAdminOtpPeerRecovery(4242L);
+        assertThatThrownBy(() -> disabled.admitAdminOtpPeerRecovery(4242L))
+            .isInstanceOfSatisfying(LoginAttemptLimitedException.class, limited ->
+                assertThat(limited.getErrorCode()).isEqualTo(MemberErrorCode.OTP_ATTEMPT_LIMITED));
+        verify(port, never()).reset(eq(AttemptKind.ADMIN_OTP_PEER_RECOVERY), anyString());
     }
 
     @ParameterizedTest

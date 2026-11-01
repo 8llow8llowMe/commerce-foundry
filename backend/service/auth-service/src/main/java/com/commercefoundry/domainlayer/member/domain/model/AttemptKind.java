@@ -33,5 +33,8 @@ public enum AttemptKind {
      * <b>재인증 창과 나눈다</b> — 같은 창이면 access 토큰만 가진 사람이 틀린 재인증을 반복해 진짜 관리자의 로그인 2단계를 잠근다.
      * <b>성공해도 창을 지우지 않는다</b>({@link #ADMIN_LOGIN} 과 같은 이유) — 성공 DEL 이 있으면 비밀번호를 아는 쪽이 한 번 맞힐 때마다 대입 횟수를 다시 채운다.
      */
-    ADMIN_OTP_LOGIN
+    ADMIN_OTP_LOGIN,
+
+    /** 동료 OTP 복구 재인증(#238 PR-C). 다른 OTP 창과 분리하고 성공해도 지우지 않는다. */
+    ADMIN_OTP_PEER_RECOVERY
 }

@@ -25,5 +25,7 @@ public enum AdminAuditAction {
     /** 로그인한 운영자가 자기 OTP 를 해제했다 (#238). */
     ADMIN_OTP_DISABLE,
     /** 로그인한 운영자가 OTP 복구 코드를 다시 발급했다 (#238). 이전 코드는 모두 무효다. */
-    ADMIN_OTP_RECOVERY_REGENERATE
+    ADMIN_OTP_RECOVERY_REGENERATE,
+    /** 동료 관리자의 OTP 자격·복구 코드를 안전하게 교체했다 (#238 PR-C). */
+    ADMIN_OTP_PEER_RECOVERY
 }

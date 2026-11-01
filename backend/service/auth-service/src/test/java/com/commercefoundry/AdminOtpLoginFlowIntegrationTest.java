@@ -309,6 +309,66 @@ class AdminOtpLoginFlowIntegrationTest {
         assertThat(otp(newChallenge, admin.currentCode(clock))).hasStatusOk();
     }
 
+    @Test
+    @DisplayName("동료 복구 뒤 대상은 계속 OTP가 필요하고 옛 코드가 무효다 — 새 코드로 로그인·해제·재등록한다")
+    void peerRecoveryKeepsSecondFactorAndEnablesReenrollment() {
+        EnrolledAdmin actor = enrolledAdmin();
+        EnrolledAdmin target = enrolledAdmin();
+        String actorToken = JsonPath.read(content(otp(challengeOf(login(actor.email(), PASSWORD)), actor.currentCode(clock))),
+            "$.dataBody.accessToken");
+        String oldChallenge = challengeOf(login(target.email(), PASSWORD));
+
+        MvcTestResult recovered = peerRecover(target.id(), actorToken, actor.recoveryCodes().getFirst());
+
+        assertThat(recovered).hasStatusOk();
+        assertThat(recovered.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        List<String> newCodes = JsonPath.read(content(recovered), "$.dataBody.recoveryCodes");
+        assertThat(newCodes).hasSize(8);
+        assertThat(adminOtpProcessor.status(target.id()).enrolled()).isTrue();
+        assertThat(code(otp(oldChallenge, target.currentCode(clock)))).isEqualTo("AUTH_034");
+        clock.advance(Duration.ofSeconds(2));
+        String newChallenge = challengeOf(login(target.email(), PASSWORD));
+        assertThat(code(otp(newChallenge, target.recoveryCodes().getFirst()))).isEqualTo("AUTH_035");
+        assertThat(code(otp(newChallenge, target.currentCode(clock)))).isEqualTo("AUTH_035");
+        MvcTestResult targetLogin = otp(newChallenge, newCodes.getFirst());
+        assertThat(targetLogin).hasStatusOk();
+        String targetToken = JsonPath.read(content(targetLogin), "$.dataBody.accessToken");
+
+        MvcTestResult disabled = mvc.post().uri("/api/v1/admin/me/otp/deactivation")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + targetToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"currentPassword\":\"%s\",\"code\":\"%s\"}".formatted(PASSWORD, newCodes.get(1))).exchange();
+        assertThat(disabled).hasStatusOk();
+        assertThat(adminOtpProcessor.status(target.id()).enrolled()).isFalse();
+
+        // 등록 시작은 Redis 전용 A2 테스트가 본다. 여기서는 해제 뒤 DB 재등록이 가능한지 같은 Processor 경로로 본다.
+        byte[] newSecret = new byte[Totp.SECRET_BYTES];
+        RANDOM.nextBytes(newSecret);
+        IssuedRecoveryCodes reissued = adminOtpProcessor.issueRecoveryCodes();
+        adminOtpProcessor.confirm(target.id(), newSecret, Totp.timeStep(clock.instant()) - 1, clock.instant(), reissued.hashes());
+        assertThat(adminOtpProcessor.status(target.id()).enrolled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("컷오프 Redis 실패 뒤 같은 동료 코드는 소비돼 재사용 불가이고, 다른 코드로 재시도해 복구한다")
+    void peerRecoveryCutoffFailureNeedsFreshActorProof() {
+        EnrolledAdmin actor = enrolledAdmin();
+        EnrolledAdmin target = enrolledAdmin();
+        String actorToken = JsonPath.read(content(otp(challengeOf(login(actor.email(), PASSWORD)), actor.currentCode(clock))),
+            "$.dataBody.accessToken");
+        cutoffStore.failNextWrite();
+
+        assertThat(code(peerRecover(target.id(), actorToken, actor.recoveryCodes().getFirst()))).isEqualTo("AUTH_013");
+        assertThat(code(peerRecover(target.id(), actorToken, actor.recoveryCodes().getFirst()))).isEqualTo("AUTH_035");
+        MvcTestResult retried = peerRecover(target.id(), actorToken, actor.recoveryCodes().get(1));
+
+        assertThat(retried).hasStatusOk();
+        assertThat(cutoffStore.findCutoff(target.id())).isPresent();
+        List<String> latestCodes = JsonPath.read(content(retried), "$.dataBody.recoveryCodes");
+        clock.advance(Duration.ofSeconds(2));
+        assertThat(otp(challengeOf(login(target.email(), PASSWORD)), latestCodes.getFirst())).hasStatusOk();
+    }
+
     private EnrolledAdmin enrolledAdmin() {
         String email = uniqueEmail();
         adminSeedUseCase.seed(new AdminSeedCommand(email, PASSWORD, null));
@@ -328,6 +388,13 @@ class AdminOtpLoginFlowIntegrationTest {
     private MvcTestResult otp(String challengeToken, String code) {
         return mvc.post().uri(ADMIN_LOGIN_OTP).contentType(MediaType.APPLICATION_JSON)
             .content("{\"challengeToken\":\"%s\",\"code\":\"%s\"}".formatted(challengeToken, code)).exchange();
+    }
+
+    private MvcTestResult peerRecover(long targetId, String actorToken, String code) {
+        return mvc.post().uri("/api/v1/admin/admins/" + targetId + "/otp/recovery")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + actorToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"currentPassword\":\"%s\",\"code\":\"%s\"}".formatted(PASSWORD, code)).exchange();
     }
 
     private static String challengeOf(MvcTestResult result) {

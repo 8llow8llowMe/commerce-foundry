@@ -21,12 +21,15 @@ import com.commercefoundry.domainlayer.member.application.model.AdminOtpProof.Re
 import com.commercefoundry.domainlayer.member.application.model.AdminOtpProof.TotpCode;
 import com.commercefoundry.domainlayer.member.application.model.IssuedRecoveryCodes;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminOtpEnrollmentStorePort;
+import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.domain.model.AdminOtpCredential;
 import com.commercefoundry.domainlayer.member.domain.model.Base32;
+import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.domainlayer.member.domain.model.RecoveryCode;
 import com.commercefoundry.domainlayer.member.domain.model.Totp;
 import com.commercefoundry.global.properties.AdminOtpProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
+import com.commercefoundry.security.principal.MemberRole;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -52,8 +55,10 @@ class AdminOtpProcessorTest {
 
     private final InMemoryAdminOtpRepository repository = new InMemoryAdminOtpRepository();
     private final AdminOtpEnrollmentStorePort enrollmentStore = mock(AdminOtpEnrollmentStorePort.class);
+    private final MemberRepositoryPort memberRepository = mock(MemberRepositoryPort.class);
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(4);
-    private final AdminOtpProcessor processor = new AdminOtpProcessor(repository, enrollmentStore, encoder, new SnowflakeIdGenerator(1, 1), PROPERTIES);
+    private final AdminOtpProcessor processor = new AdminOtpProcessor(repository, memberRepository, enrollmentStore, encoder,
+        new SnowflakeIdGenerator(1, 1), PROPERTIES);
 
     private void enroll(long lastUsedStep) {
         repository.save(AdminOtpCredential.confirm(7001L, MEMBER_ID, SECRET, lastUsedStep, NOW));
@@ -288,6 +293,59 @@ class AdminOtpProcessorTest {
 
         assertCode(catchThrown(() -> processor.disable(MEMBER_ID, stale, NOW)), MemberErrorCode.OTP_CODE_INVALID);
         assertThat(repository.findByMemberId(MEMBER_ID)).isPresent();
+    }
+
+    @Test
+    @DisplayName("동료 복구는 새 자격 ID와 새 코드로 교체해 옛 TOTP 증명·복구 코드 ID를 무효화하고 OTP 등록 상태를 유지한다")
+    void peerRecoveryReplacesCredentialIdentity() {
+        long targetId = MEMBER_ID + 1;
+        Member actor = admin(MEMBER_ID, "actor-hash");
+        Member target = admin(targetId, "target-hash");
+        given(memberRepository.findByIdForUpdate(MEMBER_ID)).willReturn(Optional.of(actor));
+        given(memberRepository.findByIdForUpdate(targetId)).willReturn(Optional.of(target));
+        repository.save(AdminOtpCredential.confirm(7001L, MEMBER_ID, SECRET, NOW_STEP - 5, NOW));
+        AdminOtpCredential oldTarget = AdminOtpCredential.confirm(7002L, targetId, SECRET, NOW_STEP - 5, NOW);
+        repository.save(oldTarget);
+        IssuedRecoveryCodes actorCodes = processor.issueRecoveryCodes();
+        repository.replaceRecoveryCodes(MEMBER_ID, actorCodes.hashes());
+        IssuedRecoveryCodes oldTargetCodes = processor.issueRecoveryCodes();
+        repository.replaceRecoveryCodes(targetId, oldTargetCodes.hashes());
+        AdminOtpProof actorProof = processor.resolveProof(MEMBER_ID, actorCodes.codes().getFirst(), NOW);
+        AdminOtpProof staleTotp = new TotpCode(oldTarget.accept(NOW_STEP).orElseThrow());
+        long oldRecoveryId = repository.findUnusedRecoveryCodes(targetId).getFirst().id();
+        IssuedRecoveryCodes replacementCodes = processor.issueRecoveryCodes();
+
+        processor.recoverPeer(MEMBER_ID, targetId, actor.passwordHash(), actorProof, replacementCodes.hashes(), NOW);
+
+        AdminOtpCredential replacement = repository.findByMemberId(targetId).orElseThrow();
+        assertThat(replacement.id()).isNotEqualTo(oldTarget.id());
+        assertThat(replacement.secret()).isNotEqualTo(oldTarget.secret());
+        assertThat(processor.isEnrolled(targetId)).isTrue();
+        assertThat(repository.countUnusedRecoveryCodes(targetId)).isEqualTo(RecoveryCode.COUNT);
+        assertCode(catchThrown(() -> processor.consumeForLogin(targetId, staleTotp, NOW)), MemberErrorCode.OTP_CODE_INVALID);
+        assertThat(repository.markRecoveryCodeUsed(oldRecoveryId, targetId, NOW)).isFalse();
+        assertCode(catchThrown(() -> processor.resolveProof(targetId, oldTargetCodes.codes().getFirst(), NOW)), MemberErrorCode.OTP_CODE_INVALID);
+        assertThat(processor.resolveProof(targetId, replacementCodes.codes().getFirst(), NOW)).isInstanceOf(RecoveryCodeMatch.class);
+    }
+
+    @Test
+    @DisplayName("행위자 비밀번호가 BCrypt 확인 뒤 바뀌면 잠금 아래 해시 재확인에서 거절하고 OTP를 소비하지 않는다")
+    void peerRecoveryRejectsChangedActorPassword() {
+        long targetId = MEMBER_ID + 1;
+        given(memberRepository.findByIdForUpdate(MEMBER_ID)).willReturn(Optional.of(admin(MEMBER_ID, "new-hash")));
+        given(memberRepository.findByIdForUpdate(targetId)).willReturn(Optional.of(admin(targetId, "target-hash")));
+        repository.save(AdminOtpCredential.confirm(7001L, MEMBER_ID, SECRET, NOW_STEP - 5, NOW));
+        repository.save(AdminOtpCredential.confirm(7002L, targetId, SECRET, NOW_STEP - 5, NOW));
+        AdminOtpProof proof = processor.resolveProof(MEMBER_ID, Totp.code(SECRET, NOW_STEP), NOW);
+
+        assertCode(catchThrown(() -> processor.recoverPeer(MEMBER_ID, targetId, "old-hash", proof, List.of("hash"), NOW)),
+            MemberErrorCode.ADMIN_PASSWORD_MISMATCH);
+        assertThat(repository.findByMemberId(MEMBER_ID).orElseThrow().lastUsedTimeStep()).isEqualTo(NOW_STEP - 5);
+        assertThat(repository.findByMemberId(targetId).orElseThrow().id()).isEqualTo(7002L);
+    }
+
+    private static Member admin(long id, String passwordHash) {
+        return Member.restore(id, "admin" + id + "@example.com", passwordHash, "관리자", null, MemberRole.ADMIN, 0L);
     }
 
     private static Throwable catchThrown(org.assertj.core.api.ThrowableAssert.ThrowingCallable callable) {

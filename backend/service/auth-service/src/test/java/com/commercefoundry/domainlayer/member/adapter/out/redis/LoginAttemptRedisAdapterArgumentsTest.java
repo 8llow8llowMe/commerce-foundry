@@ -208,4 +208,16 @@ class LoginAttemptRedisAdapterArgumentsTest {
             .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    @DisplayName("동료 복구 시도는 본인 재인증·로그인과 다른 memberId 키를 쓰고 잘못된 주체를 거절한다")
+    void peerRecoveryUsesSeparateMemberIdKey() {
+        List<String> keys = List.of("auth:admin-otp-peer-recovery-attempt:4611686018427387904");
+        given(redisTemplate.execute(LoginAttemptRedisScripts.RECORD, keys, "900000")).willReturn(List.of(1L, 900_000L));
+
+        assertThat(adapter.record(AttemptKind.ADMIN_OTP_PEER_RECOVERY, "4611686018427387904", WINDOW))
+            .isEqualTo(new LoginAttemptOutcome(1, WINDOW));
+        assertThatThrownBy(() -> adapter.record(AttemptKind.ADMIN_OTP_PEER_RECOVERY, EMAIL, WINDOW))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
 }

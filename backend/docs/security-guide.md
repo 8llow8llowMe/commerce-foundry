@@ -879,6 +879,8 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
   - 6자리 대입은 2단계 시도 제한이 막는다(창당 5회 — 창당 맞힐 확률 약 5 × 3/10^6). 다만 창이 끝나면 다시 5회 시도할 수 있어 1년 연속 시도의 성공 확률 상한은 약 40%다. 점증 잠금 또는 `ADMIN_OTP_LOGIN` 시도 초과 경보를 후속으로 둔다.
   - 같은 챌린지의 동시 2단계는 GETDEL 이 한쪽만 통과시킨다. 진 쪽이 낸 복구 코드는 소비되지 않고 남는다.
   - TOTP 로 로그인할 때 저장된 비밀이 이전 키의 암호문이면 같은 UPDATE 에서 현재 키로 다시 암호화한다(키 회전, `secret-management.md`). 복구 코드 로그인은 다시 암호화하지 않는다.
+- **동료 OTP 복구 (#238 PR-C).** 현재 `ADMIN` 역할의 다른 활성 관리자가 자기 비밀번호와 OTP 또는 복구 코드로 재인증한 뒤 대상의 자격을 교체한다. 본인 대상은 거절한다. 요청마다 행위자 전용 `ADMIN_OTP_PEER_RECOVERY` 창을 먼저 세고 성공해도 지우지 않는다. 두 회원과 OTP 자격을 ID 순으로 잠그고, 행위자 증명 소비·대상 옛 자격/코드 삭제·새 ID/무작위 비밀/코드 저장을 한 DB 트랜잭션으로 묶는다. 새 자격도 `enrolled=true` 라 대상은 비밀번호만으로 로그인할 수 없다. 옛 자격 ID의 TOTP 증명과 옛 복구 코드 ID는 모두 무효다.
+  새 복구 코드 원문은 `no-store` 응답 한 번만 내린다. 대상은 최소 두 코드를 검증된 별도 채널로 받아 하나로 로그인하고 다른 하나로 본인 OTP를 해제한 뒤 새 기기에 재등록한다. 대상의 기존 access·챌린지는 DB 교체 뒤 컷오프로 끊는다. Redis 장애면 503이어도 DB 교체와 행위자 코드 소비는 끝났을 수 있어, 새 TOTP step 또는 미사용 복구 코드로 재시도하고 마지막 성공 응답 코드만 전달한다.
 
 ### 11-2. 식별자 공간 (`sub`)
 
@@ -931,6 +933,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
     **로그인 2단계(#238 PR-B)는 `ADMIN_LOGIN_PASSWORD_VERIFIED`(1단계 비밀번호 통과)와 `ADMIN_LOGIN`(2단계 결과)을 쓴다** — 1단계 통과는 `target=member:<id> result=SUCCESS`, 2단계 성공은 `ADMIN_LOGIN` 성공,
     대상 관리자를 안 뒤의 2단계 실패(코드 틀림 · 재사용 · 그 사이 비활성화 · 잠금 대기)가 `ADMIN_LOGIN` 실패(`actorMemberId=- target=member:<id>`)다. 챌린지가 무효라 대상을 모르는 실패 ·
     2단계 시도 제한 429 · 계수기 장애 503 은 남기지 않는다. TOTP 였는지 복구 코드였는지는 싣지 않는다 — 감사 조회 결과로 어떤 코드를 썼는지 드러나지 않게.
+    동료 OTP 복구는 `ADMIN_OTP_PEER_RECOVERY` 로 행위자 memberId · 대상 `member:<id>` · 결과만 남긴다. 비밀번호·TOTP·복구 코드·비밀은 남기지 않는다. Redis 컷오프 실패 전에 DB 교체가 끝났으면 보안 상태 변경 자체는 성공으로 감사하고 503과 운영 경보를 별도로 남긴다.
   - `actorMemberId` — 행위한 관리자의 `member.id`(access 토큰의 `sub`). 요청 본문 값을 쓰지 않는다.
   - `target` — 대상 리소스 · 조건(`member:<id>` · `members?role=..&page=..&size=..`).
   - `result` — `SUCCESS` · `FAILURE`. 실패 이유(회원 없음 · 비밀번호 틀림 · 고객 계정)는 나누지 않는다.
@@ -1136,6 +1139,7 @@ IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존
 | `SIGN_UP` | `POST /api/v1/auth/sign-up` | `auth:sign-up-attempt:{emailHmac}` | 5회 · 10분 (`sign-up.max-attempts` · `sign-up.window`) | 429 `AUTH_041` | 지우지 않는다 | 세지 않고 통과 (fail-open) |
 | `ADMIN_OTP` (#238) | `POST /api/v1/admin/me/otp` · `…/otp/deactivation` · `…/otp/recovery-codes` | `auth:admin-otp-attempt:{memberId}` | 로그인과 같은 값, 창은 따로 | 429 `AUTH_043` | 지운다(DEL) | 503 `AUTH_013` (fail-closed) |
 | `ADMIN_OTP_LOGIN` (#238 PR-B) | `POST /api/v1/auth/admin/login/otp` | `auth:admin-otp-login-attempt:{memberId}` | 로그인과 같은 값, 재인증과 창은 따로 | 429 `AUTH_043` | **지우지 않는다** | 503 `AUTH_013` (fail-closed) |
+| `ADMIN_OTP_PEER_RECOVERY` (#238 PR-C) | `POST /api/v1/admin/admins/{memberId}/otp/recovery` | `auth:admin-otp-peer-recovery-attempt:{actorMemberId}` | 로그인과 같은 값, 본인 재인증·로그인 창과 따로 | 429 `AUTH_043` | **지우지 않는다** | 503 `AUTH_013` (fail-closed) |
 
 - 횟수는 1~100, 창은 1분~1시간이다(`LoginAttemptPolicy` — 벗어나면 기동하지 않는다). 키 형식 · TTL 은 `coding-conventions.md` §9-7 이다.
 - **관리자 OTP 코드 시도(`ADMIN_OTP`, #238)** 는 6자리 코드 대입을 막는다 — 주체는 이메일이 아니라 access 토큰의 memberId(개인정보가 아니라 HMAC 없이 키에 넣는다)이고,
