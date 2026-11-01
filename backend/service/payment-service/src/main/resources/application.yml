@@ -29,6 +29,11 @@ spring:
     openfeign:
       client:
         config:
+          # 모든 Feign 클라이언트의 기본 타임아웃 (ms) — 지금은 internal 클라이언트(order-service 주문 요약)가 쓴다. 기본 read timeout 60초를 그대로 두지 않는다.
+          # request-interceptors · logger-level 은 여기(default)에 두지 않는다 — 외부 API(토스) 클라이언트에도 실린다 (security-guide.md §9-5, TossPaymentsStartupGuard)
+          default:
+            connect-timeout: 2000
+            read-timeout: 3000
           # 토스페이먼츠 클라이언트(TossPaymentsClient)만의 타임아웃 (ms). 기본 read timeout 60초를 그대로 두지 않는다 (coding-conventions.md §10, architecture-guide.md §8).
           # read 는 게이트웨이 응답 타임아웃(10s)보다 짧아야 한다 — 게이트웨이가 먼저 끊으면 고객은 실패를 보는데 승인은 계속 진행된다. TossPaymentsStartupGuard 가 본다.
           # 승인은 카드사 응답을 기다려 수 초 걸릴 수 있어 내부 호출(3s)보다 길게 둔다. 넘으면 실패가 아니라 UNKNOWN 이다 (payment-guide.md §4).
@@ -39,7 +44,7 @@ spring:
             connect-timeout: 2000
             read-timeout: 6000
 
-# 외부 호출 서킷 (coding-conventions.md §10). TossPaymentsResponseSupport 가 인스턴스 이름으로 감싼다.
+# 외부 · 서비스 간 호출 서킷 (coding-conventions.md §10). TossPaymentsResponseSupport · OrderInternalResponseSupport 가 인스턴스 이름으로 감싼다.
 # spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다 — 서킷과 결과 분류를 한 곳(support)에서 한다
 resilience4j:
   circuitbreaker:
@@ -60,6 +65,13 @@ resilience4j:
         # ignore-exceptions(FeignClientException) 로 두면 그 하위인 429(TooManyRequests)까지 빠지고, Retry-After 가 붙은 429(RetryableException)만 세어져
         # 같은 429 가 헤더에 따라 달리 세어진다 — 술어로 429 만 빼고 무시한다. default 에 ignore-exceptions 를 두지 않는다(둘은 OR 로 합쳐진다)
         ignore-exception-predicate: com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.TossCircuitBreakerIgnorePredicate
+      # order-service internal 호출 — 결제 준비의 주문 요약 (GET /internal/v1/orders/{orderId}/payment-summary). OrderInternalResponseSupport 가 감싼다.
+      # 4xx(주문 없음 ORDER_001 · 서비스 인증 실패 등)는 대상 장애가 아니다 — 이 인스턴스에만 ignore-exceptions 를 둔다.
+      # default 에 두면 toss 인스턴스의 술어와 OR 로 합쳐져 토스 429 가 서킷 실패에서 빠진다 (coding-conventions.md §10)
+      order-service:
+        base-config: default
+        ignore-exceptions:
+          - feign.FeignException$FeignClientException
 
 # 토스페이먼츠 (payment-guide.md §2). 키 형식 · 프로파일 조건은 TossPaymentsStartupGuard 가 기동 때 본다
 toss:
