@@ -63,7 +63,9 @@ import tools.jackson.databind.json.JsonMapper;
 @EnabledWithDockerOrOnCi
 @TestPropertySource(properties = {
     "spring.jpa.hibernate.ddl-auto=validate",
-    "spring.jpa.properties.hibernate.default_schema=payment"
+    "spring.jpa.properties.hibernate.default_schema=payment",
+    // 운영 결제 게이트는 기본 닫힘이다 — 흐름을 보려고 연다
+    "payment.enabled=true"
 })
 class PaymentConfirmWebIntegrationTest {
 
@@ -315,6 +317,28 @@ class PaymentConfirmWebIntegrationTest {
         assertThat(codeOf(reused)).isEqualTo("PAYMENT_014");
         assertThat(dbStatusOf(second)).isEqualTo("READY");
         toss.verify(1, postRequestedFor(urlEqualTo(CONFIRM_PATH)));
+    }
+
+    @Test
+    @DisplayName("승인 직전 주문을 다시 확인한다 — 준비 뒤 주문이 취소됐으면 409 PAYMENT_003 이고 토스를 부르지 않으며 결제 시도는 READY 그대로다")
+    void confirmRechecksOrder() {
+        long orderId = pendingOrder();
+        String pgOrderId = prepare(orderId);
+        String canceled = """
+            {"dataHeader":{"success":true,"resultCode":null,"resultMessage":null,"fieldErrors":null},
+             "dataBody":{"orderId":"%d","memberId":"%d","status":"CANCELED","totalAmount":{"amount":%d,"currency":"KRW"},
+               "orderName":"테스트 저고리 외 1건","paymentDueAt":"%s"}}
+            """.formatted(orderId, TestTokens.MEMBER_ID, AMOUNT, Instant.now().plus(30, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.SECONDS));
+        order.stubFor(get(urlPathEqualTo("/internal/v1/orders/" + orderId + "/payment-summary"))
+            .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody(canceled)));
+        toss.stubFor(post(urlEqualTo(CONFIRM_PATH)).willReturn(tossDone(pgOrderId)));
+
+        MvcTestResult result = confirm(UUID.randomUUID(), pgOrderId, paymentKey(pgOrderId));
+
+        assertThat(result).hasStatus(409);
+        assertThat(codeOf(result)).isEqualTo("PAYMENT_003");
+        assertThat(dbStatusOf(pgOrderId)).isEqualTo("READY");
+        toss.verify(0, postRequestedFor(urlEqualTo(CONFIRM_PATH)));
     }
 
     @Test

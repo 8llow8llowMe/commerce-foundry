@@ -91,4 +91,29 @@ class OrderSummaryProcessorTest {
         givenSummary("PENDING_PAYMENT", Money.of(129_000, CurrencyCode.KRW), NOW.minusSeconds(60));
         assertError(PaymentErrorCode.PAYMENT_DUE_TOO_CLOSE);
     }
+
+    @Test
+    @DisplayName("승인 직전 재확인 — 기한은 min-remaining 이 아니라 경과만 본다: 1ms 남으면 통과, 기한 시각이면 409 PAYMENT_004")
+    void confirmableChecksDueOnly() {
+        givenSummary("PENDING_PAYMENT", Money.of(129_000, CurrencyCode.KRW), NOW.plusMillis(1));
+        assertThat(processor.getConfirmableOrder(ORDER_ID, MEMBER_ID).totalAmount()).isEqualTo(Money.of(129_000, CurrencyCode.KRW));
+
+        givenSummary("PENDING_PAYMENT", Money.of(129_000, CurrencyCode.KRW), NOW);
+        assertConfirmError(PaymentErrorCode.PAYMENT_DUE_TOO_CLOSE);
+    }
+
+    @Test
+    @DisplayName("승인 직전 재확인 — 주문 없음 404 PAYMENT_002 · 결제 대기 아님 409 PAYMENT_003")
+    void confirmableRejections() {
+        given(port.find(ORDER_ID, MEMBER_ID)).willReturn(Optional.empty());
+        assertConfirmError(PaymentErrorCode.NOT_FOUND_ORDER);
+
+        givenSummary("CANCELED", Money.of(129_000, CurrencyCode.KRW), NOW.plusSeconds(600));
+        assertConfirmError(PaymentErrorCode.ORDER_NOT_PAYABLE);
+    }
+
+    private void assertConfirmError(PaymentErrorCode errorCode) {
+        assertThatThrownBy(() -> processor.getConfirmableOrder(ORDER_ID, MEMBER_ID))
+            .isInstanceOfSatisfying(PaymentException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(errorCode));
+    }
 }

@@ -68,6 +68,12 @@ class PaymentServiceApplicationTests {
         assertThat(environment.getProperty("spring.jpa.properties.hibernate.default_schema")).isEqualTo("payment");
     }
 
+    @Test
+    @DisplayName("운영 결제 게이트는 기본 닫힘이다 — 공통 yml 의 payment.enabled 가 false 이고 결제 게이트 빈도 false 로 묶인다 (#308 · #15 전)")
+    void paymentGateIsClosedByDefault() {
+        assertThat(applicationContext.getBean(com.commercefoundry.global.properties.PaymentGateProperties.class).enabled()).isFalse();
+    }
+
     /** 키에 오타가 있으면 Hibernate 가 조용히 무시한다. yml 값이 아니라 실제로 만들어진 SessionFactory 의 설정을 본다. */
     @Test
     @DisplayName("Hibernate IN 절 파라미터 패딩이 켜져 있다 (coding-conventions.md §9-6)")
