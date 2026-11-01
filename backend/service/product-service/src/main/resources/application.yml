@@ -110,6 +110,11 @@ stock:
       # 꺼져 있으면 스윕이 주 경로라 쓰지 않는다. 0 이상 1시간 이하
       event-grace: 2m
 
+# AI 상품 초안 (#359, api-design-guide.md §2-14)
+product-draft:
+  # 초안 보관 기간 — 지나면 적용 · 거절할 수 없다. 읽을 때 판정하고 정리 작업은 두지 않는다
+  ttl: 7d
+
 security:
   jwt:
     # access 토큰 검증 공개키 — PEM 본문 한 줄 (security-guide.md §5-3 · §6). 비었거나 풀리지 않으면 기동하지 않는다.

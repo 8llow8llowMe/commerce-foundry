@@ -486,6 +486,55 @@
     comment on column product.product_custom_order_field.unit is
         '단위 (cm)';
 
+    create table product.product_draft (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        expires_at timestamp(6) with time zone not null,
+        input_json text not null,
+        rejected_at timestamp(6) with time zone,
+        rejected_by_member_id bigint,
+        requested_by_member_id bigint not null,
+        status varchar(16) not null check ((status in ('REQUESTED','GENERATING','READY','FAILED','APPLIED','REJECTED','EXPIRED'))),
+        version bigint not null,
+        primary key (id),
+        constraint ck_product_draft_rejected check ((status = 'REJECTED') = (rejected_by_member_id is not null and rejected_at is not null)),
+        constraint ck_product_draft_input_json_length check (char_length(input_json) <= 32768)
+    );
+
+    comment on table product.product_draft is
+        'AI 상품 등록 초안';
+
+    comment on column product.product_draft.id is
+        '초안 아이디 (Snowflake)';
+
+    comment on column product.product_draft.created_at is
+        '생성 시각';
+
+    comment on column product.product_draft.updated_at is
+        '수정 시각';
+
+    comment on column product.product_draft.expires_at is
+        '보관 만료 시각 — 지나면 적용 · 거절할 수 없다';
+
+    comment on column product.product_draft.input_json is
+        '운영자 입력(사실 · 이미지) JSON — 고객 개인정보 없음, 32768자 이하';
+
+    comment on column product.product_draft.rejected_at is
+        '거절 시각. 거절 전에는 null';
+
+    comment on column product.product_draft.rejected_by_member_id is
+        '거절한 어드민 회원 아이디. 거절 전에는 null';
+
+    comment on column product.product_draft.requested_by_member_id is
+        '초안을 만든 어드민 회원 아이디 (auth member.id, 서비스 밖 참조)';
+
+    comment on column product.product_draft.status is
+        '초안 상태 (REQUESTED / GENERATING / READY / FAILED / APPLIED / REJECTED / EXPIRED). 만료는 읽을 때 expires_at 으로 판정한다';
+
+    comment on column product.product_draft.version is
+        '낙관적 락 버전';
+
     create table product.product_image (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
