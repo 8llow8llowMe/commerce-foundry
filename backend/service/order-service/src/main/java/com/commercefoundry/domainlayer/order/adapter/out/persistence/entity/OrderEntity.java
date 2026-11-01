@@ -40,7 +40,10 @@ import lombok.NoArgsConstructor;
     uniqueConstraints = @UniqueConstraint(name = "uk_orders_stock_reservation_id", columnNames = "stock_reservation_id"),
     indexes = {
         @Index(name = "idx_orders_member_id_id", columnList = "member_id, id"),
-        @Index(name = "idx_orders_status_payment_due_at_id", columnList = "status, payment_due_at, id")
+        @Index(name = "idx_orders_status_payment_due_at_id", columnList = "status, payment_due_at, id"),
+        // 어드민 주문 목록(#17) — 주문 시각 범위 · 최신순 (상태 조건 있음 / 없음)
+        @Index(name = "idx_orders_status_created_at_id", columnList = "status, created_at, id"),
+        @Index(name = "idx_orders_created_at_id", columnList = "created_at, id")
     },
     check = {
         @CheckConstraint(

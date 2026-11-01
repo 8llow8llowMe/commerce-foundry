@@ -56,6 +56,16 @@ public final class OrderValidationMessage {
     public static final String MEMBER_ID_POSITIVE = "ORDER_142:memberId 는 양수여야 합니다.";
     /** 자유 텍스트(배송지 · 맞춤 입력)의 제어 문자 · 깨진 문자 — PostgreSQL 이 NUL 을 거절해 선점 뒤 저장이 500 이 되는 것을 앞에서 막는다(#426). */
     public static final String TEXT_INVALID_CHARACTER = "ORDER_143:제어 문자(NUL · 개행 · 탭 등)나 깨진 문자를 쓸 수 없습니다.";
+    public static final String PAGE_MIN = "ORDER_144:page 는 0 이상이어야 합니다.";
+    public static final String SIZE_RANGE = "ORDER_145:size 는 1~100 이어야 합니다.";
+    public static final String PERIOD_INVALID = "ORDER_146:기간의 시작(from)은 끝(to)보다 앞이어야 합니다.";
+    public static final String STATUS_REQUIRED = "ORDER_147:바꿀 상태(status)를 골라 주세요.";
+    public static final String REASON_LENGTH_MAX = "ORDER_148:사유는 200자 이하여야 합니다.";
+    public static final String ORDER_IDS_SIZE = "ORDER_149:주문은 1~100개까지 한 번에 바꿀 수 있습니다.";
+    public static final String ORDER_IDS_DUPLICATE = "ORDER_150:같은 주문이 두 번 들어 있습니다.";
+    public static final String REASON_INVALID_CHARACTER = "ORDER_151:사유에는 줄바꿈 · 탭 같은 제어 문자나 깨진 문자를 쓸 수 없습니다.";
+    public static final String ORDER_ID_FORMAT = "ORDER_152:주문 아이디는 숫자 문자열이어야 합니다.";
+    public static final String BULK_DELIVERED_NOT_ALLOWED = "ORDER_153:배송 완료는 사유와 함께 한 건씩 바꿉니다.";
 
     private OrderValidationMessage() {
     }

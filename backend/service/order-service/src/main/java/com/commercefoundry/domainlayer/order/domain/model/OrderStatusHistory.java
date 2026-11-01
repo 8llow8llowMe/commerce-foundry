@@ -40,6 +40,18 @@ public record OrderStatusHistory(
         return new OrderStatusHistory(id, order.id(), OrderStatus.PENDING_PAYMENT, OrderStatus.EXPIRED, StatusChangedBy.SYSTEM, null, "PAYMENT_TIMEOUT");
     }
 
+    /**
+     * 어드민이 상태를 바꿨다 (#17). {@code before} 는 전이 전 주문, {@code after} 는 전이 뒤 주문이다.
+     *
+     * @param reason 운영자가 남긴 사유(200자 이하). 없으면 null
+     */
+    public static OrderStatusHistory changedByAdmin(long id, Order before, Order after, long adminId, String reason) {
+        if (before.isNew() || before.id() != after.id() || before.status() == after.status()) {
+            throw new IllegalArgumentException("어드민 이력은 저장된 같은 주문의 상태 변경에서만 만듭니다: orderId=" + before.id());
+        }
+        return new OrderStatusHistory(id, before.id(), before.status(), after.status(), StatusChangedBy.ADMIN, adminId, reason);
+    }
+
     @Override
     public String toString() {
         return "OrderStatusHistory[id=" + id + ", orderId=" + orderId + ", fromStatus=" + fromStatus

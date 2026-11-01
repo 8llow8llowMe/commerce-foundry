@@ -9,6 +9,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -34,6 +36,13 @@ public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
          group by i.productId
         """)
     List<PendingProductQuantityQueryResult> sumQuantityByProduct(Long memberId, OrderStatus status, Collection<Long> productIds);
+    /** 어드민 목록 — 주문 시각 [from, to) · 최신순 (#17). {@code idx_orders_created_at_id} 범위 스캔(본문 · 건수 모두). */
+    Page<OrderEntity> findAllByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(Instant from, Instant to, Pageable pageable);
+
+    /** 어드민 목록 — 상태 · 주문 시각 [from, to) · 최신순 (#17). {@code idx_orders_status_created_at_id} 범위 스캔. */
+    Page<OrderEntity> findAllByStatusAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDescIdDesc(
+        OrderStatus status, Instant from, Instant to, Pageable pageable
+    );
 
     /** 만료 대상의 첫 배치. */
     @Query("""
