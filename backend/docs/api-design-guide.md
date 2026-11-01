@@ -658,23 +658,23 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 | `GET /api/v1/products/{productId}/looks` | `permitAll()` | 200 `{looks:[...목록 항목과 같은 모양]}` — 상품이 든 보이는 룩 전체, 노출 순서 · 같은 캐시 | 404 `PRODUCT_001`(없거나 숨긴 상품, 플래그보다 먼저) · 400 `PRODUCT_198`(숫자 아님) |
 | `GET /api/v1/admin/looks` | ADMIN | 200 전체(숨김 포함, 최대 100개, 배열 순서 = 노출 순서) `{looks:[...]}` | — |
 | `GET /api/v1/admin/looks/{lookId}` | ADMIN | 200 | 404 `LOOK_001` · 400 `LOOK_118` |
-| `POST /api/v1/admin/looks` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `LOOK_003~005` · `LOOK_101~117` · 409 `LOOK_002` · `LOOK_008` · 503 `LOOK_006` |
+| `POST /api/v1/admin/looks` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `LOOK_003~005` · `LOOK_009` · `LOOK_101~117` · 409 `LOOK_002` · `LOOK_008` · 503 `LOOK_006` |
 | `PUT /api/v1/admin/looks/{lookId}` | ADMIN | 200 — 룩 칸 · 구성 상품 전체 교체(순서 그대로) | 위와 같음 + 404 `LOOK_001` · 400 `LOOK_118`(경로) |
 | `DELETE /api/v1/admin/looks/{lookId}` | ADMIN | 200 `dataBody: null` — 구성 상품도 지운다. 남은 순서를 다시 매기지 않는다 | 404 `LOOK_001` · 400 `LOOK_118`(경로) · 409 `LOOK_008` |
 | `PATCH /api/v1/admin/looks/order` | ADMIN | 200 새 순서의 전체 목록 — 본문 `{lookIds}` 는 현재 전체 집합과 같아야 한다 | 400 `LOOK_007` · `LOOK_119~122` · 409 `LOOK_008` |
 
 - **본문**: `{title, description?, image:{url, width?, height?, altText?}, visible, productIds:[...]}`. 제목 1~100, 설명 1000(개행 · 탭 허용), 주소 500,
   대체 텍스트 200, 크기는 양수. `productIds` 는 1~20개이고 **배열 순서가 구성 순서**다. 아이디는 문자열로 보내도 된다.
-- **응답**: `{lookId, title, description, image:{url, width, height, altText}, visible, products:[{productId, name, visible, saleStatus}]}`. 아이디는 문자열이다.
+- **어드민 응답**(목록 · 상세 · 쓰기): `{lookId, title, description, image:{url, width, height, altText}, visible, products:[{productId, name, visible, saleStatus, deleted}]}`. 아이디는 문자열이다.
   순서는 배열 순서로만 전하고 내부 순서 번호(`displayOrder`) · 아이템 아이디는 내지 않는다(§2-8). `saleStatus` 는 `{code, name, description}`(판매중 · 판매 종료)이다.
-- **비노출 · 판매 종료 상품**: 어드민 쓰기는 숨김 · 판매 종료 상품을 받는다 — 없는 상품만 400 `LOOK_004`(메시지에 없는 아이디를 모두 싣는다).
-  어드민 조회는 상품마다 `visible` · `saleStatus` 를 내고, 상품 행이 없으면(데이터 오류) `name` · `saleStatus` 가 null · `visible=false` 다.
+- **비노출 · 판매 종료 · 삭제 상품**: 어드민 쓰기는 숨김 · 판매 종료 상품을 받는다. 없는 상품은 400 `LOOK_004`(메시지에 요청 순서의 없는 아이디 목록), 삭제 상품은 400 `LOOK_009`(메시지에 요청 순서의 삭제 아이디 목록)로 거절한다. 둘 다 있으면 `LOOK_004` 를 먼저 반환한다.
+  이미 구성된 상품이 나중에 삭제되어도 룩 구성은 유지한다. 어드민 조회는 상품마다 `visible` · `saleStatus` · `deleted` 를 내고, 상품 행이 없으면(데이터 오류) `name` · `saleStatus` 가 null · `visible=false` · `deleted=false` 다.
 - **고객 응답 규칙**:
   - 기능 플래그가 꺼지면 데이터는 그대로 두고 응답에서만 숨긴다 — 목록 200 빈 `contents`(저장소를 읽지 않는다), 상세 404 `LOOK_001`, 상품별 200 `looks: []`.
     상품별 룩은 상품 확인(없거나 숨긴 상품 404 `PRODUCT_001`)이 플래그보다 먼저다 — 상품 상세와 같은 존재 판정을 지킨다.
   - 숨긴 룩은 목록에 없고 상세는 없는 룩과 같은 404 `LOOK_001` 이다(존재를 드러내지 않는다).
   - `products` 는 상품 목록 항목(`GET /api/v1/products`)과 같은 카드 · 같은 계산(`ProductListProcessor.summarizeVisible`)이다 — `LookProductCardParityTest` 가 JSON 을 비교한다.
-    숨긴 상품은 빠지고, 판매 종료 · 품절은 `saleStatus` 로 남는다. **상품이 모두 빠져도 룩은 남는다(`products: []`)** — 그때 FE 는 "함께 담기" 를 숨긴다.
+    숨긴 · 삭제 상품은 빠지고, 판매 종료 · 품절은 `saleStatus` 로 남는다. **상품이 모두 빠져도 룩은 남는다(`products: []`)** — 그때 FE 는 "함께 담기" 를 숨긴다.
   - 정렬은 `display_order` 오름차순 → 아이디 오름차순으로 **어드민 목록과 같다** — 어드민이 본 배열 순서가 고객 순서다.
   - 읽기는 잠그지 않는다. 룩 행을 읽은 뒤 아이템을 읽기 전에 삭제가 커밋되어 아이템이 비면 그 룩은 목록에서 빠지고(한 쪽이 size 보다 작을 수 있다) 상세는 404 `LOOK_001` 이다.
     상품별 룩도 같다 — 상품 확인 · 룩 · 아이템을 각각 다른 문장으로 읽고 응답은 공유 캐시(60초)에 담기므로, 어드민 변경 · 상품 숨김이 최대 캐시 시간 수준 늦게 보일 수 있다.
@@ -687,7 +687,7 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 - **동시성**: 쓰기 4종은 전체 룩 행 잠금(대기 2초 · 트랜잭션 5초) 뒤 다시 읽어 판정하고 마지막 쓰기가 이긴다(메인 전시와 같다). 버전 칸은 없다.
   잠금을 못 얻으면 409 `LOOK_008`. 룩이 0개일 때만 동시 생성이 직렬화되지 않아 둘 다 순서 0 을 받는다 — 아이디 순으로 정렬된다.
 - 오류 코드: `LOOK_001`(룩 없음 404) · `002`(룩 100개 상한 409) · `003`(같은 상품 중복) · `004`(없는 상품) · `005`(이미지 주소) · `006`(공개 주소 미설정 503) ·
-  `007`(순서 변경 집합) · `008`(잠금 409). 검증은 `LOOK_101~122`(`LookValidationMessage`). 깨진 JSON · 타입 불일치 · 필수 파라미터는 서비스 공용 `PRODUCT_100` · `198` · `199` 다.
+  `007`(순서 변경 집합) · `008`(잠금 409) · `009`(삭제 상품 400). 검증은 `LOOK_101~122`(`LookValidationMessage`). 깨진 JSON · 타입 불일치 · 필수 파라미터는 서비스 공용 `PRODUCT_100` · `198` · `199` 다.
   `PRODUCT_1xx` 검증 대역이 다 차서 컨텍스트 접두어 `LOOK_` 를 새로 열었다(`coding-conventions.md` §8-2).
 - 계층 — look 컨텍스트는 product 컨텍스트의 Processor(어드민 `ProductLookupProcessor`, 고객 `ProductListProcessor.summarizeVisible` · `ProductDetailProcessor.getVisibleProduct`)와
   domain(`Product` · `ProductSummary`)만 쓴다(H8). 판매 상태 · 상품 카드는 Info 로 옮겨 Presenter 에 넘긴다.
@@ -762,7 +762,8 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 | 재고 선점 `POST /internal/v1/stock-reservations` | 409 `PRODUCT_022` (`order-flow-guide.md` §3) |
 | 어드민 카테고리 삭제의 연결 상품 판정 | 세지 않는다(§2-5) |
 | 고객 전시 · 룩 · 사이즈표 · 어드민 전시 미리보기의 상품 카드 · 상품 확인 | 뺀다 / 404 — 상품 컨텍스트의 고객 조회(`ProductListProcessor#summarizeVisible` · `ProductDetailProcessor#getVisibleProduct`)를 쓰므로 같은 노출 조건이 걸린다(§2-9 · §2-10 · §2-11) |
-| 어드민 전시 · 룩 · 사이즈표의 상품 확인(`ProductLookupProcessor#findAllIncludingHidden`) | 거르지 않는다 — 삭제 상품은 숨김 상품(`visible=false`)으로 보인다. 삭제 상품을 새로 연결하지 못하게 할지는 삭제 API(#9 PR-E2)에서 정한다 |
+| 어드민 룩 상품 확인(`ProductLookupProcessor#findAllIncludingHidden`) | 조회 결과에는 삭제 상품도 포함한다. 새 룩 구성에서는 `Product.isDeleted()` 로 거절(`LOOK_009`)하고, 기존 구성은 `deleted=true` 로 표시한다(§2-11) |
+| 어드민 전시 · 사이즈표 상품 확인(`ProductLookupProcessor#findAllIncludingHidden`) | 조회 결과에는 삭제 상품도 포함한다. 각 기능의 연결 정책은 해당 절을 따른다 |
 
 - **판정은 한 곳이다** — 서비스 간 SKU 의 `purchasable` 과 재고 선점의 판매 불가는 `SaleAvailability.isOpenForSale`(삭제 안 됨 · 노출 · 상품 판매중 · SKU 판매중)이 정한다.
   두 경로가 상품을 읽는 `ProductRepositoryPort#findAllByIdsIncludingHidden` 은 숨김 · 삭제 상품을 거르지 않는다. 고객 조회는 check 에 기대지 않고 삭제 조건을 명시한다

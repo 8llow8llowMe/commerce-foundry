@@ -31,7 +31,9 @@ public enum LookErrorCode {
     /** 순서 변경 본문이 현재 룩 아이디 집합과 다르다 — 누락 · 중복 · 모르는 아이디. 다시 조회한 뒤 보낸다. */
     LOOK_ORDER_MISMATCH("LOOK_007", "순서 변경에는 현재 룩 아이디를 빠짐없이 한 번씩 보내야 합니다.", HttpStatus.BAD_REQUEST),
     /** 다른 어드민의 룩 쓰기가 룩 잠금을 쥐고 있어 시간 상한 안에 끝나지 않았다. 요청끼리 겹친 것이라 503 이 아니다. */
-    LOOK_BUSY("LOOK_008", "다른 룩 변경을 처리 중입니다. 다시 시도해 주세요.", HttpStatus.CONFLICT);
+    LOOK_BUSY("LOOK_008", "다른 룩 변경을 처리 중입니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /** 본문의 상품이 삭제되었다. 요청 순서의 삭제 상품 아이디를 모두 싣는다. */
+    LOOK_PRODUCT_DELETED("LOOK_009", "삭제된 상품이 있습니다: %s", HttpStatus.BAD_REQUEST);
 
     private final String code;
     private final String message;

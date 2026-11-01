@@ -22,6 +22,9 @@ public record LookProductAdminItem(
         example = "{\"code\": \"ON_SALE\", \"name\": \"판매중\", \"description\": \"판매하도록 설정했습니다. 재고가 없으면 고객 화면에는 품절로 보입니다.\"}",
         nullable = true
     )
-    CodeNameDescriptionMetadata saleStatus
+    CodeNameDescriptionMetadata saleStatus,
+
+    @Schema(description = "상품 삭제 여부. 상품 행이 없으면 false", example = "false")
+    boolean deleted
 ) {
 }

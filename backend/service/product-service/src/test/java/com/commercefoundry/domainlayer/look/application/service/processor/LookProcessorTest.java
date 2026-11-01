@@ -121,6 +121,26 @@ class LookProcessorTest {
         }
 
         @Test
+        @DisplayName("삭제 상품은 요청 순서의 아이디 목록으로 LOOK_009, 없는 상품과 섞이면 LOOK_004 가 우선이다")
+        void deletedProducts() {
+            Map<Long, Product> found = Map.of(
+                100L, ProductFixtures.deletedProduct(100L),
+                200L, ProductFixtures.product(200L, SaleStatus.STOP_SELLING, false, false),
+                300L, ProductFixtures.deletedProduct(300L, SaleStatus.ON_SALE, true)
+            );
+
+            processor.validateProductsExist(List.of(200L), found);
+            assertThatThrownBy(() -> processor.validateProductsExist(List.of(300L, 200L, 100L), found))
+                .isInstanceOf(LookException.class)
+                .satisfies(exception -> assertThat(((LookException) exception).getErrorCode()).isEqualTo(LookErrorCode.LOOK_PRODUCT_DELETED))
+                .hasMessage("삭제된 상품이 있습니다: 300, 100");
+            assertThatThrownBy(() -> processor.validateProductsExist(List.of(300L, 400L, 100L, 500L), found))
+                .isInstanceOf(LookException.class)
+                .satisfies(exception -> assertThat(((LookException) exception).getErrorCode()).isEqualTo(LookErrorCode.LOOK_PRODUCT_NOT_FOUND))
+                .hasMessage("존재하지 않는 상품이 있습니다: 400, 500");
+        }
+
+        @Test
         @DisplayName("순서 변경 — 현재 집합과 같으면 받은 순서대로 0..n-1, 누락 · 중복 · 모르는 아이디는 400 · LOOK_007 이다")
         @SuppressWarnings("unchecked")
         void reorder() {
@@ -227,7 +247,7 @@ class LookProcessorTest {
         @DisplayName("어드민 정보는 상품의 이름 · 노출 · 판매 상태를 담고, 없는 상품은 이름 · 판매 상태 null · 노출 false 다")
         void adminInfo() {
             LookContent content = new LookContent(look(1L, 0), List.of(new LookItem(11L, 1L, 100L, 0), new LookItem(12L, 1L, 999L, 1)));
-            Map<Long, Product> products = Map.of(100L, ProductFixtures.product(100L, SaleStatus.STOP_SELLING, false, false));
+            Map<Long, Product> products = Map.of(100L, ProductFixtures.deletedProduct(100L));
 
             LookAdminInfo info = processor.toAdminInfo(content, products);
 
@@ -237,10 +257,12 @@ class LookProcessorTest {
             assertThat(hidden.name()).isEqualTo("상품100");
             assertThat(hidden.visible()).isFalse();
             assertThat(hidden.saleStatus()).isEqualTo(SaleStatus.STOP_SELLING);
+            assertThat(hidden.deleted()).isTrue();
             LookProductAdminInfo missing = info.products().get(1);
             assertThat(missing.name()).isNull();
             assertThat(missing.visible()).isFalse();
             assertThat(missing.saleStatus()).isNull();
+            assertThat(missing.deleted()).isFalse();
         }
     }
 
