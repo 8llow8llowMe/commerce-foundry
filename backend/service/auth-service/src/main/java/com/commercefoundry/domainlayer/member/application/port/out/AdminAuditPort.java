@@ -50,4 +50,7 @@ public interface AdminAuditPort {
 
     /** 로그인한 관리자가 OTP 복구 코드를 다시 발급했다 (#238). */
     void adminOtpRecoveryCodesRegenerated(long adminMemberId, boolean succeeded);
+
+    /** 동료 OTP 복구. 행위자·대상·결과만 기록한다. */
+    void adminOtpPeerRecovered(long actorMemberId, long targetMemberId, boolean succeeded);
 }

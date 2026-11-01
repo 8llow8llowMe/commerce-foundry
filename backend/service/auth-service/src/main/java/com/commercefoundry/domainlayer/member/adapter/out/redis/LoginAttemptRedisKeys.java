@@ -15,6 +15,7 @@ import com.commercefoundry.redis.key.RedisKey;
  *   <li>{@code auth:sign-up-ip-attempt:{clientSubject}} — 게이트웨이의 불투명 IP 식별자</li>
  *   <li>{@code auth:admin-otp-attempt:{memberId}} — 관리자 OTP 코드 시도 수 (#238). memberId 는 개인정보가 아니라 해시하지 않는다</li>
  *   <li>{@code auth:admin-otp-login-attempt:{memberId}} — 관리자 로그인 2단계 코드 시도 수 (#238 PR-B). 재인증 창과 따로 센다</li>
+ *   <li>{@code auth:admin-otp-peer-recovery-attempt:{memberId}} — 동료 OTP 복구 재인증 시도 수 (#238 PR-C)</li>
  * </ul>
  * {@code emailHmac} 은 {@link LoginAttemptKeyHasher} 의 값(base64url 22자)이다 — 이메일 원문은 키에 넣지 않는다.
  * TTL 은 창의 길이이고 첫 시도에만 같은 스크립트에서 건다 ({@link LoginAttemptRedisScripts}).
@@ -39,6 +40,7 @@ final class LoginAttemptRedisKeys {
             case SIGN_UP_IP -> "sign-up-ip-attempt";
             case ADMIN_OTP -> "admin-otp-attempt";
             case ADMIN_OTP_LOGIN -> "admin-otp-login-attempt";
+            case ADMIN_OTP_PEER_RECOVERY -> "admin-otp-peer-recovery-attempt";
         };
     }
 }

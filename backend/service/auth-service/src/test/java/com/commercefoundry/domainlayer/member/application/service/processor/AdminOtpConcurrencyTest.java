@@ -16,6 +16,8 @@ import com.commercefoundry.domainlayer.member.application.model.AdminOtpProof;
 import com.commercefoundry.domainlayer.member.application.model.IssuedRecoveryCodes;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminOtpEnrollmentStorePort;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminOtpRepositoryPort;
+import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
+import com.commercefoundry.domainlayer.member.domain.model.AdminOtpCredential;
 import com.commercefoundry.domainlayer.member.domain.model.RecoveryCode;
 import com.commercefoundry.domainlayer.member.domain.model.Totp;
 import com.commercefoundry.global.config.AuthServiceFeaturesConfig;
@@ -101,6 +103,11 @@ class AdminOtpConcurrencyTest {
         AdminOtpEnrollmentStorePort adminOtpEnrollmentStorePort() {
             return mock(AdminOtpEnrollmentStorePort.class);
         }
+
+        @Bean
+        MemberRepositoryPort memberRepositoryPort() {
+            return mock(MemberRepositoryPort.class);
+        }
     }
 
     @Autowired AdminOtpProcessor processor;
@@ -108,6 +115,7 @@ class AdminOtpConcurrencyTest {
     @Autowired AdminOtpCredentialRepository credentialRepository;
     @Autowired AdminOtpRecoveryCodeRepository recoveryCodeRepository;
     @Autowired TransactionTemplate transactionTemplate;
+    @Autowired SnowflakeIdGenerator snowflakeIdGenerator;
 
     /** 확정 자격 + 복구 코드 8개를 커밋하고 그 원문을 돌려준다. */
     private List<String> enroll(long memberId) {
@@ -127,6 +135,34 @@ class AdminOtpConcurrencyTest {
     private static MemberErrorCode codeOf(Throwable thrown) {
         assertThat(thrown).isInstanceOf(MemberException.class);
         return ((MemberException) thrown).getErrorCode();
+    }
+
+    @Test
+    @DisplayName("실제 PostgreSQL에서 옛 자격·코드를 지우고 같은 회원에 새 ID 자격·코드 8개를 넣는다 — 옛 증명은 둘 다 0행")
+    void peerRecoveryReplacesOldCredentialUnderUniqueKey() {
+        long targetId = MEMBER_IDS.incrementAndGet();
+        List<String> oldCodes = enroll(targetId);
+        AdminOtpCredential oldCredential = port.findByMemberId(targetId).orElseThrow();
+        long oldRecoveryId = port.findUnusedRecoveryCodes(targetId).getFirst().id();
+        IssuedRecoveryCodes freshCodes = processor.issueRecoveryCodes();
+        long replacementId = snowflakeIdGenerator.generateId();
+        byte[] freshSecret = "09876543210987654321".getBytes(StandardCharsets.US_ASCII);
+
+        transactionTemplate.executeWithoutResult(status -> {
+            assertThat(port.lockByMemberId(targetId)).isTrue();
+            port.replaceCredentialForRecovery(AdminOtpCredential.confirm(
+                replacementId, targetId, freshSecret, Totp.timeStep(NOW), NOW), freshCodes.hashes());
+        });
+
+        assertThat(credentialRows(targetId)).isEqualTo(1);
+        assertThat(codeRows(targetId)).isEqualTo(RecoveryCode.COUNT);
+        assertThat(port.findByMemberId(targetId).orElseThrow().id()).isEqualTo(replacementId).isNotEqualTo(oldCredential.id());
+        assertThat(port.recordTimeStep(oldCredential.accept(Totp.timeStep(NOW)).orElseThrow(), NOW)).isFalse();
+        assertThat(port.markRecoveryCodeUsed(oldRecoveryId, targetId, NOW)).isFalse();
+        assertThat(codeOf(catchThrowable(() -> processor.resolveProof(targetId, oldCodes.getFirst(), NOW))))
+            .isEqualTo(MemberErrorCode.OTP_CODE_INVALID);
+        assertThat(processor.resolveProof(targetId, freshCodes.codes().getFirst(), NOW))
+            .isInstanceOf(AdminOtpProof.RecoveryCodeMatch.class);
     }
 
     @Test

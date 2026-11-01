@@ -63,6 +63,10 @@ public record AdminAuditRecord(AdminAuditAction action, Long actorMemberId, Stri
         return new AdminAuditRecord(AdminAuditAction.ADMIN_OTP_RECOVERY_REGENERATE, adminMemberId, member(adminMemberId), succeeded);
     }
 
+    public static AdminAuditRecord adminOtpPeerRecovered(long actorMemberId, long targetMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_OTP_PEER_RECOVERY, actorMemberId, member(targetMemberId), succeeded);
+    }
+
     public static AdminAuditRecord membersSearched(long adminMemberId, MemberRole role, int page, int size) {
         String target = "members?role=" + (role == null ? "ALL" : role.name()) + "&page=" + page + "&size=" + size;
         return new AdminAuditRecord(AdminAuditAction.MEMBER_SEARCH, adminMemberId, target, true);

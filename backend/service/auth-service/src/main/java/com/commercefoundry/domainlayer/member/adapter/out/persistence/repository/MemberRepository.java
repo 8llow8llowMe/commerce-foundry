@@ -37,7 +37,7 @@ public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
 
     /** 활성 관리자 전부를 쓰기 잠금으로 읽는다. 마지막 관리자 비활성화를 한 트랜잭션에서 막는다 (#193). */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select m from MemberEntity m where m.role = :role and m.deactivatedAt is null")
+    @Query("select m from MemberEntity m where m.role = :role and m.deactivatedAt is null order by m.id asc")
     List<MemberEntity> findActiveAdminsForUpdate(@Param("role") MemberRole role);
 
     /**

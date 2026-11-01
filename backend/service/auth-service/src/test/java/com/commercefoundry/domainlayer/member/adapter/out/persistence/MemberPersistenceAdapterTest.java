@@ -18,6 +18,7 @@ import com.commercefoundry.global.config.AuthServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -101,6 +102,19 @@ class MemberPersistenceAdapterTest {
         entityManager.clear();
         assertThat(memberRepositoryPort.findById(1L)).hasValueSatisfying(member -> assertThat(member.version()).isZero());
         assertThat(memberRepositoryPort.findByIdForUpdate(2L)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("활성 관리자 전체 잠금 조회는 ID 오름차순이고 고객·비활성 관리자를 제외한다")
+    void activeAdminLockOrder() {
+        memberRepositoryPort.save(Member.admin(30L, "admin30@example.com", HASH, "관리자 30"));
+        memberRepositoryPort.save(Member.admin(10L, "admin10@example.com", HASH, "관리자 10"));
+        memberRepositoryPort.save(Member.admin(20L, "admin20@example.com", HASH, "관리자 20"));
+        memberRepositoryPort.save(Member.admin(40L, "admin40@example.com", HASH, "관리자 40").deactivate(Instant.now()));
+        memberRepositoryPort.save(Member.signUp(5L, "customer5@example.com", HASH, "고객", null));
+        entityManager.clear();
+
+        assertThat(memberRepositoryPort.findActiveAdminsForUpdate()).extracting(Member::id).containsExactly(10L, 20L, 30L);
     }
 
     @Test

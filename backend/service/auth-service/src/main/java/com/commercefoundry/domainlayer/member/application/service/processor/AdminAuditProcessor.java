@@ -69,4 +69,8 @@ public class AdminAuditProcessor {
     public void adminOtpRecoveryCodesRegenerated(long adminMemberId, boolean succeeded) {
         adminAuditPort.adminOtpRecoveryCodesRegenerated(adminMemberId, succeeded);
     }
+
+    public void adminOtpPeerRecovered(long actorMemberId, long targetMemberId, boolean succeeded) {
+        adminAuditPort.adminOtpPeerRecovered(actorMemberId, targetMemberId, succeeded);
+    }
 }

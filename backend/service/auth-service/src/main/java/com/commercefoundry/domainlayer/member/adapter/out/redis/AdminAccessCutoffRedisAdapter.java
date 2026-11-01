@@ -8,6 +8,7 @@ import com.commercefoundry.security.token.revocation.AdminAccessCutoffKeys;
 import com.commercefoundry.security.token.revocation.RevokedAccessTokenKeys;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -29,10 +30,11 @@ public class AdminAccessCutoffRedisAdapter implements AdminAccessCutoffPort {
     public void cutOff(long memberId, Instant cutoff) {
         String key = AdminAccessCutoffKeys.of(memberId).value();
         Duration ttl = RevokedAccessTokenKeys.ttl(jwtVerificationProperties.clockSkew());
-        tokenStore.execute(() -> {
-            redisTemplate.opsForValue().set(key, Long.toString(cutoff.toEpochMilli()), ttl);
-            return null;
-        });
+        Long advanced = tokenStore.execute(() -> redisTemplate.execute(AdminAccessCutoffRedisScripts.ADVANCE,
+            List.of(key), Long.toString(cutoff.toEpochMilli()), Long.toString(ttl.toMillis())));
+        if (advanced == null || (advanced != 0L && advanced != 1L)) {
+            throw new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+        }
     }
 
     /** 숫자가 아닌 값은 {@code AUTH_013} 이다 — 게이트웨이가 같은 값을 오류로 올리는 것과 맞춘다. 값 · 키는 예외에 싣지 않는다. */

@@ -68,4 +68,10 @@ public interface AdminOtpRepositoryPort {
      * 아무것도 쓰지 않는다(자격 없는 코드가 남지 않게). 코드 아이디는 어댑터가 만든다.
      */
     void replaceRecoveryCodes(long memberId, List<String> codeHashes);
+
+    /**
+     * 동료 복구: 이미 잠긴 대상의 옛 코드·자격을 지운 뒤 <b>새 자격 ID</b>로 넣는다. 호출자 트랜잭션이 필수다.
+     * 옛 TOTP 증명이 이전 자격 ID로 조건부 UPDATE 를 통과하지 못하게 ID를 재사용하지 않는다.
+     */
+    void replaceCredentialForRecovery(AdminOtpCredential replacement, List<String> codeHashes);
 }

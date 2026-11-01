@@ -153,6 +153,23 @@ public class AdminOtpRepositoryAdapter implements AdminOtpRepositoryPort {
             throw new MemberException(MemberErrorCode.OTP_NOT_ENROLLED);
         }
         recoveryCodeRepository.deleteByMemberId(memberId);
+        insertRecoveryCodeHashes(memberId, codeHashes);
+    }
+
+    /** 부모 자격은 Processor 가 이미 잠갔다. 옛 자식 → 옛 부모 순으로 삭제하고 새 ID/AAD의 부모 → 새 자식을 넣는다. */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void replaceCredentialForRecovery(AdminOtpCredential replacement, List<String> codeHashes) {
+        long memberId = replacement.memberId();
+        recoveryCodeRepository.deleteByMemberId(memberId);
+        if (credentialRepository.deleteByMemberId(memberId) != 1) {
+            throw new MemberException(MemberErrorCode.OTP_NOT_ENROLLED);
+        }
+        save(replacement);
+        insertRecoveryCodeHashes(memberId, codeHashes);
+    }
+
+    private void insertRecoveryCodeHashes(long memberId, List<String> codeHashes) {
         recoveryCodeRepository.saveAllAndFlush(codeHashes.stream()
             .map(codeHash -> AdminOtpRecoveryCodeEntity.builder().id(snowflakeIdGenerator.generateId()).memberId(memberId).codeHash(codeHash).build())
             .toList());

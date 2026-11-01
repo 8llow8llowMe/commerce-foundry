@@ -99,4 +99,14 @@ class InMemoryAdminOtpRepository implements AdminOtpRepositoryPort {
         codes.removeIf(code -> code.memberId() == memberId);
         codeHashes.forEach(hash -> codes.add(new StoredCode(ids.incrementAndGet(), memberId, hash, null)));
     }
+
+    @Override
+    public void replaceCredentialForRecovery(AdminOtpCredential replacement, List<String> codeHashes) {
+        if (!credentials.containsKey(replacement.memberId())) {
+            throw new MemberException(MemberErrorCode.OTP_NOT_ENROLLED);
+        }
+        deleteByMemberId(replacement.memberId());
+        save(replacement);
+        replaceRecoveryCodes(replacement.memberId(), codeHashes);
+    }
 }

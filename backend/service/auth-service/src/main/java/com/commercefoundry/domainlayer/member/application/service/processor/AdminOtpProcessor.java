@@ -10,9 +10,11 @@ import com.commercefoundry.domainlayer.member.application.model.AdminOtpProof.To
 import com.commercefoundry.domainlayer.member.application.model.IssuedRecoveryCodes;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminOtpEnrollmentStorePort;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminOtpRepositoryPort;
+import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.domain.model.AdminOtpCredential;
 import com.commercefoundry.domainlayer.member.domain.model.AdminOtpRecoveryCode;
 import com.commercefoundry.domainlayer.member.domain.model.Base32;
+import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.domainlayer.member.domain.model.RecoveryCode;
 import com.commercefoundry.domainlayer.member.domain.model.Totp;
 import com.commercefoundry.global.properties.AdminOtpProperties;
@@ -49,6 +51,7 @@ public class AdminOtpProcessor {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final AdminOtpRepositoryPort adminOtpRepositoryPort;
+    private final MemberRepositoryPort memberRepositoryPort;
     private final AdminOtpEnrollmentStorePort adminOtpEnrollmentStorePort;
     private final PasswordEncoder passwordEncoder;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
@@ -189,6 +192,42 @@ public class AdminOtpProcessor {
     }
 
     /**
+     * 동료 복구(#238 PR-C). 회원 행을 ID 순서로 잠가 활성 상태와 재인증 때 본 비밀번호 해시를 재확인한다. 이어 자격 행도 같은 순서로 잠그고
+     * 행위자의 증명을 소비한 뒤 대상의 자격을 새 ID·무작위 비밀·복구 코드로 교체한다. 전부 한 DB 트랜잭션이다.
+     * BCrypt 는 호출자가 트랜잭션 밖에서 끝낸다. 기존 암호화 키를 잃은 대상도 비밀을 복호화하지 않고 교체할 수 있다.
+     */
+    @Transactional
+    public void recoverPeer(long actorMemberId, long targetMemberId, String verifiedPasswordHash, AdminOtpProof proof,
+                            List<String> recoveryCodeHashes, Instant now) {
+        if (actorMemberId == targetMemberId) {
+            throw new MemberException(MemberErrorCode.OTP_PEER_RECOVERY_SELF);
+        }
+        long first = Math.min(actorMemberId, targetMemberId);
+        long second = Math.max(actorMemberId, targetMemberId);
+        Member firstAdmin = lockedAdmin(first);
+        Member secondAdmin = lockedAdmin(second);
+        Member actor = actorMemberId == first ? firstAdmin : secondAdmin;
+        if (!actor.passwordHash().equals(verifiedPasswordHash)) {
+            throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_MISMATCH);
+        }
+        if (!adminOtpRepositoryPort.lockByMemberId(first) || !adminOtpRepositoryPort.lockByMemberId(second)) {
+            throw new MemberException(MemberErrorCode.OTP_NOT_ENROLLED);
+        }
+        consumeLockedProof(actorMemberId, proof, now);
+        byte[] replacementSecret = new byte[Totp.SECRET_BYTES];
+        RANDOM.nextBytes(replacementSecret);
+        AdminOtpCredential replacement = AdminOtpCredential.confirm(
+            snowflakeIdGenerator.generateId(), targetMemberId, replacementSecret, Totp.timeStep(now), now);
+        adminOtpRepositoryPort.replaceCredentialForRecovery(replacement, recoveryCodeHashes);
+    }
+
+    private Member lockedAdmin(long memberId) {
+        return memberRepositoryPort.findByIdForUpdate(memberId)
+            .filter(Member::isActiveAdmin)
+            .orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND));
+    }
+
+    /**
      * 잠금을 먼저 잡아 같은 관리자의 해제 · 재발급을 줄 세운다(대기 상한 → {@code AUTH_044}). 앞선 요청이 해제했으면 자격이 없어 {@code AUTH_036} 이다.
      * TOTP 는 자격 아이디까지 맞아야 기록된다 — 해제 후 다시 등록한 새 자격에 옛 확인 결과를 쓰지 못한다.
      */
@@ -196,6 +235,10 @@ public class AdminOtpProcessor {
         if (!adminOtpRepositoryPort.lockByMemberId(memberId)) {
             throw new MemberException(MemberErrorCode.OTP_NOT_ENROLLED);
         }
+        consumeLockedProof(memberId, proof, now);
+    }
+
+    private void consumeLockedProof(long memberId, AdminOtpProof proof, Instant now) {
         boolean consumed = switch (proof) {
             case TotpCode totp -> totp.accepted().memberId() == memberId && adminOtpRepositoryPort.recordTimeStep(totp.accepted(), now);
             case RecoveryCodeMatch recovery -> adminOtpRepositoryPort.markRecoveryCodeUsed(recovery.recoveryCodeId(), memberId, now);

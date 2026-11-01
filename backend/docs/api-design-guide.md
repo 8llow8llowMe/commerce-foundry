@@ -255,6 +255,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/admin/me/otp` (#238) | `hasRole('ADMIN')` | 201 `{recoveryCodes: [8개 xxxxx-xxxxx]}` · `no-store` — 본문 `{currentPassword, code}`(code 는 6자리). 복구 코드 원문은 이번 한 번만 | 400 `AUTH_038` · `AUTH_032` · `AUTH_035` · `AUTH_145` · `AUTH_147` · `AUTH_148` · 404 `AUTH_033` · 409 `AUTH_037` · `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
 | `POST /api/v1/admin/me/otp/deactivation` (#238) | `hasRole('ADMIN')` | 200 `dataBody: null` — 본문 `{currentPassword, code}`(code 는 6자리 또는 복구 코드). 자격 · 복구 코드를 모두 지운다 | 404 `AUTH_036` · `AUTH_033` · 400 `AUTH_032` · `AUTH_035` · `AUTH_145` · `AUTH_147` · `AUTH_149` · 409 `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
 | `POST /api/v1/admin/me/otp/recovery-codes` (#238) | `hasRole('ADMIN')` | 200 `{recoveryCodes}` · `no-store` — 본문은 해제와 같다. 이전 코드는 모두 무효 | 해제와 같다 |
+| `POST /api/v1/admin/admins/{memberId}/otp/recovery` (#238 PR-C) | `hasRole('ADMIN')` | 200 `{recoveryCodes: [8개 xxxxx-xxxxx]}` · `no-store` — 본문 `{currentPassword, code}`는 **행위자 본인**의 재인증. 다른 활성 관리자의 OTP 비밀·자격 ID·복구 코드를 교체하고 새 코드 원문은 이 응답에서만 준다 | 400 `AUTH_032` · `AUTH_035` · `AUTH_045` · `AUTH_145` · `AUTH_146` · `AUTH_147` · `AUTH_149` · 404 `AUTH_033` · `AUTH_036` · 409 `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
 | `GET /api/v1/admin/members` (#6) | `hasRole('ADMIN')` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 | `GET /api/v1/admin/audit-logs` (#192 · #286 · #322) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, actorDisplayName, target, targetDisplayName, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&target=&result=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_136` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 
@@ -291,8 +292,9 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_034~039` | 400 · 404 · 409 · 503 | 관리자 OTP (#238) — 034 로그인 2단계 챌린지 없음(만료 · 이미 씀 · 모양 오류 · 그 사이 관리자 비활성화 · OTP 해제 · 비밀번호 변경, 400 — 1단계부터 다시) · 035 OTP · 복구 코드 틀림 또는 이미 씀(400) · 036 OTP 미등록(404) · 037 이미 등록(409) · 038 진행 중인 등록 없음(400) · 039 OTP 비밀을 읽을 수 없음(암호화 키 없음 · 손상, 503). 본인 OTP API 는 PR-A2, 로그인 2단계(`POST /api/v1/auth/admin/login/otp`)는 PR-B 다. 응답은 비밀번호(`AUTH_032`)와 코드(`AUTH_035`) 중 어느 쪽이 틀렸는지만 나누고, 코드가 틀렸는지 · 이미 썼는지 · 형식이 다른지는 나누지 않는다 |
 | `AUTH_040` | 429 + `Retry-After` | 로그인 시도 초과 (#66) — 고객 · 관리자 로그인. 같은 이메일(정규화)의 시도가 창(기본 15분)의 허용 횟수(기본 5회)를 넘었다. 비밀번호가 맞아도 거절하고, 계정이 있든 없든 같은 본문 · 헤더다. 관리자 로그인은 성공한 시도도 창에서 지우지 않는다. `Retry-After` 초 뒤 다시 허용한다 (`security-guide.md` §12) |
 | `AUTH_041` | 429 + `Retry-After` | 회원가입 시도 초과 (#66) — 같은 이메일의 가입 시도가 창(기본 10분)의 허용 횟수(기본 5회)를 넘었다. 가입된 이메일이든 아니든 같다 |
-| `AUTH_043` | 429 + `Retry-After` | 관리자 OTP 코드 시도 초과 (#238) — 같은 관리자의 OTP 등록 확인 · 해제 · 복구 코드 재발급(PR-A2) · 로그인 2단계(PR-B) 시도가 창(15분)의 허용 횟수(5회)를 넘었다. 재인증(PR-A2)과 로그인 2단계는 창을 따로 센다(`security-guide.md` §14-1). 재인증은 비밀번호가 틀린 시도도 센다. 로그인 2단계는 성공한 시도도 창에서 지우지 않는다. 코드가 맞아도 거절한다. 시도 제한 스위치(`auth.login-guard.enabled`)를 꺼도 켜져 있다 |
-| `AUTH_044` | 409 | 관리자 OTP 쓰기 잠금 대기 초과 (#238) — 같은 관리자의 등록 확인 · 복구 코드 재발급 · 해제 · 로그인 2단계가 겹쳐 자격 행 잠금을 대기 상한(2초) 안에 얻지 못했다. 코드는 소비되지 않는다. 등록 확인 · 재발급 · 해제는 잠시 뒤 같은 요청을 다시 보낼 수 있다. **로그인 2단계는 챌린지가 이미 소비됐으므로 1단계부터 다시 시작한다** |
+| `AUTH_043` | 429 + `Retry-After` | 관리자 OTP 코드 시도 초과 (#238) — 본인 등록 확인 · 해제 · 복구 코드 재발급(PR-A2), 로그인 2단계(PR-B), 동료 OTP 복구(PR-C)가 각각 창(기본 15분, 5회)을 센다. 동료 복구는 행위자 memberId 기준으로 별도 창을 쓰고 성공해도 지우지 않는다. 재인증은 비밀번호가 틀린 시도도 센다. 코드가 맞아도 초과하면 거절하며 `auth.login-guard.enabled=false` 여도 켜져 있다 |
+| `AUTH_044` | 409 | 관리자 OTP 쓰기 잠금 대기 초과 (#238) — 등록 확인 · 복구 코드 재발급 · 해제 · 로그인 2단계 · 동료 OTP 복구가 겹쳐 자격 행 잠금을 대기 상한(2초) 안에 얻지 못했다. 트랜잭션이 롤백돼 코드는 소비되지 않는다. 등록 확인 · 재발급 · 해제 · 동료 복구는 잠시 뒤 같은 요청을 다시 보낼 수 있다. **로그인 2단계는 챌린지가 이미 소비됐으므로 1단계부터 다시 시작한다** |
+| `AUTH_045` | 400 | 동료 OTP 복구 API 에 자기 memberId 를 대상으로 넣었다. 본인 해제·재발급은 `/api/v1/admin/me/otp/**` 를 쓴다 |
 | `AUTH_100` | 400 | 깨진 JSON · 본문 없음 · 타입 불일치 (필드는 `fieldErrors` 로 밝힌다) |
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
@@ -359,6 +361,14 @@ return ResponseEntity.ok().body(Response.success(response));
   짧은 서버 세션). `challengeExpiresIn` 이 지나거나 `AUTH_034` 면 로그인 화면으로 돌아간다. `AUTH_035` 는 같은 화면에서 다시 입력, `AUTH_043` 은 `Retry-After` 만큼 막는다.
   2단계 성공 응답은 1단계 미등록 응답과 같아 기존 토큰 처리를 그대로 쓴다. **BFF 가 `otpRequired` 를 처리하기 전에는 OTP 를 등록하지 않는다** — 등록하면 콘솔 로그인은 `BFF_002` 로 실패한다. 그 사이 해제가 필요하면 PR-C 의 동료 초기화 API 또는 `security-guide.md` §14-4 운영 절차를 쓴다.
 
+동료 관리자 OTP 복구 (#238 PR-C) — `POST /api/v1/admin/admins/{memberId}/otp/recovery`
+
+- 현재는 관리자 역할이 `ADMIN` 하나라 동료 관리자만 대상으로 허용한다(본인 대상은 `AUTH_045`, 고객·없는·비활성 관리자는 `AUTH_033`). 행위자는 JWT 의 memberId 이며 요청 본문의 아이디를 믿지 않는다. 행위자 자신의 **현재 비밀번호와 OTP 또는 복구 코드**를 재확인한다. 행위자 또는 대상 중 어느 쪽이든 OTP 미등록이면 `AUTH_036` 이다.
+- 행위자의 코드 시도는 전용 `ADMIN_OTP_PEER_RECOVERY` 창에서 5회/15분으로 제한한다(`AUTH_043`, 저장소 장애는 `AUTH_013`). 성공해도 창을 지우지 않는다. 비밀번호·코드 비교와 새 복구 코드 8개의 BCrypt 해시는 DB 트랜잭션 밖에서 한다.
+- 한 DB 트랜잭션에서 행위자의 코드를 소비하고, 대상의 **기존 자격 ID와 복구 코드를 폐기**한 뒤 새 자격 ID·알 수 없는 무작위 TOTP 비밀·새 복구 코드를 넣는다. 이전에 확인된 대상 TOTP 증명은 자격 ID가 달라 실패하고, 이전 복구 코드는 삭제돼 실패한다. 새 TOTP 비밀은 어디에도 응답하지 않는다. 대상은 여전히 `enrolled=true`라 비밀번호만으로 로그인할 수 없다.
+- 동료는 새 코드 중 하나를 대상에게 안전하게 전달한다. 대상은 비밀번호 + 새 코드로 로그인하고, 다른 코드로 본인 OTP를 해제한 뒤 새 기기에 재등록한다. 첫 로그인에 쓴 코드는 재사용할 수 없으므로 **최소 두 코드**를 전달한다. 원문을 로그·URL·감사·이슈에 남기지 않는다.
+- DB 교체 뒤 대상 access 컷오프를 쓴다. Redis 실패면 503이지만 DB 교체와 행위자 코드 소비는 이미 끝났을 수 있다. 동료는 **새 TOTP step 또는 미사용 복구 코드**로 API를 다시 호출해 다시 교체·컷오프하고 **마지막 성공 응답의 코드만** 전달한다. 감사에는 행위자·대상·성공/실패를 남기고 비밀 값은 넣지 않는다.
+
 #### 배송지 주소록 (#7)
 
 모두 `isAuthenticated()` 이고 회원은 JWT 의 memberId 로만 정한다. 주소는 언제나 (`addressId`, memberId) 로 찾는다 — 없거나 남의 주소는 같은 404 `AUTH_020` 이다.
@@ -413,7 +423,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 어드민 감사 로그 조회 (#192) — `GET /api/v1/admin/audit-logs`
 
-- `action`(선택, `AdminAuditAction` 값 — `ADMIN_LOGIN` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE`, 틀리면 198) · `actorMemberId`(선택, 양수 — 135) · `target`(선택, 완전 일치, 공백 없이 1~200자 ASCII — 136) ·
+- `action`(선택, `AdminAuditAction` 값 — `ADMIN_LOGIN` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY`, 틀리면 198) · `actorMemberId`(선택, 양수 — 135) · `target`(선택, 완전 일치, 공백 없이 1~200자 ASCII — 136) ·
   `result`(선택, `SUCCESS` · `FAILURE`, 틀리면 198) · `page` · `size`(회원 조회와 같은 133 · 134).
   정렬은 최신순 하나(감사 로그 아이디 내림차순)라 `sortType` 이 없다. 조건은 각각 켜지고 꺼지므로 QueryDSL 이고, `(action, id)` · `(actor_member_id, id)` · `(target, id)` 인덱스를 탄다.
   로그인 실패는 행위자가 없어 `actorMemberId` 만으로는 한 계정을 못 고른다. `target=member:<id>&result=FAILURE` 로 고른다 (#286).

@@ -79,6 +79,21 @@ class AdminOtpRepositoryAdapterTest {
     }
 
     @Test
+    @DisplayName("동료 복구는 옛 코드·자격을 삭제한 뒤 새 자격 ID를 INSERT하고 새 코드를 넣는다")
+    void peerRecoveryDeletesOldBeforeInsertingNewIdentity() {
+        AdminOtpCredential replacement = new AdminOtpCredential(8001L, MEMBER_ID, SECRET, 123L, NOW);
+        when(credentialRepository.deleteByMemberId(MEMBER_ID)).thenReturn(1);
+
+        adapter.replaceCredentialForRecovery(replacement, List.of("hash-a", "hash-b"));
+
+        InOrder order = inOrder(credentialRepository, recoveryCodeRepository);
+        order.verify(recoveryCodeRepository).deleteByMemberId(MEMBER_ID);
+        order.verify(credentialRepository).deleteByMemberId(MEMBER_ID);
+        order.verify(credentialRepository).saveAndFlush(any(AdminOtpCredentialEntity.class));
+        order.verify(recoveryCodeRepository).saveAllAndFlush(anyList());
+    }
+
+    @Test
     @DisplayName("해제 — 자격 행 잠금 → 코드 삭제 → 자격 삭제 순서다")
     void deleteLocksThenDeletesChildThenParent() {
         when(credentialRepository.findByMemberIdForUpdate(MEMBER_ID)).thenReturn(Optional.of(mock(AdminOtpCredentialEntity.class)));

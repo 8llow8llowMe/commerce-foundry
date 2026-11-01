@@ -108,6 +108,11 @@ public class AdminAuditLogRepositoryAdapter implements AdminAuditPort, AdminAudi
         record(AdminAuditRecord.adminOtpRecoveryCodesRegenerated(adminMemberId, succeeded));
     }
 
+    @Override
+    public void adminOtpPeerRecovered(long actorMemberId, long targetMemberId, boolean succeeded) {
+        record(AdminAuditRecord.adminOtpPeerRecovered(actorMemberId, targetMemberId, succeeded));
+    }
+
     /** 조건이 켜지고 꺼지므로 QueryDSL 한 쿼리다 — 모두 아이디 내림차순이다. */
     @Override
     public Page<AdminAuditLog> findPage(String action, Long actorMemberId, String target, String result, int page, int size) {
