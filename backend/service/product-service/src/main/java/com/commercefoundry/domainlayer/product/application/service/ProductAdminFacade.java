@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.category.application.service.processor.Ca
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.presenter.ProductAdminPresenter;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
@@ -13,6 +14,7 @@ import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminU
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminDetailProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminQueryProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductDescriptionSanitizer;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductWriteProcessor;
 import com.commercefoundry.persistence.dto.PageResponse;
 import java.util.List;
@@ -47,6 +49,13 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final ProductAdminDetailProcessor productAdminDetailProcessor;
     private final ProductWriteProcessor productWriteProcessor;
     private final ProductDescriptionSanitizer productDescriptionSanitizer;
+    private final ProductImageUploadProcessor productImageUploadProcessor;
+
+    /** 로컬 서명이라 DB · 외부 호출이 없다 — 트랜잭션을 걸지 않는다. */
+    @Override
+    public ProductImageUploadAdminResponse issueImageUpload(long memberId, String contentType, Long contentLength) {
+        return productAdminPresenter.toImageUploadResponse(productImageUploadProcessor.issue(memberId, contentType, contentLength));
+    }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)

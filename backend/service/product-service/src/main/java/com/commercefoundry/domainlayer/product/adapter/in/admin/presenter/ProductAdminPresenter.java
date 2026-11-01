@@ -8,7 +8,9 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.Product
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.CustomOrderFieldAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse;
 import com.commercefoundry.domainlayer.product.application.info.ProductAdminDetailInfo;
+import com.commercefoundry.domainlayer.product.application.info.ProductImageUploadInfo;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
@@ -36,6 +38,17 @@ public class ProductAdminPresenter {
         return ProductCreateAdminResponse.builder()
             .product(toDetailResponse(info))
             .descriptionHtmlSanitized(descriptionHtmlSanitized)
+            .build();
+    }
+
+    /** 업로드 자리 (#9 F) — 스토리지 서명 결과를 그대로 옮긴다. */
+    public ProductImageUploadAdminResponse toImageUploadResponse(ProductImageUploadInfo upload) {
+        return ProductImageUploadAdminResponse.builder()
+            .uploadKey(upload.uploadKey())
+            .uploadUrl(upload.uploadUrl())
+            .method(upload.method())
+            .headers(upload.headers())
+            .expiresAt(upload.expiresAt())
             .build();
     }
 

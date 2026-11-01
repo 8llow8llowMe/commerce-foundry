@@ -18,6 +18,10 @@ spring:
       hibernate:
         # 서비스별 스키마 (service-inventory.md §4). 다른 서비스 스키마를 직접 조회하지 않는다
         default_schema: product
+        # 상품 등록(#9)은 SKU · 옵션 값 · 재고 · 이력을 행마다 INSERT 한다 — 같은 테이블 INSERT 를 50개씩 한 왕복으로 묶는다(order · delivery 와 같다)
+        jdbc:
+          batch_size: 50
+        order_inserts: true
         query:
           # IN 절 바인드 파라미터 수를 2의 거듭제곱으로 채운다 — 개수마다 다른 SQL 이 생겨 쿼리 계획 · PreparedStatement 캐시가 늘어나지 않게 (coding-conventions.md §9-6)
           in_clause_parameter_padding: true
@@ -93,6 +97,22 @@ store:
   # 오브젝트 스토리지 공개 읽기 주소와 같은 환경변수다. 비면 미디어가 있는 쓰기를 모두 거절한다(닫힌 기본값) — local 은 backend/.env 값을 쓴다
   media:
     public-base-url: ${STORAGE_PUBLIC_BASE_URL:}
+
+# 상품 이미지 오브젝트 스토리지 (#9 F, storage-core — bootstrap-conventions.md Storage 절). 기본 꺼짐 — 꺼져 있으면 업로드 발급 · 첨부만 503 이다.
+# 접속 정보는 Vault(STORAGE_*)에서 주입한다. 켜면 기동 가드가 https · 버킷 이름 · 타임아웃을 본다
+storage:
+  enabled: ${STORAGE_ENABLED:false}
+  endpoint: ${STORAGE_ENDPOINT:}
+  region: ${STORAGE_REGION:}
+  bucket: ${STORAGE_BUCKET:}
+  access-key: ${STORAGE_ACCESS_KEY:}
+  secret-key: ${STORAGE_SECRET_KEY:}
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL:}
+  presign-ttl: 5m
+  # 게이트웨이 응답 상한(10s)보다 짧게 — 스토리지가 멈춰도 요청 스레드를 그보다 오래 잡지 않게
+  connect-timeout: 2s
+  read-timeout: 5s
+  api-call-timeout: 8s
 
 # 재고 (order-flow-guide.md §3)
 stock:

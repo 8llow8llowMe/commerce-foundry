@@ -9,6 +9,7 @@ import com.commercefoundry.messaging.config.MessagingPropertiesConfig;
 import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
 import com.commercefoundry.security.internal.InternalTokenPropertiesConfig;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
+import com.commercefoundry.storage.config.StoragePropertiesConfig;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -19,6 +20,7 @@ import org.springframework.context.annotation.Import;
     JwtVerificationPropertiesConfig.class,
     MessagingPropertiesConfig.class,
     SnowflakePropertiesConfig.class,
+    StoragePropertiesConfig.class,
     SwaggerPropertiesConfig.class
 })
 @EnableConfigurationProperties({ProductDraftProperties.class, StockProperties.class, StoreProperties.class, StoreMediaProperties.class})
