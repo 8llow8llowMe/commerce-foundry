@@ -62,10 +62,10 @@ EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 - Facade는 외부 트랜잭션을 거절한다(`NEVER`). 요청 기록 확인 → 완료 재생(원격 호출 없음) → SKU 벌크 조회·공유 `OrderQuoteProcessor` 계산·선택적 기대 총액 대조 → 기록 획득 → 동일 주문 ID로 재고 단일 선점 → 주문 저장 순서다. 배송지의 도시·주를 포함한 모든 필드와 항목·맞춤 입력·기대 총액은 지문에 포함한다. 주소록은 조회하지 않는다.
 - `OrderProcessor#create`는 독립된 5초 트랜잭션에서 현재 시각의 선점 유효성·요청 바인딩을 확인하고 `completeOwned`를 먼저 호출한다. C1 주문·스냅숏·생성 이력까지 같은 트랜잭션에서 커밋하며 뒤쪽 저장 실패는 요청 완료도 롤백한다. 오래된 주인·만료된 lease는 주문을 넣지 못한다.
 - 선점 실패·UNKNOWN·저장 실패는 해당 버전의 lease만 조용히 끝낸다. 동일 키 재시도는 기록의 동일 주문 ID를 인수한다. 자동 재전송·보상 해제·새 주문 ID 발급을 하지 않는다. 주문 PK 중복만 소유 주문 재생으로 처리하며 다른 저장 거절은 `ORDER_021`이다.
-- **회원별 활성 시도 상한 (#231).** 그 회원이 창(`order.creation.active-request-window`, 기본 30분 = product 선점 TTL) 안에 만든 다른 `order_request` 수(이 시도의 기록 제외)를
+- **회원별 활성 시도 상한 (#231).** 그 회원이 창(`order.creation.active-request-window`, 기본 30분 = product 선점 TTL) 안에 움직인(만들거나 이어받거나 끝낸 — `updated_at`) 다른 `order_request` 수(이 시도의 기록 제외)를
   기록 확인 직후 · 원격 호출 전에 한 번, 기록을 잡은 뒤 · 재고 선점 전에 한 번 센다. 상한(`order.creation.max-active-requests-per-member`, 기본 5) 이상이면 409 `ORDER_022` 다 —
   앞의 거절은 아무것도 쓰지 않고, 뒤의 거절은 기록의 lease 를 끝낸다(선점 없음). 완료 재생은 세지 않는다. 뒤의 판정이 동시 새 키의 넘침을 막는다
-  (인덱스 `idx_order_request_member_id_created_at`, 세부는 `security-guide.md` §7-3).
+  (인덱스 `idx_order_request_member_id_updated_at`, 세부는 `security-guide.md` §7-3).
   이 상한은 시도 수만 묶는다 — 수량 축은 §2-3 의 상품 수량 상한(비어 있으면 엔진 기본값, 결제 대기 주문 수량 합산, #426)이 묶는다.
   **운영 권고** — 재고가 적은 상품(맞춤 · 핸드메이드 · 한정)은 상품 등록 때 `maxQuantityPerOrder` 를 기본값(10)보다 작게 둔다.
 - 배송지는 입력 앞뒤 공백과 빈 선택 칸을 정규화하고 연락처의 공백·하이픈을 제거한다. 국내 연락처는 0으로 시작하는 9~11자리, 해외는 선택적 +와 숫자 7~15자리이며 해외 도시는 필수다. 형식 오류는 원격 호출 전에 `ORDER_1xx`로 반환한다. 요청·응답·command 문자열은 개인정보·맞춤 입력을 가린다.
