@@ -61,8 +61,9 @@ public final class ProductValidationMessage {
     // 어드민 상품 목록 (GET /api/v1/admin/products). page · size 는 PAGE_MIN · SIZE_RANGE, categoryId 는 CATEGORY_ID_POSITIVE 다
     public static final String PRODUCT_KEYWORD_SIZE_MAX = "PRODUCT_139:keyword 는 100자 이하여야 합니다.";
 
-    // 운영자 온보딩 상품 사실 (GET /internal/v1/onboarding-facts/product-registration)
-    public static final String ONBOARDING_MEMBER_ID_POSITIVE = "PRODUCT_140:memberId 는 양수여야 합니다.";
+    // 운영자 온보딩 상품 사실 (GET /internal/v1/onboarding-facts/product-registration). 메인 전시 sectionType(DisplayValidationMessage)과 겹치던 140 을
+    // 비어 있던 039 로 옮겼다(#448) — 호출자(operations)는 이 코드로 분기하지 않고 로그에만 남긴다
+    public static final String ONBOARDING_MEMBER_ID_POSITIVE = "PRODUCT_039:memberId 는 양수여야 합니다.";
 
     // 어드민 상품 등록 (POST /api/v1/admin/products, #9 E1). 1xx 가 다 차서 074~099 · 169 를 쓴다(2026-11-01 승인 — 2026-10-20 의 131~ 은 먼저 쓰였다).
     // 금액 · 판매 상태는 칸이 여럿이라 한 코드를 함께 쓰고 fieldErrors.field 경로(skus[2].additionalPrice.amount)로 구분한다.

@@ -93,8 +93,8 @@ class ProductRegistrationFactInternalControllerTest {
 
     @ParameterizedTest
     @CsvSource(delimiter = '|', value = {
-        "?memberId=0   | PRODUCT_140",
-        "?memberId=-1  | PRODUCT_140",
+        "?memberId=0   | PRODUCT_039",
+        "?memberId=-1  | PRODUCT_039",
         "?memberId=abc | PRODUCT_198",
         "''            | PRODUCT_199"
     })
