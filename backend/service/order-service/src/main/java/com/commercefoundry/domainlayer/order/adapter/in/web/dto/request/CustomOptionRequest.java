@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.order.adapter.in.web.dto.request;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.validation.NormalizedMaxLength;
 import com.commercefoundry.domainlayer.order.application.exception.OrderValidationMessage;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCustomOption;
+import com.commercefoundry.global.validation.NoControlCharacters;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -22,6 +23,7 @@ public record CustomOptionRequest(
     @Schema(description = "입력값 (앞뒤 공백을 자르고 NFC 정규화한 뒤 500자 이하). 원문 그대로 저장 · 응답한다 — 화면 · 메일 · CSV 는 텍스트로 이스케이프한다", example = "96.5")
     @NotBlank(message = OrderValidationMessage.VALUE_REQUIRED)
     @NormalizedMaxLength(max = CustomOptionRequest.VALUE_MAX_LENGTH, message = OrderValidationMessage.VALUE_LENGTH_MAX)
+    @NoControlCharacters(message = OrderValidationMessage.TEXT_INVALID_CHARACTER)
     String value
 ) {
 

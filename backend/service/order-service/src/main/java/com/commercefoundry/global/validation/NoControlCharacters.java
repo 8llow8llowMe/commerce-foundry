@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.cart.adapter.in.web.dto.validation;
+package com.commercefoundry.global.validation;
 
 import jakarta.validation.Constraint;
 import jakarta.validation.Payload;
@@ -10,7 +10,7 @@ import java.lang.annotation.Target;
 
 /**
  * 문자열에 제어 문자({@code \p{Cc}} — C0 · DEL · C1, NUL · 개행 · 탭 포함)와 짝 없는 서로게이트가 없다. 앞뒤 공백을 자르기 전의 원문 기준이다.
- * null 은 통과한다(필수는 {@code @NotBlank} 몫). 판정은 {@link NoControlCharactersValidator} 다.
+ * null 은 통과한다(필수는 {@code @NotBlank} 몫). 판정은 {@link NoControlCharactersValidator} 다. 장바구니 맞춤 입력 · 주문 생성 · 미리보기의 자유 텍스트가 함께 쓴다(#426).
  */
 @Documented
 @Target({ElementType.FIELD, ElementType.PARAMETER, ElementType.RECORD_COMPONENT})

@@ -54,6 +54,8 @@ public final class OrderValidationMessage {
     public static final String STATE_PROVINCE_LENGTH_MAX = "ORDER_140:stateProvince 는 100자 이하여야 합니다.";
     public static final String ORDER_ID_POSITIVE = "ORDER_141:orderId 는 양수여야 합니다.";
     public static final String MEMBER_ID_POSITIVE = "ORDER_142:memberId 는 양수여야 합니다.";
+    /** 자유 텍스트(배송지 · 맞춤 입력)의 제어 문자 · 깨진 문자 — PostgreSQL 이 NUL 을 거절해 선점 뒤 저장이 500 이 되는 것을 앞에서 막는다(#426). */
+    public static final String TEXT_INVALID_CHARACTER = "ORDER_143:제어 문자(NUL · 개행 · 탭 등)나 깨진 문자를 쓸 수 없습니다.";
 
     private OrderValidationMessage() {
     }

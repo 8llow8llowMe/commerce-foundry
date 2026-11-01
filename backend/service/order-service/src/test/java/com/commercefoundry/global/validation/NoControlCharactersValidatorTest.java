@@ -1,4 +1,4 @@
-package com.commercefoundry.domainlayer.cart.adapter.in.web.dto.validation;
+package com.commercefoundry.global.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

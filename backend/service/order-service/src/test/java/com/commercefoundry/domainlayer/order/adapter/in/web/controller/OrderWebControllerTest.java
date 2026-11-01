@@ -157,7 +157,10 @@ class OrderWebControllerTest {
         "기대 총액 amount 없음  | EXPECTED:{\"currency\":\"KRW\"}                                 | ORDER_129 | expectedTotalAmount.amount",
         "기대 총액 음수         | EXPECTED:{\"amount\":-1,\"currency\":\"KRW\"}                   | ORDER_130 | expectedTotalAmount.amount",
         "기대 총액 통화 없음    | EXPECTED:{\"amount\":1000}                                      | ORDER_131 | expectedTotalAmount.currency",
-        "수량 100               | {\"items\":[{\"skuId\":1,\"quantity\":100}],ADDRESS}            | ORDER_107 | items[0].quantity"
+        "수량 100               | {\"items\":[{\"skuId\":1,\"quantity\":100}],ADDRESS}            | ORDER_107 | items[0].quantity",
+        "배송 메모 NUL (#426)   | ADDRESS:문 앞=문\\u0000앞                                        | ORDER_143 | shippingAddress.deliveryMemo",
+        "주소 개행 (#426)       | ADDRESS:테스트로 1=테스트로\\n1                                  | ORDER_143 | shippingAddress.addressLine1",
+        "맞춤 입력 NUL (#426)   | {\"items\":[{\"skuId\":1,\"quantity\":1,\"customOptions\":[{\"fieldKey\":\"chest\",\"value\":\"9\\u00006\"}]}],ADDRESS} | ORDER_143 | items[0].customOptions[0].value"
     })
     @DisplayName("본문 검증 오류는 필드별 코드로 400 이다 — 헤더가 있어도 필드 경로가 그대로다(메서드 검증으로 바뀌지 않는다)")
     void validation(String caseName, String spec, String code, String field) {
