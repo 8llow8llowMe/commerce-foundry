@@ -820,8 +820,8 @@ fi
 if [ "${WITH_VAULT}" = true ]; then
   ( umask 077; mkdir -m 700 "${WORK_DIR}" )
   read_vault_secret
-  # 필수 빌드 키(이름만 출력)
-  missing="$(jq -r --arg req "${BUILD_REQUIRED_KEYS}" '. as $d | $req | split(" ")[] | select(length > 0)
+  # 필수 빌드 키(이름만 출력). 없는 앱(admin)은 withEnv 가 빈 값 변수를 지우므로 :- 로 읽는다(#441)
+  missing="$(jq -r --arg req "${BUILD_REQUIRED_KEYS:-}" '. as $d | $req | split(" ")[] | select(length > 0)
     | select(($d[.] // "") | test("^[[:space:]]*$"))' "${VALUES_JSON}")"
   if [ -n "${missing}" ]; then
     echo "${VAULT_SECRET_PATH} 에 빌드 필수 키가 없거나 비어 있습니다(deploy.md §2): $(printf '%s' "${missing}" | tr '\\n' ' ')"
