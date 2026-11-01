@@ -105,6 +105,27 @@ public record Order(
         return quote.lines().stream().anyMatch(OrderQuoteLine::customOrder);
     }
 
+    /**
+     * 결제 전 고객 취소 (#16) — 결제 대기면 CANCELED 다. 이미 취소됐으면 바꾸지 않은 이 값을 돌려준다(같은 요청의 재시도가 안전하게).
+     * 결제 뒤 취소(PAID · MAKING · PREPARING → CANCEL_REQUESTED)는 환불 · 재고 복원이 함께 가야 해 이 메서드가 아니다(#16 PR-2).
+     *
+     * @throws OrderStatusTransitionException 결제 대기 · 취소 완료가 아닌 상태(결제 완료 · 만료 등)
+     */
+    public Order cancelBeforePayment() {
+        if (status == OrderStatus.CANCELED) {
+            return this;
+        }
+        if (status != OrderStatus.PENDING_PAYMENT) {
+            throw new OrderStatusTransitionException(status, OrderStatus.CANCELED);
+        }
+        return transitionTo(OrderStatus.CANCELED);
+    }
+
+    /** 고객이 지금 취소할 수 있는가 — 결제 전(결제 대기)만이다(#16 PR-1). */
+    public boolean isCancelableByCustomer() {
+        return status == OrderStatus.PENDING_PAYMENT;
+    }
+
     public boolean isNew() {
         return version == null;
     }

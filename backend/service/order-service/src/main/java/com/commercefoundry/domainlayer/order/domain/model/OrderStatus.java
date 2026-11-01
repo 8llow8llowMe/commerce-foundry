@@ -15,7 +15,7 @@ import lombok.RequiredArgsConstructor;
  * <table>
  *   <caption>허용 전이 (표 밖은 {@link OrderStatusTransitionException})</caption>
  *   <tr><th>현재</th><th>다음</th></tr>
- *   <tr><td>PENDING_PAYMENT</td><td>PAID · EXPIRED</td></tr>
+ *   <tr><td>PENDING_PAYMENT</td><td>PAID · EXPIRED · CANCELED — 결제 전 고객 취소 (#16)</td></tr>
  *   <tr><td>EXPIRED</td><td>PAID — 만료 뒤 결제가 완료되고 재고를 다시 잡았을 때 (#14)</td></tr>
  *   <tr><td>PAID</td><td>MAKING · PREPARING · CANCEL_REQUESTED</td></tr>
  *   <tr><td>MAKING</td><td>PREPARING · CANCEL_REQUESTED</td></tr>
@@ -63,7 +63,7 @@ public enum OrderStatus implements CodeNameDescribable {
         for (OrderStatus status : values()) {
             table.put(status, Collections.unmodifiableSet(EnumSet.noneOf(OrderStatus.class)));
         }
-        table.put(PENDING_PAYMENT, Collections.unmodifiableSet(EnumSet.of(PAID, EXPIRED)));
+        table.put(PENDING_PAYMENT, Collections.unmodifiableSet(EnumSet.of(PAID, EXPIRED, CANCELED)));
         table.put(EXPIRED, Collections.unmodifiableSet(EnumSet.of(PAID)));
         table.put(PAID, Collections.unmodifiableSet(EnumSet.of(MAKING, PREPARING, CANCEL_REQUESTED)));
         table.put(MAKING, Collections.unmodifiableSet(EnumSet.of(PREPARING, CANCEL_REQUESTED)));

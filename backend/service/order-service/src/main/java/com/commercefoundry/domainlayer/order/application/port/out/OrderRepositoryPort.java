@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderAdminSummaryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderMemberSummaryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderStatusHistoryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
@@ -12,6 +13,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Slice;
 
 /**
  * 주문 — 주문 행 · 배송지 · 항목 · 맞춤 제작 입력 · 상태 이력. 단건 조회는 모두 채워 돌려준다 (주문 1번 + 배송지 1번 + 항목 1번 + 입력 1번).
@@ -73,4 +75,20 @@ public interface OrderRepositoryPort {
      * @throws org.springframework.dao.OptimisticLockingFailureException 읽은 뒤 결제 완료 · 다른 인스턴스의 만료가 먼저 커밋했을 때
      */
     void saveExpiry(Order expired, OrderStatusHistory history);
+
+    /**
+     * 회원의 주문 내역 한 조각 (#16) — 최신순(주문 아이디 내림차순, {@code idx_orders_member_id_id}). 전체 건수를 세지 않는다.
+     * 첫 항목 상품명 · 항목 수는 그 조각의 주문만 묶어 읽는다(N+1 없음).
+     */
+    Slice<OrderMemberSummaryQueryResult> findMemberSummarySlice(long memberId, int page, int size);
+
+    /**
+     * 고객의 결제 전 취소(PENDING_PAYMENT → CANCELED, #16)한 주문 헤더와 그 이력을 저장하고 flush 한다. 호출 Processor 의 트랜잭션을 필수로 요구한다 —
+     * 뒤의 {@code order-canceled} outbox 실패도 상태와 함께 롤백한다.
+     *
+     * @param canceled 도메인 {@code cancelBeforePayment()} 로 바뀐 주문 — 버전은 읽을 때 값이다
+     * @throws IllegalArgumentException 주문 · 이력이 결제 전 고객 취소가 아니거나 서로 맞지 않을 때
+     * @throws org.springframework.dao.OptimisticLockingFailureException 읽은 뒤 결제 완료 · 만료 · 다른 취소가 먼저 커밋했을 때
+     */
+    void saveCustomerCancel(Order canceled, OrderStatusHistory history);
 }
