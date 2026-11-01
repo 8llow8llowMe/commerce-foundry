@@ -54,13 +54,15 @@ import java.util.Objects;
  * @param orderSynced 결제 완료를 order-service 에 반영했는가 ({@code payment-guide.md} §6). 주문에 반영하는 상태(DONE 계열)만 true 가 된다
  * @param orderSyncFailureCode 주문 반영이 종결 실패했을 때 order-service 가 준 오류 코드. 반영 전 · 반영 성공이면 null
  * @param abortReason 중단 사유 (ABORTED, 그리고 ABORTED 에서 온 LATE_APPROVED)
+ * @param approvalIdempotencyKey 마지막으로 승인을 시작한 고객 요청의 {@code Idempotency-Key}(UUID 소문자 36자) — 같은 키의 재요청에 처음 결과를 그대로 돌려주는 근거다
+ *     ({@code api-design-guide.md} §6). 승인 시작 전이면 null. 되돌린 READY 를 새 키로 다시 시작하면 바뀐다. PG 멱등 키(결제 시도 아이디)와 다르다
  * @param version 낙관적 락 버전. 아직 저장하지 않은 결제는 null 이다
  */
 public record Payment(
     long id, long orderId, long memberId, String pgOrderId, PaymentGateway gateway, Money amount, String orderName, PaymentStatus status,
     String paymentKey, PaymentMethod method, String easyPayProvider, String pgStatus, Instant approvalStartedAt, Instant approvedAt,
     String failureCode, String failureMessage, PaymentUnknownReason unknownReason, boolean orderSynced, String orderSyncFailureCode,
-    PaymentAbortReason abortReason, Long version
+    PaymentAbortReason abortReason, String approvalIdempotencyKey, Long version
 ) {
 
     /** 토스 orderId 규칙 — 6~64자, 영문 대소문자 · 숫자 · {@code -} · {@code _}. */
@@ -76,6 +78,8 @@ public record Payment(
     /** 토스 failure.message 상한. */
     public static final int FAILURE_MESSAGE_MAX_LENGTH = 510;
     public static final int ORDER_SYNC_FAILURE_CODE_MAX_LENGTH = 30;
+    /** 고객 승인 요청의 {@code Idempotency-Key} — UUID 문자열 길이. */
+    public static final int APPROVAL_IDEMPOTENCY_KEY_MAX_LENGTH = 36;
 
     private static final int MASKED_PAYMENT_KEY_PREFIX_LENGTH = 8;
 
@@ -101,6 +105,12 @@ public record Payment(
         requireMaxLength(failureCode, FAILURE_CODE_MAX_LENGTH, "failureCode");
         requireMaxLength(failureMessage, FAILURE_MESSAGE_MAX_LENGTH, "failureMessage");
         requireMaxLength(orderSyncFailureCode, ORDER_SYNC_FAILURE_CODE_MAX_LENGTH, "orderSyncFailureCode");
+        if (approvalIdempotencyKey != null) {
+            requireApprovalIdempotencyKey(approvalIdempotencyKey);
+            if (paymentKey == null) {
+                throw new IllegalArgumentException("승인 멱등 키가 있으면 결제키도 있어야 합니다: " + status);
+            }
+        }
         requireStatusFields(status, paymentKey, method, easyPayProvider, pgStatus, approvalStartedAt, approvedAt,
             failureCode, failureMessage, unknownReason, orderSynced, orderSyncFailureCode, abortReason);
     }
@@ -118,7 +128,7 @@ public record Payment(
         }
         return new Payment(
             id, orderId, memberId, Long.toString(id), PaymentGateway.TOSS, amount, orderName, PaymentStatus.READY,
-            null, null, null, null, null, null, null, null, null, false, null, null, null
+            null, null, null, null, null, null, null, null, null, false, null, null, null, null
         );
     }
 
@@ -136,22 +146,26 @@ public record Payment(
      * 이 기록이 복구의 단서가 된다 ({@code payment-guide.md} §3-2 · §3-3).
      *
      * <p>되돌린 READY(결제키가 이미 있다)는 같은 결제키로만 다시 시작한다 — 이전 키가 PG 에서 승인됐을 수 있어 다른 키로 바꾸지 않는다.
+     * 고객 멱등 키는 새 값으로 바뀔 수 있다 — 되돌린 READY 는 청구가 없었으므로 새 요청으로 다시 승인한다.
      *
      * @param paymentKey successUrl 로 돌아온 PG 결제키 (1~200자)
-     * @throws IllegalArgumentException 결제키가 비었거나 200자를 넘을 때
+     * @param idempotencyKey 이 승인 요청의 고객 {@code Idempotency-Key} (1~36자, UUID 문자열) — 같은 키의 재요청을 알아보는 근거로 남긴다
+     * @throws IllegalArgumentException 결제키가 비었거나 200자를 넘을 때, 멱등 키가 비었거나 36자를 넘을 때
      * @throws PaymentApprovalMismatchException 되돌린 READY 에 다른 결제키가 올 때 ({@link PaymentApprovalMismatchException.Field#PAYMENT_KEY})
      */
-    public Payment startApproval(String paymentKey, Instant now) {
+    public Payment startApproval(String paymentKey, String idempotencyKey, Instant now) {
         Objects.requireNonNull(paymentKey, "paymentKey");
+        Objects.requireNonNull(idempotencyKey, "idempotencyKey");
         Objects.requireNonNull(now, "now");
         requireStatus(PaymentStatus.READY, PaymentTransitionException.Action.START_APPROVAL);
         requirePaymentKey(paymentKey);
+        requireApprovalIdempotencyKey(idempotencyKey);
         if (this.paymentKey != null && !this.paymentKey.equals(paymentKey)) {
             throw new PaymentApprovalMismatchException(id, PaymentApprovalMismatchException.Field.PAYMENT_KEY);
         }
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, PaymentStatus.IN_PROGRESS,
-            paymentKey, null, null, null, now, null, null, null, null, false, null, null, version
+            paymentKey, null, null, null, now, null, null, null, null, false, null, null, idempotencyKey, version
         );
     }
 
@@ -216,7 +230,7 @@ public record Payment(
         requireStatus(PaymentStatus.IN_PROGRESS, PaymentTransitionException.Action.MARK_UNKNOWN);
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, PaymentStatus.UNKNOWN,
-            paymentKey, null, null, null, approvalStartedAt, null, null, null, reason, false, null, null, version
+            paymentKey, null, null, null, approvalStartedAt, null, null, null, reason, false, null, null, approvalIdempotencyKey, version
         );
     }
 
@@ -229,7 +243,7 @@ public record Payment(
         requireStatus(PaymentStatus.IN_PROGRESS, PaymentTransitionException.Action.REVERT_TO_READY);
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, PaymentStatus.READY,
-            paymentKey, null, null, null, approvalStartedAt, null, null, null, null, false, null, null, version
+            paymentKey, null, null, null, approvalStartedAt, null, null, null, null, false, null, null, approvalIdempotencyKey, version
         );
     }
 
@@ -268,7 +282,7 @@ public record Payment(
         }
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, status,
-            paymentKey, null, null, null, approvalStartedAt, null, null, null, reason, false, null, null, version
+            paymentKey, null, null, null, approvalStartedAt, null, null, null, reason, false, null, null, approvalIdempotencyKey, version
         );
     }
 
@@ -321,7 +335,7 @@ public record Payment(
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, PaymentStatus.LATE_APPROVED,
             approval.paymentKey(), approval.method(), approval.easyPayProvider(), approval.pgStatus(), approvalStartedAt, approval.approvedAt(),
-            failureCode, failureMessage, unknownReason, false, null, abortReason, version
+            failureCode, failureMessage, unknownReason, false, null, abortReason, approvalIdempotencyKey, version
         );
     }
 
@@ -335,8 +349,8 @@ public record Payment(
             );
     }
 
-    /** 앞 8자 + {@code ***}. 8자 이하면 전부 가린다. null 이면 null. */
-    static String maskPaymentKey(String paymentKey) {
+    /** 앞 8자 + {@code ***}. 8자 이하면 전부 가린다. null 이면 null. 요청 DTO · 커맨드 · 로그의 결제키 마스킹도 이 메서드 하나로 한다. */
+    public static String maskPaymentKey(String paymentKey) {
         if (paymentKey == null) {
             return null;
         }
@@ -352,21 +366,21 @@ public record Payment(
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, PaymentStatus.DONE,
             paymentKey, approval.method(), approval.easyPayProvider(), approval.pgStatus(), approvalStartedAt, approval.approvedAt(),
-            null, null, unknownReason, false, null, null, version
+            null, null, unknownReason, false, null, null, approvalIdempotencyKey, version
         );
     }
 
     private Payment failed(String code, String message) {
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, PaymentStatus.FAILED,
-            paymentKey, null, null, null, approvalStartedAt, null, code, truncate(message, FAILURE_MESSAGE_MAX_LENGTH), unknownReason, false, null, null, version
+            paymentKey, null, null, null, approvalStartedAt, null, code, truncate(message, FAILURE_MESSAGE_MAX_LENGTH), unknownReason, false, null, null, approvalIdempotencyKey, version
         );
     }
 
     private Payment aborted(PaymentAbortReason reason) {
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, PaymentStatus.ABORTED,
-            paymentKey, null, null, null, approvalStartedAt, null, null, null, null, false, null, reason, version
+            paymentKey, null, null, null, approvalStartedAt, null, null, null, null, false, null, reason, approvalIdempotencyKey, version
         );
     }
 
@@ -374,7 +388,7 @@ public record Payment(
         return new Payment(
             id, orderId, memberId, pgOrderId, gateway, amount, orderName, status,
             paymentKey, method, easyPayProvider, pgStatus, approvalStartedAt, approvedAt,
-            failureCode, failureMessage, unknownReason, synced, syncFailureCode, abortReason, version
+            failureCode, failureMessage, unknownReason, synced, syncFailureCode, abortReason, approvalIdempotencyKey, version
         );
     }
 
@@ -466,6 +480,13 @@ public record Payment(
                 throw new IllegalArgumentException("PG 주문번호는 영문 · 숫자 · '-' · '_' 만 쓸 수 있습니다: %d번째 문자".formatted(index + 1));
             }
         }
+    }
+
+    private static void requireApprovalIdempotencyKey(String value) {
+        if (value.isBlank()) {
+            throw new IllegalArgumentException("승인 멱등 키가 비었습니다");
+        }
+        requireMaxLength(value, APPROVAL_IDEMPOTENCY_KEY_MAX_LENGTH, "approvalIdempotencyKey");
     }
 
     private static void requirePaymentKey(String value) {

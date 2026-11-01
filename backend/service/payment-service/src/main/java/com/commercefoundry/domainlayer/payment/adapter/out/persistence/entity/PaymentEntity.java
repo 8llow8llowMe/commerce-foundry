@@ -50,7 +50,8 @@ import lombok.NoArgsConstructor;
     uniqueConstraints = {
         @UniqueConstraint(name = "uk_payment_pg_order_id", columnNames = "pg_order_id"),
         @UniqueConstraint(name = "uk_payment_payment_key", columnNames = "payment_key"),
-        @UniqueConstraint(name = "uk_payment_active_order_id", columnNames = "active_order_id")
+        @UniqueConstraint(name = "uk_payment_active_order_id", columnNames = "active_order_id"),
+        @UniqueConstraint(name = "uk_payment_member_approval_key", columnNames = {"member_id", "approval_idempotency_key"})
     },
     indexes = {
         @Index(name = "idx_payment_order_id", columnList = "order_id"),
@@ -66,6 +67,7 @@ import lombok.NoArgsConstructor;
                 + " or (status not in ('FAILED','ABORTED','LATE_APPROVED') and active_order_id is not null and active_order_id = order_id)"
         ),
         @CheckConstraint(name = "ck_payment_approval_started_at_key", constraint = "approval_started_at is null or payment_key is not null"),
+        @CheckConstraint(name = "ck_payment_approval_key_payment_key", constraint = "approval_idempotency_key is null or payment_key is not null"),
         @CheckConstraint(
             name = "ck_payment_in_progress_fields",
             constraint = "status not in ('IN_PROGRESS','UNKNOWN') or (payment_key is not null and approval_started_at is not null)"
@@ -189,6 +191,10 @@ public class PaymentEntity extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "abort_reason", length = 30, comment = "결제 시도 중단 사유 (ABORTED 와 ABORTED 에서 온 LATE_APPROVED 만)")
     private PaymentAbortReason abortReason;
+
+    @Column(name = "approval_idempotency_key", length = Payment.APPROVAL_IDEMPOTENCY_KEY_MAX_LENGTH,
+        comment = "마지막 승인 요청의 고객 Idempotency-Key (UUID). 승인 시작 전이면 null — (member_id, 이 값) 유니크로 같은 키의 재요청을 알아본다")
+    private String approvalIdempotencyKey;
 
     @Version
     @Column(name = "version", nullable = false, comment = "낙관적 락 버전")

@@ -25,7 +25,8 @@ public interface PaymentRepositoryPort {
      * </ul>
      *
      * @return 저장한 결제 시도 — 올라간 버전을 담는다. 다음 전이는 이 값으로 한다
-     * @throws PaymentPersistenceConflictException 업무로 다룰 충돌 — 활성 슬롯({@code ACTIVE_SLOT}) · 결제키 중복({@code PAYMENT_KEY}) · 버전 충돌({@code VERSION}).
+     * @throws PaymentPersistenceConflictException 업무로 다룰 충돌 — 활성 슬롯({@code ACTIVE_SLOT}) · 결제키 중복({@code PAYMENT_KEY}) · 승인 멱등 키 중복({@code APPROVAL_KEY}) ·
+     *     버전 충돌({@code VERSION}).
      *     원인 예외는 싣지 않는다
      * @throws org.springframework.dao.DataIntegrityViolationException 그 밖의 제약 위반(check · NOT NULL · PG 주문번호 · 기본 키) — 코드 오류다. 원인 없이 제약 이름만 싣는다
      */
@@ -37,4 +38,7 @@ public interface PaymentRepositoryPort {
 
     /** 주문의 활성(FAILED · ABORTED · LATE_APPROVED 가 아닌) 결제 시도. 많아야 하나다 ({@link Payment#activeOrderId()}). */
     Optional<Payment> findActiveByOrderId(long orderId);
+
+    /** 회원이 이 고객 Idempotency-Key 로 승인을 시작한 결제 시도. 많아야 하나다({@code uk_payment_member_approval_key}). */
+    Optional<Payment> findByApprovalIdempotencyKey(long memberId, String approvalIdempotencyKey);
 }
