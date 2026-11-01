@@ -98,6 +98,7 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 | `AUTH_LOGIN_GUARD_HASH_KEY` | O | `:-` 빈 값 | | | O | | | | |
 | `AUTH_LOGIN_GUARD_ENABLED` | - | `:-false` | | | O | | | | |
 | `AUTH_OTP_SECRET_KEY` | O | `:?` 필수 | | | O | | | | |
+| `TOSS_SECRET_KEY` | O | `:?` 필수 | | | | | | O | |
 | `AUTH_OTP_SECRET_KEY_PREVIOUS` | O | `:-` 빈 값 | | | O | | | | |
 | `AUTH_OTP_ISSUER` | - | `:-Commerce Foundry Admin` | | | O | | | | |
 | `AUTH_SOCIAL_ENABLED` · `KAKAO_LOGIN_ENABLED` · `NAVER_LOGIN_ENABLED` | - | `:-false` | | | O | | | | |
@@ -135,7 +136,7 @@ compose 가 env 파일과 무관하게 고정하는 값:
   영문 · 숫자 · `. _ ~ -` 밖의 문자가 있거나 32자 미만이면 Eureka 가 뜨지 않는다(`security-guide.md` §12).
 - `GATEWAY_CORS_ALLOWED_ORIGINS` 는 비어도 뜨지만 어떤 origin 도 허용하지 않는다(닫힌 기본값). 배포 환경은 프론트 origin 을 채운다.
 - `STORE_FEATURES_*` 는 dev 프로파일 yml 이 `true` 로 덮어 dev 에서는 env 를 읽지 않는다.
-- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `KAFKA_SASL_*`(§4-4))는 compose 에 넘기지 않는다.
+- 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_SECRET_KEY` 밖의 `TOSS_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `KAFKA_SASL_*`(§4-4))는 compose 에 넘기지 않는다.
   `STORAGE_PUBLIC_BASE_URL` 은 product-service 가 메인 전시 미디어 주소 판정에 읽는다(#63, `:-` 빈 값 — 비면 미디어 쓰기만 503).
   `MESSAGING_ENABLED` · `KAFKA_NAMESPACE` · `KAFKA_BOOTSTRAP_SERVERS` · `KAFKA_SECURITY_PROTOCOL` 은 product-service · order-service compose 가 넘긴다(#309 주문 만료 · 취소 컨슈머 · #96 `order-expired` outbox 릴레이, `:-` 기본 꺼짐).
   order-service 는 꺼져 있어도 `orders.outbox` 에 쌓기만 하고 릴레이가 멈춘다 — 켜면 쌓인 것부터 나간다.
@@ -160,6 +161,7 @@ compose 가 env 파일과 무관하게 고정하는 값:
 | `JWT_PUBLIC_KEY` · `JWT_PRIVATE_KEY` | compose 해석 실패. 만들기 · 교체: `security-guide.md` §6 |
 | `INTERNAL_JWT_SECRET` | compose 해석 실패. 서비스 5종 같은 값: `security-guide.md` §9-6 |
 | `AUTH_OTP_SECRET_KEY` | compose 해석 실패 (#238). 값이 base64 로 정확히 32바이트가 아니거나 저장소의 테스트 키면 auth 가 기동하지 않는다. auth 인스턴스 전부 같은 값이고, 잃으면 등록된 관리자 OTP 를 모두 읽지 못한다(`AUTH_039`). 만들기 · 회전: `secret-management.md` (관리자 OTP 키). 기동 실패 메시지별 조치는 `local-run-guide.md` §6 |
+| `TOSS_SECRET_KEY` | compose 해석 실패 (#432). dev 는 `test_gsk_` · `test_sk_`, prod 는 `live_` 키만 기동한다 — 클라이언트 키(ck · gck)를 넣으면 기동하지 않는다: `payment-guide.md` §2 |
 | `GATEWAY_CORS_ALLOWED_ORIGINS` | 뜨지만 브라우저 요청이 전부 CORS 로 막힌다 |
 
 - **`ADMIN_SEED_*` 는 최초 시드 뒤 secret 에서 비우고 다시 배포한다**(`security-guide.md` §11-3). 관리자가 이미 있으면 시드는 아무것도 하지 않으므로,

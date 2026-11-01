@@ -34,6 +34,8 @@ x-payment-service-environment: &payment_service_environment
   # 서비스 간 토큰 비밀(서비스 5종 같은 값, 게이트웨이 제외). 이전 비밀은 교체 중에만 채운다
   INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:?deploy-guide.md 4절}
   INTERNAL_JWT_SECRET_PREVIOUS: ${INTERNAL_JWT_SECRET_PREVIOUS:-}
+  # 토스페이먼츠 시크릿 키(payment-guide.md §2). dev 는 test_ 키, prod 는 live_ 키만 받는다 — 기동 때 TossPaymentsStartupGuard 가 형식을 본다. 기본값을 두지 않는다
+  TOSS_SECRET_KEY: ${TOSS_SECRET_KEY:?deploy-guide.md 4절}
 
 x-logging: &default_logging
   driver: json-file
