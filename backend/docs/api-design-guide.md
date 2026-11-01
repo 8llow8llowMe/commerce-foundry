@@ -843,6 +843,32 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   503 `PAYMENT_010` 은 청구가 없었다는 뜻이다 — 같은 본문으로 다시 보낸다(키는 같아도 새로 만들어도 된다). UNKNOWN · 504 · 500 `PAYMENT_013` 은 상태 조회로 확인한다.
 - 결제 준비 · 승인은 운영 결제 게이트(`payment.enabled`, 기본 false — #308 · #15 뒤에 운영에서 켠다)가 닫혀 있으면 503 `PAYMENT_015` 다. 상태 조회는 막지 않는다.
 
+### 2-16. 어드민 주문 관리 (order-service, #17 PR-1)
+
+| API | 권한 | 응답 | 오류 |
+|-----|------|------|------|
+| `GET /api/v1/admin/orders?status=&from=&to=&page=0&size=20` | `hasRole('ADMIN')` | 200 `PageResponse<{orderId, memberId, status, orderName, totalAmount, currency, recipientName, createdAt, paymentDueAt}>` — 최신순(주문 시각 · 아이디 내림차순) | 400 `ORDER_144`(page) · `145`(size 1~100) · `146`(from ≥ to) · `198`(모르는 상태 · 시각 형식) |
+| `GET /api/v1/admin/orders/{orderId}` | `hasRole('ADMIN')` | 200 `{orderId, memberId, status, nextStatuses[], currency, items[], amounts{itemsAmount, shippingFee, totalAmount}, shippingAddress, histories[], paymentDueAt, createdAt}` — 어드민 전용 DTO(고객 응답과 나눈다) | 400 `ORDER_141` · 404 `ORDER_001` |
+| `PATCH /api/v1/admin/orders/{orderId}/status` `{status, reason?}` | `hasRole('ADMIN')` | 200 바뀐 상세(위와 같은 모양). 이미 그 상태면 바꾸지 않고 200 | 400 `ORDER_147`(status) · `148`(사유 200자) · `151`(사유 제어 문자 · 깨진 문자) · `027`(배송 완료 사유 없음) · 404 `ORDER_001` · 409 `ORDER_020` · `023` · `024` · `025` |
+| `POST /api/v1/admin/orders/status-changes` `{orderIds[], status, reason?}` | `hasRole('ADMIN')` | 200 `{changedCount, unchangedCount, failedCount, results[{orderId, result, errorCode, message}]}` — 요청 순서 | 400 `ORDER_147` · `148` · `149`(1~100개) · `150`(중복) · `151` · `152`(숫자 문자열 · long 범위) · `153`(배송 완료는 일괄 불가) |
+
+- **어드민이 직접 바꾸는 전이**(`AdminStatusChangePolicy`): 결제 완료 → 제작 중(맞춤 제작 항목이 있을 때만) · 상품 준비중, 제작 중 → 상품 준비중, 배송 중 → 배송 완료.
+  전이 표(`order-flow-guide.md` §1) 밖은 `ORDER_020`, 표 안이지만 다른 흐름이 바꾸는 전이(결제 완료 #14 · 만료 #96 · 출고=송장 등록 #18 · 취소 · 반품 #15 · #16 · 구매 확정)는
+  `ORDER_023`, 맞춤 제작 항목 없이 제작 중은 `ORDER_024` 다. 어드민이라고 아무 상태로나 바꾸지 않는다. 상세의 `nextStatuses` 가 지금 누를 수 있는 버튼이다.
+- **배송 완료** — 고객의 반품 · 구매 확정 기간이 여기서 시작하므로 사유(배송을 확인한 근거)가 있어야 하고(없으면 400 `ORDER_027`), 한 건씩만 바꾼다(일괄은 400 `ORDER_153`).
+  택배사 추적(#18)이 생기면 그쪽이 자동으로 바꾸고 이 버튼은 예외 처리용으로 남는다.
+- **동시성** — 주문마다 새 트랜잭션에서 읽고 바꾸며, 저장은 `@Version` 비교다. 읽은 뒤 고객 취소 · 결제 · 다른 운영자가 먼저 커밋했으면 409 `ORDER_025` 이고 아무것도 쓰지 않는다
+  (둘 중 하나만 성공). 새로고침한 상세의 `nextStatuses` 로 다시 판단한다. 다시 읽어 이미 목표 상태면(다른 운영자가 같은 목표로 먼저 바꿈) 실패가 아니라 그대로 둔 것(`UNCHANGED` · 200)이다.
+- **일괄 변경** — 주문마다 따로 바꿔 한 건의 실패가 다른 건을 되돌리지 않는다. `result` 는 `CHANGED` · `UNCHANGED`(이미 그 상태) · `FAILED`(`errorCode` · `message` 는
+  단건과 같은 업무 오류. 예상 못 한 저장 오류는 원인을 싣지 않은 `ORDER_026`). 실패한 주문만 다시 보내면 된다. 주문 아이디는 JS 정밀도 때문에 숫자 문자열로 받는다.
+- **이력** — 바꾼 관리자는 access 토큰의 memberId 로만 남긴다(본문으로 받지 않는다). `histories[]` 는 `{fromStatus, toStatus, changedBy{code, name, description}, changedById, reason, changedAt}`
+  이고 `changedBy` 는 고객 · 관리자 · 자동 처리 · 연동 처리다(§2-8 업무 언어). 주문 접수 줄은 `fromStatus` 가 null 이다.
+- **개인정보** — 목록의 받는 분과 상세 배송지의 받는 분 · 연락처는 가리고(홍*동 · 010****5678), 상세 주소 · 배송 요청 사항은 있으면 `****` 다. 기본 주소 · 도시 · 주 · 우편번호는
+  지역 정보라 그대로 둔다. 맞춤 제작 입력값(치수 등)도 제작에 필요해 그대로 보인다. 원문은 송장 출력(#18)처럼 꼭 필요한 경로가 감사와 함께 다룬다. 사유 · 배송지는 로그에 남기지 않는다.
+- **감사** — 목록 · 상세 열람과 상태 변경(성공 · 실패, 일괄은 주문마다)을 `admin.audit` 한 줄로 남긴다(`security-guide.md` §11-4 — `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE`).
+- **목록** — 기간은 주문 시각 `[from, to)` (UTC)이고 비면 그쪽 끝이 열려 있다. 정렬은 주문 시각 → 아이디 내림차순이고 `idx_orders_status_created_at_id` · `idx_orders_created_at_id` 범위로 읽는다(건수 쿼리도). 첫 상품명 · 항목 수 · 받는 분은 그 페이지 주문만 묶어 읽는다(항목 1번 · 배송지 1번).
+  결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 목록 · 승인 · 환불 · `REFUND_FAILED` 재시도는 #17 PR-2(#15 · #16 이후)다.
+
 ## 3. 계층 흐름
 
 ```text
