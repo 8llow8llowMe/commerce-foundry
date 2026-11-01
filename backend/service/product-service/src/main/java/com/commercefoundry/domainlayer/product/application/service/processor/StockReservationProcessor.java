@@ -19,6 +19,7 @@ import com.commercefoundry.domainlayer.product.domain.model.StockReservation;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationItem;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationTransitionException;
 import com.commercefoundry.global.properties.StockProperties;
+import com.commercefoundry.messaging.properties.MessagingProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
 import java.time.Instant;
@@ -62,6 +63,7 @@ public class StockReservationProcessor {
     private final ProductRepositoryPort productRepositoryPort;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final StockProperties stockProperties;
+    private final MessagingProperties messagingProperties;
     private final Clock clock;
 
     /**
@@ -169,29 +171,37 @@ public class StockReservationProcessor {
     }
 
     /**
-     * 만료 대상 — 만료 시각 → 아이디 오름차순으로 {@code limit} 건까지.
+     * 만료 대상 — 스윕 기준 시각({@link #sweepCutoff})에 만료된 선점을 만료 시각 → 아이디 오름차순으로 {@code limit} 건까지.
      *
      * @param after 앞 배치의 마지막 건. 이 건 다음부터 읽는다(keyset). null 이면 처음부터다
      */
     public List<ExpiredStockReservationInfo> findExpiredReservations(ExpiredStockReservationInfo after, int limit) {
-        return stockReservationRepositoryPort.findExpiredReservations(clock.instant(), after == null ? null : after.toCursor(), limit).stream()
+        return stockReservationRepositoryPort.findExpiredReservations(sweepCutoff(clock.instant()), after == null ? null : after.toCursor(), limit).stream()
             .map(ExpiredStockReservationInfo::from)
             .toList();
     }
 
     /**
-     * 만료된 선점 한 건을 푼다. 목록을 읽은 뒤 확정 · 해제됐을 수 있으므로 다시 읽어 RESERVED 이고 만료 시각이 지났을 때만 푼다.
+     * 만료된 선점 한 건을 푼다. 목록을 읽은 뒤 확정 · 해제됐을 수 있으므로 다시 읽어 RESERVED 이고 스윕 기준 시각에 만료됐을 때만 푼다.
      *
      * @return 풀었으면 true. 없거나 이미 확정 · 해제됐거나 아직 만료 전이면 false
      */
     public boolean expire(long reservationId) {
         Instant now = clock.instant();
         Optional<StockReservation> found = stockReservationRepositoryPort.findById(reservationId);
-        if (found.isEmpty() || !found.get().isExpired(now)) {
+        if (found.isEmpty() || !found.get().isExpired(sweepCutoff(now))) {
             return false;
         }
         saveAndRestore(transition(() -> found.get().release(now, StockReleaseReason.EXPIRED)).reservation());
         return true;
+    }
+
+    /**
+     * 스윕이 만료로 보는 기준 시각 (#309). 메시징이 켜져 있으면 {@code event-grace} 만큼 이르다 — 주문 만료 이벤트가 먼저 풀고, 스윕은 이벤트가 오지 않은
+     * 선점(발행 전 과도기 · order-service 장애 · DLT · 주문 저장 실패로 주문 없이 남은 선점)만 푸는 안전망이다. 꺼져 있으면 스윕이 주 경로라 지금 시각이다.
+     */
+    Instant sweepCutoff(Instant now) {
+        return messagingProperties.enabled() ? now.minus(stockProperties.reservation().expirySweep().eventGrace()) : now;
     }
 
     private StockReservationInfo sameOrder(StockReservation active, StockReservationCommand command) {

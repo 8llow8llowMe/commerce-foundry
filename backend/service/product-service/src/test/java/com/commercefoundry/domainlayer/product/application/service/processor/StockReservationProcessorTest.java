@@ -34,6 +34,7 @@ import com.commercefoundry.domainlayer.product.domain.model.StockReservationItem
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationStatus;
 import com.commercefoundry.domainlayer.product.domain.model.StockReservationTransitionException;
 import com.commercefoundry.global.properties.StockProperties;
+import com.commercefoundry.messaging.properties.MessagingProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
 import java.time.Duration;
@@ -58,6 +59,7 @@ class StockReservationProcessorTest {
     private static final long RESERVATION_ID = 7001L;
     private static final Instant NOW = Instant.parse("2026-10-18T09:00:00Z");
     private static final Duration TTL = Duration.ofMinutes(30);
+    private static final Duration GRACE = Duration.ofMinutes(2);
     private static final long PRODUCT_ID = 501L;
 
     private StockReservationRepositoryPort stockReservationRepositoryPort;
@@ -73,11 +75,11 @@ class StockReservationProcessorTest {
         skuRepositoryPort = Mockito.mock(SkuRepositoryPort.class);
         productRepositoryPort = Mockito.mock(ProductRepositoryPort.class);
         StockProperties properties = new StockProperties(new StockProperties.Reservation(
-            TTL, new StockProperties.ExpirySweep(Duration.ofSeconds(60), Duration.ofSeconds(60), 100, 10)
+            TTL, new StockProperties.ExpirySweep(Duration.ofSeconds(60), Duration.ofSeconds(60), 100, 10, GRACE)
         ));
         processor = new StockReservationProcessor(
             stockReservationRepositoryPort, stockRepositoryPort, skuRepositoryPort, productRepositoryPort,
-            new SequenceIdGenerator(), properties, Clock.fixed(NOW, ZoneOffset.UTC)
+            new SequenceIdGenerator(), properties, messaging(false), Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
 
@@ -545,6 +547,37 @@ class StockReservationProcessorTest {
 
             assertThat(processor.findExpiredReservations(cursor, 100)).containsExactly(new ExpiredStockReservationInfo(3L, NOW));
         }
+
+        @Test
+        @DisplayName("메시징이 켜져 있으면 안전망이다 — grace 만큼 이른 시각으로 조회하고, grace 안의 만료 건은 풀지 않는다 (이벤트가 먼저 푼다, #309)")
+        void graceWhenMessagingEnabled() {
+            StockReservationProcessor safetyNet = new StockReservationProcessor(
+                stockReservationRepositoryPort, stockRepositoryPort, skuRepositoryPort, productRepositoryPort,
+                new SequenceIdGenerator(), stockProperties(), messaging(true), Clock.fixed(NOW, ZoneOffset.UTC)
+            );
+            given(stockReservationRepositoryPort.findExpiredReservations(NOW.minus(GRACE), null, 100)).willReturn(List.of());
+            assertThat(safetyNet.findExpiredReservations(null, 100)).isEmpty();
+            verify(stockReservationRepositoryPort).findExpiredReservations(NOW.minus(GRACE), null, 100);
+
+            givenReservation(StockReservationStatus.RESERVED, NOW.minusSeconds(1), item(1001L, 2, true));
+            assertThat(safetyNet.expire(RESERVATION_ID)).isFalse();
+            verify(stockReservationRepositoryPort, never()).update(any());
+
+            givenReservation(StockReservationStatus.RESERVED, NOW.minus(GRACE), item(1001L, 2, true));
+            given(stockRepositoryPort.restore(1001L, 2L)).willReturn(true);
+            assertThat(safetyNet.expire(RESERVATION_ID)).isTrue();
+            verify(stockRepositoryPort).restore(1001L, 2L);
+        }
+    }
+
+    private static StockProperties stockProperties() {
+        return new StockProperties(new StockProperties.Reservation(
+            TTL, new StockProperties.ExpirySweep(Duration.ofSeconds(60), Duration.ofSeconds(60), 100, 10, GRACE)
+        ));
+    }
+
+    private static MessagingProperties messaging(boolean enabled) {
+        return new MessagingProperties(enabled, "commerce-foundry.test", "product", List.of(), 65536, null, null, null);
     }
 
     private void givenOnSale(long... skuIds) {

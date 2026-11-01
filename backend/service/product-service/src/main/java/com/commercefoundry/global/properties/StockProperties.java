@@ -35,12 +35,18 @@ public record StockProperties(Reservation reservation) {
      * @param fixedDelay 앞 실행이 끝난 뒤 다음 실행까지 기다리는 시간
      * @param batchSize 한 번에 읽는 선점 수
      * @param maxBatchesPerRun 한 번 실행에서 읽는 배치 수 상한 — 쌓인 만료 건이 많아도 한 실행이 끝없이 길어지지 않게
+     * @param eventGrace 메시징이 켜져 있을 때 만료 판정을 늦추는 시간 (#309) — 주문 만료 이벤트가 먼저 풀고 스윕은 놓친 것만 푸는 안전망이 된다.
+     *                   메시징이 꺼져 있으면 스윕이 주 경로라 쓰지 않는다. 0 이상 1시간 이하
      */
-    public record ExpirySweep(Duration initialDelay, Duration fixedDelay, int batchSize, int maxBatchesPerRun) {
+    public record ExpirySweep(Duration initialDelay, Duration fixedDelay, int batchSize, int maxBatchesPerRun, Duration eventGrace) {
 
         public ExpirySweep {
             requirePositive(initialDelay, "stock.reservation.expiry-sweep.initial-delay");
             requirePositive(fixedDelay, "stock.reservation.expiry-sweep.fixed-delay");
+            Objects.requireNonNull(eventGrace, "stock.reservation.expiry-sweep.event-grace 설정이 없습니다.");
+            if (eventGrace.isNegative() || eventGrace.compareTo(Duration.ofHours(1)) > 0) {
+                throw new IllegalArgumentException("stock.reservation.expiry-sweep.event-grace 는 0 이상 1시간 이하여야 합니다: " + eventGrace);
+            }
             if (batchSize <= 0) {
                 throw new IllegalArgumentException("stock.reservation.expiry-sweep.batch-size 는 1 이상이어야 합니다: " + batchSize);
             }

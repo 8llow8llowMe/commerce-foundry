@@ -28,11 +28,13 @@ public interface StockReservationRepositoryPort {
     Optional<StockReservation> findActiveByOrderId(long orderId);
 
     /**
-     * 만료 대상(RESERVED 이고 만료 시각이 {@code now} 이전 · 같음). 만료 시각 → 아이디 오름차순으로 {@code limit} 건까지다.
+     * 만료 대상(RESERVED 이고 만료 시각이 {@code cutoff} 이전 · 같음). 만료 시각 → 아이디 오름차순으로 {@code limit} 건까지다.
+     *
+     * @param cutoff 스윕 기준 시각 — 지금이 아니다(메시징이 켜져 있으면 지금 - event-grace, {@code StockReservationProcessor.sweepCutoff})
      *
      * @param after keyset 커서 — 이 건의 {@code (expiresAt, reservationId)} 다음부터 읽는다. null 이면 처음부터다
      */
-    List<ExpiredStockReservationQueryResult> findExpiredReservations(Instant now, ExpiredStockReservationQueryResult after, int limit);
+    List<ExpiredStockReservationQueryResult> findExpiredReservations(Instant cutoff, ExpiredStockReservationQueryResult after, int limit);
 
     /**
      * SKU 별 RESERVED 선점 중 재고를 실제로 차감한({@code deducted}) 항목의 수량 합. SKU 묶음을 group by 한 번(쿼리 1번)으로 읽는다.

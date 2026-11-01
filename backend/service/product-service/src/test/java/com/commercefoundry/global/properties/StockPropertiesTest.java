@@ -21,7 +21,8 @@ class StockPropertiesTest {
         "stock.reservation.expiry-sweep.initial-delay", "60s",
         "stock.reservation.expiry-sweep.fixed-delay", "60s",
         "stock.reservation.expiry-sweep.batch-size", "100",
-        "stock.reservation.expiry-sweep.max-batches-per-run", "10"
+        "stock.reservation.expiry-sweep.max-batches-per-run", "10",
+        "stock.reservation.expiry-sweep.event-grace", "2m"
     );
 
     @Test
@@ -34,6 +35,19 @@ class StockPropertiesTest {
         assertThat(reservation.expirySweep().fixedDelay()).isEqualTo(Duration.ofSeconds(60));
         assertThat(reservation.expirySweep().batchSize()).isEqualTo(100);
         assertThat(reservation.expirySweep().maxBatchesPerRun()).isEqualTo(10);
+        assertThat(reservation.expirySweep().eventGrace()).isEqualTo(Duration.ofMinutes(2));
+    }
+
+    @ParameterizedTest(name = "event-grace={0}")
+    @CsvSource({"-1s", "61m"})
+    @DisplayName("event-grace 는 0 이상 1시간 이하다 — 0 은 허용(안전망도 만료 시각에 바로 푼다)")
+    void eventGraceRange(String value) {
+        Map<String, String> properties = new HashMap<>(VALID);
+        properties.put("stock.reservation.expiry-sweep.event-grace", value);
+        assertThatThrownBy(() -> bind(properties)).isInstanceOf(BindException.class);
+
+        properties.put("stock.reservation.expiry-sweep.event-grace", "0s");
+        assertThat(bind(properties).reservation().expirySweep().eventGrace()).isZero();
     }
 
     @ParameterizedTest(name = "{0}={1}")
