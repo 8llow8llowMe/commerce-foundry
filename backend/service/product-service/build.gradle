@@ -8,6 +8,9 @@ dependencies {
     // 처리 기록 정리의 단일 실행 락(ShedLock 테이블 product.shedlock)은 messaging-core 가 런타임에 가져온다(#378)
     implementation project(':core:messaging-core')
 
+    // 어드민이 쓴 상품 상세 HTML 을 저장 전에 허용 목록으로 정제한다 (#9 E1 · D7, FE sanitize-html.ts 와 같은 목록)
+    implementation "org.jsoup:jsoup:${rootProject.ext.jsoupVersion}"
+
     // security-core 는 서블릿 · Boot 보안 자동설정을 compileOnly 로만 둔다 — 서블릿 서비스가 직접 선언한다 (security-guide.md §5-3)
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'

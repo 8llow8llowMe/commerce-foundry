@@ -64,6 +64,42 @@ public final class ProductValidationMessage {
     // 운영자 온보딩 상품 사실 (GET /internal/v1/onboarding-facts/product-registration)
     public static final String ONBOARDING_MEMBER_ID_POSITIVE = "PRODUCT_140:memberId 는 양수여야 합니다.";
 
+    // 어드민 상품 등록 (POST /api/v1/admin/products, #9 E1). 1xx 가 다 차서 074~099 · 169 를 쓴다(2026-11-01 승인 — 2026-10-20 의 131~ 은 먼저 쓰였다).
+    // 금액 · 판매 상태는 칸이 여럿이라 한 코드를 함께 쓰고 fieldErrors.field 경로(skus[2].additionalPrice.amount)로 구분한다.
+    // categoryId · categoryIds 원소 양수는 CATEGORY_ID_POSITIVE, initialStock.quantity 0 이상은 STOCK_QUANTITY_MIN 이다
+    /** 한 줄 평문 — 제어 · 서식 문자(개행 · 탭 · 제로폭 공백 · 방향 제어 등) · 짝 없는 서로게이트 · 줄 구분자 금지. */
+    public static final String PLAIN_TEXT = "[^\\p{Cc}\\p{Cf}\\p{Cs}\\p{Zl}\\p{Zp}]*";
+    public static final String PRODUCT_NAME_REQUIRED = "PRODUCT_074:name 은 필수입니다.";
+    public static final String PRODUCT_NAME_SIZE_MAX = "PRODUCT_075:name 은 100자 이하여야 합니다.";
+    public static final String PRODUCT_NAME_INVALID_CHARACTER = "PRODUCT_076:name 에는 제어 · 서식 문자를 쓸 수 없습니다.";
+    public static final String PRODUCT_SUMMARY_INVALID = "PRODUCT_077:summary 는 제어 · 서식 문자 없이 200자 이하여야 합니다.";
+    public static final String PRODUCT_DESCRIPTION_HTML_SIZE_MAX = "PRODUCT_078:descriptionHtml 은 200000자 이하여야 합니다.";
+    public static final String PRODUCT_CATEGORY_ID_REQUIRED = "PRODUCT_079:categoryId 는 필수입니다.";
+    public static final String PRODUCT_CATEGORY_IDS_SIZE_MAX = "PRODUCT_080:categoryIds 는 최대 20개입니다.";
+    public static final String PRODUCT_CATEGORY_IDS_ELEMENT_REQUIRED = "PRODUCT_081:categoryIds 의 원소는 비어 있을 수 없습니다.";
+    public static final String PRODUCT_SALE_STATUS_REQUIRED = "PRODUCT_082:saleStatus 는 필수입니다.";
+    public static final String PRODUCT_VISIBLE_REQUIRED = "PRODUCT_083:visible 은 필수입니다.";
+    public static final String PRODUCT_PRICE_REQUIRED = "PRODUCT_084:가격은 필수입니다.";
+    public static final String PRODUCT_MONEY_AMOUNT_REQUIRED = "PRODUCT_085:amount 는 필수입니다.";
+    public static final String PRODUCT_MONEY_AMOUNT_MIN = "PRODUCT_086:amount 는 0 이상이어야 합니다.";
+    public static final String PRODUCT_MONEY_CURRENCY_REQUIRED = "PRODUCT_087:currency 는 필수입니다.";
+    public static final String PRODUCT_MAX_QUANTITY_PER_ORDER_RANGE = "PRODUCT_088:maxQuantityPerOrder 는 1 이상 999 이하여야 합니다.";
+    public static final String PRODUCT_EXPECTED_SHIP_DATE_REQUIRES_PREORDER = "PRODUCT_089:expectedShipDate 는 preorder 가 true 일 때만 보낼 수 있습니다.";
+    public static final String PRODUCT_OPTION_GROUPS_SIZE_MAX = "PRODUCT_090:optionGroups 는 최대 5개입니다.";
+    public static final String PRODUCT_OPTION_GROUP_REQUIRED = "PRODUCT_091:optionGroups 의 원소는 비어 있을 수 없습니다.";
+    public static final String PRODUCT_OPTION_GROUP_NAME_INVALID = "PRODUCT_092:optionGroups.name 은 제어 · 서식 문자 없이 1~30자여야 합니다.";
+    public static final String PRODUCT_OPTION_VALUES_SIZE = "PRODUCT_093:optionGroups.values 는 1~50개여야 합니다.";
+    public static final String PRODUCT_OPTION_VALUE_NAME_INVALID = "PRODUCT_094:optionGroups.values 의 원소는 제어 · 서식 문자 없이 1~50자여야 합니다.";
+    public static final String PRODUCT_SKUS_SIZE = "PRODUCT_095:skus 는 1~100개여야 합니다.";
+    public static final String PRODUCT_SKU_REQUIRED = "PRODUCT_096:skus 의 원소는 비어 있을 수 없습니다.";
+    public static final String PRODUCT_SKU_OPTION_VALUES_INVALID = "PRODUCT_097:skus.optionValues 는 최대 5개이고 원소는 제어 · 서식 문자 없이 1~50자여야 합니다.";
+    public static final String PRODUCT_SKU_WEIGHT_GRAMS_POSITIVE = "PRODUCT_098:skus.weightGrams 는 1 이상이어야 합니다.";
+    public static final String PRODUCT_SKU_HS_CODE_INVALID = "PRODUCT_099:skus.hsCode 는 점 · 하이픈 · 공백을 뺀 뒤 숫자 6~10자리여야 합니다.";
+    public static final String PRODUCT_INITIAL_STOCK_INVALID = "PRODUCT_169:skus.initialStock 은 stockManaged · quantity 를 모두 보내야 합니다.";
+    // 위 대역이 다 차서 비어 있던 037 · 038 을 잇는다(2026-11-01)
+    public static final String PRODUCT_MONEY_AMOUNT_MAX = "PRODUCT_037:amount 는 100000000 이하여야 합니다.";
+    public static final String PRODUCT_EXPECTED_SHIP_DATE_PAST = "PRODUCT_038:expectedShipDate 는 오늘 이후여야 합니다.";
+
     private ProductValidationMessage() {
     }
 }

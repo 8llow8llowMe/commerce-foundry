@@ -12,6 +12,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Persistable;
 
 /**
  * 상품이 진열되는 카테고리 (다중). 대표 카테고리({@code product.category_id})도 반드시 여기 있다 — 쓰기 쪽이 검증한다.
@@ -29,7 +30,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class ProductCategoryEntity extends BaseEntity {
+public class ProductCategoryEntity extends BaseEntity implements Persistable<Long> {
 
     @Id
     @Column(name = "id", comment = "상품 진열 카테고리 아이디 (Snowflake)")
@@ -43,4 +44,10 @@ public class ProductCategoryEntity extends BaseEntity {
 
     @Column(name = "display_order", nullable = false, comment = "카테고리 안의 진열 순서 (오름차순). 어드민 수동 정렬용")
     private int displayOrder;
+
+    /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다(새 행은 persist, #9 E1). */
+    @Override
+    public boolean isNew() {
+        return getCreatedAt() == null;
+    }
 }

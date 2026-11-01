@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.Product
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductSkuAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductImageAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.CustomOrderFieldAdminItem;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
 import com.commercefoundry.domainlayer.product.application.info.ProductAdminDetailInfo;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
@@ -29,6 +30,14 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class ProductAdminPresenter {
+
+    /** 등록 결과 — 저장된 상세와 상세 HTML 정제 여부 (#9 E1). */
+    public ProductCreateAdminResponse toCreateResponse(ProductAdminDetailInfo info, boolean descriptionHtmlSanitized) {
+        return ProductCreateAdminResponse.builder()
+            .product(toDetailResponse(info))
+            .descriptionHtmlSanitized(descriptionHtmlSanitized)
+            .build();
+    }
 
     public ProductDetailAdminResponse toDetailResponse(ProductAdminDetailInfo info) {
         Product product = info.product();

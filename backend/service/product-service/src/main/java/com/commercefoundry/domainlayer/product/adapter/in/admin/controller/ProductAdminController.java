@@ -3,8 +3,9 @@ package com.commercefoundry.domainlayer.product.adapter.in.admin.controller;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCreateRequest;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
-import org.springframework.web.bind.annotation.PathVariable;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.model.ProductAdminSortType;
@@ -12,19 +13,26 @@ import com.commercefoundry.domainlayer.product.application.model.ProductAvailabi
 import com.commercefoundry.domainlayer.product.application.model.ProductSaleStatusFilter;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,7 +44,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
  * 판매 상태 · 판매 가능 상태 조건은 domain enum 이 아니라 application/model 의 입력 enum 으로 받는다 — 컨트롤러는 domain 을 쓰지 않는다 (H1).
  */
-@Tag(name = "[어드민] 상품 관리", description = "숨김 포함 상품 목록 · 상세")
+@Tag(name = "[어드민] 상품 관리", description = "숨김 포함 상품 목록 · 상세 · 등록")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -47,6 +55,24 @@ public class ProductAdminController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final ProductAdminUseCase productAdminUseCase;
+
+    @Operation(
+        summary = "상품 등록",
+        description = "이미지 없이, 맞춤 제작 꺼짐으로 상품을 만들고 201 과 저장된 상세(편집용 상세 조회와 같은 모양)를 돌려준다. 등록한 어드민은 토큰의 memberId 다. "
+            + "상세 HTML 은 허용 목록으로 정제해 저장하고 빠진 것이 있으면 descriptionHtmlSanitized=true 다. "
+            + "SKU 는 그룹 순서대로 고른 옵션 값 이름으로 조합을 가리킨다 — 옵션 없는 상품은 SKU 한 개. initialStock 을 준 SKU 는 재고 행과 입고 이력이 함께 생기고, "
+            + "주지 않은 SKU 는 품절로 생긴다. 없는 카테고리는 400(PRODUCT_012), 옵션 · SKU 구성은 400(PRODUCT_013), 같은 조합 SKU 는 400(PRODUCT_014), "
+            + "가격 규칙(통화 · 판매중 SKU 중 추가금 0 필수)은 400(PRODUCT_016), 카테고리 변경과 겹쳐 잠금을 얻지 못하면 409(PRODUCT_045)다. "
+            + "같은 본문을 두 번 보내면 상품이 두 개 생긴다(Idempotency-Key 없음 — 지우면 된다)."
+    )
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping
+    public ResponseEntity<Response<ProductCreateAdminResponse>> create(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @RequestBody @Valid ProductCreateRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(productAdminUseCase.create(request.toCommand(member.memberId()))));
+    }
 
     @Operation(summary = "상품 상세 조회 (편집용)", description = "숨김 상품과 은퇴 옵션 · 판매 종료 SKU 를 포함한 저장 설정이다. 삭제 상품은 404 다. 재고 · 원가는 별도 API 로 조회한다.")
     @PreAuthorize("hasRole('ADMIN')")

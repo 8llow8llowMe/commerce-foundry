@@ -24,6 +24,7 @@ import com.commercefoundry.domainlayer.product.application.model.ProductAdminSea
 import com.commercefoundry.domainlayer.product.application.model.ProductAdminSortType;
 import com.commercefoundry.domainlayer.product.application.model.ProductSearchCriteria;
 import com.commercefoundry.domainlayer.product.application.model.ProductSortType;
+import com.commercefoundry.domainlayer.product.application.port.out.ProductCategoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
@@ -35,6 +36,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.query.Produc
 import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderInputType;
+import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
@@ -43,6 +45,7 @@ import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
+import com.commercefoundry.domainlayer.product.domain.model.SkuOptionKey;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
@@ -89,7 +92,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 })
 @Import({
     QuerydslConfigurer.class, ProductServiceFeaturesConfig.class,
-    ProductRepositoryAdapter.class, ProductOptionRepositoryAdapter.class, SkuRepositoryAdapter.class, StockRepositoryAdapter.class,
+    ProductRepositoryAdapter.class, ProductCategoryRepositoryAdapter.class, ProductOptionRepositoryAdapter.class, SkuRepositoryAdapter.class, StockRepositoryAdapter.class,
     ProductImageRepositoryAdapter.class, ProductCustomOrderFieldRepositoryAdapter.class,
     ProductMapperImpl.class, ProductOptionMapperImpl.class, SkuMapperImpl.class, StockMapperImpl.class,
     ProductImageMapperImpl.class, ProductCustomOrderFieldMapperImpl.class
@@ -160,6 +163,9 @@ class ProductPersistenceAdapterTest {
 
     @Autowired
     private ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
+
+    @Autowired
+    private ProductCategoryRepositoryPort productCategoryRepositoryPort;
 
     @BeforeEach
     void setUp() {
@@ -845,6 +851,45 @@ class ProductPersistenceAdapterTest {
             .visible(visible)
             .salePriceAmount(salePriceAmount)
             .salePriceCurrency(KRW);
+    }
+
+    @Test
+    @DisplayName("등록 쓰기(#9 E1) — 상품 · 진열 카테고리 · 옵션 · SKU 를 새 행으로 INSERT 하고 기존 조회로 그대로 읽힌다. 버전은 0, 등록자가 남는다")
+    void insertsNewProduct() {
+        Product product = new Product(9_001L, 30L, "새 저고리", "요약", "<p>본문</p>", SaleStatus.ON_SALE, false, Money.of(59_000, KRW), Money.of(69_000, KRW),
+            5, false, null, null, true, LocalDate.of(2026, 12, 1), null, null, 100L);
+        productRepositoryPort.insert(product);
+        productCategoryRepositoryPort.insertLinks(9_001L, List.of(30L, 31L), List.of(9_101L, 9_102L));
+        productOptionRepositoryPort.insertAll(
+            List.of(new OptionGroup(9_201L, 9_001L, "사이즈", 0, null)),
+            List.of(new OptionValue(9_301L, 9_201L, 9_001L, "S", 0, null), new OptionValue(9_302L, 9_201L, 9_001L, "M", 1, null))
+        );
+        skuRepositoryPort.insertAll(List.of(
+            new Sku(9_401L, 9_001L, SkuOptionKey.of(List.of(9_301L)), Money.of(0, KRW), SaleStatus.ON_SALE, 350, new HsCode("6211421000")),
+            new Sku(9_402L, 9_001L, SkuOptionKey.of(List.of(9_302L)), Money.of(1_000, KRW), SaleStatus.STOP_SELLING, null, null)
+        ));
+        entityManager.flush();
+        entityManager.clear();
+
+        Product found = productRepositoryPort.findAllByIdsIncludingHidden(List.of(9_001L)).getFirst();
+        assertThat(found).usingRecursiveComparison().ignoringFields("version").isEqualTo(product);
+        assertThat(found.version()).isZero();
+        assertThat(productCategoryRepositoryPort.findCategoryIdsByProductId(9_001L)).containsExactly(30L, 31L);
+        assertThat(productOptionRepositoryPort.findValuesByProductId(9_001L)).extracting(OptionValue::name).containsExactly("S", "M");
+        assertThat(skuRepositoryPort.findAllByProductId(9_001L)).extracting(Sku::id, sku -> sku.optionKey().valueIds(), Sku::weightGrams)
+            .containsExactly(tuple(9_401L, List.of(9_301L), 350), tuple(9_402L, List.of(9_302L), null));
+    }
+
+    @Test
+    @DisplayName("등록 쓰기 — 같은 상품 안 같은 조합 SKU 는 uk_sku_product_id_option_value_key 가 막는다(Processor 판정의 2차 방어)")
+    void insertGuards() {
+        assertThatThrownBy(() -> {
+            skuRepositoryPort.insertAll(List.of(
+                new Sku(9_501L, 101L, SkuOptionKey.of(List.of(77L)), Money.of(0, KRW), SaleStatus.ON_SALE, null, null),
+                new Sku(9_502L, 101L, SkuOptionKey.of(List.of(77L)), Money.of(0, KRW), SaleStatus.ON_SALE, null, null)
+            ));
+            entityManager.flush();
+        }).rootCause().hasMessageContaining("uk_sku_product_id_option_value_key");
     }
 
     /** 삭제(soft delete) 상품 — check 가 허용하는 숨김 · 판매 종료다. */

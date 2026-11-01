@@ -12,6 +12,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Persistable;
 
 @Entity
 @Table(
@@ -23,7 +24,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class ProductOptionGroupEntity extends BaseEntity {
+public class ProductOptionGroupEntity extends BaseEntity implements Persistable<Long> {
 
     @Id
     @Column(name = "id", comment = "옵션 그룹 아이디 (Snowflake)")
@@ -40,4 +41,10 @@ public class ProductOptionGroupEntity extends BaseEntity {
 
     @Column(name = "retired_at", comment = "은퇴 시각. null 이면 사용 중. 은퇴한 그룹은 고객 상세에서 빠지고, 행은 주문 · 장바구니의 옵션명 표시용으로 남는다")
     private Instant retiredAt;
+
+    /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다(새 행은 persist, #9 E1). */
+    @Override
+    public boolean isNew() {
+        return getCreatedAt() == null;
+    }
 }
