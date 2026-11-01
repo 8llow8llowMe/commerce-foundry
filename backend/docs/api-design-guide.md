@@ -916,6 +916,27 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 - **목록** — 기간은 주문 시각 `[from, to)` (UTC)이고 비면 그쪽 끝이 열려 있다. 정렬은 주문 시각 → 아이디 내림차순이고 `idx_orders_status_created_at_id` · `idx_orders_created_at_id` 범위로 읽는다(건수 쿼리도). 첫 상품명 · 항목 수 · 받는 분은 그 페이지 주문만 묶어 읽는다(항목 1번 · 배송지 1번).
   결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 목록 · 승인 · 환불 · `REFUND_FAILED` 재시도는 #17 PR-2(#15 · #16 이후)다.
 
+### 2-17. 고객 주문 내역 · 결제 전 취소 (order-service, #16 PR-1)
+
+고객 전용(`hasRole('CUSTOMER')`, ADMIN 403). 회원은 토큰 주체이고 남의 주문은 없는 주문처럼 404 `ORDER_001` 이다.
+
+| API | 응답 | 오류 |
+|-----|------|------|
+| `GET /api/v1/orders?page=0&size=20` | 200 `SliceResponse<{orderId, status, orderName, itemCount, totalAmount, cancelable, paymentDueAt, createdAt}>` — 최신순(주문 아이디 내림차순), 전체 건수 없음 | 400 `ORDER_144`(page) · `145`(size 1~100) |
+| `GET /api/v1/orders/{orderId}` | 200 `{orderId, status, cancelable, paymentDueAt, currency, items[], amounts, shipping, shippingAddress, createdAt}` — 주문 생성 응답과 같은 스냅숏 모양 | 400 `ORDER_141` · 404 `ORDER_001` |
+| `POST /api/v1/orders/{orderId}/cancellation` `{reason}` | 200 취소된 상세. 이미 취소됐으면 바꾸지 않고 200 | 400 `ORDER_154`(사유 없음) · `100`(모르는 사유 · 깨진 JSON) · `141` · 404 `ORDER_001` · 409 `ORDER_020`(결제 완료 · 만료 등) |
+
+- **취소 범위** — PR-1 은 결제 전(결제 대기 → 취소 완료)만이다. 환불이 없고 잡아 둔 재고는 `order-canceled` 이벤트로 풀린다(`order-flow-guide.md` §1-1 · §3-5).
+  결제 뒤 취소 · 반품 · 구매 확정은 #15(환불) 뒤 #16 PR-2 다. `cancelable` 이 지금 취소 버튼을 보여 줄지다.
+- **사유** — `CHANGE_OF_MIND`(단순 변심) · `ORDER_MISTAKE`(주문 내용 잘못 선택) · `PAYMENT_ISSUE`(결제 문제) · `OTHER`(기타). 자유 입력은 받지 않는다 —
+  사유 코드가 주문 이력과 재고 해제 이벤트에 그대로 실린다.
+- **동시성** — 취소와 결제 완료 · 만료가 겹치면 `@Version` 비교로 하나만 성공한다. 진 쪽이 같은 취소(더블 클릭)면 200, 결제 완료 · 만료면 409 `ORDER_020` 이다.
+  결제창을 연 채, 또는 결제가 `UNKNOWN` · `IN_PROGRESS` 로 남은 채 취소하면 PG 승인이 취소된 주문에 대해 끝날 수 있다 — 결제 → 주문 반영(#308)이 전액 취소한다
+  (`order-flow-guide.md` §1-1). 지금 주문 응답에는 결제 상태가 없어 화면이 이를 가릴 수 없다 — 결제 요약이 생기면(#308) 결제 진행 중에는 취소 버튼을 막는다.
+- **상한** — 결제 전 취소는 회원별 활성 주문 시도 수(#231, `ORDER_022`)를 돌려주지 않는다(30분 창이 지나야 풀린다). 상품별 수량 상한(#426)은 바로 풀린다.
+- **목록** — `idx_orders_member_id_id` 를 거꾸로 읽는다(Snowflake 아이디가 시각 순). 주문 이름 · 항목 수는 그 조각 주문의 항목만 한 번에 읽는다. 결제 · 배송 요약은 #14 · #308 · #18 뒤에 더한다.
+- **레이트 리밋** — 취소도 주문 생성과 같은 게이트웨이 `ORDER_WRITE` 버킷(`/api/v1/orders/**` 쓰기)이다. 목록은 페이지 번호(OFFSET)라 회원 주문이 많아지면 커서(마지막 주문 아이디)로 바꾼다.
+
 ## 3. 계층 흐름
 
 ```text
