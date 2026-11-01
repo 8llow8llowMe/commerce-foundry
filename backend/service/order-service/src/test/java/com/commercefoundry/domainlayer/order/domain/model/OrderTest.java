@@ -43,6 +43,8 @@ class OrderTest {
         assertThat(canceled.status()).isEqualTo(OrderStatus.CANCELED);
         assertThat(canceled).usingRecursiveComparison().ignoringFields("status").isEqualTo(pending);
         assertThat(canceled.isCancelableByCustomer()).isFalse();
+        // 일반 상태 변경으로는 결제 전 취소를 못 한다 — 재고 해제 이벤트 없이 CANCELED 가 되지 않게
+        assertThatThrownBy(() -> pending.changeStatus(OrderStatus.CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
         assertThat(canceled.cancelBeforePayment()).isSameAs(canceled);
     }
 
