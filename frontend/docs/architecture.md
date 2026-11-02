@@ -606,7 +606,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 ### 상품 상세 (`/products/[productId]`, #418)
 
-- 어드민 상품 상세 `GET /api/v1/admin/products/{productId}`(BE #394, `backend/docs/api-design-guide.md` 어드민 상품 상세) — **읽기 전용**이다. 수정은 BE #9 수정 API 뒤에 이 화면에 얹는다.
+- 어드민 상품 상세 `GET /api/v1/admin/products/{productId}`(BE #394, `backend/docs/api-design-guide.md` 어드민 상품 상세) — 쓰기는 맨 아래 "판매 중지 · 삭제" 하나다(아래). 수정은 BE #9 수정 API 뒤에 이 화면에 얹는다.
 - **서버 컴포넌트에서 `serverFetch` 로 읽는다** — 상세 설명 HTML 을 서버에서 `sanitizeProductHtml`(`@cf/sanitize`, 스토어프론트 상세와 같은 허용 목록)로 거른 뒤 넣어야 해서다(`conventions.md` §2).
   어드민의 다른 화면은 클라이언트 `apiFetch` 지만 여기는 읽기만이라 재발급이 없는 어드민 세션에서도 차이가 없다. 실패하면 "다시 불러오기"(`router.refresh()`)다.
 - 상태는 `loadProductDetail` 이 가른다 — 404 `PRODUCT_001` · 경로 검증 400(`PRODUCT_105` · `PRODUCT_198`) · 형식이 틀린 아이디(부르지 않는다, Long 범위 양의 정수만)는 `notFound()` 로
@@ -618,6 +618,16 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **아이디 · 코드 원문을 보이지 않는다(#305)** — 상태 · 유형은 서버 `name`, SKU 는 아이디 대신 옵션 조합 이름(그룹 진열 순서, 옵션 없는 SKU 는 "기본", 목록에 없는 값은 "알 수 없는 옵션"),
   카테고리는 어드민 카테고리 트리의 경로 이름(대표를 맨 앞, 트리에 없으면 "찾을 수 없는 카테고리", 트리를 못 읽어도 상세는 보인다). 버전 · 등록자 · 맞춤 항목 키는 그리지 않는다.
 - 금액은 저장된 값을 `formatMoney` 로 표시만 한다. 재고 · 원가 · 사이즈표 링크는 목록과 같은 규칙이다(재고 · 원가는 노출 상품만).
+- **판매 중지 · 삭제**(#29, `DELETE /api/v1/admin/products/{productId}`, `backend/docs/api-design-guide.md` §2-13) — 숨김 · 판매 종료 · 논리 삭제를 한 번에 하고 **되돌릴 수 없다**(복구 API 없음).
+  코드는 `lib/product/delete.ts`(`productDeleteFailure`) · `components/product/ProductDeleteAction`(상세 맨 아래, 클라이언트 `apiFetch`) · `ProductDeletedNotice`(목록 안내)다.
+  - 되돌릴 수 없다는 안내 뒤 한 번 더 묻는다. 요청은 ref 로 한 번만 보내고, 목록으로 옮기는 동안에도 막아 둔다. 확인 버튼은 `disabled` 대신 `aria-disabled` 다.
+    포커스는 확인이 열리면 "취소" 로, 닫히면(취소 · 다시 읽기) 여는 버튼으로 간다(카테고리 삭제와 같다). 결과 문구 live region 은 비어도 남긴다.
+  - 본문 · 버전 · 멱등 키가 없다 — 이미 삭제된 상품도 200 이라 다시 눌러도 같은 결과다.
+  - 성공하면 상세가 404 가 되므로 `/products?deleted=done` 으로 `replace` 한다. 404 `PRODUCT_001` 은 `?deleted=gone` 으로 같은 길이다.
+    목록은 안내(`ProductDeletedNotice`)를 한 번 보이고 `SanitizedNotice` 처럼 주소에서 지운다. 목록은 들어올 때 새로 읽으므로 지운 상품은 빠져 있다.
+  - 409 `PRODUCT_010`(읽은 뒤 다른 수정 · 삭제가 먼저 반영) · 502/504(결과 모름)는 확인을 닫고 `router.refresh()` 로 다시 읽은 뒤 안내한다 — 자동으로 다시 지우지 않는다.
+    실제로 지워졌으면 다시 읽을 때 not-found 로 바뀐다.
+  - 401 은 화면을 두고 다시 로그인 안내(`SESSION_EXPIRED_ON_DELETE`, 저장 401 과 같은 규칙), 403 은 그 자리에 `AccessNotice`, 그 밖의 4xx 는 서버 문구, 5xx · 연결 실패는 일반 문구다.
 
 ### 상품 등록 (`/products/new`, #29 · BE #9 E1)
 
@@ -637,7 +647,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
     금액은 비교만 하고 합계를 계산하지 않는다.
 - **멱등 키가 없다** — 같은 본문을 두 번 보내면 상품이 둘이다. 제출은 ref 로 한 번만 받고 요청 중 버튼 · 칸을 막으며, 성공하면 곧바로 상세로 `replace` 한다(옮길 때까지 막아 둔다).
   결과를 모르는 실패(연결 실패 · 봉투 아님 · 502 · 503 · 504 · 5xx)는 "등록됐을 수 있음 — 목록에서 확인 뒤 없을 때만 다시" 와 목록 링크(새 탭)다. 자동으로 다시 보내지 않고,
-  **제출 버튼을 계속 막아 둔다** — 운영자가 "목록에 없었습니다" 를 눌러야 다시 열린다(아직 삭제 API(E2)가 없어 중복 상품은 숨김으로만 감출 수 있다).
+  **제출 버튼을 계속 막아 둔다** — 운영자가 "목록에 없었습니다" 를 눌러야 다시 열린다(중복으로 생긴 상품은 상세의 "판매 중지 · 삭제" 로 지운다).
   **입력 칸의 Enter 로 제출하지 않는다** — 옵션 · 재고를 채우다 덜 된 상품이 생기지 않게 제출은 버튼으로만 받는다.
 - **오류는 코드별 운영자 문구다**(`createFailure`) — 검증 `PRODUCT_074~099` · `169` · `037` · `038` · `106` · `137` 은 `fieldErrors.field` 경로로 칸을 찾는다(`createFieldKey`:
   `skus[1].additionalPrice.amount` → `skus.1.additionalPrice`, `skus[0].hsCodeValid` → HS 코드 칸, `expectedShipDateWithPreorder` → 발송 예정일, `skus[0].optionValues[1]` → SKU 표 전체, 모르는 경로는 폼 전체).
