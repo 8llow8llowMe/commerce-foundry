@@ -24,8 +24,8 @@ export const START_TASKS: Readonly<Record<string, StartTask>> = {
   PRODUCT_REGISTERED: {
     title: '첫 상품 등록',
     description:
-      '판매할 상품을 하나 등록합니다. 등록한 상품은 스토어에 보이기 전에 목록에서 확인할 수 있습니다.',
-    href: '/products',
+      '판매할 상품을 하나 등록합니다. 숨김으로 등록해 두고 확인한 뒤 노출할 수 있습니다.',
+    href: '/products/new',
     tourId: null,
   },
   SHIPPING_POLICY_SAVED: {

@@ -29,7 +29,7 @@ const dateTime = new Intl.DateTimeFormat('ko-KR', {
 });
 
 /**
- * 어드민 상품 목록(#208) — 숨김 포함, 조건은 주소(`query`)가 정본이다. 등록 · 수정은 BE #9 PR-D/E 뒤에 붙인다.
+ * 어드민 상품 목록(#208) — 숨김 포함, 조건은 주소(`query`)가 정본이다. 등록은 `/products/new`(#29), 수정은 BE #9 E2 뒤에 붙인다.
  * 가격은 저장된 기본 판매가 · 정가를 표시만 한다(`formatMoney`). 판매 가능은 재고를 반영한 서버 값이다.
  */
 export function ProductList({ query }: { query: ProductQuery }) {
@@ -71,12 +71,20 @@ export function ProductList({ query }: { query: ProductQuery }) {
 
   return (
     <div className="flex max-w-6xl flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold">상품</h1>
-        <p className="mt-1 text-sm text-muted-fg">
-          숨긴 상품 · 판매 종료 상품까지 모두 보입니다. 상품명을 누르면 상세를 봅니다. 상품 등록 ·
-          수정은 준비 중입니다.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold">상품</h1>
+          <p className="mt-1 text-sm text-muted-fg">
+            숨긴 상품 · 판매 종료 상품까지 모두 보입니다. 상품명을 누르면 상세를 봅니다. 상품 수정은
+            준비 중입니다.
+          </p>
+        </div>
+        <Link
+          href="/products/new"
+          className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-fg hover:opacity-90"
+        >
+          상품 등록
+        </Link>
       </div>
 
       <ProductFilters key={href} query={query} categories={categories} />

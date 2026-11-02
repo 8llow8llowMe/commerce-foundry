@@ -8,7 +8,7 @@ import { NotificationCenter } from './notification/NotificationCenter';
 import { HelpMenu } from './tour/HelpMenu';
 import { TourRunner } from './tour/TourRunner';
 
-/** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 등록 · 수정은 #9 PR-D/E 뒤, 주문은 #30) */
+/** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 등록 `/products/new` 은 상품 목록 안 버튼 — 메뉴 '상품 목록' 이 하위 경로까지 켜진다. 주문은 #30) */
 const NAV: NavGroup[] = [
   {
     title: '상품',
