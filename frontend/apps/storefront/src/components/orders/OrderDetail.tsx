@@ -2,7 +2,7 @@
 
 import { ApiError, apiFetch, type Money } from '@cf/api-client';
 import { Button, type Locale } from '@cf/ui';
-import { useCallback, useEffect, useId, useRef, useState, type Ref } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type Ref } from 'react';
 import { AddressDetails } from '@/components/account/AddressDetails';
 import { SignedOutNotice } from '@/components/account/SignedOutNotice';
 import { QuoteSummary } from '@/components/checkout/QuoteSummary';
@@ -13,6 +13,12 @@ import { formatDueAt } from '@/lib/checkout/order';
 import { paymentPageHref } from '@/lib/checkout/payment';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { fill } from '@/lib/i18n/format';
+import {
+  deliveryLabel,
+  readOrderDelivery,
+  trackingUrl,
+  type DeliveryLoad,
+} from '@/lib/orders/delivery';
 import {
   CANCEL_REASONS,
   cancelFailure,
@@ -36,7 +42,8 @@ type Load =
 /**
  * 주문 상세 · 결제 전 취소(#28 · BE #16 PR-1). 상세는 브라우저에서 BFF 로 읽고, 취소 버튼은 서버의 `cancelable` 일 때만 둔다.
  * 취소는 사유 코드(`CANCEL_REASONS`)를 골라 `POST .../cancellation` — 응답이 취소된 상세라 그대로 바꿔 끼운다.
- * 실패 처리는 `cancelFailure` 다(경합 · 결과 모름은 상세를 다시 읽는다). 출고 전 취소 · 반품 · 구매 확정 · 배송 조회는 BE 전이라 두지 않는다.
+ * 실패 처리는 `cancelFailure` 다(경합 · 결과 모름은 상세를 다시 읽는다). 출고 전 취소 · 반품 · 구매 확정은 BE 전이라 두지 않는다.
+ * 배송 조회(BE #18 PR-B2)는 상세와 함께 따로 읽는다 — 실패해도 상세는 그대로 보이고 배송 자리에서만 다시 시도한다.
  */
 export function OrderDetail({ orderId }: { orderId: string }) {
   const t = useDictionary().orders;
@@ -51,10 +58,12 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const cooldown = useRetryCooldown();
   // 패널이 열리고 닫히면 누른 버튼이 사라진다 — 다음 렌더 뒤 포커스를 옮길 곳(주문서의 pendingFocus 와 같은 방식)
-  const pendingFocus = useRef<'panel' | 'trigger' | 'notice' | null>(null);
+  const pendingFocus = useRef<'panel' | 'trigger' | 'notice' | 'delivery' | null>(null);
   const panelTitle = useRef<HTMLHeadingElement>(null);
   const trigger = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLParagraphElement>(null);
+  const deliveryTitle = useRef<HTMLHeadingElement>(null);
+  const [delivery, setDelivery] = useState<DeliveryLoad>({ status: 'loading' });
 
   const read = useCallback(
     () =>
@@ -71,21 +80,26 @@ export function OrderDetail({ orderId }: { orderId: string }) {
     [orderId],
   );
 
+  const readDelivery = useCallback(() => readOrderDelivery(orderId).then(setDelivery), [orderId]);
+
   useEffect(() => {
     void read();
-  }, [read]);
+    void readDelivery();
+  }, [read, readDelivery]);
 
   useEffect(() => {
     const target = pendingFocus.current;
     if (!target) return;
     pendingFocus.current = null;
-    // 취소가 끝나 버튼이 없으면 안내로
+    // 취소가 끝나 버튼이 없으면 안내로. 배송 다시 읽기가 성공하면 버튼이 사라져 배송 제목으로(송장이 없으면 그대로)
     const element =
       target === 'panel'
         ? panelTitle.current
         : target === 'trigger'
           ? (trigger.current?.querySelector('button') ?? noticeRef.current)
-          : noticeRef.current;
+          : target === 'delivery'
+            ? deliveryTitle.current
+            : noticeRef.current;
     element?.focus();
   });
 
@@ -186,6 +200,23 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         t={t}
         locale={locale}
         formatMoney={formatMoney}
+        shipment={
+          <DeliveryView
+            load={delivery}
+            titleRef={deliveryTitle}
+            t={t}
+            locale={locale}
+            onRetry={() => {
+              if (delivery.status === 'failed' && delivery.retrying) return;
+              setDelivery({ status: 'failed', retrying: true });
+              // 상태 반영과 같은 렌더 뒤에 포커스를 옮기도록 결과를 넣기 전에 표시한다
+              void readOrderDelivery(orderId).then((next) => {
+                pendingFocus.current = 'delivery';
+                setDelivery(next);
+              });
+            }}
+          />
+        }
       />
       {order.cancelable &&
         (cancelOpen ? (
@@ -222,19 +253,21 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   );
 }
 
-/** 주문 상세(표시만) — 상태 · 주문 번호 · 일시 · 결제 이어하기 · 항목 · 금액(서버 값) · 배송지 */
+/** 주문 상세(표시만) — 상태 · 주문 번호 · 일시 · 결제 이어하기 · 배송(`shipment`) · 항목 · 금액(서버 값) · 배송지 */
 export function OrderDetailView({
   order,
   now,
   t,
   locale,
   formatMoney,
+  shipment,
 }: {
   order: Order;
   now: number;
   t: Dictionary['orders'];
   locale: Locale;
   formatMoney: (money: Money) => string;
+  shipment?: ReactNode;
 }) {
   const resumable = canResumePayment(order, now);
   const address = order.shippingAddress;
@@ -271,6 +304,8 @@ export function OrderDetailView({
           </div>
         )}
       </section>
+
+      {shipment}
 
       <section aria-labelledby="order-items" className="flex flex-col gap-4">
         <h2 id="order-items" className="text-lg">
@@ -322,6 +357,96 @@ export function OrderDetailView({
         )}
       </section>
     </div>
+  );
+}
+
+/**
+ * 배송 정보 — 택배사 · 송장 번호 · 배송 상태 · 출고 · 배송 완료 일시와 택배사 조회 링크(새 창).
+ * 불러오는 중이거나 송장이 없으면(null) 아무것도 그리지 않는다. 실패하면 이 자리에서만 다시 시도한다.
+ */
+export function DeliveryView({
+  load,
+  titleRef,
+  t,
+  locale,
+  onRetry,
+}: {
+  load: DeliveryLoad;
+  /** 다시 읽기가 성공하면 포커스를 받을 제목 */
+  titleRef?: Ref<HTMLHeadingElement>;
+  t: Dictionary['orders'];
+  locale: Locale;
+  onRetry: () => void;
+}) {
+  if (load.status === 'loading') return null;
+  if (load.status === 'failed') {
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        {/* 상세 본문은 보이고 있어 끼어들지 않는다(status) */}
+        <p role="status" className="text-muted-fg">
+          {t.deliveryLoadFailed}
+        </p>
+        <Button
+          variant="secondary"
+          disabled={load.retrying}
+          aria-busy={load.retrying}
+          onClick={onRetry}
+        >
+          {t.reload}
+        </Button>
+      </div>
+    );
+  }
+  const { delivery } = load;
+  if (!delivery) return null;
+  const href = trackingUrl(delivery);
+  return (
+    <section aria-labelledby="order-delivery" className="flex flex-col gap-3">
+      <h2 id="order-delivery" ref={titleRef} tabIndex={-1} className="text-lg">
+        {t.delivery}
+      </h2>
+      <div className="flex flex-col gap-3 bg-muted px-5 py-5 text-sm">
+        <p className="text-base font-medium">
+          {deliveryLabel(delivery.status, t.deliveryStatuses, locale)}
+        </p>
+        {/* 상태 설명은 서버 국문 고정이라 국문 스토어만 */}
+        {locale === 'ko' && delivery.status.description && (
+          <p className="text-muted-fg">{delivery.status.description}</p>
+        )}
+        <dl className="flex flex-col gap-1">
+          <div className="flex justify-between gap-4">
+            <dt className="text-muted-fg">{t.carrier}</dt>
+            <dd>{deliveryLabel(delivery.carrier, t.carriers, locale)}</dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-muted-fg">{t.trackingNumber}</dt>
+            <dd className="break-all">{delivery.trackingNumber}</dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-muted-fg">{t.shippedAt}</dt>
+            <dd>{formatDueAt(delivery.shippedAt, locale)}</dd>
+          </div>
+          {delivery.deliveredAt && (
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-fg">{t.deliveredAt}</dt>
+              <dd>{formatDueAt(delivery.deliveredAt, locale)}</dd>
+            </div>
+          )}
+        </dl>
+        {href && (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            // @cf/ui Button(secondary) 색에 이 화면의 큰 버튼 크기(h-12) — 택배사 사이트로 이동이라 a 다
+            className="inline-flex h-12 items-center justify-center rounded-md bg-accent px-6 text-sm font-medium text-accent-fg transition hover:opacity-90"
+          >
+            {t.track}
+            <span className="sr-only"> {t.newWindow}</span>
+          </a>
+        )}
+      </div>
+    </section>
   );
 }
 

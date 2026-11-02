@@ -9,7 +9,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * 마이페이지(#28) — 하위 화면으로 가는 메뉴. 배송 조회(BE #18) · 결제 뒤 취소 · 반품(BE #16 PR-2)은 주문 상세에 붙인다.
+ * 마이페이지(#28) — 하위 화면으로 가는 메뉴. 배송 조회(BE #18)는 주문 상세에 있고, 결제 뒤 취소 · 반품(BE #16 PR-2)도 주문 상세에 붙인다.
  * 로그인하지 않았으면 로그인 화면으로 보낸다.
  */
 export default async function MyPage() {
