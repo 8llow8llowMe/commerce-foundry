@@ -6,7 +6,7 @@ import type { Dictionary } from '@/lib/i18n/dictionaries';
 /**
  * 고객 주문 내역 · 상세 · 결제 전 취소(order-service, BE #16 PR-1). 고객 전용이고 남의 주문은 없는 주문처럼 404 `ORDER_001` 이다.
  * 정본은 `backend/docs/api-design-guide.md` §2-17 · `backend/docs/order-flow-guide.md` §1-1.
- * 결제 뒤 취소 · 반품 · 구매 확정(#16 PR-2)과 배송 조회(#18)는 BE 전이라 화면에 자리도 두지 않는다.
+ * 결제 뒤 취소 · 반품 · 구매 확정(#16 PR-2)은 BE 전이라 화면에 자리도 두지 않는다. 배송 조회는 `delivery.ts`(BE #18 PR-B2).
  */
 export const ORDER_HISTORY_PATH = '/api/v1/orders';
 export const ORDER_HISTORY_PAGE_SIZE = 20;

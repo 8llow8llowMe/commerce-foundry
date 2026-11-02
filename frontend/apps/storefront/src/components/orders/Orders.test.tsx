@@ -4,7 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { en } from '@/lib/i18n/dictionaries/en';
 import { ko } from '@/lib/i18n/dictionaries/ko';
 import type { OrderDetail, OrderSummary } from '@/lib/orders/history';
-import { CancelPanel, OrderDetail as OrderDetailContainer, OrderDetailView } from './OrderDetail';
+import type { Delivery, DeliveryLoad } from '@/lib/orders/delivery';
+import {
+  CancelPanel,
+  DeliveryView,
+  OrderDetail as OrderDetailContainer,
+  OrderDetailView,
+} from './OrderDetail';
 import { OrderList, OrderListView } from './OrderList';
 
 const t = ko.orders;
@@ -149,6 +155,99 @@ describe('OrderDetail', () => {
     const html = view(detail(), 'en');
     expect(html).toContain('Awaiting payment');
     expect(html).not.toContain('결제를 기다립니다.');
+  });
+});
+
+const shipped: Delivery = {
+  deliveryId: '77',
+  orderId: '42',
+  carrier: { code: 'CJ_LOGISTICS', name: 'CJ대한통운', description: 'CJ대한통운' },
+  trackingNumber: '123456789012',
+  status: { code: 'IN_TRANSIT', name: '배송 중', description: '택배사가 상품을 옮기고 있습니다.' },
+  shippedAt: '2026-11-02T09:30:00Z',
+  deliveredAt: null,
+};
+const delivery = (load: DeliveryLoad, locale: 'ko' | 'en' = 'ko') =>
+  renderToStaticMarkup(
+    <DeliveryView
+      load={load}
+      t={locale === 'ko' ? t : en.orders}
+      locale={locale}
+      onRetry={() => {}}
+    />,
+  );
+
+describe('DeliveryView', () => {
+  it('불러오는 중이거나 송장이 없으면(null) 그리지 않는다', () => {
+    expect(delivery({ status: 'loading' })).toBe('');
+    expect(delivery({ status: 'ready', delivery: null })).toBe('');
+  });
+
+  it('택배사 · 송장 번호 · 상태 · 출고 일시와 새 창 조회 링크', () => {
+    const html = delivery({ status: 'ready', delivery: shipped });
+    expect(html).toContain(t.delivery);
+    expect(html).toContain('CJ대한통운');
+    expect(html).toContain('123456789012');
+    expect(html).toContain('배송 중');
+    expect(html).toContain('택배사가 상품을 옮기고 있습니다.');
+    expect(html).toContain(t.shippedAt);
+    expect(html).not.toContain(t.deliveredAt);
+    expect(html).toContain(
+      'href="https://trace.cjlogistics.com/next/tracking.html?wblNo=123456789012" target="_blank" rel="noopener noreferrer"',
+    );
+    expect(html).toContain(t.newWindow);
+  });
+
+  it('배송 완료면 완료 일시, 기타 택배사는 링크 없이 송장 번호만', () => {
+    const html = delivery({
+      status: 'ready',
+      delivery: {
+        ...shipped,
+        carrier: { code: 'OTHER', name: '기타 택배사', description: '기타 택배사' },
+        status: { code: 'DELIVERED', name: '배송 완료', description: '상품이 배송되었습니다.' },
+        deliveredAt: '2026-11-04T02:10:00Z',
+      },
+    });
+    expect(html).toContain(t.deliveredAt);
+    expect(html).toContain('123456789012');
+    expect(html).not.toContain('<a ');
+  });
+
+  it('영문 스토어는 사전 이름을 쓰고 서버 국문 설명을 숨긴다', () => {
+    const html = delivery({ status: 'ready', delivery: shipped }, 'en');
+    expect(html).toContain('In transit');
+    expect(html).toContain('CJ Logistics');
+    expect(html).not.toContain('택배사가 상품을 옮기고 있습니다.');
+  });
+
+  it('실패하면 안내와 다시 불러오기 — 다시 읽는 중에는 버튼을 남긴 채 막는다', () => {
+    const html = delivery({ status: 'failed', retrying: false });
+    expect(html).toContain(t.deliveryLoadFailed);
+    expect(html).toContain(t.reload);
+    expect(html).not.toContain('disabled=""');
+    expect(delivery({ status: 'failed', retrying: true })).toContain('disabled=""');
+  });
+
+  it('상세의 상태 영역 다음 · 주문 상품 앞에 놓인다', () => {
+    const html = renderToStaticMarkup(
+      <OrderDetailView
+        order={detail({ status: paid, cancelable: false })}
+        now={NOW}
+        t={t}
+        locale="ko"
+        formatMoney={krw}
+        shipment={
+          <DeliveryView
+            load={{ status: 'ready', delivery: shipped }}
+            t={t}
+            locale="ko"
+            onRetry={() => {}}
+          />
+        }
+      />,
+    );
+    expect(html.indexOf('order-delivery')).toBeGreaterThan(html.indexOf('결제 완료'));
+    expect(html.indexOf('order-delivery')).toBeLessThan(html.indexOf('order-items'));
   });
 });
 

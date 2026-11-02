@@ -563,6 +563,18 @@ export const ko = {
     } as Record<string, string>,
     /** 영문 스토어의 상태 이름(국문은 서버 이름) */
     statuses: {} as Record<string, string>,
+    delivery: '배송 정보',
+    carrier: '택배사',
+    trackingNumber: '송장 번호',
+    shippedAt: '출고 일시',
+    deliveredAt: '배송 완료 일시',
+    track: '배송 조회',
+    /** 택배사 조회 링크는 새 창으로 열린다 — 스크린리더용 */
+    newWindow: '(새 창)',
+    deliveryLoadFailed: '배송 정보를 불러오지 못했습니다.',
+    /** 영문 스토어의 배송 상태 · 택배사 이름(국문은 서버 이름) */
+    deliveryStatuses: {} as Record<string, string>,
+    carriers: {} as Record<string, string>,
   },
   account: {
     title: '마이페이지',
