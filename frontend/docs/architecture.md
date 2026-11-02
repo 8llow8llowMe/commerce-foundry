@@ -940,6 +940,17 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   - **엑셀 파일(.xlsx) 업로드는 두지 않는다** — 파일을 읽으려면 xlsx 파서 의존성을 들여야 하는데, 붙여넣기가 같은 일을 의존성 없이 한다(엑셀에서 칸을 복사해 붙인다). CSV 도 붙여넣기로 받는다.
   - 송장 조회 · 배송 상태 변경(배송 완료)은 BE #18 PR-B2 다 — 출고 뒤 어드민 상세에 송장 정보를 보이는 자리는 그때 붙인다. 고객 배송 조회는 스토어프론트 주문 상세에 붙였다(§7).
 
+### 결제 확인 (`/payments`, #30 · BE #484)
+
+메뉴 `주문 > 결제 확인`. payment-service `GET /api/v1/admin/payments?status=&orderId=&orderSynced=&page=&size=20`(ADMIN, 조건 AND, 결제 아이디 내림차순 `PageResponse`) — **읽기만 있다.**
+PG 재조회 · 재승인 · 취소 · 환불은 하지 않는다(BE #15 잔여). BFF 는 범용 프록시가 넘긴다. 코드는 `lib/payment/`(계약 `types.ts` · 조건 `query.ts`), 화면은 `components/payment/` 다.
+
+- **조건은 주소가 정본이다**(`parsePaymentQuery`) — 모르는 상태 · `REFUND_FAILED`(서버가 아직 400 `PAYMENT_198`) · long 범위 밖 주문 아이디(`isOrderId`, 서버 `102`)는 "전체" 로 읽는다.
+  바로가기로 결제 확인 중(`UNKNOWN`) · 늦은 승인 · 결제 완료 + 주문 회신 없음을 한 번에 건다.
+- **표** — 생성 시각 · 결제 아이디 · 주문 아이디(주문 상세 링크) · 상태(+ 미확정 사유) · 수단 · 원금(`formatMoney`) · 주문 회신 · 승인 시작 · 완료 시각.
+  원금은 결제 시도 금액이지 환불 뒤 잔액이 아니다. 미확정 사유는 DONE · FAILED 에도 과거 원인으로 남을 수 있다. 주문 회신은 수신 · 거절(코드) · 미수신이며, 미수신이 곧 복구 대상은 아니다.
+- 결제키 · 멱등 키 · PG 원문 · 회원 정보는 서버가 내려 주지 않고 화면도 다루지 않는다.
+
 ### 관리자 감사 로그 (`/audit-logs`, #320 · #329 · #405)
 
 메뉴 `운영 > 관리자 감사 로그`. auth-service 감사 로그 조회 `GET /api/v1/admin/audit-logs?action=&result=&page=&size=`(BE #192 · #286 · #322, ADMIN,

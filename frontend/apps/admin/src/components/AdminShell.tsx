@@ -23,7 +23,10 @@ const NAV: NavGroup[] = [
   },
   {
     title: '주문',
-    items: [{ label: '주문 목록', href: '/orders' }],
+    items: [
+      { label: '주문 목록', href: '/orders' },
+      { label: '결제 확인', href: '/payments' },
+    ],
   },
   {
     title: '전시 관리',
