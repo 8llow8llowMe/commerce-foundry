@@ -106,11 +106,15 @@ final class ClaudeAiClient implements AiClient, AutoCloseable {
      * @param interceptor 계량 인터셉터. {@code null} 이면 계량하지 않는다 — {@code ai.allow-unmetered} 일 때만 {@code AiClients} 가 이렇게 만든다
      */
     ClaudeAiClient(AnthropicClient client, AiProperties properties, PiiMasker masker, AiCallInterceptor interceptor) {
+        this(client, properties, masker, interceptor, new Semaphore(properties.maxConcurrency(), true));
+    }
+
+    ClaudeAiClient(AnthropicClient client, AiProperties properties, PiiMasker masker, AiCallInterceptor interceptor, Semaphore permits) {
         this.client = client;
         this.properties = properties;
         this.masker = masker;
         this.interceptor = interceptor;
-        this.permits = new Semaphore(properties.maxConcurrency(), true);
+        this.permits = permits;
     }
 
     @Override

@@ -10,6 +10,11 @@ import com.commercefoundry.ai.properties.AiProperties;
 /** 기존 Claude SDK 생성 설정을 보존하는 Provider. 서비스에서 직접 만들지 않는다. */
 final class ClaudeAiProvider implements AiProvider {
 
+    private final java.util.concurrent.Semaphore permits;
+
+    ClaudeAiProvider() { this.permits = null; }
+    ClaudeAiProvider(java.util.concurrent.Semaphore permits) { this.permits = permits; }
+
     @Override
     public AiClient create(AiProperties properties, PiiMasker masker, AiCallInterceptor interceptor) {
         AnthropicOkHttpClient.Builder builder = AnthropicOkHttpClient.builder()
@@ -26,6 +31,7 @@ final class ClaudeAiProvider implements AiProvider {
         if (properties.baseUrl() != null) {
             builder.baseUrl(properties.baseUrl());
         }
-        return new ClaudeAiClient(builder.build(), properties, masker, interceptor);
+        return permits == null ? new ClaudeAiClient(builder.build(), properties, masker, interceptor)
+            : new ClaudeAiClient(builder.build(), properties, masker, interceptor, permits);
     }
 }

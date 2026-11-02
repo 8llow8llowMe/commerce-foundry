@@ -30,6 +30,8 @@
   `STORAGE_PUBLIC_BASE_URL` 여섯을 Vault 에 둔다. 비밀은 두 키뿐이지만 제공자 · 계정이 드러나는 값이라 같이 둔다.
   `STORAGE_ENABLED` 는 비밀이 아니라 설정 스위치다 — `store.features.*` 처럼 배포 설정의 환경변수로 넣고 Vault 에 등록하지 않는다.
   기본값은 꺼짐이고, 켜면 여섯 값이 다 있어야 기동한다 (`bootstrap-conventions.md` Storage).
+- OpenAI를 선택하는 서비스는 전용 `AI_OPENAI_API_KEY`를 Vault에 등록한다 (#468). `AI_OPENAI_MODEL`은 비밀이 아니며 배포 설정으로 명시한다.
+  Anthropic 키와 공유하지 않으며 SDK의 개인 환경변수 `OPENAI_API_KEY`를 자동으로 읽지 않는다. 설정은 [ai-provider-guide.md](ai-provider-guide.md)를 따른다.
 - Claude API 키(#215, `ai.*`)는 `AI_API_KEY` 하나를 Vault 에 둔다 — AI 를 쓰는 서비스(operations)에만 넣는다. 툴링이 자동으로 읽는
   `ANTHROPIC_API_KEY` 이름을 쓰지 않는다(개발 PC 셸의 개인 키가 서비스로 섞이지 않게). `AI_ENABLED` 는 비밀이 아니라 설정 스위치다 —
   배포 설정의 환경변수로 넣고 Vault 에 등록하지 않는다. 기본값은 꺼짐이고, 켜면 키 · 타임아웃이 있어야 기동한다 (`bootstrap-conventions.md` AI).

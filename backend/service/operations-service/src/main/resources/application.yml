@@ -247,6 +247,11 @@ operations:
 # 켜면 ai-core 기동 가드가 키 · 타임아웃과 계량 인터셉터(AiUsageMeteringInterceptor) 하나를 본다 — 모든 호출이 operations.ai 원장에 예약 · 정산된다.
 # allow-unmetered · allow-insecure-loopback 은 두지 않는다(운영에서 켜면 기동 실패, 테스트 전용)
 ai:
+  provider: ${AI_PROVIDER:anthropic}
+  openai:
+    api-key: ${AI_OPENAI_API_KEY:}
+    base-url: ${AI_OPENAI_BASE_URL:}
+    model: ${AI_OPENAI_MODEL:}
   enabled: ${AI_ENABLED:false}
   # Vault 값 (secret-management.md). 켜면 필수
   api-key: ${AI_API_KEY:}

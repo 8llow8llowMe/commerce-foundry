@@ -62,7 +62,9 @@ public record AiProperties(
     Masking masking,
     @DefaultValue("200000") Integer maxInputChars,
     @DefaultValue("false") Boolean allowInsecureLoopback,
-    @DefaultValue("false") Boolean allowUnmetered
+    @DefaultValue("false") Boolean allowUnmetered,
+    @DefaultValue("anthropic") String provider,
+    OpenAi openai
 ) {
 
     /** Binder 는 풀리지 않은 {@code ${...}} 를 문자 그대로 남긴다. 환경변수가 없으면 값이 이 문자열을 품는다. */
@@ -98,7 +100,18 @@ public record AiProperties(
     private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,62}");
     private static final Set<String> LOOPBACK_HOSTS = Set.of("localhost", "127.0.0.1", "[::1]");
 
+    public AiProperties(Boolean enabled, String apiKey, String baseUrl, String defaultModel, Integer defaultMaxTokens,
+                        Duration connectTimeout, Duration readTimeout, Duration requestTimeout, Integer maxRetries, Integer maxConcurrency,
+                        Duration acquireTimeout, Boolean refusalFallback, Map<String, Feature> features, Masking masking, Integer maxInputChars,
+                        Boolean allowInsecureLoopback, Boolean allowUnmetered) {
+        this(enabled, apiKey, baseUrl, defaultModel, defaultMaxTokens, connectTimeout, readTimeout, requestTimeout, maxRetries,
+            maxConcurrency, acquireTimeout, refusalFallback, features, masking, maxInputChars, allowInsecureLoopback, allowUnmetered, null, null);
+    }
+
+    @ConstructorBinding
     public AiProperties {
+        provider = provider == null ? "anthropic" : provider.strip().toLowerCase(Locale.ROOT);
+        openai = openai == null ? new OpenAi(null, null, null) : openai;
         enabled = Boolean.TRUE.equals(enabled);
         apiKey = strip(apiKey);
         baseUrl = isAbsent(baseUrl) ? null : baseUrl.strip();
@@ -125,17 +138,22 @@ public record AiProperties(
      * @param promptVersion 쓸 프롬프트 템플릿 버전 — 리소스 {@code ai/prompts/<기능>/v<버전>/}. 1 이상. 템플릿을 쓰는 기능은 필수다.
      *                  배포된 버전의 파일은 고치지 않고 새 버전을 만들어 이 값을 올린다 — 되돌리기도 이 값이다 ({@code bootstrap-conventions.md} AI)
      */
-    public record Feature(String model, Integer maxTokens, String effort, Integer promptVersion) {
+    public record Feature(String model, Integer maxTokens, String effort, Integer promptVersion, String provider) {
 
         /** 생성자가 둘이라 바인딩할 생성자를 지정한다 — 없으면 Binder 가 고르지 못해 기능 설정이 조용히 빠진다. */
         @ConstructorBinding
         public Feature {
+            provider = provider == null ? null : provider.strip().toLowerCase(Locale.ROOT);
             model = isAbsent(model) ? null : model.strip();
             effort = isAbsent(effort) ? null : effort.strip().toLowerCase(Locale.ROOT);
         }
 
+        public Feature(String model, Integer maxTokens, String effort, Integer promptVersion) {
+            this(model, maxTokens, effort, promptVersion, null);
+        }
+
         public Feature(String model, Integer maxTokens, String effort) {
-            this(model, maxTokens, effort, null);
+            this(model, maxTokens, effort, null, null);
         }
     }
 
@@ -154,12 +172,33 @@ public record AiProperties(
     /** 기능 설정을 기본값으로 채운 결과. 설정에 없는 기능은 기본값 그대로다. */
     public ResolvedFeature resolve(String feature) {
         Feature settings = features.get(feature);
-        String model = settings == null || settings.model() == null ? defaultModel : settings.model();
+        String model = settings == null || settings.model() == null ? ("openai".equals(providerFor(feature)) ? openai.model() : defaultModel) : settings.model();
         int maxTokens = settings == null || settings.maxTokens() == null ? defaultMaxTokens : settings.maxTokens();
         return new ResolvedFeature(model, maxTokens, settings == null ? null : settings.effort());
     }
 
     /** 호출 한 번에 쓸 모델 · 최대 토큰 · effort({@code null} 이면 모델 기본값). */
+    public String providerFor(String feature) {
+        Feature selected = features.get(feature);
+        return selected == null || selected.provider() == null ? provider : selected.provider();
+    }
+
+    public Set<String> usedProviders() {
+        Set<String> used = new java.util.HashSet<>();
+        used.add(provider);
+        features.keySet().forEach(name -> used.add(providerFor(name)));
+        return Set.copyOf(used);
+    }
+
+    public record OpenAi(String apiKey, String baseUrl, String model) {
+        public OpenAi {
+            apiKey = strip(apiKey);
+            baseUrl = isAbsent(baseUrl) ? null : baseUrl.strip();
+            model = strip(model);
+        }
+        @Override public String toString() { return "OpenAi[apiKey=****]"; }
+    }
+
     public record ResolvedFeature(String model, int maxTokens, String effort) {
 
     }
@@ -178,14 +217,23 @@ public record AiProperties(
         if (!enabled) {
             return violations;
         }
-        if (isAbsent(apiKey)) {
+        if (!Set.of("anthropic", "openai").contains(provider)) {
+            violations.add(new Violation("ai.provider", "ai.provider must be anthropic or openai"));
+        }
+        if (usedProviders().contains("anthropic") && isAbsent(apiKey)) {
             violations.add(new Violation(API_KEY, describe(API_KEY) + " 가 비었거나 플레이스홀더가 풀리지 않았습니다. Vault 에 등록한 값을 넣으세요 (secret-management.md)"));
         }
-        if (baseUrl != null) {
+        if (usedProviders().contains("anthropic") && baseUrl != null) {
             urlProblem(baseUrl, allowInsecureLoopback).ifPresent(problem -> violations.add(new Violation(BASE_URL, describe(BASE_URL) + " " + problem)));
         }
-        if (isAbsent(defaultModel)) {
+        if (usedProviders().contains("anthropic") && isAbsent(defaultModel)) {
             violations.add(new Violation(DEFAULT_MODEL, DEFAULT_MODEL + "(기본 모델 ID)가 비었습니다"));
+        }
+        if (usedProviders().contains("openai")) {
+            if (isAbsent(openai.apiKey())) violations.add(new Violation("ai.openai.api-key", "ai.openai.api-key (AI_OPENAI_API_KEY) is required"));
+            if (isAbsent(openai.model())) violations.add(new Violation("ai.openai.model", "ai.openai.model must be explicitly configured"));
+            if (openai.baseUrl() != null) urlProblem(openai.baseUrl(), allowInsecureLoopback).ifPresent(problem ->
+                violations.add(new Violation("ai.openai.base-url", "ai.openai.base-url " + problem)));
         }
         if (defaultMaxTokens == null || defaultMaxTokens < 1) {
             violations.add(new Violation(DEFAULT_MAX_TOKENS, DEFAULT_MAX_TOKENS + "(최대 출력 토큰)는 1 이상이어야 합니다"));
@@ -206,7 +254,15 @@ public record AiProperties(
         if (maxInputChars < 1) {
             violations.add(new Violation(MAX_INPUT_CHARS, MAX_INPUT_CHARS + "(입력 글자 수 상한)는 1 이상이어야 합니다"));
         }
-        features.forEach((name, feature) -> checkFeature(name, feature, violations));
+        if ("openai".equals(provider) && defaultMaxTokens < 16) {
+            violations.add(new Violation(DEFAULT_MAX_TOKENS, "OpenAI max-tokens must be at least 16"));
+        }
+        features.forEach((name, feature) -> {
+            checkFeature(name, feature, violations);
+            if ("openai".equals(providerFor(name)) && resolve(name).maxTokens() < 16) {
+                violations.add(new Violation(FEATURES + "." + name, "OpenAI max-tokens must be at least 16"));
+            }
+        });
         masking.patterns().forEach((name, regex) -> checkPattern(name, regex, violations));
         return violations;
     }
@@ -271,6 +327,9 @@ public record AiProperties(
         }
         if (feature == null) {
             return;
+        }
+        if (feature.provider() != null && !Set.of("anthropic", "openai").contains(feature.provider())) {
+            violations.add(new Violation(property + ".provider", property + ".provider must be anthropic or openai"));
         }
         if (feature.maxTokens() != null && feature.maxTokens() < 1) {
             violations.add(new Violation(property, property + ".max-tokens 는 1 이상이어야 합니다"));

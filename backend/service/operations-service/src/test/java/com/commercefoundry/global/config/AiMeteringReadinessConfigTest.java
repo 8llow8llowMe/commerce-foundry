@@ -81,6 +81,17 @@ class AiMeteringReadinessConfigTest {
         assertThat(AiMeteringReadinessConfig.BACKOFF_MARGIN).isEqualTo(Duration.ofMinutes(1));
     }
 
+    @Test
+    void openAiRequiresExplicitPricesIncludingFeatureOverrides() {
+        runner.withPropertyValues("ai.enabled=true", "ai.provider=openai", "ai.openai.model=model-b").withPropertyValues(READY)
+            .run(context -> assertThat(context).hasFailed());
+        runner.withPropertyValues("ai.enabled=true", "ai.provider=openai", "ai.openai.model=model-a").withPropertyValues(READY)
+            .run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues("ai.enabled=true", "ai.features.chat.provider=openai", "ai.openai.model=model-a",
+            "ai.features.chat.model=model-b").withPropertyValues(READY)
+            .run(context -> assertThat(context).hasFailed());
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties({AiProperties.class, AiUsageProperties.class})
     static class Bindings {
