@@ -54,7 +54,8 @@ type Categories =
 /**
  * 어드민 상품 등록(#29 · BE #9 E1) — `POST /api/v1/admin/products`. 이미지 첨부(F2) · 맞춤 제작 · 수정은 아직 없다(BE 미머지).
  * 이미지 업로드 칸(F1 발급)은 붙여 두고 꺼 둔다(`IMAGE_ATTACH_READY`).
- * 섹션 · 등록 버튼 줄의 `data-tour` 는 온보딩 투어(#228 `product-new-v1`, 연결은 #228 쪽)가 쓸 앵커다 — 이름을 바꾸면 투어 정의도 같이 바꾼다.
+ * 섹션 · 등록 버튼 줄의 `data-tour` 는 온보딩 투어(#228 `product-new-v1`)가 가리키는 앵커다 — 이름을 바꾸면 투어 정의도 같이 바꾼다.
+ * 앵커는 카테고리를 불러온 뒤에 단다 — 불러오는 중에 투어가 뜨면 그 뒤 403 으로 폼이 권한 안내로 바뀌어도 투어가 사라진 요소를 가리킨 채 남는다.
  * **멱등 키가 없다** — 같은 본문을 두 번 보내면 상품이 둘 생긴다. 그래서 제출은 ref 로 한 번만 받고, 성공하면 곧바로 상세로 옮긴다(replace).
  * 결과를 모르는 실패는 다시 보내지 않고 목록에서 확인하게 한다. 저장 401 은 폼을 지킨다(§9 공통 규칙).
  */
@@ -161,6 +162,8 @@ export function ProductCreateForm() {
   const summary = errorSummary(errors);
   const currencyUnit = form.currency === 'KRW' ? '원' : '달러, 센트까지';
   const categoryRows = categories.kind === 'ok' ? categories.rows : [];
+  // 권한을 확인하기 전(카테고리 불러오는 중)에는 앵커를 달지 않는다 — 투어 실행기가 요소를 기다린다(다른 화면의 API 응답 뒤 앵커와 같게)
+  const tourAnchor = (name: string) => (categories.kind === 'loading' ? undefined : name);
   const pathOf = (row: CategoryRow) => `${row.path.join(' > ')}${row.hiddenBy ? ' (숨김)' : ''}`;
 
   return (
@@ -190,8 +193,8 @@ export function ProductCreateForm() {
           상품 등록
         </h1>
         <p className="text-sm text-muted-fg">
-          이미지는 이미지 추가 기능이 준비되면 등록한 상품에 붙일 수 있습니다. 같은 내용으로 두 번
-          등록하면 상품이 두 개 생깁니다.
+          대표 이미지 칸은 상품에 이미지를 붙이는 서버 기능이 준비되면 열립니다. 지금은 이미지 없이
+          등록됩니다. 같은 내용으로 두 번 등록하면 상품이 두 개 생깁니다.
         </p>
       </div>
 
@@ -229,7 +232,7 @@ export function ProductCreateForm() {
       </div>
 
       <fieldset disabled={saving} className="flex min-w-0 flex-col gap-8">
-        <Section title="기본 정보" tour="product-basic">
+        <Section title="기본 정보" tour={tourAnchor('product-basic')}>
           <TextField
             label={`상품명 (${NAME_MAX}자 이하)`}
             value={form.name}
@@ -383,7 +386,7 @@ export function ProductCreateForm() {
           />
         </Section>
 
-        <Section title="가격" tour="product-price">
+        <Section title="가격" tour={tourAnchor('product-price')}>
           <div className="flex flex-col gap-1">
             <label htmlFor={`${id}-currency`} className="text-sm font-medium">
               통화
@@ -457,7 +460,7 @@ export function ProductCreateForm() {
           {!form.preorder && <FieldError messages={errorsOf('expectedShipDate')} />}
         </Section>
 
-        <Section title="옵션" tour="product-options">
+        <Section title="옵션" tour={tourAnchor('product-options')}>
           <OptionEditor
             groups={form.optionGroups}
             errorsOf={errorsOf}
@@ -466,7 +469,7 @@ export function ProductCreateForm() {
           />
         </Section>
 
-        <Section title={`옵션 조합(SKU) ${rows.length}개`} tour="product-skus">
+        <Section title={`옵션 조합(SKU) ${rows.length}개`} tour={tourAnchor('product-skus')}>
           <SkuTable
             rows={rows}
             groups={form.optionGroups}
@@ -479,7 +482,7 @@ export function ProductCreateForm() {
         </Section>
       </fieldset>
 
-      <div className="flex items-center gap-3" data-tour="product-submit">
+      <div className="flex items-center gap-3" data-tour={tourAnchor('product-submit')}>
         <Button type="submit" disabled={saving || uncertain || categories.kind !== 'ok'}>
           {saving ? '등록 중…' : '상품 등록'}
         </Button>

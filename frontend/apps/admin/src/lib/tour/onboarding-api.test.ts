@@ -19,6 +19,8 @@ describe('guideOf', () => {
   it('모든 투어가 서버 안내 키로 바뀐다(서버 허용 목록 operations.onboarding.guides 와 맞춘다)', () => {
     expect(ALL_TOURS.map((tour) => guideOf(tour.id))).toEqual([
       { key: 'console', version: 1 },
+      // 서버 허용 목록에 아직 없다 — shipping-domestic 과 같이 이 브라우저 기록으로만 정한다
+      { key: 'product-new', version: 1 },
       // 서버 허용 목록에 아직 없다(#30) — shipping-domestic 과 같이 이 브라우저 기록으로만 정한다
       { key: 'orders', version: 2 },
       { key: 'order-detail', version: 2 },

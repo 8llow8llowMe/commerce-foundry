@@ -28,8 +28,11 @@ describe('helpTopicFor · toursFor', () => {
       CONSOLE_TOUR.id,
       'order-detail-v2',
     ]);
-    // 상품 등록 투어는 폼에 앵커가 달리기 전까지 연결하지 않는다
-    expect(toursFor('/products/new').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
+    expect(toursFor('/products/new').map((tour) => tour.id)).toEqual([
+      CONSOLE_TOUR.id,
+      PRODUCT_NEW_TOUR.id,
+    ]);
+    expect(toursFor('/products').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
   });
 
   it('송장 단계는 주문 투어의 상태 변경 뒤 · 이력 앞에 있고, 상세의 송장은 준비중 주문에만 있어 선택이다', () => {
