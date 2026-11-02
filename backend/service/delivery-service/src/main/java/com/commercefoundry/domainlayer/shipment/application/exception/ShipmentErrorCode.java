@@ -16,7 +16,7 @@ import org.springframework.http.HttpStatus;
 @RequiredArgsConstructor
 public enum ShipmentErrorCode {
 
-    /** order 404 {@code ORDER_001}. 대기 송장 행을 지웠다. */
+    /** order 404 {@code ORDER_001}. 등록이면 대기 송장 행을 지웠고, 배송 완료면 송장을 직전 상태로 되돌렸다. */
     ORDER_NOT_FOUND("DELIVERY_014", "존재하지 않는 주문입니다.", HttpStatus.NOT_FOUND),
     /** order 409 {@code ORDER_020} — 출고 전 · 취소 요청 · 취소 등. {@code %s} 는 order 가 알려 준 현재 상태 이름이고, 읽지 못하면 "현재 주문" 이다. 대기 송장 행을 지웠다. */
     ORDER_NOT_SHIPPABLE("DELIVERY_015", "%s 상태라 출고할 수 없습니다.", HttpStatus.CONFLICT),
@@ -43,7 +43,32 @@ public enum ShipmentErrorCode {
      * 일괄 등록 요청이 처리 마감(요청 시작 + 8초, 게이트웨이 응답 제한 10초 안)을 넘겨 이 건은 시작하지 않았다. 송장 행을 만들지 않았고 order 를 부르지 않았다 —
      * 다시 보내면 처음 등록으로 처리된다. {@code DELIVERY_018}(행을 남긴 결과 모름)과 나눈다.
      */
-    SHIPMENT_REGISTER_DEADLINE_EXCEEDED("DELIVERY_022", "시간 안에 처리하지 못했습니다. 다시 보내 주세요.", HttpStatus.SERVICE_UNAVAILABLE);
+    SHIPMENT_REGISTER_DEADLINE_EXCEEDED("DELIVERY_022", "시간 안에 처리하지 못했습니다. 다시 보내 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+
+    // 배송 상태 변경 · 조회 (#18 PR-B2). 배송 완료의 order 응답 번역(027~030)의 정본은 order-flow-guide.md §4 "배송 완료" 실패 표다.
+    // order 404 ORDER_001 은 등록과 같은 DELIVERY_014 다(메시지가 같다)
+
+    /** 송장 아이디로 찾지 못했다 — 어드민 상세 · 상태 변경. */
+    SHIPMENT_NOT_FOUND("DELIVERY_023", "존재하지 않는 배송입니다.", HttpStatus.NOT_FOUND),
+    /** 허용 전이(출고 완료 → 배송 중 · 배송 완료, 배송 중 → 배송 완료) 밖이다. {@code %s} 는 지금 · 바꿀 상태 이름이다. */
+    SHIPMENT_STATUS_TRANSITION_NOT_ALLOWED("DELIVERY_024", "%s 상태에서 %s 상태로 바꿀 수 없습니다.", HttpStatus.CONFLICT),
+    /** 출고가 주문에 반영되지 않은 송장(등록 결과 모름 · 버전 충돌로 남은 송장)은 배송 중 · 배송 완료로 바꾸지 않는다 — 먼저 같은 등록을 다시 보내 출고를 반영한다. */
+    SHIPMENT_NOT_SYNCED("DELIVERY_025", "주문에 출고가 반영되지 않은 송장입니다. 같은 송장으로 등록을 다시 보내 출고부터 반영해 주세요.", HttpStatus.CONFLICT),
+    /** 읽은 뒤 다른 요청이 같은 송장을 먼저 바꿨다(버전 충돌). 아무것도 바꾸지 않았다. */
+    SHIPMENT_CONCURRENTLY_CHANGED("DELIVERY_026", "다른 곳에서 배송 상태가 먼저 바뀌었습니다. 새로고침한 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /** order 409 {@code ORDER_020} — 배송 완료로 바꿀 수 없는 주문 상태(취소 요청 · 취소 등). {@code %s} 는 order 가 알려 준 현재 상태 이름이다. 송장은 직전 상태로 되돌렸다. */
+    ORDER_NOT_DELIVERABLE("DELIVERY_027", "%s 상태라 배송 완료로 바꿀 수 없습니다.", HttpStatus.CONFLICT),
+    /**
+     * order 400 {@code ORDER_159} · {@code 160} · {@code 161} — 보낸 배송 완료 시각이 order 의 허용 범위(지금 − 30일 ~ 지금 + 5분) 밖이거나 출고 시각보다 앞선다.
+     * 서비스 간 시계 차이, 또는 결과 모름으로 남은 배송 완료를 30일이 지나 재시도했다는 뜻이다. 송장은 직전 상태로 되돌렸다 — 다시 누르면 그때 시각으로 보낸다.
+     */
+    ORDER_DELIVERED_AT_REJECTED("DELIVERY_028", "배송 완료 시각을 주문에 반영하지 못했습니다. 관리자에게 문의해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
+    /** order 409 {@code ORDER_025} — 읽은 뒤 다른 처리가 주문을 먼저 바꿨다. 배송 완료 반영 대기로 남는다 — 같은 변경을 다시 보내면 지금 주문 상태로 판정받는다. */
+    ORDER_CONCURRENTLY_CHANGED_ON_COMPLETION("DELIVERY_029", "다른 곳에서 주문이 먼저 바뀌었습니다. 배송 완료를 다시 눌러 주세요.", HttpStatus.CONFLICT),
+    /** 타임아웃 · 5xx · 서킷 오픈 · 모르는 응답 — 주문에 배송 완료가 반영됐는지 모른다. 반영 대기로 남는다 — 같은 변경 재시도가 order 멱등으로 수렴한다. */
+    ORDER_SERVICE_UNAVAILABLE_ON_COMPLETION("DELIVERY_030", "주문에 배송 완료를 반영하지 못했습니다. 잠시 후 배송 완료를 다시 눌러 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /** 예상하지 못한 저장 오류(DB 장애 등) — 배송 상태 변경. 원인 메시지는 싣지 않는다. */
+    SHIPMENT_STATUS_CHANGE_FAILED("DELIVERY_031", "배송 상태를 바꾸지 못했습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final String code;
     private final String message;

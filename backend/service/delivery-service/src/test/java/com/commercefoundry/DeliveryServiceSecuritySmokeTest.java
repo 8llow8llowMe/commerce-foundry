@@ -199,4 +199,27 @@ class DeliveryServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
         assertThat(response.getStatus()).isEqualTo(400);
         assertThat(response.getContentAsString()).contains("\"resultCode\":\"DELIVERY_109\"");
     }
+
+    /** 고객 배송 조회(#18 PR-B2) — 없는 주문이라 도메인까지 닿으면 200 + null 이다. 공유 H2 에 송장을 남기지 않는다. */
+    @Test
+    @DisplayName("고객 배송 조회는 CUSTOMER 만 200 + null 이고, ADMIN 403 · SECURITY_005 · 토큰 없음 401 · SECURITY_001 이다")
+    void customerDeliveryRequiresCustomer() throws Exception {
+        String path = "/api/v1/deliveries?orderId=4611686018427387904";
+        MockHttpServletResponse customer = perform(get(path).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)));
+
+        assertThat(customer.getStatus()).isEqualTo(200);
+        assertThat(customer.getContentAsString()).contains("\"dataBody\":null");
+        assertEnvelope(perform(get(path).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))), SecurityErrorCode.FORBIDDEN);
+        assertEnvelope(perform(get(path)), SecurityErrorCode.UNAUTHORIZED);
+    }
+
+    /** 어드민 송장 목록 · 상세(#18 PR-B2) — 실제 QueryDSL 까지 닿는다(빈 목록 · 없는 송장 404). */
+    @Test
+    @DisplayName("어드민 송장 목록은 ADMIN 만 200 · 상세는 없는 송장 404 · DELIVERY_023 이고, CUSTOMER 는 403 · SECURITY_005 다")
+    void adminDeliveryQueriesRequireAdmin() throws Exception {
+        assertThat(perform(get(ADMIN_DELIVERIES_PATH + "?synced=false").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).getStatus()).isEqualTo(200);
+        assertEnvelope(perform(get(ADMIN_DELIVERIES_PATH + "/1").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))),
+            404, "DELIVERY_023", "존재하지 않는 배송입니다.");
+        assertEnvelope(perform(get(ADMIN_DELIVERIES_PATH).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))), SecurityErrorCode.FORBIDDEN);
+    }
 }

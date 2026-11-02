@@ -9,19 +9,27 @@ import java.util.regex.Pattern;
 /**
  * 송장(배송) — 주문당 1건 ({@code order-flow-guide.md} §4). 상태는 도메인 메서드로만 바꾼다.
  *
- * <p>{@code orderSynced} 는 주문 상태 반영(order-service {@code Order#ship}) 여부다. 등록하면 false 로 생기고, order 가 200 으로 답한 뒤에만 true 가 된다.
+ * <p>{@code orderSynced} 는 <b>출고</b>의 주문 상태 반영(order-service {@code Order#ship}) 여부다. 등록하면 false 로 생기고, order 가 200 으로 답한 뒤에만 true 가 된다.
  * <b>true 가 된 송장은 지우거나 다른 송장 번호로 바꾸지 않는다</b> — order 는 송장 아이디를 저장하지 않아 다른 송장의 재등록을 구분하지 못한다(§4 "주문당 송장 1건").
- * 반영 전(false) 송장만 같은 등록 요청의 재시도가 택배사 · 송장 번호를 이번 값으로 바꿀 수 있다({@link #retarget}).
+ * 반영 전(false) 송장만 같은 등록 요청의 재시도가 택배사 · 송장 번호를 이번 값으로 바꿀 수 있다({@link #retarget}). 반영 전 송장은 언제나 출고 완료 상태다 —
+ * 배송 중 · 배송 완료로 바꾸지 않는다(먼저 출고 재시도로 반영한다).
+ *
+ * <p>{@code completionPending} 은 <b>배송 완료</b>의 주문 반영 대기다(#18 PR-B2). 배송 완료로 바꾸면 true 로 저장하고 order 에 배송 완료를 보낸 뒤, 200 이면 false 로 내린다.
+ * 결과를 모르면(409 {@code ORDER_025} · 타임아웃 · 5xx) true 로 남고 같은 변경 요청 재시도가 처음 배송 완료 시각을 다시 보내 수렴한다. 출고 반영 플래그와 나눈 이유는
+ * {@code order-flow-guide.md} §4 "배송 완료" — 출고 반영 전 송장의 재시도 · 삭제 규칙(B1)이 배송 완료 송장에 걸리지 않게.
  *
  * @param memberId 주문한 회원 — order 응답의 스냅숏. 반영 전에는 null
  * @param shippingScope 배송 범위 — order 응답의 배송 국가로 정한다. 반영 전이거나 국가 코드를 읽지 못했으면 null
+ * @param completionPending 배송 완료를 order 에 반영하기를 기다린다. 배송 완료 송장에만 true 일 수 있다
+ * @param previousStatus 배송 완료 직전 상태(출고 완료 · 배송 중) — 반영 대기 중에만 있고, order 가 거절하면 이 상태로 되돌린다. 대기가 아니면 null
  * @param shippedAt 출고 시각 — 처음 등록할 때 정해 order 에 보낸 값 그대로다(마이크로초까지, order 의 {@code shipped_at} 과 같다). 재시도해도 바뀌지 않는다
- * @param deliveredAt 배송 완료 시각. {@link ShipmentStatus#DELIVERED} 일 때만 있다
+ * @param deliveredAt 배송 완료 시각. {@link ShipmentStatus#DELIVERED} 일 때만 있다 — 처음 배송 완료로 바꾼 시각(마이크로초)이고 재시도해도 바뀌지 않는다
  * @param version 낙관적 락 버전. 아직 저장하지 않은 송장이면 null
  */
 public record Shipment(
     long id, long orderId, Long memberId, CarrierCode carrier, String trackingNumber, ShipmentStatus status,
-    ShippingScope shippingScope, boolean orderSynced, Instant shippedAt, Instant deliveredAt, Long version
+    ShippingScope shippingScope, boolean orderSynced, boolean completionPending, ShipmentStatus previousStatus,
+    Instant shippedAt, Instant deliveredAt, Long version
 ) {
 
     /** 송장 번호 최대 길이 — 국내 택배 · 국제 특송 번호를 모두 담는다. */
@@ -50,8 +58,20 @@ public record Shipment(
         if (orderSynced && memberId == null) {
             throw new IllegalArgumentException("주문에 반영된 송장은 회원 아이디가 있어야 합니다: id=" + id);
         }
+        if (!orderSynced && status != ShipmentStatus.SHIPPED) {
+            throw new IllegalArgumentException("출고가 주문에 반영되지 않은 송장은 출고 완료 상태입니다: status=%s".formatted(status));
+        }
         if ((status == ShipmentStatus.DELIVERED) != (deliveredAt != null)) {
             throw new IllegalArgumentException("배송 완료 시각은 배송 완료 상태에만 있습니다: status=%s".formatted(status));
+        }
+        if (completionPending && status != ShipmentStatus.DELIVERED) {
+            throw new IllegalArgumentException("배송 완료 반영 대기는 배송 완료 상태에만 있습니다: status=%s".formatted(status));
+        }
+        if (completionPending != (previousStatus != null)) {
+            throw new IllegalArgumentException("배송 완료 직전 상태는 반영 대기에만 있습니다: previousStatus=%s".formatted(previousStatus));
+        }
+        if (previousStatus != null && !previousStatus.canTransitTo(ShipmentStatus.DELIVERED)) {
+            throw new IllegalArgumentException("배송 완료 직전 상태가 아닙니다: " + previousStatus);
         }
     }
 
@@ -61,7 +81,7 @@ public record Shipment(
     public static Shipment register(long id, long orderId, CarrierCode carrier, String trackingNumber, Instant shippedAt) {
         return new Shipment(
             id, orderId, null, carrier, trackingNumber, ShipmentStatus.SHIPPED,
-            null, false, shippedAt.truncatedTo(ChronoUnit.MICROS), null, null
+            null, false, false, null, shippedAt.truncatedTo(ChronoUnit.MICROS), null, null
         );
     }
 
@@ -84,7 +104,7 @@ public record Shipment(
         if (orderSynced) {
             throw new IllegalStateException("주문에 반영된 송장은 바꾸지 않습니다: id=" + id);
         }
-        return new Shipment(id, orderId, memberId, newCarrier, newTrackingNumber, status, shippingScope, false, shippedAt, deliveredAt, version);
+        return new Shipment(id, orderId, memberId, newCarrier, newTrackingNumber, status, shippingScope, false, false, null, shippedAt, deliveredAt, version);
     }
 
     /**
@@ -97,6 +117,64 @@ public record Shipment(
         if (orderSynced) {
             throw new IllegalStateException("이미 주문에 반영된 송장입니다: id=" + id);
         }
-        return new Shipment(id, orderId, newMemberId, carrier, trackingNumber, status, newShippingScope, true, shippedAt, deliveredAt, version);
+        return new Shipment(id, orderId, newMemberId, carrier, trackingNumber, status, newShippingScope, true, false, null, shippedAt, deliveredAt, version);
+    }
+
+    /**
+     * 출고 완료 → 배송 중 (#18 PR-B2). delivery 안의 전이다 — 주문 상태는 배송 중 그대로라 order 를 부르지 않는다.
+     *
+     * @throws IllegalStateException 출고가 주문에 반영되지 않았거나 출고 완료가 아니다(호출 쪽이 먼저 막는다)
+     */
+    public Shipment startTransit() {
+        requireTransition(ShipmentStatus.IN_TRANSIT);
+        return new Shipment(id, orderId, memberId, carrier, trackingNumber, ShipmentStatus.IN_TRANSIT, shippingScope, true, false, null, shippedAt, null, version);
+    }
+
+    /**
+     * 출고 완료 · 배송 중 → 배송 완료 (#18 PR-B2). 배송 완료 시각을 정하고(마이크로초 — order 의 {@code delivered_at} 과 같은 값을 들고 있게) order 반영 대기로 둔다.
+     * 지금 상태를 직전 상태로 함께 저장한다 — order 가 거절하면 이 값으로 되돌린다(이력 줄의 순서에 기대지 않는다).
+     *
+     * @throws IllegalStateException 출고가 주문에 반영되지 않았거나 이미 배송 완료다(호출 쪽이 먼저 막는다)
+     */
+    public Shipment deliver(Instant now) {
+        requireTransition(ShipmentStatus.DELIVERED);
+        return new Shipment(
+            id, orderId, memberId, carrier, trackingNumber, ShipmentStatus.DELIVERED, shippingScope, true, true, status, shippedAt,
+            now.truncatedTo(ChronoUnit.MICROS), version
+        );
+    }
+
+    /**
+     * order 가 배송 완료를 받아들였다 — 반영 대기를 내린다. 응답의 주문 상태와 상관없이 반영된 것으로 본다(출고 반영과 같은 원칙).
+     *
+     * @throws IllegalStateException 반영 대기 중인 배송 완료가 아니다
+     */
+    public Shipment markCompletionSynced() {
+        if (!completionPending) {
+            throw new IllegalStateException("배송 완료 반영 대기가 아닙니다: id=" + id);
+        }
+        return new Shipment(id, orderId, memberId, carrier, trackingNumber, status, shippingScope, true, false, null, shippedAt, deliveredAt, version);
+    }
+
+    /**
+     * order 가 배송 완료를 거절했다(반영되지 않은 것이 확실하다 — 404 · 409 {@code ORDER_020} · 400 시각) — 배송 완료 직전 상태로 되돌린다. 배송 완료 시각도 지운다 —
+     * 다음 배송 완료는 그때 시각으로 새로 정한다. 되돌릴 상태는 배송 완료로 바꿀 때 저장한 {@link #previousStatus} 다.
+     *
+     * @throws IllegalStateException 반영 대기 중인 배송 완료가 아니다
+     */
+    public Shipment revertDelivery() {
+        if (!completionPending) {
+            throw new IllegalStateException("배송 완료 반영 대기가 아닙니다: id=" + id);
+        }
+        return new Shipment(id, orderId, memberId, carrier, trackingNumber, previousStatus, shippingScope, true, false, null, shippedAt, null, version);
+    }
+
+    private void requireTransition(ShipmentStatus target) {
+        if (!orderSynced) {
+            throw new IllegalStateException("출고가 주문에 반영되지 않은 송장입니다: id=" + id);
+        }
+        if (!status.canTransitTo(target)) {
+            throw new IllegalStateException("바꿀 수 없는 배송 상태입니다: %s -> %s".formatted(status, target));
+        }
     }
 }

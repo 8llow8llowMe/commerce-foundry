@@ -5,8 +5,8 @@ import com.commercefoundry.domainlayer.shipment.domain.model.OrderShipmentConfir
 import java.time.Instant;
 
 /**
- * order-service 에 출고를 반영한다 ({@code POST /internal/v1/orders/{orderId}/shipment}, {@code api-design-guide.md} §2-18). order 가 멱등이라
- * 같은 주문의 재요청은 이미 배송 중 뒤면 바꾸지 않고 200 이다.
+ * order-service 에 출고 · 배송 완료를 반영한다 ({@code POST /internal/v1/orders/{orderId}/shipment} · {@code /delivery-completion}, {@code api-design-guide.md} §2-18).
+ * order 가 멱등이라 같은 주문의 재요청은 이미 그 단계 뒤면 바꾸지 않고 200 이다.
  */
 public interface OrderShipmentCommandPort {
 
@@ -16,4 +16,14 @@ public interface OrderShipmentCommandPort {
      * @throws OrderShipmentException 200 이 아니다 — {@link OrderShipmentException.Failure} 가 대기 송장 행을 지울지 남길지 정한다
      */
     OrderShipmentConfirmation ship(long orderId, long shipmentId, Instant shippedAt);
+
+    /**
+     * 배송 완료 반영 (#18 PR-B2).
+     *
+     * @param shipmentId order 가 추적 로그에 남기는 송장 아이디
+     * @param deliveredAt 배송 완료 시각 — order 의 {@code delivered_at} 이 된다(자동 구매 확정 기간의 시작)
+     * @return order 의 답 — 응답 주문 상태는 정보다(멱등이면 구매 확정 · 반품일 수 있다)
+     * @throws OrderShipmentException 200 이 아니다 — {@link OrderShipmentException.Failure#definitelyNotApplied()} 가 송장을 되돌릴지 반영 대기로 남길지 정한다
+     */
+    OrderShipmentConfirmation completeDelivery(long orderId, long shipmentId, Instant deliveredAt);
 }

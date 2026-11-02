@@ -3,12 +3,15 @@ package com.commercefoundry.domainlayer.shipment.domain.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.commercefoundry.domainlayer.shipment.application.model.ShipmentStatusFilter;
 import com.commercefoundry.shared.commerce.ShippingScope;
 import java.time.Instant;
+import java.util.Arrays;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class ShipmentTest {
@@ -23,7 +26,8 @@ class ShipmentTest {
     private static Shipment saved(Shipment shipment, long version) {
         return new Shipment(
             shipment.id(), shipment.orderId(), shipment.memberId(), shipment.carrier(), shipment.trackingNumber(), shipment.status(),
-            shipment.shippingScope(), shipment.orderSynced(), shipment.shippedAt(), shipment.deliveredAt(), version
+            shipment.shippingScope(), shipment.orderSynced(), shipment.completionPending(), shipment.previousStatus(), shipment.shippedAt(), shipment.deliveredAt(),
+            version
         );
     }
 
@@ -69,13 +73,13 @@ class ShipmentTest {
         @Test
         @DisplayName("주문에 반영된 송장은 회원 아이디가 있어야 하고, 배송 완료 시각은 배송 완료 상태에만 있다")
         void invariants() {
-            assertThatThrownBy(() -> new Shipment(1L, 2L, null, CarrierCode.DHL, "1", ShipmentStatus.SHIPPED, null, true, NOW, null, 0L))
+            assertThatThrownBy(() -> new Shipment(1L, 2L, null, CarrierCode.DHL, "1", ShipmentStatus.SHIPPED, null, true, false, null, NOW, null, 0L))
                 .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.SHIPPED, null, true, NOW, NOW, 0L))
+            assertThatThrownBy(() -> new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.SHIPPED, null, true, false, null, NOW, NOW, 0L))
                 .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.DELIVERED, null, true, NOW, null, 0L))
+            assertThatThrownBy(() -> new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.DELIVERED, null, true, false, null, NOW, null, 0L))
                 .isInstanceOf(IllegalArgumentException.class);
-            assertThat(new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.DELIVERED, null, true, NOW, NOW, 0L).deliveredAt()).isEqualTo(NOW);
+            assertThat(new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.DELIVERED, null, true, false, null, NOW, NOW, 0L).deliveredAt()).isEqualTo(NOW);
         }
     }
 
@@ -147,9 +151,9 @@ class ShipmentTest {
             assertThat(history.toStatus()).isEqualTo(ShipmentStatus.SHIPPED);
             assertThat(history.changedBy()).isEqualTo(ShipmentChangedBy.ADMIN);
             assertThat(history.changedById()).isEqualTo(9L);
-            assertThatThrownBy(() -> new ShipmentStatusHistory(1L, 2L, null, ShipmentStatus.SHIPPED, ShipmentChangedBy.ADMIN, null, null))
+            assertThatThrownBy(() -> new ShipmentStatusHistory(1L, 2L, null, ShipmentStatus.SHIPPED, ShipmentChangedBy.ADMIN, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class);
-            assertThat(new ShipmentStatusHistory(1L, 2L, ShipmentStatus.SHIPPED, ShipmentStatus.IN_TRANSIT, ShipmentChangedBy.SYSTEM, null, null).changedById()).isNull();
+            assertThat(new ShipmentStatusHistory(1L, 2L, ShipmentStatus.SHIPPED, ShipmentStatus.IN_TRANSIT, ShipmentChangedBy.SYSTEM, null, null, null).changedById()).isNull();
         }
 
         @Test
@@ -157,6 +161,134 @@ class ShipmentTest {
         void pastShipping() {
             assertThat(new OrderShipmentConfirmation(1L, 2L, "SHIPPING", ShippingScope.DOMESTIC).isPastShipping()).isFalse();
             assertThat(new OrderShipmentConfirmation(1L, 2L, "PURCHASE_CONFIRMED", null).isPastShipping()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("배송 상태 변경 (#18 PR-B2)")
+    class StatusChange {
+
+        private static final Instant LATER = Instant.parse("2026-11-04T02:10:00.987654321Z");
+
+        private Shipment synced() {
+            return saved(pending(), 0L).markOrderSynced(30L, ShippingScope.DOMESTIC);
+        }
+
+        @ParameterizedTest(name = "{0} → {1} = {2}")
+        @CsvSource({
+            "SHIPPED, IN_TRANSIT, true", "SHIPPED, DELIVERED, true", "IN_TRANSIT, DELIVERED, true",
+            "SHIPPED, SHIPPED, false", "IN_TRANSIT, SHIPPED, false", "IN_TRANSIT, IN_TRANSIT, false",
+            "DELIVERED, SHIPPED, false", "DELIVERED, IN_TRANSIT, false", "DELIVERED, DELIVERED, false"
+        })
+        @DisplayName("허용 전이 표 — 출고 완료 → 배송 중 · 배송 완료, 배송 중 → 배송 완료만 된다. 같은 상태는 전이가 아니다")
+        void transitionTable(ShipmentStatus from, ShipmentStatus to, boolean allowed) {
+            assertThat(from.canTransitTo(to)).isEqualTo(allowed);
+        }
+
+        @Test
+        @DisplayName("목록 상태 조건(ShipmentStatusFilter)은 배송 상태와 값이 같다 — 상태를 더하면 조건도 더한다")
+        void filterMatchesStatus() {
+            assertThat(Arrays.stream(ShipmentStatusFilter.values()).map(ShipmentStatusFilter::toShipmentStatus)).containsExactly(ShipmentStatus.values());
+        }
+
+        @Test
+        @DisplayName("배송 중 — 상태만 바뀌고 반영 대기 · 배송 완료 시각은 없다")
+        void startsTransit() {
+            Shipment inTransit = synced().startTransit();
+
+            assertThat(inTransit.status()).isEqualTo(ShipmentStatus.IN_TRANSIT);
+            assertThat(inTransit.completionPending()).isFalse();
+            assertThat(inTransit.deliveredAt()).isNull();
+            assertThat(inTransit.version()).isZero();
+        }
+
+        @Test
+        @DisplayName("배송 완료 — 출고 완료 · 배송 중에서 되고, 배송 완료 시각은 마이크로초로 자르고 반영 대기다")
+        void delivers() {
+            Shipment fromShipped = synced().deliver(LATER);
+            Shipment fromTransit = synced().startTransit().deliver(LATER);
+
+            assertThat(fromShipped.status()).isEqualTo(ShipmentStatus.DELIVERED);
+            assertThat(fromShipped.completionPending()).isTrue();
+            assertThat(fromShipped.deliveredAt()).isEqualTo(Instant.parse("2026-11-04T02:10:00.987654Z"));
+            assertThat(fromShipped.shippedAt()).isEqualTo(TRUNCATED);
+            assertThat(fromTransit.status()).isEqualTo(ShipmentStatus.DELIVERED);
+            assertThat(fromShipped.previousStatus()).isEqualTo(ShipmentStatus.SHIPPED);
+            assertThat(fromTransit.previousStatus()).isEqualTo(ShipmentStatus.IN_TRANSIT);
+        }
+
+        @Test
+        @DisplayName("출고가 주문에 반영되지 않은 송장은 배송 중 · 배송 완료로 바꾸지 않는다")
+        void unsyncedCannotProgress() {
+            Shipment unsynced = saved(pending(), 0L);
+
+            assertThatThrownBy(unsynced::startTransit).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> unsynced.deliver(LATER)).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("허용 전이 밖은 거절한다 — 배송 중 → 배송 중, 배송 완료 → 배송 중 · 배송 완료")
+        void rejectsOutsideTable() {
+            Shipment delivered = synced().deliver(LATER);
+
+            assertThatThrownBy(() -> synced().startTransit().startTransit()).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(delivered::startTransit).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> delivered.deliver(LATER)).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("반영 완료 — 반영 대기만 내리고 배송 완료 시각은 그대로다. 대기가 아니면 거절한다")
+        void marksCompletionSynced() {
+            Shipment delivered = synced().deliver(LATER).markCompletionSynced();
+
+            assertThat(delivered.completionPending()).isFalse();
+            assertThat(delivered.status()).isEqualTo(ShipmentStatus.DELIVERED);
+            assertThat(delivered.deliveredAt()).isNotNull();
+            assertThatThrownBy(delivered::markCompletionSynced).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("되돌림 — 배송 완료로 바꿀 때 저장한 직전 상태로 돌아가고 배송 완료 시각 · 반영 대기 · 직전 상태가 지워진다. 대기가 아니면 거절한다")
+        void revertsDelivery() {
+            Shipment fromTransit = synced().startTransit().deliver(LATER);
+            Shipment reverted = fromTransit.revertDelivery();
+
+            assertThat(fromTransit.previousStatus()).isEqualTo(ShipmentStatus.IN_TRANSIT);
+            assertThat(reverted).extracting(Shipment::status, Shipment::deliveredAt, Shipment::completionPending, Shipment::previousStatus)
+                .containsExactly(ShipmentStatus.IN_TRANSIT, null, false, null);
+            assertThat(synced().deliver(LATER).revertDelivery().status()).isEqualTo(ShipmentStatus.SHIPPED);
+            assertThat(synced().deliver(LATER).markCompletionSynced().previousStatus()).isNull();
+            assertThatThrownBy(() -> synced().deliver(LATER).markCompletionSynced().revertDelivery()).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("불변식 — 반영 전 송장은 출고 완료이고, 반영 대기는 배송 완료에만, 직전 상태는 반영 대기에만(출고 완료 · 배송 중으로) 있다")
+        void invariants() {
+            assertThatThrownBy(() -> new Shipment(1L, 2L, null, CarrierCode.DHL, "1", ShipmentStatus.IN_TRANSIT, null, false, false, null, NOW, null, 0L))
+                .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.IN_TRANSIT, null, true, true, ShipmentStatus.SHIPPED, NOW, null, 0L))
+                .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.DELIVERED, null, true, true, null, NOW, NOW, 0L))
+                .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.DELIVERED, null, true, false, ShipmentStatus.SHIPPED, NOW, NOW, 0L))
+                .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new Shipment(1L, 2L, 3L, CarrierCode.DHL, "1", ShipmentStatus.DELIVERED, null, true, true, ShipmentStatus.DELIVERED, NOW, NOW, 0L))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("이력 — 관리자 변경 줄은 이전 상태 · 사유를 담고, 되돌림 줄은 배송 완료 → 직전 상태 · 자동 처리다. 사유는 200자까지다")
+        void histories() {
+            ShipmentStatusHistory changed = ShipmentStatusHistory.changedByAdmin(1L, 2L, ShipmentStatus.SHIPPED, ShipmentStatus.DELIVERED, 9L, "수령 확인");
+            ShipmentStatusHistory reverted = ShipmentStatusHistory.completionReverted(3L, 2L, ShipmentStatus.SHIPPED);
+
+            assertThat(changed).extracting(ShipmentStatusHistory::fromStatus, ShipmentStatusHistory::changedBy, ShipmentStatusHistory::reason)
+                .containsExactly(ShipmentStatus.SHIPPED, ShipmentChangedBy.ADMIN, "수령 확인");
+            assertThat(reverted).extracting(ShipmentStatusHistory::fromStatus, ShipmentStatusHistory::toStatus, ShipmentStatusHistory::changedBy,
+                ShipmentStatusHistory::changedById).containsExactly(ShipmentStatus.DELIVERED, ShipmentStatus.SHIPPED, ShipmentChangedBy.SYSTEM, null);
+            assertThat(ShipmentStatusHistory.changedByAdmin(1L, 2L, ShipmentStatus.SHIPPED, ShipmentStatus.IN_TRANSIT, 9L, "가".repeat(200)).reason()).hasSize(200);
+            assertThatThrownBy(() -> ShipmentStatusHistory.changedByAdmin(1L, 2L, ShipmentStatus.SHIPPED, ShipmentStatus.IN_TRANSIT, 9L, "가".repeat(201)))
+                .isInstanceOf(IllegalArgumentException.class);
         }
     }
 }

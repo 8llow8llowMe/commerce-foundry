@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.shipment.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.commercefoundry.domainlayer.shipment.adapter.out.persistence.entity.ShipmentEntity;
 import com.commercefoundry.domainlayer.shipment.adapter.out.persistence.repository.ShipmentRepository;
@@ -26,6 +27,7 @@ import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -183,5 +185,91 @@ class ShipmentRepositoryAdapterTest {
             .isInstanceOf(ObjectOptimisticLockingFailureException.class);
         entityManager.clear();
         assertThat(shipmentRepositoryPort.findByOrderId(100L)).isEmpty();
+    }
+
+    // #18 PR-B2 — 목록(QueryDSL) · 이력 조회 · 새 check 제약
+
+    private static final Instant DELIVERED_AT = Instant.parse("2026-11-04T02:10:00.654321Z");
+
+    private Shipment synced(long id, long orderId) {
+        return shipmentRepositoryPort.update(shipmentRepositoryPort.insert(newShipment(id, orderId)).markOrderSynced(500L, ShippingScope.DOMESTIC));
+    }
+
+    @Test
+    @DisplayName("목록 — 상태 · 반영 여부(출고 반영 전 OR 배송 완료 반영 대기) · 주문 조건, 최신순 페이지, 건수는 같은 조건이다")
+    void searchesWithFilters() {
+        shipmentRepositoryPort.insert(newShipment(1L, 100L));
+        synced(2L, 200L);
+        shipmentRepositoryPort.update(synced(3L, 300L).deliver(DELIVERED_AT));
+        Shipment delivered = shipmentRepositoryPort.update(synced(4L, 400L).deliver(DELIVERED_AT));
+        shipmentRepositoryPort.update(delivered.markCompletionSynced());
+        entityManager.clear();
+
+        Page<Shipment> unsynced = shipmentRepositoryPort.search(null, null, false, 0, 20);
+        Page<Shipment> syncedPage = shipmentRepositoryPort.search(null, null, true, 0, 1);
+        Page<Shipment> deliveredUnsynced = shipmentRepositoryPort.search(null, ShipmentStatus.DELIVERED, false, 0, 20);
+
+        assertThat(unsynced.getContent()).extracting(Shipment::id).containsExactly(3L, 1L);
+        assertThat(unsynced.getTotalElements()).isEqualTo(2);
+        assertThat(syncedPage.getContent()).extracting(Shipment::id).containsExactly(4L);
+        assertThat(syncedPage.getTotalElements()).isEqualTo(2);
+        assertThat(deliveredUnsynced.getContent()).extracting(Shipment::id).containsExactly(3L);
+        assertThat(shipmentRepositoryPort.search(200L, null, null, 0, 20).getContent()).extracting(Shipment::id).containsExactly(2L);
+        assertThat(shipmentRepositoryPort.search(null, null, null, 3, 20).getContent()).isEmpty();
+        assertThat(shipmentRepositoryPort.search(null, null, null, 3, 20).getTotalElements()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("이력은 아이디 오름차순이고 사유 · 바뀐 시각(생성 시각)이 읽힌다. 배송 완료 반영 대기 · 직전 상태 · 시각이 그대로 저장된다")
+    void readsHistoriesAndCompletion() {
+        Shipment shipment = shipmentRepositoryPort.update(synced(1L, 100L).deliver(DELIVERED_AT));
+        shipmentRepositoryPort.insertHistory(ShipmentStatusHistory.changedByAdmin(12L, 1L, ShipmentStatus.SHIPPED, ShipmentStatus.DELIVERED, 9L, "수령 확인"));
+        shipmentRepositoryPort.insertHistory(ShipmentStatusHistory.registered(11L, 1L, 9L));
+        entityManager.clear();
+
+        assertThat(shipmentRepositoryPort.findById(1L).orElseThrow())
+            .extracting(Shipment::completionPending, Shipment::previousStatus, Shipment::deliveredAt, Shipment::version)
+            .containsExactly(true, ShipmentStatus.SHIPPED, DELIVERED_AT, shipment.version());
+        assertThat(shipmentRepositoryPort.findHistories(1L)).extracting(ShipmentStatusHistory::id, ShipmentStatusHistory::reason)
+            .containsExactly(tuple(11L, null), tuple(12L, "수령 확인"));
+        assertThat(shipmentRepositoryPort.findHistories(1L)).allSatisfy(history -> assertThat(history.changedAt()).isNotNull());
+    }
+
+    @Test
+    @DisplayName("출고 반영 전인데 배송 중이면 check 제약(ck_shipment_unsynced_shipped)이 막는다")
+    void unsyncedInTransitIsRejected() {
+        ShipmentEntity invalid = ShipmentEntity.builder()
+            .id(6L).orderId(600L).carrier(CarrierCode.DHL).trackingNumber("1").status(ShipmentStatus.IN_TRANSIT).shippedAt(SHIPPED_AT)
+            .build();
+
+        assertThatThrownBy(() -> shipmentRepository.saveAndFlush(invalid))
+            .isInstanceOfSatisfying(DataIntegrityViolationException.class,
+                exception -> assertThat(ConstraintViolations.constraintNameOf(exception)).isEqualTo("ck_shipment_unsynced_shipped"));
+    }
+
+    @Test
+    @DisplayName("배송 완료가 아닌데 반영 대기면 check 제약(ck_shipment_completion_pending_status)이 막는다")
+    void pendingWithoutDeliveredIsRejected() {
+        ShipmentEntity invalid = ShipmentEntity.builder()
+            .id(7L).orderId(700L).carrier(CarrierCode.DHL).trackingNumber("1").status(ShipmentStatus.SHIPPED)
+            .orderSynced(true).memberId(500L).completionPending(true).previousStatus(ShipmentStatus.SHIPPED).shippedAt(SHIPPED_AT)
+            .build();
+
+        assertThatThrownBy(() -> shipmentRepository.saveAndFlush(invalid))
+            .isInstanceOfSatisfying(DataIntegrityViolationException.class,
+                exception -> assertThat(ConstraintViolations.constraintNameOf(exception)).isEqualTo("ck_shipment_completion_pending_status"));
+    }
+
+    @Test
+    @DisplayName("반영 대기인데 직전 상태가 없으면 check 제약(ck_shipment_previous_status_pending)이 막는다")
+    void pendingWithoutPreviousStatusIsRejected() {
+        ShipmentEntity invalid = ShipmentEntity.builder()
+            .id(8L).orderId(800L).carrier(CarrierCode.DHL).trackingNumber("1").status(ShipmentStatus.DELIVERED)
+            .orderSynced(true).memberId(500L).completionPending(true).shippedAt(SHIPPED_AT).deliveredAt(DELIVERED_AT)
+            .build();
+
+        assertThatThrownBy(() -> shipmentRepository.saveAndFlush(invalid))
+            .isInstanceOfSatisfying(DataIntegrityViolationException.class,
+                exception -> assertThat(ConstraintViolations.constraintNameOf(exception)).isEqualTo("ck_shipment_previous_status_pending"));
     }
 }
