@@ -28,6 +28,9 @@ public final class PaymentValidationMessage {
     public static final String IDEMPOTENCY_KEY_REQUIRED = "PAYMENT_113:요청 정보가 부족합니다. 화면을 새로 고친 뒤 다시 시도해 주세요.";
     public static final String IDEMPOTENCY_KEY_FORMAT_INVALID = "PAYMENT_114:요청 정보가 올바르지 않습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.";
 
+    // 서비스 간 결제 조회 경로 (GET /internal/v1/payments/{paymentId}) — 숫자가 아니면 PAYMENT_198
+    public static final String PAYMENT_ID_POSITIVE = "PAYMENT_115:결제 아이디가 올바르지 않습니다.";
+
     private PaymentValidationMessage() {
     }
 }

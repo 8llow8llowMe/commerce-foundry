@@ -717,6 +717,14 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
 
   출고 · 배송 완료는 회원 소유를 보지 않는 운영 흐름 명령이라 delivery-service 외 서비스(payment 포함)는 403 이다. 컨트롤러 테스트가 경로마다 허용 · 거부 호출자를 본다.
 
+  payment-service 의 허용 호출자 목록:
+
+  | 엔드포인트 | 허용 호출자 | 비고 |
+  |------------|-------------|------|
+  | `GET /internal/v1/payments/{paymentId}` | `SERVICE_order-service` | 읽기, 회원 필터 없음 — `payment-approved` 진위 재조회 (#308). 결제키 · 멱등 키 · 주문명은 내리지 않는다 |
+
+  결제 정보는 다른 서비스가 읽을 이유가 없어 order-service 외(product · delivery · auth 등)는 403 이다(`PaymentInternalControllerTest`).
+
 ### 9-5. 호출 쪽 — Feign Capability
 
 ```java

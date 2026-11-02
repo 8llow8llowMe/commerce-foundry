@@ -78,6 +78,9 @@ AI 상품 초안(#359)은 상품이 아직 없는 자원이라 `/api/v1/admin/pr
   운영자 한 명의 사실이라 `ids` 벌크가 아니다. `memberId` 는 양수(`PRODUCT_039`), 숫자가 아니면 `PRODUCT_198`, 없으면 `PRODUCT_199` 다. 계약은 아래 "운영자 온보딩 계약 (#357)".
 - 결제용 주문 요약(단건): order-service `GET /internal/v1/orders/{orderId}/payment-summary?memberId=` (#14). 허용 호출자는 payment-service.
   `orderId` · `memberId` 는 양수(`ORDER_141` · `ORDER_142`), 숫자가 아니면 `ORDER_198`, `memberId` 가 없으면 `ORDER_199` 다. 계약은 `order-flow-guide.md` §2-5.
+- 결제 조회(단건): payment-service `GET /internal/v1/payments/{paymentId}` (#308 PR-A2). 허용 호출자는 order-service — `payment-approved` 이벤트의 진위 재조회다.
+  회원을 거르지 않는다. 응답은 `{paymentId, orderId, memberId, status(metadata), amount(§2-3), method(metadata) | null, approvedAt | null}` 이고
+  결제키 · 멱등 키 · 주문명 · PG 원문은 없다. 없으면 404 `PAYMENT_001`, `paymentId` 가 양수가 아니면 `PAYMENT_115`, 숫자가 아니면 `PAYMENT_198`. 계약은 `payment-guide.md` §6.
 - 시점 원가(벌크): product-service `POST /internal/v1/sku-costs/query` (#361 PR-B). 허용 호출자는 operations-service(공헌이익 집계 #362).
   조회 키가 `ids` 가 아니라 (SKU, 시각) 쌍 목록이라 본문으로 받는 **읽기 전용 POST** 다 — 위 표의 상한(원문 100개) · 중복(첫 등장 순서로 합침) · 없는 아이디(뺌) ·
   순서(요청 순서) · in 절 벌크 규칙은 그대로 따른다. 계약은 §2-12 "서비스 간 시점 원가 조회".
