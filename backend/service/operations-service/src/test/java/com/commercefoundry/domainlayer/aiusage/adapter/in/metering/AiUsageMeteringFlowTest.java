@@ -1,15 +1,25 @@
 package com.commercefoundry.domainlayer.aiusage.adapter.in.metering;
 
+import static com.commercefoundry.ai.support.StubMessagesServer.blockStart;
 import static com.commercefoundry.ai.support.StubMessagesServer.error;
+import static com.commercefoundry.ai.support.StubMessagesServer.messageStart;
 import static com.commercefoundry.ai.support.StubMessagesServer.ok;
+import static com.commercefoundry.ai.support.StubMessagesServer.okToolUse;
+import static com.commercefoundry.ai.support.StubMessagesServer.stream;
+import static com.commercefoundry.ai.support.StubMessagesServer.textDelta;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.ai.client.AiClient;
+import com.commercefoundry.ai.client.AiContent;
+import com.commercefoundry.ai.client.AiConversationRequest;
+import com.commercefoundry.ai.client.AiConversationResult;
 import com.commercefoundry.ai.client.AiException;
 import com.commercefoundry.ai.client.AiException.Reason;
+import com.commercefoundry.ai.client.AiMessage;
 import com.commercefoundry.ai.client.AiRequest;
 import com.commercefoundry.ai.client.AiResult;
+import com.commercefoundry.ai.client.AiTool;
 import com.commercefoundry.ai.metering.AiCallInterceptor;
 import com.commercefoundry.ai.support.StubMessagesServer;
 import java.time.Duration;
@@ -201,6 +211,48 @@ class AiUsageMeteringFlowTest {
         assertThat(row.get("status")).isEqualTo("NOT_SENT");
         assertThat(row.get("reason")).isEqualTo("BUSY");
         assertThat(((Number) row.get("cost_micros")).longValue()).isZero();
+    }
+
+    @Test
+    @DisplayName("대화 도구 루프 — 호출 2번(도구 호출 → 결과 첨부 재호출)이 원장 2행으로 각각 COMPLETED 정산되고, 도구 인자 원문이 원장 · 로그에 없다")
+    void toolLoopRecordsOneRowPerCall(CapturedOutput output) {
+        AiTool lookup = new AiTool("lookup_order", "주문 상태를 조회한다",
+            "{\"type\":\"object\",\"properties\":{\"orderId\":{\"type\":\"string\"}},\"required\":[\"orderId\"],\"additionalProperties\":false}");
+        SERVER.reply(okToolUse("toolu_flow1", "lookup_order", "{\"orderId\":\"" + PROMPT_PROBE + "\"}")).reply(ok(RESPONSE_PROBE, "end_turn"));
+        AiConversationRequest request = AiConversationRequest.of("flow-chat", null, List.of(AiMessage.user("주문 " + PROMPT_PROBE)), List.of(lookup))
+            .withCallerRef("chat:201");
+
+        AiConversationResult first = aiClient.converse(request);
+        AiConversationResult second = aiClient.converse(request.append(first.assistantMessage(),
+            AiMessage.toolResults(List.of(AiContent.toolResult(first.toolCalls().getFirst().id(), "{\"status\":\"SHIPPED\"}")))));
+
+        assertThat(second.text()).isEqualTo(RESPONSE_PROBE);
+        List<Map<String, Object>> rows = rows("chat:201");
+        assertThat(rows).hasSize(2).allSatisfy(row -> {
+            assertThat(row.get("status")).isEqualTo("COMPLETED");
+            assertThat(row.get("feature")).isEqualTo("flow-chat");
+            assertThat(((Number) row.get("cost_micros")).longValue()).isPositive();
+            assertThat(row.values()).allSatisfy(value -> assertThat(String.valueOf(value)).doesNotContain(PROMPT_PROBE).doesNotContain(RESPONSE_PROBE));
+        });
+        assertThat(rows).extracting(row -> ((Number) row.get("input_tokens")).longValue()).containsExactlyInAnyOrder(30L, 12L);
+        assertThat(output).doesNotContain(PROMPT_PROBE).doesNotContain(RESPONSE_PROBE);
+    }
+
+    @Test
+    @DisplayName("스트림 취소 — UNUSABLE · 원인 null · message_start 까지 받은 부분 사용량으로 1행 정산된다")
+    void cancelledStreamIsSettledWithPartialUsage() {
+        SERVER.reply(stream(List.of(messageStart(21), blockStart(0, "{\"type\":\"text\",\"text\":\"\"}"), textDelta(0, "첫 조각"), textDelta(0, "다음")), 50, 0));
+
+        AiConversationResult result = aiClient.converseStreaming(
+            AiConversationRequest.of("flow-stream", null, List.of(AiMessage.user("질문"))).withCallerRef("chat:202"), delta -> false);
+
+        assertThat(result.cancelled()).isTrue();
+        Map<String, Object> row = single("chat:202");
+        assertThat(row.get("status")).isEqualTo("UNUSABLE");
+        assertThat(row.get("reason")).isNull();
+        assertThat(((Number) row.get("input_tokens")).longValue()).isEqualTo(21L);
+        assertThat(((Number) row.get("output_tokens")).longValue()).isEqualTo(1L);
+        assertThat(row.get("message_id")).isEqualTo("msg_stream");
     }
 
     private void awaitReceived(int count) throws InterruptedException {

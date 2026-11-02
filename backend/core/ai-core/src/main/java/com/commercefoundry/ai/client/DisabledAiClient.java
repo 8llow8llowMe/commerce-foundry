@@ -12,4 +12,14 @@ final class DisabledAiClient implements AiClient {
     public <T> AiStructuredResult<T> complete(AiRequest request, Class<T> type, AiOutputValidator<T> validator) {
         throw new AiException(AiException.Reason.DISABLED, request.feature());
     }
+
+    @Override
+    public AiConversationResult converse(AiConversationRequest request) {
+        throw new AiException(AiException.Reason.DISABLED, request.feature());
+    }
+
+    @Override
+    public AiConversationResult converseStreaming(AiConversationRequest request, AiStreamListener listener) {
+        throw new AiException(AiException.Reason.DISABLED, request.feature());
+    }
 }
