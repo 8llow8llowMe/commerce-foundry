@@ -28,4 +28,8 @@ tasks.named('test') {
     inputs.file(rootProject.file('docs/api-design-guide.md'))
         .withPropertyName('routeOwnershipTable')
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    // 배포 environment를 실제 앱 환경변수와 대조한다. Compose만 바뀌어도 누락·중복 검사를 다시 실행한다 (#32).
+    inputs.file(rootProject.file('cloud/api-gateway/docker-compose-api-gateway.yml'))
+        .withPropertyName('deploymentCompose')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
