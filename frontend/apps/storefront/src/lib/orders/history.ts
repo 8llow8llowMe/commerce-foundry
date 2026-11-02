@@ -4,9 +4,9 @@ import type { OrderCreated } from '@/lib/checkout/order';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 
 /**
- * 고객 주문 내역 · 상세 · 결제 전 취소(order-service, BE #16 PR-1). 고객 전용이고 남의 주문은 없는 주문처럼 404 `ORDER_001` 이다.
+ * 고객 주문 내역 · 상세 · 결제 전 취소 · 구매 확정(order-service, BE #16). 고객 전용이고 남의 주문은 없는 주문처럼 404 `ORDER_001` 이다.
  * 정본은 `backend/docs/api-design-guide.md` §2-17 · `backend/docs/order-flow-guide.md` §1-1.
- * 결제 뒤 취소 · 반품 · 구매 확정(#16 PR-2)은 BE 전이라 화면에 자리도 두지 않는다. 배송 조회는 `delivery.ts`(BE #18 PR-B2).
+ * 결제 뒤 취소 · 반품(`/returns`)은 BE 전이라 화면에 자리도 두지 않는다. 배송 조회는 `delivery.ts`(BE #18 PR-B2).
  */
 export const ORDER_HISTORY_PATH = '/api/v1/orders';
 export const ORDER_HISTORY_PAGE_SIZE = 20;
@@ -35,6 +35,8 @@ export const orderListPath = (page: number) =>
 export const orderDetailPath = (orderId: string) =>
   `${ORDER_HISTORY_PATH}/${encodeURIComponent(orderId)}`;
 export const orderCancelPath = (orderId: string) => `${orderDetailPath(orderId)}/cancellation`;
+export const orderPurchaseConfirmationPath = (orderId: string) =>
+  `${orderDetailPath(orderId)}/purchase-confirmation`;
 
 /** 마이페이지 주문 상세 앱 경로 */
 export const orderPageHref = (orderId: string) => `/mypage/orders/${encodeURIComponent(orderId)}`;
@@ -69,6 +71,18 @@ export function canResumePayment(
   return Number.isFinite(due) && due > now;
 }
 
+/**
+ * 주문 상세에서 보일 액션 — BE 허용 전이 그대로다. 출고 뒤에는 어느 쪽도 없다(배송 중 · 반품 · 확정 뒤 포함).
+ * - cancel: 서버의 `cancelable`(결제 전 · 결제 대기만 true). 화면에서 상태로 다시 추측하지 않는다
+ * - confirmPurchase: 배송 완료(`DELIVERED → PURCHASE_CONFIRMED` 만 허용). 이미 확정됐으면 보이지 않는다
+ */
+export function orderActions(order: Pick<OrderDetail, 'status' | 'cancelable'>): {
+  cancel: boolean;
+  confirmPurchase: boolean;
+} {
+  return { cancel: order.cancelable, confirmPurchase: order.status.code === 'DELIVERED' };
+}
+
 /** 다음 조각을 붙인다 — 그 사이 새 주문이 생기면 OFFSET 이 밀려 앞 조각의 주문이 다시 올 수 있어 아이디로 거른다 */
 export function appendOrders(current: OrderSummary[], next: OrderSummary[]): OrderSummary[] {
   const seen = new Set(current.map((order) => order.orderId));
@@ -84,29 +98,56 @@ export function readOrderPathId(value: string): string | null {
  * 결제 전 취소 실패를 화면 처리로 가른다. 취소는 멱등이다(이미 취소됐으면 200) — 결과를 모르면 상세를 다시 읽어 확인하고,
  * 아직 취소할 수 있으면 다시 눌러도 된다. BE 에 멱등 키가 없다.
  * - signedOut: 401
- * - reload: 상세를 다시 읽는다 — 409 `ORDER_020`(결제 완료 · 만료가 먼저 커밋 — `@Version` 경합에서 진 경우 포함) ·
+ * - reload: 상세를 다시 읽는다 — 409 `ORDER_020`(결제 완료 · 만료가 먼저 커밋 — `@Version` 경합에서 진 경우 포함) · `ORDER_025` ·
  *   404 `ORDER_001` · 결과를 모르는 실패(502/504 · 5xx · 연결 실패 · 봉투 아님)
  * - retry: 반영되지 않았다 — 429(쿨다운) · 503 · 그 밖의 4xx
  */
-export type CancelFailure =
+export type OrderActionFailure =
   { kind: 'signedOut' } | { kind: 'reload'; message: string } | { kind: 'retry'; message: string };
 
 const UNKNOWN_KINDS = new Set<ApiError['kind']>(['network', 'invalidResponse', 'unknownOutcome']);
 
-export function cancelFailure(cause: unknown, t: Dictionary['orders']): CancelFailure {
-  if (!(cause instanceof ApiError)) return { kind: 'reload', message: t.cancelUnknown };
+export function cancelFailure(cause: unknown, t: Dictionary['orders']): OrderActionFailure {
+  return actionFailure(cause, {
+    errors: t.cancelErrors,
+    failed: t.cancelFailed,
+    unknown: t.cancelUnknown,
+  });
+}
+
+/**
+ * 구매 확정 실패를 화면 처리로 가른다. 구매 확정도 멱등이다(이미 확정됐으면 200, 이력을 더하지 않는다) — 결과를 모르면
+ * 상세를 다시 읽어 확인한다. 배송 완료로 남아 있으면 다시 눌러도 된다. BE 에 멱등 키가 없다.
+ * - reload: 409 `ORDER_020`(배송 완료가 아님 — 반품 요청 등으로 이미 바뀜) · 409 `ORDER_025`(다른 전이가 먼저 커밋) ·
+ *   404 `ORDER_001` · 결과를 모르는 실패. 자동 구매 확정과 겹치면 BE 가 다시 읽어 200 으로 돌려준다
+ * - signedOut · retry 는 취소와 같다
+ */
+export function confirmFailure(cause: unknown, t: Dictionary['orders']): OrderActionFailure {
+  return actionFailure(cause, {
+    errors: t.confirmErrors,
+    failed: t.confirmFailed,
+    unknown: t.confirmUnknown,
+  });
+}
+
+/** 상태를 바꾸는 주문 액션 실패 공통 분류 — 경합(409 `ORDER_020` · `ORDER_025`) · 404 · 결과 모름은 다시 읽는다 */
+function actionFailure(
+  cause: unknown,
+  copy: { errors: Record<string, string>; failed: string; unknown: string },
+): OrderActionFailure {
+  if (!(cause instanceof ApiError)) return { kind: 'reload', message: copy.unknown };
   if (cause.kind === 'unauthorized') return { kind: 'signedOut' };
   const code = cause.code ?? '';
   // 서버 문구는 국문 고정이고 409 는 상태 이름이 섞여 있어 사전 문구만 쓴다
-  const message = t.cancelErrors[code];
+  const message = copy.errors[code];
   if (cause.kind === 'rateLimited') {
-    return { kind: 'retry', message: t.cancelErrors.GATEWAY_006 ?? t.cancelFailed };
+    return { kind: 'retry', message: copy.errors.GATEWAY_006 ?? copy.failed };
   }
-  if (code === 'ORDER_020' || cause.kind === 'notFound') {
-    return { kind: 'reload', message: message ?? t.cancelFailed };
+  if (code === 'ORDER_020' || code === 'ORDER_025' || cause.kind === 'notFound') {
+    return { kind: 'reload', message: message ?? copy.failed };
   }
   if (UNKNOWN_KINDS.has(cause.kind) || (cause.kind === 'server' && (cause.status ?? 500) >= 500)) {
-    return { kind: 'reload', message: t.cancelUnknown };
+    return { kind: 'reload', message: copy.unknown };
   }
-  return { kind: 'retry', message: message ?? t.cancelFailed };
+  return { kind: 'retry', message: message ?? copy.failed };
 }

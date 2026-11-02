@@ -7,6 +7,7 @@ import type { OrderDetail, OrderSummary } from '@/lib/orders/history';
 import type { Delivery, DeliveryLoad } from '@/lib/orders/delivery';
 import {
   CancelPanel,
+  ConfirmPurchasePanel,
   DeliveryView,
   OrderDetail as OrderDetailContainer,
   OrderDetailView,
@@ -284,5 +285,39 @@ describe('CancelPanel', () => {
 
   it('실패 문구는 alert 다', () => {
     expect(panel({ error: t.cancelFailed })).toContain('role="alert"');
+  });
+});
+
+describe('ConfirmPurchasePanel', () => {
+  const panel = (props: Partial<Parameters<typeof ConfirmPurchasePanel>[0]> = {}) =>
+    renderToStaticMarkup(
+      <ConfirmPurchasePanel
+        t={t}
+        error={null}
+        confirming={false}
+        blocked={false}
+        onConfirm={() => {}}
+        onClose={() => {}}
+        {...props}
+      />,
+    );
+
+  it('반품 · 교환 불가 안내와 확정하기 · 닫기', () => {
+    const html = panel();
+    expect(html).toContain(t.confirmTitle);
+    expect(html).toContain(t.confirmCaution);
+    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>확정하기/);
+    expect(html).toContain(t.confirmClose);
+  });
+
+  it('진행 중이면 두 버튼을 막고, 쿨다운이면 확정하기를 막는다', () => {
+    const busy = panel({ confirming: true });
+    expect(busy).toContain(t.confirming);
+    expect(busy).toMatch(/<button[^>]*disabled=""[^>]*>닫기/);
+    expect(panel({ blocked: true })).toMatch(/<button[^>]*disabled=""[^>]*>확정하기/);
+  });
+
+  it('실패 문구는 alert 다', () => {
+    expect(panel({ error: t.confirmFailed })).toContain('role="alert"');
   });
 });
