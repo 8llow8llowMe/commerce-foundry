@@ -1061,6 +1061,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | product | `DISPLAY_SECTION_*` · `LOOK_*` (전시 미리보기는 면제) | #163 PR-C |
 | product | `STOCK_ADJUST` · `SKU_COST_CREATE` · `PRODUCT_DRAFT_*` | #163 PR-C′ (이력 표 + 줄) |
 | delivery | `SHIPPING_POLICY_*_REPLACE` (국내 · 해외) | #163 PR-D (국내는 이력 표 + 줄, 해외는 행위자 수신) |
+| delivery | `SHIPMENT_REGISTER` (대상 `order:<id>`, 일괄은 주문마다 · 이미 등록도 `SUCCESS` · 재시도한 관리자도 한 줄. Facade 가 `NEVER` 라도 빈 트랜잭션 동기화로 요청이 끝날 때 한꺼번에 남는다 — 줄마다 바로 쓰는 공통 개선은 #163 후속) | 사용 중 — #18 PR-B1 (`domainlayer/adminaudit` 의 `DeliveryAdminAuditAction` · `DeliveryAdminAuditProcessor` 를 처음 둔다. 배송 상태 이력 표 + 줄) |
 | product | `PRODUCT_CREATE` · `PRODUCT_UPDATE` · `PRODUCT_DELETE` · `PRODUCT_IMAGE_UPLOAD_ISSUE` | #163 PR-F (#9 머지 뒤) |
 
 - **알려진 한계**

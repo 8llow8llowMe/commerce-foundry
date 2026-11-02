@@ -14,8 +14,9 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
- * delivery-service 컨트롤러(고객 · 어드민 · internal)의 도메인 · 요청 검증 오류를 {@code Response.fail} 봉투로 바꾼다. 서비스 공용이다 —
- * 송장 · 배송 추적 컨텍스트가 들어와도 advice 를 하나로 둔다.
+ * delivery-service 컨트롤러(고객 · 어드민 · internal)의 요청 검증 오류와 배송비 도메인 오류({@link DeliveryException})를 {@code Response.fail} 봉투로 바꾼다.
+ * <b>검증 예외만 서비스 공용이다</b> — 검증 메시지가 코드를 싣고 오므로 컨텍스트를 몰라도 된다. 업무 코드는 컨텍스트별 enum 이 {@code DELIVERY_} 번호를 나눠 쓰고
+ * (001~013 배송비 {@link DeliveryErrorCode}, 014~ 송장 {@code ShipmentErrorCode}), 송장 도메인 오류는 {@code ShipmentExceptionHandler} 가 받는다.
  *
  * <p>{@code Exception} · {@code RuntimeException} 을 통째로 잡지 않는다 — {@code @PreAuthorize} 거부는 security-core 의
  * {@code SecurityExceptionAdvice}(가장 높은 우선순위)가 받는다 ({@code coding-conventions.md} §8-1, {@code security-guide.md} §5-2).

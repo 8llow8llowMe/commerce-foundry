@@ -47,6 +47,7 @@ class DeliveryServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     private static final String QUOTE_BODY = """
         {"orderAmount": {"amount": 99000, "currency": "KRW"}, "countryCode": "KR", "postalCode": "63100"}
         """;
+    private static final String ADMIN_DELIVERIES_PATH = "/api/v1/admin/deliveries";
     private static final String SHIPPING_POLICY_FACT_PATH = "/internal/v1/onboarding-facts/shipping-policy?memberId=4611686018427387904";
 
     private MockHttpServletResponse shippingPolicyFactAs(String caller) throws Exception {
@@ -166,6 +167,24 @@ class DeliveryServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
             .content(QUOTE_BODY));
 
         assertEnvelope(response, SecurityErrorCode.SERVICE_UNAUTHORIZED);
+    }
+
+    /** 송장 등록(#18) — 빈 items 라 저장 · order 호출까지 가지 않는다. 400 이면 인증 · 인가를 통과해 본문 검증에 닿은 것이다. */
+    @Test
+    @DisplayName("어드민 송장 등록(POST)은 ADMIN 만 본문 검증(400 · DELIVERY_140)에 닿고, 토큰 없음 401 · SECURITY_001 · CUSTOMER 403 · SECURITY_005 다")
+    void adminDeliveriesRequireAdmin() throws Exception {
+        MockHttpServletResponse admin = perform(post(ADMIN_DELIVERIES_PATH)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"items\": []}"));
+
+        assertThat(admin.getStatus()).isEqualTo(400);
+        assertThat(admin.getContentAsString()).contains("\"resultCode\":\"DELIVERY_140\"");
+        assertEnvelope(perform(post(ADMIN_DELIVERIES_PATH).contentType(MediaType.APPLICATION_JSON).content("{\"items\": []}")), SecurityErrorCode.UNAUTHORIZED);
+        assertEnvelope(perform(post(ADMIN_DELIVERIES_PATH)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"items\": []}")), SecurityErrorCode.FORBIDDEN);
     }
 
     /** 본문을 일부러 비워 저장까지 가지 않게 한다 — 공유 컨텍스트의 H2 에 정책을 남기지 않는다. 400 이면 인증 · 인가를 통과해 본문 검증에 닿은 것이다. */

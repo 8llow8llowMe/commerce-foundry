@@ -979,6 +979,41 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   → `159` · `160` → `161` → 409 `ORDER_025` 다 — 이미 반영된 주문의 재시도가 시간이 흘러 깨지지 않게. 상한의 이유는 `order-flow-guide.md` §4.
 - **이력** — 바뀌었을 때만 `SERVICE`(아이디 없음) 이력을 남긴다. 사유는 `SHIPMENT_REGISTERED` · `DELIVERY_COMPLETED` 다. 어드민 상세의 `changedBy` 는 "연동 처리" 다.
 
+### 2-19. 어드민 송장 등록 · 출고 (delivery-service, #18 PR-B1)
+
+`hasRole('ADMIN')`. 흐름 · 실패 처리의 정본은 `order-flow-guide.md` §4 다. 감사는 `SHIPMENT_REGISTER`(대상 `order:<id>`, 주문마다 한 줄 — `security-guide.md` §11-4).
+
+| API | 응답 | 오류 |
+|-----|------|------|
+| `POST /api/v1/admin/deliveries` `{items: [{orderId, carrier, trackingNumber}]}` | 200 `{registeredCount, alreadyRegisteredCount, failedCount, results[{orderId, deliveryId, result, errorCode, message}]}` — 요청 순서, 일부가 실패해도 200 | 400 `DELIVERY_140`(items 1~20) · `141`(null 원소) · `142`(orderId 숫자 문자열 · long 범위) · `143`(같은 주문 중복) · `144`(carrier 없음) · `145`(송장 번호 영문 · 숫자 · 하이픈 1~50자) · `100`(모르는 택배사 · 깨진 JSON) |
+
+- **단건도 같은 API** — 1건짜리 목록으로 보낸다. 주문마다 따로 등록하고 order-service 에 출고를 반영한다(`POST /internal/v1/orders/{orderId}/shipment`, §2-18).
+  한 건의 실패가 다른 건을 막거나 되돌리지 않는다.
+- **택배사(`carrier`)** — `CJ_LOGISTICS` · `KOREA_POST` · `LOTTE` · `HANJIN` · `LOGEN` · `EMS` · `DHL` · `FEDEX` · `UPS` · `OTHER`(목록에 없는 택배사). 송장 번호는 대소문자까지 그대로 저장한다.
+- **`result`** — `REGISTERED`(등록 · 출고 반영) · `ALREADY_REGISTERED`(같은 택배사 · 송장 번호로 이미 출고됨 — 아무것도 바꾸지 않음) · `FAILED`. `deliveryId` 는 송장 아이디(문자열)이고
+  실패여도 송장이 주문 반영 전으로 남은 건(다시 보낼 건)에는 있다. 행을 만들지 못했거나 지운 실패는 null 이다.
+- **건별 실패 코드(`errorCode`)**
+
+  | 코드 | 뜻 | 송장 | 다시 보내면 |
+  |------|-----|------|-------------|
+  | `DELIVERY_014` | 없는 주문 (order 404 `ORDER_001`) | 지움 | 같은 결과 |
+  | `DELIVERY_015` | 출고할 수 없는 주문 상태 (order 409 `ORDER_020`) — "`<상태 이름>` 상태라 출고할 수 없습니다." (이름을 못 읽으면 "현재 주문 상태라 …") | 지움 | 주문 상태가 바뀌면 등록된다 |
+  | `DELIVERY_016` | 출고 시각이 order 범위 밖 (order 400 `ORDER_159` · `160` · `161`) — 서비스 간 시계 차이, 또는 반영 전 송장을 30일 지나 재시도 | 지움 | 시계 차이면 고친 뒤, 30일 지난 재시도면 새 송장으로 등록된다 |
+  | `DELIVERY_017` | 그 사이 주문이 바뀜 (order 409 `ORDER_025`) | 남김 | 지금 주문 상태로 판정받는다 |
+  | `DELIVERY_018` | 주문 서비스 응답 없음 · 결과 모름 (타임아웃 · 5xx · 서킷 · 모르는 응답) | 남김 | order 멱등으로 수렴한다 |
+  | `DELIVERY_019` | 다른 송장으로 이미 출고된 주문 (동시에 겹친 다른 요청의 송장으로 반영된 경우 포함 — 주문은 출고됐고 이번 송장 번호는 남지 않았다) | 그대로 | 같은 결과 — 출고된 송장은 바꾸지 않는다 |
+  | `DELIVERY_020` | 같은 주문의 송장이 동시에 등록됨(유일 키 · 버전 충돌) | 그대로 | 남은 송장 기준으로 판정받는다 |
+  | `DELIVERY_021` | 저장 실패(DB 장애 등, 원인 미노출) | 그대로 | 다시 시도 |
+  | `DELIVERY_022` | 요청 처리 마감(8초)을 넘겨 이 건은 시작하지 않음 — "시간 안에 처리하지 못했습니다. 다시 보내 주세요." | 만들지 않음(order 도 부르지 않음) | 처음 등록으로 처리된다 |
+
+- **재시도** — 주문 반영 전(`order_synced=false`)으로 남은 송장은 같은 주문을 다시 보내면 **이번 요청의 택배사 · 송장 번호로 바뀌어** 같은 송장 아이디로 다시 반영된다. 자동 재전송은 없다.
+  **출고 시각은 처음 값 그대로 보낸다** — order 가 처음 요청을 이미 커밋했다면 그 값이 정본이다. 반영 전 송장 목록(`?synced=false`)은 PR-B2 의 어드민 목록이다.
+- **시간 · 상한** — 게이트웨이 `response-timeout` 이 10초다(`cloud/api-gateway` `application.yml`) — 넘기면 운영자는 504 만 받고 처리한 건의 결과를 잃는다. 그래서 한 요청은 **1~20건**이고,
+  delivery 는 요청 시작 + **8초**(서버 `Clock`)가 지나면 남은 건을 시작하지 않고 `DELIVERY_022` 로 낸다(송장 행을 만들지 않는다). 마감은 건을 시작하기 전에만 본다 —
+  진행 중인 건은 끝까지 간다. 건마다 order-service 를 한 번씩 부른다(connect 2초 · read timeout 3초). order 장애면 서킷이 열려 남은 건은 바로 `DELIVERY_018` 이다.
+  화면은 응답을 기다리는 동안 다시 누르지 못하게 막고, `DELIVERY_022` · `018` 건만 모아 다시 보낸다.
+- **FE 영향** — 새 API 다. 어드민 주문 상세 · 목록의 "송장 등록" 버튼과 일괄 등록 화면이 쓴다. 배송 상태 변경 · 송장 조회 · 고객 배송 조회는 PR-B2 다.
+
 ## 3. 계층 흐름
 
 ```text
