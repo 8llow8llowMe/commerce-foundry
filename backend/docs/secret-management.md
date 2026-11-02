@@ -108,6 +108,9 @@
 1. `backend/.env.example` 에 이름과 설명 주석을 추가한다. **값은 비운다** (로컬 기본 호스트·포트처럼 비밀이 아닌 값만 예외).
 2. 쓰는 서비스의 `application*.yml` 에 플레이스홀더를 추가한다.
    같은 PR 에서 그 모듈의 배포 compose(`docker-compose-<module>.yml`) environment 에도 키를 더한다 — 빠뜨리면 배포 컨테이너에 값이 들어가지 않는다 ([deploy-guide.md](deploy-guide.md) §8).
+   게이트웨이는 `GatewayDeploymentEnvironmentTest`가 공통·dev/prod 설정의 환경변수와 실제 Compose의 앵커·병합을 해석한 environment를 대조한다.
+   누락·다른 이름·불필요한 키 전달·YAML 중복 키·필수 키의 빈 값 허용을 검사하며, Compose 변경도 Gradle test 입력에 포함한다.
+   이 검사는 YAML 계약 검증이며 실제 `docker compose config`·Vault 주입·컨테이너 기동을 대신하지 않는다.
 3. PR 본문에 `Vault 등록 필요: KEY_NAME (dev/prod)` 를 적는다. **값은 적지 않는다.**
 4. 머지 전에 Vault 에 dev 값을, 배포 전에 prod 값을 등록한다.
 5. 이름을 바꾸면 위 세 곳을 같은 PR 에서 바꾼다.
