@@ -35,6 +35,7 @@ public class PaymentTransitionException extends RuntimeException {
         FLAG_FOR_MANUAL_REVIEW,
         MARK_ORDER_SYNCED,
         MARK_ORDER_SYNC_FAILED,
-        RECORD_LATE_APPROVAL
+        RECORD_LATE_APPROVAL,
+        RECORD_CANCELLATION
     }
 }

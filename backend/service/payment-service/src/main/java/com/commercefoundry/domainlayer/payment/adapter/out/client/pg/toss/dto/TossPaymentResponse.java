@@ -14,7 +14,7 @@ import java.math.BigDecimal;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TossPaymentResponse(
-    String paymentKey, String orderId, String currency, String method, String status, String approvedAt, BigDecimal totalAmount,
+    String paymentKey, String orderId, String currency, String method, String status, String approvedAt, BigDecimal totalAmount, BigDecimal balanceAmount,
     EasyPay easyPay, Failure failure
 ) {
 

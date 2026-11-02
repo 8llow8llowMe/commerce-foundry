@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.dto.To
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult.NotSentReason;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentApproval;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentMethod;
@@ -89,6 +90,12 @@ public class TossPaymentsResponseSupport {
     private static final Set<String> CONFIG_ERROR_CODES = Set.of("UNAUTHORIZED_KEY", "INVALID_API_KEY", "INCORRECT_BASIC_AUTH_FORMAT");
     /** 결제기관 처리 중 오류 — 거절로 확정하지 않는다. */
     private static final Set<String> PROVIDER_FAILURE_CODES = Set.of("PROVIDER_ERROR", "CARD_PROCESSING_ERROR");
+    /** 토스 취소 오류표에서 요청이 처리되지 않은 영구 거절만 확정한다. 불명확한 실패는 대기 원장에 남긴다. */
+    private static final Set<String> CANCEL_REJECTION_CODES = Set.of(
+        "INVALID_REQUEST", "INVALID_PAYMENT_FIELD", "NOT_CANCELABLE_AMOUNT", "NOT_CANCELABLE_PAYMENT",
+        "NOT_PARTIAL_CANCELABLE_PAYMENT", "NOT_ALLOWED_PARTIAL_REFUND", "EXCEED_MAX_REFUND_DUE",
+        "INVALID_CANCEL_REQUEST_ID", "INVALID_VIRTUAL_ACCOUNT_CANCEL_REQUEST_PARAM", "EXCEED_CANCEL_LIMIT"
+    );
 
     /**
      * 토스 결제 승인 오류표(2026-10-21 확인)의 "처리 전 거절" 코드 — 이 코드만 Rejected(FAILED) 로 확정한다.
@@ -160,6 +167,44 @@ public class TossPaymentsResponseSupport {
                 log.warn("toss confirm result unknown. pgOrderId={}, status={}, type={}", pgOrderId, indeterminate.status(), indeterminate.type());
                 yield new PgApprovalQueryResult.Unknown(indeterminate.reason());
             }
+        };
+    }
+
+    /** 취소 응답은 결제키·주문번호·원금·남은 금액을 모두 대조한다. 불확실하면 원장을 대기 상태로 남긴다. */
+    public PgCancelResult cancel(String pgOrderId, String paymentKey, Money original, Money cumulativeCanceled, Supplier<byte[]> remoteCall) {
+        return switch (exchange(remoteCall)) {
+            case Exchange.Success success -> {
+                try {
+                    TossPaymentResponse response = jsonMapper.readValue(success.body(), TossPaymentResponse.class);
+                    Money remaining = original.minus(cumulativeCanceled);
+                    String expectedStatus = remaining.isZero() ? "CANCELED" : "PARTIAL_CANCELED";
+                    if (response == null || !pgOrderId.equals(response.orderId()) || !paymentKey.equals(response.paymentKey())
+                        || !original.currency().name().equals(response.currency())
+                        || !expectedStatus.equals(response.status()) || response.totalAmount() == null || response.balanceAmount() == null
+                        || !Money.ofMajorUnit(response.totalAmount(), original.currency()).equals(original)
+                        || !Money.ofMajorUnit(response.balanceAmount(), original.currency()).equals(remaining)) {
+                        log.error("toss cancel response violates contract. pgOrderId={}", pgOrderId);
+                        yield new PgCancelResult.Unknown();
+                    }
+                    yield new PgCancelResult.Succeeded();
+                } catch (RuntimeException exception) {
+                    log.error("toss cancel response could not be parsed. pgOrderId={}, type={}", pgOrderId, exception.getClass().getSimpleName());
+                    yield new PgCancelResult.Unknown();
+                }
+            }
+            case Exchange.ClientError clientError -> {
+                if (clientError.code() != null && CANCEL_REJECTION_CODES.contains(clientError.code())) {
+                    yield new PgCancelResult.Rejected();
+                }
+                // 이미 취소됨 · 처리 중 · 기관 오류 · 알 수 없는 코드는 처리 여부가 불명확하다.
+                log.warn("toss cancel client result needs reconciliation. pgOrderId={}, status={}, code={}",
+                    pgOrderId, clientError.status(), loggableCode(clientError.code()));
+                yield new PgCancelResult.Unknown();
+            }
+            case Exchange.ServerError ignored -> new PgCancelResult.Unknown();
+            case Exchange.CircuitOpen ignored -> new PgCancelResult.Unknown();
+            case Exchange.ConnectFailed ignored -> new PgCancelResult.Unknown();
+            case Exchange.Indeterminate ignored -> new PgCancelResult.Unknown();
         };
     }
 

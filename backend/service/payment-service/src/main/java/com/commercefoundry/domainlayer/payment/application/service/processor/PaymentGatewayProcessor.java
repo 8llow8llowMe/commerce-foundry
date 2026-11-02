@@ -4,6 +4,8 @@ import com.commercefoundry.domainlayer.payment.application.model.PgApprovalOutco
 import com.commercefoundry.domainlayer.payment.application.model.PgApprovalRequest;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
+import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -17,6 +19,18 @@ import org.springframework.stereotype.Component;
 public class PaymentGatewayProcessor {
 
     private final PaymentGatewayPort paymentGatewayPort;
+
+    /** 같은 클레임의 멱등 키로 PG 취소를 요청한다. DB 트랜잭션 밖에서만 호출한다. */
+    public CancelOutcome cancel(Payment payment, long claimId, Money amount, Money cumulative) {
+        PgCancelResult result = paymentGatewayPort.cancel(payment, claimId, amount, cumulative);
+        return switch (result) {
+            case PgCancelResult.Succeeded ignored -> CancelOutcome.SUCCEEDED;
+            case PgCancelResult.Rejected ignored -> CancelOutcome.REJECTED;
+            case PgCancelResult.Unknown ignored -> CancelOutcome.UNKNOWN;
+        };
+    }
+
+    public enum CancelOutcome { SUCCEEDED, REJECTED, UNKNOWN }
 
     /**
      * IN_PROGRESS 로 저장한 결제 시도의 승인을 요청한다. PG 멱등 키는 결제 시도 아이디라 같은 시도의 재요청(되돌린 READY 의 재승인 포함)이 같은 값을 싣는다 —

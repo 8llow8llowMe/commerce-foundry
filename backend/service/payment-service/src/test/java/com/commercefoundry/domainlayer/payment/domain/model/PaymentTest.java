@@ -39,6 +39,17 @@ import org.junit.jupiter.params.provider.ValueSource;
 class PaymentTest {
 
     @Test
+    void lateApprovalCanOnlyBeFullyCanceledWithoutTakingAnotherActiveOrderSlot() {
+        Payment late = PaymentFixtures.lateApproved();
+        assertThatThrownBy(() -> late.recordCancellation(krw(1_000)))
+            .isInstanceOf(IllegalArgumentException.class);
+        Payment canceled = late.recordCancellation(late.amount());
+        assertThat(canceled.status()).isEqualTo(PaymentStatus.CANCELED);
+        assertThat(canceled.activeOrderId()).isNull();
+        assertThat(canceled.failureCode() != null || canceled.abortReason() != null).isTrue();
+    }
+
+    @Test
     void returnedReadyRecoveryPreservesAttemptAndRejectsOtherStatesOrMissingClue() {
         Payment returned = PaymentFixtures.reverted();
         Payment recovered = returned.recoverReturnedReady(PaymentUnknownReason.ALREADY_PROCESSED);
@@ -91,15 +102,16 @@ class PaymentTest {
         ACTIONS.put(Action.MARK_ORDER_SYNCED, Payment::markOrderSynced);
         ACTIONS.put(Action.MARK_ORDER_SYNC_FAILED, payment -> payment.markOrderSyncFailed("ORDER_030"));
         ACTIONS.put(Action.RECORD_LATE_APPROVAL, payment -> payment.recordLateApproval(approval(krw(129_000))));
+        ACTIONS.put(Action.RECORD_CANCELLATION, payment -> payment.recordCancellation(krw(129_000)));
 
         ALLOWED.put("READY", Set.of(Action.START_APPROVAL, Action.ABORT));
         ALLOWED.put("READY(되돌림)", Set.of(Action.START_APPROVAL, Action.ABORT_AFTER_INQUIRY));
         ALLOWED.put("IN_PROGRESS", Set.of(Action.APPROVE, Action.REJECT, Action.MARK_UNKNOWN, Action.REVERT_TO_READY));
-        ALLOWED.put("DONE", Set.of(Action.MARK_ORDER_SYNCED, Action.MARK_ORDER_SYNC_FAILED));
+        ALLOWED.put("DONE", Set.of(Action.MARK_ORDER_SYNCED, Action.MARK_ORDER_SYNC_FAILED, Action.RECORD_CANCELLATION));
         ALLOWED.put("FAILED", Set.of(Action.RECORD_LATE_APPROVAL));
         ALLOWED.put("UNKNOWN", Set.of(Action.RESOLVE, Action.FLAG_FOR_MANUAL_REVIEW));
         ALLOWED.put("ABORTED", Set.of(Action.RECORD_LATE_APPROVAL));
-        ALLOWED.put("LATE_APPROVED", Set.of());
+        ALLOWED.put("LATE_APPROVED", Set.of(Action.RECORD_CANCELLATION));
     }
 
     static Stream<Arguments> forbiddenTransitions() {

@@ -138,7 +138,7 @@ public record Payment(
      * 취소 상태(PARTIAL_CANCELED · CANCELED)는 승인된 결제와 같이 활성으로 둔다 — 취소된 주문에 새 결제를 열지는 취소 이슈에서 정한다(지금은 닿지 않는 상태다).
      */
     public Long activeOrderId() {
-        return status.releasesActiveSlot() ? null : orderId;
+        return status.releasesActiveSlot() || (status == PaymentStatus.CANCELED && (failureCode != null || abortReason != null)) ? null : orderId;
     }
 
     /**
@@ -352,6 +352,27 @@ public record Payment(
         );
     }
 
+    /** PG 취소가 확정된 뒤 누적 취소 금액으로 상태를 전이한다. 누계는 영속 취소 원장으로 계산한다. */
+    public Payment recordCancellation(Money cumulativeCanceled) {
+        Objects.requireNonNull(cumulativeCanceled, "cumulativeCanceled");
+        if (status != PaymentStatus.DONE && status != PaymentStatus.PARTIAL_CANCELED && status != PaymentStatus.LATE_APPROVED) {
+            throw new PaymentTransitionException(status, PaymentTransitionException.Action.RECORD_CANCELLATION);
+        }
+        if (cumulativeCanceled.isZero() || cumulativeCanceled.currency() != amount.currency()
+            || cumulativeCanceled.isGreaterThan(amount)) {
+            throw new IllegalArgumentException("취소 누계가 승인 금액 범위를 벗어났습니다");
+        }
+        if (status == PaymentStatus.LATE_APPROVED && !cumulativeCanceled.equals(amount)) {
+            throw new IllegalArgumentException("늦게 승인된 결제는 전액만 취소할 수 있습니다");
+        }
+        PaymentStatus nextStatus = cumulativeCanceled.equals(amount) ? PaymentStatus.CANCELED : PaymentStatus.PARTIAL_CANCELED;
+        return new Payment(
+            id, orderId, memberId, pgOrderId, gateway, amount, orderName, nextStatus,
+            paymentKey, method, easyPayProvider, pgStatus, approvalStartedAt, approvedAt,
+            failureCode, failureMessage, unknownReason, orderSynced, orderSyncFailureCode, abortReason, approvalIdempotencyKey, version
+        );
+    }
+
     /** 결제키 전체를 로그에 남기지 않는다 ({@code coding-conventions.md} §8) — 레코드 기본 {@code toString} 은 모든 칸을 그대로 찍는다. 거절 메시지도 찍지 않는다. */
     @Override
     public String toString() {
@@ -445,7 +466,7 @@ public record Payment(
         if (status == PaymentStatus.FAILED && failureCode == null) {
             throw new IllegalArgumentException("FAILED 결제에는 거절 코드가 있어야 합니다");
         }
-        if (status != PaymentStatus.FAILED && status != PaymentStatus.LATE_APPROVED && failureCode != null) {
+        if (status != PaymentStatus.FAILED && status != PaymentStatus.LATE_APPROVED && status != PaymentStatus.CANCELED && failureCode != null) {
             throw new IllegalArgumentException("거절 코드는 FAILED · LATE_APPROVED 에만 있어야 합니다: " + status);
         }
         if (failureMessage != null && failureCode == null) {
@@ -460,7 +481,7 @@ public record Payment(
         if (status == PaymentStatus.ABORTED && abortReason == null) {
             throw new IllegalArgumentException("ABORTED 결제에는 중단 사유가 있어야 합니다");
         }
-        if (status != PaymentStatus.ABORTED && status != PaymentStatus.LATE_APPROVED && abortReason != null) {
+        if (status != PaymentStatus.ABORTED && status != PaymentStatus.LATE_APPROVED && status != PaymentStatus.CANCELED && abortReason != null) {
             throw new IllegalArgumentException("중단 사유는 ABORTED · LATE_APPROVED 에만 있어야 합니다: " + status);
         }
         if (status == PaymentStatus.LATE_APPROVED && (failureCode == null) == (abortReason == null)) {

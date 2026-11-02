@@ -3,8 +3,16 @@ package com.commercefoundry.domainlayer.payment.adapter.out.persistence.reposito
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.entity.PaymentEntity;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.repository.query.Param;
 
 public interface PaymentRepository extends JpaRepository<PaymentEntity, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from PaymentEntity p where p.id = :id")
+    Optional<PaymentEntity> findLockedById(@Param("id") Long id);
 
     /** {@code uk_payment_pg_order_id} 로 찾는다 — 웹훅 · successUrl 이 PG 주문번호로 결제 시도를 가리킨다. */
     Optional<PaymentEntity> findByPgOrderId(String pgOrderId);

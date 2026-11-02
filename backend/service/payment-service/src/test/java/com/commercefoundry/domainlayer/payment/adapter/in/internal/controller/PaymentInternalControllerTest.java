@@ -6,9 +6,11 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentInternalResponse;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelResponse;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentErrorCode;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentException;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentInternalUseCase;
+import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationUseCase;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentMethod;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.security.error.SecurityErrorCode;
@@ -33,6 +35,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -63,6 +66,9 @@ class PaymentInternalControllerTest {
     @MockitoBean
     private PaymentInternalUseCase paymentInternalUseCase;
 
+    @MockitoBean
+    private PaymentCancellationUseCase paymentCancellationUseCase;
+
     private MvcTestResult getAs(String authorization, String paymentId) {
         var request = mvc.get().uri("/internal/v1/payments/" + paymentId);
         if (authorization != null) {
@@ -89,6 +95,37 @@ class PaymentInternalControllerTest {
             .method(PaymentMethod.EASY_PAY.toMetadata())
             .approvedAt(Instant.parse("2026-10-21T01:00:03Z"))
             .build();
+    }
+
+    private MvcTestResult cancelAs(String authorization) {
+        var request = mvc.post().uri("/internal/v1/payments/" + PAYMENT_ID + "/cancellations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"claimId\":42,\"amount\":10000,\"currency\":\"KRW\"}")
+            .header("Idempotency-Key", "42");
+        if (authorization != null) {
+            request.header(HttpHeaders.AUTHORIZATION, authorization);
+        }
+        return request.exchange();
+    }
+
+    @Test
+    void orderServiceCanCancelAndOtherServicesCannot() {
+        given(paymentCancellationUseCase.cancel(PAYMENT_ID, 42, 10_000, com.commercefoundry.shared.commerce.CurrencyCode.KRW, "42"))
+            .willReturn(new PaymentCancelResponse(Long.toString(PAYMENT_ID), "42", "PARTIAL_CANCELED", 10_000));
+        assertThat(cancelAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF))).hasStatusOk();
+        SecurityEnvelopeAssertions.assertEnvelope(cancelAs(TestServiceTokens.bearer("product-service", SELF)).getResponse(), SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(cancelAs(null).getResponse(), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+    }
+
+    @Test
+    void cancelRequiresIdempotencyHeader() {
+        MvcTestResult result = mvc.post().uri("/internal/v1/payments/" + PAYMENT_ID + "/cancellations")
+            .header(HttpHeaders.AUTHORIZATION, TestServiceTokens.bearer(ORDER_SERVICE, SELF))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"claimId\":42,\"amount\":10000,\"currency\":\"KRW\"}").exchange();
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PAYMENT_113");
+        verifyNoInteractions(paymentCancellationUseCase);
     }
 
     @Nested

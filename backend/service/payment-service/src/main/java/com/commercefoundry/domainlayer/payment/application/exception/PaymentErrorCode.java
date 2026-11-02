@@ -43,6 +43,10 @@ public enum PaymentErrorCode {
     IDEMPOTENCY_KEY_REUSED("PAYMENT_014", "이미 다른 결제에 사용한 요청입니다. 결제를 처음부터 다시 진행해 주세요.", HttpStatus.CONFLICT),
     /** 운영 결제 게이트({@code payment.enabled})가 닫혀 있다 — 결제 준비 · 승인을 받지 않는다 ({@code payment-guide.md} §3-4 · §6). */
     PAYMENTS_DISABLED("PAYMENT_015", "지금은 결제를 받을 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
+    CANCELLATION_CONFLICT("PAYMENT_016", "취소 요청이 겹치거나 취소할 수 없는 결제입니다.", HttpStatus.CONFLICT),
+    CANCELLATION_AMOUNT_INVALID("PAYMENT_017", "취소 금액이 남은 결제 금액을 초과합니다.", HttpStatus.CONFLICT),
+    CANCELLATION_UNCONFIRMED("PAYMENT_018", "취소 결과를 확인 중입니다. 같은 요청으로 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    CANCELLATION_KEY_REUSED("PAYMENT_019", "이미 다른 취소 요청에 사용한 클레임입니다.", HttpStatus.CONFLICT),
 
     /** 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON · 타입 불일치)의 폴백. */
     INVALID_REQUEST("PAYMENT_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss;
 
 import com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.dto.TossConfirmRequest;
+import com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.dto.TossCancelRequest;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -37,6 +38,11 @@ public interface TossPaymentsClient {
         @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
         @RequestBody TossConfirmRequest request
     );
+
+    @PostMapping(value = "/v1/payments/{paymentKey}/cancel", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    byte[] cancel(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+        @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
+        @PathVariable("paymentKey") String paymentKey, @RequestBody TossCancelRequest request);
 
     /** 주문번호로 결제 조회. */
     @GetMapping(value = "/v1/payments/orders/{orderId}", produces = MediaType.APPLICATION_JSON_VALUE)

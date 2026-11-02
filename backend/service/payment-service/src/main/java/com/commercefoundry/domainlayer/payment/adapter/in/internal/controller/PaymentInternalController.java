@@ -2,14 +2,21 @@ package com.commercefoundry.domainlayer.payment.adapter.in.internal.controller;
 
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentInternalResponse;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.request.PaymentCancelRequest;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelResponse;
+import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationUseCase;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentValidationMessage;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentInternalUseCase;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,6 +35,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class PaymentInternalController {
 
     private final PaymentInternalUseCase paymentInternalUseCase;
+    private final PaymentCancellationUseCase paymentCancellationUseCase;
+
+    @PreAuthorize("hasAuthority('SERVICE_order-service')")
+    @PostMapping("/{paymentId}/cancellations")
+    public ResponseEntity<Response<PaymentCancelResponse>> cancelPayment(
+        @PathVariable @Positive(message = PaymentValidationMessage.PAYMENT_ID_POSITIVE) long paymentId,
+        @Valid @RequestBody PaymentCancelRequest request,
+        @RequestHeader("Idempotency-Key") String idempotencyKey
+    ) {
+        return ResponseEntity.ok(Response.success(paymentCancellationUseCase.cancel(
+            paymentId, request.claimId(), request.amount(), request.currency(), idempotencyKey)));
+    }
 
     @PreAuthorize("hasAuthority('SERVICE_order-service')")
     @GetMapping("/{paymentId}")
