@@ -215,10 +215,16 @@ class OrderPaymentSummaryClientAdapterTest {
         @Test
         @DisplayName("응답 타임아웃 — PAYMENT_011")
         void timeout() {
-            ORDER.stubFor(get(urlPathEqualTo(PATH)).willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
-                .withBody(success(validSummary())).withFixedDelay(READ_TIMEOUT_MILLIS * 2)));
+            // 클라이언트 타임아웃 뒤 완료되는 서버 요청 기록이 다음 테스트의 PATH 횟수에 섞이지 않게 분리한다.
+            long timeoutOrderId = ORDER_ID + 1;
+            String timeoutPath = "/internal/v1/orders/" + timeoutOrderId + "/payment-summary";
+            ORDER.stubFor(get(urlPathEqualTo(timeoutPath)).willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                .withBody(success(validSummary().replace(Long.toString(ORDER_ID), Long.toString(timeoutOrderId))))
+                .withFixedDelay(READ_TIMEOUT_MILLIS * 2)));
 
-            assertUnavailable();
+            assertThatThrownBy(() -> orderPaymentSummaryPort.find(timeoutOrderId, MEMBER_ID))
+                .isInstanceOfSatisfying(PaymentException.class,
+                    exception -> assertThat(exception.getErrorCode()).isEqualTo(PaymentErrorCode.ORDER_SERVICE_UNAVAILABLE));
         }
 
         @Test
