@@ -10,6 +10,7 @@ import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.ResourceServerSmokeTestSupport;
 import com.commercefoundry.security.support.TestServiceTokens;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -27,6 +28,15 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
  * 권한이 걸렸는지 본다. 정책 데이터는 넣지 않는다 — 공유 컨텍스트의 H2 에 상태를 남기지 않게, 도메인까지 닿았는지는 "정책 없음" 응답으로 확인한다.
  */
 class DeliveryServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
+
+    /** 감사 선언(#163)을 아직 붙이지 않은 어드민 쓰기 핸들러 — 맡은 PR 에서 선언을 붙이고 지운다 ({@code security-guide.md} §11-4). */
+    @Override
+    protected Map<String, String> auditDeclarationPending() {
+        return Map.ofEntries(
+            Map.entry("ShippingPolicyAdminController#replaceDomesticPolicy", "#163 PR-D"),
+            Map.entry("InternationalShippingPolicyAdminController#replaceInternationalPolicy", "#163 PR-D")
+        );
+    }
 
     private static final String POLICY_PATH = "/api/v1/shipping-fees/policy";
     private static final String ADMIN_POLICY_PATH = "/api/v1/admin/shipping-policies/domestic";

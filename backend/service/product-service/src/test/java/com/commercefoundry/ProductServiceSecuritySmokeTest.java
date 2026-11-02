@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.ResourceServerSmokeTestSupport;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -23,6 +24,35 @@ import org.springframework.http.MediaType;
  * internal API 의 서비스 토큰 · 익명 응답은 여기서 단언하지 않는다 — 상속한 공통 스모크({@code ResourceServerSmokeTestSupport})가 본다.
  */
 class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
+
+    /** 감사 선언(#163)을 아직 붙이지 않은 어드민 쓰기 핸들러 — 맡은 PR 에서 선언을 붙이고 지운다 ({@code security-guide.md} §11-4). */
+    @Override
+    protected Map<String, String> auditDeclarationPending() {
+        return Map.ofEntries(
+            Map.entry("CategoryAdminController#createCategory", "#163 PR-B"),
+            Map.entry("CategoryAdminController#updateCategory", "#163 PR-B"),
+            Map.entry("CategoryAdminController#deleteCategory", "#163 PR-B"),
+            Map.entry("SizeChartTemplateAdminController#createTemplate", "#163 PR-B"),
+            Map.entry("SizeChartTemplateAdminController#updateTemplate", "#163 PR-B"),
+            Map.entry("SizeChartTemplateAdminController#deleteTemplate", "#163 PR-B"),
+            Map.entry("ProductSizeChartAdminController#replaceSizeChart", "#163 PR-B"),
+            Map.entry("DisplayAdminController#createSection", "#163 PR-C"),
+            Map.entry("DisplayAdminController#updateSection", "#163 PR-C"),
+            Map.entry("DisplayAdminController#deleteSection", "#163 PR-C"),
+            Map.entry("DisplayAdminController#reorderSections", "#163 PR-C"),
+            Map.entry("DisplayPreviewAdminController#preview", "#163 PR-C (면제 대상 — 저장 없는 미리보기)"),
+            Map.entry("LookAdminController#create", "#163 PR-C"),
+            Map.entry("LookAdminController#update", "#163 PR-C"),
+            Map.entry("LookAdminController#delete", "#163 PR-C"),
+            Map.entry("LookAdminController#reorder", "#163 PR-C"),
+            Map.entry("StockAdminController#adjustStock", "#163 PR-C′"),
+            Map.entry("SkuCostAdminController#createCost", "#163 PR-C′"),
+            Map.entry("ProductDraftAdminController#create", "#163 PR-C′"),
+            Map.entry("ProductDraftAdminController#reject", "#163 PR-C′"),
+            Map.entry("ProductAdminController#create", "#9 — 머지 뒤 #163 PR-F"),
+            Map.entry("ProductAdminController#issueImageUpload", "#9 — 머지 뒤 #163 PR-F")
+        );
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"/api/v1/categories", "/api/v1/products", "/api/v1/products?categoryId=1&sortType=PRICE_ASC", "/api/v1/displays/main", "/api/v1/looks"})
