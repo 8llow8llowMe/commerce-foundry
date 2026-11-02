@@ -17,6 +17,11 @@
 | `service/operations-service` | 8086 | 골격 · Resource Server · 서비스 간 인증 (#212 PR-A) · 작업 엔진 — 등록 · 가져가기 · 워커 · 재시도 · lease (#212 PR-B) · 어드민 작업 목록 · 상세 · 취소 (#212 PR-C) · Kafka 실행 신호 컨슈머 · outbox · lease 만료 판정 (#307) · 어드민 알림 센터(#213) · 운영자 온보딩 투어 진행 (#357 PR-A) · 온보딩 업무 완료 tasks — 배송 (#357 PR-B2) · 상품 (#402) 사실 Feign 조회 · AI 사용량 원장 · 월 한도 (#215 PR-B · #403) · ai-core 연결 — 계량 인터셉터 · 원장 정리 스케줄러 (#435) | 백그라운드 작업(등록 · 실행 · 재시도 · 진행률 · 결과 · 취소), 정기 작업, 어드민 작업 API(`/api/v1/admin/jobs/**`), 어드민 알림 센터(`/api/v1/admin/notifications/**`, #213), 운영자별 온보딩 안내 투어 진행(`/api/v1/admin/onboarding/**`, #357 — 실제 업무 완료 판정 `tasks` 는 담당 서비스 사실로만, 배송 정책 저장은 PR-B2 · 상품 등록은 PR-C). 전에 후순위로 두었던 batch · notification 을 흡수한다 (`architecture-guide.md` §1) |
 | `service/support-service` | 8087 | 골격 · Resource Server · 서비스 간 인증 (#470 PR-A) · 지식 문서 버전/게시 영속성 (#469 PR-A) · 지식 ADMIN 관리 API/쓰기 감사 (#469 PR-B, 검색 API는 후속) | 고객 상담 — 대화(`conversations`, 회원 · 비회원) · AI 상담 응답 · 상담원 이관 · 어드민 상담 큐 · 실시간 전달(WebSocket, #470-C), 상담 지식 문서/불변 게시 버전과 ADMIN 관리 API(`/api/v1/admin/support/knowledge`, `support-knowledge-guide.md`). 고객 `/api/v1/support/**` · 어드민 `/api/v1/admin/support/**`. 설계 정본은 이슈 #470 "설계 확정 (2026-11-02)" 댓글 — 장기 WS 연결 · 고객 공개 트래픽을 operations 작업 엔진과 다른 JVM 으로 격리한다 |
 
+product-service는 전시 · 룩 공용 이미지 업로드 발급/확정도 맡는다(#508, `domainlayer/mediaupload`).
+ADMIN `/api/v1/admin/displays/image-uploads`에서 storage-core를 통해 직접 PUT 서명과 검증된 공개 복사를 제공한다.
+기존 전시 · 룩 저장은 공개 URL 계약을 유지한다. DB/참조 원장/파일 GC는 추가하지 않으며 보관과 운영 한계는
+[display-media-upload-guide.md](display-media-upload-guide.md)를 따른다.
+
 "골격" 은 실행·Eureka 등록·헬스 체크·Swagger 그룹까지 갖추고 도메인 코드는 없는 상태다 (`bootstrap-conventions.md`).
 "Resource Server" 는 JWT 검증 · `/api/v1/admin/**` ADMIN 규칙 · 보안 오류 봉투가 걸려 있고 인가 스모크가 도는 상태다 (`security-guide.md` §5).
 "서비스 간 인증" 은 `/internal/**` 이 서비스 토큰(1단계, 공용 HS256 비밀)으로만 열리고 인가 스모크가 그것을 보는 상태다 (`security-guide.md` §9).

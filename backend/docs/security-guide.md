@@ -1073,6 +1073,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` | 사용 중 — 선언 · 통일은 #163 PR-E |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소 선언 · 통일은 #163 PR-E (알림 읽음 · 온보딩 투어는 면제) |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
+| product | `MEDIA_IMAGE_UPLOAD_ISSUE` · `MEDIA_IMAGE_UPLOAD_CONFIRM` (대상 `media-upload:<UUID>`, 식별자 없는 실패는 `-`) — URL · 전체 키 · ETag · MIME · 바이트 · 헤더 제외 | 사용 중 (#508, `ProductAdminAuditAction`) |
 | product | `DISPLAY_SECTION_*` · `LOOK_*` (전시 미리보기는 면제) | #163 PR-C |
 | product | `STOCK_ADJUST` · `SKU_COST_CREATE` · `PRODUCT_DRAFT_*` | #163 PR-C′ (이력 표 + 줄) |
 | delivery | `SHIPPING_POLICY_*_REPLACE` (국내 · 해외) | #163 PR-D (국내는 이력 표 + 줄, 해외는 행위자 수신) |

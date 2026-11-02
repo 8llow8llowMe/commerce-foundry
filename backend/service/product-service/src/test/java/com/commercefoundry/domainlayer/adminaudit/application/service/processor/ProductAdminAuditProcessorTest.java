@@ -83,6 +83,21 @@ class ProductAdminAuditProcessorTest {
         });
     }
 
+    @Test
+    void mediaImageUploadsContainOnlyFourAuditFieldsAndInternalUuid() {
+        var id = java.util.UUID.fromString("11111111-1111-1111-1111-111111111111");
+        processor.mediaImageUploadIssued(ACTOR, id, true);
+        processor.mediaImageUploadIssued(ACTOR, null, false);
+        processor.mediaImageUploadConfirmed(ACTOR, id, true);
+        processor.mediaImageUploadConfirmed(ACTOR, id, false);
+        assertThat(lines()).containsExactly(
+            "action=MEDIA_IMAGE_UPLOAD_ISSUE actorMemberId=" + ACTOR + " target=media-upload:" + id + " result=SUCCESS",
+            "action=MEDIA_IMAGE_UPLOAD_ISSUE actorMemberId=" + ACTOR + " target=- result=FAILURE",
+            "action=MEDIA_IMAGE_UPLOAD_CONFIRM actorMemberId=" + ACTOR + " target=media-upload:" + id + " result=SUCCESS",
+            "action=MEDIA_IMAGE_UPLOAD_CONFIRM actorMemberId=" + ACTOR + " target=media-upload:" + id + " result=FAILURE"
+        );
+    }
+
     private List<String> lines() {
         return audit.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
     }

@@ -31,6 +31,11 @@ dependencies {
     runtimeOnly 'org.postgresql:postgresql'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    // 전시 미디어의 실제 MinIO 서명 PUT/공개 복사 왕복 검증용 inspector. 운영 코드에는 SDK를 노출하지 않는다 (#508).
+    testImplementation("software.amazon.awssdk:s3:${rootProject.ext.awsSdkVersion}") {
+        exclude group: 'software.amazon.awssdk', module: 'apache5-client'
+        exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
+    }
     // @WebMvcTest 의 @WithMockUser — 서비스 간 권한(SERVICE_*) 토큰이 아직 없어(#51) 인증 주체를 직접 넣는다
     testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
     // 테스트 키 · 토큰 · 인가 스모크(ResourceServerSmokeTestSupport). 테스트 클래스패스에만 들어간다

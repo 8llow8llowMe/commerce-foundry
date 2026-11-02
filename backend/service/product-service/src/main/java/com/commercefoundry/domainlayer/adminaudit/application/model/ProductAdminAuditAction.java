@@ -23,5 +23,7 @@ public enum ProductAdminAuditAction {
     /** 대상 {@code size-chart-template:<id>} */
     SIZE_CHART_TEMPLATE_DELETE,
     /** 상품 사이즈표 전체 교체(없으면 생성). 대상 {@code product:<productId>} */
-    PRODUCT_SIZE_CHART_REPLACE
+    PRODUCT_SIZE_CHART_REPLACE,
+    MEDIA_IMAGE_UPLOAD_ISSUE,
+    MEDIA_IMAGE_UPLOAD_CONFIRM
 }
