@@ -25,6 +25,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -79,5 +80,15 @@ public class OrderHistoryWebController {
         @RequestBody @Valid OrderCancelRequest request
     ) {
         return ResponseEntity.ok().body(Response.success(orderHistoryWebUseCase.cancel(member.memberId(), orderId, request.reason())));
+    }
+
+    @Operation(summary = "구매 확정", description = "배송 완료 주문을 구매 확정한다. 이미 확정됐으면 200, 다른 상태는 409 ORDER_020. 없거나 남의 주문은 404 ORDER_001")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @PatchMapping("/{orderId}/purchase-confirmation")
+    public ResponseEntity<Response<OrderDetailResponse>> confirmPurchase(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "주문 아이디") @PathVariable @Positive(message = OrderValidationMessage.ORDER_ID_POSITIVE) long orderId
+    ) {
+        return ResponseEntity.ok().body(Response.success(orderHistoryWebUseCase.confirmPurchase(member.memberId(), orderId)));
     }
 }

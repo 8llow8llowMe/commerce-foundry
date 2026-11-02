@@ -61,4 +61,20 @@ public class OrderHistoryProcessor {
         orderEventPort.canceled(order.id(), order.stockReservationId(), reason);
         return canceled;
     }
+
+    /** 배송 완료 주문의 고객 구매 확정. 반복 요청은 이력을 더하지 않는다. */
+    @Transactional(timeout = 5)
+    public Order confirmPurchase(long memberId, long orderId) {
+        Order order = get(memberId, orderId);
+        if (order.status() == OrderStatus.PURCHASE_CONFIRMED) {
+            return order;
+        }
+        if (order.status() != OrderStatus.DELIVERED) {
+            throw new OrderException(OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID, order.status().getDisplayName());
+        }
+        Order confirmed = order.changeStatus(OrderStatus.PURCHASE_CONFIRMED);
+        orderRepositoryPort.saveStatusChange(confirmed,
+            OrderStatusHistory.confirmedByCustomer(snowflakeIdGenerator.generateId(), order));
+        return confirmed;
+    }
 }

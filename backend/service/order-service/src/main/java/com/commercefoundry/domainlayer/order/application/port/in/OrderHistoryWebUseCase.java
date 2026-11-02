@@ -24,4 +24,7 @@ public interface OrderHistoryWebUseCase {
      *     {@code ORDER_STATUS_TRANSITION_INVALID}(409 — 결제 완료 · 만료 등, 동시 변경에 진 경우 포함)
      */
     OrderDetailResponse cancel(long memberId, long orderId, OrderCancelReason reason);
+
+    /** 배송 완료 주문을 구매 확정한다. 이미 확정됐으면 현재 상세를 돌려준다. */
+    OrderDetailResponse confirmPurchase(long memberId, long orderId);
 }
