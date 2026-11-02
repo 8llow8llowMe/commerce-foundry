@@ -1245,11 +1245,12 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 | `GET /api/v1/admin/jobs?status=&type=&page=&size=` | `PageResponse<{jobId, type, typeName, status, progressPercent, progressMessage, notice, cancellable, requestedAt, finishedAt}>` — 아이디 내림차순(등록 최신순) 고정 | 400 `JOB_101`(page) · `102`(size 1~100) · `103`(type `[A-Z0-9_]{1,64}`) · `198`(없는 status · 형식) |
 | `GET /api/v1/admin/jobs/{jobId}` | 목록 항목과 같은 칸 — 진행 중인 작업 하나를 다시 읽을 때 쓴다 | 404 `JOB_001`, 400 `JOB_104`(양수) · `198` |
 | `POST /api/v1/admin/jobs/{jobId}/cancel` | 상세와 같다. QUEUED 는 바로 `CANCELLED`, RUNNING 은 상태 그대로 취소 요청 안내 문구가 붙고 `cancellable=false`(멱등) | 404 `JOB_001`, 409 `JOB_022`(이미 끝남) · `JOB_021`(워커와 계속 겹침 — 다시 시도) |
+| `POST /api/v1/admin/jobs/{jobId}/result-download` | `Response<{url,expiresAt,fileName,contentType,sizeBytes}>`, `Cache-Control: no-store` — 성공한 현재 시도의 비공개 결과에 최대 60초 서명 | 404 `JOB_001`(작업) · `JOB_004`(결과 없음), 410 `JOB_023`(보관 만료), 409 `JOB_021`(경합), 503 `JOB_501`(저장소) |
 
 - **운영자 칸만 낸다(§2-8, #305)** — 작업 이름(`typeName`, 핸들러의 `displayName`, 없으면 종류 코드) · 상태 `{code, name, description}` · 진행률 · 진행 문구 ·
   안내 문구(`notice`) · 취소 가능 여부 · 요청 시각(행의 생성 시각) · 끝난 시각. 시도 · 우선순위 · 멱등 키 · 입력 · 결과 원문 · 오류 코드 · 오류 원문 · 워커 · 요청자 · 취소자 아이디는 내리지 않는다.
 - 안내 문구 — 실패면 핸들러 `failureNotice(errorCode)` → 엔진 공통 문구(실행 시간 초과 · 결과 과대 · 일시 오류) → 일반 문구 순, 재시도를 기다리는 대기면 "잠시 뒤 다시 시도",
-  취소를 요청한 대기 · 실행이면 "취소를 요청했습니다". 성공 · 취소로 끝났으면 없다(null). 결과 파일 링크는 결과 파일(#212 PR-E)이 생기면 더한다.
+  취소를 요청한 대기 · 실행이면 "취소를 요청했습니다". 성공 · 취소로 끝났으면 없다(null). 결과 파일은 별도 `POST /{jobId}/result-download`로 발급한다. 목록·상세에 서명 URL을 저장하지 않는다.
 - 아이디는 문자열, 시각은 UTC ISO 다. 조회는 운영자 칸만 읽는 읽기 모델(`JobSummaryQueryResult`)로 한다 — 도메인 `Job` 을 통째로 읽지 않는다.
 - 상태 · 종류는 `application/model` 의 `JobStatusFilter` · 문자열로 받는다(H1). 조건 조합마다 파생 쿼리 하나다 — 종류 조건은 `idx_job_type_id` 를 그대로 타고,
   상태 조건은 상태 선두 인덱스로 거른 뒤 정렬한다(어드민 전용). 이 비용은 끝난 작업을 90일 뒤 지우는 보존 정리(`JOB_RETENTION_CLEANUP`, #212 PR-D)를 전제로 한다 —
@@ -1257,6 +1258,10 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - 그 밖의 요청 검증 실패(메시지에 코드가 없는 제약)는 400 `JOB_100` 이다.
 - 취소는 `JobAdminFacade` 가 `JobRunProcessor.requestCancel` 을 시도마다 새 트랜잭션으로 부른다 — 워커의 가져가기 · 종료와 겹쳐 버전에서 지면 다시 읽어 최대 3번 시도한다.
   취소한 어드민은 access 토큰의 memberId 다. 성공 · 실패 모두 감사 로그 `action=JOB_CANCEL target=job:<id>` 를 남긴다(`security-guide.md` §11-4).
+
+- 결과 다운로드는 ADMIN 토큰의 memberId로 성공·실패를 감사한다(`JOB_RESULT_DOWNLOAD`). URL·키·내용은 로그에 남기지 않는다.
+  TTL은 설정·스토리지 TTL·보관 잔여 시간의 최솟값(정수 초 내림)이며 1초 미만은 만료다. HEAD 정합성·서명 후 상태를 재검증한다.
+  FE는 클릭 때마다 발급받아 즉시 사용하고 URL을 저장·분석 도구에 전달하지 않는다. 보관·정리·운영 전제는 [job-result-storage-guide.md](job-result-storage-guide.md).
 
 ### 7-2. 어드민 알림 센터 (operations-service, #213)
 

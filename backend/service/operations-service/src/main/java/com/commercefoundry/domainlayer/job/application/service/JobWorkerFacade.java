@@ -3,6 +3,9 @@ package com.commercefoundry.domainlayer.job.application.service;
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.info.JobDispatchResult;
+import com.commercefoundry.domainlayer.job.application.model.PreparedJobResultFile;
+import com.commercefoundry.domainlayer.job.application.service.processor.JobResultFileProcessor;
+import com.commercefoundry.domainlayer.job.application.service.processor.JobResultUploadProcessor;
 import com.commercefoundry.domainlayer.job.application.port.in.JobWorkerUseCase;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobClaimProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobClaimProcessor.ClaimResult;
@@ -59,6 +62,8 @@ public class JobWorkerFacade implements JobWorkerUseCase {
     /** 예약 시각 전 신호를 미루는 최소 간격 — 서버 시계 차로 남은 시간이 0 이하여도 바로 되돌아오지 않게 한다. */
     private static final Duration MIN_REDELIVERY_DELAY = Duration.ofMillis(100);
 
+    private final JobResultFileProcessor jobResultFileProcessor;
+    private final JobResultUploadProcessor jobResultUploadProcessor;
     private final JobClaimProcessor jobClaimProcessor;
     private final JobRunProcessor jobRunProcessor;
     private final JobHandlerProcessor jobHandlerProcessor;
@@ -84,8 +89,12 @@ public class JobWorkerFacade implements JobWorkerUseCase {
         @Qualifier("jobWorkerTaskExecutor") TaskExecutor jobWorkerTaskExecutor,
         @Qualifier("jobLeaseTaskScheduler") TaskScheduler jobLeaseTaskScheduler,
         Clock clock,
-        JobWorkerIdentity jobWorkerIdentity
+        JobWorkerIdentity jobWorkerIdentity,
+        JobResultFileProcessor jobResultFileProcessor,
+        JobResultUploadProcessor jobResultUploadProcessor
     ) {
+        this.jobResultFileProcessor = jobResultFileProcessor;
+        this.jobResultUploadProcessor = jobResultUploadProcessor;
         this.jobClaimProcessor = jobClaimProcessor;
         this.jobRunProcessor = jobRunProcessor;
         this.jobHandlerProcessor = jobHandlerProcessor;
@@ -230,7 +239,20 @@ public class JobWorkerFacade implements JobWorkerUseCase {
             }
             JobOutcome outcome = handler.handler().execute(execution);
             String resultJson = outcome == null ? null : outcome.resultJson();
-            record(execution, () -> jobRunProcessor.succeed(execution.jobId(), execution.workerId(), execution.attempt(), resultJson));
+            if (outcome == null || outcome.file() == null) {
+                record(execution, () -> jobRunProcessor.succeed(execution.jobId(), execution.workerId(), execution.attempt(), resultJson));
+            } else {
+                PreparedJobResultFile prepared;
+                try {
+                    var reserved = jobResultFileProcessor.reserve(execution.jobId(), execution.workerId(), execution.attempt(), outcome.file());
+                    prepared = jobResultUploadProcessor.upload(reserved, outcome.file());
+                } catch (JobExecutionException exception) {
+                    throw exception;
+                } catch (RuntimeException exception) {
+                    throw new JobExecutionException("RESULT_STORAGE_UNAVAILABLE", true);
+                }
+                record(execution, () -> jobRunProcessor.succeed(execution.jobId(), execution.workerId(), execution.attempt(), resultJson, prepared));
+            }
         } catch (JobCancelledException exception) {
             onStopped(execution, exception.getReason());
         } catch (JobExecutionException exception) {

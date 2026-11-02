@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.job.application.service.processor;
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.port.out.JobDispatchPort;
+import com.commercefoundry.domainlayer.job.application.model.PreparedJobResultFile;
 import com.commercefoundry.domainlayer.job.application.port.out.JobRepositoryPort;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobFinishedEvent;
@@ -36,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class JobRunProcessor {
 
+    private final JobResultFileProcessor jobResultFileProcessor;
     private final JobRepositoryPort jobRepositoryPort;
     private final JobDispatchPort jobDispatchPort;
     private final JobProperties jobProperties;
@@ -75,6 +77,26 @@ public class JobRunProcessor {
             ));
         }
         return finish(jobId, workerId, attempt, "succeed", job -> job.succeed(resultJson, clock.instant()));
+    }
+
+    /** JSON 검증·유효 lease 확인·성공·첨부·종료 이벤트를 같은 트랜잭션으로 확정한다. */
+    @Transactional
+    public boolean succeed(long jobId, String workerId, int attempt, String resultJson, PreparedJobResultFile prepared) {
+        int maxJsonBytes = jobProperties.result().maxJsonBytes();
+        if (resultJson != null && Job.payloadBytes(resultJson) > maxJsonBytes) {
+            return succeed(jobId, workerId, attempt, resultJson);
+        }
+        Optional<Job> found = jobRepositoryPort.findById(jobId);
+        if (found.isEmpty() || !JobResultFileProcessor.owns(found.get(), workerId, attempt, clock.instant())) {
+            return false;
+        }
+        Job runningJob = found.get();
+        Job saved = jobRepositoryPort.update(runningJob.succeed(resultJson, clock.instant()));
+        if (saved.status() == JobStatus.SUCCEEDED) {
+            jobResultFileProcessor.confirm(prepared.id(), runningJob, prepared.eTag());
+        }
+        eventPublisher.publishEvent(JobFinishedEvent.of(saved));
+        return true;
     }
 
     /**

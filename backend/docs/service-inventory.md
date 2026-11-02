@@ -90,7 +90,7 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 | `persistence-core` | auth · product · order · payment · delivery · operations · support |
 | `redis-core` | auth(토큰·소셜 state · 로그인 · 가입 시도 계수기 — #66) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용) · support(연결만 — WS 1회용 티켓 · 대화 이벤트 pub/sub 은 #470-C). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
 | `security-core` | 서비스 전부(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
-| `storage-core` | product(상품 이미지 — 모듈만 있다(#9 PR-A). 연결은 이미지 업로드 발급 · 첨부(#9 PR-F)에서 한다) |
+| `storage-core` | product(상품 이미지 — 모듈만 있다(#9 PR-A). 연결은 이미지 업로드 발급 · 첨부(#9 PR-F)에서 한다), operations(비공개 작업 결과 파일 저장·서명 다운로드·만료 삭제, #212 PR-E) |
 | `shared-commerce` | product · order · payment · delivery · auth(배송지 국내 국가 판정 — #144) |
 
 ## 4. 데이터 저장소
