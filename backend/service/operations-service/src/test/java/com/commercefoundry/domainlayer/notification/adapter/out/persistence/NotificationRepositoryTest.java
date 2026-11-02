@@ -16,6 +16,7 @@ import com.commercefoundry.domainlayer.notification.domain.model.NotificationKin
 import com.commercefoundry.domainlayer.notification.domain.model.NotificationSeverity;
 import com.commercefoundry.global.config.OperationsServiceFeaturesConfig;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
+import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.CyclicBarrier;
@@ -69,12 +70,17 @@ class NotificationRepositoryTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private EntityManager entityManager;
+
     @Test
     @DisplayName("단건 읽음은 ID·수신자·미읽음 조건을 모두 검사하고 최초 읽음·생성 시각을 보존한다")
     void markReadIfUnreadPreservesFirstTimestampAndOwnership() {
         save(1L, 7L, null, "JOB", 10L);
         save(2L, 7L, ALREADY, "JOB", 11L);
         save(3L, 8L, null, "JOB", 12L);
+        // 감사 리스너의 나노초 값 대신 PostgreSQL에 실제 저장된 마이크로초 값을 비교 기준으로 삼는다.
+        entityManager.clear();
         Instant createdAt = notificationRepository.findById(1L).orElseThrow().getCreatedAt();
 
         assertThat(notificationRepository.markReadIfUnread(1L, 8L, NOW)).isZero();
