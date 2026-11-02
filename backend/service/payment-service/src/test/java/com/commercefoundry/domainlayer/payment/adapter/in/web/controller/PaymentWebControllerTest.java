@@ -198,11 +198,19 @@ class PaymentWebControllerTest {
             assertFailure(prepare("{\"orderId\":1}"), HttpStatus.CONFLICT, "PAYMENT_004");
 
             willThrow(new PaymentException(PaymentErrorCode.ORDER_SERVICE_UNAVAILABLE)).given(paymentWebUseCase).prepare(anyLong(), any());
-            assertFailure(prepare("{\"orderId\":1}"), HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_011");
+            MvcTestResult unavailable = prepare("{\"orderId\":1}");
+            assertFailure(unavailable, HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_011");
+            assertThat(unavailable.getResponse().getHeader(HttpHeaders.RETRY_AFTER)).isEqualTo("10");
+            willThrow(new PaymentException(PaymentErrorCode.ORDER_SERVICE_UNAVAILABLE, new IllegalStateException("private upstream body")))
+                .given(paymentWebUseCase).prepare(anyLong(), any());
+            MvcTestResult withCause = prepare("{\"orderId\":1}");
+            assertThat(withCause.getResponse().getHeader(HttpHeaders.RETRY_AFTER)).isEqualTo("10");
+            assertThat(new String(withCause.getResponse().getContentAsByteArray(), java.nio.charset.StandardCharsets.UTF_8)).doesNotContain("private upstream body");
 
             willThrow(new PaymentException(PaymentErrorCode.PAYMENTS_DISABLED)).given(paymentWebUseCase).prepare(anyLong(), any());
             MvcTestResult disabled = prepare("{\"orderId\":1}");
             assertFailure(disabled, HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_015");
+            assertThat(disabled.getResponse().getHeader(HttpHeaders.RETRY_AFTER)).isNull();
             assertThat(disabled).bodyJson().extractingPath("$.dataHeader.resultMessage").isEqualTo("지금은 결제를 받을 수 없습니다.");
         }
     }

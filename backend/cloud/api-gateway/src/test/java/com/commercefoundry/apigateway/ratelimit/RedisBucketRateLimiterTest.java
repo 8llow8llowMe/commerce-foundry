@@ -99,6 +99,17 @@ class RedisBucketRateLimiterTest {
         assertThat(redisTemplate.keys("*" + ip + "*").collectList().block(TIMEOUT)).as("IP 원문이 든 키").isEmpty();
     }
 
+    @Test
+    void paymentBurstAndMemberIsolationUseRealTokenBucket() {
+        long memberId = randomMemberId();
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertThat(rateLimiter.tryAcquire(RateLimitPolicy.PAYMENT_WRITE, RateLimitSubject.member(memberId)).block(TIMEOUT)).isTrue();
+        }
+        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.PAYMENT_WRITE, RateLimitSubject.member(memberId)).block(TIMEOUT)).isFalse();
+        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.PAYMENT_WRITE, RateLimitSubject.member(randomMemberId())).block(TIMEOUT)).isTrue();
+        assertThat(rateLimiter.tryAcquire(RateLimitPolicy.ORDER_WRITE, RateLimitSubject.member(memberId)).block(TIMEOUT)).isTrue();
+    }
+
     private static long randomMemberId() {
         return ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
     }

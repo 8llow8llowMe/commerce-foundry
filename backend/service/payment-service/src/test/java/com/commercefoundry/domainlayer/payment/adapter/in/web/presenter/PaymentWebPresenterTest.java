@@ -58,10 +58,25 @@ class PaymentWebPresenterTest {
     void failureOnlyWhenFailed() {
         PaymentResponse failed = presenter.toResponse(PaymentFixtures.failed());
         assertThat(failed.failure().code()).isEqualTo("REJECT_CARD_COMPANY");
-        assertThat(failed.failure().message()).isEqualTo("카드사에서 거절했습니다.");
+        assertThat(failed.failure().message()).isEqualTo("결제를 완료하지 못했습니다. 다른 결제 수단으로 다시 시도해 주세요.");
 
         assertThat(presenter.toResponse(PaymentFixtures.lateApproved()).failure()).isNull();
         assertThat(presenter.toResponse(PaymentFixtures.unknown()).failure()).isNull();
+    }
+
+    @Test
+    void neverReturnsStoredGatewayMessageAcrossResponseVariants() {
+        for (String code : Arrays.asList("REJECT_CARD_COMPANY", "MERCHANT_CONFIGURATION_ERROR", "UNRECOGNIZED")) {
+            for (String raw : Arrays.asList("merchant contract diagnostic", "<script>alert(1)</script>", null)) {
+                var payment = PaymentFixtures.inProgress().reject(code, raw);
+                assertThat(presenter.toResponse(payment).failure().code()).isEqualTo(code);
+                assertThat(presenter.toResponse(payment).failure().message())
+                    .isEqualTo("결제를 완료하지 못했습니다. 다른 결제 수단으로 다시 시도해 주세요.");
+                assertThat(presenter.toPrepareResponse(new PaymentPrepareInfo(payment, Instant.now())).failure())
+                    .isEqualTo(presenter.toResponse(payment).failure());
+                assertThat(payment.failureMessage()).isEqualTo(raw);
+            }
+        }
     }
 
     @Test

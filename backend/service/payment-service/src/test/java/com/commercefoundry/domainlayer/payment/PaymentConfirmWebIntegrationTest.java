@@ -224,6 +224,14 @@ class PaymentConfirmWebIntegrationTest {
         assertThat(statusOf(result)).isEqualTo("FAILED");
         assertThat(body(result).path("dataBody").path("failure").path("code").asString()).isEqualTo("REJECT_CARD_COMPANY");
         assertThat(approvedEventsOf(pgOrderId)).isZero();
+        assertThat(body(result).path("dataBody").path("failure").path("message").asString())
+            .isEqualTo("결제를 완료하지 못했습니다. 다른 결제 수단으로 다시 시도해 주세요.");
+        MvcTestResult queried = mvc.get().uri("/api/v1/payments/" + pgOrderId).header(HttpHeaders.AUTHORIZATION, bearer()).exchange();
+        assertThat(queried).hasStatusOk();
+        assertThat(body(queried).path("dataBody").path("failure").path("message").asString())
+            .isEqualTo("결제를 완료하지 못했습니다. 다른 결제 수단으로 다시 시도해 주세요.");
+        assertThat(jdbcTemplate.queryForObject("select failure_message from payment.payment where pg_order_id = ?", String.class, pgOrderId))
+            .isEqualTo("카드사 거절");
     }
 
     @Test

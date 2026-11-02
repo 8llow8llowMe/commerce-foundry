@@ -479,12 +479,19 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 | `cart-write` | 그 밖의 `/api/v1/carts/**` 쓰기 (POST · PUT · PATCH · DELETE) | 분당 60회 · 순간 20회 |
 | `order-quote` | `POST /api/v1/orders/quotes` (주문서 미리보기) | 분당 60회 · 순간 20회 |
 | `order-write` | 그 밖의 `/api/v1/orders/**` 쓰기 (POST · PUT · PATCH · DELETE) | 분당 12회 · 순간 5회 |
+| `payment-write` | `/api/v1/payments/**` 쓰기 (POST · PUT · PATCH · DELETE), 아래 웹훅 제외 | 분당 6회 · 순간 3회 |
 
 - **표 순서가 곧 우선순위다** — 위에서 처음 맞는 정책 하나만 센다. 그래서 병합은 `cart-write` 앞, 미리보기는 `order-write` 앞이다.
   미리보기는 주문서에서 수량 · 배송지를 바꿀 때마다 나가므로 주문 생성과 한도를 나눈다 — 나누지 않으면 몇 번 바꾼 뒤 "주문하기" 가 429 를 받는다(#158).
   미리보기 한도는 `POST /api/v1/orders/quotes` 에만 쓴다. 같은 경로의 다른 메서드 · 끝 슬래시는 `order-write` 로 센다(더 엄격한 `order-write` 로 세므로 우회가 아니다).
   **전제: 미리보기 핸들러(#13)는 로그인한 회원(`CUSTOMER`)만 받는다** — 토큰 없는 요청은 IP 계수(`gateway.client-ip.enabled`)가 꺼진 기본값에서 세지 않으므로,
   미리보기를 비로그인으로 열면 하류 product · delivery 호출이 한도 없이 나간다. 비로그인으로 열 때는 IP 계수를 먼저 켠다(아래 항목).
+
+- **결제 쓰기(#440)** — 준비(`POST /api/v1/payments`)와 승인(`POST /api/v1/payments/confirm`)은 같은 회원의 `payment-write` 버킷을 쓴다.
+  `gateway.rate-limit.payment-write`의 분당 횟수 · 순간 횟수는 각각 `order-write` 이하로 설정해야 하며, 기본값을 적용한 뒤에도 넘으면 기동을 거부한다.
+  기존 배포에서 주문 한도를 6/3보다 낮췄다면 결제 한도도 함께 낮춰야 한다. 회원별 버킷 분리 · 저장소 장애 fail-open · 429 봉투는 기존 정책과 같다.
+  `GET` 결제 상태 폴링은 세지 않는다. **`/api/v1/payments/webhooks`와 그 하위 경로는 이 정책에서 제외한다** — 토큰이 있거나 IP 계수가 켜져도 세지 않는다.
+  웹훅 인증·재조회·별도 남용 방어는 #15에서 정하며, 이 예외가 서비스의 익명 접근을 허용하거나 웹훅 핸들러를 구현하지는 않는다.
 
 - **주체는 둘이다** — 로그인한 요청은 검증된 회원 id, 토큰 없는 요청은 클라이언트 IP 의 HMAC(#89). 같은 정책 한도를 쓰되 버킷이 따로다.
   **토큰 없는 요청은 `gateway.client-ip.enabled` 를 켰을 때만 센다 — 기본은 꺼짐이다**(바로 아래 항목).

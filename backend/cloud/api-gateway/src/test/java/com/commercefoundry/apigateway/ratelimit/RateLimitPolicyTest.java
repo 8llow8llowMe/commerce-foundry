@@ -18,6 +18,13 @@ class RateLimitPolicyTest {
         "PATCH,  /api/v1/carts/me/items/1,   CART_WRITE",
         "DELETE, /api/v1/carts/me/items/1,   CART_WRITE",
         "PUT,    /api/v1/carts/me,           CART_WRITE",
+        "POST,   /api/v1/payments,          PAYMENT_WRITE",
+        "POST,   /api/v1/payments/confirm,  PAYMENT_WRITE",
+        "PUT,    /api/v1/payments/123,      PAYMENT_WRITE",
+        "PATCH,  /api/v1/payments/123,      PAYMENT_WRITE",
+        "DELETE, /api/v1/payments/123,      PAYMENT_WRITE",
+        "POST,   /api/v1/payments/webhooks-other, PAYMENT_WRITE",
+        "POST,   /api/v1/payments/webhooks-other/toss, PAYMENT_WRITE",
         "POST,   /api/v1/orders,             ORDER_WRITE",
         "POST,   /api/v1/orders/1/cancellation, ORDER_WRITE",
         "POST,   /api/v1/orders/quotes,      ORDER_QUOTE",
@@ -35,6 +42,14 @@ class RateLimitPolicyTest {
 
     @ParameterizedTest
     @CsvSource({
+        "GET,     /api/v1/payments/1",
+        "HEAD,    /api/v1/payments/1",
+        "OPTIONS, /api/v1/payments/confirm",
+        "POST,    /api/v1/payments/webhooks",
+        "POST,    /api/v1/payments/webhooks/",
+        "POST,    /api/v1/payments/webhooks/toss",
+        "POST,    /api/v1/payments/%77ebhooks/toss",
+        "POST,    /api/v1/payments/webhooks;tenant=x/toss",
         "GET,     /api/v1/carts/me",
         "HEAD,    /api/v1/carts/me",
         "OPTIONS, /api/v1/carts/me/items",

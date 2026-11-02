@@ -84,6 +84,10 @@ gateway:
     order-write:
       requests-per-minute: 12
       burst: 5
+    # 결제 준비 · 승인 (웹훅 제외). 두 한도 모두 order-write 이하로 둔다 (#440)
+    payment-write:
+      requests-per-minute: 6
+      burst: 3
     # 주문서 미리보기(POST /api/v1/orders/quotes). 주문서에서 값을 바꿀 때마다 나가므로 주문 생성(order-write)과 따로 센다 (#158)
     order-quote:
       requests-per-minute: 60
