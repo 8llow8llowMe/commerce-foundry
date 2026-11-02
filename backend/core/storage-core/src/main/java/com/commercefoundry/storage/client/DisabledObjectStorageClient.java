@@ -2,6 +2,7 @@ package com.commercefoundry.storage.client;
 
 import com.commercefoundry.storage.client.StorageException.Operation;
 import com.commercefoundry.storage.client.StorageException.Reason;
+import java.time.Duration;
 import java.util.Optional;
 
 /**
@@ -20,6 +21,11 @@ final class DisabledObjectStorageClient implements ObjectStorageClient {
     @Override
     public PresignedUpload presignPut(String key, String contentType, long contentLength) {
         throw disabled(Operation.PRESIGN_PUT);
+    }
+
+    @Override
+    public PresignedDownload presignGet(String key, Duration ttl) {
+        throw disabled(Operation.PRESIGN_GET);
     }
 
     @Override

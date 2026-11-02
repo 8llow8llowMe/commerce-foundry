@@ -144,6 +144,33 @@ class S3CompatibleObjectStorageRoundTripTest {
     }
 
     @Test
+    @DisplayName("비공개 결과는 익명 GET을 거절하고 서명 GET만 다운로드 정책대로 허용하며 정책 변조는 거절한다")
+    void downloadsPrivateResultWithSignedResponsePolicy() throws Exception {
+        String key = "job-results/1/2/" + UUID.randomUUID() + ".csv";
+        byte[] bytes = "id,total\n1,100\n".getBytes(StandardCharsets.UTF_8);
+        client.put(key, bytes, "text/csv", "public, max-age=3600");
+        try {
+            PresignedDownload download = client.presignGet(key, Duration.ofSeconds(60));
+            URI signed = URI.create(download.downloadUrl());
+            URI unsigned = URI.create(signed.toString().substring(0, signed.toString().indexOf('?')));
+            assertThat(http.send(HttpRequest.newBuilder(unsigned).GET().build(), HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(403);
+
+            HttpResponse<byte[]> response = http.send(HttpRequest.newBuilder(signed).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.body()).isEqualTo(bytes);
+            assertThat(response.headers().firstValue("Content-Disposition")).contains("attachment");
+            assertThat(response.headers().firstValue("Content-Type")).contains("application/octet-stream");
+            assertThat(response.headers().firstValue("Cache-Control")).contains("private, no-store");
+
+            URI tampered = URI.create(download.downloadUrl().replace("response-content-disposition=attachment", "response-content-disposition=inline"));
+            assertThat(tampered).isNotEqualTo(signed);
+            assertThat(http.send(HttpRequest.newBuilder(tampered).GET().build(), HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(403);
+        } finally {
+            client.delete(key);
+        }
+    }
+
+    @Test
     @DisplayName("확인(HEAD) 뒤 같은 키에 다른 내용이 올라오면 옛 ETag 로는 읽기 · 복사가 CHANGED 이고, 새 ETag 로는 복사된다")
     void rejectsObjectChangedAfterHead() {
         String uploadKey = "uploads/" + UUID.randomUUID() + ".png";

@@ -1,5 +1,6 @@
 package com.commercefoundry.storage.client;
 
+import java.time.Duration;
 import java.util.Optional;
 
 /**
@@ -29,6 +30,15 @@ public interface ObjectStorageClient {
      * @return 만료는 {@code storage.presign-ttl} 뒤
      */
     PresignedUpload presignPut(String key, String contentType, long contentLength);
+
+    /**
+     * 비공개 객체의 GET 서명 URL을 로컬에서 만든다. 객체 존재 여부를 조회하지 않는다.
+     * 서비스가 권한과 보관 만료를 확인한 뒤 호출하고, URL을 로그에 남기지 않는다.
+     * 다운로드 응답은 attachment · application/octet-stream · private, no-store로 서명한다.
+     *
+     * @param ttl 1초 이상의 정수 초, storage.presign-ttl 이하. 결과 보관 만료까지의 남은 시간도 넘지 않게 서비스가 정한다
+     */
+    PresignedDownload presignGet(String key, Duration ttl);
 
     /** 객체의 크기 · 형식 · ETag. 없으면 비어 있다. ETag 는 언제나 있다 — 이어지는 {@link #readRange} · {@link #copy} 의 조건으로 그대로 넘긴다. */
     Optional<StoredObject> head(String key);
