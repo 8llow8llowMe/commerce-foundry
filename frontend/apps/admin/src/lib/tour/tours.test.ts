@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { driveSteps, escapeHtml } from './steps';
-import { ALL_TOURS, CONSOLE_TOUR, helpTopicFor, toursFor, type Tour } from './tours';
+import {
+  ALL_TOURS,
+  CONSOLE_TOUR,
+  helpTopicFor,
+  PRODUCT_NEW_TOUR,
+  toursFor,
+  type Tour,
+} from './tours';
 
 describe('helpTopicFor · toursFor', () => {
   it('경로마다 도움말을 고르고, 없는 경로는 기본 도움말이다', () => {
@@ -14,11 +21,43 @@ describe('helpTopicFor · toursFor', () => {
   it('콘솔 투어가 먼저, 화면 투어가 있으면 그다음이다', () => {
     expect(toursFor('/members').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
     expect(toursFor('/stocks').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'stocks-v1']);
-    expect(toursFor('/orders').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'orders-v1']);
+    expect(toursFor('/orders').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'orders-v2']);
     expect(toursFor('/orders/42').map((tour) => tour.id)).toEqual([
       CONSOLE_TOUR.id,
-      'order-detail-v1',
+      'order-detail-v2',
     ]);
+    // 상품 등록 투어는 폼에 앵커가 달리기 전까지 연결하지 않는다
+    expect(toursFor('/products/new').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
+  });
+
+  it('송장 단계는 주문 투어의 상태 변경 뒤 · 이력 앞에 있고, 상세의 송장은 준비중 주문에만 있어 선택이다', () => {
+    const targets = (pathname: string) =>
+      toursFor(pathname)[1]?.steps.map((step) => [step.target, step.optional ?? false]);
+    expect(targets('/orders')).toEqual([
+      ['order-filters', false],
+      ['order-table', true],
+      ['order-bulk', false],
+      ['order-shipment-bulk', false],
+    ]);
+    expect(targets('/orders/42')).toEqual([
+      ['order-status', false],
+      ['order-status-actions', false],
+      ['order-shipment', true],
+      ['order-histories', false],
+    ]);
+  });
+
+  it('상품 등록 투어는 폼 구역 순서대로 필수 앵커만 가리키고, 문구는 평문이다', () => {
+    expect(PRODUCT_NEW_TOUR.steps.map((step) => [step.target, step.optional ?? false])).toEqual([
+      ['product-basic', false],
+      ['product-price', false],
+      ['product-options', false],
+      ['product-skus', false],
+      ['product-submit', false],
+    ]);
+    for (const step of PRODUCT_NEW_TOUR.steps) {
+      expect(`${step.title}${step.body}`).not.toMatch(/[<>&]/);
+    }
   });
 
   it('투어 아이디는 겹치지 않는다', () => {

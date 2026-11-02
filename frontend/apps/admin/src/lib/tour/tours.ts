@@ -3,7 +3,7 @@
  * 클래스 · 문구가 바뀌어도 투어가 깨지지 않게, 투어가 가리키는 요소에만 단다.
  *
  * 문구는 평문만 쓴다. 투어 라이브러리(driver.js)가 제목 · 설명을 innerHTML 로 넣기 때문이다(운영 데이터를 넣지 않는다).
- * 화면이 생기면(상품 등록 #29 · 주문 · 송장 #30 · 리포트 #221) 여기에 화면과 투어를 더한다.
+ * 화면이 생기면(리포트 #221 등) 여기에 화면과 투어를 더한다.
  */
 
 export type TourStep = {
@@ -182,9 +182,50 @@ export const SHIPPING_DOMESTIC_TOUR: Tour = {
   ],
 };
 
-/** 주문 목록(#30) — 조건 · 표 · 일괄 변경. 빈 목록이면 표가 없어 선택 단계다 */
+/**
+ * 상품 등록(#29). 가리키는 앵커(`product-basic` · `product-price` · `product-options` · `product-skus` · `product-submit`)는
+ * 상품 등록 폼(`ProductCreateForm`)의 구역마다 단다. **앵커가 폼에 달리기 전에는 `/products/new` 에 연결하지 않는다** —
+ * 필수 요소가 없어 시작하지 않는데 도움말의 "다시 보기" 만 남으면 고장으로 보인다. 앵커를 다는 변경에서 도움말 표에 연결한다.
+ * 안내는 위치 설명만 한다. 등록 버튼을 대신 누르지 않는다(투어 중에는 가리킨 요소를 누를 수 없다).
+ */
+export const PRODUCT_NEW_TOUR: Tour = {
+  id: 'product-new-v1',
+  steps: [
+    {
+      target: 'product-basic',
+      title: '기본 정보',
+      body: '상품명 · 요약 · 상세 설명을 넣습니다. 아래로 내려가며 카테고리 · 판매 · 노출 · 가격 · 프리오더 · 옵션을 차례로 채웁니다.',
+    },
+    {
+      target: 'product-price',
+      title: '통화 · 가격',
+      body: '판매가 · 정가 · 옵션 추가금은 모두 고른 통화로 받고 환율로 바꾸지 않습니다. 정가는 할인 전 가격이라 판매가보다 높아야 하고, 할인이 없으면 비워 둡니다.',
+      side: 'top',
+    },
+    {
+      target: 'product-options',
+      title: '옵션',
+      body: '색상 · 사이즈처럼 고객이 고르는 옵션 이름과 값을 넣습니다. 옵션이 없는 상품이면 비워 둡니다.',
+      side: 'top',
+    },
+    {
+      target: 'product-skus',
+      title: '옵션 조합(SKU)',
+      body: '옵션 값을 넣으면 조합마다 한 줄씩 생깁니다. 줄마다 추가금과 처음 재고를 정합니다. 등록한 뒤 재고는 재고 화면에서 조정합니다.',
+      side: 'top',
+    },
+    {
+      target: 'product-submit',
+      title: '등록',
+      body: '등록하면 상품 상세로 옮깁니다. 같은 내용으로 두 번 등록하면 상품이 두 개 생기니, 결과를 확인하지 못했다고 나오면 상품 목록에서 먼저 확인하세요.',
+      side: 'top',
+    },
+  ],
+};
+
+/** 주문 목록(#30) — 조건 · 표 · 일괄 변경 · 송장 일괄 등록. 빈 목록이면 표가 없어 선택 단계다 */
 const ORDERS_TOUR: Tour = {
-  id: 'orders-v1',
+  id: 'orders-v2',
   steps: [
     {
       target: 'order-filters',
@@ -204,15 +245,21 @@ const ORDERS_TOUR: Tour = {
       body: '고른 주문을 상품 준비중 · 제작 중으로 한 번에 바꿉니다. 바꿀 수 없는 주문은 결과에 이유가 나오고, 실패한 주문만 다시 보낼 수 있습니다.',
       side: 'top',
     },
+    {
+      target: 'order-shipment-bulk',
+      title: '송장 일괄 등록',
+      body: '상품 준비중 주문에 택배사 · 송장 번호를 넣어 한 번에 출고합니다. 표에서 고른 주문을 넣거나 엑셀에서 복사한 표를 붙여넣습니다. 출고된 송장은 바꿀 수 없으니 번호를 확인한 뒤 등록하세요.',
+      side: 'top',
+    },
   ],
 };
 
 /**
- * 주문 상세(#30) — 현재 상태 · 상태 변경 · 상태 이력. 바꿀 수 있는 상태가 없으면 버튼 대신 안내 문구가 같은 앵커를 단다.
- * 송장 등록 단계(`order-shipment` · `order-shipment-bulk`)는 후속으로 더하고 버전을 올린다.
+ * 주문 상세(#30) — 현재 상태 · 상태 변경 · 송장 등록 · 상태 이력. 바꿀 수 있는 상태가 없으면 버튼 대신 안내 문구가 같은 앵커를 단다.
+ * 송장 등록은 상품 준비중 주문에만 있어 선택 단계다.
  */
 const ORDER_DETAIL_TOUR: Tour = {
-  id: 'order-detail-v1',
+  id: 'order-detail-v2',
   steps: [
     {
       target: 'order-status',
@@ -223,6 +270,13 @@ const ORDER_DETAIL_TOUR: Tour = {
       target: 'order-status-actions',
       title: '상태 바꾸기',
       body: '지금 바꿀 수 있는 상태만 버튼으로 나옵니다. 누르면 사유를 적는 확인 단계가 열리고, 보내기 직전에 주문을 다시 읽어 그사이 바뀌었으면 보내지 않습니다. 배송 완료로 바꿀 때는 배송을 확인한 근거를 사유로 남깁니다. 버튼이 없으면 결제 · 출고 · 취소 같은 다른 흐름이 상태를 바꿉니다.',
+    },
+    {
+      target: 'order-shipment',
+      title: '송장 등록',
+      body: '상품 준비중 주문이면 여기서 택배사 · 송장 번호를 넣어 출고합니다. 등록하면 주문이 배송 중으로 바뀌고, 출고된 송장은 바꿀 수 없습니다.',
+      side: 'top',
+      optional: true,
     },
     {
       target: 'order-histories',
@@ -283,6 +337,7 @@ const ROUTES: Route[] = [
         },
         ...COMMON_FAQ,
       ],
+      // 앵커가 폼에 달리면 PRODUCT_NEW_TOUR 를 연결한다
       tour: null,
     },
   },
