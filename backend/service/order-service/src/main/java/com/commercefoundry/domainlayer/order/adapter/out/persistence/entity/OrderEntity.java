@@ -31,7 +31,8 @@ import lombok.NoArgsConstructor;
  * check 식이 NULL 이면 통과하므로 nullable 칸은 {@code is null} · {@code is not null} 로 먼저 가른다.
  *
  * <p>상태는 도메인 메서드로만 바꾸고 {@code @Version} 으로 동시 수정을 막는다 — 버전이 null 이면 새 주문(persist), 아니면 merge(버전 비교 UPDATE).
- * 결제 기한이 지난 결제 대기 주문은 {@code status, payment_due_at, id} 키셋 인덱스로 조회한다.
+ * 결제 기한이 지난 결제 대기 주문은 {@code status, payment_due_at, id} 키셋 인덱스로 조회한다. 배송 완료 뒤 기간이 지난 주문(자동 구매 확정, #18 PR-C)은
+ * {@code status, delivered_at, id} 키셋 인덱스로 조회한다.
  */
 @Entity
 @Table(
@@ -43,7 +44,9 @@ import lombok.NoArgsConstructor;
         @Index(name = "idx_orders_status_payment_due_at_id", columnList = "status, payment_due_at, id"),
         // 어드민 주문 목록(#17) — 주문 시각 범위 · 최신순 (상태 조건 있음 / 없음)
         @Index(name = "idx_orders_status_created_at_id", columnList = "status, created_at, id"),
-        @Index(name = "idx_orders_created_at_id", columnList = "created_at, id")
+        @Index(name = "idx_orders_created_at_id", columnList = "created_at, id"),
+        // 자동 구매 확정 스윕(#18 PR-C) — 배송 완료 시각이 기간을 지난 배송 완료 주문 키셋
+        @Index(name = "idx_orders_status_delivered_at_id", columnList = "status, delivered_at, id")
     },
     check = {
         @CheckConstraint(
@@ -188,6 +191,12 @@ public class OrderEntity extends BaseEntity {
 
     @Column(name = "payment_due_at", nullable = false, comment = "결제 기한 — 재고 선점 만료 시각")
     private Instant paymentDueAt;
+
+    @Column(name = "shipped_at", comment = "출고 시각 (송장 등록으로 배송 중이 된 시각, #18). 출고 전이면 null")
+    private Instant shippedAt;
+
+    @Column(name = "delivered_at", comment = "배송 완료 시각 (자동 구매 확정 기준, #18). 배송 완료 전이면 null")
+    private Instant deliveredAt;
 
     @Version
     @Column(name = "version", nullable = false, comment = "낙관적 락 버전")

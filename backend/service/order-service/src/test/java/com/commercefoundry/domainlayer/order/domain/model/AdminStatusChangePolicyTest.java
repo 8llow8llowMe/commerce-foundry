@@ -16,7 +16,7 @@ class AdminStatusChangePolicyTest {
 
     private static Order order(OrderStatus status, boolean customOrder) {
         OrderQuoteLine line = OrderQuoteLine.of(101, 7101, "상품", "옵션", krw(1000), 1, OrderCustomOptions.empty(), customOrder, WEIGHT_GRAMS, HS_CODE);
-        return new Order(1, 2, status, domesticQuote(line), List.of(3L), address("KR"), 4, Instant.parse("2026-10-18T09:30:00Z"), null, 0L);
+        return new Order(1, 2, status, domesticQuote(line), List.of(3L), address("KR"), 4, Instant.parse("2026-10-18T09:30:00Z"), null, null, null, 0L);
     }
 
     @ParameterizedTest(name = "{0} → {1} = {2}")

@@ -26,7 +26,7 @@ class OrderAdminPresenterTest {
     void detailMasksAddressAndDescribesHistory() {
         ShippingAddress address = new ShippingAddress("테스트수령인", "01000000001", "KR", "63100", "테스트시 테스트로 1", "101동 1001호", null, null, "공동현관 0000#");
         Order order = new Order(1, 2, OrderStatus.PAID, domesticQuote(quoteLine(101, 1000, 1)), List.of(3L), address, 4,
-            Instant.parse("2026-10-18T09:30:00Z"), Instant.parse("2026-10-18T09:00:00Z"), 1L);
+            Instant.parse("2026-10-18T09:30:00Z"), null, null, Instant.parse("2026-10-18T09:00:00Z"), 1L);
         OrderAdminDetail detail = new OrderAdminDetail(order, List.of(
             new OrderStatusHistoryInfo(null, OrderStatus.PENDING_PAYMENT, StatusChangedBy.CUSTOMER, 2L, null, Instant.parse("2026-10-18T09:00:00Z")),
             new OrderStatusHistoryInfo(OrderStatus.PENDING_PAYMENT, OrderStatus.PAID, StatusChangedBy.SERVICE, null, null, Instant.parse("2026-10-18T09:05:00Z"))

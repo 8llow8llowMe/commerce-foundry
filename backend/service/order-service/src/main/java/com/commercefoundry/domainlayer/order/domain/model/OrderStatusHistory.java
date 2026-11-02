@@ -13,6 +13,11 @@ public record OrderStatusHistory(
     long id, long orderId, OrderStatus fromStatus, OrderStatus toStatus, StatusChangedBy changedByType, Long changedById, String reason
 ) {
 
+    /** 송장 등록으로 출고됐다 — 상품 준비중 → 배송 중 (#18, delivery-service). */
+    public static final String SHIPMENT_REGISTERED = "SHIPMENT_REGISTERED";
+    /** 배송이 완료됐다 — 배송 중 → 배송 완료 (#18, delivery-service). */
+    public static final String DELIVERY_COMPLETED = "DELIVERY_COMPLETED";
+
     public OrderStatusHistory {
         if (id <= 0 || orderId <= 0 || (changedById != null && changedById <= 0) || (reason != null && reason.length() > 200)) {
             throw new IllegalArgumentException("Invalid history identifier or reason length");
@@ -50,6 +55,19 @@ public record OrderStatusHistory(
             throw new IllegalArgumentException("어드민 이력은 저장된 같은 주문의 상태 변경에서만 만듭니다: orderId=" + before.id());
         }
         return new OrderStatusHistory(id, before.id(), before.status(), after.status(), StatusChangedBy.ADMIN, adminId, reason);
+    }
+
+    /**
+     * 다른 서비스의 internal 호출이 상태를 바꿨다 (#18 출고 · 배송 완료) — 주체 {@code SERVICE}, 아이디 없음. {@code before} 는 전이 전 주문, {@code after} 는 전이 뒤 주문이다.
+     *
+     * @param reason 사유 코드 — {@link #SHIPMENT_REGISTERED} · {@link #DELIVERY_COMPLETED}
+     */
+    public static OrderStatusHistory changedByService(long id, Order before, Order after, String reason) {
+        Objects.requireNonNull(reason, "reason");
+        if (before.isNew() || before.id() != after.id() || before.status() == after.status()) {
+            throw new IllegalArgumentException("연동 이력은 저장된 같은 주문의 상태 변경에서만 만듭니다: orderId=" + before.id());
+        }
+        return new OrderStatusHistory(id, before.id(), before.status(), after.status(), StatusChangedBy.SERVICE, null, reason);
     }
 
     /** 고객이 결제 전에 취소했다 — PENDING_PAYMENT → CANCELED, 사유는 취소 사유 코드 (#16). {@code order} 는 전이 전 주문이다. */

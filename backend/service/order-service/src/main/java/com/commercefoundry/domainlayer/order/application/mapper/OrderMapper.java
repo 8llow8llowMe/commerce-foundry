@@ -52,6 +52,8 @@ public interface OrderMapper {
             .shippingWeightGrams(fee.totalWeightGrams())
             .stockReservationId(order.stockReservationId())
             .paymentDueAt(order.paymentDueAt())
+            .shippedAt(order.shippedAt())
+            .deliveredAt(order.deliveredAt())
             .version(order.version())
             .build();
     }
@@ -158,7 +160,7 @@ public interface OrderMapper {
         ShippingAddress shippingAddress = new ShippingAddress(address.getRecipientName(), address.getRecipientPhone(), address.getCountryCode(),
             address.getPostalCode(), address.getAddressLine1(), address.getAddressLine2(), address.getCity(), address.getStateProvince(), address.getDeliveryMemo());
         return new Order(entity.getId(), entity.getMemberId(), entity.getStatus(), quote, items.stream().map(OrderItemEntity::getId).toList(), shippingAddress,
-            entity.getStockReservationId(), entity.getPaymentDueAt(), entity.getCreatedAt(), entity.getVersion());
+            entity.getStockReservationId(), entity.getPaymentDueAt(), entity.getShippedAt(), entity.getDeliveredAt(), entity.getCreatedAt(), entity.getVersion());
     }
 
     private OrderQuoteLine toLine(OrderItemEntity item, List<OrderItemCustomOptionEntity> options) {

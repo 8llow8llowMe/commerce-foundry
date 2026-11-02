@@ -919,7 +919,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   전이 표(`order-flow-guide.md` §1) 밖은 `ORDER_020`, 표 안이지만 다른 흐름이 바꾸는 전이(결제 완료 #14 · 만료 #96 · 출고=송장 등록 #18 · 취소 · 반품 #15 · #16 · 구매 확정)는
   `ORDER_023`, 맞춤 제작 항목 없이 제작 중은 `ORDER_024` 다. 어드민이라고 아무 상태로나 바꾸지 않는다. 상세의 `nextStatuses` 가 지금 누를 수 있는 버튼이다.
 - **배송 완료** — 고객의 반품 · 구매 확정 기간이 여기서 시작하므로 사유(배송을 확인한 근거)가 있어야 하고(없으면 400 `ORDER_027`), 한 건씩만 바꾼다(일괄은 400 `ORDER_153`).
-  택배사 추적(#18)이 생기면 그쪽이 자동으로 바꾸고 이 버튼은 예외 처리용으로 남는다.
+  정상 경로는 delivery-service 의 배송 완료 반영(§2-18)이고 이 버튼은 예외 처리용이다. 수동 완료도 `delivered_at`(자동 구매 확정 기준)을 지금 시각으로 채운다 (#18).
 - **동시성** — 주문마다 새 트랜잭션에서 읽고 바꾸며, 저장은 `@Version` 비교다. 읽은 뒤 고객 취소 · 결제 · 다른 운영자가 먼저 커밋했으면 409 `ORDER_025` 이고 아무것도 쓰지 않는다
   (둘 중 하나만 성공). 새로고침한 상세의 `nextStatuses` 로 다시 판단한다. 다시 읽어 이미 목표 상태면(다른 운영자가 같은 목표로 먼저 바꿈) 실패가 아니라 그대로 둔 것(`UNCHANGED` · 200)이다.
 - **일괄 변경** — 주문마다 따로 바꿔 한 건의 실패가 다른 건을 되돌리지 않는다. `result` 는 `CHANGED` · `UNCHANGED`(이미 그 상태) · `FAILED`(`errorCode` · `message` 는
@@ -952,6 +952,27 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 - **상한** — 결제 전 취소는 회원별 활성 주문 시도 수(#231, `ORDER_022`)를 돌려주지 않는다(30분 창이 지나야 풀린다). 상품별 수량 상한(#426)은 바로 풀린다.
 - **목록** — `idx_orders_member_id_id` 를 거꾸로 읽는다(Snowflake 아이디가 시각 순). 주문 이름 · 항목 수는 그 조각 주문의 항목만 한 번에 읽는다. 결제 · 배송 요약은 #14 · #308 · #18 뒤에 더한다.
 - **레이트 리밋** — 취소도 주문 생성과 같은 게이트웨이 `ORDER_WRITE` 버킷(`/api/v1/orders/**` 쓰기)이다. 목록은 페이지 번호(OFFSET)라 회원 주문이 많아지면 커서(마지막 주문 아이디)로 바꾼다.
+
+### 2-18. 출고 · 배송 완료 반영 internal (order-service, #18 PR-A)
+
+서비스 간 전용(`@Hidden`). 허용 호출자는 `SERVICE_delivery-service` 하나다 — 서비스 토큰 없음 · 사용자 토큰 · `aud` 불일치는 401 `SECURITY_007`, 다른 서비스는 403 `SECURITY_005`
+(`security-guide.md` §9-4). 흐름 · 실패 처리의 정본은 `order-flow-guide.md` §4 다.
+
+| API | 응답 | 오류 |
+|-----|------|------|
+| `POST /internal/v1/orders/{orderId}/shipment` `{deliveryId, shippedAt}` | 200 `{orderId, memberId, status, countryCode}` — 상품 준비중 → 배송 중. 이미 출고된 뒤면 바꾸지 않고 200 | 400 `ORDER_141` · `198`(경로) · `155`(deliveryId 없음) · `156`(숫자 문자열 · long 범위 아님) · `157`(shippedAt 없음) · `100`(시각 형식 · 깨진 JSON) · `159`(shippedAt 범위) · 404 `ORDER_001` · 409 `ORDER_020` · `025` |
+| `POST /internal/v1/orders/{orderId}/delivery-completion` `{deliveryId, deliveredAt}` | 200 같은 모양 — 배송 중 → 배송 완료. 이미 배송 완료된 뒤면 바꾸지 않고 200 | 400 `ORDER_141` · `198` · `155` · `156` · `158`(deliveredAt 없음) · `100` · `160`(deliveredAt 범위) · `161`(출고 시각보다 앞섬) · 404 `ORDER_001` · 409 `ORDER_020` · `025` |
+
+- **요청** — `deliveryId` 는 delivery-service 송장 아이디(숫자 문자열)로 order 는 추적 로그에만 남기고 저장하지 않는다. `shippedAt` · `deliveredAt` 은 UTC ISO-8601 이고
+  주문의 `shipped_at` · `delivered_at` 으로 마이크로초까지 남는다. `delivered_at` 은 자동 구매 확정 기간의 시작이다.
+- **응답** — 아이디는 문자열, `status` 는 반영 뒤 `OrderStatus` 제어 코드(멱등이면 지금 상태 그대로 — 구매 확정 · 반품일 수 있다), `countryCode` 는 주문 배송지 스냅숏 국가다.
+  delivery 는 `memberId` · `countryCode` 를 송장에 스냅숏해 고객 배송 조회의 소유 판정 · 국내/해외 구분에 쓴다. 200 이면 `status` 와 상관없이 반영 완료로 본다 — `status` 는 정보다.
+- **오류** — 없는 주문 404 `ORDER_001`. 출고 · 완료할 수 없는 상태(출고 전 · 취소 요청 · 취소 · 상품 준비중의 배송 완료 등)는 409 `ORDER_020` 이고 메시지에 현재 상태 이름이 있다.
+  읽은 뒤 고객 취소 · 어드민 처리가 먼저 커밋했으면 409 `ORDER_025` 다 — 같은 요청을 다시 보내면 지금 상태로 판정받는다. 409 는 `code` 로 나눈다. 회원 소유는 보지 않는다(운영 흐름의 호출이다).
+- **시각 검증** — 주문을 실제로 바꿀 때만 지금 기준 30일 전 ~ 5분 뒤 밖이면 400 `ORDER_159`(shippedAt) · `160`(deliveredAt), 배송 완료 시각이 주문의 출고 시각보다
+  앞서면 400 `ORDER_161` 이다(같은 시각은 받는다). `fieldErrors[0].field` 는 그 칸 이름이다. 판정 순서는 404 → 이미 반영(200, 시각을 보지 않는다) → 409 `ORDER_020`
+  → `159` · `160` → `161` → 409 `ORDER_025` 다 — 이미 반영된 주문의 재시도가 시간이 흘러 깨지지 않게. 상한의 이유는 `order-flow-guide.md` §4.
+- **이력** — 바뀌었을 때만 `SERVICE`(아이디 없음) 이력을 남긴다. 사유는 `SHIPMENT_REGISTERED` · `DELIVERY_COMPLETED` 다. 어드민 상세의 `changedBy` 는 "연동 처리" 다.
 
 ## 3. 계층 흐름
 

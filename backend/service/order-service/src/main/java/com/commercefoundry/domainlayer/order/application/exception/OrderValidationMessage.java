@@ -67,6 +67,15 @@ public final class OrderValidationMessage {
     public static final String ORDER_ID_FORMAT = "ORDER_152:주문 아이디는 숫자 문자열이어야 합니다.";
     public static final String BULK_DELIVERED_NOT_ALLOWED = "ORDER_153:배송 완료는 사유와 함께 한 건씩 바꿉니다.";
     public static final String CANCEL_REASON_REQUIRED = "ORDER_154:취소 사유(reason)를 골라 주세요.";
+    /** 출고 · 배송 완료 internal (#18) — delivery-service 의 송장(배송) 아이디. */
+    public static final String DELIVERY_ID_REQUIRED = "ORDER_155:deliveryId 는 필수입니다.";
+    public static final String DELIVERY_ID_FORMAT = "ORDER_156:deliveryId 는 long 범위의 양수 숫자 문자열이어야 합니다.";
+    public static final String SHIPPED_AT_REQUIRED = "ORDER_157:shippedAt 은 필수입니다.";
+    public static final String DELIVERED_AT_REQUIRED = "ORDER_158:deliveredAt 은 필수입니다.";
+    /** 출고 · 배송 완료 시각 범위 (#18) — {@code OrderFulfillmentProcessor} 가 주문을 바꿀 때만 지금 시각과 견준다(이미 반영된 주문의 재시도는 보지 않는다). */
+    public static final String SHIPPED_AT_OUT_OF_RANGE = "ORDER_159:shippedAt 은 지금으로부터 30일 전부터 5분 뒤 사이여야 합니다.";
+    public static final String DELIVERED_AT_OUT_OF_RANGE = "ORDER_160:deliveredAt 은 지금으로부터 30일 전부터 5분 뒤 사이여야 합니다.";
+    public static final String DELIVERED_AT_BEFORE_SHIPPED = "ORDER_161:deliveredAt 은 주문의 출고 시각(shippedAt)보다 앞설 수 없습니다.";
 
     private OrderValidationMessage() {
     }

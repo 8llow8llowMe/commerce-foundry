@@ -360,10 +360,12 @@
         id bigint not null,
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
+        delivered_at timestamp(6) with time zone,
         items_amount bigint not null,
         items_currency varchar(3) not null check ((items_currency in ('KRW','USD'))),
         member_id bigint not null,
         payment_due_at timestamp(6) with time zone not null,
+        shipped_at timestamp(6) with time zone,
         shipping_base_fee_amount bigint not null,
         shipping_base_fee_currency varchar(3) not null check ((shipping_base_fee_currency in ('KRW','USD'))),
         shipping_fee_amount bigint not null,
@@ -411,6 +413,9 @@
     comment on column orders.orders.updated_at is
         '수정 시각';
 
+    comment on column orders.orders.delivered_at is
+        '배송 완료 시각 (자동 구매 확정 기준, #18). 배송 완료 전이면 null';
+
     comment on column orders.orders.items_amount is
         '상품 합계 — Σ(단가 × 수량), 최소 화폐 단위';
 
@@ -422,6 +427,9 @@
 
     comment on column orders.orders.payment_due_at is
         '결제 기한 — 재고 선점 만료 시각';
+
+    comment on column orders.orders.shipped_at is
+        '출고 시각 (송장 등록으로 배송 중이 된 시각, #18). 출고 전이면 null';
 
     comment on column orders.orders.shipping_base_fee_amount is
         '견적 시점 정책 기본 배송비 (해외는 기본료)';
@@ -588,6 +596,9 @@
 
     create index idx_orders_created_at_id
        on orders.orders (created_at, id);
+
+    create index idx_orders_status_delivered_at_id
+       on orders.orders (status, delivered_at, id);
 
     create index idx_outbox_published_at_available_at
        on orders.outbox (published_at, available_at);

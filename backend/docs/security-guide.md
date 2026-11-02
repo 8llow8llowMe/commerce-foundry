@@ -704,6 +704,15 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
   ArchUnit(§9-11)은 패키지 기준으로 같은 식을 보고, 정적 규칙(전역 `RequestInterceptor` · `Capability` 빈, `RequestContextHolder` 로 사용자 토큰 꺼내기)을 맡는다.
 - **1단계에서 호출자는 "선언" 이다.** 비밀이 하나라 비밀을 가진 서비스는 어느 `iss` 로도 서명할 수 있다. 허용 목록은 설정 실수 · 버그로 엉뚱한 서비스가
   부르는 것을 막고, 2단계(§9-9)에서 같은 선언이 "증명" 이 된다.
+- **상태를 바꾸는 internal 은 호출자를 하나로 좁힌다.** order-service 의 허용 호출자 목록 (호출 관계의 정본은 `service-inventory.md` §2):
+
+  | 엔드포인트 | 허용 호출자 | 비고 |
+  |------------|-------------|------|
+  | `GET /internal/v1/orders/{orderId}/payment-summary` | `SERVICE_payment-service` | 읽기, memberId 로 소유 확인 (#14) |
+  | `POST /internal/v1/orders/{orderId}/shipment` | `SERVICE_delivery-service` | 주문 상태 `SHIPPING` 전이 (#18) |
+  | `POST /internal/v1/orders/{orderId}/delivery-completion` | `SERVICE_delivery-service` | 주문 상태 `DELIVERED` 전이 (#18) |
+
+  출고 · 배송 완료는 회원 소유를 보지 않는 운영 흐름 명령이라 delivery-service 외 서비스(payment 포함)는 403 이다. 컨트롤러 테스트가 경로마다 허용 · 거부 호출자를 본다.
 
 ### 9-5. 호출 쪽 — Feign Capability
 

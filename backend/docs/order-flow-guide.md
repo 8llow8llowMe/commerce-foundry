@@ -22,8 +22,8 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
 | `PAID` | 결제 완료 | payment-service (internal) |
 | `MAKING` | 맞춤 제작 중 — `store.features.custom-order` 가 켜진 상품만 | 어드민 |
 | `PREPARING` | 출고 준비 | 어드민 |
-| `SHIPPING` | 송장 등록, 배송 중 | delivery-service / 어드민 |
-| `DELIVERED` | 배송 완료 | 택배사 추적 / 어드민 |
+| `SHIPPING` | 송장 등록, 배송 중 | delivery-service (internal 출고 반영, #18 — §4) |
+| `DELIVERED` | 배송 완료 | delivery-service (internal 배송 완료 반영, #18 — §4). 어드민 수동 완료(사유 필수, #17)는 예외 경로 |
 | `PURCHASE_CONFIRMED` | 구매 확정 (고객 확정 또는 N일 경과 자동) | 고객 / 스케줄러 |
 | `CANCEL_REQUESTED` → `CANCELED` | 출고 전 취소 (환불 포함) | 고객 요청 → 어드민/자동 승인 |
 | `PENDING_PAYMENT` → `CANCELED` | 결제 전 취소 (환불 없음, 선점 해제) | 고객 (#16) |
@@ -49,6 +49,15 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
   product 의 실제 선점 해제는 이벤트(비동기)라 그 사이 다시 주문하면 잠깐 재고 부족(`ORDER_016`)일 수 있다.
 - 어드민의 결제 전 취소(#17 PR-2)도 `Order#cancelBeforePayment` 와 같은 트랜잭션의 `order-canceled` 를 쓴다 — 전이 표만 보는 일반 상태 변경으로 `CANCELED` 를
   만들지 않는다(선점이 TTL 까지 묶인다).
+- **출고 · 배송 완료** (`Order#ship(shippedAt)` · `Order#deliver(deliveredAt)`, #18): 상품 준비중 → 배송 중은 `ship`, 배송 중 → 배송 완료는 `deliver` 로만 바꾸고
+  `orders.shipped_at` · `orders.delivered_at`(timestamptz, nullable, 마이크로초로 자름)을 함께 채운다. `changeStatus(SHIPPING)` · `changeStatus(DELIVERED)` 는 도메인이 거절한다
+  — 시각 없이 배송 중 · 배송 완료가 되지 않게. 어드민 수동 배송 완료(#17)도 `deliver(now)` 를 거쳐 `delivered_at` 을 채운다. 이미 그 뒤 상태면(`ship` 은 배송 중 ·
+  배송 완료 · 구매 확정 · 반품, `deliver` 는 배송 완료 · 구매 확정 · 반품 — 전이 표에서 배송 중 · 배송 완료로부터 닿는 상태와 같고 `OrderTest` 가 표로 계산해 맞춘다)
+  바꾸지 않은 값을 돌려주고 처음 시각을 덮지 않는다. 그 밖은 `ORDER_020` 이다 — 상품 준비중에서 바로 배송 완료하지 않는다. 취소 요청(`CANCEL_REQUESTED`) 주문도
+  출고하지 않는다 — 먼저 취소를 처리한다. 취소 거절 전이(취소 요청 → 상품 준비중)는 표에 없고 #16 PR-2 에서 정한다.
+  `delivered_at` 은 자동 구매 확정(#18 PR-C)의 기준이고 `idx_orders_status_delivered_at_id(status, delivered_at, id)` 로 읽는다.
+  두 칸이 생기기 전에 배송 중 · 배송 완료가 된 주문은 **배포 전 운영 SQL(PR 본문)** 로 상태 이력 시각을 채운다 — 채우지 못한 행은 null 로 남을 수 있어
+  상태와 묶는 check 를 두지 않는다.
 - 맞춤 제작 상품은 **제작 착수 후 단순 변심 취소 불가**가 일반적이다 — 정책 문구와 함께 스토어 설정으로 둔다.
 - 상태 변경 이력은 `order_status_history` 에 남긴다 (언제, 누가, 이전 → 이후, 사유). 어드민이 바꾼 것은 관리자 ID 를 남긴다.
 
@@ -176,7 +185,7 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
 | 거절 (order-service, #13) | 해외 주문의 주문서 미리보기 · 주문 생성에서 항목 중 **무게 또는 HS 코드가 null 인 SKU 가 하나라도 있으면 거절**한다 — 장바구니 `purchasable=false` 와 같은 결의 409, 어느 SKU 인지 알 수 있게 한다(`ORDER_007`, §2-3). delivery 견적을 부르기 **전에** 거절한다 — 무게 없이 부르면 delivery 의 무게 필수 오류(`DELIVERY_118` 400, #22)가 나와 원인이 흐려진다. 다만 **배송할 수 없는 국가**(해외 배송 꺼짐 · 정책에 없는 국가 — delivery `DELIVERY_002`)라는 사유가 무게 미입력보다 앞선다 — 해외 판매 전에는 대부분의 SKU 가 미입력이라 순서가 바뀌면 엉뚱한 사유가 보인다. 판정 순서는 배송 가능 국가 → 무게 · HS 코드 미입력 → 총 무게 → 견적이고, 국가 판정은 미입력 SKU 가 있을 때만 확인용 견적(1g)으로 먼저 한다(§2-3). 국내 주문은 두 값이 비어 있어도 거절하지 않고 견적에 무게를 싣지 않는다 — 값이 있으면 형식은 위 저장 규칙대로 늘 맞다 |
 | 총 무게 (#13 · #22) | order-service 가 **Σ(SKU `weightGrams` × 수량)** 을 `long` 으로 더해 견적 요청 `weightGrams`(Integer)로 보낸다. int 범위를 넘으면 견적을 부르지 않고 배송할 수 없는 무게로 거절한다 — delivery 의 가장 큰 구간 초과(`DELIVERY_011`)를 받았을 때와 같은 응답(`ORDER_015`)이다. 포장재 무게는 따로 더하지 않는다 |
 | 스냅숏 (#13) | 주문 항목에 단위 무게 · HS 코드를 **주문 시점 값으로 저장**한다(가격 · 상품명과 같은 규칙, 국내 주문은 null 일 수 있다). 총 무게는 배송 견적 스냅숏과 함께 주문에 저장한다. 주문 뒤 SKU 값을 고쳐도 지난 주문은 바뀌지 않는다 |
-| 통관 정보 (#18) | 송장 · 출고는 통관 신고 품목(HS 코드 · 수량 · 단위 무게 · **신고 금액 = 주문 항목의 주문 시점 금액**, 주문 통화)을 **주문 항목 스냅숏에서** 만든다 — delivery-service 가 order-service internal 로 읽고 product-service SKU 를 다시 읽지 않는다. 할인 반영 금액으로 신고할지는 #18 이 정한다 |
+| 통관 정보 (#18) | 송장 · 출고는 통관 신고 품목(HS 코드 · 수량 · 단위 무게 · **신고 금액 = 주문 항목의 주문 시점 금액**, 주문 통화)을 **주문 항목 스냅숏에서** 만든다 — delivery-service 가 order-service internal 로 읽고 product-service SKU 를 다시 읽지 않는다. 할인 반영 금액으로 신고할지는 후속 이슈(통관 품목 internal)가 정한다 — 신고 금액은 실거래가가 원칙이다 |
 | 입력 | 어드민 상품 등록 · 수정(#9)에 입력 칸을 추가한다 — 그 전에는 운영 SQL 로 넣는다. 카페24 이관(#19)의 원천 필드는 **미정**이다 — 카페24 상품 무게 필드의 단위 · HS 코드 유무를 #19 에서 확인해 매핑하고, 없으면 이관 뒤 어드민이 채운다 |
 
 ### 2-3. 주문서 계산 (#13)
@@ -537,15 +546,56 @@ payload (두 이벤트 모두 같은 모양 — **이 JSON 이 계약 정본이�
 
 ## 4. 배송
 
-| 상태 | 뜻 |
-|------|-----|
-| `READY` | 출고 대기 (주문 `PREPARING`) |
-| `SHIPPED` | 송장 등록 (주문 `SHIPPING`) |
-| `IN_TRANSIT` | 택배사 이동 중 |
-| `DELIVERED` | 배송 완료 (주문 `DELIVERED`) |
+송장(배송)은 **delivery-service 소유**다 — 컨텍스트 `domainlayer/shipment`, **주문당 1건**. 주문 상태 반영은 **동기 internal 명령**(Feign)이다.
+outbox 이벤트로 하지 않는다 — 출고할 수 있는지를 운영자가 송장 등록 응답에서 바로 알아야 하고, `MESSAGING_ENABLED=false` 기본에서 출고가 막히면 안 된다 (#18 설계 확정).
 
-- 송장 등록은 어드민에서 단건/일괄(엑셀)로 한다. 택배사 코드는 enum 으로 관리한다.
-- 배송 상태 추적은 외부 추적 API(`ShipmentTrackingPort`)로 하되, 실패해도 주문 흐름을 막지 않는다. 어드민이 수동으로도 바꿀 수 있다.
+| 배송 상태 | 뜻 | 주문 상태 |
+|-----------|-----|-----------|
+| `SHIPPED` | 송장 등록 · 출고 | `SHIPPING` |
+| `IN_TRANSIT` | 택배사 이동 중 | `SHIPPING` (주문은 바꾸지 않는다) |
+| `DELIVERED` | 배송 완료 | `DELIVERED` |
+
+출고 대기(`READY`) 상태는 두지 않는다 — 주문 `PREPARING` 이 곧 출고 대기이고, 송장 행은 등록할 때 생긴다. 송장 행은 주문 반영 여부 `order_synced` 를 갖는다.
+
+**송장 등록 (출고)** — 어드민 단건 · 일괄(1~50건, 건별 결과)
+
+1. delivery tx1 — 송장 INSERT(`order_synced=false`) + 배송 이력
+2. Feign `POST /internal/v1/orders/{orderId}/shipment {deliveryId, shippedAt}` — order 가 `Order#ship` 으로 `PREPARING → SHIPPING`, `shipped_at`, `SERVICE` 이력
+   (사유 `SHIPMENT_REGISTERED`). 이미 출고된 뒤면 바꾸지 않고 200
+3. 200 이면 delivery tx2 — `order_synced=true`, 응답의 `memberId` · 배송 국가 스냅숏
+
+**배송 완료** — `PATCH /api/v1/admin/deliveries/{deliveryId}/status {DELIVERED}` → Feign `POST /internal/v1/orders/{orderId}/delivery-completion {deliveryId, deliveredAt}`
+→ order 가 `Order#deliver` 로 `SHIPPING → DELIVERED`, `delivered_at`, `SERVICE` 이력(사유 `DELIVERY_COMPLETED`). 이미 배송 완료된 뒤면 200. 실패 규칙은 아래 표와 같다.
+
+| order 응답 | delivery 처리 |
+|------------|---------------|
+| 200 | 응답 `status` 와 상관없이 반영 완료(`order_synced=true`). 멱등 재요청도 200 이다. `status` 는 판정용이 아니라 정보다 — 출고 응답의 `status` 가 `DELIVERED` 이상(구매 확정 · 반품 포함)이면 송장도 `DELIVERED` 로 맞추거나 경고를 남긴다(B2) |
+| 400 `ORDER_159` · `160` · `161`(시각 범위 · 순서) | 보낸 시각이 틀렸다 — 등록이면 대기 송장 행을 지우고, 배송 완료면 상태를 바꾸지 않고 운영자에게 오류를 낸다. 같은 값으로 다시 보내도 같은 결과다 |
+| 404 `ORDER_001` · 409 `ORDER_020`(출고 · 완료할 수 없는 상태 — 취소 요청 · 취소 · 출고 전 등) | 등록이면 대기 송장 행을 지우고 운영자에게 오류를 낸다. 배송 완료면 상태를 바꾸지 않고 오류 |
+| 409 `ORDER_025`(버전 충돌) · 타임아웃 · 5xx · 서킷 오픈 | 행을 남긴다(`order_synced=false`). 같은 등록 · 완료 요청을 다시 보내면 order 멱등으로 수렴한다 |
+
+- **409 는 `code` 로 나눈다** — 같은 409 라도 `ORDER_020` 은 행을 지우고 `ORDER_025` 는 행을 남긴다. HTTP 상태만 보고 처리하지 않는다.
+- **시각 검증** — order 는 주문을 실제로 바꿀 때만 `shippedAt` · `deliveredAt` 을 지금 시각(order 의 `Clock`)과 견준다. 판정 순서는 404 → 이미 반영(멱등 200) →
+  바꿀 수 없는 상태 409 `ORDER_020` → 범위(지금 − 30일 ~ 지금 + 5분, 밖이면 400 `ORDER_159` · `160`) → 배송 완료가 주문의 출고 시각보다 앞섬(400 `ORDER_161`,
+  같은 시각은 받는다 · 출고 시각이 없는 옛 주문은 보지 않는다) → 저장(409 `ORDER_025`). 이미 반영된 주문의 재시도는 시각을 보지 않는다 — 그 사이 30일이 지나도 200 이다.
+  미래 5분은 서비스 간 시계 차이, 과거 30일은 택배사 실제 시각 지연 · 밀린 등록의 상한이다 — 먼 미래는 반품 기간 · 자동 구매 확정 시작을 늦추고,
+  너무 오래된 배송 완료 시각은 등록 즉시 자동 구매 확정 기간(최대 30일)을 지나 고객이 반품할 틈이 없다.
+- **주문당 송장 1건 (B1 전제)** — 주문당 송장 1건(삭제 · 재등록 포함)은 delivery 가 유니크로 보장하는 전제다. order 는 `deliveryId` 를 저장하지 않으므로(추적 로그만)
+  다른 송장의 재등록을 구분하지 못한다 — 다른 송장으로 출고를 보내도 이미 배송 중이면 멱등 200 이다. 그래서 **delivery 는 `order_synced=true` 인 송장을 지우거나
+  다른 송장으로 바꾸지 않는다.**
+- **출고 미반영 송장의 배송 완료는 delivery 가 막는다(B2)** — `order_synced=false` 송장은 배송 완료로 바꾸지 않는다. 먼저 출고 재시도로 반영한다
+  (order 쪽에서도 상품 준비중 주문의 배송 완료는 `ORDER_020` 이다).
+- **어드민 수동 배송 완료는 예외 경로다** — order 어드민의 `SHIPPING → DELIVERED`(#17, 사유 필수)는 delivery 를 거치지 않아 송장 상태(`SHIPPED` · `IN_TRANSIT`)와
+  갈라질 수 있다. B2 조회에서 order 상태 기준으로 맞추거나, 후속에서 수동 완료를 delivery 쪽으로 옮긴다. 수동 완료도 `shipped_at` 은 그대로 둔다.
+- **자동 재전송하지 않는다** — 주문 반영 실패로 남은 송장(`order_synced=false`)은 어드민 목록 `?synced=false` 로 확인하고 같은 요청 재시도로 복구한다.
+- **동시성** — 고객 취소와 출고가 겹치면 주문 `@Version` 비교로 한쪽만 성공한다(§1-2). order 의 출고 · 완료 반영은 주문마다 `REQUIRES_NEW`(5초)이고, 바뀌었을 때만 헤더 · 이력을 쓴다.
+- **고객 노출** — 고객 `GET /api/v1/deliveries?orderId=` 는 송장의 `memberId` 스냅숏으로 delivery 가 로컬에서 소유를 판정한다. 송장이 없거나 남의 것 · 미동기 `SHIPPED` 면
+  200 + `null` 이다 — 주문 존재 · 소유 404 는 주문 상세(order-service) 몫이다 (`api-design-guide.md` §2-2).
+- **자동 구매 확정** — order 스케줄러(#96 스윕 패턴)가 `status = DELIVERED and delivered_at <= now - period` 를 `(delivered_at, id)` 키셋으로 읽어 건별 `REQUIRES_NEW` +
+  `@Version` 으로 `PURCHASE_CONFIRMED` 로 바꾼다(이력 `SYSTEM`). 기본 7일 · 1시간 주기(`order.purchase-confirmation.auto.period`, 1d~30d). #18 PR-C 에서 구현한다.
+- **택배사 추적** (`ShipmentTrackingPort`) — 결정만 둔다: 추적 결과로 `IN_TRANSIT` · `DELIVERED` 를 바꾸고, 실패해도 주문 흐름을 막지 않으며, 어드민 수동 변경이 남는다.
+  포트 · 어댑터는 후속 이슈다. 택배사 코드는 enum 으로 관리한다.
+- 통관 품목 internal(해외 출고) · 송장 출력용 배송지 원문 · 주문 상세의 배송 요약 합성은 후속 이슈다.
 - 해외 배송비는 국가 그룹 · 무게 구간으로 정한다(§2, #22). 무게는 견적 요청이 싣고(SKU 무게 × 수량 합 — §2-2), 무게 · HS 코드는 product-service SKU 에 있다(#80).
   통관 정보(HS 코드, 신고 금액 = 주문 항목의 주문 시점 금액)는 **주문 항목 스냅숏**에서 송장 · 출고(#18)로 넘긴다 — §2-2.
 - 배송지 정보는 주문 시점 스냅숏이다. 회원 주소록을 바꿔도 지난 주문 배송지는 바뀌지 않는다.
