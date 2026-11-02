@@ -1,7 +1,7 @@
 # 상담 지식 게시 정책 (#469 PR-A)
 
 support-service knowledge가 FAQ·정책·응답 템플릿의 모델·게시 버전·영속성을 소유한다.
-어드민 HTTP, 검색 랭킹·언어 대체, AI·원격·감사 진입은 후속이다. HTTP 진입이 없어 예외 핸들러는 후속이다(coding-conventions §8-1).
+어드민 HTTP와 관리자 쓰기 감사는 PR-B에서 제공한다. 검색 랭킹·언어 대체, AI·원격 진입은 후속이다.
 문서 유형·언어는 고정하며 최신 리비전과 현재 게시 리비전 포인터를 분리한다. 새 초안은 기존 게시본을 보존한다.
 제목 200자·본문 8,000자, 카테고리·유효기간을 검증한다. DRAFT만 편집·승인하며 승인 이후 내용은 불변이고 수정은 새 초안이다.
 APPROVED 중 최신 리비전만 게시하며 validFrom <= 현재시각 < validTo(없으면 무기한)를 만족해야 한다.
@@ -17,3 +17,23 @@ KnowledgeProcessor가 작업별 단일 트랜잭션을 연다. 문서·리비전
 조회는 현재 게시 포인터·PUBLISHED 상태·정확한 언어·유효기간을 모두 만족하는 최대 100개 한 페이지다.
 검색어·유사도·랭킹·다른 언어 대체는 후속이다. PostgreSQL 17 DDL 스냅숏은 운영 DDL 원본이자 validate 테스트 init script다.
 H2·PostgreSQL 공통 계약으로 실제 JPQL, 초안의 게시본 보존, 원자 롤백, 멱등, 버전 경합, 유효기간·언어·유일 키를 검증한다.
+
+## 관리자 계약 (#469 PR-B)
+
+모든 `/api/v1/admin/support/knowledge` 진입은 ADMIN 권한을 요구한다. 승인·감사의 행위자는 인증 주체에서만 읽는다.
+GET 목록은 optional type/locale, page=0, size=20(최대100), 문서 ID 내림차순이며 본문 없는 최신 리비전 요약과 PageResponse를 반환한다.
+요청 본문·필터의 enum wire 값은 type=`FAQ|POLICY|TEMPLATE`, locale=`KO|EN`(한국어/영어, 대문자 코드)이다. category는 Swagger enum을 따른다.
+GET `/{documentId}`는 최신 리비전 상세와 문서 유형·언어·최신/게시 번호·문서/리비전 버전을 반환한다. 식별자는 문자열, enum은 metadata다.
+POST는 type/locale/content로 문서와 첫 DRAFT를 만들고 201을 반환한다. PUT `/{documentId}`는 revisionNumber/expectedVersion/content로 최신 DRAFT 전체를 편집한다.
+POST `/{documentId}/revisions`는 expectedDocumentVersion/content로 새 DRAFT를 만들고 201을 반환한다.
+POST `/{documentId}/approve`는 revisionNumber/expectedVersion으로 최신 DRAFT를 승인한다.
+POST `/{documentId}/publish`는 revisionNumber/expectedVersion/expectedDocumentVersion으로 최신 APPROVED를 게시한다.
+DELETE `/{documentId}`는 본문 없이 필수 query revisionNumber/expectedVersion/expectedDocumentVersion으로 해당 리비전을 soft archive하고 표준 200 봉투를 반환한다.
+현재 게시본의 동일 게시 및 이미 ARCHIVED인 대상의 삭제는 버전 검사 전 성공한다. 그 외 오래된 버전은 SUPPORT_004(409)다.
+초기 생성 POST는 멱등성을 보장하지 않는다. 새 초안 재시도는 이전 문서 버전으로 409를 받으므로 재조회 후 판단한다.
+content는 title(공백 불가/최대200), body(공백 불가/최대8000), category/validFrom 필수, validTo는 validFrom보다 뒤다.
+제목과 본문은 plain text다. FE는 이스케이프된 텍스트로 표시하고 HTML로 해석하거나 렌더링하지 않는다.
+필드 검증은 SUPPORT_1xx, 형식·필수 query는 SUPPORT_198/199로 400 필드 오류 봉투를 반환한다.
+읽기는 root/latest revision의 명시적 JPQL projection join과 동일 필터 count를 사용한다. 목록 조합에 단건 반복 조회가 없다.
+쓰기 성공·RuntimeException 실패(404/409/5xx 포함)는 서비스 내 adminaudit Processor와 AdminAuditLog에 기록한다.
+감사에는 action/인증 actor/문서 ID/결과만 기록한다. 제목·본문·요청 객체·예외 메시지는 기록하지 않는다.

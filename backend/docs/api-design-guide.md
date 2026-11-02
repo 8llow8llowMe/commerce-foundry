@@ -1517,3 +1517,17 @@ operations-service 가 `GET /api/v1/admin/onboarding/me` 마다 담당 서비스
 회원가입의 선택적 `X-Client-Subject` 헤더는 게이트웨이 전용 불투명 IP 식별자이며 FE가 만들거나 저장하지 않는다.
 이메일과 별도 30회·10분 IP 창을 먼저 검사한다. 헤더가 없으면 IP 차원만 건너뛴다. 요청 JSON·성공 응답 형식은 그대로다.
 FE는 기존 400·409와 별도로 429 안내 및 Retry-After 대기를 처리해야 한다. API 리뷰 대상은 `seonghoho`다.
+
+## 상담 지식 ADMIN API (#469 PR-B)
+
+`/api/v1/admin/support/knowledge`는 ADMIN 전용이며 GET 목록·POST 생성, `/{documentId}` GET 상세·PUT 최신 초안 전체 편집·DELETE 리비전 보관을 제공한다.
+`/{documentId}/revisions` POST는 새 초안(201), `/approve` POST는 최신 초안 승인, `/publish` POST는 최신 승인본 게시다.
+계약 정본은 [support-knowledge-guide.md](support-knowledge-guide.md)의 관리자 계약이다. 고객 FAQ·검색·AI 진입은 후속이다.
+목록은 optional type/locale, page=0/size=20(1~100), 문서 ID 내림차순 PageResponse이며 본문을 제외한다.
+본문·필터의 wire 값은 type=`FAQ|POLICY|TEMPLATE`, locale=`KO|EN`(한국어/영어의 대문자 코드)이다. category 허용 값은 Swagger enum을 따른다.
+상세는 문서와 최신 리비전·승인 메타데이터·버전을 제공한다. 식별자는 문자열이고 enum은 metadata다.
+PUT/승인은 expectedVersion, 새 초안은 expectedDocumentVersion, 게시와 보관은 두 버전을 모두 요구한다.
+DELETE는 본문 없이 필수 query revisionNumber/expectedVersion/expectedDocumentVersion을 받고 200 표준 봉투를 반환한다.
+동일 현재 게시본 게시·이미 보관한 대상 보관은 멱등이다. 생성 POST는 멱등성을 보장하지 않으며 새 초안 재시도 충돌은 재조회해야 한다.
+필드 검증은 SUPPORT_1xx/198/199(400), 없는 대상은 SUPPORT_001(404), 상태·버전 충돌은 SUPPORT_003/004(409)다.
+FE는 응답의 문서/리비전 버전을 보관해 요청에 포함하고 409이면 재조회해야 한다. API 리뷰 대상은 `seonghoho`다.

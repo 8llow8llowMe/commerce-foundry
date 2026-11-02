@@ -6,17 +6,20 @@ import com.commercefoundry.domainlayer.knowledge.application.exception.Knowledge
 import com.commercefoundry.domainlayer.knowledge.application.exception.KnowledgeException;
 import com.commercefoundry.domainlayer.knowledge.application.mapper.KnowledgeMapper;
 import com.commercefoundry.domainlayer.knowledge.application.port.out.KnowledgeRepositoryPort;
+import com.commercefoundry.domainlayer.knowledge.application.port.out.query.KnowledgeSummaryQueryResult;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeDocument;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeLocale;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeRevision;
+import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeType;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import java.time.Instant;
+import java.util.function.Supplier;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 
@@ -27,6 +30,11 @@ public class KnowledgeRepositoryAdapter implements KnowledgeRepositoryPort {
     private final KnowledgeDocumentRepository documents;
     private final KnowledgeRevisionRepository revisions;
     private final KnowledgeMapper mapper;
+
+    @Override
+    public Page<KnowledgeSummaryQueryResult> findAdminSummaries(KnowledgeType type, KnowledgeLocale locale, int page, int size) {
+        return documents.findAdminSummaries(type, locale, PageRequest.of(page, size));
+    }
 
     @Override
     public Optional<KnowledgeDocument> findDocument(long id) {
