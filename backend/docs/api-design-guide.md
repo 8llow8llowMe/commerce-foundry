@@ -643,6 +643,16 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
   원본 업로드는 임시 접두어 수명(1일)까지 남겨 재시도할 수 있다. 존재하는 원본은 같은 운영자가 재사용할 수 있으며, 일회 소비 토큰은 아니다.
   등록 자체는 멱등하지 않으므로 응답 유실 시 목록을 확인한 뒤 재시도한다. PUT 수정 · 이미지 교체/삭제 API · 옵션 편집은 후속 범위다.
 
+#### SKU별 품절 임박 기준과 조회 (#229 PR-1)
+
+`GET/PUT/DELETE /api/v1/admin/stocks/{skuId}/low-stock-policy`와 `GET /api/v1/admin/stocks/low?page=0&size=20`은 ADMIN 전용이다.
+PUT은 `{thresholdQuantity}`(필수 long, 0 이상)를 받고 정책만 교체한다. GET은 `{skuId,enabled,thresholdQuantity,updatedAt}`이며,
+미설정은 `enabled:false`와 nullable 칸 null이다. DELETE는 미설정도 200이다. 없는 SKU·삭제 상품은 404 `STOCK_ALERT_001`, 잠금 경합은 409 `STOCK_ALERT_002`다.
+목록은 `PageResponse`(size 1~100)이며 설정된 SKU 중 판매 가능 수량이 기준 이하인 항목만 낸다. 무제한·삭제 상품은 제외하고 숨김·판매 중지는 상태와 함께 포함한다.
+재고 미등록은 수량 0이며 판매 가능 수량 → SKU ID 오름차순이다. 재고 수량·선점·복원은 변경하지 않는다.
+검증 코드 `STOCK_ALERT_101~105`, 저장·잠금·감사·목록 필드와 후속 범위는 [품절 임박 기준 가이드](stock-alert-guide.md)를 따른다.
+정기 알림·재주문 추천·재입고 발송은 이 API의 기능이 아니다.
+
 ### 2-7. 고객 상품의 프리오더 · 영상 필드 (product-service, #61)
 
 고객 상품 목록과 상세의 상품명·요약·상세 HTML은 `Accept-Language`가 `en` 계열일 때 영문 저장 값을 우선한다(#20).

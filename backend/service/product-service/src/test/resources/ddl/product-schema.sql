@@ -1056,6 +1056,30 @@
     comment on column product.stock_adjustment_history.sku_id is
         'SKU 아이디 (FK: sku.id)';
 
+    create table product.stock_alert_policy (
+        sku_id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        threshold_quantity bigint not null,
+        primary key (sku_id),
+        constraint ck_stock_alert_policy_threshold_quantity_non_negative check (threshold_quantity >= 0)
+    );
+
+    comment on table product.stock_alert_policy is
+        'SKU별 품절 임박 기준. 행이 없으면 점검 제외';
+
+    comment on column product.stock_alert_policy.sku_id is
+        'SKU 아이디 (PK · FK: sku.id)';
+
+    comment on column product.stock_alert_policy.created_at is
+        '생성 시각';
+
+    comment on column product.stock_alert_policy.updated_at is
+        '수정 시각';
+
+    comment on column product.stock_alert_policy.threshold_quantity is
+        '품절 임박 기준 판매 가능 수량 (0 이상, 이하일 때 대상)';
+
     create table product.stock_reservation (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
