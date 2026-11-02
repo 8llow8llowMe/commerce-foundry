@@ -57,13 +57,33 @@ export type DisplayProductItem = {
   preorder: boolean;
 };
 
+/** 룩 대표 이미지(BE #372 `DisplayElementItem.Image`) */
+export type DisplayLookImageItem = {
+  url: string;
+  width: number | null;
+  height: number | null;
+  altText: string | null;
+};
+
+/** 전시가 참조한 룩(BE #372) — 화보와 구성 상품의 원천은 룩 관리다. 숨김 · 삭제 상품은 BE 가 뺀다 */
+export type DisplayLookItem = {
+  lookId: string;
+  title: string;
+  description: string | null;
+  image: DisplayLookImageItem;
+  /** 룩 순서의 고객 노출 상품 카드 */
+  products: DisplayProductItem[];
+};
+
 export type DisplayElementItem = {
   itemId: string;
-  itemType: 'MEDIA' | 'PRODUCT' | (string & {});
+  itemType: 'MEDIA' | 'PRODUCT' | 'LOOK' | (string & {});
   /** itemType 이 MEDIA 가 아니면 null */
   media: DisplayMediaItem | null;
   /** itemType 이 PRODUCT 가 아니면 null */
   product: DisplayProductItem | null;
+  /** itemType 이 LOOK 이 아니면 null. 룩 참조 전(BE #372 이전) 응답에는 없다 */
+  look?: DisplayLookItem | null;
   caption: string | null;
 };
 

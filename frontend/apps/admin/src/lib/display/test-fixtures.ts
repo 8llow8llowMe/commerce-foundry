@@ -38,6 +38,7 @@ export function mediaItem(
       ...overrides,
     },
     product: null,
+    lookId: null,
     caption,
   };
 }
@@ -52,6 +53,18 @@ export function productItem(
     itemType: { code: 'PRODUCT', name: '상품', description: '' },
     media: null,
     product: { productId, name, visible },
+    lookId: null,
+    caption,
+  };
+}
+
+/** 룩 참조 아이템(BE #372) */
+export function lookItem(lookId: string, caption: string | null = null): DisplayElementAdmin {
+  return {
+    itemType: { code: 'LOOK', name: '룩', description: '' },
+    media: null,
+    product: null,
+    lookId,
     caption,
   };
 }

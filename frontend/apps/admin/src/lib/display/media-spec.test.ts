@@ -14,7 +14,7 @@ describe('media-spec', () => {
 
   it('칸 이름으로 규격을 찾고, 칸이 하나면 그것', () => {
     expect(specFor('HERO', '모바일')?.minWidth).toBe(1080);
-    expect(specFor('LOOK', '모바일')).toBe(MEDIA_SPECS.LOOK[0]);
+    expect(specFor('DETAIL', '모바일')).toBe(MEDIA_SPECS.DETAIL[0]);
     expect(specFor('PRODUCT_PICK', 'PC')).toBeNull();
   });
 

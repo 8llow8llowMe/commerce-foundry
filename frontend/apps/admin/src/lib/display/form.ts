@@ -11,6 +11,7 @@ import {
   CAPTION_TYPES,
   ITEM_RANGES,
   LIMITS,
+  LOOK_REFERENCE_TYPES,
   MEDIA_URL_TYPES,
   MOBILE_MEDIA_TYPES,
   TITLE_WIDTH,
@@ -75,6 +76,7 @@ export function newImageItem(): MediaFormItem {
 export const isMediaUrlType = (type: SectionTypeCode) => MEDIA_URL_TYPES.includes(type);
 export const hasMobileMedia = (type: SectionTypeCode) => MOBILE_MEDIA_TYPES.includes(type);
 export const hasMediaCaption = (type: SectionTypeCode) => CAPTION_TYPES.includes(type);
+export const isLookReferenceType = (type: SectionTypeCode) => LOOK_REFERENCE_TYPES.includes(type);
 
 /** 고른 상품. availability 는 이번에 검색해서 더한 상품만 안다(섹션 응답에는 노출 여부만 있다) */
 export type ProductFormItem = {
@@ -94,6 +96,13 @@ export type SectionForm = Record<TextFieldKey, string> & {
   endAt: string;
   media: MediaFormItem[];
   products: ProductFormItem[];
+  /** 고른 룩 아이디(룩 섹션, BE #372) — 배열 순서가 메인 노출 순서다. 이름 · 노출 여부는 룩 목록으로 보인다(`LookPickField`) */
+  lookIds: string[];
+  /**
+   * 이관 전 룩 섹션(미디어 · 상품으로 저장된 LOOK)의 미디어 · 상품 수. 고객 메인에 보이지 않고(BE `isLegacyLook`),
+   * 룩을 골라 저장하면 지워진다(`backend/docs/display-look-migration.md`). 0 이면 이관 전 섹션이 아니다
+   */
+  legacyItemCount: number;
   /** 불러온 기간(UTC ISO) — 칸을 고치지 않았으면 이 값을 그대로 보낸다(분 아래 초 · 밀리초를 잃지 않게) */
   loadedPeriod: { startAt: string | null; endAt: string | null };
 };
@@ -146,6 +155,16 @@ export function productCountMessage(type: SectionTypeCode): string {
     : `상품은 ${max}개까지 넣을 수 있습니다.`;
 }
 
+export const LOOK_DUPLICATED = '같은 룩이 두 번 들어 있습니다.';
+export const LOOK_MISSING =
+  '찾을 수 없는(지워진) 룩이 있습니다. 그 룩을 빼거나 다른 룩으로 바꿔 저장해 주세요.';
+
+/** 룩 수 범위 안내 — 하한 · 상한은 BE 섹션 규칙 */
+export function lookCountMessage(type: SectionTypeCode): string {
+  const [min, max] = ITEM_RANGES[type].look;
+  return `룩은 ${min}개 이상 ${max}개 이하로 골라 주세요.`;
+}
+
 /** 이미지 · 영상 수 범위 안내 — 하한 · 상한은 BE 섹션 규칙 */
 export function mediaCountMessage(type: SectionTypeCode): string {
   const [min, max] = ITEM_RANGES[type].media;
@@ -159,8 +178,16 @@ const MEDIA_URL_REJECTED = /[\s\p{Zs}\p{Cc}\p{Cs}]/u;
 export function editForm(section: DisplaySectionAdmin, type: SectionTypeCode): SectionForm {
   const media: MediaFormItem[] = [];
   const products: ProductFormItem[] = [];
+  const lookIds: string[] = [];
+  let legacyItemCount = 0;
+  const lookType = isLookReferenceType(type);
   for (const item of section.items) {
-    if (item.media) {
+    if (item.lookId) {
+      lookIds.push(item.lookId);
+    } else if (lookType) {
+      // 이관 전 룩의 미디어 · 상품 — 폼에 싣지 않는다(룩 섹션은 받지 않는다). 저장하면 룩 참조로 바뀐다
+      legacyItemCount++;
+    } else if (item.media) {
       media.push({
         media: item.media,
         url: item.media.pcUrl,
@@ -190,6 +217,8 @@ export function editForm(section: DisplaySectionAdmin, type: SectionTypeCode): S
     endAt: isoToLocalInput(section.endAt),
     media,
     products,
+    lookIds,
+    legacyItemCount,
     loadedPeriod: { startAt: section.startAt, endAt: section.endAt },
   };
 }
@@ -212,6 +241,8 @@ export function createForm(type: SectionTypeCode): SectionForm {
     endAt: '',
     media: Array.from({ length: mediaSlots }, newImageItem),
     products: [],
+    lookIds: [],
+    legacyItemCount: 0,
     loadedPeriod: { startAt: null, endAt: null },
   };
 }
@@ -234,7 +265,8 @@ function periodValue(text: string, loaded: string | null): string | null | undef
  * 폼 → 생성 · 수정(전체 교체) 본문. 규칙을 어기면 보내지 않고 칸 오류를 돌려준다 — 판정은 BE 와 같다.
  * - 문구는 앞뒤 공백을 빼고 비면 null 이다. 길이는 UTF-16 코드 유닛(BE `@Size` 와 같다).
  * - 보이는 칸만 검사한다 — 보이지 않는 칸은 저장된 값을 그대로 다시 보낸다(서버가 이미 받은 값이다).
- * - 아이템 순서는 미디어 → 상품이다. LOOK 만 두 종류를 받는데, 메인은 미디어 · 상품을 따로 읽으므로 섞인 저장 순서를 이 순서로 바꿔도 같다.
+ * - 아이템 순서는 미디어 → 상품 → 룩이다. 한 유형이 두 종류를 받지 않으므로 순서가 섞이지 않는다.
+ * - 룩 섹션은 룩 참조만 보낸다(BE #372) — 수(1~10)와 중복을 본다. 지워진 룩인지는 서버가 본다(`DISPLAY_001`).
  * - 제목은 BE 200자에 더해 유형별 너비 한도(`TITLE_WIDTH`, 2줄 규칙)를 넘으면 막는다 — 서버는 보지 않는 화면 규칙이다(#71).
  * - 미디어는 이미지 수(BE 하한 · 상한)와 주소(필수 · 500자 · 공백 금지), 모바일 주소(선택, 같은 규칙), 설명(200자 · 한 줄)을 본다.
  *   저장소 주소인지는 서버가 본다(`PRODUCT_054`).
@@ -315,6 +347,12 @@ export function sectionRequest(form: SectionForm): BuildResult {
     push(errors, 'products', PRODUCT_DUPLICATED);
   }
 
+  const [minLook, maxLook] = ITEM_RANGES[form.sectionType].look;
+  if (maxLook > 0 && (form.lookIds.length < minLook || form.lookIds.length > maxLook)) {
+    push(errors, 'looks', lookCountMessage(form.sectionType));
+  }
+  if (new Set(form.lookIds).size !== form.lookIds.length) push(errors, 'looks', LOOK_DUPLICATED);
+
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
     ok: true,
@@ -331,6 +369,7 @@ export function sectionRequest(form: SectionForm): BuildResult {
           productId: item.productId,
           caption: item.caption,
         })),
+        ...form.lookIds.map(lookRequest),
       ],
     },
   };
@@ -378,6 +417,7 @@ export function draftRequest(form: SectionForm): DisplaySectionRequest {
         productId: item.productId,
         caption: item.caption,
       })),
+      ...form.lookIds.map(lookRequest),
     ],
   };
 }
@@ -401,7 +441,14 @@ function mediaRequest(
   };
 }
 
+const lookRequest = (lookId: string): DisplayItemRequest => ({
+  itemType: 'LOOK',
+  lookId,
+  caption: null,
+});
+
 function itemRequest(item: DisplayElementAdmin): DisplayItemRequest | null {
+  if (item.lookId) return { itemType: 'LOOK', lookId: item.lookId, caption: item.caption };
   if (item.media) return mediaRequest(item.media, item.media.altText, item.caption);
   if (item.product) {
     return { itemType: 'PRODUCT', productId: item.product.productId, caption: item.caption };
@@ -411,7 +458,7 @@ function itemRequest(item: DisplayElementAdmin): DisplayItemRequest | null {
 
 /**
  * 저장된 섹션을 그대로 다시 보내는 본문 — 목록의 노출 켜기 · 끄기(전체 교체 PUT 이라 나머지 칸 · 아이템을 모두 싣는다).
- * 아이템은 응답 순서 그대로다(LOOK 은 미디어 · 상품이 섞여 있다).
+ * 아이템은 응답 순서 그대로다. 이관 전 룩 섹션은 미디어 · 상품 그대로 보내 BE 가 거절한다(`PRODUCT_047`, `rowFailure`).
  */
 export function unchangedRequest(
   section: DisplaySectionAdmin,
@@ -452,12 +499,10 @@ export function sectionWarnings(form: SectionForm): string[] {
   ) {
     warnings.push('제목 · 본문이 모두 비어 있으면 이 섹션은 메인에 보이지 않습니다.');
   }
-  if (
-    form.sectionType === 'LOOK' &&
-    form.products.length > 0 &&
-    form.products.every((item) => !item.visible)
-  ) {
-    warnings.push('넣은 상품이 모두 숨김이라 메인에는 사진 · 문구만 보이고 함께 담기가 없습니다.');
+  if (form.legacyItemCount > 0) {
+    warnings.push(
+      `이관 전 룩 섹션입니다(이미지 · 상품 ${form.legacyItemCount}개). 지금은 메인에 보이지 않습니다. 룩을 골라 저장하면 기존 이미지 · 상품은 이 섹션에서 지워지니, 필요하면 룩 관리에서 먼저 룩으로 만들어 두세요.`,
+    );
   }
   return warnings;
 }

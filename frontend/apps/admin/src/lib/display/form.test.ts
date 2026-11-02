@@ -7,7 +7,8 @@ import {
   editForm,
   LABEL_WITHOUT_URL,
   LINK_RULE,
-  mediaCountMessage,
+  lookCountMessage,
+  LOOK_DUPLICATED,
   MEDIA_URL_FORMAT,
   MEDIA_URL_REQUIRED,
   newImageItem,
@@ -24,7 +25,7 @@ import {
   type SectionForm,
 } from './form';
 import { localInputToIso } from './text';
-import { mediaItem, productItem, section } from './test-fixtures';
+import { lookItem, mediaItem, productItem, section } from './test-fixtures';
 
 const pick = section('PRODUCT_PICK', {
   title: '이번 주 추천',
@@ -83,85 +84,62 @@ describe('createForm', () => {
     expect(createForm('STORY').media).toEqual([]);
   });
 
-  it('룩은 빈 이미지 주소 칸 하나로 시작한다(미디어 하한 1)', () => {
-    expect(createForm('LOOK').media).toEqual([newImageItem()]);
+  it('룩은 미디어 칸 없이 빈 룩 목록으로 시작한다(룩 참조, BE #372)', () => {
+    expect(createForm('LOOK')).toMatchObject({ media: [], products: [], lookIds: [] });
+    expect(createForm('HERO').media).toEqual([newImageItem()]);
   });
 });
 
-describe('sectionRequest — 룩(미디어를 주소로 넣는다, #419)', () => {
-  const lookSection = section('LOOK', {
-    body: '본문',
-    items: [
-      mediaItem({ mobileUrl: 'https://cdn.example.test/displays/a-mo.jpg' }),
-      productItem('21'),
-      mediaItem({ pcUrl: 'https://cdn.example.test/displays/b-pc.jpg', altText: '두 번째 사진' }),
-    ],
-  });
-
-  it('제목 · 본문 · 링크를 고치고, 주소를 바꾼 이미지만 모바일 주소를 버린다(미디어 → 상품 순)', () => {
-    const form = editForm(lookSection, 'LOOK');
-    expect(form.media.map((item) => item.url)).toEqual([
-      'https://cdn.example.test/displays/a-pc.jpg',
-      'https://cdn.example.test/displays/b-pc.jpg',
-    ]);
-    form.media[0]!.url = ' https://cdn.example.test/displays/new.jpg ';
-    const request = okRequest({ ...form, linkUrl: '/shop', linkLabel: '보러 가기' });
-    expect(request).toMatchObject({ body: '본문', linkUrl: '/shop', linkLabel: '보러 가기' });
+describe('sectionRequest — 룩(룩 참조, BE #372)', () => {
+  it('고른 룩을 순서대로 LOOK 아이템으로 보낸다(미디어 · 상품은 보내지 않는다)', () => {
+    const form = editForm(
+      section('LOOK', { body: '본문', items: [lookItem('7'), lookItem('8')] }),
+      'LOOK',
+    );
+    expect(form.lookIds).toEqual(['7', '8']);
+    expect(form.legacyItemCount).toBe(0);
+    const request = okRequest({ ...form, lookIds: ['8', '7'], linkUrl: '/shop' });
+    expect(request).toMatchObject({ body: '본문', linkUrl: '/shop' });
     expect(request.items).toEqual([
-      {
-        itemType: 'MEDIA',
-        media: {
-          mediaType: 'IMAGE',
-          pcUrl: 'https://cdn.example.test/displays/new.jpg',
-          mobileUrl: null,
-          pcPosterUrl: null,
-          mobilePosterUrl: null,
-          altText: '샘플 사진',
-        },
-        caption: null,
-      },
-      {
-        itemType: 'MEDIA',
-        media: expect.objectContaining({ pcUrl: 'https://cdn.example.test/displays/b-pc.jpg' }),
-        caption: null,
-      },
-      { itemType: 'PRODUCT', productId: '21', caption: null },
+      { itemType: 'LOOK', lookId: '8', caption: null },
+      { itemType: 'LOOK', lookId: '7', caption: null },
     ]);
   });
 
-  it('주소를 고치지 않으면 모바일 주소를 그대로 둔다', () => {
-    const request = okRequest(editForm(lookSection, 'LOOK'));
-    expect(request.items[0]).toMatchObject({
-      media: { mobileUrl: 'https://cdn.example.test/displays/a-mo.jpg' },
-    });
-  });
-
-  it('상품 없이도 저장한다(룩의 상품 하한 0)', () => {
-    const form = {
-      ...createForm('LOOK'),
-      media: [{ ...newImageItem(), url: 'https://cdn.example.test/l.jpg', altText: '룩 사진' }],
-    };
-    expect(okRequest(form).items).toHaveLength(1);
-  });
-
-  it('이미지 주소는 필수 · 500자 · 공백 금지, 이미지 수는 1 ~ 10개다', () => {
+  it('룩은 1 ~ 10개 · 중복 없이 고른다', () => {
     const base = createForm('LOOK');
-    expect(errorsOf(base)).toEqual({
-      'media.0.url': [MEDIA_URL_REQUIRED],
-      'media.0.altText': [ALT_TEXT_REQUIRED],
-    });
-    const withUrl = (url: string) => ({ ...newImageItem(), url, altText: '룩 사진' });
-    expect(errorsOf({ ...base, media: [withUrl('https://cdn.example.test/a b.jpg')] })).toEqual({
-      'media.0.url': [MEDIA_URL_FORMAT],
-    });
-    expect(
-      errorsOf({ ...base, media: [withUrl(`https://cdn.example.test/${'a'.repeat(500)}`)] }),
-    ).toEqual({ 'media.0.url': [TOO_LONG.mediaUrl] });
-    expect(errorsOf({ ...base, media: [] })).toEqual({ media: [mediaCountMessage('LOOK')] });
-    const eleven = Array.from({ length: 11 }, () => withUrl('https://cdn.example.test/a.jpg'));
-    expect(errorsOf({ ...base, media: eleven })).toEqual({ media: [mediaCountMessage('LOOK')] });
+    expect(errorsOf(base)).toEqual({ looks: [lookCountMessage('LOOK')] });
+    const eleven = Array.from({ length: 11 }, (_, index) => String(index + 1));
+    expect(errorsOf({ ...base, lookIds: eleven })).toEqual({ looks: [lookCountMessage('LOOK')] });
+    expect(errorsOf({ ...base, lookIds: ['1', '1'] })).toEqual({ looks: [LOOK_DUPLICATED] });
   });
 
+  it('이관 전 룩(미디어 · 상품)은 폼에 싣지 않고 세어 알린다 — 룩을 골라 저장하면 룩 참조로 바뀐다', () => {
+    const form = editForm(
+      section('LOOK', { items: [mediaItem(), productItem('21'), mediaItem()] }),
+      'LOOK',
+    );
+    expect(form).toMatchObject({ media: [], products: [], lookIds: [], legacyItemCount: 3 });
+    expect(sectionWarnings(form)).toHaveLength(1);
+    expect(okRequest({ ...form, lookIds: ['7'] }).items).toEqual([
+      { itemType: 'LOOK', lookId: '7', caption: null },
+    ]);
+  });
+
+  it('미리보기 본문(draftRequest)도 고른 룩을 싣는다', () => {
+    expect(draftRequest({ ...createForm('LOOK'), lookIds: ['7'] }).items).toEqual([
+      { itemType: 'LOOK', lookId: '7', caption: null },
+    ]);
+  });
+
+  it('저장된 룩 참조는 그대로 다시 보낸다(노출 켜기 · 끄기)', () => {
+    expect(unchangedRequest(section('LOOK', { items: [lookItem('7')] }), {}).items).toEqual([
+      { itemType: 'LOOK', lookId: '7', caption: null },
+    ]);
+  });
+});
+
+describe('sectionRequest — 미디어 주소(#71)', () => {
   it('이미지는 대체 텍스트가 있어야 저장한다(#71) — 영상은 아니다', () => {
     const hero = editForm(
       section('HERO', {
@@ -422,15 +400,6 @@ describe('sectionWarnings', () => {
     const form = editForm(pick, 'PRODUCT_PICK');
     expect(sectionWarnings(form)).toEqual([]);
     expect(sectionWarnings({ ...form, products: form.products.slice(1) })).toHaveLength(1);
-  });
-
-  it('룩의 상품이 모두 숨김이면 함께 담기가 없다고 알린다(상품이 없으면 알리지 않는다)', () => {
-    const form = editForm(
-      section('LOOK', { items: [mediaItem(), productItem('1', '숨긴 상품', false)] }),
-      'LOOK',
-    );
-    expect(sectionWarnings(form)).toHaveLength(1);
-    expect(sectionWarnings({ ...form, products: [] })).toEqual([]);
   });
 
   it('스토리의 제목 · 본문 · 미디어가 모두 없으면 메인에서 빠진다고 알린다', () => {

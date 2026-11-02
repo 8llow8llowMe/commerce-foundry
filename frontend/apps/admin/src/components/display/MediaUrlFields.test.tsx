@@ -7,7 +7,7 @@ import { MediaUrlFields } from './MediaUrlFields';
 const render = (media: MediaFormItem[], errors: Record<string, string[]> = {}) =>
   renderToStaticMarkup(
     <MediaUrlFields
-      type="LOOK"
+      type="HERO"
       media={media}
       errorsOf={(key) => errors[key] ?? []}
       onChange={() => {}}
@@ -19,20 +19,20 @@ const disabledButton = (html: string, label: string) =>
 
 describe('MediaUrlFields', () => {
   it('저장소에 올린 이미지 주소를 넣으라고 안내하고, 주소 · 대체 텍스트 칸과 미리보기를 보인다', () => {
-    const html = render(editForm(section('LOOK', { items: [mediaItem()] }), 'LOOK').media);
+    const html = render(editForm(section('HERO', { items: [mediaItem()] }), 'HERO').media);
     expect(html).toContain('쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소');
     expect(html).toContain('메인에는 첫 번째 이미지만 보입니다');
-    expect(html).toContain('1번째 이미지 주소');
+    expect(html).toContain('1번째 이미지 PC 주소');
     expect(html).toContain('value="https://cdn.example.test/displays/a-pc.jpg"');
     expect(html).toContain('src="https://cdn.example.test/displays/a-pc.jpg" alt=""');
     expect(html).toContain('value="샘플 사진"');
     expect(html).toContain('1번째 이미지 대체 텍스트 (필수)');
     expect(html).toContain('aria-required="true"');
-    expect(html).toContain('권장 이미지: 세로 4:5 · 1200×1500px 이상.');
+    expect(html).toContain('권장 이미지: PC 세로 4:5 · 1600×2000px 이상');
   });
 
   it('하한(1장)이면 빼기가 없고, 빈 주소 칸은 이미지 없음 · 칸 오류를 보인다', () => {
-    const html = render(createForm('LOOK').media, {
+    const html = render(createForm('HERO').media, {
       'media.0.url': ['이미지 주소를 넣어 주세요.'],
     });
     expect(html).not.toContain('빼기');
@@ -41,7 +41,7 @@ describe('MediaUrlFields', () => {
   });
 
   it('여러 장이면 빼기를 두고, 상한(10장)이면 추가를 막는다', () => {
-    const two = editForm(section('LOOK', { items: [mediaItem(), mediaItem()] }), 'LOOK').media;
+    const two = editForm(section('HERO', { items: [mediaItem(), mediaItem()] }), 'HERO').media;
     expect(render(two)).toContain('aria-label="2번째 이미지 빼기"');
     expect(disabledButton(render(two), '이미지 주소 추가')).toBe(false);
     const ten = Array.from({ length: 10 }, () => two[0]!);
@@ -54,7 +54,7 @@ describe('MediaUrlFields', () => {
       pcUrl: 'https://cdn.example.test/v.mp4',
       pcPosterUrl: 'https://cdn.example.test/v.jpg',
     });
-    const html = render(editForm(section('LOOK', { items: [video] }), 'LOOK').media);
+    const html = render(editForm(section('HERO', { items: [video] }), 'HERO').media);
     expect(html).not.toContain('1번째 영상 주소');
     expect(html).toContain('영상 주소는 여기서 바꿀 수 없습니다');
     expect(html).toContain('src="https://cdn.example.test/v.jpg"');

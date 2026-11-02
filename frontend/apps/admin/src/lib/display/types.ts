@@ -37,9 +37,11 @@ export type DisplayProductAdmin = {
 };
 
 export type DisplayElementAdmin = {
-  itemType: CodeName<'MEDIA' | 'PRODUCT'>;
+  itemType: CodeName<'MEDIA' | 'PRODUCT' | 'LOOK'>;
   media: DisplayMediaAdmin | null;
   product: DisplayProductAdmin | null;
+  /** 참조 룩 아이디(BE #372). 룩이 지워져도 남는다. LOOK 아이템이 아니면 null */
+  lookId: string | null;
   caption: string | null;
 };
 
@@ -79,7 +81,9 @@ export type DisplayItemRequest =
       };
       caption: string | null;
     }
-  | { itemType: 'PRODUCT'; productId: string; caption: string | null };
+  | { itemType: 'PRODUCT'; productId: string; caption: string | null }
+  /** 룩 참조(BE #372) — 화보 · 구성 상품은 룩 관리(`/displays/looks`)가 갖는다 */
+  | { itemType: 'LOOK'; lookId: string; caption: string | null };
 
 export type DisplaySectionRequest = {
   sectionType: string;
@@ -110,20 +114,23 @@ export const LIMITS = {
   sections: 50,
 } as const;
 
-/** 유형별 아이템 수(하한 · 상한 포함). 상한이 0 이면 그 아이템을 받지 않는다 — BE `DisplaySectionType` */
+/**
+ * 유형별 아이템 수(하한 · 상한 포함). 상한이 0 이면 그 아이템을 받지 않는다 — BE `DisplaySectionType`.
+ * 룩 섹션은 룩 참조만 받는다(BE #372) — 미디어 · 상품을 섞으면 400 `PRODUCT_047` 이다.
+ */
 export const ITEM_RANGES: Record<
   SectionTypeCode,
-  { media: [number, number]; product: [number, number] }
+  { media: [number, number]; product: [number, number]; look: [number, number] }
 > = {
-  HERO: { media: [1, 10], product: [0, 0] },
-  PRODUCT_PICK: { media: [0, 0], product: [1, 20] },
-  STORY: { media: [0, 10], product: [0, 0] },
-  LOOK: { media: [1, 10], product: [0, 20] },
-  DETAIL: { media: [1, 10], product: [0, 0] },
+  HERO: { media: [1, 10], product: [0, 0], look: [0, 0] },
+  PRODUCT_PICK: { media: [0, 0], product: [1, 20], look: [0, 0] },
+  STORY: { media: [0, 10], product: [0, 0], look: [0, 0] },
+  LOOK: { media: [0, 0], product: [0, 0], look: [1, 10] },
+  DETAIL: { media: [1, 10], product: [0, 0], look: [0, 0] },
 };
 
 /**
- * 미디어를 주소로 넣고 · 빼는 유형(#419 · #71) — 미디어를 받는 모든 유형이다. 전시용 업로드 API 가 없어
+ * 미디어를 주소로 넣고 · 빼는 유형(#419 · #71) — 미디어를 받는 모든 유형이다(룩 섹션은 룩 참조라 빠진다, BE #372). 전시용 업로드 API 가 없어
  * 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다(룩 관리 화면과 같다). 저장소 주소인지는 서버가 본다(`PRODUCT_054`).
  */
 export const MEDIA_URL_TYPES: readonly SectionTypeCode[] = SECTION_TYPES.filter(
@@ -151,6 +158,11 @@ export const TITLE_WIDTH: Record<SectionTypeCode, number> = {
   LOOK: 16,
   DETAIL: 16,
 };
+
+/** 룩을 골라 넣는 유형(BE #372) — 지금은 룩 섹션뿐이다 */
+export const LOOK_REFERENCE_TYPES: readonly SectionTypeCode[] = SECTION_TYPES.filter(
+  (type) => ITEM_RANGES[type].look[1] > 0,
+);
 
 /** 업로드 없이 만들 수 있는 유형 — 미디어 하한이 0 이거나 미디어를 주소로 넣는 유형(지금은 모든 유형) */
 export const CREATABLE_TYPES = SECTION_TYPES.filter(
