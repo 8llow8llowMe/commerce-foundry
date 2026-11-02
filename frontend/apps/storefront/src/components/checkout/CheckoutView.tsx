@@ -558,6 +558,11 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
                 {t.backToCart}
               </Link>
             )}
+            {shownOrderError.kind === 'attemptLimit' && (
+              <Link href="/mypage/orders" className="underline underline-offset-4">
+                {t.ordersLink}
+              </Link>
+            )}
           </div>
         )}
       </aside>

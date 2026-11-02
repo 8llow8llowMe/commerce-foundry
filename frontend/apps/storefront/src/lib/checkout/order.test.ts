@@ -249,15 +249,15 @@ describe('orderFailure', () => {
     });
   });
 
-  it('활성 시도 상한(409 ORDER_022)은 사전 문구로 이 시도를 끝내고 새 키다 — 거절은 아무것도 쓰지 않았다', () => {
+  it('활성 시도 상한(409 ORDER_022)은 사전 문구 + 주문 내역 안내로 이 시도를 끝내고 새 키다 — 거절은 아무것도 쓰지 않았다', () => {
     expect(fail(apiError('conflict', 409, 'ORDER_022', '서버 문구'))).toEqual({
-      kind: 'retry',
+      kind: 'attemptLimit',
       message: ko.checkout.orderErrors.ORDER_022,
       sameKey: false,
     });
     expect(
       orderFailure(apiError('conflict', 409, 'ORDER_022', '서버 문구'), en.checkout, 'en'),
-    ).toEqual({ kind: 'retry', message: en.checkout.orderErrors.ORDER_022, sameKey: false });
+    ).toEqual({ kind: 'attemptLimit', message: en.checkout.orderErrors.ORDER_022, sameKey: false });
   });
 });
 

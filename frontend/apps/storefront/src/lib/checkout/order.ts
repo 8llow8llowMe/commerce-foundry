@@ -90,6 +90,7 @@ export function orderRequest(
  * - stock: 409 `ORDER_016` — 재고 부족. 장바구니에서 수량을 고치게 한다
  * - cart: 담은 상품을 고쳐야 한다(판매 불가 · 수량 상한 · 통화 혼합 · 맞춤 입력 등) — 장바구니로 안내
  * - destination: 배송지를 고쳐야 한다(배송 불가 · 받는 사람 · 연락처 · 주소 형식)
+ * - attemptLimit: 409 `ORDER_022` — 활성 주문 시도 상한. 잠시 뒤 다시 누르거나, 결제 대기 주문이 있으면 주문 내역에서 이어 결제한다
  * - retry: 잠시 뒤 다시 누른다
  */
 export type OrderFailure =
@@ -98,6 +99,7 @@ export type OrderFailure =
   | { kind: 'stock'; message: string; sameKey: false }
   | { kind: 'cart'; message: string; sameKey: false }
   | { kind: 'destination'; message: string; sameKey: false }
+  | { kind: 'attemptLimit'; message: string; sameKey: false }
   | { kind: 'retry'; message: string; sameKey: boolean };
 
 const CART_CODES = new Set([
@@ -169,8 +171,12 @@ export function orderFailure(
   }
   if (CART_CODES.has(code)) return { kind: 'cart', message: textOf(t.cartInvalid), sameKey: false };
   if (cause.kind === 'validation') return { kind: 'cart', message: t.cartInvalid, sameKey: false };
-  // 그 밖의 4xx(019 키 재사용 · 022 활성 시도 상한 · 198/199 헤더 · 403 등) — 이 시도는 끝났다. 새 키로 다시 누를 수 있다
-  // 022 는 결제 대기 주문만 세는 게 아니라(30분 창의 모든 시도) 주문 내역으로 보내지 않고 사전 문구로 잠시 뒤를 안내한다(#425)
+  // 022 는 결제 대기 주문만 세는 게 아니라(30분 창의 모든 시도) 문구는 잠시 뒤를 안내하고(#425), 주문 내역(#28) 링크는
+  // 덧붙이기만 한다 — 결제 대기 주문이 있으면 새로 만들지 않고 이어 결제할 수 있다. 새 키로 다시 누를 수 있다
+  if (code === 'ORDER_022') {
+    return { kind: 'attemptLimit', message: t.orderErrors[code] ?? t.orderFailed, sameKey: false };
+  }
+  // 그 밖의 4xx(019 키 재사용 · 198/199 헤더 · 403 등) — 이 시도는 끝났다. 새 키로 다시 누를 수 있다
   return { kind: 'retry', message: t.orderErrors[code] ?? t.orderFailed, sameKey: false };
 }
 
