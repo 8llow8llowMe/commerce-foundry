@@ -250,6 +250,7 @@ export function TextInput({
   multiline,
   hint,
   errors,
+  required,
   onChange,
 }: {
   label: string;
@@ -257,6 +258,8 @@ export function TextInput({
   max: number;
   multiline: boolean;
   hint?: string;
+  /** 저장 전 검사가 막는 칸 — 화면 낭독기에 알린다(폼은 noValidate) */
+  required?: boolean;
   errors: string[];
   onChange: (value: string) => void;
 }) {
@@ -289,6 +292,7 @@ export function TextInput({
           rows={5}
           value={value}
           aria-invalid={invalid || undefined}
+          aria-required={required || undefined}
           aria-describedby={describedBy}
           onChange={(event) => onChange(event.currentTarget.value)}
           className={cx(className, 'py-2')}
@@ -298,6 +302,7 @@ export function TextInput({
           id={id}
           value={value}
           aria-invalid={invalid || undefined}
+          aria-required={required || undefined}
           aria-describedby={describedBy}
           onChange={(event) => onChange(event.currentTarget.value)}
           className={cx(className, 'h-10')}

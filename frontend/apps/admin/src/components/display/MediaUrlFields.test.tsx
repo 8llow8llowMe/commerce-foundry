@@ -26,6 +26,9 @@ describe('MediaUrlFields', () => {
     expect(html).toContain('value="https://cdn.example.test/displays/a-pc.jpg"');
     expect(html).toContain('src="https://cdn.example.test/displays/a-pc.jpg" alt=""');
     expect(html).toContain('value="샘플 사진"');
+    expect(html).toContain('1번째 이미지 대체 텍스트 (필수)');
+    expect(html).toContain('aria-required="true"');
+    expect(html).toContain('권장 이미지: 세로 4:5 · 1200×1500px 이상.');
   });
 
   it('하한(1장)이면 빼기가 없고, 빈 주소 칸은 이미지 없음 · 칸 오류를 보인다', () => {

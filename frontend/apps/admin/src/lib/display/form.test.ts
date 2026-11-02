@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ALT_TEXT_REQUIRED,
   BODY_CHARACTER,
   createForm,
   draftRequest,
@@ -92,7 +93,7 @@ describe('sectionRequest — 룩(미디어를 주소로 넣는다, #419)', () =>
     items: [
       mediaItem({ mobileUrl: 'https://cdn.example.test/displays/a-mo.jpg' }),
       productItem('21'),
-      mediaItem({ pcUrl: 'https://cdn.example.test/displays/b-pc.jpg', altText: null }),
+      mediaItem({ pcUrl: 'https://cdn.example.test/displays/b-pc.jpg', altText: '두 번째 사진' }),
     ],
   });
 
@@ -137,15 +138,18 @@ describe('sectionRequest — 룩(미디어를 주소로 넣는다, #419)', () =>
   it('상품 없이도 저장한다(룩의 상품 하한 0)', () => {
     const form = {
       ...createForm('LOOK'),
-      media: [{ ...newImageItem(), url: 'https://cdn.example.test/l.jpg' }],
+      media: [{ ...newImageItem(), url: 'https://cdn.example.test/l.jpg', altText: '룩 사진' }],
     };
     expect(okRequest(form).items).toHaveLength(1);
   });
 
   it('이미지 주소는 필수 · 500자 · 공백 금지, 이미지 수는 1 ~ 10개다', () => {
     const base = createForm('LOOK');
-    expect(errorsOf(base)).toEqual({ 'media.0.url': [MEDIA_URL_REQUIRED] });
-    const withUrl = (url: string) => ({ ...newImageItem(), url });
+    expect(errorsOf(base)).toEqual({
+      'media.0.url': [MEDIA_URL_REQUIRED],
+      'media.0.altText': [ALT_TEXT_REQUIRED],
+    });
+    const withUrl = (url: string) => ({ ...newImageItem(), url, altText: '룩 사진' });
     expect(errorsOf({ ...base, media: [withUrl('https://cdn.example.test/a b.jpg')] })).toEqual({
       'media.0.url': [MEDIA_URL_FORMAT],
     });
@@ -155,6 +159,32 @@ describe('sectionRequest — 룩(미디어를 주소로 넣는다, #419)', () =>
     expect(errorsOf({ ...base, media: [] })).toEqual({ media: [mediaCountMessage('LOOK')] });
     const eleven = Array.from({ length: 11 }, () => withUrl('https://cdn.example.test/a.jpg'));
     expect(errorsOf({ ...base, media: eleven })).toEqual({ media: [mediaCountMessage('LOOK')] });
+  });
+
+  it('이미지는 대체 텍스트가 있어야 저장한다(#71) — 영상은 아니다', () => {
+    const hero = editForm(
+      section('HERO', {
+        items: [
+          mediaItem({ altText: null }),
+          mediaItem({
+            mediaType: { code: 'VIDEO', name: '영상', description: '' },
+            pcPosterUrl: 'https://cdn.example.test/displays/poster.jpg',
+            altText: null,
+          }),
+        ],
+      }),
+      'HERO',
+    );
+    expect(errorsOf(hero)).toEqual({ 'media.0.altText': [ALT_TEXT_REQUIRED] });
+    hero.media[0]!.altText = '  ';
+    expect(errorsOf(hero)).toEqual({ 'media.0.altText': [ALT_TEXT_REQUIRED] });
+    hero.media[0]!.altText = '가을 화보';
+    expect(okRequest(hero).items).toHaveLength(2);
+  });
+
+  it('노출 켜기 · 끄기(unchangedRequest)는 대체 텍스트 없는 기존 이미지도 막지 않는다', () => {
+    const hero = section('HERO', { items: [mediaItem({ altText: null })] });
+    expect(unchangedRequest(hero, { visible: false }).items).toHaveLength(1);
   });
 
   it('다른 유형은 주소 칸을 검사하지 않는다(대체 텍스트만 고친다)', () => {

@@ -115,6 +115,8 @@ export const PERIOD_FORMAT = '날짜와 시각을 0001년 ~ 9999년 사이로 �
 export const PERIOD_ORDER = '노출 종료는 노출 시작보다 뒤여야 합니다.';
 export const PRODUCT_DUPLICATED = '같은 상품이 두 번 들어 있습니다.';
 export const MEDIA_URL_REQUIRED = '이미지 주소를 넣어 주세요.';
+export const ALT_TEXT_REQUIRED =
+  '대체 텍스트를 써 주세요. 사진을 볼 수 없는 고객에게 읽어 주는 문장입니다.';
 export const MEDIA_URL_FORMAT = '이미지 주소에는 공백 · 줄바꿈을 넣을 수 없습니다.';
 export const MEDIA_URL_NOT_STORAGE =
   '이미지 주소는 쇼핑몰 이미지 저장소에 올린 이미지의 주소만 넣을 수 있습니다. 다른 사이트의 주소인지 확인해 주세요.';
@@ -261,7 +263,12 @@ export function sectionRequest(form: SectionForm): BuildResult {
       }
     }
     const alt = normalizeText(item.altText);
-    if (alt === null) return;
+    if (alt === null) {
+      // 이미지는 대체 텍스트가 있어야 저장한다(#71 — BE 는 선택값). 영상은 메인이 낭독하지 않는다(aria-hidden)
+      if (item.media.mediaType.code === 'IMAGE')
+        push(errors, `media.${index}.altText`, ALT_TEXT_REQUIRED);
+      return;
+    }
     if (alt.length > LIMITS.altText) push(errors, `media.${index}.altText`, TOO_LONG.altText);
     if (hasRejectedCharacter(alt)) push(errors, `media.${index}.altText`, SINGLE_LINE_ONLY);
   });
