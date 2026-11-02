@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
+import { ImageUploadField } from '@/components/upload/ImageUploadField';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied, type FormErrors } from '@/lib/api-errors';
 import { flattenTree, type CategoryRow } from '@/lib/category/tree';
 import { CATEGORIES_PATH, type CategoryTree } from '@/lib/category/types';
@@ -30,10 +31,19 @@ import {
   type SaleStatusCode,
 } from '@/lib/product/create';
 import { createFailure, errorSummary } from '@/lib/product/create-errors';
+import { PRODUCT_IMAGE_UPLOAD_PATH } from '@/lib/upload/image-upload';
 import { OptionEditor } from './OptionEditor';
 import { SkuTable } from './SkuTable';
 
 const selectClass = 'h-10 rounded-md border border-border bg-bg px-3';
+
+/**
+ * 상품 저장 본문에 이미지(`uploadKey`)를 싣는 BE #9 F2 가 아직 없다 — 업로드 칸은 보이되 꺼 둔다.
+ * 지금 올리면 저장할 곳이 없고 올린 파일은 하루 뒤 지워진다. F2 머지 뒤 켜고 `productRequest` 에 싣는다.
+ */
+const IMAGE_ATTACH_READY = false;
+const IMAGE_ATTACH_PENDING =
+  '상품에 이미지를 붙이는 서버 기능이 준비되면 열립니다. 지금은 이미지 없이 등록됩니다.';
 
 type Categories =
   | { kind: 'loading' }
@@ -42,7 +52,9 @@ type Categories =
   | { kind: 'denied'; denied: AccessDenied };
 
 /**
- * 어드민 상품 등록(#29 · BE #9 E1) — `POST /api/v1/admin/products`. 이미지 · 맞춤 제작 · 수정은 아직 없다(BE 미머지).
+ * 어드민 상품 등록(#29 · BE #9 E1) — `POST /api/v1/admin/products`. 이미지 첨부(F2) · 맞춤 제작 · 수정은 아직 없다(BE 미머지).
+ * 이미지 업로드 칸(F1 발급)은 붙여 두고 꺼 둔다(`IMAGE_ATTACH_READY`).
+ * 섹션 · 등록 버튼 줄의 `data-tour` 는 온보딩 투어(#228 `product-new-v1`, 연결은 #228 쪽)가 쓸 앵커다 — 이름을 바꾸면 투어 정의도 같이 바꾼다.
  * **멱등 키가 없다** — 같은 본문을 두 번 보내면 상품이 둘 생긴다. 그래서 제출은 ref 로 한 번만 받고, 성공하면 곧바로 상세로 옮긴다(replace).
  * 결과를 모르는 실패는 다시 보내지 않고 목록에서 확인하게 한다. 저장 401 은 폼을 지킨다(§9 공통 규칙).
  */
@@ -217,7 +229,7 @@ export function ProductCreateForm() {
       </div>
 
       <fieldset disabled={saving} className="flex min-w-0 flex-col gap-8">
-        <Section title="기본 정보">
+        <Section title="기본 정보" tour="product-basic">
           <TextField
             label={`상품명 (${NAME_MAX}자 이하)`}
             value={form.name}
@@ -251,6 +263,18 @@ export function ProductCreateForm() {
             </p>
             <FieldError id={`${id}-description-error`} messages={errorsOf('descriptionHtml')} />
           </div>
+        </Section>
+
+        <Section title="대표 이미지">
+          <ImageUploadField
+            label="대표 이미지 (선택)"
+            issuePath={PRODUCT_IMAGE_UPLOAD_PATH}
+            value={null}
+            onChange={() => {}}
+            onAccessDenied={setDenied}
+            disabled={!IMAGE_ATTACH_READY}
+            disabledNotice={IMAGE_ATTACH_PENDING}
+          />
         </Section>
 
         <Section title="카테고리">
@@ -359,7 +383,7 @@ export function ProductCreateForm() {
           />
         </Section>
 
-        <Section title="가격">
+        <Section title="가격" tour="product-price">
           <div className="flex flex-col gap-1">
             <label htmlFor={`${id}-currency`} className="text-sm font-medium">
               통화
@@ -433,7 +457,7 @@ export function ProductCreateForm() {
           {!form.preorder && <FieldError messages={errorsOf('expectedShipDate')} />}
         </Section>
 
-        <Section title="옵션">
+        <Section title="옵션" tour="product-options">
           <OptionEditor
             groups={form.optionGroups}
             errorsOf={errorsOf}
@@ -442,7 +466,7 @@ export function ProductCreateForm() {
           />
         </Section>
 
-        <Section title={`옵션 조합(SKU) ${rows.length}개`}>
+        <Section title={`옵션 조합(SKU) ${rows.length}개`} tour="product-skus">
           <SkuTable
             rows={rows}
             groups={form.optionGroups}
@@ -455,7 +479,7 @@ export function ProductCreateForm() {
         </Section>
       </fieldset>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" data-tour="product-submit">
         <Button type="submit" disabled={saving || uncertain || categories.kind !== 'ok'}>
           {saving ? '등록 중…' : '상품 등록'}
         </Button>
@@ -467,9 +491,18 @@ export function ProductCreateForm() {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({
+  title,
+  tour,
+  children,
+}: {
+  title: string;
+  /** 온보딩 투어 앵커(`data-tour`) */
+  tour?: string;
+  children: ReactNode;
+}) {
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col gap-4" data-tour={tour}>
       <h2 className="font-semibold">{title}</h2>
       {children}
     </section>

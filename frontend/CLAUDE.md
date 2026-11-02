@@ -38,6 +38,7 @@ pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 ## 핵심 규칙
 
 - 브라우저에서 게이트웨이를 직접 부르지 않는다. 클라이언트는 `apiFetch('/api/v1/...')`, 서버 컴포넌트는 `serverFetch`.
+  예외는 어드민 이미지 업로드의 presigned 스토리지 PUT 하나다(쿠키 없음, `docs/architecture.md` §2 · §9).
 - 토큰은 httpOnly 쿠키에만 있다. JS 에서 토큰을 읽거나 localStorage 에 두지 않는다.
 - 금액은 서버 값을 `formatMoney` 로 표시만 한다. 클라이언트에서 합계·할인을 계산하지 않는다.
 - 색은 토큰 클래스(`bg-primary` 등)로만 쓴다. 앱 코드에 브랜드 이름을 하드코딩하지 않는다.
