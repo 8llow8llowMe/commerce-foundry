@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeProductLooks } from './product-looks';
+import { normalizeLookSlice, normalizeProductLooks } from './product-looks';
 
 const image = { url: 'https://cdn.example.com/a.jpg', width: 1200, height: 1600, altText: '코디' };
 
@@ -74,5 +74,27 @@ describe('normalizeProductLooks', () => {
       altText: null,
     });
     expect(odd?.description).toBe('첫 줄\n둘째 줄');
+  });
+});
+
+describe('normalizeLookSlice', () => {
+  it('룩 목록 한 쪽(contents)을 상품별 룩과 같은 규칙으로 정규화한다', () => {
+    const looks = normalizeLookSlice({
+      contents: [
+        { lookId: '1', title: '첫 룩', image, products: [] },
+        { lookId: '1', title: '중복', image, products: [] },
+        { title: '아이디 없음' },
+      ],
+      hasNext: false,
+    });
+    expect(looks).toEqual([
+      { lookId: '1', title: '첫 룩', description: null, image, products: [] },
+    ]);
+  });
+
+  it('contents 가 배열이 아니면 빈 목록', () => {
+    expect(normalizeLookSlice(null)).toEqual([]);
+    expect(normalizeLookSlice({ looks: [] })).toEqual([]);
+    expect(normalizeLookSlice({ contents: {} })).toEqual([]);
   });
 });

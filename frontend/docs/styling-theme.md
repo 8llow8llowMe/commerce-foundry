@@ -119,6 +119,7 @@
 - 메인에서만 브랜드 설정 `brand.content[locale].footerBackdrop` 화보를 밝기 0.62 로 깔고 글을 Porcelain(`text-bg`)으로 바꾼다. 화보가 null 이면 같은 어두운 단색 면이다. 메인 판별은 `useSelectedLayoutSegment() === null`(`FooterSurface`) — proxy rewrite 뒤 `usePathname` 은 주소와 다를 수 있다. 그라데이션 금지라 스크림을 두지 않으니 화보는 아래쪽이 어두운 컷으로 고른다.
 - 정적으로 미리 그리는 페이지(not-found 등)에는 **빌드 시점** 값이 들어간다. 배포 환경은 빌드 · 실행 모두에 같은 값을 준다.
 - 푸터 고객 안내 링크(약관 · 개인정보처리방침 · 고객센터)는 브랜드 설정 `brand.content[locale].footerLinks` 다. 개인정보처리방침은 `emphasis: true` 로 굵게 둔다.
+- 브랜드 인스타그램은 브랜드 설정 `brand.content[locale].instagram`(계정 주소 · 계정 이름 · 사진 4장, 없으면 null)이다. 메인 06 Our Story 아래 줄로만 쓴다(`docs/architecture.md` §10). 계정 주소는 공개 정보라 저장소에 둔다.
 - 테스트 · 예시에는 실정보가 아닌 자리 값(`000-00-00000`, `홍길동`)만 쓴다.
 
 ## 5. 새 브랜드 추가

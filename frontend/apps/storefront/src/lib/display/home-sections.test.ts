@@ -1,8 +1,12 @@
 import type { HomeSection, LookSection, StorySection } from '@cf/ui';
 import { describe, expect, it } from 'vitest';
+import type { ProductLook } from '@/lib/catalog/types';
 import {
+  fallbackLookOf,
   linkRel,
+  lookFromApi,
   readDisplaySections,
+  replaceFallbackLook,
   resolveHomeBlocks,
   safeHref,
   toHomeBlocks,
@@ -502,5 +506,72 @@ describe('resolveHomeBlocks — 실패 · 빈 응답', () => {
       labels,
     );
     expect(blocks.map((block) => block.id)).toEqual(['display-1']);
+  });
+});
+
+describe('룩 API 의 룩으로 설정 LOOK 바꾸기', () => {
+  const FALLBACK: LookSection = {
+    ...LOOK,
+    body: '설정 문구',
+    link: { label: 'SHOP ALL', href: '/shop' },
+  };
+  const apiLook = (extra: Partial<ProductLook> = {}): ProductLook => ({
+    lookId: '7',
+    title: '가을 나들이 룩',
+    description: null,
+    image: { url: 'https://cdn.example.com/look.jpg', width: 1200, height: 1500, altText: null },
+    products: [product('1'), product('2')],
+    ...extra,
+  });
+
+  it('대표 이미지 · 구성품 순서를 쓰고, 설명이 없으면 설정 문구 · 링크를 쓴다. 대체 텍스트가 없으면 제목이다', () => {
+    expect(lookFromApi(apiLook(), FALLBACK)).toEqual({
+      type: 'LOOK',
+      id: 'look-7',
+      title: '가을 나들이 룩',
+      body: '설정 문구',
+      media: {
+        image: {
+          src: 'https://cdn.example.com/look.jpg',
+          alt: '가을 나들이 룩',
+          width: 1200,
+          height: 1500,
+        },
+        placeholder: '',
+      },
+      productIds: ['1', '2'],
+      link: { label: 'SHOP ALL', href: '/shop' },
+    });
+  });
+
+  it('설명이 있으면 설명을 본문으로, 크기를 모르면 width · height 를 빼고, 이미지가 없으면 null', () => {
+    const look = lookFromApi(
+      apiLook({
+        description: '룩 설명',
+        image: { url: 'https://cdn.example.com/a.jpg', width: null, height: null, altText: '대체' },
+      }),
+      FALLBACK,
+    );
+    expect(look?.body).toBe('룩 설명');
+    expect(look?.media.image).toEqual({ src: 'https://cdn.example.com/a.jpg', alt: '대체' });
+    expect(lookFromApi(apiLook({ image: null }), FALLBACK)).toBeNull();
+  });
+
+  it('설정 LOOK 이 블록에 들어갔을 때만 찾는다', () => {
+    const template: HomeSection[] = [story('a', 'curtain'), FALLBACK];
+    expect(fallbackLookOf(template, template)).toBe(FALLBACK);
+    expect(fallbackLookOf([story('a', 'curtain')], template)).toBeNull();
+    expect(fallbackLookOf(template, [story('a', 'curtain')])).toBeNull();
+  });
+
+  it('설정 LOOK 자리만 룩으로 바꾸고, 룩이 없거나 그릴 수 없으면 그대로 둔다', () => {
+    const blocks: HomeSection[] = [story('a', 'curtain'), FALLBACK, story('b', 'panel')];
+    expect(replaceFallbackLook(blocks, FALLBACK, apiLook()).map((block) => block.id)).toEqual([
+      'a',
+      'look-7',
+      'b',
+    ]);
+    expect(replaceFallbackLook(blocks, FALLBACK, null)).toBe(blocks);
+    expect(replaceFallbackLook(blocks, FALLBACK, apiLook({ image: null }))).toBe(blocks);
   });
 });

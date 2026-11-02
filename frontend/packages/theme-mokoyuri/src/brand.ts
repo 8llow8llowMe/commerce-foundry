@@ -2,6 +2,16 @@ import type { BrandConfig } from '@cf/ui';
 import { home } from './home';
 import { homeEn } from './home-en';
 
+// 메인 Our Story 아래 인스타그램 줄(#59 06). 계정은 언어와 무관하다. 사진은 고객사에서 받기 전까지 빈 자리(촬영 안내라 국문)
+const instagram = {
+  href: 'https://www.instagram.com/moko_yuri/',
+  handle: '@moko_yuri',
+  photos: Array.from({ length: 4 }, (_, index) => ({
+    image: null,
+    placeholder: `게시물 ${index + 1} · 1:1`,
+  })),
+};
+
 export const brand: BrandConfig = {
   name: 'MOKOYURI',
   logoSrc: null,
@@ -58,6 +68,7 @@ export const brand: BrandConfig = {
         placeholder:
           '메인 마지막 화보 · 전폭 가로 · 아래쪽이 어둡고 여백이 넉넉한 컷(법정 정보 13px 가 얹힌다)',
       },
+      instagram,
       // 배송비 · 기간 · 교환 조건과 사이즈 치수는 고객사 확인 값만 넣는다 — 받기 전에는 숨긴다(#60)
       productInfo: { sizeGuide: null, shipping: null },
       home,
@@ -113,6 +124,7 @@ export const brand: BrandConfig = {
         placeholder:
           '메인 마지막 화보 · 전폭 가로 · 아래쪽이 어둡고 여백이 넉넉한 컷(법정 정보 13px 가 얹힌다)',
       },
+      instagram,
       // 배송비 · 기간 · 교환 조건과 사이즈 치수는 고객사 확인 값만 넣는다 — 받기 전에는 숨긴다(#60)
       productInfo: { sizeGuide: null, shipping: null },
       home: homeEn,
