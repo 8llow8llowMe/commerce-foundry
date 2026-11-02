@@ -467,6 +467,26 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   필수 요소가 없어 시작하지 않는데 "다시 보기" 만 남는다. 연결할 때 서버 허용 목록에 `product-new` 를 함께 올린다. 안내는 위치 설명만 하고 등록 버튼을 대신 누르지 않는다.
 - 서버 허용 목록에 아직 없는 투어: `orders`(v2) · `order-detail`(v2) · `shipping-domestic`(v1). BE 가 올릴 때 이 버전으로 등록해야 서버 기록을 쓴다(다른 버전이면 `ONBOARDING_103`).
 
+### 샘플 주문 업무 연습 (`/practice`, #365)
+
+- **입구는 도움말(?)의 "샘플 주문으로 연습하기" 하나다** — 메뉴에는 두지 않는다. 시나리오는 "주문 확인 → 상품 준비 → 가짜 송장 입력" 과 "주문 확인 → 취소 → 가짜 환불 결과" 두 개뿐이다.
+  처음부터 전 운영 화면을 복제하거나 범용 시뮬레이터로 넓히지 않는다. 실제 주문 · 환불 계약(#30 · #27)이 바뀌면 문구 · 상태를 맞춘다.
+- **데이터는 고정 fixture(`lib/practice/fixtures.ts`)와 연습 전용 transport(`lib/practice/transport.ts`)뿐이다** — transport 는 메모리 안에서만 상태를 바꾸고
+  네트워크 요청을 보내지 않는다. 처리할 수 없는 요청(샘플이 아닌 주문 · 모르는 동작 · 틀린 입력)은 실패로 돌려주고 **실서비스로 넘기지 않는다**(fallback 없음).
+  샘플 주문 번호는 `SAMPLE-` 로 시작하고, 택배사도 실제 코드가 아닌 연습 택배다. 금액은 fixture 값을 `formatMoney` 로 보이기만 한다.
+- **연습 본문의 실서비스 요청 0건은 두 겹으로 지킨다** — 범위는 샘플 버튼 · 연습 transport 다. 콘솔 화면 틀(알림 조회 · 투어 진행 기록)은 운영 업무 데이터가 아닌
+  운영자 개인 UI 상태라 다른 화면과 같고, 운영 빌드의 링크 prefetch(읽기)도 범위 밖이다.
+  - ESLint(`eslint.config.mjs` 의 practice override): 연습 폴더(`{lib,components,app/*}/practice/**`)는 `@/` 중 연습 폴더 것만, `@cf/api-client` 에서는
+    `formatMoney` · `Money` 만 들여오고, `../` · 동적 import · `fetch` · `window` · `globalThis` · `navigator` 같은 전역을 쓰지 못한다.
+  - 테스트(`components/practice/Practice.test.tsx`): fetch · XMLHttpRequest · EventSource · WebSocket · sendBeacon · `apiFetch` 를 감시한 채
+    화면의 샘플 버튼과 같은 길(`runPracticeAction` → `practiceReducer`)로 두 시나리오를 실패 입력까지 섞어 끝까지 돌려 0건인지 보고,
+    연습 폴더 소스(하위 폴더 포함)의 모든 import 가 허용 목록 안인지 검사한다.
+- **샘플 버튼을 직접 눌러야 다음 단계로 간다** — 라이브 투어와 달리 "다음" 버튼이 없다. 지금 단계의 동작이 성공해야만 넘어가고(`practiceReducer`), 실패하면 이유를 보이고 단계를 둔다.
+  단계가 바뀌면 단계 제목으로(처음부터 다시 하면 화면 제목으로) 포커스를 옮긴다. 처리 중에는 `aria-disabled` 로 막아 실패해도 포커스가 버튼에 남고,
+  실패 안내는 입력 칸이 `aria-describedby` 로 가리키며 같은 이유로 또 실패해도 다시 읽힌다. 환불 결과는 늘 있는 live region 에 쓴다.
+- **진행은 화면 메모리에만 있다** — "처음부터 다시" · "연습 끝내기" · 뒤로가기로 떠나면 샘플 주문은 처음 상태로 돌아간다. 연습을 마쳐도 서버에 기록하지 않는다
+  — 시작 체크리스트의 업무 완료(#358) · 투어 기록 · 운영 통계와 별개다. 콘솔 화면 틀(알림 · 투어)은 다른 화면과 같다.
+
 ### 로그인 · 세션 (`/login`, #204)
 
 - **세션은 access 토큰 하나다** — 관리자 로그인 `POST /api/v1/auth/admin/login`(BE #191)은 `{ accessToken, accessTokenExpiresIn }` 만 주고 refresh 를 주지 않는다(OTP 등록 관리자는 아래 2단계 뒤에 같은 모양을 받는다).

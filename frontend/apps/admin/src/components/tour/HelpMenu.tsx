@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useSyncExternalStore } from 'react';
 import { HeaderMenu } from '@/components/HeaderMenu';
@@ -7,11 +8,14 @@ import { hasNewerGuide, serverTourState, tourProgress } from '@/lib/tour/progres
 import { ALL_TOURS, CONSOLE_TOUR, helpTopicFor } from '@/lib/tour/tours';
 
 const TOUR_IDS = ALL_TOURS.map((tour) => tour.id);
+/** 샘플 주문 업무 연습(#365) — 실제 주문에 영향 없이 주문 준비 · 송장 · 취소 흐름을 눌러 본다 */
+const PRACTICE_PATH = '/practice';
 
 /**
  * 상단 바 도움말(#228) — 지금 화면의 짧은 설명 · 자주 묻는 질문, 그리고 안내(투어) 다시 보기.
  * 다시 보기는 진행 상태에 요청만 남기고 패널을 닫는다 — 투어는 `TourRunner` 가 시작한다.
  * 본 안내는 운영자별로 서버에 기록한다(BE #357). 서버가 이 화면보다 새 안내를 내면 새로 고침을 안내한다.
+ * 샘플 주문 업무 연습(#365)으로 가는 입구도 여기 하나다.
  */
 export function HelpMenu() {
   const pathname = usePathname();
@@ -73,6 +77,7 @@ export function HelpMenu() {
             >
               모든 화면 안내 다시 켜기
             </MenuButton>
+            <PracticeEntry pathname={pathname} onNavigate={() => setOpen(false)} />
             <p className="text-xs text-muted-fg">
               {state.server.mode === 'local'
                 ? '본 안내는 이 브라우저에 기억합니다. 다른 컴퓨터에서는 처음처럼 다시 보입니다.'
@@ -87,6 +92,26 @@ export function HelpMenu() {
         </div>
       )}
     </HeaderMenu>
+  );
+}
+
+/** 샘플 주문 업무 연습(#365) 입구. 연습 화면 안에서는 숨긴다 */
+export function PracticeEntry({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string;
+  onNavigate: () => void;
+}) {
+  if (pathname === PRACTICE_PATH) return null;
+  return (
+    <Link
+      href={PRACTICE_PATH}
+      onClick={onNavigate}
+      className="rounded-md px-2 py-1.5 hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary"
+    >
+      샘플 주문으로 연습하기
+    </Link>
   );
 }
 
