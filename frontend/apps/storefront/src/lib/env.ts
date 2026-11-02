@@ -29,3 +29,9 @@ export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:30
 export const adminOrigin =
   process.env.ADMIN_ORIGIN ||
   (process.env.NODE_ENV === 'production' ? undefined : 'http://localhost:3001');
+
+/**
+ * 토스페이먼츠 결제위젯 클라이언트 키(`test_gck_` · `live_gck_`, 공개돼도 되는 키 — `backend/docs/payment-guide.md` §2). 빌드 시점에 들어간다(NEXT_PUBLIC_).
+ * 서버 화면이 읽어 결제 화면에 넘긴다. 비었거나 결제위젯 키 형식이 아니면 결제위젯을 띄우지 않는다(`widgetClientKey`).
+ */
+export const tossClientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY;

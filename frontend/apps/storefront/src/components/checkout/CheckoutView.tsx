@@ -2,10 +2,16 @@
 
 import { ApiError, apiFetch, createIdempotencyKey } from '@cf/api-client';
 import { Button } from '@cf/ui';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AddressDetails } from '@/components/account/AddressDetails';
 import { AddressForm } from '@/components/account/AddressForm';
-import { useDictionary, useFormatMoney, useLocale } from '@/components/i18n/LocaleProvider';
+import {
+  useDictionary,
+  useFormatMoney,
+  useLocale,
+  useLocalizedHref,
+} from '@/components/i18n/LocaleProvider';
 import { Link } from '@/components/i18n/Link';
 import { emptyDraft, type AddressDraft } from '@/lib/account/address-form';
 import { countryOptions, defaultCountry } from '@/lib/account/countries';
@@ -22,6 +28,7 @@ import {
   type OrderCreated,
   type OrderFailure,
 } from '@/lib/checkout/order';
+import { paymentPageHref } from '@/lib/checkout/payment';
 import {
   orderLines,
   quoteDestination,
@@ -34,7 +41,6 @@ import {
 } from '@/lib/checkout/quote';
 import { fill } from '@/lib/i18n/format';
 import { useRetryCooldown } from '@/lib/use-retry-cooldown';
-import { OrderPlaced } from './OrderPlaced';
 import { QuoteSummary } from './QuoteSummary';
 
 const RETURN_PATH = '/checkout';
@@ -57,13 +63,15 @@ type OrderError = { scope: string; failure: Exclude<OrderFailure, { kind: 'signe
  * 주문하기(`POST /api/v1/orders`)는 지금 보이는 견적 총액을 `expectedTotalAmount` 로 함께 보낸다 — 견적이 없으면 누를 수 없다.
  * 누름 한 번이 시도 하나이고 `Idempotency-Key` 를 하나 만든다. 같은 키로 다시 보내도 되는 실패(5xx · 연결 · 처리 중 · 429)는
  * 본문이 같으면 다음 누름에 같은 키를 쓴다(`nextAttempt`). 요청 중에는 버튼을 막고(더블 클릭), 429 면 `Retry-After` 동안 막는다.
- * 주문이 생기면 결제 단계 자리 표시(`OrderPlaced`)로 바뀐다 — 결제위젯은 #27 이다.
+ * 주문이 생기면 결제 화면(`/checkout/payment?orderId=`, #27)으로 바꿔 이동한다(뒤로 가기로 주문서에 돌아와 같은 주문을 또 만들지 않게 replace).
  */
 export function CheckoutView({ shippableCountries }: { shippableCountries: string[] }) {
   const t = useDictionary().checkout;
   const accountText = useDictionary().account;
   const locale = useLocale();
   const formatMoney = useFormatMoney();
+  const localize = useLocalizedHref();
+  const router = useRouter();
   const cooldown = useRetryCooldown();
   const { startFrom } = cooldown;
   // 주문 쓰기는 견적과 버튼이 달라 쿨다운도 따로 둔다(`docs/api-client.md` §3-1)
@@ -83,7 +91,8 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
   // 마지막 배송지 실패 — 새 배송지를 고치는 동안(견적이 멈춰 있어도) 이유를 계속 보인다. 배송지를 바꾸거나 견적이 되면 지운다
   const [destinationError, setDestinationError] = useState<string | null>(null);
   const [placing, setPlacing] = useState(false);
-  const [placed, setPlaced] = useState<OrderCreated | null>(null);
+  // 주문이 생겼다 — 결제 화면으로 옮기는 중
+  const [placed, setPlaced] = useState(false);
   const [orderError, setOrderError] = useState<OrderError | null>(null);
   // 같은 키로 다시 보내도 되는 실패로 끝난 시도 — 다음 누름이 본문이 같으면 이 키를 이어 쓴다
   const attempt = useRef<OrderAttempt | null>(null);
@@ -193,7 +202,13 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
     };
   }, [key, quoteRetry, startFrom, t, locale]);
 
-  if (placed) return <OrderPlaced order={placed} />;
+  if (placed) {
+    return (
+      <p role="status" className="py-16 text-center text-sm text-muted-fg">
+        {t.toPayment}
+      </p>
+    );
+  }
   if (signedOut) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
@@ -265,13 +280,13 @@ export function CheckoutView({ shippableCountries }: { shippableCountries: strin
     setPlacing(true);
     setOrderError(null);
     try {
-      setPlaced(
-        await apiFetch<OrderCreated>(ORDERS_PATH, {
-          method: 'POST',
-          json: JSON.parse(thisAttempt.body) as unknown,
-          idempotencyKey: thisAttempt.idempotencyKey,
-        }),
-      );
+      const order = await apiFetch<OrderCreated>(ORDERS_PATH, {
+        method: 'POST',
+        json: JSON.parse(thisAttempt.body) as unknown,
+        idempotencyKey: thisAttempt.idempotencyKey,
+      });
+      setPlaced(true);
+      router.replace(localize(paymentPageHref(order.orderId)));
     } catch (cause) {
       orderCooldown.startFrom(cause);
       const failure = orderFailure(cause, t, locale);

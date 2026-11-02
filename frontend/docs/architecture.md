@@ -298,8 +298,50 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   - **실패**(`orderFailure`) — 금액 변경(`ORDER_010`): 안내 후 견적을 다시 받는다(새 총액 확인 뒤 다시 누름). 재고 부족(`ORDER_016`): 장바구니 링크와 함께 안내.
     장바구니 · 배송지 코드는 견적과 같은 자리로 가르고, 배송지 칸 검증(`shippingAddress.*`, `ORDER_117~128` · `138~140`)은 서버 문구에 필드 이름이 섞여 있어 `checkout.orderErrors` 사전 문구만 쓴다.
     실패 안내는 같은 배송지 · 줄에서만 보이고, 배송지를 바꾸면 사라진다.
-  - **주문 뒤** — 결제위젯(#27, BE #14 뒤) 전까지 결제 단계 자리 표시(`OrderPlaced`)로 바뀐다: 주문 번호 · 주문 응답의 금액 · 결제 기한(`paymentDueAt`, 브라우저 시간대).
-    BE 가 장바구니를 비우지 않으므로 장바구니는 그대로다 — 비우는 시점은 결제 연동에서 정한다.
+  - **주문 뒤** — 결제 화면(`/checkout/payment?orderId=`, §6-2)으로 `router.replace` 한다(뒤로 가기로 주문서에 돌아와 같은 주문을 또 만들지 않게).
+    BE 가 장바구니를 비우지 않고, 결제 완료 뒤에도 비우지 않는다(§6-2).
+
+### 6-2. 결제 (`/checkout/payment`, #27 · BE #14)
+
+토스페이먼츠 **결제위젯**(SDK `@tosspayments/tosspayments-sdk`, 클라이언트 키 `test_gck_` · `live_gck_` — `NEXT_PUBLIC_TOSS_CLIENT_KEY`)이다. 계약 정본은 `backend/docs/payment-guide.md` §3-4 · §4.
+흐름 · 실패 판정은 `lib/checkout/payment.ts` 한 곳이고, 화면은 `PaymentView` · `PaymentResult` · `PaymentFailed` 다. 세 화면 모두 noindex 이고 결제 · 성공 화면은 `requireSession` 이다.
+
+| 경로 | 하는 일 |
+|------|---------|
+| `/checkout/payment?orderId=` | 결제 준비 `POST /api/v1/payments {orderId}` → READY 면 위젯(`setAmount` · `renderPaymentMethods` · `renderAgreement`) → 결제하기 `requestPayment({ orderId: pgOrderId, orderName, successUrl, failUrl })` |
+| `/checkout/payment/success?paymentKey&orderId&amount&order` | 쿼리 검증 → 승인 `POST /api/v1/payments/confirm` + `Idempotency-Key` → DONE · FAILED · UNKNOWN |
+| `/checkout/payment/fail?code&message&orderId&order` | API 없음. 취소 · 실패 안내 + 다시 결제 |
+
+- **금액** — 위젯 · 화면 모두 준비 응답의 금액 그대로다(`formatMoney`). 성공 복귀의 `amount` 는 변조될 수 있어 서버가 결제 시도와 대조한다(400 `PAYMENT_008`).
+- **위젯** — `customerKey` 는 `ANONYMOUS`(회원 식별자를 토스에 넘기지 않고 저장 결제수단을 쓰지 않는다). 키가 없거나 결제위젯 키 형식이 아니면(`widgetClientKey` — 시크릿 키를 잘못 넣어도 브라우저로 보내지 않는다) 위젯 없이 결제 불가 안내다.
+  StrictMode effect 이중 실행에 같은 자리에 두 번 그리지 않게 ref 로 한 번만 그린다. SDK 로드 · 렌더 실패는 다시 시도 버튼이다(오류 내용은 남기지 않는다). SDK 는 `js.tosspayments.com` 스크립트를 불러온다 — CSP 를 도입하면 이 출처를 허용한다.
+- **복귀 주소** — 지금 origin + 지금 언어 접두어 + `?order=<주문 아이디>`(`paymentReturnUrls`, `Link` 와 같은 규칙 — 언어 호스트 방식이면 그 호스트). 토스가 결과 쿼리를 덧붙인다.
+- **준비 응답이 READY 가 아니면 위젯을 띄우지 않는다** — DONE 은 결제 완료 안내, IN_PROGRESS · UNKNOWN 은 "다시 결제하지 말고 잠시 후 확인" 안내(이중 결제 방지).
+- **준비 실패**(`prepareFailure`) — 401 로그인 안내, `PAYMENT_002` · `003` · `004` · `005` 와 그 밖의 4xx 는 사전 문구 + 장바구니, `PAYMENT_015`(결제 게이트 닫힘)는 결제 불가 안내,
+  `PAYMENT_012` · `011` · 5xx · 연결 실패 · 429 는 다시 시도(429 는 `useRetryCooldown`). 결제 준비는 주문당 활성 시도 하나라 멱등 키가 없다.
+- **승인 멱등 키** — 결제 시도(pgOrderId)마다 UUID 하나를 이 탭 sessionStorage `cf.pay.confirm.<pgOrderId>` 에 둔다(값은 키뿐, 결제키는 담지 않는다. 저장소를 못 쓰면 메모리).
+  새로 고침 · 다시 확인 · 로그인 뒤 같은 주소로 돌아와도 같은 키라 서버가 처음 결과(현재 상태)를 돌려준다. StrictMode 이중 실행은 ref 로 막는다. 성공 뒤 주소는 그대로 둔다.
+- **승인 결과** — DONE: 주문 번호 · 주문명 · 결제수단 · 금액(서버 값). FAILED: 사전 문구(서버 `failure.message` 를 보이지 않는다) + 그 주문의 다시 결제(새 준비 → 새 pgOrderId).
+  UNKNOWN · IN_PROGRESS: `GET /api/v1/payments/{paymentId}` 를 3 · 5 · 8 · 13 · 21초 뒤 조회(GET 이라 자동 조회 허용), 그래도 모르면 "다시 결제하지 말고 잠시 후 확인" + 다시 확인(조회를 처음부터). **다시 결제 버튼을 두지 않는다.**
+- **승인 실패**(`confirmFailure`) — 자동으로 다시 보내지 않는다(`api-client.md` §3).
+
+  | 묶음 | 코드 | 화면 |
+  |------|------|------|
+  | 같은 키로 다시 확인 | 503 `PAYMENT_010`(청구 없음 — 계약의 `Retry-After: 5` 동안 버튼을 막는다. 503 의 Retry-After 는 `ApiError` 에 실리지 않는다) · 409 `PAYMENT_007` · 500 `PAYMENT_013` · 503 `PAYMENT_011` · 5xx · 502/504 · 연결 실패 · 봉투 아님 · 429 | 다시 확인 버튼 |
+  | 다시 결제 | 409 `PAYMENT_006`(끝난 시도) | 결제 화면(`order` 쿼리가 없으면 장바구니) |
+  | 불일치 | 400 `PAYMENT_008` · `009` · 409 `PAYMENT_014` | 고객센터 안내. 다시 결제 · 다시 확인 없음 |
+  | 주문 | `PAYMENT_002` · `003` · `004` · `012`(승인 직전 주문 재확인 실패, 청구 없음) | 사전 문구 + 장바구니 |
+  | 끝 | 404 `PAYMENT_001` · 503 `PAYMENT_015` · 그 밖의 4xx | 사전 문구 |
+  | 로그인 | 401 | 다시 로그인 → 같은 주소(같은 키) |
+
+- **실패 복귀** — `PAY_PROCESS_CANCELED`(사용자 취소)는 취소 문구, 그 밖은 일반 실패 문구다. 쿼리의 `message` 는 보이지 않는다 —
+  누구나 링크로 지어낼 수 있어 우리 도메인에 임의 문구(피싱 안내)를 띄우는 통로가 된다. 다시 결제는 `order` 쿼리가 숫자일 때만 결제 화면으로, 아니면 장바구니로. 결제창 요청 자체의 SDK 오류도 같은 원칙이다(`USER_CANCEL` 은 안내, 그 밖은 국문 SDK 메시지 · 범용 문구).
+- **장바구니는 비우지 않는다** — 결제 완료(DONE) → 주문 반영(PAID)은 BE #308 전이라 DONE 이 PAID 를 보장하지 않는다. 비우는 시점은 #308 뒤에 정한다.
+- **남은 것** — 영문 스토어 USD 결제(PayPal, `PAYMENT_005`)는 #31, 결제 쓰기 요청 제한은 BE #440, 미확정 결제 확정 스케줄러는 BE #15 다.
+- **알려진 한계(되돌린 READY)** — 승인이 503 `PAYMENT_010` 으로 끝나면 결제 시도는 결제키를 가진 채 READY 로 돌아간다(`payment-guide.md` §5).
+  고객이 "다시 확인" 대신 결제 화면으로 다시 오면 준비 응답이 같은 READY 라 위젯이 다시 뜨고, 새로 인증한 결제키는 400 `PAYMENT_009`(불일치 안내)로 끝난다.
+  청구는 없지만 그 주문은 BE #15 정리 전까지 결제할 수 없다. 준비 응답에 결제키 유무가 없어 FE 만으로는 가를 수 없다 — BE 에 준비 응답 표시 칸을 요청할 대상이다.
+- **`PAYMENT_013` 다시 확인** — 승인 결과 기록 실패 뒤 다시 확인은 승인을 같은 키로 다시 보낸다(이 시점에는 paymentId 가 없어 상태 조회를 못 한다). 행이 IN_PROGRESS 로 남으면 BE #15 전까지 `PAYMENT_007` 만 받는다.
 
 ## 7. 마이페이지 (#28)
 

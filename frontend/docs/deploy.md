@@ -52,6 +52,7 @@ standalone 의 `node_modules` 에는 `sharp`(이미지 최적화) 네이티브 �
 | 키 | 앱 | 빌드 | 런타임(compose) | 비고 |
 |----|----|:---:|:---:|------|
 | `NEXT_PUBLIC_SITE_URL` | storefront | **필수** | - | 번들에 박힌다. 비면 canonical · hreflang 이 localhost 가 되므로 storefront 배포 빌드는 없으면 멈춘다 |
+| `NEXT_PUBLIC_TOSS_CLIENT_KEY` | storefront | O | - | 결제위젯 클라이언트 키(`test_gck_` · `live_gck_`, 공개 키). 번들에 박힌다. 비면 결제 화면이 결제 불가 안내만 보인다 — 운영 결제 게이트(BE `payment.enabled`)가 닫혀 있는 동안은 필수 빌드 키(`buildRequiredKeys`)로 두지 않는다. dev 이미지는 `test_`, prod 이미지는 `live_` 키 |
 | `LOCALE_HOSTS` | storefront | O | `:-` | proxy 가 읽는다. 빌드 · 실행에 같은 값 |
 | `ADMIN_ORIGIN` | storefront | O | `:-` | 메인 전시 미리보기(#71)를 iframe 으로 여는 어드민 origin. proxy · 미리보기 화면이 읽어 빌드 · 실행에 같은 값. 비면 운영에서는 미리보기를 닫는다(`frame-ancestors 'none'`) |
 | `STOREFRONT_ORIGIN` | admin | - | `:-` | 미리보기가 여는 스토어프론트 origin(요청 시점에 읽어 빌드에는 쓰지 않는다). 비면 운영에서는 미리보기 버튼이 없다 |
