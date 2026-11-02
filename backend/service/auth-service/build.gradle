@@ -42,3 +42,13 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
 }
+
+tasks.named('test') {
+    // 실제 Compose 보간 결과를 로그인 제한 정책 빈에 연결한다. 배포 파일만 바뀌어도 다시 검증한다 (#32).
+    inputs.file(rootProject.file('service/auth-service/docker-compose-auth-service.yml'))
+        .withPropertyName('deploymentCompose')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    // CLI 선택이나 CI의 필수 실행 조건이 바뀌면 local skip 결과를 재사용하지 않는다.
+    inputs.property('composeCli', providers.environmentVariable('TEST_DOCKER_COMPOSE_BINARY').orElse('docker compose'))
+    inputs.property('composeCliRequired', providers.environmentVariable('CI').orElse('false'))
+}

@@ -41,8 +41,8 @@ x-auth-service-environment: &auth_service_environment
   ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}
   ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
   ADMIN_SEED_NAME: ${ADMIN_SEED_NAME:-}
-  # auth.login-guard.enabled 를 켤 때만 필수다(기본 꺼짐)
-  AUTH_LOGIN_GUARD_ENABLED: ${AUTH_LOGIN_GUARD_ENABLED:-false}
+  # 배포 기본은 꺼짐(#355). 명시한 빈 값은 그대로 넘겨 앱 바인딩에서 거절하고, 켜면 HMAC 키가 필수다
+  AUTH_LOGIN_GUARD_ENABLED: ${AUTH_LOGIN_GUARD_ENABLED-false}
   AUTH_LOGIN_GUARD_HASH_KEY: ${AUTH_LOGIN_GUARD_HASH_KEY:-}
   # 관리자 OTP 비밀 암호화 키(AES-256, #238) — 항상 필수다. 이전 키는 회전 중에만 채운다
   AUTH_OTP_SECRET_KEY: ${AUTH_OTP_SECRET_KEY:?deploy-guide.md 4절}

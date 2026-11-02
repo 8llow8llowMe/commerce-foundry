@@ -1308,6 +1308,8 @@ IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존
 - 관리자 잠금 거절은 감사 로그에도 남는다(§11-1). **관리자 429 는 요청마다 `admin.audit` 한 줄(`target=- result=FAILURE`)을 남긴다** —
   잠긴 뒤에도 요청이 이어지면 감사 줄이 요청 수만큼 쌓이니 수집기 용량 · 보관 비용을 확인한다.
 - **켜고 끄기** — 기본 켬이다(application.yml `enabled: ${AUTH_LOGIN_GUARD_ENABLED:true}`, 프로파일 yml 은 덮지 않는다).
+  배포 Compose는 기존 배포 계약(#355)에 따라 미설정 시 `false`를 주입한다(`deploy-guide.md` §4). 앱 자체 기본값과 구분한다.
+  배포에서 켜려면 `AUTH_LOGIN_GUARD_ENABLED=true`와 유효한 HMAC 키를 함께 설정한다. 명시한 빈 값은 `false`로 치환하지 않고 기동을 거절한다.
   끄는 방법은 **`AUTH_LOGIN_GUARD_ENABLED=false`(`.env` 또는 OS 환경변수) 하나**다(비밀이 아니라 Vault 에 두지 않는다 — `secret-management.md` §2).
   꺼진 채 뜨면 기동 때 warn 한 줄(`login guard disabled. property=auth.login-guard.enabled`)을 남긴다 — 운영은 이 줄을 경보로 건다.
   켜면 `AUTH_LOGIN_GUARD_HASH_KEY` 가 필수다(base64 32바이트 이상, 비었거나 풀리지 않으면 기동하지 않는다 — 검증은 프로퍼티 compact 생성자라 거절된 값이 로그에 찍히지 않는다).
@@ -1364,5 +1366,6 @@ IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존
 | `AuthWebControllerTest` · `AdminAuthWebControllerTest` · `MemberWebControllerTest` | 429 봉투 + `Retry-After` — 초 변환 경계(0 · 1 · 999 · 1000 · 1001 · 1500ms)는 `AuthWebControllerTest` |
 | `AuthServiceApplicationTests` | 켬은 `${AUTH_LOGIN_GUARD_ENABLED:true}` 기본값 · 프로파일 yml(local · dev · test)이 스위치를 덮지 않음 |
 | `AuthLoginGuardBeansConfigTest` | `AUTH_LOGIN_GUARD_ENABLED` 없음 → 켬, `false` → 꺼짐 + 기동 warn(`login guard disabled`), 빈 값 → 기동 실패 |
+| `AuthDeploymentLoginGuardTest` | 실제 Compose의 dev/prod 보간 결과로 정책 빈 바인딩: 미설정 → 배포 기본 꺼짐, true/false 보존, 빈 값·비불리언·키 없는 켬 기동 거절. Compose CLI 필요, 데몬·실제 Vault 불필요. CLI 없는 local은 skip, CI 누락은 실패. local 독립 실행 파일은 `TEST_DOCKER_COMPOSE_BINARY`로 지정 |
 | `LoginGuardFlowIntegrationTest` | 5회 실패 → 맞는 비밀번호도 429 → 창 뒤 200, 없는 이메일 같은 429, 변형 이메일 한 창, 고객 성공 시 리셋, 관리자 성공은 리셋 없음, 고객 · 관리자 창 분리, 가입 429, fail-closed · fail-open |
 | `LoginAttemptRedisAdapterTest` (Testcontainers) | Lua 원자성 · TTL 비연장 · 종류별 키 분리(관리자 포함) |

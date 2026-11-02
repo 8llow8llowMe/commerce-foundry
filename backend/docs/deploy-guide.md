@@ -98,7 +98,7 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 | `ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` | O | `:-` 빈 값 | | | O | | | | | |
 | `ADMIN_SEED_NAME` | - | `:-` 빈 값 | | | O | | | | | |
 | `AUTH_LOGIN_GUARD_HASH_KEY` | O | `:-` 빈 값 | | | O | | | | | |
-| `AUTH_LOGIN_GUARD_ENABLED` | - | `:-false` | | | O | | | | | |
+| `AUTH_LOGIN_GUARD_ENABLED` | - | `-false` (미설정만 기본값, 빈 값은 기동 거절) | | | O | | | | | |
 | `AUTH_OTP_SECRET_KEY` | O | `:?` 필수 | | | O | | | | | |
 | `TOSS_SECRET_KEY` | O | `:?` 필수 | | | | | | O | | |
 | `AUTH_OTP_SECRET_KEY_PREVIOUS` | O | `:-` 빈 값 | | | O | | | | | |
