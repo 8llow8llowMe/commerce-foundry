@@ -1,7 +1,7 @@
 # Deploy Guide
 
 > 백엔드 8개 모듈(cloud 2 + service 6 — operations-service 는 compose 가 아직 없다)을 컨테이너로 배포하는 규칙이다. Dockerfile · compose 는 모듈 디렉터리에 있다.
-> 파이프라인은 #198, Infra 등록(포트 값 · 네트워크 이름)은 #197, Vault 주입은 #32 에서 정한다. 정해지면 이 문서를 갱신한다.
+> 파이프라인은 #198, Infra 등록(포트 값 · 네트워크 이름)은 #197, Vault 주입 방식·경로는 #32 에서 확정했다(`secret-management.md` §3). 실제 Vault 등록과 prod 권한 분리는 배포 전에 확인한다.
 > **공개 저장소다.** 서버 주소 · 호스트 이름 · 도메인 · 포트 실값 · 시크릿을 이 문서와 compose 에 쓰지 않는다. 값은 env 로만 받는다.
 
 ## 1. 배포 모델
