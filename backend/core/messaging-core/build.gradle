@@ -24,6 +24,9 @@ dependencies {
     // 서비스 테스트용 Kafka 컨테이너 (testFixtures). 버전은 Boot BOM 이 정한다
     testFixturesApi 'org.testcontainers:testcontainers-kafka'
     testFixturesImplementation 'org.springframework:spring-tx'
+    // outbox 저장소 계약 테스트(OutboxStoreContract) — 서비스 JPA 어댑터 테스트가 상속한다. JUnit · AssertJ 는 Boot BOM 버전이다
+    testFixturesImplementation 'org.junit.jupiter:junit-jupiter-api'
+    testFixturesImplementation 'org.assertj:assertj-core'
 
     // 모듈 자체 왕복 테스트는 내장 Kafka(KRaft)로 돈다 — Docker 없는 로컬에서도 발행 · 소비 · DLT 를 실제로 본다
     testImplementation 'org.springframework.kafka:spring-kafka-test'

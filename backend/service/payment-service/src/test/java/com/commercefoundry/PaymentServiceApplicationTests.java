@@ -2,12 +2,17 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.payment.application.port.out.PaymentEventPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
 import com.commercefoundry.global.config.TossPaymentsStartupGuard;
+import com.commercefoundry.messaging.outbox.OutboxStore;
+import com.commercefoundry.messaging.properties.MessagingProperties;
+import com.commercefoundry.messaging.publish.EventPublisher;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.persistence.EntityManagerFactory;
+import java.time.Clock;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -56,6 +61,20 @@ class PaymentServiceApplicationTests {
         assertThat(applicationContext.getBeansOfType(GroupedOpenApi.class).values())
             .extracting(GroupedOpenApi::getGroup)
             .containsExactlyInAnyOrder("customer", "admin");
+    }
+
+    @Test
+    @DisplayName("test 프로파일은 메시징을 끈다 — 릴레이 · 리스너는 뜨지 않고, 결제 승인 outbox 발행 빈은 조립된다 (#308)")
+    void messagingIsDisabledButPublisherIsAssembled() {
+        MessagingProperties messaging = applicationContext.getBean(MessagingProperties.class);
+
+        assertThat(messaging.enabled()).isFalse();
+        assertThat(messaging.service()).isEqualTo("payment");
+        assertThat(messaging.requiredTopics()).containsExactly("payment.payment-approved", "payment.payment-approved.dlt");
+        assertThat(applicationContext.getBeansOfType(EventPublisher.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(OutboxStore.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(PaymentEventPort.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(Clock.class)).hasSize(1);
     }
 
     @Test
