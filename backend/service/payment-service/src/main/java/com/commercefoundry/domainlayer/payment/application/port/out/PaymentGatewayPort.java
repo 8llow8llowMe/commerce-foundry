@@ -3,6 +3,9 @@ package com.commercefoundry.domainlayer.payment.application.port.out;
 import com.commercefoundry.domainlayer.payment.application.model.PgApprovalRequest;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
+import com.commercefoundry.domainlayer.payment.domain.model.Payment;
+import com.commercefoundry.shared.commerce.Money;
 
 /**
  * PG 연동 ({@code payment-guide.md} §1). application 은 이 포트만 알고, 토스는 {@code adapter/out/client/pg/toss} 에만 나온다.
@@ -14,6 +17,9 @@ import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInqu
  * 미승인을 확인하려면 결제키 조회({@link #inquireByPaymentKey})의 {@link PgInquiryQueryResult.Failed} 가 이 결제 시도의 결제키에 대한 답이어야 한다.
  */
 public interface PaymentGatewayPort {
+
+    /** 같은 claimId 는 같은 PG 멱등 키와 금액으로만 재시도한다. */
+    PgCancelResult cancel(Payment payment, long claimId, Money cancelAmount, Money cumulativeCanceled);
 
     /**
      * 승인을 요청한다. 자동 재시도하지 않는다 — 같은 멱등 키로 다시 부를지는 Processor 가 결제 시도의 상태로 정한다.

@@ -1,10 +1,14 @@
 package com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss;
 
 import com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.dto.TossConfirmRequest;
+import com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.dto.TossCancelRequest;
 import com.commercefoundry.domainlayer.payment.application.model.PgApprovalRequest;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
+import com.commercefoundry.domainlayer.payment.domain.model.Payment;
+import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.global.properties.TossPaymentsProperties;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +25,15 @@ public class TossPaymentGatewayAdapter implements PaymentGatewayPort {
     private final TossPaymentsClient tossPaymentsClient;
     private final TossPaymentsResponseSupport tossPaymentsResponseSupport;
     private final TossPaymentsProperties tossPaymentsProperties;
+
+    @Override
+    public PgCancelResult cancel(Payment payment, long claimId, Money cancelAmount, Money cumulativeCanceled) {
+        Objects.requireNonNull(payment, "payment");
+        String key = Long.toString(claimId);
+        TossCancelRequest body = new TossCancelRequest("ORDER_CLAIM", cancelAmount.toMajorUnit(), key);
+        return tossPaymentsResponseSupport.cancel(payment.pgOrderId(), payment.paymentKey(), payment.amount(), cumulativeCanceled,
+            () -> tossPaymentsClient.cancel(tossPaymentsProperties.basicAuthorization(), key, payment.paymentKey(), body));
+    }
 
     /** 금액은 결제 시도의 금액을 통화의 주 단위로 싣는다(KRW {@code 129000}, USD {@code 89.50}). 멱등 키는 결제 시도 아이디라 같은 시도의 재요청이 같은 값을 싣는다. */
     @Override

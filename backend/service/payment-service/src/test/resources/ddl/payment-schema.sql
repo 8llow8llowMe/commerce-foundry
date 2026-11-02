@@ -94,14 +94,14 @@
         constraint uk_payment_member_approval_key unique (member_id, approval_idempotency_key),
         constraint ck_payment_total_amount_positive check (total_amount > 0),
         constraint ck_payment_pg_order_id_length check (length(pg_order_id) >= 6),
-        constraint ck_payment_active_order_id_status check ((status in ('FAILED','ABORTED','LATE_APPROVED') and active_order_id is null) or (status not in ('FAILED','ABORTED','LATE_APPROVED') and active_order_id is not null and active_order_id = order_id)),
+        constraint ck_payment_active_order_id_status check ((status in ('FAILED','ABORTED','LATE_APPROVED') and active_order_id is null) or (status = 'CANCELED' and (failure_code is not null or abort_reason is not null) and active_order_id is null) or (status not in ('FAILED','ABORTED','LATE_APPROVED') and not (status = 'CANCELED' and (failure_code is not null or abort_reason is not null)) and active_order_id is not null and active_order_id = order_id)),
         constraint ck_payment_approval_started_at_key check (approval_started_at is null or payment_key is not null),
         constraint ck_payment_approval_key_payment_key check (approval_idempotency_key is null or payment_key is not null),
         constraint ck_payment_in_progress_fields check (status not in ('IN_PROGRESS','UNKNOWN') or (payment_key is not null and approval_started_at is not null)),
         constraint ck_payment_approved_fields check ((status in ('DONE','LATE_APPROVED','PARTIAL_CANCELED','CANCELED') and payment_key is not null and method is not null and approved_at is not null) or (status not in ('DONE','LATE_APPROVED','PARTIAL_CANCELED','CANCELED') and method is null and approved_at is null and easy_pay_provider is null and pg_status is null)),
-        constraint ck_payment_failed_fields check ((failure_message is null or failure_code is not null) and ((status = 'FAILED' and failure_code is not null) or status = 'LATE_APPROVED' or (status not in ('FAILED','LATE_APPROVED') and failure_code is null))),
+        constraint ck_payment_failed_fields check ((failure_message is null or failure_code is not null) and ((status = 'FAILED' and failure_code is not null) or status = 'LATE_APPROVED' or (status not in ('FAILED','LATE_APPROVED','CANCELED') and failure_code is null))),
         constraint ck_payment_unknown_fields check ((status = 'UNKNOWN' and unknown_reason is not null) or (status in ('READY','IN_PROGRESS','ABORTED','WAITING_FOR_DEPOSIT') and unknown_reason is null) or status in ('DONE','FAILED','LATE_APPROVED','PARTIAL_CANCELED','CANCELED')),
-        constraint ck_payment_abort_reason_status check ((status = 'ABORTED' and abort_reason is not null) or status = 'LATE_APPROVED' or (status not in ('ABORTED','LATE_APPROVED') and abort_reason is null)),
+        constraint ck_payment_abort_reason_status check ((status = 'ABORTED' and abort_reason is not null) or status in ('LATE_APPROVED','CANCELED') or (status not in ('ABORTED','LATE_APPROVED','CANCELED') and abort_reason is null)),
         constraint ck_payment_late_approved_origin check (status <> 'LATE_APPROVED' or (failure_code is not null and abort_reason is null) or (failure_code is null and abort_reason is not null)),
         constraint ck_payment_order_synced_status check (order_synced = false or status in ('DONE','PARTIAL_CANCELED','CANCELED')),
         constraint ck_payment_order_sync_failure_code_status check (order_sync_failure_code is null or (order_synced = false and status in ('DONE','PARTIAL_CANCELED','CANCELED')))
@@ -188,6 +188,25 @@
     comment on column payment.payment.version is
         '낙관적 락 버전';
 
+    create table payment.payment_cancel (
+        claim_id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        amount bigint not null,
+        currency varchar(3) not null check ((currency in ('KRW','USD'))),
+        payment_id bigint not null,
+        status varchar(20) not null check ((status in ('PENDING','SUCCEEDED','REJECTED'))),
+        version bigint,
+        primary key (claim_id),
+        constraint ck_payment_cancel_amount_positive check (amount > 0)
+    );
+
+    comment on column payment.payment_cancel.created_at is
+        '생성 시각';
+
+    comment on column payment.payment_cancel.updated_at is
+        '수정 시각';
+
     create table payment.shedlock (
         name varchar(64) not null,
         lock_until timestamp(6) with time zone not null,
@@ -225,3 +244,6 @@
 
     create index idx_payment_status_order_synced_id 
        on payment.payment (status, order_synced, id);
+
+    create index idx_payment_cancel_payment_id
+       on payment.payment_cancel (payment_id);

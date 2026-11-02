@@ -65,7 +65,10 @@ import lombok.NoArgsConstructor;
         @CheckConstraint(
             name = "ck_payment_active_order_id_status",
             constraint = "(status in ('FAILED','ABORTED','LATE_APPROVED') and active_order_id is null)"
-                + " or (status not in ('FAILED','ABORTED','LATE_APPROVED') and active_order_id is not null and active_order_id = order_id)"
+                + " or (status = 'CANCELED' and (failure_code is not null or abort_reason is not null) and active_order_id is null)"
+                + " or (status not in ('FAILED','ABORTED','LATE_APPROVED')"
+                + " and not (status = 'CANCELED' and (failure_code is not null or abort_reason is not null))"
+                + " and active_order_id is not null and active_order_id = order_id)"
         ),
         @CheckConstraint(name = "ck_payment_approval_started_at_key", constraint = "approval_started_at is null or payment_key is not null"),
         @CheckConstraint(name = "ck_payment_approval_key_payment_key", constraint = "approval_idempotency_key is null or payment_key is not null"),
@@ -84,7 +87,7 @@ import lombok.NoArgsConstructor;
             name = "ck_payment_failed_fields",
             constraint = "(failure_message is null or failure_code is not null)"
                 + " and ((status = 'FAILED' and failure_code is not null) or status = 'LATE_APPROVED'"
-                + " or (status not in ('FAILED','LATE_APPROVED') and failure_code is null))"
+                + " or (status not in ('FAILED','LATE_APPROVED','CANCELED') and failure_code is null))"
         ),
         @CheckConstraint(
             name = "ck_payment_unknown_fields",
@@ -94,8 +97,8 @@ import lombok.NoArgsConstructor;
         ),
         @CheckConstraint(
             name = "ck_payment_abort_reason_status",
-            constraint = "(status = 'ABORTED' and abort_reason is not null) or status = 'LATE_APPROVED'"
-                + " or (status not in ('ABORTED','LATE_APPROVED') and abort_reason is null)"
+            constraint = "(status = 'ABORTED' and abort_reason is not null) or status in ('LATE_APPROVED','CANCELED')"
+                + " or (status not in ('ABORTED','LATE_APPROVED','CANCELED') and abort_reason is null)"
         ),
         @CheckConstraint(
             name = "ck_payment_late_approved_origin",
