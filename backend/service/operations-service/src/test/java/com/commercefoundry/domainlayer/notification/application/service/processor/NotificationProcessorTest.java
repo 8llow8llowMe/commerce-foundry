@@ -94,7 +94,7 @@ class NotificationProcessorTest {
         }
 
         @Override
-        public Notification save(Notification notification) {
+        public Notification insert(Notification notification) {
             saved.incrementAndGet();
             rows.removeIf(row -> row.id() == notification.id());
             Notification stored = new Notification(
@@ -126,6 +126,18 @@ class NotificationProcessorTest {
         @Override
         public long countUnread(long recipientMemberId) {
             return rows.stream().filter(row -> row.recipientMemberId() == recipientMemberId && row.unread()).count();
+        }
+
+        @Override
+        public int markReadIfUnread(long notificationId, long recipientMemberId, Instant now) {
+            for (int index = 0; index < rows.size(); index++) {
+                Notification row = rows.get(index);
+                if (row.id() == notificationId && row.recipientMemberId() == recipientMemberId && row.unread()) {
+                    rows.set(index, row.markRead(now));
+                    return 1;
+                }
+            }
+            return 0;
         }
 
         @Override

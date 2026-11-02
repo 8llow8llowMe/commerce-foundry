@@ -24,7 +24,7 @@ public class NotificationRecordProcessor {
         if (notificationRepositoryPort.findBySource(request.sourceType(), request.sourceId(), request.kind()).isPresent()) {
             return;
         }
-        notificationRepositoryPort.save(Notification.create(snowflakeIdGenerator.generateId(), request));
+        notificationRepositoryPort.insert(Notification.create(snowflakeIdGenerator.generateId(), request));
     }
 
     public void push(String sourceType, long sourceId, NotificationKind kind) {

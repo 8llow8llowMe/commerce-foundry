@@ -20,24 +20,11 @@ public class NotificationRepositoryAdapter implements NotificationRepositoryPort
     private final NotificationRepository notificationRepository;
 
     @Override
-    public Notification save(Notification notification) {
-        Notification stored = toDomain(notificationRepository.saveAndFlush(toEntity(notification)));
-        if (stored.createdAt() != null || notification.createdAt() == null) {
-            return stored;
+    public Notification insert(Notification notification) {
+        if (notification.version() != null || notification.createdAt() != null || !notification.unread()) {
+            throw new IllegalArgumentException("Only new unread notifications can be inserted");
         }
-        return new Notification(
-            stored.id(),
-            stored.recipientMemberId(),
-            stored.kind(),
-            stored.severity(),
-            stored.title(),
-            stored.linkPath(),
-            stored.sourceType(),
-            stored.sourceId(),
-            stored.readAt(),
-            notification.createdAt(),
-            stored.version()
-        );
+        return toDomain(notificationRepository.saveAndFlush(toEntity(notification)));
     }
 
     @Override
@@ -60,6 +47,11 @@ public class NotificationRepositoryAdapter implements NotificationRepositoryPort
     @Override
     public long countUnread(long recipientMemberId) {
         return notificationRepository.countByRecipientMemberIdAndReadAtIsNull(recipientMemberId);
+    }
+
+    @Override
+    public int markReadIfUnread(long notificationId, long recipientMemberId, Instant now) {
+        return notificationRepository.markReadIfUnread(notificationId, recipientMemberId, now);
     }
 
     @Override
