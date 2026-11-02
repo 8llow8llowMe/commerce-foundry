@@ -32,6 +32,8 @@ x-api-gateway-environment: &api_gateway_environment
   GATEWAY_CORS_ALLOWED_ORIGINS: ${GATEWAY_CORS_ALLOWED_ORIGINS:-}
   # 비면 X-Forwarded-For 를 믿지 않는다. BFF · LB 구성이 정해지면 채운다(security-guide.md §7-3)
   GATEWAY_TRUSTED_PROXIES: ${GATEWAY_TRUSTED_PROXIES:-}
+  # 미설정이면 꺼짐. 명시한 빈 값은 그대로 전달해 애플리케이션의 불리언 검증에서 거절한다
+  GATEWAY_CLIENT_IP_ENABLED: ${GATEWAY_CLIENT_IP_ENABLED-false}
   # gateway.client-ip.enabled 를 켤 때만 필수다(기본 꺼짐)
   GATEWAY_CLIENT_IP_HASH_KEY: ${GATEWAY_CLIENT_IP_HASH_KEY:-}
 
