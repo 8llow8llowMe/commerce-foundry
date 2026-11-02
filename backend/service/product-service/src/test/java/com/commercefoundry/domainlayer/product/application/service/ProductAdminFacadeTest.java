@@ -78,10 +78,24 @@ class ProductAdminFacadeTest {
 
     @BeforeEach
     void setUp() {
-        facade = new ProductAdminFacade(categoryProcessor, productAdminQueryProcessor, new ProductAdminPresenter(), productAdminDetailProcessor,
+        facade = new ProductAdminFacade(idGenerator(), new com.commercefoundry.domainlayer.product.application.service.processor.ProductRegistrationProcessor(
+            productWriteProcessor, productAdminDetailProcessor,
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort.class)),
+            attachments(), new TestTransactionManager(null), categoryProcessor, productAdminQueryProcessor, new ProductAdminPresenter(), productAdminDetailProcessor,
             productWriteProcessor, new ProductDescriptionSanitizer(), org.mockito.Mockito.mock(
             com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class),
             productDeleteProcessor, productAdminAuditProcessor);
+    }
+
+    private com.commercefoundry.persistence.util.SnowflakeIdGenerator idGenerator() {
+        var ids = org.mockito.Mockito.mock(com.commercefoundry.persistence.util.SnowflakeIdGenerator.class);
+        org.mockito.Mockito.lenient().when(ids.generateId()).thenReturn(7L);
+        return ids;
+    }
+
+    private com.commercefoundry.domainlayer.product.application.service.processor.ProductImageAttachmentProcessor attachments() {
+        return new com.commercefoundry.domainlayer.product.application.service.processor.ProductImageAttachmentProcessor(
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.port.out.ProductImageStoragePort.class), idGenerator());
     }
 
     @Test
@@ -108,7 +122,7 @@ class ProductAdminFacadeTest {
         CategoryTree tree = CategoryTree.of(List.of());
         given(productWriteProcessor.displayCategoryIdsOf(command)).willReturn(List.of(12L));
         given(categoryProcessor.getTreeForUpdate()).willReturn(tree);
-        given(productWriteProcessor.create(command, "<p>본문</p>", List.of(12L))).willReturn(7L);
+        given(productWriteProcessor.create(command, "<p>본문</p>", List.of(12L), 7L)).willReturn(7L);
         given(productAdminDetailProcessor.getProduct(7L)).willReturn(detailInfo(7L));
 
         ProductCreateAdminResponse response = facade.create(command);
@@ -117,7 +131,7 @@ class ProductAdminFacadeTest {
         order.verify(productWriteProcessor).validate(command);
         order.verify(categoryProcessor).getTreeForUpdate();
         order.verify(productWriteProcessor).requireCategories(tree, List.of(12L));
-        order.verify(productWriteProcessor).create(command, "<p>본문</p>", List.of(12L));
+        order.verify(productWriteProcessor).create(command, "<p>본문</p>", List.of(12L), 7L);
         assertThat(response.descriptionHtmlSanitized()).isTrue();
         assertThat(response.product().productId()).isEqualTo("7");
     }
@@ -131,7 +145,7 @@ class ProductAdminFacadeTest {
 
         assertThatThrownBy(() -> facade.create(command))
             .isInstanceOfSatisfying(ProductException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(ProductErrorCode.CATEGORY_BUSY));
-        verify(productWriteProcessor, never()).create(any(), any(), any());
+        verify(productWriteProcessor, never()).create(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
     }
 
     private static ProductCreateCommand createCommand(String descriptionHtml) {
@@ -142,6 +156,88 @@ class ProductAdminFacadeTest {
             .skus(List.of(ProductCreateCommand.Sku.builder().optionValues(List.of()).additionalPrice(Money.of(0, KRW)).saleStatus(SaleStatus.ON_SALE).build()))
             .createdByMemberId(100L)
             .build();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void deletesOnlyWhenTransactionConfirmsRollback(boolean confirmedRollback) {
+        var attachment = org.mockito.Mockito.mock(
+            com.commercefoundry.domainlayer.product.application.service.processor.ProductImageAttachmentProcessor.class);
+        var registration = org.mockito.Mockito.mock(
+            com.commercefoundry.domainlayer.product.application.service.processor.ProductRegistrationProcessor.class);
+        var command = createCommand(null);
+        var image = new com.commercefoundry.domainlayer.product.domain.model.ProductImage(8, 7,
+            com.commercefoundry.domainlayer.product.domain.model.ImageType.THUMBNAIL, "https://media.example.com/8.png",
+            null, null, null, 0, null, "products/7/8.png");
+        given(attachment.attach(7, command)).willReturn(List.of(image));
+        RuntimeException failure = confirmedRollback ? new IllegalStateException("registration failed")
+            : new org.springframework.transaction.TransactionSystemException("commit outcome unknown");
+        org.mockito.Mockito.doAnswer(call -> {
+            if (confirmedRollback) {
+                throw failure;
+            }
+            return detailInfo(7L);
+        }).when(registration).register(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(command),
+            isNull(), any(), any(), any());
+        var subject = new ProductAdminFacade(idGenerator(), registration, attachment,
+            new TestTransactionManager(confirmedRollback ? null : failure), categoryProcessor, productAdminQueryProcessor,
+            new ProductAdminPresenter(), productAdminDetailProcessor, productWriteProcessor, new ProductDescriptionSanitizer(), null,
+            productDeleteProcessor, productAdminAuditProcessor);
+        assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
+        verify(attachment, org.mockito.Mockito.times(confirmedRollback ? 1 : 0)).cleanup(List.of("products/7/8.png"));
+    }
+
+    @Test
+    void committedImageSurvivesPresenterFailure() {
+        var attachment = org.mockito.Mockito.mock(
+            com.commercefoundry.domainlayer.product.application.service.processor.ProductImageAttachmentProcessor.class);
+        var registration = org.mockito.Mockito.mock(
+            com.commercefoundry.domainlayer.product.application.service.processor.ProductRegistrationProcessor.class);
+        var presenter = org.mockito.Mockito.mock(ProductAdminPresenter.class);
+        var command = createCommand(null);
+        given(attachment.attach(7, command)).willReturn(List.of(new com.commercefoundry.domainlayer.product.domain.model.ProductImage(
+            8, 7, com.commercefoundry.domainlayer.product.domain.model.ImageType.THUMBNAIL,
+            "https://media.example.com/8.png", null, null, null, 0, null, "products/7/8.png")));
+        given(registration.register(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(command),
+            isNull(), any(), any(), any())).willReturn(detailInfo(7L));
+        var failure = new IllegalStateException("response conversion");
+        given(presenter.toCreateResponse(any(), org.mockito.ArgumentMatchers.anyBoolean())).willThrow(failure);
+        var subject = new ProductAdminFacade(idGenerator(), registration, attachment, new TestTransactionManager(null),
+            categoryProcessor, productAdminQueryProcessor,
+            presenter, productAdminDetailProcessor, productWriteProcessor, new ProductDescriptionSanitizer(), null,
+            productDeleteProcessor, productAdminAuditProcessor);
+        assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
+        verify(attachment, never()).cleanup(any());
+    }
+
+    /** 실제 Spring 완료 콜백을 실행하되 DB 자원은 필요 없는 단위 테스트용 트랜잭션 매니저. */
+    private static final class TestTransactionManager extends org.springframework.transaction.support.AbstractPlatformTransactionManager {
+        private final RuntimeException commitFailure;
+
+        private TestTransactionManager(RuntimeException commitFailure) {
+            this.commitFailure = commitFailure;
+        }
+
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition definition) {
+            assertThat(definition.getTimeout()).isEqualTo(5);
+        }
+
+        @Override
+        protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) {
+            if (commitFailure != null) {
+                throw commitFailure;
+            }
+        }
+
+        @Override
+        protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) {
+        }
     }
 
     private static ProductAdminDetailInfo detailInfo(long productId) {

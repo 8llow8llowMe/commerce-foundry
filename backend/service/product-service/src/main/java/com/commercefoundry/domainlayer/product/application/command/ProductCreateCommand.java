@@ -8,7 +8,7 @@ import lombok.Builder;
 
 /**
  * 어드민 상품 등록 (#9 E1). 문구는 앞뒤 공백을 뺐고 빈 문구는 null 이다. 옵션 · SKU 구성 · 가격 규칙 · 카테고리 존재는 Processor 가 본다.
- * 이미지 첨부(#9 F)와 맞춤 제작 입력(#9 E2)은 이 단계에 없다 — 등록 상품은 이미지 없이 맞춤 제작 꺼짐으로 생긴다.
+ * 이미지 첨부(#9 F2)는 선택이며 맞춤 제작 입력(#9 E2)은 후속 범위다.
  *
  * @param categoryIds 진열 카테고리 (대표 카테고리는 넣지 않아도 Processor 가 더한다). 중복 없이 받은 순서
  * @param descriptionHtml 정제 전 원문 — Processor 가 정제한다
@@ -19,8 +19,15 @@ import lombok.Builder;
 public record ProductCreateCommand(
     String name, String summary, String descriptionHtml, long categoryId, List<Long> categoryIds,
     SaleStatus saleStatus, boolean visible, Money salePrice, Money listPrice, Integer maxQuantityPerOrder,
-    boolean preorder, LocalDate expectedShipDate, List<OptionGroup> optionGroups, List<Sku> skus, long createdByMemberId
+    boolean preorder, LocalDate expectedShipDate, List<OptionGroup> optionGroups, List<Sku> skus, long createdByMemberId, List<Image> images
 ) {
+
+    public ProductCreateCommand {
+        images = images == null ? List.of() : List.copyOf(images);
+    }
+
+    public record Image(String uploadKey, com.commercefoundry.domainlayer.product.domain.model.ImageType imageType, String altText) {
+    }
 
     /** @param values 값 이름 (배열 순서 = 노출 순서) */
     @Builder

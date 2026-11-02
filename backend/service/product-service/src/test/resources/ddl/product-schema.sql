@@ -545,6 +545,7 @@
         image_type varchar(20) not null check ((image_type in ('THUMBNAIL','GALLERY','VIDEO'))),
         poster_url varchar(500),
         product_id bigint not null,
+        storage_key varchar(500),
         url varchar(500) not null,
         width integer,
         primary key (id),
@@ -582,6 +583,9 @@
 
     comment on column product.product_image.product_id is
         '상품 아이디 (FK: product.id)';
+
+    comment on column product.product_image.storage_key is
+        '관리되는 상품 이미지 오브젝트 키. 기존 이관 이미지는 null';
 
     comment on column product.product_image.url is
         '이미지 URL. VIDEO 면 영상 파일 URL';

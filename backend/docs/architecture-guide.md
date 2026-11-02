@@ -158,6 +158,10 @@ Info → Presenter → Response
   트랜잭션을 Facade 에 걸지 않는다.** DB 커넥션을 잡은 채 원격 응답을 기다리게 되고, 원격 호출이
   성공한 뒤 롤백되면 "PG 는 승인했는데 우리 DB 에는 없는" 상태가 생긴다. 외부 호출을 트랜잭션 밖에
   두고 DB 구간만 Processor 단위로 `@Transactional` 을 건다. **왜 좁혔는지 메서드 주석으로 남긴다.**
+- 외부 I/O 가 있는 유스케이스에서 **컨텍스트 간 DB 조율도 한 트랜잭션이어야 하면**, Facade 는 `NOT_SUPPORTED` 로 호출자 트랜잭션을 중단하고
+  DB 구간만 시간 상한이 있는 `TransactionTemplate` 으로 묶을 수 있다(상품 등록 `ProductAdminFacade#create`). 다른 컨텍스트 Processor 는 Facade 가 부르고,
+  반환된 domain model 만 자기 컨텍스트의 `MANDATORY` Processor 에 넘긴다. 외부 복사와 실패 보상은 `execute` 전후에 두며,
+  커밋 결과 불명에서는 DB 참조가 남을 수 있는 외부 객체를 삭제하지 않는다. 프로그램 방식 트랜잭션의 기존 예는 `AiUsageMeterFacade#settle` 이다.
 - **의도적으로 느린 CPU 작업(비밀번호 해시 — BCrypt)** 도 같은 예외다. 트랜잭션 안에서 하면 해시 시간만큼 DB 커넥션을 쥔다.
   해시는 트랜잭션 밖에서 만들고 저장 구간만 Processor 에 `@Transactional` 을 건다 (예: auth `MemberWebFacade#signUp`).
 - **같은 행을 워커 · 다른 요청과 다투는 낙관적 충돌 재시도** 도 예외다. 버전에서 지면 새 트랜잭션에서 다시 읽어야 바뀐 상태로 판정되므로

@@ -35,6 +35,42 @@ public class ProductImageStorageAdapter implements ProductImageStoragePort {
         }
     }
 
+    @Override
+    public String attach(ProductImageUploadKey key, String targetKey) {
+        try {
+            String url = objectStorageClient.publicUrlOf(targetKey);
+            if (url.length() > 500) {
+                throw new ProductException(ProductErrorCode.IMAGE_STORAGE_UNAVAILABLE);
+            }
+            var source = objectStorageClient.head(key.value())
+                .orElseThrow(() -> new ProductException(ProductErrorCode.IMAGE_UPLOAD_NOT_FOUND));
+            if (source.contentLength() <= 0 || source.contentLength() > com.commercefoundry.domainlayer.product.domain.model.ProductImageFormat.MAX_BYTES) {
+                throw new ProductException(ProductErrorCode.IMAGE_SIZE_NOT_ALLOWED);
+            }
+            var format = com.commercefoundry.storage.image.ImageFormat.detect(objectStorageClient.readRange(
+                key.value(), com.commercefoundry.storage.image.ImageFormat.DETECTION_LENGTH, source.eTag()))
+                .orElseThrow(() -> new ProductException(ProductErrorCode.IMAGE_FORMAT_NOT_ALLOWED));
+            if (!format.contentType().equals(key.format().getContentType())
+                || com.commercefoundry.domainlayer.product.domain.model.ProductImageFormat.ofContentType(source.contentType())
+                    .filter(key.format()::equals).isEmpty()) {
+                throw new ProductException(ProductErrorCode.IMAGE_FORMAT_NOT_ALLOWED);
+            }
+            objectStorageClient.copy(key.value(), targetKey, format.contentType(), "public, max-age=31536000, immutable", source.eTag());
+            return url;
+        } catch (StorageException exception) {
+            throw translate(exception);
+        }
+    }
+
+    @Override
+    public void delete(String targetKey) {
+        try {
+            objectStorageClient.delete(targetKey);
+        } catch (StorageException exception) {
+            throw translate(exception);
+        }
+    }
+
     static ProductException translate(StorageException exception) {
         return switch (exception.reason()) {
             case DISABLED -> new ProductException(ProductErrorCode.IMAGE_UPLOAD_DISABLED, exception);

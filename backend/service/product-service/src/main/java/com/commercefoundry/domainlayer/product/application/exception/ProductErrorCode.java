@@ -74,6 +74,8 @@ public enum ProductErrorCode {
      * 첨부할 업로드가 없다 — 키 형식이 틀렸거나, 이 어드민이 발급받은 키가 아니거나, 올리지 않았거나 만료돼 지워졌다(#9 F). 어느 경우인지 알리지 않는다 —
      * 남의 키가 있는지 떠보지 못하게.
      */
+    IMAGE_CONFIGURATION_INVALID("PRODUCT_018", "이미지 유형 · 대표 개수 · 중복 업로드 키를 확인해 주세요.", HttpStatus.BAD_REQUEST),
+
     IMAGE_UPLOAD_NOT_FOUND("PRODUCT_032", "업로드한 이미지를 찾을 수 없습니다. 이미지를 다시 올려 주세요.", HttpStatus.BAD_REQUEST),
     /** JPEG · PNG · WebP 가 아니다 — 업로드 발급의 Content-Type, 또는 첨부 때 파일 앞부분(magic bytes)이 선언과 다르다. */
     IMAGE_FORMAT_NOT_ALLOWED("PRODUCT_033", "이미지는 JPEG · PNG · WebP 만 올릴 수 있습니다.", HttpStatus.BAD_REQUEST),

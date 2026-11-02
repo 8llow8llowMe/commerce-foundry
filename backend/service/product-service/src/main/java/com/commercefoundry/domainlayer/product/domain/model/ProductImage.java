@@ -13,8 +13,14 @@ import java.util.Objects;
  */
 public record ProductImage(
     long id, long productId, ImageType imageType, String url,
-    Integer width, Integer height, String altText, int displayOrder, String posterUrl
+    Integer width, Integer height, String altText, int displayOrder, String posterUrl, String storageKey
 ) {
+
+    /** 기존 이관 · 조회 호출은 관리 키가 없다. */
+    public ProductImage(long id, long productId, ImageType imageType, String url, Integer width, Integer height,
+                        String altText, int displayOrder, String posterUrl) {
+        this(id, productId, imageType, url, width, height, altText, displayOrder, posterUrl, null);
+    }
 
     public ProductImage {
         Objects.requireNonNull(imageType, "imageType");

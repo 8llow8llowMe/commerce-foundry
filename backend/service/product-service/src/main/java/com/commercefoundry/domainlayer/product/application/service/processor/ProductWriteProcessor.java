@@ -36,7 +36,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 어드민 상품 등록의 판정 · 저장 (#9 E1). 이미지(F) · 맞춤 제작 입력(E2)은 아직 받지 않는다 — 상품은 이미지 없이 맞춤 제작 꺼짐으로 생긴다.
+ * 어드민 상품 등록의 판정 · 저장 (#9 E1). 이미지(F2)는 별도 Processor 가 준비하고 같은 등록 트랜잭션에서 저장한다. 맞춤 제작 입력(E2)은 후속 범위다.
  *
  * <p>판정은 저장 전에 모두 끝낸다 — 옵션 · SKU 구성({@code PRODUCT_013} · {@code 014}), 가격 규칙({@code 016}), 카테고리 존재({@code 012}).
  * SKU 는 옵션 값 이름으로 조합을 고른다(그룹 순서대로 하나씩) — 값 아이디는 저장할 때 발급하므로 요청이 알 수 없다.
@@ -97,7 +97,11 @@ public class ProductWriteProcessor {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public long create(ProductCreateCommand command, String descriptionHtml, List<Long> categoryIds) {
-        long productId = snowflakeIdGenerator.generateId();
+        return create(command, descriptionHtml, categoryIds, snowflakeIdGenerator.generateId());
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public long create(ProductCreateCommand command, String descriptionHtml, List<Long> categoryIds, long productId) {
         productRepositoryPort.insert(new Product(
             productId, command.categoryId(), command.name(), command.summary(), descriptionHtml,
             command.saleStatus(), command.visible(), command.salePrice(), command.listPrice(), command.maxQuantityPerOrder(),

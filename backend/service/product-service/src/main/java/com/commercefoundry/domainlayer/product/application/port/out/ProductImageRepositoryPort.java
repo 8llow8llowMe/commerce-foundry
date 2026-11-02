@@ -6,6 +6,8 @@ import java.util.List;
 
 public interface ProductImageRepositoryPort {
 
+    void insertAll(List<ProductImage> images);
+
     /** 대표 · 갤러리 모두. 노출 순서 → 아이디 오름차순 — 유형별로 나누는 것은 호출한 쪽이 한다. */
     List<ProductImage> findAllByProductId(long productId);
 

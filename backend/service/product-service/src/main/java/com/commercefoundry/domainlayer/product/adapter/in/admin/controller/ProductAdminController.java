@@ -75,7 +75,8 @@ public class ProductAdminController {
 
     @Operation(
         summary = "상품 등록",
-        description = "이미지 없이, 맞춤 제작 꺼짐으로 상품을 만들고 201 과 저장된 상세(편집용 상세 조회와 같은 모양)를 돌려준다. 등록한 어드민은 토큰의 memberId 다. "
+        description = "맞춤 제작 꺼짐으로 상품을 만들고 201 과 저장된 상세(편집용 상세 조회와 같은 모양)를 돌려준다. 등록한 어드민은 토큰의 memberId 다. "
+            + "images 는 선택이며 본인에게 발급된 uploadKey 와 THUMBNAIL/GALLERY 유형으로 최대 8장(대표 한 장)을 첨부한다. 생략하면 이미지 없이 등록한다. "
             + "상세 HTML 은 허용 목록으로 정제해 저장하고 빠진 것이 있으면 descriptionHtmlSanitized=true 다. "
             + "SKU 는 그룹 순서대로 고른 옵션 값 이름으로 조합을 가리킨다 — 옵션 없는 상품은 SKU 한 개. initialStock 을 준 SKU 는 재고 행과 입고 이력이 함께 생기고, "
             + "주지 않은 SKU 는 품절로 생긴다. 없는 카테고리는 400(PRODUCT_012), 옵션 · SKU 구성은 400(PRODUCT_013), 같은 조합 SKU 는 400(PRODUCT_014), "

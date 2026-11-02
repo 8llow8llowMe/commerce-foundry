@@ -101,6 +101,9 @@ public final class ProductValidationMessage {
     public static final String PRODUCT_MONEY_AMOUNT_MAX = "PRODUCT_037:amount 는 100000000 이하여야 합니다.";
     public static final String PRODUCT_EXPECTED_SHIP_DATE_PAST = "PRODUCT_038:expectedShipDate 는 오늘 이후여야 합니다.";
 
+    // 1xx 대역 소진으로 등록의 미사용 019 를 쓴다. 040~045 는 카테고리 계약이므로 재사용하지 않는다.
+    public static final String PRODUCT_IMAGES_INVALID = "PRODUCT_019:images 는 최대 8장입니다. 업로드 키와 200자 이하 대체 텍스트를 확인해 주세요.";
+
     private ProductValidationMessage() {
     }
 }
