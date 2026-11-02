@@ -668,6 +668,15 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
 
 ### 2-9. 메인 전시 (product-service, #63)
 
+전시 · 룩 공용 이미지 업로드(#508): ADMIN `POST /api/v1/admin/displays/image-uploads`는
+`{contentType, contentLength}`를 받아 201 `{uploadKey, uploadUrl, method, headers, expiresAt}`를 반환한다.
+반환한 헤더로 PUT한 뒤 같은 관리자가 `POST /api/v1/admin/displays/image-uploads/{uploadKey}/confirm`(본문 없음)을 호출하면
+200 `{publicUrl, contentType, contentLength}`를 받는다. 모두 Response 봉투이며 성공 응답은 no-store다.
+JPEG · PNG · WebP, 1바이트~10MiB만 허용한다. 업로드 키는 canonical lowercase UUID.ext basename이다.
+잘못된 키/형식/크기는 400, 없는 객체/타인 namespace는 동일 404, 원본 변경은 409, 비활성/저장소 실패는 503(MEDIA_UPLOAD_ 접두어)다.
+확정 publicUrl을 기존 전시 pcUrl/mobileUrl 또는 룩 image.url에 저장한다. width/height는 모르면 생략하며 서버에서 계산하지 않는다.
+조건부 검증/복사, 보관 정책과 FE 흐름의 정본은 [display-media-upload-guide.md](display-media-upload-guide.md)다.
+
 메인 화면의 섹션(블록)을 어드민이 바꾼다. 섹션 유형은 브랜드와 무관한 블록 이름(`HERO` · `PRODUCT_PICK` · `STORY` · `LOOK` · `DETAIL`)이고,
 브랜드 문구는 섹션의 **제목 값**이다 — 코드에 고객사 이름 · 문구를 두지 않는다(`architecture-guide.md` §9). 이 유형은 페이지 빌더(#74)의 블록으로 그대로 옮긴다.
 
@@ -774,6 +783,9 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 - **게이트웨이**: 상품 사이즈표는 기존 `products/**` 로 라우팅된다. 템플릿 접두어 `/api/v1/admin/size-chart-templates/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다.
 
 ### 2-11. 룩 — Shop the Look (product-service, #62)
+
+룩 대표 이미지의 브라우저 업로드는 §2-9의 공용 발급 → PUT → 확정 흐름을 사용한다(#508).
+룩 생성/수정은 기존 image.url 공개 URL 계약을 유지하며 치수는 선택 입력이다.
 
 룩은 대표 이미지 한 장과 구성 상품 1~20개의 묶음이다. 어드민이 만들고 순서를 정한다. 메인 전시의 `LOOK` 섹션(§2-9)은 이 룩의 ID를 참조한다. 화보와 구성 상품은 여기 한 곳에서 관리한다.
 고객 노출은 기능 플래그 `store.features.looks`(기본 꺼짐)가 정하고, 어드민 API 는 플래그와 무관하게 동작한다(켜기 전에 미리 만들어 둔다, `architecture-guide.md` §9).

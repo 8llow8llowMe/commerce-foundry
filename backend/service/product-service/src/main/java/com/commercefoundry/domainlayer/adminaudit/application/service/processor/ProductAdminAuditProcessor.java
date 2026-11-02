@@ -56,6 +56,16 @@ public class ProductAdminAuditProcessor {
         write(ProductAdminAuditAction.PRODUCT_SIZE_CHART_REPLACE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
     }
 
+    public void mediaImageUploadIssued(long actorMemberId, java.util.UUID id, boolean succeeded) {
+        write(ProductAdminAuditAction.MEDIA_IMAGE_UPLOAD_ISSUE, actorMemberId,
+            id == null ? null : AdminAuditLog.target("media-upload", id.toString()), succeeded);
+    }
+
+    public void mediaImageUploadConfirmed(long actorMemberId, java.util.UUID id, boolean succeeded) {
+        write(ProductAdminAuditAction.MEDIA_IMAGE_UPLOAD_CONFIRM, actorMemberId,
+            id == null ? null : AdminAuditLog.target("media-upload", id.toString()), succeeded);
+    }
+
     private static void write(ProductAdminAuditAction action, long actorMemberId, String target, boolean succeeded) {
         AdminAuditLog.write(action.name(), actorMemberId, target, succeeded);
     }
