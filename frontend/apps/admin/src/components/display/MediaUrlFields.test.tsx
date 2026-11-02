@@ -58,5 +58,43 @@ describe('MediaUrlFields', () => {
     expect(html).not.toContain('1번째 영상 주소');
     expect(html).toContain('영상 주소는 여기서 바꿀 수 없습니다');
     expect(html).toContain('src="https://cdn.example.test/v.jpg"');
+    expect(html).toContain('1번째 영상 대체 텍스트 (선택)');
+  });
+
+  it('히어로는 PC · 모바일 주소 칸과 썸네일을 따로 두고, 모바일이 비면 PC 사진을 쓴다고 알린다(#71)', () => {
+    const renderHero = (mobileUrl: string | null) =>
+      renderToStaticMarkup(
+        <MediaUrlFields
+          type="HERO"
+          media={editForm(section('HERO', { items: [mediaItem({ mobileUrl })] }), 'HERO').media}
+          errorsOf={() => []}
+          onChange={() => {}}
+        />,
+      );
+    const html = renderHero('https://cdn.example.test/displays/a-mo.jpg');
+    expect(html).toContain('1번째 이미지 PC 주소');
+    expect(html).toContain('1번째 이미지 모바일 주소 (선택)');
+    expect(html).toContain('src="https://cdn.example.test/displays/a-mo.jpg"');
+    expect(html).toContain('PC 세로 4:5 · 1600×2000px 이상, 모바일 세로 4:5 · 1080×1350px 이상');
+    expect(html).toContain('메인에는 첫 번째 이미지만 보입니다');
+    expect(renderHero(null)).toContain('PC 사진을 씀');
+  });
+
+  it('디테일은 클로즈업마다 설명 칸을 두고, 넣은 순서대로 모두 보인다고 안내한다', () => {
+    const html = renderToStaticMarkup(
+      <MediaUrlFields
+        type="DETAIL"
+        media={
+          editForm(section('DETAIL', { items: [mediaItem({}, '손바느질 깃')] }), 'DETAIL').media
+        }
+        errorsOf={(key) => (key === 'media.0.caption' ? ['설명 오류'] : [])}
+        onChange={() => {}}
+      />,
+    );
+    expect(html).toContain('1번째 이미지 설명 (선택)');
+    expect(html).toContain('value="손바느질 깃"');
+    expect(html).toContain('설명 오류');
+    expect(html).toContain('메인에는 넣은 순서대로 모두 보입니다');
+    expect(html).not.toContain('모바일 주소');
   });
 });

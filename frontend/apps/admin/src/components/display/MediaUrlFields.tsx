@@ -2,17 +2,25 @@
 
 import { Button, FieldError } from '@cf/ui';
 import { useState } from 'react';
-import { newImageItem, type MediaFormItem } from '@/lib/display/form';
+import {
+  hasMediaCaption,
+  hasMobileMedia,
+  newImageItem,
+  type MediaFormItem,
+} from '@/lib/display/form';
 import { mediaSpecHint, specFor } from '@/lib/display/media-spec';
 import { normalizeText } from '@/lib/display/text';
 import { ITEM_RANGES, LIMITS, type SectionTypeCode } from '@/lib/display/types';
 import { MediaSizeNotice, useImageSize } from './MediaSizeCheck';
 import { TextInput } from './SectionEditor';
 
+/** 메인이 미디어를 몇 장 그리는지 — 히어로 · 룩은 첫 장만, 스토리 · 디테일은 모두(스토어프론트 `home-sections`) */
+const FIRST_ONLY: readonly SectionTypeCode[] = ['HERO', 'LOOK'];
+
 /**
- * 주소로 넣는 이미지(#419, 메인 전시 LOOK) — 업로드(#9)가 아직 없어 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다(룩 관리 화면과 같다).
- * 넣고 · 빼고 · 주소와 대체 텍스트를 고친다. 저장소 주소인지는 서버가 본다(`PRODUCT_054`). 영상은 주소를 바꾸지 않고 빼기만 한다.
- * 메인은 첫 번째 이미지만 그린다(영상은 대표 사진).
+ * 주소로 넣는 이미지(#419 · #71) — 전시용 업로드 API 가 없어 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다(룩 관리 화면과 같다).
+ * 넣고 · 빼고 · 주소와 대체 텍스트를 고친다. 히어로는 모바일 주소를 따로(비우면 PC 사진), 디테일은 클로즈업마다 설명을 쓴다.
+ * 저장소 주소인지는 서버가 본다(`PRODUCT_054`). 영상은 주소를 바꾸지 않고 빼기만 한다.
  */
 export function MediaUrlFields({
   type,
@@ -37,7 +45,10 @@ export function MediaUrlFields({
       </legend>
       <p className="text-xs text-muted-fg">
         이미지 업로드는 준비 중입니다. 지금은 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣어
-        주세요. 다른 사이트의 이미지 주소는 저장되지 않습니다. 메인에는 첫 번째 이미지만 보입니다.
+        주세요. 다른 사이트의 이미지 주소는 저장되지 않습니다.
+        {FIRST_ONLY.includes(type)
+          ? ' 메인에는 첫 번째 이미지만 보입니다.'
+          : ' 메인에는 넣은 순서대로 모두 보입니다.'}
       </p>
       {specHint && <p className="text-xs text-muted-fg">{specHint}</p>}
       <ul className="flex flex-col gap-3">
@@ -50,8 +61,7 @@ export function MediaUrlFields({
             item={item}
             errorsOf={errorsOf}
             removable={media.length > min}
-            onUrl={(url) => update(index, { url })}
-            onAltText={(altText) => update(index, { altText })}
+            onChange={(patch) => update(index, patch)}
             onRemove={() => onChange(media.filter((_, at) => at !== index))}
           />
         ))}
@@ -76,8 +86,7 @@ function MediaUrlRow({
   item,
   errorsOf,
   removable,
-  onUrl,
-  onAltText,
+  onChange,
   onRemove,
 }: {
   type: SectionTypeCode;
@@ -85,63 +94,75 @@ function MediaUrlRow({
   item: MediaFormItem;
   errorsOf: (key: string) => string[];
   removable: boolean;
-  onUrl: (url: string) => void;
-  onAltText: (altText: string) => void;
+  onChange: (patch: Partial<MediaFormItem>) => void;
   onRemove: () => void;
 }) {
   const isVideo = item.media.mediaType.code === 'VIDEO';
-  const preview = isVideo ? item.media.pcPosterUrl : normalizeText(item.url);
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const failed = preview !== null && failedUrl === preview;
+  // 히어로만 PC · 모바일 칸이 따로다. 다른 유형의 모바일 주소는 메인이 같은 칸에 쓴다
+  const split = hasMobileMedia(type);
+  const pcSrc = isVideo ? item.media.pcPosterUrl : normalizeText(item.url);
+  const mobileSrc = isVideo ? item.media.mobilePosterUrl : normalizeText(item.mobileUrl);
+  const pc = useThumb(pcSrc);
+  const mobile = useThumb(split ? mobileSrc : null);
   const position = `${index + 1}번째 ${item.media.mediaType.name}`;
-  const measure = useImageSize(failed ? null : preview);
+  const slot = (name: string) => (split ? ` ${name}` : '');
 
   return (
     <li className="flex flex-wrap items-start gap-4 rounded-md bg-bg p-3">
-      <div className="flex w-28 shrink-0 flex-col gap-1">
-        {preview && !failed ? (
-          // 이미지 CDN 이 정해지지 않아 next/image 를 쓰지 않는다(스토어프론트 메인과 같다)
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={preview}
-            src={preview}
-            alt=""
-            decoding="async"
-            onLoad={measure.onLoad}
-            onError={() => setFailedUrl(preview)}
-            className="aspect-[4/5] w-full rounded bg-muted object-cover"
-          />
-        ) : (
-          <div className="flex aspect-[4/5] w-full items-center justify-center rounded bg-muted p-2 text-center text-xs text-muted-fg">
-            {failed ? '이미지를 불러오지 못했습니다' : '이미지 없음'}
-          </div>
-        )}
+      <div className="flex shrink-0 gap-2">
+        <Thumb thumb={pc} label={split ? 'PC' : null} />
+        {split && <Thumb thumb={mobile} label="모바일" empty="PC 사진을 씀" />}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
         <span className="text-xs text-muted-fg">
           {index + 1}. {item.media.mediaType.name}
           {isVideo && ' (대표 사진)'}
         </span>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
         {isVideo ? (
           <p className="text-xs text-muted-fg">
             영상 주소는 여기서 바꿀 수 없습니다. 메인에는 대표 사진이 보입니다.
           </p>
         ) : (
-          <TextInput
-            label={`${position} 주소`}
-            value={item.url}
-            max={LIMITS.mediaUrl}
-            multiline={false}
-            hint={
-              failed
-                ? '이 주소의 이미지를 불러오지 못했습니다. 주소가 맞는지 확인해 주세요.'
-                : undefined
-            }
-            errors={errorsOf(`media.${index}.url`)}
-            onChange={onUrl}
+          <>
+            <TextInput
+              label={`${position}${slot('PC')} 주소`}
+              value={item.url}
+              max={LIMITS.mediaUrl}
+              multiline={false}
+              hint={pc.failed ? LOAD_FAILED : undefined}
+              errors={errorsOf(`media.${index}.url`)}
+              required
+              onChange={(url) => onChange({ url })}
+            />
+            {split && (
+              <TextInput
+                label={`${position} 모바일 주소 (선택)`}
+                value={item.mobileUrl}
+                max={LIMITS.mediaUrl}
+                multiline={false}
+                hint={
+                  mobile.failed
+                    ? LOAD_FAILED
+                    : '비우면 모바일에서도 PC 사진을 씁니다. 모바일 화면에 맞춰 자른 사진이 있으면 넣어 주세요.'
+                }
+                errors={errorsOf(`media.${index}.mobileUrl`)}
+                onChange={(mobileUrl) => onChange({ mobileUrl })}
+              />
+            )}
+          </>
+        )}
+        <MediaSizeNotice
+          spec={specFor(type, 'PC')}
+          size={pc.measure.size}
+          label={split ? 'PC' : undefined}
+        />
+        {split && (
+          <MediaSizeNotice
+            spec={specFor(type, '모바일')}
+            size={mobile.measure.size}
+            label="모바일"
           />
         )}
-        <MediaSizeNotice spec={specFor(type, 'PC')} size={measure.size} />
         <TextInput
           label={isVideo ? `${position} 대체 텍스트 (선택)` : `${position} 대체 텍스트 (필수)`}
           value={item.altText}
@@ -154,8 +175,19 @@ function MediaUrlRow({
           }
           errors={errorsOf(`media.${index}.altText`)}
           required={!isVideo}
-          onChange={onAltText}
+          onChange={(altText) => onChange({ altText })}
         />
+        {hasMediaCaption(type) && (
+          <TextInput
+            label={`${position} 설명 (선택)`}
+            value={item.caption}
+            max={LIMITS.caption}
+            multiline={false}
+            hint="메인에서 이 클로즈업 옆에 보이는 한 줄입니다(예: 손바느질 깃)."
+            errors={errorsOf(`media.${index}.caption`)}
+            onChange={(caption) => onChange({ caption })}
+          />
+        )}
         {removable && (
           <div>
             <Button variant="secondary" onClick={onRemove} aria-label={`${position} 빼기`}>
@@ -165,5 +197,54 @@ function MediaUrlRow({
         )}
       </div>
     </li>
+  );
+}
+
+const LOAD_FAILED = '이 주소의 이미지를 불러오지 못했습니다. 주소가 맞는지 확인해 주세요.';
+
+/** 썸네일 한 칸 — 불러오기 실패와 원본 크기(권장 비율 · 해상도 안내)를 잰다 */
+function useThumb(src: string | null) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = src !== null && failedSrc === src;
+  const measure = useImageSize(failed ? null : src);
+  return { src, failed, measure, onError: () => setFailedSrc(src) };
+}
+
+function Thumb({
+  thumb,
+  label,
+  empty = '이미지 없음',
+}: {
+  thumb: ReturnType<typeof useThumb>;
+  label: string | null;
+  empty?: string;
+}) {
+  const { src, failed, measure } = thumb;
+  return (
+    <div className="flex w-28 flex-col gap-1">
+      {src && !failed ? (
+        // 이미지 CDN 이 정해지지 않아 next/image 를 쓰지 않는다(스토어프론트 메인과 같다)
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={src}
+          src={src}
+          alt=""
+          decoding="async"
+          onLoad={measure.onLoad}
+          onError={thumb.onError}
+          className="aspect-[4/5] w-full rounded bg-muted object-cover"
+        />
+      ) : (
+        <div className="flex aspect-[4/5] w-full items-center justify-center rounded bg-muted p-2 text-center text-xs text-muted-fg">
+          {failed ? '이미지를 불러오지 못했습니다' : empty}
+        </div>
+      )}
+      {label && (
+        <span className="text-xs text-muted-fg">
+          {label}
+          {measure.size && ` · ${measure.size.width}×${measure.size.height}`}
+        </span>
+      )}
+    </div>
   );
 }

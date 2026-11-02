@@ -34,7 +34,7 @@ describe('editableType', () => {
 });
 
 describe('CREATABLE_TYPES', () => {
-  it('업로드 없이 만들 수 있는 유형(미디어 하한 0, 미디어를 주소로 넣는 LOOK)만이다', () => {
-    expect(CREATABLE_TYPES).toEqual(['PRODUCT_PICK', 'STORY', 'LOOK']);
+  it('미디어를 주소로 넣으므로 모든 유형을 업로드 없이 만들 수 있다(#71)', () => {
+    expect(CREATABLE_TYPES).toEqual(['HERO', 'PRODUCT_PICK', 'STORY', 'LOOK', 'DETAIL']);
   });
 });

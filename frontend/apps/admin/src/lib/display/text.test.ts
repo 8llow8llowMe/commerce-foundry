@@ -6,7 +6,18 @@ import {
   localInputToIso,
   normalizeText,
   periodLabel,
+  titleWidth,
 } from './text';
+
+describe('titleWidth', () => {
+  it('한글 · 한자 · 가나 · 전각은 1, 영문 · 숫자 · 공백 · 기호는 0.5 로 센다(앞뒤 공백 제외)', () => {
+    expect(titleWidth('가을 생활한복')).toBe(6.5);
+    expect(titleWidth('  New Season ')).toBe(5);
+    expect(titleWidth('韓服はな')).toBe(4);
+    expect(titleWidth('２０２６')).toBe(4);
+    expect(titleWidth('')).toBe(0);
+  });
+});
 
 describe('normalizeText', () => {
   it('앞뒤 공백을 빼고 비면 null 이다(BE TextValues.normalize)', () => {

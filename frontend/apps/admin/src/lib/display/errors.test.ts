@@ -117,11 +117,15 @@ describe('saveFailure', () => {
       products: [productCountMessage('PRODUCT_PICK')],
       form: [CHECK_FIELDS],
     });
-    expect(errorsFor('PRODUCT_048', hero)?.media).toHaveLength(1);
+    expect(errorsFor('PRODUCT_048', hero)?.media).toEqual([mediaCountMessage('HERO')]);
     expect(errorsFor('PRODUCT_050')).toEqual({ products: [PRODUCT_MISSING], form: [CHECK_FIELDS] });
     expect(errorsFor('PRODUCT_051')).toEqual({ period: [PERIOD_ORDER], form: [CHECK_FIELDS] });
     expect(errorsFor('PRODUCT_052')).toEqual({ linkUrl: [LINK_RULE], form: [CHECK_FIELDS] });
-    expect(errorsFor('PRODUCT_054', hero)).toEqual({ form: [MEDIA_STORAGE_UNAVAILABLE] });
+    // 히어로도 주소로 넣으므로(#71) 054 는 넣은 주소가 저장소 밖이라는 뜻이다
+    expect(errorsFor('PRODUCT_054', hero)).toEqual({
+      media: [MEDIA_URL_NOT_STORAGE],
+      form: [CHECK_FIELDS],
+    });
   });
 
   it('룩(주소로 넣는 미디어): 054 는 이미지 주소 안내, 048 은 이미지 · 상품 수 범위, 055 는 그대로 개발 담당자 안내', () => {
@@ -156,6 +160,24 @@ describe('saveFailure', () => {
         'media.1.url': [MEDIA_URL_REQUIRED],
         'media.0.url': [TOO_LONG.mediaUrl],
         products: [CHECK_FIELDS],
+        form: [CHECK_FIELDS],
+      },
+    });
+  });
+
+  it('모바일 주소 · 설명 칸 오류는 그 미디어의 칸에 붙는다(#71)', () => {
+    const failure = saveFailure(
+      apiError('validation', 400, null, null, [
+        { field: 'items[0].media.mobileUrl', code: 'PRODUCT_153', message: '원문' },
+        { field: 'items[1].caption', code: 'PRODUCT_156', message: '원문' },
+      ]),
+      hero,
+    );
+    expect(failure).toEqual({
+      kind: 'errors',
+      errors: {
+        'media.0.mobileUrl': [TOO_LONG.mediaUrl],
+        'media.1.caption': [TOO_LONG.caption],
         form: [CHECK_FIELDS],
       },
     });

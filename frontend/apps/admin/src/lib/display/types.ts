@@ -106,6 +106,7 @@ export const LIMITS = {
   altText: 200,
   /** 미디어 주소(pcUrl · mobileUrl · 포스터) */
   mediaUrl: 500,
+  caption: 200,
   sections: 50,
 } as const;
 
@@ -122,12 +123,36 @@ export const ITEM_RANGES: Record<
 };
 
 /**
- * 미디어를 주소로 넣고 · 빼는 유형(#419). 업로드(#9) 전이라 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다(룩 관리 화면과 같다).
- * 다른 유형의 미디어는 대체 텍스트만 고친다.
+ * 미디어를 주소로 넣고 · 빼는 유형(#419 · #71) — 미디어를 받는 모든 유형이다. 전시용 업로드 API 가 없어
+ * 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다(룩 관리 화면과 같다). 저장소 주소인지는 서버가 본다(`PRODUCT_054`).
  */
-export const MEDIA_URL_TYPES: readonly SectionTypeCode[] = ['LOOK'];
+export const MEDIA_URL_TYPES: readonly SectionTypeCode[] = SECTION_TYPES.filter(
+  (type) => ITEM_RANGES[type].media[1] > 0,
+);
 
-/** 업로드(#9) 없이 만들 수 있는 유형 — 미디어 하한이 0 이거나 미디어를 주소로 넣는 유형 */
+/** PC · 모바일 사진을 따로 넣는 유형 — 메인이 칸을 `<picture>` 로 나눠 그린다(`HeroSection`) */
+export const MOBILE_MEDIA_TYPES: readonly SectionTypeCode[] = ['HERO'];
+
+/** 미디어마다 설명 문구(caption)를 쓰는 유형 — 디테일은 클로즈업마다 설명 한 줄을 보인다(`CraftZoom`) */
+export const CAPTION_TYPES: readonly SectionTypeCode[] = ['DETAIL'];
+
+/**
+ * 제목 너비 한도(#71, #57 댓글 §4 "모든 제목은 어떤 폭에서도 2줄 이내") — 한글 한 글자를 1, 영문 · 숫자 · 공백 · 기호를 0.5 로 센다(`titleWidth`).
+ * 스토어프론트 메인에서 그 유형의 제목 칸이 가장 좁을 때(360px 휴대폰 · 1024px PC) 한 줄에 들어가는 한글 수 × 2 다.
+ * - 히어로 · 디테일: display 40px, 칸 328px → 한 줄 8자
+ * - 상품 픽 · 룩: title 28 / 48px — 룩 PC 칸(5/12 ≈ 380px)과 상품 픽 모바일(오른쪽 링크와 나눠 씀)이 가장 좁다 → 한 줄 8자
+ * - 스토리: curtain 레이아웃 PC 칸이 220px · 48px → 한 줄 4.5자. 레이아웃은 브랜드 설정이라 가장 좁은 칸에 맞춘다
+ * 글꼴 폭에 따라 조금 다를 수 있어 미리보기로 확인하게 안내한다. 서버는 200자(`LIMITS.title`)만 본다.
+ */
+export const TITLE_WIDTH: Record<SectionTypeCode, number> = {
+  HERO: 16,
+  PRODUCT_PICK: 16,
+  STORY: 9,
+  LOOK: 16,
+  DETAIL: 16,
+};
+
+/** 업로드 없이 만들 수 있는 유형 — 미디어 하한이 0 이거나 미디어를 주소로 넣는 유형(지금은 모든 유형) */
 export const CREATABLE_TYPES = SECTION_TYPES.filter(
   (type) => ITEM_RANGES[type].media[0] === 0 || MEDIA_URL_TYPES.includes(type),
 );
