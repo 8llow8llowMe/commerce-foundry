@@ -60,6 +60,11 @@ public final class MemberValidationMessage {
     /** 관리자 로그인 2단계 (#238 PR-B). 코드는 147 · 149 를 다시 쓴다. 챌린지 모양 오류 · 만료는 필드 검증이 아니라 AUTH_034 다. */
     public static final String ADMIN_OTP_CHALLENGE_REQUIRED = "AUTH_153:인증 요청 토큰(challengeToken)은 필수입니다.";
 
+    /** operations 전용 최신 마케팅 동의 조회 (#230). */
+    public static final String MARKETING_IDS_REQUIRED = "AUTH_154:memberIds 는 필수입니다.";
+    public static final String MARKETING_IDS_SIZE_MAX = "AUTH_155:memberIds 는 최대 100개입니다.";
+    public static final String MARKETING_ID_POSITIVE = "AUTH_156:memberId 는 양수여야 합니다.";
+
     private MemberValidationMessage() {
     }
 }
