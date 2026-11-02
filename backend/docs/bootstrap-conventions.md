@@ -360,7 +360,7 @@ ai:
   max-retries: 2                 # SDK 재시도(408 · 409 · 429 · 5xx · 연결 오류, retry-after 존중), 0~5
   max-concurrency: 4             # 이 프로세스의 동시 호출 상한
   acquire-timeout: 10s           # 상한이 차 있으면 이만큼 기다린 뒤 BUSY
-  max-input-chars: 200000        # 시스템 + 사용자 프롬프트 글자 수 상한 — 넘으면 보내지 않는다(INPUT_TOO_LONG)
+  max-input-chars: 200000        # 시스템 + 사용자 프롬프트 글자 수 상한(대화는 이력 전체 + 도구 정의 합) — 넘으면 보내지 않는다(INPUT_TOO_LONG)
   refusal-fallback: false        # 기본 꺼짐. 켜면 거절 시 API 가 다른 모델로 다시 시도(server-side fallback 베타, 공식 API 만)
   # allow-insecure-loopback: true  # 루프백 http base-url 허용 — 테스트 스텁 전용. 운영은 https 만(prod 에서 켜면 기동 실패)
   # allow-unmetered: true          # 계량 인터셉터 없이 켜기 허용 — 로컬 실험 · 테스트 전용. 기본 false(없으면 기동 실패). prod 에서 켜면 기동 실패
@@ -435,12 +435,71 @@ API 가 받지 않는 스키마(재귀 · 숫자 · 길이 제약 등)는 SDK �
   `AiStructuredResult.toString` 은 값의 타입만 싣는다.
 
 - **서비스 테스트는 가짜 포트를 쓴다.** 컨텍스트 로딩 테스트는 기본값(꺼짐)으로 뜨고, 업무 테스트는 서비스의 out-port 가짜로 대신한다.
-  SDK 를 거친 요청 · 재시도 · 응답 해석 · 구조화 출력 · 계량은 ai-core 의 `ClaudeAiClientTest` · `ClaudeAiStructuredTest` · `ClaudeAiMeteringTest`(루프백 스텁 서버)가 본다
+  SDK 를 거친 요청 · 재시도 · 응답 해석 · 구조화 출력 · 계량 · 대화 · 스트리밍은 ai-core 의 `ClaudeAiClientTest` · `ClaudeAiStructuredTest` · `ClaudeAiMeteringTest` ·
+  `ClaudeAiConversationTest` · `ClaudeAiStreamingTest`(루프백 스텁 서버 — tool_use 응답 · SSE 스트림 · 중간 끊김을 낸다)가 본다
   — 실제 API 는 부르지 않는다. 다른 모듈이 SDK 를 거친 흐름(원장 기록 등)을 볼 때는 ai-core 테스트 픽스처의 `StubMessagesServer` 를
   `testImplementation testFixtures(project(':core:ai-core'))` 로 받아 `ai.base-url` · `ai.allow-insecure-loopback=true` 로 가리킨다.
 - **이미지 입력.** `render` 결과에 `withImages` 로 붙인다. 바이트만 받는다(URL 은 클라이언트가 가져오지 않는다). 형식은 `image/jpeg` · `image/png` · `image/gif` · `image/webp`, 장당 5MiB, 한 요청 {@code AiImage.MAX_COUNT}장(8).
   장수를 넘으면 `INPUT_TOO_LONG` 이고 보내지 않는다. 사용자 메시지에서는 이미지 블록이 가린 텍스트보다 앞이다. 로그 · `toString` 에는 장수와 바이트 수만 남는다.
   이미지 안의 글자는 마스킹하지 못한다 — 이름 · 연락처 · 주소가 보이는 이미지는 넣지 않는다.
+
+**다중 턴 대화 · 도구 호출 · 스트리밍 (#467).** `AiClient.converse(AiConversationRequest)` · `converseStreaming(request, AiStreamListener)` 가 새 입구다 —
+`complete` 는 그대로다. 요청 · 결과 타입(`AiMessage` · `AiContent` · `AiTool` · `AiToolCall` · `AiConversationResult`)은 **Provider 중립**이라 SDK 타입이 없다(#468 OpenAI 를 같은 타입에 잇는다).
+
+```java
+AiConversationRequest request = AiConversationRequest.of("cs-chat", system, history, tools).withSensitiveValues(known).withCallerRef("chat:" + sessionId);
+AiConversationResult result = aiClient.converseStreaming(request, delta -> sink.send(delta));   // false 를 돌려주면 취소
+for (int round = 0; result.hasToolCalls(); round++) {                       // 왕복 상한은 호출자 규칙(아래)
+    List<AiContent.ToolResult> results = execute(result.toolCalls());        // 권한 검증 · 실행은 호출자 몫 — ai-core 는 실행하지 않는다
+    request = request.append(result.assistantMessage(), AiMessage.toolResults(results));
+    result = aiClient.converseStreaming(request, delta -> sink.send(delta));
+}
+```
+
+- **호출 한 번 = 응답 한 번 = 원장 한 행.** 도구 루프(호출 → 실행 → 결과 첨부 → 재호출)는 호출자가 돈다. 루프의 호출마다 `before` · `after` 가 정확히 한 번씩이고
+  순서 · 분류는 `complete` 와 같다(아래 "계량"). `AiCallContext` 에 메시지 수 · 도구 수 · 스트리밍 여부가 더 실리고, `inputChars` 는 마스킹 뒤
+  **시스템 + 이력 전체(Provider 블록 포함) + 도구 정의** 합이다. 요청의 `maxTokens` 는 기능 설정(`features.<기능>.max-tokens`)보다 낮출 수만 있다(넘으면 `IllegalArgumentException`).
+- **멈춘 이유는 Provider 중립 어휘**(`AiStopReason`: `END_TURN` · `TOOL_USE` · `MAX_TOKENS` · `REFUSAL` · `CANCELLED` · `OTHER`)다. 각 Provider 클라이언트가 자기 값을
+  번역한다(Claude 는 `AiStopReason.fromClaude`, #468 OpenAI 는 `stop` · `tool_calls` · `length` · `content_filter` 를 옮긴다). `truncated()` · `cancelled()` 는 이 값으로 판단한다.
+- **이력은 서버가 보관한 것만 쓴다 — 클라이언트(브라우저)가 보낸 이력을 받지 않는다.** 클라이언트는 새 사용자 메시지만 보내고, assistant 메시지 · 도구 호출 · 도구 결과 ·
+  Provider 블록은 서버 저장소에서 꺼낸다. 특히 `AiContent.Opaque`(thinking 블록)는 가리지 않고 그대로 가는 유일한 블록이라, 위조되면 마스킹 · 짝 검사 · 길이 상한을 피하는
+  통로가 된다 — ai-core 는 만들 때 JSON 객체 · 10만 자 이하 · 종류(`anthropic` 은 `thinking` · `redacted_thinking` 만)를 보고, 보낼 때 역직렬화 결과를 한 번 더 본다.
+  Opaque 는 고객 텍스트와 같은 등급으로 보관하고 응답 · 로그로 내보내지 않는다. 길이는 입력 상한 · 예약 예상치에 들어간다.
+- **이력 모양은 요청을 만들 때 검사한다**(`IllegalArgumentException`, 보내지 않음 · 원문 없음) — 첫 · 마지막 메시지는 USER(미리 채우기 금지), 도구 호출은 ASSISTANT 에만 ·
+  결과는 USER 에만, 도구 호출이 있는 assistant 바로 다음 USER 메시지에 그 호출 id 마다 결과가 정확히 하나씩(텍스트보다 앞), 호출 id 중복 금지, 이력의 호출 도구가
+  `tools` 에 있어야 한다. 메시지 100개 · 도구 32개 이하, 도구 이름은 `[a-zA-Z0-9_-]{1,64}`, 스키마는 최상위 `type: object`.
+- **도구 왕복 상한**: ai-core 는 마지막 일반 사용자 메시지 뒤에 쌓인 왕복이 `MAX_TOOL_ROUNDS_PER_TURN`(8)을 넘는 요청을 거절한다 — 이것은 바깥 울타리다.
+  **기능은 자기 상한을 더 낮게 둔다**(AI 상담은 5회). 상한에 닿으면 멈추고 고정 문구로 답하거나, 마지막 결과 메시지에 "도구 없이 답하라" 텍스트를 덧붙여 한 번 더 부른다
+  (이력에 호출이 남아 있어 도구 정의는 빼지 못한다 — 빼면 요청 검사에서 거절된다).
+  턴 전체 시간(예: 60초)도 호출자 규칙이다 — 호출 하나의 상한은 `read-timeout` · `request-timeout` 뿐이다.
+- **도구 인자는 신뢰할 수 없는 모델 출력이다.** ai-core 는 **최소 검증**만 한다 — JSON 객체 · `required` 키 · `additionalProperties: false` 면 모르는 키 없음 ·
+  최상위 속성의 `type`(문자열 하나일 때). 실패하면 `INVALID_RESPONSE`(재시도 안 함, UNUSABLE 실측)이고 넘기지 않은 도구 이름 · `max_tokens` 로 잘린 도구 호출도 같다.
+  중첩 객체 · `enum` · 길이 · 패턴 · `anyOf` 같은 나머지 JSON Schema 규칙은 보지 않는다(검증 라이브러리를 들이지 않았다) — **실행 전에 호출자가 값과 권한을 본다**
+  (이 고객의 주문인가 등). 로그 · 예외에는 도구 이름과 원인 구분(`missing required` · `type mismatch` · `unknown property`)만 남고 인자 원문은 없다.
+  JSON 은 깊이 64 · 문서 · 문자열 100만 자 상한으로 읽는다(`AiJson`).
+- **도구 보안 규칙(기능 쪽)**:
+  - **주체(memberId · 세션)는 세션 · JWT 에서만 꺼낸다** — 도구 스키마에 두지 않는다. 모델이 "누구의" 데이터인지 고르게 하지 않는다.
+  - **모델이 낸 식별자(주문 id 등)는 믿지 않는다** — 실행 전에 주체가 그 리소스의 주인인지 확인하고, 아니면 없는 것과 같은 결과(404 와 같은 "없음")를 돌려준다.
+  - 스키마는 **`additionalProperties: false` 를 기본**으로 둔다.
+  - **도구 결과는 답에 필요한 최소 필드만** 담는다. 결과 안의 고객 작성 텍스트(배송 메모 · 문의 본문)는 프롬프트 주입 경로다. 결과에 섞이는 개인정보 값은 `sensitiveValues` 로 넘긴다.
+- **마스킹**: 시스템 · 모든 텍스트 · 도구 결과는 글자로, 다시 보내는 도구 인자는 JSON 문자열 · 숫자 값마다 가린다(키는 그대로). 도구 결과에 고객 정보가 섞이면
+  그 값을 `sensitiveValues` 로 넘긴다. **thinking 블록**은 `AiContent.Opaque` 로 돌아오고 받은 그대로 다시 보낸다(서명이 깨지므로 가리지 않는다) —
+  `result.assistantMessage()` 를 고치지 말고 그대로 이력에 붙인다. 다른 Provider 의 Opaque 블록은 보내지 않는다.
+- **스트리밍**: 호출한 스레드가 끝까지 막히는 동기 호출이다(Reactor · Flow 의존 없음). 텍스트 조각만 순서대로 `onTextDelta` 로 가고, 도구 호출은 SDK 의
+  `MessageAccumulator` 로 조립해 최종 결과에 담는다. 스트림은 완료 · 취소 · 끊김 · 오류 · listener 예외 어느 경우에도 닫히고, 동시 상한 자리는 스트림이 닫힐 때까지 잡힌다.
+  - 취소: `onTextDelta` 가 `false` 를 돌려주거나 `onStart` 로 받은 `AiStreamHandle.cancel()`. 결과는 `stopReason=CANCELLED`(받은 조각 · 받은 사용량), 원장은 사용량이 있으면
+    `UNUSABLE` · 없으면 `TIMEOUT` 이고 원인은 `null`(실패가 아니라 호출자 선택 — 새 `Reason` 을 두지 않았다). `message_stop` 을 받은 뒤의 취소는 무시한다.
+    `onStart` 안에서 바로 취소하거나 `onStart` 가 던지면 요청을 보내지 않고 `NOT_SENT`(원인 `null`)다. `onTextDelta` 가 던진 예외는 그대로 나가고 원인은 `null` 이다.
+    **다른 스레드의 `cancel()` 은 막힌 읽기를 바로 깨우지 못한다** — SDK 가 HTTP 호출 취소를 드러내지 않아 다음 이벤트(`ping` 포함) · 서버 닫힘 · `read-timeout` 에 풀린다.
+  - `message_stop` 없이 끊김 · 읽기 타임아웃은 `UNAVAILABLE`, 스트림 중 오류 이벤트는 오류 종류로(`overloaded_error` → `UNAVAILABLE`, `rate_limit_error` → `RATE_LIMITED`).
+    스트림은 응답 헤더 전까지만 SDK 가 재시도하고, 본문 도중 끊김은 다시 보내지 않는다 — 다시 보낼지는 호출자가 정한다.
+  - listener 는 호출 스레드에서 불린다 — 무거운 일은 큐로 넘긴다. 조각은 모델 출력 원문이라 화면에서 이스케이프하고 로그에 남기지 않는다.
+  - `read-timeout` 은 스트림에서는 **이벤트 사이** 간격 상한이다. `request-timeout` 은 스트림 전체에도 걸린다 — 긴 응답을 스트리밍하는 기능은 `features.<기능>.max-tokens` 를 그 안에 맞춘다.
+  - **고객 요청 경로에서 스트리밍하는 서비스의 운영 규칙**: 서비스 단에서 **세션 · IP 별 동시 스트림 1개 + rate limit** 을 둔다. 기능별 `max-tokens` 를 짧게 잡는다.
+    고객 요청 스레드가 `acquire-timeout` 을 길게 기다리지 않게 짧게 둔다(차면 `BUSY` 로 빨리 알린다). `max-concurrency` 는 동시에 진행할 상담 수에 맞춘다 — 스트림은 끝날 때까지 자리를 잡는다.
+- **알려진 한계**: 이력의 assistant 텍스트 · 도구 인자도 보낼 때마다 가린다(NFKC 정규화 포함). 마스킹이 앞 턴 내용을 바꾸면 Opus 5.5 의 preserved thinking
+  검사가 이력 편집으로 볼 수 있다(그 뒤 thinking 블록이 버려지거나, 2026-08-31 이후 계정은 400). 모델은 가린 입력만 보므로 보통 바뀌지 않지만,
+  도구 결과에서 온 값을 모델이 되풀이한 경우 등이 있을 수 있다 — 400 이 보이면 이 경로를 먼저 의심한다.
 
 **계량 (#215 PR-B).** ai-core 는 호출 앞뒤에 끼는 SPI `AiCallInterceptor`(`com.commercefoundry.ai.metering`)만 두고, 원장 · 월 한도 · 단가는 호스트 서비스(operations)가 구현한다.
 
@@ -458,10 +517,10 @@ API 가 받지 않는 스키마(재귀 · 숫자 · 길이 제약 등)는 SDK �
 | Status | 언제 | `usage` | 원장 |
 |--------|------|---------|------|
 | `COMPLETED` | 응답을 받아 결과로 썼다 | 실측(캐시 토큰 포함) | 실측 비용 |
-| `UNUSABLE` | 응답을 받았지만 못 썼다 — 거절(`REFUSED`) · 잘림 · 형식 오류 · 검증 실패 · 사용량을 읽은 뒤 해석 실패(`INVALID_RESPONSE`) | 실측 | 실측 비용(과금됐다) |
-| `FAILED` | 오류 응답(4xx · 429 · 5xx · 529, `statusCode` 있음) | 없음 | 0 — SDK 재시도 중 앞선 타임아웃 시도분은 빠질 수 있다(`max-retries` 를 낮게) |
-| `TIMEOUT` | 쓸 수 있는 응답이 없다(연결 오류 · 타임아웃 · 사용량조차 읽지 못한 응답, `statusCode` 없음) | 없음 | 예약한 예상치 1회(위 최악 비용 문단) |
-| `NOT_SENT` | 동시 상한 자리를 못 얻었다(`BUSY`) — 보내지 않았다 | 없음 | 0, 예약 해제 |
+| `UNUSABLE` | 응답을 받았지만 못 썼다 — 거절(`REFUSED`) · 잘림 · 형식 오류 · 검증 실패 · 사용량을 읽은 뒤 해석 실패(`INVALID_RESPONSE`). 스트리밍이 `message_start` 뒤에 끊김 · 읽기 타임아웃(`UNAVAILABLE`) · 오류 이벤트 · **호출자 취소(원인 `null`)** 로 멈춘 경우 | 실측(스트림은 그때까지 받은 값 — 출력 몫이 적을 수 있다) | 실측 비용(과금됐다) |
+| `FAILED` | 오류 응답(4xx · 429 · 5xx · 529, `statusCode` 있음). 스트리밍에서 `message_start` 전에 온 SSE 오류 이벤트(HTTP 200 뒤라 `statusCode` 는 `null`) | 없음 | 0 — SDK 재시도 중 앞선 타임아웃 시도분은 빠질 수 있다(`max-retries` 를 낮게) |
+| `TIMEOUT` | 쓸 수 있는 응답이 없다(연결 오류 · 타임아웃 · 사용량조차 읽지 못한 응답, `statusCode` 없음). 스트림이 `message_start` 전에 끊기거나 취소된 경우 | 없음 | 예약한 예상치 1회(위 최악 비용 문단) |
+| `NOT_SENT` | 동시 상한 자리를 못 얻었다(`BUSY`), 또는 스트리밍에서 요청 전에 취소했거나 `onStart` 가 던졌다(원인 `null`) — 보내지 않았다 | 없음 | 0, 예약 해제 |
 
 - **사용량.** `AiResult` · `AiStructuredResult` 의 `usage()`(`AiUsage`)에 입력 · 출력 · 캐시 생성 · 캐시 읽기 토큰이 있다(캐시 토큰은 API 가 싣지 않으면 0).
   `inputTokens()` · `outputTokens()` 는 그대로 있다. 사용량은 인터셉터가 원장에 남긴다 — 호출자가 다시 기록하지 않는다.

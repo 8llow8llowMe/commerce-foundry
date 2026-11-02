@@ -33,4 +33,23 @@ public interface AiClient {
     default <T> AiStructuredResult<T> complete(AiRequest request, Class<T> type) {
         return complete(request, type, AiOutputValidator.none());
     }
+
+    /**
+     * 다중 턴 대화를 한 번 부른다(도구 호출 포함). 호출 한 번 = 응답 한 번 = 원장 한 행이다 — 도구 루프는 호출자가 돈다({@link AiConversationResult} 예시).
+     * 이력 전체(텍스트 · 도구 결과 · 다시 보내는 도구 인자)를 가리고 {@code ai.max-input-chars} 로 묶는다. 순서 · 계량은 {@link #complete(AiRequest)} 와 같다.
+     *
+     * @throws AiException {@link #complete(AiRequest)} 와 같고, 거절이면 {@code REFUSED}, 텍스트도 도구 호출도 없거나 · 도구 호출이 잘렸거나 ·
+     *                     없는 도구를 불렀거나 · 인자가 스키마 최소 검증에 맞지 않으면 {@code INVALID_RESPONSE}(재시도 안 함)
+     */
+    AiConversationResult converse(AiConversationRequest request);
+
+    /**
+     * {@link #converse} 를 스트리밍으로 부른다 — 텍스트 조각을 {@code listener} 로 차례로 넘기고, 끝나면 최종 결과(도구 호출 포함)를 돌려준다.
+     * 호출한 스레드가 끝까지 막힌다(동기). 취소({@link AiStreamListener#onTextDelta} 가 {@code false} · {@link AiStreamHandle#cancel()})하면 스트림을 닫고
+     * {@code cancelled} 결과를 돌려준다. 끊김 · 읽기 타임아웃은 스트림을 닫고 {@code UNAVAILABLE}, 스트림 중 오류 이벤트는 오류 종류대로 번역한다.
+     * {@code listener} 가 던진 예외는 스트림을 닫고 계량을 마친 뒤 그대로 나간다.
+     *
+     * @throws AiException {@link #converse} 와 같다
+     */
+    AiConversationResult converseStreaming(AiConversationRequest request, AiStreamListener listener);
 }
