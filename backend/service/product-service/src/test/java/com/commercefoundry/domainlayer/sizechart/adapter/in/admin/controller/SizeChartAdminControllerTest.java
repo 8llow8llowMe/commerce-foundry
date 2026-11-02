@@ -1,7 +1,10 @@
 package com.commercefoundry.domainlayer.sizechart.adapter.in.admin.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.domainlayer.sizechart.application.port.in.SizeChartAdminUseCase;
@@ -75,6 +78,38 @@ class SizeChartAdminControllerTest {
         void anonymousIsUnauthorized(String method, String uri) {
             SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.valueOf(method), uri, "{}", null).getResponse(), SecurityErrorCode.UNAUTHORIZED);
             verifyNoInteractions(sizeChartAdminUseCase);
+        }
+    }
+
+    @Nested
+    @DisplayName("행위자 전달 (감사 #163)")
+    class Actor {
+
+        private static final String TEMPLATE_BODY = """
+            {"name": "상의", "baseUnit": "CM", "columns": [{"name": "가슴", "displayOrder": 0}]}
+            """;
+        private static final String CHART_BODY = """
+            {"templateId": "1", "rows": [{"sizeLabel": "44", "displayOrder": 0, "cells": [{"columnId": "1", "value": 50}]}]}
+            """;
+
+        @Test
+        @DisplayName("템플릿 생성 · 수정 · 삭제는 토큰의 memberId 를 유스케이스 마지막 인자로 넘긴다")
+        void templateWrites() {
+            assertThat(exchange(HttpMethod.POST, TEMPLATES, TEMPLATE_BODY, MemberRole.ADMIN)).hasStatus(HttpStatus.CREATED);
+            assertThat(exchange(HttpMethod.PUT, TEMPLATES + "/9", TEMPLATE_BODY, MemberRole.ADMIN)).hasStatusOk();
+            assertThat(exchange(HttpMethod.DELETE, TEMPLATES + "/9", null, MemberRole.ADMIN)).hasStatusOk();
+
+            verify(sizeChartAdminUseCase).createTemplate(any(), eq(TestTokens.MEMBER_ID));
+            verify(sizeChartAdminUseCase).updateTemplate(eq(9L), any(), eq(TestTokens.MEMBER_ID));
+            verify(sizeChartAdminUseCase).deleteTemplate(9L, TestTokens.MEMBER_ID);
+        }
+
+        @Test
+        @DisplayName("상품 사이즈표 저장은 경로 상품 아이디와 토큰의 memberId 를 넘긴다")
+        void chartReplace() {
+            assertThat(exchange(HttpMethod.PUT, CHART, CHART_BODY, MemberRole.ADMIN)).hasStatusOk();
+
+            verify(sizeChartAdminUseCase).replaceProductSizeChart(eq(700L), any(), eq(TestTokens.MEMBER_ID));
         }
     }
 

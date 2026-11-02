@@ -117,9 +117,9 @@ class CategoryAdminControllerTest {
     class Writes {
 
         @Test
-        @DisplayName("생성은 201 — 문자열 parentId 를 받고 이름 앞뒤 공백을 빼서 넘기며, 아이디는 String 으로 낸다")
+        @DisplayName("생성은 201 — 문자열 parentId 를 받고 이름 앞뒤 공백을 빼서 넘기며, 아이디는 String 으로 낸다. 행위자는 토큰의 memberId 다(감사 #163)")
         void create() {
-            given(categoryAdminUseCase.createCategory(any())).willReturn(response("5001", "1"));
+            given(categoryAdminUseCase.createCategory(any(), anyLong())).willReturn(response("5001", "1"));
 
             MvcTestResult result = exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN);
 
@@ -130,42 +130,42 @@ class CategoryAdminControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataBody.name").isEqualTo("저고리");
             assertThat(result).bodyJson().extractingPath("$.dataBody.displayOrder").isEqualTo(2);
             assertThat(result).bodyJson().extractingPath("$.dataBody.visible").isEqualTo(false);
-            verify(categoryAdminUseCase).createCategory(new CategoryUpsertCommand(1L, "저고리", 2, false));
+            verify(categoryAdminUseCase).createCategory(new CategoryUpsertCommand(1L, "저고리", 2, false), TestTokens.MEMBER_ID);
         }
 
         @Test
         @DisplayName("parentId 를 빼거나 null 로 보내면 최상위 생성이다")
         void createRoot() {
-            given(categoryAdminUseCase.createCategory(any())).willReturn(response("5001", null));
+            given(categoryAdminUseCase.createCategory(any(), anyLong())).willReturn(response("5001", null));
 
             MvcTestResult result = exchange(HttpMethod.POST, PATH, "{\"name\": \"상의\", \"displayOrder\": 0, \"visible\": true}", MemberRole.ADMIN);
 
             assertThat(result).hasStatus(HttpStatus.CREATED);
             assertThat(result).bodyJson().extractingPath("$.dataBody.parentId").isNull();
-            verify(categoryAdminUseCase).createCategory(new CategoryUpsertCommand(null, "상의", 0, true));
+            verify(categoryAdminUseCase).createCategory(new CategoryUpsertCommand(null, "상의", 0, true), TestTokens.MEMBER_ID);
         }
 
         @Test
-        @DisplayName("수정은 200 — 경로 아이디와 본문 전체를 넘긴다")
+        @DisplayName("수정은 200 — 경로 아이디 · 본문 전체 · 행위자(토큰의 memberId)를 넘긴다")
         void update() {
-            given(categoryAdminUseCase.updateCategory(anyLong(), any())).willReturn(response("101", "1"));
+            given(categoryAdminUseCase.updateCategory(anyLong(), any(), anyLong())).willReturn(response("101", "1"));
 
             MvcTestResult result = exchange(HttpMethod.PUT, ITEM_PATH, VALID_BODY, MemberRole.ADMIN);
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody.categoryId").isEqualTo("101");
-            verify(categoryAdminUseCase).updateCategory(101L, new CategoryUpsertCommand(1L, "저고리", 2, false));
+            verify(categoryAdminUseCase).updateCategory(101L, new CategoryUpsertCommand(1L, "저고리", 2, false), TestTokens.MEMBER_ID);
         }
 
         @Test
-        @DisplayName("삭제는 200 이고 dataBody 는 null 이다")
+        @DisplayName("삭제는 200 이고 dataBody 는 null 이다 — 행위자는 토큰의 memberId 다")
         void delete() {
             MvcTestResult result = exchange(HttpMethod.DELETE, ITEM_PATH, null, MemberRole.ADMIN);
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
             assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
-            verify(categoryAdminUseCase).deleteCategory(101L);
+            verify(categoryAdminUseCase).deleteCategory(101L, TestTokens.MEMBER_ID);
         }
     }
 
@@ -176,7 +176,7 @@ class CategoryAdminControllerTest {
         @Test
         @DisplayName("없는 카테고리 수정이면 404 · PRODUCT_004")
         void notFound() {
-            given(categoryAdminUseCase.updateCategory(anyLong(), any())).willThrow(new ProductException(ProductErrorCode.NOT_FOUND_CATEGORY));
+            given(categoryAdminUseCase.updateCategory(anyLong(), any(), anyLong())).willThrow(new ProductException(ProductErrorCode.NOT_FOUND_CATEGORY));
 
             assertFailure(exchange(HttpMethod.PUT, ITEM_PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.NOT_FOUND, "PRODUCT_004", "존재하지 않는 카테고리입니다.");
         }
@@ -189,7 +189,7 @@ class CategoryAdminControllerTest {
         })
         @DisplayName("깊이 초과 · 순환 · 없는 상위는 400")
         void badRequest(ProductErrorCode errorCode, String code, String message) {
-            given(categoryAdminUseCase.updateCategory(anyLong(), any())).willThrow(new ProductException(errorCode));
+            given(categoryAdminUseCase.updateCategory(anyLong(), any(), anyLong())).willThrow(new ProductException(errorCode));
 
             assertFailure(exchange(HttpMethod.PUT, ITEM_PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, code, message);
         }
@@ -197,7 +197,7 @@ class CategoryAdminControllerTest {
         @Test
         @DisplayName("다른 카테고리 쓰기가 잠금을 쥐고 있어 상한을 넘기면 409 · PRODUCT_045")
         void busy() {
-            given(categoryAdminUseCase.createCategory(any())).willThrow(new ProductException(ProductErrorCode.CATEGORY_BUSY));
+            given(categoryAdminUseCase.createCategory(any(), anyLong())).willThrow(new ProductException(ProductErrorCode.CATEGORY_BUSY));
 
             assertFailure(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "PRODUCT_045", "다른 카테고리 변경을 처리 중입니다. 다시 시도해 주세요.");
         }
@@ -209,7 +209,7 @@ class CategoryAdminControllerTest {
         })
         @DisplayName("하위 · 연결 상품이 있는 삭제는 409")
         void conflict(ProductErrorCode errorCode, String code, String message) {
-            willThrow(new ProductException(errorCode)).given(categoryAdminUseCase).deleteCategory(101L);
+            willThrow(new ProductException(errorCode)).given(categoryAdminUseCase).deleteCategory(101L, TestTokens.MEMBER_ID);
 
             assertFailure(exchange(HttpMethod.DELETE, ITEM_PATH, null, MemberRole.ADMIN), HttpStatus.CONFLICT, code, message);
         }
@@ -253,7 +253,7 @@ class CategoryAdminControllerTest {
         @Test
         @DisplayName("이름 50자 · 노출 순서 0 은 통과한다 (경계값)")
         void boundariesPass() {
-            given(categoryAdminUseCase.createCategory(any())).willReturn(response("5001", null));
+            given(categoryAdminUseCase.createCategory(any(), anyLong())).willReturn(response("5001", null));
 
             assertThat(exchange(HttpMethod.POST, PATH, "{\"name\": \"" + "가".repeat(50) + "\", \"displayOrder\": 0, \"visible\": true}", MemberRole.ADMIN))
                 .hasStatus(HttpStatus.CREATED);
@@ -262,12 +262,12 @@ class CategoryAdminControllerTest {
         @Test
         @DisplayName("50자는 앞뒤 공백(전각 포함)을 뺀 뒤 센다 — 공백을 붙인 50자는 통과하고, 뺀 값을 넘긴다")
         void lengthCountsAfterStrip() {
-            given(categoryAdminUseCase.createCategory(any())).willReturn(response("5001", null));
+            given(categoryAdminUseCase.createCategory(any(), anyLong())).willReturn(response("5001", null));
             String fifty = "가".repeat(50);
 
             assertThat(exchange(HttpMethod.POST, PATH, "{\"name\": \"\\u3000 " + fifty + " \", \"displayOrder\": 0, \"visible\": true}", MemberRole.ADMIN))
                 .hasStatus(HttpStatus.CREATED);
-            verify(categoryAdminUseCase).createCategory(new CategoryUpsertCommand(null, fifty, 0, true));
+            verify(categoryAdminUseCase).createCategory(new CategoryUpsertCommand(null, fifty, 0, true), TestTokens.MEMBER_ID);
         }
 
         @Test

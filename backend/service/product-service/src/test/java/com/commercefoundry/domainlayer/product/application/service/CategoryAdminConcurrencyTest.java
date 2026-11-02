@@ -73,7 +73,7 @@ class CategoryAdminConcurrencyTest {
     @DisplayName("다른 트랜잭션이 카테고리 잠금을 쥐고 있으면 시간 상한(5초) 안에 409 · PRODUCT_045 로 끊긴다 — 무한정 기다리지 않고 아무것도 쓰지 않는다")
     void lockWaitIsBounded() throws Exception {
         // 잠글 행이 하나는 있어야 한다 — 빈 표는 잠글 것이 없다
-        categoryAdminUseCase.createCategory(new CategoryUpsertCommand(null, "상의", 0, true));
+        categoryAdminUseCase.createCategory(new CategoryUpsertCommand(null, "상의", 0, true), 1L);
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         ExecutorService holder = Executors.newSingleThreadExecutor();
@@ -90,7 +90,7 @@ class CategoryAdminConcurrencyTest {
             assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
 
             long startedAt = System.nanoTime();
-            Throwable failure = catchThrowable(() -> categoryAdminUseCase.createCategory(new CategoryUpsertCommand(null, "하의", 1, true)));
+            Throwable failure = catchThrowable(() -> categoryAdminUseCase.createCategory(new CategoryUpsertCommand(null, "하의", 1, true), 1L));
             long waitedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
             release.countDown();
             holding.get(30, TimeUnit.SECONDS);

@@ -7,6 +7,8 @@ import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.request.Si
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartTemplateAdminResponse;
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartValidationMessage;
 import com.commercefoundry.domainlayer.sizechart.application.port.in.SizeChartAdminUseCase;
+import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.persistence.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -21,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,7 +36,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 어드민 사이즈표 템플릿. {@code /api/v1/admin/**} 은 URL 규칙이 ADMIN 을 먼저 요구하고, 메서드의 {@code hasRole('ADMIN')} 이 이중으로 막는다.
- * 작성자 칸 · Idempotency-Key 는 없다. 파라미터 검증은 Spring MVC 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다.
+ * 작성자 칸 · Idempotency-Key 는 없다 — 어드민 memberId 는 감사(#163, {@code SIZE_CHART_TEMPLATE_*})에만 넘긴다.
+ * 파라미터 검증은 Spring MVC 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다.
  */
 @Tag(name = "[어드민] 사이즈표 템플릿", description = "상품 사이즈표에 붙이는 치수 항목 템플릿")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
@@ -72,9 +76,13 @@ public class SizeChartTemplateAdminController {
         description = "이름 · 저장 단위 · 항목을 만든다. 항목 이름 또는 순서 중복은 400(PRODUCT_060 · PRODUCT_061)이다."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "SIZE_CHART_TEMPLATE_CREATE")
     @PostMapping
-    public ResponseEntity<Response<SizeChartTemplateAdminResponse>> createTemplate(@RequestBody @Valid SizeChartTemplateUpsertRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(sizeChartAdminUseCase.createTemplate(request.toCommand())));
+    public ResponseEntity<Response<SizeChartTemplateAdminResponse>> createTemplate(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @RequestBody @Valid SizeChartTemplateUpsertRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(sizeChartAdminUseCase.createTemplate(request.toCommand(), admin.memberId())));
     }
 
     @Operation(
@@ -83,21 +91,25 @@ public class SizeChartTemplateAdminController {
             + "기존 columnId 로 이름 · 설명 · 순서만 바꾼다. 아무도 안 쓰면 항목을 새 아이디로 다시 만든다."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "SIZE_CHART_TEMPLATE_UPDATE")
     @PutMapping("/{templateId}")
     public ResponseEntity<Response<SizeChartTemplateAdminResponse>> updateTemplate(
+        @AuthenticationPrincipal MemberPrincipal admin,
         @Parameter(description = "템플릿 아이디") @PathVariable @Positive(message = SizeChartValidationMessage.TEMPLATE_ID_POSITIVE) long templateId,
         @RequestBody @Valid SizeChartTemplateUpsertRequest request
     ) {
-        return ResponseEntity.ok(Response.success(sizeChartAdminUseCase.updateTemplate(templateId, request.toCommand())));
+        return ResponseEntity.ok(Response.success(sizeChartAdminUseCase.updateTemplate(templateId, request.toCommand(), admin.memberId())));
     }
 
     @Operation(summary = "사이즈표 템플릿 삭제", description = "항목까지 지운다. 없으면 404(PRODUCT_059), 상품 사이즈표가 쓰면 409(PRODUCT_063)다.")
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "SIZE_CHART_TEMPLATE_DELETE")
     @DeleteMapping("/{templateId}")
     public ResponseEntity<Response<Void>> deleteTemplate(
+        @AuthenticationPrincipal MemberPrincipal admin,
         @Parameter(description = "템플릿 아이디") @PathVariable @Positive(message = SizeChartValidationMessage.TEMPLATE_ID_POSITIVE) long templateId
     ) {
-        sizeChartAdminUseCase.deleteTemplate(templateId);
+        sizeChartAdminUseCase.deleteTemplate(templateId, admin.memberId());
         return ResponseEntity.ok(Response.success());
     }
 }

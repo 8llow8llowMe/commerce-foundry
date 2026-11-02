@@ -472,7 +472,9 @@ return ResponseEntity.ok().body(Response.success(response));
   `TransactionTimedOutException`, `PessimisticLockingFailureException` 과 함께 Facade 가 409 `PRODUCT_045` 로 바꾼다(배송지 `AUTH_023` 과 같은 모양, §2-4).
   잠금 · 쓰기 Processor 메서드(`CategoryProcessor.getTreeForUpdate` · `create` · `update` · `delete`)는 `Propagation.MANDATORY` 라 트랜잭션 밖에서 부르면 바로 실패한다.
   상품 쓰기(#9 PR-E)는 이 잠금 밖이다 — 카테고리를 참조할 때 같은 잠금(또는 `FOR SHARE`)으로 존재를 확인해야 한다(DB FK 없음).
-- 카테고리 표에 작성자 · 수정자 칸이 없어 어드민 memberId 를 받지 않는다. `version` · `Idempotency-Key` 도 두지 않는다 — 동시 편집은 마지막 쓰기가 이긴다.
+- **감사 (#163)** — 생성 · 수정 · 삭제의 성공 · 실패를 `admin.audit` 한 줄로 남긴다(`security-guide.md` §11-4 — `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE`, 대상 `category:<id>`,
+  만들지 못한 생성은 `-`). 행위자는 access 토큰의 memberId 다. 본문 검증 400 · 401 · 403 은 남기지 않는다. 이름 · 순서 · 노출 값은 싣지 않는다.
+- 카테고리 표에 작성자 · 수정자 칸이 없어 어드민 memberId 는 감사 줄에만 쓴다(위). `version` · `Idempotency-Key` 도 두지 않는다 — 동시 편집은 마지막 쓰기가 이긴다.
 - 계층 — 컨트롤러 · Facade · 판정 Processor 는 상품 컨텍스트에 둔다(`CategoryAdminFacade` · `CategoryAdminProcessor`). "연결된 상품" 을 상품 컨텍스트가 알기 때문이다.
   트리 판정(`CategoryTree.placementViolationOf` · `hasChildren`)과 쓰기는 카테고리 컨텍스트 `CategoryProcessor` 가 하고, 상품 컨텍스트는 그 Processor 와
   domain model 만 쓴다(`architecture-guide.md` §3 컨텍스트 간 의존 규칙, 의존 방향 product → category).
@@ -719,6 +721,9 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
   `064`(어드민 상품 없음 404) · `065`(본문 템플릿 없음 400) · `066`(모르는 항목) · `067`(항목 누락) · `068`(행 안 항목 중복) · `069`(사이즈 이름 중복) ·
   `070`(사이즈 순서 중복) · `071`(항목 아이디 중복) · `072`(잠금 409) · `073`(상품 표 유니크 409).
   필드 검증은 `PRODUCT_170~197`(`SizeChartValidationMessage`). page · size 는 서비스 공용 `PRODUCT_101` · `PRODUCT_102` 다.
+- **감사 (#163)** — 템플릿 생성 · 수정 · 삭제와 상품 사이즈표 저장의 성공 · 실패를 `admin.audit` 한 줄로 남긴다(`security-guide.md` §11-4 — `SIZE_CHART_TEMPLATE_CREATE` ·
+  `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` 대상 `size-chart-template:<id>`(만들지 못한 생성은 `-`), `PRODUCT_SIZE_CHART_REPLACE` 대상 `product:<productId>`).
+  행위자는 access 토큰의 memberId 다. 본문 검증 400 · 401 · 403 은 남기지 않는다. 치수 · 항목 값은 싣지 않는다.
 - **게이트웨이**: 상품 사이즈표는 기존 `products/**` 로 라우팅된다. 템플릿 접두어 `/api/v1/admin/size-chart-templates/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다.
 
 ### 2-11. 룩 — Shop the Look (product-service, #62)

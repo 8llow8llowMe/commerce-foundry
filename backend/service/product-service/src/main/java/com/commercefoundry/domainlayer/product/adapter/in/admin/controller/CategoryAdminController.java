@@ -7,6 +7,8 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.Cat
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.CategoryAdminTreeResponse;
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.port.in.CategoryAdminUseCase;
+import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -17,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 어드민 카테고리 관리. {@code /api/v1/admin/**} 은 URL 규칙이 ADMIN 을 먼저 요구하고, 메서드의 {@code hasRole('ADMIN')} 이 이중으로 막는다
- * ({@code security-guide.md} §5-1). 카테고리 표에 작성자 · 수정자 칸이 없어 어드민 memberId 를 받지 않는다.
+ * ({@code security-guide.md} §5-1). 카테고리 표에 작성자 · 수정자 칸이 없어 어드민 memberId 는 감사(#163, {@code CATEGORY_*})에만 넘긴다.
  *
  * <p>상품 컨텍스트에 둔다 — 삭제 판정의 "연결된 상품" 을 상품 컨텍스트가 안다. 고객 트리({@code CategoryWebController})와 DTO 를 공유하지 않는다.
  * 파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
@@ -58,9 +61,13 @@ public class CategoryAdminController {
         description = "parentId 가 없으면 최상위로 만든다. 없는 상위는 400(PRODUCT_044), 3단계를 넘으면 400(PRODUCT_040)이다. 201 과 만든 카테고리를 돌려준다."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "CATEGORY_CREATE")
     @PostMapping
-    public ResponseEntity<Response<CategoryAdminResponse>> createCategory(@RequestBody @Valid CategoryUpsertRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(categoryAdminUseCase.createCategory(request.toCommand())));
+    public ResponseEntity<Response<CategoryAdminResponse>> createCategory(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @RequestBody @Valid CategoryUpsertRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(categoryAdminUseCase.createCategory(request.toCommand(), admin.memberId())));
     }
 
     @Operation(
@@ -70,12 +77,14 @@ public class CategoryAdminController {
             + "메뉴에서 감추려면 visible=false 로 보낸다 (하위까지 메뉴에서 빠지고, 상품 노출은 막지 않는다)."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "CATEGORY_UPDATE")
     @PutMapping("/{categoryId}")
     public ResponseEntity<Response<CategoryAdminResponse>> updateCategory(
+        @AuthenticationPrincipal MemberPrincipal admin,
         @Parameter(description = "카테고리 아이디") @PathVariable @Positive(message = ProductValidationMessage.CATEGORY_ID_POSITIVE) long categoryId,
         @RequestBody @Valid CategoryUpsertRequest request
     ) {
-        return ResponseEntity.ok().body(Response.success(categoryAdminUseCase.updateCategory(categoryId, request.toCommand())));
+        return ResponseEntity.ok().body(Response.success(categoryAdminUseCase.updateCategory(categoryId, request.toCommand(), admin.memberId())));
     }
 
     @Operation(
@@ -85,11 +94,13 @@ public class CategoryAdminController {
             + "(삭제 성공 뒤 같은 요청을 다시 보내도 404)."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "CATEGORY_DELETE")
     @DeleteMapping("/{categoryId}")
     public ResponseEntity<Response<Void>> deleteCategory(
+        @AuthenticationPrincipal MemberPrincipal admin,
         @Parameter(description = "카테고리 아이디") @PathVariable @Positive(message = ProductValidationMessage.CATEGORY_ID_POSITIVE) long categoryId
     ) {
-        categoryAdminUseCase.deleteCategory(categoryId);
+        categoryAdminUseCase.deleteCategory(categoryId, admin.memberId());
         return ResponseEntity.ok().body(Response.success());
     }
 }
