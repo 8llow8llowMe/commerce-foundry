@@ -163,6 +163,8 @@ describe('ShipmentPanel', () => {
       <ShipmentPanel orderId="1" onResult={noop} onDenied={noop} onSubmit={noop} />,
     );
     expect(html).toContain('송장 등록 (출고)');
+    // 주문 상세 투어(#228)의 송장 등록 단계가 가리킨다
+    expect(html).toContain('data-tour="order-shipment"');
     expect(html).toContain('<option value="CJ_LOGISTICS">CJ대한통운</option>');
     expect(html).toContain('<option value="OTHER">기타 택배사</option>');
     expect(html).toContain('송장 번호');
@@ -176,6 +178,8 @@ describe('ShipmentBulkPanel', () => {
       <ShipmentBulkPanel selected={[]} onSent={noop} onDenied={noop} />,
     );
     expect(html).toContain('송장 일괄 등록 (출고)');
+    // 주문 목록 투어(#228)의 필수 단계가 가리킨다 — 빠지면 목록 투어가 시작하지 않는다
+    expect(html).toContain('data-tour="order-shipment-bulk"');
     expect(html).toContain('표에서 주문을 고르세요');
     expect(html).toContain('열 순서: 주문 아이디 · 택배사(이름 또는 코드) · 송장 번호');
     expect(html).toContain('송장 0건 등록');

@@ -20,8 +20,8 @@ describe('guideOf', () => {
     expect(ALL_TOURS.map((tour) => guideOf(tour.id))).toEqual([
       { key: 'console', version: 1 },
       // 서버 허용 목록에 아직 없다(#30) — shipping-domestic 과 같이 이 브라우저 기록으로만 정한다
-      { key: 'orders', version: 1 },
-      { key: 'order-detail', version: 1 },
+      { key: 'orders', version: 2 },
+      { key: 'order-detail', version: 2 },
       { key: 'stocks', version: 1 },
       { key: 'stock-detail', version: 1 },
       { key: 'size-charts', version: 1 },
