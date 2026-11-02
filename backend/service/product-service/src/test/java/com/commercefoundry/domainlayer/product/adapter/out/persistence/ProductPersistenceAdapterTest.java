@@ -406,6 +406,21 @@ class ProductPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("목록 QueryDSL 프로젝션이 저장된 영문 상품명을 읽는다")
+    void listRowIncludesEnglishName() {
+        entityManager.getEntityManager().createQuery("update ProductEntity p set p.nameEn = :name where p.id = :id")
+            .setParameter("name", "Linen jacket")
+            .setParameter("id", 103L)
+            .executeUpdate();
+        entityManager.clear();
+
+        assertThat(productRepositoryPort.searchVisible(criteria(Set.of(11L), ProductSortType.NEWEST, 0, 20)).getContent())
+            .filteredOn(row -> row.productId() == 103L)
+            .extracting(ProductListQueryResult::nameEn)
+            .containsExactly("Linen jacket");
+    }
+
+    @Test
     @DisplayName("상세: 보이는 상품만 찾는다 — 숨김 · 없는 상품은 비어 있다")
     void findVisibleById() {
         assertThat(productRepositoryPort.findVisibleById(102L)).hasValueSatisfying(product -> {

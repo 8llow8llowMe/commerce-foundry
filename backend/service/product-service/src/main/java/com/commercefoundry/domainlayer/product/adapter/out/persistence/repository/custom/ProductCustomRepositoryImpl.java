@@ -159,7 +159,7 @@ public class ProductCustomRepositoryImpl implements ProductCustomRepository {
             ProductListQueryResult.class,
             productEntity.id, productEntity.name, productEntity.salePriceAmount, productEntity.salePriceCurrency,
             productEntity.listPriceAmount, productEntity.listPriceCurrency, productEntity.saleStatus, productEntity.customOrder,
-            productEntity.preorder
+            productEntity.preorder, productEntity.nameEn
         );
     }
 

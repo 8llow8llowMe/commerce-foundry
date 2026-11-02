@@ -26,6 +26,7 @@ import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.ProductPricing;
+import com.commercefoundry.domainlayer.product.domain.model.ProductText;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SkuStocks;
@@ -35,6 +36,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -76,6 +78,10 @@ public class ProductDetailProcessor {
      *                     대표 카테고리가 없는 데이터 오류 · 최상위가 숨김이면 빈 목록
      */
     public ProductDetailInfo getDetail(Product product, List<Category> categoryPath) {
+        return getDetail(product, categoryPath, Locale.KOREAN);
+    }
+
+    public ProductDetailInfo getDetail(Product product, List<Category> categoryPath, Locale locale) {
         List<OptionGroup> allGroups = productOptionRepositoryPort.findGroupsByProductId(product.id());
         List<OptionValue> allValues = productOptionRepositoryPort.findValuesByProductId(product.id());
         Set<Long> retiredValueIds = retiredValueIds(allGroups, allValues);
@@ -93,12 +99,12 @@ public class ProductDetailProcessor {
 
         return ProductDetailInfo.builder()
             .productId(product.id())
-            .name(product.name())
-            .summary(product.summary())
+            .name(ProductText.select(locale, product.name(), product.nameEn()))
+            .summary(ProductText.select(locale, product.summary(), product.summaryEn()))
             .categoryPath(categoryPath.stream().map(category -> new CategoryPathInfo(category.id(), category.name())).toList())
             .thumbnail(thumbnailOf(images))
             .images(galleryOf(images))
-            .descriptionHtml(product.descriptionHtml())
+            .descriptionHtml(ProductText.select(locale, product.descriptionHtml(), product.descriptionHtmlEn()))
             .salePrice(summary.salePrice())
             .listPrice(summary.listPrice())
             .discountRate(summary.discountRate())

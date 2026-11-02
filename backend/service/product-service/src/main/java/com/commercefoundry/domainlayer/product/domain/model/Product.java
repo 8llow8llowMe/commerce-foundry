@@ -26,8 +26,18 @@ public record Product(
     long id, long categoryId, String name, String summary, String descriptionHtml,
     SaleStatus saleStatus, boolean visible, Money salePrice, Money listPrice, Integer maxQuantityPerOrder,
     boolean customOrder, String customOrderNotice, Integer customOrderLeadTimeDays,
-    boolean preorder, LocalDate expectedShipDate, Long version, Instant deletedAt, Long createdByMemberId
+    boolean preorder, LocalDate expectedShipDate, Long version, Instant deletedAt, Long createdByMemberId,
+    String nameEn, String summaryEn, String descriptionHtmlEn
 ) {
+
+    public Product(long id, long categoryId, String name, String summary, String descriptionHtml,
+                   SaleStatus saleStatus, boolean visible, Money salePrice, Money listPrice, Integer maxQuantityPerOrder,
+                   boolean customOrder, String customOrderNotice, Integer customOrderLeadTimeDays,
+                   boolean preorder, LocalDate expectedShipDate, Long version, Instant deletedAt, Long createdByMemberId) {
+        this(id, categoryId, name, summary, descriptionHtml, saleStatus, visible, salePrice, listPrice,
+            maxQuantityPerOrder, customOrder, customOrderNotice, customOrderLeadTimeDays, preorder, expectedShipDate,
+            version, deletedAt, createdByMemberId, null, null, null);
+    }
 
     public Product {
         Objects.requireNonNull(name, "name");
@@ -46,7 +56,8 @@ public record Product(
         }
         return new Product(id, categoryId, name, summary, descriptionHtml, SaleStatus.STOP_SELLING, false, salePrice, listPrice,
             maxQuantityPerOrder, customOrder, customOrderNotice, customOrderLeadTimeDays, preorder, expectedShipDate, version,
-            Objects.requireNonNull(now, "now").truncatedTo(java.time.temporal.ChronoUnit.MICROS), createdByMemberId);
+            Objects.requireNonNull(now, "now").truncatedTo(java.time.temporal.ChronoUnit.MICROS), createdByMemberId,
+            nameEn, summaryEn, descriptionHtmlEn);
     }
 
     /** 삭제(soft delete)된 상품인가. */

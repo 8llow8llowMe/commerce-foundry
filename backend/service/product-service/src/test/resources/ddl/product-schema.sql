@@ -305,16 +305,19 @@
         custom_order_notice varchar(500),
         deleted_at timestamp(6) with time zone,
         description_html text,
+        description_html_en text,
         expected_ship_date date,
         list_price_amount bigint,
         list_price_currency varchar(3) check ((list_price_currency in ('KRW','USD'))),
         max_quantity_per_order integer,
         name varchar(100) not null,
+        name_en varchar(100),
         preorder boolean not null,
         sale_price_amount bigint not null,
         sale_price_currency varchar(3) not null check ((sale_price_currency in ('KRW','USD'))),
         sale_status varchar(20) not null check ((sale_status in ('ON_SALE','STOP_SELLING'))),
         summary varchar(200),
+        summary_en varchar(200),
         version bigint not null,
         visible boolean not null,
         primary key (id),
@@ -359,6 +362,9 @@
     comment on column product.product.description_html is
         '상세 설명 HTML. 표시 전 sanitize 대상';
 
+    comment on column product.product.description_html_en is
+        '영문 상세 설명 HTML. 없으면 기본 설명 사용, 표시 전 sanitize 대상';
+
     comment on column product.product.expected_ship_date is
         '발송 예정일 (순차 발송 시작일). 프리오더 상품만 갖는다. 프리오더인데 null 이면 발송일 추후 안내';
 
@@ -374,6 +380,9 @@
     comment on column product.product.name is
         '상품명';
 
+    comment on column product.product.name_en is
+        '영문 상품명. 없으면 기본 상품명 사용';
+
     comment on column product.product.preorder is
         '프리오더(예약 판매) 상품 여부. 판매 가능 판정 · 재고는 일반 상품과 같다';
 
@@ -388,6 +397,9 @@
 
     comment on column product.product.summary is
         '한 줄 요약';
+
+    comment on column product.product.summary_en is
+        '영문 한 줄 요약. 없으면 기본 요약 사용';
 
     comment on column product.product.version is
         '낙관적 락 버전';

@@ -33,6 +33,15 @@ public record ProductDetailAdminResponse(
     @Schema(description = "상세 설명 HTML. 등록(#9 E1) 이후 저장분은 서버가 정제한 값이고 그 전 데이터는 원문일 수 있다 — FE 도 sanitize 후 렌더링", nullable = true)
     String descriptionHtml,
 
+    @Schema(description = "영문 상품명. 미입력이면 고객 영문 요청에 기본 이름 사용", nullable = true)
+    String nameEn,
+
+    @Schema(description = "영문 요약. 미입력이면 기본 요약 사용", nullable = true)
+    String summaryEn,
+
+    @Schema(description = "영문 상세 설명 HTML. 미입력이면 기본 설명 사용", nullable = true)
+    String descriptionHtmlEn,
+
     @Schema(description = "저장된 판매 상태")
     CodeNameDescriptionMetadata saleStatus,
 

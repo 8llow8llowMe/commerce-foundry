@@ -88,6 +88,23 @@ class ProductAdminControllerTest {
     }
 
     @Test
+    void updateHeaderAcceptsOptionalEnglishText() {
+        String body = "{\"version\":7,\"name\":\"저고리\",\"summary\":null,\"descriptionHtml\":null,"
+            + "\"saleStatus\":\"ON_SALE\",\"visible\":true,\"nameEn\":\" Linen jacket \","
+            + "\"summaryEn\":\" Light \",\"descriptionHtmlEn\":\"<p>English</p>\"}";
+
+        var result = mvc.put().uri(PATH + "/7/header").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+
+        assertThat(result).hasStatusOk();
+        var command = org.mockito.ArgumentCaptor.forClass(com.commercefoundry.domainlayer.product.application.command.ProductHeaderUpdateCommand.class);
+        verify(productAdminUseCase).updateHeader(command.capture());
+        assertThat(command.getValue().nameEn()).isEqualTo("Linen jacket");
+        assertThat(command.getValue().summaryEn()).isEqualTo("Light");
+        assertThat(command.getValue().descriptionHtmlEn()).isEqualTo("<p>English</p>");
+    }
+
+    @Test
     @DisplayName("ADMIN 이면 200 — PageResponse 모양이고 아이디는 String, 금액은 {amount, currency}, enum 은 {code, name, description}, 시각은 UTC ISO 다")
     void adminListContract() {
         ProductListAdminItem item = ProductListAdminItem.builder()

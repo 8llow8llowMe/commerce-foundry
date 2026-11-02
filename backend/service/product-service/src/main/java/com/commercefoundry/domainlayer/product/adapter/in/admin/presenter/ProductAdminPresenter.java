@@ -59,6 +59,7 @@ public class ProductAdminPresenter {
             .productId(String.valueOf(product.id())).categoryId(String.valueOf(product.categoryId()))
             .categoryIds(info.categoryIds().stream().map(String::valueOf).toList())
             .name(product.name()).summary(product.summary()).descriptionHtml(product.descriptionHtml())
+            .nameEn(product.nameEn()).summaryEn(product.summaryEn()).descriptionHtmlEn(product.descriptionHtmlEn())
             .saleStatus(product.saleStatus().toMetadata()).visible(product.visible())
             .salePrice(MoneyItems.of(product.salePrice())).listPrice(MoneyItems.of(product.listPrice()))
             .maxQuantityPerOrder(product.maxQuantityPerOrder()).customOrder(product.customOrder())

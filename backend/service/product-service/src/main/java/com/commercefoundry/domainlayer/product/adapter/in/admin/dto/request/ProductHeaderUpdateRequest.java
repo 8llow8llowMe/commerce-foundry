@@ -22,11 +22,26 @@ public record ProductHeaderUpdateRequest(
     @Size(max = 200_000, message = ProductValidationMessage.PRODUCT_DESCRIPTION_HTML_SIZE_MAX)
     String descriptionHtml,
     @NotNull(message = ProductValidationMessage.PRODUCT_SALE_STATUS_REQUIRED) ProductSaleStatusFilter saleStatus,
-    @NotNull(message = ProductValidationMessage.PRODUCT_VISIBLE_REQUIRED) Boolean visible
+    @NotNull(message = ProductValidationMessage.PRODUCT_VISIBLE_REQUIRED) Boolean visible,
+    @Size(max = 100, message = ProductValidationMessage.PRODUCT_NAME_SIZE_MAX)
+    @Pattern(regexp = ProductValidationMessage.PLAIN_TEXT, message = ProductValidationMessage.PRODUCT_NAME_INVALID_CHARACTER)
+    String nameEn,
+    @Size(max = 200, message = ProductValidationMessage.PRODUCT_SUMMARY_INVALID)
+    @Pattern(regexp = ProductValidationMessage.PLAIN_TEXT, message = ProductValidationMessage.PRODUCT_SUMMARY_INVALID)
+    String summaryEn,
+    @Size(max = 200_000, message = ProductValidationMessage.PRODUCT_DESCRIPTION_HTML_SIZE_MAX)
+    String descriptionHtmlEn
 ) {
+    public ProductHeaderUpdateRequest(Long version, String name, String summary, String descriptionHtml,
+                                      ProductSaleStatusFilter saleStatus, Boolean visible) {
+        this(version, name, summary, descriptionHtml, saleStatus, visible, null, null, null);
+    }
+
     public ProductHeaderUpdateCommand toCommand(long productId, long actorMemberId) {
         return new ProductHeaderUpdateCommand(productId, version, actorMemberId, name.strip(),
             summary == null || summary.isBlank() ? null : summary.strip(), descriptionHtml,
-            saleStatus.toSaleStatus(), visible);
+            saleStatus.toSaleStatus(), visible,
+            nameEn == null ? null : nameEn.strip(),
+            summaryEn == null ? null : summaryEn.strip(), descriptionHtmlEn);
     }
 }

@@ -13,12 +13,16 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.PositiveOrZero;
+import java.util.Locale;
+import org.springframework.context.i18n.LocaleContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -49,9 +53,19 @@ public class ProductWebController {
         @RequestParam(defaultValue = "NEWEST") ProductSortType sortType,
         @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0") @PositiveOrZero(message = ProductValidationMessage.PAGE_MIN) int page,
         @Parameter(description = "페이지 크기 (1~100)") @RequestParam(defaultValue = "20")
-        @Min(value = 1, message = ProductValidationMessage.SIZE_RANGE) @Max(value = MAX_PAGE_SIZE, message = ProductValidationMessage.SIZE_RANGE) int size
+        @Min(value = 1, message = ProductValidationMessage.SIZE_RANGE) @Max(value = MAX_PAGE_SIZE, message = ProductValidationMessage.SIZE_RANGE) int size,
+        @RequestHeader(value = "Accept-Language", required = false) String acceptLanguage
     ) {
-        return ResponseEntity.ok().body(Response.success(productWebUseCase.searchProducts(categoryId, sortType, page, size)));
+        LocaleContext previous = LocaleContextHolder.getLocaleContext();
+        if (acceptLanguage == null || acceptLanguage.isBlank()) {
+            LocaleContextHolder.setLocale(Locale.KOREAN);
+        }
+        try {
+            return ResponseEntity.ok().varyBy("Accept-Language")
+                .body(Response.success(productWebUseCase.searchProducts(categoryId, sortType, page, size)));
+        } finally {
+            LocaleContextHolder.setLocaleContext(previous);
+        }
     }
 
     @Operation(
@@ -60,7 +74,18 @@ public class ProductWebController {
     )
     @PreAuthorize("permitAll()")
     @GetMapping("/{productId}")
-    public ResponseEntity<Response<ProductDetailResponse>> getProduct(@Parameter(description = "상품 아이디") @PathVariable long productId) {
-        return ResponseEntity.ok().body(Response.success(productWebUseCase.getProduct(productId)));
+    public ResponseEntity<Response<ProductDetailResponse>> getProduct(
+        @Parameter(description = "상품 아이디") @PathVariable long productId,
+        @RequestHeader(value = "Accept-Language", required = false) String acceptLanguage
+    ) {
+        LocaleContext previous = LocaleContextHolder.getLocaleContext();
+        if (acceptLanguage == null || acceptLanguage.isBlank()) {
+            LocaleContextHolder.setLocale(Locale.KOREAN);
+        }
+        try {
+            return ResponseEntity.ok().varyBy("Accept-Language").body(Response.success(productWebUseCase.getProduct(productId)));
+        } finally {
+            LocaleContextHolder.setLocaleContext(previous);
+        }
     }
 }

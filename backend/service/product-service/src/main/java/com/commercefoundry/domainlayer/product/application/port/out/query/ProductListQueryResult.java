@@ -16,8 +16,16 @@ import com.commercefoundry.shared.commerce.Money;
  */
 public record ProductListQueryResult(
     long productId, String name, long salePriceAmount, CurrencyCode salePriceCurrency,
-    Long listPriceAmount, CurrencyCode listPriceCurrency, SaleStatus saleStatus, boolean customOrder, boolean preorder
+    Long listPriceAmount, CurrencyCode listPriceCurrency, SaleStatus saleStatus, boolean customOrder, boolean preorder,
+    String nameEn
 ) {
+
+    public ProductListQueryResult(long productId, String name, long salePriceAmount, CurrencyCode salePriceCurrency,
+                                  Long listPriceAmount, CurrencyCode listPriceCurrency, SaleStatus saleStatus,
+                                  boolean customOrder, boolean preorder) {
+        this(productId, name, salePriceAmount, salePriceCurrency, listPriceAmount, listPriceCurrency, saleStatus,
+            customOrder, preorder, null);
+    }
 
     /** 기본 판매가. */
     public Money salePrice() {

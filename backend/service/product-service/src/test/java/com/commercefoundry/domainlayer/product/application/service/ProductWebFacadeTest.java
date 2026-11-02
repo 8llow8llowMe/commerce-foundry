@@ -22,6 +22,7 @@ import com.commercefoundry.domainlayer.product.application.service.processor.Pro
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,6 +34,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.SliceImpl;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 @ExtendWith(MockitoExtension.class)
 class ProductWebFacadeTest {
@@ -63,11 +65,11 @@ class ProductWebFacadeTest {
     @Test
     @DisplayName("카테고리 조건이 없으면 카테고리를 읽지 않고 전체로 찾는다")
     void searchWithoutCategory() {
-        given(productListProcessor.search(any())).willReturn(EMPTY);
+        given(productListProcessor.search(any(), any())).willReturn(EMPTY);
 
         facade.searchProducts(null, ProductSortType.PRICE_ASC, 2, 30);
 
-        verify(productListProcessor).search(new ProductSearchCriteria(null, ProductSortType.PRICE_ASC, 2, 30));
+        verify(productListProcessor).search(new ProductSearchCriteria(null, ProductSortType.PRICE_ASC, 2, 30), LocaleContextHolder.getLocale());
         verifyNoInteractions(categoryProcessor);
         verify(productWebPresenter).toListResponse(EMPTY);
     }
@@ -76,22 +78,23 @@ class ProductWebFacadeTest {
     @DisplayName("카테고리 조건은 CategoryProcessor.subtreeIdsOf 의 하위 집합(숨김 무관)으로 펼친다")
     void searchExpandsSubtreeIncludingHidden() {
         given(categoryProcessor.subtreeIdsOf(11L)).willReturn(Set.of(11L, 111L, 1111L));
-        given(productListProcessor.search(any())).willReturn(EMPTY);
+        given(productListProcessor.search(any(), any())).willReturn(EMPTY);
 
         facade.searchProducts(11L, ProductSortType.NEWEST, 0, 20);
 
-        verify(productListProcessor).search(new ProductSearchCriteria(Set.of(11L, 111L, 1111L), ProductSortType.NEWEST, 0, 20));
+        verify(productListProcessor).search(new ProductSearchCriteria(Set.of(11L, 111L, 1111L), ProductSortType.NEWEST, 0, 20),
+            LocaleContextHolder.getLocale());
     }
 
     @Test
     @DisplayName("없는 카테고리면 빈 집합으로 넘긴다 — 어댑터가 쿼리 없이 빈 목록을 준다")
     void searchWithUnknownCategory() {
         given(categoryProcessor.subtreeIdsOf(999L)).willReturn(Set.of());
-        given(productListProcessor.search(any())).willReturn(EMPTY);
+        given(productListProcessor.search(any(), any())).willReturn(EMPTY);
 
         facade.searchProducts(999L, ProductSortType.NEWEST, 0, 20);
 
-        verify(productListProcessor).search(new ProductSearchCriteria(Set.of(), ProductSortType.NEWEST, 0, 20));
+        verify(productListProcessor).search(new ProductSearchCriteria(Set.of(), ProductSortType.NEWEST, 0, 20), LocaleContextHolder.getLocale());
     }
 
     @Test
@@ -101,15 +104,35 @@ class ProductWebFacadeTest {
         ProductDetailInfo detail = mock(ProductDetailInfo.class);
         given(productDetailProcessor.getVisibleProduct(7L)).willReturn(product);
         given(categoryProcessor.visiblePathOf(1111L)).willReturn(VISIBLE_PATH);
-        given(productDetailProcessor.getDetail(any(), any())).willReturn(detail);
+        given(productDetailProcessor.getDetail(any(), any(), any())).willReturn(detail);
 
         facade.getProduct(7L);
 
         InOrder order = inOrder(productDetailProcessor, categoryProcessor);
         order.verify(productDetailProcessor).getVisibleProduct(7L);
         order.verify(categoryProcessor).visiblePathOf(1111L);
-        order.verify(productDetailProcessor).getDetail(product, VISIBLE_PATH);
+        order.verify(productDetailProcessor).getDetail(product, VISIBLE_PATH, LocaleContextHolder.getLocale());
         verify(productWebPresenter).toDetailResponse(detail);
+    }
+
+    @Test
+    @DisplayName("Accept-Language en은 목록과 상세 처리에 같은 로케일을 전달한다")
+    void englishLocalePassesToBothProcessors() {
+        LocaleContextHolder.setLocale(Locale.ENGLISH);
+        try {
+            Product product = ProductFixtures.product(7L, 1111L);
+            given(productListProcessor.search(any(), any())).willReturn(EMPTY);
+            given(productDetailProcessor.getVisibleProduct(7L)).willReturn(product);
+            given(categoryProcessor.visiblePathOf(1111L)).willReturn(VISIBLE_PATH);
+
+            facade.searchProducts(null, ProductSortType.NEWEST, 0, 20);
+            facade.getProduct(7L);
+
+            verify(productListProcessor).search(any(), org.mockito.ArgumentMatchers.eq(Locale.ENGLISH));
+            verify(productDetailProcessor).getDetail(product, VISIBLE_PATH, Locale.ENGLISH);
+        } finally {
+            LocaleContextHolder.resetLocaleContext();
+        }
     }
 
     @Test

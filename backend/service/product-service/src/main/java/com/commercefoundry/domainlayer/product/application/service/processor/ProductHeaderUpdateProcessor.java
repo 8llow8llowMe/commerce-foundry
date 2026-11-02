@@ -22,6 +22,11 @@ public class ProductHeaderUpdateProcessor {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public ProductAdminDetailInfo update(ProductHeaderUpdateCommand command, String sanitizedHtml) {
+        return update(command, sanitizedHtml, null);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ProductAdminDetailInfo update(ProductHeaderUpdateCommand command, String sanitizedHtml, String sanitizedHtmlEn) {
         Product current = productRepositoryPort.findAllByIdsIncludingHidden(List.of(command.productId())).stream().findFirst()
             .filter(product -> !product.isDeleted())
             .orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND_PRODUCT));
@@ -31,7 +36,13 @@ public class ProductHeaderUpdateProcessor {
         productRepositoryPort.update(new Product(current.id(), current.categoryId(), command.name(), command.summary(), sanitizedHtml,
             command.saleStatus(), command.visible(), current.salePrice(), current.listPrice(), current.maxQuantityPerOrder(),
             current.customOrder(), current.customOrderNotice(), current.customOrderLeadTimeDays(), current.preorder(),
-            current.expectedShipDate(), current.version(), current.deletedAt(), current.createdByMemberId()));
+            current.expectedShipDate(), current.version(), current.deletedAt(), current.createdByMemberId(),
+            retainedOrCleared(command.nameEn(), current.nameEn()), retainedOrCleared(command.summaryEn(), current.summaryEn()),
+            retainedOrCleared(sanitizedHtmlEn, current.descriptionHtmlEn())));
         return productAdminDetailProcessor.getProduct(command.productId());
+    }
+
+    private static String retainedOrCleared(String requested, String current) {
+        return requested == null ? current : requested.isBlank() ? null : requested;
     }
 }
