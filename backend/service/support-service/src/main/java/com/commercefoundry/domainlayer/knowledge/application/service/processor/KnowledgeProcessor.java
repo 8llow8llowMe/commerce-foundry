@@ -1,7 +1,10 @@
 package com.commercefoundry.domainlayer.knowledge.application.service.processor;
 
+import com.commercefoundry.domainlayer.knowledge.application.command.KnowledgeContentCommand;
 import com.commercefoundry.domainlayer.knowledge.application.exception.KnowledgeErrorCode;
 import com.commercefoundry.domainlayer.knowledge.application.exception.KnowledgeException;
+import com.commercefoundry.domainlayer.knowledge.application.info.KnowledgeAdminInfo;
+import com.commercefoundry.domainlayer.knowledge.application.info.KnowledgeSummaryInfo;
 import com.commercefoundry.domainlayer.knowledge.application.port.out.KnowledgeRepositoryPort;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeDocument;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeLocale;
@@ -10,11 +13,13 @@ import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeStatus;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeType;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Instant;
+import java.util.function.Supplier;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 지식 게시 정책의 불변식과 버전 계약을 적용한다. */
@@ -25,6 +30,115 @@ public class KnowledgeProcessor {
 
     private final KnowledgeRepositoryPort repository;
     private final SnowflakeIdGenerator idGenerator;
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Page<KnowledgeSummaryInfo> listAdmin(KnowledgeType type, KnowledgeLocale locale, int page, int size) {
+        return validated(() -> {
+            if (page < 0 || size < 1 || size > 100) {
+                throw new IllegalArgumentException("page");
+            }
+            return repository.findAdminSummaries(type, locale, page, size).map(row -> new KnowledgeSummaryInfo(
+                row.documentId(), row.type(), row.locale(), row.latestRevision(), row.publishedRevision(), row.documentVersion(), row.revisionVersion(),
+                row.title(), row.category(), row.status(), row.validFrom(), row.validTo(), row.approvedBy(), row.approvedAt(), row.publishedAt()));
+        });
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public KnowledgeAdminInfo getAdmin(long documentId) {
+        return validated(() -> {
+            KnowledgeDocument document = document(documentId);
+            return new KnowledgeAdminInfo(document, revision(documentId, document.latestRevision()));
+        });
+    }
+
+    public KnowledgeAdminInfo createAdmin(KnowledgeType type, KnowledgeLocale locale, KnowledgeContentCommand command) {
+        return validated(() -> {
+            KnowledgeRevision created = create(type, locale, content(command));
+            return new KnowledgeAdminInfo(document(created.documentId()), created);
+        });
+    }
+
+    public KnowledgeAdminInfo createDraftAdmin(long documentId, Long expectedDocumentVersion, KnowledgeContentCommand command) {
+        return validated(() -> {
+            KnowledgeDocument document = document(documentId);
+            requireVersion(expectedDocumentVersion, document.version());
+            KnowledgeDocument next = document.nextDraft();
+            KnowledgeRevision draft = KnowledgeRevision.draft(idGenerator.generateId(), documentId, next.latestRevision(), content(command));
+            KnowledgeDocument saved = repository.saveDocument(next);
+            return new KnowledgeAdminInfo(saved, repository.saveRevision(draft));
+        });
+    }
+
+    public KnowledgeAdminInfo editAdmin(long documentId, int number, Long expectedVersion, KnowledgeContentCommand command) {
+        return validated(() -> {
+            KnowledgeDocument document = document(documentId);
+            KnowledgeRevision target = versionedRevision(documentId, number, expectedVersion);
+            requireLatest(document, number);
+            KnowledgeRevision changed = target.edit(content(command));
+            return new KnowledgeAdminInfo(document, repository.saveRevision(changed));
+        });
+    }
+
+    public KnowledgeAdminInfo approveAdmin(long documentId, int number, Long expectedVersion, long actorId, Instant now) {
+        return validated(() -> {
+            KnowledgeDocument document = document(documentId);
+            KnowledgeRevision target = versionedRevision(documentId, number, expectedVersion);
+            requireLatest(document, number);
+            KnowledgeRevision changed = target.approve(actorId, now);
+            return new KnowledgeAdminInfo(document, repository.saveRevision(changed));
+        });
+    }
+
+    public KnowledgeAdminInfo publishAdmin(long documentId, int number, Long expectedVersion, Long expectedDocumentVersion, Instant now) {
+        return validated(() -> {
+            KnowledgeDocument document = document(documentId);
+            KnowledgeRevision target = revision(documentId, number);
+            if (Objects.equals(document.publishedRevision(), number) && target.status() == KnowledgeStatus.PUBLISHED) {
+                return new KnowledgeAdminInfo(document, target);
+            }
+            requireVersion(expectedDocumentVersion, document.version());
+            requireVersion(expectedVersion, target.version());
+            KnowledgeDocument changed = document.publish(number);
+            KnowledgeRevision published = target.publish(now);
+            KnowledgeDocument saved = repository.saveDocument(changed);
+            if (document.publishedRevision() != null) {
+                repository.saveRevision(revision(documentId, document.publishedRevision()).archive());
+            }
+            return new KnowledgeAdminInfo(saved, repository.saveRevision(published));
+        });
+    }
+
+    public void archiveAdmin(long documentId, int number, Long expectedVersion, Long expectedDocumentVersion) {
+        validated(() -> {
+            KnowledgeDocument document = document(documentId);
+            KnowledgeRevision target = revision(documentId, number);
+            if (target.status() == KnowledgeStatus.ARCHIVED) {
+                return target;
+            }
+            requireVersion(expectedDocumentVersion, document.version());
+            requireVersion(expectedVersion, target.version());
+            if (Objects.equals(document.publishedRevision(), number)) {
+                repository.saveDocument(document.unpublish());
+            }
+            return repository.saveRevision(target.archive());
+        });
+    }
+
+    private KnowledgeRevision.Content content(KnowledgeContentCommand command) {
+        return new KnowledgeRevision.Content(command.title(), command.body(), command.category(), command.validFrom(), command.validTo());
+    }
+
+    private void requireLatest(KnowledgeDocument document, int number) {
+        if (document.latestRevision() != number) {
+            throw new KnowledgeException(KnowledgeErrorCode.INVALID_TRANSITION);
+        }
+    }
+
+    private void requireVersion(Long expected, Long actual) {
+        if (expected == null || !Objects.equals(expected, actual)) {
+            throw new KnowledgeException(KnowledgeErrorCode.CONCURRENTLY_CHANGED);
+        }
+    }
 
     public KnowledgeRevision create(KnowledgeType type, KnowledgeLocale locale, KnowledgeRevision.Content content) {
         return validated(() -> {
