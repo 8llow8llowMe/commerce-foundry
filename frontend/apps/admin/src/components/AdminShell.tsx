@@ -8,7 +8,7 @@ import { NotificationCenter } from './notification/NotificationCenter';
 import { HelpMenu } from './tour/HelpMenu';
 import { TourRunner } from './tour/TourRunner';
 
-/** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 등록 `/products/new` 은 상품 목록 안 버튼 — 메뉴 '상품 목록' 이 하위 경로까지 켜진다. 주문은 #30) */
+/** 메뉴. 화면이 생길 때마다 여기에 더한다(상품 등록 `/products/new` 은 상품 목록 안 버튼 — 메뉴 '상품 목록' 이 하위 경로까지 켜진다. 주문 상세 `/orders/{id}` 도 '주문 목록' 이 켜진다) */
 const NAV: NavGroup[] = [
   {
     title: '상품',
@@ -20,6 +20,10 @@ const NAV: NavGroup[] = [
       { label: '사이즈표', href: '/size-charts' },
       { label: '사이즈표 템플릿', href: '/size-chart-templates' },
     ],
+  },
+  {
+    title: '주문',
+    items: [{ label: '주문 목록', href: '/orders' }],
   },
   {
     title: '전시 관리',
