@@ -32,7 +32,7 @@
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
-| operations-service | — | `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**`, `/api/v1/admin/onboarding/**` |
+| operations-service | — | `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**`, `/api/v1/admin/onboarding/**`, `/api/v1/admin/campaigns/**` |
 | support-service | `/api/v1/support/**` | `/api/v1/admin/support/**` |
 
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
@@ -1543,3 +1543,11 @@ DELETE는 본문 없이 필수 query revisionNumber/expectedVersion/expectedDocu
 동일 현재 게시본 게시·이미 보관한 대상 보관은 멱등이다. 생성 POST는 멱등성을 보장하지 않으며 새 초안 재시도 충돌은 재조회해야 한다.
 필드 검증은 SUPPORT_1xx/198/199(400), 없는 대상은 SUPPORT_001(404), 상태·버전 충돌은 SUPPORT_003/004(409)다.
 FE는 응답의 문서/리비전 버전을 보관해 요청에 포함하고 409이면 재조회해야 한다. API 리뷰 대상은 `seonghoho`다.
+
+### 캠페인 수신자 동의 미리보기 (#230 PR-B)
+
+`POST /api/v1/admin/campaigns/recipient-previews`는 operations-service의 ADMIN API다.
+최대100개 양수 `memberIds`로 auth의 최신 동의를 한 번 조회한다. 요청·응답·검증·실패·감사·발송 후속 경계는
+[마케팅 동의 조회 계약](marketing-consent-guide.md#관리자-수신자-미리보기-230-pr-b)을 따른다.
+중복 제거 후 첫 요청 순서의 `members[{memberId:String,marketingAgreed:boolean}]`와
+`recipientCount/agreedCount/excludedCount`를 공통 봉투로 낸다. 불완전 응답이나 조회 실패는503 `CAMPAIGN_001`이다.

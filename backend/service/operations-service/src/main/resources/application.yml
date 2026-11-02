@@ -78,6 +78,8 @@ resilience4j:
         base-config: default
       product-service:
         base-config: default
+      auth-service:
+        base-config: default
 
 eureka:
   client:
