@@ -710,3 +710,121 @@ describe('createProxyHandler', () => {
     });
   });
 });
+
+describe('createProxyHandler — 동료 OTP 복구(#428, 어드민 쿠키 설정)', () => {
+  const ADMIN_COOKIES: AuthCookieConfig = {
+    accessName: 'cf_admin_at',
+    refreshName: null,
+    accessMaxAgeSec: 1800,
+    secure: false,
+  };
+  const PATH = '/api/v1/admin/admins/312345678901234567/otp/recovery';
+  const BODY = '{"currentPassword":"pw-secret-1","code":"123456"}';
+  const codes = Array.from({ length: 8 }, (_, i) => `code${i}-xxxxx`);
+  const recover = (headers: Record<string, string> = { 'sec-fetch-site': 'same-origin' }) =>
+    request(PATH, {
+      method: 'POST',
+      body: BODY,
+      cookie: 'cf_admin_at=admin-access',
+      headers: { 'content-type': 'application/json', ...headers },
+    });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('재인증 본문을 그대로 넘기고, 새 복구 코드 응답을 no-store 로 중계하되 남기지 않는다', async () => {
+    const upstream = envelope(200, true, { recoveryCodes: codes });
+    upstream.headers.set('cache-control', 'no-store');
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(upstream);
+    const logs = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {}),
+    );
+    const handler = createProxyHandler({
+      gatewayUrl: GATEWAY,
+      cookies: ADMIN_COOKIES,
+      fetch: fetchImpl,
+    });
+
+    const res = await handler(recover());
+
+    expect(res.status).toBe(200);
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(urlOf(url)).toBe(`${GATEWAY}${PATH}`);
+    expect(init?.method).toBe('POST');
+    expect(init?.cache).toBe('no-store');
+    expect(new TextDecoder().decode(init?.body as ArrayBuffer)).toBe(BODY);
+    expect(authOf(init)).toBe('Bearer admin-access');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect((await res.json()).dataBody).toEqual({ recoveryCodes: codes });
+    for (const spy of logs) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('다른 origin 에서 온 복구 요청은 게이트웨이로 보내지 않는다(BFF_003)', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const handler = createProxyHandler({
+      gatewayUrl: GATEWAY,
+      cookies: ADMIN_COOKIES,
+      fetch: fetchImpl,
+    });
+
+    const res = await handler(recover({ 'sec-fetch-site': 'cross-site' }));
+
+    expect(res.status).toBe(403);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ dataHeader: { resultCode: 'BFF_003' } });
+  });
+
+  it.each([
+    [400, 'AUTH_032'],
+    [400, 'AUTH_035'],
+    [400, 'AUTH_045'],
+    [404, 'AUTH_033'],
+    [404, 'AUTH_036'],
+    [409, 'AUTH_044'],
+    [503, 'AUTH_013'],
+  ])('%i %s 는 재시도 없이 그대로 중계한다', async (status, code) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(envelope(status, false, null, code));
+    const handler = createProxyHandler({
+      gatewayUrl: GATEWAY,
+      cookies: ADMIN_COOKIES,
+      fetch: fetchImpl,
+    });
+
+    const res = await handler(recover());
+
+    expect(res.status).toBe(status);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toMatchObject({ dataHeader: { resultCode: code } });
+  });
+
+  it('429 AUTH_043 은 Retry-After 와 함께 중계한다', async () => {
+    const upstream = envelope(429, false, null, 'AUTH_043');
+    upstream.headers.set('retry-after', '900');
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(upstream);
+    const handler = createProxyHandler({
+      gatewayUrl: GATEWAY,
+      cookies: ADMIN_COOKIES,
+      fetch: fetchImpl,
+    });
+
+    const res = await handler(recover());
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('900');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('401 은 refresh 쿠키가 없는 설정이라 재발급 · 재시도 없이 중계한다(본문을 두 번 보내지 않는다)', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(unauthorized());
+    const handler = createProxyHandler({
+      gatewayUrl: GATEWAY,
+      cookies: ADMIN_COOKIES,
+      fetch: fetchImpl,
+    });
+
+    const res = await handler(recover());
+
+    expect(res.status).toBe(401);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
