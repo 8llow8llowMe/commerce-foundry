@@ -8,14 +8,18 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * {@link OutboxStore} SPI 계약 — 서비스마다 둔 outbox 어댑터가 릴레이 · 정리가 기대하는 대로 움직이는지 본다 (README "서비스가 둘 테이블").
  * 서비스 테스트가 상속해 {@link #outboxStore()} 를 넘긴다 — JPA 어댑터는 {@code @DataJpaTest}(PostgreSQL)로, {@link InMemoryOutboxStore} 는 모듈 자체 테스트로 돈다.
  *
- * <p>{@code append} 는 호출자 트랜잭션에 합류한다 — 상속한 테스트가 테스트마다 트랜잭션을 열어 둔다(JPA 는 {@code @DataJpaTest} 기본). 트랜잭션 밖 append 거절 ·
- * 실패 코드 칸 길이 · 지표 쿼리처럼 저장 기술에 기대는 것은 상속한 쪽이 따로 본다.
+ * <p>{@code append} 는 호출자 트랜잭션에 합류한다 — 계약 메서드마다 테스트 트랜잭션이 열려 있어야 한다. Spring 테스트는 테스트 메서드를 <b>선언한 클래스</b>에서
+ * {@code @Transactional} 을 찾으므로 상속한 쪽의 {@code @DataJpaTest} 로는 이 클래스의 메서드에 트랜잭션이 걸리지 않는다 — 그래서 여기 둔다.
+ * Spring 컨텍스트가 없는 {@link InMemoryOutboxStore} 테스트에는 영향이 없다. 트랜잭션 밖 append 거절 · 실패 코드 칸 길이 · 지표 쿼리처럼 저장 기술에 기대는 것은
+ * 상속한 쪽이 따로 본다.
  */
+@Transactional
 public abstract class OutboxStoreContract {
 
     protected static final Instant NOW = Instant.parse("2026-10-24T09:00:00Z");
