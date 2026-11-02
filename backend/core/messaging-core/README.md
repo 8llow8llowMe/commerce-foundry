@@ -84,5 +84,6 @@ shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock J
 - 모듈 자체: 단위 테스트 + 내장 Kafka(`spring-kafka-test`, KRaft) 왕복 — 커밋하면 발행 / 롤백하면 미발행, 중복 1회 처리, 재시도 상한 뒤 DLT. Docker 가 필요 없다.
 - testFixtures: `InMemoryOutboxStore` · `InMemoryProcessedEventStore`(트랜잭션 커밋 · 롤백 흉내 — 동시성 · 예외 타입은 흉내 내지 않는다), `NoOpTransactionManager`,
   `MessagingKafkaContainers`(apache/kafka 4.3.1 Testcontainers).
-- 서비스 JPA 어댑터의 SPI 계약(조건부 표시 · id 순 · available_at)은 첫 사용처 operations-service 의 `JpaOutboxStoreTest`(PostgreSQL)가 본다.
-  여러 서비스가 함께 쓰는 재사용 계약 테스트는 두 번째 사용처(#308)에서 testFixtures 로 올린다.
+- 서비스 JPA 어댑터의 SPI 계약(조건부 표시 · id 순 · available_at · 정리)은 testFixtures `OutboxStoreContract` 다(#308) — 서비스 `JpaOutboxStoreTest`(PostgreSQL)가
+  상속해 저장소만 넘기고, 트랜잭션 밖 append 거절 · 칸 길이 · 지표 쿼리는 서비스 테스트가 더 본다(operations · payment). `InMemoryOutboxStore` 도 같은 계약을 모듈 테스트로 돈다.
+  order-service 의 outbox 는 만료 · 취소 영속성 계약 테스트가 함께 보고, 아직 이 계약을 상속하지 않는다.

@@ -1,6 +1,65 @@
 
     create schema payment;
 
+    create table payment.outbox (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        aggregate_id varchar(100) not null,
+        aggregate_type varchar(50) not null,
+        available_at timestamp(6) with time zone not null,
+        event_type varchar(100) not null,
+        last_error_code varchar(100),
+        payload text not null,
+        publish_attempts integer not null,
+        published_at timestamp(6) with time zone,
+        schema_version integer not null,
+        version bigint not null,
+        primary key (id)
+    );
+
+    comment on table payment.outbox is
+        '이벤트 발행 대기열 (transactional outbox)';
+
+    comment on column payment.outbox.id is
+        'outbox 행 아이디 (Snowflake — 시간순, 같은 키의 발행 순서)';
+
+    comment on column payment.outbox.created_at is
+        '생성 시각';
+
+    comment on column payment.outbox.updated_at is
+        '수정 시각';
+
+    comment on column payment.outbox.aggregate_id is
+        '집합 아이디 — Kafka 키(같은 키는 같은 파티션 · 순서)';
+
+    comment on column payment.outbox.aggregate_type is
+        '집합 종류 (예: payment)';
+
+    comment on column payment.outbox.available_at is
+        '이 시각부터 보낸다 — 예약 · 재시도 백오프 같은 지연 발행';
+
+    comment on column payment.outbox.event_type is
+        '이벤트 종류 — 토픽 끝 토막 (예: payment-approved)';
+
+    comment on column payment.outbox.last_error_code is
+        '마지막 발행 실패 코드 (예외 타입 · Kafka 오류 코드만, 메시지 원문 없음)';
+
+    comment on column payment.outbox.payload is
+        '이벤트 봉투 JSON (개인정보 원문 없음)';
+
+    comment on column payment.outbox.publish_attempts is
+        '실패한 발행 시도 수';
+
+    comment on column payment.outbox.published_at is
+        'Kafka 에 보낸 시각. 아직이면 null';
+
+    comment on column payment.outbox.schema_version is
+        '페이로드 계약 버전 (1부터)';
+
+    comment on column payment.outbox.version is
+        '낙관적 락 버전 — 발행 표시 · 실패 기록이 올린다';
+
     create table payment.payment (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -128,6 +187,32 @@
 
     comment on column payment.payment.version is
         '낙관적 락 버전';
+
+    create table payment.shedlock (
+        name varchar(64) not null,
+        lock_until timestamp(6) with time zone not null,
+        locked_at timestamp(6) with time zone not null,
+        locked_by varchar(255) not null,
+        primary key (name)
+    );
+
+    comment on table payment.shedlock is
+        '단일 실행 락 (ShedLock — outbox 릴레이 · 정리)';
+
+    comment on column payment.shedlock.name is
+        '락 이름';
+
+    comment on column payment.shedlock.lock_until is
+        '이 시각까지 락을 쥔다';
+
+    comment on column payment.shedlock.locked_at is
+        '락을 잡은 시각';
+
+    comment on column payment.shedlock.locked_by is
+        '락을 잡은 인스턴스 (호스트 이름)';
+
+    create index idx_outbox_published_at_available_at 
+       on payment.outbox (published_at, available_at);
 
     create index idx_payment_order_id 
        on payment.payment (order_id);

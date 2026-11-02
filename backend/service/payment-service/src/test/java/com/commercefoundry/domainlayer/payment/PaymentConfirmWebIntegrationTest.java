@@ -172,6 +172,14 @@ class PaymentConfirmWebIntegrationTest {
         return jdbcTemplate.queryForObject("select status from payment.payment where pg_order_id = ?", String.class, pgOrderId);
     }
 
+    /** 결제 시도의 주문으로 쌓인 payment-approved outbox 행 수 (#308) — 키(aggregate_id)가 주문 아이디다. */
+    private long approvedEventsOf(String pgOrderId) {
+        return jdbcTemplate.queryForObject("""
+            select count(*) from payment.outbox o join payment.payment p on o.aggregate_id = cast(p.order_id as varchar)
+             where p.pg_order_id = ? and o.event_type = 'payment-approved'
+            """, Long.class, pgOrderId);
+    }
+
     private static String paymentKey(String pgOrderId) {
         return "tgen_it_" + pgOrderId;
     }
@@ -198,6 +206,8 @@ class PaymentConfirmWebIntegrationTest {
         assertThat(result).hasStatusOk();
         assertThat(statusOf(result)).isEqualTo("DONE");
         assertThat(dbStatusOf(pgOrderId)).isEqualTo("DONE");
+        // DONE 기록과 같은 커밋으로 결제 승인 이벤트 한 건이 outbox 에 남는다 (#308, 메시징이 꺼져 있어도 저장된다)
+        assertThat(approvedEventsOf(pgOrderId)).isEqualTo(1);
         toss.verify(1, postRequestedFor(urlEqualTo(CONFIRM_PATH)).withHeader("Idempotency-Key",
             com.github.tomakehurst.wiremock.client.WireMock.equalTo(pgOrderId)));
     }
@@ -213,6 +223,7 @@ class PaymentConfirmWebIntegrationTest {
         assertThat(result).hasStatusOk();
         assertThat(statusOf(result)).isEqualTo("FAILED");
         assertThat(body(result).path("dataBody").path("failure").path("code").asString()).isEqualTo("REJECT_CARD_COMPANY");
+        assertThat(approvedEventsOf(pgOrderId)).isZero();
     }
 
     @Test
@@ -226,6 +237,7 @@ class PaymentConfirmWebIntegrationTest {
         assertThat(result).hasStatusOk();
         assertThat(statusOf(result)).isEqualTo("UNKNOWN");
         assertThat(dbStatusOf(pgOrderId)).isEqualTo("UNKNOWN");
+        assertThat(approvedEventsOf(pgOrderId)).isZero();
     }
 
     @Test
@@ -283,6 +295,7 @@ class PaymentConfirmWebIntegrationTest {
         }
         toss.verify(1, postRequestedFor(urlEqualTo(CONFIRM_PATH)));
         assertThat(dbStatusOf(pgOrderId)).isEqualTo("DONE");
+        assertThat(approvedEventsOf(pgOrderId)).isEqualTo(1);
     }
 
     @Test
@@ -299,6 +312,7 @@ class PaymentConfirmWebIntegrationTest {
         assertThat(replay).hasStatusOk();
         assertThat(statusOf(replay)).isEqualTo("DONE");
         assertThat(versionOf(pgOrderId)).isEqualTo(version);
+        assertThat(approvedEventsOf(pgOrderId)).isEqualTo(1);
         toss.verify(1, postRequestedFor(urlEqualTo(CONFIRM_PATH)));
     }
 

@@ -1,5 +1,7 @@
 dependencies {
     implementation project(':core:common-core')
+    // 결제 승인 이벤트(payment-approved) outbox 발행 (#308, payment-guide.md §6)
+    implementation project(':core:messaging-core')
     implementation project(':core:commerce-support')
     implementation project(':core:persistence-core')
     implementation project(':core:security-core')
@@ -31,6 +33,8 @@ dependencies {
     testImplementation testFixtures(project(':core:security-core'))
     // 폴백 오류 봉투 스모크(FallbackErrorSmokeTestSupport). 테스트 클래스패스에만 들어간다
     testImplementation testFixtures(project(':core:common-core'))
+    // 가짜 outbox 저장소 · 트랜잭션 관리자(InMemoryOutboxStore · NoOpTransactionManager) — 발행이 결과 기록과 함께 커밋 · 롤백되는지 본다
+    testImplementation testFixtures(project(':core:messaging-core'))
     // 컨텍스트 로딩 테스트용 (application-test.yml). Docker 없이 로컬·CI 가 같은 결과를 낸다
     testRuntimeOnly 'com.h2database:h2'
 

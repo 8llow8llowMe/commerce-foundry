@@ -138,12 +138,17 @@ compose 가 env 파일과 무관하게 고정하는 값:
 - `STORE_FEATURES_*` 는 dev 프로파일 yml 이 `true` 로 덮어 dev 에서는 env 를 읽지 않는다.
 - 아직 어느 모듈의 yml 도 읽지 않는 `.env.example` 키(`TOSS_SECRET_KEY` 밖의 `TOSS_*` · `STORAGE_PUBLIC_BASE_URL` 밖의 `STORAGE_*` · `STORE_BUSINESS_*` · `KAFKA_SASL_*`(§4-4))는 compose 에 넘기지 않는다.
   `STORAGE_PUBLIC_BASE_URL` 은 product-service 가 메인 전시 미디어 주소 판정에 읽는다(#63, `:-` 빈 값 — 비면 미디어 쓰기만 503).
-  `MESSAGING_ENABLED` · `KAFKA_NAMESPACE` · `KAFKA_BOOTSTRAP_SERVERS` · `KAFKA_SECURITY_PROTOCOL` 은 product-service · order-service compose 가 넘긴다(#309 주문 만료 · 취소 컨슈머 · #96 `order-expired` outbox 릴레이, `:-` 기본 꺼짐).
-  order-service 는 꺼져 있어도 `orders.outbox` 에 쌓기만 하고 릴레이가 멈춘다 — 켜면 쌓인 것부터 나간다.
-  꺼진 동안 미결제 만료마다 행이 계속 쌓여 `commerce.messaging.outbox.unpublished.count` · `…unpublished.oldest.age` 가 오른다 —
+  `MESSAGING_ENABLED` · `KAFKA_NAMESPACE` · `KAFKA_BOOTSTRAP_SERVERS` · `KAFKA_SECURITY_PROTOCOL` 은 product-service · order-service · payment-service compose 가 넘긴다
+  (#309 주문 만료 · 취소 컨슈머 · #96 `order-expired` outbox 릴레이 · #308 `payment-approved` outbox 릴레이, `:-` 기본 꺼짐).
+  order-service · payment-service 는 꺼져 있어도 `orders.outbox` · `payment.outbox` 에 쌓기만 하고 릴레이가 멈춘다 — 켜면 쌓인 것부터 나간다.
+  꺼진 동안 미결제 만료 · 결제 승인마다 행이 계속 쌓여 `commerce.messaging.outbox.unpublished.count` · `…unpublished.oldest.age` 가 오른다 —
   메시징을 끈 환경은 이 두 지표를 알림에서 뺀다(켠 환경에서만 릴레이 정지 신호다).
-  켜기 전에 미발행 건수(`select count(*) from orders.outbox where published_at is null`)를 확인하고 — 켜는 순간 그만큼이 한꺼번에 나간다 —
-  토픽 `<ns>.order.order-expired` · `<ns>.order.order-expired.dlt` 를 먼저 만든다(`docker/kafka/topics.txt` · `create-topics.sh`, 앱 · 브로커는 토픽을 만들지 않는다).
+  켜기 전에 미발행 건수(`select count(*) from orders.outbox where published_at is null`, payment 는 `payment.outbox`)를 확인하고 — 켜는 순간 그만큼이 한꺼번에 나간다 —
+  토픽을 먼저 만든다(`docker/kafka/topics.txt` · `create-topics.sh`, 앱 · 브로커는 토픽을 만들지 않는다). order 는 `<ns>.order.order-expired` · `.dlt`,
+  payment 는 `<ns>.payment.payment-approved` · `.dlt` 다 — `required-topics` 에 적혀 있어 없으면 켠 서비스가 뜨지 않는다.
+  payment 의 운영 DDL(`payment.outbox` · `payment.shedlock`)은 메시징을 켜기 전이 아니라 **이 버전 배포 전**에 적용한다 — 꺼져 있어도 결제 승인이 outbox 에 쓴다(없으면 승인 기록이 500 `PAYMENT_013`).
+  결제 게이트(`payment.enabled`)를 켠 인스턴스는 두 테이블이 없으면 기동하지 않는다(`PaymentOutboxSchemaGuard`, `payment-guide.md` §6). 게이트가 닫혀 있으면 WARN 만 남긴다.
+  payment 의 `MESSAGING_ENABLED` 는 order 컨슈머(#308 PR-B2) 배포와 함께 켠다 — 그 전에는 outbox 에 쌓아 둔다(켜면 쌓인 것부터 나가고, 토픽 보존은 7일이다).
   operations-service yml 도 같은 키를 읽지만 배포 compose 가 아직 없다 — compose 를 만드는 PR 에서 같이 넘긴다.
   해당 기능이 yml(또는 `storage.*` 같은 relaxed binding)로 키를 읽기 시작하는 PR 에서 그 모듈 compose 의 `environment` 에 같이 더한다(§8).
   `KAFKA_PORT` 는 로컬 compose(`docker-compose-local.yml`) 전용이라 배포 compose 에 넘기지 않는다.

@@ -4,11 +4,13 @@ import com.commercefoundry.domainlayer.payment.application.exception.PaymentErro
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentException;
 import com.commercefoundry.domainlayer.payment.application.model.PayableOrder;
 import com.commercefoundry.domainlayer.payment.application.model.PgApprovalOutcome;
+import com.commercefoundry.domainlayer.payment.application.port.out.PaymentEventPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentRepositoryPort;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentAbortReason;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentApproval;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentApprovalMismatchException;
+import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentUnknownReason;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Instant;
@@ -31,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentProcessor {
 
     private final PaymentRepositoryPort paymentRepositoryPort;
+    private final PaymentEventPort paymentEventPort;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
     /** 회원의 결제 시도. 없거나 다른 회원의 것이면 404 {@code PAYMENT_001} — 존재를 숨긴다. */
@@ -107,7 +110,8 @@ public class PaymentProcessor {
      *   <li>NotSent → READY 로 되돌린다(결제키 유지) — 같은 결제키로 다시 승인할 수 있다</li>
      * </ul>
      *
-     * <p>#308 에서 DONE 을 기록하는 이 트랜잭션 안에 {@code payment.approved} outbox 를 함께 쓴다 ({@code payment-guide.md} §6) — 그 자리가 여기다.
+     * <p>DONE 이면 같은 트랜잭션에서 {@code payment-approved} 를 outbox 에 넣는다({@link #saveApproved}, {@code payment-guide.md} §6). DONE 이 아니면 발행하지 않는다.
+     * 발행이 실패하면 DONE 저장도 함께 롤백된다 — 결제는 IN_PROGRESS 로 남고 Facade 가 500 {@code PAYMENT_013} 으로 답한다(복구는 #15 의 재조회 몫이다 — 아직 없다).
      *
      * @throws com.commercefoundry.domainlayer.payment.application.exception.PaymentPersistenceConflictException {@code VERSION} — 그 사이 재조회 · 웹훅이 먼저 바꿨다
      */
@@ -125,7 +129,23 @@ public class PaymentProcessor {
                 yield inProgress.revertToReady();
             }
         };
-        return saveIfChanged(inProgress, next);
+        return next.status() == PaymentStatus.DONE ? saveApproved(inProgress, next) : saveIfChanged(inProgress, next);
+    }
+
+    /**
+     * DONE 저장과 승인 이벤트 발행을 한 묶음으로 둔다 — 호출자 트랜잭션 안에서만 부른다(둘이 함께 커밋 · 롤백된다). 지금은 승인 응답 기록({@link #recordApprovalResult})이
+     * 쓰고, #15 의 UNKNOWN 재조회 확정({@code Payment#resolve} → DONE)도 이 메서드로 저장해야 한다 — 발행을 빠뜨리면 주문이 결제 완료로 바뀌지 않는다.
+     *
+     * <p>전이가 같은 인스턴스를 돌려주면(이미 DONE — 멱등 no-op) 저장도 발행도 하지 않는다. 같은 결제의 승인 이벤트가 두 번 나가지 않게 한다.
+     * 패키지 공개다 — 재조회 확정이 생기기 전까지는 공개 메서드로 no-op 경로에 닿을 수 없어 테스트가 직접 부른다.
+     */
+    Payment saveApproved(Payment current, Payment approved) {
+        if (approved == current) {
+            return current;
+        }
+        Payment saved = paymentRepositoryPort.save(approved);
+        paymentEventPort.approved(saved);
+        return saved;
     }
 
     /** 승인 결과가 결제 시도와 어긋나면 승인으로 기록하지 않는다 — 돈이 빠졌을 수 있어 UNKNOWN 으로 두고 사람이 확인한다 ({@code payment-guide.md} §5). */
