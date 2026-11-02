@@ -3,8 +3,10 @@
 import { Button, FieldError } from '@cf/ui';
 import { useState } from 'react';
 import { newImageItem, type MediaFormItem } from '@/lib/display/form';
+import { mediaSpecHint, specFor } from '@/lib/display/media-spec';
 import { normalizeText } from '@/lib/display/text';
 import { ITEM_RANGES, LIMITS, type SectionTypeCode } from '@/lib/display/types';
+import { MediaSizeNotice, useImageSize } from './MediaSizeCheck';
 import { TextInput } from './SectionEditor';
 
 /**
@@ -24,6 +26,7 @@ export function MediaUrlFields({
   onChange: (media: MediaFormItem[]) => void;
 }) {
   const [min, max] = ITEM_RANGES[type].media;
+  const specHint = mediaSpecHint(type);
   const update = (index: number, patch: Partial<MediaFormItem>) =>
     onChange(media.map((item, at) => (at === index ? { ...item, ...patch } : item)));
 
@@ -36,11 +39,13 @@ export function MediaUrlFields({
         이미지 업로드는 준비 중입니다. 지금은 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣어
         주세요. 다른 사이트의 이미지 주소는 저장되지 않습니다. 메인에는 첫 번째 이미지만 보입니다.
       </p>
+      {specHint && <p className="text-xs text-muted-fg">{specHint}</p>}
       <ul className="flex flex-col gap-3">
         {media.map((item, index) => (
           <MediaUrlRow
             // 불러오기 실패 표시는 주소로 판정하므로 줄을 빼도 다른 줄에 섞이지 않는다
             key={index}
+            type={type}
             index={index}
             item={item}
             errorsOf={errorsOf}
@@ -66,6 +71,7 @@ export function MediaUrlFields({
 }
 
 function MediaUrlRow({
+  type,
   index,
   item,
   errorsOf,
@@ -74,6 +80,7 @@ function MediaUrlRow({
   onAltText,
   onRemove,
 }: {
+  type: SectionTypeCode;
   index: number;
   item: MediaFormItem;
   errorsOf: (key: string) => string[];
@@ -87,6 +94,7 @@ function MediaUrlRow({
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const failed = preview !== null && failedUrl === preview;
   const position = `${index + 1}번째 ${item.media.mediaType.name}`;
+  const measure = useImageSize(failed ? null : preview);
 
   return (
     <li className="flex flex-wrap items-start gap-4 rounded-md bg-bg p-3">
@@ -99,6 +107,7 @@ function MediaUrlRow({
             src={preview}
             alt=""
             decoding="async"
+            onLoad={measure.onLoad}
             onError={() => setFailedUrl(preview)}
             className="aspect-[4/5] w-full rounded bg-muted object-cover"
           />
@@ -132,17 +141,19 @@ function MediaUrlRow({
             onChange={onUrl}
           />
         )}
+        <MediaSizeNotice spec={specFor(type, 'PC')} size={measure.size} />
         <TextInput
-          label={`${position} 대체 텍스트`}
+          label={isVideo ? `${position} 대체 텍스트 (선택)` : `${position} 대체 텍스트 (필수)`}
           value={item.altText}
           max={LIMITS.altText}
           multiline={false}
           hint={
-            item.altText.trim() === ''
-              ? '비어 있으면 화면 낭독기가 이 사진을 건너뜁니다. 사진에 보이는 것을 짧게 적어 주세요.'
-              : '사진을 볼 수 없는 고객에게 읽어 주는 문장입니다.'
+            isVideo
+              ? '메인의 영상은 화면 낭독기가 읽지 않습니다.'
+              : '사진을 볼 수 없는 고객에게 읽어 주는 문장입니다. 사진에 보이는 것을 짧게 적어 주세요.'
           }
           errors={errorsOf(`media.${index}.altText`)}
+          required={!isVideo}
           onChange={onAltText}
         />
         {removable && (
