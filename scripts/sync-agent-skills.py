@@ -61,6 +61,8 @@ rg -l '@Version' backend/service/order-service backend/service/product-service b
 # 저비용 모델로 돌리는 역할 → Codex reasoning effort. 모델 ID 가 바뀌면 아래 상수만 고치고 --write 한다.
 FAST_ROLES = {"explorer": "medium", "git-ops": "low"}
 CODEX_FAST_MODEL = "gpt-6-luna"
+CODEX_WORK_MODEL = "gpt-6.1-sol"
+CODEX_DESIGN_MODEL = "gpt-6-astra"
 CURSOR_FAST_MODEL = "claude-haiku-5-5"
 GENERATED_NOTE = "scripts/sync-agent-skills.py 가 .claude/agents/ 에서 생성한다. 직접 고치지 않는다."
 
@@ -73,7 +75,7 @@ ROUTING = """## 모델 라우팅
 | 분류·계획·범위 결정, 검증 실행·결과 확인, 완료 판단 | 메인 세션 |
 | 위치·호출 흐름을 모르는 탐색, 여러 파일 훑기 | `explorer` (저비용 모델) |
 | 이슈 시작·푸시·PR 생성·머지 후 정리 같은 git·gh 작업 | `git-ops` (Codex `git_ops`, 저비용 모델) |
-| 설계·구현·검토 | 해당 역할 (현재 세션 모델) |
+| 설계·구현·검토 | 해당 역할 (Codex 설계 `gpt-6-astra`, 구현·검토 `gpt-6.1-sol`; Cursor `inherit`) |
 
 - 저비용 모델은 `.codex/agents/`·`.cursor/agents/` 정의에 있다. 위임할 수 없으면 메인 세션이 같은 순서로 처리한다.
 - 위치를 아는 파일 몇 개 읽기, 단일 git 명령은 메인 세션이 직접 한다. 하위 에이전트는 새 컨텍스트로 시작하므로 띄우는 비용이 더 크다.
@@ -84,7 +86,11 @@ ROUTING = """## 모델 라우팅
 ORCHESTRATION = """## Codex · Cursor 실행 방식
 
 - 역할 지침 원문은 저장소 루트 기준 `.agents/roles/<역할>.md`다. 네이티브 하위 에이전트로는
-  Cursor `.cursor/agents/`(전 역할)와 Codex `.codex/agents/`(`explorer`·`git_ops`)가 생성돼 있다.
+  Cursor `.cursor/agents/`와 Codex `.codex/agents/`에 11개 역할이 모두 생성돼 있다.
+- Codex에서는 `spawn_agent`에 `agent_type`으로 `.codex/agents/`의 snake_case 이름을 지정한다
+  (예: `be_executor`, `be_db_reviewer`). 도구 목록에 이름이 없으면 현재 세션에서 인식되지 않은 것이므로 새 세션에서 확인한다.
+- 서로 독립적인 읽기 전용 검토는 여러 `spawn_agent` 호출로 병렬 실행하고 `wait_agent`로 결과를 모은다.
+  구현 역할은 파일 소유권을 명시해 하나씩 실행한다.
 - 하위 에이전트를 사용할 수 있고 위임이 허용된 경우에만 역할 지침·범위·기대 출력을 전달해 위임한다.
   그 외에는 메인 세션이 동일한 역할을 순차 수행하고, 실제 수행 방식을 보고한다.
 - 읽기 전용 역할은 소스·설정·문서를 편집하지 않는다. 실행 도구의 권한 제한을 적용할 수 있으면 함께 적용한다.
@@ -202,11 +208,14 @@ def codex_agent_content(path):
     if "'''" in body:
         raise ValueError(f"Role body cannot be a TOML literal string: {path.relative_to(ROOT)}")
     description = json.dumps(adapt(meta["description"]), ensure_ascii=False)
+    role = path.stem
+    model = CODEX_FAST_MODEL if role in FAST_ROLES else (CODEX_DESIGN_MODEL if role == "architect" else CODEX_WORK_MODEL)
+    effort = FAST_ROLES.get(role, "high" if role == "architect" else "medium")
     return (f"# {GENERATED_NOTE}\n"
             f'name = "{codex_name(path.stem)}"\n'
             f"description = {description}\n"
-            f'model = "{CODEX_FAST_MODEL}"\n'
-            f'model_reasoning_effort = "{FAST_ROLES[path.stem]}"\n'
+            f'model = "{model}"\n'
+            f'model_reasoning_effort = "{effort}"\n'
             f"developer_instructions = '''\n{body}'''\n")
 
 
@@ -225,7 +234,7 @@ def main():
     expected.update({ROOT / ".agents/roles" / p.name: role_content(p) for p in roles})
     expected.update({ROOT / ".cursor/agents" / p.name: cursor_agent_content(p) for p in roles})
     expected.update({ROOT / ".codex/agents" / f"{codex_name(p.stem)}.toml": codex_agent_content(p)
-                     for p in roles if p.stem in FAST_ROLES})
+                     for p in roles})
     actual = (set((ROOT / ".agents/skills").glob("*/SKILL.md")) | set((ROOT / ".agents/roles").glob("*.md"))
               | set((ROOT / ".cursor/agents").glob("*.md")) | set((ROOT / ".codex/agents").glob("*.toml")))
     stale = actual - set(expected)
@@ -241,7 +250,7 @@ def main():
         print("Out of sync:\n" + "\n".join(failures))
         return 1
     print(f"{'Synced' if args.write else 'Verified'} {len(sources)} skills, {len(roles)} roles, "
-          f"{len(roles)} Cursor agents and {len(FAST_ROLES)} Codex agents.")
+          f"{len(roles)} Cursor agents and {len(roles)} Codex agents.")
     return 0
 
 
