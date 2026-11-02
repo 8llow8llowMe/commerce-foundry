@@ -1,5 +1,7 @@
 package com.commercefoundry.domainlayer.knowledge.application.port.out;
 
+import com.commercefoundry.domainlayer.knowledge.application.model.KnowledgeSearchCriteria;
+import com.commercefoundry.domainlayer.knowledge.application.port.out.query.KnowledgeSearchQueryResult;
 import com.commercefoundry.domainlayer.knowledge.application.port.out.query.KnowledgeSummaryQueryResult;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeDocument;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeLocale;
@@ -11,6 +13,8 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 
 public interface KnowledgeRepositoryPort {
+
+    List<KnowledgeSearchQueryResult> search(KnowledgeSearchCriteria criteria, Instant cutoff);
 
     Page<KnowledgeSummaryQueryResult> findAdminSummaries(KnowledgeType type, KnowledgeLocale locale, int page, int size);
 

@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.knowledge.adapter.out.persistence.repository;
 
 import com.commercefoundry.domainlayer.knowledge.adapter.out.persistence.entity.KnowledgeRevisionEntity;
+import com.commercefoundry.domainlayer.knowledge.adapter.out.persistence.repository.custom.KnowledgeSearchCustomRepository;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeLocale;
 import java.time.Instant;
 import java.util.List;
@@ -9,7 +10,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
-public interface KnowledgeRevisionRepository extends JpaRepository<KnowledgeRevisionEntity, Long> {
+public interface KnowledgeRevisionRepository extends JpaRepository<KnowledgeRevisionEntity, Long>,
+    KnowledgeSearchCustomRepository {
 
     Optional<KnowledgeRevisionEntity> findByDocumentIdAndRevisionNumber(long documentId, int revisionNumber);
 

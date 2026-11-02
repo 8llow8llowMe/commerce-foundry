@@ -1534,7 +1534,7 @@ FE는 기존 400·409와 별도로 429 안내 및 Retry-After 대기를 처리�
 
 `/api/v1/admin/support/knowledge`는 ADMIN 전용이며 GET 목록·POST 생성, `/{documentId}` GET 상세·PUT 최신 초안 전체 편집·DELETE 리비전 보관을 제공한다.
 `/{documentId}/revisions` POST는 새 초안(201), `/approve` POST는 최신 초안 승인, `/publish` POST는 최신 승인본 게시다.
-계약 정본은 [support-knowledge-guide.md](support-knowledge-guide.md)의 관리자 계약이다. 고객 FAQ·검색·AI 진입은 후속이다.
+계약 정본은 [support-knowledge-guide.md](support-knowledge-guide.md)의 관리자 계약이다. 같은 문서의 PR-C 절은 HTTP 없는 내부 키워드 검색 포트를 정의한다. 고객 FAQ·AI 진입은 후속이다.
 목록은 optional type/locale, page=0/size=20(1~100), 문서 ID 내림차순 PageResponse이며 본문을 제외한다.
 본문·필터의 wire 값은 type=`FAQ|POLICY|TEMPLATE`, locale=`KO|EN`(한국어/영어의 대문자 코드)이다. category 허용 값은 Swagger enum을 따른다.
 상세는 문서와 최신 리비전·승인 메타데이터·버전을 제공한다. 식별자는 문자열이고 enum은 metadata다.

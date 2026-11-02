@@ -1,10 +1,13 @@
 package com.commercefoundry.domainlayer.knowledge.application.service.processor;
 
 import com.commercefoundry.domainlayer.knowledge.application.command.KnowledgeContentCommand;
+import com.commercefoundry.domainlayer.knowledge.application.command.KnowledgeSearchCommand;
 import com.commercefoundry.domainlayer.knowledge.application.exception.KnowledgeErrorCode;
 import com.commercefoundry.domainlayer.knowledge.application.exception.KnowledgeException;
 import com.commercefoundry.domainlayer.knowledge.application.info.KnowledgeAdminInfo;
+import com.commercefoundry.domainlayer.knowledge.application.info.KnowledgeSearchInfo;
 import com.commercefoundry.domainlayer.knowledge.application.info.KnowledgeSummaryInfo;
+import com.commercefoundry.domainlayer.knowledge.application.model.KnowledgeSearchCriteria;
 import com.commercefoundry.domainlayer.knowledge.application.port.out.KnowledgeRepositoryPort;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeDocument;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeLocale;
@@ -13,9 +16,9 @@ import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeStatus;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeType;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Instant;
-import java.util.function.Supplier;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
@@ -30,6 +33,16 @@ public class KnowledgeProcessor {
 
     private final KnowledgeRepositoryPort repository;
     private final SnowflakeIdGenerator idGenerator;
+
+    // One SELECT joins the current pointer and revision in the database statement snapshot.
+    @Transactional(readOnly = true)
+    public List<KnowledgeSearchInfo> search(KnowledgeSearchCommand command, Instant cutoff) {
+        var criteria = KnowledgeSearchCriteria.from(command);
+        return repository.search(criteria, Objects.requireNonNull(cutoff)).stream().map(row ->
+            new KnowledgeSearchInfo(
+                row.documentId(), row.revisionId(), row.revisionNumber(), row.title(), row.body(), row.category(), row.type(), row.locale(),
+                row.score(), row.validFrom(), row.validTo())).toList();
+    }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Page<KnowledgeSummaryInfo> listAdmin(KnowledgeType type, KnowledgeLocale locale, int page, int size) {

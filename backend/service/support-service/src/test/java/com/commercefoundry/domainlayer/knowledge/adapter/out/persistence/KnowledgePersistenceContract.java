@@ -10,6 +10,9 @@ import static org.mockito.Mockito.reset;
 
 import com.commercefoundry.domainlayer.knowledge.adapter.out.persistence.repository.KnowledgeDocumentRepository;
 import com.commercefoundry.domainlayer.knowledge.adapter.out.persistence.repository.KnowledgeRevisionRepository;
+import com.commercefoundry.domainlayer.knowledge.application.command.KnowledgeSearchCommand;
+import com.commercefoundry.domainlayer.knowledge.application.info.KnowledgeSearchInfo;
+import com.commercefoundry.domainlayer.knowledge.application.model.KnowledgeSearchCriteria;
 import com.commercefoundry.domainlayer.knowledge.application.command.KnowledgeContentCommand;
 import com.commercefoundry.domainlayer.knowledge.application.exception.KnowledgeErrorCode;
 import com.commercefoundry.domainlayer.knowledge.application.exception.KnowledgeException;
@@ -299,6 +302,92 @@ abstract class KnowledgePersistenceContract {
         assertThatThrownBy(() -> processor.getAdmin(1))
             .isInstanceOfSatisfying(KnowledgeException.class, e -> assertThat(e.getErrorCode()).isEqualTo(KnowledgeErrorCode.NOT_FOUND));
         assertThat(processor.listAdmin(null, null, 0, 20).getTotalElements()).isZero();
+    }
+
+    @Test
+    void searchAddsTitleAndBodyWeightsPerDistinctTokenThenOrdersAndLimitsInDatabase() {
+        var title = publishSearch("Shipping shipping", "unrelated", KnowledgeLocale.EN, KnowledgeCategory.SHIPPING, null);
+        var body = publishSearch("unrelated", "Shipping shipping", KnowledgeLocale.EN, KnowledgeCategory.SHIPPING, null);
+        var both = publishSearch("Shipping Refund", "shipping refund", KnowledgeLocale.EN, KnowledgeCategory.SHIPPING, null);
+        var newestTie = publishSearch("Shipping", "unrelated", KnowledgeLocale.EN, KnowledgeCategory.SHIPPING, null);
+        publishSearch("unrelated", "unrelated", KnowledgeLocale.EN, KnowledgeCategory.SHIPPING, null);
+        var ranked = search("SHIPPING shipping refund", KnowledgeLocale.EN, null, 20, NOW);
+        assertThat(ranked).extracting(KnowledgeSearchInfo::documentId)
+            .containsExactly(both.documentId(), newestTie.documentId(), title.documentId(), body.documentId());
+        assertThat(ranked).extracting(KnowledgeSearchInfo::score).containsExactly(8, 3, 3, 1);
+        assertThat(search("shipping refund", KnowledgeLocale.EN, null, 1, NOW)).containsExactly(ranked.getFirst());
+        assertThat(ranked.getFirst()).satisfies(row -> {
+            assertThat(row.revisionId()).isEqualTo(both.id());
+            assertThat(row.revisionNumber()).isEqualTo(1);
+            assertThat(row.title()).isEqualTo("Shipping Refund");
+            assertThat(row.body()).isEqualTo("shipping refund");
+            assertThat(row.type()).isEqualTo(KnowledgeType.FAQ);
+            assertThat(row.locale()).isEqualTo(KnowledgeLocale.EN);
+            assertThat(row.category()).isEqualTo(KnowledgeCategory.SHIPPING);
+            assertThat(row.validFrom()).isEqualTo(NOW);
+            assertThat(row.validTo()).isNull();
+        });
+    }
+
+    @Test
+    void searchFiltersExactLocaleAndOptionalCategoryBeforeTopNWithoutFallback() {
+        var wanted = publishSearch("query", "unrelated", KnowledgeLocale.KO, KnowledgeCategory.SHIPPING, null);
+        publishSearch("query", "query", KnowledgeLocale.KO, KnowledgeCategory.OTHER, null);
+        publishSearch("query", "query", KnowledgeLocale.EN, KnowledgeCategory.SHIPPING, null);
+        assertThat(search("query", KnowledgeLocale.KO, KnowledgeCategory.SHIPPING, 1, NOW))
+            .extracting(KnowledgeSearchInfo::documentId).containsExactly(wanted.documentId());
+        assertThat(search("query", KnowledgeLocale.EN, KnowledgeCategory.SIZE, 20, NOW)).isEmpty();
+        assertThat(search("absent", KnowledgeLocale.KO, null, 20, NOW)).isEmpty();
+        processor.archive(wanted.documentId(), 1);
+        assertThat(search("query", KnowledgeLocale.KO, KnowledgeCategory.SHIPPING, 20, NOW)).isEmpty();
+        assertThat(search("query", KnowledgeLocale.EN, KnowledgeCategory.SHIPPING, 20, NOW)).hasSize(1);
+    }
+
+    @Test
+    void searchUsesOnlyCurrentPublishedApprovedRevisionAndExactValidityWindow() {
+        var first = publishSearch("query", "original", KnowledgeLocale.KO, KnowledgeCategory.SHIPPING, NOW.plusSeconds(60));
+        var second = processor.createDraft(first.documentId(),
+            new KnowledgeRevision.Content("draft only", "query", KnowledgeCategory.SHIPPING, NOW, null));
+        var approvalOnly = processor.create(KnowledgeType.FAQ, KnowledgeLocale.KO,
+            new KnowledgeRevision.Content("query", "unpublished", KnowledgeCategory.SHIPPING, NOW, null));
+        processor.approve(approvalOnly.documentId(), 1, approvalOnly.version(), 99, NOW);
+        assertThat(search("query", KnowledgeLocale.KO, null, 20, NOW)).singleElement().satisfies(row -> {
+            assertThat(row.revisionNumber()).isEqualTo(1);
+            assertThat(row.body()).isEqualTo("original");
+        });
+        assertThat(search("query", KnowledgeLocale.KO, null, 20, NOW.minusSeconds(1))).isEmpty();
+        assertThat(search("query", KnowledgeLocale.KO, null, 20, NOW.plusSeconds(60))).isEmpty();
+        processor.approve(first.documentId(), 2, second.version(), 99, NOW);
+        processor.publish(first.documentId(), 2, NOW);
+        assertThat(search("query", KnowledgeLocale.KO, null, 20, NOW.plusSeconds(3600)))
+            .extracting(KnowledgeSearchInfo::revisionNumber).containsExactly(2);
+        assertThat(search("original", KnowledgeLocale.KO, null, 20, NOW)).isEmpty();
+        processor.archive(first.documentId(), 2);
+        assertThat(search("query", KnowledgeLocale.KO, null, 20, NOW)).isEmpty();
+    }
+
+    @Test
+    void searchEscapesLiteralLikeWildcardsAndEscapeCharacterInActualQueryDsl() {
+        var literal = publishSearch("literal %_! marker", "literal", KnowledgeLocale.EN, KnowledgeCategory.OTHER, null);
+        publishSearch("literal abc marker", "other", KnowledgeLocale.EN, KnowledgeCategory.OTHER, null);
+        for (String token : List.of("%", "_", "!", "%_!")) {
+            var criteria = new KnowledgeSearchCriteria(List.of(token), KnowledgeLocale.EN, null, 20);
+            var result = tx.execute(status -> port.search(criteria, NOW));
+            assertThat(result).singleElement().satisfies(row -> {
+                assertThat(row.documentId()).isEqualTo(literal.documentId());
+                assertThat(row.score()).isEqualTo(3);
+            });
+        }
+    }
+
+    private KnowledgeRevision publishSearch(String title, String body, KnowledgeLocale locale, KnowledgeCategory category, Instant validTo) {
+        var draft = processor.create(KnowledgeType.FAQ, locale, new KnowledgeRevision.Content(title, body, category, NOW, validTo));
+        processor.approve(draft.documentId(), 1, draft.version(), 99, NOW);
+        return processor.publish(draft.documentId(), 1, NOW);
+    }
+
+    private List<KnowledgeSearchInfo> search(String question, KnowledgeLocale locale, KnowledgeCategory category, int topN, Instant cutoff) {
+        return processor.search(new KnowledgeSearchCommand(question, locale, category, topN), cutoff);
     }
 
     private KnowledgeContentCommand adminContent(String title) {
