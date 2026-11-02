@@ -17,7 +17,15 @@ public interface ProductMapper {
 
     @Mapping(target = "salePrice", expression = "java(MoneyColumns.required(entity.getSalePriceAmount(), entity.getSalePriceCurrency()))")
     @Mapping(target = "listPrice", expression = "java(MoneyColumns.nullable(entity.getListPriceAmount(), entity.getListPriceCurrency()))")
+    @Mapping(target = "softDelete", ignore = true)
     Product toDomain(ProductEntity entity);
 
     List<Product> toDomains(List<ProductEntity> entities);
+
+    /** Header only: the loaded version participates in merge; created_at is not updatable. */
+    @Mapping(target = "salePriceAmount", source = "salePrice.amount")
+    @Mapping(target = "salePriceCurrency", source = "salePrice.currency")
+    @Mapping(target = "listPriceAmount", expression = "java(product.listPrice() == null ? null : product.listPrice().amount())")
+    @Mapping(target = "listPriceCurrency", expression = "java(product.listPrice() == null ? null : product.listPrice().currency())")
+    ProductEntity toEntity(Product product);
 }
