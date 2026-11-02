@@ -215,7 +215,7 @@ prod 데이터를 복사해 쓰지 않는다(개인정보) — 필요하면 마�
 | USD 가격 | SKU 별 통화 가격표 / 환율 환산 | 해외 판매 |
 | 원가 통화 ↔ 판매 통화 불일치 | SKU 원가 이력은 통화를 (SKU, 유형) 첫 행으로만 고정하고 판매가 통화와 맞추지 않는다(#361). 마진 계산 때 환산 / 거절 / 표시만 중 고른다 | #362 |
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
-| 시크릿 주입 방식 | Spring Cloud Vault / Vault Agent → 환경변수 (저장소는 **Vault 로 확정**) | #32 |
+| 시크릿 주입 방식 | Jenkins 배포 agent의 AppRole → 환경별 Vault KV v2 → 임시 `.env.runtime` → Compose 환경변수로 확정. 환경별 AppRole 분리는 prod 배포 전 운영 조건(`secret-management.md` §3) | #32 |
 | 서비스 간 인증 2단계 | 서비스별 RS256 키 / 플랫폼 mTLS — 1단계(공용 HS256, #51)의 호출자 "선언" 을 "증명" 으로 바꾼다 (`security-guide.md` §9-9) | 배포 환경 결정 후 |
 
 ### 소셜 로그인 구현 범위 (#5)

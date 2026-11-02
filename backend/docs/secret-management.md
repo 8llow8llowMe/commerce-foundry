@@ -93,13 +93,13 @@
 | dev | Vault | `test_sk_` 또는 `test_gsk_` 만 |
 | prod | Vault | `live_sk_` 또는 `live_gsk_` 만 |
 
-- 주입 방식(Spring Cloud Vault / Vault Agent → 환경변수)과 Vault 경로·인증 방식은 #32 에서 확정하고 이 절을 갱신한다.
-- 배포 파이프라인(#198)은 Vault KV v2 `kv/commerce-foundry/backend/{dev,prod}/env`(환경당 secret 하나)를 AppRole 로 읽는다 —
-  Jenkins credential `commerce-foundry-vault-role-id` / `commerce-foundry-vault-secret-id`, Vault 주소는 Jenkins 전역 env `VAULT_ADDR` ([jenkins-cicd-guide.md](jenkins-cicd-guide.md) §6).
+- **주입 방식(#32)**: Jenkins 배포 agent가 AppRole로 Vault KV v2를 읽고, 해당 Compose가 요구하는 키만 권한 600의 임시 `.env.runtime`에 기록한다. Compose가 컨테이너 환경변수로 전달하며, 배포 셸의 종료 처리에서 임시 파일과 Vault 토큰을 지운다. 애플리케이션은 Vault에 직접 접속하지 않는다([jenkins-cicd-guide.md](jenkins-cicd-guide.md) §6).
+- **경로 규칙(#32)**: 현재 공통 키와 서비스 키를 환경당 하나의 secret `kv/commerce-foundry/backend/<env>/env`에 키 이름 그대로 둔다. 배포 시에는 모듈별 Compose 환경변수 목록으로 전달 범위를 제한한다. 서비스별 Vault 경로와 DB 계정 분리는 #258에서 정하며, 그 전까지 공통 AppRole에 환경 내 모든 서비스 키의 읽기 권한이 필요하다.
+- Jenkins credential은 현재 dev·prod 모두 `commerce-foundry-vault-role-id` / `commerce-foundry-vault-secret-id`를 참조하고, Vault 주소는 Jenkins 전역 env `VAULT_ADDR`다. **prod 배포 전** 환경별 AppRole·credential 범위·배포 노드 분리 결정을 적용하고 접근 범위를 확인한다([jenkins-cicd-guide.md](jenkins-cicd-guide.md) §3·§10).
 - **DB 접속 정보(`DB_URL` · `DB_USERNAME` · `DB_PASSWORD`)는 환경 축으로 나눈다** — 키 이름은 모든 환경에서 같고 값만 환경별 secret 에 다르게 둔다.
   환경은 DB 서버로 나뉘고 database · 스키마 이름은 같으므로(`service-inventory.md` §4-2), 환경마다 바뀌는 것은 호스트 · 계정 · 비밀번호뿐이다.
   지금 경로는 환경당 secret 하나(`kv/commerce-foundry/backend/<env>/env`)다. 서비스별 DB 계정으로 나누면(#258) 서비스 축을 더할지(`.../<env>/<service>`) 또는 서비스별 키 이름으로 둘지를
-  #32 에서 정한다. dev 와 prod 의 DB 계정 · 비밀번호를 같은 값으로 두지 않는다.
+  #258 에서 정한다. dev 와 prod 의 DB 계정 · 비밀번호를 같은 값으로 두지 않는다.
 - **개발자 계정은 테스트 키만 다룬다.** 라이브 키는 고객사 계정 소유이고 Vault 에만 있다.
 - 키가 뒤바뀐 채로 기동하면 실패시킨다 (`payment-guide.md` §2 — `TossPaymentsStartupGuard`).
 - payment-service `application-test.yml` 의 `test_sk_dummyForContextTestsOnly000` · 테스트 코드의 `test_sk_abc123XYZ` 같은 값은 **형식만 맞춘 더미**다 —
