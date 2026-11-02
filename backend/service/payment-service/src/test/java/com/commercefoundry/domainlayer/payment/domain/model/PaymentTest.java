@@ -38,6 +38,24 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class PaymentTest {
 
+    @Test
+    void returnedReadyRecoveryPreservesAttemptAndRejectsOtherStatesOrMissingClue() {
+        Payment returned = PaymentFixtures.reverted();
+        Payment recovered = returned.recoverReturnedReady(PaymentUnknownReason.ALREADY_PROCESSED);
+        assertThat(recovered.status()).isEqualTo(PaymentStatus.UNKNOWN);
+        assertThat(recovered.approvalStartedAt()).isEqualTo(returned.approvalStartedAt());
+        assertThat(recovered.approvalIdempotencyKey()).isEqualTo(returned.approvalIdempotencyKey());
+        assertThat(recovered.paymentKey()).isEqualTo(returned.paymentKey());
+        for (Payment other : java.util.List.of(PaymentFixtures.ready(), PaymentFixtures.inProgress(), PaymentFixtures.unknown(), PaymentFixtures.done())) {
+            assertThatThrownBy(() -> other.recoverReturnedReady(PaymentUnknownReason.MANUAL_REVIEW))
+                .isInstanceOf(PaymentTransitionException.class);
+        }
+        Payment legacy = new Payment(returned.id(), returned.orderId(), returned.memberId(), returned.pgOrderId(), returned.gateway(), returned.amount(),
+            returned.orderName(), returned.status(), returned.paymentKey(), null, null, null, null, null,
+            null, null, null, false, null, null, null, returned.version());
+        assertThatThrownBy(() -> legacy.recoverReturnedReady(PaymentUnknownReason.MANUAL_REVIEW)).isInstanceOf(PaymentTransitionException.class);
+    }
+
     private static final Instant NOW = Instant.parse("2026-10-21T02:00:00Z");
     private static final PaymentInquiry.Failed NOT_APPROVED = new PaymentInquiry.Failed(PAYMENT_KEY, "NOT_FOUND_PAYMENT_SESSION", "결제 시간이 만료되었습니다.");
 

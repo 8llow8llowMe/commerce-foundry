@@ -82,6 +82,16 @@ resilience4j:
 
 # 결제 준비 (payment-guide.md "고객 API 계약"). 주문의 결제 기한까지 이보다 적게 남았으면 결제창을 열지 않는다(409 PAYMENT_004) — 토스 인증 뒤 승인 제한도 10분이다
 payment:
+  recovery:
+    enabled: false
+    initial-delay: 1m
+    fixed-delay: 1m
+    unknown-inquiry-after: 1m
+    stale-in-progress-after: 5m
+    returned-ready-after: 10m
+    manual-review-after: 24h
+    page-size: 10
+    max-pages-per-status-per-tick: 1
   # 운영 결제 게이트 — 기본 닫힘. 꺼져 있으면 결제 준비 · 승인이 DB · PG · order 호출 전에 503 PAYMENT_015 다(상태 조회는 막지 않는다).
   # #308(결제 완료 → 주문 반영) · #15(UNKNOWN 재조회 · IN_PROGRESS 정체 복구 · 되돌린 READY 정리)가 들어오기 전에는 운영에서 켜지 않는다.
   # 토스 테스트 키 환경인 local · dev 만 프로파일 yml 이 켠다 — prod 는 프로파일 yml 이 없어 false 다

@@ -64,7 +64,7 @@
         id bigint not null,
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
-        abort_reason varchar(30) check ((abort_reason in ('REPREPARED','AMOUNT_CHANGED','ORDER_EXPIRED','ADMIN'))),
+        abort_reason varchar(30) check ((abort_reason in ('REPREPARED','AMOUNT_CHANGED','ORDER_EXPIRED','ADMIN','RECOVERY_NOT_APPROVED'))),
         active_order_id bigint,
         approval_idempotency_key varchar(36),
         approval_started_at timestamp(6) with time zone,
@@ -213,6 +213,9 @@
 
     create index idx_outbox_published_at_available_at 
        on payment.outbox (published_at, available_at);
+
+    create index idx_payment_status_approval_started_at_id
+       on payment.payment (status, approval_started_at, id);
 
     create index idx_payment_order_id 
        on payment.payment (order_id);

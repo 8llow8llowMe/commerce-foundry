@@ -12,5 +12,7 @@ public enum PaymentAbortReason {
     /** 결제 없이 주문이 만료 · 취소됐다 */
     ORDER_EXPIRED,
     /** 어드민이 버렸다 */
-    ADMIN
+    ADMIN,
+    /** 복구 조회가 ABORTED / EXPIRED 미승인을 확정했다. */
+    RECOVERY_NOT_APPROVED
 }
