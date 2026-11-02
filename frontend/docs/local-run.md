@@ -51,6 +51,11 @@ BFF 구조라 브라우저가 게이트웨이를 직접 부르지 않는다. 게
 **redirect URI = `<스토어프론트 origin>/login/oauth/{provider}`**(예: `KAKAO_REDIRECT_URI=http://localhost:3000/login/oauth/kakao`,
 `NAVER_REDIRECT_URI=http://localhost:3000/login/oauth/naver`). 기본 언어 경로 하나만 등록한다 — 영문 스토어에서 시작한 흐름은 콜백이 `/en/...` 으로 넘긴다(`architecture.md` §3-1).
 
+결제(#27)를 로컬에서 보려면 토스페이먼츠 개발자센터의 **결제위젯 연동 키**(테스트 클라이언트 키 `test_gck_…`)를 `apps/storefront/.env.local` 의
+`NEXT_PUBLIC_TOSS_CLIENT_KEY` 에 넣고 dev 서버를 다시 띄운다(빌드 시점 값이라 실행 중에 바꿔도 반영되지 않는다). 짝인 시크릿 키(`test_gsk_…`)는 BE payment-service 의
+`TOSS_SECRET_KEY` 이고 local 프로파일은 결제 게이트(`payment.enabled`)가 켜져 있다(`backend/docs/payment-guide.md` §2 · §3-4). 키 값은 커밋 · 로그 · 이슈에 쓰지 않는다.
+결제창 인증 뒤 토스가 `<origin>/checkout/payment/success` · `/fail` 로 돌려보낸다 — 지금 연 origin 그대로라 콘솔에 따로 등록하지 않는다.
+
 ## 5. 검사
 
 ```bash
