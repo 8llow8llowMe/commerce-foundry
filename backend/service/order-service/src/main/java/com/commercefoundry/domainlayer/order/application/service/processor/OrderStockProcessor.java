@@ -3,9 +3,12 @@ package com.commercefoundry.domainlayer.order.application.service.processor;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
+import com.commercefoundry.domainlayer.order.application.model.StockConfirmation;
 import com.commercefoundry.domainlayer.order.application.model.StockReservation;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
+import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderQuote;
 import java.time.Clock;
 import java.util.SortedMap;
@@ -17,7 +20,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 재고 선점 (product-service, 주문 생성 순서 4) — 원격 호출이라 <b>트랜잭션을 걸지 않는다</b>. 사유별 사용자 오류 코드를 여기서 정한다
+ * 재고 선점 (product-service, 주문 생성 순서 4) · 결제 반영 전 확정 · 재선점(#308, {@link #confirmOrReReserve}) — 원격 호출이라 <b>트랜잭션을 걸지 않는다</b>.
+ * 아래 목록은 주문 생성의 선점 사유다. 사유별 사용자 오류 코드를 여기서 정한다
  * ({@code order-flow-guide.md} §3-4 · §2-4). <b>다시 보내지 않는다</b> — 같은 키의 재시도가 같은 주문 아이디로 다시 선점하고, product 는 기존 선점을 200 으로 준다.
  *
  * <ul>
@@ -87,11 +91,88 @@ public class OrderStockProcessor {
                 log.error("stock reservation items mismatch for same order. orderId={}", orderId);
                 yield new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT, exception);
             }
-            case UNKNOWN, REJECTED -> {
+            // RELEASED · NOT_FOUND 는 확정에서만 나온다 — 선점에서 오면 모르는 거절과 같다
+            case UNKNOWN, REJECTED, RELEASED, NOT_FOUND -> {
                 log.warn("stock reservation failed. orderId={}, failure={}", orderId, exception.getFailure());
                 yield new OrderException(OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
             }
         };
     }
 
+    /**
+     * 결제 완료 반영 전 재고 확정 (#308, {@code order-flow-guide.md} §3-4) — 원격 호출이라 <b>트랜잭션을 걸지 않는다</b>. 주문은 바꾸지 않는다 —
+     * 결과의 선점 아이디로 부른 쪽이 새 트랜잭션에서 {@code Order#markPaid} 한다. 여기서 다시 보내지 않는다 — 다시 부르는 것은 결제 이벤트 재전달이고,
+     * 확정 · 재선점은 모두 멱등이라(확정은 이미 CONFIRMED 면 200, 재선점은 같은 주문의 활성 선점을 200) 재전달에서 처음부터 다시 불러도 재고가 두 번 움직이지 않는다.
+     *
+     * <ol>
+     *   <li>주문의 선점을 확정한다 — 200 · CONFIRMED 면 그 선점이다.</li>
+     *   <li>409 {@code PRODUCT_025}(해제 · 만료) · 404 {@code PRODUCT_003}(없음)이면 같은 주문 아이디 · 주문 항목 스냅숏의 SKU 별 수량 합으로 재선점하고
+     *       <b>곧바로</b> 그 선점을 확정한다 — 사이를 비우면 새 선점도 TTL 뒤 다시 만료된다. 재선점 응답의 만료 시각은 보지 않는다(지났을 수 있다).</li>
+     *   <li>재선점이 {@code PRODUCT_021}(재고 부족) · {@code PRODUCT_022}(판매 불가)면 {@link StockConfirmation#stockUnavailable()} — 아무것도 잡지 않았다.</li>
+     * </ol>
+     *
+     * <p>예외 — 부른 쪽(컨슈머)이 재시도 여부를 오류 코드로 가른다:
+     * <ul>
+     *   <li>503 {@code PRODUCT_SERVICE_UNAVAILABLE} — 다시 부르면 풀릴 수 있다: 동시 변경 {@code PRODUCT_026} · 타임아웃 · 5xx · 서킷 오픈 · 모르는 4xx ·
+     *       읽을 수 없는 성공 응답 · 재선점 직후 확정이 다시 해제 · 없음.</li>
+     *   <li>500 {@code STOCK_RESERVATION_INCONSISTENT} — 다시 불러도 같다(error 로그): 같은 주문의 선점과 항목이 다름({@code PRODUCT_023}) · 다른 주문의 선점이 확정됨.</li>
+     * </ul>
+     *
+     * @param order 결제 대기 · 만료 주문 — 결제 전 취소된 주문은 확정 · 재선점 없이 부른 쪽이 거절한다
+     * @throws IllegalArgumentException 결제 대기 · 만료가 아닌 주문
+     */
+    @Transactional(propagation = Propagation.NEVER)
+    public StockConfirmation confirmOrReReserve(Order order) {
+        if (!order.isAwaitingPaymentApproval()) {
+            throw new IllegalArgumentException("결제 대기 · 만료 주문만 재고를 확정합니다: orderId=" + order.id() + ", status=" + order.status());
+        }
+        SortedMap<Long, Integer> quantitiesBySkuId = quantitiesBySkuId(order.quote());
+        try {
+            return StockConfirmation.confirmed(confirmOwn(order.id(), order.stockReservationId()));
+        } catch (StockReservationException exception) {
+            if (exception.getFailure() != StockReservationException.Failure.RELEASED && exception.getFailure() != StockReservationException.Failure.NOT_FOUND) {
+                throw toConfirmationException(order.id(), exception);
+            }
+            log.info("stock reservation gone before payment, re-reserving. orderId={}, failure={}", order.id(), exception.getFailure());
+        }
+        StockReservationQueryResult reReserved;
+        try {
+            reReserved = stockReservationPort.reReserve(order.id(), quantitiesBySkuId);
+        } catch (StockReservationException exception) {
+            if (exception.getFailure() == StockReservationException.Failure.INSUFFICIENT
+                || exception.getFailure() == StockReservationException.Failure.NOT_PURCHASABLE) {
+                log.warn("stock unavailable for paid order re-reservation. orderId={}, failure={}", order.id(), exception.getFailure());
+                return StockConfirmation.stockUnavailable();
+            }
+            throw toConfirmationException(order.id(), exception);
+        }
+        if (reReserved == null || reReserved.orderId() != order.id()) {
+            log.error("stock re-reservation result belongs to another order. orderId={}", order.id());
+            throw new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT);
+        }
+        try {
+            return StockConfirmation.reReservedAndConfirmed(confirmOwn(order.id(), reReserved.reservationId()));
+        } catch (StockReservationException exception) {
+            throw toConfirmationException(order.id(), exception);
+        }
+    }
+
+    /** 확정하고 그 선점이 이 주문의 것인지 본다. */
+    private long confirmOwn(long orderId, long reservationId) {
+        StockConfirmationQueryResult confirmed = stockReservationPort.confirm(reservationId);
+        if (confirmed == null || confirmed.reservationId() != reservationId || confirmed.orderId() != orderId) {
+            log.error("confirmed stock reservation belongs to another order. orderId={}, reservationId={}", orderId, reservationId);
+            throw new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT);
+        }
+        return reservationId;
+    }
+
+    private static OrderException toConfirmationException(long orderId, StockReservationException exception) {
+        if (exception.getFailure() == StockReservationException.Failure.ITEMS_MISMATCH) {
+            log.error("stock re-reservation items mismatch for same order. orderId={}", orderId);
+            return new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT, exception);
+        }
+        log.warn("stock confirmation failed. orderId={}, failure={}", orderId, exception.getFailure());
+        return new OrderException(OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
+    }
 }

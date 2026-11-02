@@ -74,6 +74,9 @@ resilience4j:
       # 주문서 미리보기 · 주문 생성 배송비 견적 (POST /internal/v1/shipping-fees/quotes, #13)
       delivery-service:
         base-config: default
+      # 결제 승인 이벤트의 결제 재조회 (GET /internal/v1/payments/{paymentId}, #308). 404 PAYMENT_001 은 없는 결제 — 4xx 라 서킷이 세지 않는다
+      payment-service:
+        base-config: default
 
 eureka:
   client:

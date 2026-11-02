@@ -278,7 +278,7 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 |--------|-----------|--------------------|-------------------------------|------|
 | `payment-approved` | `<ns>.payment.payment-approved` · orderId | payment → `<ns>.order.payment-approved` | `paymentId` · `orderId` · `memberId` · `amount`(최소 단위 정수) · `currency` · `approvedAt` · `method`(수단 코드) | 발행 구현(PR-A1) · 소비 PR-B 예정 |
 | `order-paid` | `<ns>.order.order-paid` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `stockReservationId` · `paidAt` | PR-B 예정 |
-| `order-payment-rejected` | `<ns>.order.order-payment-rejected` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `reason`(`ORDER_CANCELED` · `ORDER_NOT_FOUND` · `PAYMENT_MISMATCH` · `STOCK_UNAVAILABLE` · `ALREADY_PAID`) | PR-B 예정 |
+| `order-payment-rejected` | `<ns>.order.order-payment-rejected` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `reason`(`ORDER_CANCELED` · `ORDER_NOT_FOUND` · `PAYMENT_MISMATCH` · `STOCK_UNAVAILABLE` · `ALREADY_PAID` · `PAYMENT_NOT_DONE`) | PR-B 예정 |
 
 - **발행(payment, 구현)** — `PaymentProcessor` 가 DONE 저장과 `PaymentEventPort.approved` 를 한 트랜잭션에서 한다(`saveApproved` 하나로 묶었다 — #15 의 UNKNOWN 재조회 확정도
   이 메서드로 DONE 을 저장해야 한다). 전이가 멱등 no-op(이미 DONE, 같은 인스턴스)이면 저장도 발행도 하지 않는다 — 같은 결제의 승인 이벤트가 두 번 나가지 않는다.
@@ -289,16 +289,22 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   **결제 게이트(`payment.enabled`)가 열려 있으면 `payment.outbox` · `payment.shedlock` 이 없을 때 기동하지 않는다**(`PaymentOutboxSchemaGuard`) — 운영 DDL 을 빠뜨린 채
   PG 승인 뒤 매 결제가 500 이 되는 것을 막는다. 게이트가 닫혀 있으면 WARN 만 남긴다.
 - **진위 확인(order, PR-B 예정)** — 봉투에는 서명이 없다. order 컨슈머는 이벤트를 알림으로만 보고 payment internal 결제 조회(`GET /internal/v1/payments/{paymentId}`, PR-A2 구현)로
-  재조회해 상태 · 금액 · 통화 · 주문 · 회원을 확정한다. 불일치 · 404 는 DLT 로 보내고 주문을 바꾸지 않는다. 재조회가 DONE 이 아니면(이미 취소 등) WARN 과 기록만 남긴다.
+  재조회해 상태 · 금액 · 통화 · 주문 · 회원을 확정한다. 두 불일치를 나눈다 — **이벤트 ↔ 재조회** 불일치(이벤트가 말한 주문 · 금액이 payment 원본과 다름 — 위조 · 버그)와
+  재조회 404 는 DLT 로 보내고 주문을 바꾸지 않는다. **재조회 ↔ 주문** 불일치(payment 원본의 금액 · 통화 · 회원이 주문과 다름)는 `PAYMENT_MISMATCH` 거절 회신이다.
+  재조회가 DONE 이 아니면(이미 취소 · 부분 취소 등) WARN 과 `order_payment` 기록(`REJECTED_PAYMENT_NOT_DONE`)을 남긴다(판정은 PR-B2).
   - **조회 계약(payment, 구현)** — `PaymentInternalController`, 허용 호출자 `SERVICE_order-service` 하나(`security-guide.md` §9-4). 회원을 거르지 않는다(서비스 간 조회).
     응답 `{paymentId, orderId, memberId, status{code, name, description}, amount{amount, currency}, method{code, name, description} | null, approvedAt | null}` —
     아이디는 문자열, `status.code` 가 `PaymentStatus` 제어 코드다. 결제키 · 고객 멱등 키 · 주문명 · PG 원문 상태 · 간편결제 제공자 · 실패 사유 · 미확정 이유 · 주문 반영 기록은 내리지 않는다.
     없으면 404 `PAYMENT_001`, `paymentId` 가 양수가 아니면 400 `PAYMENT_115`, 숫자 · long 범위가 아니면 400 `PAYMENT_198`. 결제 게이트(`payment.enabled`)를 보지 않는다.
-    호출 구현(order Feign 클라이언트 · 서킷 · timeout)은 PR-B1 이다.
-- **재고(order, PR-B 예정)** — 재고 선점이 만료된 뒤 결제가 완료되는 경우(고객이 결제창을 오래 열어 둠)가 있다. 확정이 409 `PRODUCT_025`(이미 해제 · 만료)면 같은 주문으로
+  - **호출(order, PR-B1 구현)** — `PaymentClient`(서비스 토큰, `contextId=paymentClient`) · `PaymentInternalResponseSupport`(서킷 `payment-service`, 4xx 는 세지 않음,
+    timeout 은 Feign 기본 connect 2s · read 3s) · `PaymentQueryPort#findPayment`. 404 `PAYMENT_001` 은 빈 결과, 타임아웃 · 5xx · 서킷 오픈은 `UNAVAILABLE`(재시도),
+    401 · 403 은 `UNAUTHORIZED`(재시도 — 키 교체 · 허용 호출자 설정 실수 시간대의 승인이 바로 DLT 로 가 "돈 받고 주문 만료" 가 되지 않게),
+    그 밖의 4xx(400 등)는 `REJECTED`(비재시도), 다른 결제 · 아이디 · 금액 · 통화 · 상태 형식 · DONE 의 승인 시각 없음은 `CONTRACT_VIOLATION` 이다(`PaymentQueryException`).
+    결과의 주문 · 회원 · 금액 · 통화 대조는 컨슈머(PR-B2)가 한다.
+- **재고(order, 확정 · 재선점 PR-B1 구현 · 컨슈머 연결 PR-B2)** — 재고 선점이 만료된 뒤 결제가 완료되는 경우(고객이 결제창을 오래 열어 둠)가 있다. 확정이 409 `PRODUCT_025`(이미 해제 · 만료)면 같은 주문으로
   재선점(`POST /internal/v1/stock-reservations`)하고 **곧바로 확정**한다. 재선점이 `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면 `STOCK_UNAVAILABLE` 로 거절 회신한다.
   **주문은 선점 확정 200(`CONFIRMED`)을 받은 뒤에만 PAID 로 둔다** — 같은 이벤트를 다시 받아도 확정을 멱등으로 다시 부른다 (`order-flow-guide.md` §3-4).
-  재선점은 `EXPIRED` 주문만 한다. 결제 전 취소된 `CANCELED` 주문은 거절(`ORDER_CANCELED`)이다.
+  재선점은 결제 대기 · 만료 주문만 한다(선점이 이미 풀린 결제 대기 주문 포함). 결제 전 취소된 `CANCELED` 주문은 거절(`ORDER_CANCELED`)이다.
 - **회신과 `order_synced`(payment, PR-C 예정)** — 두 칸은 그대로 두고 뜻을 **"주문의 회신 이벤트를 받았는가"** 로 바꾼다(DONE 계열만 쓴다 — LATE_APPROVED 는 주문에 반영하지 않는다, #14):
 
   | `order_synced` | `order_sync_failure_code` | 뜻 | 처리 |

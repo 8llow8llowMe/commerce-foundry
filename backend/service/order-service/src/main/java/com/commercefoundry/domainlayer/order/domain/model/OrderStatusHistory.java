@@ -17,6 +17,8 @@ public record OrderStatusHistory(
     public static final String SHIPMENT_REGISTERED = "SHIPMENT_REGISTERED";
     /** 배송이 완료됐다 — 배송 중 → 배송 완료 (#18, delivery-service). */
     public static final String DELIVERY_COMPLETED = "DELIVERY_COMPLETED";
+    /** 결제 승인이 반영됐다 — 결제 대기 · 만료 → 결제 완료 (#308, payment-service 의 {@code payment-approved} 이벤트 + 재조회). {@link #changedByService} 로 남긴다. */
+    public static final String PAYMENT_APPROVED = "PAYMENT_APPROVED";
 
     public OrderStatusHistory {
         if (id <= 0 || orderId <= 0 || (changedById != null && changedById <= 0) || (reason != null && reason.length() > 200)) {
@@ -60,7 +62,7 @@ public record OrderStatusHistory(
     /**
      * 다른 서비스의 internal 호출이 상태를 바꿨다 (#18 출고 · 배송 완료) — 주체 {@code SERVICE}, 아이디 없음. {@code before} 는 전이 전 주문, {@code after} 는 전이 뒤 주문이다.
      *
-     * @param reason 사유 코드 — {@link #SHIPMENT_REGISTERED} · {@link #DELIVERY_COMPLETED}
+     * @param reason 사유 코드 — {@link #SHIPMENT_REGISTERED} · {@link #DELIVERY_COMPLETED} · {@link #PAYMENT_APPROVED}(#308)
      */
     public static OrderStatusHistory changedByService(long id, Order before, Order after, String reason) {
         Objects.requireNonNull(reason, "reason");

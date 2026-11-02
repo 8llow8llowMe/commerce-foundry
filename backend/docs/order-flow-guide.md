@@ -42,7 +42,7 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
   이미 취소됐으면 아무것도 쓰지 않고 성공이다. 읽은 뒤 결제 완료 · 만료가 먼저 커밋하면 `@Version` 비교로 롤백하고, 다시 읽어 취소 완료가 아니면 409 `ORDER_020` 이다.
   **남는 경합**: payment-service 가 승인 직전 주문을 다시 확인한 뒤(`payment-guide.md` §6) 고객이 취소하면 PG 승인이 취소된 주문에 대해 끝날 수 있다 —
   PG 타임아웃으로 결제가 `UNKNOWN` · `IN_PROGRESS` 로 남은 채(주문은 결제 대기) 주문 내역에서 취소해도 같다 — 창이 분 단위다. 결제 → 주문 반영(#308)이
-  `CANCELED` 주문의 결제 완료를 받으면 확정 · 재선점 없이 거절하고 전액 취소해야 한다(재선점은 `EXPIRED` 만, §3-4). 확정 뒤 `markPaid` 가 `CANCELED` 에 지면
+  `CANCELED` 주문의 결제 완료를 받으면 확정 · 재선점 없이 거절하고 전액 취소해야 한다(재선점은 결제 대기 · 만료 주문만, §3-4). 확정 뒤 `markPaid` 가 `CANCELED` 에 지면
   결제 후 복원(`stock-restorations`)으로 재고를 되돌린다 — product 는 확정된 선점의 해제 이벤트를 무시한다(§3-5).
 - 결제 기한이 지났지만 만료 스윕 전인 결제 대기 주문도 고객이 취소할 수 있다 — `CANCELED` · 고객 사유로 남고, 이미 풀린 선점의 해제는 product 가 그대로 둔다(§3-5).
 - 결제 전 취소는 #231 활성 시도 수를 돌려주지 않는다(창이 지나야 풀린다 — 취소 · 재주문 반복을 막는다). #426 결제 대기 수량 합은 취소 커밋과 함께 빠지지만,
@@ -64,10 +64,24 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
 ### 1-2. 동시성
 
 - `EXPIRED → PAID`는 만료 후 결제 확인, 같은 주문의 재선점, 선점 확정의 **200 · CONFIRMED 응답**을 모두 확인한 경우에만 허용한다. 위 도식의 만료에서 PAID로 복귀하는 조건부 경로다 (`payment-guide.md` §6 · 이 문서 §3-4). 재선점 실패 시 전액 취소한다.
-- #13 C1은 주문 값 · 전이 표 · `expire(now)`와 영속성 기반만 제공한다. 결제 전이는 후속 연동에서 증거를 확인한 뒤 구현하며 현재 호출 가능한 `markPaid` 메서드는 없다.
+- **결제 완료 전이는 `Order#markPaid(reservationId)` 하나다 (#308 PR-B1).** 결제 대기 · 만료 → `PAID` 이고 재고 선점 아이디를 확정 200 을 받은 선점으로 바꾼다 —
+  그 밖의 상태(이미 결제 완료 · 취소 등)는 `OrderStatusTransitionException` 이다. 부르기 전에 진위 확인(payment 재조회) · 결제 대조 · 확정 200 을 끝낸다(§3-4).
+  이력은 `OrderStatusHistory.changedByService(…, PAYMENT_APPROVED)`(주체 `SERVICE`), 결제 연결은 주문 행이 아니라 `orders.order_payment`(아래)에 남긴다.
+  부르는 컨슈머(`payment-approved`)는 PR-B2 다 — 주문 상태 · 이력 · `order_payment` · inbox · 회신 outbox 를 한 트랜잭션으로 쓴다.
+- **결제 반영 기록 `orders.order_payment`** (#308 PR-B1, `OrderPaymentRepositoryPort`) — 결제당 한 행(`uk_order_payment_payment_id`), 주문당 결제 완료 하나
+  (`paid_order_id` 는 결과 `PAID` 일 때만 주문 아이디, 아니면 null — `uk_order_payment_paid_order_id`). 결과는 `PAID` 또는 거절 `REJECTED_*`(회신 reason
+  `ORDER_CANCELED` · `ORDER_NOT_FOUND` · `PAYMENT_MISMATCH` · `STOCK_UNAVAILABLE` · `ALREADY_PAID` · `PAYMENT_NOT_DONE` 와 일대일)이고 금액 · 통화 · 승인 시각 ·
+  확정 선점 · eventId 를 남긴다. `PAYMENT_NOT_DONE` 은 재조회가 DONE 이 아닌 경우(부분 취소 등 돈이 남은 상태 포함)용 값이고 판정은 PR-B2 다.
+  **확정 선점(`stock_reservation_id`)은 `PAID` · `REJECTED_ORDER_CANCELED` 에만 기록한다**(`ck_order_payment_reservation_scope`) — 이중 결제에서 진 쪽(`ALREADY_PAID`)이
+  이긴 결제가 확정한 같은 선점을 가리키면 PR-C 복원이 이긴 주문의 재고를 되돌려 초과 판매가 된다. `restoration_claim_id` · `restored_at` 은 확정 선점이 있는
+  `REJECTED_ORDER_CANCELED`(확정 뒤 취소가 이긴 경합)에만 있고(`ck_order_payment_restoration_consistent`), PR-C 가 조건부 UPDATE(`… and restoration_claim_id is null` ·
+  `… and restored_at is null`)로 채운다. 유니크 위반은 `OrderPaymentSaveException`(`PAYMENT_ALREADY_RECORDED` · `ORDER_ALREADY_PAID`, 같은 트랜잭션에 먼저 넣은 inbox 의
+  중복은 `EVENT_ALREADY_PROCESSED`)으로 나오고 그 트랜잭션은 rollback-only 다 — 새 트랜잭션에서 다시 읽어 판정한다. 컨슈머 권장 순서는 주문 저장(`@Version` flush) →
+  `order_payment` insert → inbox record → 회신 outbox 다.
 
 - 주문 행에 `@Version` 을 둔다. 고객 취소와 어드민 출고 처리가 동시에 오면 하나만 성공해야 한다.
-- 결제 완료 알림(internal)은 재전송될 수 있다 — **이미 `PAID` 이후 상태면 성공으로 응답**하고 아무것도 바꾸지 않는다.
+- 같은 결제 승인 이벤트는 다시 올 수 있다(릴레이 재발행 · 컨슈머 재전달) — inbox(`orders.processed_event`)가 같은 eventId 를 거르고, 다른 eventId 의 같은 결제는
+  `order_payment.payment_id` 유니크가 막는다. 이미 그 결제로 `PAID` 이후 상태면 아무것도 바꾸지 않는다. 재전송 스케줄러는 없다(`payment-guide.md` §6).
 
 ### 1-3. 미결제 주문 만료 스윕 (#96)
 
@@ -76,8 +90,11 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
 - 실행 시작 시각 하나(마이크로초로 자름 — DB `timestamp(6)` 판정과 도메인 `expire(now)` 판정을 같은 값으로)로 기한을 판정하고 `(payment_due_at, id)` 오름차순 키셋을 읽는다. 첫 배치와 다음 배치는 쿼리를 나눈다(null 커서를 `:after is null or …` 로 넘기면 PostgreSQL 이 파라미터 타입을 정하지 못한다). 다음 배치 쿼리는 OR 키셋 조건에 뜻이 같은 하한 `payment_due_at >= :afterDueAt` 을 더해 인덱스 range 시작점으로 쓴다. 조회는 아이디·기한만 투영해 out-port 가 `OrderExpiryCandidateQueryResult` 로 돌려주고, Processor 가 Facade 용 커서(`OrderExpiryCandidate`)로 바꾼다 — 다음 배치는 Processor 가 커서의 (기한, 아이디)를 풀어 넘긴다. `idx_orders_status_payment_due_at_id(status, payment_due_at, id)`를 사용한다. 처리 실패도 커서를 전진시켜 뒤 주문을 계속 처리하고, 다음 실행은 처음부터 읽어 실패 주문을 재시도한다.
 - Facade는 트랜잭션 밖이고 각 주문은 별도 `REQUIRES_NEW`, 제한 5초다. 건별 트랜잭션에서 주문 전체를 재조회하고 도메인 `expire(now)`를 호출한다. 이는 서로 다른 주문을 배치 조립하는 N+1 조회가 아니라 주문별 원자적 전이 경계이며, 각 주문은 기존 집계 조회(주문·배송지·항목·입력) 4문장을 사용한다.
 - 저장은 만료 전용 `OrderRepositoryPort.saveExpiry`다. 주문 헤더만 `@Version`을 포함해 `saveAndFlush`(merge의 `UPDATE … where version = ?`가 실제 보호)한 뒤 `SYSTEM`·`PAYMENT_TIMEOUT` 이력과 `order-expired` outbox를 같은 트랜잭션으로 넣는다. 배송지·항목·맞춤 입력을 다시 저장하지 않는다. 이미 만료·결제 완료·미래 기한이면 건너뛰고 동시 결제·중복 만료는 버전 충돌로 한쪽만 커밋한다. 이력·outbox 실패도 주문 상태와 함께 롤백한다. 버전 충돌(정상 경합)은 WARN, 그 밖의 실패는 ERROR 로 남기고 다음 주문으로 간다. ERROR 는 주문 아이디 · 예외 타입 · 루트 원인 타입과 `RedactedThrowable` 사본(타입 · 스택 프레임 · SQLState)만 남긴다 — 원래 예외를 넘기면 원인 사슬의 메시지(PostgreSQL `Failing row contains (...)` 같은 행 값)가 찍힌다(`coding-conventions.md` §8).
-- 이벤트 계약은 §3-5다. `MESSAGING_ENABLED=false`여도 outbox를 저장하며 릴레이만 멈춘다. order-service가 `orders.outbox`·`orders.shedlock`과 미발행 수·나이 지표를 소유하고 inbox는 두지 않는다. 직접 HTTP 해제·커밋 후 보상·product 선점 TTL 유예 변경은 이 범위에 없다. 현재 product TTL 스윕은 안전망으로 유지한다.
+- 이벤트 계약은 §3-5다. `MESSAGING_ENABLED=false`여도 outbox를 저장하며 릴레이만 멈춘다. order-service가 `orders.outbox`·`orders.shedlock`과 미발행 수·나이 지표를 소유한다. inbox(`orders.processed_event`)는 결제 승인 컨슈머용으로 #308 PR-B1 에서 생겼다(만료 발행과 무관). 직접 HTTP 해제·커밋 후 보상·product 선점 TTL 유예 변경은 이 범위에 없다. 현재 product TTL 스윕은 안전망으로 유지한다.
 - 운영 배포 전 Hibernate PostgreSQL 17 생성 스냅숏(`service/order-service/src/test/resources/ddl/order-schema.sql`)의 신규 인덱스·outbox·shedlock DDL을 적용한다. 신규 토픽과 DLT는 인프라가 미리 만들고, 메시징을 켜면 존재 여부를 확인한다. 이 변경에 FE HTTP 계약 영향은 없다.
+- #308 PR-B1 이 더한 `orders.processed_event`(inbox) · `orders.order_payment` 도 같은 스냅숏에서 가져와 **DDL 적용 → 배포** 순서로 넣는다(`ddl-auto=none` 이라 앱이 만들지 않는다).
+  order 의 `MESSAGING_ENABLED` 가 켜진 환경이면 `processed_event` 가 배포 전에 있어야 한다 — inbox 빈이 생겨 messaging-core 정리가 이 테이블을 지우려 하고, 없으면 주기마다
+  정리 WARN 이 난다. `order_payment.result` 의 값 목록 check 는 Hibernate 가 이름 없이 만든다 — 결과 값을 더하면 그 check 를 지우고 다시 만드는 운영 DDL 이 필요하다.
 
 ## 2. 주문 금액
 
@@ -490,10 +507,20 @@ RESERVED ──확정──▶ CONFIRMED
 ### 3-4. order-service 호출 규칙
 
 - **주문을 PAID 로 확정하기 전에 선점 확정(`/confirmation`)의 200 · `CONFIRMED` 응답을 받아야 한다.** 확정 응답 없이 PAID 로 두면 만료 스케줄러가 선점을 풀어
-  돈은 받았는데 재고는 다른 주문에 팔린다. 결제 완료 알림이 다시 와도(웹훅 재전송 · 재조회) 확정을 **멱등으로 다시 부른다** — 이미 CONFIRMED 면 200 이다.
+  돈은 받았는데 재고는 다른 주문에 팔린다. 같은 결제 승인 이벤트가 다시 와도(릴레이 재발행 · 컨슈머 재전달) 확정을 **멱등으로 다시 부른다** — 이미 CONFIRMED 면 200 이다.
 - **만료 후 확정(409 `PRODUCT_025`)** — 같은 `orderId` 로 다시 선점하고(해제된 주문은 활성 유니크 키에 걸리지 않는다) **곧바로 같은 흐름에서 확정**한다.
   재선점과 확정 사이를 비우면 새 선점도 `ttl` 뒤 다시 만료돼 같은 경합이 되풀이된다. 재선점이 `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면
-  결제를 전액 취소한다 (`payment-guide.md` §6).
+  `STOCK_UNAVAILABLE` 로 거절 회신하고 payment 가 전액 취소 대상으로 넘긴다 (`payment-guide.md` §6).
+- **구현 (#308 PR-B1, `OrderStockProcessor#confirmOrReReserve(order)`)** — 트랜잭션 없음(`NEVER`), 주문을 바꾸지 않고 결과(`StockConfirmation`)만 돌려준다.
+  결제 대기 · 만료 주문만 받는다(결제 전 취소된 주문은 부르는 쪽이 확정 · 재선점 없이 거절한다).
+  1. 주문의 `stockReservationId` 를 확정한다 — 200 · `CONFIRMED` 이고 응답의 주문 아이디가 같으면 `CONFIRMED`.
+  2. 확정이 409 `PRODUCT_025`(해제 · 만료) · 404 `PRODUCT_003`(없음)이면 같은 `orderId` · **주문 항목 스냅숏**의 SKU 별 수량 합(주문 생성과 같은 `quantitiesBySkuId`)으로
+     재선점(`StockReservationPort#reReserve`)하고 곧바로 그 선점을 확정한다 — `RE_RESERVED_AND_CONFIRMED`. 재선점 응답은 같은 주문의 이미 확정된 선점(`CONFIRMED`,
+     앞선 처리가 반영 전에 끊긴 재전달)도 받고 만료 시각은 보지 않는다.
+  3. 재선점 `PRODUCT_021` · `PRODUCT_022` 는 예외가 아니라 `STOCK_UNAVAILABLE` 결과다.
+  4. 그 밖은 예외다 — `PRODUCT_026` · 타임아웃 · 5xx · 서킷 · 모르는 4xx · 읽을 수 없는 응답 · 재선점 직후 확정이 다시 해제는 503 `ORDER_002`(재전달로 다시 부른다),
+     `PRODUCT_023`(같은 주문의 다른 항목) · 다른 주문의 선점이 확정됨은 500 `ORDER_017`(다시 해도 같다, error 로그). 여기서 다시 보내지 않는다.
+  확정 · 재선점이 모두 멱등이라 재전달이 처음부터 다시 불러도 재고가 두 번 움직이지 않는다.
 - **409 는 `resultCode` 로 분기한다.** `PRODUCT_026`(동시 변경 · 동시 생성) · `PRODUCT_030`(같은 클레임의 동시 복원 생성) ·
   `PRODUCT_031`(선점 잠금 대기 초과)만 재시도 대상이고 **새 트랜잭션(새 요청)** 으로 다시 부른다 — 다시 부르면 바뀐 상태를 기준으로 답한다.
   재시도는 **상한을 둔다(예: 3회, 간격을 늘려 가며)** — 넘으면 영속 재전송(아래 복원 보장)으로 넘긴다.
@@ -508,7 +535,8 @@ RESERVED ──확정──▶ CONFIRMED
   - 결제 후 취소는 **경로와 상관없이** — 고객 취소 · 어드민 취소 · PG 웹훅 / PG 콘솔 취소 · 자동 전액 취소(재선점 실패 등) — order-service 가 먼저 클레임 행을
     만들고 그 `claimId` 로 복원한다. 재시도마다 새 아이디를 만들지 않는다 — 새 아이디면 멱등이 깨져 재고가 두 번 는다(상한 안이면 409 도 나지 않는다).
   - **복원 호출은 영속적으로 보장한다.** 클레임에 "재고 복원 대기" 표시를 두고 200 을 받으면 지운다. 실패(타임아웃 · 서킷 오픈 · 재시도 대상 409 상한 초과)하면
-    스케줄러가 **같은 claimId · 같은 본문**으로 다시 보낸다 — `payment-guide.md` §6 의 재전송 패턴과 같다. 종결 409 는 어드민에 노출한다.
+    스케줄러가 **같은 claimId · 같은 본문**으로 다시 보낸다(클레임 쪽 재전송이다 — 결제 반영은 재전송 대신 이벤트 재전달 · DLT 를 쓴다, `payment-guide.md` §6).
+    종결 409 는 어드민에 노출한다. 결제 반영 경합(확정 뒤 취소가 이김)의 복원은 클레임 행 대신 `order_payment.restoration_claim_id` 를 claimId 로 쓴다(#308 PR-C).
   - **복원을 부른 클레임은 철회하지 않는다.** 환불이 실패(`REFUND_FAILED`)해도 환불만 재시도한다 — 재고를 다시 빼는(복원을 되돌리는) API 는 없다.
 - **409 를 같은 트랜잭션 안에서 잡고 계속하지 않는다.** product-service 안에서도 어댑터가 409 로 바꾼 시점에는 flush 가 이미 실패해 트랜잭션이 rollback-only 다 —
   잡고 계속하면 커밋에서 실패한다. order-service 도 Feign 409 를 받은 트랜잭션에서 주문 상태를 바꾸고 재시도까지 하지 말고, 재시도는 새 트랜잭션에서 한다.
@@ -556,7 +584,8 @@ payload (두 이벤트 모두 같은 모양 — **이 JSON 이 계약 정본이�
   | 동시 변경 `PRODUCT_026` · DB 오류 | 컨슈머 안 재시도(`commerce.messaging.retry.*`) 뒤 DLT |
 - **internal 재조회를 하지 않는다** — `coding-conventions.md` §12 "재고를 바꾸는 컨슈머는 원본 서비스로 재조회" 의 예외다. 이 컨슈머는 RESERVED 를 푸는 일만 해 효과가 TTL 만료와 같고,
   CONFIRMED 는 건드리지 않는다. 위조 이벤트의 최대 피해는 결제 대기 재고가 TTL 보다 일찍 풀리는 것이고, 그 주문의 확정은 `PRODUCT_025` → 재선점(§3-4)으로 흡수된다.
-  클러스터는 PLAINTEXT · ACL 없음이다 — SASL · ACL · 서명 헤더는 결제 이벤트(#308) 전에 다시 본다.
+  클러스터는 PLAINTEXT · ACL 없음이다. 결제 이벤트(#308)도 봉투 서명 · SASL · ACL 을 더하지 않기로 했다 — 돈 · 재고를 바꾸는 결제 승인 컨슈머는
+  payment internal 재조회로 진위를 확정한다(`payment-guide.md` §6). 클러스터 인증 · ACL 은 운영 인프라 과제로 따로 본다.
 - DLT 재처리는 사람이 한다(messaging-core README). DLT 에 남은 선점은 만료 스윕(안전망, §3-3)이 TTL 뒤 푼다.
 
 ## 4. 배송
@@ -710,7 +739,7 @@ order → delivery 역방향 호출은 두지 않는다(`service-inventory.md` �
 - **재고 복원은 클레임당 한 번이다** — `claimId` 가 product-service 복원 API 의 멱등 키다(§3-2 "결제 후 복원"). 결제 후 취소는 취소 확정 때,
   반품은 검수 뒤 어드민이 재고로 되돌림을 고른 경우만 부른다. 확정 수량을 넘는 복원은 product-service 가 409 로 거절한다.
   - 결제 후 취소는 경로(고객 · 어드민 · PG 웹훅 / 콘솔 취소 · 자동 전액 취소)와 상관없이 **클레임 행을 먼저 만들고** 그 아이디로 복원한다. 재시도마다 새 아이디를 만들지 않는다.
-  - 클레임에 **"재고 복원 대기"** 를 두고, 복원이 실패하면 스케줄러가 같은 claimId · 같은 본문으로 다시 보낸다 (`payment-guide.md` §6 재전송과 같은 패턴).
+  - 클레임에 **"재고 복원 대기"** 를 두고, 복원이 실패하면 스케줄러가 같은 claimId · 같은 본문으로 다시 보낸다 (클레임 쪽 영속 재전송이다 — 결제 반영은 재전송 대신 이벤트 재전달 · DLT, `payment-guide.md` §6).
   - 복원을 부른 클레임은 **철회하지 않는다** — `REFUND_FAILED` 면 환불만 재시도한다. 복원을 되돌리는 API 는 없다. 상세는 §3-4.
 - 교환은 v1 에서 "반품 + 재주문" 으로 운영하고, 전용 흐름은 필요해질 때 만든다.
 

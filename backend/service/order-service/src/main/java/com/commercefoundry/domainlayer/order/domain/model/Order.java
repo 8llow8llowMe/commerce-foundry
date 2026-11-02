@@ -179,6 +179,30 @@ public record Order(
         return transitionTo(OrderStatus.CANCELED);
     }
 
+    /**
+     * 결제 완료 (#308) — 결제 대기 · 만료 주문을 결제 완료로 바꾸고 재고 선점 아이디를 확정한 선점으로 바꾼다.
+     * <b>부르기 전에 선점 확정의 200 · CONFIRMED 응답을 받아야 한다</b> — 만료 주문이면 같은 주문 아이디의 재선점 뒤 확정이다
+     * ({@code order-flow-guide.md} §1-2 · §3-4). 진위 확인(payment 재조회) · 결제 대조 · 취소 주문 거절은 부르는 쪽이 먼저 한다.
+     *
+     * @param reservationId 확정 200 을 받은 재고 선점 아이디 — 결제 대기면 보통 지금 값과 같고, 재선점했으면 새 아이디다
+     * @throws OrderStatusTransitionException 결제 대기 · 만료가 아닌 상태(이미 결제 완료 · 취소 등) · 저장 전 주문
+     * @throws IllegalArgumentException 선점 아이디가 양수가 아닐 때
+     */
+    public Order markPaid(long reservationId) {
+        if (reservationId <= 0) {
+            throw new IllegalArgumentException("positive reservationId required");
+        }
+        if (isNew() || !isAwaitingPaymentApproval() || !status.canTransitionTo(OrderStatus.PAID)) {
+            throw new OrderStatusTransitionException(status, OrderStatus.PAID);
+        }
+        return new Order(id, memberId, OrderStatus.PAID, quote, itemIds, shippingAddress, reservationId, paymentDueAt, shippedAt, deliveredAt, createdAt, version);
+    }
+
+    /** 결제 승인을 반영할 수 있는 상태인가 — 결제 대기 · 만료 (#308). {@link #markPaid} 와 재고 확정 · 재선점이 같은 판정을 쓴다. */
+    public boolean isAwaitingPaymentApproval() {
+        return status == OrderStatus.PENDING_PAYMENT || status == OrderStatus.EXPIRED;
+    }
+
     /** 고객이 지금 취소할 수 있는가 — 결제 전(결제 대기)만이다(#16 PR-1). */
     public boolean isCancelableByCustomer() {
         return status == OrderStatus.PENDING_PAYMENT;
