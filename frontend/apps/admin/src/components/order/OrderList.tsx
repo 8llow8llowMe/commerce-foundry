@@ -11,6 +11,7 @@ import type { OrderListItem } from '@/lib/order/types';
 import { BulkStatusPanel } from './BulkStatusPanel';
 import { OrderFilters } from './OrderFilters';
 import { OrderTable } from './OrderTable';
+import { ShipmentBulkPanel } from './ShipmentBulkPanel';
 
 /** `reload` — 어느 다시 읽기의 응답인지. 지금 값과 다르면 일괄 변경 뒤 새 목록을 기다리는 중이다 */
 type Loaded =
@@ -20,8 +21,8 @@ type Loaded =
 
 /**
  * 어드민 주문 목록(#30) — `GET /api/v1/admin/orders`. 조건은 주소(`query`)가 정본이다. 최신순(주문 시각 · 아이디 내림차순)이다.
- * 표에서 고른 주문은 아래 일괄 변경으로 보낸다. 고른 것은 지금 페이지(주소)에만 걸린다 — 페이지 · 조건이 바뀌면 비운다.
- * 받는 분은 서버가 가린 값이다. 결제수단 조건 · 결제 · 송장 · 클레임은 BE 가 열리면(#14 · #18 · #15) 붙인다.
+ * 표에서 고른 주문은 아래 일괄 변경 · 송장 일괄 등록으로 보낸다. 고른 것은 지금 페이지(주소)에만 걸린다 — 페이지 · 조건이 바뀌면 비운다.
+ * 받는 분은 서버가 가린 값이다. 결제수단 조건 · 결제 · 송장 조회 · 클레임은 BE 가 열리면(#14 · #18 PR-B2 · #15) 붙인다.
  */
 export function OrderList({ query }: { query: OrderQuery }) {
   const path = ordersApiPath(query);
@@ -76,8 +77,8 @@ export function OrderList({ query }: { query: OrderQuery }) {
       <div>
         <h1 className="text-xl font-semibold">주문</h1>
         <p className="mt-1 text-sm text-muted-fg">
-          주문을 찾고 상태를 바꿉니다. 주문 이름을 누르면 상세 · 이력을 봅니다. 받는 분은 가려서
-          보입니다.
+          주문을 찾고 상태를 바꾸거나 송장을 등록합니다. 주문 이름을 누르면 상세 · 이력을 봅니다.
+          받는 분은 가려서 보입니다.
         </p>
       </div>
 
@@ -146,6 +147,16 @@ export function OrderList({ query }: { query: OrderQuery }) {
       {/* 결과가 다시 읽은 목록 · 다른 페이지에서도 남도록 목록 상태와 따로 둔다 */}
       {current?.kind !== 'denied' && (
         <BulkStatusPanel
+          selected={selectedOrders}
+          onSent={() => {
+            setSelection({ path, ids: new Set() });
+            setReload((n) => n + 1);
+          }}
+          onDenied={setDenied}
+        />
+      )}
+      {current?.kind !== 'denied' && (
+        <ShipmentBulkPanel
           selected={selectedOrders}
           onSent={() => {
             setSelection({ path, ids: new Set() });
