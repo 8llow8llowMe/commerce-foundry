@@ -9,10 +9,13 @@ import com.commercefoundry.domainlayer.order.application.command.OrderStatusChan
 import com.commercefoundry.domainlayer.order.application.model.OrderStatusFilter;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderFieldValidationException;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.info.OrderAdminSummaryInfo;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderStatusHistoryQueryResult;
+import com.commercefoundry.domainlayer.order.application.info.OrderFulfillmentInfo;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderAdminProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderFulfillmentProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCustomOptions;
 import com.commercefoundry.domainlayer.order.domain.model.OrderQuoteLine;
@@ -20,12 +23,14 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.domainlayer.order.domain.model.StatusChangedBy;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,7 +44,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 어드민 주문 관리 영속성 계약 (#17) — H2({@code OrderAdminH2Test}) · PostgreSQL({@code OrderAdminPostgresTest})이 같은 단언을 돌린다.
- * 어드민 전이 정책 · 이력, 고객 취소와 어드민 처리가 겹칠 때 하나만 성공하는지(@Version), 목록 조회를 본다.
+ * 어드민 전이 정책 · 이력, 고객 취소와 어드민 처리가 겹칠 때 하나만 성공하는지(@Version), 목록 조회를 본다. 같은 주문 헤더 전이라
+ * delivery-service 의 출고 · 배송 완료 반영(#18 — 시각 칸 · SERVICE 이력 · 멱등 · 버전 충돌)도 여기서 본다.
  */
 public abstract class OrderAdminPersistenceContract {
 
@@ -48,6 +54,7 @@ public abstract class OrderAdminPersistenceContract {
 
     @MockitoSpyBean protected OrderRepositoryPort orders;
     @Autowired protected OrderAdminProcessor processor;
+    @Autowired protected OrderFulfillmentProcessor fulfillmentProcessor;
     @Autowired protected JdbcTemplate jdbc;
     @Autowired protected PlatformTransactionManager transactionManager;
 
@@ -94,15 +101,184 @@ public abstract class OrderAdminPersistenceContract {
     @Test
     @DisplayName("배송중 → 배송 완료는 사유(배송을 확인한 근거)가 있어야 한다 — 없으면 ORDER_027 이고 아무것도 쓰지 않는다")
     void deliveredRequiresReason() {
-        long id = create(OrderStatus.SHIPPING, false);
+        long id = create(OrderStatus.PREPARING, false);
+        Instant shippedAt = Instant.now().minus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MICROS);
+        fulfillmentProcessor.ship(id, shippedAt);
 
         assertRejected(id, OrderStatus.DELIVERED, OrderErrorCode.DELIVERED_REASON_REQUIRED);
         assertThat(read(id).status()).isEqualTo(OrderStatus.SHIPPING);
-        assertThat(historyCount(id)).isEqualTo(1);
-
-        assertThat(processor.changeStatus(id, new OrderStatusChangeCommand(OrderStatus.DELIVERED, "택배사 조회로 수령 확인"), ADMIN_ID)).isTrue();
-        assertThat(read(id).status()).isEqualTo(OrderStatus.DELIVERED);
         assertThat(historyCount(id)).isEqualTo(2);
+
+        Instant before = Instant.now().minusSeconds(1);
+        assertThat(processor.changeStatus(id, new OrderStatusChangeCommand(OrderStatus.DELIVERED, "택배사 조회로 수령 확인"), ADMIN_ID)).isTrue();
+        Order delivered = read(id);
+        assertThat(delivered.status()).isEqualTo(OrderStatus.DELIVERED);
+        assertThat(delivered.deliveredAt()).as("수동 완료도 자동 구매 확정 기준 시각을 남긴다 (#18)").isAfter(before);
+        assertThat(delivered.shippedAt()).as("수동 완료는 출고 시각을 지킨다").isEqualTo(shippedAt);
+        assertThat(historyCount(id)).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("출고 반영 — 상품 준비중이 배송 중이 되고 출고 시각 · SERVICE 이력(SHIPMENT_REGISTERED)이 함께 남는다. 다시 보내면 아무것도 쓰지 않고 지금 상태다")
+    void shipsWithServiceHistoryAndIsIdempotent() {
+        long id = create(OrderStatus.PREPARING, false);
+        Instant shippedAt = Instant.now().minus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS).plusNanos(123_456_000);
+
+        OrderFulfillmentInfo shipped = fulfillmentProcessor.ship(id, shippedAt);
+
+        assertThat(shipped.changed()).isTrue();
+        assertThat(shipped.status()).isEqualTo(OrderStatus.SHIPPING);
+        assertThat(shipped.countryCode()).isEqualTo("KR");
+        Order stored = read(id);
+        assertThat(stored.status()).isEqualTo(OrderStatus.SHIPPING);
+        assertThat(stored.shippedAt()).isEqualTo(shippedAt);
+        assertThat(stored.deliveredAt()).isNull();
+        OrderStatusHistoryQueryResult serviceRow = tx().execute(status -> orders.findHistories(id)).getLast();
+        assertThat(serviceRow.fromStatus()).isEqualTo(OrderStatus.PREPARING);
+        assertThat(serviceRow.toStatus()).isEqualTo(OrderStatus.SHIPPING);
+        assertThat(serviceRow.changedByType()).isEqualTo(StatusChangedBy.SERVICE);
+        assertThat(serviceRow.changedById()).isNull();
+        assertThat(serviceRow.reason()).isEqualTo(OrderStatusHistory.SHIPMENT_REGISTERED);
+
+        clearInvocations(orders);
+        // 멱등 판정이 시각 범위보다 먼저다 — 범위 밖(40일 전) 시각의 재시도도 이미 반영된 주문이면 200 이다
+        OrderFulfillmentInfo again = fulfillmentProcessor.ship(id, Instant.now().minus(40, ChronoUnit.DAYS));
+        assertThat(again.changed()).isFalse();
+        assertThat(again.status()).isEqualTo(OrderStatus.SHIPPING);
+        verify(orders, never()).saveStatusChange(any(), any());
+        assertThat(read(id).shippedAt()).as("처음 출고 시각을 덮지 않는다").isEqualTo(shippedAt);
+        assertThat(historyCount(id)).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("배송 완료 반영 — 배송 중이 배송 완료가 되고 배송 완료 시각 · SERVICE 이력(DELIVERY_COMPLETED)이 남는다. 출고 시각은 그대로다. 다시 보내면 쓰지 않는다")
+    void completesDeliveryWithServiceHistory() {
+        long id = create(OrderStatus.PREPARING, false);
+        Instant base = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Instant shippedAt = base.minus(2, ChronoUnit.DAYS);
+        Instant deliveredAt = base.minus(1, ChronoUnit.HOURS).plusNanos(654_321_000);
+        fulfillmentProcessor.ship(id, shippedAt);
+
+        OrderFulfillmentInfo delivered = fulfillmentProcessor.completeDelivery(id, deliveredAt);
+
+        assertThat(delivered.changed()).isTrue();
+        assertThat(delivered.status()).isEqualTo(OrderStatus.DELIVERED);
+        Order stored = read(id);
+        assertThat(stored.shippedAt()).isEqualTo(shippedAt);
+        assertThat(stored.deliveredAt()).isEqualTo(deliveredAt);
+        OrderStatusHistoryQueryResult serviceRow = tx().execute(status -> orders.findHistories(id)).getLast();
+        assertThat(serviceRow.changedByType()).isEqualTo(StatusChangedBy.SERVICE);
+        assertThat(serviceRow.reason()).isEqualTo(OrderStatusHistory.DELIVERY_COMPLETED);
+
+        assertThat(fulfillmentProcessor.completeDelivery(id, Instant.now().plus(1, ChronoUnit.DAYS)).changed()).as("멱등이 시각 범위보다 먼저다").isFalse();
+        assertThat(read(id).deliveredAt()).isEqualTo(deliveredAt);
+        assertThat(historyCount(id)).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("반영할 수 없는 상태는 ORDER_020(메시지에 현재 상태), 없는 주문은 ORDER_001 이고 아무것도 쓰지 않는다")
+    void rejectsFulfillmentWithoutWriting() {
+        long paid = create(OrderStatus.PAID, false);
+        long preparing = create(OrderStatus.PREPARING, false);
+
+        assertThatThrownBy(() -> fulfillmentProcessor.ship(paid, Instant.now()))
+            .isInstanceOfSatisfying(OrderException.class, exception -> {
+                assertThat(exception.getErrorCode()).isEqualTo(OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID);
+                assertThat(exception.getMessage()).contains(OrderStatus.PAID.getDisplayName());
+            });
+        assertThatThrownBy(() -> fulfillmentProcessor.completeDelivery(preparing, Instant.now()))
+            .isInstanceOfSatisfying(OrderException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID));
+        assertThatThrownBy(() -> fulfillmentProcessor.ship(Long.MAX_VALUE, Instant.now()))
+            .isInstanceOfSatisfying(OrderException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(OrderErrorCode.NOT_FOUND_ORDER));
+
+        // 취소 요청 주문은 먼저 취소를 처리한다 — 취소 · 만료 주문도 출고하지 않는다. 범위 밖 시각이어도 상태 판정(409)이 먼저다
+        for (OrderStatus status : List.of(OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELED, OrderStatus.EXPIRED)) {
+            long id = create(status, false);
+            assertThatThrownBy(() -> fulfillmentProcessor.ship(id, Instant.now().plus(1, ChronoUnit.DAYS)))
+                .as(status.name())
+                .isInstanceOfSatisfying(OrderException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID);
+                    assertThat(exception.getMessage()).contains(status.getDisplayName());
+                });
+            assertThat(read(id).status()).isEqualTo(status);
+            assertThat(read(id).shippedAt()).isNull();
+            assertThat(historyCount(id)).isEqualTo(1);
+        }
+
+        assertThat(read(paid).status()).isEqualTo(OrderStatus.PAID);
+        assertThat(read(preparing).status()).isEqualTo(OrderStatus.PREPARING);
+        assertThat(historyCount(paid)).isEqualTo(1);
+        assertThat(historyCount(preparing)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("바꿀 때 시각이 지금 기준 30일 전 ~ 5분 뒤 밖이면 400 ORDER_159 · 160, 배송 완료가 출고보다 앞서면 ORDER_161 이고 아무것도 쓰지 않는다")
+    void rejectsFulfillmentTimesOutOfRangeWithoutWriting() {
+        long preparing = create(OrderStatus.PREPARING, false);
+        Instant now = Instant.now();
+
+        assertFieldRejected(() -> fulfillmentProcessor.ship(preparing, now.plus(10, ChronoUnit.MINUTES)), "ORDER_159", "shippedAt");
+        assertFieldRejected(() -> fulfillmentProcessor.ship(preparing, now.minus(31, ChronoUnit.DAYS)), "ORDER_159", "shippedAt");
+        assertThat(read(preparing).status()).isEqualTo(OrderStatus.PREPARING);
+        assertThat(read(preparing).shippedAt()).isNull();
+        assertThat(historyCount(preparing)).isEqualTo(1);
+
+        // 시계 차이(5분 안)와 29일 지연은 받는다
+        Instant shippedAt = now.plus(1, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.MICROS);
+        assertThat(fulfillmentProcessor.ship(preparing, shippedAt).changed()).isTrue();
+        long late = create(OrderStatus.PREPARING, false);
+        assertThat(fulfillmentProcessor.ship(late, now.minus(29, ChronoUnit.DAYS)).changed()).isTrue();
+
+        assertFieldRejected(() -> fulfillmentProcessor.completeDelivery(preparing, now.plus(10, ChronoUnit.MINUTES)), "ORDER_160", "deliveredAt");
+        assertFieldRejected(() -> fulfillmentProcessor.completeDelivery(preparing, now.minus(31, ChronoUnit.DAYS)), "ORDER_160", "deliveredAt");
+        assertFieldRejected(() -> fulfillmentProcessor.completeDelivery(preparing, shippedAt.minusNanos(1_000)), "ORDER_161", "deliveredAt");
+        assertThat(read(preparing).status()).isEqualTo(OrderStatus.SHIPPING);
+        assertThat(read(preparing).deliveredAt()).isNull();
+        assertThat(historyCount(preparing)).isEqualTo(2);
+
+        assertThat(fulfillmentProcessor.completeDelivery(preparing, shippedAt).changed()).as("출고와 같은 시각은 받는다").isTrue();
+    }
+
+    private static void assertFieldRejected(ThrowingCallable call, String code, String field) {
+        assertThatThrownBy(call).isInstanceOfSatisfying(OrderFieldValidationException.class, exception ->
+            assertThat(exception.violations()).singleElement().satisfies(violation -> {
+                assertThat(violation.code()).isEqualTo(code);
+                assertThat(violation.field()).isEqualTo(field);
+            }));
+    }
+
+    @Test
+    @DisplayName("고객 취소가 출고 반영의 읽기와 쓰기 사이에 먼저 커밋하면 출고 쪽이 버전 충돌로 실패한다 — 출고 시각 · 연동 이력이 남지 않는다")
+    void concurrentCancelWinsOverShipmentAfterItsRead() throws Exception {
+        long id = create(OrderStatus.PREPARING, false);
+        CountDownLatch loaded = new CountDownLatch(1);
+        CountDownLatch canceled = new CountDownLatch(1);
+        OrderRepositoryPort target = AopTestUtils.getUltimateTargetObject(orders);
+        doAnswer(call -> {
+            Object result = call.callRealMethod();
+            loaded.countDown();
+            if (!canceled.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Customer cancel did not complete");
+            }
+            return result;
+        }).when(target).findById(id);
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<OrderFulfillmentInfo> shipment = pool.submit(() -> fulfillmentProcessor.ship(id, Instant.now()));
+            assertThat(loaded.await(5, TimeUnit.SECONDS)).isTrue();
+            tx().executeWithoutResult(status -> assertThat(jdbc.update(
+                "update orders.orders set status = 'CANCEL_REQUESTED', version = version + 1 where id = ? and version = 1 and status = 'PREPARING'", id)).isEqualTo(1));
+            canceled.countDown();
+            assertThatThrownBy(() -> shipment.get(10, TimeUnit.SECONDS)).hasCauseInstanceOf(OptimisticLockingFailureException.class);
+        } finally {
+            canceled.countDown();
+            pool.shutdownNow();
+            reset(target);
+        }
+        Order stored = read(id);
+        assertThat(stored.status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        assertThat(stored.shippedAt()).isNull();
+        assertThat(historyCount(id)).isEqualTo(1);
     }
 
     @Test

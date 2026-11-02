@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapperImpl;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderAdminProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderFulfillmentProcessor;
 import com.commercefoundry.domainlayer.order.support.OrderAdminPersistenceContract;
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
@@ -31,6 +32,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
     OrderRepositoryAdapter.class,
     OrderMapperImpl.class,
     OrderAdminProcessor.class,
+    OrderFulfillmentProcessor.class,
     OrderAdminH2Test.Config.class
 })
 class OrderAdminPostgresTest extends OrderAdminPersistenceContract {

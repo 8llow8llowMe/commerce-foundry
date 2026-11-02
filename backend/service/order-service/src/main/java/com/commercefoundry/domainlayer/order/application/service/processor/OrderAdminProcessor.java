@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
+import java.time.Clock;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,7 @@ public class OrderAdminProcessor {
 
     private final OrderRepositoryPort orderRepositoryPort;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
+    private final Clock clock;
 
     @Transactional(readOnly = true, timeout = 5)
     public Page<OrderAdminSummaryInfo> search(OrderAdminSearchCommand command) {
@@ -66,7 +68,8 @@ public class OrderAdminProcessor {
                 if (command.status() == OrderStatus.DELIVERED && command.reason() == null) {
                     throw new OrderException(OrderErrorCode.DELIVERED_REASON_REQUIRED);
                 }
-                Order changed = order.changeStatus(command.status());
+                // 배송 완료는 시각(자동 구매 확정 기준)을 함께 남기는 전용 메서드로 바꾼다 — 수동 완료도 delivery-service 의 완료와 같은 칸을 채운다 (#18)
+                Order changed = command.status() == OrderStatus.DELIVERED ? order.deliver(clock.instant()) : order.changeStatus(command.status());
                 orderRepositoryPort.saveStatusChange(changed,
                     OrderStatusHistory.changedByAdmin(snowflakeIdGenerator.generateId(), order, changed, adminId, command.reason()));
                 yield true;

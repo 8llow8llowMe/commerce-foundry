@@ -9,8 +9,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,7 +35,7 @@ class OrderTest {
     private static Order withStatus(OrderStatus status) {
         Order order = placed();
         return new Order(order.id(), order.memberId(), status, order.quote(), order.itemIds(), order.shippingAddress(),
-            order.stockReservationId(), order.paymentDueAt(), Instant.EPOCH, 3L);
+            order.stockReservationId(), order.paymentDueAt(), null, null, Instant.EPOCH, 3L);
     }
 
     @Test
@@ -128,7 +133,7 @@ class OrderTest {
     @DisplayName("배송지 국가가 주문서의 배송 국가와 다르거나 항목 아이디 수가 줄 수와 다르면 만들지 않는다")
     void invariants() {
         assertThatThrownBy(() -> Order.place(1L, 7L, QUOTE, () -> 1L, address(US), 99L, DUE)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new Order(1L, 7L, OrderStatus.PENDING_PAYMENT, QUOTE, List.of(1L), ADDRESS, 99L, DUE, null, null))
+        assertThatThrownBy(() -> new Order(1L, 7L, OrderStatus.PENDING_PAYMENT, QUOTE, List.of(1L), ADDRESS, 99L, DUE, null, null, null, null))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -196,4 +201,147 @@ class OrderTest {
         assertThatThrownBy(() -> Order.place(0, 7, QUOTE, new AtomicLong(10)::incrementAndGet, ADDRESS, 99, DUE)).isInstanceOf(IllegalArgumentException.class);
     }
 
+    private static final Instant SHIPPED_AT = Instant.parse("2026-11-02T09:30:00.123456789Z");
+    private static final Instant DELIVERED_AT = Instant.parse("2026-11-04T05:00:00.987654321Z");
+
+    @Test
+    @DisplayName("ship — 상품 준비중이면 배송 중이 되고 출고 시각을 마이크로초로 잘라 남긴다(나머지 값 그대로). 다시 부르면 그대로다(처음 출고 시각 유지)")
+    void ship() {
+        Order preparing = withStatus(OrderStatus.PREPARING);
+
+        Order shipped = preparing.ship(SHIPPED_AT);
+
+        assertThat(shipped.status()).isEqualTo(OrderStatus.SHIPPING);
+        assertThat(shipped.shippedAt()).isEqualTo(Instant.parse("2026-11-02T09:30:00.123456Z"));
+        assertThat(shipped.deliveredAt()).isNull();
+        assertThat(shipped).usingRecursiveComparison().ignoringFields("status", "shippedAt").isEqualTo(preparing);
+        assertThat(shipped.ship(SHIPPED_AT.plusSeconds(3600))).isSameAs(shipped);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"SHIPPING", "DELIVERED", "PURCHASE_CONFIRMED", "RETURN_REQUESTED", "RETURNED"})
+    @DisplayName("ship — 이미 출고된 뒤(배송 중 · 배송 완료 · 구매 확정 · 반품)면 바꾸지 않은 이 값이다 — 송장 등록 재시도가 안전하다")
+    void shipIsIdempotentAfterShipment(OrderStatus status) {
+        Order order = withStatus(status);
+
+        assertThat(order.ship(SHIPPED_AT)).isSameAs(order);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"PENDING_PAYMENT", "EXPIRED", "PAID", "MAKING", "CANCEL_REQUESTED", "CANCELED"})
+    @DisplayName("ship — 상품 준비중 전이거나 취소된 주문은 도메인 전이 예외다(목표 SHIPPING)")
+    void shipRejected(OrderStatus status) {
+        assertThatThrownBy(() -> withStatus(status).ship(SHIPPED_AT)).isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+            assertThat(exception.getCurrentStatus()).isEqualTo(status);
+            assertThat(exception.getTargetStatus()).isEqualTo(OrderStatus.SHIPPING);
+        });
+    }
+
+    @Test
+    @DisplayName("deliver — 배송 중이면 배송 완료가 되고 배송 완료 시각을 마이크로초로 잘라 남긴다(출고 시각 유지). 다시 부르면 그대로다")
+    void deliver() {
+        Order shipping = withStatus(OrderStatus.PREPARING).ship(SHIPPED_AT);
+
+        Order delivered = shipping.deliver(DELIVERED_AT);
+
+        assertThat(delivered.status()).isEqualTo(OrderStatus.DELIVERED);
+        assertThat(delivered.deliveredAt()).isEqualTo(Instant.parse("2026-11-04T05:00:00.987654Z"));
+        assertThat(delivered.shippedAt()).isEqualTo(shipping.shippedAt());
+        assertThat(delivered).usingRecursiveComparison().ignoringFields("status", "deliveredAt").isEqualTo(shipping);
+        assertThat(delivered.deliver(DELIVERED_AT.plusSeconds(60))).isSameAs(delivered);
+    }
+
+    @Test
+    @DisplayName("deliver — 출고 시각이 없는 배송 중 주문(칸이 생기기 전 출고)도 배송 완료할 수 있다 — 출고 시각은 null 그대로다")
+    void deliverWithoutShippedAt() {
+        Order delivered = withStatus(OrderStatus.SHIPPING).deliver(DELIVERED_AT);
+
+        assertThat(delivered.status()).isEqualTo(OrderStatus.DELIVERED);
+        assertThat(delivered.shippedAt()).isNull();
+        assertThat(delivered.deliveredAt()).isNotNull();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"DELIVERED", "PURCHASE_CONFIRMED", "RETURN_REQUESTED", "RETURNED"})
+    @DisplayName("deliver — 이미 배송 완료된 뒤면 바꾸지 않은 이 값이다")
+    void deliverIsIdempotentAfterDelivery(OrderStatus status) {
+        Order order = withStatus(status);
+
+        assertThat(order.deliver(DELIVERED_AT)).isSameAs(order);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"PENDING_PAYMENT", "EXPIRED", "PAID", "MAKING", "PREPARING", "CANCEL_REQUESTED", "CANCELED"})
+    @DisplayName("deliver — 배송 중 전이거나 취소된 주문은 도메인 전이 예외다(목표 DELIVERED) — 상품 준비중에서 바로 배송 완료하지 않는다")
+    void deliverRejected(OrderStatus status) {
+        assertThatThrownBy(() -> withStatus(status).deliver(DELIVERED_AT)).isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+            assertThat(exception.getCurrentStatus()).isEqualTo(status);
+            assertThat(exception.getTargetStatus()).isEqualTo(OrderStatus.DELIVERED);
+        });
+    }
+
+    @Test
+    @DisplayName("멱등 범위는 전이 표와 같다 — ship 은 배송 중에서, deliver 는 배송 완료에서 표로 닿는 상태(자기 포함)에서만 그대로이고 나머지는 전이 예외다")
+    void idempotentStatusesMatchTransitionTable() {
+        Set<OrderStatus> shippedOrLater = reachableFrom(OrderStatus.SHIPPING);
+        Set<OrderStatus> deliveredOrLater = reachableFrom(OrderStatus.DELIVERED);
+
+        for (OrderStatus status : OrderStatus.values()) {
+            Order order = withStatus(status);
+            if (status != OrderStatus.PREPARING) {
+                assertMovesOrStays(order, () -> order.ship(SHIPPED_AT), shippedOrLater.contains(status));
+            }
+            if (status != OrderStatus.SHIPPING) {
+                assertMovesOrStays(order, () -> order.deliver(DELIVERED_AT), deliveredOrLater.contains(status));
+            }
+        }
+    }
+
+    /** 전이 표로 닿는 상태 — 출발 상태를 포함한다. 표에 새 상태 · 전이가 생기면 멱등 목록도 함께 바뀌어야 한다. */
+    private static Set<OrderStatus> reachableFrom(OrderStatus start) {
+        Set<OrderStatus> reached = EnumSet.of(start);
+        Deque<OrderStatus> queue = new ArrayDeque<>(List.of(start));
+        while (!queue.isEmpty()) {
+            for (OrderStatus next : queue.poll().nextStatuses()) {
+                if (reached.add(next)) {
+                    queue.add(next);
+                }
+            }
+        }
+        return reached;
+    }
+
+    private static void assertMovesOrStays(Order order, Supplier<Order> call, boolean stays) {
+        if (stays) {
+            assertThat(call.get()).as("%s 는 멱등이어야 한다", order.status()).isSameAs(order);
+        } else {
+            assertThatThrownBy(call::get).as("%s 는 거절해야 한다", order.status()).isInstanceOf(OrderStatusTransitionException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("일반 상태 변경으로는 출고 · 배송 완료를 못 한다 — 시각 없이 배송 중 · 배송 완료가 되지 않게 ship · deliver 만 쓴다")
+    void changeStatusRejectsShipmentAndDelivery() {
+        assertThatThrownBy(() -> withStatus(OrderStatus.PREPARING).changeStatus(OrderStatus.SHIPPING)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> withStatus(OrderStatus.SHIPPING).changeStatus(OrderStatus.DELIVERED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThat(withStatus(OrderStatus.PAID).changeStatus(OrderStatus.PREPARING).status()).isEqualTo(OrderStatus.PREPARING);
+    }
+
+    @Test
+    @DisplayName("연동 이력은 저장된 같은 주문의 상태 변경에서 SERVICE · 아이디 없음 · 사유 코드로 만든다")
+    void serviceHistory() {
+        Order preparing = withStatus(OrderStatus.PREPARING);
+        Order shipped = preparing.ship(SHIPPED_AT);
+
+        OrderStatusHistory history = OrderStatusHistory.changedByService(11L, preparing, shipped, OrderStatusHistory.SHIPMENT_REGISTERED);
+
+        assertThat(history.fromStatus()).isEqualTo(OrderStatus.PREPARING);
+        assertThat(history.toStatus()).isEqualTo(OrderStatus.SHIPPING);
+        assertThat(history.changedByType()).isEqualTo(StatusChangedBy.SERVICE);
+        assertThat(history.changedById()).isNull();
+        assertThat(history.reason()).isEqualTo("SHIPMENT_REGISTERED");
+        assertThatThrownBy(() -> OrderStatusHistory.changedByService(11L, shipped, shipped, OrderStatusHistory.SHIPMENT_REGISTERED))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OrderStatusHistory.changedByService(11L, preparing, shipped, null)).isInstanceOf(NullPointerException.class);
+    }
 }
