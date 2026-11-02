@@ -31,7 +31,11 @@ public record DisplaySectionUpsertCommand(
      * @param productId 상품 아이디. {@link DisplayItemType#PRODUCT} 일 때만 있다
      */
     @Builder
-    public record Item(DisplayItemType itemType, Media media, Long productId, String caption) {
+    public record Item(DisplayItemType itemType, Media media, Long productId, Long lookId, String caption) {
+
+        public Item(DisplayItemType itemType, Media media, Long productId, String caption) {
+            this(itemType, media, productId, null, caption);
+        }
 
         public Item {
             Objects.requireNonNull(itemType, "itemType");

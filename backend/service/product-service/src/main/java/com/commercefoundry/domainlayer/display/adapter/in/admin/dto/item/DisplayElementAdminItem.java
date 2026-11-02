@@ -13,7 +13,7 @@ import lombok.Builder;
 public record DisplayElementAdminItem(
 
     @Schema(
-        description = "아이템 유형 — MEDIA(미디어) · PRODUCT(상품). 수정 요청에는 code 를 그대로 보낸다",
+        description = "아이템 유형 — MEDIA(미디어) · PRODUCT(상품) · LOOK(룩 참조). 수정 요청에는 code 를 그대로 보낸다",
         example = "{\"code\": \"PRODUCT\", \"name\": \"상품\", \"description\": \"상품 하나입니다. 고객 메인에는 상품 목록과 같은 카드로 보입니다.\"}"
     )
     CodeNameDescriptionMetadata itemType,
@@ -23,6 +23,9 @@ public record DisplayElementAdminItem(
 
     @Schema(description = "가리키는 상품. itemType 이 PRODUCT 가 아니면 null", nullable = true)
     DisplayProductAdminItem product,
+
+    @Schema(description = "참조 룩 아이디. 삭제된 룩도 원래 참조를 유지한다. LOOK 아이템이 아니면 null", example = "4611686018427387904", nullable = true)
+    String lookId,
 
     @Schema(description = "아이템 설명 문구. 없으면 null. 평문이다. HTML 로 해석하지 않는다(텍스트 노드로만 렌더, 개행은 white-space 로)", nullable = true)
     String caption

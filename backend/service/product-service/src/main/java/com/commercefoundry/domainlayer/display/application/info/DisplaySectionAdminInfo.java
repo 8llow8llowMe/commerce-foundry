@@ -23,7 +23,7 @@ public record DisplaySectionAdminInfo(
      * @param media 미디어 아이템이면 있다
      * @param product 상품 아이템이면 있다
      */
-    public record Element(long itemId, DisplayItemType itemType, DisplayMedia media, ProductReference product, String caption) {
+    public record Element(long itemId, DisplayItemType itemType, DisplayMedia media, ProductReference product, Long lookId, String caption) {
     }
 
     /**

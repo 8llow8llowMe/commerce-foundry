@@ -63,6 +63,12 @@ public record DisplaySectionContent(DisplaySection section, List<DisplayItem> it
                 return Optional.of(DisplayViolation.of(DisplayViolation.Kind.PRODUCT_DUPLICATED));
             }
         }
+        seen.clear();
+        for (DisplayItem item : items) {
+            if (item.isLook() && !seen.add(item.lookId())) {
+                return Optional.of(DisplayViolation.of(DisplayViolation.Kind.LOOK_DUPLICATED));
+            }
+        }
         return Optional.empty();
     }
 
@@ -71,6 +77,18 @@ public record DisplaySectionContent(DisplaySection section, List<DisplayItem> it
         Set<Long> productIds = new LinkedHashSet<>();
         items.stream().filter(DisplayItem::isProduct).forEach(item -> productIds.add(item.productId()));
         return productIds;
+    }
+
+    /** 참조 룩 아이디 — 아이템 순서, 중복 없이. */
+    public Set<Long> lookIds() {
+        Set<Long> ids = new LinkedHashSet<>();
+        items.stream().filter(DisplayItem::isLook).forEach(item -> ids.add(item.lookId()));
+        return ids;
+    }
+
+    /** 이관 전의 미디어 · 상품 LOOK. 원문은 어드민에 보존하고 고객에게는 노출하지 않는다. */
+    public boolean isLegacyLook() {
+        return section.sectionType() == DisplaySectionType.LOOK && items.stream().anyMatch(item -> !item.isLook());
     }
 
     /** 미디어 아이템의 모든 주소 (PC · 모바일 · 포스터). */

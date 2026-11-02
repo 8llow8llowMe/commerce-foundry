@@ -30,7 +30,7 @@ import lombok.Builder;
 public record DisplaySectionUpsertRequest(
 
     @Schema(
-        description = "섹션 유형 — HERO(미디어 1~10) · PRODUCT_PICK(상품 1~20) · STORY(미디어 0~10) · LOOK(미디어 1~10 + 상품 0~20) · DETAIL(미디어 1~10). "
+        description = "섹션 유형 — HERO(미디어 1~10) · PRODUCT_PICK(상품 1~20) · STORY(미디어 0~10) · LOOK(룩 참조 1~10) · DETAIL(미디어 1~10). "
             + "받지 않는 아이템 유형이 있으면 400(PRODUCT_047), 수가 범위 밖이면 400(PRODUCT_048)이다",
         example = "PRODUCT_PICK"
     )

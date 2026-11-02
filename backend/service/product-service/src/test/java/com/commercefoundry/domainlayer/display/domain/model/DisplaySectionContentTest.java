@@ -27,7 +27,6 @@ class DisplaySectionContentTest {
             "HERO, 1, 0", "HERO, 10, 0",
             "PRODUCT_PICK, 0, 1", "PRODUCT_PICK, 0, 20",
             "STORY, 0, 0", "STORY, 10, 0",
-            "LOOK, 1, 0", "LOOK, 10, 20",
             "DETAIL, 1, 0", "DETAIL, 10, 0"
         })
         @DisplayName("범위 안이면 위반이 없다")
@@ -40,7 +39,6 @@ class DisplaySectionContentTest {
             "HERO, 0, 0, MEDIA", "HERO, 11, 0, MEDIA",
             "PRODUCT_PICK, 0, 0, PRODUCT", "PRODUCT_PICK, 0, 21, PRODUCT",
             "STORY, 11, 0, MEDIA",
-            "LOOK, 0, 1, MEDIA", "LOOK, 11, 0, MEDIA", "LOOK, 1, 21, PRODUCT",
             "DETAIL, 0, 0, MEDIA", "DETAIL, 11, 0, MEDIA"
         })
         @DisplayName("범위 밖이면 그 아이템 유형의 수 위반이다")
@@ -112,7 +110,8 @@ class DisplaySectionContentTest {
         assertThat(content.items()).extracting(DisplayItem::id).containsExactly(4L, 2L, 3L, 5L);
         assertThat(content.productIds()).containsExactly(90L, 80L, 70L);
         assertThat(content.mediaUrls()).containsExactly("https://cdn.example.com/v.mp4", "https://cdn.example.com/p.jpg");
-        assertThat(content.violation()).isEmpty();
+        assertThat(content.isLegacyLook()).isTrue();
+        assertThat(content.violation()).contains(new DisplayViolation(DisplayViolation.Kind.ITEM_TYPE_NOT_ALLOWED, DisplayItemType.MEDIA));
     }
 
     @Test

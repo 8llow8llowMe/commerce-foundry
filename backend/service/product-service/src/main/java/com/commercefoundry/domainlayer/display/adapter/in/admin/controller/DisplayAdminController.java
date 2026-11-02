@@ -67,6 +67,7 @@ public class DisplayAdminController {
     @Operation(
         summary = "전시 섹션 생성",
         description = "섹션과 아이템 전체를 만들고 맨 뒤 순서에 둔다. 유형별 아이템 규칙 위반은 400(PRODUCT_047 · 048), 같은 상품 중복은 400(PRODUCT_049), "
+            + "LOOK 섹션은 룩 참조만 받는다. 없는 룩은 400(DISPLAY_001), 같은 룩 중복은 400(DISPLAY_002), "
             + "없는 상품은 400(PRODUCT_050), 기간 · 링크 오류는 400(PRODUCT_051~053), 저장소 밖 미디어 주소는 400(PRODUCT_054), "
             + "미디어 저장소 미설정은 503(PRODUCT_055), 섹션 50개 초과는 409(PRODUCT_056), 다른 전시 변경과 겹치면 409(PRODUCT_058)다. 201 과 만든 섹션을 돌려준다."
     )

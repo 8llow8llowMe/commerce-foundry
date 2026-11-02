@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.display.domain.model.DisplaySection;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionContent;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayViolation;
+import com.commercefoundry.domainlayer.look.domain.model.LookContent;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.ProductSummary;
@@ -79,7 +80,7 @@ public class DisplaySectionProcessor {
             );
             // 요청 DTO의 섹션당 아이템 상한은 30개다. 필터 전 위치로 섹션 간 중복 없이 매긴다.
             List<DisplayItem> items = draft.items().stream().map(item -> new DisplayItem(
-                sectionIndex * 30 + item.displayOrder(), sectionIndex, item.displayOrder(), item.itemType(), item.media(), item.productId(), item.caption()
+                sectionIndex * 30 + item.displayOrder(), sectionIndex, item.displayOrder(), item.itemType(), item.media(), item.productId(), item.lookId(), item.caption()
             )).toList();
             drafts.add(new DisplaySectionContent(section, items));
         }
@@ -111,6 +112,21 @@ public class DisplaySectionProcessor {
         return productIds;
     }
 
+    /** 섹션 전체의 참조 룩을 합쳐 한 번에 조회한다. */
+    public Set<Long> lookIdsOf(Collection<DisplaySectionContent> contents) {
+        Set<Long> ids = new LinkedHashSet<>();
+        contents.stream().filter(content -> !content.isLegacyLook()).forEach(content -> ids.addAll(content.lookIds()));
+        return ids;
+    }
+
+    /** 어드민 쓰기에는 숨긴 룩도 허용하지만 없는 룩은 거절한다. */
+    public void validateLooksExist(Set<Long> lookIds, Set<Long> foundIds) {
+        List<String> missing = lookIds.stream().filter(id -> !foundIds.contains(id)).map(String::valueOf).toList();
+        if (!missing.isEmpty()) {
+            throw new DisplayException(DisplayErrorCode.DISPLAY_LOOK_NOT_FOUND, String.join(", ", missing));
+        }
+    }
+
     /**
      * 고객 메인 응답 모양. 고객에게 보이지 않는 상품(숨김 · 없음 — {@code visibleProducts} 에 없다)의 아이템은 뺀다.
      *
@@ -120,17 +136,29 @@ public class DisplaySectionProcessor {
      * @param visibleProducts 고객에게 보이는 상품의 카드 (상품 아이디 → 카드)
      */
     public DisplayMainInfo toMainInfo(List<DisplaySectionContent> contents, Map<Long, ProductSummary> visibleProducts) {
-        List<DisplayMainInfo.Section> sections = contents.stream().map(content -> {
+        return toMainInfo(contents, visibleProducts, Map.of());
+    }
+
+    /** 룩은 고객 조회 Processor가 걸러 넘긴 원본이며, 전시 응답에는 복사해 저장하지 않고 현재 값을 펼친다. */
+    public DisplayMainInfo toMainInfo(List<DisplaySectionContent> contents, Map<Long, ProductSummary> visibleProducts, Map<Long, LookContent> visibleLooks) {
+        List<DisplayMainInfo.Section> sections = contents.stream().filter(content -> !content.isLegacyLook()).map(content -> {
             DisplaySection section = content.section();
             List<DisplayMainInfo.Element> elements = new ArrayList<>();
             for (DisplayItem item : content.items()) {
+                if (item.isLook()) {
+                    LookContent look = visibleLooks.get(item.lookId());
+                    if (look != null) {
+                        elements.add(new DisplayMainInfo.Element(item.id(), item.itemType(), null, null, toLook(look, visibleProducts), item.caption()));
+                    }
+                    continue;
+                }
                 if (!item.isProduct()) {
-                    elements.add(new DisplayMainInfo.Element(item.id(), item.itemType(), item.media(), null, item.caption()));
+                    elements.add(new DisplayMainInfo.Element(item.id(), item.itemType(), item.media(), null, null, item.caption()));
                     continue;
                 }
                 ProductSummary summary = visibleProducts.get(item.productId());
                 if (summary != null) {
-                    elements.add(new DisplayMainInfo.Element(item.id(), item.itemType(), null, toProduct(summary), item.caption()));
+                    elements.add(new DisplayMainInfo.Element(item.id(), item.itemType(), null, toProduct(summary), null, item.caption()));
                 }
             }
             return new DisplayMainInfo.Section(
@@ -295,6 +323,7 @@ public class DisplaySectionProcessor {
                 sectionType.minCountOf(violation.itemType()), sectionType.maxCountOf(violation.itemType())
             );
             case PRODUCT_DUPLICATED -> new DisplayException(DisplayErrorCode.DISPLAY_PRODUCT_DUPLICATED);
+            case LOOK_DUPLICATED -> new DisplayException(DisplayErrorCode.DISPLAY_LOOK_DUPLICATED);
         };
     }
 
@@ -306,7 +335,7 @@ public class DisplaySectionProcessor {
         );
         List<DisplayItem> items = draft.items().stream()
             .map(item -> new DisplayItem(
-                snowflakeIdGenerator.generateId(), sectionId, item.displayOrder(), item.itemType(), item.media(), item.productId(), item.caption()
+                snowflakeIdGenerator.generateId(), sectionId, item.displayOrder(), item.itemType(), item.media(), item.productId(), item.lookId(), item.caption()
             ))
             .toList();
         return new DisplaySectionContent(section, items);
@@ -319,7 +348,16 @@ public class DisplaySectionProcessor {
             source.mediaType(), source.pcUrl(), source.mobileUrl(), source.pcPosterUrl(), source.mobilePosterUrl(), source.altText()
         );
         Long productId = item.itemType() == DisplayItemType.PRODUCT ? item.productId() : null;
-        return new DisplayItem(DRAFT_ID, DRAFT_ID, displayOrder, item.itemType(), media, productId, item.caption());
+        return new DisplayItem(DRAFT_ID, DRAFT_ID, displayOrder, item.itemType(), media, productId, item.lookId(), item.caption());
+    }
+
+    private static DisplayMainInfo.Look toLook(LookContent content, Map<Long, ProductSummary> visibleProducts) {
+        var look = content.look();
+        var image = look.image();
+        return new DisplayMainInfo.Look(
+            look.id(), look.title(), look.description(), new DisplayMainInfo.Image(image.url(), image.width(), image.height(), image.altText()),
+            content.productIds().stream().map(visibleProducts::get).filter(java.util.Objects::nonNull).map(DisplaySectionProcessor::toProduct).toList()
+        );
     }
 
     private static DisplayMainInfo.Product toProduct(ProductSummary summary) {
@@ -342,7 +380,7 @@ public class DisplaySectionProcessor {
                 Product found = products.get(item.productId());
                 product = new DisplaySectionAdminInfo.ProductReference(item.productId(), found == null ? null : found.name(), found != null && found.visible());
             }
-            return new DisplaySectionAdminInfo.Element(item.id(), item.itemType(), item.media(), product, item.caption());
+            return new DisplaySectionAdminInfo.Element(item.id(), item.itemType(), item.media(), product, item.lookId(), item.caption());
         }).toList();
         return new DisplaySectionAdminInfo(
             section.id(), section.sectionType(), section.title(), section.subtitle(), section.body(),

@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.display.application.port.in.DisplayAdminU
 import com.commercefoundry.domainlayer.display.application.service.processor.DisplaySectionProcessor;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySection;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionContent;
+import com.commercefoundry.domainlayer.look.application.service.processor.LookProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductLookupProcessor;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import java.util.List;
@@ -48,6 +49,7 @@ public class DisplayAdminFacade implements DisplayAdminUseCase {
     private final DisplaySectionProcessor displaySectionProcessor;
     private final ProductLookupProcessor productLookupProcessor;
     private final DisplayAdminPresenter displayAdminPresenter;
+    private final LookProcessor lookProcessor;
 
     @Override
     @Transactional(readOnly = true)
@@ -71,6 +73,7 @@ public class DisplayAdminFacade implements DisplayAdminUseCase {
             displaySectionProcessor.validateCanCreate(locked);
             Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
             displaySectionProcessor.validateProductsExist(draft.productIds(), products);
+            displaySectionProcessor.validateLooksExist(draft.lookIds(), lookProcessor.existingIds(draft.lookIds()));
             DisplaySectionContent created = displaySectionProcessor.create(draft, locked);
             return displayAdminPresenter.toResponse(displaySectionProcessor.toAdminInfo(created, products));
         });
@@ -84,6 +87,7 @@ public class DisplayAdminFacade implements DisplayAdminUseCase {
             DisplaySection current = displaySectionProcessor.requireSection(locked, sectionId);
             Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
             displaySectionProcessor.validateProductsExist(draft.productIds(), products);
+            displaySectionProcessor.validateLooksExist(draft.lookIds(), lookProcessor.existingIds(draft.lookIds()));
             DisplaySectionContent replaced = displaySectionProcessor.replace(current, draft);
             return displayAdminPresenter.toResponse(displaySectionProcessor.toAdminInfo(replaced, products));
         });

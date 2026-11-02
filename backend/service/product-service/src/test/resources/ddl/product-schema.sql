@@ -43,7 +43,8 @@
         alt_text varchar(200),
         caption varchar(200),
         display_order integer not null,
-        item_type varchar(20) not null check ((item_type in ('MEDIA','PRODUCT'))),
+        item_type varchar(20) not null check ((item_type in ('MEDIA','PRODUCT','LOOK'))),
+        look_id bigint,
         media_type varchar(20) check ((media_type in ('IMAGE','VIDEO'))),
         mobile_poster_url varchar(500),
         mobile_url varchar(500),
@@ -53,14 +54,15 @@
         section_id bigint not null,
         primary key (id),
         constraint uk_display_item_section_id_display_order unique (section_id, display_order),
-        constraint ck_display_item_media_fields check (item_type <> 'MEDIA' or (media_type is not null and pc_url is not null and product_id is null)),
-        constraint ck_display_item_product_fields check (item_type <> 'PRODUCT' or (product_id is not null and media_type is null and pc_url is null and mobile_url is null and pc_poster_url is null and mobile_poster_url is null and alt_text is null)),
+        constraint ck_display_item_media_fields check (item_type <> 'MEDIA' or (media_type is not null and pc_url is not null and product_id is null and look_id is null)),
+        constraint ck_display_item_product_fields check (item_type <> 'PRODUCT' or (product_id is not null and media_type is null and pc_url is null and mobile_url is null and pc_poster_url is null and mobile_poster_url is null and alt_text is null and look_id is null)),
+        constraint ck_display_item_look_fields check (item_type <> 'LOOK' or (look_id is not null and look_id > 0 and product_id is null and media_type is null and pc_url is null and mobile_url is null and pc_poster_url is null and mobile_poster_url is null and alt_text is null)),
         constraint ck_display_item_video_poster check (media_type is null or (media_type = 'VIDEO' and pc_poster_url is not null) or (media_type = 'IMAGE' and pc_poster_url is null and mobile_poster_url is null)),
         constraint ck_display_item_display_order_non_negative check (display_order >= 0)
     );
 
     comment on table product.display_item is
-        '메인 전시 아이템 (미디어 또는 상품)';
+        '메인 전시 아이템 (미디어 · 상품 또는 룩 참조)';
 
     comment on column product.display_item.id is
         '전시 아이템 아이디 (Snowflake). 섹션 수정마다 새로 발급한다';
@@ -81,7 +83,10 @@
         '섹션 안의 순서 (0 부터, 오름차순)';
 
     comment on column product.display_item.item_type is
-        '아이템 유형 (MEDIA · PRODUCT)';
+        '아이템 유형 (MEDIA · PRODUCT · LOOK)';
+
+    comment on column product.display_item.look_id is
+        '룩 아이디 (FK: look.id). 룩 아이템만';
 
     comment on column product.display_item.media_type is
         '미디어 종류 (IMAGE · VIDEO). 미디어 아이템만';

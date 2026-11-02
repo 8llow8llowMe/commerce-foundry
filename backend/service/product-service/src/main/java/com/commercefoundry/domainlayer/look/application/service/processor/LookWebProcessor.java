@@ -10,7 +10,10 @@ import com.commercefoundry.domainlayer.look.domain.model.LookContent;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.ProductSummary;
 import com.commercefoundry.global.properties.StoreProperties;
+import java.util.Collection;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.stream.Collectors;
 import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
@@ -66,6 +69,15 @@ public class LookWebProcessor {
             return List.of();
         }
         return withItems(lookRepositoryPort.findVisibleByProductId(productId));
+    }
+
+    /** 메인 전시의 참조 룩 — 플래그 · 숨김 · 읽는 사이 삭제를 다른 고객 조회와 같은 곳에서 판정한다. */
+    public Map<Long, LookContent> getVisibleContentsByIds(Collection<Long> lookIds) {
+        if (lookIds.isEmpty() || !isExposed()) {
+            return Map.of();
+        }
+        List<Look> looks = lookRepositoryPort.findAll().stream().filter(Look::visible).filter(look -> lookIds.contains(look.id())).toList();
+        return withItems(looks).stream().collect(Collectors.toMap(content -> content.look().id(), content -> content, (first, second) -> first, LinkedHashMap::new));
     }
 
     /**

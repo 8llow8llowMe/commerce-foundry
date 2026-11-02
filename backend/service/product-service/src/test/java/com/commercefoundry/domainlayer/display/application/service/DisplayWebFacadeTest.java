@@ -15,6 +15,8 @@ import com.commercefoundry.domainlayer.display.domain.model.DisplayItem;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayItemType;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySection;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
+import com.commercefoundry.domainlayer.look.application.port.out.LookRepositoryPort;
+import com.commercefoundry.domainlayer.look.application.service.processor.LookWebProcessor;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
@@ -50,7 +52,8 @@ class DisplayWebFacadeTest {
     private final DisplayWebFacade facade = new DisplayWebFacade(
         new DisplaySectionProcessor(displayPort, new SnowflakeIdGenerator(1, 1), MediaUrlPolicy.of(""), Clock.fixed(NOW, ZoneOffset.UTC)),
         new ProductListProcessor(productPort, skuPort, imagePort, new StoreProperties(null)),
-        new DisplayWebPresenter()
+        new DisplayWebPresenter(), new LookWebProcessor(
+            mock(LookRepositoryPort.class), new StoreProperties(null))
     );
 
     @Test

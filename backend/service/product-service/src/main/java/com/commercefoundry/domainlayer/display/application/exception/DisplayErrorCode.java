@@ -43,7 +43,12 @@ public enum DisplayErrorCode {
     /** 순서 변경 본문이 현재 섹션 아이디 집합과 다르다 — 누락 · 중복 · 모르는 아이디. 다시 조회한 뒤 보낸다. */
     DISPLAY_SECTION_ORDER_MISMATCH("PRODUCT_057", "순서 변경에는 현재 전시 섹션 아이디를 빠짐없이 한 번씩 보내야 합니다.", HttpStatus.BAD_REQUEST),
     /** 다른 어드민의 전시 쓰기가 전시 잠금을 쥐고 있어 시간 상한(5초) 안에 끝나지 않았다. 요청끼리 겹친 것이라 503 이 아니다. */
-    DISPLAY_BUSY("PRODUCT_058", "다른 전시 변경을 처리 중입니다. 다시 시도해 주세요.", HttpStatus.CONFLICT);
+    DISPLAY_BUSY("PRODUCT_058", "다른 전시 변경을 처리 중입니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
+
+    /** 본문이 참조한 룩이 없다. 숨긴 룩은 허용한다. */
+    DISPLAY_LOOK_NOT_FOUND("DISPLAY_001", "존재하지 않는 룩이 있습니다: %s", HttpStatus.BAD_REQUEST),
+    /** 한 섹션의 룩 참조 중복. */
+    DISPLAY_LOOK_DUPLICATED("DISPLAY_002", "한 섹션에 같은 룩을 두 번 넣을 수 없습니다.", HttpStatus.BAD_REQUEST);
 
     private final String code;
     private final String message;

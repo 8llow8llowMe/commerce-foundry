@@ -7,6 +7,9 @@ package com.commercefoundry.domainlayer.display.application.exception;
  */
 public final class DisplayValidationMessage {
 
+    public static final String ITEM_LOOK_ID_POSITIVE = "DISPLAY_101:룩 아이디는 양수여야 합니다.";
+    public static final String ITEM_LOOK_SHAPE_INVALID = "DISPLAY_102:LOOK 아이템은 lookId만 채워야 합니다.";
+
     // 어드민 전시 섹션 생성 · 수정 (POST /api/v1/admin/displays/sections, PUT /api/v1/admin/displays/sections/{sectionId})
     public static final String SECTION_TYPE_REQUIRED = "PRODUCT_140:sectionType 은 필수입니다.";
     public static final String TITLE_SIZE_MAX = "PRODUCT_141:title 은 200자 이하여야 합니다.";
@@ -25,8 +28,8 @@ public final class DisplayValidationMessage {
     public static final String MEDIA_ALT_TEXT_SIZE_MAX = "PRODUCT_154:altText 는 200자 이하여야 합니다.";
     public static final String ITEM_PRODUCT_ID_POSITIVE = "PRODUCT_155:productId 는 양수여야 합니다.";
     public static final String ITEM_CAPTION_SIZE_MAX = "PRODUCT_156:caption 은 200자 이하여야 합니다.";
-    public static final String ITEM_MEDIA_SHAPE_INVALID = "PRODUCT_157:itemType 이 MEDIA 면 media 가 필수이고 productId 는 보낼 수 없습니다.";
-    public static final String ITEM_PRODUCT_SHAPE_INVALID = "PRODUCT_158:itemType 이 PRODUCT 면 productId 가 필수이고 media 는 보낼 수 없습니다.";
+    public static final String ITEM_MEDIA_SHAPE_INVALID = "PRODUCT_157:itemType 이 MEDIA 면 media 가 필수이고 productId · lookId 는 보낼 수 없습니다.";
+    public static final String ITEM_PRODUCT_SHAPE_INVALID = "PRODUCT_158:itemType 이 PRODUCT 면 productId 가 필수이고 media · lookId 는 보낼 수 없습니다.";
     public static final String MEDIA_POSTER_SHAPE_INVALID = "PRODUCT_159:VIDEO 는 pcPosterUrl 이 필수이고, IMAGE 는 포스터를 보낼 수 없습니다.";
     public static final String TEXT_INVALID_CHARACTER = "PRODUCT_164:문구에는 제어 문자를 쓸 수 없습니다 (body 만 개행 · 탭 허용).";
     public static final String PERIOD_OUT_OF_RANGE = "PRODUCT_165:startAt · endAt 은 0001-01-01T00:00:00Z 이상 9999-12-31T23:59:59.999999Z 이하여야 합니다.";

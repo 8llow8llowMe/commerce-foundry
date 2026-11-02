@@ -16,7 +16,10 @@ public enum DisplayItemType implements CodeNameDescribable {
     MEDIA("미디어", "이미지 또는 영상 한 개입니다."),
 
     /** 상품 하나 — 고객 응답에서는 상품 목록과 같은 카드로 펼친다. */
-    PRODUCT("상품", "상품 하나입니다. 고객 메인에는 상품 목록과 같은 카드로 보입니다.");
+    PRODUCT("상품", "상품 하나입니다. 고객 메인에는 상품 목록과 같은 카드로 보입니다."),
+
+    /** 룩 하나 — 이미지와 구성 상품의 원천은 룩 컨텍스트다. */
+    LOOK("룩", "등록된 룩 하나를 참조합니다.");
 
     private final String displayName;
     private final String description;

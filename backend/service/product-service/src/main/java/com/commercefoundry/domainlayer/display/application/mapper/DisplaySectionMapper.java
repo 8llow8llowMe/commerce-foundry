@@ -29,7 +29,7 @@ public interface DisplaySectionMapper {
             ? new DisplayMedia(entity.getMediaType(), entity.getPcUrl(), entity.getMobileUrl(), entity.getPcPosterUrl(), entity.getMobilePosterUrl(), entity.getAltText())
             : null;
         return new DisplayItem(
-            entity.getId(), entity.getSectionId(), entity.getDisplayOrder(), entity.getItemType(), media, entity.getProductId(), entity.getCaption()
+            entity.getId(), entity.getSectionId(), entity.getDisplayOrder(), entity.getItemType(), media, entity.getProductId(), entity.getLookId(), entity.getCaption()
         );
     }
 
@@ -52,6 +52,7 @@ public interface DisplaySectionMapper {
             .mobilePosterUrl(media == null ? null : media.mobilePosterUrl())
             .altText(media == null ? null : media.altText())
             .productId(item.productId())
+            .lookId(item.lookId())
             .caption(item.caption())
             .build();
     }

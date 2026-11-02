@@ -87,6 +87,23 @@ class DisplaySectionRepositoryAdapterTest {
     }
 
     @Test
+    @DisplayName("룩 참조는 별도 look_id로 저장되고 수정 후에도 유형과 참조를 보존한다")
+    void lookReferenceRoundTrip() {
+        port.insert(content(section(1L, 0), List.of(new DisplayItem(11, 1, 0, DisplayItemType.LOOK, null, null, 100L, null))));
+        entityManager.flush();
+        entityManager.clear();
+        var item = port.findItemsBySectionIds(List.of(1L)).getFirst();
+        assertThat(item.itemType()).isEqualTo(DisplayItemType.LOOK);
+        assertThat(item.lookId()).isEqualTo(100L);
+        assertThat(item.productId()).isNull();
+        assertThat(item.media()).isNull();
+        port.replace(content(section(1L, 0), List.of(new DisplayItem(12, 1, 0, DisplayItemType.LOOK, null, null, 200L, null))));
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(port.findItemsBySectionIds(List.of(1L)).getFirst().lookId()).isEqualTo(200L);
+    }
+
+    @Test
     @DisplayName("교체는 섹션 칸을 바꾸고 아이템을 지운 뒤 같은 순서 번호로 다시 넣어도 유니크 키에 걸리지 않는다")
     void replaceItems() {
         port.insert(content(section(1L, 0), List.of(product(11L, 1L, 0, 700L), product(12L, 1L, 1, 701L))));

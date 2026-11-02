@@ -23,6 +23,7 @@ import com.commercefoundry.domainlayer.display.domain.model.DisplayLiveStatus;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySection;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionContent;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
+import com.commercefoundry.domainlayer.look.application.service.processor.LookProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductLookupProcessor;
 import java.util.List;
 import java.util.Map;
@@ -53,7 +54,7 @@ class DisplayAdminFacadeTest {
 
     private final DisplaySectionProcessor processor = mock(DisplaySectionProcessor.class);
     private final ProductLookupProcessor productLookupProcessor = mock(ProductLookupProcessor.class);
-    private final DisplayAdminFacade facade = new DisplayAdminFacade(processor, productLookupProcessor, new DisplayAdminPresenter());
+    private final DisplayAdminFacade facade = new DisplayAdminFacade(processor, productLookupProcessor, new DisplayAdminPresenter(), mock(LookProcessor.class));
 
     DisplayAdminFacadeTest() {
         given(processor.toAdminInfo(any(), any())).willReturn(INFO);

@@ -3,15 +3,21 @@ package com.commercefoundry;
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.display.adapter.out.persistence.entity.DisplayItemEntity;
+import com.commercefoundry.domainlayer.display.adapter.out.persistence.entity.DisplaySectionEntity;
 import com.commercefoundry.domainlayer.display.adapter.out.persistence.repository.DisplayItemRepository;
 import com.commercefoundry.domainlayer.display.adapter.out.persistence.repository.DisplaySectionRepository;
+import com.commercefoundry.domainlayer.display.domain.model.DisplayItemType;
+import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
+import com.commercefoundry.domainlayer.look.adapter.out.persistence.repository.LookItemRepository;
+import com.commercefoundry.domainlayer.look.adapter.out.persistence.repository.LookRepository;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductImageEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.ProductImageRepository;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.ProductRepository;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.SkuRepository;
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
-import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.ProductRepository;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
@@ -37,7 +43,7 @@ import tools.jackson.databind.json.JsonMapper;
  * 메인 전시 어드민 쓰기 → 고객 메인 조회를 실제 빈 구성(Facade · Processor · 어댑터 · H2)으로 잇는다 — 매퍼 · 잠금 조회 · 아이템 bulk 삭제 뒤 같은 순서 번호로 다시 넣기
  * (유니크 키와 flush 순서) · 노출 필터 · 숨긴 상품 제외를 본다. 엔진 고유 동작(check 제약 · 잠금 대기)은 PostgreSQL 리포지토리 테스트가 본다.
  */
-@SpringBootTest(properties = {"store.media.public-base-url=https://cdn.example.com/media/", "store.features.preorder=true"})
+@SpringBootTest(properties = {"store.media.public-base-url=https://cdn.example.com/media/", "store.features.preorder=true", "store.features.looks=true"})
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
 class DisplayFlowIntegrationTest {
@@ -66,6 +72,12 @@ class DisplayFlowIntegrationTest {
     @Autowired
     private DisplayItemRepository displayItemRepository;
 
+    @Autowired
+    private LookRepository lookRepository;
+
+    @Autowired
+    private LookItemRepository lookItemRepository;
+
     @BeforeEach
     void setUp() {
         productRepository.saveAll(List.of(product(VISIBLE_PRODUCT, true), product(HIDDEN_PRODUCT, false), product(OTHER_PRODUCT, true)));
@@ -73,6 +85,8 @@ class DisplayFlowIntegrationTest {
 
     @AfterEach
     void tearDown() {
+        lookItemRepository.deleteAllInBatch();
+        lookRepository.deleteAllInBatch();
         displayItemRepository.deleteAllInBatch();
         displaySectionRepository.deleteAllInBatch();
         skuRepository.deleteAllById(List.of(9_101L, 9_102L));
@@ -191,12 +205,15 @@ class DisplayFlowIntegrationTest {
         String story = """
             {"sectionType":"STORY","title":"  이야기  ","body":"본문","linkUrl":"/products","linkLabel":"보기","visible":true,"items":[]}
             """;
+        var createdLook = exchange("POST", "/api/v1/admin/looks", """
+            {"title":"통합 룩","visible":true,"image":{"url":"https://cdn.example.com/media/look.jpg"},
+             "productIds":["%d","%d"]}
+            """.formatted(VISIBLE_PRODUCT, HIDDEN_PRODUCT));
+        assertThat(createdLook).hasStatus(HttpStatus.CREATED);
+        String lookId = body(createdLook).at("/dataBody/lookId").asString();
         String look = """
-            {"sectionType":"LOOK","title":"룩","visible":true,"items":[
-              {"itemType":"MEDIA","caption":"영상","media":{"mediaType":"VIDEO","pcUrl":"https://cdn.example.com/media/look.mp4",
-               "mobileUrl":"https://cdn.example.com/media/mobile.mp4","pcPosterUrl":"https://cdn.example.com/media/poster.jpg","altText":"룩 영상"}},
-              {"itemType":"PRODUCT","productId":"%d","caption":"상품"}, {"itemType":"PRODUCT","productId":"%d"}]}
-            """.formatted(VISIBLE_PRODUCT, HIDDEN_PRODUCT);
+            {"sectionType":"LOOK","title":"룩","visible":true,"items":[{"itemType":"LOOK","lookId":"%s"}]}
+            """.formatted(lookId);
         String hidden = "{\"sectionType\":\"STORY\",\"visible\":false,\"items\":[]}";
         String future = "{\"sectionType\":\"STORY\",\"visible\":true,\"startAt\":\"9999-01-01T00:00:00Z\",\"items\":[]}";
         String ended = "{\"sectionType\":\"STORY\",\"visible\":true,\"endAt\":\"2000-01-01T00:00:00Z\",\"items\":[]}";
@@ -215,7 +232,7 @@ class DisplayFlowIntegrationTest {
         assertThat(previewBody.at("/sections/1/sectionId").asString()).isEqualTo("preview-section-2");
         assertThat(previewBody.at("/sections/1/items/0/itemId").asString()).isEqualTo("preview-item-60");
         assertThat(previewBody.at("/sections/2/items").size()).isZero();
-        JsonNode card = previewBody.at("/sections/1/items/1/product");
+        JsonNode card = previewBody.at("/sections/1/items/0/look/products/0");
         assertThat(card.at("/salePrice/amount").asLong()).isEqualTo(40_000L);
         assertThat(card.at("/listPrice/amount").asLong()).isEqualTo(60_000L);
         assertThat(card.at("/discountRate").asInt()).isEqualTo(33);
@@ -227,6 +244,53 @@ class DisplayFlowIntegrationTest {
         assertThat(displaySectionRepository.findAll()).usingRecursiveComparison().isEqualTo(sectionsBefore);
         assertThat(displayItemRepository.findAll()).usingRecursiveComparison().isEqualTo(itemsBefore);
         assertThat(body(mvc.get().uri("/api/v1/displays/main").exchange()).at("/dataBody")).isEqualTo(mainBefore);
+    }
+
+    @Test
+    void legacyLookCanBeConvertedInPlaceAndDeletedLookReferenceStaysInAdmin() {
+        displaySectionRepository.save(DisplaySectionEntity.builder()
+            .id(880001L).sectionType(DisplaySectionType.LOOK)
+            .title("기존 룩").displayOrder(7).visible(true).build());
+        displayItemRepository.save(DisplayItemEntity.builder()
+            .id(880002L).sectionId(880001L).displayOrder(0)
+            .itemType(DisplayItemType.PRODUCT).productId(VISIBLE_PRODUCT).build());
+
+        var legacy = exchange("GET", ADMIN_PATH + "/880001", null);
+        assertThat(legacy).hasStatusOk();
+        assertThat(body(legacy).at("/dataBody/items/0/product/productId").asString()).isEqualTo(String.valueOf(VISIBLE_PRODUCT));
+        assertThat(body(mvc.get().uri("/api/v1/displays/main").exchange()).at("/dataBody/sections").size()).isZero();
+
+        var created = exchange("POST", "/api/v1/admin/looks", """
+            {"title":"전환 룩","visible":true,"image":{"url":"https://cdn.example.com/media/converted.jpg"},"productIds":["%d"]}
+            """.formatted(VISIBLE_PRODUCT));
+        assertThat(created).hasStatus(HttpStatus.CREATED);
+        String lookId = body(created).at("/dataBody/lookId").asString();
+        var converted = exchange("PUT", ADMIN_PATH + "/880001", """
+            {"sectionType":"LOOK","title":"기존 룩","visible":true,"items":[{"itemType":"LOOK","lookId":"%s"}]}
+            """.formatted(lookId));
+        assertThat(converted).hasStatusOk();
+        assertThat(body(converted).at("/dataBody/sectionId").asString()).isEqualTo("880001");
+        assertThat(displaySectionRepository.findById(880001L).orElseThrow().getDisplayOrder()).isEqualTo(7);
+        assertThat(body(mvc.get().uri("/api/v1/displays/main").exchange()).at("/dataBody/sections/0/items/0/look/lookId").asString()).isEqualTo(lookId);
+
+        var deleted = exchange("DELETE", "/api/v1/admin/looks/" + lookId, null);
+        assertThat(deleted).hasStatusOk();
+        assertThat(body(exchange("GET", ADMIN_PATH + "/880001", null)).at("/dataBody/items/0/lookId").asString()).isEqualTo(lookId);
+        assertThat(body(mvc.get().uri("/api/v1/displays/main").exchange()).at("/dataBody/sections/0/items").size()).isZero();
+    }
+
+    @Test
+    void lookReferenceErrorsUseTheHttpErrorEnvelope() {
+        for (String uri : List.of(ADMIN_PATH, "/api/v1/admin/displays/preview")) {
+            for (var invalid : java.util.Map.of("0", "DISPLAY_101", "null", "DISPLAY_102", "999999", "DISPLAY_001").entrySet()) {
+                String section = "{\"sectionType\":\"LOOK\",\"visible\":true,\"items\":[{\"itemType\":\"LOOK\",\"lookId\":" + invalid.getKey() + "}]}";
+                String request = uri.equals(ADMIN_PATH) ? section : "{\"sections\":[" + section + "]}";
+                var result = exchange("POST", uri, request);
+                assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+                assertThat(body(result).at("/dataHeader/resultCode").asString()).isEqualTo(invalid.getValue());
+            }
+        }
+        assertThat(displaySectionRepository.count()).isZero();
     }
 
     @Test

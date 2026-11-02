@@ -14,15 +14,15 @@ import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 /**
- * 전시 아이템 한 개 — 미디어 또는 상품. 다른 유형의 칸은 보내지 않는다.
+ * 전시 아이템 한 개 — 미디어 · 상품 또는 룩 참조. 다른 유형의 칸은 보내지 않는다.
  *
  * <p>교차 검증은 {@code @AssertTrue} 메서드다. 오류의 {@code field} 는 메서드 이름에서 온다({@code mediaShapeValid} · {@code productShapeValid}).
  */
 @Builder
-@Schema(description = "전시 아이템 (미디어 또는 상품)")
+@Schema(description = "전시 아이템 (미디어 · 상품 또는 룩 참조)")
 public record DisplayItemUpsertRequest(
 
-    @Schema(description = "아이템 유형 — MEDIA(media 필수) · PRODUCT(productId 필수)", example = "PRODUCT")
+    @Schema(description = "아이템 유형 — MEDIA(media 필수) · PRODUCT(productId 필수) · LOOK(lookId 필수)", example = "PRODUCT")
     @NotNull(message = DisplayValidationMessage.ITEM_TYPE_REQUIRED)
     DisplayItemType itemType,
 
@@ -37,6 +37,10 @@ public record DisplayItemUpsertRequest(
     @Positive(message = DisplayValidationMessage.ITEM_PRODUCT_ID_POSITIVE)
     Long productId,
 
+    @Schema(description = "룩 아이디. LOOK 아이템만 보낸다. 숨긴 룩도 참조할 수 있다", example = "4611686018427387904", nullable = true)
+    @Positive(message = DisplayValidationMessage.ITEM_LOOK_ID_POSITIVE)
+    Long lookId,
+
     @Schema(description = "아이템 설명 문구 (200자 이하, 제어 문자 불가). 평문이다. HTML 로 해석하지 않는다(텍스트 노드로만 렌더, 개행은 white-space 로)", example = "봄 신상", nullable = true)
     @Size(max = 200, message = DisplayValidationMessage.ITEM_CAPTION_SIZE_MAX)
     @DisplayText(message = DisplayValidationMessage.TEXT_INVALID_CHARACTER)
@@ -47,14 +51,21 @@ public record DisplayItemUpsertRequest(
     @Schema(hidden = true)
     @AssertTrue(message = DisplayValidationMessage.ITEM_MEDIA_SHAPE_INVALID)
     public boolean isMediaShapeValid() {
-        return itemType != DisplayItemType.MEDIA || media != null && productId == null;
+        return itemType != DisplayItemType.MEDIA || media != null && productId == null && lookId == null;
     }
 
     @JsonIgnore
     @Schema(hidden = true)
     @AssertTrue(message = DisplayValidationMessage.ITEM_PRODUCT_SHAPE_INVALID)
     public boolean isProductShapeValid() {
-        return itemType != DisplayItemType.PRODUCT || productId != null && media == null;
+        return itemType != DisplayItemType.PRODUCT || productId != null && media == null && lookId == null;
+    }
+
+    @JsonIgnore
+    @Schema(hidden = true)
+    @AssertTrue(message = DisplayValidationMessage.ITEM_LOOK_SHAPE_INVALID)
+    public boolean isLookShapeValid() {
+        return itemType != DisplayItemType.LOOK || lookId != null && media == null && productId == null;
     }
 
     public DisplaySectionUpsertCommand.Item toCommand() {
@@ -62,6 +73,7 @@ public record DisplayItemUpsertRequest(
             .itemType(itemType)
             .media(media == null ? null : media.toCommand())
             .productId(productId)
+            .lookId(lookId)
             .caption(TextValues.normalize(caption))
             .build();
     }
