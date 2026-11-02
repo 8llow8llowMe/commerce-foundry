@@ -31,6 +31,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -57,6 +58,17 @@ public class ProductAdminController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final ProductAdminUseCase productAdminUseCase;
+
+    @Operation(summary = "상품 삭제", description = "숨김 · 판매 종료로 바꾸고 삭제 시각을 기록한다. 자식 데이터와 기존 재고 선점은 유지한다. "
+        + "재삭제도 200(dataBody=null), 없으면 404 PRODUCT_001. 버전 파라미터는 없으며 동시 변경은 409 PRODUCT_010. 다시 조회한 뒤 재시도한다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/{productId}")
+    public ResponseEntity<Response<Void>> delete(
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId
+    ) {
+        productAdminUseCase.delete(productId);
+        return ResponseEntity.ok(Response.success(null));
+    }
 
     @Operation(
         summary = "상품 등록",

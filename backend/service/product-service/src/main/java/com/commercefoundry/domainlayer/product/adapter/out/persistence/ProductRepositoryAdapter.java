@@ -23,6 +23,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.SliceImpl;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -97,6 +98,19 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
             .expectedShipDate(product.expectedShipDate())
             .createdByMemberId(product.createdByMemberId())
             .build());
+    }
+
+    /** Merge the existing header and flush so version conflicts become 409 inside the transaction. */
+    @Override
+    public void update(Product product) {
+        if (product.version() == null) {
+            throw new IllegalArgumentException("Cannot update an unsaved product. productId=" + product.id());
+        }
+        try {
+            productRepository.saveAndFlush(productMapper.toEntity(product));
+        } catch (ObjectOptimisticLockingFailureException exception) {
+            throw new ProductException(ProductErrorCode.PRODUCT_MODIFICATION_CONFLICT, exception);
+        }
     }
 
     /** 영속성 컨텍스트 전체를 내보낸다 — 같은 트랜잭션의 진열 카테고리 · 옵션 · SKU INSERT 도 함께 나간다. */

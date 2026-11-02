@@ -68,13 +68,23 @@ class ProductAdminFacadeTest {
     @Mock
     private ProductWriteProcessor productWriteProcessor;
 
+    @Mock
+    private com.commercefoundry.domainlayer.product.application.service.processor.ProductDeleteProcessor productDeleteProcessor;
+
     private ProductAdminFacade facade;
 
     @BeforeEach
     void setUp() {
         facade = new ProductAdminFacade(categoryProcessor, productAdminQueryProcessor, new ProductAdminPresenter(), productAdminDetailProcessor,
             productWriteProcessor, new ProductDescriptionSanitizer(), org.mockito.Mockito.mock(
-            com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class));
+            com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class), productDeleteProcessor);
+    }
+
+    @Test
+    void deleteDelegatesWithoutQueryingChildrenOrIssuingUploads() {
+        facade.delete(7L);
+        verify(productDeleteProcessor).delete(7L);
+        verifyNoInteractions(categoryProcessor, productAdminDetailProcessor, productAdminQueryProcessor, productWriteProcessor);
     }
 
     @Test

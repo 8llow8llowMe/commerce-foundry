@@ -42,8 +42,9 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 "어드민 카테고리 관리" 는 숨김 포함 트리 조회 · 생성 · 수정(이동 포함) · 삭제(`/api/v1/admin/categories/**`)가 있는 상태다 — 깊이 3단계 · 순환 금지, 하위나 연결 상품이 있으면 삭제 409 (`api-design-guide.md` §2-5).
 "어드민 상품 목록" 은 숨김 포함 상품 페이지 목록(`GET /api/v1/admin/products` — 상품명 · 카테고리(하위 포함) · 판매 상태 · 노출 · 재고 반영 판매 가능 상태 조건,
 최신순 · 이름순)이 있는 상태다 (`api-design-guide.md` §2-6). 상품 soft delete · 옵션 은퇴 · 낙관적 락 버전 · 등록자 컬럼과 그 조회 규칙(삭제 상품은 고객 · 어드민 목록에서 빠지고
-서비스 간 SKU 조회에는 판매 불가로 남는다)이 있고 삭제 · 은퇴를 쓰는 API 는 아직 없다 (`api-design-guide.md` §2-13). 어드민 상품 상세(`GET /api/v1/admin/products/{productId}`)는 숨김 · 은퇴 옵션 · 판매 종료 SKU 와 저장된 설정을 포함하며 삭제 상품은 404 다.
-재고 · 원가는 기존 별도 API 로 조회한다. 상품 쓰기 · 상태 변경 · 삭제 · 이미지 업로드는 #9 의 다음 PR 이다.
+서비스 간 SKU 조회에는 판매 불가로 남는다)이 있다. 상품 삭제 API(`DELETE /api/v1/admin/products/{productId}`)는 ADMIN 전용이며 이미 삭제된 상품도 200이다.
+읽은 버전과 merge 시점이 충돌하면 409 `PRODUCT_010`이며 자식·재고·기존 선점은 유지한다. 옵션 은퇴 쓰기는 후속 범위다 (`api-design-guide.md` §2-13). 어드민 상품 상세(`GET /api/v1/admin/products/{productId}`)는 숨김 · 은퇴 옵션 · 판매 종료 SKU 와 저장된 설정을 포함하며 삭제 상품은 404 다.
+재고 · 원가는 기존 별도 API 로 조회한다. 이미지 없는 상품 등록(E1)·이미지 업로드 발급(F1)·상품 삭제는 구현됐으며, 수정·상태 변경·이미지 첨부는 #9 후속 범위다.
 SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullable)를 가지고 서비스 간 SKU 벌크 조회가 그대로 내린다 — 해외 주문 거절은 order-service 몫이다 (#80, `order-flow-guide.md` §2-2).
 "국내 배송비 정책" 은 고객 정책 안내(`/api/v1/shipping-fees/policy`) · 어드민 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/domestic`) · 서비스 간 배송비 견적(`/internal/v1/shipping-fees/quotes`)이 있는 상태다.
 "국내 배송비 정책 교체 이력" 은 교체가 성공할 때 같은 트랜잭션에서 교체 전 · 후 값 · 관리자 · 시각을 `delivery.shipping_policy_history`(+ `shipping_policy_history_area`)에 남기고

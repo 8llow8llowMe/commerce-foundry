@@ -39,6 +39,16 @@ public record Product(
         }
     }
 
+    /** Immutable deletion snapshot; preserve editor fields and the loaded optimistic version. */
+    public Product softDelete(Instant now) {
+        if (isDeleted()) {
+            return this;
+        }
+        return new Product(id, categoryId, name, summary, descriptionHtml, SaleStatus.STOP_SELLING, false, salePrice, listPrice,
+            maxQuantityPerOrder, customOrder, customOrderNotice, customOrderLeadTimeDays, preorder, expectedShipDate, version,
+            Objects.requireNonNull(now, "now").truncatedTo(java.time.temporal.ChronoUnit.MICROS), createdByMemberId);
+    }
+
     /** 삭제(soft delete)된 상품인가. */
     public boolean isDeleted() {
         return deletedAt != null;

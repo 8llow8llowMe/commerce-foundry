@@ -45,6 +45,20 @@ class ProductTest {
             .hasMessageContaining("expectedShipDate");
     }
 
+    @Test
+    void deletionIsImmutableIdempotentAndPreservesEveryOtherField() {
+        Product original = new Product(1, 11, "name", "summary", "<p>body</p>", SaleStatus.ON_SALE, true,
+            Money.of(39000, KRW), Money.of(49000, KRW), 3, true, "notice", 14, true, SHIP_DATE, 7L, null, 99L);
+        var now = java.time.Instant.parse("2026-11-02T00:00:00.123456789Z");
+        Product deleted = original.softDelete(now);
+        assertThat(original.isDeleted()).isFalse();
+        assertThat(deleted).usingRecursiveComparison().ignoringFields("visible", "saleStatus", "deletedAt").isEqualTo(original);
+        assertThat(deleted.visible()).isFalse();
+        assertThat(deleted.saleStatus()).isEqualTo(SaleStatus.STOP_SELLING);
+        assertThat(deleted.deletedAt()).isEqualTo(java.time.Instant.parse("2026-11-02T00:00:00.123456Z"));
+        assertThat(deleted.softDelete(now.plusSeconds(10))).isSameAs(deleted);
+    }
+
     private static Product product(boolean preorder, LocalDate expectedShipDate) {
         return new Product(
             1L, 11L, "상품", null, null, SaleStatus.ON_SALE, true, Money.of(39_000, KRW), null, null,

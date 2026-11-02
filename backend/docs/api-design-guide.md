@@ -544,7 +544,7 @@ return ResponseEntity.ok().body(Response.success(response));
 `product.created_by_member_id` 에 남는다(본문으로 받지 않는다, 운영자 온보딩 #357 이 읽는다).
 
 - **이 단계의 범위** — 이미지(#9 F, 업로드 키 발급 · 첨부)와 맞춤 제작 입력(#9 E2)은 아직 받지 않는다. 등록 상품은 이미지 없이, 맞춤 제작 꺼짐으로 생긴다.
-  수정 · 판매 상태 변경 · 삭제는 E2 다. Idempotency-Key 는 없다 — 같은 본문을 두 번 보내면 상품이 두 개 생긴다(지우면 된다, #9 결정).
+  수정 · 판매 상태 변경은 E2 후속 범위이며 삭제는 §2-13에 구현됐다. Idempotency-Key 는 없다 — 같은 본문을 두 번 보내면 상품이 두 개 생긴다(지우면 된다, #9 결정).
 - **본문**: `{name, summary?, descriptionHtml?, categoryId, categoryIds?[], saleStatus, visible, salePrice{amount,currency}, listPrice?, maxQuantityPerOrder?,
   preorder?, expectedShipDate?, optionGroups?[{name, values[]}], skus[{optionValues[], additionalPrice, saleStatus, weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}`.
   - 문구는 앞뒤 공백을 빼고, 빈 요약은 null 이다. 상품명 · 요약 · 옵션 이름은 제어 · 서식 문자를 받지 않는다.
@@ -573,7 +573,7 @@ return ResponseEntity.ok().body(Response.success(response));
   | 대역 | 용도 |
   |------|------|
   | `001~004` | 없는 리소스(404) |
-  | `010~019` | 어드민 상품 쓰기 — E1 `012~014` · `016`, E2(수정 · 삭제)는 `010` · `011` · `015` · `017` |
+  | `010~019` | 어드민 상품 쓰기 — 삭제 동시 변경 `010`, E1 `012~014` · `016`, 후속 수정 `011` · `015` · `017` |
   | `020~031` | 재고(조정 · 선점 · 복원) |
   | `032~036` | 상품 이미지 업로드 · 스토리지(#9 F) |
   | `037` · `038` | 어드민 상품 등록 필드 검증(금액 상한 · 지난 발송 예정일) |
@@ -834,9 +834,22 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 
 ### 2-13. 상품 삭제 (soft delete) · 옵션 은퇴 (product-service, #9)
 
+#### 어드민 상품 삭제 API (#9 E2 삭제)
+
+- `DELETE /api/v1/admin/products/{productId}`는 ADMIN 전용이다. 본문·버전 파라미터 없이 현재 저장된 상품을 삭제하며 200 `dataBody: null`을 반환한다.
+  상품 아이디는 양수(400 `PRODUCT_105`), 숫자 변환 실패는 400 `PRODUCT_198`, 없는 상품은 404 `PRODUCT_001`이다. 익명은 401, CUSTOMER는 403이다.
+- 이미 삭제된 상품은 200이며 삭제 시각·수정 시각·버전을 다시 쓰지 않는다. 숨김·판매 종료 상품도 삭제할 수 있다. 복구 API는 없다.
+- `ProductAdminFacade`의 최대 5초 DB 트랜잭션에서 `ProductDeleteProcessor`가 삭제 상품을 포함해 헤더를 읽고 `Product.softDelete(now)`로 상태를 바꾼다.
+  삭제 시각은 UTC 마이크로초 정밀도이며, `visible=false`·`saleStatus=STOP_SELLING` 외 편집 설정·등록자는 보존한다.
+  `ProductMapper`가 읽은 버전을 유지한 헤더를 merge하고 즉시 flush한다. 읽기 이후 동시 수정·삭제가 먼저 반영되면 409 `PRODUCT_010`이다.
+  FE는 다시 조회한 뒤 재시도한다. 조회와 삭제 사이에 먼저 완료된 편집도 현재 상태를 대상으로 삭제하므로, 편집 화면 버전 비교 계약은 없다.
+- SKU·옵션·이미지·맞춤 입력·진열 카테고리·재고·선점과 기존 주문을 변경하지 않는다. 신규 선점은 기존 판매 가능 판정으로 거절하고,
+  internal SKU 조회에는 상품과 SKU를 유지하며 `purchasable=false`로 알린다. S3·Kafka·서비스 간 호출은 없다. 새 엔티티·운영 DDL도 없다.
+- 상품 수정·판매 상태 변경·옵션 은퇴·이미지 첨부는 후속 범위다. FE 계약 검토자는 `seonghoho`다.
+
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다
-(주문 · 장바구니가 계속 읽는다). **v1 에는 복구 기능이 없다** — 되살리려면 운영 SQL 이다. 삭제 API 는 #9 PR-E2 에서 연다.
+(주문 · 장바구니가 계속 읽는다). **v1 에는 복구 기능이 없다** — 되살리려면 운영 SQL 이다. 삭제는 위의 ADMIN 전용 DELETE API로 처리한다.
 
 | 경로 | 삭제 상품 |
 |------|-----------|

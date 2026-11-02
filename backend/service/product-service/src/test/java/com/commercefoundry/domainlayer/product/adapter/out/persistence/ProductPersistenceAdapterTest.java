@@ -111,6 +111,28 @@ class ProductPersistenceAdapterTest {
     //   104   5,000   X    ON_SALE       10
     //   105  30,000   O    ON_SALE       12
     //   108   1,000   X    STOP_SELLING  10       ← 삭제. 이름 "상품 108" 이 키워드 "상품 10" 에도 걸리지만 빠진다
+    @Test
+    void versionedDeleteMergePreservesHeaderAndRejectsStaleSnapshot() {
+        Product original = productRepositoryPort.findAllByIdsIncludingHidden(List.of(101L)).getFirst();
+        Instant createdAt = entityManager.find(ProductEntity.class, 101L).getCreatedAt();
+        productRepositoryPort.update(original.softDelete(DELETED_AT));
+        entityManager.clear();
+        Product deleted = productRepositoryPort.findAllByIdsIncludingHidden(List.of(101L)).getFirst();
+        assertThat(deleted).usingRecursiveComparison().ignoringFields("visible", "saleStatus", "deletedAt", "version").isEqualTo(original);
+        assertThat(deleted.version()).isEqualTo(original.version() + 1);
+        assertThat(entityManager.find(ProductEntity.class, 101L).getCreatedAt()).isEqualTo(createdAt);
+        assertThat(entityManager.find(SkuEntity.class, 1001L)).isNotNull();
+        assertThat(entityManager.find(StockEntity.class, 1001L).getAvailableQuantity()).isEqualTo(3);
+        assertThat(entityManager.find(ProductImageEntity.class, 4001L)).isNotNull();
+        assertThat(entityManager.find(ProductOptionGroupEntity.class, 3001L)).isNotNull();
+        assertThat(entityManager.find(ProductCategoryEntity.class, 9001L)).isNotNull();
+        assertThat(productRepositoryPort.findVisibleById(101L)).isEmpty();
+        assertThatThrownBy(() -> productRepositoryPort.update(original.softDelete(DELETED_AT)))
+            .isInstanceOfSatisfying(com.commercefoundry.domainlayer.product.application.exception.ProductException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.PRODUCT_MODIFICATION_CONFLICT));
+    }
+
+
     private static final String LONG_DESCRIPTION = "<p>" + "가".repeat(5_000) + "</p>";
     private static final Instant DELETED_AT = Instant.parse("2026-10-20T00:00:00Z");
 

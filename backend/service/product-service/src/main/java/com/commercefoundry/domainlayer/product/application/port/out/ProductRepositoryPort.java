@@ -45,6 +45,9 @@ public interface ProductRepositoryPort {
     /** 새 상품 INSERT (#9 E1). 아이디는 호출한 쪽이 발급했고 버전은 비어 있다(0 으로 저장된다). */
     void insert(Product product);
 
+    /** Merge and flush the existing header with its loaded version; conflicts are PRODUCT_010 (409). No child rows change. */
+    void update(Product product);
+
     /**
      * 지금까지 미룬 상품 등록 INSERT(상품 · 진열 카테고리 · 옵션 · SKU)를 내보낸다 — 제약 위반을 그 자리에서 업무 오류로 바꾸려고 재고 행보다 먼저 부른다.
      * 같은 상품 안 같은 조합 SKU({@code uk_sku_product_id_option_value_key})는 {@code PRODUCT_014} 이고, 그 밖의 위반은 그대로 올라간다(500 — 판정 누락).

@@ -386,6 +386,38 @@ class ProductAdminControllerTest {
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_036");
     }
 
+    @Test
+    void deleteAuthorizationAndSuccess() {
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.delete().uri(PATH + "/7").exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.delete().uri(PATH + "/7").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))
+            .exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(productAdminUseCase);
+        MvcTestResult result = mvc.delete().uri(PATH + "/7").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
+        assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
+        verify(productAdminUseCase).delete(7L);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0,PRODUCT_105", "-1,PRODUCT_105", "wrong,PRODUCT_198"})
+    void deleteInvalidId(String id, String code) {
+        var result = mvc.delete().uri(PATH + "/" + id).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"NOT_FOUND_PRODUCT,404,PRODUCT_001", "PRODUCT_MODIFICATION_CONFLICT,409,PRODUCT_010"})
+    void deleteErrorEnvelope(String error, int status, String code) {
+        org.mockito.Mockito.doThrow(new com.commercefoundry.domainlayer.product.application.exception.ProductException(
+            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.valueOf(error))).when(productAdminUseCase).delete(7L);
+        var result = mvc.delete().uri(PATH + "/7").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatus(status);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+    }
+
     private MvcTestResult adminPost(String body) {
         return mvc.post().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(body).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
     }

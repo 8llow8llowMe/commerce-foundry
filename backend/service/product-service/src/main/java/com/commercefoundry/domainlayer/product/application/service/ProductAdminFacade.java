@@ -12,6 +12,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminDetailProcessor;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductDeleteProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminQueryProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductDescriptionSanitizer;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor;
@@ -50,6 +51,14 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final ProductWriteProcessor productWriteProcessor;
     private final ProductDescriptionSanitizer productDescriptionSanitizer;
     private final ProductImageUploadProcessor productImageUploadProcessor;
+    private final ProductDeleteProcessor productDeleteProcessor;
+
+    /** Database-only deletion: read and versioned merge share one bounded transaction. */
+    @Override
+    @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
+    public void delete(long productId) {
+        productDeleteProcessor.delete(productId);
+    }
 
     /** 로컬 서명이라 DB · 외부 호출이 없다 — 트랜잭션을 걸지 않는다. */
     @Override
