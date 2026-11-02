@@ -13,7 +13,7 @@ frontend/AGENTS.md                     프론트엔드 초기 지침
 .agents/skills/<name>/SKILL.md          Codex·Cursor 공통 스킬 10개
 .agents/roles/<name>.md                도구 중립 역할 지침 11개
 .cursor/agents/<name>.md                Cursor 하위 에이전트 11개 (생성본)
-.codex/agents/<name>.toml               Codex 하위 에이전트 2개 — explorer·git_ops (생성본)
+.codex/agents/<name>.toml               Codex 하위 에이전트 11개 (생성본, 이름은 snake_case)
 .cursor/rules/commerce-foundry.mdc      Cursor의 항상 적용되는 프로젝트 진입 규칙
 scripts/sync-agent-skills.py            Claude 원본 → 공통 스킬·역할·하위 에이전트 동기화 및 검사
 ```
@@ -65,12 +65,13 @@ Cursor는 Claude 호환 경로도 탐색하므로 같은 이름의 항목이 함
 | 도구 | 위치 | 역할 | 모델 | 읽기 전용 |
 |------|------|------|------|-----------|
 | Cursor | `.cursor/agents/*.md` | 11개 전부 | `explorer`·`git-ops` 는 `claude-haiku-5-5`, 나머지 `inherit` | Claude 원본에 `Write`·`Edit` 없는 `tools` 가 있으면 `readonly: true` |
-| Codex | `.codex/agents/*.toml` | `explorer`(내장 explorer 대체)·`git_ops` | `gpt-6-luna` (effort `medium`·`low`) | 부모 세션 sandbox 를 상속 — 역할 본문이 편집을 금지한다 |
+| Codex | `.codex/agents/*.toml` | 11개 전부 (`-` → `_`) | 탐색·Git Ops `gpt-6-luna`, 설계 `gpt-6-astra`, 구현·검토 `gpt-6.1-sol` | 부모 세션 sandbox 를 상속 — 읽기 전용은 역할 본문으로 제한한다 |
 
 - Cursor 는 `.claude/agents/` 도 하위 에이전트로 읽는다. 같은 이름이면 `.cursor/agents/` 가 이기므로, 생성본이 Claude 모델명·`tools` 가
   섞인 정의를 덮어쓴다. 역할을 추가하면 `--write` 로 Cursor 정의도 같이 만든다.
 - Codex 는 프로젝트를 신뢰(trusted)한 경우에만 `.codex/` 를 읽는다. 에이전트 파일은 `sandbox_mode`·승인 정책을 바꿀 수 없다.
-- 모델 ID 는 스크립트의 `CODEX_FAST_MODEL`·`CURSOR_FAST_MODEL` 상수에만 둔다. 모델이 바뀌면 상수를 고치고 `--write` 한다.
+- 현재 CLI의 `codex agents`는 공유 데몬의 세션 탐색 명령이며 역할 정의 목록 명령은 아니다. 대화 중 `/subagents`는 실행 중·완료된 하위 스레드를 보여준다. 역할 인식은 새 세션에서 확인한다.
+- 모델 ID 는 스크립트의 `CODEX_FAST_MODEL`·`CODEX_WORK_MODEL`·`CODEX_DESIGN_MODEL`·`CURSOR_FAST_MODEL` 상수에 둔다. 모델이 바뀌면 상수를 고치고 `--write` 한다.
   Cursor 모델 ID 는 모델 피커·`~/.cursor/cli-config.json` 의 ID 형식(`claude-opus-5-5`)과 맞춘다.
 - Cursor 내장 Explore 하위 에이전트의 모델은 사용자 설정(`exploreSubagentModel`)이다. 저장소로는 바꿀 수 없다.
 
@@ -78,11 +79,12 @@ Cursor는 Claude 호환 경로도 탐색하므로 같은 이름의 항목이 함
 지원되지 않거나 위임이 허용되지 않으면 동일한 탐색 → 설계 → 구현 → 검증 → 검토를 메인 세션에서 순차 수행한다.
 실제 실행한 역할과 수행 방식을 결과에 기록한다.
 
-- 탐색·git/gh 반복 작업만 저비용 모델(`explorer`·`git-ops`)로 내리고, 설계·구현·검토는 현재 세션 모델(`inherit`)을 따른다.
+- 탐색·git/gh 반복 작업은 저비용 모델(`explorer`·`git_ops`)로 내리고, Codex 설계는 높은 추론 모델, 구현·검토는 작업용 모델로 실행한다. Cursor 설계·구현·검토는 현재 세션 모델(`inherit`)을 따른다.
   단일 명령은 위임하지 않는다 — 하위 에이전트는 새 컨텍스트로 시작하므로 짧은 일에는 띄우는 비용이 더 크다.
 - 검토·탐색·설계 역할은 소스·설정·문서를 편집하지 않는다. 실행 환경이 읽기 전용 도구 제한을 지원하면 함께 적용한다.
   역할 파일 자체가 도구 권한을 강제하는 것은 아니다. 검사 실행은 빌드 산출물을 만들 수 있다.
 - 독립적인 읽기 전용 조사·검토만 병렬로 수행한다. 쓰기 역할은 한 번에 하나만 수행한다.
+- Codex에서 `spawn_agent(agent_type="be_db_reviewer", ...)`처럼 생성본의 `name`을 지정한다. 독립 검토는 여러 번 호출해 병렬 실행하고, 구현은 파일 소유권을 지정해 순서대로 위임한다. 도구 목록에 역할이 없으면 새 세션에서 재확인한다.
 - 하위 역할은 재위임·커밋·푸시·이슈·PR을 수행하지 않는다. 메인 세션이 요청 범위 안에서 처리한다.
 - 메인 세션이 범위·계획·최종 결과를 판단하고 실제 검증 결과를 확인한다. 하위 역할의 통과 보고만으로 완료 처리하지 않는다.
 

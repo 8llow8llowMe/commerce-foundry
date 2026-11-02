@@ -8,7 +8,11 @@ description: "Commerce Foundry 개발 작업을 유형과 복잡도 T0–T3로 �
 ## Codex · Cursor 실행 방식
 
 - 역할 지침 원문은 저장소 루트 기준 `.agents/roles/<역할>.md`다. 네이티브 하위 에이전트로는
-  Cursor `.cursor/agents/`(전 역할)와 Codex `.codex/agents/`(`explorer`·`git_ops`)가 생성돼 있다.
+  Cursor `.cursor/agents/`와 Codex `.codex/agents/`에 11개 역할이 모두 생성돼 있다.
+- Codex에서는 `spawn_agent`에 `agent_type`으로 `.codex/agents/`의 snake_case 이름을 지정한다
+  (예: `be_executor`, `be_db_reviewer`). 도구 목록에 이름이 없으면 현재 세션에서 인식되지 않은 것이므로 새 세션에서 확인한다.
+- 서로 독립적인 읽기 전용 검토는 여러 `spawn_agent` 호출로 병렬 실행하고 `wait_agent`로 결과를 모은다.
+  구현 역할은 파일 소유권을 명시해 하나씩 실행한다.
 - 하위 에이전트를 사용할 수 있고 위임이 허용된 경우에만 역할 지침·범위·기대 출력을 전달해 위임한다.
   그 외에는 메인 세션이 동일한 역할을 순차 수행하고, 실제 수행 방식을 보고한다.
 - 읽기 전용 역할은 소스·설정·문서를 편집하지 않는다. 실행 도구의 권한 제한을 적용할 수 있으면 함께 적용한다.
@@ -28,7 +32,7 @@ description: "Commerce Foundry 개발 작업을 유형과 복잡도 T0–T3로 �
 | 분류·계획·범위 결정, 검증 실행·결과 확인, 완료 판단 | 메인 세션 |
 | 위치·호출 흐름을 모르는 탐색, 여러 파일 훑기 | `explorer` (저비용 모델) |
 | 이슈 시작·푸시·PR 생성·머지 후 정리 같은 git·gh 작업 | `git-ops` (Codex `git_ops`, 저비용 모델) |
-| 설계·구현·검토 | 해당 역할 (현재 세션 모델) |
+| 설계·구현·검토 | 해당 역할 (Codex 설계 `gpt-6-astra`, 구현·검토 `gpt-6.1-sol`; Cursor `inherit`) |
 
 - 저비용 모델은 `.codex/agents/`·`.cursor/agents/` 정의에 있다. 위임할 수 없으면 메인 세션이 같은 순서로 처리한다.
 - 위치를 아는 파일 몇 개 읽기, 단일 git 명령은 메인 세션이 직접 한다. 하위 에이전트는 새 컨텍스트로 시작하므로 띄우는 비용이 더 크다.

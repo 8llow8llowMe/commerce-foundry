@@ -8,7 +8,11 @@ description: "Commerce Foundry의 큰 백엔드 작업을 Leader·Executor·계�
 ## Codex · Cursor 실행 방식
 
 - 역할 지침 원문은 저장소 루트 기준 `.agents/roles/<역할>.md`다. 네이티브 하위 에이전트로는
-  Cursor `.cursor/agents/`(전 역할)와 Codex `.codex/agents/`(`explorer`·`git_ops`)가 생성돼 있다.
+  Cursor `.cursor/agents/`와 Codex `.codex/agents/`에 11개 역할이 모두 생성돼 있다.
+- Codex에서는 `spawn_agent`에 `agent_type`으로 `.codex/agents/`의 snake_case 이름을 지정한다
+  (예: `be_executor`, `be_db_reviewer`). 도구 목록에 이름이 없으면 현재 세션에서 인식되지 않은 것이므로 새 세션에서 확인한다.
+- 서로 독립적인 읽기 전용 검토는 여러 `spawn_agent` 호출로 병렬 실행하고 `wait_agent`로 결과를 모은다.
+  구현 역할은 파일 소유권을 명시해 하나씩 실행한다.
 - 하위 에이전트를 사용할 수 있고 위임이 허용된 경우에만 역할 지침·범위·기대 출력을 전달해 위임한다.
   그 외에는 메인 세션이 동일한 역할을 순차 수행하고, 실제 수행 방식을 보고한다.
 - 읽기 전용 역할은 소스·설정·문서를 편집하지 않는다. 실행 도구의 권한 제한을 적용할 수 있으면 함께 적용한다.
