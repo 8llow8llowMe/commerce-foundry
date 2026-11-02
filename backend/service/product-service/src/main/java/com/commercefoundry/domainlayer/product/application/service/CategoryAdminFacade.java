@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.service;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.category.application.service.processor.CategoryProcessor;
 import com.commercefoundry.domainlayer.category.domain.model.Category;
 import com.commercefoundry.domainlayer.category.domain.model.CategoryTree;
@@ -30,6 +31,9 @@ import org.springframework.transaction.annotation.Transactional;
  * 쿼리 타임아웃으로 넣어 잠금을 기다리는 {@code select ... for update} 도 그 안에 끊긴다(드라이버가 문장을 취소 — Spring {@link QueryTimeoutException}).
  * 상한이 이미 지난 뒤의 쿼리는 {@link TransactionTimedOutException} 이다. 둘 다 다른 어드민의 카테고리 쓰기와 겹친 것이라 409 · {@code PRODUCT_045} 로 바꾼다
  * (선례: auth {@code ShippingAddressWebFacade}).
+ *
+ * <p><b>감사 (#163)</b> — 쓰기는 성공 · 실패를 {@link ProductAdminAuditProcessor} 로 남긴다. 트랜잭션 안에서 불러도 줄은 커밋 결과로 남는다
+ * (롤백되면 성공으로 부른 것도 {@code FAILURE}). 업무 예외는 기록한 뒤 그대로 다시 던진다.
  */
 @Service
 @RequiredArgsConstructor
@@ -41,6 +45,7 @@ public class CategoryAdminFacade implements CategoryAdminUseCase {
     private final CategoryProcessor categoryProcessor;
     private final CategoryAdminProcessor categoryAdminProcessor;
     private final CategoryAdminPresenter categoryAdminPresenter;
+    private final ProductAdminAuditProcessor productAdminAuditProcessor;
 
     @Override
     @Transactional(readOnly = true)
@@ -50,32 +55,52 @@ public class CategoryAdminFacade implements CategoryAdminUseCase {
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public CategoryAdminResponse createCategory(CategoryUpsertCommand command) {
-        Category created = inCategoryQueue(tree -> {
-            categoryAdminProcessor.validateCreate(tree, command.parentId());
-            return categoryProcessor.create(command.parentId(), command.name(), command.displayOrder(), command.visible());
-        });
+    public CategoryAdminResponse createCategory(CategoryUpsertCommand command, long actorMemberId) {
+        Category created;
+        try {
+            created = inCategoryQueue(tree -> {
+                categoryAdminProcessor.validateCreate(tree, command.parentId());
+                return categoryProcessor.create(command.parentId(), command.name(), command.displayOrder(), command.visible());
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.categoryCreated(actorMemberId, null, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.categoryCreated(actorMemberId, created.id(), true);
         return categoryAdminPresenter.toResponse(categoryAdminProcessor.toInfo(created));
     }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public CategoryAdminResponse updateCategory(long categoryId, CategoryUpsertCommand command) {
-        Category updated = inCategoryQueue(tree -> {
-            categoryAdminProcessor.validateUpdate(tree, categoryId, command.parentId());
-            return categoryProcessor.update(categoryId, command.parentId(), command.name(), command.displayOrder(), command.visible());
-        });
+    public CategoryAdminResponse updateCategory(long categoryId, CategoryUpsertCommand command, long actorMemberId) {
+        Category updated;
+        try {
+            updated = inCategoryQueue(tree -> {
+                categoryAdminProcessor.validateUpdate(tree, categoryId, command.parentId());
+                return categoryProcessor.update(categoryId, command.parentId(), command.name(), command.displayOrder(), command.visible());
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.categoryUpdated(actorMemberId, categoryId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.categoryUpdated(actorMemberId, categoryId, true);
         return categoryAdminPresenter.toResponse(categoryAdminProcessor.toInfo(updated));
     }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public void deleteCategory(long categoryId) {
-        inCategoryQueue(tree -> {
-            categoryAdminProcessor.validateDelete(tree, categoryId);
-            categoryProcessor.delete(categoryId);
-            return null;
-        });
+    public void deleteCategory(long categoryId, long actorMemberId) {
+        try {
+            inCategoryQueue(tree -> {
+                categoryAdminProcessor.validateDelete(tree, categoryId);
+                categoryProcessor.delete(categoryId);
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.categoryDeleted(actorMemberId, categoryId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.categoryDeleted(actorMemberId, categoryId, true);
     }
 
     /**

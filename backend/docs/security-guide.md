@@ -1023,6 +1023,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
     이메일 · 한글 이름 · 서식 문자(U+202E · U+200B) · `;` 같은 값이 감사 줄로 새지 않게 한다.
   - **트랜잭션 안 호출은 커밋 결과로 기록한다.** 트랜잭션 동기화가 켜져 있으면 줄을 미뤘다가 `afterCompletion` 에서 **커밋됐고 `succeeded` 일 때만 `SUCCESS`**,
     롤백 · 결과 모름이면 `FAILURE` 로 남긴다 — Facade 가 메서드 단위 `@Transactional` 이어도 롤백된 쓰기가 `SUCCESS` 로 남지 않는다. 동기화가 꺼져 있으면 바로 쓴다.
+    실제 Facade 트랜잭션(H2)의 커밋 · 롤백 · 커밋 시점 실패(`UnexpectedRollbackException`) 경로는 product `CategoryAdminAuditIntegrationTest` 가 본다(#163 PR-B).
     예외는 auth 의 DB 싱크다 — `REQUIRES_NEW` 로 따로 저장하므로 지금처럼 트랜잭션 밖에서 부른다.
   - spring-tx 는 `compileOnly` 다. 감사를 남기는 서블릿 서비스는 persistence-core 로 이미 가진다. 리액티브 게이트웨이는 이 클래스를 부르지 않는다(불려도 spring-tx 가 없으면 바로 쓴다).
 - **선언 — `@AdminAudited(action = "...")` · `@AdminAuditExempt(reason = "...")`** (같은 패키지, METHOD · RUNTIME). 애노테이션은 줄을 쓰지 않는 선언이다.
@@ -1053,7 +1054,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 사용 중 — 선언 · `AdminAuditLog` 통일은 #163 PR-E |
 | order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` | 사용 중 — 선언 · 통일은 #163 PR-E |
 | operations | `JOB_CANCEL` | 사용 중 — 선언 · 통일은 #163 PR-E (알림 읽음 · 온보딩 투어는 면제) |
-| product | `CATEGORY_*` · `SIZE_CHART_TEMPLATE_*` · `PRODUCT_SIZE_CHART_REPLACE` | #163 PR-B |
+| product | `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
 | product | `DISPLAY_SECTION_*` · `LOOK_*` (전시 미리보기는 면제) | #163 PR-C |
 | product | `STOCK_ADJUST` · `SKU_COST_CREATE` · `PRODUCT_DRAFT_*` | #163 PR-C′ (이력 표 + 줄) |
 | delivery | `SHIPPING_POLICY_*_REPLACE` (국내 · 해외) | #163 PR-D (국내는 이력 표 + 줄, 해외는 행위자 수신) |
@@ -1067,6 +1068,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   - `REQUIRES_NEW` 안쪽 트랜잭션에서 `write` 하면 **안쪽 트랜잭션의 커밋 기준**으로 기록된다 — 바깥 트랜잭션이 나중에 롤백돼도 `SUCCESS` 로 남는다. 감사 줄은 업무 트랜잭션(바깥) 범위에서 쓴다.
   - 대기 목록 남용(새 핸들러를 목록에 넣어 통과시키기)은 리뷰로 막는다 — 가드는 이슈 표기(`#<번호>`)와 한 항목 한 핸들러만 강제한다.
   - GET 감사(`ORDER_VIEW` · `ORDER_SEARCH` · `MEMBER_SEARCH` 등 열람 감사)는 가드 대상 밖이다. 개인정보를 읽는 어드민 조회를 더할 때는 리뷰에서 감사 여부를 본다.
+  - Facade 본문에 들어가기 전 인프라 실패(트랜잭션 시작 실패 — DB 연결 불가 등)와 `Error` 는 줄을 남기지 않는다. 실패 기록은 본문의 `RuntimeException` 에만 걸린다 — 그런 장애는 오류 로그로 본다.
 
 ### 11-5. 이중 방어 확인
 

@@ -6,6 +6,8 @@ import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.request.Pr
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.ProductSizeChartAdminResponse;
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartValidationMessage;
 import com.commercefoundry.domainlayer.sizechart.application.port.in.SizeChartAdminUseCase;
+import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -15,6 +17,7 @@ import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -25,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 어드민 상품 사이즈표. 상품 상세 응답에 넣지 않고 부모당 0~1개인 선택 리소스로 둔다.
  * 숨긴 상품도 조회한다. 상품이 없으면 404(PRODUCT_064)이고, 상품은 있는데 표가 없으면 200 · dataBody null 이다.
- * 응답 값은 항상 저장 단위 그대로다.
+ * 응답 값은 항상 저장 단위 그대로다. 저장은 어드민 memberId 를 감사(#163, {@code PRODUCT_SIZE_CHART_REPLACE})에만 넘긴다.
  */
 @Tag(name = "[어드민] 상품 사이즈표", description = "상품에 붙인 사이즈표 조회 · 저장")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
@@ -54,11 +57,13 @@ public class ProductSizeChartAdminController {
             + "항목이 빠지거나 겹치거나 템플릿에 없으면 400(PRODUCT_066~068), 사이즈 이름 · 순서 중복은 400(PRODUCT_069 · PRODUCT_070)이다."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_SIZE_CHART_REPLACE")
     @PutMapping
     public ResponseEntity<Response<ProductSizeChartAdminResponse>> replaceSizeChart(
+        @AuthenticationPrincipal MemberPrincipal admin,
         @Parameter(description = "상품 아이디") @PathVariable @Positive(message = SizeChartValidationMessage.PRODUCT_ID_POSITIVE) long productId,
         @RequestBody @Valid ProductSizeChartUpsertRequest request
     ) {
-        return ResponseEntity.ok(Response.success(sizeChartAdminUseCase.replaceProductSizeChart(productId, request.toCommand())));
+        return ResponseEntity.ok(Response.success(sizeChartAdminUseCase.replaceProductSizeChart(productId, request.toCommand(), admin.memberId())));
     }
 }

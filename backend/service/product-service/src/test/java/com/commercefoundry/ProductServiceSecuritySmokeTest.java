@@ -4,15 +4,22 @@ import static com.commercefoundry.security.support.SecurityEnvelopeAssertions.as
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.commercefoundry.security.audit.AdminAuditLog;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.ResourceServerSmokeTestSupport;
+import com.commercefoundry.security.support.TestTokens;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
@@ -29,13 +36,6 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     @Override
     protected Map<String, String> auditDeclarationPending() {
         return Map.ofEntries(
-            Map.entry("CategoryAdminController#createCategory", "#163 PR-B"),
-            Map.entry("CategoryAdminController#updateCategory", "#163 PR-B"),
-            Map.entry("CategoryAdminController#deleteCategory", "#163 PR-B"),
-            Map.entry("SizeChartTemplateAdminController#createTemplate", "#163 PR-B"),
-            Map.entry("SizeChartTemplateAdminController#updateTemplate", "#163 PR-B"),
-            Map.entry("SizeChartTemplateAdminController#deleteTemplate", "#163 PR-B"),
-            Map.entry("ProductSizeChartAdminController#replaceSizeChart", "#163 PR-B"),
             Map.entry("DisplayAdminController#createSection", "#163 PR-C"),
             Map.entry("DisplayAdminController#updateSection", "#163 PR-C"),
             Map.entry("DisplayAdminController#deleteSection", "#163 PR-C"),
@@ -94,6 +94,35 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
         );
     }
 
+
+    @Test
+    @DisplayName("어드민 카테고리 생성은 CUSTOMER 403 이면 유스케이스에 닿지 않아 감사 줄이 없고, ADMIN 의 업무 실패(없는 상위 400 · PRODUCT_044)는 FAILURE 한 줄이다")
+    void categoryCreateAuditOnlyAfterAuthorization() throws Exception {
+        String body = "{\"parentId\": \"999999\", \"name\": \"상의\", \"displayOrder\": 0, \"visible\": true}";
+        ListAppender<ILoggingEvent> audit = new ListAppender<>();
+        Logger auditLogger = (Logger) LoggerFactory.getLogger(AdminAuditLog.LOGGER_NAME);
+        audit.start();
+        auditLogger.addAppender(audit);
+        try {
+            assertEnvelope(
+                perform(post("/api/v1/admin/categories").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))
+                    .contentType(MediaType.APPLICATION_JSON).content(body)),
+                SecurityErrorCode.FORBIDDEN
+            );
+            assertThat(audit.list).as("거부된 요청은 유스케이스(감사)에 닿지 않는다").noneMatch(event -> event.getFormattedMessage().contains("action=CATEGORY_CREATE"));
+
+            assertEnvelope(
+                perform(post("/api/v1/admin/categories").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))
+                    .contentType(MediaType.APPLICATION_JSON).content(body)),
+                400, "PRODUCT_044", "상위 카테고리가 존재하지 않습니다."
+            );
+            // 캡처가 실제로 줄을 잡는다는 증거 — 위 noneMatch 가 거짓 통과하지 않게 지우지 않는다
+            assertThat(audit.list).extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("action=CATEGORY_CREATE actorMemberId=" + TestTokens.MEMBER_ID + " target=- result=FAILURE");
+        } finally {
+            auditLogger.detachAppender(audit);
+        }
+    }
     @Test
     @DisplayName("ADMIN 은 실제 빈 구성(Facade · Processor · 어댑터 · H2)으로 룩 도메인까지 닿는다 — 목록 200, 없는 룩 404 · LOOK_001")
     void adminLooksReachDomain() throws Exception {
