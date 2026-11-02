@@ -36,13 +36,14 @@ spring:
     openfeign:
       client:
         config:
-          # auth-service 회원 표시 이름 조회 (GET /internal/v1/member-display-names, #322). 기본 read timeout 60초를 그대로 두지 않는다
+          # auth-service 회원 표시 이름 조회 (#322) · order-service 출고 반영 (#18). 기본 read timeout 60초를 그대로 두지 않는다.
+          # 출고 반영이 3초 안에 답하지 않으면 결과 모름(DELIVERY_018)으로 송장 행을 남긴다 — 같은 요청 재시도가 order 멱등으로 수렴한다
           # request-interceptors 는 여기(default)에 두지 않는다 — 외부 API 클라이언트에도 실린다 (security-guide.md §9-5)
           default:
             connect-timeout: 2000
             read-timeout: 3000
 
-# 서비스 간 호출 서킷 (coding-conventions.md §10). MemberDisplayNameInternalResponseSupport 가 인스턴스 이름으로 감싼다.
+# 서비스 간 호출 서킷 (coding-conventions.md §10). MemberDisplayNameInternalResponseSupport · OrderShipmentInternalResponseSupport 가 인스턴스 이름으로 감싼다.
 # spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다 — 서킷과 예외 변환을 한 곳(support)에서 한다
 resilience4j:
   circuitbreaker:
@@ -61,6 +62,9 @@ resilience4j:
     instances:
       # 배송비 정책 이력의 관리자 표시 이름 (GET /internal/v1/member-display-names, #322)
       auth-service:
+        base-config: default
+      # 송장 등록의 출고 반영 (POST /internal/v1/orders/{orderId}/shipment, #18). 4xx(업무 거절 ORDER_001 · 020 · 025 · 159~161)는 세지 않는다 — default 의 ignore-exceptions
+      order-service:
         base-config: default
 
 eureka:

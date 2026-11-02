@@ -557,12 +557,37 @@ outbox 이벤트로 하지 않는다 — 출고할 수 있는지를 운영자가
 
 출고 대기(`READY`) 상태는 두지 않는다 — 주문 `PREPARING` 이 곧 출고 대기이고, 송장 행은 등록할 때 생긴다. 송장 행은 주문 반영 여부 `order_synced` 를 갖는다.
 
-**송장 등록 (출고)** — 어드민 단건 · 일괄(1~50건, 건별 결과)
+**송장 등록 (출고)** — 어드민 단건 · 일괄(1~20건, 건별 결과, 요청 처리 마감 8초)
 
 1. delivery tx1 — 송장 INSERT(`order_synced=false`) + 배송 이력
 2. Feign `POST /internal/v1/orders/{orderId}/shipment {deliveryId, shippedAt}` — order 가 `Order#ship` 으로 `PREPARING → SHIPPING`, `shipped_at`, `SERVICE` 이력
    (사유 `SHIPMENT_REGISTERED`). 이미 출고된 뒤면 바꾸지 않고 200
 3. 200 이면 delivery tx2 — `order_synced=true`, 응답의 `memberId` · 배송 국가 스냅숏
+
+구현(#18 PR-B1) — `POST /api/v1/admin/deliveries`(계약 `api-design-guide.md` §2-19). `ShipmentAdminFacade`(트랜잭션 `NEVER`)가 주문마다
+`ShipmentRegisterProcessor#prepare`(tx1, `REQUIRES_NEW` 5초) → `OrderShipmentProcessor#ship`(트랜잭션 밖, `OrderShipmentCommandPort` · 서킷 `order-service`) →
+`#confirm`(tx2) 또는 `#discard`(대기 송장 · 이력 삭제, tx2)를 부른다. 출고 시각은 처음 등록 시각(서버 `Clock`, 마이크로초)이고 `deliveryId` 는 송장 아이디다.
+
+- **이미 송장이 있는 주문** — `order_synced=false` 면 이번 요청의 택배사 · 송장 번호로 바꿔 같은 송장 아이디로 다시 보낸다(재시도 경로). **출고 시각은 처음 값 그대로다** —
+  반영 전 송장은 결과 모름으로 남은 것이라 order 가 처음 값을 이미 커밋했을 수 있고, 그러면 order 의 `shipped_at` 이 정본이다(멱등 200 은 바꾸지 않는다).
+  처음 값이 30일을 넘긴 뒤의 재시도는, order 가 커밋하지 않았다면 400 `ORDER_159` → `DELIVERY_016` 으로 대기 송장이 지워지고 그다음 요청이 새 송장(새 아이디 · 그때 시각)으로 등록된다.
+  `true` 면 같은 택배사 · 송장 번호는 `ALREADY_REGISTERED`(order 를 부르지 않는다), 다르면 `DELIVERY_019` 다. 같은 주문의 동시 INSERT(유일 키) · 버전 충돌은 `DELIVERY_020` 이다.
+- **재시도는 이력을 더하지 않는다** — 상태가 그대로라 배송 이력의 등록자는 처음 등록한 관리자이고, 재시도한 관리자는 감사 줄(`SHIPMENT_REGISTER`)에 남는다.
+- **삭제는 버전 비교다** — tx1 뒤 다른 요청이 같은 송장을 바꿨으면 지우지 않는다(`deletePending` 0건) — 그 요청의 결과가 남는다.
+- **반영 완료 저장의 충돌은 지금 행에 맞춘다** — order 200 은 "주문은 출고됐다" 의 증거라 송장을 반영 전으로 남기지 않는다. `#confirm` 이 낙관적 락으로 실패하면(행 없음 포함)
+  `#reconcile`(새 트랜잭션)이 주문 아이디로 다시 읽어: 행 없음 → 이번 요청 값 · 같은 송장 아이디로 반영 완료 행 + 등록 이력 INSERT, 반영 전 행 → 그 행을 반영 완료로 표시(그 행의
+  송장 번호 유지), 반영된 행 → 그대로. 결과는 남은 송장이 이번 요청과 같은 택배사 · 송장 번호면 `REGISTERED`, 다른 요청의 송장이면 `DELIVERY_019`(주문은 출고됐고 이번 번호는 남지 않았다 —
+  다시 보내도 같은 결과라 "성공" 으로 감추지 않는다). 다시 만들 때 유일 키 경합이면 PostgreSQL 이 실패한 트랜잭션에서 다시 읽지 못하므로 새 트랜잭션으로 한 번 더 맞추고,
+  두 번 다 겹치면 `DELIVERY_020`(행 유지)이다. 남은 행이 다른 요청의 대기 송장이면 그 행의 출고 시각을 유지하므로 order 의 `shipped_at` 과 다를 수 있다 — 지운 뒤 새 등록과 늦은 order 200 이 겹치는 드문 경합이라 남은 위험으로 둔다.
+- **요청 처리 마감** — 게이트웨이 `response-timeout` 10초 안에 응답하도록 상한은 20건이고, 요청 시작 + 8초(서버 `Clock`)가 지나면 남은 건은 prepare 없이 `DELIVERY_022` 다
+  (`api-design-guide.md` §2-19).
+- **order 응답 번역** (`OrderShipmentInternalResponseSupport`, 아래 표) — 404 `ORDER_001` → `DELIVERY_014`, 409 `ORDER_020` → `DELIVERY_015`(order 메시지의 상태 이름을 짧은 한글일 때만 옮긴다),
+  400 `ORDER_159~161` → `DELIVERY_016`(이 셋은 행 삭제, 시계 차이 · 30일 지난 재시도라 error 로그), 409 `ORDER_025` → `DELIVERY_017`, 그 밖 → `DELIVERY_018`(행 유지).
+  상태와 코드가 함께 맞아야 한다 — 다른 상태로 온 같은 코드 · 본문 없는 4xx 는 결과 모름이다. 200 의 배송 국가를 읽지 못하면 범위(`shipping_scope`) 없이 반영 완료로 둔다.
+  회원 아이디 형식 등 **계약과 다른 200** 은 결과 모름(행 유지)이고 error 로그다 — 다시 보내도 같은 200 이 오므로 **코드를 고치기 전까지 미반영으로 남는다**.
+- 응답 `status` 가 `SHIPPING` 이 아니면(이미 배송 완료 · 구매 확정 · 반품) B1 은 경고 로그만 남긴다 — 송장 상태 맞추기는 B2 다.
+- 저장: `delivery.shipment`(`uk_shipment_order_id`, `idx_shipment_status_id` · `idx_shipment_order_synced_id`, check `ck_shipment_synced_member` · `ck_shipment_delivered_at_status`, `@Version`) ·
+  `delivery.shipment_status_history`(`idx_shipment_status_history_shipment_id_id`, 변경 주체 `ADMIN` · `SYSTEM`). 택배사는 `CarrierCode` enum 이다.
 
 **배송 완료** — `PATCH /api/v1/admin/deliveries/{deliveryId}/status {DELIVERED}` → Feign `POST /internal/v1/orders/{orderId}/delivery-completion {deliveryId, deliveredAt}`
 → order 가 `Order#deliver` 로 `SHIPPING → DELIVERED`, `delivered_at`, `SERVICE` 이력(사유 `DELIVERY_COMPLETED`). 이미 배송 완료된 뒤면 200. 실패 규칙은 아래 표와 같다.
@@ -573,6 +598,7 @@ outbox 이벤트로 하지 않는다 — 출고할 수 있는지를 운영자가
 | 400 `ORDER_159` · `160` · `161`(시각 범위 · 순서) | 보낸 시각이 틀렸다 — 등록이면 대기 송장 행을 지우고, 배송 완료면 상태를 바꾸지 않고 운영자에게 오류를 낸다. 같은 값으로 다시 보내도 같은 결과다 |
 | 404 `ORDER_001` · 409 `ORDER_020`(출고 · 완료할 수 없는 상태 — 취소 요청 · 취소 · 출고 전 등) | 등록이면 대기 송장 행을 지우고 운영자에게 오류를 낸다. 배송 완료면 상태를 바꾸지 않고 오류 |
 | 409 `ORDER_025`(버전 충돌) · 타임아웃 · 5xx · 서킷 오픈 | 행을 남긴다(`order_synced=false`). 같은 등록 · 완료 요청을 다시 보내면 order 멱등으로 수렴한다 |
+| 계약과 다른 200(회원 아이디 형식 · 다른 주문 아이디 · 상태 코드 모양 · 성공 봉투 아님) | 행을 남기고(`order_synced=false`) error 로그. 다시 보내도 같은 응답이라 **코드 수정 전까지 미반영으로 남는다** |
 
 - **409 는 `code` 로 나눈다** — 같은 409 라도 `ORDER_020` 은 행을 지우고 `ORDER_025` 는 행을 남긴다. HTTP 상태만 보고 처리하지 않는다.
 - **시각 검증** — order 는 주문을 실제로 바꿀 때만 `shippedAt` · `deliveredAt` 을 지금 시각(order 의 `Clock`)과 견준다. 판정 순서는 404 → 이미 반영(멱등 200) →

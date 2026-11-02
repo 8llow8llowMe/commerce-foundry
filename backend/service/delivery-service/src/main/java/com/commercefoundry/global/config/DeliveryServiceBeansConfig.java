@@ -6,6 +6,8 @@ import com.commercefoundry.persistence.config.SnowflakeConfigurer;
 import com.commercefoundry.security.internal.InternalTokenIssuerConfigurer;
 import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import java.time.Clock;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
@@ -20,4 +22,9 @@ import org.springframework.context.annotation.Import;
 })
 public class DeliveryServiceBeansConfig {
 
+    /** 송장 등록 시각(= order 에 보내는 출고 시각, #18). UTC 다 — 테스트는 고정 시계로 바꾼다. */
+    @Bean
+    public Clock deliveryClock() {
+        return Clock.systemUTC();
+    }
 }

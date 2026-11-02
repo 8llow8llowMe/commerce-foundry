@@ -7,7 +7,9 @@ import org.springframework.http.HttpStatus;
 /**
  * 배송 서비스 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link DeliveryValidationMessage} 에 둔다.
  *
- * <p>서비스 공용이다 — 배송비(이 컨텍스트) 다음에 들어올 송장 · 배송 추적 컨텍스트도 {@code DELIVERY_} 대역을 이어서 쓴다.
+ * <p>검증 예외 폴백(100 · 198 · 199)만 서비스 공용이다. 업무 코드는 컨텍스트별 enum 이 {@code DELIVERY_} 번호를 나눠 쓴다 — 001~013 은 배송비(이 enum),
+ * 014~ 는 송장({@code ShipmentErrorCode}). 검증 메시지도 101~139 는 {@link DeliveryValidationMessage}, 140~ 는 {@code ShipmentValidationMessage} 다.
+ * 번호가 겹치지 않는지는 {@code DeliveryCodeUniquenessTest} 가 본다.
  */
 @Getter
 @RequiredArgsConstructor

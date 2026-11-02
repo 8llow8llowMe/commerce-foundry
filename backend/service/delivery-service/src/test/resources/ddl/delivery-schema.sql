@@ -1,6 +1,108 @@
 
     create schema delivery;
 
+    create table delivery.shipment (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        carrier varchar(20) not null check ((carrier in ('CJ_LOGISTICS','KOREA_POST','LOTTE','HANJIN','LOGEN','EMS','DHL','FEDEX','UPS','OTHER'))),
+        delivered_at timestamp(6) with time zone,
+        member_id bigint,
+        order_id bigint not null,
+        order_synced boolean not null,
+        shipped_at timestamp(6) with time zone not null,
+        shipping_scope varchar(20) check ((shipping_scope in ('DOMESTIC','INTERNATIONAL'))),
+        status varchar(20) not null check ((status in ('SHIPPED','IN_TRANSIT','DELIVERED'))),
+        tracking_number varchar(50) not null,
+        version bigint not null,
+        primary key (id),
+        constraint uk_shipment_order_id unique (order_id),
+        constraint ck_shipment_synced_member check (order_synced = false or member_id is not null),
+        constraint ck_shipment_delivered_at_status check ((status = 'DELIVERED' and delivered_at is not null) or (status <> 'DELIVERED' and delivered_at is null))
+    );
+
+    comment on table delivery.shipment is
+        '송장(배송) — 주문당 1건';
+
+    comment on column delivery.shipment.id is
+        '송장(배송) 아이디 (Snowflake) — order 에 deliveryId 로 보낸다';
+
+    comment on column delivery.shipment.created_at is
+        '생성 시각';
+
+    comment on column delivery.shipment.updated_at is
+        '수정 시각';
+
+    comment on column delivery.shipment.carrier is
+        '택배사 코드 (CarrierCode)';
+
+    comment on column delivery.shipment.delivered_at is
+        '배송 완료 시각. 배송 완료 상태에만 있다';
+
+    comment on column delivery.shipment.member_id is
+        '주문한 회원 아이디 (외부 FK: auth-service member.id) — 출고 반영 응답의 스냅숏. 반영 전에는 null';
+
+    comment on column delivery.shipment.order_id is
+        '주문 아이디 (외부 FK: order-service orders.id). 주문당 1건';
+
+    comment on column delivery.shipment.order_synced is
+        '주문 상태 반영 여부. 반영된 송장은 지우거나 다른 송장으로 바꾸지 않는다';
+
+    comment on column delivery.shipment.shipped_at is
+        '출고 시각 — order 의 shipped_at 과 같은 값';
+
+    comment on column delivery.shipment.shipping_scope is
+        '배송 범위 (DOMESTIC · INTERNATIONAL) — 출고 반영 응답의 배송 국가로 정한다. 반영 전이거나 국가를 읽지 못했으면 null';
+
+    comment on column delivery.shipment.status is
+        '배송 상태 (SHIPPED · IN_TRANSIT · DELIVERED)';
+
+    comment on column delivery.shipment.tracking_number is
+        '송장 번호 (영문 · 숫자 · 하이픈)';
+
+    comment on column delivery.shipment.version is
+        '낙관적 락 버전';
+
+    create table delivery.shipment_status_history (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        changed_by varchar(20) not null check ((changed_by in ('ADMIN','SYSTEM'))),
+        changed_by_id bigint,
+        from_status varchar(20) check ((from_status in ('SHIPPED','IN_TRANSIT','DELIVERED'))),
+        shipment_id bigint not null,
+        to_status varchar(20) not null check ((to_status in ('SHIPPED','IN_TRANSIT','DELIVERED'))),
+        primary key (id),
+        constraint ck_shipment_status_history_admin_actor check (changed_by <> 'ADMIN' or changed_by_id is not null)
+    );
+
+    comment on table delivery.shipment_status_history is
+        '배송 상태 이력 (append-only)';
+
+    comment on column delivery.shipment_status_history.id is
+        '배송 상태 이력 아이디 (Snowflake)';
+
+    comment on column delivery.shipment_status_history.created_at is
+        '생성 시각';
+
+    comment on column delivery.shipment_status_history.updated_at is
+        '수정 시각';
+
+    comment on column delivery.shipment_status_history.changed_by is
+        '변경 주체 (ADMIN · SYSTEM)';
+
+    comment on column delivery.shipment_status_history.changed_by_id is
+        '바꾼 관리자 회원 아이디 (외부 FK: auth-service member.id) — access 토큰의 memberId. 자동 처리면 null';
+
+    comment on column delivery.shipment_status_history.from_status is
+        '바뀌기 전 배송 상태. 등록 줄이면 null';
+
+    comment on column delivery.shipment_status_history.shipment_id is
+        '송장 아이디 (FK: shipment.id)';
+
+    comment on column delivery.shipment_status_history.to_status is
+        '바뀐 배송 상태';
+
     create table delivery.shipping_policy (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -335,6 +437,15 @@
 
     comment on column delivery.shipping_zone_rate.shipping_zone_id is
         '국가 그룹 아이디 (FK: shipping_zone.id)';
+
+    create index idx_shipment_status_id 
+       on delivery.shipment (status, id);
+
+    create index idx_shipment_order_synced_id 
+       on delivery.shipment (order_synced, id);
+
+    create index idx_shipment_status_history_shipment_id_id 
+       on delivery.shipment_status_history (shipment_id, id);
 
     create index idx_shipping_policy_history_scope_id 
        on delivery.shipping_policy_history (scope, id);

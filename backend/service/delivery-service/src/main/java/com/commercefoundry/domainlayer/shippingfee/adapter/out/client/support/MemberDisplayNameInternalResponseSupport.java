@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.out.client.feign.dto.
 import com.commercefoundry.domainlayer.shippingfee.adapter.out.client.feign.dto.MemberDisplayNameInternalResponse;
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryErrorCode;
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryException;
+import com.commercefoundry.global.support.RemoteResultCodes;
 import feign.FeignException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -12,7 +13,6 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -31,9 +31,6 @@ import org.springframework.stereotype.Component;
 public class MemberDisplayNameInternalResponseSupport {
 
     static final String CIRCUIT_BREAKER = "auth-service";
-
-    private static final Pattern RESULT_CODE_SHAPE = Pattern.compile("[A-Z][A-Z0-9_]*_[0-9]{3}");
-    private static final int MAX_LOGGED_LENGTH = 40;
 
     private final CircuitBreaker circuitBreaker;
 
@@ -65,7 +62,7 @@ public class MemberDisplayNameInternalResponseSupport {
         if (response == null || response.dataHeader() == null || !response.dataHeader().success()
             || response.dataBody() == null || response.dataBody().members() == null) {
             log.error("auth-service member display name response is not a success envelope. resultCode={}",
-                response == null || response.dataHeader() == null ? null : loggable(response.dataHeader().resultCode()));
+                response == null || response.dataHeader() == null ? null : RemoteResultCodes.loggable(response.dataHeader().resultCode()));
             throw new DeliveryException(DeliveryErrorCode.AUTH_SERVICE_UNAVAILABLE);
         }
         try {
@@ -97,13 +94,5 @@ public class MemberDisplayNameInternalResponseSupport {
 
     private static String blankToNull(String displayName) {
         return displayName == null || displayName.isBlank() ? null : displayName;
-    }
-
-    /** 코드 모양일 때만 그대로 남긴다. 원격의 임의 문자열을 로그에 넣지 않는다. */
-    private static String loggable(String resultCode) {
-        if (resultCode == null) {
-            return null;
-        }
-        return resultCode.length() <= MAX_LOGGED_LENGTH && RESULT_CODE_SHAPE.matcher(resultCode).matches() ? resultCode : "<unrecognized>";
     }
 }
