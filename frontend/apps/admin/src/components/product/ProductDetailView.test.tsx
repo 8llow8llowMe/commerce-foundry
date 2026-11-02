@@ -1,7 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { adminProduct } from '@/lib/product/test-fixtures';
 import { ProductDetailView } from './ProductDetailView';
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 
 const render = (product = adminProduct()) =>
   renderToStaticMarkup(<ProductDetailView product={product} categories={null} />);
@@ -96,5 +98,13 @@ describe('ProductDetailView', () => {
     const shown = render(adminProduct({ visible: true }));
     expect(shown).toContain('href="/stocks/4611686018427387904"');
     expect(shown).toContain('href="/sku-costs/4611686018427387904"');
+  });
+
+  it('맨 아래에 되돌릴 수 없다는 안내와 판매 중지 · 삭제 버튼을 둔다(#29) — 확인 단계는 누른 뒤에 연다', () => {
+    const html = render();
+    expect(html).toContain('판매 중지 · 삭제');
+    expect(html).toContain('되돌릴 수 없습니다.');
+    expect(html).toContain('판매 중지 · 삭제…');
+    expect(html).not.toContain('판매 중지하고 삭제<');
   });
 });

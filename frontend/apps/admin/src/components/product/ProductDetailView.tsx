@@ -13,11 +13,12 @@ import {
   VIDEO_MEDIA,
   type AdminProductDetail,
 } from '@/lib/product/detail';
+import { ProductDeleteAction } from './ProductDeleteAction';
 
 /**
- * 어드민 상품 상세(읽기 전용, #418). 서버 컴포넌트다 — 상세 설명 HTML 을 여기서 정제한다.
+ * 어드민 상품 상세(#418). 서버 컴포넌트다 — 상세 설명 HTML 을 여기서 정제한다.
  * 저장된 값을 표시만 한다: 금액은 `formatMoney`, 상태는 서버 `name`(설명은 `title`). 아이디 · 코드 원문은 보이지 않는다(#305).
- * 은퇴 옵션 · 판매 종료 SKU 도 그대로 보이되 표시를 단다.
+ * 은퇴 옵션 · 판매 종료 SKU 도 그대로 보이되 표시를 단다. 쓰기는 맨 아래 판매 중지 · 삭제(#29) 하나다.
  */
 export function ProductDetailView({
   product,
@@ -39,7 +40,9 @@ export function ProductDetailView({
           ← 상품 목록
         </Link>
         <h1 className="text-xl font-semibold">{product.name}</h1>
-        <p className="text-sm text-muted-fg">읽기 전용입니다. 상품 수정은 준비 중입니다.</p>
+        <p className="text-sm text-muted-fg">
+          상품 수정은 준비 중입니다. 판매 중지 · 삭제는 맨 아래에 있습니다.
+        </p>
         <nav aria-label="상품 관련 화면" className="flex gap-3 text-sm">
           {/* 재고 · 원가 화면은 아직 고객 상세에서 SKU 를 읽어 노출 상품만 열린다(목록과 같은 규칙) */}
           {product.visible && (
@@ -321,6 +324,8 @@ export function ProductDetailView({
           <Empty>상세 설명이 없습니다.</Empty>
         )}
       </Section>
+
+      <ProductDeleteAction productId={product.productId} productName={product.name} />
     </div>
   );
 }

@@ -13,7 +13,7 @@ import { serverFetch } from '@/lib/server-api';
 export const metadata: Metadata = { title: '상품 상세' };
 
 /**
- * 어드민 상품 상세(읽기 전용, #418). 숨긴 상품도 보인다. 수정은 BE #9 의 수정 API 뒤에 이 화면에 얹는다.
+ * 어드민 상품 상세(#418). 숨긴 상품도 보인다. 쓰기는 맨 아래 판매 중지 · 삭제(#29) 하나고, 수정은 BE #9 의 수정 API 뒤에 이 화면에 얹는다.
  * 서버 컴포넌트에서 읽는다 — 상세 설명 HTML 을 서버에서 정제해 넣어야 해서다(`frontend/docs/conventions.md` §2).
  * 등록 직후 서버가 상세 설명을 정리했으면(`?sanitized=1`, #29) 한 번 알린다.
  */
