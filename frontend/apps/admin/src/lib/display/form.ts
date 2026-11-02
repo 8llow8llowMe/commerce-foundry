@@ -5,11 +5,15 @@ import {
   isoToLocalInput,
   localInputToIso,
   normalizeText,
+  titleWidth,
 } from './text';
 import {
+  CAPTION_TYPES,
   ITEM_RANGES,
   LIMITS,
   MEDIA_URL_TYPES,
+  MOBILE_MEDIA_TYPES,
+  TITLE_WIDTH,
   type CodeName,
   type DisplayElementAdmin,
   type DisplayItemRequest,
@@ -35,15 +39,19 @@ export const FIELDS_BY_TYPE: Record<SectionTypeCode, readonly TextFieldKey[]> = 
 };
 
 /**
- * 미디어 한 개. 대부분의 유형은 주소를 그대로 다시 보내고 대체 텍스트만 고친다(교체는 업로드 기능 #9 뒤).
- * 주소로 넣는 유형(`MEDIA_URL_TYPES`, LOOK)은 이미지 주소(`url`)도 고친다 — 바꾸면 모바일 주소는 버린다(예전 사진의 것이다).
+ * 미디어 한 개. 이미지는 주소(`url`)와 대체 텍스트를 고친다(`MEDIA_URL_TYPES`). 영상은 주소를 바꾸지 않고 빼기만 한다.
+ * PC · 모바일을 따로 넣는 유형(`MOBILE_MEDIA_TYPES`, HERO)은 모바일 주소 칸도 고친다. 그 밖의 유형은 PC 주소를 바꾸면
+ * 모바일 주소를 버린다(예전 사진의 것이다).
  */
 export type MediaFormItem = {
   media: DisplayMediaAdmin;
   /** 이미지 주소 칸(글자 그대로). 처음에는 `media.pcUrl` 이다 */
   url: string;
+  /** 모바일 이미지 주소 칸 — 비우면 메인이 PC 사진을 쓴다. 처음에는 `media.mobileUrl` 이다 */
+  mobileUrl: string;
   altText: string;
-  caption: string | null;
+  /** 설명 문구 칸 — 설명을 쓰는 유형(`CAPTION_TYPES`)만 보이고, 그 밖은 저장된 값을 그대로 다시 보낸다 */
+  caption: string;
 };
 
 /** 주소로 넣는 새 이미지 — 주소 칸이 빈 채로 시작한다 */
@@ -58,12 +66,15 @@ export function newImageItem(): MediaFormItem {
       altText: null,
     },
     url: '',
+    mobileUrl: '',
     altText: '',
-    caption: null,
+    caption: '',
   };
 }
 
 export const isMediaUrlType = (type: SectionTypeCode) => MEDIA_URL_TYPES.includes(type);
+export const hasMobileMedia = (type: SectionTypeCode) => MOBILE_MEDIA_TYPES.includes(type);
+export const hasMediaCaption = (type: SectionTypeCode) => CAPTION_TYPES.includes(type);
 
 /** 고른 상품. availability 는 이번에 검색해서 더한 상품만 안다(섹션 응답에는 노출 여부만 있다) */
 export type ProductFormItem = {
@@ -96,7 +107,7 @@ export const TEXT_LABELS: Record<TextFieldKey, string> = {
 };
 
 /** 길이 안내 — 칸마다 조사가 달라 문장을 통째로 둔다 */
-export const TOO_LONG: Record<TextFieldKey | 'altText' | 'mediaUrl', string> = {
+export const TOO_LONG: Record<TextFieldKey | 'altText' | 'mediaUrl' | 'caption', string> = {
   title: `제목은 ${LIMITS.title}자 이하로 써 주세요.`,
   subtitle: `부제는 ${LIMITS.subtitle}자 이하로 써 주세요.`,
   body: `본문은 ${LIMITS.body}자 이하로 써 주세요.`,
@@ -104,7 +115,13 @@ export const TOO_LONG: Record<TextFieldKey | 'altText' | 'mediaUrl', string> = {
   linkLabel: `링크 버튼 문구는 ${LIMITS.linkLabel}자 이하로 써 주세요.`,
   altText: `대체 텍스트는 ${LIMITS.altText}자 이하로 써 주세요.`,
   mediaUrl: `이미지 주소는 ${LIMITS.mediaUrl}자 이하로 넣어 주세요.`,
+  caption: `설명은 ${LIMITS.caption}자 이하로 써 주세요.`,
 };
+
+/** 제목 너비 한도 안내(2줄 규칙) — 한도는 유형마다 다르다(`TITLE_WIDTH`) */
+export function titleTooWide(type: SectionTypeCode): string {
+  return `제목이 길어 메인에서 2줄을 넘을 수 있습니다. 한글 기준 ${TITLE_WIDTH[type]}자(영문 · 숫자 · 공백은 반 글자) 이내로 줄여 주세요.`;
+}
 
 export const SINGLE_LINE_ONLY = '줄바꿈 · 탭 같은 특수 문자는 쓸 수 없습니다.';
 export const BODY_CHARACTER = '본문에는 줄바꿈과 탭 외의 특수 문자를 쓸 수 없습니다.';
@@ -147,8 +164,9 @@ export function editForm(section: DisplaySectionAdmin, type: SectionTypeCode): S
       media.push({
         media: item.media,
         url: item.media.pcUrl,
+        mobileUrl: item.media.mobileUrl ?? '',
         altText: item.media.altText ?? '',
-        caption: item.caption,
+        caption: item.caption ?? '',
       });
     } else if (item.product) {
       products.push({
@@ -217,7 +235,9 @@ function periodValue(text: string, loaded: string | null): string | null | undef
  * - 문구는 앞뒤 공백을 빼고 비면 null 이다. 길이는 UTF-16 코드 유닛(BE `@Size` 와 같다).
  * - 보이는 칸만 검사한다 — 보이지 않는 칸은 저장된 값을 그대로 다시 보낸다(서버가 이미 받은 값이다).
  * - 아이템 순서는 미디어 → 상품이다. LOOK 만 두 종류를 받는데, 메인은 미디어 · 상품을 따로 읽으므로 섞인 저장 순서를 이 순서로 바꿔도 같다.
- * - 주소로 넣는 유형(LOOK)은 이미지 수(BE 하한 · 상한)와 주소(필수 · 500자 · 공백 금지)를 본다. 저장소 주소인지는 서버가 본다(`PRODUCT_054`).
+ * - 제목은 BE 200자에 더해 유형별 너비 한도(`TITLE_WIDTH`, 2줄 규칙)를 넘으면 막는다 — 서버는 보지 않는 화면 규칙이다(#71).
+ * - 미디어는 이미지 수(BE 하한 · 상한)와 주소(필수 · 500자 · 공백 금지), 모바일 주소(선택, 같은 규칙), 설명(200자 · 한 줄)을 본다.
+ *   저장소 주소인지는 서버가 본다(`PRODUCT_054`).
  */
 export function sectionRequest(form: SectionForm): BuildResult {
   const errors: FormErrors = {};
@@ -228,6 +248,9 @@ export function sectionRequest(form: SectionForm): BuildResult {
     text[key] = value;
     if (!shown.has(key) || value === null) continue;
     if (value.length > LIMITS[key]) push(errors, key, TOO_LONG[key]);
+    else if (key === 'title' && titleWidth(value) > TITLE_WIDTH[form.sectionType]) {
+      push(errors, key, titleTooWide(form.sectionType));
+    }
     if (key === 'linkUrl') {
       if (!isAllowedLinkUrl(value)) push(errors, key, LINK_RULE);
     } else if (hasRejectedCharacter(value, key === 'body')) {
@@ -252,21 +275,32 @@ export function sectionRequest(form: SectionForm): BuildResult {
       push(errors, 'media', mediaCountMessage(form.sectionType));
     }
   }
+  const mobileEditable = hasMobileMedia(form.sectionType);
+  const captionEditable = hasMediaCaption(form.sectionType);
+  const checkUrl = (value: string, key: string) => {
+    if (value.length > LIMITS.mediaUrl) push(errors, key, TOO_LONG.mediaUrl);
+    if (MEDIA_URL_REJECTED.test(value)) push(errors, key, MEDIA_URL_FORMAT);
+  };
   form.media.forEach((item, index) => {
-    if (urlEditable) {
+    const isImage = item.media.mediaType.code === 'IMAGE';
+    if (urlEditable && isImage) {
       const url = normalizeText(item.url);
       const key = `media.${index}.url`;
       if (url === null) push(errors, key, MEDIA_URL_REQUIRED);
-      else {
-        if (url.length > LIMITS.mediaUrl) push(errors, key, TOO_LONG.mediaUrl);
-        if (MEDIA_URL_REJECTED.test(url)) push(errors, key, MEDIA_URL_FORMAT);
-      }
+      else checkUrl(url, key);
+      const mobileUrl = mobileEditable ? normalizeText(item.mobileUrl) : null;
+      if (mobileUrl !== null) checkUrl(mobileUrl, `media.${index}.mobileUrl`);
+    }
+    const caption = captionEditable ? normalizeText(item.caption) : null;
+    if (caption !== null) {
+      const key = `media.${index}.caption`;
+      if (caption.length > LIMITS.caption) push(errors, key, TOO_LONG.caption);
+      if (hasRejectedCharacter(caption)) push(errors, key, SINGLE_LINE_ONLY);
     }
     const alt = normalizeText(item.altText);
     if (alt === null) {
       // 이미지는 대체 텍스트가 있어야 저장한다(#71 — BE 는 선택값). 영상은 메인이 낭독하지 않는다(aria-hidden)
-      if (item.media.mediaType.code === 'IMAGE')
-        push(errors, `media.${index}.altText`, ALT_TEXT_REQUIRED);
+      if (isImage) push(errors, `media.${index}.altText`, ALT_TEXT_REQUIRED);
       return;
     }
     if (alt.length > LIMITS.altText) push(errors, `media.${index}.altText`, TOO_LONG.altText);
@@ -291,7 +325,7 @@ export function sectionRequest(form: SectionForm): BuildResult {
       startAt: startAt ?? null,
       endAt: endAt ?? null,
       items: [
-        ...form.media.map(formMediaRequest),
+        ...form.media.map((item) => formMediaRequest(item, form.sectionType)),
         ...form.products.map((item): DisplayItemRequest => ({
           itemType: 'PRODUCT',
           productId: item.productId,
@@ -302,15 +336,22 @@ export function sectionRequest(form: SectionForm): BuildResult {
   };
 }
 
-/** 폼의 미디어 → 요청. 주소를 바꿨으면 모바일 주소는 버린다(예전 사진의 것이다) */
-function formMediaRequest(item: MediaFormItem): DisplayItemRequest {
-  const url = normalizeText(item.url) ?? '';
-  const changed = url !== item.media.pcUrl;
-  return mediaRequest(
-    changed ? { ...item.media, pcUrl: url, mobileUrl: null } : item.media,
-    normalizeText(item.altText),
-    item.caption,
-  );
+/**
+ * 폼의 미디어 → 요청. 영상은 주소를 그대로 보낸다. 이미지는 고친 주소를 싣는다 — 모바일 칸이 있는 유형은 그 칸 값을,
+ * 없는 유형은 PC 주소를 바꿨으면 모바일 주소를 버린다(예전 사진의 것이다).
+ */
+function formMediaRequest(item: MediaFormItem, type: SectionTypeCode): DisplayItemRequest {
+  let media = item.media;
+  if (media.mediaType.code === 'IMAGE') {
+    const url = normalizeText(item.url) ?? '';
+    const mobileUrl = hasMobileMedia(type)
+      ? normalizeText(item.mobileUrl)
+      : url === media.pcUrl
+        ? media.mobileUrl
+        : null;
+    media = { ...media, pcUrl: url, mobileUrl };
+  }
+  return mediaRequest(media, normalizeText(item.altText), normalizeText(item.caption));
 }
 
 /**
@@ -329,7 +370,9 @@ export function draftRequest(form: SectionForm): DisplaySectionRequest {
     startAt: periodValue(form.startAt, form.loadedPeriod.startAt) ?? null,
     endAt: periodValue(form.endAt, form.loadedPeriod.endAt) ?? null,
     items: [
-      ...form.media.filter((item) => normalizeText(item.url) !== null).map(formMediaRequest),
+      ...form.media
+        .filter((item) => normalizeText(item.url) !== null)
+        .map((item) => formMediaRequest(item, form.sectionType)),
       ...form.products.map((item): DisplayItemRequest => ({
         itemType: 'PRODUCT',
         productId: item.productId,

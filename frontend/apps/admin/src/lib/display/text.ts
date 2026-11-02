@@ -7,6 +7,20 @@ export function normalizeText(value: string): string | null {
   return stripped === '' ? null : stripped;
 }
 
+// 한 글자 폭을 다 쓰는 글자 — 한글 · 한자 · 가나 · 전각 기호(East Asian Wide · Fullwidth 의 흔한 범위)
+const WIDE =
+  /[\p{Script=Hangul}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}　-〿！-｠￠-￦]/u;
+
+/**
+ * 제목 너비(#71 2줄 규칙) — 앞뒤 공백을 뺀 글자를 한글 등 넓은 글자 1, 그 밖(영문 · 숫자 · 공백 · 기호) 0.5 로 센다.
+ * 글꼴마다 실제 폭은 조금 다르다 — 줄 수를 정확히 재는 것이 아니라 2줄을 넘기기 쉬운 제목을 미리 막는 기준이다.
+ */
+export function titleWidth(value: string): number {
+  let width = 0;
+  for (const char of value.trim()) width += WIDE.test(char) ? 1 : 0.5;
+  return width;
+}
+
 // 제어 문자(\p{Cc})와 짝 없는 서로게이트(\p{Cs})는 거절한다. 본문만 개행(CR · LF) · 탭을 허용한다 — BE `DisplayTextValidator`
 const SINGLE_LINE_REJECTED = /[\p{Cc}\p{Cs}]/u;
 const MULTILINE_REJECTED = /(?![\n\r\t])[\p{Cc}\p{Cs}]/u;

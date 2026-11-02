@@ -18,6 +18,7 @@ import {
   sectionRequest,
   sectionWarnings,
   SINGLE_LINE_ONLY,
+  titleTooWide,
   TOO_LONG,
   unchangedRequest,
   type SectionForm,
@@ -70,7 +71,7 @@ describe('editForm', () => {
       'HERO',
     );
     expect(form.media.map((item) => [item.altText, item.caption])).toEqual([
-      ['샘플 사진', null],
+      ['샘플 사진', ''],
       ['', '설명'],
     ]);
   });
@@ -187,9 +188,60 @@ describe('sectionRequest — 룩(미디어를 주소로 넣는다, #419)', () =>
     expect(unchangedRequest(hero, { visible: false }).items).toHaveLength(1);
   });
 
-  it('다른 유형은 주소 칸을 검사하지 않는다(대체 텍스트만 고친다)', () => {
+  it('히어로 · 스토리 · 디테일도 주소로 넣는다 — 새 섹션은 미디어 하한만큼 빈 칸으로 시작한다', () => {
+    expect(createForm('HERO').media).toEqual([newImageItem()]);
+    expect(createForm('DETAIL').media).toEqual([newImageItem()]);
+    expect(createForm('STORY').media).toEqual([]);
+    expect(errorsOf(createForm('DETAIL'))).toEqual({
+      'media.0.url': [MEDIA_URL_REQUIRED],
+      'media.0.altText': [ALT_TEXT_REQUIRED],
+    });
+  });
+
+  it('히어로는 모바일 주소를 따로 고친다 — 비우면 null(PC 사진), 공백 · 500자 규칙은 같다', () => {
+    const form = editForm(
+      section('HERO', {
+        items: [mediaItem({ mobileUrl: 'https://cdn.example.test/displays/a-mo.jpg' })],
+      }),
+      'HERO',
+    );
+    expect(form.media[0]!.mobileUrl).toBe('https://cdn.example.test/displays/a-mo.jpg');
+    // PC 주소를 바꿔도 모바일 칸 값을 그대로 보낸다(룩과 다르다)
+    form.media[0]!.url = 'https://cdn.example.test/displays/new-pc.jpg';
+    expect(okRequest(form).items[0]).toMatchObject({
+      media: {
+        pcUrl: 'https://cdn.example.test/displays/new-pc.jpg',
+        mobileUrl: 'https://cdn.example.test/displays/a-mo.jpg',
+      },
+    });
+    form.media[0]!.mobileUrl = '  ';
+    expect(okRequest(form).items[0]).toMatchObject({ media: { mobileUrl: null } });
+    form.media[0]!.mobileUrl = 'https://cdn.example.test/a b.jpg';
+    expect(errorsOf(form)).toEqual({ 'media.0.mobileUrl': [MEDIA_URL_FORMAT] });
+  });
+
+  it('룩 · 디테일은 모바일 칸을 보지 않는다', () => {
     const form = editForm(section('DETAIL', { items: [mediaItem()] }), 'DETAIL');
-    expect(okRequest(form).items).toHaveLength(1);
+    form.media[0]!.mobileUrl = 'https://cdn.example.test/a b.jpg';
+    expect(okRequest(form).items[0]).toMatchObject({ media: { mobileUrl: null } });
+  });
+
+  it('디테일은 클로즈업마다 설명(caption)을 고친다 — 200자 · 한 줄, 비우면 null', () => {
+    const form = editForm(section('DETAIL', { items: [mediaItem({}, '예전 설명')] }), 'DETAIL');
+    expect(form.media[0]!.caption).toBe('예전 설명');
+    form.media[0]!.caption = ' 손바느질 깃 ';
+    expect(okRequest(form).items[0]).toMatchObject({ caption: '손바느질 깃' });
+    form.media[0]!.caption = '';
+    expect(okRequest(form).items[0]).toMatchObject({ caption: null });
+    form.media[0]!.caption = 'a'.repeat(201);
+    expect(errorsOf(form)).toEqual({ 'media.0.caption': [TOO_LONG.caption] });
+    form.media[0]!.caption = '첫 줄\n둘째 줄';
+    expect(errorsOf(form)).toEqual({ 'media.0.caption': [SINGLE_LINE_ONLY] });
+  });
+
+  it('설명을 쓰지 않는 유형은 저장된 설명을 그대로 다시 보내고 검사하지 않는다', () => {
+    const form = editForm(section('HERO', { items: [mediaItem({}, '예전 설명')] }), 'HERO');
+    expect(okRequest(form).items[0]).toMatchObject({ caption: '예전 설명' });
   });
 
   it('미리보기 본문은 주소 칸이 빈 이미지(넣는 중)를 뺀다', () => {
@@ -276,7 +328,6 @@ describe('sectionRequest — 입력 제약(BE 와 같다)', () => {
 
   it('글자 수 한도를 넘으면 그 칸에 오류를 붙이고 보내지 않는다(앞뒤 공백은 세지 않는다)', () => {
     expect(errorsOf({ ...story(), title: 'a'.repeat(201) })).toEqual({ title: [TOO_LONG.title] });
-    expect(sectionRequest({ ...story(), title: ` ${'a'.repeat(200)} ` }).ok).toBe(true);
     expect(errorsOf({ ...story(), body: 'a'.repeat(2001) })).toEqual({ body: [TOO_LONG.body] });
     expect(errorsOf({ ...story(), linkUrl: `/${'a'.repeat(500)}` })).toEqual({
       linkUrl: [TOO_LONG.linkUrl],
@@ -284,6 +335,21 @@ describe('sectionRequest — 입력 제약(BE 와 같다)', () => {
     expect(errorsOf({ ...story(), linkUrl: '/a', linkLabel: 'a'.repeat(51) })).toEqual({
       linkLabel: [TOO_LONG.linkLabel],
     });
+  });
+
+  it('제목은 유형별 너비 한도(2줄 규칙, #71)를 넘으면 막는다 — 한글 1 · 영문 등 0.5', () => {
+    const hero = () => editForm(section('HERO', { items: [mediaItem()] }), 'HERO');
+    expect(sectionRequest({ ...hero(), title: '가'.repeat(16) }).ok).toBe(true);
+    expect(sectionRequest({ ...hero(), title: ` ${'a'.repeat(32)} ` }).ok).toBe(true);
+    expect(errorsOf({ ...hero(), title: '가'.repeat(17) })).toEqual({
+      title: [titleTooWide('HERO')],
+    });
+    // 스토리는 가장 좁은 칸(curtain) 기준이라 더 짧다
+    expect(sectionRequest({ ...story(), title: '손끝의 계절' }).ok).toBe(true);
+    expect(errorsOf({ ...story(), title: '손끝에서 시작되는 계절' })).toEqual({
+      title: [titleTooWide('STORY')],
+    });
+    expect(titleTooWide('STORY')).toContain('한글 기준 9자');
   });
 
   it('본문만 개행 · 탭을 허용한다', () => {

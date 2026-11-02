@@ -55,7 +55,7 @@ const VALIDATION: Record<string, [string, string]> = {
 
 /**
  * 서버 칸 경로(`items[2].media.altText`) → 폼 칸 키. 아이템은 미디어 → 상품 순으로 보낸다(`sectionRequest`).
- * 미디어의 대체 텍스트 · 주소(pcUrl, 주소로 넣는 유형의 이미지 주소 칸)는 그 미디어의 칸, 그 밖은 미디어 묶음이다.
+ * 미디어의 대체 텍스트 · 주소(pcUrl · mobileUrl) · 설명은 그 미디어의 칸, 그 밖은 미디어 묶음이다.
  */
 function formKey(path: string, mediaCount: number): string {
   if (/^(startAt|endAt|periodInRange)$/.test(path)) return 'period';
@@ -66,6 +66,8 @@ function formKey(path: string, mediaCount: number): string {
     if (index < mediaCount) {
       if (path.endsWith('.media.altText')) return `media.${index}.altText`;
       if (path.endsWith('.media.pcUrl')) return `media.${index}.url`;
+      if (path.endsWith('.media.mobileUrl')) return `media.${index}.mobileUrl`;
+      if (path.endsWith('.caption')) return `media.${index}.caption`;
       return 'media';
     }
     return 'products';
@@ -81,6 +83,7 @@ function fieldMessage(code: string, key: string): string {
   if (code === 'PRODUCT_154') return TOO_LONG.altText;
   if (code === 'PRODUCT_152') return MEDIA_URL_REQUIRED;
   if (code === 'PRODUCT_153') return TOO_LONG.mediaUrl;
+  if (code === 'PRODUCT_156') return TOO_LONG.caption;
   return VALIDATION[code]?.[1] ?? CHECK_FIELDS;
 }
 
@@ -126,7 +129,7 @@ export function saveFailure(
   }
 
   const itemsKey = context.type === 'PRODUCT_PICK' ? 'products' : 'media';
-  // 주소로 넣는 유형(LOOK)의 054 는 운영자가 넣은 주소가 저장소 밖이라는 뜻이다 — 주소 칸을 고치면 풀린다
+  // 주소로 넣는 유형(미디어를 받는 모든 유형)의 054 는 운영자가 넣은 주소가 저장소 밖이라는 뜻이다 — 주소 칸을 고치면 풀린다
   const urlEditable = isMediaUrlType(context.type);
   switch (cause.code) {
     case 'PRODUCT_047':
@@ -147,7 +150,7 @@ export function saveFailure(
           [itemsKey]: [
             context.type === 'PRODUCT_PICK'
               ? productCountMessage(context.type)
-              : '이미지 · 영상 수가 이 섹션이 받을 수 있는 범위를 벗어났습니다.',
+              : mediaCountMessage(context.type),
           ],
         }),
       };

@@ -14,20 +14,21 @@ import {
   type SectionForm,
   type TextFieldKey,
 } from '@/lib/display/form';
+import { titleWidth } from '@/lib/display/text';
 import {
   DISPLAY_SECTIONS_PATH,
   ITEM_RANGES,
   LIMITS,
+  TITLE_WIDTH,
   type DisplaySectionAdmin,
 } from '@/lib/display/types';
-import { MediaFields } from './MediaFields';
 import { MediaUrlFields } from './MediaUrlFields';
 import { ProductPickField } from './ProductPickField';
 
 /** 칸 아래 안내 — 스토어프론트 메인이 그 칸을 어떻게 쓰는지(frontend/docs/architecture.md §10) */
 const HINTS: Partial<Record<TextFieldKey, string>> = {
   title:
-    '제목은 PC · 모바일 어느 화면 폭에서도 2줄을 넘지 않게 짧게 써 주세요. 길면 글자 크기를 줄이지 않고 단어를 줄입니다. 줄바꿈은 넣을 수 없습니다(화면 폭에 맞춰 자동으로 줄이 바뀝니다).',
+    '제목은 PC · 모바일 어느 화면 폭에서도 2줄을 넘지 않게 짧게 써 주세요. 길면 글자 크기를 줄이지 않고 단어를 줄입니다. 한글은 한 글자, 영문 · 숫자 · 공백은 반 글자로 셉니다. 줄바꿈은 넣을 수 없습니다(화면 폭에 맞춰 자동으로 줄이 바뀝니다).',
   body: '줄바꿈은 메인에도 그대로 보입니다.',
   linkUrl:
     '/ 로 시작하는 쇼핑몰 안 주소(예: /shop) 또는 https:// 로 시작하는 주소만 넣을 수 있습니다. 비우면 버튼이 없습니다.',
@@ -136,7 +137,9 @@ export function SectionEditor({
             key={key}
             label={TEXT_LABELS[key]}
             value={form[key]}
-            max={LIMITS[key]}
+            // 제목은 2줄 규칙의 너비 한도(BE 200자보다 훨씬 작다)를 센다
+            max={key === 'title' ? TITLE_WIDTH[form.sectionType] : LIMITS[key]}
+            count={key === 'title' ? titleWidth : undefined}
             multiline={key === 'body'}
             hint={HINTS[key]}
             errors={errorsOf(key)}
@@ -199,24 +202,6 @@ export function SectionEditor({
             }}
           />
         )}
-        {!mediaByUrl && form.media.length > 0 && (
-          <MediaFields
-            type={form.sectionType}
-            media={form.media}
-            errorsOf={errorsOf}
-            onAltText={(index, altText) =>
-              set({
-                media: form.media.map((item, at) => (at === index ? { ...item, altText } : item)),
-              })
-            }
-          />
-        )}
-        {form.media.length === 0 && form.sectionType === 'STORY' && (
-          <p className="text-xs text-muted-fg">
-            스토리 이미지 · 영상은 업로드 기능이 준비되면 넣을 수 있습니다. 지금은 문구만으로
-            보입니다.
-          </p>
-        )}
       </fieldset>
 
       {warnings.length > 0 && (
@@ -240,8 +225,8 @@ export function SectionEditor({
 }
 
 /**
- * 글자 칸(한 줄 · 여러 줄). 길이는 BE 와 같은 기준(앞뒤 공백을 뺀 UTF-16 길이)으로 센다. 넘어도 자르지 않고 저장할 때 막는다.
- * 룩 폼(`LookEditor`)도 쓴다.
+ * 글자 칸(한 줄 · 여러 줄). 길이는 BE 와 같은 기준(앞뒤 공백을 뺀 UTF-16 길이)으로 센다 — `count` 를 주면 그 값(제목 너비)이다.
+ * 넘어도 자르지 않고 저장할 때 막는다. 룩 폼(`LookEditor`)도 쓴다.
  */
 export function TextInput({
   label,
@@ -251,11 +236,14 @@ export function TextInput({
   hint,
   errors,
   required,
+  count,
   onChange,
 }: {
   label: string;
   value: string;
   max: number;
+  /** 글자 수 대신 셀 값 — 없으면 앞뒤 공백을 뺀 길이 */
+  count?: (value: string) => number;
   multiline: boolean;
   hint?: string;
   /** 저장 전 검사가 막는 칸 — 화면 낭독기에 알린다(폼은 noValidate) */
@@ -265,7 +253,7 @@ export function TextInput({
 }) {
   const id = useId();
   const invalid = errors.length > 0;
-  const length = value.trim().length;
+  const length = count ? count(value) : value.trim().length;
   const describedBy = [hint && `${id}-hint`, `${id}-count`, invalid && `${id}-error`]
     .filter(Boolean)
     .join(' ');
