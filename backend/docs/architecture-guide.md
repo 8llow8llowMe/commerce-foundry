@@ -218,6 +218,8 @@ Info → Presenter → Response
   예: auth 배송지 Facade 가 부르는 `MemberLockProcessor` 의 `AUTH_003`(회원 없음)은 그 컨텍스트의 advice 가 봉투로 만든다 (#7).
 - 숨김 같은 조회 규칙은 그 컨텍스트가 정한다 — 다른 컨텍스트는 용도별 Processor 메서드만 부른다.
   예: `ProductWebFacade` 는 `CategoryProcessor.subtreeIdsOf(categoryId)`(목록 필터 — 숨김과 무관) · `visiblePathOf(categoryId)`(상세 경로 — 숨김 제외)만 부른다.
+  메인 전시(#372)는 Facade에서 `LookWebProcessor.getVisibleContentsByIds` · `LookProcessor.existingIds`를 조합하고 `LookContent`만 전시 Processor에 전달한다.
+  전시에는 룩 ID만 저장하며 화보 · 구성 상품은 룩 컨텍스트가 소유한다. 상품 조회는 직접 상품과 룩 상품 ID를 합쳐 한 번만 수행한다.
   예: 고객 룩(#62) `LookWebFacade` 는 상품 카드를 `ProductListProcessor.summarizeVisible`(숨김 제외), 상품별 룩의 상품 확인을 `ProductDetailProcessor.getVisibleProduct`(없거나 숨김 → 404 `PRODUCT_001`)로만 받는다.
 - 다른 컨텍스트의 쓰기도 그 컨텍스트 Processor 로만 한다. 판정에 부른 쪽 데이터가 필요하면 API 를 부른 쪽에 둔다.
   예: 어드민 카테고리 관리(#9)는 삭제 판정에 "연결된 상품" 이 필요해 상품 컨텍스트에 둔다 — `CategoryAdminFacade` 가 `CategoryProcessor.getTreeForUpdate()`(잠근 트리)를 받아

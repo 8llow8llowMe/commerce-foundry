@@ -29,6 +29,9 @@ public record DisplayViolation(Kind kind, DisplayItemType itemType) {
         ITEM_COUNT_OUT_OF_RANGE,
 
         /** 한 섹션에 같은 상품이 두 번 있다. */
-        PRODUCT_DUPLICATED
+        PRODUCT_DUPLICATED,
+
+        /** 한 섹션에 같은 룩이 두 번 있다. */
+        LOOK_DUPLICATED
     }
 }

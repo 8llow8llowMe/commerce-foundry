@@ -5,6 +5,8 @@ import com.commercefoundry.domainlayer.display.adapter.in.web.presenter.DisplayW
 import com.commercefoundry.domainlayer.display.application.port.in.DisplayWebUseCase;
 import com.commercefoundry.domainlayer.display.application.service.processor.DisplaySectionProcessor;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionContent;
+import com.commercefoundry.domainlayer.look.application.service.processor.LookWebProcessor;
+import com.commercefoundry.domainlayer.look.domain.model.LookContent;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductListProcessor;
 import com.commercefoundry.domainlayer.product.domain.model.ProductSummary;
 import java.util.List;
@@ -24,12 +26,16 @@ public class DisplayWebFacade implements DisplayWebUseCase {
     private final DisplaySectionProcessor displaySectionProcessor;
     private final ProductListProcessor productListProcessor;
     private final DisplayWebPresenter displayWebPresenter;
+    private final LookWebProcessor lookWebProcessor;
 
     @Override
     @Transactional(readOnly = true)
     public DisplayMainResponse getMain() {
         List<DisplaySectionContent> contents = displaySectionProcessor.getLiveContents();
-        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(displaySectionProcessor.productIdsOf(contents));
-        return displayWebPresenter.toMainResponse(displaySectionProcessor.toMainInfo(contents, visibleProducts));
+        Map<Long, LookContent> looks = lookWebProcessor.getVisibleContentsByIds(displaySectionProcessor.lookIdsOf(contents));
+        var productIds = displaySectionProcessor.productIdsOf(contents.stream().filter(content -> !content.isLegacyLook()).toList());
+        productIds.addAll(LookContent.productIdsOf(looks.values()));
+        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(productIds);
+        return displayWebPresenter.toMainResponse(displaySectionProcessor.toMainInfo(contents, visibleProducts, looks));
     }
 }

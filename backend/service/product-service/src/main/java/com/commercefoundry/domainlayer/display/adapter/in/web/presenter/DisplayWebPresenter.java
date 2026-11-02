@@ -44,8 +44,20 @@ public class DisplayWebPresenter {
             .itemType(element.itemType().name())
             .media(toMediaItem(element.media()))
             .product(toProductItem(element.product()))
+            .look(toLookItem(element.look()))
             .caption(element.caption())
             .build();
+    }
+
+    private DisplayElementItem.Look toLookItem(DisplayMainInfo.Look look) {
+        if (look == null) {
+            return null;
+        }
+        DisplayMainInfo.Image image = look.image();
+        return DisplayElementItem.Look.builder()
+            .lookId(String.valueOf(look.lookId())).title(look.title()).description(look.description())
+            .image(DisplayElementItem.Image.builder().url(image.url()).width(image.width()).height(image.height()).altText(image.altText()).build())
+            .products(look.products().stream().map(this::toProductItem).toList()).build();
     }
 
     private DisplayMediaItem toMediaItem(DisplayMedia media) {

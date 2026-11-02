@@ -54,6 +54,14 @@ public class LookProcessor {
         return withItems(lookRepositoryPort.findAll());
     }
 
+    /** 전시의 어드민 참조 확인. 숨김 · 플래그와 무관하게 존재하는 룩 아이디만 돌려준다. */
+    public Set<Long> existingIds(Collection<Long> lookIds) {
+        if (lookIds.isEmpty()) {
+            return Set.of();
+        }
+        return lookRepositoryPort.findAll().stream().map(Look::id).filter(lookIds::contains).collect(Collectors.toSet());
+    }
+
     /**
      * 없으면 {@code LOOK_001}(404)이다. 읽기는 잠그지 않아 룩 행을 읽은 뒤 아이템을 읽기 전에 다른 어드민의 삭제가 커밋될 수 있다(READ COMMITTED 의 문장별 스냅숏) —
      * 그때 아이템이 비면 지워진 룩이므로 같은 404 로 답한다(구성 상품 1개 이상 불변식으로 500 이 나지 않게).

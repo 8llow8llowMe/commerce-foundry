@@ -44,6 +44,7 @@ public class DisplayAdminPresenter {
             .itemType(element.itemType().toMetadata())
             .media(toMediaItem(element.media()))
             .product(toProductItem(element.product()))
+            .lookId(element.lookId() == null ? null : String.valueOf(element.lookId()))
             .caption(element.caption())
             .build();
     }

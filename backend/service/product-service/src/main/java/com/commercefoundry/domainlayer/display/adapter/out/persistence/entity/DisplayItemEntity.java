@@ -31,17 +31,22 @@ import org.springframework.data.domain.Persistable;
 @Entity
 @Table(
     name = "display_item",
-    comment = "메인 전시 아이템 (미디어 또는 상품)",
+    comment = "메인 전시 아이템 (미디어 · 상품 또는 룩 참조)",
     uniqueConstraints = @UniqueConstraint(name = "uk_display_item_section_id_display_order", columnNames = {"section_id", "display_order"}),
     check = {
         @CheckConstraint(
             name = "ck_display_item_media_fields",
-            constraint = "item_type <> 'MEDIA' or (media_type is not null and pc_url is not null and product_id is null)"
+            constraint = "item_type <> 'MEDIA' or (media_type is not null and pc_url is not null and product_id is null and look_id is null)"
         ),
         @CheckConstraint(
             name = "ck_display_item_product_fields",
             constraint = "item_type <> 'PRODUCT' or (product_id is not null and media_type is null and pc_url is null and mobile_url is null"
-                + " and pc_poster_url is null and mobile_poster_url is null and alt_text is null)"
+                + " and pc_poster_url is null and mobile_poster_url is null and alt_text is null and look_id is null)"
+        ),
+        @CheckConstraint(
+            name = "ck_display_item_look_fields",
+            constraint = "item_type <> 'LOOK' or (look_id is not null and look_id > 0 and product_id is null and media_type is null"
+                + " and pc_url is null and mobile_url is null and pc_poster_url is null and mobile_poster_url is null and alt_text is null)"
         ),
         @CheckConstraint(
             name = "ck_display_item_video_poster",
@@ -68,7 +73,7 @@ public class DisplayItemEntity extends BaseEntity implements Persistable<Long> {
     private int displayOrder;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "item_type", nullable = false, length = 20, comment = "아이템 유형 (MEDIA · PRODUCT)")
+    @Column(name = "item_type", nullable = false, length = 20, comment = "아이템 유형 (MEDIA · PRODUCT · LOOK)")
     private DisplayItemType itemType;
 
     @Enumerated(EnumType.STRING)
@@ -92,6 +97,9 @@ public class DisplayItemEntity extends BaseEntity implements Persistable<Long> {
 
     @Column(name = "product_id", comment = "상품 아이디 (FK: product.id). 상품 아이템만")
     private Long productId;
+
+    @Column(name = "look_id", comment = "룩 아이디 (FK: look.id). 룩 아이템만")
+    private Long lookId;
 
     @Column(name = "caption", length = 200, comment = "아이템 설명 문구")
     private String caption;

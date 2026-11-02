@@ -10,12 +10,15 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.domainlayer.display.adapter.in.admin.presenter.DisplayPreviewAdminPresenter;
 import com.commercefoundry.domainlayer.display.application.command.DisplaySectionUpsertCommand;
-import com.commercefoundry.domainlayer.display.application.exception.DisplayException;
 import com.commercefoundry.domainlayer.display.application.exception.DisplayErrorCode;
+import com.commercefoundry.domainlayer.display.application.exception.DisplayException;
 import com.commercefoundry.domainlayer.display.application.port.out.DisplaySectionRepositoryPort;
 import com.commercefoundry.domainlayer.display.application.service.processor.DisplaySectionProcessor;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayItemType;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
+import com.commercefoundry.domainlayer.look.application.port.out.LookRepositoryPort;
+import com.commercefoundry.domainlayer.look.application.service.processor.LookProcessor;
+import com.commercefoundry.domainlayer.look.application.service.processor.LookWebProcessor;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
@@ -48,7 +51,9 @@ class DisplayPreviewAdminFacadeTest {
         new DisplaySectionProcessor(displayPort, ids, MediaUrlPolicy.of(""), Clock.fixed(NOW, ZoneOffset.UTC)),
         new ProductLookupProcessor(productPort),
         new ProductListProcessor(productPort, skuPort, imagePort, new StoreProperties(null)),
-        new DisplayPreviewAdminPresenter()
+        new DisplayPreviewAdminPresenter(), mock(LookProcessor.class),
+        new LookWebProcessor(
+            mock(LookRepositoryPort.class), new StoreProperties(null))
     );
 
     @Test

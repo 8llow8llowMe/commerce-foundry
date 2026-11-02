@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
+import com.commercefoundry.domainlayer.display.adapter.in.admin.presenter.DisplayPreviewAdminPresenter;
 import com.commercefoundry.domainlayer.display.adapter.in.web.dto.item.DisplayElementItem;
 import com.commercefoundry.domainlayer.display.application.info.DisplayMainInfo;
 import com.commercefoundry.domainlayer.display.application.port.out.DisplaySectionRepositoryPort;
@@ -15,6 +16,10 @@ import com.commercefoundry.domainlayer.display.domain.model.DisplayItemType;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySection;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionContent;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionType;
+import com.commercefoundry.domainlayer.look.domain.model.Look;
+import com.commercefoundry.domainlayer.look.domain.model.LookContent;
+import com.commercefoundry.domainlayer.look.domain.model.LookImage;
+import com.commercefoundry.domainlayer.look.domain.model.LookItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.response.ProductListItemResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.web.presenter.ProductWebPresenter;
 import com.commercefoundry.domainlayer.product.application.model.ProductSearchCriteria;
@@ -99,6 +104,21 @@ class DisplayProductCardParityTest {
             JsonNode actual = JSON.valueToTree(displayed.get(index).product());
             assertThat(actual).as("상품 %s", listed.get(index).productId()).isEqualTo(expected);
         }
+        var look = new LookContent(
+            new Look(100, "룩", null,
+                new LookImage("https://cdn.example.com/look.jpg", 1200, 1600, null), true, 0),
+            java.util.stream.LongStream.rangeClosed(1, 4).mapToObj(id -> new LookItem(100 + id, 100, id, (int) id - 1)).toList()
+        );
+        var lookSection = new DisplaySectionContent(
+            new DisplaySection(8, DisplaySectionType.LOOK, null, null, null, null, null, 1, true, null, null),
+            List.of(new DisplayItem(81, 8, 0, DisplayItemType.LOOK, null, null, 100L, null))
+        );
+        var lookInfo = displayProcessor.toMainInfo(List.of(lookSection), summaries, Map.of(100L, look));
+        var lookCards = new DisplayWebPresenter().toMainResponse(lookInfo).sections().getFirst().items().getFirst().look().products();
+        var previewCards = new DisplayPreviewAdminPresenter()
+            .toMainResponse(lookInfo).sections().getFirst().items().getFirst().look().products();
+        assertThat(JSON.<JsonNode>valueToTree(lookCards)).isEqualTo(JSON.<JsonNode>valueToTree(listed));
+        assertThat(JSON.<JsonNode>valueToTree(previewCards)).isEqualTo(JSON.<JsonNode>valueToTree(listed));
         // 비교가 플래그를 실제로 탔는지 — 상품 1 은 맞춤 제작 · 프리오더가 모두 켜진 상품이라 카드 값이 스토어 플래그를 그대로 따른다
         assertThat(JSON.valueToTree(displayed.getFirst().product()).has("preorder")).isTrue();
         assertThat(displayed.getFirst().product().preorder()).isEqualTo(preorderFeature);

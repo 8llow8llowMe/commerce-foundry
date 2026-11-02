@@ -205,9 +205,9 @@ class DisplaySectionProcessorTest {
         @Test
         @DisplayName("통과하면 받은 순서가 아이템 순서인 초안을 돌려준다")
         void draftKeepsOrder() {
-            DisplaySectionContent draft = processor.draftOf(command(DisplaySectionType.LOOK, List.of(productCommand(3L), mediaItem(), productCommand(2L))));
+            DisplaySectionContent draft = processor.draftOf(command(DisplaySectionType.PRODUCT_PICK, List.of(productCommand(3L), productCommand(2L))));
 
-            assertThat(draft.items()).extracting(DisplayItem::displayOrder).containsExactly(0, 1, 2);
+            assertThat(draft.items()).extracting(DisplayItem::displayOrder).containsExactly(0, 1);
             assertThat(draft.productIds()).containsExactly(3L, 2L);
         }
     }

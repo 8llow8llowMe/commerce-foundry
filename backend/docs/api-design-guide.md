@@ -667,10 +667,10 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
 | `GET /api/v1/displays/main` | `permitAll()` | 200 노출 중인 섹션 목록 · `Cache-Control: max-age=60, public` | — |
-| `POST /api/v1/admin/displays/preview` | ADMIN | 200 현재 노출 가능한 초안 · 고객 메인과 같은 JSON · `Cache-Control: no-store` | 400 `PRODUCT_047~054` · 검증 `140~168` · 503 `PRODUCT_055` |
+| `POST /api/v1/admin/displays/preview` | ADMIN | 200 현재 노출 가능한 초안 · 고객 메인과 같은 JSON · `Cache-Control: no-store` | 400 `PRODUCT_047~054` · `DISPLAY_001~002` · 검증 `PRODUCT_140~168` · `DISPLAY_101~102` · 503 `PRODUCT_055` |
 | `GET /api/v1/admin/displays/sections` | ADMIN | 200 전체 섹션(비노출 · 기간 밖 포함, 배열 순서 = 노출 순서, `liveStatus` 파생) | — |
 | `GET /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 | 404 `PRODUCT_046` |
-| `POST /api/v1/admin/displays/sections` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `PRODUCT_047~054` · 409 `PRODUCT_056` · `PRODUCT_058` · 503 `PRODUCT_055` |
+| `POST /api/v1/admin/displays/sections` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `PRODUCT_047~054` · `DISPLAY_001~002` · `DISPLAY_101~102` · 409 `PRODUCT_056` · `PRODUCT_058` · 503 `PRODUCT_055` |
 | `PUT /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 — 섹션 필드 · 아이템 전체 교체 | 위와 같음 + 404 `PRODUCT_046` |
 | `DELETE /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 — 아이템도 지운다. 남은 순서를 다시 매기지 않는다 | 404 `PRODUCT_046` · 409 `PRODUCT_058` |
 | `PATCH /api/v1/admin/displays/sections/order` | ADMIN | 200 새 순서의 전체 목록 — 본문 `{sectionIds}` 는 현재 전체 집합과 같아야 한다 | 400 `PRODUCT_057` · 409 `PRODUCT_058` |
@@ -681,15 +681,24 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
   응답은 `DisplayMainResponse`와 같은 섹션 · 미디어 · 상품 카드 JSON 형태다. 현재 서버 Clock으로 노출을 판정하며 임의 시각 파라미터는 받지 않는다.
   섹션과 아이템은 요청 배열 순서다. `sectionId`는 `preview-section-<섹션 인덱스>`, `itemId`는 `preview-item-<섹션 인덱스 * 30 + 아이템 인덱스>`인 임시 문자열이다.
   필터 전 배열 위치를 쓰므로 필터 후 번호가 건너뛸 수 있다. 저장 식별자가 아니므로 저장 · 수정 요청의 식별자로 쓰면 안 된다. 상품 · 이미지 식별자는 실제 식별자다.
-  전시 DB 읽기 · 쓰기 · 잠금과 Snowflake 발급은 없고 상품만 bulk 조회한다. DB의 현재 전시 구성과 합치지 않는다. 응답은 `no-store`다.
+  전시 DB 읽기 · 쓰기 · 잠금과 Snowflake 발급은 없고 상품과 참조 룩을 bulk 조회한다. DB의 현재 전시 구성과 합치지 않는다. 응답은 `no-store`다.
   FE 영향 · 계약 리뷰어: `seonghoho` — 어드민 인증 BFF에서 preview를 호출하고 결과를 기존 미리보기 렌더러에 전달한다. 임시 ID는 저장 ID와 구분한다.
   storefront 공개 action으로 ADMIN 자격증명을 전달하거나 해당 API 인가를 완화하지 않는다. 어드민 관리 조회의 metadata 형태와 달리
   미리보기의 `itemType` · `mediaType`은 고객 메인처럼 문자열이며 고객/어드민 DTO·Presenter는 분리한다.
 - **노출 조건**: `visible` 이고 `startAt ≤ now < endAt`(둘 다 비면 제한 없음). 섹션 · 아이템은 순서 → 아이디 오름차순이다.
   시각은 마이크로초로 잘라 저장 · 판정한다(DB `timestamp(6)` 과 같은 값). 0001 ~ 9999년 밖은 400 `PRODUCT_165`.
-- **아이템**: `MEDIA`(PC · 모바일 주소 따로, 모바일이 없으면 PC, VIDEO 는 PC 포스터 필수) 또는 `PRODUCT`(상품 아이디). 유형별 허용 아이템 · 개수는
-  HERO 미디어 1~10 · PRODUCT_PICK 상품 1~20 · STORY 미디어 0~10 · LOOK 미디어 1~10 + 상품 0~20 · DETAIL 미디어 1~10, 섹션당 아이템 30 · 섹션 50 상한이다.
-  LOOK 은 룩 API(#62)가 생기면 바뀔 수 있다.
+- **아이템**: `MEDIA`(PC · 모바일 주소 따로, 모바일이 없으면 PC, VIDEO 는 PC 포스터 필수), `PRODUCT`(상품 아이디), `LOOK`(룩 아이디)이다.
+  HERO 미디어 1~10 · PRODUCT_PICK 상품 1~20 · STORY 미디어 0~10 · LOOK 룩 참조 1~10 · DETAIL 미디어 1~10, 섹션당 아이템 30 · 섹션 50 상한이다.
+  LOOK 섹션은 `{itemType:"LOOK", lookId:"...", caption?:"..."}`만 받으며 미디어 · 상품을 직접 저장하지 않는다(#372). 같은 섹션의 중복 룩은 400 `DISPLAY_002`다.
+- **메인 Shop the Look의 단일 원천**은 §2-11의 룩(`Look` · `LookItem`)이다. 전시는 배치 · 노출 기간 · 룩 참조 순서만 소유한다.
+  고객/미리보기 LOOK 아이템은 `{itemId, itemType:"LOOK", media:null, product:null, look:{lookId,title,description,image:{url,width,height,altText},products:[상품 카드]},caption}`이다.
+  룩의 현재 이미지와 구성 순서로 펼치며, 카드는 상품 목록 및 고객 룩 API와 같은 값이다. 섹션의 제목 · 링크 등은 전시 설정을 유지한다.
+  `store.features.looks=false` · 숨긴 룩 · 삭제/읽는 사이 삭제된 룩은 아이템에서 빠진다. 모두 빠지면 섹션은 `items:[]`로 남는다.
+  룩은 남아 있고 구성 상품만 모두 숨김/삭제되면 `look.products:[]`로 남긴다. 응답 캐시(60초) 동안 변경 전 값이 보일 수 있다.
+  어드민 쓰기와 미리보기는 숨긴/기간 밖 섹션도 룩 존재를 확인한다(없는 룩 400 `DISPLAY_001`). 숨긴 룩도 참조 가능하며 기능 플래그와 무관하다.
+  어드민 조회는 `lookId` 문자열을 반환하고 삭제된 룩도 원래 참조 ID를 유지한다. 존재 확인 직후 삭제되는 경쟁은 dangling 참조를 허용하고 고객 조회에서 제외한다.
+  이관 전 미디어+상품 LOOK은 어드민 읽기 · 삭제만 유지하고 고객 응답에서 섹션 전체를 제외한다. 새 저장/미리보기는 400 `PRODUCT_047`이다.
+  기존 데이터 전환 및 BE/FE 동시 배포는 [LOOK 참조 전환 가이드](display-look-migration.md)를 따른다. 자동 추측 변환은 하지 않는다.
 - **상품 카드**는 고객 상품 목록 항목과 같은 필드 · 같은 계산(`ProductSaleSummary`)이다 — `hoverImage` 포함. `DisplayProductCardParityTest` 가 두 응답을 비교한다.
   숨긴 상품 아이템은 고객 응답에서 빠지고, 그래서 `PRODUCT_PICK` 이 비어도 섹션은 남는다. 숨긴 상품도 등록은 된다(없는 상품만 400 `PRODUCT_050`).
 - **미디어 주소**는 스토리지 공개 주소(`store.media.public-base-url` ← `STORAGE_PUBLIC_BASE_URL`) 아래만 받는다. 키는 `[A-Za-z0-9._~-/]` 와 `%XX` 만,
@@ -705,12 +714,15 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
   어드민 미리보기는 `POST /api/v1/admin/displays/preview` 를 쓴다. 언어 · 통화별 응답이 생기면 `Vary` 를 두거나 경로를 나눈다.
 - 오류 코드: `PRODUCT_046`(섹션 없음 404) · `047`(유형이 받지 않는 아이템) · `048`(아이템 수 범위) · `049`(상품 중복) · `050`(없는 상품) · `051`(기간) ·
   `052`(링크 주소) · `053`(문구만 있는 링크) · `054`(미디어 주소) · `055`(공개 주소 미설정 503) · `056`(섹션 상한 409) · `057`(순서 변경 집합) · `058`(잠금 409).
-  검증 코드는 `PRODUCT_140~168`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` · `DisplayErrorCode` · `SizeChartErrorCode`(059~, §2-10)가 나눠 쓴다 — 새 번호는 세 클래스를 모두 보고 고른다.
+  룩 참조 오류는 `DISPLAY_001`(없는 룩) · `DISPLAY_002`(중복), 요청 검증은 `DISPLAY_101`(양수 룩 ID) · `DISPLAY_102`(LOOK은 lookId만 필수)다.
+  기존 검증 코드는 `PRODUCT_140~168`(`DisplayValidationMessage`). 번호 공간 `PRODUCT_` 를 `ProductErrorCode` · `DisplayErrorCode` · `SizeChartErrorCode`(059~, §2-10)가 나눠 쓴다 — 새 번호는 세 클래스를 모두 보고 고른다.
   **검증 대역 `PRODUCT_1xx` 는 소진됐다** — 새 컨텍스트는 자기 접두어를 연다(룩은 `LOOK_`, §2-11 · SKU 원가는 `SKU_COST_`, §2-12 · `coding-conventions.md` §8-2).
-- 계층 — display 컨텍스트는 product 컨텍스트의 Processor(`ProductListProcessor.summarizeVisible` · `ProductLookupProcessor`)와 domain(`ProductSummary`)만 쓴다(H8).
+- 계층 — display Facade는 product의 Processor(`ProductListProcessor.summarizeVisible` · `ProductLookupProcessor`)와 look의 Processor(`LookProcessor.existingIds` · `LookWebProcessor.getVisibleContentsByIds`)를 조합한다(H8).
+  display Processor에는 domain(`ProductSummary` · `LookContent`)만 넘기고 다른 컨텍스트의 Info/DTO/Presenter는 공유하지 않는다.
+  룩 머리는 상한 100개인 전체 조회에서 참조만 골라 아이템을 한 번에 읽는다. 모든 직접 상품과 참조 룩의 상품 ID를 합쳐 상품 카드를 한 번만 조회한다.
   상품 카드의 `customOrder` · `preorder` 는 목록과 같은 플래그 판정(#61)이다.
 - **어드민 응답은 운영자 언어다(#305).** 순서는 배열 순서로만 전하고 내부 순서 번호(`displayOrder`, 삭제 뒤 빈 번호가 남는다) · 저장마다 새로 발급되는
-  아이템 아이디는 내지 않는다. `itemType` · `mediaType` 은 `{code,name,description}`(미디어 · 상품, 이미지 · 영상)이고 — 고객 응답은 분기용 문자열 그대로 —
+  아이템 아이디는 내지 않는다. `itemType` · `mediaType` 은 `{code,name,description}`(미디어 · 상품 · 룩 참조, 이미지 · 영상)이고 — 고객 응답은 분기용 문자열 그대로 —
   노출 상태는 `liveStatus`(LIVE 노출 중 · HIDDEN 숨김 · SCHEDULED 예정 · ENDED 종료, 숨김이 기간보다 앞선다)로 낸다. 고객 메인 노출과 같은 판정(`DisplaySection.liveStatusAt`)이다.
   요청은 code 문자열로 받는다.
 
@@ -756,7 +768,7 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 
 ### 2-11. 룩 — Shop the Look (product-service, #62)
 
-룩은 대표 이미지 한 장과 구성 상품 1~20개의 묶음이다. 어드민이 만들고 순서를 정한다. 메인 전시의 `LOOK` 섹션(§2-9)과는 별도 리소스다.
+룩은 대표 이미지 한 장과 구성 상품 1~20개의 묶음이다. 어드민이 만들고 순서를 정한다. 메인 전시의 `LOOK` 섹션(§2-9)은 이 룩의 ID를 참조한다. 화보와 구성 상품은 여기 한 곳에서 관리한다.
 고객 노출은 기능 플래그 `store.features.looks`(기본 꺼짐)가 정하고, 어드민 API 는 플래그와 무관하게 동작한다(켜기 전에 미리 만들어 둔다, `architecture-guide.md` §9).
 플래그 · 숨긴 룩 판정은 고객 조회 Processor(`LookWebProcessor`) 한 곳에서만 한다 — 어드민 Processor(`LookProcessor`)에 섞지 않는다.
 

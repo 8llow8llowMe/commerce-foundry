@@ -44,8 +44,20 @@ public class DisplayPreviewAdminPresenter {
             .itemType(element.itemType().name())
             .media(toMediaItem(element.media()))
             .product(toProductItem(element.product()))
+            .look(toLookItem(element.look()))
             .caption(element.caption())
             .build();
+    }
+
+    private DisplayPreviewAdminResponse.Look toLookItem(DisplayMainInfo.Look look) {
+        if (look == null) {
+            return null;
+        }
+        DisplayMainInfo.Image image = look.image();
+        return DisplayPreviewAdminResponse.Look.builder()
+            .lookId(String.valueOf(look.lookId())).title(look.title()).description(look.description())
+            .image(DisplayPreviewAdminResponse.Image.builder().url(image.url()).width(image.width()).height(image.height()).altText(image.altText()).build())
+            .products(look.products().stream().map(this::toProductItem).toList()).build();
     }
 
     private Media toMediaItem(DisplayMedia media) {

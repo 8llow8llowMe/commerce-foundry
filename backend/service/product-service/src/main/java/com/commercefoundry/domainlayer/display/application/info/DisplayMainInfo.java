@@ -25,7 +25,13 @@ public record DisplayMainInfo(List<Section> sections) {
      * @param media 미디어 아이템이면 있다
      * @param product 상품 아이템이면 있다
      */
-    public record Element(long itemId, DisplayItemType itemType, DisplayMedia media, Product product, String caption) {
+    public record Element(long itemId, DisplayItemType itemType, DisplayMedia media, Product product, Look look, String caption) {
+    }
+
+    public record Look(long lookId, String title, String description, Image image, List<Product> products) {
+    }
+
+    public record Image(String url, Integer width, Integer height, String altText) {
     }
 
     /**

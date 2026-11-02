@@ -6,6 +6,9 @@ import com.commercefoundry.domainlayer.display.application.command.DisplaySectio
 import com.commercefoundry.domainlayer.display.application.port.in.DisplayPreviewAdminUseCase;
 import com.commercefoundry.domainlayer.display.application.service.processor.DisplaySectionProcessor;
 import com.commercefoundry.domainlayer.display.domain.model.DisplaySectionContent;
+import com.commercefoundry.domainlayer.look.application.service.processor.LookProcessor;
+import com.commercefoundry.domainlayer.look.application.service.processor.LookWebProcessor;
+import com.commercefoundry.domainlayer.look.domain.model.LookContent;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductListProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductLookupProcessor;
 import java.util.List;
@@ -23,6 +26,8 @@ public class DisplayPreviewAdminFacade implements DisplayPreviewAdminUseCase {
     private final ProductLookupProcessor productLookupProcessor;
     private final ProductListProcessor productListProcessor;
     private final DisplayPreviewAdminPresenter displayPreviewAdminPresenter;
+    private final LookProcessor lookProcessor;
+    private final LookWebProcessor lookWebProcessor;
 
     @Override
     @Transactional(readOnly = true)
@@ -30,9 +35,12 @@ public class DisplayPreviewAdminFacade implements DisplayPreviewAdminUseCase {
         List<DisplaySectionContent> drafts = displaySectionProcessor.previewDraftsOf(sections);
         Set<Long> allProductIds = displaySectionProcessor.productIdsOf(drafts);
         displaySectionProcessor.validateProductsExist(allProductIds, productLookupProcessor.findAllIncludingHidden(allProductIds));
+        Set<Long> lookIds = displaySectionProcessor.lookIdsOf(drafts);
+        displaySectionProcessor.validateLooksExist(lookIds, lookProcessor.existingIds(lookIds));
         List<DisplaySectionContent> live = displaySectionProcessor.liveContentsOf(drafts);
-        return displayPreviewAdminPresenter.toMainResponse(displaySectionProcessor.toMainInfo(
-            live, productListProcessor.summarizeVisible(displaySectionProcessor.productIdsOf(live))
-        ));
+        var looks = lookWebProcessor.getVisibleContentsByIds(displaySectionProcessor.lookIdsOf(live));
+        Set<Long> productIds = displaySectionProcessor.productIdsOf(live);
+        productIds.addAll(LookContent.productIdsOf(looks.values()));
+        return displayPreviewAdminPresenter.toMainResponse(displaySectionProcessor.toMainInfo(live, productListProcessor.summarizeVisible(productIds), looks));
     }
 }
