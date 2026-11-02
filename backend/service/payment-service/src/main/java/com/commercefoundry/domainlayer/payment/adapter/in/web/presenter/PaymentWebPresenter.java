@@ -17,6 +17,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class PaymentWebPresenter {
 
+    private static final String CUSTOMER_FAILURE_MESSAGE = "결제를 완료하지 못했습니다. 다른 결제 수단으로 다시 시도해 주세요.";
+
     public PaymentResponse toResponse(Payment payment) {
         return PaymentResponse.builder()
             .paymentId(String.valueOf(payment.id()))
@@ -53,6 +55,7 @@ public class PaymentWebPresenter {
         if (payment.status() != PaymentStatus.FAILED) {
             return null;
         }
-        return new PaymentFailureItem(payment.failureCode(), payment.failureMessage());
+        // 과거 저장된 PG 원문도 고객에게 싣지 않는다. 진단용 저장 값은 그대로 보존한다.
+        return new PaymentFailureItem(payment.failureCode(), CUSTOMER_FAILURE_MESSAGE);
     }
 }

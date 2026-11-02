@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.apigateway.properties.GatewayRateLimitProperties.Limit;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Configuration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,11 +43,43 @@ class GatewayRateLimitPropertiesTest {
     @Test
     @DisplayName("yml 에 적지 않은 정책은 기본 한도를 쓴다")
     void fallsBackToDefaults() {
-        GatewayRateLimitProperties properties = new GatewayRateLimitProperties(true, null, null, null, null);
+        GatewayRateLimitProperties properties = new GatewayRateLimitProperties(true, null, null, null, null, null);
 
         assertThat(properties.cartMerge()).isEqualTo(GatewayRateLimitProperties.DEFAULT_CART_MERGE);
         assertThat(properties.cartWrite()).isEqualTo(GatewayRateLimitProperties.DEFAULT_CART_WRITE);
         assertThat(properties.orderWrite()).isEqualTo(GatewayRateLimitProperties.DEFAULT_ORDER_WRITE);
+        assertThat(properties.paymentWrite()).isEqualTo(new Limit(6, 3));
         assertThat(properties.orderQuote()).isEqualTo(GatewayRateLimitProperties.DEFAULT_ORDER_QUOTE);
     }
+    @ParameterizedTest
+    @CsvSource({"12, 3", "6, 4"})
+    void paymentCannotExceedEitherOrderLimit(int perMinute, int burst) {
+        assertThatThrownBy(() -> new GatewayRateLimitProperties(true, null, null, new Limit(6, 3), null, new Limit(perMinute, burst)))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("payment-write");
+    }
+
+    @Test
+    void lowerOrderLimitRequiresExplicitLowerPaymentLimit() {
+        assertThatThrownBy(() -> new GatewayRateLimitProperties(true, null, null, new Limit(2, 1), null, null))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThat(new GatewayRateLimitProperties(true, null, null, new Limit(2, 1), null, new Limit(2, 1)).paymentWrite())
+            .isEqualTo(new Limit(2, 1));
+    }
+    @Test
+    void bindsPaymentLimitsAndRejectsUnsafeEffectiveConfigurationAtStartup() {
+        ApplicationContextRunner runner = new ApplicationContextRunner().withUserConfiguration(RateLimitConfig.class);
+        runner.withPropertyValues("gateway.rate-limit.payment-write.requests-per-minute=3", "gateway.rate-limit.payment-write.burst=2")
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context.getBean(GatewayRateLimitProperties.class).paymentWrite()).isEqualTo(new Limit(3, 2));
+            });
+        runner.withPropertyValues("gateway.rate-limit.order-write.requests-per-minute=3", "gateway.rate-limit.order-write.burst=2")
+            .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableConfigurationProperties(GatewayRateLimitProperties.class)
+    static class RateLimitConfig {
+    }
+
 }

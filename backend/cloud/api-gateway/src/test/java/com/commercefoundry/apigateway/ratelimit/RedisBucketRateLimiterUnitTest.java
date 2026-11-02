@@ -38,11 +38,15 @@ class RedisBucketRateLimiterUnitTest {
     void registersPolicyConfigs() {
         limiter();
 
-        assertThat(registered).containsOnlyKeys("cart-merge", "cart-write", "order-quote", "order-write");
+        assertThat(registered).containsOnlyKeys("cart-merge", "cart-write", "order-quote", "order-write", "payment-write");
         RedisRateLimiter.Config merge = registered.get("cart-merge");
         assertThat(merge.getReplenishRate()).isEqualTo(1);
         assertThat(merge.getRequestedTokens()).isEqualTo(10);
         assertThat(merge.getBurstCapacity()).isEqualTo(30);
+        RedisRateLimiter.Config payment = registered.get("payment-write");
+        assertThat(payment.getReplenishRate()).isEqualTo(1);
+        assertThat(payment.getRequestedTokens()).isEqualTo(10);
+        assertThat(payment.getBurstCapacity()).isEqualTo(30);
     }
 
     @Test
@@ -96,7 +100,7 @@ class RedisBucketRateLimiterUnitTest {
     private RedisBucketRateLimiter limiter() {
         given(redisRateLimiter.getConfig()).willReturn(registered);
         given(redisRateLimiter.getRemainingHeader()).willReturn(RedisRateLimiter.REMAINING_HEADER);
-        return new RedisBucketRateLimiter(redisRateLimiter, new GatewayRateLimitProperties(true, null, null, null, null));
+        return new RedisBucketRateLimiter(redisRateLimiter, new GatewayRateLimitProperties(true, null, null, null, null, null));
     }
 
     private void answer(RateLimiter.Response response) {

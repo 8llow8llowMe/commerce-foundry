@@ -24,7 +24,10 @@ public enum RateLimitPolicy {
     CART_WRITE("cart-write", "/api/v1/carts/**", WriteMethods.ALL, GatewayRateLimitProperties::cartWrite),
     // 주문서 미리보기는 수량 · 배송지를 바꿀 때마다 나간다 — 주문 생성과 한도를 나누지 않으면 몇 번 바꾼 뒤 "주문하기" 가 429 를 받는다 (#158)
     ORDER_QUOTE("order-quote", "/api/v1/orders/quotes", Set.of(HttpMethod.POST), GatewayRateLimitProperties::orderQuote),
-    ORDER_WRITE("order-write", "/api/v1/orders/**", WriteMethods.ALL, GatewayRateLimitProperties::orderWrite);
+    ORDER_WRITE("order-write", "/api/v1/orders/**", WriteMethods.ALL, GatewayRateLimitProperties::orderWrite),
+    PAYMENT_WRITE("payment-write", "/api/v1/payments/**", WriteMethods.ALL, GatewayRateLimitProperties::paymentWrite);
+
+    private static final PathPattern PAYMENT_WEBHOOKS = PathPatternParser.defaultInstance.parse("/api/v1/payments/webhooks/**");
 
     /** Redis 키의 일부다 ({@code request_rate_limiter.{<id>.<id>:member:<memberId>}.tokens} · {@code ...{<id>.<id>:ip:<HMAC>}...}). 바꾸면 진행 중인 버킷이 새로 시작된다. */
     private final String id;
@@ -46,7 +49,8 @@ public enum RateLimitPolicy {
     /** 경로는 라우트 매칭과 같은 {@code PathPattern} 으로 본다 — 비예약 문자 인코딩도 같은 경로다. */
     public static Optional<RateLimitPolicy> match(HttpMethod method, PathContainer path) {
         return Arrays.stream(values())
-            .filter(policy -> policy.methods.contains(method) && policy.pathPattern.matches(path))
+            .filter(policy -> policy.methods.contains(method) && policy.pathPattern.matches(path)
+                && (policy != PAYMENT_WRITE || !PAYMENT_WEBHOOKS.matches(path)))
             .findFirst();
     }
 

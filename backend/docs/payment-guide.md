@@ -107,7 +107,10 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 | `GET /api/v1/payments/{paymentId}` | 200 | `PaymentResponse` |
 
 `PaymentResponse` 칸: `paymentId` · `orderId` · `pgOrderId`(문자열), `status`(metadata), `amount`, `orderName`, `method`(metadata | null), `easyPayProvider` | null,
-`approvedAt` | null, `failure{code, message}` | null(FAILED 만). 결제키 · 미확정 이유 · 주문 반영 여부 · 승인 시작 시각 · 고객 멱등 키는 내리지 않는다.
+`approvedAt` | null, `failure{code, message}` | null(FAILED 만).
+`failure.code`는 기존 결제사 코드이고 `failure.message`는 코드·PG 원문·저장 시점과 무관하게 "결제를 완료하지 못했습니다. 다른 결제 수단으로 다시 시도해 주세요."다(#440).
+과거 저장된 원문도 고객 준비·승인·조회 응답에는 싣지 않는다. 저장된 진단 정보는 바꾸지 않으며 FAILED 외에는 failure가 null이다.
+ 결제키 · 미확정 이유 · 주문 반영 여부 · 승인 시작 시각 · 고객 멱등 키는 내리지 않는다.
 
 **결제 준비** — 업무 키는 주문 아이디 + 주문당 활성 결제 시도 하나(`uk_payment_active_order_id`)라 `Idempotency-Key` 를 받지 않는다.
 
@@ -159,7 +162,7 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 | `PAYMENT_008` | 400 | 결제 금액 불일치 |
 | `PAYMENT_009` | 400 | 결제키 불일치 |
 | `PAYMENT_010` | 503 + `Retry-After` | 결제사에 연결하지 못함(청구 없음, 같은 요청 재시도) |
-| `PAYMENT_011` | 503 | 주문 정보를 잠시 불러올 수 없음 |
+| `PAYMENT_011` | 503 + `Retry-After: 10` | 주문 정보를 잠시 불러올 수 없음 |
 | `PAYMENT_012` | 409 | 결제 요청이 겹침 — 잠시 후 재시도. 번역되지 않은 도메인 예외의 마지막 안전망도 이 코드다(error 로그) |
 | `PAYMENT_013` | 500 | 승인 결과 기록 실패 — 상태 조회로 확인 |
 | `PAYMENT_014` | 409 | 같은 `Idempotency-Key` 로 다른 결제 승인을 요청할 수 없음 |
@@ -178,7 +181,9 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 - 응답 메시지는 언제나 오류 코드의 고정 문구다 — 핸들러는 예외 메시지가 아니라 `errorCode.getMessage()` 를 싣는다.
 - **운영 DDL** (#14 — `approval_idempotency_key` 칸 · `uk_payment_member_approval_key` · `ck_payment_approval_key_payment_key`)은 배포 전에 적용한다. dev 도 수동 적용한다 —
   `ddl-auto=update` 는 칸은 더하지만 기존 테이블에 check · unique 제약을 만들지 않는다.
-- 후속: #440 — 결제 쓰기 요청 제한, `PAYMENT_011` 의 `Retry-After`, 거절 문구 정책.
+- #440: 게이트웨이 결제 쓰기는 회원당 기본 분당 6회 · 순간 3회이며 초과 시 하류 호출 전에 429 `GATEWAY_006` + `Retry-After: 10`이다 (`security-guide.md` §7-3).
+  웹훅 경로는 이 버킷에서 제외하고 결제 상태 GET 폴링은 세지 않는다. `PAYMENT_011`의 `Retry-After: 10`은 클라이언트 재요청 간격 안내이며
+  서킷 복구나 승인 성공을 보장하지 않는다. 자동 승인 재시도를 추가하지 않으며 `PAYMENT_010`의 기존 Retry-After 처리와 별개다.
 - order-service 요약 호출은 서킷 `order-service`(4xx 는 `ignore-exceptions`)로 감싸고, 404 `ORDER_001` 만 "주문 없음" 이다. 다른 4xx · 401 `SECURITY_007` · 응답 계약 위반
   (아이디 불일치 · 금액 0 이하 · 모르는 통화 · 주문명 비었거나 100자 초과 · 기한 없음) · 5xx · 타임아웃 · 서킷 오픈은 503 `PAYMENT_011` 이다(`OrderInternalResponseSupport`).
 - 도메인 예외 메시지 · 결제키 · 원인 예외 메시지는 응답 · 로그에 싣지 않는다. 5xx 로그는 코드와 `causeType` 만이다(`coding-conventions.md` §8). 요청 DTO · 명령의 `toString` 은 결제키 앞 8자만 남긴다.

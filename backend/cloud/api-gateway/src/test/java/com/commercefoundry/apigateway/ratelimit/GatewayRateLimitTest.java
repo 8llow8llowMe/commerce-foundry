@@ -192,6 +192,47 @@ class GatewayRateLimitTest {
         assertThat(UPSTREAM_PATHS).containsExactly(CART_ITEMS);
     }
 
+    @Test
+    void paymentPrepareAndConfirmShareMemberBucketAndRejectBeforeDownstream() {
+        rateLimiter.deniedPolicy = RateLimitPolicy.PAYMENT_WRITE;
+        String authorization = BEARER + token();
+        for (String path : List.of("/api/v1/payments", "/api/v1/payments/confirm")) {
+            post(path, authorization).expectStatus().isEqualTo(429)
+                .expectHeader().valueEquals(HttpHeaders.RETRY_AFTER, "10")
+                .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_006");
+        }
+        assertThat(rateLimiter.calls).containsExactly("PAYMENT_WRITE:member:" + TestTokens.MEMBER_ID, "PAYMENT_WRITE:member:" + TestTokens.MEMBER_ID);
+        assertThat(UPSTREAM_PATHS).isEmpty();
+        post(ORDERS, authorization).expectStatus().isOk();
+    }
+
+    @Test
+    void paymentMembersHaveDistinctSubjectsAndPollingDoesNotCount() {
+        post("/api/v1/payments", BEARER + token()).expectStatus().isOk();
+        String otherToken = TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID + 1, MemberRole.CUSTOMER).tokenValue();
+        post("/api/v1/payments/confirm", BEARER + otherToken).expectStatus().isOk();
+        webTestClient.get().uri("/api/v1/payments/1").header(HttpHeaders.AUTHORIZATION, BEARER + token()).exchange().expectStatus().isOk();
+        assertThat(rateLimiter.calls).containsExactly("PAYMENT_WRITE:member:" + TestTokens.MEMBER_ID, "PAYMENT_WRITE:member:" + (TestTokens.MEMBER_ID + 1));
+    }
+
+    @Test
+    void webhooksSkipPaymentBucketEvenForMemberAndEnabledClientIp() {
+        rateLimiter.deny = true;
+        for (String path : List.of("/api/v1/payments/webhooks", "/api/v1/payments/webhooks/toss")) {
+            post(path, BEARER + token()).expectStatus().isOk();
+            webTestClient.post().uri(path).contentType(MediaType.APPLICATION_JSON).bodyValue("{}").exchange().expectStatus().isOk();
+        }
+        assertThat(rateLimiter.calls).isEmpty();
+        assertThat(UPSTREAM_PATHS).hasSize(4);
+    }
+
+    @Test
+    void paymentLimiterFailureKeepsExistingFailOpenPolicy() {
+        rateLimiter.fail = true;
+        post("/api/v1/payments/confirm", BEARER + token()).expectStatus().isOk();
+        assertThat(UPSTREAM_PATHS).containsExactly("/api/v1/payments/confirm");
+    }
+
     private static final String BEARER = "Bearer ";
 
     private WebTestClient.ResponseSpec post(String path, String authorization) {

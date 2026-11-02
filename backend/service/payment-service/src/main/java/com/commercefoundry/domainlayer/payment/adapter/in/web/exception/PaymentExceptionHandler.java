@@ -58,7 +58,12 @@ public class PaymentExceptionHandler {
         if (errorCode.getHttpStatus().is5xxServerError()) {
             log.warn("payment request failed. code={}, causeType={}", errorCode.getCode(), causeTypeOf(exception));
         }
-        return ResponseEntity.status(errorCode.getHttpStatus()).body(Response.fail(errorCode.getCode(), errorCode.getMessage()));
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(errorCode.getHttpStatus());
+        if (errorCode == PaymentErrorCode.ORDER_SERVICE_UNAVAILABLE) {
+            // 재요청 간격 안내다. 서킷 복구를 보장하거나 승인 요청을 자동 재전송하지 않는다.
+            response.header(HttpHeaders.RETRY_AFTER, "10");
+        }
+        return response.body(Response.fail(errorCode.getCode(), errorCode.getMessage()));
     }
 
     /**
