@@ -588,6 +588,49 @@ payload (두 이벤트 모두 같은 모양 — **이 JSON 이 계약 정본이�
   payment internal 재조회로 진위를 확정한다(`payment-guide.md` §6). 클러스터 인증 · ACL 은 운영 인프라 과제로 따로 본다.
 - DLT 재처리는 사람이 한다(messaging-core README). DLT 에 남은 선점은 만료 스윕(안전망, §3-3)이 TTL 뒤 푼다.
 
+### 3-6. 결제 승인 소비 (#308 PR-B2)
+
+`PaymentApprovedEventListener` → `OrderPaymentEventUseCase` → `OrderPaymentEventFacade`가 `payment-approved` v1을 처리한다.
+토픽은 `<ns>.payment.payment-approved`, 그룹은 `<ns>.order.payment-approved`, Kafka key와 aggregateId는 payload.orderId다.
+원격 I/O가 있어 Facade는 `NEVER`, DB 쓰기만 `OrderPaymentProcessor.complete`의 `REQUIRES_NEW(timeout=10s)`다.
+
+1. 봉투 종류/생산자/aggregate/version, 양수 문자열 ID, 통화·양수금액·승인시각·수단 코드를 검증한다. inbox에 있으면 건너뛴다.
+2. `PaymentApprovalProcessor`만 payment internal을 조회하고 이벤트와 ID/회원/금액/통화/승인시각/수단을 대조한다. 승인시각은 timestamp(6)에 맞춰 마이크로초로 자른다.
+   Facade에는 `VerifiedPayment` application model만 넘긴다. 404/400/계약위반/알림↔원본 불일치는 즉시 DLT, 401/403/5xx/timeout은 재시도다.
+3. 원본↔주문의 소유/금액/통화 불일치는 `PAYMENT_MISMATCH` 회신이다. 주문 없음은 `ORDER_NOT_FOUND`, 다른 결제로 이미 결제완료면 `ALREADY_PAID`다.
+   CANCELED는 확정·재선점 없이 `ORDER_CANCELED`. PENDING_PAYMENT/EXPIRED만 §3-4의 확정·재선점→즉시확정을 호출한다.
+4. DONE이 아닌 결제는 WARN + `REJECTED_PAYMENT_NOT_DONE` 기록/inbox를 남긴다. CANCELED(전액취소)는 회신 없이 끝내고,
+   PARTIAL_CANCELED 등 잔액이 남을 수 있는 상태는 `PAYMENT_NOT_DONE` 거절 회신을 낸다. 조회 amount는 원승인 총액이므로 잔액을 계산하지 않는다.
+5. DB 쓰기 순서는 **주문 @Version flush → order_payment INSERT → inbox → 회신 outbox**다. 성공 회신 `order-paid`는
+   `{orderId,paymentId,stockReservationId,paidAt}`, 거절 `order-payment-rejected`는 `{orderId,paymentId,reason}`(모든 ID 문자열)다. 한 트랜잭션에 커밋/롤백한다.
+6. 주문 버전·결제/주문/inbox 유니크 경합은 롤백된 tx 밖에서 잡고 새 tx로 최대3회 재판정한다. 소진은 Kafka 재시도다.
+   이미 받은 확정선점 ID는 이 로컬 재시도 동안 유지한다. 취소가 이겼으면 `REJECTED_ORDER_CANCELED.stock_reservation_id`에 남겨 C가 복원한다.
+   다른 결제가 이겼으면 `REJECTED_ALREADY_PAID`에 선점을 넣지 않는다(이긴 주문의 재고를 복원하면 안 된다).
+7. inbox 보존7d가 지난 재처리/서로 다른 eventId의 같은 payment도 영구 `order_payment.payment_id` 기록으로 회신 중복을 막는다.
+   기존 회신은 outbox가 전달하며 중복 알림 때 새 회신을 만들지 않는다. DB 커밋 뒤 ack 전 재시작은 같은 inbox로 거른다.
+
+**배포 gate** — `MESSAGING_ENABLED=true`와 `ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED=true`(기본 false)가 모두 필요하다.
+전용 소비 gate를 켤 때만 `OrderPaymentConsumerConfig`가 승인/성공회신/거절회신 토픽과 각 `.dlt` 6개를 확인한다. 없거나 Kafka 불통이면 기동 실패다.
+gate OFF에서는 기존 required-topics(만료 토픽)만 확인하므로 기존 만료 outbox 릴레이를 계속 운영할 수 있다.
+**PR-C와 #15 완료 및 아래 미해결 복구창 검증 전에는 소비 gate와 운영 payment.enabled를 열지 않는다.**
+
+**남은 필수 복구창(PR-C)** — 확정 성공 뒤 DB 기록 전에 프로세스가 종료되고 그 사이 고객 취소가 커밋되면 재전달은 CANCELED부터 본다.
+메모리의 확정선점 ID는 사라졌고 재선점이 새 ID였으면 orders.stockReservationId는 옛 값이다. product는 orderId로 활성선점을 찾는 reserve 명령만 제공하고
+조회 API는 없다. CANCELED에 reserve/confirm을 호출할 수 없으므로 B2는 이 창의 확정선점 증거를 복구하지 못한다. **해결되지 않았다.**
+C는 안전한 조회 또는 영속증거 복구 경로 및 동일 claimId 복원을 설계·검증해야 한다. 기존 주문 ID만으로 복원가능하다고 가정하지 않는다.
+또한 확정→DB실패/프로세스종료 뒤 payment가 CANCELED/PARTIAL_CANCELED가 되어 재전달되면, 주문이 CANCELED가 아니어도
+`REJECTED_PAYMENT_NOT_DONE` 기록이 확정선점 ID 없이 영구히 남을 수 있다. B1의 도메인/DB check는 NOT_DONE에 선점참조를 허용하지 않는다.
+따라서 기존 모델로 이 변형을 해결했다고 간주하지 않는다. C는 취소주문 경합과 함께 **결제상태가 먼저 바뀐 복구창**도 모델/조회계약을 재설계하고
+실패주입·동일claimId복원을 검증해야 한다. 두 변형을 증명하기 전 gate OFF를 유지한다.
+
+**재시도와 liveness** — attempts8, initial2s, multiplier2, max60s. 7대기의 합은 **182s 순수대기**이며 성공시간 보장이 아니다.
+DefaultErrorHandler의 기본 seek 방식은 실패 레코드로 되돌린 뒤 poll해 재호출한다. 따라서 전체182s를 한 번의 poll 간격으로 합산하지 않는다.
+한 번의 backoff 최대60s에 한 처리의 원격/DB 대기가 더해진다. max.poll.records=1, max.poll.interval.ms=300000으로 배치 처리량을 제한한다.
+원격 호출의 명목 connect2s+read3s, 재고 최초확정/재선점/즉시확정 최대3회(15s)와 payment조회(5s), 읽기/쓰기 DB구간은 각10s timeout이다.
+초기 inbox읽기+최대3회 inspect/complete를 모두 합친 명목 DB70s와 원격20s+backoff60s=150s는 poll interval300s보다 작다.
+다만 커넥션풀 획득 대기/드라이버·OS·DNS가 이 명목 계산에 포함되지 않고 JDBC tx timeout도 벽시계 강제종료가 아니다. 무조건 liveness를 보장하지 않는다.
+운영에서 poll 지연/rebalance/DB pool timeout을 관찰하고 조정한다. 재시도 동안 같은 파티션의 뒤 주문도 지연되며 상한 뒤 DLT는 사람이 원인 해결 후 재전송한다.
+
 ## 4. 배송
 
 송장(배송)은 **delivery-service 소유**다 — 컨텍스트 `domainlayer/shipment`, **주문당 1건**. 주문 상태 반영은 **동기 internal 명령**(Feign)이다.

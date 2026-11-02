@@ -2,6 +2,8 @@ package com.commercefoundry.domainlayer.order.adapter.out.event;
 
 import com.commercefoundry.domainlayer.order.application.port.out.OrderEventPort;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
+import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
+import java.time.Instant;
 import com.commercefoundry.messaging.publish.DomainEvent;
 import com.commercefoundry.messaging.publish.EventPublisher;
 import lombok.RequiredArgsConstructor;
@@ -31,5 +33,24 @@ public class OrderEventAdapter implements OrderEventPort {
 
     /** {@code order-expired} · {@code order-canceled} v1 페이로드(두 이벤트가 같은 모양, §3-5) — 식별자는 문자열이다(JS 정밀도). 필드를 바꾸면 스키마 버전을 올린다. */
     public record OrderStockReleaseMessage(String orderId, String reservationId, String reason) {
+    }
+
+    @Override
+    public void paid(OrderPayment payment, Instant paidAt) {
+        eventPublisher.publish(new DomainEvent("order", Long.toString(payment.orderId()), "order-paid", 1,
+            new OrderPaidMessage(Long.toString(payment.orderId()), Long.toString(payment.paymentId()),
+                Long.toString(payment.stockReservationId()), paidAt)));
+    }
+
+    @Override
+    public void paymentRejected(OrderPayment payment) {
+        eventPublisher.publish(new DomainEvent("order", Long.toString(payment.orderId()), "order-payment-rejected", 1,
+            new OrderPaymentRejectedMessage(Long.toString(payment.orderId()), Long.toString(payment.paymentId()), payment.result().rejectionReason())));
+    }
+
+    public record OrderPaidMessage(String orderId, String paymentId, String stockReservationId, Instant paidAt) {
+    }
+
+    public record OrderPaymentRejectedMessage(String orderId, String paymentId, String reason) {
     }
 }

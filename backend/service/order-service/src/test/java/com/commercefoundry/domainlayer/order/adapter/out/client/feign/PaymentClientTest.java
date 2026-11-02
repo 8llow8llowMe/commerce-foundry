@@ -141,7 +141,7 @@ class PaymentClientTest {
         PaymentQueryResult result = paymentQueryPort.findPayment(PAYMENT_ID).orElseThrow();
 
         assertThat(result).isEqualTo(new PaymentQueryResult(PAYMENT_ID, 4611686018427387905L, 4611686018427387904L, "DONE",
-            Money.of(129_000, CurrencyCode.KRW), Instant.parse("2026-10-21T01:00:03Z")));
+            Money.of(129_000, CurrencyCode.KRW), Instant.parse("2026-10-21T01:00:03Z"), "EASY_PAY"));
         assertThat(result.isDone()).isTrue();
         assertThat(REQUESTS).containsExactly("GET /internal/v1/payments/" + PAYMENT_ID);
         assertThat(AUTHORIZATIONS).singleElement().satisfies(values -> {

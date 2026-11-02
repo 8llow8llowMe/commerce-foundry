@@ -1,6 +1,8 @@
 package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
+import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
+import java.time.Instant;
 
 /**
  * 주문 도메인 이벤트 발행 — transactional outbox 에 넣는다 ({@code order-flow-guide.md} §3-5). 호출자 트랜잭션 안에서 불러야 상태 전이와 함께 커밋 · 롤백된다.
@@ -12,4 +14,8 @@ public interface OrderEventPort {
 
     /** 고객이 결제 전에 주문을 취소했다 (#16) — product-service 가 받아 {@code reservationId} 선점을 해제한다. {@code reason} 은 취소 사유 코드다. */
     void canceled(long orderId, long reservationId, OrderCancelReason reason);
+
+    void paid(OrderPayment payment, Instant paidAt);
+
+    void paymentRejected(OrderPayment payment);
 }

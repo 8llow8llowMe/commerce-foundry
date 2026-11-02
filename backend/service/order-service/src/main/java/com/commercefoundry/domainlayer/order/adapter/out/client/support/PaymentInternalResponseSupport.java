@@ -93,7 +93,8 @@ public class PaymentInternalResponseSupport {
                 throw new IllegalArgumentException("status and positive amount required");
             }
             Money amount = Money.of(body.amount().amount(), CurrencyCode.valueOf(body.amount().currency()));
-            return new PaymentQueryResult(paymentId, positiveId(body.orderId()), positiveId(body.memberId()), body.status().code(), amount, body.approvedAt());
+            return new PaymentQueryResult(paymentId, positiveId(body.orderId()), positiveId(body.memberId()), body.status().code(), amount,
+                body.approvedAt(), body.method() == null ? null : body.method().code());
         } catch (RuntimeException exception) {
             log.error("payment-service payment response violates contract. paymentId={}, type={}", paymentId, exception.getClass().getSimpleName());
             throw new PaymentQueryException(Failure.CONTRACT_VIOLATION, exception);
