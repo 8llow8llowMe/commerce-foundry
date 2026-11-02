@@ -72,9 +72,10 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     public ProductHeaderUpdateAdminResponse updateHeader(ProductHeaderUpdateCommand command) {
         try {
             ProductDescriptionSanitizer.Result description = productDescriptionSanitizer.sanitize(command.descriptionHtml());
-            var info = productHeaderUpdateProcessor.update(command, description.html());
+            ProductDescriptionSanitizer.Result descriptionEn = productDescriptionSanitizer.sanitize(command.descriptionHtmlEn());
+            var info = productHeaderUpdateProcessor.update(command, description.html(), descriptionEn.html());
             productAdminAuditProcessor.productUpdated(command.actorMemberId(), command.productId(), true);
-            return new ProductHeaderUpdateAdminResponse(productAdminPresenter.toDetailResponse(info), description.changed());
+            return new ProductHeaderUpdateAdminResponse(productAdminPresenter.toDetailResponse(info), description.changed() || descriptionEn.changed());
         } catch (RuntimeException exception) {
             productAdminAuditProcessor.productUpdated(command.actorMemberId(), command.productId(), false);
             throw exception;

@@ -80,6 +80,16 @@ public class ProductEntity extends BaseEntity {
     @Column(name = "description_html", comment = "상세 설명 HTML. 표시 전 sanitize 대상")
     private String descriptionHtml;
 
+    @Column(name = "name_en", length = 100, comment = "영문 상품명. 없으면 기본 상품명 사용")
+    private String nameEn;
+
+    @Column(name = "summary_en", length = 200, comment = "영문 한 줄 요약. 없으면 기본 요약 사용")
+    private String summaryEn;
+
+    @JdbcTypeCode(SqlTypes.LONG32VARCHAR)
+    @Column(name = "description_html_en", comment = "영문 상세 설명 HTML. 없으면 기본 설명 사용, 표시 전 sanitize 대상")
+    private String descriptionHtmlEn;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "sale_status", nullable = false, length = 20,
         comment = "판매 상태 (ON_SALE / STOP_SELLING). 품절은 저장하지 않는다 — 재고에서 유도")

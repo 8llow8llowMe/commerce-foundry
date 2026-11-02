@@ -23,6 +23,8 @@ import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigu
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,6 +32,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -48,6 +51,34 @@ class ProductWebControllerTest {
 
     @MockitoBean
     private ProductWebUseCase productWebUseCase;
+
+    @Test
+    void acceptLanguageReachesLocaleContextAndResponseVariesByLanguage() {
+        AtomicReference<Locale> seen = new AtomicReference<>();
+        given(productWebUseCase.searchProducts(null, ProductSortType.NEWEST, 0, 20)).willAnswer(invocation -> {
+            seen.set(LocaleContextHolder.getLocale());
+            return new SliceResponse<>(List.of(), false);
+        });
+
+        MvcTestResult result = mvc.get().uri("/api/v1/products").header("Accept-Language", "en-US").exchange();
+
+        assertThat(result).hasStatusOk();
+        assertThat(seen.get().getLanguage()).isEqualTo("en");
+        assertThat(result.getResponse().getHeader("Vary")).contains("Accept-Language");
+    }
+
+    @Test
+    void noLanguageHeaderUsesKoreanByDefault() {
+        AtomicReference<Locale> seen = new AtomicReference<>();
+        given(productWebUseCase.searchProducts(null, ProductSortType.NEWEST, 0, 20)).willAnswer(invocation -> {
+            seen.set(LocaleContextHolder.getLocale());
+            return new SliceResponse<>(List.of(), false);
+        });
+
+        assertThat(mvc.get().uri("/api/v1/products").exchange()).hasStatusOk();
+
+        assertThat(seen.get().getLanguage()).isEqualTo("ko");
+    }
 
     @Test
     @DisplayName("목록은 익명으로 200 이고 Response<SliceResponse> 봉투다 — 아이디는 문자열, 금액은 {amount, currency}")

@@ -45,6 +45,22 @@ class ProductPersistenceMapperTest {
     }
 
     @Test
+    void englishTextSurvivesEntityDomainRoundTrip() {
+        Product original = productMapper.toDomain(product()
+            .nameEn("Linen jacket")
+            .summaryEn("Light jacket")
+            .descriptionHtmlEn("<p>English details</p>")
+            .build());
+
+        ProductEntity saved = productMapper.toEntity(original);
+
+        assertThat(saved.getNameEn()).isEqualTo("Linen jacket");
+        assertThat(saved.getSummaryEn()).isEqualTo("Light jacket");
+        assertThat(saved.getDescriptionHtmlEn()).isEqualTo("<p>English details</p>");
+        assertThat(productMapper.toDomain(saved).nameEn()).isEqualTo("Linen jacket");
+    }
+
+    @Test
     @DisplayName("상품: 프리오더 여부 · 발송 예정일을 읽는다. 일반 상품은 false · null 이다")
     void productPreorder() {
         Product preorder = productMapper.toDomain(product().preorder(true).expectedShipDate(LocalDate.of(2026, 11, 20)).build());

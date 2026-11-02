@@ -10,12 +10,14 @@ import com.commercefoundry.domainlayer.product.application.port.out.query.Produc
 import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.ProductSummary;
+import com.commercefoundry.domainlayer.product.domain.model.ProductText;
 import com.commercefoundry.global.properties.StoreProperties;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -41,12 +43,16 @@ public class ProductListProcessor {
     private final StoreProperties storeProperties;
 
     public Slice<ProductListItemInfo> search(ProductSearchCriteria criteria) {
+        return search(criteria, Locale.KOREAN);
+    }
+
+    public Slice<ProductListItemInfo> search(ProductSearchCriteria criteria, Locale locale) {
         Slice<ProductListQueryResult> rows = productRepositoryPort.searchVisible(criteria);
         if (!rows.hasContent()) {
             return new SliceImpl<>(List.of(), rows.getPageable(), rows.hasNext());
         }
 
-        List<ProductListItemInfo> items = summarize(rows.getContent()).stream().map(ProductListItemInfo::from).toList();
+        List<ProductListItemInfo> items = summarize(rows.getContent(), locale).stream().map(ProductListItemInfo::from).toList();
         return new SliceImpl<>(items, rows.getPageable(), rows.hasNext());
     }
 
@@ -64,12 +70,12 @@ public class ProductListProcessor {
         if (rows.isEmpty()) {
             return Map.of();
         }
-        return summarize(rows).stream()
+        return summarize(rows, Locale.KOREAN).stream()
             .collect(Collectors.toMap(ProductSummary::productId, Function.identity(), (left, right) -> left, LinkedHashMap::new));
     }
 
     /** 행 순서를 지킨다. 집계 · 대표 이미지 · 정지 이미지는 행의 상품 아이디로 한 번씩 읽는다. */
-    private List<ProductSummary> summarize(List<ProductListQueryResult> rows) {
+    private List<ProductSummary> summarize(List<ProductListQueryResult> rows, Locale locale) {
         List<Long> productIds = rows.stream().map(ProductListQueryResult::productId).toList();
         Map<Long, SkuAggregateQueryResult> aggregates = skuRepositoryPort.aggregateByProductIds(productIds).stream()
             .collect(Collectors.toMap(SkuAggregateQueryResult::productId, Function.identity()));
@@ -79,7 +85,7 @@ public class ProductListProcessor {
         Map<Long, ProductImage> hoverImages = secondStillImageByProduct(productImageRepositoryPort.findStillImagesByProductIds(productIds));
 
         return rows.stream()
-            .map(row -> toSummary(row, aggregates.get(row.productId()), thumbnails.get(row.productId()), hoverImages.get(row.productId())))
+            .map(row -> toSummary(row, aggregates.get(row.productId()), thumbnails.get(row.productId()), hoverImages.get(row.productId()), locale))
             .toList();
     }
 
@@ -108,7 +114,8 @@ public class ProductListProcessor {
     /**
      * @param aggregate 판매중 SKU 집계. SKU 가 하나도 없는 상품은 집계 행이 없어 null 이다 — 판매중 · 구매 가능 SKU 없음으로 본다
      */
-    private ProductSummary toSummary(ProductListQueryResult row, SkuAggregateQueryResult aggregate, ProductImage thumbnail, ProductImage hoverImage) {
+    private ProductSummary toSummary(ProductListQueryResult row, SkuAggregateQueryResult aggregate, ProductImage thumbnail,
+                                     ProductImage hoverImage, Locale locale) {
         ProductSaleSummary summary = aggregate == null
             ? ProductSaleSummary.of(row.saleStatus(), row.salePrice(), row.listPrice(), false, false, null, null)
             : ProductSaleSummary.of(
@@ -117,7 +124,7 @@ public class ProductListProcessor {
             );
 
         return new ProductSummary(
-            row.productId(), row.name(), thumbnail, hoverImage,
+            row.productId(), ProductText.select(locale, row.name(), row.nameEn()), thumbnail, hoverImage,
             summary.salePrice(), summary.listPrice(), summary.discountRate(), summary.hasOptionSurcharge(),
             summary.saleStatus(), storeProperties.features().customOrder() && row.customOrder(),
             storeProperties.features().preorder() && row.preorder()

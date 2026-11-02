@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
@@ -15,6 +16,7 @@ import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.List;
+import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -86,7 +88,7 @@ class ProductDetailBreadcrumbTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Category>> path = ArgumentCaptor.forClass(List.class);
-        verify(productDetailProcessor).getDetail(eq(product), path.capture());
+        verify(productDetailProcessor).getDetail(eq(product), path.capture(), any(Locale.class));
         List<Long> expected = expectedIds.isEmpty() ? List.of() : List.of(expectedIds.split(";")).stream().map(Long::valueOf).toList();
         assertThat(path.getValue()).extracting(Category::id).as(scenario).containsExactlyElementsOf(expected);
     }

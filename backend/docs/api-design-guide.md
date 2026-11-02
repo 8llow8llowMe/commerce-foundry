@@ -633,6 +633,10 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
 
 ### 2-7. 고객 상품의 프리오더 · 영상 필드 (product-service, #61)
 
+고객 상품 목록과 상세의 상품명·요약·상세 HTML은 `Accept-Language`가 `en` 계열일 때 영문 저장 값을 우선한다(#20).
+영문 값이 비어 있으면 **필드별로** 기존 한국어 값을 사용한다. 헤더가 없거나 지원하지 않는 언어도 한국어다.
+두 응답에는 `Vary: Accept-Language`를 넣어 언어별 캐시를 구분한다. 가격·옵션명·enum metadata와 전시/룩 카드는 이 단계에서 기존 KRW·한국어 계약을 유지한다.
+
 | 응답 | 필드 | 뜻 |
 |------|------|----|
 | 목록 `GET /api/v1/products` | `hoverImage` | 목록 카드 hover 용 두 번째 정지 이미지. 모양은 `thumbnail`(`ProductThumbnailItem`)과 같다. 대표 · 갤러리를 노출 순서 → 아이디 오름차순으로 세어 두 번째이고, 영상은 세지 않는다. 1장 이하면 `null` |
@@ -904,9 +908,9 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 
 #### 어드민 상품 기본 정보 수정 API (#9 후속)
 
-- `PUT /api/v1/admin/products/{productId}/header`는 ADMIN 전용이며 `version`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`을 받는다. 이 필드만 전체 교체한다. `summary`·`descriptionHtml`은 null로 지울 수 있다. 응답은 `product`(어드민 상세 스냅숏)와 `descriptionHtmlSanitized`다.
+- `PUT /api/v1/admin/products/{productId}/header`는 ADMIN 전용이며 `version`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`과 선택적 `nameEn`, `summaryEn`, `descriptionHtmlEn`을 받는다. 기본 문구는 전체 교체하고 영문 문구는 빠지거나 null이면 기존 값을 유지한다(기존 FE 호환). 영문 값을 지우려면 빈 문자열을 보낸다. 영문 입력은 등록 뒤 이 API에서 추가한다. 응답은 영문 문구를 포함한 `product`(어드민 상세 스냅숏)와 두 HTML 정제 결과를 합친 `descriptionHtmlSanitized`다.
 - 버전은 직전 어드민 상세 조회에서 얻은 값을 보낸다. 불일치·동시 merge 충돌은 409 `PRODUCT_010`, 없거나 삭제된 상품은 404 `PRODUCT_001`이다. 상세 HTML은 등록과 같은 허용 목록으로 정제한다.
-- 카테고리·가격·프리오더·맞춤 입력·옵션·SKU·이미지·재고·선점은 이 API에서 수정하지 않는다. 카테고리 연결을 바꾸지 않아 카테고리 행 잠금은 필요 없다. 수정 트랜잭션은 5초이며 `PRODUCT_UPDATE` 감사를 남긴다. 신규 DDL은 없다. FE는 수정 후 반환된 버전과 정제 경고를 사용한다.
+- 카테고리·가격·프리오더·맞춤 입력·옵션·SKU·이미지·재고·선점은 이 API에서 수정하지 않는다. 카테고리 연결을 바꾸지 않아 카테고리 행 잠금은 필요 없다. 수정 트랜잭션은 5초이며 `PRODUCT_UPDATE` 감사를 남긴다. #20에서 `product.name_en`, `summary_en`, `description_html_en` nullable 컬럼을 추가한다. FE는 수정 후 반환된 버전과 정제 경고를 사용한다.
 
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다

@@ -48,6 +48,37 @@ class ProductHeaderUpdateProcessorTest {
     }
 
     @Test
+    void englishHeaderIsSavedWithKoreanHeaderInSameVersionedUpdate() {
+        Product current = product(null);
+        given(products.findAllByIdsIncludingHidden(List.of(1L))).willReturn(List.of(current));
+        var translated = new ProductHeaderUpdateCommand(1L, 7L, 99L, "새 이름", null, "<p>정제본</p>",
+            SaleStatus.STOP_SELLING, false, "New name", null, "<p>English</p>");
+
+        processor.update(translated, "<p>정제본</p>", "<p>English</p>");
+
+        ArgumentCaptor<Product> saved = ArgumentCaptor.forClass(Product.class);
+        verify(products).update(saved.capture());
+        assertThat(saved.getValue().nameEn()).isEqualTo("New name");
+        assertThat(saved.getValue().summaryEn()).isNull();
+        assertThat(saved.getValue().descriptionHtmlEn()).isEqualTo("<p>English</p>");
+        assertThat(saved.getValue().version()).isEqualTo(7L);
+    }
+
+    @Test
+    void legacyHeaderUpdateKeepsEnglishAndEmptyInputClearsEnglish() {
+        Product current = new Product(1L, 2L, "이전 이름", "요약", "<p>이전</p>", SaleStatus.ON_SALE, true,
+            Money.of(10000, KRW), null, 5, false, null, null, false, null, 7L, null, 99L,
+            "Old English", "Old summary", "<p>Old</p>");
+        given(products.findAllByIdsIncludingHidden(List.of(1L))).willReturn(List.of(current));
+        ArgumentCaptor<Product> saved = ArgumentCaptor.forClass(Product.class);
+
+        processor.update(command, "<p>정제본</p>", null);
+        verify(products).update(saved.capture());
+        assertThat(saved.getValue().nameEn()).isEqualTo("Old English");
+        assertThat(saved.getValue().descriptionHtmlEn()).isEqualTo("<p>Old</p>");
+    }
+
+    @Test
     void staleVersionCannotWrite() {
         given(products.findAllByIdsIncludingHidden(List.of(1L))).willReturn(List.of(product(null)));
         var stale = new ProductHeaderUpdateCommand(1L, 6L, 99L, "새 이름", null, null, SaleStatus.ON_SALE, true);
