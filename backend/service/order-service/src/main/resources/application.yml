@@ -182,3 +182,10 @@ order:
       interval: 30s
       batch-size: 100
       max-batches-per-run: 10
+  purchase-confirmation:
+    auto:
+      enabled: true
+      period: 7d
+      interval: 1h
+      batch-size: 100
+      max-batches-per-run: 10

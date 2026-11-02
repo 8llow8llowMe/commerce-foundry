@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.order.adapter.out.persistence.repository;
 
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.entity.OrderEntity;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderConfirmationCandidateQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PendingProductQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
@@ -70,4 +71,23 @@ public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
          order by o.paymentDueAt, o.id
         """)
     List<OrderExpiryCandidateQueryResult> findDueAfter(OrderStatus status, Instant now, Instant afterDueAt, Long afterId, Limit limit);
+
+    /** 자동 구매 확정 조회는 (deliveredAt, id) 키셋과 기존 인덱스를 사용한다. */
+    @Query("""
+        select new com.commercefoundry.domainlayer.order.application.port.out.query.OrderConfirmationCandidateQueryResult(o.id, o.deliveredAt)
+          from OrderEntity o
+         where o.status = :status and o.deliveredAt <= :cutoff
+         order by o.deliveredAt, o.id
+        """)
+    List<OrderConfirmationCandidateQueryResult> findConfirmationDue(OrderStatus status, Instant cutoff, Limit limit);
+
+    /** 자동 구매 확정 조회는 (deliveredAt, id) 키셋과 기존 인덱스를 사용한다. */
+    @Query("""
+        select new com.commercefoundry.domainlayer.order.application.port.out.query.OrderConfirmationCandidateQueryResult(o.id, o.deliveredAt)
+          from OrderEntity o
+         where o.status = :status and o.deliveredAt <= :cutoff and o.deliveredAt >= :afterDeliveredAt
+           and (o.deliveredAt > :afterDeliveredAt or (o.deliveredAt = :afterDeliveredAt and o.id > :afterId))
+         order by o.deliveredAt, o.id
+        """)
+    List<OrderConfirmationCandidateQueryResult> findConfirmationDueAfter(OrderStatus status, Instant cutoff, Instant afterDeliveredAt, Long afterId, Limit limit);
 }

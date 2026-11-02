@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderAdminSummaryQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderConfirmationCandidateQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderMemberSummaryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderStatusHistoryQueryResult;
@@ -75,6 +76,12 @@ public interface OrderRepositoryPort {
      * @throws org.springframework.dao.OptimisticLockingFailureException 읽은 뒤 결제 완료 · 다른 인스턴스의 만료가 먼저 커밋했을 때
      */
     void saveExpiry(Order expired, OrderStatusHistory history);
+
+    /** 자동 구매 확정 조회는 (deliveredAt, id) 키셋과 기존 인덱스를 사용한다. */
+    List<OrderConfirmationCandidateQueryResult> findDueForConfirmation(Instant cutoff, int limit);
+
+    /** 자동 구매 확정 조회는 (deliveredAt, id) 키셋과 기존 인덱스를 사용한다. */
+    List<OrderConfirmationCandidateQueryResult> findDueForConfirmationAfter(Instant cutoff, Instant afterDeliveredAt, long afterOrderId, int limit);
 
     /**
      * 회원의 주문 내역 한 조각 (#16) — 최신순(주문 아이디 내림차순, {@code idx_orders_member_id_id}). 전체 건수를 세지 않는다.
