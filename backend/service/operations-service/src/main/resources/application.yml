@@ -107,6 +107,9 @@ snowflake:
 # 백그라운드 작업 엔진 (architecture-guide.md §10). 값이 빠지거나 0 · 음수면 기동하지 않는다 (JobProperties)
 operations:
   jobs:
+    result-file:
+      cleanup-initial-delay: ${OPERATIONS_JOBS_RESULTFILE_CLEANUPINITIALDELAY:1m}
+      cleanup-delay: ${OPERATIONS_JOBS_RESULTFILE_CLEANUPDELAY:1m}
     worker:
       # false 면 이 인스턴스는 실행 신호를 받지 않는다(등록만). 다른 인스턴스가 실행한다
       enabled: true
