@@ -59,6 +59,35 @@ class ProductAdminControllerTest {
     private ProductAdminUseCase productAdminUseCase;
 
     @Test
+    void updateHeaderRequiresAdminAndPassesVersionAndActor() {
+        String body = "{\"version\":7,\"name\":\" 새 이름 \",\"summary\":null,\"descriptionHtml\":\"<p>설명</p>\",\"saleStatus\":\"STOP_SELLING\",\"visible\":false}";
+        String uri = PATH + "/7/header";
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(productAdminUseCase);
+
+        var result = mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatusOk();
+        var command = org.mockito.ArgumentCaptor.forClass(com.commercefoundry.domainlayer.product.application.command.ProductHeaderUpdateCommand.class);
+        verify(productAdminUseCase).updateHeader(command.capture());
+        assertThat(command.getValue().version()).isEqualTo(7L);
+        assertThat(command.getValue().actorMemberId()).isEqualTo(TestTokens.MEMBER_ID);
+        assertThat(command.getValue().name()).isEqualTo("새 이름");
+    }
+
+    @Test
+    void updateHeaderRejectsMissingVersion() {
+        var result = mvc.put().uri(PATH + "/7/header").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"name\":\"상품\",\"saleStatus\":\"ON_SALE\",\"visible\":true}")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @Test
     @DisplayName("ADMIN 이면 200 — PageResponse 모양이고 아이디는 String, 금액은 {amount, currency}, enum 은 {code, name, description}, 시각은 UTC ISO 다")
     void adminListContract() {
         ProductListAdminItem item = ProductListAdminItem.builder()

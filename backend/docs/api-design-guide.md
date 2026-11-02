@@ -900,7 +900,13 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   FE는 다시 조회한 뒤 재시도한다. 조회와 삭제 사이에 먼저 완료된 편집도 현재 상태를 대상으로 삭제하므로, 편집 화면 버전 비교 계약은 없다.
 - SKU·옵션·이미지·맞춤 입력·진열 카테고리·재고·선점과 기존 주문을 변경하지 않는다. 신규 선점은 기존 판매 가능 판정으로 거절하고,
   internal SKU 조회에는 상품과 SKU를 유지하며 `purchasable=false`로 알린다. S3·Kafka·서비스 간 호출은 없다. 새 엔티티·운영 DDL도 없다.
-- 상품 수정·판매 상태 변경·옵션 은퇴·이미지 첨부는 후속 범위다. FE 계약 검토자는 `seonghoho`다.
+- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리·가격·옵션·SKU·이미지 편집은 후속 범위다. FE 계약 검토자는 `seonghoho`다.
+
+#### 어드민 상품 기본 정보 수정 API (#9 후속)
+
+- `PUT /api/v1/admin/products/{productId}/header`는 ADMIN 전용이며 `version`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`을 받는다. 이 필드만 전체 교체한다. `summary`·`descriptionHtml`은 null로 지울 수 있다. 응답은 `product`(어드민 상세 스냅숏)와 `descriptionHtmlSanitized`다.
+- 버전은 직전 어드민 상세 조회에서 얻은 값을 보낸다. 불일치·동시 merge 충돌은 409 `PRODUCT_010`, 없거나 삭제된 상품은 404 `PRODUCT_001`이다. 상세 HTML은 등록과 같은 허용 목록으로 정제한다.
+- 카테고리·가격·프리오더·맞춤 입력·옵션·SKU·이미지·재고·선점은 이 API에서 수정하지 않는다. 카테고리 연결을 바꾸지 않아 카테고리 행 잠금은 필요 없다. 수정 트랜잭션은 5초이며 `PRODUCT_UPDATE` 감사를 남긴다. 신규 DDL은 없다. FE는 수정 후 반환된 버전과 정제 경고를 사용한다.
 
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다

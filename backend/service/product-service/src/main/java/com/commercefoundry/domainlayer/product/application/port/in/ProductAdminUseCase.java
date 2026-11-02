@@ -4,14 +4,19 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.Product
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductHeaderUpdateAdminResponse;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
+import com.commercefoundry.domainlayer.product.application.command.ProductHeaderUpdateCommand;
 import com.commercefoundry.persistence.dto.PageResponse;
 
 /**
  * 어드민 상품 관리. 숨김 상품을 포함한다 — 고객 상품 조회({@link ProductWebUseCase})와 DTO 를 공유하지 않는다.
  */
 public interface ProductAdminUseCase {
+
+    /** Versioned replacement of editable header fields only; product children and prices remain unchanged. */
+    ProductHeaderUpdateAdminResponse updateHeader(ProductHeaderUpdateCommand command);
 
     /** 숨김을 포함한 편집용 저장 스냅숏. 삭제되었거나 없는 상품은 404 다. */
     ProductDetailAdminResponse getProduct(long productId);
