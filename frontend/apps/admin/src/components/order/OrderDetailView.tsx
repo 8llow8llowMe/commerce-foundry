@@ -100,7 +100,11 @@ export function OrderDetailView({ order }: { order: OrderDetail }) {
         </dl>
       </section>
 
-      <section aria-labelledby="order-histories" className="flex flex-col gap-3">
+      <section
+        aria-labelledby="order-histories"
+        data-tour="order-histories"
+        className="flex flex-col gap-3"
+      >
         <h2 id="order-histories" className="font-medium">
           상태 이력
         </h2>
