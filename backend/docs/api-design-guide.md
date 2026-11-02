@@ -33,12 +33,15 @@
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
 | operations-service | — | `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**`, `/api/v1/admin/onboarding/**` |
+| support-service | `/api/v1/support/**` | `/api/v1/admin/support/**` |
 
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
 상품 사이즈표(#216)의 고객 · 어드민 조회는 새 접두어가 아니다 — `GET /api/v1/products/{productId}/size-chart`,
 `GET|PUT /api/v1/admin/products/{productId}/size-chart` 는 기존 `products/**` 다. 템플릿 컬렉션만 `/api/v1/admin/size-chart-templates/**` 다.
 SKU 원가 이력(#361)은 SKU 하위 리소스라 `/api/v1/admin/skus/**` 를 새로 둔다(§2-12).
 AI 상품 초안(#359)은 상품이 아직 없는 자원이라 `/api/v1/admin/product-drafts/**` 를 새로 둔다(§2-14).
+고객 상담(#470)은 `support-service` 의 `/api/v1/support/**` · `/api/v1/admin/support/**` 다. 비회원 상담을 받으므로 고객 경로는 게이트웨이에서 무토큰도 통과하고 인가는 서비스가 정한다.
+WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 — 게이트웨이 WS 프록시와 함께 #470-C 에서 더한다.
 
 - **관리자 로그인은 `POST /api/v1/auth/admin/login` 이다(고객 열의 `/api/v1/auth/**`, #6).** **이슈 #6 원문의 `/api/v1/admin/auth/login` 과 다르다** — `/api/v1/admin/**` 아래에 두지 않는다 —
   그 경로는 게이트웨이 · 서비스 URL 규칙이 둘 다 ADMIN 토큰을 요구해 토큰을 받으러 오는 익명 요청이 닿지 못한다. 진입 패키지도 `adapter/in/web` 이고

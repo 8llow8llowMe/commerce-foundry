@@ -148,6 +148,10 @@ springdoc:
         url: /docs/operations-service/v3/api-docs/customer
       - name: 운영 — 어드민
         url: /docs/operations-service/v3/api-docs/admin
+      - name: 상담 — 고객
+        url: /docs/support-service/v3/api-docs/customer
+      - name: 상담 — 어드민
+        url: /docs/support-service/v3/api-docs/admin
 
 management:
   endpoints:

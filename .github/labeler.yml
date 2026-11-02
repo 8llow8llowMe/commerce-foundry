@@ -78,6 +78,10 @@ backend-operations-service:
   - changed-files:
       - any-glob-to-any-file: 'backend/service/operations-service/**'
 
+backend-support-service:
+  - changed-files:
+      - any-glob-to-any-file: 'backend/service/support-service/**'
+
 backend-api-gateway:
   - changed-files:
       - any-glob-to-any-file: 'backend/cloud/api-gateway/**'

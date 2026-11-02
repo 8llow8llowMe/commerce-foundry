@@ -1149,7 +1149,7 @@ eureka:
   그래서 **Eureka 가 먼저 떠 있어야 한다**(`deploy-guide.md` §5 기동 순서). 테스트는 `eureka.client.enabled=false` 라 영향이 없다.
 - `EUREKA_PASSWORD` 는 기본값이 없다. 로컬도 `backend/.env` 에 넣는다(`local-run-guide.md` §2).
 - **로그에 비밀번호가 나오지 않게 한다** — Eureka 에 닿지 않으면 `RedirectingEurekaHttpClient` 가 INFO · WARN 으로 `defaultZone` 원문(userinfo 포함)을 남긴다.
-  7개 모듈 yml 이 그 로거를 `ERROR` 로 둔다(연결 실패 신호는 `RetryableEurekaHttpClient` 의 WARN 이 남긴다). `com.netflix.discovery` 를 DEBUG 로 올리지 않는다 —
+  모든 모듈 yml 이 그 로거를 `ERROR` 로 둔다(연결 실패 신호는 `RetryableEurekaHttpClient` 의 WARN 이 남긴다). `com.netflix.discovery` 를 DEBUG 로 올리지 않는다 —
   `ConfigClusterResolver` 등이 같은 URL 을 찍는다. 요청 자체는 userinfo 를 뗀 URL 로 나가 예외 메시지에는 실리지 않는다.
 
 ### 12-4. 비밀번호 교체 런북
@@ -1168,7 +1168,7 @@ eureka:
 |------|--------|-------------|
 | service-discovery | `DiscoverySecurityTest` (실제 포트 HTTP) | 무자격 조회 401 + `WWW-Authenticate: Basic` · 무자격 / 틀린 비밀번호 / 다른 사용자 등록 401 이고 레지스트리에 없음 · 올바른 자격 증명 등록 204 · 조회 200 · health 익명 UP · 다른 actuator 401 · 대시보드 익명 401 · 인증해도 기본 꺼짐 404 |
 | service-discovery | `DiscoveryPasswordStartupGuardTest` | hex 64자 통과 · 없음 · 공백 · 풀리지 않은 플레이스홀더 · 31자 · `:` `@` `%3A` 공백 포함 시 기동 실패, 메시지에 값 없음 |
-| service-discovery | `EurekaClientCredentialTest` | 클라이언트가 `http://eureka:<비밀번호>@localhost:<port>/eureka/` userinfo 를 Basic 으로 실어 등록한다 · 틀린 비밀번호는 Basic 으로 실려도 등록되지 않는다 · userinfo 에 `:` 가 더 있으면 등록되지 않고 클라이언트가 뜨지 않는다 · 연결 거부 로그에 비밀번호가 없다(`RedirectingEurekaHttpClient` ERROR, 7개 모듈 yml 과 같은 설정) |
+| service-discovery | `EurekaClientCredentialTest` | 클라이언트가 `http://eureka:<비밀번호>@localhost:<port>/eureka/` userinfo 를 Basic 으로 실어 등록한다 · 틀린 비밀번호는 Basic 으로 실려도 등록되지 않는다 · userinfo 에 `:` 가 더 있으면 등록되지 않고 클라이언트가 뜨지 않는다 · 연결 거부 로그에 비밀번호가 없다(`RedirectingEurekaHttpClient` ERROR, 모든 모듈 yml 과 같은 설정) |
 
 ## 13. 소셜 고객 로그인 (#5)
 

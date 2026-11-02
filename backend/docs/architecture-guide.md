@@ -28,12 +28,15 @@ backend/
     ├── order-service        장바구니 · 주문 · 주문 금액 계산 · 클레임(취소/반품/교환)
     ├── payment-service      PG 결제 승인/취소 · 웹훅 · 대사 (토스페이먼츠: 카드·카카오페이·네이버페이·PayPal)
     ├── delivery-service     배송비 정책(국내/해외) · 송장 · 배송 상태 추적
-    └── operations-service   백그라운드 작업(등록 · 실행 · 재시도 · 진행률 · 결과) · 정기 작업 · 어드민 알림 센터(#213)
+    ├── operations-service   백그라운드 작업(등록 · 실행 · 재시도 · 진행률 · 결과) · 정기 작업 · 어드민 알림 센터(#213)
+    └── support-service      고객 상담 — 대화(회원 · 비회원) · AI 상담 응답 · 상담원 이관 · 실시간 전달(WebSocket) (#470)
 ```
 
 후순위(필요해지면 추가): 쿠폰/프로모션 컨텍스트.
 전에 후순위로 두었던 `batch-service`(자동 구매확정·결제 대사 배치·카페24 이관) · `notification-service`(알림)는 `operations-service` 가 흡수한다(#212) —
 배치는 작업 엔진의 핸들러 · 정기 작업으로, 어드민 알림은 같은 서비스의 알림 센터(#213)로 붙인다.
+고객 상담(#470)은 operations 에 붙이지 않고 `support-service` 로 따로 둔다 — 고객 공개 트래픽 · 장기 WebSocket 연결 · 잦은 배포를 작업 엔진 JVM 과 섞지 않으려고(장애 · 배포 격리).
+AI 사용량 원장 · 월 한도의 정본은 그대로 operations 하나다(support 는 원격 계량, `bootstrap-conventions.md` AI).
 
 ### 1-1. core 모듈 포함 기준
 

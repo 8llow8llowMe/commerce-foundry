@@ -1,6 +1,6 @@
 # Deploy Guide
 
-> 백엔드 7개 모듈(cloud 2 + service 5)을 컨테이너로 배포하는 규칙이다. Dockerfile · compose 는 모듈 디렉터리에 있다.
+> 백엔드 8개 모듈(cloud 2 + service 6 — operations-service 는 compose 가 아직 없다)을 컨테이너로 배포하는 규칙이다. Dockerfile · compose 는 모듈 디렉터리에 있다.
 > 파이프라인은 #198, Infra 등록(포트 값 · 네트워크 이름)은 #197, Vault 주입은 #32 에서 정한다. 정해지면 이 문서를 갱신한다.
 > **공개 저장소다.** 서버 주소 · 호스트 이름 · 도메인 · 포트 실값 · 시크릿을 이 문서와 compose 에 쓰지 않는다. 값은 env 로만 받는다.
 
@@ -59,6 +59,7 @@ GitHub (develop / main)
 | order-service | 8083 | `ORDER_SERVICE_PORT_{DEV,PROD}` | 루프백 | `ORDER_SERVICE_MEM_LIMIT_{DEV,PROD}` | 768m / 1g |
 | payment-service | 8084 | `PAYMENT_SERVICE_PORT_{DEV,PROD}` | 루프백 | `PAYMENT_SERVICE_MEM_LIMIT_{DEV,PROD}` | 768m / 1g |
 | delivery-service | 8085 | `DELIVERY_SERVICE_PORT_{DEV,PROD}` | 루프백 | `DELIVERY_SERVICE_MEM_LIMIT_{DEV,PROD}` | 768m / 1g |
+| support-service | 8087 | `SUPPORT_SERVICE_PORT_{DEV,PROD}` | 루프백 | `SUPPORT_SERVICE_MEM_LIMIT_{DEV,PROD}` | 768m / 1g |
 
 - **외부에는 게이트웨이만 연다**(`architecture-guide.md` §6). Eureka · 서비스는 호스트 루프백(`127.0.0.1`)에만 포트를 연다 — 게이트웨이 라우팅 ·
   Eureka 등록 · 서비스 간 호출은 같은 docker 네트워크 안에서 닿으므로 호스트 포트는 호스트 안 점검용이다. Eureka 레지스트리는 HTTP Basic 이다(#248, `security-guide.md` §12).
@@ -77,44 +78,44 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 
 ### 4-1. 모듈별 키
 
-| 키 | 시크릿 | compose 보간 | discovery | gateway | auth | product | order | payment | delivery |
-|----|--------|--------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `EUREKA_HOST` | - | `:?` 필수 (§4-2) | | O | O | O | O | O | O |
-| `EUREKA_PASSWORD` | O | `:?` 필수 | O | O | O | O | O | O | O |
-| `DB_URL` · `DB_USERNAME` | - | `:?` 필수 | | | O | O | O | O | O |
-| `DB_PASSWORD` | O | `:?` 필수 | | | O | O | O | O | O |
-| `REDIS_HOST` · `REDIS_PORT` | - | `:?` 필수 | | O | O | | | | |
-| `REDIS_PASSWORD` | O | `:?` 필수 | | O | O | | | | |
-| `SNOWFLAKE_DATACENTER_ID` | - | `:?` 필수 | | | O | O | O | O | O |
-| `JWT_PUBLIC_KEY` | - (Vault 배포) | `:?` 필수 | | O | O | O | O | O | O |
-| `JWT_PUBLIC_KEY_PREVIOUS` | - | `:-` 빈 값 | | O | O | O | O | O | O |
-| `JWT_PRIVATE_KEY` | O | `:?` 필수 | | | O | | | | |
-| `INTERNAL_JWT_SECRET` | O | `:?` 필수 | | | O | O | O | O | O |
-| `INTERNAL_JWT_SECRET_PREVIOUS` | O | `:-` 빈 값 | | | O | O | O | O | O |
-| `GATEWAY_CORS_ALLOWED_ORIGINS` · `GATEWAY_TRUSTED_PROXIES` | - | `:-` 빈 값 | | O | | | | | |
-| `GATEWAY_CLIENT_IP_HASH_KEY` | O | `:-` 빈 값 | | O | | | | | |
-| `ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` | O | `:-` 빈 값 | | | O | | | | |
-| `ADMIN_SEED_NAME` | - | `:-` 빈 값 | | | O | | | | |
-| `AUTH_LOGIN_GUARD_HASH_KEY` | O | `:-` 빈 값 | | | O | | | | |
-| `AUTH_LOGIN_GUARD_ENABLED` | - | `:-false` | | | O | | | | |
-| `AUTH_OTP_SECRET_KEY` | O | `:?` 필수 | | | O | | | | |
-| `TOSS_SECRET_KEY` | O | `:?` 필수 | | | | | | O | |
-| `AUTH_OTP_SECRET_KEY_PREVIOUS` | O | `:-` 빈 값 | | | O | | | | |
-| `AUTH_OTP_ISSUER` | - | `:-Commerce Foundry Admin` | | | O | | | | |
-| `AUTH_SOCIAL_ENABLED` · `KAKAO_LOGIN_ENABLED` · `NAVER_LOGIN_ENABLED` | - | `:-false` | | | O | | | | |
-| `KAKAO_CLIENT_ID` · `NAVER_CLIENT_ID` · `KAKAO_REDIRECT_URI` · `NAVER_REDIRECT_URI` | - | `:-` 빈 값 | | | O | | | | |
-| `KAKAO_CLIENT_SECRET` · `NAVER_CLIENT_SECRET` | O | `:-` 빈 값 | | | O | | | | |
-| `STORE_FEATURES_CUSTOM_ORDER` · `STORE_FEATURES_PREORDER` · `STORE_FEATURES_PRODUCT_VIDEO` · `STORE_FEATURES_LOOKS` | - | `:-false` | | | | O | | | |
-| `STORE_FEATURES_INTERNATIONAL_SHIPPING` | - | `:-false` | | | | | | | O |
-| `TIME_ZONE` | - | `:-UTC` | O | O | O | O | O | O | O |
-| `COMMERCE_DOCKER_NETWORK` · 포트 · 메모리 (§3) | - | 네트워크 · 포트 `:?`, 메모리 `:-` | O | O | O | O | O | O | O |
+| 키 | 시크릿 | compose 보간 | discovery | gateway | auth | product | order | payment | delivery | support |
+|----|--------|--------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `EUREKA_HOST` | - | `:?` 필수 (§4-2) | | O | O | O | O | O | O | O |
+| `EUREKA_PASSWORD` | O | `:?` 필수 | O | O | O | O | O | O | O | O |
+| `DB_URL` · `DB_USERNAME` | - | `:?` 필수 | | | O | O | O | O | O | O |
+| `DB_PASSWORD` | O | `:?` 필수 | | | O | O | O | O | O | O |
+| `REDIS_HOST` · `REDIS_PORT` | - | `:?` 필수 | | O | O | | | | | O |
+| `REDIS_PASSWORD` | O | `:?` 필수 | | O | O | | | | | O |
+| `SNOWFLAKE_DATACENTER_ID` | - | `:?` 필수 | | | O | O | O | O | O | O |
+| `JWT_PUBLIC_KEY` | - (Vault 배포) | `:?` 필수 | | O | O | O | O | O | O | O |
+| `JWT_PUBLIC_KEY_PREVIOUS` | - | `:-` 빈 값 | | O | O | O | O | O | O | O |
+| `JWT_PRIVATE_KEY` | O | `:?` 필수 | | | O | | | | | |
+| `INTERNAL_JWT_SECRET` | O | `:?` 필수 | | | O | O | O | O | O | O |
+| `INTERNAL_JWT_SECRET_PREVIOUS` | O | `:-` 빈 값 | | | O | O | O | O | O | O |
+| `GATEWAY_CORS_ALLOWED_ORIGINS` · `GATEWAY_TRUSTED_PROXIES` | - | `:-` 빈 값 | | O | | | | | | |
+| `GATEWAY_CLIENT_IP_HASH_KEY` | O | `:-` 빈 값 | | O | | | | | | |
+| `ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` | O | `:-` 빈 값 | | | O | | | | | |
+| `ADMIN_SEED_NAME` | - | `:-` 빈 값 | | | O | | | | | |
+| `AUTH_LOGIN_GUARD_HASH_KEY` | O | `:-` 빈 값 | | | O | | | | | |
+| `AUTH_LOGIN_GUARD_ENABLED` | - | `:-false` | | | O | | | | | |
+| `AUTH_OTP_SECRET_KEY` | O | `:?` 필수 | | | O | | | | | |
+| `TOSS_SECRET_KEY` | O | `:?` 필수 | | | | | | O | | |
+| `AUTH_OTP_SECRET_KEY_PREVIOUS` | O | `:-` 빈 값 | | | O | | | | | |
+| `AUTH_OTP_ISSUER` | - | `:-Commerce Foundry Admin` | | | O | | | | | |
+| `AUTH_SOCIAL_ENABLED` · `KAKAO_LOGIN_ENABLED` · `NAVER_LOGIN_ENABLED` | - | `:-false` | | | O | | | | | |
+| `KAKAO_CLIENT_ID` · `NAVER_CLIENT_ID` · `KAKAO_REDIRECT_URI` · `NAVER_REDIRECT_URI` | - | `:-` 빈 값 | | | O | | | | | |
+| `KAKAO_CLIENT_SECRET` · `NAVER_CLIENT_SECRET` | O | `:-` 빈 값 | | | O | | | | | |
+| `STORE_FEATURES_CUSTOM_ORDER` · `STORE_FEATURES_PREORDER` · `STORE_FEATURES_PRODUCT_VIDEO` · `STORE_FEATURES_LOOKS` | - | `:-false` | | | | O | | | | |
+| `STORE_FEATURES_INTERNATIONAL_SHIPPING` | - | `:-false` | | | | | | | O | |
+| `TIME_ZONE` | - | `:-UTC` | O | O | O | O | O | O | O | O |
+| `COMMERCE_DOCKER_NETWORK` · 포트 · 메모리 (§3) | - | 네트워크 · 포트 `:?`, 메모리 `:-` | O | O | O | O | O | O | O | O |
 
 compose 가 env 파일과 무관하게 고정하는 값:
 
 | 키 | 값 | 이유 |
 |----|----|------|
 | `SPRING_PROFILES_ACTIVE` | 서비스마다 `dev` / `prod` | §2 |
-| `SNOWFLAKE_WORKER_ID` | auth 1 · product 2 · order 3 · payment 4 · delivery 5 | (datacenter, worker) 쌍이 인스턴스마다 달라야 한다. env 하나로 넣으면 서비스 5종이 같은 값을 받는다. local 배정표(`bootstrap-conventions.md`)와 같은 번호이고, 서비스당 컨테이너가 하나(`container_name` 고정)라 겹치지 않는다. 인스턴스를 늘리면 다시 정한다 |
+| `SNOWFLAKE_WORKER_ID` | auth 1 · product 2 · order 3 · payment 4 · delivery 5 · support 7 (operations 6 은 compose 를 만드는 PR 에서) | (datacenter, worker) 쌍이 인스턴스마다 달라야 한다. env 하나로 넣으면 서비스 전부가 같은 값을 받는다. local 배정표(`bootstrap-conventions.md`)와 같은 번호이고, 서비스당 컨테이너가 하나(`container_name` 고정)라 겹치지 않는다. 인스턴스를 늘리면 다시 정한다 |
 
 - Eureka 에 IP 로 등록하는 설정(`eureka.instance.prefer-ip-address: true`)은 env 가 아니라 **각 모듈 `application.yml`** 에 있다 (#249).
   기본은 컨테이너 호스트 이름(컨테이너 ID)으로 등록돼 게이트웨이 `lb://` · Feign 이 이름을 풀지 못할 수 있어서, dev · prod 모두 docker 네트워크 IP 로 등록한다.
@@ -159,12 +160,12 @@ compose 가 env 파일과 무관하게 고정하는 값:
 |----|--------|
 | `COMMERCE_DOCKER_NETWORK` · 자기 환경의 `<MODULE>_PORT_{DEV|PROD}` | compose 해석 실패로 배포 중단. 반대 환경 포트는 파이프라인이 `'0'` 자리값으로 채운다(§3) |
 | `EUREKA_HOST` | compose 해석 실패 |
-| `EUREKA_PASSWORD` | compose 해석 실패. 7개 모듈 같은 값, 형식이 틀리면 Eureka 가 기동하지 않는다: `security-guide.md` §12 |
-| `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` | compose 해석 실패. dev 와 prod 는 다른 DB 서버라 값은 환경별 secret 에서 갈라 넣는다(키 이름은 같다). 서비스 5종은 한 DB 의 서비스별 스키마(`auth` · `product` · `orders` · `payment` · `delivery`, yml `hibernate.default_schema`)를 쓰므로 URL 은 환경당 하나다. 스키마는 미리 만들어 둔다 — JPA 는 스키마를 만들지 않는다. 정본은 [`docker/postgres/init/01-create-schemas.sql`](../docker/postgres/init/01-create-schemas.sql) 이다. 환경 분리 · 계정 원칙은 [`service-inventory.md`](service-inventory.md) §4-2 |
-| `REDIS_*` | compose 해석 실패. auth 와 gateway 는 같은 Redis 여야 한다 |
+| `EUREKA_PASSWORD` | compose 해석 실패. 8개 모듈 같은 값, 형식이 틀리면 Eureka 가 기동하지 않는다: `security-guide.md` §12 |
+| `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` | compose 해석 실패. dev 와 prod 는 다른 DB 서버라 값은 환경별 secret 에서 갈라 넣는다(키 이름은 같다). 서비스 6종은 한 DB 의 서비스별 스키마(`auth` · `product` · `orders` · `payment` · `delivery` · `support`, yml `hibernate.default_schema`)를 쓰므로 URL 은 환경당 하나다. 스키마는 미리 만들어 둔다 — JPA 는 스키마를 만들지 않는다. 정본은 [`docker/postgres/init/01-create-schemas.sql`](../docker/postgres/init/01-create-schemas.sql) 이다. 환경 분리 · 계정 원칙은 [`service-inventory.md`](service-inventory.md) §4-2 |
+| `REDIS_*` | compose 해석 실패. auth 와 gateway 는 같은 Redis 여야 한다. support 도 같은 Redis 를 쓰고 키 접두어(`support:`)로 가른다 |
 | `SNOWFLAKE_DATACENTER_ID` | compose 해석 실패. 0~31 |
 | `JWT_PUBLIC_KEY` · `JWT_PRIVATE_KEY` | compose 해석 실패. 만들기 · 교체: `security-guide.md` §6 |
-| `INTERNAL_JWT_SECRET` | compose 해석 실패. 서비스 5종 같은 값: `security-guide.md` §9-6 |
+| `INTERNAL_JWT_SECRET` | compose 해석 실패. 서비스 6종 같은 값: `security-guide.md` §9-6 |
 | `AUTH_OTP_SECRET_KEY` | compose 해석 실패 (#238). 값이 base64 로 정확히 32바이트가 아니거나 저장소의 테스트 키면 auth 가 기동하지 않는다. auth 인스턴스 전부 같은 값이고, 잃으면 등록된 관리자 OTP 를 모두 읽지 못한다(`AUTH_039`). 만들기 · 회전: `secret-management.md` (관리자 OTP 키). 기동 실패 메시지별 조치는 `local-run-guide.md` §6 |
 | `TOSS_SECRET_KEY` | compose 해석 실패 (#432). dev 는 `test_gsk_` · `test_sk_`, prod 는 `live_` 키만 기동한다 — 클라이언트 키(ck · gck)를 넣으면 기동하지 않는다: `payment-guide.md` §2 |
 | `GATEWAY_CORS_ALLOWED_ORIGINS` | 뜨지만 브라우저 요청이 전부 CORS 로 막힌다 |
@@ -198,13 +199,13 @@ Infra 의 Kafka 는 3노드 KRaft 클러스터(apache/kafka 4.3 · RF 3 · min I
 
 **헬스 체크** — compose `healthcheck` 가 컨테이너 안에서 `curl -fsS http://localhost:<컨테이너 포트>/actuator/health` 를 부른다.
 
-- 7개 모듈 모두 actuator 가 있고(`backend/build.gradle` 이 실행 모듈마다 넣는다) `management.endpoints.web.exposure.include: health` 다.
-- 익명으로 열려 있다 — 서비스 5종은 security-core(`ResourceServerSecurityConfigurer`)가 `health` 만 `permitAll`, 게이트웨이는 `/api/v1/admin/**` 밖을 `permitAll`,
+- 8개 모듈 모두 actuator 가 있고(`backend/build.gradle` 이 실행 모듈마다 넣는다) `management.endpoints.web.exposure.include: health` 다.
+- 익명으로 열려 있다 — 서비스 6종은 security-core(`ResourceServerSecurityConfigurer`)가 `health` 만 `permitAll`, 게이트웨이는 `/api/v1/admin/**` 밖을 `permitAll`,
   Eureka 는 `health` 만 익명이고 나머지는 HTTP Basic 이다(#248). 응답은 상태만 낸다(`{"status":"UP"}`), DOWN 이면 503 이라 `curl -f` 가 실패한다.
-- 서비스 헬스에는 DB 가 들어 있다(DB 가 내려가면 unhealthy). Redis 는 auth · 게이트웨이 모두 헬스에서 뺐다(`management.health.redis.enabled: false`) — Redis 장애로 컨테이너를 빼지 않는다.
+- 서비스 헬스에는 DB 가 들어 있다(DB 가 내려가면 unhealthy). Redis 는 auth · 게이트웨이 · support 모두 헬스에서 뺐다(`management.health.redis.enabled: false`) — Redis 장애로 컨테이너를 빼지 않는다.
 - `curl` 은 베이스 이미지(§7)에 들어 있다. 간격 15초 · 제한 5초 · 4회, 기동 유예 120초.
 
-**기동 순서** — Eureka → 게이트웨이 → 서비스 5종.
+**기동 순서** — Eureka → 게이트웨이 → 서비스 6종.
 
 ```text
 1. service-discovery    등록 대상
@@ -212,6 +213,7 @@ Infra 의 Kafka 는 3노드 KRaft 클러스터(apache/kafka 4.3 · RF 3 · min I
 3. auth-service         토큰 발급
 4. product-service · delivery-service   order 가 부르는 대상(Feign)
 5. order-service · payment-service
+6. support-service      다른 서비스가 부르지 않는다 — 게이트웨이 뒤면 순서는 자유다(#470)
 ```
 
 - compose 파일이 모듈마다 따로라 `depends_on` 으로 묶을 수 없다. **배포마다 `up -d --wait` 로 그 컨테이너가 healthy 가 될 때까지 기다리고 다음 모듈로 간다.**
@@ -253,7 +255,7 @@ Infra 의 Kafka 는 3노드 KRaft 클러스터(apache/kafka 4.3 · RF 3 · min I
 - **CI 와 같은 JVM** — GitHub Actions 가 `setup-java` temurin 21 로 테스트한다. 테스트한 HotSpot 과 같은 배포판으로 운영한다.
 - **curl 포함** — compose healthcheck 가 쓴다. 다른 베이스(distroless · alpine 계열)로 바꾸면 healthcheck 수단부터 다시 정한다.
 - **정확한 태그로 고정한다** — `latest` · `21-jre` 를 쓰지 않는다. 같은 태그도 OS 패치로 다시 빌드될 수 있다(재현성보다 보안 패치를 택했다).
-  올릴 때는 7개 Dockerfile 을 같이 올린다.
+  올릴 때는 8개 Dockerfile 을 같이 올린다.
 - 컨테이너는 root 가 아닌 `app` 사용자로 돈다. `exec java` 로 java 가 PID 1 이 돼 `docker stop` 의 SIGTERM 으로 graceful shutdown 하고,
   compose `stop_grace_period: 40s` 가 그동안 SIGKILL 을 미룬다.
 - JVM 시간대는 `TIME_ZONE`(기본 UTC)이다. 업무 시각은 `Clock.systemUTC()` · `Instant` 라 로그 시각만 바뀐다.
@@ -295,13 +297,13 @@ REDIS_HOST='redis'
 REDIS_PORT='6379'
 SNOWFLAKE_DATACENTER_ID='1'
 JWT_PUBLIC_KEY · JWT_PRIVATE_KEY · INTERNAL_JWT_SECRET — 로컬에서 만든 테스트 값(local-run-guide.md §2)
-<MODULE>_PORT_DEV / _PROD 7쌍 — 로컬에서 비어 있는 아무 포트
+<MODULE>_PORT_DEV / _PROD 8쌍 — 로컬에서 비어 있는 아무 포트
 ```
 
 ```bash
 docker compose -p commerce-service-discovery-dev --env-file <env 파일> \
   -f cloud/service-discovery/docker-compose-service-discovery.yml up -d --build --wait service-discovery-dev
-# api-gateway → auth → product · delivery → order · payment 순서로 같은 명령
+# api-gateway → auth → product · delivery → order · payment → support 순서로 같은 명령
 docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) 확인
 ```
 

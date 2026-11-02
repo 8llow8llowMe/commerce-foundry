@@ -15,6 +15,7 @@
 | `service/payment-service` | 8084 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 결제 준비 · 승인 · 조회(#14) · 결제 승인 이벤트 `payment-approved` transactional outbox (#308 PR-A1) | 결제 준비·승인·취소, 웹훅, UNKNOWN 재조회, 결제 승인 → 주문 반영 이벤트 · 주문 회신 수신(#308) |
 | `service/delivery-service` | 8085 | 골격 (#36) · Resource Server (#41) · 서비스 간 인증 (#51) · 국내 배송비 정책 (#11) · 해외 배송비 (#22) · 국내 배송비 정책 교체 이력 (#69) · 운영자 온보딩 사실 internal (#357 PR-B1) · 송장 등록 · 출고 반영 (#18 PR-B1) · 배송 상태 변경 · 배송 완료 반영 · 어드민 송장 조회 · 고객 배송 조회 (#18 PR-B2) | 배송비 정책(국내/해외), 송장, 배송 상태 추적, 운영자 온보딩의 국내 배송비 정책 저장 사실(`GET /internal/v1/onboarding-facts/shipping-policy`, 허용 호출자 operations-service) |
 | `service/operations-service` | 8086 | 골격 · Resource Server · 서비스 간 인증 (#212 PR-A) · 작업 엔진 — 등록 · 가져가기 · 워커 · 재시도 · lease (#212 PR-B) · 어드민 작업 목록 · 상세 · 취소 (#212 PR-C) · Kafka 실행 신호 컨슈머 · outbox · lease 만료 판정 (#307) · 어드민 알림 센터(#213) · 운영자 온보딩 투어 진행 (#357 PR-A) · 온보딩 업무 완료 tasks — 배송 (#357 PR-B2) · 상품 (#402) 사실 Feign 조회 · AI 사용량 원장 · 월 한도 (#215 PR-B · #403) · ai-core 연결 — 계량 인터셉터 · 원장 정리 스케줄러 (#435) | 백그라운드 작업(등록 · 실행 · 재시도 · 진행률 · 결과 · 취소), 정기 작업, 어드민 작업 API(`/api/v1/admin/jobs/**`), 어드민 알림 센터(`/api/v1/admin/notifications/**`, #213), 운영자별 온보딩 안내 투어 진행(`/api/v1/admin/onboarding/**`, #357 — 실제 업무 완료 판정 `tasks` 는 담당 서비스 사실로만, 배송 정책 저장은 PR-B2 · 상품 등록은 PR-C). 전에 후순위로 두었던 batch · notification 을 흡수한다 (`architecture-guide.md` §1) |
+| `service/support-service` | 8087 | 골격 · Resource Server · 서비스 간 인증 (#470 PR-A) | 고객 상담 — 대화(`conversations`, 회원 · 비회원) · AI 상담 응답 · 상담원 이관 · 어드민 상담 큐 · 실시간 전달(WebSocket, #470-C). 고객 `/api/v1/support/**` · 어드민 `/api/v1/admin/support/**`. 설계 정본은 이슈 #470 "설계 확정 (2026-11-02)" 댓글 — 장기 WS 연결 · 고객 공개 트래픽을 operations 작업 엔진과 다른 JVM 으로 격리한다 |
 
 "골격" 은 실행·Eureka 등록·헬스 체크·Swagger 그룹까지 갖추고 도메인 코드는 없는 상태다 (`bootstrap-conventions.md`).
 "Resource Server" 는 JWT 검증 · `/api/v1/admin/**` ADMIN 규칙 · 보안 오류 봉투가 걸려 있고 인가 스모크가 도는 상태다 (`security-guide.md` §5).
@@ -82,19 +83,19 @@ A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃
 
 | core | 사용 서비스 |
 |------|-------------|
-| `ai-core` | operations (#435 — `AiUsageMeteringInterceptor` 가 모든 호출을 사용량 원장 · 월 한도에 예약 · 정산한다. 기본 꺼짐 `AI_ENABLED`. 기능은 작업 엔진(#212) 핸들러가 부른다 — 첫 기능 #359) |
+| `ai-core` | operations (#435 — `AiUsageMeteringInterceptor` 가 모든 호출을 사용량 원장 · 월 한도에 예약 · 정산한다. 기본 꺼짐 `AI_ENABLED`. 기능은 작업 엔진(#212) 핸들러가 부른다 — 첫 기능 #359). 대화형(고객 상담)은 support 요청 경로 — 원격 계량 #222-A |
 | `common-core` | 전부 |
 | `commerce-support` | product · order · payment · delivery — Money 응답·금액 컬럼 변환. common-core와 shared-commerce를 조합하며 서비스별 DTO·엔티티는 포함하지 않는다 (#68) |
 | `messaging-core` | product(inbox — `order-expired` · `order-canceled` 컨슈머, #309) · order(outbox — `order-expired` 발행, #96) · operations(outbox · 컨슈머 — 작업 실행 신호, #307) · payment(outbox — `payment-approved` 발행, #308 PR-A1). 테스트는 픽스처의 가짜 outbox · inbox · `OutboxStoreContract` |
-| `persistence-core` | auth · product · order · payment · delivery · operations |
-| `redis-core` | auth(토큰·소셜 state · 로그인 · 가입 시도 계수기 — #66) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
+| `persistence-core` | auth · product · order · payment · delivery · operations · support |
+| `redis-core` | auth(토큰·소셜 state · 로그인 · 가입 시도 계수기 — #66) · api-gateway(로그아웃 차단 목록 읽기 — #4 적용) · support(연결만 — WS 1회용 티켓 · 대화 이벤트 pub/sub 은 #470-C). order 는 쓰지 않는다 — 장바구니(#12) · 주문 멱등 기록(#13)은 PostgreSQL `orders` 스키마다 |
 | `security-core` | 서비스 전부(서블릿 Resource Server — #41 적용, 서비스 간 인증 — #51 적용, 테스트는 픽스처의 키 · 토큰 · 인가 스모크) · auth(발급 — #4) · api-gateway(리액티브 검증기 · 오류 코드 · 차단 목록 키 — #4 적용) |
 | `storage-core` | product(상품 이미지 — 모듈만 있다(#9 PR-A). 연결은 이미지 업로드 발급 · 첨부(#9 PR-F)에서 한다) |
 | `shared-commerce` | product · order · payment · delivery · auth(배송지 국내 국가 판정 — #144) |
 
 ## 4. 데이터 저장소
 
-- PostgreSQL 한 database(`commerce_foundry`)에 **서비스별 스키마**를 둔다 (`auth`, `product`, `orders`, `payment`, `delivery`, `operations`).
+- PostgreSQL 한 database(`commerce_foundry`)에 **서비스별 스키마**를 둔다 (`auth`, `product`, `orders`, `payment`, `delivery`, `operations`, `support`).
   다른 서비스 스키마를 직접 조회하지 않는다 — 필요한 데이터는 내부 API 로 받는다.
 - 운영 규모가 커지면 인스턴스를 나눌 수 있게 스키마 간 FK·조인을 만들지 않는다.
 - 스키마 관리: 마이그레이션 도구 없음 — local · dev 는 `ddl-auto: update`, 운영은 `none` 이고 사용자가 DDL 을 직접 적용한다
