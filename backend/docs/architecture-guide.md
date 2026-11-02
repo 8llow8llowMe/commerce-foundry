@@ -347,6 +347,12 @@ Info → Presenter → Response
 - **발행 정합성 = transactional outbox + 폴링 릴레이**(CDC · Debezium 은 쓰지 않는다 — 사용자 결정). 업무 트랜잭션과 같은 커밋으로 서비스 스키마의 `outbox` 에 행을 넣고,
   릴레이가 `published_at is null and available_at <= now` 를 id 순으로 읽어 발행한 뒤 `published_at` 을 조건부 UPDATE 로 기록한다. 발행은 트랜잭션 밖이다.
   다중 인스턴스는 단일 실행 락(ShedLock)으로 한 인스턴스만 릴레이를 돌려 같은 키의 발행 순서를 지킨다. 지연 발행(작업 예약 · 백오프)은 `available_at` 으로 한다.
+  전송 실패에는 `available_at` 백오프를 넣지 않는다 — 실패 키만 그 주기 동안 막고 재시도 횟수는 계속 기록하되 ERROR 로그를 10 · 100 · 1000회와 1분 간격으로 줄인다.
+  Kafka 성공 뒤 발행 표시 예외는 WARN · 별도 카운터로 남기고 같은 봉투를 다음 주기에 재발행한다(inbox 멱등 필수).
+  릴레이는 기존 oldest-age 게이지를 읽어 기본 60초 WARN · 300초 ERROR 를 심각도별 1분 간격으로 남긴다. 게이지 부재 · 릴레이 꺼짐의 관측 공백은 별도 알림이 맡는다.
+  operations/order/payment 의 oldest-age 공급자는 공통 `OutboxAgeMetrics` 로 DB 예외를 관측 실패 카운터 + NaN 으로 바꿔 Micrometer 원문 예외 로깅을 막는다.
+  JDBC 락은 앱 시각을 쓰므로 NTP 동기화 · 시계 차 < `lock-at-most-for / 2` 를 유지하고, 최소 락 유지 기본 500ms로 빠른 재획득을 줄인다.
+  부분 인덱스는 PostgreSQL 17 실측 뒤에만 결정한다(#476, 측정 계획과 운영 전제는 `core/messaging-core/README.md`).
 - **컨슈머는 멱등이다** — 수동 ack, at-least-once 전제. 상태를 바꾸는 트랜잭션 안에서 `processed_event` 를 넣는다 — `(consumer_group, event_id)` 유니크다.
   처리 전에 `exists` 로 이미 처리한 이벤트를 건너뛰고, 동시에 두 번 받아 유니크 위반이 나면 그 트랜잭션이 롤백 → 컨슈머 재시도 → `exists` 로 건너뛴다.
   상태 전이 멱등(이미 PAID · RELEASED 면 no-op)이 2차 방어다. 일시 오류는 컨슈머 안 지수 백오프 뒤 DLT(`<topic>.dlt`), 종결 오류는 바로 DLT 다.

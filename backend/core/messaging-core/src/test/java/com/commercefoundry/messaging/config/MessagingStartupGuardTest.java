@@ -123,4 +123,19 @@ class MessagingStartupGuardTest {
         assertThat(new MessagingStartupGuard(new MockEnvironment().withProperty("commerce.messaging.outbox.relay.interval", "secret-ish")).check())
             .singleElement().asString().contains("형식").doesNotContain("secret-ish");
     }
+
+    @Test
+    @DisplayName("릴레이 운영 임계 설정은 양수이고 WARN < ERROR, 최소 락 <= 최대 락이어야 한다")
+    void relayOperationalSettingsAreValidated() {
+        for (String property : List.of("oldest-age-warn", "oldest-age-error", "lock-at-least-for")) {
+            assertThat(new MessagingStartupGuard(new MockEnvironment().withProperty("commerce.messaging.outbox.relay." + property, "0s")).check())
+                .anySatisfy(message -> assertThat(message).contains(property));
+        }
+        assertThat(new MessagingStartupGuard(new MockEnvironment()
+            .withProperty("commerce.messaging.outbox.relay.oldest-age-warn", "20s")
+            .withProperty("commerce.messaging.outbox.relay.oldest-age-error", "20s")).check())
+            .singleElement().asString().contains("oldest-age-error");
+        assertThat(new MessagingStartupGuard(new MockEnvironment().withProperty("commerce.messaging.outbox.relay.lock-at-least-for", "31s")).check())
+            .singleElement().asString().contains("lock-at-least-for");
+    }
 }

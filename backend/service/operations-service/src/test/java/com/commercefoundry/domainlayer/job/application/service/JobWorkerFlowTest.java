@@ -41,6 +41,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,8 +50,10 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.event.EventListener;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -120,6 +123,16 @@ class JobWorkerFlowTest {
 
     @Autowired
     private DeadLetters deadLetters;
+
+    @Autowired
+    private KafkaListenerEndpointRegistry listeners;
+
+    @BeforeEach
+    void awaitKafkaReadiness() {
+        // 브로커/소비자 준비 시간은 작업 실행 제한 20초와 분리한다. 준비 실패 자체는 테스트를 실패시킨다.
+        assertThat(listeners.getListenerContainers()).isNotEmpty();
+        listeners.getListenerContainers().forEach(container -> ContainerTestUtils.waitForAssignment(container, 1));
+    }
 
     @Test
     @DisplayName("등록은 바로 QUEUED 작업 아이디를 돌려주고, 실행 신호를 받은 워커가 처리하면 SUCCEEDED · 결과 JSON · 시도 1 이 되고 종료 이벤트가 한 번 나간다")

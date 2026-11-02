@@ -1,11 +1,10 @@
 package com.commercefoundry.global.messaging;
 
+import com.commercefoundry.messaging.outbox.OutboxAgeMetrics;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -25,18 +24,13 @@ public class OutboxMetrics implements MeterBinder {
         Gauge.builder("commerce.messaging.outbox.unpublished.count", outboxRepository, repository -> repository.countByPublishedAtIsNull())
             .description("발행되지 않은 outbox 행 수")
             .register(registry);
-        Gauge.builder("commerce.messaging.outbox.unpublished.oldest.age", this, OutboxMetrics::oldestAgeSeconds)
+        Gauge.builder("commerce.messaging.outbox.unpublished.oldest.age", this, metrics -> metrics.oldestAgeSeconds(registry))
             .description("가장 오래된 미발행 outbox 행이 발행 가능해진 뒤 지난 시간")
             .baseUnit("seconds")
             .register(registry);
     }
 
-    private double oldestAgeSeconds() {
-        Instant oldest = outboxRepository.findOldestUnpublishedAvailableAt();
-        if (oldest == null) {
-            return 0;
-        }
-        Duration age = Duration.between(oldest, clock.instant());
-        return age.isNegative() ? 0 : age.toMillis() / 1000.0;
+    private double oldestAgeSeconds(MeterRegistry registry) {
+        return OutboxAgeMetrics.oldestAgeSeconds(outboxRepository::findOldestUnpublishedAvailableAt, clock, registry);
     }
 }
