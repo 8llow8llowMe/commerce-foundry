@@ -70,7 +70,7 @@ public class OrderQuoteProcessor {
      *       400 {@link OrderFieldValidationException}. {@code fieldErrors[].field} 는 {@code items[i].customOptions[j].value} 다.
      *       빠진 필수 항목은 그 줄에 있던 입력 개수 다음 칸이다. 입력값은 메시지에 넣지 않는다</li>
      *   <li><b>상품 단위</b> 수량 합이 상품의 {@code maxQuantityPerOrder}(null 이면 {@code order.quantity-limit.default-per-product})를 넘는다 —
-     *       {@code QUANTITY_EXCEEDED}(409). 주문 생성은 회원의 결제 대기 주문에 담긴 수량을 더한다</li>
+     *       {@code QUANTITY_EXCEEDED}(409). 주문 생성은 회원이 이미 쥔 수량(진행 중 시도 · 결제 대기 주문)을 더한다 ({@link #requireQuantityWithinLimit})</li>
      *   <li>판매가 통화가 섞였다 — {@code CURRENCY_MIXED}(409). 주문 통화는 SKU 판매가의 통화다</li>
      *   <li>줄 금액 = 단가 × 수량, 상품 합계 = Σ 줄 금액</li>
      *   <li>배송 국가로 국내 · 해외를 가른다({@link ShippingScope#ofCountry}, 통화는 보지 않는다). 해외면 배송 가능 국가 → 무게 · HS 미입력 → 총 무게 순이다
@@ -92,11 +92,11 @@ public class OrderQuoteProcessor {
     }
 
     /**
-     * 주문 생성용 — {@link #quote(OrderQuoteCommand, Map)} 와 같고, 상품 수량 상한에 회원의 결제 대기 주문에 이미 담긴 수량을 더한다 (#426).
+     * 주문 생성용 — {@link #quote(OrderQuoteCommand, Map)} 와 같고, 상품 수량 상한에 회원이 이미 쥔 수량을 더한다 (#426 · #436).
      *
-     * @param pendingQuantityByProduct 상품 아이디 → 결제 대기 주문의 수량 합. 없는 상품은 0 이다
+     * @param heldByProduct 상품 아이디 → 진행 중 시도 · 결제 대기 주문의 수량 합 ({@code OrderProcessor#heldQuantitiesByProduct}). 없는 상품은 0 이다
      */
-    public OrderQuote quote(OrderQuoteCommand command, Map<Long, CatalogSku> skus, Map<Long, Integer> pendingQuantityByProduct) {
+    public OrderQuote quote(OrderQuoteCommand command, Map<Long, CatalogSku> skus, Map<Long, Integer> heldByProduct) {
         List<OrderItemCommand> items = command.items();
         rejectDuplicateLines(items, skus);
         rejectLines(items, skus, (item, sku) -> sku == null || !sku.purchasable(), OrderErrorCode.ITEM_NOT_PURCHASABLE);
@@ -105,7 +105,7 @@ public class OrderQuoteProcessor {
         if (!fieldViolations.isEmpty()) {
             throw new OrderFieldValidationException(fieldViolations);
         }
-        rejectQuantityOverLimit(items, skus, pendingQuantityByProduct);
+        requireQuantityWithinLimit(items, skus, heldByProduct);
         CurrencyCode currency = currencyOf(items, skus);
 
         List<OrderQuoteLine> lines = items.stream().map(item -> toLine(item, skus.get(item.skuId()))).toList();
@@ -142,14 +142,21 @@ public class OrderQuoteProcessor {
     /**
      * 1회 주문 최대 수량은 상품 컬럼이다 — SKU 별로 세면 S 2 + M 2 로 상한이 우회되므로 같은 상품의 줄(다른 SKU · 다른 맞춤 입력)을 모두 더한다.
      * 상품 값이 비어 있으면 엔진 기본값({@code order.quantity-limit.default-per-product})을 쓴다 — 비어 있다고 무제한이면 시도 하나로 재고를 다 잡는다(#426).
-     * 주문 생성은 회원의 결제 대기 주문에 이미 담긴 수량도 더한다 — 결제 대기 주문은 선점을 쥐고 있어, 주문을 나눠 상한을 넘지 못하게 한다.
+     * 주문 생성은 회원이 이미 쥔 수량(진행 중 시도 · 결제 대기 주문)도 더한다 — 선점을 쥐었거나 쥐려는 수량이라, 주문을 나누거나 동시에 넣어 상한을 넘지 못하게 한다.
+     *
+     * <p>주문 생성은 견적 단계(1차)와 기록을 잡은 뒤 · 선점 전(확정, #436) 두 번 부른다 — 판정과 문구를 한 곳에 둔다. 문구의 "결제 대기 주문에 M개" 의 M 은
+     * 진행 중 시도의 수량을 합친 값이다(문구는 그대로 둔다).
+     *
+     * @param items 견적을 통과한 줄 — 모든 SKU 가 {@code skus} 에 있다
+     * @param heldByProduct 상품 아이디 → 이미 쥔 수량. 없는 상품은 0 이다
+     * @throws OrderException {@code QUANTITY_EXCEEDED}(409) — 넘친 상품을 모두 싣는다
      */
-    private void rejectQuantityOverLimit(List<OrderItemCommand> items, Map<Long, CatalogSku> skus, Map<Long, Integer> pendingQuantityByProduct) {
+    public void requireQuantityWithinLimit(List<OrderItemCommand> items, Map<Long, CatalogSku> skus, Map<Long, Integer> heldByProduct) {
         Map<Long, ProductQuantity> products = new LinkedHashMap<>();
         for (OrderItemCommand item : items) {
             CatalogSku sku = skus.get(item.skuId());
             products.merge(sku.productId(), new ProductQuantity(sku.productName(), quantityLimit.maxPerProduct(sku.maxQuantityPerOrder()), item.quantity(),
-                pendingQuantityByProduct.getOrDefault(sku.productId(), 0)), ProductQuantity::plus);
+                heldByProduct.getOrDefault(sku.productId(), 0)), ProductQuantity::plus);
         }
         List<String> exceeded = products.values().stream()
             .filter(ProductQuantity::exceeded)
@@ -270,8 +277,8 @@ public class OrderQuoteProcessor {
     }
 
     /**
-     * 한 상품의 주문 수량 합과 결제 대기 주문에 이미 담긴 수량. 상한은 상품 컬럼이라 같은 상품의 SKU 는 같은 값이지만, 다르게 오면 작은 쪽(닫힌 쪽)을 쓴다.
-     * 결제 대기 수량은 상품 단위 값이라 줄마다 같다 — 더하지 않는다.
+     * 한 상품의 주문 수량 합과 이미 쥔 수량(진행 중 시도 · 결제 대기 주문). 상한은 상품 컬럼이라 같은 상품의 SKU 는 같은 값이지만, 다르게 오면 작은 쪽(닫힌 쪽)을 쓴다.
+     * 이미 쥔 수량은 상품 단위 값이라 줄마다 같다 — 더하지 않는다.
      */
     private record ProductQuantity(String productName, int maxQuantity, int quantity, int pendingQuantity) {
 

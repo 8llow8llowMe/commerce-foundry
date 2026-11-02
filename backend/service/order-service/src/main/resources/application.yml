@@ -162,11 +162,13 @@ commerce:
 # 끄는 env 스위치를 두지 않는다(product 재고 선점 만료 스윕과 같다). test 프로파일만 enabled: false 로 끈다
 order:
   # 주문 생성 (OrderProperties). 회원별 활성 시도 상한(#231) — 창 안에 새 키로 시작한 시도가 상한 이상이면 409 ORDER_022.
-  # 창은 product 의 재고 선점 TTL(stock.reservation.ttl)과 같게 둔다. 상한 1 미만 · 창 1분~24시간 밖이면 기동하지 않는다
+  # 창은 product 의 재고 선점 TTL(stock.reservation.ttl)과 같게 둔다. 상한 1 미만 · 창 1분~24시간 밖 · 창이 processing-lease 보다 짧으면 기동하지 않는다
   creation:
     processing-lease: 30s
     max-active-requests-per-member: 5
     active-request-window: 30m
+    # 완료는 lease 가 이만큼 더 남아 있을 때만 한다(#436) — 저장 timeout 5초 + 시계 차 여유. 0 초과 · processing-lease 미만이어야 기동한다
+    completion-margin: 10s
   # 상품 수량 상한 (OrderQuantityLimitProperties, #426). 상품의 1회 주문 최대 수량이 비어 있으면 이 값을 쓴다(1–99) — 비어 있다고 무제한이면
   # 시도 하나로 재고가 적은 상품을 전부 선점할 수 있다. 주문 생성은 회원의 결제 대기 주문에 담긴 수량도 더한다. 넘으면 409 ORDER_005
   quantity-limit:

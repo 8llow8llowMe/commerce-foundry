@@ -22,7 +22,8 @@ import lombok.NoArgsConstructor;
 
 /**
  * 주문 요청 기록 (멱등 — {@code api-design-guide.md} §6). 유니크 키가 같은 회원 · 같은 키를 동시에 잡는 시도 중 하나만 통과시키고, 상태 · lease 갱신은 {@code @Version} 이 막는다.
- * 본문은 지문(SHA-256)만 둔다 — 원문은 남지 않는다. 오래된 기록의 정리 배치는 후속 이슈다.
+ * 본문은 지문(SHA-256)만 둔다 — 원문은 남지 않는다. 오래된 기록의 정리 배치는 후속 이슈다 — 항목({@code order_request_item}, #436)을 먼저
+ * ({@code order_request_id in (...)}) 지우고 기록을 같은 트랜잭션에서 지운다(FK 제약이 없어 순서를 어겨도 DB 가 막지 않는다).
  */
 @Entity
 @Table(
