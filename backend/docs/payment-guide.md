@@ -172,6 +172,7 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 | `PAYMENT_109` · `110` | 400 | `amount.amount` 필수 · 양수 |
 | `PAYMENT_111` · `112` | 400 | `amount.currency` 필수 · 대문자 3자 |
 | `PAYMENT_113` · `114` | 400 | `Idempotency-Key` 헤더 필수 · UUID 형식 (`fieldErrors[0].field` = 헤더 이름) |
+| `PAYMENT_115` | 400 | internal 결제 조회(`GET /internal/v1/payments/{paymentId}`)의 `paymentId` 양수 아님 (§6) |
 | `PAYMENT_198` · `199` | 400 | 파라미터 형식(결제 아이디 등) · 필수 파라미터 누락 |
 
 - 응답 메시지는 언제나 오류 코드의 고정 문구다 — 핸들러는 예외 메시지가 아니라 `errorCode.getMessage()` 를 싣는다.
@@ -282,8 +283,13 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   메시징이 꺼져 있어도(`MESSAGING_ENABLED=false`) outbox(`payment.outbox`)에는 쌓이고 릴레이만 멈춘다.
   **결제 게이트(`payment.enabled`)가 열려 있으면 `payment.outbox` · `payment.shedlock` 이 없을 때 기동하지 않는다**(`PaymentOutboxSchemaGuard`) — 운영 DDL 을 빠뜨린 채
   PG 승인 뒤 매 결제가 500 이 되는 것을 막는다. 게이트가 닫혀 있으면 WARN 만 남긴다.
-- **진위 확인(order, PR-B 예정)** — 봉투에는 서명이 없다. order 컨슈머는 이벤트를 알림으로만 보고 payment internal 결제 조회(`GET /internal/v1/payments/{paymentId}`, PR-A2 예정)로
+- **진위 확인(order, PR-B 예정)** — 봉투에는 서명이 없다. order 컨슈머는 이벤트를 알림으로만 보고 payment internal 결제 조회(`GET /internal/v1/payments/{paymentId}`, PR-A2 구현)로
   재조회해 상태 · 금액 · 통화 · 주문 · 회원을 확정한다. 불일치 · 404 는 DLT 로 보내고 주문을 바꾸지 않는다. 재조회가 DONE 이 아니면(이미 취소 등) WARN 과 기록만 남긴다.
+  - **조회 계약(payment, 구현)** — `PaymentInternalController`, 허용 호출자 `SERVICE_order-service` 하나(`security-guide.md` §9-4). 회원을 거르지 않는다(서비스 간 조회).
+    응답 `{paymentId, orderId, memberId, status{code, name, description}, amount{amount, currency}, method{code, name, description} | null, approvedAt | null}` —
+    아이디는 문자열, `status.code` 가 `PaymentStatus` 제어 코드다. 결제키 · 고객 멱등 키 · 주문명 · PG 원문 상태 · 간편결제 제공자 · 실패 사유 · 미확정 이유 · 주문 반영 기록은 내리지 않는다.
+    없으면 404 `PAYMENT_001`, `paymentId` 가 양수가 아니면 400 `PAYMENT_115`, 숫자 · long 범위가 아니면 400 `PAYMENT_198`. 결제 게이트(`payment.enabled`)를 보지 않는다.
+    호출 구현(order Feign 클라이언트 · 서킷 · timeout)은 PR-B1 이다.
 - **재고(order, PR-B 예정)** — 재고 선점이 만료된 뒤 결제가 완료되는 경우(고객이 결제창을 오래 열어 둠)가 있다. 확정이 409 `PRODUCT_025`(이미 해제 · 만료)면 같은 주문으로
   재선점(`POST /internal/v1/stock-reservations`)하고 **곧바로 확정**한다. 재선점이 `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면 `STOCK_UNAVAILABLE` 로 거절 회신한다.
   **주문은 선점 확정 200(`CONFIRMED`)을 받은 뒤에만 PAID 로 둔다** — 같은 이벤트를 다시 받아도 확정을 멱등으로 다시 부른다 (`order-flow-guide.md` §3-4).

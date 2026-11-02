@@ -123,6 +123,19 @@ class PaymentProcessorTest {
     }
 
     @Test
+    @DisplayName("서비스 간 조회(get)는 회원을 거르지 않는다 — 결제를 그대로 돌려주고, 없으면 404 PAYMENT_001. 저장하지 않는다")
+    void getWithoutMemberFilter() {
+        given(repository.findById(PAYMENT_ID)).willReturn(Optional.of(PaymentFixtures.done()));
+
+        Payment found = processor.getUnscoped(PAYMENT_ID);
+
+        assertThat(found.id()).isEqualTo(PAYMENT_ID);
+        assertThat(found.memberId()).isEqualTo(MEMBER_ID);
+        assertNotFound(() -> processor.getUnscoped(PAYMENT_ID + 1));
+        verify(repository, never()).save(any());
+    }
+
+    @Test
     @DisplayName("새 결제 시도는 Snowflake 아이디(= PG 주문번호) · 주문 금액 · 주문명으로 READY 를 저장한다")
     void prepares() {
         Payment created = processor.prepare(MEMBER_ID, ORDER);

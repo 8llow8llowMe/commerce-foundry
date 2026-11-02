@@ -36,6 +36,15 @@ public class PaymentProcessor {
     private final PaymentEventPort paymentEventPort;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
+    /**
+     * 결제 시도 — 회원을 거르지 않는다. 서비스 간 조회(internal, 허용 호출자 order-service) 전용이다. 고객 진입은 {@link #getOwned} 를 쓴다.
+     * 없으면 404 {@code PAYMENT_001}.
+     */
+    @Transactional(readOnly = true)
+    public Payment getUnscoped(long paymentId) {
+        return paymentRepositoryPort.findById(paymentId).orElseThrow(() -> new PaymentException(PaymentErrorCode.NOT_FOUND_PAYMENT));
+    }
+
     /** 회원의 결제 시도. 없거나 다른 회원의 것이면 404 {@code PAYMENT_001} — 존재를 숨긴다. */
     @Transactional(readOnly = true)
     public Payment getOwned(long paymentId, long memberId) {
