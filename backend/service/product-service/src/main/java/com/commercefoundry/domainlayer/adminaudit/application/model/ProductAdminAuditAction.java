@@ -7,6 +7,9 @@ package com.commercefoundry.domainlayer.adminaudit.application.model;
  */
 public enum ProductAdminAuditAction {
 
+    /** 상품 soft delete. 대상 {@code product:<id>} */
+    PRODUCT_DELETE,
+
     /** 대상 {@code category:<id>} — 만들지 못했으면 {@code -} */
     CATEGORY_CREATE,
     /** 대상 {@code category:<id>} */

@@ -4,6 +4,12 @@ import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.commercefoundry.security.audit.AdminAuditLog;
+import org.slf4j.LoggerFactory;
+
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.*;
 import com.commercefoundry.domainlayer.product.application.command.StockReservationCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
@@ -84,7 +90,7 @@ class ProductDeleteIntegrationTest {
     void deleteRetainsHeaderChildrenAndRejectsNewPurchases() {
         Product before = tx.execute(s -> repository.findAllByIdsIncludingHidden(List.of(ID)).getFirst());
         Instant created = tx.execute(s -> em.find(ProductEntity.class, ID).getCreatedAt());
-        products.delete(ID);
+        products.delete(ID, 99L);
         Product deleted = tx.execute(s -> repository.findAllByIdsIncludingHidden(List.of(ID)).getFirst());
         assertThat(deleted).usingRecursiveComparison().ignoringFields("visible", "saleStatus", "deletedAt", "version").isEqualTo(before);
         assertThat(deleted.deletedAt()).isNotNull();
@@ -111,7 +117,7 @@ class ProductDeleteIntegrationTest {
         assertThatThrownBy(() -> stocks.reserve(new StockReservationCommand(ID, List.of(new StockReservationCommand.Item(ID, 1)))))
             .isInstanceOfSatisfying(ProductException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ProductErrorCode.STOCK_SKU_NOT_PURCHASABLE));
         Instant updated = tx.execute(s -> em.find(ProductEntity.class, ID).getUpdatedAt());
-        products.delete(ID);
+        products.delete(ID, 99L);
         assertThat(tx.<Instant>execute(s -> em.find(ProductEntity.class, ID).getUpdatedAt())).isEqualTo(updated);
         assertThat(tx.<Product>execute(s -> repository.findAllByIdsIncludingHidden(List.of(ID)).getFirst())).isEqualTo(deleted);
     }
@@ -120,7 +126,7 @@ class ProductDeleteIntegrationTest {
     void existingReservationsStillConfirmAndReleaseExactlyOnce() {
         var confirmed = stocks.reserve(new StockReservationCommand(ID, List.of(new StockReservationCommand.Item(ID, 2))));
         var released = stocks.reserve(new StockReservationCommand(ID + 1, List.of(new StockReservationCommand.Item(ID, 3))));
-        products.delete(ID);
+        products.delete(ID, 99L);
         assertThat(tx.<Long>execute(status -> em.find(StockEntity.class, ID).getAvailableQuantity())).isEqualTo(5L);
         assertThat(stocks.confirm(Long.parseLong(confirmed.reservationId())).status()).isEqualTo("CONFIRMED");
         assertThat(stocks.release(Long.parseLong(released.reservationId())).status()).isEqualTo("RELEASED");
@@ -130,10 +136,33 @@ class ProductDeleteIntegrationTest {
 
     @Test
     void missingAndRollback() {
-        assertThatThrownBy(() -> products.delete(ID + 1)).isInstanceOfSatisfying(ProductException.class,
+        assertThatThrownBy(() -> products.delete(ID + 1, 99L)).isInstanceOfSatisfying(ProductException.class,
             e -> assertThat(e.getErrorCode()).isEqualTo(ProductErrorCode.NOT_FOUND_PRODUCT));
-        tx.executeWithoutResult(s -> { products.delete(ID); s.setRollbackOnly(); });
+        tx.executeWithoutResult(s -> { products.delete(ID, 99L); s.setRollbackOnly(); });
         assertThat(tx.<Product>execute(s -> repository.findAllByIdsIncludingHidden(List.of(ID)).getFirst()).isDeleted()).isFalse();
+    }
+
+    @Test
+    void auditUsesActorAndCommittedOutcome() {
+        Logger logger = (Logger) LoggerFactory.getLogger(AdminAuditLog.LOGGER_NAME);
+        ListAppender<ILoggingEvent> audit = new ListAppender<>();
+        audit.start();
+        logger.addAppender(audit);
+        try {
+            products.delete(ID, 99L);
+            tx.executeWithoutResult(status -> {
+                products.delete(ID, 99L);
+                status.setRollbackOnly();
+            });
+            assertThatThrownBy(() -> products.delete(ID + 1, 99L)).isInstanceOf(ProductException.class);
+            assertThat(audit.list.stream().map(ILoggingEvent::getFormattedMessage).toList()).containsExactly(
+                "action=PRODUCT_DELETE actorMemberId=99 target=product:" + ID + " result=SUCCESS",
+                "action=PRODUCT_DELETE actorMemberId=99 target=product:" + ID + " result=FAILURE",
+                "action=PRODUCT_DELETE actorMemberId=99 target=product:" + (ID + 1) + " result=FAILURE");
+        } finally {
+            logger.detachAppender(audit);
+            audit.stop();
+        }
     }
 
     @Test
@@ -157,7 +186,7 @@ class ProductDeleteIntegrationTest {
 
     private String deleteOutcome() {
         try {
-            products.delete(ID);
+            products.delete(ID, 99L);
             return "success";
         } catch (ProductException e) {
             return e.getErrorCode().getCode();

@@ -839,6 +839,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 - `DELETE /api/v1/admin/products/{productId}`는 ADMIN 전용이다. 본문·버전 파라미터 없이 현재 저장된 상품을 삭제하며 200 `dataBody: null`을 반환한다.
   상품 아이디는 양수(400 `PRODUCT_105`), 숫자 변환 실패는 400 `PRODUCT_198`, 없는 상품은 404 `PRODUCT_001`이다. 익명은 401, CUSTOMER는 403이다.
 - 이미 삭제된 상품은 200이며 삭제 시각·수정 시각·버전을 다시 쓰지 않는다. 숨김·판매 종료 상품도 삭제할 수 있다. 복구 API는 없다.
+- JWT 관리자 ID로 `PRODUCT_DELETE` 감사를 남긴다. 대상은 `product:<id>`이며 성공·업무 실패·롤백 결과를 커밋 이후 기록한다. 요청 검증·인증·인가 실패는 기록하지 않는다.
 - `ProductAdminFacade`의 최대 5초 DB 트랜잭션에서 `ProductDeleteProcessor`가 삭제 상품을 포함해 헤더를 읽고 `Product.softDelete(now)`로 상태를 바꾼다.
   삭제 시각은 UTC 마이크로초 정밀도이며, `visible=false`·`saleStatus=STOP_SELLING` 외 편집 설정·등록자는 보존한다.
   `ProductMapper`가 읽은 버전을 유지한 헤더를 merge하고 즉시 flush한다. 읽기 이후 동시 수정·삭제가 먼저 반영되면 409 `PRODUCT_010`이다.

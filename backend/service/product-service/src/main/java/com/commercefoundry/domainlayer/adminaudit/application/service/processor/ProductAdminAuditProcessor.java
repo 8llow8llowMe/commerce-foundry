@@ -19,6 +19,10 @@ public class ProductAdminAuditProcessor {
     static final String SIZE_CHART_TEMPLATE = "size-chart-template";
     static final String PRODUCT = "product";
 
+    public void productDeleted(long actorMemberId, long productId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_DELETE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
+    }
+
     /** @param categoryId 만든 카테고리 아이디 — 실패해 없으면 {@code null}({@code target=-}) */
     public void categoryCreated(long actorMemberId, Long categoryId, boolean succeeded) {
         write(ProductAdminAuditAction.CATEGORY_CREATE, actorMemberId, categoryId == null ? null : AdminAuditLog.target(CATEGORY, categoryId), succeeded);
