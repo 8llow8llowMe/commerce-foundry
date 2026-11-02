@@ -151,6 +151,21 @@ compose 가 env 파일과 무관하게 고정하는 값:
   payment 의 운영 DDL(`payment.outbox` · `payment.shedlock`)은 메시징을 켜기 전이 아니라 **이 버전 배포 전**에 적용한다 — 꺼져 있어도 결제 승인이 outbox 에 쓴다(없으면 승인 기록이 500 `PAYMENT_013`).
   결제 게이트(`payment.enabled`)를 켠 인스턴스는 두 테이블이 없으면 기동하지 않는다(`PaymentOutboxSchemaGuard`, `payment-guide.md` §6). 게이트가 닫혀 있으면 WARN 만 남긴다.
   payment 의 `MESSAGING_ENABLED` 는 order 컨슈머(#308 PR-B2) 배포와 함께 켠다 — 그 전에는 outbox 에 쌓아 둔다(켜면 쌓인 것부터 나가고, 토픽 보존은 7일이다).
+  **릴레이 운영 안전성(#476)**: `JdbcLockProvider`(`shedlock-provider-jdbc`)는 DB 시각이 아니라 앱 시각으로 `lock_until` 을 비교한다.
+  모든 인스턴스를 NTP 동기화하고 시계 차 < `commerce.messaging.outbox.relay.lock-at-most-for / 2`(기본 15초 미만)를 유지한다.
+  최소 락 유지 `outbox.relay.lock-at-least-for` 는 기본 500ms(양수 · 최대 락 이하)이며 시계 보정 기능은 아니다. 시계 차 · 긴 일시정지로 락이 겹칠 수 있고,
+  이때 중복 발행은 조건부 표시 · 컨슈머 inbox 가 흡수한다. 다중 인스턴스 운영 시 jdbc-template provider 의 `usingDbTime()` 전환을 재검토한다(현재 JDBC provider 에는 없음).
+  실패 행은 시도 수를 계속 올리고 다음 주기에 재시도한다. `available_at` 을 늦추지 않으며 ERROR 는 행당 10 · 100 · 1000회와 1분 간격이다.
+  로그 억제는 인스턴스 메모리 기준이므로 재시작 · 락 소유자 변경 시 첫 경고가 다시 나올 수 있다. `publish.failed.total` 은 로그 억제와 무관하게 모든 전송 실패를 센다.
+  Kafka 성공 뒤 DB 표시 실패는 WARN + `commerce.messaging.outbox.publish.mark.failed.total` 이고 다음 주기에 같은 eventId 를 다시 보낸다.
+  `outbox.relay.oldest-age-warn` · `oldest-age-error` 는 기본 60s · 300s(양수 · WARN < ERROR). 릴레이 주기 시작에 기존
+  `commerce.messaging.outbox.unpublished.oldest.age` 초 단위 게이지를 읽어 DB 조회 1회를 더하며 심각도별로 1분에 1회 경고한다.
+  게이지/레지스트리 부재 · 조회 실패 · 메시징 꺼짐 · 락 미획득이면 임계 로그가 없으므로 별도 지표 스크랩/알림도 유지한다.
+  operations/order/payment 의 oldest-age 공급자는 공통 `OutboxAgeMetrics` 로 DB RuntimeException 을 처리해 Micrometer 의 원문 throwable 로깅을 막는다.
+  이때 `commerce.messaging.outbox.unpublished.oldest.age.observation.failed.total` 이 증가하고 나이는 NaN(관측 불가)이다.
+  NaN 을 정상 0(적체 없음/미래 예약)으로 처리하지 말고 관측 실패 카운터도 감시한다. 카운터 기록 자체가 실패해도 공급자는 NaN 을 유지한다(count 게이지는 기존 동작).
+  인덱스는 PostgreSQL 17 0/1k/100k 미발행 실측 전에는 변경하지 않는다. #476의 현재 환경은 Docker 부재로 미측정이며
+  `core/messaging-core/README.md`의 후속 계획대로 릴레이 · 정리 · 지표 쿼리 모두 측정한 뒤 운영 DDL 을 결정한다.
   operations-service yml 도 같은 키를 읽지만 배포 compose 가 아직 없다 — compose 를 만드는 PR 에서 같이 넘긴다.
   해당 기능이 yml(또는 `storage.*` 같은 relaxed binding)로 키를 읽기 시작하는 PR 에서 그 모듈 compose 의 `environment` 에 같이 더한다(§8).
   `KAFKA_PORT` 는 로컬 compose(`docker-compose-local.yml`) 전용이라 배포 compose 에 넘기지 않는다.

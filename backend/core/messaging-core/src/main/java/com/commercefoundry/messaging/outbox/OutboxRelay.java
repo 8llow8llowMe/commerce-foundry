@@ -3,12 +3,16 @@ package com.commercefoundry.messaging.outbox;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
 import com.commercefoundry.messaging.event.TopicNames;
 import com.commercefoundry.messaging.properties.MessagingProperties;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -28,7 +32,7 @@ import org.springframework.kafka.core.KafkaOperations;
  *       락이 만료돼 둘이 함께 돌아도 표시는 조건부 UPDATE 라 한 번이고, 남은 중복 발행은 컨슈머 멱등(inbox)이 흡수한다.</li>
  *   <li><b>트랜잭션 밖에서 보낸다</b> — 외부 I/O 를 트랜잭션 · 행 잠금 안에 두지 않는다. 한 건씩 응답({@code acks=all})을 기다린다.</li>
  *   <li><b>실패한 키는 그 주기 동안 멈춘다</b> — 같은 aggregateId 의 뒤 행을 먼저 보내 순서를 뒤집지 않고, 다른 키는 계속 보낸다.
- *       실패 행은 시도 수 · 실패 코드를 남기고 다음 주기에 다시 보낸다({@value #ALERT_ATTEMPTS}회부터 ERROR).</li>
+ *       실패 행은 시도 수 · 실패 코드를 남기고 다음 주기에 다시 보낸다(ERROR 는 milestone · 1분 간격으로 제한).</li>
  *   <li>로그 · 실패 코드에 봉투 · 예외 메시지를 싣지 않는다 — 아이디 · 이벤트 종류 · 예외 타입만.</li>
  * </ul>
  */
@@ -39,6 +43,7 @@ public class OutboxRelay {
     private static final int MAX_ERROR_CODE_LENGTH = 50;
     /** 이 시도 수부터 ERROR 로 남긴다. */
     static final int ALERT_ATTEMPTS = 10;
+    private static final Duration LOG_REPEAT_INTERVAL = Duration.ofMinutes(1);
 
     private final OutboxStore outboxStore;
     private final KafkaOperations<String, String> kafka;
@@ -48,6 +53,10 @@ public class OutboxRelay {
     private final MessagingProperties properties;
     private final Clock clock;
     private final MeterRegistry meterRegistry;
+    // 전용 백그라운드 스레드가 사용한다. 최근 1분 안에 경고한 행만 보관해 오래된 행이 누적되지 않는다.
+    private final Map<Long, FailureAlert> failureAlerts = new HashMap<>();
+    private Instant lastAgeWarn;
+    private Instant lastAgeError;
 
     /**
      * @param meterRegistry 지표. 없으면 null
@@ -77,7 +86,7 @@ public class OutboxRelay {
         MessagingProperties.Relay relay = properties.outbox().relay();
         try {
             lockingTaskExecutor.executeWithLock((Runnable) this::publishPending,
-                new LockConfiguration(clock.instant(), RELAY_LOCK, relay.lockAtMostFor(), Duration.ZERO));
+                new LockConfiguration(clock.instant(), RELAY_LOCK, relay.lockAtMostFor(), relay.lockAtLeastFor()));
         } catch (RuntimeException exception) {
             // DB · 락 오류 상세가 원문으로 남지 않게 타입만
             log.warn("outbox relay run failed. error={}", exception.getClass().getSimpleName());
@@ -93,7 +102,10 @@ public class OutboxRelay {
      */
     int publishPending() {
         MessagingProperties.Relay relay = properties.outbox().relay();
+        Instant now = clock.instant();
+        failureAlerts.values().removeIf(last -> !now.isBefore(last.at().plus(LOG_REPEAT_INTERVAL)));
         long deadline = System.nanoTime() + relay.lockAtMostFor().toNanos() / 2;
+        checkOldestAge(relay, now);
         Set<String> blockedAggregates = new HashSet<>();
         int published = 0;
         for (int batch = 0; batch < relay.maxBatchesPerRun(); batch++) {
@@ -139,7 +151,18 @@ public class OutboxRelay {
             fail(row, exception);
             return SendOutcome.FAILED;
         }
-        boolean marked = outboxStore.markPublished(row.id(), clock.instant());
+        boolean marked;
+        try {
+            marked = outboxStore.markPublished(row.id(), clock.instant());
+        } catch (RuntimeException exception) {
+            // Kafka 는 받았지만 DB 표시는 미확정이다. 같은 키의 뒤 행을 막고 다음 주기에 같은 봉투를 재발행한다.
+            log.warn("outbox publish marker failed, will republish next run. outboxId={}, error={}", row.id(), exception.getClass().getSimpleName());
+            if (meterRegistry != null) {
+                meterRegistry.counter("commerce.messaging.outbox.publish.mark.failed.total").increment();
+            }
+            return SendOutcome.FAILED;
+        }
+        failureAlerts.remove(row.id());
         if (meterRegistry != null) {
             if (marked) {
                 meterRegistry.counter("commerce.messaging.outbox.published.total").increment();
@@ -181,11 +204,11 @@ public class OutboxRelay {
             errorCode = errorCode.substring(0, MAX_ERROR_CODE_LENGTH);
         }
         int attempts = row.publishAttempts() + 1;
-        if (attempts >= ALERT_ATTEMPTS) {
+        if (attempts >= ALERT_ATTEMPTS && shouldAlertFailure(row.id(), attempts)) {
             // 토픽 누락 · 다시 해도 같은 실패 — 이 키의 이벤트가 계속 묶여 있다. 사람이 볼 신호다
             log.error("outbox row keeps failing, aggregate is blocked. outboxId={}, eventType={}, attempts={}, error={}",
                 row.id(), row.eventType(), attempts, errorCode);
-        } else {
+        } else if (attempts < ALERT_ATTEMPTS) {
             log.warn("outbox publish failed, will retry next run. outboxId={}, eventType={}, attempts={}, error={}",
                 row.id(), row.eventType(), attempts, errorCode);
         }
@@ -196,6 +219,51 @@ public class OutboxRelay {
         }
         if (meterRegistry != null) {
             meterRegistry.counter("commerce.messaging.outbox.publish.failed.total", "error", errorCode).increment();
+        }
+    }
+
+    private boolean shouldAlertFailure(long id, int attempts) {
+        FailureAlert previous = failureAlerts.get(id);
+        boolean milestone = attempts == ALERT_ATTEMPTS || attempts == 100 || attempts == 1000;
+        if (previous == null || (milestone && previous.attempts() != attempts)) {
+            failureAlerts.put(id, new FailureAlert(attempts, clock.instant()));
+            return true;
+        }
+        return false;
+    }
+
+    private record FailureAlert(int attempts, Instant at) {
+    }
+
+    /** 서비스의 기존 초 단위 게이지를 읽는다. 게이지가 없거나 읽을 수 없으면 관측만 생략하고 발행은 계속한다. */
+    private void checkOldestAge(MessagingProperties.Relay relay, Instant now) {
+        if (meterRegistry == null) {
+            return;
+        }
+        try {
+            Gauge age = meterRegistry.find("commerce.messaging.outbox.unpublished.oldest.age").gauge();
+            if (age == null) {
+                return;
+            }
+            double seconds = age.value();
+            if (!Double.isFinite(seconds)) {
+                return;
+            }
+            // 심각도별로 1분 제한한다. 정상 복귀나 임계 부근 진동도 억제 시각을 초기화하지 않는다.
+            if (seconds >= relay.oldestAgeError().toMillis() / 1000.0) {
+                if (lastAgeError == null || !now.isBefore(lastAgeError.plus(LOG_REPEAT_INTERVAL))) {
+                    log.error("outbox unpublished oldest age exceeds threshold. ageSeconds={}", seconds);
+                    lastAgeError = now;
+                }
+            } else if (seconds >= relay.oldestAgeWarn().toMillis() / 1000.0) {
+                if (lastAgeWarn == null || !now.isBefore(lastAgeWarn.plus(LOG_REPEAT_INTERVAL))) {
+                    log.warn("outbox unpublished oldest age exceeds threshold. ageSeconds={}", seconds);
+                    lastAgeWarn = now;
+                }
+            }
+        } catch (RuntimeException exception) {
+            // 관측 실패로 발행을 막지 않는다. 예외 메시지에는 DB 정보가 있을 수 있어 남기지 않는다.
+            log.debug("outbox oldest age observation failed. error={}", exception.getClass().getSimpleName());
         }
     }
 }

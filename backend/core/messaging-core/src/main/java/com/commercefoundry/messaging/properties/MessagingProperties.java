@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
@@ -113,6 +114,17 @@ public record MessagingProperties(
             positive(relay.maxBatchesPerRun(), "outbox.relay.max-batches-per-run", violations);
             positive(relay.publishTimeout(), "outbox.relay.publish-timeout", violations);
             positive(relay.lockAtMostFor(), "outbox.relay.lock-at-most-for", violations);
+            positive(relay.lockAtLeastFor(), "outbox.relay.lock-at-least-for", violations);
+            positive(relay.oldestAgeWarn(), "outbox.relay.oldest-age-warn", violations);
+            positive(relay.oldestAgeError(), "outbox.relay.oldest-age-error", violations);
+            if (relay.lockAtLeastFor() != null && relay.lockAtMostFor() != null
+                && relay.lockAtLeastFor().compareTo(relay.lockAtMostFor()) > 0) {
+                violations.add(PREFIX + ".outbox.relay.lock-at-least-for 는 lock-at-most-for 이하여야 합니다");
+            }
+            if (relay.oldestAgeWarn() != null && relay.oldestAgeError() != null
+                && relay.oldestAgeWarn().compareTo(relay.oldestAgeError()) >= 0) {
+                violations.add(PREFIX + ".outbox.relay.oldest-age-error 는 oldest-age-warn 보다 길어야 합니다");
+            }
             // 한 주기는 lock-at-most-for 의 절반 안에서 끝낸다 — 한 건 대기가 그보다 길면 락이 쥔 채로 만료된다
             if (relay.publishTimeout() != null && relay.lockAtMostFor() != null
                 && relay.publishTimeout().multipliedBy(2).compareTo(relay.lockAtMostFor()) > 0) {
@@ -136,6 +148,9 @@ public record MessagingProperties(
      * @param publishTimeout 한 건 발행 응답 대기 상한 — 프로듀서 {@code max.block.ms}(토픽 메타데이터 대기)도 이 값으로 맞춘다
      * @param lockAtMostFor 단일 실행 락 상한 — 락을 쥔 인스턴스가 죽으면 이 시간 뒤 다른 인스턴스가 잇는다. 한 주기는 이 값의 절반 안에서 끝난다. 기록 정리 락도 이 값이다
      * @param lockTable ShedLock 테이블(서비스 스키마, 예 {@code orders.shedlock}). 기록 정리도 같은 테이블을 쓴다 — 받기만 하는 서비스도 둔다
+     * @param lockAtLeastFor 빠르게 끝난 실행의 락 재획득을 막는 최소 유지 시간
+     * @param oldestAgeWarn 가장 오래된 미발행 나이 WARN 임계
+     * @param oldestAgeError 가장 오래된 미발행 나이 ERROR 임계
      */
     public record Relay(
         @DefaultValue("true") boolean enabled,
@@ -144,8 +159,23 @@ public record MessagingProperties(
         @DefaultValue("10") int maxBatchesPerRun,
         @DefaultValue("5s") Duration publishTimeout,
         @DefaultValue("30s") Duration lockAtMostFor,
-        @DefaultValue("shedlock") String lockTable
+        @DefaultValue("shedlock") String lockTable,
+        @DefaultValue("500ms") Duration lockAtLeastFor,
+        @DefaultValue("60s") Duration oldestAgeWarn,
+        @DefaultValue("300s") Duration oldestAgeError
     ) {
+        @ConstructorBinding
+        public Relay {
+        }
+
+        /** 기존 직접 생성자의 기본 운영 설정을 보존한다. */
+        public Relay(
+            boolean enabled, Duration interval, int batchSize, int maxBatchesPerRun,
+            Duration publishTimeout, Duration lockAtMostFor, String lockTable
+        ) {
+            this(enabled, interval, batchSize, maxBatchesPerRun, publishTimeout, lockAtMostFor, lockTable,
+                Duration.ofMillis(500), Duration.ofSeconds(60), Duration.ofSeconds(300));
+        }
     }
 
     /**

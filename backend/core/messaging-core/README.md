@@ -29,6 +29,8 @@ Kafka 메시징 공통 모듈 (#306). 설계 기준은 #304 설계 댓글 A 절�
 | `outbox.relay.interval` · `batch-size` · `max-batches-per-run` | 1s · 100 · 10 | |
 | `outbox.relay.publish-timeout` | 5s | 한 건 발행 응답 대기. 프로듀서 `max.block.ms`(토픽 메타데이터 대기)도 이 값이다 |
 | `outbox.relay.lock-at-most-for` | 30s | 단일 실행 락 상한. `publish-timeout` 의 두 배 이상이어야 하고, 한 주기는 이 값의 절반 안에서 끝난다 |
+| `outbox.relay.lock-at-least-for` | 500ms | 빠르게 끝난 실행도 락을 유지해 재획득 폭주를 막는다. 양수이며 `lock-at-most-for` 이하여야 한다 |
+| `outbox.relay.oldest-age-warn` · `oldest-age-error` | 60s · 300s | 가장 오래된 미발행 나이 로그 임계. 양수이며 WARN < ERROR 여야 한다 |
 | `outbox.relay.lock-table` | `shedlock` | 서비스 스키마를 붙인다(예 `orders.shedlock`). 기록 정리 락도 이 테이블 · `lock-at-most-for` 를 쓴다 — outbox 없는 서비스도 적는다 |
 | `outbox.cleanup.enabled` · `interval` · `retention` · `batch-size` | true · 1h · 7d · 1000 | 발행 완료 outbox 행과 처리 기록(inbox) 정리. 키는 outbox 아래지만 inbox 정리에도 적용된다(하위 호환). `retention` 은 outbox 보존이고 Kafka 보존(7일)과 맞춘다 — 처리 기록 보존은 `inbox.retention` |
 | `inbox.retention` | 7d | 처리 기록 보존 — 토픽 보존 + 재시도 창 이상 |
@@ -49,7 +51,7 @@ kafka-clients 의 `*Config values` INFO 로그에 접속 주소가 찍힌다 —
 outbox            id(Snowflake PK) · aggregate_type · aggregate_id · event_type · schema_version · payload(봉투 JSON, text)
                   · available_at · created_at · published_at · publish_attempts · last_error_code · version
                   인덱스: (published_at, available_at) 하나 — 미발행 조회(published_at is null and available_at <= now order by id) · 정리(published_at < cutoff)를 함께 받는다.
-                          엔티티 @Index 로 표현할 수 없는 부분 인덱스는 쓰지 않는다(서비스 규칙). 미발행 행이 많아 정렬이 무거워지면 그때 운영 DDL 로 더한다
+                          부분 인덱스 도입은 PostgreSQL 17 실측 뒤 판단한다. 기존 인덱스는 정리 · 지표 쿼리도 쓰므로 임의로 지우지 않는다
 processed_event   (consumer_group, event_id) 유니크 · event_type · processed_at, 인덱스 (processed_at) — 정리
 shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock JDBC 표준 모양)
 ```
@@ -67,8 +69,15 @@ shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock J
 
 - 토픽 · DLT(`<topic>.dlt`)는 Infra 선언 스크립트가 만든다. 앱은 만들지 않고 `required-topics` 로 확인만 한다.
 - 릴레이는 한 인스턴스만 돈다(ShedLock). 락이 만료돼 둘이 겹쳐도 표시는 조건부 UPDATE 로 한 번이고, 남은 중복 발행은 컨슈머 멱등이 흡수한다.
+  현재 `shedlock-provider-jdbc` 의 `JdbcLockProvider` 는 앱(클라이언트) 시각으로 `lock_until` 을 비교한다. `usingDbTime()` 은
+  `shedlock-provider-jdbc-template` 에만 있으므로 현재 provider 에 적용할 수 없다. 모든 인스턴스를 NTP 로 동기화하고 인스턴스 간 시계 차를
+  `lock-at-most-for / 2` 미만(기본 15초 미만)으로 유지한다. 이는 운영 상한이며 락 중첩이 없다는 증명은 아니다 — 시계 차 · 긴 일시정지로 락이 만료될 수 있다.
+  `lock-at-least-for`(기본 500ms)는 빠른 실행의 재획득을 늦출 뿐 시계 차를 보정하지 않는다. 다중 인스턴스 운영 때 jdbc-template + DB 시각 사용을 재검토한다.
 - 발행이 실패하면 그 aggregateId 만 그 주기 동안 멈추고(같은 키의 순서 보존) 다른 키는 계속 보낸다. 실패 행은 시도 수 · 실패 코드(예외 타입)를 남기고
-  다음 주기에 다시 보낸다 — 10회부터 ERROR 로그다.
+  다음 주기에 다시 보낸다 — `available_at` 백오프를 넣지 않는다. 1~9회 WARN, 10 · 100 · 1000회 ERROR 를 남기고, 그 사이와 이후 ERROR 는 행당 1분에 1회다.
+  억제 상태는 실행 인스턴스의 메모리에만 있고 재시작 · 릴레이 소유자 변경 시 첫 실패 경고가 다시 나올 수 있다. 실패 카운터는 모든 전송 실패를 센다.
+  Kafka 성공 뒤 `markPublished` 예외는 WARN + `commerce.messaging.outbox.publish.mark.failed.total` 이며 전송 실패 카운터와 구분한다.
+  같은 키의 뒤 행은 이번 주기 동안 멈추고 다음 주기에 같은 eventId · 봉투를 재발행한다. 컨슈머 inbox 가 중복을 흡수해야 한다.
 - **토픽과 함께 `<topic>.dlt` 도 있어야 한다.** DLT 가 없으면 재시도를 다 쓴 레코드를 보내지 못해 그 파티션이 같은 레코드를 계속 다시 처리하며 멈춘다.
   쓰는 토픽 · DLT 를 `required-topics` 에 적어 기동 때 확인한다.
 - DLT 재처리는 사람이 한다 — Kafka UI 로 재전송하거나 outbox 행의 `published_at` 을 비워 릴레이가 다시 보내게 한다. DLT 헤더에는 예외 · 원인 클래스 이름만 있고 예외 메시지 · 스택트레이스는 없다.
@@ -78,6 +87,30 @@ shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock J
 - 지표: `commerce.messaging.outbox.published.total` · `…outbox.publish.failed.total{error}` · `…outbox.publish.latency` · `commerce.messaging.consumer.dlt.total{topic}`.
   미발행 행 수 · 가장 오래된 미발행 나이 게이지(`commerce.messaging.outbox.unpublished.count` · `…unpublished.oldest.age`)는 저장소를 가진 서비스가 단다 —
   operations-service `OutboxMetrics` 참고.
+  릴레이는 락을 획득한 주기의 시작에 이 **초 단위 나이 게이지를 한 번 읽어 DB 조회 1회**를 추가한다. 기본 60초 WARN · 300초 ERROR 이고
+  심각도별로 1분에 1회만 남긴다(심각도 상승은 즉시, 정상 복귀 · 임계 진동도 억제 시각을 초기화하지 않음).
+  레지스트리 · 게이지가 없거나 NaN · 조회 실패면 임계 로그를 생략하고 발행은 계속한다. 메시징/릴레이가 꺼졌거나 락을 못 잡으면 이 경고도 돌지 않으므로
+  별도 스크랩 · 알림을 대체하지 않는다. 게이지 없는 서비스에는 임계 경고가 없다는 점을 배포 시 확인한다.
+  operations · order · payment 의 oldest-age 공급자는 공통 `OutboxAgeMetrics.oldestAgeSeconds` 를 사용한다. DB 조회의 `RuntimeException` 은
+  `commerce.messaging.outbox.unpublished.oldest.age.observation.failed.total` 을 올리고 NaN(관측 불가)을 반환한다. 정상 0(미발행 없음/미래 예약)과 다르다.
+  예외를 Micrometer 로 넘기면 `DefaultGauge` 가 원문 throwable 을 WARN/DEBUG 로 기록하므로 공급자 내부에서 처리하며 원문 로그를 남기지 않는다.
+  실패 카운터 기록도 실패하면 예외 없이 NaN 을 유지한다. 이 보호는 oldest-age 공급자에만 적용한다(count 게이지는 기존 동작 유지).
+  NaN/관측 실패 카운터도 별도 알림 대상으로 둔다 — 나이를 읽지 못한 상태를 적체 없음으로 해석하지 않는다.
+
+## 인덱스 실측 계획 (#476, 미완료)
+
+현재 환경에는 Docker 실행 파일이 없어 PostgreSQL 17 `EXPLAIN (ANALYZE, BUFFERS)` 를 실행하지 못했다. 인덱스 · 엔티티 · DDL 은 변경하지 않았다.
+측정 결과 없이 인덱스 완료 기준을 통과로 처리하지 않는다. Docker 가 있는 환경에서 다음 작업을 별도로 수행한다.
+
+1. PostgreSQL 17 Testcontainers 에 실제 서비스 DDL 스냅숏을 적용하고, 미발행 0 / 1,000 / 100,000건을 만든다. 이미 발행한 행과 미래 예약 행도 일정 비율로 섞고
+   데이터 규모 · 분포 · PostgreSQL 버전 · 설정을 기록한다. 각 구성에서 `ANALYZE` 후 같은 기준 시각 · batch-size 로 여러 번 측정한다.
+2. 실제 저장소 질의(릴레이 `published_at is null and available_at <= ? order by id limit N`, 정리, count, oldest-age)를 모두
+   `EXPLAIN (ANALYZE, BUFFERS)` 로 실행하고 실행 시간 · 정렬 · 실제 행 수 · shared hit/read 를 남긴다.
+3. 기존 `(published_at, available_at)` 유지 상태와 추가 `(id) where published_at is null` 후보를 비교한다.
+   `(available_at, id) where published_at is null` + 정렬 변경 후보는 같은 키의 순서 계약을 먼저 검증한다 — 측정만으로 순서 변경을 승인하지 않는다.
+4. 개선을 확인한 경우에만 별도 인덱스 변경을 결정한다. 부분 인덱스는 `@Index` 로 표현할 수 없으므로 실제 스냅숏 관리 방식을 정하고,
+   운영 DDL 은 `CREATE INDEX CONCURRENTLY` 를 트랜잭션 밖 단독 실행하도록 제공한다. 실패한 INVALID 인덱스는 확인 후 삭제 · 재생성한다.
+   기존 인덱스는 정리 · 지표 쿼리 영향까지 확인하기 전 유지한다.
 
 ## 테스트
 
