@@ -23,9 +23,12 @@ import {
   CANCEL_REASONS,
   cancelFailure,
   canResumePayment,
+  confirmFailure,
+  orderActions,
   orderCancelPath,
   orderDetailPath,
   orderPageHref,
+  orderPurchaseConfirmationPath,
   statusLabel,
   type CancelReason,
   type OrderDetail as Order,
@@ -40,9 +43,11 @@ type Load =
   | { status: 'ready'; order: Order; now: number };
 
 /**
- * 주문 상세 · 결제 전 취소(#28 · BE #16 PR-1). 상세는 브라우저에서 BFF 로 읽고, 취소 버튼은 서버의 `cancelable` 일 때만 둔다.
- * 취소는 사유 코드(`CANCEL_REASONS`)를 골라 `POST .../cancellation` — 응답이 취소된 상세라 그대로 바꿔 끼운다.
- * 실패 처리는 `cancelFailure` 다(경합 · 결과 모름은 상세를 다시 읽는다). 출고 전 취소 · 반품 · 구매 확정은 BE 전이라 두지 않는다.
+ * 주문 상세 · 결제 전 취소 · 구매 확정(#28 · BE #16). 상세는 브라우저에서 BFF 로 읽고, 액션은 `orderActions` 가 정한 것만 둔다
+ * (취소는 서버의 `cancelable`, 구매 확정은 배송 완료). 두 액션 모두 확인 패널을 거친다.
+ * 취소는 사유 코드(`CANCEL_REASONS`)를 골라 `POST .../cancellation`, 구매 확정은 `PATCH .../purchase-confirmation` —
+ * 응답이 바뀐 상세라 그대로 바꿔 끼운다. 실패 처리는 `cancelFailure` · `confirmFailure` 다(경합 · 결과 모름은 상세를 다시 읽는다).
+ * 결제 뒤 취소 · 반품은 BE 전이라 두지 않는다.
  * 배송 조회(BE #18 PR-B2)는 상세와 함께 따로 읽는다 — 실패해도 상세는 그대로 보이고 배송 자리에서만 다시 시도한다.
  */
 export function OrderDetail({ orderId }: { orderId: string }) {
@@ -55,6 +60,10 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   const [canceling, setCanceling] = useState(false);
   const cancelingNow = useRef(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const confirmingNow = useRef(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const cooldown = useRetryCooldown();
   // 패널이 열리고 닫히면 누른 버튼이 사라진다 — 다음 렌더 뒤 포커스를 옮길 곳(주문서의 pendingFocus 와 같은 방식)
@@ -149,6 +158,45 @@ export function OrderDetail({ orderId }: { orderId: string }) {
     setCancelError(null);
   };
 
+  const closeConfirm = (focus: 'trigger' | 'notice' = 'trigger') => {
+    pendingFocus.current = focus;
+    setConfirmOpen(false);
+    setConfirmError(null);
+  };
+
+  const confirmPurchase = async () => {
+    // 상태 반영 전 두 번째 클릭은 ref 로 막는다
+    if (confirmingNow.current) return;
+    confirmingNow.current = true;
+    setConfirming(true);
+    setConfirmError(null);
+    try {
+      // 이미 확정된 주문도 200 으로 확정된 상세가 온다(자동 구매 확정과 겹친 경우 포함)
+      const confirmed = await apiFetch<Order>(orderPurchaseConfirmationPath(orderId), {
+        method: 'PATCH',
+      });
+      setLoad({ status: 'ready', order: confirmed, now: Date.now() });
+      closeConfirm('notice');
+      setNotice(t.confirmed);
+    } catch (cause) {
+      cooldown.startFrom(cause);
+      const failure = confirmFailure(cause, t);
+      if (failure.kind === 'signedOut') {
+        setLoad({ status: 'signedOut' });
+      } else if (failure.kind === 'reload') {
+        // 반품 요청 등 다른 전이가 먼저였거나 결과를 모른다 — 지금 상태를 다시 읽는다. 배송 완료로 남아 있으면 다시 누르면 된다
+        closeConfirm('notice');
+        setNotice(failure.message);
+        await read();
+      } else {
+        setConfirmError(failure.message);
+      }
+    } finally {
+      confirmingNow.current = false;
+      setConfirming(false);
+    }
+  };
+
   const cancel = async () => {
     // 상태 반영 전 두 번째 클릭은 ref 로 막는다
     if (!reason || cancelingNow.current) return;
@@ -183,6 +231,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   };
 
   const { order } = load;
+  const actions = orderActions(order);
   return (
     <div className="flex flex-col gap-8">
       {/* 상태 영역은 늘 두고 내용만 바꾼다 — 내용과 함께 새로 끼운 라이브 영역은 스크린리더가 읽지 않기도 한다 */}
@@ -218,7 +267,32 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           />
         }
       />
-      {order.cancelable &&
+      {actions.confirmPurchase &&
+        (confirmOpen ? (
+          <ConfirmPurchasePanel
+            titleRef={panelTitle}
+            t={t}
+            error={confirmError}
+            confirming={confirming}
+            blocked={cooldown.coolingDown}
+            onConfirm={() => void confirmPurchase()}
+            onClose={() => closeConfirm()}
+          />
+        ) : (
+          <div ref={trigger}>
+            <Button
+              className="h-12 w-full"
+              onClick={() => {
+                setNotice(null);
+                pendingFocus.current = 'panel';
+                setConfirmOpen(true);
+              }}
+            >
+              {t.confirm}
+            </Button>
+          </div>
+        ))}
+      {actions.cancel &&
         (cancelOpen ? (
           <CancelPanel
             titleRef={panelTitle}
@@ -514,6 +588,60 @@ export function CancelPanel({
         </Button>
         <Button variant="secondary" disabled={canceling} onClick={onClose} className="h-12 flex-1">
           {t.cancelClose}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** 구매 확정 확인 — 확정 뒤에는 반품 · 교환을 요청할 수 없다는 안내를 함께 둔다 */
+export function ConfirmPurchasePanel({
+  titleRef,
+  t,
+  error,
+  confirming,
+  blocked,
+  onConfirm,
+  onClose,
+}: {
+  /** 패널이 열리면 포커스를 받을 제목 */
+  titleRef?: Ref<HTMLHeadingElement>;
+  t: Dictionary['orders'];
+  error: string | null;
+  confirming: boolean;
+  blocked: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const name = useId();
+  return (
+    <section
+      aria-labelledby={`${name}-title`}
+      aria-describedby={`${name}-caution`}
+      className="flex flex-col gap-4 border border-border p-5"
+    >
+      <h2 id={`${name}-title`} ref={titleRef} tabIndex={-1} className="text-lg">
+        {t.confirmTitle}
+      </h2>
+      <p id={`${name}-caution`} className="text-sm text-muted-fg">
+        {t.confirmCaution}
+      </p>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={confirming || blocked}
+          aria-busy={confirming}
+          onClick={onConfirm}
+          className="h-12 flex-1"
+        >
+          {confirming ? t.confirming : t.confirmConfirm}
+        </Button>
+        <Button variant="secondary" disabled={confirming} onClick={onClose} className="h-12 flex-1">
+          {t.confirmClose}
         </Button>
       </div>
     </section>

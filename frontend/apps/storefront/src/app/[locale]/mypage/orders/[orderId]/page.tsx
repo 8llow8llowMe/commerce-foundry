@@ -12,8 +12,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * 주문 상세 · 결제 전 취소(#28 · BE #16 PR-1). 주문 아이디 형식이 어긋나면 API 를 부르지 않고 not-found 다.
- * 상세 · 취소는 브라우저에서 BFF 로 한다(`OrderDetail`).
+ * 주문 상세 · 결제 전 취소 · 구매 확정(#28 · BE #16). 주문 아이디 형식이 어긋나면 API 를 부르지 않고 not-found 다.
+ * 상세 · 취소 · 구매 확정은 브라우저에서 BFF 로 한다(`OrderDetail`).
  */
 export default async function OrderDetailPage({
   params,

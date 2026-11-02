@@ -561,6 +561,26 @@ export const ko = {
       ORDER_154: '취소 사유를 선택해 주세요.',
       GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
     } as Record<string, string>,
+    /** 구매 확정(#28 · BE #16) — 배송 완료 주문만. 확정 뒤에는 반품 · 교환을 요청할 수 없다 */
+    confirm: '구매 확정',
+    confirmTitle: '구매를 확정할까요?',
+    confirmCaution:
+      '구매를 확정하면 반품 · 교환을 요청할 수 없습니다. 상품을 받으셨는지 확인해 주세요.',
+    confirmConfirm: '확정하기',
+    confirming: '확정하는 중입니다.',
+    confirmClose: '닫기',
+    confirmed: '구매를 확정했습니다.',
+    confirmFailed: '구매를 확정하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    /** 결과를 모른다 — 상세를 다시 읽었다 */
+    confirmUnknown:
+      '구매 확정 결과를 확인하지 못했습니다. 주문 상태를 확인하고 필요하면 다시 시도해 주세요.',
+    /** 구매 확정 오류 코드별 문구. 없으면 confirmFailed */
+    confirmErrors: {
+      ORDER_001: '주문을 찾을 수 없습니다.',
+      ORDER_020: '배송 완료된 주문만 구매를 확정할 수 있습니다. 주문 상태를 확인해 주세요.',
+      ORDER_025: '주문 상태가 방금 바뀌었습니다. 주문 상태를 확인해 주세요.',
+      GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+    } as Record<string, string>,
     /** 영문 스토어의 상태 이름(국문은 서버 이름) */
     statuses: {} as Record<string, string>,
     delivery: '배송 정보',

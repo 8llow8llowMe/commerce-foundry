@@ -6,8 +6,11 @@ import {
   appendOrders,
   cancelFailure,
   canResumePayment,
+  confirmFailure,
+  orderActions,
   orderCancelPath,
   orderListPath,
+  orderPurchaseConfirmationPath,
   readOrderPathId,
   statusLabel,
   type OrderSummary,
@@ -38,6 +41,9 @@ describe('주문 내역 경로', () => {
     expect(orderListPath(1)).toBe('/api/v1/orders?page=1&size=20');
     expect(orderCancelPath('4611686018427387904')).toBe(
       '/api/v1/orders/4611686018427387904/cancellation',
+    );
+    expect(orderPurchaseConfirmationPath('4611686018427387904')).toBe(
+      '/api/v1/orders/4611686018427387904/purchase-confirmation',
     );
   });
 
@@ -140,6 +146,81 @@ describe('cancelFailure', () => {
     expect(cancelFailure(apiError('server', 400, 'ORDER_999'), en.orders)).toEqual({
       kind: 'retry',
       message: en.orders.cancelFailed,
+    });
+  });
+});
+
+describe('orderActions', () => {
+  const at = (code: string, cancelable = false) =>
+    orderActions({ status: { code, name: code, description: '' }, cancelable });
+
+  it('취소는 서버의 cancelable 만 따른다 — 출고 뒤 상태에는 없다', () => {
+    expect(at('PENDING_PAYMENT', true).cancel).toBe(true);
+    for (const code of ['PAID', 'PREPARING', 'SHIPPING', 'DELIVERED', 'PURCHASE_CONFIRMED']) {
+      expect(at(code).cancel).toBe(false);
+    }
+  });
+
+  it('구매 확정은 배송 완료만 — 이미 확정 · 배송 중 · 반품 · 취소에는 없다', () => {
+    expect(at('DELIVERED').confirmPurchase).toBe(true);
+    for (const code of [
+      'PENDING_PAYMENT',
+      'PAID',
+      'MAKING',
+      'PREPARING',
+      'SHIPPING',
+      'PURCHASE_CONFIRMED',
+      'RETURN_REQUESTED',
+      'RETURNED',
+      'CANCELED',
+      'EXPIRED',
+    ]) {
+      expect(at(code).confirmPurchase).toBe(false);
+    }
+  });
+});
+
+describe('confirmFailure', () => {
+  it('401 은 로그인 안내', () => {
+    expect(confirmFailure(apiError('unauthorized', 401, null), t)).toEqual({ kind: 'signedOut' });
+  });
+
+  it('배송 완료가 아니거나(ORDER_020) 다른 전이가 먼저(ORDER_025) · 404 면 다시 읽는다', () => {
+    for (const code of ['ORDER_020', 'ORDER_025']) {
+      expect(confirmFailure(apiError('conflict', 409, code), t)).toEqual({
+        kind: 'reload',
+        message: t.confirmErrors[code],
+      });
+    }
+    expect(confirmFailure(apiError('notFound', 404, 'ORDER_001'), t)).toEqual({
+      kind: 'reload',
+      message: t.confirmErrors.ORDER_001,
+    });
+  });
+
+  it('결과를 모르면 다시 읽어 확인한다(구매 확정은 멱등)', () => {
+    for (const cause of [
+      apiError('unknownOutcome', 504, null),
+      apiError('server', 500, 'COMMON_001'),
+      apiError('network', null, null),
+      new Error('boom'),
+    ]) {
+      expect(confirmFailure(cause, t)).toEqual({ kind: 'reload', message: t.confirmUnknown });
+    }
+  });
+
+  it('반영되지 않은 실패는 문구만 — 429 · 503 · 그 밖의 4xx(영문은 사전 문구)', () => {
+    expect(confirmFailure(apiError('rateLimited', 429, 'GATEWAY_006'), t)).toEqual({
+      kind: 'retry',
+      message: t.confirmErrors.GATEWAY_006,
+    });
+    expect(confirmFailure(apiError('unavailable', 503, 'BFF_002'), t)).toEqual({
+      kind: 'retry',
+      message: t.confirmFailed,
+    });
+    expect(confirmFailure(apiError('server', 400, 'ORDER_141'), en.orders)).toEqual({
+      kind: 'retry',
+      message: en.orders.confirmFailed,
     });
   });
 });

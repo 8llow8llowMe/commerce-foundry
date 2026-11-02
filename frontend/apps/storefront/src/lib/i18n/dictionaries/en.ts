@@ -505,6 +505,23 @@ export const en: Dictionary = {
       ORDER_154: 'Please choose a reason.',
       GATEWAY_006: 'Too many requests. Please try again in a moment.',
     } as Record<string, string>,
+    confirm: 'Confirm purchase',
+    confirmTitle: 'Confirm this purchase?',
+    confirmCaution:
+      'After you confirm the purchase, you can no longer request a return or exchange. Please make sure you have received your items.',
+    confirmConfirm: 'Confirm',
+    confirming: 'Confirming.',
+    confirmClose: 'Close',
+    confirmed: 'Your purchase has been confirmed.',
+    confirmFailed: 'We couldn’t confirm the purchase. Please try again in a moment.',
+    confirmUnknown:
+      'We couldn’t verify the confirmation. Please check the order status and try again if needed.',
+    confirmErrors: {
+      ORDER_001: 'We couldn’t find this order.',
+      ORDER_020: 'Only delivered orders can be confirmed. Please check the order status.',
+      ORDER_025: 'The order status just changed. Please check the order status.',
+      GATEWAY_006: 'Too many requests. Please try again in a moment.',
+    } as Record<string, string>,
     statuses: {
       PENDING_PAYMENT: 'Awaiting payment',
       EXPIRED: 'Expired',
