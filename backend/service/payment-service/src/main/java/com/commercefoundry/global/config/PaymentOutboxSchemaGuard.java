@@ -26,10 +26,16 @@ public class PaymentOutboxSchemaGuard implements SmartInitializingSingleton {
 
     private final DataSource dataSource;
     private final PaymentGateProperties gate;
+    private final boolean recoveryEnabled;
 
     public PaymentOutboxSchemaGuard(DataSource dataSource, PaymentGateProperties gate) {
+        this(dataSource, gate, false);
+    }
+
+    public PaymentOutboxSchemaGuard(DataSource dataSource, PaymentGateProperties gate, boolean recoveryEnabled) {
         this.dataSource = dataSource;
         this.gate = gate;
+        this.recoveryEnabled = recoveryEnabled;
     }
 
     @Override
@@ -38,8 +44,8 @@ public class PaymentOutboxSchemaGuard implements SmartInitializingSingleton {
         if (missing.isEmpty()) {
             return;
         }
-        if (gate.enabled()) {
-            throw new IllegalStateException("결제 게이트(payment.enabled)가 열려 있는데 outbox 테이블이 없습니다: " + String.join(", ", missing)
+        if (gate.enabled() || recoveryEnabled) {
+            throw new IllegalStateException("결제 또는 복구 게이트(payment.enabled / payment.recovery.enabled)가 열려 있는데 outbox 테이블이 없습니다: " + String.join(", ", missing)
                 + " — 운영 DDL(payment-schema.sql 의 outbox · shedlock)을 먼저 적용하세요 (deploy-guide.md §4-2)");
         }
         log.warn("payment outbox tables are missing. payment gate is closed, so approvals are not recorded. tables={}", missing);

@@ -120,7 +120,7 @@ public class PaymentProcessor {
      * </ul>
      *
      * <p>DONE 이면 같은 트랜잭션에서 {@code payment-approved} 를 outbox 에 넣는다({@link #saveApproved}, {@code payment-guide.md} §6). DONE 이 아니면 발행하지 않는다.
-     * 발행이 실패하면 DONE 저장도 함께 롤백된다 — 결제는 IN_PROGRESS 로 남고 Facade 가 500 {@code PAYMENT_013} 으로 답한다(복구는 #15 의 재조회 몫이다 — 아직 없다).
+     * 발행이 실패하면 DONE 저장도 함께 롤백된다 — 결제는 IN_PROGRESS 로 남고 Facade 가 500 {@code PAYMENT_013} 으로 답한다(복구는 별도 게이트의 #15 재조회가 담당한다).
      *
      * @throws com.commercefoundry.domainlayer.payment.application.exception.PaymentPersistenceConflictException {@code VERSION} — 그 사이 재조회 · 웹훅이 먼저 바꿨다
      */
@@ -146,7 +146,7 @@ public class PaymentProcessor {
      * 쓰고, #15 의 UNKNOWN 재조회 확정({@code Payment#resolve} → DONE)도 이 메서드로 저장해야 한다 — 발행을 빠뜨리면 주문이 결제 완료로 바뀌지 않는다.
      *
      * <p>전이가 같은 인스턴스를 돌려주면(이미 DONE — 멱등 no-op) 저장도 발행도 하지 않는다. 같은 결제의 승인 이벤트가 두 번 나가지 않게 한다.
-     * 패키지 공개다 — 재조회 확정이 생기기 전까지는 공개 메서드로 no-op 경로에 닿을 수 없어 테스트가 직접 부른다.
+     * 패키지 공개다 — PaymentRecoveryProcessor의 새 결과 기록 트랜잭션도 이 원자 저장 경로를 쓴다.
      */
     Payment saveApproved(Payment current, Payment approved) {
         if (approved == current) {

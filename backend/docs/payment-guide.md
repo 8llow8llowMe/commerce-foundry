@@ -207,7 +207,7 @@ PG 호출이 **타임아웃·5xx·서킷 오픈**으로 끝나면 승인 여부�
 | 타임아웃 · 5xx · 서킷 오픈 | **`UNKNOWN`** | "결제 확인 중" — 몇 초 뒤 상태 조회 |
 
 - `UNKNOWN` 은 스케줄러가 **PG 조회 API 로 재조회**해서 `DONE` 또는 `FAILED` 로 확정한다.
-  - 재조회 · 오래된 IN_PROGRESS 복구 · 되돌린 READY 정리 스케줄러는 #15 다 — 그 전까지 `UNKNOWN` · 오래 남은 `IN_PROGRESS` 는 토스 상점관리자에서 사람이 확인한다.
+  - 재조회 · 오래된 IN_PROGRESS 복구 · 되돌린 READY 정리는 아래 §4-2의 별도 복구 게이트로 켠다. 기본 비활성이며 운영 결제 개방 조건(#308 · 취소/이상 조치 경로)은 별도다.
 - 서킷이 열렸을 때 confirm 을 아예 보내지 않았다면 `READY` 로 되돌릴 수 있다. **보냈는지 모르면 UNKNOWN 이다.**
 
 ### 4-1. 토스 승인 응답 분류 (#14 — `TossPaymentsResponseSupport` 가 정본)
@@ -238,6 +238,72 @@ PG 호출이 **타임아웃·5xx·서킷 오픈**으로 끝나면 승인 여부�
   `PaymentInquiry.Failed` 는 결제키를 싣고, `abortAfterInquiry` 는 결제키가 다르면 전이 예외, `resolve(Failed)` 는 결제키가 다르면 `PaymentApprovalMismatchException` 이다
   — 다른 결제키의 실패로 `FAILED` 를 확정하면 이 결제키의 승인을 놓친다. 불일치는 Processor 가 사람 확인(`flagForManualReview`)으로 돌린다.
 
+### 4-2. 결제 미확정 복구 (#15, S2)
+
+복구는 `payment.recovery.enabled=false`가 기본이다. 신규 결제 게이트(`payment.enabled`)와 독립이므로 새 청구를 닫고 기존 기록만 복구할 수 있다.
+복구를 켜면 승인 결과 저장에 필요한 outbox 스키마도 기동에서 검사한다. 스케줄러는 UseCase만 부르고, Facade는 트랜잭션을 열지 않는다.
+짧은 건별 트랜잭션 → PG 결제키 조회(트랜잭션 밖) → 새 결과 기록 트랜잭션 순서다. 승인 API·주문 호출·DONE 미회신 재전송은 하지 않는다.
+
+| 설정 (`payment.recovery`) | 기본 | 규칙 |
+|---|---|---|
+| `initial-delay` · `fixed-delay` | 각 1분 | 양수, 완료 뒤 지연이므로 PG가 느리면 실제 주기도 길어진다 |
+| `unknown-inquiry-after` | 1분 | approval_started_at 기준 최초 대기 |
+| `stale-in-progress-after` | 5분 | 이 시각까지 IN_PROGRESS인 건을 UNKNOWN(STALE_IN_PROGRESS)으로 커밋하고 조회 |
+| `returned-ready-after` | 10분 | 결제키가 있는 READY의 조회 시작 |
+| `manual-review-after` | 24시간 | 세 상태별 조회 대기 이상인 양수. 조회 횟수 제한이 아닌 자동 복구 시간 예산 |
+| `page-size` · `max-pages-per-status-per-tick` | 10 · 1 | 각각 1~100 · 1~10 |
+
+- UNKNOWN(MANUAL_REVIEW 제외), IN_PROGRESS, READY(결제키 있음)를 각각 `(approval_started_at, id)` 오름차순 keyset으로 읽는다.
+  cutoff는 tick 시작에 고정한다. 상태별 커서는 다음 tick에도 유지하고 끝이면 다음 tick에서만 처음으로 돌아간다. 한 tick에서 wrap해 같은 행을 반복 조회하지 않는다.
+  기본 tick당 후보·PG 조회는 각각 최대 30건(설정 상한은 3 × page-size × max-pages)이다. 재시도 행이 앞에 남아도 뒤 후보가 굶지 않게 한다.
+- 로컬 중복 실행을 막는다. 다중 인스턴스의 PG 읽기 중복은 가능하며 한도는 인스턴스별이다. 저장·승인 이벤트의 중복은 @Version과 동일 트랜잭션으로 막는다.
+- 건별로 상태·시간·수동확인 제외를 다시 검사한다. PG 조회 후 현재 기록이 조회 전 스냅숏(버전·상태·키·주문번호·금액/통화·주문/회원 등)과 달라지면 오래된 응답은 버린다.
+  이미 DONE이면 저장·이벤트 0건이다. PG에는 회원 ID가 없으므로 회원 소유를 PG가 검증한다고 주장하지 않는다. 저장된 시도와 동일 버전의 대응을 확인한다.
+- `inquireByPaymentKey`가 요청 결제키·주문번호와 응답을 대조하고 도메인이 키·금액·통화를 검증한다. DONE은 반드시 `PaymentProcessor.saveApproved`를 거쳐 outbox와 원자적으로 저장한다.
+  기록/outbox 실패 시 함께 롤백하며 다음 스캔에서 조회로 복구한다. 낙관적 락 충돌은 롤백된 트랜잭션 밖에서 처리하고 뒤 후보는 계속 진행한다.
+- READY에서 승인 확인 시 원래 승인 시작 시각·키·nullable 고객 멱등 키를 보존해 UNKNOWN(ALREADY_PROCESSED) → resolve → DONE으로 한 번에 기록한다.
+  복구를 위해 `startApproval`을 호출하거나 새 고객 멱등 키·승인 시작 시각을 만들지 않는다.
+
+| PG 결제키 조회 결과 | 처리 |
+|---|---|
+| Approved | 키·금액·통화 검증 후 DONE + 승인 outbox 1건 |
+| Failed(ABORTED/EXPIRED만) | UNKNOWN은 FAILED, 되돌린 READY는 abortAfterInquiry로 ABORTED(RECOVERY_NOT_APPROVED) |
+| Pending · NotFound · TIMEOUT · SERVER_ERROR | 상태를 유지하고 다음 tick. 이번 조회까지 불확정이고 24시간 예산을 넘으면 UNKNOWN(MANUAL_REVIEW) |
+| CONTRACT · MANUAL_REVIEW · 키/금액 불일치 | 즉시 UNKNOWN(MANUAL_REVIEW), 자동 스캔 제외 |
+
+24시간을 넘겼어도 이번 조회가 확정 결과면 먼저 확정한다. `NotFound`는 미승인 증거가 아니므로 실패·중단으로 바꾸지 않는다.
+후보 인덱스는 `(status, approval_started_at, id)`다. 새 중단 사유의 enum check 확장과 인덱스는 운영 DDL을 먼저 적용하며, PostgreSQL CONCURRENTLY 인덱스는 트랜잭션 밖에서 만든다.
+
+#### 배포 DDL과 검증
+
+기존 DB에는 다음 순서로 수동 적용한다. 신규 DB의 전체 스키마는 `service/payment-service/src/test/resources/ddl/payment-schema.sql`이 정본이다.
+Hibernate `update`가 기존 enum check를 바꾼다고 가정하지 않는다.
+
+1. 복구를 끈 채 `service/payment-service/src/test/resources/ddl/payment-recovery-abort-reason.sql` 전체 DO 문을 한 번에 실행한다.
+   `pg_attribute.attnum`과 `pg_constraint.conkey`가 abort_reason 단일 열인 check만 찾고, 단순 enum 표현식 및 기존 네 값 또는 알려진 새 다섯 값을 검증한다.
+   예상 밖 정의·개수는 변경 없이 중단한다. 임의 생성된 기존 제약 이름을 추측하지 않으며 교차 필드 check를 보존한다.
+   새 명명 제약 `ck_payment_abort_reason_values`가 같은 다섯 값을 가지면 재실행은 no-op이다.
+2. 트랜잭션 밖의 autocommit 연결에서 `service/payment-service/src/test/resources/ddl/payment-recovery-index.sql`을 실행한다.
+   `pg_index.indisvalid`와 `indisready`가 모두 true인지, `pg_get_indexdef(indexrelid)`가 payment.payment의
+   `(status, approval_started_at, id)` B-tree인지 확인한다. 같은 이름의 인덱스가 있다고 검증을 생략하지 않는다.
+   CREATE INDEX CONCURRENTLY 실패 후 INVALID 인덱스가 남으면 복구를 끈 상태에서 그 정의를 확인하고
+   `DROP INDEX CONCURRENTLY payment.idx_payment_status_approval_started_at_id`를 트랜잭션 밖에서 실행한 뒤 인덱스 SQL을 재실행한다.
+   `IF NOT EXISTS`는 같은 이름의 INVALID 인덱스를 복구하거나 다른 정의를 교정하지 않는다.
+3. CI의 `PaymentRecoveryPostgresTest`에서 PostgreSQL 17의 실제 keyset 질의·롤백·기존 enum check 교체·교차 필드 제약 보존·재실행·인덱스 유효성을 확인한 뒤 활성화한다.
+   로컬 Docker가 없는 환경의 skip은 PostgreSQL 실행 증거가 아니다. 실제 PG 접속·운영 데이터 EXPLAIN·운영 DDL 적용은 이 테스트로 대체하지 않는다.
+
+구현은 `PaymentRecoveryFacade`의 NEVER 경계, `PaymentRecoveryScanProcessor`의 후보별 격리,
+`PaymentRecoveryProcessor.prepare/finish`의 REQUIRES_NEW로 나뉜다. 스캔의 건별 재조회는 동시 요청의 상태·버전을 검사하기 위한 트랜잭션 경계이며 목록 부가정보를 채우는 N+1 조회가 아니다.
+
+#### 운영자 수동 확인
+
+- MANUAL_REVIEW는 재승인 허가가 아니다. 복구를 잠시 끄고 어드민 결제 목록의 내부 결제/주문 ID로 대상을 좁힌 뒤 토스 상점관리자의 주문번호·키·원금·통화·승인/취소 상태를 안전한 접근 경로로 확인한다.
+- 승인됐으면 결제·주문·재고 상태와 이벤트 존재를 대조한다. 이 PR에는 수동 확정·전액 취소 API가 없으므로 임의 SQL로 DONE을 쓰지 않는다(outbox를 누락할 수 있다).
+  확인 증거를 남기고 별도 운영 승인/복구 절차로 처리하며, 취소가 필요하면 승인된 취소 경로가 준비될 때까지 운영 결제 개방을 보류한다.
+- PG 자체가 미확정이거나 응답 계약/금액이 다르면 사람 확인을 유지한다. 단순 404·재시도 횟수만으로 주문을 버리거나 새 결제를 받지 않는다.
+- 과거 SQL/이관으로 READY에 결제키만 있고 approval_started_at이 없는 행은 시간 기반 자동 후보에서 제외된다. 시각을 추측해 채우지 말고 별도로 찾아 상점관리자 증거로 확인한다.
+- 알림 전달은 #477, 주문 회신은 #308 PR-C, 취소·웹훅은 #15 후속이다. 이번 복구만으로 운영 결제 게이트를 자동으로 열지 않는다.
+
 ## 5. 결제 상태 모델
 
 ```text
@@ -250,7 +316,7 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 ```
 
 - 상태 전이는 `Payment` 의 도메인 메서드로만 한다 — `startApproval` · `abort` · `abortAfterInquiry` · `approve` · `reject` · `markUnknown` · `revertToReady` ·
-  `resolve` · `flagForManualReview` · `recordLateApproval` · `markOrderSynced` · `markOrderSyncFailed`(#14). 표 밖 전이는 `PaymentTransitionException`(현재 상태 · 시도한 동작)이고
+  `resolve` · `recoverReturnedReady` · `flagForManualReview` · `recordLateApproval` · `markOrderSynced` · `markOrderSyncFailed`(#14). 표 밖 전이는 `PaymentTransitionException`(현재 상태 · 시도한 동작)이고
   Processor 가 PAYMENT 오류 코드로 바꾼다. 같은 상태 재호출이 멱등인 것은 주문 반영 기록 · `flagForManualReview` 뿐이다. 승인 · 거절의 재호출은 예외다 — 중복 승인 경로를 조용히 통과시키지 않는다.
   멱등 no-op(같은 인스턴스 반환)이면 저장하지 않는다(쓸데없는 버전 증가 · 충돌 방지).
 - **되돌린 READY** — `revertToReady`(IN_PROGRESS → READY)는 승인 요청을 **보내지 않은 것이 확실할 때만** 쓴다(서킷 오픈 · 연결 전 실패 · 키 설정 오류).
@@ -289,11 +355,11 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 
 - **발행(payment, 구현)** — `PaymentProcessor` 가 DONE 저장과 `PaymentEventPort.approved` 를 한 트랜잭션에서 한다(`saveApproved` 하나로 묶었다 — #15 의 UNKNOWN 재조회 확정도
   이 메서드로 DONE 을 저장해야 한다). 전이가 멱등 no-op(이미 DONE, 같은 인스턴스)이면 저장도 발행도 하지 않는다 — 같은 결제의 승인 이벤트가 두 번 나가지 않는다.
-  발행이 실패하면 DONE 저장도 롤백돼 IN_PROGRESS 로 남고 500 `PAYMENT_013` 이다 — 복구는 #15 재조회의 몫이다(아직 없다). DONE 이 아닌 결과(FAILED · UNKNOWN ·
+  발행이 실패하면 DONE 저장도 롤백돼 IN_PROGRESS 로 남고 500 `PAYMENT_013` 이다 — 복구는 §4-2의 별도 게이트 재조회가 담당한다. DONE 이 아닌 결과(FAILED · UNKNOWN ·
   READY 되돌림 · 금액 불일치 UNKNOWN)는 발행하지 않는다. 페이로드에 PG 결제키 · 카드 정보 · 주문명 · 개인정보를 싣지 않는다(messaging-core 코덱의 금지 필드가 이름으로도 막는다).
   금액은 통화의 최소 단위 정수다(KRW 원 · USD 센트).
   메시징이 꺼져 있어도(`MESSAGING_ENABLED=false`) outbox(`payment.outbox`)에는 쌓이고 릴레이만 멈춘다.
-  **결제 게이트(`payment.enabled`)가 열려 있으면 `payment.outbox` · `payment.shedlock` 이 없을 때 기동하지 않는다**(`PaymentOutboxSchemaGuard`) — 운영 DDL 을 빠뜨린 채
+  **결제 게이트(`payment.enabled`) 또는 복구 게이트(`payment.recovery.enabled`)가 열려 있으면 `payment.outbox` · `payment.shedlock` 이 없을 때 기동하지 않는다**(`PaymentOutboxSchemaGuard`) — 운영 DDL 을 빠뜨린 채
   PG 승인 뒤 매 결제가 500 이 되는 것을 막는다. 게이트가 닫혀 있으면 WARN 만 남긴다.
 - **진위 확인(order, PR-B 예정)** — 봉투에는 서명이 없다. order 컨슈머는 이벤트를 알림으로만 보고 payment internal 결제 조회(`GET /internal/v1/payments/{paymentId}`, PR-A2 구현)로
   재조회해 상태 · 금액 · 통화 · 주문 · 회원을 확정한다. 두 불일치를 나눈다 — **이벤트 ↔ 재조회** 불일치(이벤트가 말한 주문 · 금액이 payment 원본과 다름 — 위조 · 버그)와

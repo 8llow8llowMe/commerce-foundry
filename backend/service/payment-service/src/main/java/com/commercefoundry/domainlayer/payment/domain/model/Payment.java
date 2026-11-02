@@ -234,6 +234,19 @@ public record Payment(
         );
     }
 
+    /** 과거 승인 단서가 있는 READY → UNKNOWN. 원래 시작 시각과 nullable 고객 멱등 키를 보존한다. */
+    public Payment recoverReturnedReady(PaymentUnknownReason reason) {
+        Objects.requireNonNull(reason, "reason");
+        requireStatus(PaymentStatus.READY, PaymentTransitionException.Action.RECOVER_RETURNED_READY);
+        if (paymentKey == null || approvalStartedAt == null) {
+            throw new PaymentTransitionException(status, PaymentTransitionException.Action.RECOVER_RETURNED_READY);
+        }
+        return new Payment(
+            id, orderId, memberId, pgOrderId, gateway, amount, orderName, PaymentStatus.UNKNOWN,
+            paymentKey, null, null, null, approvalStartedAt, null, null, null, reason, false, null, null, approvalIdempotencyKey, version
+        );
+    }
+
     /**
      * IN_PROGRESS → READY. 승인 요청을 <b>보내지 않은 것이 확실할 때만</b> 부른다 — 서킷 오픈으로 호출 전에 막혔거나 연결 자체가 맺어지지 않았을 때.
      * 보냈는지 모르면 {@link #markUnknown} 이다 ({@code payment-guide.md} §4). 결제키 · 승인 시작 시각은 흔적으로 남긴다 — 이 READY 는 같은 결제키로만 다시 시작하고

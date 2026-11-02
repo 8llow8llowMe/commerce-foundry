@@ -2,6 +2,7 @@ package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.global.properties.PaymentGateProperties;
+import com.commercefoundry.global.properties.PaymentRecoveryProperties;
 import com.commercefoundry.messaging.config.MessagingConfigurer;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
@@ -42,8 +43,10 @@ public class PaymentServiceBeansConfig {
 
     /** 결제 게이트가 열려 있으면 outbox 테이블이 있어야 기동한다 (#308, {@code payment-guide.md} §6). */
     @Bean
-    public PaymentOutboxSchemaGuard paymentOutboxSchemaGuard(DataSource dataSource, PaymentGateProperties paymentGateProperties) {
-        return new PaymentOutboxSchemaGuard(dataSource, paymentGateProperties);
+    public PaymentOutboxSchemaGuard paymentOutboxSchemaGuard(
+        DataSource dataSource, PaymentGateProperties paymentGateProperties, PaymentRecoveryProperties recovery
+    ) {
+        return new PaymentOutboxSchemaGuard(dataSource, paymentGateProperties, recovery.enabled());
     }
 
     /** 결제 기한 판정 · 승인 시작 시각의 기준 시계 (UTC). */

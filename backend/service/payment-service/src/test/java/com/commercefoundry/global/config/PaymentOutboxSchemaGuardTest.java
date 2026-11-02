@@ -3,6 +3,7 @@ package com.commercefoundry.global.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.global.properties.PaymentGateProperties;
+import com.commercefoundry.global.properties.PaymentRecoveryProperties;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.DisplayName;
@@ -50,8 +51,14 @@ class PaymentOutboxSchemaGuardTest {
             .run(context -> assertThat(context).hasNotFailed());
     }
 
+    @Test
+    void recoveryRequiresSchemaEvenWhenNewPaymentGateIsClosed() {
+        runner.withPropertyValues("payment.enabled=false", "payment.recovery.enabled=true", "test.tables=")
+            .run(context -> assertThat(context).hasFailed().getFailure().isInstanceOf(IllegalStateException.class));
+    }
+
     @Configuration(proxyBeanMethods = false)
-    @EnableConfigurationProperties(PaymentGateProperties.class)
+    @EnableConfigurationProperties({PaymentGateProperties.class, PaymentRecoveryProperties.class})
     static class GuardTestConfig {
 
         /** 테스트마다 새 DB — {@code test.tables} 에 적은 테이블만 만든다. */
@@ -69,8 +76,8 @@ class PaymentOutboxSchemaGuardTest {
         }
 
         @Bean
-        PaymentOutboxSchemaGuard paymentOutboxSchemaGuard(DataSource dataSource, PaymentGateProperties gate) {
-            return new PaymentOutboxSchemaGuard(dataSource, gate);
+        PaymentOutboxSchemaGuard paymentOutboxSchemaGuard(DataSource dataSource, PaymentGateProperties gate, PaymentRecoveryProperties recovery) {
+            return new PaymentOutboxSchemaGuard(dataSource, gate, recovery.enabled());
         }
     }
 }

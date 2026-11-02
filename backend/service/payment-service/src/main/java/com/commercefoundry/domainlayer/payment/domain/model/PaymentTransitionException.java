@@ -29,6 +29,7 @@ public class PaymentTransitionException extends RuntimeException {
         APPROVE,
         REJECT,
         MARK_UNKNOWN,
+        RECOVER_RETURNED_READY,
         REVERT_TO_READY,
         RESOLVE,
         FLAG_FOR_MANUAL_REVIEW,
