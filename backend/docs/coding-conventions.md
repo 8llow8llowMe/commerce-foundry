@@ -402,6 +402,7 @@ public final class ProductValidationMessage {
 | owner | 서비스 |
 |-------|--------|
 | `auth` · `product` · `order` · `payment` · `delivery` | 같은 이름의 `*-service` |
+| `support` | `support-service` |
 | `gateway` | `api-gateway` |
 
 - owner 로 서비스별 네임스페이스를 나눠 같은 이름의 키가 부딪히지 않게 한다. 싱글 테넌트(`architecture-guide.md` §9)라 스토어 접두어는 붙이지 않는다.
@@ -475,7 +476,7 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
 | 리포지토리 테스트 (Testcontainers PostgreSQL) | `validate` | DDL 스냅숏을 init script 로 적용 (`bootstrap-conventions.md` 리포지토리 테스트) |
 
 - **엔티티를 추가 · 변경하는 PR 은 본문 `운영 DDL` 절에 운영에 적용할 PostgreSQL DDL 을 그대로 적는다.**
-  테이블 · 컬럼 코멘트, 인덱스(`idx_` / `uk_`), 제약(`ck_`)까지 넣는다. 스키마(`auth` · `product` · `orders` · `payment` · `delivery` · `operations`)를 붙여 쓴다.
+  테이블 · 컬럼 코멘트, 인덱스(`idx_` / `uk_`), 제약(`ck_`)까지 넣는다. 스키마(`auth` · `product` · `orders` · `payment` · `delivery` · `operations` · `support`)를 붙여 쓴다.
   아래 틀로 감싼다 — Windows `psql` 은 클라이언트 인코딩 기본값이 CP949 라 그대로 붙여 넣으면 한글 코멘트가 깨지고,
   트랜잭션으로 묶지 않으면 중간에 실패했을 때 일부만 적용된다.
 

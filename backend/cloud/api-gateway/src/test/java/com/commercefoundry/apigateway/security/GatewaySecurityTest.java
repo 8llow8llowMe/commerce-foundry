@@ -66,7 +66,8 @@ import tools.jackson.databind.json.JsonMapper;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class GatewaySecurityTest {
 
-    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service");
+    private static final List<String> SERVICE_IDS = List.of(
+        "auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service", "support-service");
 
     private static final String PUBLIC_PATH = "/api/v1/products/1";
     private static final String ADMIN_PATH = "/api/v1/admin/orders/1";
@@ -74,6 +75,8 @@ class GatewaySecurityTest {
     private static final String ADMIN_LOGIN_PATH = "/api/v1/auth/admin/login";
     private static final String ADMIN_JOBS_PATH = "/api/v1/admin/jobs/1";
     private static final String ADMIN_NOTIFICATIONS_PATH = "/api/v1/admin/notifications/1";
+    private static final String SUPPORT_PATH = "/api/v1/support/conversations";
+    private static final String ADMIN_SUPPORT_PATH = "/api/v1/admin/support/conversations/1";
 
     private static final String BEARER = "Bearer ";
     private static final String INVALID_TOKEN = "Bearer error=\"invalid_token\"";
@@ -305,6 +308,27 @@ class GatewaySecurityTest {
         get(ADMIN_NOTIFICATIONS_PATH, token(MemberRole.ADMIN)).expectStatus().isOk();
 
         assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(ADMIN_NOTIFICATIONS_PATH));
+    }
+
+    // ── 고객 상담 (#470) ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("고객 상담(/api/v1/support/**)은 비회원 상담을 받으므로 무토큰도 support-service 라우트로 간다 — 인가는 서비스가 정한다")
+    void anonymousSupportRequestIsRouted() {
+        webTestClient.get().uri(SUPPORT_PATH).exchange().expectStatus().isOk();
+
+        assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(SUPPORT_PATH));
+    }
+
+    @Test
+    @DisplayName("어드민 상담(/api/v1/admin/support/**)은 무토큰 401(001) · CUSTOMER 403(005)이고, ADMIN 은 support-service 라우트로 그대로 간다")
+    void adminSupportIsProtectedAndRoutedForAdmin() {
+        assertRejected(webTestClient.get().uri(ADMIN_SUPPORT_PATH).exchange(), SecurityErrorCode.UNAUTHORIZED, "Bearer");
+        assertRejected(get(ADMIN_SUPPORT_PATH, token(MemberRole.CUSTOMER)), SecurityErrorCode.FORBIDDEN, null);
+
+        get(ADMIN_SUPPORT_PATH, token(MemberRole.ADMIN)).expectStatus().isOk();
+
+        assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(ADMIN_SUPPORT_PATH));
     }
 
     @Test

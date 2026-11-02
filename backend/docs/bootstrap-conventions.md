@@ -103,6 +103,7 @@ local 은 서비스마다 `(datacenter-id, worker-id)` 를 고정한다. 새 서
 | payment-service | 1 | 4 |
 | delivery-service | 1 | 5 |
 | operations-service | 1 | 6 |
+| support-service | 1 | 7 |
 
 ## 컨텍스트 로딩 테스트
 
@@ -345,9 +346,12 @@ storage:
 `*BeansConfig` 가 `AiConfigurer` 를, `*PropertiesConfig` 가 `AiPropertiesConfig` 를 `@Import` 하고 `build.gradle` 에
 `implementation project(':core:ai-core')` 를 더한다. 서비스가 받는 것은 `AiClient` 빈 하나다 — 공식 SDK(`anthropic-java`)는 ai-core 의
 `implementation` 이라 서비스 코드에서 보이지 않는다. **첫 사용처는 operations-service 다**(#435 — 연결 · 계량 인터셉터 · 원장 정리 스케줄러, 아래 "operations 연결").
-기능은 operations 의 작업 핸들러(#212)가 부른다(첫 기능은 #359 상품 초안) —
-AI 호출을 한 서비스에 모아 키 · 사용량 원장 · 동시 상한이 한 곳에 있게 한다(별도 ai-service 를 두지 않는 근거는 #215 PR-A).
-**AI 호출은 operations 작업 핸들러로 모은다** — 원장 · 월 한도(계량 인터셉터, 아래 "계량")를 가진 곳이 operations 하나뿐이고, 켜진 서비스에 인터셉터가 없으면 기동이 멈춘다.
+별도 ai-service 는 두지 않는다(근거는 #215 PR-A).
+**AI 호출은 계량 인터셉터를 가진 서비스에서만 한다** — 켜진 서비스에 인터셉터가 없으면 기동이 멈춘다(아래 "미계량 가드"). 원장 · 월 한도의 정본은 operations `aiusage` 하나다 —
+operations 는 로컬 인터셉터(`AiUsageMeteringInterceptor`), 다른 서비스는 operations 원장 internal API 를 부르는 원격 인터셉터를 쓴다(#470 설계 2 —
+`POST /internal/v1/ai-usage/reservations` · `.../{callId}/settlement`, **#222-A 에서 구현 예정** — 그 전에는 operations 밖에서 AI 를 켜지 않는다).
+비동기 생성(상품 초안 #359 처럼 사용자가 기다리지 않는 것)은 operations 작업 핸들러(#212)가, 대화형 호출(사용자가 기다리는 · 스트리밍 — 고객 상담 #222)은
+기능을 소유한 서비스의 요청 경로가 부른다.
 
 ```yaml
 ai:

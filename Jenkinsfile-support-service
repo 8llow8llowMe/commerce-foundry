@@ -1,0 +1,29 @@
+// commerce-foundry support-service 배포 잡. 고객 상담(#470). 다른 서비스가 이 서비스를 부르지 않는다 — 게이트웨이 라우트(SUPPORT)가 먼저 배포돼 있으면 순서는 자유다.
+//
+// Jenkins 멀티브랜치 파이프라인 이름: commerce-foundry-support-service (Script Path: Jenkinsfile-support-service)
+// 배포 대상 PR 라벨:                  backend-support-service
+//   develop -> dev  (agent deploy-backend-dev2)
+//   main    -> prod (agent deploy-backend-prod)
+// 규칙: backend/docs/jenkins-cicd-guide.md · 배포 단위: backend/docs/deploy-guide.md
+def backendPipeline
+node('builder-backend') {
+    checkout scm
+    backendPipeline = load 'Jenkinsfile.backend-common.groovy'
+}
+
+backendPipeline.run([
+    serviceGroup       : 'service',
+    serviceName        : 'support-service',
+    modulePath         : 'service:support-service',
+    fsPath             : 'backend/service/support-service',
+    dockerfile         : 'support-service.Dockerfile',
+    composeFile        : 'docker-compose-support-service.yml',
+    composeServiceName : 'support-service',
+    containerNamePrefix: 'commerce-support-service',
+    deploySubdir       : 'service/support-service',
+    buildAgentLabel    : 'builder-backend',
+    deployAgentLabels  : [
+        dev : 'deploy-backend-dev2',
+        prod: 'deploy-backend-prod'
+    ]
+])

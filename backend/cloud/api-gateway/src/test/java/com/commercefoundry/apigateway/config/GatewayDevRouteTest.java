@@ -56,7 +56,8 @@ class GatewayDevRouteTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
-    private static final List<String> SERVICE_IDS = List.of("auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service");
+    private static final List<String> SERVICE_IDS = List.of(
+        "auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service", "support-service");
 
     /** 서비스 {@code *SwaggerConfig} 의 그룹 이름 ({@code bootstrap-conventions.md}). */
     private static final List<String> SWAGGER_GROUPS = List.of("customer", "admin");
@@ -93,14 +94,16 @@ class GatewayDevRouteTest {
     // ── 라우트 ────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("플래그를 켜면 라우트는 서비스 6종 + 서비스마다 헬스 · 문서 라우트 하나씩이다")
+    @DisplayName("플래그를 켜면 라우트는 서비스 7종 + 서비스마다 헬스 · 문서 라우트 하나씩이다")
     void routeIdsAreServicesPlusDevRoutes() {
         List<String> routeIds = routeLocator.getRoutes().map(Route::getId).collectList().block(TIMEOUT);
 
         assertThat(routeIds).containsExactlyInAnyOrder(
-            "auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service",
-            "auth-service-health", "product-service-health", "order-service-health", "payment-service-health", "delivery-service-health", "operations-service-health",
-            "auth-service-docs", "product-service-docs", "order-service-docs", "payment-service-docs", "delivery-service-docs", "operations-service-docs");
+            "auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service", "support-service",
+            "auth-service-health", "product-service-health", "order-service-health", "payment-service-health", "delivery-service-health",
+            "operations-service-health", "support-service-health",
+            "auth-service-docs", "product-service-docs", "order-service-docs", "payment-service-docs", "delivery-service-docs",
+            "operations-service-docs", "support-service-docs");
     }
 
     @ParameterizedTest(name = "{0} → {1} → 하류 {2}")
@@ -111,6 +114,7 @@ class GatewayDevRouteTest {
         /health/payment-service                        | payment-service-health  | /actuator/health
         /health/delivery-service                       | delivery-service-health | /actuator/health
         /health/operations-service                     | operations-service-health | /actuator/health
+        /health/support-service                        | support-service-health  | /actuator/health
         /docs/auth-service/v3/api-docs/customer        | auth-service-docs       | /v3/api-docs/customer
         /docs/auth-service/v3/api-docs/admin           | auth-service-docs       | /v3/api-docs/admin
         /docs/product-service/v3/api-docs/customer     | product-service-docs    | /v3/api-docs/customer
@@ -123,6 +127,8 @@ class GatewayDevRouteTest {
         /docs/delivery-service/v3/api-docs/admin       | delivery-service-docs   | /v3/api-docs/admin
         /docs/operations-service/v3/api-docs/customer  | operations-service-docs | /v3/api-docs/customer
         /docs/operations-service/v3/api-docs/admin     | operations-service-docs | /v3/api-docs/admin
+        /docs/support-service/v3/api-docs/customer     | support-service-docs    | /v3/api-docs/customer
+        /docs/support-service/v3/api-docs/admin        | support-service-docs    | /v3/api-docs/admin
         """)
     @DisplayName("헬스 · 문서 경로는 정해진 라우트 하나에만 걸리고, 하류에는 고정된 경로로만 간다")
     void devPathGoesToFixedDownstreamPath(String path, String routeId, String downstreamPath) {

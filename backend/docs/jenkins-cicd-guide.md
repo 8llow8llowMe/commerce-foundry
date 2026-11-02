@@ -48,6 +48,7 @@ develop 에 Rebase and merge
 | payment-service | `commerce-foundry-payment-service` | `Jenkinsfile-payment-service` | `backend-payment-service` |
 | delivery-service | `commerce-foundry-delivery-service` | `Jenkinsfile-delivery-service` | `backend-delivery-service` |
 | operations-service | `commerce-foundry-operations-service` | `Jenkinsfile-operations-service` | `backend-operations-service` |
+| support-service | `commerce-foundry-support-service` | `Jenkinsfile-support-service` | `backend-support-service` |
 
 - **operations-service 는 자리만 있다.** #212 가 모듈 · Dockerfile · compose 를 추가하고 `.github/labeler.yml` 에 라벨을 더한 뒤 잡을 등록한다.
   그 전에 돌리면 첫 단계가 "배포 단위 파일이 없습니다" 로 멈춘다(compose · Dockerfile · `.dockerignore` · `build.gradle` 중 하나라도 없으면 모든 잡이 그렇다).
@@ -255,9 +256,9 @@ Jenkins · Vault 에 등록할 것. 값은 저장소에 쓰지 않는다.
 - [ ] agent `builder-backend`(Docker 포함) · `deploy-backend-dev2` · `deploy-backend-prod`(jq 포함) — §3 도구
 - [ ] Vault secret `kv/commerce-foundry/backend/dev/env` · `.../prod/env` — `deploy-guide.md` §4-3 의 키, 환경마다 다른 `COMMERCE_DOCKER_NETWORK`.
       #248 부터 `EUREKA_HOST`(`commerce-service-discovery-<env>`) · `EUREKA_PASSWORD`(`openssl rand -hex 32`, 환경마다 다른 값)가 필요하고 `EUREKA_DEFAULT_ZONE` 은 쓰지 않는다
-- [ ] 멀티브랜치 잡 7개(§3, operations-service 는 #212 뒤) — 소스 설정은 §3 표, **Suppress automatic SCM triggering** 을 켠 채 등록
+- [ ] 멀티브랜치 잡 8개(§3, operations-service 는 #212 뒤) — 소스 설정은 §3 표, **Suppress automatic SCM triggering** 을 켠 채 등록
 - [ ] **첫 배포** — 잡을 등록한 뒤 각 잡의 `develop` 을 **FORCE_DEPLOY** 로 한 번씩, 순서대로 실행한다:
-      service-discovery → api-gateway → auth → product · delivery → order · payment (`deploy-guide.md` §5).
+      service-discovery → api-gateway → auth → product · delivery → order · payment → support (`deploy-guide.md` §5).
       첫 빌드는 이전 성공 커밋이 없어 자동 배포하지 않으므로(§4) 이 절차가 유일한 첫 배포 경로다. 끝나면 트리거 억제를 풀어 webhook 빌드를 받는다
 - [ ] 첫 배포 뒤 §11 의 Pipeline Steps · build.xml 확인
 

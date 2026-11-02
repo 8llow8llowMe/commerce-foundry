@@ -69,7 +69,7 @@ class EurekaClientCredentialTest {
     private static final String REDIRECTING_LOGGER = "com.netflix.discovery.shared.transport.decorator.RedirectingEurekaHttpClient";
     private static final String REDIRECTING_LEVEL = REDIRECTING_LOGGER + ": ERROR";
 
-    /** 게이트웨이 + 서비스 6개. 연결 실패 로그 가림과 같은 설정이다. */
+    /** 게이트웨이 + 서비스 7개. 연결 실패 로그 가림과 같은 설정이다. */
     private static final List<String> CLIENT_CONFIGS = List.of(
         "cloud/api-gateway/src/main/resources/application.yml",
         "service/auth-service/src/main/resources/application.yml",
@@ -77,7 +77,8 @@ class EurekaClientCredentialTest {
         "service/order-service/src/main/resources/application.yml",
         "service/payment-service/src/main/resources/application.yml",
         "service/delivery-service/src/main/resources/application.yml",
-        "service/operations-service/src/main/resources/application.yml");
+        "service/operations-service/src/main/resources/application.yml",
+        "service/support-service/src/main/resources/application.yml");
 
     @LocalServerPort
     private int port;

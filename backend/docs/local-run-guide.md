@@ -53,7 +53,7 @@ cp .env.example .env
   `AUTH_OTP_SECRET_KEY_PREVIOUS` 는 비워 둔다(키 회전 중에만 채운다). 테스트 설정(`application-test.yml`)의 키는 공개된 값이라 넣으면 auth 가 뜨지 않는다 —
   반드시 새로 만든다. 로컬 키를 바꾸면 그 전에 등록한 로컬 OTP 는 읽지 못하므로(`AUTH_039`) 해당 행을 지우고 다시 등록한다 (`secret-management.md`).
 - **#248 부터 Eureka · 게이트웨이 · 서비스 전부는 `EUREKA_PASSWORD`(레지스트리 HTTP Basic 비밀번호)가 비면 뜨지 않는다.** 빈 `EUREKA_PASSWORD=` 줄을 지우고
-  `printf 'EUREKA_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다(7개 모듈이 같은 `.env` 를 읽는다).
+  `printf 'EUREKA_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> "$ENV_FILE"` 로 로컬 값을 만든다(모든 모듈이 같은 `.env` 를 읽는다).
   hex 로 만든다 — 영문 · 숫자 · `. _ ~ -` 밖의 문자가 있으면 Eureka 가 뜨지 않는다 (`security-guide.md` §12).
 - `GATEWAY_CLIENT_IP_HASH_KEY`(클라이언트 IP 의 HMAC 키, #89)는 **게이트웨이의 `GATEWAY_CLIENT_IP_ENABLED`(`gateway.client-ip.enabled`)를 켤 때만 필요하다** —
   기본은 꺼짐이라 비워도 뜬다. 켜서 확인하려면 빈 줄을 지우고 `printf 'GATEWAY_CLIENT_IP_HASH_KEY=%s\n' "$(openssl rand -base64 32)" >> "$ENV_FILE"` 로
@@ -72,7 +72,7 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
 
 | 서비스 | 주소 | 비고 |
 |--------|------|------|
-| PostgreSQL 17 | `localhost:5432/commerce_foundry` | 스키마 `auth` · `product` · `orders` · `payment` · `delivery` · `operations` |
+| PostgreSQL 17 | `localhost:5432/commerce_foundry` | 스키마 `auth` · `product` · `orders` · `payment` · `delivery` · `operations` · `support` |
 | Redis 7.4 | `localhost:${REDIS_PORT}` (기본 6379) | 비밀번호 필수 |
 | Kafka 4.3 (KRaft 단일 노드) | `localhost:${KAFKA_PORT}` (기본 9092) — 서비스는 `KAFKA_BOOTSTRAP_SERVERS` | 인증 없음(로컬 전용). 토픽 자동 생성 꺼짐 |
 
@@ -180,6 +180,7 @@ Eureka 는 DB · Redis 가 필요 없고 `backend/.env` 의 `EUREKA_PASSWORD`(§
 도메인 서비스는 PostgreSQL(§3)과 `backend/.env` 의 `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` · `JWT_PUBLIC_KEY` · `INTERNAL_JWT_SECRET`(§2)가 필요하다.
 **auth-service 는 #4 부터 `JWT_PRIVATE_KEY`(발급 개인키 — `JWT_PUBLIC_KEY` 와 한 쌍이어야 뜬다, `security-guide.md` §6)와 `REDIS_HOST` · `REDIS_PORT` · `REDIS_PASSWORD` 도 필요하다** —
 refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨이와 같은 Redis). Redis 가 꺼져 있어도 뜨지만 로그인 · 재발급 · 로그아웃은 503(`AUTH_013`)이다.
+support-service(#470)도 `REDIS_HOST` · `REDIS_PORT` · `REDIS_PASSWORD` 가 있어야 뜬다(기동 가드). 연결은 처음 쓸 때 맺으므로 Redis 가 꺼져 있어도 뜬다.
 
 ```bash
 ./gradlew :cloud:service-discovery:bootRun    # Eureka 서버 — 8761 (local 은 127.0.0.1 에만 묶인다)
@@ -190,6 +191,7 @@ refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨
 ./gradlew :service:payment-service:bootRun    # 8084
 ./gradlew :service:delivery-service:bootRun   # 8085
 ./gradlew :service:operations-service:bootRun # 8086
+./gradlew :service:support-service:bootRun    # 8087
 ```
 
 - **`bootRun` 은 `SPRING_PROFILES_ACTIVE` 가 없거나 비어 있으면 `local` 프로파일로 뜬다** (`backend/build.gradle`). 빌드한 jar 를 `java -jar` 로
@@ -204,7 +206,7 @@ refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨
 
 | 확인 URL | 기대 |
 |----------|------|
-| `http://localhost:8761` | Eureka 대시보드(local 만). 브라우저가 묻는 사용자는 `eureka`, 비밀번호는 `.env` 의 `EUREKA_PASSWORD`. 띄우고 30초쯤 지나면 `API-GATEWAY` 와 서비스 6종이 등록된다 |
+| `http://localhost:8761` | Eureka 대시보드(local 만). 브라우저가 묻는 사용자는 `eureka`, 비밀번호는 `.env` 의 `EUREKA_PASSWORD`. 띄우고 30초쯤 지나면 `API-GATEWAY` 와 서비스 전부가 등록된다 |
 | `http://localhost:8761/actuator/health` | `"status":"UP"` |
 | `http://localhost:8000/actuator/health` | `"status":"UP"` (actuator 는 `health` 만 노출한다) |
 | `http://localhost:8000/health/{service-id}` (예: `/health/product-service`) | `"status":"UP"` — 게이트웨이 경유 서비스 헬스 체크. local · dev 만 |
@@ -242,7 +244,7 @@ refresh 토큰을 저장하고 로그아웃 차단 목록을 쓴다(게이트웨
 | 서비스가 `'url' must start with "jdbc"` 로 안 뜬다 | `DB_URL` 을 받지 못했다. `.env` 는 local 프로파일에서만 읽는다 — `backend/.env` 가 있는지, 작업 디렉터리가 모듈 디렉터리인지(§5), `SPRING_PROFILES_ACTIVE` 가 local 인지 본다 |
 | 서비스가 `Failed to bind properties under 'snowflake.datacenter-id'` 로 안 뜬다 | local 이 아닌 프로파일로 떴고 `SNOWFLAKE_DATACENTER_ID` · `SNOWFLAKE_WORKER_ID` 가 없다. dev · prod 는 인스턴스마다 환경변수로 넣는다 (local 은 yml 고정값) |
 | Eureka 가 `Eureka 레지스트리 비밀번호가 기동 조건에 맞지 않습니다` 로 뜨지 않는다 | `.env` 의 `EUREKA_PASSWORD` 가 비었거나 32자 미만이거나 영문 · 숫자 · `. _ ~ -` 밖의 문자가 있다. `openssl rand -hex 32` 결과를 넣는다 (§2, `security-guide.md` §12) |
-| 게이트웨이 · 서비스가 `Registration error at startup` 으로 뜨지 않는다 | Eureka 가 꺼져 있거나 `EUREKA_PASSWORD` 가 Eureka 와 다르다(401). Eureka 를 먼저 띄우고, 7개 모듈이 같은 `backend/.env` 를 읽는지 본다 (`security-guide.md` §12-3) |
+| 게이트웨이 · 서비스가 `Registration error at startup` 으로 뜨지 않는다 | Eureka 가 꺼져 있거나 `EUREKA_PASSWORD` 가 Eureka 와 다르다(401). Eureka 를 먼저 띄우고, 모든 모듈이 같은 `backend/.env` 를 읽는지 본다 (`security-guide.md` §12-3) |
 | 게이트웨이 경유 `/health/{service-id}` 가 `503` + `GATEWAY_002` | 서비스가 꺼져 있거나 아직 Eureka 에 등록되지 않았다(기동 후 30초쯤 걸린다) |
 | 게이트웨이 경유 `/health/{service-id}` 가 `503` + `{"status":"DOWN"}` | 서비스는 떠 있지만 DB 같은 구성 요소가 내려갔다. 헬스는 상세를 숨기므로 서비스 로그를 본다 |
 | 게이트웨이 경유 `/health/{service-id}` · `/swagger-ui.html` 이 `404` | local · dev 프로파일이 아니라 dev 라우트가 꺼져 있다 (`gateway.dev-routes.enabled`) |

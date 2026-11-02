@@ -92,7 +92,9 @@ class GatewayRouteCoverageTest {
         new Sample("/api/v1/admin/shipping-policies", "delivery-service"),
         new Sample("/api/v1/admin/jobs/1", "operations-service"),
         new Sample("/api/v1/admin/notifications/1", "operations-service"),
-        new Sample("/api/v1/admin/onboarding/me/tours/console", "operations-service")
+        new Sample("/api/v1/admin/onboarding/me/tours/console", "operations-service"),
+        new Sample("/api/v1/support/conversations", "support-service"),
+        new Sample("/api/v1/admin/support/conversations/1", "support-service")
     );
 
     @Autowired
@@ -121,11 +123,12 @@ class GatewayRouteCoverageTest {
     }
 
     @Test
-    @DisplayName("dev 라우트 플래그가 꺼져 있으면 라우트 id 는 서비스 6종과 정확히 같다 — 헬스 · 문서 라우트가 하나도 없다")
+    @DisplayName("dev 라우트 플래그가 꺼져 있으면 라우트 id 는 서비스 7종과 정확히 같다 — 헬스 · 문서 라우트가 하나도 없다")
     void routeIdsAreExactlyTheServices() {
         List<String> routeIds = routeLocator.getRoutes().map(Route::getId).collectList().block(TIMEOUT);
 
-        assertThat(routeIds).containsExactlyInAnyOrder("auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service");
+        assertThat(routeIds).containsExactlyInAnyOrder(
+            "auth-service", "product-service", "order-service", "payment-service", "delivery-service", "operations-service", "support-service");
     }
 
     @Test
