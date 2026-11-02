@@ -8,6 +8,8 @@ describe('helpTopicFor · toursFor', () => {
     expect(helpTopicFor('/size-charts').title).toBe('상품 사이즈표');
     expect(helpTopicFor('/stocks/7').title).toBe('옵션별 재고');
     expect(helpTopicFor('/jobs/9').title).toBe('백그라운드 작업');
+    expect(helpTopicFor('/practice').title).toBe('샘플 주문 업무 연습');
+    expect(helpTopicFor('/practice').tour).toBeNull();
     expect(helpTopicFor('/nope').title).toBe('도움말');
   });
 
