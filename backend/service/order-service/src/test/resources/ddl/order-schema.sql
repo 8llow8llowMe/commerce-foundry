@@ -203,6 +203,80 @@
     comment on column orders.order_item_custom_option.order_item_id is
         '주문 항목 아이디 (FK: order_item.id)';
 
+    create table orders.order_payment (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        approved_at timestamp(6) with time zone,
+        event_id uuid not null,
+        member_id bigint not null,
+        order_id bigint not null,
+        paid_order_id bigint,
+        payment_id bigint not null,
+        restoration_claim_id bigint,
+        restored_at timestamp(6) with time zone,
+        result varchar(40) not null check ((result in ('PAID','REJECTED_ORDER_CANCELED','REJECTED_ORDER_NOT_FOUND','REJECTED_PAYMENT_MISMATCH','REJECTED_STOCK_UNAVAILABLE','REJECTED_ALREADY_PAID','REJECTED_PAYMENT_NOT_DONE'))),
+        stock_reservation_id bigint,
+        total_amount bigint not null,
+        total_currency varchar(3) not null check ((total_currency in ('KRW','USD'))),
+        primary key (id),
+        constraint uk_order_payment_payment_id unique (payment_id),
+        constraint uk_order_payment_paid_order_id unique (paid_order_id),
+        constraint ck_order_payment_total_amount_positive check (total_amount > 0),
+        constraint ck_order_payment_paid_order_id_consistent check ((result = 'PAID' and paid_order_id is not null and paid_order_id = order_id) or (result <> 'PAID' and paid_order_id is null)),
+        constraint ck_order_payment_paid_requires_confirmation check (result <> 'PAID' or (stock_reservation_id is not null and approved_at is not null)),
+        constraint ck_order_payment_reservation_scope check (stock_reservation_id is null or result in ('PAID', 'REJECTED_ORDER_CANCELED')),
+        constraint ck_order_payment_restoration_consistent check ((restoration_claim_id is null and restored_at is null) or (restoration_claim_id is not null and result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null))
+    );
+
+    comment on table orders.order_payment is
+        '결제 반영 기록 (payment-approved 이벤트 + 재조회 결과, 결제당 1행)';
+
+    comment on column orders.order_payment.id is
+        '결제 반영 기록 아이디 (Snowflake)';
+
+    comment on column orders.order_payment.created_at is
+        '생성 시각';
+
+    comment on column orders.order_payment.updated_at is
+        '수정 시각';
+
+    comment on column orders.order_payment.approved_at is
+        '결제 승인 시각 (payment 재조회 값). 결제 완료면 필수, 거절이면 null 일 수 있다';
+
+    comment on column orders.order_payment.event_id is
+        '반영한 payment-approved 이벤트 아이디 (봉투 eventId)';
+
+    comment on column orders.order_payment.member_id is
+        '결제한 회원 아이디 (외부 FK: auth-service member.id, payment 재조회 값)';
+
+    comment on column orders.order_payment.order_id is
+        '주문 아이디 (논리 FK: orders.id, 제약 없음) — 이벤트가 가리킨 주문. 주문 없음 거절이면 없는 아이디다';
+
+    comment on column orders.order_payment.paid_order_id is
+        '결제 완료면 order_id, 아니면 null — 주문당 결제 완료 1건 유니크';
+
+    comment on column orders.order_payment.payment_id is
+        '결제 아이디 (외부 FK: payment-service payment.id)';
+
+    comment on column orders.order_payment.restoration_claim_id is
+        '확정 뒤 취소 주문 거절의 재고 복원 클레임 아이디 (product stock-restorations 멱등 키, #308 PR-C). 없으면 null';
+
+    comment on column orders.order_payment.restored_at is
+        '재고 복원 200 을 받은 시각 (#308 PR-C). 복원 전이면 null';
+
+    comment on column orders.order_payment.result is
+        '반영 결과 (PAID / REJECTED_* — 거절 사유는 order-payment-rejected 회신 reason 과 같다)';
+
+    comment on column orders.order_payment.stock_reservation_id is
+        '확정 200 을 받은 재고 선점 아이디 (외부 FK: product-service stock_reservation.id). 결제 완료 · 취소 주문 거절에만, 그 밖은 null';
+
+    comment on column orders.order_payment.total_amount is
+        '결제 금액 — 통화의 최소 단위 정수 (payment 재조회 값)';
+
+    comment on column orders.order_payment.total_currency is
+        '결제 금액 통화';
+
     create table orders.order_request (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -587,6 +661,42 @@
     comment on column orders.outbox.version is
         '낙관적 락 버전 — 발행 표시 · 실패 기록이 올린다';
 
+    create table orders.processed_event (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        consumer_group varchar(200) not null,
+        event_id uuid not null,
+        event_type varchar(100) not null,
+        processed_at timestamp(6) with time zone not null,
+        primary key (id),
+        constraint uk_processed_event_consumer_group_event_id unique (consumer_group, event_id)
+    );
+
+    comment on table orders.processed_event is
+        '처리한 이벤트 기록 (멱등 컨슈머 inbox)';
+
+    comment on column orders.processed_event.id is
+        '처리 기록 아이디 (Snowflake)';
+
+    comment on column orders.processed_event.created_at is
+        '생성 시각';
+
+    comment on column orders.processed_event.updated_at is
+        '수정 시각';
+
+    comment on column orders.processed_event.consumer_group is
+        '컨슈머 그룹 (예: commerce-foundry.prod.order.payment-approved)';
+
+    comment on column orders.processed_event.event_id is
+        '이벤트 아이디 (봉투 eventId)';
+
+    comment on column orders.processed_event.event_type is
+        '이벤트 종류 (예: payment-approved)';
+
+    comment on column orders.processed_event.processed_at is
+        '처리 시각 — 보존 기간 정리 기준';
+
     create table orders.shedlock (
         name varchar(64) not null,
         lock_until timestamp(6) with time zone not null,
@@ -613,6 +723,9 @@
     create index idx_order_item_custom_option_order_id_order_item_id
        on orders.order_item_custom_option (order_id, order_item_id);
 
+    create index idx_order_payment_order_id_id
+       on orders.order_payment (order_id, id);
+
     create index idx_order_request_member_id_updated_at
        on orders.order_request (member_id, updated_at);
 
@@ -636,3 +749,6 @@
 
     create index idx_outbox_published_at_available_at
        on orders.outbox (published_at, available_at);
+
+    create index idx_processed_event_processed_at
+       on orders.processed_event (processed_at);

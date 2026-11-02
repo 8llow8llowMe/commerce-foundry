@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderExceptio
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException.Failure;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderStockProcessor;
 import com.commercefoundry.security.internal.InternalTokenDecoderFactory;
@@ -292,6 +293,92 @@ class StockReservationClientAdapterTest {
         RESPONSE_BODY.set(failure("attacker\\r\\nFORGED_SECRET", "RAW_BODY_SECRET"));
         assertFailure(Failure.REJECTED);
         assertThat(output.getAll()).contains("resultCode=<unrecognized>").doesNotContain("FORGED_SECRET", "RAW_BODY_SECRET");
+    }
+
+    // --- 확정 · 재선점 (#308) ---
+
+    private static final long RESERVATION_ID = 4611686018427388001L;
+
+    @Test
+    @DisplayName("확정 — POST /{reservationId}/confirmation 에 본문 없이 서비스 토큰(aud=product-service)을 싣고, CONFIRMED 응답을 확정 결과로 바꾼다")
+    void confirms() {
+        RESPONSE_BODY.set(reservation("CONFIRMED"));
+
+        assertThat(stockReservationPort.confirm(RESERVATION_ID)).isEqualTo(new StockConfirmationQueryResult(RESERVATION_ID, ORDER_ID));
+
+        assertThat(PATHS).containsExactly("/internal/v1/stock-reservations/" + RESERVATION_ID + "/confirmation");
+        assertThat(BODIES.getFirst()).isEmpty();
+        assertThat(AUTHORIZATIONS).singleElement().satisfies(values -> {
+            Jwt token = InternalTokenDecoderFactory.create(TestServiceTokens.properties("product-service"), Clock.systemUTC())
+                .decode(values.getFirst().substring("Bearer ".length()));
+            assertThat(token.getAudience()).containsExactly("product-service");
+        });
+    }
+
+    @ParameterizedTest(name = "확정 {0} {1} → {2}")
+    @CsvSource({
+        "409, PRODUCT_025, RELEASED",
+        "404, PRODUCT_003, NOT_FOUND",
+        "409, PRODUCT_026, CONFLICT",
+        "409, PRODUCT_024, REJECTED",
+        "409, PRODUCT_021, REJECTED",
+        "409, PRODUCT_003, REJECTED",
+        "404, PRODUCT_025, REJECTED",
+        "401, SECURITY_007, REJECTED",
+        "500, X, UNKNOWN",
+        "503, X, UNKNOWN"
+    })
+    @DisplayName("확정 오류 — 025 해제 · 003 없음은 재선점 신호, 026 은 일시 충돌, 짝이 맞지 않는 코드는 모르는 거절, 5xx 는 결과를 모르는 실패다")
+    void confirmationFailures(int status, String code, Failure expected) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(failure(code, "이미 해제된 재고 선점입니다"));
+
+        assertThatThrownBy(() -> stockReservationPort.confirm(RESERVATION_ID))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(expected));
+        assertThat(PATHS).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"RESERVED", "RELEASED"})
+    @DisplayName("확정 응답이 CONFIRMED 가 아니거나 다른 선점이면 결과를 모르는 실패(UNKNOWN)다 — 확정은 멱등이라 다시 부르면 된다")
+    void confirmationContractViolation(String status) {
+        RESPONSE_BODY.set(reservation(status));
+        assertThatThrownBy(() -> stockReservationPort.confirm(RESERVATION_ID))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+
+        RESPONSE_BODY.set(reservation("CONFIRMED"));
+        assertThatThrownBy(() -> stockReservationPort.confirm(RESERVATION_ID + 1))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+    }
+
+    @Test
+    @DisplayName("확정 타임아웃 · 서킷 오픈은 UNKNOWN 이다 — 서킷이 열려 있으면 부르지 않는다")
+    void confirmationTimeoutAndCircuit() {
+        DELAY_MS.set(3300);
+        assertThatThrownBy(() -> stockReservationPort.confirm(RESERVATION_ID))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+        DELAY_MS.set(0);
+        PATHS.clear();
+
+        circuits.circuitBreaker("product-service").transitionToOpenState();
+        assertThatThrownBy(() -> stockReservationPort.confirm(RESERVATION_ID))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+        assertThat(PATHS).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"RESERVED", "CONFIRMED"})
+    @DisplayName("재선점 — 같은 선점 요청을 보내고, 같은 주문의 이미 확정된 선점(CONFIRMED)도 받는다. 지난 만료 시각도 그대로 받는다")
+    void reReserveAcceptsConfirmed(String status) {
+        RESPONSE_BODY.set(reservation(status).replace("2099-10-18", "2000-10-18"));
+
+        assertThat(stockReservationPort.reReserve(ORDER_ID, items()).reservationId()).isEqualTo(RESERVATION_ID);
+        assertThat(PATHS).containsExactly("/internal/v1/stock-reservations");
+        assertThat(BODIES.getFirst()).contains("\"orderId\":4611686018427387904");
+
+        RESPONSE_BODY.set(reservation("RELEASED"));
+        assertThatThrownBy(() -> stockReservationPort.reReserve(ORDER_ID, items()))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
     }
 
     private void assertFailure(Failure expected) {

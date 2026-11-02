@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.order.adapter.out.client.feign.dto.StockR
 import com.commercefoundry.domainlayer.order.adapter.out.client.feign.dto.StockReservationInternalResponse;
 import com.commercefoundry.security.internal.client.InternalFeignClientConfiguration;
 import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
@@ -24,4 +25,10 @@ public interface StockReservationClient {
     @PostMapping("/internal/v1/stock-reservations")
     Response<StockReservationInternalResponse> reserve(@RequestBody StockReservationInternalRequest request);
 
+    /**
+     * 선점 확정 (#308) — 본문 없음. 멱등이다(이미 CONFIRMED 면 200, 응답 모양은 선점과 같다). 해제 · 만료는 409 {@code PRODUCT_025}, 없으면 404 {@code PRODUCT_003},
+     * 동시 변경은 409 {@code PRODUCT_026} 이다.
+     */
+    @PostMapping("/internal/v1/stock-reservations/{reservationId}/confirmation")
+    Response<StockReservationInternalResponse> confirm(@PathVariable("reservationId") long reservationId);
 }

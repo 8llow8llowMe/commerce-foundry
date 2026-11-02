@@ -56,7 +56,7 @@ shedlock          name(PK) · lock_until · locked_at · locked_by   (ShedLock J
 
 - `markPublished` 는 `published_at is null` 조건부 UPDATE, `markFailed` 는 `publish_attempts + 1` 조건부 UPDATE — 메서드마다 자기 트랜잭션이다(릴레이가 트랜잭션 밖에서 부른다).
 - `append` · `ProcessedEventStore.exists` · `record` 는 호출자 트랜잭션에 합류한다.
-- inbox 첫 구현은 product-service `JpaProcessedEventStore`(#309)다.
+- inbox 첫 구현은 product-service `JpaProcessedEventStore`(#309)다. order-service 도 같은 모양으로 둔다(#308, `orders.processed_event`).
 - **기록 정리(`MessagingCleanup`)는 릴레이와 따로 돈다**(#378) — 서비스가 둔 저장소만 정리한다. outbox 가 있으면 발행 완료 행(`deletePublishedBefore`),
   inbox 가 있으면 처리 기록(`deleteProcessedBefore`)을 `batch-size` 씩 지운다(한 주기 최대 100 배치). 받기만 하는 서비스(지금 product)도 정리가 돈다.
   락 이름은 `commerce-messaging-outbox-cleanup` 이다(릴레이에 있던 때와 같다 — 롤링 배포 중 구 · 신 인스턴스가 같은 락을 쓴다).

@@ -582,6 +582,8 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
   트랜잭션 밖에서 부르면 `NO_TRANSACTION`, 읽기 전용 트랜잭션이면 `READ_ONLY_TRANSACTION` 이다. 롤백되면 이벤트가 나가지 않고, 커밋되면 한 번 이상 나간다.
 - **소비는 멱등이다.** `IdempotentEventProcessor.process(group, envelope, handler)` 가 처리 기록(`processed_event`)과 업무 처리를 한 트랜잭션으로 묶는다.
   원격 호출을 섞어 트랜잭션을 나누는 컨슈머는 `isProcessed` 로 거르고 상태를 쓰는 트랜잭션 안에서 `record` 한다. 상태 전이 멱등이 2차 방어다.
+  inbox 저장소(`ProcessedEventStore`)는 받는 서비스가 `global/messaging/{ProcessedEventEntity, ProcessedEventRepository, JpaProcessedEventStore}` 로 둔다 —
+  구현처는 product-service(주문 만료 · 취소 → 선점 해제, #309)와 order-service(결제 승인 → 결제 완료, #308 — `orders.processed_event`)다.
 - 리스너는 `adapter/in/event/*EventListener` 이고 UseCase 만 부른다. 값은 문자열로 받아 `EventEnvelopeCodec.decode` 로 봉투를 읽고,
   `requireVersion` 으로 모르는 새 버전을 거른다.
 - **이름은 `TopicNames` 로 만든다** — 토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`, DLT `<topic>.dlt`, 그룹 `<ns>.<소비 서비스>.<목적>`.
@@ -592,7 +594,8 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
 - **리스너 토픽 · 그룹은 `TopicNames` 로 만든 이름만 쓴다.** 켜져 있으면 namespace 로 시작하지 않는 토픽 · 그룹, 토픽 패턴 구독은 기동 실패다. `autoStartup` 은 적지 않는다.
 - **이벤트는 진위가 확인되지 않은 알림이다.** 돈 · 재고 상태를 바꾸는 컨슈머는 원본 서비스 internal API 로 재조회해 확정한다(웹훅과 같은 원칙).
   - 예외: product-service 의 주문 만료 · 취소 → 선점 해제 컨슈머는 재조회하지 않는다 — RESERVED 를 푸는 일만 해 효과가 TTL 만료와 같고 CONFIRMED 는 건드리지 않아,
-    위조 이벤트의 최대 피해가 "결제 대기 재고가 TTL 보다 일찍 풀림"(확정은 재선점으로 흡수)이다(`order-flow-guide.md` §3-5). SASL · ACL · 서명은 #308 전에 다시 본다.
+    위조 이벤트의 최대 피해가 "결제 대기 재고가 TTL 보다 일찍 풀림"(확정은 재선점으로 흡수)이다(`order-flow-guide.md` §3-5). #308 은 봉투 서명 · SASL · ACL 을
+    더하지 않고 결제 승인 컨슈머가 payment 재조회로 확정하기로 했다(`payment-guide.md` §6).
     새 예외는 이 근거(효과 상한 · 되돌릴 수 있음)를 문서에 적고 사람이 승인한다.
 - **재시도 · DLT** — 일시 오류는 컨슈머 안 지수 백오프(기본 5회) 뒤 `<topic>.dlt`. 다시 해도 같은 실패는 `NonRetryableEventException` 으로 던져 바로 DLT 로 보낸다.
   업무상 정상적인 거절(금액 불일치 등)은 예외가 아니라 결과 상태 · 보상 이벤트로 처리한다. `@RetryableTopic` 은 쓰지 않는다.
