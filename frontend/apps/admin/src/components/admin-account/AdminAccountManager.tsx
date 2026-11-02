@@ -6,15 +6,24 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
 import { deactivateFailure } from '@/lib/admin-account/errors';
+import { canRecoverPeer } from '@/lib/admin-account/peer-otp';
 import { adminsApiPath, adminsHref, deactivatePath } from '@/lib/admin-account/query';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
+import { useLoginCooldown } from '@/lib/auth/use-login-cooldown';
 import type { MemberListItem } from '@/lib/member/query';
 import { AdminCreateForm } from './AdminCreateForm';
+import { PeerOtpRecoveryForm } from './PeerOtpRecoveryForm';
+import { RecoveryCodesPanel } from './RecoveryCodesPanel';
 
 type Loaded =
   | { key: string; kind: 'ok'; data: PageResponse<MemberListItem> }
   | { key: string; kind: 'failed' }
   | { key: string; kind: 'denied'; denied: AccessDenied };
+
+/** 동료 OTP 복구(#428) 진행. 새 복구 코드(`codes`)는 여기(화면 상태)에만 있고 패널을 닫으면 버린다 */
+type Recovery =
+  | { kind: 'form'; member: MemberListItem }
+  | { kind: 'codes'; member: MemberListItem; codes: string[] };
 
 const linkButton = 'text-sm underline-offset-4 hover:underline';
 
@@ -27,8 +36,17 @@ const dateTime = new Intl.DateTimeFormat('ko-KR', {
 /**
  * 가게 운영자 계정(#352) — 관리자 목록 · 추가 · 비활성화. 목록은 회원 목록(#241)의 `role=ADMIN` 이고 페이지는 주소가 정본이다.
  * 목록 응답에 활성 여부가 없어 비활성화한 계정도 계속 보인다 — 이번 방문에서 끈 계정만 표시를 붙이고 버튼을 거둔다.
+ * 동료 OTP 복구(#428)는 내 계정(`selfMemberId`)이 아닌 줄에만 둔다. 내 아이디를 모르면 어느 줄에도 두지 않는다.
+ * 비활성 · 없는 대상은 서버가 `AUTH_033` 으로 거절하고, 그 뒤 그 줄의 복구 버튼을 거둔다.
  */
-export function AdminAccountManager({ page }: { page: number }) {
+export function AdminAccountManager({
+  page,
+  selfMemberId,
+}: {
+  page: number;
+  /** 지금 세션 관리자의 아이디(토큰 `sub`). 화면 힌트일 뿐이고 본인 대상 거절의 정본은 BE `AUTH_045` 다 */
+  selfMemberId: string | null;
+}) {
   const path = adminsApiPath(page);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [reloads, setReloads] = useState(0);
@@ -39,6 +57,10 @@ export function AdminAccountManager({ page }: { page: number }) {
   const [rowError, setRowError] = useState<{ memberId: string; message: string } | null>(null);
   const [deactivated, setDeactivated] = useState<ReadonlySet<string>>(() => new Set());
   const [denied, setDenied] = useState<AccessDenied | null>(null);
+  const [recovery, setRecovery] = useState<Recovery | null>(null);
+  const [unrecoverable, setUnrecoverable] = useState<ReadonlySet<string>>(() => new Set());
+  // 동료 복구는 행위자별 시도 창(15분 5회)을 쓴다 — 대상이 바뀌어도 같은 쿨다운이다
+  const cooldown = useLoginCooldown();
   // 누른 버튼이 사라지는 전환(확인 열기 · 닫기 · 폼 열기 · 닫기) 뒤 포커스를 둘 `data-focus` 키. 그리지 않으면 body 로 빠진다.
   // 늘 상태 변경과 함께 정하므로 ref 로 두고 그다음 커밋에서 옮긴다(카테고리와 같은 방식)
   const pendingFocus = useRef<string | null>(null);
@@ -107,6 +129,28 @@ export function AdminAccountManager({ page }: { page: number }) {
 
   if (denied) return <AccessNotice denied={denied} />;
 
+  // 새 복구 코드가 보이는 동안에는 목록 · 페이지 이동을 그리지 않는다 — 눌러서 코드를 잃지 않게(창 닫기는 패널이 묻는다)
+  if (recovery?.kind === 'codes') {
+    const { member, codes } = recovery;
+    return (
+      <div ref={rootRef} className="flex max-w-6xl flex-col gap-6">
+        <h1 className="text-xl font-semibold">관리자 계정</h1>
+        <RecoveryCodesPanel
+          codes={codes}
+          regenerated={false}
+          recipient={member.name}
+          onClose={() => {
+            setRecovery(null);
+            setFocusKey('add');
+            setNotice(
+              `${member.name} 님의 2단계 인증을 복구했습니다. 대상 관리자가 새 휴대폰으로 2단계 인증을 다시 등록했는지 확인해 주세요. 같은 관리자를 다시 복구하면 방금 코드는 쓸 수 없게 됩니다.`,
+            );
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div ref={rootRef} className="flex max-w-6xl flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -119,6 +163,8 @@ export function AdminAccountManager({ page }: { page: number }) {
         {!adding && (
           <Button
             data-focus="add"
+            // 복구 폼이 열린 동안에는 막는다 — 두 폼을 같이 열지 않는다
+            disabled={recovery !== null}
             onClick={() => {
               setAdding(true);
               setNotice(null);
@@ -143,6 +189,31 @@ export function AdminAccountManager({ page }: { page: number }) {
           onCancel={() => {
             setAdding(false);
             setFocusKey('add');
+          }}
+        />
+      )}
+
+      {recovery?.kind === 'form' && (
+        <PeerOtpRecoveryForm
+          key={recovery.member.memberId}
+          target={recovery.member}
+          cooldown={cooldown}
+          onRecovered={(codes) => {
+            setRecovery({ kind: 'codes', member: recovery.member, codes });
+            setNotice(null);
+          }}
+          onGone={(message) => {
+            const { memberId } = recovery.member;
+            setUnrecoverable((prev) => new Set(prev).add(memberId));
+            setRecovery(null);
+            setRowError({ memberId, message });
+            // 오류 문구가 그 줄에 붙는다 — 포커스도 그 줄(비활성화 버튼)에 둔다
+            setFocusKey(`deactivate:${memberId}`);
+          }}
+          onDenied={setDenied}
+          onCancel={() => {
+            setFocusKey(`recover:${recovery.member.memberId}`);
+            setRecovery(null);
           }}
         />
       )}
@@ -198,11 +269,20 @@ export function AdminAccountManager({ page }: { page: number }) {
               <tbody>
                 {current.data.contents.map((member) => {
                   const off = deactivated.has(member.memberId);
+                  const self = selfMemberId !== null && member.memberId === selfMemberId;
+                  // 내 계정 · 내 아이디를 모를 때 · 이번 방문에 끈 계정 · 서버가 복구할 수 없다고 한 계정에는 두지 않는다
+                  const recoverable =
+                    !off && canRecoverPeer(member.memberId, selfMemberId, unrecoverable);
                   const error = rowError?.memberId === member.memberId ? rowError.message : null;
                   return (
                     <tr key={member.memberId} className="border-t border-border align-top">
                       <th scope="row" className="py-3 pr-4 font-medium whitespace-nowrap">
                         {member.name}
+                        {self && (
+                          <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs font-normal">
+                            내 계정
+                          </span>
+                        )}
                         {off && (
                           <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs font-normal">
                             비활성화함
@@ -249,22 +329,40 @@ export function AdminAccountManager({ page }: { page: number }) {
                               </button>
                             </div>
                           ) : (
-                            <button
-                              type="button"
-                              className={linkButton}
-                              aria-label={`${member.name} 비활성화`}
-                              // 추가 폼이 열린 동안에는 막는다 — 비활성화 401 이 화면을 로그인 안내로 바꿔 입력을 잃지 않게
-                              disabled={deactivating !== null || adding}
-                              data-focus={`deactivate:${member.memberId}`}
-                              onClick={() => {
-                                setConfirming(member.memberId);
-                                // 누른 버튼이 확인으로 바뀌어 사라진다 — 포커스를 안전한 쪽(취소)에 둔다
-                                setFocusKey(`cancel:${member.memberId}`);
-                                setRowError(null);
-                              }}
-                            >
-                              비활성화
-                            </button>
+                            <div className="flex flex-wrap items-center justify-end gap-4">
+                              {recoverable && (
+                                <button
+                                  type="button"
+                                  className={linkButton}
+                                  aria-label={`${member.name} 2단계 인증 복구`}
+                                  disabled={deactivating !== null || adding || recovery !== null}
+                                  data-focus={`recover:${member.memberId}`}
+                                  onClick={() => {
+                                    setRecovery({ kind: 'form', member });
+                                    setRowError(null);
+                                    setNotice(null);
+                                  }}
+                                >
+                                  OTP 복구
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className={linkButton}
+                                aria-label={`${member.name} 비활성화`}
+                                // 추가 · 복구 폼이 열린 동안에는 막는다 — 비활성화 401 이 화면을 로그인 안내로 바꿔 입력을 잃지 않게
+                                disabled={deactivating !== null || adding || recovery !== null}
+                                data-focus={`deactivate:${member.memberId}`}
+                                onClick={() => {
+                                  setConfirming(member.memberId);
+                                  // 누른 버튼이 확인으로 바뀌어 사라진다 — 포커스를 안전한 쪽(취소)에 둔다
+                                  setFocusKey(`cancel:${member.memberId}`);
+                                  setRowError(null);
+                                }}
+                              >
+                                비활성화
+                              </button>
+                            </div>
                           )}
                           {error && (
                             <p role="alert" className="text-sm text-danger">
