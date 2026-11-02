@@ -23,7 +23,7 @@
         constraint ck_shipment_unsynced_shipped check (order_synced = true or status = 'SHIPPED'),
         constraint ck_shipment_delivered_at_status check ((status = 'DELIVERED' and delivered_at is not null) or (status <> 'DELIVERED' and delivered_at is null)),
         constraint ck_shipment_completion_pending_status check (completion_pending = false or status = 'DELIVERED'),
-        constraint ck_shipment_previous_status_pending check ((completion_pending = false and previous_status is null) or (completion_pending = true and previous_status in ('SHIPPED','IN_TRANSIT')))
+        constraint ck_shipment_previous_status_pending check ((completion_pending = false and previous_status is null) or (completion_pending = true and previous_status is not null and previous_status in ('SHIPPED','IN_TRANSIT')))
     );
 
     comment on table delivery.shipment is

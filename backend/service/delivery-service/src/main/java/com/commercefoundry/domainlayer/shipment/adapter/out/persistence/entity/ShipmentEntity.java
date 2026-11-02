@@ -55,9 +55,11 @@ import org.hibernate.annotations.ColumnDefault;
             constraint = "(status = 'DELIVERED' and delivered_at is not null) or (status <> 'DELIVERED' and delivered_at is null)"
         ),
         @CheckConstraint(name = "ck_shipment_completion_pending_status", constraint = "completion_pending = false or status = 'DELIVERED'"),
+        // "is not null" 을 빼면 안 된다 — null in (...) 은 false 가 아니라 null 이고 check 는 null 을 통과시킨다
         @CheckConstraint(
             name = "ck_shipment_previous_status_pending",
-            constraint = "(completion_pending = false and previous_status is null) or (completion_pending = true and previous_status in ('SHIPPED','IN_TRANSIT'))"
+            constraint = "(completion_pending = false and previous_status is null)"
+                + " or (completion_pending = true and previous_status is not null and previous_status in ('SHIPPED','IN_TRANSIT'))"
         )
     }
 )
