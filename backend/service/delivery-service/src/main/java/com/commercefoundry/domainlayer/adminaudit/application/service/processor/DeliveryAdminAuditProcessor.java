@@ -23,4 +23,14 @@ public class DeliveryAdminAuditProcessor {
     public void shipmentRegistered(long adminMemberId, long orderId, boolean succeeded) {
         AdminAuditLog.write(DeliveryAdminAuditAction.SHIPMENT_REGISTER.name(), adminMemberId, AdminAuditLog.target("order", orderId), succeeded);
     }
+
+    /**
+     * 배송 상태 변경 한 건 (#18 PR-B2). 등록과 같이 Facade({@code NEVER})가 결과가 정해진 뒤 부르고, 요청이 끝날 때 남는다 — 예외로 끝나면 빈 범위가 롤백으로 끝나
+     * {@code succeeded} 와 상관없이 {@code FAILURE} 다. 바꾼 상태 · 사유는 싣지 않는다(정본은 배송 상태 이력).
+     *
+     * @param succeeded 바꿈 · 그대로 둠이면 true, 업무 오류면 false
+     */
+    public void shipmentStatusChanged(long adminMemberId, long shipmentId, boolean succeeded) {
+        AdminAuditLog.write(DeliveryAdminAuditAction.SHIPMENT_STATUS_CHANGE.name(), adminMemberId, AdminAuditLog.target("delivery", shipmentId), succeeded);
+    }
 }

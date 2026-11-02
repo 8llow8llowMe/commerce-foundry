@@ -229,6 +229,8 @@ return ResponseEntity.ok().body(Response.success(response));
 
 - **id 로 지정한 리소스가 없거나 타인 소유면 404** — 남의 주문은 403 이 아니라 404 로 답해 존재를 숨긴다.
 - **부모당 0~1개인 선택적 하위 리소스의 부재는 200 + `dataBody: null`** — 예: 아직 송장이 없는 주문의 배송 정보.
+- **예외 — 부모를 다른 서비스가 가진 고객 조회** — 고객 배송 조회 `GET /api/v1/deliveries?orderId=`(delivery, #18 PR-B2)는 송장이 없거나 남의 주문 · 출고 반영 전이어도 404 가 아니라 200 + null 이다.
+  delivery 는 주문의 존재를 모르고(원격 호출 없음), 주문 존재 · 소유 404 는 주문 상세(order-service)가 낸다 — 같은 화면이 두 API 를 함께 부른다.
 
 ### 2-3. 금액 표현
 
@@ -1010,12 +1012,58 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   | `DELIVERY_022` | 요청 처리 마감(8초)을 넘겨 이 건은 시작하지 않음 — "시간 안에 처리하지 못했습니다. 다시 보내 주세요." | 만들지 않음(order 도 부르지 않음) | 처음 등록으로 처리된다 |
 
 - **재시도** — 주문 반영 전(`order_synced=false`)으로 남은 송장은 같은 주문을 다시 보내면 **이번 요청의 택배사 · 송장 번호로 바뀌어** 같은 송장 아이디로 다시 반영된다. 자동 재전송은 없다.
-  **출고 시각은 처음 값 그대로 보낸다** — order 가 처음 요청을 이미 커밋했다면 그 값이 정본이다. 반영 전 송장 목록(`?synced=false`)은 PR-B2 의 어드민 목록이다.
+  **출고 시각은 처음 값 그대로 보낸다** — order 가 처음 요청을 이미 커밋했다면 그 값이 정본이다. 반영 전 송장은 어드민 목록 `?synced=false` 로 찾는다(아래 PR-B2).
 - **시간 · 상한** — 게이트웨이 `response-timeout` 이 10초다(`cloud/api-gateway` `application.yml`) — 넘기면 운영자는 504 만 받고 처리한 건의 결과를 잃는다. 그래서 한 요청은 **1~20건**이고,
   delivery 는 요청 시작 + **8초**(서버 `Clock`)가 지나면 남은 건을 시작하지 않고 `DELIVERY_022` 로 낸다(송장 행을 만들지 않는다). 마감은 건을 시작하기 전에만 본다 —
   진행 중인 건은 끝까지 간다. 건마다 order-service 를 한 번씩 부른다(connect 2초 · read timeout 3초). order 장애면 서킷이 열려 남은 건은 바로 `DELIVERY_018` 이다.
   화면은 응답을 기다리는 동안 다시 누르지 못하게 막고, `DELIVERY_022` · `018` 건만 모아 다시 보낸다.
-- **FE 영향** — 새 API 다. 어드민 주문 상세 · 목록의 "송장 등록" 버튼과 일괄 등록 화면이 쓴다. 배송 상태 변경 · 송장 조회 · 고객 배송 조회는 PR-B2 다.
+- **FE 영향** — 새 API 다. 어드민 주문 상세 · 목록의 "송장 등록" 버튼과 일괄 등록 화면이 쓴다. 배송 상태 변경 · 송장 조회 · 고객 배송 조회는 아래 PR-B2 다.
+
+#### 배송 상태 변경 · 송장 조회 · 고객 배송 조회 (#18 PR-B2)
+
+흐름 · 실패 처리의 정본은 `order-flow-guide.md` §4 "배송 완료" 다. 아이디는 문자열, 코드 값(`carrier` · `status` · `changedBy`)은 `{code, name, description}` 이다.
+
+| API | 권한 | 응답 | 오류 |
+|-----|------|------|------|
+| `GET /api/v1/admin/deliveries?orderId=&status=&synced=&page=0&size=20` | `hasRole('ADMIN')` | 200 `PageResponse<{deliveryId, orderId, carrier, trackingNumber, status, orderSynced, completionPending, shippedAt, deliveredAt}>` — 최신순(송장 아이디 내림차순) | 400 `DELIVERY_142`(orderId 1 이상) · `137`(page) · `149`(size 1~100) · `198`(숫자 · 상태 · true/false 형식) |
+| `GET /api/v1/admin/deliveries/{deliveryId}` | `hasRole('ADMIN')` | 200 상세 `{deliveryId, orderId, carrier, trackingNumber, status, orderSynced, completionPending, shippedAt, deliveredAt, histories[{fromStatus, toStatus, changedBy, changedById, reason, changedAt}]}` — 이력 시간순 | 400 `DELIVERY_198`(숫자 아님) · 404 `DELIVERY_023` |
+| `PATCH /api/v1/admin/deliveries/{deliveryId}/status` `{status: IN_TRANSIT\|DELIVERED, reason?}` | `hasRole('ADMIN')` | 200 바뀐 상세(위와 같은 모양). 이미 그 상태면 바꾸지 않고 200 | 400 `DELIVERY_146`(status) · `147`(사유 200자) · `148`(사유 제어 문자) · `100`(모르는 상태 · 깨진 JSON) · `198` · 404 `DELIVERY_023` · 409 `024` · `025` · `026` · 배송 완료 반영 실패(아래 표) |
+| `GET /api/v1/deliveries?orderId=` | `hasRole('CUSTOMER')`(ADMIN 403) | 200 `{deliveryId, orderId, carrier, trackingNumber, status, shippedAt, deliveredAt}` 또는 `dataBody: null` | 400 `DELIVERY_199`(orderId 없음) · `198` · `142` |
+
+- **조회 경로를 나눈 이유** — 한 경로가 쿼리에 따라 단건 · 페이지 두 모양으로 답하지 않게 한다. 주문의 송장은 목록 `?orderId=`(주문당 1건이라 0~1건)로 찾고, 이력이 필요하면
+  아이디 상세를 부른다. 아이디로 지정한 상세가 없으면 404(§2-2). "주문의 배송" 하위 리소스(`/admin/orders/{orderId}/delivery`)는 order-service 경로라 두지 않는다.
+- **`synced`** — `false` 는 지금 상태가 주문에 반영되지 않은 송장 = 출고 반영 전(`orderSynced=false`, 같은 송장으로 등록을 다시 보낸다) 또는 배송 완료 반영 대기
+  (`completionPending=true`, 배송 완료를 다시 보낸다). `true` 는 그 밖이다. **자동 재전송은 없다** — 이 목록이 반영 대기를 찾는 유일한 화면이라 송장 관리 화면이 따로 보여 준다
+  (오래 남은 대기의 운영 확인 · 후속 스윕은 `order-flow-guide.md` §4 "자동 재전송하지 않는다").
+- **전이** — 출고 완료 → 배송 중 · 배송 완료, 배송 중 → 배송 완료. 배송 중은 배송 정보만 바꾸고, 배송 완료는 주문을 배송 완료로 반영한다(배송 완료 시각 = 서버 지금, 반품 · 구매 확정 기간의 시작).
+  출고가 주문에 반영되지 않은 송장(`orderSynced=false`)은 409 `DELIVERY_025` — 등록을 다시 보내 출고부터 반영한다. 이력의 관리자는 토큰의 memberId, 사유는 본문 값이다
+  (앞뒤 공백을 자르고, 공백뿐이면 `null`). 배송 완료 반영 대기 송장에 배송 중을 보내면 409 `DELIVERY_024` 다(배송 완료 → 배송 중은 전이 밖).
+- **배송 완료 반영 실패 코드**
+
+  | 코드 | 뜻 | 송장 | 다시 보내면 |
+  |------|-----|------|-------------|
+  | 404 `DELIVERY_014` | 없는 주문 (order 404 `ORDER_001`) | 직전 상태로 되돌림(되돌림 이력 `자동 처리`) | 같은 결과 |
+  | 409 `DELIVERY_027` | 배송 완료로 바꿀 수 없는 주문 상태 (order 409 `ORDER_020`) — "`<상태 이름>` 상태라 배송 완료로 바꿀 수 없습니다." | 되돌림 | 주문 상태가 바뀌면 된다 |
+  | 500 `DELIVERY_028` | 배송 완료 시각이 order 범위 밖 · 출고 시각보다 앞섬 (order 400 `ORDER_159~161`) — 서비스 간 시계 차이 또는 30일 지난 재시도 | 되돌림 | 그때 시각으로 다시 보낸다 |
+  | 409 `DELIVERY_029` | 그 사이 주문이 바뀜 (order 409 `ORDER_025`) | 배송 완료 · 반영 대기 | 처음 배송 완료 시각으로 다시 반영 |
+  | 503 `DELIVERY_030` | 주문 서비스 응답 없음 · 결과 모름 | 배송 완료 · 반영 대기 | order 멱등으로 수렴 |
+  | 409 `DELIVERY_026` | 그 사이 배송 상태가 바뀜(버전 충돌 — 반영 완료 저장은 한 번 더 다시 읽고도 겹칠 때) | 그대로 · 반영 대기 | 새로고침 뒤 다시 |
+  | 500 `DELIVERY_031` | 저장 실패 · 상태 변경 뒤 응답용 다시 읽기 실패(원인 미노출) | 그대로 · 반영 대기 · 바뀐 뒤일 수 있음 | 다시 시도(같은 상태면 바꾸지 않고 상세를 돌려준다) |
+
+- **주문 상태와 다를 수 있다** — 배송 상태는 송장 상태 그대로다. 주문 화면의 수동 배송 완료처럼 배송을 거치지 않은 변경이 있으면 주문은 배송 완료인데 송장은 출고 완료 · 배송 중일 수 있다.
+  그때 배송 완료를 보내면 주문은 그대로(멱등 200) 송장만 맞춰진다 — 이때 송장 `deliveredAt` 은 맞춘 시각이라 주문의 배송 완료 시각과 다를 수 있다(효력은 주문 값).
+  어드민 응답은 송장 그대로다(`completionPending` 을 함께 싣는다).
+- **고객 배송 조회** — 소유는 송장의 회원 스냅숏(출고 반영 응답)과 토큰의 memberId 로 delivery 가 판정한다. 없음 · 남의 주문 · 출고 반영 전 모두 200 + null 이다(§2-2 예외).
+  배송 상태는 송장 상태 그대로이되, **배송 완료 반영 대기는 배송 중(`IN_TRANSIT`) · `deliveredAt=null`** 로 보인다 — 주문이 아직 배송 중이라 반품 · 구매 확정을 할 수 없는 것과 맞춘다.
+- **감사** — 상태 변경은 `SHIPMENT_STATUS_CHANGE`(대상 `delivery:<id>`). 목록 · 상세는 개인정보(받는 분 · 주소 · 회원)를 싣지 않아 남기지 않는다(`security-guide.md` §11-4).
+  `FAILURE` 는 요청이 오류로 끝났다는 뜻이다 — 상태 변경 여부는 배송 이력이 정본이다.
+- **FE 영향** — 새 API 넷. 계약 검토자는 `seonghoho` 다.
+  - **주문 상세에서 송장 찾기 = 목록 `?orderId=` 의 첫 원소**(주문당 1건, 없으면 빈 목록). 이력이 필요하면 그 `deliveryId` 로 상세를 부른다.
+  - 배송 상태 버튼(배송 중 · 배송 완료)은 `PATCH`. **행동 버튼은 주문 상태 기준**으로 보인다(주문 `SHIPPING` 일 때) — 송장 상태는 주문과 갈라질 수 있다.
+  - 오류 뒤 화면 — **`DELIVERY_026` · `029` · `030` 은 배송 완료를 다시 누르면 수렴**한다(반영 대기 · 처음 시각으로 다시 보낸다). **`014` · `027` · `028` 은 송장이 되돌아간
+    상태**라(직전 상태 · 되돌림 이력) 다시 누르면 새 배송 완료다. 어느 쪽이든 응답 뒤 상세를 다시 읽어 그린다.
+  - 반영 대기 · 미반영 송장 화면은 `?synced=false`.
+  - 스토어프론트 주문 상세는 `GET /api/v1/deliveries?orderId=` 를 주문 상세와 함께 부르고 null 이면 "출고 전" 으로 그린다. 반영 대기는 배송 중으로 온다.
 
 ## 3. 계층 흐름
 
@@ -1044,7 +1092,7 @@ Info → Presenter → Response
   - 모든 정렬은 마지막에 아이디 내림차순(최신순)으로 동률을 끊는다. 페이지 경계에서 같은 항목이 두 번 나오거나 빠지지 않게 한다.
 - `totalCount` 를 내리는 응답은 **자르기 전 개수**여야 한다. Presenter 가 `items.size()` 로 채우지 않는다.
 - 페이지 파라미터는 `page`(기본 0, 0 이상) · `size`(기본 20, 1~100)이고 검증 코드는 도메인의 `page` · `size` 공용 코드를 쓴다
-  (product 는 `PRODUCT_101` · `PRODUCT_102`, delivery 는 page `DELIVERY_137`, 배송비 정책 이력 size `DELIVERY_138`).
+  (product 는 `PRODUCT_101` · `PRODUCT_102`, delivery 는 page `DELIVERY_137`, 배송비 정책 이력 size `DELIVERY_138`, 송장 목록 size(1~100) `DELIVERY_149`).
   마지막 페이지를 넘긴 요청은 400 이 아니라 빈 `contents` 와 그대로인 `totalElements` 다.
   정렬을 고를 수 없는 목록(감사 이력처럼 최신순 하나뿐)은 `sortType` 을 두지 않고 아이디 내림차순으로 고정한다 —
   처음 만든 곳: 어드민 재고 조정 이력 `GET /api/v1/admin/stocks/{skuId}/adjustments` (#86). 배송비 정책 교체 이력(§6-2, #69)도 같다.

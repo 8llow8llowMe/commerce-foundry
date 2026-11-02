@@ -6,12 +6,15 @@ import com.commercefoundry.domainlayer.shipment.adapter.out.persistence.reposito
 import com.commercefoundry.domainlayer.shipment.application.mapper.ShipmentMapper;
 import com.commercefoundry.domainlayer.shipment.application.port.out.ShipmentRepositoryPort;
 import com.commercefoundry.domainlayer.shipment.domain.model.Shipment;
+import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentStatus;
 import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentStatusHistory;
 import com.commercefoundry.persistence.util.ConstraintViolations;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +32,21 @@ public class ShipmentRepositoryAdapter implements ShipmentRepositoryPort {
     @Override
     public Optional<Shipment> findByOrderId(long orderId) {
         return shipmentRepository.findByOrderId(orderId).map(shipmentMapper::toDomain);
+    }
+
+    @Override
+    public Optional<Shipment> findById(long shipmentId) {
+        return shipmentRepository.findById(shipmentId).map(shipmentMapper::toDomain);
+    }
+
+    @Override
+    public Page<Shipment> search(Long orderId, ShipmentStatus status, Boolean synced, int page, int size) {
+        return shipmentRepository.search(orderId, status, synced, page, size).map(shipmentMapper::toDomain);
+    }
+
+    @Override
+    public List<ShipmentStatusHistory> findHistories(long shipmentId) {
+        return shipmentStatusHistoryRepository.findAllByShipmentIdOrderByIdAsc(shipmentId).stream().map(shipmentMapper::toDomain).toList();
     }
 
     /**

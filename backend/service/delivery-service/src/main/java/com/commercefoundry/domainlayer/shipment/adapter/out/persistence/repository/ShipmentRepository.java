@@ -1,12 +1,13 @@
 package com.commercefoundry.domainlayer.shipment.adapter.out.persistence.repository;
 
 import com.commercefoundry.domainlayer.shipment.adapter.out.persistence.entity.ShipmentEntity;
+import com.commercefoundry.domainlayer.shipment.adapter.out.persistence.repository.custom.ShipmentCustomRepository;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
-public interface ShipmentRepository extends JpaRepository<ShipmentEntity, Long> {
+public interface ShipmentRepository extends JpaRepository<ShipmentEntity, Long>, ShipmentCustomRepository {
 
     /** 유일 키 {@code uk_shipment_order_id} 를 탄다. */
     Optional<ShipmentEntity> findByOrderId(Long orderId);

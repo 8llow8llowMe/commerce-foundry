@@ -2,17 +2,25 @@ package com.commercefoundry.domainlayer.shipment.adapter.in.admin.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.domainlayer.shipment.adapter.in.admin.dto.item.ShipmentRegisterResultAdminItem;
+import com.commercefoundry.domainlayer.shipment.adapter.in.admin.dto.item.ShipmentStatusHistoryAdminItem;
+import com.commercefoundry.domainlayer.shipment.adapter.in.admin.dto.response.ShipmentAdminResponse;
 import com.commercefoundry.domainlayer.shipment.adapter.in.admin.dto.response.ShipmentRegisterAdminResponse;
 import com.commercefoundry.domainlayer.shipment.application.command.ShipmentRegisterCommand;
+import com.commercefoundry.domainlayer.shipment.application.command.ShipmentStatusChangeCommand;
 import com.commercefoundry.domainlayer.shipment.application.exception.ShipmentErrorCode;
 import com.commercefoundry.domainlayer.shipment.application.exception.ShipmentException;
+import com.commercefoundry.domainlayer.shipment.application.model.ShipmentStatusFilter;
 import com.commercefoundry.domainlayer.shipment.application.port.in.ShipmentAdminUseCase;
 import com.commercefoundry.domainlayer.shipment.domain.model.CarrierCode;
+import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentChangedBy;
+import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentStatus;
+import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
@@ -203,6 +211,159 @@ class ShipmentAdminControllerTest {
 
             assertCode(result, errorCode.getHttpStatus().value(), errorCode.getCode());
             assertThat(result).bodyJson().extractingPath("$.dataHeader.resultMessage").asString().isEqualTo(exception.getMessage());
+        }
+    }
+
+    private static final String DELIVERY_ID = "4611686018427387906";
+
+    private static ShipmentAdminResponse detail(String status) {
+        return ShipmentAdminResponse.builder()
+            .deliveryId(DELIVERY_ID).orderId("4611686018427387904")
+            .carrier(CarrierCode.CJ_LOGISTICS.toMetadata()).trackingNumber("123456789012")
+            .status(ShipmentStatus.valueOf(status).toMetadata()).orderSynced(true).completionPending(false)
+            .shippedAt(Instant.parse("2026-11-02T09:30:00.123456Z"))
+            .histories(List.of(ShipmentStatusHistoryAdminItem.builder()
+                .toStatus(ShipmentStatus.SHIPPED.toMetadata()).changedBy(ShipmentChangedBy.ADMIN.toMetadata()).changedById("9")
+                .changedAt(Instant.parse("2026-11-02T09:30:00Z")).build()))
+            .build();
+    }
+
+    private MvcTestResult patch(String body, MemberRole role) {
+        return mvc.patch().uri(PATH + "/" + DELIVERY_ID + "/status").header(HttpHeaders.AUTHORIZATION, bearer(role))
+            .contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    }
+
+    private MvcTestResult get(String uri, MemberRole role) {
+        return mvc.get().uri(uri).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange();
+    }
+
+    @Nested
+    @DisplayName("배송 상태 변경 (#18 PR-B2)")
+    class ChangeStatus {
+
+        @Test
+        @DisplayName("경로 아이디 · 상태 · 사유와 토큰의 memberId 를 command 로 넘기고, 바뀐 상세(아이디 문자열 · 코드 값 · 이력)로 답한다")
+        void changes() {
+            given(shipmentAdminUseCase.changeStatus(any())).willReturn(detail("DELIVERED"));
+
+            MvcTestResult result = patch("{\"status\": \"DELIVERED\", \"reason\": \"수령 확인\"}", MemberRole.ADMIN);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.deliveryId").asString().isEqualTo(DELIVERY_ID);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.status.code").asString().isEqualTo("DELIVERED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.carrier.name").asString().isEqualTo("CJ대한통운");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.histories[0].changedBy.code").asString().isEqualTo("ADMIN");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.histories[0].fromStatus").isNull();
+            ArgumentCaptor<ShipmentStatusChangeCommand> captor = ArgumentCaptor.forClass(ShipmentStatusChangeCommand.class);
+            verify(shipmentAdminUseCase).changeStatus(captor.capture());
+            assertThat(captor.getValue()).isEqualTo(new ShipmentStatusChangeCommand(Long.parseLong(DELIVERY_ID), ShipmentStatus.DELIVERED, "수령 확인", TestTokens.MEMBER_ID));
+        }
+
+        @Test
+        @DisplayName("사유는 없어도 되고 200자까지 받는다")
+        void reasonOptional() {
+            given(shipmentAdminUseCase.changeStatus(any())).willReturn(detail("IN_TRANSIT"));
+
+            assertThat(patch("{\"status\": \"IN_TRANSIT\"}", MemberRole.ADMIN)).hasStatusOk();
+            assertThat(patch("{\"status\": \"IN_TRANSIT\", \"reason\": \"" + "가".repeat(200) + "\"}", MemberRole.ADMIN)).hasStatusOk();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @CsvSource(value = {
+            "status 없음 | {} | DELIVERY_146",
+            "출고 완료로 | {\"status\": \"SHIPPED\"} | DELIVERY_146",
+            "모르는 상태 | {\"status\": \"LOST\"} | DELIVERY_100",
+            "사유 제어 문자 | {\"status\": \"DELIVERED\", \"reason\": \"a\\nb\"} | DELIVERY_148",
+            "깨진 JSON | {\"status\": | DELIVERY_100"
+        }, delimiter = '|')
+        @DisplayName("본문 오류는 400 과 필드별 코드이고 유스케이스를 부르지 않는다")
+        void rejects(String name, String body, String code) {
+            assertCode(patch(body, MemberRole.ADMIN), 400, code);
+            verifyNoInteractions(shipmentAdminUseCase);
+        }
+
+        @Test
+        @DisplayName("사유 201자는 DELIVERY_147 이다")
+        void rejectsLongReason() {
+            assertCode(patch("{\"status\": \"DELIVERED\", \"reason\": \"" + "가".repeat(201) + "\"}", MemberRole.ADMIN), 400, "DELIVERY_147");
+        }
+
+        @Test
+        @DisplayName("경로 아이디가 숫자가 아니면 400 · DELIVERY_198 이다")
+        void rejectsNonNumericId() {
+            MvcTestResult result = mvc.patch().uri(PATH + "/abc/status").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"status\": \"DELIVERED\"}").exchange();
+
+            assertCode(result, 400, "DELIVERY_198");
+        }
+
+        @Test
+        @DisplayName("업무 오류는 송장 코드 · 상태로 나간다 — 예: 출고 미반영 409 · DELIVERY_025")
+        void domainError() {
+            given(shipmentAdminUseCase.changeStatus(any())).willThrow(new ShipmentException(ShipmentErrorCode.SHIPMENT_NOT_SYNCED));
+
+            assertCode(patch("{\"status\": \"DELIVERED\"}", MemberRole.ADMIN), 409, "DELIVERY_025");
+        }
+
+        @Test
+        @DisplayName("CUSTOMER 면 403 · SECURITY_005 이다")
+        void customerIsForbidden() {
+            SecurityEnvelopeAssertions.assertEnvelope(patch("{\"status\": \"DELIVERED\"}", MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(shipmentAdminUseCase);
+        }
+    }
+
+    @Nested
+    @DisplayName("상세 · 목록 (#18 PR-B2)")
+    class Query {
+
+        @Test
+        @DisplayName("상세는 경로 아이디로 읽고, 없으면 404 · DELIVERY_023 이다")
+        void detailById() {
+            given(shipmentAdminUseCase.getDetail(Long.parseLong(DELIVERY_ID))).willReturn(detail("SHIPPED"));
+            given(shipmentAdminUseCase.getDetail(1L)).willThrow(new ShipmentException(ShipmentErrorCode.SHIPMENT_NOT_FOUND));
+
+            MvcTestResult found = get(PATH + "/" + DELIVERY_ID, MemberRole.ADMIN);
+
+            assertThat(found).hasStatusOk();
+            assertThat(found).bodyJson().extractingPath("$.dataBody.orderId").asString().isEqualTo("4611686018427387904");
+            assertCode(get(PATH + "/1", MemberRole.ADMIN), 404, "DELIVERY_023");
+        }
+
+        @Test
+        @DisplayName("목록은 조건 · 페이지를 그대로 넘기고 PageResponse 로 답한다. 기본은 조건 없음 · page 0 · size 20 이다")
+        void search() {
+            given(shipmentAdminUseCase.search(any(), any(), any(), anyInt(), anyInt())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+
+            assertThat(get(PATH + "?orderId=12&status=DELIVERED&synced=false&page=1&size=100", MemberRole.ADMIN)).hasStatusOk();
+            assertThat(get(PATH, MemberRole.ADMIN)).bodyJson().extractingPath("$.dataBody.totalElements").asNumber().isEqualTo(0);
+
+            verify(shipmentAdminUseCase).search(12L, ShipmentStatusFilter.DELIVERED, false, 1, 100);
+            verify(shipmentAdminUseCase).search(null, null, null, 0, 20);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @CsvSource(value = {
+            "orderId 0 | ?orderId=0 | DELIVERY_142",
+            "orderId 숫자 아님 | ?orderId=abc | DELIVERY_198",
+            "모르는 상태 | ?status=LOST | DELIVERY_198",
+            "synced 형식 | ?synced=maybe | DELIVERY_198",
+            "page 음수 | ?page=-1 | DELIVERY_137",
+            "size 0 | ?size=0 | DELIVERY_149",
+            "size 101 | ?size=101 | DELIVERY_149"
+        }, delimiter = '|')
+        @DisplayName("쿼리 오류는 400 과 코드이고 유스케이스를 부르지 않는다")
+        void rejects(String name, String query, String code) {
+            assertCode(get(PATH + query, MemberRole.ADMIN), 400, code);
+            verifyNoInteractions(shipmentAdminUseCase);
+        }
+
+        @Test
+        @DisplayName("CUSTOMER 의 목록 · 상세는 403 · SECURITY_005 이다")
+        void customerIsForbidden() {
+            SecurityEnvelopeAssertions.assertEnvelope(get(PATH, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(get(PATH + "/" + DELIVERY_ID, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(shipmentAdminUseCase);
         }
     }
 }

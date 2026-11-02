@@ -210,4 +210,74 @@ class OrderShipmentClientAdapterTest {
         assertThatThrownBy(() -> orderShipmentCommandPort.ship(ORDER_ID, SHIPMENT_ID, SHIPPED_AT))
             .isInstanceOfSatisfying(OrderShipmentException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
     }
+
+    // 배송 완료 반영 (#18 PR-B2) — 같은 클라이언트 · 서킷 · 번역이다
+
+    private static final Instant DELIVERED_AT = Instant.parse("2026-11-04T02:10:00.654321Z");
+    private static final String COMPLETION_PATH = "/internal/v1/orders/" + ORDER_ID + "/delivery-completion";
+
+    private OrderShipmentException completionRejected() {
+        try {
+            orderShipmentCommandPort.completeDelivery(ORDER_ID, SHIPMENT_ID, DELIVERED_AT);
+        } catch (OrderShipmentException exception) {
+            return exception;
+        }
+        throw new AssertionError("OrderShipmentException 이 나야 한다");
+    }
+
+    @Test
+    @DisplayName("배송 완료 200 — POST delivery-completion 경로 · 본문(deliveryId 문자열 · deliveredAt ISO 마이크로초) · 서비스 토큰을 싣고 주문 상태를 받는다")
+    void completionAccepted() {
+        respond(200, """
+            {%s,"dataBody":{"orderId":"%d","memberId":"%d","status":"DELIVERED","countryCode":"US"}}
+            """.formatted(SUCCESS_HEADER, ORDER_ID, MEMBER_ID));
+
+        OrderShipmentConfirmation confirmation = orderShipmentCommandPort.completeDelivery(ORDER_ID, SHIPMENT_ID, DELIVERED_AT);
+
+        assertThat(confirmation).isEqualTo(new OrderShipmentConfirmation(ORDER_ID, MEMBER_ID, "DELIVERED", ShippingScope.INTERNATIONAL));
+        assertThat(REQUESTS).containsExactly("POST " + COMPLETION_PATH);
+        JsonNode body = JSON.readTree(REQUEST_BODIES.getFirst());
+        assertThat(body.path("deliveryId").isString()).isTrue();
+        assertThat(body.path("deliveryId").asString()).isEqualTo(String.valueOf(SHIPMENT_ID));
+        assertThat(Instant.parse(body.path("deliveredAt").asString())).isEqualTo(DELIVERED_AT);
+        assertThat(AUTHORIZATIONS).singleElement().satisfies(values -> {
+            Jwt token = InternalTokenDecoderFactory.create(TestServiceTokens.properties("order-service"), Clock.systemUTC())
+                .decode(values.getFirst().substring("Bearer ".length()));
+            assertThat(token.getAudience()).containsExactly("order-service");
+        });
+    }
+
+    @Test
+    @DisplayName("배송 완료 409 ORDER_020 → 바꿀 수 없는 상태(되돌림), 상태 이름을 꺼낸다")
+    void completionNotDeliverable() {
+        respond(409, failure("ORDER_020", "현재 주문 상태(취소 요청)에서는 할 수 없는 요청입니다."));
+
+        OrderShipmentException exception = completionRejected();
+
+        assertThat(exception.getFailure()).isEqualTo(Failure.NOT_SHIPPABLE);
+        assertThat(exception.getFailure().definitelyNotApplied()).isTrue();
+        assertThat(exception.toCompletionException().getMessage()).isEqualTo("취소 요청 상태라 배송 완료로 바꿀 수 없습니다.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ORDER_160", "ORDER_161"})
+    @DisplayName("배송 완료 400 시각 범위 · 출고 시각보다 앞섬 → 시각 거절(되돌림)")
+    void completionInvalidTime(String resultCode) {
+        respond(400, failure(resultCode, "x"));
+
+        assertThat(completionRejected().getFailure()).isEqualTo(Failure.INVALID_TIME);
+    }
+
+    @Test
+    @DisplayName("배송 완료 409 ORDER_025 → 버전 충돌(반영 대기 유지), 5xx → 결과 모름(반영 대기 유지)")
+    void completionKeepsPending() {
+        respond(409, failure("ORDER_025", "x"));
+        OrderShipmentException conflict = completionRejected();
+        respond(503, "");
+        OrderShipmentException unknown = completionRejected();
+
+        assertThat(conflict.getFailure()).isEqualTo(Failure.CONFLICT_RETRY);
+        assertThat(conflict.getFailure().definitelyNotApplied()).isFalse();
+        assertThat(unknown.getFailure()).isEqualTo(Failure.UNKNOWN);
+    }
 }

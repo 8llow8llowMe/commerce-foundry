@@ -1077,6 +1077,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | product | `STOCK_ADJUST` · `SKU_COST_CREATE` · `PRODUCT_DRAFT_*` | #163 PR-C′ (이력 표 + 줄) |
 | delivery | `SHIPPING_POLICY_*_REPLACE` (국내 · 해외) | #163 PR-D (국내는 이력 표 + 줄, 해외는 행위자 수신) |
 | delivery | `SHIPMENT_REGISTER` (대상 `order:<id>`, 일괄은 주문마다 · 이미 등록도 `SUCCESS` · 재시도한 관리자도 한 줄. Facade 가 `NEVER` 라도 빈 트랜잭션 동기화로 요청이 끝날 때 한꺼번에 남는다 — 줄마다 바로 쓰는 공통 개선은 #163 후속) | 사용 중 — #18 PR-B1 (`domainlayer/adminaudit` 의 `DeliveryAdminAuditAction` · `DeliveryAdminAuditProcessor` 를 처음 둔다. 배송 상태 이력 표 + 줄) |
+| delivery | `SHIPMENT_STATUS_CHANGE` (대상 `delivery:<deliveryId>`, 같은 상태라 그대로 둔 것도 `SUCCESS` · 404 · 409 · 5xx 업무 오류는 `FAILURE`. **`FAILURE` 는 "요청이 오류로 끝났다" 이지 "상태가 바뀌지 않았다" 가 아니다** — 결과 모름(`DELIVERY_029` · `030`)은 배송 완료 · 반영 대기로 남고, 응답용 다시 읽기 실패(`031`)는 상태 변경 뒤일 수 있다. 상태 변경 여부의 정본은 배송 상태 이력이다. 바꾼 상태 · 사유도 싣지 않는다). 송장 목록 · 상세 · 고객 배송 조회는 개인정보(받는 분 · 주소 · 회원)를 싣지 않아 열람 감사를 남기지 않는다 | 사용 중 — #18 PR-B2 (배송 상태 이력 표 + 줄) |
 | product | `PRODUCT_CREATE` · `PRODUCT_UPDATE` · `PRODUCT_DELETE` · `PRODUCT_IMAGE_UPLOAD_ISSUE` | #163 PR-F (#9 머지 뒤) |
 
 - **알려진 한계**

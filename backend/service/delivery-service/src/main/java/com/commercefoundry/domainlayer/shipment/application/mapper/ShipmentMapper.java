@@ -25,6 +25,8 @@ public interface ShipmentMapper {
             .status(shipment.status())
             .shippingScope(shipment.shippingScope())
             .orderSynced(shipment.orderSynced())
+            .completionPending(shipment.completionPending())
+            .previousStatus(shipment.previousStatus())
             .shippedAt(shipment.shippedAt())
             .deliveredAt(shipment.deliveredAt())
             .version(shipment.version())
@@ -34,7 +36,8 @@ public interface ShipmentMapper {
     default Shipment toDomain(ShipmentEntity entity) {
         return new Shipment(
             entity.getId(), entity.getOrderId(), entity.getMemberId(), entity.getCarrier(), entity.getTrackingNumber(), entity.getStatus(),
-            entity.getShippingScope(), entity.isOrderSynced(), entity.getShippedAt(), entity.getDeliveredAt(), entity.getVersion()
+            entity.getShippingScope(), entity.isOrderSynced(), entity.isCompletionPending(), entity.getPreviousStatus(), entity.getShippedAt(),
+            entity.getDeliveredAt(), entity.getVersion()
         );
     }
 
@@ -46,6 +49,15 @@ public interface ShipmentMapper {
             .toStatus(history.toStatus())
             .changedBy(history.changedBy())
             .changedById(history.changedById())
+            .reason(history.reason())
             .build();
+    }
+
+    /** 바뀐 시각은 행의 생성 시각이다(append-only). */
+    default ShipmentStatusHistory toDomain(ShipmentStatusHistoryEntity entity) {
+        return new ShipmentStatusHistory(
+            entity.getId(), entity.getShipmentId(), entity.getFromStatus(), entity.getToStatus(), entity.getChangedBy(), entity.getChangedById(),
+            entity.getReason(), entity.getCreatedAt()
+        );
     }
 }

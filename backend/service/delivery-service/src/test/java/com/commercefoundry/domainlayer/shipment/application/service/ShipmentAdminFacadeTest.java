@@ -28,7 +28,9 @@ import com.commercefoundry.domainlayer.shipment.application.exception.OrderShipm
 import com.commercefoundry.domainlayer.shipment.application.exception.ShipmentErrorCode;
 import com.commercefoundry.domainlayer.shipment.application.port.out.OrderShipmentCommandPort;
 import com.commercefoundry.domainlayer.shipment.application.service.processor.OrderShipmentProcessor;
+import com.commercefoundry.domainlayer.shipment.application.service.processor.ShipmentQueryProcessor;
 import com.commercefoundry.domainlayer.shipment.application.service.processor.ShipmentRegisterProcessor;
+import com.commercefoundry.domainlayer.shipment.application.service.processor.ShipmentStatusChangeProcessor;
 import com.commercefoundry.domainlayer.shipment.domain.model.CarrierCode;
 import com.commercefoundry.domainlayer.shipment.domain.model.OrderShipmentConfirmation;
 import com.commercefoundry.domainlayer.shipment.domain.model.Shipment;
@@ -93,9 +95,10 @@ class ShipmentAdminFacadeTest {
     }
 
     private ShipmentAdminFacade facadeWith(InMemoryShipmentRepository shipmentRepository) {
+        SnowflakeIdGenerator idGenerator = new SnowflakeIdGenerator(1, 1);
         return new ShipmentAdminFacade(
-            new ShipmentRegisterProcessor(shipmentRepository, new SnowflakeIdGenerator(1, 1)), new OrderShipmentProcessor(orderPort),
-            new DeliveryAdminAuditProcessor(), new ShipmentAdminPresenter(), clock
+            new ShipmentRegisterProcessor(shipmentRepository, idGenerator), new ShipmentStatusChangeProcessor(shipmentRepository, idGenerator),
+            new ShipmentQueryProcessor(shipmentRepository), new OrderShipmentProcessor(orderPort), new DeliveryAdminAuditProcessor(), new ShipmentAdminPresenter(), clock
         );
     }
 

@@ -37,6 +37,24 @@ public class OrderShipmentException extends RuntimeException {
         };
     }
 
+    /**
+     * 배송 완료 반영(#18 PR-B2)의 도메인 오류. 404 는 등록과 같은 {@code DELIVERY_014}, 나머지는 배송 완료 전용 코드다 — 다시 할 일이 등록과 다르다
+     * (등록 재시도가 아니라 배송 완료를 다시 누른다).
+     */
+    public ShipmentException toCompletionException() {
+        return switch (failure) {
+            case NOT_FOUND -> new ShipmentException(ShipmentErrorCode.ORDER_NOT_FOUND);
+            case NOT_SHIPPABLE -> new ShipmentException(ShipmentErrorCode.ORDER_NOT_DELIVERABLE, orderStatusName == null ? UNKNOWN_STATUS_NAME : orderStatusName);
+            case INVALID_TIME -> new ShipmentException(ShipmentErrorCode.ORDER_DELIVERED_AT_REJECTED);
+            case CONFLICT_RETRY -> new ShipmentException(ShipmentErrorCode.ORDER_CONCURRENTLY_CHANGED_ON_COMPLETION);
+            case UNKNOWN -> new ShipmentException(ShipmentErrorCode.ORDER_SERVICE_UNAVAILABLE_ON_COMPLETION);
+        };
+    }
+
+    /**
+     * 실패 종류 — 등록 · 배송 완료가 같은 번역을 쓴다({@code OrderShipmentInternalResponseSupport}). {@code NOT_SHIPPABLE} 은 배송 완료에서는 "배송 완료로 바꿀 수 없는
+     * 상태"({@code ORDER_020})다.
+     */
     public enum Failure {
 
         /** 404 {@code ORDER_001}. */
@@ -58,6 +76,11 @@ public class OrderShipmentException extends RuntimeException {
 
         /** 주문에 반영되지 않은 것이 확실해 대기 송장 행을 지우는가. false 면 행을 남긴다 — 같은 등록 요청 재시도로 수렴한다. */
         public boolean discardsPending() {
+            return discardsPending;
+        }
+
+        /** 주문에 반영되지 않은 것이 확실한가 — 배송 완료면 송장을 직전 상태로 되돌리고, false 면 반영 대기로 남긴다(같은 변경 재시도로 수렴). 등록의 {@link #discardsPending} 과 같은 판정이다. */
+        public boolean definitelyNotApplied() {
             return discardsPending;
         }
     }

@@ -14,6 +14,13 @@ public final class ShipmentValidationMessage {
     public static final String CARRIER_REQUIRED = "DELIVERY_144:carrier 는 필수입니다.";
     public static final String TRACKING_NUMBER_FORMAT = "DELIVERY_145:송장 번호(trackingNumber)는 영문 · 숫자 · 하이픈으로 1~50자여야 합니다.";
 
+    // 배송 상태 변경 · 조회 (#18 PR-B2). 모르는 status 값 · 깨진 JSON 은 DELIVERY_100, 쿼리 파라미터 형식(숫자 · 상태 · true/false)은 DELIVERY_198 이다.
+    // 쿼리의 orderId 양수 검증은 등록과 같은 DELIVERY_142, page 는 공용 DELIVERY_137 이다. 경로의 deliveryId 는 숫자가 아니면 DELIVERY_198, 0 이하는 없는 배송(404)이다
+    public static final String STATUS_CHANGE_TARGET = "DELIVERY_146:status 는 IN_TRANSIT(배송 중) · DELIVERED(배송 완료) 중 하나여야 합니다.";
+    public static final String REASON_LENGTH_MAX = "DELIVERY_147:사유(reason)는 200자 이하여야 합니다.";
+    public static final String REASON_INVALID_CHARACTER = "DELIVERY_148:사유(reason)에는 줄바꿈 · 탭 같은 제어 문자나 깨진 문자를 쓸 수 없습니다.";
+    public static final String PAGE_SIZE_RANGE = "DELIVERY_149:size 는 1 이상 100 이하여야 합니다.";
+
     private ShipmentValidationMessage() {
     }
 }

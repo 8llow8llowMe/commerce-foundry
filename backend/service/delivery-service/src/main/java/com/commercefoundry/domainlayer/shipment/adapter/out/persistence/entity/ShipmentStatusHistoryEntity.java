@@ -61,6 +61,9 @@ public class ShipmentStatusHistoryEntity extends BaseEntity implements Persistab
     @Column(name = "changed_by_id", comment = "바꾼 관리자 회원 아이디 (외부 FK: auth-service member.id) — access 토큰의 memberId. 자동 처리면 null")
     private Long changedById;
 
+    @Column(name = "reason", length = 200, comment = "사유 — 어드민 배송 상태 변경이 받은 값. 없으면 null")
+    private String reason;
+
     /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다. */
     @Override
     public boolean isNew() {

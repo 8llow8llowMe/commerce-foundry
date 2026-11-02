@@ -1,9 +1,12 @@
 package com.commercefoundry.domainlayer.shipment.application.port.out;
 
 import com.commercefoundry.domainlayer.shipment.domain.model.Shipment;
+import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentStatus;
 import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentStatusHistory;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
 
 /**
  * 송장 · 배송 상태 이력 저장. 쓰기는 모두 이 호출에서 flush 한다 — 유일 키 · 버전 충돌이 커밋 시점이 아니라 여기서 드러나 Processor 가 도메인 오류로 바꿀 수 있게.
@@ -12,6 +15,20 @@ public interface ShipmentRepositoryPort {
 
     /** 주문의 송장 — 주문당 1건({@code uk_shipment_order_id}). */
     Optional<Shipment> findByOrderId(long orderId);
+
+    /** 송장 아이디로 (#18 PR-B2). */
+    Optional<Shipment> findById(long shipmentId);
+
+    /**
+     * 어드민 목록 (#18 PR-B2) — 아이디 내림차순(최신순). 인자가 null 이면 그 조건은 걸지 않는다. 마지막 페이지를 넘긴 요청은 빈 목록이고 전체 건수는 그대로다.
+     *
+     * @param synced true 면 지금 상태가 order 에 반영된 송장, false 면 반영되지 않은 송장(출고 반영 전 또는 배송 완료 반영 대기)
+     * @param page 0 부터 센다
+     */
+    Page<Shipment> search(Long orderId, ShipmentStatus status, Boolean synced, int page, int size);
+
+    /** 송장의 이력을 시간순(아이디 오름차순)으로. 없으면 빈 목록이다. */
+    List<ShipmentStatusHistory> findHistories(long shipmentId);
 
     /**
      * 새 송장 INSERT.

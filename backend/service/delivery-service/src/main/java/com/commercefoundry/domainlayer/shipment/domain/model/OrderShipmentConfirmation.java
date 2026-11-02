@@ -21,7 +21,8 @@ public record OrderShipmentConfirmation(long orderId, long memberId, String orde
         }
     }
 
-    /** 주문이 이미 배송 중 다음 단계(배송 완료 · 구매 확정 · 반품 등)에 있는가. 송장 상태를 맞추는 일은 PR-B2 다 — 지금은 경고만 남긴다. */
+    /** 주문이 이미 배송 중 다음 단계(배송 완료 · 구매 확정 · 반품 등)에 있는가. 송장 상태는 자동으로 맞추지 않는다 — 경고만 남기고,
+     * 운영자가 배송 완료를 보내면 order 멱등 200 으로 수렴한다 ({@code order-flow-guide.md} §4 "상태가 갈라지는 경우"). */
     public boolean isPastShipping() {
         return !SHIPPING_STATUS.equals(orderStatus);
     }

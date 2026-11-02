@@ -1,19 +1,29 @@
 package com.commercefoundry.domainlayer.shipment.application.service;
 
 import com.commercefoundry.domainlayer.adminaudit.application.service.processor.DeliveryAdminAuditProcessor;
+import com.commercefoundry.domainlayer.shipment.adapter.in.admin.dto.item.ShipmentSummaryAdminItem;
+import com.commercefoundry.domainlayer.shipment.adapter.in.admin.dto.response.ShipmentAdminResponse;
 import com.commercefoundry.domainlayer.shipment.adapter.in.admin.dto.response.ShipmentRegisterAdminResponse;
 import com.commercefoundry.domainlayer.shipment.adapter.in.admin.presenter.ShipmentAdminPresenter;
 import com.commercefoundry.domainlayer.shipment.application.command.ShipmentRegisterCommand;
+import com.commercefoundry.domainlayer.shipment.application.command.ShipmentStatusChangeCommand;
 import com.commercefoundry.domainlayer.shipment.application.exception.OrderShipmentException;
 import com.commercefoundry.domainlayer.shipment.application.exception.ShipmentErrorCode;
 import com.commercefoundry.domainlayer.shipment.application.exception.ShipmentException;
+import com.commercefoundry.domainlayer.shipment.application.info.ShipmentDetailInfo;
 import com.commercefoundry.domainlayer.shipment.application.info.ShipmentRegisterResultInfo;
+import com.commercefoundry.domainlayer.shipment.application.model.ShipmentStatusFilter;
 import com.commercefoundry.domainlayer.shipment.application.port.in.ShipmentAdminUseCase;
 import com.commercefoundry.domainlayer.shipment.application.service.processor.OrderShipmentProcessor;
+import com.commercefoundry.domainlayer.shipment.application.service.processor.ShipmentQueryProcessor;
 import com.commercefoundry.domainlayer.shipment.application.service.processor.ShipmentRegisterProcessor;
 import com.commercefoundry.domainlayer.shipment.application.service.processor.ShipmentRegisterProcessor.Registration;
+import com.commercefoundry.domainlayer.shipment.application.service.processor.ShipmentStatusChangeProcessor;
+import com.commercefoundry.domainlayer.shipment.application.service.processor.ShipmentStatusChangeProcessor.StatusChange;
 import com.commercefoundry.domainlayer.shipment.domain.model.OrderShipmentConfirmation;
 import com.commercefoundry.domainlayer.shipment.domain.model.Shipment;
+import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentStatus;
+import com.commercefoundry.persistence.dto.PageResponse;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,7 +36,9 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 어드민 송장 등록 (#18 PR-B1, {@code order-flow-guide.md} §4). order-service Feign 호출이 섞여 이 Facade 는 트랜잭션 밖이다({@code NEVER}) —
+ * 어드민 송장 등록 (#18 PR-B1) · 배송 상태 변경 · 조회 (#18 PR-B2, {@code order-flow-guide.md} §4). 조회는 {@link ShipmentQueryProcessor} 가 읽기 전용 트랜잭션을 연다.
+ *
+ * <p>송장 등록 (#18 PR-B1, {@code order-flow-guide.md} §4). order-service Feign 호출이 섞여 이 Facade 는 트랜잭션 밖이다({@code NEVER}) —
  * 저장 단계마다 {@link ShipmentRegisterProcessor} 가 새 트랜잭션을 건다. 일괄 등록은 주문마다 따로 처리해 한 건의 실패가 다른 건을 막거나 되돌리지 않는다.
  *
  * <p>주문마다 order 를 한 번씩 부른다 — 출고 반영 internal 은 주문 단위 명령(주문마다 {@code REQUIRES_NEW} · 건별 결과)이라 벌크 엔드포인트를 두지 않았다
@@ -48,14 +60,162 @@ public class ShipmentAdminFacade implements ShipmentAdminUseCase {
      */
     static final Duration REQUEST_DEADLINE = Duration.ofSeconds(8);
 
-    /** 반영 완료 저장이 충돌한 뒤 지금 행에 맞추는 시도 횟수 — 유일 키 경합으로 실패한 트랜잭션은 다시 읽지 못해 새 트랜잭션으로 한 번 더 본다. */
+    /**
+     * 반영 완료 저장이 충돌한 뒤 지금 행에 맞추는 시도 횟수 — 유일 키 · 버전 경합으로 실패한 트랜잭션은 다시 읽지 못해 새 트랜잭션으로 한 번 더 본다.
+     * 등록 반영({@link #reconcile})과 배송 완료 반영({@link #confirmCompletion})이 같은 값을 쓴다.
+     */
     private static final int RECONCILE_ATTEMPTS = 2;
 
+    /**
+     * 배송 완료 반영 대기가 이만큼 넘게 남았으면 "오래 남은 대기" 로 본다(재시도 때 warn 로그). 정상 경로는 order 호출 한 번(read timeout 3초) 안에 대기를 내리므로,
+     * 10분은 운영자의 즉시 재시도 · 서킷 반열림 대기(수십 초)를 넘겨 "장애 뒤 방치된 대기" 만 고르는 값이다. 같은 값으로 운영 확인 쿼리를 쓴다({@code order-flow-guide.md} §4).
+     */
+    static final Duration LONG_PENDING_THRESHOLD = Duration.ofMinutes(10);
+
+    /** 배송 완료 반영 직후의 주문 상태 제어 코드. 이 밖이면(구매 확정 · 반품 등) 이미 그 뒤로 지나간 주문의 멱등 응답이다 — 정보다. */
+    private static final String DELIVERED_ORDER_STATUS = "DELIVERED";
+
     private final ShipmentRegisterProcessor shipmentRegisterProcessor;
+    private final ShipmentStatusChangeProcessor shipmentStatusChangeProcessor;
+    private final ShipmentQueryProcessor shipmentQueryProcessor;
     private final OrderShipmentProcessor orderShipmentProcessor;
     private final DeliveryAdminAuditProcessor deliveryAdminAuditProcessor;
     private final ShipmentAdminPresenter shipmentAdminPresenter;
     private final Clock clock;
+
+    /**
+     * 배송 상태 변경 (#18 PR-B2, {@code order-flow-guide.md} §4 "배송 완료"). 저장 단계마다 {@link ShipmentStatusChangeProcessor} 가 새 트랜잭션을 걸고, 배송 완료의
+     * order 호출은 트랜잭션 밖이다. 응답은 끝난 뒤 다시 읽은 상세다.
+     *
+     * <p>감사 줄({@code SHIPMENT_STATUS_CHANGE}, 대상 {@code delivery:<id>})은 결과가 정해진 뒤 남긴다 — 바꿈 · 그대로 둠은 {@code SUCCESS}, 업무 오류는 {@code FAILURE}.
+     */
+    @Override
+    public ShipmentAdminResponse changeStatus(ShipmentStatusChangeCommand command) {
+        boolean succeeded = false;
+        try {
+            ShipmentAdminResponse response = shipmentAdminPresenter.toDetailResponse(changeStatusAndRead(command));
+            succeeded = true;
+            return response;
+        } finally {
+            deliveryAdminAuditProcessor.shipmentStatusChanged(command.adminMemberId(), command.shipmentId(), succeeded);
+        }
+    }
+
+    @Override
+    public ShipmentAdminResponse getDetail(long shipmentId) {
+        return shipmentAdminPresenter.toDetailResponse(shipmentQueryProcessor.getDetail(shipmentId));
+    }
+
+    @Override
+    public PageResponse<ShipmentSummaryAdminItem> search(Long orderId, ShipmentStatusFilter status, Boolean synced, int page, int size) {
+        ShipmentStatus statusCondition = status == null ? null : status.toShipmentStatus();
+        return shipmentAdminPresenter.toPageResponse(shipmentQueryProcessor.search(orderId, statusCondition, synced, page, size));
+    }
+
+    private ShipmentDetailInfo changeStatusAndRead(ShipmentStatusChangeCommand command) {
+        StatusChange change;
+        try {
+            change = shipmentStatusChangeProcessor.begin(command, clock.instant());
+        } catch (ShipmentException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            log.error("shipment status change failed. shipmentId={}, error={}", command.shipmentId(), exception.getClass().getSimpleName());
+            throw new ShipmentException(ShipmentErrorCode.SHIPMENT_STATUS_CHANGE_FAILED, exception);
+        }
+        if (change.completionRequired()) {
+            warnIfLongPending(change.shipment());
+            completeDelivery(change.shipment());
+        }
+        try {
+            return shipmentQueryProcessor.getDetail(command.shipmentId());
+        } catch (ShipmentException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            // 상태 변경은 끝났고 응답용 다시 읽기만 실패했다 — 저장 오류와 같은 모양(031)으로 낸다. 같은 변경을 다시 보내면 같은 상태라 바꾸지 않고 상세를 돌려준다
+            log.error("shipment detail read failed after status change. shipmentId={}, error={}", command.shipmentId(), exception.getClass().getSimpleName());
+            throw new ShipmentException(ShipmentErrorCode.SHIPMENT_STATUS_CHANGE_FAILED, exception);
+        }
+    }
+
+    /**
+     * 반영 대기가 {@link #LONG_PENDING_THRESHOLD} 넘게 남은 송장의 재시도면 warn 로그를 남긴다 — 자동 재전송 스윕이 없어 오래 남은 대기는 운영자가 찾아야 한다
+     * ({@code order-flow-guide.md} §4 "자동 재전송하지 않는다").
+     */
+    private void warnIfLongPending(Shipment pending) {
+        Duration age = Duration.between(pending.deliveredAt(), clock.instant());
+        if (age.compareTo(LONG_PENDING_THRESHOLD) > 0) {
+            log.warn("shipment completion pending for long. orderId={}, shipmentId={}, pendingSeconds={}", pending.orderId(), pending.id(), age.toSeconds());
+        }
+    }
+
+    /**
+     * 배송 완료를 order 에 반영한다 — 200 이면 반영 대기를 내리고, 거절이 확실하면(404 · 409 {@code ORDER_020} · 400 시각) 직전 상태로 되돌린 뒤 오류,
+     * 모르면(409 {@code ORDER_025} · 타임아웃 · 5xx · 서킷) 반영 대기로 남기고 오류다. 남은 대기는 같은 변경 재시도가 처음 배송 완료 시각으로 다시 보내 수렴한다.
+     */
+    private void completeDelivery(Shipment pending) {
+        OrderShipmentConfirmation confirmation;
+        try {
+            confirmation = orderShipmentProcessor.completeDelivery(pending);
+        } catch (OrderShipmentException exception) {
+            throw completionRejected(pending, exception);
+        } catch (RuntimeException exception) {
+            // 원격 응답 변환은 support 가 모두 OrderShipmentException 으로 바꾼다. 여기 온 것은 예상 못 한 오류라 반영 여부를 모른다 — 대기로 남긴다
+            log.error("order delivery completion call failed unexpectedly — left pending. orderId={}, shipmentId={}, error={}",
+                pending.orderId(), pending.id(), exception.getClass().getSimpleName());
+            throw new ShipmentException(ShipmentErrorCode.ORDER_SERVICE_UNAVAILABLE_ON_COMPLETION, exception);
+        }
+        if (!DELIVERED_ORDER_STATUS.equals(confirmation.orderStatus())) {
+            // 이미 구매 확정 · 반품 등으로 지나간 주문의 멱등 200 — 반영 완료로 본다(§4 실패 표 200 줄)
+            log.info("order already past delivered. orderId={}, shipmentId={}, orderStatus={}", pending.orderId(), pending.id(), confirmation.orderStatus());
+        }
+        confirmCompletion(pending);
+        log.info("shipment delivered. orderId={}, shipmentId={}", pending.orderId(), pending.id());
+    }
+
+    /**
+     * order 200 뒤 반영 대기를 내린다. 충돌(026)이면 새 트랜잭션으로 한 번 더 본다 — 경합한 쪽이 같은 배송 완료의 재시도라 먼저 반영을 끝냈으면 다시 읽은 행이
+     * 배송 완료 · 대기 아님이라 성공이다(B1 {@link #reconcile} 과 같은 원칙 — order 200 은 반영의 증거다). 두 번 다 겹치면 026 이고 대기로 남는다.
+     */
+    private void confirmCompletion(Shipment pending) {
+        ShipmentException lastConflict = null;
+        for (int attempt = 0; attempt < RECONCILE_ATTEMPTS; attempt++) {
+            try {
+                shipmentStatusChangeProcessor.confirmCompletion(pending);
+                return;
+            } catch (ShipmentException exception) {
+                lastConflict = exception;
+            } catch (RuntimeException exception) {
+                // 주문은 배송 완료가 됐고 송장만 반영 대기로 남았다 — 같은 변경 재시도가 order 멱등 200 으로 수렴한다
+                log.error("shipment completion confirm failed after order delivered — left pending. orderId={}, shipmentId={}, error={}",
+                    pending.orderId(), pending.id(), exception.getClass().getSimpleName());
+                throw new ShipmentException(ShipmentErrorCode.SHIPMENT_STATUS_CHANGE_FAILED, exception);
+            }
+        }
+        log.warn("shipment completion confirm lost to a concurrent change — left pending. orderId={}, shipmentId={}", pending.orderId(), pending.id());
+        throw lastConflict;
+    }
+
+    /** 되돌리다 실패해도 결과는 order 의 거절 이유다 — 송장은 반영 대기로 남아 다음 변경 요청에서 다시 판정받는다. */
+    private ShipmentException completionRejected(Shipment pending, OrderShipmentException rejection) {
+        ShipmentException failure = rejection.toCompletionException();
+        if (rejection.getFailure() == OrderShipmentException.Failure.INVALID_TIME) {
+            log.error("order rejected deliveredAt. orderId={}, shipmentId={}, deliveredAt={}", pending.orderId(), pending.id(), pending.deliveredAt());
+        } else {
+            log.warn("order rejected delivery completion. orderId={}, shipmentId={}, failure={}", pending.orderId(), pending.id(), rejection.getFailure());
+        }
+        if (!rejection.getFailure().definitelyNotApplied()) {
+            log.warn("shipment completion left pending. orderId={}, shipmentId={}, failure={}", pending.orderId(), pending.id(), rejection.getFailure());
+            return failure;
+        }
+        try {
+            if (!shipmentStatusChangeProcessor.revertCompletion(pending)) {
+                log.warn("pending completion changed before revert. orderId={}, shipmentId={}", pending.orderId(), pending.id());
+            }
+        } catch (RuntimeException exception) {
+            log.error("pending completion revert failed. orderId={}, shipmentId={}, error={}", pending.orderId(), pending.id(), exception.getClass().getSimpleName());
+        }
+        return failure;
+    }
 
     @Override
     public ShipmentRegisterAdminResponse register(ShipmentRegisterCommand command) {
@@ -108,7 +268,8 @@ public class ShipmentAdminFacade implements ShipmentAdminUseCase {
             return failed(orderId, pending.id(), new ShipmentException(ShipmentErrorCode.ORDER_SERVICE_UNAVAILABLE));
         }
         if (confirmation.isPastShipping()) {
-            // 이미 배송 완료 · 구매 확정 · 반품 등으로 지나간 주문의 멱등 200 — 반영 완료로 본다. 송장 상태를 맞추는 일은 PR-B2 다
+            // 이미 배송 완료 · 구매 확정 · 반품 등으로 지나간 주문의 멱등 200 — 반영 완료로 본다. 송장 상태는 출고 완료로 둔다 —
+            // 운영자가 배송 완료를 보내면 order 멱등 200 으로 맞춰진다(order-flow-guide.md §4 "상태가 갈라지는 경우")
             log.warn("order already past shipping. orderId={}, shipmentId={}, orderStatus={}", orderId, pending.id(), confirmation.orderStatus());
         }
 

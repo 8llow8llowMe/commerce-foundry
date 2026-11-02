@@ -2,19 +2,28 @@ package com.commercefoundry.domainlayer.shipment.support;
 
 import com.commercefoundry.domainlayer.shipment.application.port.out.ShipmentRepositoryPort;
 import com.commercefoundry.domainlayer.shipment.domain.model.Shipment;
+import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentStatus;
 import com.commercefoundry.domainlayer.shipment.domain.model.ShipmentStatusHistory;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 /**
- * 송장 저장소 테스트 대역 — 실제 어댑터와 같은 계약(주문당 1건 · 버전 비교 · 조건부 삭제)을 메모리에서 지킨다. Facade · Processor 의 실패 표 경로를
- * DB 없이 여러 단계에 걸쳐 본다. 실제 SQL 은 {@code ShipmentRepositoryAdapterTest}(PostgreSQL) · {@code ShipmentRegisterFlowTest}(H2) 가 본다.
+ * 송장 저장소 테스트 대역 — 실제 어댑터와 같은 계약(주문당 1건 · 버전 비교 · 조건부 삭제 · 이력 시간순)을 메모리에서 지킨다. Facade · Processor 의 실패 표 경로를
+ * DB 없이 여러 단계에 걸쳐 본다. 실제 SQL 은 {@code ShipmentRepositoryAdapterTest}(PostgreSQL) · {@code ShipmentRegisterFlowTest} · {@code ShipmentStatusFlowTest}(H2) 가 본다.
  */
 public class InMemoryShipmentRepository implements ShipmentRepositoryPort {
+
+    /** 이력의 바뀐 시각 — 저장 때 감사 리스너가 채우는 값을 흉내 낸다. */
+    private static final Instant SAVED_AT = Instant.parse("2026-11-02T00:00:00Z");
 
     private final Map<Long, Shipment> shipmentsById = new LinkedHashMap<>();
     private final List<ShipmentStatusHistory> histories = new ArrayList<>();
@@ -22,6 +31,28 @@ public class InMemoryShipmentRepository implements ShipmentRepositoryPort {
     @Override
     public Optional<Shipment> findByOrderId(long orderId) {
         return shipmentsById.values().stream().filter(shipment -> shipment.orderId() == orderId).findFirst();
+    }
+
+    @Override
+    public Optional<Shipment> findById(long shipmentId) {
+        return Optional.ofNullable(shipmentsById.get(shipmentId));
+    }
+
+    @Override
+    public Page<Shipment> search(Long orderId, ShipmentStatus status, Boolean synced, int page, int size) {
+        List<Shipment> matched = shipmentsById.values().stream()
+            .filter(shipment -> orderId == null || shipment.orderId() == orderId)
+            .filter(shipment -> status == null || shipment.status() == status)
+            .filter(shipment -> synced == null || synced == (shipment.orderSynced() && !shipment.completionPending()))
+            .sorted(Comparator.comparingLong(Shipment::id).reversed())
+            .toList();
+        int from = Math.min(page * size, matched.size());
+        return new PageImpl<>(matched.subList(from, Math.min(from + size, matched.size())), PageRequest.of(page, size), matched.size());
+    }
+
+    @Override
+    public List<ShipmentStatusHistory> findHistories(long shipmentId) {
+        return histories.stream().filter(history -> history.shipmentId() == shipmentId).sorted(Comparator.comparingLong(ShipmentStatusHistory::id)).toList();
     }
 
     @Override
@@ -43,7 +74,8 @@ public class InMemoryShipmentRepository implements ShipmentRepositoryPort {
 
     @Override
     public void insertHistory(ShipmentStatusHistory history) {
-        histories.add(history);
+        histories.add(new ShipmentStatusHistory(
+            history.id(), history.shipmentId(), history.fromStatus(), history.toStatus(), history.changedBy(), history.changedById(), history.reason(), SAVED_AT));
     }
 
     @Override
@@ -90,7 +122,8 @@ public class InMemoryShipmentRepository implements ShipmentRepositoryPort {
     private Shipment put(Shipment shipment, long version) {
         Shipment saved = new Shipment(
             shipment.id(), shipment.orderId(), shipment.memberId(), shipment.carrier(), shipment.trackingNumber(), shipment.status(),
-            shipment.shippingScope(), shipment.orderSynced(), shipment.shippedAt(), shipment.deliveredAt(), version
+            shipment.shippingScope(), shipment.orderSynced(), shipment.completionPending(), shipment.previousStatus(), shipment.shippedAt(), shipment.deliveredAt(),
+            version
         );
         shipmentsById.put(saved.id(), saved);
         return saved;

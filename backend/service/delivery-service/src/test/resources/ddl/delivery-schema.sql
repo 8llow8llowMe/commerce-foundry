@@ -6,10 +6,12 @@
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
         carrier varchar(20) not null check ((carrier in ('CJ_LOGISTICS','KOREA_POST','LOTTE','HANJIN','LOGEN','EMS','DHL','FEDEX','UPS','OTHER'))),
+        completion_pending boolean default false not null,
         delivered_at timestamp(6) with time zone,
         member_id bigint,
         order_id bigint not null,
         order_synced boolean not null,
+        previous_status varchar(20) check ((previous_status in ('SHIPPED','IN_TRANSIT','DELIVERED'))),
         shipped_at timestamp(6) with time zone not null,
         shipping_scope varchar(20) check ((shipping_scope in ('DOMESTIC','INTERNATIONAL'))),
         status varchar(20) not null check ((status in ('SHIPPED','IN_TRANSIT','DELIVERED'))),
@@ -18,7 +20,10 @@
         primary key (id),
         constraint uk_shipment_order_id unique (order_id),
         constraint ck_shipment_synced_member check (order_synced = false or member_id is not null),
-        constraint ck_shipment_delivered_at_status check ((status = 'DELIVERED' and delivered_at is not null) or (status <> 'DELIVERED' and delivered_at is null))
+        constraint ck_shipment_unsynced_shipped check (order_synced = true or status = 'SHIPPED'),
+        constraint ck_shipment_delivered_at_status check ((status = 'DELIVERED' and delivered_at is not null) or (status <> 'DELIVERED' and delivered_at is null)),
+        constraint ck_shipment_completion_pending_status check (completion_pending = false or status = 'DELIVERED'),
+        constraint ck_shipment_previous_status_pending check ((completion_pending = false and previous_status is null) or (completion_pending = true and previous_status in ('SHIPPED','IN_TRANSIT')))
     );
 
     comment on table delivery.shipment is
@@ -36,6 +41,9 @@
     comment on column delivery.shipment.carrier is
         '택배사 코드 (CarrierCode)';
 
+    comment on column delivery.shipment.completion_pending is
+        '배송 완료의 주문 반영 대기 — 배송 완료로 바꿨고 order 가 아직 200 으로 답하지 않았다. 같은 변경 재시도가 수렴한다';
+
     comment on column delivery.shipment.delivered_at is
         '배송 완료 시각. 배송 완료 상태에만 있다';
 
@@ -47,6 +55,9 @@
 
     comment on column delivery.shipment.order_synced is
         '주문 상태 반영 여부. 반영된 송장은 지우거나 다른 송장으로 바꾸지 않는다';
+
+    comment on column delivery.shipment.previous_status is
+        '배송 완료 직전 상태 (SHIPPED · IN_TRANSIT) — 반영 대기 중에만 있다. order 가 배송 완료를 거절하면 이 상태로 되돌린다';
 
     comment on column delivery.shipment.shipped_at is
         '출고 시각 — order 의 shipped_at 과 같은 값';
@@ -70,6 +81,7 @@
         changed_by varchar(20) not null check ((changed_by in ('ADMIN','SYSTEM'))),
         changed_by_id bigint,
         from_status varchar(20) check ((from_status in ('SHIPPED','IN_TRANSIT','DELIVERED'))),
+        reason varchar(200),
         shipment_id bigint not null,
         to_status varchar(20) not null check ((to_status in ('SHIPPED','IN_TRANSIT','DELIVERED'))),
         primary key (id),
@@ -96,6 +108,9 @@
 
     comment on column delivery.shipment_status_history.from_status is
         '바뀌기 전 배송 상태. 등록 줄이면 null';
+
+    comment on column delivery.shipment_status_history.reason is
+        '사유 — 어드민 배송 상태 변경이 받은 값. 없으면 null';
 
     comment on column delivery.shipment_status_history.shipment_id is
         '송장 아이디 (FK: shipment.id)';
@@ -443,6 +458,9 @@
 
     create index idx_shipment_order_synced_id 
        on delivery.shipment (order_synced, id);
+
+    create index idx_shipment_completion_pending_id 
+       on delivery.shipment (completion_pending, id);
 
     create index idx_shipment_status_history_shipment_id_id 
        on delivery.shipment_status_history (shipment_id, id);

@@ -600,8 +600,9 @@ outbox 이벤트로 하지 않는다 — 출고할 수 있는지를 운영자가
   400 `ORDER_159~161` → `DELIVERY_016`(이 셋은 행 삭제, 시계 차이 · 30일 지난 재시도라 error 로그), 409 `ORDER_025` → `DELIVERY_017`, 그 밖 → `DELIVERY_018`(행 유지).
   상태와 코드가 함께 맞아야 한다 — 다른 상태로 온 같은 코드 · 본문 없는 4xx 는 결과 모름이다. 200 의 배송 국가를 읽지 못하면 범위(`shipping_scope`) 없이 반영 완료로 둔다.
   회원 아이디 형식 등 **계약과 다른 200** 은 결과 모름(행 유지)이고 error 로그다 — 다시 보내도 같은 200 이 오므로 **코드를 고치기 전까지 미반영으로 남는다**.
-- 응답 `status` 가 `SHIPPING` 이 아니면(이미 배송 완료 · 구매 확정 · 반품) B1 은 경고 로그만 남긴다 — 송장 상태 맞추기는 B2 다.
-- 저장: `delivery.shipment`(`uk_shipment_order_id`, `idx_shipment_status_id` · `idx_shipment_order_synced_id`, check `ck_shipment_synced_member` · `ck_shipment_delivered_at_status`, `@Version`) ·
+- 응답 `status` 가 `SHIPPING` 이 아니면(이미 배송 완료 · 구매 확정 · 반품) 경고 로그만 남기고 송장은 `SHIPPED` 로 둔다 — 아래 "상태가 갈라지는 경우".
+- 저장: `delivery.shipment`(`uk_shipment_order_id`, `idx_shipment_status_id` · `idx_shipment_order_synced_id`, check `ck_shipment_synced_member` · `ck_shipment_delivered_at_status`, `@Version`,
+  B2 가 더한 컬럼 · 제약은 아래 "배송 완료") ·
   `delivery.shipment_status_history`(`idx_shipment_status_history_shipment_id_id`, 변경 주체 `ADMIN` · `SYSTEM`). 택배사는 `CarrierCode` enum 이다.
 
 **배송 완료** — `PATCH /api/v1/admin/deliveries/{deliveryId}/status {DELIVERED}` → Feign `POST /internal/v1/orders/{orderId}/delivery-completion {deliveryId, deliveredAt}`
@@ -609,11 +610,51 @@ outbox 이벤트로 하지 않는다 — 출고할 수 있는지를 운영자가
 
 | order 응답 | delivery 처리 |
 |------------|---------------|
-| 200 | 응답 `status` 와 상관없이 반영 완료(`order_synced=true`). 멱등 재요청도 200 이다. `status` 는 판정용이 아니라 정보다 — 출고 응답의 `status` 가 `DELIVERED` 이상(구매 확정 · 반품 포함)이면 송장도 `DELIVERED` 로 맞추거나 경고를 남긴다(B2) |
-| 400 `ORDER_159` · `160` · `161`(시각 범위 · 순서) | 보낸 시각이 틀렸다 — 등록이면 대기 송장 행을 지우고, 배송 완료면 상태를 바꾸지 않고 운영자에게 오류를 낸다. 같은 값으로 다시 보내도 같은 결과다 |
-| 404 `ORDER_001` · 409 `ORDER_020`(출고 · 완료할 수 없는 상태 — 취소 요청 · 취소 · 출고 전 등) | 등록이면 대기 송장 행을 지우고 운영자에게 오류를 낸다. 배송 완료면 상태를 바꾸지 않고 오류 |
-| 409 `ORDER_025`(버전 충돌) · 타임아웃 · 5xx · 서킷 오픈 | 행을 남긴다(`order_synced=false`). 같은 등록 · 완료 요청을 다시 보내면 order 멱등으로 수렴한다 |
-| 계약과 다른 200(회원 아이디 형식 · 다른 주문 아이디 · 상태 코드 모양 · 성공 봉투 아님) | 행을 남기고(`order_synced=false`) error 로그. 다시 보내도 같은 응답이라 **코드 수정 전까지 미반영으로 남는다** |
+| 200 | 응답 `status` 와 상관없이 반영 완료(등록 `order_synced=true` · 배송 완료 `completion_pending=false`). 멱등 재요청도 200 이다. `status` 는 판정용이 아니라 정보다 — 출고 응답의 `status` 가 `DELIVERED` 이상(구매 확정 · 반품 포함)이어도 송장은 자동으로 맞추지 않고 경고만 남긴다 |
+| 400 `ORDER_159` · `160` · `161`(시각 범위 · 순서) | 보낸 시각이 틀렸다 — 등록이면 대기 송장 행을 지우고, 배송 완료면 송장을 직전 상태로 되돌리고(되돌림 이력 `SYSTEM`) 운영자에게 오류를 낸다(`DELIVERY_016` · `028`). 같은 값으로 다시 보내도 같은 결과다 — 배송 완료는 되돌렸으므로 다시 누르면 그때 시각으로 보낸다 |
+| 404 `ORDER_001` · 409 `ORDER_020`(출고 · 완료할 수 없는 상태 — 취소 요청 · 취소 · 출고 전 등) | 등록이면 대기 송장 행을 지우고 운영자에게 오류를 낸다. 배송 완료면 직전 상태로 되돌리고 오류(`DELIVERY_014` · `027`) |
+| 409 `ORDER_025`(버전 충돌) · 타임아웃 · 5xx · 서킷 오픈 | 행을 남긴다(등록 `order_synced=false`, 배송 완료 `status=DELIVERED` · `completion_pending=true`). 같은 등록 · 완료 요청을 다시 보내면 처음 시각 그대로 다시 보내 order 멱등으로 수렴한다 |
+| 계약과 다른 200(회원 아이디 형식 · 다른 주문 아이디 · 상태 코드 모양 · 성공 봉투 아님) | 행을 남기고(등록 `order_synced=false` · 배송 완료 `completion_pending=true`) error 로그. 다시 보내도 같은 응답이라 **코드 수정 전까지 미반영으로 남는다** |
+
+구현(#18 PR-B2) — `PATCH /api/v1/admin/deliveries/{deliveryId}/status`(계약 `api-design-guide.md` §2-19). `ShipmentAdminFacade#changeStatus`(트랜잭션 `NEVER`)가
+`ShipmentStatusChangeProcessor#begin`(tx1, `REQUIRES_NEW` 5초) → 배송 완료면 `OrderShipmentProcessor#completeDelivery`(트랜잭션 밖, 같은 Feign 클라이언트 · 서킷 `order-service`) →
+`#confirmCompletion`(tx2) 또는 `#revertCompletion`(tx2)을 부르고, 끝난 뒤 다시 읽은 상세를 돌려준다.
+
+- **전이 표** (`ShipmentStatus#canTransitTo`) — `SHIPPED → IN_TRANSIT`, `SHIPPED → DELIVERED`, `IN_TRANSIT → DELIVERED`. 그 밖은 409 `DELIVERY_024`, 없는 송장 404 `DELIVERY_023`.
+  같은 상태 요청은 바꾸지 않고 200(이력을 더하지 않는다) — 단 반영 대기 배송 완료면 아래 재시도다. 판정 순서는 404 → 같은 상태 → 출고 미반영 409 `DELIVERY_025` → 전이 표 → 저장(버전 충돌 409 `DELIVERY_026`).
+- **배송 중은 delivery 안의 전이다** — 주문은 배송 중 그대로라 order 를 부르지 않는다. 이력은 `ADMIN`(토큰 memberId · 사유).
+- **배송 완료 tx1** — `status=DELIVERED`, `delivered_at` = 서버 `Clock`(마이크로초), `completion_pending=true`, `previous_status` = 바꾸기 전 상태(`SHIPPED` · `IN_TRANSIT`), 이력 `ADMIN`.
+  200 이면 tx2 가 다시 읽어 `completion_pending=false` · `previous_status=null`.
+- **완료 반영 대기는 새 컬럼 `completion_pending` 이다 (결정)** — `order_synced` 를 "지금 상태가 order 에 반영됐는가" 로 바꿔 쓰면 B1 규칙과 부딪힌다:
+  `order_synced=false` 송장은 등록 재시도가 택배사 · 송장 번호를 바꾸고(`Shipment#retarget`) 404 · 020 · 시각 거절이면 행을 지운다(`deletePending` 조건이 `order_synced = false`) —
+  배송 완료 대기 송장에 그 규칙이 걸리면 출고된 송장이 지워지거나 번호가 바뀐다. 고객 노출의 "미동기 `SHIPPED` 는 null" 규칙과 등록 결과(`ALREADY_REGISTERED` 판정)도 흐려진다.
+  그래서 `order_synced` 는 출고 반영만 뜻하고, 배송 완료 반영 대기는 `completion_pending` 이 따로 든다. check 제약: `ck_shipment_completion_pending_status`(대기는 `DELIVERED` 에만),
+  `ck_shipment_unsynced_shipped`(출고 반영 전 송장은 `SHIPPED` — 반영 전 송장은 배송 중 · 배송 완료로 바꾸지 않는다),
+  `ck_shipment_previous_status_pending`(직전 상태는 반영 대기에만, `SHIPPED` · `IN_TRANSIT` 로). 인덱스 `idx_shipment_completion_pending_id`.
+  `completion_pending` 은 DDL 기본값 `false` 를 둔다(`@ColumnDefault`) — dev `ddl-auto: update` 가 행이 있는 테이블에 `not null` 컬럼을 더할 때 기존 행을 채우게.
+- **재시도는 처음 배송 완료 시각을 다시 보낸다** — 반영 대기(`completion_pending=true`)에 같은 `DELIVERED` 를 보내면 tx1 은 아무것도 바꾸지 않고(이력 없음) 저장된 `delivered_at` 으로
+  order 를 다시 부른다. order 가 처음 값을 이미 커밋했을 수 있어서다(B1 출고 시각과 같은 원칙). 처음 값이 30일을 넘긴 뒤의 재시도는, order 가 커밋하지 않았다면 400 `ORDER_160` 으로
+  되돌려지고 다음 요청이 그때 시각으로 보낸다.
+- **되돌림은 지우지 않고 줄을 더한다** — 확실한 거절(404 · 020 · 시각)이면 tx2 가 다시 읽어 지금 행이 이번에 보낸 배송 완료(반영 대기 · 같은 `delivered_at`)일 때만
+  tx1 이 저장한 `previous_status` 로 되돌리고(`delivered_at` · `previous_status` 지움 · 버전 비교) `DELIVERED → 직전 상태` 이력(`SYSTEM`)을 더한다. 운영자가 누른 배송 완료는 일어난 일이라
+  B1 의 대기 송장 삭제와 달리 이력을 지우지 않는다. 그 사이 다른 요청이 바꿨으면 되돌리지 않는다(결과는 order 의 거절 이유 그대로).
+  직전 상태를 이력 줄(마지막 배송 완료 줄의 `fromStatus`)에서 고르지 않는 이유 — 이력 순서는 Snowflake 아이디 · 생성 시각이라 인스턴스 시계가 어긋나면 줄을 잘못 고를 수 있고,
+  이력이 없으면 되돌리지 못한다. 반영 대기와 같은 행에 두면 같은 트랜잭션 · 같은 버전으로 움직인다. 되돌림 저장이 실패하면 반영 대기로 남고, 같은 변경 재시도가 다시 판정받아 되돌린다.
+- **반영 완료 저장의 충돌** — order 200 뒤 tx2 가 버전 충돌 · 다른 배송 완료로 지면 새 트랜잭션으로 한 번 더 다시 읽는다(B1 `#reconcile` 과 같은 원칙 — order 200 은 반영의 증거다).
+  그 사이 같은 배송 완료의 재시도가 반영을 끝냈으면(`DELIVERED` · 대기 아님) 성공이다. 두 번 다 겹치거나 행이 없거나 다른 배송 완료로 바뀌었으면 409 `DELIVERY_026` 이고
+  송장은 반영 대기로 남는다(같은 요청 재시도가 수렴). 저장의 예상 못 한 오류는 `DELIVERY_031` 이고 역시 반영 대기로 남는다.
+- **실패 코드** — 404 `ORDER_001` → `DELIVERY_014`(등록과 같다), 409 `ORDER_020` → `DELIVERY_027`(상태 이름은 짧은 한글일 때만), 400 시각 → `DELIVERY_028`(error 로그),
+  409 `ORDER_025` → `DELIVERY_029`, 그 밖 → `DELIVERY_030`, 저장 오류 · 상태 변경 뒤 응답용 다시 읽기 실패 → `DELIVERY_031`.
+- **사유** — 앞뒤 공백을 자르고 비면 `null` 로 이력에 남긴다(어드민 주문 상태 변경 사유와 같은 규칙, `ShipmentStatusChangeCommand`).
+- **감사** — `SHIPMENT_STATUS_CHANGE`(대상 `delivery:<id>`, 바꿈 · 그대로 둠 `SUCCESS`, 업무 오류 `FAILURE`, `security-guide.md` §11-4). 상세 · 목록 조회는 개인정보가 없어 남기지 않는다.
+  `FAILURE` 는 "요청이 오류로 끝남" 이다 — 상태 변경 여부(결과 모름 029 · 030 은 반영 대기로 남는다, 031 은 바꾼 뒤일 수 있다)의 정본은 배송 이력이다.
+
+**상태가 갈라지는 경우 (B2 결정)** — order 어드민의 수동 배송 완료(#17)와 등록 재시도의 멱등 200(이미 배송 완료 이후)은 delivery 를 거치지 않아 송장이 `SHIPPED` · `IN_TRANSIT` 로 남을 수 있다.
+조회 응답(어드민 · 고객)은 **송장 상태 그대로**이고(고객 응답의 배송 완료 반영 대기만 예외 — 아래 "고객 노출"), 어드민 상세 · 목록의 Swagger 에 주문 상태와 다를 수 있다고 적는다.
+운영자가 그 송장을 `DELIVERED` 로 바꾸면 order 는 이미 배송 완료라 멱등 200 이고 송장만 맞춰진다.
+**어드민 수동 배송 완료 뒤에는 delivery `delivered_at` 이 order 와 다를 수 있다** — delivery 값은 운영자가 송장을 맞춘 시각이다. 효력(구매 확정 · 반품 기간)은 order 값이 정본이고,
+order 주문 응답에 `deliveredAt` 을 실어 화면이 그 값을 쓰게 맞추는 정렬은 후속이다.
+order → delivery 역방향 호출은 두지 않는다(`service-inventory.md` 순환 금지). 갈라짐을 자동으로 찾는 대조 작업 · 수동 완료를 delivery 쪽으로 옮기는 일은 후속에서 본다.
 
 - **409 는 `code` 로 나눈다** — 같은 409 라도 `ORDER_020` 은 행을 지우고 `ORDER_025` 는 행을 남긴다. HTTP 상태만 보고 처리하지 않는다.
 - **시각 검증** — order 는 주문을 실제로 바꿀 때만 `shippedAt` · `deliveredAt` 을 지금 시각(order 의 `Clock`)과 견준다. 판정 순서는 404 → 이미 반영(멱등 200) →
@@ -624,14 +665,24 @@ outbox 이벤트로 하지 않는다 — 출고할 수 있는지를 운영자가
 - **주문당 송장 1건 (B1 전제)** — 주문당 송장 1건(삭제 · 재등록 포함)은 delivery 가 유니크로 보장하는 전제다. order 는 `deliveryId` 를 저장하지 않으므로(추적 로그만)
   다른 송장의 재등록을 구분하지 못한다 — 다른 송장으로 출고를 보내도 이미 배송 중이면 멱등 200 이다. 그래서 **delivery 는 `order_synced=true` 인 송장을 지우거나
   다른 송장으로 바꾸지 않는다.**
-- **출고 미반영 송장의 배송 완료는 delivery 가 막는다(B2)** — `order_synced=false` 송장은 배송 완료로 바꾸지 않는다. 먼저 출고 재시도로 반영한다
+- **출고 미반영 송장의 배송 상태 변경은 delivery 가 막는다(B2, 409 `DELIVERY_025`)** — `order_synced=false` 송장은 배송 중 · 배송 완료로 바꾸지 않는다. 먼저 출고 재시도로 반영한다
   (order 쪽에서도 상품 준비중 주문의 배송 완료는 `ORDER_020` 이다).
 - **어드민 수동 배송 완료는 예외 경로다** — order 어드민의 `SHIPPING → DELIVERED`(#17, 사유 필수)는 delivery 를 거치지 않아 송장 상태(`SHIPPED` · `IN_TRANSIT`)와
-  갈라질 수 있다. B2 조회에서 order 상태 기준으로 맞추거나, 후속에서 수동 완료를 delivery 쪽으로 옮긴다. 수동 완료도 `shipped_at` 은 그대로 둔다.
-- **자동 재전송하지 않는다** — 주문 반영 실패로 남은 송장(`order_synced=false`)은 어드민 목록 `?synced=false` 로 확인하고 같은 요청 재시도로 복구한다.
+  갈라질 수 있다. 위 "상태가 갈라지는 경우" 대로 조회는 송장 상태 그대로이고 운영자의 배송 완료로 수렴한다. 수동 완료도 `shipped_at` 은 그대로 둔다.
+- **자동 재전송하지 않는다** — 주문 반영 실패로 남은 송장(출고 `order_synced=false` · 배송 완료 `completion_pending=true`)은 어드민 목록 `?synced=false` 가 둘 다 고르고,
+  같은 요청 재시도(등록 다시 보내기 · 배송 완료 다시 보내기)로 복구한다. **반영 대기는 운영자가 찾아야 남지 않는다** — 송장 관리 화면은 `?synced=false` 를 따로 보여 준다(FE).
+  - 가시성(B2) — 대기로 끝나는 요청은 warn(결과 모름 · 충돌) 또는 error(예상 못 한 오류) 로그(`... left pending`)를 남기고, 대기가 10분(`ShipmentAdminFacade.LONG_PENDING_THRESHOLD`)
+    넘게 남은 송장의 재시도는 `shipment completion pending for long` warn 을 남긴다. 정상 경로는 order 호출 한 번(read timeout 3초) 안에 대기를 내리므로 10분은 즉시 재시도 ·
+    서킷 반열림을 넘긴 "장애 뒤 방치된 대기" 만 고른다. 건수는 운영 확인 쿼리로 본다:
+    `select count(*) from delivery.shipment where completion_pending and delivered_at < now() - interval '10 minutes';`
+    (출고 미반영은 `not order_synced and shipped_at < now() - interval '10 minutes'`).
+  - 후속 — 오래 남은 대기의 건수 지표 · 알림과 자동 재전송 스윕(대기 송장을 `(delivered_at, id)` · `(shipped_at, id)` 키셋으로 읽어 처음 시각 그대로 다시 보내는 스케줄러, order #96 스윕 패턴)은
+    delivery 에 스케줄러가 처음 생기는 일이라 따로 이슈로 연다.
 - **동시성** — 고객 취소와 출고가 겹치면 주문 `@Version` 비교로 한쪽만 성공한다(§1-2). order 의 출고 · 완료 반영은 주문마다 `REQUIRES_NEW`(5초)이고, 바뀌었을 때만 헤더 · 이력을 쓴다.
 - **고객 노출** — 고객 `GET /api/v1/deliveries?orderId=` 는 송장의 `memberId` 스냅숏으로 delivery 가 로컬에서 소유를 판정한다. 송장이 없거나 남의 것 · 미동기 `SHIPPED` 면
-  200 + `null` 이다 — 주문 존재 · 소유 404 는 주문 상세(order-service) 몫이다 (`api-design-guide.md` §2-2).
+  200 + `null` 이다 — 주문 존재 · 소유 404 는 주문 상세(order-service) 몫이다 (`api-design-guide.md` §2-2). ADMIN 토큰은 403 이다(구현 #18 PR-B2).
+  보이는 상태는 송장 상태 그대로다 — **단 배송 완료 반영 대기(`completion_pending=true`)는 배송 중(`IN_TRANSIT`) · `deliveredAt=null` 로 보인다**(`ShipmentWebPresenter`).
+  주문이 아직 배송 중이라 반품 · 구매 확정을 할 수 없는데 배송 완료로 보이면 고객 화면이 주문 상세와 어긋나고, order 가 거절하면 되돌려질 수도 있다. 어드민 응답은 송장 그대로다.
 - **자동 구매 확정** — order 스케줄러(#96 스윕 패턴)가 `status = DELIVERED and delivered_at <= now - period` 를 `(delivered_at, id)` 키셋으로 읽어 건별 `REQUIRES_NEW` +
   `@Version` 으로 `PURCHASE_CONFIRMED` 로 바꾼다(이력 `SYSTEM`). 기본 7일 · 1시간 주기(`order.purchase-confirmation.auto.period`, 1d~30d). #18 PR-C 에서 구현한다.
 - **택배사 추적** (`ShipmentTrackingPort`) — 결정만 둔다: 추적 결과로 `IN_TRANSIT` · `DELIVERED` 를 바꾸고, 실패해도 주문 흐름을 막지 않으며, 어드민 수동 변경이 남는다.
