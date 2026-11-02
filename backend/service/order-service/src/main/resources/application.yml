@@ -36,6 +36,11 @@ spring:
   # Kafka 접속 (deploy-guide.md §4-4). 주소는 Vault 값이다 — 저장소에 쓰지 않는다. 앱은 토픽을 만들지 않는다
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+    consumer:
+      # 한 poll의 처리량을 제한한다. 명목 원격 timeout+DB timeout 여유; 네트워크/DB 절대시간 보장은 아니다.
+      max-poll-records: 1
+      properties:
+        max.poll.interval.ms: 300000
     security:
       protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
     admin:
@@ -156,6 +161,11 @@ commerce:
     required-topics:
       - order.order-expired
       - order.order-expired.dlt
+    retry:
+      attempts: 8
+      initial-backoff: 2s
+      multiplier: 2
+      max-backoff: 60s
     # outbox 릴레이 · 정리의 단일 실행 락 테이블. operations-service 처럼 서비스 스키마를 붙인다
     outbox:
       relay:
@@ -164,6 +174,10 @@ commerce:
 # 미결제 주문 만료 스윕 (order-flow-guide.md §1-3, OrderPaymentExpiryProperties). 분산 락 없이 인스턴스마다 돈다 — 버전 검사로 한 건만 커밋한다.
 # 끄는 env 스위치를 두지 않는다(product 재고 선점 만료 스윕과 같다). test 프로파일만 enabled: false 로 끈다
 order:
+  # #308 PR-C 복원 복구 경로와 #15 완료 전 운영에서 열지 않는다. 기존 outbox 릴레이와 독립이다.
+  payment-approval:
+    consumer:
+      enabled: ${ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED:false}
   # 주문 생성 (OrderProperties). 회원별 활성 시도 상한(#231) — 창 안에 새 키로 시작한 시도가 상한 이상이면 409 ORDER_022.
   # 창은 product 의 재고 선점 TTL(stock.reservation.ttl)과 같게 둔다. 상한 1 미만 · 창 1분~24시간 밖 · 창이 processing-lease 보다 짧으면 기동하지 않는다
   creation:

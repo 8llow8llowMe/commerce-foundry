@@ -12,7 +12,11 @@ import java.util.Objects;
  * @param amount 결제 금액 (최소 단위 정수 + 통화)
  * @param approvedAt 승인 시각 (UTC). 승인 전이면 null — {@value #DONE} 이면 언제나 있다
  */
-public record PaymentQueryResult(long paymentId, long orderId, long memberId, String statusCode, Money amount, Instant approvedAt) {
+public record PaymentQueryResult(long paymentId, long orderId, long memberId, String statusCode, Money amount, Instant approvedAt, String method) {
+
+    public PaymentQueryResult(long paymentId, long orderId, long memberId, String statusCode, Money amount, Instant approvedAt) {
+        this(paymentId, orderId, memberId, statusCode, amount, approvedAt, null);
+    }
 
     /** 결제 완료(승인) 상태 코드. */
     public static final String DONE = "DONE";
