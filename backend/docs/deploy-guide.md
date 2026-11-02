@@ -93,6 +93,7 @@ compose 의 `environment` 에는 **그 모듈이 실제로 읽는 키만** 넘�
 | `INTERNAL_JWT_SECRET` | O | `:?` 필수 | | | O | O | O | O | O | O |
 | `INTERNAL_JWT_SECRET_PREVIOUS` | O | `:-` 빈 값 | | | O | O | O | O | O | O |
 | `GATEWAY_CORS_ALLOWED_ORIGINS` · `GATEWAY_TRUSTED_PROXIES` | - | `:-` 빈 값 | | O | | | | | | |
+| `GATEWAY_CLIENT_IP_ENABLED` | - | `-false` (미설정만 기본값, 빈 값은 기동 거절) | | O | | | | | | |
 | `GATEWAY_CLIENT_IP_HASH_KEY` | O | `:-` 빈 값 | | O | | | | | | |
 | `ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` | O | `:-` 빈 값 | | | O | | | | | |
 | `ADMIN_SEED_NAME` | - | `:-` 빈 값 | | | O | | | | | |

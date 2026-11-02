@@ -30,7 +30,6 @@ x-api-gateway-environment: &api_gateway_environment
   JWT_PUBLIC_KEY_PREVIOUS: ${JWT_PUBLIC_KEY_PREVIOUS:-}
   # 비면 어떤 origin 도 허용하지 않는다(yml 의 닫힌 기본값). 배포 환경은 프론트 origin 을 채운다
   GATEWAY_CORS_ALLOWED_ORIGINS: ${GATEWAY_CORS_ALLOWED_ORIGINS:-}
-  GATEWAY_CLIENT_IP_ENABLED: ${GATEWAY_CLIENT_IP_ENABLED:-false}
   # 비면 X-Forwarded-For 를 믿지 않는다. BFF · LB 구성이 정해지면 채운다(security-guide.md §7-3)
   GATEWAY_TRUSTED_PROXIES: ${GATEWAY_TRUSTED_PROXIES:-}
   # 미설정이면 꺼짐. 명시한 빈 값은 그대로 전달해 애플리케이션의 불리언 검증에서 거절한다
