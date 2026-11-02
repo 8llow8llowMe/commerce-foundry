@@ -29,6 +29,46 @@ class ProductImageStorageAdapterTest {
     private final ObjectStorageClient client = mock(ObjectStorageClient.class);
     private final ProductImageStorageAdapter adapter = new ProductImageStorageAdapter(client);
 
+    private void uploaded(long bytes, String contentType, byte[] header) {
+        given(client.publicUrlOf("products/7/8.png")).willReturn("https://media.example.com/products/7/8.png");
+        given(client.head(KEY.value())).willReturn(java.util.Optional.of(new com.commercefoundry.storage.client.StoredObject(bytes, contentType, "etag")));
+        given(client.readRange(KEY.value(), 12, "etag")).willReturn(header);
+    }
+
+    @Test
+    void copiesOnlyValidatedVersionWithFixedMetadata() {
+        uploaded(8, "image/png", new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10});
+        assertThat(adapter.attach(KEY, "products/7/8.png")).isEqualTo("https://media.example.com/products/7/8.png");
+        org.mockito.Mockito.verify(client).copy(KEY.value(), "products/7/8.png", "image/png", "public, max-age=31536000, immutable", "etag");
+    }
+
+    @Test
+    void rejectsHtmlDisguisedAsPng() {
+        uploaded(8, "image/png", "<script>".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> adapter.attach(KEY, "products/7/8.png"))
+            .isInstanceOfSatisfying(ProductException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ProductErrorCode.IMAGE_FORMAT_NOT_ALLOWED));
+        org.mockito.Mockito.verify(client, org.mockito.Mockito.never()).copy(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void detectsReplacementBetweenVerificationAndCopy() {
+        uploaded(8, "image/png", new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10});
+        org.mockito.Mockito.doThrow(new StorageException(StorageException.Reason.CHANGED, StorageException.Operation.COPY))
+            .when(client).copy(KEY.value(), "products/7/8.png", "image/png", "public, max-age=31536000, immutable", "etag");
+        assertThatThrownBy(() -> adapter.attach(KEY, "products/7/8.png"))
+            .isInstanceOfSatisfying(ProductException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ProductErrorCode.IMAGE_STORAGE_UNAVAILABLE));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0, 10485761})
+    void rejectsActualObjectSize(long size) {
+        given(client.publicUrlOf("products/7/8.png")).willReturn("https://media.example.com/products/7/8.png");
+        given(client.head(KEY.value())).willReturn(java.util.Optional.of(new com.commercefoundry.storage.client.StoredObject(size, "image/png", "etag")));
+        assertThatThrownBy(() -> adapter.attach(KEY, "products/7/8.png"))
+            .isInstanceOfSatisfying(ProductException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ProductErrorCode.IMAGE_SIZE_NOT_ALLOWED));
+    }
+
     @Test
     @DisplayName("키 · 선언 형식의 Content-Type · 크기로 서명하고 결과를 그대로 옮긴다")
     void issuesUpload() {

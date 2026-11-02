@@ -10,6 +10,8 @@ import org.mapstruct.ReportingPolicy;
 @Mapper(componentModel = MappingConstants.ComponentModel.SPRING, unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface ProductImageMapper {
 
+    ProductImageEntity toEntity(ProductImage image);
+
     ProductImage toDomain(ProductImageEntity entity);
 
     List<ProductImage> toDomains(List<ProductImageEntity> entities);

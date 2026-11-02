@@ -18,6 +18,11 @@ public class ProductImageRepositoryAdapter implements ProductImageRepositoryPort
     private final ProductImageMapper productImageMapper;
 
     @Override
+    public void insertAll(List<ProductImage> images) {
+        productImageRepository.saveAll(images.stream().map(productImageMapper::toEntity).toList());
+    }
+
+    @Override
     public List<ProductImage> findAllByProductId(long productId) {
         return productImageMapper.toDomains(productImageRepository.findAllByProductIdOrderByDisplayOrderAscIdAsc(productId));
     }

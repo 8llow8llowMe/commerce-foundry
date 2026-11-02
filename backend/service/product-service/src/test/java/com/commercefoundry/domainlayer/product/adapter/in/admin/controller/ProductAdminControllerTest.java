@@ -260,6 +260,26 @@ class ProductAdminControllerTest {
     }
 
     @Test
+    void imagesUseAuthenticatedActorAndNormalizeAlternativeText() {
+        given(productAdminUseCase.create(any())).willReturn(ProductCreateAdminResponse.builder().build());
+        assertThat(adminPost(MINIMAL_BODY_PREFIX + ", \"createdByMemberId\": 123, \"images\":[{\"uploadKey\":\"uploads/99/token.png\","
+            + "\"imageType\":\"GALLERY\",\"altText\":\"  상세  \"}]}")).hasStatus(HttpStatus.CREATED);
+        var command = ArgumentCaptor.forClass(ProductCreateCommand.class);
+        verify(productAdminUseCase).create(command.capture());
+        assertThat(command.getValue().createdByMemberId()).isEqualTo(TestTokens.MEMBER_ID);
+        assertThat(command.getValue().images().getFirst().altText()).isEqualTo("상세");
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"[null]", "[{\"imageType\":\"GALLERY\"}]", "[{\"uploadKey\":\"key\"}]"})
+    void imagesValidationUsesDedicatedCode(String images) {
+        var result = adminPost(MINIMAL_BODY_PREFIX + ", \"images\":" + images + "}");
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_019");
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @Test
     @DisplayName("등록 — 201, 등록자는 토큰의 memberId, 문구 · 옵션 이름은 앞뒤 공백을 빼고 빈 요약은 null, HS 코드는 구분자를 뺀다. 응답은 상세 + 정제 여부")
     void create() {
         var detail = com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse.builder()

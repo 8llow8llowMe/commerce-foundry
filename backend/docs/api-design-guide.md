@@ -546,7 +546,7 @@ return ResponseEntity.ok().body(Response.success(response));
 `POST /api/v1/admin/products` — `hasRole('ADMIN')`. 201 `{product: 위 어드민 상세와 같은 모양, descriptionHtmlSanitized}`. 등록한 어드민은 토큰의 memberId 로
 `product.created_by_member_id` 에 남는다(본문으로 받지 않는다, 운영자 온보딩 #357 이 읽는다).
 
-- **이 단계의 범위** — 이미지(#9 F, 업로드 키 발급 · 첨부)와 맞춤 제작 입력(#9 E2)은 아직 받지 않는다. 등록 상품은 이미지 없이, 맞춤 제작 꺼짐으로 생긴다.
+- **이 단계의 범위** — 이미지 첨부(#9 F2)는 아래 계약으로 받는다. 맞춤 제작 입력(#9 E2)은 아직 받지 않아 맞춤 제작 꺼짐으로 생긴다.
   수정 · 판매 상태 변경은 E2 후속 범위이며 삭제는 §2-13에 구현됐다. Idempotency-Key 는 없다 — 같은 본문을 두 번 보내면 상품이 두 개 생긴다(지우면 된다, #9 결정).
 - **본문**: `{name, summary?, descriptionHtml?, categoryId, categoryIds?[], saleStatus, visible, salePrice{amount,currency}, listPrice?, maxQuantityPerOrder?,
   preorder?, expectedShipDate?, optionGroups?[{name, values[]}], skus[{optionValues[], additionalPrice, saleStatus, weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}`.
@@ -565,8 +565,9 @@ return ResponseEntity.ok().body(Response.success(response));
   허용 목록 밖의 태그 · 속성 · 주소가 있어 뺐거나 HTML 구조(닫히지 않은 태그 · 주석)를 정리했으면 `descriptionHtmlSanitized: true` 이고 화면이 저장된 `descriptionHtml` 을
   다시 보여 준다. 링크는 `target="_blank"` · `rel="noopener noreferrer"`, 이미지는 `loading="lazy"` · `decoding="async"` 로 고정한다(FE 가 붙인 속성은 "정제됨" 으로 세지 않는다).
   FE 와 다른 점: 상대 주소(`/x` · `#a`)는 서버가 지운다 — 절대 https · http · mailto 만 남는다. 입력 상한 200000자.
-- **트랜잭션**: 정제 · 구성 · 가격 판정을 잠금 전에 끝내고, Facade 의 한 트랜잭션(5초 상한)에서 카테고리 잠금 → 상품 · 진열 카테고리 · 옵션 · SKU · 처음 재고를 INSERT 한 뒤
-  같은 트랜잭션에서 상세를 읽어 응답한다. 외부 I/O 는 없다(이미지 복사는 F 에서 트랜잭션 밖에 둔다).
+- **트랜잭션**: 정제 · 구성 · 가격 판정과 이미지 복사를 잠금 전에 끝내고, Facade 의 좁은 `TransactionTemplate`(5초 상한)에서 카테고리 잠금 →
+  `ProductRegistrationProcessor`(`MANDATORY`)로 상품 · 진열 카테고리 · 옵션 · SKU · 처음 재고 · 이미지를 INSERT 한 뒤 같은 트랜잭션에서 상세를 읽는다.
+  카테고리 Processor 는 Facade 만 호출하고 잠근 `CategoryTree` 만 등록 Processor 에 전달한다. Facade 등록은 `NOT_SUPPORTED` 로 호출자 트랜잭션도 중단한다.
 - **오류 코드**: 업무 `PRODUCT_012` · `013` · `014` · `016` · `045`, 필드 검증 `PRODUCT_074~099` · `169`(`initialStock` 칸 누락) · `037`(금액 상한) · `038`(지난 발송 예정일), 금액 · 판매 상태는 칸이 여럿이라 한 코드를
   쓰고 `fieldErrors.field` 경로(`skus[1].additionalPrice.amount`)로 구분한다. 대표 · 진열 카테고리 아이디 양수는 `PRODUCT_137`, 처음 재고 수량 0 이상은 `PRODUCT_106` 이다.
   깨진 JSON · 모르는 enum(`saleStatus: SOLD_OUT` 등)은 `PRODUCT_100` 이다.
@@ -576,7 +577,7 @@ return ResponseEntity.ok().body(Response.success(response));
   | 대역 | 용도 |
   |------|------|
   | `001~004` | 없는 리소스(404) |
-  | `010~019` | 어드민 상품 쓰기 — 삭제 동시 변경 `010`, E1 `012~014` · `016`, 후속 수정 `011` · `015` · `017` |
+  | `010~019` | 어드민 상품 쓰기 — 삭제 동시 변경 `010`, E1 `012~014` · `016`, F2 이미지 구성 `018` · 필드 검증 `019`, 후속 수정 `011` · `015` · `017` |
   | `020~031` | 재고(조정 · 선점 · 복원) |
   | `032~036` | 상품 이미지 업로드 · 스토리지(#9 F) |
   | `037` · `038` | 어드민 상품 등록 필드 검증(금액 상한 · 지난 발송 예정일) |
@@ -602,7 +603,26 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
   `uploads/` 는 공개 읽기가 닫힌 임시 접두어이고 버킷 수명 규칙이 1일 뒤 지운다. 서명 유효 시간은 `storage.presign-ttl`(기본 5분).
 - **스토리지 설정** — `storage.*`(storage-core, Vault `STORAGE_*`). **기본 꺼짐**이고, 꺼져 있으면 업로드 발급 · 첨부만 503 `PRODUCT_036` 이고 이미지 없는 등록 · 조회는 그대로다.
   스토리지 장애(연결 · 권한 · 거절)는 503 `PRODUCT_035` — 원인은 로그(이유 · 동작만)에 남기고 응답에 싣지 않는다. 서명 주소는 로그에 남기지 않는다.
-- 첨부(등록 본문의 `images[{uploadKey, ...}]` → 검증 · `products/{productId}/{imageId}.{ext}` 복사 · 실패 보상 삭제)와 `product_image.storage_key` 는 F2 다.
+- 첨부는 아래 F2 계약을 따른다. 업로드 발급 응답은 바뀌지 않는다.
+
+#### 등록 시 이미지 첨부 (#9 F2)
+
+- 기존 등록 본문에 선택 `images[{uploadKey, imageType, altText?}]` 를 더한다. 없거나 null · 빈 배열이면 이미지 없는 기존 등록과 같다.
+  최대 8장, `imageType` 은 `THUMBNAIL` · `GALLERY` 만 받는다. 대표는 최대 한 장, 같은 업로드 키는 두 번 붙이지 않는다(구성 오류 400 `PRODUCT_018`).
+  배열 순서로 갤러리 `displayOrder` 는 위치 + 1, 대표는 항상 0 이다. 대표가 배열 뒤에 있어도 응답에서는 먼저 나온다.
+  `altText` 는 선택, 앞뒤 공백을 뺀 200자 이하 한 줄 평문이다. 비면 null 이고 화면 낭독기가 건너뛴다. 필드 검증은 `PRODUCT_019` 다.
+- 업로드 키 소유자는 본문이 아닌 인증 토큰의 memberId 로 확인한다. 다른 운영자의 키 · 잘못된 키 · 없는 객체는 모두 400 `PRODUCT_032` 다.
+  URL · storageKey · 가로/세로 · 영상 · 포스터는 입력받지 않는다. 가로/세로는 모르는 값(null)이고 URL 은 서버가 공개 저장소 주소에서 만든다.
+- HEAD 의 실제 크기(1~10485760), 키 확장자 · HEAD MIME · 앞부분 magic bytes 의 일치를 확인한다. 크기 오류는 `PRODUCT_034`, 형식 오류는 `PRODUCT_033` 이다.
+  검증 때의 ETag 를 읽기와 복사 조건에 모두 넘겨 원본 교체 경합을 막는다. 교체 · 저장소 장애는 503 `PRODUCT_035`, 꺼짐은 `PRODUCT_036` 이다.
+  검증은 파일 헤더 판별이며 전체 디코딩 검증은 아니다. 공개 도메인은 어드민/스토어와 분리하고 nosniff 를 적용한다(F1 인프라 계약).
+- 목적지는 서버 발급 `products/{productId}/{imageId}.{ext}` 이다. 검증 형식 MIME 과 immutable 캐시 메타데이터로 복사하고 `product_image.storage_key` 에 저장한다.
+  nullable 컬럼으로 기존 이관 이미지의 URL 을 보존한다. 키는 고객 · 어드민 응답에 추가하지 않으며 기존 Presenter 계약 그대로 URL 을 응답한다.
+- 복사 중 실패하면 이 요청이 시도한 목적지만 보상 삭제한다. DB 저장은 확실한 롤백(`afterCompletion(ROLLED_BACK)`)일 때만 보상한다.
+  콜백은 카테고리 잠금 전에 등록해 롤백 확정 표시만 남기고, `TransactionTemplate.execute` 가 DB 자원을 정리한 뒤 Facade 에서 외부 삭제한다.
+  커밋 결과 불명 · 트랜잭션 시작 실패 · 커밋 후 응답 변환 실패에서는 삭제하지 않는다. 보상 실패는 원래 오류를 보존하고 경고를 남기며 운영 고아 객체 대조가 필요하다.
+  원본 업로드는 임시 접두어 수명(1일)까지 남겨 재시도할 수 있다. 존재하는 원본은 같은 운영자가 재사용할 수 있으며, 일회 소비 토큰은 아니다.
+  등록 자체는 멱등하지 않으므로 응답 유실 시 목록을 확인한 뒤 재시도한다. PUT 수정 · 이미지 교체/삭제 API · 옵션 편집은 후속 범위다.
 
 ### 2-7. 고객 상품의 프리오더 · 영상 필드 (product-service, #61)
 

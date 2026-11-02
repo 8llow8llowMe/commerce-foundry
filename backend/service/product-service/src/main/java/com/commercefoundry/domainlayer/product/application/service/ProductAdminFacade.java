@@ -26,14 +26,18 @@ import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionTimedOutException;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 어드민 상품 관리. 카테고리는 카테고리 컨텍스트의 {@link CategoryProcessor} 용도별 메서드로만 받는다 ({@code architecture-guide.md} §3 컨텍스트 간 의존 규칙).
  * 조회는 외부 I/O 가 없어 Facade 에 읽기 전용 트랜잭션을 건다.
  *
- * <p><b>등록</b>(#9 E1)도 외부 I/O 가 없어 Facade 에 트랜잭션을 건다(이미지 복사가 붙는 F 에서 스토리지 구간을 트랜잭션 밖으로 뺀다).
+ * <p><b>등록</b>(#9 F2)은 이미지 복사를 DB 트랜잭션 밖에서 끝내고 Facade 의 좁은 TransactionTemplate 에서만 카테고리 잠금과 등록을 묶는다.
  * 정제 · 구성 · 가격 판정을 잠금 전에 끝내고, {@link CategoryProcessor#getTreeForUpdate()} 로 카테고리 행을 잠가 존재를 본 뒤 저장한다 —
  * DB FK 가 없어 카테고리 삭제와 엇갈리면 지워진 카테고리를 가리키는 상품이 생기기 때문이다. 잠금을 시간 안에 얻지 못하면 409 · {@code PRODUCT_045} 다
  * (선례: {@code CategoryAdminFacade}).
@@ -45,6 +49,10 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     /** 카테고리 잠금을 거는 등록 트랜잭션의 시간 상한(초) — {@code CategoryAdminFacade} 와 같다. */
     static final int LOCKING_TIMEOUT_SECONDS = 5;
 
+    private final com.commercefoundry.persistence.util.SnowflakeIdGenerator snowflakeIdGenerator;
+    private final com.commercefoundry.domainlayer.product.application.service.processor.ProductRegistrationProcessor productRegistrationProcessor;
+    private final com.commercefoundry.domainlayer.product.application.service.processor.ProductImageAttachmentProcessor productImageAttachmentProcessor;
+    private final PlatformTransactionManager transactionManager;
     private final CategoryProcessor categoryProcessor;
     private final ProductAdminQueryProcessor productAdminQueryProcessor;
     private final ProductAdminPresenter productAdminPresenter;
@@ -75,18 +83,43 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     }
 
     @Override
-    @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ProductCreateAdminResponse create(ProductCreateCommand command) {
         ProductDescriptionSanitizer.Result description = productDescriptionSanitizer.sanitize(command.descriptionHtml());
         productWriteProcessor.validate(command);
         List<Long> categoryIds = productWriteProcessor.displayCategoryIdsOf(command);
+        long productId = snowflakeIdGenerator.generateId();
+        var images = productImageAttachmentProcessor.attach(productId, command);
+        var rolledBack = new java.util.concurrent.atomic.AtomicBoolean();
+        // 컨텍스트 간 조율은 Facade 책임이다. 외부 I/O 전후를 제외한 DB 구간만 프로그램 방식으로 한정한다.
+        TransactionTemplate registrationTransaction = new TransactionTemplate(transactionManager);
+        registrationTransaction.setTimeout(LOCKING_TIMEOUT_SECONDS);
         try {
-            productWriteProcessor.requireCategories(categoryProcessor.getTreeForUpdate(), categoryIds);
-            long productId = productWriteProcessor.create(command, description.html(), categoryIds);
-            // 미뤄 둔 INSERT 는 상세 재조회의 auto-flush 에서 나간다 — 그 구간의 시간 상한 초과도 409 로 바꾸려고 재조회까지 묶는다
-            return productAdminPresenter.toCreateResponse(productAdminDetailProcessor.getProduct(productId), description.changed());
-        } catch (QueryTimeoutException | TransactionTimedOutException | PessimisticLockingFailureException exception) {
-            throw new ProductException(ProductErrorCode.CATEGORY_BUSY, exception);
+            var info = registrationTransaction.execute(status -> {
+                // 카테고리 잠금 자체가 실패해도 확정 롤백 후 보상할 수 있게 첫 동작으로 등록한다.
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCompletion(int completion) {
+                        if (completion == STATUS_ROLLED_BACK) {
+                            rolledBack.set(true);
+                        }
+                    }
+                });
+                var lockedCategories = categoryProcessor.getTreeForUpdate();
+                return productRegistrationProcessor.register(productId, command, description.html(), categoryIds, images, lockedCategories);
+            });
+            return productAdminPresenter.toCreateResponse(info, description.changed());
+        } catch (RuntimeException exception) {
+            // execute 가 트랜잭션 · connection 자원을 정리한 뒤 외부 삭제한다. 커밋 결과 불명에서는 표시가 없으므로 보존한다.
+            if (rolledBack.get()) {
+                productImageAttachmentProcessor.cleanup(images.stream()
+                    .map(com.commercefoundry.domainlayer.product.domain.model.ProductImage::storageKey).toList());
+            }
+            if (exception instanceof QueryTimeoutException || exception instanceof TransactionTimedOutException
+                || exception instanceof PessimisticLockingFailureException) {
+                throw new ProductException(ProductErrorCode.CATEGORY_BUSY, exception);
+            }
+            throw exception;
         }
     }
 

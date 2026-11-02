@@ -23,7 +23,7 @@ import java.util.List;
 import lombok.Builder;
 
 /**
- * 어드민 상품 등록 요청 (#9 E1). 이미지(#9 F) · 맞춤 제작 입력(#9 E2)은 아직 받지 않는다 — 상품은 이미지 없이 맞춤 제작 꺼짐으로 생긴다.
+ * 어드민 상품 등록 요청 (#9 E1). 이미지(#9 F2)는 선택이며 맞춤 제작 입력(#9 E2)은 후속 범위다.
  * 문구는 앞뒤 공백을 빼고 저장하며 빈 요약은 없는 값(null)이다. 등록한 어드민은 토큰의 memberId 다 — 본문으로 받지 않는다.
  *
  * <p>옵션 · SKU: 옵션 그룹마다 값 이름 목록을 보내고, SKU 는 그룹 순서대로 고른 값 이름({@code optionValues})으로 조합을 가리킨다.
@@ -97,7 +97,11 @@ public record ProductCreateRequest(
     @Schema(description = "SKU (1~100개). 옵션 없는 상품은 한 개", requiredMode = Schema.RequiredMode.REQUIRED)
     @NotNull(message = ProductValidationMessage.PRODUCT_SKUS_SIZE)
     @Size(min = 1, max = 100, message = ProductValidationMessage.PRODUCT_SKUS_SIZE)
-    List<@NotNull(message = ProductValidationMessage.PRODUCT_SKU_REQUIRED) @Valid SkuRequest> skus
+    List<@NotNull(message = ProductValidationMessage.PRODUCT_SKU_REQUIRED) @Valid SkuRequest> skus,
+
+    @Schema(description = "발급받아 업로드한 정지 이미지. 최대 8장, 대표는 한 장. 배열 순서로 노출한다", nullable = true)
+    @Size(max = 8, message = ProductValidationMessage.PRODUCT_IMAGES_INVALID)
+    List<@NotNull(message = ProductValidationMessage.PRODUCT_IMAGES_INVALID) @Valid ImageRequest> images
 ) {
 
     @JsonIgnore
@@ -124,8 +128,30 @@ public record ProductCreateRequest(
             .expectedShipDate(expectedShipDate)
             .optionGroups(optionGroups == null ? List.of() : optionGroups.stream().map(OptionGroupRequest::toCommand).toList())
             .skus(skus.stream().map(SkuRequest::toCommand).toList())
+            .images(images == null ? List.of() : images.stream().map(ImageRequest::toCommand).toList())
             .createdByMemberId(createdByMemberId)
             .build();
+    }
+
+    @Schema(description = "등록 이미지 — VIDEO 는 후속 범위")
+    public record ImageRequest(
+        @Schema(description = "현재 어드민에게 발급된 uploads 키", requiredMode = Schema.RequiredMode.REQUIRED)
+        @NotBlank(message = ProductValidationMessage.PRODUCT_IMAGES_INVALID)
+        @Size(max = 100, message = ProductValidationMessage.PRODUCT_IMAGES_INVALID)
+        String uploadKey,
+
+        @Schema(description = "THUMBNAIL 또는 GALLERY", requiredMode = Schema.RequiredMode.REQUIRED)
+        @NotNull(message = ProductValidationMessage.PRODUCT_IMAGES_INVALID)
+        com.commercefoundry.domainlayer.product.domain.model.ImageType imageType,
+
+        @Schema(description = "대체 텍스트. 없으면 화면 낭독기가 건너뛴다", nullable = true)
+        @Size(max = 200, message = ProductValidationMessage.PRODUCT_IMAGES_INVALID)
+        @Pattern(regexp = ProductValidationMessage.PLAIN_TEXT, message = ProductValidationMessage.PRODUCT_IMAGES_INVALID)
+        String altText
+    ) {
+        ProductCreateCommand.Image toCommand() {
+            return new ProductCreateCommand.Image(uploadKey, imageType, altText == null || altText.isBlank() ? null : altText.strip());
+        }
     }
 
     @Schema(description = "옵션 그룹")

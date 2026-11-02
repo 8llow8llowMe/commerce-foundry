@@ -41,7 +41,12 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class ProductImageEntity extends BaseEntity {
+public class ProductImageEntity extends BaseEntity implements org.springframework.data.domain.Persistable<Long> {
+
+    @Override
+    public boolean isNew() {
+        return getCreatedAt() == null;
+    }
 
     @Id
     @Column(name = "id", comment = "상품 이미지 아이디 (Snowflake)")
@@ -56,6 +61,9 @@ public class ProductImageEntity extends BaseEntity {
 
     @Column(name = "url", nullable = false, length = 500, comment = "이미지 URL. VIDEO 면 영상 파일 URL")
     private String url;
+
+    @Column(name = "storage_key", length = 500, comment = "관리되는 상품 이미지 오브젝트 키. 기존 이관 이미지는 null")
+    private String storageKey;
 
     @Column(name = "width", comment = "원본 가로 px. 모르면 null")
     private Integer width;
