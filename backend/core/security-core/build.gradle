@@ -29,6 +29,9 @@ dependencies {
     // token.revocation(로그아웃 차단 목록 키 함수)만 쓴다. 키를 쓰는 auth 와 읽는 api-gateway 가 redis-core 를 직접 의존한다 —
     // Redis 를 쓰지 않는 서비스에 Lettuce · 기동 가드가 끌려가지 않게 (coding-conventions.md §9-7 서비스 횡단 키)
     compileOnly project(':core:redis-core')
+    // audit(관리자 감사 줄의 트랜잭션 동기화)만 쓴다. 감사를 남기는 서블릿 서비스는 persistence-core(JPA)로 spring-tx 를 이미 가진다.
+    // 게이트웨이는 audit 를 부르지 않고, 불려도 AdminAuditLog 가 spring-tx 유무를 보고 바로 쓴다
+    compileOnly 'org.springframework:spring-tx'
 
     testFixturesImplementation 'org.springframework.boot:spring-boot-starter-test'
     testFixturesImplementation 'tools.jackson.core:jackson-databind'
@@ -47,6 +50,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-actuator'
     testImplementation 'io.projectreactor:reactor-core'
     testImplementation 'io.github.openfeign:feign-core'
+    testImplementation 'org.springframework:spring-tx'
     // RedisKey 만 쓴다. 전이 의존(data-redis 스타터)을 받으면 이 모듈의 컨텍스트 테스트에 Redis 자동설정 · 헬스 지표가 켜진다
     testImplementation(project(':core:redis-core')) {
         transitive = false

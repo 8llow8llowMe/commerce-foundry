@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.support.ResourceServerSmokeTestSupport;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -17,6 +18,15 @@ import org.springframework.mock.web.MockHttpServletResponse;
  * 애노테이션은 {@link OrderServiceApplicationTests} 와 같아 컨텍스트를 같이 쓴다.
  */
 class OrderServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
+
+    /** 감사 선언(#163)을 아직 붙이지 않은 어드민 쓰기 핸들러 — 맡은 PR 에서 선언을 붙이고 지운다 ({@code security-guide.md} §11-4). */
+    @Override
+    protected Map<String, String> auditDeclarationPending() {
+        return Map.ofEntries(
+            Map.entry("OrderAdminController#changeStatus", "#163 PR-E"),
+            Map.entry("OrderAdminController#changeStatuses", "#163 PR-E")
+        );
+    }
 
     @Test
     void anonymousOnOrderCreate() throws Exception {

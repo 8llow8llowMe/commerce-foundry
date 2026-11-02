@@ -5,6 +5,8 @@ import static com.commercefoundry.security.support.SecurityEnvelopeAssertions.as
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
+import com.commercefoundry.security.audit.AdminAuditExempt;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.internal.InternalTokenProperties;
 import com.commercefoundry.security.issuer.JwtIssuer;
@@ -13,15 +15,21 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.lang.reflect.Method;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -39,6 +47,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -70,6 +79,8 @@ import org.springframework.web.util.pattern.PathPatternParser;
  *       {@code /api/} 핸들러는 {@code @PreAuthorize} 가 있는지 본다. 실제 매핑을 보는 런타임 가드이고, 패키지 기준 정적 규칙(어드민의 {@code hasRole('ADMIN')} ·
  *       전역 Feign 설정 · {@code RequestContextHolder})은 {@link ControllerAuthorizationArchTestSupport} 가 맡는다. 허용 호출자 판정은 둘이
  *       {@link AuthorizationExpressions} 를 같이 쓴다.</li>
+ *   <li>관리자 감사 선언 누락 가드(#163) — {@code /api/v1/admin} 의 쓰기 핸들러는 {@link AdminAudited} 또는 {@link AdminAuditExempt} 를 선언한다.
+ *       아직 붙이지 않은 핸들러는 서비스가 {@link #auditDeclarationPending()} 에 이슈 번호와 함께 둔다.</li>
  * </ul>
  */
 @SpringBootTest
@@ -86,6 +97,12 @@ public abstract class ResourceServerSmokeTestSupport {
     private static final String API_PREFIX = "/api/";
     /** 어드민 API 경로 머리 ({@code api-design-guide.md}). URL 규칙의 {@code /api/v1/admin/**} 와 같다. */
     private static final String ADMIN_API_PREFIX = "/api/v1/admin";
+    /** 감사 줄을 남겨야 하는 어드민 쓰기 메서드 ({@code security-guide.md} §11-4). */
+    private static final Set<RequestMethod> WRITE_METHODS = EnumSet.of(RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE);
+    /** {@code AdminAuditLog} 가 받는 행위 이름 형식과 같다. */
+    private static final String AUDIT_ACTION_REGEX = "^[A-Z][A-Z0-9_]{0,63}$";
+    /** 대기 항목의 이슈 표기에 있어야 하는 이슈 번호. */
+    private static final Pattern ISSUE_REFERENCE = Pattern.compile("#\\d+");
 
     @Autowired
     private MockMvc mockMvc;
@@ -338,6 +355,98 @@ public abstract class ResourceServerSmokeTestSupport {
 
     /** {@link #scanHandlers} 결과 — 검사한 internal 경로(빈 검사 방지)와 위반 목록. */
     record AuthorizationScan(List<String> checkedInternalPatterns, List<String> violations) {
+    }
+
+    // ── 관리자 감사 선언 누락 가드 (#163) ────────────────────────
+
+    /**
+     * 아직 감사 선언을 붙이지 않은 어드민 쓰기 핸들러 — 키 {@code "클래스 단순 이름#메서드"}, 값은 맡은 이슈 표기({@code "#163 PR-B"} 처럼 {@code #<번호>} 를 포함).
+     * 서비스 스모크가 override 한다 ({@code security-guide.md} §11-4). 비어 있지 않으면 WARN 을 남긴다. 아래는 실패다 — 이슈 표기에 {@code #<번호>} 가 없음,
+     * 이미 선언했거나 없어진 항목(목록이 저절로 줄어든다), 한 항목이 쓰기 핸들러 둘 이상(같은 이름의 오버로드)과 맞음(새 핸들러가 묻어 가지 않게).
+     */
+    protected Map<String, String> auditDeclarationPending() {
+        return Map.of();
+    }
+
+    /**
+     * 어드민 쓰기가 감사 줄 없이 늘어나지 않게 한다 ({@code security-guide.md} §11-4). {@code /api/v1/admin} 아래 매핑 중 POST · PUT · PATCH · DELETE
+     * (메서드 조건이 없으면 모든 메서드라 쓰기로 본다) 핸들러는 {@link AdminAudited} 또는 {@link AdminAuditExempt} 를 선언해야 한다. 실제 매핑을 보므로
+     * 패키지 · 상속과 무관하다.
+     */
+    @Test
+    @DisplayName("/api/v1/admin 의 쓰기(POST · PUT · PATCH · DELETE) 핸들러는 @AdminAudited 또는 @AdminAuditExempt 를 선언한다")
+    void adminWriteHandlersDeclareAudit() {
+        RequestMappingHandlerMapping handlerMapping = applicationContext.getBean("requestMappingHandlerMapping", RequestMappingHandlerMapping.class);
+        Map<String, String> pending = auditDeclarationPending();
+
+        AuditScan scan = scanAuditDeclarations(handlerMapping.getHandlerMethods(), pending);
+
+        if (!pending.isEmpty()) {
+            LoggerFactory.getLogger(getClass()).warn("감사 선언 대기(auditDeclarationPending) {}건 — 맡은 이슈에서 선언을 붙이고 목록에서 지우세요: {}", pending.size(), pending);
+        }
+        assertThat(scan.violations()).as("감사 선언이 없는 어드민 쓰기 핸들러 · 정리할 대기 항목 (security-guide.md §11-4)").isEmpty();
+    }
+
+    /** 감사 선언 누락 가드의 판정. 컨텍스트 없이 security-core 테스트가 매핑을 직접 만들어 시험할 수 있게 떼어 둔다. */
+    static AuditScan scanAuditDeclarations(Map<RequestMappingInfo, HandlerMethod> handlerMethods, Map<String, String> pending) {
+        List<String> violations = new ArrayList<>();
+        Map<String, Set<Method>> pendingMatched = new HashMap<>();
+
+        pending.entrySet().stream()
+            .filter(entry -> entry.getValue() == null || !ISSUE_REFERENCE.matcher(entry.getValue()).find())
+            .map(Map.Entry::getKey)
+            .sorted()
+            .forEach(key -> violations.add(key + " [대기] → 이슈 표기가 없습니다 — auditDeclarationPending() 의 값에 맡은 이슈(\"#163 PR-B\" 처럼 #<번호>)를 적으세요"));
+
+        handlerMethods.forEach((mapping, handler) -> {
+            Set<String> patterns = mapping.getPatternValues();
+            boolean admin = patterns.stream().anyMatch(pattern -> pattern.equals(ADMIN_API_PREFIX) || pattern.startsWith(ADMIN_API_PREFIX + "/"));
+            if (!admin || !isWrite(mapping)) {
+                return;
+            }
+            String key = handler.getBeanType().getSimpleName() + "#" + handler.getMethod().getName();
+            String where = key + " " + patterns;
+            AdminAudited audited = AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(), AdminAudited.class);
+            AdminAuditExempt exempt = AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(), AdminAuditExempt.class);
+            if (pending.containsKey(key)) {
+                pendingMatched.computeIfAbsent(key, ignored -> new HashSet<>()).add(handler.getMethod());
+                if (audited != null || exempt != null) {
+                    violations.add(where + " → 이미 선언했습니다 — auditDeclarationPending() 에서 \"" + key + "\" 를 지우세요");
+                }
+                return;
+            }
+            if (audited != null && exempt != null) {
+                violations.add(where + " → @AdminAudited 와 @AdminAuditExempt 를 같이 붙였습니다 — 하나만 남기세요");
+            } else if (audited == null && exempt == null) {
+                violations.add(where + " → 감사 선언 없음 — @AdminAudited(action = \"<RESOURCE>_<VERB>\") 를 붙이고 Facade 에서 감사 줄을 쓰거나, "
+                    + "저장 없음 · 본인 상태만 바꾸면 @AdminAuditExempt(reason = \"...\") 를 붙이세요");
+            } else if (audited != null && !audited.action().matches(AUDIT_ACTION_REGEX)) {
+                violations.add(where + " → @AdminAudited(action = \"" + audited.action() + "\") — 행위 이름은 " + AUDIT_ACTION_REGEX + " 형식(<RESOURCE>_<VERB>)으로 고치세요");
+            } else if (exempt != null && exempt.reason().isBlank()) {
+                violations.add(where + " → @AdminAuditExempt 의 reason 이 비었습니다 — 면제 이유를 적으세요");
+            }
+        });
+        pending.keySet().stream()
+            .filter(key -> !pendingMatched.containsKey(key))
+            .sorted()
+            .forEach(key -> violations.add(key + " [없음] → 이 이름의 어드민 쓰기 핸들러가 없습니다 — auditDeclarationPending() 에서 지우세요"));
+        pendingMatched.entrySet().stream()
+            .filter(entry -> entry.getValue().size() > 1)
+            .map(Map.Entry::getKey)
+            .sorted()
+            .forEach(key -> violations.add(key + " [쓰기 핸들러 " + pendingMatched.get(key).size() + "개] → 대기 항목 하나가 같은 이름의 핸들러 여럿과 맞습니다 — "
+                + "새 핸들러가 대기 목록에 묻어 가지 않게 선언을 붙이거나 메서드 이름을 나누세요"));
+        return new AuditScan(List.copyOf(violations));
+    }
+
+    /** POST · PUT · PATCH · DELETE 중 하나를 받거나, 메서드 조건이 없어 모든 메서드를 받는 매핑. */
+    private static boolean isWrite(RequestMappingInfo mapping) {
+        Set<RequestMethod> methods = mapping.getMethodsCondition().getMethods();
+        return methods.isEmpty() || methods.stream().anyMatch(WRITE_METHODS::contains);
+    }
+
+    /** {@link #scanAuditDeclarations} 결과 — 위반 목록. */
+    record AuditScan(List<String> violations) {
     }
 
     // ── 구성 ─────────────────────────────────────────────────────

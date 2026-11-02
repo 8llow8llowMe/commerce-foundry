@@ -13,6 +13,7 @@ import com.commercefoundry.security.support.ResourceServerSmokeTestSupport;
 import com.jayway.jsonpath.JsonPath;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -53,6 +54,21 @@ class AuthServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     @Override
     protected boolean issuerExpected() {
         return true;
+    }
+
+    /** 감사 선언(#163)을 아직 붙이지 않은 어드민 쓰기 핸들러 — 맡은 PR 에서 선언을 붙이고 지운다 ({@code security-guide.md} §11-4). */
+    @Override
+    protected Map<String, String> auditDeclarationPending() {
+        return Map.ofEntries(
+            Map.entry("AdminAccountAdminController#createAdmin", "#163 PR-E"),
+            Map.entry("AdminAccountAdminController#deactivateAdmin", "#163 PR-E"),
+            Map.entry("AdminAccountAdminController#changePassword", "#163 PR-E"),
+            Map.entry("AdminOtpAdminController#startEnrollment", "#163 PR-E (면제 대상 — OTP 등록 시작)"),
+            Map.entry("AdminOtpAdminController#confirmEnrollment", "#163 PR-E"),
+            Map.entry("AdminOtpAdminController#disable", "#163 PR-E"),
+            Map.entry("AdminOtpAdminController#regenerateRecoveryCodes", "#163 PR-E"),
+            Map.entry("AdminOtpPeerRecoveryAdminController#recover", "#163 PR-E")
+        );
     }
 
     @Test

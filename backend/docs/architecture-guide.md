@@ -93,7 +93,7 @@ com.commercefoundry
   |  |     |  |- repository
   |  |     |  |  \- custom      (*CustomRepository + Impl — QueryDSL 동적 쿼리·조인)
   |  |     |  \- *RepositoryAdapter
-  |  |     |- log               (*AuditLogAdapter — 관리자 감사 로그 한 줄, security-guide.md §11-4)
+  |  |     |- log               (선택 — 관리자 감사에 DB 싱크가 있을 때만(auth). 기본은 domainlayer/adminaudit Processor + core AdminAuditLog, security-guide.md §11-4)
   |  |     |- event             (*EventAdapter — Kafka 로 나갈 메시지를 outbox 에 쓴다, coding-conventions.md §12)
   |  |     |- lock              (*LockAdapter — 단일 실행 락 ShedLock, 예: 정기 작업 플래너)
   |  |     \- client
@@ -250,7 +250,7 @@ Info → Presenter → Response
 - out-port 이름이 책임 기준인지(`PaymentGatewayPort` ○, `TossClientPort` ✕) — `coding-conventions.md` §5-1
 - 진입 DTO 의 필드 누출(고객 응답에 원가 · 재고 수량 · 내부 메모), 다른 컨텍스트 Processor 메서드가 용도별인지(숨김 규칙 비켜 가기)
 - 패키지 구조(§2)를 비켜 간 클래스 — 규칙은 패키지 이름과 바깥 클래스 이름 접미사(`*Facade` · `*Processor` · `*ExceptionHandler` · `*ValidationMessage`)로 판정하므로 이름이 틀리면 보지 못한다.
-  `global` 패키지(설정 · 프로퍼티)는 규칙 대상이 아니다 — application 이 `global.properties` · core 컴포넌트(`SnowflakeIdGenerator`, 토큰 발급기 등)를 쓰는 것은 허용된 상태다
+  `global` 패키지(설정 · 프로퍼티)는 규칙 대상이 아니다 — application 이 `global.properties` · core 컴포넌트(`SnowflakeIdGenerator`, 토큰 발급기, 관리자 감사 유틸 `AdminAuditLog` 등)를 쓰는 것은 허용된 상태다
 - PG SDK 처럼 위 H12 패턴에 없는 외부 전송 타입이 application 으로 새지 않는지
 
 ## 4. Query / Model 경계

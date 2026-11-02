@@ -799,6 +799,8 @@ openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하
 - **인가 선언 누락 가드** — 같은 스모크의 `handlersDeclareAuthorization` 이 서비스 컨텍스트의 `RequestMappingHandlerMapping` 을 모두 돈다.
   `/internal/` 핸들러는 서비스 권한만 나열한 `hasAuthority` · `hasAnyAuthority` 식, `/api/v1/admin` 과 그 아래 핸들러는 `hasRole('ADMIN')` 필요조건, 그 밖의 `/api/` 핸들러는 `@PreAuthorize` 존재(식은 자유)를 요구하고 위반 핸들러를 고치는 법과 함께 목록으로 알린다.
   스모크 핸들러가 검사 대상에 들어 있는지도 단언해, 실제 핸들러가 없는 지금도 빈 목록으로 통과하지 않는다. 허용 호출자 식 판정은 `AuthorizationExpressions` 하나를 ArchUnit(§9-11)과 같이 쓴다.
+- **관리자 감사 선언 누락 가드 (#163)** — 같은 스모크의 `adminWriteHandlersDeclareAudit` 가 `/api/v1/admin` 쓰기 핸들러의 `@AdminAudited` · `@AdminAuditExempt` 선언을 본다.
+  대기 목록(`auditDeclarationPending()`) 규칙은 §11-4 다.
 - 호출 쪽은 `InternalServiceTokenCapabilityTest` 가 실제 Feign 파이프라인(`Feign.builder()` + 앞 · 뒤 인터셉터 + 다른 Capability + 요청을 붙잡는 Client)을
   왕복해 최종 요청의 `Authorization` 이 서비스 토큰 하나인지 본다.
 - internal 컨트롤러가 생기면 그 서비스의 `*SecuritySmokeTest` 나 컨트롤러 테스트에서 실제 경로의 허용 · 거부 호출자를 하나씩 본다.
@@ -945,10 +947,11 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   - `result` — `SUCCESS` · `FAILURE`. 실패 이유(회원 없음 · 비밀번호 틀림 · 고객 계정)는 나누지 않는다.
 - **개인정보 · 비밀을 싣지 않는다** — 이메일 · 이름 · 전화 원문, 비밀번호 · 토큰, 검색어 원문. 관리자 로그인 실패는 이메일 원문 대신 그 이메일이 관리자 계정일 때만
   `target=member:<id>` 를 남긴다(고객 memberId 는 남기지 않는다) — 한 관리자 계정에 몰리는 대입을 찾을 수 있게.
-- 쓰는 방식 — 컨텍스트의 out-port(`AdminAuditPort`)에 행위별 메서드를 두고, **Facade 는 포트를 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다**
-  (ArchUnit H11 — Facade 는 out-port 를 쓰지 않는다). 업무가 끝난 뒤(트랜잭션 밖) 부르고, 실패 로그의 대상 선택 같은 감사 정책도 Processor 에 둔다.
-  어댑터는 `adapter/out/log/*AuditLogAdapter` 다.
-  다른 서비스도 어드민 쓰기 API 를 만들 때 같은 로거 이름 · 칸으로 남긴다. 업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 · SKU 원가 이력 #361 등)는 그 이력이 감사의 정본이다.
+- 쓰는 방식 — 아래 "어드민 쓰기 감사 공통 장치 (#163)" 를 따른다. 기본은 서비스의 `domainlayer/adminaudit` Processor 가 security-core 의 `AdminAuditLog` 를 부르는 것이고,
+  out-port(`AdminAuditPort`) · `adapter/out/log` 어댑터는 **DB 싱크가 있는 서비스(auth)만** 둔다. auth 는 Facade 가 포트를 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다
+  (ArchUnit H11 — Facade 는 out-port 를 쓰지 않는다). auth 의 DB 싱크(`REQUIRES_NEW`)는 업무가 끝난 뒤(트랜잭션 밖) 부른다. 실패 로그의 대상 선택 같은 감사 정책은 Processor 에 둔다.
+  order · operations 의 `adapter/out/log/*AdminAuditLogAdapter` 는 #163 PR-E 에서 `AdminAuditLog` 로 옮긴다.
+  업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 · SKU 원가 이력 #361 등)는 그 이력이 감사의 정본이고, `admin.audit` 줄도 함께 남긴다(아래 C′).
 - **영속화 (auth-service, #192)** — `AdminAuditPort` 계약은 그대로이고 구현이 `adapter/out/persistence/AdminAuditLogRepositoryAdapter` 다.
   - 순서: `admin.audit` 로그 한 줄(`AdminAuditLogAdapter`)을 **먼저** 남기고 `auth.admin_audit_log` 에 한 행을 더한다. 칸 값은 `AdminAuditRecord` 팩토리 한 곳에서 만든다 —
     로그 줄과 행이 같은 값이다. 로그 어댑터는 지우지 않는다(수집기 형식 · 다른 서비스와 같은 줄 · DB 장애 때의 증거).
@@ -984,19 +987,77 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
     로그인 실패는 행위자가 null 이라 `actorMemberId` 만으로는 한 계정을 노린 실패를 못 고른다. `action=ADMIN_LOGIN&target=member:<id>&result=FAILURE` 로 고르고,
     `(target, id)` 인덱스를 둔다. 이 조회 자체는 감사하지 않는다 — 행에 개인정보가 없고, 남기면 조회마다 행이 늘어난다.
     응답의 `actorDisplayName` · `targetDisplayName` 은 저장된 행이 아니라 조회 시 회원 이름을 마스킹해 붙인다 (#322, `api-design-guide.md` §2-4). 회원 목록 API 는 쓰지 않는다.
-  - 다른 서비스(operations `JOB_CANCEL` 등)는 지금 로그 한 줄만 남긴다. DB 영속화를 서비스마다 어떻게 둘지(서비스별 같은 모양 테이블 · core 공유 안 함 권고)는 #163 에서 정한다.
+  - 다른 서비스(operations `JOB_CANCEL` 등)는 로그 한 줄만 남긴다. 서비스별 감사 DB 영속화는 하지 않는다 (#163 결정, 아래 "공통 장치").
 - **서비스 전용 이력 테이블 사례 — delivery-service 배송비 정책 교체 이력 (#69).** 어드민 공통 감사 로그(DB)가 아직 없어 `delivery.shipping_policy_history`
   (+ 구간 스냅숏 `shipping_policy_history_area`)에 교체 전 · 후 값 · 교체한 관리자(`admin_member_id` — access 토큰의 memberId, 본문 값을 쓰지 않는다) · 시각을 남긴다.
   교체와 **같은 트랜잭션**이라 이력 저장이 실패하면 교체도 롤백된다 — 기록 없는 변경이 생기지 않는다(로그 한 줄 방식은 트랜잭션 밖이라 이 보장이 없다).
   조회는 `GET /api/v1/admin/shipping-policies/domestic/histories`(ADMIN, `api-design-guide.md` §6-2). append-only 라 고치거나 지우는 API 가 없다.
   `adminDisplayName` 은 auth-service 표시 이름 벌크 조회가 마스킹해 준 값이다 (#322). 원문 이름은 delivery 에 들어오지 않는다.
-  공통 감사 로그(#163 · #192)가 생기면 이 행위를 그쪽에도 함께 남길지 재검토한다.
+  #163 결정(C′)으로 이 표가 정본이고 `admin.audit` 줄도 함께 남긴다(#163 PR-D).
 - 적용 대상 (#6 · #238): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade` — 1단계 · 2단계), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
 - 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` — `action=JOB_CANCEL target=job:<id>`, operations-service `JobAdminAuditLogAdapter`). 작업 목록 · 상세 조회는 남기지 않는다 —
   payload · 결과 · 오류에 개인정보 원문을 두지 않는 규칙(`architecture-guide.md` §10)이라 읽기가 개인정보 열람이 아니다. 결과 파일 링크 발급(#212 PR-E)은 남긴다.
 - 적용 대상 (#17): 어드민 주문 목록 · 상세 조회와 상태 변경(`OrderAdminFacade` — order-service `OrderAdminAuditLogAdapter`). 목록은 `action=ORDER_SEARCH target=orders?status=..&from=..&to=..&page=..&size=..`,
   상세는 `action=ORDER_VIEW target=order:<id>`(마스킹했어도 받는 분 · 기본 주소 · 맞춤 입력값을 읽는 행위다), 상태 변경은 `action=ORDER_STATUS_CHANGE target=order:<id>` 이고
   일괄 변경은 주문마다 한 줄이다(이미 그 상태라 그대로 둔 것도 `SUCCESS`). 바꾼 상태 · 사유는 감사 줄에 싣지 않는다 — 정본은 같은 트랜잭션의 주문 상태 이력이다.
+
+#### 어드민 쓰기 감사 공통 장치 (#163)
+
+어드민 쓰기가 감사 줄 없이 늘어나지 않게 공통 유틸 · 선언 애노테이션 · 스모크 가드를 둔다. 줄 형식은 위 네 칸 그대로다.
+
+- **공통 유틸 — security-core `com.commercefoundry.security.audit.AdminAuditLog`** (static). `write(action, actorMemberId, target, succeeded)` · `target(type, id)` · `target(type, key)`.
+  - 로거 `admin.audit`, INFO, `action={} actorMemberId={} target={} result={}` — auth `AdminAuditLogAdapter` 와 글자 하나 다르지 않다(수집기 파서 계약). `null` 은 `-`.
+  - `action` 이 `^[A-Z][A-Z0-9_]{0,63}$` 가 아니면 `IllegalArgumentException`(호출 코드의 버그). `target` 의 `type` · `key` 는 `[a-z0-9-]+` 가 아니면 `IllegalArgumentException`.
+    예외 메시지에는 원문을 싣지 않는다(이름 · 길이만).
+  - `write` 는 `target` 전체 모양을 본다 — `null`(`-`) · `<type>:<key>` · 조회 조건 `<type>?<k>=<v>&...` 만 받는다(정규식 `^[a-z0-9-]+(?::[a-z0-9-]+|\?[A-Za-z0-9=&_:.-]*)?$`).
+    조회 조건 문자는 auth `MEMBER_SEARCH` · order `ORDER_SEARCH`(`Instant` 기간 포함)가 쓰는 것만 연다. 맞지 않으면 일부를 고치지 않고 **통째로 `-`** 로 남기고, 원문 없는 WARN(행위 · 길이)을 남긴다 —
+    이메일 · 한글 이름 · 서식 문자(U+202E · U+200B) · `;` 같은 값이 감사 줄로 새지 않게 한다.
+  - **트랜잭션 안 호출은 커밋 결과로 기록한다.** 트랜잭션 동기화가 켜져 있으면 줄을 미뤘다가 `afterCompletion` 에서 **커밋됐고 `succeeded` 일 때만 `SUCCESS`**,
+    롤백 · 결과 모름이면 `FAILURE` 로 남긴다 — Facade 가 메서드 단위 `@Transactional` 이어도 롤백된 쓰기가 `SUCCESS` 로 남지 않는다. 동기화가 꺼져 있으면 바로 쓴다.
+    예외는 auth 의 DB 싱크다 — `REQUIRES_NEW` 로 따로 저장하므로 지금처럼 트랜잭션 밖에서 부른다.
+  - spring-tx 는 `compileOnly` 다. 감사를 남기는 서블릿 서비스는 persistence-core 로 이미 가진다. 리액티브 게이트웨이는 이 클래스를 부르지 않는다(불려도 spring-tx 가 없으면 바로 쓴다).
+- **선언 — `@AdminAudited(action = "...")` · `@AdminAuditExempt(reason = "...")`** (같은 패키지, METHOD · RUNTIME). 애노테이션은 줄을 쓰지 않는 선언이다.
+  실제 줄은 Facade → 서비스 `adminaudit` Processor 가 `AdminAuditLog.write` 로 쓴다.
+- **서비스 쪽 구성** — 서비스당 `domainlayer/adminaudit`(application 만): `<Svc>AdminAuditAction` enum + `<Svc>AdminAuditProcessor`. Port/Adapter 는 DB 싱크가 있을 때만(auth).
+  행위자는 컨트롤러의 `@AuthenticationPrincipal MemberPrincipal` 에서 꺼낸다 — 감사에만 쓰면 UseCase 마지막 인자 `long actorMemberId`, 업무 데이터(이력 표의 관리자 칸 등)면 Command 에 싣는다.
+  요청 본문 값을 행위자로 쓰지 않는다. 컨트롤러의 `@AdminAudited.action()` 집합과 enum 값 집합이 같은지 서비스 테스트가 본다.
+  **target 은 업무 호출 전에 만든다** — 경로 변수 · Command 의 식별자로 `AdminAuditLog.target(...)` 을 먼저 만들어 두어야 업무가 예외로 끝나도 같은 대상으로 `FAILURE` 를 남긴다.
+- **가드 — `ResourceServerSmokeTestSupport.adminWriteHandlersDeclareAudit()`** (서비스 `*SecuritySmokeTest` 가 상속). 실제 매핑 중 `/api/v1/admin` 아래의
+  POST · PUT · PATCH · DELETE(메서드 조건이 없는 매핑 포함) 핸들러는 `@AdminAudited` 또는 `@AdminAuditExempt` 를 선언해야 한다. 둘 다 붙이거나, 행위 이름 형식이 틀리거나,
+  면제 이유가 비면 실패다. 위반은 `클래스#메서드 [경로] → 고치는 법` 으로 알린다. 패키지 기준 ArchUnit 규칙은 두지 않는다(실제 매핑을 보는 런타임 가드 하나로 본다).
+  - **대기 목록** — 아직 선언을 붙이지 않은 핸들러는 서비스가 `auditDeclarationPending()`(`Map<String, String>`)에 `"클래스#메서드"` → 맡은 이슈 표기(`"#163 PR-B"`)로 둔다.
+    비어 있지 않으면 WARN 을 남긴다. 아래는 실패다 — 이슈 표기에 `#<번호>` 가 없음, 이미 선언했거나 없어진 항목(선언을 붙인 PR 이 목록에서 지운다),
+    한 항목이 같은 이름의 쓰기 핸들러 둘 이상(오버로드)과 맞음(새 핸들러가 묻어 가지 않게). 새 핸들러를 대기 목록으로 넘기지 않는다.
+- **방식 C′(혼합)** — 업무 이력 표가 있는 행위(재고 조정 · SKU 원가 · 상품 초안 · 국내 배송비 정책 · 주문 상태 · 작업 취소)는 그 표가 정본이고, **그래도 `admin.audit` 줄을 한 줄 남긴다**
+  (서비스를 가로지르는 검색 색인). 감사를 위해 새 이력 표를 만들지 않는다.
+- **어드민 쓰기 API(`/api/v1/admin`)의 실패 기준** — UseCase 에 닿은 뒤의 업무 실패(404 · 409 · 5xx)만 `FAILURE` 다. 본문 검증 400 · 401 · 403 · 429 는 남기지 않는다.
+  결과는 `SUCCESS` · `FAILURE` 둘이고 **errorCode 는 싣지 않는다**(네 칸 형식 유지).
+  관리자 로그인 · OTP 의 기존 규칙(위 행위 설명, 관리자 429 는 요청마다 `target=- result=FAILURE` 한 줄 — §14)은 그대로다.
+- **금지 필드** — 위 "개인정보 · 비밀" 에 더해 바꾼 값(가격 · 원가 · 수량 · 정책 본문 · 상태 · 사유 · 메모)을 싣지 않는다. 바뀐 값의 정본은 업무 이력 표다.
+- **면제 대상** (`@AdminAuditExempt`) — 전시 미리보기(저장 없음) · 알림 읽음 · 온보딩 투어 기록(본인 상태) · OTP 등록 시작(확인 전에는 아무것도 켜지지 않는다). 그 밖의 면제는 리뷰에서 이유를 본다.
+- **다른 서비스의 DB 영속화는 하지 않는다.** DB 에 남는 감사는 auth 의 `auth.admin_audit_log` 하나다. 다른 서비스는 로그 줄이 정본이고(업무 이력 표가 있으면 그 표), 필요해지면 별도 이슈로 본다.
+- **행위 이름** — `<RESOURCE>_<VERB>` 대문자 스네이크. 로그 검색 키라 한번 정한 이름을 바꾸지 않는다. 동사는 `CREATE` · `UPDATE` · `DELETE` · `REORDER` · `REPLACE` · `ADJUST` · `REJECT` · `CANCEL` 처럼
+  업무 동작 그대로 쓴다. 이름의 정본은 서비스의 `<Svc>AdminAuditAction` enum 이다. 아래 표에서 `*` 로 적은 이름은 맡은 PR 에서 확정한다.
+
+| 서비스 | 행위 | 상태 |
+|--------|------|------|
+| auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 사용 중 — 선언 · `AdminAuditLog` 통일은 #163 PR-E |
+| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` | 사용 중 — 선언 · 통일은 #163 PR-E |
+| operations | `JOB_CANCEL` | 사용 중 — 선언 · 통일은 #163 PR-E (알림 읽음 · 온보딩 투어는 면제) |
+| product | `CATEGORY_*` · `SIZE_CHART_TEMPLATE_*` · `PRODUCT_SIZE_CHART_REPLACE` | #163 PR-B |
+| product | `DISPLAY_SECTION_*` · `LOOK_*` (전시 미리보기는 면제) | #163 PR-C |
+| product | `STOCK_ADJUST` · `SKU_COST_CREATE` · `PRODUCT_DRAFT_*` | #163 PR-C′ (이력 표 + 줄) |
+| delivery | `SHIPPING_POLICY_*_REPLACE` (국내 · 해외) | #163 PR-D (국내는 이력 표 + 줄, 해외는 행위자 수신) |
+| product | `PRODUCT_CREATE` · `PRODUCT_UPDATE` · `PRODUCT_DELETE` · `PRODUCT_IMAGE_UPLOAD_ISSUE` | #163 PR-F (#9 머지 뒤) |
+
+- **알려진 한계**
+  - 커밋된 뒤 `afterCompletion` 전에 프로세스가 끝나면 그 줄은 유실된다(업무는 커밋됨). 이력 표가 있는 행위는 표가 남는다.
+  - 트랜잭션 동기화를 끈 구성(`SYNCHRONIZATION_NEVER`)에서는 바로 쓰므로 롤백돼도 `succeeded` 대로 남는다. 서비스는 기본값(`SYNCHRONIZATION_ALWAYS`)을 바꾸지 않는다.
+  - 마지막 변경자 칼럼(`updated_by_member_id`)은 두지 않는다 — "지금 값을 누가 바꿨나" 는 로그 검색으로 찾는다. 화면에 필요해지면 별도 이슈로 본다.
+  - 가드는 선언만 본다. 선언하고 Facade 에서 줄을 빠뜨린 경우는 서비스의 일치 테스트 · 리뷰로 본다.
+  - `REQUIRES_NEW` 안쪽 트랜잭션에서 `write` 하면 **안쪽 트랜잭션의 커밋 기준**으로 기록된다 — 바깥 트랜잭션이 나중에 롤백돼도 `SUCCESS` 로 남는다. 감사 줄은 업무 트랜잭션(바깥) 범위에서 쓴다.
+  - 대기 목록 남용(새 핸들러를 목록에 넣어 통과시키기)은 리뷰로 막는다 — 가드는 이슈 표기(`#<번호>`)와 한 항목 한 핸들러만 강제한다.
+  - GET 감사(`ORDER_VIEW` · `ORDER_SEARCH` · `MEMBER_SEARCH` 등 열람 감사)는 가드 대상 밖이다. 개인정보를 읽는 어드민 조회를 더할 때는 리뷰에서 감사 여부를 본다.
 
 ### 11-5. 이중 방어 확인
 
