@@ -184,8 +184,9 @@ export const SHIPPING_DOMESTIC_TOUR: Tour = {
 
 /**
  * 상품 등록(#29). 가리키는 앵커(`product-basic` · `product-price` · `product-options` · `product-skus` · `product-submit`)는
- * 상품 등록 폼(`ProductCreateForm`)의 구역마다 단다. **앵커가 폼에 달리기 전에는 `/products/new` 에 연결하지 않는다** —
- * 필수 요소가 없어 시작하지 않는데 도움말의 "다시 보기" 만 남으면 고장으로 보인다. 앵커를 다는 변경에서 도움말 표에 연결한다.
+ * 상품 등록 폼(`ProductCreateForm`)의 구역마다 달려 있다 — 이름을 바꾸면 폼과 같이 바꾼다(폼 테스트가 이 정의의 앵커를 확인한다).
+ * 대표 이미지 칸은 첨부(BE #9 F2) 전까지 꺼 둔 칸이라 단계에 넣지 않는다. 서버 허용 목록에 `product-new` 가 오르기 전에는
+ * 이 브라우저 기록으로만 정한다(`progress.ts` 의 `writableGuide`).
  * 안내는 위치 설명만 한다. 등록 버튼을 대신 누르지 않는다(투어 중에는 가리킨 요소를 누를 수 없다).
  */
 export const PRODUCT_NEW_TOUR: Tour = {
@@ -333,12 +334,12 @@ const ROUTES: Route[] = [
         },
         {
           question: '이미지는 어디서 넣나요?',
-          answer: '이미지 추가 기능이 준비되면 등록한 상품에 붙일 수 있습니다.',
+          answer:
+            '"대표 이미지" 칸은 상품에 이미지를 붙이는 서버 기능이 준비되면 열립니다. 지금은 이미지 없이 등록됩니다.',
         },
         ...COMMON_FAQ,
       ],
-      // 앵커가 폼에 달리면 PRODUCT_NEW_TOUR 를 연결한다
-      tour: null,
+      tour: PRODUCT_NEW_TOUR,
     },
   },
   {
