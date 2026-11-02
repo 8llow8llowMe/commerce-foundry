@@ -31,6 +31,10 @@ public final class PaymentValidationMessage {
     // 서비스 간 결제 조회 경로 (GET /internal/v1/payments/{paymentId}) — 숫자가 아니면 PAYMENT_198
     public static final String PAYMENT_ID_POSITIVE = "PAYMENT_115:결제 아이디가 올바르지 않습니다.";
 
+    // 어드민 결제 목록 페이지
+    public static final String PAGE_MIN = "PAYMENT_116:페이지는 0 이상이어야 합니다.";
+    public static final String SIZE_RANGE = "PAYMENT_117:페이지 크기는 1~100이어야 합니다.";
+
     private PaymentValidationMessage() {
     }
 }

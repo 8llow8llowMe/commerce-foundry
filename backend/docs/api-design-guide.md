@@ -930,6 +930,30 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   503 `PAYMENT_010` 은 청구가 없었다는 뜻이다 — 같은 본문으로 다시 보낸다(키는 같아도 새로 만들어도 된다). UNKNOWN · 504 · 500 `PAYMENT_013` 은 상태 조회로 확인한다.
 - 결제 준비 · 승인은 운영 결제 게이트(`payment.enabled`, 기본 false — #308 · #15 뒤에 운영에서 켠다)가 닫혀 있으면 503 `PAYMENT_015` 다. 상태 조회는 막지 않는다.
 
+#### 어드민 결제 목록 (#15, 읽기 범위)
+
+`GET /api/v1/admin/payments` — `hasRole('ADMIN')`, `PageResponse<PaymentAdminItem>`. 고객 · internal DTO 와 분리한다.
+
+| 파라미터 | 규칙 | 오류 |
+|---|---|---|
+| `status` | 현재 `PaymentStatus` 10개 상태 중 하나. 미지정이면 전체 | 변환 실패 400 `PAYMENT_198` |
+| `orderId` | 선택적 양의 주문 아이디. 다른 서비스는 호출하지 않고 저장된 아이디만 비교 | 400 `PAYMENT_102` · `198` |
+| `orderSynced` | 선택적 boolean. 저장된 주문 성공 회신 수신 여부로 거른다 | 변환 실패 400 `PAYMENT_198` |
+| `page` · `size` | 0부터 · 기본 20, size 1~100. 고정 결제 아이디 내림차순 | 400 `PAYMENT_116` · `117` |
+
+- 필터는 AND 이다. 없는 주문이나 조건에 맞는 결제가 없으면 200 빈 `contents`이며, 뒤쪽 빈 페이지도 필터 전체의 정확한 `totalElements`를 보존한다.
+- 항목은 `paymentId`, `orderId`, `status`, `amount`, `method`, `unknownReason`, `orderSynced`, `orderSyncFailureCode`,
+  `createdAt`, `updatedAt`, `approvalStartedAt`, `approvedAt` 이다. 아이디는 문자열, 금액은 `{amount, currency}`, 상태 · 수단 · 미확정 이유는 metadata, 시각은 UTC ISO 이다.
+  수단 · 미확정 이유 · 주문 회신 거절 코드 · 승인 시작/완료 시각은 null 일 수 있다. `unknownReason`은 DONE/FAILED에도 과거 원인으로 남을 수 있어 지우지 않는다.
+- `amount`는 서버에 저장된 **결제 시도 원금**이다. 환불 차감 잔액 · 실제 수납액 · PG 대사 결과로 해석하지 않는다.
+- `orderSynced=false`는 READY 등 미승인 상태에도 있다. DONE 중 성공 회신 미확인을 보려면 `status=DONE&orderSynced=false`로 조회한다.
+  그중 `orderSyncFailureCode=null`은 회신 미확인, 코드가 있으면 거절 회신이다. 어느 쪽도 자동 재전송 대상으로 보지 않는다 (`payment-guide.md` §6).
+- 결제키 · 고객 승인 멱등 키 · PG 원문 메시지 · 회원 개인정보는 projection과 응답에서 제외한다. 목록은 외부 호출 · 쓰기 · PG 재조회 · 재승인을 하지 않는다.
+- `PaymentAdminFacade`의 읽기 전용 REPEATABLE_READ에서 목록/count를 같은 조건으로 읽으며 최대 2회 질의다. N+1과 스키마 변경은 없다.
+  주문 조건은 `idx_payment_order_id`, 상태+회신 조건은 `idx_payment_status_order_synced_id`, 전체 최신순은 PK를 활용할 수 있다.
+  상태만 거르면 중간 회신 컬럼 때문에 별도 정렬이 필요할 수 있으며 초기 운영자 조회 규모에서 수용한다.
+- `REFUND_FAILED`는 현재 결제 상태에 없으므로 400 `PAYMENT_198`이다. 취소/환불 모델의 실패 필터, 취소 · 웹훅 · 자동 복구 · 알림은 #15의 후속 범위다.
+
 ### 2-16. 어드민 주문 관리 (order-service, #17 PR-1)
 
 | API | 권한 | 응답 | 오류 |
