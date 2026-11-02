@@ -37,6 +37,8 @@ import software.amazon.awssdk.services.s3.model.MetadataDirective;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
@@ -165,6 +167,26 @@ final class S3CompatibleObjectStorageClient implements ObjectStorageClient, Auto
             return new PresignedUpload(presigned.url().toString(), PresignedUpload.METHOD_PUT, requestHeaders(presigned.signedHeaders()), presigned.expiration());
         } catch (SdkException e) {
             throw translate(Operation.PRESIGN_PUT, e);
+        }
+    }
+
+    @Override
+    public PresignedDownload presignGet(String key, Duration ttl) {
+        ObjectKeys.requireValid(key);
+        if (ttl == null || ttl.compareTo(Duration.ofSeconds(1)) < 0 || ttl.getNano() != 0 || ttl.compareTo(presignTtl) > 0) {
+            throw new IllegalArgumentException("ttl은 1초 이상의 정수 초이며 storage.presign-ttl 이하여야 합니다");
+        }
+        GetObjectRequest get = GetObjectRequest.builder().bucket(bucket).key(key)
+            .responseContentDisposition("attachment")
+            .responseContentType("application/octet-stream")
+            .responseCacheControl("private, no-store")
+            .build();
+        try {
+            PresignedGetObjectRequest presigned = presigner.presignGetObject(GetObjectPresignRequest.builder()
+                .signatureDuration(ttl).getObjectRequest(get).build());
+            return new PresignedDownload(presigned.url().toString(), presigned.expiration());
+        } catch (SdkException e) {
+            throw translate(Operation.PRESIGN_GET, e);
         }
     }
 

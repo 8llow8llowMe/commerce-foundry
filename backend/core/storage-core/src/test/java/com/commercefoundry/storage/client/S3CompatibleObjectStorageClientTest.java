@@ -67,6 +67,64 @@ class S3CompatibleObjectStorageClientTest {
     private static final String ETAG = "\"0123456789abcdef0123456789abcdef\"";
 
     @Test
+    @DisplayName("비공개 GET은 요청 TTL과 다운로드 응답 정책을 서명하고 공개 CDN 주소를 사용하지 않는다")
+    void presignsPrivateDownload() {
+        try (S3CompatibleObjectStorageClient client = client(true, Duration.ofMinutes(5))) {
+            Instant before = Instant.now();
+            PresignedDownload download = client.presignGet("job-results/1/2/결과 파일.csv", Duration.ofSeconds(45));
+            URI url = URI.create(download.downloadUrl());
+            Map<String, String> query = query(url);
+
+            assertThat(url.getScheme() + "://" + url.getAuthority()).isEqualTo(ENDPOINT);
+            assertThat(url.getPath()).isEqualTo("/" + BUCKET + "/job-results/1/2/결과 파일.csv");
+            assertThat(query).containsEntry("X-Amz-Expires", "45")
+                .containsEntry("response-content-disposition", "attachment")
+                .containsEntry("response-content-type", "application/octet-stream")
+                .containsEntry("response-cache-control", "private, no-store")
+                .containsEntry("X-Amz-SignedHeaders", "host")
+                .containsKey("X-Amz-Signature");
+            assertThat(download.expiresAt()).isCloseTo(before.plusSeconds(45), within(5, ChronoUnit.SECONDS));
+            assertThat(download.toString()).doesNotContain("X-Amz", "test-access-key", "job-results", "결과 파일")
+                .isEqualTo("PresignedDownload[downloadUrl=****, expiresAt=" + download.expiresAt() + "]");
+        }
+    }
+
+    @Test
+    @DisplayName("GET은 1초와 설정 TTL 경계까지 허용하고 virtual-hosted 버킷을 지원한다")
+    void downloadSupportsTtlBoundariesAndVirtualHost() {
+        try (S3CompatibleObjectStorageClient client = client(false, Duration.ofMinutes(5))) {
+            URI shortest = URI.create(client.presignGet(KEY, Duration.ofSeconds(1)).downloadUrl());
+            assertThat(shortest.getHost()).isEqualTo(BUCKET + ".localhost");
+            assertThat(shortest.getPath()).isEqualTo("/" + KEY);
+            assertThat(query(shortest)).containsEntry("X-Amz-Expires", "1");
+            assertThat(query(URI.create(client.presignGet(KEY, Duration.ofMinutes(5)).downloadUrl())))
+                .containsEntry("X-Amz-Expires", "300");
+        }
+    }
+
+    @Test
+    @DisplayName("GET은 null·0·음수·소수 초·설정 상한 초과 TTL을 거절한다")
+    void rejectsInvalidDownloadTtl() {
+        try (S3CompatibleObjectStorageClient client = client(true, Duration.ofMinutes(5))) {
+            for (Duration ttl : new Duration[] {null, Duration.ZERO, Duration.ofSeconds(-1), Duration.ofMillis(999),
+                Duration.ofMillis(1500), Duration.ofSeconds(301)}) {
+                assertThatThrownBy(() -> client.presignGet(KEY, ttl)).isInstanceOf(IllegalArgumentException.class);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("비활성 스토리지는 GET 서명도 DISABLED/PRESIGN_GET으로 거절한다")
+    void disabledDownloadIsClassified() {
+        ObjectStorageClient disabled = new DisabledObjectStorageClient("https://cdn.example.test");
+        assertThatThrownBy(() -> disabled.presignGet(KEY, Duration.ofSeconds(30)))
+            .isInstanceOfSatisfying(StorageException.class, e -> {
+                assertThat(e.reason()).isEqualTo(Reason.DISABLED);
+                assertThat(e.operation()).isEqualTo(StorageException.Operation.PRESIGN_GET);
+            });
+    }
+
+    @Test
     @DisplayName("업로드 서명은 오프라인으로 만들고, Content-Type · Content-Length · Host 를 서명하며 만료는 설정 TTL 이다")
     void presignsPutWithContentTypeAndLength() {
         try (S3CompatibleObjectStorageClient client = client(true, Duration.ofMinutes(5))) {
@@ -157,6 +215,7 @@ class S3CompatibleObjectStorageClientTest {
         try (S3CompatibleObjectStorageClient client = client(true, Duration.ofMinutes(5))) {
             assertThatThrownBy(() -> client.publicUrlOf(key)).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> client.presignPut(key, "image/jpeg", 10)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> client.presignGet(key, Duration.ofSeconds(30))).isInstanceOf(IllegalArgumentException.class);
         }
     }
 
@@ -221,6 +280,21 @@ class S3CompatibleObjectStorageClientTest {
         private final S3Presigner presigner = mock(S3Presigner.class);
         private final S3CompatibleObjectStorageClient client =
             new S3CompatibleObjectStorageClient(s3Client, presigner, BUCKET, Duration.ofMinutes(5), "https://cdn.example.test");
+
+        @Test
+        @DisplayName("GET 서명기 장애는 PRESIGN_GET/UNAVAILABLE로 번역하며 스토리지 조회 I/O가 없다")
+        void downloadTranslatesSigningFailureWithoutStorageIo() {
+            when(presigner.presignGetObject(any(software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest.class)))
+                .thenThrow(SdkClientException.create("signing failed"));
+
+            assertThatThrownBy(() -> client.presignGet(KEY, Duration.ofSeconds(30)))
+                .isInstanceOfSatisfying(StorageException.class, e -> {
+                    assertThat(e.reason()).isEqualTo(Reason.UNAVAILABLE);
+                    assertThat(e.operation()).isEqualTo(StorageException.Operation.PRESIGN_GET);
+                    assertThat(e.getMessage()).doesNotContain(KEY);
+                });
+            verifyNoInteractions(s3Client);
+        }
 
         @Test
         @DisplayName("삭제 — 404 NoSuchKey 를 주는 스토리지여도 성공이다(멱등)")

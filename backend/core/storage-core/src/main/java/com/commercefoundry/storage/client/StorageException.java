@@ -39,7 +39,7 @@ public class StorageException extends RuntimeException {
 
     /** 실패한 동작 — 메시지 · 로그에서 어느 호출인지 가린다. */
     public enum Operation {
-        PRESIGN_PUT, HEAD, READ_RANGE, COPY, DELETE, PUT, PUBLIC_URL
+        PRESIGN_PUT, PRESIGN_GET, HEAD, READ_RANGE, COPY, DELETE, PUT, PUBLIC_URL
     }
 
     private final Reason reason;
