@@ -120,6 +120,27 @@ class OrderHistoryWebControllerTest {
         assertFailure(request("POST", "/api/v1/orders/10/cancellation", CANCEL_BODY, bearer(MemberRole.CUSTOMER)), HttpStatus.NOT_FOUND, "ORDER_001");
     }
 
+    @Test
+    void purchaseConfirmationUsesAuthenticatedMemberAndHidesOtherOrders() {
+        OrderDetailResponse detail = OrderDetailResponse.builder().orderId("9").build();
+        given(orderHistoryWebUseCase.confirmPurchase(TestTokens.MEMBER_ID, 9L)).willReturn(detail);
+        var customer = mvc.patch().uri("/api/v1/orders/9/purchase-confirmation")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange();
+        assertThat(customer).hasStatus(HttpStatus.OK);
+        assertThat(customer).bodyJson().extractingPath("$.dataBody.orderId").isEqualTo("9");
+        verify(orderHistoryWebUseCase).confirmPurchase(TestTokens.MEMBER_ID, 9L);
+
+        var admin = mvc.patch().uri("/api/v1/orders/9/purchase-confirmation")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertFailure(admin, HttpStatus.FORBIDDEN, "SECURITY_005");
+
+        given(orderHistoryWebUseCase.confirmPurchase(TestTokens.MEMBER_ID, 10L))
+            .willThrow(new OrderException(OrderErrorCode.NOT_FOUND_ORDER));
+        var other = mvc.patch().uri("/api/v1/orders/10/purchase-confirmation")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange();
+        assertFailure(other, HttpStatus.NOT_FOUND, "ORDER_001");
+    }
+
     @ParameterizedTest(name = "{0}")
     @CsvSource(delimiter = '|', value = {
         "페이지 음수   | GET  | /api/v1/orders?page=-1             | -                                | ORDER_144",

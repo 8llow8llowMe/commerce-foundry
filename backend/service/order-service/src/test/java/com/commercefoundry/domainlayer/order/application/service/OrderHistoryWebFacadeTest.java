@@ -51,4 +51,25 @@ class OrderHistoryWebFacadeTest {
             exception -> assertThat(exception.getErrorCode()).isEqualTo(OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID));
         verifyNoInteractions(presenter);
     }
+
+    @Test
+    void concurrentPurchaseConfirmationIsIdempotent() {
+        Order confirmed = orderIn(OrderStatus.PURCHASE_CONFIRMED);
+        OrderDetailResponse response = OrderDetailResponse.builder().orderId("1").build();
+        when(processor.confirmPurchase(7L, 1L)).thenThrow(new ObjectOptimisticLockingFailureException("orders", 1L));
+        when(processor.get(7L, 1L)).thenReturn(confirmed);
+        when(presenter.toDetailResponse(confirmed)).thenReturn(response);
+
+        assertThat(facade.confirmPurchase(7L, 1L)).isSameAs(response);
+    }
+
+    @Test
+    void concurrentReturnRejectsPurchaseConfirmation() {
+        when(processor.confirmPurchase(7L, 1L)).thenThrow(new ObjectOptimisticLockingFailureException("orders", 1L));
+        Order returned = orderIn(OrderStatus.RETURN_REQUESTED);
+        when(processor.get(7L, 1L)).thenReturn(returned);
+
+        assertThatThrownBy(() -> facade.confirmPurchase(7L, 1L)).isInstanceOfSatisfying(OrderException.class,
+            exception -> assertThat(exception.getErrorCode()).isEqualTo(OrderErrorCode.ORDER_CONCURRENTLY_CHANGED));
+    }
 }

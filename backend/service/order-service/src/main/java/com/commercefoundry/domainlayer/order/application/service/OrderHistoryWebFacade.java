@@ -56,4 +56,19 @@ public class OrderHistoryWebFacade implements OrderHistoryWebUseCase {
         }
         return orderHistoryWebPresenter.toDetailResponse(canceled);
     }
+
+    @Override
+    public OrderDetailResponse confirmPurchase(long memberId, long orderId) {
+        Order confirmed;
+        try {
+            confirmed = orderHistoryProcessor.confirmPurchase(memberId, orderId);
+        } catch (OptimisticLockingFailureException exception) {
+            Order current = orderHistoryProcessor.get(memberId, orderId);
+            if (current.status() != OrderStatus.PURCHASE_CONFIRMED) {
+                throw new OrderException(OrderErrorCode.ORDER_CONCURRENTLY_CHANGED);
+            }
+            confirmed = current;
+        }
+        return orderHistoryWebPresenter.toDetailResponse(confirmed);
+    }
 }

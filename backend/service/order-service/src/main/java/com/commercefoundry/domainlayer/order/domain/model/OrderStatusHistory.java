@@ -40,6 +40,15 @@ public record OrderStatusHistory(
             StatusChangedBy.SYSTEM, null, "AUTO_PURCHASE_CONFIRMATION");
     }
 
+    /** 고객이 배송 완료 주문을 구매 확정했다. */
+    public static OrderStatusHistory confirmedByCustomer(long id, Order order) {
+        if (order.isNew() || order.status() != OrderStatus.DELIVERED) {
+            throw new IllegalArgumentException("고객 구매 확정 이력은 저장된 배송 완료 주문에서만 만듭니다");
+        }
+        return new OrderStatusHistory(id, order.id(), OrderStatus.DELIVERED, OrderStatus.PURCHASE_CONFIRMED,
+            StatusChangedBy.CUSTOMER, order.memberId(), "CUSTOMER_PURCHASE_CONFIRMATION");
+    }
+
     /** 고객이 주문을 만들었다 — null → PENDING_PAYMENT. */
     public static OrderStatusHistory created(long id, Order order) {
         if (!order.isNew() || order.createdAt() != null || order.status() != OrderStatus.PENDING_PAYMENT) {
