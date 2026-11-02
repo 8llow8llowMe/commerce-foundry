@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
-import { ImageUploadField } from '@/components/upload/ImageUploadField';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied, type FormErrors } from '@/lib/api-errors';
 import { flattenTree, type CategoryRow } from '@/lib/category/tree';
 import { CATEGORIES_PATH, type CategoryTree } from '@/lib/category/types';
@@ -15,7 +14,6 @@ import {
   CREATE_PRODUCT_PATH,
   createdProductHref,
   CURRENCIES,
-  DESCRIPTION_MAX,
   emptyProductForm,
   localToday,
   MAX_QUANTITY_MAX,
@@ -31,19 +29,12 @@ import {
   type SaleStatusCode,
 } from '@/lib/product/create';
 import { createFailure, errorSummary } from '@/lib/product/create-errors';
-import { PRODUCT_IMAGE_UPLOAD_PATH } from '@/lib/upload/image-upload';
+import { DescriptionHtmlField } from './DescriptionHtmlField';
 import { OptionEditor } from './OptionEditor';
+import { ProductImagesField } from './ProductImagesField';
 import { SkuTable } from './SkuTable';
 
 const selectClass = 'h-10 rounded-md border border-border bg-bg px-3';
-
-/**
- * 상품 저장 본문에 이미지(`uploadKey`)를 싣는 BE #9 F2 가 아직 없다 — 업로드 칸은 보이되 꺼 둔다.
- * 지금 올리면 저장할 곳이 없고 올린 파일은 하루 뒤 지워진다. F2 머지 뒤 켜고 `productRequest` 에 싣는다.
- */
-const IMAGE_ATTACH_READY = false;
-const IMAGE_ATTACH_PENDING =
-  '상품에 이미지를 붙이는 서버 기능이 준비되면 열립니다. 지금은 이미지 없이 등록됩니다.';
 
 type Categories =
   | { kind: 'loading' }
@@ -52,8 +43,8 @@ type Categories =
   | { kind: 'denied'; denied: AccessDenied };
 
 /**
- * 어드민 상품 등록(#29 · BE #9 E1) — `POST /api/v1/admin/products`. 이미지 첨부(F2) · 맞춤 제작 · 수정은 아직 없다(BE 미머지).
- * 이미지 업로드 칸(F1 발급)은 붙여 두고 꺼 둔다(`IMAGE_ATTACH_READY`).
+ * 어드민 상품 등록(#29 · BE #9 E1 · F2) — `POST /api/v1/admin/products`. 맞춤 제작 입력은 아직 없다(BE 후속).
+ * 이미지는 고르자마자 올리고(F1 발급 → 스토리지) 본문 `images` 에 `uploadKey` 만 싣는다(F2). 올리는 중에는 등록을 막는다.
  * 섹션 · 등록 버튼 줄의 `data-tour` 는 온보딩 투어(#228 `product-new-v1`)가 가리키는 앵커다 — 이름을 바꾸면 투어 정의도 같이 바꾼다.
  * 앵커는 카테고리를 불러온 뒤에 단다 — 불러오는 중에 투어가 뜨면 그 뒤 403 으로 폼이 권한 안내로 바뀌어도 투어가 사라진 요소를 가리킨 채 남는다.
  * **멱등 키가 없다** — 같은 본문을 두 번 보내면 상품이 둘 생긴다. 그래서 제출은 ref 로 한 번만 받고, 성공하면 곧바로 상세로 옮긴다(replace).
@@ -69,6 +60,7 @@ export function ProductCreateForm() {
   const [denied, setDenied] = useState<AccessDenied | null>(null);
   const [categories, setCategories] = useState<Categories>({ kind: 'loading' });
   const [categoryLoad, setCategoryLoad] = useState(0);
+  const [uploading, setUploading] = useState<ReadonlySet<string>>(new Set());
   const submitting = useRef(false);
   const summaryRef = useRef<HTMLDivElement>(null);
 
@@ -119,8 +111,17 @@ export function ProductCreateForm() {
     requestAnimationFrame(() => summaryRef.current?.focus());
   };
 
+  const changeUploading = (slotId: string, busy: boolean) =>
+    setUploading((value) => {
+      if (value.has(slotId) === busy) return value;
+      const next = new Set(value);
+      if (busy) next.add(slotId);
+      else next.delete(slotId);
+      return next;
+    });
+
   const submit = async () => {
-    if (submitting.current) return;
+    if (submitting.current || uploading.size > 0) return;
     const built = productRequest(form);
     if (!built.ok) {
       setUncertain(false);
@@ -147,7 +148,7 @@ export function ProductCreateForm() {
         return;
       }
       // 등록됐는지 모르는 실패는 제출을 계속 막는다 — 운영자가 목록에서 확인하고 "없었다" 를 누른 뒤에만 다시 연다
-      // (멱등 키가 없어 다시 누르면 상품이 하나 더 생기고, 아직 삭제 API 가 없다)
+      // (멱등 키가 없어 다시 누르면 상품이 하나 더 생긴다 — 생기면 상세의 판매 중지 · 삭제로 지운다)
       if (!failure.uncertain) submitting.current = false;
       setUncertain(failure.uncertain);
       showErrors(failure.errors);
@@ -173,7 +174,7 @@ export function ProductCreateForm() {
         event.preventDefault();
         void submit();
       }}
-      // 입력 칸의 Enter 로 제출하지 않는다 — 옵션 · 재고를 채우다 덜 된 상품이 생기고, 아직 수정 · 삭제 API 가 없다. 제출은 버튼으로만
+      // 입력 칸의 Enter 로 제출하지 않는다 — 옵션 · 재고를 채우다 덜 된 상품이 생기고, 옵션 · SKU 는 등록 뒤 고칠 수 없다. 제출은 버튼으로만
       onKeyDown={(event) => {
         if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
           event.preventDefault();
@@ -192,10 +193,7 @@ export function ProductCreateForm() {
         <h1 id={`${id}-title`} className="text-xl font-semibold">
           상품 등록
         </h1>
-        <p className="text-sm text-muted-fg">
-          대표 이미지 칸은 상품에 이미지를 붙이는 서버 기능이 준비되면 열립니다. 지금은 이미지 없이
-          등록됩니다. 같은 내용으로 두 번 등록하면 상품이 두 개 생깁니다.
-        </p>
+        <p className="text-sm text-muted-fg">같은 내용으로 두 번 등록하면 상품이 두 개 생깁니다.</p>
       </div>
 
       <div ref={summaryRef} tabIndex={-1} className="outline-none">
@@ -246,37 +244,21 @@ export function ProductCreateForm() {
             onChange={(event) => set({ summary: event.currentTarget.value })}
             errors={errorsOf('summary')}
           />
-          <div className="flex flex-col gap-1">
-            <label htmlFor={`${id}-description`} className="text-sm font-medium">
-              상세 설명 HTML (선택)
-            </label>
-            <textarea
-              id={`${id}-description`}
-              value={form.descriptionHtml}
-              rows={10}
-              aria-invalid={errorsOf('descriptionHtml').length > 0 || undefined}
-              aria-describedby={`${id}-description-help${errorsOf('descriptionHtml').length > 0 ? ` ${id}-description-error` : ''}`}
-              onChange={(event) => set({ descriptionHtml: event.currentTarget.value })}
-              className="rounded-md border border-border bg-bg px-3 py-2 font-mono text-sm text-fg outline-none focus:ring-2 focus:ring-primary"
-            />
-            <p id={`${id}-description-help`} className="text-xs text-muted-fg">
-              {form.descriptionHtml.length.toLocaleString('ko-KR')} /{' '}
-              {DESCRIPTION_MAX.toLocaleString('ko-KR')}자. 허용되지 않은 태그 · 속성 · 상대 주소는
-              저장할 때 빠집니다.
-            </p>
-            <FieldError id={`${id}-description-error`} messages={errorsOf('descriptionHtml')} />
-          </div>
+          <DescriptionHtmlField
+            value={form.descriptionHtml}
+            onChange={(descriptionHtml) => set({ descriptionHtml })}
+            errors={errorsOf('descriptionHtml')}
+          />
         </Section>
 
-        <Section title="대표 이미지">
-          <ImageUploadField
-            label="대표 이미지 (선택)"
-            issuePath={PRODUCT_IMAGE_UPLOAD_PATH}
-            value={null}
-            onChange={() => {}}
+        <Section title="이미지">
+          <ProductImagesField
+            value={form}
+            onChange={({ thumbnail, gallery }) => set({ thumbnail, gallery })}
+            errorsOf={errorsOf}
+            disabled={saving}
+            onUploadingChange={changeUploading}
             onAccessDenied={setDenied}
-            disabled={!IMAGE_ATTACH_READY}
-            disabledNotice={IMAGE_ATTACH_PENDING}
           />
         </Section>
 
@@ -483,8 +465,11 @@ export function ProductCreateForm() {
       </fieldset>
 
       <div className="flex items-center gap-3" data-tour={tourAnchor('product-submit')}>
-        <Button type="submit" disabled={saving || uncertain || categories.kind !== 'ok'}>
-          {saving ? '등록 중…' : '상품 등록'}
+        <Button
+          type="submit"
+          disabled={saving || uncertain || uploading.size > 0 || categories.kind !== 'ok'}
+        >
+          {saving ? '등록 중…' : uploading.size > 0 ? '이미지 올리는 중…' : '상품 등록'}
         </Button>
         <Link href="/products" className="text-sm text-muted-fg underline-offset-4 hover:underline">
           취소

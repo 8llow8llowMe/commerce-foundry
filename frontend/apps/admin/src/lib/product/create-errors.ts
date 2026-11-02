@@ -8,6 +8,12 @@ import {
   type FormErrors,
 } from '@/lib/api-errors';
 import {
+  IMAGE_FORMAT_NOT_ALLOWED,
+  IMAGE_SIZE_NOT_ALLOWED,
+  UPLOAD_DISABLED,
+} from '@/lib/upload/image-upload';
+import {
+  ALT_TEXT_INVALID,
   AMOUNT_FORMAT,
   AMOUNT_REQUIRED,
   AMOUNT_TOO_LARGE,
@@ -21,6 +27,7 @@ import {
   GROUP_VALUES_REQUIRED,
   GROUPS_TOO_MANY,
   HS_CODE_INVALID,
+  IMAGES_MAX,
   INITIAL_STOCK_INVALID,
   MAX_QUANTITY_RANGE,
   NAME_CHARACTER,
@@ -47,6 +54,15 @@ export const OPTION_INVALID = '옵션 구성이 올바르지 않습니다. 옵�
 export const SKU_DUPLICATED = '같은 옵션 조합의 SKU 가 두 번 있습니다. 옵션 값을 확인해 주세요.';
 export const PRICE_RULE = '가격 설정이 올바르지 않습니다. 정가 · 추가금 규칙을 확인해 주세요.';
 export const BUSY = '다른 카테고리 변경을 처리 중입니다. 잠시 후 다시 등록해 주세요.';
+export const IMAGES_INVALID = `이미지는 대표를 포함해 ${IMAGES_MAX}장까지, 대체 텍스트는 200자 이하로 확인해 주세요.`;
+export const IMAGE_CONFIGURATION =
+  '대표 이미지는 한 장이고 같은 이미지를 두 번 붙일 수 없습니다. 이미지를 확인해 주세요.';
+/** 다른 운영자의 키 · 하루가 지나 지워진 업로드 · 잘못된 키(`PRODUCT_032`) — 서버는 어느 이유인지 알리지 않는다 */
+export const IMAGE_UPLOAD_GONE =
+  '올린 이미지를 찾을 수 없습니다. 이미지를 빼고 다시 올린 뒤 등록해 주세요(올린 지 하루가 지나면 지워집니다).';
+/** 이미지 검증 · 복사는 저장(DB) 전에 한다 — 저장소 오류(`PRODUCT_035`)면 상품은 생기지 않았다 */
+export const IMAGE_STORAGE_FAILED =
+  '이미지 저장소에 연결하지 못해 등록하지 않았습니다. 잠시 후 다시 등록하거나 이미지를 빼고 등록해 주세요.';
 /**
  * 결과를 모르는 실패(502 · 504 · 5xx · 연결 실패). 등록에는 멱등 키가 없어 다시 보내면 상품이 하나 더 생길 수 있다 —
  * 실패로 단정하지 않고 목록에서 확인하게 한다. 자동으로 다시 보내지 않는다.
@@ -87,6 +103,7 @@ const VALIDATION: Record<string, string> = {
   PRODUCT_038: SHIP_DATE_PAST,
   PRODUCT_137: CATEGORY_INVALID,
   PRODUCT_106: QUANTITY_INVALID,
+  PRODUCT_019: IMAGES_INVALID,
   PRODUCT_100: CHECK_FIELDS,
 };
 
@@ -105,6 +122,7 @@ const TOP_LEVEL = new Set([
   'expectedShipDate',
   'optionGroups',
   'skus',
+  'images',
 ]);
 const SKU_FIELDS = new Set(['additionalPrice', 'saleStatus', 'weightGrams', 'hsCode']);
 
@@ -113,6 +131,7 @@ const SKU_FIELDS = new Set(['additionalPrice', 'saleStatus', 'weightGrams', 'hsC
  * - `@AssertTrue` 메서드 이름(`expectedShipDateWithPreorder` · `skus[0].hsCodeValid`)은 그 칸으로
  * - 처음 재고(`skus[0].initialStock.quantity`)는 처음 재고 칸, SKU 옵션 조합(`skus[0].optionValues[1]`)은 SKU 표 전체로
  * - 옵션 그룹 이름 · 값은 그 그룹(`optionGroups.0.name` · `optionGroups.0.values`)
+ * - 이미지 대체 텍스트는 그 칸(`images.0.altText`, 본문 번호 — `imageEntries`), 그 밖의 이미지 오류는 이미지 칸 전체(`images`)
  */
 export function createFieldKey(path: string): string {
   const key = fieldKey(path);
@@ -125,6 +144,12 @@ export function createFieldKey(path: string): string {
     if (field === 'initialStock') return `skus.${index}.initialStock`;
     if (field !== undefined && SKU_FIELDS.has(field)) return `skus.${index}.${field}`;
     return 'skus';
+  }
+  if (head === 'images') {
+    if (index !== undefined && /^\d+$/.test(index) && field === 'altText') {
+      return `images.${index}.altText`;
+    }
+    return 'images';
   }
   if (head === 'optionGroups' && index !== undefined && /^\d+$/.test(index)) {
     if (field === 'name' || field === 'values') return `optionGroups.${index}.${field}`;
@@ -165,6 +190,9 @@ export function createFailure(cause: unknown): CreateFailure {
   const denied = accessDeniedOf(cause);
   if (denied === 'unauthorized') return errorsOnly({ form: [SESSION_EXPIRED_ON_SAVE] });
   if (denied) return { kind: 'access', denied };
+  // 이미지 첨부 오류는 저장(DB) 전에 난다 — 503(035 · 036)이어도 등록되지 않았다
+  const image = cause instanceof ApiError ? imageFailure(cause.code) : null;
+  if (image) return errorsOnly(image);
   if (!(cause instanceof ApiError) || isUncertain(cause)) {
     return {
       kind: 'errors',
@@ -178,7 +206,9 @@ export function createFailure(cause: unknown): CreateFailure {
     const errors: FormErrors = {};
     for (const item of cause.fieldErrors) {
       const key = createFieldKey(item.field);
-      const message = VALIDATION[item.code] ?? CHECK_FIELDS;
+      const message = key.endsWith('.altText')
+        ? ALT_TEXT_INVALID
+        : (VALIDATION[item.code] ?? CHECK_FIELDS);
       errors[key] = [...new Set([...(errors[key] ?? []), message])];
     }
     return errorsOnly(errors);
@@ -207,6 +237,26 @@ export function createFailure(cause: unknown): CreateFailure {
     return errorsOnly({ form: [cause.message] });
   }
   return errorsOnly({ form: [SAVE_FAILED] });
+}
+
+/** 이미지 첨부(BE #9 F2) 업무 오류 → 칸 오류. 아니면 null */
+function imageFailure(code: string | null): FormErrors | null {
+  switch (code) {
+    case 'PRODUCT_018':
+      return { images: [IMAGE_CONFIGURATION] };
+    case 'PRODUCT_032':
+      return { images: [IMAGE_UPLOAD_GONE] };
+    case 'PRODUCT_033':
+      return { images: [IMAGE_FORMAT_NOT_ALLOWED] };
+    case 'PRODUCT_034':
+      return { images: [IMAGE_SIZE_NOT_ALLOWED] };
+    case 'PRODUCT_035':
+      return { form: [IMAGE_STORAGE_FAILED] };
+    case 'PRODUCT_036':
+      return { form: [UPLOAD_DISABLED] };
+    default:
+      return null;
+  }
 }
 
 /** 서버가 처리했는지 모르는 실패 — 연결 실패 · 봉투 아님 · 502/504 · 503 · 5xx */
