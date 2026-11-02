@@ -24,10 +24,10 @@ export async function renderMainPreview(
   const response = readPreviewDisplay(display);
   if (!hasLocale(locale) || response === null) return { ok: false };
 
-  const blocks = resolveHomeBlocks(
-    response,
-    brand.content[locale].home,
-    getDictionary(locale).home,
-  );
-  return { ok: true, node: <HomeSections sections={blocks} fetchLocale={locale} /> };
+  const content = brand.content[locale];
+  const blocks = resolveHomeBlocks(response, content.home, getDictionary(locale).home);
+  return {
+    ok: true,
+    node: <HomeSections sections={blocks} instagram={content.instagram} fetchLocale={locale} />,
+  };
 }

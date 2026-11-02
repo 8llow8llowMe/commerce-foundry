@@ -176,6 +176,56 @@ describe('StorySection — panel', () => {
   });
 });
 
+describe('인스타그램 줄 (06 Our Story 아래)', () => {
+  const INSTAGRAM = {
+    href: 'https://www.instagram.com/brand/',
+    handle: '@brand',
+    photos: [slot('사진 1'), slot('사진 2'), slot('사진 3'), slot('사진 4'), slot('사진 5')],
+  };
+  const panel = (id: string): StoryData => ({
+    type: 'STORY',
+    id,
+    title: id,
+    body: '',
+    links: [],
+    media: [],
+    layout: 'panel',
+  });
+
+  it('첫 panel 아래에만 계정 링크 하나와 정사각 사진 4장을 둔다', () => {
+    const html = renderToStaticMarkup(
+      <HomeSections
+        sections={[panel('a'), { ...panel('b'), layout: 'centered' }, panel('c')]}
+        instagram={INSTAGRAM}
+      />,
+    );
+    expect(html.match(/href="https:\/\/www.instagram.com\/brand\/"/g)).toHaveLength(1);
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain('@brand');
+    expect(html.match(/aspect-square/g)).toHaveLength(4);
+    expect(html).not.toContain('사진 5');
+    expect(html.indexOf('instagram.com')).toBeLessThan(html.indexOf('id="b-title"'));
+  });
+
+  it('인스타그램이 없거나 https 주소가 아니면 줄을 그리지 않는다', () => {
+    expect(renderToStaticMarkup(<HomeSections sections={[panel('a')]} />)).not.toContain(
+      'Instagram',
+    );
+    const html = renderToStaticMarkup(
+      <HomeSections
+        sections={[panel('a')]}
+        instagram={{ ...INSTAGRAM, href: 'javascript:alert(1)' }}
+      />,
+    );
+    expect(html).not.toContain('Instagram');
+    expect(
+      renderToStaticMarkup(
+        <HomeSections sections={[panel('a')]} instagram={{ ...INSTAGRAM, href: '/our-story' }} />,
+      ),
+    ).not.toContain('Instagram');
+  });
+});
+
 describe('ProductPickSection (서버 데이터)', () => {
   const section = {
     type: 'PRODUCT_PICK' as const,

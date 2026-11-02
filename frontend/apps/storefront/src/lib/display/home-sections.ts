@@ -9,7 +9,7 @@ import type {
   ProductPickSection,
   StorySection,
 } from '@cf/ui';
-import type { ProductListItem } from '@/lib/catalog/types';
+import type { ProductListItem, ProductLook } from '@/lib/catalog/types';
 import type {
   DisplayElementItem,
   DisplayLinkItem,
@@ -205,6 +205,48 @@ function toLook(section: DisplaySectionItem, labels: HomeLinkLabels): LookSectio
     productIds,
     link: toLink(section.link, labels.more),
   };
+}
+
+/**
+ * 룩 API(#62)의 룩 → 메인 LOOK. 대표 이미지가 없으면 null. 섹션 설명 · 링크는 룩에 없거나(목록에는 설명이 없다) 룩 단위가 아니라
+ * 브랜드 설정 LOOK(fallback)의 것을 쓴다. 구성품은 응답 순서 그대로 — 옵션 · SKU 는 화면이 상품 상세로 받는다.
+ */
+export function lookFromApi(look: ProductLook, fallback: LookSection): LookSection | null {
+  if (!look.image) return null;
+  const { url, altText, width, height } = look.image;
+  return {
+    type: 'LOOK',
+    id: `look-${look.lookId}`,
+    title: look.title,
+    body: look.description ?? fallback.body,
+    media: {
+      image: {
+        src: url,
+        alt: altText ?? look.title,
+        ...(width ? { width } : {}),
+        ...(height ? { height } : {}),
+      },
+      placeholder: '',
+    },
+    productIds: look.products.map((product) => product.productId),
+    link: fallback.link,
+  };
+}
+
+/** 블록 중 브랜드 설정의 LOOK(전시 API 에 그릴 LOOK 이 없어 대신 들어간 것)이 있으면 그 LOOK */
+export function fallbackLookOf(blocks: HomeBlock[], template: HomeSection[]): LookSection | null {
+  const look = template.find((section): section is LookSection => section.type === 'LOOK');
+  return look && blocks.includes(look) ? look : null;
+}
+
+/** 대신 들어간 브랜드 설정 LOOK 을 룩 API 의 룩으로 바꾼다. 룩이 없거나 그릴 수 없으면 그대로 둔다 */
+export function replaceFallbackLook(
+  blocks: HomeBlock[],
+  fallback: LookSection,
+  look: ProductLook | null,
+): HomeBlock[] {
+  const replacement = look ? lookFromApi(look, fallback) : null;
+  return replacement ? blocks.map((block) => (block === fallback ? replacement : block)) : blocks;
 }
 
 function isSectionItem(value: unknown): value is DisplaySectionItem {

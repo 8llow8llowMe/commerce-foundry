@@ -38,6 +38,16 @@ export type ProductInfo = {
   shipping: string[] | null;
 };
 
+/** 브랜드 인스타그램(#59 06) — Our Story 패널 아래 글자 링크 + 여백 없이 붙인 정사각 사진 줄 */
+export type InstagramLink = {
+  /** 계정 주소(https). 공개 정보다 */
+  href: string;
+  /** 글자 링크에 보이는 계정 이름 (예: '@brand') */
+  handle: string;
+  /** 정사각 사진 4장, 순서대로. 받기 전에는 빈 자리(placeholder) */
+  photos: HomeMediaSlot[];
+};
+
 /** 스토어 언어. URL 접두어(`/en`) · `<html lang>` · 사전 키로 쓴다 */
 export type Locale = 'ko' | 'en';
 
@@ -54,6 +64,8 @@ export type BrandContent = {
   footerLinks: FooterLink[];
   /** 메인 푸터의 전폭 배경 화보(#59 푸터) — 메인에서만 깔린다. 없으면 null(목록 · 상세와 같은 푸터) */
   footerBackdrop: HomeMediaSlot | null;
+  /** 메인 Our Story(panel) 아래 인스타그램 줄. 없으면 null(줄을 그리지 않는다) */
+  instagram: InstagramLink | null;
   /** 상품 상세 공통 안내(사이즈 가이드 · 배송 · 교환). 고객사 값을 받기 전에는 null 로 숨긴다 */
   productInfo: ProductInfo;
   /** 메인 화면 섹션, 위에서부터. 메인 전시 API(#63)가 생기면 그 응답으로 바꾼다 */

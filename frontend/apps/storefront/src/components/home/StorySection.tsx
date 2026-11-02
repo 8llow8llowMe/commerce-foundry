@@ -1,4 +1,4 @@
-import type { StorySection as StorySectionData } from '@cf/ui';
+import type { InstagramLink, StorySection as StorySectionData } from '@cf/ui';
 import { Link } from '@/components/i18n/Link';
 import { linkRel } from '@/lib/display/home-sections';
 import { CurtainStory } from './CurtainStory';
@@ -10,9 +10,16 @@ import { SectionHeading, sectionLabel } from './SectionHeading';
  * 03 Collection Story · 06 Our Story. curtain 은 CurtainStory, panel 은 PanelStory, asymmetric 은 큰 화보 + 글 + 작은 컷을 어긋나게,
  * centered 는 글을 가운데 두고 아래에 넓은 사진 한 장. 같은 '왼쪽 글 / 오른쪽 이미지' 반복을 피한다.
  */
-export function StorySection({ section }: { section: StorySectionData }) {
+export function StorySection({
+  section,
+  instagram = null,
+}: {
+  section: StorySectionData;
+  /** panel 아래에 둘 브랜드 인스타그램 줄 — 다른 레이아웃은 쓰지 않는다 */
+  instagram?: InstagramLink | null;
+}) {
   if (section.layout === 'curtain') return <CurtainStory section={section} />;
-  if (section.layout === 'panel') return <PanelStory section={section} />;
+  if (section.layout === 'panel') return <PanelStory section={section} instagram={instagram} />;
   const headingId = `${section.id}-title`;
   const [first, second] = section.media;
 

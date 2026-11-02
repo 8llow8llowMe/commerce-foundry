@@ -46,16 +46,27 @@ function normalizeLook(value: unknown): ProductLook | null {
   };
 }
 
-/** `{looks:[...]}` 가 아니면 빈 목록. 아이디 · 제목이 없는 룩과 같은 아이디가 다시 나온 룩은 뺀다 */
-export function normalizeProductLooks(body: unknown): ProductLook[] {
-  if (!isRecord(body) || !Array.isArray(body.looks)) return [];
+/** 아이디 · 제목이 없는 룩과 같은 아이디가 다시 나온 룩은 뺀다 */
+function normalizeLooks(values: unknown[]): ProductLook[] {
   const seen = new Set<string>();
   const looks: ProductLook[] = [];
-  for (const raw of body.looks) {
+  for (const raw of values) {
     const look = normalizeLook(raw);
     if (!look || seen.has(look.lookId)) continue;
     seen.add(look.lookId);
     looks.push(look);
   }
   return looks;
+}
+
+/** 상품별 룩(`GET /api/v1/products/{id}/looks`). `{looks:[...]}` 가 아니면 빈 목록 */
+export function normalizeProductLooks(body: unknown): ProductLook[] {
+  if (!isRecord(body) || !Array.isArray(body.looks)) return [];
+  return normalizeLooks(body.looks);
+}
+
+/** 룩 목록 한 쪽(`GET /api/v1/looks`, SliceResponse). `{contents:[...]}` 가 아니면 빈 목록 */
+export function normalizeLookSlice(body: unknown): ProductLook[] {
+  if (!isRecord(body) || !Array.isArray(body.contents)) return [];
+  return normalizeLooks(body.contents);
 }

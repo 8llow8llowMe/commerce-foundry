@@ -2,6 +2,7 @@ export type {
   BrandConfig,
   BrandContent,
   FooterLink,
+  InstagramLink,
   Locale,
   NavItem,
   ProductInfo,

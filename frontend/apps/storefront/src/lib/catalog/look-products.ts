@@ -1,6 +1,6 @@
 import { serverFetch } from '@/lib/server-api';
 import type { LookProduct } from './look-cart';
-import { normalizeProductLooks } from './product-looks';
+import { normalizeLookSlice, normalizeProductLooks } from './product-looks';
 import type { ProductDetail, ProductLook } from './types';
 
 /** 상세 SHOP THE LOOK 에 보여 줄 최대 룩 수 */
@@ -48,6 +48,31 @@ export async function fetchLookProducts(
     }
   }
   return products;
+}
+
+export const LOOKS_PATH = '/api/v1/looks';
+
+/** 메인 대신 룩을 고를 때 보는 앞쪽 룩 수 — 대표 이미지가 깨진 룩을 건너뛸 만큼만 */
+export const MAIN_LOOK_CANDIDATES = 5;
+
+/** 룩 목록 캐시 시간(초). BE 응답의 `Cache-Control: max-age=60, public` 과 같다 */
+export const LOOKS_REVALIDATE_SEC = 60;
+
+/**
+ * 메인 Shop the Look 의 대신 쓸 룩 — 노출 순서 첫 룩 중 대표 이미지가 있는 것(BE #62). 목록은 공개 · 사용자 무관이라
+ * 토큰 없이 60초 캐시한다. 실패하거나 룩이 없으면(기능 꺼짐 포함) null — 화면은 브랜드 설정의 LOOK 을 그린다.
+ */
+export async function fetchMainLook(): Promise<ProductLook | null> {
+  try {
+    const body = await serverFetch<unknown>(
+      `${LOOKS_PATH}?page=0&size=${MAIN_LOOK_CANDIDATES}`,
+      { cache: 'force-cache', next: { revalidate: LOOKS_REVALIDATE_SEC } },
+      { anonymous: true },
+    );
+    return normalizeLookSlice(body).find((look) => look.image !== null) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
