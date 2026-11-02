@@ -39,6 +39,7 @@ pnpm workspace + Turborepo. 앱 둘과 패키지 넷이다.
 ```
 
 - 브라우저는 게이트웨이를 직접 부르지 않으므로 운영 CORS 가 필요 없다.
+  **예외는 하나** — 어드민 이미지 업로드의 presigned 스토리지 PUT(쿠키 없음, §9 "이미지 업로드")이다. CORS 는 스토리지 쪽 설정이다(#451).
 - 401 은 인증 단계 거절이라 서버가 처리하지 않았다. 쓰기 요청도 재발급 후 1회 재시도가 안전하다.
 - 같은 refresh 토큰의 동시 재발급은 인스턴스 안에서 한 번으로 합친다. 성공 결과는 30초(`REISSUE_GRACE_MS`) 동안
   같은 옛 refresh 토큰에 다시 내준다 — 브라우저가 새 쿠키를 반영하기 전에 옛 쿠키로 온 요청(병렬 요청·다른 탭)이
@@ -599,7 +600,10 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - `POST /api/v1/admin/products`(`backend/docs/api-design-guide.md` 어드민 상품 등록). 코드는 `lib/product/create.ts`(폼 · 조합 · 본문 · 미리 보는 검증) · `create-errors.ts`(실패 처리),
   화면은 `components/product/ProductCreateForm` · `OptionEditor` · `SkuTable` 이다. 목록 위 "상품 등록" 버튼과 시작 체크리스트의 상품 등록 업무(`PRODUCT_REGISTERED`)가 이 화면으로 온다.
   완료 판정은 그대로 서버 재조회다(체크로 완료하지 않는다).
-- **범위** — 이미지(첨부 F2 미머지) · 맞춤 제작 · 수정 · 판매 상태 변경 · 삭제(E2)는 넣지 않는다(비활성 자리도 두지 않는다). 상품은 이미지 없이 생긴다.
+- **범위** — 맞춤 제작 · 수정 · 판매 상태 변경 · 삭제(E2)는 넣지 않는다(비활성 자리도 두지 않는다). 상품은 이미지 없이 생긴다.
+  이미지는 업로드 칸(아래 "이미지 업로드")을 **꺼 둔 채** 두고 이유를 안내한다(`IMAGE_ATTACH_READY = false`) — 등록 본문에 `uploadKey` 를 싣는 첨부(F2)가 아직 없어 올려도 저장할 곳이 없고,
+  올린 파일은 하루 뒤 지워진다. F2 머지 뒤 켜고 `productRequest` 에 싣는다.
+- **투어 앵커** — 섹션 · 등록 버튼 줄에 `data-tour`(`product-basic` · `product-price` · `product-options` · `product-skus` · `product-submit`)를 단다. 온보딩 투어 `product-new-v1`(#228)이 쓸 앵커다(투어 정의 · 연결은 #228 쪽).
 - **폼** — 기본 정보(상품명 · 요약 · 상세 설명 HTML), 카테고리(어드민 트리에서 대표 1개 + 진열 여럿, 숨김 포함), 판매 상태 · 노출(기본 숨김), 가격(통화 하나로 판매가 · 정가 · 추가금, `parseMoneyInput`),
   1회 최대 수량, 프리오더 · 발송 예정일, 옵션 그룹(이름 + 값 칩, 입력 순서 = 노출 순서), SKU 표.
   - **SKU 표는 옵션의 조합(카테시안 곱)이다** — 옵션을 바꾸면 다시 만들고 같은 조합(값 이름 배열 키)의 입력은 남긴다. 옵션이 없으면 "기본" 한 줄(`optionValues: []`).
@@ -617,6 +621,22 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   `045` 는 잠시 후 다시, 칸 모르는 `100` 은 "입력값 확인" 이다. 폼 위에 요약(폼 전체 문구 + 칸 오류 수)을 두고 포커스를 옮긴다. 저장 401 은 폼을 지킨다(§9 공통), 403 은 `AccessNotice`.
 - **정제 안내** — 응답 `descriptionHtmlSanitized: true` 면 상세 주소에 `?sanitized=1` 을 붙여 옮기고, 상세가 안내를 한 번 보인 뒤 주소에서 지운다(`SanitizedNotice`, `history.replaceState`).
 - 입력 중 이탈 경고(beforeunload)는 두지 않는다 — 어드민 폼에 그 규칙이 없다.
+
+### 이미지 업로드 (`components/upload/ImageUploadField`, #29 · BE #9 F1)
+
+- **presigned PUT** — ① `apiFetch` 로 BFF 를 거쳐 업로드 자리를 발급받고(`POST /api/v1/admin/products/image-uploads`, `{ contentType, contentLength }` → `uploadKey` · `uploadUrl` · `method` · `headers` · `expiresAt`)
+  ② 받은 주소로 파일을 **스토리지에 직접** 올린다(게이트웨이 · BFF 를 지나지 않는 유일한 브라우저 요청이다). ③ 저장 본문에 `uploadKey` 를 싣는다.
+  ② 는 다른 origin 이라 쿠키를 싣지 않고(`credentials: 'omit'`), 받은 헤더를 그대로 보내며(서명에 들어간다), 리다이렉트를 따르지 않는다(`redirect: 'error'`).
+  발급 응답은 `usableTicket` 으로 본다 — 메서드는 PUT 만, 주소는 https 절대 주소만(화면이 http 인 로컬 개발에서만 http), 모양이 다르면 일시 오류다.
+  서명 주소는 로그 · 화면에 남기지 않는다.
+- 코드는 `lib/upload/image-upload.ts`(`uploadImage` · `checkImageFile` · `usableTicket` · `uploadFailure`), 칸은 `ImageUploadField`(파일 하나, 고르면 곧바로 올린다). 발급 경로를 prop 으로 받아 다른 화면도 쓴다.
+  - 값은 `{ uploadKey, file }` 이다. 미리보기 object URL 은 `<img>` callback ref 가 `file` 로 만들고 그 정리 함수가 놓는다(React 19, StrictMode 에서도 짝이 맞는다)(서버 주소가 아니다 — `uploads/` 는 공개 읽기가 닫혀 있다).
+  - 다른 파일을 고르거나 칸이 사라지면 진행 중인 업로드를 취소한다. 부르는 화면은 `onUploadingChange` 로 **올리는 동안 저장을 막는다**(키 없이 저장되면 이미지가 조용히 빠진다).
+- **검사** — 올리기 전 형식(JPEG · PNG · WebP) · 크기(1B ~ 10MB)를 BE 와 같은 규칙으로 본다. 판정은 서버다.
+- **오류** — 발급 `PRODUCT_033`(형식) · `034`(크기)는 같은 문구, `035`(스토리지 장애)는 잠시 후 다시, `036`(스토리지 꺼짐)은 "아직 연결되지 않음" — 둘 다 이미지 없이 저장할 수 있다고 안내한다.
+  401 은 화면을 지키는 업로드 문구(§9 공통), 403 은 `AccessNotice`, 429 는 서버 문구(어드민 상품 API 는 게이트웨이 요청 제한 대상이 아니라 쿨다운을 두지 않는다), 그 밖 · 예상 못 한 예외는 일시 오류다. 발급은 저장이 아니라 결과를 모르는 실패도 다시 고르면 새 키를 받는다.
+  ② 실패(서명 만료 · 스토리지 거절 · 연결 실패)는 "다시 골라 주세요" 다 — 키 하나는 한 번 올리는 자리라 발급부터 다시 한다.
+- 스토리지 쪽 CORS(어드민 origin 의 PUT · 헤더 허용)는 인프라 설정이다(#451). 어드민 CSP 는 `frame-ancestors` 만이라 `connect-src` 를 막지 않는다.
 
 ### 회원 목록 (`/members`, #241)
 
