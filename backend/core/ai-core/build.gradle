@@ -5,6 +5,10 @@ plugins {
 }
 
 dependencies {
+    implementation("com.openai:openai-java:${rootProject.ext.openaiSdkVersion}") {
+        // Both SDK schema generators use the shared Jakarta annotations below (#435).
+        exclude group: 'io.swagger.core.v3', module: 'swagger-annotations'
+    }
     implementation 'org.springframework.boot:spring-boot'
     implementation 'org.slf4j:slf4j-api'
     implementation("com.anthropic:anthropic-java:${rootProject.ext.anthropicSdkVersion}") {

@@ -29,7 +29,20 @@ public final class AiClients {
      * @throws IllegalArgumentException 규칙에 어긋나면. 메시지에는 프로퍼티 이름과 설명만 있고 설정값은 없다
      */
     public static AiClient create(AiProperties properties, List<AiCallInterceptor> interceptors) {
-        return create(properties, interceptors, new ClaudeAiProvider());
+        return create(properties, interceptors, (p, m, i) -> {
+            java.util.concurrent.Semaphore permits = new java.util.concurrent.Semaphore(p.maxConcurrency(), true);
+            java.util.Map<String, AiClient> clients = new java.util.LinkedHashMap<>();
+            try {
+                for (String name : p.usedProviders()) {
+                    clients.put(name, "anthropic".equals(name) ? new ClaudeAiProvider(permits).create(p, m, i)
+                        : new OpenAiClient(p, m, i, permits));
+                }
+                return new RoutedAiClient(p, clients);
+            } catch (RuntimeException | Error failure) {
+                clients.values().forEach(RoutedAiClient::closeClient);
+                throw failure;
+            }
+        });
     }
 
     /** Provider 선택은 내부 책임이다. 공통 가드는 Provider 를 만들기 전에 반드시 거친다. */

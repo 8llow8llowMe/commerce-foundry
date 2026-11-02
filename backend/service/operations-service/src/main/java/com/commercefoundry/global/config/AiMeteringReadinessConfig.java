@@ -44,6 +44,13 @@ public class AiMeteringReadinessConfig {
         if (aiUsageProperties.pricing().models().isEmpty()) {
             problems.add("operations.ai.pricing.models 가 비었습니다 — 단가 없이 비용을 계산할 수 없습니다");
         }
+        java.util.Set<String> openAiModels = new java.util.HashSet<>();
+        if ("openai".equals(aiProperties.provider())) openAiModels.add(aiProperties.openai().model());
+        aiProperties.features().keySet().stream().filter(name -> "openai".equals(aiProperties.providerFor(name)))
+            .forEach(name -> openAiModels.add(aiProperties.resolve(name).model()));
+        if (openAiModels.stream().filter(java.util.Objects::nonNull).anyMatch(model -> !aiUsageProperties.pricing().models().containsKey(model))) {
+            problems.add("operations.ai.pricing.models requires an explicit price entry for every selected OpenAI model");
+        }
         Duration worstCall = worstCallDuration(aiProperties);
         if (worstCall != null && aiUsageProperties.reservationSweep().staleAfter().compareTo(worstCall.plus(BACKOFF_MARGIN)) <= 0) {
             problems.add("operations.ai.reservation-sweep.stale-after 는 (1 + ai.max-retries) × ai.request-timeout + ai.acquire-timeout + 재시도 백오프 여유("

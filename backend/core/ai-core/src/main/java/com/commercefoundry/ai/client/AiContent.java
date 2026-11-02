@@ -84,7 +84,7 @@ public sealed interface AiContent permits AiContent.Text, AiToolCall, AiContent.
 
         public static final int MAX_PAYLOAD_CHARS = 100_000;
         /** Provider 별로 받아 주는 블록 종류. 여기 없는 Provider 의 블록은 받되 그 Provider 가 아닌 클라이언트는 보내지 않는다. */
-        static final Map<String, Set<String>> ALLOWED_TYPES = Map.of("anthropic", Set.of("thinking", "redacted_thinking"));
+        static final Map<String, Set<String>> ALLOWED_TYPES = Map.of("anthropic", Set.of("thinking", "redacted_thinking"), "openai", Set.of("reasoning"));
 
         public Opaque {
             if (provider == null || !AiTool.NAME.matcher(provider).matches()) {
