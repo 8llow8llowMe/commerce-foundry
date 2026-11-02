@@ -2,6 +2,7 @@ import type { Currency } from '@cf/api-client';
 import type { SaleStatusCode } from '@/lib/catalog/types';
 import type {
   DisplayElementItem,
+  DisplayLookItem,
   DisplayMainResponse,
   DisplayMediaItem,
   DisplayProductItem,
@@ -40,7 +41,7 @@ export function isPreviewDisplay(
  */
 export const PREVIEW_LIMITS = { sections: 50, items: 30 } as const;
 
-/** 상품 아이디는 상품 링크 경로에 들어가므로 숫자만 받는다(Long) */
+/** 상품 · 룩 아이디는 상품 링크 경로 · 블록 id 에 들어가므로 숫자만 받는다(Long) */
 const PRODUCT_ID = /^[1-9]\d{0,18}$/;
 /** 섹션 아이디는 블록 id 에 들어간다 — BE 임시 아이디(`preview-section-0`) 모양 */
 const SECTION_ID = /^[\w-]{1,64}$/;
@@ -136,6 +137,36 @@ function readMedia(value: unknown): DisplayMediaItem | null {
   };
 }
 
+/** 룩 구성 상품 상한 — BE 룩 규칙(`LookProcessor`, 1~20개)과 같다. 넘는 것은 버린다 */
+const LOOK_PRODUCTS_MAX = 20;
+
+/** 참조 룩(BE #372) — 대표 이미지 주소가 맞지 않으면 그 룩을 버린다. 상품 카드는 하나씩 읽고 맞지 않는 것은 버린다 */
+function readLook(value: unknown): DisplayLookItem | null {
+  if (!isRecord(value) || typeof value.lookId !== 'string' || !PRODUCT_ID.test(value.lookId)) {
+    return null;
+  }
+  if (typeof value.title !== 'string' || !isRecord(value.image)) return null;
+  const url = mediaUrl(value.image.url);
+  if (!url) return null;
+  return {
+    lookId: value.lookId,
+    title: value.title,
+    description: text(value.description),
+    image: {
+      url,
+      width: size(value.image.width),
+      height: size(value.image.height),
+      altText: text(value.image.altText),
+    },
+    products: Array.isArray(value.products)
+      ? value.products
+          .slice(0, LOOK_PRODUCTS_MAX)
+          .map(readProduct)
+          .filter((product) => product !== null)
+      : [],
+  };
+}
+
 function readItem(value: unknown, index: number): DisplayElementItem | null {
   if (!isRecord(value)) return null;
   // 아이템 아이디는 화면이 쓰지 않는다 — BE 임시 아이디를 믿지 않고 위치로 다시 붙인다
@@ -148,6 +179,10 @@ function readItem(value: unknown, index: number): DisplayElementItem | null {
   if (value.itemType === 'PRODUCT') {
     const product = readProduct(value.product);
     return product ? { itemId, itemType: 'PRODUCT', media: null, product, caption } : null;
+  }
+  if (value.itemType === 'LOOK') {
+    const look = readLook(value.look);
+    return look ? { itemId, itemType: 'LOOK', media: null, product: null, look, caption } : null;
   }
   return null;
 }

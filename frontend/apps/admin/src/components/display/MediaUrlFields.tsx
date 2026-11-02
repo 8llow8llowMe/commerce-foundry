@@ -14,8 +14,8 @@ import { ITEM_RANGES, LIMITS, type SectionTypeCode } from '@/lib/display/types';
 import { MediaSizeNotice, useImageSize } from './MediaSizeCheck';
 import { TextInput } from './SectionEditor';
 
-/** 메인이 미디어를 몇 장 그리는지 — 히어로 · 룩은 첫 장만, 스토리 · 디테일은 모두(스토어프론트 `home-sections`) */
-const FIRST_ONLY: readonly SectionTypeCode[] = ['HERO', 'LOOK'];
+/** 메인이 미디어를 몇 장 그리는지 — 히어로는 첫 장만, 스토리 · 디테일은 모두(스토어프론트 `home-sections`) */
+const FIRST_ONLY: readonly SectionTypeCode[] = ['HERO'];
 
 /**
  * 주소로 넣는 이미지(#419 · #71) — 전시용 업로드 API 가 없어 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다(룩 관리 화면과 같다).

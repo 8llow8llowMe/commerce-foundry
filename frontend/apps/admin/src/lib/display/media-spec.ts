@@ -23,7 +23,8 @@ export const MEDIA_SPECS: Record<SectionTypeCode, readonly MediaSpec[]> = {
   PRODUCT_PICK: [],
   // curtain 은 1440px 화면 전체 폭이라 가로를 넉넉히 잡는다
   STORY: [{ slot: null, ratio: null, minWidth: 2000, minHeight: 1600 }],
-  LOOK: [{ slot: null, ratio: [4, 5], minWidth: 1200, minHeight: 1500 }],
+  // 룩 섹션은 룩 참조라 미디어 칸이 없다(BE #372) — 화보 규격은 룩 관리 화면이 본다
+  LOOK: [],
   DETAIL: [{ slot: null, ratio: [3, 4], minWidth: 1200, minHeight: 1600 }],
 };
 

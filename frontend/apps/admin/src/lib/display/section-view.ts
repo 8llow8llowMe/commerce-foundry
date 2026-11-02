@@ -6,14 +6,25 @@ export function sectionName(section: DisplaySectionAdmin): string {
   return section.title ?? `${section.sectionType.name} (제목 없음)`;
 }
 
-/** 아이템 요약 — `상품 5개` · `이미지 · 영상 2개` */
+/**
+ * 이관 전 룩 섹션 — 룩 참조(BE #372) 전의 미디어 · 상품으로 저장된 LOOK. 고객 메인 · 미리보기에서 빠지고(BE `isLegacyLook`),
+ * 그대로 다시 보내면 400 `PRODUCT_047` 이다. 수정 화면에서 룩을 골라 저장하면 풀린다.
+ */
+export function isLegacyLook(section: Pick<DisplaySectionAdmin, 'sectionType' | 'items'>): boolean {
+  return section.sectionType.code === 'LOOK' && section.items.some((item) => !item.lookId);
+}
+
+/** 아이템 요약 — `상품 5개` · `이미지 · 영상 2개` · `룩 3개`. 이관 전 룩은 그렇다고 앞에 붙인다 */
 export function itemSummary(section: DisplaySectionAdmin): string {
   const media = section.items.filter((item) => item.media).length;
   const products = section.items.filter((item) => item.product).length;
+  const looks = section.items.filter((item) => item.lookId).length;
   const parts: string[] = [];
   if (media > 0) parts.push(`이미지 · 영상 ${media}개`);
   if (products > 0) parts.push(`상품 ${products}개`);
-  return parts.length > 0 ? parts.join(' · ') : '항목 없음';
+  if (looks > 0) parts.push(`룩 ${looks}개`);
+  const summary = parts.length > 0 ? parts.join(' · ') : '항목 없음';
+  return isLegacyLook(section) ? `이관 필요 — ${summary} (메인에 보이지 않음)` : summary;
 }
 
 /**

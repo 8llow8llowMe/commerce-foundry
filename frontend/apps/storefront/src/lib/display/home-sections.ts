@@ -13,12 +13,13 @@ import type { ProductListItem, ProductLook } from '@/lib/catalog/types';
 import type {
   DisplayElementItem,
   DisplayLinkItem,
+  DisplayLookItem,
   DisplayMediaItem,
   DisplaySectionItem,
 } from './types';
 
 // 메인 전시 API(#63) 응답 → 메인 섹션(HomeSection). 섹션 노출 · 순서는 응답을 따르고, 레이아웃 변형(curtain · panel)은
-// 브랜드 설정(content.home)을 틀로 쓴다. 그릴 수 없는 LOOK 은 설정의 LOOK 으로 대신한다(#419). 정본 규칙은 frontend/docs/architecture.md §10.
+// 브랜드 설정(content.home)을 틀로 쓴다. 그릴 룩이 없는 LOOK 은 설정의 LOOK 으로 대신한다(#419 · #372). 정본 규칙은 frontend/docs/architecture.md §10.
 
 /** 메인 전시 API 의 상품 픽 — 상품 카드를 응답에서 바로 받는다(브랜드 설정의 상품 픽은 source 로 목록 API 를 부른다) */
 export type DisplayProductPickSection = Omit<ProductPickSection, 'source'> & {
@@ -181,30 +182,49 @@ function toDetail(section: DisplaySectionItem): DetailSection | null {
   };
 }
 
-/**
- * 룩(#419): 첫 그릴 미디어(영상은 포스터) + 입은 상품(응답 순서, 중복 없이). 구성품의 옵션 · SKU 는 응답에 없어 화면이 상품 상세로 받는다.
- * 숨긴 상품은 BE 가 빼므로 상품이 없을 수 있다 — 그때는 사진 · 글 · 링크만 그린다. 그릴 미디어가 없으면 null(설정 LOOK 으로 대신한다).
- */
-function toLook(section: DisplaySectionItem, labels: HomeLinkLabels): LookSection | null {
-  const [media] = mediaSlots(section.items);
-  if (!media) return null;
-  const productIds = [
-    ...new Set(
-      section.items.flatMap((item) => {
-        const id = item.itemType === 'PRODUCT' ? item.product?.productId : undefined;
-        return typeof id === 'string' ? [id] : [];
-      }),
-    ),
-  ];
+/** 룩 대표 이미지 → 사진 한 장. 주소가 없으면 null. 대체 텍스트가 없으면 룩 제목이다(`lookFromApi` 와 같다) */
+function lookImage(look: DisplayLookItem): HomeImage | null {
+  const { url, altText, width, height } = look.image ?? {};
+  if (!url) return null;
   return {
-    type: 'LOOK',
-    id: blockId(section),
-    title: section.title ?? '',
-    body: section.body,
-    media: { image: media.image, placeholder: '' },
-    productIds,
-    link: toLink(section.link, labels.more),
+    src: url,
+    alt: altText ?? look.title,
+    ...(width ? { width } : {}),
+    ...(height ? { height } : {}),
   };
+}
+
+/**
+ * 룩 섹션(BE #372): 참조한 룩마다 블록 하나 — 룩 대표 이미지 + 구성 상품(룩 순서, 중복 없이). 구성품의 옵션 · SKU 는 응답에 없어
+ * 화면이 상품 상세로 받는다. 숨긴 상품은 BE 가 빼므로 상품이 없을 수 있다 — 그때는 화보 · 글 · 링크만 그린다.
+ * 섹션 제목 · 본문은 첫 룩에 얹고(없으면 그 룩의 제목 · 설명), 다음 룩부터는 룩의 제목 · 설명이다. 섹션 링크는 마지막 룩 뒤에 둔다.
+ * 숨긴 · 지워진 룩은 BE 가 빼고, 이관 전(미디어 · 상품) LOOK 은 섹션째 오지 않는다. 그릴 룩이 없으면 빈 배열(설정 LOOK 으로 대신한다).
+ */
+function toLooks(section: DisplaySectionItem, labels: HomeLinkLabels): LookSection[] {
+  const looks = section.items.flatMap((item) => {
+    const look = item.itemType === 'LOOK' ? item.look : null;
+    const image = look ? lookImage(look) : null;
+    return look && image ? [{ look, image }] : [];
+  });
+  const link = toLink(section.link, labels.more);
+  return looks.map(({ look, image }, index): LookSection => {
+    const first = index === 0;
+    return {
+      type: 'LOOK',
+      id: first ? blockId(section) : `${blockId(section)}-${index}`,
+      title: (first ? section.title : null) ?? look.title,
+      body: (first ? section.body : null) ?? look.description,
+      media: { image, placeholder: '' },
+      productIds: [
+        ...new Set(
+          (look.products ?? []).flatMap((product) =>
+            typeof product?.productId === 'string' ? [product.productId] : [],
+          ),
+        ),
+      ],
+      link: index === looks.length - 1 ? link : null,
+    };
+  });
 }
 
 /**
@@ -275,7 +295,7 @@ export function readDisplaySections(body: unknown): DisplaySectionItem[] | null 
 /**
  * 응답 섹션을 응답 순서대로 메인 블록으로 바꾼다. 비었거나(상품이 모두 빠진 상품 픽 · 사진 없는 히어로 등) 모르는 유형은 건너뛴다.
  * - STORY 의 레이아웃은 브랜드 설정의 STORY 순서를 따른다(n 번째 STORY → 설정의 n 번째 STORY 레이아웃, 없으면 asymmetric)
- * - LOOK 은 응답의 미디어 · 상품으로 그린다(#419). 그릴 미디어가 없으면 그 자리에 브랜드 설정의 LOOK 을 한 번만 그린다(설정에 없으면 건너뛴다)
+ * - LOOK 은 참조 룩(`item.look`, BE #372)마다 블록 하나로 그린다. 그릴 룩이 없으면 그 자리에 브랜드 설정의 LOOK 을 한 번만 그린다(설정에 없으면 건너뛴다)
  */
 export function toHomeBlocks(
   sections: DisplaySectionItem[],
@@ -291,6 +311,13 @@ export function toHomeBlocks(
 
   return sections.flatMap((section): HomeBlock[] => {
     let block: HomeBlock | null = null;
+    if (section.sectionType.code === 'LOOK') {
+      const blocks = toLooks(section, labels);
+      if (blocks.length > 0) return blocks;
+      if (!look || lookUsed) return [];
+      lookUsed = true;
+      return [look];
+    }
     switch (section.sectionType.code) {
       case 'HERO':
         block = toHero(section, labels);
@@ -303,13 +330,6 @@ export function toHomeBlocks(
         break;
       case 'DETAIL':
         block = toDetail(section);
-        break;
-      case 'LOOK':
-        block = toLook(section, labels);
-        if (!block && look && !lookUsed) {
-          lookUsed = true;
-          block = look;
-        }
         break;
     }
     return block ? [block] : [];

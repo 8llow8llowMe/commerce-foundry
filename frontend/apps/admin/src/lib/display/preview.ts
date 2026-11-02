@@ -1,5 +1,6 @@
 import { previewFailure, type PreviewFailure } from './errors';
 import { draftRequest, unchangedRequest, type SectionForm } from './form';
+import { isLegacyLook } from './section-view';
 import type { DisplaySectionAdmin, DisplaySectionRequest } from './types';
 
 // 메인 전시 미리보기(#71) — 저장 전 편집 상태로 BE 미리보기(`POST /api/v1/admin/displays/preview`, #340)를 부르고,
@@ -185,17 +186,20 @@ export type PreviewEditing =
 
 /**
  * 지금 화면의 편집 상태 → 미리보기 섹션. 순서는 화면 순서(저장하지 않은 순서 변경 포함)이고,
- * 저장된 섹션은 받은 값 그대로, 열린 폼은 저장 전 값(`draftRequest`)이다. 노출 판정(노출 여부 · 기간 · 숨긴 상품)은 BE 미리보기가 메인과 같게 한다.
+ * 저장된 섹션은 받은 값 그대로(이관 전 룩은 뺀다), 열린 폼은 저장 전 값(`draftRequest`)이다. 노출 판정(노출 여부 · 기간 · 숨긴 상품)은 BE 미리보기가 메인과 같게 한다.
  */
 export function previewSections(
   ordered: readonly DisplaySectionAdmin[],
   editing: PreviewEditing | null,
 ): PreviewSection[] {
-  const sections = ordered.map((section): PreviewSection =>
-    editing?.mode === 'edit' && editing.sectionId === section.sectionId
-      ? { sectionId: section.sectionId, ...draftRequest(editing.form) }
-      : { sectionId: section.sectionId, ...unchangedRequest(section, {}) },
-  );
+  const sections = ordered.flatMap((section): PreviewSection[] => {
+    if (editing?.mode === 'edit' && editing.sectionId === section.sectionId) {
+      return [{ sectionId: section.sectionId, ...draftRequest(editing.form) }];
+    }
+    // 이관 전 룩은 메인에 보이지 않고, 그대로 보내면 미리보기 전체가 400(`PRODUCT_047`)이다 — 싣지 않는다
+    if (isLegacyLook(section)) return [];
+    return [{ sectionId: section.sectionId, ...unchangedRequest(section, {}) }];
+  });
   if (editing?.mode === 'create') {
     sections.push({ sectionId: NEW_SECTION_ID, ...draftRequest(editing.form) });
   }

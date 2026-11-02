@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { editableType, itemSummary, sectionName } from './section-view';
-import { mediaItem, productItem, section } from './test-fixtures';
+import { lookItem, mediaItem, productItem, section } from './test-fixtures';
 import { CREATABLE_TYPES } from './types';
 
 describe('sectionName', () => {
@@ -15,8 +15,10 @@ describe('itemSummary', () => {
     expect(
       itemSummary(section('PRODUCT_PICK', { items: [productItem('1'), productItem('2')] })),
     ).toBe('상품 2개');
+    expect(itemSummary(section('LOOK', { items: [lookItem('7'), lookItem('8')] }))).toBe('룩 2개');
+    // 이관 전 룩(미디어 · 상품 LOOK, BE #372)은 메인에 보이지 않는다고 붙인다
     expect(itemSummary(section('LOOK', { items: [mediaItem(), productItem('1')] }))).toBe(
-      '이미지 · 영상 1개 · 상품 1개',
+      '이관 필요 — 이미지 · 영상 1개 · 상품 1개 (메인에 보이지 않음)',
     );
     expect(itemSummary(section('STORY'))).toBe('항목 없음');
   });

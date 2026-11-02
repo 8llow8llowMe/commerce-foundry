@@ -10,7 +10,11 @@ import {
   BODY_CHARACTER,
   LABEL_WITHOUT_URL,
   LINK_RULE,
+  isLookReferenceType,
   isMediaUrlType,
+  lookCountMessage,
+  LOOK_DUPLICATED,
+  LOOK_MISSING,
   mediaCountMessage,
   MEDIA_URL_NOT_STORAGE,
   MEDIA_URL_REQUIRED,
@@ -40,6 +44,8 @@ export const ITEM_NOT_ALLOWED =
   '이 섹션에 넣을 수 없는 항목이 있습니다. 목록을 다시 불러온 뒤 확인해 주세요.';
 export const PRODUCT_MISSING = '찾을 수 없는 상품이 있습니다. 그 상품을 빼고 저장해 주세요.';
 export const DELETE_FAILED = '삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+export const LEGACY_LOOK_TOGGLE =
+  '이관 전 룩 섹션이라 노출을 바꿀 수 없습니다. 수정 화면에서 룩을 골라 저장한 뒤 다시 시도해 주세요.';
 export const TOGGLE_FAILED =
   '노출을 바꾸지 못했습니다. 수정 화면에서 내용을 확인한 뒤 다시 시도해 주세요.';
 
@@ -102,7 +108,7 @@ export type SaveFailure =
 /**
  * 생성 · 수정 실패를 화면 처리로 가른다.
  * - 401 은 폼을 지키고 다시 로그인을 안내한다(`SESSION_EXPIRED_ON_SAVE`). 403 은 권한 안내.
- * - fieldErrors 는 칸에, 섹션 규칙 오류(`PRODUCT_047~056`)는 그 칸 · 폼 전체에 업무 문구로 붙인다.
+ * - fieldErrors 는 칸에, 섹션 규칙 오류(`PRODUCT_047~056` · 룩 참조 `DISPLAY_001~002`)는 그 칸 · 폼 전체에 업무 문구로 붙인다.
  * - 버전이 없어 마지막 쓰기가 이긴다. 409 는 잠금 대기(`PRODUCT_058`) · 섹션 상한(`PRODUCT_056`)뿐이다.
  */
 export function saveFailure(
@@ -117,11 +123,14 @@ export function saveFailure(
   if (cause.code === 'PRODUCT_046') return { kind: 'reload', notice: SECTION_GONE_NOTICE };
   if (cause.kind === 'unknownOutcome') return { kind: 'reload', notice: UNKNOWN_OUTCOME_NOTICE };
 
+  const lookType = isLookReferenceType(context.type);
   if (cause.fieldErrors.length > 0) {
     const errors: FormErrors = {};
     for (const item of cause.fieldErrors) {
       const code = item.code;
-      const key = VALIDATION[code]?.[0] ?? formKey(item.field, context.mediaCount);
+      let key = VALIDATION[code]?.[0] ?? formKey(item.field, context.mediaCount);
+      // 룩 섹션의 아이템은 룩 참조뿐이다(BE #372) — 아이템 칸 오류(`DISPLAY_101` · `DISPLAY_102` 등)는 룩 칸에 붙인다
+      if (lookType && /^(media|products)(\.|$)/.test(key)) key = 'looks';
       const message = fieldMessage(code, key);
       if (!(errors[key] ?? []).includes(message)) errors[key] = [...(errors[key] ?? []), message];
     }
@@ -135,14 +144,8 @@ export function saveFailure(
     case 'PRODUCT_047':
       return { kind: 'errors', errors: { form: [ITEM_NOT_ALLOWED] } };
     case 'PRODUCT_048':
-      if (context.type === 'LOOK') {
-        return {
-          kind: 'errors',
-          errors: withSummary({
-            media: [mediaCountMessage(context.type)],
-            products: [productCountMessage(context.type)],
-          }),
-        };
+      if (lookType) {
+        return { kind: 'errors', errors: withSummary({ looks: [lookCountMessage(context.type)] }) };
       }
       return {
         kind: 'errors',
@@ -175,6 +178,10 @@ export function saveFailure(
       return { kind: 'errors', errors: { form: [SECTION_LIMIT] } };
     case 'PRODUCT_058':
       return { kind: 'errors', errors: { form: [BUSY] } };
+    case 'DISPLAY_001':
+      return { kind: 'errors', errors: withSummary({ looks: [LOOK_MISSING] }) };
+    case 'DISPLAY_002':
+      return { kind: 'errors', errors: withSummary({ looks: [LOOK_DUPLICATED] }) };
   }
   // 요청 제한(429)은 기본 문구가 운영자 문구다. 그 밖은 일반 실패 문구(서버 원문을 보이지 않는다)
   if (cause.kind === 'rateLimited') return { kind: 'errors', errors: { form: [cause.message] } };
@@ -197,6 +204,8 @@ export function rowFailure(cause: unknown, fallback: string): RowFailure {
   if (cause.code === 'PRODUCT_046') return { kind: 'reload', notice: SECTION_GONE_NOTICE };
   if (cause.kind === 'unknownOutcome') return { kind: 'reload', notice: UNKNOWN_OUTCOME_NOTICE };
   if (cause.code === 'PRODUCT_058') return { kind: 'message', message: BUSY };
+  // 노출 바꾸기는 받은 아이템을 그대로 다시 보낸다 — 047 은 이관 전 룩(미디어 · 상품 LOOK)뿐이다(BE #372)
+  if (cause.code === 'PRODUCT_047') return { kind: 'message', message: LEGACY_LOOK_TOGGLE };
   if (cause.code === 'PRODUCT_054' || cause.code === 'PRODUCT_055') {
     return { kind: 'message', message: MEDIA_STORAGE_UNAVAILABLE };
   }
@@ -228,7 +237,7 @@ export function orderFailure(cause: unknown): OrderFailure {
 export const PREVIEW_CHECK_INPUT =
   '입력값을 확인해 주세요. 고칠 때까지 마지막으로 그린 미리보기를 그대로 둡니다.';
 export const PREVIEW_ITEM_COUNT =
-  '이미지 · 영상 · 상품 수가 섹션이 받을 수 있는 범위를 벗어났습니다.';
+  '이미지 · 영상 · 상품 · 룩 수가 섹션이 받을 수 있는 범위를 벗어났습니다.';
 export const PREVIEW_FORBIDDEN =
   '관리자 권한이 없어 미리보기를 그리지 못했습니다. 관리자 계정으로 다시 로그인해 주세요.';
 export const PREVIEW_FAILED = '미리보기를 새로 그리지 못했습니다. 잠시 후 다시 시도해 주세요.';
@@ -245,15 +254,17 @@ const PREVIEW_RULES: Record<string, string> = {
   PRODUCT_051: PERIOD_ORDER,
   PRODUCT_052: LINK_RULE,
   PRODUCT_053: LABEL_WITHOUT_URL,
+  DISPLAY_001: LOOK_MISSING,
+  DISPLAY_002: LOOK_DUPLICATED,
 };
 
 /**
  * 미리보기의 미디어 저장소 오류(503 `PRODUCT_055` · 400 `PRODUCT_054`). 저장용 문구(`MEDIA_STORAGE_UNAVAILABLE`)와 달리 저장하지 않았다고 알린다.
  * BE 는 숨김 섹션까지 미디어 주소를 다시 판정하므로, 공개 주소가 없거나 바뀐 환경에서는 미디어 섹션이 하나라도 있으면 미리보기가 그려지지 않는다
  */
-/** 미리보기 400 `PRODUCT_054` — 저장소 밖 주소. 룩 섹션은 운영자가 주소를 넣으므로(#419) 그 칸을 먼저 보라고 안내한다 */
+/** 미리보기 400 `PRODUCT_054` — 저장소 밖 주소. 미디어 주소는 운영자가 넣으므로(#71) 그 칸을 먼저 보라고 안내한다 */
 export const PREVIEW_MEDIA_URL =
-  '쇼핑몰 이미지 저장소 밖의 이미지 주소가 있어 미리보기를 그리지 못했습니다. 룩 섹션의 이미지 주소를 확인해 주세요. 마지막으로 그린 미리보기를 그대로 두었습니다. 계속되면 개발 담당자에게 문의해 주세요.';
+  '쇼핑몰 이미지 저장소 밖의 이미지 주소가 있어 미리보기를 그리지 못했습니다. 섹션의 이미지 주소를 확인해 주세요. 마지막으로 그린 미리보기를 그대로 두었습니다. 계속되면 개발 담당자에게 문의해 주세요.';
 
 export const PREVIEW_MEDIA_STORAGE =
   '이미지 · 영상 저장소 설정 문제로 미리보기를 그리지 못했습니다. 저장은 하지 않았고 마지막으로 그린 미리보기를 그대로 두었습니다. 계속되면 개발 담당자에게 문의해 주세요.';
@@ -307,7 +318,7 @@ const fail = (
  * - 400: 입력 확인 안내 + fieldErrors 의 `sections[i]` 로 섹션 위치를 짚는다. 섹션 규칙 오류(`PRODUCT_047~053`)는 코드별 문구
  * - 401: 저장 401 처럼 폼을 지키고 다시 로그인을 안내한다. 403: 권한 안내
  * - 503 `PRODUCT_055`: 미리보기용 미디어 저장소 안내. 설정을 고친 뒤 입력을 바꾸지 않고도 다시 그려 볼 수 있게 다시 시도를 둔다
- * - 400 `PRODUCT_054`: 저장소 밖 주소 — 룩 이미지 주소를 확인하라고 안내한다. 그 주소가 바뀌어야 풀려 다시 시도를 두지 않는다
+ * - 400 `PRODUCT_054`: 저장소 밖 주소 — 이미지 주소를 확인하라고 안내한다. 그 주소가 바뀌어야 풀려 다시 시도를 두지 않는다
  * - 429: 서버 문구 + `Retry-After` 동안 다시 시도를 막는다. 그 밖(503 · 연결 실패 · 5xx)은 다시 시도
  */
 export function previewFailure(

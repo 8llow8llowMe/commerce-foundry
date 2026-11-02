@@ -6,6 +6,7 @@ import {
   CHECK_FIELDS,
   DELETE_FAILED,
   ITEM_NOT_ALLOWED,
+  LEGACY_LOOK_TOGGLE,
   MEDIA_STORAGE_UNAVAILABLE,
   ORDER_CHANGED_NOTICE,
   orderFailure,
@@ -23,10 +24,14 @@ import {
   saveFailure,
   SECTION_GONE_NOTICE,
   SECTION_LIMIT,
+  TOGGLE_FAILED,
   UNKNOWN_OUTCOME_NOTICE,
 } from './errors';
 import {
   LINK_RULE,
+  lookCountMessage,
+  LOOK_DUPLICATED,
+  LOOK_MISSING,
   MEDIA_URL_NOT_STORAGE,
   MEDIA_URL_REQUIRED,
   mediaCountMessage,
@@ -46,7 +51,6 @@ const apiError = (
 
 const pick = { type: 'PRODUCT_PICK' as const, mediaCount: 0 };
 const hero = { type: 'HERO' as const, mediaCount: 2 };
-const look = { type: 'LOOK' as const, mediaCount: 2 };
 
 describe('saveFailure', () => {
   it('401 은 폼을 지키고 다시 로그인을 안내한다, 403 은 권한 안내다', () => {
@@ -128,21 +132,28 @@ describe('saveFailure', () => {
     });
   });
 
-  it('룩(주소로 넣는 미디어): 054 는 이미지 주소 안내, 048 은 이미지 · 상품 수 범위, 055 는 그대로 개발 담당자 안내', () => {
+  it('룩(룩 참조, BE #372): 048 은 룩 수 범위, DISPLAY_001 · 002 는 룩 칸, 아이템 칸 오류도 룩 칸에 붙는다', () => {
+    const look = { type: 'LOOK' as const, mediaCount: 0 };
     const errorsFor = (code: string, status = 400) => {
       const failure = saveFailure(apiError('server', status, code, '서버 원문'), look);
       return failure.kind === 'errors' ? failure.errors : null;
     };
-    expect(errorsFor('PRODUCT_054')).toEqual({
-      media: [MEDIA_URL_NOT_STORAGE],
-      form: [CHECK_FIELDS],
-    });
     expect(errorsFor('PRODUCT_048')).toEqual({
-      media: [mediaCountMessage('LOOK')],
-      products: [productCountMessage('LOOK')],
+      looks: [lookCountMessage('LOOK')],
       form: [CHECK_FIELDS],
     });
-    expect(errorsFor('PRODUCT_055', 503)).toEqual({ form: [MEDIA_STORAGE_UNAVAILABLE] });
+    expect(errorsFor('DISPLAY_001')).toEqual({ looks: [LOOK_MISSING], form: [CHECK_FIELDS] });
+    expect(errorsFor('DISPLAY_002')).toEqual({ looks: [LOOK_DUPLICATED], form: [CHECK_FIELDS] });
+    const field = saveFailure(
+      apiError('validation', 400, null, null, [
+        { field: 'items[0].lookShapeValid', code: 'DISPLAY_102', message: '원문' },
+      ]),
+      look,
+    );
+    expect(field).toEqual({
+      kind: 'errors',
+      errors: { looks: [CHECK_FIELDS], form: [CHECK_FIELDS] },
+    });
   });
 
   it('미디어 주소 칸 오류는 그 미디어의 주소 칸에 업무 문구로 붙는다', () => {
@@ -152,7 +163,7 @@ describe('saveFailure', () => {
         { field: 'items[0].media.pcUrl', code: 'PRODUCT_153', message: '원문' },
         { field: 'items[2].productId', code: 'PRODUCT_155', message: '원문' },
       ]),
-      look,
+      hero,
     );
     expect(failure).toEqual({
       kind: 'errors',
@@ -218,6 +229,13 @@ describe('rowFailure', () => {
       notice: SECTION_GONE_NOTICE,
     });
     expect(rowFailure(apiError('unknownOutcome', 502, null), DELETE_FAILED).kind).toBe('reload');
+  });
+
+  it('노출 바꾸기의 047 은 이관 전 룩이라 수정 화면에서 룩을 고르라고 안내한다', () => {
+    expect(rowFailure(apiError('server', 400, 'PRODUCT_047'), TOGGLE_FAILED)).toEqual({
+      kind: 'message',
+      message: LEGACY_LOOK_TOGGLE,
+    });
   });
 
   it('잠금 대기 · 저장소 미설정은 그 문구, 나머지는 넘겨받은 문구다', () => {

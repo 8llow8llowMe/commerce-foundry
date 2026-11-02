@@ -124,6 +124,64 @@ describe('readPreviewDisplay', () => {
     expect(items[1]?.product?.thumbnail).toBeNull();
   });
 
+  it('룩 참조(BE #372)는 룩 대표 이미지 · 상품 카드를 읽고, 이미지 주소 · 아이디가 맞지 않는 룩은 버린다', () => {
+    const look = (overrides: Record<string, unknown> = {}) => ({
+      itemId: 'preview-item-2',
+      itemType: 'LOOK',
+      media: null,
+      product: null,
+      look: {
+        lookId: '7',
+        title: '샘플 룩',
+        description: '',
+        image: {
+          url: 'https://cdn.example.test/look.jpg',
+          width: 1200,
+          height: 0,
+          altText: '룩 사진',
+        },
+        products: [card(), card({ salePrice: null })],
+        ...overrides,
+      },
+      caption: null,
+    });
+    const read = readPreviewDisplay({
+      sections: [
+        section({
+          items: [
+            look(),
+            look({ image: { url: 'javascript:alert(1)' } }),
+            look({ lookId: '../x' }),
+          ],
+        }),
+      ],
+    });
+    expect(read?.sections[0]?.items).toEqual([
+      {
+        itemId: 'preview-item-0',
+        itemType: 'LOOK',
+        media: null,
+        product: null,
+        look: {
+          lookId: '7',
+          title: '샘플 룩',
+          description: null,
+          image: {
+            url: 'https://cdn.example.test/look.jpg',
+            width: 1200,
+            height: null,
+            altText: '룩 사진',
+          },
+          products: [
+            readPreviewDisplay({ sections: [section({ items: [productItem(card())] })] })
+              ?.sections[0]?.items[0]?.product,
+          ],
+        },
+        caption: null,
+      },
+    ]);
+  });
+
   it('정가 · 할인율은 함께 있을 때만 싣는다', () => {
     const [item] =
       readPreviewDisplay({

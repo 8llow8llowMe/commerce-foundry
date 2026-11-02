@@ -15,7 +15,7 @@ import {
   previewScale,
   previewSections,
 } from './preview';
-import { mediaItem, productItem, section } from './test-fixtures';
+import { lookItem, mediaItem, productItem, section } from './test-fixtures';
 
 const hero = section('HERO', {
   sectionId: '1',
@@ -86,6 +86,19 @@ describe('previewSections', () => {
       title: '새 스토리',
       visible: true,
     });
+  });
+
+  it('이관 전 룩(미디어 · 상품 LOOK)은 싣지 않는다 — 메인에 보이지 않고 BE 가 미리보기 전체를 거절한다(PRODUCT_047)', () => {
+    const legacy = section('LOOK', { sectionId: '3', items: [mediaItem(), productItem('11')] });
+    const look = section('LOOK', { sectionId: '4', items: [lookItem('7')] });
+    expect(previewSections([hero, legacy, look], null).map((item) => item.sectionId)).toEqual([
+      '1',
+      '4',
+    ]);
+    // 고치는 중이면 폼 값(룩 참조)으로 싣는다
+    const form = { ...editForm(legacy, 'LOOK'), lookIds: ['7'] };
+    const editing = previewSections([legacy], { mode: 'edit', sectionId: '3', form });
+    expect(editing[0]?.items).toEqual([{ itemType: 'LOOK', lookId: '7', caption: null }]);
   });
 });
 

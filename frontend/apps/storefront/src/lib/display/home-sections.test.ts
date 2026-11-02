@@ -61,6 +61,26 @@ const productItem = (productId: string): DisplayElementItem => ({
   caption: null,
 });
 
+/** 룩 참조 아이템(BE #372) — 룩 대표 이미지 + 구성 상품 카드 */
+const lookItem = (
+  lookId: string,
+  extra: Partial<NonNullable<DisplayElementItem['look']>> = {},
+): DisplayElementItem => ({
+  itemId: `l-${lookId}`,
+  itemType: 'LOOK',
+  media: null,
+  product: null,
+  look: {
+    lookId,
+    title: `룩 ${lookId}`,
+    description: null,
+    image: { url: `https://cdn.test/look-${lookId}.jpg`, width: null, height: null, altText: null },
+    products: [],
+    ...extra,
+  },
+  caption: null,
+});
+
 const section = (
   code: string,
   sectionId: string,
@@ -336,7 +356,7 @@ describe('toHomeBlocks — 매핑', () => {
     });
   });
 
-  it('룩: 첫 그릴 미디어와 입은 상품(순서대로, 중복 없이) · 문구 · 링크를 그린다', () => {
+  it('룩: 참조 룩의 대표 이미지와 구성 상품(룩 순서, 중복 없이) · 섹션 문구 · 링크를 그린다(BE #372)', () => {
     const [block] = toHomeBlocks(
       [
         section('LOOK', '1', {
@@ -344,12 +364,16 @@ describe('toHomeBlocks — 매핑', () => {
           body: '첫 줄\n둘째 줄',
           link: { url: '/shop', label: null },
           items: [
-            productItem('7'),
-            mediaItem(image('https://cdn.test/v.mp4', { mediaType: 'VIDEO', pcPosterUrl: null })),
-            mediaItem(image('https://cdn.test/look.jpg', { altText: '착용 사진' })),
-            mediaItem(image('https://cdn.test/second.jpg')),
-            productItem('3'),
-            productItem('7'),
+            lookItem('9', {
+              description: '룩 설명',
+              image: {
+                url: 'https://cdn.test/look.jpg',
+                width: 1200,
+                height: 1500,
+                altText: '착용 사진',
+              },
+              products: [product('7'), product('3'), product('7')],
+            }),
           ],
         }),
       ],
@@ -361,36 +385,66 @@ describe('toHomeBlocks — 매핑', () => {
       id: 'display-1',
       title: '가을 룩',
       body: '첫 줄\n둘째 줄',
-      media: { image: { src: 'https://cdn.test/look.jpg', alt: '착용 사진' }, placeholder: '' },
+      media: {
+        image: { src: 'https://cdn.test/look.jpg', alt: '착용 사진', width: 1200, height: 1500 },
+        placeholder: '',
+      },
       productIds: ['7', '3'],
       link: { label: '더 보기', href: '/shop' },
     });
   });
 
-  it('룩: 상품이 없어도(모두 숨김) 사진만으로 그리고, 제목이 없으면 빈 제목이다', () => {
+  it('룩: 섹션 제목 · 본문이 없으면 룩 제목 · 설명, 대체 텍스트가 없으면 룩 제목이다(상품이 없어도 그린다)', () => {
     const [block] = toHomeBlocks(
-      [section('LOOK', '1', { items: [mediaItem(image('https://cdn.test/look.jpg'))] })],
+      [section('LOOK', '1', { items: [lookItem('9', { description: '룩 설명' })] })],
       TEMPLATE,
       labels,
     );
-    expect(block).toMatchObject({ id: 'display-1', title: '', productIds: [], link: null });
+    expect(block).toMatchObject({
+      id: 'display-1',
+      title: '룩 9',
+      body: '룩 설명',
+      media: { image: { alt: '룩 9' } },
+      productIds: [],
+      link: null,
+    });
   });
 
-  it('룩: 응답의 룩이 여러 개면 모두 그린다', () => {
-    const look = (id: string) =>
-      section('LOOK', id, { items: [mediaItem(image(`https://cdn.test/${id}.jpg`))] });
-    const blocks = toHomeBlocks([look('1'), look('2')], TEMPLATE, labels);
-    expect(blocks.map((block) => block.id)).toEqual(['display-1', 'display-2']);
+  it('룩: 한 섹션의 룩 여러 개는 블록 여러 개다 — 섹션 문구는 첫 룩, 링크는 마지막 룩에 둔다', () => {
+    const blocks = toHomeBlocks(
+      [
+        section('LOOK', '1', {
+          title: '섹션 제목',
+          link: { url: '/looks', label: '룩북' },
+          items: [lookItem('7'), lookItem('8'), lookItem('9')],
+        }),
+        section('LOOK', '2', { items: [lookItem('5')] }),
+      ],
+      TEMPLATE,
+      labels,
+    );
+    expect(blocks.map((block) => block.id)).toEqual([
+      'display-1',
+      'display-1-1',
+      'display-1-2',
+      'display-2',
+    ]);
+    const looks = blocks as LookSection[];
+    expect(looks.map((block) => block.title)).toEqual(['섹션 제목', '룩 8', '룩 9', '룩 5']);
+    expect(looks.map((block) => block.link?.href ?? null)).toEqual([null, null, '/looks', null]);
   });
 
-  it('룩: 그릴 미디어가 없으면 그 자리에 브랜드 설정의 LOOK 을 한 번만 그린다', () => {
+  it('룩: 그릴 룩이 없으면(미디어 · 상품만 있는 응답 포함) 그 자리에 브랜드 설정의 LOOK 을 한 번만 그린다', () => {
     const blocks = toHomeBlocks([section('LOOK', '1'), section('LOOK', '2')], TEMPLATE, labels);
     expect(blocks).toEqual([LOOK]);
     expect(toHomeBlocks([section('LOOK', '1')], [], labels)).toEqual([]);
     const mixed = toHomeBlocks(
       [
-        section('LOOK', '1', { items: [productItem('1')] }),
-        section('LOOK', '2', { items: [mediaItem(image('https://cdn.test/2.jpg'))] }),
+        section('LOOK', '1', {
+          items: [productItem('1'), mediaItem(image('https://cdn.test/1.jpg'))],
+        }),
+        section('LOOK', '2', { items: [lookItem('2')] }),
+        section('LOOK', '3', { items: [lookItem('3', { image: null as never })] }),
       ],
       TEMPLATE,
       labels,

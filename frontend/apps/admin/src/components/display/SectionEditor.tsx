@@ -7,6 +7,7 @@ import type { AccessDenied, FormErrors } from '@/lib/api-errors';
 import { saveFailure, withSummary } from '@/lib/display/errors';
 import {
   FIELDS_BY_TYPE,
+  isLookReferenceType,
   isMediaUrlType,
   sectionRequest,
   sectionWarnings,
@@ -22,6 +23,7 @@ import {
   TITLE_WIDTH,
   type DisplaySectionAdmin,
 } from '@/lib/display/types';
+import { LookPickField } from './LookPickField';
 import { MediaUrlFields } from './MediaUrlFields';
 import { ProductPickField } from './ProductPickField';
 
@@ -184,7 +186,24 @@ export function SectionEditor({
             }}
           />
         )}
-        {(form.sectionType === 'PRODUCT_PICK' || form.sectionType === 'LOOK') && (
+        {isLookReferenceType(form.sectionType) && (
+          <LookPickField
+            min={ITEM_RANGES[form.sectionType].look[0]}
+            max={ITEM_RANGES[form.sectionType].look[1]}
+            lookIds={form.lookIds}
+            errors={errorsOf('looks')}
+            onChange={(lookIds) => {
+              set({ lookIds });
+              // 오류 키가 줄 순서와 무관한 'looks' 하나라 지워도 엉뚱한 줄에 붙지 않는다
+              setErrors((current) => {
+                const next = { ...current };
+                delete next.looks;
+                return next;
+              });
+            }}
+          />
+        )}
+        {ITEM_RANGES[form.sectionType].product[1] > 0 && (
           <ProductPickField
             min={ITEM_RANGES[form.sectionType].product[0]}
             max={ITEM_RANGES[form.sectionType].product[1]}
