@@ -470,7 +470,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **상품 등록 투어**(`product-new-v1`, `/products/new`) — 기본 정보 · 통화 · 가격 · 옵션 · 옵션 조합(SKU) · 등록 버튼. 앵커(`product-basic` · `product-price` ·
   `product-options` · `product-skus` · `product-submit`)는 상품 등록 폼 구역에 달려 있고, 폼 테스트가 폼의 `data-tour` 목록이 투어 정의와 같은지 확인한다(어긋나면 필수 요소가 없어 시작하지 않는다).
   앵커는 카테고리를 불러온 뒤에 단다 — 폼은 첫 렌더부터 그려져, 불러오는 중에 투어가 뜨면 그 뒤 403 권한 안내로 바뀐 화면에 투어가 남는다.
-  꺼 둔 대표 이미지 칸은 단계에 넣지 않는다(첨부 F2 뒤 켤 때 단계를 더하면 버전을 올린다). 안내는 위치 설명만 하고 등록 버튼을 대신 누르지 않는다.
+  이미지 칸(F2)은 단계에 넣지 않았다(단계를 더하면 버전을 올린다). 안내는 위치 설명만 하고 등록 버튼을 대신 누르지 않는다.
 - 서버 허용 목록에 아직 없는 투어: `orders`(v2) · `order-detail`(v2) · `shipping-domestic`(v1) · `product-new`(v1). BE 가 올릴 때 이 버전으로 등록해야 서버 기록을 쓴다(다른 버전이면 `ONBOARDING_103`).
 
 ### 샘플 주문 업무 연습 (`/practice`, #365)
@@ -599,7 +599,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 ### 상품 목록 (`/products`, #208)
 
-- 어드민 상품 목록 `GET /api/v1/admin/products`(#9) — 숨김 · 판매 종료까지 전체, 페이지 20개. 위의 "상품 등록" 버튼이 등록 화면(아래)이다. 수정 · 이미지는 BE #9 E2 · F2 뒤에 붙인다.
+- 어드민 상품 목록 `GET /api/v1/admin/products`(#9) — 숨김 · 판매 종료까지 전체, 페이지 20개. 위의 "상품 등록" 버튼이 등록 화면(아래)이다. 기본 정보 수정은 상세에서 들어간다(아래).
 - 상품명은 상세(`/products/[productId]`, 아래) 링크다. 숨긴 상품도 열린다.
 - **조건은 주소(query string)가 정본이다** — 새로고침 · 뒤로 가기 · 링크 공유에도 같은 목록이다. 페이지(`page.tsx`)가 `searchParams` 를 `parseProductQuery` 로 읽어 넘긴다.
   허용 값만 받고 나머지는 "전체" 로 본다(손으로 고친 주소가 400 이 되지 않게 — 카테고리는 Long 범위 양의 정수만). 검색어는 앞뒤 공백을 빼고 100자에서 자른다. 기본값은 주소에서 뺀다(`productsHref`).
@@ -612,7 +612,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 ### 상품 상세 (`/products/[productId]`, #418)
 
-- 어드민 상품 상세 `GET /api/v1/admin/products/{productId}`(BE #394, `backend/docs/api-design-guide.md` 어드민 상품 상세) — 쓰기는 맨 아래 "판매 중지 · 삭제" 하나다(아래). 수정은 BE #9 수정 API 뒤에 이 화면에 얹는다.
+- 어드민 상품 상세 `GET /api/v1/admin/products/{productId}`(BE #394, `backend/docs/api-design-guide.md` 어드민 상품 상세) — 쓰기는 "기본 정보 수정" 화면(`/edit`, 아래)과 맨 아래 "판매 중지 · 삭제"(아래)다.
 - **서버 컴포넌트에서 `serverFetch` 로 읽는다** — 상세 설명 HTML 을 서버에서 `sanitizeProductHtml`(`@cf/sanitize`, 스토어프론트 상세와 같은 허용 목록)로 거른 뒤 넣어야 해서다(`conventions.md` §2).
   어드민의 다른 화면은 클라이언트 `apiFetch` 지만 여기는 읽기만이라 재발급이 없는 어드민 세션에서도 차이가 없다. 실패하면 "다시 불러오기"(`router.refresh()`)다.
 - 상태는 `loadProductDetail` 이 가른다 — 404 `PRODUCT_001` · 경로 검증 400(`PRODUCT_105` · `PRODUCT_198`) · 형식이 틀린 아이디(부르지 않는다, Long 범위 양의 정수만)는 `notFound()` 로
@@ -635,14 +635,30 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
     실제로 지워졌으면 다시 읽을 때 not-found 로 바뀐다.
   - 401 은 화면을 두고 다시 로그인 안내(`SESSION_EXPIRED_ON_DELETE`, 저장 401 과 같은 규칙), 403 은 그 자리에 `AccessNotice`, 그 밖의 4xx 는 서버 문구, 5xx · 연결 실패는 일반 문구다.
 
-### 상품 등록 (`/products/new`, #29 · BE #9 E1)
+### 상품 기본 정보 수정 (`/products/[productId]/edit`, #29 · BE #9 후속)
+
+- `PUT /api/v1/admin/products/{productId}/header`(`backend/docs/api-design-guide.md` "어드민 상품 기본 정보 수정 API") — 상품명 · 요약 · 상세 설명 HTML · 판매 상태 · 노출만 **전체 교체**한다.
+  카테고리 · 가격 · 프리오더 · 옵션 · SKU · 이미지 수정은 BE 후속이라 화면에 자리를 두지 않고 "준비 중" 으로만 알린다. 상세 위 링크 "기본 정보 수정" 으로 들어온다.
+- 코드는 `lib/product/update.ts`(폼 · 본문 · `updateFailure`) · `components/product/ProductHeaderEditForm`(클라이언트 `apiFetch`)이고, 페이지는 상세처럼 서버에서 `loadProductDetail` 로 읽어 넘긴다.
+  칸 규칙 · 문구 · 상세 설명 칸(`DescriptionHtmlField`)은 등록과 같다. 빈 요약 · 상세 설명은 `null` 로 보내 지운다. 바뀐 것이 없으면 저장 버튼을 막는다.
+- **낙관적 락** — 상세의 `version` 을 되돌려 보낸다. 409 `PRODUCT_010`(읽은 뒤 다른 수정 · 삭제가 먼저 반영) · 결과 모름(502 · 504 · 5xx · 연결 실패)은 폼을 지키고
+  "최신 내용 불러오기" 를 낸다 — 누르면 상세를 다시 읽어 폼과 버전을 바꾼다(입력은 최신 값으로 바뀐다). 자동으로 다시 보내지 않는다.
+  결과 모름 뒤 같은 버전으로 다시 보내도 저장됐다면 409 라 덮어쓰지 않는다. 상세의 `version` 이 null(이관 · 시드)이면 서버가 받지 않으므로 저장 전에 안내한다.
+- 성공하면 상세로 `replace` 한다(옮길 때까지 막아 둔다). `descriptionHtmlSanitized: true` 면 등록과 같이 `?sanitized=1` 로 상세가 한 번 알린다.
+  404 `PRODUCT_001` 은 삭제와 같이 `/products?deleted=gone`, 401 은 폼을 지킨다(§9 공통), 403 은 `AccessNotice`.
+
+### 상품 등록 (`/products/new`, #29 · BE #9 E1 · F2)
 
 - `POST /api/v1/admin/products`(`backend/docs/api-design-guide.md` 어드민 상품 등록). 코드는 `lib/product/create.ts`(폼 · 조합 · 본문 · 미리 보는 검증) · `create-errors.ts`(실패 처리),
   화면은 `components/product/ProductCreateForm` · `OptionEditor` · `SkuTable` 이다. 목록 위 "상품 등록" 버튼과 시작 체크리스트의 상품 등록 업무(`PRODUCT_REGISTERED`)가 이 화면으로 온다.
   완료 판정은 그대로 서버 재조회다(체크로 완료하지 않는다).
-- **범위** — 맞춤 제작 · 수정 · 판매 상태 변경 · 삭제(E2)는 넣지 않는다(비활성 자리도 두지 않는다). 상품은 이미지 없이 생긴다.
-  이미지는 업로드 칸(아래 "이미지 업로드")을 **꺼 둔 채** 두고 이유를 안내한다(`IMAGE_ATTACH_READY = false`) — 등록 본문에 `uploadKey` 를 싣는 첨부(F2)가 아직 없어 올려도 저장할 곳이 없고,
-  올린 파일은 하루 뒤 지워진다. F2 머지 뒤 켜고 `productRequest` 에 싣는다.
+- **범위** — 맞춤 제작 입력은 넣지 않는다(비활성 자리도 두지 않는다). 수정 · 삭제는 상세에서 한다(위).
+- **이미지(F2)** — `components/product/ProductImagesField` 가 대표 한 칸(`THUMBNAIL`) + 추가 이미지 칸(`GALLERY`, "칸 더하기")을 그린다. 합쳐 8장, 칸마다 업로드 칸(아래 "이미지 업로드")이고
+  올린 칸에만 대체 텍스트(선택, 200자 한 줄)가 열린다. 본문 `images` 는 올린 칸만 대표 → 추가 이미지 순서로 `{uploadKey, imageType, altText?}` 를 싣는다(`imageEntries`),
+  이미지가 없으면 `images` 를 보내지 않는다. 대체 텍스트 칸 오류 키는 본문 번호(`images.{n}.altText`)라 칸 id → 본문 번호로 찾는다.
+  **올리는 중에는 등록을 막는다** — 키 없이 보내면 이미지가 조용히 빠진다. 올린 파일은 하루 안에 등록하지 않으면 지워진다(안내).
+  이미지 오류는 BE 가 저장(DB) 전에 검증 · 복사해서 난다 — `018`(구성) · `032`(키 없음 · 남의 키 · 만료) · `033` · `034` 는 이미지 칸, `035`(저장소) · `036`(꺼짐)은 폼 전체 문구이고
+  503 이어도 **결과 모름으로 보지 않는다**(상품이 생기지 않았다). 검증 `019` 는 대체 텍스트 칸 또는 이미지 칸 전체다.
 - **투어 앵커** — 섹션 · 등록 버튼 줄에 `data-tour`(`product-basic` · `product-price` · `product-options` · `product-skus` · `product-submit`)를 단다. 온보딩 투어 `product-new-v1`(#228)이 가리키는 앵커다 — 이름을 바꾸면 `lib/tour/tours.ts` 정의도 같이 바꾼다(폼 테스트가 둘을 맞춰 본다).
 - **폼** — 기본 정보(상품명 · 요약 · 상세 설명 HTML), 카테고리(어드민 트리에서 대표 1개 + 진열 여럿, 숨김 포함), 판매 상태 · 노출(기본 숨김), 가격(통화 하나로 판매가 · 정가 · 추가금, `parseMoneyInput`),
   1회 최대 수량, 프리오더 · 발송 예정일, 옵션 그룹(이름 + 값 칩, 입력 순서 = 노출 순서), SKU 표.

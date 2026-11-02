@@ -4,7 +4,7 @@ import type { CategoryRow } from '@/lib/category/tree';
 import type { AdminProductDetail } from './detail';
 import { ADMIN_PRODUCTS_PATH } from './query';
 
-// 어드민 상품 등록(#29 · BE #9 E1) — 폼 → `POST /api/v1/admin/products` 본문.
+// 어드민 상품 등록(#29 · BE #9 E1 · 이미지 첨부 F2) — 폼 → `POST /api/v1/admin/products` 본문.
 // 계약 정본은 `backend/docs/api-design-guide.md` "어드민 상품 등록", 칸 규칙 정본은 BE `ProductCreateRequest` · `ProductWriteProcessor` 다.
 // 화면은 같은 규칙으로 미리 막아 저장을 누른 뒤에야 알게 되는 일을 줄일 뿐이고, 판정은 서버다.
 // 금액은 계산하지 않는다 — 글자를 최소 단위 정수로 바꾸고(`parseMoneyInput`) 서버 규칙(정가 > 판매가 · 추가금 0)을 비교로만 본다.
@@ -30,6 +30,9 @@ export const VALUES_MAX = 50;
 export const VALUE_NAME_MAX = 50;
 /** SKU 1~100개(BE `PRODUCT_095`) — 옵션 조합 수가 곧 SKU 수라 조합 상한이다 */
 export const SKUS_MAX = 100;
+/** 이미지 최대 8장(대표 포함, BE `PRODUCT_019`) · 대체 텍스트 200자 */
+export const IMAGES_MAX = 8;
+export const ALT_TEXT_MAX = 200;
 /** 금액 상한(최소 화폐 단위, BE `PRODUCT_037`) */
 export const AMOUNT_MAX = 100_000_000;
 const INT_MAX = 2_147_483_647;
@@ -47,6 +50,21 @@ export type SkuForm = {
   stockMode: 'quantity' | 'unlimited';
   quantity: string;
 };
+
+/** BE `ImageType` 중 등록이 받는 정지 이미지 둘(영상은 후속) */
+export type ProductImageType = 'THUMBNAIL' | 'GALLERY';
+
+/**
+ * 이미지 칸 하나. `upload` 는 업로드 칸이 준 값이다 — 서버로는 `uploadKey` 만 가고 `file` 은 미리보기용이다.
+ * 올리기 전 · 뺀 칸은 `upload` 가 null 이고 보내지 않는다. `id` 는 화면 key 용.
+ */
+export type ImageSlot = {
+  id: string;
+  upload: { uploadKey: string; file: File } | null;
+  altText: string;
+};
+
+export const emptyImageSlot = (id: string): ImageSlot => ({ id, upload: null, altText: '' });
 
 export type ProductCreateForm = {
   name: string;
@@ -68,6 +86,10 @@ export type ProductCreateForm = {
   optionGroups: OptionGroupForm[];
   /** 조합 키(`comboKey`) → SKU 칸. 옵션을 바꿔도 같은 조합이면 입력이 남는다 */
   skus: Record<string, SkuForm>;
+  /** 대표 이미지(THUMBNAIL) 한 칸 */
+  thumbnail: ImageSlot;
+  /** 추가 이미지(GALLERY). 배열 순서 = 노출 순서, 대표와 합쳐 `IMAGES_MAX` 장까지 */
+  gallery: ImageSlot[];
 };
 
 export type MoneyBody = Money;
@@ -95,6 +117,7 @@ export type ProductCreateRequest = {
     hsCode?: string;
     initialStock?: { stockManaged: boolean; quantity: number };
   }[];
+  images?: { uploadKey: string; imageType: ProductImageType; altText?: string }[];
 };
 
 /** 201 `ProductCreateAdminResponse` */
@@ -130,7 +153,34 @@ export function emptyProductForm(): ProductCreateForm {
     expectedShipDate: '',
     optionGroups: [],
     skus: {},
+    thumbnail: emptyImageSlot('thumbnail'),
+    gallery: [],
   };
+}
+
+// ---------- 이미지 ----------
+
+export type ImageEntry = {
+  slot: ImageSlot;
+  uploadKey: string;
+  imageType: ProductImageType;
+  index: number;
+};
+
+/**
+ * 보낼 이미지 — 올린 칸만, 대표 → 추가 이미지 순서. `index` 는 본문 `images` 의 번호라
+ * 칸 오류 키(`images.{index}.altText`)와 서버 `fieldErrors`(`images[1].altText`)가 같은 번호를 쓴다.
+ */
+export function imageEntries(form: Pick<ProductCreateForm, 'thumbnail' | 'gallery'>): ImageEntry[] {
+  const slots: { slot: ImageSlot; imageType: ProductImageType }[] = [
+    { slot: form.thumbnail, imageType: 'THUMBNAIL' },
+    ...form.gallery.map((slot) => ({ slot, imageType: 'GALLERY' as const })),
+  ];
+  return slots
+    .flatMap(({ slot, imageType }) =>
+      slot.upload ? [{ slot, uploadKey: slot.upload.uploadKey, imageType }] : [],
+    )
+    .map((entry, index) => ({ ...entry, index }));
 }
 
 // ---------- 옵션 조합 ----------
@@ -212,7 +262,7 @@ export function addOptionValue(
 
 // BE `ProductValidationMessage.PLAIN_TEXT` — 제어 · 서식 · 대리 · 줄/문단 구분 문자 금지
 const NOT_PLAIN = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
-const isPlainText = (text: string) => !NOT_PLAIN.test(text);
+export const isPlainText = (text: string) => !NOT_PLAIN.test(text);
 const INTEGER = /^\d+$/;
 const HS_SEPARATORS = /[.\- ]/g;
 const HS_DIGITS = /^[0-9]{6,10}$/;
@@ -249,6 +299,8 @@ export const WEIGHT_INVALID = '무게는 1 이상의 정수(g)로 입력해 주�
 export const HS_CODE_INVALID = 'HS 코드는 점 · 하이픈 · 공백을 뺀 숫자 6~10자리입니다.';
 export const QUANTITY_INVALID = '처음 재고는 0 이상의 정수로 입력해 주세요.';
 export const INITIAL_STOCK_INVALID = '처음 재고를 다시 입력해 주세요.';
+export const IMAGES_TOO_MANY = `이미지는 대표를 포함해 ${IMAGES_MAX}장까지입니다.`;
+export const ALT_TEXT_INVALID = `대체 텍스트는 줄바꿈 · 탭 · 보이지 않는 문자 없이 ${ALT_TEXT_MAX}자 이하로 입력해 주세요.`;
 export const ZERO_ADDITIONAL_REQUIRED =
   '판매중 SKU 중 하나는 추가금이 0 이어야 합니다. 판매가가 판매중 SKU 의 가장 낮은 가격입니다.';
 
@@ -396,6 +448,23 @@ export function productRequest(
   });
   if (onSale.length > 0 && additionalParsed && !zeroOnSale) add('skus', ZERO_ADDITIONAL_REQUIRED);
 
+  const entries = imageEntries(form);
+  if (entries.length > IMAGES_MAX) add('images', IMAGES_TOO_MANY);
+  const images: NonNullable<ProductCreateRequest['images']> = entries.map(
+    ({ slot, uploadKey, imageType, index }) => {
+      const altText = slot.altText.trim();
+      if (!isPlainText(altText) || altText.length > ALT_TEXT_MAX) {
+        add(`images.${index}.altText`, ALT_TEXT_INVALID);
+      }
+      const item: NonNullable<ProductCreateRequest['images']>[number] = {
+        uploadKey,
+        imageType,
+      };
+      if (altText !== '') item.altText = altText;
+      return item;
+    },
+  );
+
   if (Object.keys(errors).length > 0 || !salePrice.ok) return { ok: false, errors };
 
   const request: ProductCreateRequest = {
@@ -419,6 +488,7 @@ export function productRequest(
     request.maxQuantityPerOrder = maxQuantity;
   }
   if (expectedShipDate !== undefined) request.expectedShipDate = expectedShipDate;
+  if (images.length > 0) request.images = images;
   return { ok: true, request };
 }
 

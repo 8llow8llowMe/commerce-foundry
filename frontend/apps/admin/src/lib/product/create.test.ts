@@ -3,6 +3,7 @@ import { flattenTree } from '@/lib/category/tree';
 import type { CategoryNode } from '@/lib/category/types';
 import {
   addOptionValue,
+  ALT_TEXT_INVALID,
   AMOUNT_FORMAT,
   AMOUNT_TOO_LARGE,
   CATEGORY_REQUIRED,
@@ -11,11 +12,14 @@ import {
   COMBINATIONS_TOO_MANY,
   comboKey,
   createdProductHref,
+  emptyImageSlot,
   emptyProductForm,
   emptySku,
   GROUP_NAME_DUPLICATED,
   GROUP_VALUES_REQUIRED,
   HS_CODE_INVALID,
+  imageEntries,
+  IMAGES_TOO_MANY,
   LIST_PRICE_NOT_HIGHER,
   localToday,
   MAX_QUANTITY_RANGE,
@@ -33,6 +37,7 @@ import {
   VALUE_INVALID,
   WEIGHT_INVALID,
   ZERO_ADDITIONAL_REQUIRED,
+  type ImageSlot,
   type OptionGroupForm,
   type ProductCreateForm,
 } from './create';
@@ -314,6 +319,54 @@ describe('productRequest', () => {
       },
     });
     expect(productRequest(form, TODAY).ok).toBe(true);
+  });
+});
+
+describe('이미지 (BE #9 F2)', () => {
+  const file = new File(['x'], 'a.png', { type: 'image/png' });
+  const uploaded = (id: string, altText = ''): ImageSlot => ({
+    id,
+    upload: { uploadKey: `uploads/1/${id}.png`, file },
+    altText,
+  });
+
+  it('올린 칸만 대표 → 추가 이미지 순서로 보내고 본문 번호를 매긴다', () => {
+    const form = filled({
+      thumbnail: emptyImageSlot('thumbnail'),
+      gallery: [uploaded('g1', '  앞모습 '), emptyImageSlot('g2'), uploaded('g3')],
+    });
+    expect(imageEntries(form).map(({ slot, index }) => [slot.id, index])).toEqual([
+      ['g1', 0],
+      ['g3', 1],
+    ]);
+    const built = productRequest(form, TODAY);
+    expect(built.ok && built.request.images).toEqual([
+      { uploadKey: 'uploads/1/g1.png', imageType: 'GALLERY', altText: '앞모습' },
+      { uploadKey: 'uploads/1/g3.png', imageType: 'GALLERY' },
+    ]);
+  });
+
+  it('대표 이미지는 THUMBNAIL 로 맨 앞이다 · 올린 이미지가 없으면 images 를 보내지 않는다', () => {
+    const built = productRequest(
+      filled({ thumbnail: uploaded('thumbnail'), gallery: [uploaded('g1')] }),
+      TODAY,
+    );
+    expect(built.ok && built.request.images?.map((image) => image.imageType)).toEqual([
+      'THUMBNAIL',
+      'GALLERY',
+    ]);
+    const empty = productRequest(filled(), TODAY);
+    expect(empty.ok && 'images' in empty.request).toBe(false);
+  });
+
+  it('대체 텍스트 오류는 본문 번호 키 · 8장 초과는 이미지 칸 전체 오류다', () => {
+    const gallery = Array.from({ length: 8 }, (_, n) => uploaded(`g${n}`));
+    gallery[1] = uploaded('g1', '줄\n바꿈');
+    const built = productRequest(filled({ thumbnail: uploaded('thumbnail'), gallery }), TODAY);
+    expect(built).toEqual({
+      ok: false,
+      errors: { images: [IMAGES_TOO_MANY], 'images.2.altText': [ALT_TEXT_INVALID] },
+    });
   });
 });
 

@@ -5,6 +5,7 @@ import {
   AMOUNT_FORMAT,
   AMOUNT_TOO_LARGE,
   CATEGORY_INVALID,
+  ALT_TEXT_INVALID,
   CHECK_FIELDS,
   GROUP_NAME_INVALID,
   HS_CODE_INVALID,
@@ -15,12 +16,17 @@ import {
   SKU_OPTION_INVALID,
   VALUE_INVALID,
 } from './create';
+import { IMAGE_FORMAT_NOT_ALLOWED, UPLOAD_DISABLED } from '@/lib/upload/image-upload';
 import {
   BUSY,
   CATEGORY_NOT_FOUND,
   createFailure,
   createFieldKey,
   errorSummary,
+  IMAGE_CONFIGURATION,
+  IMAGE_STORAGE_FAILED,
+  IMAGE_UPLOAD_GONE,
+  IMAGES_INVALID,
   OPTION_INVALID,
   PRICE_RULE,
   UNKNOWN_OUTCOME,
@@ -48,7 +54,7 @@ describe('createFieldKey', () => {
     ['optionGroups[0].values[2]', 'optionGroups.0.values'],
     ['optionGroups[1].name', 'optionGroups.1.name'],
     ['optionGroups[1]', 'optionGroups'],
-    ['images', 'form'],
+    ['customOrderFields', 'form'],
   ])('%s → %s', (path, key) => {
     expect(createFieldKey(path)).toBe(key);
   });
@@ -187,5 +193,49 @@ describe('errorSummary', () => {
       'a',
       `${CHECK_FIELDS} (2곳)`,
     ]);
+  });
+});
+
+describe('createFailure — 이미지 첨부 (BE #9 F2)', () => {
+  it('대체 텍스트는 그 칸, 그 밖의 images 검증은 이미지 칸 전체다', () => {
+    expect(createFieldKey('images[2].altText')).toBe('images.2.altText');
+    expect(createFieldKey('images[0].uploadKey')).toBe('images');
+    expect(createFieldKey('images')).toBe('images');
+    expect(
+      createFailure(
+        validation(field('PRODUCT_019', 'images[1].altText'), field('PRODUCT_019', 'images')),
+      ),
+    ).toEqual({
+      kind: 'errors',
+      errors: { 'images.1.altText': [ALT_TEXT_INVALID], images: [IMAGES_INVALID] },
+      reloadCategories: false,
+      uncertain: false,
+    });
+  });
+
+  it.each([
+    [400, 'PRODUCT_018', { images: [IMAGE_CONFIGURATION] }],
+    [400, 'PRODUCT_032', { images: [IMAGE_UPLOAD_GONE] }],
+    [400, 'PRODUCT_033', { images: [IMAGE_FORMAT_NOT_ALLOWED] }],
+    [503, 'PRODUCT_035', { form: [IMAGE_STORAGE_FAILED] }],
+    [503, 'PRODUCT_036', { form: [UPLOAD_DISABLED] }],
+  ])('%i %s — 저장 전에 난 오류라 등록되지 않았다(uncertain 아님)', (status, code, errors) => {
+    const cause = new ApiError(
+      status === 503 ? 'unavailable' : 'server',
+      status,
+      code,
+      '서버 문구',
+    );
+    expect(createFailure(cause)).toEqual({
+      kind: 'errors',
+      errors,
+      reloadCategories: false,
+      uncertain: false,
+    });
+  });
+
+  it('코드 없는 503 은 여전히 결과 모름이다', () => {
+    const failure = createFailure(new ApiError('unavailable', 503, null, null));
+    expect(failure).toMatchObject({ uncertain: true });
   });
 });

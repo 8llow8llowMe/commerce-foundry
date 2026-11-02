@@ -36,17 +36,18 @@ describe('ProductCreateForm', () => {
     expect(render(false)).not.toContain('data-tour');
   });
 
-  // 첨부(BE #9 F2) 뒤 이미지 칸을 켜고 투어 단계를 더하면 이 테스트를 바꾼다
-  it('꺼 둔 이미지 업로드 칸은 투어가 가리키지 않는다', () => {
+  it('이미지 업로드 칸(BE #9 F2)은 투어가 가리키지 않는다', () => {
     const html = render(true);
     const imageSection = html.match(/<section[^>]*>(?:(?!<\/section>).)*type="file"/s)?.[0] ?? '';
     expect(imageSection).not.toBe('');
     expect(imageSection).not.toContain('data-tour');
   });
 
-  it('이미지 업로드 칸은 첨부 API(BE #9 F2) 전까지 꺼 두고 이유를 안내한다', () => {
+  it('대표 이미지 업로드 칸을 켜 두고 추가 이미지 칸을 더할 수 있다', () => {
     const html = render(false);
-    expect(html).toMatch(/<input(?=[^>]*type="file")[^>]*disabled=""/);
-    expect(html).toContain('상품에 이미지를 붙이는 서버 기능이 준비되면 열립니다.');
+    expect(html).toMatch(/<input(?=[^>]*type="file")(?![^>]*disabled="")[^>]*>/);
+    expect(html).toContain('대표 이미지 (선택)');
+    expect(html).toContain('추가 이미지 칸 더하기');
+    expect(html).not.toContain('서버 기능이 준비되면 열립니다');
   });
 });
