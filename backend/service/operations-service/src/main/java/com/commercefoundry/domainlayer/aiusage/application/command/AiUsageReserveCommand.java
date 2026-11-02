@@ -13,12 +13,21 @@ import java.util.Objects;
  * @param inputChars     마스킹 뒤 입력 글자 수 — 예상 비용의 입력 몫
  * @param imageCount     이미지 장수
  * @param structured     구조화 출력 호출이면 {@code true}
+ * @param provider       예약 시 선택한 Provider ({@code anthropic}/{@code openai}). 신규 예약에는 필수다
  */
 public record AiUsageReserveCommand(
-    String feature, Integer promptVersion, String callerRef, String requestedModel, int maxTokens, long inputChars, int imageCount, boolean structured
+    String feature, Integer promptVersion, String callerRef, String requestedModel, int maxTokens, long inputChars, int imageCount, boolean structured, String provider
 ) {
 
+    public AiUsageReserveCommand(String feature, Integer promptVersion, String callerRef, String requestedModel, int maxTokens, long inputChars,
+                                 int imageCount, boolean structured) {
+        this(feature, promptVersion, callerRef, requestedModel, maxTokens, inputChars, imageCount, structured, "anthropic");
+    }
+
     public AiUsageReserveCommand {
+        if (!java.util.Set.of("anthropic", "openai").contains(provider == null ? "" : provider)) {
+            throw new IllegalArgumentException("provider must be anthropic or openai");
+        }
         Objects.requireNonNull(feature, "feature");
         Objects.requireNonNull(requestedModel, "requestedModel");
     }

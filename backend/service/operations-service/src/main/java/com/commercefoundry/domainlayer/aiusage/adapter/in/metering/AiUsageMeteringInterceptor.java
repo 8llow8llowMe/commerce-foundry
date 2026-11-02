@@ -51,7 +51,7 @@ public class AiUsageMeteringInterceptor implements AiCallInterceptor {
         try {
             reservation = aiUsageMeterUseCase.reserve(new AiUsageReserveCommand(
                 context.feature(), context.promptVersion(), context.callerRef(), context.requestedModel(),
-                context.maxTokens(), context.inputChars(), context.imageCount(), context.structured()
+                context.maxTokens(), context.inputChars(), context.imageCount(), context.structured(), context.provider()
             ));
         } catch (AiBudgetExceededException exception) {
             logBudgetRejected(context.feature(), exception);

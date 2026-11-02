@@ -40,11 +40,25 @@ before 실패는 HTTP를 보내지 않는다. before가 성공한 호출은 afte
 스트리밍은 텍스트 delta만 전달한다. terminal 이벤트 없는 EOF는 실패다. 취소는 받은 텍스트·빈 도구 목록·null assistant 메시지다.
 시작 시 취소는 `NOT_SENT`, 사용량을 받은 뒤 거절·파싱 실패는 `UNUSABLE`이다. SDK 오류 본문과 원인은 공개 예외에 싣지 않는다.
 
-## 운영 단가와 후속 범위
+## 운영 단가와 원장 Provider 식별
 
-operations는 선택된 모든 OpenAI 기본·기능 모델의 명시적 `operations.ai.pricing.models` 항목을 요구한다.
-실제 모델과 단가는 운영자가 공식 가격을 확인해 설정한다. 기존 Claude의 최고 단가 대체 정책은 유지한다.
-원장의 Provider 식별 컬럼·DDL·원격 계량 확장은 후속 범위이며 #468은 열린 상태로 둔다. FE API 계약 변경은 없다.
+operations는 선택된 모든 OpenAI 기본·기능 모델에 명시적 단가를 요구한다. `operations.ai.pricing.providers.<anthropic|openai>.models.<모델>`로
+동일한 모델 ID도 Provider별 단가를 설정할 수 있다. 선택 순서는 Provider의 정확한 모델 → 기존 `operations.ai.pricing.models`의 정확한 모델 →
+해당 Provider와 기존 공통 단가 전체의 항목별 최댓값이다. 다른 Provider의 단가는 최고 단가 계산에도 포함하지 않는다.
+모든 사용 Provider에는 자체 또는 공통 단가 풀이 있어야 하며, OpenAI의 기동 검사는 최고 단가 대체만으로 통과하지 않는다.
+기존 공통 단가 설정과 Claude의 최고 단가 대체는 호환된다. 실제 모델과 단가는 운영자가 공식 가격을 확인해 설정한다.
+
+신규 호출은 예약 시 선택한 `anthropic`/`openai`를 `AiCallContext`부터 `operations.ai_usage_call.provider`까지 전달한다.
+Provider는 정산·회수에서 바꾸지 않는다. 과거 행의 NULL은 미기록이며 모델 이름으로 추정하거나 일괄 채우지 않는다.
+과거 NULL 행의 비용 계산은 기존 공통 단가만 사용한다. 예전 9·12인자 계량 생성자와 예약 명령·pending 호출은 Anthropic으로 호환된다.
+Provider별 단가만 사용하는 설정으로 전환하더라도, 과거 Provider가 NULL인 PENDING 예약의 정산이 끝날 때까지 기존 공통 단가를 유지한다.
+이를 먼저 지우면 해당 호출의 실측 정산이 실패하고 회수 작업에서 예상 비용으로 ABANDONED 처리될 수 있다.
+
+배포 전 [운영 delta DDL](../service/operations-service/src/test/resources/ddl/ai-usage-provider.sql)을 DB에 먼저 적용한 뒤 애플리케이션을 배포한다.
+`application.yml`의 `hibernate.default_schema=operations`와 PostgreSQL 17 Hibernate 생성 스냅숏에 근거한 nullable varchar(32) 컬럼·comment만 추가한다.
+기본값·NOT NULL·인덱스·backfill은 없다. 실제 운영 DB 적용과 유료 API 호출은 검증 범위에 포함하지 않는다.
+실제 OpenAI SDK 루프백 → 공통 계량 → H2 원장 통합시험에서 단일·구조화·도구·스트리밍, 거절 과금, 보내기 전 취소를 검증한다.
+PostgreSQL 원장 시험도 Provider 보존과 과거 NULL 로드·정산·회수를 검증하며 Docker/CI에서 실행한다. FE API 계약 변경은 없다.
 
 자동 Provider 전환은 하지 않는다(#468 확정 결정). 같은 Provider의 SDK 재시도 이후에는 기존 `AiException`으로 실패를 전달한다.
 새 Provider도 단일·구조화·대화·도구·스트리밍 모든 경로에서 개인정보 마스킹과 계량을 적용해야 한다.

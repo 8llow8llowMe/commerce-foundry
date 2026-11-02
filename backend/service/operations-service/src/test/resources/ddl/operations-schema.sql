@@ -25,6 +25,7 @@
         priced_by varchar(16) check ((priced_by in ('CONFIG','MAX_FALLBACK'))),
         pricing_version varchar(20),
         prompt_version integer,
+        provider varchar(32),
         reason varchar(32),
         requested_model varchar(64) not null,
         settled_at timestamp(6) with time zone,
@@ -107,6 +108,9 @@
 
     comment on column operations.ai_usage_call.prompt_version is
         '프롬프트 템플릿 버전. 템플릿 없이 만든 요청이면 null';
+
+    comment on column operations.ai_usage_call.provider is
+        '예약 시 선택한 AI Provider (anthropic/openai). null은 미기록 — 모델 이름으로 추정하지 않음';
 
     comment on column operations.ai_usage_call.reason is
         '실패 원인 (ai-core AiException.Reason). 없으면 null';

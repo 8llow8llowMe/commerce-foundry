@@ -24,6 +24,9 @@ public class AiUsageCallRepositoryAdapter implements AiUsageCallRepositoryPort {
     /** 바로 내보낸다 — 아이디 충돌(PK 위반)이 예약 트랜잭션 안에서 드러나 그대로 올라간다(계량 어댑터가 METERING_FAILED 로 번역). */
     @Override
     public void insert(AiUsageCall call) {
+        if (call.provider() == null) {
+            throw new IllegalArgumentException("provider is required for new reservations");
+        }
         if (!call.status().isPending()) {
             throw new IllegalArgumentException("새 호출은 PENDING 이어야 합니다: " + call.status());
         }
@@ -74,6 +77,7 @@ public class AiUsageCallRepositoryAdapter implements AiUsageCallRepositoryPort {
             .promptVersion(call.promptVersion())
             .callerRef(call.callerRef())
             .requestedModel(call.requestedModel())
+            .provider(call.provider())
             .model(call.model())
             .structured(call.structured())
             .imageCount(call.imageCount())
@@ -103,7 +107,7 @@ public class AiUsageCallRepositoryAdapter implements AiUsageCallRepositoryPort {
             entity.getRequestedModel(), entity.getModel(), entity.isStructured(), entity.getImageCount(), entity.getInputChars(), entity.getEstimateCostMicros(),
             new AiTokenUsage(entity.getInputTokens(), entity.getOutputTokens(), entity.getCacheCreationInputTokens(), entity.getCacheReadInputTokens()),
             entity.getCostMicros(), entity.getPricingVersion(), entity.getPricedBy(), entity.getStatus(), entity.getReason(), entity.getHttpStatus(),
-            entity.getMessageId(), entity.getElapsedMs(), entity.getCalledAt(), entity.getSettledAt()
+            entity.getMessageId(), entity.getElapsedMs(), entity.getCalledAt(), entity.getSettledAt(), entity.getProvider()
         );
     }
 }

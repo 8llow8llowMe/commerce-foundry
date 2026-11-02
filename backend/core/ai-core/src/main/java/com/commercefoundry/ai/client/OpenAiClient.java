@@ -155,7 +155,8 @@ final class OpenAiClient implements AiClient, AutoCloseable {
                 new AiCallContext(
                         UUID.randomUUID().toString(),
                         request.feature(),
-                        request.promptVersion(), request.callerRef(), settings.model(), settings.maxTokens(), maskedLength, request.images().size(), format != null));
+                        request.promptVersion(), request.callerRef(), settings.model(), settings.maxTokens(), maskedLength,
+                        request.images().size(), format != null, 1, 0, false, "openai"));
     }
 
     private AiConversationResult conversation(AiConversationRequest request, AiStreamListener listener) {
@@ -214,7 +215,8 @@ final class OpenAiClient implements AiClient, AutoCloseable {
                         request.promptVersion(),
                         request.callerRef(),
                         settings.model(),
-                        body.path("max_output_tokens").asInt(), AiJson.write(body).length(), 0, false, request.messages().size(), request.tools().size(), listener != null);
+                        body.path("max_output_tokens").asInt(), AiJson.write(body).length(), 0, false,
+                        request.messages().size(), request.tools().size(), listener != null, "openai");
         ResponseCreateParams params = params(body);
         return execute(
                 context,

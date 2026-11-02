@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * AI 사용량 원장 · 월 한도 설정 (#215 PR-B). 기본값은 {@code application.yml} 에 둔다 — 블록이 빠지거나 값이 틀리면 기동하지 않는다.
@@ -118,16 +119,27 @@ public record AiUsageProperties(Budget budget, Estimate estimate, Pricing pricin
      * @param version 단가표 버전(20자 이하) — 호출 행에 남는다. 단가가 있으면 필수
      * @param models  모델 ID → 단가(USD / 1M 토큰). 비어 있을 수 있다
      */
-    public record Pricing(String version, Map<String, Price> models) {
+    public record Pricing(String version, Map<String, Price> models, Map<String, ProviderPrices> providers) {
+
+        public Pricing(String version, Map<String, Price> models) {
+            this(version, models, Map.of());
+        }
 
         public static final int VERSION_MAX_LENGTH = 20;
 
+        @ConstructorBinding
         public Pricing {
+            providers = providers == null ? Map.of() : Map.copyOf(providers);
+            for (String provider : providers.keySet()) {
+                if (!java.util.Set.of("anthropic", "openai").contains(provider)) {
+                    throw new IllegalArgumentException("Invalid pricing provider");
+                }
+            }
             models = models == null ? Map.of() : Map.copyOf(models);
             if (version != null && version.isBlank()) {
                 version = null;
             }
-            if (!models.isEmpty() && version == null) {
+            if ((!models.isEmpty() || providers.values().stream().anyMatch(prices -> !prices.models().isEmpty())) && version == null) {
                 throw new IllegalArgumentException("operations.ai.pricing.models 가 있으면 operations.ai.pricing.version 이 있어야 합니다.");
             }
             if (version != null && version.length() > VERSION_MAX_LENGTH) {
@@ -139,17 +151,34 @@ public record AiUsageProperties(Budget budget, Estimate estimate, Pricing pricin
                 }
                 Objects.requireNonNull(entry.getValue(), "operations.ai.pricing.models." + entry.getKey() + " 단가가 없습니다.");
             }
-            toTable(version, models);
+            toTable(version, models, providers);
         }
 
         public AiPriceTable toTable() {
-            return toTable(version, models);
+            return toTable(version, models, providers);
         }
 
-        private static AiPriceTable toTable(String version, Map<String, Price> models) {
+        private static AiPriceTable toTable(String version, Map<String, Price> models, Map<String, ProviderPrices> providers) {
             Map<String, AiPrice> prices = new LinkedHashMap<>();
             models.forEach((model, price) -> prices.put(model, price.toPrice("operations.ai.pricing.models." + model)));
-            return new AiPriceTable(version, prices);
+            Map<String, Map<String, AiPrice>> providerPrices = new LinkedHashMap<>();
+            providers.forEach((provider, settings) -> {
+                Map<String, AiPrice> entries = new LinkedHashMap<>();
+                settings.models().forEach((model, price) -> entries.put(model, price.toPrice("operations.ai.pricing.providers." + provider + ".models." + model)));
+                providerPrices.put(provider, entries);
+            });
+            return new AiPriceTable(version, prices, providerPrices);
+        }
+
+        public record ProviderPrices(Map<String, Price> models) {
+            public ProviderPrices {
+                models = models == null ? Map.of() : Map.copyOf(models);
+                for (String model : models.keySet()) {
+                    if (model.isBlank() || model.length() > 64) {
+                        throw new IllegalArgumentException("Provider pricing model ID must be 1-64 characters");
+                    }
+                }
+            }
         }
 
         /** 단가 네 칸 — 전부 필수, 0 이상. 문자열로 적는다(예 {@code "3"}, {@code "0.30"}). */
