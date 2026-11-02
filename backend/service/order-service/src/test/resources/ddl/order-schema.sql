@@ -253,6 +253,40 @@
     comment on column orders.order_request.version is
         '낙관적 락 버전';
 
+    create table orders.order_request_item (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        order_request_id bigint not null,
+        product_id bigint not null,
+        quantity integer not null,
+        primary key (id),
+        constraint uk_order_request_item_order_request_id_product_id unique (order_request_id, product_id),
+        constraint ck_order_request_item_identifiers_positive check (id > 0 and order_request_id > 0 and product_id > 0),
+        constraint ck_order_request_item_quantity_positive check (quantity >= 1)
+    );
+
+    comment on table orders.order_request_item is
+        '주문 요청 기록의 상품별 수량 (진행 중 시도의 수량 상한 계수용)';
+
+    comment on column orders.order_request_item.id is
+        '항목 아이디 (Snowflake)';
+
+    comment on column orders.order_request_item.created_at is
+        '생성 시각';
+
+    comment on column orders.order_request_item.updated_at is
+        '수정 시각';
+
+    comment on column orders.order_request_item.order_request_id is
+        '주문 요청 기록 아이디 (FK: order_request.id)';
+
+    comment on column orders.order_request_item.product_id is
+        '상품 아이디 (외부 FK: product-service product.id)';
+
+    comment on column orders.order_request_item.quantity is
+        '요청에 담긴 이 상품의 수량 합 (줄 · SKU 를 합친 상품 단위)';
+
     create table orders.order_shipping_address (
         order_id bigint not null,
         created_at timestamp(6) with time zone not null,

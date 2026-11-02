@@ -40,7 +40,7 @@ class OrderRequestTest {
         assertThatThrownBy(() -> OrderRequest.start(1, 2, UUID.randomUUID(), "private-input", 3, NOW, Duration.ofSeconds(30)))
             .isInstanceOf(IllegalArgumentException.class).hasMessageNotContaining("private-input");
         for (Duration duration : new Duration[]{Duration.ZERO, Duration.ofMillis(999), Duration.ofMinutes(6)}) {
-            assertThatThrownBy(() -> new OrderProperties.Creation(duration, 5, Duration.ofMinutes(30))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new OrderProperties.Creation(duration, 5, Duration.ofMinutes(30), Duration.ofMillis(500))).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> OrderRequest.start(1, 2, UUID.randomUUID(), HASH, 3, NOW, duration)).isInstanceOf(IllegalArgumentException.class);
         }
     }

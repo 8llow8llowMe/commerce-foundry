@@ -124,7 +124,13 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
         return orderMapper.toDomain(entity, address, items, options);
     }
 
+    /**
+     * 짧은 읽기 트랜잭션 하나 (#436). 부른 쪽({@code OrderProcessor#heldQuantitiesByProduct})은 진행 중 기록 수량(REQUIRES_NEW 읽기) → 이 합계를 순서대로 읽어
+     * 트랜잭션을 걸지 않는다 — 걸면 기록 어댑터가 커넥션을 하나 더 잡는다. 선언 쿼리 메서드는 Spring Data 가 트랜잭션을 붙이지 않으므로 여기서 건다
+     * ({@code architecture-guide.md} §3 예외).
+     */
     @Override
+    @Transactional(readOnly = true, timeout = 5)
     public List<PendingProductQuantityQueryResult> sumPendingQuantitiesByProduct(long memberId, Collection<Long> productIds) {
         if (productIds.isEmpty()) {
             return List.of();

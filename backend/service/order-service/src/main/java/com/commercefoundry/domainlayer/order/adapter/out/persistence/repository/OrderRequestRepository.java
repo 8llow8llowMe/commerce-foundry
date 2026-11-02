@@ -42,7 +42,7 @@ public interface OrderRequestRepository extends JpaRepository<OrderRequestEntity
         where r.id = :#{#expected.id} and r.version = :#{#expected.version}
           and r.memberId = :#{#expected.memberId} and r.idempotencyKey = :#{#expected.idempotencyKey}
           and r.requestHash = :#{#expected.requestHash} and r.orderId = :#{#expected.orderId}
-          and r.status = :processing and r.leaseExpiresAt > :now
+          and r.status = :processing and r.leaseExpiresAt > :leaseFloor
         """)
-    int completeOwned(OrderRequest expected, Instant now, OrderRequest.Status processing, OrderRequest.Status completed);
+    int completeOwned(OrderRequest expected, Instant now, Instant leaseFloor, OrderRequest.Status processing, OrderRequest.Status completed);
 }

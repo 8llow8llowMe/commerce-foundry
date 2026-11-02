@@ -11,13 +11,20 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderRequestRe
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
+import com.commercefoundry.domainlayer.order.domain.model.OrderQuoteLine;
 import com.commercefoundry.domainlayer.order.domain.model.OrderRequest;
+import com.commercefoundry.domainlayer.order.domain.model.OrderRequestItem;
 import com.commercefoundry.domainlayer.order.support.OrderFixtures;
 import com.commercefoundry.domainlayer.order.support.FakeShippingFeeQueryPort;
+import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +50,7 @@ class OrderCreateWebIntegrationTest {
     @Autowired MockMvcTester mvc;
     @Autowired OrderRequestRepositoryPort requests;
     @Autowired OrderRepositoryPort orders;
+    @Autowired SnowflakeIdGenerator ids;
     @MockitoBean SkuQueryPort skus;
     @MockitoBean ShippingFeeQueryPort shipping;
     @MockitoBean StockReservationPort stock;
@@ -125,5 +133,41 @@ class OrderCreateWebIntegrationTest {
         clearInvocations(skus, shipping, stock);
         assertThat(post(key, BODY, member)).hasStatus(409);
         verifyNoInteractions(skus, shipping, stock);
+    }
+
+    @Test
+    void inFlightQuantityOfAnotherAttemptIsRecheckedAfterAcquireAndEndedLeaseIsNotCounted() {
+        long member = TestTokens.MEMBER_ID + 436_000 + ThreadLocalRandom.current().nextInt(1_000_000);
+        long product = 9001 + 7000;
+        var other = new AtomicReference<OrderRequest>();
+        // 견적의 1차 판정이 끝난 뒤(배송비 견적 중) 같은 회원의 다른 시도가 같은 상품 수량을 쥔 기록을 커밋한다 — 기록을 잡은 뒤의 재검사가 잡아야 한다
+        doAnswer(call -> {
+            if (other.get() == null) {
+                other.set(requests.insertIfAbsent(OrderRequest.start(ids.generateId(), member, UUID.randomUUID(), "d".repeat(64), ids.generateId(), Instant.now(),
+                    Duration.ofSeconds(30)), List.of(new OrderRequestItem(product, OrderQuoteLine.MAX_QUANTITY))).orElseThrow());
+            }
+            return new FakeShippingFeeQueryPort().quote(call.getArgument(0));
+        }).when(shipping).quote(any());
+
+        var raced = UUID.randomUUID();
+        var rejected = post(raced, BODY, member);
+        assertThat(rejected).hasStatus(409);
+        assertThat(rejected).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_005");
+        verifyNoInteractions(stock);
+        var ended = requests.findByMemberIdAndIdempotencyKey(member, raced).orElseThrow();
+        assertThat(ended.status()).isEqualTo(OrderRequest.Status.PROCESSING);
+        assertThat(ended.isLeasedAt(Instant.now())).as("넘친 시도는 lease 를 바로 끝낸다").isFalse();
+
+        // 다른 시도가 lease 를 쥐고 있는 동안은 새 키도 견적 단계에서 거절된다 — 기록을 잡지 않는다
+        var early = UUID.randomUUID();
+        var earlyRejected = post(early, BODY, member);
+        assertThat(earlyRejected).hasStatus(409);
+        assertThat(earlyRejected).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_005");
+        assertThat(requests.findByMemberIdAndIdempotencyKey(member, early)).isEmpty();
+
+        // 그 시도가 실패해 lease 를 끝내면 세지 않는다 — 새 키로 곧바로 주문할 수 있다
+        assertThat(requests.endLease(other.get(), Instant.now())).isTrue();
+        assertThat(post(UUID.randomUUID(), BODY, member)).hasStatus(201);
+        verify(stock, times(1)).reserve(anyLong(), any());
     }
 }

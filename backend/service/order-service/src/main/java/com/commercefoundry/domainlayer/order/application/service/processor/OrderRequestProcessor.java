@@ -6,9 +6,11 @@ import com.commercefoundry.domainlayer.order.application.model.OrderRequestClaim
 import com.commercefoundry.domainlayer.order.application.model.OrderRequestClaim.Outcome;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRequestRepositoryPort;
 import com.commercefoundry.domainlayer.order.domain.model.OrderRequest;
+import com.commercefoundry.domainlayer.order.domain.model.OrderRequestItem;
 import com.commercefoundry.global.properties.OrderProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -54,8 +56,17 @@ public class OrderRequestProcessor {
         }
     }
 
-    public OrderRequestClaim acquire(long memberId, UUID key, String hash, OrderRequestClaim checked) {
+    /**
+     * 기록을 잡는다 — 새 키면 기록과 상품별 수량(#436)을 한 트랜잭션에 넣고, lease 가 지난 기록이면 같은 주문 아이디로 이어받는다(항목은 그대로 — 같은 본문이라 같은 값이다).
+     * 충돌이면 다시 읽어 완료면 재생, 그 밖은 409 다.
+     *
+     * @param items 견적을 상품별로 합친 수량 ({@link OrderRequestItem#of}). 새로 넣을 때만 쓴다
+     */
+    public OrderRequestClaim acquire(long memberId, UUID key, String hash, OrderRequestClaim checked, List<OrderRequestItem> items) {
         validate(memberId, key, hash);
+        if (items == null || items.isEmpty()) {
+            throw new IllegalArgumentException("Order request items are required");
+        }
         if (checked == null || (checked.outcome() != Outcome.NONE && checked.outcome() != Outcome.TAKE_OVER)) {
             throw new IllegalArgumentException("Only NONE or TAKE_OVER can be acquired");
         }
@@ -64,7 +75,8 @@ public class OrderRequestProcessor {
             throw new IllegalArgumentException("The claim does not match this request");
         }
         Optional<OrderRequest> acquired = checked.outcome() == Outcome.NONE
-            ? repository.insertIfAbsent(OrderRequest.start(ids.generateId(), memberId, key, hash, ids.generateId(), clock.instant(), properties.creation().processingLease()))
+            ? repository.insertIfAbsent(
+                OrderRequest.start(ids.generateId(), memberId, key, hash, ids.generateId(), clock.instant(), properties.creation().processingLease()), items)
             : repository.takeOver(checked.request(), clock.instant(), properties.creation().processingLease());
         if (acquired.isPresent()) {
             return new OrderRequestClaim(Outcome.ACQUIRED, acquired.get());

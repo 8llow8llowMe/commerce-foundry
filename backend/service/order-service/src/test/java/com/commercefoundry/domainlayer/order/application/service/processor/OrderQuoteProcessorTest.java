@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.order.application.service.processor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.tuple;
 
@@ -359,6 +360,25 @@ class OrderQuoteProcessorTest {
 
             assertThat(processor.quote(domestic(item(1001, 1)), skus(limited), Map.of(7001L, 2)).lines()).as("합이 상한과 같으면 통과").hasSize(1);
             assertThat(processor.quote(domestic(item(1001, 3)), skus(limited), Map.of(9999L, 5)).lines()).as("다른 상품의 결제 대기 수량은 보지 않는다").hasSize(1);
+        }
+
+        @Test
+        @DisplayName("확정 판정(기록을 잡은 뒤)은 견적과 같은 판정 · 문구다 — 이미 쥔 수량(진행 중 + 결제 대기)을 상품 단위로 더하고, 넘친 상품을 모두 싣는다 (#436)")
+        void requireQuantityWithinLimitUsesHeldQuantities() {
+            CatalogSku skirtS = withMaxQuantity(sku(1001, 7001, "치마", "S", 40_000), 10);
+            CatalogSku skirtM = withMaxQuantity(sku(1002, 7001, "치마", "M", 40_000), 10);
+            CatalogSku top = withMaxQuantity(sku(1003, 7003, "저고리", "S", 30_000), 3);
+            var skus = skus(skirtS, skirtM, top);
+
+            OrderException exceeded = rejected(() -> processor.requireQuantityWithinLimit(List.of(item(1001, 2), item(1002, 2), item(1003, 1)), skus,
+                Map.of(7001L, 7, 7003L, 3)), OrderErrorCode.QUANTITY_EXCEEDED);
+            assertThat(exceeded.getMessage()).endsWith(": 치마(최대 10개, 결제 대기 주문에 7개), 저고리(최대 3개, 결제 대기 주문에 3개)");
+
+            assertThatCode(() -> processor.requireQuantityWithinLimit(List.of(item(1001, 2), item(1002, 2)), skus, Map.of(7001L, 6)))
+                .as("합이 상한과 같으면 통과").doesNotThrowAnyException();
+            assertThatCode(() -> processor.requireQuantityWithinLimit(List.of(item(1003, 3)), skus, Map.of()))
+                .as("쥔 수량이 없으면 이번 주문만 본다").doesNotThrowAnyException();
+            assertNoShippingCall();
         }
 
         @Test

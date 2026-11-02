@@ -41,7 +41,7 @@ public abstract class OrderCreatePersistenceContract extends OrderRequestPersist
     }
 
     private OrderRequest owned() {
-        return requests.insertIfAbsent(OrderRequest.start(id(), id(), UUID.randomUUID(), command().fingerprint(), id(), NOW, LEASE)).orElseThrow();
+        return requests.insertIfAbsent(OrderRequest.start(id(), id(), UUID.randomUUID(), command().fingerprint(), id(), NOW, LEASE), ITEMS).orElseThrow();
     }
 
     @Test
@@ -109,5 +109,19 @@ public abstract class OrderCreatePersistenceContract extends OrderRequestPersist
             assertThat(List.of(one.get(10, TimeUnit.SECONDS), two.get(10, TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
         }
         assertThat(orders.findByIdAndMemberId(request.orderId(), request.memberId())).isPresent();
+    }
+
+    @Test
+    void creationInsideCompletionMarginIsFencedLikeATakeOverAndInsertsNothing() {
+        var request = owned();
+        // 고정 시각 — lease 끝 5초 전(기본 margin 10초 안). 완료 커밋이 lease 끝 뒤로 밀릴 수 있는 시도는 저장하지 않는다 (#436)
+        when(clock.instant()).thenReturn(request.leaseExpiresAt().minusSeconds(5));
+        assertThatThrownBy(() -> orderProcessor.create(request.memberId(), request, command(),
+            OrderFixtures.domesticQuote(OrderFixtures.quoteLine(101, 1000, 1)), reservation(request)))
+            .isInstanceOfSatisfying(OrderException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(OrderErrorCode.IDEMPOTENCY_IN_PROGRESS));
+        assertThat(requests.findByMemberIdAndIdempotencyKey(request.memberId(), request.idempotencyKey()).orElseThrow().status())
+            .isEqualTo(OrderRequest.Status.PROCESSING);
+        assertThat(orders.findByIdAndMemberId(request.orderId(), request.memberId())).isEmpty();
+        verify(org.springframework.test.util.AopTestUtils.<OrderRepositoryPort>getUltimateTargetObject(orderStorage), never()).insert(any(), any());
     }
 }
