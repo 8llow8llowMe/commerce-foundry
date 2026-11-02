@@ -14,6 +14,9 @@ import com.commercefoundry.domainlayer.job.application.info.JobDispatchResult;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobClaimProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobHandlerProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobRunProcessor;
+import com.commercefoundry.domainlayer.job.application.service.processor.JobResultFileProcessor;
+import com.commercefoundry.domainlayer.job.application.service.processor.JobResultUploadProcessor;
+import com.commercefoundry.domainlayer.job.domain.model.JobResultContent;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobCancelledException;
 import com.commercefoundry.domainlayer.job.domain.model.JobExecution;
@@ -62,6 +65,8 @@ class JobWorkerFacadeTest {
     private MutableClock clock;
     private TaskScheduler scheduler;
     private Runnable heartbeat;
+    private final JobResultFileProcessor resultFiles = mock(JobResultFileProcessor.class);
+    private final JobResultUploadProcessor resultUploads = mock(JobResultUploadProcessor.class);
 
     @BeforeEach
     void setUp() {
@@ -75,6 +80,18 @@ class JobWorkerFacadeTest {
             return mock(ScheduledFuture.class);
         });
         repository.insert(Job.register(1L, TYPE, "{}", null, null, 0, NOW, 3));
+    }
+
+    @Test
+    void failedReservationDoesNotPutAndUsesSafeRetryCode() {
+        var content = new JobResultContent("report.csv", "text/csv", new byte[] {1}, false);
+        when(resultFiles.reserve(1L, WORKER, 1, content)).thenThrow(new IllegalStateException("private database message"));
+        var worker = facade(Runnable::run, handler(execution -> new JobOutcome("{}", content)));
+        assertThat(worker.dispatch(1L, 0, TYPE)).isEqualTo(JobDispatchResult.STARTED);
+        assertThat(repository.get(1L).status()).isEqualTo(JobStatus.QUEUED);
+        assertThat(repository.get(1L).errorCode()).isEqualTo("RESULT_STORAGE_UNAVAILABLE");
+        assertThat(repository.get(1L).errorMessage()).isNull();
+        org.mockito.Mockito.verifyNoInteractions(resultUploads);
     }
 
     @Test
@@ -406,8 +423,10 @@ class JobWorkerFacadeTest {
         JobHandlerProcessor handlerProcessor = new JobHandlerProcessor(handlers(handlers), jobProperties);
         return new JobWorkerFacade(
             new JobClaimProcessor(repository, dispatchPort, clock),
-            new JobRunProcessor(repository, dispatchPort, jobProperties, events::add, clock),
-            handlerProcessor, jobProperties, executor, scheduler, clock, new JobWorkerIdentity(WORKER)
+            new JobRunProcessor(resultFiles, repository, dispatchPort, jobProperties, events::add, clock),
+            handlerProcessor, jobProperties, executor, scheduler, clock, new JobWorkerIdentity(WORKER),
+            resultFiles,
+            resultUploads
         );
     }
 

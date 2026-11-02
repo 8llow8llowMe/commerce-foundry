@@ -1,6 +1,7 @@
 dependencies {
     implementation project(':core:common-core')
     implementation project(':core:persistence-core')
+    implementation project(':core:storage-core')
     implementation project(':core:security-core')
     // 작업 실행 신호 — outbox · 릴레이 · 컨슈머 재시도 · DLT (#307, architecture-guide.md §10)
     implementation project(':core:messaging-core')

@@ -42,7 +42,9 @@ class JobRunProcessorTest {
         repository = new InMemoryJobRepositoryPort();
         dispatchPort = new RecordingJobDispatchPort();
         events = new ArrayList<>();
-        processor = new JobRunProcessor(repository, dispatchPort, properties(), events::add, Clock.fixed(NOW, ZoneOffset.UTC));
+        processor = new JobRunProcessor(
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.job.application.service.processor.JobResultFileProcessor.class),
+            repository, dispatchPort, properties(), events::add, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test

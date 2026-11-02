@@ -306,3 +306,18 @@ logging:
     org.apache.kafka.clients.producer.ProducerConfig: WARN
     org.apache.kafka.clients.consumer.ConsumerConfig: WARN
     org.apache.kafka.clients.admin.AdminClientConfig: WARN
+
+# 작업 결과 전용 비공개 버킷. 공개 이미지 credential과 공유하지 않는다(job-result-storage-guide.md).
+storage:
+  enabled: ${STORAGE_ENABLED:false}
+  endpoint: ${STORAGE_ENDPOINT:}
+  region: ${STORAGE_REGION:}
+  bucket: ${STORAGE_BUCKET:}
+  access-key: ${STORAGE_ACCESS_KEY:}
+  secret-key: ${STORAGE_SECRET_KEY:}
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL:}
+  path-style-access: true
+  presign-ttl: 5m
+  connect-timeout: 2s
+  read-timeout: 5s
+  api-call-timeout: 8s

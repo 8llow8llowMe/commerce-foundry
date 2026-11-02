@@ -293,6 +293,91 @@
     comment on column operations.job.worker_id is
         '작업을 쥔 워커 ({앱}:{호스트}:{pid}:{난수}). 끝난 작업은 마지막 워커, QUEUED 는 null';
 
+    create table operations.job_result_file (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        attempt integer not null,
+        content_type varchar(120) not null,
+        delete_attempts integer not null,
+        etag varchar(200),
+        expires_at timestamp(6) with time zone not null,
+        file_name varchar(120) not null,
+        job_id bigint not null,
+        last_deleted_at timestamp(6) with time zone,
+        next_delete_at timestamp(6) with time zone not null,
+        object_key varchar(200) not null,
+        sensitive boolean not null,
+        size_bytes bigint not null,
+        staging_deadline timestamp(6) with time zone not null,
+        state varchar(20) not null check ((state in ('STAGED','AVAILABLE','RETIRED'))),
+        version bigint not null,
+        worker_id varchar(100) not null,
+        primary key (id),
+        constraint uk_job_result_file_object_key unique (object_key),
+        constraint ck_job_result_file_size_bytes_positive check (size_bytes > 0)
+    );
+
+    comment on table operations.job_result_file is
+        '작업 결과 파일';
+
+    comment on column operations.job_result_file.id is
+        '결과 파일 원장 아이디 (Snowflake)';
+
+    comment on column operations.job_result_file.created_at is
+        '생성 시각';
+
+    comment on column operations.job_result_file.updated_at is
+        '수정 시각';
+
+    comment on column operations.job_result_file.attempt is
+        '파일을 만든 작업 시도 번호 — release 뒤 같은 번호의 원장이 여러 개일 수 있음';
+
+    comment on column operations.job_result_file.content_type is
+        'MIME';
+
+    comment on column operations.job_result_file.delete_attempts is
+        '삭제 시도 기록 수 — 실패 백오프 계산, 최대 1000000';
+
+    comment on column operations.job_result_file.etag is
+        '성공 확정 때 검증한 ETag — 미확정 원장은 null, 정리 후에도 보존';
+
+    comment on column operations.job_result_file.expires_at is
+        '예약 시점 기준 보관 만료 — 이후 새 다운로드 링크 발급 금지';
+
+    comment on column operations.job_result_file.file_name is
+        '다운로드 표시 파일명 — 경로와 개인정보 원문 없음';
+
+    comment on column operations.job_result_file.job_id is
+        '작업 아이디 (FK: job.id)';
+
+    comment on column operations.job_result_file.last_deleted_at is
+        '마지막 삭제 API 성공 시각 — 늦은 PUT 복구를 위해 원장은 계속 보존';
+
+    comment on column operations.job_result_file.next_delete_at is
+        '다음 삭제 후보 시각 — 기한 만료, 실패 재시도 또는 RETIRED 재삭제';
+
+    comment on column operations.job_result_file.object_key is
+        '서버가 만든 비공개 객체 키 — 원장마다 새 UUID, 재사용 금지';
+
+    comment on column operations.job_result_file.sensitive is
+        '짧은 보관 정책 선택 — 개인정보 원문 저장을 허용하지 않음';
+
+    comment on column operations.job_result_file.size_bytes is
+        '파일 바이트 수 — 업로드 뒤 HEAD와 대조';
+
+    comment on column operations.job_result_file.staging_deadline is
+        '미확정 업로드 회수 시각 — 이후 성공 확정 금지';
+
+    comment on column operations.job_result_file.state is
+        '원장 상태 (STAGED / AVAILABLE / RETIRED)';
+
+    comment on column operations.job_result_file.version is
+        '낙관적 락 버전 — 첨부 확정과 정리의 경합 제어';
+
+    comment on column operations.job_result_file.worker_id is
+        '파일을 예약한 워커 — 성공 확정 시 소유 확인';
+
     create table operations.notification (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -495,6 +580,12 @@
 
     create index idx_job_type_id 
        on operations.job (type, id);
+
+    create index idx_job_result_file_next_delete_at_id
+       on operations.job_result_file (next_delete_at, id);
+
+    create index idx_job_result_file_job_id_attempt
+       on operations.job_result_file (job_id, attempt);
 
     create index idx_notification_recipient_member_id_id 
        on operations.notification (recipient_member_id, id);

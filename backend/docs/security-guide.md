@@ -1071,7 +1071,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 |--------|------|------|
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 사용 중 — 선언 · `AdminAuditLog` 통일은 #163 PR-E |
 | order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` | 사용 중 — 선언 · 통일은 #163 PR-E |
-| operations | `JOB_CANCEL` | 사용 중 — 선언 · 통일은 #163 PR-E (알림 읽음 · 온보딩 투어는 면제) |
+| operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소 선언 · 통일은 #163 PR-E (알림 읽음 · 온보딩 투어는 면제) |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
 | product | `DISPLAY_SECTION_*` · `LOOK_*` (전시 미리보기는 면제) | #163 PR-C |
 | product | `STOCK_ADJUST` · `SKU_COST_CREATE` · `PRODUCT_DRAFT_*` | #163 PR-C′ (이력 표 + 줄) |

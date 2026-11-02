@@ -34,6 +34,10 @@ public enum JobErrorCode {
     /** 끝난(SUCCEEDED · FAILED · CANCELLED) 작업을 취소하려 했다. */
     JOB_ALREADY_FINISHED("JOB_022", "이미 끝난 작업입니다.", HttpStatus.CONFLICT),
 
+    NOT_FOUND_RESULT_FILE("JOB_004", "다운로드할 결과 파일이 없습니다.", HttpStatus.NOT_FOUND),
+    RESULT_FILE_EXPIRED("JOB_023", "결과 파일 보관 기간이 만료되었습니다.", HttpStatus.GONE),
+    RESULT_STORAGE_UNAVAILABLE("JOB_501", "결과 파일 저장소를 사용할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
+
     INVALID_REQUEST("JOB_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_TYPE_INVALID("JOB_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST);
 

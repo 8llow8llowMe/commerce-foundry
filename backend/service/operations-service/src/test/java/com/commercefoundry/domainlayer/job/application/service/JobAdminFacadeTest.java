@@ -67,7 +67,9 @@ class JobAdminFacadeTest {
         JobHandlerProcessor handlerProcessor = new JobHandlerProcessor(handlers(new ReportHandler()), properties());
         return new JobAdminFacade(
             new JobQueryProcessor(repository, handlerProcessor),
-            new JobRunProcessor(repository, new RecordingJobDispatchPort(), properties(), events::add, clock),
+            new JobRunProcessor(
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.job.application.service.processor.JobResultFileProcessor.class),
+            repository, new RecordingJobDispatchPort(), properties(), events::add, clock),
             new JobAdminAuditProcessor(auditPort),
             new JobAdminPresenter()
         );
