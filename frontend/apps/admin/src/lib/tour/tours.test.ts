@@ -14,6 +14,11 @@ describe('helpTopicFor · toursFor', () => {
   it('콘솔 투어가 먼저, 화면 투어가 있으면 그다음이다', () => {
     expect(toursFor('/members').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
     expect(toursFor('/stocks').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'stocks-v1']);
+    expect(toursFor('/orders').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'orders-v1']);
+    expect(toursFor('/orders/42').map((tour) => tour.id)).toEqual([
+      CONSOLE_TOUR.id,
+      'order-detail-v1',
+    ]);
   });
 
   it('투어 아이디는 겹치지 않는다', () => {

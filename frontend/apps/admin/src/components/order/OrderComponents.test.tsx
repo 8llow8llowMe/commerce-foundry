@@ -133,6 +133,11 @@ describe('StatusChangePanel', () => {
     expect(html).not.toContain('<button');
     expect(html).toContain('바꿀 수 있는 상태가 없습니다');
   });
+
+  it('버튼이 있든 없든 상태 변경 투어 앵커를 단다(#228)', () => {
+    expect(panel()).toContain('data-tour="order-status-actions"');
+    expect(panel(orderDetail({ nextStatuses: [] }))).toContain('data-tour="order-status-actions"');
+  });
 });
 
 describe('OrderDetailView', () => {
@@ -148,6 +153,7 @@ describe('OrderDetailView', () => {
     expect(html).toContain('결제 대기(주문 접수)');
     expect(html).toContain('결제 대기 → 결제 완료');
     expect(html).toContain('연동 처리');
+    expect(html).toContain('data-tour="order-histories"');
   });
 });
 

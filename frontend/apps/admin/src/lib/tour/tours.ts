@@ -207,6 +207,32 @@ const ORDERS_TOUR: Tour = {
   ],
 };
 
+/**
+ * 주문 상세(#30) — 현재 상태 · 상태 변경 · 상태 이력. 바꿀 수 있는 상태가 없으면 버튼 대신 안내 문구가 같은 앵커를 단다.
+ * 송장 등록 단계(`order-shipment` · `order-shipment-bulk`)는 후속으로 더하고 버전을 올린다.
+ */
+const ORDER_DETAIL_TOUR: Tour = {
+  id: 'order-detail-v1',
+  steps: [
+    {
+      target: 'order-status',
+      title: '현재 상태',
+      body: '주문의 지금 상태입니다. 결제를 기다리는 주문은 결제 기한도 함께 보입니다.',
+    },
+    {
+      target: 'order-status-actions',
+      title: '상태 바꾸기',
+      body: '지금 바꿀 수 있는 상태만 버튼으로 나옵니다. 누르면 사유를 적는 확인 단계가 열리고, 보내기 직전에 주문을 다시 읽어 그사이 바뀌었으면 보내지 않습니다. 배송 완료로 바꿀 때는 배송을 확인한 근거를 사유로 남깁니다. 버튼이 없으면 결제 · 출고 · 취소 같은 다른 흐름이 상태를 바꿉니다.',
+    },
+    {
+      target: 'order-histories',
+      title: '상태 이력',
+      body: '언제 어느 쪽(고객 · 운영자 · 연동 처리 등)이 어떤 상태로 바꿨는지와 적은 사유가 쌓입니다.',
+      side: 'top',
+    },
+  ],
+};
+
 const COMMON_FAQ = [
   {
     question: '로그인이 자꾸 풀려요.',
@@ -274,7 +300,8 @@ const ROUTES: Route[] = [
         },
         {
           question: '송장 등록 · 취소 · 반품 처리는 어디서 하나요?',
-          answer: '준비 중입니다. 기능이 열리면 이 화면과 주문 상세에서 처리합니다.',
+          answer:
+            '송장은 상품 준비중 주문을 이 화면 아래 송장 일괄 등록이나 주문 상세에서 등록합니다. 취소 · 반품 처리는 준비 중입니다.',
         },
         ...COMMON_FAQ,
       ],
@@ -300,7 +327,7 @@ const ROUTES: Route[] = [
         },
         ...COMMON_FAQ,
       ],
-      tour: null,
+      tour: ORDER_DETAIL_TOUR,
     },
   },
   {

@@ -51,7 +51,7 @@ export function StatusChangePanel({
 
   if (order.nextStatuses.length === 0) {
     return (
-      <p className="text-sm text-muted-fg">
+      <p data-tour="order-status-actions" className="text-sm text-muted-fg">
         지금 이 화면에서 바꿀 수 있는 상태가 없습니다. 결제 · 출고(송장) · 취소 · 반품 같은 다른
         흐름이 상태를 바꿉니다.
       </p>
@@ -81,7 +81,12 @@ export function StatusChangePanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap gap-3" role="group" aria-label="바꿀 상태">
+      <div
+        data-tour="order-status-actions"
+        className="flex flex-wrap gap-3"
+        role="group"
+        aria-label="바꿀 상태"
+      >
         {order.nextStatuses.map((status) => (
           <Button
             key={status.code}
