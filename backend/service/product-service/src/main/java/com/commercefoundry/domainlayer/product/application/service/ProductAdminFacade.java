@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductExce
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminDetailProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductDeleteProcessor;
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminQueryProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductDescriptionSanitizer;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor;
@@ -52,12 +53,19 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final ProductDescriptionSanitizer productDescriptionSanitizer;
     private final ProductImageUploadProcessor productImageUploadProcessor;
     private final ProductDeleteProcessor productDeleteProcessor;
+    private final ProductAdminAuditProcessor productAdminAuditProcessor;
 
     /** Database-only deletion: read and versioned merge share one bounded transaction. */
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public void delete(long productId) {
-        productDeleteProcessor.delete(productId);
+    public void delete(long productId, long actorMemberId) {
+        try {
+            productDeleteProcessor.delete(productId);
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.productDeleted(actorMemberId, productId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.productDeleted(actorMemberId, productId, true);
     }
 
     /** 로컬 서명이라 DB · 외부 호출이 없다 — 트랜잭션을 걸지 않는다. */

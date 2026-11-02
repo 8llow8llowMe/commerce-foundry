@@ -71,20 +71,34 @@ class ProductAdminFacadeTest {
     @Mock
     private com.commercefoundry.domainlayer.product.application.service.processor.ProductDeleteProcessor productDeleteProcessor;
 
+    @Mock
+    private com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor productAdminAuditProcessor;
+
     private ProductAdminFacade facade;
 
     @BeforeEach
     void setUp() {
         facade = new ProductAdminFacade(categoryProcessor, productAdminQueryProcessor, new ProductAdminPresenter(), productAdminDetailProcessor,
             productWriteProcessor, new ProductDescriptionSanitizer(), org.mockito.Mockito.mock(
-            com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class), productDeleteProcessor);
+            com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class),
+            productDeleteProcessor, productAdminAuditProcessor);
     }
 
     @Test
     void deleteDelegatesWithoutQueryingChildrenOrIssuingUploads() {
-        facade.delete(7L);
+        facade.delete(7L, 99L);
         verify(productDeleteProcessor).delete(7L);
+        verify(productAdminAuditProcessor).productDeleted(99L, 7L, true);
         verifyNoInteractions(categoryProcessor, productAdminDetailProcessor, productAdminQueryProcessor, productWriteProcessor);
+    }
+
+    @Test
+    void failedDeleteKeepsOriginalFailureAndAuditTarget() {
+        var failure = new com.commercefoundry.domainlayer.product.application.exception.ProductException(
+            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.NOT_FOUND_PRODUCT);
+        org.mockito.Mockito.doThrow(failure).when(productDeleteProcessor).delete(7L);
+        assertThatThrownBy(() -> facade.delete(7L, 99L)).isSameAs(failure);
+        verify(productAdminAuditProcessor).productDeleted(99L, 7L, false);
     }
 
     @Test

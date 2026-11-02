@@ -17,7 +17,7 @@ public interface ProductAdminUseCase {
     ProductDetailAdminResponse getProduct(long productId);
 
     /** Soft delete; an already deleted product succeeds without a write. Missing products are 404. */
-    void delete(long productId);
+    void delete(long productId, long actorMemberId);
 
     /**
      * 어드민 상품 목록. 조건이 null 이면 걸지 않는다 — 노출 여부 조건이 없으면 숨김 상품까지 전체다.

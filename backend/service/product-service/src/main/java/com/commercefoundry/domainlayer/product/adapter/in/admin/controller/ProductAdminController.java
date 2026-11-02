@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.adapter.in.admin.controller;
 
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCreateRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductImageUploadRequest;
@@ -62,11 +63,13 @@ public class ProductAdminController {
     @Operation(summary = "상품 삭제", description = "숨김 · 판매 종료로 바꾸고 삭제 시각을 기록한다. 자식 데이터와 기존 재고 선점은 유지한다. "
         + "재삭제도 200(dataBody=null), 없으면 404 PRODUCT_001. 버전 파라미터는 없으며 동시 변경은 409 PRODUCT_010. 다시 조회한 뒤 재시도한다.")
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_DELETE")
     @DeleteMapping("/{productId}")
     public ResponseEntity<Response<Void>> delete(
+        @AuthenticationPrincipal MemberPrincipal member,
         @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId
     ) {
-        productAdminUseCase.delete(productId);
+        productAdminUseCase.delete(productId, member.memberId());
         return ResponseEntity.ok(Response.success(null));
     }
 

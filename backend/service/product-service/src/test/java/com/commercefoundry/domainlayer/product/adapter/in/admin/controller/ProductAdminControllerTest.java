@@ -396,7 +396,7 @@ class ProductAdminControllerTest {
         assertThat(result).hasStatusOk();
         assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
         assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
-        verify(productAdminUseCase).delete(7L);
+        verify(productAdminUseCase).delete(7L, TestTokens.MEMBER_ID);
     }
 
     @ParameterizedTest
@@ -412,7 +412,7 @@ class ProductAdminControllerTest {
     @CsvSource({"NOT_FOUND_PRODUCT,404,PRODUCT_001", "PRODUCT_MODIFICATION_CONFLICT,409,PRODUCT_010"})
     void deleteErrorEnvelope(String error, int status, String code) {
         org.mockito.Mockito.doThrow(new com.commercefoundry.domainlayer.product.application.exception.ProductException(
-            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.valueOf(error))).when(productAdminUseCase).delete(7L);
+            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.valueOf(error))).when(productAdminUseCase).delete(7L, TestTokens.MEMBER_ID);
         var result = mvc.delete().uri(PATH + "/7").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
         assertThat(result).hasStatus(status);
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
