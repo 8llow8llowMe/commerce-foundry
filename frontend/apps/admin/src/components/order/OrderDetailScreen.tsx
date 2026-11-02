@@ -6,8 +6,14 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
+import {
+  shipmentNotice,
+  shipmentNoticeWithoutReload,
+  type ShipmentRow,
+} from '@/lib/order/shipment';
 import { adminOrderPath, type OrderDetail } from '@/lib/order/types';
 import { OrderDetailView } from './OrderDetailView';
+import { ShipmentPanel } from './ShipmentPanel';
 import { StatusChangePanel } from './StatusChangePanel';
 
 type Status =
@@ -27,7 +33,7 @@ const dateTime = new Intl.DateTimeFormat('ko-KR', {
 
 /**
  * 어드민 주문 상세(#30) — `GET /api/v1/admin/orders/{orderId}`. 상태 변경 응답이 같은 모양의 상세라 그대로 바꿔 그린다.
- * 거절 · 경합 · 결과 모름이면 최신 상세를 다시 읽고 안내한다(덮어쓰지 않는다). 형식이 틀린 아이디(400 `ORDER_141`)도 없는 주문으로 안내한다.
+ * 거절 · 경합 · 결과 모름이면 최신 상세를 다시 읽고 안내한다(덮어쓰지 않는다). 상품 준비중이면 송장 등록(출고)을 두고, 등록 뒤 상세를 다시 읽는다. 형식이 틀린 아이디(400 `ORDER_141`)도 없는 주문으로 안내한다.
  */
 export function OrderDetailScreen({ orderId }: { orderId: string }) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
@@ -77,6 +83,24 @@ export function OrderDetailScreen({ orderId }: { orderId: string }) {
         const denied = accessDeniedOf(cause);
         if (denied) setStatus({ kind: 'denied', denied });
         else setNotice({ tone: 'warn', message: `${message} ${LOAD_FAILED}` });
+      },
+    );
+  };
+
+  /** 송장 등록 뒤 — 결과가 어떻든 상세를 다시 읽어 배송 중 반영을 서버 값으로 확인한다 */
+  const afterShipment = (row: ShipmentRow) => {
+    const request = ++latest.current;
+    apiFetch<OrderDetail>(adminOrderPath(orderId)).then(
+      (fresh) => {
+        if (request !== latest.current) return;
+        setStatus({ kind: 'ready', order: fresh });
+        setNotice(shipmentNotice(row, fresh.status));
+      },
+      (cause: unknown) => {
+        if (request !== latest.current) return;
+        const denied = accessDeniedOf(cause);
+        if (denied) setStatus({ kind: 'denied', denied });
+        else setNotice(shipmentNoticeWithoutReload(row, LOAD_FAILED));
       },
     );
   };
@@ -166,6 +190,14 @@ export function OrderDetailScreen({ orderId }: { orderId: string }) {
               onSubmit={() => setNotice(null)}
             />
           </section>
+          {order.status.code === 'PREPARING' && (
+            <ShipmentPanel
+              orderId={order.orderId}
+              onResult={afterShipment}
+              onDenied={(denied) => setStatus({ kind: 'denied', denied })}
+              onSubmit={() => setNotice(null)}
+            />
+          )}
           <OrderDetailView order={order} />
         </>
       )}

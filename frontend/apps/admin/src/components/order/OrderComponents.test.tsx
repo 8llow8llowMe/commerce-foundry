@@ -4,6 +4,9 @@ import { bulkResponse, orderDetail, orderItem } from '@/lib/order/test-fixtures'
 import { BulkResult } from './BulkResult';
 import { OrderDetailView } from './OrderDetailView';
 import { OrderTable } from './OrderTable';
+import { ShipmentBulkPanel } from './ShipmentBulkPanel';
+import { ShipmentPanel } from './ShipmentPanel';
+import { ShipmentResult } from './ShipmentResult';
 import { StatusChangePanel } from './StatusChangePanel';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -145,5 +148,78 @@ describe('OrderDetailView', () => {
     expect(html).toContain('결제 대기(주문 접수)');
     expect(html).toContain('결제 대기 → 결제 완료');
     expect(html).toContain('연동 처리');
+  });
+});
+
+describe('ShipmentPanel', () => {
+  it('택배사 목록 · 송장 번호 칸 · 등록 버튼을 그린다', () => {
+    const html = renderToStaticMarkup(
+      <ShipmentPanel orderId="1" onResult={noop} onDenied={noop} onSubmit={noop} />,
+    );
+    expect(html).toContain('송장 등록 (출고)');
+    expect(html).toContain('<option value="CJ_LOGISTICS">CJ대한통운</option>');
+    expect(html).toContain('<option value="OTHER">기타 택배사</option>');
+    expect(html).toContain('송장 번호');
+    expect(html).toContain('>송장 등록<');
+  });
+});
+
+describe('ShipmentBulkPanel', () => {
+  it('고른 주문이 없으면 넣기 · 등록을 막고 붙여넣기 안내를 보인다', () => {
+    const html = renderToStaticMarkup(
+      <ShipmentBulkPanel selected={[]} onSent={noop} onDenied={noop} />,
+    );
+    expect(html).toContain('송장 일괄 등록 (출고)');
+    expect(html).toContain('표에서 주문을 고르세요');
+    expect(html).toContain('열 순서: 주문 아이디 · 택배사(이름 또는 코드) · 송장 번호');
+    expect(html).toContain('송장 0건 등록');
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('고른 주문 수를 넣기 버튼에 보인다', () => {
+    const html = renderToStaticMarkup(
+      <ShipmentBulkPanel selected={[orderItem()]} onSent={noop} onDenied={noop} />,
+    );
+    expect(html).toContain('고른 주문 1건 넣기');
+  });
+});
+
+describe('ShipmentResult', () => {
+  it('요약 · 송장 · 행별 결과 · 서버 실패 이유와 남긴 줄 안내를 보인다', () => {
+    const html = renderToStaticMarkup(
+      <ShipmentResult
+        rows={[
+          {
+            item: { orderId: '11', carrier: 'CJ_LOGISTICS', trackingNumber: '111' },
+            result: 'REGISTERED',
+            errorCode: null,
+            message: null,
+          },
+          {
+            item: { orderId: '12', carrier: 'HANJIN', trackingNumber: '222' },
+            result: 'FAILED',
+            errorCode: 'DELIVERY_018',
+            message: '주문에 출고를 반영하지 못했습니다. 잠시 후 같은 송장으로 다시 등록해 주세요.',
+          },
+          {
+            item: { orderId: '13', carrier: 'LOTTE', trackingNumber: '333' },
+            result: 'FAILED',
+            errorCode: 'DELIVERY_015',
+            message: '취소 요청 상태라 출고할 수 없습니다.',
+          },
+        ]}
+        names={{ '11': '첫 주문' }}
+        disabled={false}
+        onDismiss={noop}
+      />,
+    );
+    expect(html).toContain('송장 등록: 일부 주문을 출고하지 못했습니다 — 등록 1건 · 실패 2건');
+    expect(html).toContain('첫 주문');
+    // 이름을 모르는 주문은 아이디로
+    expect(html).toContain('href="/orders/12"');
+    expect(html).toContain('CJ대한통운 111');
+    expect(html).toContain('취소 요청 상태라 출고할 수 없습니다.');
+    expect(html).toContain('다시 보낼 수 있는 1건');
+    expect(html).toContain('다시 보내도 같은 결과라');
   });
 });

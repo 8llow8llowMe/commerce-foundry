@@ -3,7 +3,7 @@ import type { CodeName } from '@/lib/product/detail';
 
 /**
  * 어드민 주문 관리 API(#17 PR-1, order-service `OrderAdminController`, `backend/docs/api-design-guide.md` §2-16).
- * 결제 · 배송(송장) 요약과 클레임 처리는 아직 API 가 없다(#14 · #18 · #15 · #16) — 화면에도 자리를 두지 않는다.
+ * 결제 · 배송(송장) 요약과 클레임 처리는 아직 API 가 없다(#14 · #18 PR-B2 · #15 · #16) — 화면에도 자리를 두지 않는다. 송장 등록은 `shipment.ts`.
  */
 export const ADMIN_ORDERS_PATH = '/api/v1/admin/orders';
 export const adminOrderPath = (orderId: string) =>
