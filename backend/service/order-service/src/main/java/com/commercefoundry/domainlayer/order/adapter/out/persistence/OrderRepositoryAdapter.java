@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderSaveExce
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderAdminSummaryQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderConfirmationCandidateQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderExpiryCandidateQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderMemberSummaryQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.OrderStatusHistoryQueryResult;
@@ -138,7 +139,17 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
         return orderRepository.sumQuantityByProduct(memberId, OrderStatus.PENDING_PAYMENT, productIds);
     }
 
-    /** 첫 배치와 다음 배치를 다른 쿼리로 부른다 — null 커서를 한 쿼리에 넘기지 않는다({@link OrderRepository} 주석). */
+    /** 배송 완료 시각의 키셋 첫 배치. null 시각은 비교식에서 제외된다. */
+    @Override
+    public List<OrderConfirmationCandidateQueryResult> findDueForConfirmation(Instant cutoff, int limit) {
+        return orderRepository.findConfirmationDue(OrderStatus.DELIVERED, cutoff, Limit.of(limit));
+    }
+
+    @Override
+    public List<OrderConfirmationCandidateQueryResult> findDueForConfirmationAfter(Instant cutoff, Instant afterDeliveredAt, long afterOrderId, int limit) {
+        return orderRepository.findConfirmationDueAfter(OrderStatus.DELIVERED, cutoff, afterDeliveredAt, afterOrderId, Limit.of(limit));
+    }
+
     @Override
     public List<OrderExpiryCandidateQueryResult> findDueForExpiry(Instant now, int limit) {
         return orderRepository.findDue(OrderStatus.PENDING_PAYMENT, now, Limit.of(limit));

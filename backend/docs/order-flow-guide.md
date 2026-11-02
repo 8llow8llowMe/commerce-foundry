@@ -712,8 +712,19 @@ order → delivery 역방향 호출은 두지 않는다(`service-inventory.md` �
   200 + `null` 이다 — 주문 존재 · 소유 404 는 주문 상세(order-service) 몫이다 (`api-design-guide.md` §2-2). ADMIN 토큰은 403 이다(구현 #18 PR-B2).
   보이는 상태는 송장 상태 그대로다 — **단 배송 완료 반영 대기(`completion_pending=true`)는 배송 중(`IN_TRANSIT`) · `deliveredAt=null` 로 보인다**(`ShipmentWebPresenter`).
   주문이 아직 배송 중이라 반품 · 구매 확정을 할 수 없는데 배송 완료로 보이면 고객 화면이 주문 상세와 어긋나고, order 가 거절하면 되돌려질 수도 있다. 어드민 응답은 송장 그대로다.
-- **자동 구매 확정** — order 스케줄러(#96 스윕 패턴)가 `status = DELIVERED and delivered_at <= now - period` 를 `(delivered_at, id)` 키셋으로 읽어 건별 `REQUIRES_NEW` +
-  `@Version` 으로 `PURCHASE_CONFIRMED` 로 바꾼다(이력 `SYSTEM`). 기본 7일 · 1시간 주기(`order.purchase-confirmation.auto.period`, 1d~30d). #18 PR-C 에서 구현한다.
+- **자동 구매 확정** (#18 PR-C) — `OrderAutoConfirmationScheduler → OrderAutoConfirmationUseCase → OrderAutoConfirmationFacade → OrderAutoConfirmationProcessor` 순서다.
+  `order.purchase-confirmation.auto` 기본값은 `enabled=true`, `period=7d`(1d~30d, 양 끝 포함), `interval=1h`(1ms 이상), `batch-size=100`(1~100),
+  `max-batches-per-run=10`(1~10)이며 잘못된 설정은 기동을 막는다. test 프로파일은 `enabled=false`다. 첫 실행도 interval 뒤에 시작하고 실행 종료 뒤 같은 간격을 둔다.
+  실행 시작에 `cutoff = now - period`를 마이크로초로 잘라 고정한다. `status = DELIVERED and delivered_at <= cutoff`를 `(delivered_at, id)` 오름차순 키셋으로 읽는다.
+  첫 배치 · 다음 배치를 분리하고 다음 배치는 같은 뜻의 하한 `delivered_at >= afterDeliveredAt`도 적어 기존 `idx_orders_status_delivered_at_id`를 재사용한다.
+  배송 완료 시각이 null인 옛 주문 · 기간 전 주문 · 구매 확정 · 반품 요청/완료 등 다른 상태는 제외한다. 실패한 건도 커서를 전진시키고 다음 실행에서 처음부터 재시도한다.
+  Facade는 트랜잭션 밖(`NEVER`), 조회는 읽기 전용 5초, 주문마다 `REQUIRES_NEW` 5초다. 건별 집계 재조회(기존 4문장)는 배치 조립 N+1이 아닌 전이 경계다.
+  `Order.autoConfirmPurchase(cutoff)`가 상태와 시각을 다시 확인하고 `PURCHASE_CONFIRMED`로 바꾼다. `saveStatusChange`는 헤더만 merge/flush해 `@Version`을 검사한 뒤
+  `SYSTEM` · `AUTO_PURCHASE_CONFIRMATION` 이력을 같은 트랜잭션에 쓴다. 이력 실패도 상태와 함께 롤백하고 배송지 · 항목 · 금액 · 배송 완료 시각은 보존한다.
+  이미 확정되었으면 저장하지 않으며 동시 확정 · 반품 경합은 하나만 커밋한다. ShedLock · 결제/재고 호출 · outbox 이벤트는 없다.
+  버전 충돌은 WARN, 그 밖의 건별 실패는 ERROR(아이디 · 예외 타입 · 루트 타입 · `RedactedThrowable`, 행 값/개인정보 원문 없음) 뒤 다음 주문을 처리한다.
+  **배포 전** `delivered_at` 백필은 여전히 필요하다(§1-1). 최초 배송 완료 이력의 `created_at`을 쓰고, 이력이 없는 주문은 null로 남겨 운영 확인한다.
+  자동 확정 활성화 전에 백필 결과와 보류 건수를 확인한다. 이 PR은 새 스키마 변경이 없고 기존 nullable 컬럼 · 인덱스를 사용한다.
 - **택배사 추적** (`ShipmentTrackingPort`) — 결정만 둔다: 추적 결과로 `IN_TRANSIT` · `DELIVERED` 를 바꾸고, 실패해도 주문 흐름을 막지 않으며, 어드민 수동 변경이 남는다.
   포트 · 어댑터는 후속 이슈다. 택배사 코드는 enum 으로 관리한다.
 - 통관 품목 internal(해외 출고) · 송장 출력용 배송지 원문 · 주문 상세의 배송 요약 합성은 후속 이슈다.

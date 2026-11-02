@@ -158,6 +158,15 @@ public record Order(
         return transitionTo(OrderStatus.DELIVERED, shippedAt, deliveredAt.truncatedTo(ChronoUnit.MICROS));
     }
 
+    /** 배송 완료 기간이 지난 주문만 자동 구매 확정한다. 반품 등 다른 상태 · 시각이 없는 주문은 그대로 둔다. */
+    public Order autoConfirmPurchase(Instant cutoff) {
+        Objects.requireNonNull(cutoff, "cutoff");
+        if (isNew() || status != OrderStatus.DELIVERED || deliveredAt == null || deliveredAt.isAfter(cutoff)) {
+            return this;
+        }
+        return transitionTo(OrderStatus.PURCHASE_CONFIRMED);
+    }
+
     /** 맞춤 제작 항목이 하나라도 있는가 — 제작 중(MAKING) 단계는 이런 주문만 거친다 ({@code order-flow-guide.md} §1). */
     public boolean hasCustomOrderItem() {
         return quote.lines().stream().anyMatch(OrderQuoteLine::customOrder);

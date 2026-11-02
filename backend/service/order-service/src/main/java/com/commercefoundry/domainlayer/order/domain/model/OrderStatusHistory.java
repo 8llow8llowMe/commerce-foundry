@@ -31,6 +31,15 @@ public record OrderStatusHistory(
         }
     }
 
+    /** 시스템의 자동 구매 확정. 배송 완료 전 주문으로 이력을 만들 수 없다. */
+    public static OrderStatusHistory autoConfirmed(long id, Order order) {
+        if (order.isNew() || order.status() != OrderStatus.DELIVERED || order.deliveredAt() == null) {
+            throw new IllegalArgumentException("자동 구매 확정 이력은 배송 완료 시각이 있는 저장된 배송 완료 주문이어야 합니다");
+        }
+        return new OrderStatusHistory(id, order.id(), OrderStatus.DELIVERED, OrderStatus.PURCHASE_CONFIRMED,
+            StatusChangedBy.SYSTEM, null, "AUTO_PURCHASE_CONFIRMATION");
+    }
+
     /** 고객이 주문을 만들었다 — null → PENDING_PAYMENT. */
     public static OrderStatusHistory created(long id, Order order) {
         if (!order.isNew() || order.createdAt() != null || order.status() != OrderStatus.PENDING_PAYMENT) {

@@ -36,3 +36,10 @@ order:
   payment-expiry:
     sweep:
       enabled: false
+  purchase-confirmation:
+    auto:
+      enabled: false
+      period: 7d
+      interval: 1h
+      batch-size: 100
+      max-batches-per-run: 10
