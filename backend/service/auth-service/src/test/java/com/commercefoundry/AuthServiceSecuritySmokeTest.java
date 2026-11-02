@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.ResourceServerSmokeTestSupport;
+import com.commercefoundry.security.support.TestServiceTokens;
 import com.jayway.jsonpath.JsonPath;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -50,6 +51,27 @@ class AuthServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
         {"recipientName":"홍길동","recipientPhone":"01012345678","countryCode":"KR","postalCode":"06236","addressLine1":"서울특별시 강남구 테헤란로 123"}""";
     private static final String ADMIN_LOGIN = "/api/v1/auth/admin/login";
     private static final String ADMIN_MEMBERS = "/api/v1/admin/members";
+
+    @Test
+    @DisplayName("마케팅 동의 조회는 operations 토큰만 허용하고 사용자·익명·다른 서비스·다른 audience를 거절한다")
+    void marketingConsentRequiresOperationsToken() throws Exception {
+        String path = "/internal/v1/marketing-consents/query";
+        String body = "{\"memberIds\":[9223372036854775807]}";
+        assertEnvelope(perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body)), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+        for (MemberRole role : MemberRole.values()) {
+            assertEnvelope(perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body)
+                .header(HttpHeaders.AUTHORIZATION, bearer(role))), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+        }
+        assertEnvelope(perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, TestServiceTokens.bearer("order-service", serviceId()))), SecurityErrorCode.FORBIDDEN);
+        assertEnvelope(perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, TestServiceTokens.bearer("operations-service", "order-service"))), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+        MockHttpServletResponse response = perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, TestServiceTokens.bearer("operations-service", serviceId())));
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(JsonPath.<String>read(response.getContentAsString(), "$.dataBody.members[0].memberId")).isEqualTo(String.valueOf(Long.MAX_VALUE));
+        assertThat(JsonPath.<Boolean>read(response.getContentAsString(), "$.dataBody.members[0].marketingAgreed")).isFalse();
+    }
 
     @Override
     protected boolean issuerExpected() {

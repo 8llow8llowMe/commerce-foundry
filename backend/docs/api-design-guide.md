@@ -88,6 +88,13 @@ WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 —
   조회 키가 `ids` 가 아니라 (SKU, 시각) 쌍 목록이라 본문으로 받는 **읽기 전용 POST** 다 — 위 표의 상한(원문 100개) · 중복(첫 등장 순서로 합침) · 없는 아이디(뺌) ·
   순서(요청 순서) · in 절 벌크 규칙은 그대로 따른다. 계약은 §2-12 "서비스 간 시점 원가 조회".
 
+- 마케팅 동의 상태(벌크): auth-service `POST /internal/v1/marketing-consents/query` (#230). 허용 호출자는 operations-service 하나다.
+  ID 목록을 URL 대신 본문 `{memberIds: [...]}`로 받는 **읽기 전용 POST**이며 중복 포함 1~100개 양수 ID를 받는다.
+  일반 리소스 벌크의 "없는 ID를 뺌" 규칙과 달리 모든 요청 ID에 상태를 반환한다. 회원 존재/역할/동의 이력 부재를 구분해 노출하지 않고 모두 `false`로 판정하기 위해서다.
+  중복은 첫 등장 순서로 합치고 `{memberId: String, marketingAgreed: boolean}`만 반환한다. 고객 계정·비활성화 시각 없음·최신 MARKETING 이력 true를 모두 만족해야 true다.
+  검증 코드는 `AUTH_154`(목록 없음/비어 있음), `AUTH_155`(100개 초과), `AUTH_156`(null/0/음수 ID), 깨진 JSON/타입 불일치는 기존 `AUTH_100`이다.
+  최신 동의 판정은 `created_at desc, id desc`이고 읽기 스냅숏이다. 발송 직전 재확인과 조회 후 철회 경합·채널별 발송 정책은 [마케팅 동의 계약](marketing-consent-guide.md)을 따른다.
+
 **internal 쓰기 API** 도 같은 자리(`/internal/v1/**`, `@Hidden`, 허용 호출자 `@PreAuthorize`)에 둔다. 아래를 더 지킨다.
 
 | 규칙 | 내용 |
