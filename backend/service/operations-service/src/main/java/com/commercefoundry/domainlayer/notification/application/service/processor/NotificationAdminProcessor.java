@@ -28,14 +28,20 @@ public class NotificationAdminProcessor {
     }
 
     public Notification markRead(long notificationId, long recipientMemberId, Instant now) {
-        Notification notification = notificationRepositoryPort.findById(notificationId)
-            .filter(found -> found.recipientMemberId() == recipientMemberId)
-            .orElseThrow(() -> new NotificationException(NotificationErrorCode.NOT_FOUND));
+        Notification notification = findOwned(notificationId, recipientMemberId);
         Notification read = notification.markRead(now);
         if (read == notification) {
             return notification;
         }
-        return notificationRepositoryPort.save(read);
+        notificationRepositoryPort.markReadIfUnread(notificationId, recipientMemberId, read.readAt());
+        // 전체 읽음이나 다른 단건 읽음이 먼저 저장했으면 그 시각을 반환한다. 정리로 삭제됐다면 다시 만들지 않는다.
+        return findOwned(notificationId, recipientMemberId);
+    }
+
+    private Notification findOwned(long notificationId, long recipientMemberId) {
+        return notificationRepositoryPort.findById(notificationId)
+            .filter(found -> found.recipientMemberId() == recipientMemberId)
+            .orElseThrow(() -> new NotificationException(NotificationErrorCode.NOT_FOUND));
     }
 
     public int markAllRead(long recipientMemberId, Instant now) {

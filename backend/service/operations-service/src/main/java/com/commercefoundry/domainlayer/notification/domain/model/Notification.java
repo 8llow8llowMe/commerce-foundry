@@ -4,8 +4,8 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 어드민 알림 한 건. 한 건 읽음은 {@link #markRead} 로만 한다. 이미 읽은 알림에 다시 부르면 같은 인스턴스를 돌려준다(저장하지 않는다).
- * 모두 읽음은 이 전이를 행마다 반복하지 않고, 저장소가 같은 {@code readAt} 칸을 한 문장으로 채운다.
+ * 어드민 알림 한 건. 한 건 읽음은 {@link #markRead} 로 판정한 뒤 미읽음 조건으로 저장하고 실제 저장 결과를 재조회한다.
+ * 이미 읽은 알림에 다시 부르면 같은 인스턴스를 돌려준다(저장하지 않는다). 모두 읽음도 같은 {@code readAt} 칸을 조건부로 채운다.
  */
 public record Notification(
     long id,

@@ -257,7 +257,10 @@ public final class ProductValidationMessage {
   FK 컬럼은 `(FK: target_table.id)` 를 명시한다: `@Column(name = "product_id", comment = "상품 아이디 (FK: product.id)")`.
   코멘트에 작은따옴표(`'`)를 쓰지 않는다 — Hibernate 가 DDL 의 `comment on ... is '...'` 안에서 이스케이프하지 않아 스냅숏 · 운영 DDL 이 깨진다(#63).
   다른 서비스 테이블을 가리키면 `(외부 FK: product-service product.id)` 로 적는다 — DB 제약은 걸 수 없다.
-- 상태가 있는 엔티티(주문·결제·재고)는 **낙관적 락(`@Version`)** 을 기본으로 검토한다.
+- 동시성 제어는 불변식에 맞춰 고른다. 수량·단조로운 시각·소유권 갱신은 조건부 UPDATE(§9-5), 복수 필드 편집·상태 전이는
+  **낙관적 락(`@Version`)**, 자식 합계·교체는 아래 부모 행 잠금을 검토한다. Redis 분산 락으로 DB 정합성 검사를 대체하지 않는다.
+  전 서비스의 현재 선택과 재검토 조건은 [concurrency-control-review.md](concurrency-control-review.md)에 정리했다(#510).
+  기존 상태 엔티티의 버전 검사 저장은 다음 규칙을 따른다.
   - 버전은 **`Long`(wrapper)** 으로 두고 도메인 모델도 `Long version` 을 들고 다닌다. 쓰기는 `domain → mapper.toEntity → repository.save` 다 —
     새 행은 버전이 null 이라 Spring Data 가 `persist`(INSERT)로, 읽어 온 행은 버전이 있어 `merge`(버전 비교 · `UPDATE ... where version = ?`)로 간다.
   - 상태를 바꾼 저장은 `saveAndFlush` 로 바로 내보내고, 어댑터가 `ObjectOptimisticLockingFailureException` 을 도메인 409 로 바꾼다 —
@@ -267,6 +270,8 @@ public final class ProductValidationMessage {
   - 예: product-service `StockReservationEntity` · `StockReservationRepositoryAdapter` (#10).
   - lease · 진행률처럼 **상태가 아닌 칸**의 잦은 갱신은 다시 읽어 merge 하지 않고 조건부 UPDATE 한 문장(§9-5)으로 한다 — 조건에 주인(워커 · 시도)을 넣고 영향 행 수로 "아직 주인인가" 를 판정한다.
     다른 쓰기가 버전 비교로 이 칸을 덮지 않게 해야 하면 그 UPDATE 도 버전을 올린다. 예: operations `JobRepository` 의 heartbeat — 올리지 않으면 lease 회수가 옛 버전으로 merge 에 성공해 방금 연장한 lease 를 빼앗는다 (#212).
+  - 알림 읽음은 단건·전체 모두 수신자와 `readAt is null` 조건으로 갱신한다. 단건은 도메인 `markRead` 뒤 조건 갱신하고 실제 저장 결과를 재조회해
+    경쟁에서 먼저 저장된 시각을 반환한다. 혼합 배포 중 구버전 merge를 막기 위해 version 증가를 유지한다. Redis 락은 두지 않는다(#510).
 - **비관적 잠금(`@Lock(PESSIMISTIC_WRITE)`)은 상태를 바꾸지 않는 쓰기가 같은 부모 행 기준으로 합계 · 상한을 판정할 때만 쓴다** — 상태 전이가 없으면
   `@Version` 이 경합을 잡지 못하고, 각자 읽은 합으로 함께 상한을 넘긴다. 정적 JPQL(`select ... where id = :id`)에 `@Lock` 을 달고 이름은 `findByIdForUpdate` 로 둔다
   (네이티브 `for update` 금지 — §9-5). PostgreSQL 에서는 `for no key update`(Hibernate 7) 다 — 같은 잠금 · 그 행의 UPDATE 와만 충돌하고,
