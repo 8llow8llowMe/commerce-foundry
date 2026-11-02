@@ -9,7 +9,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * 마이페이지(#28) — 하위 화면으로 가는 메뉴. 주문 내역 · 배송 조회 · 취소 · 반품은 주문 조회 API(BE #16)가 들어오면 `/mypage/orders` 로 붙인다.
+ * 마이페이지(#28) — 하위 화면으로 가는 메뉴. 배송 조회(BE #18) · 결제 뒤 취소 · 반품(BE #16 PR-2)은 주문 상세에 붙인다.
  * 로그인하지 않았으면 로그인 화면으로 보낸다.
  */
 export default async function MyPage() {
@@ -23,9 +23,11 @@ export default async function MyPage() {
       <h1 className="mb-8 font-serif text-[1.75rem] leading-tight">{t.title}</h1>
       <nav aria-label={t.nav}>
         <ul className="flex flex-col gap-2">
-          <li className={item}>
-            <span className="text-muted-fg">{t.orders}</span>
-            <span className="text-sm text-muted-fg">{t.ordersPending}</span>
+          <li>
+            <Link href="/mypage/orders" className={`${item} hover:text-primary`}>
+              <span>{t.orders}</span>
+              <span className="text-sm text-muted-fg">{t.ordersNote}</span>
+            </Link>
           </li>
           <li>
             <Link href="/mypage/profile" className={`${item} hover:text-primary`}>

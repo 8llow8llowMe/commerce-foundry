@@ -1,5 +1,7 @@
 // 앱 UI 문구(국문). 브랜드 문구(메뉴 · 메인 · 푸터 링크)는 브랜드 설정 content 에 있다.
 // 키를 더하면 en.ts 도 채워야 타입 검사를 통과한다.
+import type { CancelReason } from '@/lib/orders/history';
+
 export const ko = {
   languageName: '한국어',
   header: {
@@ -395,6 +397,8 @@ export const ko = {
     orderFailed: '주문을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.',
     /** 주문 생성 뒤 결제 화면으로 옮기는 동안 */
     toPayment: '주문이 접수되었습니다. 결제 화면으로 이동합니다.',
+    /** 활성 주문 시도 상한(409 ORDER_022) 아래 — 결제 대기 주문이 있으면 이어 결제할 수 있다 */
+    ordersLink: '주문 내역 보기',
     /**
      * 주문 생성 오류 코드별 문구 — 없으면 위 errors(견적과 같은 코드), 그다음 국문 서버 문구 · 범용 문구다.
      * 배송지 칸 코드(117~128 · 138~140)의 서버 문구에는 필드 이름이 섞여 있어 여기 문구만 쓴다.
@@ -501,11 +505,70 @@ export const ko = {
     failCanceled: '결제를 취소했습니다.',
     /** {message}: 토스 안내(국문 스토어만) */
   },
+  /** 마이페이지 주문 내역 · 상세 · 결제 전 취소(#28 · BE #16) — 금액은 서버 값이다 */
+  orders: {
+    title: '주문 내역',
+    detailTitle: '주문 상세',
+    back: '주문 내역',
+    loading: '주문 내역을 불러오는 중입니다.',
+    loadFailed: '주문 내역을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    reload: '다시 불러오기',
+    empty: '아직 주문한 내역이 없습니다.',
+    shop: '쇼핑하러 가기',
+    more: '더 보기',
+    loadingMore: '불러오는 중입니다.',
+    /** {count}: 주문 줄 수 — 주문 이름이 없을 때 */
+    itemCount: '상품 {count}개',
+    orderNumber: '주문 번호',
+    orderedAt: '주문 일시',
+    viewDetail: '상세 보기',
+    /** {time}: 결제 기한 */
+    paymentDue: '{time}까지 결제하지 않으면 주문이 취소됩니다.',
+    resumePayment: '결제 이어하기',
+    notFound: '주문을 찾을 수 없습니다.',
+    items: '주문 상품',
+    /** {count}: 수량 */
+    quantity: '수량 {count}',
+    amounts: '결제 금액',
+    shippingAddress: '배송지',
+    deliveryMemo: '배송 메모',
+    cancel: '주문 취소',
+    cancelTitle: '주문을 취소할까요?',
+    cancelReason: '취소 사유',
+    /** 결제창을 연 채 취소하면 결제가 끝날 수 있다(BE 결제 → 주문 반영 #308 이 환불) */
+    cancelCaution:
+      '결제를 진행하는 중이라면 결제가 끝난 뒤 주문 상태를 확인해 주세요. 결제 전 주문만 바로 취소됩니다.',
+    cancelConfirm: '취소하기',
+    canceling: '취소하는 중입니다.',
+    cancelClose: '닫기',
+    canceled: '주문을 취소했습니다.',
+    cancelFailed: '주문을 취소하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    /** 결과를 모른다 — 상세를 다시 읽었다 */
+    cancelUnknown:
+      '취소 결과를 확인하지 못했습니다. 주문 상태를 확인하고 필요하면 다시 시도해 주세요.',
+    cancelReasons: {
+      CHANGE_OF_MIND: '단순 변심',
+      ORDER_MISTAKE: '주문 내용 잘못 선택',
+      PAYMENT_ISSUE: '결제 문제',
+      OTHER: '기타',
+    } as Record<CancelReason, string>,
+    /** 취소 오류 코드별 문구. 없으면 cancelFailed */
+    cancelErrors: {
+      ORDER_001: '주문을 찾을 수 없습니다.',
+      ORDER_020:
+        '결제가 완료되었거나 결제 기한이 지나 취소할 수 없습니다. 주문 상태를 확인해 주세요.',
+      ORDER_100: '취소 사유를 다시 선택해 주세요.',
+      ORDER_154: '취소 사유를 선택해 주세요.',
+      GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+    } as Record<string, string>,
+    /** 영문 스토어의 상태 이름(국문은 서버 이름) */
+    statuses: {} as Record<string, string>,
+  },
   account: {
     title: '마이페이지',
     nav: '마이페이지 메뉴',
     orders: '주문 내역',
-    ordersPending: '주문 내역은 준비 중입니다.',
+    ordersNote: '주문 · 결제 상태를 확인합니다.',
     profileMenu: '회원 정보',
     profileMenuNote: '이름 · 연락처 · 마케팅 수신',
     addressMenu: '배송지 관리',
