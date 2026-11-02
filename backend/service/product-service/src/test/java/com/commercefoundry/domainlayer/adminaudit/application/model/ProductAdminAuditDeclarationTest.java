@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.adminaudit.application.model;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.domainlayer.product.application.model.StockAlertAuditAction;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,6 +32,7 @@ class ProductAdminAuditDeclarationTest {
     void declaredActionsMatchEnum() {
         List<String> declared = declaredActions();
         Set<String> enumValues = Arrays.stream(ProductAdminAuditAction.values()).map(Enum::name).collect(Collectors.toSet());
+        enumValues.addAll(Arrays.stream(StockAlertAuditAction.values()).map(Enum::name).collect(Collectors.toSet()));
 
         assertThat(declared).as("선언 수집이 비어 있으면 스캔이 잘못된 것이다").isNotEmpty();
         assertThat(declared).as("한 행위 이름은 한 핸들러만 선언한다").doesNotHaveDuplicates();
