@@ -5,14 +5,17 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.Product
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductHeaderUpdateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.presenter.ProductAdminPresenter;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
+import com.commercefoundry.domainlayer.product.application.command.ProductHeaderUpdateCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminDetailProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductDeleteProcessor;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor;
 import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminQueryProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductDescriptionSanitizer;
@@ -61,7 +64,22 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final ProductDescriptionSanitizer productDescriptionSanitizer;
     private final ProductImageUploadProcessor productImageUploadProcessor;
     private final ProductDeleteProcessor productDeleteProcessor;
+    private final ProductHeaderUpdateProcessor productHeaderUpdateProcessor;
     private final ProductAdminAuditProcessor productAdminAuditProcessor;
+
+    @Override
+    @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
+    public ProductHeaderUpdateAdminResponse updateHeader(ProductHeaderUpdateCommand command) {
+        try {
+            ProductDescriptionSanitizer.Result description = productDescriptionSanitizer.sanitize(command.descriptionHtml());
+            var info = productHeaderUpdateProcessor.update(command, description.html());
+            productAdminAuditProcessor.productUpdated(command.actorMemberId(), command.productId(), true);
+            return new ProductHeaderUpdateAdminResponse(productAdminPresenter.toDetailResponse(info), description.changed());
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.productUpdated(command.actorMemberId(), command.productId(), false);
+            throw exception;
+        }
+    }
 
     /** Database-only deletion: read and versioned merge share one bounded transaction. */
     @Override

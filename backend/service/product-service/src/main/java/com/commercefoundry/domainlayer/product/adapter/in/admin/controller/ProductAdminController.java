@@ -5,6 +5,8 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCreateRequest;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductHeaderUpdateRequest;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductHeaderUpdateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductImageUploadRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductCreateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
@@ -36,6 +38,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -59,6 +62,19 @@ public class ProductAdminController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final ProductAdminUseCase productAdminUseCase;
+
+    @Operation(summary = "상품 기본 정보 수정", description = "상품명·요약·상세 HTML·판매 상태·노출 여부와 version을 전체 교체한다. "
+        + "카테고리·가격·옵션·SKU·이미지는 바꾸지 않는다. 오래된 version은 409 PRODUCT_010, 삭제된 상품은 404 PRODUCT_001이다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_UPDATE")
+    @PutMapping("/{productId}/header")
+    public ResponseEntity<Response<ProductHeaderUpdateAdminResponse>> updateHeader(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId,
+        @RequestBody @Valid ProductHeaderUpdateRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(productAdminUseCase.updateHeader(request.toCommand(productId, member.memberId()))));
+    }
 
     @Operation(summary = "상품 삭제", description = "숨김 · 판매 종료로 바꾸고 삭제 시각을 기록한다. 자식 데이터와 기존 재고 선점은 유지한다. "
         + "재삭제도 200(dataBody=null), 없으면 404 PRODUCT_001. 버전 파라미터는 없으며 동시 변경은 409 PRODUCT_010. 다시 조회한 뒤 재시도한다.")

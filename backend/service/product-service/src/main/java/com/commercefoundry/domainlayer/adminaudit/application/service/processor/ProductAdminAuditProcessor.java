@@ -23,6 +23,10 @@ public class ProductAdminAuditProcessor {
         write(ProductAdminAuditAction.PRODUCT_DELETE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
     }
 
+    public void productUpdated(long actorMemberId, long productId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_UPDATE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
+    }
+
     /** @param categoryId 만든 카테고리 아이디 — 실패해 없으면 {@code null}({@code target=-}) */
     public void categoryCreated(long actorMemberId, Long categoryId, boolean succeeded) {
         write(ProductAdminAuditAction.CATEGORY_CREATE, actorMemberId, categoryId == null ? null : AdminAuditLog.target(CATEGORY, categoryId), succeeded);
