@@ -1,8 +1,5 @@
 package com.commercefoundry.ai.client;
 
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
-import com.anthropic.core.LogLevel;
-import com.anthropic.core.Timeout;
 import com.commercefoundry.ai.masking.PiiMasker;
 import com.commercefoundry.ai.metering.AiCallInterceptor;
 import com.commercefoundry.ai.properties.AiProperties;
@@ -32,8 +29,14 @@ public final class AiClients {
      * @throws IllegalArgumentException 규칙에 어긋나면. 메시지에는 프로퍼티 이름과 설명만 있고 설정값은 없다
      */
     public static AiClient create(AiProperties properties, List<AiCallInterceptor> interceptors) {
+        return create(properties, interceptors, new ClaudeAiProvider());
+    }
+
+    /** Provider 선택은 내부 책임이다. 공통 가드는 Provider 를 만들기 전에 반드시 거친다. */
+    static AiClient create(AiProperties properties, List<AiCallInterceptor> interceptors, AiProvider provider) {
         Objects.requireNonNull(properties, "properties");
         Objects.requireNonNull(interceptors, "interceptors");
+        Objects.requireNonNull(provider, "provider");
         List<Violation> violations = new ArrayList<>(properties.violations());
         properties.meteringViolation(interceptors.size()).ifPresent(violations::add);
         if (!violations.isEmpty()) {
@@ -43,20 +46,7 @@ public final class AiClients {
         if (!properties.enabled()) {
             return new DisabledAiClient();
         }
-        AnthropicOkHttpClient.Builder builder = AnthropicOkHttpClient.builder()
-            // SDK 빌더는 fromEnv() 없이도 ANTHROPIC_LOG 를 읽어, debug 면 요청 · 응답 본문을 slf4j 를 거치지 않고 stderr 로 낸다. 명시적으로 끈다
-            .logLevel(LogLevel.OFF)
-            .apiKey(properties.apiKey())
-            .maxRetries(properties.maxRetries())
-            .timeout(Timeout.builder()
-                .connect(properties.connectTimeout())
-                .read(properties.readTimeout())
-                .write(properties.readTimeout())
-                .request(properties.requestTimeout())
-                .build());
-        if (properties.baseUrl() != null) {
-            builder.baseUrl(properties.baseUrl());
-        }
-        return new ClaudeAiClient(builder.build(), properties, new PiiMasker(properties.masking().patterns()), interceptors.isEmpty() ? null : interceptors.getFirst());
+        return Objects.requireNonNull(provider.create(properties, new PiiMasker(properties.masking().patterns()),
+            interceptors.isEmpty() ? null : interceptors.getFirst()), "provider client");
     }
 }
