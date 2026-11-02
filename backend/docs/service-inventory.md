@@ -72,7 +72,7 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 | operations-service | delivery-service | 운영자 온보딩 업무 사실 — 국내 배송비 정책 저장 여부 · 운영자별 최초 저장 시각(`GET /internal/v1/onboarding-facts/shipping-policy`, #357). memberId 는 operations 가 access 토큰으로 확인한 운영자. 호출 구현 #357 PR-B2 (`ShippingPolicyFactClient`, 서킷 `delivery-service`) — 장애면 그 업무만 `UNAVAILABLE`, 조회는 200 |
 | operations-service | product-service | 운영자 온보딩 상품 등록 사실 — 구매 가능 상품 존재 여부 · 운영자별 미삭제 상품 최초 등록 시각(`GET /internal/v1/onboarding-facts/product-registration`, #402). `ProductRegistrationFactClient`, 서킷 `product-service` — 장애면 상품 업무만 `UNAVAILABLE`, 조회는 200. 등록자 기록을 쓰는 상품 등록 API는 #9 의존 |
 | operations-service | product-service | 시점 원가 일괄 조회(`POST /internal/v1/sku-costs/query`, #361 PR-B) — 공헌이익 집계가 주문 항목의 (SKU, 주문 시각) 쌍을 100개씩 보내 그 시각의 유형별 원가를 받는다. 없는 SKU 는 빠지고 원가 미입력은 빈 costs 다. 호출 구현은 #362 |
-| operations-service | auth-service | 마케팅 발송 직전 동의 확인용 `POST /internal/v1/marketing-consents/query` (#230). auth의 받는 API만 구현. 최대100개 ID의 최신 동의 상태만 반환하며 이름·연락처는 없다. 실제 캠페인 호출·발송 연결은 후속. |
+| operations-service | auth-service | 마케팅 동의 `POST /internal/v1/marketing-consents/query` (#230). PR-B의 ADMIN 수신자 미리보기에서 실제 Feign 호출(`campaignConsentClient`, 서킷 `auth-service`). 최대100개 ID, 이름·연락처 없음. 실패·응답 계약 위반은503. 실제 발송 연결은 후속. |
 
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —
 A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃이 겹친다.
