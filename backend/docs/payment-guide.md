@@ -71,6 +71,14 @@
   확인하고, 다르면 **승인 요청을 보내지 않고** 거절한다 (400 `PAYMENT_008`). 이 경우는 보안 경고 로그(결제 · 회원 아이디만)로 남긴다.
 - 쿠폰·배송비·할인이 바뀌어 주문 금액이 달라졌으면 결제 준비를 새로 받는다 (기존 READY 는 ABORTED).
 
+### 3-1-1. 토스 승인 계약 확인 (2026-11-02)
+
+- `POST /v1/payments/confirm` 요청 본문은 `paymentKey`(최대 200자), `orderId`(6~64자), `amount`가 필수다. 결제 인증 후 **10분 안에** 승인하지 않으면 인증이 만료된다. 이 10분은 HTTP read timeout 10초나 우리 주문의 `paymentDueAt`과 다른 제한이다.
+- 토스 `orderId`는 영문 대소문자·숫자·`-`·`_`·`=`를 허용한다. 현재 `pgOrderId`는 결제 시도 ID의 숫자 문자열이므로 허용 범위 안에 있다. `successUrl`의 `paymentKey`·`orderId`·`amount`는 서버에 저장한 시도와 대조한 뒤 승인한다.
+- 토스 `Idempotency-Key`는 최대 300자이고 최초 요청일부터 15일간 유효하다. 같은 승인 시도에서는 같은 키를 유지하고, 그 뒤의 복구는 PG 조회와 우리 결제 기록으로 판정한다. 주문번호 조회 `GET /v1/payments/orders/{orderId}`는 결제위젯 키(`gsk`)로 호출할 수 없다. 현재 `TossPaymentGatewayAdapter#inquire`는 주문번호 조회를 사용하므로 #15 재조회 구현에서는 키 종류를 확인하고 `gsk`일 때 결제키 조회를 사용해야 한다.
+
+근거: [토스 코어 API](https://docs.tosspayments.com/reference), [인증 및 멱등키](https://docs.tosspayments.com/reference/using-api/authorization).
+
 ### 3-2. 중복 승인 방지 — 두 겹으로 막는다
 
 1. **우리 상태**: `READY → IN_PROGRESS` 전이를 낙관적 락(`@Version`) 또는 조건부 UPDATE 로 한 번만 성공시킨다.
