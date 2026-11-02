@@ -92,6 +92,19 @@ class AiMeteringReadinessConfigTest {
             .run(context -> assertThat(context).hasFailed());
     }
 
+    @Test void providerOnlyPricesBindAndRequireEveryUsedProviderAndExplicitOpenAiModel() {
+        var namespace = runner.withPropertyValues("operations.ai.budget.monthly-usd=50", "operations.ai.pricing.version=v1",
+            "operations.ai.pricing.providers.openai.models.[model-a].input=2", "operations.ai.pricing.providers.openai.models.[model-a].output=10",
+            "operations.ai.pricing.providers.openai.models.[model-a].cache-write=3", "operations.ai.pricing.providers.openai.models.[model-a].cache-read=0.2");
+        namespace.withPropertyValues("ai.enabled=true", "ai.provider=openai", "ai.openai.model=model-a").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(AiUsageProperties.class).pricing().toTable().quote("openai", "model-a").price().input()).isEqualByComparingTo("2");
+        });
+        namespace.withPropertyValues("ai.enabled=true", "ai.provider=openai", "ai.openai.model=unregistered").run(context -> assertThat(context).hasFailed());
+        namespace.withPropertyValues("ai.enabled=true", "ai.features.chat.provider=openai", "ai.openai.model=model-a")
+            .run(context -> assertThat(context).hasFailed());
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties({AiProperties.class, AiUsageProperties.class})
     static class Bindings {

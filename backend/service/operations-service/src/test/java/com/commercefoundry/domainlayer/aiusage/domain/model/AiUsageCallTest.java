@@ -21,6 +21,31 @@ class AiUsageCallTest {
     private static final long ESTIMATE = 9_000L;
     private static final AiTokenUsage USAGE = new AiTokenUsage(100, 20, 0, 0);
 
+    @Test void reservationProviderIsImmutableAndLegacyConstructorPreservesNull() {
+        AiUsageCall selected = AiUsageCall.pending(100L, new AiBudgetPeriod("2026-10"), "chat", null, null, "same-model", false,
+            0, 10, ESTIMATE, ESTIMATE_QUOTE, CALLED_AT, "openai");
+        assertThat(selected.settle(AiUsageStatus.COMPLETED, USAGE, "same-model", ACTUAL_QUOTE, null, null, "msg", 1, SETTLED_AT).provider()).isEqualTo("openai");
+        assertThat(selected.abandon(SETTLED_AT).provider()).isEqualTo("openai");
+        AiUsageCall legacy = new AiUsageCall(selected.id(), selected.period(), selected.feature(), selected.promptVersion(), selected.callerRef(),
+            selected.requestedModel(), selected.model(), selected.structured(), selected.imageCount(), selected.inputChars(), selected.estimateCostMicros(),
+            selected.usage(), selected.costMicros(), selected.pricingVersion(), selected.pricedBy(), selected.status(), selected.reason(), selected.httpStatus(),
+            selected.messageId(), selected.elapsedMs(), selected.calledAt(), selected.settledAt());
+        assertThat(legacy.provider()).isNull();
+        assertThat(legacy.settle(AiUsageStatus.COMPLETED, USAGE, "same-model", ACTUAL_QUOTE, null, null, "msg", 1, SETTLED_AT).provider()).isNull();
+        assertThat(legacy.abandon(SETTLED_AT).provider()).isNull();
+        assertThat(pending().provider()).isEqualTo("anthropic");
+    }
+
+    @Test void newReservationAndCommandRejectUnrecordedProvidersWithoutValueLeaks() {
+        for (String provider : new String[]{null, "private-provider-probe", ""}) {
+            assertThatThrownBy(() -> AiUsageCall.pending(100L, new AiBudgetPeriod("2026-10"), "chat", null, null, "same-model", false,
+                0, 10, ESTIMATE, ESTIMATE_QUOTE, CALLED_AT, provider)).isInstanceOf(IllegalArgumentException.class).hasMessageNotContaining("private-provider-probe");
+            assertThatThrownBy(() -> new com.commercefoundry.domainlayer.aiusage.application.command.AiUsageReserveCommand(
+                "chat", null, null, "same-model", 100, 10, 0, false, provider))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageNotContaining("private-provider-probe");
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(value = AiUsageStatus.class, names = {"COMPLETED", "UNUSABLE"})
     @DisplayName("응답을 받은 COMPLETED · UNUSABLE 은 답한 모델 단가로 실측 비용을 남긴다")

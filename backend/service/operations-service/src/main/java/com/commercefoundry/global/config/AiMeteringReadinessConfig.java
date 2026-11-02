@@ -41,14 +41,18 @@ public class AiMeteringReadinessConfig {
         if (aiUsageProperties.budget().limitMicros().isEmpty()) {
             problems.add("operations.ai.budget.monthly-usd(환경변수 AI_MONTHLY_BUDGET_USD) 가 비었습니다 — 월 한도 없이 예약할 수 없습니다");
         }
-        if (aiUsageProperties.pricing().models().isEmpty()) {
+        var prices = aiUsageProperties.pricing().toTable();
+        if (prices.isEmpty()) {
             problems.add("operations.ai.pricing.models 가 비었습니다 — 단가 없이 비용을 계산할 수 없습니다");
+        }
+        if (aiProperties.usedProviders().stream().anyMatch(provider -> !prices.hasPricePool(provider))) {
+            problems.add("operations.ai.pricing requires prices for every selected provider");
         }
         java.util.Set<String> openAiModels = new java.util.HashSet<>();
         if ("openai".equals(aiProperties.provider())) openAiModels.add(aiProperties.openai().model());
         aiProperties.features().keySet().stream().filter(name -> "openai".equals(aiProperties.providerFor(name)))
             .forEach(name -> openAiModels.add(aiProperties.resolve(name).model()));
-        if (openAiModels.stream().filter(java.util.Objects::nonNull).anyMatch(model -> !aiUsageProperties.pricing().models().containsKey(model))) {
+        if (openAiModels.stream().filter(java.util.Objects::nonNull).anyMatch(model -> !prices.hasExplicitPrice("openai", model))) {
             problems.add("operations.ai.pricing.models requires an explicit price entry for every selected OpenAI model");
         }
         Duration worstCall = worstCallDuration(aiProperties);

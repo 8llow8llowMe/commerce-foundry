@@ -101,6 +101,9 @@ class AiUsageLedgerPostgresTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
     private TransactionTemplate transactionTemplate;
 
     private ExecutorService executor;
@@ -118,6 +121,37 @@ class AiUsageLedgerPostgresTest {
         executor.shutdownNow();
         aiUsageCallRepository.deleteAllInBatch();
         aiUsageMonthRepository.deleteAllInBatch();
+    }
+
+    @Test
+    void providerPersistsAcrossSettlementAbandonmentAndLegacyNullLoading() {
+        for (String provider : List.of("anthropic", "openai")) {
+            var reservation = aiUsageMeterUseCase.reserve(new AiUsageReserveCommand("chat", null, null, "test-small", 100, 10, 0, false, provider));
+            assertThat(aiUsageCallRepositoryPort.findById(reservation.callId()).orElseThrow().provider()).isEqualTo(provider);
+            aiUsageMeterUseCase.settle(new AiUsageSettleCommand(reservation.callId(), AiUsageStatus.COMPLETED,
+                new AiTokenUsage(8, 5, 0, 4), "test-small", null, null, "msg", 1));
+            assertThat(aiUsageCallRepository.findById(reservation.callId()).orElseThrow().getProvider()).isEqualTo(provider);
+            var abandoned = aiUsageMeterUseCase.reserve(new AiUsageReserveCommand("chat", null, null, "test-small", 100, 10, 0, false, provider));
+            transactionTemplate.executeWithoutResult(status -> {
+                AiUsageCall pending = aiUsageCallRepositoryPort.findById(abandoned.callId()).orElseThrow();
+                assertThat(aiUsageCallRepositoryPort.closeIfPending(pending.abandon(Instant.now()))).isTrue();
+            });
+            assertThat(aiUsageCallRepository.findById(abandoned.callId()).orElseThrow().getProvider()).isEqualTo(provider);
+        }
+        var legacy = aiUsageMeterUseCase.reserve(command());
+        jdbc.update("update operations.ai_usage_call set provider = null where id = ?", legacy.callId());
+        assertThat(aiUsageCallRepositoryPort.findById(legacy.callId()).orElseThrow().provider()).isNull();
+        aiUsageMeterUseCase.settle(new AiUsageSettleCommand(legacy.callId(), AiUsageStatus.COMPLETED,
+            new AiTokenUsage(8, 5, 0, 4), "test-small", null, null, "msg", 1));
+        assertThat(aiUsageCallRepository.findById(legacy.callId()).orElseThrow().getProvider()).isNull();
+        var legacyAbandoned = aiUsageMeterUseCase.reserve(command());
+        jdbc.update("update operations.ai_usage_call set provider = null where id = ?", legacyAbandoned.callId());
+        transactionTemplate.executeWithoutResult(status -> {
+            AiUsageCall pending = aiUsageCallRepositoryPort.findById(legacyAbandoned.callId()).orElseThrow();
+            assertThat(pending.provider()).isNull();
+            assertThat(aiUsageCallRepositoryPort.closeIfPending(pending.abandon(Instant.now()))).isTrue();
+        });
+        assertThat(aiUsageCallRepository.findById(legacyAbandoned.callId()).orElseThrow().getProvider()).isNull();
     }
 
     @Test

@@ -9,17 +9,31 @@ import java.util.Objects;
  * @param version 단가표 버전 — 호출 행에 남겨 어느 가격표로 계산했는지 추적한다. 단가가 없으면 {@code null}
  * @param models  모델 ID → 단가. 비어 있을 수 있다 — 그러면 계산할 수 없다({@link #quote} 가 실패한다)
  */
-public record AiPriceTable(String version, Map<String, AiPrice> models) {
+public record AiPriceTable(String version, Map<String, AiPrice> models, Map<String, Map<String, AiPrice>> providers) {
+
+    public AiPriceTable(String version, Map<String, AiPrice> models) {
+        this(version, models, Map.of());
+    }
 
     public AiPriceTable {
         models = models == null ? Map.of() : Map.copyOf(models);
-        if (!models.isEmpty() && (version == null || version.isBlank())) {
+        Map<String, Map<String, AiPrice>> copied = new java.util.LinkedHashMap<>();
+        if (providers != null) {
+            providers.forEach((provider, prices) -> {
+                if (!java.util.Set.of("anthropic", "openai").contains(provider)) {
+                    throw new IllegalArgumentException("Invalid pricing provider");
+                }
+                copied.put(provider, Map.copyOf(prices));
+            });
+        }
+        providers = Map.copyOf(copied);
+        if ((!models.isEmpty() || providers.values().stream().anyMatch(prices -> !prices.isEmpty())) && (version == null || version.isBlank())) {
             throw new IllegalArgumentException("단가가 있으면 단가표 버전이 있어야 합니다.");
         }
     }
 
     public boolean isEmpty() {
-        return models.isEmpty();
+        return models.isEmpty() && providers.values().stream().allMatch(Map::isEmpty);
     }
 
     /**
@@ -28,15 +42,37 @@ public record AiPriceTable(String version, Map<String, AiPrice> models) {
      * @throws IllegalStateException 단가가 하나도 없다 — 계산할 수 없다(설정 누락. ai 를 켤 때 기동 가드가 막는다)
      */
     public AiPriceQuote quote(String model) {
+        return quote(null, model);
+    }
+
+    public boolean hasExplicitPrice(String provider, String model) {
+        return model != null && (providerModels(provider).containsKey(model) || models.containsKey(model));
+    }
+
+    public boolean hasPricePool(String provider) {
+        return !models.isEmpty() || !providerModels(provider).isEmpty();
+    }
+
+    public AiPriceQuote quote(String provider, String model) {
         Objects.requireNonNull(model, "model");
-        if (models.isEmpty()) {
-            throw new IllegalStateException("operations.ai.pricing.models 에 단가가 없어 비용을 계산할 수 없습니다.");
+        Map<String, AiPrice> selected = providerModels(provider);
+        AiPrice configured = selected.get(model);
+        if (configured == null) {
+            configured = models.get(model);
         }
-        AiPrice configured = models.get(model);
         if (configured != null) {
             return new AiPriceQuote(configured, AiPricedBy.CONFIG, version);
         }
-        return new AiPriceQuote(AiPrice.maxOf(models.values()), AiPricedBy.MAX_FALLBACK, version);
+        java.util.List<AiPrice> candidates = new java.util.ArrayList<>(models.values());
+        candidates.addAll(selected.values());
+        if (candidates.isEmpty()) {
+            throw new IllegalStateException("operations.ai.pricing has no prices for the selected provider");
+        }
+        return new AiPriceQuote(AiPrice.maxOf(candidates), AiPricedBy.MAX_FALLBACK, version);
+    }
+
+    private Map<String, AiPrice> providerModels(String provider) {
+        return provider == null ? Map.of() : providers.getOrDefault(provider, Map.of());
     }
 
     /**

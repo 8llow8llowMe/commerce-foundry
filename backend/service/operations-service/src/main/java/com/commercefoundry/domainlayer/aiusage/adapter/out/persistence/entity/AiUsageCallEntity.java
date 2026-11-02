@@ -79,6 +79,9 @@ public class AiUsageCallEntity extends BaseEntity implements Persistable<Long> {
     @Column(name = "requested_model", nullable = false, length = 64, comment = "요청한 모델 ID — 예상 비용의 단가")
     private String requestedModel;
 
+    @Column(name = "provider", length = 32, comment = "예약 시 선택한 AI Provider (anthropic/openai). null은 미기록 — 모델 이름으로 추정하지 않음")
+    private String provider;
+
     @Column(name = "model", length = 64, comment = "답한 모델 ID. 응답이 없으면 요청한 모델, PENDING · ABANDONED 면 null")
     private String model;
 

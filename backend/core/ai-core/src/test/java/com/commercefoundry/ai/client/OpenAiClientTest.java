@@ -154,6 +154,7 @@ class OpenAiClientTest {
         assertThat(result.text()).isEqualTo("hello");
         assertThat(result.usage()).isEqualTo(new AiUsage(8, 5, 0, 4));
         assertThat(requests.getFirst()).contains("\"store\":false", "reasoning.encrypted_content", "[EMAIL]").doesNotContain("member@example.com");
+        assertThat(meter.contexts.getFirst().provider()).isEqualTo("openai");
         assertThat(meter.single().status()).isEqualTo(Status.COMPLETED);
     }
 
@@ -363,6 +364,7 @@ class OpenAiClientTest {
         client().complete(AiRequest.of("chat", null, "prompt"), DescribedAnswer.class, value -> List.of());
         JsonNodeProbe.assertSchemaAccounting(requests.getFirst(), meter.contexts.getFirst().inputChars());
         assertThat(requests.getFirst()).contains("[EMAIL]").doesNotContain("member@example.com");
+        assertThat(meter.contexts.getFirst().provider()).isEqualTo("openai");
         assertThat(meter.single().status()).isEqualTo(Status.COMPLETED);
     }
 
@@ -495,6 +497,7 @@ class OpenAiClientTest {
         replies.add(response(text("{\"answer\":\"yes\"}"), "completed"));
         assertThat(client().complete(AiRequest.of("chat", null, "prompt"), Answer.class, value -> List.of()).value().answer()).isEqualTo("yes");
         assertThat(requests.getFirst()).contains("json_schema", "\"strict\":true");
+        assertThat(meter.contexts.getFirst().provider()).isEqualTo("openai");
         assertThat(meter.single().status()).isEqualTo(Status.COMPLETED);
     }
 
@@ -539,6 +542,7 @@ class OpenAiClientTest {
                                 });
         assertThat(deltas).containsExactly("hello");
         assertThat(result.text()).isEqualTo("hello");
+        assertThat(meter.contexts.getFirst().provider()).isEqualTo("openai");
         assertThat(meter.single().status()).isEqualTo(Status.COMPLETED);
     }
 

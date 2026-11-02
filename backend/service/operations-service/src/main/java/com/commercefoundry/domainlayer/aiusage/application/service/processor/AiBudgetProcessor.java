@@ -66,7 +66,7 @@ public class AiBudgetProcessor {
     public ReserveAttempt tryReserve(AiUsageReserveCommand command, Instant now) {
         long limitMicros = limitMicros();
         String period = AiBudgetPeriod.of(now, budget.zone()).value();
-        AiPriceQuote quote = priceTable.quote(command.requestedModel());
+        AiPriceQuote quote = priceTable.quote(command.provider(), command.requestedModel());
         long estimateMicros = AiCost.estimateMicros(estimatePolicy, command.inputChars(), command.imageCount(), command.maxTokens(), quote.price());
 
         if (estimateMicros > limitMicros) {
@@ -80,7 +80,7 @@ public class AiBudgetProcessor {
         if (aiUsageMonthRepositoryPort.reserve(period, estimateMicros, limitMicros, now)) {
             AiUsageCall call = AiUsageCall.pending(
                 snowflakeIdGenerator.generateId(), new AiBudgetPeriod(period), command.feature(), command.promptVersion(), command.callerRef(),
-                command.requestedModel(), command.structured(), command.imageCount(), command.inputChars(), estimateMicros, quote, now
+                command.requestedModel(), command.structured(), command.imageCount(), command.inputChars(), estimateMicros, quote, now, command.provider()
             );
             aiUsageCallRepositoryPort.insert(call);
             return ReserveAttempt.reserved(new AiUsageReservation(call.id(), period, estimateMicros));
@@ -117,7 +117,7 @@ public class AiBudgetProcessor {
         }
         AiUsageCall call = found.get();
         AiPriceQuote actualQuote = command.outcome().chargesActualUsage()
-            ? priceTable.quote(command.model() == null ? call.requestedModel() : command.model())
+            ? priceTable.quote(call.provider(), command.model() == null ? call.requestedModel() : command.model())
             : null;
         AiUsageCall closed = call.settle(
             command.outcome(), command.usage(), command.model(), actualQuote, command.reason(), command.httpStatus(), command.messageId(), command.elapsedMs(), now

@@ -16,6 +16,7 @@ import java.util.Objects;
  * @param costMicros         확정 비용 (micro-USD). PENDING 이면 {@code null}
  * @param pricingVersion     비용 계산에 쓴 단가표 버전 — PENDING 이면 예상치의 버전이다
  * @param pricedBy           비용 계산에 쓴 단가 출처 — PENDING 이면 예상치의 출처다
+ * @param provider           예약 시 선택한 Provider. 과거 행의 null은 미기록이며 정산·회수에서도 그대로 보존한다
  */
 public record AiUsageCall(
     long id,
@@ -39,8 +40,18 @@ public record AiUsageCall(
     String messageId,
     Integer elapsedMs,
     Instant calledAt,
-    Instant settledAt
+    Instant settledAt,
+    String provider
 ) {
+
+    /** Legacy rows may have no recorded provider; never infer it from the model. */
+    public AiUsageCall(long id, AiBudgetPeriod period, String feature, Integer promptVersion, String callerRef, String requestedModel, String model,
+                       boolean structured, int imageCount, int inputChars, long estimateCostMicros, AiTokenUsage usage, Long costMicros,
+                       String pricingVersion, AiPricedBy pricedBy, AiUsageStatus status, String reason, Integer httpStatus, String messageId,
+                       Integer elapsedMs, Instant calledAt, Instant settledAt) {
+        this(id, period, feature, promptVersion, callerRef, requestedModel, model, structured, imageCount, inputChars, estimateCostMicros, usage, costMicros,
+            pricingVersion, pricedBy, status, reason, httpStatus, messageId, elapsedMs, calledAt, settledAt, null);
+    }
 
     public static final int FEATURE_MAX_LENGTH = 63;
     public static final int CALLER_REF_MAX_LENGTH = 100;
@@ -50,6 +61,9 @@ public record AiUsageCall(
     public static final int PRICING_VERSION_MAX_LENGTH = 20;
 
     public AiUsageCall {
+        if (provider != null && !java.util.Set.of("anthropic", "openai").contains(provider)) {
+            throw new IllegalArgumentException("provider must be anthropic or openai");
+        }
         if (id <= 0) {
             throw new IllegalArgumentException("id");
         }
@@ -76,14 +90,23 @@ public record AiUsageCall(
      *
      * @param estimateQuote 예상 비용을 계산한 단가 — 버전 · 출처를 남긴다
      */
+    public static AiUsageCall pending(long id, AiBudgetPeriod period, String feature, Integer promptVersion, String callerRef, String requestedModel,
+                                      boolean structured, int imageCount, long inputChars, long estimateCostMicros, AiPriceQuote estimateQuote, Instant calledAt) {
+        return pending(id, period, feature, promptVersion, callerRef, requestedModel, structured, imageCount, inputChars, estimateCostMicros, estimateQuote,
+            calledAt, "anthropic");
+    }
+
     public static AiUsageCall pending(
         long id, AiBudgetPeriod period, String feature, Integer promptVersion, String callerRef, String requestedModel, boolean structured,
-        int imageCount, long inputChars, long estimateCostMicros, AiPriceQuote estimateQuote, Instant calledAt
+        int imageCount, long inputChars, long estimateCostMicros, AiPriceQuote estimateQuote, Instant calledAt, String provider
     ) {
+        if (!java.util.Set.of("anthropic", "openai").contains(provider == null ? "" : provider)) {
+            throw new IllegalArgumentException("provider must be anthropic or openai");
+        }
         Objects.requireNonNull(estimateQuote, "estimateQuote");
         return new AiUsageCall(
             id, period, feature, promptVersion, callerRef, requestedModel, null, structured, imageCount, Math.toIntExact(inputChars), estimateCostMicros,
-            AiTokenUsage.ZERO, null, estimateQuote.version(), estimateQuote.pricedBy(), AiUsageStatus.PENDING, null, null, null, null, calledAt, null
+            AiTokenUsage.ZERO, null, estimateQuote.version(), estimateQuote.pricedBy(), AiUsageStatus.PENDING, null, null, null, null, calledAt, null, provider
         );
     }
 
@@ -123,7 +146,7 @@ public record AiUsageCall(
             id, period, feature, promptVersion, callerRef, requestedModel, model == null ? requestedModel : truncate(model, MODEL_MAX_LENGTH), structured,
             imageCount, inputChars, estimateCostMicros, settledUsage, outcome.settledCostMicros(actualMicros, estimateCostMicros), settledPricingVersion,
             settledPricedBy, outcome, truncate(reason, REASON_MAX_LENGTH), httpStatus, truncate(messageId, MESSAGE_ID_MAX_LENGTH),
-            (int) Math.min(Math.max(elapsedMs, 0L), Integer.MAX_VALUE), calledAt, now
+            (int) Math.min(Math.max(elapsedMs, 0L), Integer.MAX_VALUE), calledAt, now, provider
         );
     }
 
@@ -134,7 +157,7 @@ public record AiUsageCall(
         return new AiUsageCall(
             id, period, feature, promptVersion, callerRef, requestedModel, model, structured, imageCount, inputChars, estimateCostMicros, usage,
             AiUsageStatus.ABANDONED.settledCostMicros(0, estimateCostMicros), pricingVersion, pricedBy, AiUsageStatus.ABANDONED, null, null, null, null,
-            calledAt, now
+            calledAt, now, provider
         );
     }
 

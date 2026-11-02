@@ -110,6 +110,7 @@ class AiUsageMeteringFlowTest {
 
         assertThat(result.text()).isEqualTo(RESPONSE_PROBE);
         Map<String, Object> row = single("job:101");
+        assertThat(row.get("provider")).isEqualTo("anthropic");
         assertThat(row.get("status")).isEqualTo("COMPLETED");
         assertThat(row.get("feature")).isEqualTo("flow-ok");
         assertThat(row.get("requested_model")).isEqualTo("test-small");

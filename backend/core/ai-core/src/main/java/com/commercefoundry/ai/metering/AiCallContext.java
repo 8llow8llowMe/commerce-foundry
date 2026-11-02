@@ -16,9 +16,21 @@ package com.commercefoundry.ai.metering;
  * @param messageCount   보낸 메시지 수. 단일 호출은 1
  * @param toolCount      넘긴 도구 정의 수
  * @param streaming      스트리밍 호출이면 {@code true}
+ * @param provider       예약 시 선택한 Provider ({@code anthropic}/{@code openai}). 모델 이름으로 추정하지 않는다
  */
 public record AiCallContext(String callId, String feature, Integer promptVersion, String callerRef, String requestedModel, int maxTokens, long inputChars,
-                            int imageCount, boolean structured, int messageCount, int toolCount, boolean streaming) {
+                            int imageCount, boolean structured, int messageCount, int toolCount, boolean streaming, String provider) {
+
+    public AiCallContext {
+        if (!java.util.Set.of("anthropic", "openai").contains(provider == null ? "" : provider)) {
+            throw new IllegalArgumentException("provider must be anthropic or openai");
+        }
+    }
+
+    public AiCallContext(String callId, String feature, Integer promptVersion, String callerRef, String requestedModel, int maxTokens, long inputChars,
+                         int imageCount, boolean structured, int messageCount, int toolCount, boolean streaming) {
+        this(callId, feature, promptVersion, callerRef, requestedModel, maxTokens, inputChars, imageCount, structured, messageCount, toolCount, streaming, "anthropic");
+    }
 
     /** 단일 호출({@code complete}) — 메시지 하나, 도구 없음, 스트리밍 아님. */
     public AiCallContext(String callId, String feature, Integer promptVersion, String callerRef, String requestedModel, int maxTokens, long inputChars,
