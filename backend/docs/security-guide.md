@@ -978,7 +978,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - 쓰는 방식 — 아래 "어드민 쓰기 감사 공통 장치 (#163)" 를 따른다. 기본은 서비스의 `domainlayer/adminaudit` Processor 가 security-core 의 `AdminAuditLog` 를 부르는 것이고,
   out-port(`AdminAuditPort`) · `adapter/out/log` 어댑터는 **DB 싱크가 있는 서비스(auth)만** 둔다. auth 는 Facade 가 포트를 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다
   (ArchUnit H11 — Facade 는 out-port 를 쓰지 않는다). auth 의 DB 싱크(`REQUIRES_NEW`)는 업무가 끝난 뒤(트랜잭션 밖) 부른다. 실패 로그의 대상 선택 같은 감사 정책은 Processor 에 둔다.
-  operations 의 작업 취소는 `JobAdminAuditProcessor` 가 `AdminAuditLog` 를 직접 쓴다(DB 싱크 없음). order 의 `adapter/out/log/OrderAdminAuditLogAdapter` 는 #163 PR-E 에서 옮긴다.
+  operations 의 작업 취소는 `JobAdminAuditProcessor` 가 `AdminAuditLog` 를 직접 쓴다(DB 싱크 없음). order 도 `OrderAdminAuditProcessor` 가 직접 쓴다 — DB 싱크가 없어 감사 Port/로그 Adapter 를 두지 않는다.
   업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 · SKU 원가 이력 #361 등)는 그 이력이 감사의 정본이고, `admin.audit` 줄도 함께 남긴다(아래 C′).
 - **영속화 (auth-service, #192)** — `AdminAuditPort` 계약은 그대로이고 구현이 `adapter/out/persistence/AdminAuditLogRepositoryAdapter` 다.
   - 순서: `admin.audit` 로그 한 줄(`AdminAuditLogAdapter`)을 **먼저** 남기고 `auth.admin_audit_log` 에 한 행을 더한다. 칸 값은 `AdminAuditRecord` 팩토리 한 곳에서 만든다 —
@@ -1026,9 +1026,11 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` → `JobAdminAuditProcessor` → `AdminAuditLog` — `action=JOB_CANCEL target=job:<id>`). 취소의 시도별 트랜잭션과 재시도가 끝난 뒤 최종 결과만 한 번 남긴다.
   취소 반영 후 응답 재조회가 실패해도 취소 자체는 `SUCCESS` 다. `JobAdminController#cancel` 은 `@AdminAudited` 를 선언하고, 행위자는 access 토큰의 memberId 다. 작업 목록 · 상세 조회는 남기지 않는다 —
   payload · 결과 · 오류에 개인정보 원문을 두지 않는 규칙(`architecture-guide.md` §10)이라 읽기가 개인정보 열람이 아니다. 결과 파일 링크 발급(#212 PR-E)은 남긴다.
-- 적용 대상 (#17): 어드민 주문 목록 · 상세 조회와 상태 변경(`OrderAdminFacade` — order-service `OrderAdminAuditLogAdapter`). 목록은 `action=ORDER_SEARCH target=orders?status=..&from=..&to=..&page=..&size=..`,
+- 적용 대상 (#17): 어드민 주문 목록 · 상세 조회와 상태 변경(`OrderAdminFacade` → `OrderAdminAuditProcessor` → `AdminAuditLog`). 목록은 `action=ORDER_SEARCH target=orders?status=..&from=..&to=..&page=..&size=..`,
   상세는 `action=ORDER_VIEW target=order:<id>`(마스킹했어도 받는 분 · 기본 주소 · 맞춤 입력값을 읽는 행위다), 상태 변경은 `action=ORDER_STATUS_CHANGE target=order:<id>` 이고
   일괄 변경은 주문마다 한 줄이다(이미 그 상태라 그대로 둔 것도 `SUCCESS`). 바꾼 상태 · 사유는 감사 줄에 싣지 않는다 — 정본은 같은 트랜잭션의 주문 상태 이력이다.
+  `OrderAdminController#changeStatus` · `changeStatuses` 는 `@AdminAudited(action = "ORDER_STATUS_CHANGE")` 를 선언한다. Facade 는 `Propagation.NEVER` 로 업무 트랜잭션 밖을 지키고,
+  상태 변경 결과가 확정된 뒤 감사한다 — 단건 변경 뒤 응답 재조회만 실패해도 변경 자체는 `SUCCESS` 다. 낙관적 충돌 뒤 같은 목표 상태가 확인되면 그대로 두기 성공으로 본다.
 
 #### 어드민 쓰기 감사 공통 장치 (#163)
 
@@ -1041,8 +1043,10 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   - `write` 는 `target` 전체 모양을 본다 — `null`(`-`) · `<type>:<key>` · 조회 조건 `<type>?<k>=<v>&...` 만 받는다(정규식 `^[a-z0-9-]+(?::[a-z0-9-]+|\?[A-Za-z0-9=&_:.-]*)?$`).
     조회 조건 문자는 auth `MEMBER_SEARCH` · order `ORDER_SEARCH`(`Instant` 기간 포함)가 쓰는 것만 연다. 맞지 않으면 일부를 고치지 않고 **통째로 `-`** 로 남기고, 원문 없는 WARN(행위 · 길이)을 남긴다 —
     이메일 · 한글 이름 · 서식 문자(U+202E · U+200B) · `;` 같은 값이 감사 줄로 새지 않게 한다.
-  - **트랜잭션 안 호출은 커밋 결과로 기록한다.** 트랜잭션 동기화가 켜져 있으면 줄을 미뤘다가 `afterCompletion` 에서 **커밋됐고 `succeeded` 일 때만 `SUCCESS`**,
-    롤백 · 결과 모름이면 `FAILURE` 로 남긴다 — Facade 가 메서드 단위 `@Transactional` 이어도 롤백된 쓰기가 `SUCCESS` 로 남지 않는다. 동기화가 꺼져 있으면 바로 쓴다.
+  - **실제 트랜잭션과 동기화가 모두 활성화된 호출만 커밋 결과로 기록한다.** `isActualTransactionActive()` · `isSynchronizationActive()` 가 모두 참이면 줄을 미뤘다가
+    `afterCompletion` 에서 **커밋됐고 `succeeded` 일 때만 `SUCCESS`**, 롤백 · 결과 모름이면 `FAILURE` 로 남긴다 — 롤백된 쓰기가 `SUCCESS` 로 남지 않는다. 그 밖에는 바로 쓴다.
+    `NEVER` · 실제 트랜잭션 없는 `SUPPORTS` 범위에 Spring 기본값(`SYNCHRONIZATION_ALWAYS`)이 만든 빈 동기화는 업무 트랜잭션이 아니다. 이미 확정한 업무 결과를 즉시 남기므로
+    그 뒤 응답 재조회가 실패해도 빈 범위의 종료 결과가 감사 결과를 뒤집지 않는다. 배송처럼 호출자가 응답 실패를 `succeeded=false` 로 판정하는 계약은 그대로 `FAILURE` 다.
     실제 Facade 트랜잭션(H2)의 커밋 · 롤백 · 커밋 시점 실패(`UnexpectedRollbackException`) 경로는 product `CategoryAdminAuditIntegrationTest` 가 본다(#163 PR-B).
     예외는 auth 의 DB 싱크다 — `REQUIRES_NEW` 로 따로 저장하므로 지금처럼 트랜잭션 밖에서 부른다.
   - spring-tx 는 `compileOnly` 다. 감사를 남기는 서블릿 서비스는 persistence-core 로 이미 가진다. 리액티브 게이트웨이는 이 클래스를 부르지 않는다(불려도 spring-tx 가 없으면 바로 쓴다).
@@ -1072,7 +1076,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | 서비스 | 행위 | 상태 |
 |--------|------|------|
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 사용 중 — 선언 · `AdminAuditLog` 통일은 #163 PR-E |
-| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` | 사용 중 — 선언 · 통일은 #163 PR-E |
+| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor` 직접 `AdminAuditLog` 호출로 통일(#163 PR-E 일부) |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음 · 온보딩 투어 면제 선언은 후속 |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
@@ -1080,7 +1084,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | product | `DISPLAY_SECTION_*` · `LOOK_*` (전시 미리보기는 면제) | #163 PR-C |
 | product | `STOCK_ADJUST` · `SKU_COST_CREATE` · `PRODUCT_DRAFT_*` | #163 PR-C′ (이력 표 + 줄) |
 | delivery | `SHIPPING_POLICY_*_REPLACE` (국내 · 해외) | #163 PR-D (국내는 이력 표 + 줄, 해외는 행위자 수신) |
-| delivery | `SHIPMENT_REGISTER` (대상 `order:<id>`, 일괄은 주문마다 · 이미 등록도 `SUCCESS` · 재시도한 관리자도 한 줄. Facade 가 `NEVER` 라도 빈 트랜잭션 동기화로 요청이 끝날 때 한꺼번에 남는다 — 줄마다 바로 쓰는 공통 개선은 #163 후속) | 사용 중 — #18 PR-B1 (`domainlayer/adminaudit` 의 `DeliveryAdminAuditAction` · `DeliveryAdminAuditProcessor` 를 처음 둔다. 배송 상태 이력 표 + 줄) |
+| delivery | `SHIPMENT_REGISTER` (대상 `order:<id>`, 일괄은 주문마다 · 이미 등록도 `SUCCESS` · 재시도한 관리자도 한 줄. Facade 의 `NEVER` 범위에서는 실제 트랜잭션 없이 각 항목의 확정 결과를 즉시 남긴다) | 사용 중 — #18 PR-B1 (`domainlayer/adminaudit` 의 `DeliveryAdminAuditAction` · `DeliveryAdminAuditProcessor` 를 처음 둔다. 배송 상태 이력 표 + 줄) |
 | delivery | `SHIPMENT_STATUS_CHANGE` (대상 `delivery:<deliveryId>`, 같은 상태라 그대로 둔 것도 `SUCCESS` · 404 · 409 · 5xx 업무 오류는 `FAILURE`. **`FAILURE` 는 "요청이 오류로 끝났다" 이지 "상태가 바뀌지 않았다" 가 아니다** — 결과 모름(`DELIVERY_029` · `030`)은 배송 완료 · 반영 대기로 남고, 응답용 다시 읽기 실패(`031`)는 상태 변경 뒤일 수 있다. 상태 변경 여부의 정본은 배송 상태 이력이다. 바꾼 상태 · 사유도 싣지 않는다). 송장 목록 · 상세 · 고객 배송 조회는 개인정보(받는 분 · 주소 · 회원)를 싣지 않아 열람 감사를 남기지 않는다 | 사용 중 — #18 PR-B2 (배송 상태 이력 표 + 줄) |
 | product | `PRODUCT_CREATE` · `PRODUCT_UPDATE` · `PRODUCT_IMAGE_UPLOAD_ISSUE` | #163 PR-F (#9 머지 뒤) |
 

@@ -16,8 +16,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 관리자 감사 한 줄의 형식과 트랜잭션 결과 반영 ({@code security-guide.md} §11-4). 형식은 로그 수집기의 파서 계약이라 auth-service 의
@@ -38,6 +48,10 @@ class AdminAuditLogTest {
     void detachAppenders() {
         ((Logger) LoggerFactory.getLogger(AdminAuditLog.LOGGER_NAME)).detachAppender(audit);
         ((Logger) LoggerFactory.getLogger(AdminAuditLog.class.getName())).detachAppender(warnings);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        TransactionSynchronizationManager.clear();
     }
 
     @Test
@@ -136,19 +150,172 @@ class AdminAuditLogTest {
         assertThat(warnings.list).isEmpty();
     }
 
-    /** 트랜잭션 동기화가 켜져 있으면 줄을 미뤘다가 트랜잭션 결과로 남긴다. 트랜잭션 매니저 대신 동기화를 직접 켜고 완료 콜백을 부른다. */
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("실제 트랜잭션 없는 빈 동기화에서는 업무 결과를 즉시 기록하고 완료 콜백을 등록하지 않는다")
+    void emptySynchronizationWritesImmediately(boolean succeeded) {
+        TransactionSynchronizationManager.initSynchronization();
+        assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+
+        AdminAuditLog.write("ORDER_STATUS_CHANGE", 9L, "order:12", succeeded);
+
+        assertThat(lines()).containsExactly("action=ORDER_STATUS_CHANGE actorMemberId=9 target=order:12 result=" + (succeeded ? "SUCCESS" : "FAILURE"));
+        assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("실제 Spring NEVER 프록시의 응답 실패는 이미 확정된 업무 SUCCESS 를 FAILURE 로 바꾸지 않는다")
+    void neverProxyDoesNotReverseSuccessfulAudit() {
+        AuditedWork work = proxiedWork(new AuditTransactionManager());
+
+        assertThatThrownBy(work::never).isInstanceOf(IllegalStateException.class).hasMessage("response unavailable");
+
+        assertThat(lines()).containsExactly("action=ORDER_STATUS_CHANGE actorMemberId=9 target=order:12 result=SUCCESS");
+        assertThat(TransactionSynchronizationManager.isSynchronizationActive()).isFalse();
+    }
+
+    @Test
+    @DisplayName("실제 Spring SUPPORTS 프록시도 실제 트랜잭션이 없으면 후속 예외와 무관하게 SUCCESS 를 보존한다")
+    void supportsProxyDoesNotReverseSuccessfulAudit() {
+        AuditedWork work = proxiedWork(new AuditTransactionManager());
+
+        assertThatThrownBy(work::supports).isInstanceOf(IllegalStateException.class).hasMessage("response unavailable");
+
+        assertThat(lines()).containsExactly("action=ORDER_STATUS_CHANGE actorMemberId=9 target=order:12 result=SUCCESS");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("실제 Spring REQUIRED 트랜잭션은 완료까지 미루고 커밋 SUCCESS · 롤백 FAILURE 를 남긴다")
+    void realTransactionUsesCompletionResult(boolean rollback) {
+        AuditedWork work = proxiedWork(new AuditTransactionManager());
+        if (rollback) {
+            assertThatThrownBy(() -> work.required(true)).isInstanceOf(IllegalStateException.class).hasMessage("response unavailable");
+        } else {
+            work.required(false);
+        }
+
+        assertThat(lines()).containsExactly("action=ORDER_STATUS_CHANGE actorMemberId=9 target=order:12 result=" + (rollback ? "FAILURE" : "SUCCESS"));
+    }
+
+    @Test
+    @DisplayName("실제 트랜잭션 매니저의 커밋 결과 불명은 FAILURE 를 남긴다")
+    void realTransactionWithUnknownCommitIsFailure() {
+        AuditTransactionManager manager = new AuditTransactionManager();
+        manager.failCommit = true;
+        AuditedWork work = proxiedWork(manager);
+
+        assertThatThrownBy(() -> work.required(false)).isInstanceOf(TransactionSystemException.class);
+
+        assertThat(lines()).containsExactly("action=ORDER_STATUS_CHANGE actorMemberId=9 target=order:12 result=FAILURE");
+    }
+
+    @Test
+    @DisplayName("afterCompletion 중 다시 쓰는 감사는 동기화가 끝났으므로 즉시 한 번 기록한다")
+    void writesFromAfterCompletionWithoutRegisteringAgain() {
+        new TransactionTemplate(new AuditTransactionManager()).executeWithoutResult(status -> {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int completionStatus) {
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+                    assertThat(TransactionSynchronizationManager.isSynchronizationActive()).isFalse();
+                    AdminAuditLog.write("JOB_CANCEL", 9L, "job:13", true);
+                }
+            });
+            AdminAuditLog.write("ORDER_STATUS_CHANGE", 9L, "order:12", true);
+            assertThat(audit.list).isEmpty();
+        });
+
+        assertThat(lines()).containsExactly(
+            "action=JOB_CANCEL actorMemberId=9 target=job:13 result=SUCCESS",
+            "action=ORDER_STATUS_CHANGE actorMemberId=9 target=order:12 result=SUCCESS"
+        );
+    }
+
+    private AuditedWork proxiedWork(AuditTransactionManager manager) {
+        ProxyFactory factory = new ProxyFactory(new AuditedWork(() -> assertThat(audit.list).isEmpty()));
+        factory.addAdvice(new TransactionInterceptor(manager, new AnnotationTransactionAttributeSource()));
+        return (AuditedWork) factory.getProxy();
+    }
+
+    /** 외부 리소스 없이 Spring 의 전파 · 동기화 · 완료 처리를 돌린다. 실제 DB 커밋 보존은 order 의 H2 테스트가 본다. */
+    static class AuditTransactionManager extends AbstractPlatformTransactionManager {
+
+        private boolean failCommit;
+
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {
+        }
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+            if (failCommit) {
+                throw new TransactionSystemException("commit result unknown");
+            }
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {
+        }
+    }
+
+    static class AuditedWork {
+
+        private final Runnable assertDeferred;
+
+        AuditedWork(Runnable assertDeferred) {
+            this.assertDeferred = assertDeferred;
+        }
+
+        @Transactional(propagation = Propagation.NEVER)
+        public void never() {
+            nonTransactionalSuccessThenThrow();
+        }
+
+        @Transactional(propagation = Propagation.SUPPORTS)
+        public void supports() {
+            nonTransactionalSuccessThenThrow();
+        }
+
+        private void nonTransactionalSuccessThenThrow() {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(TransactionSynchronizationManager.isSynchronizationActive()).isTrue();
+            AdminAuditLog.write("ORDER_STATUS_CHANGE", 9L, "order:12", true);
+            throw new IllegalStateException("response unavailable");
+        }
+
+        @Transactional
+        public void required(boolean rollback) {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            assertThat(TransactionSynchronizationManager.isSynchronizationActive()).isTrue();
+            AdminAuditLog.write("ORDER_STATUS_CHANGE", 9L, "order:12", true);
+            assertDeferred.run();
+            if (rollback) {
+                throw new IllegalStateException("response unavailable");
+            }
+        }
+    }
+
+    /** 실제 트랜잭션을 모델링한다 — 동기화와 actualTransactionActive 를 함께 켜고 완료 콜백을 부른다. */
     @Nested
     @DisplayName("트랜잭션 동기화")
     class Synchronized {
 
         @BeforeEach
         void init() {
+            TransactionSynchronizationManager.setActualTransactionActive(true);
             TransactionSynchronizationManager.initSynchronization();
         }
 
         @AfterEach
         void clear() {
             TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
         }
 
         @Test

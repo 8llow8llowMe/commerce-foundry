@@ -12,6 +12,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderValidati
 import com.commercefoundry.domainlayer.order.application.port.in.OrderAdminUseCase;
 import com.commercefoundry.domainlayer.order.application.model.OrderStatusFilter;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -92,6 +93,7 @@ public class OrderAdminController {
             + "읽은 뒤 다른 곳(고객 취소 · 결제 · 다른 운영자)이 먼저 바꿈 409(ORDER_025 — 새로고침 후 다시), 없는 주문 404(ORDER_001)."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "ORDER_STATUS_CHANGE")
     @PatchMapping("/{orderId}/status")
     public ResponseEntity<Response<OrderAdminResponse>> changeStatus(
         @AuthenticationPrincipal MemberPrincipal admin,
@@ -108,6 +110,7 @@ public class OrderAdminController {
             + "주문 아이디가 비었거나 100개를 넘거나 겹치면 400(ORDER_149 · ORDER_150)."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "ORDER_STATUS_CHANGE")
     @PostMapping("/status-changes")
     public ResponseEntity<Response<OrderStatusBulkChangeResponse>> changeStatuses(
         @AuthenticationPrincipal MemberPrincipal admin,

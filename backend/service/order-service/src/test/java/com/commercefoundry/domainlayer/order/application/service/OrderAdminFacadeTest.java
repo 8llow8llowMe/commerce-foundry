@@ -5,13 +5,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.OrderStatusChangeResultItem;
+import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.OrderAdminResponse;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.OrderStatusBulkChangeResponse;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.presenter.OrderAdminPresenter;
+import com.commercefoundry.domainlayer.order.application.command.OrderAdminSearchCommand;
 import com.commercefoundry.domainlayer.order.application.command.OrderStatusChangeCommand;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.model.OrderAdminDetail;
-import com.commercefoundry.domainlayer.order.application.port.out.OrderAdminAuditPort;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderAdminAuditProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderAdminProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
@@ -20,7 +21,10 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.data.domain.Page;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 /** 어드민 주문 Facade (#17) — 버전 충돌의 오류 코드 · 일괄 변경의 건별 결과 · 건마다 남는 감사. */
@@ -29,14 +33,47 @@ class OrderAdminFacadeTest {
     private static final OrderStatusChangeCommand PREPARING = new OrderStatusChangeCommand(OrderStatus.PREPARING, null);
 
     private final OrderAdminProcessor processor = mock(OrderAdminProcessor.class);
-    private final OrderAdminAuditPort auditPort = mock(OrderAdminAuditPort.class);
-    private final OrderAdminFacade facade = new OrderAdminFacade(processor, new OrderAdminAuditProcessor(auditPort), new OrderAdminPresenter());
+    private final OrderAdminAuditProcessor auditProcessor = mock(OrderAdminAuditProcessor.class);
+    private final OrderAdminFacade facade = new OrderAdminFacade(processor, auditProcessor, new OrderAdminPresenter());
 
     /** 버전 충돌 뒤 다시 읽은 주문 — 상태만 본다. */
-    private void nowIn(long orderId, OrderStatus status) {
+    private OrderAdminDetail nowIn(long orderId, OrderStatus status) {
         Order order = mock(Order.class);
         when(order.status()).thenReturn(status);
-        when(processor.getDetail(orderId)).thenReturn(new OrderAdminDetail(order, List.of(), Set.of()));
+        OrderAdminDetail detail = new OrderAdminDetail(order, List.of(), Set.of());
+        when(processor.getDetail(orderId)).thenReturn(detail);
+        return detail;
+    }
+
+    @Test
+    @DisplayName("목록 열람이 끝난 뒤 조건을 그대로 넘겨 한 번 감사한다")
+    void searchIsAuditedAfterReading() {
+        OrderAdminSearchCommand command = new OrderAdminSearchCommand(null, null, null, 0, 20);
+        when(processor.search(command)).thenReturn(Page.empty());
+
+        assertThat(facade.getOrders(command, 7L).contents()).isEmpty();
+
+        var ordered = inOrder(processor, auditProcessor);
+        ordered.verify(processor).search(command);
+        ordered.verify(auditProcessor).searched(7L, command);
+        verifyNoMoreInteractions(auditProcessor);
+    }
+
+    @Test
+    @DisplayName("상세 응답을 만든 뒤에 열람을 한 번 감사한다")
+    void detailIsAuditedAfterPresenting() {
+        OrderAdminDetail detail = nowIn(1L, OrderStatus.PAID);
+        OrderAdminPresenter presenter = mock(OrderAdminPresenter.class);
+        OrderAdminResponse response = OrderAdminResponse.builder().orderId("1").build();
+        when(presenter.toResponse(detail)).thenReturn(response);
+
+        assertThat(new OrderAdminFacade(processor, auditProcessor, presenter).getOrder(1L, 7L)).isSameAs(response);
+
+        var ordered = inOrder(processor, presenter, auditProcessor);
+        ordered.verify(processor).getDetail(1L);
+        ordered.verify(presenter).toResponse(detail);
+        ordered.verify(auditProcessor).viewed(7L, 1L);
+        verifyNoMoreInteractions(auditProcessor);
     }
 
     @Test
@@ -47,8 +84,56 @@ class OrderAdminFacadeTest {
 
         assertThatThrownBy(() -> facade.changeStatus(1L, PREPARING, 7L)).isInstanceOfSatisfying(OrderException.class,
             exception -> assertThat(exception.getErrorCode()).isEqualTo(OrderErrorCode.ORDER_CONCURRENTLY_CHANGED));
-        verify(auditPort).orderStatusChangeFailed(7L, 1L);
-        verify(auditPort, never()).orderStatusChangeSucceeded(anyLong(), anyLong());
+        verify(auditProcessor).statusChanged(7L, 1L, false);
+        verifyNoMoreInteractions(auditProcessor);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("단건 변경 · 그대로 두기가 확정된 뒤 응답 재조회가 실패해도 감사는 SUCCESS 한 번이다")
+    void responseReadFailureKeepsSuccessfulAudit(boolean changed) {
+        when(processor.changeStatus(1L, PREPARING, 7L)).thenReturn(changed);
+        RuntimeException failure = new CannotAcquireLockException("SECRET response row");
+        when(processor.getDetail(1L)).thenThrow(failure);
+
+        assertThatThrownBy(() -> facade.changeStatus(1L, PREPARING, 7L)).isSameAs(failure);
+
+        var ordered = inOrder(processor, auditProcessor);
+        ordered.verify(processor).changeStatus(1L, PREPARING, 7L);
+        ordered.verify(auditProcessor).statusChanged(7L, 1L, true);
+        ordered.verify(processor).getDetail(1L);
+        verifyNoMoreInteractions(auditProcessor);
+    }
+
+    @Test
+    @DisplayName("단건 변경 자체가 실패하면 원래 예외를 던지고 FAILURE 한 번만 남긴다")
+    void changeFailureIsAuditedOnce() {
+        RuntimeException failure = new CannotAcquireLockException("SECRET change row");
+        when(processor.changeStatus(1L, PREPARING, 7L)).thenThrow(failure);
+
+        assertThatThrownBy(() -> facade.changeStatus(1L, PREPARING, 7L)).isSameAs(failure);
+
+        verify(auditProcessor).statusChanged(7L, 1L, false);
+        verifyNoMoreInteractions(auditProcessor);
+        verify(processor, never()).getDetail(anyLong());
+    }
+
+    @Test
+    @DisplayName("같은 목표 상태로 먼저 바뀐 낙관적 충돌은 그대로 두기 성공이며 재조회 실패로 감사를 뒤집지 않는다")
+    void concurrentSameTargetKeepsSuccessfulAudit() {
+        when(processor.changeStatus(1L, PREPARING, 7L)).thenThrow(new ObjectOptimisticLockingFailureException("orders", 1L));
+        OrderAdminDetail current = nowIn(1L, OrderStatus.PREPARING);
+        RuntimeException failure = new CannotAcquireLockException("SECRET response row");
+        when(processor.getDetail(1L)).thenReturn(current).thenThrow(failure);
+
+        assertThatThrownBy(() -> facade.changeStatus(1L, PREPARING, 7L)).isSameAs(failure);
+
+        var ordered = inOrder(processor, auditProcessor);
+        ordered.verify(processor).changeStatus(1L, PREPARING, 7L);
+        ordered.verify(processor).getDetail(1L);
+        ordered.verify(auditProcessor).statusChanged(7L, 1L, true);
+        ordered.verify(processor).getDetail(1L);
+        verifyNoMoreInteractions(auditProcessor);
     }
 
     @Test
@@ -75,10 +160,11 @@ class OrderAdminFacadeTest {
         assertThat(response.failedCount()).isEqualTo(3);
         // 감사는 건마다 — 그대로 둔 것도 성공으로 남는다
         for (long orderId : List.of(1L, 2L, 6L)) {
-            verify(auditPort).orderStatusChangeSucceeded(7L, orderId);
+            verify(auditProcessor).statusChanged(7L, orderId, true);
         }
         for (long orderId : List.of(3L, 4L, 5L)) {
-            verify(auditPort).orderStatusChangeFailed(7L, orderId);
+            verify(auditProcessor).statusChanged(7L, orderId, false);
         }
+        verifyNoMoreInteractions(auditProcessor);
     }
 }
