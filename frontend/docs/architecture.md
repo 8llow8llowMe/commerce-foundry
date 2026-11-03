@@ -604,7 +604,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 ### 상품 목록 (`/products`, #208)
 
-- 어드민 상품 목록 `GET /api/v1/admin/products`(#9) — 숨김 · 판매 종료까지 전체, 페이지 20개. 위의 "상품 등록" 버튼이 등록 화면(아래)이다. 기본 정보 수정은 상세에서 들어간다(아래).
+- 어드민 상품 목록 `GET /api/v1/admin/products`(#9) — 숨김 · 판매 종료까지 전체, 페이지 20개. 위의 "상품 등록" 버튼이 등록 화면(아래)이다. 기본 정보 · 섹션 수정은 상세에서 들어간다(아래).
 - 상품명은 상세(`/products/[productId]`, 아래) 링크다. 숨긴 상품도 열린다.
 - **조건은 주소(query string)가 정본이다** — 새로고침 · 뒤로 가기 · 링크 공유에도 같은 목록이다. 페이지(`page.tsx`)가 `searchParams` 를 `parseProductQuery` 로 읽어 넘긴다.
   허용 값만 받고 나머지는 "전체" 로 본다(손으로 고친 주소가 400 이 되지 않게 — 카테고리는 Long 범위 양의 정수만). 검색어는 앞뒤 공백을 빼고 100자에서 자른다. 기본값은 주소에서 뺀다(`productsHref`).
@@ -617,7 +617,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 ### 상품 상세 (`/products/[productId]`, #418)
 
-- 어드민 상품 상세 `GET /api/v1/admin/products/{productId}`(BE #394, `backend/docs/api-design-guide.md` 어드민 상품 상세) — 쓰기는 "기본 정보 수정" 화면(`/edit`, 아래)과 맨 아래 "판매 중지 · 삭제"(아래)다.
+- 어드민 상품 상세 `GET /api/v1/admin/products/{productId}`(BE #394, `backend/docs/api-design-guide.md` 어드민 상품 상세) — 쓰기는 "기본 정보 수정"(`/edit`) · 섹션 수정(`/edit/{section}`, 아래) 화면과 맨 아래 "판매 중지 · 삭제"(아래)다.
 - **서버 컴포넌트에서 `serverFetch` 로 읽는다** — 상세 설명 HTML 을 서버에서 `sanitizeProductHtml`(`@cf/sanitize`, 스토어프론트 상세와 같은 허용 목록)로 거른 뒤 넣어야 해서다(`conventions.md` §2).
   어드민의 다른 화면은 클라이언트 `apiFetch` 지만 여기는 읽기만이라 재발급이 없는 어드민 세션에서도 차이가 없다. 실패하면 "다시 불러오기"(`router.refresh()`)다.
 - 상태는 `loadProductDetail` 이 가른다 — 404 `PRODUCT_001` · 경로 검증 400(`PRODUCT_105` · `PRODUCT_198`) · 형식이 틀린 아이디(부르지 않는다, Long 범위 양의 정수만)는 `notFound()` 로
@@ -643,7 +643,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 ### 상품 기본 정보 수정 (`/products/[productId]/edit`, #29 · BE #9 후속)
 
 - `PUT /api/v1/admin/products/{productId}/header`(`backend/docs/api-design-guide.md` "어드민 상품 기본 정보 수정 API") — 상품명 · 요약 · 상세 설명 HTML · 판매 상태 · 노출만 **전체 교체**한다.
-  카테고리 · 가격 · 프리오더 · 옵션 · SKU · 이미지 수정은 BE 후속이라 화면에 자리를 두지 않고 "준비 중" 으로만 알린다. 상세 위 링크 "기본 정보 수정" 으로 들어온다.
+  카테고리 · 가격 · 옵션 · SKU · 이미지 · 맞춤 제작은 섹션 수정(아래)이다. 상세 위 링크 "기본 정보 수정" 으로 들어온다.
 - 코드는 `lib/product/update.ts`(폼 · 본문 · `updateFailure`) · `components/product/ProductHeaderEditForm`(클라이언트 `apiFetch`)이고, 페이지는 상세처럼 서버에서 `loadProductDetail` 로 읽어 넘긴다.
   칸 규칙 · 문구 · 상세 설명 칸(`DescriptionHtmlField`)은 등록과 같다. 빈 요약 · 상세 설명은 `null` 로 보내 지운다. 바뀐 것이 없으면 저장 버튼을 막는다.
 - **낙관적 락** — 상세의 `version` 을 되돌려 보낸다. 409 `PRODUCT_010`(읽은 뒤 다른 수정 · 삭제가 먼저 반영) · 결과 모름(502 · 504 · 5xx · 연결 실패)은 폼을 지키고
@@ -651,6 +651,32 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   결과 모름 뒤 같은 버전으로 다시 보내도 저장됐다면 409 라 덮어쓰지 않는다. 상세의 `version` 이 null(이관 · 시드)이면 서버가 받지 않으므로 저장 전에 안내한다.
 - 성공하면 상세로 `replace` 한다(옮길 때까지 막아 둔다). `descriptionHtmlSanitized: true` 면 등록과 같이 `?sanitized=1` 로 상세가 한 번 알린다.
   404 `PRODUCT_001` 은 삭제와 같이 `/products?deleted=gone`, 401 은 폼을 지킨다(§9 공통), 403 은 `AccessNotice`.
+
+### 상품 섹션 수정 (`/products/[productId]/edit/{section}`, #29 · BE #9 후속)
+
+- 섹션마다 화면 하나다 — `pricing`(`PUT .../pricing`, #553) · `categories`(`PUT .../categories`, #535) · `images`(`PUT .../images`, #560) ·
+  `options`(옵션 · SKU, 아래) · `custom-order`(`PUT .../custom-order`, #580). 상세 위 "○○ 수정" 링크(`productSectionHref`)로 들어온다.
+  1회 최대 수량 · 프리오더를 고치는 API 는 아직 없어 화면도 없다(상세가 "준비 중" 으로 알린다).
+- 페이지는 `ProductEditGate`(서버 컴포넌트)로 상세를 읽어 폼에 넘긴다(없음 → not-found, 403 → `AccessNotice`, 실패 → 다시 불러오기). 카테고리는 트리도 서버에서 함께 읽는다.
+- **공통 저장** — `lib/product/use-section-save.ts`(`useSectionSave`) · `section.ts`(`sectionFailure`) · `components/product/SectionEditFrame`(`SectionForm`).
+  상세의 `version` 을 되돌려 보내는 상품 버전 CAS 라 기본 정보 수정과 같은 규칙이다 — 409(`PRODUCT_010` · `SKU_ADMIN_002` · 잠금 `SKU_ADMIN_005`) · 결과 모름은 폼을 지키고
+  "최신 내용 불러오기", 없는 상품(`PRODUCT_001` · `SKU_ADMIN_001`)은 `/products?deleted=gone`, 401 은 폼을 지키고, 403 은 `AccessNotice`, 업무 규칙 400 은 서버 문구다.
+  응답은 모두 편집용 상세다. 멱등 키가 없다 — 자동으로 다시 보내지 않는다. 입력 칸의 Enter 로 저장하지 않는다. 바뀐 것이 없으면 저장을 막는다.
+- **가격** — 판매가 · 정가만, 통화는 상품 통화 그대로(바꾸는 API 없음). 정가를 비우면 `null` 로 지운다. 입력 칸은 `moneyToDecimalString` 으로 채우고 `parseMoneyInput` 으로 읽는다(계산 없음).
+- **카테고리** — 등록과 같은 `CategoryFields`. 트리에 없는 연결(그사이 삭제)은 폼에서 빼고 개수를 알린다(그대로 보내면 `PRODUCT_012`).
+- **이미지** — 대표 한 칸 + 추가 이미지(위 · 아래로 순서, 합쳐 8장). 남길 기존 이미지는 `imageId`, 새로 올린 것은 `uploadKey` 만 싣는다(`imagesRequest`).
+  기존 이미지를 빼면 같은 칸이 업로드 칸이 된다. 영상은 보내지 않아도 남는다(안내). 올리는 중에는 저장을 막는다.
+- **맞춤 제작** — 사용 여부 · 안내(줄바꿈 허용) · 소요일 · 입력 항목(키 · 이름 · 숫자/글자 · 단위 · 최소 · 최대 · 증분 · 도움말 · 필수, 위 · 아래로 순서).
+  **저장한 항목의 키는 읽기 전용이다** — 주문이 키로 입력값을 남긴다. 바꾸려면 지우고 새로 더한다. 글자 입력은 최대 글자 수(1~500)만 보낸다.
+- **옵션 · SKU**(`ProductOptionsEditor` · `ProductSkuPanels`) — 한 화면에 따로 저장하는 폼 넷이다. 저장마다 버전이 바뀌므로 **한 번에 한 폼만** 고친다(고치는 중인 폼 밖은 잠근다,
+  `option-panel.ts`). 저장 · 다시 읽기 뒤 모든 폼이 새 상세로 다시 그려지고 화면에 남는다.
+  - 옵션 이름 · 순서(`PUT .../options`, #576) — 은퇴 행까지 기존 그룹 · 값 전체, 더하거나 빼지 않는다.
+  - SKU(`PUT .../skus`, #573) — 기존 SKU 전체의 추가금 · 판매 상태 · 무게 · HS 코드. 판매 종료는 판매 상태로 한다. 비운 무게 · HS 코드는 지운다.
+    은퇴 옵션 SKU 는 판매중을 고를 수 없다(`SKU_ADMIN_006`). 판매중 중 추가금 0 하나는 비교로만 미리 본다(`SKU_ADMIN_004`).
+  - 옵션 값 · 조합 추가(`POST .../skus`, #583) — 기존 옵션에 값을 더하고, 아직 없는 조합(판매 종료 포함 기존 조합 제외, `skuCandidates`) 중 고른 것을 처음 재고와 함께 만든다.
+    새 옵션(그룹)은 받지 않고, 옵션이 없거나 은퇴 옵션이 있는 상품은 막는다. 쓰지 않는 새 값은 보내지 않는다.
+  - 옵션 은퇴(`POST .../option-retirements`, #585) — 되돌릴 수 없어 확인 체크 뒤에만 누른다. 함께 판매 종료될 판매중 SKU 수와, 남는 판매중 SKU 에 추가금 0 이 없어 막힐지(`SKU_ADMIN_004`)를 미리 알린다.
+- 투어는 기본 정보 수정(`product-edit-v1`)만 있다. 섹션 화면은 도움말(`상품 구역 수정`)만 있다.
 
 ### 상품 등록 (`/products/new`, #29 · BE #9 E1 · F2)
 
