@@ -165,6 +165,9 @@ operations:
       schedules: []
   # 어드민 알림 센터 (#213). 값이 빠지거나 0 · 음수면 기동하지 않는다 (NotificationProperties)
   notifications:
+    dlt-alert:
+      enabled: ${DLT_ALERT_ENABLED:false}
+      suppression: 1h
     # SSE 연결을 붙잡는 시간. 끊기면 클라이언트는 목록 조회로 따라잡고 다시 연다
     stream-timeout: 5m
     # 알림이 없어도 이 간격으로 주석을 보낸다. 게이트웨이 response-timeout(10s) 동안 바이트가 없으면 연결이 끊긴다

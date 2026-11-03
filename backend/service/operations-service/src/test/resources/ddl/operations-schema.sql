@@ -186,6 +186,69 @@
     comment on column operations.ai_usage_month.warned_at is
         '경고 임계(한도 × warn-ratio)를 처음 넘은 시각. 기간당 한 번. 아직이면 null';
 
+    create table operations.dlt_alert_state (
+        topic varchar(249) not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        last_notified_at timestamp(6) with time zone,
+        version bigint not null,
+        primary key (topic)
+    );
+
+    comment on table operations.dlt_alert_state is
+        'DLT alert metadata';
+
+    comment on column operations.dlt_alert_state.topic is
+        'Qualified allowlisted DLT topic';
+
+    comment on column operations.dlt_alert_state.created_at is
+        '생성 시각';
+
+    comment on column operations.dlt_alert_state.updated_at is
+        '수정 시각';
+
+    comment on column operations.dlt_alert_state.last_notified_at is
+        'Last actual notification timestamp';
+
+    comment on column operations.dlt_alert_state.version is
+        'Optimistic lock version';
+
+    create table operations.dlt_partition_checkpoint (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        partition_number integer not null,
+        topic varchar(249) not null,
+        version bigint not null,
+        watermark bigint not null,
+        primary key (id),
+        constraint uk_dlt_partition_checkpoint_topic_partition_number unique (topic, partition_number)
+    );
+
+    comment on table operations.dlt_partition_checkpoint is
+        'DLT alert metadata';
+
+    comment on column operations.dlt_partition_checkpoint.id is
+        'Checkpoint identifier (Snowflake)';
+
+    comment on column operations.dlt_partition_checkpoint.created_at is
+        '생성 시각';
+
+    comment on column operations.dlt_partition_checkpoint.updated_at is
+        '수정 시각';
+
+    comment on column operations.dlt_partition_checkpoint.partition_number is
+        'Kafka partition number';
+
+    comment on column operations.dlt_partition_checkpoint.topic is
+        'Qualified allowlisted DLT topic';
+
+    comment on column operations.dlt_partition_checkpoint.version is
+        'Optimistic lock version';
+
+    comment on column operations.dlt_partition_checkpoint.watermark is
+        'Highest processed Kafka offset';
+
     create table operations.job (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -570,19 +633,19 @@
     comment on column operations.shedlock.locked_by is
         '락을 잡은 인스턴스 (호스트 이름)';
 
-    create index idx_ai_usage_call_called_at_id 
+    create index idx_ai_usage_call_called_at_id
        on operations.ai_usage_call (called_at, id);
 
-    create index idx_ai_usage_call_status_called_at 
+    create index idx_ai_usage_call_status_called_at
        on operations.ai_usage_call (status, called_at);
 
-    create index idx_job_status_lease_expires_at 
+    create index idx_job_status_lease_expires_at
        on operations.job (status, lease_expires_at);
 
-    create index idx_job_type_dedup_key 
+    create index idx_job_type_dedup_key
        on operations.job (type, dedup_key);
 
-    create index idx_job_type_id 
+    create index idx_job_type_id
        on operations.job (type, id);
 
     create index idx_job_result_file_next_delete_at_id
@@ -591,14 +654,14 @@
     create index idx_job_result_file_job_id_attempt
        on operations.job_result_file (job_id, attempt);
 
-    create index idx_notification_recipient_member_id_id 
+    create index idx_notification_recipient_member_id_id
        on operations.notification (recipient_member_id, id);
 
-    create index idx_notification_recipient_member_id_read_at 
+    create index idx_notification_recipient_member_id_read_at
        on operations.notification (recipient_member_id, read_at);
 
-    create index idx_notification_created_at 
+    create index idx_notification_created_at
        on operations.notification (created_at);
 
-    create index idx_outbox_published_at_available_at 
+    create index idx_outbox_published_at_available_at
        on operations.outbox (published_at, available_at);

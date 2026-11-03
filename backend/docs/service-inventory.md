@@ -235,3 +235,7 @@ CUSTOMER JWT와 기존 비밀번호 재인증으로 기존 member_id에만 연�
 `auth:oauth-link-state:{SHA-256 지문}`과 LINK/member/provider/verifier 바인딩을 소유한다. 로그인 state 형식은 유지한다.
 회원별 잠금·5초 DB 상한과 identity의 두 유니크 키로 제공자별 단일 연결과 경합을 보장한다.
 운영 제약 추가 SQL·중복 사전 점검과 FE 계약은 `api-design-guide.md`의 #355 절을 따른다.
+
+### DLT 이상 징후 알림 (#477 A2)
+
+operations-service는 기본 비활성 기능으로 기존 네 DLT를 구독하고 auth A1 internal 수신자 API의 활성 관리자에게 ANOMALY 알림을 저장한다. 결제 승인 DLT는 CRITICAL, 나머지는 WARNING이다. 토픽별 억제·파티션별 워터마크로 상태를 제한하며 업무 상태는 변경하지 않는다. 신규 operations 테이블은 `dlt_alert_state`·`dlt_partition_checkpoint`다. 배포·ACL·실패/복구·FE 계약은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
