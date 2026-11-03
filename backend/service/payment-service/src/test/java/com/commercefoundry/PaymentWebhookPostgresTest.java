@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.PaymentWebhookInboxAdapter;
+import com.commercefoundry.domainlayer.payment.adapter.out.persistence.repository.custom.PaymentWebhookInboxCustomRepositoryImpl;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentWebhookConflictException;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentWebhookInboxPort;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentWebhookInbox;
@@ -46,7 +47,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.jpa.properties.hibernate.default_schema=payment"})
-@Import({QuerydslConfigurer.class, PaymentServiceFeaturesConfig.class, PaymentWebhookInboxAdapter.class})
+@Import({QuerydslConfigurer.class, PaymentServiceFeaturesConfig.class, PaymentWebhookInboxAdapter.class,
+    PaymentWebhookInboxCustomRepositoryImpl.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class PaymentWebhookPostgresTest {
     @Container @ServiceConnection

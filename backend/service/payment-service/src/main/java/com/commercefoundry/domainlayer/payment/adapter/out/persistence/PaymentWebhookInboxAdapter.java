@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.payment.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.entity.PaymentWebhookInboxEntity;
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.repository.PaymentWebhookInboxRepository;
+import com.commercefoundry.domainlayer.payment.adapter.out.persistence.repository.custom.PaymentWebhookInboxCustomRepository;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentWebhookConflictException;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentWebhookInboxPort;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentWebhookInbox;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class PaymentWebhookInboxAdapter implements PaymentWebhookInboxPort {
     private final PaymentWebhookInboxRepository repository;
+    private final PaymentWebhookInboxCustomRepository updates;
 
     @Override public PaymentWebhookInbox insert(PaymentWebhookInbox row) {
         try { return repository.saveAndFlush(PaymentWebhookInboxEntity.from(row)).toDomain(); }
@@ -35,7 +37,7 @@ public class PaymentWebhookInboxAdapter implements PaymentWebhookInboxPort {
             .map(PaymentWebhookInboxEntity::toDomain).toList();
     }
     @Override public PaymentWebhookInbox claim(PaymentWebhookInbox expected, PaymentWebhookInbox claimed, Instant now) {
-        return repository.claim(expected, claimed, now);
+        return updates.claim(expected, claimed, now);
     }
-    @Override public void finish(PaymentWebhookInbox claimed, PaymentWebhookInbox result, Instant now) { repository.finish(claimed, result, now); }
+    @Override public void finish(PaymentWebhookInbox claimed, PaymentWebhookInbox result, Instant now) { updates.finish(claimed, result, now); }
 }
