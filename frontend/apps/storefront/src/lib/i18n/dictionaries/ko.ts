@@ -1,6 +1,6 @@
 // 앱 UI 문구(국문). 브랜드 문구(메뉴 · 메인 · 푸터 링크)는 브랜드 설정 content 에 있다.
 // 키를 더하면 en.ts 도 채워야 타입 검사를 통과한다.
-import type { CancelReason } from '@/lib/orders/history';
+import type { CancelReason, ReturnReason } from '@/lib/orders/history';
 
 export const ko = {
   languageName: '한국어',
@@ -586,6 +586,37 @@ export const ko = {
       ORDER_001: '주문을 찾을 수 없습니다.',
       ORDER_020: '배송 완료된 주문만 구매를 확정할 수 있습니다. 주문 상태를 확인해 주세요.',
       ORDER_025: '주문 상태가 방금 바뀌었습니다. 주문 상태를 확인해 주세요.',
+      GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+    } as Record<string, string>,
+    /** 부분 반품 접수(#28 · BE #16) — 배송 완료 · 반품 요청 주문. 환불 금액 · 비용 부담은 판매자가 확인한 뒤 정한다 */
+    requestReturn: '반품 요청',
+    returnTitle: '반품할 상품을 골라 주세요',
+    returnItems: '반품할 상품',
+    /** {name}: 상품명 — 수량 선택의 접근 가능한 이름 */
+    returnQuantity: '{name} 반품 수량',
+    returnReason: '반품 사유',
+    returnCaution:
+      '반품을 접수하면 판매자가 확인한 뒤 회수 방법과 환불 금액을 안내합니다. 이미 접수한 수량을 넘으면 접수되지 않습니다.',
+    returnConfirm: '반품 접수하기',
+    returning: '반품을 접수하는 중입니다.',
+    returnClose: '닫기',
+    returned: '반품을 접수했습니다. 판매자가 확인한 뒤 안내해 드립니다.',
+    returnFailed: '반품을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    /** 결과를 모른다 — 같은 요청으로 다시 누르면 이미 접수됐어도 한 번만 접수된다 */
+    returnUnknown: '반품 접수 결과를 확인하지 못했습니다. 다시 누르면 같은 요청으로 확인합니다.',
+    returnReasons: {
+      CHANGE_OF_MIND: '단순 변심',
+      DEFECTIVE: '상품 불량',
+      WRONG_ITEM: '오배송',
+    } as Record<ReturnReason, string>,
+    /** 반품 오류 코드별 문구. 없으면 returnFailed */
+    returnErrors: {
+      ORDER_001: '주문을 찾을 수 없습니다.',
+      ORDER_020: '지금 주문 상태에서는 반품을 요청할 수 없습니다. 주문 상태를 확인해 주세요.',
+      ORDER_025: '주문 상태가 방금 바뀌었습니다. 다시 눌러 주세요.',
+      ORDER_029: '반품할 상품을 다시 골라 주세요.',
+      ORDER_030: '이미 반품을 접수한 수량을 포함하면 주문 수량을 넘습니다. 수량을 줄여 주세요.',
+      ORDER_031: '반품 내용이 바뀌었습니다. 다시 눌러 주세요.',
       GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
     } as Record<string, string>,
     /** 영문 스토어의 상태 이름(국문은 서버 이름) */

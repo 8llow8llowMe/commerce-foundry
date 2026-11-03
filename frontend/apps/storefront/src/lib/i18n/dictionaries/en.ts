@@ -527,6 +527,37 @@ export const en: Dictionary = {
       ORDER_025: 'The order status just changed. Please check the order status.',
       GATEWAY_006: 'Too many requests. Please try again in a moment.',
     } as Record<string, string>,
+    requestReturn: 'Request a return',
+    returnTitle: 'Choose items to return',
+    returnItems: 'Items to return',
+    returnQuantity: 'Return quantity for {name}',
+    returnReason: 'Reason for return',
+    returnCaution:
+      'After you submit, the seller will review the request and let you know how to send the items back and how much will be refunded. Quantities already requested for return can’t be requested again.',
+    returnConfirm: 'Submit return request',
+    returning: 'Submitting your return request.',
+    returnClose: 'Close',
+    returned:
+      'Your return request has been submitted. The seller will contact you after reviewing it.',
+    returnFailed: 'We couldn’t submit the return request. Please try again in a moment.',
+    returnUnknown:
+      'We couldn’t confirm the return request. Press the button again to check with the same request.',
+    returnReasons: {
+      CHANGE_OF_MIND: 'Changed my mind',
+      DEFECTIVE: 'Defective item',
+      WRONG_ITEM: 'Received the wrong item',
+    },
+    returnErrors: {
+      ORDER_001: 'We couldn’t find this order.',
+      ORDER_020:
+        'A return can’t be requested in the current order status. Please check the order status.',
+      ORDER_025: 'The order status just changed. Please press the button again.',
+      ORDER_029: 'Please choose the items to return again.',
+      ORDER_030:
+        'Together with earlier return requests, this exceeds the ordered quantity. Please lower the quantity.',
+      ORDER_031: 'The return request changed. Please press the button again.',
+      GATEWAY_006: 'Too many requests. Please try again in a moment.',
+    } as Record<string, string>,
     statuses: {
       PENDING_PAYMENT: 'Awaiting payment',
       EXPIRED: 'Expired',
