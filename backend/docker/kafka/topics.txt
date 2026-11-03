@@ -19,3 +19,8 @@ order.order-canceled 604800000
 
 # 결제 승인 → 주문 결제 완료 반영 (#308) — 컨슈머 그룹 <ns>.order.payment-approved. 발행은 payment-service(DONE 기록과 같은 트랜잭션), 키는 주문 아이디
 payment.payment-approved 604800000
+
+# 주문 반영 결과 회신 (#308) — 컨슈머 그룹 <ns>.payment.order-payment-result(#308 PR-C3). 발행은 order-service(주문 결제 기록과 같은 트랜잭션), 키는 주문 아이디.
+# order 컨슈머 게이트(ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED)를 켜면 order 가 기동 때 이 두 토픽도 확인한다 — 없으면 뜨지 않는다
+order.order-paid 604800000
+order.order-payment-rejected 604800000
