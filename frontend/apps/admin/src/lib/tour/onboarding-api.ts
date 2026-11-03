@@ -47,7 +47,7 @@ export const onboardingApi: OnboardingApi = {
   getMine: () => apiFetch<OnboardingMe>(ONBOARDING_ME_PATH),
   updateTour: (guideKey, body) =>
     apiFetch(`${ONBOARDING_ME_PATH}/tours/${encodeURIComponent(guideKey)}`, {
-      method: 'PUT',
+      method: 'PATCH',
       json: body,
     }),
 };
