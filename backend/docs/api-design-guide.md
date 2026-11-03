@@ -119,7 +119,8 @@ WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 —
 사용자 ADMIN/CUSTOMER access 토큰 · 무토큰 · 잘못된 서비스 토큰은 401 `SECURITY_007`, 다른 서비스 토큰은 403 `SECURITY_005`다.
 `afterId`는 기본 0 · 0 이상의 long, `size`는 기본 100 · 1~100이다. 각각 범위 오류는 400 `AUTH_157` · `AUTH_158`, 타입/범위 변환 실패는 `AUTH_198`이다.
 
-응답 `dataBody`는 `{memberIds:["..."]}`뿐이다. `role=ADMIN AND deactivated_at IS NULL AND id>afterId`인 ID만 숫자 오름차순으로 최대 size개 읽고,
+응답 `dataBody`는 `{memberIds:["..."]}`뿐이다. `role IN ('ADMIN','OWNER') AND deactivated_at IS NULL AND id>afterId`인 ID만 숫자 오름차순으로 최대 size개 읽고,
+(수신자는 대표 관리자 `MemberRole.OWNER_ROLES`뿐이다 — 매니저 · 스태프는 시스템 알림을 받지 않는다, #236)
 Presenter가 Snowflake 문자열로 바꾼다. 계정명 · 이메일 · OTP 상태 · 총 회원 수는 내리지 않는다. 없으면 200 빈 배열이다.
 다음 요청의 afterId는 직전 응답의 마지막 ID다. size 미만이면 종료하고, 정확히 size개면 다음 페이지(마지막 빈 페이지 포함)를 요청한다.
 페이지 사이 활성 변경에 대한 전체 snapshot은 보장하지 않는다. 조회 도중 낮은 ID가 활성화되면 다음 이상 알림의 수신자 조회부터 포함될 수 있다.
@@ -287,17 +288,17 @@ return ResponseEntity.ok().body(Response.success(response));
 | `POST /api/v1/auth/logout` | `isAuthenticated()` | 200 `dataBody: null` — 본문 `{refreshToken?}`(본문 생략 가능). 모르는 · 남의 refresh 여도 access 는 막고 200(멱등) | 401 `SECURITY_001` · 503 `AUTH_013` |
 | `POST /api/v1/auth/admin/login` (#6 · #238) | `permitAll()` | 200 `{accessToken, accessTokenExpiresIn, otpRequired, challengeToken, challengeExpiresIn}` · `Cache-Control: no-store` — 본문 `{email, password}`. OTP 미등록 관리자는 토큰 두 칸 + `otpRequired=false`(챌린지 두 칸 null), **OTP 등록 관리자는 토큰 없이 `otpRequired=true` + 챌린지 두 칸**(토큰 두 칸 null, 아래 "관리자 로그인 2단계"). refresh 없음. 비활성 관리자도 `AUTH_030` | 400 `AUTH_030` · `AUTH_130` · `AUTH_131` · `AUTH_132` · 429 `AUTH_040` + `Retry-After` · 503 `AUTH_013` |
 | `POST /api/v1/auth/admin/login/otp` (#238 PR-B) | `permitAll()` | 200 1단계와 같은 모양(토큰 두 칸 + `otpRequired=false`) · `no-store` — 본문 `{challengeToken, code}`(code 는 6자리 또는 복구 코드) | 400 `AUTH_034` · `AUTH_035` · `AUTH_147` · `AUTH_149` · `AUTH_153` · 409 `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
-| `POST /api/v1/admin/admins` (#193) | `hasRole('ADMIN')` | 201 `{memberId}` — 본문 `{email, password, name}`. 비밀번호는 응답에 없다. 고객 이메일은 승격하지 않는다 | 400 `AUTH_130` · `AUTH_131` · `AUTH_132` · `AUTH_140`~`144` · 409 `AUTH_002` · 401 `SECURITY_001` · 403 `SECURITY_005` |
-| `PATCH /api/v1/admin/admins/{memberId}` (#193) | `hasRole('ADMIN')` | 200 `dataBody: null` — 활성 관리자를 끈다. 마지막 한 명은 거절. 옛 access 토큰은 게이트웨이 컷오프 | 404 `AUTH_033` · 409 `AUTH_031` · 400 `AUTH_146` · 503 `AUTH_013` |
-| `PATCH /api/v1/admin/me/password` (#193) | `hasRole('ADMIN')` | 200 `dataBody: null` — 본문 `{currentPassword, newPassword}`. 본인만. 바꾼 뒤 다시 로그인 | 400 `AUTH_032` · `AUTH_141` · `AUTH_142` · `AUTH_145` · 503 `AUTH_013` |
-| `GET /api/v1/admin/me/otp` (#238) | `hasRole('ADMIN')` | 200 `{enrolled, confirmedAt, remainingRecoveryCodes}` — `confirmedAt` 은 미등록이면 null. 확인 전 진행 중 등록은 `enrolled=false` | 401 `SECURITY_001` · 403 `SECURITY_005` |
-| `POST /api/v1/admin/me/otp/enrollment` (#238) | `hasRole('ADMIN')` | 200 `{secret, otpauthUri, expiresAt}` · `Cache-Control: no-store` — 본문 없음. 비밀은 이번 한 번만. 다시 부르면 이전 진행 중 등록은 버려진다 | 409 `AUTH_037` · 404 `AUTH_033` · 503 `AUTH_013` · `AUTH_039` |
-| `POST /api/v1/admin/me/otp` (#238) | `hasRole('ADMIN')` | 201 `{recoveryCodes: [8개 xxxxx-xxxxx]}` · `no-store` — 본문 `{currentPassword, code}`(code 는 6자리). 복구 코드 원문은 이번 한 번만 | 400 `AUTH_038` · `AUTH_032` · `AUTH_035` · `AUTH_145` · `AUTH_147` · `AUTH_148` · 404 `AUTH_033` · 409 `AUTH_037` · `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
-| `POST /api/v1/admin/me/otp/deactivation` (#238) | `hasRole('ADMIN')` | 200 `dataBody: null` — 본문 `{currentPassword, code}`(code 는 6자리 또는 복구 코드). 자격 · 복구 코드를 모두 지운다 | 404 `AUTH_036` · `AUTH_033` · 400 `AUTH_032` · `AUTH_035` · `AUTH_145` · `AUTH_147` · `AUTH_149` · 409 `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
-| `POST /api/v1/admin/me/otp/recovery-codes` (#238) | `hasRole('ADMIN')` | 200 `{recoveryCodes}` · `no-store` — 본문은 해제와 같다. 이전 코드는 모두 무효 | 해제와 같다 |
-| `POST /api/v1/admin/admins/{memberId}/otp/recovery` (#238 PR-C) | `hasRole('ADMIN')` | 200 `{recoveryCodes: [8개 xxxxx-xxxxx]}` · `no-store` — 본문 `{currentPassword, code}`는 **행위자 본인**의 재인증. 다른 활성 관리자의 OTP 비밀·자격 ID·복구 코드를 교체하고 새 코드 원문은 이 응답에서만 준다 | 400 `AUTH_032` · `AUTH_035` · `AUTH_045` · `AUTH_145` · `AUTH_146` · `AUTH_147` · `AUTH_149` · 404 `AUTH_033` · `AUTH_036` · 409 `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
-| `GET /api/v1/admin/members` (#6) | `hasRole('ADMIN')` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
-| `GET /api/v1/admin/audit-logs` (#192 · #286 · #322) | `hasRole('ADMIN')` | 200 `PageResponse<{auditLogId, action, actorMemberId, actorDisplayName, target, targetDisplayName, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&target=&result=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_136` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `POST /api/v1/admin/admins` (#193) | `AdminAuthority.STAFF_MANAGE` | 201 `{memberId}` — 본문 `{email, password, name}`. 비밀번호는 응답에 없다. 고객 이메일은 승격하지 않는다 | 400 `AUTH_130` · `AUTH_131` · `AUTH_132` · `AUTH_140`~`144` · 409 `AUTH_002` · 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `PATCH /api/v1/admin/admins/{memberId}` (#193) | `AdminAuthority.STAFF_MANAGE` | 200 `dataBody: null` — 활성 운영자 계정(ADMIN · OWNER · MANAGER · STAFF)을 끈다. 대표 관리자(ADMIN · OWNER) 중 마지막 한 명은 거절. 대표 관리자 계정은 대표 관리자만 끈다. 옛 access 토큰은 게이트웨이 컷오프 | 404 `AUTH_033` · 409 `AUTH_031` · 403 `AUTH_046` · `SECURITY_005` · 400 `AUTH_146` · 503 `AUTH_013` |
+| `PATCH /api/v1/admin/me/password` (#193) | `AdminAuthority.OPERATOR` | 200 `dataBody: null` — 본문 `{currentPassword, newPassword}`. 본인만. 바꾼 뒤 다시 로그인 | 400 `AUTH_032` · `AUTH_141` · `AUTH_142` · `AUTH_145` · 503 `AUTH_013` |
+| `GET /api/v1/admin/me/otp` (#238) | `AdminAuthority.OPERATOR` | 200 `{enrolled, confirmedAt, remainingRecoveryCodes}` — `confirmedAt` 은 미등록이면 null. 확인 전 진행 중 등록은 `enrolled=false` | 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `POST /api/v1/admin/me/otp/enrollment` (#238) | `AdminAuthority.OPERATOR` | 200 `{secret, otpauthUri, expiresAt}` · `Cache-Control: no-store` — 본문 없음. 비밀은 이번 한 번만. 다시 부르면 이전 진행 중 등록은 버려진다 | 409 `AUTH_037` · 404 `AUTH_033` · 503 `AUTH_013` · `AUTH_039` |
+| `POST /api/v1/admin/me/otp` (#238) | `AdminAuthority.OPERATOR` | 201 `{recoveryCodes: [8개 xxxxx-xxxxx]}` · `no-store` — 본문 `{currentPassword, code}`(code 는 6자리). 복구 코드 원문은 이번 한 번만 | 400 `AUTH_038` · `AUTH_032` · `AUTH_035` · `AUTH_145` · `AUTH_147` · `AUTH_148` · 404 `AUTH_033` · 409 `AUTH_037` · `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
+| `POST /api/v1/admin/me/otp/deactivation` (#238) | `AdminAuthority.OPERATOR` | 200 `dataBody: null` — 본문 `{currentPassword, code}`(code 는 6자리 또는 복구 코드). 자격 · 복구 코드를 모두 지운다 | 404 `AUTH_036` · `AUTH_033` · 400 `AUTH_032` · `AUTH_035` · `AUTH_145` · `AUTH_147` · `AUTH_149` · 409 `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
+| `POST /api/v1/admin/me/otp/recovery-codes` (#238) | `AdminAuthority.OPERATOR` | 200 `{recoveryCodes}` · `no-store` — 본문은 해제와 같다. 이전 코드는 모두 무효 | 해제와 같다 |
+| `POST /api/v1/admin/admins/{memberId}/otp/recovery` (#238 PR-C) | `AdminAuthority.SECURITY_MANAGE` | 200 `{recoveryCodes: [8개 xxxxx-xxxxx]}` · `no-store` — 본문 `{currentPassword, code}`는 **행위자 본인**의 재인증. 다른 활성 운영자의 OTP 비밀·자격 ID·복구 코드를 교체하고 새 코드 원문은 이 응답에서만 준다 | 403 `SECURITY_005` · 400 `AUTH_032` · `AUTH_035` · `AUTH_045` · `AUTH_145` · `AUTH_146` · `AUTH_147` · `AUTH_149` · 404 `AUTH_033` · `AUTH_036` · 409 `AUTH_044` · 429 `AUTH_043` + `Retry-After` · 503 `AUTH_013` · `AUTH_039` |
+| `GET /api/v1/admin/members` (#6) | `AdminAuthority.CS_READ` | 200 `PageResponse<{memberId, email, name, phone, role, createdAt}>` — 개인정보는 마스킹(아래). `?page=0&size=20&role=` | 400 `AUTH_133` · `AUTH_134` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
+| `GET /api/v1/admin/audit-logs` (#192 · #286 · #322) | `AdminAuthority.SECURITY_READ` | 200 `PageResponse<{auditLogId, action, actorMemberId, actorDisplayName, target, targetDisplayName, result, createdAt}>` — 최신순(아래). `?action=&actorMemberId=&target=&result=&page=0&size=20` | 400 `AUTH_133` · `AUTH_134` · `AUTH_135` · `AUTH_136` · `AUTH_198` · 401 `SECURITY_001` · 403 `SECURITY_005` |
 
 토큰 쌍 (로그인 · 재발급 공통, #4 결정 1 — 전달은 응답 본문이고 쿠키는 BFF 가 만든다)
 
@@ -335,6 +336,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_043` | 429 + `Retry-After` | 관리자 OTP 코드 시도 초과 (#238) — 본인 등록 확인 · 해제 · 복구 코드 재발급(PR-A2), 로그인 2단계(PR-B), 동료 OTP 복구(PR-C)가 각각 창(기본 15분, 5회)을 센다. 동료 복구는 행위자 memberId 기준으로 별도 창을 쓰고 성공해도 지우지 않는다. 재인증은 비밀번호가 틀린 시도도 센다. 코드가 맞아도 초과하면 거절하며 `auth.login-guard.enabled=false` 여도 켜져 있다 |
 | `AUTH_044` | 409 | 관리자 OTP 쓰기 잠금 대기 초과 (#238) — 등록 확인 · 복구 코드 재발급 · 해제 · 로그인 2단계 · 동료 OTP 복구가 겹쳐 자격 행 잠금을 대기 상한(2초) 안에 얻지 못했다. 트랜잭션이 롤백돼 코드는 소비되지 않는다. 등록 확인 · 재발급 · 해제 · 동료 복구는 잠시 뒤 같은 요청을 다시 보낼 수 있다. **로그인 2단계는 챌린지가 이미 소비됐으므로 1단계부터 다시 시작한다** |
 | `AUTH_045` | 400 | 동료 OTP 복구 API 에 자기 memberId 를 대상으로 넣었다. 본인 해제·재발급은 `/api/v1/admin/me/otp/**` 를 쓴다 |
+| `AUTH_046` | 403 | 운영자 비활성화 — 대표 관리자(ADMIN · OWNER) 계정을 대표 관리자가 아닌 행위자가 끄려 했다 (#236). 문구 "이 계정을 비활성화할 권한이 없습니다." |
 | `AUTH_100` | 400 | 깨진 JSON · 본문 없음 · 타입 불일치 (필드는 `fieldErrors` 로 밝힌다) |
 | `AUTH_101~115` | 400 | 필드별 검증 — 이메일 101~103 · 비밀번호 104~106 · 이름 107 · 108 · 114 · 전화 109 · 동의 110~113 · 수정 칸 없음 115. 로그인은 같은 뜻의 101 · 102 · 104 만 본다(비밀번호 형식은 보지 않는다 — 틀리면 `AUTH_001`) |
 | `AUTH_116~119` | — | 예약 없음 (비워 둔다) |
@@ -342,7 +344,7 @@ return ResponseEntity.ok().body(Response.success(response));
 | `AUTH_130~153` | 400 | 관리자 · 표시 이름 · 운영자 계정 · OTP 필드 검증 (#6 · #286 · #322 · #193 · #238) — 관리자 로그인 이메일 필수 130 · 254자 131 · 비밀번호 필수 132, 어드민 목록 `page` 133 · `size` 134, 감사 로그 `actorMemberId` 135 · `target` 136, 표시 이름 `ids` 137 · 100개 138 · 양수 139, 운영자 추가 이메일 형식 140 · 비밀번호 10~64자 141 · 비밀번호 형식 142 · 이름 필수 143 · 이름 길이 144 · 현재 비밀번호 필수 145 · 관리자 아이디 양수 146, OTP 코드 필수 147 · 등록 확인 6자리 148 · 해제 · 재발급 · 로그인 2단계 6자리 또는 복구 코드(32자 이하) 149. 로그인 2단계 `challengeToken` 필수는 소셜(150~152) 다음의 153 이다 |
 | `AUTH_198` · `AUTH_199` | 400 | 파라미터 타입 불일치(`page=x` · 없는 `role`) · 필수 파라미터 누락 |
 
-코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~033` · 관리자 OTP(#238) `034~039` · 시도 제한(#66) `040~049`(OTP 시도 `043` · OTP 잠금 대기 `044`), 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.
+코드 대역 — 회원 `001~009` · 토큰 `010~019` · 배송지 `020~029` · 관리자(#6) `030~033` · 관리자 OTP(#238) `034~039` · 시도 제한(#66) `040~049`(OTP 시도 `043` · OTP 잠금 대기 `044` — `045` 동료 OTP 본인 대상 · `046` 대표 관리자 비활성화 권한은 관리자 대역이 차서 이 대역 끝을 빌려 쓴다), 검증은 회원 `101~115` · 배송지 `120~129` · 관리자(#6) `130~` 이다.
 `AUTH_042` 는 BCrypt 동시 실행 상한(bulkhead, 503)용으로 남겨 둔다(아직 없다).
 시도 제한 429 는 `Retry-After`(초, `max(1, ceil(남은 ms / 1000))`)를 싣는다 — 게이트웨이 `GATEWAY_006` 과 같은 모양이다. BFF 는 이 헤더를 클라이언트로 중계한다.
 요청 검증 예외(본문 · 파라미터 · 타입)는 컨텍스트와 무관하게 `MemberExceptionHandler` 하나가 서비스 공용으로 봉투를 만든다 — 메시지가 코드를 싣고 오므로 컨텍스트를 몰라도 된다.
@@ -366,6 +368,7 @@ return ResponseEntity.ok().body(Response.success(response));
   세 칸 모두 동의 이력(`member_agreement`, 추가만 한다)에 한 줄씩 남고 약관 버전은 서버 설정 `auth.agreement.versions.*` 다 — 클라이언트가 보내지 않는다.
   마케팅 현재 상태는 그 회원의 가장 최근 마케팅 행이고, 내 정보 수정에서 값이 바뀔 때만 한 줄 더한다.
 - 역할은 요청으로 받지 않는다. 가입은 언제나 `CUSTOMER` 다. 관리자 계정은 같은 `member` 테이블에 `role=ADMIN` 으로 따로 만든다(#6).
+  관리자 로그인은 운영자 역할 전체(`ADMIN` · `OWNER` · `MANAGER` · `STAFF`)를 받지만, 운영자 추가 · 시드는 어드민 화면 전환(#237) 전까지 계속 `ADMIN` 으로 만든다(#236).
 
 관리자 본인 OTP (#238 PR-A2) — `/api/v1/admin/me/otp/**`
 
@@ -403,7 +406,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 동료 관리자 OTP 복구 (#238 PR-C) — `POST /api/v1/admin/admins/{memberId}/otp/recovery`
 
-- 현재는 관리자 역할이 `ADMIN` 하나라 동료 관리자만 대상으로 허용한다(본인 대상은 `AUTH_045`, 고객·없는·비활성 관리자는 `AUTH_033`). 행위자는 JWT 의 memberId 이며 요청 본문의 아이디를 믿지 않는다. 행위자 자신의 **현재 비밀번호와 OTP 또는 복구 코드**를 재확인한다. 행위자 또는 대상 중 어느 쪽이든 OTP 미등록이면 `AUTH_036` 이다.
+- 보안 관리 권한(`AdminAuthority.SECURITY_MANAGE` — ADMIN · OWNER)이 있는 행위자만 부르고, 대상은 다른 활성 운영자(ADMIN · OWNER · MANAGER · STAFF)다(#236, 본인 대상은 `AUTH_045`, 고객·없는·비활성 운영자는 `AUTH_033`). 행위자는 JWT 의 memberId 이며 요청 본문의 아이디를 믿지 않는다. 행위자 자신의 **현재 비밀번호와 OTP 또는 복구 코드**를 재확인한다. 행위자 또는 대상 중 어느 쪽이든 OTP 미등록이면 `AUTH_036` 이다.
 - 행위자의 코드 시도는 전용 `ADMIN_OTP_PEER_RECOVERY` 창에서 5회/15분으로 제한한다(`AUTH_043`, 저장소 장애는 `AUTH_013`). 성공해도 창을 지우지 않는다. 비밀번호·코드 비교와 새 복구 코드 8개의 BCrypt 해시는 DB 트랜잭션 밖에서 한다.
 - 한 DB 트랜잭션에서 행위자의 코드를 소비하고, 대상의 **기존 자격 ID와 복구 코드를 폐기**한 뒤 새 자격 ID·알 수 없는 무작위 TOTP 비밀·새 복구 코드를 넣는다. 이전에 확인된 대상 TOTP 증명은 자격 ID가 달라 실패하고, 이전 복구 코드는 삭제돼 실패한다. 새 TOTP 비밀은 어디에도 응답하지 않는다. 대상은 여전히 `enrolled=true`라 비밀번호만으로 로그인할 수 없다.
 - 동료는 새 코드 중 하나를 대상에게 안전하게 전달한다. 대상은 비밀번호 + 새 코드로 로그인하고, 다른 코드로 본인 OTP를 해제한 뒤 새 기기에 재등록한다. 첫 로그인에 쓴 코드는 재사용할 수 없으므로 **최소 두 코드**를 전달한다. 원문을 로그·URL·감사·이슈에 남기지 않는다.
@@ -451,7 +454,9 @@ return ResponseEntity.ok().body(Response.success(response));
 
 어드민 회원 조회 (#6) — `GET /api/v1/admin/members`
 
-- `page`(기본 0, 0 이상 — 133) · `size`(기본 20, 1~100 — 134) · `role`(선택, `CUSTOMER` · `ADMIN` · `OWNER` · `MANAGER` · `STAFF`, 없으면 전체 · 틀리면 198). #236 PR-A에서 새 역할 필터 값은 수락하지만 계정 발급은 아직 없어 결과가 비어 있다. 정렬은 최신순 하나(회원 아이디 내림차순 —
+- `page`(기본 0, 0 이상 — 133) · `size`(기본 20, 1~100 — 134) · `role`(선택, `CUSTOMER` · `ADMIN` · `OWNER` · `MANAGER` · `STAFF`, 없으면 전체 · 틀리면 198). 새 역할 필터 값은 수락하지만 계정 발급(#237 화면 전환과 함께)이 아직 없어 결과가 비어 있다. 고객 응대 조회 권한(`AdminAuthority.CS_READ`)이라 대표 관리자 · 매니저 · 스태프 모두 쓴다(#236).
+  **운영자 계정 행은 직원 조회 권한(`ADMIN_STAFF_READ` — ADMIN · OWNER)이 있어야 보인다.** 없으면(매니저 · 스태프) 역할을 주지 않아도 고객 행만 내리고,
+  운영자 역할로 거르면 400 이 아니라 빈 페이지(`totalElements=0`)다 — 운영자 계정이 있는지 드러나지 않게. 감사 로그에는 요청한 역할 조건 그대로 남는다. 정렬은 최신순 하나(회원 아이디 내림차순 —
   Snowflake 라 생성 순서다)라 `sortType` 이 없다. 마지막 페이지 너머는 빈 `contents` 다. 조회는 관리자 감사 로그에 남는다(`security-guide.md` §11-4).
 - 항목 `{memberId(string), email, name, phone, role, createdAt}` — **이메일 · 이름 · 전화는 마스킹한 값만 내린다**(원문 조회 API 는 없다). 규칙(`MemberMasking`):
 
