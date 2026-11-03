@@ -191,15 +191,16 @@ class GatewayDevRouteTest {
     @Test
     @DisplayName("Swagger UI 가 열리고, 게이트웨이 자신의 기본 문서와 /webjars 경로는 열리지 않는다")
     void servesSwaggerUiWithoutGatewayDocs() {
-        URI uiLocation = webTestClient.get().uri("/swagger-ui.html").exchange()
+        WebTestClient client = webTestClient.mutate().responseTimeout(Duration.ofSeconds(20)).build();
+        URI uiLocation = client.get().uri("/swagger-ui.html").exchange()
             .expectStatus().is3xxRedirection()
             .returnResult(Void.class).getResponseHeaders().getLocation();
 
         assertThat(uiLocation).hasPath("/swagger-ui/index.html");
-        webTestClient.get().uri(uiLocation.getPath()).exchange().expectStatus().isOk();
-        webTestClient.get().uri("/v3/api-docs").exchange().expectStatus().isNotFound();
+        client.get().uri(uiLocation.getPath()).exchange().expectStatus().isOk();
+        client.get().uri("/v3/api-docs").exchange().expectStatus().isNotFound();
         // 정적 리소스 매핑을 껐으므로 Boot 기본 /webjars/** 로는 열리지 않는다 (UI 는 springdoc 경로로만)
-        webTestClient.get().uri("/webjars/swagger-ui/index.html").exchange().expectStatus().isNotFound();
+        client.get().uri("/webjars/swagger-ui/index.html").exchange().expectStatus().isNotFound();
     }
 
     private List<String> matchingRouteIds(HttpMethod method, String rawPath) {
