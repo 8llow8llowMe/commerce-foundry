@@ -575,12 +575,12 @@ return ResponseEntity.ok().body(Response.success(response));
 `POST /api/v1/admin/products` — `hasRole('ADMIN')`. 201 `{product: 위 어드민 상세와 같은 모양, descriptionHtmlSanitized}`. 등록한 어드민은 토큰의 memberId 로
 `product.created_by_member_id` 에 남는다(본문으로 받지 않는다, 운영자 온보딩 #357 이 읽는다).
 
-- **이 단계의 범위** — 이미지 첨부(#9 F2)는 아래 계약으로 받는다. 맞춤 제작 입력(#9 E2)은 아직 받지 않아 맞춤 제작 꺼짐으로 생긴다.
+- **이 단계의 범위** — 이미지 첨부(#9 F2)는 아래 계약으로 받는다. 맞춤 제작 설정 `customOrder` 는 선택이고 규칙은 아래 `/custom-order` 와 같다(생략하면 꺼짐).
   수정은 하나의 전체 PUT 이 아니라 섹션별 PUT(기본 정보 · 판매 상태 · 노출 `/header`, `/pricing`, `/categories`, `/images`, `/options`, `/skus`)으로 나눠 구현했다
   (#525 · #553 · #535 · #560 · #576 · #573 — 판매 중지는 `/header` 의 `saleStatus`). 삭제는 §2-13에 구현됐다. 옵션 · 조합 추가 · 은퇴는 #9 후속이다.
   감사는 `PRODUCT_CREATE`(`security-guide.md` §11-4)다. Idempotency-Key 는 없다 — 같은 본문을 두 번 보내면 상품이 두 개 생긴다(지우면 된다, #9 결정).
 - **본문**: `{name, summary?, descriptionHtml?, categoryId, categoryIds?[], saleStatus, visible, salePrice{amount,currency}, listPrice?, maxQuantityPerOrder?,
-  preorder?, expectedShipDate?, optionGroups?[{name, values[]}], skus[{optionValues[], additionalPrice, saleStatus, weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}`.
+  preorder?, expectedShipDate?, optionGroups?[{name, values[]}], skus[{optionValues[], additionalPrice, saleStatus, weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}], customOrder?{enabled, notice?, leadTimeDays?, fields[]}}`.
   - 문구는 앞뒤 공백을 빼고, 빈 요약은 null 이다. 상품명 · 요약 · 옵션 이름은 제어 · 서식 문자를 받지 않는다.
   - 진열 카테고리는 중복을 빼고 대표 카테고리가 없으면 더한다(카테고리 안 진열 순서 `display_order` 는 0 으로 넣는다 — 편집 API 없음, 상세는 아이디 오름차순). 대표 · 진열 카테고리 존재는 **카테고리 행을 잠근 트리**로 확인한다
     (DB FK 가 없어 카테고리 삭제와 엇갈리지 않게) — 없으면 400 `PRODUCT_012`(없는 아이디 모두), 잠금을 시간 안에 얻지 못하면 409 `PRODUCT_045`.
@@ -608,7 +608,7 @@ return ResponseEntity.ok().body(Response.success(response));
   | 대역 | 용도 |
   |------|------|
   | `001~004` | 없는 리소스(404) |
-  | `010~019` | 어드민 상품 쓰기 — 삭제 동시 변경 `010`, E1 `012~014` · `016`, F2 이미지 구성 `018` · 필드 검증 `019`, 후속 수정 `011` · `015` · `017` |
+  | `010~019` | 어드민 상품 쓰기 — 삭제 동시 변경 `010`, E1 `012~014` · `016`, F2 이미지 구성 `018` · 필드 검증 `019`, 맞춤 제작 설정 `011`(#9 PR-B), 후속 `015` · `017` |
   | `020~031` | 재고(조정 · 선점 · 복원) |
   | `032~036` | 상품 이미지 업로드 · 스토리지(#9 F) |
   | `037` · `038` | 어드민 상품 등록 필드 검증(금액 상한 · 지난 발송 예정일) |
@@ -962,7 +962,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   FE는 다시 조회한 뒤 재시도한다. 조회와 삭제 사이에 먼저 완료된 편집도 현재 상태를 대상으로 삭제하므로, 편집 화면 버전 비교 계약은 없다.
 - SKU·옵션·이미지·맞춤 입력·진열 카테고리·재고·선점과 기존 주문을 변경하지 않는다. 신규 선점은 기존 판매 가능 판정으로 거절하고,
   internal SKU 조회에는 상품과 SKU를 유지하며 `purchasable=false`로 알린다. S3·Kafka·서비스 간 호출은 없다. 새 엔티티·운영 DDL도 없다.
-- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing`, 정지 이미지 편집은 `/images`, 기존 옵션 이름·순서는 `/options`, 기존 SKU 필드는 `PUT /skus`, 옵션 값 · 새 조합 SKU 추가는 `POST /skus` API로 편집한다. FE 계약 검토자는 `seonghoho`다.
+- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing`, 정지 이미지 편집은 `/images`, 기존 옵션 이름·순서는 `/options`, 기존 SKU 필드는 `PUT /skus`, 옵션 값 · 새 조합 SKU 추가는 `POST /skus`, 맞춤 제작 설정은 `/custom-order` API로 편집한다. FE 계약 검토자는 `seonghoho`다.
 
 #### 어드민 상품 기본 정보 수정 API (#9 후속)
 
@@ -1028,6 +1028,25 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 - **필드 검증** — `version` `SKU_ADMIN_101`, 그룹 아이디 `103`, 추가금 `104` · `108` · `109`, 판매 상태 `105`, 무게 `106`, HS 코드 `107`, 값 0~50개 `111`, 값 이름 1~50자 `112`,
   SKU 1~100개 `113`, 옵션 값 이름 1~5개 `114`, 처음 재고 `115`.
 - 감사 행위는 `PRODUCT_SKUS_ADD`(대상 `product:<id>`)이고 값 · 가격은 싣지 않는다. 기존 SKU 판매 종료는 `PUT /skus` 의 `saleStatus` 로 한다(#573). 운영 DDL 은 없다.
+
+#### 맞춤 제작 설정 전체 교체 API (#9 PR-B)
+
+ADMIN `PUT /api/v1/admin/products/{productId}/custom-order` 는 `{version, enabled, notice?, leadTimeDays?, fields:[{fieldKey, label, inputType, unit?, required, minValue?, maxValue?, stepValue?, helpText?}]}` 를 받고
+편집용 상세를 돌려준다. 등록 본문의 `customOrder` 도 `version` 을 뺀 같은 모양 · 같은 규칙이다(생략하면 맞춤 제작 꺼짐 · 항목 없음).
+
+- **항목은 키로 구분한다** — 주문 · 장바구니는 맞춤 입력을 `fieldKey` 와 값으로만 남긴다(`order_item_custom_option`, `order-flow-guide.md` §2-2 4번).
+  그래서 같은 키는 같은 항목(아이디 유지)으로 고치고, 빠진 키는 지우고, 새 키는 더한다. 키 이름을 바꾸는 편집은 없다(지우고 새로 더한다).
+  이미 받은 주문의 입력값은 주문 쪽 스냅숏이라 그대로이고, 장바구니에 담긴 입력은 주문할 때 지금 정의로 다시 확인한다(지운 키는 `ORDER_133`, 꺼진 맞춤 제작은 `ORDER_004`).
+- **주문이 받을 수 있는 정의만 저장한다** — 같은 키 두 번, 숫자의 최소 > 최대 · 0 이하 증분 · 소수 셋째 자리 · 1억 이상, 글자의 최소값 · 증분 지정 ·
+  1~500 정수가 아닌 최대 글자 수(주문 입력 칸이 500자)는 400 `PRODUCT_011` 이다. 숫자의 최소 · 최대 · 증분은 비워도 된다(주문이 그 검사를 건너뛴다).
+- **필드 검증** — `version` `PRODUCT_EDIT_101`, `enabled` `104`, 안내 문구 500자 · 줄바꿈 외 제어 문자 `105`, 소요일 1~365 `106`, 항목 0~20개 `107`,
+  키(영문 소문자로 시작, 소문자 · 숫자 · 밑줄 30자) `108`, 이름 1~50자 `109`, `inputType` `110`, 단위 10자 · 도움말 200자 `111`, `required` `112`.
+  문구는 앞뒤 공백을 빼고 빈 문구는 null 이다. 모르는 `inputType` 은 400 `PRODUCT_100` 이다.
+- **맞춤 제작을 꺼도 항목은 남는다** — 다시 켤 때 그대로 쓴다. 꺼진 상품은 고객 상세 · 내부 SKU 조회에서 항목이 빈 목록이다.
+  `store.features.custom-order` 가 꺼진 스토어도 저장은 되지만 고객 · 주문에는 나타나지 않는다.
+- **동시성** — 오래된 버전은 409 `PRODUCT_010` 이고 아무것도 쓰지 않는다. 바뀐 것이 없으면(숫자는 크기로 비교 — 60 과 60.00 은 같다) 쓰지 않고 버전을 유지한다.
+  사용 여부 · 안내 · 소요일이 바뀌면 상품 merge 가, 항목만 바뀌면 버전 CAS 가 자식 쓰기보다 먼저 동시 편집을 막는다. 숨김 상품도 편집하고 지운 상품은 404 `PRODUCT_001` 이다.
+- 감사 행위는 `PRODUCT_CUSTOM_ORDER_REPLACE`(대상 `product:<id>`)이고 입력 항목 내용은 싣지 않는다. 운영 DDL 은 없다(기존 `product_custom_order_field` · 상품 칸을 쓴다).
 
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다
