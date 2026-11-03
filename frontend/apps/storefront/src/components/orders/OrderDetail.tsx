@@ -1,6 +1,6 @@
 'use client';
 
-import { ApiError, apiFetch, type Money } from '@cf/api-client';
+import { ApiError, apiFetch, createIdempotencyKey, type Money } from '@cf/api-client';
 import { Button, type Locale } from '@cf/ui';
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type Ref } from 'react';
 import { AddressDetails } from '@/components/account/AddressDetails';
@@ -9,7 +9,7 @@ import { QuoteSummary } from '@/components/checkout/QuoteSummary';
 import { useDictionary, useFormatMoney, useLocale } from '@/components/i18n/LocaleProvider';
 import { Link } from '@/components/i18n/Link';
 import { countryOptions } from '@/lib/account/countries';
-import { formatDueAt } from '@/lib/checkout/order';
+import { formatDueAt, nextAttempt, type OrderAttempt } from '@/lib/checkout/order';
 import { paymentPageHref } from '@/lib/checkout/payment';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { fill } from '@/lib/i18n/format';
@@ -29,9 +29,17 @@ import {
   orderDetailPath,
   orderPageHref,
   orderPurchaseConfirmationPath,
+  orderReturnPath,
+  RETURN_REASONS,
+  returnableLines,
+  returnFailure,
+  returnRequestBody,
   statusLabel,
   type CancelReason,
   type OrderDetail as Order,
+  type OrderDetailLine,
+  type OrderReturnResult,
+  type ReturnReason,
 } from '@/lib/orders/history';
 import { useRetryCooldown } from '@/lib/use-retry-cooldown';
 
@@ -47,7 +55,8 @@ type Load =
  * (취소는 서버의 `cancelable`, 구매 확정은 배송 완료). 두 액션 모두 확인 패널을 거친다.
  * 취소는 사유 코드(`CANCEL_REASONS`)를 골라 `POST .../cancellation`, 구매 확정은 `PATCH .../purchase-confirmation` —
  * 응답이 바뀐 상세라 그대로 바꿔 끼운다. 실패 처리는 `cancelFailure` · `confirmFailure` 다(경합 · 결과 모름은 상세를 다시 읽는다).
- * 결제 뒤 취소 · 반품은 BE 전이라 두지 않는다.
+ * 부분 반품은 항목 · 수량 · 사유를 골라 `POST .../returns`(멱등 키 필수) — 응답은 클레임이라 접수 뒤 상세를 다시 읽어
+ * 주문 상태(반품 요청)를 반영한다. 실패 처리는 `returnFailure`(같은 키로 다시 보낼지 가른다). 결제 뒤 취소 · 환불은 BE 전이라 두지 않는다.
  * 배송 조회(BE #18 PR-B2)는 상세와 함께 따로 읽는다 — 실패해도 상세는 그대로 보이고 배송 자리에서만 다시 시도한다.
  */
 export function OrderDetail({ orderId }: { orderId: string }) {
@@ -64,12 +73,24 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   const [confirming, setConfirming] = useState(false);
   const confirmingNow = useRef(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [returnOpen, setReturnOpen] = useState(false);
+  // 주문 항목 아이디 → 반품 수량. 없으면 고르지 않은 항목
+  const [returnSelected, setReturnSelected] = useState<Record<string, number>>({});
+  const [returnReason, setReturnReason] = useState<ReturnReason | null>(null);
+  const [returning, setReturning] = useState(false);
+  const returningNow = useRef(false);
+  const [returnError, setReturnError] = useState<string | null>(null);
+  // 같은 키로 다시 보내도 되는 실패 뒤에만 남는 시도(본문 + 키). 본문이 바뀌면 nextAttempt 가 새 키를 만든다
+  const returnAttempt = useRef<OrderAttempt | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const cooldown = useRetryCooldown();
   // 패널이 열리고 닫히면 누른 버튼이 사라진다 — 다음 렌더 뒤 포커스를 옮길 곳(주문서의 pendingFocus 와 같은 방식)
-  const pendingFocus = useRef<'panel' | 'trigger' | 'notice' | 'delivery' | null>(null);
+  const pendingFocus = useRef<'panel' | 'trigger' | 'returnTrigger' | 'notice' | 'delivery' | null>(
+    null,
+  );
   const panelTitle = useRef<HTMLHeadingElement>(null);
   const trigger = useRef<HTMLDivElement>(null);
+  const returnTrigger = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLParagraphElement>(null);
   const deliveryTitle = useRef<HTMLHeadingElement>(null);
   const [delivery, setDelivery] = useState<DeliveryLoad>({ status: 'loading' });
@@ -106,9 +127,11 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         ? panelTitle.current
         : target === 'trigger'
           ? (trigger.current?.querySelector('button') ?? noticeRef.current)
-          : target === 'delivery'
-            ? deliveryTitle.current
-            : noticeRef.current;
+          : target === 'returnTrigger'
+            ? (returnTrigger.current?.querySelector('button') ?? noticeRef.current)
+            : target === 'delivery'
+              ? deliveryTitle.current
+              : noticeRef.current;
     element?.focus();
   });
 
@@ -230,8 +253,63 @@ export function OrderDetail({ orderId }: { orderId: string }) {
     }
   };
 
+  const closeReturn = (focus: 'returnTrigger' | 'notice' = 'returnTrigger') => {
+    pendingFocus.current = focus;
+    setReturnOpen(false);
+    setReturnSelected({});
+    setReturnReason(null);
+    setReturnError(null);
+    returnAttempt.current = null;
+  };
+
   const { order } = load;
   const actions = orderActions(order);
+  const returnBody = returnRequestBody(order, returnSelected, returnReason);
+
+  const requestReturn = async () => {
+    // 상태 반영 전 두 번째 클릭은 ref 로 막는다
+    if (!returnBody || returningNow.current) return;
+    returningNow.current = true;
+    setReturning(true);
+    setReturnError(null);
+    // 같은 본문의 재시도는 같은 키 — 앞 시도가 접수됐으면 서버가 그 접수를 200 으로 재생한다
+    const attempt = nextAttempt(
+      returnAttempt.current,
+      JSON.stringify(returnBody),
+      createIdempotencyKey,
+    );
+    returnAttempt.current = attempt;
+    try {
+      // 응답은 클레임(접수 상태 · 항목). 환불 금액은 미산정(null)이라 보이지 않는다
+      await apiFetch<OrderReturnResult>(orderReturnPath(orderId), {
+        method: 'POST',
+        json: returnBody,
+        idempotencyKey: attempt.idempotencyKey,
+      });
+      closeReturn('notice');
+      setNotice(t.returned);
+      // 배송 완료였으면 반품 요청으로 바뀌었다 — 상태는 서버에서 다시 읽는다
+      await read();
+    } catch (cause) {
+      cooldown.startFrom(cause);
+      const failure = returnFailure(cause, t);
+      if (failure.kind === 'signedOut') {
+        setLoad({ status: 'signedOut' });
+      } else if (failure.kind === 'reload') {
+        // 구매 확정 등으로 반품할 수 없게 됐다 — 지금 상태를 다시 읽는다(반품할 수 없으면 버튼이 사라진다)
+        closeReturn('notice');
+        setNotice(failure.message);
+        await read();
+      } else {
+        if (!failure.sameKey) returnAttempt.current = null;
+        setReturnError(failure.message);
+      }
+    } finally {
+      returningNow.current = false;
+      setReturning(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-8">
       {/* 상태 영역은 늘 두고 내용만 바꾼다 — 내용과 함께 새로 끼운 라이브 영역은 스크린리더가 읽지 않기도 한다 */}
@@ -267,7 +345,53 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           />
         }
       />
+      {/* 반품 · 구매 확정 패널은 한 번에 하나만 연다 — 제목 포커스 ref 를 함께 쓴다 */}
+      {actions.requestReturn &&
+        !confirmOpen &&
+        (returnOpen ? (
+          <ReturnPanel
+            titleRef={panelTitle}
+            t={t}
+            lines={returnableLines(order)}
+            selected={returnSelected}
+            onSelect={(orderItemId, quantity) => {
+              setReturnSelected((current) => {
+                const next = { ...current };
+                if (quantity > 0) next[orderItemId] = quantity;
+                else delete next[orderItemId];
+                return next;
+              });
+              setReturnError(null);
+            }}
+            reason={returnReason}
+            onReason={(next) => {
+              setReturnReason(next);
+              setReturnError(null);
+            }}
+            error={returnError}
+            ready={returnBody !== null}
+            returning={returning}
+            blocked={cooldown.coolingDown}
+            onConfirm={() => void requestReturn()}
+            onClose={() => closeReturn()}
+          />
+        ) : (
+          <div ref={returnTrigger}>
+            <Button
+              variant="secondary"
+              className="h-12 w-full"
+              onClick={() => {
+                setNotice(null);
+                pendingFocus.current = 'panel';
+                setReturnOpen(true);
+              }}
+            >
+              {t.requestReturn}
+            </Button>
+          </div>
+        ))}
       {actions.confirmPurchase &&
+        !returnOpen &&
         (confirmOpen ? (
           <ConfirmPurchasePanel
             titleRef={panelTitle}
@@ -642,6 +766,141 @@ export function ConfirmPurchasePanel({
         </Button>
         <Button variant="secondary" disabled={confirming} onClick={onClose} className="h-12 flex-1">
           {t.confirmClose}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 부분 반품 접수 — 항목(주문 항목 아이디가 있는 줄)을 고르고 수량(1 ~ 주문 수량) · 사유(모든 항목 공통)를 정한다.
+ * 고른 항목과 사유가 있어야 누를 수 있다. 이미 접수한 수량을 뺀 잔여 수량은 서버가 판단한다(넘으면 `ORDER_030`).
+ */
+export function ReturnPanel({
+  titleRef,
+  t,
+  lines,
+  selected,
+  onSelect,
+  reason,
+  onReason,
+  error,
+  ready,
+  returning,
+  blocked,
+  onConfirm,
+  onClose,
+}: {
+  /** 패널이 열리면 포커스를 받을 제목 */
+  titleRef?: Ref<HTMLHeadingElement>;
+  t: Dictionary['orders'];
+  lines: (OrderDetailLine & { orderItemId: string })[];
+  /** 주문 항목 아이디 → 반품 수량 */
+  selected: Record<string, number>;
+  /** 수량 0 은 고르지 않음 */
+  onSelect: (orderItemId: string, quantity: number) => void;
+  reason: ReturnReason | null;
+  onReason: (reason: ReturnReason) => void;
+  error: string | null;
+  /** 보낼 본문이 있다(항목 · 사유를 골랐다) */
+  ready: boolean;
+  returning: boolean;
+  blocked: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const name = useId();
+  return (
+    <section
+      aria-labelledby={`${name}-title`}
+      aria-describedby={`${name}-caution`}
+      className="flex flex-col gap-4 border border-border p-5"
+    >
+      <h2 id={`${name}-title`} ref={titleRef} tabIndex={-1} className="text-lg">
+        {t.returnTitle}
+      </h2>
+      <fieldset className="flex flex-col gap-3" disabled={returning}>
+        <legend className="mb-2 text-sm font-medium">{t.returnItems}</legend>
+        {lines.map((line) => {
+          const quantity = selected[line.orderItemId] ?? 0;
+          const max = Math.min(line.quantity, 99);
+          return (
+            <div
+              key={line.orderItemId}
+              className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm"
+            >
+              <label className="flex min-w-0 items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={quantity > 0}
+                  onChange={(event) =>
+                    onSelect(line.orderItemId, event.currentTarget.checked ? max : 0)
+                  }
+                />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="font-medium">{line.productName}</span>
+                  {line.optionName && <span className="text-muted-fg">{line.optionName}</span>}
+                  <span className="text-muted-fg">
+                    {fill(t.quantity, { count: line.quantity })}
+                  </span>
+                </span>
+              </label>
+              {max > 1 && (
+                <select
+                  aria-label={fill(t.returnQuantity, { name: line.productName })}
+                  value={quantity > 0 ? quantity : max}
+                  disabled={quantity === 0}
+                  onChange={(event) =>
+                    onSelect(line.orderItemId, Number(event.currentTarget.value))
+                  }
+                  className="h-10 rounded-md border border-border bg-bg px-3 text-fg outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                >
+                  {Array.from({ length: max }, (_, index) => index + 1).map((count) => (
+                    <option key={count} value={count}>
+                      {count}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          );
+        })}
+      </fieldset>
+      <fieldset className="flex flex-col gap-2" disabled={returning}>
+        <legend className="mb-2 text-sm font-medium">{t.returnReason}</legend>
+        {RETURN_REASONS.map((code) => (
+          <label key={code} className="flex items-center gap-3 text-sm">
+            <input
+              type="radio"
+              name={`${name}-reason`}
+              value={code}
+              checked={reason === code}
+              onChange={() => onReason(code)}
+            />
+            <span>{t.returnReasons[code]}</span>
+          </label>
+        ))}
+      </fieldset>
+      <p id={`${name}-caution`} className="text-xs text-muted-fg">
+        {t.returnCaution}
+      </p>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={!ready || returning || blocked}
+          aria-busy={returning}
+          onClick={onConfirm}
+          className="h-12 flex-1"
+        >
+          {returning ? t.returning : t.returnConfirm}
+        </Button>
+        <Button variant="secondary" disabled={returning} onClick={onClose} className="h-12 flex-1">
+          {t.returnClose}
         </Button>
       </div>
     </section>

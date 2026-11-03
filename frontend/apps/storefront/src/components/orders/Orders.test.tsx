@@ -11,6 +11,7 @@ import {
   DeliveryView,
   OrderDetail as OrderDetailContainer,
   OrderDetailView,
+  ReturnPanel,
 } from './OrderDetail';
 import { OrderList, OrderListView } from './OrderList';
 
@@ -319,5 +320,63 @@ describe('ConfirmPurchasePanel', () => {
 
   it('실패 문구는 alert 다', () => {
     expect(panel({ error: t.confirmFailed })).toContain('role="alert"');
+  });
+});
+
+describe('ReturnPanel', () => {
+  const lines = [
+    { ...detail().items[0]!, orderItemId: '11', quantity: 3 },
+    { ...detail().items[0]!, orderItemId: '12', productName: '생활한복 바지', quantity: 1 },
+  ];
+  const panel = (props: Partial<Parameters<typeof ReturnPanel>[0]> = {}) =>
+    renderToStaticMarkup(
+      <ReturnPanel
+        t={t}
+        lines={lines}
+        selected={{}}
+        onSelect={() => {}}
+        reason={null}
+        onReason={() => {}}
+        error={null}
+        ready={false}
+        returning={false}
+        blocked={false}
+        onConfirm={() => {}}
+        onClose={() => {}}
+        {...props}
+      />,
+    );
+
+  it('항목 · 사유 세 가지 · 안내를 보이고, 고르기 전에는 접수하기를 막는다', () => {
+    const html = panel();
+    expect(html).toContain('모시 저고리');
+    expect(html).toContain('생활한복 바지');
+    for (const label of Object.values(t.returnReasons)) expect(html).toContain(label);
+    expect(html).toContain(t.returnCaution);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>반품 접수하기<\/button>/);
+  });
+
+  it('수량 선택은 2개 이상 주문한 항목만, 고르기 전에는 막는다(1 ~ 주문 수량)', () => {
+    const html = panel();
+    expect(html.match(/<select/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="모시 저고리 반품 수량"');
+    expect(html).toMatch(/<select[^>]*disabled=""/);
+    expect(html).toContain('<option value="3"');
+    expect(html).not.toContain('<option value="4"');
+    expect(panel({ selected: { '11': 2 } })).not.toMatch(/<select[^>]*disabled=""/);
+  });
+
+  it('본문이 준비되면 누를 수 있고, 쿨다운 · 진행 중이면 막는다', () => {
+    expect(panel({ ready: true })).not.toMatch(/<button[^>]*disabled=""[^>]*>반품 접수하기/);
+    expect(panel({ ready: true, blocked: true })).toMatch(
+      /<button[^>]*disabled=""[^>]*>반품 접수하기/,
+    );
+    const busy = panel({ ready: true, returning: true });
+    expect(busy).toContain(t.returning);
+    expect(busy).toMatch(/<button[^>]*disabled=""[^>]*>닫기/);
+  });
+
+  it('실패 문구는 alert 다', () => {
+    expect(panel({ error: t.returnFailed })).toContain('role="alert"');
   });
 });

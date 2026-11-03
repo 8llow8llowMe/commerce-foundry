@@ -11,8 +11,12 @@ import {
   orderCancelPath,
   orderListPath,
   orderPurchaseConfirmationPath,
+  orderReturnPath,
   readOrderPathId,
+  returnFailure,
+  returnRequestBody,
   statusLabel,
+  type OrderDetailLine,
   type OrderSummary,
 } from './history';
 
@@ -28,6 +32,18 @@ const summary = (orderId: string, patch: Partial<OrderSummary> = {}): OrderSumma
   paymentDueAt: '2026-11-02T01:30:00Z',
   createdAt: '2026-11-02T01:00:00Z',
   ...patch,
+});
+const line = (orderItemId: string | undefined, quantity = 1): OrderDetailLine => ({
+  ...(orderItemId ? { orderItemId } : {}),
+  skuId: '9001',
+  productId: '1001',
+  productName: '모시 저고리',
+  optionName: '',
+  unitPrice: { amount: 36000, currency: 'KRW' },
+  quantity,
+  lineAmount: { amount: 36000 * quantity, currency: 'KRW' },
+  customOrder: false,
+  customOptions: [],
 });
 const apiError = (
   kind: ConstructorParameters<typeof ApiError>[0],
@@ -151,8 +167,8 @@ describe('cancelFailure', () => {
 });
 
 describe('orderActions', () => {
-  const at = (code: string, cancelable = false) =>
-    orderActions({ status: { code, name: code, description: '' }, cancelable });
+  const at = (code: string, cancelable = false, items: OrderDetailLine[] = [line('1')]) =>
+    orderActions({ status: { code, name: code, description: '' }, cancelable, items });
 
   it('취소는 서버의 cancelable 만 따른다 — 출고 뒤 상태에는 없다', () => {
     expect(at('PENDING_PAYMENT', true).cancel).toBe(true);
@@ -177,6 +193,133 @@ describe('orderActions', () => {
     ]) {
       expect(at(code).confirmPurchase).toBe(false);
     }
+  });
+});
+
+describe('orderActions — 반품', () => {
+  const at = (code: string, items: OrderDetailLine[] = [line('1')]) =>
+    orderActions({ status: { code, name: code, description: '' }, cancelable: false, items })
+      .requestReturn;
+
+  it('배송 완료 · 반품 요청(추가 접수)만 — 그 밖의 상태에는 없다', () => {
+    expect(at('DELIVERED')).toBe(true);
+    expect(at('RETURN_REQUESTED')).toBe(true);
+    for (const code of [
+      'PENDING_PAYMENT',
+      'PAID',
+      'SHIPPING',
+      'PURCHASE_CONFIRMED',
+      'RETURNED',
+      'CANCELED',
+    ]) {
+      expect(at(code)).toBe(false);
+    }
+  });
+
+  it('주문 항목 아이디가 없으면(BE #609 전) 반품 버튼을 숨긴다', () => {
+    expect(at('DELIVERED', [line(undefined)])).toBe(false);
+    expect(at('DELIVERED', [line(undefined), line('2')])).toBe(true);
+  });
+});
+
+describe('returnRequestBody', () => {
+  const order = { items: [line('11', 3), line(undefined, 1), line('12', 2)] };
+
+  it('고른 항목을 주문 순서대로 싣고 사유는 공통이다 — 아이디 없는 줄은 빠진다', () => {
+    expect(returnRequestBody(order, { '12': 1, '11': 2 }, 'DEFECTIVE')).toEqual({
+      items: [
+        { orderItemId: '11', quantity: 2, reason: 'DEFECTIVE' },
+        { orderItemId: '12', quantity: 1, reason: 'DEFECTIVE' },
+      ],
+    });
+  });
+
+  it('수량은 1 ~ 주문 수량으로 자른다', () => {
+    expect(returnRequestBody(order, { '11': 7 }, 'WRONG_ITEM')?.items[0]?.quantity).toBe(3);
+  });
+
+  it('고른 항목이 없거나 사유가 없으면 null', () => {
+    expect(returnRequestBody(order, {}, 'CHANGE_OF_MIND')).toBeNull();
+    expect(returnRequestBody(order, { '11': 1 }, null)).toBeNull();
+    expect(returnRequestBody(order, { '11': 0 }, 'CHANGE_OF_MIND')).toBeNull();
+  });
+
+  it('경로', () => {
+    expect(orderReturnPath('42')).toBe('/api/v1/orders/42/returns');
+  });
+});
+
+describe('returnFailure', () => {
+  it('401 은 로그인 안내', () => {
+    expect(returnFailure(apiError('unauthorized', 401, null), t)).toEqual({ kind: 'signedOut' });
+  });
+
+  it('반품할 수 없는 상태(ORDER_020) · 404 는 다시 읽는다', () => {
+    expect(returnFailure(apiError('conflict', 409, 'ORDER_020'), t)).toEqual({
+      kind: 'reload',
+      message: t.returnErrors.ORDER_020,
+    });
+    expect(returnFailure(apiError('notFound', 404, 'ORDER_001'), t)).toEqual({
+      kind: 'reload',
+      message: t.returnErrors.ORDER_001,
+    });
+  });
+
+  it('결과를 모르면 같은 키로 다시 누른다(접수됐으면 재생)', () => {
+    for (const cause of [
+      apiError('unknownOutcome', 504, null),
+      apiError('server', 500, 'ORDER_021'),
+      apiError('network', null, null),
+      new Error('boom'),
+    ]) {
+      expect(returnFailure(cause, t)).toEqual({
+        kind: 'retry',
+        message: t.returnUnknown,
+        sameKey: true,
+      });
+    }
+  });
+
+  it('경합(ORDER_025) · 처리 중(409) · 429 · 503 은 같은 키', () => {
+    expect(returnFailure(apiError('conflict', 409, 'ORDER_025'), t)).toEqual({
+      kind: 'retry',
+      message: t.returnErrors.ORDER_025,
+      sameKey: true,
+    });
+    expect(returnFailure(apiError('conflict', 409, 'COMMON_409'), t)).toMatchObject({
+      sameKey: true,
+    });
+    expect(returnFailure(apiError('rateLimited', 429, 'GATEWAY_006'), t)).toEqual({
+      kind: 'retry',
+      message: t.returnErrors.GATEWAY_006,
+      sameKey: true,
+    });
+    expect(returnFailure(apiError('unavailable', 503, 'BFF_002'), t)).toMatchObject({
+      sameKey: true,
+    });
+  });
+
+  it('본문을 고쳐야 하는 실패는 새 키 — 항목 오류 · 잔여 수량 초과 · 키 재사용 · 검증(영문은 사전 문구)', () => {
+    expect(returnFailure(apiError('server', 400, 'ORDER_029'), t)).toEqual({
+      kind: 'retry',
+      message: t.returnErrors.ORDER_029,
+      sameKey: false,
+    });
+    for (const code of ['ORDER_030', 'ORDER_031']) {
+      expect(returnFailure(apiError('conflict', 409, code), en.orders)).toEqual({
+        kind: 'retry',
+        message: en.orders.returnErrors[code],
+        sameKey: false,
+      });
+    }
+    expect(
+      returnFailure(
+        apiError('validation', 400, 'ORDER_100', [
+          { code: 'NotEmpty', field: 'items', message: 'x' },
+        ]),
+        t,
+      ),
+    ).toEqual({ kind: 'retry', message: t.returnFailed, sameKey: false });
   });
 });
 
