@@ -266,7 +266,8 @@ class ProductAdminFacadeTest {
             productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class),
-            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductCustomOrderProcessor.class));
         var key = com.commercefoundry.domainlayer.product.domain.model.ProductImageUploadKey.issue(
             100L, com.commercefoundry.domainlayer.product.domain.model.ProductImageFormat.PNG);
         given(uploads.issue(100L, "image/png", 10L)).willReturn(new com.commercefoundry.domainlayer.product.application.info.ProductImageUploadInfo(
