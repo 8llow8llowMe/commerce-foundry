@@ -335,8 +335,8 @@ export function DisplayManager({ previewOrigin }: { previewOrigin: string | null
         )}
         {loaded?.kind === 'ok' && (
           <p className="text-xs text-muted-fg">
-            히어로 · 디테일처럼 이미지 · 영상이 꼭 있어야 하는 섹션은 업로드 기능이 준비되면 만들 수
-            있습니다.
+            히어로 · 디테일은 이미지가 있어야 저장됩니다. 섹션을 고칠 때 이미지를 올릴 수 있습니다.
+            영상은 아직 올릴 수 없습니다.
           </p>
         )}
 
