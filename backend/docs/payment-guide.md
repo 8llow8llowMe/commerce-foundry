@@ -360,6 +360,12 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 정확한 7필드·인가·오류 계약은 [order-payment-result-guide.md](order-payment-result-guide.md)를 따른다.
 이 API 추가는 ACK 소비·inbox·회신 outbox·재고 확정 뒤 중단 창 복구를 완료하지 않는다. #308 C·#15 운영 개방 조건과 기존 게이트는 유지한다.
 
+**C1b1 호출 경계**: payment의 `OrderPaymentResultQueryPort`가 C1a를 서비스 토큰으로 조회하고 결과별 응답 계약을 검증한다.
+미반영(`ORDER_028`)·인증/통신 실패·응답 계약 위반을 구분하며, 원격 본문·Feign 원인을 전파하거나 어댑터·Feign 재시도를 추가하지 않는다.
+정확한 실패 분류는 위 가이드의 "payment 호출 경계"를 따른다. 아직 이벤트/로컬 결제 대조·ACK 소비·inbox·플래그 저장은 연결하지 않는다.
+`order-paid.paidAt`는 주문 처리 시각이고 원천 `approvedAt`는 PG 승인 시각이므로 서로 같다고 비교하지 않는다.
+후속 C1b2에서 원천과 로컬 결제의 승인 시각을 마이크로초 정밀도로 대조하고, 취소 경합·inbox 원자 기록을 함께 구현한다.
+
 결제 승인(DONE)을 주문의 결제 완료(PAID)로 반영하는 단계는 **Kafka 이벤트**다(#304 · #308, `architecture-guide.md` §8-1). 동기 internal 호출 + 재전송 플래그 + 스케줄러로 하던 이전 설계는
 쓰지 않는다 — 전달은 outbox 릴레이(적어도 한 번)와 컨슈머 재시도 · DLT 가 보장하고(소비 · 회신 쪽은 PR-B · C 예정), 중복은 inbox · 유니크 키 · `@Version` 이 막는다.
 **payment 에 재전송 스케줄러를 두지 않는다.** **#308 이 끝나기 전에는 운영 결제를 열지 않는다(`payment.enabled=false`, §3-4).**
