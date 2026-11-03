@@ -60,4 +60,6 @@ SSE는 커밋 뒤 현재 인스턴스 연결로 최선 전달한다. 커밋 후 
 
 ## 검증
 
+후속 A3a는 payment-service의 읽기 전용 [outbox 원천 관측 API](outbox-observation-guide.md)를 제공한다. 미래 예약을 제외한 단일 집계 사실만 반환하며, 이 단계에 operations 수집·임계 탐지·해소 알림은 포함하지 않는다.
+
 로컬 테스트는 정확한 억제 경계, 중복·억제 워터마크, 0명, 비정상·다중 페이지·상한 수신자, 메타데이터 전용 리스너, ACK/NACK, EmbeddedKafka → H2 → 실제 알림 스트림, 실패 재전달과 sentinel 원문 로그 미노출을 확인한다. PostgreSQL 17 테스트는 실제 JPQL NOWAIT, 동시 첫 INSERT·여러 파티션, 수신자 중간 실패 롤백·재시도를 확인한다. Testcontainers Kafka+PostgreSQL은 커밋 후 SSE 스트림 전달을 확인한다. Docker 테스트는 EnabledWithDockerOrOnCi로 로컬 Docker 부재 시 건너뛰고 CI는 Docker를 요구한다. DDL은 OperationsSchemaSnapshotTest로 대조하며 마지막에 operations cleanTest/check를 실행한다.

@@ -3,16 +3,32 @@ package com.commercefoundry.global.messaging;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import jakarta.persistence.QueryHint;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.QueryHints;
 
 /**
  * outbox 행. 넣은 뒤에는 상태가 아닌 칸만 조건부 UPDATE 한 문장으로 바꾼다 ({@code coding-conventions.md} §9-1 · §9-5). 반환값은 바뀐 행 수다.
  * bulk UPDATE 는 감사 리스너를 거치지 않아 {@code updatedAt} 을 인자로 받아 직접 세팅하고, 버전도 직접 올린다.
  */
 public interface OutboxRepository extends JpaRepository<OutboxEntity, Long> {
+
+    /** One snapshot of ready unpublished rows; future retries and completed publications are excluded. */
+    @Query("""
+        select count(o.id) as readyUnpublishedCount, min(o.availableAt) as oldestReadyAvailableAt
+          from OutboxEntity o
+         where o.publishedAt is null and o.availableAt <= :observedAt
+        """)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    ReadyObservationProjection observeReady(Instant observedAt);
+
+    interface ReadyObservationProjection {
+        long getReadyUnpublishedCount();
+        Instant getOldestReadyAvailableAt();
+    }
 
     /** 보낼 행 — 아이디 오름차순(같은 키의 발행 순서). */
     List<OutboxEntity> findByPublishedAtIsNullAndAvailableAtLessThanEqualOrderByIdAsc(Instant now, Limit limit);
