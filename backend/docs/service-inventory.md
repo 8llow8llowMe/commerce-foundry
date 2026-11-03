@@ -50,7 +50,7 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 최신순 · 이름순)이 있는 상태다 (`api-design-guide.md` §2-6). 상품 soft delete · 옵션 은퇴 · 낙관적 락 버전 · 등록자 컬럼과 그 조회 규칙(삭제 상품은 고객 · 어드민 목록에서 빠지고
 서비스 간 SKU 조회에는 판매 불가로 남는다)이 있다. 상품 삭제 API(`DELETE /api/v1/admin/products/{productId}`)는 ADMIN 전용이며 이미 삭제된 상품도 200이다.
 읽은 버전과 merge 시점이 충돌하면 409 `PRODUCT_010`이며 자식·재고·기존 선점은 유지한다. 옵션 은퇴 쓰기는 후속 범위다 (`api-design-guide.md` §2-13). 어드민 상품 상세(`GET /api/v1/admin/products/{productId}`)는 숨김 · 은퇴 옵션 · 판매 종료 SKU 와 저장된 설정을 포함하며 삭제 상품은 404 다.
-재고 · 원가는 기존 별도 API 로 조회한다. 상품 등록(E1)·이미지 업로드 발급(F1)·등록 시 첨부(F2)·정지 이미지 전체 편집(F3)·상품 삭제와 기본 정보/상태·카테고리·가격 수정이 구현됐다. 정지 이미지 편집은 VIDEO와 기존 객체 속성을 보존하고 신규 복사만 트랜잭션 밖에서 수행한다. 옵션·SKU 편집은 #9 후속 범위다.
+재고 · 원가는 기존 별도 API 로 조회한다. 상품 등록(E1)·이미지 업로드 발급(F1)·등록 시 첨부(F2)·정지 이미지 전체 편집(F3)·상품 삭제와 기본 정보/상태·카테고리·가격 수정이 구현됐다. 정지 이미지 편집은 VIDEO와 기존 객체 속성을 보존하고 신규 복사만 트랜잭션 밖에서 수행한다. 기존 옵션 이름·노출 순서 편집은 `/options`, 기존 SKU 필드 편집은 `/skus` API로 제공한다. 옵션 추가·조합 변경·은퇴 처리는 #9 후속 범위다.
 SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullable)를 가지고 서비스 간 SKU 벌크 조회가 그대로 내린다 — 해외 주문 거절은 order-service 몫이다 (#80, `order-flow-guide.md` §2-2).
 "국내 배송비 정책" 은 고객 정책 안내(`/api/v1/shipping-fees/policy`) · 어드민 정책 조회·전체 교체(`/api/v1/admin/shipping-policies/domestic`) · 서비스 간 배송비 견적(`/internal/v1/shipping-fees/quotes`)이 있는 상태다.
 "국내 배송비 정책 교체 이력" 은 교체가 성공할 때 같은 트랜잭션에서 교체 전 · 후 값 · 관리자 · 시각을 `delivery.shipping_policy_history`(+ `shipping_policy_history_area`)에 남기고

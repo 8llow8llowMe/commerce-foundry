@@ -4,6 +4,9 @@ package com.commercefoundry.domainlayer.product.application.exception;
 public final class ProductEditValidationMessage {
     public static final String VERSION_REQUIRED_OR_MIN = "PRODUCT_EDIT_101:version 은 필수이며 0 이상이어야 합니다.";
 
+    public static final String OPTION_GROUP_ID_REQUIRED_OR_POSITIVE = "PRODUCT_EDIT_102:옵션 그룹 아이디는 필수이며 양수여야 합니다.";
+    public static final String OPTION_VALUE_ID_REQUIRED_OR_POSITIVE = "PRODUCT_EDIT_103:옵션 값 아이디는 필수이며 양수여야 합니다.";
+
     private ProductEditValidationMessage() {
     }
 }

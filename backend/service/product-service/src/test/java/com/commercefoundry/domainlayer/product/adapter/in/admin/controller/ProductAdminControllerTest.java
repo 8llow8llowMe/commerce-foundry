@@ -59,6 +59,59 @@ class ProductAdminControllerTest {
     private ProductAdminUseCase productAdminUseCase;
 
     @Test
+    void optionReplacementRequiresAdminAndNormalizesNamesWithActor() {
+        String body = "{\"version\":7,\"optionGroups\":[{\"optionGroupId\":11,\"name\":\" size \",\"values\":[{\"optionValueId\":12,\"name\":\" M \"}]}]}";
+        String uri = PATH + "/7/options";
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(productAdminUseCase);
+        given(productAdminUseCase.updateOptions(any())).willReturn(
+            com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse.builder().productId("7").version(8L).build());
+        assertThat(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatusOk()
+            .bodyJson().extractingPath("$.dataBody.productId").isEqualTo("7");
+        var command = ArgumentCaptor.forClass(com.commercefoundry.domainlayer.product.application.command.ProductOptionsUpdateCommand.class);
+        verify(productAdminUseCase).updateOptions(command.capture());
+        assertThat(command.getValue().actorMemberId()).isEqualTo(TestTokens.MEMBER_ID);
+        assertThat(command.getValue().version()).isEqualTo(7);
+        assertThat(command.getValue().optionGroups().getFirst().name()).isEqualTo("size");
+        assertThat(command.getValue().optionGroups().getFirst().values().getFirst().name()).isEqualTo("M");
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("invalidOptionBodies")
+    void optionReplacementRejectsInvalidInput(String body, String code) {
+        assertThat(mvc.put().uri(PATH + "/7/options").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatus(HttpStatus.BAD_REQUEST)
+            .bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> invalidOptionBodies() {
+        String template = "{\"version\":0,\"optionGroups\":[{\"optionGroupId\":11,\"name\":\"%s\",\"values\":[{\"optionValueId\":12,\"name\":\"%s\"}]}]}";
+        return java.util.stream.Stream.of(
+            org.junit.jupiter.params.provider.Arguments.of("{\"optionGroups\":[]}", "PRODUCT_EDIT_101"),
+            org.junit.jupiter.params.provider.Arguments.of("{\"version\":-1,\"optionGroups\":[]}", "PRODUCT_EDIT_101"),
+            org.junit.jupiter.params.provider.Arguments.of(template.formatted("x", "y").replace("11", "0"), "PRODUCT_EDIT_102"),
+            org.junit.jupiter.params.provider.Arguments.of(template.formatted("x", "y").replace("12", "0"), "PRODUCT_EDIT_103"),
+            org.junit.jupiter.params.provider.Arguments.of(template.formatted("x".repeat(31), "y"), "PRODUCT_092"),
+            org.junit.jupiter.params.provider.Arguments.of(template.formatted("x", "y".repeat(51)), "PRODUCT_094")
+        );
+    }
+
+    @ParameterizedTest
+    @CsvSource({"NOT_FOUND_PRODUCT,404,PRODUCT_001", "PRODUCT_MODIFICATION_CONFLICT,409,PRODUCT_010", "PRODUCT_OPTION_COMBINATION_INVALID,400,PRODUCT_013"})
+    void optionReplacementErrorEnvelope(String error, int status, String code) {
+        given(productAdminUseCase.updateOptions(any())).willThrow(new com.commercefoundry.domainlayer.product.application.exception.ProductException(
+            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.valueOf(error), "옵션 구성"));
+        assertThat(mvc.put().uri(PATH + "/7/options").contentType(MediaType.APPLICATION_JSON).content("{\"version\":0,\"optionGroups\":[]}")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatus(HttpStatus.valueOf(status))
+            .bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+    }
+
+    @Test
     void pricingReplacementRequiresAdminAndReturnsDetailWithActorAndPrices() {
         String body = "{\"version\":7,\"salePrice\":{\"amount\":15000,\"currency\":\"KRW\"}}";
         String uri = PATH + "/7/pricing";

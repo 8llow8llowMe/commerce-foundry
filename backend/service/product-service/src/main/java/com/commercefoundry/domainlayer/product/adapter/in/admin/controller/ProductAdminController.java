@@ -65,6 +65,19 @@ public class ProductAdminController {
 
     private final ProductAdminUseCase productAdminUseCase;
 
+    @Operation(summary = "기존 상품 옵션 이름·순서 수정", description = "은퇴 행을 포함한 기존 그룹·값 전체 아이디를 보내고 이름과 배열 순서만 편집한다. "
+        + "추가·누락·그룹 이동·중복 이름은 400 PRODUCT_013이다. 동일 값은 버전을 유지하며 오래된 버전은 409 PRODUCT_010이다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_OPTIONS_REPLACE")
+    @PutMapping("/{productId}/options")
+    public ResponseEntity<Response<ProductDetailAdminResponse>> updateOptions(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId,
+        @RequestBody @Valid com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductOptionsUpdateRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(productAdminUseCase.updateOptions(request.toCommand(productId, member.memberId()))));
+    }
+
     @Operation(summary = "상품 정지 이미지 전체 교체", description = "기존 imageId 또는 신규 uploadKey로 최대 8장(대표 한 장)을 교체한다. "
         + "빈 배열은 정지 이미지 연결 삭제, VIDEO는 보존한다. 동일 요청도 버전이 증가하며 오래된 버전은 409 PRODUCT_010이다.")
     @PreAuthorize("hasRole('ADMIN')")

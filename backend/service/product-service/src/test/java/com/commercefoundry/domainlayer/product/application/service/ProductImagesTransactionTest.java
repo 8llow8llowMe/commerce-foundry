@@ -49,7 +49,7 @@ class ProductImagesTransactionTest {
             mock(CategoryProcessor.class), mock(ProductAdminQueryProcessor.class), presenter, mock(ProductAdminDetailProcessor.class),
             mock(ProductWriteProcessor.class), mock(ProductDescriptionSanitizer.class), mock(ProductImageUploadProcessor.class),
             mock(ProductDeleteProcessor.class), mock(ProductHeaderUpdateProcessor.class), mock(ProductCategoryUpdateProcessor.class),
-            audit, mock(ProductPricingUpdateProcessor.class), prepare, update);
+            audit, mock(ProductPricingUpdateProcessor.class), prepare, update, mock(ProductOptionsUpdateProcessor.class));
         doAnswer(c -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             assertThat(TransactionSynchronizationManager.isSynchronizationActive()).isFalse();
