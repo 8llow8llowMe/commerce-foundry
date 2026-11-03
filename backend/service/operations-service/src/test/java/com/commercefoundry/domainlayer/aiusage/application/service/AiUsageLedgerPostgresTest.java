@@ -155,6 +155,37 @@ class AiUsageLedgerPostgresTest {
     }
 
     @Test
+    @DisplayName("실제 회수 경로가 두 Provider와 과거 NULL을 보존하고 월 비용을 한 번만 옮긴다")
+    void maintenancePreservesProvidersAndMovesMonthlyCostsOnce() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        String period = AiBudgetPeriod.of(now, ZoneId.of("Asia/Seoul")).value();
+        aiUsageMonthRepositoryPort.createIfAbsent(period, LIMIT, now);
+        Instant staleAt = now.minus(Duration.ofHours(1));
+        insertPending(1L, period, staleAt, "anthropic");
+        insertPending(2L, period, staleAt, "openai");
+        insertPending(3L, period, staleAt, "anthropic");
+        jdbc.update("update operations.ai_usage_call set provider = null where id = ?", 3L);
+        insertPending(4L, period, now, "openai");
+
+        assertThat(aiUsageMaintenanceUseCase.abandonStale()).isEqualTo(3);
+        assertThat(aiUsageMaintenanceUseCase.abandonStale()).isZero();
+        assertThat(aiUsageCallRepository.findById(1L).orElseThrow().getProvider()).isEqualTo("anthropic");
+        assertThat(aiUsageCallRepository.findById(2L).orElseThrow().getProvider()).isEqualTo("openai");
+        assertThat(aiUsageCallRepository.findById(3L).orElseThrow().getProvider()).isNull();
+        for (long id : List.of(1L, 2L, 3L)) {
+            AiUsageCallEntity call = aiUsageCallRepository.findById(id).orElseThrow();
+            assertThat(call.getStatus()).isEqualTo(AiUsageStatus.ABANDONED);
+            assertThat(call.getCostMicros()).isEqualTo(ESTIMATE);
+        }
+        assertThat(aiUsageCallRepository.findById(4L).orElseThrow().getProvider()).isEqualTo("openai");
+        assertThat(aiUsageCallRepository.findById(4L).orElseThrow().getStatus()).isEqualTo(AiUsageStatus.PENDING);
+        AiUsageMonthEntity month = aiUsageMonthRepository.findByPeriod(period).orElseThrow();
+        assertThat(month.getReservedMicros()).isEqualTo(4 * ESTIMATE);
+        assertThat(month.getSettledMicros()).isEqualTo(3 * ESTIMATE);
+        assertThat(month.getCallCount()).isEqualTo(3L);
+    }
+
+    @Test
     @DisplayName("① 월 행이 없는 달에 20개가 동시에 예약하면 월 행은 하나(유니크 키 경합 재시도)이고 한도 안의 정확히 5건만 통과한다 — 첫 거절 표시는 한 번")
     void concurrentReservesNeverExceedLimit() throws Exception {
         List<Outcome> outcomes = runConcurrently(() -> aiUsageMeterUseCase.reserve(command()));
@@ -257,8 +288,12 @@ class AiUsageLedgerPostgresTest {
     }
 
     private AiUsageCall insertPending(long id, String period, Instant calledAt) {
+        return insertPending(id, period, calledAt, "anthropic");
+    }
+
+    private AiUsageCall insertPending(long id, String period, Instant calledAt, String provider) {
         AiUsageCall call = AiUsageCall.pending(
-            id, new AiBudgetPeriod(period), "size-chart", 1, "job:" + id, "test-small", false, 0, 2_000, ESTIMATE, QUOTE, calledAt
+            id, new AiBudgetPeriod(period), "size-chart", 1, "job:" + id, "test-small", false, 0, 2_000, ESTIMATE, QUOTE, calledAt, provider
         );
         transactionTemplate.executeWithoutResult(status -> {
             assertThat(aiUsageMonthRepositoryPort.reserve(period, ESTIMATE, LIMIT, calledAt)).isTrue();
