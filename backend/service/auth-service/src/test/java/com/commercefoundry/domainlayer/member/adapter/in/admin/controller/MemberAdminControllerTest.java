@@ -35,7 +35,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
- * 어드민 회원 조회의 HTTP 계약 — 권한(URL 규칙 + {@code hasRole('ADMIN')}), 조회한 관리자(토큰의 memberId) 전달, 페이지 파라미터 검증 코드, 응답 모양.
+ * 어드민 회원 조회의 HTTP 계약 — 권한(URL 규칙 + {@code AdminAuthority.CS_READ}), 조회한 관리자(토큰의 memberId) 전달, 페이지 파라미터 검증 코드, 응답 모양.
  * 슬라이스라 보안 구성을 직접 import 하고, 테스트 키로 서명한 실제 access 토큰을 보낸다.
  */
 @WebMvcTest(MemberAdminController.class)
@@ -63,7 +63,7 @@ class MemberAdminControllerTest {
         @Test
         @DisplayName("ADMIN 이면 200 PageResponse 이고 기본 page 0 · size 20 · 역할 전체, 조회한 관리자는 토큰의 memberId 다")
         void adminIsAllowed() {
-            given(memberAdminUseCase.searchMembers(TestTokens.MEMBER_ID, null, 0, 20)).willReturn(PAGE);
+            given(memberAdminUseCase.searchMembers(TestTokens.MEMBER_ID, true, null, 0, 20)).willReturn(PAGE);
 
             MvcTestResult result = get(PATH, MemberRole.ADMIN);
 
@@ -79,16 +79,26 @@ class MemberAdminControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].phone").isEqualTo("010-****-5678");
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].role").isEqualTo("CUSTOMER");
             assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].createdAt").isEqualTo("2026-10-18T03:00:00Z");
-            verify(memberAdminUseCase).searchMembers(TestTokens.MEMBER_ID, null, 0, 20);
+            verify(memberAdminUseCase).searchMembers(TestTokens.MEMBER_ID, true, null, 0, 20);
         }
 
         @Test
         @DisplayName("page · size · role 은 그대로 넘긴다")
         void passesParameters() {
-            given(memberAdminUseCase.searchMembers(TestTokens.MEMBER_ID, MemberRole.ADMIN, 3, 100)).willReturn(PAGE);
+            given(memberAdminUseCase.searchMembers(TestTokens.MEMBER_ID, true, MemberRole.ADMIN, 3, 100)).willReturn(PAGE);
 
             assertThat(get(PATH + "?page=3&size=100&role=ADMIN", MemberRole.ADMIN)).hasStatusOk();
-            verify(memberAdminUseCase).searchMembers(TestTokens.MEMBER_ID, MemberRole.ADMIN, 3, 100);
+            verify(memberAdminUseCase).searchMembers(TestTokens.MEMBER_ID, true, MemberRole.ADMIN, 3, 100);
+        }
+
+        @ParameterizedTest
+        @CsvSource({"ADMIN, true", "OWNER, true", "MANAGER, false", "STAFF, false"})
+        @DisplayName("고객 응대 조회 권한(ADMIN_CS_READ)이 있으면 200 이고, 운영자 행 포함 여부는 직원 조회 권한(ADMIN_STAFF_READ)으로 넘긴다 (#236)")
+        void operatorsWithCsReadAreAllowed(MemberRole role, boolean includeOperators) {
+            given(memberAdminUseCase.searchMembers(TestTokens.MEMBER_ID, includeOperators, null, 0, 20)).willReturn(PAGE);
+
+            assertThat(get(PATH, role)).hasStatusOk();
+            verify(memberAdminUseCase).searchMembers(TestTokens.MEMBER_ID, includeOperators, null, 0, 20);
         }
 
         @Test
@@ -131,7 +141,7 @@ class MemberAdminControllerTest {
         @Test
         @DisplayName("마지막 페이지를 넘긴 page 는 400 이 아니다 — 유스케이스가 빈 목록을 준다")
         void pageBeyondLastIsNotAnError() {
-            given(memberAdminUseCase.searchMembers(anyLong(), isNull(), eq(999), anyInt())).willReturn(new PageResponse<>(List.of(), 999, 20, 1, 1));
+            given(memberAdminUseCase.searchMembers(anyLong(), eq(true), isNull(), eq(999), anyInt())).willReturn(new PageResponse<>(List.of(), 999, 20, 1, 1));
 
             assertThat(get(PATH + "?page=999", MemberRole.ADMIN)).hasStatusOk();
         }

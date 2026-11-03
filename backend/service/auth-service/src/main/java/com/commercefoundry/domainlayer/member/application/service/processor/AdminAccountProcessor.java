@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -38,9 +39,9 @@ public class AdminAccountProcessor {
     }
 
     @Transactional(readOnly = true)
-    public Member findActiveAdmin(long memberId) {
+    public Member findActiveOperator(long memberId) {
         return memberRepositoryPort.findById(memberId)
-            .filter(Member::isActiveAdmin)
+            .filter(Member::isActiveOperator)
             .orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND));
     }
 
@@ -53,25 +54,31 @@ public class AdminAccountProcessor {
     }
 
     /**
-     * 활성 관리자를 끈다. 활성 관리자가 한 명뿐이면 거절한다. 없거나 고객이거나 이미 꺼진 계정은 같은 404 다.
+     * 활성 운영자 계정을 끈다 — 운영자 역할 전체가 대상이다. 없거나 고객이거나 이미 꺼진 계정은 같은 404 다.
+     * 대표 관리자(ADMIN · OWNER) 계정은 활성 대표 관리자만 끄고({@link Member#canBeDeactivatedBy}, 403), 활성 대표 관리자 중 마지막 한 명이면 거절한다
+     * ({@link Member#isLastActiveOwner}, 409). 활성 운영자 전부를 한 번에 잠가 읽으므로 대표 관리자 두 명을 동시에 끄는 요청도 줄을 선다.
      */
     @Transactional
-    public void deactivate(long memberId, Instant deactivatedAt) {
-        List<Member> activeAdmins = memberRepositoryPort.findActiveAdminsForUpdate();
-        Member target = activeAdmins.stream()
-            .filter(admin -> admin.id() == memberId)
-            .findFirst()
-            .orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND));
-        if (activeAdmins.size() == 1) {
+    public void deactivate(long actorMemberId, long memberId, Instant deactivatedAt) {
+        List<Member> activeOperators = memberRepositoryPort.findActiveOperatorsForUpdate();
+        Member target = findIn(activeOperators, memberId).orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND));
+        if (!target.canBeDeactivatedBy(findIn(activeOperators, actorMemberId))) {
+            throw new MemberException(MemberErrorCode.ADMIN_DEACTIVATION_FORBIDDEN);
+        }
+        if (Member.isLastActiveOwner(target, activeOperators)) {
             throw new MemberException(MemberErrorCode.LAST_ACTIVE_ADMIN);
         }
         memberRepositoryPort.save(target.deactivate(deactivatedAt));
     }
 
+    private static Optional<Member> findIn(List<Member> operators, long memberId) {
+        return operators.stream().filter(operator -> operator.id() == memberId).findFirst();
+    }
+
     @Transactional
     public void changePassword(long memberId, String passwordHash) {
         Member admin = memberRepositoryPort.findByIdForUpdate(memberId)
-            .filter(Member::isActiveAdmin)
+            .filter(Member::isActiveOperator)
             .orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND));
         memberRepositoryPort.save(admin.changePassword(passwordHash));
     }

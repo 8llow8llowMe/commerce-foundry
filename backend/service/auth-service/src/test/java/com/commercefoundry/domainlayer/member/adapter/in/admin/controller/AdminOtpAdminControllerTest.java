@@ -26,6 +26,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -121,6 +122,17 @@ class AdminOtpAdminControllerTest {
         assertThat(result).hasStatusOk();
         assertThat(result).headers().hasValue(HttpHeaders.CACHE_CONTROL, "no-store");
         assertThat(result).bodyJson().extractingPath("$.dataBody.recoveryCodes[0]").isEqualTo("ABCDE-FGH23");
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+    @DisplayName("내 OTP 5개 API 는 운영자 역할 전체가 쓴다 — 기능 권한과 무관한 본인 보안 설정이다 (#236)")
+    void everyOperatorManagesOwnOtp(MemberRole role) {
+        assertThat(mvc.get().uri(BASE).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange()).hasStatusOk();
+        assertThat(post(BASE + "/enrollment", null, role)).hasStatusOk();
+        assertThat(post(BASE, CONFIRM_BODY, role)).hasStatus(HttpStatus.CREATED);
+        assertThat(post(BASE + "/deactivation", REAUTH_BODY, role)).hasStatusOk();
+        assertThat(post(BASE + "/recovery-codes", REAUTH_BODY, role)).hasStatusOk();
     }
 
     @Test

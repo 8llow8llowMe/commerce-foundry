@@ -12,6 +12,6 @@ public class AdminNotificationRecipientQueryProcessor {
     private final AdminNotificationRecipientQueryPort adminNotificationRecipientQueryPort;
 
     public List<Long> findIds(long afterId, int size) {
-        return adminNotificationRecipientQueryPort.findActiveAdminIdsAfter(afterId, size);
+        return adminNotificationRecipientQueryPort.findActiveOwnerIdsAfter(afterId, size);
     }
 }

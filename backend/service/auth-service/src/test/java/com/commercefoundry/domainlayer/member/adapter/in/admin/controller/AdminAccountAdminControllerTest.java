@@ -20,6 +20,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -92,6 +93,31 @@ class AdminAccountAdminControllerTest {
     void customerIsForbidden() {
         SecurityEnvelopeAssertions.assertEnvelope(post(CREATE, CREATE_BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
         verifyNoInteractions(adminAccountUseCase);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER"})
+    @DisplayName("운영자 추가 · 비활성화는 직원 계정 관리 권한(ADMIN_STAFF_MANAGE)이 있는 ADMIN · OWNER 가 쓴다 (#236)")
+    void staffManageIsAllowed(MemberRole role) {
+        assertThat(post(CREATE, CREATE_BODY, role)).hasStatus(HttpStatus.CREATED);
+        assertThat(patch("/api/v1/admin/admins/7", null, role)).hasStatusOk();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+    @DisplayName("매니저 · 스태프는 운영자 추가 · 비활성화가 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#236)")
+    void staffManageIsForbidden(MemberRole role) {
+        SecurityEnvelopeAssertions.assertEnvelope(post(CREATE, CREATE_BODY, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(patch("/api/v1/admin/admins/7", null, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(adminAccountUseCase);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+    @DisplayName("본인 비밀번호 변경은 운영자 역할 전체가 쓴다 (#236)")
+    void ownPasswordIsOpenToEveryOperator(MemberRole role) {
+        assertThat(patch(PASSWORD, PASSWORD_BODY, role)).hasStatusOk();
+        verify(adminAccountUseCase).changePassword(eq(TestTokens.MEMBER_ID), any(), eq("current-password1"), eq("next-password-2026"));
     }
 
     @Test

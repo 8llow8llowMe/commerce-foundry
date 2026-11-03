@@ -63,7 +63,7 @@ class AdminOtpFacadeTest {
         new AdminOtpAdminPresenter(), Clock.fixed(NOW, ZoneOffset.UTC));
 
     private void passwordIs(boolean correct) {
-        given(adminAccountProcessor.findActiveAdmin(ADMIN_ID)).willReturn(ADMIN);
+        given(adminAccountProcessor.findActiveOperator(ADMIN_ID)).willReturn(ADMIN);
         given(adminAccountProcessor.passwordMatches(ADMIN, "current-password1")).willReturn(correct);
     }
 
@@ -75,7 +75,7 @@ class AdminOtpFacadeTest {
     @Test
     @DisplayName("등록 시작은 관리자 이메일을 라벨로 넘기고 감사하지 않는다")
     void startEnrollment() {
-        given(adminAccountProcessor.findActiveAdmin(ADMIN_ID)).willReturn(ADMIN);
+        given(adminAccountProcessor.findActiveOperator(ADMIN_ID)).willReturn(ADMIN);
         given(adminOtpProcessor.startEnrollment(ADMIN_ID, "owner@example.com", NOW))
             .willReturn(new AdminOtpEnrollmentInfo("SECRET", "otpauth://totp/x", NOW.plus(Duration.ofMinutes(15))));
 

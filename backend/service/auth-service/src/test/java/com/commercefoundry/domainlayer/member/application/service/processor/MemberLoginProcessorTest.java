@@ -20,6 +20,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class MemberLoginProcessorTest {
@@ -123,6 +125,25 @@ class MemberLoginProcessorTest {
         given(passwordEncoder.matches("admin-password-1", "$2a$10$admin")).willReturn(true);
 
         assertThat(processor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).isEqualTo(ADMIN);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+    @DisplayName("관리자 로그인 — 새 운영자 역할(OWNER · MANAGER · STAFF)도 비밀번호가 맞으면 그 회원이다 (#236)")
+    void operatorAuthenticated(MemberRole role) {
+        Member operator = Member.restore(4L, "operator@example.com", "$2a$10$operator", "운영", null, role, 0L);
+        given(passwordEncoder.matches("operator-password-1", "$2a$10$operator")).willReturn(true);
+
+        assertThat(processor.authenticateAdmin(Optional.of(operator), "operator-password-1")).isEqualTo(operator);
+    }
+
+    @Test
+    @DisplayName("관리자 로그인 — 비활성 매니저는 비밀번호가 맞아도 AUTH_030 이다 (#236)")
+    void deactivatedManagerIsRejected() {
+        Member manager = Member.restore(5L, "manager@example.com", "$2a$10$manager", "매니저", null, MemberRole.MANAGER, 0L, Instant.parse("2026-10-26T00:00:00Z"));
+        given(passwordEncoder.matches("manager-password-1", "$2a$10$manager")).willReturn(true);
+
+        assertAdminLoginFailed(() -> processor.authenticateAdmin(Optional.of(manager), "manager-password-1"));
     }
 
     @Test

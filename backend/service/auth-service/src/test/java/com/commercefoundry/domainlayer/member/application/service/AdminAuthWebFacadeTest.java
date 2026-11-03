@@ -258,7 +258,7 @@ class AdminAuthWebFacadeTest {
     @DisplayName("2단계는 챌린지 조회 → 시도 제한 → 활성 관리자 → 컷오프 → 코드 확인 → 챌린지 소비 → 코드 소비 → 발급 순서다")
     void otpLogin() {
         given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
-        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminAccountProcessor.findActiveOperator(9L)).willReturn(ADMIN);
         given(adminOtpProcessor.resolveProof(9L, "ABCDE-FGH23", NOW)).willReturn(PROOF);
         given(authTokenProcessor.issueAdminAccessToken(ADMIN, STORED_CHALLENGE.issuedAt())).willReturn(new AdminAccessTokenInfo("access", 1800));
 
@@ -269,7 +269,7 @@ class AdminAuthWebFacadeTest {
             adminOtpProcessor, authTokenProcessor, adminAuditPort);
         order.verify(adminLoginChallengeProcessor).find(CHALLENGE);
         order.verify(loginGuardProcessor).admitAdminOtpLogin(9L);
-        order.verify(adminAccountProcessor).findActiveAdmin(9L);
+        order.verify(adminAccountProcessor).findActiveOperator(9L);
         order.verify(adminAccessCutoffProcessor).issuedBeforeCutoff(9L, STORED_CHALLENGE.issuedAt());
         order.verify(adminOtpProcessor).resolveProof(9L, "ABCDE-FGH23", NOW);
         order.verify(adminLoginChallengeProcessor).consume(CHALLENGE, STORED_CHALLENGE);
@@ -309,7 +309,7 @@ class AdminAuthWebFacadeTest {
     @DisplayName("틀린 코드는 400 AUTH_035 그대로이고 대상 관리자로 실패 감사한다 — 챌린지는 소비하지 않아 TTL 안에서 다시 시도할 수 있다")
     void wrongCode() {
         given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
-        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminAccountProcessor.findActiveOperator(9L)).willReturn(ADMIN);
         willThrow(new MemberException(MemberErrorCode.OTP_CODE_INVALID)).given(adminOtpProcessor).resolveProof(9L, "ABCDE-FGH23", NOW);
 
         assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
@@ -326,7 +326,7 @@ class AdminAuthWebFacadeTest {
     @DisplayName("비밀번호 변경 컷오프 이전 챌린지는 AUTH_034 로 거절하고 코드와 토큰을 소비하지 않는다")
     void oldChallengeAfterPasswordChange() {
         given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
-        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminAccountProcessor.findActiveOperator(9L)).willReturn(ADMIN);
         given(adminAccessCutoffProcessor.issuedBeforeCutoff(9L, STORED_CHALLENGE.issuedAt())).willReturn(true);
 
         assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).extracting(failure -> ((MemberException) failure).getErrorCode())
@@ -341,7 +341,7 @@ class AdminAuthWebFacadeTest {
     @DisplayName("GETDEL 동시 패자는 코드를 소비하지 않고 AUTH_034 로 실패 감사한다")
     void lostChallengeDoesNotConsumeCode() {
         given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
-        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminAccountProcessor.findActiveOperator(9L)).willReturn(ADMIN);
         given(adminOtpProcessor.resolveProof(9L, "ABCDE-FGH23", NOW)).willReturn(PROOF);
         willThrow(new MemberException(MemberErrorCode.OTP_CHALLENGE_INVALID)).given(adminLoginChallengeProcessor)
             .consume(CHALLENGE, STORED_CHALLENGE);
@@ -359,7 +359,7 @@ class AdminAuthWebFacadeTest {
     void unexpectedFailureIsAudited() {
         given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
         RuntimeException failure = new IllegalStateException("test failure");
-        given(adminAccountProcessor.findActiveAdmin(9L)).willThrow(failure);
+        given(adminAccountProcessor.findActiveOperator(9L)).willThrow(failure);
 
         assertThatThrownBy(() -> facade.loginWithOtp(OTP_COMMAND)).isSameAs(failure);
 
@@ -371,7 +371,7 @@ class AdminAuthWebFacadeTest {
     @DisplayName("그 사이 비활성화(AUTH_033) · OTP 해제(AUTH_036 — 확인 · 소비 어느 쪽이든)는 챌린지 무효 AUTH_034 로 답하고 실패 감사한다")
     void deactivatedOrDisabledMeansInvalidChallenge() {
         given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
-        given(adminAccountProcessor.findActiveAdmin(9L)).willThrow(new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND)).willReturn(ADMIN);
+        given(adminAccountProcessor.findActiveOperator(9L)).willThrow(new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND)).willReturn(ADMIN);
         given(adminOtpProcessor.resolveProof(9L, "ABCDE-FGH23", NOW)).willThrow(new MemberException(MemberErrorCode.OTP_NOT_ENROLLED)).willReturn(PROOF);
         willThrow(new MemberException(MemberErrorCode.OTP_NOT_ENROLLED)).given(adminOtpProcessor).consumeForLogin(9L, PROOF, NOW);
 
@@ -389,7 +389,7 @@ class AdminAuthWebFacadeTest {
     @DisplayName("코드 소비의 잠금 실패는 409 AUTH_044, 챌린지 소비를 진 동시 요청은 400 AUTH_034 — 둘 다 토큰 없이 실패 감사한다")
     void busyOrLostChallenge() {
         given(adminLoginChallengeProcessor.find(CHALLENGE)).willReturn(STORED_CHALLENGE);
-        given(adminAccountProcessor.findActiveAdmin(9L)).willReturn(ADMIN);
+        given(adminAccountProcessor.findActiveOperator(9L)).willReturn(ADMIN);
         given(adminOtpProcessor.resolveProof(9L, "ABCDE-FGH23", NOW)).willReturn(PROOF);
         willThrow(new PessimisticLockingFailureException("lock")).willDoNothing().given(adminOtpProcessor).consumeForLogin(9L, PROOF, NOW);
         willDoNothing().willThrow(new MemberException(MemberErrorCode.OTP_CHALLENGE_INVALID))

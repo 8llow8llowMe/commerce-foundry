@@ -76,6 +76,8 @@ public enum MemberErrorCode {
     OTP_BUSY("AUTH_044", "다른 OTP 요청을 처리하고 있습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT),
     /** 동료 OTP 복구 엔드포인트는 자신을 대상으로 쓸 수 없다. */
     OTP_PEER_RECOVERY_SELF("AUTH_045", "본인 OTP는 내 OTP 메뉴에서 관리해 주세요.", HttpStatus.BAD_REQUEST),
+    /** 대표 관리자(ADMIN · OWNER) 계정은 활성 대표 관리자만 끈다 (#236). 지금은 직원 관리 권한이 대표 관리자에게만 있어 메서드 보안 뒤의 이중 방어다. */
+    ADMIN_DEACTIVATION_FORBIDDEN("AUTH_046", "이 계정을 비활성화할 권한이 없습니다.", HttpStatus.FORBIDDEN),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
     SOCIAL_PROVIDER_UNSUPPORTED("AUTH_050", "지원하지 않는 소셜 로그인 제공자입니다.", HttpStatus.BAD_REQUEST),

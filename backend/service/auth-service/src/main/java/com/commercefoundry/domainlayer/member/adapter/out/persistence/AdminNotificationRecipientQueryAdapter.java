@@ -15,9 +15,10 @@ public class AdminNotificationRecipientQueryAdapter implements AdminNotification
     private final MemberRepository memberRepository;
 
     @Override
-    public List<Long> findActiveAdminIdsAfter(long afterId, int size) {
+    public List<Long> findActiveOwnerIdsAfter(long afterId, int size) {
         // List + limit: count 질의 · 전체 회원/개인정보 로딩 · 운영자별 단건 조회 없이 한 번 읽는다.
-        return memberRepository.findByRoleAndDeactivatedAtIsNullAndIdGreaterThanOrderByIdAsc(MemberRole.ADMIN, afterId, PageRequest.of(0, size))
+        // 시스템 알림은 대표 관리자(기존 ADMIN · OWNER)만 받는다 — 매니저 · 스태프에게 운영 경보를 넓히지 않는다 (#236).
+        return memberRepository.findByRoleInAndDeactivatedAtIsNullAndIdGreaterThanOrderByIdAsc(MemberRole.OWNER_ROLES, afterId, PageRequest.of(0, size))
             .stream().map(MemberRepository.AdminRecipientIdView::getId).toList();
     }
 }

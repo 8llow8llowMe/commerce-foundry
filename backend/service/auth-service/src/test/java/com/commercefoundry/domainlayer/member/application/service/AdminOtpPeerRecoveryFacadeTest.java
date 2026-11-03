@@ -52,10 +52,10 @@ class AdminOtpPeerRecoveryFacadeTest {
         new AdminOtpAdminPresenter(), Clock.fixed(NOW, ZoneOffset.UTC));
 
     private void validProof() {
-        given(accounts.findActiveAdmin(ACTOR)).willReturn(ACTOR_MEMBER);
+        given(accounts.findActiveOperator(ACTOR)).willReturn(ACTOR_MEMBER);
         given(accounts.passwordMatches(ACTOR_MEMBER, "current-password1")).willReturn(true);
         given(otp.resolveProof(ACTOR, "ABCDE-FGH23", NOW)).willReturn(PROOF);
-        given(accounts.findActiveAdmin(TARGET)).willReturn(TARGET_MEMBER);
+        given(accounts.findActiveOperator(TARGET)).willReturn(TARGET_MEMBER);
         given(otp.issueRecoveryCodes()).willReturn(ISSUED);
     }
 
@@ -71,7 +71,7 @@ class AdminOtpPeerRecoveryFacadeTest {
         order.verify(guard).admitAdminOtpPeerRecovery(ACTOR);
         order.verify(accounts).passwordMatches(ACTOR_MEMBER, "current-password1");
         order.verify(otp).resolveProof(ACTOR, "ABCDE-FGH23", NOW);
-        order.verify(accounts).findActiveAdmin(TARGET);
+        order.verify(accounts).findActiveOperator(TARGET);
         order.verify(otp).issueRecoveryCodes();
         order.verify(otp).recoverPeer(ACTOR, TARGET, "hash", PROOF, ISSUED.hashes(), NOW);
         order.verify(audit).adminOtpPeerRecovered(ACTOR, TARGET, true);
@@ -91,7 +91,7 @@ class AdminOtpPeerRecoveryFacadeTest {
     @Test
     @DisplayName("비밀번호가 틀리면 코드를 보거나 새 코드를 해시하지 않고 실패 감사한다")
     void wrongPassword() {
-        given(accounts.findActiveAdmin(ACTOR)).willReturn(ACTOR_MEMBER);
+        given(accounts.findActiveOperator(ACTOR)).willReturn(ACTOR_MEMBER);
         assertThatThrownBy(() -> facade.recover(ACTOR, TARGET, "bad-password", "123456"))
             .isInstanceOf(MemberException.class).extracting("errorCode").isEqualTo(MemberErrorCode.ADMIN_PASSWORD_MISMATCH);
         verify(audit).adminOtpPeerRecovered(ACTOR, TARGET, false);

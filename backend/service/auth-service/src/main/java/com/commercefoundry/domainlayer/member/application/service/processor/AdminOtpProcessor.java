@@ -204,8 +204,8 @@ public class AdminOtpProcessor {
         }
         long first = Math.min(actorMemberId, targetMemberId);
         long second = Math.max(actorMemberId, targetMemberId);
-        Member firstAdmin = lockedAdmin(first);
-        Member secondAdmin = lockedAdmin(second);
+        Member firstAdmin = lockedOperator(first);
+        Member secondAdmin = lockedOperator(second);
         Member actor = actorMemberId == first ? firstAdmin : secondAdmin;
         if (!actor.passwordHash().equals(verifiedPasswordHash)) {
             throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_MISMATCH);
@@ -221,9 +221,9 @@ public class AdminOtpProcessor {
         adminOtpRepositoryPort.replaceCredentialForRecovery(replacement, recoveryCodeHashes);
     }
 
-    private Member lockedAdmin(long memberId) {
+    private Member lockedOperator(long memberId) {
         return memberRepositoryPort.findByIdForUpdate(memberId)
-            .filter(Member::isActiveAdmin)
+            .filter(Member::isActiveOperator)
             .orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND));
     }
 

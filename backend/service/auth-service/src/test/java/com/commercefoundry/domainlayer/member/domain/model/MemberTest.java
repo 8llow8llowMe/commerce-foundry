@@ -4,10 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.security.principal.MemberRole;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -215,11 +220,76 @@ class MemberTest {
         assertThat(Member.restore(1L, "a@example.com", HASH, "관리자", null, MemberRole.ADMIN, 0L).isCustomer()).isFalse();
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "CUSTOMER, false, false",
+        "ADMIN,    true,  true",
+        "OWNER,    true,  true",
+        "MANAGER,  true,  false",
+        "STAFF,    true,  false"
+    })
+    @DisplayName("관리자 로그인은 운영자 역할 전체가 쓰고, 대표 관리자는 기존 ADMIN · OWNER 다 — 고객 계정은 관리자 로그인 대상이 아니다 (#6 · #236)")
+    void operatorAndOwnerRoles(MemberRole role, boolean operator, boolean owner) {
+        Member member = Member.restore(1L, "a@example.com", HASH, "운영", null, role, 0L);
+
+        assertThat(member.isOperator()).isEqualTo(operator);
+        assertThat(member.isOwner()).isEqualTo(owner);
+        assertThat(member.isActiveOperator()).isEqualTo(operator);
+        assertThat(member.isCustomer()).isEqualTo(!operator);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+    @DisplayName("운영자 역할 전체를 비활성화할 수 있고, 꺼진 운영자는 활성 운영자가 아니다 (#236)")
+    void operatorsCanBeDeactivated(MemberRole role) {
+        Member deactivated = Member.restore(1L, "a@example.com", HASH, "운영", null, role, 0L).deactivate(Instant.parse("2026-11-03T00:00:00Z"));
+
+        assertThat(deactivated.isOperator()).isTrue();
+        assertThat(deactivated.isActiveOperator()).isFalse();
+    }
+
     @Test
-    @DisplayName("관리자 로그인은 ADMIN 만 쓸 수 있다 — 고객 계정은 관리자 로그인 대상이 아니다 (#6)")
-    void onlyAdminCanUseAdminLogin() {
-        assertThat(Member.restore(1L, "a@example.com", HASH, "관리자", null, MemberRole.ADMIN, 0L).isAdmin()).isTrue();
-        assertThat(Member.restore(1L, "a@example.com", HASH, "홍길동", null, MemberRole.CUSTOMER, 0L).isAdmin()).isFalse();
+    @DisplayName("마지막 활성 대표 관리자 판정 — 다른 활성 대표 관리자(ADMIN · OWNER)가 있어야 끌 수 있고, 매니저 · 스태프 · 꺼진 대표 관리자는 세지 않는다 (#236)")
+    void lastActiveOwner() {
+        Member admin = operator(1L, MemberRole.ADMIN);
+        Member owner = operator(2L, MemberRole.OWNER);
+        Member manager = operator(3L, MemberRole.MANAGER);
+        Member staff = operator(4L, MemberRole.STAFF);
+        Member formerOwner = operator(5L, MemberRole.OWNER).deactivate(Instant.parse("2026-11-03T00:00:00Z"));
+
+        assertThat(Member.isLastActiveOwner(owner, List.of(owner, manager, staff, formerOwner))).isTrue();
+        assertThat(Member.isLastActiveOwner(owner, List.of(admin, owner, manager))).isFalse();
+        assertThat(Member.isLastActiveOwner(admin, List.of(admin, owner))).isFalse();
+        assertThat(Member.isLastActiveOwner(manager, List.of(owner, manager))).isFalse();
+        assertThat(Member.isLastActiveOwner(staff, List.of(staff))).isFalse();
+    }
+
+    @Test
+    @DisplayName("대표 관리자 계정은 활성 대표 관리자만 끈다 — 매니저 · 스태프 · 행위자 없음은 거절, 매니저 · 스태프 계정은 행위자를 따지지 않는다 (#236)")
+    void canBeDeactivatedBy() {
+        Member owner = operator(2L, MemberRole.OWNER);
+        Member manager = operator(3L, MemberRole.MANAGER);
+        Member formerAdmin = operator(6L, MemberRole.ADMIN).deactivate(Instant.parse("2026-11-03T00:00:00Z"));
+
+        assertThat(owner.canBeDeactivatedBy(Optional.of(operator(1L, MemberRole.ADMIN)))).isTrue();
+        assertThat(owner.canBeDeactivatedBy(Optional.of(owner))).isTrue();
+        assertThat(owner.canBeDeactivatedBy(Optional.of(manager))).isFalse();
+        assertThat(owner.canBeDeactivatedBy(Optional.of(operator(4L, MemberRole.STAFF)))).isFalse();
+        assertThat(owner.canBeDeactivatedBy(Optional.of(formerAdmin))).isFalse();
+        assertThat(owner.canBeDeactivatedBy(Optional.empty())).isFalse();
+        assertThat(manager.canBeDeactivatedBy(Optional.empty())).isTrue();
+    }
+
+    private static Member operator(long id, MemberRole role) {
+        return Member.restore(id, id + "@example.com", HASH, "운영", null, role, 0L);
+    }
+
+    @Test
+    @DisplayName("고객은 비활성화하지 않는다 — 호출 코드의 오류다")
+    void customerCannotBeDeactivated() {
+        Member customer = Member.restore(1L, "a@example.com", HASH, "홍길동", null, MemberRole.CUSTOMER, 0L);
+
+        assertThatThrownBy(() -> customer.deactivate(Instant.parse("2026-11-03T00:00:00Z"))).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Nested

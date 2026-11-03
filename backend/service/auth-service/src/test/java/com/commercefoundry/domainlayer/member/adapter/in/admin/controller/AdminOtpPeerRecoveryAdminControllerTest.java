@@ -17,6 +17,8 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -55,6 +57,20 @@ class AdminOtpPeerRecoveryAdminControllerTest {
         assertThat(result).headers().hasValue(HttpHeaders.CACHE_CONTROL, "no-store");
         assertThat(result).bodyJson().extractingPath("$.dataBody.recoveryCodes[0]").isEqualTo("JKLMP-QRST2");
         verify(useCase).recover(TestTokens.MEMBER_ID, 9L, "current-password1", "ABCDE-FGH23");
+    }
+
+    @Test
+    @DisplayName("보안 관리 권한(ADMIN_SECURITY_MANAGE)이 있는 OWNER 는 동료 OTP 를 복구한다 (#236)")
+    void ownerIsAllowed() {
+        assertThat(post(PATH, BODY, MemberRole.OWNER)).hasStatusOk();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+    @DisplayName("매니저 · 스태프는 동료 OTP 를 복구할 수 없다 — 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#236)")
+    void managerAndStaffAreForbidden(MemberRole role) {
+        SecurityEnvelopeAssertions.assertEnvelope(post(PATH, BODY, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(useCase);
     }
 
     @Test

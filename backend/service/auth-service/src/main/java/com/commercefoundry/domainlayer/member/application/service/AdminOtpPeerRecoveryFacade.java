@@ -49,12 +49,12 @@ public class AdminOtpPeerRecoveryFacade implements AdminOtpPeerRecoveryUseCase {
         }
         IssuedRecoveryCodes issued;
         try {
-            Member actor = adminAccountProcessor.findActiveAdmin(actorMemberId);
+            Member actor = adminAccountProcessor.findActiveOperator(actorMemberId);
             if (!adminAccountProcessor.passwordMatches(actor, currentPassword)) {
                 throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_MISMATCH);
             }
             AdminOtpProof proof = adminOtpProcessor.resolveProof(actorMemberId, code, clock.instant());
-            adminAccountProcessor.findActiveAdmin(targetMemberId);
+            adminAccountProcessor.findActiveOperator(targetMemberId);
             issued = adminOtpProcessor.issueRecoveryCodes();
             inOtpQueue(() -> adminOtpProcessor.recoverPeer(actorMemberId, targetMemberId, actor.passwordHash(), proof,
                 issued.hashes(), clock.instant()));

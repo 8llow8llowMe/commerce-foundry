@@ -24,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -34,7 +35,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
- * 어드민 감사 로그 조회의 HTTP 계약 — 권한(URL 규칙 + {@code hasRole('ADMIN')}), 조건 · 페이지 파라미터 검증 코드, 응답 모양.
+ * 어드민 감사 로그 조회의 HTTP 계약 — 권한(URL 규칙 + {@code AdminAuthority.SECURITY_READ}), 조건 · 페이지 파라미터 검증 코드, 응답 모양.
  * 슬라이스라 보안 구성을 직접 import 하고, 테스트 키로 서명한 실제 access 토큰을 보낸다.
  */
 @WebMvcTest(AdminAuditLogAdminController.class)
@@ -90,6 +91,20 @@ class AdminAuditLogAdminControllerTest {
         verify(adminAuditLogAdminUseCase).searchAuditLogs(
             new AdminAuditLogSearchCommand(AdminAuditAction.ADMIN_LOGIN, 7L, "member:7", AdminAuditResult.FAILURE, 1, 50)
         );
+    }
+
+    @Test
+    @DisplayName("보안 기록 조회 권한(ADMIN_SECURITY_READ)이 있는 OWNER 는 200 이다 (#236)")
+    void ownerIsAllowed() {
+        assertThat(get(PATH, MemberRole.OWNER)).hasStatusOk();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+    @DisplayName("매니저 · 스태프는 감사 로그를 볼 수 없다 — 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#236)")
+    void managerAndStaffAreForbidden(MemberRole role) {
+        SecurityEnvelopeAssertions.assertEnvelope(get(PATH, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(adminAuditLogAdminUseCase);
     }
 
     @Test

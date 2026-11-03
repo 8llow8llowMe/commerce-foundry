@@ -329,6 +329,38 @@ class AdminOtpProcessorTest {
     }
 
     @Test
+    @DisplayName("매니저도 본인 OTP 를 등록 시작 · 확인한다 — 역할과 무관하게 자기 memberId 로만 저장한다 (#236)")
+    void managerEnrollsOwnOtp() {
+        long managerId = MEMBER_ID + 10;
+
+        AdminOtpEnrollmentInfo info = processor.startEnrollment(managerId, "manager@example.com", NOW);
+        processor.confirm(managerId, SECRET, NOW_STEP, NOW, processor.issueRecoveryCodes().hashes());
+
+        assertThat(info.otpauthUri()).contains("manager%40example.com");
+        assertThat(processor.isEnrolled(managerId)).isTrue();
+        assertThat(processor.isEnrolled(MEMBER_ID)).isFalse();
+        assertThat(repository.countUnusedRecoveryCodes(managerId)).isEqualTo(RecoveryCode.COUNT);
+    }
+
+    @Test
+    @DisplayName("동료 복구 대상이 매니저여도 활성 운영자라 자격을 교체한다 (#236)")
+    void peerRecoveryAcceptsManagerTarget() {
+        long targetId = MEMBER_ID + 1;
+        Member actor = admin(MEMBER_ID, "actor-hash");
+        Member manager = Member.restore(targetId, "manager@example.com", "target-hash", "매니저", null, MemberRole.MANAGER, 0L);
+        given(memberRepository.findByIdForUpdate(MEMBER_ID)).willReturn(Optional.of(actor));
+        given(memberRepository.findByIdForUpdate(targetId)).willReturn(Optional.of(manager));
+        repository.save(AdminOtpCredential.confirm(7001L, MEMBER_ID, SECRET, NOW_STEP - 5, NOW));
+        repository.save(AdminOtpCredential.confirm(7002L, targetId, SECRET, NOW_STEP - 5, NOW));
+        AdminOtpProof proof = processor.resolveProof(MEMBER_ID, Totp.code(SECRET, NOW_STEP), NOW);
+
+        processor.recoverPeer(MEMBER_ID, targetId, actor.passwordHash(), proof, processor.issueRecoveryCodes().hashes(), NOW);
+
+        assertThat(repository.findByMemberId(targetId).orElseThrow().id()).isNotEqualTo(7002L);
+        assertThat(repository.countUnusedRecoveryCodes(targetId)).isEqualTo(RecoveryCode.COUNT);
+    }
+
+    @Test
     @DisplayName("행위자 비밀번호가 BCrypt 확인 뒤 바뀌면 잠금 아래 해시 재확인에서 거절하고 OTP를 소비하지 않는다")
     void peerRecoveryRejectsChangedActorPassword() {
         long targetId = MEMBER_ID + 1;

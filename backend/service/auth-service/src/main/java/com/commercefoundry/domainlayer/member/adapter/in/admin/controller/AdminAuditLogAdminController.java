@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.member.application.model.AdminAuditAction
 import com.commercefoundry.domainlayer.member.application.model.AdminAuditResult;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminAuditLogAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.AdminAuthority;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -54,7 +55,7 @@ public class AdminAuditLogAdminController {
             + "actorDisplayName 은 행위한 관리자의 마스킹 이름, targetDisplayName 은 대상이 member:<id> 일 때만 그 회원의 마스킹 이름이다. 모르면 null. "
             + "이 조회 자체는 감사 로그에 남지 않는다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SECURITY_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<AdminAuditLogAdminItem>>> searchAuditLogs(
         @Parameter(description = "행위 — ADMIN_LOGIN · ADMIN_LOGIN_PASSWORD_VERIFIED · MEMBER_SEARCH · ADMIN_CREATE · ADMIN_DEACTIVATE · ADMIN_PASSWORD_CHANGE · "
