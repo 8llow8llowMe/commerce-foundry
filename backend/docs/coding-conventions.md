@@ -284,6 +284,9 @@ public final class ProductValidationMessage {
     (`SkuRepository#findByIdForUpdate` · 상한 2000ms · 초과 `SKU_COST_005`, #361 — 합계가 아니라 "최신보다 뒤" 판정이지만 같은 이유다).
     auth 관리자 OTP 는 복구 코드 교체 · 해제를 자격 행 잠금으로 줄 세운다 (`AdminOtpCredentialRepository#findByMemberIdForUpdate` · 상한 2000ms · 초과 `AUTH_044`, #238 —
     교체가 해제와 엇갈려 자격 없는 코드가 남지 않게. 자격이 없으면 교체는 `AUTH_036`).
+  - support 비회원 대화 작업은 자격 행을 `PESSIMISTIC_WRITE` NOWAIT(`lock.timeout=0`)로 잠그고 refresh한 뒤 만료·폐기를 확인한다.
+    자격 폐기와 같은 DB 트랜잭션 안에서 순서를 정하며, 잠금 순서는 guest session → conversation이다. 비회원 조회도 짧은 쓰기 트랜잭션이고
+    동일 자격의 동시 호출은 `GUEST_SESSION_004` 409가 될 수 있다. 세부와 재시도 제한은 `support-conversation-guide.md`를 따른다(#470 PR-B1b).
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.

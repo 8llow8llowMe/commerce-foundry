@@ -36,7 +36,12 @@ ACTIVE는 `revokedAt == null && now < expiresAt`이다. null·잘못된 형식·
 
 ## 후속 범위와 검증
 
-HTTP·WebSocket·Redis·Gateway·요청 제한·회원 연결·대화 모델·AI 호출은 후속이다.
+PR-B1b의 대화 내부 기반은 [support-conversation-guide.md](support-conversation-guide.md)를 따른다.
+`resolveForUpdate`는 MANDATORY 쓰기 트랜잭션에서 NOWAIT guest 행 락과 명시적 refresh를 완료한 뒤
+Clock을 읽어 만료·폐기를 판정하며, domain `GuestSessionIdentity(id, expiresAt)`만 반환한다.
+락 조회·refresh 잠금 실패는 원인 예외를 보존하지 않은 409 GUEST_SESSION_004다.
+기존 resolve의 시점 인증과 revoke의 낙관적 UPDATE 계약은 유지한다.
+HTTP·WebSocket·Redis·Gateway·요청 제한·회원 연결·AI 호출은 후속이다.
 외부 발급 API는 PR-B2 요청 제한과 함께 제공한다. 7일 자격 증명 만료와 비회원 대화 30일 보존은 다른 정책이며,
 물리 삭제·보존 스케줄러는 후속에서 대화 참조와 함께 설계한다. #470 전체는 OPEN을 유지한다.
 H2와 PostgreSQL이 같은 영속성 계약을 실행한다. PG17 생성 스냅숏을 init script로 적용하고 validate하며,

@@ -8,6 +8,8 @@ import com.commercefoundry.domainlayer.guestsession.application.port.out.GuestSe
 import com.commercefoundry.domainlayer.guestsession.application.port.out.GuestSessionStorePort;
 import com.commercefoundry.domainlayer.guestsession.domain.model.GuestSession;
 import com.commercefoundry.domainlayer.guestsession.domain.model.GuestSessionToken;
+import com.commercefoundry.domainlayer.guestsession.domain.model.GuestSessionIdentity;
+import org.springframework.transaction.annotation.Propagation;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
 import java.time.Duration;
@@ -50,6 +52,19 @@ public class GuestSessionProcessor {
             throw unavailable();
         }
         return new GuestSessionResolvedInfo(session.id(), session.expiresAt());
+    }
+
+    /** Clock is read only after lock acquisition and persistence-context refresh. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public GuestSessionIdentity resolveForUpdate(String token) {
+        if (!GuestSessionToken.isCanonical(token)) {
+            throw unavailable();
+        }
+        GuestSession session = store.findByTokenHashForUpdate(crypto.fingerprint(token)).orElseThrow(GuestSessionProcessor::unavailable);
+        if (!session.isActive(now())) {
+            throw unavailable();
+        }
+        return new GuestSessionIdentity(session.id(), session.expiresAt());
     }
 
     /** Privileged internal operation; public authorization belongs to a future entry point. */
