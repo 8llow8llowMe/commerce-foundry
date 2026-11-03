@@ -114,6 +114,54 @@
     comment on column support.knowledge_revision.version is
         '리비전 낙관적 락 버전';
 
+    create table support.support_conversation (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        channel varchar(20) not null check ((channel in ('WEB'))),
+        guest_session_id bigint,
+        last_seq bigint not null,
+        locale varchar(2) not null check ((locale in ('KO','EN'))),
+        member_id bigint,
+        status varchar(20) not null check ((status in ('AI_ACTIVE','WAITING_AGENT','HUMAN_ACTIVE','RESOLVED','CLOSED'))),
+        version bigint not null,
+        primary key (id),
+        constraint ck_support_conversation_state check (id > 0 and last_seq >= 0 and ((member_id is not null and member_id > 0 and guest_session_id is null) or (member_id is null and guest_session_id is not null and guest_session_id > 0)))
+    );
+
+    comment on table support.support_conversation is
+        '고객 상담 대화';
+
+    comment on column support.support_conversation.id is
+        '대화 아이디 (Snowflake)';
+
+    comment on column support.support_conversation.created_at is
+        '생성 시각';
+
+    comment on column support.support_conversation.updated_at is
+        '수정 시각';
+
+    comment on column support.support_conversation.channel is
+        '상담 채널';
+
+    comment on column support.support_conversation.guest_session_id is
+        '비회원 세션 아이디 (FK: support_guest_session.id)';
+
+    comment on column support.support_conversation.last_seq is
+        '마지막 메시지 순번, 신규 대화는 0';
+
+    comment on column support.support_conversation.locale is
+        '상담 언어';
+
+    comment on column support.support_conversation.member_id is
+        '회원 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column support.support_conversation.status is
+        '상담 상태';
+
+    comment on column support.support_conversation.version is
+        '낙관적 락 버전';
+
     create table support.support_guest_session (
         id bigint not null,
         created_at timestamp(6) with time zone not null,

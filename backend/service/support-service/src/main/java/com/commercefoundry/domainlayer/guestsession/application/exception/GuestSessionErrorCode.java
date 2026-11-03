@@ -9,7 +9,8 @@ import org.springframework.http.HttpStatus;
 public enum GuestSessionErrorCode {
     UNAVAILABLE("GUEST_SESSION_001", "Guest session is unavailable.", HttpStatus.UNAUTHORIZED),
     CONCURRENTLY_CHANGED("GUEST_SESSION_002", "Guest session was concurrently changed.", HttpStatus.CONFLICT),
-    TOKEN_COLLISION("GUEST_SESSION_003", "Guest session could not be issued.", HttpStatus.CONFLICT);
+    TOKEN_COLLISION("GUEST_SESSION_003", "Guest session could not be issued.", HttpStatus.CONFLICT),
+    LOCK_UNAVAILABLE("GUEST_SESSION_004", "Guest session is busy.", HttpStatus.CONFLICT);
 
     private final String code;
     private final String message;

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -93,6 +94,30 @@ class GuestSessionProcessorTest {
         verify(store).saveAndFlush(argThat(session -> session.revokedAt().equals(NOW.truncatedTo(java.time.temporal.ChronoUnit.MICROS))));
         when(store.findById(2)).thenReturn(Optional.empty());
         unavailable(() -> processor.revoke(2));
+    }
+
+    @Test
+    void lockedResolutionAuthenticatesOnlyAfterTheStoreHasAcquiredAndRefreshedTheRow() {
+        var active = new GuestSession(1, HASH, NOW.plusSeconds(60), null, 0L);
+        when(store.findByTokenHashForUpdate(HASH)).thenReturn(Optional.of(active));
+        var identity = processor.resolveForUpdate(TOKEN);
+        assertThat(identity.id()).isEqualTo(1);
+        assertThat(identity.expiresAt()).isEqualTo(active.expiresAt());
+        var order = inOrder(crypto, store, clock);
+        order.verify(crypto).fingerprint(TOKEN);
+        order.verify(store).findByTokenHashForUpdate(HASH);
+        order.verify(clock).instant();
+        verify(store, never()).findByTokenHash(any());
+        verify(store, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void lockedResolutionRejectsMalformedWithoutClockOrStoreAndChecksNormalizedExpiry() {
+        unavailable(() -> processor.resolveForUpdate("malformed"));
+        verifyNoInteractions(crypto, store, clock);
+        var boundary = new GuestSession(1, HASH, NOW.truncatedTo(java.time.temporal.ChronoUnit.MICROS), null, 0L);
+        when(store.findByTokenHashForUpdate(HASH)).thenReturn(Optional.of(boundary));
+        unavailable(() -> processor.resolveForUpdate(TOKEN));
     }
 
     private void unavailable(Runnable operation) {

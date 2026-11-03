@@ -5,6 +5,7 @@ import java.util.Optional;
 
 public interface GuestSessionStorePort {
     Optional<GuestSession> findByTokenHash(String tokenHash);
+    Optional<GuestSession> findByTokenHashForUpdate(String tokenHash);
     Optional<GuestSession> findById(long id);
     GuestSession saveAndFlush(GuestSession session);
 }
