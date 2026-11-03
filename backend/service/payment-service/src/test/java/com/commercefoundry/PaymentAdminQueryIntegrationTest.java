@@ -2,6 +2,8 @@ package com.commercefoundry;
 
 import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.ID;
 import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.entity;
+import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.refundHistoryPayments;
+import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.refundHistoryCancellations;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -82,6 +84,43 @@ class PaymentAdminQueryIntegrationTest {
         em.flush();
         em.clear();
         assertThat(em.find(PaymentEntity.class, ID + 1).getVersion()).isEqualTo(version);
+    }
+
+    @Test
+    void refundFailedMeansAnyRejectedHistoryAndKeepsActualStatusAfterLaterSuccess() {
+        refundHistoryPayments().forEach(em::persist);
+        refundHistoryCancellations().forEach(em::persist);
+        em.flush();
+        Long version = em.find(PaymentEntity.class, ID + 2).getVersion();
+        em.clear();
+        var stats = emf.unwrap(SessionFactory.class).getStatistics();
+        stats.clear();
+        var history = useCase.search(command(PaymentAdminStatusFilter.REFUND_FAILED, null, false, 0, 20));
+        assertThat(history.contents()).extracting(item -> item.paymentId()).containsExactly("" + (ID + 2), "" + (ID + 1));
+        assertThat(history.totalElements()).isEqualTo(2);
+        assertThat(history.contents().getFirst().status().code()).isEqualTo("CANCELED");
+        assertThat(stats.getPrepareStatementCount()).isEqualTo(2);
+        em.flush();
+        assertThat(stats.getEntityUpdateCount()).isZero();
+        assertThat(stats.getEntityInsertCount()).isZero();
+        assertThat(stats.getEntityDeleteCount()).isZero();
+        em.clear();
+        assertThat(em.find(PaymentEntity.class, ID + 2).getVersion()).isEqualTo(version);
+
+        var one = useCase.search(command(PaymentAdminStatusFilter.REFUND_FAILED, 101L, false, 0, 20));
+        assertThat(one.contents()).singleElement().satisfies(item -> assertThat(item.status().code()).isEqualTo("DONE"));
+        assertThat(one.totalElements()).isEqualTo(1); // two REJECTED rows still mean one payment
+        assertThat(useCase.search(command(PaymentAdminStatusFilter.REFUND_FAILED, null, null, 0, 20)).totalElements()).isEqualTo(3);
+        assertThat(useCase.search(command(PaymentAdminStatusFilter.REFUND_FAILED, null, true, 0, 20)).contents()).singleElement();
+        assertThat(useCase.search(command(PaymentAdminStatusFilter.REFUND_FAILED, 103L, false, 0, 20)).contents()).isEmpty();
+        var first = useCase.search(command(PaymentAdminStatusFilter.REFUND_FAILED, null, false, 0, 1));
+        assertThat(first.contents()).singleElement().satisfies(item -> assertThat(item.paymentId()).isEqualTo("" + (ID + 2)));
+        var later = useCase.search(command(PaymentAdminStatusFilter.REFUND_FAILED, null, false, 4, 1));
+        assertThat(later.contents()).isEmpty();
+        assertThat(later.totalElements()).isEqualTo(2);
+        assertThat(useCase.search(command(PaymentAdminStatusFilter.CANCELED, null, false, 0, 20)).contents()).singleElement();
+        assertThat(useCase.search(command(PaymentAdminStatusFilter.FAILED, null, false, 0, 20)).contents()).singleElement()
+            .satisfies(item -> assertThat(item.paymentId()).isEqualTo("" + (ID + 5)));
     }
 
     @Test

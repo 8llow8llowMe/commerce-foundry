@@ -1060,7 +1060,7 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
 
 | 파라미터 | 규칙 | 오류 |
 |---|---|---|
-| `status` | 현재 `PaymentStatus` 10개 상태 중 하나. 미지정이면 전체 | 변환 실패 400 `PAYMENT_198` |
+| `status` | `PaymentStatus` 10개 상태 또는 조회 전용 `REFUND_FAILED`(취소거절 이력). 미지정이면 전체 | 변환 실패 400 `PAYMENT_198` |
 | `orderId` | 선택적 양의 주문 아이디. 다른 서비스는 호출하지 않고 저장된 아이디만 비교 | 400 `PAYMENT_102` · `198` |
 | `orderSynced` | 선택적 boolean. 저장된 주문 성공 회신 수신 여부로 거른다 | 변환 실패 400 `PAYMENT_198` |
 | `page` · `size` | 0부터 · 기본 20, size 1~100. 고정 결제 아이디 내림차순 | 400 `PAYMENT_116` · `117` |
@@ -1076,7 +1076,11 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
 - `PaymentAdminFacade`의 읽기 전용 REPEATABLE_READ에서 목록/count를 같은 조건으로 읽으며 최대 2회 질의다. N+1과 스키마 변경은 없다.
   주문 조건은 `idx_payment_order_id`, 상태+회신 조건은 `idx_payment_status_order_synced_id`, 전체 최신순은 PK를 활용할 수 있다.
   상태만 거르면 중간 회신 컬럼 때문에 별도 정렬이 필요할 수 있으며 초기 운영자 조회 규모에서 수용한다.
-- `REFUND_FAILED`는 현재 결제 상태에 없으므로 400 `PAYMENT_198`이다. 취소/환불 모델의 실패 필터, 취소 · 웹훅 · 자동 복구 · 알림은 #15의 후속 범위다.
+- `status=REFUND_FAILED`는 조회 전용 **취소거절 이력** 필터다. 해당 결제의 `payment_cancel.status=REJECTED` 원장이 하나 이상 존재하면 포함한다.
+  PENDING 미확정 · SUCCEEDED만 있는 결제는 제외하며, 다른 클레임의 후속 성공 뒤에도 거절 이력이 있으면 포함한다. 현재 미처리 환불/재시도 필요 여부를 판정하지 않는다.
+  응답 `status`는 실제 PaymentStatus metadata(DONE · CANCELED 등)를 유지한다. 거절 원장이 여러 개여도 결제는 한 번만 나오며 `orderId` · `orderSynced`와 AND로 조합한다.
+  기존 페이지 · ID 내림차순 · 목록/count 동일 조건을 유지하고, 알 수 없는 상태 입력은 계속 400 `PAYMENT_198`이다. 새 상태 · 엔티티 · DDL · PG 호출은 없다.
+  FE는 선택 항목을 "취소거절 이력"으로 표시하고 실제 응답 상태를 사용한다(계약 검토자 `seonghoho`). 웹훅 · 자동 복구 · 알림은 #15 후속 범위다.
 
 ### 2-16. 어드민 주문 관리 (order-service, #17 PR-1)
 

@@ -201,7 +201,12 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 운영자는 `GET /api/v1/admin/payments`로 기존 결제 상태(UNKNOWN 포함) · 주문 아이디 · 주문 성공 회신 여부를 조합해 페이지 조회한다.
 계약은 `api-design-guide.md` §2-15이며 ADMIN 전용이다. 결제 시도 원금·상태·시각과 미확정 이유·주문 회신 거절 코드를 읽기만 하고, 결제키·고객 멱등 키·PG 원문·회원 개인정보를 싣지 않는다.
 미확정 이유는 해결된 결제에도 이력으로 남을 수 있다. `orderSynced=false` 전체가 복구 대상은 아니며 DONE + false 중 null 거절 코드는 회신 미확인, 코드가 있으면 주문 거절 회신이다.
-이 API는 PG 조회나 승인 재시도, 주문 이벤트 재발행을 하지 않는다. REFUND_FAILED는 아직 모델에 없어 지원하지 않으며 취소/환불 실패 조회·자동 복구·웹훅·알림은 후속이다.
+`status=REFUND_FAILED`는 조회 전용 **취소거절 이력** 필터다. PG 취소가 확정 거절된 원장(`payment_cancel.status=REJECTED`)이 하나 이상 있는 결제를 조회한다.
+실제 결제 상태를 새로 만들지 않으며 응답의 `status`는 DONE · CANCELED 등 저장된 결제 상태 metadata 그대로다. PENDING 미확정은 이 필터에 포함하지 않는다.
+다른 클레임의 후속 취소가 성공해 CANCELED가 되어도 거절 이력이 있으면 포함한다. 현재 미처리 환불이나 재시도 필요 여부를 판정하지 않는다.
+중복 거절 원장이 있어도 결제는 한 번만 반환하며 `orderId` · `orderSynced`와 AND로 조합한다. 기존 목록 · count 두 질의에 같은 상관 EXISTS를 적용하고
+`idx_payment_cancel_payment_id`를 사용 가능한 기존 인덱스로 유지한다. 새 DDL · PG 조회 · 승인/취소 재시도 · 주문 이벤트 재발행은 없다.
+FE는 새 필터를 "취소거절 이력"으로 표시하고 응답 상태를 그대로 사용한다. 계약 검토자는 `seonghoho`다. 자동 복구 · 웹훅 · 알림은 후속이다.
 
 ## 4. 결과 미확정(UNKNOWN) 처리
 
