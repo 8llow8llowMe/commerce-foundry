@@ -114,6 +114,43 @@
     comment on column support.knowledge_revision.version is
         '리비전 낙관적 락 버전';
 
+    create table support.support_guest_session (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        expires_at timestamp(6) with time zone not null,
+        revoked_at timestamp(6) with time zone,
+        token_hash varchar(43) not null,
+        version bigint not null,
+        primary key (id),
+        constraint uk_support_guest_session_token_hash unique (token_hash),
+        constraint ck_support_guest_session_state check (id > 0 and length(token_hash) = 43)
+    );
+
+    comment on table support.support_guest_session is
+        '비회원 상담 자격 증명';
+
+    comment on column support.support_guest_session.id is
+        '비회원 세션 아이디 (Snowflake)';
+
+    comment on column support.support_guest_session.created_at is
+        '생성 시각';
+
+    comment on column support.support_guest_session.updated_at is
+        '수정 시각';
+
+    comment on column support.support_guest_session.expires_at is
+        '자격 증명 절대 만료 시각 (UTC)';
+
+    comment on column support.support_guest_session.revoked_at is
+        '자격 증명 폐기 시각 (UTC)';
+
+    comment on column support.support_guest_session.token_hash is
+        'SHA-256 자격 증명 지문, 토큰 원문 미저장';
+
+    comment on column support.support_guest_session.version is
+        '낙관적 락 버전';
+
     create index idx_knowledge_document_locale_published_revision_id
        on support.knowledge_document (locale, published_revision, id);
 

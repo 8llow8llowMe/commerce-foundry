@@ -2,6 +2,8 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.guestsession.application.port.in.GuestSessionInternalUseCase;
+import com.commercefoundry.domainlayer.guestsession.application.port.out.GuestSessionCryptoPort;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.redis.config.RedisStartupGuard;
 import com.querydsl.jpa.impl.JPAQueryFactory;
@@ -47,6 +49,8 @@ class SupportServiceApplicationTests {
     void contextLoads() {
         assertThat(applicationContext.getBeanNamesForType(SnowflakeIdGenerator.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(JPAQueryFactory.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(GuestSessionInternalUseCase.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(GuestSessionCryptoPort.class)).hasSize(1);
         assertThat(applicationContext.containsBean("jpaAuditingHandler")).isTrue();
         assertThat(applicationContext.getBeansOfType(GroupedOpenApi.class).values())
             .extracting(GroupedOpenApi::getGroup)
