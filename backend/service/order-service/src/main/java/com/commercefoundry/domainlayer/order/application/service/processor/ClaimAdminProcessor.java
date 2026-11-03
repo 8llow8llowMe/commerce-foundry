@@ -4,7 +4,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCod
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.info.ClaimAdminSummaryInfo;
 import com.commercefoundry.domainlayer.order.application.model.ClaimAdminFilter;
-import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.ClaimAdminQueryPort;
 import com.commercefoundry.domainlayer.order.application.info.ClaimAdminDetailInfo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -15,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @Transactional(readOnly = true, timeout = 5)
 public class ClaimAdminProcessor {
-    private final ClaimRepositoryPort claims;
+    private final ClaimAdminQueryPort claims;
 
     public Page<ClaimAdminSummaryInfo> search(ClaimAdminFilter filter) {
         return claims.findAdminSummaryPage(filter.orderId(), filter.type() == null ? null : filter.type().toDomain(),
