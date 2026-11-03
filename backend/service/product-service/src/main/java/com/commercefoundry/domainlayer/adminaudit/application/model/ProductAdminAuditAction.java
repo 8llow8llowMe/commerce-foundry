@@ -18,6 +18,9 @@ public enum ProductAdminAuditAction {
 
     PRODUCT_OPTIONS_REPLACE,
 
+    /** 맞춤 제작 설정 전체 교체 (#9 PR-B). 대상 {@code product:<id>} */
+    PRODUCT_CUSTOM_ORDER_REPLACE,
+
     PRODUCT_IMAGES_REPLACE,
 
     /** 상품 기본 판매가 · 정가 전체 교체. 대상 {@code product:<id>} */

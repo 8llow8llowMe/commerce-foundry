@@ -7,7 +7,7 @@ import org.springframework.http.HttpStatus;
 /**
  * 상품 도메인 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link ProductValidationMessage} 에 둔다.
  *
- * <p>대역 — {@code 00x} 없는 리소스(404), {@code 01x} 어드민 상품 쓰기(#9 — 삭제 010, 등록 012~016, 후속 수정 011 · 015 · 017),
+ * <p>대역 — {@code 00x} 없는 리소스(404), {@code 01x} 어드민 상품 쓰기(#9 — 삭제 010, 등록 012~016, 맞춤 제작 설정 011(#9 PR-B), 후속 015 · 017),
  * {@code 020~031} 재고(조정 · 선점 · 복원 충돌과 부족, 409), {@code 032~036} 상품 이미지 업로드 · 스토리지(#9 F), {@code 037} · {@code 038} 등록 필드 검증, {@code 039} 온보딩 memberId 검증(#448), {@code 040~045} 어드민 카테고리 관리,
  * {@code 074~099} · {@code 169} · {@code 1xx} 요청 검증(400). {@code 046~073} 은 메인 전시({@code DisplayErrorCode}) · 사이즈표({@code SizeChartErrorCode})가 쓴다 —
  * 2026-10-20 에 승인한 업로드 050~054 · 검증 131~ 은 먼저 쓰여 032~036 · 074~ 로 옮겼다.
@@ -26,6 +26,11 @@ public enum ProductErrorCode {
 
     /** 읽은 상품 버전이 merge · flush 전에 바뀌었다. 현재 상태를 다시 읽고 재시도한다. */
     PRODUCT_MODIFICATION_CONFLICT("PRODUCT_010", "상품이 동시에 변경되었습니다. 다시 조회한 뒤 시도해 주세요.", HttpStatus.CONFLICT),
+    /**
+     * 맞춤 제작 입력 항목 구성이 맞지 않는다 (#9 PR-B) — 같은 키 두 번, 숫자 범위 · 증분, 글자 입력의 최대 글자 수.
+     * 주문이 같은 정의로 입력을 검증하므로(order-flow-guide §2-2 4번) 주문이 받을 수 없는 정의를 저장하지 않는다. 메시지에 이유를 싣는다.
+     */
+    PRODUCT_CUSTOM_ORDER_INVALID("PRODUCT_011", "맞춤 제작 입력 항목 설정이 올바르지 않습니다: %s", HttpStatus.BAD_REQUEST),
 
     /** 상품 등록 본문의 대표 · 진열 카테고리 중 없는 것이 있다. 본문 참조라 400 이다 — 메시지에 없는 아이디를 모두 싣는다. */
     PRODUCT_CATEGORY_NOT_FOUND("PRODUCT_012", "존재하지 않는 카테고리가 있습니다: %s", HttpStatus.BAD_REQUEST),

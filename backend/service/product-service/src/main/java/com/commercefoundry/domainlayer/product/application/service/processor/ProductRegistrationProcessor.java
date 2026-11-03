@@ -19,12 +19,14 @@ public class ProductRegistrationProcessor {
     private final ProductWriteProcessor productWriteProcessor;
     private final ProductAdminDetailProcessor productAdminDetailProcessor;
     private final ProductImageRepositoryPort productImageRepositoryPort;
+    private final ProductCustomOrderProcessor productCustomOrderProcessor;
 
     @Transactional(propagation = Propagation.MANDATORY)
     public ProductAdminDetailInfo register(long productId, ProductCreateCommand command, String html, List<Long> categoryIds, List<ProductImage> images,
                                          CategoryTree lockedCategories) {
         productWriteProcessor.requireCategories(lockedCategories, categoryIds);
         productWriteProcessor.create(command, html, categoryIds, productId);
+        productCustomOrderProcessor.insertForNewProduct(productId, command.customOrder());
         productImageRepositoryPort.insertAll(images);
         return productAdminDetailProcessor.getProduct(productId);
     }

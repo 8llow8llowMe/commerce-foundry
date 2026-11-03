@@ -104,7 +104,8 @@ public class ProductWriteProcessor {
         productRepositoryPort.insert(new Product(
             productId, command.categoryId(), command.name(), command.summary(), descriptionHtml,
             command.saleStatus(), command.visible(), command.salePrice(), command.listPrice(), command.maxQuantityPerOrder(),
-            false, null, null, command.preorder(), command.expectedShipDate(), null, null, command.createdByMemberId()
+            command.customOrder().enabled(), command.customOrder().notice(), command.customOrder().leadTimeDays(),
+            command.preorder(), command.expectedShipDate(), null, null, command.createdByMemberId()
         ));
         productCategoryRepositoryPort.insertLinks(productId, categoryIds, categoryIds.stream().map(id -> snowflakeIdGenerator.generateId()).toList());
 

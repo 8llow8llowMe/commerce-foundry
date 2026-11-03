@@ -101,7 +101,11 @@ public record ProductCreateRequest(
 
     @Schema(description = "발급받아 업로드한 정지 이미지. 최대 8장, 대표는 한 장. 배열 순서로 노출한다", nullable = true)
     @Size(max = 8, message = ProductValidationMessage.PRODUCT_IMAGES_INVALID)
-    List<@NotNull(message = ProductValidationMessage.PRODUCT_IMAGES_INVALID) @Valid ImageRequest> images
+    List<@NotNull(message = ProductValidationMessage.PRODUCT_IMAGES_INVALID) @Valid ImageRequest> images,
+
+    @Schema(description = "맞춤 제작 설정. 생략하면 맞춤 제작 꺼짐 · 입력 항목 없음", nullable = true)
+    @Valid
+    CustomOrderSettingsRequest customOrder
 ) {
 
     @JsonIgnore
@@ -130,6 +134,7 @@ public record ProductCreateRequest(
             .skus(skus.stream().map(SkuRequest::toCommand).toList())
             .images(images == null ? List.of() : images.stream().map(ImageRequest::toCommand).toList())
             .createdByMemberId(createdByMemberId)
+            .customOrder(customOrder == null ? null : customOrder.toCommand())
             .build();
     }
 

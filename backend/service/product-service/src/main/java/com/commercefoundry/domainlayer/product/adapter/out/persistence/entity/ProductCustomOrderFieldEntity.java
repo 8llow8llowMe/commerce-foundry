@@ -15,6 +15,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Persistable;
 
 /**
  * 입력 범위 값(min · max · step)은 금액이 아니라 치수 · 글자 수라 {@code numeric(10,2)} 로 둔다.
@@ -29,7 +30,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
-public class ProductCustomOrderFieldEntity extends BaseEntity {
+public class ProductCustomOrderFieldEntity extends BaseEntity implements Persistable<Long> {
 
     @Id
     @Column(name = "id", comment = "입력 항목 아이디 (Snowflake)")
@@ -68,4 +69,10 @@ public class ProductCustomOrderFieldEntity extends BaseEntity {
 
     @Column(name = "display_order", nullable = false, comment = "노출 순서")
     private int displayOrder;
+
+    /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다(새 행은 persist, #9 PR-B). */
+    @Override
+    public boolean isNew() {
+        return getCreatedAt() == null;
+    }
 }

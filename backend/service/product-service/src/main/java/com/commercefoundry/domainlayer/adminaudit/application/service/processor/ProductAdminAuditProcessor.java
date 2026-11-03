@@ -31,6 +31,10 @@ public class ProductAdminAuditProcessor {
             token == null ? null : AdminAuditLog.target(PRODUCT_IMAGE_UPLOAD, token.toString()), succeeded);
     }
 
+    public void productCustomOrderReplaced(long actorMemberId, long productId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_CUSTOM_ORDER_REPLACE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
+    }
+
     public void productOptionsReplaced(long actorMemberId, long productId, boolean succeeded) {
         write(ProductAdminAuditAction.PRODUCT_OPTIONS_REPLACE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
     }
