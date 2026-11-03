@@ -1,5 +1,6 @@
 package com.commercefoundry.security.principal;
 
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
@@ -22,7 +23,12 @@ public final class MemberJwtAuthenticationConverter implements Converter<Jwt, Ab
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
         MemberPrincipal principal = toPrincipal(jwt);
-        return UsernamePasswordAuthenticationToken.authenticated(principal, null, List.of(new SimpleGrantedAuthority(principal.role().authority())));
+        List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+        authorities.add(new SimpleGrantedAuthority(principal.role().authority()));
+        AdminPermission.grantedTo(principal.role()).stream()
+            .map(permission -> new SimpleGrantedAuthority(permission.authority()))
+            .forEach(authorities::add);
+        return UsernamePasswordAuthenticationToken.authenticated(principal, null, authorities);
     }
 
     private static MemberPrincipal toPrincipal(Jwt jwt) {

@@ -10,6 +10,7 @@ import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.error.SecurityErrorResolver;
 import com.commercefoundry.security.issuer.IssuedAccessToken;
 import com.commercefoundry.security.issuer.JwtIssuer;
+import com.commercefoundry.security.principal.AdminPermission;
 import com.commercefoundry.security.principal.MemberJwtAuthenticationConverter;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.security.principal.MemberRole;
@@ -20,10 +21,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -51,6 +54,24 @@ class AccessTokenVerificationTest {
         assertThat(authentication.getPrincipal()).isEqualTo(new MemberPrincipal(MEMBER_ID, MemberRole.CUSTOMER, issued.tokenId(), NOW));
         assertThat(authentication.getName()).isEqualTo(String.valueOf(MEMBER_ID));
         assertThat(authentication.getAuthorities()).extracting(GrantedAuthority::getAuthority).containsExactly("ROLE_CUSTOMER");
+    }
+
+    @ParameterizedTest
+    @EnumSource(MemberRole.class)
+    @DisplayName("role claim 하나에서 그 역할 하나와 서버 권한표만 만든다 — 새 역할에 ROLE_ADMIN 을 붙이지 않는다")
+    void roleClaimExpandsOnlyItsOwnAuthorities(MemberRole role) {
+        IssuedAccessToken issued = TestTokens.issuer(NOW).issueAccessToken(MEMBER_ID, role);
+
+        Authentication authentication = authenticate(issued.tokenValue(), VERIFIED_AT);
+
+        assertThat(((MemberPrincipal) authentication.getPrincipal()).role()).isEqualTo(role);
+        var actual = authentication.getAuthorities().stream().map(GrantedAuthority::getAuthority).toList();
+        var expected = Stream.concat(Stream.of(role.authority()), AdminPermission.grantedTo(role).stream().map(AdminPermission::authority)).toList();
+        assertThat(actual).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(actual.stream().filter(authority -> authority.startsWith("ROLE_"))).containsExactly(role.authority());
+        if (role != MemberRole.ADMIN) {
+            assertThat(actual).doesNotContain("ROLE_ADMIN");
+        }
     }
 
     @Test
@@ -193,7 +214,7 @@ class AccessTokenVerificationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"admin", "Customer", ""})
+    @ValueSource(strings = {"admin", "Customer", "UNKNOWN", ""})
     @DisplayName("role 은 대소문자까지 MemberRole 이름과 같아야 한다 — 역할을 추측해 올리지 않는다")
     void roleMustMatchExactly(String role) {
         String token = TestTokens.sign(TestKeys.CURRENT, TestTokens.claims().claim("role", role).build());

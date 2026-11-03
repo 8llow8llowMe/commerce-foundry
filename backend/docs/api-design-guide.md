@@ -451,7 +451,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 어드민 회원 조회 (#6) — `GET /api/v1/admin/members`
 
-- `page`(기본 0, 0 이상 — 133) · `size`(기본 20, 1~100 — 134) · `role`(선택, `CUSTOMER` · `ADMIN`, 없으면 전체 · 틀리면 198). 정렬은 최신순 하나(회원 아이디 내림차순 —
+- `page`(기본 0, 0 이상 — 133) · `size`(기본 20, 1~100 — 134) · `role`(선택, `CUSTOMER` · `ADMIN` · `OWNER` · `MANAGER` · `STAFF`, 없으면 전체 · 틀리면 198). #236 PR-A에서 새 역할 필터 값은 수락하지만 계정 발급은 아직 없어 결과가 비어 있다. 정렬은 최신순 하나(회원 아이디 내림차순 —
   Snowflake 라 생성 순서다)라 `sortType` 이 없다. 마지막 페이지 너머는 빈 `contents` 다. 조회는 관리자 감사 로그에 남는다(`security-guide.md` §11-4).
 - 항목 `{memberId(string), email, name, phone, role, createdAt}` — **이메일 · 이름 · 전화는 마스킹한 값만 내린다**(원문 조회 API 는 없다). 규칙(`MemberMasking`):
 

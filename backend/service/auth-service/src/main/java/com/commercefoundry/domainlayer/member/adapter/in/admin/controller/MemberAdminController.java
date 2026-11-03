@@ -51,7 +51,8 @@ public class MemberAdminController {
         @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0") @PositiveOrZero(message = MemberValidationMessage.ADMIN_PAGE_MIN) int page,
         @Parameter(description = "페이지 크기 (1~100)") @RequestParam(defaultValue = "20")
         @Min(value = 1, message = MemberValidationMessage.ADMIN_SIZE_RANGE) @Max(value = MAX_PAGE_SIZE, message = MemberValidationMessage.ADMIN_SIZE_RANGE) int size,
-        @Parameter(description = "역할 — CUSTOMER · ADMIN. 없으면 전체") @RequestParam(required = false) MemberRole role
+        @Parameter(description = "역할 — CUSTOMER · ADMIN · OWNER · MANAGER · STAFF. 없으면 전체. 새 운영자 역할의 계정 발급은 #236 후속 단계")
+        @RequestParam(required = false) MemberRole role
     ) {
         return ResponseEntity.ok().body(Response.success(memberAdminUseCase.searchMembers(admin.memberId(), role, page, size)));
     }

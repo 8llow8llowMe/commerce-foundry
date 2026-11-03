@@ -3,13 +3,16 @@ package com.commercefoundry.security.principal;
 import java.util.Arrays;
 
 /**
- * 회원 역할. access 토큰의 {@code role} claim 값이고, 권한 이름은 {@code ROLE_} 접두어를 붙여
- * {@code hasRole('ADMIN')} 이 동작하게 한다.
+ * 회원 역할. access 토큰의 {@code role} claim 값이다. 기존 {@code ADMIN} 은 #236 이행 동안 유지하며
+ * 기능 권한은 {@code OWNER} 와 같다. 새 운영자 역할은 PR-A 에서 해석만 하고 아직 발급하지 않는다.
  */
 public enum MemberRole {
 
     CUSTOMER,
-    ADMIN;
+    ADMIN,
+    OWNER,
+    MANAGER,
+    STAFF;
 
     /** access 토큰에서 역할을 싣는 claim 이름. 값은 이 enum 의 이름 하나다. */
     public static final String CLAIM_NAME = "role";

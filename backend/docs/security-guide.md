@@ -33,7 +33,7 @@
 | `iss` | `security.jwt.issuer` (기본 `commerce-foundry-auth`) | 일치 |
 | `aud` | `security.jwt.audience` (기본 `commerce-foundry-api`) | 포함 |
 | `sub` | memberId **문자열** (`"4611686018427387904"`) | 양의 정수, `String.valueOf(long)` 모양만 (`007` · `+1` 거부) |
-| `role` | `CUSTOMER` 또는 `ADMIN` 문자열 하나 | `MemberRole` 이름과 대소문자까지 같아야 한다 |
+| `role` | `CUSTOMER` · 기존 `ADMIN` · `OWNER` · `MANAGER` · `STAFF` 중 문자열 하나 (#236 PR-A) | `MemberRole` 이름과 대소문자까지 같아야 한다. PR-A는 새 역할을 해석만 하고 발급하지 않는다 |
 | `iat` | 발급 시각(초) | — |
 | `exp` | 발급 시각 + access TTL | 없으면 003, 지났으면 002 (시계 오차 허용 적용) |
 | `jti` | UUID | 있어야 한다. 로그아웃 블랙리스트(#4)의 키 |
@@ -152,8 +152,32 @@
 
 ## 3. 인증 주체
 
-검증을 통과한 토큰은 `MemberPrincipal(long memberId, MemberRole role, String tokenId)` 이 된다.
-권한 이름은 `ROLE_CUSTOMER` · `ROLE_ADMIN` 이라 `hasRole('ADMIN')` 이 동작한다.
+검증을 통과한 토큰은 `MemberPrincipal(long memberId, MemberRole role, String tokenId, Instant issuedAt)` 이 된다.
+역할 권한은 `ROLE_CUSTOMER` · 기존 `ROLE_ADMIN` 등 `ROLE_<role>` 한 개이며, 기존 `hasRole('ADMIN')` 선언은 그대로 동작한다.
+
+### 3-1. 운영자 권한 모델 준비 (#236 PR-A)
+
+`role` claim은 계속 단일 값이다. `ADMIN`은 기존 계정·발급 토큰을 위한 호환 역할로, 기능 권한은 `OWNER`와 같다.
+인증 변환기는 토큰의 역할 권한(`ROLE_<role>`) 하나와 아래 기능 권한(`ADMIN_<기능>_<READ|MANAGE>`)을 함께 만든다.
+`ADMIN` 토큰에는 `ROLE_OWNER`를, `OWNER`·`MANAGER`·`STAFF` 토큰에는 `ROLE_ADMIN`을 추가하지 않는다.
+모르는 역할은 권한을 추측하지 않고 401 `SECURITY_003`으로 거절한다. 개인별 추가 권한은 이 단계에서 두지 않는다.
+
+| 역할 | 기능 권한 |
+|------|-----------|
+| `ADMIN`(기존) · `OWNER` | 모든 기능의 조회·관리 |
+| `MANAGER` | 상품·재고 조회, 주문·출고·CS 조회·관리, 리포트 조회. 상품·재고 쓰기와 정산·원가·직원·보안·설정 제외 |
+| `STAFF` | 상품·주문·출고·CS 조회만. 쓰기와 재고·리포트·정산·원가·직원·보안·설정 제외 |
+| `CUSTOMER` | 운영자 기능 권한 없음 |
+
+기능 이름은 `CATALOG`, `INVENTORY`, `ORDER`, `FULFILLMENT`, `CS`, `REPORT`, `SETTLEMENT`, `COST`, `STAFF`, `SECURITY`, `SETTINGS`이고,
+각각 `READ`와 `MANAGE` 권한을 따로 둔다. 예를 들어 `ADMIN_ORDER_READ`는 조회, `ADMIN_ORDER_MANAGE`는 상태 변경이다.
+`MANAGE`가 `READ`를 자동으로 뜻하지 않으므로 역할표에 둘 다 명시한다.
+
+PR-A는 권한 이름과 역할표를 도입하고 `auth.member.role`의 check 제약을 새 enum 값까지 확장한다. 기존 `ADMIN` 계정·JWT 발급,
+게이트웨이와 서비스의 `/api/v1/admin/**` URL 규칙, 컨트롤러의 `hasRole('ADMIN')`, 저장된 DB 역할 값은 그대로다. 새 역할 행은 아직 만들지 않는다. 따라서 새 역할 claim을 가진 토큰은 서명·claim 검증을 통과해도
+어드민 URL에서 거절된다. 다음 단계에서 URL 이중 방어와 각 API의 기능 권한을 함께 전환하고 테스트한 뒤에만
+새 역할 계정을 생성·발급한다. check 제약은 `coding-conventions.md` §9-8에 따라 배포 전에 dev·운영에 적용한다. 기존 `ADMIN` 행을 `OWNER`로 옮길 때는 컷오프·구 토큰 수명까지의 호환을 별도로 검증한다.
+어드민 회원 목록의 `role` 필터는 enum 바인딩이라 새 역할 이름도 수락하지만, 발급 전에는 해당 역할 행이 없어 빈 결과다.
 
 ```java
 @PreAuthorize("isAuthenticated()")
