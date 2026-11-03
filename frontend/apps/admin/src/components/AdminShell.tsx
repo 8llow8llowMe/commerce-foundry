@@ -47,6 +47,10 @@ const NAV: NavGroup[] = [
     items: [{ label: '회원 목록', href: '/members' }],
   },
   {
+    title: 'CS',
+    items: [{ label: '지식 관리', href: '/support/knowledge' }],
+  },
+  {
     title: '운영',
     items: [
       { label: '백그라운드 작업', href: '/jobs' },
