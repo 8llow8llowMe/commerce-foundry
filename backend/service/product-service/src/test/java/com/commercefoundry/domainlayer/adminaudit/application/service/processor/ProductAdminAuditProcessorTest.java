@@ -84,6 +84,16 @@ class ProductAdminAuditProcessorTest {
     }
 
     @Test
+    void categoryReplacementHasItsOwnActionAndProductTarget() {
+        processor.productCategoriesReplaced(ACTOR, 700L, true);
+        processor.productCategoriesReplaced(ACTOR, 700L, false);
+        assertThat(lines()).containsExactly(
+            "action=PRODUCT_CATEGORIES_REPLACE actorMemberId=" + ACTOR + " target=product:700 result=SUCCESS",
+            "action=PRODUCT_CATEGORIES_REPLACE actorMemberId=" + ACTOR + " target=product:700 result=FAILURE"
+        );
+    }
+
+    @Test
     void mediaImageUploadsContainOnlyFourAuditFieldsAndInternalUuid() {
         var id = java.util.UUID.fromString("11111111-1111-1111-1111-111111111111");
         processor.mediaImageUploadIssued(ACTOR, id, true);

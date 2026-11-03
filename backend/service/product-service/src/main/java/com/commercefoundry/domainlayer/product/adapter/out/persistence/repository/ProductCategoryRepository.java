@@ -2,6 +2,8 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence.reposito
 
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductCategoryEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 
@@ -12,4 +14,8 @@ import java.util.List;
 public interface ProductCategoryRepository extends JpaRepository<ProductCategoryEntity, Long> {
 
     List<ProductCategoryEntity> findAllByProductIdOrderByCategoryIdAsc(long productId);
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from ProductCategoryEntity p where p.productId = :productId and p.categoryId in :categoryIds")
+    void deleteLinks(long productId, List<Long> categoryIds);
 }
