@@ -19,6 +19,10 @@ public class ProductAdminAuditProcessor {
     static final String SIZE_CHART_TEMPLATE = "size-chart-template";
     static final String PRODUCT = "product";
 
+    public void productImagesReplaced(long actorMemberId, long productId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_IMAGES_REPLACE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
+    }
+
     public void productPricingReplaced(long actorMemberId, long productId, boolean succeeded) {
         write(ProductAdminAuditAction.PRODUCT_PRICING_REPLACE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
     }

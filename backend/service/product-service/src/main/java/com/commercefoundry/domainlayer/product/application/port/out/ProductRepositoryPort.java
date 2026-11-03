@@ -45,6 +45,9 @@ public interface ProductRepositoryPort {
     /** 삭제되지 않은 상품의 대표 카테고리와 버전을 CAS로 바꾼다. 불일치는 PRODUCT_010이다. */
     void updateCategory(long productId, long version, long categoryId);
 
+    /** Version CAS only; a mismatch is PRODUCT_010. */
+    void bumpVersion(long productId, long version);
+
     /** 새 상품 INSERT (#9 E1). 아이디는 호출한 쪽이 발급했고 버전은 비어 있다(0 으로 저장된다). */
     void insert(Product product);
 

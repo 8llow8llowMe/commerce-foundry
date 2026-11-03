@@ -72,6 +72,47 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final ProductAdminAuditProcessor productAdminAuditProcessor;
     private final com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor productPricingUpdateProcessor;
 
+    private final com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor productImagesPrepareProcessor;
+    private final com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor productImagesUpdateProcessor;
+
+    /** 외부 복사와 롤백 보상은 DB 트랜잭션 밖에서 실행하고, 버전 CAS와 연결 교체만 짧은 TransactionTemplate으로 묶는다. */
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public ProductDetailAdminResponse updateImages(com.commercefoundry.domainlayer.product.application.command.ProductImagesUpdateCommand command) {
+        List<com.commercefoundry.domainlayer.product.domain.model.ProductImage> copied = List.of();
+        var rolledBack = new java.util.concurrent.atomic.AtomicBoolean();
+        var auditRegistered = new java.util.concurrent.atomic.AtomicBoolean();
+        com.commercefoundry.domainlayer.product.application.info.ProductAdminDetailInfo info;
+        try {
+            productImagesPrepareProcessor.prepare(command);
+            copied = productImageAttachmentProcessor.attach(command.productId(), command.actorMemberId(), command.images().stream()
+                .filter(i -> i.imageId() == null).map(i -> new com.commercefoundry.domainlayer.product.application.service.processor.ProductImageAttachmentProcessor.Input(
+                    i.uploadKey(), i.imageType(), i.altText())).toList());
+            var attachments = copied;
+            var transaction = new TransactionTemplate(transactionManager);
+            transaction.setTimeout(LOCKING_TIMEOUT_SECONDS);
+            info = transaction.execute(status -> {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCompletion(int completion) {
+                        if (completion == STATUS_ROLLED_BACK) rolledBack.set(true);
+                    }
+                });
+                // Audit waits for actual completion and covers processor/commit failure once.
+                productAdminAuditProcessor.productImagesReplaced(command.actorMemberId(), command.productId(), true);
+                auditRegistered.set(true);
+                return productImagesUpdateProcessor.update(command, attachments);
+            });
+        } catch (RuntimeException exception) {
+            if (rolledBack.get()) productImageAttachmentProcessor.cleanup(copied.stream()
+                .map(com.commercefoundry.domainlayer.product.domain.model.ProductImage::storageKey).toList());
+            if (!auditRegistered.get()) productAdminAuditProcessor.productImagesReplaced(command.actorMemberId(), command.productId(), false);
+            throw exception;
+        }
+        // Response failure after commit must never trigger object compensation.
+        return productAdminPresenter.toDetailResponse(info);
+    }
+
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
     public ProductDetailAdminResponse updatePricing(ProductPricingUpdateCommand command) {

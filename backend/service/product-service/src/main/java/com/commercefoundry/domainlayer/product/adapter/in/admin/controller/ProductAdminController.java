@@ -65,6 +65,19 @@ public class ProductAdminController {
 
     private final ProductAdminUseCase productAdminUseCase;
 
+    @Operation(summary = "상품 정지 이미지 전체 교체", description = "기존 imageId 또는 신규 uploadKey로 최대 8장(대표 한 장)을 교체한다. "
+        + "빈 배열은 정지 이미지 연결 삭제, VIDEO는 보존한다. 동일 요청도 버전이 증가하며 오래된 버전은 409 PRODUCT_010이다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_IMAGES_REPLACE")
+    @PutMapping("/{productId}/images")
+    public ResponseEntity<Response<ProductDetailAdminResponse>> updateImages(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId,
+        @RequestBody @Valid com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductImagesUpdateRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(productAdminUseCase.updateImages(request.toCommand(productId, member.memberId()))));
+    }
+
     @Operation(summary = "상품 가격 수정", description = "기본 판매가 · 정가를 전체 교체하고 편집용 상세를 반환한다. 정가 생략/null은 삭제다. "
         + "현재 상품 통화를 유지하며 SKU 추가금과 판매중 최저가 규칙을 검사한다(400 PRODUCT_016). 동일 값은 버전을 유지한다. "
         + "오래된 버전은 동일 값이어도 409 PRODUCT_010, 삭제 상품은 404 PRODUCT_001이다.")

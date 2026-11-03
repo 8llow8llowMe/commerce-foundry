@@ -10,6 +10,8 @@ public enum ProductAdminAuditAction {
     /** 상품 기본 정보 수정. 대상 {@code product:<id>} */
     PRODUCT_UPDATE,
 
+    PRODUCT_IMAGES_REPLACE,
+
     /** 상품 기본 판매가 · 정가 전체 교체. 대상 {@code product:<id>} */
     PRODUCT_PRICING_REPLACE,
 

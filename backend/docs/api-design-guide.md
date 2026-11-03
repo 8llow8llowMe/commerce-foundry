@@ -533,7 +533,7 @@ return ResponseEntity.ok().body(Response.success(response));
   아이디는 문자열, 금액은 `{amount, currency}`, `saleStatus` · `availability` 는 `{code, name, description}`, `updatedAt` 은 UTC ISO 다.
 - **가격은 저장된 값 그대로다** — `salePrice` 는 기본 판매가(옵션 추가금 · 판매중 옵션 최저가를 반영하지 않는다), `listPrice` 는 정가(없으면 null)다.
   고객 목록처럼 할인이 아닌 정가를 숨기지 않는다. `thumbnailUrl` 은 대표 이미지 주소(없으면 null), `skuCount` 는 판매 상태와 무관한 SKU 수다.
-  `updatedAt` 은 상품 행의 수정 시각이라 SKU · 재고 · 이미지만 바뀐 것은 반영하지 않는다.
+  `updatedAt` 은 상품 행의 수정 시각이라 SKU · 재고만 바뀐 것은 반영하지 않는다. 아래 정지 이미지 전체 편집은 상품 버전 CAS와 함께 `updatedAt`도 갱신한다.
 - **판매 가능 상태** — 고객 뱃지와 같은 규칙(`SaleAvailability.ofProduct`)이고 노출 여부는 보지 않는다. 상품이 판매 종료이거나 판매중 SKU 가 없으면(SKU 0개 포함) `STOP_SELLING`,
   판매중 SKU 중 재고가 무제한이거나 수량 > 0 인 것이 있으면 `ON_SALE`, 그 밖이면 `SOLD_OUT` 이다. **재고 행이 없는 SKU 는 품절**이다.
   항목의 값은 SKU 집계로, 필터는 같은 판정을 SQL EXISTS 로 건다 — 둘은 `SkuCustomRepositoryImpl` 의 `onSale` · `inStock` 식을 함께 쓴다.
@@ -632,6 +632,19 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
   스토리지 장애(연결 · 권한 · 거절)는 503 `PRODUCT_035` — 원인은 로그(이유 · 동작만)에 남기고 응답에 싣지 않는다. 서명 주소는 로그에 남기지 않는다.
 - 첨부는 아래 F2 계약을 따른다. 업로드 발급 응답은 바뀌지 않는다.
 
+#### 정지 이미지 전체 편집 (#9 F3)
+
+ADMIN `PUT /api/v1/admin/products/{productId}/images`는 `{version, images:[{imageId?, uploadKey?, imageType, altText?}]}`로 정지 이미지를 전체 교체한다.
+version은 필수 0 이상(`PRODUCT_EDIT_101`), images는 필수·최대 8장·빈 배열 허용이다. 기존 행은 imageId, 신규 업로드는 uploadKey 중 정확히 하나를 보낸다.
+유형은 THUMBNAIL/GALLERY이고 대표는 한 장까지다. 중복 ID/키·다른 상품 ID·VIDEO ID·XOR 위반은 400 `PRODUCT_018`, 필드 형식/대체 텍스트는 `PRODUCT_019`다.
+모든 구성과 업로드 소유권(`PRODUCT_032`)을 외부 복사 전에 검사한다. URL·storageKey·치수 입력은 받지 않는다.
+배열 위치 + 1이 갤러리 순서이고 대표 순서는 0이다. 기존 VIDEO는 입력 없이 보존하고 기존 ID·URL·관리 키·치수·생성 시각을 유지한다.
+동일 요청도 상품 버전/수정 시각이 증가한다. 숨김 상품은 수정 가능하며 없는/삭제 상품은 404 `PRODUCT_001`, 버전 경합은 409 `PRODUCT_010`이다.
+신규 복사만 DB 트랜잭션 밖에서 끝내고 5초 DB 트랜잭션의 상품 CAS와 이미지 변경을 원자적으로 처리한다. 확정 롤백에만 이번 요청의 신규 복사본을 보상한다.
+연결에서 빠진 기존 공개 객체는 공유 이관 키·HTML 참조 때문에 삭제하지 않는다(전시 공용 정책과 동일). GC/참조 추적은 후속 범위다.
+스토리지 꺼짐에서도 기존 이미지의 순서/유형/대체 텍스트 편집과 삭제는 가능하다. 성공 응답은 기존 편집 상세이며 FE는 새 version과 images[].imageId를 사용한다.
+`PRODUCT_IMAGES_REPLACE` 감사를 남기고 API 리뷰어는 seonghoho다. 업로드 오류 `032~036`과 파일 검증은 등록 계약을 그대로 따른다.
+
 #### 등록 시 이미지 첨부 (#9 F2)
 
 - 기존 등록 본문에 선택 `images[{uploadKey, imageType, altText?}]` 를 더한다. 없거나 null · 빈 배열이면 이미지 없는 기존 등록과 같다.
@@ -649,7 +662,7 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
   콜백은 카테고리 잠금 전에 등록해 롤백 확정 표시만 남기고, `TransactionTemplate.execute` 가 DB 자원을 정리한 뒤 Facade 에서 외부 삭제한다.
   커밋 결과 불명 · 트랜잭션 시작 실패 · 커밋 후 응답 변환 실패에서는 삭제하지 않는다. 보상 실패는 원래 오류를 보존하고 경고를 남기며 운영 고아 객체 대조가 필요하다.
   원본 업로드는 임시 접두어 수명(1일)까지 남겨 재시도할 수 있다. 존재하는 원본은 같은 운영자가 재사용할 수 있으며, 일회 소비 토큰은 아니다.
-  등록 자체는 멱등하지 않으므로 응답 유실 시 목록을 확인한 뒤 재시도한다. PUT 수정 · 이미지 교체/삭제 API · 옵션 편집은 후속 범위다.
+  등록 자체는 멱등하지 않으므로 응답 유실 시 목록을 확인한 뒤 재시도한다. 이미지 교체/삭제는 위 정지 이미지 전체 편집 API를 사용한다. 옵션 편집은 후속 범위다.
 
 #### SKU별 품절 임박 기준과 조회 (#229 PR-1)
 
@@ -934,7 +947,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   FE는 다시 조회한 뒤 재시도한다. 조회와 삭제 사이에 먼저 완료된 편집도 현재 상태를 대상으로 삭제하므로, 편집 화면 버전 비교 계약은 없다.
 - SKU·옵션·이미지·맞춤 입력·진열 카테고리·재고·선점과 기존 주문을 변경하지 않는다. 신규 선점은 기존 판매 가능 판정으로 거절하고,
   internal SKU 조회에는 상품과 SKU를 유지하며 `purchasable=false`로 알린다. S3·Kafka·서비스 간 호출은 없다. 새 엔티티·운영 DDL도 없다.
-- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing` API가 담당하며 옵션·SKU·이미지 편집은 후속 범위다. FE 계약 검토자는 `seonghoho`다.
+- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing`, 정지 이미지 편집은 `/images` API가 담당하며 옵션·SKU 편집은 후속 범위다. FE 계약 검토자는 `seonghoho`다.
 
 #### 어드민 상품 기본 정보 수정 API (#9 후속)
 

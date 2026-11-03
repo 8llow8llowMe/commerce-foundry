@@ -76,6 +76,13 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
     }
 
     @Override
+    public void bumpVersion(long productId, long version) {
+        if (productRepository.bumpVersion(productId, version, java.time.Instant.now()) != 1) {
+            throw new ProductException(ProductErrorCode.PRODUCT_MODIFICATION_CONFLICT);
+        }
+    }
+
+    @Override
     public void updateCategory(long productId, long version, long categoryId) {
         if (productRepository.updateCategory(productId, version, categoryId, java.time.Instant.now()) != 1) {
             throw new ProductException(ProductErrorCode.PRODUCT_MODIFICATION_CONFLICT);
