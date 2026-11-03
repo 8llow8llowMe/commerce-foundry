@@ -13,6 +13,13 @@ public final class SkuAdminValidationMessage {
     public static final String PRICE_CURRENCY = "SKU_ADMIN_109:추가금 통화가 필수입니다.";
     public static final String PRODUCT_ID = "SKU_ADMIN_110:상품 아이디는 양수입니다.";
 
+    // 옵션 값 · 새 SKU 추가 (#9 PR-C1)
+    public static final String NEW_OPTION_VALUES = "SKU_ADMIN_111:추가할 옵션 값은 0~50개입니다.";
+    public static final String NEW_OPTION_VALUE_NAME = "SKU_ADMIN_112:옵션 값 이름은 1~50자이며 제어 · 서식 문자를 쓸 수 없습니다.";
+    public static final String NEW_SKUS = "SKU_ADMIN_113:추가할 SKU 를 1~100개 보내 주세요.";
+    public static final String OPTION_VALUE_NAMES = "SKU_ADMIN_114:SKU 의 옵션 값 이름을 옵션 순서대로 보내 주세요.";
+    public static final String INITIAL_STOCK = "SKU_ADMIN_115:처음 재고는 재고 관리 여부와 0 이상의 수량을 모두 보내 주세요.";
+
     private SkuAdminValidationMessage() {
     }
 }

@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.adapter.in.admin.controller;
 
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.SkuAddRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.SkuBulkUpdateRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
 import com.commercefoundry.domainlayer.product.application.exception.SkuAdminValidationMessage;
@@ -15,10 +16,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/admin/products")
-@Tag(name = "[어드민] 상품 SKU", description = "기존 SKU 편집")
+@Tag(name = "[어드민] 상품 SKU", description = "SKU 편집 · 추가")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 public class SkuAdminController {
     private final SkuAdminUseCase skuAdminUseCase;
@@ -44,5 +47,22 @@ public class SkuAdminController {
         @RequestBody @Valid SkuBulkUpdateRequest request
     ) {
         return ResponseEntity.ok(Response.success(skuAdminUseCase.replace(request.toCommand(productId, member.memberId()))));
+    }
+
+    @Operation(summary = "옵션 값 · 새 조합 SKU 추가", description = "기존 옵션에 값을 더하고 새 조합 SKU 를 만든 뒤 201 과 편집용 상세를 돌려준다. "
+        + "기존 옵션 · SKU · 재고는 그대로다. 새 옵션(그룹)은 더할 수 없다 — 구조를 바꾸려면 새 상품으로 등록한다. "
+        + "SKU 는 옵션 노출 순서대로 값 이름을 고르고, 새 값은 이번 요청의 이름으로 고른다. initialStock 을 주면 재고와 입고 이력이 함께 생기고, 주지 않으면 품절로 생긴다. "
+        + "삭제 상품 404 SKU_ADMIN_001, 버전 충돌 409 SKU_ADMIN_002, 가격 규칙 400 SKU_ADMIN_004, 잠금 충돌 409 SKU_ADMIN_005, "
+        + "옵션 값(없는 옵션 · 이미 쓴 이름 · 은퇴한 이름 · 50개 초과) 400 SKU_ADMIN_007, 조합(값 수 · 없는 값 · 옵션 없는 상품 · 은퇴 옵션이 있는 상품) 400 SKU_ADMIN_008, "
+        + "이미 있는 조합(판매 종료 포함) 400 SKU_ADMIN_009, 상품당 100개 초과 400 SKU_ADMIN_010 이다. 같은 요청을 두 번 보내면 두 번째는 409 SKU_ADMIN_002 다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_SKUS_ADD")
+    @PostMapping("/{productId}/skus")
+    public ResponseEntity<Response<ProductDetailAdminResponse>> add(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = SkuAdminValidationMessage.PRODUCT_ID) long productId,
+        @RequestBody @Valid SkuAddRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(skuAdminUseCase.add(request.toCommand(productId, member.memberId()))));
     }
 }
