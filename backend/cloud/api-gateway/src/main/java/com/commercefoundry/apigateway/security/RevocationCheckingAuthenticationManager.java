@@ -87,9 +87,12 @@ public final class RevocationCheckingAuthenticationManager {
                 : rejectIfAdminCutoff(authenticated, member, exchange));
     }
 
-    /** 관리자만 컷오프를 본다 (#193). 고객 요청에 Redis 를 한 번 더 치지 않는다. 발급 시각이 없으면 잘못된 토큰(003)이다. */
+    /**
+     * 운영자 역할({@link MemberRole#isOperator()} — ADMIN · OWNER · MANAGER · STAFF)만 컷오프를 본다 (#193 · #236). 고객 요청에 Redis 를 한 번 더 치지 않는다.
+     * ADMIN 만 보면 새 운영자 역할 토큰이 로그아웃 · 비활성화 컷오프를 우회한다. 발급 시각이 없으면 잘못된 토큰(003)이다.
+     */
     private Mono<Authentication> rejectIfAdminCutoff(Authentication authenticated, MemberPrincipal member, ServerWebExchange exchange) {
-        if (member.role() != MemberRole.ADMIN) {
+        if (!member.role().isOperator()) {
             return Mono.just(authenticated);
         }
         if (member.issuedAt() == null) {

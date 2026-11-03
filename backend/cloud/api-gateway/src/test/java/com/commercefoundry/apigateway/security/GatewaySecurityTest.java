@@ -212,10 +212,11 @@ class GatewaySecurityTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"OWNER", "MANAGER", "STAFF"})
-    @DisplayName("새 운영자 역할은 인가 전환 전 어드민 경로에서 403이고 하류에 닿지 않는다")
-    void newOperatorRolesCannotReachAdminRoutes(String roleName) {
-        assertRejected(get(ADMIN_PATH, token(MemberRole.valueOf(roleName))), SecurityErrorCode.FORBIDDEN, null);
-        assertThat(UPSTREAM_REQUESTS).isEmpty();
+    @DisplayName("새 운영자 역할(OWNER · MANAGER · STAFF)도 어드민 URL 층을 통과해 하류에 닿는다 — #236 에서 URL 층은 운영자 역할 전체, 기능 판정은 서비스 메서드가 한다")
+    void newOperatorRolesReachAdminRoutes(String roleName) {
+        get(ADMIN_PATH, token(MemberRole.valueOf(roleName))).expectStatus().isOk();
+
+        assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(ADMIN_PATH));
     }
 
     // ── 어드민 회원 조회 · 관리자 로그인 (#6) ─────────────────────

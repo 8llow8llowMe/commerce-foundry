@@ -1,6 +1,7 @@
 package com.commercefoundry.apigateway.security;
 
 import com.commercefoundry.security.error.SecurityErrorEnvelope;
+import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.token.JwtVerificationProperties;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
@@ -24,7 +25,8 @@ import tools.jackson.databind.json.JsonMapper;
  * 섞어 갖고, dev 라우트({@code /health/**} · {@code /docs/**})도 덮어야 한다 ({@code security-guide.md} §7).
  *
  * <ul>
- *   <li>{@value #ADMIN_PATH_PATTERN} 은 ADMIN 만 통과한다. 토큰 없으면 401(001), CUSTOMER 면 403(005).</li>
+ *   <li>{@value #ADMIN_PATH_PATTERN} 은 운영자 역할({@link MemberRole#OPERATOR_ROLES})만 통과한다. 토큰 없으면 401(001), CUSTOMER 면 403(005).
+ *       기능 권한(예: MANAGER 의 설정 변경 금지)은 서비스 메서드의 {@code @PreAuthorize} 가 판정한다 ({@code security-guide.md} §3-1).</li>
  *   <li>그 밖은 열어 둔다 — 토큰 없는 요청은 그대로 하류로 가고 서비스가 판정한다 ({@code architecture-guide.md} §6).
  *       다만 토큰을 보냈으면 공개 경로여도 검증한다. 틀리거나 만료되거나 로그아웃된 토큰은 여기서 401 이다.</li>
  *   <li>{@code Authorization} 헤더는 그대로 하류로 넘긴다. 서비스가 JWT 를 직접 검증한다. 검증 결과를 {@code X-Member-Id} 같은 헤더로 만들지 않는다.</li>
@@ -39,8 +41,6 @@ public class GatewaySecurityConfig {
 
     /** 어드민 경로. 서비스 체인(security-core {@code ResourceServerSecurityConfigurer})의 어드민 패턴과 같은 값이어야 한다. */
     public static final String ADMIN_PATH_PATTERN = "/api/v1/admin/**";
-
-    private static final String ADMIN_ROLE = "ADMIN";
 
     @Bean
     public GatewaySecurityErrorResponder gatewaySecurityErrorResponder(JsonMapper jsonMapper) {
@@ -81,7 +81,7 @@ public class GatewaySecurityConfig {
             // Cache-Control 을 덧붙이면 서비스가 정한 값(no-store 등)과 겹치거나 바뀐다
             .headers(HeaderSpec::disable)
             .authorizeExchange(exchanges -> exchanges
-                .pathMatchers(ADMIN_PATH_PATTERN).hasRole(ADMIN_ROLE)
+                .pathMatchers(ADMIN_PATH_PATTERN).hasAnyRole(MemberRole.operatorRoleNames())
                 .anyExchange().permitAll())
             // 토큰 없는 어드민 요청(001)과 역할 부족(005). 아래 oauth2ResourceServer 의 진입점은 Bearer 토큰이 붙은 요청에만 걸린다
             .exceptionHandling(exceptions -> exceptions

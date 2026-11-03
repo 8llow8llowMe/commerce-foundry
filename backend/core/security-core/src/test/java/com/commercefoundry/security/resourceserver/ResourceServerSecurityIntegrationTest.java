@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.security.error.SecurityErrorCode;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestKeys;
@@ -159,12 +160,49 @@ class ResourceServerSecurityIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"OWNER", "MANAGER", "STAFF"})
-    @DisplayName("새 운영자 역할은 전환 전 어드민 URL과 기존 ADMIN 메서드에서 403 — 발급을 켜기 전까지 fail-closed")
-    void newOperatorRolesCannotUseLegacyAdminEndpoints(String roleName) throws Exception {
+    @DisplayName("새 운영자 역할은 어드민 URL 규칙을 통과하지만(#236 URL 층 = 운영자 역할 전체) 기존 hasRole('ADMIN') 메서드에서는 403 — 컨트롤러 전환 전까지 fail-closed")
+    void newOperatorRolesPassAdminUrlButNotLegacyAdminMethod(String roleName) throws Exception {
         MemberRole role = MemberRole.valueOf(roleName);
 
-        assertEnvelope(perform(get("/api/v1/admin/x").header(HttpHeaders.AUTHORIZATION, bearer(role))), SecurityErrorCode.FORBIDDEN);
+        assertThat(perform(get("/api/v1/admin/x").header(HttpHeaders.AUTHORIZATION, bearer(role))).getStatus()).isEqualTo(200);
+        assertThat(TestController.ADMIN_CALLS).hasValue(1);
+
         assertEnvelope(perform(get("/api/v1/annotated-admin").header(HttpHeaders.AUTHORIZATION, bearer(role))), SecurityErrorCode.FORBIDDEN);
+        assertThat(TestController.ADMIN_CALLS).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"OWNER", "MANAGER", "STAFF"})
+    @DisplayName("어드민 경로의 hasRole('ADMIN') 메서드는 새 운영자 역할이 URL 층을 지나도 403 · SECURITY_005 이고 컨트롤러에 닿지 않는다 — 전환 전 fail-closed")
+    void legacyAdminMethodUnderAdminPathRejectsNewOperatorRoles(String roleName) throws Exception {
+        assertEnvelope(perform(get("/api/v1/admin/legacy").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.valueOf(roleName)))), SecurityErrorCode.FORBIDDEN);
+        assertThat(TestController.ADMIN_CALLS).hasValue(0);
+    }
+
+    @Test
+    @DisplayName("어드민 경로의 hasRole('ADMIN') 메서드는 기존 ADMIN 토큰이면 200 이다")
+    void legacyAdminMethodUnderAdminPathAllowsAdmin() throws Exception {
+        assertThat(perform(get("/api/v1/admin/legacy").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).getStatus()).isEqualTo(200);
+        assertThat(TestController.ADMIN_CALLS).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ADMIN", "OWNER", "MANAGER"})
+    @DisplayName("hasAuthority('ADMIN_ORDER_MANAGE') 메서드는 권한표에 ORDER_MANAGE 가 있는 역할(ADMIN · OWNER · MANAGER)만 통과한다")
+    void orderManageAllowsRolesWithPermission(String roleName) throws Exception {
+        MemberRole role = MemberRole.valueOf(roleName);
+
+        assertThat(perform(get("/api/v1/admin/orders").header(HttpHeaders.AUTHORIZATION, bearer(role))).getStatus()).isEqualTo(200);
+        assertThat(TestController.ADMIN_CALLS).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"STAFF", "CUSTOMER"})
+    @DisplayName("ORDER_MANAGE 가 없는 역할은 403 · SECURITY_005 — STAFF 는 URL 층을 지나 메서드에서, CUSTOMER 는 URL 층에서 막힌다")
+    void orderManageRejectsRolesWithoutPermission(String roleName) throws Exception {
+        MemberRole role = MemberRole.valueOf(roleName);
+
+        assertEnvelope(perform(get("/api/v1/admin/orders").header(HttpHeaders.AUTHORIZATION, bearer(role))), SecurityErrorCode.FORBIDDEN);
         assertThat(TestController.ADMIN_CALLS).hasValue(0);
     }
 
@@ -470,6 +508,22 @@ class ResourceServerSecurityIntegrationTest {
         /** 애노테이션 없이 URL 규칙({@code /api/v1/admin/**})만으로 막히는지 본다. */
         @GetMapping("/api/v1/admin/x")
         ResponseEntity<Response<Void>> admin() {
+            ADMIN_CALLS.incrementAndGet();
+            return ResponseEntity.ok(Response.success());
+        }
+
+        /** URL 층(운영자 역할)을 지난 뒤 메서드의 기능 권한이 가르는지 본다. */
+        @PreAuthorize(AdminAuthority.ORDER_MANAGE)
+        @GetMapping("/api/v1/admin/orders")
+        ResponseEntity<Response<Void>> manageOrders() {
+            ADMIN_CALLS.incrementAndGet();
+            return ResponseEntity.ok(Response.success());
+        }
+
+        /** 어드민 경로 + 전환 전 표기. URL 층을 지난 새 운영자 역할을 메서드가 막는지 본다. */
+        @PreAuthorize("hasRole('ADMIN')")
+        @GetMapping("/api/v1/admin/legacy")
+        ResponseEntity<Response<Void>> legacyAdmin() {
             ADMIN_CALLS.incrementAndGet();
             return ResponseEntity.ok(Response.success());
         }

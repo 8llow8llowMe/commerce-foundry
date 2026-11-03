@@ -98,15 +98,18 @@ public abstract class ControllerAuthorizationArchTestSupport {
     public static final ArchRule CUSTOMER_AND_ADMIN_HANDLERS_DECLARE_PRE_AUTHORIZE = methods()
         .that(handlerMethodsIn("adapter.in.web · adapter.in.admin 컨트롤러의 핸들러 메서드", CUSTOMER_PACKAGE, ADMIN_PACKAGE))
         .should(declarePreAuthorizeOnMethod())
-        .because("URL 단계는 /api/** 를 열어 둔다(default-allow) — 공개면 permitAll(), 로그인 필요면 isAuthenticated(), 어드민이면 hasRole('ADMIN') 을"
+        .because("URL 단계는 /api/** 를 열어 둔다(default-allow) — 공개면 permitAll(), 로그인 필요면 isAuthenticated(), 어드민이면 AdminAuthority 상수를"
             + " 메서드에 적는다 (security-guide.md §5)")
         .allowEmptyShould(true);
 
-    /** R2. 어드민 핸들러는 ADMIN 이 필요조건이다 — {@code hasRole('ADMIN')} 또는 {@code hasRole('ADMIN') and ...}. 판정은 {@link AuthorizationExpressions#requiresAdminRole}. */
-    public static final ArchRule ADMIN_HANDLERS_REQUIRE_ADMIN_ROLE = methods()
+    /**
+     * R2. 어드민 핸들러는 운영자 권한이 필요조건이다 — {@code AdminAuthority} 의 기능 상수 · {@code OPERATOR} 또는 #236 이전 표기 {@code hasRole('ADMIN')},
+     * 좁힐 때만 {@code ... and ...}. 판정은 {@link AuthorizationExpressions#requiresOperatorAuthority} ({@code security-guide.md} §3-1).
+     */
+    public static final ArchRule ADMIN_HANDLERS_REQUIRE_OPERATOR_AUTHORITY = methods()
         .that(handlerMethodsIn("adapter.in.admin 컨트롤러의 핸들러 메서드", ADMIN_PACKAGE))
-        .should(requireAdminRole())
-        .because("어드민 API 는 ADMIN 만 부른다 — permitAll() · isAuthenticated() · or 로 넓힌 식은 고객에게 열린다 (security-guide.md §5)")
+        .should(requireOperatorAuthority())
+        .because("어드민 API 는 운영자 권한이 있어야 부른다 — permitAll() · isAuthenticated() · or 로 넓힌 식은 고객에게 열린다 (security-guide.md §5)")
         .allowEmptyShould(true);
 
     /**
@@ -186,9 +189,9 @@ public abstract class ControllerAuthorizationArchTestSupport {
     }
 
     @Test
-    @DisplayName("R2 adapter.in.admin 핸들러의 @PreAuthorize 는 hasRole('ADMIN') 을 필요조건으로 한다")
+    @DisplayName("R2 adapter.in.admin 핸들러의 @PreAuthorize 는 운영자 권한(AdminAuthority 상수 · hasRole('ADMIN'))을 필요조건으로 한다")
     void adminHandlersRequireAdminRole() {
-        ADMIN_HANDLERS_REQUIRE_ADMIN_ROLE.check(serviceClasses());
+        ADMIN_HANDLERS_REQUIRE_OPERATOR_AUTHORITY.check(serviceClasses());
     }
 
     @Test
@@ -307,15 +310,15 @@ public abstract class ControllerAuthorizationArchTestSupport {
         };
     }
 
-    private static ArchCondition<JavaMethod> requireAdminRole() {
-        return new ArchCondition<>("@PreAuthorize 가 hasRole('ADMIN') 을 필요조건으로 한다") {
+    private static ArchCondition<JavaMethod> requireOperatorAuthority() {
+        return new ArchCondition<>("@PreAuthorize 가 운영자 권한을 필요조건으로 한다") {
             @Override
             public void check(JavaMethod method, ConditionEvents events) {
                 Optional<String> expression = preAuthorizeValue(method);
-                boolean satisfied = expression.filter(AuthorizationExpressions::requiresAdminRole).isPresent();
+                boolean satisfied = expression.filter(AuthorizationExpressions::requiresOperatorAuthority).isPresent();
                 String declared = expression.map(value -> "@PreAuthorize(\"" + value + "\")").orElse("@PreAuthorize 없음");
                 events.add(new SimpleConditionEvent(method, satisfied,
-                    handlerName(method) + " -> " + declared + " — hasRole('ADMIN') 또는 hasRole('ADMIN') and ... 로 고치세요"));
+                    handlerName(method) + " -> " + declared + " — AdminAuthority 상수(hasAuthority('ADMIN_<기능>_READ|MANAGE') · hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')) 또는 hasRole('ADMIN') 를 머리로, 좁힐 때만 and ... 로 고치세요"));
             }
         };
     }

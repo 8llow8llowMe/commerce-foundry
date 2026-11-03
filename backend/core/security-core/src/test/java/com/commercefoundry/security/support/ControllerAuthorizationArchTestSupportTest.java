@@ -37,7 +37,7 @@ class ControllerAuthorizationArchTestSupportTest {
             ControllerAuthorizationArchTestSupport.CONTROLLERS_DECLARE_MAPPINGS_DIRECTLY,
             ControllerAuthorizationArchTestSupport.NO_GLOBAL_FEIGN_REQUEST_CUSTOMIZER_COMPONENTS,
             ControllerAuthorizationArchTestSupport.CUSTOMER_AND_ADMIN_HANDLERS_DECLARE_PRE_AUTHORIZE,
-            ControllerAuthorizationArchTestSupport.ADMIN_HANDLERS_REQUIRE_ADMIN_ROLE,
+            ControllerAuthorizationArchTestSupport.ADMIN_HANDLERS_REQUIRE_OPERATOR_AUTHORITY,
             ControllerAuthorizationArchTestSupport.INTERNAL_HANDLERS_ALLOW_SERVICE_CALLERS_ONLY,
             ControllerAuthorizationArchTestSupport.NO_REQUEST_CONTEXT_HOLDER,
             ControllerAuthorizationArchTestSupport.NO_GLOBAL_FEIGN_REQUEST_CUSTOMIZER_BEANS,
@@ -64,11 +64,12 @@ class ControllerAuthorizationArchTestSupportTest {
     }
 
     @Test
-    @DisplayName("R2 어드민 핸들러가 permitAll() · isAuthenticated() · or 로 넓힌 식 · 선언 없음이면 실패한다")
+    @DisplayName("R2 어드민 핸들러가 permitAll() · isAuthenticated() · or 로 넓힌 식 · 정의되지 않은 기능 권한 · 선언 없음이면 실패한다")
     void adminHandlersWithoutAdminRoleFail() {
-        assertThat(violations(ControllerAuthorizationArchTestSupport.ADMIN_HANDLERS_REQUIRE_ADMIN_ROLE))
-            .hasSize(5)
-            .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#open", "@PreAuthorize(\"permitAll()\")", "hasRole('ADMIN')"))
+        assertThat(violations(ControllerAuthorizationArchTestSupport.ADMIN_HANDLERS_REQUIRE_OPERATOR_AUTHORITY))
+            .hasSize(6)
+            .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#unknownFeature", "ADMIN_FOO_READ"))
+            .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#open", "@PreAuthorize(\"permitAll()\")", "AdminAuthority"))
             .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#member"))
             .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#widened"))
             .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#precedence"))
