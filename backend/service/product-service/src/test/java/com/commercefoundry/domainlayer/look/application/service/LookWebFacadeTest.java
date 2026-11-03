@@ -56,13 +56,13 @@ class LookWebFacadeTest {
     void listReadsProductsOnce() {
         given(port.findVisibleSlice(0, 20)).willReturn(new SliceImpl<>(List.of(look(1L), look(2L)), PageRequest.of(0, 20), true));
         given(port.findItemsByLookIds(anyCollection())).willReturn(List.of(new LookItem(11L, 1L, 100L, 0), new LookItem(12L, 1L, 200L, 1), new LookItem(21L, 2L, 100L, 0)));
-        given(productListProcessor.summarizeVisible(anyCollection())).willReturn(Map.of(100L, summary(100L)));
+        given(productListProcessor.summarizeVisible(anyCollection(), org.mockito.ArgumentMatchers.any())).willReturn(Map.of(100L, summary(100L)));
 
         SliceResponse<?> response = facade(true).getLooks(0, 20);
 
         assertThat(response.hasNext()).isTrue();
         assertThat(response.contents()).hasSize(2);
-        verify(productListProcessor, times(1)).summarizeVisible(Set.of(100L, 200L));
+        verify(productListProcessor, times(1)).summarizeVisible(org.mockito.ArgumentMatchers.eq(Set.of(100L, 200L)), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -70,13 +70,13 @@ class LookWebFacadeTest {
     void detail() {
         given(port.findById(1L)).willReturn(Optional.of(look(1L)));
         given(port.findItemsByLookIds(List.of(1L))).willReturn(List.of(new LookItem(11L, 1L, 200L, 0), new LookItem(12L, 1L, 100L, 1)));
-        given(productListProcessor.summarizeVisible(anyCollection())).willReturn(Map.of(100L, summary(100L)));
+        given(productListProcessor.summarizeVisible(anyCollection(), org.mockito.ArgumentMatchers.any())).willReturn(Map.of(100L, summary(100L)));
 
         LookDetailResponse response = facade(true).getLook(1L);
 
         assertThat(response.lookId()).isEqualTo("1");
         assertThat(response.products()).singleElement().satisfies(product -> assertThat(product.productId()).isEqualTo("100"));
-        verify(productListProcessor).summarizeVisible(List.of(200L, 100L));
+        verify(productListProcessor).summarizeVisible(org.mockito.ArgumentMatchers.eq(List.of(200L, 100L)), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -98,7 +98,7 @@ class LookWebFacadeTest {
         given(productDetailProcessor.getVisibleProduct(700L)).willReturn(ProductFixtures.product(700L));
         given(port.findVisibleByProductId(700L)).willReturn(List.of(look(3L)));
         given(port.findItemsByLookIds(anyCollection())).willReturn(List.of(new LookItem(31L, 3L, 700L, 0)));
-        given(productListProcessor.summarizeVisible(anyCollection())).willReturn(Map.of(700L, summary(700L)));
+        given(productListProcessor.summarizeVisible(anyCollection(), org.mockito.ArgumentMatchers.any())).willReturn(Map.of(700L, summary(700L)));
 
         ProductLookListResponse on = facade(true).getLooksOfProduct(700L);
         ProductLookListResponse off = facade(false).getLooksOfProduct(700L);
