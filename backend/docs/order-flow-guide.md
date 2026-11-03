@@ -1,5 +1,8 @@
 # Order Flow Guide
 
+저장된 최초 결제 반영 결과 조회(#14 · #308 C1a)는 [order-payment-result-guide.md](order-payment-result-guide.md)를 따른다.
+현재 주문 상태와 독립적인 읽기 전용 원천 API이며, 주문 상태 전이·재고 복원·회신 소비를 추가하지 않는다.
+
 > 주문 · 재고 · 배송 · 클레임의 **상태 전이** 정본이다. order-service / product-service(재고) / delivery-service 가
 > 이 문서를 따르고, `/order-flow-guard` 스킬이 이 문서로 점검한다. 결제 상태는 `payment-guide.md` §5.
 

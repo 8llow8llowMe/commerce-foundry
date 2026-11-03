@@ -719,6 +719,7 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
   | 엔드포인트 | 허용 호출자 | 비고 |
   |------------|-------------|------|
   | `GET /internal/v1/orders/{orderId}/payment-summary` | `SERVICE_payment-service` | 읽기, memberId 로 소유 확인 (#14) |
+  | `GET /internal/v1/order-payments/{paymentId}` | `SERVICE_payment-service` | 저장된 최초 반영 결과 읽기, 회원 필터 없음 (#308 C1a). 현재 주문 상태 · 복원 진행 정보는 내리지 않는다 |
   | `POST /internal/v1/orders/{orderId}/shipment` | `SERVICE_delivery-service` | 주문 상태 `SHIPPING` 전이 (#18) |
   | `POST /internal/v1/orders/{orderId}/delivery-completion` | `SERVICE_delivery-service` | 주문 상태 `DELIVERED` 전이 (#18) |
 

@@ -356,6 +356,10 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 
 ## 6. 서비스 간 정합성
 
+**C1a 원천 조회 API**: order-service의 `GET /internal/v1/order-payments/{paymentId}`는 저장된 최초 반영 결과만 반환한다.
+정확한 7필드·인가·오류 계약은 [order-payment-result-guide.md](order-payment-result-guide.md)를 따른다.
+이 API 추가는 ACK 소비·inbox·회신 outbox·재고 확정 뒤 중단 창 복구를 완료하지 않는다. #308 C·#15 운영 개방 조건과 기존 게이트는 유지한다.
+
 결제 승인(DONE)을 주문의 결제 완료(PAID)로 반영하는 단계는 **Kafka 이벤트**다(#304 · #308, `architecture-guide.md` §8-1). 동기 internal 호출 + 재전송 플래그 + 스케줄러로 하던 이전 설계는
 쓰지 않는다 — 전달은 outbox 릴레이(적어도 한 번)와 컨슈머 재시도 · DLT 가 보장하고(소비 · 회신 쪽은 PR-B · C 예정), 중복은 inbox · 유니크 키 · `@Version` 이 막는다.
 **payment 에 재전송 스케줄러를 두지 않는다.** **#308 이 끝나기 전에는 운영 결제를 열지 않는다(`payment.enabled=false`, §3-4).**

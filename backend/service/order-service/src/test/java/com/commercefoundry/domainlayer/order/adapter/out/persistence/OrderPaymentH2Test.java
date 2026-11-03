@@ -2,6 +2,9 @@ package com.commercefoundry.domainlayer.order.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapperImpl;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderPaymentMapperImpl;
+import com.commercefoundry.domainlayer.order.adapter.in.internal.presenter.OrderPaymentResultInternalPresenter;
+import com.commercefoundry.domainlayer.order.application.service.OrderPaymentResultInternalFacade;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentResultProcessor;
 import com.commercefoundry.domainlayer.order.support.OrderPaymentPersistenceContract;
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
 import com.commercefoundry.global.messaging.JpaProcessedEventStore;
@@ -22,7 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @TestPropertySource(properties = {
     "spring.datasource.url=jdbc:h2:mem:order-payment;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;INIT=CREATE SCHEMA IF NOT EXISTS orders",
-    "spring.jpa.properties.hibernate.default_schema=orders", "spring.jpa.hibernate.ddl-auto=create-drop",
+    "spring.jpa.properties.hibernate.default_schema=orders", "spring.jpa.hibernate.ddl-auto=create-drop", "spring.jpa.properties.hibernate.generate_statistics=true",
     "spring.cloud.discovery.enabled=false", "eureka.client.enabled=false", "commerce.messaging.enabled=false"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -32,6 +35,9 @@ import org.springframework.transaction.annotation.Transactional;
     OrderMapperImpl.class,
     OrderPaymentRepositoryAdapter.class,
     OrderPaymentMapperImpl.class,
+    OrderPaymentResultInternalFacade.class,
+    OrderPaymentResultProcessor.class,
+    OrderPaymentResultInternalPresenter.class,
     JpaProcessedEventStore.class,
     OrderPaymentH2Test.Config.class
 })
