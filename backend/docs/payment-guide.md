@@ -401,6 +401,8 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   재선점(`POST /internal/v1/stock-reservations`)하고 **곧바로 확정**한다. 재선점이 `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면 `STOCK_UNAVAILABLE` 로 거절 회신한다.
   **주문은 선점 확정 200(`CONFIRMED`)을 받은 뒤에만 PAID 로 둔다** — 같은 이벤트를 다시 받아도 확정을 멱등으로 다시 부른다 (`order-flow-guide.md` §3-4).
   재선점은 결제 대기 · 만료 주문만 한다(선점이 이미 풀린 결제 대기 주문 포함). 결제 전 취소된 `CANCELED` 주문은 거절(`ORDER_CANCELED`)이다.
+  확정 뒤 취소가 이긴 경합(확정 뒤 끊긴 복구창 포함)은 해제 프로브로 확정 선점을 찾아 `order_payment.restoration_claim_id` 로 재고를 복원한 **뒤에**
+  `ORDER_CANCELED` 를 회신한다(#308 PR-C1, `order-flow-guide.md` §3-6).
 - **회신과 `order_synced`(payment, PR-C 예정)** — 두 칸은 그대로 두고 뜻을 **"주문의 회신 이벤트를 받았는가"** 로 바꾼다(DONE 계열만 쓴다 — LATE_APPROVED 는 주문에 반영하지 않는다, #14):
 
   | `order_synced` | `order_sync_failure_code` | 뜻 | 처리 |
