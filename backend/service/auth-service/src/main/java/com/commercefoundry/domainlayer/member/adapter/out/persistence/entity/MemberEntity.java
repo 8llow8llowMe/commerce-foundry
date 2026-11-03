@@ -60,7 +60,7 @@ public class MemberEntity extends BaseEntity {
     private String phone;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "role", nullable = false, length = 20, comment = "역할 (CUSTOMER / ADMIN) — access 토큰 role claim 값")
+    @Column(name = "role", nullable = false, length = 20, comment = "역할 (CUSTOMER / ADMIN / OWNER / MANAGER / STAFF) — access 토큰 role claim 값")
     private MemberRole role;
 
     @Column(name = "deactivated_at", comment = "관리자 비활성화 시각 (#193). 고객 · 활성 관리자는 null")

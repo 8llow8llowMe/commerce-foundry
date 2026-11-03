@@ -113,7 +113,7 @@
         name varchar(50) not null,
         password_hash varchar(100) not null,
         phone varchar(20),
-        role varchar(20) not null check ((role in ('CUSTOMER','ADMIN'))),
+        role varchar(20) not null check ((role in ('CUSTOMER','ADMIN','OWNER','MANAGER','STAFF'))),
         version bigint not null,
         primary key (id),
         constraint uk_member_email unique (email),
@@ -148,7 +148,7 @@
         '휴대폰 번호 — 숫자만 (01012345678). 없으면 null';
 
     comment on column auth.member.role is
-        '역할 (CUSTOMER / ADMIN) — access 토큰 role claim 값';
+        '역할 (CUSTOMER / ADMIN / OWNER / MANAGER / STAFF) — access 토큰 role claim 값';
 
     comment on column auth.member.version is
         '낙관적 락 버전';

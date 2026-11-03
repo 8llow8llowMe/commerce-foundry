@@ -157,6 +157,17 @@ class ResourceServerSecurityIntegrationTest {
         assertThat(TestController.ADMIN_CALLS).hasValue(0);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"OWNER", "MANAGER", "STAFF"})
+    @DisplayName("새 운영자 역할은 전환 전 어드민 URL과 기존 ADMIN 메서드에서 403 — 발급을 켜기 전까지 fail-closed")
+    void newOperatorRolesCannotUseLegacyAdminEndpoints(String roleName) throws Exception {
+        MemberRole role = MemberRole.valueOf(roleName);
+
+        assertEnvelope(perform(get("/api/v1/admin/x").header(HttpHeaders.AUTHORIZATION, bearer(role))), SecurityErrorCode.FORBIDDEN);
+        assertEnvelope(perform(get("/api/v1/annotated-admin").header(HttpHeaders.AUTHORIZATION, bearer(role))), SecurityErrorCode.FORBIDDEN);
+        assertThat(TestController.ADMIN_CALLS).hasValue(0);
+    }
+
     @Test
     @DisplayName("CUSTOMER 가 hasRole('ADMIN') 메서드에 오면 catch-all advice 가 있어도 403 · SECURITY_005 다")
     void customerOnAnnotatedAdminMethod() throws Exception {

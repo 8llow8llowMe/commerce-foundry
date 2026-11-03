@@ -210,6 +210,14 @@ class GatewaySecurityTest {
         });
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"OWNER", "MANAGER", "STAFF"})
+    @DisplayName("새 운영자 역할은 인가 전환 전 어드민 경로에서 403이고 하류에 닿지 않는다")
+    void newOperatorRolesCannotReachAdminRoutes(String roleName) {
+        assertRejected(get(ADMIN_PATH, token(MemberRole.valueOf(roleName))), SecurityErrorCode.FORBIDDEN, null);
+        assertThat(UPSTREAM_REQUESTS).isEmpty();
+    }
+
     // ── 어드민 회원 조회 · 관리자 로그인 (#6) ─────────────────────
 
     @Test
