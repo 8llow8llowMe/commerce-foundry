@@ -962,7 +962,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   FE는 다시 조회한 뒤 재시도한다. 조회와 삭제 사이에 먼저 완료된 편집도 현재 상태를 대상으로 삭제하므로, 편집 화면 버전 비교 계약은 없다.
 - SKU·옵션·이미지·맞춤 입력·진열 카테고리·재고·선점과 기존 주문을 변경하지 않는다. 신규 선점은 기존 판매 가능 판정으로 거절하고,
   internal SKU 조회에는 상품과 SKU를 유지하며 `purchasable=false`로 알린다. S3·Kafka·서비스 간 호출은 없다. 새 엔티티·운영 DDL도 없다.
-- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing`, 정지 이미지 편집은 `/images`, 기존 옵션 이름·순서는 `/options`, 기존 SKU 필드는 `/skus` API로 편집한다. FE 계약 검토자는 `seonghoho`다.
+- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing`, 정지 이미지 편집은 `/images`, 기존 옵션 이름·순서는 `/options`, 기존 SKU 필드는 `PUT /skus`, 옵션 값 · 새 조합 SKU 추가는 `POST /skus` API로 편집한다. FE 계약 검토자는 `seonghoho`다.
 
 #### 어드민 상품 기본 정보 수정 API (#9 후속)
 
@@ -1011,6 +1011,23 @@ ADMIN `PUT /api/v1/admin/products/{productId}/options`는 `{version, optionGroup
 ID·FK·createdAt·retiredAt과 SKU 조합 키·가격·판매 상태·무게·HS 코드·원가·재고·선점은 유지한다. 옵션 추가·조합 변경·은퇴 처리는 범위 밖이다.
 기존 편집 상세를 반환하며 은퇴 옵션은 어드민에 포함하고 고객에서는 계속 제외한다. internal SKU 조회는 수정된 현재 옵션명을 사용하며 이미 저장된 주문 항목 스냅숏은 바뀌지 않는다.
 감사 행위는 `PRODUCT_OPTIONS_REPLACE`이고 식별자·결과만 기록한다. FE 계약 검토자는 `seonghoho`다.
+
+#### 옵션 값 · 새 조합 SKU 추가 API (#9 PR-C1)
+
+ADMIN `POST /api/v1/admin/products/{productId}/skus` 는 `{version, newOptionValues?:[{optionGroupId, name}], skus:[{optionValues[], additionalPrice{amount,currency}, saleStatus,
+weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 과 편집용 상세를 돌려준다. 기존 옵션 · SKU · 재고 · 선점 · 원가 · 주문 스냅숏은 바꾸지 않고 새 행만 넣는다.
+
+- **새 옵션(그룹)은 받지 않는다** — 그룹이 늘면 기존 SKU 조합이 모두 맞지 않는다. 구조를 바꾸려면 새 상품으로 등록한다(#9 PR-C 권장안).
+- **옵션 값** — 기존 그룹 끝에 배열 순서로 붙는다. 없는 · 다른 상품의 그룹, 그룹 안에서 이미 쓴 이름(은퇴한 값 포함 — 이름 고유 제약이 은퇴 행을 포함한다), 그룹당 50개 초과는 400 `SKU_ADMIN_007` 이다.
+- **조합** — SKU 마다 옵션 노출 순서대로 값 이름을 하나씩 고른다(새 값은 이번 요청의 이름). 값 수가 다르거나 없는 · 은퇴한 값, 옵션 없는 상품,
+  은퇴한 옵션이 있는 상품은 400 `SKU_ADMIN_008`, 이미 있는 조합(판매 종료 포함)이나 요청 안에서 겹친 조합은 400 `SKU_ADMIN_009`, 상품당 100개 초과는 400 `SKU_ADMIN_010` 이다.
+- **가격** — 기본 판매가 = 판매중 SKU 최저가 불변식과 통화를 기존 + 새 SKU 전체로 본다(400 `SKU_ADMIN_004`).
+- **처음 재고** — 등록(E1)과 같은 경로다. `initialStock` 을 준 SKU 는 재고 행과 입고(`RESTOCK`) 이력 1건(메모 "SKU 추가 초기 재고", 관리자 = 토큰 주체)을 같은 트랜잭션에서 만들고,
+  주지 않은 SKU 는 재고 행 없이 품절로 생긴다. 선점 · 만료 경로는 건드리지 않는다.
+- **동시성 · 멱등** — 상품 버전 CAS 가 모든 쓰기보다 먼저다. 오래된 버전은 409 `SKU_ADMIN_002` 이고 아무것도 쓰지 않는다. 같은 요청을 다시 보내면 두 번째는 버전이 달라 409 다(중복 생성 없음).
+- **필드 검증** — `version` `SKU_ADMIN_101`, 그룹 아이디 `103`, 추가금 `104` · `108` · `109`, 판매 상태 `105`, 무게 `106`, HS 코드 `107`, 값 0~50개 `111`, 값 이름 1~50자 `112`,
+  SKU 1~100개 `113`, 옵션 값 이름 1~5개 `114`, 처음 재고 `115`.
+- 감사 행위는 `PRODUCT_SKUS_ADD`(대상 `product:<id>`)이고 값 · 가격은 싣지 않는다. 기존 SKU 판매 종료는 `PUT /skus` 의 `saleStatus` 로 한다(#573). 운영 DDL 은 없다.
 
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다
