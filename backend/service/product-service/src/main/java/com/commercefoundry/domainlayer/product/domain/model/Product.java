@@ -49,6 +49,13 @@ public record Product(
         }
     }
 
+    /** 가격 외 모든 편집 필드와 로드한 낙관적 버전을 보존한다. */
+    public Product withPricing(Money newSalePrice, Money newListPrice) {
+        return new Product(id, categoryId, name, summary, descriptionHtml, saleStatus, visible, newSalePrice, newListPrice,
+            maxQuantityPerOrder, customOrder, customOrderNotice, customOrderLeadTimeDays, preorder, expectedShipDate,
+            version, deletedAt, createdByMemberId, nameEn, summaryEn, descriptionHtmlEn);
+    }
+
     /** Immutable deletion snapshot; preserve editor fields and the loaded optimistic version. */
     public Product softDelete(Instant now) {
         if (isDeleted()) {

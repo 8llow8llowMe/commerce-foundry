@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.Pro
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductHeaderUpdateAdminResponse;
+import com.commercefoundry.domainlayer.product.application.command.ProductPricingUpdateCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCategoryUpdateCommand;
@@ -15,6 +16,9 @@ import com.commercefoundry.persistence.dto.PageResponse;
  * 어드민 상품 관리. 숨김 상품을 포함한다 — 고객 상품 조회({@link ProductWebUseCase})와 DTO 를 공유하지 않는다.
  */
 public interface ProductAdminUseCase {
+
+    /** 가격을 버전 대조 후 전체 교체한다. 동일 값은 버전을 유지하고 생략한 정가는 삭제한다. */
+    ProductDetailAdminResponse updatePricing(ProductPricingUpdateCommand command);
 
     /** 대표 · 진열 카테고리를 버전 대조 후 전체 교체한다. */
     ProductDetailAdminResponse updateCategories(ProductCategoryUpdateCommand command);

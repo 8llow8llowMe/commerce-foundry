@@ -3,7 +3,9 @@ package com.commercefoundry.domainlayer.product.domain.model;
 import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 상품 가격 계산의 유일한 진입점이다. 목록 · 상세 · 서비스 간 SKU 조회가 모두 여기를 거친다 —
@@ -16,6 +18,29 @@ public final class ProductPricing {
     private static final BigDecimal PERCENT = BigDecimal.valueOf(100);
 
     private ProductPricing() {
+    }
+
+    /** 등록 · 편집이 공유하는 순수 가격 규칙. 오류 이유를 application 에서 서비스 오류 코드로 번역한다. */
+    public static Optional<String> violation(Money sale, Money list, List<SkuPrice> skus) {
+        Objects.requireNonNull(sale, "sale");
+        if (list != null && list.currency() != sale.currency()) {
+            return Optional.of("정가 통화가 판매가 통화와 다릅니다");
+        }
+        if (list != null && list.amount() <= sale.amount()) {
+            return Optional.of("정가는 판매가보다 높아야 합니다");
+        }
+        if (skus.stream().anyMatch(sku -> sku.additionalPrice().currency() != sale.currency())) {
+            return Optional.of("SKU 추가금 통화가 판매가 통화와 다릅니다");
+        }
+        var onSale = skus.stream().filter(sku -> sku.saleStatus() == SaleStatus.ON_SALE).toList();
+        if (!onSale.isEmpty() && onSale.stream().noneMatch(sku -> sku.additionalPrice().amount() == 0)) {
+            return Optional.of("판매중 SKU 중 하나는 추가금이 0 이어야 합니다(기본 판매가 = 판매중 최저가)");
+        }
+        return Optional.empty();
+    }
+
+    /** 영속 모델 · 등록 command 에 의존하지 않는 SKU 가격 입력. */
+    public record SkuPrice(Money additionalPrice, SaleStatus saleStatus) {
     }
 
     /**

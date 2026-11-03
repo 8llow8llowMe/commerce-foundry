@@ -5,6 +5,7 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCreateRequest;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductPricingUpdateRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCategoryUpdateRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductHeaderUpdateRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductHeaderUpdateAdminResponse;
@@ -63,6 +64,20 @@ public class ProductAdminController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final ProductAdminUseCase productAdminUseCase;
+
+    @Operation(summary = "상품 가격 수정", description = "기본 판매가 · 정가를 전체 교체하고 편집용 상세를 반환한다. 정가 생략/null은 삭제다. "
+        + "현재 상품 통화를 유지하며 SKU 추가금과 판매중 최저가 규칙을 검사한다(400 PRODUCT_016). 동일 값은 버전을 유지한다. "
+        + "오래된 버전은 동일 값이어도 409 PRODUCT_010, 삭제 상품은 404 PRODUCT_001이다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_PRICING_REPLACE")
+    @PutMapping("/{productId}/pricing")
+    public ResponseEntity<Response<ProductDetailAdminResponse>> updatePricing(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId,
+        @RequestBody @Valid ProductPricingUpdateRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(productAdminUseCase.updatePricing(request.toCommand(productId, member.memberId()))));
+    }
 
     @Operation(summary = "상품 카테고리 수정", description = "대표 · 진열 카테고리를 전체 교체하고 편집용 상세를 반환한다. 대표는 진열 목록에 자동 포함한다. "
         + "동일 요청도 버전이 증가한다. 오래된 버전은 409 PRODUCT_010, 삭제 상품은 404 PRODUCT_001, 없는 카테고리는 400 PRODUCT_012, 잠금 충돌은 409 PRODUCT_045다.")

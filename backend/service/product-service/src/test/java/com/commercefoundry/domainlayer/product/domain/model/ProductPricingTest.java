@@ -14,6 +14,35 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 class ProductPricingTest {
 
+    @Test
+    void sharedPricingRulesAcceptZeroBaseStoppedSkusAndValidateCurrenciesBeforeMinimum() {
+        var zero = new ProductPricing.SkuPrice(Money.zero(KRW), SaleStatus.ON_SALE);
+        var stopped = new ProductPricing.SkuPrice(Money.of(100, KRW), SaleStatus.STOP_SELLING);
+        assertThat(ProductPricing.violation(Money.zero(KRW), null, java.util.List.of(zero))).isEmpty();
+        assertThat(ProductPricing.violation(Money.of(1000, KRW), null, java.util.List.of(stopped))).isEmpty();
+        assertThat(ProductPricing.violation(Money.of(1000, KRW), Money.of(2000, USD), java.util.List.of(zero)))
+            .contains("정가 통화가 판매가 통화와 다릅니다");
+        assertThat(ProductPricing.violation(Money.of(1000, KRW), Money.of(1000, KRW), java.util.List.of(zero)))
+            .contains("정가는 판매가보다 높아야 합니다");
+        assertThat(ProductPricing.violation(Money.of(1000, KRW), null,
+            java.util.List.of(new ProductPricing.SkuPrice(Money.of(100, USD), SaleStatus.STOP_SELLING))))
+            .contains("SKU 추가금 통화가 판매가 통화와 다릅니다");
+        assertThat(ProductPricing.violation(Money.of(1000, KRW), null,
+            java.util.List.of(new ProductPricing.SkuPrice(Money.of(100, KRW), SaleStatus.ON_SALE))))
+            .contains("판매중 SKU 중 하나는 추가금이 0 이어야 합니다(기본 판매가 = 판매중 최저가)");
+    }
+
+    @Test
+    void withPricingPreservesAllOtherFieldsIncludingDeletedAndEnglishState() {
+        var source = new Product(1, 2, "name", "summary", "<p>body</p>", SaleStatus.STOP_SELLING, false,
+            Money.of(1000, KRW), Money.of(2000, KRW), 3, true, "notice", 14, true,
+            java.time.LocalDate.of(2027, 1, 1), 9L, java.time.Instant.EPOCH, 99L, "English", "summaryEn", "bodyEn");
+        var changed = source.withPricing(Money.zero(KRW), null);
+        assertThat(changed).usingRecursiveComparison().ignoringFields("salePrice", "listPrice").isEqualTo(source);
+        assertThat(changed.salePrice()).isEqualTo(Money.zero(KRW));
+        assertThat(changed.listPrice()).isNull();
+    }
+
     @Nested
     @DisplayName("skuSalePrice")
     class SkuSalePrice {
