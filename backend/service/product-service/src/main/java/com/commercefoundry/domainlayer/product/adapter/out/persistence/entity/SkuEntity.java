@@ -75,6 +75,24 @@ public class SkuEntity extends BaseEntity implements Persistable<Long> {
         comment = "통관 신고용 HS 코드 (숫자 6~10자리) — 해외 판매 상품만 필수, null 이면 미입력")
     private String hsCode;
 
+    /** 기존 managed 행만 변경한다. createdAt·옵션 키·아이디를 보존하며 새 엔티티를 만들지 않는다. */
+    public boolean replaceEditableProperties(com.commercefoundry.domainlayer.product.domain.model.Sku sku) {
+        if (id != sku.id() || productId != sku.productId() || !optionValueKey.equals(sku.optionKey().value())) {
+            throw new IllegalArgumentException("SKU 식별자와 옵션 구성은 변경할 수 없습니다");
+        }
+        String nextHsCode = sku.hsCode() == null ? null : sku.hsCode().value();
+        boolean changed = additionalPriceAmount != sku.additionalPrice().amount() || additionalPriceCurrency != sku.additionalPrice().currency()
+            || saleStatus != sku.saleStatus() || !java.util.Objects.equals(weightGrams, sku.weightGrams()) || !java.util.Objects.equals(hsCode, nextHsCode);
+        if (changed) {
+            additionalPriceAmount = sku.additionalPrice().amount();
+            additionalPriceCurrency = sku.additionalPrice().currency();
+            saleStatus = sku.saleStatus();
+            weightGrams = sku.weightGrams();
+            hsCode = nextHsCode;
+        }
+        return changed;
+    }
+
     /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다(새 행은 persist, #9 E1). */
     @Override
     public boolean isNew() {
