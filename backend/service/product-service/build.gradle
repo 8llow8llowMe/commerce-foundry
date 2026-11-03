@@ -64,4 +64,8 @@ dependencies {
 def orderFlowContract = rootProject.file('docs/order-flow-guide.md')
 tasks.named('test') {
     inputs.file(orderFlowContract).withPropertyName('orderFlowContract').withPathSensitivity(PathSensitivity.RELATIVE)
+    // 데몬의 org.gradle.jvmargs 와 별도인 테스트 worker 힙. PostgreSQL · MVC · Kafka 컨텍스트를 함께 검증한다.
+    maxHeapSize = '1g'
+    // OOM 뒤 Kafka/Hikari 스레드만 살아 CI 제한 시간까지 대기하지 않도록 worker를 즉시 실패시킨다.
+    jvmArgs '-XX:+ExitOnOutOfMemoryError'
 }
