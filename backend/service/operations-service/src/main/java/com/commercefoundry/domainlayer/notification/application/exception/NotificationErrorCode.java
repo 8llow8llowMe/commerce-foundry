@@ -13,6 +13,8 @@ import org.springframework.http.HttpStatus;
 @RequiredArgsConstructor
 public enum NotificationErrorCode {
 
+    OUTBOX_OBSERVATION_UNAVAILABLE("NOTIFICATION_051", "결제 이벤트 발행 상태를 확인할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
+
     RECIPIENTS_UNAVAILABLE("NOTIFICATION_050", "알림 수신자를 확인할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
 
     NOT_FOUND("NOTIFICATION_001", "존재하지 않는 알림입니다.", HttpStatus.NOT_FOUND),

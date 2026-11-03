@@ -241,6 +241,10 @@ CUSTOMER JWT와 기존 비밀번호 재인증으로 기존 member_id에만 연�
 회원별 잠금·5초 DB 상한과 identity의 두 유니크 키로 제공자별 단일 연결과 경합을 보장한다.
 운영 제약 추가 SQL·중복 사전 점검과 FE 계약은 `api-design-guide.md`의 #355 절을 따른다.
 
+### 결제 outbox 운영 관측 (#477 A3b)
+
+operations-service는 auth 활성 관리자 목록과 payment-service의 읽기 전용 A3a 관측 API(PR #548)를 수집해 발행 지연 CRITICAL·ready 대기 해소 INFO를 알린다. 신규 `operations.outbox_alert_state`는 PAYMENT 단일 소스의 사고 상태·관측 워터마크를 소유한다. 결제/주문 업무 상태·PG·downstream 건강 판정은 소유하지 않는다. 기본 비활성 플래그·배포·실패 보존·시계 제약은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다. FE 스키마 변경과 새 Vault 비밀은 없다.
+
 ### DLT 이상 징후 알림 (#477 A2)
 
 operations-service는 기본 비활성 기능으로 기존 네 DLT를 구독하고 auth A1 internal 수신자 API의 활성 관리자에게 ANOMALY 알림을 저장한다. 결제 승인 DLT는 CRITICAL, 나머지는 WARNING이다. 토픽별 억제·파티션별 워터마크로 상태를 제한하며 업무 상태는 변경하지 않는다. 신규 operations 테이블은 `dlt_alert_state`·`dlt_partition_checkpoint`다. 배포·ACL·실패/복구·FE 계약은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.

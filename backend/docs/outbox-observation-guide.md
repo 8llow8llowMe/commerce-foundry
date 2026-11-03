@@ -44,6 +44,8 @@ Processor는 읽기 전용 트랜잭션과 2초 제한을 사용하고 집계 �
 
 ## 배포와 검증
 
-새 DDL·환경변수·Vault 키·Gateway 경로는 없다. payment-service 배포 후 operations 서비스 토큰으로 200과 세 필드 응답을 확인한다. operations의 실제 Feign 호출 연결은 이번 배포에 포함되지 않는다.
+원천 A3a(PR #548)에는 새 DDL·환경변수·Vault 키·Gateway 경로가 없다. payment-service 배포 후 operations 서비스 토큰으로 200과 세 필드 응답을 확인한다. 후속 A3b는 operations의 실제 Feign 호출과 관측 알림을 연결한다.
+
+A3b의 기본 비활성 플래그·신선도·시계 방어·억제·0건 해소 의미·신규 operations 상태 테이블 배포는 [이상 징후 알림](anomaly-notifications.md)의 결제 outbox 절을 따른다. 수집 불가·비정상·오래된 응답은 기존 사고를 유지하며 해소로 판단하지 않는다.
 
 검증 대상은 빈 테이블·미래 예약만·경계 시각·여러 과거 행·발행 완료 제외·발행 후 재조회, Clock 1회 사용, 실제 JWT 인가, 세 필드/null/no-store 계약, 실패 503과 원문 비노출이다. PostgreSQL 전용 검증의 로컬 건너뜀과 실제 실행 결과를 구분하며, payment-service `cleanTest/check --no-build-cache` 및 CI 결과를 완료 근거로 기록한다.
