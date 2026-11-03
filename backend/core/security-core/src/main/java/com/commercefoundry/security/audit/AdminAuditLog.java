@@ -21,8 +21,9 @@ import org.springframework.util.ClassUtils;
  *   <li>{@code action} 은 {@code <RESOURCE>_<VERB>} 대문자 — {@value #ACTION_REGEX} 가 아니면 {@link IllegalArgumentException}(호출 코드의 버그).</li>
  *   <li>{@code target} 은 {@link #target(String, long)} · {@link #target(String, String)} 로 만든다. {@code write} 는 대상 전체가 {@value #TARGET_REGEX} 가 아니면
  *       통째로 {@code -} 로 남기고 원문 없는 WARN 을 남긴다 — 이메일 · 이름 · 전화 원문, 주소, 비밀번호 · 토큰이 감사 줄로 새지 않게.</li>
- *   <li>트랜잭션 동기화가 켜져 있으면 줄을 바로 쓰지 않고 트랜잭션이 끝난 뒤({@code afterCompletion}) 쓴다 — <b>커밋됐고 {@code succeeded} 일 때만</b>
- *       {@code SUCCESS}, 롤백이면 {@code FAILURE}. 롤백된 쓰기가 {@code SUCCESS} 로 남지 않게 한다. 동기화가 꺼져 있으면 바로 쓴다.</li>
+ *   <li>실제 트랜잭션과 동기화가 모두 활성화됐으면 트랜잭션이 끝난 뒤({@code afterCompletion}) 쓴다 — <b>커밋됐고 {@code succeeded} 일 때만</b>
+ *       {@code SUCCESS}, 롤백 · 결과 모름이면 {@code FAILURE}. 그 밖에는 바로 쓴다. {@code NEVER} · 트랜잭션 없는 {@code SUPPORTS} 의 빈 동기화가
+ *       이미 확정한 업무 결과를 뒤집지 않게 한다.</li>
  * </ul>
  *
  * <p>spring-tx 는 {@code compileOnly} 다 — 트랜잭션을 쓰는 서블릿 서비스만 이 클래스를 부른다. spring-tx 가 없는 실행 환경(리액티브 게이트웨이)에서
@@ -55,12 +56,12 @@ public final class AdminAuditLog {
     }
 
     /**
-     * 감사 한 줄을 남긴다. 트랜잭션 안이면 트랜잭션 결과에 따라 끝난 뒤 남긴다.
+     * 감사 한 줄을 남긴다. 실제 트랜잭션과 동기화가 모두 활성화됐을 때만 완료 결과에 따라 끝난 뒤 남긴다. 빈 동기화에서는 바로 쓴다.
      *
      * @param action         {@code <RESOURCE>_<VERB>} — 형식이 아니면 {@link IllegalArgumentException}
      * @param actorMemberId  행위자 회원 ID — 모르면 {@code null}({@code -})
      * @param target         대상 — {@link #target} 으로 만든다. 없으면 {@code null}({@code -})
-     * @param succeeded      업무 결과. 트랜잭션 안이면 커밋까지 되어야 {@code SUCCESS}
+     * @param succeeded      업무 결과. 실제 트랜잭션과 동기화가 모두 활성화됐으면 커밋까지 되어야 {@code SUCCESS}
      */
     public static void write(String action, Long actorMemberId, String target, boolean succeeded) {
         requireAction(action);
@@ -126,9 +127,9 @@ public final class AdminAuditLog {
         private Deferred() {
         }
 
-        /** @return 동기화에 걸었으면 {@code true} — 이때 줄은 트랜잭션이 끝난 뒤 쓴다 */
+        /** @return 실제 트랜잭션의 동기화에 걸었으면 {@code true} — 이때 줄은 트랜잭션이 끝난 뒤 쓴다 */
         static boolean register(String action, Long actorMemberId, String target, boolean succeeded) {
-            if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            if (!TransactionSynchronizationManager.isActualTransactionActive() || !TransactionSynchronizationManager.isSynchronizationActive()) {
                 return false;
             }
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

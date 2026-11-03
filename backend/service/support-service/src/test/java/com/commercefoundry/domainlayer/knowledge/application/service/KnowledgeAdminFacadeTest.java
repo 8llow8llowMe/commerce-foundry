@@ -78,6 +78,7 @@ class KnowledgeAdminFacadeTest {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.clearSynchronization();
         }
+        TransactionSynchronizationManager.setActualTransactionActive(false);
     }
 
     @ParameterizedTest
@@ -135,6 +136,7 @@ class KnowledgeAdminFacadeTest {
 
     @Test
     void auditWaitsForTransactionCompletionAndRollbackCannotBeSuccess() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
         TransactionSynchronizationManager.initSynchronization();
         auditProcessor.created(99, 101L, true);
         assertThat(audit.list).isEmpty();

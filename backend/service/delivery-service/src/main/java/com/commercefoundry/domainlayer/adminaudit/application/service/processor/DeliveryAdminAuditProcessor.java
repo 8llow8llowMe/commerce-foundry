@@ -14,9 +14,7 @@ public class DeliveryAdminAuditProcessor {
     /**
      * 송장 등록 한 건. 업무 결과가 정해진 뒤 Facade 에서 부른다 — 단계마다 {@code REQUIRES_NEW} 라 안쪽에서 부르면 안쪽 커밋 기준으로 남는다.
      *
-     * <p>Facade 는 {@code NEVER} 지만 Spring 은 트랜잭션 없는 범위에도 동기화를 켠다({@code SYNCHRONIZATION_ALWAYS}) — 그래서 {@link AdminAuditLog#write} 는 줄을
-     * 바로 쓰지 않고 동기화에 걸어, <b>Facade 가 끝날 때(일괄 요청의 모든 건을 처리한 뒤) 한꺼번에</b> 남긴다. 빈 범위라 결과는 언제나 커밋이고 {@code succeeded}
-     * 그대로다. 줄마다 바로 쓰는 공통 개선은 #163 후속이다.
+     * <p>Facade 의 {@code NEVER} 범위에 Spring 이 빈 동기화를 켜도 실제 트랜잭션은 없다. {@link AdminAuditLog#write} 는 각 항목의 확정 결과를 즉시 남긴다.
      *
      * @param succeeded 등록 · 이미 등록이면 true, 건별 실패면 false
      */
@@ -25,8 +23,8 @@ public class DeliveryAdminAuditProcessor {
     }
 
     /**
-     * 배송 상태 변경 한 건 (#18 PR-B2). 등록과 같이 Facade({@code NEVER})가 결과가 정해진 뒤 부르고, 요청이 끝날 때 남는다 — 예외로 끝나면 빈 범위가 롤백으로 끝나
-     * {@code succeeded} 와 상관없이 {@code FAILURE} 다. 바꾼 상태 · 사유는 싣지 않는다(정본은 배송 상태 이력).
+     * 배송 상태 변경 한 건 (#18 PR-B2). Facade({@code NEVER})가 {@code finally} 에서 판정한 결과를 즉시 남긴다. 응답 재조회가 실패해도 호출자는
+     * {@code succeeded=false} 를 넘기므로 {@code FAILURE} 다 — 상태 변경 여부의 정본은 배송 상태 이력이다. 바꾼 상태 · 사유는 싣지 않는다.
      *
      * @param succeeded 바꿈 · 그대로 둠이면 true, 업무 오류면 false
      */

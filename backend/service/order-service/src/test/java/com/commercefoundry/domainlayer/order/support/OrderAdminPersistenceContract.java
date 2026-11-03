@@ -382,7 +382,7 @@ public abstract class OrderAdminPersistenceContract {
             StatusChangedBy.CUSTOMER, before.memberId(), "고객 변심");
     }
 
-    private long create(OrderStatus status, boolean customOrder) {
+    protected long create(OrderStatus status, boolean customOrder) {
         OrderQuoteLine line = customOrder
             ? OrderQuoteLine.of(101, 7101, "맞춤 두루마기", "M", krw(90_000), 1, OrderCustomOptions.empty(), true, WEIGHT_GRAMS, HS_CODE)
             : quoteLine(101, 1000, 1);
