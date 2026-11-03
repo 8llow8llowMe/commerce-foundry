@@ -78,8 +78,8 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
   확정 선점 · eventId 를 남긴다. `PAYMENT_NOT_DONE` 은 재조회가 DONE 이 아닌 경우(부분 취소 등 돈이 남은 상태 포함)용 값이고 판정은 PR-B2 다.
   **확정 선점(`stock_reservation_id`)은 `PAID` · `REJECTED_ORDER_CANCELED` 에만 기록한다**(`ck_order_payment_reservation_scope`) — 이중 결제에서 진 쪽(`ALREADY_PAID`)이
   이긴 결제가 확정한 같은 선점을 가리키면 PR-C 복원이 이긴 주문의 재고를 되돌려 초과 판매가 된다. `restoration_claim_id` · `restored_at` 은 확정 선점이 있는
-  `REJECTED_ORDER_CANCELED`(확정 뒤 취소가 이긴 경합)에만 있고(`ck_order_payment_restoration_consistent`), PR-C 가 조건부 UPDATE(`… and restoration_claim_id is null` ·
-  `… and restored_at is null`)로 채운다. 유니크 위반은 `OrderPaymentSaveException`(`PAYMENT_ALREADY_RECORDED` · `ORDER_ALREADY_PAID`, 같은 트랜잭션에 먼저 넣은 inbox 의
+  `REJECTED_ORDER_CANCELED`(확정 뒤 취소가 이긴 경합)에만 있고(`ck_order_payment_restoration_consistent`), PR-C1 은 `restoration_claim_id` 를 거절 기록 INSERT 때
+  함께 넣고 `restored_at` 만 조건부 UPDATE(`… and restoration_claim_id is not null and restored_at is null`, 영향 행 수 확인)로 채운다(§3-6). 유니크 위반은 `OrderPaymentSaveException`(`PAYMENT_ALREADY_RECORDED` · `ORDER_ALREADY_PAID`, 같은 트랜잭션에 먼저 넣은 inbox 의
   중복은 `EVENT_ALREADY_PROCESSED`)으로 나오고 그 트랜잭션은 rollback-only 다 — 새 트랜잭션에서 다시 읽어 판정한다. 컨슈머 권장 순서는 주문 저장(`@Version` flush) →
   `order_payment` insert → inbox record → 회신 outbox 다.
 
@@ -540,7 +540,15 @@ RESERVED ──확정──▶ CONFIRMED
     만들고 그 `claimId` 로 복원한다. 재시도마다 새 아이디를 만들지 않는다 — 새 아이디면 멱등이 깨져 재고가 두 번 는다(상한 안이면 409 도 나지 않는다).
   - **복원 호출은 영속적으로 보장한다.** 클레임에 "재고 복원 대기" 표시를 두고 200 을 받으면 지운다. 실패(타임아웃 · 서킷 오픈 · 재시도 대상 409 상한 초과)하면
     스케줄러가 **같은 claimId · 같은 본문**으로 다시 보낸다(클레임 쪽 재전송이다 — 결제 반영은 재전송 대신 이벤트 재전달 · DLT 를 쓴다, `payment-guide.md` §6).
-    종결 409 는 어드민에 노출한다. 결제 반영 경합(확정 뒤 취소가 이김)의 복원은 클레임 행 대신 `order_payment.restoration_claim_id` 를 claimId 로 쓴다(#308 PR-C).
+    종결 409 는 어드민에 노출한다. 결제 반영 경합(확정 뒤 취소가 이김)의 복원은 클레임 행 대신 `order_payment.restoration_claim_id` 를 claimId 로 쓴다(#308 PR-C1).
+    이 claimId 는 거절 기록 INSERT 때 한 번 만들고 재시도 · 재전달은 그 값을 다시 쓴다. 이 경로만 `PRODUCT_028` 을 "다른 경로가 이미 복원" 으로 보고
+    WARN 후 복원 완료로 종결한다(그 선점의 확정 수량을 다른 클레임이 이미 되돌렸다 — 다시 늘릴 수 없다). `PRODUCT_027` · `PRODUCT_029` · 복원의 404 `PRODUCT_003` 은
+    DLT(버그 신호), 그 밖은 이벤트 재전달로 다시 부른다(§3-6).
+    이 경로의 `PRODUCT_028` 종결은 **전량 복원 전제**다(항목이 주문 스냅숏 전체 수량) — 같은 선점을 부분 복원하는 경로가 생기면 재검토한다.
+- **해제(`/release`) 프로브 (#308 PR-C1)** — order-service 가 해제를 부르는 곳은 결제 승인 소비가 **취소 주문**을 만나 확정 · 재선점 없이 거절하기 전 하나다.
+  후보 선점(재선점 증거 `order_stock_confirmation.stock_reservation_id` → 주문의 `stock_reservation_id`)마다 해제를 부른다 — 200 은 RESERVED 를 풀었거나 이미 RELEASED
+  (취소 주문이니 풀린 것이 맞다), 409 `PRODUCT_024` 는 **확정 선점 증거**(그 선점을 복원한다), 404 `PRODUCT_003` 은 후보 아님, `PRODUCT_026` · `PRODUCT_031` · 5xx ·
+  타임아웃은 재전달로 다시 한다. 확정 선점이 둘이면 데이터 이상(DLT)이다. **재선점(reserve)을 조회 대용으로 쓰지 않는다** — 취소 주문에 새 선점을 만든다.
   - **복원을 부른 클레임은 철회하지 않는다.** 환불이 실패(`REFUND_FAILED`)해도 환불만 재시도한다 — 재고를 다시 빼는(복원을 되돌리는) API 는 없다.
 - **409 를 같은 트랜잭션 안에서 잡고 계속하지 않는다.** product-service 안에서도 어댑터가 409 로 바꾼 시점에는 flush 가 이미 실패해 트랜잭션이 rollback-only 다 —
   잡고 계속하면 커밋에서 실패한다. order-service 도 Feign 409 를 받은 트랜잭션에서 주문 상태를 바꾸고 재시도까지 하지 말고, 재시도는 새 트랜잭션에서 한다.
@@ -592,7 +600,7 @@ payload (두 이벤트 모두 같은 모양 — **이 JSON 이 계약 정본이�
   payment internal 재조회로 진위를 확정한다(`payment-guide.md` §6). 클러스터 인증 · ACL 은 운영 인프라 과제로 따로 본다.
 - DLT 재처리는 사람이 한다(messaging-core README). DLT 에 남은 선점은 만료 스윕(안전망, §3-3)이 TTL 뒤 푼다.
 
-### 3-6. 결제 승인 소비 (#308 PR-B2)
+### 3-6. 결제 승인 소비 (#308 PR-B2 · PR-C1)
 
 `PaymentApprovedEventListener` → `OrderPaymentEventUseCase` → `OrderPaymentEventFacade`가 `payment-approved` v1을 처리한다.
 토픽은 `<ns>.payment.payment-approved`, 그룹은 `<ns>.order.payment-approved`, Kafka key와 aggregateId는 payload.orderId다.
@@ -602,13 +610,14 @@ payload (두 이벤트 모두 같은 모양 — **이 JSON 이 계약 정본이�
 2. `PaymentApprovalProcessor`만 payment internal을 조회하고 이벤트와 ID/회원/금액/통화/승인시각/수단을 대조한다. 승인시각은 timestamp(6)에 맞춰 마이크로초로 자른다.
    Facade에는 `VerifiedPayment` application model만 넘긴다. 404/400/계약위반/알림↔원본 불일치는 즉시 DLT, 401/403/5xx/timeout은 재시도다.
 3. 원본↔주문의 소유/금액/통화 불일치는 `PAYMENT_MISMATCH` 회신이다. 주문 없음은 `ORDER_NOT_FOUND`, 다른 결제로 이미 결제완료면 `ALREADY_PAID`다.
-   CANCELED는 확정·재선점 없이 `ORDER_CANCELED`. PENDING_PAYMENT/EXPIRED만 §3-4의 확정·재선점→즉시확정을 호출한다.
+   CANCELED는 확정·재선점 없이 `ORDER_CANCELED`(그 전에 해제 프로브 — 아래 "확정 뒤 취소 복구"). PENDING_PAYMENT/EXPIRED만 §3-4의 확정·재선점→즉시확정을 호출한다.
+   재선점이 새 선점 ID를 주면 확정 **전에** `orders.order_stock_confirmation`에 REQUIRES_NEW(timeout=5s)로 upsert하고, 실패하면 확정을 부르지 않는다.
 4. DONE이 아닌 결제는 WARN + `REJECTED_PAYMENT_NOT_DONE` 기록/inbox를 남긴다. CANCELED(전액취소)는 회신 없이 끝내고,
    PARTIAL_CANCELED 등 잔액이 남을 수 있는 상태는 `PAYMENT_NOT_DONE` 거절 회신을 낸다. 조회 amount는 원승인 총액이므로 잔액을 계산하지 않는다.
 5. DB 쓰기 순서는 **주문 @Version flush → order_payment INSERT → inbox → 회신 outbox**다. 성공 회신 `order-paid`는
    `{orderId,paymentId,stockReservationId,paidAt}`, 거절 `order-payment-rejected`는 `{orderId,paymentId,reason}`(모든 ID 문자열)다. 한 트랜잭션에 커밋/롤백한다.
 6. 주문 버전·결제/주문/inbox 유니크 경합은 롤백된 tx 밖에서 잡고 새 tx로 최대3회 재판정한다. 소진은 Kafka 재시도다.
-   이미 받은 확정선점 ID는 이 로컬 재시도 동안 유지한다. 취소가 이겼으면 `REJECTED_ORDER_CANCELED.stock_reservation_id`에 남겨 C가 복원한다.
+   이미 받은 확정선점 ID는 이 로컬 재시도 동안 유지한다. 취소가 이겼으면 `REJECTED_ORDER_CANCELED.stock_reservation_id`에 남겨 복원한다(아래 PR-C1).
    다른 결제가 이겼으면 `REJECTED_ALREADY_PAID`에 선점을 넣지 않는다(이긴 주문의 재고를 복원하면 안 된다).
 7. inbox 보존7d가 지난 재처리/서로 다른 eventId의 같은 payment도 영구 `order_payment.payment_id` 기록으로 회신 중복을 막는다.
    기존 회신은 outbox가 전달하며 중복 알림 때 새 회신을 만들지 않는다. DB 커밋 뒤 ack 전 재시작은 같은 inbox로 거른다.
@@ -616,16 +625,55 @@ payload (두 이벤트 모두 같은 모양 — **이 JSON 이 계약 정본이�
 **배포 gate** — `MESSAGING_ENABLED=true`와 `ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED=true`(기본 false)가 모두 필요하다.
 전용 소비 gate를 켤 때만 `OrderPaymentConsumerConfig`가 승인/성공회신/거절회신 토픽과 각 `.dlt` 6개를 확인한다. 없거나 Kafka 불통이면 기동 실패다.
 gate OFF에서는 기존 required-topics(만료 토픽)만 확인하므로 기존 만료 outbox 릴레이를 계속 운영할 수 있다.
-**PR-C와 #15 완료 및 아래 미해결 복구창 검증 전에는 소비 gate와 운영 payment.enabled를 열지 않는다.**
+**PR-C2 · PR-C3 · #15 완료 전에는 소비 gate와 운영 payment.enabled를 열지 않는다** — 아래 "남은 복구창(PR-C2)" 이 아직 열려 있다.
 
-**남은 필수 복구창(PR-C)** — 확정 성공 뒤 DB 기록 전에 프로세스가 종료되고 그 사이 고객 취소가 커밋되면 재전달은 CANCELED부터 본다.
-메모리의 확정선점 ID는 사라졌고 재선점이 새 ID였으면 orders.stockReservationId는 옛 값이다. product는 orderId로 활성선점을 찾는 reserve 명령만 제공하고
-조회 API는 없다. CANCELED에 reserve/confirm을 호출할 수 없으므로 B2는 이 창의 확정선점 증거를 복구하지 못한다. **해결되지 않았다.**
-C는 안전한 조회 또는 영속증거 복구 경로 및 동일 claimId 복원을 설계·검증해야 한다. 기존 주문 ID만으로 복원가능하다고 가정하지 않는다.
-또한 확정→DB실패/프로세스종료 뒤 payment가 CANCELED/PARTIAL_CANCELED가 되어 재전달되면, 주문이 CANCELED가 아니어도
-`REJECTED_PAYMENT_NOT_DONE` 기록이 확정선점 ID 없이 영구히 남을 수 있다. B1의 도메인/DB check는 NOT_DONE에 선점참조를 허용하지 않는다.
-따라서 기존 모델로 이 변형을 해결했다고 간주하지 않는다. C는 취소주문 경합과 함께 **결제상태가 먼저 바뀐 복구창**도 모델/조회계약을 재설계하고
-실패주입·동일claimId복원을 검증해야 한다. 두 변형을 증명하기 전 gate OFF를 유지한다.
+**확정 뒤 취소 복구 (#308 PR-C1)** — 확정 성공 뒤 DB 기록 전에 프로세스가 끊기고 그 사이 고객 취소가 커밋되면 재전달은 CANCELED부터 보고,
+메모리의 확정선점 ID는 사라졌다. 확정 대상은 두 곳 중 하나로 영속돼 있다 — 첫 확정은 `orders.stock_reservation_id`, 재선점 확정은 확정 **전에** 커밋한
+`orders.order_stock_confirmation(payment_id PK)`. 재전달이 CANCELED를 만나면 그 두 후보로 해제 프로브(§3-4)를 부른다.
+
+| 프로브 결과 | 처리 |
+|------|------|
+| 모두 200 · 404 | 확정 전 취소 — 지금처럼 `REJECTED_ORDER_CANCELED`(선점 없음) 기록 + inbox + 회신. 복원 없음 |
+| 409 `PRODUCT_024` 하나 | 그 선점으로 아래 복원 |
+| `PRODUCT_026` · `PRODUCT_031` · 5xx · 타임아웃 · 서킷 | 503 `ORDER_002` — Kafka 재시도. product 장애가 재시도 예산(아래 "재시도와 liveness")보다 길면 DLT |
+| 409 `PRODUCT_024` 둘 | 500 `ORDER_017` — DLT(재선점은 앞 선점이 풀렸을 때만 하므로 데이터 이상) |
+
+**결제 전 취소 거절도 이제 product 해제 프로브에 의존한다** — 프로브가 성공해야 거절을 기록 · 회신하므로 product 장애가 길면 이 거절도 DLT 로 간다.
+
+복원(멱등) — 이번 처리가 확정 200을 받은 경합(버전 충돌 → 다시 읽어 CANCELED)도 같은 경로다. 복원 전에 `findPaidByOrderId`가 비어 있는지 본다
+(다른 결제로 결제완료된 뒤 취소된 주문이면 선점은 이긴 결제의 것이라 복원하지 않고 선점 없는 거절만 남긴다).
+
+1. REQUIRES_NEW — `order_payment(REJECTED_ORDER_CANCELED, stock_reservation_id, restoration_claim_id = 새 Snowflake)` INSERT. inbox · 회신은 아직 쓰지 않는다.
+2. tx 밖 — `POST /internal/v1/stock-restorations {claimId = restoration_claim_id, reservationId, reason = CANCELLATION, items = 주문 스냅숏 SKU 별 수량 합}`.
+   200 → 3. `PRODUCT_028`(다른 경로가 이미 복원) → WARN 후 3(종결). `PRODUCT_027` · `PRODUCT_029` · 404 `PRODUCT_003` → DLT.
+   `PRODUCT_026` · `PRODUCT_030` · `PRODUCT_031` · 5xx · 타임아웃 → 재시도.
+3. REQUIRES_NEW — `restored_at` 조건부 UPDATE(`… and restored_at is null`, 영향 행 수 확인) → inbox → 영향 1행일 때만 `order-payment-rejected(ORDER_CANCELED)` outbox.
+   0행이면(같은 결제의 다른 처리가 먼저 마무리) inbox만 남긴다.
+
+재전달은 inbox가 없으므로 다시 들어와 `order_payment`가 `awaitsRestoration()`(취소 거절 · 선점 · claimId 있음 · `restored_at` 없음)이면 프로브 · 확정 없이 2부터 같은
+claimId로 재개한다. 회신은 3의 한 번뿐이다. 재전달 때 결제가 이미 전액 취소(CANCELED)면 일반 거절과 같이 회신하지 않는다.
+
+이번 실행이 확정 200 을 받았는데 커밋된 기록(이 결제의 기록 · 같은 주문의 결제 완료 기록)이 그 선점을 가리키지 않으면 — 다른 처리가 확정 전 취소(프로브 200)로
+거절을 먼저 커밋한 경합 — inbox 만 남기지 않고 ERROR 로그(orderId · paymentId · reservationId · eventId) 후 DLT 로 보낸다(조용한 재고 누수 차단, 자동 복원은 #582).
+
+**DLT 는 거절(환불) 회신 미발행이다.** 위 프로브 장애 초과 · 복원 `PRODUCT_027` · `PRODUCT_029` · 404 `PRODUCT_003` · 확정 선점 미기록이 DLT 로 가면
+payment 는 거절 회신을 받지 못해 환불 대상으로 넘어가지 않는다. 재처리 담당은 원인을 고친 뒤 재전송하고 **재고 복원(`restored_at`)과 거절 회신 · 환불까지** 확인한다.
+DLT · 복원 대기 행의 자동 재처리 스윕은 #582 이고, **소비 게이트를 열기 전에 닫아야 한다.** 그 전까지 아래 쿼리로 점검한다.
+
+```sql
+-- 복원 대기(awaitsRestoration) 행 수 · 가장 오래된 나이
+select count(*), now() - min(created_at) as oldest_age
+from orders.order_payment
+where result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null and restoration_claim_id is not null and restored_at is null;
+
+-- B2 형식 행(확정 선점은 있는데 복원 클레임이 없음) — PR-C1 은 복원하지 않는다. 0 이어야 한다
+select count(*) from orders.order_payment
+where result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null and restoration_claim_id is null;
+```
+
+**남은 복구창(PR-C2)** — 확정→DB실패/프로세스종료 뒤 payment가 CANCELED/PARTIAL_CANCELED가 되어 재전달되면, 주문이 CANCELED가 아니어도
+`REJECTED_PAYMENT_NOT_DONE` 기록이 확정선점 ID 없이 영구히 남을 수 있다(B1의 도메인/DB check는 NOT_DONE에 선점참조를 허용하지 않는다).
+`rejection()` 판정 순서(취소 판정이 결제 완료 판정보다 앞), 복원한 선점의 재확정 차단도 PR-C2 범위다. payment 회신 컨슈머는 PR-C3 다.
 
 **재시도와 liveness** — attempts8, initial2s, multiplier2, max60s. 7대기의 합은 **182s 순수대기**이며 성공시간 보장이 아니다.
 DefaultErrorHandler의 기본 seek 방식은 실패 레코드로 되돌린 뒤 poll해 재호출한다. 따라서 전체182s를 한 번의 poll 간격으로 합산하지 않는다.
