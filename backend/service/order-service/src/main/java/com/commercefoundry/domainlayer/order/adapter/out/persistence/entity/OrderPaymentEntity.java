@@ -30,8 +30,9 @@ import org.springframework.data.domain.Persistable;
  * 확정 선점은 결제 완료 · 취소 주문 거절에만(이중 결제에서 진 쪽이 이긴 결제의 선점을 가리키지 않게), 복원 클레임은 확정 선점이 있는 취소 주문 거절에만,
  * 복원 시각은 복원 클레임이 있을 때만. {@code result} 값 목록 check 는 Hibernate 가 이름 없이 만든다 — 값을 더하면 운영 DDL 로 지우고 다시 만든다.
  *
- * <p>행은 추가만 한다. PR-C 가 채우는 {@code restoration_claim_id} · {@code restored_at} 은 merge 가 아니라 조건부 UPDATE 로 바꾼다
- * ({@code ... where id = :id and restoration_claim_id is null} / {@code ... and restored_at is null}) — 두 처리가 같은 행을 읽고 덮어쓰는 lost update 를 막는다.
+ * <p>행은 추가만 한다. {@code restoration_claim_id} 는 확정 뒤 취소 거절 기록을 INSERT 할 때 함께 넣는다(#308 PR-C1 — 나중에 채우지 않는다).
+ * 바뀌는 칸은 {@code restored_at} 하나이고 merge 가 아니라 조건부 UPDATE({@code ... where id = :id and restoration_claim_id is not null and restored_at is null})
+ * 로 채운다 — 두 처리가 같은 행을 읽고 덮어쓰는 lost update 를 막는다.
  */
 @Entity
 @Table(

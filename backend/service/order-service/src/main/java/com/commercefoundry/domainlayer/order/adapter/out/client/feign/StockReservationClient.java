@@ -31,4 +31,11 @@ public interface StockReservationClient {
      */
     @PostMapping("/internal/v1/stock-reservations/{reservationId}/confirmation")
     Response<StockReservationInternalResponse> confirm(@PathVariable("reservationId") long reservationId);
+
+    /**
+     * 선점 해제 (#308 PR-C1) — 본문 없음. 멱등이다(이미 RELEASED 면 200, 응답 모양은 선점과 같다). 확정된 선점은 409 {@code PRODUCT_024}, 없으면 404 {@code PRODUCT_003},
+     * 동시 변경 · 잠금 대기는 409 {@code PRODUCT_026} · {@code PRODUCT_031} 이다. 취소 주문의 결제 반영 복구창 프로브로만 쓴다.
+     */
+    @PostMapping("/internal/v1/stock-reservations/{reservationId}/release")
+    Response<StockReservationInternalResponse> release(@PathVariable("reservationId") long reservationId);
 }

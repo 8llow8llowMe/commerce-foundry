@@ -1,14 +1,15 @@
 package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
+import java.time.Instant;
 import java.util.Optional;
 
 /**
  * 결제 반영 기록 (#308, {@code orders.order_payment}) — 결제당 한 행, 주문당 결제 완료 하나.
  *
- * <p>행은 추가만 한다. PR-C 가 더할 복원 칸 갱신({@code restoration_claim_id} · {@code restored_at})은 읽고 merge 하지 않고 조건부 UPDATE 한 문장으로 한다 —
- * {@code ... set restoration_claim_id = :claimId where id = :id and restoration_claim_id is null},
- * {@code ... set restored_at = :now where id = :id and restored_at is null}. 0행이면 다른 처리가 먼저 채운 것이다(lost update 방지).
+ * <p>행은 추가만 한다. 복원 클레임 아이디({@code restoration_claim_id})는 확정 뒤 취소 거절 기록을 넣을 때 함께 넣는다(PR-C1) — 나중에 채우지 않는다.
+ * 바뀌는 칸은 {@code restored_at} 하나이고 읽고 merge 하지 않고 조건부 UPDATE 한 문장으로 한다({@link #markRestored}) —
+ * 0행이면 다른 처리가 먼저 채운 것이다(lost update 방지).
  */
 public interface OrderPaymentRepositoryPort {
 
@@ -31,4 +32,12 @@ public interface OrderPaymentRepositoryPort {
 
     /** 주문의 결제 완료 기록(결과 PAID). 없으면 빈 값이다. */
     Optional<OrderPayment> findPaidByOrderId(long orderId);
+
+    /**
+     * 재고 복원 완료 표시 (#308 PR-C1) — {@code update ... set restored_at = :restoredAt where id = :id and restoration_claim_id is not null and restored_at is null}.
+     * 호출 트랜잭션을 필수로 요구한다.
+     *
+     * @return 이번 호출이 채웠으면 true, 이미 채워져 있었거나 복원 클레임이 없으면 false
+     */
+    boolean markRestored(long id, Instant restoredAt);
 }

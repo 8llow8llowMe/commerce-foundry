@@ -87,15 +87,26 @@ public record OrderPayment(
     }
 
     /**
-     * 확정 뒤 취소가 이긴 경합의 거절 반영 — 결과 {@link Result#REJECTED_ORDER_CANCELED} 와 확정한 선점을 남긴다. PR-C 가 이 선점을 복원한다.
+     * 확정 뒤 취소가 이긴 경합의 거절 반영 — 결과 {@link Result#REJECTED_ORDER_CANCELED} 와 확정한 선점, 그 선점을 되돌릴 복원 클레임 아이디를 함께 남긴다
+     * (#308 PR-C1). 복원 시각은 비어 있다 — 복원 200 뒤 조건부 UPDATE 로 채운다({@link #awaitsRestoration()}).
      *
-     * @param confirmedReservationId 이 결제 처리가 확정 200 을 받은 선점 아이디
+     * @param confirmedReservationId 이 결제 처리가 확정 200 을 받았거나 해제 프로브가 확정({@code PRODUCT_024})으로 확인한 선점 아이디
+     * @param restorationClaimId 재고 복원의 멱등 키 — 재시도 · 재전달 모두 이 값을 다시 쓴다
      */
     public static OrderPayment canceledAfterConfirmation(
-        long id, long orderId, long paymentId, long memberId, Money totalAmount, Instant approvedAt, long confirmedReservationId, UUID eventId
+        long id, long orderId, long paymentId, long memberId, Money totalAmount, Instant approvedAt, long confirmedReservationId, UUID eventId,
+        long restorationClaimId
     ) {
         return new OrderPayment(id, orderId, paymentId, memberId, totalAmount, approvedAt, Result.REJECTED_ORDER_CANCELED, confirmedReservationId, eventId,
-            null, null, null);
+            restorationClaimId, null, null);
+    }
+
+    /**
+     * 재고 복원이 남았는가 (#308 PR-C1) — 확정 선점 · 복원 클레임이 있는 취소 주문 거절이고 아직 복원 시각이 없다. 재전달은 이 기록의 같은 클레임 아이디로
+     * 복원부터 다시 하고, 그 뒤에야 inbox · 거절 회신을 남긴다.
+     */
+    public boolean awaitsRestoration() {
+        return result == Result.REJECTED_ORDER_CANCELED && stockReservationId != null && restorationClaimId != null && restoredAt == null;
     }
 
     /** 주문당 결제 완료 하나를 막는 칸 — 결제 완료면 주문 아이디, 아니면 null ({@code uk_order_payment_paid_order_id}). */

@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.order.application.mapper.OrderMapperImpl;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderPaymentMapperImpl;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentQueryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
+import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.in.OrderPaymentEventUseCase;
 import com.commercefoundry.domainlayer.order.application.service.OrderPaymentEventFacade;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
@@ -57,7 +58,7 @@ public class OrderPaymentConsumerH2Test extends OrderPaymentConsumerContract {
 
     @TestConfiguration
     @Import({OrderServiceFeaturesConfig.class, OrderRepositoryAdapter.class, OrderMapperImpl.class, OrderPaymentRepositoryAdapter.class,
-        OrderPaymentMapperImpl.class, JpaProcessedEventStore.class, JpaOutboxStore.class, OrderEventAdapter.class, OrderPaymentProcessor.class,
+        OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, JpaProcessedEventStore.class, JpaOutboxStore.class, OrderEventAdapter.class, OrderPaymentProcessor.class,
         PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class})
     public static class Config {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
@@ -65,6 +66,7 @@ public class OrderPaymentConsumerH2Test extends OrderPaymentConsumerContract {
         @Bean TopicNames topicNames() { return new TopicNames("commerce-foundry.test", "order"); }
         @Bean PaymentQueryPort paymentQueryPort() { return mock(PaymentQueryPort.class); }
         @Bean StockReservationPort stockReservationPort() { return mock(StockReservationPort.class); }
+        @Bean StockRestorationPort stockRestorationPort() { return mock(StockRestorationPort.class); }
         @Bean PaymentApprovedEventListener paymentApprovedEventListener(OrderPaymentEventUseCase useCase) {
             // 업무 UseCase는 실제 Spring 프록시다. 외부 payment/product 포트만 mock으로 둔다.
             return new PaymentApprovedEventListener(new EventEnvelopeCodec(65536), useCase);
