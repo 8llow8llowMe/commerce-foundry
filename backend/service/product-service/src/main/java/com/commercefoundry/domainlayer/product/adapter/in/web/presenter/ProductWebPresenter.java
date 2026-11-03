@@ -23,6 +23,7 @@ import com.commercefoundry.domainlayer.product.application.info.ProductOptionGro
 import com.commercefoundry.domainlayer.product.application.info.ProductOptionValueInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductSkuInfo;
 import com.commercefoundry.persistence.dto.SliceResponse;
+import java.util.Locale;
 import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Component;
 
@@ -36,10 +37,18 @@ public class ProductWebPresenter {
     private static final String MEDIA_TYPE_VIDEO = "VIDEO";
 
     public SliceResponse<ProductListItemResponse> toListResponse(Slice<ProductListItemInfo> slice) {
-        return SliceResponse.of(slice).map(this::toListItem);
+        return toListResponse(slice, Locale.KOREAN);
+    }
+
+    public SliceResponse<ProductListItemResponse> toListResponse(Slice<ProductListItemInfo> slice, Locale locale) {
+        return SliceResponse.of(slice).map(info -> toListItem(info, locale));
     }
 
     public ProductDetailResponse toDetailResponse(ProductDetailInfo info) {
+        return toDetailResponse(info, Locale.KOREAN);
+    }
+
+    public ProductDetailResponse toDetailResponse(ProductDetailInfo info, Locale locale) {
         return ProductDetailResponse.builder()
             .productId(String.valueOf(info.productId()))
             .name(info.name())
@@ -51,16 +60,16 @@ public class ProductWebPresenter {
             .salePrice(MoneyItems.of(info.salePrice()))
             .listPrice(MoneyItems.of(info.listPrice()))
             .discountRate(info.discountRate())
-            .saleStatus(info.saleStatus().toMetadata())
+            .saleStatus(info.saleStatus().toMetadata(locale))
             .maxQuantityPerOrder(info.maxQuantityPerOrder())
             .optionGroups(info.optionGroups().stream().map(this::toOptionGroupItem).toList())
-            .skus(info.skus().stream().map(this::toSkuItem).toList())
+            .skus(info.skus().stream().map(sku -> toSkuItem(sku, locale)).toList())
             .customOrder(toCustomOrderItem(info.customOrder()))
             .preorder(toPreorderItem(info.preorder()))
             .build();
     }
 
-    private ProductListItemResponse toListItem(ProductListItemInfo info) {
+    private ProductListItemResponse toListItem(ProductListItemInfo info, Locale locale) {
         return ProductListItemResponse.builder()
             .productId(String.valueOf(info.productId()))
             .name(info.name())
@@ -70,7 +79,7 @@ public class ProductWebPresenter {
             .listPrice(MoneyItems.of(info.listPrice()))
             .discountRate(info.discountRate())
             .hasOptionSurcharge(info.hasOptionSurcharge())
-            .saleStatus(info.saleStatus().toMetadata())
+            .saleStatus(info.saleStatus().toMetadata(locale))
             .customOrder(info.customOrder())
             .preorder(info.preorder())
             .build();
@@ -127,13 +136,13 @@ public class ProductWebPresenter {
             .build();
     }
 
-    private ProductSkuItem toSkuItem(ProductSkuInfo sku) {
+    private ProductSkuItem toSkuItem(ProductSkuInfo sku, Locale locale) {
         return ProductSkuItem.builder()
             .skuId(String.valueOf(sku.skuId()))
             .optionValueIds(sku.optionValueIds().stream().map(String::valueOf).toList())
             .additionalPrice(MoneyItems.of(sku.additionalPrice()))
             .salePrice(MoneyItems.of(sku.salePrice()))
-            .saleStatus(sku.saleStatus().toMetadata())
+            .saleStatus(sku.saleStatus().toMetadata(locale))
             .build();
     }
 

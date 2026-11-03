@@ -51,7 +51,8 @@ public record ProductDetailResponse(
     @Schema(description = "정가 대비 할인율(%) — 소수점 아래는 버린다. 할인이 없으면(정가 ≤ 표시 판매가 또는 1% 미만 할인) null — listPrice 와 discountRate 는 함께 null 이다", example = "13", nullable = true)
     Integer discountRate,
 
-    @Schema(description = "판매 상태 — ON_SALE · SOLD_OUT · STOP_SELLING", example = "{\"code\": \"ON_SALE\", \"name\": \"판매중\", \"description\": \"구매할 수 있습니다.\"}")
+    @Schema(description = "판매 상태 — ON_SALE · SOLD_OUT · STOP_SELLING. name/description은 Accept-Language의 en 계열이면 영어, 그 밖에는 한국어",
+        example = "{\"code\": \"ON_SALE\", \"name\": \"판매중\", \"description\": \"구매할 수 있습니다.\"}")
     CodeNameDescriptionMetadata saleStatus,
 
     @Schema(description = "1회 주문 최대 수량. null 이면 제한 없음", example = "10", nullable = true)

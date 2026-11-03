@@ -71,7 +71,7 @@ class ProductWebFacadeTest {
 
         verify(productListProcessor).search(new ProductSearchCriteria(null, ProductSortType.PRICE_ASC, 2, 30), LocaleContextHolder.getLocale());
         verifyNoInteractions(categoryProcessor);
-        verify(productWebPresenter).toListResponse(EMPTY);
+        verify(productWebPresenter).toListResponse(EMPTY, LocaleContextHolder.getLocale());
     }
 
     @Test
@@ -112,26 +112,47 @@ class ProductWebFacadeTest {
         order.verify(productDetailProcessor).getVisibleProduct(7L);
         order.verify(categoryProcessor).visiblePathOf(1111L);
         order.verify(productDetailProcessor).getDetail(product, VISIBLE_PATH, LocaleContextHolder.getLocale());
-        verify(productWebPresenter).toDetailResponse(detail);
+        verify(productWebPresenter).toDetailResponse(detail, LocaleContextHolder.getLocale());
     }
 
     @Test
-    @DisplayName("Accept-Language en은 목록과 상세 처리에 같은 로케일을 전달한다")
-    void englishLocalePassesToBothProcessors() {
+    @DisplayName("Accept-Language en은 문구 Processor와 metadata Presenter에 같은 로케일을 전달한다")
+    void englishLocalePassesToProcessorsAndPresenter() {
+        var previous = LocaleContextHolder.getLocaleContext();
         LocaleContextHolder.setLocale(Locale.ENGLISH);
         try {
             Product product = ProductFixtures.product(7L, 1111L);
+            ProductDetailInfo detail = mock(ProductDetailInfo.class);
             given(productListProcessor.search(any(), any())).willReturn(EMPTY);
             given(productDetailProcessor.getVisibleProduct(7L)).willReturn(product);
             given(categoryProcessor.visiblePathOf(1111L)).willReturn(VISIBLE_PATH);
+            given(productDetailProcessor.getDetail(product, VISIBLE_PATH, Locale.ENGLISH)).willReturn(detail);
 
             facade.searchProducts(null, ProductSortType.NEWEST, 0, 20);
             facade.getProduct(7L);
 
             verify(productListProcessor).search(any(), org.mockito.ArgumentMatchers.eq(Locale.ENGLISH));
             verify(productDetailProcessor).getDetail(product, VISIBLE_PATH, Locale.ENGLISH);
+            verify(productWebPresenter).toListResponse(EMPTY, Locale.ENGLISH);
+            verify(productWebPresenter).toDetailResponse(detail, Locale.ENGLISH);
         } finally {
-            LocaleContextHolder.resetLocaleContext();
+            LocaleContextHolder.setLocaleContext(previous);
+        }
+    }
+
+    @Test
+    void capturesLocaleOnceBeforeCallingTheProcessor() {
+        var previous = LocaleContextHolder.getLocaleContext();
+        LocaleContextHolder.setLocale(Locale.UK);
+        try {
+            given(productListProcessor.search(any(), org.mockito.ArgumentMatchers.eq(Locale.UK))).willAnswer(invocation -> {
+                LocaleContextHolder.setLocale(Locale.KOREAN);
+                return EMPTY;
+            });
+            facade.searchProducts(null, ProductSortType.NEWEST, 0, 20);
+            verify(productWebPresenter).toListResponse(EMPTY, Locale.UK);
+        } finally {
+            LocaleContextHolder.setLocaleContext(previous);
         }
     }
 

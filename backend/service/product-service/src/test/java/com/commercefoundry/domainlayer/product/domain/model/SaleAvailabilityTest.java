@@ -8,6 +8,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
 import java.util.stream.Stream;
+import java.util.Arrays;
+import java.util.Locale;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -75,6 +77,25 @@ class SaleAvailabilityTest {
         assertThat(SaleAvailability.SOLD_OUT.toMetadata())
             .isEqualTo(CodeNameDescriptionMetadata.of("SOLD_OUT", "품절", "재고가 모두 소진되었습니다."));
         assertThat(SaleAvailability.STOP_SELLING.toMetadata().name()).isEqualTo("판매 종료");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "ON_SALE,판매중,구매할 수 있습니다.,Available,This item is available for purchase.",
+        "SOLD_OUT,품절,재고가 모두 소진되었습니다.,Sold out,This item is out of stock.",
+        "STOP_SELLING,판매 종료,판매가 종료된 상품입니다.,No longer sold,This item is no longer sold."
+    })
+    void localizedMetadataKeepsCodesAndExistingKoreanFallback(SaleAvailability status, String koName, String koDescription,
+                                                            String enName, String enDescription) {
+        var korean = CodeNameDescriptionMetadata.of(status.name(), koName, koDescription);
+        var english = CodeNameDescriptionMetadata.of(status.name(), enName, enDescription);
+        assertThat(status.toMetadata()).isEqualTo(korean);
+        for (Locale locale : Arrays.asList(Locale.KOREAN, Locale.FRANCE, Locale.JAPANESE, null)) {
+            assertThat(status.toMetadata(locale)).isEqualTo(korean);
+        }
+        for (Locale locale : new Locale[]{Locale.ENGLISH, Locale.US, Locale.UK}) {
+            assertThat(status.toMetadata(locale)).isEqualTo(english);
+        }
     }
 
     @Test

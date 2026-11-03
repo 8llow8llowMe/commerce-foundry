@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
@@ -18,12 +21,33 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.model.ProductSortType;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductWebUseCase;
+import com.commercefoundry.domainlayer.category.application.service.processor.CategoryProcessor;
+import com.commercefoundry.domainlayer.product.adapter.in.web.presenter.ProductWebPresenter;
+import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.ProductListQueryResult;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
+import com.commercefoundry.domainlayer.product.application.service.ProductWebFacade;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductListProcessor;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductDetailProcessor;
+import com.commercefoundry.domainlayer.product.domain.model.Product;
+import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
+import com.commercefoundry.domainlayer.product.domain.model.Stock;
+import com.commercefoundry.domainlayer.product.support.ProductFixtures;
+import com.commercefoundry.global.properties.StoreProperties;
+import com.commercefoundry.shared.commerce.CurrencyCode;
+import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.persistence.dto.SliceResponse;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -34,6 +58,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.HttpStatus;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -51,6 +77,78 @@ class ProductWebControllerTest {
 
     @MockitoBean
     private ProductWebUseCase productWebUseCase;
+
+    @Test
+    void sequentialRequestsTranslateTextAndSaleStatusThroughActualFacadeProcessorsAndPresenter() {
+        var products = mock(ProductRepositoryPort.class);
+        var skus = mock(SkuRepositoryPort.class);
+        var images = mock(ProductImageRepositoryPort.class);
+        var stocks = mock(StockRepositoryPort.class);
+        var options = mock(ProductOptionRepositoryPort.class);
+        var fields = mock(ProductCustomOrderFieldRepositoryPort.class);
+        var store = new StoreProperties(null);
+        var product = new Product(1, 11, "저고리", "한국어 요약", "<p>설명</p>", SaleStatus.ON_SALE, true,
+            Money.of(39_000, CurrencyCode.KRW), null, null, false, null, null, false, null, 0L, null, null, "Jacket", null, null);
+        given(products.findVisibleById(1L)).willReturn(Optional.of(product));
+        given(products.searchVisible(any())).willReturn(new SliceImpl<>(List.of(
+            new ProductListQueryResult(1, "저고리", 39_000, CurrencyCode.KRW, null, null, SaleStatus.ON_SALE, false, false, "Jacket"),
+            new ProductListQueryResult(2, "번역 없는 상품", 39_000, CurrencyCode.KRW, null, null, SaleStatus.ON_SALE, false, false, null)
+        ), PageRequest.of(0, 20), false));
+        given(skus.aggregateByProductIds(anyCollection())).willReturn(List.of(
+            new SkuAggregateQueryResult(1, true, true, 0L, 0L, 3), new SkuAggregateQueryResult(2, true, true, 0L, 0L, 1)));
+        given(skus.findAllByProductId(1)).willReturn(List.of(
+            ProductFixtures.sku(10, 1, "", 0, SaleStatus.ON_SALE), ProductFixtures.sku(11, 1, "", 0, SaleStatus.ON_SALE),
+            ProductFixtures.sku(12, 1, "", 0, SaleStatus.STOP_SELLING)));
+        given(stocks.findAllBySkuIds(anyCollection())).willReturn(List.of(new Stock(10, true, 5), new Stock(11, true, 0), new Stock(12, true, 5)));
+        var facade = new ProductWebFacade(mock(CategoryProcessor.class), new ProductListProcessor(products, skus, images, store),
+            new ProductDetailProcessor(products, options, skus, stocks, images, fields, store), new ProductWebPresenter());
+        // Reuse this MVC slice: only the mocked entry port delegates; the entire customer read/formatting path is real.
+        given(productWebUseCase.searchProducts(null, ProductSortType.NEWEST, 0, 20))
+            .willAnswer(invocation -> facade.searchProducts(null, ProductSortType.NEWEST, 0, 20));
+        given(productWebUseCase.getProduct(1L)).willAnswer(invocation -> facade.getProduct(1));
+
+        for (String language : new String[]{"en-US", null, "en-GB", "fr", "ko", null}) {
+            boolean english = language != null && language.startsWith("en");
+            var listRequest = mvc.get().uri("/api/v1/products");
+            var detailRequest = mvc.get().uri("/api/v1/products/1");
+            if (language != null) {
+                listRequest.header("Accept-Language", language);
+                detailRequest.header("Accept-Language", language);
+            }
+            var list = listRequest.exchange();
+            var detail = detailRequest.exchange();
+            assertThat(list).hasStatusOk();
+            assertThat(detail).hasStatusOk();
+            assertThat(list.getResponse().getHeader("Vary")).contains("Accept-Language");
+            assertThat(detail.getResponse().getHeader("Vary")).contains("Accept-Language");
+            assertThat(list).bodyJson().extractingPath("$.dataBody.contents[0].name").isEqualTo(english ? "Jacket" : "저고리");
+            assertThat(list).bodyJson().extractingPath("$.dataBody.contents[1].name").isEqualTo("번역 없는 상품");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.name").isEqualTo(english ? "Jacket" : "저고리");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.summary").isEqualTo("한국어 요약");
+            assertThat(list).bodyJson().extractingPath("$.dataBody.contents[0].saleStatus.code").isEqualTo("ON_SALE");
+            assertThat(list).bodyJson().extractingPath("$.dataBody.contents[0].saleStatus.name").isEqualTo(english ? "Available" : "판매중");
+            assertThat(list).bodyJson().extractingPath("$.dataBody.contents[0].saleStatus.description")
+                .isEqualTo(english ? "This item is available for purchase." : "구매할 수 있습니다.");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.saleStatus.code").isEqualTo("ON_SALE");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.saleStatus.name").isEqualTo(english ? "Available" : "판매중");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.saleStatus.description")
+                .isEqualTo(english ? "This item is available for purchase." : "구매할 수 있습니다.");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[0].saleStatus.code").isEqualTo("ON_SALE");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[0].saleStatus.name").isEqualTo(english ? "Available" : "판매중");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[1].saleStatus.code").isEqualTo("SOLD_OUT");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[1].saleStatus.name").isEqualTo(english ? "Sold out" : "품절");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[1].saleStatus.description")
+                .isEqualTo(english ? "This item is out of stock." : "재고가 모두 소진되었습니다.");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[2].saleStatus.code").isEqualTo("STOP_SELLING");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[2].saleStatus.name").isEqualTo(english ? "No longer sold" : "판매 종료");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[2].saleStatus.description")
+                .isEqualTo(english ? "This item is no longer sold." : "판매가 종료된 상품입니다.");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[1].saleStatus").asMap().containsOnlyKeys("code", "name", "description");
+            assertThat(list).bodyJson().extractingPath("$.dataBody.contents[0].salePrice.amount").isEqualTo(39_000);
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.salePrice.amount").isEqualTo(39_000);
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.skus[1].salePrice.currency").isEqualTo("KRW");
+        }
+    }
 
     @Test
     void acceptLanguageReachesLocaleContextAndResponseVariesByLanguage() {

@@ -1,6 +1,8 @@
 package com.commercefoundry.domainlayer.product.domain.model;
 
 import com.commercefoundry.common.dto.metadata.CodeNameDescribable;
+import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
+import java.util.Locale;
 import java.util.Objects;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -14,12 +16,20 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public enum SaleAvailability implements CodeNameDescribable {
 
-    ON_SALE("판매중", "구매할 수 있습니다."),
-    SOLD_OUT("품절", "재고가 모두 소진되었습니다."),
-    STOP_SELLING("판매 종료", "판매가 종료된 상품입니다.");
+    ON_SALE("판매중", "구매할 수 있습니다.", "Available", "This item is available for purchase."),
+    SOLD_OUT("품절", "재고가 모두 소진되었습니다.", "Sold out", "This item is out of stock."),
+    STOP_SELLING("판매 종료", "판매가 종료된 상품입니다.", "No longer sold", "This item is no longer sold.");
 
     private final String displayName;
     private final String description;
+    private final String displayNameEn;
+    private final String descriptionEn;
+
+    /** 고객 상품 응답에서만 명시적으로 선택한다. 인자 없는 metadata는 기존 한국어 계약을 유지한다. */
+    public CodeNameDescriptionMetadata toMetadata(Locale locale) {
+        return CodeNameDescriptionMetadata.of(name(), ProductText.select(locale, displayName, displayNameEn),
+            ProductText.select(locale, description, descriptionEn));
+    }
 
     /**
      * SKU 하나의 판매 가능 상태. 상품 · SKU 중 하나라도 판매 종료면 판매 종료, 아니면 재고가 바닥났을 때 품절이다.
