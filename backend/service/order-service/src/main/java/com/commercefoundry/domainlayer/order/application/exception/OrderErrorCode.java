@@ -99,6 +99,9 @@ public enum OrderErrorCode {
     /** 배송 완료는 고객의 반품 · 구매 확정 기간에 닿는다 — 운영자가 수동으로 바꿀 때는 확인한 근거를 사유로 남긴다 (#17). */
     DELIVERED_REASON_REQUIRED("ORDER_027", "배송 완료로 바꿀 때는 배송을 확인한 근거를 사유로 남겨 주세요.", HttpStatus.BAD_REQUEST),
 
+    /** 결제 반영 기록이 없다. 현재 주문의 존재 · 상태와는 별개다 (#308 C1a). */
+    ORDER_PAYMENT_RESULT_NOT_FOUND("ORDER_028", "저장된 결제 반영 결과가 없습니다.", HttpStatus.NOT_FOUND),
+
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     /** 타입 불일치 — {@code Idempotency-Key} 가 UUID 가 아닌 경우도 여기다. */

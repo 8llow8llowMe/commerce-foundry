@@ -9,6 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.commercefoundry.domainlayer.order.application.exception.OrderPaymentSaveException;
+import com.commercefoundry.domainlayer.order.application.port.in.OrderPaymentResultInternalUseCase;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
@@ -17,11 +18,17 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderPayment.Result;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.global.messaging.JpaProcessedEventStore;
+import com.commercefoundry.shared.commerce.CurrencyCode;
+import com.commercefoundry.shared.commerce.Money;
+import jakarta.persistence.EntityManagerFactory;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.hibernate.SessionFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,9 +53,86 @@ public abstract class OrderPaymentPersistenceContract {
     @Autowired protected JpaProcessedEventStore processedEventStore;
     @Autowired protected JdbcTemplate jdbc;
     @Autowired protected PlatformTransactionManager transactionManager;
+    @Autowired protected OrderPaymentResultInternalUseCase paymentResults;
+    @Autowired protected EntityManagerFactory entityManagerFactory;
 
     /** 위반한 제약 이름으로 사유를 가르는가 — PostgreSQL 이면 true, H2 는 이름이 없어 {@code REJECTED} 다. */
     protected abstract boolean reportsConstraintNames();
+
+    @ParameterizedTest
+    @EnumSource(Result.class)
+    @DisplayName("최초 결제 반영 결과는 주문 행 없이 한 SELECT 로 읽고 저장된 전체 행을 바꾸지 않는다")
+    void persistedResultIsIndependentOfCurrentOrderAndReadOnly(Result result) {
+        long orderId = IDS.incrementAndGet();
+        long paymentId = IDS.incrementAndGet();
+        Long reservationId = result.recordsConfirmedReservation() ? IDS.incrementAndGet() : null;
+        Instant approvedAt = result == Result.REJECTED_PAYMENT_NOT_DONE ? null : APPROVED_AT;
+        OrderPayment source = new OrderPayment(IDS.incrementAndGet(), orderId, paymentId, 7L, krw(1000), approvedAt,
+            result, reservationId, UUID.randomUUID(), null, null, null);
+        tx().executeWithoutResult(status -> orderPayments.insert(source));
+        var before = jdbc.queryForMap("select * from orders.order_payment where payment_id = ?", paymentId);
+        var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        var response = paymentResults.getResult(paymentId);
+
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
+        assertThat(statistics.getEntityInsertCount()).isZero();
+        assertThat(statistics.getEntityUpdateCount()).isZero();
+        assertThat(statistics.getEntityDeleteCount()).isZero();
+        assertThat(response.paymentId()).isEqualTo(String.valueOf(paymentId));
+        assertThat(response.orderId()).isEqualTo(String.valueOf(orderId));
+        assertThat(response.memberId()).isEqualTo("7");
+        assertThat(response.result()).isEqualTo(result.name());
+        assertThat(response.amount().amount()).isEqualTo(1000);
+        assertThat(response.amount().currency()).isEqualTo("KRW");
+        assertThat(response.approvedAt()).isEqualTo(approvedAt);
+        assertThat(response.stockReservationId()).isEqualTo(reservationId == null ? null : String.valueOf(reservationId));
+        assertThat(jdbc.queryForMap("select * from orders.order_payment where payment_id = ?", paymentId)).isEqualTo(before);
+        assertThat(jdbc.queryForObject("select count(*) from orders.orders where id = ?", Long.class, orderId)).isZero();
+    }
+
+    @Test
+    @DisplayName("USD 센트와 int 범위 초과 금액은 저장 · 결과 조회에서 환산이나 축소 없이 보존한다")
+    void usdMinorUnitsAboveIntegerRangeRoundTrip() {
+        long paymentId = IDS.incrementAndGet();
+        OrderPayment source = new OrderPayment(IDS.incrementAndGet(), IDS.incrementAndGet(), paymentId, 7L,
+            Money.of(4_294_967_295L, CurrencyCode.USD), APPROVED_AT, Result.PAID, IDS.incrementAndGet(), UUID.randomUUID(), null, null, null);
+        tx().executeWithoutResult(status -> orderPayments.insert(source));
+        var before = jdbc.queryForMap("select * from orders.order_payment where payment_id = ?", paymentId);
+        var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        var response = paymentResults.getResult(paymentId);
+
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
+        assertThat(statistics.getEntityUpdateCount()).isZero();
+        assertThat(response.paymentId()).isEqualTo(String.valueOf(paymentId));
+        assertThat(response.result()).isEqualTo("PAID");
+        assertThat(response.amount().amount()).isEqualTo(4_294_967_295L);
+        assertThat(response.amount().currency()).isEqualTo("USD");
+        assertThat(response.approvedAt()).isEqualTo(APPROVED_AT);
+        assertThat(response.stockReservationId()).isEqualTo(String.valueOf(source.stockReservationId()));
+        assertThat(jdbc.queryForMap("select * from orders.order_payment where payment_id = ?", paymentId)).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("최신 주문 상태가 바뀌어도 결제 반영 결과는 최초 PAID 그대로다")
+    void currentOrderStateDoesNotReinterpretPaidResult() {
+        long orderId = place(OrderStatus.PENDING_PAYMENT);
+        long paymentId = IDS.incrementAndGet();
+        Order paid = tx().execute(status -> orders.findById(orderId).orElseThrow()).markPaid(IDS.incrementAndGet());
+        tx().executeWithoutResult(status -> orderPayments.insert(
+            OrderPayment.paid(IDS.incrementAndGet(), paid, paymentId, krw(1000), APPROVED_AT, UUID.randomUUID())));
+        // 후속 흐름이 진행된 주문을 구성한다. 조회 경로는 현재 주문 상태를 해석하지 않아야 한다.
+        jdbc.update("update orders.orders set status = 'PREPARING', version = version + 1 where id = ?", orderId);
+
+        var response = paymentResults.getResult(paymentId);
+
+        assertThat(response.result()).isEqualTo("PAID");
+        assertThat(response.approvedAt()).isEqualTo(APPROVED_AT);
+        assertThat(response.stockReservationId()).isEqualTo(String.valueOf(paid.stockReservationId()));
+    }
 
     @Test
     @DisplayName("결제 완료 반영 — 주문 PAID · 새 선점 아이디 · SERVICE/PAYMENT_APPROVED 이력 · 결제 기록 · inbox 가 한 커밋에 남고, 결제 · 주문으로 다시 읽힌다")

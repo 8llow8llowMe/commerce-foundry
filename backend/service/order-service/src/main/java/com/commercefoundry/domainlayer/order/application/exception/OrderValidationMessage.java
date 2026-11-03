@@ -77,6 +77,8 @@ public final class OrderValidationMessage {
     public static final String DELIVERED_AT_OUT_OF_RANGE = "ORDER_160:deliveredAt 은 지금으로부터 30일 전부터 5분 뒤 사이여야 합니다.";
     public static final String DELIVERED_AT_BEFORE_SHIPPED = "ORDER_161:deliveredAt 은 주문의 출고 시각(shippedAt)보다 앞설 수 없습니다.";
 
+    public static final String PAYMENT_ID_POSITIVE = "ORDER_162:paymentId 는 양수여야 합니다.";
+
     private OrderValidationMessage() {
     }
 }
