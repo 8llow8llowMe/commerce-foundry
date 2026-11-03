@@ -34,13 +34,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Real transactions, CAS query and link storage; PostgreSQL subclass inherits every contract. */
-@SpringBootTest
+@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:product-category-update;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;"
+    + "DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1;INIT=CREATE SCHEMA IF NOT EXISTS product")
 @ActiveProfiles("test")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ProductCategoryUpdateIntegrationTest {
     static final long ID = 820001L;
     static final long FIRST = 820101L;

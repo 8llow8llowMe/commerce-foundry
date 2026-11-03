@@ -37,6 +37,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
@@ -62,6 +63,7 @@ import org.springframework.test.context.ActiveProfiles;
     "commerce.messaging.retry.max-backoff=30s"
 })
 @ActiveProfiles("test")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @EmbeddedKafka(
     partitions = 1,
     bootstrapServersProperty = "spring.kafka.bootstrap-servers",

@@ -155,6 +155,11 @@ Claude 세션이나 하위 에이전트 여러 개가 worktree 를 나눠 같은
 
 - 검증 범위를 §4 대로 좁힌다 — 반복 중에는 `--tests`, PR 직전에는 바꾼 모듈만, 전 모듈은 CI.
 - 여러 모듈 check 같은 무거운 빌드는 한 번에 한 세션만 돌린다.
+- product-service의 테스트 JVM은 최대 힙 1GB다. Gradle 데몬의 `org.gradle.jvmargs`와
+  테스트 worker 힙은 별개다([Gradle 메모리 설정](https://docs.gradle.org/current/userguide/config_gradle.html)).
+  클래스 전용 PostgreSQL·내장 Kafka 테스트는 `@DirtiesContext(AFTER_CLASS)`로 캐시에서 컨텍스트를 제거하고 풀·브로커를 해제한다.
+  이때 create-drop H2 스키마가 다른 캐시된 컨텍스트에 영향을 주지 않도록 카테고리 교체 테스트는 전용 H2 DB를 사용한다.
+  product 테스트의 OOM은 `ExitOnOutOfMemoryError`로 즉시 실패시키며, 테스트 제외나 대기 시간 상향으로 감추지 않는다.
 - 데몬은 켠 채로 쓴다(저장소 기본값). `--no-daemon` 은 매번 JVM 을 새로 띄워 느리다 — JVM 크래시 직후 한 번 다시 돌릴 때만 쓴다(§6).
   **`./gradlew --stop` 은 쓰지 않는다** — 같은 Gradle 버전의 데몬을 모두 내려 같은 PC 의 다른 세션 빌드까지 끊긴다.
 - 개인 설정 `~/.gradle/gradle.properties`(Windows 는 `%USERPROFILE%\.gradle\gradle.properties`)는 저장소 설정보다 우선하고,
