@@ -32,11 +32,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class PaymentAdminController {
     private final PaymentAdminUseCase paymentAdminUseCase;
 
-    @Operation(summary = "결제 목록 조회", description = "현재 저장된 결제 시도를 아이디 내림차순으로 조회한다. PG 조회 · 승인 재시도는 하지 않는다. REFUND_FAILED는 아직 지원하지 않는다.")
+    @Operation(summary = "결제 목록 조회", description = "결제 시도를 아이디 내림차순으로 조회한다. REFUND_FAILED는 PG 취소 확정 거절 이력 필터이며 실제 결제 상태는 그대로 반환한다.")
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
     public ResponseEntity<Response<PageResponse<PaymentAdminItem>>> search(
-        @Parameter(description = "결제 상태. 미지정이면 전체") @RequestParam(required = false) PaymentAdminStatusFilter status,
+        @Parameter(description = "결제 상태. REFUND_FAILED는 취소거절 이력(REJECTED)이 있는 결제이며 후속 성공 뒤에도 포함한다. 미지정이면 전체")
+        @RequestParam(required = false) PaymentAdminStatusFilter status,
         @Parameter(description = "주문 아이디. 미지정이면 전체") @RequestParam(required = false)
         @Positive(message = PaymentValidationMessage.ORDER_ID_POSITIVE) Long orderId,
         @Parameter(description = "주문 성공 회신 수신 여부. false 자체가 재시도 지시는 아니다") @RequestParam(required = false) Boolean orderSynced,

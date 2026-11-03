@@ -24,6 +24,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -57,21 +58,36 @@ class PaymentAdminControllerTest {
             "createdAt", "updatedAt", "approvalStartedAt", "approvedAt");
     }
 
-    @Test
-    void anonymousAndCustomerCannotRead() {
-        assertThat(mvc.get().uri(PATH).exchange()).hasStatus(401);
-        assertThat(mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange()).hasStatus(403);
+    @ParameterizedTest
+    @ValueSource(strings = {"", "?status=REFUND_FAILED"})
+    void anonymousAndCustomerCannotRead(String query) {
+        assertThat(mvc.get().uri(PATH + query).exchange()).hasStatus(401);
+        assertThat(mvc.get().uri(PATH + query).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange()).hasStatus(403);
         verifyNoInteractions(useCase);
     }
 
     @ParameterizedTest
     @CsvSource({"orderId=0,PAYMENT_102", "orderId=-1,PAYMENT_102", "page=-1,PAYMENT_116", "size=0,PAYMENT_117", "size=101,PAYMENT_117",
-        "status=REFUND_FAILED,PAYMENT_198", "status=invalid,PAYMENT_198", "orderSynced=invalid,PAYMENT_198", "orderId=abc,PAYMENT_198"})
+        "status=invalid,PAYMENT_198", "orderSynced=invalid,PAYMENT_198", "orderId=abc,PAYMENT_198"})
     void invalidFiltersFailBeforeQuery(String query, String code) {
         var result = mvc.get().uri(PATH + "?" + query).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
         assertThat(result).hasStatus(400);
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
         verifyNoInteractions(useCase);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DONE", "CANCELED"})
+    void refundFailedIsAcceptedAndResponseKeepsActualPaymentStatus(String actualStatus) {
+        PaymentAdminItem item = new PaymentAdminItem("4611686018427387904", "4611686018427387905", PaymentStatus.valueOf(actualStatus).toMetadata(),
+            MoneyItem.of(129000, "KRW"), null, null, false, null, Instant.parse("2026-11-01T00:00:00Z"), Instant.parse("2026-11-01T00:00:00Z"), null, null);
+        given(useCase.search(any())).willReturn(new PageResponse<>(List.of(item), 0, 20, 1, 1));
+        var result = mvc.get().uri(PATH + "?status=REFUND_FAILED&orderId=100&orderSynced=false")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].status.code").isEqualTo(actualStatus);
+        verify(useCase).search(new PaymentAdminSearchCommand(PaymentAdminStatusFilter.REFUND_FAILED, 100L, false, 0, 20));
     }
 
     @Test
