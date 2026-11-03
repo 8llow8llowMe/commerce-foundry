@@ -3,7 +3,9 @@ package com.commercefoundry.domainlayer.display.adapter.in.web.controller;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.display.adapter.in.web.dto.response.DisplayMainResponse;
 import com.commercefoundry.domainlayer.display.application.port.in.DisplayWebUseCase;
+import com.commercefoundry.global.web.CustomerLocale;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +13,7 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -22,7 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
  * 토큰을 보낸 요청도 같은 응답이라 사용자별로 달라지지 않는다. 가격 · 재고는 상세 · 장바구니 · 주문이 다시 계산하므로 1분 늦은 카드가 결제 금액을 바꾸지 않는다.
  *
  * <p><b>언어 · 통화별 응답이 생기면</b>(국문 KRW / 영문 USD 스토어프론트, {@code Accept-Language} 등 요청 헤더로 응답이 갈리면) 공유 캐시가 한 언어의 응답을
- * 다른 언어 방문자에게 내지 않도록 그 헤더를 {@code Vary} 에 싣거나 경로(쿼리 · 접두어)로 나눈다 — 지금은 응답이 하나라 {@code Vary} 를 두지 않는다.
+ * 다른 언어 방문자에게 내지 않도록 그 헤더를 {@code Vary} 에 싣거나 경로(쿼리 · 접두어)로 나눈다 — 상품 카드 이름 · 판매 상태와 섹션 유형이 {@code Accept-Language} 로
+ * 갈리므로 {@code Vary: Accept-Language} 를 싣는다(#20). 통화별 응답이 생기면 같은 방식으로 나눈다.
  */
 @Tag(name = "메인 전시", description = "스토어프론트 메인 화면의 전시 섹션(히어로 · 상품 픽 · 스토리 · 룩 · 디테일)")
 @RestController
@@ -42,9 +46,10 @@ public class DisplayWebController {
     )
     @PreAuthorize("permitAll()")
     @GetMapping("/main")
-    public ResponseEntity<Response<DisplayMainResponse>> getMain() {
+    public ResponseEntity<Response<DisplayMainResponse>> getMain(@Parameter(hidden = true) @RequestHeader(value = CustomerLocale.HEADER, required = false) String acceptLanguage) {
         return ResponseEntity.ok()
             .cacheControl(CacheControl.maxAge(CACHE_MAX_AGE).cachePublic())
-            .body(Response.success(displayWebUseCase.getMain()));
+            .varyBy(CustomerLocale.HEADER)
+            .body(Response.success(CustomerLocale.within(acceptLanguage, displayWebUseCase::getMain)));
     }
 }

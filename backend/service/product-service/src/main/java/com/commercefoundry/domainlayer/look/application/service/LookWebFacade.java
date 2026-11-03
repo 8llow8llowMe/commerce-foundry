@@ -17,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.util.Locale;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 /**
  * 고객 룩 조회. 쿼리는 룩 1 + 아이템 1(룩 아이디 in 절) + 상품 카드 4(모든 룩의 상품 아이디를 합쳐 한 번 — 상품 행 · SKU 집계 · 대표 이미지 · 정지 이미지)다.
@@ -36,25 +38,28 @@ public class LookWebFacade implements LookWebUseCase {
     @Override
     @Transactional(readOnly = true)
     public SliceResponse<LookSummaryResponse> getLooks(int page, int size) {
+        Locale locale = LocaleContextHolder.getLocale();
         Slice<LookContent> slice = lookWebProcessor.getVisibleSlice(page, size);
-        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(LookContent.productIdsOf(slice.getContent()));
-        return lookWebPresenter.toSliceResponse(slice.map(content -> lookWebProcessor.toInfo(content, visibleProducts)));
+        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(LookContent.productIdsOf(slice.getContent()), locale);
+        return lookWebPresenter.toSliceResponse(slice.map(content -> lookWebProcessor.toInfo(content, visibleProducts)), locale);
     }
 
     @Override
     @Transactional(readOnly = true)
     public LookDetailResponse getLook(long lookId) {
+        Locale locale = LocaleContextHolder.getLocale();
         LookContent content = lookWebProcessor.getVisibleContent(lookId);
-        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(content.productIds());
-        return lookWebPresenter.toDetailResponse(lookWebProcessor.toInfo(content, visibleProducts));
+        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(content.productIds(), locale);
+        return lookWebPresenter.toDetailResponse(lookWebProcessor.toInfo(content, visibleProducts), locale);
     }
 
     @Override
     @Transactional(readOnly = true)
     public ProductLookListResponse getLooksOfProduct(long productId) {
+        Locale locale = LocaleContextHolder.getLocale();
         productDetailProcessor.getVisibleProduct(productId);
         List<LookContent> contents = lookWebProcessor.getVisibleContentsOfProduct(productId);
-        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(LookContent.productIdsOf(contents));
-        return lookWebPresenter.toProductLookListResponse(lookWebProcessor.toInfos(contents, visibleProducts));
+        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(LookContent.productIdsOf(contents), locale);
+        return lookWebPresenter.toProductLookListResponse(lookWebProcessor.toInfos(contents, visibleProducts), locale);
     }
 }

@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.look.adapter.in.web.dto.response.LookSumm
 import com.commercefoundry.domainlayer.look.application.exception.LookValidationMessage;
 import com.commercefoundry.domainlayer.look.application.port.in.LookWebUseCase;
 import com.commercefoundry.persistence.dto.SliceResponse;
+import com.commercefoundry.global.web.CustomerLocale;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -20,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -29,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p><b>{@code Cache-Control: max-age=60, public}</b> — 메인 전시({@code DisplayWebController})와 같은 이유다. 모든 방문자에게 같은 응답이고(로그인 · 회원과 무관,
  * 개인 정보 없음) 어드민 변경 · 상품 숨김이 최대 1분 늦게 보이는 것을 받아들인다. 가격 · 재고는 상세 · 장바구니 · 주문이 다시 계산한다.
- * 언어 · 통화별 응답이 생기면 {@code Vary} 를 두거나 경로를 나눈다.
+ * 상품 카드 이름 · 판매 상태가 {@code Accept-Language} 로 갈리므로 {@code Vary: Accept-Language} 를 싣는다(#20). 통화별 응답이 생기면 같은 방식으로 나눈다.
  */
 @Tag(name = "룩", description = "스토어프론트 룩(Shop the Look) — 대표 이미지와 구성 상품 카드")
 @RestController
@@ -54,9 +56,11 @@ public class LookWebController {
     public ResponseEntity<Response<SliceResponse<LookSummaryResponse>>> getLooks(
         @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0") @PositiveOrZero(message = LookValidationMessage.PAGE_MIN) int page,
         @Parameter(description = "페이지 크기 (1~100)") @RequestParam(defaultValue = "20")
-        @Min(value = 1, message = LookValidationMessage.SIZE_RANGE) @Max(value = MAX_PAGE_SIZE, message = LookValidationMessage.SIZE_RANGE) int size
+        @Min(value = 1, message = LookValidationMessage.SIZE_RANGE) @Max(value = MAX_PAGE_SIZE, message = LookValidationMessage.SIZE_RANGE) int size,
+        @Parameter(hidden = true) @RequestHeader(value = CustomerLocale.HEADER, required = false) String acceptLanguage
     ) {
-        return ResponseEntity.ok().cacheControl(cacheControl()).body(Response.success(lookWebUseCase.getLooks(page, size)));
+        return ResponseEntity.ok().cacheControl(cacheControl()).varyBy(CustomerLocale.HEADER)
+            .body(Response.success(CustomerLocale.within(acceptLanguage, () -> lookWebUseCase.getLooks(page, size))));
     }
 
     @Operation(
@@ -66,9 +70,11 @@ public class LookWebController {
     @PreAuthorize("permitAll()")
     @GetMapping("/{lookId}")
     public ResponseEntity<Response<LookDetailResponse>> getLook(
-        @Parameter(description = "룩 아이디") @PathVariable @Positive(message = LookValidationMessage.LOOK_ID_POSITIVE) long lookId
+        @Parameter(description = "룩 아이디") @PathVariable @Positive(message = LookValidationMessage.LOOK_ID_POSITIVE) long lookId,
+        @Parameter(hidden = true) @RequestHeader(value = CustomerLocale.HEADER, required = false) String acceptLanguage
     ) {
-        return ResponseEntity.ok().cacheControl(cacheControl()).body(Response.success(lookWebUseCase.getLook(lookId)));
+        return ResponseEntity.ok().cacheControl(cacheControl()).varyBy(CustomerLocale.HEADER)
+            .body(Response.success(CustomerLocale.within(acceptLanguage, () -> lookWebUseCase.getLook(lookId))));
     }
 
     static CacheControl cacheControl() {

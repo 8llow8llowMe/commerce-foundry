@@ -11,6 +11,7 @@ import com.commercefoundry.domainlayer.display.adapter.in.web.dto.response.Displ
 import com.commercefoundry.domainlayer.display.application.info.DisplayMainInfo;
 import com.commercefoundry.domainlayer.display.domain.model.DisplayMedia;
 import com.commercefoundry.shared.commerce.Money;
+import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,35 +22,40 @@ import org.springframework.stereotype.Component;
 public class DisplayWebPresenter {
 
     public DisplayMainResponse toMainResponse(DisplayMainInfo info) {
+        return toMainResponse(info, Locale.KOREAN);
+    }
+
+    /** @param locale 섹션 유형 · 상품 판매 상태의 표시 언어 (#20). 상품 이름은 상품 카드가 이미 그 언어로 골라 왔다 */
+    public DisplayMainResponse toMainResponse(DisplayMainInfo info, Locale locale) {
         return DisplayMainResponse.builder()
-            .sections(info.sections().stream().map(this::toSectionItem).toList())
+            .sections(info.sections().stream().map(section -> toSectionItem(section, locale)).toList())
             .build();
     }
 
-    private DisplaySectionItem toSectionItem(DisplayMainInfo.Section section) {
+    private DisplaySectionItem toSectionItem(DisplayMainInfo.Section section, Locale locale) {
         return DisplaySectionItem.builder()
             .sectionId(String.valueOf(section.sectionId()))
-            .sectionType(section.sectionType().toMetadata())
+            .sectionType(section.sectionType().toMetadata(locale))
             .title(section.title())
             .subtitle(section.subtitle())
             .body(section.body())
             .link(section.linkUrl() == null ? null : DisplayLinkItem.builder().url(section.linkUrl()).label(section.linkLabel()).build())
-            .items(section.items().stream().map(this::toElementItem).toList())
+            .items(section.items().stream().map(element -> toElementItem(element, locale)).toList())
             .build();
     }
 
-    private DisplayElementItem toElementItem(DisplayMainInfo.Element element) {
+    private DisplayElementItem toElementItem(DisplayMainInfo.Element element, Locale locale) {
         return DisplayElementItem.builder()
             .itemId(String.valueOf(element.itemId()))
             .itemType(element.itemType().name())
             .media(toMediaItem(element.media()))
-            .product(toProductItem(element.product()))
-            .look(toLookItem(element.look()))
+            .product(toProductItem(element.product(), locale))
+            .look(toLookItem(element.look(), locale))
             .caption(element.caption())
             .build();
     }
 
-    private DisplayElementItem.Look toLookItem(DisplayMainInfo.Look look) {
+    private DisplayElementItem.Look toLookItem(DisplayMainInfo.Look look, Locale locale) {
         if (look == null) {
             return null;
         }
@@ -57,7 +63,7 @@ public class DisplayWebPresenter {
         return DisplayElementItem.Look.builder()
             .lookId(String.valueOf(look.lookId())).title(look.title()).description(look.description())
             .image(DisplayElementItem.Image.builder().url(image.url()).width(image.width()).height(image.height()).altText(image.altText()).build())
-            .products(look.products().stream().map(this::toProductItem).toList()).build();
+            .products(look.products().stream().map(product -> toProductItem(product, locale)).toList()).build();
     }
 
     private DisplayMediaItem toMediaItem(DisplayMedia media) {
@@ -74,7 +80,7 @@ public class DisplayWebPresenter {
             .build();
     }
 
-    private DisplayProductItem toProductItem(DisplayMainInfo.Product product) {
+    private DisplayProductItem toProductItem(DisplayMainInfo.Product product, Locale locale) {
         if (product == null) {
             return null;
         }
@@ -87,7 +93,7 @@ public class DisplayWebPresenter {
             .listPrice(toMoneyItem(product.listPrice()))
             .discountRate(product.discountRate())
             .hasOptionSurcharge(product.hasOptionSurcharge())
-            .saleStatus(product.saleStatus().toMetadata())
+            .saleStatus(product.saleStatus().toMetadata(locale))
             .customOrder(product.customOrder())
             .preorder(product.preorder())
             .build();

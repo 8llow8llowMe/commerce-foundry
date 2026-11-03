@@ -63,6 +63,11 @@ public class ProductListProcessor {
      * @return 상품 아이디 → 카드. 순서는 의미가 없다 — 호출한 쪽이 자기 순서로 꺼낸다
      */
     public Map<Long, ProductSummary> summarizeVisible(Collection<Long> productIds) {
+        return summarizeVisible(productIds, Locale.KOREAN);
+    }
+
+    /** @param locale 카드 상품 이름의 언어 — 영문 이름이 없으면 한국어다 (#20, 전시 · 룩 고객 응답) */
+    public Map<Long, ProductSummary> summarizeVisible(Collection<Long> productIds, Locale locale) {
         if (productIds.isEmpty()) {
             return Map.of();
         }
@@ -70,7 +75,7 @@ public class ProductListProcessor {
         if (rows.isEmpty()) {
             return Map.of();
         }
-        return summarize(rows, Locale.KOREAN).stream()
+        return summarize(rows, locale).stream()
             .collect(Collectors.toMap(ProductSummary::productId, Function.identity(), (left, right) -> left, LinkedHashMap::new));
     }
 
