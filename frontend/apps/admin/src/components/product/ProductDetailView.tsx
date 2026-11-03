@@ -13,13 +13,23 @@ import {
   VIDEO_MEDIA,
   type AdminProductDetail,
 } from '@/lib/product/detail';
+import { productSectionHref, type ProductSection } from '@/lib/product/section';
 import { productEditHref } from '@/lib/product/update';
 import { ProductDeleteAction } from './ProductDeleteAction';
+
+/** 섹션 수정 화면 링크(#29) */
+const SECTION_LINKS: [ProductSection, string][] = [
+  ['pricing', '가격 수정'],
+  ['categories', '카테고리 수정'],
+  ['images', '이미지 수정'],
+  ['options', '옵션 · SKU 수정'],
+  ['custom-order', '맞춤 제작 수정'],
+];
 
 /**
  * 어드민 상품 상세(#418). 서버 컴포넌트다 — 상세 설명 HTML 을 여기서 정제한다.
  * 저장된 값을 표시만 한다: 금액은 `formatMoney`, 상태는 서버 `name`(설명은 `title`). 아이디 · 코드 원문은 보이지 않는다(#305).
- * 은퇴 옵션 · 판매 종료 SKU 도 그대로 보이되 표시를 단다. 쓰기는 기본 정보 수정 화면(`/edit`)과 맨 아래 판매 중지 · 삭제(#29)다.
+ * 은퇴 옵션 · 판매 종료 SKU 도 그대로 보이되 표시를 단다. 쓰기는 기본 정보 · 섹션 수정 화면(`/edit`, `/edit/{section}`)과 맨 아래 판매 중지 · 삭제(#29)다.
  */
 export function ProductDetailView({
   product,
@@ -42,13 +52,24 @@ export function ProductDetailView({
         </Link>
         <h1 className="text-xl font-semibold">{product.name}</h1>
         <p className="text-sm text-muted-fg">
-          기본 정보(상품명 · 요약 · 상세 설명 · 판매 상태 · 노출)를 수정할 수 있습니다. 카테고리 ·
-          가격 · 옵션 · SKU · 이미지 수정은 준비 중입니다. 판매 중지 · 삭제는 맨 아래에 있습니다.
+          구역마다 따로 수정합니다. 1회 최대 수량 · 프리오더 수정은 준비 중입니다. 판매 중지 ·
+          삭제는 맨 아래에 있습니다.
         </p>
-        <nav aria-label="상품 관련 화면" className="flex gap-3 text-sm">
+        <nav aria-label="상품 수정" className="flex flex-wrap gap-3 text-sm">
           <Link href={productEditHref(product.productId)} className="underline underline-offset-4">
             기본 정보 수정
           </Link>
+          {SECTION_LINKS.map(([section, label]) => (
+            <Link
+              key={section}
+              href={productSectionHref(product.productId, section)}
+              className="underline underline-offset-4"
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
+        <nav aria-label="상품 관련 화면" className="flex gap-3 text-sm">
           {/* 재고 · 원가 화면은 아직 고객 상세에서 SKU 를 읽어 노출 상품만 열린다(목록과 같은 규칙) */}
           {product.visible && (
             <Link href={`/stocks/${product.productId}`} className="underline underline-offset-4">

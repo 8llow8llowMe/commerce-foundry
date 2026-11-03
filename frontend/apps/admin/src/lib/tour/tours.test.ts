@@ -45,6 +45,8 @@ describe('helpTopicFor · toursFor', () => {
     expect(helpTopicFor('/products/new').title).toBe('상품 등록');
     expect(helpTopicFor('/products/42').title).toBe('상품 상세');
     expect(helpTopicFor('/products/42/edit').title).toBe('상품 기본 정보 수정');
+    expect(helpTopicFor('/products/42/edit/pricing').title).toBe('상품 구역 수정');
+    expect(toursFor('/products/42/edit/options').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
     expect(helpTopicFor('/payments').title).toBe('결제 확인');
   });
 

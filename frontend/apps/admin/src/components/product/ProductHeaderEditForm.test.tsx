@@ -19,9 +19,9 @@ describe('ProductHeaderEditForm', () => {
     expect(html).toContain('바뀐 내용이 없습니다.');
   });
 
-  it('카테고리 · 가격 · 옵션 · SKU · 이미지는 이 화면에서 바꾸지 않는다고 알린다', () => {
+  it('카테고리 · 가격 · 옵션 · SKU · 이미지는 구역별 수정에서 바꾼다고 알린다', () => {
     const html = renderToStaticMarkup(<ProductHeaderEditForm product={adminProduct()} />);
-    expect(html).toContain('카테고리 · 가격 · 옵션 · SKU · 이미지 수정은 준비 중입니다.');
+    expect(html).toContain('맞춤 제작은 상품 상세의 구역별 수정에서 바꿉니다.');
     expect(html).not.toContain('type="file"');
     expect(html).toContain(`href="/products/${adminProduct().productId}"`);
   });

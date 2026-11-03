@@ -107,4 +107,13 @@ describe('ProductDetailView', () => {
     expect(html).toContain('판매 중지 · 삭제…');
     expect(html).not.toContain('판매 중지하고 삭제<');
   });
+
+  it('구역별 수정 화면으로 가는 링크를 단다(#29)', () => {
+    const html = render(adminProduct());
+    const id = adminProduct().productId;
+    for (const section of ['pricing', 'categories', 'images', 'options', 'custom-order']) {
+      expect(html).toContain(`href="/products/${id}/edit/${section}"`);
+    }
+    expect(html).toContain(`href="/products/${id}/edit"`);
+  });
 });
