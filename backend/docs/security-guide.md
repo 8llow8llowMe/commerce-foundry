@@ -173,10 +173,39 @@
 각각 `READ`와 `MANAGE` 권한을 따로 둔다. 예를 들어 `ADMIN_ORDER_READ`는 조회, `ADMIN_ORDER_MANAGE`는 상태 변경이다.
 `MANAGE`가 `READ`를 자동으로 뜻하지 않으므로 역할표에 둘 다 명시한다.
 
-PR-A는 권한 이름과 역할표를 도입하고 `auth.member.role`의 check 제약을 새 enum 값까지 확장한다. 기존 `ADMIN` 계정·JWT 발급,
-게이트웨이와 서비스의 `/api/v1/admin/**` URL 규칙, 컨트롤러의 `hasRole('ADMIN')`, 저장된 DB 역할 값은 그대로다. 새 역할 행은 아직 만들지 않는다. 따라서 새 역할 claim을 가진 토큰은 서명·claim 검증을 통과해도
-어드민 URL에서 거절된다. 다음 단계에서 URL 이중 방어와 각 API의 기능 권한을 함께 전환하고 테스트한 뒤에만
-새 역할 계정을 생성·발급한다. check 제약은 `coding-conventions.md` §9-8에 따라 배포 전에 dev·운영에 적용한다. 기존 `ADMIN` 행을 `OWNER`로 옮길 때는 컷오프·구 토큰 수명까지의 호환을 별도로 검증한다.
+PR-A는 권한 이름과 역할표를 도입하고 `auth.member.role`의 check 제약을 새 enum 값까지 확장한다. 기존 `ADMIN` 계정·JWT 발급과
+저장된 DB 역할 값은 그대로다. 새 역할 행은 아직 만들지 않는다. check 제약은 `coding-conventions.md` §9-8에 따라 배포 전에 dev·운영에 적용한다.
+기존 `ADMIN` 행을 `OWNER`로 옮길 때는 컷오프·구 토큰 수명까지의 호환을 별도로 검증한다.
+
+**URL 층은 운영자 역할 전체다.** `MemberRole`에 운영자 역할 `OPERATOR_ROLES`(`ADMIN`·`OWNER`·`MANAGER`·`STAFF`)와 소유자 역할
+`OWNER_ROLES`(`ADMIN`·`OWNER`), `isOperator()`·`isOwner()`·`operatorRoleNames()`를 둔다. 게이트웨이(`GatewaySecurityConfig`)와 서비스 체인
+(`ResourceServerSecurityConfigurer`)의 `/api/v1/admin/**` 규칙은 둘 다 `hasAnyRole(MemberRole.operatorRoleNames())`로 이 상수를 참조한다 —
+역할 목록을 문자열로 따로 적지 않는다. URL 층은 고객·익명을 끊는 1차 방어이고, 기능 단위 판정은 컨트롤러 메서드의 `@PreAuthorize`가 한다.
+게이트웨이의 관리자 컷오프(로그아웃·비활성화, #193)도 `role.isOperator()`인 토큰 전체에 적용한다 — `ADMIN`만 보면 새 역할 토큰이 컷오프를 우회한다.
+시스템 알림 수신자·"마지막 관리자" 가드는 `OWNER_ROLES`만 세도록 바꾼다(auth-service 적용은 #236 후속 PR — 지금 코드는 아직 `ADMIN`만 센다).
+
+**메서드 식은 `AdminAuthority` 상수로 쓴다.** `com.commercefoundry.security.principal.AdminAuthority`에 기능별 상수 22개
+(`ORDER_MANAGE = "hasAuthority('ADMIN_ORDER_MANAGE')"` 등, `AdminPermission`과 1:1)와 운영자 본인 API용 `OPERATOR`
+(`"hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')"`)를 둔다. 조회 핸들러는 `*_READ`, 변경 핸들러는 `*_MANAGE`를 쓰고 식 문자열을 직접 적지 않는다.
+
+```java
+@PreAuthorize(AdminAuthority.ORDER_MANAGE)
+@PatchMapping("/api/v1/admin/orders/{orderId}/status")
+```
+
+**어드민 식 가드(R2 · 인가 스모크)는 머리 3종만 받는다** — testFixtures `AuthorizationExpressions.requiresOperatorAuthority`.
+
+| 머리 | 뜻 |
+|------|----|
+| `hasRole('ADMIN')` | 전환 전 표기(호환). 새 운영자 역할에는 열리지 않는다 |
+| `hasAuthority('ADMIN_<기능>_READ' \| '..._MANAGE')` | `AdminPermission`에 있는 기능만. `AdminAuthority` 기능 상수 |
+| `hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')` | `AdminAuthority.OPERATOR`와 정확히 같은 문자열만 |
+
+머리 뒤에는 `and`·`&&`로 좁히는 조건만 붙일 수 있고, 괄호 밖 `or`·`||`·`?`는 실패다(§5). `hasAnyAuthority(...)`·정의되지 않은 기능
+(`hasAuthority('ADMIN_FOO_READ')`)·`hasAuthority('ROLE_ADMIN')`·순서나 공백이 다른 `hasAnyRole(...)`도 실패다.
+
+아직 `hasRole('ADMIN')`인 컨트롤러는 새 역할 토큰이 URL 층을 지나도 메서드에서 403 `SECURITY_005`로 막힌다(fail-closed).
+각 서비스 컨트롤러를 `AdminAuthority` 상수로 전환하고 테스트한 뒤에만 새 역할 계정을 생성·발급한다.
 어드민 회원 목록의 `role` 필터는 enum 바인딩이라 새 역할 이름도 수락하지만, 발급 전에는 해당 역할 행이 없어 빈 결과다.
 
 ```java
@@ -238,7 +267,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 | 경로 | 규칙 |
 |------|------|
-| `/api/v1/admin/**` | URL 규칙으로 `ADMIN` 을 요구한다. 컨트롤러의 `@PreAuthorize("hasRole('ADMIN')")` 와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
+| `/api/v1/admin/**` | URL 규칙으로 운영자 역할(`MemberRole.OPERATOR_ROLES`)을 요구한다(§3-1). 기능 판정은 컨트롤러의 `@PreAuthorize`(`AdminAuthority` 상수 또는 전환 전 `hasRole('ADMIN')`)와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
 | `/internal/**` | 이 체인에서는 **`denyAll`**(익명 001 · 로그인 005)이다. 앞 순서의 서비스 인증 체인(§9-3)만 서비스 토큰으로 연다 — 서비스가 그 Configurer 를 빠뜨려도 internal API 가 열리지 않는다(fail-closed). **internal 컨트롤러 메서드마다 허용 호출자를 `@PreAuthorize("hasAuthority('SERVICE_<service-id>')")` 로 선언한다**(§9-4). 사설망 전제(게이트웨이가 라우팅하지 않고 서비스 포트를 외부에 열지 않는다, 아래 강제 수단)는 그대로 둔다 — 1단계 서비스 토큰은 그 위의 두 번째 방어다 |
 | 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고(default-allow) 메서드의 `@PreAuthorize` 가 정한다. 비로그인 상품 조회 같은 API 가 있다 (아래 보완 규칙) |
 | `/actuator/**` | `health`(하위 경로 포함)만 `permitAll` 이다. 웹에 노출된 다른 엔드포인트와 링크(`/actuator`)는 `denyAll` — 토큰 없으면 401(001), 로그인했으면 403(005). 노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — **노출 설정(`exposure.include: health`)이 1차, URL 규칙이 2차** 방어다. 경로는 Boot 의 `EndpointRequest` 로 잡아 management base-path 를 바꿔도 따라간다. **어느 서비스도 `heapdump` 를 노출하지 않는다** — 서비스 전부의 힙에 `INTERNAL_JWT_SECRET` 이 있고, auth 의 힙에는 개인키도 있다 |
@@ -266,7 +295,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 **default-allow 보완 규칙** — URL 단계가 열려 있으니 메서드 애노테이션이 빠지면 그대로 공개 API 가 된다.
 
 - `adapter/in/web` · `adapter/in/admin` 의 **모든 핸들러 메서드에 `@PreAuthorize` 를 단다.** 공개 API 도 `@PreAuthorize("permitAll()")` 로 적어
-  빠뜨린 메서드가 리뷰에서 보이게 한다. 로그인 필요는 `isAuthenticated()`, 어드민은 `hasRole('ADMIN')` 이다.
+  빠뜨린 메서드가 리뷰에서 보이게 한다. 로그인 필요는 `isAuthenticated()`, 어드민은 `AdminAuthority` 상수(전환 전 `hasRole('ADMIN')`)다(§3-1).
   빠뜨리면 **빌드가 실패한다** — 경로 기준 런타임 가드(§9-10 스모크)와 패키지 기준 정적 가드(§9-11 ArchUnit)가 둘 다 본다.
 
 **`/internal/**` 사설망 전제의 강제 수단**
@@ -850,7 +879,7 @@ openssl rand -base64 32    # INTERNAL_JWT_SECRET — 표준 base64, 디코드하
   이 핸들러는 픽스처의 `InternalSecuritySmokeContextCustomizerFactory`(spring.factories)가 **모든 서블릿 테스트 컨텍스트**에 등록한다 —
   모든 테스트에 같은 커스터마이저라 `*ApplicationTests` 와 스모크가 컨텍스트를 계속 같이 쓴다. 리액티브 컨텍스트에는 등록하지 않는다.
 - **인가 선언 누락 가드** — 같은 스모크의 `handlersDeclareAuthorization` 이 서비스 컨텍스트의 `RequestMappingHandlerMapping` 을 모두 돈다.
-  `/internal/` 핸들러는 서비스 권한만 나열한 `hasAuthority` · `hasAnyAuthority` 식, `/api/v1/admin` 과 그 아래 핸들러는 `hasRole('ADMIN')` 필요조건, 그 밖의 `/api/` 핸들러는 `@PreAuthorize` 존재(식은 자유)를 요구하고 위반 핸들러를 고치는 법과 함께 목록으로 알린다.
+  `/internal/` 핸들러는 서비스 권한만 나열한 `hasAuthority` · `hasAnyAuthority` 식, `/api/v1/admin` 과 그 아래 핸들러는 운영자 권한 필요조건(§3-1 머리 3종), 그 밖의 `/api/` 핸들러는 `@PreAuthorize` 존재(식은 자유)를 요구하고 위반 핸들러를 고치는 법과 함께 목록으로 알린다.
   스모크 핸들러가 검사 대상에 들어 있는지도 단언해, 실제 핸들러가 없는 지금도 빈 목록으로 통과하지 않는다. 허용 호출자 식 판정은 `AuthorizationExpressions` 하나를 ArchUnit(§9-11)과 같이 쓴다.
 - **관리자 감사 선언 누락 가드 (#163)** — 같은 스모크의 `adminWriteHandlersDeclareAudit` 가 `/api/v1/admin` 쓰기 핸들러의 `@AdminAudited` · `@AdminAuditExempt` 선언을 본다.
   대기 목록(`auditDeclarationPending()`) 규칙은 §11-4 다.
@@ -869,15 +898,15 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
 |------|------|------------------------|
 | R0 컨트롤러 위치 | `@Controller`(메타 포함, `@RestController` 포함 · `@(Rest)ControllerAdvice` 제외) 클래스 | `adapter.in.web`(고객) · `adapter.in.admin`(어드민) · `adapter.in.internal`(서비스 간) · `adapter.in.webhook`(외부 콜백) 중 하나로 옮긴다 |
 | R7 매핑은 컨트롤러에 직접 | web · admin · internal 컨트롤러의 상위 클래스 · 인터페이스 | springdoc `XxxApi` 인터페이스나 추상 기반 컨트롤러에 매핑을 두지 않는다. 매핑 · `@PreAuthorize` · Swagger 애노테이션을 컨트롤러 메서드에 직접 둔다 (상속받은 핸들러는 R1~R3 이 보지 못한다) |
-| R1 핸들러 인가 선언 | `..adapter.in.web..` · `..adapter.in.admin..` 의 `@Controller`(·`@RestController`) 매핑 메서드 | 보고된 `클래스#메서드` **메서드에** `@PreAuthorize` 를 단다 — 공개 `permitAll()`, 로그인 `isAuthenticated()`, 어드민 `hasRole('ADMIN')`. 클래스 선언은 대신하지 않는다 |
-| R2 어드민은 ADMIN 필요 | `..adapter.in.admin..` 핸들러 | `hasRole('ADMIN')` 또는 `hasRole('ADMIN') and <추가 조건>`. `permitAll()` · `isAuthenticated()` · 괄호 밖 `or` · `\|\|` · 삼항은 실패다. 고객도 부르는 API 면 admin 이 아니라 web 패키지에 따로 만든다(DTO 공유 금지) |
+| R1 핸들러 인가 선언 | `..adapter.in.web..` · `..adapter.in.admin..` 의 `@Controller`(·`@RestController`) 매핑 메서드 | 보고된 `클래스#메서드` **메서드에** `@PreAuthorize` 를 단다 — 공개 `permitAll()`, 로그인 `isAuthenticated()`, 어드민 `AdminAuthority` 상수(§3-1). 클래스 선언은 대신하지 않는다 |
+| R2 어드민은 운영자 권한 필요 | `..adapter.in.admin..` 핸들러 | §3-1 의 머리 3종(`AdminAuthority` 기능 상수 · `OPERATOR` · 전환 전 `hasRole('ADMIN')`) 단독 또는 `<머리> and <추가 조건>`. `permitAll()` · `isAuthenticated()` · 괄호 밖 `or` · `\|\|` · 삼항은 실패다. 고객도 부르는 API 면 admin 이 아니라 web 패키지에 따로 만든다(DTO 공유 금지) |
 | R3 internal 허용 호출자 | `..adapter.in.internal..` 핸들러(메서드, 없으면 클래스) | `hasAuthority('SERVICE_<호출 서비스>')` 또는 `hasAnyAuthority('SERVICE_a', 'SERVICE_b')` **그 자체**. `isAuthenticated()` · `or` 금지 (§9-4) |
 | R4 `RequestContextHolder` 금지 | 서비스 main 전체 | 사용자 토큰 · 헤더를 꺼내 넘기지 않는다. memberId 를 본문 · 파라미터로 넘긴다 (§9-4, `coding-conventions.md` §10) |
 | R5 Feign 전역 빈 금지 | `feign.RequestInterceptor` · `feign.Capability`(구현 포함)를 반환하는 `@Bean`, 그리고 그 둘을 구현한 `@Component`(메타 포함 — `@Configuration` · `@Service` 등) 클래스 | 전역 빈 · 스캔되는 구현을 지운다(OpenFeign 은 컨텍스트의 인터셉터를 모든 클라이언트에 붙인다). internal 클라이언트는 `@FeignClient(configuration = InternalFeignClientConfiguration.class)` 로 붙이고, 그 configuration 클래스에도 `@Configuration` 을 달지 않는다 (§9-5) |
 | R6 기본 설정 금지 | `@EnableFeignClients(defaultConfiguration = ...)` — 메타(합성) 애노테이션 포함 | 지우고 클라이언트마다 `configuration` 으로 붙인다 |
 
 - 런타임 가드(§9-10 스모크, **경로 기준**)와 정적 가드(ArchUnit, **패키지 기준**)는 서로를 대신하지 않는다.
-  스모크는 실제 매핑(상속 · 인터페이스로 받은 것 포함)을 보고 `/internal/` 은 허용 호출자 식 그 자체, **`/api/v1/admin` 과 그 아래는 `hasRole('ADMIN')` 필요조건(R2 와 같은 판정)**,
+  스모크는 실제 매핑(상속 · 인터페이스로 받은 것 포함)을 보고 `/internal/` 은 허용 호출자 식 그 자체, **`/api/v1/admin` 과 그 아래는 운영자 권한 필요조건(§3-1 머리 3종, R2 와 같은 판정)**,
   그 밖의 `/api/` 는 선언 존재를 요구한다 — `adapter.in.web.admin` 처럼 패키지로는 R2 를 비켜 간 어드민 핸들러를 여기서 잡는다.
   ArchUnit 은 `/internal/` 이 아닌 경로로 매핑된 internal 패키지 컨트롤러, 어드민 경로가 아닌 admin 패키지 핸들러를 잡는다.
 - 식은 SpEL 을 파싱하지 않고 문자열 모양으로 본다. 애매한 모양은 실패 쪽으로 판정한다 — **식에 큰따옴표 문자열과 `{...}` 템플릿 자리표시자를 쓰지 않는다**(문자열은 작은따옴표).

@@ -75,7 +75,7 @@ com.commercefoundry
   |  |  |  |- dto/validation    그 진입 요청 DTO 전용 커스텀 Bean Validation 제약 + Validator (다른 진입과 공유하지 않는다, 필요할 때만)
   |  |  |  |- exception         (*ExceptionHandler)
   |  |  |  \- presenter
-  |  |  |- in/admin             어드민 콘솔 API — /api/v1/admin/** (ADMIN 전용)
+  |  |  |- in/admin             어드민 콘솔 API — /api/v1/admin/** (운영자 역할 전용)
   |  |  |  |- controller
   |  |  |  |- dto/{request,response,item}
   |  |  |  |- exception         (*ExceptionHandler — 그 컨텍스트에 in/web 이 없을 때만. 예: operations-service job)
@@ -291,7 +291,8 @@ Info → Presenter → Response
 - 역할: `CUSTOMER`, `ADMIN`. 관리자 계정은 소셜 로그인 없이 별도 발급한다 — 같은 `auth.member` 테이블 · 같은 아이디 공간이고, 초기 관리자는 환경변수 시드,
   로그인은 `POST /api/v1/auth/admin/login`(access 만)이다. 관리자 행위는 감사 로그 한 줄(`admin.audit`)로 남긴다 — 정본은 [security-guide.md](security-guide.md) §11.
 - 게이트웨이는 JWT 유효성 검증과 라우팅에 집중한다. **단 `/api/v1/admin/**` 은 게이트웨이에서도
-  `ADMIN` 역할을 확인한다(이중 방어).** 서비스 안에서도 `@PreAuthorize("hasRole('ADMIN')")` 를 건다.
+  운영자 역할(`MemberRole.OPERATOR_ROLES`)을 확인한다(이중 방어).** 서비스 안에서는 `@PreAuthorize` 로 기능 권한(`AdminAuthority` 상수)을 건다 —
+  정본은 [security-guide.md](security-guide.md) §3-1.
 - 토큰이 없는 요청은 게이트웨이가 거부하지 않는다 — 상품 조회처럼 비로그인으로도 되는 API 가 있다.
   인증 필요 여부는 서비스가 판정한다.
 - **로그아웃 차단 목록(Redis)은 게이트웨이만 본다(#4).** 저장소 장애 시 일반 경로는 통과(fail-open), `/api/v1/admin/**` 만 503 이다.
