@@ -1,11 +1,17 @@
 package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
+import com.commercefoundry.domainlayer.order.application.port.out.query.ClaimAdminSummaryQueryResult;
+import org.springframework.data.domain.Page;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface ClaimRepositoryPort {
+    Page<ClaimAdminSummaryQueryResult> findAdminSummaryPage(Long orderId, Claim.Type type, Claim.Status status, int page, int size);
+
+    Optional<Claim> findById(long claimId);
+
     Optional<Claim> findByOrderIdAndRequestKey(long orderId, UUID requestKey);
 
     /** REQUESTED 반품의 항목별 수량을 한 번에 읽는다. */
