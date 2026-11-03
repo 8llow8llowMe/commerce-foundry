@@ -1,10 +1,12 @@
 package com.commercefoundry.domainlayer.shippingfee.application.service;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.DeliveryAdminAuditProcessor;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.InternationalShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.presenter.InternationalShippingPolicyAdminPresenter;
 import com.commercefoundry.domainlayer.shippingfee.application.command.InternationalShippingPolicyReplaceCommand;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.InternationalShippingPolicyAdminUseCase;
 import com.commercefoundry.domainlayer.shippingfee.application.service.processor.InternationalShippingPolicyProcessor;
+import com.commercefoundry.domainlayer.shippingfee.domain.model.InternationalShippingPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -16,6 +18,7 @@ public class InternationalShippingPolicyAdminFacade implements InternationalShip
 
     private final InternationalShippingPolicyProcessor internationalShippingPolicyProcessor;
     private final InternationalShippingPolicyAdminPresenter internationalShippingPolicyAdminPresenter;
+    private final DeliveryAdminAuditProcessor deliveryAdminAuditProcessor;
 
     /**
      * 네 테이블(정책 행 · 그룹 · 국가 · 구간)을 같은 스냅숏에서 읽는다. 교체가 하위 행 아이디를 새로 발급하므로 READ COMMITTED 로 문장마다
@@ -30,10 +33,21 @@ public class InternationalShippingPolicyAdminFacade implements InternationalShip
     /**
      * 정책 행 갱신과 국가 그룹 · 국가 · 무게 구간 삭제 · 삽입을 한 트랜잭션으로 묶는다 — 실패(버전 충돌 포함)하면 아무것도 바뀌지 않는다. 외부 I/O 가 없다.
      * 기본 격리 수준(READ COMMITTED)이다 — 교체 전 조회가 동시 교체와 겹쳐 하위 행이 엇갈리면 어댑터가 버전 충돌로 알려 006 이 된다.
+     *
+     * <p><b>감사 (#163)</b> — 성공 · 실패를 한 줄 남긴다. 트랜잭션 안에서 불러도 줄은 커밋 결과로 남는다(롤백 · 커밋 실패면 {@code FAILURE}).
+     * 업무 예외는 기록한 뒤 그대로 다시 던진다.
      */
     @Override
     @Transactional
-    public InternationalShippingPolicyAdminResponse replaceInternationalPolicy(InternationalShippingPolicyReplaceCommand command) {
-        return internationalShippingPolicyAdminPresenter.toResponse(internationalShippingPolicyProcessor.replacePolicy(command));
+    public InternationalShippingPolicyAdminResponse replaceInternationalPolicy(InternationalShippingPolicyReplaceCommand command, long adminMemberId) {
+        InternationalShippingPolicy replaced;
+        try {
+            replaced = internationalShippingPolicyProcessor.replacePolicy(command);
+        } catch (RuntimeException exception) {
+            deliveryAdminAuditProcessor.internationalPolicyReplaced(adminMemberId, false);
+            throw exception;
+        }
+        deliveryAdminAuditProcessor.internationalPolicyReplaced(adminMemberId, true);
+        return internationalShippingPolicyAdminPresenter.toResponse(replaced);
     }
 }

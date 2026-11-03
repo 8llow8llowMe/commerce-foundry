@@ -5,7 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.ResourceServerSmokeTestSupport;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
@@ -23,16 +22,5 @@ class OperationsServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport 
             .contentType(MediaType.APPLICATION_JSON).content("{}")).getStatus()).isEqualTo(403);
         assertThat(perform(post(path).header("Authorization", bearer(MemberRole.ADMIN))
             .contentType(MediaType.APPLICATION_JSON).content("{}")).getStatus()).isEqualTo(400);
-    }
-
-    /** 감사 선언(#163)을 아직 붙이지 않은 어드민 쓰기 핸들러 — 맡은 PR 에서 선언을 붙이고 지운다 ({@code security-guide.md} §11-4). */
-    @Override
-    protected Map<String, String> auditDeclarationPending() {
-        return Map.ofEntries(
-            Map.entry("NotificationAdminController#markRead", "#163 PR-E (면제 대상 — 알림 읽음)"),
-            Map.entry("NotificationAdminController#markAllRead", "#163 PR-E (면제 대상 — 알림 읽음)"),
-            Map.entry("OnboardingAdminController#updateTour", "#163 PR-E (면제 대상 — 본인 온보딩 투어 기록)"),
-            Map.entry("OnboardingAdminController#updateTourLegacy", "#163 PR-E (면제 대상 — 본인 온보딩 투어 기록)")
-        );
     }
 }

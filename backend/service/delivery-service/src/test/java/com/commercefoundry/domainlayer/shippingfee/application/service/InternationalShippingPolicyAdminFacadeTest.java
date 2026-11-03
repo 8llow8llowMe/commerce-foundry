@@ -5,8 +5,11 @@ import static com.commercefoundry.domainlayer.shippingfee.support.ShippingFeeFix
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.DeliveryAdminAuditProcessor;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.InternationalShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.presenter.InternationalShippingPolicyAdminPresenter;
 import com.commercefoundry.domainlayer.shippingfee.application.command.InternationalShippingPolicyReplaceCommand;
@@ -29,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 class InternationalShippingPolicyAdminFacadeTest {
 
     private static final InternationalShippingPolicyReplaceCommand COMMAND = new InternationalShippingPolicyReplaceCommand(usd(500), null, null, List.of(), 2L);
+    private static final long ADMIN_MEMBER_ID = 4611686018427387904L;
 
     @Mock
     private InternationalShippingPolicyProcessor internationalShippingPolicyProcessor;
@@ -36,11 +40,14 @@ class InternationalShippingPolicyAdminFacadeTest {
     @Mock
     private InternationalShippingPolicyAdminPresenter internationalShippingPolicyAdminPresenter;
 
+    @Mock
+    private DeliveryAdminAuditProcessor deliveryAdminAuditProcessor;
+
     private InternationalShippingPolicyAdminFacade facade;
 
     @BeforeEach
     void setUp() {
-        facade = new InternationalShippingPolicyAdminFacade(internationalShippingPolicyProcessor, internationalShippingPolicyAdminPresenter);
+        facade = new InternationalShippingPolicyAdminFacade(internationalShippingPolicyProcessor, internationalShippingPolicyAdminPresenter, deliveryAdminAuditProcessor);
     }
 
     @Test
@@ -63,29 +70,33 @@ class InternationalShippingPolicyAdminFacadeTest {
     }
 
     @Test
-    @DisplayName("교체: Processor 가 저장한 정책을 Presenter 로 바꾸고, 도메인 오류는 Presenter 없이 그대로 올라간다")
+    @DisplayName("교체: Processor 가 저장한 정책을 Presenter 로 바꾸고, 토큰의 어드민으로 성공 감사를 한 번 남긴다 (#163)")
     void replace() {
         InternationalShippingPolicyAdminResponse response = InternationalShippingPolicyAdminResponse.builder().shippingPolicyId("8001").version(3).build();
         given(internationalShippingPolicyProcessor.replacePolicy(COMMAND)).willReturn(internationalPolicy());
         given(internationalShippingPolicyAdminPresenter.toResponse(internationalPolicy())).willReturn(response);
 
-        assertThat(facade.replaceInternationalPolicy(COMMAND)).isSameAs(response);
+        assertThat(facade.replaceInternationalPolicy(COMMAND, ADMIN_MEMBER_ID)).isSameAs(response);
+        verify(deliveryAdminAuditProcessor).internationalPolicyReplaced(ADMIN_MEMBER_ID, true);
+        verifyNoMoreInteractions(deliveryAdminAuditProcessor);
     }
 
     @Test
-    @DisplayName("교체: 도메인 오류는 그대로 올라가고 Presenter 를 부르지 않는다")
+    @DisplayName("교체: 도메인 오류는 실패 감사를 한 번 남긴 뒤 그대로 올라가고 Presenter 를 부르지 않는다 (#163)")
     void replacePropagatesDomainError() {
         given(internationalShippingPolicyProcessor.replacePolicy(COMMAND)).willThrow(new DeliveryException(DeliveryErrorCode.SHIPPING_POLICY_VERSION_CONFLICT));
 
-        assertThatThrownBy(() -> facade.replaceInternationalPolicy(COMMAND)).isInstanceOf(DeliveryException.class);
+        assertThatThrownBy(() -> facade.replaceInternationalPolicy(COMMAND, ADMIN_MEMBER_ID)).isInstanceOf(DeliveryException.class);
         verifyNoInteractions(internationalShippingPolicyAdminPresenter);
+        verify(deliveryAdminAuditProcessor).internationalPolicyReplaced(ADMIN_MEMBER_ID, false);
+        verifyNoMoreInteractions(deliveryAdminAuditProcessor);
     }
 
     /** 정책 행 갱신과 하위 행 삭제 · 삽입이 한 트랜잭션이어야 버전 충돌 때 아무것도 바뀌지 않는다. */
     @Test
     @DisplayName("교체는 쓰기 트랜잭션, 조회는 읽기 전용 · REPEATABLE READ 트랜잭션이다")
     void transactionBoundaries() throws NoSuchMethodException {
-        Method replace = InternationalShippingPolicyAdminFacade.class.getMethod("replaceInternationalPolicy", InternationalShippingPolicyReplaceCommand.class);
+        Method replace = InternationalShippingPolicyAdminFacade.class.getMethod("replaceInternationalPolicy", InternationalShippingPolicyReplaceCommand.class, long.class);
         Method get = InternationalShippingPolicyAdminFacade.class.getMethod("getInternationalPolicy");
 
         assertThat(replace.getAnnotation(Transactional.class)).isNotNull().extracting(Transactional::readOnly).isEqualTo(false);
