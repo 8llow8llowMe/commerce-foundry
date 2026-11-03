@@ -121,12 +121,19 @@ class OrderPaymentTest {
     }
 
     @Test
-    @DisplayName("확정 뒤 취소 거절 — 취소 주문 거절 결과와 확정한 선점을 남긴다(PR-C 복원 대상)")
+    @DisplayName("확정 뒤 취소 거절 — 취소 주문 거절 결과 · 확정한 선점 · 복원 클레임을 함께 남기고 복원 시각이 찰 때까지 복원 대상이다(PR-C1)")
     void canceledAfterConfirmation() {
-        OrderPayment record = OrderPayment.canceledAfterConfirmation(32L, 1L, PAYMENT_ID, 7L, krw(20_000), APPROVED_AT, 123L, EVENT_ID);
+        OrderPayment record = OrderPayment.canceledAfterConfirmation(32L, 1L, PAYMENT_ID, 7L, krw(20_000), APPROVED_AT, 123L, EVENT_ID, 456L);
 
         assertThat(record.result()).isEqualTo(Result.REJECTED_ORDER_CANCELED);
         assertThat(record.stockReservationId()).isEqualTo(123L);
+        assertThat(record.restorationClaimId()).isEqualTo(456L);
+        assertThat(record.restoredAt()).isNull();
+        assertThat(record.awaitsRestoration()).isTrue();
+        assertThat(new OrderPayment(32L, 1L, PAYMENT_ID, 7L, krw(20_000), APPROVED_AT, Result.REJECTED_ORDER_CANCELED, 123L, EVENT_ID, 456L, APPROVED_AT, null)
+            .awaitsRestoration()).isFalse();
+        assertThat(OrderPayment.rejected(33L, 1L, PAYMENT_ID, 7L, krw(20_000), APPROVED_AT, Result.REJECTED_ORDER_CANCELED, EVENT_ID).awaitsRestoration())
+            .isFalse();
         assertThat(record.paidOrderId()).isNull();
         assertThat(Result.PAID.recordsConfirmedReservation()).isTrue();
         assertThat(Result.REJECTED_ORDER_CANCELED.recordsConfirmedReservation()).isTrue();

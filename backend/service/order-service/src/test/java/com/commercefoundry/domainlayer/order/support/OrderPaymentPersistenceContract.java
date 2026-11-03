@@ -311,6 +311,29 @@ public abstract class OrderPaymentPersistenceContract {
         return id;
     }
 
+    @Test
+    @DisplayName("markRestored — 복원 클레임이 있고 복원 시각이 빈 행만 한 번 채우고 updated_at 도 바꾼다. 클레임 없는 행 · 두 번째 호출은 false 다 (#308 PR-C1)")
+    void markRestoredIsConditional() {
+        Instant restoredAt = NOW.plusSeconds(60);
+        OrderPayment restorable = tx().execute(status -> orderPayments.insert(OrderPayment.canceledAfterConfirmation(IDS.incrementAndGet(), IDS.incrementAndGet(),
+            IDS.incrementAndGet(), 7L, krw(1000), APPROVED_AT, IDS.incrementAndGet(), UUID.randomUUID(), IDS.incrementAndGet())));
+        OrderPayment withoutClaim = tx().execute(status -> orderPayments.insert(OrderPayment.rejected(IDS.incrementAndGet(), IDS.incrementAndGet(),
+            IDS.incrementAndGet(), 7L, krw(1000), APPROVED_AT, Result.REJECTED_ORDER_CANCELED, UUID.randomUUID())));
+
+        Boolean first = tx().execute(status -> orderPayments.markRestored(restorable.id(), restoredAt));
+        Boolean second = tx().execute(status -> orderPayments.markRestored(restorable.id(), restoredAt.plusSeconds(60)));
+        Boolean noClaim = tx().execute(status -> orderPayments.markRestored(withoutClaim.id(), restoredAt));
+        assertThat(first).isTrue();
+        assertThat(second).isFalse();
+        assertThat(noClaim).isFalse();
+
+        assertThat(orderPayments.findByPaymentId(restorable.paymentId()).orElseThrow().restoredAt()).isEqualTo(restoredAt);
+        assertThat(jdbc.queryForObject("select updated_at from orders.order_payment where id = ?", java.sql.Timestamp.class, restorable.id()).toInstant())
+            .isEqualTo(restoredAt);
+        assertThat(orderPayments.findByPaymentId(withoutClaim.paymentId()).orElseThrow().restoredAt()).isNull();
+        assertThatThrownBy(() -> orderPayments.markRestored(restorable.id(), restoredAt)).isInstanceOf(IllegalTransactionStateException.class);
+    }
+
     private TransactionTemplate tx() {
         return new TransactionTemplate(transactionManager);
     }

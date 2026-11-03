@@ -18,7 +18,7 @@ import java.util.TreeMap;
 
 /**
  * product-service 선점 · 확정을 흉내 낸다. 같은 주문 아이디는 같은 활성 선점을 주고(확정된 것 포함), 다음 실패를 미리 넣을 수 있다.
- * 확정은 멱등이다(이미 확정이면 그대로). {@link #release} 로 해제된 선점은 확정에서 {@code RELEASED} 이고 같은 주문의 재선점은 새 아이디다.
+ * 확정은 멱등이다(이미 확정이면 그대로). {@link #expire} 로 해제된 선점은 확정에서 {@code RELEASED} 이고 같은 주문의 재선점은 새 아이디다.
  */
 public class FakeStockReservationPort implements StockReservationPort {
 
@@ -32,6 +32,8 @@ public class FakeStockReservationPort implements StockReservationPort {
     private final Deque<StockReservationException> confirmFailures = new ArrayDeque<>();
     private final List<SortedMap<Long, Integer>> reserveCalls = new ArrayList<>();
     private final List<Long> confirmCalls = new ArrayList<>();
+    private final Deque<StockReservationException> releaseFailures = new ArrayDeque<>();
+    private final List<Long> releaseCalls = new ArrayList<>();
     private Instant expiresAt = EXPIRES_AT;
     private long nextReservationId = 880_000L;
 
@@ -77,11 +79,29 @@ public class FakeStockReservationPort implements StockReservationPort {
         return this;
     }
 
+    /**
+     * 해제 프로브 (#308 PR-C1) — 확정된 선점은 {@code CONFIRMED}, 모르는 선점은 {@code NOT_FOUND}, 그 밖은 해제한다(이미 해제면 그대로).
+     */
+    @Override
+    public void release(long reservationId, long orderId) {
+        releaseCalls.add(reservationId);
+        if (!releaseFailures.isEmpty()) {
+            throw releaseFailures.poll();
+        }
+        if (confirmed.contains(reservationId)) {
+            throw new StockReservationException(StockReservationException.Failure.CONFIRMED);
+        }
+        if (!orderIdByReservationId.containsKey(reservationId)) {
+            throw new StockReservationException(StockReservationException.Failure.NOT_FOUND);
+        }
+        expire(reservationId);
+    }
+
     /** 만료 스윕 · 해제 이벤트가 선점을 푼 것을 흉내 낸다 — 활성에서 빠져 같은 주문의 재선점은 새 선점이다. */
-    public FakeStockReservationPort release(long reservationId) {
+    public FakeStockReservationPort expire(long reservationId) {
         released.add(reservationId);
         Long orderId = orderIdByReservationId.get(reservationId);
-        if (orderId != null) {
+        if (orderId != null && activeByOrderId.containsKey(orderId) && activeByOrderId.get(orderId).reservationId() == reservationId) {
             activeByOrderId.remove(orderId);
         }
         return this;
@@ -113,6 +133,17 @@ public class FakeStockReservationPort implements StockReservationPort {
 
     public List<Long> confirmCalls() {
         return confirmCalls;
+    }
+
+    public List<Long> releaseCalls() {
+        return releaseCalls;
+    }
+
+    public FakeStockReservationPort failNextRelease(StockReservationException.Failure... failures) {
+        for (StockReservationException.Failure failure : failures) {
+            releaseFailures.add(new StockReservationException(failure));
+        }
+        return this;
     }
 
     public boolean isConfirmed(long reservationId) {

@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.order.adapter.in.event.PaymentApprovedEve
 import com.commercefoundry.domainlayer.order.adapter.out.event.OrderEventAdapter;
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderRepositoryAdapter;
 import com.commercefoundry.domainlayer.order.application.command.PaymentApprovalCommand;
+import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
 import com.commercefoundry.domainlayer.order.application.model.StockConfirmation;
 import com.commercefoundry.domainlayer.order.application.model.VerifiedPayment;
@@ -17,6 +18,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRe
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentQueryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
+import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
@@ -25,6 +27,7 @@ import com.commercefoundry.domainlayer.order.application.service.processor.Order
 import com.commercefoundry.domainlayer.order.domain.model.*;
 import com.commercefoundry.global.messaging.JpaProcessedEventStore;
 import com.commercefoundry.messaging.consume.MessagingErrorHandlers;
+import com.commercefoundry.messaging.consume.NonRetryableEventException;
 import com.commercefoundry.messaging.event.EventEnvelope;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
 import com.commercefoundry.messaging.properties.MessagingProperties;
@@ -33,6 +36,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -75,6 +80,7 @@ public abstract class OrderPaymentConsumerContract {
     @Autowired protected OrderPaymentProcessor processor;
     @Autowired protected PaymentQueryPort remotePayment;
     @Autowired protected StockReservationPort stock;
+    @Autowired protected StockRestorationPort restorations;
     @Autowired protected JdbcTemplate jdbc;
     @Autowired protected PlatformTransactionManager transactions;
     @Autowired protected PaymentApprovedEventListener listener;
@@ -85,7 +91,7 @@ public abstract class OrderPaymentConsumerContract {
 
     @BeforeEach
     void resetPorts() {
-        reset(remotePayment, stock, events, orderWrites);
+        reset(remotePayment, stock, restorations, events, orderWrites);
     }
 
     @Test
@@ -212,9 +218,17 @@ public abstract class OrderPaymentConsumerContract {
     @Test
     void canceledFirstNeverConfirmsAndApprovedFirstRejectsPrepaymentCancel() {
         PaymentApprovalCommand canceled = arrange(OrderStatus.CANCELED);
+        long reservationId = order(canceled).stockReservationId();
         facade.approve(canceled);
         assertThat(payment(canceled).result()).isEqualTo(OrderPayment.Result.REJECTED_ORDER_CANCELED);
-        verifyNoInteractions(stock);
+        assertThat(payment(canceled).stockReservationId()).isNull();
+        assertThat(payment(canceled).restorationClaimId()).isNull();
+        assertThat(replies(canceled.orderId())).isEqualTo(1);
+        // 확정 전 취소 — 해제 프로브가 200(RESERVED 를 풀었거나 이미 RELEASED)이면 확정 · 재선점 · 복원 없이 거절한다
+        verify(stock).release(reservationId, canceled.orderId());
+        verify(stock, never()).confirm(anyLong());
+        verify(stock, never()).reReserve(anyLong(), any());
+        verifyNoInteractions(restorations);
         PaymentApprovalCommand paid = arrange(OrderStatus.PENDING_PAYMENT);
         facade.approve(paid);
         assertThatThrownBy(() -> order(paid).cancelBeforePayment()).isInstanceOf(OrderStatusTransitionException.class);
@@ -232,6 +246,8 @@ public abstract class OrderPaymentConsumerContract {
         assertThat(order(command).status()).isEqualTo(OrderStatus.CANCELED);
         assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_ORDER_CANCELED);
         assertThat(payment(command).stockReservationId()).isEqualTo(reservationId);
+        assertRestoredOnce(command, reservationId);
+        verify(stock, never()).release(anyLong(), anyLong()); // 이번 처리가 확정 200 을 받았으므로 프로브하지 않는다
     }
 
     @Test
@@ -371,6 +387,191 @@ public abstract class OrderPaymentConsumerContract {
             assertThat(loser.result()).isEqualTo(OrderPayment.Result.REJECTED_ALREADY_PAID);
             assertThat(loser.stockReservationId()).isNull();
         }
+    }
+
+    // --- PR-C1: 확정 뒤 취소가 이긴 건의 복구창 · 멱등 복원 ---
+
+    @Test
+    void crashAfterConfirmationThenCancelIsFoundByReleaseProbeAndRestoredOnce() {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        cancel(command); // 확정 200 뒤 DB 기록 전에 끊겼고 그 사이 고객 취소가 커밋됐다 — 메모리의 확정 결과는 없다
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+
+        facade.approve(command);
+
+        assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_ORDER_CANCELED);
+        assertThat(payment(command).stockReservationId()).isEqualTo(reservationId);
+        assertRestoredOnce(command, reservationId);
+        verify(stock, never()).confirm(anyLong());
+        verify(stock, never()).reReserve(anyLong(), any());
+
+        facade.approve(command); // 같은 이벤트 재전달 — inbox
+        facade.approve(withEvent(command, UUID.randomUUID())); // 다른 eventId — 복원이 끝난 기록이라 회신을 다시 쌓지 않는다
+        assertRestoredOnce(command, reservationId);
+        verify(restorations, times(1)).restoreCancellation(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void restorationFailureResumesWithSameClaimOnRedeliveryAndRepliesOnce() {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        cancel(command);
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN)).doNothing()
+            .when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(OrderException.class);
+        OrderPayment pending = payment(command);
+        assertThat(pending.awaitsRestoration()).isTrue();
+        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+        assertThat(replies(command.orderId())).isZero();
+
+        facade.approve(command); // 재전달 — 프로브 없이 기록의 같은 claimId 로 복원부터 다시 한다
+
+        verify(restorations, times(2)).restoreCancellation(pending.restorationClaimId(), reservationId, skus());
+        verify(stock, times(1)).release(anyLong(), anyLong());
+        assertThat(payment(command).restorationClaimId()).isEqualTo(pending.restorationClaimId());
+        assertRestoredOnce(command, reservationId);
+    }
+
+    @Test
+    void reReservedIdIsRecordedBeforeConfirmAndProbedAfterCrash() {
+        PaymentApprovalCommand command = arrange(OrderStatus.EXPIRED);
+        long oldReservation = order(command).stockReservationId();
+        long newReservation = IDS.incrementAndGet();
+        when(stock.confirm(oldReservation)).thenThrow(new StockReservationException(StockReservationException.Failure.RELEASED));
+        when(stock.reReserve(eq(command.orderId()), any())).thenReturn(new StockReservationQueryResult(newReservation, command.orderId(), NOW));
+        when(stock.confirm(newReservation)).thenAnswer(invocation -> {
+            // 증거는 확정 호출 전에 이미 커밋돼 있다
+            assertThat(jdbc.queryForObject("select stock_reservation_id from orders.order_stock_confirmation where payment_id=?", Long.class,
+                command.paymentId())).isEqualTo(newReservation);
+            cancel(command);
+            throw new IllegalStateException("process killed after remote confirmation");
+        });
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(IllegalStateException.class);
+        assertThat(payments.findByPaymentId(command.paymentId())).isEmpty();
+
+        reset(stock);
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(newReservation, command.orderId());
+        facade.approve(command);
+
+        var sequence = inOrder(stock);
+        sequence.verify(stock).release(newReservation, command.orderId());
+        sequence.verify(stock).release(oldReservation, command.orderId());
+        verify(stock, never()).reReserve(anyLong(), any());
+        assertThat(payment(command).stockReservationId()).isEqualTo(newReservation);
+        assertRestoredOnce(command, newReservation);
+    }
+
+    @Test
+    void quantityExceededMeansAlreadyRestoredAndCloses() {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        cancel(command);
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.QUANTITY_EXCEEDED)).when(restorations)
+            .restoreCancellation(anyLong(), anyLong(), any());
+
+        facade.approve(command);
+
+        assertRestoredOnce(command, reservationId);
+    }
+
+    @Test
+    void mismatchOrNotConfirmedRestorationGoesToDltWithoutReply() {
+        for (StockReservationException.Failure failure
+            : new StockReservationException.Failure[] {StockReservationException.Failure.RESTORATION_MISMATCH, StockReservationException.Failure.NOT_CONFIRMED,
+                StockReservationException.Failure.NOT_FOUND}) {
+            PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+            long reservationId = order(command).stockReservationId();
+            cancel(command);
+            doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+            doThrow(new StockReservationException(failure)).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+
+            assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
+            assertThat(payment(command).awaitsRestoration()).isTrue();
+            assertThat(replies(command.orderId())).isZero();
+            assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+        }
+    }
+
+    @Test
+    void confirmedRunLosingToProbeRejectionGoesToDltWithoutExtraReply() {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        PaymentApprovalCommand other = withEvent(command, UUID.randomUUID());
+        when(stock.confirm(reservationId)).thenAnswer(invocation -> {
+            // 확정 응답 전에 고객 취소가 커밋되고, 같은 결제의 다른 전달이 프로브 200(확정 전 취소로 봄)으로 거절을 먼저 커밋한다
+            cancel(command);
+            facade.approve(other);
+            return new StockConfirmationQueryResult(reservationId, command.orderId());
+        });
+
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
+
+        assertThat(payment(command).stockReservationId()).isNull();
+        assertThat(replies(command.orderId())).isEqualTo(1); // 먼저 커밋된 거절 회신뿐 — 추가 회신 없음
+        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+        assertThat(inbox.exists(GROUP, other.eventId())).isTrue();
+        verifyNoInteractions(restorations);
+    }
+
+    @Test
+    void canceledOrderPaidByAnotherPaymentIsNotRestored() {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> payments.insert(new OrderPayment(IDS.incrementAndGet(), command.orderId(),
+            IDS.incrementAndGet(), command.memberId(), command.amount(), NOW, OrderPayment.Result.PAID, reservationId, UUID.randomUUID(), null, null, null)));
+        cancel(command); // 다른 결제로 결제 완료된 뒤 취소된 주문 — 확정 선점은 이긴 결제의 것이고 그 취소 클레임이 복원한다
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+
+        facade.approve(command);
+
+        assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_ORDER_CANCELED);
+        assertThat(payment(command).stockReservationId()).isNull();
+        assertThat(payment(command).restorationClaimId()).isNull();
+        assertThat(replies(command.orderId())).isEqualTo(1);
+        verifyNoInteractions(restorations);
+    }
+
+    @Test
+    void resumedRestorationAfterFullPaymentCancelDoesNotReply() {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        cancel(command);
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN)).doNothing()
+            .when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(OrderException.class);
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(
+            new PaymentQueryResult(command.paymentId(), command.orderId(), command.memberId(), "CANCELED", command.amount(), NOW, "CARD")));
+
+        facade.approve(command); // 재전달 사이 결제가 전액 취소됐다 — 복원은 끝내고 환불할 돈이 없으니 회신하지 않는다
+
+        assertThat(payment(command).restoredAt()).isNotNull();
+        assertThat(replies(command.orderId())).isZero();
+        assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
+    }
+
+    private void cancel(PaymentApprovalCommand command) {
+        jdbc.update("update orders.orders set status='CANCELED',version=version+1 where id=?", command.orderId());
+    }
+
+    private static SortedMap<Long, Integer> skus() {
+        return new TreeMap<>(Map.of(101L, 1));
+    }
+
+    /** 복원은 기록의 claimId 로 끝났고(restored_at), 거절 회신 · inbox 는 한 번이다. */
+    private void assertRestoredOnce(PaymentApprovalCommand command, long reservationId) {
+        OrderPayment record = payment(command);
+        assertThat(record.restorationClaimId()).isNotNull();
+        assertThat(record.restoredAt()).isNotNull();
+        assertThat(record.awaitsRestoration()).isFalse();
+        verify(restorations, atLeastOnce()).restoreCancellation(record.restorationClaimId(), reservationId, skus());
+        assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=? and event_type='order-payment-rejected'",
+            Long.class, Long.toString(command.orderId()))).isEqualTo(1);
+        assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
     }
 
     protected PaymentApprovalCommand arrange(OrderStatus status) {

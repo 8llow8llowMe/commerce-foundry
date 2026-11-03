@@ -6,13 +6,18 @@ import com.commercefoundry.domainlayer.order.application.exception.StockReservat
 import com.commercefoundry.domainlayer.order.application.model.StockConfirmation;
 import com.commercefoundry.domainlayer.order.application.model.StockReservation;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
+import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderQuote;
 import java.time.Clock;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.OptionalLong;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.function.LongConsumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -40,6 +45,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class OrderStockProcessor {
 
     private final StockReservationPort stockReservationPort;
+    private final StockRestorationPort stockRestorationPort;
     private final Clock clock;
 
     /**
@@ -92,7 +98,7 @@ public class OrderStockProcessor {
                 yield new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT, exception);
             }
             // RELEASED · NOT_FOUND 는 확정에서만 나온다 — 선점에서 오면 모르는 거절과 같다
-            case UNKNOWN, REJECTED, RELEASED, NOT_FOUND -> {
+            case UNKNOWN, REJECTED, RELEASED, NOT_FOUND, CONFIRMED, NOT_CONFIRMED, QUANTITY_EXCEEDED, RESTORATION_MISMATCH -> {
                 log.warn("stock reservation failed. orderId={}, failure={}", orderId, exception.getFailure());
                 yield new OrderException(OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
             }
@@ -123,6 +129,16 @@ public class OrderStockProcessor {
      */
     @Transactional(propagation = Propagation.NEVER)
     public StockConfirmation confirmOrReReserve(Order order) {
+        return confirmOrReReserve(order, reservationId -> {
+        });
+    }
+
+    /**
+     * {@link #confirmOrReReserve(Order)} 과 같고, 재선점이 <b>새 선점 아이디</b>를 주면 그 선점을 확정하기 <b>전에</b> {@code beforeReReservedConfirm} 을 부른다
+     * (#308 PR-C1 — 재선점 증거를 남겨 확정 뒤 끊긴 복구창에서 찾게 한다). 콜백이 실패하면 확정을 부르지 않고 그 예외가 그대로 나간다.
+     */
+    @Transactional(propagation = Propagation.NEVER)
+    public StockConfirmation confirmOrReReserve(Order order, LongConsumer beforeReReservedConfirm) {
         if (!order.isAwaitingPaymentApproval()) {
             throw new IllegalArgumentException("결제 대기 · 만료 주문만 재고를 확정합니다: orderId=" + order.id() + ", status=" + order.status());
         }
@@ -150,10 +166,84 @@ public class OrderStockProcessor {
             log.error("stock re-reservation result belongs to another order. orderId={}", order.id());
             throw new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT);
         }
+        if (reReserved.reservationId() != order.stockReservationId()) {
+            beforeReReservedConfirm.accept(reReserved.reservationId());
+        }
         try {
             return StockConfirmation.reReservedAndConfirmed(confirmOwn(order.id(), reReserved.reservationId()));
         } catch (StockReservationException exception) {
             throw toConfirmationException(order.id(), exception);
+        }
+    }
+
+    /**
+     * 취소 주문의 결제 반영 복구창 프로브 (#308 PR-C1, {@code order-flow-guide.md} §3-6) — 트랜잭션 없음. 후보 선점마다 해제를 불러 확정된 선점을 찾는다.
+     * 후보는 재선점 증거 · 주문의 선점 아이디 둘뿐이라 원격 호출은 최대 두 번이다(벌크 해제 API 없음). 재선점(reserve)을 조회 대용으로 쓰지 않는다.
+     *
+     * <ul>
+     *   <li>200 — RESERVED 를 풀었거나 이미 RELEASED. 취소 주문이니 풀린 것이 맞고 누수가 없다.</li>
+     *   <li>409 {@code PRODUCT_024} — 확정 선점 증거. 그 선점을 돌려준다(부른 쪽이 복원한다).</li>
+     *   <li>404 {@code PRODUCT_003} — 후보가 아니다.</li>
+     *   <li>그 밖({@code PRODUCT_026} · {@code PRODUCT_031} · 타임아웃 · 5xx · 서킷 · 모르는 4xx · 계약 위반) — 503 {@code PRODUCT_SERVICE_UNAVAILABLE}(재전달로 다시 한다).</li>
+     *   <li>확정 선점이 둘 — 500 {@code STOCK_RESERVATION_INCONSISTENT}(재선점은 앞 선점이 풀렸을 때만 하므로 둘 다 확정일 수 없다).</li>
+     * </ul>
+     *
+     * @param candidates 앞쪽부터 부른다 — 같은 아이디는 한 번만
+     * @return 확정된 선점 아이디. 없으면 빈 값
+     */
+    @Transactional(propagation = Propagation.NEVER)
+    public OptionalLong findConfirmedByReleaseProbe(long orderId, List<Long> candidates) {
+        OptionalLong confirmed = OptionalLong.empty();
+        for (long reservationId : new LinkedHashSet<>(candidates)) {
+            try {
+                stockReservationPort.release(reservationId, orderId);
+                log.info("canceled order reservation released by probe. orderId={}, reservationId={}", orderId, reservationId);
+            } catch (StockReservationException exception) {
+                if (exception.getFailure() == StockReservationException.Failure.NOT_FOUND) {
+                    continue;
+                }
+                if (exception.getFailure() != StockReservationException.Failure.CONFIRMED) {
+                    throw toConfirmationException(orderId, exception);
+                }
+                if (confirmed.isPresent()) {
+                    log.error("two confirmed stock reservations for canceled order. orderId={}", orderId);
+                    throw new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT, exception);
+                }
+                log.warn("canceled order holds confirmed stock reservation, restoring. orderId={}, reservationId={}", orderId, reservationId);
+                confirmed = OptionalLong.of(reservationId);
+            }
+        }
+        return confirmed;
+    }
+
+    /**
+     * 확정 뒤 취소가 이긴 결제의 재고 복원 (#308 PR-C1, {@code order-flow-guide.md} §3-4) — 트랜잭션 없음. 항목은 주문 생성 · 재선점과 같은 SKU 별 수량 합이다.
+     * 클레임 아이디는 {@code order_payment.restoration_claim_id} 그대로라 재시도 · 재전달이 재고를 두 번 늘리지 않는다.
+     *
+     * <ul>
+     *   <li>200 — 복원됨(같은 클레임의 기존 복원 포함).</li>
+     *   <li>409 {@code PRODUCT_028} — 다른 경로가 이미 복원했다. WARN 후 복원된 것으로 끝낸다(조용히 다시 늘리지 않는다).</li>
+     *   <li>409 {@code PRODUCT_027} · {@code PRODUCT_029} · 404 {@code PRODUCT_003} — 500 {@code STOCK_RESERVATION_INCONSISTENT}(다시 해도 같다, 버그 신호).</li>
+     *   <li>그 밖({@code PRODUCT_026} · {@code PRODUCT_030} · {@code PRODUCT_031} · 타임아웃 · 5xx · 서킷 · 모르는 4xx · 계약 위반) — 503 {@code PRODUCT_SERVICE_UNAVAILABLE}.</li>
+     * </ul>
+     */
+    @Transactional(propagation = Propagation.NEVER)
+    public void restoreCanceledPayment(long orderId, long paymentId, long claimId, long reservationId, OrderQuote quote) {
+        try {
+            stockRestorationPort.restoreCancellation(claimId, reservationId, quantitiesBySkuId(quote));
+        } catch (StockReservationException exception) {
+            switch (exception.getFailure()) {
+                case QUANTITY_EXCEEDED -> log.warn("stock already restored by another path, closing. orderId={}, paymentId={}, reservationId={}, claimId={}",
+                    orderId, paymentId, reservationId, claimId);
+                case NOT_CONFIRMED, RESTORATION_MISMATCH, NOT_FOUND -> {
+                    log.error("stock restoration rejected permanently. orderId={}, reservationId={}, failure={}", orderId, reservationId, exception.getFailure());
+                    throw new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT, exception);
+                }
+                default -> {
+                    log.warn("stock restoration failed. orderId={}, failure={}", orderId, exception.getFailure());
+                    throw new OrderException(OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE, exception);
+                }
+            }
         }
     }
 

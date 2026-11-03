@@ -10,11 +10,13 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderExceptio
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException.Failure;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
+import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderStockProcessor;
 import com.commercefoundry.security.internal.InternalTokenDecoderFactory;
 import com.commercefoundry.security.support.TestServiceTokens;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.io.IOException;
@@ -73,6 +75,9 @@ class StockReservationClientAdapterTest {
     private StockReservationPort stockReservationPort;
 
     @Autowired
+    private StockRestorationPort stockRestorationPort;
+
+    @Autowired
     private OrderStockProcessor processor;
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -82,12 +87,13 @@ class StockReservationClientAdapterTest {
     @DynamicPropertySource
     static void productServiceUrl(DynamicPropertyRegistry registry) {
         registry.add("spring.cloud.openfeign.client.config.stockReservationClient.url", () -> "http://127.0.0.1:" + SERVER.getAddress().getPort());
+        registry.add("spring.cloud.openfeign.client.config.stockRestorationClient.url", () -> "http://127.0.0.1:" + SERVER.getAddress().getPort());
     }
 
     private static HttpServer startServer() {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            server.createContext("/internal/v1/stock-reservations", exchange -> {
+            HttpHandler handler = exchange -> {
                 PATHS.add(exchange.getRequestURI().getPath());
                 BODIES.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
                 AUTHORIZATIONS.add(exchange.getRequestHeaders().getOrDefault("Authorization", List.of()));
@@ -106,7 +112,9 @@ class StockReservationClientAdapterTest {
                 try (OutputStream output = exchange.getResponseBody()) {
                     output.write(body);
                 }
-            });
+            };
+            server.createContext("/internal/v1/stock-reservations", handler);
+            server.createContext("/internal/v1/stock-restorations", handler);
             server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
             server.start();
             return server;
@@ -292,7 +300,7 @@ class StockReservationClientAdapterTest {
         RESPONSE_STATUS.set(409);
         RESPONSE_BODY.set(failure("attacker\\r\\nFORGED_SECRET", "RAW_BODY_SECRET"));
         assertFailure(Failure.REJECTED);
-        assertThat(output.getAll()).contains("resultCode=<unrecognized>").doesNotContain("FORGED_SECRET", "RAW_BODY_SECRET");
+        assertThat(output.getAll()).contains("op=RESERVE").contains("resultCode=<unrecognized>").doesNotContain("FORGED_SECRET", "RAW_BODY_SECRET");
     }
 
     // --- 확정 · 재선점 (#308) ---
@@ -379,6 +387,146 @@ class StockReservationClientAdapterTest {
         RESPONSE_BODY.set(reservation("RELEASED"));
         assertThatThrownBy(() -> stockReservationPort.reReserve(ORDER_ID, items()))
             .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+    }
+
+    // --- 해제 프로브 · 결제 후 복원 (#308 PR-C1) ---
+
+    private static final long CLAIM_ID = 4611686018427388201L;
+
+    private static String restoration(long claimId) {
+        return """
+            {"dataHeader":{"success":true,"resultCode":null,"resultMessage":null,"fieldErrors":null},
+             "dataBody":{"restorationId":"4611686018427388101","claimId":"%d","reservationId":"4611686018427388001","reason":"CANCELLATION",
+               "items":[{"skuId":"9001","quantity":2,"restored":true},{"skuId":"9002","quantity":1,"restored":false}],"futureField":1}}
+            """.formatted(claimId);
+    }
+
+    @Test
+    @DisplayName("해제 — POST /{reservationId}/release 에 본문 없이 서비스 토큰(aud=product-service)을 싣고, RELEASED 응답이면 정상 반환이다")
+    void releases() {
+        RESPONSE_BODY.set(reservation("RELEASED"));
+
+        stockReservationPort.release(RESERVATION_ID, ORDER_ID);
+
+        assertThat(PATHS).containsExactly("/internal/v1/stock-reservations/" + RESERVATION_ID + "/release");
+        assertThat(BODIES.getFirst()).isEmpty();
+        assertThat(AUTHORIZATIONS).singleElement().satisfies(values -> {
+            Jwt token = InternalTokenDecoderFactory.create(TestServiceTokens.properties("product-service"), Clock.systemUTC())
+                .decode(values.getFirst().substring("Bearer ".length()));
+            assertThat(token.getAudience()).containsExactly("product-service");
+        });
+    }
+
+    @ParameterizedTest(name = "해제 {0} {1} → {2}")
+    @CsvSource({
+        "409, PRODUCT_024, CONFIRMED",
+        "404, PRODUCT_003, NOT_FOUND",
+        "409, PRODUCT_026, CONFLICT",
+        "409, PRODUCT_031, CONFLICT",
+        "409, PRODUCT_025, REJECTED",
+        "404, PRODUCT_024, REJECTED",
+        "401, SECURITY_007, REJECTED",
+        "503, X, UNKNOWN"
+    })
+    @DisplayName("해제 오류 — 024 확정은 프로브의 확정 증거, 003 은 후보 아님, 026 · 031 은 일시 충돌, 짝이 맞지 않는 코드는 모르는 거절이다")
+    void releaseFailures(int status, String code, Failure expected) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(failure(code, "이미 확정된 재고 선점입니다"));
+
+        assertThatThrownBy(() -> stockReservationPort.release(RESERVATION_ID, ORDER_ID))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(expected));
+        assertThat(PATHS).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"RESERVED", "CONFIRMED"})
+    @DisplayName("해제 200 이 RELEASED 가 아니거나 다른 선점이면 결과를 모르는 실패(UNKNOWN)다")
+    void releaseContractViolation(String status) {
+        RESPONSE_BODY.set(reservation(status));
+        assertThatThrownBy(() -> stockReservationPort.release(RESERVATION_ID, ORDER_ID))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+
+        RESPONSE_BODY.set(reservation("RELEASED"));
+        assertThatThrownBy(() -> stockReservationPort.release(RESERVATION_ID + 1, ORDER_ID))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+
+        // 200 의 주문 아이디가 다르면 계약 위반이다 — 확정의 주문 대조와 대칭
+        assertThatThrownBy(() -> stockReservationPort.release(RESERVATION_ID, ORDER_ID + 1))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+    }
+
+    @Test
+    @DisplayName("복원 — {claimId, reservationId, reason: CANCELLATION, items} 를 서비스 토큰과 보내고, 같은 클레임 · 선점 · 항목 응답이면 정상 반환이다")
+    void restores() {
+        RESPONSE_BODY.set(restoration(CLAIM_ID));
+
+        stockRestorationPort.restoreCancellation(CLAIM_ID, RESERVATION_ID, items());
+
+        assertThat(PATHS).containsExactly("/internal/v1/stock-restorations");
+        assertThat(BODIES.getFirst()).contains("\"claimId\":" + CLAIM_ID).contains("\"reservationId\":" + RESERVATION_ID)
+            .contains("\"reason\":\"CANCELLATION\"").contains("{\"skuId\":9001,\"quantity\":2}").contains("{\"skuId\":9002,\"quantity\":1}");
+        assertThat(AUTHORIZATIONS).singleElement().satisfies(values -> {
+            Jwt token = InternalTokenDecoderFactory.create(TestServiceTokens.properties("product-service"), Clock.systemUTC())
+                .decode(values.getFirst().substring("Bearer ".length()));
+            assertThat(token.getAudience()).containsExactly("product-service");
+            assertThat(token.getClaimAsString("iss")).isEqualTo("order-service");
+        });
+    }
+
+    @ParameterizedTest(name = "복원 {0} {1} → {2}")
+    @CsvSource({
+        "409, PRODUCT_027, NOT_CONFIRMED",
+        "409, PRODUCT_028, QUANTITY_EXCEEDED",
+        "409, PRODUCT_029, RESTORATION_MISMATCH",
+        "404, PRODUCT_003, NOT_FOUND",
+        "409, PRODUCT_026, CONFLICT",
+        "409, PRODUCT_030, CONFLICT",
+        "409, PRODUCT_031, CONFLICT",
+        "409, PRODUCT_024, REJECTED",
+        "400, PRODUCT_101, REJECTED",
+        "500, X, UNKNOWN",
+        "503, X, UNKNOWN"
+    })
+    @DisplayName("복원 오류 — 027 · 029 종결, 028 이미 복원, 003 선점 없음, 026 · 030 · 031 일시 충돌, 짝이 맞지 않는 코드는 모르는 거절, 5xx 는 결과를 모르는 실패다")
+    void restorationFailures(int status, String code, Failure expected) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(failure(code, "복원 가능 수량을 넘은 SKU 가 있습니다: [9001]"));
+
+        assertThatThrownBy(() -> stockRestorationPort.restoreCancellation(CLAIM_ID, RESERVATION_ID, items()))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> {
+                assertThat(exception.getFailure()).isEqualTo(expected);
+                assertThat(exception.getMessage()).doesNotContain("9001");
+            });
+        assertThat(PATHS).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidRestorations")
+    @DisplayName("복원 200 이 다른 클레임 · 선점 · 사유 · 항목이거나 읽을 수 없으면 결과를 모르는 실패(UNKNOWN)다 — 같은 claimId 로 다시 부르면 된다")
+    void restorationContractViolation(String response) {
+        RESPONSE_BODY.set(response);
+        assertThatThrownBy(() -> stockRestorationPort.restoreCancellation(CLAIM_ID, RESERVATION_ID, items()))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+        assertThat(PATHS).hasSize(1);
+    }
+
+    static Stream<String> invalidRestorations() {
+        String valid = restoration(CLAIM_ID);
+        return Stream.of("{}", "not-json", restoration(CLAIM_ID + 1),
+            valid.replace("\"reservationId\":\"4611686018427388001\"", "\"reservationId\":\"4611686018427388002\""),
+            valid.replace("\"reason\":\"CANCELLATION\"", "\"reason\":\"RETURN\""),
+            valid.replace("\"quantity\":2", "\"quantity\":1"),
+            valid.replace("\"skuId\":\"9002\"", "\"skuId\":\"9001\""),
+            valid.replace("\"restorationId\":\"4611686018427388101\"", "\"restorationId\":\"0\""));
+    }
+
+    @Test
+    @DisplayName("복원 타임아웃은 다시 보내지 않고 UNKNOWN 이다 — 재시도는 이벤트 재전달이 같은 claimId 로 한다")
+    void restorationTimeoutIsNotRetried() {
+        DELAY_MS.set(3300);
+        assertThatThrownBy(() -> stockRestorationPort.restoreCancellation(CLAIM_ID, RESERVATION_ID, items()))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+        assertThat(PATHS).hasSize(1);
     }
 
     private void assertFailure(Failure expected) {

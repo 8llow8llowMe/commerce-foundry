@@ -24,4 +24,12 @@ public interface StockReservationPort {
      * 해제 · 만료(409 {@code PRODUCT_025})는 {@code RELEASED}, 없음(404 {@code PRODUCT_003})은 {@code NOT_FOUND}, 동시 변경(409 {@code PRODUCT_026})은 {@code CONFLICT} 사유다.
      */
     StockConfirmationQueryResult confirm(long reservationId);
+
+    /**
+     * 선점 해제 (#308 PR-C1, {@code POST /internal/v1/stock-reservations/{id}/release}) — 취소 주문의 결제 반영 복구창에서 <b>프로브</b>로만 쓴다.
+     * 정상 반환은 해제됨(RESERVED 를 풀었거나 이미 RELEASED — 취소 주문이니 풀린 것이 맞다)이다. 200 응답의 주문 아이디가 {@code orderId} 와 다르면 계약 위반({@code UNKNOWN})이다.
+     * 확정된 선점(409 {@code PRODUCT_024})은 {@code CONFIRMED}, 없음(404 {@code PRODUCT_003})은 {@code NOT_FOUND},
+     * 동시 변경 · 잠금 대기(409 {@code PRODUCT_026} · {@code PRODUCT_031})는 {@code CONFLICT} 사유다.
+     */
+    void release(long reservationId, long orderId);
 }

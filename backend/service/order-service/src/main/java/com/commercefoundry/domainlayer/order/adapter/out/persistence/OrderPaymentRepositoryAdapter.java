@@ -8,6 +8,8 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRe
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import jakarta.persistence.PersistenceException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -85,5 +87,11 @@ public class OrderPaymentRepositoryAdapter implements OrderPaymentRepositoryPort
     @Override
     public Optional<OrderPayment> findPaidByOrderId(long orderId) {
         return orderPaymentRepository.findByPaidOrderId(orderId).map(orderPaymentMapper::toDomain);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean markRestored(long id, Instant restoredAt) {
+        return orderPaymentRepository.markRestored(id, restoredAt.truncatedTo(ChronoUnit.MICROS)) == 1;
     }
 }

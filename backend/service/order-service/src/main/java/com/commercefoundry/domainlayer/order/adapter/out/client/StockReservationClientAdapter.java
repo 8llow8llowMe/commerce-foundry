@@ -42,6 +42,15 @@ public class StockReservationClientAdapter implements StockReservationPort {
             stockReservationInternalResponseSupport.callConfirmation(() -> stockReservationClient.confirm(reservationId)), reservationId);
     }
 
+    @Override
+    public void release(long reservationId, long orderId) {
+        if (reservationId <= 0) {
+            throw new IllegalArgumentException("positive reservationId required");
+        }
+        stockReservationInternalResponseSupport.requireReleased(
+            stockReservationInternalResponseSupport.callRelease(() -> stockReservationClient.release(reservationId)), reservationId, orderId);
+    }
+
     private static StockReservationInternalRequest toRequest(long orderId, SortedMap<Long, Integer> quantitiesBySkuId) {
         return new StockReservationInternalRequest(orderId,
             quantitiesBySkuId.entrySet().stream().map(entry -> new StockReservationInternalRequest.Item(entry.getKey(), entry.getValue())).toList());

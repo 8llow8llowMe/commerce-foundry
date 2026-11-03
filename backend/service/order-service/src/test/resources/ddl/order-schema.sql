@@ -552,6 +552,37 @@
     comment on column orders.order_status_history.to_status is
         '바뀐 상태';
 
+    create table orders.order_stock_confirmation (
+        payment_id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        event_id uuid not null,
+        order_id bigint not null,
+        stock_reservation_id bigint not null,
+        primary key (payment_id)
+    );
+
+    comment on table orders.order_stock_confirmation is
+        '결제 반영의 재선점 증거 (재선점 새 선점 아이디를 확정 전에 기록, 결제당 1행)';
+
+    comment on column orders.order_stock_confirmation.payment_id is
+        '결제 아이디 (외부 FK: payment-service payment.id)';
+
+    comment on column orders.order_stock_confirmation.created_at is
+        '생성 시각';
+
+    comment on column orders.order_stock_confirmation.updated_at is
+        '수정 시각';
+
+    comment on column orders.order_stock_confirmation.event_id is
+        '기록한 payment-approved 이벤트 아이디 (봉투 eventId)';
+
+    comment on column orders.order_stock_confirmation.order_id is
+        '주문 아이디 (FK: orders.id)';
+
+    comment on column orders.order_stock_confirmation.stock_reservation_id is
+        '확정하려는 재선점 아이디 (외부 FK: product-service stock_reservation.id)';
+
     create table orders.orders (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
