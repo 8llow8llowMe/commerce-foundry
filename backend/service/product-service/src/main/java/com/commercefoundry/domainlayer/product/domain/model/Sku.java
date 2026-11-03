@@ -30,6 +30,11 @@ public record Sku(
         }
     }
 
+    /** 옵션 구성·아이디는 유지하고 편집 가능한 속성만 교체한다. */
+    public Sku withEditableProperties(Money price, SaleStatus status, Integer weight, HsCode code) {
+        return new Sku(id, productId, optionKey, price, status, weight, code);
+    }
+
     /** 판매중(ON_SALE) SKU 인가. 상품 판매 상태 · 재고는 보지 않는다 — 판매 가능 여부는 {@link SaleAvailability#ofSku} 가 정한다. */
     public boolean isOnSale() {
         return saleStatus == SaleStatus.ON_SALE;
