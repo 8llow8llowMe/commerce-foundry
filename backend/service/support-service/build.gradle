@@ -1,4 +1,5 @@
 dependencies {
+    implementation project(':core:ai-core')
     implementation project(':core:common-core')
     implementation project(':core:persistence-core')
     // 다음 PR 의 WebSocket 1회용 티켓(GETDEL) · 다중 인스턴스 전달(pub/sub) 용 — 지금은 연결 설정 · 기동 가드만 건다 (#470)

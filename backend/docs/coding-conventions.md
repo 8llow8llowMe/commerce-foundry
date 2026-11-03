@@ -287,6 +287,8 @@ public final class ProductValidationMessage {
   - support 비회원 대화 작업은 자격 행을 `PESSIMISTIC_WRITE` NOWAIT(`lock.timeout=0`)로 잠그고 refresh한 뒤 만료·폐기를 확인한다.
     자격 폐기와 같은 DB 트랜잭션 안에서 순서를 정하며, 잠금 순서는 guest session → conversation이다. 비회원 조회도 짧은 쓰기 트랜잭션이고
     동일 자격의 동시 호출은 `GUEST_SESSION_004` 409가 될 수 있다. 세부와 재시도 제한은 `support-conversation-guide.md`를 따른다(#470 PR-B1b).
+  - support 고객 메시지는 대화 부모를 NOWAIT 잠금·refresh하고, 멱등 키를 확인한 뒤 lastSeq 갱신과 메시지 insert를 같은 트랜잭션으로 묶는다.
+    대화 내 순번·중복 메시지의 직렬화가 목적이며 비회원은 guest → conversation 순서를 지킨다. 실패 후 동일 키는 새 트랜잭션에서 재시도한다(#470 PR-B1c).
 - **아이디(Snowflake · 다른 테이블의 PK)를 직접 넣고 `@Version` 이 없는 엔티티**는 `Persistable` 을 구현해 `isNew()` 를 `getCreatedAt() == null`
   ("감사 시각이 아직 없다") 로 둔다. 기본 `save` 는 아이디가 있으면 merge 로 가서 행마다 SELECT 를 한 번 더 보내고, PK 를 업무 키로 쓰는 행(`stock.sku_id`)은
   동시 첫 INSERT 가 먼저 커밋된 행을 조건 없이 덮어쓴다. persist 면 PK 충돌로 실패한다.

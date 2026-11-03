@@ -199,6 +199,60 @@
     comment on column support.support_guest_session.version is
         '낙관적 락 버전';
 
+    create table support.support_message (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        author_guest_session_id bigint,
+        author_member_id bigint,
+        author_type varchar(20) not null check ((author_type in ('CUSTOMER'))),
+        client_message_id varchar(36) not null,
+        content varchar(2000) not null,
+        conversation_id bigint not null,
+        seq bigint not null,
+        status varchar(20) not null check ((status in ('COMPLETED'))),
+        primary key (id),
+        constraint uk_support_message_conversation_id_seq unique (conversation_id, seq),
+        constraint uk_support_message_conversation_id_client_message_id unique (conversation_id, client_message_id),
+        constraint ck_support_message_state check (id > 0 and conversation_id > 0 and seq > 0 and length(trim(content)) > 0 and ((author_member_id is not null and author_member_id > 0 and author_guest_session_id is null) or (author_member_id is null and author_guest_session_id is not null and author_guest_session_id > 0)))
+    );
+
+    comment on table support.support_message is
+        '고객 상담 메시지';
+
+    comment on column support.support_message.id is
+        '메시지 아이디 (Snowflake)';
+
+    comment on column support.support_message.created_at is
+        '생성 시각';
+
+    comment on column support.support_message.updated_at is
+        '수정 시각';
+
+    comment on column support.support_message.author_guest_session_id is
+        '원 작성 비회원 세션 아이디 (FK: support_guest_session.id)';
+
+    comment on column support.support_message.author_member_id is
+        '원 작성 회원 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column support.support_message.author_type is
+        '원 작성자 유형';
+
+    comment on column support.support_message.client_message_id is
+        '대화별 멱등 요청 키 (canonical lowercase UUID)';
+
+    comment on column support.support_message.content is
+        'NFKC 정규화 및 개인정보 마스킹된 본문';
+
+    comment on column support.support_message.conversation_id is
+        '대화 아이디 (FK: support_conversation.id)';
+
+    comment on column support.support_message.seq is
+        '대화별 단조 증가 순번';
+
+    comment on column support.support_message.status is
+        '메시지 완료 상태';
+
     create index idx_knowledge_document_locale_published_revision_id
        on support.knowledge_document (locale, published_revision, id);
 

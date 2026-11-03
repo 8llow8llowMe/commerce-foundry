@@ -48,6 +48,9 @@ class SupportServiceApplicationTests {
     @Test
     @DisplayName("컨텍스트가 뜨고 global.config 가 import 한 공통 빈이 조립된다")
     void contextLoads() {
+        assertThat(applicationContext.getBeanNamesForType(com.commercefoundry.ai.client.AiClient.class)).isEmpty();
+        assertThat(applicationContext.getBeanNamesForType(
+            com.commercefoundry.domainlayer.conversation.application.port.in.ConversationMessageInternalUseCase.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(SnowflakeIdGenerator.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(JPAQueryFactory.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(GuestSessionInternalUseCase.class)).hasSize(1);
