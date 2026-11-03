@@ -21,13 +21,18 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class AdminAccountProcessorTest {
 
     private static final Instant AT = Instant.parse("2026-10-26T01:00:00Z");
     private static final Member OWNER = admin(1L);
-    private static final Member STAFF = admin(2L);
+    private static final Member OTHER_ADMIN = admin(2L);
+    private static final Member NEW_OWNER = operator(3L, MemberRole.OWNER);
+    private static final Member MANAGER = operator(4L, MemberRole.MANAGER);
+    private static final Member STAFF_ROLE = operator(5L, MemberRole.STAFF);
 
     private final MemberRepositoryPort memberRepositoryPort = mock(MemberRepositoryPort.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
@@ -52,7 +57,7 @@ class AdminAccountProcessorTest {
         assertThat(created.email()).isEqualTo("staff@example.com");
         assertThat(created.name()).isEqualTo("김운영");
         assertThat(created.role()).isEqualTo(MemberRole.ADMIN);
-        assertThat(created.isActiveAdmin()).isTrue();
+        assertThat(created.isActiveOperator()).isTrue();
         assertThat(created.phone()).isNull();
     }
 
@@ -68,28 +73,97 @@ class AdminAccountProcessorTest {
     @Test
     @DisplayName("활성 운영자가 둘 이상이면 대상만 끈다")
     void deactivatesWhenAnotherAdminRemains() {
-        given(memberRepositoryPort.findActiveAdminsForUpdate()).willReturn(List.of(OWNER, STAFF));
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(OWNER, OTHER_ADMIN));
 
-        processor.deactivate(STAFF.id(), AT);
+        processor.deactivate(OWNER.id(), OTHER_ADMIN.id(), AT);
 
-        verify(memberRepositoryPort).save(argThat(saved -> saved.id() == STAFF.id() && AT.equals(saved.deactivatedAt())));
+        verify(memberRepositoryPort).save(argThat(saved -> saved.id() == OTHER_ADMIN.id() && AT.equals(saved.deactivatedAt())));
     }
 
     @Test
     @DisplayName("마지막 활성 운영자는 AUTH_031 이고 저장하지 않는다")
     void lastAdminIsRejected() {
-        given(memberRepositoryPort.findActiveAdminsForUpdate()).willReturn(List.of(OWNER));
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(OWNER));
 
-        assertCode(MemberErrorCode.LAST_ACTIVE_ADMIN, () -> processor.deactivate(OWNER.id(), AT));
+        assertCode(MemberErrorCode.LAST_ACTIVE_ADMIN, () -> processor.deactivate(OWNER.id(), OWNER.id(), AT));
         verify(memberRepositoryPort, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("대표 관리자가 한 명이면 매니저가 남아 있어도 그 대표 관리자는 끌 수 없다 — AUTH_031")
+    void lastOwnerIsRejectedEvenWithManager() {
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(NEW_OWNER, MANAGER));
+
+        assertCode(MemberErrorCode.LAST_ACTIVE_ADMIN, () -> processor.deactivate(NEW_OWNER.id(), NEW_OWNER.id(), AT));
+        verify(memberRepositoryPort, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("대표 관리자가 한 명뿐이어도 매니저는 끌 수 있다")
+    void managerIsDeactivatedWithSingleOwner() {
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(NEW_OWNER, MANAGER));
+
+        processor.deactivate(NEW_OWNER.id(), MANAGER.id(), AT);
+
+        verify(memberRepositoryPort).save(argThat(saved -> saved.id() == MANAGER.id() && AT.equals(saved.deactivatedAt())));
+    }
+
+    @Test
+    @DisplayName("마지막 남은 운영자가 스태프 한 명이어도 대표 관리자가 아니면 끌 수 있다 — 가드는 대표 관리자 수만 센다")
+    void lastStaffIsNotGuarded() {
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(STAFF_ROLE));
+
+        processor.deactivate(STAFF_ROLE.id(), STAFF_ROLE.id(), AT);
+
+        verify(memberRepositoryPort).save(argThat(saved -> saved.id() == STAFF_ROLE.id() && AT.equals(saved.deactivatedAt())));
+    }
+
+    @Test
+    @DisplayName("기존 ADMIN 과 OWNER 는 같은 대표 관리자로 센다 — 한 명이 남으면 다른 한 명은 끌 수 있다")
+    void adminAndOwnerCountTogether() {
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(OWNER, NEW_OWNER, MANAGER));
+
+        processor.deactivate(OWNER.id(), NEW_OWNER.id(), AT);
+
+        verify(memberRepositoryPort).save(argThat(saved -> saved.id() == NEW_OWNER.id() && AT.equals(saved.deactivatedAt())));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+    @DisplayName("대표 관리자 계정은 매니저 · 스태프가 끌 수 없다 — AUTH_046 이고 저장하지 않는다 (#236)")
+    void nonOwnerCannotDeactivateOwner(MemberRole actorRole) {
+        Member actor = operator(6L, actorRole);
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(OWNER, NEW_OWNER, actor));
+
+        assertCode(MemberErrorCode.ADMIN_DEACTIVATION_FORBIDDEN, () -> processor.deactivate(actor.id(), NEW_OWNER.id(), AT));
+        verify(memberRepositoryPort, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("행위자가 활성 운영자 목록에 없으면(이미 꺼짐) 대표 관리자 계정을 끄지 못한다 — AUTH_046 (#236)")
+    void inactiveActorCannotDeactivateOwner() {
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(OWNER, NEW_OWNER));
+
+        assertCode(MemberErrorCode.ADMIN_DEACTIVATION_FORBIDDEN, () -> processor.deactivate(99L, NEW_OWNER.id(), AT));
+        verify(memberRepositoryPort, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("매니저 · 스태프 계정의 비밀번호도 바꾼다 — 운영자 역할 전체가 대상이다")
+    void changesOperatorPassword() {
+        given(memberRepositoryPort.findByIdForUpdate(MANAGER.id())).willReturn(Optional.of(MANAGER));
+
+        processor.changePassword(MANAGER.id(), "new-hash");
+
+        verify(memberRepositoryPort).save(argThat(saved -> saved.id() == MANAGER.id() && "new-hash".equals(saved.passwordHash())));
     }
 
     @Test
     @DisplayName("없거나 이미 꺼진 계정은 AUTH_033 이다")
     void missingAdminIsNotFound() {
-        given(memberRepositoryPort.findActiveAdminsForUpdate()).willReturn(List.of(OWNER));
+        given(memberRepositoryPort.findActiveOperatorsForUpdate()).willReturn(List.of(OWNER));
 
-        assertCode(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND, () -> processor.deactivate(99L, AT));
+        assertCode(MemberErrorCode.ADMIN_ACCOUNT_NOT_FOUND, () -> processor.deactivate(OWNER.id(), 99L, AT));
         verify(memberRepositoryPort, never()).save(any());
     }
 
@@ -124,7 +198,11 @@ class AdminAccountProcessorTest {
     }
 
     private static Member admin(long id) {
-        return Member.restore(id, id + "@example.com", "hash-" + id, "운영", null, MemberRole.ADMIN, 0L);
+        return operator(id, MemberRole.ADMIN);
+    }
+
+    private static Member operator(long id, MemberRole role) {
+        return Member.restore(id, id + "@example.com", "hash-" + id, "운영", null, role, 0L);
     }
 
     private static void assertCode(MemberErrorCode code, org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {

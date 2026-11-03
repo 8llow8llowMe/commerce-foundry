@@ -22,8 +22,8 @@ public class MemberAdminFacade implements MemberAdminUseCase {
     private final MemberAdminPresenter memberAdminPresenter;
 
     @Override
-    public PageResponse<AdminMemberItem> searchMembers(long adminMemberId, MemberRole role, int page, int size) {
-        PageResponse<AdminMemberItem> response = memberAdminPresenter.toPageResponse(memberAdminProcessor.search(role, page, size));
+    public PageResponse<AdminMemberItem> searchMembers(long adminMemberId, boolean includeOperators, MemberRole role, int page, int size) {
+        PageResponse<AdminMemberItem> response = memberAdminPresenter.toPageResponse(memberAdminProcessor.search(includeOperators, role, page, size));
         adminAuditProcessor.membersSearched(adminMemberId, role, page, size);
         return response;
     }

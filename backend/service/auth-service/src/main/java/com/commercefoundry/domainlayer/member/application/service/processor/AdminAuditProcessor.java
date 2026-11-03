@@ -29,7 +29,7 @@ public class AdminAuditProcessor {
 
     /** 노린 계정이 관리자일 때만 그 memberId 를 대상으로 남긴다 — 고객 memberId 는 관리자 감사 로그에 남기지 않는다. */
     public void adminLoginFailed(Optional<Member> candidate) {
-        OptionalLong target = candidate.filter(Member::isAdmin).map(member -> OptionalLong.of(member.id())).orElse(OptionalLong.empty());
+        OptionalLong target = candidate.filter(Member::isOperator).map(member -> OptionalLong.of(member.id())).orElse(OptionalLong.empty());
         adminAuditPort.adminLoginFailed(target);
     }
 

@@ -116,6 +116,28 @@ class AuthTokenProcessorTest {
     }
 
     @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+    @DisplayName("새 운영자 역할도 관리자 access 를 받고 role claim 은 그 역할 그대로다 — refresh 저장소를 부르지 않는다 (#236)")
+    void operatorRolesReceiveAdminAccessToken(MemberRole role) throws Exception {
+        Member operator = Member.restore(TestTokens.MEMBER_ID, "operator@example.com", "$2a$10$hash", "운영", null, role, 0L);
+
+        AdminAccessTokenInfo info = processor.issueAdminAccessToken(operator);
+
+        assertThat(SignedJWT.parse(info.accessToken()).getJWTClaimsSet().getStringClaim(MemberRole.CLAIM_NAME)).isEqualTo(role.name());
+        verifyNoInteractions(store, revocation);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+    @DisplayName("운영자 계정에는 refresh family 를 만들지 않는다 — 고객 로그인 발급은 호출 코드의 오류로 거절하고 저장소를 부르지 않는다 (#236)")
+    void loginTokensRequireCustomer(MemberRole role) {
+        Member operator = Member.restore(TestTokens.MEMBER_ID, "operator@example.com", "$2a$10$hash", "운영", null, role, 0L);
+
+        assertThatThrownBy(() -> processor.issueForLogin(operator)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(store, revocation);
+    }
+
+    @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {"short", "n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCg", "n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg=", "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg"})
     @DisplayName("없음 · 빈 값 · 발급 모양(base64url 43자)이 아니면 저장소를 부르지 않고 AUTH_010 이다")

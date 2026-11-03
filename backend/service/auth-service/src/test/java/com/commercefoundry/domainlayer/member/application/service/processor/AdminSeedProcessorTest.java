@@ -19,6 +19,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -113,13 +114,14 @@ class AdminSeedProcessorTest {
             .containsExactly(42L, EMAIL, "$2a$10$hash", "관리자", null, MemberRole.ADMIN);
     }
 
-    @Test
-    @DisplayName("같은 이메일의 관리자가 있으면 비밀번호를 덮어쓰지 않는다 — 저장하지 않는다(멱등)")
-    void alreadyAdmin() {
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+    @DisplayName("같은 이메일의 운영자(역할 무관)가 있으면 비밀번호를 덮어쓰지 않는다 — 저장하지 않는다(멱등, #236)")
+    void alreadyAdmin(MemberRole role) {
         given(memberRepositoryPort.findByEmail(EMAIL))
-            .willReturn(Optional.of(Member.restore(1L, EMAIL, "$2a$10$old", "관리자", null, MemberRole.ADMIN, 3L)));
+            .willReturn(Optional.of(Member.restore(1L, EMAIL, "$2a$10$old", "관리자", null, role, 3L)));
 
-        assertThat(processor.createIfAbsent(EMAIL, "$2a$10$new", "관리자")).isEqualTo(AdminSeedOutcome.ALREADY_ADMIN);
+        assertThat(processor.createIfAbsent(EMAIL, "$2a$10$new", "관리자")).isEqualTo(AdminSeedOutcome.ALREADY_OPERATOR);
         verify(memberRepositoryPort, never()).save(any());
     }
 

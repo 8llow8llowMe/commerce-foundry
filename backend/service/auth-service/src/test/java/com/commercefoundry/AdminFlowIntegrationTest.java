@@ -68,13 +68,13 @@ class AdminFlowIntegrationTest {
     private TransactionTemplate transactionTemplate;
 
     @Test
-    @DisplayName("시드는 멱등이다 — 처음 CREATED, 다시 부르면 ALREADY_ADMIN 이고 다른 비밀번호로 불러도 덮어쓰지 않는다")
+    @DisplayName("시드는 멱등이다 — 처음 CREATED, 다시 부르면 ALREADY_OPERATOR 이고 다른 비밀번호로 불러도 덮어쓰지 않는다")
     void seedIsIdempotent() {
         String email = uniqueEmail();
 
         assertThat(adminSeedUseCase.seed(new AdminSeedCommand(email.toUpperCase(), PASSWORD, null))).isEqualTo(AdminSeedOutcome.CREATED);
-        assertThat(adminSeedUseCase.seed(new AdminSeedCommand(email, PASSWORD, null))).isEqualTo(AdminSeedOutcome.ALREADY_ADMIN);
-        assertThat(adminSeedUseCase.seed(new AdminSeedCommand(email, "other-password-2", "새 이름"))).isEqualTo(AdminSeedOutcome.ALREADY_ADMIN);
+        assertThat(adminSeedUseCase.seed(new AdminSeedCommand(email, PASSWORD, null))).isEqualTo(AdminSeedOutcome.ALREADY_OPERATOR);
+        assertThat(adminSeedUseCase.seed(new AdminSeedCommand(email, "other-password-2", "새 이름"))).isEqualTo(AdminSeedOutcome.ALREADY_OPERATOR);
 
         assertThat(memberRepositoryPort.findByEmail(email)).hasValueSatisfying(admin -> {
             assertThat(admin.role()).isEqualTo(MemberRole.ADMIN);

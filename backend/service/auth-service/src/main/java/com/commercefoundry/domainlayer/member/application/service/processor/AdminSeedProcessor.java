@@ -68,7 +68,7 @@ public class AdminSeedProcessor {
     }
 
     /**
-     * 같은 이메일이 없으면 관리자를 만든다(동의 이력 없음). 있으면 아무것도 바꾸지 않는다 — 관리자면 비밀번호를 덮어쓰지 않고, 고객이면 승격하지 않는다.
+     * 같은 이메일이 없으면 관리자를 만든다(동의 이력 없음). 있으면 아무것도 바꾸지 않는다 — 운영자 계정(역할 무관)이면 비밀번호를 덮어쓰지 않고, 고객이면 승격하지 않는다.
      *
      * @param email 정규화한 이메일
      * @throws MemberException {@link MemberErrorCode#DUPLICATE_EMAIL} — 조회 뒤 다른 인스턴스가 먼저 넣었다(유니크 키). 이 트랜잭션은 롤백 전용이 되므로
@@ -80,7 +80,7 @@ public class AdminSeedProcessor {
         if (existing.isPresent()) {
             Member member = existing.get();
             log.debug("admin seed found existing member: memberId={}, role={}", member.id(), member.role());
-            return member.isAdmin() ? AdminSeedOutcome.ALREADY_ADMIN : AdminSeedOutcome.CUSTOMER_EXISTS;
+            return member.isOperator() ? AdminSeedOutcome.ALREADY_OPERATOR : AdminSeedOutcome.CUSTOMER_EXISTS;
         }
         Member admin = memberRepositoryPort.save(Member.admin(snowflakeIdGenerator.generateId(), email, passwordHash, name));
         log.debug("admin seed created: memberId={}", admin.id());

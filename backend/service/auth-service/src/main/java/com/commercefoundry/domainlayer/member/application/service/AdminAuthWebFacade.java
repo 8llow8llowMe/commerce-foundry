@@ -119,7 +119,7 @@ public class AdminAuthWebFacade implements AdminAuthWebUseCase {
         loginGuardProcessor.admitAdminOtpLogin(adminMemberId);
         AdminLoginResponse response;
         try {
-            Member admin = asChallengeFailure(() -> adminAccountProcessor.findActiveAdmin(adminMemberId));
+            Member admin = asChallengeFailure(() -> adminAccountProcessor.findActiveOperator(adminMemberId));
             rejectIfCutOff(challenge);
             AdminOtpProof proof = asChallengeFailure(() -> adminOtpProcessor.resolveProof(adminMemberId, command.code(), clock.instant()));
             adminLoginChallengeProcessor.consume(command.challengeToken(), challenge);

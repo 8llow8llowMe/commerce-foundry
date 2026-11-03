@@ -54,7 +54,7 @@ public class AdminOtpFacade implements AdminOtpUseCase {
     /** 감사하지 않는다 — 확인 전에는 아무것도 켜지지 않고, 진행 중 등록은 TTL 로 사라진다. 계정 라벨은 관리자 이메일이다(응답에만 싣는다). */
     @Override
     public AdminOtpEnrollmentResponse startEnrollment(long adminMemberId) {
-        Member admin = adminAccountProcessor.findActiveAdmin(adminMemberId);
+        Member admin = adminAccountProcessor.findActiveOperator(adminMemberId);
         return adminOtpAdminPresenter.toEnrollment(adminOtpProcessor.startEnrollment(adminMemberId, admin.email(), clock.instant()));
     }
 
@@ -128,7 +128,7 @@ public class AdminOtpFacade implements AdminOtpUseCase {
 
     /** 활성 관리자가 아니면 {@code AUTH_033}(게이트웨이 컷오프를 지난 드문 경우), 비밀번호가 틀리면 {@code AUTH_032}. BCrypt 는 트랜잭션 밖이다. */
     private void requirePassword(long adminMemberId, String currentPassword) {
-        Member admin = adminAccountProcessor.findActiveAdmin(adminMemberId);
+        Member admin = adminAccountProcessor.findActiveOperator(adminMemberId);
         if (!adminAccountProcessor.passwordMatches(admin, currentPassword)) {
             throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_MISMATCH);
         }

@@ -57,8 +57,8 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
     }
 
     @Override
-    public List<Member> findActiveAdminsForUpdate() {
-        return memberRepository.findActiveAdminsForUpdate(MemberRole.ADMIN).stream().map(memberMapper::toDomain).toList();
+    public List<Member> findActiveOperatorsForUpdate() {
+        return memberRepository.findActiveByRoleInForUpdate(MemberRole.OPERATOR_ROLES).stream().map(memberMapper::toDomain).toList();
     }
 
     /**

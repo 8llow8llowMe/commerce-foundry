@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.request.Admin
 import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.response.AdminOtpRecoveryCodesResponse;
 import com.commercefoundry.domainlayer.member.application.exception.MemberValidationMessage;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminOtpPeerRecoveryUseCase;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -37,7 +38,7 @@ public class AdminOtpPeerRecoveryAdminController {
     @Operation(summary = "동료 OTP 복구", description = "행위자의 현재 비밀번호와 OTP 또는 복구 코드로 재인증한 뒤 대상의 OTP 자격·복구 코드를 교체한다. "
         + "새 복구 코드 8개는 이 응답에서만 보여 준다. 대상에게 최소 두 코드를 안전하게 전달해 로그인과 본인 OTP 재등록에 사용한다. "
         + "본인 대상은 400(AUTH_045), 대상 미등록은 404(AUTH_036), 재인증 오류는 400(AUTH_032 · AUTH_035), 시도 초과는 429(AUTH_043).")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SECURITY_MANAGE)
     @PostMapping("/{memberId}/otp/recovery")
     public ResponseEntity<Response<AdminOtpRecoveryCodesResponse>> recover(
         @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin,

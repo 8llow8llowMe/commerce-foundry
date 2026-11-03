@@ -71,7 +71,7 @@ class AdminAccountFacadeTest {
     void deactivatingSomeoneElseKeepsCallerToken() {
         facade.deactivateAdmin(ACTOR.id(), 8L, "caller-jti");
 
-        verify(adminAccountProcessor).deactivate(8L, NOW);
+        verify(adminAccountProcessor).deactivate(ACTOR.id(), 8L, NOW);
         verify(adminAccessCutoffProcessor).cutOff(8L, CUTOFF);
         verify(adminAccessCutoffProcessor, never()).revokeCurrent(any());
         verify(adminAuditProcessor).adminAccountDeactivated(ACTOR.id(), 8L, true);
@@ -101,7 +101,7 @@ class AdminAccountFacadeTest {
     @Test
     @DisplayName("현재 비밀번호가 틀리면 AUTH_032 이고 저장 · 컷오프를 하지 않는다")
     void currentPasswordMismatch() {
-        given(adminAccountProcessor.findActiveAdmin(ACTOR.id())).willReturn(ACTOR);
+        given(adminAccountProcessor.findActiveOperator(ACTOR.id())).willReturn(ACTOR);
         given(adminAccountProcessor.passwordMatches(ACTOR, "wrong")).willReturn(false);
 
         assertThatThrownBy(() -> facade.changePassword(ACTOR.id(), "caller-jti", "wrong", "next-password-2026"))
@@ -116,7 +116,7 @@ class AdminAccountFacadeTest {
     @Test
     @DisplayName("비밀번호를 바꾸면 다음 초 컷오프와 지금 토큰 차단 뒤에 성공 감사를 남긴다")
     void passwordChangeCutsOffThenAudits() {
-        given(adminAccountProcessor.findActiveAdmin(ACTOR.id())).willReturn(ACTOR);
+        given(adminAccountProcessor.findActiveOperator(ACTOR.id())).willReturn(ACTOR);
         given(adminAccountProcessor.passwordMatches(ACTOR, "current-password1")).willReturn(true);
         given(adminAccountProcessor.hashPassword("next-password-2026")).willReturn("new-hash");
 

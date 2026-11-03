@@ -46,7 +46,7 @@ public class AdminAccountFacade implements AdminAccountUseCase {
     @Override
     public void deactivateAdmin(long actorMemberId, long targetMemberId, String currentTokenId) {
         try {
-            adminAccountProcessor.deactivate(targetMemberId, clock.instant());
+            adminAccountProcessor.deactivate(actorMemberId, targetMemberId, clock.instant());
         } catch (MemberException exception) {
             adminAuditProcessor.adminAccountDeactivated(actorMemberId, targetMemberId, false);
             throw exception;
@@ -60,7 +60,7 @@ public class AdminAccountFacade implements AdminAccountUseCase {
 
     @Override
     public void changePassword(long actorMemberId, String currentTokenId, String currentPassword, String newPassword) {
-        Member admin = adminAccountProcessor.findActiveAdmin(actorMemberId);
+        Member admin = adminAccountProcessor.findActiveOperator(actorMemberId);
         if (!adminAccountProcessor.passwordMatches(admin, currentPassword)) {
             adminAuditProcessor.adminPasswordChanged(actorMemberId, false);
             throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_MISMATCH);

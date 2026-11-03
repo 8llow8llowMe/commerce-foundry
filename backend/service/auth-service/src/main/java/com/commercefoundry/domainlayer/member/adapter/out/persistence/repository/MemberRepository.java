@@ -13,16 +13,15 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 
 public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
 
-    /** 수신자 조회는 ID만 읽는다. 운영자 계정 변경에 쓰는 잠금 조회와 분리한다 (#477). */
+    /** 수신자 조회는 ID만 읽는다. 운영자 계정 변경에 쓰는 잠금 조회와 분리한다 (#477). 역할 묶음은 대표 관리자 역할({@code OWNER_ROLES})이다 (#236). */
     interface AdminRecipientIdView {
         Long getId();
     }
 
-    List<AdminRecipientIdView> findByRoleAndDeactivatedAtIsNullAndIdGreaterThanOrderByIdAsc(MemberRole role, long afterId, Pageable pageable);
+    List<AdminRecipientIdView> findByRoleInAndDeactivatedAtIsNullAndIdGreaterThanOrderByIdAsc(Collection<MemberRole> roles, long afterId, Pageable pageable);
 
     boolean existsByEmail(String email);
 
@@ -42,10 +41,13 @@ public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<MemberEntity> findWithLockById(Long id);
 
-    /** 활성 관리자 전부를 쓰기 잠금으로 읽는다. 마지막 관리자 비활성화를 한 트랜잭션에서 막는다 (#193). */
+    /**
+     * 주어진 역할의 활성 계정 전부를 쓰기 잠금으로 읽는다. 마지막 대표 관리자 비활성화를 한 트랜잭션에서 막는다 (#193).
+     * 운영자 역할 전체({@code OPERATOR_ROLES})를 넘겨 비활성화 대상과 "마지막" 판정 대상을 같은 잠금 안에서 본다 (#236).
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select m from MemberEntity m where m.role = :role and m.deactivatedAt is null order by m.id asc")
-    List<MemberEntity> findActiveAdminsForUpdate(@Param("role") MemberRole role);
+    @Query("select m from MemberEntity m where m.role in :roles and m.deactivatedAt is null order by m.id asc")
+    List<MemberEntity> findActiveByRoleInForUpdate(Collection<MemberRole> roles);
 
     /**
      * 읽은 버전일 때만 버전을 하나 올린다 — 조건부 UPDATE 한 문장. 바뀐 행 수가 0 이면 다른 요청이 먼저 고쳤다.

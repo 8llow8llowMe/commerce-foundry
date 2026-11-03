@@ -1,8 +1,11 @@
 package com.commercefoundry.domainlayer.member.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.item.AdminMemberItem;
@@ -19,6 +22,8 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
@@ -41,7 +46,7 @@ class MemberAdminFacadeTest {
         MemberListQueryResult row = new MemberListQueryResult(5L, "customer@example.com", "홍길동", "01012345678", MemberRole.CUSTOMER, CREATED_AT);
         given(memberRepositoryPort.findPage(MemberRole.CUSTOMER, 2, 10)).willReturn(new PageImpl<>(List.of(row), PageRequest.of(2, 10), 21));
 
-        PageResponse<AdminMemberItem> response = facade.searchMembers(9L, MemberRole.CUSTOMER, 2, 10);
+        PageResponse<AdminMemberItem> response = facade.searchMembers(9L, true, MemberRole.CUSTOMER, 2, 10);
 
         assertThat(response.totalElements()).isEqualTo(21);
         assertThat(response.page()).isEqualTo(2);
@@ -58,8 +63,41 @@ class MemberAdminFacadeTest {
     void searchAll() {
         given(memberRepositoryPort.findPage(null, 0, 20)).willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
 
-        assertThat(facade.searchMembers(9L, null, 0, 20).contents()).isEmpty();
+        assertThat(facade.searchMembers(9L, true, null, 0, 20).contents()).isEmpty();
         verify(adminAuditPort).membersSearched(9L, null, 0, 20);
+    }
+
+    @Test
+    @DisplayName("직원 조회 권한이 없으면(매니저 · 스태프) 역할 조건이 없어도 고객 행만 조회한다 (#236)")
+    void withoutStaffReadOnlyCustomers() {
+        given(memberRepositoryPort.findPage(MemberRole.CUSTOMER, 0, 20)).willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        assertThat(facade.searchMembers(9L, false, null, 0, 20).contents()).isEmpty();
+        verify(memberRepositoryPort).findPage(MemberRole.CUSTOMER, 0, 20);
+        verify(adminAuditPort).membersSearched(9L, null, 0, 20);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+    @DisplayName("직원 조회 권한이 없으면 운영자 역할로 걸러도 질의 없이 빈 페이지다 — 운영자 명단이 드러나지 않는다 (#236)")
+    void withoutStaffReadOperatorFilterIsEmpty(MemberRole role) {
+        PageResponse<AdminMemberItem> response = facade.searchMembers(9L, false, role, 1, 20);
+
+        assertThat(response.contents()).isEmpty();
+        assertThat(response.totalElements()).isZero();
+        assertThat(response.page()).isEqualTo(1);
+        verify(memberRepositoryPort, never()).findPage(any(), anyInt(), anyInt());
+        verify(adminAuditPort).membersSearched(9L, role, 1, 20);
+    }
+
+    @Test
+    @DisplayName("직원 조회 권한이 없어도 고객 역할 조건은 그대로 조회한다 (#236)")
+    void withoutStaffReadCustomerFilter() {
+        given(memberRepositoryPort.findPage(MemberRole.CUSTOMER, 0, 20)).willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        facade.searchMembers(9L, false, MemberRole.CUSTOMER, 0, 20);
+
+        verify(memberRepositoryPort).findPage(MemberRole.CUSTOMER, 0, 20);
     }
 
     @Test

@@ -45,8 +45,12 @@ public class AuthTokenProcessor {
     /**
      * 로그인 — 새 family 로 refresh 토큰을 저장하고 access 토큰을 발급한다. family 에는 지금을 로그인 시각으로 남긴다(절대 수명의 기준).
      * refresh 수명은 정책 TTL 그대로다 — 절대 수명 ≥ TTL 이라 로그인 시점에는 줄어들 일이 없다.
+     *
+     * @throws IllegalArgumentException 고객 계정이 아니다 — 운영자 계정에는 refresh family 를 붙이지 않는다({@link #issueAdminAccessToken} 참고).
+     *                                  고객 인증({@code MemberLoginProcessor#authenticate} · 소셜 로그인)을 지난 회원만 온다
      */
     public AuthTokenInfo issueForLogin(Member member) {
+        requireCustomer(member);
         String refreshToken = opaqueTokenGenerator.generate();
         refreshTokenStorePort.saveNewFamily(
             opaqueTokenGenerator.fingerprint(refreshToken), member.id(), UUID.randomUUID().toString(), clock.instant(), rotationPolicy.ttl()
@@ -59,23 +63,29 @@ public class AuthTokenProcessor {
      * 관리자 세션은 access 수명까지다 — refresh family 를 만들어도 재발급이 고객만 받아({@code MemberLoginProcessor#findCustomer}) 쓰지 못할 키만 남는다.
      * 로그아웃은 고객과 같은 {@link #logout}(refresh 없이 access 차단만)이다.
      *
-     * @throws IllegalArgumentException 관리자 계정이 아니다 — 관리자 인증({@code MemberLoginProcessor#authenticateAdmin})을 지난 회원만 온다
+     * @throws IllegalArgumentException 운영자 계정(ADMIN · OWNER · MANAGER · STAFF)이 아니다 — 관리자 인증({@code MemberLoginProcessor#authenticateAdmin})을 지난 회원만 온다
      */
     public AdminAccessTokenInfo issueAdminAccessToken(Member admin) {
-        requireAdmin(admin);
+        requireOperator(admin);
         return adminTokenInfo(jwtIssuer.issueAccessToken(admin.id(), admin.role()));
     }
 
     /** OTP 2단계 완료 토큰의 iat 를 챌린지 발급 시각에 묶어 이후 관리자 컷오프가 언제나 이 토큰을 끊게 한다. */
     public AdminAccessTokenInfo issueAdminAccessToken(Member admin, Instant challengeIssuedAt) {
-        requireAdmin(admin);
+        requireOperator(admin);
         Objects.requireNonNull(challengeIssuedAt, "challengeIssuedAt");
         return adminTokenInfo(jwtIssuer.issueAccessToken(admin.id(), admin.role(), challengeIssuedAt));
     }
 
-    private static void requireAdmin(Member admin) {
-        if (!admin.isAdmin()) {
-            throw new IllegalArgumentException("관리자 계정만 관리자 access 토큰을 받는다");
+    private static void requireOperator(Member admin) {
+        if (!admin.isOperator()) {
+            throw new IllegalArgumentException("운영자 계정만 관리자 access 토큰을 받는다");
+        }
+    }
+
+    private static void requireCustomer(Member member) {
+        if (!member.isCustomer()) {
+            throw new IllegalArgumentException("고객 계정만 refresh 토큰을 받는다");
         }
     }
 

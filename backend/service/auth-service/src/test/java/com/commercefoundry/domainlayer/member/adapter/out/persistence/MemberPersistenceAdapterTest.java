@@ -105,16 +105,20 @@ class MemberPersistenceAdapterTest {
     }
 
     @Test
-    @DisplayName("활성 관리자 전체 잠금 조회는 ID 오름차순이고 고객·비활성 관리자를 제외한다")
-    void activeAdminLockOrder() {
+    @DisplayName("활성 운영자 전체 잠금 조회는 ID 오름차순이고 운영자 역할 전체(ADMIN · OWNER · MANAGER · STAFF)를 담되 고객·비활성 운영자를 제외한다")
+    void activeOperatorLockOrder() {
         memberRepositoryPort.save(Member.admin(30L, "admin30@example.com", HASH, "관리자 30"));
         memberRepositoryPort.save(Member.admin(10L, "admin10@example.com", HASH, "관리자 10"));
-        memberRepositoryPort.save(Member.admin(20L, "admin20@example.com", HASH, "관리자 20"));
+        memberRepositoryPort.save(Member.restore(20L, "owner20@example.com", HASH, "대표 20", null, MemberRole.OWNER, null));
+        memberRepositoryPort.save(Member.restore(25L, "manager25@example.com", HASH, "매니저 25", null, MemberRole.MANAGER, null));
+        memberRepositoryPort.save(Member.restore(35L, "staff35@example.com", HASH, "스태프 35", null, MemberRole.STAFF, null));
         memberRepositoryPort.save(Member.admin(40L, "admin40@example.com", HASH, "관리자 40").deactivate(Instant.now()));
+        memberRepositoryPort.save(
+            Member.restore(45L, "manager45@example.com", HASH, "매니저 45", null, MemberRole.MANAGER, null).deactivate(Instant.now()));
         memberRepositoryPort.save(Member.signUp(5L, "customer5@example.com", HASH, "고객", null));
         entityManager.clear();
 
-        assertThat(memberRepositoryPort.findActiveAdminsForUpdate()).extracting(Member::id).containsExactly(10L, 20L, 30L);
+        assertThat(memberRepositoryPort.findActiveOperatorsForUpdate()).extracting(Member::id).containsExactly(10L, 20L, 25L, 30L, 35L);
     }
 
     @Test

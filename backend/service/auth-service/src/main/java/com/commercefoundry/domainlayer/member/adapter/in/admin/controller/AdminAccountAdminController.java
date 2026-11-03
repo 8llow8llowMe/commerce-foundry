@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.request.Admin
 import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.response.AdminAccountCreatedResponse;
 import com.commercefoundry.domainlayer.member.application.exception.MemberValidationMessage;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminAccountUseCase;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -41,7 +42,7 @@ public class AdminAccountAdminController {
 
     @Operation(summary = "운영자 추가", description = "관리자 계정을 만든다. 이미 있는 이메일(고객 포함)은 409(AUTH_002)이고 승격하지 않는다. "
         + "비밀번호는 응답에 없다. 201 {memberId}.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.STAFF_MANAGE)
     @PostMapping("/admins")
     public ResponseEntity<Response<AdminAccountCreatedResponse>> createAdmin(
         @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin,
@@ -52,9 +53,10 @@ public class AdminAccountAdminController {
         return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(created));
     }
 
-    @Operation(summary = "운영자 비활성화", description = "활성 관리자를 끈다. 마지막 한 명은 409(AUTH_031). 없거나 고객이거나 이미 꺼진 계정은 404(AUTH_033). "
+    @Operation(summary = "운영자 비활성화", description = "활성 운영자 계정을 끈다. 대표 관리자(ADMIN · OWNER) 중 마지막 한 명은 409(AUTH_031). "
+        + "없거나 고객이거나 이미 꺼진 계정은 404(AUTH_033), 대표 관리자 계정을 대표 관리자가 아닌 사람이 끄면 403(AUTH_046). "
         + "끈 계정의 기존 access 토큰은 게이트웨이에서 거절된다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.STAFF_MANAGE)
     @PatchMapping("/admins/{memberId}")
     public ResponseEntity<Response<Void>> deactivateAdmin(
         @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin,
@@ -66,7 +68,7 @@ public class AdminAccountAdminController {
 
     @Operation(summary = "본인 비밀번호 변경", description = "로그인한 관리자 자신의 비밀번호만 바꾼다. 현재 비밀번호가 틀리면 400(AUTH_032). "
         + "바꾼 뒤 기존 access 토큰은 게이트웨이에서 거절되므로 다시 로그인한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @PatchMapping("/me/password")
     public ResponseEntity<Response<Void>> changePassword(
         @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin,

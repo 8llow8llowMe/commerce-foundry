@@ -72,20 +72,20 @@ public class MemberLoginProcessor {
     }
 
     /**
-     * 관리자 로그인(#6) — 비밀번호를 비교하고 관리자 계정이면 돌려준다. {@link #authenticate} 의 거울이다: 회원이 없어도 · 고객이어도 비교는 언제나 한 번 하고,
+     * 관리자 로그인(#6) — 비밀번호를 비교하고 운영자 계정(ADMIN · OWNER · MANAGER · STAFF, #236)이면 돌려준다. {@link #authenticate} 의 거울이다: 회원이 없어도 · 고객이어도 비교는 언제나 한 번 하고,
      * 실패 이유를 나누지 않는다 — 관리자 로그인 경로로 관리자 이메일이 있는지 · 고객 이메일인지 드러나지 않게.
      *
      * <p>비밀번호가 {@value #ADMIN_PASSWORD_MAX_LENGTH}자를 넘으면 맞을 수 없다(시드 규칙 상한). 필드 검증 400 으로 따로 답하지 않고 같은 {@code AUTH_030} 으로 끝내되,
      * 비교는 자리값으로 똑같이 한 번 한다 — 응답 · 시간이 "틀린 비밀번호" 와 같다.
      *
-     * @throws MemberException {@link MemberErrorCode#ADMIN_LOGIN_FAILED} — 회원 없음 · 비밀번호 틀림 · 64자 초과 · 고객 계정 · 비활성 관리자
+     * @throws MemberException {@link MemberErrorCode#ADMIN_LOGIN_FAILED} — 회원 없음 · 비밀번호 틀림 · 64자 초과 · 고객 계정 · 비활성 운영자
      */
     public Member authenticateAdmin(Optional<Member> candidate, String rawPassword) {
         boolean acceptable = rawPassword != null && rawPassword.length() <= ADMIN_PASSWORD_MAX_LENGTH;
         String hash = candidate.map(Member::passwordHash).orElse(dummyPasswordHash);
         boolean matches = matches(acceptable ? rawPassword : OVERSIZED_PLACEHOLDER, hash) && acceptable;
         return candidate
-            .filter(member -> matches && member.isActiveAdmin())
+            .filter(member -> matches && member.isActiveOperator())
             .orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_LOGIN_FAILED));
     }
 

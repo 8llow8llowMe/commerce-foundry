@@ -57,27 +57,27 @@ class AdminNotificationRecipientInternalControllerTest {
     @Test
     @DisplayName("operations 서비스 토큰은 기본 0/100으로 조회하고 Snowflake 문자열 ID만 받는다")
     void defaultsAndIdsOnly() {
-        given(queryPort.findActiveAdminIdsAfter(0L, 100)).willReturn(List.of(10L, 9007199254740993L));
+        given(queryPort.findActiveOwnerIdsAfter(0L, 100)).willReturn(List.of(10L, 9007199254740993L));
 
         var result = mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, serviceBearer()).exchange();
 
         assertThat(result).hasStatusOk();
         assertThat(result).bodyJson().extractingPath("$.dataBody")
             .isEqualTo(Map.of("memberIds", List.of("10", "9007199254740993")));
-        verify(queryPort).findActiveAdminIdsAfter(0L, 100);
+        verify(queryPort).findActiveOwnerIdsAfter(0L, 100);
     }
 
     @Test
     @DisplayName("마지막 ID를 afterId로 넘기는 다음 페이지가 비었으면 200 빈 배열이다")
     void emptyNextPage() {
-        given(queryPort.findActiveAdminIdsAfter(Long.MAX_VALUE, 1)).willReturn(List.of());
+        given(queryPort.findActiveOwnerIdsAfter(Long.MAX_VALUE, 1)).willReturn(List.of());
 
         var result = mvc.get().uri(PATH).param("afterId", String.valueOf(Long.MAX_VALUE)).param("size", "1")
             .header(HttpHeaders.AUTHORIZATION, serviceBearer()).exchange();
 
         assertThat(result).hasStatusOk();
         assertThat(result).bodyJson().extractingPath("$.dataBody").isEqualTo(Map.of("memberIds", List.of()));
-        verify(queryPort).findActiveAdminIdsAfter(Long.MAX_VALUE, 1);
+        verify(queryPort).findActiveOwnerIdsAfter(Long.MAX_VALUE, 1);
     }
 
     @ParameterizedTest
