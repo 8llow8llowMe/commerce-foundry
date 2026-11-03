@@ -1,6 +1,14 @@
 import { ApiError } from '@cf/api-client';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CONFIRM_CHANGED,
+  CONFIRM_GONE,
+  CONFIRM_SESSION_EXPIRED,
+  CONFIRM_UNKNOWN,
+  confirmDisplayImage,
+  confirmFailure,
+  DISPLAY_IMAGE_UPLOAD_PATH,
+  uploadDisplayImage,
   checkImageFile,
   formatBytes,
   IMAGE_EMPTY,
@@ -221,6 +229,117 @@ describe('uploadImage', () => {
     await expect(
       uploadImage(jpeg(), { ...options, signal: controller.signal }, fetchImpl),
     ).rejects.toBeDefined();
+  });
+});
+
+describe('uploadFailure — 전시 발급(#508)', () => {
+  it('MEDIA_UPLOAD 코드도 상품과 같은 문구', () => {
+    const error = (code: string) => new ApiError('server', 400, code, '서버 문구');
+    expect(uploadFailure(error('MEDIA_UPLOAD_003'))).toMatchObject({
+      message: IMAGE_FORMAT_NOT_ALLOWED,
+    });
+    expect(uploadFailure(error('MEDIA_UPLOAD_004'))).toMatchObject({
+      message: IMAGE_SIZE_NOT_ALLOWED,
+    });
+    expect(uploadFailure(error('MEDIA_UPLOAD_006'))).toMatchObject({ message: UPLOAD_DISABLED });
+    expect(uploadFailure(error('MEDIA_UPLOAD_007'))).toMatchObject({
+      message: UPLOAD_UNAVAILABLE,
+    });
+  });
+});
+
+describe('uploadDisplayImage', () => {
+  const displayTicket = { ...ticket, uploadKey: '3f2a1c4e-8b7d-4e2a-9c1f-5a6b7c8d9e0f.jpg' };
+  const confirmed = {
+    publicUrl: 'https://cdn.example.test/products/media/1/3f2a/abc.jpg',
+    contentType: 'image/jpeg',
+    contentLength: 1024,
+  };
+
+  it('발급 → PUT → 확정 순서로 부르고 공개 주소를 돌려준다', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(envelope(201, displayTicket))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(envelope(200, confirmed));
+
+    expect(await uploadDisplayImage(jpeg(), {}, fetchImpl)).toEqual({
+      ok: true,
+      publicUrl: confirmed.publicUrl,
+    });
+    expect(fetchImpl.mock.calls[0]![0]).toBe(DISPLAY_IMAGE_UPLOAD_PATH);
+    const [confirmUrl, confirmInit] = fetchImpl.mock.calls[2]!;
+    expect(confirmUrl).toBe(`${DISPLAY_IMAGE_UPLOAD_PATH}/${displayTicket.uploadKey}/confirm`);
+    expect(confirmInit?.method).toBe('POST');
+    expect(confirmInit?.body).toBeUndefined();
+  });
+
+  it('PUT 이 실패하면 확정하지 않는다', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(envelope(201, displayTicket))
+      .mockResolvedValueOnce(new Response(null, { status: 403 }));
+    expect(await uploadDisplayImage(jpeg(), {}, fetchImpl)).toMatchObject({
+      message: UPLOAD_FAILED,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('확정 결과를 모르면 같은 키로 다시 확인할 수 있게 남긴다', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(envelope(201, displayTicket))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect(await uploadDisplayImage(jpeg(), {}, fetchImpl)).toEqual({
+      ok: false,
+      kind: 'error',
+      message: CONFIRM_UNKNOWN,
+      retryKey: displayTicket.uploadKey,
+    });
+  });
+
+  it('확정 응답 주소가 쓸 수 없으면(http · 빈 값) 결과 모름으로 본다', async () => {
+    for (const body of [null, {}, { publicUrl: 'javascript:alert(1)' }, { publicUrl: 'x' }]) {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(envelope(200, body));
+      expect(await confirmDisplayImage('k.jpg', {}, fetchImpl)).toMatchObject({
+        message: CONFIRM_UNKNOWN,
+        retryKey: 'k.jpg',
+      });
+    }
+  });
+
+  it('확정 실패는 다시 확인으로 풀리는 것만 키를 남긴다', () => {
+    const error = (status: number, code: string | null, kind: ApiError['kind'] = 'server') =>
+      new ApiError(kind, status, code, '서버 문구');
+    expect(confirmFailure(error(404, 'MEDIA_UPLOAD_001'), 'k')).toEqual({
+      ok: false,
+      kind: 'error',
+      message: CONFIRM_GONE,
+    });
+    expect(confirmFailure(error(400, 'MEDIA_UPLOAD_106'), 'k')).toMatchObject({
+      message: CONFIRM_GONE,
+    });
+    expect(confirmFailure(error(503, 'MEDIA_UPLOAD_006', 'unavailable'), 'k')).not.toHaveProperty(
+      'retryKey',
+    );
+    expect(confirmFailure(error(409, 'MEDIA_UPLOAD_005', 'conflict'), 'k')).toMatchObject({
+      message: CONFIRM_CHANGED,
+      retryKey: 'k',
+    });
+    expect(confirmFailure(error(503, 'MEDIA_UPLOAD_007', 'unavailable'), 'k')).toMatchObject({
+      message: CONFIRM_UNKNOWN,
+      retryKey: 'k',
+    });
+    expect(confirmFailure(error(401, null, 'unauthorized'), 'k')).toMatchObject({
+      message: CONFIRM_SESSION_EXPIRED,
+      retryKey: 'k',
+    });
+    expect(confirmFailure(error(403, null, 'forbidden'), 'k')).toEqual({
+      ok: false,
+      kind: 'access',
+      denied: 'forbidden',
+    });
   });
 });
 
