@@ -299,6 +299,9 @@
     create index idx_admin_otp_recovery_code_member_id
        on auth.admin_otp_recovery_code (member_id);
 
+    create index idx_member_role_deactivated_at_id
+       on auth.member (role, deactivated_at, id);
+
     create index idx_member_agreement_member_id_agreement_type
        on auth.member_agreement (member_id, agreement_type);
 

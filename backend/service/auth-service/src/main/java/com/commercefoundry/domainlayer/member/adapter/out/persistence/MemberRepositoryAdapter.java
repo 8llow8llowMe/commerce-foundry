@@ -64,7 +64,7 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
     /**
      * 최신순(아이디 내림차순) — 유일한 키라 페이지 경계에서 같은 회원이 두 번 나오거나 빠지지 않는다 ({@code api-design-guide.md} §4).
      * 회원 한 행이 곧 한 항목이라 연관 조회가 없다(N+1 없음). 질의는 목록 한 번 · count 한 번이다(첫 페이지가 다 차지 않으면 Spring Data 가 count 를 건너뛴다).
-     * 역할 조건에는 인덱스가 없다 — 회원 표 크기(수만 행)에서는 기본 키 역순 스캔 + 필터로 충분하다. 커지면 {@code (role, id)} 인덱스를 더한다.
+     * 수신자 조회용 {@code (role, deactivated_at, id)} 인덱스(#477)는 활성 조건까지 묶는다. 이 목록은 비활성도 포함하므로 실제 계획을 별도로 확인한다.
      */
     @Override
     public Page<MemberListQueryResult> findPage(MemberRole role, int page, int size) {
