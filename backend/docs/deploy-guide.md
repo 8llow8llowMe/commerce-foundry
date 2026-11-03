@@ -151,6 +151,9 @@ compose 가 env 파일과 무관하게 고정하는 값:
   payment 의 운영 DDL(`payment.outbox` · `payment.shedlock`)은 메시징을 켜기 전이 아니라 **이 버전 배포 전**에 적용한다 — 꺼져 있어도 결제 승인이 outbox 에 쓴다(없으면 승인 기록이 500 `PAYMENT_013`).
   결제 게이트(`payment.enabled`)를 켠 인스턴스는 두 테이블이 없으면 기동하지 않는다(`PaymentOutboxSchemaGuard`, `payment-guide.md` §6). 게이트가 닫혀 있으면 WARN 만 남긴다.
   payment 의 `MESSAGING_ENABLED` 는 order 컨슈머(#308 PR-B2) 배포와 함께 켠다 — 그 전에는 outbox 에 쌓아 둔다(켜면 쌓인 것부터 나가고, 토픽 보존은 7일이다).
+  payment 의 주문 결제 회신 컨슈머(#308 PR-C)는 `PAYMENT_ORDER_RESULT_CONSUMER_ENABLED`(기본 꺼짐)로 따로 켠다 — 켜면 `<ns>.order.order-paid` · `<ns>.order.order-payment-rejected` 와
+  각 `.dlt` 가 없을 때 뜨지 않는다(회신 토픽은 #578 에서 `topics.txt` 에 선언한다). inbox DDL(`payment-processed-event.sql`)은 게이트와 무관하게 **이 버전 배포 전**에 적용한다(`payment-guide.md` §6).
+  배포 compose 는 이 키를 아직 넘기지 않는다 — 게이트를 열 때(#579 · #591 · #582 뒤) compose 에 `${PAYMENT_ORDER_RESULT_CONSUMER_ENABLED:-false}` 를 같은 PR 에서 더한다.
   **릴레이 운영 안전성(#476)**: `JdbcLockProvider`(`shedlock-provider-jdbc`)는 DB 시각이 아니라 앱 시각으로 `lock_until` 을 비교한다.
   모든 인스턴스를 NTP 동기화하고 시계 차 < `commerce.messaging.outbox.relay.lock-at-most-for / 2`(기본 15초 미만)를 유지한다.
   최소 락 유지 `outbox.relay.lock-at-least-for` 는 기본 500ms(양수 · 최대 락 이하)이며 시계 보정 기능은 아니다. 시계 차 · 긴 일시정지로 락이 겹칠 수 있고,

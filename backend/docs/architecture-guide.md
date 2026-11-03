@@ -365,7 +365,8 @@ Info → Presenter → Response
   상태 전이 멱등(이미 PAID · RELEASED 면 no-op)이 2차 방어다. 일시 오류는 컨슈머 안 지수 백오프 뒤 DLT(`<topic>.dlt`), 종결 오류는 바로 DLT 다.
   `@RetryableTopic`(재시도 토픽 체인)은 쓰지 않는다. DLT 재처리는 사람이 한다.
   inbox 의 첫 구현은 product-service 의 주문 만료 · 취소 컨슈머다(`global/messaging/JpaProcessedEventStore`, `order-flow-guide.md` §3-5).
-  order-service 도 결제 승인 컨슈머용으로 같은 모양을 둔다(#308, `orders.processed_event`).
+  order-service 도 결제 승인 컨슈머용으로 같은 모양을 둔다(#308, `orders.processed_event`). payment-service 는 주문 결제 회신 컨슈머(그룹 `<ns>.payment.order-payment-result`,
+  토픽 `order.order-paid` · `order.order-payment-rejected`, 게이트 `payment.order-result.consumer.enabled`)용으로 `payment.processed_event` 를 둔다(#308 PR-C, `payment-guide.md` §6).
   처리 기록은 보존 기간(`inbox.retention`) 뒤 messaging-core 기록 정리가 지운다 — 릴레이와 따로 돌아 outbox 없는 서비스도 지워진다(#378, 락은 서비스 스키마의 `shedlock`).
 - **이름(공유 클러스터)** — namespace `commerce-foundry.<env>`(`KAFKA_NAMESPACE`, 마지막 토막 = 활성 프로파일이 아니면 기동하지 않는다).
   토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`, 컨슈머 그룹 `<ns>.<소비 서비스>.<목적>`, 파티션 키는 애그리거트 아이디(orderId · jobId).

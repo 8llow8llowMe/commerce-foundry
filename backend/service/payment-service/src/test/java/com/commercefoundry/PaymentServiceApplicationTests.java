@@ -2,9 +2,13 @@ package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.domainlayer.payment.adapter.in.event.OrderPaymentReplyEventListener;
+import com.commercefoundry.domainlayer.payment.application.port.in.OrderPaymentReplyEventUseCase;
+import com.commercefoundry.domainlayer.payment.application.port.out.PaymentCancelPolicy;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentEventPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
 import com.commercefoundry.global.config.TossPaymentsStartupGuard;
+import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.messaging.outbox.OutboxStore;
 import com.commercefoundry.messaging.properties.MessagingProperties;
 import com.commercefoundry.messaging.publish.EventPublisher;
@@ -75,6 +79,13 @@ class PaymentServiceApplicationTests {
         assertThat(applicationContext.getBeansOfType(OutboxStore.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(PaymentEventPort.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(Clock.class)).hasSize(1);
+        // 주문 결제 회신 컨슈머(#308 PR-C)는 게이트가 기본 닫힘이라 리스너 · 토픽 확인이 없다. 처리 빈 · inbox · 정책 훅 · 지표는 조립된다
+        assertThat(applicationContext.getBeansOfType(OrderPaymentReplyEventListener.class)).isEmpty();
+        assertThat(applicationContext.containsBean("orderPaymentResultTopicsVerifier")).isFalse();
+        assertThat(applicationContext.getBeansOfType(OrderPaymentReplyEventUseCase.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(ProcessedEventStore.class)).hasSize(1);
+        assertThat(applicationContext.getBeansOfType(PaymentCancelPolicy.class)).hasSize(1);
+        assertThat(applicationContext.getEnvironment().getProperty("payment.order-result.consumer.enabled")).isEqualTo("false");
     }
 
     @Test

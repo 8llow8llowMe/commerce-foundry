@@ -182,11 +182,11 @@ public class PaymentEntity extends BaseEntity {
     @Column(name = "unknown_reason", length = 40, comment = "결과 미확정(UNKNOWN)으로 둔 이유. 재조회로 확정한 뒤(DONE · FAILED 계열)에도 이력으로 남는다")
     private PaymentUnknownReason unknownReason;
 
-    @Column(name = "order_synced", nullable = false, comment = "결제 완료를 order-service 에 반영했는가. DONE 계열만 true — false 인 DONE 은 재전송 대상 (LATE_APPROVED 는 반영하지 않는다)")
+    @Column(name = "order_synced", nullable = false, comment = "order 회신(order-paid)을 받았는가. DONE 계열만 true — false 는 회신 대기 또는 거절 회신(order_sync_failure_code) (LATE_APPROVED 는 회신 대상 아님)")
     private boolean orderSynced;
 
     @Column(name = "order_sync_failure_code", length = Payment.ORDER_SYNC_FAILURE_CODE_MAX_LENGTH,
-        comment = "주문 반영 종결 실패 시 order-service 오류 코드. 반영 전 · 반영 성공이면 null")
+        comment = "order 거절 회신(order-payment-rejected) 사유 코드. 회신 전 · order-paid 수신이면 null")
     private String orderSyncFailureCode;
 
     @Column(name = "active_order_id", comment = "활성 결제 시도의 주문 아이디 — FAILED · ABORTED · LATE_APPROVED 면 null, 그 밖은 order_id (주문당 활성 결제 시도 1건)")

@@ -61,7 +61,7 @@
   │                                                   ④ DONE 기록 + payment-approved outbox ◀──┘  (같은 트랜잭션, #308 PR-A1)
   │                            ◀── Kafka payment-approved ──┘  (릴레이 · 키 orderId)
   │                            ⑤ 결제 재조회(internal) · 선점 확정 · PAID 전이 (#308 PR-B 예정)
-  │                            ⑥ order-paid / order-payment-rejected 회신 ──▶ order_synced 기록 (#308 PR-C 예정)
+  │                            ⑥ order-paid / order-payment-rejected 회신 ──▶ order_synced 기록 (#308 PR-C 구현, 게이트 기본 닫힘)
 ```
 
 ### 3-1. 금액은 서버가 정하고 서버가 검증한다
@@ -330,7 +330,9 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 
 - 상태 전이는 `Payment` 의 도메인 메서드로만 한다 — `startApproval` · `abort` · `abortAfterInquiry` · `approve` · `reject` · `markUnknown` · `revertToReady` ·
   `resolve` · `recoverReturnedReady` · `flagForManualReview` · `recordLateApproval` · `markOrderSynced` · `markOrderSyncFailed`(#14). 표 밖 전이는 `PaymentTransitionException`(현재 상태 · 시도한 동작)이고
-  Processor 가 PAYMENT 오류 코드로 바꾼다. 같은 상태 재호출이 멱등인 것은 주문 반영 기록 · `flagForManualReview` 뿐이다. 승인 · 거절의 재호출은 예외다 — 중복 승인 경로를 조용히 통과시키지 않는다.
+  Processor 가 PAYMENT 오류 코드로 바꾼다. 같은 상태 재호출이 멱등인 것은 주문 반영 기록 · `flagForManualReview` 뿐이다.
+  주문 반영 기록(`markOrderSynced` · `markOrderSyncFailed`)은 DONE 계열(`reportsToOrder` — DONE · PARTIAL_CANCELED · CANCELED) 중 **DONE 에서 온 것**만 받는다 —
+  회신은 비동기라 그 사이 취소됐을 수 있다. LATE_APPROVED 와 거기서 온 CANCELED(종결 이유가 남아 있다)는 승인 이벤트를 낸 적이 없어 거절한다(#308 PR-C). 승인 · 거절의 재호출은 예외다 — 중복 승인 경로를 조용히 통과시키지 않는다.
   멱등 no-op(같은 인스턴스 반환)이면 저장하지 않는다(쓸데없는 버전 증가 · 충돌 방지).
 - **되돌린 READY** — `revertToReady`(IN_PROGRESS → READY)는 승인 요청을 **보내지 않은 것이 확실할 때만** 쓴다(서킷 오픈 · 연결 전 실패 · 키 설정 오류).
   결제키 · `approval_started_at` 을 흔적으로 남긴다. 이 READY 는 **같은 결제키로만** 다시 승인을 시작하고(다른 키면 `PaymentApprovalMismatchException`),
@@ -362,9 +364,9 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 
 **C1b1 호출 경계**: payment의 `OrderPaymentResultQueryPort`가 C1a를 서비스 토큰으로 조회하고 결과별 응답 계약을 검증한다.
 미반영(`ORDER_028`)·인증/통신 실패·응답 계약 위반을 구분하며, 원격 본문·Feign 원인을 전파하거나 어댑터·Feign 재시도를 추가하지 않는다.
-정확한 실패 분류는 위 가이드의 "payment 호출 경계"를 따른다. 아직 이벤트/로컬 결제 대조·ACK 소비·inbox·플래그 저장은 연결하지 않는다.
+정확한 실패 분류는 위 가이드의 "payment 호출 경계"를 따른다. 이벤트/로컬 결제 대조·회신 소비·inbox·플래그 저장은 아래 **회신 컨슈머(PR-C)** 가 연결한다.
 `order-paid.paidAt`는 주문 처리 시각이고 원천 `approvedAt`는 PG 승인 시각이므로 서로 같다고 비교하지 않는다.
-후속 C1b2에서 원천과 로컬 결제의 승인 시각을 마이크로초 정밀도로 대조하고, 취소 경합·inbox 원자 기록을 함께 구현한다.
+원천과 로컬 결제의 승인 시각 마이크로초 대조 · 취소 뒤 도착한 회신 · inbox 원자 기록은 아래 회신 컨슈머(PR-C)가 구현했다.
 
 결제 승인(DONE)을 주문의 결제 완료(PAID)로 반영하는 단계는 **Kafka 이벤트**다(#304 · #308, `architecture-guide.md` §8-1). 동기 internal 호출 + 재전송 플래그 + 스케줄러로 하던 이전 설계는
 쓰지 않는다 — 전달은 outbox 릴레이(적어도 한 번)와 컨슈머 재시도 · DLT 가 보장하고(소비 · 회신 쪽은 PR-B · C 예정), 중복은 inbox · 유니크 키 · `@Version` 이 막는다.
@@ -373,8 +375,8 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 | 이벤트 | 토픽 · 키 | 생산 → 컨슈머 그룹 | 페이로드 (v1, 아이디는 문자열) | 상태 |
 |--------|-----------|--------------------|-------------------------------|------|
 | `payment-approved` | `<ns>.payment.payment-approved` · orderId | payment → `<ns>.order.payment-approved` | `paymentId` · `orderId` · `memberId` · `amount`(최소 단위 정수) · `currency` · `approvedAt` · `method`(수단 코드) | 발행 구현(PR-A1) · 소비 PR-B 예정 |
-| `order-paid` | `<ns>.order.order-paid` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `stockReservationId` · `paidAt` | PR-B 예정 |
-| `order-payment-rejected` | `<ns>.order.order-payment-rejected` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `reason`(`ORDER_CANCELED` · `ORDER_NOT_FOUND` · `PAYMENT_MISMATCH` · `STOCK_UNAVAILABLE` · `ALREADY_PAID` · `PAYMENT_NOT_DONE`) | PR-B 예정 |
+| `order-paid` | `<ns>.order.order-paid` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `stockReservationId` · `paidAt` | 발행 PR-B2 · 소비 PR-C(게이트 기본 닫힘) |
+| `order-payment-rejected` | `<ns>.order.order-payment-rejected` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `reason`(`ORDER_CANCELED` · `ORDER_NOT_FOUND` · `PAYMENT_MISMATCH` · `STOCK_UNAVAILABLE` · `ALREADY_PAID` · `PAYMENT_NOT_DONE`) | 발행 PR-B2 · 소비 PR-C(게이트 기본 닫힘) |
 
 - **발행(payment, 구현)** — `PaymentProcessor` 가 DONE 저장과 `PaymentEventPort.approved` 를 한 트랜잭션에서 한다(`saveApproved` 하나로 묶었다 — #15 의 UNKNOWN 재조회 확정도
   이 메서드로 DONE 을 저장해야 한다). 전이가 멱등 no-op(이미 DONE, 같은 인스턴스)이면 저장도 발행도 하지 않는다 — 같은 결제의 승인 이벤트가 두 번 나가지 않는다.
@@ -401,16 +403,40 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   재선점(`POST /internal/v1/stock-reservations`)하고 **곧바로 확정**한다. 재선점이 `PRODUCT_021`(재고 부족) · `PRODUCT_022`(판매 불가)면 `STOCK_UNAVAILABLE` 로 거절 회신한다.
   **주문은 선점 확정 200(`CONFIRMED`)을 받은 뒤에만 PAID 로 둔다** — 같은 이벤트를 다시 받아도 확정을 멱등으로 다시 부른다 (`order-flow-guide.md` §3-4).
   재선점은 결제 대기 · 만료 주문만 한다(선점이 이미 풀린 결제 대기 주문 포함). 결제 전 취소된 `CANCELED` 주문은 거절(`ORDER_CANCELED`)이다.
-- **회신과 `order_synced`(payment, PR-C 예정)** — 두 칸은 그대로 두고 뜻을 **"주문의 회신 이벤트를 받았는가"** 로 바꾼다(DONE 계열만 쓴다 — LATE_APPROVED 는 주문에 반영하지 않는다, #14):
+- **회신과 `order_synced`(payment, PR-C 구현)** — 두 칸은 그대로 두고 뜻을 **"주문의 회신 이벤트를 받았는가"** 로 바꾼다(DONE 계열만 쓴다 — LATE_APPROVED 는 주문에 반영하지 않는다, #14):
 
   | `order_synced` | `order_sync_failure_code` | 뜻 | 처리 |
   |----------------|---------------------------|----|------|
-  | false | null | 아직 회신을 받지 않았다 | 없음 — 전달은 릴레이 · 컨슈머 재시도가 보장한다. 오래 남으면 outbox · DLT 지표로 본다 |
+  | false | null | 아직 회신을 받지 않았다. **전액 취소된 결제는 회신이 오지 않는 것이 정상**이다(order 의 전액 취소 분기) | 없음 — 릴레이 · 컨슈머 재시도가 나르고, 재시도 소진 · DLT 뒤에는 재대조(#591) 또는 수동 처리. 오래 남으면 pending 게이지 · outbox · DLT 지표로 본다 |
   | true | null | `order-paid` 를 받았다(주문 PAID 확정) | 없음 |
-  | false | 코드 | `order-payment-rejected(reason)` 를 받았다 — 다시 보내도 바뀌지 않는다 | ERROR 로그 · 지표 + **자동 전액 취소 · 어드민 확인** 대상 |
+  | false | 코드(`reason` 그대로) | `order-payment-rejected(reason)` 를 받았다 — 다시 보내도 바뀌지 않는다 | ERROR 로그 · 지표 + **자동 전액 취소(#579) · 어드민 확인** 대상 |
   | true | 코드 | 금지(check) — 반영 성공 뒤 늦게 온 거절은 무시한다 | — |
-- **전액 취소** — 거절 회신은 `PaymentCancelPolicy` 훅(기본 로그 · 지표, PR-C 예정)으로 넘기고, 실제 PG 전액 취소와 종결 뒤 승인(LATE_APPROVED)의 `payment-late-approved` 알림은 #15 다.
-  돈만 받고 상품이 없는 주문을 남기지 않는다.
+- **전액 취소** — 거절 회신은 `PaymentCancelPolicy` 훅(기본 `LoggingPaymentCancelPolicy` — ERROR 로그 · `commerce.payment.order-sync.rejected.total{reason}`, PG 취소 없음)으로 넘긴다.
+  실제 PG 자동 전액 취소는 #579 가 이 포트 구현을 바꿔 붙이고, 종결 뒤 승인(LATE_APPROVED)의 `payment-late-approved` 알림은 #15 다. 돈만 받고 상품이 없는 주문을 남기지 않는다.
+- **회신 컨슈머(payment, PR-C 구현)** — `OrderPaymentReplyEventListener` → `OrderPaymentReplyEventUseCase` → `OrderPaymentReplyEventFacade` → `OrderPaymentReplyProcessor`.
+  - **게이트** — `commerce.messaging.enabled`(`MESSAGING_ENABLED`)와 `payment.order-result.consumer.enabled`(`PAYMENT_ORDER_RESULT_CONSUMER_ENABLED`, 기본 false)가 모두 켜져야
+    리스너가 뜬다. 켜면 `PaymentOrderResultConsumerConfig` 가 기동 때 `<ns>.order.order-paid` · `<ns>.order.order-payment-rejected` 와 각 `.dlt` 4개를 확인한다(없거나 Kafka 불통이면 기동 실패).
+    게이트가 꺼져 있으면 공통 `required-topics`(`payment-approved` · `.dlt`)만 본다. 운영 결제 게이트(`payment.enabled`)와 별개이며 이 컨슈머는 그 게이트를 열지 않는다.
+  - **봉투** — 종류(`order-paid` · `order-payment-rejected`, 토픽 끝과 같아야 함) · 생산자 · aggregate `order` · 버전 1 · Kafka 키 = aggregateId = `payload.orderId` ·
+    양수 문자열 아이디 · 알려진 거절 사유 · `order-paid` 의 `stockReservationId` · `paidAt` 이 맞지 않으면 재시도 없이 DLT 다.
+  - **처리** — inbox(`payment.processed_event`, 그룹 `<ns>.payment.order-payment-result`)에 있으면 건너뛴다 → 트랜잭션 밖에서 `OrderPaymentResultQueryPort` 로 원천 재조회 →
+    한 트랜잭션에서 로컬 결제 대조 · `markOrderSynced` / `markOrderSyncFailed(reason)` · inbox 기록 → 커밋 뒤 거절이면 취소 정책 훅. 봉투 본문을 믿지 않는다.
+    같은 회신의 재수신(다른 eventId)은 도메인 멱등(같은 인스턴스)이라 저장 · 훅 없이 inbox 만 남는다. 반영 성공 뒤 늦게 온 거절은 덮지 않는다.
+    **이미 전액 취소(CANCELED)된 결제의 거절**은 코드만 기록하고 훅을 부르지 않는다(멱등 — 돌려줄 돈이 없다). PARTIAL_CANCELED 는 잔액이 있어 훅을 부른다.
+    훅 실패는 기록을 되돌리지 않는다(ERROR 로그만) — 놓친 건은 아래 거절 게이지로 찾는다.
+  - **실패 분류** — 재시도(attempts 8 · initial 2s · ×2 · max 60s, order 컨슈머와 같다) 뒤 DLT: 원천 미반영 404 `ORDER_028` · 조회 장애(timeout · 5xx · 서킷) · 401/403,
+    저장 버전 충돌. 바로 DLT: 원천 조회 그 밖의 4xx · 응답 계약 위반, **이벤트 ↔ 원천** 불일치(결제 · 주문 · 결과 종류 · 거절 사유 — 원천은 최초 결과로 고정이고
+    order 는 기록과 회신 outbox 를 한 트랜잭션에 쓰므로 원천이 아직 없는 경우는 404 로 따로 온다. 카운터 `commerce.payment.order-sync.source-mismatch.total`), 로컬 결제 없음,
+    **원천 ↔ 로컬 결제** 불일치(주문 · 회원 · 금액 · 승인 시각 — 마이크로초로 자른 뒤 비교, 거절의 승인 시각 null 은 건너뜀), 회신을 받을 수 없는 상태(LATE_APPROVED 등). DLT 재처리는 사람이 한다.
+  - **지표** — `commerce.payment.order-sync.pending.count`(승인 뒤 `payment.order-result.pending-after`(기본 5m)가 지나도록 회신을 받지 않은 DONE · PARTIAL_CANCELED 결제 —
+    전액 취소는 회신이 없는 것이 정상이라 세지 않는다) · `commerce.payment.order-sync.rejected.count`(거절됐는데 전액 취소되지 않은 결제) 게이지(각 2초 상한)와
+    관측 실패 카운터 `commerce.payment.order-sync.observation.failures`(NaN 을 0 으로 보지 않는다). 게이트가 닫힌 환경은 pending 이 계속 오르므로 알림에서 뺀다.
+  - **취소 정책 훅** — at-most-once 빠른 경로다. 정본 트리거는 DB 상태(거절 코드 + DONE · PARTIAL_CANCELED)이고 재대조 · 자동 취소는 #591 · #579 다.
+    구현은 결제를 다시 읽어 잔액을 확인해야 한다(커밋과 훅 사이에 취소가 들어올 수 있다).
+  - **운영 DDL** — `service/payment-service/src/test/resources/ddl/payment-processed-event.sql`(새 테이블 · 인덱스와 `payment.order_synced` · `order_sync_failure_code` 컬럼 comment 갱신)을 **이 버전 배포 전**에 적용한다 — 게이트가 꺼져 있어도
+    messaging-core 기록 정리가 inbox 를 지우러 간다(메시징이 켜진 인스턴스에서 없으면 정리 주기마다 WARN). Hibernate 스냅숏은 `ddl/payment-schema.sql` 이다.
+  - **아직 하지 않는 것** — PG 자동 전액 취소(#579), 확정 뒤 취소 주문의 재고 복원 · 결제 상태가 먼저 바뀐 복구창(`order-flow-guide.md` §3-6 "남은 필수 복구창")은 이 컨슈머 범위 밖이다.
+    **그 검증 전에는 운영에서 회신 컨슈머 게이트와 `payment.enabled` 를 열지 않는다.**
 
 ## 7. 웹훅
 

@@ -89,6 +89,9 @@ class PaymentTest {
         STATES.put("UNKNOWN", PaymentFixtures::unknown);
         STATES.put("ABORTED", PaymentFixtures::aborted);
         STATES.put("LATE_APPROVED", PaymentFixtures::lateApproved);
+        STATES.put("PARTIAL_CANCELED", () -> PaymentFixtures.done().recordCancellation(krw(29_000)));
+        STATES.put("CANCELED", () -> PaymentFixtures.done().recordCancellation(krw(129_000)));
+        STATES.put("CANCELED(늦은 승인)", () -> PaymentFixtures.lateApproved().recordCancellation(krw(129_000)));
 
         ACTIONS.put(Action.START_APPROVAL, payment -> payment.startApproval(PAYMENT_KEY, APPROVAL_KEY, NOW));
         ACTIONS.put(Action.ABORT, payment -> payment.abort(PaymentAbortReason.AMOUNT_CHANGED));
@@ -112,6 +115,10 @@ class PaymentTest {
         ALLOWED.put("UNKNOWN", Set.of(Action.RESOLVE, Action.FLAG_FOR_MANUAL_REVIEW));
         ALLOWED.put("ABORTED", Set.of(Action.RECORD_LATE_APPROVAL));
         ALLOWED.put("LATE_APPROVED", Set.of(Action.RECORD_CANCELLATION));
+        // 주문 회신은 비동기라 취소 뒤에 도착할 수 있다 — DONE 에서 온 취소만 기록한다. 늦은 승인은 주문에 반영한 적이 없다 (#308 PR-C)
+        ALLOWED.put("PARTIAL_CANCELED", Set.of(Action.MARK_ORDER_SYNCED, Action.MARK_ORDER_SYNC_FAILED, Action.RECORD_CANCELLATION));
+        ALLOWED.put("CANCELED", Set.of(Action.MARK_ORDER_SYNCED, Action.MARK_ORDER_SYNC_FAILED));
+        ALLOWED.put("CANCELED(늦은 승인)", Set.of());
     }
 
     static Stream<Arguments> forbiddenTransitions() {
@@ -624,6 +631,18 @@ class PaymentTest {
             Payment synced = PaymentFixtures.done().markOrderSynced();
 
             assertThat(synced.markOrderSyncFailed("ORDER_030")).isSameAs(synced);
+        }
+
+        @Test
+        @DisplayName("회신이 취소 뒤에 도착해도 기록한다 — 부분 · 전액 취소 결제의 반영 성공 · 종결 실패 (#308 PR-C)")
+        void recordsReplyAfterCancellation() {
+            Payment partial = PaymentFixtures.done().recordCancellation(krw(29_000));
+            Payment canceled = PaymentFixtures.done().recordCancellation(krw(129_000));
+
+            assertThat(partial.markOrderSynced().orderSynced()).isTrue();
+            assertThat(partial.markOrderSynced().status()).isEqualTo(PaymentStatus.PARTIAL_CANCELED);
+            assertThat(canceled.markOrderSyncFailed("ORDER_CANCELED").orderSyncFailureCode()).isEqualTo("ORDER_CANCELED");
+            assertThat(canceled.markOrderSyncFailed("ORDER_CANCELED").status()).isEqualTo(PaymentStatus.CANCELED);
         }
 
         @Test

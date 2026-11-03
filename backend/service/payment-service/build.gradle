@@ -35,6 +35,8 @@ dependencies {
     testImplementation testFixtures(project(':core:common-core'))
     // 가짜 outbox 저장소 · 트랜잭션 관리자(InMemoryOutboxStore · NoOpTransactionManager) — 발행이 결과 기록과 함께 커밋 · 롤백되는지 본다
     testImplementation testFixtures(project(':core:messaging-core'))
+    // 주문 결제 회신 컨슈머 계약(#308 PR-C) — 내장 Kafka(KRaft)로 실제 리스너 · 재시도 · DLT 를 돌린다. Docker 없이 돈다
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
     // 컨텍스트 로딩 테스트용 (application-test.yml). Docker 없이 로컬·CI 가 같은 결과를 낸다
     testRuntimeOnly 'com.h2database:h2'
 

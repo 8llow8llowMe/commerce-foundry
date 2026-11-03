@@ -28,6 +28,11 @@ spring:
   # Kafka 접속 (deploy-guide.md §4-4). 주소는 Vault 값이다 — 저장소에 쓰지 않는다. 앱은 토픽을 만들지 않는다
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+    consumer:
+      # 주문 결제 회신 컨슈머(#308 PR-C)는 레코드마다 order 원천 조회(Feign 2s+3s) + DB 기록을 한다. 한 poll 에 하나만 받아 poll 간격 상한 안에 끝낸다 (order-service 와 같다)
+      max-poll-records: 1
+      properties:
+        max.poll.interval.ms: 300000
     security:
       protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
     admin:
@@ -82,6 +87,14 @@ resilience4j:
 
 # 결제 준비 (payment-guide.md "고객 API 계약"). 주문의 결제 기한까지 이보다 적게 남았으면 결제창을 열지 않는다(409 PAYMENT_004) — 토스 인증 뒤 승인 제한도 10분이다
 payment:
+  # 주문 결제 회신 컨슈머 (#308 PR-C, payment-guide.md §6) — order.order-paid · order.order-payment-rejected 를 받아 주문 반영 기록(order_synced)을 남긴다.
+  # commerce.messaging.enabled 와 함께 켜져야 리스너가 뜬다. 켜면 회신 토픽 · DLT 가 있어야 기동한다. 운영 결제 게이트(payment.enabled)와 별개다.
+  # payment.processed_event 운영 DDL 은 게이트와 관계없이 이 버전 배포 전에 적용한다 — 메시징이 켜진 인스턴스에서는 inbox 정리 잡이 게이트와 무관하게 돈다
+  order-result:
+    consumer:
+      enabled: ${PAYMENT_ORDER_RESULT_CONSUMER_ENABLED:false}
+    # 회신 대기 게이지(commerce.payment.order-sync.pending.count)는 승인 뒤 이만큼 지난 결제만 센다 — 정상 지연(릴레이 · 컨슈머 재시도)을 경보로 보지 않게
+    pending-after: 5m
   recovery:
     enabled: false
     initial-delay: 1m
@@ -183,6 +196,13 @@ commerce:
     required-topics:
       - payment.payment-approved
       - payment.payment-approved.dlt
+    # 컨슈머 안 재시도 (MessagingErrorHandlers) — order 컨슈머와 같은 8회 · 최대 60초 백오프. 소진 · 재시도 불가 오류는 <topic>.dlt 로 간다.
+    # 회신 컨슈머의 회신 토픽 · DLT 확인은 전용 게이트가 켜졌을 때만 한다 (PaymentOrderResultConsumerConfig)
+    retry:
+      attempts: 8
+      initial-backoff: 2s
+      multiplier: 2
+      max-backoff: 60s
     # outbox 릴레이 · 정리의 단일 실행 락 테이블. order-service 처럼 서비스 스키마를 붙인다
     outbox:
       relay:
