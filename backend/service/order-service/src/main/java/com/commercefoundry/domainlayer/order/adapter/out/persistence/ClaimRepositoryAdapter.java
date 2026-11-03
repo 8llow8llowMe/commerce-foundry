@@ -7,9 +7,6 @@ import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositor
 import com.commercefoundry.domainlayer.order.application.port.out.query.RequestedReturnQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import jakarta.persistence.EntityManager;
-import com.commercefoundry.domainlayer.order.application.port.out.query.ClaimAdminSummaryQueryResult;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,17 +23,6 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
     private final ClaimItemRepository claimItemRepository;
     private final ClaimMapper claimMapper;
     private final EntityManager entityManager;
-
-    @Override
-    public Page<ClaimAdminSummaryQueryResult> findAdminSummaryPage(Long orderId, Claim.Type type, Claim.Status status, int page, int size) {
-        return claimRepository.findAdminSummaryPage(orderId, type, status, PageRequest.of(page, size));
-    }
-
-    @Override
-    public Optional<Claim> findById(long claimId) {
-        return claimRepository.findById(claimId)
-            .map(entity -> claimMapper.toDomain(entity, claimItemRepository.findAllByClaimIdOrderByOrderItemIdAsc(claimId)));
-    }
 
     @Override
     public Optional<Claim> findByOrderIdAndRequestKey(long orderId, UUID requestKey) {
