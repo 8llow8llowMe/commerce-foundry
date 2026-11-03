@@ -1340,7 +1340,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 ### 7-2. 어드민 알림 센터 (operations-service, #213)
 
 모두 `hasRole('ADMIN')` 이다. 게이트웨이 라우트는 `ServiceRoute.OPERATIONS`(`/api/v1/admin/notifications/**`).
-알림은 요청한 어드민 것만 보인다. 다른 관리자 알림 아이디는 404(`NOTIFICATION_001`)다.
+알림은 로그인한 어드민의 개인 알림만 보인다. JOB은 요청자에게, DLT 이상 알림은 auth가 반환한 활성 ADMIN 각각에게 생성된다. 다른 관리자 알림 아이디는 404(`NOTIFICATION_001`)다.
 
 | API | 응답 | 오류 |
 |-----|------|------|
@@ -1356,6 +1356,10 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - 단건·모두 읽음은 그 어드민의 읽지 않은 행만 조건부 UPDATE로 처리한다(`read_at` · `updated_at` · 호환 버전 증가).
   단건은 도메인 `markRead` 판정 뒤 ID·수신자·미읽음 조건으로 갱신하고 DB 결과를 재조회한다. 경합해도 최초 저장된 읽음 시각을 유지한다.
   타인·없는 알림은 404이며, 구버전과 혼합 배포 중 오래된 merge를 막기 위해 version 컬럼은 유지한다(#510).
+- #477 A2는 기존 목록·읽음·SSE에 ANOMALY 개인 알림을 추가한다. 결제 승인 DLT는 CRITICAL, 주문 만료·취소 DLT는 WARNING이다.
+  제목·화면 링크는 고정이며 같은 발행도 수신자마다 notificationId·읽음이 독립이다. SSE는 커밋 뒤 비동기 best effort이며 끊김/다른 인스턴스 연결은 목록으로 따라잡는다.
+  링크는 기존 `/admin/payments` 또는 `/admin/orders`이며 외부 runbook 링크는 제공하지 않는다. 자동 해소를 뜻하지 않는다.
+  수신자·억제·보존·배포 계약은 [DLT 이상 알림](anomaly-notification-guide.md)이 정본이다. FE API 리뷰 대상은 `seonghoho`다.
 - 아이디는 문자열, 시각은 UTC ISO 다.
 
 ## 8. Swagger

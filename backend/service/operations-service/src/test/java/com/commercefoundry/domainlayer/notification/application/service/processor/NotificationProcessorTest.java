@@ -35,7 +35,7 @@ class NotificationProcessorTest {
 
         processor.record(request);
         processor.record(request);
-        processor.push("JOB", 10L, NotificationKind.JOB_FAILED);
+        processor.push(7L, "JOB", 10L, NotificationKind.JOB_FAILED);
 
         assertThat(port.saved.get()).isEqualTo(1);
         assertThat(pushed).singleElement().satisfies(notification -> {
@@ -111,9 +111,9 @@ class NotificationProcessorTest {
         }
 
         @Override
-        public Optional<Notification> findBySource(String sourceType, long sourceId, NotificationKind kind) {
+        public Optional<Notification> findBySource(long recipientMemberId, String sourceType, long sourceId, NotificationKind kind) {
             return rows.stream()
-                .filter(row -> row.sourceType().equals(sourceType) && row.sourceId() == sourceId && row.kind() == kind)
+                .filter(row -> row.recipientMemberId() == recipientMemberId && row.sourceType().equals(sourceType) && row.sourceId() == sourceId && row.kind() == kind)
                 .findFirst();
         }
 

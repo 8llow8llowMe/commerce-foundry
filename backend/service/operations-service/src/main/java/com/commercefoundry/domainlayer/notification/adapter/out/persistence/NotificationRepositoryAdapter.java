@@ -33,8 +33,8 @@ public class NotificationRepositoryAdapter implements NotificationRepositoryPort
     }
 
     @Override
-    public Optional<Notification> findBySource(String sourceType, long sourceId, NotificationKind kind) {
-        return notificationRepository.findBySourceTypeAndSourceIdAndKind(sourceType, sourceId, kind).map(this::toDomain);
+    public Optional<Notification> findBySource(long recipientMemberId, String sourceType, long sourceId, NotificationKind kind) {
+        return notificationRepository.findByRecipientMemberIdAndSourceTypeAndSourceIdAndKind(recipientMemberId, sourceType, sourceId, kind).map(this::toDomain);
     }
 
     @Override

@@ -12,5 +12,5 @@ public interface NotificationRecordUseCase {
     void record(NotificationRequest request);
 
     /** 커밋 뒤에 호출한다. 행이 없으면 아무 것도 하지 않는다. */
-    void push(String sourceType, long sourceId, NotificationKind kind);
+    void push(long recipientMemberId, String sourceType, long sourceId, NotificationKind kind);
 }

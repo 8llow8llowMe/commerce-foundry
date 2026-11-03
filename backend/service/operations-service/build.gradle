@@ -48,6 +48,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
+    testImplementation 'org.testcontainers:testcontainers-kafka'
     // 가짜 outbox 저장소(InMemoryOutboxStore) — 단위 테스트가 실행 신호 발행을 단언한다
     testImplementation testFixtures(project(':core:messaging-core'))
     // Messages API 루프백 스텁(StubMessagesServer) — 계량 인터셉터 · 원장 흐름 테스트가 실제 API 대신 부른다

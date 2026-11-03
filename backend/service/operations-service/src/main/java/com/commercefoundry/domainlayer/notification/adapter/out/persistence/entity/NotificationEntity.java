@@ -27,7 +27,8 @@ import lombok.NoArgsConstructor;
 @Table(
     name = "notification",
     comment = "어드민 알림",
-    uniqueConstraints = @UniqueConstraint(name = "uk_notification_source_type_source_id_kind", columnNames = {"source_type", "source_id", "kind"}),
+    uniqueConstraints = @UniqueConstraint(name = "uk_notification_recipient_member_id_source_type_source_id_kind",
+        columnNames = {"recipient_member_id", "source_type", "source_id", "kind"}),
     indexes = {
         @Index(name = "idx_notification_recipient_member_id_id", columnList = "recipient_member_id, id"),
         @Index(name = "idx_notification_recipient_member_id_read_at", columnList = "recipient_member_id, read_at"),

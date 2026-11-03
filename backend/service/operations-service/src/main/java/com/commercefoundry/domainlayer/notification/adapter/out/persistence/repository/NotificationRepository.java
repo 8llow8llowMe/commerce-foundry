@@ -13,7 +13,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface NotificationRepository extends JpaRepository<NotificationEntity, Long> {
 
-    Optional<NotificationEntity> findBySourceTypeAndSourceIdAndKind(String sourceType, long sourceId, NotificationKind kind);
+    Optional<NotificationEntity> findByRecipientMemberIdAndSourceTypeAndSourceIdAndKind(long recipientMemberId, String sourceType, long sourceId, NotificationKind kind);
 
     Page<NotificationEntity> findByRecipientMemberId(long recipientMemberId, Pageable pageable);
 

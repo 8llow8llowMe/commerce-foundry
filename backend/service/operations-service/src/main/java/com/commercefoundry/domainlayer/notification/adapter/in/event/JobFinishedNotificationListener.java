@@ -32,7 +32,7 @@ public class JobFinishedNotificationListener {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void push(JobFinishedEvent event) {
-        toRequest(event).ifPresent(request -> notificationRecordUseCase.push(request.sourceType(), request.sourceId(), request.kind()));
+        toRequest(event).ifPresent(request -> notificationRecordUseCase.push(request.recipientMemberId(), request.sourceType(), request.sourceId(), request.kind()));
     }
 
     private Optional<NotificationRequest> toRequest(JobFinishedEvent event) {

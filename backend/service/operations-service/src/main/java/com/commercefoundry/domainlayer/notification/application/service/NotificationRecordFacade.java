@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.notification.domain.model.NotificationKin
 import com.commercefoundry.domainlayer.notification.domain.model.NotificationRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -24,8 +25,8 @@ public class NotificationRecordFacade implements NotificationRecordUseCase {
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public void push(String sourceType, long sourceId, NotificationKind kind) {
-        notificationRecordProcessor.push(sourceType, sourceId, kind);
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public void push(long recipientMemberId, String sourceType, long sourceId, NotificationKind kind) {
+        notificationRecordProcessor.push(recipientMemberId, sourceType, sourceId, kind);
     }
 }

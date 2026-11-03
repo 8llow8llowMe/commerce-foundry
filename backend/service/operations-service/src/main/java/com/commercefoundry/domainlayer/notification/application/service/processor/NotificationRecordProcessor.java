@@ -21,13 +21,13 @@ public class NotificationRecordProcessor {
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
     public void record(NotificationRequest request) {
-        if (notificationRepositoryPort.findBySource(request.sourceType(), request.sourceId(), request.kind()).isPresent()) {
+        if (notificationRepositoryPort.findBySource(request.recipientMemberId(), request.sourceType(), request.sourceId(), request.kind()).isPresent()) {
             return;
         }
         notificationRepositoryPort.insert(Notification.create(snowflakeIdGenerator.generateId(), request));
     }
 
-    public void push(String sourceType, long sourceId, NotificationKind kind) {
-        notificationRepositoryPort.findBySource(sourceType, sourceId, kind).ifPresent(notificationPushPort::push);
+    public void push(long recipientMemberId, String sourceType, long sourceId, NotificationKind kind) {
+        notificationRepositoryPort.findBySource(recipientMemberId, sourceType, sourceId, kind).ifPresent(notificationPushPort::push);
     }
 }

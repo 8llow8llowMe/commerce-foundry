@@ -337,7 +337,11 @@ auth 배포 전에 `idx_member_role_deactivated_at_id`(`auth.member(role, deacti
 `IF NOT EXISTS`만으로 잘못된 정의/INVALID를 성공으로 간주하지 않는다. 생성 후 정의·valid 여부를 다시 확인한다.
 기존 PK/이메일 UNIQUE는 제거하지 않으며, 데이터 이관 · 새 Vault 키 · Gateway 라우트 변경은 없다.
 auth를 먼저 배포하고 서비스 토큰의 audience=auth-service / 호출자 operations-service로 내부 조회를 점검한다.
-A1에는 operations 호출 어댑터 · DLT consumer가 없으므로 기존 작업/알림 동작은 그대로이며, 이상 알림 활성화는 후속 배포에서 다룬다.
+A2 operations DLT 이상 알림은 기본 gate OFF다. [DLT 이상 알림 배포·복구](anomaly-notification-guide.md#배포복구)에 따라
+새 state/record 테이블·인덱스 선적용 → recipient 포함 notification UNIQUE 추가 → 이전 UNIQUE 제거 → 전 인스턴스 신코드 OFF 배포 → ON 순서를 지킨다.
+gate OFF도 스키마 validate에서 새 엔티티를 요구한다. 구버전이 공존할 때는 ON하지 않는다.
+전용 container 정지 ERROR를 운영 로그로 감시하고 auth/DB 복구 뒤 앱을 재시작한다. offset skip·재귀 DLT를 사용하지 않는다.
+토픽 verifier는 세 DLT의 존재만 확인한다. 실제 retention 7일/처리 기록 기본 8일과 ACL은 운영자가 별도로 확인한다.
 
 ### 소셜 로그인 활성화 (#5)
 

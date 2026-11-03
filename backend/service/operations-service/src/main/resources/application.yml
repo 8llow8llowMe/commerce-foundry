@@ -165,6 +165,16 @@ operations:
       schedules: []
   # 어드민 알림 센터 (#213). 값이 빠지거나 0 · 음수면 기동하지 않는다 (NotificationProperties)
   notifications:
+    # DLT 전용 소비. 스키마 선적용 + 모든 인스턴스 신코드 배포 뒤에만 켠다 (anomaly-notification-guide.md).
+    anomaly:
+      enabled: ${NOTIFICATION_ANOMALY_ENABLED:false}
+      suppression-window: ${NOTIFICATION_ANOMALY_SUPPRESSION_WINDOW:1h}
+      record-retention: ${NOTIFICATION_ANOMALY_RECORD_RETENTION:8d}
+      max-recipients: ${NOTIFICATION_ANOMALY_MAX_RECIPIENTS:1000}
+      retry-attempts: ${NOTIFICATION_ANOMALY_RETRY_ATTEMPTS:3}
+      retry-backoff: ${NOTIFICATION_ANOMALY_RETRY_BACKOFF:1s}
+      transaction-timeout-seconds: ${NOTIFICATION_ANOMALY_TRANSACTION_TIMEOUT_SECONDS:10}
+      cleanup-interval: 1h
     # SSE 연결을 붙잡는 시간. 끊기면 클라이언트는 목록 조회로 따라잡고 다시 연다
     stream-timeout: 5m
     # 알림이 없어도 이 간격으로 주석을 보낸다. 게이트웨이 response-timeout(10s) 동안 바이트가 없으면 연결이 끊긴다

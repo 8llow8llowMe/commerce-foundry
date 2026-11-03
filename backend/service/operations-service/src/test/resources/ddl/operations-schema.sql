@@ -392,7 +392,7 @@
         title varchar(120) not null,
         version bigint not null,
         primary key (id),
-        constraint uk_notification_source_type_source_id_kind unique (source_type, source_id, kind)
+        constraint uk_notification_recipient_member_id_source_type_source_id_kind unique (recipient_member_id, source_type, source_id, kind)
     );
 
     comment on table operations.notification is
@@ -433,6 +433,78 @@
 
     comment on column operations.notification.version is
         '낙관적 락 버전';
+
+    create table operations.notification_anomaly_record (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        offset_id bigint not null,
+        partition_id integer not null,
+        processed_at timestamp(6) with time zone not null,
+        topic varchar(249) not null,
+        primary key (id),
+        constraint uk_notification_anomaly_record_topic_partition_id_offset_id unique (topic, partition_id, offset_id)
+    );
+
+    comment on table operations.notification_anomaly_record is
+        '처리한 DLT 메타데이터 (원문 없음)';
+
+    comment on column operations.notification_anomaly_record.id is
+        '처리 기록 아이디 (Snowflake)';
+
+    comment on column operations.notification_anomaly_record.created_at is
+        '생성 시각';
+
+    comment on column operations.notification_anomaly_record.updated_at is
+        '수정 시각';
+
+    comment on column operations.notification_anomaly_record.offset_id is
+        'DLT 오프셋';
+
+    comment on column operations.notification_anomaly_record.partition_id is
+        'DLT 파티션';
+
+    comment on column operations.notification_anomaly_record.processed_at is
+        '처리 커밋 기준 시각';
+
+    comment on column operations.notification_anomaly_record.topic is
+        '허용된 namespace 포함 DLT 토픽';
+
+    create table operations.notification_anomaly_state (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        last_notified_at timestamp(6) with time zone,
+        last_seen_at timestamp(6) with time zone not null,
+        source_key varchar(249) not null,
+        version bigint not null,
+        primary key (id),
+        constraint uk_notification_anomaly_state_source_key unique (source_key)
+    );
+
+    comment on table operations.notification_anomaly_state is
+        'DLT 출처별 알림 억제 상태';
+
+    comment on column operations.notification_anomaly_state.id is
+        '상태 아이디 (Snowflake)';
+
+    comment on column operations.notification_anomaly_state.created_at is
+        '생성 시각';
+
+    comment on column operations.notification_anomaly_state.updated_at is
+        '수정 시각';
+
+    comment on column operations.notification_anomaly_state.last_notified_at is
+        '최근 개인 알림 발행 시각';
+
+    comment on column operations.notification_anomaly_state.last_seen_at is
+        '최근 새 레코드 처리 시각';
+
+    comment on column operations.notification_anomaly_state.source_key is
+        '허용된 DLT 출처';
+
+    comment on column operations.notification_anomaly_state.version is
+        '창 판정 CAS 버전';
 
     create table operations.onboarding_tour_progress (
         id bigint not null,
@@ -595,6 +667,9 @@
 
     create index idx_notification_created_at 
        on operations.notification (created_at);
+
+    create index idx_notification_anomaly_record_processed_at
+       on operations.notification_anomaly_record (processed_at);
 
     create index idx_outbox_published_at_available_at 
        on operations.outbox (published_at, available_at);

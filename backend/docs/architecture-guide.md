@@ -376,6 +376,12 @@ Info → Presenter → Response
   세부는 컨슈머가 internal API 로 읽는다(Kafka UI 로 본문이 열람되고 7일 보존된다).
 - 클러스터는 지금 PLAINTEXT · ACL 없음이다 — 이름으로 구분할 뿐 격리가 아니다. SASL · ACL 은 Infra 후속 이슈로 하고 앱은 `KAFKA_SASL_*` 키를 예약만 한다.
 
+operations의 DLT 이상 알림(#477 A2)은 위 일반 소비 실패 정책의 별도 종단이다. 현재 namespace의 승인된 세 DLT만 구독하고,
+원문 없이 TPO 메타데이터로 dedup·topic별 rolling window를 적용한다. state CAS/seen/개인 알림을 한 TX에 커밋한다.
+원격 ADMIN 수신자 조회는 TX 밖이며, 커밋된 안전한 알림 snapshot을 별도 bounded executor로 SSE에 best effort 전송한다.
+이 소비 실패는 유한 재시도 뒤 offset 미커밋/전용 container 정지이며 추가 DLT로 발행하지 않는다.
+설정·수신자·스키마·복구·보장 한계는 [DLT 이상 알림](anomaly-notification-guide.md)을 따른다.
+
 ## 9. 멀티 스토어(재사용) 기준
 
 commerce-foundry 는 **싱글 테넌트 템플릿**이다 — 고객사마다 별도 배포·DB·PG 계약을 쓰고 코드는 공유한다.

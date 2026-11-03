@@ -14,7 +14,7 @@ public interface NotificationRepositoryPort {
 
     Optional<Notification> findById(long notificationId);
 
-    Optional<Notification> findBySource(String sourceType, long sourceId, NotificationKind kind);
+    Optional<Notification> findBySource(long recipientMemberId, String sourceType, long sourceId, NotificationKind kind);
 
     Page<Notification> findPage(long recipientMemberId, int page, int size);
 

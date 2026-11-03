@@ -41,7 +41,7 @@ class JobFinishedNotificationListenerTest {
                 && request.sourceType().equals("JOB")
                 && request.sourceId() == 10L
                 && request.title().equals("작업이 실패했습니다")));
-        verify(notificationRecordUseCase).push("JOB", 10L, NotificationKind.JOB_FAILED);
+        verify(notificationRecordUseCase).push(7L, "JOB", 10L, NotificationKind.JOB_FAILED);
     }
 
     @Test
