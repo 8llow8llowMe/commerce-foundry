@@ -127,6 +127,11 @@ subprojects { project ->
         jvmArgs "-javaagent:${configurations.mockitoAgent.asPath}"
         // 에이전트가 부트스트랩 클래스패스를 덧붙이면 JVM 이 CDS 를 부분만 쓰겠다는 경고를 매번 찍는다. 테스트 JVM 에서만 CDS 를 끈다
         jvmArgs '-Xshare:off'
+        // product-service 는 CI 에서 테스트 한 JVM 이 전체 그룹의 꼬리가 된다. 러너 4 vCPU 중 두 fork 에 나눠 실행한다.
+        // 로컬은 여러 세션이 같은 PC 에서 빌드하므로 기존 단일 fork 를 유지한다.
+        if (System.getenv('CI') == 'true' && project.name == 'product-service') {
+            maxParallelForks = 2
+        }
     }
     tasks.withType(Javadoc).configureEach {
         options.encoding = 'UTF-8'
