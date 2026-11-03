@@ -1,6 +1,8 @@
 package com.commercefoundry.domainlayer.display.domain.model;
 
 import com.commercefoundry.common.dto.metadata.CodeNameDescribable;
+import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
+import java.util.Locale;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
@@ -37,5 +39,21 @@ public enum DisplaySectionType implements CodeNameDescribable {
 
     public boolean allows(DisplayItemType itemType) {
         return maxCountOf(itemType) > 0;
+    }
+
+    /**
+     * 고객 메인 전시 응답의 표시 이름 (#20). 영어 지역 태그면 영어, 그 밖은 한국어다 — 인자 없는 {@code toMetadata()} 는 어드민의 한국어 계약 그대로다.
+     */
+    public CodeNameDescriptionMetadata toMetadata(Locale locale) {
+        String[] en = switch (this) {
+            case HERO -> new String[] {"Hero", "A large image or video banner at the top of the page. Multiple banners rotate as slides."};
+            case PRODUCT_PICK -> new String[] {"Product pick", "A curated selection of products."};
+            case STORY -> new String[] {"Story", "A brand story or feature article, with optional images or videos."};
+            case LOOK -> new String[] {"Look", "A styled look with its photos and the products in it."};
+            case DETAIL -> new String[] {"Detail", "A large image or video showing materials and details."};
+        };
+        // 상품 문구(ProductText)와 같은 규칙 — 영어 지역 태그만 영어. 다른 컨텍스트 도메인을 부르지 않게 여기서 판정한다(H8)
+        boolean english = locale != null && "en".equals(locale.getLanguage());
+        return english ? CodeNameDescriptionMetadata.of(name(), en[0], en[1]) : toMetadata();
     }
 }

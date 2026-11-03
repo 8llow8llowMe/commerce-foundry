@@ -4,6 +4,7 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.web.dto.response.ProductSizeChartResponse;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartUnitCode;
 import com.commercefoundry.domainlayer.sizechart.application.port.in.ProductSizeChartWebUseCase;
+import com.commercefoundry.global.web.CustomerLocale;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -12,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -38,8 +40,10 @@ public class ProductSizeChartWebController {
     @GetMapping
     public ResponseEntity<Response<ProductSizeChartResponse>> getSizeChart(
         @Parameter(description = "상품 아이디") @PathVariable long productId,
-        @Parameter(description = "표시 단위 — CM · INCH. 없으면 저장 단위") @RequestParam(required = false) SizeChartUnitCode unit
+        @Parameter(description = "표시 단위 — CM · INCH. 없으면 저장 단위") @RequestParam(required = false) SizeChartUnitCode unit,
+        @Parameter(hidden = true) @RequestHeader(value = CustomerLocale.HEADER, required = false) String acceptLanguage
     ) {
-        return ResponseEntity.ok(Response.success(productSizeChartWebUseCase.getSizeChart(productId, unit)));
+        return ResponseEntity.ok().varyBy(CustomerLocale.HEADER)
+            .body(Response.success(CustomerLocale.within(acceptLanguage, () -> productSizeChartWebUseCase.getSizeChart(productId, unit))));
     }
 }

@@ -14,6 +14,8 @@ import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.util.Locale;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 /**
  * 고객 메인 전시. 쿼리는 섹션 1 + 아이템 1(보이는 섹션 in 절) + 상품 카드 3(모든 섹션의 상품 아이디를 합쳐 한 번 — 상품 행 · SKU 집계 · 대표 이미지)이다.
@@ -31,11 +33,12 @@ public class DisplayWebFacade implements DisplayWebUseCase {
     @Override
     @Transactional(readOnly = true)
     public DisplayMainResponse getMain() {
+        Locale locale = LocaleContextHolder.getLocale();
         List<DisplaySectionContent> contents = displaySectionProcessor.getLiveContents();
         Map<Long, LookContent> looks = lookWebProcessor.getVisibleContentsByIds(displaySectionProcessor.lookIdsOf(contents));
         var productIds = displaySectionProcessor.productIdsOf(contents.stream().filter(content -> !content.isLegacyLook()).toList());
         productIds.addAll(LookContent.productIdsOf(looks.values()));
-        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(productIds);
-        return displayWebPresenter.toMainResponse(displaySectionProcessor.toMainInfo(contents, visibleProducts, looks));
+        Map<Long, ProductSummary> visibleProducts = productListProcessor.summarizeVisible(productIds, locale);
+        return displayWebPresenter.toMainResponse(displaySectionProcessor.toMainInfo(contents, visibleProducts, looks), locale);
     }
 }

@@ -12,6 +12,7 @@ import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartUnit;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 /**
  * 고객 상품 사이즈표. 없거나 숨긴 상품은 상품 상세와 같은 {@link ProductDetailProcessor#getVisibleProduct} 라 {@code PRODUCT_001}(404)이다.
@@ -31,6 +32,6 @@ public class ProductSizeChartWebFacade implements ProductSizeChartWebUseCase {
         Product product = productDetailProcessor.getVisibleProduct(productId);
         SizeChartUnit displayUnit = unit == null ? null : unit.toDomain();
         ProductSizeChartInfo info = productSizeChartProcessor.find(product.id(), displayUnit);
-        return info == null ? null : sizeChartWebPresenter.toResponse(info);
+        return info == null ? null : sizeChartWebPresenter.toResponse(info, LocaleContextHolder.getLocale());
     }
 }

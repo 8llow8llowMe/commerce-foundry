@@ -14,6 +14,7 @@ import com.commercefoundry.persistence.dto.SliceResponse;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
 import org.springframework.data.domain.Slice;
+import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 /**
@@ -25,31 +26,44 @@ import org.springframework.stereotype.Component;
 public class LookWebPresenter {
 
     public SliceResponse<LookSummaryResponse> toSliceResponse(Slice<LookInfo> slice) {
-        return SliceResponse.of(slice).map(this::toSummary);
+        return toSliceResponse(slice, Locale.KOREAN);
+    }
+
+    /** @param locale 상품 판매 상태의 표시 언어 (#20). 상품 이름은 상품 카드가 이미 그 언어로 골라 왔다 */
+    public SliceResponse<LookSummaryResponse> toSliceResponse(Slice<LookInfo> slice, Locale locale) {
+        return SliceResponse.of(slice).map(info -> toSummary(info, locale));
     }
 
     public LookDetailResponse toDetailResponse(LookInfo info) {
+        return toDetailResponse(info, Locale.KOREAN);
+    }
+
+    public LookDetailResponse toDetailResponse(LookInfo info, Locale locale) {
         return LookDetailResponse.builder()
             .lookId(String.valueOf(info.lookId()))
             .title(info.title())
             .description(info.description())
             .image(toImageItem(info.image()))
-            .products(info.products().stream().map(this::toProductItem).toList())
+            .products(info.products().stream().map(product -> toProductItem(product, locale)).toList())
             .build();
     }
 
     public ProductLookListResponse toProductLookListResponse(List<LookInfo> infos) {
+        return toProductLookListResponse(infos, Locale.KOREAN);
+    }
+
+    public ProductLookListResponse toProductLookListResponse(List<LookInfo> infos, Locale locale) {
         return ProductLookListResponse.builder()
-            .looks(infos.stream().map(this::toSummary).toList())
+            .looks(infos.stream().map(info -> toSummary(info, locale)).toList())
             .build();
     }
 
-    private LookSummaryResponse toSummary(LookInfo info) {
+    private LookSummaryResponse toSummary(LookInfo info, Locale locale) {
         return LookSummaryResponse.builder()
             .lookId(String.valueOf(info.lookId()))
             .title(info.title())
             .image(toImageItem(info.image()))
-            .products(info.products().stream().map(this::toProductItem).toList())
+            .products(info.products().stream().map(product -> toProductItem(product, locale)).toList())
             .build();
     }
 
@@ -62,7 +76,7 @@ public class LookWebPresenter {
             .build();
     }
 
-    private LookProductItem toProductItem(LookProductInfo product) {
+    private LookProductItem toProductItem(LookProductInfo product, Locale locale) {
         return LookProductItem.builder()
             .productId(String.valueOf(product.productId()))
             .name(product.name())
@@ -72,7 +86,7 @@ public class LookWebPresenter {
             .listPrice(toMoneyItem(product.listPrice()))
             .discountRate(product.discountRate())
             .hasOptionSurcharge(product.hasOptionSurcharge())
-            .saleStatus(product.saleStatus().toMetadata())
+            .saleStatus(product.saleStatus().toMetadata(locale))
             .customOrder(product.customOrder())
             .preorder(product.preorder())
             .build();

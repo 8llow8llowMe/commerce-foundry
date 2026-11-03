@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.sizechart.adapter.in.web.dto.item.Product
 import com.commercefoundry.domainlayer.sizechart.adapter.in.web.dto.response.ProductSizeChartResponse;
 import com.commercefoundry.domainlayer.sizechart.application.info.ProductSizeChartInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartTemplateDetailInfo;
+import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 /** 고객 사이즈표 응답. 식별자 {@code long → String}, 단위 → metadata 만 한다. 값 변환은 Processor 가 끝냈다. */
@@ -13,12 +14,17 @@ import org.springframework.stereotype.Component;
 public class SizeChartWebPresenter {
 
     public ProductSizeChartResponse toResponse(ProductSizeChartInfo info) {
+        return toResponse(info, Locale.KOREAN);
+    }
+
+    /** @param locale 단위의 표시 언어 (#20). 템플릿 이름 · 칸 이름 · 안내는 운영자가 적은 문구 그대로다 */
+    public ProductSizeChartResponse toResponse(ProductSizeChartInfo info, Locale locale) {
         return ProductSizeChartResponse.builder()
             .productId(Long.toString(info.productId()))
             .templateId(Long.toString(info.templateId()))
             .templateName(info.templateName())
-            .baseUnit(info.baseUnit().toMetadata())
-            .displayUnit(info.displayUnit().toMetadata())
+            .baseUnit(info.baseUnit().toMetadata(locale))
+            .displayUnit(info.displayUnit().toMetadata(locale))
             .note(info.note())
             .columns(info.columns().stream().map(this::toColumn).toList())
             .rows(info.rows().stream().map(this::toRow).toList())

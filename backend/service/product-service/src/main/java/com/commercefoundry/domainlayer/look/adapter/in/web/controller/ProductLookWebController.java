@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.look.adapter.in.web.controller;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.look.adapter.in.web.dto.response.ProductLookListResponse;
 import com.commercefoundry.domainlayer.look.application.port.in.LookWebUseCase;
+import com.commercefoundry.global.web.CustomerLocale;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -11,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -33,7 +35,11 @@ public class ProductLookWebController {
     )
     @PreAuthorize("permitAll()")
     @GetMapping
-    public ResponseEntity<Response<ProductLookListResponse>> getLooksOfProduct(@Parameter(description = "상품 아이디") @PathVariable long productId) {
-        return ResponseEntity.ok().cacheControl(LookWebController.cacheControl()).body(Response.success(lookWebUseCase.getLooksOfProduct(productId)));
+    public ResponseEntity<Response<ProductLookListResponse>> getLooksOfProduct(
+        @Parameter(description = "상품 아이디") @PathVariable long productId,
+        @Parameter(hidden = true) @RequestHeader(value = CustomerLocale.HEADER, required = false) String acceptLanguage
+    ) {
+        return ResponseEntity.ok().cacheControl(LookWebController.cacheControl()).varyBy(CustomerLocale.HEADER)
+            .body(Response.success(CustomerLocale.within(acceptLanguage, () -> lookWebUseCase.getLooksOfProduct(productId))));
     }
 }
