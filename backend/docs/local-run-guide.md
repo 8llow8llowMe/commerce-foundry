@@ -121,6 +121,7 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
     그룹 = job 하나다. 무료 Organization 의 동시 실행 job 한도(20) 때문에 그룹을 늘리면 PR 이 몰릴 때 Queued 대기가 길어진다(#194) —
     그룹을 쪼개기보다 job 안 병렬(`org.gradle.parallel`)에 맡긴다.
   - job 마다 `./gradlew <그룹 모듈>:check --continue --no-build-cache` 로 돌아 한 모듈의 실패가 같은 그룹의 다른 모듈 결과를 가리지 않는다.
+  - CI 의 `product-service` 테스트만 JVM fork 2개로 실행한다. 그 외 모듈과 로컬은 기본값인 fork 1개를 쓴다. 테스트 결과는 기존처럼 모듈별 실행 건수로 확인한다.
   - 그룹 결과는 `check` job 이 모은다.
   - Gradle 홈(의존성 · wrapper)은 캐시하지만 빌드 캐시(`caches/build-cache-1`)는 담지 않는다. 캐시는 develop push 실행만 쓰고 PR 은 읽기만 한다.
 - **PR 은 바꾼 모듈과 그 모듈에 의존하는 모듈만 돌린다**(#179). develop push 는 전 모듈이다. plan job 요약에 고른 모듈과 이유가 남는다.
