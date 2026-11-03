@@ -29,7 +29,6 @@ class OperationsServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport 
     @Override
     protected Map<String, String> auditDeclarationPending() {
         return Map.ofEntries(
-            Map.entry("JobAdminController#cancel", "#163 PR-E"),
             Map.entry("NotificationAdminController#markRead", "#163 PR-E (면제 대상 — 알림 읽음)"),
             Map.entry("NotificationAdminController#markAllRead", "#163 PR-E (면제 대상 — 알림 읽음)"),
             Map.entry("OnboardingAdminController#updateTour", "#163 PR-E (면제 대상 — 본인 온보딩 투어 기록)")

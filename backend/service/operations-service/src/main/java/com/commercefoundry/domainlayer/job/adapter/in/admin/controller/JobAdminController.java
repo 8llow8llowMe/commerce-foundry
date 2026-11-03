@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.job.application.exception.JobValidationMe
 import com.commercefoundry.domainlayer.job.application.model.JobStatusFilter;
 import com.commercefoundry.domainlayer.job.application.port.in.JobAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -82,6 +83,7 @@ public class JobAdminController {
             + "이미 끝난 작업이면 409(JOB_022), 없는 작업이면 404(JOB_001)다. 워커와 계속 겹쳐 반영하지 못하면 409(JOB_021) — 다시 시도한다."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "JOB_CANCEL")
     @PostMapping("/{jobId}/cancel")
     public ResponseEntity<Response<JobAdminResponse>> cancel(
         @AuthenticationPrincipal MemberPrincipal member,

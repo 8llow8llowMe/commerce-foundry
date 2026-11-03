@@ -977,7 +977,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - 쓰는 방식 — 아래 "어드민 쓰기 감사 공통 장치 (#163)" 를 따른다. 기본은 서비스의 `domainlayer/adminaudit` Processor 가 security-core 의 `AdminAuditLog` 를 부르는 것이고,
   out-port(`AdminAuditPort`) · `adapter/out/log` 어댑터는 **DB 싱크가 있는 서비스(auth)만** 둔다. auth 는 Facade 가 포트를 직접 주입하지 않고 `AdminAuditProcessor` 를 부른다
   (ArchUnit H11 — Facade 는 out-port 를 쓰지 않는다). auth 의 DB 싱크(`REQUIRES_NEW`)는 업무가 끝난 뒤(트랜잭션 밖) 부른다. 실패 로그의 대상 선택 같은 감사 정책은 Processor 에 둔다.
-  order · operations 의 `adapter/out/log/*AdminAuditLogAdapter` 는 #163 PR-E 에서 `AdminAuditLog` 로 옮긴다.
+  operations 의 작업 취소는 `JobAdminAuditProcessor` 가 `AdminAuditLog` 를 직접 쓴다(DB 싱크 없음). order 의 `adapter/out/log/OrderAdminAuditLogAdapter` 는 #163 PR-E 에서 옮긴다.
   업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 · SKU 원가 이력 #361 등)는 그 이력이 감사의 정본이고, `admin.audit` 줄도 함께 남긴다(아래 C′).
 - **영속화 (auth-service, #192)** — `AdminAuditPort` 계약은 그대로이고 구현이 `adapter/out/persistence/AdminAuditLogRepositoryAdapter` 다.
   - 순서: `admin.audit` 로그 한 줄(`AdminAuditLogAdapter`)을 **먼저** 남기고 `auth.admin_audit_log` 에 한 행을 더한다. 칸 값은 `AdminAuditRecord` 팩토리 한 곳에서 만든다 —
@@ -1022,7 +1022,8 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   `adminDisplayName` 은 auth-service 표시 이름 벌크 조회가 마스킹해 준 값이다 (#322). 원문 이름은 delivery 에 들어오지 않는다.
   #163 결정(C′)으로 이 표가 정본이고 `admin.audit` 줄도 함께 남긴다(#163 PR-D).
 - 적용 대상 (#6 · #238): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade` — 1단계 · 2단계), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
-- 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` — `action=JOB_CANCEL target=job:<id>`, operations-service `JobAdminAuditLogAdapter`). 작업 목록 · 상세 조회는 남기지 않는다 —
+- 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` → `JobAdminAuditProcessor` → `AdminAuditLog` — `action=JOB_CANCEL target=job:<id>`). 취소의 시도별 트랜잭션과 재시도가 끝난 뒤 최종 결과만 한 번 남긴다.
+  취소 반영 후 응답 재조회가 실패해도 취소 자체는 `SUCCESS` 다. `JobAdminController#cancel` 은 `@AdminAudited` 를 선언하고, 행위자는 access 토큰의 memberId 다. 작업 목록 · 상세 조회는 남기지 않는다 —
   payload · 결과 · 오류에 개인정보 원문을 두지 않는 규칙(`architecture-guide.md` §10)이라 읽기가 개인정보 열람이 아니다. 결과 파일 링크 발급(#212 PR-E)은 남긴다.
 - 적용 대상 (#17): 어드민 주문 목록 · 상세 조회와 상태 변경(`OrderAdminFacade` — order-service `OrderAdminAuditLogAdapter`). 목록은 `action=ORDER_SEARCH target=orders?status=..&from=..&to=..&page=..&size=..`,
   상세는 `action=ORDER_VIEW target=order:<id>`(마스킹했어도 받는 분 · 기본 주소 · 맞춤 입력값을 읽는 행위다), 상태 변경은 `action=ORDER_STATUS_CHANGE target=order:<id>` 이고
@@ -1071,7 +1072,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 |--------|------|------|
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 사용 중 — 선언 · `AdminAuditLog` 통일은 #163 PR-E |
 | order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` | 사용 중 — 선언 · 통일은 #163 PR-E |
-| operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소 선언 · 통일은 #163 PR-E (알림 읽음 · 온보딩 투어는 면제) |
+| operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음 · 온보딩 투어 면제 선언은 후속 |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
 | product | `MEDIA_IMAGE_UPLOAD_ISSUE` · `MEDIA_IMAGE_UPLOAD_CONFIRM` (대상 `media-upload:<UUID>`, 식별자 없는 실패는 `-`) — URL · 전체 키 · ETag · MIME · 바이트 · 헤더 제외 | 사용 중 (#508, `ProductAdminAuditAction`) |
