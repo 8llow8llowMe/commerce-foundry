@@ -101,4 +101,14 @@ public class ProductOptionRepositoryAdapter implements ProductOptionRepositoryPo
                 .displayOrder(value.displayOrder()).retiredAt(value.retiredAt()).build())
             .toList());
     }
+
+    @Override
+    public void retire(long productId, Collection<Long> optionGroupIds, Collection<Long> optionValueIds, java.time.Instant retiredAt) {
+        if (!optionGroupIds.isEmpty()) {
+            productOptionGroupRepository.retire(productId, optionGroupIds, retiredAt);
+        }
+        if (!optionValueIds.isEmpty()) {
+            productOptionValueRepository.retire(productId, optionValueIds, retiredAt);
+        }
+    }
 }

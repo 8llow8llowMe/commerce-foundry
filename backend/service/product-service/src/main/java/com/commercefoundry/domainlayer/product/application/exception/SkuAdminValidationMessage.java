@@ -20,6 +20,9 @@ public final class SkuAdminValidationMessage {
     public static final String OPTION_VALUE_NAMES = "SKU_ADMIN_114:SKU 의 옵션 값 이름을 옵션 순서대로 보내 주세요.";
     public static final String INITIAL_STOCK = "SKU_ADMIN_115:처음 재고는 재고 관리 여부와 0 이상의 수량을 모두 보내 주세요.";
 
+    // 옵션 은퇴 (#9 PR-C2) — 111~115 는 #9 PR-C1 이 쓴다
+    public static final String RETIREMENT_TARGETS = "SKU_ADMIN_116:은퇴할 옵션 · 값을 하나 이상, 각각 50개까지 보내 주세요.";
+
     private SkuAdminValidationMessage() {
     }
 }
