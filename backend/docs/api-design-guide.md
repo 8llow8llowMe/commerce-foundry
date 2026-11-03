@@ -576,7 +576,9 @@ return ResponseEntity.ok().body(Response.success(response));
 `product.created_by_member_id` 에 남는다(본문으로 받지 않는다, 운영자 온보딩 #357 이 읽는다).
 
 - **이 단계의 범위** — 이미지 첨부(#9 F2)는 아래 계약으로 받는다. 맞춤 제작 입력(#9 E2)은 아직 받지 않아 맞춤 제작 꺼짐으로 생긴다.
-  수정 · 판매 상태 변경은 E2 후속 범위이며 삭제는 §2-13에 구현됐다. Idempotency-Key 는 없다 — 같은 본문을 두 번 보내면 상품이 두 개 생긴다(지우면 된다, #9 결정).
+  수정은 하나의 전체 PUT 이 아니라 섹션별 PUT(기본 정보 · 판매 상태 · 노출 `/header`, `/pricing`, `/categories`, `/images`, `/options`, `/skus`)으로 나눠 구현했다
+  (#525 · #553 · #535 · #560 · #576 · #573 — 판매 중지는 `/header` 의 `saleStatus`). 삭제는 §2-13에 구현됐다. 옵션 · 조합 추가 · 은퇴는 #9 후속이다.
+  감사는 `PRODUCT_CREATE`(`security-guide.md` §11-4)다. Idempotency-Key 는 없다 — 같은 본문을 두 번 보내면 상품이 두 개 생긴다(지우면 된다, #9 결정).
 - **본문**: `{name, summary?, descriptionHtml?, categoryId, categoryIds?[], saleStatus, visible, salePrice{amount,currency}, listPrice?, maxQuantityPerOrder?,
   preorder?, expectedShipDate?, optionGroups?[{name, values[]}], skus[{optionValues[], additionalPrice, saleStatus, weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}`.
   - 문구는 앞뒤 공백을 빼고, 빈 요약은 null 이다. 상품명 · 요약 · 옵션 이름은 제어 · 서식 문자를 받지 않는다.
