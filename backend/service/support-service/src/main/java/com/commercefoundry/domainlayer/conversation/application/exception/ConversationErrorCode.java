@@ -16,7 +16,9 @@ public enum ConversationErrorCode {
     INVALID_OWNER("SUPPORT_110", "Conversation owner must be a positive identifier.", HttpStatus.BAD_REQUEST),
     INVALID_LOCALE("SUPPORT_111", "Conversation locale is required.", HttpStatus.BAD_REQUEST),
     INVALID_MESSAGE_KEY("SUPPORT_112", "Message key must be a canonical lowercase UUID.", HttpStatus.BAD_REQUEST),
-    INVALID_MESSAGE_CONTENT("SUPPORT_113", "Message content must contain 1 to 2000 UTF-16 units.", HttpStatus.BAD_REQUEST);
+    INVALID_MESSAGE_CONTENT("SUPPORT_113", "Message content must contain 1 to 2000 UTF-16 units.", HttpStatus.BAD_REQUEST),
+    INVALID_MESSAGE_CURSOR("SUPPORT_114", "Message cursor must be between zero and the observed last sequence.", HttpStatus.BAD_REQUEST),
+    INVALID_MESSAGE_PAGE_SIZE("SUPPORT_115", "Message page size must be between 1 and 100.", HttpStatus.BAD_REQUEST);
 
     private final String code;
     private final String message;

@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.conversation.application.service;
 
 import com.commercefoundry.domainlayer.conversation.application.info.MessageInfo;
+import com.commercefoundry.domainlayer.conversation.application.info.MessagePageInfo;
 import com.commercefoundry.domainlayer.conversation.application.port.in.ConversationMessageInternalUseCase;
 import com.commercefoundry.domainlayer.conversation.application.service.processor.ConversationMessageProcessor;
 import com.commercefoundry.domainlayer.guestsession.application.service.processor.GuestSessionProcessor;
@@ -14,6 +15,17 @@ import org.springframework.transaction.annotation.Transactional;
 public class ConversationMessageInternalFacade implements ConversationMessageInternalUseCase {
     private final ConversationMessageProcessor messages;
     private final GuestSessionProcessor guests;
+
+    @Override
+    @Transactional(readOnly = true)
+    public MessagePageInfo getForMember(long conversationId, long memberId, long afterSeq, int size) {
+        return messages.getForMember(conversationId, memberId, afterSeq, size);
+    }
+
+    @Override
+    public MessagePageInfo getForGuest(long conversationId, String token, long afterSeq, int size) {
+        return messages.getForGuest(conversationId, guests.resolveForUpdate(token), afterSeq, size);
+    }
 
     @Override
     public MessageInfo appendForMember(long conversationId, long memberId, String clientMessageId, String rawContent) {

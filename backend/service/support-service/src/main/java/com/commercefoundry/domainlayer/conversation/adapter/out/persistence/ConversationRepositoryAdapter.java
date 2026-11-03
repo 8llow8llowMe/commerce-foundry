@@ -26,6 +26,16 @@ public class ConversationRepositoryAdapter implements ConversationRepositoryPort
     private final EntityManager entityManager;
 
     @Override
+    public Optional<Long> findLastSeqByIdAndMemberId(long id, long memberId) {
+        return repository.findLastSeqByIdAndMemberId(id, memberId);
+    }
+
+    @Override
+    public Optional<Long> findLastSeqByIdAndGuestSessionId(long id, long guestSessionId) {
+        return repository.findLastSeqByIdAndGuestSessionId(id, guestSessionId);
+    }
+
+    @Override
     public Conversation saveAndFlush(Conversation conversation) {
         try {
             return mapper.toDomain(repository.saveAndFlush(mapper.toEntity(conversation)));
