@@ -72,6 +72,9 @@ export function SectionEditor({
   const [form, setForm] = useState<SectionForm>(initial);
   const [errors, setErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
+  // 올리는 칸 수 — 확정한 주소가 들어오기 전에 저장하면 그 이미지가 빠지므로 그동안 저장을 막는다
+  const [uploads, setUploads] = useState(0);
+  const uploading = uploads > 0;
   const errorsOf = (key: string) => errors[key] ?? [];
   const set = (patch: Partial<SectionForm>) => setForm((current) => ({ ...current, ...patch }));
   const formChanged = useRef(onFormChange);
@@ -85,7 +88,7 @@ export function SectionEditor({
   const mediaByUrl = isMediaUrlType(form.sectionType);
 
   const submit = async () => {
-    if (saving) return;
+    if (saving || uploading) return;
     const built = sectionRequest(form);
     if (!built.ok) {
       setErrors(withSummary(built.errors));
@@ -173,6 +176,11 @@ export function SectionEditor({
             type={form.sectionType}
             media={form.media}
             errorsOf={errorsOf}
+            uploading={uploading}
+            onUploadingChange={(busy) =>
+              setUploads((count) => Math.max(0, count + (busy ? 1 : -1)))
+            }
+            onAccessDenied={onDenied}
             onChange={(media) => {
               set({ media });
               // 미디어 칸 오류 키는 줄 위치(`media.0.url`)라 줄을 넣고 빼면 엉뚱한 줄에 붙는다 — 미디어 오류를 모두 지운다
@@ -231,8 +239,17 @@ export function SectionEditor({
         </ul>
       )}
       <FieldError messages={errorsOf('form')} />
+      {uploading && (
+        <p id={`${id}-uploading`} className="text-sm text-muted-fg">
+          이미지를 올리는 중입니다. 다 올라가면 저장할 수 있습니다.
+        </p>
+      )}
       <div className="flex gap-2">
-        <Button type="submit" disabled={saving}>
+        <Button
+          type="submit"
+          disabled={saving || uploading}
+          aria-describedby={uploading ? `${id}-uploading` : undefined}
+        >
           {saving ? '저장 중…' : '저장'}
         </Button>
         <Button variant="secondary" onClick={onCancel} disabled={saving}>

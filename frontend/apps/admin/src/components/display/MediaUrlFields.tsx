@@ -2,6 +2,8 @@
 
 import { Button, FieldError } from '@cf/ui';
 import { useState } from 'react';
+import { DisplayImageUploadButton } from '@/components/upload/DisplayImageUploadButton';
+import type { AccessDenied } from '@/lib/api-errors';
 import {
   hasMediaCaption,
   hasMobileMedia,
@@ -18,20 +20,28 @@ import { TextInput } from './SectionEditor';
 const FIRST_ONLY: readonly SectionTypeCode[] = ['HERO'];
 
 /**
- * 주소로 넣는 이미지(#419 · #71) — 전시용 업로드 API 가 없어 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다(룩 관리 화면과 같다).
+ * 미디어 칸(#419 · #71). 주소 칸마다 파일 올리기(BE #508 — 확정한 공개 주소가 주소 칸에 들어간다)를 두고, 저장소에 이미 올린 주소도 그대로 넣을 수 있다.
  * 넣고 · 빼고 · 주소와 대체 텍스트를 고친다. 히어로는 모바일 주소를 따로(비우면 PC 사진), 디테일은 클로즈업마다 설명을 쓴다.
- * 저장소 주소인지는 서버가 본다(`PRODUCT_054`). 영상은 주소를 바꾸지 않고 빼기만 한다.
+ * 저장소 주소인지는 서버가 본다(`PRODUCT_054`). 영상은 업로드 API 가 받지 않아 주소를 바꾸지 않고 빼기만 한다.
+ * 올리는 동안(`uploading`)은 줄을 넣고 빼지 않는다 — 끝난 업로드가 줄 위치로 주소를 넣기 때문이다.
  */
 export function MediaUrlFields({
   type,
   media,
   errorsOf,
   onChange,
+  uploading = false,
+  onUploadingChange,
+  onAccessDenied,
 }: {
   type: SectionTypeCode;
   media: MediaFormItem[];
   errorsOf: (key: string) => string[];
   onChange: (media: MediaFormItem[]) => void;
+  /** 이 폼에서 올리는 칸이 있는지 */
+  uploading?: boolean;
+  onUploadingChange?: (uploading: boolean) => void;
+  onAccessDenied?: (denied: AccessDenied) => void;
 }) {
   const [min, max] = ITEM_RANGES[type].media;
   const specHint = mediaSpecHint(type);
@@ -44,8 +54,8 @@ export function MediaUrlFields({
         이미지 ({media.length} / {max}개)
       </legend>
       <p className="text-xs text-muted-fg">
-        이미지 업로드는 준비 중입니다. 지금은 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣어
-        주세요. 다른 사이트의 이미지 주소는 저장되지 않습니다.
+        파일을 올리면 주소 칸이 채워집니다. 쇼핑몰 이미지 저장소에 이미 올린 이미지는 주소를 바로
+        넣어도 됩니다. 다른 사이트의 이미지 주소는 저장되지 않습니다.
         {FIRST_ONLY.includes(type)
           ? ' 메인에는 첫 번째 이미지만 보입니다.'
           : ' 메인에는 넣은 순서대로 모두 보입니다.'}
@@ -61,6 +71,9 @@ export function MediaUrlFields({
             item={item}
             errorsOf={errorsOf}
             removable={media.length > min}
+            locked={uploading}
+            onUploadingChange={onUploadingChange}
+            onAccessDenied={onAccessDenied}
             onChange={(patch) => update(index, patch)}
             onRemove={() => onChange(media.filter((_, at) => at !== index))}
           />
@@ -69,7 +82,7 @@ export function MediaUrlFields({
       <div>
         <Button
           variant="secondary"
-          disabled={media.length >= max}
+          disabled={media.length >= max || uploading}
           onClick={() => onChange([...media, newImageItem()])}
         >
           이미지 주소 추가
@@ -86,6 +99,9 @@ function MediaUrlRow({
   item,
   errorsOf,
   removable,
+  locked,
+  onUploadingChange,
+  onAccessDenied,
   onChange,
   onRemove,
 }: {
@@ -94,6 +110,9 @@ function MediaUrlRow({
   item: MediaFormItem;
   errorsOf: (key: string) => string[];
   removable: boolean;
+  locked: boolean;
+  onUploadingChange?: (uploading: boolean) => void;
+  onAccessDenied?: (denied: AccessDenied) => void;
   onChange: (patch: Partial<MediaFormItem>) => void;
   onRemove: () => void;
 }) {
@@ -134,6 +153,12 @@ function MediaUrlRow({
               required
               onChange={(url) => onChange({ url })}
             />
+            <DisplayImageUploadButton
+              label={`${position}${slot('PC')} 파일 올리기`}
+              onUploaded={(url) => onChange({ url })}
+              onUploadingChange={onUploadingChange}
+              onAccessDenied={onAccessDenied}
+            />
             {split && (
               <TextInput
                 label={`${position} 모바일 주소 (선택)`}
@@ -147,6 +172,14 @@ function MediaUrlRow({
                 }
                 errors={errorsOf(`media.${index}.mobileUrl`)}
                 onChange={(mobileUrl) => onChange({ mobileUrl })}
+              />
+            )}
+            {split && (
+              <DisplayImageUploadButton
+                label={`${position} 모바일 파일 올리기 (선택)`}
+                onUploaded={(mobileUrl) => onChange({ mobileUrl })}
+                onUploadingChange={onUploadingChange}
+                onAccessDenied={onAccessDenied}
               />
             )}
           </>
@@ -190,7 +223,12 @@ function MediaUrlRow({
         )}
         {removable && (
           <div>
-            <Button variant="secondary" onClick={onRemove} aria-label={`${position} 빼기`}>
+            <Button
+              variant="secondary"
+              disabled={locked}
+              onClick={onRemove}
+              aria-label={`${position} 빼기`}
+            >
               빼기
             </Button>
           </div>

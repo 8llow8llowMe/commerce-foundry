@@ -3,7 +3,7 @@ import { accessDeniedOf, type AccessDenied } from '@/lib/api-errors';
 
 // 어드민 이미지 업로드(#29 · BE #9 F1, presigned PUT). 순서는 ① BFF 로 업로드 자리를 발급받고 ② 받은 주소로 파일을 스토리지에 직접 올린 뒤
 // ③ 저장 본문에 `uploadKey` 를 싣는다. ② 는 게이트웨이 · BFF 를 지나지 않는다 — 쿠키를 싣지 않고, 서명 주소는 로그 · 화면에 남기지 않는다.
-// 상품 이미지 발급(`PRODUCT_IMAGE_UPLOAD_PATH`)이 첫 사용처다. 전시 미디어 등 다른 발급 경로도 같은 응답 모양이면 경로만 바꿔 쓴다.
+// 상품 이미지 발급(`PRODUCT_IMAGE_UPLOAD_PATH`)이 첫 사용처다. 전시 이미지는 같은 ①② 뒤에 확정을 더한다(아래 `uploadDisplayImage`).
 
 export const PRODUCT_IMAGE_UPLOAD_PATH = '/api/v1/admin/products/image-uploads';
 
@@ -93,14 +93,19 @@ export function uploadFailure(cause: unknown): ImageUploadFailure {
   }
   if (denied) return { ok: false, kind: 'access', denied };
   if (cause instanceof ApiError) {
+    // 상품(`PRODUCT_03x`, #9) · 전시(`MEDIA_UPLOAD_00x`, #508) 발급이 같은 뜻의 코드를 쓴다
     switch (cause.code) {
       case 'PRODUCT_033':
+      case 'MEDIA_UPLOAD_003':
         return { ok: false, kind: 'error', message: IMAGE_FORMAT_NOT_ALLOWED };
       case 'PRODUCT_034':
+      case 'MEDIA_UPLOAD_004':
         return { ok: false, kind: 'error', message: IMAGE_SIZE_NOT_ALLOWED };
       case 'PRODUCT_036':
+      case 'MEDIA_UPLOAD_006':
         return { ok: false, kind: 'error', message: UPLOAD_DISABLED };
       case 'PRODUCT_035':
+      case 'MEDIA_UPLOAD_007':
         return { ok: false, kind: 'error', message: UPLOAD_UNAVAILABLE };
       default:
         break;
@@ -153,6 +158,119 @@ export async function uploadImage(
     return { ok: false, kind: 'error', message: UPLOAD_FAILED };
   }
   return { ok: true, uploadKey: ticket.uploadKey };
+}
+
+// 전시 · 룩 이미지(#71 · BE #508). 상품과 달리 저장 본문에 키가 아니라 **공개 주소**를 싣는다 —
+// ①② 는 위와 같고, ③ 확정(`/{uploadKey}/confirm`, 본문 없음)이 검증한 사본의 `publicUrl` 을 돌려준다. 확정 전에는 전시를 저장하지 않는다.
+// 확정은 같은 키로 다시 불러도 같은 주소를 준다(BE `display-media-upload-guide.md`) — 결과를 모르는 실패는 파일을 다시 올리지 않고 확정만 다시 한다.
+
+export const DISPLAY_IMAGE_UPLOAD_PATH = '/api/v1/admin/displays/image-uploads';
+
+/** ③ 결과를 모름(연결 끊김 · 일시 장애) — 같은 키로 확정만 다시 하면 된다 */
+export const CONFIRM_UNKNOWN =
+  '이미지를 올렸지만 마무리를 확인하지 못했습니다. "다시 확인"을 눌러 주세요. 파일을 다시 고를 필요는 없습니다.';
+/** ③ 409 — 확정하는 동안 원본이 바뀌었다. 다시 확정하면 지금 원본으로 마무리한다 */
+export const CONFIRM_CHANGED = '올린 파일이 확인 중에 바뀌었습니다. "다시 확인"을 눌러 주세요.';
+/** ③ 404 · 잘못된 키 — 원본이 없다(하루가 지나 지워졌거나 다른 관리자의 키). 다시 올려야 한다 */
+export const CONFIRM_GONE = '올린 파일을 찾지 못했습니다. 파일을 다시 골라 주세요.';
+/** ③ 401 — 키는 하루 동안 남아 있어 다시 로그인한 뒤 확정만 다시 하면 된다 */
+export const CONFIRM_SESSION_EXPIRED =
+  '로그인이 만료되어 이미지를 마무리하지 못했습니다. 새 탭에서 어드민에 다시 로그인한 뒤 "다시 확인"을 눌러 주세요.';
+
+/** 전시 업로드 결과. 확정만 실패하면 `retryKey` 로 같은 파일을 다시 확정할 수 있다(키는 화면에 보이지 않는다) */
+export type DisplayImageResult =
+  | { ok: true; publicUrl: string }
+  | { ok: false; kind: 'access'; denied: AccessDenied }
+  | { ok: false; kind: 'error'; message: string; retryKey?: string };
+
+/** 확정 응답 — BE `MediaImageUploadResponse`. 주소는 업로드 주소와 같은 규칙(https, 로컬 http 화면만 http)으로 본다 */
+function usablePublicUrl(
+  body: unknown,
+  pageProtocol: string | null = typeof location === 'undefined' ? null : location.protocol,
+): string | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const { publicUrl } = body as { publicUrl?: unknown };
+  if (typeof publicUrl !== 'string') return null;
+  let url: URL;
+  try {
+    url = new URL(publicUrl);
+  } catch {
+    return null;
+  }
+  return url.protocol === 'https:' || (url.protocol === 'http:' && pageProtocol === 'http:')
+    ? publicUrl
+    : null;
+}
+
+/** 확정 실패 → 화면 처리. 다시 확정해 풀리는 실패만 `retryKey` 를 남긴다 */
+export function confirmFailure(cause: unknown, uploadKey: string): DisplayImageResult {
+  const retry = (message: string): DisplayImageResult => ({
+    ok: false,
+    kind: 'error',
+    message,
+    retryKey: uploadKey,
+  });
+  const denied = accessDeniedOf(cause);
+  if (denied === 'unauthorized') return retry(CONFIRM_SESSION_EXPIRED);
+  if (denied) return { ok: false, kind: 'access', denied };
+  if (cause instanceof ApiError) {
+    switch (cause.code) {
+      case 'MEDIA_UPLOAD_001':
+      case 'MEDIA_UPLOAD_002':
+      case 'MEDIA_UPLOAD_106':
+        return { ok: false, kind: 'error', message: CONFIRM_GONE };
+      case 'MEDIA_UPLOAD_003':
+        return { ok: false, kind: 'error', message: IMAGE_FORMAT_NOT_ALLOWED };
+      case 'MEDIA_UPLOAD_004':
+        return { ok: false, kind: 'error', message: IMAGE_SIZE_NOT_ALLOWED };
+      case 'MEDIA_UPLOAD_005':
+        return retry(CONFIRM_CHANGED);
+      case 'MEDIA_UPLOAD_006':
+        return { ok: false, kind: 'error', message: UPLOAD_DISABLED };
+      default:
+        break;
+    }
+    if (cause.kind === 'rateLimited') return retry(cause.message);
+  }
+  // 007(스토리지 장애) · 결과 모름 · 예상 못 한 예외 — 확정은 같은 키로 다시 불러도 안전하다
+  return retry(CONFIRM_UNKNOWN);
+}
+
+/** ③ 만 — 처음 확정과 "다시 확인"이 같이 쓴다. 취소(`signal`)만 그대로 던진다 */
+export async function confirmDisplayImage(
+  uploadKey: string,
+  { signal }: { signal?: AbortSignal } = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<DisplayImageResult> {
+  let body: unknown;
+  try {
+    body = await apiFetch<unknown>(
+      `${DISPLAY_IMAGE_UPLOAD_PATH}/${encodeURIComponent(uploadKey)}/confirm`,
+      { method: 'POST', signal },
+      fetchImpl,
+    );
+  } catch (cause) {
+    if (signal?.aborted) throw cause;
+    return confirmFailure(cause, uploadKey);
+  }
+  const publicUrl = usablePublicUrl(body);
+  // 본문 모양이 다르면 결과를 모르는 것과 같다 — 다시 확정하면 같은 주소를 받는다
+  return publicUrl ? { ok: true, publicUrl } : confirmFailure(null, uploadKey);
+}
+
+/** 전시 이미지 한 장 — ①② 는 `uploadImage`, ③ 확정까지 해 공개 주소를 돌려준다 */
+export async function uploadDisplayImage(
+  file: File,
+  { signal }: { signal?: AbortSignal } = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<DisplayImageResult> {
+  const uploaded = await uploadImage(
+    file,
+    { issuePath: DISPLAY_IMAGE_UPLOAD_PATH, signal },
+    fetchImpl,
+  );
+  if (!uploaded.ok) return uploaded;
+  return confirmDisplayImage(uploaded.uploadKey, { signal }, fetchImpl);
 }
 
 /** 크기 표시 — 1MB 미만은 KB(올림), 그 위는 MB 소수 한 자리(.0 은 뺀다) */

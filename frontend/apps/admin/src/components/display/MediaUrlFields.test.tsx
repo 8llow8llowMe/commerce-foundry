@@ -18,9 +18,12 @@ const disabledButton = (html: string, label: string) =>
   new RegExp(`<button[^>]*disabled=""[^>]*>${label}<`).test(html);
 
 describe('MediaUrlFields', () => {
-  it('저장소에 올린 이미지 주소를 넣으라고 안내하고, 주소 · 대체 텍스트 칸과 미리보기를 보인다', () => {
+  it('파일 올리기 · 주소 넣기를 안내하고, 주소 · 대체 텍스트 칸과 미리보기를 보인다', () => {
     const html = render(editForm(section('HERO', { items: [mediaItem()] }), 'HERO').media);
-    expect(html).toContain('쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소');
+    expect(html).toContain('파일을 올리면 주소 칸이 채워집니다');
+    expect(html).toContain('1번째 이미지 PC 파일 올리기');
+    expect(html).toContain('1번째 이미지 모바일 파일 올리기 (선택)');
+    expect(html).toContain('accept="image/jpeg,image/png,image/webp"');
     expect(html).toContain('메인에는 첫 번째 이미지만 보입니다');
     expect(html).toContain('1번째 이미지 PC 주소');
     expect(html).toContain('value="https://cdn.example.test/displays/a-pc.jpg"');
@@ -48,6 +51,15 @@ describe('MediaUrlFields', () => {
     expect(disabledButton(render(ten), '이미지 주소 추가')).toBe(true);
   });
 
+  it('올리는 중이면 줄 넣기 · 빼기를 막는다(끝난 업로드가 줄 위치로 주소를 넣는다)', () => {
+    const two = editForm(section('HERO', { items: [mediaItem(), mediaItem()] }), 'HERO').media;
+    const html = renderToStaticMarkup(
+      <MediaUrlFields type="HERO" media={two} errorsOf={() => []} onChange={() => {}} uploading />,
+    );
+    expect(disabledButton(html, '이미지 주소 추가')).toBe(true);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="2번째 이미지 빼기"/);
+  });
+
   it('영상은 주소 칸 없이 대표 사진과 안내만 둔다', () => {
     const video = mediaItem({
       mediaType: { code: 'VIDEO', name: '영상', description: '' },
@@ -56,6 +68,7 @@ describe('MediaUrlFields', () => {
     });
     const html = render(editForm(section('HERO', { items: [video] }), 'HERO').media);
     expect(html).not.toContain('1번째 영상 주소');
+    expect(html).not.toContain('파일 올리기');
     expect(html).toContain('영상 주소는 여기서 바꿀 수 없습니다');
     expect(html).toContain('src="https://cdn.example.test/v.jpg"');
     expect(html).toContain('1번째 영상 대체 텍스트 (선택)');
