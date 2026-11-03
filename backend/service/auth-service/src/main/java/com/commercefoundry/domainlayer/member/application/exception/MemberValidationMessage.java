@@ -65,6 +65,10 @@ public final class MemberValidationMessage {
     public static final String MARKETING_IDS_SIZE_MAX = "AUTH_155:memberIds 는 최대 100개입니다.";
     public static final String MARKETING_ID_POSITIVE = "AUTH_156:memberId 는 양수여야 합니다.";
 
+    /** 시스템 알림 수신자 internal 조회 (#477). */
+    public static final String NOTIFICATION_RECIPIENT_AFTER_ID_MIN = "AUTH_157:afterId 는 0 이상이어야 합니다.";
+    public static final String NOTIFICATION_RECIPIENT_SIZE_RANGE = "AUTH_158:size 는 1 이상 100 이하여야 합니다.";
+
     private MemberValidationMessage() {
     }
 }

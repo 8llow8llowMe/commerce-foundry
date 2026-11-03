@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
@@ -29,6 +30,7 @@ import lombok.NoArgsConstructor;
 @Table(
     name = "member",
     comment = "회원 (고객 · 관리자)",
+    indexes = @Index(name = "idx_member_role_deactivated_at_id", columnList = "role, deactivated_at, id"),
     uniqueConstraints = @UniqueConstraint(name = MemberEntity.UK_EMAIL, columnNames = "email"),
     check = @CheckConstraint(name = "ck_member_email_normalized", constraint = "email = lower(email)")
 )

@@ -111,6 +111,18 @@ WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 —
   상태 전이가 없는 쓰기라 `@Version` 대신 대상 행(선점 헤더) 비관적 잠금으로 같은 대상의 동시 쓰기를 줄 세운다. 잠금 대기 상한(2000ms)을 넘으면
   재시도 가능한 409 `PRODUCT_031` 이다 (`order-flow-guide.md` §3-2, `coding-conventions.md` §9-1).
 
+### 1-4. 시스템 알림 수신자 조회 (auth-service, #477 A1)
+
+`GET /internal/v1/admin-notification-recipients?afterId=0&size=100`은 `SERVICE_operations-service`만 호출한다(`@Hidden`).
+사용자 ADMIN/CUSTOMER access 토큰 · 무토큰 · 잘못된 서비스 토큰은 401 `SECURITY_007`, 다른 서비스 토큰은 403 `SECURITY_005`다.
+`afterId`는 기본 0 · 0 이상의 long, `size`는 기본 100 · 1~100이다. 각각 범위 오류는 400 `AUTH_157` · `AUTH_158`, 타입/범위 변환 실패는 `AUTH_198`이다.
+
+응답 `dataBody`는 `{memberIds:["..."]}`뿐이다. `role=ADMIN AND deactivated_at IS NULL AND id>afterId`인 ID만 숫자 오름차순으로 최대 size개 읽고,
+Presenter가 Snowflake 문자열로 바꾼다. 계정명 · 이메일 · OTP 상태 · 총 회원 수는 내리지 않는다. 없으면 200 빈 배열이다.
+다음 요청의 afterId는 직전 응답의 마지막 ID다. size 미만이면 종료하고, 정확히 size개면 다음 페이지(마지막 빈 페이지 포함)를 요청한다.
+페이지 사이 활성 변경에 대한 전체 snapshot은 보장하지 않는다. 조회 도중 낮은 ID가 활성화되면 다음 이상 알림의 수신자 조회부터 포함될 수 있다.
+ID projection + limit 한 번이며 count/잠금/개인정보 로딩이 없다. operations 호출 어댑터와 DLT · 알림 생성은 후속 범위다.
+
 ## 2. 응답 구조
 
 - 공통 래퍼 `Response<T>` 를 쓰고, Controller 반환은 `ResponseEntity<Response<T>>` 로 통일한다.

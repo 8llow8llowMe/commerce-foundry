@@ -17,6 +17,13 @@ import org.springframework.data.repository.query.Param;
 
 public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
 
+    /** 수신자 조회는 ID만 읽는다. 운영자 계정 변경에 쓰는 잠금 조회와 분리한다 (#477). */
+    interface AdminRecipientIdView {
+        Long getId();
+    }
+
+    List<AdminRecipientIdView> findByRoleAndDeactivatedAtIsNullAndIdGreaterThanOrderByIdAsc(MemberRole role, long afterId, Pageable pageable);
+
     boolean existsByEmail(String email);
 
     /** 로그인. 이메일은 정규화한 값이고 {@code uk_member_email} 인덱스를 탄다. */

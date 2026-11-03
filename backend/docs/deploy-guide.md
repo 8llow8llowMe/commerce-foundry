@@ -326,6 +326,19 @@ docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) �
 - `app.jar` 는 `.gitignore` 대상이다(`backend/**/app.jar`). 확인이 끝나면 지운다.
 - 정리: `docker compose -p commerce-<module>-dev -f <compose> down` (모듈마다).
 
+### 시스템 알림 수신자 조회 배포 (#477 A1)
+
+auth 배포 전에 `idx_member_role_deactivated_at_id`(`auth.member(role, deactivated_at, id)`)를 적용한다.
+정본은 엔티티와 Hibernate PostgreSQL17 생성 스냅숏(`service/auth-service/src/test/resources/ddl/auth-schema.sql`)이며,
+테스트 스냅숏의 일반 `CREATE INDEX`는 작은 테스트 DB용이다. 운영의 큰 회원 테이블에서는 DDL 담당자가 쓰기 차단 시간을 고려해
+`CREATE INDEX CONCURRENTLY idx_member_role_deactivated_at_id ON auth.member (role, deactivated_at, id)`를 **트랜잭션 밖에서** 실행한다.
+실행 전 같은 이름의 인덱스 정의와 `pg_index.indisvalid`를 확인한다. 실패가 남긴 INVALID 인덱스는 쓰지 못하므로,
+정확한 schema/name을 확인해 `DROP INDEX CONCURRENTLY auth.idx_member_role_deactivated_at_id`를 트랜잭션 밖에서 실행한 뒤 다시 생성한다.
+`IF NOT EXISTS`만으로 잘못된 정의/INVALID를 성공으로 간주하지 않는다. 생성 후 정의·valid 여부를 다시 확인한다.
+기존 PK/이메일 UNIQUE는 제거하지 않으며, 데이터 이관 · 새 Vault 키 · Gateway 라우트 변경은 없다.
+auth를 먼저 배포하고 서비스 토큰의 audience=auth-service / 호출자 operations-service로 내부 조회를 점검한다.
+A1에는 operations 호출 어댑터 · DLT consumer가 없으므로 기존 작업/알림 동작은 그대로이며, 이상 알림 활성화는 후속 배포에서 다룬다.
+
 ### 소셜 로그인 활성화 (#5)
 
 auth 배포 compose만 소셜 키를 전달한다. 기본은 전체/제공자 플래그 모두 false다.
