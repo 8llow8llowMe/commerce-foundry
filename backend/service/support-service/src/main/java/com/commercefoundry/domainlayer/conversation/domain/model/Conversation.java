@@ -17,4 +17,8 @@ public record Conversation(long id, Long memberId, Long guestSessionId, Conversa
     public static Conversation create(long id, Long memberId, Long guestSessionId, ConversationLocale locale) {
         return new Conversation(id, memberId, guestSessionId, locale, ConversationChannel.WEB, ConversationStatus.AI_ACTIVE, 0, null);
     }
+
+    public Conversation advanceSequence() {
+        return new Conversation(id, memberId, guestSessionId, locale, channel, status, Math.addExact(lastSeq, 1), version);
+    }
 }
