@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.product.application.service.processor.Pro
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.persistence.dto.SliceResponse;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.springframework.context.i18n.LocaleContextHolder;
 import lombok.RequiredArgsConstructor;
@@ -38,16 +39,18 @@ public class ProductWebFacade implements ProductWebUseCase {
      */
     @Override
     public SliceResponse<ProductListItemResponse> searchProducts(Long categoryId, ProductSortType sortType, int page, int size) {
+        Locale locale = LocaleContextHolder.getLocale();
         Set<Long> categoryIds = categoryId == null ? null : categoryProcessor.subtreeIdsOf(categoryId);
         ProductSearchCriteria criteria = new ProductSearchCriteria(categoryIds, sortType, page, size);
-        return productWebPresenter.toListResponse(productListProcessor.search(criteria, LocaleContextHolder.getLocale()));
+        return productWebPresenter.toListResponse(productListProcessor.search(criteria, locale), locale);
     }
 
     /** 상품을 먼저 읽는다 — 없거나 숨긴 상품이면 카테고리를 읽지 않고 404 다. */
     @Override
     public ProductDetailResponse getProduct(long productId) {
+        Locale locale = LocaleContextHolder.getLocale();
         Product product = productDetailProcessor.getVisibleProduct(productId);
         List<Category> categoryPath = categoryProcessor.visiblePathOf(product.categoryId());
-        return productWebPresenter.toDetailResponse(productDetailProcessor.getDetail(product, categoryPath, LocaleContextHolder.getLocale()));
+        return productWebPresenter.toDetailResponse(productDetailProcessor.getDetail(product, categoryPath, locale), locale);
     }
 }

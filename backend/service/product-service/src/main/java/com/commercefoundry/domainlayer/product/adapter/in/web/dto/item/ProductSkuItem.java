@@ -22,7 +22,8 @@ public record ProductSkuItem(
     @Schema(description = "판매가 = 기본 판매가 + 옵션 추가금 (서버 계산)")
     MoneyItem salePrice,
 
-    @Schema(description = "판매 상태 — ON_SALE · SOLD_OUT · STOP_SELLING", example = "{\"code\": \"ON_SALE\", \"name\": \"판매중\", \"description\": \"구매할 수 있습니다.\"}")
+    @Schema(description = "판매 상태 — ON_SALE · SOLD_OUT · STOP_SELLING. name/description은 상품과 같은 요청 언어로 표시하며 en 계열 외에는 한국어",
+        example = "{\"code\": \"ON_SALE\", \"name\": \"판매중\", \"description\": \"구매할 수 있습니다.\"}")
     CodeNameDescriptionMetadata saleStatus
 ) {
 }

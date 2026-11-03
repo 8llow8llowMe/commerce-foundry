@@ -34,6 +34,8 @@ import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
+import java.util.Arrays;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageRequest;
@@ -46,6 +48,37 @@ class ProductWebPresenterTest {
     private static final CodeNameDescriptionMetadata ON_SALE = CodeNameDescriptionMetadata.of("ON_SALE", "판매중", "구매할 수 있습니다.");
 
     private final ProductWebPresenter presenter = new ProductWebPresenter();
+
+    @Test
+    void explicitLocaleTranslatesEveryListAndNestedSkuStatusAndKeepsAmountsAndCodes() {
+        var states = SaleAvailability.values();
+        var rows = Arrays.stream(states).map(status -> ProductListItemInfo.builder()
+            .productId(SNOWFLAKE_ID).name("선택된 상품명").salePrice(Money.of(39_000, KRW)).saleStatus(status).build()).toList();
+        var slice = new SliceImpl<>(rows, PageRequest.of(0, 20), false);
+        var list = presenter.toListResponse(slice, Locale.US);
+        assertThat(list.contents()).extracting(item -> item.saleStatus().name()).containsExactly("Available", "Sold out", "No longer sold");
+        assertThat(list.contents()).extracting(item -> item.saleStatus().code()).containsExactly("ON_SALE", "SOLD_OUT", "STOP_SELLING");
+        assertThat(list.contents()).allSatisfy(item -> {
+            assertThat(item.salePrice()).isEqualTo(MoneyItem.of(39_000, "KRW"));
+            assertThat(item.name()).isEqualTo("선택된 상품명");
+        });
+        var info = ProductDetailInfo.builder().productId(SNOWFLAKE_ID).name("선택된 상품명")
+            .categoryPath(List.of()).images(List.of()).optionGroups(List.of()).salePrice(Money.of(39_000, KRW))
+            .saleStatus(SaleAvailability.SOLD_OUT).skus(Arrays.stream(states)
+                .map(status -> new ProductSkuInfo(9001, List.of(), Money.zero(KRW), Money.of(39_000, KRW), status)).toList()).build();
+        var detail = presenter.toDetailResponse(info, Locale.UK);
+        assertThat(detail.saleStatus().name()).isEqualTo("Sold out");
+        assertThat(detail.saleStatus().description()).isEqualTo("This item is out of stock.");
+        assertThat(detail.skus()).extracting(sku -> sku.saleStatus().name()).containsExactly("Available", "Sold out", "No longer sold");
+        assertThat(detail.skus()).extracting(sku -> sku.saleStatus().code()).containsExactly("ON_SALE", "SOLD_OUT", "STOP_SELLING");
+        assertThat(detail.skus()).allSatisfy(sku -> assertThat(sku.salePrice()).isEqualTo(MoneyItem.of(39_000, "KRW")));
+        assertThat(presenter.toListResponse(slice).contents()).extracting(item -> item.saleStatus().name()).containsExactly("판매중", "품절", "판매 종료");
+        var koreanDetail = presenter.toDetailResponse(info);
+        assertThat(koreanDetail.saleStatus().name()).isEqualTo("품절");
+        assertThat(koreanDetail.skus()).extracting(sku -> sku.saleStatus().name()).containsExactly("판매중", "품절", "판매 종료");
+        assertThat(presenter.toDetailResponse(info, null)).isEqualTo(koreanDetail);
+        assertThat(presenter.toDetailResponse(info, Locale.FRANCE)).isEqualTo(koreanDetail);
+    }
 
     @Test
     @DisplayName("목록은 SliceResponse.map 으로 항목만 바꾸고 hasNext 를 그대로 둔다 — 아이디는 문자열, 금액은 MoneyItem, 판매 상태는 metadata 다")

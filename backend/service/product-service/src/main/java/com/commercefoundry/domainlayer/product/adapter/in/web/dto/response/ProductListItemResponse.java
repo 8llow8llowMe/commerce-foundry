@@ -37,7 +37,8 @@ public record ProductListItemResponse(
     @Schema(description = "판매중 옵션끼리 추가금이 다른가", example = "true")
     boolean hasOptionSurcharge,
 
-    @Schema(description = "판매 상태 — ON_SALE · SOLD_OUT · STOP_SELLING", example = "{\"code\": \"ON_SALE\", \"name\": \"판매중\", \"description\": \"구매할 수 있습니다.\"}")
+    @Schema(description = "판매 상태 — ON_SALE · SOLD_OUT · STOP_SELLING. name/description은 Accept-Language의 en 계열이면 영어, 그 밖에는 한국어",
+        example = "{\"code\": \"ON_SALE\", \"name\": \"판매중\", \"description\": \"구매할 수 있습니다.\"}")
     CodeNameDescriptionMetadata saleStatus,
 
     @Schema(description = "맞춤 제작 상품인가. 스토어 맞춤 제작 기능이 꺼져 있으면 false", example = "false")

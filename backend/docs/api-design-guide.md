@@ -680,7 +680,18 @@ PUT은 `{thresholdQuantity}`(필수 long, 0 이상)를 받고 정책만 교체�
 
 고객 상품 목록과 상세의 상품명·요약·상세 HTML은 `Accept-Language`가 `en` 계열일 때 영문 저장 값을 우선한다(#20).
 영문 값이 비어 있으면 **필드별로** 기존 한국어 값을 사용한다. 헤더가 없거나 지원하지 않는 언어도 한국어다.
-두 응답에는 `Vary: Accept-Language`를 넣어 언어별 캐시를 구분한다. 가격·옵션명·enum metadata와 전시/룩 카드는 이 단계에서 기존 KRW·한국어 계약을 유지한다.
+두 응답에는 `Vary: Accept-Language`를 넣어 언어별 캐시를 구분한다. 고객 상품 목록 · 상세 · 상세 SKU의 `saleStatus` metadata도 같은 요청 언어를 사용한다.
+`en`, `en-US`, `en-GB` 등 en 계열은 영어 `name`/`description`, 한국어 · 미지원 언어 · 헤더 없음은 기존 한국어다.
+JSON 모양 `{code, name, description}`과 판매 가능 판정 · code는 유지한다. 상품 문구에 영문 저장 값이 없어 한국어로 폴백해도 상태 표시는 요청 언어를 따른다.
+
+| code | 영어 name | 영어 description |
+|---|---|---|
+| `ON_SALE` | Available | This item is available for purchase. |
+| `SOLD_OUT` | Sold out | This item is out of stock. |
+| `STOP_SELLING` | No longer sold | This item is no longer sold. |
+
+어드민 · internal · 전시/룩 응답은 기존 한국어 metadata를 유지한다. 가격 · 통화 · 재고는 바뀌지 않으며 옵션명, 다른 enum · 응답 컨텍스트의 번역과 USD 가격은 #20 후속이다.
+FE는 code로 분기하고 name/description을 표시한다(계약 검토자 `seonghoho`). 이번 판매 상태 표시 범위가 끝나도 #20 전체 완료는 아니다.
 
 | 응답 | 필드 | 뜻 |
 |------|------|----|
