@@ -12,6 +12,7 @@
 | `architecture-guide.md` | MSA 모듈 구성, Hexagonal 패키지, 계층 책임, 보안 기준, 멀티 스토어 기준 |
 | `coding-conventions.md` | 줄 길이, 네이밍, Swagger, 식별자 String, 예외·검증 코드, 엔티티·금액·쿼리, Feign·서킷 |
 | `api-design-guide.md` | 경로 체계(고객/어드민/internal/webhook), 응답·오류 봉투, 금액 표현, 페이지네이션, 멱등성 |
+| `put-patch-review.md` | PUT API 15개 점검, 전체 교체 유지 근거와 온보딩 병합 PATCH 전환 (#561) |
 | `payment-guide.md` | 토스페이먼츠 통합 결제 — 승인 흐름, 중복 방지, UNKNOWN, 웹훅, 환불, USD/PayPal |
 | `order-flow-guide.md` | 주문·재고·배송·클레임 상태 전이와 동시성 |
 | `concurrency-control-review.md` | BE 락 사용처 점검, Redis·조건부 갱신·DB 락 선택 근거와 재검토 조건 (#510) |

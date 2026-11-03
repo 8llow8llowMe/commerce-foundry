@@ -31,7 +31,8 @@ class OperationsServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport 
         return Map.ofEntries(
             Map.entry("NotificationAdminController#markRead", "#163 PR-E (면제 대상 — 알림 읽음)"),
             Map.entry("NotificationAdminController#markAllRead", "#163 PR-E (면제 대상 — 알림 읽음)"),
-            Map.entry("OnboardingAdminController#updateTour", "#163 PR-E (면제 대상 — 본인 온보딩 투어 기록)")
+            Map.entry("OnboardingAdminController#updateTour", "#163 PR-E (면제 대상 — 본인 온보딩 투어 기록)"),
+            Map.entry("OnboardingAdminController#updateTourLegacy", "#163 PR-E (면제 대상 — 본인 온보딩 투어 기록)")
         );
     }
 }

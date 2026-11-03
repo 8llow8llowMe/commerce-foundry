@@ -19,6 +19,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -53,15 +54,36 @@ public class OnboardingAdminController {
 
     @Operation(
         summary = "안내 투어 진행 기록",
-        description = "다른 기기 · 탭의 기록과 합친다 — 같은 버전이면 상태가 뒤로 가지 않고(완료 · 건너뜀 뒤 진행 중은 무시, 건너뜀 → 완료만 허용) 단계는 큰 쪽이다. "
+        description = "조건부 병합 API 이며 일반 JSON Merge Patch 가 아니다. guideVersion · status 는 필수다. "
+            + "같은 안내 버전에서는 currentStep 이 null 이거나 생략되면 기존 단계를 유지한다. "
+            + "다른 기기 · 탭의 기록과 합친다 — 같은 버전이면 상태가 뒤로 가지 않고(완료 · 건너뜀 뒤 진행 중은 무시, 건너뜀 → 완료만 허용) 단계는 큰 쪽이다. "
             + "guideVersion 은 배포된 버전과 같아야 한다 — 기록 버전이 다르면 교체한다. 같은 본문을 다시 보내도 결과가 같다. "
             + "status=NOT_STARTED 는 재실행 — 버전과 관계없이 기록을 지우고 NOT_STARTED 를 낸다(실제 상품 · 설정은 그대로). "
             + "허용 목록에 없는 안내면 404(ONBOARDING_001) — 로컬 저장으로 돌아간다. 배포된 버전보다 오래된 버전이면 409(ONBOARDING_020), "
             + "다른 기기와 계속 겹치면 409(ONBOARDING_021) — 다시 시도한다. 배포되지 않은 버전이면 400(ONBOARDING_103)이다."
     )
     @PreAuthorize("hasRole('ADMIN')")
-    @PutMapping("/tours/{guideKey}")
+    @PatchMapping("/tours/{guideKey}")
     public ResponseEntity<Response<OnboardingTourItem>> updateTour(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "안내 키 (영문 소문자로 시작하는 소문자 · 숫자 · 하이픈 1 ~ 64자)", example = "console")
+        @PathVariable @Pattern(regexp = OnboardingValidationMessage.GUIDE_KEY_PATTERN_REGEXP, message = OnboardingValidationMessage.GUIDE_KEY_PATTERN) String guideKey,
+        @Valid @RequestBody OnboardingTourUpdateRequest request
+    ) {
+        return ResponseEntity.ok().body(Response.success(onboardingAdminUseCase.updateTour(member.memberId(), request.toCommand(guideKey))));
+    }
+
+    @Operation(
+        summary = "안내 투어 진행 기록 (PUT 호환)",
+        description = "기존 클라이언트를 위한 호환 API 다. PATCH /api/v1/admin/onboarding/me/tours/{guideKey} 사용을 권장한다. "
+            + "PATCH 와 동일한 조건부 병합이며 전체 교체나 일반 JSON Merge Patch 가 아니다. guideVersion · status 는 필수이고 "
+            + "같은 안내 버전에서는 currentStep 이 null 이거나 생략되면 기존 단계를 유지한다. "
+            + "상태 · 단계 병합, NOT_STARTED 재실행과 버전 · 오류 계약도 PATCH 와 같다.",
+        deprecated = true
+    )
+    @PreAuthorize("hasRole('ADMIN')")
+    @PutMapping("/tours/{guideKey}")
+    public ResponseEntity<Response<OnboardingTourItem>> updateTourLegacy(
         @AuthenticationPrincipal MemberPrincipal member,
         @Parameter(description = "안내 키 (영문 소문자로 시작하는 소문자 · 숫자 · 하이픈 1 ~ 64자)", example = "console")
         @PathVariable @Pattern(regexp = OnboardingValidationMessage.GUIDE_KEY_PATTERN_REGEXP, message = OnboardingValidationMessage.GUIDE_KEY_PATTERN) String guideKey,

@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -84,8 +85,8 @@ class OnboardingAdminControllerTest {
         return mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange();
     }
 
-    private MvcTestResult put(String uri, String body, MemberRole role) {
-        return mvc.put().uri(uri).header(HttpHeaders.AUTHORIZATION, bearer(role)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    private MvcTestResult patch(String uri, String body, MemberRole role) {
+        return mvc.patch().uri(uri).header(HttpHeaders.AUTHORIZATION, bearer(role)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
     }
 
     private static String bearer(MemberRole role) {
@@ -108,6 +109,8 @@ class OnboardingAdminControllerTest {
         void anonymousIsUnauthorized() {
             SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
             SecurityEnvelopeAssertions.assertEnvelope(
+                mvc.patch().uri(TOUR_PATH).contentType(MediaType.APPLICATION_JSON).content(BODY).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+            SecurityEnvelopeAssertions.assertEnvelope(
                 mvc.put().uri(TOUR_PATH).contentType(MediaType.APPLICATION_JSON).content(BODY).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
             verifyNoInteractions(onboardingAdminUseCase);
         }
@@ -116,7 +119,10 @@ class OnboardingAdminControllerTest {
         @DisplayName("CUSTOMER 면 조회 · 기록 모두 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")
         void customerIsForbidden() {
             SecurityEnvelopeAssertions.assertEnvelope(get(MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
-            SecurityEnvelopeAssertions.assertEnvelope(put(TOUR_PATH, BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(patch(TOUR_PATH, BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(
+                mvc.put().uri(TOUR_PATH).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER))
+                    .contentType(MediaType.APPLICATION_JSON).content(BODY).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
             verifyNoInteractions(onboardingAdminUseCase);
         }
     }
@@ -175,7 +181,7 @@ class OnboardingAdminControllerTest {
     }
 
     @Nested
-    @DisplayName("기록")
+    @DisplayName("PATCH 기록")
     class Update {
 
         @Test
@@ -183,9 +189,41 @@ class OnboardingAdminControllerTest {
         void records() {
             given(onboardingAdminUseCase.updateTour(anyLong(), any())).willReturn(item(TourStatus.IN_PROGRESS, 2, null));
 
-            MvcTestResult result = put(TOUR_PATH, BODY, MemberRole.ADMIN);
+            MvcTestResult result = patch(TOUR_PATH, BODY, MemberRole.ADMIN);
 
             assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("IN_PROGRESS");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.currentStep").asNumber().isEqualTo(2);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.finishedAt").isNull();
+            verify(onboardingAdminUseCase).updateTour(TestTokens.MEMBER_ID, new TourProgressUpdateCommand("console", 1, TourStatus.IN_PROGRESS, 2));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+            "{\"guideVersion\": 1, \"status\": \"IN_PROGRESS\"}",
+            "{\"guideVersion\": 1, \"status\": \"IN_PROGRESS\", \"currentStep\": null}"
+        })
+        @DisplayName("currentStep 생략과 null 은 모두 null command 로 전달한다")
+        void omittedOrNullStep(String body) {
+            given(onboardingAdminUseCase.updateTour(anyLong(), any())).willReturn(item(TourStatus.IN_PROGRESS, 2, null));
+
+            MvcTestResult result = patch(TOUR_PATH, body, MemberRole.ADMIN);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.currentStep").asNumber().isEqualTo(2);
+            verify(onboardingAdminUseCase).updateTour(TestTokens.MEMBER_ID, new TourProgressUpdateCommand("console", 1, TourStatus.IN_PROGRESS, null));
+        }
+
+        @Test
+        @DisplayName("기존 PUT 도 ADMIN 에게 같은 command 와 200 응답을 제공한다")
+        void legacyPutRecords() {
+            given(onboardingAdminUseCase.updateTour(anyLong(), any())).willReturn(item(TourStatus.IN_PROGRESS, 2, null));
+
+            MvcTestResult result = mvc.put().uri(TOUR_PATH).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))
+                .contentType(MediaType.APPLICATION_JSON).content(BODY).exchange();
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
             assertThat(result).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("IN_PROGRESS");
             assertThat(result).bodyJson().extractingPath("$.dataBody.currentStep").asNumber().isEqualTo(2);
             assertThat(result).bodyJson().extractingPath("$.dataBody.finishedAt").isNull();
@@ -197,7 +235,7 @@ class OnboardingAdminControllerTest {
         void ignoresMemberIdInBody() {
             given(onboardingAdminUseCase.updateTour(anyLong(), any())).willReturn(item(TourStatus.SKIPPED, null, Instant.parse("2026-10-28T01:00:00Z")));
 
-            assertThat(put(TOUR_PATH, """
+            assertThat(patch(TOUR_PATH, """
                 {"memberId": 999, "guideVersion": 1, "status": "SKIPPED"}
                 """, MemberRole.ADMIN)).hasStatusOk();
 
@@ -219,7 +257,7 @@ class OnboardingAdminControllerTest {
             """)
         @DisplayName("검증 코드 — 400 이고 유스케이스를 부르지 않는다. 본문 오류의 필드명은 파라미터 이름(request)이 아니라 본문 필드명이다")
         void invalid(String suffix, String body, String code, String field) {
-            MvcTestResult result = put(PATH + suffix, body, MemberRole.ADMIN);
+            MvcTestResult result = patch(PATH + suffix, body, MemberRole.ADMIN);
 
             assertFail(result, HttpStatus.BAD_REQUEST, code);
             if (field != null) {
@@ -231,7 +269,7 @@ class OnboardingAdminControllerTest {
         @Test
         @DisplayName("본문 오류가 둘이면 record 선언 순서다 — guideVersion 누락 + currentStep 201 은 대표 코드 ONBOARDING_102")
         void multipleBodyErrorsFollowDeclarationOrder() {
-            MvcTestResult result = put(TOUR_PATH, """
+            MvcTestResult result = patch(TOUR_PATH, """
                 {"status": "IN_PROGRESS", "currentStep": 201}
                 """, MemberRole.ADMIN);
 
@@ -244,7 +282,7 @@ class OnboardingAdminControllerTest {
         @Test
         @DisplayName("경로 오류와 본문 오류가 함께면 둘 다 싣는다 — 필드명은 guideKey 와 본문 필드명")
         void pathAndBodyErrorsTogether() {
-            MvcTestResult result = put(PATH + "/tours/Console", """
+            MvcTestResult result = patch(PATH + "/tours/Console", """
                 {"guideVersion": 1, "status": "IN_PROGRESS", "currentStep": 201}
                 """, MemberRole.ADMIN);
 
@@ -258,20 +296,20 @@ class OnboardingAdminControllerTest {
         void notFound() {
             willThrow(new OnboardingException(OnboardingErrorCode.GUIDE_NOT_FOUND)).given(onboardingAdminUseCase).updateTour(anyLong(), any());
 
-            assertFail(put(PATH + "/tours/unknown", BODY, MemberRole.ADMIN), HttpStatus.NOT_FOUND, "ONBOARDING_001");
+            assertFail(patch(PATH + "/tours/unknown", BODY, MemberRole.ADMIN), HttpStatus.NOT_FOUND, "ONBOARDING_001");
         }
 
         @Test
         @DisplayName("오래된 버전은 409 · ONBOARDING_020, 계속 겹치면 409 · ONBOARDING_021, 배포 전 버전은 400 · ONBOARDING_103 봉투다")
         void conflicts() {
             willThrow(new OnboardingException(OnboardingErrorCode.STALE_GUIDE_VERSION)).given(onboardingAdminUseCase).updateTour(anyLong(), any());
-            assertFail(put(TOUR_PATH, BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "ONBOARDING_020");
+            assertFail(patch(TOUR_PATH, BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "ONBOARDING_020");
 
             willThrow(new OnboardingException(OnboardingErrorCode.CONCURRENT_UPDATE)).given(onboardingAdminUseCase).updateTour(anyLong(), any());
-            assertFail(put(TOUR_PATH, BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "ONBOARDING_021");
+            assertFail(patch(TOUR_PATH, BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "ONBOARDING_021");
 
             willThrow(new OnboardingException(OnboardingErrorCode.UNRELEASED_GUIDE_VERSION)).given(onboardingAdminUseCase).updateTour(anyLong(), any());
-            assertFail(put(TOUR_PATH, BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "ONBOARDING_103");
+            assertFail(patch(TOUR_PATH, BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "ONBOARDING_103");
         }
     }
 }

@@ -1546,13 +1546,22 @@ FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가�
 
 ## 운영자 온보딩 계약 (#357)
 
-어드민 안내 투어(#228)의 진행을 브라우저가 아니라 운영자별로 서버에 둔다. 두 API 모두 `hasRole('ADMIN')` 이고 operations-service 다(게이트웨이 `ServiceRoute.OPERATIONS`,
+어드민 안내 투어(#228)의 진행을 브라우저가 아니라 운영자별로 서버에 둔다. 조회·기록 API 모두 `hasRole('ADMIN')` 이고 operations-service 다(게이트웨이 `ServiceRoute.OPERATIONS`,
 `/api/v1/admin/onboarding/**`). 운영자는 access 토큰의 memberId 로만 정한다 — 경로 · 본문으로 받지 않아 남의 기록을 읽거나 쓸 수 없다.
 
 | API | 입력 | 응답 dataBody |
 |---|---|---|
 | `GET /api/v1/admin/onboarding/me` | — | `{tours, tasks}` — `tours` 는 배포된 투어 전부(설정 순서), `tasks` 는 업무 전부(고정 순서, 아래 "업무 완료 tasks") |
-| `PUT /api/v1/admin/onboarding/me/tours/{guideKey}` | `{guideVersion, status, currentStep}` | tour 항목 하나 |
+| `PATCH /api/v1/admin/onboarding/me/tours/{guideKey}` | `{guideVersion, status, currentStep?}` | tour 항목 하나 |
+| `PUT /api/v1/admin/onboarding/me/tours/{guideKey}` (deprecated 호환 별칭) | PATCH와 같음 | PATCH와 같음 |
+
+투어 기록은 기존 상태·단계와 병합하므로 PATCH를 정식 메서드로 사용한다(#561).
+기존 PUT도 같은 인가·검증·UseCase·응답으로 유지하며 삭제 일정은 FE 전환 확인 후 별도로 정한다.
+본문은 `application/json`이고 `guideVersion`·`status`는 필수다. JSON Merge Patch 형식이 아니다.
+같은 버전에서 `currentStep` 생략/null은 기존 단계를 지우지 않으며 단계 최댓값과 완료 상태를 보존한다.
+새 버전 교체와 `NOT_STARTED` 재실행 초기화 규칙은 그대로다.
+FE는 BE 배포 뒤 `lib/tour/onboarding-api.ts`의 메서드를 PUT에서 PATCH로 전환할 수 있다.
+전체 PUT 점검과 유지·보류 근거는 [PUT · PATCH 계약 점검](put-patch-review.md)을 따른다.
 
 - tour 항목은 `{guideKey, guideVersion, status{code,name,description}, currentStep, finishedAt}` 다. `guideVersion` 은 지금 배포된 버전, `finishedAt` 은 UTC ISO 다.
   status 는 `NOT_STARTED` · `IN_PROGRESS` · `COMPLETED` · `SKIPPED` 다. **안내를 본 기록일 뿐 실제 업무 완료가 아니다** — 업무 완료(`tasks`)는 담당 서비스의 사실로만 판정한다(#357 PR-B).
