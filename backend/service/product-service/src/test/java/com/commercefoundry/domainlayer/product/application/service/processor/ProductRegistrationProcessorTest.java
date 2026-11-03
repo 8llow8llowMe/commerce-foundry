@@ -15,13 +15,15 @@ class ProductRegistrationProcessorTest {
         var writes = mock(ProductWriteProcessor.class);
         var details = mock(ProductAdminDetailProcessor.class);
         var images = mock(ProductImageRepositoryPort.class);
-        var processor = new ProductRegistrationProcessor(writes, details, images);
+        var customOrders = mock(ProductCustomOrderProcessor.class);
+        var processor = new ProductRegistrationProcessor(writes, details, images, customOrders);
         var tree = CategoryTree.of(List.of());
         var command = ProductCreateCommand.builder().build();
         assertThat(processor.register(7, command, null, List.of(12L), List.of(), tree)).isNull();
-        var order = inOrder(writes, images, details);
+        var order = inOrder(writes, customOrders, images, details);
         order.verify(writes).requireCategories(tree, List.of(12L));
         order.verify(writes).create(command, null, List.of(12L), 7);
+        order.verify(customOrders).insertForNewProduct(7, command.customOrder());
         order.verify(images).insertAll(List.of());
         order.verify(details).getProduct(7);
     }

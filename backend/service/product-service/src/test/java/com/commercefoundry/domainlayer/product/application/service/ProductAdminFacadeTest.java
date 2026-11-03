@@ -83,7 +83,8 @@ class ProductAdminFacadeTest {
     void setUp() {
         facade = new ProductAdminFacade(idGenerator(), new com.commercefoundry.domainlayer.product.application.service.processor.ProductRegistrationProcessor(
             productWriteProcessor, productAdminDetailProcessor,
-            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort.class)),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductCustomOrderProcessor.class)),
             attachments(), new TestTransactionManager(null), categoryProcessor, productAdminQueryProcessor, new ProductAdminPresenter(), productAdminDetailProcessor,
             productWriteProcessor, new ProductDescriptionSanitizer(), org.mockito.Mockito.mock(
             com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class),
@@ -92,7 +93,8 @@ class ProductAdminFacadeTest {
             productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class),
-            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductCustomOrderProcessor.class));
     }
 
     private com.commercefoundry.persistence.util.SnowflakeIdGenerator idGenerator() {
@@ -213,7 +215,8 @@ class ProductAdminFacadeTest {
             productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class),
-            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductCustomOrderProcessor.class));
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, org.mockito.Mockito.times(confirmedRollback ? 1 : 0)).cleanup(List.of("products/7/8.png"));
         verify(productAdminAuditProcessor).productCreated(100L, null, false);
@@ -242,7 +245,8 @@ class ProductAdminFacadeTest {
             productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class),
-            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductCustomOrderProcessor.class));
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, never()).cleanup(any());
         // 상품은 커밋됐다 — 응답 조립 실패와 무관하게 등록 성공으로 남긴다
