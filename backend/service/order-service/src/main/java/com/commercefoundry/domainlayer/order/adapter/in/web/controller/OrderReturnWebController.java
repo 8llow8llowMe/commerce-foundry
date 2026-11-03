@@ -38,8 +38,8 @@ public class OrderReturnWebController {
     @Operation(summary = "부분 반품 접수", description = "CUSTOMER 본인 주문의 DELIVERED·RETURN_REQUESTED 상태에서 부분 반품을 접수한다. "
         + "신규 201, 같은 주문·키·정렬한 항목 본문 재생 200이다. 키는 완전한 UUID 36자이며 대소문자는 구분하지 않는다. "
         + "환불 실행·배송비 계산·재고 복원은 하지 않으며 expectedRefund는 미산정 null이다. "
-        + "없는 주문·타인 주문 404(ORDER_001), 상태 거절 409(ORDER_020), 동시 변경 409(ORDER_025), 항목 오류 400(ORDER_028), "
-        + "잔여 수량 초과 409(ORDER_029), 같은 키 다른 본문 409(ORDER_030), 저장 실패 500(ORDER_021), 헤더 형식 400(ORDER_198), 누락 400(ORDER_199).")
+        + "없는 주문·타인 주문 404(ORDER_001), 상태 거절 409(ORDER_020), 동시 변경 409(ORDER_025), 항목 오류 400(ORDER_029), "
+        + "잔여 수량 초과 409(ORDER_030), 같은 키 다른 본문 409(ORDER_031), 저장 실패 500(ORDER_021), 헤더 형식 400(ORDER_198), 누락 400(ORDER_199).")
     @PreAuthorize("hasRole('CUSTOMER')")
     @PostMapping
     public ResponseEntity<Response<OrderReturnResponse>> request(
