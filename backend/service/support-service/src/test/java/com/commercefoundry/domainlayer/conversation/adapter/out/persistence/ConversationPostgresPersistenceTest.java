@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -27,6 +29,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @DataJpaTest
+// Override this class's slice-test transaction too: other threads must see committed fixture rows.
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Testcontainers
 @EnabledWithDockerOrOnCi
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -51,7 +55,7 @@ class ConversationPostgresPersistenceTest extends ConversationPersistenceContrac
                 await(release);
             }));
             try {
-                assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+                awaitReady(locked, holder);
                 var contender = executor.submit(() -> {
                     busy(() -> conversations.createForGuest(guest.token(), ConversationLocale.KO));
                     busy(() -> conversations.getForGuest(conversation.id(), guest.token()));
@@ -86,7 +90,7 @@ class ConversationPostgresPersistenceTest extends ConversationPersistenceContrac
                 await(release);
             }));
             try {
-                assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+                awaitReady(locked, holder);
                 var revoke = executor.submit(() -> guests.revoke(guest.id()));
                 assertThat(revokeRead.await(10, TimeUnit.SECONDS)).isTrue();
                 assertThat(revoke.isDone()).isFalse();
@@ -115,7 +119,7 @@ class ConversationPostgresPersistenceTest extends ConversationPersistenceContrac
                 await(release);
             }));
             try {
-                assertThat(written.await(10, TimeUnit.SECONDS)).isTrue();
+                awaitReady(written, revoke);
                 executor.submit(() -> busy(() -> conversations.createForGuest(guest.token(), ConversationLocale.KO))).get(5, TimeUnit.SECONDS);
                 assertThat(repository.count()).isZero();
             } finally {
@@ -142,6 +146,13 @@ class ConversationPostgresPersistenceTest extends ConversationPersistenceContrac
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted transaction coordination", failure);
+        }
+    }
+
+    private static void awaitReady(CountDownLatch signal, java.util.concurrent.Future<?> worker) throws Exception {
+        if (!signal.await(10, TimeUnit.SECONDS)) {
+            worker.get(1, TimeUnit.SECONDS);
+            throw new AssertionError("Worker completed without reaching the transaction coordination point");
         }
     }
 

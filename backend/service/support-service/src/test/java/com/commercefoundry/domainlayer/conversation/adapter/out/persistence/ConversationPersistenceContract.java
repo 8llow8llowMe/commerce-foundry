@@ -72,6 +72,15 @@ abstract class ConversationPersistenceContract {
     }
 
     @Test
+    void committedGuestCanBeAuthenticatedInsideAnIndependentThreadTransaction() throws Exception {
+        var guest = guests.issue();
+        try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var result = executor.submit(() -> tx.execute(status -> guests.resolveForUpdate(guest.token())));
+            assertThat(result.get(5, java.util.concurrent.TimeUnit.SECONDS).id()).isEqualTo(guest.id());
+        }
+    }
+
+    @Test
     void ownersAreIsolatedAndCreationIsDeliberatelyNonIdempotent() {
         var firstGuest = guests.issue();
         var secondGuest = guests.issue();
