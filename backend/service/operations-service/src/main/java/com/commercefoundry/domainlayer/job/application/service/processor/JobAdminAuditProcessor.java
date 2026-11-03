@@ -1,24 +1,20 @@
 package com.commercefoundry.domainlayer.job.application.service.processor;
 
-import com.commercefoundry.domainlayer.job.application.port.out.JobAdminAuditPort;
-import lombok.RequiredArgsConstructor;
+import com.commercefoundry.security.audit.AdminAuditLog;
 import org.springframework.stereotype.Component;
 
 /**
- * 어드민 작업 행위 감사. Facade 는 감사 포트를 직접 쓰지 않고 이 Processor 를 부른다 (ArchUnit H11, {@code security-guide.md} §11-4).
- * 업무가 끝난 뒤(트랜잭션 밖) 부른다.
+ * 어드민 작업 행위 감사 ({@code security-guide.md} §11-4). DB 싱크가 없어 공통 로그 유틸을 직접 쓴다.
+ * Facade 가 취소의 최종 결과가 정해진 뒤(시도별 트랜잭션 밖) 한 번 부른다. 실패 이유 · 작업 본문은 받지 않는다.
  */
 @Component
-@RequiredArgsConstructor
 public class JobAdminAuditProcessor {
 
-    private final JobAdminAuditPort jobAdminAuditPort;
-
     public void cancelSucceeded(long adminMemberId, long jobId) {
-        jobAdminAuditPort.jobCancelSucceeded(adminMemberId, jobId);
+        AdminAuditLog.write("JOB_CANCEL", adminMemberId, AdminAuditLog.target("job", jobId), true);
     }
 
     public void cancelFailed(long adminMemberId, long jobId) {
-        jobAdminAuditPort.jobCancelFailed(adminMemberId, jobId);
+        AdminAuditLog.write("JOB_CANCEL", adminMemberId, AdminAuditLog.target("job", jobId), false);
     }
 }

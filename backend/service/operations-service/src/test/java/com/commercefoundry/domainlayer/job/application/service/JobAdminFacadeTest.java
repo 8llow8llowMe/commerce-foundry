@@ -15,7 +15,7 @@ import com.commercefoundry.domainlayer.job.application.command.JobAdminSearchCom
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.model.JobStatusFilter;
-import com.commercefoundry.domainlayer.job.application.port.out.JobAdminAuditPort;
+import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummaryQueryResult;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobAdminAuditProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobHandlerProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobQueryProcessor;
@@ -35,9 +35,14 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 /**
  * 어드민 작업 Facade — 운영자 응답(작업 이름 · 안내 문구 · 취소 가능 여부, #305) · 목록 조건 · 상세 404 · 취소(QUEUED · RUNNING · 끝남 · 워커와 겹침)와
@@ -52,13 +57,13 @@ class JobAdminFacadeTest {
     private static final RetryPolicy RETRY = properties().retry().toPolicy();
 
     private InMemoryJobRepositoryPort repository;
-    private JobAdminAuditPort auditPort;
+    private JobAdminAuditProcessor auditProcessor;
     private List<Object> events;
 
     @BeforeEach
     void setUp() {
         repository = new InMemoryJobRepositoryPort();
-        auditPort = mock(JobAdminAuditPort.class);
+        auditProcessor = mock(JobAdminAuditProcessor.class);
         events = new ArrayList<>();
     }
 
@@ -70,7 +75,7 @@ class JobAdminFacadeTest {
             new JobRunProcessor(
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.job.application.service.processor.JobResultFileProcessor.class),
             repository, new RecordingJobDispatchPort(), properties(), events::add, clock),
-            new JobAdminAuditProcessor(auditPort),
+            auditProcessor,
             new JobAdminPresenter()
         );
     }
@@ -157,8 +162,8 @@ class JobAdminFacadeTest {
         assertThat(response.cancellable()).isFalse();
         assertThat(repository.get(1L).status()).isEqualTo(JobStatus.CANCELLED);
         assertThat(events).hasSize(1);
-        verify(auditPort).jobCancelSucceeded(ADMIN, 1L);
-        verifyNoMoreInteractions(auditPort);
+        verify(auditProcessor).cancelSucceeded(ADMIN, 1L);
+        verifyNoMoreInteractions(auditProcessor);
     }
 
     @Test
@@ -185,7 +190,8 @@ class JobAdminFacadeTest {
 
         assertThatThrownBy(() -> facade().cancel(1L, ADMIN))
             .isInstanceOfSatisfying(JobException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(JobErrorCode.JOB_ALREADY_FINISHED));
-        verify(auditPort).jobCancelFailed(ADMIN, 1L);
+        verify(auditProcessor).cancelFailed(ADMIN, 1L);
+        verifyNoMoreInteractions(auditProcessor);
     }
 
     @Test
@@ -210,7 +216,73 @@ class JobAdminFacadeTest {
         assertThat(response.status().code()).isEqualTo("RUNNING");
         assertThat(response.notice()).isEqualTo("취소를 요청했습니다. 진행 중인 단계가 끝나면 멈춥니다.");
         assertThat(events).isEmpty();
-        verify(auditPort).jobCancelSucceeded(ADMIN, 1L);
+        verify(auditProcessor).cancelSucceeded(ADMIN, 1L);
+        verifyNoMoreInteractions(auditProcessor);
+    }
+
+    @Test
+    @DisplayName("워커와 세 번 겹치면 재시도를 멈추고 최종 FAILURE 감사 한 번만 남긴다")
+    void auditsOnceAfterExhaustingConflicts() {
+        AtomicInteger attempts = new AtomicInteger();
+        repository = new InMemoryJobRepositoryPort() {
+            @Override
+            public synchronized Job update(Job job) {
+                attempts.incrementAndGet();
+                throw new JobException(JobErrorCode.JOB_CONFLICT);
+            }
+        };
+        queued(1L, REPORT);
+
+        assertThatThrownBy(() -> facade().cancel(1L, ADMIN))
+            .isInstanceOfSatisfying(JobException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(JobErrorCode.JOB_CONFLICT));
+
+        assertThat(attempts).hasValue(3);
+        assertThat(repository.get(1L).status()).isEqualTo(JobStatus.QUEUED);
+        assertThat(events).isEmpty();
+        verify(auditProcessor).cancelFailed(ADMIN, 1L);
+        verifyNoMoreInteractions(auditProcessor);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("저장소 실패는 원래 예외를 전파하고 감사에는 실패 이유 · 본문 · 이름 원문을 남기지 않는다")
+    void failureDoesNotLogRawValues(CapturedOutput output) {
+        String raw = "synthetic-body token=synthetic-token name=synthetic-name";
+        RuntimeException failure = new IllegalStateException(raw);
+        repository = new InMemoryJobRepositoryPort() {
+            @Override
+            public synchronized Job update(Job job) {
+                throw failure;
+            }
+        };
+        repository.insert(Job.register(1L, REPORT, "{\"message\":\"" + raw + "\"}", null, ADMIN, 0, NOW, 3));
+        auditProcessor = new JobAdminAuditProcessor();
+
+        assertThatThrownBy(() -> facade().cancel(1L, ADMIN)).isSameAs(failure);
+
+        assertThat(output.getAll())
+            .containsOnlyOnce("action=JOB_CANCEL actorMemberId=9 target=job:1 result=FAILURE")
+            .doesNotContain(raw, "synthetic-body", "synthetic-token", "synthetic-name", "result=SUCCESS");
+    }
+
+    @Test
+    @DisplayName("취소 반영 후 응답 재조회가 실패해도 취소 자체는 SUCCESS 감사 한 번이다")
+    void responseLookupFailureKeepsSuccessfulAudit() {
+        RuntimeException failure = new IllegalStateException("synthetic response lookup failure");
+        repository = new InMemoryJobRepositoryPort() {
+            @Override
+            public Optional<JobSummaryQueryResult> findSummary(long jobId) {
+                throw failure;
+            }
+        };
+        queued(1L, REPORT);
+
+        assertThatThrownBy(() -> facade().cancel(1L, ADMIN)).isSameAs(failure);
+
+        assertThat(repository.get(1L).status()).isEqualTo(JobStatus.CANCELLED);
+        assertThat(events).hasSize(1);
+        verify(auditProcessor).cancelSucceeded(ADMIN, 1L);
+        verifyNoMoreInteractions(auditProcessor);
     }
 
     /** 표시명과 고유 실패 문구를 가진 합성 핸들러. */
