@@ -75,6 +75,21 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor productImagesPrepareProcessor;
     private final com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor productImagesUpdateProcessor;
 
+    private final com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor productOptionsUpdateProcessor;
+
+    @Override
+    @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
+    public ProductDetailAdminResponse updateOptions(com.commercefoundry.domainlayer.product.application.command.ProductOptionsUpdateCommand command) {
+        try {
+            var info = productOptionsUpdateProcessor.update(command);
+            productAdminAuditProcessor.productOptionsReplaced(command.actorMemberId(), command.productId(), true);
+            return productAdminPresenter.toDetailResponse(info);
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.productOptionsReplaced(command.actorMemberId(), command.productId(), false);
+            throw exception;
+        }
+    }
+
     /** 외부 복사와 롤백 보상은 DB 트랜잭션 밖에서 실행하고, 버전 CAS와 연결 교체만 짧은 TransactionTemplate으로 묶는다. */
     @Override
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)

@@ -664,7 +664,7 @@ version은 필수 0 이상(`PRODUCT_EDIT_101`), images는 필수·최대 8장·�
   콜백은 카테고리 잠금 전에 등록해 롤백 확정 표시만 남기고, `TransactionTemplate.execute` 가 DB 자원을 정리한 뒤 Facade 에서 외부 삭제한다.
   커밋 결과 불명 · 트랜잭션 시작 실패 · 커밋 후 응답 변환 실패에서는 삭제하지 않는다. 보상 실패는 원래 오류를 보존하고 경고를 남기며 운영 고아 객체 대조가 필요하다.
   원본 업로드는 임시 접두어 수명(1일)까지 남겨 재시도할 수 있다. 존재하는 원본은 같은 운영자가 재사용할 수 있으며, 일회 소비 토큰은 아니다.
-  등록 자체는 멱등하지 않으므로 응답 유실 시 목록을 확인한 뒤 재시도한다. 이미지 교체/삭제는 위 정지 이미지 전체 편집 API를 사용한다. 옵션 편집은 후속 범위다.
+  등록 자체는 멱등하지 않으므로 응답 유실 시 목록을 확인한 뒤 재시도한다. 이미지 교체/삭제는 위 정지 이미지 전체 편집 API를 사용한다. 기존 옵션 이름·순서는 아래 `/options` API로 편집한다.
 
 #### SKU별 품절 임박 기준과 조회 (#229 PR-1)
 
@@ -960,7 +960,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   FE는 다시 조회한 뒤 재시도한다. 조회와 삭제 사이에 먼저 완료된 편집도 현재 상태를 대상으로 삭제하므로, 편집 화면 버전 비교 계약은 없다.
 - SKU·옵션·이미지·맞춤 입력·진열 카테고리·재고·선점과 기존 주문을 변경하지 않는다. 신규 선점은 기존 판매 가능 판정으로 거절하고,
   internal SKU 조회에는 상품과 SKU를 유지하며 `purchasable=false`로 알린다. S3·Kafka·서비스 간 호출은 없다. 새 엔티티·운영 DDL도 없다.
-- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing`, 정지 이미지 편집은 `/images` API가 담당하며 옵션·SKU 편집은 후속 범위다. FE 계약 검토자는 `seonghoho`다.
+- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing`, 정지 이미지 편집은 `/images`, 기존 옵션 이름·순서는 `/options`, 기존 SKU 필드는 `/skus` API로 편집한다. FE 계약 검토자는 `seonghoho`다.
 
 #### 어드민 상품 기본 정보 수정 API (#9 후속)
 
@@ -997,6 +997,18 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
 동시 기본 정보 수정 · 삭제로 버전이 바뀌면 저장 전체를 롤백한다. 기본 · 영문 정보와 가격 · 옵션 · SKU · 이미지 · 재고는 보존한다.
 감사는 `PRODUCT_CATEGORIES_REPLACE`를 사용한다. FE는 반환 상세의 version을 다음 편집에 사용한다(검토자 `seonghoho`).
 
+
+#### 기존 옵션 이름·노출 순서 편집 API (#9)
+
+ADMIN `PUT /api/v1/admin/products/{productId}/options`는 `{version, optionGroups:[{optionGroupId,name,values:[{optionValueId,name}]}]}`를 받는다.
+은퇴 행까지 저장된 전체 그룹 ID와 각 그룹의 전체 값 ID가 정확히 일치해야 한다. 누락·중복·새 ID·다른 상품 ID·그룹 이동·정규화 후 이름 중복은 400 `PRODUCT_013`이다.
+누락을 은퇴로 해석하지 않는다. 옵션 없는 상품의 빈 배열과 기존 값 없는 그룹의 빈 값 배열은 허용한다. 그룹 최대 5개·이름 30자, 그룹당 값 최대 50개·이름 50자로 등록과 같다.
+이름은 strip 후 비교하고 제어·서식 문자를 거절한다. 배열 순서가 0부터 시작하는 displayOrder다. version은 필수 0 이상(`PRODUCT_EDIT_101`), 그룹 ID와 값 ID는 필수 양수(`PRODUCT_EDIT_102`, `PRODUCT_EDIT_103`)다.
+숨김 상품도 편집하며 없거나 삭제된 상품은 404 `PRODUCT_001`, 오래된 버전은 동일 값이어도 409 `PRODUCT_010`이다. 동일 이름·순서면 쓰기와 버전 증가를 생략한다.
+실제 변경은 부모 버전 CAS를 자식 쓰기 전에 실행한다. DB 유니크 이름 교환은 현재·최종·예약 이름과 충돌하지 않는 임시명으로 주차 후 부분 UPDATE하여 같은 5초 트랜잭션에서 처리한다.
+ID·FK·createdAt·retiredAt과 SKU 조합 키·가격·판매 상태·무게·HS 코드·원가·재고·선점은 유지한다. 옵션 추가·조합 변경·은퇴 처리는 범위 밖이다.
+기존 편집 상세를 반환하며 은퇴 옵션은 어드민에 포함하고 고객에서는 계속 제외한다. internal SKU 조회는 수정된 현재 옵션명을 사용하며 이미 저장된 주문 항목 스냅숏은 바뀌지 않는다.
+감사 행위는 `PRODUCT_OPTIONS_REPLACE`이고 식별자·결과만 기록한다. FE 계약 검토자는 `seonghoho`다.
 
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다

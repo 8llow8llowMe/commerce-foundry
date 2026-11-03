@@ -91,7 +91,8 @@ class ProductAdminFacadeTest {
             productCategoryUpdateProcessor,
             productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor.class),
-            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class));
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
     }
 
     private com.commercefoundry.persistence.util.SnowflakeIdGenerator idGenerator() {
@@ -210,7 +211,8 @@ class ProductAdminFacadeTest {
             productCategoryUpdateProcessor,
             productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor.class),
-            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class));
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, org.mockito.Mockito.times(confirmedRollback ? 1 : 0)).cleanup(List.of("products/7/8.png"));
     }
@@ -237,7 +239,8 @@ class ProductAdminFacadeTest {
             productCategoryUpdateProcessor,
             productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class),
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor.class),
-            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class));
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, never()).cleanup(any());
     }

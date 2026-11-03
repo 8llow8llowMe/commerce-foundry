@@ -17,6 +17,8 @@ import com.commercefoundry.persistence.dto.PageResponse;
  */
 public interface ProductAdminUseCase {
 
+    ProductDetailAdminResponse updateOptions(com.commercefoundry.domainlayer.product.application.command.ProductOptionsUpdateCommand command);
+
     ProductDetailAdminResponse updateImages(com.commercefoundry.domainlayer.product.application.command.ProductImagesUpdateCommand command);
 
     /** 가격을 버전 대조 후 전체 교체한다. 동일 값은 버전을 유지하고 생략한 정가는 삭제한다. */

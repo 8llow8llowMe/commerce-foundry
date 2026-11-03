@@ -47,6 +47,47 @@ public class ProductOptionRepositoryAdapter implements ProductOptionRepositoryPo
         return productOptionMapper.toValues(productOptionValueRepository.findAllById(optionValueIds));
     }
 
+    /** 기존 행의 이름과 순서만 부분 UPDATE한다. */
+    @Override
+    public void updateLabels(List<OptionGroup> existingGroups, List<OptionValue> existingValues, List<OptionGroup> groups, List<OptionValue> values) {
+        var now = java.time.Instant.now();
+        var blocked = new java.util.HashSet<String>();
+        existingGroups.forEach(group -> blocked.add(group.name()));
+        existingValues.forEach(value -> blocked.add(value.name()));
+        groups.forEach(group -> blocked.add(group.name()));
+        values.forEach(value -> blocked.add(value.name()));
+        var oldGroups = existingGroups.stream().collect(java.util.stream.Collectors.toMap(OptionGroup::id, java.util.function.Function.identity()));
+        var oldValues = existingValues.stream().collect(java.util.stream.Collectors.toMap(OptionValue::id, java.util.function.Function.identity()));
+        // Exclude current, final and previously reserved names, including retired rows.
+        for (var group : groups) {
+            if (!group.name().equals(oldGroups.get(group.id()).name())) {
+                requireUpdated(productOptionGroupRepository.updateLabel(group.id(), temporaryName(blocked), oldGroups.get(group.id()).displayOrder(), now));
+            }
+        }
+        for (var value : values) {
+            if (!value.name().equals(oldValues.get(value.id()).name())) {
+                requireUpdated(productOptionValueRepository.updateLabel(value.id(), temporaryName(blocked), oldValues.get(value.id()).displayOrder(), now));
+            }
+        }
+        for (var group : groups) {
+            if (!group.equals(oldGroups.get(group.id()))) requireUpdated(productOptionGroupRepository.updateLabel(group.id(), group.name(), group.displayOrder(), now));
+        }
+        for (var value : values) {
+            if (!value.equals(oldValues.get(value.id()))) requireUpdated(productOptionValueRepository.updateLabel(value.id(), value.name(), value.displayOrder(), now));
+        }
+    }
+
+    private static String temporaryName(java.util.Set<String> blocked) {
+        for (int candidate = 0; ; candidate++) {
+            String name = "__edit_" + candidate;
+            if (blocked.add(name)) return name;
+        }
+    }
+
+    private static void requireUpdated(int count) {
+        if (count != 1) throw new IllegalStateException("Option disappeared during version-fenced edit");
+    }
+
     /** 엔티티가 {@code Persistable} 이라 새 행은 persist(INSERT) 로 간다. 그룹을 먼저 넣고 값을 넣는다. */
     @Override
     public void insertAll(List<OptionGroup> groups, List<OptionValue> values) {
