@@ -8,6 +8,8 @@ import com.commercefoundry.domainlayer.conversation.application.port.out.Message
 import com.commercefoundry.domainlayer.conversation.domain.model.Message;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import java.util.Optional;
+import java.util.List;
+import org.springframework.data.domain.PageRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
@@ -21,6 +23,12 @@ public class MessageRepositoryAdapter implements MessageRepositoryPort {
     @Override
     public Optional<Message> findByConversationIdAndClientMessageId(long conversationId, String clientMessageId) {
         return repository.findByConversationIdAndClientMessageId(conversationId, clientMessageId).map(mapper::toDomain);
+    }
+
+    @Override
+    public List<Message> findByConversationIdAndSequenceRange(long conversationId, long afterSeq, long lastSeq, int limit) {
+        return repository.findByConversationIdAndSequenceRange(conversationId, afterSeq, lastSeq, PageRequest.of(0, limit))
+            .stream().map(mapper::toDomain).toList();
     }
 
     @Override

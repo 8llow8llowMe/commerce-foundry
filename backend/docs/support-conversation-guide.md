@@ -87,9 +87,50 @@ raw 본문과 지문은 저장하지 않는다. 이름·비정형 주소·주문
 고정 오류는 상태 409 SUPPORT_011, 잠금 409 SUPPORT_012, 낙관 충돌 409 SUPPORT_013,
 키/메시지 unique 충돌 409 SUPPORT_014, 순번 소진 409 SUPPORT_015, 키 400 SUPPORT_112, 본문 400 SUPPORT_113이다.
 예상 잠금·낙관·unique 충돌은 원인 예외 없이 반환한다. 이름이 일치하는 두 메시지 unique만 변환하고 다른 DB 장애는 전파한다.
-목록·페이징·HTTP·WebSocket·AI 응답·상태 전이·이벤트·회원 연결·삭제 보존은 제공하지 않는다.
+HTTP·WebSocket·AI 응답·상태 전이·이벤트·회원 연결·삭제 보존은 제공하지 않는다.
 
 메시지 검증은 domain/policy 단위와 H2/PostgreSQL 공통 계약으로 멱등·소유·상태·원자 롤백·DB check/unique를 검사한다.
 부모를 flush한 뒤 실제 메시지 unique 실패로 트랜잭션 전체가 복구되는지 검사한다.
 오래된 영속성 컨텍스트의 부모는 refresh로 최신 seq를 사용한다. PostgreSQL 전용 계약은 동일 대화 NOWAIT,
 재시도 시 seq 1/2와 같은 키 단일 행, 다른 대화의 독립 진행, 양방향 비회원 폐기 경합을 검사한다.
+
+## 소유자별 메시지 커서 조회 (#470 PR-B1e)
+
+기존 내부 Java 진입에 `getForMember(conversationId, memberId, afterSeq, size)`와
+`getForGuest(conversationId, token, afterSeq, size)`를 추가한다. 회원 ID는 신뢰할 수 있는 인증 경계에서 확정한 양수다.
+비회원은 매 호출마다 Facade가 기존 `resolveForUpdate`로 인증하고 domain 신원만 Processor에 전달한다.
+인증과 소유 확인은 커서·크기 검증보다 먼저 수행한다. 없는 대화와 다른 소유자·회원/비회원 교차 조회는 같은 404 SUPPORT_010이다.
+잘못된 회원 ID는 400 SUPPORT_110, 비회원 만료·폐기·잘못된 토큰은 기존 401 GUEST_SESSION_001,
+비회원 잠금 경합은 기존 409 GUEST_SESSION_004다. CLOSED·RESOLVED를 포함한 모든 대화 상태에서 읽을 수 있다.
+
+소유자 조건을 포함한 scalar `lastSeq` projection으로 현재 트랜잭션에서 관측한 상한을 한 번 고정한다.
+0은 정상적인 빈 대화이며 조회 결과 없음과 구분한다. 영속성 컨텍스트의 오래된 부모 엔티티 값을 사용하지 않는다.
+메시지는 `conversationId`와 `afterSeq < seq <= lastSeq`로 한정하고 seq 오름차순으로 DB에서 최대 `size + 1`행만 읽는다.
+기존 `(conversation_id, seq)` unique 인덱스를 사용하며 count 쿼리·전체 조회·새 인덱스·DDL 변경은 없다.
+`0 <= afterSeq <= lastSeq`, `1 <= size <= 100`이며 잘못된 커서는 400 SUPPORT_114, 잘못된 크기는 400 SUPPORT_115다.
+`afterSeq == lastSeq`이면 빈 목록, hasNext=false, nextCursor=afterSeq다.
+
+반환은 `MessagePageInfo(messages, hasNext, nextCursor, lastSeq)`다. 목록은 방어 복사해 수정할 수 없고
+기존 MessageInfo만 사용하므로 원 작성자 ID·요청 키·토큰을 노출하지 않는다. 저장한 canonical 본문을 재마스킹하지 않는다.
+기본 마스킹 뒤에도 이름·주소 등의 개인정보가 남을 수 있어 본문 접근 인가가 계속 필요하다.
+MessagePageInfo의 toString은 메시지 수와 커서만 남기며 본문은 포함하지 않는다.
+
+hasNext는 이번 호출의 관측 상한 안에서 다음 행이 존재한다는 뜻이다. nextCursor는 실제 반환한 마지막 seq이며
+빈 목록이면 입력 afterSeq다. lastSeq는 관측 상한이므로 다음 커서로 사용하면 안 된다.
+다음 호출에는 nextCursor를 전달한다. 매 호출마다 상한을 다시 읽으므로 페이지 사이에 커밋한 새 append도 순서대로 받을 수 있다.
+두 SELECT 사이에 append가 커밋해도 현재 페이지는 처음 관측한 상한까지만 반환한다.
+hasNext=false는 영구 종료가 아니며 같은 nextCursor로 나중에 폴링할 수 있다. 별도 snapshotUpper 입력은 없다.
+
+Facade는 기존 REQUIRED를 유지한다. 회원 조회만 readOnly=true이며, 비회원 조회는 인증 잠금을 위한 짧은 쓰기 트랜잭션이다.
+Processor는 MANDATORY다. 호출자 트랜잭션의 미커밋 append도 읽고, 호출자가 롤백하면 부모 순번과 메시지가 함께 복구된다.
+기본 READ COMMITTED에서는 각 호출이 당시 커밋된 상한을 관측한다. 더 강한 격리의 외부 트랜잭션에 참여하면 그 스냅숏을 따른다.
+부모에는 추가 잠금을 잡지 않는다. 비회원 잠금은 참여한 트랜잭션 종료까지 유지되어 먼저 인증한 조회는 revoke를 기다리게 하고,
+revoke가 먼저 잠근 경우 NOWAIT 409, 폐기 커밋 뒤에는 401이다. 외부 I/O는 수행하지 않는다.
+
+이 조회는 현재 소유자가 바뀌지 않고 append와 부모 순번 증가가 원자적이며 메시지를 물리 삭제하지 않는 현재 모델을 전제로 한다.
+향후 소유 이전·보존 삭제를 구현할 때 이 보장을 다시 설계해야 한다. 후속 HTTP·WebSocket 진입도 인증 우선순위,
+소유자 범위, 실제 반환 커서, DB 조회 상한, 본문 비로깅 계약을 보존해야 한다. 공개 HTTP·WebSocket 계약은 이번 범위에 없다.
+
+별도 H2/PostgreSQL 읽기 계약으로 소유·인증 우선순위, 커서·크기 경계, 모든 상태 읽기, 오름차순 무누락 페이지,
+DB의 size+1 제한과 count 부재, 두 SELECT 사이 append, 오래된 부모의 scalar 상한, 호출자 자기 쓰기·롤백을 검증한다.
+PostgreSQL 17 전용 검증은 양방향 비회원 조회·폐기 잠금 경합을 확인하며 기존 support DDL 스냅숏과 Hibernate validate를 사용한다.

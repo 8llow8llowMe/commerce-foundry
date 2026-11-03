@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.conversation.application.service.process
 import com.commercefoundry.domainlayer.conversation.application.exception.ConversationErrorCode;
 import com.commercefoundry.domainlayer.conversation.application.exception.ConversationException;
 import com.commercefoundry.domainlayer.conversation.application.info.MessageInfo;
+import com.commercefoundry.domainlayer.conversation.application.info.MessagePageInfo;
 import com.commercefoundry.domainlayer.conversation.application.port.out.ConversationRepositoryPort;
 import com.commercefoundry.domainlayer.conversation.application.port.out.MessageRepositoryPort;
 import com.commercefoundry.domainlayer.conversation.domain.model.Conversation;
@@ -25,6 +26,38 @@ public class ConversationMessageProcessor {
     private final MessageRepositoryPort messages;
     private final MessageContentPolicy contentPolicy;
     private final SnowflakeIdGenerator ids;
+
+    public MessagePageInfo getForMember(long id, long memberId, long afterSeq, int size) {
+        if (memberId <= 0) {
+            throw new ConversationException(ConversationErrorCode.INVALID_OWNER);
+        }
+        long lastSeq = conversations.findLastSeqByIdAndMemberId(id, memberId)
+            .orElseThrow(() -> new ConversationException(ConversationErrorCode.NOT_FOUND));
+        return page(id, afterSeq, size, lastSeq);
+    }
+
+    public MessagePageInfo getForGuest(long id, GuestSessionIdentity guest, long afterSeq, int size) {
+        long lastSeq = conversations.findLastSeqByIdAndGuestSessionId(id, guest.id())
+            .orElseThrow(() -> new ConversationException(ConversationErrorCode.NOT_FOUND));
+        return page(id, afterSeq, size, lastSeq);
+    }
+
+    private MessagePageInfo page(long id, long afterSeq, int size, long lastSeq) {
+        if (afterSeq < 0 || afterSeq > lastSeq) {
+            throw new ConversationException(ConversationErrorCode.INVALID_MESSAGE_CURSOR);
+        }
+        if (size < 1 || size > 100) {
+            throw new ConversationException(ConversationErrorCode.INVALID_MESSAGE_PAGE_SIZE);
+        }
+        if (afterSeq == lastSeq) {
+            return new MessagePageInfo(java.util.List.of(), false, afterSeq, lastSeq);
+        }
+        var found = messages.findByConversationIdAndSequenceRange(id, afterSeq, lastSeq, size + 1);
+        boolean hasNext = found.size() > size;
+        var items = found.stream().limit(size).map(MessageInfo::from).toList();
+        long nextCursor = items.isEmpty() ? afterSeq : items.getLast().seq();
+        return new MessagePageInfo(items, hasNext, nextCursor, lastSeq);
+    }
 
     public MessageInfo appendForMember(long id, long memberId, String key, String raw) {
         if (memberId <= 0) {
