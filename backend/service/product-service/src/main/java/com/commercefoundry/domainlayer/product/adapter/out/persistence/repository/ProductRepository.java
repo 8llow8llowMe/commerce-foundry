@@ -12,6 +12,11 @@ import org.springframework.data.jpa.repository.Query;
  */
 public interface ProductRepository extends JpaRepository<ProductEntity, Long>, ProductCustomRepository {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update ProductEntity p set p.version = p.version + 1, p.updatedAt = :updatedAt "
+        + "where p.id = :productId and p.version = :version and p.deletedAt is null")
+    int bumpVersion(long productId, long version, Instant updatedAt);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update ProductEntity p set p.categoryId = :categoryId, p.version = p.version + 1, p.updatedAt = :updatedAt "
         + "where p.id = :productId and p.version = :version and p.deletedAt is null")
     int updateCategory(long productId, long version, long categoryId, Instant updatedAt);

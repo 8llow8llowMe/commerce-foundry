@@ -8,6 +8,9 @@ public interface ProductImageRepositoryPort {
 
     void insertAll(List<ProductImage> images);
 
+    /** Replace still images after product CAS; preserve VIDEO and retained object attributes. */
+    void replaceStillImages(long productId, List<ProductImage> existing, List<ProductImage> requested, List<Long> retainedIds);
+
     /** 대표 · 갤러리 모두. 노출 순서 → 아이디 오름차순 — 유형별로 나누는 것은 호출한 쪽이 한다. */
     List<ProductImage> findAllByProductId(long productId);
 

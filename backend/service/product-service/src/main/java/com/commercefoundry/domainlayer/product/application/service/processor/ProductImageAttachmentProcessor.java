@@ -25,15 +25,19 @@ public class ProductImageAttachmentProcessor {
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
     public List<ProductImage> attach(long productId, ProductCreateCommand command) {
-        var inputs = command.images();
+        return attach(productId, command.createdByMemberId(), command.images().stream()
+            .map(i -> new Input(i.uploadKey(), i.imageType(), i.altText())).toList());
+    }
+
+    public List<ProductImage> attach(long productId, long actorMemberId, List<Input> inputs) {
         if (inputs.size() > 8 || inputs.stream().anyMatch(image -> image.imageType() == null || image.imageType() == ImageType.VIDEO)
             || inputs.stream().filter(image -> image.imageType() == ImageType.THUMBNAIL).count() > 1
-            || new HashSet<>(inputs.stream().map(ProductCreateCommand.Image::uploadKey).toList()).size() != inputs.size()) {
+            || new HashSet<>(inputs.stream().map(Input::uploadKey).toList()).size() != inputs.size()) {
             throw new ProductException(ProductErrorCode.IMAGE_CONFIGURATION_INVALID);
         }
         // 모든 소유 확인을 외부 호출 전에 끝낸다. 키 · 어드민 ID 는 오류 응답에 싣지 않는다.
         var keys = inputs.stream().map(image -> ProductImageUploadKey.parse(image.uploadKey())
-            .filter(key -> key.isOwnedBy(command.createdByMemberId()))
+            .filter(key -> key.isOwnedBy(actorMemberId))
             .orElseThrow(() -> new ProductException(ProductErrorCode.IMAGE_UPLOAD_NOT_FOUND))).toList();
         List<ProductImage> images = new ArrayList<>();
         List<String> attemptedKeys = new ArrayList<>();
@@ -55,6 +59,8 @@ public class ProductImageAttachmentProcessor {
             throw exception;
         }
     }
+
+    public record Input(String uploadKey, ImageType imageType, String altText) { }
 
     public void cleanup(List<String> keys) {
         for (String key : keys) {

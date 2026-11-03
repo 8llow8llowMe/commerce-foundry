@@ -18,6 +18,31 @@ public class ProductImageRepositoryAdapter implements ProductImageRepositoryPort
     private final ProductImageMapper productImageMapper;
 
     @Override
+    public void replaceStillImages(long productId, List<ProductImage> existing, List<ProductImage> requested, List<Long> retainedIds) {
+        var removed = existing.stream().filter(i -> i.imageType() != ImageType.VIDEO && !retainedIds.contains(i.id())).map(ProductImage::id).toList();
+        if (!removed.isEmpty()) productImageRepository.deleteImages(productId, removed);
+        var occupied = new java.util.HashSet<Integer>();
+        existing.stream().filter(i -> retainedIds.contains(i.id()) && i.imageType() == ImageType.GALLERY)
+            .map(ProductImage::displayOrder).forEach(occupied::add);
+        var now = java.time.Instant.now();
+        int temporary = -1;
+        // At most 8 legacy slots and 8 reserved slots: no arithmetic on arbitrary legacy values.
+        for (var image : requested) {
+            if (!retainedIds.contains(image.id())) continue;
+            while (occupied.contains(temporary)) temporary--;
+            occupied.add(temporary);
+            productImageRepository.updatePlacement(productId, image.id(), ImageType.GALLERY, temporary--, image.altText(), now);
+        }
+        for (var image : requested) {
+            if (retainedIds.contains(image.id())) {
+                productImageRepository.updatePlacement(productId, image.id(), image.imageType(), image.displayOrder(), image.altText(), now);
+            }
+        }
+        insertAll(requested.stream().filter(i -> !retainedIds.contains(i.id())).toList());
+        productImageRepository.flush();
+    }
+
+    @Override
     public void insertAll(List<ProductImage> images) {
         productImageRepository.saveAll(images.stream().map(productImageMapper::toEntity).toList());
     }
