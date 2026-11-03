@@ -904,13 +904,30 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   FE는 다시 조회한 뒤 재시도한다. 조회와 삭제 사이에 먼저 완료된 편집도 현재 상태를 대상으로 삭제하므로, 편집 화면 버전 비교 계약은 없다.
 - SKU·옵션·이미지·맞춤 입력·진열 카테고리·재고·선점과 기존 주문을 변경하지 않는다. 신규 선점은 기존 판매 가능 판정으로 거절하고,
   internal SKU 조회에는 상품과 SKU를 유지하며 `purchasable=false`로 알린다. S3·Kafka·서비스 간 호출은 없다. 새 엔티티·운영 DDL도 없다.
-- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리·가격·옵션·SKU·이미지 편집은 후속 범위다. FE 계약 검토자는 `seonghoho`다.
+- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories` API가 담당하며 가격·옵션·SKU·이미지 편집은 후속 범위다. FE 계약 검토자는 `seonghoho`다.
 
 #### 어드민 상품 기본 정보 수정 API (#9 후속)
 
 - `PUT /api/v1/admin/products/{productId}/header`는 ADMIN 전용이며 `version`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`과 선택적 `nameEn`, `summaryEn`, `descriptionHtmlEn`을 받는다. 기본 문구는 전체 교체하고 영문 문구는 빠지거나 null이면 기존 값을 유지한다(기존 FE 호환). 영문 값을 지우려면 빈 문자열을 보낸다. 영문 입력은 등록 뒤 이 API에서 추가한다. 응답은 영문 문구를 포함한 `product`(어드민 상세 스냅숏)와 두 HTML 정제 결과를 합친 `descriptionHtmlSanitized`다.
 - 버전은 직전 어드민 상세 조회에서 얻은 값을 보낸다. 불일치·동시 merge 충돌은 409 `PRODUCT_010`, 없거나 삭제된 상품은 404 `PRODUCT_001`이다. 상세 HTML은 등록과 같은 허용 목록으로 정제한다.
 - 카테고리·가격·프리오더·맞춤 입력·옵션·SKU·이미지·재고·선점은 이 API에서 수정하지 않는다. 카테고리 연결을 바꾸지 않아 카테고리 행 잠금은 필요 없다. 수정 트랜잭션은 5초이며 `PRODUCT_UPDATE` 감사를 남긴다. #20에서 `product.name_en`, `summary_en`, `description_html_en` nullable 컬럼을 추가한다. FE는 수정 후 반환된 버전과 정제 경고를 사용한다.
+
+#### 어드민 상품 카테고리 수정 API (#9 후속)
+
+`PUT /api/v1/admin/products/{productId}/categories` 는 ADMIN 전용이며 대표 · 진열 카테고리를 전체 교체한다.
+요청은 `{version: 0, categoryId: 100, categoryIds: [100, 200]}` 다. version은 필수인 0 이상 정수,
+version 누락 · 음수는 400 `PRODUCT_EDIT_101`이다(PRODUCT 검증 1xx 소진으로 편집 검증 접두어를 분리한다).
+categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소는 null 아닌 양수)이다.
+빈 배열도 허용하며 중복 제거 후 대표 카테고리를 자동 포함한다. 대표가 별도로 추가되면 최종 연결은 최대 21개다.
+입력 배열 순서는 카테고리 안 상품 진열 순서가 아니다. 유지된 연결의 아이디 · 생성 시각 · display_order는 보존하고 새 연결의 display_order는 0이다.
+
+성공은 200과 기존 편집용 `ProductDetailAdminResponse`다. 식별자는 문자열이고 categoryIds는 대표를 포함해 오름차순이다.
+대표가 같고 연결만 바뀌거나 요청이 완전히 같아도 최신 version을 보내면 버전이 1 증가한다. 오래된 버전은 409 `PRODUCT_010`,
+없는 · 삭제된 상품은 404 `PRODUCT_001`, 없는 카테고리는 400 `PRODUCT_012`, 카테고리 잠금 시간 초과는 409 `PRODUCT_045`다.
+카테고리 등록 · 삭제와 같은 트리 잠금을 먼저 얻고, 상품 버전 CAS와 연결 차집합을 한 DB 트랜잭션으로 저장한다.
+동시 기본 정보 수정 · 삭제로 버전이 바뀌면 저장 전체를 롤백한다. 기본 · 영문 정보와 가격 · 옵션 · SKU · 이미지 · 재고는 보존한다.
+감사는 `PRODUCT_CATEGORIES_REPLACE`를 사용한다. FE는 반환 상세의 version을 다음 편집에 사용한다(검토자 `seonghoho`).
+
 
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다

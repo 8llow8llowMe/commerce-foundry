@@ -5,6 +5,7 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.ProductListAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCreateRequest;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCategoryUpdateRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductHeaderUpdateRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductHeaderUpdateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductImageUploadRequest;
@@ -62,6 +63,19 @@ public class ProductAdminController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final ProductAdminUseCase productAdminUseCase;
+
+    @Operation(summary = "상품 카테고리 수정", description = "대표 · 진열 카테고리를 전체 교체하고 편집용 상세를 반환한다. 대표는 진열 목록에 자동 포함한다. "
+        + "동일 요청도 버전이 증가한다. 오래된 버전은 409 PRODUCT_010, 삭제 상품은 404 PRODUCT_001, 없는 카테고리는 400 PRODUCT_012, 잠금 충돌은 409 PRODUCT_045다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_CATEGORIES_REPLACE")
+    @PutMapping("/{productId}/categories")
+    public ResponseEntity<Response<ProductDetailAdminResponse>> updateCategories(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId,
+        @RequestBody @Valid ProductCategoryUpdateRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(productAdminUseCase.updateCategories(request.toCommand(productId, member.memberId()))));
+    }
 
     @Operation(summary = "상품 기본 정보 수정", description = "상품명·요약·상세 HTML·판매 상태·노출 여부와 version을 전체 교체한다. "
         + "카테고리·가격·옵션·SKU·이미지는 바꾸지 않는다. 오래된 version은 409 PRODUCT_010, 삭제된 상품은 404 PRODUCT_001이다.")

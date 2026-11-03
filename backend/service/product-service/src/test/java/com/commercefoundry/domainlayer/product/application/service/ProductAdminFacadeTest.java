@@ -74,6 +74,9 @@ class ProductAdminFacadeTest {
     @Mock
     private com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor productAdminAuditProcessor;
 
+    @Mock
+    private com.commercefoundry.domainlayer.product.application.service.processor.ProductCategoryUpdateProcessor productCategoryUpdateProcessor;
+
     private ProductAdminFacade facade;
 
     @BeforeEach
@@ -85,6 +88,7 @@ class ProductAdminFacadeTest {
             productWriteProcessor, new ProductDescriptionSanitizer(), org.mockito.Mockito.mock(
             com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class),
             productDeleteProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor.class),
+            productCategoryUpdateProcessor,
             productAdminAuditProcessor);
     }
 
@@ -97,6 +101,23 @@ class ProductAdminFacadeTest {
     private com.commercefoundry.domainlayer.product.application.service.processor.ProductImageAttachmentProcessor attachments() {
         return new com.commercefoundry.domainlayer.product.application.service.processor.ProductImageAttachmentProcessor(
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.port.out.ProductImageStoragePort.class), idGenerator());
+    }
+
+    @Test
+    void categoryUpdateLocksTreeBeforeLoadingAndTranslatesBusyLock() {
+        var command = new com.commercefoundry.domainlayer.product.application.command.ProductCategoryUpdateCommand(7L, 0, 99L, 1L, List.of());
+        var tree = CategoryTree.of(List.of());
+        given(categoryProcessor.getTreeForUpdate()).willReturn(tree);
+        given(productCategoryUpdateProcessor.update(command, tree)).willThrow(new ProductException(ProductErrorCode.NOT_FOUND_PRODUCT));
+        assertThatThrownBy(() -> facade.updateCategories(command)).isInstanceOf(ProductException.class);
+        var order = inOrder(categoryProcessor, productCategoryUpdateProcessor);
+        order.verify(categoryProcessor).getTreeForUpdate();
+        order.verify(productCategoryUpdateProcessor).update(command, tree);
+        verify(productAdminAuditProcessor).productCategoriesReplaced(99L, 7L, false);
+
+        given(categoryProcessor.getTreeForUpdate()).willThrow(new PessimisticLockingFailureException("busy"));
+        assertThatThrownBy(() -> facade.updateCategories(command)).isInstanceOfSatisfying(ProductException.class,
+            e -> assertThat(e.getErrorCode()).isEqualTo(ProductErrorCode.CATEGORY_BUSY));
     }
 
     @Test
@@ -184,6 +205,7 @@ class ProductAdminFacadeTest {
             new TestTransactionManager(confirmedRollback ? null : failure), categoryProcessor, productAdminQueryProcessor,
             new ProductAdminPresenter(), productAdminDetailProcessor, productWriteProcessor, new ProductDescriptionSanitizer(), null,
             productDeleteProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor.class),
+            productCategoryUpdateProcessor,
             productAdminAuditProcessor);
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, org.mockito.Mockito.times(confirmedRollback ? 1 : 0)).cleanup(List.of("products/7/8.png"));
@@ -208,6 +230,7 @@ class ProductAdminFacadeTest {
             categoryProcessor, productAdminQueryProcessor,
             presenter, productAdminDetailProcessor, productWriteProcessor, new ProductDescriptionSanitizer(), null,
             productDeleteProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor.class),
+            productCategoryUpdateProcessor,
             productAdminAuditProcessor);
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, never()).cleanup(any());

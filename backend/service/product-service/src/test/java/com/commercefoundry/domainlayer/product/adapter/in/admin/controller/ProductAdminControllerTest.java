@@ -59,6 +59,67 @@ class ProductAdminControllerTest {
     private ProductAdminUseCase productAdminUseCase;
 
     @Test
+    void categoryReplacementRequiresAdminAndReturnsDetail() {
+        String body = "{\"version\":7,\"categoryId\":10,\"categoryIds\":[10,20]}";
+        String uri = PATH + "/7/categories";
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(productAdminUseCase);
+        given(productAdminUseCase.updateCategories(any())).willReturn(
+            com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse.builder()
+                .productId("7").categoryId("10").categoryIds(List.of("10", "20")).version(8L).build());
+        var result = mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatusOk().bodyJson().extractingPath("$.dataBody.productId").isEqualTo("7");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.categoryId").isEqualTo("10");
+        var command = ArgumentCaptor.forClass(com.commercefoundry.domainlayer.product.application.command.ProductCategoryUpdateCommand.class);
+        verify(productAdminUseCase).updateCategories(command.capture());
+        assertThat(command.getValue().productId()).isEqualTo(7L);
+        assertThat(command.getValue().version()).isEqualTo(7L);
+        assertThat(command.getValue().actorMemberId()).isEqualTo(TestTokens.MEMBER_ID);
+        assertThat(command.getValue().categoryIds()).containsExactly(10L, 20L);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "{\"categoryId\":10,\"categoryIds\":[]}", "{\"version\":-1,\"categoryId\":10,\"categoryIds\":[]}"
+    })
+    void categoryReplacementRejectsInvalidVersion(String body) {
+        var result = mvc.put().uri(PATH + "/7/categories").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_EDIT_101");
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "{\"version\":0,\"categoryIds\":[]}",
+        "{\"version\":0,\"categoryId\":0,\"categoryIds\":[]}",
+        "{\"version\":0,\"categoryId\":10}",
+        "{\"version\":0,\"categoryId\":10,\"categoryIds\":null}",
+        "{\"version\":0,\"categoryId\":10,\"categoryIds\":[null]}",
+        "{\"version\":0,\"categoryId\":10,\"categoryIds\":[-1]}",
+        "{\"version\":0,\"categoryId\":10,\"categoryIds\":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]}"
+    })
+    void categoryReplacementRejectsInvalidInput(String body) {
+        assertThat(mvc.put().uri(PATH + "/7/categories").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatus(HttpStatus.BAD_REQUEST);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @Test
+    void categoryReplacementAllowsEmptyArrayButRejectsInvalidProductId() {
+        String body = "{\"version\":0,\"categoryId\":10,\"categoryIds\":[]}";
+        assertThat(mvc.put().uri(PATH + "/0/categories").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatus(HttpStatus.BAD_REQUEST);
+        verifyNoInteractions(productAdminUseCase);
+        assertThat(mvc.put().uri(PATH + "/7/categories").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatusOk();
+    }
+
+    @Test
     void updateHeaderRequiresAdminAndPassesVersionAndActor() {
         String body = "{\"version\":7,\"name\":\" 새 이름 \",\"summary\":null,\"descriptionHtml\":\"<p>설명</p>\",\"saleStatus\":\"STOP_SELLING\",\"visible\":false}";
         String uri = PATH + "/7/header";

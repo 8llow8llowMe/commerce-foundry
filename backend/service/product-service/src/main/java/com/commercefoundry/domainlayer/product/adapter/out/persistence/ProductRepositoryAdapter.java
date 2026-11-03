@@ -75,6 +75,13 @@ public class ProductRepositoryAdapter implements ProductRepositoryPort {
         return productRepository.searchForAdmin(criteria);
     }
 
+    @Override
+    public void updateCategory(long productId, long version, long categoryId) {
+        if (productRepository.updateCategory(productId, version, categoryId, java.time.Instant.now()) != 1) {
+            throw new ProductException(ProductErrorCode.PRODUCT_MODIFICATION_CONFLICT);
+        }
+    }
+
     /** 버전이 비어 있어 Spring Data 가 새 행으로 보고 persist(INSERT) 한다 — 버전은 0 으로 저장된다. */
     @Override
     public void insert(Product product) {

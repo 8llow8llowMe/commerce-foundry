@@ -29,4 +29,7 @@ public interface ProductCategoryRepositoryPort {
      * @param ids 연결 행 아이디 — {@code categoryIds} 와 같은 길이, 호출한 쪽이 발급했다
      */
     void insertLinks(long productId, List<Long> categoryIds, List<Long> ids);
+
+    /** 제거된 연결만 삭제한다. 유지된 행의 아이디 · 생성 시각 · 진열 순서는 보존한다. */
+    void deleteLinks(long productId, List<Long> categoryIds);
 }

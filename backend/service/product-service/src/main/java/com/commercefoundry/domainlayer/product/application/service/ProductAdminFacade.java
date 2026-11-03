@@ -9,12 +9,14 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.Pro
 import com.commercefoundry.domainlayer.product.adapter.in.admin.presenter.ProductAdminPresenter;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
+import com.commercefoundry.domainlayer.product.application.command.ProductCategoryUpdateCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductHeaderUpdateCommand;
 import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminDetailProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductDeleteProcessor;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductCategoryUpdateProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor;
 import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductAdminQueryProcessor;
@@ -65,7 +67,26 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final ProductImageUploadProcessor productImageUploadProcessor;
     private final ProductDeleteProcessor productDeleteProcessor;
     private final ProductHeaderUpdateProcessor productHeaderUpdateProcessor;
+    private final ProductCategoryUpdateProcessor productCategoryUpdateProcessor;
     private final ProductAdminAuditProcessor productAdminAuditProcessor;
+
+    @Override
+    @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
+    public ProductDetailAdminResponse updateCategories(ProductCategoryUpdateCommand command) {
+        try {
+            var tree = categoryProcessor.getTreeForUpdate();
+            var info = productCategoryUpdateProcessor.update(command, tree);
+            productAdminAuditProcessor.productCategoriesReplaced(command.actorMemberId(), command.productId(), true);
+            return productAdminPresenter.toDetailResponse(info);
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.productCategoriesReplaced(command.actorMemberId(), command.productId(), false);
+            if (exception instanceof QueryTimeoutException || exception instanceof TransactionTimedOutException
+                || exception instanceof PessimisticLockingFailureException) {
+                throw new ProductException(ProductErrorCode.CATEGORY_BUSY, exception);
+            }
+            throw exception;
+        }
+    }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)

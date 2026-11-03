@@ -28,6 +28,13 @@ public class ProductCategoryRepositoryAdapter implements ProductCategoryReposito
         return productRepository.existsLiveProductInCategory(categoryId);
     }
 
+    @Override
+    public void deleteLinks(long productId, List<Long> categoryIds) {
+        if (!categoryIds.isEmpty()) {
+            productCategoryRepository.deleteLinks(productId, categoryIds);
+        }
+    }
+
     /** 엔티티가 {@code Persistable} 이라 새 행은 persist(INSERT) 로 간다 — 아이디가 겹치면 덮어쓰지 않고 PK 위반이다. */
     @Override
     public void insertLinks(long productId, List<Long> categoryIds, List<Long> ids) {
