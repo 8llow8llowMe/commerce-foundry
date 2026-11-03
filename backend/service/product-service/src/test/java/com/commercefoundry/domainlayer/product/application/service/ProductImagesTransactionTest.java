@@ -49,7 +49,8 @@ class ProductImagesTransactionTest {
             mock(CategoryProcessor.class), mock(ProductAdminQueryProcessor.class), presenter, mock(ProductAdminDetailProcessor.class),
             mock(ProductWriteProcessor.class), mock(ProductDescriptionSanitizer.class), mock(ProductImageUploadProcessor.class),
             mock(ProductDeleteProcessor.class), mock(ProductHeaderUpdateProcessor.class), mock(ProductCategoryUpdateProcessor.class),
-            audit, mock(ProductPricingUpdateProcessor.class), prepare, update, mock(ProductOptionsUpdateProcessor.class));
+            audit, mock(ProductPricingUpdateProcessor.class), prepare, update, mock(ProductOptionsUpdateProcessor.class),
+            mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductCustomOrderProcessor.class));
         doAnswer(c -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             assertThat(TransactionSynchronizationManager.isSynchronizationActive()).isFalse();
