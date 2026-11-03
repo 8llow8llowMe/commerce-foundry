@@ -408,11 +408,7 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 
 ## 7. 웹훅
 
-- 수신 경로: `POST /api/v1/payments/webhooks/toss` (`adapter/in/webhook`, JWT 없음).
-- **웹훅 본문을 그대로 믿지 않는다.** 이벤트를 받으면 PG 조회 API 로 결제를 재조회해 그 결과로 상태를 확정한다.
-- 같은 이벤트가 여러 번 올 수 있다. 상태 전이 규칙(§5)이 이미 반영된 이벤트를 무시하게 만든다 — 멱등.
-- 처리는 짧게 하고 빨리 `200` 을 돌려준다. 무거운 후처리는 비동기로 넘긴다.
-- 가상계좌를 켜면 입금 완료가 웹훅으로만 온다. 그때 `WAITING_FOR_DEPOSIT` 상태와 입금 콜백 처리를 추가한다.
+수신·영속 inbox·PG 재조회·재시도·수동 확인 및 활성화 절차는 [payment-webhook-guide.md](payment-webhook-guide.md)를 따른다 (#15).
 
 ## 8. 취소 · 환불
 
