@@ -154,10 +154,7 @@ const SIZE_TEMPLATES_TOUR: Tour = {
   ],
 };
 
-/**
- * 국내 배송비 정책(#358 시작 체크리스트의 업무 화면). 서버 허용 목록(`operations.onboarding.guides`)에 `shipping-domestic` 이 오르기 전에는
- * 서버가 이 투어를 모르므로 이 브라우저 기록으로만 정한다(`progress.ts` 의 `writableGuide`).
- */
+/** 국내 배송비 정책(#358 시작 체크리스트의 업무 화면). 서버 허용 목록(`operations.onboarding.guides`)에 `shipping-domestic` 이 있다(BE #412) */
 export const SHIPPING_DOMESTIC_TOUR: Tour = {
   id: 'shipping-domestic-v1',
   steps: [
@@ -183,19 +180,26 @@ export const SHIPPING_DOMESTIC_TOUR: Tour = {
 };
 
 /**
- * 상품 등록(#29). 가리키는 앵커(`product-basic` · `product-price` · `product-options` · `product-skus` · `product-submit`)는
- * 상품 등록 폼(`ProductCreateForm`)의 구역마다 달려 있다 — 이름을 바꾸면 폼과 같이 바꾼다(폼 테스트가 이 정의의 앵커를 확인한다).
- * 대표 이미지 칸은 첨부(BE #9 F2) 전까지 꺼 둔 칸이라 단계에 넣지 않는다. 서버 허용 목록에 `product-new` 가 오르기 전에는
- * 이 브라우저 기록으로만 정한다(`progress.ts` 의 `writableGuide`).
+ * 상품 등록(#29 · #358 시작 체크리스트의 업무 화면). 가리키는 앵커(`product-basic` · `product-images` · `product-price` ·
+ * `product-options` · `product-skus` · `product-submit`)는 상품 등록 폼(`ProductCreateForm`)의 구역마다 달려 있다 —
+ * 이름을 바꾸면 폼과 같이 바꾼다(폼 테스트가 이 정의의 앵커를 확인한다).
+ * v2 — 이미지 첨부(BE #9 F2)가 열려 이미지 단계를 더했다. 서버 허용 목록(`operations.onboarding.guides`)에 `product-new` 가
+ * 오르기 전에는 이 브라우저 기록으로만 정한다(`progress.ts` 의 `writableGuide`).
  * 안내는 위치 설명만 한다. 등록 버튼을 대신 누르지 않는다(투어 중에는 가리킨 요소를 누를 수 없다).
  */
 export const PRODUCT_NEW_TOUR: Tour = {
-  id: 'product-new-v1',
+  id: 'product-new-v2',
   steps: [
     {
       target: 'product-basic',
       title: '기본 정보',
-      body: '상품명 · 요약 · 상세 설명을 넣습니다. 아래로 내려가며 카테고리 · 판매 · 노출 · 가격 · 프리오더 · 옵션을 차례로 채웁니다.',
+      body: '상품명 · 요약 · 상세 설명을 넣습니다. 아래로 내려가며 이미지 · 카테고리 · 판매 · 노출 · 가격 · 프리오더 · 옵션을 차례로 채웁니다.',
+    },
+    {
+      target: 'product-images',
+      title: '이미지',
+      body: '대표 이미지 한 장과 추가 이미지를 고르면 바로 올라갑니다. 올리는 동안에는 등록할 수 없습니다. 대체 텍스트는 이미지를 볼 수 없는 고객에게 읽어 줍니다. 이미지 없이도 등록할 수 있습니다.',
+      side: 'top',
     },
     {
       target: 'product-price',
@@ -218,8 +222,59 @@ export const PRODUCT_NEW_TOUR: Tour = {
     {
       target: 'product-submit',
       title: '등록',
-      body: '등록하면 상품 상세로 옮깁니다. 같은 내용으로 두 번 등록하면 상품이 두 개 생기니, 결과를 확인하지 못했다고 나오면 상품 목록에서 먼저 확인하세요.',
+      body: '등록하면 상품 상세로 옮기고 시작 체크리스트의 업무도 완료됩니다. 이 안내를 끝까지 보는 것만으로는 완료되지 않습니다. 같은 내용으로 두 번 등록하면 상품이 두 개 생기니, 결과를 확인하지 못했다고 나오면 상품 목록에서 먼저 확인하세요.',
       side: 'top',
+    },
+  ],
+};
+
+/**
+ * 상품 기본 정보 수정(#29). 앵커는 `ProductHeaderEditForm` 에 있다 — 서버에서 상품을 읽은 뒤에만 폼이 그려지고,
+ * 권한이 없으면 폼 대신 권한 안내가 그려져 필수 요소가 없으니 투어가 시작하지 않는다.
+ */
+const PRODUCT_EDIT_TOUR: Tour = {
+  id: 'product-edit-v1',
+  steps: [
+    {
+      target: 'product-edit-text',
+      title: '상품 문구',
+      body: '상품명 · 요약 · 상세 설명을 고칩니다. 카테고리 · 가격 · 옵션 · 이미지 수정은 아직 이 화면에 없습니다.',
+    },
+    {
+      target: 'product-edit-status',
+      title: '판매 상태 · 노출',
+      body: '판매 상태와 스토어 노출을 바꿉니다. 노출을 끄면 고객에게 상품이 보이지 않지만 상품과 주문 기록은 그대로 남습니다.',
+      side: 'top',
+    },
+    {
+      target: 'product-edit-save',
+      title: '저장',
+      body: '바뀐 내용이 있을 때만 저장할 수 있습니다. 그사이 다른 곳에서 상품이 바뀌었으면 덮어쓰지 않고 알려 주니, 최신 내용을 불러와 다시 고치세요.',
+      side: 'top',
+    },
+  ],
+};
+
+/** 결제 확인 목록(#30 · #504) — 조건 · 표 · 읽기 전용 안내. 빈 목록이면 표가 없어 선택 단계다 */
+const PAYMENTS_TOUR: Tour = {
+  id: 'payments-v1',
+  steps: [
+    {
+      target: 'payment-filters',
+      title: '결제 찾기',
+      body: '결제 상태 · 주문 아이디 · 주문 회신 여부로 찾습니다. 위쪽 바로가기로 자주 보는 조건을 한 번에 고릅니다.',
+    },
+    {
+      target: 'payment-table',
+      title: '결제 보기',
+      body: '결제 시도마다 상태 · 수단 · 원금 · 주문 회신을 봅니다. 원금은 환불 뒤 잔액이 아닙니다. 주문 아이디를 누르면 주문 상세로 갑니다.',
+      side: 'top',
+      optional: true,
+    },
+    {
+      target: null,
+      title: '읽기 전용',
+      body: '이 화면은 저장된 기록만 보여 주고 결제사에 다시 조회하거나 승인 · 취소하지 않습니다. 주문 회신이 미수신이라고 해서 곧바로 복구할 결제는 아닙니다.',
     },
   ],
 };
@@ -315,7 +370,7 @@ const ROUTES: Route[] = [
     topic: {
       title: '상품 목록',
       summary:
-        '숨긴 상품까지 모든 상품을 찾고 판매 상태 · 재고 반영 판매 가능 여부를 봅니다. "상품 등록" 으로 새 상품을 등록합니다. 상품 수정 화면은 준비 중입니다.',
+        '숨긴 상품까지 모든 상품을 찾고 판매 상태 · 재고 반영 판매 가능 여부를 봅니다. "상품 등록" 으로 새 상품을 등록하고, 상품을 눌러 상세에서 기본 정보를 고칩니다.',
       faq: COMMON_FAQ,
       tour: null,
     },
@@ -333,13 +388,57 @@ const ROUTES: Route[] = [
             '상품이 이미 등록됐을 수 있습니다. 같은 내용으로 다시 등록하면 상품이 두 개 생기니, 상품 목록에서 먼저 확인하세요.',
         },
         {
-          question: '이미지는 어디서 넣나요?',
+          question: '이미지를 올리는 중이라며 등록이 안 돼요.',
           answer:
-            '"대표 이미지" 칸은 상품에 이미지를 붙이는 서버 기능이 준비되면 열립니다. 지금은 이미지 없이 등록됩니다.',
+            '이미지가 다 올라갈 때까지 등록을 막아 둡니다. 올리기에 실패하면 칸 아래에 이유가 나오니 파일을 다시 고르세요.',
         },
         ...COMMON_FAQ,
       ],
       tour: PRODUCT_NEW_TOUR,
+    },
+  },
+  {
+    pattern: /^\/products\/[^/]+\/edit$/,
+    topic: {
+      title: '상품 기본 정보 수정',
+      summary:
+        '상품명 · 요약 · 상세 설명 · 판매 상태 · 노출을 고칩니다. 카테고리 · 가격 · 옵션 · 이미지 수정은 준비 중입니다.',
+      faq: [
+        {
+          question: '"그사이 다른 곳에서 이 상품이 바뀌었습니다" 가 떠요.',
+          answer:
+            '보고 있는 동안 다른 운영자가 상품을 고친 것입니다. "최신 내용 불러오기" 로 바뀐 내용을 확인한 뒤 다시 고치세요.',
+        },
+        ...COMMON_FAQ,
+      ],
+      tour: PRODUCT_EDIT_TOUR,
+    },
+  },
+  {
+    pattern: /^\/products\/[^/]+$/,
+    topic: {
+      title: '상품 상세',
+      summary:
+        '상품 정보 · 옵션 조합(SKU)을 보고, "기본 정보 수정" 으로 문구 · 판매 상태 · 노출을 고칩니다. 재고는 재고 화면에서 조정합니다.',
+      faq: COMMON_FAQ,
+      tour: null,
+    },
+  },
+  {
+    pattern: /^\/payments$/,
+    topic: {
+      title: '결제 확인',
+      summary:
+        '저장된 결제 시도와 주문 회신 상태를 봅니다. 결제사에 다시 조회하거나 승인 · 취소하지 않습니다.',
+      faq: [
+        {
+          question: '주문 회신이 "미수신" 이에요.',
+          answer:
+            '결제 서비스가 주문 쪽 성공 회신을 아직 받지 못했다는 기록입니다. 주문 상세에서 주문 상태를 먼저 확인하세요.',
+        },
+        ...COMMON_FAQ,
+      ],
+      tour: PAYMENTS_TOUR,
     },
   },
   {

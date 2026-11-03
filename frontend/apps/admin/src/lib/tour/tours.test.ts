@@ -33,6 +33,29 @@ describe('helpTopicFor · toursFor', () => {
       PRODUCT_NEW_TOUR.id,
     ]);
     expect(toursFor('/products').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
+    expect(toursFor('/products/42').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
+    expect(toursFor('/products/42/edit').map((tour) => tour.id)).toEqual([
+      CONSOLE_TOUR.id,
+      'product-edit-v1',
+    ]);
+    expect(toursFor('/payments').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'payments-v1']);
+  });
+
+  it('상품 상세 · 수정 · 결제 확인 화면에 도움말이 있다(상품 등록 경로가 상세 패턴에 먹히지 않는다)', () => {
+    expect(helpTopicFor('/products/new').title).toBe('상품 등록');
+    expect(helpTopicFor('/products/42').title).toBe('상품 상세');
+    expect(helpTopicFor('/products/42/edit').title).toBe('상품 기본 정보 수정');
+    expect(helpTopicFor('/payments').title).toBe('결제 확인');
+  });
+
+  it('결제 확인 투어는 표가 빈 목록이면 없어 선택이고, 읽기 전용 안내는 가운데에 뜬다', () => {
+    expect(
+      toursFor('/payments')[1]?.steps.map((step) => [step.target, step.optional ?? false]),
+    ).toEqual([
+      ['payment-filters', false],
+      ['payment-table', true],
+      [null, false],
+    ]);
   });
 
   it('송장 단계는 주문 투어의 상태 변경 뒤 · 이력 앞에 있고, 상세의 송장은 준비중 주문에만 있어 선택이다', () => {
@@ -52,9 +75,11 @@ describe('helpTopicFor · toursFor', () => {
     ]);
   });
 
-  it('상품 등록 투어는 폼 구역 순서대로 필수 앵커만 가리키고, 문구는 평문이다', () => {
+  it('상품 등록 투어(v2)는 폼 구역 순서대로 이미지 칸을 포함한 필수 앵커만 가리키고, 문구는 평문이다', () => {
+    expect(PRODUCT_NEW_TOUR.id).toBe('product-new-v2');
     expect(PRODUCT_NEW_TOUR.steps.map((step) => [step.target, step.optional ?? false])).toEqual([
       ['product-basic', false],
+      ['product-images', false],
       ['product-price', false],
       ['product-options', false],
       ['product-skus', false],

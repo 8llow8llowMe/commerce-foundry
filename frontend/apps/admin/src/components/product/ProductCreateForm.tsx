@@ -9,6 +9,7 @@ import { AccessNotice } from '@/components/AccessNotice';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied, type FormErrors } from '@/lib/api-errors';
 import { flattenTree, type CategoryRow } from '@/lib/category/tree';
 import { CATEGORIES_PATH, type CategoryTree } from '@/lib/category/types';
+import { onboardingTasks, type OnboardingTasksStore } from '@/lib/onboarding/tasks-store';
 import {
   CATEGORY_IDS_MAX,
   CREATE_PRODUCT_PATH,
@@ -45,7 +46,7 @@ type Categories =
 /**
  * 어드민 상품 등록(#29 · BE #9 E1 · F2) — `POST /api/v1/admin/products`. 맞춤 제작 입력은 아직 없다(BE 후속).
  * 이미지는 고르자마자 올리고(F1 발급 → 스토리지) 본문 `images` 에 `uploadKey` 만 싣는다(F2). 올리는 중에는 등록을 막는다.
- * 섹션 · 등록 버튼 줄의 `data-tour` 는 온보딩 투어(#228 `product-new-v1`)가 가리키는 앵커다 — 이름을 바꾸면 투어 정의도 같이 바꾼다.
+ * 섹션 · 등록 버튼 줄의 `data-tour` 는 온보딩 투어(#228 `product-new-v2`)가 가리키는 앵커다 — 이름을 바꾸면 투어 정의도 같이 바꾼다.
  * 앵커는 카테고리를 불러온 뒤에 단다 — 불러오는 중에 투어가 뜨면 그 뒤 403 으로 폼이 권한 안내로 바뀌어도 투어가 사라진 요소를 가리킨 채 남는다.
  * **멱등 키가 없다** — 같은 본문을 두 번 보내면 상품이 둘 생긴다. 그래서 제출은 ref 로 한 번만 받고, 성공하면 곧바로 상세로 옮긴다(replace).
  * 결과를 모르는 실패는 다시 보내지 않고 목록에서 확인하게 한다. 저장 401 은 폼을 지킨다(§9 공통 규칙).
@@ -138,7 +139,7 @@ export function ProductCreateForm() {
         json: built.request,
       });
       // 상세로 옮길 때까지 버튼을 막아 둔다(다시 누르면 상품이 하나 더 생긴다)
-      router.replace(createdProductHref(created));
+      afterProductCreated(created, router.replace);
     } catch (cause) {
       const failure = createFailure(cause);
       setSaving(false);
@@ -251,7 +252,7 @@ export function ProductCreateForm() {
           />
         </Section>
 
-        <Section title="이미지">
+        <Section title="이미지" tour={tourAnchor('product-images')}>
           <ProductImagesField
             value={form}
             onChange={({ thumbnail, gallery }) => set({ thumbnail, gallery })}
@@ -477,6 +478,19 @@ export function ProductCreateForm() {
       </div>
     </form>
   );
+}
+
+/**
+ * 등록 성공 — 시작 체크리스트(#358)의 "첫 상품 등록" 업무 상태를 서버에서 다시 읽게 하고 상세로 옮긴다.
+ * 화면에서 완료로 바꾸지 않는다(완료 판정은 서버가 상품 서비스 사실로 한다).
+ */
+export function afterProductCreated(
+  created: ProductCreateResponse,
+  replace: (href: string) => void,
+  tasks: Pick<OnboardingTasksStore, 'invalidate'> = onboardingTasks,
+) {
+  tasks.invalidate();
+  replace(createdProductHref(created));
 }
 
 function Section({

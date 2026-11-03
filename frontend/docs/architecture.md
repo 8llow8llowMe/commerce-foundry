@@ -438,7 +438,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 ### 도움말 · 온보딩 투어 (#228)
 
 - **상단 바 도움말(?)** — 지금 화면의 짧은 설명 · 자주 묻는 질문(`<details>`)과 "이 화면 안내 다시 보기" · "처음 안내 다시 보기" · "모든 화면 안내 다시 켜기". 내용은 `lib/tour/tours.ts` 의 경로 → 도움말 표 한 곳이다.
-- **투어** — 처음 콘솔에 들어오면 콘솔 투어(메뉴 · 알림 · 도움말), 그다음 화면 투어(재고 · 옵션별 재고 · 사이즈표 고르기 · 사이즈표 입력 · 사이즈표 템플릿 · 국내 배송비 정책 · 상품 등록 · 주문 목록 · 주문 상세)를 한 번씩 자동으로 보인다.
+- **투어** — 처음 콘솔에 들어오면 콘솔 투어(메뉴 · 알림 · 도움말), 그다음 화면 투어(재고 · 옵션별 재고 · 사이즈표 고르기 · 사이즈표 입력 · 사이즈표 템플릿 · 국내 배송비 정책 · 상품 등록 · 상품 기본 정보 수정 · 주문 목록 · 주문 상세 · 결제 확인)를 한 번씩 자동으로 보인다.
   끝내거나(마치기) 닫으면(×, Esc, 바깥 누르기) 본 것으로 남기고 다시 띄우지 않는다. 화면을 옮겨 끊긴 투어는 본 것으로 남기지 않는다. 실행은 콘솔 레이아웃의 `TourRunner` 하나다.
 - **가리키는 요소는 `data-tour="<이름>"` 속성**이다 — 클래스 · 문구가 바뀌어도 투어가 깨지지 않게. 목록 · 표는 API 응답 뒤에 그려져 모두 나타날 때까지(최대 4초) 기다리고,
   빈 목록 · 템플릿을 고르기 전의 표처럼 없을 수 있는 요소는 `optional` 단계라 없으면 그 단계만 뺀다. 필수 요소가 없으면(권한 없음 안내 · 불러오기 실패)
@@ -467,11 +467,16 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **주문 투어** — 목록(`orders-v2`: 조건 · 표 · 일괄 변경 · 송장 일괄 등록)과 상세(`order-detail-v2`: 현재 상태 · 상태 바꾸기 · 송장 등록 · 상태 이력). 상세의 `order-status-actions` 는
   바꿀 수 있는 상태가 없을 때 버튼 대신 나오는 안내 문구에도 달아 필수 단계로 둔다(종료된 주문에서도 4초를 기다리지 않게).
   상세의 송장 등록(`order-shipment`)은 상품 준비중 주문에만 있어 선택 단계다. 서버 허용 목록에 `orders` · `order-detail` 이 오르기 전에는 이 브라우저 기록으로만 간다.
-- **상품 등록 투어**(`product-new-v1`, `/products/new`) — 기본 정보 · 통화 · 가격 · 옵션 · 옵션 조합(SKU) · 등록 버튼. 앵커(`product-basic` · `product-price` ·
+- **상품 등록 투어**(`product-new-v2`, `/products/new`) — 기본 정보 · 이미지 · 통화 · 가격 · 옵션 · 옵션 조합(SKU) · 등록 버튼. 앵커(`product-basic` · `product-images` · `product-price` ·
   `product-options` · `product-skus` · `product-submit`)는 상품 등록 폼 구역에 달려 있고, 폼 테스트가 폼의 `data-tour` 목록이 투어 정의와 같은지 확인한다(어긋나면 필수 요소가 없어 시작하지 않는다).
   앵커는 카테고리를 불러온 뒤에 단다 — 폼은 첫 렌더부터 그려져, 불러오는 중에 투어가 뜨면 그 뒤 403 권한 안내로 바뀐 화면에 투어가 남는다.
-  이미지 칸(F2)은 단계에 넣지 않았다(단계를 더하면 버전을 올린다). 안내는 위치 설명만 하고 등록 버튼을 대신 누르지 않는다.
-- 서버 허용 목록에 아직 없는 투어: `orders`(v2) · `order-detail`(v2) · `shipping-domestic`(v1) · `product-new`(v1). BE 가 올릴 때 이 버전으로 등록해야 서버 기록을 쓴다(다른 버전이면 `ONBOARDING_103`).
+  v2 는 이미지 칸(F2)이 열려 이미지 단계를 더하며 버전을 올렸다. 안내는 위치 설명만 하고 등록 버튼을 대신 누르지 않는다.
+  시작 체크리스트의 "첫 상품 등록" 업무(`PRODUCT_REGISTERED`)의 "안내와 함께 열기" 가 이 투어를 연다.
+- **상품 기본 정보 수정 투어**(`product-edit-v1`, `/products/[productId]/edit`) — 문구(`product-edit-text`) · 판매 상태 · 노출(`product-edit-status`) · 저장 줄(`product-edit-save`).
+  폼은 서버에서 상품을 읽은 뒤 그려지고, 권한이 없으면 권한 안내라 필수 요소가 없어 시작하지 않는다. 폼 테스트가 앵커 목록과 정의를 맞춰 본다.
+- **결제 확인 투어**(`payments-v1`, `/payments`) — 조건(`payment-filters`) · 표(`payment-table`, 빈 목록이면 없어 선택) · 읽기 전용 안내(가운데).
+- 전시 편집(`/displays/main`)에는 아직 투어가 없다.
+- 서버 허용 목록에 아직 없는 투어: `orders`(v2) · `order-detail`(v2) · `product-new`(v2) · `product-edit`(v1) · `payments`(v1). `shipping-domestic`(v1)은 BE #412 로 올랐다. BE 가 올릴 때 이 버전으로 등록해야 서버 기록을 쓴다(다른 버전이면 `ONBOARDING_103`).
 
 ### 샘플 주문 업무 연습 (`/practice`, #365)
 
@@ -651,7 +656,8 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 
 - `POST /api/v1/admin/products`(`backend/docs/api-design-guide.md` 어드민 상품 등록). 코드는 `lib/product/create.ts`(폼 · 조합 · 본문 · 미리 보는 검증) · `create-errors.ts`(실패 처리),
   화면은 `components/product/ProductCreateForm` · `OptionEditor` · `SkuTable` 이다. 목록 위 "상품 등록" 버튼과 시작 체크리스트의 상품 등록 업무(`PRODUCT_REGISTERED`)가 이 화면으로 온다.
-  완료 판정은 그대로 서버 재조회다(체크로 완료하지 않는다).
+  완료 판정은 그대로 서버 재조회다(체크로 완료하지 않는다) — 등록에 성공하면 상세로 옮기기 전에 `onboardingTasks.invalidate()`(`afterProductCreated`)로
+  지난 업무 상태를 버려, 홈의 시작 카드가 다음에 열릴 때 서버에서 다시 읽는다(국내 배송비 저장 뒤와 같은 방식).
 - **범위** — 맞춤 제작 입력은 넣지 않는다(비활성 자리도 두지 않는다). 수정 · 삭제는 상세에서 한다(위).
 - **이미지(F2)** — `components/product/ProductImagesField` 가 대표 한 칸(`THUMBNAIL`) + 추가 이미지 칸(`GALLERY`, "칸 더하기")을 그린다. 합쳐 8장, 칸마다 업로드 칸(아래 "이미지 업로드")이고
   올린 칸에만 대체 텍스트(선택, 200자 한 줄)가 열린다. 본문 `images` 는 올린 칸만 대표 → 추가 이미지 순서로 `{uploadKey, imageType, altText?}` 를 싣는다(`imageEntries`),
@@ -659,7 +665,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   **올리는 중에는 등록을 막는다** — 키 없이 보내면 이미지가 조용히 빠진다. 올린 파일은 하루 안에 등록하지 않으면 지워진다(안내).
   이미지 오류는 BE 가 저장(DB) 전에 검증 · 복사해서 난다 — `018`(구성) · `032`(키 없음 · 남의 키 · 만료) · `033` · `034` 는 이미지 칸, `035`(저장소) · `036`(꺼짐)은 폼 전체 문구이고
   503 이어도 **결과 모름으로 보지 않는다**(상품이 생기지 않았다). 검증 `019` 는 대체 텍스트 칸 또는 이미지 칸 전체다.
-- **투어 앵커** — 섹션 · 등록 버튼 줄에 `data-tour`(`product-basic` · `product-price` · `product-options` · `product-skus` · `product-submit`)를 단다. 온보딩 투어 `product-new-v1`(#228)이 가리키는 앵커다 — 이름을 바꾸면 `lib/tour/tours.ts` 정의도 같이 바꾼다(폼 테스트가 둘을 맞춰 본다).
+- **투어 앵커** — 섹션 · 등록 버튼 줄에 `data-tour`(`product-basic` · `product-images` · `product-price` · `product-options` · `product-skus` · `product-submit`)를 단다. 온보딩 투어 `product-new-v2`(#228)이 가리키는 앵커다 — 이름을 바꾸면 `lib/tour/tours.ts` 정의도 같이 바꾼다(폼 테스트가 둘을 맞춰 본다).
 - **폼** — 기본 정보(상품명 · 요약 · 상세 설명 HTML), 카테고리(어드민 트리에서 대표 1개 + 진열 여럿, 숨김 포함), 판매 상태 · 노출(기본 숨김), 가격(통화 하나로 판매가 · 정가 · 추가금, `parseMoneyInput`),
   1회 최대 수량, 프리오더 · 발송 예정일, 옵션 그룹(이름 + 값 칩, 입력 순서 = 노출 순서), SKU 표.
   - **SKU 표는 옵션의 조합(카테시안 곱)이다** — 옵션을 바꾸면 다시 만들고 같은 조합(값 이름 배열 키)의 입력은 남긴다. 옵션이 없으면 "기본" 한 줄(`optionValues: []`).

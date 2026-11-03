@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { PRODUCT_NEW_TOUR } from '@/lib/tour/tours';
-import { ProductCreateForm } from './ProductCreateForm';
+import { afterProductCreated, ProductCreateForm } from './ProductCreateForm';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn() }) }));
 
@@ -26,7 +26,7 @@ const render = (loaded: boolean) => {
 };
 
 describe('ProductCreateForm', () => {
-  it('카테고리를 불러오면 상품 등록 투어(#228 product-new-v1)가 가리키는 앵커를 모두 한 번씩 정의 순서로 단다', () => {
+  it('카테고리를 불러오면 상품 등록 투어(#228 product-new-v2)가 가리키는 앵커를 모두 한 번씩 정의 순서로 단다', () => {
     const anchors = [...render(true).matchAll(/data-tour="([^"]+)"/g)].map((match) => match[1]);
     // 정의와 폼이 어긋나면 필수 요소가 없어 투어가 시작하지 않는다 — 폼에 없는 앵커 · 정의에 없는 앵커 둘 다 잡는다
     expect(anchors).toEqual(PRODUCT_NEW_TOUR.steps.map((step) => step.target));
@@ -36,11 +36,10 @@ describe('ProductCreateForm', () => {
     expect(render(false)).not.toContain('data-tour');
   });
 
-  it('이미지 업로드 칸(BE #9 F2)은 투어가 가리키지 않는다', () => {
+  it('이미지 업로드 칸(BE #9 F2)은 투어의 이미지 단계가 가리킨다', () => {
     const html = render(true);
     const imageSection = html.match(/<section[^>]*>(?:(?!<\/section>).)*type="file"/s)?.[0] ?? '';
-    expect(imageSection).not.toBe('');
-    expect(imageSection).not.toContain('data-tour');
+    expect(imageSection).toMatch(/^<section[^>]*data-tour="product-images"/);
   });
 
   it('대표 이미지 업로드 칸을 켜 두고 추가 이미지 칸을 더할 수 있다', () => {
@@ -49,5 +48,19 @@ describe('ProductCreateForm', () => {
     expect(html).toContain('대표 이미지 (선택)');
     expect(html).toContain('추가 이미지 칸 더하기');
     expect(html).not.toContain('서버 기능이 준비되면 열립니다');
+  });
+
+  it('등록에 성공하면 시작 체크리스트(#358) 업무 상태를 다시 읽게 한 뒤 상세로 옮긴다 — 화면에서 완료로 바꾸지 않는다', () => {
+    const order: string[] = [];
+    const tasks = { invalidate: vi.fn(() => order.push('invalidate')) };
+    const replace = vi.fn((href: string) => order.push(href));
+    afterProductCreated(
+      { product: { productId: '42' }, descriptionHtmlSanitized: false } as Parameters<
+        typeof afterProductCreated
+      >[0],
+      replace,
+      tasks,
+    );
+    expect(order).toEqual(['invalidate', '/products/42']);
   });
 });

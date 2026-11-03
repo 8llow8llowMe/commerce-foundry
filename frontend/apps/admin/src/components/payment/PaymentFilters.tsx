@@ -50,7 +50,7 @@ export function PaymentFilters({ query }: { query: PaymentQuery }) {
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div data-tour="payment-filters" className="flex flex-col gap-3">
       <ul aria-label="바로가기" className="flex flex-wrap gap-2 text-sm">
         {PRESETS.map((preset) => {
           const active = isPreset(query, preset.query);

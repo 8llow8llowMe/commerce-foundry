@@ -50,6 +50,31 @@ describe('StartChecklistView', () => {
     expect(html).not.toContain('type="checkbox"');
   });
 
+  it('서버가 상품 등록 업무를 주면 배송비 업무 다음에 상품 등록 화면 이동 · 안내와 함께 열기를 보인다', () => {
+    const item = (taskKey: string, my: string) => ({
+      taskKey,
+      storeStatus: { code: 'READY' },
+      myStatus: { code: my },
+      myCompletedAt: null,
+    });
+    const both = (my: string) =>
+      taskViewsOf({
+        tours: [],
+        tasks: [item('SHIPPING_POLICY_SAVED', 'NOT_COMPLETED'), item('PRODUCT_REGISTERED', my)],
+      });
+    const html = render({ tasks: both('NOT_COMPLETED'), loading: false, failed: false });
+    expect(html.indexOf('국내 배송비 정책 저장')).toBeLessThan(html.indexOf('첫 상품 등록'));
+    expect(html).toContain('href="/products/new"');
+    expect(html.match(/안내와 함께 열기/g)).toHaveLength(2);
+    expect(html).toContain('2개 중 0개 완료');
+    // 다른 운영자가 등록한 상품만 있으면(스토어만) · 상품 서비스 장애면(확인 불가) 완료도 미완료도 아니다
+    const storeOnly = render({ tasks: both('NO_EVIDENCE'), loading: false, failed: false });
+    expect(storeOnly).toContain('스토어에는 설정됨 · 내 저장 기록 없음');
+    expect(storeOnly).toContain('2개 중 0개 완료');
+    const unknown = render({ tasks: both('UNAVAILABLE'), loading: false, failed: false });
+    expect(unknown).toContain('확인 불가');
+  });
+
   it('서버가 완료라고 할 때만 완료다. 스토어에만 있으면 완료가 아니다', () => {
     expect(render({ tasks: views('COMPLETED'), loading: false, failed: false })).toContain(
       '시작 업무를 모두 마쳤습니다.',

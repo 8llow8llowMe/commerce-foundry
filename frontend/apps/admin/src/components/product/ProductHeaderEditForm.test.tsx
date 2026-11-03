@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { adminProduct } from '@/lib/product/test-fixtures';
+import { helpTopicFor } from '@/lib/tour/tours';
 import { ProductHeaderEditForm } from './ProductHeaderEditForm';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn() }) }));
@@ -23,5 +24,13 @@ describe('ProductHeaderEditForm', () => {
     expect(html).toContain('카테고리 · 가격 · 옵션 · SKU · 이미지 수정은 준비 중입니다.');
     expect(html).not.toContain('type="file"');
     expect(html).toContain(`href="/products/${adminProduct().productId}"`);
+  });
+
+  it('상품 수정 투어(#228 product-edit-v1)가 가리키는 앵커를 모두 한 번씩 정의 순서로 단다', () => {
+    const html = renderToStaticMarkup(<ProductHeaderEditForm product={adminProduct()} />);
+    const anchors = [...html.matchAll(/data-tour="([^"]+)"/g)].map((match) => match[1]);
+    const tour = helpTopicFor(`/products/${adminProduct().productId}/edit`).tour;
+    expect(tour?.id).toBe('product-edit-v1');
+    expect(anchors).toEqual(tour?.steps.map((step) => step.target));
   });
 });

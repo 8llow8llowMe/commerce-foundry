@@ -34,6 +34,7 @@ import { DescriptionHtmlField } from './DescriptionHtmlField';
  * 상세에서 읽은 `version` 을 되돌려 보낸다. 충돌(409) · 결과 모름은 폼을 지키고 "최신 내용 불러오기" 를 낸다 —
  * 누르면 상세를 다시 읽어 폼과 버전을 바꾼다(입력은 최신 값으로 바뀐다). 자동으로 다시 보내지 않는다.
  * 저장하면 상세로 옮기고, 상세 설명을 정리해 저장했으면 상세가 한 번 알린다(`?sanitized=1`).
+ * 구역 · 저장 줄의 `data-tour` 는 온보딩 투어(#228 `product-edit-v1`)가 가리키는 앵커다 — 이름을 바꾸면 투어 정의도 같이 바꾼다.
  */
 export function ProductHeaderEditForm({ product }: { product: AdminProductDetail }) {
   const id = useId();
@@ -162,51 +163,55 @@ export function ProductHeaderEditForm({ product }: { product: AdminProductDetail
       </div>
 
       <fieldset disabled={busy !== null} className="flex min-w-0 flex-col gap-6">
-        <TextField
-          label={`상품명 (${NAME_MAX}자 이하)`}
-          value={form.name}
-          onChange={(event) => set({ name: event.currentTarget.value })}
-          errors={errorsOf('name')}
-          required
-        />
-        <TextField
-          label={`요약 (선택, ${SUMMARY_MAX}자 이하)`}
-          value={form.summary}
-          onChange={(event) => set({ summary: event.currentTarget.value })}
-          errors={errorsOf('summary')}
-        />
-        <DescriptionHtmlField
-          value={form.descriptionHtml}
-          onChange={(descriptionHtml) => set({ descriptionHtml })}
-          errors={errorsOf('descriptionHtml')}
-        />
-        <div className="flex flex-col gap-1">
-          <label htmlFor={`${id}-status`} className="text-sm font-medium">
-            판매 상태
-          </label>
-          <select
-            id={`${id}-status`}
-            value={form.saleStatus}
-            onChange={(event) => set({ saleStatus: event.currentTarget.value as SaleStatusCode })}
-            className="h-10 w-40 rounded-md border border-border bg-bg px-3"
-          >
-            {(Object.keys(SALE_STATUS_LABELS) as SaleStatusCode[]).map((code) => (
-              <option key={code} value={code}>
-                {SALE_STATUS_LABELS[code]}
-              </option>
-            ))}
-          </select>
-          <FieldError messages={errorsOf('saleStatus')} />
+        <div className="flex flex-col gap-6" data-tour="product-edit-text">
+          <TextField
+            label={`상품명 (${NAME_MAX}자 이하)`}
+            value={form.name}
+            onChange={(event) => set({ name: event.currentTarget.value })}
+            errors={errorsOf('name')}
+            required
+          />
+          <TextField
+            label={`요약 (선택, ${SUMMARY_MAX}자 이하)`}
+            value={form.summary}
+            onChange={(event) => set({ summary: event.currentTarget.value })}
+            errors={errorsOf('summary')}
+          />
+          <DescriptionHtmlField
+            value={form.descriptionHtml}
+            onChange={(descriptionHtml) => set({ descriptionHtml })}
+            errors={errorsOf('descriptionHtml')}
+          />
         </div>
-        <Checkbox
-          label="스토어에 노출 — 끄면 고객에게 보이지 않습니다"
-          checked={form.visible}
-          onChange={(event) => set({ visible: event.currentTarget.checked })}
-          errors={errorsOf('visible')}
-        />
+        <div className="flex flex-col gap-6" data-tour="product-edit-status">
+          <div className="flex flex-col gap-1">
+            <label htmlFor={`${id}-status`} className="text-sm font-medium">
+              판매 상태
+            </label>
+            <select
+              id={`${id}-status`}
+              value={form.saleStatus}
+              onChange={(event) => set({ saleStatus: event.currentTarget.value as SaleStatusCode })}
+              className="h-10 w-40 rounded-md border border-border bg-bg px-3"
+            >
+              {(Object.keys(SALE_STATUS_LABELS) as SaleStatusCode[]).map((code) => (
+                <option key={code} value={code}>
+                  {SALE_STATUS_LABELS[code]}
+                </option>
+              ))}
+            </select>
+            <FieldError messages={errorsOf('saleStatus')} />
+          </div>
+          <Checkbox
+            label="스토어에 노출 — 끄면 고객에게 보이지 않습니다"
+            checked={form.visible}
+            onChange={(event) => set({ visible: event.currentTarget.checked })}
+            errors={errorsOf('visible')}
+          />
+        </div>
       </fieldset>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" data-tour="product-edit-save">
         <Button type="submit" disabled={busy !== null || unchanged}>
           {busy === 'saving' ? '저장 중…' : '저장'}
         </Button>
