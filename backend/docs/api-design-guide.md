@@ -1132,7 +1132,23 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
   지역 정보라 그대로 둔다. 맞춤 제작 입력값(치수 등)도 제작에 필요해 그대로 보인다. 원문은 송장 출력(#18)처럼 꼭 필요한 경로가 감사와 함께 다룬다. 사유 · 배송지는 로그에 남기지 않는다.
 - **감사** — 목록 · 상세 열람과 상태 변경(성공 · 실패, 일괄은 주문마다)을 `admin.audit` 한 줄로 남긴다(`security-guide.md` §11-4 — `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE`).
 - **목록** — 기간은 주문 시각 `[from, to)` (UTC)이고 비면 그쪽 끝이 열려 있다. 정렬은 주문 시각 → 아이디 내림차순이고 `idx_orders_status_created_at_id` · `idx_orders_created_at_id` 범위로 읽는다(건수 쿼리도). 첫 상품명 · 항목 수 · 받는 분은 그 페이지 주문만 묶어 읽는다(항목 1번 · 배송지 1번).
-  결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 목록 · 승인 · 환불 · `REFUND_FAILED` 재시도는 #17 PR-2(#15 · #16 이후)다.
+  결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 조회는 아래 계약이며 승인 · 환불 · `REFUND_FAILED` 재시도는 후속이다.
+
+#### 어드민 클레임 조회 (#17)
+
+두 경로 모두 `hasRole('ADMIN')`이다. CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 어드민 Swagger 그룹에 포함된다.
+
+| API | 응답 | 검증/오류 |
+|-----|------|-----------|
+| `GET /api/v1/admin/claims?orderId=&type=&status=&page=0&size=20` | 200 `PageResponse<{claimId,orderId,type,status,expectedRefund,requestedAt}>` | page 0 이상 `ORDER_144`, size 1~100 `ORDER_145`, orderId 양수 `ORDER_141`, page×size가 JPA offset 한도 초과 `ORDER_167`, 타입·범위 오류 `ORDER_198` (400) |
+| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}]}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
+
+- 필터는 모두 선택적이고 함께 지정하면 AND다. 현재 지원 값은 `type=RETURN`, `status=REQUESTED`다. 필터에 맞는 접수의 claimId 내림차순으로 정렬하며 임의 정렬 입력은 받지 않는다.
+- `page`는 0부터, 기본 크기는 20이다. `page×size`는 2,147,483,647 이하여야 하고 초과 입력은 DB 조회 전에 400으로 거절한다. `totalElements`는 같은 조건의 실제 count이고 빈 페이지에서도 전체 건수를 보존한다. 목록은 헤더와 count만 조회하고 상세만 항목을 읽는다.
+- ID는 문자열, type/status/reason은 `{code,name,description}` metadata다. `expectedRefund`는 `{amount,currency}` 또는 미산정 `null`이며 null을 0원으로 표시하지 않는다.
+- UUID 멱등키·회원/배송 개인정보·버전·워커 정보는 응답에 포함하지 않는다. 조회는 주문/접수 상태·이력·outbox를 변경하지 않고 외부 서비스를 호출하지 않는다.
+- 성공한 조회 뒤 `admin.audit`에 `CLAIM_SEARCH` 또는 `CLAIM_VIEW`를 남긴다. JWT 관리자 ID와 검증된 필터/대상만 기록하며 요청 원문·항목·멱등키는 기록하지 않는다.
+- 승인·거절·환불 계산/실행·실패 재시도·재고 복원과 새 상태는 후속이다. FE는 현 상태를 접수로 표시하고 이 조회 API만으로 처리 완료 버튼을 제공하지 않는다. 계약 리뷰어는 `seonghoho`다.
 
 ### 2-17. 고객 주문 내역 · 결제 전 취소 · 구매 확정 · 반품 접수 (order-service, #16)
 

@@ -1077,7 +1077,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | 서비스 | 행위 | 상태 |
 |--------|------|------|
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 사용 중 — 선언 · `AdminAuditLog` 통일은 #163 PR-E |
-| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor` 직접 `AdminAuditLog` 호출로 통일(#163 PR-E 일부) |
+| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor`와 조회 후 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출. 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·개인정보는 제외한다 (#17) |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음 · 온보딩 투어 면제 선언은 후속 |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |

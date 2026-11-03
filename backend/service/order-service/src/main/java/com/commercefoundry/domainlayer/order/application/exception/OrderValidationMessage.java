@@ -83,6 +83,8 @@ public final class OrderValidationMessage {
     }
     public static final String RETURN_ITEM_ID_REQUIRED = "ORDER_163:orderItemId 는 필수입니다.";
     public static final String RETURN_ITEM_ID_POSITIVE = "ORDER_164:orderItemId 는 양수여야 합니다.";
+    public static final String CLAIM_PAGE_OFFSET_RANGE = "ORDER_167:page 와 size 의 곱은 2147483647 이하여야 합니다.";
+    public static final String CLAIM_ID_POSITIVE = "ORDER_166:claimId 는 양수여야 합니다.";
     public static final String RETURN_REASON_REQUIRED = "ORDER_165:반품 사유(reason)는 필수입니다.";
     public static final String IDEMPOTENCY_KEY_FORMAT = "ORDER_198:Idempotency-Key 는 완전한 UUID 형식이어야 합니다.";
 }
