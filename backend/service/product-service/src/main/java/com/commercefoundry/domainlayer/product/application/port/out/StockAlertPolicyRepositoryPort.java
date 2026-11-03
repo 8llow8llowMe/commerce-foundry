@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.application.port.out;
 
 import com.commercefoundry.domainlayer.product.application.port.out.query.StockAlertQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.StockAlertPolicy;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 
@@ -16,4 +17,6 @@ public interface StockAlertPolicyRepositoryPort {
 
     /** SKU 쓰기 잠금 안에서만 호출한다. 미설정이면 아무것도 하지 않는다. */
     void delete(long skuId);
+    /** 아이디 오름차순으로 limit개까지 읽는다. count 쿼리는 실행하지 않는다. */
+    List<StockAlertQueryResult> findLowStocksAfter(long afterSkuId, int limit);
 }
