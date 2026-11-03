@@ -352,3 +352,7 @@ Kakao는 콘솔에서 Client Secret 사용을 활성화해야 한다. 클라이�
 compose는 기본 false를 유지한다. 끄면 기존 로그인은 유지되지만 연결 시작은 503 `AUTH_060`으로 차단한다.
 켜면 동일 이메일의 LOGIN 카운터를 비밀번호 재인증 전 기록하며 저장소 장애 시 연결을 차단한다. 기존 일반 로그인·가입 제한 흐름 연결은 #66 범위다.
 기존 데이터의 회원·제공자 중복 사전 점검 후 `uk_social_identity_member_id_provider`도 추가한다 (`api-design-guide.md` #355 운영 DDL).
+
+### DLT 알림 활성화 (#477 A2)
+
+operations 스키마 스냅숏에서 신규 `operations.dlt_alert_state`·`operations.dlt_partition_checkpoint` DDL만 추출해 `DLT_ALERT_ENABLED=true` 활성화 전에 적용한다. `ddl-auto=none`은 테이블을 만들지 않는다. 실제 프로세스에 `MESSAGING_ENABLED=true`·올바른 `KAFKA_NAMESPACE`도 주입한다. 기존 네 DLT 토픽 READ/DESCRIBE와 namespace가 붙은 `operations.dlt-alerts` 그룹 READ ACL, auth A1 활성 관리자 API·operations internal 서비스 토큰 허용을 확인한다. 새 비밀 키는 없다. 허용 목록·재시도·롤백·상한·토픽 재생성 대응은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.

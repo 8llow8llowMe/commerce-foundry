@@ -13,6 +13,8 @@ import org.springframework.http.HttpStatus;
 @RequiredArgsConstructor
 public enum NotificationErrorCode {
 
+    RECIPIENTS_UNAVAILABLE("NOTIFICATION_050", "알림 수신자를 확인할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
+
     NOT_FOUND("NOTIFICATION_001", "존재하지 않는 알림입니다.", HttpStatus.NOT_FOUND),
     CONFLICT("NOTIFICATION_020", "알림이 그 사이 바뀌었습니다. 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
