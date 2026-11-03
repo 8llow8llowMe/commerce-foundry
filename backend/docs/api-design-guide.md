@@ -123,6 +123,14 @@ Presenter가 Snowflake 문자열로 바꾼다. 계정명 · 이메일 · OTP 상
 페이지 사이 활성 변경에 대한 전체 snapshot은 보장하지 않는다. 조회 도중 낮은 ID가 활성화되면 다음 이상 알림의 수신자 조회부터 포함될 수 있다.
 ID projection + limit 한 번이며 count/잠금/개인정보 로딩이 없다. operations 호출 어댑터와 DLT · 알림 생성은 후속 범위다.
 
+### 1-5. 결제 outbox 원천 관측 (payment-service, #477 A3a)
+
+`GET /internal/v1/outbox-observations/ready`는 인자 없는 읽기 전용 internal API이며 `SERVICE_operations-service`만 허용한다(`@Hidden`).
+성공은 공통 봉투의 `{observedAt, readyUnpublishedCount, oldestReadyAvailableAt}` 세 필드와 `Cache-Control: no-store`다.
+관측시각은 Clock을 한 번 읽고 마이크로초 미만을 버린 조회 기준이며, 단일 집계로 미발행 중 `availableAt <= observedAt`인 행만 센다.
+빈 결과·미래 예약만 있는 결과는 `0/null`, 정확한 시각 경계는 포함한다. DB·트랜잭션 실패는 503 `OUTBOX_OBSERVATION_001`이며 정상·해소로 바꾸지 않는다.
+결제·메시징 게이트와 독립적으로 읽는다. operations 수집기·알림·해소 판정은 후속이며 [원천 관측 계약](outbox-observation-guide.md)을 따른다.
+
 ## 2. 응답 구조
 
 - 공통 래퍼 `Response<T>` 를 쓰고, Controller 반환은 `ResponseEntity<Response<T>>` 로 통일한다.

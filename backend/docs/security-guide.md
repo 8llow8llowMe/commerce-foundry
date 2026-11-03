@@ -729,6 +729,7 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
   | 엔드포인트 | 허용 호출자 | 비고 |
   |------------|-------------|------|
   | `GET /internal/v1/payments/{paymentId}` | `SERVICE_order-service` | 읽기, 회원 필터 없음 — `payment-approved` 진위 재조회 (#308). 결제키 · 멱등 키 · 주문명은 내리지 않는다 |
+  | `GET /internal/v1/outbox-observations/ready` | `SERVICE_operations-service` | 읽기, 발행 가능한 미발행 건수·최소시각·조회 기준시각만 반환. 결제 정보·outbox 본문 없음 (#477 A3a) |
 
   결제 정보는 다른 서비스가 읽을 이유가 없어 order-service 외(product · delivery · auth 등)는 403 이다(`PaymentInternalControllerTest`).
 

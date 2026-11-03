@@ -80,6 +80,10 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 | operations-service | product-service | 시점 원가 일괄 조회(`POST /internal/v1/sku-costs/query`, #361 PR-B) — 공헌이익 집계가 주문 항목의 (SKU, 주문 시각) 쌍을 100개씩 보내 그 시각의 유형별 원가를 받는다. 없는 SKU 는 빠지고 원가 미입력은 빈 costs 다. 호출 구현은 #362 |
 | operations-service | auth-service | 마케팅 동의 `POST /internal/v1/marketing-consents/query` (#230). PR-B의 ADMIN 수신자 미리보기에서 실제 Feign 호출(`campaignConsentClient`, 서킷 `auth-service`). 최대100개 ID, 이름·연락처 없음. 실패·응답 계약 위반은503. 실제 발송 연결은 후속. |
 
+operations-service의 payment outbox 원천 관측 권한(#477 A3a): payment-service의
+`GET /internal/v1/outbox-observations/ready`는 `SERVICE_operations-service`만 허용한다. 미래 예약을 제외한 발행 가능 미발행 건수·최소시각을
+단일 집계로 제공하며, operations 호출자·주기 수집·알림·해소 연결은 후속이다. [관측 계약](outbox-observation-guide.md)을 따른다.
+
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —
 A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃이 겹친다.
 
