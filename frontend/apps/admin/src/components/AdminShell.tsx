@@ -26,6 +26,7 @@ const NAV: NavGroup[] = [
     items: [
       { label: '주문 목록', href: '/orders' },
       { label: '결제 확인', href: '/payments' },
+      { label: '클레임', href: '/claims' },
     ],
   },
   {

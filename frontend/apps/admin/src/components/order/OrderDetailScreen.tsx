@@ -5,6 +5,7 @@ import { Button } from '@cf/ui';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
+import { OrderClaims } from '@/components/claim/OrderClaims';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
 import {
   shipmentNotice,
@@ -199,6 +200,7 @@ export function OrderDetailScreen({ orderId }: { orderId: string }) {
             />
           )}
           <OrderDetailView order={order} />
+          <OrderClaims orderId={order.orderId} />
         </>
       )}
     </div>
