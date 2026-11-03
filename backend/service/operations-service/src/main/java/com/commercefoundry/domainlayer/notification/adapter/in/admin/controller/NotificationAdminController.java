@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.notification.application.model.Notificati
 import com.commercefoundry.domainlayer.notification.application.port.in.NotificationAdminUseCase;
 import com.commercefoundry.global.properties.NotificationProperties;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.audit.AdminAuditExempt;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -79,6 +80,7 @@ public class NotificationAdminController {
 
     @Operation(summary = "알림 읽음", description = "이미 읽은 알림이면 같은 내용이다. 없거나 내 알림이 아니면 404(NOTIFICATION_001)다.")
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAuditExempt(reason = "본인 알림을 읽음으로 표시할 뿐 업무 데이터를 바꾸지 않는다")
     @PostMapping("/{notificationId}/read")
     public ResponseEntity<Response<NotificationAdminItem>> markRead(
         @AuthenticationPrincipal MemberPrincipal member,
@@ -89,6 +91,7 @@ public class NotificationAdminController {
 
     @Operation(summary = "알림 모두 읽음", description = "처리 뒤 읽지 않은 수를 돌려준다.")
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAuditExempt(reason = "본인 알림을 읽음으로 표시할 뿐 업무 데이터를 바꾸지 않는다")
     @PostMapping("/read-all")
     public ResponseEntity<Response<NotificationUnreadCountResponse>> markAllRead(@AuthenticationPrincipal MemberPrincipal member) {
         return ResponseEntity.ok().body(Response.success(notificationAdminUseCase.markAllRead(member.memberId(), Instant.now())));

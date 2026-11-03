@@ -5,6 +5,8 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.request.InternationalShippingPolicyReplaceRequest;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.InternationalShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.InternationalShippingPolicyAdminUseCase;
+import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -12,6 +14,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -52,10 +55,12 @@ public class InternationalShippingPolicyAdminController {
             + "remoteAreas(도서산간)를 보내면 400(DELIVERY_136)이다."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "SHIPPING_POLICY_INTERNATIONAL_REPLACE")
     @PutMapping
     public ResponseEntity<Response<InternationalShippingPolicyAdminResponse>> replaceInternationalPolicy(
+        @AuthenticationPrincipal MemberPrincipal member,
         @Valid @RequestBody InternationalShippingPolicyReplaceRequest request
     ) {
-        return ResponseEntity.ok().body(Response.success(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(request.toCommand())));
+        return ResponseEntity.ok().body(Response.success(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(request.toCommand(), member.memberId())));
     }
 }

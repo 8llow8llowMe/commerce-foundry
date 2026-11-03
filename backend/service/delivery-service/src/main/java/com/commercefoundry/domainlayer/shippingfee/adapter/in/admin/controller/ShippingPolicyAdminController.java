@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryValidationMessage;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingPolicyAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -66,6 +67,7 @@ public class ShippingPolicyAdminController {
             + "성공하면 교체 전 · 후 값과 교체한 어드민으로 이력을 한 건 남긴다(값이 그대로인 교체도 남긴다)."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "SHIPPING_POLICY_DOMESTIC_REPLACE")
     @PutMapping
     public ResponseEntity<Response<ShippingPolicyAdminResponse>> replaceDomesticPolicy(
         @AuthenticationPrincipal MemberPrincipal member,

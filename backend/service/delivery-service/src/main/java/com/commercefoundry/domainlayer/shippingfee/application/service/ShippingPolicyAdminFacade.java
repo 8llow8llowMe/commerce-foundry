@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.shippingfee.application.service;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.DeliveryAdminAuditProcessor;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.ShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.presenter.ShippingPolicyAdminPresenter;
@@ -7,6 +8,7 @@ import com.commercefoundry.domainlayer.shippingfee.application.command.ShippingP
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingPolicyAdminUseCase;
 import com.commercefoundry.domainlayer.shippingfee.application.service.processor.MemberDisplayNameQueryProcessor;
 import com.commercefoundry.domainlayer.shippingfee.application.service.processor.ShippingPolicyProcessor;
+import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicy;
 import com.commercefoundry.domainlayer.shippingfee.domain.model.ShippingPolicyHistory;
 import com.commercefoundry.persistence.dto.PageResponse;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,7 @@ public class ShippingPolicyAdminFacade implements ShippingPolicyAdminUseCase {
     private final ShippingPolicyProcessor shippingPolicyProcessor;
     private final MemberDisplayNameQueryProcessor memberDisplayNameQueryProcessor;
     private final ShippingPolicyAdminPresenter shippingPolicyAdminPresenter;
+    private final DeliveryAdminAuditProcessor deliveryAdminAuditProcessor;
 
     @Override
     @Transactional(readOnly = true)
@@ -31,11 +34,22 @@ public class ShippingPolicyAdminFacade implements ShippingPolicyAdminUseCase {
     /**
      * 정책 행 갱신 · 구간 삭제 · 삽입 · 교체 이력 append 를 한 트랜잭션으로 묶는다 — 실패(버전 충돌 · 이력 저장 실패 포함)하면 아무것도 바뀌지 않는다.
      * 외부 I/O 가 없다.
+     *
+     * <p><b>감사 (#163)</b> — 성공 · 실패를 한 줄 남긴다. 트랜잭션 안에서 불러도 줄은 커밋 결과로 남는다(롤백 · 커밋 실패면 {@code FAILURE}).
+     * 업무 예외는 기록한 뒤 그대로 다시 던진다.
      */
     @Override
     @Transactional
     public ShippingPolicyAdminResponse replaceDomesticPolicy(ShippingPolicyReplaceCommand command) {
-        return shippingPolicyAdminPresenter.toResponse(shippingPolicyProcessor.replaceDomesticPolicy(command));
+        ShippingPolicy replaced;
+        try {
+            replaced = shippingPolicyProcessor.replaceDomesticPolicy(command);
+        } catch (RuntimeException exception) {
+            deliveryAdminAuditProcessor.domesticPolicyReplaced(command.adminMemberId(), false);
+            throw exception;
+        }
+        deliveryAdminAuditProcessor.domesticPolicyReplaced(command.adminMemberId(), true);
+        return shippingPolicyAdminPresenter.toResponse(replaced);
     }
 
     /**

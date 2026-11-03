@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.onboarding.adapter.in.admin.dto.request.O
 import com.commercefoundry.domainlayer.onboarding.adapter.in.admin.dto.response.OnboardingAdminResponse;
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingValidationMessage;
 import com.commercefoundry.domainlayer.onboarding.application.port.in.OnboardingAdminUseCase;
+import com.commercefoundry.security.audit.AdminAuditExempt;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -63,6 +64,7 @@ public class OnboardingAdminController {
             + "다른 기기와 계속 겹치면 409(ONBOARDING_021) — 다시 시도한다. 배포되지 않은 버전이면 400(ONBOARDING_103)이다."
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAuditExempt(reason = "본인 안내 투어 진행만 기록할 뿐 상품 · 설정 같은 업무 데이터를 바꾸지 않는다")
     @PatchMapping("/tours/{guideKey}")
     public ResponseEntity<Response<OnboardingTourItem>> updateTour(
         @AuthenticationPrincipal MemberPrincipal member,
@@ -82,6 +84,7 @@ public class OnboardingAdminController {
         deprecated = true
     )
     @PreAuthorize("hasRole('ADMIN')")
+    @AdminAuditExempt(reason = "본인 안내 투어 진행만 기록할 뿐 상품 · 설정 같은 업무 데이터를 바꾸지 않는다")
     @PutMapping("/tours/{guideKey}")
     public ResponseEntity<Response<OnboardingTourItem>> updateTourLegacy(
         @AuthenticationPrincipal MemberPrincipal member,

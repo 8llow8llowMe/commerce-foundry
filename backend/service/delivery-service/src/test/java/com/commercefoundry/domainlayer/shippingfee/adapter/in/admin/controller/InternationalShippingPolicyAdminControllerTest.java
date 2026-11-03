@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -17,8 +18,10 @@ import com.commercefoundry.domainlayer.shippingfee.application.exception.Deliver
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryException;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.InternationalShippingPolicyAdminUseCase;
 import com.commercefoundry.security.error.SecurityErrorCode;
+import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
+import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
@@ -34,6 +37,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -80,8 +84,24 @@ class InternationalShippingPolicyAdminControllerTest {
             .build();
     }
 
+    /**
+     * 교체는 {@code @AuthenticationPrincipal MemberPrincipal} 을 받으므로(감사 행위자, #163) {@code @WithMockUser} 가 아니라 테스트 키로 서명한
+     * 실제 access 토큰을 보낸다 — 국내 {@link ShippingPolicyAdminControllerTest} 와 같다.
+     */
     private MvcTestResult put(String body) {
+        return put(body, MemberRole.ADMIN);
+    }
+
+    private MvcTestResult put(String body, MemberRole role) {
+        return mvc.put().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(role)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    }
+
+    private MvcTestResult putWithoutToken(String body) {
         return mvc.put().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    }
+
+    private static String bearer(MemberRole role) {
+        return "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, role).tokenValue();
     }
 
     @Nested
@@ -117,7 +137,7 @@ class InternationalShippingPolicyAdminControllerTest {
         @DisplayName("CUSTOMER 면 조회 · 교체 모두 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")
         void customerIsForbidden() {
             SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
-            SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
             verifyNoInteractions(internationalShippingPolicyAdminUseCase);
         }
 
@@ -125,7 +145,7 @@ class InternationalShippingPolicyAdminControllerTest {
         @DisplayName("토큰이 없으면 401 · SECURITY_001 이다")
         void anonymousIsUnauthorized() {
             SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
-            SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY).getResponse(), SecurityErrorCode.UNAUTHORIZED);
+            SecurityEnvelopeAssertions.assertEnvelope(putWithoutToken(VALID_BODY).getResponse(), SecurityErrorCode.UNAUTHORIZED);
             verifyNoInteractions(internationalShippingPolicyAdminUseCase);
         }
     }
@@ -136,22 +156,22 @@ class InternationalShippingPolicyAdminControllerTest {
     class Replace {
 
         @Test
-        @DisplayName("본문을 command 로 바꿔 넘긴다 — 안내 문구는 앞뒤 공백을 자른다")
+        @DisplayName("본문을 command 로, 토큰의 memberId 를 행위자로 넘긴다 — 안내 문구는 앞뒤 공백을 자른다")
         void replaces() {
-            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any())).willReturn(response());
+            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any(), anyLong())).willReturn(response());
 
             assertThat(put(VALID_BODY)).hasStatusOk();
             verify(internationalShippingPolicyAdminUseCase).replaceInternationalPolicy(new InternationalShippingPolicyReplaceCommand(
                 Money.of(500, CurrencyCode.USD), Money.of(20_000, CurrencyCode.USD), "관세는 받는 분 부담",
                 List.of(new ZoneCommand("아시아", List.of("JP", "SG"), List.of(new RateCommand(500, Money.of(1_000, CurrencyCode.USD))))),
                 2L
-            ));
+            ), TestTokens.MEMBER_ID);
         }
 
         @Test
         @DisplayName("무료배송 기준 · 안내 문구(공백뿐) · version 은 null 로 넘긴다 (처음 만들기)")
         void nullableFields() {
-            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any())).willReturn(response());
+            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any(), anyLong())).willReturn(response());
 
             assertThat(put("""
                 {"baseFee": {"amount": 0, "currency": "USD"}, "customsNotice": "   ",
@@ -160,7 +180,7 @@ class InternationalShippingPolicyAdminControllerTest {
             verify(internationalShippingPolicyAdminUseCase).replaceInternationalPolicy(new InternationalShippingPolicyReplaceCommand(
                 Money.of(0, CurrencyCode.USD), null, null,
                 List.of(new ZoneCommand("북미", List.of("US"), List.of(new RateCommand(1_000, Money.of(2_000, CurrencyCode.USD))))), null
-            ));
+            ), TestTokens.MEMBER_ID);
         }
 
         @ParameterizedTest(name = "{0} → {1} {2}")
@@ -175,7 +195,7 @@ class InternationalShippingPolicyAdminControllerTest {
         })
         @DisplayName("도메인 오류는 상태 · 코드 봉투로 나간다")
         void domainErrors(DeliveryErrorCode errorCode, int status, String code) {
-            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any())).willThrow(new DeliveryException(errorCode, "가", "나"));
+            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any(), anyLong())).willThrow(new DeliveryException(errorCode, "가", "나"));
 
             MvcTestResult result = put(VALID_BODY);
 
@@ -278,7 +298,7 @@ class InternationalShippingPolicyAdminControllerTest {
         @Test
         @DisplayName("상한 1,000,000g 은 받는다")
         void maxWeightAtLimit() {
-            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any())).willReturn(response());
+            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any(), anyLong())).willReturn(response());
 
             assertThat(put(zone("\"가\"", "[\"JP\"]", "[{\"maxWeightGrams\": 1000000, \"fee\": {\"amount\": 1000, \"currency\": \"USD\"}}]"))).hasStatusOk();
         }

@@ -8,7 +8,9 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.DeliveryAdminAuditProcessor;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.item.ShippingPolicyHistoryAdminItem;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.ShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.presenter.ShippingPolicyAdminPresenter;
@@ -51,11 +53,14 @@ class ShippingPolicyAdminFacadeTest {
     @Mock
     private ShippingPolicyAdminPresenter shippingPolicyAdminPresenter;
 
+    @Mock
+    private DeliveryAdminAuditProcessor deliveryAdminAuditProcessor;
+
     private ShippingPolicyAdminFacade facade;
 
     @BeforeEach
     void setUp() {
-        facade = new ShippingPolicyAdminFacade(shippingPolicyProcessor, memberDisplayNameQueryProcessor, shippingPolicyAdminPresenter);
+        facade = new ShippingPolicyAdminFacade(shippingPolicyProcessor, memberDisplayNameQueryProcessor, shippingPolicyAdminPresenter, deliveryAdminAuditProcessor);
     }
 
     @Test
@@ -78,22 +83,26 @@ class ShippingPolicyAdminFacadeTest {
     }
 
     @Test
-    @DisplayName("교체: Processor 가 저장한 정책을 Presenter 로 바꾼다")
+    @DisplayName("교체: Processor 가 저장한 정책을 Presenter 로 바꾸고, 토큰의 어드민으로 성공 감사를 한 번 남긴다 (#163)")
     void replacePresentsSavedPolicy() {
         ShippingPolicyAdminResponse response = ShippingPolicyAdminResponse.builder().shippingPolicyId("7001").version(4).build();
         given(shippingPolicyProcessor.replaceDomesticPolicy(COMMAND)).willReturn(domesticPolicy());
         given(shippingPolicyAdminPresenter.toResponse(domesticPolicy())).willReturn(response);
 
         assertThat(facade.replaceDomesticPolicy(COMMAND)).isSameAs(response);
+        verify(deliveryAdminAuditProcessor).domesticPolicyReplaced(COMMAND.adminMemberId(), true);
+        verifyNoMoreInteractions(deliveryAdminAuditProcessor);
     }
 
     @Test
-    @DisplayName("교체: 도메인 오류는 그대로 올라가고 Presenter 를 부르지 않는다")
+    @DisplayName("교체: 도메인 오류는 실패 감사를 한 번 남긴 뒤 그대로 올라가고 Presenter 를 부르지 않는다 (#163)")
     void replacePropagatesDomainError() {
         given(shippingPolicyProcessor.replaceDomesticPolicy(COMMAND)).willThrow(new DeliveryException(DeliveryErrorCode.SHIPPING_POLICY_VERSION_CONFLICT));
 
         assertThatThrownBy(() -> facade.replaceDomesticPolicy(COMMAND)).isInstanceOf(DeliveryException.class);
         verifyNoInteractions(shippingPolicyAdminPresenter);
+        verify(deliveryAdminAuditProcessor).domesticPolicyReplaced(COMMAND.adminMemberId(), false);
+        verifyNoMoreInteractions(deliveryAdminAuditProcessor);
     }
 
     @Test
