@@ -1022,7 +1022,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   교체와 **같은 트랜잭션**이라 이력 저장이 실패하면 교체도 롤백된다 — 기록 없는 변경이 생기지 않는다(로그 한 줄 방식은 트랜잭션 밖이라 이 보장이 없다).
   조회는 `GET /api/v1/admin/shipping-policies/domestic/histories`(ADMIN, `api-design-guide.md` §6-2). append-only 라 고치거나 지우는 API 가 없다.
   `adminDisplayName` 은 auth-service 표시 이름 벌크 조회가 마스킹해 준 값이다 (#322). 원문 이름은 delivery 에 들어오지 않는다.
-  #163 결정(C′)으로 이 표가 정본이고 `admin.audit` 줄도 함께 남긴다(#163 PR-D).
+  #163 결정(C′)으로 이 표가 정본이고 `admin.audit` 줄(`SHIPPING_POLICY_DOMESTIC_REPLACE`)도 함께 남긴다(#163 PR-D).
 - 적용 대상 (#6 · #238): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade` — 1단계 · 2단계), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
 - 적용 대상 (#212): 어드민 작업 취소 성공 · 실패(`JobAdminFacade` → `JobAdminAuditProcessor` → `AdminAuditLog` — `action=JOB_CANCEL target=job:<id>`). 취소의 시도별 트랜잭션과 재시도가 끝난 뒤 최종 결과만 한 번 남긴다.
   취소 반영 후 응답 재조회가 실패해도 취소 자체는 `SUCCESS` 다. `JobAdminController#cancel` 은 `@AdminAudited` 를 선언하고, 행위자는 access 토큰의 memberId 다. 작업 목록 · 상세 조회는 남기지 않는다 —
@@ -1078,13 +1078,13 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 |--------|------|------|
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 사용 중 — 선언 · `AdminAuditLog` 통일은 #163 PR-E |
 | order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor`와 조회 후 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출. 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·개인정보는 제외한다 (#17) |
-| operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음 · 온보딩 투어 면제 선언은 후속 |
+| operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음(`markRead` · `markAllRead`) · 온보딩 투어 기록(`updateTour` · `updateTourLegacy`)은 본인 상태라 `@AdminAuditExempt` (#163 PR-E) |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
 | product | `MEDIA_IMAGE_UPLOAD_ISSUE` · `MEDIA_IMAGE_UPLOAD_CONFIRM` (대상 `media-upload:<UUID>`, 식별자 없는 실패는 `-`) — URL · 전체 키 · ETag · MIME · 바이트 · 헤더 제외 | 사용 중 (#508, `ProductAdminAuditAction`) |
 | product | `DISPLAY_SECTION_*` · `LOOK_*` (전시 미리보기는 면제) | #163 PR-C |
 | product | `STOCK_ADJUST` · `SKU_COST_CREATE` · `PRODUCT_DRAFT_*` | #163 PR-C′ (이력 표 + 줄) |
-| delivery | `SHIPPING_POLICY_*_REPLACE` (국내 · 해외) | #163 PR-D (국내는 이력 표 + 줄, 해외는 행위자 수신) |
+| delivery | `SHIPPING_POLICY_DOMESTIC_REPLACE` (대상 `shipping-policy:domestic`) · `SHIPPING_POLICY_INTERNATIONAL_REPLACE` (대상 `shipping-policy:international`) — 처음 만들기도 같은 행위. 금액 · 구간 · 국가 · 안내 문구는 싣지 않는다. Facade 쓰기 트랜잭션 안에서 불러 커밋 결과로 남는다(롤백 · 커밋 실패는 `FAILURE`). **`FAILURE` 는 "요청이 오류로 끝났다" 이지 "정책이 바뀌지 않았다" 가 아니다** — 커밋 결과를 모르는 경우도 `FAILURE` 이므로, 국내는 이력 표로, 해외는 현재 정책 조회로 실제 반영 여부를 확인한다. 검증 400 · 401/403 은 업무 미도달이라 감사 없음 | 사용 중 — #163 PR-D (국내는 이력 표 + 줄, 해외는 줄만. 해외 교체도 행위자를 access 토큰의 memberId 로 받는다) |
 | delivery | `SHIPMENT_REGISTER` (대상 `order:<id>`, 일괄은 주문마다 · 이미 등록도 `SUCCESS` · 재시도한 관리자도 한 줄. Facade 의 `NEVER` 범위에서는 실제 트랜잭션 없이 각 항목의 확정 결과를 즉시 남긴다) | 사용 중 — #18 PR-B1 (`domainlayer/adminaudit` 의 `DeliveryAdminAuditAction` · `DeliveryAdminAuditProcessor` 를 처음 둔다. 배송 상태 이력 표 + 줄) |
 | delivery | `SHIPMENT_STATUS_CHANGE` (대상 `delivery:<deliveryId>`, 같은 상태라 그대로 둔 것도 `SUCCESS` · 404 · 409 · 5xx 업무 오류는 `FAILURE`. **`FAILURE` 는 "요청이 오류로 끝났다" 이지 "상태가 바뀌지 않았다" 가 아니다** — 결과 모름(`DELIVERY_029` · `030`)은 배송 완료 · 반영 대기로 남고, 응답용 다시 읽기 실패(`031`)는 상태 변경 뒤일 수 있다. 상태 변경 여부의 정본은 배송 상태 이력이다. 바꾼 상태 · 사유도 싣지 않는다). 송장 목록 · 상세 · 고객 배송 조회는 개인정보(받는 분 · 주소 · 회원)를 싣지 않아 열람 감사를 남기지 않는다 | 사용 중 — #18 PR-B2 (배송 상태 이력 표 + 줄) |
 | product | `PRODUCT_CREATE` (`product:<id>`, 커밋 전 실패는 `-`) · `PRODUCT_UPDATE` · `PRODUCT_*_REPLACE` (`product:<id>`) · `PRODUCT_IMAGE_UPLOAD_ISSUE` (`product-image-upload:<token>` — 키 원문 · 서명 URL · 헤더 제외(토큰만), 실패는 `-`) | 사용 중 (#9, `ProductAdminAuditAction`) — 등록은 트랜잭션 밖 Facade 라 등록 트랜잭션 커밋 뒤 바로 `SUCCESS`(응답 조립 실패와 무관), 커밋 결과를 모르는 실패는 `FAILURE` · `-` 로 남는다 — **`FAILURE` 는 "요청이 오류로 끝났다" 이지 "상품이 생기지 않았다" 가 아니다**(정본은 `product.created_by_member_id`) |
