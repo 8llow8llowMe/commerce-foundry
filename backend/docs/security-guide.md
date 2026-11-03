@@ -182,7 +182,32 @@ PR-A는 권한 이름과 역할표를 도입하고 `auth.member.role`의 check �
 (`ResourceServerSecurityConfigurer`)의 `/api/v1/admin/**` 규칙은 둘 다 `hasAnyRole(MemberRole.operatorRoleNames())`로 이 상수를 참조한다 —
 역할 목록을 문자열로 따로 적지 않는다. URL 층은 고객·익명을 끊는 1차 방어이고, 기능 단위 판정은 컨트롤러 메서드의 `@PreAuthorize`가 한다.
 게이트웨이의 관리자 컷오프(로그아웃·비활성화, #193)도 `role.isOperator()`인 토큰 전체에 적용한다 — `ADMIN`만 보면 새 역할 토큰이 컷오프를 우회한다.
-시스템 알림 수신자·"마지막 관리자" 가드는 `OWNER_ROLES`만 세도록 바꾼다(auth-service 적용은 #236 후속 PR — 지금 코드는 아직 `ADMIN`만 센다).
+시스템 알림 수신자(#477 `AdminNotificationRecipientQueryAdapter`)·"마지막 관리자" 가드(`AdminAccountProcessor#deactivate`)는 `OWNER_ROLES`만 센다
+(#236 PR-A2). 매니저·스태프에게 운영 경보를 넓히지 않고, 대표 관리자(`ADMIN`·`OWNER`)가 한 명 남으면 그 사람은 끌 수 없다 — 매니저·스태프만 남으면
+운영자 계정을 관리할 사람이 없다. 매니저·스태프는 대표 관리자 수와 무관하게 끌 수 있다. 비활성화는 활성 운영자 전체를 한 번에 잠가 읽어 동시 요청도 줄을 세운다.
+판정은 도메인(`Member.isLastActiveOwner` · `Member#canBeDeactivatedBy`)에 있고, 대표 관리자 계정은 활성 대표 관리자만 끈다(403 `AUTH_046`, 메서드 보안 뒤의 이중 방어).
+알림 수신자 · 잠금 조회는 `role in (...)` 다값 조건이라 `(role, deactivated_at, id)` 인덱스로 정렬까지 끝나지 않고 아이디 정렬(Sort)이 붙는다 — 대표 관리자 · 운영자 수가 작아 비용은 무시할 만하다.
+
+**auth-service 계정 경로 (#236 PR-A2).** 관리자 로그인(`MemberLoginProcessor#authenticateAdmin`)과 관리자 access 발급(`AuthTokenProcessor#issueAdminAccessToken`)은
+운영자 역할 전체(`Member#isActiveOperator`)를 받는다. 비밀번호 변경·비활성화·OTP 대상 판정도 운영자 전체다. 고객 로그인 발급(`issueForLogin`)은 고객만 받는다 —
+운영자 계정에 refresh family 를 붙이지 않는 규칙을 호출 실수로도 깨지 않게 `IllegalArgumentException` 으로 막는다(§11-1).
+**계정 발급은 아직 `ADMIN`이다** — 운영자 추가(`Member.admin()`)·초기 시드는 계속 `ADMIN` 행을 만든다. 어드민 화면이 `'ADMIN'` 리터럴로 세션을 판정하므로
+`OWNER`·`MANAGER`·`STAFF` 발급은 화면 전환(#237)과 함께 연다. 시드의 "이미 있는 관리자" 판정은 운영자 전체(`isOperator`)다.
+
+auth-service 어드민 엔드포인트 → 권한:
+
+| 엔드포인트 | 식 (`AdminAuthority`) | ADMIN · OWNER | MANAGER | STAFF |
+|------------|----------------------|---------------|---------|-------|
+| `GET /api/v1/admin/members` | `CS_READ` | 200 | 200 | 200 |
+| `GET /api/v1/admin/audit-logs` | `SECURITY_READ` | 200 | 403 | 403 |
+| `POST /api/v1/admin/admins` · `PATCH /api/v1/admin/admins/{memberId}` | `STAFF_MANAGE` | 200 | 403 | 403 |
+| `POST /api/v1/admin/admins/{memberId}/otp/recovery` (동료 OTP 복구) | `SECURITY_MANAGE` | 200 | 403 | 403 |
+| `PATCH /api/v1/admin/me/password` · `/api/v1/admin/me/otp` 5개 | `OPERATOR` | 200 | 200 | 200 |
+
+403 은 `SECURITY_005` 이고 컨트롤러 슬라이스 테스트(`*AdminControllerTest`)가 역할별로 고정한다.
+회원 목록은 `CS_READ` 라 매니저·스태프도 열지만 **운영자 명단은 직원 조회 권한(`ADMIN_STAFF_READ`)이 있어야 본다** — 컨트롤러는 그 권한 여부만 넘기고
+(`AdminPermission.grantedTo(role)`), `MemberAdminProcessor` 가 권한이 없으면 고객 행만 조회한다. 운영자 역할(`role=ADMIN` 등)로 거르면 질의 없이 빈 페이지다 —
+오류로 답하지 않아 운영자 계정이 있는지도 드러나지 않는다.
 
 **메서드 식은 `AdminAuthority` 상수로 쓴다.** `com.commercefoundry.security.principal.AdminAuthority`에 기능별 상수 22개
 (`ORDER_MANAGE = "hasAuthority('ADMIN_ORDER_MANAGE')"` 등, `AdminPermission`과 1:1)와 운영자 본인 API용 `OPERATOR`
@@ -204,8 +229,8 @@ PR-A는 권한 이름과 역할표를 도입하고 `auth.member.role`의 check �
 머리 뒤에는 `and`·`&&`로 좁히는 조건만 붙일 수 있고, 괄호 밖 `or`·`||`·`?`는 실패다(§5). `hasAnyAuthority(...)`·정의되지 않은 기능
 (`hasAuthority('ADMIN_FOO_READ')`)·`hasAuthority('ROLE_ADMIN')`·순서나 공백이 다른 `hasAnyRole(...)`도 실패다.
 
-아직 `hasRole('ADMIN')`인 컨트롤러는 새 역할 토큰이 URL 층을 지나도 메서드에서 403 `SECURITY_005`로 막힌다(fail-closed).
-각 서비스 컨트롤러를 `AdminAuthority` 상수로 전환하고 테스트한 뒤에만 새 역할 계정을 생성·발급한다.
+auth-service 는 위 표대로 전환했다. 아직 `hasRole('ADMIN')`인 다른 서비스 컨트롤러는 새 역할 토큰이 URL 층을 지나도 메서드에서 403 `SECURITY_005`로
+막힌다(fail-closed). 각 서비스 컨트롤러를 `AdminAuthority` 상수로 전환하고 테스트한 뒤에만 새 역할 계정을 생성·발급한다.
 어드민 회원 목록의 `role` 필터는 enum 바인딩이라 새 역할 이름도 수락하지만, 발급 전에는 해당 역할 행이 없어 빈 결과다.
 
 ```java
@@ -957,6 +982,8 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
   `JwtIssuer`)가 역할별 TTL 을 받지 않아 줄이려면 core 를 바꿔야 하고, refresh 가 없어 30분이 곧 관리자 세션 상한이라 이미 고객(14일 refresh)보다 짧다.
   더 줄이려면(예: 15분) 발급기에 역할별 TTL 을 더하는 후속 이슈로 한다.
 - 고객 로그인(`/api/v1/auth/login`)은 관리자 계정을 `AUTH_001` 로, 관리자 로그인은 고객 계정을 `AUTH_030` 으로 거절한다 — 한 계정이 두 종류 토큰을 받지 않는다.
+  관리자 로그인은 운영자 역할 전체(`ADMIN`·`OWNER`·`MANAGER`·`STAFF`, 비활성 제외)를 받고 토큰 `role` claim 은 그 행의 역할 그대로다(§3-1).
+  고객 토큰 발급(`AuthTokenProcessor#issueForLogin`)은 고객이 아닌 회원을 `IllegalArgumentException` 으로 거절한다 — 운영자에게 refresh family 를 만들지 않는다.
 - **OTP 2단계 (#238 PR-B).** OTP 를 등록한 관리자는 비밀번호만으로 토큰을 받지 못한다 — 1단계(`…/admin/login`)가 비밀번호를 확인하면 access 대신 1회용 챌린지
   (`otpRequired=true` · `challengeToken`)만 주고, 2단계(`POST /api/v1/auth/admin/login/otp`, `permitAll()`)가 TOTP 또는 복구 코드를 확인한 뒤 access 를 준다.
   미등록 관리자는 지금과 같이 1단계에서 토큰을 받는다(등록은 관리자별 선택, 강제는 #236). 등록 여부는 비밀번호 확인 **뒤**에 본다 — 틀린 비밀번호의 응답이 등록 여부로 갈리지 않는다.
@@ -969,7 +996,7 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
   - 6자리 대입은 2단계 시도 제한이 막는다(창당 5회 — 창당 맞힐 확률 약 5 × 3/10^6). 다만 창이 끝나면 다시 5회 시도할 수 있어 1년 연속 시도의 성공 확률 상한은 약 40%다. 점증 잠금 또는 `ADMIN_OTP_LOGIN` 시도 초과 경보를 후속으로 둔다.
   - 같은 챌린지의 동시 2단계는 GETDEL 이 한쪽만 통과시킨다. 진 쪽이 낸 복구 코드는 소비되지 않고 남는다.
   - TOTP 로 로그인할 때 저장된 비밀이 이전 키의 암호문이면 같은 UPDATE 에서 현재 키로 다시 암호화한다(키 회전, `secret-management.md`). 복구 코드 로그인은 다시 암호화하지 않는다.
-- **동료 OTP 복구 (#238 PR-C).** 현재 `ADMIN` 역할의 다른 활성 관리자가 자기 비밀번호와 OTP 또는 복구 코드로 재인증한 뒤 대상의 자격을 교체한다. 본인 대상은 거절한다. 요청마다 행위자 전용 `ADMIN_OTP_PEER_RECOVERY` 창을 먼저 세고 성공해도 지우지 않는다. 두 회원과 OTP 자격을 ID 순으로 잠그고, 행위자 증명 소비·대상 옛 자격/코드 삭제·새 ID/무작위 비밀/코드 저장을 한 DB 트랜잭션으로 묶는다. 새 자격도 `enrolled=true` 라 대상은 비밀번호만으로 로그인할 수 없다. 옛 자격 ID의 TOTP 증명과 옛 복구 코드 ID는 모두 무효다.
+- **동료 OTP 복구 (#238 PR-C).** 보안 관리 권한(`AdminAuthority.SECURITY_MANAGE` — `ADMIN`·`OWNER`)이 있는 다른 활성 운영자가 자기 비밀번호와 OTP 또는 복구 코드로 재인증한 뒤 대상의 자격을 교체한다. 본인 대상은 거절한다. 요청마다 행위자 전용 `ADMIN_OTP_PEER_RECOVERY` 창을 먼저 세고 성공해도 지우지 않는다. 두 회원과 OTP 자격을 ID 순으로 잠그고, 행위자 증명 소비·대상 옛 자격/코드 삭제·새 ID/무작위 비밀/코드 저장을 한 DB 트랜잭션으로 묶는다. 새 자격도 `enrolled=true` 라 대상은 비밀번호만으로 로그인할 수 없다. 옛 자격 ID의 TOTP 증명과 옛 복구 코드 ID는 모두 무효다.
   새 복구 코드 원문은 `no-store` 응답 한 번만 내린다. 대상은 최소 두 코드를 검증된 별도 채널로 받아 하나로 로그인하고 다른 하나로 본인 OTP를 해제한 뒤 새 기기에 재등록한다. 대상의 기존 access·챌린지는 DB 교체 뒤 컷오프로 끊는다. Redis 장애면 503이어도 DB 교체와 행위자 코드 소비는 끝났을 수 있어, 새 TOTP step 또는 미사용 복구 코드로 재시도하고 마지막 성공 응답 코드만 전달한다.
 
 ### 11-2. 식별자 공간 (`sub`)
@@ -1000,7 +1027,9 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
   - 시드 이메일은 외부에 알려지지 않은 주소로 한다 — 대표 메일 · CS 주소처럼 공개된 주소는 남이 먼저 고객으로 가입해 시드를 막거나(`CUSTOMER_EXISTS`) 대입 대상이 된다.
   - **`CUSTOMER_EXISTS` warn 은 경보로 받는다.** 정상 배포에서는 나지 않고, 나면 관리자 계정이 만들어지지 않은 채 기동한 것이다(누군가 그 이메일을 선점했을 수 있다).
 - 관리자 추가 · 비활성화 · 본인 비밀번호 변경은 #193 이다 (`POST /api/v1/admin/admins`, `PATCH /api/v1/admin/admins/{memberId}`, `PATCH /api/v1/admin/me/password`).
-  어드민은 상품을 파는 사업자의 직원 계정이다. 고객 이메일은 관리자로 승격하지 않는다. 마지막 활성 관리자는 끄지 못한다(409 `AUTH_031`).
+  어드민은 상품을 파는 사업자의 직원 계정이다. 고객 이메일은 관리자로 승격하지 않는다. 마지막 활성 대표 관리자(`ADMIN`·`OWNER`)는 끄지 못한다(409 `AUTH_031`,
+문구는 #237 전까지 "마지막 관리자는 …" 그대로). 매니저·스태프는 대표 관리자 수와 무관하게 끌 수 있다(§3-1). 대표 관리자 계정은 활성 대표 관리자만 끈다(403 `AUTH_046`).
+추가·비활성화는 `STAFF_MANAGE`, 본인 비밀번호는 `OPERATOR` 다.
   비밀번호 변경 · 비활성화는 Redis `auth:admin-access-cutoff:{memberId}` 에 다음 초를 쓰고, 게이트웨이가 관리자 토큰의 `iat` 가 그 시각보다 이르면 004 로 끊는다.
   본인 요청의 `jti` 는 로그아웃 차단 목록에도 넣는다. 다른 관리자를 끌 때는 그 사람의 jti 를 저장하지 않으므로 컷오프만 쓴다.
   컷오프는 로그아웃 차단과 같이 게이트웨이만 본다. 서비스로 직접 붙는 호출은 만료까지 옛 토큰이 남는다. 보관 TTL 은 access 수명 상한 + 시계 오차(기본 61분)다.
@@ -1160,7 +1189,9 @@ CUSTOMER 토큰으로 어드민 경로에 오면 게이트웨이와 서비스가
 |----|--------|---------|
 | 게이트웨이 | `GatewaySecurityTest` (`adminMembers*` · `*AdminMembersPath*`) | 무토큰 401 · CUSTOMER 403 · ADMIN 은 auth 라우트로. `..` · `%2e%2e` · `..;` · `;` · `%2f`/`%2F` · `%252e` 는 400 `GATEWAY_004`, `%61dmin` · 끝 슬래시는 401 · 403, 모두 하류 미도달 |
 | 서비스 | `AuthServiceSecuritySmokeTest` (`adminMembers*` · `bypassPaths*` · `*AdminMembersPath`) | 무토큰 401 · CUSTOMER 403 · ADMIN 200. 우회 경로(위와 같음)는 방화벽 400, `%61dmin` 은 401 · 403, 끝 슬래시는 401 · 403 · ADMIN 404 |
-| 서비스 슬라이스 · 흐름 | `MemberAdminControllerTest` · `AdminFlowIntegrationTest` · `AuthTokenFlowIntegrationTest#adminLogoutRevokesJtiOnly` | `hasRole('ADMIN')` · 시드 → 로그인 → 조회 · 로그아웃은 jti 차단(서비스 직접 호출은 200 — 차단 목록은 게이트웨이만 본다) |
+| 서비스 슬라이스 · 흐름 | `MemberAdminControllerTest` · `AdminFlowIntegrationTest` · `AuthTokenFlowIntegrationTest#adminLogoutRevokesJtiOnly` | `AdminAuthority.CS_READ`(ADMIN · OWNER · MANAGER · STAFF 200, CUSTOMER 403) · 시드 → 로그인 → 조회 · 로그아웃은 jti 차단(서비스 직접 호출은 200 — 차단 목록은 게이트웨이만 본다) |
+
+기능 권한으로 좁힌 auth 어드민 엔드포인트(감사 로그 · 운영자 추가/비활성화 · 동료 OTP 복구)의 MANAGER · STAFF 403 은 각 컨트롤러 슬라이스가 본다(§3-1 표).
 
 - 서비스 스모크의 "컨트롤러 미도달" 은 감사 로그(`action=MEMBER_SEARCH`)가 stdout 에 없는 것으로 판정한다 — 로깅 설정이 그 로거를 콘솔에서 빼면 거짓 통과하므로,
   같은 테스트의 ADMIN 200 케이스가 그 줄이 잡히는 것(`contains`)을 함께 단언한다.
