@@ -126,6 +126,49 @@ class DisplayProductCardParityTest {
         assertThat(displayed.get(1).product().preorder()).as("상품 설정이 꺼진 상품은 플래그와 무관하게 false").isFalse();
     }
 
+    @org.junit.jupiter.api.Test
+    @DisplayName("영어 요청이면 메인 전시 카드도 상품 목록과 같은 영문 이름 · 판매 상태이고, 섹션 유형도 영어다 — 영문 이름이 없으면 한국어 (#20)")
+    void englishCardMatchesProductList() {
+        java.util.Locale english = java.util.Locale.forLanguageTag("en-US");
+        List<ProductListQueryResult> rows = List.of(
+            new ProductListQueryResult(1L, "저고리", 39_000L, KRW, null, null, SaleStatus.ON_SALE, false, false, "Jeogori"),
+            new ProductListQueryResult(2L, "치마", 20_000L, KRW, null, null, SaleStatus.STOP_SELLING, false, false, null)
+        );
+        ProductRepositoryPort productPort = mock(ProductRepositoryPort.class);
+        SkuRepositoryPort skuPort = mock(SkuRepositoryPort.class);
+        ProductImageRepositoryPort imagePort = mock(ProductImageRepositoryPort.class);
+        given(productPort.searchVisible(CRITERIA)).willReturn(new SliceImpl<>(rows, PageRequest.of(0, 20), false));
+        given(productPort.findVisibleListRowsByIds(anyCollection())).willReturn(rows);
+        given(skuPort.aggregateByProductIds(anyCollection())).willReturn(List.of(new SkuAggregateQueryResult(1L, true, true, 0L, 0L, 1)));
+        given(imagePort.findThumbnailsByProductIds(anyCollection())).willReturn(List.of());
+        ProductListProcessor productListProcessor = new ProductListProcessor(productPort, skuPort, imagePort,
+            new StoreProperties(new StoreProperties.Features(false, false, false, false)));
+
+        List<ProductListItemResponse> listed = new ProductWebPresenter().toListResponse(productListProcessor.search(CRITERIA, english), english).contents();
+        DisplaySectionContent pick = new DisplaySectionContent(
+            new DisplaySection(7L, DisplaySectionType.PRODUCT_PICK, null, null, null, null, null, 0, true, null, null),
+            List.of(item(71L, 0, 1L), item(72L, 1, 2L))
+        );
+        DisplaySectionProcessor displayProcessor = new DisplaySectionProcessor(
+            mock(DisplaySectionRepositoryPort.class), new SnowflakeIdGenerator(1, 1), MediaUrlPolicy.of(""), Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
+        );
+        var section = new DisplayWebPresenter()
+            .toMainResponse(displayProcessor.toMainInfo(List.of(pick), productListProcessor.summarizeVisible(List.of(1L, 2L), english)), english)
+            .sections().getFirst();
+
+        assertThat(section.sectionType().name()).isEqualTo("Product pick");
+        assertThat(section.sectionType().code()).isEqualTo("PRODUCT_PICK");
+        for (int index = 0; index < listed.size(); index++) {
+            assertThat(JSON.<JsonNode>valueToTree(section.items().get(index).product())).isEqualTo(JSON.<JsonNode>valueToTree(listed.get(index)));
+        }
+        assertThat(section.items().get(0).product().name()).isEqualTo("Jeogori");
+        assertThat(section.items().get(1).product().name()).as("영문 이름이 없으면 한국어").isEqualTo("치마");
+        assertThat(section.items().get(1).product().saleStatus().name()).isEqualTo("No longer sold");
+        // 인자 없는 경로(어드민 미리보기 등)는 한국어 그대로다
+        assertThat(new DisplayWebPresenter().toMainResponse(displayProcessor.toMainInfo(List.of(pick), productListProcessor.summarizeVisible(List.of(1L, 2L))))
+            .sections().getFirst().sectionType().name()).isEqualTo("상품 픽");
+    }
+
     private static DisplayItem item(long id, int displayOrder, long productId) {
         return new DisplayItem(id, 7L, displayOrder, DisplayItemType.PRODUCT, null, productId, null);
     }
