@@ -60,6 +60,24 @@ SSE는 커밋 뒤 현재 인스턴스 연결로 최선 전달한다. 커밋 후 
 
 ## 검증
 
-후속 A3a는 payment-service의 읽기 전용 [outbox 원천 관측 API](outbox-observation-guide.md)를 제공한다. 미래 예약을 제외한 단일 집계 사실만 반환하며, 이 단계에 operations 수집·임계 탐지·해소 알림은 포함하지 않는다.
+A3a(PR #548)는 payment-service의 읽기 전용 [outbox 원천 관측 API](outbox-observation-guide.md)를 제공한다. A3b는 아래의 operations 탐지기를 연결한다.
+
+## 결제 outbox 지연·해소 관측 (#477 A3b)
+
+기본 비활성인 `PAYMENT_OUTBOX_ALERT_ENABLED`는 messaging 활성화와 독립적이다. 릴레이가 꺼진 상태에서도 관측할 수 있다. operations 전용 단일 스레드 스케줄러가 초기 1분 후, 실행 종료마다 1분 간격으로 동작한다. 기존 작업 lease 회수·플래너·알림 보존 스케줄러와 HTTP 대기 스레드를 공유하지 않는다.
+
+수집 락 이름은 `operations-payment-outbox-alert`, 기본 lease는 2분이다. 락 안에서 auth 활성 관리자 전체(100명 페이지, 최대 11회·총 1,000명)를 먼저 조회하고, 성공한 경우에만 payment의 최신 관측을 읽는다. 0명·불완전 페이지·상한 초과·인증 실패는 실패이며 아무 상태도 전진하지 않는다. 두 HTTP 호출은 DB 트랜잭션 밖이다. 기존 internal 서비스 토큰 발급기·Feign 설정과 connect 2초/read 3초, payment-service 서킷을 사용하고 HTTP 재시도하지 않는다. 페이지 전체 수집이나 전체 HTTP 구간에 대한 강제 종료 deadline을 보장하지 않는다.
+
+설정은 `operations.notifications.payment-outbox-alert` 아래 `threshold=5m`, `suppression=1h`, `initial-delay=1m`, `fixed-delay=1m`, `max-observation-age=30s`, `lock-at-most=2m`이다. 기간은 양수·상한 검증을 받는다. 원천 count는 JSON 정수 long이며 음수·누락·null·문자열·소수·boolean·overflow를 거부한다. 시각은 ISO Instant 문자열(마이크로초 이하 정밀도), 0건이면 oldest=null, 양수이면 oldest<=observedAt여야 한다.
+
+최종 처리에서는 `operations.outbox_alert_state`의 PAYMENT 한 행을 NOWAIT로 잠근 뒤 Clock을 읽는다. observedAt은 이전 수락 값보다 엄격히 증가해야 하고 미래가 아니며 최종 현재 시각에서 30초 이내여야 한다. 최종 로컬 시각은 이전 수락 시각보다 뒤이거나 같고, HTTP 전·후·최종 로컬 시각이 역행하지 않아야 한다. nanoTime으로 잰 원천 HTTP 시작부터 최종 처리까지도 30초 이내여야 한다. 관측하지 않은 시계 epoch 사이의 역행을 timestamp만으로 증명할 수는 없다.
+
+NORMAL의 첫 정상 관측도 워터마크를 저장한다. 양수이고 `observedAt-oldestReadyAvailableAt>=5m`면 ACTIVE와 ANOMALY/CRITICAL을 저장한다. 첫 감지 시각은 oldest가 아닌 해당 observedAt이다. ACTIVE에서 같은 조건이 지속되면 실제 마지막 알림의 로컬 시각에서 1시간 경계 이상일 때만 반복한다. 억제 중 관측은 반복 시각을 늦추지 않는다. 양수지만 아직 임계 미만이면 ACTIVE를 유지하고 해소로 보지 않는다. ACTIVE의 신선한 0/null에서만 NORMAL과 ANOMALY/INFO 해소를 한 번 저장한다. 사고 전의 0건은 해소 알림이 없고 새 사고는 이전 사고의 억제 기간과 관계없이 즉시 알린다.
+
+상태와 모든 수신자의 알림은 15초 상한 DB 트랜잭션 하나다. 수신자별 Snowflake 알림 ID를 sourceId에도 넣고 sourceType은 PAYMENT_OUTBOX_ALERT이다. 기존 전역 source 유니크 제약은 유지한다. 첫 INSERT 경쟁·잠금 충돌·중간 알림 실패는 전체 롤백하고 다음 실행이 다시 시도한다. ShedLock lease 만료 뒤 겹쳐도 DB 락·워터마크가 최종 정합성을 지킨다. 커밋 후 불변 수신자 알림 배치를 전용 단일 푸시 스레드의 최대 16개 배치 큐에 전달한다. 느린 SSE는 수집 스레드를 막지 않으며 큐 포화·전달 실패는 안전한 WARN과 함께 최선 전달을 포기하고 저장된 목록으로 복원한다. 인스턴스 간 SSE 브로드캐스트는 제공하지 않는다. 상태 행은 알림 보존 정리로 지우지 않는다.
+
+수집 실패·비정상/오래된/같거나 이전/미래 관측·시계 역행은 기존 상태·사고 시각·워터마크를 그대로 보존한다. 수집 실패 WARN과 timing/freshness/watermark rejected WARN으로 관측 불가를 구분하고 auth·payment·DB·시계를 점검한다. 정상 또는 해소로 추정하지 않는다. 해소는 ready 미발행 행이 없다는 뜻뿐이며 downstream 반영·PG 결제 결과·릴레이 건강을 증명하지 않는다. 알림 문구는 고정 한국어이고 원문 응답·예외·토큰·URL을 로그/알림에 싣지 않는다.
+
+배포 전 auth A1 API와 payment A3a(PR #548), 기존 internal 토큰 배포를 확인하고 Hibernate 생성 operations DDL 스냅숏의 outbox_alert_state 신규 테이블을 적용한다. 새 Vault 비밀은 없다. 현재 operations compose 서비스 정의가 없으므로 실제 배포 프로세스 환경에 플래그를 주입한다. FE 응답 스키마 변경은 없으며 기존 ANOMALY/CRITICAL·INFO 및 목록을 사용한다.
 
 로컬 테스트는 정확한 억제 경계, 중복·억제 워터마크, 0명, 비정상·다중 페이지·상한 수신자, 메타데이터 전용 리스너, ACK/NACK, EmbeddedKafka → H2 → 실제 알림 스트림, 실패 재전달과 sentinel 원문 로그 미노출을 확인한다. PostgreSQL 17 테스트는 실제 JPQL NOWAIT, 동시 첫 INSERT·여러 파티션, 수신자 중간 실패 롤백·재시도를 확인한다. Testcontainers Kafka+PostgreSQL은 커밋 후 SSE 스트림 전달을 확인한다. Docker 테스트는 EnabledWithDockerOrOnCi로 로컬 Docker 부재 시 건너뛰고 CI는 Docker를 요구한다. DDL은 OperationsSchemaSnapshotTest로 대조하며 마지막에 operations cleanTest/check를 실행한다.

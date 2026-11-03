@@ -348,7 +348,8 @@ Info → Presenter → Response
 
 - **결과가 필요한 명령은 Feign, 일어난 사실은 Kafka.** 선점 확정 · 해제 · 금액 조회처럼 응답으로 분기하는 호출은 internal API(§7) 그대로다.
   결제 승인됨 · 주문 만료됨 · 작업 등록됨 같은 사실은 outbox → Kafka → 컨슈머로 전한다.
-- **주기 조회는 두 곳에만 남는다** — ① outbox 릴레이 ② 시간 기준 만료 판정 트리거(주문 만료 · 재고 선점 안전망 · 작업 lease 회수 · 결제 재조회 등).
+- **업무 주기 조회는 두 곳에만 남는다** — ① outbox 릴레이 ② 시간 기준 만료 판정 트리거(주문 만료 · 재고 선점 안전망 · 작업 lease 회수 · 결제 재조회 등).
+  운영 관측 예외로 operations는 읽기 전용 internal outbox 사실을 주기 조회하여 발행 지연·해소 알림만 저장할 수 있다(#477). 업무 상태 변경·PG 호출·후속 업무 처리를 폴링으로 실행하지 않는다.
   그 밖의 업무 처리는 모두 Kafka 컨슈머가 한다. 만료 트리거는 판정 + 상태 전이 + outbox 발행만 하고(건별 트랜잭션 · `@Version`), 후속 처리는 컨슈머가 한다.
 - **발행 정합성 = transactional outbox + 폴링 릴레이**(CDC · Debezium 은 쓰지 않는다 — 사용자 결정). 업무 트랜잭션과 같은 커밋으로 서비스 스키마의 `outbox` 에 행을 넣고,
   릴레이가 `published_at is null and available_at <= now` 를 id 순으로 읽어 발행한 뒤 `published_at` 을 조건부 UPDATE 로 기록한다. 발행은 트랜잭션 밖이다.

@@ -80,6 +80,8 @@ resilience4j:
         base-config: default
       auth-service:
         base-config: default
+      payment-service:
+        base-config: default
 
 eureka:
   client:
@@ -165,6 +167,14 @@ operations:
       schedules: []
   # 어드민 알림 센터 (#213). 값이 빠지거나 0 · 음수면 기동하지 않는다 (NotificationProperties)
   notifications:
+    payment-outbox-alert:
+      enabled: ${PAYMENT_OUTBOX_ALERT_ENABLED:false}
+      threshold: 5m
+      suppression: 1h
+      initial-delay: 1m
+      fixed-delay: 1m
+      max-observation-age: 30s
+      lock-at-most: 2m
     dlt-alert:
       enabled: ${DLT_ALERT_ENABLED:false}
       suppression: 1h

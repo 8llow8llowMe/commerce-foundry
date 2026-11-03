@@ -610,6 +610,51 @@
     comment on column operations.outbox.version is
         '낙관적 락 버전 — 발행 표시 · 실패 기록이 올린다';
 
+    create table operations.outbox_alert_state (
+        source varchar(16) not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        first_detected_at timestamp(6) with time zone,
+        last_accepted_local_at timestamp(6) with time zone not null,
+        last_alert_at timestamp(6) with time zone,
+        last_observed_at timestamp(6) with time zone not null,
+        status varchar(16) not null check ((status in ('NORMAL','ACTIVE'))),
+        version bigint not null,
+        primary key (source),
+        constraint ck_outbox_alert_state_source check (source = 'PAYMENT'),
+        constraint ck_outbox_alert_state_incident check ((status = 'NORMAL' and first_detected_at is null and last_alert_at is null) or (status = 'ACTIVE' and first_detected_at is not null and last_alert_at is not null))
+    );
+
+    comment on table operations.outbox_alert_state is
+        'Payment outbox observation incident watermarks';
+
+    comment on column operations.outbox_alert_state.source is
+        'Allowlisted observation source';
+
+    comment on column operations.outbox_alert_state.created_at is
+        '생성 시각';
+
+    comment on column operations.outbox_alert_state.updated_at is
+        '수정 시각';
+
+    comment on column operations.outbox_alert_state.first_detected_at is
+        'First qualifying source observation timestamp';
+
+    comment on column operations.outbox_alert_state.last_accepted_local_at is
+        'Last accepted local timestamp';
+
+    comment on column operations.outbox_alert_state.last_alert_at is
+        'Last actual alert local timestamp';
+
+    comment on column operations.outbox_alert_state.last_observed_at is
+        'Last accepted source observation timestamp';
+
+    comment on column operations.outbox_alert_state.status is
+        'Observation incident status';
+
+    comment on column operations.outbox_alert_state.version is
+        'Optimistic lock version';
+
     create table operations.shedlock (
         name varchar(64) not null,
         lock_until timestamp(6) with time zone not null,
