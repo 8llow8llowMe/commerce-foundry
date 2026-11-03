@@ -45,12 +45,11 @@ import unicodedata
 from collections import deque
 from pathlib import Path
 
-# 그룹 이름 → 모듈(backend 기준 경로). #151 측정에서 rest 의 operations-service:test 가 3분 이상을 차지해
-# product 그룹으로 옮긴다. 새 job 은 만들지 않고 기존 3개 그룹의 실행 시간을 고르게 한다.
+# 그룹 이름 → 모듈(backend 기준 경로). 시간 근거: #136 측정(auth 100s · delivery 94s · order 60s, product 가 가장 크다)
 # 그룹은 job 하나다. 무료 Organization 은 동시 실행 job 이 20개라 그룹을 늘릴수록 PR 이 몰릴 때 Queued 대기가 길어진다(#194).
 # 그래서 서비스를 묶는다 — job 안에서는 `org.gradle.parallel=true` 로 모듈이 병렬로 돈다.
 GROUPS = {
-    'product-ops-delivery': ['service/product-service', 'service/delivery-service', 'service/operations-service'],
+    'product-delivery': ['service/product-service', 'service/delivery-service'],
     'auth-order': ['service/auth-service', 'service/order-service', 'service/payment-service'],
 }
 REST_GROUP = 'rest'

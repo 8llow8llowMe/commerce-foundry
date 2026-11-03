@@ -117,7 +117,7 @@ docker compose -f docker-compose-local.yml down -v        # 데이터까지 삭�
     — `-c core.quotePath=false` 를 빼면 git 이 한글 경로를 `"..."` 로 감싸 내보내고, 스크립트는 그 경로를 판단하지 못해 전 모듈로 판정한다.
   - `python ../.github/scripts/backend-test-count.py .` — 모듈별 실행 건수. CI 의 그룹 job 은 `--modules "<그룹 모듈>"` 로 자기 그룹만 센다.
 - CI 는 모듈을 **그룹별 병렬 job** 으로 돌린다(`.github/scripts/backend-ci-matrix.py`).
-  - 서비스를 묶어 그룹을 만들고(`product-ops-delivery` · `auth-order`), 나머지 core · cloud · 새 모듈은 전부 `rest` 그룹이다.
+  - 서비스를 묶어 그룹을 만들고(`product-delivery` · `auth-order`), 나머지 core · cloud · 새 모듈은 전부 `rest` 그룹이다.
     그룹 = job 하나다. 무료 Organization 의 동시 실행 job 한도(20) 때문에 그룹을 늘리면 PR 이 몰릴 때 Queued 대기가 길어진다(#194) —
     그룹을 쪼개기보다 job 안 병렬(`org.gradle.parallel`)에 맡긴다.
   - job 마다 `./gradlew <그룹 모듈>:check --continue --no-build-cache` 로 돌아 한 모듈의 실패가 같은 그룹의 다른 모듈 결과를 가리지 않는다.
