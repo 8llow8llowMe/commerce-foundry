@@ -19,11 +19,9 @@ describe('guideOf', () => {
   it('모든 투어가 서버 안내 키로 바뀐다(서버 허용 목록 operations.onboarding.guides 와 맞춘다)', () => {
     expect(ALL_TOURS.map((tour) => guideOf(tour.id))).toEqual([
       { key: 'console', version: 1 },
-      // 서버 허용 목록에 아직 없다(#228 · #358) — 서버가 모르는 동안은 이 브라우저 기록으로만 정한다
       { key: 'product-new', version: 2 },
       { key: 'product-edit', version: 1 },
       { key: 'payments', version: 1 },
-      // 서버 허용 목록에 아직 없다(#30) — shipping-domestic 과 같이 이 브라우저 기록으로만 정한다
       { key: 'orders', version: 2 },
       { key: 'order-detail', version: 2 },
       { key: 'stocks', version: 1 },
@@ -31,7 +29,6 @@ describe('guideOf', () => {
       { key: 'size-charts', version: 1 },
       { key: 'size-chart-editor', version: 1 },
       { key: 'size-chart-templates', version: 1 },
-      // 서버 허용 목록에 있다(BE #412)
       { key: 'shipping-domestic', version: 1 },
     ]);
   });
