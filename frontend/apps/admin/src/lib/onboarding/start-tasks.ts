@@ -1,6 +1,6 @@
 import { guideOf, type OnboardingMe } from '@/lib/tour/onboarding-api';
 import type { TourState } from '@/lib/tour/progress';
-import { SHIPPING_DOMESTIC_TOUR } from '@/lib/tour/tours';
+import { PRODUCT_NEW_TOUR, SHIPPING_DOMESTIC_TOUR } from '@/lib/tour/tours';
 
 /**
  * 어드민 시작 체크리스트의 업무(#358). 서버(`GET /api/v1/admin/onboarding/me` 의 `tasks`)가 준 업무만 그린다 —
@@ -18,15 +18,15 @@ export type StartTask = {
 
 export const START_TASKS: Readonly<Record<string, StartTask>> = {
   /**
-   * 상품 1건 등록 — 서버는 상품 등록 API(BE #9) 뒤에 이 업무를 내기 시작한다(#357 PR-C).
-   * 키는 서버가 정하면 맞춘다. 그 전에는 서버가 주지 않으므로 보이지 않는다.
+   * 상품 1건 등록 — 서버(`OnboardingTaskProcessor`)는 `operations.onboarding.product-registration-enabled` 를 켠 배포에서만
+   * 이 업무를 낸다. 끈 배포에서는 서버가 주지 않으므로 보이지 않는다. 등록에 성공하면 상품 등록 폼이 업무 상태를 다시 읽게 한다.
    */
   PRODUCT_REGISTERED: {
     title: '첫 상품 등록',
     description:
       '판매할 상품을 하나 등록합니다. 숨김으로 등록해 두고 확인한 뒤 노출할 수 있습니다.',
     href: '/products/new',
-    tourId: null,
+    tourId: PRODUCT_NEW_TOUR.id,
   },
   SHIPPING_POLICY_SAVED: {
     title: '국내 배송비 정책 저장',

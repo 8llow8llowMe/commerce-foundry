@@ -23,11 +23,11 @@ export function orderSyncLabel(payment: PaymentListItem): string {
 /**
  * 결제 표 — 생성 시각 · 결제 아이디 · 주문(상세 링크) · 상태(+ 미확정 사유) · 수단 · 원금 · 주문 회신 · 승인 시작/완료 시각.
  * 금액은 저장된 결제 시도 원금을 `formatMoney` 로 표시만 한다. 상태 · 사유 · 수단은 서버 `name`(설명은 `title`)이다.
- * 결제키 · 개인정보는 서버가 내려 주지 않는다.
+ * 결제키 · 개인정보는 서버가 내려 주지 않는다. `data-tour` 는 온보딩 투어(#228 `payments-v1`)의 앵커다.
  */
 export function PaymentTable({ payments }: { payments: PaymentListItem[] }) {
   return (
-    <div className="relative overflow-x-auto">
+    <div data-tour="payment-table" className="relative overflow-x-auto">
       <table className="w-full min-w-[60rem] text-left text-sm">
         <caption className="sr-only">결제 목록</caption>
         <thead className="text-muted-fg">

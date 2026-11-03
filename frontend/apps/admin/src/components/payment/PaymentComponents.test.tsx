@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_QUERY } from '@/lib/payment/query';
 import type { PaymentListItem } from '@/lib/payment/types';
+import { helpTopicFor } from '@/lib/tour/tours';
 import { PaymentFilters } from './PaymentFilters';
 import { orderSyncLabel, PaymentTable } from './PaymentTable';
 
@@ -84,5 +85,18 @@ describe('PaymentFilters', () => {
     const html = renderToStaticMarkup(<PaymentFilters query={DEFAULT_QUERY} />);
     expect(html).not.toContain('조건 초기화');
     expect(html).not.toContain('aria-current');
+  });
+});
+
+describe('결제 확인 투어 앵커(#228 payments-v1)', () => {
+  it('조건 · 표가 투어가 가리키는 앵커를 단다', () => {
+    const targets = helpTopicFor('/payments').tour?.steps.flatMap((step) => step.target ?? []);
+    expect(targets).toEqual(['payment-filters', 'payment-table']);
+    expect(renderToStaticMarkup(<PaymentFilters query={DEFAULT_QUERY} />)).toContain(
+      'data-tour="payment-filters"',
+    );
+    expect(renderToStaticMarkup(<PaymentTable payments={[payment()]} />)).toContain(
+      'data-tour="payment-table"',
+    );
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ServerTaskItem, TourStatus } from '@/lib/tour/onboarding-api';
 import type { ServerProgress, TourState } from '@/lib/tour/progress';
-import { SHIPPING_DOMESTIC_TOUR } from '@/lib/tour/tours';
+import { PRODUCT_NEW_TOUR, SHIPPING_DOMESTIC_TOUR } from '@/lib/tour/tours';
 import { START_TASKS, taskViewsOf, tourNoteOf } from './start-tasks';
 
 const task = (
@@ -30,6 +30,13 @@ describe('taskViewsOf', () => {
     expect(taskViewsOf({ tours: [], tasks: [] })).toEqual([]);
     const views = taskViewsOf({ tours: [], tasks: [task('PRODUCT_REGISTERED', 'NOT_COMPLETED')] });
     expect(views[0]?.task.title).toBe('첫 상품 등록');
+  });
+
+  it('상품 등록 업무는 상품 등록 화면과 그 화면 투어로 연다', () => {
+    expect(START_TASKS.PRODUCT_REGISTERED).toMatchObject({
+      href: '/products/new',
+      tourId: PRODUCT_NEW_TOUR.id,
+    });
   });
 
   it('내 상태를 완료 · 스토어만 · 미완료 · 확인 불가로 나눈다', () => {
