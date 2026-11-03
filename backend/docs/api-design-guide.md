@@ -1053,6 +1053,20 @@ ADMIN `PUT /api/v1/admin/products/{productId}/custom-order` 는 `{version, enabl
   사용 여부 · 안내 · 소요일이 바뀌면 상품 merge 가, 항목만 바뀌면 버전 CAS 가 자식 쓰기보다 먼저 동시 편집을 막는다. 숨김 상품도 편집하고 지운 상품은 404 `PRODUCT_001` 이다.
 - 감사 행위는 `PRODUCT_CUSTOM_ORDER_REPLACE`(대상 `product:<id>`)이고 입력 항목 내용은 싣지 않는다. 운영 DDL 은 없다(기존 `product_custom_order_field` · 상품 칸을 쓴다).
 
+#### 옵션 · 옵션 값 은퇴 API (#9 PR-C2)
+
+ADMIN `POST /api/v1/admin/products/{productId}/option-retirements` 는 `{version, optionGroupIds?[], optionValueIds?[]}`(아이디는 숫자 또는 십진수 문자열)를 받고 200 과 편집용 상세를 돌려준다.
+
+- **은퇴는 지우기가 아니다** — `retired_at` 만 채운다. 옵션 · SKU · 재고 · 선점 · 원가 행과 지난 주문 · 장바구니의 옵션명은 남는다. 은퇴 되돌리기는 v1 에 없다(#9 PR-C 권장안).
+- **판매 종료가 함께 간다** — 은퇴한 값(은퇴한 옵션의 값 포함)을 하나라도 쓰는 판매중 SKU 는 같은 트랜잭션에서 `STOP_SELLING` 이 된다. 옵션(그룹)을 은퇴하면 모든 SKU 가 그 옵션의 값을 쓰므로
+  상품의 SKU 전부가 판매 종료된다. 고객 상세는 은퇴 값과 그 SKU 를 빼고, 서비스 간 SKU 조회는 `purchasable=false` 로 낸다(주문 · 재고 선점이 막힌다).
+  은퇴 전에 이미 잡힌 재고 선점은 그대로 확정 · 해제된다 — 결제 중인 주문을 깨지 않는다(새 선점만 막힌다).
+- **가격 규칙** — 남는 판매중 SKU 로 "기본 판매가 = 판매중 최저가" 가 서야 한다. 남는 판매중 SKU 에 추가금 0 이 없으면 400 `SKU_ADMIN_004` 이고 아무것도 쓰지 않는다
+  (`PUT /pricing` 이나 `PUT /skus` 로 먼저 맞춘다). 판매중 SKU 가 하나도 남지 않으면 따지지 않는다.
+- **멱등 · 동시성** — 이미 은퇴한 대상만 보내면 아무것도 쓰지 않고 버전을 유지한다. 바꾸는 것이 있으면 상품 버전 CAS 가 모든 쓰기보다 먼저다(오래된 버전 409 `SKU_ADMIN_002`).
+- **오류** — 이 상품의 옵션 · 값이 아니면 400 `SKU_ADMIN_011`, 대상 없음 · 각 50개 초과 400 `SKU_ADMIN_116`, 아이디 0 · 음수 400 `SKU_ADMIN_103`, 삭제 상품 404 `SKU_ADMIN_001`.
+- 감사 행위는 `PRODUCT_OPTIONS_RETIRE`(대상 `product:<id>`)이다. 기존 SKU 하나만 판매 종료하는 것은 `PUT /skus` 의 `saleStatus` 다(#573). 운영 DDL 은 없다.
+
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다
 (주문 · 장바구니가 계속 읽는다). **v1 에는 복구 기능이 없다** — 되살리려면 운영 SQL 이다. 삭제는 위의 ADMIN 전용 DELETE API로 처리한다.
@@ -1073,9 +1087,9 @@ ADMIN `PUT /api/v1/admin/products/{productId}/custom-order` 는 `{version, enabl
 - **판정은 한 곳이다** — 서비스 간 SKU 의 `purchasable` 과 재고 선점의 판매 불가는 `SaleAvailability.isOpenForSale`(삭제 안 됨 · 노출 · 상품 판매중 · SKU 판매중)이 정한다.
   두 경로가 상품을 읽는 `ProductRepositoryPort#findAllByIdsIncludingHidden` 은 숨김 · 삭제 상품을 거르지 않는다. 고객 조회는 check 에 기대지 않고 삭제 조건을 명시한다
   (`ProductCustomRepositoryImpl#visibleToCustomer`).
-- **옵션 은퇴** — 옵션 그룹 · 값에 `retired_at` 이 있다(쓰기는 #9 PR-E2). 고객 상세는 은퇴한 그룹 · 값과, 은퇴 값(은퇴 그룹의 값 포함)을 하나라도 쓰는 SKU 를 빼고
+- **옵션 은퇴** — 옵션 그룹 · 값에 `retired_at` 이 있다(쓰기는 `POST /option-retirements`, #9 PR-C2). 고객 상세는 은퇴한 그룹 · 값과, 은퇴 값(은퇴 그룹의 값 포함)을 하나라도 쓰는 SKU 를 빼고
   상단 가격 · 판매 상태도 남은 SKU 로 계산한다. 살아 있는 값만 쓰는 판매 종료 SKU 는 그대로 보인다. 서비스 간 SKU 조회는 은퇴 값의 이름을 그대로 낸다 —
-  order-service 는 `optionName` 이 비면 줄을 끊는다. 고객 목록의 SKU 집계는 은퇴를 보지 않는다 — "은퇴 값을 쓰는 SKU 는 판매 종료" 를 쓰기(E2)가 보장한다.
+  order-service 는 `optionName` 이 비면 줄을 끊는다. 고객 목록의 SKU 집계는 은퇴를 보지 않는다 — "은퇴 값을 쓰는 SKU 는 판매 종료" 를 쓰기(은퇴 API 가 같은 트랜잭션에서 판매 종료로 바꾸고, `PUT /skus` 가 은퇴 옵션 SKU 의 판매중 전환을 `SKU_ADMIN_006` 으로 막는다)가 보장한다.
 - **버전** — `product.version`(`@Version`)은 어드민 수정의 낙관적 락이다(#9 PR-E2). 고객 응답에는 버전 · 삭제 · 은퇴 칸을 싣지 않는다 —
   고객 응답 칸은 `ProductWebResponseComponentsTest` 가 허용 목록으로 고정한다(`architecture-guide.md` §2).
 - **등록자** — `product.created_by_member_id`(null 허용, 외부 FK: auth-service `member.id`)는 운영자 온보딩(#357)의 "상품 1건 등록" 판정용이다. 값은 등록 API(#9 PR-E1)가
