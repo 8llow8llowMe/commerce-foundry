@@ -2,7 +2,11 @@ package com.commercefoundry.security.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.security.principal.AdminAuthority;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -20,11 +24,17 @@ class AuthorizationExpressionsTest {
         "hasRole('ADMIN') and !hasAuthority('SCOPE_readonly')",
         "hasRole('ADMIN') and (hasAuthority('SCOPE_a') or hasAuthority('SCOPE_b'))",
         "hasRole('ADMIN') and hasAuthority('SCOPE_or')",
-        "hasRole('ADMIN') and principal.name != 'operator'"
+        "hasRole('ADMIN') and principal.name != 'operator'",
+        "hasAuthority('ADMIN_ORDER_MANAGE')",
+        "hasAuthority('ADMIN_CATALOG_READ')",
+        "hasAuthority('ADMIN_SETTINGS_MANAGE') and isFullyAuthenticated()",
+        " hasAuthority( 'ADMIN_SECURITY_READ' ) ",
+        "hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')",
+        "hasAnyRole('ADMIN','OWNER','MANAGER','STAFF') and isFullyAuthenticated()"
     })
-    @DisplayName("ADMIN 이 필요조건인 식은 통과한다 — 단독 · and 로 좁힘 · 괄호 · 문자열 안의 or")
-    void adminRoleRequired(String expression) {
-        assertThat(AuthorizationExpressions.requiresAdminRole(expression)).isTrue();
+    @DisplayName("운영자 권한이 필요조건인 식은 통과한다 — hasRole('ADMIN') · AdminAuthority 기능 상수 · OPERATOR, 단독 · and 로 좁힘 · 괄호 · 문자열 안의 or")
+    void operatorAuthorityRequired(String expression) {
+        assertThat(AuthorizationExpressions.requiresOperatorAuthority(expression)).isTrue();
     }
 
     @ParameterizedTest
@@ -51,11 +61,36 @@ class AuthorizationExpressionsTest {
         "hasRole('ADMIN') and \"(\" != \"\" or true and \")\" != \"\"",
         "hasRole('ADMIN') and \"'\" != \"\" or true and \"'\" != \"\"",
         "hasRole('ADMIN') and \"x\" != \"\"",
-        "hasRole('ADMIN') and {cond}"
+        "hasRole('ADMIN') and {cond}",
+        "hasAuthority('ADMIN_FOO_READ')",
+        "hasAuthority('ADMIN_ORDER_WRITE')",
+        "hasAuthority('ADMIN_ORDER')",
+        "hasAuthority('admin_order_read')",
+        "hasAnyAuthority('ADMIN_ORDER_READ')",
+        "hasAnyAuthority('ADMIN_ORDER_READ', 'ADMIN_ORDER_MANAGE')",
+        "hasAuthority('ADMIN_ORDER_READ') or isAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ', 'ROLE_CUSTOMER')",
+        "hasAnyRole('ADMIN', 'OWNER', 'MANAGER', 'STAFF')",
+        "hasAnyRole('OWNER','ADMIN','MANAGER','STAFF')",
+        "hasAnyRole('ADMIN','OWNER','MANAGER','STAFF','CUSTOMER')",
+        "hasAnyRole('ADMIN','OWNER','MANAGER','STAFF') or permitAll()",
+        "hasRole('OWNER')",
+        "hasRole('MANAGER')"
     })
-    @DisplayName("ADMIN 이 필요조건이 아닌 식은 실패한다 — permitAll · isAuthenticated · 다른 표기 · 괄호 밖 or · 삼항 · 괄호 불일치 · 큰따옴표 · 템플릿 자리표시자")
-    void adminRoleNotRequired(String expression) {
-        assertThat(AuthorizationExpressions.requiresAdminRole(expression)).isFalse();
+    @DisplayName("운영자 권한이 필요조건이 아닌 식은 실패한다 — permitAll · isAuthenticated · 다른 표기 · 정의되지 않은 기능 · hasAnyAuthority · OPERATOR 변형 · 괄호 밖 or · 삼항 · 괄호 불일치 · 큰따옴표 · 템플릿 자리표시자")
+    void operatorAuthorityNotRequired(String expression) {
+        assertThat(AuthorizationExpressions.requiresOperatorAuthority(expression)).isFalse();
+    }
+
+    @Test
+    @DisplayName("AdminAuthority 의 모든 상수는 운영자 권한 식으로 통과한다 — 컨트롤러가 상수를 쓰면 R2 · 스모크 스캔이 막지 않는다")
+    void everyAdminAuthorityConstantPasses() throws IllegalAccessException {
+        for (Field field : AdminAuthority.class.getDeclaredFields()) {
+            if (Modifier.isStatic(field.getModifiers()) && field.getType() == String.class) {
+                String expression = (String) field.get(null);
+                assertThat(AuthorizationExpressions.requiresOperatorAuthority(expression)).as(field.getName()).isTrue();
+            }
+        }
     }
 
     @ParameterizedTest

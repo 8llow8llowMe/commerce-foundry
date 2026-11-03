@@ -2,6 +2,7 @@ package com.commercefoundry.security.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.support.ResourceServerSmokeTestSupport.AuthorizationScan;
 import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
@@ -20,11 +21,14 @@ import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 class HandlerAuthorizationScanTest {
 
     @Test
-    @DisplayName("/api/v1/admin 핸들러는 hasRole('ADMIN') 이 필요조건이어야 하고, 그 밖의 /api 는 선언만, /internal 은 허용 호출자 그 자체여야 한다")
+    @DisplayName("/api/v1/admin 핸들러는 운영자 권한(AdminAuthority 기능 상수 · OPERATOR · hasRole('ADMIN'))이 필요조건이어야 하고, 그 밖의 /api 는 선언만, /internal 은 허용 호출자 그 자체여야 한다")
     void scanJudgesByPath() {
         Map<RequestMappingInfo, HandlerMethod> handlers = new LinkedHashMap<>();
         handlers.put(mapping("/api/v1/admin/policies"), handler("adminRole"));
         handlers.put(mapping("/api/v1/admin"), handler("adminRoleNarrowed"));
+        handlers.put(mapping("/api/v1/admin/orders"), handler("featureAuthority"));
+        handlers.put(mapping("/api/v1/admin/me/password"), handler("operator"));
+        handlers.put(mapping("/api/v1/admin/foo"), handler("unknownFeature"));
         handlers.put(mapping("/api/v1/admin/members"), handler("authenticated"));
         handlers.put(mapping("/api/v1/admin/open"), handler("open"));
         handlers.put(mapping("/api/v1/admin/missing"), handler("missing"));
@@ -39,7 +43,8 @@ class HandlerAuthorizationScanTest {
 
         assertThat(scan.checkedInternalPatterns()).containsExactlyInAnyOrder("/internal/v1/stocks", "/internal/v1/widened");
         assertThat(scan.violations())
-            .hasSize(5)
+            .hasSize(6)
+            .anySatisfy(detail -> assertThat(detail).contains("#unknownFeature [/api/v1/admin/foo]", "ADMIN_FOO_READ"))
             .anySatisfy(detail -> assertThat(detail).contains("#authenticated [/api/v1/admin/members]", "isAuthenticated()", "hasRole('ADMIN')"))
             .anySatisfy(detail -> assertThat(detail).contains("#open [/api/v1/admin/open]", "permitAll()"))
             .anySatisfy(detail -> assertThat(detail).contains("#missing [/api/v1/admin/missing]", "@PreAuthorize 없음"))
@@ -68,6 +73,18 @@ class HandlerAuthorizationScanTest {
 
         @PreAuthorize("hasRole('ADMIN') and isFullyAuthenticated()")
         public void adminRoleNarrowed() {
+        }
+
+        @PreAuthorize(AdminAuthority.ORDER_MANAGE)
+        public void featureAuthority() {
+        }
+
+        @PreAuthorize(AdminAuthority.OPERATOR)
+        public void operator() {
+        }
+
+        @PreAuthorize("hasAuthority('ADMIN_FOO_READ')")
+        public void unknownFeature() {
         }
 
         @PreAuthorize("isAuthenticated()")

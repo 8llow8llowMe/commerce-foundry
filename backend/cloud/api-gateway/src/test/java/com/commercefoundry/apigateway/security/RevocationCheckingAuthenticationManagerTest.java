@@ -17,6 +17,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
@@ -113,6 +115,18 @@ class RevocationCheckingAuthenticationManagerTest {
         assertThat(adminManager(issuedAt, memberId -> Mono.empty(), FailurePolicy.FAIL_CLOSED).authenticate(bearer()).block(TIMEOUT)).isNotNull();
     }
 
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+    @DisplayName("새 운영자 역할(OWNER · MANAGER · STAFF) 토큰도 iat 가 컷오프보다 이르면 004 다 — ADMIN 만 보면 로그아웃 · 비활성화 컷오프를 우회한다 (#236)")
+    void operatorIssuedBeforeCutoffIs004(MemberRole role) {
+        Instant issuedAt = Instant.parse("2026-10-26T01:00:00Z");
+        ReactiveAuthenticationManager manager = new RevocationCheckingAuthenticationManager(
+            operatorDelegate(role, issuedAt), notRevoked(memberId -> Mono.just(issuedAt.plusSeconds(1))), FailurePolicy.FAIL_CLOSED, Clock.systemUTC()
+        ).forExchange(EXCHANGE);
+
+        assertThat(resolve(manager)).isEqualTo(SecurityErrorCode.TOKEN_REVOKED);
+    }
+
     @Test
     @DisplayName("고객 토큰은 컷오프를 조회하지 않는다")
     void customerSkipsAdminCutoff() {
@@ -198,9 +212,13 @@ class RevocationCheckingAuthenticationManagerTest {
     }
 
     private static ReactiveAuthenticationManager adminDelegate(Instant issuedAt) {
-        MemberPrincipal principal = new MemberPrincipal(TestTokens.MEMBER_ID, MemberRole.ADMIN, JTI, issuedAt);
+        return operatorDelegate(MemberRole.ADMIN, issuedAt);
+    }
+
+    private static ReactiveAuthenticationManager operatorDelegate(MemberRole role, Instant issuedAt) {
+        MemberPrincipal principal = new MemberPrincipal(TestTokens.MEMBER_ID, role, JTI, issuedAt);
         return authentication -> Mono.just(UsernamePasswordAuthenticationToken.authenticated(
-            principal, null, List.of(new SimpleGrantedAuthority(MemberRole.ADMIN.authority()))));
+            principal, null, List.of(new SimpleGrantedAuthority(role.authority()))));
     }
 
     /** 서명 · 만료 검증을 통과했다고 치는 위임 매니저. */

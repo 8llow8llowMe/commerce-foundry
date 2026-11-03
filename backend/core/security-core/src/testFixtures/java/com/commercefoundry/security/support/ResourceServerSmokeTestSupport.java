@@ -76,7 +76,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
  *       {@code aud} 불일치 401 · 007, 허용 목록 밖 호출자 403 · 005, 허용된 호출자 200. 핸들러는 {@link InternalSecuritySmokeContextCustomizerFactory} 가
  *       모든 서블릿 테스트 컨텍스트에 등록하므로 {@code *ApplicationTests} 와 컨텍스트 공유가 깨지지 않는다.</li>
  *   <li>인가 선언 누락 가드 — 서비스 컨텍스트의 모든 MVC 핸들러를 돌며 {@code /internal/} 핸들러는 허용 호출자({@code hasAuthority('SERVICE_…')}),
- *       {@code /api/} 핸들러는 {@code @PreAuthorize} 가 있는지 본다. 실제 매핑을 보는 런타임 가드이고, 패키지 기준 정적 규칙(어드민의 {@code hasRole('ADMIN')} ·
+ *       {@code /api/} 핸들러는 {@code @PreAuthorize} 가 있는지 본다. 실제 매핑을 보는 런타임 가드이고, 패키지 기준 정적 규칙(어드민의 운영자 권한 식 ·
  *       전역 Feign 설정 · {@code RequestContextHolder})은 {@link ControllerAuthorizationArchTestSupport} 가 맡는다. 허용 호출자 판정은 둘이
  *       {@link AuthorizationExpressions} 를 같이 쓴다.</li>
  *   <li>관리자 감사 선언 누락 가드(#163) — {@code /api/v1/admin} 의 쓰기 핸들러는 {@link AdminAudited} 또는 {@link AdminAuditExempt} 를 선언한다.
@@ -154,11 +154,15 @@ public abstract class ResourceServerSmokeTestSupport {
         assertWwwAuthenticate(response, null);
     }
 
-    /** 보안이 없어도 404 라 단독으로는 아무것도 증명하지 않는다. 위 401 · 403 케이스와 함께라야 "ADMIN 만 통과" 가 된다. */
-    @Test
-    @DisplayName("ADMIN 토큰은 어드민 URL 규칙을 통과한다 — 매핑이 없어 404")
-    void adminPassesAdminRule() throws Exception {
-        assertThat(perform(get(ADMIN_PATH).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).getStatus()).isEqualTo(404);
+    /**
+     * 보안이 없어도 404 라 단독으로는 아무것도 증명하지 않는다. 위 401 · 403 케이스와 함께라야 "운영자 역할만 통과" 가 된다.
+     * 기능 권한은 URL 층이 아니라 핸들러의 {@code @PreAuthorize} 가 가른다 ({@code security-guide.md} §3-1).
+     */
+    @ParameterizedTest
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+    @DisplayName("운영자 역할(ADMIN · OWNER · MANAGER · STAFF) 토큰은 어드민 URL 규칙을 통과한다 — 매핑이 없어 404 (#236)")
+    void operatorPassesAdminRule(MemberRole role) throws Exception {
+        assertThat(perform(get(ADMIN_PATH).header(HttpHeaders.AUTHORIZATION, bearer(role))).getStatus()).isEqualTo(404);
     }
 
     /** 문자열 템플릿은 {@code %} 를 다시 인코딩하므로 {@link URI} 로 보낸다. */
@@ -302,7 +306,7 @@ public abstract class ResourceServerSmokeTestSupport {
      * <ul>
      *   <li>{@code /internal/} — 메서드(없으면 클래스)의 {@code @PreAuthorize} 식이 {@code hasAuthority('SERVICE_<id>')} 또는
      *       {@code hasAnyAuthority('SERVICE_<id>', ...)} <b>그 자체</b>여야 한다. {@code isAuthenticated()} · {@code permitAll()} · {@code or} 로 넓힌 식은 실패다.</li>
-     *   <li>{@code /api/v1/admin} 아래 — 식이 ADMIN 을 필요조건으로 해야 한다({@link AuthorizationExpressions#requiresAdminRole}). ArchUnit R2 는 패키지
+     *   <li>{@code /api/v1/admin} 아래 — 식이 운영자 권한을 필요조건으로 해야 한다({@link AuthorizationExpressions#requiresOperatorAuthority}). ArchUnit R2 는 패키지
      *       ({@code adapter.in.admin})로 보므로, 어드민 핸들러를 다른 패키지({@code adapter.in.web.admin} 등)에 두거나 상속으로 받으면 비켜 간다.
      *       여기는 실제 매핑 경로로 보아 패키지 · 상속과 무관하다.</li>
      *   <li>그 밖의 {@code /api/} — {@code @PreAuthorize} 가 있으면 된다(식은 {@code permitAll()} · {@code isAuthenticated()} · {@code hasRole(...)} 등 자유).</li>
@@ -311,7 +315,7 @@ public abstract class ResourceServerSmokeTestSupport {
      * <p>지금 서비스에는 실제 핸들러가 없어 빈 목록으로 통과하지 않도록, 스모크 핸들러가 검사 대상에 들어 있는지도 본다.
      */
     @Test
-    @DisplayName("모든 /internal 핸들러는 허용 호출자 hasAuthority('SERVICE_…') 를, /api/v1/admin 핸들러는 hasRole('ADMIN') 을, 모든 /api 핸들러는 @PreAuthorize 를 선언한다")
+    @DisplayName("모든 /internal 핸들러는 허용 호출자 hasAuthority('SERVICE_…') 를, /api/v1/admin 핸들러는 운영자 권한(AdminAuthority 상수 · hasRole('ADMIN'))을, 모든 /api 핸들러는 @PreAuthorize 를 선언한다")
     void handlersDeclareAuthorization() {
         RequestMappingHandlerMapping handlerMapping = applicationContext.getBean("requestMappingHandlerMapping", RequestMappingHandlerMapping.class);
 
@@ -343,8 +347,8 @@ public abstract class ResourceServerSmokeTestSupport {
                     violations.add(handlerName + " -> " + found + " — hasAuthority('SERVICE_<호출 서비스 ID>') · hasAnyAuthority(...) 로 부를 수 있는 서비스만 적으세요");
                 }
             } else if (admin) {
-                if (declared == null || !AuthorizationExpressions.requiresAdminRole(declared.value())) {
-                    violations.add(handlerName + " -> " + found + " — 어드민 경로는 hasRole('ADMIN') 또는 hasRole('ADMIN') and ... 로 고치세요");
+                if (declared == null || !AuthorizationExpressions.requiresOperatorAuthority(declared.value())) {
+                    violations.add(handlerName + " -> " + found + " — 어드민 경로는 AdminAuthority 상수(hasAuthority('ADMIN_<기능>_READ|MANAGE') · hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')) 또는 hasRole('ADMIN') 를 머리로, 좁힐 때만 and ... 로 고치세요");
                 }
             } else if (declared == null) {
                 violations.add(handlerName + " -> " + found + " — 메서드에 인가 식(permitAll() · isAuthenticated() · hasRole(...))을 적으세요");

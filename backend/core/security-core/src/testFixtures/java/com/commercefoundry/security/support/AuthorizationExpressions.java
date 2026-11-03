@@ -1,9 +1,13 @@
 package com.commercefoundry.security.support;
 
 import com.commercefoundry.security.internal.InternalTokenFormat;
+import com.commercefoundry.security.principal.AdminAuthority;
+import com.commercefoundry.security.principal.AdminPermission;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * {@code @PreAuthorize} 식의 모양 판정. 런타임 가드({@link ResourceServerSmokeTestSupport#handlersDeclareAuthorization})와
@@ -17,12 +21,31 @@ public final class AuthorizationExpressions {
     public static final Pattern SERVICE_CALLERS = Pattern.compile(
         "has(Any)?Authority\\(\\s*'" + InternalTokenFormat.AUTHORITY_PREFIX + "[a-z][a-z0-9-]*'(\\s*,\\s*'" + InternalTokenFormat.AUTHORITY_PREFIX + "[a-z][a-z0-9-]*')*\\s*\\)");
 
-    /** 어드민 식의 머리 — 반드시 {@code hasRole('ADMIN')} 으로 시작한다. */
-    private static final Pattern ADMIN_ROLE_HEAD = Pattern.compile("hasRole\\(\\s*'ADMIN'\\s*\\)");
+    /**
+     * 어드민 식의 머리 — 셋 중 하나로 시작한다 ({@code security-guide.md} §3-1).
+     *
+     * <ul>
+     *   <li>{@code hasRole('ADMIN')} — #236 이전 표기. 새 운영자 역할에는 열리지 않아 fail-closed 다.</li>
+     *   <li>{@code hasAuthority('ADMIN_<기능>_READ|MANAGE')} — {@link AdminPermission#authority()} 에 있는 이름만(정확히 일치). {@code AdminAuthority} 의 기능 상수다.</li>
+     *   <li>{@code hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')} — 운영자 전체({@link AdminAuthority#OPERATOR}). 공백 없는 정확한 문자열만 받는다.</li>
+     * </ul>
+     */
+    private static final Pattern OPERATOR_HEAD = Pattern.compile(
+        "hasRole\\(\\s*'ADMIN'\\s*\\)"
+            + "|hasAuthority\\(\\s*'(" + permissionAuthorities() + ")'\\s*\\)"
+            + "|" + Pattern.quote(AdminAuthority.OPERATOR));
     /** 머리 뒤에 붙일 수 있는 것은 {@code and} · {@code &&} 로 잇는 조건뿐이다 (SpEL 연산자는 대소문자를 가리지 않는다). */
     private static final Pattern AND_TAIL = Pattern.compile("(?i)(and(?=[\\s(!])|&&)");
 
     private AuthorizationExpressions() {
+    }
+
+    /** {@link AdminPermission#authority()} 전체를 정규식 택일로 — 기능 × 동작을 곱해 만들지 않아 권한표에 없는 조합이 통과하지 않는다. */
+    private static String permissionAuthorities() {
+        return Arrays.stream(AdminPermission.values())
+            .map(AdminPermission::authority)
+            .map(Pattern::quote)
+            .collect(Collectors.joining("|"));
     }
 
     /** {@code hasAuthority('SERVICE_<id>')} · {@code hasAnyAuthority('SERVICE_<id>', ...)} 그 자체인가. 앞뒤 공백만 무시한다. */
@@ -31,24 +54,25 @@ public final class AuthorizationExpressions {
     }
 
     /**
-     * ADMIN 이 필요조건인가 — {@code hasRole('ADMIN')} 이거나 {@code hasRole('ADMIN') and ...} 이다 ({@code security-guide.md} §5).
+     * 운영자 권한이 필요조건인가 — 머리({@link #OPERATOR_HEAD}) 단독이거나 {@code 머리 and ...} 이다 ({@code security-guide.md} §3-1 · §5).
      *
      * <ul>
      *   <li>{@code and} 뒤에 괄호 밖(최상위) {@code or} · {@code ||} · {@code ?}(삼항 · 엘비스)가 있으면 실패다. SpEL 에서 {@code and} 가 {@code or} 보다 먼저 묶여
      *       {@code hasRole('ADMIN') and a or b} 는 {@code (ADMIN and a) or b} — ADMIN 이 아니어도 통과한다. 삼항도 {@code and} 보다 늦게 묶인다.</li>
      *   <li>{@code ?.}(안전 탐색)도 {@code ?} 로 보아 실패로 둔다 — 어드민 식에 쓸 일이 없고, 좁게 허용하는 쪽이 안전하다.</li>
-     *   <li>괄호 안의 {@code or} 는 {@code and} 로 묶여 있어 ADMIN 이 여전히 필요조건이다 — 통과시킨다.</li>
-     *   <li>{@code permitAll()} · {@code isAuthenticated()} · {@code hasAnyRole('ADMIN', ...)} · {@code hasAuthority('ROLE_ADMIN')} 은 실패다.
-     *       뒤의 둘은 같은 뜻이 될 수 있어도 문서의 표기({@code hasRole('ADMIN')}) 하나로 맞춘다.</li>
+     *   <li>괄호 안의 {@code or} 는 {@code and} 로 묶여 있어 머리가 여전히 필요조건이다 — 통과시킨다.</li>
+     *   <li>{@code permitAll()} · {@code isAuthenticated()} · {@code hasAnyAuthority(...)} · 순서나 공백이 다르거나 CUSTOMER 를 섞은 {@code hasAnyRole(...)} ·
+     *       {@code hasAuthority('ROLE_ADMIN')} · 정의되지 않은 기능({@code hasAuthority('ADMIN_FOO_READ')}) 은 실패다.
+     *       같은 뜻이 될 수 있어도 {@code AdminAuthority} 의 표기 하나로 맞춘다.</li>
      *   <li>큰따옴표 · {@code {}} 가 있으면 실패다 ({@link #hasUncheckableToken}).</li>
      * </ul>
      */
-    public static boolean requiresAdminRole(String expression) {
+    public static boolean requiresOperatorAuthority(String expression) {
         if (expression == null || hasUncheckableToken(expression)) {
             return false;
         }
         String stripped = expression.strip();
-        Matcher head = ADMIN_ROLE_HEAD.matcher(stripped);
+        Matcher head = OPERATOR_HEAD.matcher(stripped);
         if (!head.lookingAt()) {
             return false;
         }
