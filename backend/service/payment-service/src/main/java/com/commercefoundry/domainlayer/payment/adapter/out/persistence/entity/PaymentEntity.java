@@ -86,7 +86,7 @@ import lombok.NoArgsConstructor;
         @CheckConstraint(
             name = "ck_payment_failed_fields",
             constraint = "(failure_message is null or failure_code is not null)"
-                + " and ((status = 'FAILED' and failure_code is not null) or status = 'LATE_APPROVED'"
+                + " and ((status = 'FAILED' and failure_code is not null) or status in ('LATE_APPROVED','CANCELED')"
                 + " or (status not in ('FAILED','LATE_APPROVED','CANCELED') and failure_code is null))"
         ),
         @CheckConstraint(

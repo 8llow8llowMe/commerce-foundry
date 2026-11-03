@@ -411,6 +411,19 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 - 취소 요청도 `Idempotency-Key` 를 싣는다. 키는 클레임 ID 처럼 재시도해도 같은 값이어야 한다.
 - PayPal 환불은 수수료가 돌려받아지지 않을 수 있다 — 환불 정책 문구와 어드민 화면에 반영한다.
 
+### 전액 취소 실패 필드 제약 보정 (#551)
+
+배포 전 `service/payment-service/src/test/resources/ddl/payment-canceled-failed-fields.sql`을 운영자가
+`psql -v ON_ERROR_STOP=1 -f <파일>`로 적용한다. 기존 `ck_payment_failed_fields`의 CANCELED 허용 누락만 고친다.
+정상 전액 취소와 FAILED/ABORTED 기원의 늦은 승인 전액 취소를 허용하며 원 승인액 · 승인 시각 · 실패/중단 원인을 보존한다.
+FAILED 실패 코드 필수 · 메시지/코드 쌍 · 다른 상태 제약은 유지한다. 공개 API · PG 호출 · 금액 · 멱등 · 락 정책은 바뀌지 않는다.
+
+제약 교체는 한 트랜잭션에서 기존 이름으로 즉시 검증한다. `ACCESS EXCLUSIVE` 잠금과 전체 기존 행 검사가 필요하므로 쓰기 트래픽이 낮을 때 적용한다.
+잠금 대기는 2초, 문장은 30초 상한이며 실패하면 롤백된다. 제약이 없으면 실패하고, 정상 적용 뒤 같은 스크립트를 다시 실행할 수 있다.
+적용 뒤 `pg_constraint`에서 해당 제약이 하나이고 `convalidated=true`인지 확인한다. Hibernate 스냅숏은 `ddl/payment-schema.sql`이다.
+이전 제약 때문에 PG 취소 성공 후 DB 기록이 실패한 건은 원장이 PENDING일 수 있다. 임의 SQL로 성공 처리하거나 새 키로 재청구하지 않는다.
+PG 거래 · 취소 내역과 기존 클레임 멱등 키를 대조한 뒤, 키 유효기간 안에서 기존 취소 조회/재시도로 복구하며 불명확하면 수동 확인한다.
+
 ## 9. 해외 결제 (USD · PayPal)
 
 - 금액은 **USD 센트(minor unit) 정수**로 저장하고, PG 요청 시 adapter 가 소수 표현(`89.50`)으로 바꾼다.
