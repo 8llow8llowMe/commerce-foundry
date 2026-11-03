@@ -1,0 +1,29 @@
+# 고객 부분 반품 접수
+
+`POST /api/v1/orders/{orderId}/returns`는 CUSTOMER의 본인 주문만 받는다. 회원은 JWT에서만 정하며 없는 주문과 타인 주문은 모두 `ORDER_001`(404)이다.
+
+본문은 `items[{orderItemId, quantity, reason}]`이다. 항목은 1~50개, 수량은 1~99이며 사유는 `CHANGE_OF_MIND`, `DEFECTIVE`, `WRONG_ITEM`이다.
+같은 주문 항목 중복이나 다른 주문 항목은 `ORDER_029`(400), 기존 REQUESTED 반품 수량과 이번 수량의 합이 주문 수량을 넘으면 `ORDER_030`(409)이다.
+사유는 비용 부담 정책을 뜻하지 않는다. 금액·통화·자유 텍스트·회원 아이디는 입력 계약에 없다.
+
+`Idempotency-Key`는 완전한 UUID 36자 문자열이다. 대소문자는 구분하지 않으며 축약·공백·여러 값은 거절한다.
+누락은 `ORDER_199`, 형식 오류는 `ORDER_198`(400)이다. 키 범위는 주문·UUID 조합이다.
+항목 아이디로 정렬한 수량·사유를 저장 항목과 직접 비교한다. 같은 키·본문은 200, 다른 본문은 `ORDER_031`(409), 새 접수는 201이다.
+소유 확인 뒤 재생을 상태·잔여 수량 검사보다 먼저 처리하므로 같은 접수는 주문 상태가 달라져도 재생된다.
+
+신규 접수는 DELIVERED 또는 RETURN_REQUESTED에서만 가능하다. 그 밖의 상태는 `ORDER_020`(409)이다.
+주문 부모 행을 NOWAIT으로 잠근 뒤 전체 요청 수량을 한 번에 합산한다. 최초 DELIVERED 접수만 RETURN_REQUESTED로 바꾸며
+CUSTOMER·`CUSTOMER_RETURN_REQUESTED` 이력을 한 건 쓴다. 이미 RETURN_REQUESTED인 주문의 추가 부분 반품은 주문 상태·이력을 다시 저장하지 않는다.
+반품 헤더·항목·주문 상태·이력은 하나의 짧은 트랜잭션으로 커밋되거나 롤백된다. 호출자의 트랜잭션 롤백에도 함께 참여한다.
+잠금·버전 경합은 `ORDER_025`(409), 다른 저장 실패는 `ORDER_021`(500)이다. 실패한 트랜잭션 안에서는 재시도하지 않는다.
+
+응답은 문자열 claimId·orderId·orderItemId, 상태·사유 메타데이터, items, expectedRefund, requestedAt을 포함한다.
+`expectedRefund`는 미산정 null이다. requestedAt은 DB에서 다시 읽은 생성 시각이므로 최초 응답과 같은 키 재생에서 동일하다.
+HTTP 상태를 고르는 내부 created 플래그는 JSON에 노출하지 않는다.
+
+이 단계는 접수만 수행한다. PG 호출·환불 실행·배송비 계산·재고 복원·운영자 승인/거절·철회·기간 제한·맞춤 제작 금지 정책은 후속 범위다.
+현재 예약 수량은 RETURN·REQUESTED만 합산한다. 향후 거절·철회 상태를 추가할 때 예약 수량 제외 규칙과 상태별 전이를 함께 정의해야 한다.
+RETURN_REQUESTED는 자동 구매 확정의 DELIVERED 후보에서 빠진다. 구매 확정과 경합하면 최신 상태·버전 검사로 한쪽만 성공한다.
+
+FE는 같은 시도를 재시도할 때 UUID와 본문을 유지한다. `ORDER_025` 뒤에는 같은 키로 재시도해 이미 접수됐다면 200 재생을 받는다.
+예상 환불 금액 null을 0원으로 표시하지 않는다. API 계약 검토자는 `seonghoho`다.

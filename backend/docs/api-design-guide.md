@@ -1123,7 +1123,7 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
 - **목록** — 기간은 주문 시각 `[from, to)` (UTC)이고 비면 그쪽 끝이 열려 있다. 정렬은 주문 시각 → 아이디 내림차순이고 `idx_orders_status_created_at_id` · `idx_orders_created_at_id` 범위로 읽는다(건수 쿼리도). 첫 상품명 · 항목 수 · 받는 분은 그 페이지 주문만 묶어 읽는다(항목 1번 · 배송지 1번).
   결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 목록 · 승인 · 환불 · `REFUND_FAILED` 재시도는 #17 PR-2(#15 · #16 이후)다.
 
-### 2-17. 고객 주문 내역 · 결제 전 취소 · 구매 확정 (order-service, #16)
+### 2-17. 고객 주문 내역 · 결제 전 취소 · 구매 확정 · 반품 접수 (order-service, #16)
 
 고객 전용(`hasRole('CUSTOMER')`, ADMIN 403). 회원은 토큰 주체이고 남의 주문은 없는 주문처럼 404 `ORDER_001` 이다.
 
@@ -1135,7 +1135,7 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
 | `PATCH /api/v1/orders/{orderId}/purchase-confirmation` | 200 구매 확정된 상세. 이미 확정됐으면 바꾸지 않고 200 | 400 `ORDER_141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 완료 전 · 반품 등), `ORDER_025`(다른 전이가 먼저 커밋) |
 
 - **취소 범위** — PR-1 은 결제 전(결제 대기 → 취소 완료)만이다. 환불이 없고 잡아 둔 재고는 `order-canceled` 이벤트로 풀린다(`order-flow-guide.md` §1-1 · §3-5).
-  결제 뒤 취소 · 반품은 #15(환불) 뒤 #16 후속이다. 구매 확정은 배송 완료 주문에서 가능하다. `cancelable` 이 지금 취소 버튼을 보여 줄지다.
+  결제 뒤 취소 · 반품 승인/환불 연계는 #15·#16 후속이다. 고객 부분 반품 접수는 아래 계약으로 제공한다. 구매 확정은 배송 완료 주문에서 가능하다. `cancelable` 이 지금 취소 버튼을 보여 줄지다.
 - **사유** — `CHANGE_OF_MIND`(단순 변심) · `ORDER_MISTAKE`(주문 내용 잘못 선택) · `PAYMENT_ISSUE`(결제 문제) · `OTHER`(기타). 자유 입력은 받지 않는다 —
   사유 코드가 주문 이력과 재고 해제 이벤트에 그대로 실린다.
 - **동시성** — 취소와 결제 완료 · 만료가 겹치면 `@Version` 비교로 하나만 성공한다. 진 쪽이 같은 취소(더블 클릭)면 200, 결제 완료 · 만료면 409 `ORDER_020` 이다.
@@ -1144,6 +1144,24 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
 - **상한** — 결제 전 취소는 회원별 활성 주문 시도 수(#231, `ORDER_022`)를 돌려주지 않는다(30분 창이 지나야 풀린다). 상품별 수량 상한(#426)은 바로 풀린다.
 - **목록** — `idx_orders_member_id_id` 를 거꾸로 읽는다(Snowflake 아이디가 시각 순). 주문 이름 · 항목 수는 그 조각 주문의 항목만 한 번에 읽는다. 결제 · 배송 요약은 #14 · #308 · #18 뒤에 더한다.
 - **레이트 리밋** — 취소도 주문 생성과 같은 게이트웨이 `ORDER_WRITE` 버킷(`/api/v1/orders/**` 쓰기)이다. 목록은 페이지 번호(OFFSET)라 회원 주문이 많아지면 커서(마지막 주문 아이디)로 바꾼다.
+
+#### 고객 부분 반품 접수
+
+`POST /api/v1/orders/{orderId}/returns` — CUSTOMER 본인 주문만, 새 접수 201·같은 요청 재생 200. 접수는 승인·환불 보장이 아니다.
+필수 `Idempotency-Key`는 완전한 UUID 36자(대소문자 정규화), 본문은 `{items:[{orderItemId,quantity,reason}]}`다.
+항목 1~50개·수량 1~99, 사유는 `CHANGE_OF_MIND|DEFECTIVE|WRONG_ITEM`이며 자유 텍스트·금액·통화·회원 ID를 받지 않는다.
+일반 §6의 `(memberId,key)`와 다른 **주문 하위 반품의 예외**로 키 범위는 `(orderId,key)`다. 다른 주문에서 같은 UUID를 사용할 수 있다.
+소유 확인 뒤 항목 ID 순으로 정렬한 수량·사유가 같으면 기존 접수를 반환한다. 같은 키의 본문 변경은 409 `ORDER_031`이다.
+
+새 요청은 `DELIVERED|RETURN_REQUESTED`만 허용한다. 첫 접수는 주문을 `RETURN_REQUESTED`로 바꾸고 추가 부분 접수는 같은 상태 이력을 반복하지 않는다.
+이미 접수한 REQUESTED 수량과 이번 수량의 합이 주문 스냅숏 수량을 넘으면 409 `ORDER_030`, 외부/중복 항목은 400 `ORDER_029`이다.
+그 밖의 상태는 409 `ORDER_020`, 잠금·버전 경합은 409 `ORDER_025`, 저장 실패는 500 `ORDER_021`, 헤더 형식/누락은 400 `ORDER_198/199`다.
+경합·응답 유실 뒤에는 같은 키와 본문으로 재시도한다. 없는 주문·타인 주문은 404 `ORDER_001`이다.
+
+응답은 `{claimId,orderId,status,items:[{orderItemId,quantity,reason}],expectedRefund,requestedAt}`다. ID는 문자열, status/reason은 metadata다.
+`expectedRefund=null`은 미산정이며 0원이 아니다. 접수 시각은 같은 키 재생에서도 동일하다. 환불·배송비 계산·재고 복원은 호출하지 않는다.
+구매 확정과 반품은 상태·버전 검사로 한쪽만 성공한다. 기간 제한·맞춤 제작 반품 금지 정책은 신설하지 않는다.
+상세 상태·원자성·후속 경계는 [order-return-request-guide.md](order-return-request-guide.md), 흐름은 `order-flow-guide.md` §5를 따른다. FE 리뷰어는 `seonghoho`다.
 
 ### 2-18. 출고 · 배송 완료 반영 internal (order-service, #18 PR-A)
 

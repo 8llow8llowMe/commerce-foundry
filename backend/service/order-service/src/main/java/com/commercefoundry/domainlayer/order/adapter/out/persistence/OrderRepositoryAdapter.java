@@ -25,6 +25,8 @@ import com.commercefoundry.domainlayer.order.domain.model.StatusChangedBy;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import jakarta.persistence.PersistenceException;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -59,6 +61,17 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
     private final OrderMapper orderMapper;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
+    private final EntityManager entityManager;
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<Order> findByIdAndMemberIdForUpdate(long orderId, long memberId) {
+        return orderRepository.findOwnedId(orderId, memberId).flatMap(id -> {
+            OrderEntity entity = entityManager.getReference(OrderEntity.class, id);
+            entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE, Map.of("jakarta.persistence.lock.timeout", 0));
+            return entity.getMemberId() == memberId ? Optional.of(toDomain(entity)) : Optional.empty();
+        });
+    }
 
     /**
      * 주문 행을 {@code saveAndFlush} 로 바로 넣고(버전 null → persist) 그 자리에서 제약 위반을 가른다 — 커밋 때 터지면 Facade 밖에서 나 바꿀 자리가 없다

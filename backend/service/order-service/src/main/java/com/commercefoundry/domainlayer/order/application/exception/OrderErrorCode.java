@@ -101,6 +101,9 @@ public enum OrderErrorCode {
 
     /** 결제 반영 기록이 없다. 현재 주문의 존재 · 상태와는 별개다 (#308 C1a). */
     ORDER_PAYMENT_RESULT_NOT_FOUND("ORDER_028", "저장된 결제 반영 결과가 없습니다.", HttpStatus.NOT_FOUND),
+    RETURN_ITEM_INVALID("ORDER_029", "반품 항목이 주문에 없거나 중복되었습니다.", HttpStatus.BAD_REQUEST),
+    RETURN_QUANTITY_EXCEEDED("ORDER_030", "이미 접수한 반품을 포함하면 주문 수량을 넘습니다.", HttpStatus.CONFLICT),
+    RETURN_KEY_REUSED("ORDER_031", "같은 Idempotency-Key 로 다른 반품을 요청할 수 없습니다.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

@@ -4,6 +4,7 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.common.dto.ValidationErrorItem;
 import com.commercefoundry.common.exception.ValidationErrorSupport;
 import com.commercefoundry.domainlayer.catalog.application.exception.CatalogException;
+import com.commercefoundry.domainlayer.order.adapter.in.web.controller.OrderReturnWebController;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.exception.OrderFieldValidationException;
@@ -12,6 +13,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.validation.FieldError;
+import org.springframework.validation.method.ParameterErrors;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -82,6 +86,26 @@ public class OrderExceptionHandler {
     /** 메서드 파라미터 제약 — 지금 주문 API 에는 없지만 경로 · 쿼리 파라미터가 생기면 여기로 온다. */
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<Response<Void>> handleHandlerMethodValidation(HandlerMethodValidationException exception) {
+        if (exception.getMethod().getDeclaringClass() == OrderReturnWebController.class) {
+            var body = exception.getParameterValidationResults().stream()
+                .filter(ParameterErrors.class::isInstance).map(ParameterErrors.class::cast).findFirst();
+            if (body.isPresent()) {
+                ParameterErrors errors = body.get();
+                var binding = new BeanPropertyBindingResult(errors.getArgument(), errors.getObjectName());
+                for (var result : exception.getParameterValidationResults()) {
+                    if (result instanceof ParameterErrors parameterErrors) {
+                        parameterErrors.getAllErrors().forEach(binding::addError);
+                    } else {
+                        for (var error : result.getResolvableErrors()) {
+                            binding.addError(new FieldError(errors.getObjectName(), result.getMethodParameter().getParameterName(),
+                                null, false, error.getCodes(), error.getArguments(), error.getDefaultMessage()));
+                        }
+                    }
+                }
+                return ValidationErrorSupport.toResponse(new MethodArgumentNotValidException(errors.getMethodParameter(), binding),
+                    OrderErrorCode.INVALID_REQUEST.getCode());
+            }
+        }
         return ValidationErrorSupport.toResponse(exception, OrderErrorCode.INVALID_REQUEST.getCode());
     }
 
