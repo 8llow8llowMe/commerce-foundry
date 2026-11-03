@@ -1371,3 +1371,7 @@ IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존
 | `AuthDeploymentLoginGuardTest` | 실제 Compose의 dev/prod 보간 결과로 정책 빈 바인딩: 미설정 → 배포 기본 꺼짐, true/false 보존, 빈 값·비불리언·키 없는 켬 기동 거절. Compose CLI 필요, 데몬·실제 Vault 불필요. CLI 없는 local은 skip, CI 누락은 실패. local 독립 실행 파일은 `TEST_DOCKER_COMPOSE_BINARY`로 지정 |
 | `LoginGuardFlowIntegrationTest` | 5회 실패 → 맞는 비밀번호도 429 → 창 뒤 200, 없는 이메일 같은 429, 변형 이메일 한 창, 고객 성공 시 리셋, 관리자 성공은 리셋 없음, 고객 · 관리자 창 분리, 가입 429, fail-closed · fail-open |
 | `LoginAttemptRedisAdapterTest` (Testcontainers) | Lua 원자성 · TTL 비연장 · 종류별 키 분리(관리자 포함) |
+
+## 15. 비회원 상담 세션 자격 증명
+
+비회원 상담 자격 증명은 256비트 불투명 토큰을 발급하고 SHA-256 지문만 저장한다. 절대 만료는 7일이며, 폐기와 만료 오류를 동일하게 처리한다. 내부 발급의 트랜잭션 경계와 후속 공개 API의 보호 조건은 [support-guest-session-guide.md](support-guest-session-guide.md)를 따른다(#470 PR-B1a).

@@ -81,6 +81,10 @@ class SupportSchemaSnapshotTest {
         List<String> generated = lines(generateDdl());
         List<String> snapshot = lines(readSnapshot());
 
+        assertThat(generated.stream().filter(line -> line.startsWith("create schema ")).toList())
+            .as("기본 스키마와 명시적 스키마가 중복되어 PostgreSQL 초기화를 실패시키면 안 된다")
+            .containsExactly("create schema support;");
+
         assertThat(generated)
             .as("엔티티와 DDL 스냅숏이 다르다. %s 를 %s 로 복사하고, 바뀐 부분을 PR 본문 운영 DDL 절에 적는다 (coding-conventions.md §9-8)",
                 GENERATED.toAbsolutePath(), SNAPSHOT.toAbsolutePath())
