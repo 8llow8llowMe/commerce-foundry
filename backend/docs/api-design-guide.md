@@ -684,6 +684,16 @@ PUT은 `{thresholdQuantity}`(필수 long, 0 이상)를 받고 정책만 교체�
 `en`, `en-US`, `en-GB` 등 en 계열은 영어 `name`/`description`, 한국어 · 미지원 언어 · 헤더 없음은 기존 한국어다.
 JSON 모양 `{code, name, description}`과 판매 가능 판정 · code는 유지한다. 상품 문구에 영문 저장 값이 없어 한국어로 폴백해도 상태 표시는 요청 언어를 따른다.
 
+**전시 · 룩 · 사이즈표 표시 언어 (#20)** — 고객 메인 전시(`GET /api/v1/displays/main`), 룩 목록 · 상세 · 상품별 룩(`GET /api/v1/looks` · `/looks/{lookId}` · `/products/{productId}/looks`),
+상품 사이즈표(`GET /api/v1/products/{productId}/size-chart`)도 같은 `Accept-Language` 규칙을 따르고 `Vary: Accept-Language` 를 싣는다(공개 캐시가 언어를 섞지 않게).
+상품 카드의 이름 · `saleStatus` 는 상품 목록과 같은 값이고, 섹션 유형 `sectionType` · 사이즈표 `baseUnit` · `displayUnit` metadata 도 요청 언어다(code 는 그대로).
+운영자가 적은 문구(섹션 제목 · 본문 · 룩 제목 · 사이즈표 템플릿 이름 · 칸 이름 · 안내)는 영문 저장 칸이 없어 한국어 그대로다. 어드민 · internal · 어드민 전시 미리보기는 한국어 계약을 유지한다.
+
+| enum | code | 영어 name |
+|---|---|---|
+| 전시 섹션 유형 | `HERO` · `PRODUCT_PICK` · `STORY` · `LOOK` · `DETAIL` | Hero · Product pick · Story · Look · Detail |
+| 사이즈표 단위 | `CM` · `INCH` | Centimeters · Inches |
+
 | code | 영어 name | 영어 description |
 |---|---|---|
 | `ON_SALE` | Available | This item is available for purchase. |
@@ -787,7 +797,7 @@ JPEG · PNG · WebP, 1바이트~10MiB만 허용한다. 업로드 키는 canonica
 - **동시성**: 쓰기 4종은 전체 섹션 행 잠금(5초) 뒤 다시 읽어 판정하고 마지막 쓰기가 이긴다(§2-5 카테고리와 같다). 섹션이 0개일 때만 동시 생성이 직렬화되지 않아
   둘 다 순서 0 을 받는다 — 아이디 순으로 정렬되고 순서 변경으로 정리된다.
 - **캐시**: `public` 은 공개 · 사용자 무관 · 개인정보 없는 응답에만 쓴다. 고객 메인은 1분 늦어도 가격 · 재고를 상세 · 주문이 다시 계산하므로 결제 금액을 바꾸지 않는다.
-  어드민 미리보기는 `POST /api/v1/admin/displays/preview` 를 쓴다. 언어 · 통화별 응답이 생기면 `Vary` 를 두거나 경로를 나눈다.
+  어드민 미리보기는 `POST /api/v1/admin/displays/preview` 를 쓴다. 응답이 언어로 갈리므로 `Vary: Accept-Language` 를 싣는다(#20, 아래 "전시 · 룩 · 사이즈표 표시 언어"). 통화별 응답이 생기면 같은 방식으로 나눈다.
 - 오류 코드: `PRODUCT_046`(섹션 없음 404) · `047`(유형이 받지 않는 아이템) · `048`(아이템 수 범위) · `049`(상품 중복) · `050`(없는 상품) · `051`(기간) ·
   `052`(링크 주소) · `053`(문구만 있는 링크) · `054`(미디어 주소) · `055`(공개 주소 미설정 503) · `056`(섹션 상한 409) · `057`(순서 변경 집합) · `058`(잠금 409).
   룩 참조 오류는 `DISPLAY_001`(없는 룩) · `DISPLAY_002`(중복), 요청 검증은 `DISPLAY_101`(양수 룩 ID) · `DISPLAY_102`(LOOK은 lookId만 필수)다.
