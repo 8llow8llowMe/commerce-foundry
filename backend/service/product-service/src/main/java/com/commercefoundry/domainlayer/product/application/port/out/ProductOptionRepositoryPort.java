@@ -25,4 +25,10 @@ public interface ProductOptionRepositoryPort {
 
     /** 새 그룹·값 INSERT. 아이디는 호출한 쪽이 발급했다. */
     void insertAll(List<OptionGroup> groups, List<OptionValue> values);
+
+    /**
+     * 옵션 그룹 · 값 은퇴 (#9 PR-C2). 아직 사용 중인 행만 {@code retiredAt} 을 채운다 — 이미 은퇴한 행은 그대로다. 행은 지우지 않는다(주문 · 장바구니 옵션명 표시).
+     * 호출자가 상품 버전 CAS 로 동시 편집을 먼저 막는다.
+     */
+    void retire(long productId, Collection<Long> optionGroupIds, Collection<Long> optionValueIds, java.time.Instant retiredAt);
 }

@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.adapter.in.admin.controller;
 
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.OptionRetirementRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.SkuAddRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.SkuBulkUpdateRequest;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse;
@@ -30,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/admin/products")
-@Tag(name = "[어드민] 상품 SKU", description = "SKU 편집 · 추가")
+@Tag(name = "[어드민] 상품 SKU", description = "SKU 편집 · 추가 · 옵션 은퇴")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 public class SkuAdminController {
     private final SkuAdminUseCase skuAdminUseCase;
@@ -64,5 +65,21 @@ public class SkuAdminController {
         @RequestBody @Valid SkuAddRequest request
     ) {
         return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(skuAdminUseCase.add(request.toCommand(productId, member.memberId()))));
+    }
+
+    @Operation(summary = "옵션 · 옵션 값 은퇴", description = "고른 옵션(그룹) · 값을 더 이상 팔지 않게 은퇴시키고 편집용 상세를 돌려준다. "
+        + "은퇴한 값(은퇴한 옵션의 값 포함)을 쓰는 판매중 SKU 는 함께 판매 종료되고, 고객 상세에서 빠진다. 행 · 재고 · 지난 주문의 옵션명은 남는다. "
+        + "옵션(그룹)을 은퇴하면 그 옵션을 쓰는 SKU 전부, 즉 상품의 모든 SKU 가 판매 종료된다. 이미 은퇴한 대상은 그대로 두고, 은퇴 되돌리기는 없다. "
+        + "삭제 상품 404 SKU_ADMIN_001, 버전 충돌 409 SKU_ADMIN_002, 남는 판매중 SKU 로 가격 규칙이 깨지면 400 SKU_ADMIN_004(추가금을 먼저 맞춘다), "
+        + "잠금 충돌 409 SKU_ADMIN_005, 이 상품의 옵션 · 값이 아니면 400 SKU_ADMIN_011, 대상 없음 · 50개 초과 400 SKU_ADMIN_116 이다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_OPTIONS_RETIRE")
+    @PostMapping("/{productId}/option-retirements")
+    public ResponseEntity<Response<ProductDetailAdminResponse>> retireOptions(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = SkuAdminValidationMessage.PRODUCT_ID) long productId,
+        @RequestBody @Valid OptionRetirementRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(skuAdminUseCase.retireOptions(request.toCommand(productId, member.memberId()))));
     }
 }

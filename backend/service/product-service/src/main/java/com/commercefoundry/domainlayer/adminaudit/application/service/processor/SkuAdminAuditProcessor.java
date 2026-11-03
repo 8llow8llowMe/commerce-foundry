@@ -13,4 +13,8 @@ public class SkuAdminAuditProcessor {
     public void added(long actorMemberId, long productId, boolean succeeded) {
         AdminAuditLog.write(SkuAdminAuditAction.PRODUCT_SKUS_ADD.name(), actorMemberId, AdminAuditLog.target("product", productId), succeeded);
     }
+
+    public void optionsRetired(long actorMemberId, long productId, boolean succeeded) {
+        AdminAuditLog.write(SkuAdminAuditAction.PRODUCT_OPTIONS_RETIRE.name(), actorMemberId, AdminAuditLog.target("product", productId), succeeded);
+    }
 }
