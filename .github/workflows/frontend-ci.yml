@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -59,11 +59,74 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
       - name: Test
         run: pnpm test:ci
 
       - name: Test count
         run: node ../.github/scripts/frontend-test-count.mjs test-results/vitest.json
 
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
       - name: Build
         run: pnpm build
+
+  # 필수 체크 이름을 유지하고 모든 병렬 job 의 실패 · 취소를 모은다.
+  check:
+    needs: [quality, test, build]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 검증 결과 확인
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          echo "quality=$QUALITY_RESULT test=$TEST_RESULT build=$BUILD_RESULT"
+          test "$QUALITY_RESULT" = success
+          test "$TEST_RESULT" = success
+          test "$BUILD_RESULT" = success
