@@ -988,6 +988,20 @@ PG 재조회 · 재승인 · 취소 · 환불은 하지 않는다(BE #15 잔여)
   원금은 결제 시도 금액이지 환불 뒤 잔액이 아니다. 미확정 사유는 DONE · FAILED 에도 과거 원인으로 남을 수 있다. 주문 회신은 수신 · 거절(코드) · 미수신이며, 미수신이 곧 복구 대상은 아니다.
 - 결제키 · 멱등 키 · PG 원문 · 회원 정보는 서버가 내려 주지 않고 화면도 다루지 않는다.
 
+### 클레임 (`/claims` · `/claims/[claimId]`, #30 · BE #574)
+
+메뉴 `주문 > 클레임`. order-service `GET /api/v1/admin/claims?type=&status=&orderId=&page=&size=20`(ADMIN, 조건 AND, 클레임 아이디 내림차순 `PageResponse`) ·
+`GET /api/v1/admin/claims/{claimId}` — **읽기만 있다.** 승인 · 거절 · 환불 실행 · 환불 실패 재시도는 BE #17 잔여라 버튼 자리도 두지 않는다.
+BFF 는 범용 프록시가 넘긴다. 코드는 `lib/claim/`(계약 `types.ts` · 조건 `query.ts`), 화면은 `components/claim/` 다.
+
+- **조건은 주소가 정본이다**(`parseClaimQuery`) — 서버가 지금 받는 값은 유형 `RETURN` · 상태 `REQUESTED` 뿐이다(다른 값은 400). 그 밖의 값 · long 범위 밖 주문 아이디는 "전체" 로 읽는다.
+  BE 가 상태 · 유형을 늘리면 `CLAIM_TYPES` · `CLAIM_STATUSES` 에 BE enum 이름 그대로 더한다.
+- **목록 · 상세** — 유형 · 상태 · 사유는 서버 `name`(설명은 `title`)이다. 예상 환불액은 `formatMoney` 로 표시만 하고, `null` 은 "미산정"(0원과 다르다)이다.
+  상세는 접수 항목(주문 항목 아이디 · 수량 · 사유)을 보인다. 상품 이름 · 옵션은 응답에 없고 어드민 주문 상세 응답에도 주문 항목 아이디가 없어
+  화면에서 잇지 않는다(순서로 짐작하지 않는다) — 주문 링크로 주문 상세에서 확인한다.
+- **주문 ↔ 클레임** — 클레임 목록 · 상세의 주문 아이디는 주문 상세 링크다. 주문 상세는 아래에 이 주문의 클레임(`?orderId=`)을 클레임 상세 링크로 보인다(`OrderClaims`).
+  이 칸이 실패해도 주문 상세는 그대로 두고 이 칸만 안내한다.
+
 ### 상담 지식 (`/support/knowledge` · `/new` · `/[documentId]` · `/[documentId]/edit`, #473 · BE #469)
 
 메뉴 `CS > 지식 관리`. support-service `/api/v1/admin/support/knowledge`(ADMIN, 계약 정본 `backend/docs/support-knowledge-guide.md` "관리자 계약") — BFF 는 범용 프록시가 넘긴다.
