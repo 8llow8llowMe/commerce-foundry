@@ -37,6 +37,16 @@ public class StockAlertProcessor {
         ));
     }
 
+    public StockAlertInfo.Scan getLowStocksAfter(long afterSkuId, int size) {
+        var rows = policyRepositoryPort.findLowStocksAfter(afterSkuId, size + 1).stream().map(row -> new StockAlertInfo.LowStock(
+            row.skuId(), row.productId(), row.productName(), row.optionValueKey(), row.availableQuantity(), row.thresholdQuantity(),
+            row.productVisible(), row.productSaleStatus(), row.skuSaleStatus(), row.policyUpdatedAt()
+        )).toList();
+        boolean hasNext = rows.size() > size;
+        var contents = hasNext ? List.copyOf(rows.subList(0, size)) : rows;
+        return new StockAlertInfo.Scan(contents, hasNext, hasNext ? contents.getLast().skuId() : null);
+    }
+
     /** SKU 잠금 → 상품 삭제 여부 확인 → 정책 저장 순서. 재고 행은 잠그거나 갱신하지 않는다. */
     @Transactional(propagation = Propagation.MANDATORY)
     public StockAlertInfo.Policy setPolicy(long skuId, long thresholdQuantity) {

@@ -8,6 +8,8 @@ public final class StockAlertValidationMessage {
     public static final String PAGE_NON_NEGATIVE = "STOCK_ALERT_104:page는 0 이상이어야 합니다.";
     public static final String SIZE_RANGE = "STOCK_ALERT_105:size는 1~100이어야 합니다.";
 
+    public static final String AFTER_SKU_ID_NON_NEGATIVE = "STOCK_ALERT_106:afterSkuId는 0 이상이어야 합니다.";
+
     private StockAlertValidationMessage() {
     }
 }

@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.query.StockA
 import com.commercefoundry.domainlayer.product.domain.model.StockAlertPolicy;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -29,6 +30,11 @@ public class StockAlertPolicyRepositoryAdapter implements StockAlertPolicyReposi
     @Override
     public Page<StockAlertQueryResult> findLowStocks(int page, int size) {
         return repository.findLowStocks(PageRequest.of(page, size));
+    }
+
+    @Override
+    public List<StockAlertQueryResult> findLowStocksAfter(long afterSkuId, int limit) {
+        return repository.findLowStocksAfter(afterSkuId, limit);
     }
 
     @Override

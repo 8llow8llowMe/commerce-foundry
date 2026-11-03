@@ -123,6 +123,20 @@ class StockAlertPolicyRepositoryAdapterTest {
     }
 
     @Test
+    void cursorUsesIdOrderSameEligibilityAndOneSelectWithoutCount() {
+        var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+        var first = port.findLowStocksAfter(0, 2);
+        assertThat(statistics.getPrepareStatementCount()).isOne();
+        assertThat(first).extracting(row -> row.skuId()).containsExactly(1L, 2L);
+        assertThat(first).extracting(row -> row.availableQuantity()).containsExactly(0L, 2L);
+        assertThat(port.findLowStocksAfter(2, 2)).extracting(row -> row.skuId()).containsExactly(5L);
+        assertThat(port.findLowStocksAfter(5, 2)).isEmpty();
+        assertThat(port.findLowStocksAfter(Long.MAX_VALUE, 101)).isEmpty();
+        assertThat(port.findLowStocksAfter(0, 101)).extracting(row -> row.skuId()).containsExactly(1L, 2L, 5L);
+    }
+
+    @Test
     void firstConcurrentRegistrationsKeepOnePolicyAndPreserveStock() throws Exception {
         facade.getPolicy(7);
         var start = new CountDownLatch(1);

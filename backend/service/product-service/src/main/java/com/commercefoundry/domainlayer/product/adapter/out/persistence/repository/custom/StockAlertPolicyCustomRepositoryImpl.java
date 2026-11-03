@@ -24,16 +24,32 @@ public class StockAlertPolicyCustomRepositoryImpl implements StockAlertPolicyCus
 
     @Override
     public Page<StockAlertQueryResult> findLowStocks(Pageable pageable) {
-        NumberExpression<Long> available = stockEntity.availableQuantity.coalesce(0L);
-        BooleanExpression eligible = productEntity.deletedAt.isNull()
-            .and(stockEntity.stockManaged.coalesce(true).isTrue())
-            .and(available.loe(stockAlertPolicyEntity.thresholdQuantity));
-        List<StockAlertQueryResult> rows = joined(queryFactory.select(Projections.constructor(StockAlertQueryResult.class,
-            skuEntity.id, productEntity.id, productEntity.name, skuEntity.optionValueKey, available, stockAlertPolicyEntity.thresholdQuantity,
-            productEntity.visible, productEntity.saleStatus, skuEntity.saleStatus, stockAlertPolicyEntity.updatedAt)))
-            .where(eligible).orderBy(available.asc(), skuEntity.id.asc()).offset(pageable.getOffset()).limit(pageable.getPageSize()).fetch();
+        NumberExpression<Long> available = availableQuantity();
+        BooleanExpression eligible = eligible();
+        List<StockAlertQueryResult> rows = lowStockQuery().where(eligible)
+            .orderBy(available.asc(), skuEntity.id.asc()).offset(pageable.getOffset()).limit(pageable.getPageSize()).fetch();
         Long total = joined(queryFactory.select(stockAlertPolicyEntity.skuId.count())).where(eligible).fetchOne();
         return new PageImpl<>(rows, pageable, total == null ? 0 : total);
+    }
+
+    @Override
+    public List<StockAlertQueryResult> findLowStocksAfter(long afterSkuId, int limit) {
+        return lowStockQuery().where(eligible(), skuEntity.id.gt(afterSkuId)).orderBy(skuEntity.id.asc()).limit(limit).fetch();
+    }
+
+    private JPAQuery<StockAlertQueryResult> lowStockQuery() {
+        return joined(queryFactory.select(Projections.constructor(StockAlertQueryResult.class,
+            skuEntity.id, productEntity.id, productEntity.name, skuEntity.optionValueKey, availableQuantity(), stockAlertPolicyEntity.thresholdQuantity,
+            productEntity.visible, productEntity.saleStatus, skuEntity.saleStatus, stockAlertPolicyEntity.updatedAt)));
+    }
+
+    private BooleanExpression eligible() {
+        return productEntity.deletedAt.isNull().and(stockEntity.stockManaged.coalesce(true).isTrue())
+            .and(availableQuantity().loe(stockAlertPolicyEntity.thresholdQuantity));
+    }
+
+    private NumberExpression<Long> availableQuantity() {
+        return stockEntity.availableQuantity.coalesce(0L);
     }
 
     private <T> JPAQuery<T> joined(JPAQuery<T> query) {
