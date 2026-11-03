@@ -136,7 +136,7 @@ export function ProductHeaderEditForm({ product }: { product: AdminProductDetail
         </h1>
         <p className="text-sm text-muted-fg">
           상품명 · 요약 · 상세 설명 · 판매 상태 · 노출을 바꿉니다. 카테고리 · 가격 · 옵션 · SKU ·
-          이미지 수정은 준비 중입니다.
+          이미지 · 맞춤 제작은 상품 상세의 구역별 수정에서 바꿉니다.
         </p>
       </div>
 

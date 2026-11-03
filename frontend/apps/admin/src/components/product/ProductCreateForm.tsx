@@ -11,7 +11,6 @@ import { flattenTree, type CategoryRow } from '@/lib/category/tree';
 import { CATEGORIES_PATH, type CategoryTree } from '@/lib/category/types';
 import { onboardingTasks, type OnboardingTasksStore } from '@/lib/onboarding/tasks-store';
 import {
-  CATEGORY_IDS_MAX,
   CREATE_PRODUCT_PATH,
   createdProductHref,
   CURRENCIES,
@@ -30,6 +29,7 @@ import {
   type SaleStatusCode,
 } from '@/lib/product/create';
 import { createFailure, errorSummary } from '@/lib/product/create-errors';
+import { CategoryFields } from './CategoryFields';
 import { DescriptionHtmlField } from './DescriptionHtmlField';
 import { OptionEditor } from './OptionEditor';
 import { ProductImagesField } from './ProductImagesField';
@@ -166,7 +166,6 @@ export function ProductCreateForm() {
   const categoryRows = categories.kind === 'ok' ? categories.rows : [];
   // 권한을 확인하기 전(카테고리 불러오는 중)에는 앵커를 달지 않는다 — 투어 실행기가 요소를 기다린다(다른 화면의 API 응답 뒤 앵커와 같게)
   const tourAnchor = (name: string) => (categories.kind === 'loading' ? undefined : name);
-  const pathOf = (row: CategoryRow) => `${row.path.join(' > ')}${row.hiddenBy ? ' (숨김)' : ''}`;
 
   return (
     <form
@@ -285,60 +284,13 @@ export function ProductCreateForm() {
             </p>
           )}
           {categories.kind === 'ok' && categoryRows.length > 0 && (
-            <>
-              <div className="flex flex-col gap-1">
-                <label htmlFor={`${id}-category`} className="text-sm font-medium">
-                  대표 카테고리
-                </label>
-                <select
-                  id={`${id}-category`}
-                  value={form.categoryId}
-                  aria-invalid={errorsOf('categoryId').length > 0 || undefined}
-                  aria-describedby={
-                    errorsOf('categoryId').length > 0 ? `${id}-category-error` : undefined
-                  }
-                  onChange={(event) => set({ categoryId: event.currentTarget.value })}
-                  className={`${selectClass} max-w-md`}
-                >
-                  <option value="">고르세요</option>
-                  {categoryRows.map((row) => (
-                    <option key={row.node.categoryId} value={row.node.categoryId}>
-                      {pathOf(row)}
-                    </option>
-                  ))}
-                </select>
-                <FieldError id={`${id}-category-error`} messages={errorsOf('categoryId')} />
-              </div>
-              <fieldset className="flex flex-col gap-1">
-                <legend className="text-sm font-medium">
-                  함께 진열할 카테고리 (선택, 대표 포함 {CATEGORY_IDS_MAX}개까지)
-                </legend>
-                <div className="max-h-60 overflow-y-auto rounded-md border border-border p-3">
-                  {categoryRows.map((row) => {
-                    const primary = row.node.categoryId === form.categoryId;
-                    return (
-                      <Checkbox
-                        key={row.node.categoryId}
-                        label={primary ? `${pathOf(row)} — 대표` : pathOf(row)}
-                        checked={primary || form.categoryIds.includes(row.node.categoryId)}
-                        disabled={primary}
-                        onChange={(event) => {
-                          const checked = event.currentTarget.checked;
-                          setForm((value) => ({
-                            ...value,
-                            categoryIds: checked
-                              ? [...value.categoryIds, row.node.categoryId]
-                              : value.categoryIds.filter((item) => item !== row.node.categoryId),
-                          }));
-                        }}
-                        className="py-1"
-                      />
-                    );
-                  })}
-                </div>
-                <FieldError messages={errorsOf('categoryIds')} />
-              </fieldset>
-            </>
+            <CategoryFields
+              rows={categoryRows}
+              categoryId={form.categoryId}
+              categoryIds={form.categoryIds}
+              onChange={set}
+              errorsOf={errorsOf}
+            />
           )}
         </Section>
 

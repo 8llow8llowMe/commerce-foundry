@@ -35,7 +35,7 @@ export const IMAGES_MAX = 8;
 export const ALT_TEXT_MAX = 200;
 /** 금액 상한(최소 화폐 단위, BE `PRODUCT_037`) */
 export const AMOUNT_MAX = 100_000_000;
-const INT_MAX = 2_147_483_647;
+export const INT_MAX = 2_147_483_647;
 
 /** 옵션 그룹 한 줄. `id` 는 화면 key 용(서버로 보내지 않는다) */
 export type OptionGroupForm = { id: string; name: string; values: string[] };
@@ -263,7 +263,7 @@ export function addOptionValue(
 // BE `ProductValidationMessage.PLAIN_TEXT` — 제어 · 서식 · 대리 · 줄/문단 구분 문자 금지
 const NOT_PLAIN = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
 export const isPlainText = (text: string) => !NOT_PLAIN.test(text);
-const INTEGER = /^\d+$/;
+export const INTEGER = /^\d+$/;
 const HS_SEPARATORS = /[.\- ]/g;
 const HS_DIGITS = /^[0-9]{6,10}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -310,9 +310,9 @@ export function localToday(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-type Amount = { ok: true; amount: number } | { ok: false; message: string } | { ok: null };
+export type Amount = { ok: true; amount: number } | { ok: false; message: string } | { ok: null };
 
-function amountOf(text: string, currency: Currency): Amount {
+export function amountOf(text: string, currency: Currency): Amount {
   const amount = parseMoneyInput(text, currency);
   if (amount === null) return { ok: null };
   if (Number.isNaN(amount)) return { ok: false, message: AMOUNT_FORMAT };
@@ -320,7 +320,7 @@ function amountOf(text: string, currency: Currency): Amount {
   return { ok: true, amount };
 }
 
-function positiveInt(text: string, max: number): number | null {
+export function positiveInt(text: string, max: number): number | null {
   const raw = text.trim();
   if (raw === '') return null;
   if (!INTEGER.test(raw)) return Number.NaN;
@@ -511,4 +511,12 @@ export const SANITIZED_PARAM = 'sanitized';
 export function createdProductHref(response: ProductCreateResponse): string {
   const base = `/products/${response.product.productId}`;
   return response.descriptionHtmlSanitized ? `${base}?${SANITIZED_PARAM}=1` : base;
+}
+
+/** HS 코드 칸 — 비우면 null(삭제), 점 · 하이픈 · 공백을 뺀 숫자 6~10자리면 그 값, 아니면 false(BE `SkuBulkUpdateRequest`) */
+export function hsCodeInput(text: string): string | null | false {
+  const raw = text.trim();
+  if (raw === '') return null;
+  const digits = raw.replace(HS_SEPARATORS, '');
+  return HS_DIGITS.test(digits) && raw.length <= 20 ? digits : false;
 }
