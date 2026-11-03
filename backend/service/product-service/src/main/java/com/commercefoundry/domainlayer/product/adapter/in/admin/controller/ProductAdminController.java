@@ -78,6 +78,21 @@ public class ProductAdminController {
         return ResponseEntity.ok(Response.success(productAdminUseCase.updateOptions(request.toCommand(productId, member.memberId()))));
     }
 
+    @Operation(summary = "상품 맞춤 제작 설정 전체 교체", description = "맞춤 제작 사용 여부 · 안내 문구 · 소요일과 고객 입력 항목(치수 등)을 한 번에 바꾼다. "
+        + "항목은 키(fieldKey)로 구분한다 — 같은 키는 같은 항목으로 고치고, 빠진 키는 지우고, 새 키는 더한다. 이미 받은 주문의 입력값은 그대로이고, "
+        + "장바구니에 담긴 입력은 주문할 때 바뀐 항목으로 다시 확인한다. 맞춤 제작을 꺼도 항목은 남는다. "
+        + "키 중복 · 숫자 범위 · 증분 · 글자 수 설정 오류는 400 PRODUCT_011, 오래된 버전은 409 PRODUCT_010, 바뀐 것이 없으면 버전을 유지한다.")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AdminAudited(action = "PRODUCT_CUSTOM_ORDER_REPLACE")
+    @PutMapping("/{productId}/custom-order")
+    public ResponseEntity<Response<ProductDetailAdminResponse>> updateCustomOrder(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId,
+        @RequestBody @Valid com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request.ProductCustomOrderUpdateRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(productAdminUseCase.updateCustomOrder(request.toCommand(productId, member.memberId()))));
+    }
+
     @Operation(summary = "상품 정지 이미지 전체 교체", description = "기존 imageId 또는 신규 uploadKey로 최대 8장(대표 한 장)을 교체한다. "
         + "빈 배열은 정지 이미지 연결 삭제, VIDEO는 보존한다. 동일 요청도 버전이 증가하며 오래된 버전은 409 PRODUCT_010이다.")
     @PreAuthorize("hasRole('ADMIN')")
@@ -146,7 +161,8 @@ public class ProductAdminController {
 
     @Operation(
         summary = "상품 등록",
-        description = "맞춤 제작 꺼짐으로 상품을 만들고 201 과 저장된 상세(편집용 상세 조회와 같은 모양)를 돌려준다. 등록한 어드민은 토큰의 memberId 다. "
+        description = "상품을 만들고 201 과 저장된 상세(편집용 상세 조회와 같은 모양)를 돌려준다. 등록한 어드민은 토큰의 memberId 다. "
+            + "customOrder 는 선택이며 생략하면 맞춤 제작 꺼짐이다(항목 규칙은 PUT /custom-order 와 같고 설정 오류는 400 PRODUCT_011). "
             + "images 는 선택이며 본인에게 발급된 uploadKey 와 THUMBNAIL/GALLERY 유형으로 최대 8장(대표 한 장)을 첨부한다. 생략하면 이미지 없이 등록한다. "
             + "상세 HTML 은 허용 목록으로 정제해 저장하고 빠진 것이 있으면 descriptionHtmlSanitized=true 다. "
             + "SKU 는 그룹 순서대로 고른 옵션 값 이름으로 조합을 가리킨다 — 옵션 없는 상품은 SKU 한 개. initialStock 을 준 SKU 는 재고 행과 입고 이력이 함께 생기고, "

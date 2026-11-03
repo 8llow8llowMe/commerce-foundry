@@ -76,6 +76,7 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor productImagesUpdateProcessor;
 
     private final com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor productOptionsUpdateProcessor;
+    private final com.commercefoundry.domainlayer.product.application.service.processor.ProductCustomOrderProcessor productCustomOrderProcessor;
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
@@ -86,6 +87,19 @@ public class ProductAdminFacade implements ProductAdminUseCase {
             return productAdminPresenter.toDetailResponse(info);
         } catch (RuntimeException exception) {
             productAdminAuditProcessor.productOptionsReplaced(command.actorMemberId(), command.productId(), false);
+            throw exception;
+        }
+    }
+
+    @Override
+    @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
+    public ProductDetailAdminResponse updateCustomOrder(com.commercefoundry.domainlayer.product.application.command.ProductCustomOrderUpdateCommand command) {
+        try {
+            var info = productCustomOrderProcessor.update(command);
+            productAdminAuditProcessor.productCustomOrderReplaced(command.actorMemberId(), command.productId(), true);
+            return productAdminPresenter.toDetailResponse(info);
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.productCustomOrderReplaced(command.actorMemberId(), command.productId(), false);
             throw exception;
         }
     }
@@ -220,6 +234,7 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private ProductCreateAdminResponse createInternal(ProductCreateCommand command, java.util.concurrent.atomic.AtomicReference<Long> createdProductId) {
         ProductDescriptionSanitizer.Result description = productDescriptionSanitizer.sanitize(command.descriptionHtml());
         productWriteProcessor.validate(command);
+        productCustomOrderProcessor.validate(command.customOrder());
         List<Long> categoryIds = productWriteProcessor.displayCategoryIdsOf(command);
         long productId = snowflakeIdGenerator.generateId();
         var images = productImageAttachmentProcessor.attach(productId, command);
