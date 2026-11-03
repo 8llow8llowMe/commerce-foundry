@@ -22,6 +22,9 @@ import org.springframework.data.domain.Slice;
  */
 public interface OrderRepositoryPort {
 
+    /** 주문 소유 확인 후 최신 헤더를 NOWAIT으로 잠근다. 호출 트랜잭션이 필요하다. */
+    Optional<Order> findByIdAndMemberIdForUpdate(long orderId, long memberId);
+
     /**
      * 새 주문(배송지 · 항목 · 입력 포함)과 첫 상태 이력을 넣고(persist — 같은 아이디는 PK 위반) 바로 flush 한다. 입력 행 아이디는 저장할 때 발급한다.
      *

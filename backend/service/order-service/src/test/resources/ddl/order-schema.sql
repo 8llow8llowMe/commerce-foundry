@@ -78,6 +78,94 @@
     comment on column orders.cart_item_custom_option.field_value is
         '입력값 (앞뒤 공백을 자른 값)';
 
+    create table orders.claim (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        expected_refund_amount bigint,
+        expected_refund_currency varchar(3) check ((expected_refund_currency in ('KRW','USD'))),
+        order_id bigint not null,
+        request_key uuid not null,
+        status varchar(20) not null check ((status in ('REQUESTED'))),
+        type varchar(20) not null check ((type in ('RETURN'))),
+        version bigint not null,
+        primary key (id),
+        constraint uk_claim_order_id_request_key unique (order_id, request_key),
+        constraint ck_claim_identifiers_positive check (id > 0 and order_id > 0 and version >= 0),
+        constraint ck_claim_expected_refund_pair check ((expected_refund_amount is null and expected_refund_currency is null) or (expected_refund_amount is not null and expected_refund_currency is not null and expected_refund_amount >= 0))
+    );
+
+    comment on table orders.claim is
+        '주문 클레임 접수';
+
+    comment on column orders.claim.id is
+        '클레임 아이디 (Snowflake)';
+
+    comment on column orders.claim.created_at is
+        '생성 시각';
+
+    comment on column orders.claim.updated_at is
+        '수정 시각';
+
+    comment on column orders.claim.expected_refund_amount is
+        '예상 환불 최소 단위 금액 (미산정이면 null)';
+
+    comment on column orders.claim.expected_refund_currency is
+        '예상 환불 통화 (미산정이면 null)';
+
+    comment on column orders.claim.order_id is
+        '주문 아이디 (FK: orders.id)';
+
+    comment on column orders.claim.request_key is
+        '주문별 멱등 접수 키 (UUID)';
+
+    comment on column orders.claim.status is
+        '클레임 상태 (REQUESTED)';
+
+    comment on column orders.claim.type is
+        '클레임 유형 (RETURN)';
+
+    comment on column orders.claim.version is
+        '낙관적 락 버전';
+
+    create table orders.claim_item (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        claim_id bigint not null,
+        order_item_id bigint not null,
+        quantity integer not null,
+        reason varchar(20) not null check ((reason in ('CHANGE_OF_MIND','DEFECTIVE','WRONG_ITEM'))),
+        primary key (id),
+        constraint uk_claim_item_claim_id_order_item_id unique (claim_id, order_item_id),
+        constraint ck_claim_item_identifiers_positive check (id > 0 and claim_id > 0 and order_item_id > 0),
+        constraint ck_claim_item_quantity_positive check (quantity > 0)
+    );
+
+    comment on table orders.claim_item is
+        '반품 접수 항목 스냅숏';
+
+    comment on column orders.claim_item.id is
+        '클레임 항목 아이디 (Snowflake)';
+
+    comment on column orders.claim_item.created_at is
+        '생성 시각';
+
+    comment on column orders.claim_item.updated_at is
+        '수정 시각';
+
+    comment on column orders.claim_item.claim_id is
+        '클레임 아이디 (FK: claim.id)';
+
+    comment on column orders.claim_item.order_item_id is
+        '주문 항목 아이디 (FK: order_item.id)';
+
+    comment on column orders.claim_item.quantity is
+        '반품 접수 수량';
+
+    comment on column orders.claim_item.reason is
+        '접수 사유 (CHANGE_OF_MIND / DEFECTIVE / WRONG_ITEM)';
+
     create table orders.order_item (
         id bigint not null,
         created_at timestamp(6) with time zone not null,

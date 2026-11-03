@@ -25,6 +25,10 @@ import org.springframework.data.jpa.repository.Query;
  */
 public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
 
+    /** 엔티티를 미리 적재하지 않아 오래된 영속성 컨텍스트 버전도 refresh 전에 충돌하지 않는다. */
+    @Query("select o.id from OrderEntity o where o.id = :orderId and o.memberId = :memberId")
+    Optional<Long> findOwnedId(long orderId, long memberId);
+
     Optional<OrderEntity> findByIdAndMemberId(Long id, Long memberId);
 
     /** 회원의 주문 최신순 한 조각 (#16) — {@code idx_orders_member_id_id} 를 거꾸로 읽는다(아이디가 시각 순인 Snowflake 다). 건수 쿼리가 없다. */

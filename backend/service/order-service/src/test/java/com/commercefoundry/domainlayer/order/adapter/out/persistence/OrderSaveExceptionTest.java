@@ -49,7 +49,8 @@ class OrderSaveExceptionTest {
 
     private static OrderRepositoryAdapter adapter(OrderRepository orderRepository) {
         return new OrderRepositoryAdapter(orderRepository, mock(OrderShippingAddressRepository.class), mock(OrderItemRepository.class),
-            mock(OrderItemCustomOptionRepository.class), mock(OrderStatusHistoryRepository.class), new OrderMapperImpl(), new SnowflakeIdGenerator(1, 1));
+            mock(OrderItemCustomOptionRepository.class), mock(OrderStatusHistoryRepository.class), new OrderMapperImpl(), new SnowflakeIdGenerator(1, 1),
+            mock(jakarta.persistence.EntityManager.class));
     }
 
     private static void assertReason(Runnable call, OrderSaveException.Reason reason) {
