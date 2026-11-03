@@ -8,8 +8,10 @@ import com.commercefoundry.domainlayer.payment.domain.model.PaymentWebhookInbox.
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Repository;
 
 @RequiredArgsConstructor
+@Repository
 public class PaymentWebhookInboxCustomRepositoryImpl implements PaymentWebhookInboxCustomRepository {
     private final JPAQueryFactory queries;
     @Override public PaymentWebhookInbox claim(PaymentWebhookInbox expected, PaymentWebhookInbox claimed, Instant now) {
