@@ -18,6 +18,18 @@ public class ProductAdminAuditProcessor {
     static final String CATEGORY = "category";
     static final String SIZE_CHART_TEMPLATE = "size-chart-template";
     static final String PRODUCT = "product";
+    static final String PRODUCT_IMAGE_UPLOAD = "product-image-upload";
+
+    /** @param productId 만든 상품 아이디 — 실패해 없으면 {@code null}({@code target=-}) */
+    public void productCreated(long actorMemberId, Long productId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_CREATE, actorMemberId, productId == null ? null : AdminAuditLog.target(PRODUCT, productId), succeeded);
+    }
+
+    /** @param token 발급한 업로드 키의 토큰 — 실패해 없으면 {@code null}({@code target=-}). 키 원문 · 서명 URL 은 싣지 않는다(토큰만) */
+    public void productImageUploadIssued(long actorMemberId, java.util.UUID token, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_IMAGE_UPLOAD_ISSUE, actorMemberId,
+            token == null ? null : AdminAuditLog.target(PRODUCT_IMAGE_UPLOAD, token.toString()), succeeded);
+    }
 
     public void productOptionsReplaced(long actorMemberId, long productId, boolean succeeded) {
         write(ProductAdminAuditAction.PRODUCT_OPTIONS_REPLACE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);

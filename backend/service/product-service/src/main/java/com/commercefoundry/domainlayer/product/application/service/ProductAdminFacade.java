@@ -187,15 +187,37 @@ public class ProductAdminFacade implements ProductAdminUseCase {
         productAdminAuditProcessor.productDeleted(actorMemberId, productId, true);
     }
 
-    /** 로컬 서명이라 DB · 외부 호출이 없다 — 트랜잭션을 걸지 않는다. */
+    /** 로컬 서명이라 DB · 외부 호출이 없다 — 트랜잭션을 걸지 않는다. 감사 대상은 키의 토큰만이다(키 원문 · 서명 URL 은 싣지 않는다). */
     @Override
     public ProductImageUploadAdminResponse issueImageUpload(long memberId, String contentType, Long contentLength) {
-        return productAdminPresenter.toImageUploadResponse(productImageUploadProcessor.issue(memberId, contentType, contentLength));
+        java.util.UUID token = null;
+        boolean succeeded = false;
+        try {
+            var info = productImageUploadProcessor.issue(memberId, contentType, contentLength);
+            token = com.commercefoundry.domainlayer.product.domain.model.ProductImageUploadKey.parse(info.uploadKey())
+                .map(com.commercefoundry.domainlayer.product.domain.model.ProductImageUploadKey::token).orElse(null);
+            var response = productAdminPresenter.toImageUploadResponse(info);
+            succeeded = true;
+            return response;
+        } finally {
+            productAdminAuditProcessor.productImageUploadIssued(memberId, token, succeeded);
+        }
     }
 
     @Override
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ProductCreateAdminResponse create(ProductCreateCommand command) {
+        // 트랜잭션 밖이라 감사는 바로 쓰인다 — 등록 트랜잭션이 커밋되면 성공(응답 조립 실패와 무관), 그 전 실패면 아직 없는 상품이라 대상 '-'
+        var createdProductId = new java.util.concurrent.atomic.AtomicReference<Long>();
+        try {
+            return createInternal(command, createdProductId);
+        } finally {
+            Long created = createdProductId.get();
+            productAdminAuditProcessor.productCreated(command.createdByMemberId(), created, created != null);
+        }
+    }
+
+    private ProductCreateAdminResponse createInternal(ProductCreateCommand command, java.util.concurrent.atomic.AtomicReference<Long> createdProductId) {
         ProductDescriptionSanitizer.Result description = productDescriptionSanitizer.sanitize(command.descriptionHtml());
         productWriteProcessor.validate(command);
         List<Long> categoryIds = productWriteProcessor.displayCategoryIdsOf(command);
@@ -219,6 +241,7 @@ public class ProductAdminFacade implements ProductAdminUseCase {
                 var lockedCategories = categoryProcessor.getTreeForUpdate();
                 return productRegistrationProcessor.register(productId, command, description.html(), categoryIds, images, lockedCategories);
             });
+            createdProductId.set(productId);
             return productAdminPresenter.toCreateResponse(info, description.changed());
         } catch (RuntimeException exception) {
             // execute 가 트랜잭션 · connection 자원을 정리한 뒤 외부 삭제한다. 커밋 결과 불명에서는 표시가 없으므로 보존한다.

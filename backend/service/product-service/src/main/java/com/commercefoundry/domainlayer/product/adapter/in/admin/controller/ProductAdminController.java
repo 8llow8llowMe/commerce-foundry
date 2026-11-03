@@ -154,6 +154,7 @@ public class ProductAdminController {
             + "가격 규칙(통화 · 판매중 SKU 중 추가금 0 필수)은 400(PRODUCT_016), 카테고리 변경과 겹쳐 잠금을 얻지 못하면 409(PRODUCT_045)다. "
             + "같은 본문을 두 번 보내면 상품이 두 개 생긴다(Idempotency-Key 없음 — 지우면 된다)."
     )
+    @AdminAudited(action = "PRODUCT_CREATE")
     @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
     public ResponseEntity<Response<ProductCreateAdminResponse>> create(
@@ -170,6 +171,7 @@ public class ProductAdminController {
             + "형식은 JPEG · PNG · WebP(아니면 400 PRODUCT_033), 크기는 1B~10MB(아니면 400 PRODUCT_034)다. "
             + "스토리지 장애는 503(PRODUCT_035), 스토리지 설정이 꺼져 있으면 503(PRODUCT_036)이다 — 이미지 없는 등록은 된다."
     )
+    @AdminAudited(action = "PRODUCT_IMAGE_UPLOAD_ISSUE")
     @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/image-uploads")
     public ResponseEntity<Response<ProductImageUploadAdminResponse>> issueImageUpload(

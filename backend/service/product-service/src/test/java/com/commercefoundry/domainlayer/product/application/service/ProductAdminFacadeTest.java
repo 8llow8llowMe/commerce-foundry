@@ -171,6 +171,7 @@ class ProductAdminFacadeTest {
         assertThatThrownBy(() -> facade.create(command))
             .isInstanceOfSatisfying(ProductException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(ProductErrorCode.CATEGORY_BUSY));
         verify(productWriteProcessor, never()).create(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(productAdminAuditProcessor).productCreated(100L, null, false);
     }
 
     private static ProductCreateCommand createCommand(String descriptionHtml) {
@@ -215,6 +216,7 @@ class ProductAdminFacadeTest {
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, org.mockito.Mockito.times(confirmedRollback ? 1 : 0)).cleanup(List.of("products/7/8.png"));
+        verify(productAdminAuditProcessor).productCreated(100L, null, false);
     }
 
     @Test
@@ -243,6 +245,36 @@ class ProductAdminFacadeTest {
             org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, never()).cleanup(any());
+        // 상품은 커밋됐다 — 응답 조립 실패와 무관하게 등록 성공으로 남긴다
+        verify(productAdminAuditProcessor).productCreated(100L, 7L, true);
+    }
+
+    @Test
+    @DisplayName("이미지 업로드 발급 — 성공은 키 토큰을 대상으로, 실패는 대상 없이 감사를 남긴다(키 원문 · 회원 아이디는 싣지 않는다)")
+    void issueImageUploadAudits() {
+        var uploads = org.mockito.Mockito.mock(
+            com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class);
+        var subject = new ProductAdminFacade(idGenerator(), null, null, new TestTransactionManager(null),
+            categoryProcessor, productAdminQueryProcessor,
+            new ProductAdminPresenter(), productAdminDetailProcessor, productWriteProcessor, new ProductDescriptionSanitizer(), uploads,
+            productDeleteProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor.class),
+            productCategoryUpdateProcessor,
+            productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesPrepareProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImagesUpdateProcessor.class),
+            org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductOptionsUpdateProcessor.class));
+        var key = com.commercefoundry.domainlayer.product.domain.model.ProductImageUploadKey.issue(
+            100L, com.commercefoundry.domainlayer.product.domain.model.ProductImageFormat.PNG);
+        given(uploads.issue(100L, "image/png", 10L)).willReturn(new com.commercefoundry.domainlayer.product.application.info.ProductImageUploadInfo(
+            key.value(), "https://storage.example.com/put", "PUT", java.util.Map.of(), java.time.Instant.parse("2099-01-01T00:00:00Z")));
+        var failure = new IllegalStateException("storage");
+        given(uploads.issue(100L, "image/png", 20L)).willThrow(failure);
+
+        subject.issueImageUpload(100L, "image/png", 10L);
+        assertThatThrownBy(() -> subject.issueImageUpload(100L, "image/png", 20L)).isSameAs(failure);
+
+        verify(productAdminAuditProcessor).productImageUploadIssued(100L, key.token(), true);
+        verify(productAdminAuditProcessor).productImageUploadIssued(100L, null, false);
     }
 
     /** 실제 Spring 완료 콜백을 실행하되 DB 자원은 필요 없는 단위 테스트용 트랜잭션 매니저. */

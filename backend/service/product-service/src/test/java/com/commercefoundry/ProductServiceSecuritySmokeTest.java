@@ -48,9 +48,7 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
             Map.entry("StockAdminController#adjustStock", "#163 PR-C′"),
             Map.entry("SkuCostAdminController#createCost", "#163 PR-C′"),
             Map.entry("ProductDraftAdminController#create", "#163 PR-C′"),
-            Map.entry("ProductDraftAdminController#reject", "#163 PR-C′"),
-            Map.entry("ProductAdminController#create", "#9 — 머지 뒤 #163 PR-F"),
-            Map.entry("ProductAdminController#issueImageUpload", "#9 — 머지 뒤 #163 PR-F")
+            Map.entry("ProductDraftAdminController#reject", "#163 PR-C′")
         );
     }
 

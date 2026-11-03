@@ -7,6 +7,12 @@ package com.commercefoundry.domainlayer.adminaudit.application.model;
  */
 public enum ProductAdminAuditAction {
 
+    /** 상품 등록. 대상 {@code product:<id>} — 만들지 못했으면 {@code -} */
+    PRODUCT_CREATE,
+
+    /** 상품 이미지 업로드 자리 발급. 대상 {@code product-image-upload:<token>} — 발급하지 못했으면 {@code -} */
+    PRODUCT_IMAGE_UPLOAD_ISSUE,
+
     /** 상품 기본 정보 수정. 대상 {@code product:<id>} */
     PRODUCT_UPDATE,
 
