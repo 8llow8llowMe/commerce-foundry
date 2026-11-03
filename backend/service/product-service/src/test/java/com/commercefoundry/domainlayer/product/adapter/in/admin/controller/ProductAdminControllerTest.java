@@ -59,6 +59,77 @@ class ProductAdminControllerTest {
     private ProductAdminUseCase productAdminUseCase;
 
     @Test
+    void pricingReplacementRequiresAdminAndReturnsDetailWithActorAndPrices() {
+        String body = "{\"version\":7,\"salePrice\":{\"amount\":15000,\"currency\":\"KRW\"}}";
+        String uri = PATH + "/7/pricing";
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(productAdminUseCase);
+        given(productAdminUseCase.updatePricing(any())).willReturn(
+            com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse.builder()
+                .productId("7").version(8L).salePrice(MoneyItem.of(15000, "KRW")).build());
+        var result = mvc.put().uri(uri).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatusOk().bodyJson().extractingPath("$.dataBody.productId").isEqualTo("7");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.salePrice.amount").isEqualTo(15000);
+        var command = ArgumentCaptor.forClass(com.commercefoundry.domainlayer.product.application.command.ProductPricingUpdateCommand.class);
+        verify(productAdminUseCase).updatePricing(command.capture());
+        assertThat(command.getValue().actorMemberId()).isEqualTo(TestTokens.MEMBER_ID);
+        assertThat(command.getValue().version()).isEqualTo(7L);
+        assertThat(command.getValue().salePrice()).isEqualTo(com.commercefoundry.shared.commerce.Money.of(15000,
+            com.commercefoundry.shared.commerce.CurrencyCode.KRW));
+        assertThat(command.getValue().listPrice()).isNull();
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("invalidPricingBodies")
+    void pricingReplacementRejectsInvalidInputWithExactCode(String body, String code) {
+        var result = mvc.put().uri(PATH + "/7/pricing").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"NOT_FOUND_PRODUCT,404,PRODUCT_001", "PRODUCT_MODIFICATION_CONFLICT,409,PRODUCT_010", "PRODUCT_PRICE_RULE_VIOLATED,400,PRODUCT_016"})
+    void pricingReplacementErrorEnvelope(String error, int status, String code) {
+        given(productAdminUseCase.updatePricing(any())).willThrow(new com.commercefoundry.domainlayer.product.application.exception.ProductException(
+            com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.valueOf(error), "가격 규칙"));
+        var result = mvc.put().uri(PATH + "/7/pricing").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"version\":0,\"salePrice\":{\"amount\":10000,\"currency\":\"KRW\"}}")
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatus(status).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> invalidPricingBodies() {
+        return java.util.stream.Stream.of(
+            org.junit.jupiter.params.provider.Arguments.of("{\"salePrice\":{\"amount\":0,\"currency\":\"KRW\"}}", "PRODUCT_EDIT_101"),
+            org.junit.jupiter.params.provider.Arguments.of("{\"version\":-1,\"salePrice\":{\"amount\":0,\"currency\":\"KRW\"}}", "PRODUCT_EDIT_101"),
+            org.junit.jupiter.params.provider.Arguments.of("{\"version\":0}", "PRODUCT_084"),
+            org.junit.jupiter.params.provider.Arguments.of("{\"version\":0,\"salePrice\":{\"currency\":\"KRW\"}}", "PRODUCT_085"),
+            org.junit.jupiter.params.provider.Arguments.of("{\"version\":0,\"salePrice\":{\"amount\":-1,\"currency\":\"KRW\"}}", "PRODUCT_086"),
+            org.junit.jupiter.params.provider.Arguments.of("{\"version\":0,\"salePrice\":{\"amount\":100000001,\"currency\":\"KRW\"}}", "PRODUCT_037"),
+            org.junit.jupiter.params.provider.Arguments.of("{\"version\":0,\"salePrice\":{\"amount\":0}}", "PRODUCT_087"),
+            org.junit.jupiter.params.provider.Arguments.of(
+                "{\"version\":0,\"salePrice\":{\"amount\":0,\"currency\":\"KRW\"},\"listPrice\":{\"amount\":-1,\"currency\":\"KRW\"}}", "PRODUCT_086")
+        );
+    }
+
+    @Test
+    void pricingReplacementRejectsInvalidIdAndCurrencyBindingAndAcceptsExplicitNullListPrice() {
+        String body = "{\"version\":0,\"salePrice\":{\"amount\":0,\"currency\":\"KRW\"},\"listPrice\":null}";
+        assertThat(mvc.put().uri(PATH + "/0/pricing").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(mvc.put().uri(PATH + "/7/pricing").contentType(MediaType.APPLICATION_JSON).content(body.replace("KRW", "INVALID"))
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatus(HttpStatus.BAD_REQUEST);
+        verifyNoInteractions(productAdminUseCase);
+        assertThat(mvc.put().uri(PATH + "/7/pricing").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatusOk();
+    }
+
+    @Test
     void categoryReplacementRequiresAdminAndReturnsDetail() {
         String body = "{\"version\":7,\"categoryId\":10,\"categoryIds\":[10,20]}";
         String uri = PATH + "/7/categories";

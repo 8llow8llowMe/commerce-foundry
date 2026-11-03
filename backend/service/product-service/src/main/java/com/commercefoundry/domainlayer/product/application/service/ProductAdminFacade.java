@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.Pro
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductImageUploadAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductHeaderUpdateAdminResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.presenter.ProductAdminPresenter;
+import com.commercefoundry.domainlayer.product.application.command.ProductPricingUpdateCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductAdminSearchCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCreateCommand;
 import com.commercefoundry.domainlayer.product.application.command.ProductCategoryUpdateCommand;
@@ -69,6 +70,20 @@ public class ProductAdminFacade implements ProductAdminUseCase {
     private final ProductHeaderUpdateProcessor productHeaderUpdateProcessor;
     private final ProductCategoryUpdateProcessor productCategoryUpdateProcessor;
     private final ProductAdminAuditProcessor productAdminAuditProcessor;
+    private final com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor productPricingUpdateProcessor;
+
+    @Override
+    @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
+    public ProductDetailAdminResponse updatePricing(ProductPricingUpdateCommand command) {
+        try {
+            var info = productPricingUpdateProcessor.update(command);
+            productAdminAuditProcessor.productPricingReplaced(command.actorMemberId(), command.productId(), true);
+            return productAdminPresenter.toDetailResponse(info);
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.productPricingReplaced(command.actorMemberId(), command.productId(), false);
+            throw exception;
+        }
+    }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)

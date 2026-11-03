@@ -89,7 +89,7 @@ class ProductAdminFacadeTest {
             com.commercefoundry.domainlayer.product.application.service.processor.ProductImageUploadProcessor.class),
             productDeleteProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor.class),
             productCategoryUpdateProcessor,
-            productAdminAuditProcessor);
+            productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class));
     }
 
     private com.commercefoundry.persistence.util.SnowflakeIdGenerator idGenerator() {
@@ -206,7 +206,7 @@ class ProductAdminFacadeTest {
             new ProductAdminPresenter(), productAdminDetailProcessor, productWriteProcessor, new ProductDescriptionSanitizer(), null,
             productDeleteProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor.class),
             productCategoryUpdateProcessor,
-            productAdminAuditProcessor);
+            productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class));
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, org.mockito.Mockito.times(confirmedRollback ? 1 : 0)).cleanup(List.of("products/7/8.png"));
     }
@@ -231,7 +231,7 @@ class ProductAdminFacadeTest {
             presenter, productAdminDetailProcessor, productWriteProcessor, new ProductDescriptionSanitizer(), null,
             productDeleteProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductHeaderUpdateProcessor.class),
             productCategoryUpdateProcessor,
-            productAdminAuditProcessor);
+            productAdminAuditProcessor, org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductPricingUpdateProcessor.class));
         assertThatThrownBy(() -> subject.create(command)).isSameAs(failure);
         verify(attachment, never()).cleanup(any());
     }

@@ -934,13 +934,26 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
   FE는 다시 조회한 뒤 재시도한다. 조회와 삭제 사이에 먼저 완료된 편집도 현재 상태를 대상으로 삭제하므로, 편집 화면 버전 비교 계약은 없다.
 - SKU·옵션·이미지·맞춤 입력·진열 카테고리·재고·선점과 기존 주문을 변경하지 않는다. 신규 선점은 기존 판매 가능 판정으로 거절하고,
   internal SKU 조회에는 상품과 SKU를 유지하며 `purchasable=false`로 알린다. S3·Kafka·서비스 간 호출은 없다. 새 엔티티·운영 DDL도 없다.
-- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories` API가 담당하며 가격·옵션·SKU·이미지 편집은 후속 범위다. FE 계약 검토자는 `seonghoho`다.
+- 상품 기본 정보 수정은 아래 `/header` API가 담당한다. 카테고리 편집은 `/categories`, 가격 편집은 `/pricing` API가 담당하며 옵션·SKU·이미지 편집은 후속 범위다. FE 계약 검토자는 `seonghoho`다.
 
 #### 어드민 상품 기본 정보 수정 API (#9 후속)
 
 - `PUT /api/v1/admin/products/{productId}/header`는 ADMIN 전용이며 `version`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`과 선택적 `nameEn`, `summaryEn`, `descriptionHtmlEn`을 받는다. 기본 문구는 전체 교체하고 영문 문구는 빠지거나 null이면 기존 값을 유지한다(기존 FE 호환). 영문 값을 지우려면 빈 문자열을 보낸다. 영문 입력은 등록 뒤 이 API에서 추가한다. 응답은 영문 문구를 포함한 `product`(어드민 상세 스냅숏)와 두 HTML 정제 결과를 합친 `descriptionHtmlSanitized`다.
 - 버전은 직전 어드민 상세 조회에서 얻은 값을 보낸다. 불일치·동시 merge 충돌은 409 `PRODUCT_010`, 없거나 삭제된 상품은 404 `PRODUCT_001`이다. 상세 HTML은 등록과 같은 허용 목록으로 정제한다.
 - 카테고리·가격·프리오더·맞춤 입력·옵션·SKU·이미지·재고·선점은 이 API에서 수정하지 않는다. 카테고리 연결을 바꾸지 않아 카테고리 행 잠금은 필요 없다. 수정 트랜잭션은 5초이며 `PRODUCT_UPDATE` 감사를 남긴다. #20에서 `product.name_en`, `summary_en`, `description_html_en` nullable 컬럼을 추가한다. FE는 수정 후 반환된 버전과 정제 경고를 사용한다.
+
+#### 어드민 상품 가격 수정 API (#9 후속)
+
+`PUT /api/v1/admin/products/{productId}/pricing` 은 ADMIN 전용이다. 본문은 `{version, salePrice: {amount, currency}, listPrice?: {amount, currency}}`다.
+`version`은 필수 0 이상(`PRODUCT_EDIT_101`), 판매가는 필수(`PRODUCT_084`)이며 금액은 등록과 같은 0~100000000 최소 화폐 단위다.
+정가를 생략하거나 null로 보내면 기존 정가를 삭제한다. 정가가 있으면 판매가와 통화가 같고 판매가보다 커야 한다.
+현재 상품의 통화를 유지한다(기존 USD 상품도 편집 가능). 모든 SKU 추가금의 통화가 판매가와 같아야 하며, 판매중 SKU가 있으면 그중 추가금 0인 SKU가 하나 이상이어야 한다.
+위 가격 규칙 위반은 400 `PRODUCT_016`이다. 다통화 가격표·환산은 #20 범위다.
+숨김 상품도 편집할 수 있으며 없거나 삭제된 상품은 404 `PRODUCT_001`이다. 오래된 버전은 값이 같아도 409 `PRODUCT_010`이다.
+조회 시 이미 오래된 버전이면 동일 가격이어도 거절한다. 현재 버전으로 동일한 가격을 보내면 저장을 생략하고 버전을 유지한다(동일 요청도 버전을 올리는 카테고리 교체와 다름). 실제 가격 쓰기 경합은 409 `PRODUCT_010`이며 실제 변경 시 상품 버전이 증가한다.
+200 응답은 기존 편집용 상세 스냅숏이며 식별자는 문자열이다. 목록·고객 상세·internal SKU 조회는 변경된 판매가를 즉시 사용한다.
+기존 주문 항목은 주문 시점의 가격 스냅숏을 유지한다. SKU 추가금·원가·재고·기존 선점·카테고리·주문/결제 데이터는 변경하지 않는다.
+감사 action은 `PRODUCT_PRICING_REPLACE`이며 대상 상품 식별자와 성공/실패만 기록하고 금액은 기록하지 않는다. FE 계약 검토자는 `seonghoho`다.
 
 #### 어드민 상품 카테고리 수정 API (#9 후속)
 

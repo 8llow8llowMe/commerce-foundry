@@ -14,7 +14,7 @@ import com.commercefoundry.domainlayer.product.domain.model.HsCode;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
-import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
+import com.commercefoundry.domainlayer.product.domain.model.ProductPricing;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SkuOptionKey;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
@@ -22,7 +22,6 @@ import com.commercefoundry.domainlayer.product.domain.model.StockAdjustmentHisto
 import com.commercefoundry.domainlayer.product.domain.model.StockAdjustmentReason;
 import com.commercefoundry.domainlayer.product.domain.model.StockSnapshot;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
-import com.commercefoundry.shared.commerce.Money;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -203,21 +202,9 @@ public class ProductWriteProcessor {
      * ({@code ProductPricing#displaySalePrice} 의 불변식). 판매중 SKU 가 없으면(전부 판매 종료) 따지지 않는다.
      */
     private static void validatePricing(ProductCreateCommand command) {
-        Money salePrice = command.salePrice();
-        if (command.listPrice() != null && command.listPrice().currency() != salePrice.currency()) {
-            throw priceRuleViolated("정가 통화가 판매가 통화와 다릅니다");
-        }
-        if (command.listPrice() != null && command.listPrice().amount() <= salePrice.amount()) {
-            // 정가는 할인 전 가격이다 — 판매가 이하이면 할인 표시가 아니라 입력 실수다(#9 설계 §1)
-            throw priceRuleViolated("정가는 판매가보다 높아야 합니다");
-        }
-        if (command.skus().stream().anyMatch(sku -> sku.additionalPrice().currency() != salePrice.currency())) {
-            throw priceRuleViolated("SKU 추가금 통화가 판매가 통화와 다릅니다");
-        }
-        List<ProductCreateCommand.Sku> onSale = command.skus().stream().filter(sku -> sku.saleStatus() == SaleStatus.ON_SALE).toList();
-        if (!onSale.isEmpty() && onSale.stream().noneMatch(sku -> sku.additionalPrice().amount() == 0)) {
-            throw priceRuleViolated("판매중 SKU 중 하나는 추가금이 0 이어야 합니다(기본 판매가 = 판매중 최저가)");
-        }
+        ProductPricing.violation(command.salePrice(), command.listPrice(), command.skus().stream()
+            .map(sku -> new ProductPricing.SkuPrice(sku.additionalPrice(), sku.saleStatus())).toList())
+            .ifPresent(reason -> { throw priceRuleViolated(reason); });
     }
 
     private static ProductException combinationInvalid(String reason) {
