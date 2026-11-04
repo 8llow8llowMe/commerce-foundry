@@ -47,9 +47,11 @@ public enum PaymentErrorCode {
     CANCELLATION_AMOUNT_INVALID("PAYMENT_017", "취소 금액이 남은 결제 금액을 초과합니다.", HttpStatus.CONFLICT),
     CANCELLATION_UNCONFIRMED("PAYMENT_018", "취소 결과를 확인 중입니다. 같은 요청으로 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
     CANCELLATION_KEY_REUSED("PAYMENT_019", "이미 다른 취소 요청에 사용한 클레임입니다.", HttpStatus.CONFLICT),
+    APPROVAL_SUMMARY_OVERFLOW("PAYMENT_020", "승인 집계 금액의 허용 범위를 초과했습니다.", HttpStatus.INTERNAL_SERVER_ERROR),
 
     /** 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON · 타입 불일치)의 폴백. */
     INVALID_REQUEST("PAYMENT_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
+    APPROVAL_SUMMARY_PERIOD_INVALID("PAYMENT_122", "집계 기간은 시작보다 뒤에 끝나야 하며 31일 이하여야 합니다.", HttpStatus.BAD_REQUEST),
     /** 경로 변수 · 헤더 형식 오류(바인딩 단계). */
     PARAMETER_TYPE_INVALID("PAYMENT_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     /** 필수 요청 파라미터 · 헤더 누락. */

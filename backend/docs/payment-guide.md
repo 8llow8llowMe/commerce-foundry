@@ -208,6 +208,27 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 `idx_payment_cancel_payment_id`를 사용 가능한 기존 인덱스로 유지한다. 새 DDL · PG 조회 · 승인/취소 재시도 · 주문 이벤트 재발행은 없다.
 FE는 새 필터를 "취소거절 이력"으로 표시하고 응답 상태를 그대로 사용한다. 계약 검토자는 `seonghoho`다. 자동 복구 · 웹훅 · 알림은 후속이다.
 
+### 리포트용 정상 승인 집계 internal (#550)
+
+`GET /internal/v1/payments/approval-summary?from=&to=`는 `SERVICE_operations-service`만 호출한다(`@Hidden`, `Cache-Control: no-store`).
+필수 시각은 Instant로 바인딩하며 UTC `[from, to)`를 조회한다. `from < to`, 최대 31일(정확히 31일 허용)이다.
+응답 봉투의 `dataBody`는 `{from, to, groups:[{method(metadata), approvalCount, grossApprovedAmount:{amount, currency}}]}`다.
+통화 · 결제수단 코드 오름차순이며 빈 결과는 `groups:[]`다. 금액은 최소 화폐 단위 long이고, 통화는 금액 객체 안에 한 번만 둔다.
+결제키 · 주문/회원/결제 식별자 · 원문 진단값을 포함하지 않는다. FE 직접 계약 변경은 없다.
+
+- `approvedAt >= from AND approvedAt < to`, `status IN (DONE, PARTIAL_CANCELED, CANCELED)`, `failureCode IS NULL AND abortReason IS NULL`인
+  결제 시도를 통화 · 결제수단별 단일 SQL로 센다. `createdAt` · `updatedAt` · 주문 반영 여부는 조건이 아니다.
+- `grossApprovedAmount`는 최초 정상 승인 원금의 합계다. 부분 · 전액 취소 뒤에도 유지하며 `LATE_APPROVED`와 늦은 승인 뒤 `CANCELED`는 두 원인 경로 모두 제외한다.
+  현재 취소 시각이 없어 취소일 집계는 제공하지 않는다. 이 값은 주문 매출 · 순매출 · 환불액 · 정산액이 아니다.
+- DB에서 decimal로 합산하고 `BigDecimal.longValueExact()`로 변환한다. long 합계 범위를 넘으면 요청 전체가 500 `PAYMENT_020`으로 실패하며 부분 그룹은 반환하지 않는다.
+  고정 조건 조회지만 decimal 합계 · 건수 · 그룹 키의 타입을 같은 표현식으로 선택하고 추출하기 위해 이 집계는 QueryDSL custom 저장소를 유지한다.
+  정적 JPQL 우선 규칙의 국소 예외이며 H2 · PostgreSQL에 같은 집계 계약을 실행해 DB별 합산 타입 차이를 검증한다.
+- 시작 필수/형식은 400 `PAYMENT_118/119`, 종료 필수/형식은 `PAYMENT_120/121`, 역순 · 같은 시각 · 31일 초과는 `PAYMENT_122`다.
+  다른 서비스는 403, 사용자 토큰 · 익명은 internal 인증 단계에서 401이다.
+- 읽기 전용 트랜잭션 timeout 2초와 query timeout 2,000ms를 사용한다. 새 락 · 엔티티 · DDL은 없다.
+  `approvedAt` 인덱스가 없어 31일 제한이 스캔 행 수를 제한하지는 않는다. 운영 데이터로 실행계획 · 지연 · timeout 빈도를 측정한 뒤 후속 인덱스를 검토한다.
+  UNKNOWN 복구 등으로 정상 승인 사실이 나중에 확정되면 같은 과거 구간 결과가 달라질 수 있다. operations 리포트 연결은 #220 후속이다.
+
 ## 4. 결과 미확정(UNKNOWN) 처리
 
 PG 호출이 **타임아웃·5xx·서킷 오픈**으로 끝나면 승인 여부를 모른다. 이것을 "실패" 로 처리하면 안 된다 —
