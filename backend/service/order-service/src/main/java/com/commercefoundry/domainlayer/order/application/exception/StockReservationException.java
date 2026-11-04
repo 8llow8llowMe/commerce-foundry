@@ -28,7 +28,7 @@ public class StockReservationException extends RuntimeException {
         CONFIRMED,
         /** 복원 대상 선점이 확정(CONFIRMED)이 아니다(복원의 409 {@code PRODUCT_027}) — 다시 불러도 같다(버그 신호). */
         NOT_CONFIRMED,
-        /** 복원 수량이 (선점 수량 − 이미 복원한 수량)을 넘는다(복원의 409 {@code PRODUCT_028}) — 다른 경로가 이미 복원했다. */
+        /** 복원 수량이 (선점 수량 − 이미 복원한 수량)을 넘는다(409 {@code PRODUCT_028}) — 전량 복원 증거가 아니므로 운영 확인한다. */
         QUANTITY_EXCEEDED,
         /** 같은 클레임에 내용이 다른 복원이 이미 있다(복원의 409 {@code PRODUCT_029}) — 다시 불러도 같다(버그 신호). */
         RESTORATION_MISMATCH,

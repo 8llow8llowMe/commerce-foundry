@@ -44,7 +44,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.TopicPartition;
@@ -52,6 +51,8 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -150,12 +151,22 @@ public abstract class OrderPaymentConsumerContract {
         }
     }
 
-    private ConcurrentMessageListenerContainer<String, String> startConsumer(String topic, DefaultKafkaConsumerFactory<String, String> consumers,
+    protected ConcurrentMessageListenerContainer<String, String> startConsumer(String topic, DefaultKafkaConsumerFactory<String, String> consumers,
         KafkaTemplate<String, String> kafka, AtomicInteger deliveries) {
+        return startConsumer(topic, consumers, kafka, deliveries, failure -> {});
+    }
+
+    protected ConcurrentMessageListenerContainer<String, String> startConsumer(String topic, DefaultKafkaConsumerFactory<String, String> consumers,
+        KafkaTemplate<String, String> kafka, AtomicInteger deliveries, java.util.function.Consumer<RuntimeException> onFailure) {
         var properties = new ContainerProperties(topic);
         properties.setAckMode(ContainerProperties.AckMode.RECORD);
         properties.setMessageListener((MessageListener<String, String>) record -> {
-            listener.onPaymentApproved(record); // 실제 listener bean → 실제 UseCase Spring proxy → 실제 DB
+            try {
+                listener.onPaymentApproved(record); // 실제 listener bean → 실제 UseCase Spring proxy → 실제 DB
+            } catch (RuntimeException failure) {
+                onFailure.accept(failure);
+                throw failure;
+            }
             deliveries.incrementAndGet();
         });
         var container = new ConcurrentMessageListenerContainer<>(consumers, properties);
@@ -165,7 +176,7 @@ public abstract class OrderPaymentConsumerContract {
         return container;
     }
 
-    private void assertSingleReflection(PaymentApprovalCommand command, EventEnvelopeCodec codec) {
+    protected void assertSingleReflection(PaymentApprovalCommand command, EventEnvelopeCodec codec) {
         assertThat(order(command).status()).isEqualTo(OrderStatus.PAID);
         assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.PAID);
         assertThat(jdbc.queryForObject("select count(*) from orders.order_payment where payment_id=?", Long.class, command.paymentId())).isEqualTo(1);
@@ -251,55 +262,62 @@ public abstract class OrderPaymentConsumerContract {
     }
 
     @Test
-    void realVersionConflictAfterOrderReadReplaysInNewTransactionAndPreservesConfirmedReservation() throws Exception {
+    void parentLockSerializesPaymentAheadOfStaleCustomerCancelAndVersionRejectsCancel() throws Exception {
         PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
         long reservationId = order(command).stockReservationId();
-        AtomicReference<Throwable> actualConflict = new AtomicReference<>();
-        AtomicInteger writesIntercepted = new AtomicInteger();
+        CountDownLatch paymentLocked = new CountDownLatch(1);
+        CountDownLatch cancelSnapshotRead = new CountDownLatch(1);
         OrderRepositoryAdapter target = AopTestUtils.getUltimateTargetObject(orderWrites);
-        try {
-            doAnswer(invocation -> {
-                Order changed = invocation.getArgument(0);
-                if (changed.id() == command.orderId() && writesIntercepted.getAndIncrement() == 0) {
-                    // complete가 주문을 읽고 PAID를 만든 직후 멈춘다. 별도 스레드/tx에서 실제 고객취소와 outbox를 먼저 커밋한다.
-                    try (var executor = Executors.newSingleThreadExecutor()) {
-                        executor.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(tx -> {
-                            Order before = orders.findById(command.orderId()).orElseThrow();
-                            Order canceled = before.cancelBeforePayment();
-                            orders.saveCustomerCancel(canceled,
-                                OrderStatusHistory.canceledByCustomer(IDS.incrementAndGet(), before, OrderCancelReason.CHANGE_OF_MIND));
-                            events.canceled(before.id(), before.stockReservationId(), OrderCancelReason.CHANGE_OF_MIND);
-                        })).get(10, TimeUnit.SECONDS);
-                    }
-                    try {
-                        return invocation.callRealMethod(); // stale @Version을 실제 saveAndFlush에 전달한다. 실패를 mock하지 않는다.
-                    } catch (Throwable conflict) {
-                        actualConflict.set(conflict);
-                        throw conflict;
-                    }
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var cancelAttempt = executor.submit(() -> {
+                try {
+                    assertThat(paymentLocked.await(10, TimeUnit.SECONDS)).isTrue();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
                 }
-                return invocation.callRealMethod();
-            }).when(target).saveStatusChange(any(), any());
+                new TransactionTemplate(transactions).executeWithoutResult(tx -> {
+                    Order before = orders.findById(command.orderId()).orElseThrow();
+                    assertThat(before.status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+                    cancelSnapshotRead.countDown();
+                    Order canceled = before.cancelBeforePayment();
+                    orders.saveCustomerCancel(canceled,
+                        OrderStatusHistory.canceledByCustomer(IDS.incrementAndGet(), before, OrderCancelReason.CHANGE_OF_MIND));
+                    events.canceled(before.id(), before.stockReservationId(), OrderCancelReason.CHANGE_OF_MIND);
+                });
+            });
+            try {
+                doAnswer(invocation -> {
+                    Order changed = invocation.getArgument(0);
+                    if (changed.id() == command.orderId()) {
+                        paymentLocked.countDown();
+                        // 취소의 비잠금 스냅숏 읽기만 기다린다. 부모 잠금이 막는 취소 쓰기 완료를 여기서 기다리면 테스트 자체가 교착된다.
+                        assertThat(cancelSnapshotRead.await(10, TimeUnit.SECONDS)).isTrue();
+                    }
+                    return invocation.callRealMethod();
+                }).when(target).saveStatusChange(any(), any());
 
-            facade.approve(command);
+                facade.approve(command);
 
-            assertThat(actualConflict.get()).isInstanceOf(OptimisticLockingFailureException.class);
-            assertThat(writesIntercepted).hasValue(1); // 재판정에서 취소를 읽었으므로 두 번째 PAID 쓰기는 없다.
-            assertThat(order(command).status()).isEqualTo(OrderStatus.CANCELED);
-            assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_ORDER_CANCELED);
-            assertThat(payment(command).stockReservationId()).isEqualTo(reservationId);
-            assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
-            assertThat(jdbc.queryForObject("select count(*) from orders.order_status_history where order_id=? and to_status='CANCELED'",
-                Long.class, command.orderId())).isEqualTo(1);
-            assertThat(jdbc.queryForObject("select count(*) from orders.order_status_history where order_id=? and reason='PAYMENT_APPROVED'",
-                Long.class, command.orderId())).isZero();
-            assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=? and event_type='order-canceled'",
-                Long.class, Long.toString(command.orderId()))).isEqualTo(1);
-            assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=? and event_type='order-payment-rejected'",
-                Long.class, Long.toString(command.orderId()))).isEqualTo(1);
-            verify(stock, times(1)).confirm(reservationId);
-        } finally {
-            reset(target);
+                assertThatThrownBy(() -> cancelAttempt.get(20, TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                    .hasCauseInstanceOf(OptimisticLockingFailureException.class);
+                assertThat(order(command).status()).isEqualTo(OrderStatus.PAID);
+                assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.PAID);
+                assertThat(payment(command).stockReservationId()).isEqualTo(reservationId);
+                assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
+                assertThat(jdbc.queryForObject("select count(*) from orders.order_status_history where order_id=? and to_status='CANCELED'",
+                    Long.class, command.orderId())).isZero();
+                assertThat(jdbc.queryForObject("select count(*) from orders.order_status_history where order_id=? and reason='PAYMENT_APPROVED'",
+                    Long.class, command.orderId())).isEqualTo(1);
+                assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=? and event_type='order-canceled'",
+                    Long.class, Long.toString(command.orderId()))).isZero();
+                assertThat(replies(command.orderId())).isEqualTo(1);
+                verify(stock, times(1)).confirm(reservationId);
+            } finally {
+                paymentLocked.countDown();
+                reset(target);
+            }
         }
     }
 
@@ -375,13 +393,38 @@ public abstract class OrderPaymentConsumerContract {
             return new StockConfirmationQueryResult(reservationId, first.orderId());
         });
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var a = executor.submit(() -> facade.approve(first));
-            var b = executor.submit(() -> facade.approve(second));
-            a.get(30, TimeUnit.SECONDS);
-            b.get(30, TimeUnit.SECONDS);
+            var a = executor.submit(() -> approveOrAwaitRedelivery(first));
+            var b = executor.submit(() -> approveOrAwaitRedelivery(second));
+            boolean retryFirst = a.get(30, TimeUnit.SECONDS);
+            boolean retrySecond = b.get(30, TimeUnit.SECONDS);
+            assertThat(retryFirst && retrySecond).isFalse();
+            // 둘 다 종료한 시점에 승자가 커밋됐음을 확인하고, 정확히 NOWAIT 재시도 소진으로 실패한 전달만 한 번 재전달한다.
+            assertThat(payments.findPaidByOrderId(first.orderId())).isPresent();
+            assertThat(jdbc.queryForObject("select count(*) from orders.order_payment where order_id=? and result='PAID'",
+                Long.class, first.orderId())).isEqualTo(1);
+            if (otherEvent && retryFirst) {
+                assertThat(inbox.exists(GROUP, first.eventId())).isFalse();
+            }
+            if (otherEvent && retrySecond) {
+                assertThat(inbox.exists(GROUP, second.eventId())).isFalse();
+            }
+            if (retryFirst) {
+                facade.approve(first);
+            }
+            if (retrySecond) {
+                facade.approve(second);
+            }
         }
         assertThat(order(first).status()).isEqualTo(OrderStatus.PAID);
         assertThat(replies(first.orderId())).isEqualTo(otherPayment ? 2 : 1);
+        assertThat(jdbc.queryForObject("select count(*) from orders.order_payment where order_id=?", Long.class, first.orderId()))
+            .isEqualTo(otherPayment ? 2 : 1);
+        assertThat(jdbc.queryForObject("select count(*) from orders.order_status_history where order_id=? and to_status='PAID'",
+            Long.class, first.orderId())).isEqualTo(1);
+        assertThat(inbox.exists(GROUP, first.eventId())).isTrue();
+        assertThat(inbox.exists(GROUP, second.eventId())).isTrue();
+        verify(stock, times(2)).confirm(reservationId);
+        verifyNoInteractions(restorations);
         if (otherPayment) {
             OrderPayment loser = payment(first).result() == OrderPayment.Result.PAID ? payment(second) : payment(first);
             assertThat(loser.result()).isEqualTo(OrderPayment.Result.REJECTED_ALREADY_PAID);
@@ -389,7 +432,114 @@ public abstract class OrderPaymentConsumerContract {
         }
     }
 
+    private boolean approveOrAwaitRedelivery(PaymentApprovalCommand command) {
+        try {
+            facade.approve(command);
+            return false;
+        } catch (IllegalStateException exception) {
+            if (!"order payment conflict retry exhausted".equals(exception.getMessage())) {
+                throw exception;
+            }
+            return true;
+        }
+    }
+
     // --- PR-C1: 확정 뒤 취소가 이긴 건의 복구창 · 멱등 복원 ---
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void anotherPaymentsPendingOrCompletedIntentFencesInitialReservation(boolean restored) {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        // C1은 CANCELED에만 의도를 만든다. PENDING+의도는 C2b 확장을 위한 영속 fence 계약 fixture이며 상태 역전 경로가 아니다.
+        insertIntent(command, reservationId, restored);
+
+        facade.approve(command);
+
+        assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_STOCK_UNAVAILABLE);
+        assertThat(payment(command).stockReservationId()).isNull();
+        assertThat(payments.existsRestorationIntent(command.orderId(), reservationId)).isTrue();
+        assertThat(payments.existsRestorationIntent(command.orderId(), reservationId + 1)).isFalse();
+        assertThat(payments.existsRestorationIntent(command.orderId() + 1, reservationId)).isFalse();
+        verify(stock, never()).confirm(reservationId);
+        verify(stock, never()).reReserve(anyLong(), any());
+        verifyNoInteractions(restorations);
+    }
+
+    @Test
+    void reReservationReturningAnotherPaymentsFencedIdIsNotConfirmed() {
+        PaymentApprovalCommand command = arrange(OrderStatus.EXPIRED);
+        long original = order(command).stockReservationId();
+        long replacement = IDS.incrementAndGet();
+        // 확장용 영속 fixture: 재선점 API가 과거 복원된 CONFIRMED 선점을 돌려줘도 200 확정을 신뢰하지 않는다.
+        insertIntent(command, replacement, true);
+        when(stock.confirm(original)).thenThrow(new StockReservationException(StockReservationException.Failure.RELEASED));
+        when(stock.reReserve(eq(command.orderId()), any())).thenReturn(new StockReservationQueryResult(replacement, command.orderId(), NOW));
+
+        facade.approve(command);
+
+        assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_STOCK_UNAVAILABLE);
+        verify(stock, never()).confirm(replacement);
+        assertThat(jdbc.queryForObject("select stock_reservation_id from orders.order_stock_confirmation where payment_id=?",
+            Long.class, command.paymentId())).isEqualTo(replacement);
+    }
+
+    @Test
+    void delayedConfirmAfterIntentCommitCannotRecordPaid() throws Exception {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        CountDownLatch confirming = new CountDownLatch(1);
+        CountDownLatch returnConfirmed = new CountDownLatch(1);
+        when(stock.confirm(reservationId)).thenAnswer(call -> {
+            confirming.countDown();
+            assertThat(returnConfirmed.await(10, TimeUnit.SECONDS)).isTrue();
+            return new StockConfirmationQueryResult(reservationId, command.orderId());
+        });
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var delayed = executor.submit(() -> facade.approve(command));
+            try {
+                assertThat(confirming.await(10, TimeUnit.SECONDS)).isTrue();
+                // PENDING+의도 확장 fixture. 사전검사 후 의도 커밋과 늦은 200 사이의 최종 DB fence를 실제 두 트랜잭션으로 검증한다.
+                insertIntent(command, reservationId, true);
+            } finally {
+                returnConfirmed.countDown();
+            }
+            delayed.get(20, TimeUnit.SECONDS);
+        }
+
+        assertThat(order(command).status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+        assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_STOCK_UNAVAILABLE);
+        assertThat(payments.findPaidByOrderId(command.orderId())).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void canceledOrderDoesNotDuplicateAnotherPaymentsRestorationClaim(boolean restored) {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        long reservationId = order(command).stockReservationId();
+        insertIntent(command, reservationId, restored);
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+
+        facade.approve(command);
+
+        assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_ORDER_CANCELED);
+        assertThat(payment(command).restorationClaimId()).isNull();
+        assertThat(jdbc.queryForObject("select count(*) from orders.order_payment where order_id=? and restoration_claim_id is not null",
+            Long.class, command.orderId())).isEqualTo(1);
+        verifyNoInteractions(restorations);
+    }
+
+    /** fixture도 실서비스와 같은 orders → order_payment 잠금/쓰기 순서를 지킨다. product DB 수량을 검증하는 테스트는 아니다. */
+    protected void insertIntent(PaymentApprovalCommand command, long reservationId, boolean restored) {
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> {
+            orders.findByIdAndMemberIdForUpdate(command.orderId(), command.memberId()).orElseThrow();
+            OrderPayment intent = payments.insert(OrderPayment.canceledAfterConfirmation(IDS.incrementAndGet(), command.orderId(), IDS.incrementAndGet(),
+                command.memberId(), command.amount(), NOW, reservationId, UUID.randomUUID(), IDS.incrementAndGet()));
+            if (restored) {
+                payments.markRestored(intent.id(), NOW);
+            }
+        });
+    }
 
     @Test
     void crashAfterConfirmationThenCancelIsFoundByReleaseProbeAndRestoredOnce() {
@@ -465,7 +615,7 @@ public abstract class OrderPaymentConsumerContract {
     }
 
     @Test
-    void quantityExceededMeansAlreadyRestoredAndCloses() {
+    void quantityExceededLeavesIntentPendingWithoutInboxOrReply() {
         PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
         long reservationId = order(command).stockReservationId();
         cancel(command);
@@ -473,9 +623,13 @@ public abstract class OrderPaymentConsumerContract {
         doThrow(new StockReservationException(StockReservationException.Failure.QUANTITY_EXCEEDED)).when(restorations)
             .restoreCancellation(anyLong(), anyLong(), any());
 
-        facade.approve(command);
+        // product는 일부 SKU/수량만 외부 복원됐어도 요청 전체를 028로 거절한다. mock 오류를 전량 복원의 증거로 삼지 않는다.
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
 
-        assertRestoredOnce(command, reservationId);
+        assertThat(payment(command).awaitsRestoration()).isTrue();
+        assertThat(payment(command).restoredAt()).isNull();
+        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+        assertThat(replies(command.orderId())).isZero();
     }
 
     @Test

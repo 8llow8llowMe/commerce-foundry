@@ -16,6 +16,8 @@ public interface OrderPaymentRepository extends JpaRepository<OrderPaymentEntity
     /** 주문의 결제 완료 기록 — 유니크 키 {@code uk_order_payment_paid_order_id} 로 찾는다. */
     Optional<OrderPaymentEntity> findByPaidOrderId(Long paidOrderId);
 
+    boolean existsByOrderIdAndStockReservationIdAndRestorationClaimIdIsNotNull(Long orderId, Long stockReservationId);
+
     /** 재고 복원 완료 표시 (#308 PR-C1) — 아직 비어 있을 때만 채운다(PK 한 행). 0행이면 다른 처리가 먼저 채웠거나 복원 클레임이 없다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""

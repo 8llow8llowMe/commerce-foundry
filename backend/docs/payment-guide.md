@@ -427,6 +427,10 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
   재선점은 결제 대기 · 만료 주문만 한다(선점이 이미 풀린 결제 대기 주문 포함). 결제 전 취소된 `CANCELED` 주문은 거절(`ORDER_CANCELED`)이다.
   확정 뒤 취소가 이긴 경합(확정 뒤 끊긴 복구창 포함)은 해제 프로브로 확정 선점을 찾아 `order_payment.restoration_claim_id` 로 재고를 복원한 **뒤에**
   `ORDER_CANCELED` 를 회신한다(#308 PR-C1, `order-flow-guide.md` §3-6).
+  C2a는 같은 order/reservation의 모든 복원 의도(대기/완료)를 confirm 전 · 최종 PAID 전에 검사하고 기존 주문 NOWAIT 잠금 아래 의도/PAID 결정을 직렬화한다.
+  `PRODUCT_028`은 부분 복원일 수도 있어 의도 유지 · DLT · 운영 확인이며 restored_at/inbox/회신을 쓰지 않는다. 확인 절차는 위 가이드 §3-6을 따른다.
+  order 의도 없는 외부 복원은 기존 confirm 응답으로 판별할 수 없다. 소비 OFF/drain 뒤 모든 order 인스턴스에 적용하고 게이트는 유지한다.
+  취소/부분취소 재전달의 NOT_DONE 복구와 내부/외부 계약 정렬은 C2b이며 C2a만으로 전체 결제 복구 완료를 뜻하지 않는다.
 - **회신과 `order_synced`(payment, PR-C 예정)** — 두 칸은 그대로 두고 뜻을 **"주문의 회신 이벤트를 받았는가"** 로 바꾼다(DONE 계열만 쓴다 — LATE_APPROVED 는 주문에 반영하지 않는다, #14):
 
   | `order_synced` | `order_sync_failure_code` | 뜻 | 처리 |

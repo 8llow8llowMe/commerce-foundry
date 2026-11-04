@@ -47,7 +47,7 @@ public class StockReservationInternalResponseSupport {
         "409:PRODUCT_024", Failure.CONFIRMED, "404:PRODUCT_003", Failure.NOT_FOUND, "409:PRODUCT_026", Failure.CONFLICT, "409:PRODUCT_031", Failure.CONFLICT);
 
     /**
-     * 결제 후 복원의 업무 거절 (#308 PR-C1, {@code order-flow-guide.md} §3-4) — 027 · 029 는 다시 불러도 같은 종결(버그 신호), 028 은 다른 경로가 이미 복원,
+     * 결제 후 복원의 업무 거절 (#308, {@code order-flow-guide.md} §3-4) — 027 · 029 는 다시 불러도 같은 종결(버그 신호), 028 은 전량 복원 증거가 아닌 수량 초과,
      * 003 은 선점 없음, 026 · 030 · 031 은 다시 부를 일시 오류다.
      */
     private static final Map<String, Failure> RESTORE_FAILURES = Map.of(

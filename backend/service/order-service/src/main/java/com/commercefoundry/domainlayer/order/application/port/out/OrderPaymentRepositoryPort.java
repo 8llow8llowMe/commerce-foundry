@@ -33,6 +33,9 @@ public interface OrderPaymentRepositoryPort {
     /** 주문의 결제 완료 기록(결과 PAID). 없으면 빈 값이다. */
     Optional<OrderPayment> findPaidByOrderId(long orderId);
 
+    /** 같은 주문·선점의 모든 결제 복원 의도. 대기·완료 모두 영구적인 PAID 차단 근거다. */
+    boolean existsRestorationIntent(long orderId, long stockReservationId);
+
     /**
      * 재고 복원 완료 표시 (#308 PR-C1) — {@code update ... set restored_at = :restoredAt where id = :id and restoration_claim_id is not null and restored_at is null}.
      * 호출 트랜잭션을 필수로 요구한다.

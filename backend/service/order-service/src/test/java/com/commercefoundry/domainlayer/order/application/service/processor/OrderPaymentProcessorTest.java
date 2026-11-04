@@ -93,4 +93,16 @@ class OrderPaymentProcessorTest {
         verify(events, never()).paymentRejected(any());
         verify(inbox).record(any(), eq(command.eventId()), any(), any());
     }
+
+    @Test
+    void anotherPaymentsRestorationIntentAccountsForConfirmedReservation() {
+        when(payments.findByPaymentId(10)).thenReturn(Optional.of(
+            OrderPayment.rejected(2, 20, 10, 30, krw(4000), NOW, OrderPayment.Result.REJECTED_ORDER_CANCELED, UUID.randomUUID())));
+        when(payments.existsRestorationIntent(20, 77)).thenReturn(true);
+
+        assertThat(processor.complete(command, done, StockConfirmation.confirmed(77))).isEmpty();
+
+        verify(inbox).record(any(), eq(command.eventId()), any(), any());
+        verify(payments, never()).insert(any());
+    }
 }

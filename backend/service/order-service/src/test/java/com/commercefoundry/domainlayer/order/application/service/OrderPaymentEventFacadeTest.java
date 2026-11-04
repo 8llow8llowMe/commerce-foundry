@@ -29,8 +29,10 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 
 class OrderPaymentEventFacadeTest {
     private final PaymentApprovalProcessor verify = mock(PaymentApprovalProcessor.class);
@@ -50,16 +52,37 @@ class OrderPaymentEventFacadeTest {
         verifyNoInteractions(verify, stock);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"spring", "pessimistic", "timeout"})
+    void nowaitConflictHasBoundedFreshTransactionAttemptsAndRetainsConfirmation(String failure) {
+        when(verify.verify(command)).thenReturn(payment);
+        when(database.inspect(payment, command.eventId())).thenReturn(new PaymentApprovalTarget(false, order, null));
+        StockConfirmation confirmed = StockConfirmation.confirmed(99);
+        when(stock.confirmOrReReserve(eq(order), any(), any())).thenReturn(confirmed);
+        RuntimeException exception = switch (failure) {
+            case "pessimistic" -> new jakarta.persistence.PessimisticLockException("locked");
+            case "timeout" -> new jakarta.persistence.LockTimeoutException("locked");
+            default -> new PessimisticLockingFailureException("locked");
+        };
+        doThrow(exception).when(database).complete(command, payment, confirmed);
+
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(IllegalStateException.class).hasMessageContaining("retry exhausted");
+
+        verify(database, times(3)).complete(command, payment, confirmed);
+        verify(stock, times(1)).confirmOrReReserve(eq(order), any(), any());
+        verify(database, never()).completeRestoration(any(), any(), any());
+    }
+
     @Test
     void versionConflictRetainsConfirmedIdWhenCanceledWins() {
         when(verify.verify(command)).thenReturn(payment);
         when(database.inspect(payment, command.eventId())).thenReturn(new PaymentApprovalTarget(false, order, null),
             new PaymentApprovalTarget(false, order, OrderPayment.Result.REJECTED_ORDER_CANCELED));
         StockConfirmation confirmed = StockConfirmation.confirmed(99);
-        when(stock.confirmOrReReserve(eq(order), any())).thenReturn(confirmed);
+        when(stock.confirmOrReReserve(eq(order), any(), any())).thenReturn(confirmed);
         doThrow(new OptimisticLockingFailureException("PRIVATE_SENTINEL")).doReturn(Optional.empty()).when(database).complete(command, payment, confirmed);
         facade.approve(command);
-        verify(stock, times(1)).confirmOrReReserve(eq(order), any());
+        verify(stock, times(1)).confirmOrReReserve(eq(order), any(), any());
         verify(stock, never()).findConfirmedByReleaseProbe(anyLong(), any());
         verify(database, times(2)).complete(command, payment, confirmed);
     }
@@ -69,7 +92,7 @@ class OrderPaymentEventFacadeTest {
     void classifiesStockFailureWithoutCauseOrPrivateText(OrderErrorCode code) {
         when(verify.verify(command)).thenReturn(payment);
         when(database.inspect(payment, command.eventId())).thenReturn(new PaymentApprovalTarget(false, order, null));
-        when(stock.confirmOrReReserve(eq(order), any())).thenThrow(new OrderException(code, new IllegalStateException("PRIVATE_SENTINEL")));
+        when(stock.confirmOrReReserve(eq(order), any(), any())).thenThrow(new OrderException(code, new IllegalStateException("PRIVATE_SENTINEL")));
         assertThatThrownBy(() -> facade.approve(command))
             .isInstanceOf(code == OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE ? OrderException.class : NonRetryableEventException.class)
             .hasNoCause().hasMessageNotContaining("PRIVATE_SENTINEL");
@@ -94,7 +117,7 @@ class OrderPaymentEventFacadeTest {
         sequence.verify(database).complete(command, payment, StockConfirmation.confirmed(77));
         sequence.verify(stock).restoreCanceledPayment(20, 10, 555, 77, quote);
         sequence.verify(database).completeRestoration(command.eventId(), restorable, payment);
-        verify(stock, never()).confirmOrReReserve(any(), any());
+        verify(stock, never()).confirmOrReReserve(any(), any(), any());
     }
 
     @Test

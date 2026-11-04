@@ -90,6 +90,11 @@ public class OrderPaymentRepositoryAdapter implements OrderPaymentRepositoryPort
     }
 
     @Override
+    public boolean existsRestorationIntent(long orderId, long stockReservationId) {
+        return orderPaymentRepository.existsByOrderIdAndStockReservationIdAndRestorationClaimIdIsNotNull(orderId, stockReservationId);
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean markRestored(long id, Instant restoredAt) {
         return orderPaymentRepository.markRestored(id, restoredAt.truncatedTo(ChronoUnit.MICROS)) == 1;

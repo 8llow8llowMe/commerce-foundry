@@ -80,9 +80,16 @@ public class OrderPaymentProcessor {
         return candidates;
     }
 
+    /** confirm 사전 검사. 원격 호출 사이의 경쟁은 complete의 잠금 후 재검사가 막는다. */
+    @Transactional(readOnly = true, timeout = 5)
+    public boolean canConfirm(long orderId, long reservationId) {
+        return !orderPaymentRepositoryPort.existsRestorationIntent(orderId, reservationId);
+    }
+
     /**
      * 원격 I/O 없이 DB 구간만 새 트랜잭션으로 묶는다. 충돌은 바깥 Facade가 잡고 새 트랜잭션에서 재판정한다.
-     * 주문 @Version flush → payment INSERT → inbox → 회신 outbox 순서다. 뒤 단계 실패는 모두 롤백한다.
+     * orders NOWAIT 잠금 → payment 조회/의도 INSERT 또는 PAID 저장 → inbox → 회신 outbox 순서다. 뒤 단계 실패는 모두 롤백한다.
+     * 의도 INSERT는 주문 버전을 바꾸지 않으므로 @Version만으로 PAID와 상호 배제되지 않는다. 원격 I/O는 이 잠금 밖이다.
      *
      * <p>확정 뒤 취소가 이긴 경합(#308 PR-C1)은 거절 기록(확정 선점 · 새 복원 클레임 아이디)만 넣고 inbox · 회신은 남기지 않는다 — 돌려준 대상으로 Facade 가
      * tx 밖에서 복원하고 {@link #completeRestoration} 이 마무리한다. 이미 그런 기록이 복원 전이면(복원 실패 뒤 재전달) 새로 쓰지 않고 그 기록을 돌려준다.
@@ -91,6 +98,8 @@ public class OrderPaymentProcessor {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 10)
     public Optional<StockRestorationTarget> complete(PaymentApprovalCommand command, VerifiedPayment payment, StockConfirmation confirmation) {
+        Order before = orderRepositoryPort.findByIdAndMemberIdForUpdate(payment.orderId(), payment.memberId())
+            .orElseGet(() -> orderRepositoryPort.findById(payment.orderId()).orElse(null));
         Optional<OrderPayment> existing = orderPaymentRepositoryPort.findByPaymentId(payment.paymentId());
         if (existing.isPresent() && existing.get().awaitsRestoration()) {
             Order canceled = orderRepositoryPort.findById(existing.get().orderId())
@@ -108,9 +117,10 @@ public class OrderPaymentProcessor {
             record(command.eventId());
             return Optional.empty();
         }
-        Order before = orderRepositoryPort.findById(payment.orderId()).orElse(null);
         Result rejected = rejection(payment, before);
-        if (rejected == null && (confirmation == null || !confirmation.isConfirmed())) {
+        boolean fenced = confirmation != null && confirmation.isConfirmed()
+            && orderPaymentRepositoryPort.existsRestorationIntent(payment.orderId(), confirmation.reservationId());
+        if (rejected == null && (confirmation == null || !confirmation.isConfirmed() || fenced)) {
             rejected = Result.REJECTED_STOCK_UNAVAILABLE;
         }
         OrderPayment record;
@@ -120,13 +130,13 @@ public class OrderPaymentProcessor {
                 OrderStatusHistory.changedByService(nextId(), before, paid, OrderStatusHistory.PAYMENT_APPROVED));
             record = OrderPayment.paid(nextId(), paid, payment.paymentId(), payment.amount(), payment.approvedAt(), command.eventId());
         } else if (rejected == Result.REJECTED_ORDER_CANCELED && confirmation != null && confirmation.isConfirmed()) {
-            if (orderPaymentRepositoryPort.findPaidByOrderId(payment.orderId()).isEmpty()) {
+            if (!fenced && orderPaymentRepositoryPort.findPaidByOrderId(payment.orderId()).isEmpty()) {
                 OrderPayment restorable = orderPaymentRepositoryPort.insert(OrderPayment.canceledAfterConfirmation(nextId(), payment.orderId(), payment.paymentId(),
                     payment.memberId(), payment.amount(), payment.approvedAt(), confirmation.reservationId(), command.eventId(), nextId()));
                 return Optional.of(new StockRestorationTarget(restorable, before));
             }
             // 다른 결제가 이미 결제 완료한 뒤 취소된 주문 — 확정 선점은 이긴 결제의 것이고 그 취소 클레임이 복원한다. 여기서 복원하면 두 번 는다.
-            log.warn("canceled order already paid by another payment, skipping restoration. orderId={}, paymentId={}", payment.orderId(), payment.paymentId());
+            log.warn("canceled order reservation already accounted for, skipping restoration. orderId={}, paymentId={}", payment.orderId(), payment.paymentId());
             record = OrderPayment.rejected(nextId(), payment.orderId(), payment.paymentId(), payment.memberId(), payment.amount(), payment.approvedAt(),
                 rejected, command.eventId());
         } else {
@@ -166,7 +176,8 @@ public class OrderPaymentProcessor {
         if (existing.isPresent() && Long.valueOf(reservationId).equals(existing.get().stockReservationId())) {
             return true;
         }
-        return orderPaymentRepositoryPort.findPaidByOrderId(orderId).map(paid -> Long.valueOf(reservationId).equals(paid.stockReservationId())).orElse(false);
+        return orderPaymentRepositoryPort.existsRestorationIntent(orderId, reservationId)
+            || orderPaymentRepositoryPort.findPaidByOrderId(orderId).map(paid -> Long.valueOf(reservationId).equals(paid.stockReservationId())).orElse(false);
     }
 
     private boolean isRecorded(long paymentId, UUID eventId) {

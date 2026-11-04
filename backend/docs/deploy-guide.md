@@ -327,6 +327,15 @@ docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) �
 - `app.jar` 는 `.gitignore` 대상이다(`backend/**/app.jar`). 확인이 끝나면 지운다.
 - 정리: `docker compose -p commerce-<module>-dev -f <compose> down` (모듈마다).
 
+### 주문 결제 복원 의도 fence 배포 (#14 C2a)
+
+소비 게이트 OFF → 기존 consumer의 진행 중 처리 drain → 모든 order 인스턴스에 C2a 적용 순서다. 구 consumer와 혼합 소비하지 않는다.
+기존 만료 outbox 릴레이는 유지한다. C2a는 엔티티/DDL/새 환경변수 변경이 없으며 소비/운영 결제 게이트를 여는 승인이 아니다.
+기존 C1 복원은 product 호출 전에 order 의도를 남기는 경로만 보호한다. order 기록 없는 외부 수동 복원은 기존 confirm 200으로 구별할 수 없다.
+배포 전 복원 대기/DLT와 같은 선점의 PAID·복원 의도 상충을 확인하고 상충 행은 자동 보정하지 않는다(`order-flow-guide.md` §3-6).
+028은 미종결 · 운영 확인이다. 소비 OFF/영향 주문 차단 후 claim/SKU별 원장과 잔량을 대조하고 승인된 보정 절차를 협의한다.
+실제 복원 증거 없이 restored_at을 채우거나 028을 무한 재생하지 않는다. C2b · C3 · #582 등 전체 선행과 운영 검증 후 별도로 활성화한다.
+
 ### 시스템 알림 수신자 조회 배포 (#477 A1)
 
 auth 배포 전에 `idx_member_role_deactivated_at_id`(`auth.member(role, deactivated_at, id)`)를 적용한다.
