@@ -22,6 +22,8 @@ operations-service `legaldocument`가 고객사별 이용약관·개인정보처
 - Summary: `{type,locale,latestRevision,publishedRevision,version}`. 미게시 publishedRevision은 null이다.
 - Detail: `{document:Summary,revision:Revision}`. revision은 **항상 최신 리비전**이다. 최신본이 게시 상태이면 게시 메타데이터도 포함한다.
 - Revision: `{revisionNumber,title,body,createdBy,createdAt,publishedBy,publishedAt}`. 관리자 식별자는 문자열, 시각은 UTC ISO이며 미게시 publishedBy/publishedAt은 null이다.
+- 신규 저장·게시 시각은 Processor에서 DB `timestamp(6)` 정밀도에 맞춰 마이크로초 미만을 버린다. 반올림으로 다음 초로 넘기지 않으며,
+  최초 응답·DB 재조회·반복 게시에서 같은 시각을 반환한다. 기존 리비전의 작성·최초 게시 시각은 다시 계산하거나 변경하지 않는다.
 - Template: `{templateId,version,type,locale,title,body,checklist,guidance}`. templateId는 `legal-{terms|privacy}-{ko|en}`, 초기 version은 1이다.
 - 초안 저장은 title·body 전체 교체 입력이며 항상 새 불변 리비전을 추가한다. 최초 expectedVersion은 생략/null, 기존 문서는 조회한 0 이상 버전이 필요하다.
   같은 본문 재전송도 새 저장이므로 멱등하지 않다. 응답을 잃으면 상세·이력을 재조회하고 재저장 여부를 판단한다.
