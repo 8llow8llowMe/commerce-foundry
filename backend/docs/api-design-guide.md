@@ -1818,3 +1818,11 @@ FE는 응답의 문서/리비전 버전을 보관해 요청에 포함하고 409�
 - FE 연계 #568: 설정 화면은 저장이 즉시 공개됨을 안내하고 `expectedVersion`을 전달한다. 푸터 `BUSINESS_*`와 쇼핑몰 표시 이름을
   공개 API로 이행한다. 미등록 404는 설정 필요 상태로 다루고 실정보 기본값을 번들에 넣지 않는다. API 조회는 캐시하지 않는다.
   이용약관·개인정보처리방침 관리(#569)는 별도 계약이다. 새 비밀키·FE 코드 변경은 없다. 계약 검토자 `seonghoho`.
+
+## 스토어 약관·개인정보처리방침 (#569)
+
+operations-service의 ADMIN `/api/v1/admin/store/legal-documents`와 `/api/v1/admin/store/legal-document-templates/{type}`는
+불변 초안 저장·명시적 즉시 게시·이력·시작 템플릿을 제공한다. 고객 `/api/v1/store/legal-documents`는 익명으로 실제 게시본만 읽는다.
+`type=TERMS|PRIVACY`, `locale=ko|en`은 원시 문자열 제어 코드다. 표준 봉투·no-store, 언어 fallback 없음, 미게시 404를 적용한다.
+FE는 버전 충돌 409 후 상세를 재조회하고 본문을 escape한 텍스트로 렌더링한다. 템플릿은 법적 적합성 보장이 아니다.
+정확한 필드·오류·게시 재시도·배포 의존(#566)은 [스토어 법적 문서 계약](store-legal-guide.md)을 따른다. FE #570, API 리뷰 대상은 `seonghoho`다.

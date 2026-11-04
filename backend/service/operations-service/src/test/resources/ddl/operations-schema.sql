@@ -445,6 +445,86 @@
     comment on column operations.job_result_file.worker_id is
         '파일을 예약한 워커 — 성공 확정 시 소유 확인';
 
+    create table operations.legal_document (
+        id bigint not null,
+        latest_revision integer not null,
+        locale varchar(2) not null,
+        published_revision integer,
+        type varchar(20) not null check ((type in ('TERMS','PRIVACY'))),
+        version bigint not null,
+        primary key (id),
+        constraint uk_legal_document_type_locale unique (type, locale),
+        constraint ck_legal_document_locale check (locale in ('ko', 'en')),
+        constraint ck_legal_document_pointers check (latest_revision > 0 and (published_revision is null or (published_revision > 0 and published_revision <= latest_revision)))
+    );
+
+    comment on table operations.legal_document is
+        '약관·개인정보처리방침 문서 루트';
+
+    comment on column operations.legal_document.id is
+        '문서 아이디 (Snowflake)';
+
+    comment on column operations.legal_document.latest_revision is
+        '최신 리비전 번호';
+
+    comment on column operations.legal_document.locale is
+        '문서 언어 (ko/en)';
+
+    comment on column operations.legal_document.published_revision is
+        '현재 게시 리비전 번호 (미게시 null)';
+
+    comment on column operations.legal_document.type is
+        '문서 유형';
+
+    comment on column operations.legal_document.version is
+        '낙관적 편집 버전';
+
+    create table operations.legal_document_revision (
+        id bigint not null,
+        body varchar(50000) not null,
+        created_at timestamp(6) with time zone not null,
+        created_by bigint not null,
+        document_id bigint not null,
+        published_at timestamp(6) with time zone,
+        published_by bigint,
+        revision_number integer not null,
+        title varchar(200) not null,
+        primary key (id),
+        constraint uk_legal_document_revision_document_id_revision_number unique (document_id, revision_number),
+        constraint ck_legal_document_revision_number check (revision_number > 0),
+        constraint ck_legal_document_revision_publication check ((published_by is null and published_at is null) or (published_by is not null and published_at is not null))
+    );
+
+    comment on table operations.legal_document_revision is
+        '법적 문서의 불변 본문 리비전';
+
+    comment on column operations.legal_document_revision.id is
+        '리비전 아이디 (Snowflake)';
+
+    comment on column operations.legal_document_revision.body is
+        '불변 본문 (단순 텍스트)';
+
+    comment on column operations.legal_document_revision.created_at is
+        '작성 시각';
+
+    comment on column operations.legal_document_revision.created_by is
+        '작성 관리자 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column operations.legal_document_revision.document_id is
+        '문서 아이디 (FK: legal_document.id)';
+
+    comment on column operations.legal_document_revision.published_at is
+        '최초 게시 시각';
+
+    comment on column operations.legal_document_revision.published_by is
+        '최초 게시 관리자 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column operations.legal_document_revision.revision_number is
+        '문서 내 리비전 번호';
+
+    comment on column operations.legal_document_revision.title is
+        '불변 제목';
+
     create table operations.notification (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
