@@ -41,6 +41,13 @@ import {
   type OptionGroupForm,
   type ProductCreateForm,
 } from './create';
+import {
+  emptyCustomField,
+  emptyCustomOrderForm,
+  FIELD_KEY_INVALID,
+  LEAD_TIME_INVALID,
+  MIN_OVER_MAX,
+} from './custom-order';
 import { adminProduct } from './test-fixtures';
 
 const TODAY = '2026-11-02';
@@ -319,6 +326,78 @@ describe('productRequest', () => {
       },
     });
     expect(productRequest(form, TODAY).ok).toBe(true);
+  });
+});
+
+describe('맞춤 제작 (BE #9 PR-B)', () => {
+  const chest = {
+    ...emptyCustomField('a'),
+    fieldKey: 'chest',
+    label: ' 가슴둘레 ',
+    unit: 'cm',
+    minValue: '60',
+    maxValue: '150',
+    stepValue: '0.5',
+  };
+
+  it('처음 값(꺼짐 · 항목 없음)이면 본문에 customOrder 가 없다', () => {
+    const built = productRequest(filled(), TODAY);
+    expect(built.ok && 'customOrder' in built.request).toBe(false);
+  });
+
+  it('켜거나 항목을 더하면 버전 없는 설정을 싣는다', () => {
+    const built = productRequest(
+      filled({
+        customOrder: { enabled: true, notice: ' 제작 2주 ', leadTimeDays: '14', fields: [chest] },
+      }),
+      TODAY,
+    );
+    expect(built.ok && built.request.customOrder).toEqual({
+      enabled: true,
+      notice: '제작 2주',
+      leadTimeDays: 14,
+      fields: [
+        {
+          fieldKey: 'chest',
+          label: '가슴둘레',
+          inputType: 'NUMBER',
+          unit: 'cm',
+          required: true,
+          minValue: 60,
+          maxValue: 150,
+          stepValue: 0.5,
+          helpText: null,
+        },
+      ],
+    });
+    // 꺼 둔 채 항목만 더해도 싣는다(항목은 남고 고객에게는 보이지 않는다)
+    const off = productRequest(
+      filled({ customOrder: { ...emptyCustomOrderForm(), fields: [chest] } }),
+      TODAY,
+    );
+    expect(off.ok && off.request.customOrder?.enabled).toBe(false);
+  });
+
+  it('칸 오류 키는 customOrder. 로 시작한다(서버 fieldErrors 와 같다)', () => {
+    const built = productRequest(
+      filled({
+        customOrder: {
+          enabled: true,
+          notice: '',
+          leadTimeDays: '0',
+          fields: [{ ...chest, fieldKey: 'Chest', minValue: '200' }],
+        },
+      }),
+      TODAY,
+    );
+    expect(built).toEqual({
+      ok: false,
+      errors: {
+        'customOrder.leadTimeDays': [LEAD_TIME_INVALID],
+        'customOrder.fields.0.fieldKey': [FIELD_KEY_INVALID],
+        'customOrder.fields.0.minValue': [MIN_OVER_MAX],
+      },
+    });
   });
 });
 

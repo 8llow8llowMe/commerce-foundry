@@ -1,7 +1,6 @@
 import type { FormErrors } from '@/lib/api-errors';
-import { INTEGER, isPlainText } from './create';
 import type { AdminProductDetail } from './detail';
-import { addError } from './section';
+import { addError, INTEGER, isPlainText } from './form-text';
 
 // 어드민 상품 맞춤 제작 설정 수정(#29 · BE #580 PR-B) — `PUT /api/v1/admin/products/{productId}/custom-order`.
 // 사용 여부 · 안내 문구 · 제작 소요일 · 입력 항목 전체 교체다. 항목은 `fieldKey` 로 구분한다 — 같은 키는 같은 항목,
@@ -59,13 +58,30 @@ export type CustomOrderFieldBody = {
   helpText: string | null;
 };
 
-export type CustomOrderRequest = {
-  version: number;
+/** 등록 본문 `customOrder`(BE `CustomOrderSettingsRequest`)와 수정 본문에서 `version` 을 뺀 것 */
+export type CustomOrderBody = {
   enabled: boolean;
   notice: string | null;
   leadTimeDays: number | null;
   fields: CustomOrderFieldBody[];
 };
+
+export type CustomOrderRequest = CustomOrderBody & { version: number };
+
+/** 등록 화면의 처음 값 — 꺼짐 · 항목 없음(본문에서 빼는 것과 같다) */
+export const emptyCustomOrderForm = (): CustomOrderForm => ({
+  enabled: false,
+  notice: '',
+  leadTimeDays: '',
+  fields: [],
+});
+
+/** 처음 값 그대로인가 — 등록 본문에서 `customOrder` 를 뺀다 */
+export const isDefaultCustomOrder = (form: CustomOrderForm) =>
+  !form.enabled &&
+  form.notice.trim() === '' &&
+  form.leadTimeDays.trim() === '' &&
+  form.fields.length === 0;
 
 const text = (value: number | null) => (value === null ? '' : String(value));
 
@@ -145,39 +161,52 @@ const blankToNull = (value: string) => (value.trim() === '' ? null : value.trim(
 export type BuildCustomOrder =
   { ok: true; request: CustomOrderRequest } | { ok: false; errors: FormErrors };
 
+export type BuildCustomOrderBody =
+  { ok: true; body: CustomOrderBody } | { ok: false; errors: FormErrors };
+
 /** 폼 → PUT 본문. 칸 오류 키는 서버 `fieldErrors`(`fields[0].label`)와 같은 `fields.0.label` 이다 */
 export function customOrderRequest(form: CustomOrderForm, version: number): BuildCustomOrder {
+  const built = customOrderBody(form);
+  return built.ok ? { ok: true, request: { version, ...built.body } } : built;
+}
+
+/**
+ * 폼 → 본문(버전 없음). `prefix` 는 칸 오류 키 앞에 붙는다 — 등록 본문 안에서는 `customOrder.` 라
+ * 서버 `fieldErrors`(`customOrder.fields[0].label`)와 같은 `customOrder.fields.0.label` 이 된다.
+ */
+export function customOrderBody(form: CustomOrderForm, prefix = ''): BuildCustomOrderBody {
   const errors: FormErrors = {};
+  const add = (key: string, message: string) => addError(errors, `${prefix}${key}`, message);
   const notice = form.notice.trim();
-  if (notice.length > NOTICE_MAX || !noticeText(notice)) addError(errors, 'notice', NOTICE_INVALID);
+  if (notice.length > NOTICE_MAX || !noticeText(notice)) add('notice', NOTICE_INVALID);
 
   let leadTimeDays: number | null = null;
   const lead = form.leadTimeDays.trim();
   if (lead !== '') {
     const days = Number(lead);
     if (!INTEGER.test(lead) || days < 1 || days > LEAD_TIME_MAX) {
-      addError(errors, 'leadTimeDays', LEAD_TIME_INVALID);
+      add('leadTimeDays', LEAD_TIME_INVALID);
     } else leadTimeDays = days;
   }
 
-  if (form.fields.length > FIELDS_MAX) addError(errors, 'fields', FIELDS_TOO_MANY);
+  if (form.fields.length > FIELDS_MAX) add('fields', FIELDS_TOO_MANY);
   const keys = new Set<string>();
   const fields = form.fields.map((field, index): CustomOrderFieldBody => {
     const at = (name: string) => `fields.${index}.${name}`;
     const fieldKey = field.fieldKey.trim();
-    if (!FIELD_KEY.test(fieldKey)) addError(errors, at('fieldKey'), FIELD_KEY_INVALID);
-    else if (keys.has(fieldKey)) addError(errors, at('fieldKey'), FIELD_KEY_DUPLICATED);
+    if (!FIELD_KEY.test(fieldKey)) add(at('fieldKey'), FIELD_KEY_INVALID);
+    else if (keys.has(fieldKey)) add(at('fieldKey'), FIELD_KEY_DUPLICATED);
     keys.add(fieldKey);
 
     const label = field.label.trim();
     if (label === '' || label.length > LABEL_MAX || !isPlainText(label)) {
-      addError(errors, at('label'), LABEL_INVALID);
+      add(at('label'), LABEL_INVALID);
     }
     const unit = field.unit.trim();
-    if (unit.length > UNIT_MAX || !isPlainText(unit)) addError(errors, at('unit'), UNIT_INVALID);
+    if (unit.length > UNIT_MAX || !isPlainText(unit)) add(at('unit'), UNIT_INVALID);
     const helpText = field.helpText.trim();
     if (helpText.length > HELP_TEXT_MAX || !isPlainText(helpText)) {
-      addError(errors, at('helpText'), HELP_TEXT_INVALID);
+      add(at('helpText'), HELP_TEXT_INVALID);
     }
 
     let minValue: number | null = null;
@@ -189,19 +218,19 @@ export function customOrderRequest(form: CustomOrderForm, version: number): Buil
       if (raw !== '') {
         const length = Number(raw);
         if (!INTEGER.test(raw) || length < 1 || length > TEXT_LENGTH_MAX) {
-          addError(errors, at('maxValue'), TEXT_MAX_INVALID);
+          add(at('maxValue'), TEXT_MAX_INVALID);
         } else maxValue = length;
       }
     } else {
       minValue = decimalOf(field.minValue);
       maxValue = decimalOf(field.maxValue);
       stepValue = decimalOf(field.stepValue);
-      if (Number.isNaN(minValue)) addError(errors, at('minValue'), NUMBER_INVALID);
-      if (Number.isNaN(maxValue)) addError(errors, at('maxValue'), NUMBER_INVALID);
-      if (Number.isNaN(stepValue)) addError(errors, at('stepValue'), NUMBER_INVALID);
-      else if (stepValue === 0) addError(errors, at('stepValue'), STEP_NOT_POSITIVE);
+      if (Number.isNaN(minValue)) add(at('minValue'), NUMBER_INVALID);
+      if (Number.isNaN(maxValue)) add(at('maxValue'), NUMBER_INVALID);
+      if (Number.isNaN(stepValue)) add(at('stepValue'), NUMBER_INVALID);
+      else if (stepValue === 0) add(at('stepValue'), STEP_NOT_POSITIVE);
       if (minValue !== null && maxValue !== null && minValue > maxValue) {
-        addError(errors, at('minValue'), MIN_OVER_MAX);
+        add(at('minValue'), MIN_OVER_MAX);
       }
     }
     return {
@@ -220,7 +249,7 @@ export function customOrderRequest(form: CustomOrderForm, version: number): Buil
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
     ok: true,
-    request: { version, enabled: form.enabled, notice: blankToNull(notice), leadTimeDays, fields },
+    body: { enabled: form.enabled, notice: blankToNull(notice), leadTimeDays, fields },
   };
 }
 

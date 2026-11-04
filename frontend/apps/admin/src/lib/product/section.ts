@@ -8,6 +8,7 @@ import {
 } from '@/lib/api-errors';
 import { CHECK_FIELDS } from './create';
 import { adminProductPath } from './detail';
+import { addError } from './form-text';
 import { UPDATE_CONFLICT, UPDATE_UNKNOWN, type UpdateFailure } from './update';
 
 // 어드민 상품 섹션 수정(#29 · BE #9 후속) — 기본 정보(`/header`) 밖의 섹션별 PUT · POST 공통.
@@ -104,9 +105,7 @@ export const underAny =
     prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}.`));
 
 /** 칸 오류 하나 더하기(같은 문구는 한 번) */
-export function addError(errors: FormErrors, key: string, message: string) {
-  errors[key] = [...new Set([...(errors[key] ?? []), message])];
-}
+export { addError };
 
 /** 화면에서 내려 줄 저장 결과 — 섹션 화면은 상세로 옮기고, 옵션 · SKU 화면은 그 자리에서 이어서 고친다 */
 export const SAVED_NOTICE = '저장했습니다.';

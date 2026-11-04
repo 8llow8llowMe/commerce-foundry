@@ -44,6 +44,7 @@ import {
   VISIBLE_REQUIRED,
   WEIGHT_INVALID,
 } from './create';
+import { CUSTOM_ORDER_VALIDATION } from './custom-order';
 
 // 상품 등록(POST) 실패 → 화면 처리. 검증 문구는 서버 문구(칸 이름이 영문)를 그대로 보이지 않고 코드별 운영자 문구를 쓴다(원가 #395 와 같은 규칙).
 // 코드 정본은 BE `ProductValidationMessage` · `ProductErrorCode`, 칸은 `fieldErrors.field` 경로(`skus[1].additionalPrice.amount`)로 찾는다.
@@ -54,6 +55,8 @@ export const OPTION_INVALID = '옵션 구성이 올바르지 않습니다. 옵�
 export const SKU_DUPLICATED = '같은 옵션 조합의 SKU 가 두 번 있습니다. 옵션 값을 확인해 주세요.';
 export const PRICE_RULE = '가격 설정이 올바르지 않습니다. 정가 · 추가금 규칙을 확인해 주세요.';
 export const BUSY = '다른 카테고리 변경을 처리 중입니다. 잠시 후 다시 등록해 주세요.';
+/** 맞춤 제작 항목 정의 규칙 위반(`PRODUCT_011`) — 서버 문구에 이유가 붙는다 */
+export const CUSTOM_ORDER_INVALID = '맞춤 제작 입력 항목을 확인해 주세요.';
 export const IMAGES_INVALID = `이미지는 대표를 포함해 ${IMAGES_MAX}장까지, 대체 텍스트는 200자 이하로 확인해 주세요.`;
 export const IMAGE_CONFIGURATION =
   '대표 이미지는 한 장이고 같은 이미지를 두 번 붙일 수 없습니다. 이미지를 확인해 주세요.';
@@ -105,6 +108,7 @@ const VALIDATION: Record<string, string> = {
   PRODUCT_106: QUANTITY_INVALID,
   PRODUCT_019: IMAGES_INVALID,
   PRODUCT_100: CHECK_FIELDS,
+  ...CUSTOM_ORDER_VALIDATION,
 };
 
 /** 화면에 칸이 있는 키. 그 밖의 경로는 폼 전체(`form`)로 — 오류를 그릴 곳이 없어 사라지지 않게 */
@@ -125,6 +129,17 @@ const TOP_LEVEL = new Set([
   'images',
 ]);
 const SKU_FIELDS = new Set(['additionalPrice', 'saleStatus', 'weightGrams', 'hsCode']);
+const CUSTOM_ORDER_TOP = new Set(['enabled', 'notice', 'leadTimeDays', 'fields']);
+const CUSTOM_FIELD_FIELDS = new Set([
+  'fieldKey',
+  'label',
+  'inputType',
+  'unit',
+  'minValue',
+  'maxValue',
+  'stepValue',
+  'helpText',
+]);
 
 /**
  * 서버 `fieldErrors.field` → 폼 칸 키. 공통 `fieldKey` 로 점 경로를 만든 뒤 이 폼에 맞춘다.
@@ -132,6 +147,7 @@ const SKU_FIELDS = new Set(['additionalPrice', 'saleStatus', 'weightGrams', 'hsC
  * - 처음 재고(`skus[0].initialStock.quantity`)는 처음 재고 칸, SKU 옵션 조합(`skus[0].optionValues[1]`)은 SKU 표 전체로
  * - 옵션 그룹 이름 · 값은 그 그룹(`optionGroups.0.name` · `optionGroups.0.values`)
  * - 이미지 대체 텍스트는 그 칸(`images.0.altText`, 본문 번호 — `imageEntries`), 그 밖의 이미지 오류는 이미지 칸 전체(`images`)
+ * - 맞춤 제작은 그 칸(`customOrder.notice` · `customOrder.fields.0.label`), 모르는 항목 칸은 항목 전체(`customOrder.fields`)
  */
 export function createFieldKey(path: string): string {
   const key = fieldKey(path);
@@ -150,6 +166,17 @@ export function createFieldKey(path: string): string {
       return `images.${index}.altText`;
     }
     return 'images';
+  }
+  if (head === 'customOrder') {
+    const [, top, row, field] = parts;
+    if (top === 'fields' && row !== undefined && /^\d+$/.test(row)) {
+      if (field !== undefined && CUSTOM_FIELD_FIELDS.has(field)) {
+        return `customOrder.fields.${row}.${field}`;
+      }
+      return 'customOrder.fields';
+    }
+    if (top !== undefined && CUSTOM_ORDER_TOP.has(top)) return `customOrder.${top}`;
+    return 'customOrder.fields';
   }
   if (head === 'optionGroups' && index !== undefined && /^\d+$/.test(index)) {
     if (field === 'name' || field === 'values') return `optionGroups.${index}.${field}`;
@@ -222,6 +249,8 @@ export function createFailure(cause: unknown): CreateFailure {
       return errorsOnly({ optionGroups: [serverMessage(cause, OPTION_INVALID)] });
     case 'PRODUCT_014':
       return errorsOnly({ skus: [serverMessage(cause, SKU_DUPLICATED)] });
+    case 'PRODUCT_011':
+      return errorsOnly({ 'customOrder.fields': [serverMessage(cause, CUSTOM_ORDER_INVALID)] });
     case 'PRODUCT_016':
       return errorsOnly({ form: [serverMessage(cause, PRICE_RULE)] });
     case 'PRODUCT_045':

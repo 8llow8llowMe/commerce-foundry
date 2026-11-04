@@ -50,6 +50,14 @@ describe('ProductCreateForm', () => {
     expect(html).not.toContain('서버 기능이 준비되면 열립니다');
   });
 
+  it('맞춤 제작은 꺼진 채 항목 없이 시작하고 등록 화면에서 켜고 항목을 더할 수 있다', () => {
+    const html = render(true);
+    expect(html).toContain('맞춤 제작 (선택)');
+    expect(html).toContain('맞춤 제작 상품 — 켜면 고객이 주문할 때 아래 항목을 입력합니다');
+    expect(html).toContain('입력 항목이 없습니다.');
+    expect(html).toContain('입력 항목 더하기');
+  });
+
   it('등록에 성공하면 시작 체크리스트(#358) 업무 상태를 다시 읽게 한 뒤 상세로 옮긴다 — 화면에서 완료로 바꾸지 않는다', () => {
     const order: string[] = [];
     const tasks = { invalidate: vi.fn(() => order.push('invalidate')) };
