@@ -54,14 +54,31 @@ final class AnomalyProbeMeter implements QueryExecutionListener, MethodExecution
         }
         for (var query : queries) {
             String sql = query.getQuery().stripLeading().toLowerCase(Locale.ROOT);
-            // Hibernate SQL 주석은 이 slice에서 비활성화. 허용 테이블은 notification 하나다.
+            // E1 notification 집계 키를 유지하고 E2 상태 테이블만 별도 집계한다. 원문 SQL/값은 출력하지 않는다.
             String type = sql.startsWith("insert into operations.notification ") ? "insert"
                 : sql.startsWith("update operations.notification ") ? "update"
-                : sql.startsWith("select ") && sql.contains("operations.notification ") ? "select" : "other";
+                : sql.startsWith("select ") && sql.contains("operations.notification ") ? "select"
+                : sql.startsWith("insert into operations.payment_anomaly_alert_state ") ? "stateInsert"
+                : sql.startsWith("update operations.payment_anomaly_alert_state ") ? "stateUpdate"
+                : sql.startsWith("select ") && sql.contains("operations.payment_anomaly_alert_state ") ? "stateSelect" : "other";
+            if (type.equals("stateSelect") && sql.contains("order by") && sql.contains("family") && sql.contains("for ") && sql.contains("nowait")) {
+                window.increment("orderedNowaitSelect", 1);
+            }
             long rows = execution.isBatch() ? query.getParametersList().size() : 1;
             window.increment(type + "AttemptRows", rows);
             if (execution.isSuccess()) {
                 window.increment(type + "Rows", rows);
+                if (type.equals("stateInsert")) {
+                    for (var parameters : query.getParametersList()) {
+                        for (var operation : parameters) {
+                            Object[] arguments = operation.getArgs();
+                            if (arguments.length > 1 && arguments[1] instanceof String value
+                                && java.util.Set.of("UNKNOWN", "IN_PROGRESS", "RETURNED_READY", "LATE_APPROVED", "DONE_ORDER_UNSYNCED").contains(value)) {
+                                window.stateInsertFamilies.add(value);
+                            }
+                        }
+                    }
+                }
             } else {
                 window.increment("failedExecutions", 1);
             }
@@ -90,6 +107,7 @@ final class AnomalyProbeMeter implements QueryExecutionListener, MethodExecution
     final class Window implements AutoCloseable {
         private final SessionFactory factory;
         private final Map<String, Long> counts = new LinkedHashMap<>();
+        private final List<String> stateInsertFamilies = new java.util.ArrayList<>();
         private final long started = System.nanoTime();
         private final long heapStart = heap();
         private final AtomicLong sampledPeak = new AtomicLong(heapStart);
@@ -114,6 +132,7 @@ final class AnomalyProbeMeter implements QueryExecutionListener, MethodExecution
 
         Map<String, Object> snapshot() {
             var result = new LinkedHashMap<String, Object>(counts);
+            result.put("stateInsertFamilyOrder", List.copyOf(stateInsertFamilies));
             var statistics = factory.getStatistics();
             result.put("elapsedNanos", System.nanoTime() - started);
             result.put("hibernatePrepare", statistics.getPrepareStatementCount());

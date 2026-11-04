@@ -735,6 +735,57 @@
     comment on column operations.outbox_alert_state.version is
         'Optimistic lock version';
 
+    create table operations.payment_anomaly_alert_state (
+        family varchar(32) not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        first_detected_at timestamp(6) with time zone,
+        last_accepted_local_at timestamp(6) with time zone not null,
+        last_alert_at timestamp(6) with time zone,
+        last_observed_at timestamp(6) with time zone not null,
+        severity varchar(16) check ((severity in ('INFO','WARNING','CRITICAL'))),
+        status varchar(16) not null check ((status in ('NORMAL','ACTIVE'))),
+        version bigint not null,
+        primary key (family),
+        constraint ck_payment_anomaly_alert_state_family check (family in ('UNKNOWN','IN_PROGRESS','RETURNED_READY','LATE_APPROVED','DONE_ORDER_UNSYNCED')),
+        constraint ck_payment_anomaly_alert_state_incident check ((status = 'NORMAL' and severity is null and first_detected_at is null and last_alert_at is null) or (status = 'ACTIVE' and severity is not null and severity in ('WARNING','CRITICAL') and first_detected_at is not null and last_alert_at is not null)),
+        constraint ck_payment_anomaly_alert_state_severity check (status = 'NORMAL' or family = 'UNKNOWN' or (family in ('IN_PROGRESS','RETURNED_READY') and severity = 'WARNING') or (family in ('LATE_APPROVED','DONE_ORDER_UNSYNCED') and severity = 'CRITICAL')),
+        constraint ck_payment_anomaly_alert_state_chronology check (last_observed_at <= last_accepted_local_at and (status = 'NORMAL' or (first_detected_at <= last_observed_at and first_detected_at <= last_alert_at and last_alert_at <= last_accepted_local_at)))
+    );
+
+    comment on table operations.payment_anomaly_alert_state is
+        '결제 이상 다섯 사건의 수락 워터마크';
+
+    comment on column operations.payment_anomaly_alert_state.family is
+        '허용된 결제 이상 사건 키';
+
+    comment on column operations.payment_anomaly_alert_state.created_at is
+        '생성 시각';
+
+    comment on column operations.payment_anomaly_alert_state.updated_at is
+        '수정 시각';
+
+    comment on column operations.payment_anomaly_alert_state.first_detected_at is
+        '사건 개시 원천 시각';
+
+    comment on column operations.payment_anomaly_alert_state.last_accepted_local_at is
+        '마지막 수락 로컬 시각';
+
+    comment on column operations.payment_anomaly_alert_state.last_alert_at is
+        '마지막 알림 로컬 시각';
+
+    comment on column operations.payment_anomaly_alert_state.last_observed_at is
+        '마지막 수락 원천 시각';
+
+    comment on column operations.payment_anomaly_alert_state.severity is
+        '활성 사건의 최고 긴급도';
+
+    comment on column operations.payment_anomaly_alert_state.status is
+        '사건 상태';
+
+    comment on column operations.payment_anomaly_alert_state.version is
+        '낙관적 락 버전';
+
     create table operations.shedlock (
         name varchar(64) not null,
         lock_until timestamp(6) with time zone not null,

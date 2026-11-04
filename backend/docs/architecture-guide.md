@@ -171,6 +171,8 @@ Info → Presenter → Response
   트랜잭션은 시도마다 Processor 가 열고 Facade 는 재시도만 한다 (예: operations `JobAdminFacade#cancel`, 작업 등록 `JobRegisterFacade`).
 - **유니크 키 경합으로 행을 처음 만드는 일** 도 예외다. 진 쪽 트랜잭션은 PostgreSQL 이 중단시켜 같은 트랜잭션에서 다시 시도할 수 없으므로 생성은 adapter 의
   `REQUIRES_NEW` 로 격리하고, Facade 는 바깥 트랜잭션 없이(`NOT_SUPPORTED`) 시도를 반복한다 (예: operations `AiUsageMeterFacade#reserve`, order 주문 요청).
+  단, 이상 탐지의 사건 상태와 전체 수신자 알림을 원자 저장하는 경로는 Processor의 같은 트랜잭션을 유지한다.
+  초기 INSERT 경합도 상태·알림 전체를 롤백하며, 다음 호출은 새 트랜잭션에서 다시 판정한다(#477 A4b-2).
 - **Processor 가 전파 설정이 다른 읽기 둘을 순서대로 부를 때** 는 Processor 에 트랜잭션을 걸지 않고 읽기 트랜잭션을 어댑터에 둔다 — Processor 에 걸면 `REQUIRES_NEW`
   쪽이 커넥션을 하나 더 잡고, 읽는 순서 자체가 정합성 규칙이면 한 트랜잭션으로 묶을 이유도 없다 (예: order `OrderProcessor#heldQuantitiesByProduct`, #436).
 - **단일 프로필의 버전 비교·저장 결과를 감사할 때** 는 진입 Facade에 트랜잭션을 걸지 않고 저장소 adapter의 한 트랜잭션에서 조회·버전 비교·flush를 끝낸다
