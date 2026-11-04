@@ -62,28 +62,28 @@ public class AdminAuditProcessor {
     }
 
     public void adminOtpEnrolled(long adminMemberId, boolean succeeded) {
-        adminAuditPort.adminOtpEnrolled(adminMemberId, succeeded);
+        safelyRecord(AdminAuditAction.ADMIN_OTP_ENROLL, adminMemberId, () -> adminAuditPort.adminOtpEnrolled(adminMemberId, succeeded));
     }
 
     public void adminOtpDisabled(long adminMemberId, boolean succeeded) {
-        adminAuditPort.adminOtpDisabled(adminMemberId, succeeded);
+        safelyRecord(AdminAuditAction.ADMIN_OTP_DISABLE, adminMemberId, () -> adminAuditPort.adminOtpDisabled(adminMemberId, succeeded));
     }
 
     public void adminOtpRecoveryCodesRegenerated(long adminMemberId, boolean succeeded) {
-        adminAuditPort.adminOtpRecoveryCodesRegenerated(adminMemberId, succeeded);
+        safelyRecord(AdminAuditAction.ADMIN_OTP_RECOVERY_REGENERATE, adminMemberId, () -> adminAuditPort.adminOtpRecoveryCodesRegenerated(adminMemberId, succeeded));
     }
 
     public void adminOtpPeerRecovered(long actorMemberId, long targetMemberId, boolean succeeded) {
-        adminAuditPort.adminOtpPeerRecovered(actorMemberId, targetMemberId, succeeded);
+        safelyRecord(AdminAuditAction.ADMIN_OTP_PEER_RECOVERY, actorMemberId, () -> adminAuditPort.adminOtpPeerRecovered(actorMemberId, targetMemberId, succeeded));
     }
 
-    /** 계정 감사만 격리한다. 업무 DB 커밋과 필수 Redis 처리는 호출자가 이미 마쳤다. */
+    /** 계정·OTP 감사 장애를 격리한다. 업무 결과와 호출자에게 남은 필수 처리를 바꾸지 않는다. */
     private void safelyRecord(AdminAuditAction action, long actorMemberId, Runnable write) {
         try {
             write.run();
         } catch (RuntimeException exception) {
             try {
-                log.error("admin account audit failed. action={}, actorMemberId={}, error={}", action, actorMemberId, exception.getClass().getName());
+                log.error("admin audit failed. action={}, actorMemberId={}, error={}", action, actorMemberId, exception.getClass().getName());
             } catch (RuntimeException loggingFailure) {
                 // 진단 로거 장애도 이미 끝난 업무 결과를 바꾸지 않는다.
             }

@@ -53,12 +53,30 @@ class AdminAuditProcessorTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
+    void otpActionsDelegateExactlyOnce(boolean succeeded) {
+        processor.adminOtpEnrolled(7L, succeeded);
+        processor.adminOtpDisabled(7L, succeeded);
+        processor.adminOtpRecoveryCodesRegenerated(7L, succeeded);
+        processor.adminOtpPeerRecovered(7L, 9L, succeeded);
+        verify(adminAuditPort).adminOtpEnrolled(7L, succeeded);
+        verify(adminAuditPort).adminOtpDisabled(7L, succeeded);
+        verify(adminAuditPort).adminOtpRecoveryCodesRegenerated(7L, succeeded);
+        verify(adminAuditPort).adminOtpPeerRecovered(7L, 9L, succeeded);
+        verifyNoMoreInteractions(adminAuditPort);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
     void accountAuditWriterFailuresAreIsolatedAndRedacted(boolean succeeded) {
         String secret = "email@example.com name-password JWT-jti-secret";
         RuntimeException failure = new IllegalStateException(secret, new IllegalArgumentException("cause-secret"));
         doThrow(failure).when(adminAuditPort).adminAccountCreated(7L, 9L, succeeded);
         doThrow(failure).when(adminAuditPort).adminAccountDeactivated(7L, 9L, succeeded);
         doThrow(failure).when(adminAuditPort).adminPasswordChanged(7L, succeeded);
+        doThrow(failure).when(adminAuditPort).adminOtpEnrolled(7L, succeeded);
+        doThrow(failure).when(adminAuditPort).adminOtpDisabled(7L, succeeded);
+        doThrow(failure).when(adminAuditPort).adminOtpRecoveryCodesRegenerated(7L, succeeded);
+        doThrow(failure).when(adminAuditPort).adminOtpPeerRecovered(7L, 9L, succeeded);
         Logger logger = (Logger) LoggerFactory.getLogger(AdminAuditProcessor.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -68,15 +86,23 @@ class AdminAuditProcessorTest {
                 processor.adminAccountCreated(7L, 9L, succeeded);
                 processor.adminAccountDeactivated(7L, 9L, succeeded);
                 processor.adminPasswordChanged(7L, succeeded);
+                processor.adminOtpEnrolled(7L, succeeded);
+                processor.adminOtpDisabled(7L, succeeded);
+                processor.adminOtpRecoveryCodesRegenerated(7L, succeeded);
+                processor.adminOtpPeerRecovered(7L, 9L, succeeded);
             }).doesNotThrowAnyException();
-            assertThat(appender.list).hasSize(3).allSatisfy(event -> {
-                assertThat(event.getFormattedMessage()).contains("actorMemberId=7", "java.lang.IllegalStateException")
+            assertThat(appender.list).hasSize(7).allSatisfy(event -> {
+                assertThat(event.getFormattedMessage()).contains("admin audit failed", "actorMemberId=7", "java.lang.IllegalStateException")
                     .doesNotContain("email@example.com", "name-password", "JWT-jti-secret", "cause-secret", "target=");
                 assertThat(event.getThrowableProxy()).isNull();
             });
             verify(adminAuditPort).adminAccountCreated(7L, 9L, succeeded);
             verify(adminAuditPort).adminAccountDeactivated(7L, 9L, succeeded);
             verify(adminAuditPort).adminPasswordChanged(7L, succeeded);
+            verify(adminAuditPort).adminOtpEnrolled(7L, succeeded);
+            verify(adminAuditPort).adminOtpDisabled(7L, succeeded);
+            verify(adminAuditPort).adminOtpRecoveryCodesRegenerated(7L, succeeded);
+            verify(adminAuditPort).adminOtpPeerRecovered(7L, 9L, succeeded);
             verifyNoMoreInteractions(adminAuditPort);
         } finally {
             logger.detachAppender(appender);
@@ -88,12 +114,22 @@ class AdminAuditProcessorTest {
     @SuppressWarnings("unchecked")
     void fallbackLoggerFailureIsAlsoIsolated() {
         doThrow(new IllegalStateException("writer-secret")).when(adminAuditPort).adminPasswordChanged(7L, true);
+        doThrow(new IllegalStateException("writer-secret")).when(adminAuditPort).adminOtpEnrolled(7L, true);
+        doThrow(new IllegalStateException("writer-secret")).when(adminAuditPort).adminOtpDisabled(7L, true);
+        doThrow(new IllegalStateException("writer-secret")).when(adminAuditPort).adminOtpRecoveryCodesRegenerated(7L, true);
+        doThrow(new IllegalStateException("writer-secret")).when(adminAuditPort).adminOtpPeerRecovered(7L, 9L, true);
         Logger logger = (Logger) LoggerFactory.getLogger(AdminAuditProcessor.class);
         Appender<ILoggingEvent> appender = mock(Appender.class);
         doThrow(new IllegalStateException("logger-secret")).when(appender).doAppend(any());
         logger.addAppender(appender);
         try {
-            assertThatCode(() -> processor.adminPasswordChanged(7L, true)).doesNotThrowAnyException();
+            assertThatCode(() -> {
+                processor.adminPasswordChanged(7L, true);
+                processor.adminOtpEnrolled(7L, true);
+                processor.adminOtpDisabled(7L, true);
+                processor.adminOtpRecoveryCodesRegenerated(7L, true);
+                processor.adminOtpPeerRecovered(7L, 9L, true);
+            }).doesNotThrowAnyException();
         } finally {
             logger.detachAppender(appender);
         }

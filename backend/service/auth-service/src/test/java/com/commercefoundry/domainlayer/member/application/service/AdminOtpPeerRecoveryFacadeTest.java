@@ -10,6 +10,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.Appender;
+import ch.qos.logback.core.read.ListAppender;
+import com.commercefoundry.domainlayer.member.application.port.out.AdminAuditPort;
 import com.commercefoundry.domainlayer.member.adapter.in.admin.presenter.AdminOtpAdminPresenter;
 import com.commercefoundry.domainlayer.member.application.exception.LoginAttemptLimitedException;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
@@ -31,6 +36,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.slf4j.LoggerFactory;
 
 /** 동료 OTP 복구의 재인증·DB 교체·컷오프·감사 순서와 실패 경계. */
 class AdminOtpPeerRecoveryFacadeTest {
@@ -132,5 +138,79 @@ class AdminOtpPeerRecoveryFacadeTest {
             .isInstanceOf(MemberException.class).extracting("errorCode").isEqualTo(MemberErrorCode.OTP_BUSY);
         verify(audit).adminOtpPeerRecovered(ACTOR, TARGET, false);
         verifyNoInteractions(cutoff);
+    }
+
+    @Test
+    void unavailableAdmissionHasNoAudit() {
+        RuntimeException failure = new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+        willThrow(failure).given(guard).admitAdminOtpPeerRecovery(ACTOR);
+        assertThatThrownBy(() -> facade.recover(ACTOR, TARGET, "current-password1", "123456")).isSameAs(failure);
+        verifyNoInteractions(accounts, otp, audit, cutoff);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void failedAuditNeverSkipsCutoffOrReplacesItsOriginalFailure(boolean cutoffFails) {
+        validProof();
+        AdminAuditPort port = mock(AdminAuditPort.class);
+        willThrow(new IllegalStateException("audit-secret")).given(port).adminOtpPeerRecovered(ACTOR, TARGET, true);
+        RuntimeException original = new IllegalStateException("cutoff-secret", new IllegalArgumentException("cause-secret"));
+        if (cutoffFails) willThrow(original).given(cutoff).cutOff(TARGET, NOW.plusSeconds(1));
+        AdminOtpPeerRecoveryFacade safe = new AdminOtpPeerRecoveryFacade(accounts, otp, guard, cutoff, new AdminAuditProcessor(port),
+            new AdminOtpAdminPresenter(), Clock.fixed(NOW, ZoneOffset.UTC));
+        Logger logger = (Logger) LoggerFactory.getLogger(AdminOtpPeerRecoveryFacade.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            if (cutoffFails) {
+                assertThatThrownBy(() -> safe.recover(ACTOR, TARGET, "current-password1", "ABCDE-FGH23")).isSameAs(original);
+                assertThat(appender.list).singleElement().satisfies(event -> {
+                    assertThat(event.getFormattedMessage()).contains("actorMemberId=7", "targetMemberId=9", "java.lang.IllegalStateException")
+                        .doesNotContain("audit-secret", "cutoff-secret", "cause-secret");
+                    assertThat(event.getThrowableProxy()).isNull();
+                });
+            } else {
+                assertThat(safe.recover(ACTOR, TARGET, "current-password1", "ABCDE-FGH23").recoveryCodes()).containsExactlyElementsOf(ISSUED.codes());
+            }
+            verify(cutoff).cutOff(TARGET, NOW.plusSeconds(1));
+            verify(port).adminOtpPeerRecovered(ACTOR, TARGET, true);
+            org.mockito.Mockito.verifyNoMoreInteractions(port);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void failingDiagnosticLoggerCannotReplaceCutoffFailure() {
+        validProof();
+        RuntimeException original = new IllegalStateException("cutoff-secret");
+        willThrow(original).given(cutoff).cutOff(TARGET, NOW.plusSeconds(1));
+        Logger logger = (Logger) LoggerFactory.getLogger(AdminOtpPeerRecoveryFacade.class);
+        Appender<ILoggingEvent> appender = mock(Appender.class);
+        org.mockito.Mockito.doThrow(new IllegalStateException("logger-secret")).when(appender).doAppend(org.mockito.ArgumentMatchers.any());
+        logger.addAppender(appender);
+        try {
+            assertThatThrownBy(() -> facade.recover(ACTOR, TARGET, "current-password1", "ABCDE-FGH23")).isSameAs(original);
+            verify(audit).adminOtpPeerRecovered(ACTOR, TARGET, true);
+            verify(audit, never()).adminOtpPeerRecovered(ACTOR, TARGET, false);
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    void presenterFailureDoesNotAddFailureAudit() {
+        validProof();
+        AdminOtpAdminPresenter presenter = mock(AdminOtpAdminPresenter.class);
+        RuntimeException failure = new IllegalStateException("presenter-secret");
+        given(presenter.toRecoveryCodes(org.mockito.ArgumentMatchers.any())).willThrow(failure);
+        AdminOtpPeerRecoveryFacade withBrokenPresenter = new AdminOtpPeerRecoveryFacade(accounts, otp, guard, cutoff, audit,
+            presenter, Clock.fixed(NOW, ZoneOffset.UTC));
+        assertThatThrownBy(() -> withBrokenPresenter.recover(ACTOR, TARGET, "current-password1", "ABCDE-FGH23")).isSameAs(failure);
+        verify(audit).adminOtpPeerRecovered(ACTOR, TARGET, true);
+        org.mockito.Mockito.verifyNoMoreInteractions(audit);
     }
 }

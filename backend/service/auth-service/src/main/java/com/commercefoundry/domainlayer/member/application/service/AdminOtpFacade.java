@@ -68,12 +68,12 @@ public class AdminOtpFacade implements AdminOtpUseCase {
             long step = adminOtpProcessor.verifyEnrollmentCode(secret, code, clock.instant());
             issued = adminOtpProcessor.issueRecoveryCodes();
             inOtpQueue(() -> adminOtpProcessor.confirm(adminMemberId, secret, step, clock.instant(), issued.hashes()));
-        } catch (MemberException failure) {
+            adminOtpProcessor.discardEnrollment(adminMemberId);
+            loginGuardProcessor.clearAdminOtp(adminMemberId);
+        } catch (RuntimeException failure) {
             adminAuditProcessor.adminOtpEnrolled(adminMemberId, false);
             throw failure;
         }
-        adminOtpProcessor.discardEnrollment(adminMemberId);
-        loginGuardProcessor.clearAdminOtp(adminMemberId);
         adminAuditProcessor.adminOtpEnrolled(adminMemberId, true);
         return adminOtpAdminPresenter.toRecoveryCodes(issued.toInfo());
     }
@@ -85,11 +85,11 @@ public class AdminOtpFacade implements AdminOtpUseCase {
             requirePassword(adminMemberId, currentPassword);
             AdminOtpProof proof = adminOtpProcessor.resolveProof(adminMemberId, code, clock.instant());
             inOtpQueue(() -> adminOtpProcessor.disable(adminMemberId, proof, clock.instant()));
-        } catch (MemberException failure) {
+            loginGuardProcessor.clearAdminOtp(adminMemberId);
+        } catch (RuntimeException failure) {
             adminAuditProcessor.adminOtpDisabled(adminMemberId, false);
             throw failure;
         }
-        loginGuardProcessor.clearAdminOtp(adminMemberId);
         adminAuditProcessor.adminOtpDisabled(adminMemberId, true);
     }
 
@@ -103,11 +103,11 @@ public class AdminOtpFacade implements AdminOtpUseCase {
             AdminOtpProof proof = adminOtpProcessor.resolveProof(adminMemberId, code, clock.instant());
             issued = adminOtpProcessor.issueRecoveryCodes();
             inOtpQueue(() -> adminOtpProcessor.replaceRecoveryCodes(adminMemberId, proof, issued.hashes(), clock.instant()));
-        } catch (MemberException failure) {
+            loginGuardProcessor.clearAdminOtp(adminMemberId);
+        } catch (RuntimeException failure) {
             adminAuditProcessor.adminOtpRecoveryCodesRegenerated(adminMemberId, false);
             throw failure;
         }
-        loginGuardProcessor.clearAdminOtp(adminMemberId);
         adminAuditProcessor.adminOtpRecoveryCodesRegenerated(adminMemberId, true);
         return adminOtpAdminPresenter.toRecoveryCodes(issued.toInfo());
     }

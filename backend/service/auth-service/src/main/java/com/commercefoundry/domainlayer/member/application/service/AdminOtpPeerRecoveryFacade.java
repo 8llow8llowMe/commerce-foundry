@@ -68,7 +68,12 @@ public class AdminOtpPeerRecoveryFacade implements AdminOtpPeerRecoveryUseCase {
             Instant cutoff = clock.instant().truncatedTo(ChronoUnit.SECONDS).plusSeconds(1);
             adminAccessCutoffProcessor.cutOff(targetMemberId, cutoff);
         } catch (RuntimeException failure) {
-            log.error("admin otp peer recovery cutoff failed. actorMemberId={}, targetMemberId={}", actorMemberId, targetMemberId, failure);
+            try {
+                log.error("admin otp peer recovery cutoff failed. actorMemberId={}, targetMemberId={}, error={}",
+                    actorMemberId, targetMemberId, failure.getClass().getName());
+            } catch (RuntimeException loggingFailure) {
+                // 진단 로거 장애로 원래 컷오프 오류를 가리지 않는다.
+            }
             throw failure;
         }
         return adminOtpAdminPresenter.toRecoveryCodes(issued.toInfo());

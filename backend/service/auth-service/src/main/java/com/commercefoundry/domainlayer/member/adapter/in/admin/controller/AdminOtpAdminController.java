@@ -8,6 +8,8 @@ import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.response.Admi
 import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.response.AdminOtpRecoveryCodesResponse;
 import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.response.AdminOtpStatusResponse;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminOtpUseCase;
+import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.audit.AdminAuditExempt;
 import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
@@ -55,6 +57,7 @@ public class AdminOtpAdminController {
         + "다시 부르면 이전 진행 중 등록은 버려진다. 이미 등록돼 있으면 409(AUTH_037) — 바꾸려면 해제부터 한다.")
     @PreAuthorize(AdminAuthority.OPERATOR)
     @PostMapping("/enrollment")
+    @AdminAuditExempt(reason = "확인 전에는 OTP를 켜지 않으며 진행 중 등록은 TTL로 사라진다")
     public ResponseEntity<Response<AdminOtpEnrollmentResponse>> startEnrollment(@Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Response.success(adminOtpUseCase.startEnrollment(admin.memberId())));
     }
@@ -64,6 +67,7 @@ public class AdminOtpAdminController {
         + "비활성 관리자면 404(AUTH_033), 같은 관리자의 다른 OTP 요청과 겹치면 409(AUTH_044, 잠시 뒤 재시도), 시도가 15분에 5회를 넘으면 429(AUTH_043) + Retry-After.")
     @PreAuthorize(AdminAuthority.OPERATOR)
     @PostMapping
+    @AdminAudited(action = "ADMIN_OTP_ENROLL")
     public ResponseEntity<Response<AdminOtpRecoveryCodesResponse>> confirmEnrollment(
         @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin,
         @Valid @RequestBody AdminOtpConfirmRequest request
@@ -77,6 +81,7 @@ public class AdminOtpAdminController {
         + "같은 관리자의 다른 OTP 요청과 겹치면 409(AUTH_044, 잠시 뒤 재시도), 시도 초과 429(AUTH_043) + Retry-After.")
     @PreAuthorize(AdminAuthority.OPERATOR)
     @PostMapping("/deactivation")
+    @AdminAudited(action = "ADMIN_OTP_DISABLE")
     public ResponseEntity<Response<Void>> disable(
         @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin,
         @Valid @RequestBody AdminOtpReauthenticationRequest request
@@ -89,6 +94,7 @@ public class AdminOtpAdminController {
         + "오류는 해제와 같다(AUTH_036 · AUTH_033 · AUTH_032 · AUTH_035 · AUTH_044 · AUTH_043).")
     @PreAuthorize(AdminAuthority.OPERATOR)
     @PostMapping("/recovery-codes")
+    @AdminAudited(action = "ADMIN_OTP_RECOVERY_REGENERATE")
     public ResponseEntity<Response<AdminOtpRecoveryCodesResponse>> regenerateRecoveryCodes(
         @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin,
         @Valid @RequestBody AdminOtpReauthenticationRequest request
