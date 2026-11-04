@@ -1,8 +1,6 @@
 package com.commercefoundry.domainlayer.storeprofile;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.reset;
 
 import com.commercefoundry.domainlayer.storeprofile.adapter.out.persistence.StoreProfileRepositoryAdapter;
 import com.commercefoundry.domainlayer.storeprofile.adapter.out.persistence.repository.StoreProfileRepository;
@@ -12,20 +10,22 @@ import com.commercefoundry.global.config.OperationsServiceFeaturesConfig;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import org.aopalliance.intercept.MethodInterceptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.aop.framework.Advised;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
@@ -46,7 +46,7 @@ class StoreProfilePostgresTest {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/operations-schema.sql");
     @Autowired
     StoreProfileRepositoryAdapter adapter;
-    @MockitoSpyBean
+    @Autowired
     StoreProfileRepository repository;
 
     @BeforeEach
@@ -70,11 +70,17 @@ class StoreProfilePostgresTest {
     private void race(Long expected) throws Exception {
         int editors = 6;
         CyclicBarrier readBarrier = new CyclicBarrier(editors);
-        doAnswer(invocation -> {
-            Object result = invocation.callRealMethod();
-            readBarrier.await(20, TimeUnit.SECONDS);
+        Advised repositoryProxy = (Advised) repository;
+        MethodInterceptor synchronizeReads = invocation -> {
+            Object result = invocation.proceed();
+            if (invocation.getMethod().getName().equals("findById") && invocation.getArguments().length == 1
+                && Objects.equals(invocation.getArguments()[0], 1L)) {
+                readBarrier.await(20, TimeUnit.SECONDS);
+            }
             return result;
-        }).when(repository).findById(1L);
+        };
+        // 실제 Spring Data 조회를 실행한 뒤 모든 편집자가 같은 초기 상태를 읽을 때까지 기다린다.
+        repositoryProxy.addAdvice(0, synchronizeReads);
         CountDownLatch ready = new CountDownLatch(editors);
         CountDownLatch start = new CountDownLatch(1);
         try (var executor = Executors.newFixedThreadPool(editors)) {
@@ -104,7 +110,7 @@ class StoreProfilePostgresTest {
             }
             assertThat(winners).isEqualTo(1);
         } finally {
-            reset(repository);
+            repositoryProxy.removeAdvice(synchronizeReads);
         }
     }
 }
