@@ -22,6 +22,7 @@
 | `secret-management.md` | Vault 시크릿 관리 — 키 이름 규칙(`../.env.example`), 환경별 출처, 키 추가 절차, 유출 대응 |
 | `service-inventory.md` | 서비스 책임·포트·호출 관계·결정 대기 항목 |
 | `jenkins-cicd-guide.md` | Jenkins 멀티브랜치 배포 — Actions 와의 역할 분담, 잡 · agent · lock · Vault, 변경 경로 · 라벨 게이트, FORCE_DEPLOY · 되돌리기, 실패 대응 |
+| `store-legal-guide.md` | 스토어 이용약관·개인정보처리방침 불변 리비전·명시적 게시·공개 조회·시작 템플릿 (#569) |
 | `done-checklist.md` | 기능 단위 완료 기준 |
 | `migration-guide.md` | 외부 쇼핑몰(카페24) 데이터 이관 — 파이프라인, 결정 대기, 정규화 규칙, 입력 계약 초안, 실데이터 취급 |
 

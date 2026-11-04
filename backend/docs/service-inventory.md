@@ -263,3 +263,10 @@ ADMIN 전체 교체 저장은 즉시 공개된다. 익명 공개 조회는 표�
 Gateway 경로는 `/api/v1/store/**`·`/api/v1/admin/store/**`다. 신규 테이블은 `operations.store_profile`이며
 실제 Hibernate DDL은 `service/operations-service/src/test/resources/ddl/operations-schema.sql`에 포함한다.
 FE #568의 설정 화면·푸터 BUSINESS_* 이행 계약은 `api-design-guide.md` 쇼핑몰 공개 정보 절을 따른다. 새 Vault 키는 없다.
+
+## 스토어 법적 문서 (#569)
+
+operations-service `legaldocument`는 TERMS/PRIVACY × ko/en의 불변 초안 리비전·게시 포인터·최초 게시 기록을 소유한다.
+ADMIN 편집·검토 확인 후 즉시 게시·이력·브랜드 비종속 시작 템플릿과 익명 게시본 조회를 제공한다.
+AI·외부 수집·auth 동의 수집을 호출하지 않으며 새 초안은 공개 게시본을 바꾸지 않는다.
+계약·운영 DDL·FE #570 영향과 #566 store route 배포 의존은 [store-legal-guide.md](store-legal-guide.md)를 따른다.

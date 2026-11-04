@@ -1144,6 +1144,10 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   행위자는 컨트롤러의 `@AuthenticationPrincipal MemberPrincipal` 에서 꺼낸다 — 감사에만 쓰면 UseCase 마지막 인자 `long actorMemberId`, 업무 데이터(이력 표의 관리자 칸 등)면 Command 에 싣는다.
   요청 본문 값을 행위자로 쓰지 않는다. 컨트롤러의 `@AdminAudited.action()` 집합과 enum 값 집합이 같은지 서비스 테스트가 본다.
   **target 은 업무 호출 전에 만든다** — 경로 변수 · Command 의 식별자로 `AdminAuditLog.target(...)` 을 먼저 만들어 두어야 업무가 예외로 끝나도 같은 대상으로 `FAILURE` 를 남긴다.
+- **법적 문서 전환 예외 (#569)** — operations `legaldocument`는 서비스 감사 통합 전까지 `LegalDocumentAdminFacade` →
+  컨텍스트 내부 `LegalDocumentAuditProcessor`로 `LEGAL_DOCUMENT_DRAFT_SAVE`·`LEGAL_DOCUMENT_PUBLISH`를 기록한다.
+  `@AdminAudited` 선언, 실제 JWT 행위자, 고정 허용 코드 대상 `legal-document:{terms|privacy}-{ko|en}`, 네 칸 형식과 본문 금지는 동일하다.
+  adapter 트랜잭션 완료 후 성공을 기록하고 UseCase 진입 뒤 업무 실패만 실패로 기록한다. 감사만을 위한 새 DB 테이블은 만들지 않는다.
 - **가드 — `ResourceServerSmokeTestSupport.adminWriteHandlersDeclareAudit()`** (서비스 `*SecuritySmokeTest` 가 상속). 실제 매핑 중 `/api/v1/admin` 아래의
   POST · PUT · PATCH · DELETE(메서드 조건이 없는 매핑 포함) 핸들러는 `@AdminAudited` 또는 `@AdminAuditExempt` 를 선언해야 한다. 둘 다 붙이거나, 행위 이름 형식이 틀리거나,
   면제 이유가 비면 실패다. 위반은 `클래스#메서드 [경로] → 고치는 법` 으로 알린다. 패키지 기준 ArchUnit 규칙은 두지 않는다(실제 매핑을 보는 런타임 가드 하나로 본다).
