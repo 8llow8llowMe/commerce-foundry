@@ -34,7 +34,7 @@
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
-| operations-service | — | `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**`, `/api/v1/admin/onboarding/**`, `/api/v1/admin/campaigns/**` |
+| operations-service | `/api/v1/store/**` | `/api/v1/admin/store/**`, `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**`, `/api/v1/admin/onboarding/**`, `/api/v1/admin/campaigns/**` |
 | support-service | `/api/v1/support/**` | `/api/v1/admin/support/**` |
 
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
@@ -1794,3 +1794,23 @@ FE는 응답의 문서/리비전 버전을 보관해 요청에 포함하고 409�
 [마케팅 동의 조회 계약](marketing-consent-guide.md#관리자-수신자-미리보기-230-pr-b)을 따른다.
 중복 제거 후 첫 요청 순서의 `members[{memberId:String,marketingAgreed:boolean}]`와
 `recipientCount/agreedCount/excludedCount`를 공통 봉투로 낸다. 불완전 응답이나 조회 실패는503 `CAMPAIGN_001`이다.
+
+## 쇼핑몰 공개 정보 (#566)
+
+- 정본: operations-service `storeprofile`, 배포당 단일 `store_profile` 행(id=1). 다른 고객사는 다른 배포·DB를 사용한다.
+- ADMIN `GET /api/v1/admin/store/profile`, `PUT /api/v1/admin/store/profile`; 익명 `GET /api/v1/store/profile`.
+  조회·저장 성공 응답은 공통 `Response` 봉투와 `Cache-Control: no-store`를 사용한다. 미등록 조회는 404 `STORE_PROFILE_001`이다.
+- PUT은 전체 교체이며 **저장 즉시 공개**된다. 최초 생성 `expectedVersion: null`, 수정은 ADMIN GET의 `version`을 전달한다.
+  오래된 편집·중복 최초 등록·DB 낙관 락 경합은 409 `STORE_PROFILE_020`이다. FE는 다시 조회해 편집 내용을 확인한 뒤 저장한다.
+  동일 값 저장은 Hibernate의 변경 감지에 따라 버전을 유지할 수 있다. 실제 변경은 버전을 증가시킨다.
+- 필수 필드(최대 문자 수): `storeName`(100), `companyName`(200), `representativeName`(100), `countryCode`(2, 대문자 ISO 3166-1 alpha-2),
+  `businessRegistrationNumber`(100), `address`(500), `customerServiceEmail`(254, 이메일).
+  선택 필드: `mailOrderRegistrationNumber`(100), `customerServicePhone`(50), `customerServiceHours`(500). 선택 필드를 지우려면 null을 보낸다.
+  사업자 식별 번호는 국가별 형식을 하드코딩하지 않는다. 버전은 null 또는 0 이상이다. 필드 검증은 `STORE_PROFILE_101`~`111`,
+  모든 표시 필드는 NUL·줄바꿈을 포함한 Unicode Cc 제어문자를 허용하지 않는다.
+  알 수 없는 ISO 국가·깨진 JSON 등은 `STORE_PROFILE_100` 오류 봉투다.
+- 공개 응답은 위 표시 필드 10개만 허용한다. ADMIN 응답만 `version`을 추가한다. 내부 고정 ID·감사 행위자·비밀키는 반환하지 않는다.
+  쓰기는 JWT ADMIN만 가능하며 감사에는 `STORE_PROFILE_UPDATE`, 실제 JWT 행위자, `store-profile:1`, 성공/실패만 남긴다.
+- FE 연계 #568: 설정 화면은 저장이 즉시 공개됨을 안내하고 `expectedVersion`을 전달한다. 푸터 `BUSINESS_*`와 쇼핑몰 표시 이름을
+  공개 API로 이행한다. 미등록 404는 설정 필요 상태로 다루고 실정보 기본값을 번들에 넣지 않는다. API 조회는 캐시하지 않는다.
+  이용약관·개인정보처리방침 관리(#569)는 별도 계약이다. 새 비밀키·FE 코드 변경은 없다. 계약 검토자 `seonghoho`.

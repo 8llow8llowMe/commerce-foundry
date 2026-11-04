@@ -1137,6 +1137,9 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - **선언 — `@AdminAudited(action = "...")` · `@AdminAuditExempt(reason = "...")`** (같은 패키지, METHOD · RUNTIME). 애노테이션은 줄을 쓰지 않는 선언이다.
   실제 줄은 Facade → 서비스 `adminaudit` Processor 가 `AdminAuditLog.write` 로 쓴다.
 - **서비스 쪽 구성** — 서비스당 `domainlayer/adminaudit`(application 만): `<Svc>AdminAuditAction` enum + `<Svc>AdminAuditProcessor`. Port/Adapter 는 DB 싱크가 있을 때만(auth).
+  **operations 전환 예외 (#566)**: 기존 작업 감사와 동일하게 `storeprofile` 내부 `StoreProfileAuditProcessor`가 `STORE_PROFILE_UPDATE` 문자열 행위를 기록한다.
+  서비스 전체 `adminaudit`·행위 enum 통합은 #163의 후속 범위로 남긴다. #566은 선언과 실제 감사 줄의 행위·JWT 행위자·고정 대상·결과를 흐름 테스트로 검증한다.
+  입력 검증 400은 감사하지 않으며, 저장 성공·버전 충돌 실패에는 본문 없이 `store-profile:1`만 기록한다.
   행위자는 컨트롤러의 `@AuthenticationPrincipal MemberPrincipal` 에서 꺼낸다 — 감사에만 쓰면 UseCase 마지막 인자 `long actorMemberId`, 업무 데이터(이력 표의 관리자 칸 등)면 Command 에 싣는다.
   요청 본문 값을 행위자로 쓰지 않는다. 컨트롤러의 `@AdminAudited.action()` 집합과 enum 값 집합이 같은지 서비스 테스트가 본다.
   **target 은 업무 호출 전에 만든다** — 경로 변수 · Command 의 식별자로 `AdminAuditLog.target(...)` 을 먼저 만들어 두어야 업무가 예외로 끝나도 같은 대상으로 `FAILURE` 를 남긴다.

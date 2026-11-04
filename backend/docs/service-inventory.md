@@ -252,3 +252,11 @@ operations-service는 auth 활성 관리자 목록과 payment-service의 읽기 
 ### DLT 이상 징후 알림 (#477 A2)
 
 operations-service는 기본 비활성 기능으로 기존 네 DLT를 구독하고 auth A1 internal 수신자 API의 활성 관리자에게 ANOMALY 알림을 저장한다. 결제 승인 DLT는 CRITICAL, 나머지는 WARNING이다. 토픽별 억제·파티션별 워터마크로 상태를 제한하며 업무 상태는 변경하지 않는다. 신규 operations 테이블은 `dlt_alert_state`·`dlt_partition_checkpoint`다. 배포·ACL·실패/복구·FE 계약은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
+
+## 쇼핑몰 공개 정보 (#566)
+
+operations-service `storeprofile`이 배포당 단일 쇼핑몰 이름·공개 사업자·CS 정보와 낙관적 버전을 소유한다.
+ADMIN 전체 교체 저장은 즉시 공개된다. 익명 공개 조회는 표시 필드만 반환하며 내부 버전·행위자는 노출하지 않는다.
+Gateway 경로는 `/api/v1/store/**`·`/api/v1/admin/store/**`다. 신규 테이블은 `operations.store_profile`이며
+실제 Hibernate DDL은 `service/operations-service/src/test/resources/ddl/operations-schema.sql`에 포함한다.
+FE #568의 설정 화면·푸터 BUSINESS_* 이행 계약은 `api-design-guide.md` 쇼핑몰 공개 정보 절을 따른다. 새 Vault 키는 없다.
