@@ -46,6 +46,8 @@ dependencies {
 
     // 리포지토리 · 동시성 테스트 (@DataJpaTest · @SpringBootTest + PostgreSQL 컨테이너). Docker 없는 로컬은 건너뛰고 CI 는 실패한다 (bootstrap-conventions.md)
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    // #477 E1: 운영 저장 설정을 바꾸지 않는 테스트 전용 JDBC 계측
+    testImplementation 'net.ttddyy:datasource-proxy:1.11.1'
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
@@ -64,6 +66,12 @@ tasks.named('test') {
     // 성공한 CI는 테스트 artifact를 올리지 않는다. 합성 outbox 실측만 로그에 남겨 결과를 회수한다(#476).
     onOutput { descriptor, event ->
         if (descriptor.className == 'com.commercefoundry.global.messaging.OutboxIndexExplainTest' && event.message.startsWith('OUTBOX_INDEX_')) {
+            logger.lifecycle(event.message.stripTrailing())
+        }
+        if (descriptor.className in [
+            'com.commercefoundry.domainlayer.notification.adapter.out.persistence.AnomalyStorageProbeH2Test',
+            'com.commercefoundry.domainlayer.notification.adapter.out.persistence.AnomalyStorageProbePostgresTest'
+        ] && event.message.startsWith('ANOMALY_STORAGE_PROBE ')) {
             logger.lifecycle(event.message.stripTrailing())
         }
     }
