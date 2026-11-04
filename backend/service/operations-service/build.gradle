@@ -70,7 +70,9 @@ tasks.named('test') {
         }
         if (descriptor.className in [
             'com.commercefoundry.domainlayer.notification.adapter.out.persistence.AnomalyStorageProbeH2Test',
-            'com.commercefoundry.domainlayer.notification.adapter.out.persistence.AnomalyStorageProbePostgresTest'
+            'com.commercefoundry.domainlayer.notification.adapter.out.persistence.AnomalyStorageProbePostgresTest',
+            'com.commercefoundry.domainlayer.notification.adapter.out.persistence.PaymentAnomalyPersistenceH2Test',
+            'com.commercefoundry.domainlayer.notification.adapter.out.persistence.PaymentAnomalyPersistencePostgresTest'
         ] && event.message.startsWith('ANOMALY_STORAGE_PROBE ')) {
             logger.lifecycle(event.message.stripTrailing())
         }
