@@ -463,6 +463,25 @@ listener OFF는 cleanup OFF가 아니다. **cleanup OFF라도 배포 전 `ddl/pa
 C3a-2 지표와 기존 #616 A4a 관측 API는 별도 범위이며 #550은 approval-summary다. 기존 관측 API의 의미는 유지한다.
 실제 회신 소비·PG 취소 #579·재대조 #591 및 소비/결제 게이트 활성화는 후속 범위다.
 
+### 6-2. 주문 회신 지연 관측 (#308 C3a-2)
+
+`PaymentOrderSyncMetrics`는 스케줄러·캐시 없이 scrape 때 세 질의를 각각 실행한다. `payment.order-result.pending-after`는 기본 5m이며 0은 허용하고 음수는 기동을 거절한다.
+
+| 지표 (`commerce.payment.order-sync.` 접두사) | 모집단·단위 |
+|---|---|
+| `pending.count` | DONE/PARTIAL_CANCELED + orderSynced=false + 거절 코드 없음 + approvedAt < observedAt-pendingAfter |
+| `pending.oldest.age` | 같은 모집단의 최소 approvedAt부터 observedAt까지 전체 경과 초(baseUnit=seconds), 기준 시간을 뺀 초과분 아님 |
+| `rejected.count` | DONE/PARTIAL_CANCELED + orderSynced=false + 거절 코드 있음, 시간 제한 없음 |
+| `observation.failures` | 실패한 Gauge callback 횟수(셋 모두 실패하면 3 증가) |
+
+strict `<`이므로 동등·미래 승인 행은 pending에서 제외한다. 정상 빈 집합은 0, DB 실패나 불가능한 반환값은 해당 Gauge만 NaN이며 다음 관측에서 재조회한다.
+콜백마다 Clock을 한 번 읽고 count/min은 같은 조건을 사용하지만 독립 트랜잭션이므로 원자 snapshot·상호 합산·업무 상태 판정 근거로 쓰지 않는다.
+각 질의는 read-only tx timeout 2초와 JPA query timeout 2000ms를 사용하며 풀 대기·전체 scrape의 2초 상한은 보장하지 않는다. 예외 원문/cause·ID를 로그/태그에 넣지 않는다.
+기존 #616 A4a의 `doneOrderUnsynced`는 DONE+false(거절 포함)를 유지하며 미래 시각 오류 검출도 그대로다. #550 approval-summary는 바뀌지 않는다.
+PostgreSQL 시험은 ACCESS EXCLUSIVE 잠금으로 실제 취소·rollback·같은 풀 연결 회복을 확인하고, PG17 합성 10k/100k의 정상·미회신/거절 backlog에서
+ANALYZE 후 실제 Hibernate 생성 SQL·동일 바인딩의 EXPLAIN(ANALYZE,BUFFERS)을 first/repeat로 기록한다. 운영 분포 효율이나 cold cache를 보장하지 않으며 생산 인덱스를 추가하지 않는다.
+이 절은 구현 계약이며 실제 시험 실행·로컬 Docker skip·CI PG 실행 결과는 PR 검증 근거로 구분한다.
+
 ## 7. 웹훅
 
 수신·영속 inbox·PG 재조회·재시도·수동 확인 및 활성화 절차는 [payment-webhook-guide.md](payment-webhook-guide.md)를 따른다 (#15).

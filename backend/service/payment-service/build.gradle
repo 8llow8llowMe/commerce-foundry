@@ -51,7 +51,15 @@ dependencies {
 
 // CI 로그에서도 구 DB upgrade · 실제 저장소 계약 · cleanup 배선의 메서드별 실행 결과를 확인한다.
 tasks.named('test') {
+    onOutput { descriptor, event ->
+        if (descriptor.className?.endsWith('PaymentOrderSyncQueryPostgresTest') && event.message.startsWith('C3a-2 PG')) {
+            logger.lifecycle(event.message.trim())
+        }
+    }
     afterTest { descriptor, result ->
+        if (descriptor.className?.endsWith('PaymentOrderSyncQueryPostgresTest')) {
+            logger.lifecycle("C3a-2 critical ${descriptor.className}.${descriptor.name}: ${result.resultType}")
+        }
         if (descriptor.className?.endsWith('PaymentProcessedEventUpgradePostgresTest')
             || descriptor.className?.endsWith('PaymentProcessedEventStorePostgresTest')
             || descriptor.className?.endsWith('PaymentInboxLifecycleConfigTest')) {

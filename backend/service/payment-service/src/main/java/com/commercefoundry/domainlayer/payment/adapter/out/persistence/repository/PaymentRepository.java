@@ -1,12 +1,18 @@
 package com.commercefoundry.domainlayer.payment.adapter.out.persistence.repository;
 
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.entity.PaymentEntity;
+import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
+import java.time.Instant;
+import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
-import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 public interface PaymentRepository extends JpaRepository<PaymentEntity, Long> {
 
@@ -22,4 +28,22 @@ public interface PaymentRepository extends JpaRepository<PaymentEntity, Long> {
 
     /** {@code uk_payment_member_approval_key} 로 찾는다 — 회원이 같은 Idempotency-Key 로 승인을 시작한 결제 시도는 많아야 하나다. */
     Optional<PaymentEntity> findByMemberIdAndApprovalIdempotencyKey(Long memberId, String approvalIdempotencyKey);
+    // count/min은 같은 모집단을 사용하지만 별도 트랜잭션의 독립 관측이다.
+    String AWAITING_ORDER_REPLY = " from PaymentEntity p where p.status in :statuses and p.orderSynced = false"
+        + " and p.orderSyncFailureCode is null and p.approvedAt < :approvedBefore";
+
+    @Transactional(readOnly = true, timeout = 2)
+    @Query("select count(p)" + AWAITING_ORDER_REPLY)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    long countAwaitingOrderReply(Collection<PaymentStatus> statuses, Instant approvedBefore);
+
+    @Transactional(readOnly = true, timeout = 2)
+    @Query("select min(p.approvedAt)" + AWAITING_ORDER_REPLY)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    Instant findOldestAwaitingOrderReplyApprovedAt(Collection<PaymentStatus> statuses, Instant approvedBefore);
+
+    @Transactional(readOnly = true, timeout = 2)
+    @Query("select count(p) from PaymentEntity p where p.status in :statuses and p.orderSynced = false and p.orderSyncFailureCode is not null")
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    long countOrderRejected(Collection<PaymentStatus> statuses);
 }
