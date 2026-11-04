@@ -86,8 +86,8 @@ HTTP 전/후/최종 Clock·nanoTime 검증은 A4b-3, 다섯 행의 원자 저장
 
 ## 결제 이상 사건·전체 알림 원자 저장 (#477 A4b-2)
 
-`PaymentAnomalyAlertStateProcessor`는 이미 검증한 원천 표본·정책 설정·양수이며 중복 없는 수신자 1~1,000명을 받는 내부 저장 경계다.
-수신자는 절삭하지 않으며 전체가 유효해야 한다. 전체 상태를 `ORDER BY family`·PESSIMISTIC_WRITE/NOWAIT로 한 번 읽은 뒤 Clock을 읽고 순수 정책을 적용한다.
+`PaymentAnomalyAlertStateProcessor`는 이미 검증한 원천 표본·정책 설정·양수이며 중복 없는 수신자 1~1,000명과 필수 timing을 받는 내부 저장 경계다.
+수신자는 절삭하지 않으며 전체가 유효해야 한다. 전체 상태를 `ORDER BY family`·PESSIMISTIC_WRITE/NOWAIT로 한 번 읽은 뒤 최종 Clock과 ticker를 읽고 순수 정책을 적용한다.
 0행 또는 허용된 다섯 키와 공통 원천/로컬 워터마크가 모두 일치할 때만 판정한다. 부분 행·잘못된 키·워터마크 손상은 쓰기 없이 실패하며 자동 보충하지 않는다.
 최초 정상 표본도 상태 다섯 행을 INSERT하고 알림은 만들지 않는다. 빈 조회 뒤에는 경쟁자가 먼저 커밋해도 신규 INSERT를 유지한다.
 기존 행은 같은 영속 컨텍스트에서 로딩·관리·쓰기 잠금이 확인된 Entity만 갱신해 감사 생성시각과 버전을 보존한다.
@@ -102,10 +102,34 @@ NOWAIT는 기존 다섯 행 잠금 조회에 적용되며, 빈 조회가 존재�
 
 배포 전 생성 DDL 스냅숏의 `payment_anomaly_alert_state` 신규 테이블·CHECK·주석만 적용한다. 전체 스냅숏을 기존 DB에 재실행하지 않는다.
 운영 ddl-auto=none과 기존 단건·읽음·JOB·DLT·outbox 알림 경로는 유지한다. 새 Vault 비밀과 FE 응답 스키마 변경은 없다.
-이 경계는 자동 실행되지 않는다. 실제 HTTP 전후 Clock/nanoTime·수신자 조회·활성화·커밋 후 SSE 연결은 A4b-3 범위다.
+이 경계는 자동 실행되지 않는다. 실제 HTTP 전후 Clock/nanoTime 기록·수신자 조회·활성화·커밋 후 SSE 연결은 E3b 후속 범위다.
 반환 목록 자체는 외부 트랜잭션이 있을 때 커밋 증거가 아니며, 후속 전달은 실제 커밋 이후에 연결해야 한다.
 PG 시각 컬럼은 마이크로초 정밀도로 로컬 Clock의 나노초가 반올림될 수 있어 서브마이크로초 역행의 정확한 복원은 보장하지 않는다.
 합성 1,000명 fanout의 시간·할당·2ms 샘플 heap은 해당 트랜잭션 관측값이며 SLA·retained heap·SSE 큐 포화 시 JVM 전체 안전성을 증명하지 않는다.
+
+### 필수 시간 검증·미연결 전달 기반 (#477 E3a)
+
+저장 메서드는 `accept(sample, recipients, settings, timing)` 단일 경계다. 불변 `PaymentAnomalyObservationTiming`의
+`beforeHttp`, `afterHttp`, `startedNanos`는 필수이며 null이나 자동 대체 timing을 허용하지 않는다.
+상태 잠금 조회 뒤 최종 Clock과 전용 `paymentAnomalyTicker`를 읽는다. HTTP 전후 wall-clock 역행, 최종 시각이 HTTP 종료보다 이른 경우,
+음수 elapsed 또는 최대 관측 나이 초과면 상태·알림 전체 무쓰기다. 정확한 기본 30초 경계는 허용하며 기존 원천 freshness·워터마크 검증도 유지한다.
+`nanoTime` 시작값의 부호는 제한하지 않고 정상 overflow wrap을 포함한 차이를 사용한다.
+예산은 원천 HTTP 시작부터 잠금 후 판정까지다. auth 전체 조회나 flush·commit의 강제 종료 시한이 아니며 관측하지 않은 모든 시각 역행을 증명하지 않는다.
+
+`PaymentAnomalyAlertPushProcessor → PaymentAnomalyAlertPushPort → PaymentAnomalyAlertPushAdapter`는 기존 `NotificationPushPort`로 전달하는
+미연결 기반이다. StateProcessor·Facade·수집기에서 호출하지 않고 자동 실행·새 활성화 설정도 없다. 생성 시 worker 스레드는 0개다.
+배치는 1~5,000건 전체 검증 뒤 불변 복사하며 배치 하나가 task 하나다. 단일 worker·대기 16배치·AbortPolicy로 제한한다.
+개별 RuntimeException 뒤 나머지를 계속 전달하고 포화·종료 거절은 고정 event key와 reason만 WARN으로 남긴다. 식별자·본문·원문 예외는 기록하지 않는다.
+거절된 전달을 DB에 재저장하거나 저장 결과를 취소하지 않는다. 실제 커밋 완료 프록시 반환 뒤 전달 연결은 E3b에서 검증한다.
+
+Adapter가 plain ThreadPoolExecutor를 단독 소유하고 PreDestroy에서 신규 제출 차단, shutdownNow의 대기 큐 폐기·실행 중 interrupt 요청 후
+최대 5초 종료 대기를 수행한다. 호출자 interrupt는 복원하고 반복 close는 추가 대기하지 않는다. 매 알림 전 closed·interrupt를 확인하되
+검사 직후 send와의 경합으로 한 전송이 시작될 수 있다. 이미 진행 중인 동기 SSE 전송은 interrupt를 무시할 수 있으며 강제 5초 종료를 보장하지 않는다.
+worker는 non-daemon이므로 비협조 전송은 JVM 종료를 지연시킬 수 있다. 5초 뒤 미종료는 경고하며 context 종료 이벤트 즉시 차단이나
+후속 collector의 종료 순서는 이번 범위에서 보장하지 않는다.
+
+서로 다른 최대 배치 17개의 실행·큐 점유와 18번째 거절·배출 시험은 기능 검증이다. 대기 80,000건·실행 5,000건 외에 PG 생산 중 일시 객체와
+기존 SSE 연결·다른 작업까지 포함한 운영 heap 여유는 증명하지 않는다. PG 생산 중 포화·768MiB 통합 계측과 활성화 승인은 E3b 후속이다.
 
 A3a(PR #548)는 payment-service의 읽기 전용 [outbox 원천 관측 API](outbox-observation-guide.md)를 제공한다. A3b는 아래의 operations 탐지기를 연결한다.
 
