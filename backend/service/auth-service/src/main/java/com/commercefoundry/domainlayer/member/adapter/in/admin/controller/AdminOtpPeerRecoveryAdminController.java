@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.request.Admin
 import com.commercefoundry.domainlayer.member.adapter.in.admin.dto.response.AdminOtpRecoveryCodesResponse;
 import com.commercefoundry.domainlayer.member.application.exception.MemberValidationMessage;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminOtpPeerRecoveryUseCase;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
@@ -40,6 +41,7 @@ public class AdminOtpPeerRecoveryAdminController {
         + "본인 대상은 400(AUTH_045), 대상 미등록은 404(AUTH_036), 재인증 오류는 400(AUTH_032 · AUTH_035), 시도 초과는 429(AUTH_043).")
     @PreAuthorize(AdminAuthority.SECURITY_MANAGE)
     @PostMapping("/{memberId}/otp/recovery")
+    @AdminAudited(action = "ADMIN_OTP_PEER_RECOVERY")
     public ResponseEntity<Response<AdminOtpRecoveryCodesResponse>> recover(
         @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal admin,
         @Parameter(description = "복구할 동료 관리자 아이디")

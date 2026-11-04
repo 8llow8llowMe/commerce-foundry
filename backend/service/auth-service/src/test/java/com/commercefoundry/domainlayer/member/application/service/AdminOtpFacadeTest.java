@@ -202,6 +202,67 @@ class AdminOtpFacadeTest {
         verify(adminAuditProcessor).adminOtpRecoveryCodesRegenerated(ADMIN_ID, false);
     }
 
+    @Test
+    void unavailableAdmissionHasNoAuditButEnrollmentReadFailureDoes() {
+        RuntimeException unavailable = new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+        willThrow(unavailable).given(loginGuardProcessor).admitAdminOtp(ADMIN_ID);
+        assertThatThrownBy(() -> facade.confirmEnrollment(ADMIN_ID, "current-password1", "123456")).isSameAs(unavailable);
+        assertThatThrownBy(() -> facade.disable(ADMIN_ID, "current-password1", "123456")).isSameAs(unavailable);
+        assertThatThrownBy(() -> facade.regenerateRecoveryCodes(ADMIN_ID, "current-password1", "123456")).isSameAs(unavailable);
+        verifyNoInteractions(adminAuditProcessor);
+        org.mockito.Mockito.doNothing().when(loginGuardProcessor).admitAdminOtp(ADMIN_ID);
+        willThrow(unavailable).given(adminOtpProcessor).findEnrollment(ADMIN_ID);
+        assertThatThrownBy(() -> facade.confirmEnrollment(ADMIN_ID, "current-password1", "123456")).isSameAs(unavailable);
+        verify(adminAuditProcessor).adminOtpEnrolled(ADMIN_ID, false);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void unexpectedBusinessOrCleanupFailureIsAuditedOnce(boolean cleanup) {
+        passwordIs(true);
+        given(adminOtpProcessor.findEnrollment(ADMIN_ID)).willReturn(SECRET);
+        given(adminOtpProcessor.resolveProof(ADMIN_ID, "123456", NOW)).willReturn(PROOF);
+        given(adminOtpProcessor.issueRecoveryCodes()).willReturn(ISSUED);
+        RuntimeException failure = new IllegalStateException("exception-message-sentinel");
+        if (cleanup) {
+            willThrow(failure).given(loginGuardProcessor).clearAdminOtp(ADMIN_ID);
+        } else {
+            willThrow(failure).given(adminOtpProcessor).confirm(ADMIN_ID, SECRET, 0L, NOW, ISSUED.hashes());
+            willThrow(failure).given(adminOtpProcessor).disable(ADMIN_ID, PROOF, NOW);
+            willThrow(failure).given(adminOtpProcessor).replaceRecoveryCodes(ADMIN_ID, PROOF, ISSUED.hashes(), NOW);
+        }
+        assertThatThrownBy(() -> facade.confirmEnrollment(ADMIN_ID, "current-password1", "123456")).isSameAs(failure);
+        assertThatThrownBy(() -> facade.disable(ADMIN_ID, "current-password1", "123456")).isSameAs(failure);
+        assertThatThrownBy(() -> facade.regenerateRecoveryCodes(ADMIN_ID, "current-password1", "123456")).isSameAs(failure);
+        verify(adminAuditProcessor).adminOtpEnrolled(ADMIN_ID, false);
+        verify(adminAuditProcessor).adminOtpDisabled(ADMIN_ID, false);
+        verify(adminAuditProcessor).adminOtpRecoveryCodesRegenerated(ADMIN_ID, false);
+        org.mockito.Mockito.verifyNoMoreInteractions(adminAuditProcessor);
+    }
+
+    @Test
+    void discardFailureIsAuditedButPresenterFailureKeepsOnlySuccess() {
+        passwordIs(true);
+        given(adminOtpProcessor.findEnrollment(ADMIN_ID)).willReturn(SECRET);
+        given(adminOtpProcessor.issueRecoveryCodes()).willReturn(ISSUED);
+        RuntimeException failure = new IllegalStateException("sentinel");
+        willThrow(failure).given(adminOtpProcessor).discardEnrollment(ADMIN_ID);
+        assertThatThrownBy(() -> facade.confirmEnrollment(ADMIN_ID, "current-password1", "123456")).isSameAs(failure);
+        verify(adminAuditProcessor).adminOtpEnrolled(ADMIN_ID, false);
+        org.mockito.Mockito.reset(adminAuditProcessor);
+        org.mockito.Mockito.doNothing().when(adminOtpProcessor).discardEnrollment(ADMIN_ID);
+        AdminOtpAdminPresenter presenter = mock(AdminOtpAdminPresenter.class);
+        given(presenter.toRecoveryCodes(any())).willThrow(failure);
+        AdminOtpFacade withBrokenPresenter = new AdminOtpFacade(adminOtpProcessor, adminAccountProcessor, loginGuardProcessor, adminAuditProcessor,
+            presenter, Clock.fixed(NOW, ZoneOffset.UTC));
+        assertThatThrownBy(() -> withBrokenPresenter.confirmEnrollment(ADMIN_ID, "current-password1", "123456")).isSameAs(failure);
+        given(adminOtpProcessor.resolveProof(ADMIN_ID, "123456", NOW)).willReturn(PROOF);
+        assertThatThrownBy(() -> withBrokenPresenter.regenerateRecoveryCodes(ADMIN_ID, "current-password1", "123456")).isSameAs(failure);
+        verify(adminAuditProcessor).adminOtpEnrolled(ADMIN_ID, true);
+        verify(adminAuditProcessor).adminOtpRecoveryCodesRegenerated(ADMIN_ID, true);
+        org.mockito.Mockito.verifyNoMoreInteractions(adminAuditProcessor);
+    }
+
     static Stream<RuntimeException> lockFailures() {
         return Stream.of(new CannotAcquireLockException("lock"), new QueryTimeoutException("cancelled"), new TransactionTimedOutException("deadline"));
     }
