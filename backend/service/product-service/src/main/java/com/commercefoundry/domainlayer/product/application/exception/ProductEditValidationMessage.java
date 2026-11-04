@@ -19,6 +19,9 @@ public final class ProductEditValidationMessage {
     public static final String CUSTOM_ORDER_FIELD_TEXT_INVALID = "PRODUCT_EDIT_111:단위는 10자, 도움말은 200자 이하이며 제어 · 서식 문자를 쓸 수 없습니다.";
     public static final String CUSTOM_ORDER_FIELD_REQUIRED_REQUIRED = "PRODUCT_EDIT_112:필수 입력 여부(required)는 필수입니다.";
 
+    public static final String OPTION_GROUP_NAME_EN_INVALID = "PRODUCT_EDIT_113:옵션 그룹 영문명은 30자 이하이며 제어 · 서식 문자를 쓸 수 없습니다.";
+    public static final String OPTION_VALUE_NAME_EN_INVALID = "PRODUCT_EDIT_114:옵션 값 영문명은 50자 이하이며 제어 · 서식 문자를 쓸 수 없습니다.";
+
     private ProductEditValidationMessage() {
     }
 }

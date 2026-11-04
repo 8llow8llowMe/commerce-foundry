@@ -898,8 +898,8 @@ class ProductPersistenceAdapterTest {
         productRepositoryPort.insert(product);
         productCategoryRepositoryPort.insertLinks(9_001L, List.of(30L, 31L), List.of(9_101L, 9_102L));
         productOptionRepositoryPort.insertAll(
-            List.of(new OptionGroup(9_201L, 9_001L, "사이즈", 0, null)),
-            List.of(new OptionValue(9_301L, 9_201L, 9_001L, "S", 0, null), new OptionValue(9_302L, 9_201L, 9_001L, "M", 1, null))
+            List.of(new OptionGroup(9_201L, 9_001L, "사이즈", 0, null, "Size")),
+            List.of(new OptionValue(9_301L, 9_201L, 9_001L, "S", 0, null, "Small"), new OptionValue(9_302L, 9_201L, 9_001L, "M", 1, null))
         );
         skuRepositoryPort.insertAll(List.of(
             new Sku(9_401L, 9_001L, SkuOptionKey.of(List.of(9_301L)), Money.of(0, KRW), SaleStatus.ON_SALE, 350, new HsCode("6211421000")),
@@ -913,6 +913,8 @@ class ProductPersistenceAdapterTest {
         assertThat(found.version()).isZero();
         assertThat(productCategoryRepositoryPort.findCategoryIdsByProductId(9_001L)).containsExactly(30L, 31L);
         assertThat(productOptionRepositoryPort.findValuesByProductId(9_001L)).extracting(OptionValue::name).containsExactly("S", "M");
+        assertThat(productOptionRepositoryPort.findGroupsByProductId(9_001L)).extracting(OptionGroup::nameEn).containsExactly("Size");
+        assertThat(productOptionRepositoryPort.findValuesByProductId(9_001L)).extracting(OptionValue::nameEn).containsExactly("Small", null);
         assertThat(skuRepositoryPort.findAllByProductId(9_001L)).extracting(Sku::id, sku -> sku.optionKey().valueIds(), Sku::weightGrams)
             .containsExactly(tuple(9_401L, List.of(9_301L), 350), tuple(9_402L, List.of(9_302L), null));
     }

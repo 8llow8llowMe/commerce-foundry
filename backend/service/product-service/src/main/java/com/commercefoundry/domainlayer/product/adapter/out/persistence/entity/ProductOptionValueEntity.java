@@ -41,6 +41,9 @@ public class ProductOptionValueEntity extends BaseEntity implements Persistable<
     @Column(name = "name", nullable = false, length = 50, comment = "옵션 값명")
     private String name;
 
+    @Column(name = "name_en", length = 50, comment = "옵션 값 영문명. 없으면 한국어 이름으로 표시")
+    private String nameEn;
+
     @Column(name = "display_order", nullable = false, comment = "그룹 안의 노출 순서")
     private int displayOrder;
 

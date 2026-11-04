@@ -81,6 +81,55 @@ class ProductAdminControllerTest {
     }
 
     @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("englishOptionBodies")
+    void optionEnglishJsonPreservesRawIntent(String groupField, String valueField, String expected) {
+        String body = """
+            {"version":0,"optionGroups":[{"optionGroupId":11,"name":"group"%s,
+            "values":[{"optionValueId":12,"name":"value"%s}]}]}
+            """.formatted(groupField, valueField);
+        given(productAdminUseCase.updateOptions(any())).willReturn(
+            com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.ProductDetailAdminResponse.builder().productId("7").version(1L).build());
+        assertThat(mvc.put().uri(PATH + "/7/options").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange()).hasStatusOk();
+        var command = ArgumentCaptor.forClass(com.commercefoundry.domainlayer.product.application.command.ProductOptionsUpdateCommand.class);
+        verify(productAdminUseCase).updateOptions(command.capture());
+        assertThat(command.getValue().optionGroups().getFirst().nameEn()).isEqualTo(expected);
+        assertThat(command.getValue().optionGroups().getFirst().values().getFirst().nameEn()).isEqualTo(expected);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> englishOptionBodies() {
+        return java.util.stream.Stream.of(
+            org.junit.jupiter.params.provider.Arguments.of("", "", null),
+            org.junit.jupiter.params.provider.Arguments.of(",\"nameEn\":null", ",\"nameEn\":null", null),
+            org.junit.jupiter.params.provider.Arguments.of(",\"nameEn\":\"\"", ",\"nameEn\":\"\"", ""),
+            org.junit.jupiter.params.provider.Arguments.of(",\"nameEn\":\" English \"", ",\"nameEn\":\" English \"", " English ")
+        );
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("invalidEnglishOptionBodies")
+    void rejectsRawEnglishJsonWithFieldError(String groupEn, String valueEn, String code, String field) throws Exception {
+        String body = """
+            {"version":0,"optionGroups":[{"optionGroupId":11,"name":"group","nameEn":%s,
+            "values":[{"optionValueId":12,"name":"value","nameEn":%s}]}]}
+            """.formatted(groupEn, valueEn);
+        var result = mvc.put().uri(PATH + "/7/options").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        assertThat(result.getResponse().getContentAsString()).contains(field);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> invalidEnglishOptionBodies() {
+        return java.util.stream.Stream.of(
+            org.junit.jupiter.params.provider.Arguments.of("\"" + "x".repeat(31) + "\"", "null", "PRODUCT_EDIT_113", "optionGroups[0].nameEn"),
+            org.junit.jupiter.params.provider.Arguments.of("null", "\"" + "x".repeat(51) + "\"", "PRODUCT_EDIT_114", "optionGroups[0].values[0].nameEn"),
+            org.junit.jupiter.params.provider.Arguments.of("\"line\\n\"", "null", "PRODUCT_EDIT_113", "optionGroups[0].nameEn"),
+            org.junit.jupiter.params.provider.Arguments.of("null", "\"tab\\t\"", "PRODUCT_EDIT_114", "optionGroups[0].values[0].nameEn")
+        );
+    }
+
+    @ParameterizedTest
     @org.junit.jupiter.params.provider.MethodSource("invalidOptionBodies")
     void optionReplacementRejectsInvalidInput(String body, String code) {
         assertThat(mvc.put().uri(PATH + "/7/options").contentType(MediaType.APPLICATION_JSON).content(body)

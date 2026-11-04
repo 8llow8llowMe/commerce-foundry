@@ -12,8 +12,8 @@ public interface ProductOptionGroupRepository extends JpaRepository<ProductOptio
 
     List<ProductOptionGroupEntity> findAllByProductIdOrderByDisplayOrderAscIdAsc(Long productId);
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update ProductOptionGroupEntity e set e.name = :name, e.displayOrder = :displayOrder, e.updatedAt = :updatedAt where e.id = :id")
-    int updateLabel(long id, String name, int displayOrder, Instant updatedAt);
+    @Query("update ProductOptionGroupEntity e set e.name = :name, e.nameEn = :nameEn, e.displayOrder = :displayOrder, e.updatedAt = :updatedAt where e.id = :id")
+    int updateLabel(long id, String name, String nameEn, int displayOrder, Instant updatedAt);
 
     /** 은퇴 (#9 PR-C2) — 이미 은퇴한 행은 은퇴 시각을 바꾸지 않는다. 상품 아이디까지 조건에 둬 남의 상품 행을 바꾸지 않는다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)

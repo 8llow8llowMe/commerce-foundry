@@ -14,6 +14,9 @@ public record ProductOptionValueAdminItem(
     @Schema(description = "옵션 값 이름")
     String name,
 
+    @Schema(description = "저장된 영문명. 번역이 없으면 null", nullable = true)
+    String nameEn,
+
     @Schema(description = "진열 순서")
     int displayOrder,
 

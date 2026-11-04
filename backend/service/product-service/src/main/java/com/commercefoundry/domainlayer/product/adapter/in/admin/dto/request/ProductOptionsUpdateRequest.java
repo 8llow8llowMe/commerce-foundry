@@ -28,7 +28,7 @@ public record ProductOptionsUpdateRequest(
     public ProductOptionsUpdateCommand toCommand(long productId, long actorMemberId) {
         return new ProductOptionsUpdateCommand(productId, version, actorMemberId, optionGroups.stream().map(group ->
             new ProductOptionsUpdateCommand.Group(group.optionGroupId(), group.name().strip(), group.values().stream().map(value ->
-                new ProductOptionsUpdateCommand.Value(value.optionValueId(), value.name().strip())).toList())).toList());
+                new ProductOptionsUpdateCommand.Value(value.optionValueId(), value.name().strip(), value.nameEn())).toList(), group.nameEn())).toList());
     }
 
     @Schema(description = "기존 옵션 그룹")
@@ -47,8 +47,17 @@ public record ProductOptionsUpdateRequest(
         @Schema(description = "은퇴 행을 포함한 그룹의 기존 값 전체 (최대 50개). 배열 순서가 노출 순서", requiredMode = Schema.RequiredMode.REQUIRED)
         @NotNull(message = ProductValidationMessage.PRODUCT_OPTION_VALUES_SIZE)
         @Size(max = 50, message = ProductValidationMessage.PRODUCT_OPTION_VALUES_SIZE)
-        List<@NotNull(message = ProductValidationMessage.PRODUCT_OPTION_VALUE_NAME_INVALID) @Valid Value> values
-    ) { }
+        List<@NotNull(message = ProductValidationMessage.PRODUCT_OPTION_VALUE_NAME_INVALID) @Valid Value> values,
+
+        @Schema(description = "그룹 영문명 (0~30자). 미지정/null은 유지, 빈 값은 삭제", nullable = true)
+        @Size(max = 30, message = ProductEditValidationMessage.OPTION_GROUP_NAME_EN_INVALID)
+        @Pattern(regexp = ProductValidationMessage.PLAIN_TEXT, message = ProductEditValidationMessage.OPTION_GROUP_NAME_EN_INVALID)
+        String nameEn
+    ) {
+        public Group(Long optionGroupId, String name, List<Value> values) {
+            this(optionGroupId, name, values, null);
+        }
+    }
 
     @Schema(description = "기존 옵션 값")
     public record Value(
@@ -61,6 +70,15 @@ public record ProductOptionsUpdateRequest(
         @NotBlank(message = ProductValidationMessage.PRODUCT_OPTION_VALUE_NAME_INVALID)
         @Size(max = 50, message = ProductValidationMessage.PRODUCT_OPTION_VALUE_NAME_INVALID)
         @Pattern(regexp = ProductValidationMessage.PLAIN_TEXT, message = ProductValidationMessage.PRODUCT_OPTION_VALUE_NAME_INVALID)
-        String name
-    ) { }
+        String name,
+
+        @Schema(description = "값 영문명 (0~50자). 미지정/null은 유지, 빈 값은 삭제", nullable = true)
+        @Size(max = 50, message = ProductEditValidationMessage.OPTION_VALUE_NAME_EN_INVALID)
+        @Pattern(regexp = ProductValidationMessage.PLAIN_TEXT, message = ProductEditValidationMessage.OPTION_VALUE_NAME_EN_INVALID)
+        String nameEn
+    ) {
+        public Value(Long optionValueId, String name) {
+            this(optionValueId, name, null);
+        }
+    }
 }

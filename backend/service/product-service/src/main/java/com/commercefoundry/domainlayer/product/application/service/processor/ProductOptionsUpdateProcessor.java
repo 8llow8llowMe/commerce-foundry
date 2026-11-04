@@ -45,14 +45,15 @@ public class ProductOptionsUpdateProcessor {
         for (var input : command.optionGroups()) {
             var group = groupsById.get(input.optionGroupId());
             if (group == null || !groupIds.add(input.optionGroupId()) || !groupNames.add(input.name().strip())) invalid();
-            groups.add(new OptionGroup(group.id(), group.productId(), input.name().strip(), groups.size(), group.retiredAt()));
+            groups.add(new OptionGroup(group.id(), group.productId(), input.name().strip(), groups.size(), group.retiredAt(), mergeTranslation(input.nameEn(), group.nameEn())));
             var valueNames = new HashSet<String>();
             for (int order = 0; order < input.values().size(); order++) {
                 var valueInput = input.values().get(order);
                 var value = valuesById.get(valueInput.optionValueId());
                 if (value == null || value.optionGroupId() != group.id() || !valueIds.add(valueInput.optionValueId())
                     || !valueNames.add(valueInput.name().strip())) invalid();
-                values.add(new OptionValue(value.id(), group.id(), value.productId(), valueInput.name().strip(), order, value.retiredAt()));
+                values.add(new OptionValue(value.id(), group.id(), value.productId(), valueInput.name().strip(), order, value.retiredAt(),
+                    mergeTranslation(valueInput.nameEn(), value.nameEn())));
             }
         }
         if (!groupIds.equals(groupsById.keySet()) || !valueIds.equals(valuesById.keySet())) invalid();
@@ -64,6 +65,12 @@ public class ProductOptionsUpdateProcessor {
             productOptionRepositoryPort.updateLabels(existingGroups, existingValues, groups, values);
         }
         return productAdminDetailProcessor.getProduct(command.productId());
+    }
+
+    private static String mergeTranslation(String input, String existing) {
+        if (input == null) return existing;
+        String stripped = input.strip();
+        return stripped.isEmpty() ? null : stripped;
     }
 
     private static void invalid() {

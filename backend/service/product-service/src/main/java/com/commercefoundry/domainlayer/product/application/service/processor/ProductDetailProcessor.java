@@ -110,7 +110,7 @@ public class ProductDetailProcessor {
             .discountRate(summary.discountRate())
             .saleStatus(summary.saleStatus())
             .maxQuantityPerOrder(product.maxQuantityPerOrder())
-            .optionGroups(groups.stream().map(group -> toGroupInfo(group, valuesByGroupId.getOrDefault(group.id(), List.of()))).toList())
+            .optionGroups(groups.stream().map(group -> toGroupInfo(group, valuesByGroupId.getOrDefault(group.id(), List.of()), locale)).toList())
             .skus(toSkuInfos(product, skus, stocks, optionValueRanks(groups, valuesByGroupId)))
             .customOrder(customOrderOf(product))
             .preorder(preorderOf(product))
@@ -154,11 +154,11 @@ public class ProductDetailProcessor {
             .orElse(null);
     }
 
-    private static ProductOptionGroupInfo toGroupInfo(OptionGroup group, List<OptionValue> values) {
+    private static ProductOptionGroupInfo toGroupInfo(OptionGroup group, List<OptionValue> values, Locale locale) {
         List<ProductOptionValueInfo> valueInfos = values.stream()
-            .map(value -> new ProductOptionValueInfo(value.id(), value.name(), value.displayOrder()))
+            .map(value -> new ProductOptionValueInfo(value.id(), ProductText.select(locale, value.name(), value.nameEn()), value.displayOrder()))
             .toList();
-        return new ProductOptionGroupInfo(group.id(), group.name(), group.displayOrder(), valueInfos);
+        return new ProductOptionGroupInfo(group.id(), ProductText.select(locale, group.name(), group.nameEn()), group.displayOrder(), valueInfos);
     }
 
     /**
