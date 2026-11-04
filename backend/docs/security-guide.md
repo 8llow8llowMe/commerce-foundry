@@ -1157,16 +1157,21 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - **선언 — `@AdminAudited(action = "...")` · `@AdminAuditExempt(reason = "...")`** (같은 패키지, METHOD · RUNTIME). 애노테이션은 줄을 쓰지 않는 선언이다.
   실제 줄은 Facade → 서비스 `adminaudit` Processor 가 `AdminAuditLog.write` 로 쓴다.
 - **서비스 쪽 구성** — 서비스당 `domainlayer/adminaudit`(application 만): `<Svc>AdminAuditAction` enum + `<Svc>AdminAuditProcessor`. Port/Adapter 는 DB 싱크가 있을 때만(auth).
-  **operations 전환 예외 (#566)**: 기존 작업 감사와 동일하게 `storeprofile` 내부 `StoreProfileAuditProcessor`가 `STORE_PROFILE_UPDATE` 문자열 행위를 기록한다.
-  서비스 전체 `adminaudit`·행위 enum 통합은 #163의 후속 범위로 남긴다. #566은 선언과 실제 감사 줄의 행위·JWT 행위자·고정 대상·결과를 흐름 테스트로 검증한다.
-  입력 검증 400은 감사하지 않으며, 저장 성공·버전 충돌 실패에는 본문 없이 `store-profile:1`만 기록한다.
+  **operations 부분 통합 (#163 R1)**: `OperationsAdminAuditAction`·`OperationsAdminAuditProcessor`는 프로필 `STORE_PROFILE_UPDATE`와 법적 문서
+  `LEGAL_DOCUMENT_DRAFT_SAVE`·`LEGAL_DOCUMENT_PUBLISH` 세 행위만 소유한다. enum은 전체 서비스 선언 집합이 아닌 이관한 두 컨텍스트의 부분집합이다.
+  JOB 취소·결과 다운로드와 CAMPAIGN 미리보기는 기존 경로를 유지하며 서비스 전체 감사 통합은 후속 범위다.
+  프로필 입력 검증 400은 감사하지 않으며, 저장 성공·버전 충돌 실패에는 본문 없이 `store-profile:1`만 기록한다.
   행위자는 컨트롤러의 `@AuthenticationPrincipal MemberPrincipal` 에서 꺼낸다 — 감사에만 쓰면 UseCase 마지막 인자 `long actorMemberId`, 업무 데이터(이력 표의 관리자 칸 등)면 Command 에 싣는다.
-  요청 본문 값을 행위자로 쓰지 않는다. 컨트롤러의 `@AdminAudited.action()` 집합과 enum 값 집합이 같은지 서비스 테스트가 본다.
+  요청 본문 값을 행위자로 쓰지 않는다. 컨트롤러의 `@AdminAudited.action()` 집합과 enum 값 집합이 같은지 서비스 테스트가 본다(operations R1은 이관한 두 컨트롤러만 비교한다).
   **target 은 업무 호출 전에 만든다** — 경로 변수 · Command 의 식별자로 `AdminAuditLog.target(...)` 을 먼저 만들어 두어야 업무가 예외로 끝나도 같은 대상으로 `FAILURE` 를 남긴다.
-- **법적 문서 전환 예외 (#569)** — operations `legaldocument`는 서비스 감사 통합 전까지 `LegalDocumentAdminFacade` →
-  컨텍스트 내부 `LegalDocumentAuditProcessor`로 `LEGAL_DOCUMENT_DRAFT_SAVE`·`LEGAL_DOCUMENT_PUBLISH`를 기록한다.
+- **프로필·법적 문서 감사 경계 (#566·#569·#163 R1)** — 두 AdminFacade가 공통 `OperationsAdminAuditProcessor`를 호출한다.
   `@AdminAudited` 선언, 실제 JWT 행위자, 고정 허용 코드 대상 `legal-document:{terms|privacy}-{ko|en}`, 네 칸 형식과 본문 금지는 동일하다.
-  adapter 트랜잭션 완료 후 성공을 기록하고 UseCase 진입 뒤 업무 실패만 실패로 기록한다. 감사만을 위한 새 DB 테이블은 만들지 않는다.
+  adapter 트랜잭션 완료와 Presenter 조립이 모두 성공한 뒤 `SUCCESS`를 기록한다. Presenter 실패는 기존대로 `FAILURE`이며 DB 변경이 이미 커밋됐을 수 있다.
+  프로필 사전 validate는 감사 범위 밖이고 법적 문서 도메인 키 검증 실패는 범위 안이므로 `target=- result=FAILURE`다. HTTP 본문 검증 400·401·403은 진입 전이라 감사하지 않는다.
+  성공 감사는 업무 try 밖에서 한 번만 호출한다. 공통 Processor가 동기 writer의 RuntimeException을 격리하고, 진단도 실패하면 격리해 업무 응답·원래 예외를 보존한다.
+  진단에는 코드가 정한 action·actorMemberId·예외 타입만 남기며 message·cause·stack·target·입력 본문은 전달하지 않는다.
+  보호 범위는 현재 동기 HTTP 경로다. 외부 실제 트랜잭션에서 나중에 실행되는 afterCompletion 콜백 장애까지 보호하는 전역 보장은 아니다.
+  감사만을 위한 새 DB 테이블은 만들지 않는다. 반복 게시 응답·업무 트랜잭션·권한·네 칸 형식은 그대로다.
 - **가드 — `ResourceServerSmokeTestSupport.adminWriteHandlersDeclareAudit()`** (서비스 `*SecuritySmokeTest` 가 상속). 실제 매핑 중 `/api/v1/admin` 아래의
   POST · PUT · PATCH · DELETE(메서드 조건이 없는 매핑 포함) 핸들러는 `@AdminAudited` 또는 `@AdminAuditExempt` 를 선언해야 한다. 둘 다 붙이거나, 행위 이름 형식이 틀리거나,
   면제 이유가 비면 실패다. 위반은 `클래스#메서드 [경로] → 고치는 법` 으로 알린다. 패키지 기준 ArchUnit 규칙은 두지 않는다(실제 매핑을 보는 런타임 가드 하나로 본다).

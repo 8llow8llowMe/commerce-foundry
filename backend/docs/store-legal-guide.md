@@ -70,6 +70,10 @@ FE는 title/body를 **텍스트 노드로 렌더링하고 escape**한다. `dange
 ADMIN 무인증은 401, CUSTOMER는 403이며 공통 보안 오류를 따른다. 도메인·검증 오류에도 no-store를 적용한다.
 감사는 `LEGAL_DOCUMENT_DRAFT_SAVE`·`LEGAL_DOCUMENT_PUBLISH`, 실제 actorMemberId,
 고정 대상 `legal-document:{terms|privacy}-{ko|en}`와 성공/실패만 기록한다. 제목·본문·회원 개인정보를 감사에 넣지 않는다.
+두 행위는 프로필과 함께 `OperationsAdminAuditProcessor`로 부분 통합했다(#163 R1). JOB/CAMPAIGN은 이 범위에 포함하지 않는다.
+저장소 트랜잭션 완료와 Presenter 조립까지 성공해야 `SUCCESS`이며, Presenter 실패는 커밋 후에도 기존대로 `FAILURE`다.
+HTTP 본문 검증·인증·인가 거절은 감사하지 않고, UseCase 내부 지원하지 않는 type/locale 오류는 `target=- result=FAILURE`로 기록한다.
+동기 감사·진단 로거의 RuntimeException은 업무 응답과 원래 예외를 바꾸지 않는다(`security-guide.md` §11-4).
 
 ## 템플릿 출처와 한계
 
