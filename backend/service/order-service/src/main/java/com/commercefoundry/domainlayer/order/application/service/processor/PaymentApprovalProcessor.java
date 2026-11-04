@@ -33,14 +33,16 @@ public class PaymentApprovalProcessor {
             }
             throw new NonRetryableEventException("payment query contract rejected");
         }
+        boolean approvalRequired = payment.isDone() || "CANCELED".equals(payment.statusCode()) || "PARTIAL_CANCELED".equals(payment.statusCode());
         if (payment.paymentId() != command.paymentId() || payment.orderId() != command.orderId() || payment.memberId() != command.memberId()
             || !payment.amount().equals(command.amount())
-            || ((payment.isDone() || payment.approvedAt() != null) && !Objects.equals(micros(payment.approvedAt()), micros(command.approvedAt())))
-            || ((payment.isDone() || payment.method() != null) && !Objects.equals(payment.method(), command.method()))) {
+            || (approvalRequired && (payment.approvedAt() == null || payment.method() == null))
+            || ((approvalRequired || payment.approvedAt() != null) && !Objects.equals(micros(payment.approvedAt()), micros(command.approvedAt())))
+            || ((approvalRequired || payment.method() != null) && !Objects.equals(payment.method(), command.method()))) {
             throw new NonRetryableEventException("payment notification mismatch");
         }
         return new VerifiedPayment(payment.paymentId(), payment.orderId(), payment.memberId(), payment.amount(), payment.approvedAt(),
-            payment.isDone(), "CANCELED".equals(payment.statusCode()));
+            payment.statusCode());
     }
 
     private static Instant micros(Instant value) {

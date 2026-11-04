@@ -13,16 +13,16 @@ import java.util.UUID;
  * <p>추가만 한다 — 바뀌는 칸은 확정 뒤 취소가 이긴 경합의 재고 복원(#308 PR-C)이 채우는 {@code restorationClaimId} · {@code restoredAt} 뿐이고,
  * 그 갱신은 조건부 UPDATE(아직 비어 있을 때만)로 한다 — {@code OrderPaymentRepositoryPort} 참고.
  *
- * <p><b>확정 선점은 결제 완료 · 취소 주문 거절에만 기록한다</b>({@link Result#recordsConfirmedReservation()}). 이중 결제에서 진 쪽({@link Result#REJECTED_ALREADY_PAID})이
- * 이긴 결제가 확정한 같은 선점 아이디를 들고 있으면 PR-C 복원이 이긴 주문의 재고를 되돌려 초과 판매가 된다. 복원 클레임은 취소 주문 거절에만 있다.
+ * <p>확정 선점은 결제 완료 · 취소 주문 거절과 원승인 시각 · 복원 클레임이 있는 NOT_DONE 거절에 기록한다. 이중 결제에서 진 쪽
+ * ({@link Result#REJECTED_ALREADY_PAID})은 이긴 결제의 선점을 가리키지 못한다. 복원 클레임은 ORDER_CANCELED · NOT_DONE 거절에만 있다.
  *
  * @param orderId 이벤트가 가리킨 주문 아이디 — {@link Result#REJECTED_ORDER_NOT_FOUND} 면 없는 주문이다
  * @param memberId 결제한 회원 아이디 (payment 재조회 값)
  * @param totalAmount 결제 금액 (payment 재조회 값, 최소 단위 정수 + 통화)
  * @param approvedAt 결제 승인 시각 (payment 재조회 값, 마이크로초로 자른다). 결제 완료면 필수, 거절이면 없을 수 있다
- * @param stockReservationId 확정 200 을 받은 재고 선점 아이디. 결제 완료면 필수, 취소 주문 거절이면 있을 수 있고, 그 밖의 결과는 null
+ * @param stockReservationId 확정 선점 아이디. PAID면 필수, ORDER_CANCELED는 선택, NOT_DONE은 원승인 시각 · 복원 클레임이 함께 있을 때만 허용
  * @param eventId 반영한 이벤트 아이디 (봉투 eventId) — 같은 결제를 다른 eventId 로 다시 받아도 행은 하나다
- * @param restorationClaimId 확정한 선점을 되돌리는 재고 복원의 클레임 아이디 (PR-C). 확정 선점이 있는 취소 주문 거절({@link Result#REJECTED_ORDER_CANCELED})에만
+ * @param restorationClaimId 확정한 선점을 되돌리는 재고 복원의 멱등 키. 확정 선점이 있는 ORDER_CANCELED · NOT_DONE 거절에만 허용
  * @param restoredAt 재고 복원 200 을 받은 시각 (PR-C). 복원 클레임이 있을 때만
  * @param createdAt 저장된 시각(읽기 전용). 저장 전이면 null
  */
@@ -48,10 +48,13 @@ public record OrderPayment(
             throw new IllegalArgumentException("결제 완료는 확정한 재고 선점 · 승인 시각이 있어야 합니다: orderId=" + orderId);
         }
         if (stockReservationId != null && !result.recordsConfirmedReservation()) {
-            throw new IllegalArgumentException("확정 선점은 결제 완료 · 취소 주문 거절에만 기록합니다: orderId=" + orderId + ", result=" + result);
+            throw new IllegalArgumentException("확정 선점을 기록할 수 없는 결과입니다: orderId=" + orderId + ", result=" + result);
         }
-        if (restorationClaimId != null && (result != Result.REJECTED_ORDER_CANCELED || stockReservationId == null)) {
-            throw new IllegalArgumentException("재고 복원은 확정 선점이 있는 취소 주문 거절에만 있습니다: orderId=" + orderId);
+        if (result == Result.REJECTED_PAYMENT_NOT_DONE && stockReservationId != null && (restorationClaimId == null || approvedAt == null)) {
+            throw new IllegalArgumentException("미승인 결제 복원은 원승인 시각과 복원 클레임이 필요합니다");
+        }
+        if (restorationClaimId != null && (!result.restorableRejection() || stockReservationId == null)) {
+            throw new IllegalArgumentException("재고 복원은 확정 선점이 있는 ORDER_CANCELED · NOT_DONE 거절에만 있습니다: orderId=" + orderId);
         }
         if (restoredAt != null && restorationClaimId == null) {
             throw new IllegalArgumentException("복원 시각은 복원 클레임이 있을 때만 있습니다: orderId=" + orderId);
@@ -97,16 +100,28 @@ public record OrderPayment(
         long id, long orderId, long paymentId, long memberId, Money totalAmount, Instant approvedAt, long confirmedReservationId, UUID eventId,
         long restorationClaimId
     ) {
-        return new OrderPayment(id, orderId, paymentId, memberId, totalAmount, approvedAt, Result.REJECTED_ORDER_CANCELED, confirmedReservationId, eventId,
+        return rejectedAfterConfirmation(id, orderId, paymentId, memberId, totalAmount, approvedAt, Result.REJECTED_ORDER_CANCELED,
+            confirmedReservationId, eventId, restorationClaimId);
+    }
+
+    /** 원승인 뒤 취소된 결제도 최초 거절 사유를 유지하며 같은 영속 클레임으로 복원한다. */
+    public static OrderPayment rejectedAfterConfirmation(
+        long id, long orderId, long paymentId, long memberId, Money totalAmount, Instant approvedAt, Result result, long confirmedReservationId,
+        UUID eventId, long restorationClaimId
+    ) {
+        if (!result.restorableRejection()) {
+            throw new IllegalArgumentException("복원 가능한 거절 결과가 필요합니다");
+        }
+        return new OrderPayment(id, orderId, paymentId, memberId, totalAmount, approvedAt, result, confirmedReservationId, eventId,
             restorationClaimId, null, null);
     }
 
     /**
-     * 재고 복원이 남았는가 (#308 PR-C1) — 확정 선점 · 복원 클레임이 있는 취소 주문 거절이고 아직 복원 시각이 없다. 재전달은 이 기록의 같은 클레임 아이디로
+     * 재고 복원이 남았는가 — 확정 선점 · 복원 클레임이 있는 ORDER_CANCELED · NOT_DONE 거절이고 아직 복원 시각이 없다. 재전달은 같은 클레임 아이디로
      * 복원부터 다시 하고, 그 뒤에야 inbox · 거절 회신을 남긴다.
      */
     public boolean awaitsRestoration() {
-        return result == Result.REJECTED_ORDER_CANCELED && stockReservationId != null && restorationClaimId != null && restoredAt == null;
+        return result.restorableRejection() && stockReservationId != null && restorationClaimId != null && restoredAt == null;
     }
 
     /** 주문당 결제 완료 하나를 막는 칸 — 결제 완료면 주문 아이디, 아니면 null ({@code uk_order_payment_paid_order_id}). */
@@ -149,9 +164,13 @@ public record OrderPayment(
             return rejectionReason;
         }
 
-        /** 확정한 재고 선점을 기록하는 결과인가 — 결제 완료 · 취소 주문 거절만이다. DB check {@code ck_order_payment_reservation_scope} 와 같다. */
+        /** 확정 선점을 기록할 수 있는 결과인가. NOT_DONE은 생성자와 DB에서 원승인 시각 · 복원 클레임도 요구한다. */
         public boolean recordsConfirmedReservation() {
-            return this == PAID || this == REJECTED_ORDER_CANCELED;
+            return this == PAID || restorableRejection();
+        }
+
+        public boolean restorableRejection() {
+            return this == REJECTED_ORDER_CANCELED || this == REJECTED_PAYMENT_NOT_DONE;
         }
     }
 

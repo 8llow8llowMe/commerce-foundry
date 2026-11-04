@@ -347,8 +347,13 @@ public abstract class OrderPaymentConsumerContract {
             assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE);
             assertThat(replies(command.orderId())).isEqualTo(status.equals("CANCELED") ? 0 : 1);
             assertThat(order(command).status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+            assertThat(payment(command).stockReservationId()).isNull();
+            assertThat(payment(command).restorationClaimId()).isNull();
+            assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
+            verify(stock).release(order(command).stockReservationId(), command.orderId());
         }
-        verifyNoInteractions(stock);
+        verifyNoMoreInteractions(stock);
+        verifyNoInteractions(restorations);
     }
 
     @Test
@@ -447,17 +452,20 @@ public abstract class OrderPaymentConsumerContract {
     // --- PR-C1: 확정 뒤 취소가 이긴 건의 복구창 · 멱등 복원 ---
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void anotherPaymentsPendingOrCompletedIntentFencesInitialReservation(boolean restored) {
+    @org.junit.jupiter.params.provider.CsvSource({"false,REJECTED_ORDER_CANCELED", "true,REJECTED_ORDER_CANCELED",
+        "false,REJECTED_PAYMENT_NOT_DONE", "true,REJECTED_PAYMENT_NOT_DONE"})
+    void anotherPaymentsPendingOrCompletedIntentFencesInitialReservation(boolean restored, OrderPayment.Result result) {
         PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
         long reservationId = order(command).stockReservationId();
-        // C1은 CANCELED에만 의도를 만든다. PENDING+의도는 C2b 확장을 위한 영속 fence 계약 fixture이며 상태 역전 경로가 아니다.
-        insertIntent(command, reservationId, restored);
+        // C1 fixture와 C2b NOT_DONE 의도 모두 대기·완료 후 다른 결제의 재확정을 막는다.
+        insertIntent(command, reservationId, restored, result);
 
         facade.approve(command);
 
         assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_STOCK_UNAVAILABLE);
         assertThat(payment(command).stockReservationId()).isNull();
+        assertThat(order(command).status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+        assertThat(payments.findPaidByOrderId(command.orderId())).isEmpty();
         assertThat(payments.existsRestorationIntent(command.orderId(), reservationId)).isTrue();
         assertThat(payments.existsRestorationIntent(command.orderId(), reservationId + 1)).isFalse();
         assertThat(payments.existsRestorationIntent(command.orderId() + 1, reservationId)).isFalse();
@@ -531,10 +539,14 @@ public abstract class OrderPaymentConsumerContract {
 
     /** fixture도 실서비스와 같은 orders → order_payment 잠금/쓰기 순서를 지킨다. product DB 수량을 검증하는 테스트는 아니다. */
     protected void insertIntent(PaymentApprovalCommand command, long reservationId, boolean restored) {
+        insertIntent(command, reservationId, restored, OrderPayment.Result.REJECTED_ORDER_CANCELED);
+    }
+
+    private void insertIntent(PaymentApprovalCommand command, long reservationId, boolean restored, OrderPayment.Result result) {
         new TransactionTemplate(transactions).executeWithoutResult(tx -> {
             orders.findByIdAndMemberIdForUpdate(command.orderId(), command.memberId()).orElseThrow();
-            OrderPayment intent = payments.insert(OrderPayment.canceledAfterConfirmation(IDS.incrementAndGet(), command.orderId(), IDS.incrementAndGet(),
-                command.memberId(), command.amount(), NOW, reservationId, UUID.randomUUID(), IDS.incrementAndGet()));
+            OrderPayment intent = payments.insert(OrderPayment.rejectedAfterConfirmation(IDS.incrementAndGet(), command.orderId(), IDS.incrementAndGet(),
+                command.memberId(), command.amount(), NOW, result, reservationId, UUID.randomUUID(), IDS.incrementAndGet()));
             if (restored) {
                 payments.markRestored(intent.id(), NOW);
             }
@@ -706,6 +718,188 @@ public abstract class OrderPaymentConsumerContract {
         assertThat(payment(command).restoredAt()).isNotNull();
         assertThat(replies(command.orderId())).isZero();
         assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
+    }
+
+    // C2b: shared real-order-DB contract, not a product database quantity test.
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "CANCELED,false,PENDING_PAYMENT", "CANCELED,false,EXPIRED", "CANCELED,false,CANCELED",
+        "CANCELED,true,PENDING_PAYMENT", "CANCELED,true,EXPIRED", "CANCELED,true,CANCELED",
+        "PARTIAL_CANCELED,false,PENDING_PAYMENT", "PARTIAL_CANCELED,false,EXPIRED", "PARTIAL_CANCELED,false,CANCELED",
+        "PARTIAL_CANCELED,true,PENDING_PAYMENT", "PARTIAL_CANCELED,true,EXPIRED", "PARTIAL_CANCELED,true,CANCELED"
+    })
+    void canceledSourceRestoresInitialOrPersistedReReservation(String source, boolean reReserved, OrderStatus status) {
+        PaymentApprovalCommand command = arrange(status);
+        long original = order(command).stockReservationId();
+        long confirmed = reReserved ? IDS.incrementAndGet() : original;
+        if (reReserved) {
+            processor.recordReReservation(command.paymentId(), command.orderId(), confirmed, command.eventId());
+        }
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+            command.memberId(), source, command.amount(), NOW, "CARD")));
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(confirmed, command.orderId());
+
+        facade.approve(command);
+        OrderPayment first = payment(command);
+        assertThat(first.result()).isEqualTo(OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE);
+        assertThat(first.stockReservationId()).isEqualTo(confirmed);
+        assertThat(first.approvedAt()).isEqualTo(NOW);
+        assertThat(first.restoredAt()).isNotNull();
+        assertThat(order(command).status()).isEqualTo(status);
+        assertThat(replies(command.orderId())).isEqualTo(source.equals("CANCELED") ? 0 : 1);
+        facade.approve(command);
+        facade.approve(withEvent(command, UUID.randomUUID()));
+        assertThat(payment(command)).isEqualTo(first);
+        verify(restorations, times(1)).restoreCancellation(first.restorationClaimId(), confirmed, skus());
+        verify(stock, never()).confirm(anyLong());
+        verify(stock, never()).reReserve(anyLong(), any());
+    }
+
+    @Test
+    void pendingNotDoneResumesWithOtherSourceAndOriginalClaimAndReason() {
+        PaymentApprovalCommand command = arrange(OrderStatus.EXPIRED);
+        long reservation = order(command).stockReservationId();
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+            command.memberId(), "PARTIAL_CANCELED", command.amount(), NOW, "CARD")));
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservation, command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN)).doNothing()
+            .when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(OrderException.class);
+        OrderPayment pending = payment(command);
+        cancel(command);
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+            command.memberId(), "UNKNOWN", command.amount(), null, null)));
+        facade.approve(command);
+        OrderPayment completed = payment(command);
+        assertThat(completed.restorationClaimId()).isEqualTo(pending.restorationClaimId());
+        assertThat(completed.approvedAt()).isEqualTo(pending.approvedAt());
+        assertThat(completed.result()).isEqualTo(OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE);
+        assertThat(completed.restoredAt()).isNotNull();
+        assertThat(replies(command.orderId())).isEqualTo(1);
+        verify(stock, times(1)).release(reservation, command.orderId());
+        verify(restorations, times(2)).restoreCancellation(pending.restorationClaimId(), reservation, skus());
+    }
+
+    @Test
+    void otherSourceCanceledOrderAndNullableLegacyReplayNeverTouchStock() {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+            command.memberId(), "UNKNOWN", command.amount(), null, null)));
+        facade.approve(command);
+        facade.approve(withEvent(command, UUID.randomUUID()));
+        assertThat(payment(command).approvedAt()).isNull();
+        assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE);
+        assertThat(replies(command.orderId())).isEqualTo(1);
+        verifyNoInteractions(stock, restorations);
+    }
+
+    @Test
+    void canceledSourceLegacyPaidOrderWithoutPaidRecordIsDltWithoutProbe() {
+        PaymentApprovalCommand command = arrange(OrderStatus.MAKING);
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+            command.memberId(), "CANCELED", command.amount(), NOW, "CARD")));
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
+        assertThat(payments.findByPaymentId(command.paymentId())).isEmpty();
+        verifyNoInteractions(stock, restorations);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CANCELED", "PARTIAL_CANCELED"})
+    void canceledSourceProtectsOwnAndOtherPaidRecords(String source) {
+        PaymentApprovalCommand own = arrange(OrderStatus.PENDING_PAYMENT);
+        facade.approve(own);
+        OrderPayment paid = payment(own);
+        reset(stock, restorations);
+        when(remotePayment.findPayment(own.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(own.paymentId(), own.orderId(), own.memberId(),
+            source, own.amount(), NOW, "CARD")));
+        facade.approve(withEvent(own, UUID.randomUUID()));
+        assertThat(payment(own)).isEqualTo(paid);
+        verifyNoInteractions(stock, restorations);
+
+        PaymentApprovalCommand other = arrange(OrderStatus.CANCELED);
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> payments.insert(new OrderPayment(IDS.incrementAndGet(), other.orderId(),
+            IDS.incrementAndGet(), other.memberId(), other.amount(), NOW, OrderPayment.Result.PAID, order(other).stockReservationId(), UUID.randomUUID(),
+            null, null, null)));
+        when(remotePayment.findPayment(other.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(other.paymentId(), other.orderId(), other.memberId(),
+            source, other.amount(), NOW, "CARD")));
+        facade.approve(other);
+        assertThat(payment(other).result()).isEqualTo(OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE);
+        assertThat(payment(other).stockReservationId()).isNull();
+        verifyNoInteractions(stock, restorations);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"member", "amount", "approvedAt"})
+    void pendingRestorationRejectsStoredIdentityMismatchBeforeAnyRemoteRestoration(String field) {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        long reservation = order(command).stockReservationId();
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> payments.insert(OrderPayment.rejectedAfterConfirmation(IDS.incrementAndGet(),
+            command.orderId(), command.paymentId(), field.equals("member") ? 8 : command.memberId(), field.equals("amount") ? krw(1001) : command.amount(),
+            field.equals("approvedAt") ? NOW.plusSeconds(1) : NOW, OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE, reservation,
+            command.eventId(), IDS.incrementAndGet())));
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+            command.memberId(), "UNKNOWN", command.amount(), null, null)));
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
+        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+        assertThat(payment(command).restoredAt()).isNull();
+        verifyNoInteractions(stock, restorations);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"member", "amount", "missing"})
+    void canceledSourceValidatesOrderBeforeReturningNotDone(String field) {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        if (field.equals("member")) {
+            jdbc.update("update orders.orders set member_id=8 where id=?", command.orderId());
+        } else if (field.equals("amount")) {
+            when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+                command.memberId(), "CANCELED", krw(1001), NOW, "CARD")));
+            PaymentApprovalCommand changed = new PaymentApprovalCommand(command.eventId(), command.paymentId(), command.orderId(), command.memberId(),
+                krw(1001), NOW, "CARD");
+            facade.approve(changed);
+            assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_PAYMENT_MISMATCH);
+            verifyNoInteractions(stock, restorations);
+            return;
+        } else {
+            jdbc.update("delete from orders.order_item where order_id=?", command.orderId());
+            jdbc.update("delete from orders.order_status_history where order_id=?", command.orderId());
+            jdbc.update("delete from orders.orders where id=?", command.orderId());
+        }
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+            command.memberId(), "CANCELED", command.amount(), NOW, "CARD")));
+        facade.approve(command);
+        assertThat(payment(command).result()).isEqualTo(field.equals("missing") ? OrderPayment.Result.REJECTED_ORDER_NOT_FOUND
+            : OrderPayment.Result.REJECTED_PAYMENT_MISMATCH);
+        verifyNoInteractions(stock, restorations);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"member", "amount", "status", "paid"})
+    void pendingNotDoneRevalidatesCurrentOrderBeforeRestoring(String field) {
+        PaymentApprovalCommand command = arrange(OrderStatus.EXPIRED);
+        long reservation = order(command).stockReservationId();
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> payments.insert(OrderPayment.rejectedAfterConfirmation(IDS.incrementAndGet(),
+            command.orderId(), command.paymentId(), command.memberId(), command.amount(), NOW, OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE,
+            reservation, command.eventId(), IDS.incrementAndGet())));
+        switch (field) {
+            case "member" -> jdbc.update("update orders.orders set member_id=8 where id=?", command.orderId());
+            case "amount" -> {
+                jdbc.update("update orders.order_item set unit_price_amount=1001,line_amount=1001 where order_id=?", command.orderId());
+                jdbc.update("update orders.orders set items_amount=1001,total_amount=4001 where id=?", command.orderId());
+            }
+            case "status" -> jdbc.update("update orders.orders set status='MAKING',version=version+1 where id=?", command.orderId());
+            default -> new TransactionTemplate(transactions).executeWithoutResult(tx -> payments.insert(new OrderPayment(IDS.incrementAndGet(),
+                command.orderId(), IDS.incrementAndGet(), command.memberId(), command.amount(), NOW, OrderPayment.Result.PAID, reservation,
+                UUID.randomUUID(), null, null, null)));
+        }
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(),
+            command.memberId(), "UNKNOWN", command.amount(), null, null)));
+
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
+        assertThat(payment(command).restoredAt()).isNull();
+        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+        assertThat(replies(command.orderId())).isZero();
+        verifyNoInteractions(stock, restorations);
     }
 
     private void cancel(PaymentApprovalCommand command) {

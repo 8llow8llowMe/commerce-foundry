@@ -110,7 +110,7 @@ class OrderPaymentTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = Result.class, mode = EnumSource.Mode.EXCLUDE, names = {"PAID", "REJECTED_ORDER_CANCELED"})
+    @EnumSource(value = Result.class, mode = EnumSource.Mode.EXCLUDE, names = {"PAID", "REJECTED_ORDER_CANCELED", "REJECTED_PAYMENT_NOT_DONE"})
     @DisplayName("확정 선점 · 복원 클레임은 결제 완료 · 취소 주문 거절에만 — 이중 결제에서 진 쪽(ALREADY_PAID) 등은 이긴 결제의 선점을 가리키지 못한다(복원 시 초과 판매)")
     void confirmedReservationOnlyForPaidOrCanceled(Result result) {
         assertThat(result.recordsConfirmedReservation()).isFalse();
@@ -144,6 +144,22 @@ class OrderPaymentTest {
     @DisplayName("isAwaitingPaymentApproval — 결제 대기 · 만료만 true 다")
     void awaitingPaymentApproval(OrderStatus status) {
         assertThat(withStatus(status).isAwaitingPaymentApproval()).isEqualTo(status == OrderStatus.PENDING_PAYMENT || status == OrderStatus.EXPIRED);
+    }
+
+    @Test
+    void notDoneRestorationRequiresOriginalApprovalAndClaimButKeepsLegacyC1Shapes() {
+        OrderPayment pending = OrderPayment.rejectedAfterConfirmation(31L, 1L, PAYMENT_ID, 7L, krw(20_000), APPROVED_AT,
+            Result.REJECTED_PAYMENT_NOT_DONE, 123L, EVENT_ID, 77L);
+        assertThat(pending.awaitsRestoration()).isTrue();
+        assertThat(pending.result().rejectionReason()).isEqualTo("PAYMENT_NOT_DONE");
+        assertThatThrownBy(() -> new OrderPayment(31L, 1L, PAYMENT_ID, 7L, krw(20_000), APPROVED_AT,
+            Result.REJECTED_PAYMENT_NOT_DONE, 123L, EVENT_ID, null, null, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new OrderPayment(31L, 1L, PAYMENT_ID, 7L, krw(20_000), null,
+            Result.REJECTED_PAYMENT_NOT_DONE, 123L, EVENT_ID, 77L, null, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(new OrderPayment(31L, 1L, PAYMENT_ID, 7L, krw(20_000), null,
+            Result.REJECTED_ORDER_CANCELED, 123L, EVENT_ID, null, null, null).awaitsRestoration()).isFalse();
+        assertThat(new OrderPayment(31L, 1L, PAYMENT_ID, 7L, krw(20_000), null,
+            Result.REJECTED_ORDER_CANCELED, 123L, EVENT_ID, 77L, null, null).awaitsRestoration()).isTrue();
     }
 
     @Test

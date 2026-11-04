@@ -68,4 +68,21 @@ class PaymentApprovalProcessorTest {
     private PaymentQueryResult payment(String status, long order, long member, long amount, Instant time, String method) {
         return new PaymentQueryResult(10, order, member, status, krw(amount), time, method);
     }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"DONE,method", "CANCELED,time", "CANCELED,method",
+        "PARTIAL_CANCELED,time", "PARTIAL_CANCELED,method", "CANCELED,mismatchTime", "PARTIAL_CANCELED,mismatchMethod"})
+    void approvedSourcesRequireOriginalApprovalMetadata(String status, String field) {
+        PaymentQueryResult source = payment(status, 20, 30, 4000,
+            field.equals("time") ? null : field.equals("mismatchTime") ? TIME.plusSeconds(1) : TIME,
+            field.equals("method") ? null : field.equals("mismatchMethod") ? "OTHER" : "CARD");
+        when(port.findPayment(10)).thenReturn(Optional.of(source));
+        assertThatThrownBy(() -> processor.verify(command)).isInstanceOf(NonRetryableEventException.class);
+    }
+
+    @Test
+    void doneQueryResultRejectsMissingApprovalBeforeProcessor() {
+        assertThatThrownBy(() -> payment("DONE", 20, 30, 4000, null, "CARD"))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("approved payment requires approvedAt");
+    }
 }

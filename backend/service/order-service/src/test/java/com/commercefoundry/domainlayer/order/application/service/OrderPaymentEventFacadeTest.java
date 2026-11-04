@@ -40,7 +40,7 @@ class OrderPaymentEventFacadeTest {
     private final OrderStockProcessor stock = mock(OrderStockProcessor.class);
     private final OrderPaymentEventFacade facade = new OrderPaymentEventFacade(verify, database, stock);
     private final PaymentApprovalCommand command = new PaymentApprovalCommand(UUID.randomUUID(), 10, 20, 30, krw(4000), Instant.now(), "CARD");
-    private final VerifiedPayment payment = new VerifiedPayment(10, 20, 30, krw(4000), command.approvedAt(), true, false);
+    private final VerifiedPayment payment = new VerifiedPayment(10, 20, 30, krw(4000), command.approvedAt(), "DONE");
     private final Order order = mock(Order.class);
     private final OrderQuote quote = mock(OrderQuote.class);
     private final OrderPayment restorable = OrderPayment.canceledAfterConfirmation(1, 20, 10, 30, krw(4000), command.approvedAt(), 77, command.eventId(), 555);
@@ -105,6 +105,7 @@ class OrderPaymentEventFacadeTest {
         when(order.id()).thenReturn(20L);
         when(order.quote()).thenReturn(quote);
         when(database.inspect(payment, command.eventId())).thenReturn(new PaymentApprovalTarget(false, order, OrderPayment.Result.REJECTED_ORDER_CANCELED));
+        when(database.canProbe(payment, order)).thenReturn(true);
         when(database.confirmationCandidates(10, order)).thenReturn(List.of(77L, 66L));
         when(stock.findConfirmedByReleaseProbe(20, List.of(77L, 66L))).thenReturn(OptionalLong.of(77));
         StockRestorationTarget target = new StockRestorationTarget(restorable, order);
@@ -125,6 +126,7 @@ class OrderPaymentEventFacadeTest {
         when(verify.verify(command)).thenReturn(payment);
         when(order.id()).thenReturn(20L);
         when(database.inspect(payment, command.eventId())).thenReturn(new PaymentApprovalTarget(false, order, OrderPayment.Result.REJECTED_ORDER_CANCELED));
+        when(database.canProbe(payment, order)).thenReturn(true);
         when(database.confirmationCandidates(10, order)).thenReturn(List.of(66L));
         when(stock.findConfirmedByReleaseProbe(20, List.of(66L))).thenReturn(OptionalLong.empty());
         when(database.complete(command, payment, null)).thenReturn(Optional.empty());

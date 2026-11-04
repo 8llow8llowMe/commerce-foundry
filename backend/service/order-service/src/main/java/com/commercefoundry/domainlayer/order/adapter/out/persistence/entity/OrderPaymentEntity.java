@@ -27,7 +27,7 @@ import org.springframework.data.domain.Persistable;
  * 주문의 결제 기록은 {@code idx_order_payment_order_id_id (order_id, id)} 로 읽는다 — PR-C 의 확정 뒤 취소 복원 대상 찾기 · 어드민 주문 상세의 결제 반영 이력용이다.
  *
  * <p>check 는 도메인 불변식 중 이 행 안에서 볼 수 있는 것을 막는다 — 결제 완료 ⇔ {@code paid_order_id = order_id}, 결제 완료면 확정 선점 · 승인 시각 있음,
- * 확정 선점은 결제 완료 · 취소 주문 거절에만(이중 결제에서 진 쪽이 이긴 결제의 선점을 가리키지 않게), 복원 클레임은 확정 선점이 있는 취소 주문 거절에만,
+ * 확정 선점은 PAID · ORDER_CANCELED 또는 원승인 시각 · 복원 클레임이 있는 NOT_DONE에만, 복원 클레임은 확정 선점이 있는 두 거절 결과에만,
  * 복원 시각은 복원 클레임이 있을 때만. {@code result} 값 목록 check 는 Hibernate 가 이름 없이 만든다 — 값을 더하면 운영 DDL 로 지우고 다시 만든다.
  *
  * <p>행은 추가만 한다. {@code restoration_claim_id} 는 확정 뒤 취소 거절 기록을 INSERT 할 때 함께 넣는다(#308 PR-C1 — 나중에 채우지 않는다).
@@ -56,11 +56,12 @@ import org.springframework.data.domain.Persistable;
         @CheckConstraint(
             name = "ck_order_payment_reservation_scope",
             constraint = "stock_reservation_id is null or result in ('PAID', 'REJECTED_ORDER_CANCELED')"
+                + " or (result = 'REJECTED_PAYMENT_NOT_DONE' and restoration_claim_id is not null and approved_at is not null)"
         ),
         @CheckConstraint(
             name = "ck_order_payment_restoration_consistent",
             constraint = "(restoration_claim_id is null and restored_at is null)"
-                + " or (restoration_claim_id is not null and result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null)"
+                + " or (restoration_claim_id is not null and result in ('REJECTED_ORDER_CANCELED', 'REJECTED_PAYMENT_NOT_DONE') and stock_reservation_id is not null)"
         )
     }
 )
@@ -100,13 +101,13 @@ public class OrderPaymentEntity extends BaseEntity implements Persistable<Long> 
     @Column(name = "paid_order_id", comment = "결제 완료면 order_id, 아니면 null — 주문당 결제 완료 1건 유니크")
     private Long paidOrderId;
 
-    @Column(name = "stock_reservation_id", comment = "확정 200 을 받은 재고 선점 아이디 (외부 FK: product-service stock_reservation.id). 결제 완료 · 취소 주문 거절에만, 그 밖은 null")
+    @Column(name = "stock_reservation_id", comment = "확정 선점 아이디 (외부 FK: product-service stock_reservation.id). PAID · ORDER_CANCELED 또는 원승인 시각과 복원 클레임이 있는 NOT_DONE")
     private Long stockReservationId;
 
     @Column(name = "event_id", nullable = false, comment = "반영한 payment-approved 이벤트 아이디 (봉투 eventId)")
     private UUID eventId;
 
-    @Column(name = "restoration_claim_id", comment = "확정 뒤 취소 주문 거절의 재고 복원 클레임 아이디 (product stock-restorations 멱등 키, #308 PR-C). 없으면 null")
+    @Column(name = "restoration_claim_id", comment = "확정 뒤 ORDER_CANCELED 또는 NOT_DONE 거절의 재고 복원 클레임 아이디 (product stock-restorations 멱등 키). 없으면 null")
     private Long restorationClaimId;
 
     @Column(name = "restored_at", comment = "재고 복원 200 을 받은 시각 (#308 PR-C). 복원 전이면 null")

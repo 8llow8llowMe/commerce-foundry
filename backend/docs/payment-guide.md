@@ -380,6 +380,11 @@ READY ──▶ IN_PROGRESS ──▶ DONE ──▶ PARTIAL_CANCELED ──▶ 
 
 ## 6. 서비스 간 정합성
 
+#14 C2b는 주문 반영 전 프로세스 종료 뒤 결제가 CANCELED/PARTIAL_CANCELED로 바뀐 경우에도, 원승인 정보와 주문 소유를 검증하고 이미 확정한 선점을 복원한다.
+최초 거절 reason은 PAYMENT_NOT_DONE으로 유지하며 내부 선점·claim을 외부 조회에 노출하지 않는다(기존 7필드, NOT_DONE의 stockReservationId=null).
+pending 의도는 같은 claim으로 재개하고 전액취소 원천에는 추가 거절 회신을 보내지 않는다. 주문 PAID 소유·기결제 legacy는 자동 복원하지 않는다.
+자세한 자격·재전달·운영 DDL/중단시험 범위는 `order-flow-guide.md` §3-6, `deploy-guide.md`의 C2b 절을 따른다. 소비/운영 결제 게이트 활성화 승인은 포함하지 않는다.
+
 **C1a 원천 조회 API**: order-service의 `GET /internal/v1/order-payments/{paymentId}`는 저장된 최초 반영 결과만 반환한다.
 정확한 7필드·인가·오류 계약은 [order-payment-result-guide.md](order-payment-result-guide.md)를 따른다.
 이 API 추가는 ACK 소비·inbox·회신 outbox·재고 확정 뒤 중단 창 복구를 완료하지 않는다. #308 C·#15 운영 개방 조건과 기존 게이트는 유지한다.

@@ -19,6 +19,6 @@ public class OrderPaymentResultProcessor {
         OrderPayment payment = orderPaymentRepositoryPort.findByPaymentId(paymentId)
             .orElseThrow(() -> new OrderException(OrderErrorCode.ORDER_PAYMENT_RESULT_NOT_FOUND));
         return new OrderPaymentResultInfo(payment.paymentId(), payment.orderId(), payment.memberId(), payment.result(), payment.totalAmount(),
-            payment.approvedAt(), payment.stockReservationId());
+            payment.approvedAt(), payment.result() == OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE ? null : payment.stockReservationId());
     }
 }
