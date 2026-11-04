@@ -228,7 +228,7 @@ prod 데이터를 복사해 쓰지 않는다(개인정보) — 필요하면 마�
 |------|--------|-------------|
 | 서비스 간 비동기 메시징 | **Kafka 로 확정**(2026-10-25 사용자 결정, Infra 공유 클러스터) · 발행 정합성은 transactional outbox + 폴링 릴레이(CDC 안 함). 규칙은 `architecture-guide.md` §8-1, 남은 세부(dev 접속 방식 · ShedLock · 지표 노출 · 토픽 prefix 등)는 #304 설계 댓글의 결정 항목 | #304 (구현 #306 ~ #310) |
 | 비회원 주문 | 지원 / 미지원 | 주문 생성 |
-| USD 가격 | SKU 별 통화 가격표 / 환율 환산 | 해외 판매 |
+| USD 가격 | **관리자 수동 고정 KRW/USD 가격으로 확정**. 상품×통화 기본가·정가 + SKU×통화 추가금, 환산 없음. [정책·단계별 계획](usd-pricing-guide.md)은 #20 A이며 가격행·명시 통화·nullable SKU는 구현 전 목표다. 현재 단일 통화/internal 조회·주문 추론·KRW 결제 계약은 유지한다 | #20 B~E 구현·검증 및 USD 개방은 별도 승인 |
 | 원가 통화 ↔ 판매 통화 불일치 | SKU 원가 이력은 통화를 (SKU, 유형) 첫 행으로만 고정하고 판매가 통화와 맞추지 않는다(#361). 마진 계산 때 환산 / 거절 / 표시만 중 고른다 | #362 |
 | 배포 환경 | 단일 VM + docker compose / 관리형 컨테이너 | 인프라 |
 | 시크릿 주입 방식 | Jenkins 배포 agent의 AppRole → 환경별 Vault KV v2 → 임시 `.env.runtime` → Compose 환경변수로 확정. 환경별 AppRole 분리는 prod 배포 전 운영 조건(`secret-management.md` §3) | #32 |
