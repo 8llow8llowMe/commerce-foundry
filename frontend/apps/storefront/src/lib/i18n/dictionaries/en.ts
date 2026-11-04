@@ -170,11 +170,16 @@ export const en: Dictionary = {
     business: 'Company information',
     businessName: 'Company',
     representative: 'CEO',
-    registrationNumber: 'Business registration no.',
+    registrationNumber: 'Business ID',
+    registrationLabels: { KR: 'Business registration no.' },
     mailOrderNumber: 'Mail-order business report no.',
     address: 'Address',
     contact: 'Customer service',
+    email: 'Email',
+    hours: 'Hours',
     verify: 'Verify business information',
+    businessUnavailable:
+      'Company information is temporarily unavailable. Please check back shortly.',
   },
   shop: {
     categories: 'Categories',

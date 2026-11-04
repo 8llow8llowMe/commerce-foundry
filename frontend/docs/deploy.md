@@ -62,11 +62,13 @@ standalone 의 `node_modules` 에는 `sharp`(이미지 최적화) 네이티브 �
 | `LOCALE_HOSTS` | storefront | O | `:-` | proxy 가 읽는다. 빌드 · 실행에 같은 값 |
 | `ADMIN_ORIGIN` | storefront | O | `:-` | 메인 전시 미리보기(#71)를 iframe 으로 여는 어드민 origin. proxy · 미리보기 화면이 읽어 빌드 · 실행에 같은 값. 비면 운영에서는 미리보기를 닫는다(`frame-ancestors 'none'`) |
 | `STOREFRONT_ORIGIN` | admin | - | `:-` | 미리보기가 여는 스토어프론트 origin(요청 시점에 읽어 빌드에는 쓰지 않는다). 비면 운영에서는 미리보기 버튼이 없다 |
-| `BUSINESS_*` (6개) | storefront | O | `:-` | 푸터. 정적으로 미리 그리는 페이지에 들어갈 수 있어 빌드 · 실행에 같은 값. 비면 그 줄을 뺀다 |
 | `GATEWAY_URL` | 둘 다 | O | **`:?` 필수** | `http://commerce-api-gateway-<env>:8000` (같은 네트워크의 게이트웨이 컨테이너 이름, §3) |
 | `CLIENT_IP_HEADER` | 둘 다 | - | `:-` | 앞단 구성에 맞춘다(§8). 비면 앱 기본값 `x-real-ip` |
 | `COMMERCE_DOCKER_NETWORK` · 포트 · 바인드 · 메모리 | 둘 다 | - | 네트워크 · 자기 포트 `:?` | §3 |
 | `NODE_ENV` | 둘 다 | - | 이미지가 `production` 으로 고정 | 어드민 쿠키가 `Secure` 가 된다 — **HTTPS 앞단 없이 http 로 열면 어드민 로그인이 안 된다** |
+
+푸터 사업자 · 고객센터 정보와 쇼핑몰 표시 이름은 env 가 아니다 — 어드민이 저장하는 쇼핑몰 공개 정보(#566 · #568)를 스토어프론트가
+요청마다 `GET /api/v1/store/profile` 로 읽는다(`styling-theme.md` §4). 예전 `BUSINESS_*` 키는 Vault 에서 지워도 된다.
 
 **빌드 시점 키** — `turbo.json` 의 `build.env` 가 목록의 정본이다. turbo 는 strict env 모드라 여기 없는 변수는 `next build` 에 전달되지 않는다.
 배포 빌드(develop · main 의 배포 대상 빌드)만 빌드 agent 의 sh 하나에서 Vault 를 읽어 이 목록에 맞는 키를 그 셸의 env 로 넘긴다.
@@ -74,7 +76,7 @@ PR · CI 빌드는 Vault 를 읽지 않는다(앱 기본값으로 빌드, 배포
 storefront 의 필수 빌드 키는 `Jenkinsfile-storefront` 의 `buildRequiredKeys` 다.
 
 **런타임 키** — compose 의 `environment` 가 읽는 키만 `.env.runtime` 에 쓴다(백엔드 `planRuntimeKeys` 와 같다). 그래서 admin 배포에는
-`BUSINESS_*` 가 내려가지 않는다. 앱이 새 서버 env 를 읽기 시작하면 그 앱 compose 의 `x-<app>-environment` 에 같이 더한다 —
+`NEXT_PUBLIC_*` · `LOCALE_HOSTS` 처럼 storefront compose 만 읽는 키가 내려가지 않는다. 앱이 새 서버 env 를 읽기 시작하면 그 앱 compose 의 `x-<app>-environment` 에 같이 더한다 —
 빠뜨리면 컨테이너에는 그 키가 없다. 보간 규칙은 백엔드와 같다(`deploy-guide.md` §4-2: 필수는 `:?`, 기본값이 빈 값이면 `:-`).
 
 - `.env.runtime` 은 `KEY='value'`(작은따옴표) · 권한 600 이고, 배포 경로가 아니라 **워크스페이스의 700 디렉터리**에 만든다
@@ -150,7 +152,7 @@ develop 에 Rebase and merge
 | 항목 | 백엔드 | 프론트 | 이유 |
 |------|--------|--------|------|
 | 빌드 | Gradle test + bootJar | pnpm 검사 4종 + 테스트 건수 + `turbo run build --filter` | frontend-ci 와 같은 검사 |
-| 빌드 시 Vault | 읽지 않음 | **배포 빌드만** 빌드 시점 키를 읽음(sh 하나 안) | `NEXT_PUBLIC_*` · `BUSINESS_*` 는 빌드에 박힌다 |
+| 빌드 시 Vault | 읽지 않음 | **배포 빌드만** 빌드 시점 키를 읽음(sh 하나 안) | `NEXT_PUBLIC_*` 는 빌드에 박힌다 |
 | Vault 경로 · AppRole | `kv/commerce-foundry/backend/*`, `commerce-foundry-vault-*` | `kv/commerce-foundry/frontend/*`, `commerce-foundry-frontend-vault-*` | 프론트 잡이 백엔드 시크릿을 읽지 않게 |
 | 배포 lock | `commerce-foundry-backend-deploy` | `commerce-foundry-frontend-deploy` | 프론트는 네트워크를 만들지 않고 백엔드 컨테이너를 건드리지 않는다 |
 | 산출물 전달 | jar · Dockerfile · compose stash | tar.gz 하나 stash | pnpm standalone 의 심볼릭 링크를 그대로 옮긴다 |
@@ -188,7 +190,7 @@ develop 에 Rebase and merge
 |------|-------------|
 | `빌드 agent 의 Node 메이저 ... 가 frontend/.nvmrc ... 와 다릅니다` · `glibc 리눅스여야 합니다` | 빌드 agent 의 도구를 맞춘다(§5) |
 | `빌드 필수 키가 없거나 비어 있습니다: NEXT_PUBLIC_SITE_URL` | 그 환경 Vault secret 에 넣고 다시 실행한다 |
-| `turbo.json build.env 의 ... 를 해석할 수 없습니다` | `build.env` 는 대문자 키 또는 끝 와일드카드(`BUSINESS_*`)만 쓴다 |
+| `turbo.json build.env 의 ... 를 해석할 수 없습니다` | `build.env` 는 대문자 키 또는 끝 와일드카드(`NEXT_PUBLIC_*`)만 쓴다 |
 | `standalone 에 sharp-linux-<cpu> 가 없습니다` · `묶음에 배포 호스트용 sharp-linux-<cpu> 가 없습니다` | 새 배포 호스트 CPU 면 `sharpTargetCpus()` 에 더한다. 아니면 pnpm install 의 `--cpu` 플래그와 lockfile 을 본다(§1) |
 | `네트워크 ... 가 없습니다. 같은 환경의 백엔드(api-gateway)를 먼저 배포합니다` | 백엔드를 먼저 배포하거나 `COMMERCE_DOCKER_NETWORK` 값을 백엔드 secret 과 맞춘다 |
 | 경고 `commerce-api-gateway-<env> 가 없습니다` | 배포는 됐다. BFF 요청은 게이트웨이가 뜰 때까지 503 이다 |

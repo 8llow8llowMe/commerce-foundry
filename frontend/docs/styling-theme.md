@@ -112,12 +112,20 @@
 
 ## 4. 고객사 정보
 
-사업자등록번호·대표자 등 실정보는 테마에 넣지 않는다(공개 저장소). 서버 env(`BUSINESS_*`)로 받는다.
+사업자등록번호·대표자 등 실정보는 테마 · env · 번들에 넣지 않는다(공개 저장소). 정본은 어드민 **쇼핑몰 설정 > 쇼핑몰 정보**(#568)가
+저장하는 쇼핑몰 공개 정보(BE #566, `backend/docs/api-design-guide.md` 쇼핑몰 공개 정보)다. 저장 즉시 공개된다.
 
-- 스토어프론트 푸터(`components/footer/SiteFooter`)가 `src/lib/env.ts` 의 `businessInfo` 로 표시한다 — 법정 정보(상호 · 대표 · 사업자등록번호 · 통신판매업 신고번호 · 주소)는 아래 13px, 고객센터 연락처는 위 줄 오른쪽 전화 링크. 빈 값은 그 줄을 빼고, 사업자등록번호가 10자리면 공정위 사업자 정보 확인 링크를 단다.
+- 스토어프론트 `[locale]` 레이아웃이 요청마다 `loadStoreProfile`(`src/lib/store-profile.ts`)로 익명 `GET /api/v1/store/profile` 을 부른다.
+  BE 계약대로 캐시하지 않고(no-store) 3초에 끊는다. 같은 요청의 메타데이터와는 React `cache` 로 한 번만 부른다.
+- 상태는 셋이다. **등록**: 푸터(`components/footer/SiteFooter`)가 법정 정보(상호 · 대표 · 등록번호 · 통신판매업 신고번호 · 주소)를 아래 13px,
+  고객센터(전화 · 이메일 · 운영 시간)를 위 줄 오른쪽에 보이고, 탭 제목 · 저작권 표시 이름을 쇼핑몰 이름으로 쓴다.
+  **미등록**(404 `STORE_PROFILE_001`): 사업자 · 고객센터 블록 없이 브랜드 패키지 이름으로 그린다.
+  **장애**(그 밖의 실패 · 시간 초과 · 모양 불일치): 지난 값 · 다른 브랜드 값을 대신 보이지 않고 안내 한 줄만 둔다.
+- 등록번호 이름 · 공개 확인 링크는 국가 코드로 고른다(`src/lib/business-info.ts` 의 `REGISTRIES`). 지금은 KR 만 규칙이 있다 —
+  사업자등록번호 10자리면 공정위 사업자 정보 확인 링크. 규칙이 없는 국가는 일반 이름(`footer.registrationNumber`)으로 번호만 보인다.
+- 워드마크 · 로고 · 폰트 · 색은 쇼핑몰 정보가 아니라 브랜드 패키지다.
 - 푸터 구성(#59): 위 줄 링크 · 연락처 → 화면 폭 가득 워드마크(`Wordmark`, 브랜드 이름을 SVG `textLength` 로 자간만 벌려 양 끝을 맞춘다) → 법정 정보. 모바일은 링크 1열부터 같은 순서다.
 - 메인에서만 브랜드 설정 `brand.content[locale].footerBackdrop` 화보를 밝기 0.62 로 깔고 글을 Porcelain(`text-bg`)으로 바꾼다. 화보가 null 이면 같은 어두운 단색 면이다. 메인 판별은 `useSelectedLayoutSegment() === null`(`FooterSurface`) — proxy rewrite 뒤 `usePathname` 은 주소와 다를 수 있다. 그라데이션 금지라 스크림을 두지 않으니 화보는 아래쪽이 어두운 컷으로 고른다.
-- 정적으로 미리 그리는 페이지(not-found 등)에는 **빌드 시점** 값이 들어간다. 배포 환경은 빌드 · 실행 모두에 같은 값을 준다.
 - 푸터 고객 안내 링크(약관 · 개인정보처리방침 · 고객센터)는 브랜드 설정 `brand.content[locale].footerLinks` 다. 개인정보처리방침은 `emphasis: true` 로 굵게 둔다.
 - 브랜드 인스타그램은 브랜드 설정 `brand.content[locale].instagram`(계정 주소 · 계정 이름 · 사진 4장, 없으면 null)이다. 메인 06 Our Story 아래 줄로만 쓴다(`docs/architecture.md` §10). 계정 주소는 공개 정보라 저장소에 둔다.
 - 테스트 · 예시에는 실정보가 아닌 자리 값(`000-00-00000`, `홍길동`)만 쓴다.
