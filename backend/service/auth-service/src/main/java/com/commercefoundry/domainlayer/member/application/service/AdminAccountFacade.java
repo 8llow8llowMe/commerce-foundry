@@ -31,49 +31,49 @@ public class AdminAccountFacade implements AdminAccountUseCase {
 
     @Override
     public AdminAccountCreatedResponse createAdmin(long actorMemberId, String email, String rawPassword, String name) {
-        String normalizedEmail = Member.normalizeEmail(email);
-        String passwordHash = adminAccountProcessor.hashPassword(rawPassword);
+        Member created;
         try {
-            Member created = adminAccountProcessor.create(normalizedEmail, passwordHash, name);
-            adminAuditProcessor.adminAccountCreated(actorMemberId, created.id(), true);
-            return adminAccountPresenter.toCreated(created.id());
-        } catch (MemberException exception) {
+            String normalizedEmail = Member.normalizeEmail(email);
+            String passwordHash = adminAccountProcessor.hashPassword(rawPassword);
+            created = adminAccountProcessor.create(normalizedEmail, passwordHash, name);
+        } catch (RuntimeException exception) {
             adminAuditProcessor.adminAccountCreated(actorMemberId, null, false);
             throw exception;
         }
+        adminAuditProcessor.adminAccountCreated(actorMemberId, created.id(), true);
+        return adminAccountPresenter.toCreated(created.id());
     }
 
     @Override
     public void deactivateAdmin(long actorMemberId, long targetMemberId, String currentTokenId) {
         try {
             adminAccountProcessor.deactivate(actorMemberId, targetMemberId, clock.instant());
-        } catch (MemberException exception) {
+            adminAccessCutoffProcessor.cutOff(targetMemberId, cutoff());
+            if (actorMemberId == targetMemberId) {
+                adminAccessCutoffProcessor.revokeCurrent(currentTokenId);
+            }
+        } catch (RuntimeException exception) {
             adminAuditProcessor.adminAccountDeactivated(actorMemberId, targetMemberId, false);
             throw exception;
-        }
-        adminAccessCutoffProcessor.cutOff(targetMemberId, cutoff());
-        if (actorMemberId == targetMemberId) {
-            adminAccessCutoffProcessor.revokeCurrent(currentTokenId);
         }
         adminAuditProcessor.adminAccountDeactivated(actorMemberId, targetMemberId, true);
     }
 
     @Override
     public void changePassword(long actorMemberId, String currentTokenId, String currentPassword, String newPassword) {
-        Member admin = adminAccountProcessor.findActiveOperator(actorMemberId);
-        if (!adminAccountProcessor.passwordMatches(admin, currentPassword)) {
-            adminAuditProcessor.adminPasswordChanged(actorMemberId, false);
-            throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_MISMATCH);
-        }
-        String passwordHash = adminAccountProcessor.hashPassword(newPassword);
         try {
+            Member admin = adminAccountProcessor.findActiveOperator(actorMemberId);
+            if (!adminAccountProcessor.passwordMatches(admin, currentPassword)) {
+                throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_MISMATCH);
+            }
+            String passwordHash = adminAccountProcessor.hashPassword(newPassword);
             adminAccountProcessor.changePassword(actorMemberId, passwordHash);
-        } catch (MemberException exception) {
+            adminAccessCutoffProcessor.cutOff(actorMemberId, cutoff());
+            adminAccessCutoffProcessor.revokeCurrent(currentTokenId);
+        } catch (RuntimeException exception) {
             adminAuditProcessor.adminPasswordChanged(actorMemberId, false);
             throw exception;
         }
-        adminAccessCutoffProcessor.cutOff(actorMemberId, cutoff());
-        adminAccessCutoffProcessor.revokeCurrent(currentTokenId);
         adminAuditProcessor.adminPasswordChanged(actorMemberId, true);
     }
 

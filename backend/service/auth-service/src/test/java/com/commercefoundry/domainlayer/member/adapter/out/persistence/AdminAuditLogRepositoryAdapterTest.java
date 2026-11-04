@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -20,14 +21,18 @@ import java.util.OptionalLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 
 /** 감사 DB 어댑터의 기록 계약 — 로그 한 줄이 먼저, 행은 REQUIRES_NEW, 저장 실패는 업무로 번지지 않는다. 실제 질의는 {@code AdminAuditLogPersistenceAdapterTest}. */
+@ExtendWith(OutputCaptureExtension.class)
 class AdminAuditLogRepositoryAdapterTest {
 
     private AdminAuditLogAdapter logAdapter;
@@ -81,6 +86,22 @@ class AdminAuditLogRepositoryAdapterTest {
         doThrow(new DataAccessResourceFailureException("commit failed")).when(transactionManager).commit(any());
 
         assertThatCode(() -> adapter.membersSearched(9L, null, 0, 20)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void accountPersistAndCommitDiagnosticsDoNotLeakSecrets(CapturedOutput output) {
+        String secret = "email@example.com name-password JWT-jti-secret";
+        RuntimeException failure = new DataAccessResourceFailureException(secret, new IllegalStateException("cause-secret"));
+        given(repository.saveAndFlush(any())).willThrow(failure);
+        assertThatCode(() -> adapter.adminAccountCreated(7L, 9L, true)).doesNotThrowAnyException();
+        willReturn(null).given(repository).saveAndFlush(any());
+        doThrow(failure).when(transactionManager).commit(any());
+        assertThatCode(() -> adapter.adminPasswordChanged(7L, false)).doesNotThrowAnyException();
+
+        assertThat(output.getAll()).contains("action=ADMIN_CREATE", "action=ADMIN_PASSWORD_CHANGE", "actorMemberId=7")
+            .doesNotContain("email@example.com", "name-password", "JWT-jti-secret", "cause-secret");
+        verify(logAdapter).write(AdminAuditRecord.adminCreated(7L, 9L, true));
+        verify(logAdapter).write(AdminAuditRecord.adminPasswordChanged(7L, false));
     }
 
     @Test

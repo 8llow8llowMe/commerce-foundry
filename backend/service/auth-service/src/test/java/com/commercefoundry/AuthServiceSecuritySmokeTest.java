@@ -82,9 +82,6 @@ class AuthServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     @Override
     protected Map<String, String> auditDeclarationPending() {
         return Map.ofEntries(
-            Map.entry("AdminAccountAdminController#createAdmin", "#163 PR-E"),
-            Map.entry("AdminAccountAdminController#deactivateAdmin", "#163 PR-E"),
-            Map.entry("AdminAccountAdminController#changePassword", "#163 PR-E"),
             Map.entry("AdminOtpAdminController#startEnrollment", "#163 PR-E (면제 대상 — OTP 등록 시작)"),
             Map.entry("AdminOtpAdminController#confirmEnrollment", "#163 PR-E"),
             Map.entry("AdminOtpAdminController#disable", "#163 PR-E"),

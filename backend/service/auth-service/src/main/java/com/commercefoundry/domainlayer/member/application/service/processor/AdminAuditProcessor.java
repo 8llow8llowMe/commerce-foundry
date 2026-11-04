@@ -1,17 +1,20 @@
 package com.commercefoundry.domainlayer.member.application.service.processor;
 
+import com.commercefoundry.domainlayer.member.application.model.AdminAuditAction;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminAuditPort;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
 import java.util.Optional;
 import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
  * 관리자 감사 기록 (#6, {@code security-guide.md} §11-4). Facade 는 out-port({@link AdminAuditPort})를 직접 부르지 않고 이 Processor 를 거친다
  * (ArchUnit H11). "실패 로그에 무엇을 대상으로 남기나" 같은 감사 정책도 여기에 모은다. 트랜잭션을 걸지 않는다 — 업무가 끝난 뒤 부른다.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class AdminAuditProcessor {
@@ -47,15 +50,15 @@ public class AdminAuditProcessor {
     }
 
     public void adminAccountCreated(long actorMemberId, Long createdMemberId, boolean succeeded) {
-        adminAuditPort.adminAccountCreated(actorMemberId, createdMemberId, succeeded);
+        safelyRecord(AdminAuditAction.ADMIN_CREATE, actorMemberId, () -> adminAuditPort.adminAccountCreated(actorMemberId, createdMemberId, succeeded));
     }
 
     public void adminAccountDeactivated(long actorMemberId, long targetMemberId, boolean succeeded) {
-        adminAuditPort.adminAccountDeactivated(actorMemberId, targetMemberId, succeeded);
+        safelyRecord(AdminAuditAction.ADMIN_DEACTIVATE, actorMemberId, () -> adminAuditPort.adminAccountDeactivated(actorMemberId, targetMemberId, succeeded));
     }
 
     public void adminPasswordChanged(long adminMemberId, boolean succeeded) {
-        adminAuditPort.adminPasswordChanged(adminMemberId, succeeded);
+        safelyRecord(AdminAuditAction.ADMIN_PASSWORD_CHANGE, adminMemberId, () -> adminAuditPort.adminPasswordChanged(adminMemberId, succeeded));
     }
 
     public void adminOtpEnrolled(long adminMemberId, boolean succeeded) {
@@ -72,5 +75,18 @@ public class AdminAuditProcessor {
 
     public void adminOtpPeerRecovered(long actorMemberId, long targetMemberId, boolean succeeded) {
         adminAuditPort.adminOtpPeerRecovered(actorMemberId, targetMemberId, succeeded);
+    }
+
+    /** 계정 감사만 격리한다. 업무 DB 커밋과 필수 Redis 처리는 호출자가 이미 마쳤다. */
+    private void safelyRecord(AdminAuditAction action, long actorMemberId, Runnable write) {
+        try {
+            write.run();
+        } catch (RuntimeException exception) {
+            try {
+                log.error("admin account audit failed. action={}, actorMemberId={}, error={}", action, actorMemberId, exception.getClass().getName());
+            } catch (RuntimeException loggingFailure) {
+                // 진단 로거 장애도 이미 끝난 업무 결과를 바꾸지 않는다.
+            }
+        }
     }
 }

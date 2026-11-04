@@ -202,6 +202,26 @@ class TokenStoreRedisSupportTest {
         assertThat(output.getAll()).doesNotContain(SECRET_MESSAGE);
     }
 
+    @Test
+    @DisplayName("계정 컷오프와 jti 차단의 실제 Redis 어댑터는 DataAccessException을 AUTH_013으로 번역한다 — 네트워크 없는 연결 검증")
+    @SuppressWarnings("unchecked")
+    void accountInvalidationAdaptersTranslateRedisFailure(CapturedOutput output) {
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        QueryTimeoutException failure = new QueryTimeoutException(SECRET_MESSAGE, new IllegalStateException("cause-sentinel"));
+        given(template.execute(eq(AdminAccessCutoffRedisScripts.ADVANCE), anyList(), any(Object[].class))).willThrow(failure);
+        given(template.opsForValue()).willReturn(values);
+        willThrow(failure).given(values).set(anyString(), eq(AccessTokenRevocationRedisAdapter.REVOKED), any(Duration.class));
+        AdminAccessCutoffRedisAdapter cutoff = new AdminAccessCutoffRedisAdapter(template, TestTokens.verification(), support);
+        AccessTokenRevocationRedisAdapter revocations = new AccessTokenRevocationRedisAdapter(template, TestTokens.verification(), support);
+
+        for (Runnable call : List.<Runnable>of(() -> cutoff.cutOff(7L, Instant.now()), () -> revocations.revoke("jti-sentinel"))) {
+            assertThatThrownBy(call::run).isInstanceOf(MemberException.class).hasCause(failure)
+                .extracting(exception -> ((MemberException) exception).getErrorCode()).isEqualTo(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+        }
+        assertThat(output.getAll()).doesNotContain(SECRET_MESSAGE, "cause-sentinel", "jti-sentinel");
+    }
+
     private void failTimes(int times) {
         for (int i = 0; i < times; i++) {
             assertThatThrownBy(() -> support.execute(() -> {
