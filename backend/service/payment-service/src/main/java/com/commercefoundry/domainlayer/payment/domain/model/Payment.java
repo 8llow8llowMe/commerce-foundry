@@ -21,7 +21,7 @@ import java.util.Objects;
  *   <tr><td>IN_PROGRESS</td><td>{@link #revertToReady}</td><td>READY</td></tr>
  *   <tr><td>UNKNOWN</td><td>{@link #resolve}</td><td>DONE · FAILED</td></tr>
  *   <tr><td>UNKNOWN</td><td>{@link #flagForManualReview}</td><td>UNKNOWN (이유만 바뀐다)</td></tr>
- *   <tr><td>DONE</td><td>{@link #markOrderSynced} · {@link #markOrderSyncFailed}</td><td>DONE (주문 반영 기록만 바뀐다)</td></tr>
+ *   <tr><td>DONE · PARTIAL_CANCELED · CANCELED (DONE 에서 온 것만)</td><td>{@link #markOrderSynced} · {@link #markOrderSyncFailed}</td><td>그대로 (주문 반영 기록만 바뀐다)</td></tr>
  *   <tr><td>FAILED · ABORTED</td><td>{@link #recordLateApproval}</td><td>LATE_APPROVED</td></tr>
  * </table>
  *
@@ -51,8 +51,9 @@ import java.util.Objects;
  * @param failureCode PG 거절 코드 (FAILED, 그리고 FAILED 에서 온 LATE_APPROVED)
  * @param failureMessage PG 거절 메시지 (거절 코드가 있을 때만, 없을 수 있다)
  * @param unknownReason UNKNOWN 으로 둔 이유. 재조회로 확정한 뒤에도 이력으로 남긴다
- * @param orderSynced 결제 완료를 order-service 에 반영했는가 ({@code payment-guide.md} §6). 주문에 반영하는 상태(DONE 계열)만 true 가 된다
- * @param orderSyncFailureCode 주문 반영이 종결 실패했을 때 order-service 가 준 오류 코드. 반영 전 · 반영 성공이면 null
+ * @param orderSynced order 의 회신 {@code order-paid} 를 받았는가(주문 PAID 확정, {@code payment-guide.md} §6). DONE 에서 온 DONE 계열만 true 가 된다.
+ *     false 는 회신 대기이거나 거절 회신({@code orderSyncFailureCode})이다 — 재전송 대상이라는 뜻이 아니다
+ * @param orderSyncFailureCode order 의 거절 회신 {@code order-payment-rejected} 의 사유 코드. 회신 전 · {@code order-paid} 수신이면 null
  * @param abortReason 중단 사유 (ABORTED, 그리고 ABORTED 에서 온 LATE_APPROVED)
  * @param approvalIdempotencyKey 마지막으로 승인을 시작한 고객 요청의 {@code Idempotency-Key}(UUID 소문자 36자) — 같은 키의 재요청에 처음 결과를 그대로 돌려주는 근거다
  *     ({@code api-design-guide.md} §6). 승인 시작 전이면 null. 되돌린 READY 를 새 키로 다시 시작하면 바뀐다. PG 멱등 키(결제 시도 아이디)와 다르다
@@ -300,10 +301,11 @@ public record Payment(
     }
 
     /**
-     * 결제 완료를 order-service 에 반영했다 ({@code payment-guide.md} §6). 이전 종결 실패 코드는 지운다. 이미 반영됐으면 그대로 돌려준다(멱등 — 재전송이 겹친다).
+     * order 의 회신 {@code order-paid} 를 받았다 — 주문이 PAID 로 확정됐다 ({@code payment-guide.md} §6). 이전 거절 코드는 지운다. 이미 받았으면 그대로 돌려준다(멱등 — 재전달이 겹친다).
+     * 회신은 비동기라 그 사이 결제가 부분 · 전액 취소됐을 수 있다 — DONE 계열({@link PaymentStatus#reportsToOrder()}) 어디서든 기록한다(#308 PR-C).
      */
     public Payment markOrderSynced() {
-        requireStatus(PaymentStatus.DONE, PaymentTransitionException.Action.MARK_ORDER_SYNCED);
+        requireReportsToOrder(PaymentTransitionException.Action.MARK_ORDER_SYNCED);
         if (orderSynced) {
             return this;
         }
@@ -311,14 +313,14 @@ public record Payment(
     }
 
     /**
-     * 주문 반영이 종결 실패했다 — 재전송해도 바뀌지 않는 거절(예: 주문이 이미 취소됨). 반영 여부는 false 그대로라 재전송 · 자동 취소 대상으로 남는다.
-     * 이미 반영됐으면 그대로 돌려준다 — 늦게 도착한 실패가 성공 기록을 덮지 않게. 같은 코드면 그대로다(멱등).
+     * order 의 거절 회신 {@code order-payment-rejected(reason)} 를 받았다 — 다시 보내도 바뀌지 않는 거절(예: 주문이 이미 취소됨). 회신 수신 여부는 false 그대로이고
+     * 돈이 남아 있으면 전액 취소 대상이다(#579). 이미 {@code order-paid} 를 받았으면 그대로 돌려준다 — 늦게 도착한 거절이 성공 기록을 덮지 않게. 같은 코드면 그대로다(멱등).
      *
-     * @param failureCode order-service 오류 코드 (1~30자)
+     * @param failureCode order 거절 사유 코드 (1~30자)
      */
     public Payment markOrderSyncFailed(String failureCode) {
         Objects.requireNonNull(failureCode, "failureCode");
-        requireStatus(PaymentStatus.DONE, PaymentTransitionException.Action.MARK_ORDER_SYNC_FAILED);
+        requireReportsToOrder(PaymentTransitionException.Action.MARK_ORDER_SYNC_FAILED);
         if (failureCode.isBlank()) {
             throw new IllegalArgumentException("주문 반영 실패 코드가 비었습니다");
         }
@@ -436,6 +438,16 @@ public record Payment(
     private void requireSameAmount(PaymentApproval approval) {
         if (!approval.amount().equals(amount)) {
             throw new PaymentApprovalMismatchException(id, PaymentApprovalMismatchException.Field.AMOUNT);
+        }
+    }
+
+    /**
+     * 주문 반영 기록을 남길 수 있는 결제인가 — DONE 계열이고 승인 이벤트({@code payment-approved})를 낸 시도여야 한다. 늦은 승인(LATE_APPROVED)과 거기서 전액 취소된 CANCELED
+     * (종결 이유 — 거절 코드 · 중단 사유 — 가 남아 있다)는 주문에 반영한 적이 없어 회신이 올 수 없다 ({@code payment-guide.md} §5).
+     */
+    private void requireReportsToOrder(PaymentTransitionException.Action action) {
+        if (!status.reportsToOrder() || failureCode != null || abortReason != null) {
+            throw new PaymentTransitionException(status, action);
         }
     }
 
