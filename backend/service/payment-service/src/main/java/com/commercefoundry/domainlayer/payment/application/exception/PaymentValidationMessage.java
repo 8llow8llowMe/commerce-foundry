@@ -35,6 +35,12 @@ public final class PaymentValidationMessage {
     public static final String PAGE_MIN = "PAYMENT_116:페이지는 0 이상이어야 합니다.";
     public static final String SIZE_RANGE = "PAYMENT_117:페이지 크기는 1~100이어야 합니다.";
 
+    // 서비스 간 승인 집계
+    public static final String SUMMARY_FROM_REQUIRED = "PAYMENT_118:집계 시작 시각은 필수입니다.";
+    public static final String SUMMARY_FROM_FORMAT = "PAYMENT_119:집계 시작 시각 형식이 올바르지 않습니다.";
+    public static final String SUMMARY_TO_REQUIRED = "PAYMENT_120:집계 종료 시각은 필수입니다.";
+    public static final String SUMMARY_TO_FORMAT = "PAYMENT_121:집계 종료 시각 형식이 올바르지 않습니다.";
+
     private PaymentValidationMessage() {
     }
 }

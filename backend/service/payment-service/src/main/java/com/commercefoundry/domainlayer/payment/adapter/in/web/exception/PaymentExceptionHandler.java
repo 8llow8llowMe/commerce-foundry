@@ -100,11 +100,23 @@ public class PaymentExceptionHandler {
         if (PaymentWebController.IDEMPOTENCY_KEY_HEADER.equals(exception.getName())) {
             return fieldError(PaymentValidationMessage.IDEMPOTENCY_KEY_FORMAT_INVALID, PaymentWebController.IDEMPOTENCY_KEY_HEADER);
         }
+        if ("from".equals(exception.getName())) {
+            return fieldError(PaymentValidationMessage.SUMMARY_FROM_FORMAT, "from");
+        }
+        if ("to".equals(exception.getName())) {
+            return fieldError(PaymentValidationMessage.SUMMARY_TO_FORMAT, "to");
+        }
         return ValidationErrorSupport.toResponse(exception, PaymentErrorCode.PARAMETER_TYPE_INVALID.getCode());
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<Response<Void>> handleMissingParameter(MissingServletRequestParameterException exception) {
+        if ("from".equals(exception.getParameterName())) {
+            return fieldError(PaymentValidationMessage.SUMMARY_FROM_REQUIRED, "from");
+        }
+        if ("to".equals(exception.getParameterName())) {
+            return fieldError(PaymentValidationMessage.SUMMARY_TO_REQUIRED, "to");
+        }
         return ValidationErrorSupport.toMissingParameterResponse(exception.getParameterName(), PaymentErrorCode.PARAMETER_REQUIRED.getCode());
     }
 

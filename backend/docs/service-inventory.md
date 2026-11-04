@@ -81,6 +81,10 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 | operations-service | product-service | 품절 임박 커서 조회(`GET /internal/v1/stocks/low`, #229 PR-2). operations-service만 허용하는 조회 기반이며 소비자 클라이언트·스케줄러·알림 연결은 후속 |
 | operations-service | auth-service | 마케팅 동의 `POST /internal/v1/marketing-consents/query` (#230). PR-B의 ADMIN 수신자 미리보기에서 실제 Feign 호출(`campaignConsentClient`, 서킷 `auth-service`). 최대100개 ID, 이름·연락처 없음. 실패·응답 계약 위반은503. 실제 발송 연결은 후속. |
 
+operations-service의 정상 승인 집계 읽기 권한(#550): payment-service가
+`GET /internal/v1/payments/approval-summary?from=&to=`를 operations 전용으로 제공한다. 승인일 기준 최대 31일의 통화 · 수단별 건수와 원금을
+단일 질의로 반환하며 식별자 · 결제키는 없다. 취소 뒤에도 최초 승인액을 유지하고 늦은 승인은 제외한다. 호출 구현 · 리포트 연결은 #220 후속이다.
+
 operations-service의 payment outbox 원천 관측 권한(#477 A3a): payment-service의
 `GET /internal/v1/outbox-observations/ready`는 `SERVICE_operations-service`만 허용한다. 미래 예약을 제외한 발행 가능 미발행 건수·최소시각을
 단일 집계로 제공하며, operations 호출자·주기 수집·알림·해소 연결은 후속이다. [관측 계약](outbox-observation-guide.md)을 따른다.

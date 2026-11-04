@@ -86,6 +86,11 @@ WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 —
 - 결제 조회(단건): payment-service `GET /internal/v1/payments/{paymentId}` (#308 PR-A2). 허용 호출자는 order-service — `payment-approved` 이벤트의 진위 재조회다.
   회원을 거르지 않는다. 응답은 `{paymentId, orderId, memberId, status(metadata), amount(§2-3), method(metadata) | null, approvedAt | null}` 이고
   결제키 · 멱등 키 · 주문명 · PG 원문은 없다. 없으면 404 `PAYMENT_001`, `paymentId` 가 양수가 아니면 `PAYMENT_115`, 숫자가 아니면 `PAYMENT_198`. 계약은 `payment-guide.md` §6.
+- 정상 승인 집계: payment-service `GET /internal/v1/payments/approval-summary?from=&to=` (#550). 허용 호출자는 operations-service다.
+  필수 UTC `[from, to)`, 양의 기간 · 최대 31일이며 `Cache-Control: no-store`다. `{from, to, groups:[{method(metadata), approvalCount,
+  grossApprovedAmount:{amount, currency}}]}`를 기존 봉투로 반환한다. 그룹은 통화 · 수단 코드순, 빈 범위는 빈 배열이다.
+  결제/주문/회원 식별자 · 결제키 없이 정상 승인 원금만 집계하며 취소 뒤에도 승인액을 유지한다. 누락 · 형식 `PAYMENT_118~121`, 기간 `122`는 400,
+  합계 overflow는 500 `PAYMENT_020`으로 전체 실패다. 상세 조건과 성능 한계는 `payment-guide.md` "리포트용 정상 승인 집계 internal"을 따른다. FE 직접 영향은 없다.
 - 시점 원가(벌크): product-service `POST /internal/v1/sku-costs/query` (#361 PR-B). 허용 호출자는 operations-service(공헌이익 집계 #362).
   조회 키가 `ids` 가 아니라 (SKU, 시각) 쌍 목록이라 본문으로 받는 **읽기 전용 POST** 다 — 위 표의 상한(원문 100개) · 중복(첫 등장 순서로 합침) · 없는 아이디(뺌) ·
   순서(요청 순서) · in 절 벌크 규칙은 그대로 따른다. 계약은 §2-12 "서비스 간 시점 원가 조회".
