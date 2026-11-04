@@ -134,7 +134,7 @@ public class AdminAuditLogRepositoryAdapter implements AdminAuditPort, AdminAudi
                 .build()));
         } catch (RuntimeException exception) {
             log.error("admin audit persist failed. action={}, actorMemberId={}, error={}",
-                record.action(), record.actorMemberId(), exception.getClass().getSimpleName(), exception);
+                record.action(), record.actorMemberId(), exception.getClass().getName());
         }
     }
 }

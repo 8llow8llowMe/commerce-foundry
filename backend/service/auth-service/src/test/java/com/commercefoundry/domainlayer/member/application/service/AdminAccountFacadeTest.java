@@ -11,10 +11,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.commercefoundry.domainlayer.member.adapter.in.admin.presenter.AdminAccountPresenter;
 import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
+import com.commercefoundry.domainlayer.member.application.port.out.AdminAuditPort;
 import com.commercefoundry.domainlayer.member.application.service.processor.AdminAccessCutoffProcessor;
 import com.commercefoundry.domainlayer.member.application.service.processor.AdminAccountProcessor;
 import com.commercefoundry.domainlayer.member.application.service.processor.AdminAuditProcessor;
@@ -90,12 +92,14 @@ class AdminAccountFacadeTest {
     @Test
     @DisplayName("컷오프 저장이 실패하면 성공 감사를 남기지 않는다")
     void cutoffFailureSkipsSuccessAudit() {
-        doThrow(new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE))
+        MemberException original = new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE);
+        doThrow(original)
             .when(adminAccessCutoffProcessor).cutOff(anyLong(), any());
 
         assertThatThrownBy(() -> facade.deactivateAdmin(ACTOR.id(), 8L, "caller-jti"))
-            .isInstanceOf(MemberException.class);
+            .isSameAs(original);
         verify(adminAuditProcessor, never()).adminAccountDeactivated(anyLong(), anyLong(), eq(true));
+        verify(adminAuditProcessor).adminAccountDeactivated(ACTOR.id(), 8L, false);
     }
 
     @Test
@@ -111,6 +115,48 @@ class AdminAccountFacadeTest {
         verify(adminAccountProcessor, never()).changePassword(anyLong(), any());
         verifyNoInteractions(adminAccessCutoffProcessor);
         verify(adminAuditProcessor).adminPasswordChanged(ACTOR.id(), false);
+        verifyNoMoreInteractions(adminAuditProcessor);
+    }
+
+    @Test
+    void businessExceptionIdentitySurvivesFailingAuditWriter() {
+        AdminAuditPort port = mock(AdminAuditPort.class);
+        AdminAccountFacade isolated = new AdminAccountFacade(adminAccountProcessor, adminAccessCutoffProcessor,
+            new AdminAuditProcessor(port), new AdminAccountPresenter(), Clock.fixed(NOW, ZoneOffset.UTC));
+        RuntimeException original = new IllegalStateException("business-secret");
+        given(adminAccountProcessor.hashPassword("password")).willThrow(original);
+        doThrow(new MemberException(MemberErrorCode.DUPLICATE_EMAIL)).when(port).adminAccountCreated(ACTOR.id(), null, false);
+
+        assertThatThrownBy(() -> isolated.createAdmin(ACTOR.id(), "staff@example.com", "password", "운영")).isSameAs(original);
+        verify(port).adminAccountCreated(ACTOR.id(), null, false);
+        verifyNoMoreInteractions(port);
+    }
+
+    @Test
+    void successfulWriterFailureDoesNotBecomeBusinessFailure() {
+        AdminAuditPort port = mock(AdminAuditPort.class);
+        AdminAccountFacade isolated = new AdminAccountFacade(adminAccountProcessor, adminAccessCutoffProcessor,
+            new AdminAuditProcessor(port), new AdminAccountPresenter(), Clock.fixed(NOW, ZoneOffset.UTC));
+        given(adminAccountProcessor.create(any(), any(), any())).willReturn(CREATED);
+        doThrow(new MemberException(MemberErrorCode.DUPLICATE_EMAIL)).when(port).adminAccountCreated(ACTOR.id(), CREATED.id(), true);
+
+        assertThat(isolated.createAdmin(ACTOR.id(), "staff@example.com", "password", "운영").memberId()).isEqualTo("9");
+        verify(port).adminAccountCreated(ACTOR.id(), CREATED.id(), true);
+        verifyNoMoreInteractions(port);
+    }
+
+    @Test
+    void presenterFailureDoesNotReverseCommittedCreateAudit() {
+        AdminAccountPresenter presenter = mock(AdminAccountPresenter.class);
+        AdminAccountFacade isolated = new AdminAccountFacade(adminAccountProcessor, adminAccessCutoffProcessor,
+            adminAuditProcessor, presenter, Clock.fixed(NOW, ZoneOffset.UTC));
+        given(adminAccountProcessor.create(any(), any(), any())).willReturn(CREATED);
+        MemberException original = new MemberException(MemberErrorCode.DUPLICATE_EMAIL);
+        given(presenter.toCreated(CREATED.id())).willThrow(original);
+
+        assertThatThrownBy(() -> isolated.createAdmin(ACTOR.id(), "staff@example.com", "password", "운영")).isSameAs(original);
+        verify(adminAuditProcessor).adminAccountCreated(ACTOR.id(), CREATED.id(), true);
+        verifyNoMoreInteractions(adminAuditProcessor);
     }
 
     @Test

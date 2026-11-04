@@ -1066,6 +1066,14 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   operations 의 작업 취소는 `JobAdminAuditProcessor` 가 `AdminAuditLog` 를 직접 쓴다(DB 싱크 없음). order 도 `OrderAdminAuditProcessor` 가 직접 쓴다 — DB 싱크가 없어 감사 Port/로그 Adapter 를 두지 않는다.
   업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 · SKU 원가 이력 #361 등)는 그 이력이 감사의 정본이고, `admin.audit` 줄도 함께 남긴다(아래 C′).
 - **영속화 (auth-service, #192)** — `AdminAuditPort` 계약은 그대로이고 구현이 `adapter/out/persistence/AdminAuditLogRepositoryAdapter` 다.
+  - 계정 생성 · 비활성화 · 본인 비밀번호 변경은 `@AdminAudited`로 선언하고 기존 `AdminAuditProcessor → AdminAuditPort → 로그 + DB` 경로만 쓴다 (#163).
+    생성 SUCCESS는 업무 DB 커밋 뒤이며 이후 Presenter 실패로 뒤집지 않는다. 비활성화 · 비밀번호 변경 SUCCESS는 DB 변경과 필수 cutoff · 현재 jti 차단까지 완료한 뒤다.
+    업무 RuntimeException(필수 Redis 단계 포함)은 기존 예외를 그대로 반환하고 FAILURE를 한 번 시도한다. 검증 400 · 보안 401 · 진입 인가 403은 무감사이며 업무 AUTH_046은 감사한다.
+    이 세 행위의 감사 Port RuntimeException과 진단 로거 실패는 업무 결과를 바꾸지 않는다. 진단에는 고정 action · actor ID · 예외 타입만 남기고 메시지 · cause · stack은 싣지 않는다.
+    DB 감사 저장 · 커밋 장애 진단에도 예외 원문을 싣지 않는다. OTP 다섯 선언 대기와 업무 정책은 이번 범위 밖이다.
+  - 업무 DB · 감사 DB · 로그는 서로 원자적이지 않은 best-effort 기록이다. 업무 커밋 후 프로세스 종료나 로그 장애로 감사가 누락될 수 있고 자동 재적재는 없다.
+    Redis 장애의 FAILURE는 DB 롤백을 뜻하지 않는다. 계정 변경은 이미 커밋됐을 수 있으며 cutoff 자동 복구는 없다.
+    비활성화 재시도는 AUTH_033, 이전 비밀번호 재시도는 AUTH_032로 cutoff 전에 끝날 수 있으므로 503 재시도만으로 복구된다고 안내하지 않는다.
   - 순서: `admin.audit` 로그 한 줄(`AdminAuditLogAdapter`)을 **먼저** 남기고 `auth.admin_audit_log` 에 한 행을 더한다. 칸 값은 `AdminAuditRecord` 팩토리 한 곳에서 만든다 —
     로그 줄과 행이 같은 값이다. 로그 어댑터는 지우지 않는다(수집기 형식 · 다른 서비스와 같은 줄 · DB 장애 때의 증거).
   - DB 쓰기는 `REQUIRES_NEW` 짧은 트랜잭션이고 예외는 그 바깥에서 삼킨다 — 감사 저장 실패가 로그인 · 조회 응답을 바꾸지 않는다(로그인 실패 응답이 달라지면
@@ -1167,7 +1175,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 
 | 서비스 | 행위 | 상태 |
 |--------|------|------|
-| auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 사용 중 — 선언 · `AdminAuditLog` 통일은 #163 PR-E |
+| auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 계정 3개 선언 완료(#163), OTP 5개 선언 대기 — 기존 Port · 로그 + DB 경로 유지 |
 | order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor`와 조회 후 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출. 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·개인정보는 제외한다 (#17) |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음(`markRead` · `markAllRead`) · 온보딩 투어 기록(`updateTour` · `updateTourLegacy`)은 본인 상태라 `@AdminAuditExempt` (#163 PR-E) |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
