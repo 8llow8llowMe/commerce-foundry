@@ -136,6 +136,33 @@ class OrderStockProcessorTest {
 
     private static final long RESERVATION_ID = 770_001L;
 
+    @Test
+    void initialFencedReservationNeverCallsConfirmOrReReserve() {
+        port.existing(ORDER_ID, RESERVATION_ID);
+
+        assertThat(processor.confirmOrReReserve(saved(OrderStatus.PENDING_PAYMENT), id -> {}, id -> false))
+            .isEqualTo(StockConfirmation.stockUnavailable());
+
+        assertThat(port.confirmCalls()).isEmpty();
+        assertThat(port.reserveCalls()).isEmpty();
+    }
+
+    @Test
+    void reReservedFencedReservationNeverCallsSecondConfirm() {
+        port.existing(ORDER_ID, RESERVATION_ID).expire(RESERVATION_ID);
+        List<Long> recorded = new ArrayList<>();
+        List<Long> checked = new ArrayList<>();
+
+        assertThat(processor.confirmOrReReserve(saved(OrderStatus.EXPIRED), recorded::add, id -> {
+            checked.add(id);
+            return id == RESERVATION_ID;
+        })).isEqualTo(StockConfirmation.stockUnavailable());
+
+        assertThat(recorded).hasSize(1);
+        assertThat(checked).containsExactly(RESERVATION_ID, recorded.getFirst());
+        assertThat(port.confirmCalls()).containsExactly(RESERVATION_ID);
+    }
+
     private static Order saved(OrderStatus status) {
         AtomicLong ids = new AtomicLong(10);
         Order order = Order.place(ORDER_ID, 7L, QUOTE, ids::incrementAndGet, address("KR"), RESERVATION_ID, NOW);
@@ -345,11 +372,13 @@ class OrderStockProcessorTest {
     }
 
     @Test
-    @DisplayName("복원 028(다른 경로가 이미 복원) — WARN 후 복원된 것으로 끝낸다")
-    void quantityExceededClosesRestoration() {
+    @DisplayName("복원 028은 부분 복원일 수 있어 미종결 의도를 남기고 DLT로 보낸다")
+    void quantityExceededRequiresManualVerification() {
         doThrow(new StockReservationException(Failure.QUANTITY_EXCEEDED)).when(restoration).restoreCancellation(anyLong(), anyLong(), any());
 
-        processor.restoreCanceledPayment(ORDER_ID, 99L, 555L, RESERVATION_ID, QUOTE);
+        assertThatThrownBy(() -> processor.restoreCanceledPayment(ORDER_ID, 99L, 555L, RESERVATION_ID, QUOTE))
+            .isInstanceOfSatisfying(OrderException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT));
     }
 
     @ParameterizedTest(name = "복원 {0} → {1}")

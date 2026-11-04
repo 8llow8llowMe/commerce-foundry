@@ -16,12 +16,15 @@ import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment.Result;
 import com.commercefoundry.messaging.consume.NonRetryableEventException;
+import jakarta.persistence.LockTimeoutException;
+import jakarta.persistence.PessimisticLockException;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,7 +61,8 @@ public class OrderPaymentEventFacade implements OrderPaymentEventUseCase {
                 if (target.rejection() == null) {
                     Order order = target.order();
                     confirmation = stockCall(() -> orderStockProcessor.confirmOrReReserve(order,
-                        reReservedId -> orderPaymentProcessor.recordReReservation(payment.paymentId(), order.id(), reReservedId, command.eventId())));
+                        reReservedId -> orderPaymentProcessor.recordReReservation(payment.paymentId(), order.id(), reReservedId, command.eventId()),
+                        reservationId -> orderPaymentProcessor.canConfirm(order.id(), reservationId)));
                 } else if (target.rejection() == Result.REJECTED_ORDER_CANCELED && !probed) {
                     confirmation = probeConfirmed(payment, target.order());
                     probed = true;
@@ -71,8 +75,10 @@ public class OrderPaymentEventFacade implements OrderPaymentEventUseCase {
                 if (exception.getReason() == OrderPaymentSaveException.Reason.REJECTED) {
                     throw exception;
                 }
-            } catch (OptimisticLockingFailureException | DataIntegrityViolationException exception) {
+            } catch (OptimisticLockingFailureException | PessimisticLockingFailureException | DataIntegrityViolationException exception) {
                 // 다음 호출은 새 트랜잭션이다. inbox/결제/주문을 다시 읽는다.
+            } catch (PessimisticLockException | LockTimeoutException exception) {
+                // EntityManager.refresh의 NOWAIT 예외는 @Component 어댑터에서 Spring 예외로 변환되지 않을 수 있다.
             } catch (OrderException exception) {
                 if (exception.getErrorCode() == OrderErrorCode.STOCK_RESERVATION_INCONSISTENT) {
                     // 확정한 선점을 커밋된 기록이 책임지지 않는다 — 다시 해도 같다. 사람이 복원 · 환불을 확인한다(DLT)

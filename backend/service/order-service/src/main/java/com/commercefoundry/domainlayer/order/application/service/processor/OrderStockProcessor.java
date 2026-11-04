@@ -18,6 +18,7 @@ import java.util.OptionalLong;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.LongConsumer;
+import java.util.function.LongPredicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -139,10 +140,19 @@ public class OrderStockProcessor {
      */
     @Transactional(propagation = Propagation.NEVER)
     public StockConfirmation confirmOrReReserve(Order order, LongConsumer beforeReReservedConfirm) {
+        return confirmOrReReserve(order, beforeReReservedConfirm, reservationId -> true);
+    }
+
+    /** 모든 confirm 직전에 영속 복원 의도를 검사한다. 진행 중인 confirm의 경쟁은 최종 DB 결정에서 다시 검사한다. */
+    @Transactional(propagation = Propagation.NEVER)
+    public StockConfirmation confirmOrReReserve(Order order, LongConsumer beforeReReservedConfirm, LongPredicate canConfirm) {
         if (!order.isAwaitingPaymentApproval()) {
             throw new IllegalArgumentException("결제 대기 · 만료 주문만 재고를 확정합니다: orderId=" + order.id() + ", status=" + order.status());
         }
         SortedMap<Long, Integer> quantitiesBySkuId = quantitiesBySkuId(order.quote());
+        if (!canConfirm.test(order.stockReservationId())) {
+            return StockConfirmation.stockUnavailable();
+        }
         try {
             return StockConfirmation.confirmed(confirmOwn(order.id(), order.stockReservationId()));
         } catch (StockReservationException exception) {
@@ -168,6 +178,9 @@ public class OrderStockProcessor {
         }
         if (reReserved.reservationId() != order.stockReservationId()) {
             beforeReReservedConfirm.accept(reReserved.reservationId());
+        }
+        if (!canConfirm.test(reReserved.reservationId())) {
+            return StockConfirmation.stockUnavailable();
         }
         try {
             return StockConfirmation.reReservedAndConfirmed(confirmOwn(order.id(), reReserved.reservationId()));
@@ -222,7 +235,7 @@ public class OrderStockProcessor {
      *
      * <ul>
      *   <li>200 — 복원됨(같은 클레임의 기존 복원 포함).</li>
-     *   <li>409 {@code PRODUCT_028} — 다른 경로가 이미 복원했다. WARN 후 복원된 것으로 끝낸다(조용히 다시 늘리지 않는다).</li>
+     *   <li>409 {@code PRODUCT_028} — 일부만 복원됐어도 반환된다. 전량 복원 증거가 아니므로 미종결 의도 유지 · DLT · 운영 확인.</li>
      *   <li>409 {@code PRODUCT_027} · {@code PRODUCT_029} · 404 {@code PRODUCT_003} — 500 {@code STOCK_RESERVATION_INCONSISTENT}(다시 해도 같다, 버그 신호).</li>
      *   <li>그 밖({@code PRODUCT_026} · {@code PRODUCT_030} · {@code PRODUCT_031} · 타임아웃 · 5xx · 서킷 · 모르는 4xx · 계약 위반) — 503 {@code PRODUCT_SERVICE_UNAVAILABLE}.</li>
      * </ul>
@@ -233,8 +246,11 @@ public class OrderStockProcessor {
             stockRestorationPort.restoreCancellation(claimId, reservationId, quantitiesBySkuId(quote));
         } catch (StockReservationException exception) {
             switch (exception.getFailure()) {
-                case QUANTITY_EXCEEDED -> log.warn("stock already restored by another path, closing. orderId={}, paymentId={}, reservationId={}, claimId={}",
-                    orderId, paymentId, reservationId, claimId);
+                case QUANTITY_EXCEEDED -> {
+                    log.error("stock restoration quantity requires manual verification. orderId={}, paymentId={}, reservationId={}, claimId={}",
+                        orderId, paymentId, reservationId, claimId);
+                    throw new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT);
+                }
                 case NOT_CONFIRMED, RESTORATION_MISMATCH, NOT_FOUND -> {
                     log.error("stock restoration rejected permanently. orderId={}, reservationId={}, failure={}", orderId, reservationId, exception.getFailure());
                     throw new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT, exception);
