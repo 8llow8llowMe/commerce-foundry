@@ -92,7 +92,8 @@ operations-service의 payment outbox 원천 관측 권한(#477 A3a): payment-ser
 단일 집계로 제공하며, operations 호출자·주기 수집·알림·해소 연결은 후속이다. [관측 계약](outbox-observation-guide.md)을 따른다.
 
 `GET /internal/v1/payment-observations/anomalies`는 operations 전용 결제 이상 후보 여섯 버킷을 단일 집계로 제공한다.
-payment 소유 Processor의 domain 관측값을 paymentobservation Facade가 조합한다. 알림·소비 연결은 후속이며 [관측 계약](payment-observation-guide.md)을 따른다.
+payment 소유 Processor의 domain 관측값을 paymentobservation Facade가 조합한다. operations notification 컨텍스트는 A4b-1에서
+엄격 원천 소비와 다섯 사건의 불변 순수 정책만 소유한다. 자동 수집·영속 상태·알림 전달은 후속이며 [관측 계약](payment-observation-guide.md)을 따른다.
 
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —
 A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃이 겹친다.

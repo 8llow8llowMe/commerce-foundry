@@ -36,6 +36,7 @@ dependencies {
     runtimeOnly 'org.postgresql:postgresql'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation "org.wiremock:wiremock-standalone:${rootProject.ext.wiremockVersion}"
     // 테스트 키 · 토큰 · 인가 스모크(ResourceServerSmokeTestSupport). 테스트 클래스패스에만 들어간다
     testImplementation testFixtures(project(':core:security-core'))
     // 폴백 오류 봉투 스모크(FallbackErrorSmokeTestSupport). 테스트 클래스패스에만 들어간다

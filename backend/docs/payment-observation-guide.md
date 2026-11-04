@@ -40,5 +40,8 @@ H2와 PostgreSQL 공통 질의 계약은 빈 결과·모든 버킷·모든 UNKNO
 PostgreSQL Testcontainers는 로컬 Docker 부재 시 건너뛰고 CI에서는 실행을 요구한다. 웹 테스트는 실제 JWT 체인·응답 필드·null·no-store·정밀도와
 DB 실패 원문 sentinel 비노출을, 단위 테스트는 Clock 1회와 트랜잭션 시작·커밋 실패 번역을 확인한다.
 
-임계값·스케줄러·operations 소비·알림·억제·해소 판정은 후속 작업이다. PG 재조회·수동 처리·결제 복구 API를 추가하지 않는다.
+operations의 A4b-1 소비기는 기존 internal Feign 서비스 토큰·payment 서킷과 connect 2초/read 3초·HTTP 재시도 없음으로 이 원천만 읽는다.
+성공 봉투·여섯 버킷·정수 long·0/null·마이크로초 시각·UNKNOWN 부분집합 관계를 전체 검증하며 실패는 원인 없는 고정 `NOTIFICATION_052`로 바꾼다.
+원천 나이와 순수 사건 정책은 [이상 알림](anomaly-notifications.md)의 A4b-1을 따른다. 아직 자동 수집·영속 상태·알림 전달은 연결하지 않는다.
+PG 재조회·수동 처리·결제 복구 API를 추가하지 않는다.
 새 Vault 키와 운영 DDL은 없고 FE 고객·어드민 계약 영향도 없다. 운영 소비 계약은 [이상 알림](anomaly-notifications.md)에서 연결한다.
