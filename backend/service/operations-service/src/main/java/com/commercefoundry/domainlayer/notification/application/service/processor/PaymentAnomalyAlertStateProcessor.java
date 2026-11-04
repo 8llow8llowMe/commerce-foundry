@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.notification.application.service.processor;
 
+import com.commercefoundry.domainlayer.notification.application.model.PaymentAnomalyObservationTiming;
 import com.commercefoundry.domainlayer.notification.application.port.out.NotificationBatchInsertPort;
 import com.commercefoundry.domainlayer.notification.application.port.out.PaymentAnomalyAlertStatePort;
 import com.commercefoundry.domainlayer.notification.domain.model.Notification;
@@ -14,21 +15,34 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
+import java.util.Objects;
+import java.util.function.LongSupplier;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /** E2 내부 저장 경계. 원천 HTTP/수신자 조회와 커밋 후 전달은 후속 연결 계층의 책임이다. */
 @Component
-@RequiredArgsConstructor
 public class PaymentAnomalyAlertStateProcessor {
     private final PaymentAnomalyAlertStatePort states;
     private final NotificationBatchInsertPort notifications;
     private final SnowflakeIdGenerator ids;
     private final Clock clock;
+    private final LongSupplier ticker;
+
+    public PaymentAnomalyAlertStateProcessor(PaymentAnomalyAlertStatePort states, NotificationBatchInsertPort notifications,
+                                            SnowflakeIdGenerator ids, Clock clock, @Qualifier("paymentAnomalyTicker") LongSupplier ticker) {
+        this.states = states;
+        this.notifications = notifications;
+        this.ids = ids;
+        this.clock = clock;
+        this.ticker = ticker;
+    }
 
     @Transactional(timeout = 15)
-    public List<Notification> accept(PaymentAnomalyObservation sample, List<Long> recipients, PaymentAnomalyPolicySettings settings) {
+    public List<Notification> accept(PaymentAnomalyObservation sample, List<Long> recipients, PaymentAnomalyPolicySettings settings,
+                                     PaymentAnomalyObservationTiming timing) {
+        Objects.requireNonNull(timing, "timing");
         if (recipients == null || recipients.isEmpty() || recipients.size() > 1000) {
             throw new IllegalArgumentException("Invalid anomaly recipients");
         }
@@ -40,7 +54,14 @@ public class PaymentAnomalyAlertStateProcessor {
         }
         var input = List.copyOf(recipients);
         var previous = states.findLocked().orElse(null);
-        var decision = PaymentAnomalyPolicy.accept(previous, sample, clock.instant(), settings);
+        var now = clock.instant();
+        // nanoTime의 시작 부호는 자유이며 정상적인 overflow wrap을 포함한 차이로 기간을 판단한다.
+        long elapsed = ticker.getAsLong() - timing.startedNanos();
+        if (timing.afterHttp().isBefore(timing.beforeHttp()) || now.isBefore(timing.afterHttp())
+            || elapsed < 0 || elapsed > settings.maxObservationAge().toNanos()) {
+            return List.of();
+        }
+        var decision = PaymentAnomalyPolicy.accept(previous, sample, now, settings);
         if (decision.state() == previous) {
             return List.of();
         }

@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.notification.adapter.out.persistence.repo
 import com.commercefoundry.domainlayer.notification.application.service.processor.PaymentAnomalyAlertStateProcessor;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import jakarta.persistence.EntityManagerFactory;
+import java.util.function.LongSupplier;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -27,6 +28,14 @@ class PaymentAnomalyPersistenceConfig {
     SnowflakeIdGenerator anomalyIds() { return new SnowflakeIdGenerator(3, 7); }
     @Bean
     SampleClock anomalyClock() { return new SampleClock(); }
+
+    @Bean(name = "paymentAnomalyTicker", defaultCandidate = false)
+    SampleTicker anomalyTicker() { return new SampleTicker(); }
+
+    static final class SampleTicker implements LongSupplier {
+        volatile long now;
+        @Override public long getAsLong() { return now; }
+    }
 
     static final class SampleClock extends Clock {
         volatile Instant now = Instant.parse("2026-11-04T01:00:00Z");

@@ -98,7 +98,8 @@ operations-service의 payment outbox 원천 관측 권한(#477 A3a): payment-ser
 payment 소유 Processor의 domain 관측값을 paymentobservation Facade가 조합한다. operations notification 컨텍스트는 A4b-1에서
 엄격 원천 소비와 다섯 사건의 불변 순수 정책을 소유한다. A4b-2는 `operations.payment_anomaly_alert_state` 다섯 행과
 최대 1,000명·5,000건 알림의 원자 저장 Processor를 추가한다. 결제·주문 업무 상태와 PG 처리는 변경하지 않는다.
-자동 수집·활성화·알림 전달 연결은 후속이며 [관측 계약](payment-observation-guide.md)과 [저장 경계](anomaly-notifications.md)를 따른다.
+E3a는 잠금 후 필수 HTTP timing 검증과 미연결 단일 worker·대기 16배치 전달 기반을 추가한다. 생성 시 worker는 0개다.
+자동 수집·활성화·커밋 후 알림 전달 연결과 PG 생산 중 포화 검증은 E3b 후속이며 [관측 계약](payment-observation-guide.md)과 [저장 경계](anomaly-notifications.md)를 따른다.
 
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —
 A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃이 겹친다.

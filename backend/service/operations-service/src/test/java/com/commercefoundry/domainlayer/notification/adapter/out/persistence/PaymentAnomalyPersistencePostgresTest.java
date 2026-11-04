@@ -79,8 +79,9 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
         var recipients = LongStream.rangeClosed(1, 1000).boxed().toList();
         for (int iteration = 0; iteration < 2; iteration++) {
             clock.now = NOW.plusSeconds(iteration * 3600L);
+            ticker.now = 0;
             var observation = sample(clock.now, true);
-            var result = measure("E2_FULL_5000", 5000, iteration + 1, () -> processor.accept(observation, recipients, SETTINGS));
+            var result = measure("E2_FULL_5000", 5000, iteration + 1, () -> accept(observation, recipients, SETTINGS));
             // 정상 최대치 실패는 여기서 즉시 중단한다. 실패를 허용하는 진단 분기는 없다.
             assertThat(result.failure()).isNull();
             assertSql(result.total(), 1, iteration == 0 ? 5 : 0, iteration == 0 ? 0 : 5, 5000);
@@ -120,10 +121,11 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
     void fiveThousandFlushedNotificationsAndAllStatesRollBackOnPostFlushFailure() {
         for (boolean existing : List.of(false, true)) {
             clock.now = NOW;
+            ticker.now = 0;
             jdbc.update("delete from operations.payment_anomaly_alert_state");
             jdbc.update("delete from operations.notification");
             if (existing) {
-                processor.accept(sample(NOW, true), List.of(1L), SETTINGS);
+                accept(sample(NOW, true), List.of(1L), SETTINGS);
             }
             var before = stateRows();
             assertThat(before).hasSize(existing ? 5 : 0);
@@ -132,7 +134,7 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
             var observation = sample(clock.now, true);
             var recipients = LongStream.rangeClosed(1, 1000).boxed().toList();
             var result = measure("E2_5000_POST_FLUSH_ROLLBACK", 5000, 1, () -> {
-                assertThat(processor.accept(observation, recipients, SETTINGS)).hasSize(5000);
+                assertThat(accept(observation, recipients, SETTINGS)).hasSize(5000);
                 throw new IllegalStateException("synthetic post-5000-flush failure");
             });
             assertThat(result.failure()).isInstanceOf(IllegalStateException.class);
@@ -144,7 +146,7 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
 
     @Test
     void actualOrderedNowaitLocksEveryFamilyAcrossTransactions() throws Exception {
-        processor.accept(sample(NOW, false), List.of(1L), SETTINGS);
+        accept(sample(NOW, false), List.of(1L), SETTINGS);
         var locked = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var executor = Executors.newSingleThreadExecutor();
@@ -228,7 +230,7 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
                 return List.of();
             }));
             await(empty);
-            processor.accept(sample(NOW, false), List.of(1L), SETTINGS);
+            accept(sample(NOW, false), List.of(1L), SETTINGS);
             var winner = stateRows();
             committed.countDown();
             var result = loser.get(20, TimeUnit.SECONDS);
@@ -289,7 +291,7 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
 
     @Test
     void databaseConstraintsRejectInvalidKeyStatusSeverityNullsAndChronology() {
-        processor.accept(sample(NOW, false), List.of(1L), SETTINGS);
+        accept(sample(NOW, false), List.of(1L), SETTINGS);
         for (String update : List.of("family='OTHER'", "status='OTHER'", "status='ACTIVE'", "severity='INFO'",
             "last_observed_at=last_accepted_local_at + interval '1 second'",
             "status='ACTIVE',severity='CRITICAL',first_detected_at=last_observed_at,last_alert_at=last_accepted_local_at")) {
@@ -304,7 +306,7 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
                 jdbc.update("update operations.payment_anomaly_alert_state set family='OTHER' where family='UNKNOWN'");
                 return null;
             });
-            processor.accept(sample(NOW.plusSeconds(1), true), List.of(1L), SETTINGS);
+            accept(sample(NOW.plusSeconds(1), true), List.of(1L), SETTINGS);
             return List.of();
         });
         assertThat(result.failure()).isNotNull();
@@ -315,12 +317,12 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
     @Test
     void localNanosecondsRoundTripThroughPgMicrosecondsAndReplayStillDoesNotWrite() {
         clock.now = NOW.plusNanos(999);
-        processor.accept(sample(NOW, true), List.of(1L), SETTINGS);
+        accept(sample(NOW, true), List.of(1L), SETTINGS);
         var restored = transaction().execute(status -> states.findLocked().orElseThrow());
         assertThat(restored.lastAcceptedLocalAt()).isEqualTo(NOW.plusNanos(1000));
         assertThat(restored.incidents().values()).allSatisfy(i -> assertThat(i.lastAlertAt()).isEqualTo(restored.lastAcceptedLocalAt()));
         var before = stateRows();
-        var replay = measure("E2_NANO_REPLAY", 0, 1, () -> processor.accept(sample(NOW, true), List.of(1L), SETTINGS));
+        var replay = measure("E2_NANO_REPLAY", 0, 1, () -> accept(sample(NOW, true), List.of(1L), SETTINGS));
         assertThat(replay.failure()).isNull();
         assertSql(replay.total(), 1, 0, 0, 0);
         assertThat(stateRows()).isEqualTo(before);
