@@ -1053,6 +1053,27 @@ BFF 는 범용 프록시가 넘긴다. 코드는 `lib/claim/`(계약 `types.ts` 
 - **영문(en)** — 같은 문서의 번역이 아니라 언어가 `EN` 인 별도 문서다. 언어 · 유형은 만든 뒤 바꿀 수 없다. 언어 대체(영어 → 한국어)는 BE 후속이다.
 - **아직 없는 것** — 지난 리비전 목록 · 비교, 최신이 초안일 때 이전 게시본만 해제(그 리비전 버전을 상세가 주지 않는다), 상담 인박스 · 품질 지표(#470 · #471 · #472)는 BE 계약이 생기면 붙인다.
 
+### 약관 · 개인정보처리방침 (`/store/legal-documents`, #570 · BE #569)
+
+메뉴 `쇼핑몰 설정 > 약관 · 개인정보처리방침`. operations-service `/api/v1/admin/store/legal-documents`(ADMIN, 계약 정본 `backend/docs/store-legal-guide.md`) — BFF 는 범용 프록시가 넘긴다.
+코드는 `lib/legal/`(계약 `types.ts` · 주소 `query.ts` · 입력 · 상태 판정 `form.ts` · 실패 처리 `errors.ts`), 화면은 `components/legal/` 다.
+
+- **문서 하나 = 유형(`TERMS` · `PRIVACY`) × 언어(`ko` · `en`)** — 주소 `?type=&locale=` 가 정본이다(모르는 값은 이용약관 · 국문). 위 네 칸에 각 조합의 공개 상태(목록 API)를 보이고,
+  저장하지 않은 입력이 있으면 다른 문서로 옮기기 전에 묻는다(창 닫기는 `beforeunload`). 문서를 바꾸면 화면 상태를 버리고 새로 읽는다.
+- **초안 저장 ≠ 공개** — 초안 저장(`PUT /draft`, 제목 · 본문 전체)은 새 불변 리비전을 더할 뿐 공개 페이지를 바꾸지 않는다. 버튼 문구("초안 저장 (공개 안 됨)") · 상태 줄(`publicStateText`)로 이를 알린다.
+  처음 문서는 `expectedVersion: null`, 이후에는 상세의 `document.version` 이다. 입력이 최신 리비전과 같으면 저장 버튼을 막는다.
+- **게시** — 저장한 **최신 리비전만** 게시할 수 있다(`publishBlocker`): 저장 안 한 입력 · `{{...}}` 빈칸이 남으면 이유를 보이고 버튼을 두지 않는다. 최신이 이미 공개 중이면 버튼이 없다.
+  "게시하기…" → 최종 제목 · 본문(텍스트 미리보기) · 공개 언어 · 공개 주소를 다시 보이고, 검토 확인 체크 뒤에만 `{ expectedVersion, revisionNumber, reviewConfirmed: true }` 를 보낸다.
+  지난 번호를 직접 다시 게시할 수 없다 — 이력에서 "편집기로 불러오기" → 새 초안 저장 → 게시.
+- **시작 템플릿** — `GET /legal-document-templates/{type}?locale=` 의 제목 · 본문을 편집기에 넣는다. 입력이 있으면 덮기 전에 묻는다(이전 리비전 불러오기도 같다).
+  안내(`guidance`) · 확인 항목(`checklist`)을 옆에 두고 "법률 검토를 마친 완성 문서가 아님" 을 함께 보인다. 빈칸(`{{...}}`)은 `PlaceholderNotice` 로 목록을 보이고 미리보기에서 표시한다 — 빈칸이 있어도 초안으로는 저장되지만 게시는 거부된다(`LEGAL_DOCUMENT_022`).
+- **미리보기 · 본문** — 단순 텍스트다. 편집기 · 미리보기 · 이력 모두 React 텍스트(`whitespace-pre-wrap`)로만 그리고 HTML 로 해석하지 않는다.
+- **경합 · 실패**(`writeFailure`) — 409 `LEGAL_DOCUMENT_020` · 결과 모름(502 · 504)은 **자동으로 다시 보내지 않는다**(초안 저장은 멱등이 아니다 — 같은 본문도 새 리비전).
+  입력은 지키고 최신 상세를 다시 읽어 기준(버전)만 바꾸고, 409 면 "내 입력 / 지금 최신본" 을 나란히 보인다(`ConflictCompare`, "최신본으로 바꾸기" 가능). 결과 모름은 이력에서 반영 여부를 확인하게 안내한다.
+  400 `021` · `105`(검토 확인) · `022`(빈칸) · `102` · `103`(제목 · 본문)은 업무 문구, 401 은 입력을 지키는 `SESSION_EXPIRED_ON_SAVE` 다.
+- **이력** — `GET /revisions` 10개씩, 공개 중 · 최신 · 게시 시각을 보이고 펼치면 본문이다. 관리자 아이디 원문은 보이지 않는다.
+- 회원가입 · 주문 동의 증빙 갱신, 예약 게시, AI 초안(#572)은 범위 밖이다.
+
 ### 관리자 감사 로그 (`/audit-logs`, #320 · #329 · #405)
 
 메뉴 `운영 > 관리자 감사 로그`. auth-service 감사 로그 조회 `GET /api/v1/admin/audit-logs?action=&result=&page=&size=`(BE #192 · #286 · #322, ADMIN,
@@ -1166,3 +1187,17 @@ BFF 는 범용 프록시가 넘긴다. 코드는 `lib/claim/`(계약 `types.ts` 
 - 어드민 iframe 은 `sandbox="allow-scripts allow-same-origin"` 이라 미리보기 안 링크가 어드민 창을 옮기지 못한다. 미리보기 블록 안의 링크 · 버튼은 누르지 않는다
   (`MainPreview` 가 클릭을 막는다 — 실제 페이지 이동 · 장바구니 담기 방지). 머리글 · 바닥글(레이아웃)의 링크는 iframe 안에서 그 페이지로 옮겨 간다.
 - 어드민은 기본 언어(국문) 미리보기만 연다. 영문 메인 미리보기는 `/en/preview/main` 이 있지만 어드민에 고르는 칸이 없다.
+
+## 11. 약관 · 개인정보처리방침 공개 페이지 (`/terms` · `/privacy`, #570 · BE #569)
+
+operations-service 공개 API `GET /api/v1/store/legal-documents/{type}?locale=` · `/{type}/revisions/{n}?locale=`(익명, 계약 정본 `backend/docs/store-legal-guide.md`)를 서버 컴포넌트에서 읽는다.
+코드는 `lib/legal/`(`document.ts` 계약 · 주소 · 날짜, `load.ts` 조회), `components/legal/`(`LegalPage` · `LegalDocumentView`) 다. 푸터 링크는 브랜드 설정 `footerLinks`(개인정보처리방침은 `emphasis` 로 굵게 구별)다.
+
+- **실제 게시본만** — 현재 게시본, `?revision=N` 이면 그 번호의 지난 게시본이다. 게시하지 않은 초안 번호 · 미게시 · 없는 언어는 BE 가 404 를 주고, 화면은 "게시된 문서 없음" · "게시된 적 없는 버전" 만 알린다.
+  **다른 언어로 대신 보이거나 문서를 만들어 채우지 않는다.** 언어는 스토어 언어(`locale` query)다.
+- **이전 게시본 고르기** — 공개 API 에 지난 게시본 목록이 없어 번호를 입력받는 GET 폼(`?revision=`, JS 없이 동작)이다. 번호는 1 이상 정수만 읽고(`parseRevision`), 아니면 현재 게시본이다.
+- **HTML 을 실행하지 않는다** — 제목 · 본문은 React 텍스트로만 그리고(`whitespace-pre-wrap`) `dangerouslySetInnerHTML` · `@cf/sanitize` 를 쓰지 않는다.
+- **캐시 · 게시 직후 갱신** — 데이터 캐시를 쓰지 않는다(`cache: 'no-store'`, 토큰 없이 `anonymous`). BE 가 `no-store` 를 주고 본문 · 버전을 BFF · 브라우저 · 중간 캐시에 두지 말라고 정했기 때문이다.
+  화면도 요청마다 그리므로(레이아웃이 세션 쿠키를 읽는다) **게시 직후 다음 요청부터 새 게시본**이 보인다 — 재검증 태그 · 시간이 필요 없다. 메타데이터와 본문은 `react` `cache` 로 한 번만 부른다.
+- **검색** — 정식 주소는 현재 게시본(`/terms`) 하나다. 이전 게시본 · 게시본 없음 · 실패 화면은 `noindex` 다.
+- 남은 것: 공개 지난 게시본 목록(번호 고르기 대신 목록) — BE 공개 API 가 생기면 바꾼다.
