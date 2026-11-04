@@ -17,9 +17,13 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderPayment.Result;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.messaging.consume.ProcessedEventStore;
+import com.commercefoundry.messaging.consume.NonRetryableEventException;
 import com.commercefoundry.messaging.event.TopicNames;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -86,6 +90,20 @@ public class OrderPaymentProcessor {
         return !orderPaymentRepositoryPort.existsRestorationIntent(orderId, reservationId);
     }
 
+    /** 프로브 자격과 거절 reason은 별개다. 이미 결제된 주문의 선점을 해제 프로브로 건드리지 않는다. */
+    @Transactional(readOnly = true, timeout = 5)
+    public boolean canProbe(VerifiedPayment payment, Order order) {
+        if (order == null || (!payment.canceled() && !(payment.done() && order.status() == OrderStatus.CANCELED))) {
+            return false;
+        }
+        if (order.memberId() != payment.memberId() || !order.quote().totalAmount().equals(payment.amount())
+            || orderPaymentRepositoryPort.findPaidByOrderId(order.id()).isPresent()) {
+            return false;
+        }
+        requireRestorableOrder(order);
+        return true;
+    }
+
     /**
      * 원격 I/O 없이 DB 구간만 새 트랜잭션으로 묶는다. 충돌은 바깥 Facade가 잡고 새 트랜잭션에서 재판정한다.
      * orders NOWAIT 잠금 → payment 조회/의도 INSERT 또는 PAID 저장 → inbox → 회신 outbox 순서다. 뒤 단계 실패는 모두 롤백한다.
@@ -101,9 +119,15 @@ public class OrderPaymentProcessor {
         Order before = orderRepositoryPort.findByIdAndMemberIdForUpdate(payment.orderId(), payment.memberId())
             .orElseGet(() -> orderRepositoryPort.findById(payment.orderId()).orElse(null));
         Optional<OrderPayment> existing = orderPaymentRepositoryPort.findByPaymentId(payment.paymentId());
+        existing.ifPresent(record -> verifyRecord(record, command, payment));
         if (existing.isPresent() && existing.get().awaitsRestoration()) {
             Order canceled = orderRepositoryPort.findById(existing.get().orderId())
                 .orElseThrow(() -> new IllegalStateException("restorable payment record without order: orderId=" + existing.get().orderId()));
+            if (canceled.memberId() != payment.memberId() || !canceled.quote().totalAmount().equals(payment.amount())
+                || orderPaymentRepositoryPort.findPaidByOrderId(canceled.id()).isPresent()) {
+                throw new NonRetryableEventException("restoration order ownership mismatch");
+            }
+            requireRestorableOrder(canceled);
             return Optional.of(new StockRestorationTarget(existing.get(), canceled));
         }
         if (existing.isPresent() || processedEventStore.exists(group(), command.eventId())) {
@@ -129,10 +153,12 @@ public class OrderPaymentProcessor {
             orderRepositoryPort.saveStatusChange(paid,
                 OrderStatusHistory.changedByService(nextId(), before, paid, OrderStatusHistory.PAYMENT_APPROVED));
             record = OrderPayment.paid(nextId(), paid, payment.paymentId(), payment.amount(), payment.approvedAt(), command.eventId());
-        } else if (rejected == Result.REJECTED_ORDER_CANCELED && confirmation != null && confirmation.isConfirmed()) {
+        } else if (rejected.restorableRejection() && confirmation != null && confirmation.isConfirmed() && before != null
+            && before.memberId() == payment.memberId() && before.quote().totalAmount().equals(payment.amount())) {
             if (!fenced && orderPaymentRepositoryPort.findPaidByOrderId(payment.orderId()).isEmpty()) {
-                OrderPayment restorable = orderPaymentRepositoryPort.insert(OrderPayment.canceledAfterConfirmation(nextId(), payment.orderId(), payment.paymentId(),
-                    payment.memberId(), payment.amount(), payment.approvedAt(), confirmation.reservationId(), command.eventId(), nextId()));
+                requireRestorableOrder(before);
+                OrderPayment restorable = orderPaymentRepositoryPort.insert(OrderPayment.rejectedAfterConfirmation(nextId(), payment.orderId(), payment.paymentId(),
+                    payment.memberId(), payment.amount(), payment.approvedAt(), rejected, confirmation.reservationId(), command.eventId(), nextId()));
                 return Optional.of(new StockRestorationTarget(restorable, before));
             }
             // 다른 결제가 이미 결제 완료한 뒤 취소된 주문 — 확정 선점은 이긴 결제의 것이고 그 취소 클레임이 복원한다. 여기서 복원하면 두 번 는다.
@@ -158,7 +184,7 @@ public class OrderPaymentProcessor {
     }
 
     /**
-     * 재고 복원 뒤 마무리 (#308 PR-C1) — 복원 시각 조건부 UPDATE → inbox → {@code order-payment-rejected(ORDER_CANCELED)} 회신 outbox 를 한 커밋으로 남긴다.
+     * 재고 복원 뒤 마무리 — 복원 시각 조건부 UPDATE → inbox → 저장된 거절 reason의 회신 outbox 를 한 커밋으로 남긴다.
      * 복원 시각을 이번에 채우지 못했으면(같은 결제의 다른 처리가 먼저 마무리) inbox 만 남기고 회신을 다시 쌓지 않는다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 10)
@@ -185,7 +211,7 @@ public class OrderPaymentProcessor {
     }
 
     private Result rejection(VerifiedPayment payment, Order order) {
-        if (!payment.done()) {
+        if (!payment.done() && !payment.canceled()) {
             return Result.REJECTED_PAYMENT_NOT_DONE;
         }
         if (order == null) {
@@ -194,6 +220,9 @@ public class OrderPaymentProcessor {
         if (order.memberId() != payment.memberId() || !order.quote().totalAmount().equals(payment.amount())) {
             return Result.REJECTED_PAYMENT_MISMATCH;
         }
+        if (payment.canceled()) {
+            return Result.REJECTED_PAYMENT_NOT_DONE;
+        }
         if (order.status() == OrderStatus.CANCELED) {
             return Result.REJECTED_ORDER_CANCELED;
         }
@@ -201,6 +230,25 @@ public class OrderPaymentProcessor {
             return Result.REJECTED_ALREADY_PAID;
         }
         return null;
+    }
+
+    private static void requireRestorableOrder(Order order) {
+        if (!order.isAwaitingPaymentApproval() && order.status() != OrderStatus.CANCELED) {
+            throw new NonRetryableEventException("legacy paid order without payment record");
+        }
+    }
+
+    private static void verifyRecord(OrderPayment record, PaymentApprovalCommand command, VerifiedPayment payment) {
+        if (record.paymentId() != payment.paymentId() || record.orderId() != payment.orderId() || record.memberId() != payment.memberId()
+            || !record.totalAmount().equals(payment.amount())
+            || ((record.approvedAt() != null || record.awaitsRestoration()) && !Objects.equals(record.approvedAt(), micros(command.approvedAt())))
+            || (record.approvedAt() != null && payment.approvedAt() != null && !Objects.equals(record.approvedAt(), micros(payment.approvedAt())))) {
+            throw new NonRetryableEventException("stored payment notification mismatch");
+        }
+    }
+
+    private static Instant micros(Instant value) {
+        return value == null ? null : value.truncatedTo(ChronoUnit.MICROS);
     }
 
     private void record(UUID eventId) {

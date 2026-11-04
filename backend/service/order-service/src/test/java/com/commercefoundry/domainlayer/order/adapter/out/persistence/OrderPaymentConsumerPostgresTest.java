@@ -137,7 +137,7 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
     void parentNowaitSerializesPaidAndIntentDecisionsAcrossTwoTransactions(boolean paidFirst) throws Exception {
         var command = arrange(OrderStatus.PENDING_PAYMENT);
         long reservationId = jdbc.queryForObject("select stock_reservation_id from orders.orders where id=?", Long.class, command.orderId());
-        var verified = new VerifiedPayment(command.paymentId(), command.orderId(), command.memberId(), command.amount(), NOW, true, false);
+        var verified = new VerifiedPayment(command.paymentId(), command.orderId(), command.memberId(), command.amount(), NOW, "DONE");
         CountDownLatch holding = new CountDownLatch(1);
         CountDownLatch commit = new CountDownLatch(1);
         try (var executor = Executors.newSingleThreadExecutor()) {

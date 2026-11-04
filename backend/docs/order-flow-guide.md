@@ -681,9 +681,26 @@ where result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null an
 order 기록 없는 외부 복원은 기존 confirm 200으로 구별하지 못한다(product는 복원 뒤에도 CONFIRMED). 외부 복원까지 원자적으로 보호하려면 별도 소유권/조건부 확정 계약이 필요하다.
 구 consumer는 fence 규약을 모르므로 소비 OFF · 기존 consumer drain 후 모든 order 인스턴스를 적용한다. C2a는 스키마 변경이 없으며 게이트 활성화 승인이 아니다.
 
-**남은 복구창(PR-C2b)** — 확정→DB실패/프로세스종료 뒤 payment가 CANCELED/PARTIAL_CANCELED가 되어 재전달되면, 주문이 CANCELED가 아니어도
+**C2b가 다루는 복구창** — 확정→DB실패/프로세스종료 뒤 payment가 CANCELED/PARTIAL_CANCELED가 되어 재전달되면, 주문이 CANCELED가 아니어도
 `REJECTED_PAYMENT_NOT_DONE` 기록이 확정선점 ID 없이 영구히 남을 수 있다(B1의 도메인/DB check는 NOT_DONE에 선점참조를 허용하지 않는다).
-취소 결제의 원천 상태 보존/검증 · NOT_DONE 내부 복원 모델/DDL · 외부 null 계약은 C2b다. C2a는 기존 C1 의도의 fence와 028 정책만 보강한다. payment 회신 컨슈머는 PR-C3 다.
+취소 결제의 원천 상태 보존/검증 · NOT_DONE 내부 복원 모델/DDL · 외부 null 계약은 아래 C2b를 따른다. C2a는 기존 C1 의도의 fence와 028 정책을 보강했다. payment 회신 컨슈머는 PR-C3 다.
+
+**취소 원천의 확정 복구 (#14 C2b)** — payment 조회의 statusCode를 보존한다. DONE/CANCELED/PARTIAL_CANCELED는 원승인 시각·수단이 필수이며 승인 이벤트와 대조한다.
+그 밖의 상태(OTHER)는 기존 NOT_DONE 거절이고 신규 재고 프로브를 하지 않는다. 명시 취소 원천은 주문 존재·회원·금액·통화를 먼저 검증하고, 정상 소유 주문이면
+현재 주문이 CANCELED여도 `PAYMENT_NOT_DONE` 사유를 유지한다. 복원 자격은 사유와 별개로 PENDING_PAYMENT/EXPIRED/CANCELED와 PAID 기록 없음에 한정한다.
+MAKING 등 기결제 상태인데 PAID 기록이 없는 legacy는 DLT로 보내며 자동 복원하지 않는다. 자기 PAID 기록과 타 PAID 소유 선점도 복원하지 않는다.
+
+확정 후보는 기존과 같은 최초 선점·선행 커밋된 재선점 증거다. 해제 프로브가 확인한 확정 선점 하나만 NOT_DONE 복원 의도에 남긴다. 후보 둘이 확정되거나
+PRODUCT_028이면 성공 종결하지 않는다. 부모 주문 NOWAIT 잠금 안에서 타 의도/PAID를 재검사하고 의도를 커밋한 뒤, 트랜잭션 밖에서 같은 claim·같은 주문 스냅숏 수량으로 복원한다.
+NOT_DONE 내부 선점 참조는 원승인 시각과 claim이 필수다. 기존 C1의 ORDER_CANCELED+선점/claim/승인시각 nullable 형태는 DB에서 불필요하게 강화하지 않는다.
+
+이미 저장한 pending 의도는 이벤트·조회 원천·저장된 payment/order/member/amount/승인시각을 대조하고 주문 소유도 재검증한다. 원천이 OTHER로 바뀌어도 같은 의도로 재개하며
+최초 result/amount/approvedAt/reservationId/claimId는 바꾸지 않는다. OTHER 조회에 승인 정보가 없으면 저장된 원승인 시각을 원 이벤트와 대조한다. 기존 일반 nullable 거절은 멱등 재전달을 유지한다.
+회신은 마지막으로 검증한 원천이 CANCELED면 0건, 그 밖에는 markRestored를 성공한 처리만 저장된 사유로 최대 1건이다. 부분취소 잔액을 원승인 금액으로 추정하거나 PG 취소를 직접 실행하지 않는다.
+
+운영 전 읽기 전용 진단은 `service/order-service/src/test/resources/ddl/order-payment-c2b-preflight.sql`, 실제 ALTER는 같은 디렉터리의
+`order-payment-c2b-restoration.sql`이다. 구 C2a 스냅숏→실제 ALTER→새 매핑 validate와 SQL CHECK 시험을 수행한다. child JVM 시험은 실제 order PostgreSQL과
+부모 생존 HTTP fake로 중단 재개를 확인하며 실제 product DB 수량이나 실제 PG 취소 검증을 뜻하지 않는다. 원천 조회 직후 원격 상태 변경의 분산 원자성·외부 수동복원·추가 미기록 선점은 보장 범위 밖이다.
 
 **재시도와 liveness** — attempts8, initial2s, multiplier2, max60s. 7대기의 합은 **182s 순수대기**이며 성공시간 보장이 아니다.
 DefaultErrorHandler의 기본 seek 방식은 실패 레코드로 되돌린 뒤 poll해 재호출한다. 따라서 전체182s를 한 번의 poll 간격으로 합산하지 않는다.

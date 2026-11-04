@@ -65,7 +65,7 @@ public abstract class OrderPaymentPersistenceContract {
     void persistedResultIsIndependentOfCurrentOrderAndReadOnly(Result result) {
         long orderId = IDS.incrementAndGet();
         long paymentId = IDS.incrementAndGet();
-        Long reservationId = result.recordsConfirmedReservation() ? IDS.incrementAndGet() : null;
+        Long reservationId = (result == Result.PAID || result == Result.REJECTED_ORDER_CANCELED) ? IDS.incrementAndGet() : null;
         Instant approvedAt = result == Result.REJECTED_PAYMENT_NOT_DONE ? null : APPROVED_AT;
         OrderPayment source = new OrderPayment(IDS.incrementAndGet(), orderId, paymentId, 7L, krw(1000), approvedAt,
             result, reservationId, UUID.randomUUID(), null, null, null);

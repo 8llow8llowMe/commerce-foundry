@@ -336,6 +336,23 @@ docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) �
 028은 미종결 · 운영 확인이다. 소비 OFF/영향 주문 차단 후 claim/SKU별 원장과 잔량을 대조하고 승인된 보정 절차를 협의한다.
 실제 복원 증거 없이 restored_at을 채우거나 028을 무한 재생하지 않는다. C2b · C3 · #582 등 전체 선행과 운영 검증 후 별도로 활성화한다.
 
+### 취소 원천 재고 복원 배포 (#14 C2b)
+
+1. 운영 결제·소비 게이트를 OFF로 유지한다. 기존 order consumer와 진행 중인 원격 확정/복원 호출을 모두 drain한 뒤 중단한다.
+2. `service/order-service/src/test/resources/ddl/order-payment-c2b-preflight.sql`로 기존 C1 nullable 형태·pending 승인시각 누락·소유/금액 불일치·중복 책임·기결제 legacy를 진단한다.
+   원인 불명 행을 자동 backfill하거나 restored_at으로 덮지 않는다. CANCELED만으로 결제 전 취소라고 추정하지 않는다. 진단 결과와 운영 처리 결정을 기록한다.
+3. 실제 운영 ALTER `service/order-service/src/test/resources/ddl/order-payment-c2b-restoration.sql`을 UTF-8로 실행한다. 두 CHECK 교체와 두 컬럼 comment만 변경한다.
+   기준은 `OrderPaymentEntity`와 PostgreSQL 스냅숏 `ddl/order-schema.sql`이다. 기존 C1 유효 형태는 유지하고 NOT_DONE+선점만 claim/승인시각을 필수로 한다.
+4. 모든 order 인스턴스를 새 코드로 교체하고 새 매핑 검증·진단 결과·pending 재개를 확인한다. 혼합 버전 consumer로 소비하지 않는다. 게이트 OFF는 계속 유지한다.
+
+새 NOT_DONE 내부 복원 형태가 생성된 뒤 구 코드는 도메인 매핑에서 해당 행을 읽지 못한다. CHECK만 되돌리는 롤백이나 구 consumer 재기동은 안전하지 않다.
+롤백이 필요하면 소비 OFF·drain을 유지하고 새 형태와 원격 복원 적용 여부를 운영 확인한 뒤 별도 복구 계획을 정한다. 본 DDL은 다운 마이그레이션·자동 보정 SQL을 제공하지 않는다.
+
+`OrderPaymentSchemaUpgradePostgresTest`는 동결한 구 C2a 스냅숏(7c5c0a6f)으로 DB를 만든 뒤 실제 ALTER→새 매핑 validate→허용/거절 SQL을 검증한다.
+`OrderPaymentCrashRecoveryPostgresTest`의 두 대표 시험은 실제 child JVM을 강제 종료하고 새 JVM으로 같은 이벤트/claim을 재개한다.
+테스트 클래스패스 원본은 UTF-8 파일로 전달하고 Java launcher 임시 argfile은 native 인코딩으로 엄격 변환한다. 지원하지 않는 문자는 치환하지 않고 경로·환경값을 노출하지 않는 인코딩 실패로 분류한다.
+실제 order PostgreSQL과 부모 생존 HTTP fake의 원격 상태가 근거이며 실제 product DB 수량·PG 취소 완료·운영 환경에서의 실행을 검증한 것은 아니다.
+
 ### 시스템 알림 수신자 조회 배포 (#477 A1)
 
 auth 배포 전에 `idx_member_role_deactivated_at_id`(`auth.member(role, deactivated_at, id)`)를 적용한다.

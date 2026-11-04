@@ -63,7 +63,7 @@ public class OrderPaymentEventFacade implements OrderPaymentEventUseCase {
                     confirmation = stockCall(() -> orderStockProcessor.confirmOrReReserve(order,
                         reReservedId -> orderPaymentProcessor.recordReReservation(payment.paymentId(), order.id(), reReservedId, command.eventId()),
                         reservationId -> orderPaymentProcessor.canConfirm(order.id(), reservationId)));
-                } else if (target.rejection() == Result.REJECTED_ORDER_CANCELED && !probed) {
+                } else if (!probed && orderPaymentProcessor.canProbe(payment, target.order())) {
                     confirmation = probeConfirmed(payment, target.order());
                     probed = true;
                 }

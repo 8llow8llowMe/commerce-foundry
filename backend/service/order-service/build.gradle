@@ -45,3 +45,19 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
 }
+
+// 긴 클래스패스는 파일에 두고 테스트 JVM 명령줄에는 파일 경로만 전달한다.
+tasks.named('test') {
+    doFirst {
+        def classpathFile = layout.buildDirectory.file('test-runtime-classpath.txt').get().asFile
+        layout.buildDirectory.get().asFile.mkdirs()
+        classpathFile.setText(sourceSets.test.runtimeClasspath.asPath, 'UTF-8')
+        systemProperty 'order.test.runtimeClasspathFile', classpathFile.absolutePath
+    }
+    afterTest { descriptor, result ->
+        if (descriptor.className?.endsWith('OrderPaymentSchemaUpgradePostgresTest')
+            || descriptor.className?.endsWith('OrderPaymentCrashRecoveryPostgresTest')) {
+            logger.lifecycle("C2b critical ${descriptor.className}.${descriptor.name}: ${result.resultType}")
+        }
+    }
+}

@@ -313,8 +313,8 @@
         constraint ck_order_payment_total_amount_positive check (total_amount > 0),
         constraint ck_order_payment_paid_order_id_consistent check ((result = 'PAID' and paid_order_id is not null and paid_order_id = order_id) or (result <> 'PAID' and paid_order_id is null)),
         constraint ck_order_payment_paid_requires_confirmation check (result <> 'PAID' or (stock_reservation_id is not null and approved_at is not null)),
-        constraint ck_order_payment_reservation_scope check (stock_reservation_id is null or result in ('PAID', 'REJECTED_ORDER_CANCELED')),
-        constraint ck_order_payment_restoration_consistent check ((restoration_claim_id is null and restored_at is null) or (restoration_claim_id is not null and result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null))
+        constraint ck_order_payment_reservation_scope check (stock_reservation_id is null or result in ('PAID', 'REJECTED_ORDER_CANCELED') or (result = 'REJECTED_PAYMENT_NOT_DONE' and restoration_claim_id is not null and approved_at is not null)),
+        constraint ck_order_payment_restoration_consistent check ((restoration_claim_id is null and restored_at is null) or (restoration_claim_id is not null and result in ('REJECTED_ORDER_CANCELED', 'REJECTED_PAYMENT_NOT_DONE') and stock_reservation_id is not null))
     );
 
     comment on table orders.order_payment is
@@ -348,7 +348,7 @@
         '결제 아이디 (외부 FK: payment-service payment.id)';
 
     comment on column orders.order_payment.restoration_claim_id is
-        '확정 뒤 취소 주문 거절의 재고 복원 클레임 아이디 (product stock-restorations 멱등 키, #308 PR-C). 없으면 null';
+        '확정 뒤 ORDER_CANCELED 또는 NOT_DONE 거절의 재고 복원 클레임 아이디 (product stock-restorations 멱등 키). 없으면 null';
 
     comment on column orders.order_payment.restored_at is
         '재고 복원 200 을 받은 시각 (#308 PR-C). 복원 전이면 null';
@@ -357,7 +357,7 @@
         '반영 결과 (PAID / REJECTED_* — 거절 사유는 order-payment-rejected 회신 reason 과 같다)';
 
     comment on column orders.order_payment.stock_reservation_id is
-        '확정 200 을 받은 재고 선점 아이디 (외부 FK: product-service stock_reservation.id). 결제 완료 · 취소 주문 거절에만, 그 밖은 null';
+        '확정 선점 아이디 (외부 FK: product-service stock_reservation.id). PAID · ORDER_CANCELED 또는 원승인 시각과 복원 클레임이 있는 NOT_DONE';
 
     comment on column orders.order_payment.total_amount is
         '결제 금액 — 통화의 최소 단위 정수 (payment 재조회 값)';

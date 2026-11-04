@@ -44,7 +44,7 @@ class OrderPaymentProcessorTest {
     private final OrderPaymentProcessor processor = new OrderPaymentProcessor(orders, payments, evidence, events, inbox,
         new TopicNames("commerce-foundry.test", "order"), new SnowflakeIdGenerator(1, 1), Clock.fixed(NOW, ZoneOffset.UTC));
     private final PaymentApprovalCommand command = new PaymentApprovalCommand(UUID.randomUUID(), 10, 20, 30, krw(4000), NOW, "CARD");
-    private final VerifiedPayment done = new VerifiedPayment(10, 20, 30, krw(4000), NOW, true, false);
+    private final VerifiedPayment done = new VerifiedPayment(10, 20, 30, krw(4000), NOW, "DONE");
     private final OrderPayment restorable = OrderPayment.canceledAfterConfirmation(1, 20, 10, 30, krw(4000), NOW, 77, command.eventId(), 555);
 
     @Test
@@ -76,7 +76,7 @@ class OrderPaymentProcessorTest {
     void completeRestorationSkipsReplyForFullyCanceledPayment() {
         when(payments.markRestored(anyLong(), any())).thenReturn(true);
 
-        processor.completeRestoration(command.eventId(), restorable, new VerifiedPayment(10, 20, 30, krw(4000), NOW, false, true));
+        processor.completeRestoration(command.eventId(), restorable, new VerifiedPayment(10, 20, 30, krw(4000), NOW, "CANCELED"));
         verify(events, never()).paymentRejected(any());
 
         processor.completeRestoration(command.eventId(), restorable, done);

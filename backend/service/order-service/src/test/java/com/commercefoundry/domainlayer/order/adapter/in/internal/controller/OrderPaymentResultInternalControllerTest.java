@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -133,6 +134,24 @@ class OrderPaymentResultInternalControllerTest {
         assertThat(response).hasStatus(HttpStatus.NOT_FOUND);
         assertThat(response).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_028");
         assertThat(response).bodyJson().extractingPath("$.dataBody").isNull();
+        verifyNoInteractions(orders);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void notDoneHidesInternalPendingOrCompletedRestorationAndPreservesApproval(boolean restored) {
+        OrderPayment source = new OrderPayment(1L, ORDER_ID, PAYMENT_ID, MEMBER_ID, Money.of(129000, CurrencyCode.KRW), APPROVED_AT,
+            Result.REJECTED_PAYMENT_NOT_DONE, RESERVATION_ID, UUID.randomUUID(), 42L, restored ? APPROVED_AT.plusSeconds(1) : null, APPROVED_AT);
+        given(orderPayments.findByPaymentId(PAYMENT_ID)).willReturn(Optional.of(source));
+
+        MvcTestResult response = get(String.valueOf(PAYMENT_ID));
+
+        assertThat(response).hasStatusOk();
+        assertThat(response).bodyJson().extractingPath("$.dataBody").asMap().hasSize(7);
+        assertThat(response).bodyJson().extractingPath("$.dataBody.result").isEqualTo("REJECTED_PAYMENT_NOT_DONE");
+        assertThat(response).bodyJson().extractingPath("$.dataBody.approvedAt").isEqualTo(APPROVED_AT.toString());
+        assertThat(response).bodyJson().extractingPath("$.dataBody.stockReservationId").isNull();
+        assertThat(response).bodyJson().extractingPath("$.dataBody.amount.amount").asNumber().isEqualTo(129000);
         verifyNoInteractions(orders);
     }
 
