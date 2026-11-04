@@ -17,9 +17,11 @@ import {
   VALUE_INVALID,
 } from './create';
 import { IMAGE_FORMAT_NOT_ALLOWED, UPLOAD_DISABLED } from '@/lib/upload/image-upload';
+import { LABEL_INVALID, LEAD_TIME_INVALID } from './custom-order';
 import {
   BUSY,
   CATEGORY_NOT_FOUND,
+  CUSTOM_ORDER_INVALID,
   createFailure,
   createFieldKey,
   errorSummary,
@@ -55,6 +57,13 @@ describe('createFieldKey', () => {
     ['optionGroups[1].name', 'optionGroups.1.name'],
     ['optionGroups[1]', 'optionGroups'],
     ['customOrderFields', 'form'],
+    ['customOrder.notice', 'customOrder.notice'],
+    ['customOrder.leadTimeDays', 'customOrder.leadTimeDays'],
+    ['customOrder.fields', 'customOrder.fields'],
+    ['customOrder.fields[2].label', 'customOrder.fields.2.label'],
+    ['customOrder.fields[0].required', 'customOrder.fields'],
+    ['customOrder.fields[1]', 'customOrder.fields'],
+    ['customOrder', 'customOrder.fields'],
   ])('%s → %s', (path, key) => {
     expect(createFieldKey(path)).toBe(key);
   });
@@ -124,6 +133,36 @@ describe('createFailure', () => {
       },
       reloadCategories: false,
       uncertain: false,
+    });
+  });
+
+  it('맞춤 제작 검증 · 정의 오류는 맞춤 제작 칸에 둔다', () => {
+    expect(
+      createFailure(
+        validation(
+          field('PRODUCT_EDIT_106', 'customOrder.leadTimeDays'),
+          field('PRODUCT_EDIT_109', 'customOrder.fields[1].label'),
+        ),
+      ),
+    ).toEqual({
+      kind: 'errors',
+      errors: {
+        'customOrder.leadTimeDays': [LEAD_TIME_INVALID],
+        'customOrder.fields.1.label': [LABEL_INVALID],
+      },
+      reloadCategories: false,
+      uncertain: false,
+    });
+    const failure = createFailure(
+      business(400, 'PRODUCT_011', '맞춤 제작 입력 항목 설정이 올바르지 않습니다: 키가 겹칩니다'),
+    );
+    expect(failure).toMatchObject({
+      errors: {
+        'customOrder.fields': ['맞춤 제작 입력 항목 설정이 올바르지 않습니다: 키가 겹칩니다'],
+      },
+    });
+    expect(createFailure(business(400, 'PRODUCT_011', ''))).toMatchObject({
+      errors: { 'customOrder.fields': [CUSTOM_ORDER_INVALID] },
     });
   });
 

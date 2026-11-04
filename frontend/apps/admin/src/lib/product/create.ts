@@ -1,10 +1,18 @@
 import { parseMoneyInput, type Currency, type Money } from '@cf/api-client';
 import type { FormErrors } from '@/lib/api-errors';
 import type { CategoryRow } from '@/lib/category/tree';
+import {
+  customOrderBody,
+  emptyCustomOrderForm,
+  isDefaultCustomOrder,
+  type CustomOrderBody,
+  type CustomOrderForm,
+} from './custom-order';
 import type { AdminProductDetail } from './detail';
+import { INTEGER, isPlainText } from './form-text';
 import { ADMIN_PRODUCTS_PATH } from './query';
 
-// 어드민 상품 등록(#29 · BE #9 E1 · 이미지 첨부 F2) — 폼 → `POST /api/v1/admin/products` 본문.
+// 어드민 상품 등록(#29 · BE #9 E1 · 이미지 첨부 F2 · 맞춤 제작 PR-B) — 폼 → `POST /api/v1/admin/products` 본문.
 // 계약 정본은 `backend/docs/api-design-guide.md` "어드민 상품 등록", 칸 규칙 정본은 BE `ProductCreateRequest` · `ProductWriteProcessor` 다.
 // 화면은 같은 규칙으로 미리 막아 저장을 누른 뒤에야 알게 되는 일을 줄일 뿐이고, 판정은 서버다.
 // 금액은 계산하지 않는다 — 글자를 최소 단위 정수로 바꾸고(`parseMoneyInput`) 서버 규칙(정가 > 판매가 · 추가금 0)을 비교로만 본다.
@@ -90,6 +98,8 @@ export type ProductCreateForm = {
   thumbnail: ImageSlot;
   /** 추가 이미지(GALLERY). 배열 순서 = 노출 순서, 대표와 합쳐 `IMAGES_MAX` 장까지 */
   gallery: ImageSlot[];
+  /** 맞춤 제작 설정. 처음 값(꺼짐 · 항목 없음)이면 본문에서 뺀다 */
+  customOrder: CustomOrderForm;
 };
 
 export type MoneyBody = Money;
@@ -118,6 +128,8 @@ export type ProductCreateRequest = {
     initialStock?: { stockManaged: boolean; quantity: number };
   }[];
   images?: { uploadKey: string; imageType: ProductImageType; altText?: string }[];
+  /** 생략하면 맞춤 제작 꺼짐 · 항목 없음(BE `CustomOrderSettingsRequest`) */
+  customOrder?: CustomOrderBody;
 };
 
 /** 201 `ProductCreateAdminResponse` */
@@ -155,6 +167,7 @@ export function emptyProductForm(): ProductCreateForm {
     skus: {},
     thumbnail: emptyImageSlot('thumbnail'),
     gallery: [],
+    customOrder: emptyCustomOrderForm(),
   };
 }
 
@@ -260,10 +273,7 @@ export function addOptionValue(
 
 // ---------- 검증 · 본문 ----------
 
-// BE `ProductValidationMessage.PLAIN_TEXT` — 제어 · 서식 · 대리 · 줄/문단 구분 문자 금지
-const NOT_PLAIN = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
-export const isPlainText = (text: string) => !NOT_PLAIN.test(text);
-export const INTEGER = /^\d+$/;
+export { INTEGER, isPlainText };
 const HS_SEPARATORS = /[.\- ]/g;
 const HS_DIGITS = /^[0-9]{6,10}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -465,6 +475,16 @@ export function productRequest(
     },
   );
 
+  let customOrder: CustomOrderBody | undefined;
+  if (!isDefaultCustomOrder(form.customOrder)) {
+    const built = customOrderBody(form.customOrder, 'customOrder.');
+    if (built.ok) customOrder = built.body;
+    else
+      for (const [key, messages] of Object.entries(built.errors)) {
+        for (const message of messages) add(key, message);
+      }
+  }
+
   if (Object.keys(errors).length > 0 || !salePrice.ok) return { ok: false, errors };
 
   const request: ProductCreateRequest = {
@@ -489,6 +509,7 @@ export function productRequest(
   }
   if (expectedShipDate !== undefined) request.expectedShipDate = expectedShipDate;
   if (images.length > 0) request.images = images;
+  if (customOrder) request.customOrder = customOrder;
   return { ok: true, request };
 }
 

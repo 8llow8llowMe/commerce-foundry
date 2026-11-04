@@ -678,13 +678,17 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   - 옵션 은퇴(`POST .../option-retirements`, #585) — 되돌릴 수 없어 확인 체크 뒤에만 누른다. 함께 판매 종료될 판매중 SKU 수와, 남는 판매중 SKU 에 추가금 0 이 없어 막힐지(`SKU_ADMIN_004`)를 미리 알린다.
 - 투어는 기본 정보 수정(`product-edit-v1`)만 있다. 섹션 화면은 도움말(`상품 구역 수정`)만 있다.
 
-### 상품 등록 (`/products/new`, #29 · BE #9 E1 · F2)
+### 상품 등록 (`/products/new`, #29 · BE #9 E1 · F2 · PR-B)
 
 - `POST /api/v1/admin/products`(`backend/docs/api-design-guide.md` 어드민 상품 등록). 코드는 `lib/product/create.ts`(폼 · 조합 · 본문 · 미리 보는 검증) · `create-errors.ts`(실패 처리),
   화면은 `components/product/ProductCreateForm` · `OptionEditor` · `SkuTable` 이다. 목록 위 "상품 등록" 버튼과 시작 체크리스트의 상품 등록 업무(`PRODUCT_REGISTERED`)가 이 화면으로 온다.
   완료 판정은 그대로 서버 재조회다(체크로 완료하지 않는다) — 등록에 성공하면 상세로 옮기기 전에 `onboardingTasks.invalidate()`(`afterProductCreated`)로
   지난 업무 상태를 버려, 홈의 시작 카드가 다음에 열릴 때 서버에서 다시 읽는다(국내 배송비 저장 뒤와 같은 방식).
-- **범위** — 맞춤 제작 입력은 넣지 않는다(비활성 자리도 두지 않는다). 수정 · 삭제는 상세에서 한다(위).
+- **범위** — 수정 · 삭제는 상세에서 한다(위).
+- **맞춤 제작(BE #9 PR-B)** — 섹션 수정과 같은 칸(`components/product/CustomOrderFields`, 규칙 `lib/product/custom-order.ts`)을 "맞춤 제작 (선택)" 에 둔다.
+  꺼짐 · 안내 · 소요일 빈칸 · 항목 없음(처음 값)이면 본문에서 `customOrder` 를 뺀다. 켜거나 항목을 더하면 버전 없는 설정(`customOrderBody`)을 싣는다 — 꺼 둔 채 항목만 더해도 싣는다.
+  칸 오류 키는 `customOrder.` 로 시작한다(`customOrder.fields.0.label`, 서버 `fieldErrors` 경로와 같다). 검증 `PRODUCT_EDIT_105~109` 는 그 칸, 정의 규칙 위반 `PRODUCT_011` 은 항목 전체에 서버 문구다.
+  상품 폼 모듈끼리 서로 가져오지 않게 공용 칸 검사(`isPlainText` · `INTEGER` · `addError`)는 `lib/product/form-text.ts` 에 둔다 — `create` ↔ `custom-order` 처럼 돌면 읽는 순서에 따라 상수가 비어 보인다.
 - **이미지(F2)** — `components/product/ProductImagesField` 가 대표 한 칸(`THUMBNAIL`) + 추가 이미지 칸(`GALLERY`, "칸 더하기")을 그린다. 합쳐 8장, 칸마다 업로드 칸(아래 "이미지 업로드")이고
   올린 칸에만 대체 텍스트(선택, 200자 한 줄)가 열린다. 본문 `images` 는 올린 칸만 대표 → 추가 이미지 순서로 `{uploadKey, imageType, altText?}` 를 싣는다(`imageEntries`),
   이미지가 없으면 `images` 를 보내지 않는다. 대체 텍스트 칸 오류 키는 본문 번호(`images.{n}.altText`)라 칸 id → 본문 번호로 찾는다.

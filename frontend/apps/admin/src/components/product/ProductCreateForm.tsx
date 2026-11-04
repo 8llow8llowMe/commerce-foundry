@@ -30,6 +30,7 @@ import {
 } from '@/lib/product/create';
 import { createFailure, errorSummary } from '@/lib/product/create-errors';
 import { CategoryFields } from './CategoryFields';
+import { CustomOrderFields } from './CustomOrderFields';
 import { DescriptionHtmlField } from './DescriptionHtmlField';
 import { OptionEditor } from './OptionEditor';
 import { ProductImagesField } from './ProductImagesField';
@@ -44,7 +45,7 @@ type Categories =
   | { kind: 'denied'; denied: AccessDenied };
 
 /**
- * 어드민 상품 등록(#29 · BE #9 E1 · F2) — `POST /api/v1/admin/products`. 맞춤 제작 입력은 아직 없다(BE 후속).
+ * 어드민 상품 등록(#29 · BE #9 E1 · F2 · PR-B) — `POST /api/v1/admin/products`. 맞춤 제작은 켜거나 항목을 더했을 때만 본문 `customOrder` 로 싣는다.
  * 이미지는 고르자마자 올리고(F1 발급 → 스토리지) 본문 `images` 에 `uploadKey` 만 싣는다(F2). 올리는 중에는 등록을 막는다.
  * 섹션 · 등록 버튼 줄의 `data-tour` 는 온보딩 투어(#228 `product-new-v2`)가 가리키는 앵커다 — 이름을 바꾸면 투어 정의도 같이 바꾼다.
  * 앵커는 카테고리를 불러온 뒤에 단다 — 불러오는 중에 투어가 뜨면 그 뒤 403 으로 폼이 권한 안내로 바뀌어도 투어가 사라진 요소를 가리킨 채 남는다.
@@ -413,6 +414,22 @@ export function ProductCreateForm() {
             onChange={(key, sku) =>
               setForm((value) => ({ ...value, skus: { ...value.skus, [key]: sku } }))
             }
+          />
+        </Section>
+
+        <Section title="맞춤 제작 (선택)">
+          <p className="text-sm text-muted-fg">
+            치수처럼 주문할 때 고객이 적는 항목을 정합니다. 등록한 뒤 상품 상세에서도 고칠 수
+            있습니다.
+          </p>
+          <CustomOrderFields
+            form={form.customOrder}
+            onChange={(update) =>
+              setForm((value) => ({ ...value, customOrder: update(value.customOrder) }))
+            }
+            errorsOf={(key) => errorsOf(`customOrder.${key}`)}
+            busy={saving}
+            enabledLabel="맞춤 제작 상품 — 켜면 고객이 주문할 때 아래 항목을 입력합니다"
           />
         </Section>
       </fieldset>
