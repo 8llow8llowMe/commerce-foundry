@@ -164,6 +164,9 @@ Info → Presenter → Response
   커밋 결과 불명에서는 DB 참조가 남을 수 있는 외부 객체를 삭제하지 않는다. 프로그램 방식 트랜잭션의 기존 예는 `AiUsageMeterFacade#settle` 이다.
 - **의도적으로 느린 CPU 작업(비밀번호 해시 — BCrypt)** 도 같은 예외다. 트랜잭션 안에서 하면 해시 시간만큼 DB 커넥션을 쥔다.
   해시는 트랜잭션 밖에서 만들고 저장 구간만 Processor 에 `@Transactional` 을 건다 (예: auth `MemberWebFacade#signUp`).
+- **컨텍스트 간 원천 관측 예외**: paymentobservation Facade는 payment의 신규 관측 Processor만 호출하고 domain model을 자기 Info로 바꾼다.
+  DB 시작·커밋 실패까지 고정 503으로 번역하려고 Facade를 트랜잭션 밖에 두고 payment Processor에 짧은 읽기 트랜잭션을 둔다.
+  다른 컨텍스트의 Entity·Port·QueryResult를 공유하지 않는다([결제 관측 계약](payment-observation-guide.md), #477 A4a).
 - **같은 행을 워커 · 다른 요청과 다투는 낙관적 충돌 재시도** 도 예외다. 버전에서 지면 새 트랜잭션에서 다시 읽어야 바뀐 상태로 판정되므로
   트랜잭션은 시도마다 Processor 가 열고 Facade 는 재시도만 한다 (예: operations `JobAdminFacade#cancel`, 작업 등록 `JobRegisterFacade`).
 - **유니크 키 경합으로 행을 처음 만드는 일** 도 예외다. 진 쪽 트랜잭션은 PostgreSQL 이 중단시켜 같은 트랜잭션에서 다시 시도할 수 없으므로 생성은 adapter 의
