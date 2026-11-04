@@ -72,11 +72,11 @@ class OperationsAdminAuditFlowTest extends ResourceServerSmokeTestSupport {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class AuditConfiguration {
-        // Keep this audit fixture at database timestamp(6) precision; production clock policy is unchanged.
+        // Exercise first responses and fresh database reads with a real nanosecond clock value.
         @Bean
         @Primary
         Clock auditClock() {
-            return Clock.fixed(Instant.parse("2026-11-04T00:00:00.123456Z"), ZoneOffset.UTC);
+            return Clock.fixed(Instant.parse("2026-11-04T00:00:00.123456789Z"), ZoneOffset.UTC);
         }
 
         @Bean
@@ -110,10 +110,16 @@ class OperationsAdminAuditFlowTest extends ResourceServerSmokeTestSupport {
             var saved = request(put(LEGAL + "/draft"), draft(), token);
             assertThat(saved.getStatus()).isEqualTo(200);
             assertThat(saved.getContentAsString()).contains(DOCUMENT);
+            var savedRead = request(get(LEGAL), "", token);
+            assertThat(savedRead.getStatus()).isEqualTo(200);
+            assertThat(JSON.readTree(savedRead.getContentAsString())).isEqualTo(JSON.readTree(saved.getContentAsString()));
             assertThat(documents.count()).isEqualTo(1);
             assertThat(revisions.count()).isEqualTo(1);
             var published = request(post(LEGAL + "/publish"), publish(), token);
             assertThat(published.getStatus()).isEqualTo(200);
+            var publishedRead = request(get(LEGAL), "", token);
+            assertThat(publishedRead.getStatus()).isEqualTo(200);
+            assertThat(JSON.readTree(publishedRead.getContentAsString())).isEqualTo(JSON.readTree(published.getContentAsString()));
             var repeated = request(post(LEGAL + "/publish"), publish(), token);
             assertThat(repeated.getStatus()).isEqualTo(200);
             assertThat(JSON.readTree(repeated.getContentAsString())).isEqualTo(JSON.readTree(published.getContentAsString()));

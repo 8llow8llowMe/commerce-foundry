@@ -12,6 +12,7 @@ import com.commercefoundry.domainlayer.legaldocument.domain.model.LegalDocumentR
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -54,12 +55,12 @@ public class LegalDocumentProcessor {
 
     public LegalDocumentInfos.Detail save(long actorMemberId, LegalDocumentCommands.SaveDraft command) {
         return info(port.saveDraft(key(command.type(), command.locale()), command.expectedVersion(), command.title(), command.body(),
-            actorMemberId, idGenerator.generateId(), idGenerator.generateId(), clock.instant()));
+            actorMemberId, idGenerator.generateId(), idGenerator.generateId(), clock.instant().truncatedTo(ChronoUnit.MICROS)));
     }
 
     public LegalDocumentInfos.Detail publish(long actorMemberId, LegalDocumentCommands.Publish command) {
         return info(port.publish(key(command.type(), command.locale()), command.expectedVersion(), command.revisionNumber(),
-            command.reviewConfirmed(), actorMemberId, clock.instant()));
+            command.reviewConfirmed(), actorMemberId, clock.instant().truncatedTo(ChronoUnit.MICROS)));
     }
 
     public LegalDocumentKey key(String type, String locale) {
