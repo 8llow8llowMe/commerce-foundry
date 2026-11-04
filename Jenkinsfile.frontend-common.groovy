@@ -49,8 +49,10 @@ String composeWaitTimeoutSeconds() { return '180' }
 String postDeploySettleSeconds() { return '30' }
 // 빌드 산출물 묶음. 한 파일로 묶어 stash 한다 — pnpm standalone 의 node_modules 는 심볼릭 링크라 tar 로 그대로 옮긴다
 String bundleFileName() { return 'frontend-bundle.tar.gz' }
-// 빌드 agent 의 CPU 아키텍처를 적어 두는 파일(앱 디렉터리 기준). 배포 호스트와 다르면 sharp 네이티브 바이너리가 뜨지 않는다(deploy.md §1)
+// 빌드 agent 의 CPU 아키텍처를 적어 두는 파일(앱 디렉터리 기준). 기록용이다 — 배포 가능 여부는 묶음에 배포 호스트용 sharp 가 있는지로 본다(deploy.md §1)
 String buildArchFileName() { return '.build-arch' }
+// standalone 에 함께 넣는 sharp 네이티브 바이너리의 CPU(pnpm --cpu 값). 배포 호스트는 dev backend-1 arm64 · prod backend-server x64 다(deploy.md §1)
+String sharpTargetCpus() { return 'x64 arm64' }
 
 // ── config 검사 ──────────────────────────────────────────────────────────
 
@@ -242,8 +244,8 @@ String resolveDeployAgentLabel(Map config, Map ctx) {
     return label
 }
 
-// 검사 · 빌드 단계의 agent 라벨. 배포하는 빌드는 배포 호스트와 같은 아키텍처여야 standalone 의 sharp 네이티브 바이너리가 뜬다(deploy.md §1).
-// buildAgentLabels 에 그 환경 라벨이 있으면 그것을, 없거나 배포하지 않는 빌드(PR · 비배포 브랜치 · SKIP_DEPLOY)는 buildAgentLabel 을 쓴다.
+// 검사 · 빌드 단계의 agent 라벨. 기본은 buildAgentLabel 하나다 — 배포 호스트용 sharp 는 아키텍처와 무관하게 함께 받는다(sharpTargetCpus, deploy.md §1, #618).
+// buildAgentLabels(선택)에 그 환경 라벨이 있으면 배포 빌드만 그것을 쓴다. 배포하지 않는 빌드(PR · 비배포 브랜치 · SKIP_DEPLOY)는 늘 buildAgentLabel 이다.
 String resolveBuildAgentLabel(Map config, Map ctx, boolean deploying) {
     String envLabel = deploying ? (config.buildAgentLabels as Map)?.get(ctx.deployEnv)?.toString()?.trim() : null
     return envLabel ?: config.buildAgentLabel.toString()
@@ -804,7 +806,11 @@ umask 022
 # toolchainCheckScript 가 둔 pnpm 심(turbo 가 PATH 의 pnpm 을 부른다)
 export PATH="${WORKSPACE}/.corepack-bin:${PATH}"
 export NEXT_TELEMETRY_DISABLED=1 TURBO_TELEMETRY_DISABLED=1
-pnpm install --frozen-lockfile
+# 빌드 머신 아키텍처와 무관하게 배포 호스트 전부의 sharp 네이티브 바이너리(@img/sharp-linux-<cpu> · libvips)를 받는다.
+# lockfile 에는 모든 플랫폼이 이미 있어 --frozen-lockfile 과 함께 쓸 수 있고, standalone 추적이 둘 다 담는다(deploy.md §1, #618)
+cpu_flags=()
+for cpu in ${SHARP_TARGET_CPUS}; do cpu_flags+=("--cpu=${cpu}"); done
+pnpm install --frozen-lockfile --os=linux --libc=glibc "${cpu_flags[@]}"
 
 if [ "${RUN_TESTS}" = true ]; then
   # frontend-ci 와 같은 검사. 테스트가 0건이면 실패한다(frontend-test-count.mjs)
@@ -846,6 +852,13 @@ test -d "${APP_DIR}/.next/static"
 # Dockerfile 이 public 을 COPY 한다 — 없으면 빌드가 실패하므로 빈 디렉터리라도 만든다
 mkdir -p "${APP_DIR}/public"
 uname -m > "${APP_DIR}/${BUILD_ARCH_FILE}"
+# 배포 호스트용 sharp 가 standalone 에 들었는지 — 없으면 그 호스트에서 이미지 최적화가 뜨지 않는다(deploy.md §1)
+for cpu in ${SHARP_TARGET_CPUS}; do
+  if ! compgen -G "${APP_DIR}/.next/standalone/node_modules/.pnpm/@img+sharp-linux-${cpu}@*" > /dev/null; then
+    echo "standalone 에 sharp-linux-${cpu} 가 없습니다. pnpm install 의 --cpu 플래그와 lockfile 을 확인합니다."
+    exit 1
+  fi
+done
 '''
 }
 
@@ -899,14 +912,20 @@ on_exit() {
 }
 trap on_exit EXIT
 
-# ── 아키텍처: 빌드 agent 와 배포 호스트가 같아야 standalone 의 네이티브 바이너리(sharp)가 뜬다(deploy.md §1)
+# ── 아키텍처: 묶음에 배포 호스트용 sharp 네이티브 바이너리가 있어야 이미지 최적화가 뜬다(deploy.md §1)
 # 묶음의 권한을 그대로 푼다(-p). umask 077 로 풀면 파일이 600 이 돼 이미지의 node 사용자가 읽지 못한다
 ( umask 022; mkdir "${STAGE_DIR}" && tar -xzpf "${BUNDLE_FILE}" -C "${STAGE_DIR}" )
 build_arch="$(cat "${STAGE_DIR}/${APP_DIR}/${BUILD_ARCH_FILE}" 2>/dev/null || true)"
-if [ -z "${build_arch}" ] || [ "${build_arch}" != "$(uname -m)" ]; then
-  echo "빌드 agent 아키텍처(${build_arch:-알 수 없음})와 배포 호스트($(uname -m))가 다릅니다. builder-frontend 를 배포 호스트와 같은 아키텍처로 둡니다."
+case "$(uname -m)" in
+  x86_64) host_cpu=x64 ;;
+  aarch64 | arm64) host_cpu=arm64 ;;
+  *) host_cpu="$(uname -m)" ;;
+esac
+if ! compgen -G "${STAGE_DIR}/${APP_DIR}/.next/standalone/node_modules/.pnpm/@img+sharp-linux-${host_cpu}@*" > /dev/null; then
+  echo "묶음(빌드 agent ${build_arch:-알 수 없음})에 배포 호스트($(uname -m))용 sharp-linux-${host_cpu} 가 없습니다. sharpTargetCpus 에 ${host_cpu} 를 더합니다."
   exit 1
 fi
+echo "빌드 agent ${build_arch:-알 수 없음} → 배포 호스트 $(uname -m): sharp-linux-${host_cpu} 확인"
 
 read_vault_secret
 
@@ -1291,6 +1310,7 @@ void run(Map config) {
                     "PACKAGE_NAME=${config.packageName}",
                     "FS_PATH=${config.fsPath}",
                     "BUILD_ARCH_FILE=${buildArchFileName()}",
+                    "SHARP_TARGET_CPUS=${sharpTargetCpus()}",
                     "BUILD_ENV_REGEX=${ctx.buildEnvRegex}",
                     "BUILD_REQUIRED_KEYS=${((config.buildRequiredKeys ?: []) as List).join(' ')}",
                     'CI=true',
