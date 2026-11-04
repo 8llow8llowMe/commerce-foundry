@@ -170,6 +170,8 @@ Info → Presenter → Response
   `REQUIRES_NEW` 로 격리하고, Facade 는 바깥 트랜잭션 없이(`NOT_SUPPORTED`) 시도를 반복한다 (예: operations `AiUsageMeterFacade#reserve`, order 주문 요청).
 - **Processor 가 전파 설정이 다른 읽기 둘을 순서대로 부를 때** 는 Processor 에 트랜잭션을 걸지 않고 읽기 트랜잭션을 어댑터에 둔다 — Processor 에 걸면 `REQUIRES_NEW`
   쪽이 커넥션을 하나 더 잡고, 읽는 순서 자체가 정합성 규칙이면 한 트랜잭션으로 묶을 이유도 없다 (예: order `OrderProcessor#heldQuantitiesByProduct`, #436).
+- **단일 프로필의 버전 비교·저장 결과를 감사할 때** 는 진입 Facade에 트랜잭션을 걸지 않고 저장소 adapter의 한 트랜잭션에서 조회·버전 비교·flush를 끝낸다
+  (operations `StoreProfileAdminFacade`, #566). 커밋 또는 충돌 롤백이 확정된 뒤 Facade가 성공·실패 감사를 기록하며, 경합을 재시도하지 않고 409로 반환한다.
 
 ### Processor
 
@@ -407,8 +409,9 @@ store:
   `looks`(#62)는 고객 룩 조회만 본다(판정은 고객 조회 `LookWebProcessor` 한 곳 — 꺼지면 목록 빈 쪽 · 상세 404 · 상품별 빈 목록) — 어드민 룩 관리는 플래그와 무관하게 동작해 켜기 전에 룩을 미리 만들어 둘 수 있다.
 - 메인 화면 구성 · 문구는 코드가 아니라 **전시 데이터**(product-service 메인 전시, #63 — `api-design-guide.md` §2-9)다. 섹션 유형은 브랜드 무관한 블록 이름이고
   고객사 문구는 제목 값으로만 들어간다. 미디어 주소의 허용 범위는 `store.media.public-base-url`(스토리지 공개 주소, 비면 미디어 쓰기를 닫는다)로 정한다.
-- 상호·대표자·사업자등록번호·통신판매업 신고번호 같은 **법정 표시 정보는 Vault 에 등록하고 주입**한다
-  (`STORE_*` — `secret-management.md`). 저장소가 public 이므로 yml 에 실값을 쓰지 않는다.
+- 쇼핑몰 이름·상호·대표자·사업자 식별 번호·공개 주소·CS 연락처는 operations-service `storeprofile`의 **런타임 DB 정본**으로 관리한다(#566).
+  배포당 단일 행이며 ADMIN 저장은 즉시 공개 변경이다. 비밀키는 받지 않고, 고객사 실정보를 저장소·픽스처·이슈에 넣지 않는다.
+  PG·JWT·DB 비밀은 계속 Vault에서 주입한다. API·FE 이행은 `api-design-guide.md` 쇼핑몰 공개 정보 절을 따른다.
 - 브랜드 특화 요구가 생기면 먼저 "다른 쇼핑몰에도 의미가 있는 일반 기능인가" 를 묻는다. 그렇다면
   플래그가 있는 공통 기능으로, 아니라면 확장 지점(전략 인터페이스)으로 만든다.
 

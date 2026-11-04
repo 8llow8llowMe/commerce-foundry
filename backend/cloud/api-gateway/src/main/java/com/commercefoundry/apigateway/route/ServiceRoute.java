@@ -30,6 +30,7 @@ public enum ServiceRoute {
         "/api/v1/deliveries/**", "/api/v1/shipping-fees/**",
         "/api/v1/admin/deliveries/**", "/api/v1/admin/shipping-policies/**"),
     OPERATIONS("operations-service",
+        "/api/v1/store/**", "/api/v1/admin/store/**",
         "/api/v1/admin/jobs/**", "/api/v1/admin/notifications/**", "/api/v1/admin/onboarding/**", "/api/v1/admin/campaigns/**"),
     SUPPORT("support-service",
         "/api/v1/support/**",

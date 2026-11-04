@@ -29,7 +29,7 @@
 `8llow8llowMe/commerce-foundry` 는 **public** 이다. 코드·설정·이슈·PR·커밋 메시지 어디에도 아래를 쓰지 않는다.
 
 - PG 시크릿 키, JWT 서명 키, DB 비밀번호 → **Vault** 에 등록하고 기동 시 주입
-- 사업자등록번호·대표자·통신판매업 신고번호 등 고객사 실정보 → **Vault** 에 등록
+- 공개 사업자 정보 → ADMIN이 명시적으로 저장하는 **런타임 DB** 정본(`backend/docs/architecture-guide.md` §9). 고객사 실정보는 저장소·픽스처·이슈에 넣지 않는다.
 - 고객 개인정보·주문번호 원문 → 마스킹
 
 저장소에는 키 **이름**만 둔다 — 목록 [`backend/.env.example`](backend/.env.example), 규칙 [`backend/docs/secret-management.md`](backend/docs/secret-management.md).

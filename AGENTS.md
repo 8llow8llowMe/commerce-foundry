@@ -17,7 +17,8 @@ Claude Code용 대응 엔트리는 `CLAUDE.md`, `backend/CLAUDE.md`, `frontend/C
 
 ## 공통 규칙
 
-- 공개 저장소다. PG·JWT 키, DB 비밀번호, 고객사 사업자 실정보는 Vault에만 두고 저장소에는 키 이름·환경변수 플레이스홀더만 둔다.
+- 공개 저장소다. PG·JWT 키, DB 비밀번호는 Vault에만 두고 저장소에는 키 이름·환경변수 플레이스홀더만 둔다.
+  공개 사업자 정보는 ADMIN이 명시적으로 저장하는 런타임 DB 데이터로 관리한다(`backend/docs/architecture-guide.md` §9). 고객사 실정보는 저장소·픽스처·이슈에 넣지 않는다.
   고객 개인정보·주문번호 원문은 마스킹한다. [secret-management.md](backend/docs/secret-management.md), [키 목록](backend/.env.example)을 따른다.
 - 모든 파일은 UTF-8 no BOM, LF로 저장한다(`.bat`·`.cmd`는 CRLF). `.editorconfig`와 `.gitattributes`를 보존한다.
 - 신규 기능은 명세(이슈 작업 상세·완료 기준) → 계획 → 구현 → 검증 순서다. 버그는 근본 원인을 확인한 뒤 수정한다.

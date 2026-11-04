@@ -678,6 +678,62 @@
     comment on column operations.shedlock.locked_by is
         '락을 잡은 인스턴스 (호스트 이름)';
 
+    create table operations.store_profile (
+        id bigint not null,
+        address varchar(500) not null,
+        business_registration_number varchar(100) not null,
+        company_name varchar(200) not null,
+        country_code varchar(2) not null,
+        customer_service_email varchar(254) not null,
+        customer_service_hours varchar(500),
+        customer_service_phone varchar(50),
+        mail_order_registration_number varchar(100),
+        representative_name varchar(100) not null,
+        store_name varchar(100) not null,
+        version bigint not null,
+        primary key (id),
+        constraint ck_store_profile_singleton check (id = 1)
+    );
+
+    comment on table operations.store_profile is
+        '배포당 단일 쇼핑몰 공개 사업자·고객센터 정보';
+
+    comment on column operations.store_profile.id is
+        '배포당 단일 프로필 고정 키';
+
+    comment on column operations.store_profile.address is
+        '공개 사업장 주소';
+
+    comment on column operations.store_profile.business_registration_number is
+        '사업자 식별 번호';
+
+    comment on column operations.store_profile.company_name is
+        '상호';
+
+    comment on column operations.store_profile.country_code is
+        'ISO 3166-1 alpha-2 국가 코드';
+
+    comment on column operations.store_profile.customer_service_email is
+        '고객센터 이메일';
+
+    comment on column operations.store_profile.customer_service_hours is
+        '고객센터 운영 시간';
+
+    comment on column operations.store_profile.customer_service_phone is
+        '고객센터 전화';
+
+    comment on column operations.store_profile.mail_order_registration_number is
+        '통신판매 신고 번호';
+
+    comment on column operations.store_profile.representative_name is
+        '대표자';
+
+    comment on column operations.store_profile.store_name is
+        '쇼핑몰 이름';
+
+    comment on column operations.store_profile.version is
+        '낙관적 편집 버전';
+
     create index idx_ai_usage_call_called_at_id
        on operations.ai_usage_call (called_at, id);
 
