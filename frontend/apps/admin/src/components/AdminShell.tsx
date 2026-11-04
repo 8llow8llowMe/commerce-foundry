@@ -53,7 +53,10 @@ const NAV: NavGroup[] = [
   },
   {
     title: '쇼핑몰 설정',
-    items: [{ label: '쇼핑몰 정보', href: '/store/profile' }],
+    items: [
+      { label: '쇼핑몰 정보', href: '/store/profile' },
+      { label: '약관 · 개인정보처리방침', href: '/store/legal-documents' },
+    ],
   },
   {
     title: '운영',
