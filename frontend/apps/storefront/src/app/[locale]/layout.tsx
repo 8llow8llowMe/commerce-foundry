@@ -7,11 +7,12 @@ import { CartMerge } from '@/components/cart/CartMerge';
 import { SiteHeader } from '@/components/header/SiteHeader';
 import { LocaleProvider } from '@/components/i18n/LocaleProvider';
 import { hasSession } from '@/lib/auth/session';
-import { businessInfo, siteUrl } from '@/lib/env';
+import { siteUrl } from '@/lib/env';
 import { hasLocale, localeRouting } from '@/lib/i18n/config';
 import { getDictionary } from '@/lib/i18n/dictionaries';
 import { localePrefix, localeTarget, localeUrl } from '@/lib/i18n/routing';
 import { getI18n, localeHomeHref } from '@/lib/i18n/server';
+import { loadStoreProfile } from '@/lib/store-profile';
 import '../globals.css';
 
 // 언어 접두어(/en)든 언어 호스트든 proxy 가 /[locale]/... 로 바꿔 들어온다 (lib/i18n/routing.ts)
@@ -21,10 +22,16 @@ export function generateStaticParams() {
 
 export async function generateMetadata(): Promise<Metadata> {
   const { locale, content } = await getI18n();
+  // 표시 이름은 어드민이 저장한 쇼핑몰 이름(#568). 미등록 · 장애면 브랜드 패키지 이름과 문구
+  const store = await loadStoreProfile();
+  const title =
+    store.kind === 'registered'
+      ? { default: store.profile.storeName, template: `%s | ${store.profile.storeName}` }
+      : { default: brand.name, template: content.seo.titleTemplate };
   return {
     // 상대 경로 메타(canonical · OG 이미지)를 이 언어의 정식 주소로 푼다
     metadataBase: new URL(localeUrl(localeRouting, locale, '/', siteUrl)),
-    title: { default: brand.name, template: content.seo.titleTemplate },
+    title,
     description: content.seo.description,
   };
 }
@@ -36,6 +43,7 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
   const content = brand.content[locale];
   // 스토어프론트 화면은 이미 요청마다 렌더링된다(언어 판별) — 쿠키를 읽어도 정적 생성을 잃지 않는다
   const signedIn = await hasSession();
+  const store = await loadStoreProfile();
   const languages = brand.locales.map((code) => ({
     locale: code,
     name: getDictionary(code).languageName,
@@ -61,7 +69,7 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
             <SiteFooter
               brandName={brand.name}
               links={content.footerLinks}
-              business={businessInfo}
+              store={store}
               labels={dict.footer}
               backdrop={content.footerBackdrop}
             />

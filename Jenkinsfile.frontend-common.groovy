@@ -12,7 +12,7 @@
 //
 // **공개 저장소다.** 서버 주소 · 호스트 이름 · 포트 값 · 시크릿을 이 파일에 쓰지 않는다. 라벨 · 경로 · 키 이름만 둔다.
 //   - Vault 주소는 Jenkins 전역 환경변수 VAULT_ADDR 로 받는다. 같은 이름의 잡 파라미터를 만들지 않는다 — 파라미터가 전역 env 를 빈 값으로 덮는다.
-//   - 시크릿 값은 Groovy 를 지나지 않는다. 빌드 시점 키(NEXT_PUBLIC_* · BUSINESS_* 등)는 빌드 agent 의 sh 하나가(buildShellScript),
+//   - 시크릿 값은 Groovy 를 지나지 않는다. 빌드 시점 키(NEXT_PUBLIC_* 등)는 빌드 agent 의 sh 하나가(buildShellScript),
 //     런타임 키는 배포 agent 의 sh 하나가(deployShellScript) Vault 에서 읽고 쓰고 정리한다. Groovy 는 키 이름만 다룬다.
 //   - sh 는 `set +x` 로 돌고, 실패 시 컨테이너 로그는 sh 안에서 Vault 값을 가린 뒤 출력한다.
 //   - PR 빌드는 PR 브랜치의 이 파일을 그대로 실행한다. credential 보호는 Jenkins 쪽 범위 설정이 맡는다(jenkins-cicd-guide.md §3 과 같다).
@@ -672,7 +672,7 @@ read_vault_secret() {
 // ── 빌드 시점 키 (이름만) ─────────────────────────────────────────────────
 
 // turbo.json 의 build.env → 빌드 때 Vault 에서 꺼내 넘길 키 이름의 정규식. turbo 는 strict env 모드라 여기 없는 키는 next build 에 가지 않는다
-// (deploy.md §2) — 같은 목록을 정본으로 쓴다. `BUSINESS_*` 같은 끝 와일드카드만 받는다.
+// (deploy.md §2) — 같은 목록을 정본으로 쓴다. `NEXT_PUBLIC_*` 같은 끝 와일드카드만 받는다.
 @NonCPS
 Map buildEnvKeyPattern(List<String> names) {
     List<String> errors = []
@@ -728,7 +728,7 @@ String appPortKey(String appName, String deployEnv) {
 }
 
 // compose → .env.runtime 키 계획(이름만). 백엔드 planRuntimeKeys 와 같다.
-//   keep        — compose 가 보간하는 키. 이것만 쓴다. 환경당 secret 하나라 다른 앱의 키(BUSINESS_* 등)가 이 앱 배포에 내려가지 않게.
+//   keep        — compose 가 보간하는 키. 이것만 쓴다. 환경당 secret 하나라 다른 앱의 키(NEXT_PUBLIC_* 등)가 이 앱 배포에 내려가지 않게.
 //   placeholder — 반대 환경의 `<APP>_PORT_<ENV>`. 한 compose 에 dev · prod 가 같이 있고 파일 전체가 보간되므로 '0' 으로 채운다(deploy.md §3).
 //   required    — compose 의 `:?` 키에서 placeholder 를 뺀 것. 비면 sh 가 키 이름만 모아 실패한다.
 //   errors      — compose 가 규칙(자기 · 반대 포트, 네트워크를 `:?` 로)과 다르면.

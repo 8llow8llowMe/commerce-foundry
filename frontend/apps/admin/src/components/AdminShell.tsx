@@ -52,6 +52,10 @@ const NAV: NavGroup[] = [
     items: [{ label: '지식 관리', href: '/support/knowledge' }],
   },
   {
+    title: '쇼핑몰 설정',
+    items: [{ label: '쇼핑몰 정보', href: '/store/profile' }],
+  },
+  {
     title: '운영',
     items: [
       { label: '백그라운드 작업', href: '/jobs' },

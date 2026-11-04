@@ -187,11 +187,18 @@ export const ko = {
     business: '사업자 정보',
     businessName: '상호',
     representative: '대표',
-    registrationNumber: '사업자등록번호',
+    /** 국가 규칙(`lib/business-info.ts`)이 없는 나라의 사업자 식별 번호 이름 */
+    registrationNumber: '사업자 번호',
+    /** 국가별 사업자 식별 번호 이름. 키는 ISO 국가 코드 */
+    registrationLabels: { KR: '사업자등록번호' },
     mailOrderNumber: '통신판매업 신고번호',
     address: '주소',
     contact: '고객센터',
+    email: '이메일',
+    hours: '운영 시간',
     verify: '사업자 정보 확인',
+    /** 공개 정보 API 장애 — 지난 값을 대신 보이지 않는다 */
+    businessUnavailable: '사업자 정보를 잠시 불러오지 못했습니다. 잠시 후 다시 확인해 주세요.',
   },
   shop: {
     categories: '카테고리',
