@@ -8,7 +8,11 @@ import java.util.Objects;
  *
  * @param retiredAt 은퇴 시각. null 이면 사용 중이다. 은퇴한 그룹은 고객 상세에서 빠지지만 행은 남는다 — 서비스 간 SKU 조회는 옵션명을 계속 읽는다
  */
-public record OptionGroup(long id, long productId, String name, int displayOrder, Instant retiredAt) {
+public record OptionGroup(long id, long productId, String name, int displayOrder, Instant retiredAt, String nameEn) {
+
+    public OptionGroup(long id, long productId, String name, int displayOrder, Instant retiredAt) {
+        this(id, productId, name, displayOrder, retiredAt, null);
+    }
 
     public OptionGroup {
         Objects.requireNonNull(name, "name");

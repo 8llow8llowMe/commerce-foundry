@@ -61,19 +61,25 @@ public class ProductOptionRepositoryAdapter implements ProductOptionRepositoryPo
         // Exclude current, final and previously reserved names, including retired rows.
         for (var group : groups) {
             if (!group.name().equals(oldGroups.get(group.id()).name())) {
-                requireUpdated(productOptionGroupRepository.updateLabel(group.id(), temporaryName(blocked), oldGroups.get(group.id()).displayOrder(), now));
+                var before = oldGroups.get(group.id());
+                requireUpdated(productOptionGroupRepository.updateLabel(group.id(), temporaryName(blocked), before.nameEn(), before.displayOrder(), now));
             }
         }
         for (var value : values) {
             if (!value.name().equals(oldValues.get(value.id()).name())) {
-                requireUpdated(productOptionValueRepository.updateLabel(value.id(), temporaryName(blocked), oldValues.get(value.id()).displayOrder(), now));
+                var before = oldValues.get(value.id());
+                requireUpdated(productOptionValueRepository.updateLabel(value.id(), temporaryName(blocked), before.nameEn(), before.displayOrder(), now));
             }
         }
         for (var group : groups) {
-            if (!group.equals(oldGroups.get(group.id()))) requireUpdated(productOptionGroupRepository.updateLabel(group.id(), group.name(), group.displayOrder(), now));
+            if (!group.equals(oldGroups.get(group.id()))) {
+                requireUpdated(productOptionGroupRepository.updateLabel(group.id(), group.name(), group.nameEn(), group.displayOrder(), now));
+            }
         }
         for (var value : values) {
-            if (!value.equals(oldValues.get(value.id()))) requireUpdated(productOptionValueRepository.updateLabel(value.id(), value.name(), value.displayOrder(), now));
+            if (!value.equals(oldValues.get(value.id()))) {
+                requireUpdated(productOptionValueRepository.updateLabel(value.id(), value.name(), value.nameEn(), value.displayOrder(), now));
+            }
         }
     }
 
@@ -93,11 +99,11 @@ public class ProductOptionRepositoryAdapter implements ProductOptionRepositoryPo
     public void insertAll(List<OptionGroup> groups, List<OptionValue> values) {
         productOptionGroupRepository.saveAll(groups.stream()
             .map(group -> ProductOptionGroupEntity.builder()
-                .id(group.id()).productId(group.productId()).name(group.name()).displayOrder(group.displayOrder()).retiredAt(group.retiredAt()).build())
+                .id(group.id()).productId(group.productId()).name(group.name()).nameEn(group.nameEn()).displayOrder(group.displayOrder()).retiredAt(group.retiredAt()).build())
             .toList());
         productOptionValueRepository.saveAll(values.stream()
             .map(value -> ProductOptionValueEntity.builder()
-                .id(value.id()).optionGroupId(value.optionGroupId()).productId(value.productId()).name(value.name())
+                .id(value.id()).optionGroupId(value.optionGroupId()).productId(value.productId()).name(value.name()).nameEn(value.nameEn())
                 .displayOrder(value.displayOrder()).retiredAt(value.retiredAt()).build())
             .toList());
     }

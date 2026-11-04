@@ -42,3 +42,9 @@
 
 새 PATCH에 대한 인증·검증·응답·오류 계약과 PUT 호환은 `OnboardingAdminControllerTest`로 검증한다.
 병합·재실행 규칙은 기존 `TourProgressTest`와 `OnboardingTourProcessorTest`를 포함한 모듈 check로 검증한다.
+
+## 후속 보완 — 옵션 번역 호환 (#20)
+
+`PUT /api/v1/admin/products/{productId}/options`는 한국어 이름·전체 ID 집합·순서를 교체하면서 선택적 `nameEn`만 미지정/null 보존을 허용한다.
+영문 빈 값은 삭제한다. 기존 FE의 한국어 편집이 번역을 지우지 않도록 둔 PUT 호환 예외이며, 위 기존 15개 경로 판단은 바꾸지 않는다.
+번역만 바뀌어도 기존 상품 버전 CAS·감사·전체 응답을 재사용한다. 메서드 전환·새 PATCH와 FE 번역 UI는 후속 범위다.

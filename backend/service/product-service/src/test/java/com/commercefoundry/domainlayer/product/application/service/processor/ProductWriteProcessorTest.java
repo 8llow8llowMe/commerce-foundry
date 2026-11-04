@@ -156,6 +156,8 @@ class ProductWriteProcessorTest {
             ArgumentCaptor<List<OptionGroup>> groups = ArgumentCaptor.forClass(List.class);
             ArgumentCaptor<List<OptionValue>> values = ArgumentCaptor.forClass(List.class);
             verify(optionPort).insertAll(groups.capture(), values.capture());
+            assertThat(groups.getValue()).allSatisfy(g -> assertThat(g.nameEn()).isNull());
+            assertThat(values.getValue()).allSatisfy(v -> assertThat(v.nameEn()).isNull());
             assertThat(groups.getValue()).extracting(OptionGroup::name).containsExactly("색상", "사이즈");
             assertThat(groups.getValue()).extracting(OptionGroup::displayOrder).containsExactly(0, 1);
             Map<String, Long> valueIds = values.getValue().stream().collect(Collectors.toMap(OptionValue::name, OptionValue::id, (a, b) -> a));

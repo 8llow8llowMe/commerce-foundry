@@ -55,13 +55,20 @@ class ProductOptionsUpdateIntegrationTest {
     @Autowired ProductAdminUseCase products;
     @Autowired ProductWebUseCase customerProducts;
     @Autowired SkuInternalUseCase internalSkus;
+    @Autowired com.commercefoundry.domainlayer.product.application.port.in.SkuAdminUseCase adminSkus;
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoSpyBean ProductRepositoryPort repository;
     @MockitoSpyBean ProductOptionRepositoryPort options;
     TransactionTemplate tx;
+    final ch.qos.logback.classic.Logger auditLogger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(
+        com.commercefoundry.security.audit.AdminAuditLog.LOGGER_NAME);
+    ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> audit;
 
     @BeforeEach
     void seed() {
+        audit = new ch.qos.logback.core.read.ListAppender<>();
+        audit.start();
+        auditLogger.addAppender(audit);
         tx = new TransactionTemplate(transactionManager);
         tx.executeWithoutResult(s -> {
             em.persist(ProductEntity.builder().id(ID).categoryId(1L).name("original").visible(false).saleStatus(SaleStatus.ON_SALE)
@@ -85,6 +92,7 @@ class ProductOptionsUpdateIntegrationTest {
 
     @AfterEach
     void cleanup() {
+        auditLogger.detachAppender(audit);
         reset(repository, options);
         tx.executeWithoutResult(s -> {
             for (var entity : List.of("SkuEntity", "ProductOptionValueEntity", "ProductOptionGroupEntity"))
@@ -129,6 +137,49 @@ class ProductOptionsUpdateIntegrationTest {
             assertThat(em.find(StockReservationItemEntity.class, ID + 51)).usingRecursiveComparison().isEqualTo(itemBefore);
             assertThat(em.find(SkuCostEntity.class, ID + 70)).usingRecursiveComparison().isEqualTo(costBefore);
         });
+    }
+
+    @Test
+    void translationOnlyRoundTripsPreservesOldClientAndClearsCanonicalNull() {
+        var response = products.updateOptions(translated(0, " Color ", " Blue "));
+        assertThat(response.version()).isEqualTo(1);
+        assertThat(audit.list).extracting(e -> e.getFormattedMessage()).anySatisfy(message ->
+            assertThat(message).contains("PRODUCT_OPTIONS_REPLACE").doesNotContain("Color", "Blue"));
+        assertThat(response.optionGroups().getFirst().name()).isEqualTo("first");
+        assertThat(response.optionGroups().getFirst().nameEn()).isEqualTo("Color");
+        assertThat(response.optionGroups().getFirst().values().getFirst().nameEn()).isEqualTo("Blue");
+        assertThat(products.getProduct(ID).optionGroups().getFirst().nameEn()).isEqualTo("Color");
+        var updatedAt = tx.execute(s -> em.find(ProductOptionGroupEntity.class, G1).getUpdatedAt());
+        assertThat(products.updateOptions(translated(1, "Color", "Blue")).version()).isEqualTo(1);
+        assertThat(products.updateOptions(original(1)).version()).isEqualTo(1);
+        assertThat(tx.<Instant>execute(s -> em.find(ProductOptionGroupEntity.class, G1).getUpdatedAt())).isEqualTo(updatedAt);
+        assertThat(products.updateOptions(translated(1, "   ", "")).version()).isEqualTo(2);
+        assertThat(products.getProduct(ID).optionGroups().getFirst().nameEn()).isNull();
+        assertThat(products.getProduct(ID).optionGroups().getFirst().values().getFirst().nameEn()).isNull();
+        assertThat(products.updateOptions(translated(2, "", " ")).version()).isEqualTo(2);
+        error(() -> products.updateOptions(original(1)), "PRODUCT_010");
+    }
+
+    @Test
+    void englishDuplicatesAndKoreanSwapsPreserveTranslationsIncludingRetiredRows() {
+        products.updateOptions(translated(0, "same", "same"));
+        var retired = original(1).optionGroups().getLast();
+        products.updateOptions(new ProductOptionsUpdateCommand(ID, 1, 99, List.of(
+            new Group(G1, "first", List.of(new Value(V1, "a"), new Value(V2, "b", "same"))),
+            new Group(G2, retired.name(), List.of(new Value(V3, "__edit_0", "same")), "same"))));
+        var swap = changed();
+        products.updateOptions(new ProductOptionsUpdateCommand(ID, 2, 99, swap.optionGroups()));
+        var groups = products.getProduct(ID).optionGroups();
+        assertThat(groups).extracting(g -> g.nameEn()).containsExactly("same", "same");
+        assertThat(groups.getFirst().values().getFirst().nameEn()).isEqualTo("same");
+        assertThat(groups.getFirst().retiredAt()).isNotNull();
+        assertThat(groups.getLast().values()).extracting(v -> v.nameEn()).containsExactly("same", "same");
+    }
+
+    private ProductOptionsUpdateCommand translated(long version, String groupEn, String valueEn) {
+        return new ProductOptionsUpdateCommand(ID, version, 99, List.of(
+            new Group(G1, "first", List.of(new Value(V1, "a", valueEn), new Value(V2, "b")), groupEn),
+            original(version).optionGroups().getLast()));
     }
 
     @Test
@@ -190,8 +241,12 @@ class ProductOptionsUpdateIntegrationTest {
             assertThat(em.find(ProductOptionValueEntity.class, V1).getName()).isEqualTo("b");
             throw new IllegalStateException("injected after final writes");
         }).when(options).updateLabels(anyList(), anyList(), anyList(), anyList());
-        assertThatThrownBy(() -> products.updateOptions(changed())).isInstanceOf(IllegalStateException.class);
+        var request = changed();
+        var groups = request.optionGroups().stream().map(g -> new Group(g.optionGroupId(), g.name(),
+            g.values().stream().map(v -> new Value(v.optionValueId(), v.name(), "Changed")).toList(), "Changed")).toList();
+        assertThatThrownBy(() -> products.updateOptions(new ProductOptionsUpdateCommand(ID, 0, 99, groups))).isInstanceOf(IllegalStateException.class);
         assertThat(version()).isZero();
+        assertThat(products.getProduct(ID).optionGroups()).allSatisfy(g -> assertThat(g.nameEn()).isNull());
         assertThat(products.getProduct(ID).optionGroups()).extracting(g -> g.name()).containsExactly("first", "second");
         assertThat(products.getProduct(ID).optionGroups().getFirst().values()).extracting(v -> v.name()).containsExactly("a", "b");
     }
@@ -209,8 +264,38 @@ class ProductOptionsUpdateIntegrationTest {
     }
 
     @Test
+    void concurrentTranslationChangesHaveOneWinnerAndNoPartialChildWrites() throws Exception {
+        race(() -> products.updateOptions(translated(0, "winner-group", "winner-value")), translated(0, "loser-group", "loser-value"));
+        assertThat(products.getProduct(ID).optionGroups().getFirst().nameEn()).isEqualTo("winner-group");
+        assertThat(products.getProduct(ID).optionGroups().getFirst().values().getFirst().nameEn()).isEqualTo("winner-value");
+    }
+
+    @Test
+    void concurrentRetirementFencesTranslationWrites() throws Exception {
+        race(() -> adminSkus.retireOptions(new com.commercefoundry.domainlayer.product.application.command.OptionRetirementCommand(
+            ID, 0, 99, java.util.Set.of(), java.util.Set.of(V2))), translated(0, "loser", "loser"));
+        assertThat(products.getProduct(ID).optionGroups().getFirst().nameEn()).isNull();
+        assertThat(tx.<Instant>execute(s -> em.find(ProductOptionValueEntity.class, V2).getRetiredAt())).isNotNull();
+    }
+
+    @Test
+    void concurrentAdditionFencesTranslationWrites() throws Exception {
+        tx.executeWithoutResult(s -> {
+            em.createQuery("update ProductOptionGroupEntity set retiredAt = null where id = :id").setParameter("id", G2).executeUpdate();
+            em.createQuery("update ProductOptionValueEntity set retiredAt = null where id = :id").setParameter("id", V3).executeUpdate();
+        });
+        race(() -> adminSkus.add(new com.commercefoundry.domainlayer.product.application.command.SkuAddCommand(ID, 0, 99,
+            List.of(new com.commercefoundry.domainlayer.product.application.command.SkuAddCommand.NewOptionValue(G1, "new-value")),
+            List.of(new com.commercefoundry.domainlayer.product.application.command.SkuAddCommand.NewSku(List.of("new-value", "__edit_0"),
+                com.commercefoundry.shared.commerce.Money.of(0, KRW), SaleStatus.ON_SALE, null, null, null)))), translated(0, "loser", "loser"));
+        assertThat(products.getProduct(ID).optionGroups().getFirst().nameEn()).isNull();
+        assertThat(products.getProduct(ID).optionGroups().getFirst().values()).hasSize(3);
+    }
+
+    @Test
     void concurrentHeaderCommitMakesOptionCasFail() throws Exception {
-        race(() -> products.updateHeader(new ProductHeaderUpdateCommand(ID, 0, 99, "winner", null, null, SaleStatus.STOP_SELLING, false)));
+        race(() -> products.updateHeader(new ProductHeaderUpdateCommand(ID, 0, 99, "winner", null, null, SaleStatus.STOP_SELLING, false)),
+            translated(0, "loser", "loser"));
         assertThat(products.getProduct(ID).name()).isEqualTo("winner");
     }
 
@@ -221,12 +306,20 @@ class ProductOptionsUpdateIntegrationTest {
     }
 
     private void race(Runnable other) throws Exception {
+        race(other, changed());
+    }
+
+    private void race(Runnable other, ProductOptionsUpdateCommand request) throws Exception {
         var read = new CountDownLatch(1);
         var committed = new CountDownLatch(1);
-        doAnswer(invocation -> { read.countDown(); await(committed); return invocation.callRealMethod(); }).when(repository).bumpVersion(ID, 0);
+        var first = new java.util.concurrent.atomic.AtomicBoolean(true);
+        doAnswer(invocation -> {
+            if (first.compareAndSet(true, false)) { read.countDown(); await(committed); }
+            return invocation.callRealMethod();
+        }).when(repository).bumpVersion(ID, 0);
         try (var executor = Executors.newSingleThreadExecutor()) {
             var result = executor.submit(() -> {
-                try { products.updateOptions(changed()); return "success"; }
+                try { products.updateOptions(request); return "success"; }
                 catch (ProductException e) { return e.getErrorCode().getCode(); }
             });
             try { await(read); other.run(); } finally { committed.countDown(); }

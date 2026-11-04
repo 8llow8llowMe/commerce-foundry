@@ -10,7 +10,11 @@ import java.util.Objects;
  * @param retiredAt 은퇴 시각. null 이면 사용 중이다. 은퇴한 값과 그 값을 쓰는 SKU 는 고객 상세에서 빠지지만 행은 남는다 —
  *     서비스 간 SKU 조회는 옵션명을 계속 읽는다(주문 · 장바구니 줄의 옵션명이 끊기지 않게)
  */
-public record OptionValue(long id, long optionGroupId, long productId, String name, int displayOrder, Instant retiredAt) {
+public record OptionValue(long id, long optionGroupId, long productId, String name, int displayOrder, Instant retiredAt, String nameEn) {
+
+    public OptionValue(long id, long optionGroupId, long productId, String name, int displayOrder, Instant retiredAt) {
+        this(id, optionGroupId, productId, name, displayOrder, retiredAt, null);
+    }
 
     public OptionValue {
         Objects.requireNonNull(name, "name");

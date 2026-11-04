@@ -56,9 +56,9 @@ class SkuAddIntegrationTest {
         tx.executeWithoutResult(s -> {
             em.persist(ProductEntity.builder().id(ID).categoryId(1L).name("저고리").visible(true).saleStatus(ON_SALE)
                 .salePriceAmount(10000).salePriceCurrency(KRW).createdByMemberId(99L).build());
-            em.persist(ProductOptionGroupEntity.builder().id(COLOR).productId(ID).name("색상").displayOrder(0).build());
+            em.persist(ProductOptionGroupEntity.builder().id(COLOR).productId(ID).nameEn("Color").name("색상").displayOrder(0).build());
             em.persist(ProductOptionGroupEntity.builder().id(SIZE).productId(ID).name("사이즈").displayOrder(1).build());
-            em.persist(ProductOptionValueEntity.builder().id(BLACK).productId(ID).optionGroupId(COLOR).name("블랙").displayOrder(0).build());
+            em.persist(ProductOptionValueEntity.builder().id(BLACK).productId(ID).optionGroupId(COLOR).nameEn("Black").name("블랙").displayOrder(0).build());
             em.persist(ProductOptionValueEntity.builder().id(WHITE).productId(ID).optionGroupId(COLOR).name("화이트").displayOrder(1).build());
             em.persist(ProductOptionValueEntity.builder().id(S).productId(ID).optionGroupId(SIZE).name("S").displayOrder(0).build());
             em.persist(ProductOptionValueEntity.builder().id(M).productId(ID).optionGroupId(SIZE).name("M").displayOrder(1).build());
@@ -112,6 +112,9 @@ class SkuAddIntegrationTest {
             var large = em.createQuery("from ProductOptionValueEntity where optionGroupId = :g and name = 'L'", ProductOptionValueEntity.class)
                 .setParameter("g", SIZE).getSingleResult();
             assertThat(large.getDisplayOrder()).isEqualTo(3);
+            assertThat(large.getNameEn()).isNull();
+            assertThat(em.find(ProductOptionGroupEntity.class, COLOR).getNameEn()).isEqualTo("Color");
+            assertThat(em.find(ProductOptionValueEntity.class, BLACK).getNameEn()).isEqualTo("Black");
             var blackLarge = stored.stream().filter(e -> e.getOptionValueKey().equals(BLACK + "," + large.getId())).findFirst().orElseThrow();
             var whiteSmall = stored.stream().filter(e -> e.getOptionValueKey().equals(WHITE + "," + S)).findFirst().orElseThrow();
             assertThat(whiteSmall.getAdditionalPriceAmount()).isEqualTo(1000);

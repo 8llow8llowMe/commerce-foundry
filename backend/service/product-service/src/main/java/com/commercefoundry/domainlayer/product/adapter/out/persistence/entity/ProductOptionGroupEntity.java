@@ -36,6 +36,9 @@ public class ProductOptionGroupEntity extends BaseEntity implements Persistable<
     @Column(name = "name", nullable = false, length = 50, comment = "옵션 그룹명")
     private String name;
 
+    @Column(name = "name_en", length = 30, comment = "옵션 그룹 영문명. 없으면 한국어 이름으로 표시")
+    private String nameEn;
+
     @Column(name = "display_order", nullable = false, comment = "노출 순서 (오름차순)")
     private int displayOrder;
 

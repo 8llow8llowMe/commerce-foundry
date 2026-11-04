@@ -65,7 +65,8 @@ public class ProductAdminController {
 
     private final ProductAdminUseCase productAdminUseCase;
 
-    @Operation(summary = "기존 상품 옵션 이름·순서 수정", description = "은퇴 행을 포함한 기존 그룹·값 전체 아이디를 보내고 이름과 배열 순서만 편집한다. "
+    @Operation(summary = "기존 상품 옵션 이름·순서 수정", description = "은퇴 행을 포함한 기존 그룹·값 전체 아이디를 보내고 한국어·영문 이름과 배열 순서를 편집한다. "
+        + "nameEn 미지정/null은 기존 번역 유지, 빈 값은 삭제한다. "
         + "추가·누락·그룹 이동·중복 이름은 400 PRODUCT_013이다. 동일 값은 버전을 유지하며 오래된 버전은 409 PRODUCT_010이다.")
     @PreAuthorize("hasRole('ADMIN')")
     @AdminAudited(action = "PRODUCT_OPTIONS_REPLACE")

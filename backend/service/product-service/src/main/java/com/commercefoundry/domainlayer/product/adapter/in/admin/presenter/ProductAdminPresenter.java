@@ -74,9 +74,9 @@ public class ProductAdminPresenter {
     }
 
     private ProductOptionGroupAdminItem toGroupItem(OptionGroup group, List<OptionValue> values) {
-        return new ProductOptionGroupAdminItem(String.valueOf(group.id()), group.name(), group.displayOrder(), group.retiredAt(),
+        return new ProductOptionGroupAdminItem(String.valueOf(group.id()), group.name(), group.nameEn(), group.displayOrder(), group.retiredAt(),
             values.stream().map(value -> new ProductOptionValueAdminItem(
-                String.valueOf(value.id()), value.name(), value.displayOrder(), value.retiredAt()
+                String.valueOf(value.id()), value.name(), value.nameEn(), value.displayOrder(), value.retiredAt()
             )).toList());
     }
 

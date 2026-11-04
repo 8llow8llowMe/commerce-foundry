@@ -616,6 +616,7 @@
         updated_at timestamp(6) with time zone not null,
         display_order integer not null,
         name varchar(50) not null,
+        name_en varchar(30),
         product_id bigint not null,
         retired_at timestamp(6) with time zone,
         primary key (id),
@@ -640,6 +641,9 @@
     comment on column product.product_option_group.name is
         '옵션 그룹명';
 
+    comment on column product.product_option_group.name_en is
+        '옵션 그룹 영문명. 없으면 한국어 이름으로 표시';
+
     comment on column product.product_option_group.product_id is
         '상품 아이디 (FK: product.id)';
 
@@ -652,6 +656,7 @@
         updated_at timestamp(6) with time zone not null,
         display_order integer not null,
         name varchar(50) not null,
+        name_en varchar(50),
         option_group_id bigint not null,
         product_id bigint not null,
         retired_at timestamp(6) with time zone,
@@ -676,6 +681,9 @@
 
     comment on column product.product_option_value.name is
         '옵션 값명';
+
+    comment on column product.product_option_value.name_en is
+        '옵션 값 영문명. 없으면 한국어 이름으로 표시';
 
     comment on column product.product_option_value.option_group_id is
         '옵션 그룹 아이디 (FK: product_option_group.id)';

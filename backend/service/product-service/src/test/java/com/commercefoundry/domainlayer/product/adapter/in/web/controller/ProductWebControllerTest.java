@@ -79,12 +79,19 @@ class ProductWebControllerTest {
     private ProductWebUseCase productWebUseCase;
 
     @Test
-    void sequentialRequestsTranslateTextAndSaleStatusThroughActualFacadeProcessorsAndPresenter() {
+    void sequentialRequestsTranslateTextAndSaleStatusThroughActualFacadeProcessorsAndPresenter() throws Exception {
         var products = mock(ProductRepositoryPort.class);
         var skus = mock(SkuRepositoryPort.class);
         var images = mock(ProductImageRepositoryPort.class);
         var stocks = mock(StockRepositoryPort.class);
         var options = mock(ProductOptionRepositoryPort.class);
+        given(options.findGroupsByProductId(1)).willReturn(List.of(
+            new com.commercefoundry.domainlayer.product.domain.model.OptionGroup(20, 1, "group-ko", 0, null, "Color"),
+            new com.commercefoundry.domainlayer.product.domain.model.OptionGroup(21, 1, "fallback-group", 1, null, " ")));
+        given(options.findValuesByProductId(1)).willReturn(List.of(
+            new com.commercefoundry.domainlayer.product.domain.model.OptionValue(30, 20, 1, "value-ko", 0, null, "Blue"),
+            new com.commercefoundry.domainlayer.product.domain.model.OptionValue(31, 20, 1, "fallback-value", 1, null, null),
+            new com.commercefoundry.domainlayer.product.domain.model.OptionValue(32, 21, 1, "other-ko", 0, null, "Other")));
         var fields = mock(ProductCustomOrderFieldRepositoryPort.class);
         var store = new StoreProperties(null);
         var product = new Product(1, 11, "저고리", "한국어 요약", "<p>설명</p>", SaleStatus.ON_SALE, true,
@@ -107,7 +114,7 @@ class ProductWebControllerTest {
             .willAnswer(invocation -> facade.searchProducts(null, ProductSortType.NEWEST, 0, 20));
         given(productWebUseCase.getProduct(1L)).willAnswer(invocation -> facade.getProduct(1));
 
-        for (String language : new String[]{"en-US", null, "en-GB", "fr", "ko", null}) {
+        for (String language : new String[]{"en-US", null, "en-GB", "fr", "ko", "", null}) {
             boolean english = language != null && language.startsWith("en");
             var listRequest = mvc.get().uri("/api/v1/products");
             var detailRequest = mvc.get().uri("/api/v1/products/1");
@@ -119,6 +126,12 @@ class ProductWebControllerTest {
             var detail = detailRequest.exchange();
             assertThat(list).hasStatusOk();
             assertThat(detail).hasStatusOk();
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.optionGroups[0].name").isEqualTo(english ? "Color" : "group-ko");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.optionGroups[0].values[0].name").isEqualTo(english ? "Blue" : "value-ko");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.optionGroups[0].values[1].name").isEqualTo("fallback-value");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.optionGroups[1].name").isEqualTo("fallback-group");
+            assertThat(detail).bodyJson().extractingPath("$.dataBody.optionGroups[1].values[0].name").isEqualTo(english ? "Other" : "other-ko");
+            assertThat(detail.getResponse().getContentAsString()).doesNotContain("nameEn");
             assertThat(list.getResponse().getHeader("Vary")).contains("Accept-Language");
             assertThat(detail.getResponse().getHeader("Vary")).contains("Accept-Language");
             assertThat(list).bodyJson().extractingPath("$.dataBody.contents[0].name").isEqualTo(english ? "Jacket" : "저고리");

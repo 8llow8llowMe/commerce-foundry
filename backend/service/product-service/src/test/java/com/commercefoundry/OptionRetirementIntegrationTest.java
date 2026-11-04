@@ -54,10 +54,10 @@ class OptionRetirementIntegrationTest {
         tx.executeWithoutResult(s -> {
             em.persist(ProductEntity.builder().id(ID).categoryId(1L).name("저고리").visible(true).saleStatus(ON_SALE)
                 .salePriceAmount(10000).salePriceCurrency(KRW).createdByMemberId(99L).build());
-            em.persist(ProductOptionGroupEntity.builder().id(COLOR).productId(ID).name("색상").displayOrder(0).build());
+            em.persist(ProductOptionGroupEntity.builder().id(COLOR).productId(ID).nameEn("Color").name("색상").displayOrder(0).build());
             em.persist(ProductOptionGroupEntity.builder().id(SIZE).productId(ID).name("사이즈").displayOrder(1).build());
             em.persist(ProductOptionValueEntity.builder().id(BLACK).productId(ID).optionGroupId(COLOR).name("블랙").displayOrder(0).build());
-            em.persist(ProductOptionValueEntity.builder().id(WHITE).productId(ID).optionGroupId(COLOR).name("화이트").displayOrder(1).build());
+            em.persist(ProductOptionValueEntity.builder().id(WHITE).productId(ID).optionGroupId(COLOR).nameEn("White").name("화이트").displayOrder(1).build());
             em.persist(ProductOptionValueEntity.builder().id(S).productId(ID).optionGroupId(SIZE).name("S").displayOrder(0).build());
             em.persist(ProductOptionValueEntity.builder().id(M).productId(ID).optionGroupId(SIZE).name("M").displayOrder(1).build());
             sku(BLACK_S, BLACK, S, 0);
@@ -104,6 +104,8 @@ class OptionRetirementIntegrationTest {
         assertThat(status(BLACK_M)).isEqualTo(ON_SALE);
         tx.executeWithoutResult(s -> {
             assertThat(em.find(ProductOptionValueEntity.class, WHITE).getRetiredAt()).isNotNull();
+            assertThat(em.find(ProductOptionValueEntity.class, WHITE).getNameEn()).isEqualTo("White");
+            assertThat(em.find(ProductOptionGroupEntity.class, COLOR).getNameEn()).isEqualTo("Color");
             assertThat(em.find(ProductOptionValueEntity.class, BLACK).getRetiredAt()).isNull();
             assertThat(em.find(StockEntity.class, WHITE_S).getAvailableQuantity()).isEqualTo(4);
         });

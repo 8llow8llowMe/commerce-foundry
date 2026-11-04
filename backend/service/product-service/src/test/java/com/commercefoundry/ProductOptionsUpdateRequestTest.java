@@ -32,6 +32,29 @@ class ProductOptionsUpdateRequestTest {
     }
 
     @Test
+    void validatesRawEnglishBeforeNormalizationAndKeepsOptionalIntent() {
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            var validator = factory.getValidator();
+            for (String en : new String[]{null, "", "   ", " English ", "x".repeat(30)}) {
+                var request = new ProductOptionsUpdateRequest(0L, List.of(new Group(1L, "group", List.of(new Value(2L, "value", en)), en)));
+                assertThat(validator.validate(request)).isEmpty();
+                assertThat(request.toCommand(1, 2).optionGroups().getFirst().nameEn()).isEqualTo(en);
+                assertThat(request.toCommand(1, 2).optionGroups().getFirst().values().getFirst().nameEn()).isEqualTo(en);
+            }
+            for (String en : List.of("x".repeat(31), "x\n", "x\u200b", "x\u2028", "\ud800")) {
+                var request = new ProductOptionsUpdateRequest(0L, List.of(new Group(1L, "group", List.of(), en)));
+                assertThat(validator.validate(request)).anyMatch(v -> v.getMessage().startsWith("PRODUCT_EDIT_113:"));
+            }
+            for (String en : List.of("x".repeat(51), "x\t", "x\u2029")) {
+                var request = new ProductOptionsUpdateRequest(0L, List.of(new Group(1L, "group", List.of(new Value(2L, "value", en)))));
+                assertThat(validator.validate(request)).anyMatch(v -> v.getMessage().startsWith("PRODUCT_EDIT_114:"));
+            }
+            assertThat(validator.validate(new ProductOptionsUpdateRequest(0L,
+                List.of(new Group(1L, "group", List.of(new Value(2L, "value", "x".repeat(50)))))))).isEmpty();
+        }
+    }
+
+    @Test
     void rejectsBlankAndControlOrFormatNames() {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
             for (String name : List.of(" ", "a\n", "a\u200b")) {

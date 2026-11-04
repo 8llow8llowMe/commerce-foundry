@@ -1026,15 +1026,20 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
 
 #### 기존 옵션 이름·노출 순서 편집 API (#9)
 
-ADMIN `PUT /api/v1/admin/products/{productId}/options`는 `{version, optionGroups:[{optionGroupId,name,values:[{optionValueId,name}]}]}`를 받는다.
+ADMIN `PUT /api/v1/admin/products/{productId}/options`는 `{version, optionGroups:[{optionGroupId,name,nameEn?,values:[{optionValueId,name,nameEn?}]}]}`를 받는다.
+그룹·값의 선택적 영문명 `nameEn`은 각각 30자·50자 이하의 plain text이며 raw 길이·제어/서식 문자 검증 후 strip 한다(`PRODUCT_EDIT_113`, `PRODUCT_EDIT_114`).
+미지정/null은 기존 번역 유지, 빈 문자열·유효한 공백만 입력하면 DB null로 삭제한다. 영문명은 중복을 허용하며 기존 FE의 한국어 편집 요청도 번역을 보존한다.
+등록·값 추가 입력은 그대로이고 신규 행의 번역은 null이다. 어드민 GET/PUT 상세는 locale과 무관하게 한국어 `name`과 nullable 저장 원문 `nameEn`을 함께 반환한다.
 은퇴 행까지 저장된 전체 그룹 ID와 각 그룹의 전체 값 ID가 정확히 일치해야 한다. 누락·중복·새 ID·다른 상품 ID·그룹 이동·정규화 후 이름 중복은 400 `PRODUCT_013`이다.
 누락을 은퇴로 해석하지 않는다. 옵션 없는 상품의 빈 배열과 기존 값 없는 그룹의 빈 값 배열은 허용한다. 그룹 최대 5개·이름 30자, 그룹당 값 최대 50개·이름 50자로 등록과 같다.
 이름은 strip 후 비교하고 제어·서식 문자를 거절한다. 배열 순서가 0부터 시작하는 displayOrder다. version은 필수 0 이상(`PRODUCT_EDIT_101`), 그룹 ID와 값 ID는 필수 양수(`PRODUCT_EDIT_102`, `PRODUCT_EDIT_103`)다.
-숨김 상품도 편집하며 없거나 삭제된 상품은 404 `PRODUCT_001`, 오래된 버전은 동일 값이어도 409 `PRODUCT_010`이다. 동일 이름·순서면 쓰기와 버전 증가를 생략한다.
+숨김 상품도 편집하며 없거나 삭제된 상품은 404 `PRODUCT_001`, 오래된 버전은 동일 값이어도 409 `PRODUCT_010`이다. 보존·삭제를 반영한 이름·영문명·순서가 같으면 쓰기와 버전 증가를 생략한다.
 실제 변경은 부모 버전 CAS를 자식 쓰기 전에 실행한다. DB 유니크 이름 교환은 현재·최종·예약 이름과 충돌하지 않는 임시명으로 주차 후 부분 UPDATE하여 같은 5초 트랜잭션에서 처리한다.
 ID·FK·createdAt·retiredAt과 SKU 조합 키·가격·판매 상태·무게·HS 코드·원가·재고·선점은 유지한다. 옵션 추가·조합 변경·은퇴 처리는 범위 밖이다.
 기존 편집 상세를 반환하며 은퇴 옵션은 어드민에 포함하고 고객에서는 계속 제외한다. internal SKU 조회는 수정된 현재 옵션명을 사용하며 이미 저장된 주문 항목 스냅숏은 바뀌지 않는다.
 감사 행위는 `PRODUCT_OPTIONS_REPLACE`이고 식별자·결과만 기록한다. FE 계약 검토자는 `seonghoho`다.
+고객 상세는 기존 `Accept-Language`/`Vary` 정책으로 그룹·값 각각 en 번역을 선택하며, 번역이 null/blank이면 해당 한국어 이름으로 대체한다.
+공개 DTO의 필드는 그대로이며 `nameEn` 원문은 노출하지 않는다. internal SKU 옵션명은 한국어를 유지한다. FE 번역 입력 UI는 후속 범위다.
 
 #### 옵션 값 · 새 조합 SKU 추가 API (#9 PR-C1)
 
