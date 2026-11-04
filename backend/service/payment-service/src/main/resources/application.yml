@@ -82,6 +82,8 @@ resilience4j:
 
 # 결제 준비 (payment-guide.md "고객 API 계약"). 주문의 결제 기한까지 이보다 적게 남았으면 결제창을 열지 않는다(409 PAYMENT_004) — 토스 인증 뒤 승인 제한도 10분이다
 payment:
+  order-result:
+    pending-after: 5m
   recovery:
     enabled: false
     initial-delay: 1m
