@@ -60,6 +60,10 @@ SSE는 커밋 뒤 현재 인스턴스 연결로 최선 전달한다. 커밋 후 
 
 ## 검증
 
+A4a는 payment의 읽기 전용 [결제 이상 후보 원천 API](payment-observation-guide.md)를 제공한다.
+UNKNOWN 전체와 수동 검토 부분집합은 합산하지 않고, 누락·미래 후보 시각이나 원천 실패를 정상·해소로 간주하지 않는다.
+operations 소비·임계값·주기 수집·알림·억제·해소 연결은 A4a 이후 후속 작업이며 이번 원천 API에는 포함하지 않는다.
+
 A3a(PR #548)는 payment-service의 읽기 전용 [outbox 원천 관측 API](outbox-observation-guide.md)를 제공한다. A3b는 아래의 operations 탐지기를 연결한다.
 
 ## 결제 outbox 지연·해소 관측 (#477 A3b)

@@ -89,6 +89,9 @@ operations-service의 payment outbox 원천 관측 권한(#477 A3a): payment-ser
 `GET /internal/v1/outbox-observations/ready`는 `SERVICE_operations-service`만 허용한다. 미래 예약을 제외한 발행 가능 미발행 건수·최소시각을
 단일 집계로 제공하며, operations 호출자·주기 수집·알림·해소 연결은 후속이다. [관측 계약](outbox-observation-guide.md)을 따른다.
 
+`GET /internal/v1/payment-observations/anomalies`는 operations 전용 결제 이상 후보 여섯 버킷을 단일 집계로 제공한다.
+payment 소유 Processor의 domain 관측값을 paymentobservation Facade가 조합한다. 알림·소비 연결은 후속이며 [관측 계약](payment-observation-guide.md)을 따른다.
+
 순환 호출(order ↔ payment, order ↔ delivery)이 있다. **같은 요청 안에서 왕복하지 않게** 설계한다 —
 A 가 B 를 부르는 처리 안에서 B 가 다시 A 를 부르면 타임아웃이 겹친다.
 
