@@ -119,12 +119,14 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
     @Order(2)
     void fiveThousandFlushedNotificationsAndAllStatesRollBackOnPostFlushFailure() {
         for (boolean existing : List.of(false, true)) {
+            clock.now = NOW;
             jdbc.update("delete from operations.payment_anomaly_alert_state");
             jdbc.update("delete from operations.notification");
             if (existing) {
                 processor.accept(sample(NOW, true), List.of(1L), SETTINGS);
             }
             var before = stateRows();
+            assertThat(before).hasSize(existing ? 5 : 0);
             var noticesBefore = jdbc.queryForList("select * from operations.notification order by id");
             clock.now = NOW.plusSeconds(3600);
             var observation = sample(clock.now, true);
