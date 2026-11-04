@@ -327,6 +327,21 @@ docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) �
 - `app.jar` 는 `.gitignore` 대상이다(`backend/**/app.jar`). 확인이 끝나면 지운다.
 - 정리: `docker compose -p commerce-<module>-dev -f <compose> down` (모듈마다).
 
+### payment inbox 기반 배포 (#308 C3a-1)
+
+이 단계는 회신 도메인과 inbox 저장소만 추가한다. 생산 리스너·소비/결제 게이트·환경변수는 추가하거나 활성화하지 않는다.
+**messaging/relay/cleanup OFF 여부와 무관하게 앱 배포 전** `service/payment-service/src/test/resources/ddl/payment-processed-event.sql`을 적용한다.
+구 DB 기준은 동결된 `payment-schema-pre-c3a-66b5af4f.sql`이며, 운영 스크립트는 신규 inbox와 PK/unique/정리 인덱스 및 기존 payment 두 컬럼 comment만 변경한다.
+
+1. 대상 DB·`payment` 스키마와 `payment.processed_event`·`payment.idx_processed_event_processed_at`의 존재 여부를 카탈로그에서 확인한다.
+   예상치 못한 선행 객체가 있으면 적용 상태를 점검한다. `IF NOT EXISTS`로 덮거나 이미 커밋한 스크립트를 무조건 재실행하지 않는다.
+2. UTF-8 스크립트를 `psql -v ON_ERROR_STOP=1 -f <파일>`로 실행한다. 단일 BEGIN/COMMIT이며 중간 실패는 rollback 후 기존 행·제약·인덱스·신규 객체 유무를 확인하고 재시도한다.
+3. 새 매핑으로 validate하고 기존 payment 값·version·원승인 금액/통화/시각·실패/중단 사유 보존과 inbox 컬럼/unique/인덱스/comment를 확인한다.
+   `ddl-auto=validate`는 inbox 누락 시 기동 실패한다. 운영 `none`은 누락 상태에서 기동할 수 있어도 DDL 선행의 예외가 아니다.
+
+모두 ON이면 기존 core가 outbox 후 inbox를 정리한다. listener OFF와 cleanup OFF를 혼동하지 않는다. 앱 rollback 시 추가 inbox 테이블/행을 자동 DROP하지 않는다.
+이전 앱은 추가 테이블을 무시할 수 있다. 후속 소비 단계의 rollback은 별도 OFF/drain 계획으로 정한다.
+
 ### 주문 결제 복원 의도 fence 배포 (#14 C2a)
 
 소비 게이트 OFF → 기존 consumer의 진행 중 처리 drain → 모든 order 인스턴스에 C2a 적용 순서다. 구 consumer와 혼합 소비하지 않는다.

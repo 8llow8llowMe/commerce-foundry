@@ -39,6 +39,40 @@ import org.junit.jupiter.params.provider.ValueSource;
 class PaymentTest {
 
     @Test
+    void repliesPreserveNormalApprovalAndCancellationAndAreIdempotent() {
+        Payment done = PaymentFixtures.done();
+        for (Payment payment : List.of(done, done.recordCancellation(krw(1_000)), done.recordCancellation(done.amount()))) {
+            Payment rejected = payment.markOrderSyncFailed("ORDER_CANCELED");
+            assertThat(rejected.markOrderSyncFailed("ORDER_CANCELED")).isSameAs(rejected);
+            assertThat(rejected.orderSynced()).isFalse();
+            Payment synced = rejected.markOrderSynced();
+            assertThat(synced.markOrderSynced()).isSameAs(synced);
+            assertThat(synced.markOrderSyncFailed("ORDER_CANCELED")).isSameAs(synced);
+            assertThat(synced.orderSyncFailureCode()).isNull();
+            assertThat(synced.status()).isEqualTo(payment.status());
+            assertThat(synced.amount()).isEqualTo(payment.amount());
+            assertThat(synced.approvedAt()).isEqualTo(payment.approvedAt());
+            assertThat(synced.paymentKey()).isEqualTo(payment.paymentKey());
+            assertThat(synced.version()).isEqualTo(payment.version());
+        }
+    }
+
+    @Test
+    void repliesRejectBothLateApprovalOriginsIncludingTheirCanceledDescendants() {
+        for (Payment late : List.of(PaymentFixtures.lateApproved(), PaymentFixtures.aborted().recordLateApproval(approval(krw(129_000))))) {
+            for (Payment payment : List.of(late, late.recordCancellation(late.amount()))) {
+                assertThatThrownBy(payment::markOrderSynced).isInstanceOf(PaymentTransitionException.class);
+                assertThatThrownBy(() -> payment.markOrderSyncFailed("ORDER_CANCELED")).isInstanceOf(PaymentTransitionException.class);
+            }
+        }
+        Payment ready = PaymentFixtures.ready();
+        Payment waiting = new Payment(ready.id(), ready.orderId(), ready.memberId(), ready.pgOrderId(), ready.gateway(), ready.amount(), ready.orderName(),
+            PaymentStatus.WAITING_FOR_DEPOSIT, null, null, null, null, null, null, null, null, null, false, null, null, null, ready.version());
+        assertThatThrownBy(waiting::markOrderSynced).isInstanceOf(PaymentTransitionException.class);
+        assertThatThrownBy(() -> waiting.markOrderSyncFailed("ORDER_CANCELED")).isInstanceOf(PaymentTransitionException.class);
+    }
+
+    @Test
     void lateApprovalCanOnlyBeFullyCanceledWithoutTakingAnotherActiveOrderSlot() {
         Payment late = PaymentFixtures.lateApproved();
         assertThatThrownBy(() -> late.recordCancellation(krw(1_000)))

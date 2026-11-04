@@ -159,10 +159,10 @@
         'PG 결제창 주문명 (1~100자)';
 
     comment on column payment.payment.order_sync_failure_code is
-        '주문 반영 종결 실패 시 order-service 오류 코드. 반영 전 · 반영 성공이면 null';
+        'order 거절 회신(order-payment-rejected) 사유 코드. 회신 전 · order-paid 수신이면 null';
 
     comment on column payment.payment.order_synced is
-        '결제 완료를 order-service 에 반영했는가. DONE 계열만 true — false 인 DONE 은 재전송 대상 (LATE_APPROVED 는 반영하지 않는다)';
+        'order 회신(order-paid)을 받았는가. DONE 계열만 true — false 는 회신 대기 또는 거절 회신(order_sync_failure_code) (LATE_APPROVED 는 회신 대상 아님)';
 
     comment on column payment.payment.payment_key is
         'PG 결제키 (승인 시작부터). 승인 시작 전이면 null';
@@ -240,6 +240,42 @@
     comment on column payment.payment_webhook_inbox.payment_id is
         '로컬 결제 아이디 (FK: payment.id)';
 
+    create table payment.processed_event (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        consumer_group varchar(200) not null,
+        event_id uuid not null,
+        event_type varchar(100) not null,
+        processed_at timestamp(6) with time zone not null,
+        primary key (id),
+        constraint uk_processed_event_consumer_group_event_id unique (consumer_group, event_id)
+    );
+
+    comment on table payment.processed_event is
+        '처리한 이벤트 기록 (멱등 컨슈머 inbox)';
+
+    comment on column payment.processed_event.id is
+        '처리 기록 아이디 (Snowflake)';
+
+    comment on column payment.processed_event.created_at is
+        '생성 시각';
+
+    comment on column payment.processed_event.updated_at is
+        '수정 시각';
+
+    comment on column payment.processed_event.consumer_group is
+        '컨슈머 그룹 (예: commerce-foundry.prod.payment.order-payment-result)';
+
+    comment on column payment.processed_event.event_id is
+        '이벤트 아이디 (봉투 eventId)';
+
+    comment on column payment.processed_event.event_type is
+        '이벤트 종류 (예: order-paid)';
+
+    comment on column payment.processed_event.processed_at is
+        '처리 시각 — 보존 기간 정리 기준';
+
     create table payment.shedlock (
         name varchar(64) not null,
         lock_until timestamp(6) with time zone not null,
@@ -283,3 +319,6 @@
 
     create index idx_payment_webhook_inbox_state_available_at_id
        on payment.payment_webhook_inbox (state, available_at, id);
+
+    create index idx_processed_event_processed_at
+       on payment.processed_event (processed_at);

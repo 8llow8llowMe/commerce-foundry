@@ -447,6 +447,22 @@ pending 의도는 같은 claim으로 재개하고 전액취소 원천에는 추�
 - **전액 취소** — 거절 회신은 `PaymentCancelPolicy` 훅(기본 로그 · 지표, PR-C 예정)으로 넘기고, 실제 PG 전액 취소와 종결 뒤 승인(LATE_APPROVED)의 `payment-late-approved` 알림은 #15 다.
   돈만 받고 상품이 없는 주문을 남기지 않는다.
 
+### 6-1. payment 회신 저장소 기반 (#308 C3a-1)
+
+정상 DONE 기원의 DONE · PARTIAL_CANCELED · CANCELED는 회신 기록을 허용한다. LATE_APPROVED와 FAILED/ABORTED에서 늦게 승인된 뒤 CANCELED가 된 시도는 거절한다.
+같은 성공·같은 거절 코드는 no-op이며 성공 뒤 늦은 거절은 성공을 덮지 않는다. 원승인 금액·통화·시각과 기존 생성자/DB 제약은 유지한다.
+이 단계에는 생산 회신 Processor·리스너가 없다. payment 저장과 inbox를 묶는 시험은 저장소 계약이며 실제 소비 완료를 뜻하지 않는다.
+
+`payment.processed_event`의 `(consumer_group,event_id)` unique가 동시 중복의 최종 방어다. `record`는 MANDATORY로 업무 tx에 INSERT하며,
+tx 밖 호출은 실패한다. 중복 INSERT나 후속 업무 실패는 같은 tx 전체를 롤백한다. `exists` 선조회만으로 경합을 막지 않는다.
+정리는 `< cutoff`를 `(processed_at,id)` 순으로 batch 제한 조회한 뒤 해당 ID만 bulk 삭제한다. 이전 batch가 커밋된 뒤 실패하면 실패 batch만 롤백되고 다음 주기에 재개한다.
+
+현재 core는 messaging 또는 relay OFF면 relay·cleanup을 모두 정지한다. 둘 ON이고 cleanup OFF면 relay만 가능하며, 모두 ON이면 outbox와 inbox를 정리한다.
+listener OFF는 cleanup OFF가 아니다. **cleanup OFF라도 배포 전 `ddl/payment-processed-event.sql` 적용이 필수**다(`deploy-guide.md` C3a-1 절).
+기본 inbox 보존 7d 이후의 재전달은 inbox가 막지 못한다. C3c 소비 활성화 전에 토픽·DLT 보존/재시도/수동 재처리 창과 후속 도메인 멱등성을 함께 확인한다.
+C3a-2 지표와 기존 #616 A4a 관측 API는 별도 범위이며 #550은 approval-summary다. 기존 관측 API의 의미는 유지한다.
+실제 회신 소비·PG 취소 #579·재대조 #591 및 소비/결제 게이트 활성화는 후속 범위다.
+
 ## 7. 웹훅
 
 수신·영속 inbox·PG 재조회·재시도·수동 확인 및 활성화 절차는 [payment-webhook-guide.md](payment-webhook-guide.md)를 따른다 (#15).

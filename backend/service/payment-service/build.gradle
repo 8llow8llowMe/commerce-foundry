@@ -43,6 +43,19 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-postgresql'
+    // 서비스 배선 시험에서만 단일 실행 락을 대체한다. messaging-core의 런타임 implementation 의존은 노출하지 않는다.
+    testImplementation "net.javacrumbs.shedlock:shedlock-core:${rootProject.ext.shedlockVersion}"
     // 토스 어댑터 테스트 — 가짜 토스 서버로 성공 · 거절 · 타임아웃 · 5xx · 연결 실패를 재현한다 (payment-guide.md §11). Docker 없이 돈다
     testImplementation "org.wiremock:wiremock-standalone:${rootProject.ext.wiremockVersion}"
+}
+
+// CI 로그에서도 구 DB upgrade · 실제 저장소 계약 · cleanup 배선의 메서드별 실행 결과를 확인한다.
+tasks.named('test') {
+    afterTest { descriptor, result ->
+        if (descriptor.className?.endsWith('PaymentProcessedEventUpgradePostgresTest')
+            || descriptor.className?.endsWith('PaymentProcessedEventStorePostgresTest')
+            || descriptor.className?.endsWith('PaymentInboxLifecycleConfigTest')) {
+            logger.lifecycle("C3a-1 critical ${descriptor.className}.${descriptor.name}: ${result.resultType}")
+        }
+    }
 }
