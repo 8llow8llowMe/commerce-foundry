@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -110,6 +111,39 @@ class StockAdminControllerTest {
 
             SecurityEnvelopeAssertions.assertEnvelope(result.getResponse(), SecurityErrorCode.UNAUTHORIZED);
             verifyNoInteractions(stockAdminUseCase);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER"})
+        @DisplayName("재고 조회 · 조정 이력은 INVENTORY_READ 라 ADMIN · OWNER · MANAGER 는 200 이다 (#586)")
+        void inventoryReadersMayRead(MemberRole role) {
+            assertThat(getStocks("1001", role)).hasStatusOk();
+            assertThat(getAdjustments(PATH + "/adjustments", role)).hasStatusOk();
+        }
+
+        @Test
+        @DisplayName("STAFF 는 INVENTORY_READ 가 없어 재고 조회 · 조정 이력이 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#586)")
+        void staffMayNotReadStocks() {
+            SecurityEnvelopeAssertions.assertEnvelope(getStocks("1001", MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(getAdjustments(PATH + "/adjustments", MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(stockAdminUseCase);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+        @DisplayName("재고 조정은 INVENTORY_MANAGE 라 MANAGER · STAFF 는 유효한 본문이어도 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#586)")
+        void adjustRequiresInventoryManage(MemberRole role) {
+            SecurityEnvelopeAssertions.assertEnvelope(patch(VALID_BODY, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(stockAdminUseCase);
+        }
+
+        @Test
+        @DisplayName("OWNER 는 INVENTORY_MANAGE 가 있어 재고 조정이 200 이다 (#586)")
+        void ownerMayAdjust() {
+            given(stockAdminUseCase.adjustStock(any())).willReturn(StockAdminResponse.builder().skuId("1001").stockManaged(true)
+                .availableQuantity(12L).reservedQuantity(0L).updatedAt(Instant.parse("2026-10-18T09:00:00Z")).build());
+
+            assertThat(patch(VALID_BODY, MemberRole.OWNER)).hasStatusOk();
         }
     }
 

@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -84,6 +85,27 @@ class LookAdminControllerTest {
         @DisplayName("토큰이 없으면 401 · SECURITY_001 이고 유스케이스를 부르지 않는다")
         void anonymousIsUnauthorized(String method, String uri) {
             SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.valueOf(method), uri, bodyFor(uri), null).getResponse(), SecurityErrorCode.UNAUTHORIZED);
+            verifyNoInteractions(lookAdminUseCase);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+        @DisplayName("룩 조회는 CATALOG_READ 라 운영자 역할 전부 200 이다 (#586)")
+        void readsAreOpenToEveryOperator(MemberRole role) {
+            assertThat(exchange(HttpMethod.GET, PATH, null, role)).hasStatusOk();
+            assertThat(exchange(HttpMethod.GET, PATH + "/1", null, role)).hasStatusOk();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+        @DisplayName("룩 쓰기는 CATALOG_MANAGE 라 MANAGER · STAFF 는 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#586)")
+        void writesRequireCatalogManage(MemberRole role) {
+            for (String request : List.of("POST " + PATH, "PUT " + PATH + "/1", "DELETE " + PATH + "/1", "PATCH " + PATH + "/order")) {
+                String[] methodAndUri = request.split(" ");
+                SecurityEnvelopeAssertions.assertEnvelope(
+                    exchange(HttpMethod.valueOf(methodAndUri[0]), methodAndUri[1], bodyFor(methodAndUri[1]), role).getResponse(), SecurityErrorCode.FORBIDDEN
+                );
+            }
             verifyNoInteractions(lookAdminUseCase);
         }
     }
