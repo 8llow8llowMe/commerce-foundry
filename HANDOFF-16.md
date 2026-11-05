@@ -46,8 +46,7 @@ git rebase origin/develop
 product-service · payment-service 수정 금지, #308 C3b(payment 회신 컨슈머)와 겹치지 않게.
 ```
 
-architect 에게 받을 것: 현재 고객 취소 API 범위(결제 전만인지), payment 취소 internal 계약, order → payment 취소 호출 경로,
-재고 복원 경로, 상태 전이 표(order-flow-guide.md), 배송비 차감 정책 문서 여부, 30파일 이내 PR 분할안, ★ 사용자 결정 항목.
+설계는 끝났다(HANDOFF-16-design.md). 구현은 PR-2a-1(도메인·DDL·payment 취소 Feign/포트·환불 정책) → PR-2a-2(흐름·API·스케줄러·문서) 순서로 한다.
 
 ## 결정 대기 항목
 
