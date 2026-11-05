@@ -6,7 +6,7 @@
 판매 중지·은퇴를 포함한 legacy SKU의 기준통화 추가금행은 필수이며 신규 SKU도 같은 트랜잭션/부모 CAS에서 생성해야 한다.
 정확한 새 경로·필드·오류 코드는 B2 승인 명세에서 정하며 현재 API를 이 문서만으로 변경하지 않는다.
 
-`PUT /api/v1/admin/products/{productId}/skus`는 ADMIN access JWT의 memberId를 행위자로 사용한다.
+`PUT /api/v1/admin/products/{productId}/skus`는 운영자 access JWT(`AdminAuthority.CATALOG_MANAGE`)의 memberId를 행위자로 사용한다.
 기존 SKU 전체의 추가금·판매 상태·배송 무게·HS 코드를 한 트랜잭션으로 교체하고
 `200 Response<ProductDetailAdminResponse>`를 반환한다. 숨김 상품도 편집할 수 있으며 삭제 상품은 404다.
 응답은 기존 편집용 상세 조회와 동일하여 상품·SKU·옵션 아이디가 문자열이고 판매 상태는 code/name/description 메타데이터다.

@@ -491,7 +491,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 ### 2-5. 어드민 카테고리 관리 (product-service, #9)
 
-모두 `hasRole('ADMIN')` 이다. 고객 트리(`GET /api/v1/categories` — 숨긴 카테고리는 하위까지 빠진다)와 DTO 를 공유하지 않는다. 경로는 `/api/v1/admin/categories` (아래 `…`).
+조회(GET)는 `AdminAuthority.CATALOG_READ`, 생성 · 수정 · 삭제는 `CATALOG_MANAGE` 다(`security-guide.md` §3-1). 고객 트리(`GET /api/v1/categories` — 숨긴 카테고리는 하위까지 빠진다)와 DTO 를 공유하지 않는다. 경로는 `/api/v1/admin/categories` (아래 `…`).
 
 | API | 성공 | 주요 오류 |
 |-----|------|-----------|
@@ -532,7 +532,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 ### 2-6. 어드민 상품 목록 (product-service, #9)
 
-`GET /api/v1/admin/products` — `hasRole('ADMIN')`. 고객 목록(`GET /api/v1/products` — 숨김 제외 `SliceResponse`)과 DTO 를 공유하지 않는다.
+`GET /api/v1/admin/products` — `AdminAuthority.CATALOG_READ`. 고객 목록(`GET /api/v1/products` — 숨김 제외 `SliceResponse`)과 DTO 를 공유하지 않는다.
 삭제(soft delete, §2-13)된 상품은 **늘 뺀다** — 어떤 파라미터로도 볼 수 없다(필터 없음).
 
 | 파라미터 | 값 | 오류 |
@@ -565,7 +565,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 #### 어드민 상품 상세
 
-`GET /api/v1/admin/products/{productId}` — `hasRole('ADMIN')`. 편집 화면이 저장된 설정을 읽는 API 다. 고객 상세 DTO 와 나눈다.
+`GET /api/v1/admin/products/{productId}` — `AdminAuthority.CATALOG_READ`. 편집 화면이 저장된 설정을 읽는 API 다. 고객 상세 DTO 와 나눈다.
 
 - 숨김 상품은 포함하고, 없거나 삭제된 상품은 404 `PRODUCT_001` 이다. 경로 아이디는 양수여야 한다(400 `PRODUCT_105`), 숫자 변환 실패는 `PRODUCT_198` 이다.
 - 상품 필드: `productId`, `categoryId`, `categoryIds`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`, `salePrice`, `listPrice`,
@@ -586,7 +586,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 #### 어드민 상품 등록 (#9 E1)
 
-`POST /api/v1/admin/products` — `hasRole('ADMIN')`. 201 `{product: 위 어드민 상세와 같은 모양, descriptionHtmlSanitized}`. 등록한 어드민은 토큰의 memberId 로
+`POST /api/v1/admin/products` — `AdminAuthority.CATALOG_MANAGE`. 201 `{product: 위 어드민 상세와 같은 모양, descriptionHtmlSanitized}`. 등록한 어드민은 토큰의 memberId 로
 `product.created_by_member_id` 에 남는다(본문으로 받지 않는다, 운영자 온보딩 #357 이 읽는다).
 
 - **이 단계의 범위** — 이미지 첨부(#9 F2)는 아래 계약으로 받는다. 맞춤 제작 설정 `customOrder` 는 선택이고 규칙은 아래 `/custom-order` 와 같다(생략하면 꺼짐).
@@ -637,7 +637,7 @@ return ResponseEntity.ok().body(Response.success(response));
 
 #### 어드민 상품 이미지 업로드 발급 (#9 F1)
 
-`POST /api/v1/admin/products/image-uploads` — `hasRole('ADMIN')`. 본문 `{contentType, contentLength}` → 201 `{uploadKey, uploadUrl, method, headers, expiresAt}`.
+`POST /api/v1/admin/products/image-uploads` — `AdminAuthority.CATALOG_MANAGE`. 본문 `{contentType, contentLength}` → 201 `{uploadKey, uploadUrl, method, headers, expiresAt}`.
 D1(presigned PUT) — 브라우저가 `uploadUrl` 에 `method`(PUT) · `headers`(서명에 든 Content-Type 등) 그대로 파일을 **스토리지에 직접** 올린다. 게이트웨이(2MB 상한) ·
 BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대신한다 — #9 MinIO 체크리스트).
 
@@ -652,7 +652,7 @@ BFF 를 지나지 않아 라우트 예외가 필요 없다(버킷 CORS 가 대�
 
 #### 정지 이미지 전체 편집 (#9 F3)
 
-ADMIN `PUT /api/v1/admin/products/{productId}/images`는 `{version, images:[{imageId?, uploadKey?, imageType, altText?}]}`로 정지 이미지를 전체 교체한다.
+`AdminAuthority.CATALOG_MANAGE` `PUT /api/v1/admin/products/{productId}/images`는 `{version, images:[{imageId?, uploadKey?, imageType, altText?}]}`로 정지 이미지를 전체 교체한다.
 version은 필수 0 이상(`PRODUCT_EDIT_101`), images는 필수·최대 8장·빈 배열 허용이다. 기존 행은 imageId, 신규 업로드는 uploadKey 중 정확히 하나를 보낸다.
 유형은 THUMBNAIL/GALLERY이고 대표는 한 장까지다. 중복 ID/키·다른 상품 ID·VIDEO ID·XOR 위반은 400 `PRODUCT_018`, 필드 형식/대체 텍스트는 `PRODUCT_019`다.
 모든 구성과 업로드 소유권(`PRODUCT_032`)을 외부 복사 전에 검사한다. URL·storageKey·치수 입력은 받지 않는다.
@@ -684,7 +684,7 @@ version은 필수 0 이상(`PRODUCT_EDIT_101`), images는 필수·최대 8장·�
 
 #### SKU별 품절 임박 기준과 조회 (#229 PR-1)
 
-`GET/PUT/DELETE /api/v1/admin/stocks/{skuId}/low-stock-policy`와 `GET /api/v1/admin/stocks/low?page=0&size=20`은 ADMIN 전용이다.
+`GET/PUT/DELETE /api/v1/admin/stocks/{skuId}/low-stock-policy`와 `GET /api/v1/admin/stocks/low?page=0&size=20`는 조회(GET)가 `AdminAuthority.INVENTORY_READ`, 설정 · 해제가 `INVENTORY_MANAGE` 다(`STAFF` 는 조회도 403).
 PUT은 `{thresholdQuantity}`(필수 long, 0 이상)를 받고 정책만 교체한다. GET은 `{skuId,enabled,thresholdQuantity,updatedAt}`이며,
 미설정은 `enabled:false`와 nullable 칸 null이다. DELETE는 미설정도 200이다. 없는 SKU·삭제 상품은 404 `STOCK_ALERT_001`, 잠금 경합은 409 `STOCK_ALERT_002`다.
 목록은 `PageResponse`(size 1~100)이며 설정된 SKU 중 판매 가능 수량이 기준 이하인 항목만 낸다. 무제한·삭제 상품은 제외하고 숨김·판매 중지는 상태와 함께 포함한다.
@@ -754,7 +754,7 @@ FE는 code로 분기하고 name/description을 표시한다(계약 검토자 `se
 
 ### 2-9. 메인 전시 (product-service, #63)
 
-전시 · 룩 공용 이미지 업로드(#508): ADMIN `POST /api/v1/admin/displays/image-uploads`는
+전시 · 룩 공용 이미지 업로드(#508): `AdminAuthority.CATALOG_MANAGE` `POST /api/v1/admin/displays/image-uploads`는
 `{contentType, contentLength}`를 받아 201 `{uploadKey, uploadUrl, method, headers, expiresAt}`를 반환한다.
 반환한 헤더로 PUT한 뒤 같은 관리자가 `POST /api/v1/admin/displays/image-uploads/{uploadKey}/confirm`(본문 없음)을 호출하면
 200 `{publicUrl, contentType, contentLength}`를 받는다. 모두 Response 봉투이며 성공 응답은 no-store다.
@@ -769,13 +769,13 @@ JPEG · PNG · WebP, 1바이트~10MiB만 허용한다. 업로드 키는 canonica
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
 | `GET /api/v1/displays/main` | `permitAll()` | 200 노출 중인 섹션 목록 · `Cache-Control: max-age=60, public` | — |
-| `POST /api/v1/admin/displays/preview` | ADMIN | 200 현재 노출 가능한 초안 · 고객 메인과 같은 JSON · `Cache-Control: no-store` | 400 `PRODUCT_047~054` · `DISPLAY_001~002` · 검증 `PRODUCT_140~168` · `DISPLAY_101~102` · 503 `PRODUCT_055` |
-| `GET /api/v1/admin/displays/sections` | ADMIN | 200 전체 섹션(비노출 · 기간 밖 포함, 배열 순서 = 노출 순서, `liveStatus` 파생) | — |
-| `GET /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 | 404 `PRODUCT_046` |
-| `POST /api/v1/admin/displays/sections` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `PRODUCT_047~054` · `DISPLAY_001~002` · `DISPLAY_101~102` · 409 `PRODUCT_056` · `PRODUCT_058` · 503 `PRODUCT_055` |
-| `PUT /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 — 섹션 필드 · 아이템 전체 교체 | 위와 같음 + 404 `PRODUCT_046` |
-| `DELETE /api/v1/admin/displays/sections/{sectionId}` | ADMIN | 200 — 아이템도 지운다. 남은 순서를 다시 매기지 않는다 | 404 `PRODUCT_046` · 409 `PRODUCT_058` |
-| `PATCH /api/v1/admin/displays/sections/order` | ADMIN | 200 새 순서의 전체 목록 — 본문 `{sectionIds}` 는 현재 전체 집합과 같아야 한다 | 400 `PRODUCT_057` · 409 `PRODUCT_058` |
+| `POST /api/v1/admin/displays/preview` | `CATALOG_MANAGE` | 200 현재 노출 가능한 초안 · 고객 메인과 같은 JSON · `Cache-Control: no-store` | 400 `PRODUCT_047~054` · `DISPLAY_001~002` · 검증 `PRODUCT_140~168` · `DISPLAY_101~102` · 503 `PRODUCT_055` |
+| `GET /api/v1/admin/displays/sections` | `CATALOG_READ` | 200 전체 섹션(비노출 · 기간 밖 포함, 배열 순서 = 노출 순서, `liveStatus` 파생) | — |
+| `GET /api/v1/admin/displays/sections/{sectionId}` | `CATALOG_READ` | 200 | 404 `PRODUCT_046` |
+| `POST /api/v1/admin/displays/sections` | `CATALOG_MANAGE` | 201 — 순서는 마지막 + 1 | 400 `PRODUCT_047~054` · `DISPLAY_001~002` · `DISPLAY_101~102` · 409 `PRODUCT_056` · `PRODUCT_058` · 503 `PRODUCT_055` |
+| `PUT /api/v1/admin/displays/sections/{sectionId}` | `CATALOG_MANAGE` | 200 — 섹션 필드 · 아이템 전체 교체 | 위와 같음 + 404 `PRODUCT_046` |
+| `DELETE /api/v1/admin/displays/sections/{sectionId}` | `CATALOG_MANAGE` | 200 — 아이템도 지운다. 남은 순서를 다시 매기지 않는다 | 404 `PRODUCT_046` · 409 `PRODUCT_058` |
+| `PATCH /api/v1/admin/displays/sections/order` | `CATALOG_MANAGE` | 200 새 순서의 전체 목록 — 본문 `{sectionIds}` 는 현재 전체 집합과 같아야 한다 | 400 `PRODUCT_057` · 409 `PRODUCT_058` |
 
 - **저장 전 미리보기(#340)**: 본문 `{sections: [DisplaySectionUpsertRequest, ...]}` 은 전체 초안이며 최대 50개, 빈 배열을 허용한다.
   `sections` 누락 · null 은 400 `PRODUCT_166`, 50개 초과는 `PRODUCT_167`, null 원소는 `PRODUCT_168`이다. 중첩 요청은 기존 `PRODUCT_140~165` 검증을 그대로 쓴다.
@@ -836,13 +836,13 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
-| `GET /api/v1/admin/size-chart-templates?page=&size=` | ADMIN | 200 `PageResponse` 요약 `{templateId, name, baseUnit, columnCount}` — 최신순(아이디 내림차순). page/size 기본 0/20, size 1~100 | 400 `PRODUCT_101` · `PRODUCT_102` |
-| `GET /api/v1/admin/size-chart-templates/{templateId}` | ADMIN | 200 항목 포함 | 404 `PRODUCT_059` |
-| `POST /api/v1/admin/size-chart-templates` | ADMIN | 201 생성한 템플릿 | 400 `PRODUCT_060` · `PRODUCT_061` · `PRODUCT_100` · `PRODUCT_170~182` |
-| `PUT /api/v1/admin/size-chart-templates/{templateId}` | ADMIN | 200 전체 교체 | 404 `PRODUCT_059` · 409 `PRODUCT_062` · `PRODUCT_072` · 400 `PRODUCT_060` · `PRODUCT_061` · `PRODUCT_071` |
-| `DELETE /api/v1/admin/size-chart-templates/{templateId}` | ADMIN | 200 `dataBody: null` — 항목까지 행 삭제 | 404 `PRODUCT_059` · 409 `PRODUCT_063` · `PRODUCT_072` |
-| `GET /api/v1/admin/products/{productId}/size-chart` | ADMIN | 200 저장 값. 숨긴 상품 포함. 표가 없으면 `dataBody: null` | 404 `PRODUCT_064` |
-| `PUT /api/v1/admin/products/{productId}/size-chart` | ADMIN | 200 전체 교체(없으면 생성). 값은 저장 단위 그대로 | 404 `PRODUCT_064` · 400 `PRODUCT_065~070` · `PRODUCT_183~197` · 409 `PRODUCT_072` · `PRODUCT_073` |
+| `GET /api/v1/admin/size-chart-templates?page=&size=` | `CATALOG_READ` | 200 `PageResponse` 요약 `{templateId, name, baseUnit, columnCount}` — 최신순(아이디 내림차순). page/size 기본 0/20, size 1~100 | 400 `PRODUCT_101` · `PRODUCT_102` |
+| `GET /api/v1/admin/size-chart-templates/{templateId}` | `CATALOG_READ` | 200 항목 포함 | 404 `PRODUCT_059` |
+| `POST /api/v1/admin/size-chart-templates` | `CATALOG_MANAGE` | 201 생성한 템플릿 | 400 `PRODUCT_060` · `PRODUCT_061` · `PRODUCT_100` · `PRODUCT_170~182` |
+| `PUT /api/v1/admin/size-chart-templates/{templateId}` | `CATALOG_MANAGE` | 200 전체 교체 | 404 `PRODUCT_059` · 409 `PRODUCT_062` · `PRODUCT_072` · 400 `PRODUCT_060` · `PRODUCT_061` · `PRODUCT_071` |
+| `DELETE /api/v1/admin/size-chart-templates/{templateId}` | `CATALOG_MANAGE` | 200 `dataBody: null` — 항목까지 행 삭제 | 404 `PRODUCT_059` · 409 `PRODUCT_063` · `PRODUCT_072` |
+| `GET /api/v1/admin/products/{productId}/size-chart` | `CATALOG_READ` | 200 저장 값. 숨긴 상품 포함. 표가 없으면 `dataBody: null` | 404 `PRODUCT_064` |
+| `PUT /api/v1/admin/products/{productId}/size-chart` | `CATALOG_MANAGE` | 200 전체 교체(없으면 생성). 값은 저장 단위 그대로 | 404 `PRODUCT_064` · 400 `PRODUCT_065~070` · `PRODUCT_183~197` · 409 `PRODUCT_072` · `PRODUCT_073` |
 | `GET /api/v1/products/{productId}/size-chart?unit=` | `permitAll()` | 200. `unit` 생략 시 저장 단위. `unit=CM\|INCH` 이면 그 단위로 바꾼 값. 표가 없으면 `dataBody: null` | 404 `PRODUCT_001`(없거나 숨긴 상품) · 400 `PRODUCT_198`(unit) |
 
 - **템플릿**: `{name, baseUnit, columns:[{name, description?, displayOrder}]}`. 항목 1~20. 이름 1~50, 항목 이름 1~30, 설명 200(nullable), `displayOrder` 0 이상.
@@ -882,12 +882,12 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 | `GET /api/v1/looks?page=&size=` | `permitAll()` | 200 `SliceResponse` `{contents:[{lookId, title, image, products}], hasNext}` — 보이는 룩, 노출 순서. page/size 기본 0/20, size 1~100 · `Cache-Control: max-age=60, public` | 400 `PRODUCT_101` · `PRODUCT_102` · `PRODUCT_198` |
 | `GET /api/v1/looks/{lookId}` | `permitAll()` | 200 `{lookId, title, description, image, products}` · 같은 캐시 | 404 `LOOK_001`(없음 · 숨김 · 플래그 꺼짐) · 400 `LOOK_118` · `PRODUCT_198`(숫자 아님) |
 | `GET /api/v1/products/{productId}/looks` | `permitAll()` | 200 `{looks:[...목록 항목과 같은 모양]}` — 상품이 든 보이는 룩 전체, 노출 순서 · 같은 캐시 | 404 `PRODUCT_001`(없거나 숨긴 상품, 플래그보다 먼저) · 400 `PRODUCT_198`(숫자 아님) |
-| `GET /api/v1/admin/looks` | ADMIN | 200 전체(숨김 포함, 최대 100개, 배열 순서 = 노출 순서) `{looks:[...]}` | — |
-| `GET /api/v1/admin/looks/{lookId}` | ADMIN | 200 | 404 `LOOK_001` · 400 `LOOK_118` |
-| `POST /api/v1/admin/looks` | ADMIN | 201 — 순서는 마지막 + 1 | 400 `LOOK_003~005` · `LOOK_009` · `LOOK_101~117` · 409 `LOOK_002` · `LOOK_008` · 503 `LOOK_006` |
-| `PUT /api/v1/admin/looks/{lookId}` | ADMIN | 200 — 룩 칸 · 구성 상품 전체 교체(순서 그대로) | 위와 같음 + 404 `LOOK_001` · 400 `LOOK_118`(경로) |
-| `DELETE /api/v1/admin/looks/{lookId}` | ADMIN | 200 `dataBody: null` — 구성 상품도 지운다. 남은 순서를 다시 매기지 않는다 | 404 `LOOK_001` · 400 `LOOK_118`(경로) · 409 `LOOK_008` |
-| `PATCH /api/v1/admin/looks/order` | ADMIN | 200 새 순서의 전체 목록 — 본문 `{lookIds}` 는 현재 전체 집합과 같아야 한다 | 400 `LOOK_007` · `LOOK_119~122` · 409 `LOOK_008` |
+| `GET /api/v1/admin/looks` | `CATALOG_READ` | 200 전체(숨김 포함, 최대 100개, 배열 순서 = 노출 순서) `{looks:[...]}` | — |
+| `GET /api/v1/admin/looks/{lookId}` | `CATALOG_READ` | 200 | 404 `LOOK_001` · 400 `LOOK_118` |
+| `POST /api/v1/admin/looks` | `CATALOG_MANAGE` | 201 — 순서는 마지막 + 1 | 400 `LOOK_003~005` · `LOOK_009` · `LOOK_101~117` · 409 `LOOK_002` · `LOOK_008` · 503 `LOOK_006` |
+| `PUT /api/v1/admin/looks/{lookId}` | `CATALOG_MANAGE` | 200 — 룩 칸 · 구성 상품 전체 교체(순서 그대로) | 위와 같음 + 404 `LOOK_001` · 400 `LOOK_118`(경로) |
+| `DELETE /api/v1/admin/looks/{lookId}` | `CATALOG_MANAGE` | 200 `dataBody: null` — 구성 상품도 지운다. 남은 순서를 다시 매기지 않는다 | 404 `LOOK_001` · 400 `LOOK_118`(경로) · 409 `LOOK_008` |
+| `PATCH /api/v1/admin/looks/order` | `CATALOG_MANAGE` | 200 새 순서의 전체 목록 — 본문 `{lookIds}` 는 현재 전체 집합과 같아야 한다 | 400 `LOOK_007` · `LOOK_119~122` · 409 `LOOK_008` |
 
 - **본문**: `{title, description?, image:{url, width?, height?, altText?}, visible, productIds:[...]}`. 제목 1~100, 설명 1000(개행 · 탭 허용), 주소 500,
   대체 텍스트 200, 크기는 양수. `productIds` 는 1~20개이고 **배열 순서가 구성 순서**다. 아이디는 문자열로 보내도 된다.
@@ -929,9 +929,9 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
-| `GET /api/v1/admin/skus/{skuId}/costs` | ADMIN | 200 `{skuId, costs:[항목]}` — 지금 적용되는 유형별 원가, GOODS → PACKAGING 순 | 404 `PRODUCT_002` · 400 `SKU_COST_110` |
-| `GET /api/v1/admin/skus/{skuId}/costs/histories?costType=&page=&size=` | ADMIN | 200 `PageResponse<항목>` — 적용 시작 내림차순 · 아이디 내림차순 고정. page/size 기본 0/20, size 1~100 | 404 `PRODUCT_002` · 400 `PRODUCT_101` · `102` · `198`(costType) · `SKU_COST_110` |
-| `POST /api/v1/admin/skus/{skuId}/costs` | ADMIN | 201 추가한 항목 | 404 `PRODUCT_002` · 400 `SKU_COST_001` · `PRODUCT_100` · `SKU_COST_101~110` · 409 `SKU_COST_002~006` |
+| `GET /api/v1/admin/skus/{skuId}/costs` | `COST_READ` | 200 `{skuId, costs:[항목]}` — 지금 적용되는 유형별 원가, GOODS → PACKAGING 순 | 404 `PRODUCT_002` · 400 `SKU_COST_110` |
+| `GET /api/v1/admin/skus/{skuId}/costs/histories?costType=&page=&size=` | `COST_READ` | 200 `PageResponse<항목>` — 적용 시작 내림차순 · 아이디 내림차순 고정. page/size 기본 0/20, size 1~100 | 404 `PRODUCT_002` · 400 `PRODUCT_101` · `102` · `198`(costType) · `SKU_COST_110` |
+| `POST /api/v1/admin/skus/{skuId}/costs` | `COST_MANAGE` | 201 추가한 항목 | 404 `PRODUCT_002` · 400 `SKU_COST_001` · `PRODUCT_100` · `SKU_COST_101~110` · 409 `SKU_COST_002~006` |
 
 - **항목**: `{costId, costType{code,name,description}, amount{amount,currency}, effectiveFrom, reason, adminMemberId, createdAt}`. `createdAt` 은 기록 시각, `effectiveFrom` 은 적용 시작(포함)이다.
 - **본문**: `{costType, amount:{amount,currency}, effectiveFrom?, reason}`. `costType` 은 `GOODS`(매입 · 제작 원가) · `PACKAGING`(포장 변동비)다.
@@ -976,7 +976,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 
 #### 어드민 상품 삭제 API (#9 E2 삭제)
 
-- `DELETE /api/v1/admin/products/{productId}`는 ADMIN 전용이다. 본문·버전 파라미터 없이 현재 저장된 상품을 삭제하며 200 `dataBody: null`을 반환한다.
+- `DELETE /api/v1/admin/products/{productId}`는 `AdminAuthority.CATALOG_MANAGE` 다. 본문·버전 파라미터 없이 현재 저장된 상품을 삭제하며 200 `dataBody: null`을 반환한다.
   상품 아이디는 양수(400 `PRODUCT_105`), 숫자 변환 실패는 400 `PRODUCT_198`, 없는 상품은 404 `PRODUCT_001`이다. 익명은 401, CUSTOMER는 403이다.
 - 이미 삭제된 상품은 200이며 삭제 시각·수정 시각·버전을 다시 쓰지 않는다. 숨김·판매 종료 상품도 삭제할 수 있다. 복구 API는 없다.
 - JWT 관리자 ID로 `PRODUCT_DELETE` 감사를 남긴다. 대상은 `product:<id>`이며 성공·업무 실패·롤백 결과를 커밋 이후 기록한다. 요청 검증·인증·인가 실패는 기록하지 않는다.
@@ -990,13 +990,13 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 
 #### 어드민 상품 기본 정보 수정 API (#9 후속)
 
-- `PUT /api/v1/admin/products/{productId}/header`는 ADMIN 전용이며 `version`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`과 선택적 `nameEn`, `summaryEn`, `descriptionHtmlEn`을 받는다. 기본 문구는 전체 교체하고 영문 문구는 빠지거나 null이면 기존 값을 유지한다(기존 FE 호환). 영문 값을 지우려면 빈 문자열을 보낸다. 영문 입력은 등록 뒤 이 API에서 추가한다. 응답은 영문 문구를 포함한 `product`(어드민 상세 스냅숏)와 두 HTML 정제 결과를 합친 `descriptionHtmlSanitized`다.
+- `PUT /api/v1/admin/products/{productId}/header`는 `AdminAuthority.CATALOG_MANAGE` 이며 `version`, `name`, `summary`, `descriptionHtml`, `saleStatus`, `visible`과 선택적 `nameEn`, `summaryEn`, `descriptionHtmlEn`을 받는다. 기본 문구는 전체 교체하고 영문 문구는 빠지거나 null이면 기존 값을 유지한다(기존 FE 호환). 영문 값을 지우려면 빈 문자열을 보낸다. 영문 입력은 등록 뒤 이 API에서 추가한다. 응답은 영문 문구를 포함한 `product`(어드민 상세 스냅숏)와 두 HTML 정제 결과를 합친 `descriptionHtmlSanitized`다.
 - 버전은 직전 어드민 상세 조회에서 얻은 값을 보낸다. 불일치·동시 merge 충돌은 409 `PRODUCT_010`, 없거나 삭제된 상품은 404 `PRODUCT_001`이다. 상세 HTML은 등록과 같은 허용 목록으로 정제한다.
 - 카테고리·가격·프리오더·맞춤 입력·옵션·SKU·이미지·재고·선점은 이 API에서 수정하지 않는다. 카테고리 연결을 바꾸지 않아 카테고리 행 잠금은 필요 없다. 수정 트랜잭션은 5초이며 `PRODUCT_UPDATE` 감사를 남긴다. #20에서 `product.name_en`, `summary_en`, `description_html_en` nullable 컬럼을 추가한다. FE는 수정 후 반환된 버전과 정제 경고를 사용한다.
 
 #### 어드민 상품 가격 수정 API (#9 후속)
 
-`PUT /api/v1/admin/products/{productId}/pricing` 은 ADMIN 전용이다. 본문은 `{version, salePrice: {amount, currency}, listPrice?: {amount, currency}}`다.
+`PUT /api/v1/admin/products/{productId}/pricing` 은 `AdminAuthority.CATALOG_MANAGE` 다. 본문은 `{version, salePrice: {amount, currency}, listPrice?: {amount, currency}}`다.
 `version`은 필수 0 이상(`PRODUCT_EDIT_101`), 판매가는 필수(`PRODUCT_084`)이며 금액은 등록과 같은 0~100000000 최소 화폐 단위다.
 정가를 생략하거나 null로 보내면 기존 정가를 삭제한다. 정가가 있으면 판매가와 통화가 같고 판매가보다 커야 한다.
 현재 상품의 통화를 유지한다(기존 USD 상품도 편집 가능). 모든 SKU 추가금의 통화가 판매가와 같아야 하며, 판매중 SKU가 있으면 그중 추가금 0인 SKU가 하나 이상이어야 한다.
@@ -1012,7 +1012,7 @@ Idempotency-Key 는 없다(같은 시작 시각의 재전송은 유니크 키가
 
 #### 어드민 상품 카테고리 수정 API (#9 후속)
 
-`PUT /api/v1/admin/products/{productId}/categories` 는 ADMIN 전용이며 대표 · 진열 카테고리를 전체 교체한다.
+`PUT /api/v1/admin/products/{productId}/categories` 는 `AdminAuthority.CATALOG_MANAGE` 이며 대표 · 진열 카테고리를 전체 교체한다.
 요청은 `{version: 0, categoryId: 100, categoryIds: [100, 200]}` 다. version은 필수인 0 이상 정수,
 version 누락 · 음수는 400 `PRODUCT_EDIT_101`이다(PRODUCT 검증 1xx 소진으로 편집 검증 접두어를 분리한다).
 categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소는 null 아닌 양수)이다.
@@ -1029,7 +1029,7 @@ categoryId는 필수 양수, categoryIds는 필수 배열(최대 20개, 원소�
 
 #### 기존 옵션 이름·노출 순서 편집 API (#9)
 
-ADMIN `PUT /api/v1/admin/products/{productId}/options`는 `{version, optionGroups:[{optionGroupId,name,nameEn?,values:[{optionValueId,name,nameEn?}]}]}`를 받는다.
+`AdminAuthority.CATALOG_MANAGE` `PUT /api/v1/admin/products/{productId}/options`는 `{version, optionGroups:[{optionGroupId,name,nameEn?,values:[{optionValueId,name,nameEn?}]}]}`를 받는다.
 그룹·값의 선택적 영문명 `nameEn`은 각각 30자·50자 이하의 plain text이며 raw 길이·제어/서식 문자 검증 후 strip 한다(`PRODUCT_EDIT_113`, `PRODUCT_EDIT_114`).
 미지정/null은 기존 번역 유지, 빈 문자열·유효한 공백만 입력하면 DB null로 삭제한다. 영문명은 중복을 허용하며 기존 FE의 한국어 편집 요청도 번역을 보존한다.
 등록·값 추가 입력은 그대로이고 신규 행의 번역은 null이다. 어드민 GET/PUT 상세는 locale과 무관하게 한국어 `name`과 nullable 저장 원문 `nameEn`을 함께 반환한다.
@@ -1046,7 +1046,7 @@ ID·FK·createdAt·retiredAt과 SKU 조합 키·가격·판매 상태·무게·H
 
 #### 옵션 값 · 새 조합 SKU 추가 API (#9 PR-C1)
 
-ADMIN `POST /api/v1/admin/products/{productId}/skus` 는 `{version, newOptionValues?:[{optionGroupId, name}], skus:[{optionValues[], additionalPrice{amount,currency}, saleStatus,
+`AdminAuthority.CATALOG_MANAGE` `POST /api/v1/admin/products/{productId}/skus` 는 `{version, newOptionValues?:[{optionGroupId, name}], skus:[{optionValues[], additionalPrice{amount,currency}, saleStatus,
 weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 과 편집용 상세를 돌려준다. 기존 옵션 · SKU · 재고 · 선점 · 원가 · 주문 스냅숏은 바꾸지 않고 새 행만 넣는다.
 
 - **새 옵션(그룹)은 받지 않는다** — 그룹이 늘면 기존 SKU 조합이 모두 맞지 않는다. 구조를 바꾸려면 새 상품으로 등록한다(#9 PR-C 권장안).
@@ -1063,7 +1063,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 #### 맞춤 제작 설정 전체 교체 API (#9 PR-B)
 
-ADMIN `PUT /api/v1/admin/products/{productId}/custom-order` 는 `{version, enabled, notice?, leadTimeDays?, fields:[{fieldKey, label, inputType, unit?, required, minValue?, maxValue?, stepValue?, helpText?}]}` 를 받고
+`AdminAuthority.CATALOG_MANAGE` `PUT /api/v1/admin/products/{productId}/custom-order` 는 `{version, enabled, notice?, leadTimeDays?, fields:[{fieldKey, label, inputType, unit?, required, minValue?, maxValue?, stepValue?, helpText?}]}` 를 받고
 편집용 상세를 돌려준다. 등록 본문의 `customOrder` 도 `version` 을 뺀 같은 모양 · 같은 규칙이다(생략하면 맞춤 제작 꺼짐 · 항목 없음).
 
 - **항목은 키로 구분한다** — 주문 · 장바구니는 맞춤 입력을 `fieldKey` 와 값으로만 남긴다(`order_item_custom_option`, `order-flow-guide.md` §2-2 4번).
@@ -1082,7 +1082,7 @@ ADMIN `PUT /api/v1/admin/products/{productId}/custom-order` 는 `{version, enabl
 
 #### 옵션 · 옵션 값 은퇴 API (#9 PR-C2)
 
-ADMIN `POST /api/v1/admin/products/{productId}/option-retirements` 는 `{version, optionGroupIds?[], optionValueIds?[]}`(아이디는 숫자 또는 십진수 문자열)를 받고 200 과 편집용 상세를 돌려준다.
+`AdminAuthority.CATALOG_MANAGE` `POST /api/v1/admin/products/{productId}/option-retirements` 는 `{version, optionGroupIds?[], optionValueIds?[]}`(아이디는 숫자 또는 십진수 문자열)를 받고 200 과 편집용 상세를 돌려준다.
 
 - **은퇴는 지우기가 아니다** — `retired_at` 만 채운다. 옵션 · SKU · 재고 · 선점 · 원가 행과 지난 주문 · 장바구니의 옵션명은 남는다. 은퇴 되돌리기는 v1 에 없다(#9 PR-C 권장안).
 - **판매 종료가 함께 간다** — 은퇴한 값(은퇴한 옵션의 값 포함)을 하나라도 쓰는 판매중 SKU 는 같은 트랜잭션에서 `STOP_SELLING` 이 된다. 옵션(그룹)을 은퇴하면 모든 SKU 가 그 옵션의 값을 쓰므로
@@ -1096,7 +1096,7 @@ ADMIN `POST /api/v1/admin/products/{productId}/option-retirements` 는 `{version
 
 상품 삭제는 행을 지우지 않는다. `product.deleted_at` 을 채우고 **숨김(`visible=false`) · 판매 종료(`STOP_SELLING`)로 함께** 바꾼다 — check
 `ck_product_deleted_hidden`(`deleted_at is null or (visible = false and sale_status = 'STOP_SELLING')`)이 DB 에서 고정한다. SKU · 재고 · 옵션 · 이미지 행은 남긴다
-(주문 · 장바구니가 계속 읽는다). **v1 에는 복구 기능이 없다** — 되살리려면 운영 SQL 이다. 삭제는 위의 ADMIN 전용 DELETE API로 처리한다.
+(주문 · 장바구니가 계속 읽는다). **v1 에는 복구 기능이 없다** — 되살리려면 운영 SQL 이다. 삭제는 위의 DELETE API(`CATALOG_MANAGE`)로 처리한다.
 
 | 경로 | 삭제 상품 |
 |------|-----------|
@@ -1126,13 +1126,13 @@ ADMIN `POST /api/v1/admin/products/{productId}/option-retirements` 는 `{version
 
 운영자가 올린 사진과 직접 입력한 사실로 한국어 상품 문구 초안을 만들고, **검토한 값만** 상품 등록(#9)에 적용한다. 초안은 상품을 만들거나 바꾸거나 공개하지 않는다.
 컨텍스트는 `domainlayer/productdraft` 이고 어드민 진입만 있다. AI 호출은 operations 작업 핸들러가 하고(`bootstrap-conventions.md` AI 절), 초안 · 적용은 product 가 갖는다.
-응답은 운영자 언어만 쓴다 — 모델 · 프롬프트 · 토큰 · 비용 · 작업 내부 정보를 내지 않는다(§2-8). 초안은 모든 ADMIN 이 보고, 만든 · 거절한 어드민은 토큰의 memberId 로만 남긴다.
+응답은 운영자 언어만 쓴다 — 모델 · 프롬프트 · 토큰 · 비용 · 작업 내부 정보를 내지 않는다(§2-8). 초안은 `CATALOG_READ` 가 있는 운영자 모두가 보고, 만든 · 거절한 어드민은 토큰의 memberId 로만 남긴다.
 
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
-| `POST /api/v1/admin/product-drafts` | ADMIN | 201 초안 — 생성 대기(`REQUESTED`) | 400 `PRODUCT_DRAFT_030` · `034` · `035` · `101~126` · `PRODUCT_100` · 503 `PRODUCT_DRAFT_032` |
-| `GET /api/v1/admin/product-drafts/{draftId}` | ADMIN | 200 초안 | 404 `PRODUCT_DRAFT_001` · 400 `PRODUCT_DRAFT_127` |
-| `POST /api/v1/admin/product-drafts/{draftId}/reject` | ADMIN | 200 초안 — 거절(`REJECTED`). 이미 거절했으면 그대로 200 | 404 `PRODUCT_DRAFT_001` · 409 `PRODUCT_DRAFT_020`(적용함) · `022`(만료) · `025`(동시 변경) · 400 `PRODUCT_DRAFT_127` |
+| `POST /api/v1/admin/product-drafts` | `CATALOG_MANAGE` | 201 초안 — 생성 대기(`REQUESTED`) | 400 `PRODUCT_DRAFT_030` · `034` · `035` · `101~126` · `PRODUCT_100` · 503 `PRODUCT_DRAFT_032` |
+| `GET /api/v1/admin/product-drafts/{draftId}` | `CATALOG_READ` | 200 초안 | 404 `PRODUCT_DRAFT_001` · 400 `PRODUCT_DRAFT_127` |
+| `POST /api/v1/admin/product-drafts/{draftId}/reject` | `CATALOG_MANAGE` | 200 초안 — 거절(`REJECTED`). 이미 거절했으면 그대로 200 | 404 `PRODUCT_DRAFT_001` · 409 `PRODUCT_DRAFT_020`(적용함) · `022`(만료) · `025`(동시 변경) · 400 `PRODUCT_DRAFT_127` |
 
 - **본문(생성)**: `{nameHint?, categoryId?, materials?[], careNotes?[], measurementsNote?, origin?, certifications?[], tone?, mustInclude?[], mustAvoid?[], images?[{url, imageType, width?, height?}]}`.
   모든 칸이 선택이다. 문구는 앞뒤 공백을 빼고 빈 문구는 null 이다. 한 줄 문구는 제어 문자를, 치수 메모는 개행 · 탭 외 제어 문자를 받지 않는다(입력은 AI 프롬프트의 데이터 칸으로만 쓰인다).
@@ -1426,7 +1426,7 @@ Info → Presenter → Response
 ## 5. 보안 API 설계
 
 - 고객·어드민 API(`adapter/in/web` · `adapter/in/admin`)의 **모든 핸들러에 `@PreAuthorize` 를 단다.** 서비스 URL 단계가 열려 있어(default-allow)
-  빠뜨리면 공개 API 가 된다. 공개 API 도 `@PreAuthorize("permitAll()")` 로 명시하고, 로그인 필요는 `isAuthenticated()`, 어드민은 `hasRole('ADMIN')` 이다.
+  빠뜨리면 공개 API 가 된다. 공개 API 도 `@PreAuthorize("permitAll()")` 로 명시하고, 로그인 필요는 `isAuthenticated()`, 어드민은 `AdminAuthority` 기능 상수(전환 전 서비스는 `hasRole('ADMIN')`)다(`security-guide.md` §3-1).
   본문 검증(`@RequestBody @Valid`)은 인자 바인딩 단계라 메서드 보안보다 먼저 돈다 — `isAuthenticated()` 쓰기 API 에 익명으로 형식이 틀린 본문을 보내면
   401 이 아니라 400 이다(형식이 맞으면 401 · `SECURITY_001`). 400 응답에는 리소스 데이터가 없고 유스케이스에 닿지 않는다 (처음 확인: 장바구니 #12).
 - internal API(`adapter/in/internal`, `/internal/**`)의 **모든 핸들러에 허용 호출자를 `@PreAuthorize` 로 단다** —

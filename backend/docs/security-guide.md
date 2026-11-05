@@ -209,6 +209,24 @@ auth-service 어드민 엔드포인트 → 권한:
 (`AdminPermission.grantedTo(role)`), `MemberAdminProcessor` 가 권한이 없으면 고객 행만 조회한다. 운영자 역할(`role=ADMIN` 등)로 거르면 질의 없이 빈 페이지다 —
 오류로 답하지 않아 운영자 계정이 있는지도 드러나지 않는다.
 
+product-service 어드민 엔드포인트 → 권한 (#586). 조회(GET)는 `*_READ`, 변경은 `*_MANAGE` 다:
+
+| 기능 묶음 | 식 (`AdminAuthority`) | ADMIN · OWNER | MANAGER | STAFF |
+|-----------|----------------------|---------------|---------|-------|
+| 상품 · 카테고리 · 사이즈표 · AI 초안 · 전시 · 룩 조회 | `CATALOG_READ` | 200 | 200 | 200 |
+| 위의 쓰기 · SKU 구조(`/skus` · `/option-retirements`) · 이미지 업로드 발급 · 확정 · 전시 미리보기 | `CATALOG_MANAGE` | 200 | 403 | 403 |
+| 재고 · 조정 이력 · 품절 임박 기준 · 품절 임박 조회 | `INVENTORY_READ` | 200 | 200 | 403 |
+| 재고 조정(PATCH) · 품절 임박 기준 설정 · 해제 | `INVENTORY_MANAGE` | 200 | 403 | 403 |
+| SKU 원가 현재 · 이력 조회 | `COST_READ` | 200 | 403 | 403 |
+| SKU 원가 추가 | `COST_MANAGE` | 200 | 403 | 403 |
+
+- SKU 교체 · 추가 · 옵션 은퇴는 상품 구조(옵션 · SKU 조합)를 바꾸고 편집용 상품 상세를 돌려주므로 `CATALOG_MANAGE` 다. 재고 수량 변경은 `/stocks` 의 `INVENTORY_MANAGE` 다.
+- 전시 미리보기(`POST /displays/preview`)는 저장하지 않지만 편집 흐름의 일부라 `CATALOG_MANAGE` 다.
+- 핸들러 전체 표는 `ProductAdminAuthorizationMappingTest` 가 실제 MVC 매핑과 양방향으로 대조한다. 표에 없는 새 어드민 핸들러가 생기면 실패한다.
+  역할별 200 · 403 은 각 `*AdminControllerTest` 슬라이스가 고정한다.
+- 이미지 업로드는 presigned PUT 이다. 서비스는 `{contentType, contentLength}` JSON 만 받고 multipart 를 받지 않는다(product-service 에 `MultipartFile` · multipart 설정이 없다).
+  따라서 메서드 인가 전에 큰 파일 본문을 받는 문제가 없다.
+
 **메서드 식은 `AdminAuthority` 상수로 쓴다.** `com.commercefoundry.security.principal.AdminAuthority`에 기능별 상수 22개
 (`ORDER_MANAGE = "hasAuthority('ADMIN_ORDER_MANAGE')"` 등, `AdminPermission`과 1:1)와 운영자 본인 API용 `OPERATOR`
 (`"hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')"`)를 둔다. 조회 핸들러는 `*_READ`, 변경 핸들러는 `*_MANAGE`를 쓰고 식 문자열을 직접 적지 않는다.
@@ -229,7 +247,7 @@ auth-service 어드민 엔드포인트 → 권한:
 머리 뒤에는 `and`·`&&`로 좁히는 조건만 붙일 수 있고, 괄호 밖 `or`·`||`·`?`는 실패다(§5). `hasAnyAuthority(...)`·정의되지 않은 기능
 (`hasAuthority('ADMIN_FOO_READ')`)·`hasAuthority('ROLE_ADMIN')`·순서나 공백이 다른 `hasAnyRole(...)`도 실패다.
 
-auth-service 는 위 표대로 전환했다. 아직 `hasRole('ADMIN')`인 다른 서비스 컨트롤러는 새 역할 토큰이 URL 층을 지나도 메서드에서 403 `SECURITY_005`로
+auth-service · product-service 는 위 표대로 전환했다. 아직 `hasRole('ADMIN')`인 그 밖의 서비스 컨트롤러는 새 역할 토큰이 URL 층을 지나도 메서드에서 403 `SECURITY_005`로
 막힌다(fail-closed). 각 서비스 컨트롤러를 `AdminAuthority` 상수로 전환하고 테스트한 뒤에만 새 역할 계정을 생성·발급한다.
 어드민 회원 목록의 `role` 필터는 enum 바인딩이라 새 역할 이름도 수락하지만, 발급 전에는 해당 역할 행이 없어 빈 결과다.
 

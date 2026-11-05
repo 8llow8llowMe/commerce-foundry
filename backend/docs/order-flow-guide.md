@@ -380,7 +380,7 @@ available (판매 가능) ──선점──▶ reserved (결제 대기) ──�
   전체 건수는 필요할 때만 1번(최대 3번 — Spring Data 는 첫 페이지가 size 보다 짧으면 count 를 생략한다)이다.
   선점 합은 PATCH 도 같은 묶음 쿼리를 SKU 하나로 부른다. 이력은 `idx_stock_adjustment_history_sku_id_id` 를 탄다.
 - 조정 이력의 `adminMemberId` 는 내부 회원 아이디라 그대로 낸다(개인정보 아님). 어드민 이름 표시는 auth-service 조회가 필요해 범위 밖이다.
-- 이력 조회의 없는 SKU 는 404 `PRODUCT_002`, 이력이 없는 SKU 는 빈 목록이다. 두 조회 모두 `hasRole('ADMIN')`, Facade 는 `@Transactional(readOnly = true)` 다.
+- 이력 조회의 없는 SKU 는 404 `PRODUCT_002`, 이력이 없는 SKU 는 빈 목록이다. 두 조회 모두 `AdminAuthority.INVENTORY_READ`(조정 PATCH 는 `INVENTORY_MANAGE`), Facade 는 `@Transactional(readOnly = true)` 다.
 
 #### 어드민 조정 운영 규칙
 

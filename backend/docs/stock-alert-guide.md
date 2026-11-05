@@ -5,7 +5,7 @@
 
 ## 어드민 API
 
-아래 API는 ADMIN 전용이며 고객·익명 요청은 기존 보안 봉투로 거절한다. 기존 `/api/v1/admin/stocks/**` 게이트웨이 경로를 사용한다.
+아래 API는 조회가 `AdminAuthority.INVENTORY_READ`, 설정 · 해제가 `INVENTORY_MANAGE` 이며(ADMIN · OWNER 쓰기, MANAGER 조회, STAFF 불가) 고객·익명 요청은 기존 보안 봉투로 거절한다. 기존 `/api/v1/admin/stocks/**` 게이트웨이 경로를 사용한다.
 
 | 경로 | 결과 |
 |---|---|
