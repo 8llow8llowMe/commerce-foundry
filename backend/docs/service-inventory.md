@@ -21,7 +21,7 @@ payment-service의 #308 C3a-2는 주문 미회신 지연 건수·최대 나이·
 | `service/support-service` | 8087 | 골격 · Resource Server · 서비스 간 인증 (#470 PR-A) · 지식 문서 버전/게시 영속성 (#469 PR-A) · 지식 ADMIN 관리 API/쓰기 감사 (#469 PR-B) · 현재 게시 지식 내부 키워드 검색 (#469 PR-C) · 비회원 세션 자격 증명 영속성 (#470 PR-B1a) · 회원/비회원 대화 생성·소유 조회 기반 (#470 PR-B1b) · 고객 메시지 저장·멱등·순번 (#470 PR-B1c, HTTP 미공개) | 고객 상담 — 대화(`conversations`, 회원 · 비회원) · AI 상담 응답 · 상담원 이관 · 어드민 상담 큐 · 실시간 전달(WebSocket, #470-C), 상담 지식 문서/불변 게시 버전과 ADMIN 관리 API(`/api/v1/admin/support/knowledge`), 정확한 언어·유효기간·카테고리의 검색 근거(`support-knowledge-guide.md`). 고객 `/api/v1/support/**` · 어드민 `/api/v1/admin/support/**`. 설계 정본은 이슈 #470 "설계 확정 (2026-11-02)" 댓글 — 장기 WS 연결 · 고객 공개 트래픽을 operations 작업 엔진과 다른 JVM 으로 격리한다 |
 
 product-service는 전시 · 룩 공용 이미지 업로드 발급/확정도 맡는다(#508, `domainlayer/mediaupload`).
-ADMIN `/api/v1/admin/displays/image-uploads`에서 storage-core를 통해 직접 PUT 서명과 검증된 공개 복사를 제공한다.
+`/api/v1/admin/displays/image-uploads`(`CATALOG_MANAGE`)에서 storage-core를 통해 직접 PUT 서명과 검증된 공개 복사를 제공한다.
 기존 전시 · 룩 저장은 공개 URL 계약을 유지한다. DB/참조 원장/파일 GC는 추가하지 않으며 보관과 운영 한계는
 [display-media-upload-guide.md](display-media-upload-guide.md)를 따른다.
 

@@ -5,9 +5,9 @@ product-service의 mediaupload 컨텍스트가 어드민 공용 이미지 업로
 
 ## API와 FE 흐름
 
-1. ADMIN JWT로 `POST /api/v1/admin/displays/image-uploads`에 `{contentType, contentLength}`를 보낸다.
+1. `CATALOG_MANAGE` 권한이 있는 운영자(ADMIN · OWNER) JWT로 `POST /api/v1/admin/displays/image-uploads`에 `{contentType, contentLength}`를 보낸다.
 2. 201 `Response` 봉투의 `{uploadKey, uploadUrl, method, headers, expiresAt}`를 읽고, 반환한 메서드와 헤더로 파일을 스토리지에 직접 PUT한다.
-3. 같은 ADMIN JWT로 `POST /api/v1/admin/displays/image-uploads/{uploadKey}/confirm`을 호출한다. 본문은 없다.
+3. 같은 운영자 JWT로 `POST /api/v1/admin/displays/image-uploads/{uploadKey}/confirm`을 호출한다. 본문은 없다.
 4. 200 `Response` 봉투의 `{publicUrl, contentType, contentLength}`에서 publicUrl을 전시 MEDIA의 pcUrl/mobileUrl 또는 룩 image.url에 넣는다.
 
 발급 · 확정 성공 응답은 `Cache-Control: no-store`다. 서명 URL, 헤더, 업로드 키를 로그에 남기지 않는다.
