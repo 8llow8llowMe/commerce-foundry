@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -109,6 +110,32 @@ class CategoryAdminControllerTest {
         void anonymousIsUnauthorized(String method, String uri) {
             SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.valueOf(method), uri, VALID_BODY, null).getResponse(), SecurityErrorCode.UNAUTHORIZED);
             verifyNoInteractions(categoryAdminUseCase);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+        @DisplayName("트리 조회는 CATALOG_READ 라 운영자 역할 전부 200 이다 (#586)")
+        void treeIsOpenToEveryOperator(MemberRole role) {
+            assertThat(exchange(HttpMethod.GET, PATH, null, role)).hasStatusOk();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+        @DisplayName("생성 · 수정 · 삭제는 CATALOG_MANAGE 라 MANAGER · STAFF 는 유효한 본문이어도 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#586)")
+        void writesRequireCatalogManage(MemberRole role) {
+            for (HttpMethod method : List.of(HttpMethod.POST, HttpMethod.PUT, HttpMethod.DELETE)) {
+                String uri = method == HttpMethod.POST ? PATH : ITEM_PATH;
+                SecurityEnvelopeAssertions.assertEnvelope(exchange(method, uri, VALID_BODY, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+            }
+            verifyNoInteractions(categoryAdminUseCase);
+        }
+
+        @Test
+        @DisplayName("OWNER 는 CATALOG_MANAGE 가 있어 생성이 201 이다 (#586)")
+        void ownerMayCreate() {
+            given(categoryAdminUseCase.createCategory(any(), anyLong())).willReturn(response("5001", "1"));
+
+            assertThat(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.OWNER)).hasStatus(HttpStatus.CREATED);
         }
     }
 

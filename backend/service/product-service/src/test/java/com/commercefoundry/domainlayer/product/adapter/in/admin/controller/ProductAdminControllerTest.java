@@ -30,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -429,6 +430,36 @@ class ProductAdminControllerTest {
     void anonymousIsUnauthorized() {
         SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
         verifyNoInteractions(productAdminUseCase);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+    @DisplayName("상품 목록은 CATALOG_READ 라 운영자 역할 전부 200 이다 (#586)")
+    void listIsOpenToEveryOperator(MemberRole role) {
+        givenEmptyPage();
+
+        assertThat(mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange()).hasStatusOk();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+    @DisplayName("상품 쓰기(header PUT)는 CATALOG_MANAGE 라 MANAGER · STAFF 는 유효한 본문이어도 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#586)")
+    void headerUpdateRequiresCatalogManage(MemberRole role) {
+        SecurityEnvelopeAssertions.assertEnvelope(putHeader(role).getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(productAdminUseCase);
+    }
+
+    @Test
+    @DisplayName("OWNER 는 CATALOG_MANAGE 가 있어 상품 쓰기(header PUT)가 200 이다 (#586)")
+    void ownerMayUpdateHeader() {
+        assertThat(putHeader(MemberRole.OWNER)).hasStatusOk();
+        verify(productAdminUseCase).updateHeader(any());
+    }
+
+    private MvcTestResult putHeader(MemberRole role) {
+        String body = "{\"version\":7,\"name\":\"새 이름\",\"summary\":null,\"descriptionHtml\":\"<p>설명</p>\",\"saleStatus\":\"ON_SALE\",\"visible\":true}";
+        return mvc.put().uri(PATH + "/7/header").contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange();
     }
 
     @ParameterizedTest(name = "{0}={1} → {2}")

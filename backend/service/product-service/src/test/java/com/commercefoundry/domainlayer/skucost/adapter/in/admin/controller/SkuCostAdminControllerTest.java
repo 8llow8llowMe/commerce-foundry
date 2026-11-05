@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -95,6 +96,25 @@ class SkuCostAdminControllerTest {
         void anonymousIsUnauthorized(String method, String uri) {
             SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.valueOf(method), uri, VALID_BODY, null).getResponse(), SecurityErrorCode.UNAUTHORIZED);
             verifyNoInteractions(skuCostAdminUseCase);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+        @DisplayName("원가는 COST_READ · COST_MANAGE 라 MANAGER · STAFF 는 조회 · 추가(유효한 본문) 모두 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#586)")
+        void managerAndStaffHaveNoCostAccess(MemberRole role) {
+            for (String uri : List.of(COSTS, HISTORIES)) {
+                SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.GET, uri, null, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+            }
+            SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.POST, COSTS, VALID_BODY, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(skuCostAdminUseCase);
+        }
+
+        @Test
+        @DisplayName("OWNER 는 COST_MANAGE 가 있어 원가 추가가 201 이다 (#586)")
+        void ownerMayCreateCost() {
+            given(skuCostAdminUseCase.createCost(any())).willReturn(item());
+
+            assertThat(exchange(HttpMethod.POST, COSTS, VALID_BODY, MemberRole.OWNER)).hasStatus(HttpStatus.CREATED);
         }
     }
 
