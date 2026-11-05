@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.Cat
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.port.in.CategoryAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -30,7 +31,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 어드민 카테고리 관리. {@code /api/v1/admin/**} 은 URL 규칙이 ADMIN 을 먼저 요구하고, 메서드의 {@code hasRole('ADMIN')} 이 이중으로 막는다
+ * 어드민 카테고리 관리. {@code /api/v1/admin/**} 은 URL 규칙이 운영자 역할을 먼저 요구하고, 메서드의 {@code AdminAuthority.CATALOG_*} 이 기능 권한으로 다시 막는다
  * ({@code security-guide.md} §5-1). 카테고리 표에 작성자 · 수정자 칸이 없어 어드민 memberId 는 감사(#163, {@code CATEGORY_*})에만 넘긴다.
  *
  * <p>상품 컨텍스트에 둔다 — 삭제 판정의 "연결된 상품" 을 상품 컨텍스트가 안다. 고객 트리({@code CategoryWebController})와 DTO 를 공유하지 않는다.
@@ -50,7 +51,7 @@ public class CategoryAdminController {
         description = "어드민 편집용 전체 트리다. 숨긴 카테고리와 그 하위도 나오고 visible · parentId 를 함께 낸다. "
             + "같은 상위 안에서 노출 순서 → 아이디 오름차순이다. 깊이는 최대 3단계(대·중·소)다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_READ)
     @GetMapping
     public ResponseEntity<Response<CategoryAdminTreeResponse>> getCategoryTree() {
         return ResponseEntity.ok().body(Response.success(categoryAdminUseCase.getCategoryTree()));
@@ -60,7 +61,7 @@ public class CategoryAdminController {
         summary = "카테고리 생성",
         description = "parentId 가 없으면 최상위로 만든다. 없는 상위는 400(PRODUCT_044), 3단계를 넘으면 400(PRODUCT_040)이다. 201 과 만든 카테고리를 돌려준다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "CATEGORY_CREATE")
     @PostMapping
     public ResponseEntity<Response<CategoryAdminResponse>> createCategory(
@@ -76,7 +77,7 @@ public class CategoryAdminController {
             + "자기 자신 · 자기 하위를 상위로 지정하면 400(PRODUCT_041), 없는 상위는 400(PRODUCT_044)이다. 없는 카테고리는 404(PRODUCT_004)다. "
             + "메뉴에서 감추려면 visible=false 로 보낸다 (하위까지 메뉴에서 빠지고, 상품 노출은 막지 않는다)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "CATEGORY_UPDATE")
     @PutMapping("/{categoryId}")
     public ResponseEntity<Response<CategoryAdminResponse>> updateCategory(
@@ -93,7 +94,7 @@ public class CategoryAdminController {
             + "연결을 자동으로 풀지 않는다. 메뉴에서만 감추려면 삭제 대신 visible=false 로 수정한다. 없는 카테고리는 404(PRODUCT_004)다 "
             + "(삭제 성공 뒤 같은 요청을 다시 보내도 404)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "CATEGORY_DELETE")
     @DeleteMapping("/{categoryId}")
     public ResponseEntity<Response<Void>> deleteCategory(

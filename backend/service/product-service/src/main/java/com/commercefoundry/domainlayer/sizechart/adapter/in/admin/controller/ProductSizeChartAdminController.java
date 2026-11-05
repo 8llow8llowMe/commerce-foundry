@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.P
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartValidationMessage;
 import com.commercefoundry.domainlayer.sizechart.application.port.in.SizeChartAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -43,7 +44,7 @@ public class ProductSizeChartAdminController {
         summary = "상품 사이즈표 조회",
         description = "숨긴 상품도 본다. 상품이 없으면 404(PRODUCT_064)다. 상품은 있고 표가 없으면 200 이고 dataBody 는 null 이다. 값은 저장 단위 그대로다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_READ)
     @GetMapping
     public ResponseEntity<Response<ProductSizeChartAdminResponse>> getSizeChart(
         @Parameter(description = "상품 아이디") @PathVariable @Positive(message = SizeChartValidationMessage.PRODUCT_ID_POSITIVE) long productId
@@ -56,7 +57,7 @@ public class ProductSizeChartAdminController {
         description = "없으면 만들고 있으면 행과 칸을 다시 넣는다. 상품이 없으면 404(PRODUCT_064), 본문 템플릿이 없으면 400(PRODUCT_065), "
             + "항목이 빠지거나 겹치거나 템플릿에 없으면 400(PRODUCT_066~068), 사이즈 이름 · 순서 중복은 400(PRODUCT_069 · PRODUCT_070)이다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_SIZE_CHART_REPLACE")
     @PutMapping
     public ResponseEntity<Response<ProductSizeChartAdminResponse>> replaceSizeChart(

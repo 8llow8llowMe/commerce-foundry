@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.Sto
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.port.in.StockAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -36,7 +37,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 어드민 재고 관리. {@code /api/v1/admin/**} 은 URL 규칙이 ADMIN 을 먼저 요구하고, 메서드의 {@code hasRole('ADMIN')} 이 이중으로 막는다
+ * 어드민 재고 관리. {@code /api/v1/admin/**} 은 URL 규칙이 운영자 역할을 먼저 요구하고, 메서드의 {@code AdminAuthority.INVENTORY_*} 이 기능 권한으로 다시 막는다
  * ({@code security-guide.md} §5-1). 조정한 어드민은 access 토큰의 memberId 로만 기록한다 — 본문으로 받지 않는다.
  *
  * <p>파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
@@ -61,7 +62,7 @@ public class StockAdminController {
             + "차감 선점이 생길 수 없어 정상이면 0 이다 (읽은 값을 그대로 낸다). "
             + "availableQuantity 를 그대로 조정의 expectedQuantity 로 보내면 된다 (재고 미등록 SKU 는 0)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.INVENTORY_READ)
     @GetMapping
     public ResponseEntity<Response<StockAdminListResponse>> getStocks(
         @Parameter(description = "SKU 아이디 목록 (1~100개, 쉼표 구분)", example = "1001,1002")
@@ -77,7 +78,7 @@ public class StockAdminController {
         summary = "SKU 재고 조정 이력 조회",
         description = "SKU 하나의 조정 이력을 최신순으로 페이지 단위로 읽는다. 없는 SKU 는 404(PRODUCT_002), 이력이 없는 SKU 는 빈 목록이다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.INVENTORY_READ)
     @GetMapping("/{skuId}/adjustments")
     public ResponseEntity<Response<PageResponse<StockAdjustmentHistoryAdminItem>>> getAdjustments(
         @Parameter(description = "SKU 아이디") @PathVariable @Positive(message = ProductValidationMessage.STOCK_SKU_ID_POSITIVE) long skuId,
@@ -95,7 +96,7 @@ public class StockAdminController {
             + "없는 SKU 는 404(PRODUCT_002). 요청마다 조정 이력을 한 건 남긴다. availableQuantity 는 결제 전 선점분(reservedQuantity)이 빠진 값이라 "
             + "실사 수량을 입력할 때는 실물 − reservedQuantity 를 quantity 로 보낸다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.INVENTORY_MANAGE)
     @PatchMapping("/{skuId}")
     public ResponseEntity<Response<StockAdminResponse>> adjustStock(
         @AuthenticationPrincipal MemberPrincipal member,

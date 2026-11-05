@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.mediaupload.adapter.in.admin.dto.response
 import com.commercefoundry.domainlayer.mediaupload.application.exception.MediaUploadValidationMessage;
 import com.commercefoundry.domainlayer.mediaupload.application.port.in.MediaImageUploadAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -36,7 +37,7 @@ public class MediaImageUploadAdminController {
 
     @Operation(summary = "이미지 업로드 발급", description = "1바이트~10MiB. 응답의 메서드 · 헤더로 PUT 후 확정 API를 호출한다.")
     @AdminAudited(action = "MEDIA_IMAGE_UPLOAD_ISSUE")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @PostMapping
     public ResponseEntity<Response<MediaImageUploadResponse.Ticket>> issue(
         @AuthenticationPrincipal MemberPrincipal member, @RequestBody @Valid MediaImageUploadRequest request
@@ -47,7 +48,7 @@ public class MediaImageUploadAdminController {
 
     @Operation(summary = "이미지 업로드 확정", description = "JWT 소유자의 객체를 검증하고 공개 URL을 발급한다. 없으면 404, 변경되면 409다. 본문은 없다.")
     @AdminAudited(action = "MEDIA_IMAGE_UPLOAD_CONFIRM")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @PostMapping("/{uploadKey}/confirm")
     public ResponseEntity<Response<MediaImageUploadResponse.Confirmed>> confirm(
         @AuthenticationPrincipal MemberPrincipal member,

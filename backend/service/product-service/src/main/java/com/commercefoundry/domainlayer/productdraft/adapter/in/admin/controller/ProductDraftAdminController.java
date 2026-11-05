@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.request
 import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.response.ProductDraftAdminResponse;
 import com.commercefoundry.domainlayer.productdraft.application.exception.ProductDraftValidationMessage;
 import com.commercefoundry.domainlayer.productdraft.application.port.in.ProductDraftAdminUseCase;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -26,8 +27,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 어드민 AI 상품 초안 (#359). {@code /api/v1/admin/**} 은 URL 규칙이 ADMIN 을 먼저 요구하고, 메서드의 {@code hasRole('ADMIN')} 이 이중으로 막는다
- * ({@code security-guide.md} §5-1). 만든 · 거절한 어드민은 access 토큰의 memberId 로만 기록한다 — 본문으로 받지 않는다. 초안은 모든 ADMIN 이 본다.
+ * 어드민 AI 상품 초안 (#359). {@code /api/v1/admin/**} 은 URL 규칙이 운영자 역할을 먼저 요구하고, 메서드의 {@code AdminAuthority.CATALOG_*} 이 기능 권한으로 다시 막는다
+ * ({@code security-guide.md} §5-1). 만든 · 거절한 어드민은 access 토큰의 memberId 로만 기록한다 — 본문으로 받지 않는다. 초안은 상품 조회 권한이 있는 운영자 모두가 본다.
  * 파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
  */
 @Tag(name = "[어드민] AI 상품 초안", description = "사진과 운영자 입력으로 상품 문구 초안을 만들고, 검토한 값만 상품 등록에 적용한다")
@@ -45,7 +46,7 @@ public class ProductDraftAdminController {
             + "이미지는 스토어 미디어 저장소의 공개 주소만 받는다 — 밖이면 400(PRODUCT_DRAFT_030), 저장소 미설정은 503(PRODUCT_DRAFT_032), "
             + "대표 이미지 두 장 이상은 400(PRODUCT_DRAFT_034), 같은 주소 두 번은 400(PRODUCT_DRAFT_035)이다. 이미지 유형은 THUMBNAIL · GALLERY 만 받는다(영상 등은 400 PRODUCT_100)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @PostMapping
     public ResponseEntity<Response<ProductDraftAdminResponse>> create(
         @AuthenticationPrincipal MemberPrincipal member,
@@ -55,7 +56,7 @@ public class ProductDraftAdminController {
     }
 
     @Operation(summary = "초안 조회", description = "없는 초안은 404(PRODUCT_DRAFT_001)다. 보관 기간이 지난 진행 중 초안은 EXPIRED 로 보인다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_READ)
     @GetMapping("/{draftId}")
     public ResponseEntity<Response<ProductDraftAdminResponse>> getDraft(
         @Parameter(description = "초안 아이디") @PathVariable @Positive(message = ProductDraftValidationMessage.DRAFT_ID_POSITIVE) long draftId
@@ -68,7 +69,7 @@ public class ProductDraftAdminController {
         description = "이 초안을 쓰지 않기로 한다(REJECTED). 이미 거절한 초안이면 그대로 200 이다. 적용한 초안은 409(PRODUCT_DRAFT_020), "
             + "보관 기간이 지났으면 409(PRODUCT_DRAFT_022), 다른 변경과 겹치면 409(PRODUCT_DRAFT_025)다. 없는 초안은 404(PRODUCT_DRAFT_001)다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @PostMapping("/{draftId}/reject")
     public ResponseEntity<Response<ProductDraftAdminResponse>> reject(
         @AuthenticationPrincipal MemberPrincipal member,

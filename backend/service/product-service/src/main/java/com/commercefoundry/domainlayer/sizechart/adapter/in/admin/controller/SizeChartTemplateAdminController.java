@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.S
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartValidationMessage;
 import com.commercefoundry.domainlayer.sizechart.application.port.in.SizeChartAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.persistence.dto.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,7 +36,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 어드민 사이즈표 템플릿. {@code /api/v1/admin/**} 은 URL 규칙이 ADMIN 을 먼저 요구하고, 메서드의 {@code hasRole('ADMIN')} 이 이중으로 막는다.
+ * 어드민 사이즈표 템플릿. {@code /api/v1/admin/**} 은 URL 규칙이 운영자 역할을 먼저 요구하고, 메서드의 {@code AdminAuthority.CATALOG_*} 이 기능 권한으로 다시 막는다.
  * 작성자 칸 · Idempotency-Key 는 없다 — 어드민 memberId 는 감사(#163, {@code SIZE_CHART_TEMPLATE_*})에만 넘긴다.
  * 파라미터 검증은 Spring MVC 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다.
  */
@@ -51,7 +52,7 @@ public class SizeChartTemplateAdminController {
     private final SizeChartAdminUseCase sizeChartAdminUseCase;
 
     @Operation(summary = "사이즈표 템플릿 목록", description = "최신순(아이디 내림차순) 페이지다. 항목 본문은 없고 개수만 담는다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<SizeChartTemplateSummaryAdminItem>>> getTemplates(
         @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0")
@@ -63,7 +64,7 @@ public class SizeChartTemplateAdminController {
     }
 
     @Operation(summary = "사이즈표 템플릿 조회", description = "항목을 포함한다. 없으면 404(PRODUCT_059)다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_READ)
     @GetMapping("/{templateId}")
     public ResponseEntity<Response<SizeChartTemplateAdminResponse>> getTemplate(
         @Parameter(description = "템플릿 아이디") @PathVariable @Positive(message = SizeChartValidationMessage.TEMPLATE_ID_POSITIVE) long templateId
@@ -75,7 +76,7 @@ public class SizeChartTemplateAdminController {
         summary = "사이즈표 템플릿 생성",
         description = "이름 · 저장 단위 · 항목을 만든다. 항목 이름 또는 순서 중복은 400(PRODUCT_060 · PRODUCT_061)이다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "SIZE_CHART_TEMPLATE_CREATE")
     @PostMapping
     public ResponseEntity<Response<SizeChartTemplateAdminResponse>> createTemplate(
@@ -90,7 +91,7 @@ public class SizeChartTemplateAdminController {
         description = "없으면 404(PRODUCT_059). 상품 사이즈표가 이 템플릿을 쓰면 단위 변경과 항목 추가 · 삭제는 409(PRODUCT_062)이고, "
             + "기존 columnId 로 이름 · 설명 · 순서만 바꾼다. 아무도 안 쓰면 항목을 새 아이디로 다시 만든다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "SIZE_CHART_TEMPLATE_UPDATE")
     @PutMapping("/{templateId}")
     public ResponseEntity<Response<SizeChartTemplateAdminResponse>> updateTemplate(
@@ -102,7 +103,7 @@ public class SizeChartTemplateAdminController {
     }
 
     @Operation(summary = "사이즈표 템플릿 삭제", description = "항목까지 지운다. 없으면 404(PRODUCT_059), 상품 사이즈표가 쓰면 409(PRODUCT_063)다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "SIZE_CHART_TEMPLATE_DELETE")
     @DeleteMapping("/{templateId}")
     public ResponseEntity<Response<Void>> deleteTemplate(
