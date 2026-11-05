@@ -20,6 +20,7 @@ import com.commercefoundry.domainlayer.product.application.model.ProductAvailabi
 import com.commercefoundry.domainlayer.product.application.model.ProductSaleStatusFilter;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -47,7 +48,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 어드민 상품 관리. {@code /api/v1/admin/**} 은 URL 규칙이 ADMIN 을 먼저 요구하고, 메서드의 {@code hasRole('ADMIN')} 이 이중으로 막는다
+ * 어드민 상품 관리. {@code /api/v1/admin/**} 은 URL 규칙이 운영자 역할을 먼저 요구하고, 메서드의 {@code AdminAuthority.CATALOG_*} 이 기능 권한으로 다시 막는다
  * ({@code security-guide.md} §5-1). 고객 상품 조회({@code ProductWebController})와 DTO 를 공유하지 않는다.
  *
  * <p>파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
@@ -68,7 +69,7 @@ public class ProductAdminController {
     @Operation(summary = "기존 상품 옵션 이름·순서 수정", description = "은퇴 행을 포함한 기존 그룹·값 전체 아이디를 보내고 한국어·영문 이름과 배열 순서를 편집한다. "
         + "nameEn 미지정/null은 기존 번역 유지, 빈 값은 삭제한다. "
         + "추가·누락·그룹 이동·중복 이름은 400 PRODUCT_013이다. 동일 값은 버전을 유지하며 오래된 버전은 409 PRODUCT_010이다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_OPTIONS_REPLACE")
     @PutMapping("/{productId}/options")
     public ResponseEntity<Response<ProductDetailAdminResponse>> updateOptions(
@@ -83,7 +84,7 @@ public class ProductAdminController {
         + "항목은 키(fieldKey)로 구분한다 — 같은 키는 같은 항목으로 고치고, 빠진 키는 지우고, 새 키는 더한다. 이미 받은 주문의 입력값은 그대로이고, "
         + "장바구니에 담긴 입력은 주문할 때 바뀐 항목으로 다시 확인한다. 맞춤 제작을 꺼도 항목은 남는다. "
         + "키 중복 · 숫자 범위 · 증분 · 글자 수 설정 오류는 400 PRODUCT_011, 오래된 버전은 409 PRODUCT_010, 바뀐 것이 없으면 버전을 유지한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_CUSTOM_ORDER_REPLACE")
     @PutMapping("/{productId}/custom-order")
     public ResponseEntity<Response<ProductDetailAdminResponse>> updateCustomOrder(
@@ -96,7 +97,7 @@ public class ProductAdminController {
 
     @Operation(summary = "상품 정지 이미지 전체 교체", description = "기존 imageId 또는 신규 uploadKey로 최대 8장(대표 한 장)을 교체한다. "
         + "빈 배열은 정지 이미지 연결 삭제, VIDEO는 보존한다. 동일 요청도 버전이 증가하며 오래된 버전은 409 PRODUCT_010이다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_IMAGES_REPLACE")
     @PutMapping("/{productId}/images")
     public ResponseEntity<Response<ProductDetailAdminResponse>> updateImages(
@@ -110,7 +111,7 @@ public class ProductAdminController {
     @Operation(summary = "상품 가격 수정", description = "기본 판매가 · 정가를 전체 교체하고 편집용 상세를 반환한다. 정가 생략/null은 삭제다. "
         + "현재 상품 통화를 유지하며 SKU 추가금과 판매중 최저가 규칙을 검사한다(400 PRODUCT_016). 동일 값은 버전을 유지한다. "
         + "오래된 버전은 동일 값이어도 409 PRODUCT_010, 삭제 상품은 404 PRODUCT_001이다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_PRICING_REPLACE")
     @PutMapping("/{productId}/pricing")
     public ResponseEntity<Response<ProductDetailAdminResponse>> updatePricing(
@@ -123,7 +124,7 @@ public class ProductAdminController {
 
     @Operation(summary = "상품 카테고리 수정", description = "대표 · 진열 카테고리를 전체 교체하고 편집용 상세를 반환한다. 대표는 진열 목록에 자동 포함한다. "
         + "동일 요청도 버전이 증가한다. 오래된 버전은 409 PRODUCT_010, 삭제 상품은 404 PRODUCT_001, 없는 카테고리는 400 PRODUCT_012, 잠금 충돌은 409 PRODUCT_045다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_CATEGORIES_REPLACE")
     @PutMapping("/{productId}/categories")
     public ResponseEntity<Response<ProductDetailAdminResponse>> updateCategories(
@@ -136,7 +137,7 @@ public class ProductAdminController {
 
     @Operation(summary = "상품 기본 정보 수정", description = "상품명·요약·상세 HTML·판매 상태·노출 여부와 version을 전체 교체한다. "
         + "카테고리·가격·옵션·SKU·이미지는 바꾸지 않는다. 오래된 version은 409 PRODUCT_010, 삭제된 상품은 404 PRODUCT_001이다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_UPDATE")
     @PutMapping("/{productId}/header")
     public ResponseEntity<Response<ProductHeaderUpdateAdminResponse>> updateHeader(
@@ -149,7 +150,7 @@ public class ProductAdminController {
 
     @Operation(summary = "상품 삭제", description = "숨김 · 판매 종료로 바꾸고 삭제 시각을 기록한다. 자식 데이터와 기존 재고 선점은 유지한다. "
         + "재삭제도 200(dataBody=null), 없으면 404 PRODUCT_001. 버전 파라미터는 없으며 동시 변경은 409 PRODUCT_010. 다시 조회한 뒤 재시도한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_DELETE")
     @DeleteMapping("/{productId}")
     public ResponseEntity<Response<Void>> delete(
@@ -172,7 +173,7 @@ public class ProductAdminController {
             + "같은 본문을 두 번 보내면 상품이 두 개 생긴다(Idempotency-Key 없음 — 지우면 된다)."
     )
     @AdminAudited(action = "PRODUCT_CREATE")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @PostMapping
     public ResponseEntity<Response<ProductCreateAdminResponse>> create(
         @AuthenticationPrincipal MemberPrincipal member,
@@ -189,7 +190,7 @@ public class ProductAdminController {
             + "스토리지 장애는 503(PRODUCT_035), 스토리지 설정이 꺼져 있으면 503(PRODUCT_036)이다 — 이미지 없는 등록은 된다."
     )
     @AdminAudited(action = "PRODUCT_IMAGE_UPLOAD_ISSUE")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @PostMapping("/image-uploads")
     public ResponseEntity<Response<ProductImageUploadAdminResponse>> issueImageUpload(
         @AuthenticationPrincipal MemberPrincipal member,
@@ -201,7 +202,7 @@ public class ProductAdminController {
     }
 
     @Operation(summary = "상품 상세 조회 (편집용)", description = "숨김 상품과 은퇴 옵션 · 판매 종료 SKU 를 포함한 저장 설정이다. 삭제 상품은 404 다. 재고 · 원가는 별도 API 로 조회한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_READ)
     @GetMapping("/{productId}")
     public ResponseEntity<Response<ProductDetailAdminResponse>> getProduct(
         @Parameter(description = "상품 아이디") @PathVariable @Positive(message = ProductValidationMessage.ID_POSITIVE) long productId
@@ -217,7 +218,7 @@ public class ProductAdminController {
             + "availability 는 재고를 반영한 판매 가능 상태로 고객 화면 뱃지와 같은 규칙이다(재고 미등록 SKU 는 품절, 판매중 SKU 가 없으면 판매 종료). "
             + "가격은 저장된 기본 판매가 · 정가 그대로다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<ProductListAdminItem>>> searchProducts(
         @Parameter(description = "상품명 검색어 — 부분 일치, 대소문자 무시 (100자 이하)") @RequestParam(required = false)

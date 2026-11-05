@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.skucost.application.exception.SkuCostVali
 import com.commercefoundry.domainlayer.skucost.application.model.SkuCostTypeCode;
 import com.commercefoundry.domainlayer.skucost.application.port.in.SkuCostAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -34,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 어드민 SKU 원가 이력. 원가는 고치지 않고 적용 시작 시각이 있는 행을 더한다(append-only) — 주문 시점 원가를 나중에 그대로 다시 고를 수 있게 한다.
- * {@code /api/v1/admin/**} 은 URL 규칙이 ADMIN 을 먼저 요구하고, 메서드의 {@code hasRole('ADMIN')} 이 이중으로 막는다 ({@code security-guide.md} §5-1).
+ * {@code /api/v1/admin/**} 은 URL 규칙이 운영자 역할을 먼저 요구하고, 메서드의 {@code AdminAuthority.COST_*} 이 기능 권한으로 다시 막는다 ({@code security-guide.md} §5-1).
  * 기록한 어드민은 access 토큰의 memberId 로만 남긴다 — 본문으로 받지 않는다. 숨긴 상품의 SKU 도 다룬다. 없는 SKU 는 404(PRODUCT_002)다.
  *
  * <p>파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
@@ -55,7 +56,7 @@ public class SkuCostAdminController {
         description = "지금 적용되는 원가를 유형별(GOODS → PACKAGING)로 하나씩 낸다. 한 번도 입력하지 않은 유형은 항목이 없다 — 0원으로 채우지 않는다. "
             + "없는 SKU 는 404(PRODUCT_002)다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.COST_READ)
     @GetMapping
     public ResponseEntity<Response<SkuCurrentCostsAdminResponse>> getCurrentCosts(
         @Parameter(description = "SKU 아이디") @PathVariable @Positive(message = SkuCostValidationMessage.SKU_ID_POSITIVE) long skuId
@@ -68,7 +69,7 @@ public class SkuCostAdminController {
         description = "적용 시작 시각 내림차순(같으면 아이디 내림차순)으로 페이지 단위로 읽는다. costType 을 주면 그 유형만이다. "
             + "없는 SKU 는 404(PRODUCT_002), 이력이 없으면 빈 목록이다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.COST_READ)
     @GetMapping("/histories")
     public ResponseEntity<Response<PageResponse<SkuCostAdminItem>>> getHistories(
         @Parameter(description = "SKU 아이디") @PathVariable @Positive(message = SkuCostValidationMessage.SKU_ID_POSITIVE) long skuId,
@@ -87,7 +88,7 @@ public class SkuCostAdminController {
             + "같은 유형의 최신 이력 시작보다 뒤가 아니면 409(SKU_COST_002), 같은 시작 시각이 먼저 저장됐으면 409(SKU_COST_004), "
             + "다른 원가 저장과 겹쳐 잠금을 얻지 못하면 409(SKU_COST_005 — 다시 시도)다. 없는 SKU 는 404(PRODUCT_002)다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.COST_MANAGE)
     @PostMapping
     public ResponseEntity<Response<SkuCostAdminItem>> createCost(
         @AuthenticationPrincipal MemberPrincipal member,

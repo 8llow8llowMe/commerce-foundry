@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.Pro
 import com.commercefoundry.domainlayer.product.application.exception.SkuAdminValidationMessage;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -39,7 +40,7 @@ public class SkuAdminController {
     @Operation(summary = "상품 SKU 편집 속성 전체 교체", description = "기존 SKU 전체의 추가금·판매 상태·무게·HS 코드를 바꾸고 편집용 상세를 반환한다. "
         + "동일 값도 상품 버전이 증가한다. 삭제 상품 404 SKU_ADMIN_001, 버전 충돌 409 SKU_ADMIN_002, "
         + "SKU 집합 오류 400 SKU_ADMIN_003, 가격 오류 400 SKU_ADMIN_004, 잠금 충돌 409 SKU_ADMIN_005, 은퇴 옵션 판매중 400 SKU_ADMIN_006이다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_SKUS_REPLACE")
     @PutMapping("/{productId}/skus")
     public ResponseEntity<Response<ProductDetailAdminResponse>> replace(
@@ -56,7 +57,7 @@ public class SkuAdminController {
         + "삭제 상품 404 SKU_ADMIN_001, 버전 충돌 409 SKU_ADMIN_002, 가격 규칙 400 SKU_ADMIN_004, 잠금 충돌 409 SKU_ADMIN_005, "
         + "옵션 값(없는 옵션 · 이미 쓴 이름 · 은퇴한 이름 · 50개 초과) 400 SKU_ADMIN_007, 조합(값 수 · 없는 값 · 옵션 없는 상품 · 은퇴 옵션이 있는 상품) 400 SKU_ADMIN_008, "
         + "이미 있는 조합(판매 종료 포함) 400 SKU_ADMIN_009, 상품당 100개 초과 400 SKU_ADMIN_010 이다. 같은 요청을 두 번 보내면 두 번째는 409 SKU_ADMIN_002 다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_SKUS_ADD")
     @PostMapping("/{productId}/skus")
     public ResponseEntity<Response<ProductDetailAdminResponse>> add(
@@ -72,7 +73,7 @@ public class SkuAdminController {
         + "옵션(그룹)을 은퇴하면 그 옵션을 쓰는 SKU 전부, 즉 상품의 모든 SKU 가 판매 종료된다. 이미 은퇴한 대상은 그대로 두고, 은퇴 되돌리기는 없다. "
         + "삭제 상품 404 SKU_ADMIN_001, 버전 충돌 409 SKU_ADMIN_002, 남는 판매중 SKU 로 가격 규칙이 깨지면 400 SKU_ADMIN_004(추가금을 먼저 맞춘다), "
         + "잠금 충돌 409 SKU_ADMIN_005, 이 상품의 옵션 · 값이 아니면 400 SKU_ADMIN_011, 대상 없음 · 50개 초과 400 SKU_ADMIN_116 이다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_OPTIONS_RETIRE")
     @PostMapping("/{productId}/option-retirements")
     public ResponseEntity<Response<ProductDetailAdminResponse>> retireOptions(

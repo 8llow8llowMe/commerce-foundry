@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.product.application.exception.StockAlertV
 import com.commercefoundry.domainlayer.product.application.port.in.StockAlertAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -42,7 +43,7 @@ public class StockAlertAdminController {
     private final StockAlertAdminUseCase useCase;
 
     @Operation(summary = "SKU 품절 임박 기준 조회", description = "미설정은 enabled=false. 없는 SKU·삭제 상품은 404(STOCK_ALERT_001).")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.INVENTORY_READ)
     @GetMapping("/{skuId}/low-stock-policy")
     public ResponseEntity<Response<StockAlertPolicyResponse>> getPolicy(
         @Parameter(description = "SKU 아이디") @PathVariable @Positive(message = StockAlertValidationMessage.SKU_ID_POSITIVE) long skuId
@@ -51,7 +52,7 @@ public class StockAlertAdminController {
     }
 
     @Operation(summary = "SKU 품절 임박 기준 설정", description = "기준 수량은 0 이상. 재고는 변경하지 않는다. 없는 SKU·삭제 상품은 404(STOCK_ALERT_001), 잠금 경합은 409(STOCK_ALERT_002).")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.INVENTORY_MANAGE)
     @PutMapping("/{skuId}/low-stock-policy")
     @AdminAudited(action = "STOCK_ALERT_POLICY_SET")
     public ResponseEntity<Response<StockAlertPolicyResponse>> setPolicy(
@@ -63,7 +64,7 @@ public class StockAlertAdminController {
     }
 
     @Operation(summary = "SKU 품절 임박 기준 해제", description = "미설정도 성공한다. 없는 SKU·삭제 상품은 404(STOCK_ALERT_001), 잠금 경합은 409(STOCK_ALERT_002).")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.INVENTORY_MANAGE)
     @DeleteMapping("/{skuId}/low-stock-policy")
     @AdminAudited(action = "STOCK_ALERT_POLICY_CLEAR")
     public ResponseEntity<Response<Void>> clearPolicy(
@@ -75,7 +76,7 @@ public class StockAlertAdminController {
     }
 
     @Operation(summary = "품절 임박 SKU 조회", description = "설정된 SKU 중 판매 가능 수량이 기준 이하인 항목. 무제한·삭제 상품은 제외하고 숨김·판매 중지는 상태와 함께 포함한다. 수량→SKU 아이디 오름차순.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.INVENTORY_READ)
     @GetMapping("/low")
     public ResponseEntity<Response<PageResponse<StockAlertAdminItem>>> getLowStocks(
         @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0") @PositiveOrZero(message = StockAlertValidationMessage.PAGE_NON_NEGATIVE) int page,
