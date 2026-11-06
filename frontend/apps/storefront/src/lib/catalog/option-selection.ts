@@ -49,6 +49,40 @@ export function optionValueState(
   return 'unavailable';
 }
 
+/** 옵션 그룹 한 줄 요약 — 그룹 이름과 고른 값, 고르기 전이면 지금 살 수 있는 값들 */
+export type OptionSummary = { groupId: string; name: string; values: string[]; selected: boolean };
+
+/**
+ * 모바일 하단 구매 바에 보일 옵션 요약(#60 — 375px 첫 화면에 사이즈가 보이도록).
+ * 고른 그룹은 그 값 하나, 아직 고르지 않은 그룹은 다른 선택과 함께 판매중인 값만 보인다. 살 수 있는 값이 없는 그룹은 뺀다.
+ */
+export function optionSummary(
+  groups: ProductOptionGroup[],
+  skus: ProductSku[],
+  selection: OptionSelection,
+): OptionSummary[] {
+  return groups.flatMap((group): OptionSummary[] => {
+    const chosen = group.values.find(
+      (value) => value.optionValueId === selection[group.optionGroupId],
+    );
+    if (chosen) {
+      return [
+        { groupId: group.optionGroupId, name: group.name, values: [chosen.name], selected: true },
+      ];
+    }
+    const values = group.values
+      .filter(
+        (value) =>
+          optionValueState(skus, selection, group.optionGroupId, value.optionValueId) ===
+          'available',
+      )
+      .map((value) => value.name);
+    return values.length > 0
+      ? [{ groupId: group.optionGroupId, name: group.name, values, selected: false }]
+      : [];
+  });
+}
+
 /** 값 하나를 고른 다음 선택. 새 값과 함께 살 수 없게 된 다른 그룹의 선택은 푼다 */
 export function selectOption(
   skus: ProductSku[],

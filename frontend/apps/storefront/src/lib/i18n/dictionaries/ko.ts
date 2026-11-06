@@ -266,6 +266,8 @@ export const ko = {
       buy: '구매하기',
       /** 모바일 구매 바텀시트 닫기 */
       closeSheet: '옵션 선택 닫기',
+      /** 모바일 하단 바의 옵션 요약 버튼(화면 낭독용 덧붙임) */
+      chooseOptions: '옵션 선택',
     },
     option: { soldOut: '품절', unavailable: '선택 불가' },
     customOrder: {

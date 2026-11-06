@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { displayPrice, optionValueState, resolveSku, selectOption } from './option-selection';
+import {
+  displayPrice,
+  optionSummary,
+  optionValueState,
+  resolveSku,
+  selectOption,
+} from './option-selection';
 import type { ProductDetail, ProductOptionGroup, ProductSku, SaleStatusCode } from './types';
 
 const krw = (amount: number) => ({ amount, currency: 'KRW' as const });
@@ -103,6 +109,32 @@ describe('optionValueState', () => {
   it('같은 그룹의 현재 선택은 무시하고 바꿀 값으로 본다', () => {
     expect(optionValueState(SKUS, { color: 'ivory', size: 's' }, 'size', 'm')).toBe('soldOut');
     expect(optionValueState(SKUS, { color: 'ivory', size: 'm' }, 'size', 'l')).toBe('available');
+  });
+});
+
+describe('optionSummary', () => {
+  it('고르기 전에는 그룹마다 지금 살 수 있는 값만 보인다', () => {
+    expect(optionSummary(GROUPS, SKUS, {})).toEqual([
+      { groupId: 'color', name: '색상', values: ['아이보리', '먹색'], selected: false },
+      // 아이보리 M 은 품절이지만 먹색 M 이 판매중이라 M 도 남는다
+      { groupId: 'size', name: '사이즈', values: ['S', 'M', 'L'], selected: false },
+    ]);
+  });
+
+  it('고른 그룹은 그 값 하나, 나머지는 함께 살 수 있는 값만 보인다', () => {
+    expect(optionSummary(GROUPS, SKUS, { color: 'ink' })).toEqual([
+      { groupId: 'color', name: '색상', values: ['먹색'], selected: true },
+      { groupId: 'size', name: '사이즈', values: ['M'], selected: false },
+    ]);
+  });
+
+  it('살 수 있는 값이 없는 그룹은 뺀다', () => {
+    const soldOut = SKUS.map((item) => ({ ...item, saleStatus: status('SOLD_OUT') }));
+    expect(optionSummary(GROUPS, soldOut, {})).toEqual([]);
+  });
+
+  it('옵션 없는 상품은 빈 배열이다', () => {
+    expect(optionSummary([], [sku('only', [], 0)], {})).toEqual([]);
   });
 });
 

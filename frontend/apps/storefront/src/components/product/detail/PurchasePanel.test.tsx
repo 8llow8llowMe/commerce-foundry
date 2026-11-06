@@ -220,7 +220,22 @@ describe('PurchasePanel 배송 안내', () => {
   it('안내가 없으면 줄을 그리지 않는다', () => {
     const html = render();
     expect(html).not.toContain('<li>');
-    expect(bar(html)).not.toContain('truncate');
+    expect(bar(html)).not.toContain('block truncate text-xs');
+  });
+});
+
+describe('PurchasePanel 하단 바 옵션 요약', () => {
+  it('고르기 전에는 그룹 이름과 지금 살 수 있는 값을 한 줄로 보인다(품절 M 은 뺀다)', () => {
+    const bottom = bar(render());
+    expect(bottom).toContain('<span class="text-muted-fg">사이즈</span> S · L</span>');
+    expect(bottom).toContain('<span class="sr-only"> 옵션 선택</span>');
+  });
+
+  it('옵션 없는 상품 · 판매중이 아닌 상품은 요약 줄이 없다', () => {
+    expect(bar(render({ optionGroups: [], skus: [sku('only', [], 0)] }))).not.toContain(
+      '옵션 선택',
+    );
+    expect(bar(render({ saleStatus: status('SOLD_OUT', '품절') }))).not.toContain('옵션 선택');
   });
 });
 

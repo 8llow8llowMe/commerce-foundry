@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { CloseIcon } from '@/components/header/HeaderIcons';
 import {
   displayPrice,
+  optionSummary,
   resolveSku,
   selectOption,
   type OptionSelection,
@@ -70,9 +71,9 @@ export function PurchasePanel({
     const observer = new IntersectionObserver(
       ([entry]) => setPanelInView(entry?.isIntersecting ?? false),
       {
-        // 패널의 수량 · 담기 버튼 묶음이 하단 바(약 80px) 위로 올라와 보일 때만 바를 숨긴다.
+        // 패널의 수량 · 담기 버튼 묶음이 하단 바(약 96px) 위로 올라와 보일 때만 바를 숨긴다.
         // 가격 줄을 기준으로 하면 화면 높이에 따라 첫 화면부터 바가 숨어 구매 버튼이 사라진다.
-        rootMargin: '0px 0px -80px 0px',
+        rootMargin: '0px 0px -96px 0px',
       },
     );
     observer.observe(cta);
@@ -113,6 +114,7 @@ export function PurchasePanel({
   const maxQuantity = product.maxQuantityPerOrder ?? QUANTITY_CAP;
   const productOnSale = product.saleStatus.code === 'ON_SALE';
   const headline = delivery ? deliveryHeadline(delivery) : null;
+  const options = productOnSale ? optionSummary(groups, product.skus, selection) : [];
   const openPurchase = () => {
     if (purchaseTarget(product) === 'panel') return goToPanel();
     sheetRef.current?.showModal();
@@ -292,8 +294,25 @@ export function PurchasePanel({
           panelInView && 'pointer-events-none translate-y-full opacity-0',
         )}
       >
-        <p className="min-w-0 flex-1 text-sm">
+        <div className="min-w-0 flex-1 text-sm">
           <span className="block">{priceText}</span>
+          {/* 사이즈 등 옵션도 첫 화면에서 보이게 한 줄로 요약한다 — 누르면 구매하기와 같은 곳을 연다(#60, 375px) */}
+          {options.length > 0 && (
+            <button
+              type="button"
+              tabIndex={panelInView ? -1 : undefined}
+              onClick={openPurchase}
+              className="block w-full truncate text-left text-xs underline-offset-4 hover:underline"
+            >
+              {options.map((option, index) => (
+                <span key={option.groupId}>
+                  {index > 0 && <span aria-hidden> / </span>}
+                  <span className="text-muted-fg">{option.name}</span> {option.values.join(' · ')}
+                </span>
+              ))}
+              <span className="sr-only"> {t.chooseOptions}</span>
+            </button>
+          )}
           {headline && (
             <span
               className={cx(
@@ -304,7 +323,7 @@ export function PurchasePanel({
               {headline}
             </span>
           )}
-        </p>
+        </div>
         <Button
           className="h-11 shrink-0 px-6"
           tabIndex={panelInView ? -1 : undefined}
