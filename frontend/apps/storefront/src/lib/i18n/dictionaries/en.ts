@@ -247,6 +247,8 @@ export const en: Dictionary = {
       buy: 'Buy now',
       /** Mobile purchase bottom sheet */
       closeSheet: 'Close options',
+      /** Mobile bottom bar option summary button (screen reader suffix) */
+      chooseOptions: 'Choose options',
     },
     option: { soldOut: 'sold out', unavailable: 'unavailable' },
     customOrder: {
