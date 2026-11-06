@@ -489,10 +489,18 @@ export const en: Dictionary = {
     cancelReason: 'Reason',
     cancelCaution:
       'If you are in the middle of paying, check the order status after the payment finishes. Only unpaid orders are canceled right away.',
+    cancelPaidCaution:
+      'We will refund the full amount you paid, including shipping, and then cancel the order. If the refund takes a while to confirm, the order may show as “Cancellation requested” for a moment.',
     cancelConfirm: 'Cancel order',
     canceling: 'Canceling.',
     cancelClose: 'Close',
     canceled: 'Your order has been canceled.',
+    cancelRequested:
+      'We received your cancellation. The order will show as canceled once the refund is confirmed.',
+    cancelInProgress:
+      'We are processing your cancellation. The order will show as canceled once the refund is confirmed. If it doesn’t change for a long time, please contact customer service.',
+    cancelRecheck: 'Check cancellation status',
+    cancelSupport: 'We can’t take the cancellation right now. Please contact customer service.',
     cancelFailed: 'We couldn’t cancel the order. Please try again in a moment.',
     cancelUnknown:
       'We couldn’t confirm the cancellation. Please check the order status and try again if needed.',
@@ -505,7 +513,14 @@ export const en: Dictionary = {
     cancelErrors: {
       ORDER_001: 'We couldn’t find this order.',
       ORDER_020:
-        'This order can no longer be canceled because it has been paid or the payment deadline has passed. Please check the order status.',
+        'This order can no longer be canceled because its status has changed (for example, the payment deadline passed or it has shipped). Please check the order status.',
+      ORDER_025:
+        'The order status just changed. Please check the order status and try again if needed.',
+      ORDER_033:
+        'We couldn’t verify the payment, so we couldn’t take the cancellation. Please contact customer service.',
+      ORDER_034:
+        'We couldn’t verify the payment amount, so we couldn’t take the cancellation. Please contact customer service.',
+      ORDER_035: 'Paid orders can’t be canceled online right now. Please contact customer service.',
       ORDER_100: 'Please choose a reason again.',
       ORDER_154: 'Please choose a reason.',
       GATEWAY_006: 'Too many requests. Please try again in a moment.',

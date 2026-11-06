@@ -22,8 +22,11 @@ import {
 import {
   CANCEL_REASONS,
   cancelFailure,
+  cancelInProgress,
+  cancelNotice,
   canResumePayment,
   confirmFailure,
+  isPaidCancel,
   orderActions,
   orderCancelPath,
   orderDetailPath,
@@ -51,12 +54,14 @@ type Load =
   | { status: 'ready'; order: Order; now: number };
 
 /**
- * 주문 상세 · 결제 전 취소 · 구매 확정(#28 · BE #16). 상세는 브라우저에서 BFF 로 읽고, 액션은 `orderActions` 가 정한 것만 둔다
+ * 주문 상세 · 취소(결제 전 · 결제 후 전체) · 구매 확정(#28 · BE #16). 상세는 브라우저에서 BFF 로 읽고, 액션은 `orderActions` 가 정한 것만 둔다
  * (취소는 서버의 `cancelable`, 구매 확정은 배송 완료). 두 액션 모두 확인 패널을 거친다.
  * 취소는 사유 코드(`CANCEL_REASONS`)를 골라 `POST .../cancellation`, 구매 확정은 `PATCH .../purchase-confirmation` —
  * 응답이 바뀐 상세라 그대로 바꿔 끼운다. 실패 처리는 `cancelFailure` · `confirmFailure` 다(경합 · 결과 모름은 상세를 다시 읽는다).
  * 부분 반품은 항목 · 수량 · 사유를 골라 `POST .../returns`(멱등 키 필수) — 응답은 클레임이라 접수 뒤 상세를 다시 읽어
- * 주문 상태(반품 요청)를 반영한다. 실패 처리는 `returnFailure`(같은 키로 다시 보낼지 가른다). 결제 뒤 취소 · 환불은 BE 전이라 두지 않는다.
+ * 주문 상태(반품 요청)를 반영한다. 실패 처리는 `returnFailure`(같은 키로 다시 보낼지 가른다).
+ * 결제 후 취소(BE #16 PR-2a-2)는 같은 취소 API 다 — 확인 패널에 전액 환불 안내를 두고, 응답이 `CANCEL_REQUESTED`(환불 미확정)면
+ * "처리 중" 안내와 다시 확인 버튼을 둔다(서버가 재시도로 잇는다). 미개방(503 `ORDER_035`) 등 접수 거절은 고객센터로 안내한다.
  * 배송 조회(BE #18 PR-B2)는 상세와 함께 따로 읽는다 — 실패해도 상세는 그대로 보이고 배송 자리에서만 다시 시도한다.
  */
 export function OrderDetail({ orderId }: { orderId: string }) {
@@ -69,6 +74,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   const [canceling, setCanceling] = useState(false);
   const cancelingNow = useRef(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [rechecking, setRechecking] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const confirmingNow = useRef(false);
@@ -233,7 +239,8 @@ export function OrderDetail({ orderId }: { orderId: string }) {
       });
       setLoad({ status: 'ready', order: canceled, now: Date.now() });
       closeCancel('notice');
-      setNotice(t.canceled);
+      // 결제 후 취소는 환불이 확정되지 않으면 취소 요청(처리 중) 상태로 온다
+      setNotice(cancelNotice(canceled, t));
     } catch (cause) {
       cooldown.startFrom(cause);
       const failure = cancelFailure(cause, t);
@@ -241,6 +248,12 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         setLoad({ status: 'signedOut' });
       } else if (failure.kind === 'reload') {
         // 경합에서 졌거나 결과를 모른다 — 지금 상태를 다시 읽어 보인다. 아직 취소할 수 있으면 다시 누르면 된다(취소는 멱등)
+        closeCancel('notice');
+        setNotice(failure.message);
+        await read();
+      } else if (failure.kind === 'support') {
+        // 서버가 접수하지 않았다(결제 후 취소 미개방 등) — 다시 눌러도 같아 패널을 닫고 고객센터로 안내한다.
+        // 다시 읽으면 서버 판정(cancelable)이 버튼을 거둘 수 있다
         closeCancel('notice');
         setNotice(failure.message);
         await read();
@@ -264,6 +277,17 @@ export function OrderDetail({ orderId }: { orderId: string }) {
 
   const { order } = load;
   const actions = orderActions(order);
+
+  const recheckCancel = async () => {
+    if (rechecking) return;
+    setRechecking(true);
+    setNotice(null);
+    try {
+      await read();
+    } finally {
+      setRechecking(false);
+    }
+  };
   const returnBody = returnRequestBody(order, returnSelected, returnReason);
 
   const requestReturn = async () => {
@@ -345,6 +369,9 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           />
         }
       />
+      {cancelInProgress(order) && (
+        <CancelProgress t={t} rechecking={rechecking} onRecheck={() => void recheckCancel()} />
+      )}
       {/* 반품 · 구매 확정 패널은 한 번에 하나만 연다 — 제목 포커스 ref 를 함께 쓴다 */}
       {actions.requestReturn &&
         !confirmOpen &&
@@ -421,6 +448,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           <CancelPanel
             titleRef={panelTitle}
             t={t}
+            paid={isPaidCancel(order)}
             reason={reason}
             onReason={(next) => {
               setReason(next);
@@ -652,6 +680,7 @@ export function DeliveryView({
 export function CancelPanel({
   titleRef,
   t,
+  paid = false,
   reason,
   onReason,
   error,
@@ -663,6 +692,8 @@ export function CancelPanel({
   /** 패널이 열리면 포커스를 받을 제목 */
   titleRef?: Ref<HTMLHeadingElement>;
   t: Dictionary['orders'];
+  /** 결제 후 취소 — 전액 환불 안내로 바꾼다 */
+  paid?: boolean;
   reason: CancelReason | null;
   onReason: (reason: CancelReason) => void;
   error: string | null;
@@ -695,7 +726,7 @@ export function CancelPanel({
           </label>
         ))}
       </fieldset>
-      <p className="text-xs text-muted-fg">{t.cancelCaution}</p>
+      <p className="text-xs text-muted-fg">{paid ? t.cancelPaidCaution : t.cancelCaution}</p>
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -714,6 +745,32 @@ export function CancelPanel({
           {t.cancelClose}
         </Button>
       </div>
+    </section>
+  );
+}
+
+/** 결제 후 취소 처리 중(`CANCEL_REQUESTED`) — 환불이 확정되면 다시 읽었을 때 취소 완료다. 자동 폴링 없이 고객이 다시 확인한다 */
+export function CancelProgress({
+  t,
+  rechecking,
+  onRecheck,
+}: {
+  t: Dictionary['orders'];
+  rechecking: boolean;
+  onRecheck: () => void;
+}) {
+  return (
+    <section className="flex flex-col gap-3 border border-border p-5 text-sm">
+      <p>{t.cancelInProgress}</p>
+      <Button
+        variant="secondary"
+        className="h-12 w-full"
+        disabled={rechecking}
+        aria-busy={rechecking}
+        onClick={onRecheck}
+      >
+        {t.cancelRecheck}
+      </Button>
     </section>
   );
 }

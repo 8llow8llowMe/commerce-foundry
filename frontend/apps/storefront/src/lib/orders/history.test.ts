@@ -5,8 +5,11 @@ import { ko } from '@/lib/i18n/dictionaries/ko';
 import {
   appendOrders,
   cancelFailure,
+  cancelInProgress,
+  cancelNotice,
   canResumePayment,
   confirmFailure,
+  isPaidCancel,
   orderActions,
   orderCancelPath,
   orderListPath,
@@ -158,11 +161,52 @@ describe('cancelFailure', () => {
     });
   });
 
+  it('결제 후 취소를 접수하지 않은 코드(503 ORDER_035 · 500 ORDER_033 · 034)는 결과 모름이 아니라 고객센터 안내다', () => {
+    expect(cancelFailure(apiError('unavailable', 503, 'ORDER_035'), t)).toEqual({
+      kind: 'support',
+      message: t.cancelErrors.ORDER_035,
+    });
+    for (const code of ['ORDER_033', 'ORDER_034']) {
+      expect(cancelFailure(apiError('server', 500, code), t)).toEqual({
+        kind: 'support',
+        message: t.cancelErrors[code],
+      });
+    }
+    expect(cancelFailure(apiError('unavailable', 503, 'ORDER_035'), en.orders)).toEqual({
+      kind: 'support',
+      message: en.orders.cancelErrors.ORDER_035,
+    });
+  });
+
+  it('동시 변경(409 ORDER_025)은 상세를 다시 읽는다', () => {
+    expect(cancelFailure(apiError('conflict', 409, 'ORDER_025'), t)).toEqual({
+      kind: 'reload',
+      message: t.cancelErrors.ORDER_025,
+    });
+  });
+
   it('서버 국문 문구를 보이지 않는다(영문 스토어)', () => {
     expect(cancelFailure(apiError('server', 400, 'ORDER_999'), en.orders)).toEqual({
       kind: 'retry',
       message: en.orders.cancelFailed,
     });
+  });
+});
+
+describe('결제 후 취소 판정', () => {
+  const status = (code: string) => ({ status: { code, name: code, description: '' } });
+
+  it('결제 대기 밖에서의 취소는 결제 후 취소다', () => {
+    expect(isPaidCancel(status('PENDING_PAYMENT'))).toBe(false);
+    expect(isPaidCancel(status('PAID'))).toBe(true);
+    expect(isPaidCancel(status('PREPARING'))).toBe(true);
+  });
+
+  it('취소 요청(환불 미확정)은 처리 중 안내, 취소 완료는 취소 안내', () => {
+    expect(cancelInProgress(status('CANCEL_REQUESTED'))).toBe(true);
+    expect(cancelInProgress(status('CANCELED'))).toBe(false);
+    expect(cancelNotice(status('CANCEL_REQUESTED'), t)).toBe(t.cancelRequested);
+    expect(cancelNotice(status('CANCELED'), t)).toBe(t.canceled);
   });
 });
 
@@ -172,6 +216,11 @@ describe('orderActions', () => {
 
   it('취소는 서버의 cancelable 만 따른다 — 출고 뒤 상태에는 없다', () => {
     expect(at('PENDING_PAYMENT', true).cancel).toBe(true);
+    // 결제 후 취소가 열린 환경에서만 서버가 true 를 준다
+    expect(at('PAID', true).cancel).toBe(true);
+    expect(at('PREPARING', true).cancel).toBe(true);
+    expect(at('PAID', false).cancel).toBe(false);
+    expect(at('CANCEL_REQUESTED', false).cancel).toBe(false);
     for (const code of ['PAID', 'PREPARING', 'SHIPPING', 'DELIVERED', 'PURCHASE_CONFIRMED']) {
       expect(at(code).cancel).toBe(false);
     }
