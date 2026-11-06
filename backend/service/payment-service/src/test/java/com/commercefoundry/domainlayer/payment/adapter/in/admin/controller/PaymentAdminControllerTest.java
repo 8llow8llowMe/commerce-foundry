@@ -13,17 +13,21 @@ import com.commercefoundry.domainlayer.payment.application.model.PaymentAdminSta
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentAdminUseCase;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -99,5 +103,22 @@ class PaymentAdminControllerTest {
 
     private static String bearer(MemberRole role) {
         return "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, role).tokenValue();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER"})
+    @DisplayName("결제 목록은 SETTLEMENT_READ 라 ADMIN · OWNER 는 200 이다 (#587)")
+    void settlementReadersMayRead(MemberRole role) {
+        given(useCase.search(any())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+        assertThat(mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange()).hasStatusOk();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+    @DisplayName("MANAGER · STAFF 는 SETTLEMENT_READ 가 없어 결제 목록이 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#587)")
+    void nonSettlementOperatorsMayNotRead(MemberRole role) {
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange().getResponse(),
+            SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(useCase);
     }
 }

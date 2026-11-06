@@ -18,8 +18,10 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderExceptio
 import com.commercefoundry.domainlayer.order.application.port.in.OrderAdminUseCase;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.time.Instant;
@@ -28,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -173,5 +176,45 @@ class OrderAdminControllerTest {
             .hasStatus(HttpStatus.OK);
 
         verify(orderAdminUseCase).changeStatuses(List.of(4611686018427387905L, 12L), new OrderStatusChangeCommand(OrderStatus.PREPARING, null), TestTokens.MEMBER_ID);
+    }
+
+    private MvcTestResult patch(String uri, String body, MemberRole role) {
+        return mvc.patch().uri(uri).header(HttpHeaders.AUTHORIZATION, bearer(role)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    }
+
+    private MvcTestResult post(String uri, String body, MemberRole role) {
+        return mvc.post().uri(uri).header(HttpHeaders.AUTHORIZATION, bearer(role)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER", "STAFF"})
+    @DisplayName("주문 목록 · 상세는 ORDER_READ 라 ADMIN · OWNER · MANAGER · STAFF 모두 200 이다 (#587)")
+    void orderReadersMayRead(MemberRole role) {
+        given(orderAdminUseCase.getOrders(any(), anyLong())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+        given(orderAdminUseCase.getOrder(anyLong(), anyLong())).willReturn(OrderAdminResponse.builder().orderId("9").build());
+
+        assertThat(get("/api/v1/admin/orders", role)).hasStatusOk();
+        assertThat(get("/api/v1/admin/orders/9", role)).hasStatusOk();
+    }
+
+    @Test
+    @DisplayName("MANAGER 는 ORDER_MANAGE 가 있어 상태 변경 · 일괄 상태 변경이 200 이다 (#587)")
+    void managerMayChangeStatus() {
+        given(orderAdminUseCase.changeStatus(anyLong(), any(), anyLong())).willReturn(OrderAdminResponse.builder().orderId("9").build());
+        given(orderAdminUseCase.changeStatuses(any(), any(), anyLong())).willReturn(new OrderStatusBulkChangeResponse(1, 0, 0, List.of()));
+
+        assertThat(patch("/api/v1/admin/orders/9/status", "{\"status\":\"PREPARING\"}", MemberRole.MANAGER)).hasStatusOk();
+        assertThat(post("/api/v1/admin/orders/status-changes", "{\"orderIds\":[\"9\"],\"status\":\"PREPARING\"}", MemberRole.MANAGER)).hasStatusOk();
+    }
+
+    @Test
+    @DisplayName("STAFF 는 ORDER_MANAGE 가 없어 유효한 본문이어도 상태 변경 · 일괄 상태 변경이 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#587)")
+    void staffMayNotChangeStatus() {
+        SecurityEnvelopeAssertions.assertEnvelope(patch("/api/v1/admin/orders/9/status", "{\"status\":\"PREPARING\"}", MemberRole.STAFF).getResponse(),
+            SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(
+            post("/api/v1/admin/orders/status-changes", "{\"orderIds\":[\"9\"],\"status\":\"PREPARING\"}", MemberRole.STAFF).getResponse(),
+            SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(orderAdminUseCase);
     }
 }
