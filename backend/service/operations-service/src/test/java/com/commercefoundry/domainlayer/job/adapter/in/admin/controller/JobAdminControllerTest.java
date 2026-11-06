@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -106,6 +107,37 @@ class JobAdminControllerTest {
     @Nested
     @DisplayName("권한")
     class Authorization {
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER"})
+        @DisplayName("목록 · 상세는 REPORT_READ 라 ADMIN · OWNER · MANAGER 는 200 이다 (#588)")
+        void reportReadersMayRead(MemberRole role) {
+            given(jobAdminUseCase.getJobs(any())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+            given(jobAdminUseCase.getJob(4611686018427387904L)).willReturn(response());
+
+            assertThat(get(PATH, role)).hasStatusOk();
+            assertThat(get(JOB_PATH, role)).hasStatusOk();
+        }
+
+        @Test
+        @DisplayName("STAFF 는 REPORT 권한이 없어 목록 · 상세 · 취소 모두 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#588)")
+        void staffIsForbidden() {
+            SecurityEnvelopeAssertions.assertEnvelope(get(PATH, MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(get(JOB_PATH, MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(post(CANCEL_PATH, MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(jobAdminUseCase);
+        }
+
+        @Test
+        @DisplayName("취소는 REPORT_MANAGE 라 MANAGER 는 403 · SECURITY_005 이고, OWNER 는 유스케이스에 닿는다 (#588)")
+        void onlyReportManagersMayCancel() {
+            SecurityEnvelopeAssertions.assertEnvelope(post(CANCEL_PATH, MemberRole.MANAGER).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(jobAdminUseCase);
+
+            given(jobAdminUseCase.cancel(4611686018427387904L, TestTokens.MEMBER_ID)).willReturn(response());
+            assertThat(post(CANCEL_PATH, MemberRole.OWNER)).hasStatusOk();
+            verify(jobAdminUseCase).cancel(4611686018427387904L, TestTokens.MEMBER_ID);
+        }
 
         @Test
         @DisplayName("CUSTOMER 면 목록 · 상세 · 취소 모두 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")

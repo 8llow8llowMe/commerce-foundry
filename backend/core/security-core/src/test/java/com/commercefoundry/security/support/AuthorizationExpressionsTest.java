@@ -16,15 +16,15 @@ class AuthorizationExpressionsTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-        "hasRole('ADMIN')",
-        "  hasRole( 'ADMIN' )  ",
-        "hasRole('ADMIN') and isFullyAuthenticated()",
-        "hasRole('ADMIN') AND isFullyAuthenticated()",
-        "hasRole('ADMIN') && isFullyAuthenticated()",
-        "hasRole('ADMIN') and !hasAuthority('SCOPE_readonly')",
-        "hasRole('ADMIN') and (hasAuthority('SCOPE_a') or hasAuthority('SCOPE_b'))",
-        "hasRole('ADMIN') and hasAuthority('SCOPE_or')",
-        "hasRole('ADMIN') and principal.name != 'operator'",
+        "hasAuthority('ADMIN_ORDER_READ')",
+        "  hasAuthority( 'ADMIN_ORDER_READ' )  ",
+        "hasAuthority('ADMIN_ORDER_READ') and isFullyAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') AND isFullyAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') && isFullyAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') and !hasAuthority('SCOPE_readonly')",
+        "hasAuthority('ADMIN_ORDER_READ') and (hasAuthority('SCOPE_a') or hasAuthority('SCOPE_b'))",
+        "hasAuthority('ADMIN_ORDER_READ') and hasAuthority('SCOPE_or')",
+        "hasAuthority('ADMIN_ORDER_READ') and principal.name != 'operator'",
         "hasAuthority('ADMIN_ORDER_MANAGE')",
         "hasAuthority('ADMIN_CATALOG_READ')",
         "hasAuthority('ADMIN_SETTINGS_MANAGE') and isFullyAuthenticated()",
@@ -32,7 +32,7 @@ class AuthorizationExpressionsTest {
         "hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')",
         "hasAnyRole('ADMIN','OWNER','MANAGER','STAFF') and isFullyAuthenticated()"
     })
-    @DisplayName("운영자 권한이 필요조건인 식은 통과한다 — hasRole('ADMIN') · AdminAuthority 기능 상수 · OPERATOR, 단독 · and 로 좁힘 · 괄호 · 문자열 안의 or")
+    @DisplayName("운영자 권한이 필요조건인 식은 통과한다 — AdminAuthority 기능 상수 · OPERATOR, 단독 · and 로 좁힘 · 괄호 · 문자열 안의 or")
     void operatorAuthorityRequired(String expression) {
         assertThat(AuthorizationExpressions.requiresOperatorAuthority(expression)).isTrue();
     }
@@ -46,22 +46,26 @@ class AuthorizationExpressionsTest {
         "hasRole('CUSTOMER')",
         "hasAnyRole('ADMIN', 'CUSTOMER')",
         "hasAuthority('ROLE_ADMIN')",
-        "hasRole('ADMIN') or isAuthenticated()",
-        "hasRole('ADMIN') OR isAuthenticated()",
-        "hasRole('ADMIN') || isAuthenticated()",
-        "hasRole('ADMIN') and isAuthenticated() or permitAll()",
-        "hasRole('ADMIN') and isAuthenticated() ? true : true",
-        "hasRole('ADMIN') and (isAuthenticated()",
-        "hasRole('ADMIN') and isAuthenticated())",
-        "hasRole('ADMIN') == false",
-        "hasRole('ADMIN')and(isAuthenticated()) or true",
+        "hasRole('ADMIN')",
+        "  hasRole( 'ADMIN' )  ",
+        "hasRole('ADMIN') and isFullyAuthenticated()",
+        "hasRole('ADMIN') && isFullyAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') or isAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') OR isAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') || isAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') and isAuthenticated() or permitAll()",
+        "hasAuthority('ADMIN_ORDER_READ') and isAuthenticated() ? true : true",
+        "hasAuthority('ADMIN_ORDER_READ') and (isAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') and isAuthenticated())",
+        "hasAuthority('ADMIN_ORDER_READ') == false",
+        "hasAuthority('ADMIN_ORDER_READ')and(isAuthenticated()) or true",
         "hasRole('ADMINISTRATOR')",
-        "isAuthenticated() and hasRole('ADMIN')",
-        "hasRole('ADMIN') andIsAuthenticated()",
-        "hasRole('ADMIN') and \"(\" != \"\" or true and \")\" != \"\"",
-        "hasRole('ADMIN') and \"'\" != \"\" or true and \"'\" != \"\"",
-        "hasRole('ADMIN') and \"x\" != \"\"",
-        "hasRole('ADMIN') and {cond}",
+        "isAuthenticated() and hasAuthority('ADMIN_ORDER_READ')",
+        "hasAuthority('ADMIN_ORDER_READ') andIsAuthenticated()",
+        "hasAuthority('ADMIN_ORDER_READ') and \"(\" != \"\" or true and \")\" != \"\"",
+        "hasAuthority('ADMIN_ORDER_READ') and \"'\" != \"\" or true and \"'\" != \"\"",
+        "hasAuthority('ADMIN_ORDER_READ') and \"x\" != \"\"",
+        "hasAuthority('ADMIN_ORDER_READ') and {cond}",
         "hasAuthority('ADMIN_FOO_READ')",
         "hasAuthority('ADMIN_ORDER_WRITE')",
         "hasAuthority('ADMIN_ORDER')",
@@ -77,7 +81,8 @@ class AuthorizationExpressionsTest {
         "hasRole('OWNER')",
         "hasRole('MANAGER')"
     })
-    @DisplayName("운영자 권한이 필요조건이 아닌 식은 실패한다 — permitAll · isAuthenticated · 다른 표기 · 정의되지 않은 기능 · hasAnyAuthority · OPERATOR 변형 · 괄호 밖 or · 삼항 · 괄호 불일치 · 큰따옴표 · 템플릿 자리표시자")
+    @DisplayName("운영자 권한이 필요조건이 아닌 식은 실패한다 — permitAll · isAuthenticated · #236 이전 표기 hasRole('ADMIN')(#588) · 다른 표기 · 정의되지 않은 기능 · "
+        + "hasAnyAuthority · OPERATOR 변형 · 괄호 밖 or · 삼항 · 괄호 불일치 · 큰따옴표 · 템플릿 자리표시자")
     void operatorAuthorityNotRequired(String expression) {
         assertThat(AuthorizationExpressions.requiresOperatorAuthority(expression)).isFalse();
     }

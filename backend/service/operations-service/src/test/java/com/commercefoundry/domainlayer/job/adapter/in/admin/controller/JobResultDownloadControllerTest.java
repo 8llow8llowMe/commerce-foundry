@@ -10,11 +10,14 @@ import com.commercefoundry.domainlayer.job.adapter.in.admin.dto.response.JobResu
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.port.in.JobResultDownloadUseCase;
+import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.time.Instant;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -35,6 +38,19 @@ class JobResultDownloadControllerTest {
         assertThat(mvc.post().uri(PATH).exchange()).hasStatus(401);
         assertThat(mvc.post().uri(PATH).header(HttpHeaders.AUTHORIZATION, token(MemberRole.CUSTOMER)).exchange()).hasStatus(403);
         verifyNoInteractions(useCase);
+    }
+
+    @Test
+    @DisplayName("결과 다운로드는 REPORT_READ 라 MANAGER 는 유스케이스에 닿고 STAFF 는 403 · SECURITY_005 다 (#588)")
+    void reportReadersMayIssueDownload() {
+        SecurityEnvelopeAssertions.assertEnvelope(
+            mvc.post().uri(PATH).header(HttpHeaders.AUTHORIZATION, token(MemberRole.STAFF)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(useCase);
+
+        given(useCase.download(42L, TestTokens.MEMBER_ID)).willReturn(
+            new JobResultDownloadResponse("https://private.example.test/file?signature=SECRET", Instant.parse("2026-11-01T00:01:00Z"), "report.csv", "text/csv", 3));
+        assertThat(mvc.post().uri(PATH).header(HttpHeaders.AUTHORIZATION, token(MemberRole.MANAGER)).exchange()).hasStatusOk();
+        verify(useCase).download(42L, TestTokens.MEMBER_ID);
     }
 
     @Test

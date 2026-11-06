@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -95,6 +96,33 @@ class ShipmentAdminControllerTest {
     @Nested
     @DisplayName("권한")
     class Authorization {
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER"})
+        @DisplayName("송장 등록은 FULFILLMENT_MANAGE 라 ADMIN · OWNER · MANAGER 는 유스케이스에 닿는다 (#588)")
+        void fulfillmentManagersMayRegister(MemberRole role) {
+            given(shipmentAdminUseCase.register(any())).willReturn(new ShipmentRegisterAdminResponse(0, 0, 0, List.of()));
+
+            assertThat(post(VALID_BODY, role)).hasStatusOk();
+
+            verify(shipmentAdminUseCase).register(any(ShipmentRegisterCommand.class));
+        }
+
+        @Test
+        @DisplayName("STAFF 는 FULFILLMENT_READ 뿐이라 송장 등록 · 배송 상태 변경은 403 · SECURITY_005 이고 목록 · 상세는 200 이다 (#588)")
+        void staffMayReadButNotManage() {
+            given(shipmentAdminUseCase.search(any(), any(), any(), anyInt(), anyInt())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+            given(shipmentAdminUseCase.getDetail(Long.parseLong(DELIVERY_ID))).willReturn(detail("SHIPPED"));
+
+            SecurityEnvelopeAssertions.assertEnvelope(post(VALID_BODY, MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(patch("{\"status\": \"DELIVERED\", \"reason\": \"수령 확인\"}", MemberRole.STAFF).getResponse(),
+                SecurityErrorCode.FORBIDDEN);
+            assertThat(get(PATH, MemberRole.STAFF)).hasStatusOk();
+            assertThat(get(PATH + "/" + DELIVERY_ID, MemberRole.STAFF)).hasStatusOk();
+
+            verify(shipmentAdminUseCase, never()).register(any());
+            verify(shipmentAdminUseCase, never()).changeStatus(any());
+        }
 
         @Test
         @DisplayName("CUSTOMER 면 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")

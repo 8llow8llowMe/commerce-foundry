@@ -12,16 +12,20 @@ import com.commercefoundry.domainlayer.campaign.adapter.in.admin.dto.response.Ca
 import com.commercefoundry.domainlayer.campaign.application.exception.CampaignErrorCode;
 import com.commercefoundry.domainlayer.campaign.application.exception.CampaignException;
 import com.commercefoundry.domainlayer.campaign.application.port.in.CampaignAdminUseCase;
+import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.time.Instant;
 import java.util.List;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -55,11 +59,23 @@ class CampaignAdminControllerTest {
         verify(useCase).preview(TestTokens.MEMBER_ID, List.of(2L, 1L, 2L));
     }
 
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+    @DisplayName("수신 대상 미리보기는 CS_READ 라 OWNER · MANAGER · STAFF 도 유스케이스에 닿는다 — 저장 · 발송이 없고 회원 목록과 같은 노출 수준이다 (#588)")
+    void csReadersMayPreview(MemberRole role) {
+        when(useCase.preview(anyLong(), anyList())).thenReturn(new CampaignRecipientPreviewResponse(1, 1, 0, List.of()));
+
+        assertThat(mvc.post().uri(PATH).header("Authorization", bearer(role))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"memberIds\":[1]}").exchange()).hasStatusOk();
+        verify(useCase).preview(TestTokens.MEMBER_ID, List.of(1L));
+    }
+
     @Test
     void anonymousAndCustomerCannotQuery() {
-        assertThat(mvc.post().uri(PATH).contentType(MediaType.APPLICATION_JSON).content("{\"memberIds\":[1]}").exchange()).hasStatus(401);
-        assertThat(mvc.post().uri(PATH).header("Authorization", bearer(MemberRole.CUSTOMER))
-            .contentType(MediaType.APPLICATION_JSON).content("{\"memberIds\":[1]}").exchange()).hasStatus(403);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH).contentType(MediaType.APPLICATION_JSON).content("{\"memberIds\":[1]}").exchange().getResponse(),
+            SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH).header("Authorization", bearer(MemberRole.CUSTOMER))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"memberIds\":[1]}").exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
         verifyNoInteractions(useCase);
     }
 

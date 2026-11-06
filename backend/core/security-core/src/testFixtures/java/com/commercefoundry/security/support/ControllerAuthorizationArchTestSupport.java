@@ -103,7 +103,7 @@ public abstract class ControllerAuthorizationArchTestSupport {
         .allowEmptyShould(true);
 
     /**
-     * R2. 어드민 핸들러는 운영자 권한이 필요조건이다 — {@code AdminAuthority} 의 기능 상수 · {@code OPERATOR} 또는 #236 이전 표기 {@code hasRole('ADMIN')},
+     * R2. 어드민 핸들러는 운영자 권한이 필요조건이다 — {@code AdminAuthority} 의 기능 상수 · {@code OPERATOR} 만 머리로 받고(#236 이전 표기 {@code hasRole('ADMIN')} 은 #588 부터 실패),
      * 좁힐 때만 {@code ... and ...}. 판정은 {@link AuthorizationExpressions#requiresOperatorAuthority} ({@code security-guide.md} §3-1).
      */
     public static final ArchRule ADMIN_HANDLERS_REQUIRE_OPERATOR_AUTHORITY = methods()
@@ -189,7 +189,7 @@ public abstract class ControllerAuthorizationArchTestSupport {
     }
 
     @Test
-    @DisplayName("R2 adapter.in.admin 핸들러의 @PreAuthorize 는 운영자 권한(AdminAuthority 상수 · hasRole('ADMIN'))을 필요조건으로 한다")
+    @DisplayName("R2 adapter.in.admin 핸들러의 @PreAuthorize 는 운영자 권한(AdminAuthority 상수)을 필요조건으로 한다")
     void adminHandlersRequireAdminRole() {
         ADMIN_HANDLERS_REQUIRE_OPERATOR_AUTHORITY.check(serviceClasses());
     }
@@ -318,7 +318,8 @@ public abstract class ControllerAuthorizationArchTestSupport {
                 boolean satisfied = expression.filter(AuthorizationExpressions::requiresOperatorAuthority).isPresent();
                 String declared = expression.map(value -> "@PreAuthorize(\"" + value + "\")").orElse("@PreAuthorize 없음");
                 events.add(new SimpleConditionEvent(method, satisfied,
-                    handlerName(method) + " -> " + declared + " — AdminAuthority 상수(hasAuthority('ADMIN_<기능>_READ|MANAGE') · hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')) 또는 hasRole('ADMIN') 를 머리로, 좁힐 때만 and ... 로 고치세요"));
+                    handlerName(method) + " -> " + declared + " — AdminAuthority 상수(hasAuthority('ADMIN_<기능>_READ|MANAGE') · hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')) 를 머리로,"
+                        + " 좁힐 때만 and ... 로 고치세요 — hasRole('ADMIN') 은 #588 부터 받지 않습니다"));
             }
         };
     }

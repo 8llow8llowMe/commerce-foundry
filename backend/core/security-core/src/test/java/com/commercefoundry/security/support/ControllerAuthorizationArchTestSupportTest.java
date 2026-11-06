@@ -64,10 +64,11 @@ class ControllerAuthorizationArchTestSupportTest {
     }
 
     @Test
-    @DisplayName("R2 어드민 핸들러가 permitAll() · isAuthenticated() · or 로 넓힌 식 · 정의되지 않은 기능 권한 · 선언 없음이면 실패한다")
+    @DisplayName("R2 어드민 핸들러가 permitAll() · isAuthenticated() · or 로 넓힌 식 · 정의되지 않은 기능 권한 · #236 이전 표기 hasRole('ADMIN') · 선언 없음이면 실패한다")
     void adminHandlersWithoutAdminRoleFail() {
         assertThat(violations(ControllerAuthorizationArchTestSupport.ADMIN_HANDLERS_REQUIRE_OPERATOR_AUTHORITY))
-            .hasSize(6)
+            .hasSize(7)
+            .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#legacyAdminRole", "hasRole('ADMIN')"))
             .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#unknownFeature", "ADMIN_FOO_READ"))
             .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#open", "@PreAuthorize(\"permitAll()\")", "AdminAuthority"))
             .anySatisfy(detail -> assertThat(detail).contains("WidenedAdminController#member"))
