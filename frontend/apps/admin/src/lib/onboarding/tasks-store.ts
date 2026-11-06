@@ -78,6 +78,34 @@ export function createOnboardingTasksStore(
 /** 서버 렌더 스냅숏 — 아직 모른다 */
 export const serverTasksState = (): TasksState => INITIAL;
 
+/** 탭으로 돌아왔을 때 다시 읽는 최소 간격 — 조회가 원천 서비스를 거치므로 탭을 오갈 때마다 부르지 않는다 */
+export const RETURN_REFRESH_MS = 30_000;
+
+type VisibilitySource = Pick<
+  Document,
+  'visibilityState' | 'addEventListener' | 'removeEventListener'
+>;
+
+/**
+ * 홈 카드를 띄워 둔 채 다른 기기(탭)에서 업무를 했을 때 — 이 탭으로 돌아오면 서버에서 다시 읽는다(#358 다른 기기 진행률).
+ * 마지막으로 읽은 뒤 `RETURN_REFRESH_MS` 가 지나지 않았으면 읽지 않는다. 돌려준 함수로 듣기를 멈춘다.
+ */
+export function refreshOnReturn(
+  doc: VisibilitySource,
+  load: () => void,
+  now: () => number = Date.now,
+): () => void {
+  let last = now();
+  const onChange = () => {
+    if (doc.visibilityState !== 'visible') return;
+    if (now() - last < RETURN_REFRESH_MS) return;
+    last = now();
+    load();
+  };
+  doc.addEventListener('visibilitychange', onChange);
+  return () => doc.removeEventListener('visibilitychange', onChange);
+}
+
 /**
  * 시작 카드 접기 · 나중에(#358). 이 탭 동안만 기억한다(sessionStorage) — 운영자 기록이 아니라 화면 편의라 서버에 두지 않고,
  * 로그아웃하면 지운다. 업무 상태와는 관계없다.
