@@ -492,6 +492,22 @@ ANALYZE 후 실제 Hibernate 생성 SQL·동일 바인딩의 EXPLAIN(ANALYZE,BUF
 - 취소 요청도 `Idempotency-Key` 를 싣는다. 키는 클레임 ID 처럼 재시도해도 같은 값이어야 한다.
 - PayPal 환불은 수수료가 돌려받아지지 않을 수 있다 — 환불 정책 문구와 어드민 화면에 반영한다.
 
+### order → payment 결제 후 취소 호출 (#16 PR-2)
+
+- **경로** — 고객 결제 후 취소(`POST /api/v1/orders/{orderId}/cancellation`)가 클레임을 접수(tx1)한 뒤 트랜잭션 밖에서
+  `POST /internal/v1/payments/{paymentId}/cancellations` 를 부른다(`PaymentCancelPort` → `PaymentCancelClientAdapter`). 미확정이면 재시도 스케줄러
+  (`ClaimCancellationRetryScheduler`, `order.cancellation.retry.*`)가 같은 경로로 다시 부른다. 흐름 · 상태는 `order-flow-guide.md` §5 가 정본이다.
+  재시도 스케줄러가 꺼져 있으면(`order.cancellation.retry.enabled=false`, 기본) 결제 후 취소 자체를 받지 않는다(503 `ORDER_035`) — 미확정 환불이 영영 따라오지 않는 창을 막는다.
+- **본문 · 키** — `Idempotency-Key` = 클레임 아이디, 본문 `{claimId, amount, currency}`. 결제 아이디 · 금액은 **접수 때 클레임에 저장한 값만** 보낸다 — 재시도에서 다시 계산하지
+  않는다(키가 같은데 금액이 바뀌면 `PAYMENT_019`). 접수 때 환불액(전체 취소 = 주문 총액)이 `order_payment` 승인 금액과 다르면 접수하지 않는다(500 `ORDER_034`),
+  결제 완료 기록이 없으면 500 `ORDER_033` 이다.
+- **분류** (`PaymentCancelInternalResponseSupport`) — 200 → 환불 확정(같은 클레임의 기존 성공 포함). `PAYMENT_016` · `017` · `019` · `001` · 400 `PAYMENT_1xx` → 종결 거절
+  (클레임 `REFUND_FAILED` + 그 코드, 운영자 확인). 그 밖(503 `PAYMENT_018` · `PAYMENT_012` · 타임아웃 · 5xx · 모르는 4xx · 401/403 · 서킷 오픈 · 계약 위반 ·
+  Feign 밖 예외) → 미확정 — 같은 클레임 · 같은 본문으로 백오프 재시도, `max-attempts` 를 넘으면 `REFUND_FAILED`(`REFUND_UNCONFIRMED`). 키 유효 기간(14일) 안에서
+  끝나도록 `max-backoff × max-attempts ≤ 14d` 를 기동 때 검사한다.
+- **타임아웃 · 서킷** — `paymentCancelClient`(contextId) read timeout **10초**(PG 취소 대기, 조회 3초와 따로), 서킷 `payment-cancellation` 은 조회 서킷
+  `payment-service` 와 분리한다 — PG 취소 장애가 승인 반영 재조회를 막지 않게. 클레임 lease(`order.cancellation.retry.lease`, 기본 2분)는 read timeout 보다 충분히 길어야 한다.
+
 ### 전액 취소 실패 필드 제약 보정 (#551)
 
 배포 전 `service/payment-service/src/test/resources/ddl/payment-canceled-failed-fields.sql`을 운영자가

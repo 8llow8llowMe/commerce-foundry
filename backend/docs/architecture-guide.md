@@ -169,6 +169,8 @@ Info → Presenter → Response
   다른 컨텍스트의 Entity·Port·QueryResult를 공유하지 않는다([결제 관측 계약](payment-observation-guide.md), #477 A4a).
 - **같은 행을 워커 · 다른 요청과 다투는 낙관적 충돌 재시도** 도 예외다. 버전에서 지면 새 트랜잭션에서 다시 읽어야 바뀐 상태로 판정되므로
   트랜잭션은 시도마다 Processor 가 열고 Facade 는 재시도만 한다 (예: operations `JobAdminFacade#cancel`, 작업 등록 `JobRegisterFacade`).
+- **여러 Facade 가 공유하는 "원격 호출 + 짧은 트랜잭션" 단계 묶음** 은 트랜잭션을 걸지 않는(또는 `NEVER`) Processor 로 둘 수 있다 — 그 Processor 는 원격 포트를 부르고
+  DB 구간은 다른 Processor 의 짧은 트랜잭션에 맡긴다(Facade 끼리 부르지 않는다). 예: payment `PaymentRecoveryScanProcessor`, order `OrderCancellationPipelineProcessor`(#16).
 - **유니크 키 경합으로 행을 처음 만드는 일** 도 예외다. 진 쪽 트랜잭션은 PostgreSQL 이 중단시켜 같은 트랜잭션에서 다시 시도할 수 없으므로 생성은 adapter 의
   `REQUIRES_NEW` 로 격리하고, Facade 는 바깥 트랜잭션 없이(`NOT_SUPPORTED`) 시도를 반복한다 (예: operations `AiUsageMeterFacade#reserve`, order 주문 요청).
   단, 이상 탐지의 사건 상태와 전체 수신자 알림을 원자 저장하는 경로는 Processor의 같은 트랜잭션을 유지한다.
