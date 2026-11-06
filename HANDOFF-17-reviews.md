@@ -20,3 +20,14 @@
 - MEDIUM: ClaimAdminActionProcessor:74 prepareRetry 가 lease 가 살아 있는 REQUESTED·REFUNDED 도 hold 로 다시 선점 → 진행 중인 스케줄러/고객 쪽과 원격 호출 중복, 진 쪽이 실패 1회로 세어져 UNCONFIRMED 상한에 일찍 닿을 수 있음. → nextAttemptAt > now 면 원격 없이 현재 상세(또는 409).
 - MEDIUM: 롤링 배포 · 롤백 위험을 문서에 명시 — 구 앱은 REJECTED 를 못 읽어 그 행이 든 어드민 목록 페이지 500, 구 앱은 거절된 주문 고객 재취소를 막지 않음(uk 충돌 롤백). "REJECTED 행이 생긴 뒤 PR-A 이전 앱으로 롤백 금지, 필요하면 거절 API 먼저 차단", 롤링 중 거절 API 막는 수단(게이트웨이/플래그/절차).
 - LOW: ADD CHECK 에 NOT VALID 없음(작은 테이블이라 OK, 주석), preflight 에 새 칸 존재 여부 SELECT 추가(dev ddl-auto 대비), 마지막 결정이 덮어써 수동 확정 사유가 audit 에만 남는 경우(감사 실패 경보 또는 문서화), findOrderIds 는 uk 앞 열 사용으로 충분.
+
+### 결제 정합성(be-payment-reviewer) — CRITICAL 0 · **HIGH 3** · MEDIUM 3 (17:3x 도착)
+- **HIGH-1 이미 환불된 결제도 거절 가능**(ClaimAdminActionProcessor:103-107, Claim:258): payment `PAYMENT_016` 은 "결제가 이미 CANCELED/콘솔 취소" · "다른 PENDING 있음" · "PG 성공 뒤 complete 에서 이미 REJECTED" 까지 섞여 있고, `PAYMENT_017` 은 이미 일부 환불됐다는 뜻. 지금은 REFUND_UNCONFIRMED 만 거절 금지라, 016/017 로 닫힌 건을 거절하면 돈은 환불됐는데 주문은 PAID 로 돌아가 출고된다. → 최소: 016 · 017 은 거절 금지(409 ORDER_038)로, 거절은 PG 거절 계열(PAYMENT_019 · 001 · 400 검증 등 돈이 확실히 안 움직인 코드)만. 더 나아가 payment 조회 포트(#308)로 결제 DONE · 이 claimId SUCCEEDED 없음을 확인 후 허용, 또는 payment 016 세분화(후속 이슈).
+- **HIGH-2 대기 상태 재시도가 lease 를 무시**(ClaimAdminActionProcessor:74, Claim.holdUntil:213-219): 진행 중인 원격 호출과 겹쳐 PG 취소 동시 2회 → 한쪽 016 → HIGH-1 경로. → REQUESTED · REFUNDED 이고 nextAttemptAt > now 면 409 ORDER_025("진행 중"). DB 검토 MEDIUM 과 같은 지적. 동시성 시험 추가.
+- **HIGH-3 completion 이 RESTORATION_UNCONFIRMED 도 받음**(ClaimAdminActionProcessor:177): product 는 실제로 복원했는데 응답만 유실된 경우, 운영자가 재고 조정 후 completion 하면 이중 복원. → RESTORATION_UNCONFIRMED 는 completion 금지(재시도 강제 — product claimId 멱등이라 안전), completion 은 종결 코드(027 · 028 · 029 · 003 · RESTORATION_DATA_INVALID · ORDER_STATUS_UNEXPECTED)만.
+- MEDIUM-4: 수동 확정 · 거절 근거가 사라짐(failureCode null 처리, Decision 덮어쓰기, CANCELED 분기 ADMIN 이력 없음, 감사 줄에 사유 없음) → 종결 시 실패 코드 보존(last_failure_code 등), 결정 이력 append-only 검토, 감사에 이전 상태 · 실패 코드.
+- MEDIUM-5: 거절 뒤 늦게 온 성공이 warn 로그로만 버려짐(Pipeline:75-77, :61-62) → REJECTED 재읽기 + DONE 이면 error 로그 + 알림/표시, 시험.
+- MEDIUM-6: 미확정을 "환불 안 됨"으로 확정할 경로가 없음(payment 018 고리) → deploy-guide ⑧ 에 한계 명시, payment 클레임별 취소 조회 API 후속 이슈.
+- LOW: 수동 확정 · completion 에 paidCancellationOpen 게이트 없음(스케줄러 꺼져 있으면 REFUNDED 방치 알림). 거절 원상태 판정 · 전이 표 확장 · ORDER_STATUS_UNEXPECTED 재시도 금지 · 수동 확정 뒤 복원 멱등은 정상.
+
+### 최종 reviewer — 마감까지 미도착 → 집에서 다시 돌린다.

@@ -22,7 +22,8 @@
 - 보안: **HIGH 1(★ 결정 필요)** — 권한 수준이 `security-guide.md:250` 규칙과 충돌. 4 API 모두 `ORDER_MANAGE`(MANAGER 허용). 내 추천 (a) refund-confirmation = `SETTLEMENT_MANAGE`, retries · rejection = `CS_MANAGE`(+ORDER_MANAGE), completion = `ORDER_MANAGE`. (b) 유지하고 :250 을 명시적 결정으로 교체.
 - DB: HIGH 0. MEDIUM 2 — 재시도가 lease 가 살아 있는 클레임을 다시 선점(원격 중복·실패 횟수 오집계), 롤링 배포 · 롤백 위험 문서화(REJECTED 행 생긴 뒤 이전 앱 롤백 금지).
 - Hexagonal: HIGH 0. MEDIUM 2 — 고객 cancelable 판정이 Facade 로 새어 나감(Processor 로 모으기), `PAID_BEFORE_SHIPMENT` 3곳 중복(`OrderStatus#isPaidBeforeShipment()`).
-- 결제 정합성 · 최종 reviewer: **마감까지 결과 미도착** → 집에서 다시 돌린다.
+- 결제 정합성: **HIGH 3** — (1) PAYMENT_016 · 017 로 닫힌(이미 환불됐을 수 있는) 건도 거절 가능 → 거절은 돈이 확실히 안 움직인 코드만, (2) 재시도가 lease 무시 → 원격 중복 호출, (3) completion 이 RESTORATION_UNCONFIRMED 도 받아 이중 복원 가능. MEDIUM 3.
+- 최종 reviewer: 마감까지 미도착 → 집에서 다시 돌린다.
 
 ## 집에서 할 일 (순서)
 
@@ -35,8 +36,8 @@
    ```
 2. 실패 시험 근본 원인 수정 → 위 재현 명령으로 확인.
 3. ★ 권한 결정(보안 HIGH) 받기.
-4. 검토 지적 반영(보안 HIGH · DB MEDIUM 2 · Hexagonal MEDIUM 2 + LOW 들) — 한 번에 be-executor 로.
-5. 결제 정합성 · 최종 reviewer 검토를 다시 돌린다(be-payment-reviewer · reviewer).
+4. 검토 지적 반영(결제 HIGH 3 · 보안 HIGH 1 · DB MEDIUM 2 · Hexagonal MEDIUM 2 + 결제 MEDIUM 3 + LOW 들) — 한 번에 be-executor 로.
+5. 반영 뒤 결제 정합성 · 최종 reviewer 검토를 다시 돌린다(be-payment-reviewer · reviewer).
 6. `./gradlew :service:order-service:cleanTest :service:order-service:check --no-build-cache` 를 직접 돌려 통과 확인.
 7. HANDOFF 파일 3개 삭제 → "작업 중 저장" 커밋과 함께 정리(코드 커밋 · 문서 커밋으로 나눠 다시 만들기 — 원격 이력 덮어쓰기가 필요하면 새 브랜치 이름으로 올린다. 이 PC 의 권한 정책은 force push 를 막는다).
 8. `/pr` — 제목은 이슈 제목 "[BE] feat: 어드민 주문 관리 API 구현 (목록·상세·상태 변경·취소/반품 처리)" 확인 후 사용, 본문 첫 줄 "#17 PR-A: 결제 후 취소 수습", 운영 DDL 절에 `claim-admin-decision.sql` 전문, FE 영향(어드민 버튼 4개 · 응답 칸 · 고객 ORDER_037) → reviewer seonghoho.
