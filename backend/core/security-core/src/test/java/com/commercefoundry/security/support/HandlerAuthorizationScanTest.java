@@ -21,11 +21,12 @@ import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 class HandlerAuthorizationScanTest {
 
     @Test
-    @DisplayName("/api/v1/admin 핸들러는 운영자 권한(AdminAuthority 기능 상수 · OPERATOR · hasRole('ADMIN'))이 필요조건이어야 하고, 그 밖의 /api 는 선언만, /internal 은 허용 호출자 그 자체여야 한다")
+    @DisplayName("/api/v1/admin 핸들러는 운영자 권한(AdminAuthority 기능 상수 · OPERATOR)이 필요조건이어야 하고(hasRole('ADMIN') 은 #588 부터 실패), "
+        + "그 밖의 /api 는 선언만, /internal 은 허용 호출자 그 자체여야 한다")
     void scanJudgesByPath() {
         Map<RequestMappingInfo, HandlerMethod> handlers = new LinkedHashMap<>();
-        handlers.put(mapping("/api/v1/admin/policies"), handler("adminRole"));
-        handlers.put(mapping("/api/v1/admin"), handler("adminRoleNarrowed"));
+        handlers.put(mapping("/api/v1/admin/policies"), handler("legacyAdminRole"));
+        handlers.put(mapping("/api/v1/admin"), handler("featureNarrowed"));
         handlers.put(mapping("/api/v1/admin/orders"), handler("featureAuthority"));
         handlers.put(mapping("/api/v1/admin/me/password"), handler("operator"));
         handlers.put(mapping("/api/v1/admin/foo"), handler("unknownFeature"));
@@ -43,9 +44,10 @@ class HandlerAuthorizationScanTest {
 
         assertThat(scan.checkedInternalPatterns()).containsExactlyInAnyOrder("/internal/v1/stocks", "/internal/v1/widened");
         assertThat(scan.violations())
-            .hasSize(6)
+            .hasSize(7)
+            .anySatisfy(detail -> assertThat(detail).contains("#legacyAdminRole [/api/v1/admin/policies]", "hasRole('ADMIN')", "#588"))
             .anySatisfy(detail -> assertThat(detail).contains("#unknownFeature [/api/v1/admin/foo]", "ADMIN_FOO_READ"))
-            .anySatisfy(detail -> assertThat(detail).contains("#authenticated [/api/v1/admin/members]", "isAuthenticated()", "hasRole('ADMIN')"))
+            .anySatisfy(detail -> assertThat(detail).contains("#authenticated [/api/v1/admin/members]", "isAuthenticated()", "AdminAuthority"))
             .anySatisfy(detail -> assertThat(detail).contains("#open [/api/v1/admin/open]", "permitAll()"))
             .anySatisfy(detail -> assertThat(detail).contains("#missing [/api/v1/admin/missing]", "@PreAuthorize 없음"))
             .anySatisfy(detail -> assertThat(detail).contains("#missing [/api/v1/forgotten]", "@PreAuthorize 없음"))
@@ -67,12 +69,13 @@ class HandlerAuthorizationScanTest {
     /** 판정에 쓰는 선언만 가진 핸들러 모음. 매핑은 {@link #mapping} 이 경로로 따로 준다 — 어느 패키지 · 클래스에 있든 경로로 판정함을 보인다. */
     static class Handlers {
 
+        /** #236 이전 표기 — #588 부터 어드민 경로에서 위반이다. */
         @PreAuthorize("hasRole('ADMIN')")
-        public void adminRole() {
+        public void legacyAdminRole() {
         }
 
-        @PreAuthorize("hasRole('ADMIN') and isFullyAuthenticated()")
-        public void adminRoleNarrowed() {
+        @PreAuthorize("hasAuthority('ADMIN_ORDER_READ') and isFullyAuthenticated()")
+        public void featureNarrowed() {
         }
 
         @PreAuthorize(AdminAuthority.ORDER_MANAGE)

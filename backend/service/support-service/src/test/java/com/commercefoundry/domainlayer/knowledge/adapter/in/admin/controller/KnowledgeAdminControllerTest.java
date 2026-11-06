@@ -18,15 +18,19 @@ import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeLocale;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeRevision;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeStatus;
 import com.commercefoundry.domainlayer.knowledge.domain.model.KnowledgeType;
+import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
+import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.time.Instant;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -50,6 +54,11 @@ class KnowledgeAdminControllerTest {
         {"title":"Shipping","body":"Private policy text","category":"SHIPPING","validFrom":"2026-11-02T00:00:00Z"}
         """.strip();
     private static final String CREATE = "{\"type\":\"FAQ\",\"locale\":\"KO\",\"content\":" + CONTENT + "}";
+    private static final String EDIT = "{\"revisionNumber\":1,\"expectedVersion\":4,\"content\":" + CONTENT + "}";
+    private static final String DRAFT = "{\"expectedDocumentVersion\":3,\"content\":" + CONTENT + "}";
+    private static final String APPROVE = "{\"revisionNumber\":1,\"expectedVersion\":4}";
+    private static final String PUBLISH = "{\"revisionNumber\":1,\"expectedVersion\":4,\"expectedDocumentVersion\":3}";
+    private static final String ARCHIVE_QUERY = "/101?revisionNumber=1&expectedVersion=4&expectedDocumentVersion=3";
 
     @Autowired MockMvcTester mvc;
     @MockitoBean KnowledgeAdminUseCase useCase;
@@ -57,10 +66,62 @@ class KnowledgeAdminControllerTest {
     @ParameterizedTest
     @CsvSource({"GET, ''", "GET, /101", "POST, ''", "PUT, /101", "DELETE, /101",
         "POST, /101/revisions", "POST, /101/approve", "POST, /101/publish"})
-    void everyHandlerRequiresAdmin(String method, String suffix) {
+    void everyHandlerRejectsAnonymousAndCustomer(String method, String suffix) {
         assertThat(exchange(HttpMethod.valueOf(method), suffix, CREATE, null)).hasStatus(401);
         assertThat(exchange(HttpMethod.valueOf(method), suffix, CREATE, MemberRole.CUSTOMER)).hasStatus(403);
         verifyNoInteractions(useCase);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+    @DisplayName("목록 · 상세는 CS_READ 라 MANAGER · STAFF 도 200 이다 (#588)")
+    void csReadersMayRead(MemberRole role) {
+        assertThat(exchange(HttpMethod.GET, "", null, role)).hasStatusOk();
+        assertThat(exchange(HttpMethod.GET, "/101", null, role)).hasStatusOk();
+    }
+
+    @Test
+    @DisplayName("생성 · 편집 · 새 초안은 CS_MANAGE 라 MANAGER 는 유스케이스에 닿고 작성자는 토큰의 memberId 다 (#588)")
+    void managerMayDraft() {
+        assertThat(exchange(HttpMethod.POST, "", CREATE, MemberRole.MANAGER)).hasStatus(201);
+        assertThat(exchange(HttpMethod.PUT, "/101", EDIT, MemberRole.MANAGER)).hasStatusOk();
+        assertThat(exchange(HttpMethod.POST, "/101/revisions", DRAFT, MemberRole.MANAGER)).hasStatus(201);
+
+        verify(useCase).create(any(), eq(TestTokens.MEMBER_ID));
+        verify(useCase).edit(eq(101L), eq(1), eq(4L), any(), eq(TestTokens.MEMBER_ID));
+        verify(useCase).createDraft(eq(101L), eq(3L), any(), eq(TestTokens.MEMBER_ID));
+    }
+
+    @Test
+    @DisplayName("STAFF 는 CS_READ 뿐이라 생성 · 편집 · 새 초안(유효한 본문)이 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#588)")
+    void staffMayNotDraft() {
+        SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.POST, "", CREATE, MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.PUT, "/101", EDIT, MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(
+            exchange(HttpMethod.POST, "/101/revisions", DRAFT, MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(useCase);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+    @DisplayName("승인 · 게시 · 보관은 고객 AI 응답에 나가는 결정이라 SETTINGS_MANAGE — MANAGER · STAFF 는 유효한 요청이어도 403 · SECURITY_005 다 (#588)")
+    void nonOwnersMayNotApprovePublishOrArchive(MemberRole role) {
+        SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.POST, "/101/approve", APPROVE, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.POST, "/101/publish", PUBLISH, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.DELETE, ARCHIVE_QUERY, null, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+        verifyNoInteractions(useCase);
+    }
+
+    @Test
+    @DisplayName("OWNER 는 SETTINGS_MANAGE 가 있어 승인 · 게시 · 보관이 유스케이스에 닿는다 (#588)")
+    void ownerMayApprovePublishAndArchive() {
+        assertThat(exchange(HttpMethod.POST, "/101/approve", APPROVE, MemberRole.OWNER)).hasStatusOk();
+        assertThat(exchange(HttpMethod.POST, "/101/publish", PUBLISH, MemberRole.OWNER)).hasStatusOk();
+        assertThat(exchange(HttpMethod.DELETE, ARCHIVE_QUERY, null, MemberRole.OWNER)).hasStatusOk();
+
+        verify(useCase).approve(101, 1, 4L, TestTokens.MEMBER_ID);
+        verify(useCase).publish(101, 1, 4L, 3L, TestTokens.MEMBER_ID);
+        verify(useCase).archive(101, 1, 4L, 3L, TestTokens.MEMBER_ID);
     }
 
     @Test

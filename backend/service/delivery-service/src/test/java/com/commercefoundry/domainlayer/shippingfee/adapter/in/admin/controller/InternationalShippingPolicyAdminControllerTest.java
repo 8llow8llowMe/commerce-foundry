@@ -34,13 +34,13 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -85,9 +85,13 @@ class InternationalShippingPolicyAdminControllerTest {
     }
 
     /**
-     * 교체는 {@code @AuthenticationPrincipal MemberPrincipal} 을 받으므로(감사 행위자, #163) {@code @WithMockUser} 가 아니라 테스트 키로 서명한
-     * 실제 access 토큰을 보낸다 — 국내 {@link ShippingPolicyAdminControllerTest} 와 같다.
+     * 교체는 {@code @AuthenticationPrincipal MemberPrincipal} 을 받고(감사 행위자, #163) 메서드 식이 기능 권한(#588)이라 {@code @WithMockUser} 가 아니라
+     * 테스트 키로 서명한 실제 access 토큰을 보낸다 — 역할 → 기능 권한 매핑까지 실제 경로로 지난다. 국내 {@link ShippingPolicyAdminControllerTest} 와 같다.
      */
+    private MvcTestResult get(MemberRole role) {
+        return mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer(role)).exchange();
+    }
+
     private MvcTestResult put(String body) {
         return put(body, MemberRole.ADMIN);
     }
@@ -109,12 +113,11 @@ class InternationalShippingPolicyAdminControllerTest {
     class Authorization {
 
         @Test
-        @WithMockUser(roles = "ADMIN")
         @DisplayName("ADMIN 이면 조회 200 — 아이디는 문자열이다")
         void adminCanRead() {
             given(internationalShippingPolicyAdminUseCase.getInternationalPolicy()).willReturn(response());
 
-            MvcTestResult result = mvc.get().uri(PATH).exchange();
+            MvcTestResult result = get(MemberRole.ADMIN);
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody.shippingPolicyId").asString().isEqualTo("4611686018427387904");
@@ -124,19 +127,42 @@ class InternationalShippingPolicyAdminControllerTest {
         }
 
         @Test
-        @WithMockUser(roles = "ADMIN")
         @DisplayName("정책이 아직 없으면 200 이고 dataBody 가 null 이다")
         void notConfiguredIsNull() {
             given(internationalShippingPolicyAdminUseCase.getInternationalPolicy()).willReturn(null);
 
-            assertThat(mvc.get().uri(PATH).exchange()).hasStatusOk().bodyJson().extractingPath("$.dataBody").isNull();
+            assertThat(get(MemberRole.ADMIN)).hasStatusOk().bodyJson().extractingPath("$.dataBody").isNull();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+        @DisplayName("조회는 FULFILLMENT_READ 라 OWNER · MANAGER · STAFF 도 200 이다 (#588)")
+        void fulfillmentReadersMayRead(MemberRole role) {
+            given(internationalShippingPolicyAdminUseCase.getInternationalPolicy()).willReturn(response());
+
+            assertThat(get(role)).hasStatusOk();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+        @DisplayName("교체는 SETTINGS_MANAGE 라 MANAGER · STAFF 는 유효한 본문이어도 403 · SECURITY_005 이고 유스케이스를 부르지 않는다 (#588)")
+        void nonOwnersMayNotReplace(MemberRole role) {
+            SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(internationalShippingPolicyAdminUseCase);
         }
 
         @Test
-        @WithMockUser(roles = "CUSTOMER")
+        @DisplayName("OWNER 는 SETTINGS_MANAGE 가 있어 교체가 유스케이스에 닿는다 (#588)")
+        void ownerMayReplace() {
+            given(internationalShippingPolicyAdminUseCase.replaceInternationalPolicy(any(), anyLong())).willReturn(response());
+
+            assertThat(put(VALID_BODY, MemberRole.OWNER)).hasStatusOk();
+        }
+
+        @Test
         @DisplayName("CUSTOMER 면 조회 · 교체 모두 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")
         void customerIsForbidden() {
-            SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(PATH).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
+            SecurityEnvelopeAssertions.assertEnvelope(get(MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
             SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
             verifyNoInteractions(internationalShippingPolicyAdminUseCase);
         }
@@ -152,7 +178,6 @@ class InternationalShippingPolicyAdminControllerTest {
 
     @Nested
     @DisplayName("교체")
-    @WithMockUser(roles = "ADMIN")
     class Replace {
 
         @Test
@@ -207,7 +232,6 @@ class InternationalShippingPolicyAdminControllerTest {
 
     @Nested
     @DisplayName("본문 검증")
-    @WithMockUser(roles = "ADMIN")
     class BodyValidation {
 
         private static final String RATE = "{\"maxWeightGrams\": 500, \"fee\": {\"amount\": 1000, \"currency\": \"USD\"}}";

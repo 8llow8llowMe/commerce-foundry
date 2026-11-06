@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -129,6 +130,34 @@ class ShippingPolicyAdminControllerTest {
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+        @DisplayName("조회 · 이력은 FULFILLMENT_READ 라 OWNER · MANAGER · STAFF 도 200 이다 (#588)")
+        void fulfillmentReadersMayRead(MemberRole role) {
+            given(shippingPolicyAdminUseCase.getDomesticPolicy()).willReturn(response());
+            given(shippingPolicyAdminUseCase.getDomesticPolicyHistories(0, 20)).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+
+            assertThat(get(PATH, role)).hasStatusOk();
+            assertThat(get(HISTORIES_PATH, role)).hasStatusOk();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"MANAGER", "STAFF"})
+        @DisplayName("교체는 고객 결제 금액을 바꾸는 상점 설정(SETTINGS_MANAGE)이라 MANAGER · STAFF 는 유효한 본문이어도 403 · SECURITY_005 다 (#588)")
+        void nonOwnersMayNotReplace(MemberRole role) {
+            SecurityEnvelopeAssertions.assertEnvelope(put(VALID_BODY, role).getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(shippingPolicyAdminUseCase);
+        }
+
+        @Test
+        @DisplayName("OWNER 는 SETTINGS_MANAGE 가 있어 교체가 유스케이스에 닿는다 (#588)")
+        void ownerMayReplace() {
+            given(shippingPolicyAdminUseCase.replaceDomesticPolicy(any())).willReturn(response());
+
+            assertThat(put(VALID_BODY, MemberRole.OWNER)).hasStatusOk();
+            verify(shippingPolicyAdminUseCase).replaceDomesticPolicy(any(ShippingPolicyReplaceCommand.class));
         }
 
         @Test

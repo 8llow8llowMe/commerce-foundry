@@ -160,7 +160,7 @@ class ResourceServerSecurityIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"OWNER", "MANAGER", "STAFF"})
-    @DisplayName("새 운영자 역할은 어드민 URL 규칙을 통과하지만(#236 URL 층 = 운영자 역할 전체) 기존 hasRole('ADMIN') 메서드에서는 403 — 컨트롤러 전환 전까지 fail-closed")
+    @DisplayName("새 운영자 역할은 어드민 URL 규칙을 통과하지만(#236 URL 층 = 운영자 역할 전체) 기존 hasRole('ADMIN') 메서드에서는 403 — 옛 표기는 런타임에도 fail-closed(선언 가드는 #588 부터 이 표기를 거부)")
     void newOperatorRolesPassAdminUrlButNotLegacyAdminMethod(String roleName) throws Exception {
         MemberRole role = MemberRole.valueOf(roleName);
 
@@ -173,7 +173,7 @@ class ResourceServerSecurityIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"OWNER", "MANAGER", "STAFF"})
-    @DisplayName("어드민 경로의 hasRole('ADMIN') 메서드는 새 운영자 역할이 URL 층을 지나도 403 · SECURITY_005 이고 컨트롤러에 닿지 않는다 — 전환 전 fail-closed")
+    @DisplayName("어드민 경로의 hasRole('ADMIN') 메서드는 새 운영자 역할이 URL 층을 지나도 403 · SECURITY_005 이고 컨트롤러에 닿지 않는다 — 런타임 fail-closed(선언 가드는 #588 부터 거부)")
     void legacyAdminMethodUnderAdminPathRejectsNewOperatorRoles(String roleName) throws Exception {
         assertEnvelope(perform(get("/api/v1/admin/legacy").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.valueOf(roleName)))), SecurityErrorCode.FORBIDDEN);
         assertThat(TestController.ADMIN_CALLS).hasValue(0);
@@ -520,7 +520,7 @@ class ResourceServerSecurityIntegrationTest {
             return ResponseEntity.ok(Response.success());
         }
 
-        /** 어드민 경로 + 전환 전 표기. URL 층을 지난 새 운영자 역할을 메서드가 막는지 본다. */
+        /** 어드민 경로 + #236 이전 표기. 선언 가드는 #588 부터 거부하지만, 런타임에서도 URL 층을 지난 새 운영자 역할을 메서드가 막는지 본다. */
         @PreAuthorize("hasRole('ADMIN')")
         @GetMapping("/api/v1/admin/legacy")
         ResponseEntity<Response<Void>> legacyAdmin() {

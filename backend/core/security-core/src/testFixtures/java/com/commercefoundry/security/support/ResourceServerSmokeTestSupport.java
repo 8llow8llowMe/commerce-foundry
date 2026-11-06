@@ -315,7 +315,7 @@ public abstract class ResourceServerSmokeTestSupport {
      * <p>지금 서비스에는 실제 핸들러가 없어 빈 목록으로 통과하지 않도록, 스모크 핸들러가 검사 대상에 들어 있는지도 본다.
      */
     @Test
-    @DisplayName("모든 /internal 핸들러는 허용 호출자 hasAuthority('SERVICE_…') 를, /api/v1/admin 핸들러는 운영자 권한(AdminAuthority 상수 · hasRole('ADMIN'))을, 모든 /api 핸들러는 @PreAuthorize 를 선언한다")
+    @DisplayName("모든 /internal 핸들러는 허용 호출자 hasAuthority('SERVICE_…') 를, /api/v1/admin 핸들러는 운영자 권한(AdminAuthority 상수)을, 모든 /api 핸들러는 @PreAuthorize 를 선언한다")
     void handlersDeclareAuthorization() {
         RequestMappingHandlerMapping handlerMapping = applicationContext.getBean("requestMappingHandlerMapping", RequestMappingHandlerMapping.class);
 
@@ -348,7 +348,8 @@ public abstract class ResourceServerSmokeTestSupport {
                 }
             } else if (admin) {
                 if (declared == null || !AuthorizationExpressions.requiresOperatorAuthority(declared.value())) {
-                    violations.add(handlerName + " -> " + found + " — 어드민 경로는 AdminAuthority 상수(hasAuthority('ADMIN_<기능>_READ|MANAGE') · hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')) 또는 hasRole('ADMIN') 를 머리로, 좁힐 때만 and ... 로 고치세요");
+                    violations.add(handlerName + " -> " + found + " — 어드민 경로는 AdminAuthority 상수(hasAuthority('ADMIN_<기능>_READ|MANAGE') · hasAnyRole('ADMIN','OWNER','MANAGER','STAFF'))"
+                        + " 를 머리로, 좁힐 때만 and ... 로 고치세요 — hasRole('ADMIN') 은 #588 부터 받지 않습니다");
                 }
             } else if (declared == null) {
                 violations.add(handlerName + " -> " + found + " — 메서드에 인가 식(permitAll() · isAuthenticated() · hasRole(...))을 적으세요");

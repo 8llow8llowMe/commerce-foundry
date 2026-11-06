@@ -22,16 +22,23 @@ public class WidenedAdminController {
         return "member";
     }
 
-    @PreAuthorize("hasRole('ADMIN') or isAuthenticated()")
+    @PreAuthorize("hasAuthority('ADMIN_ORDER_READ') or isAuthenticated()")
     @GetMapping("/widened")
     public String widened() {
         return "widened";
     }
 
-    @PreAuthorize("hasRole('ADMIN') and isAuthenticated() or permitAll()")
+    @PreAuthorize("hasAuthority('ADMIN_ORDER_READ') and isAuthenticated() or permitAll()")
     @GetMapping("/precedence")
     public String precedence() {
         return "precedence";
+    }
+
+    /** #236 이전 표기 — 런타임은 ADMIN 만 통과시키지만(fail-closed) 새 역할에 기능을 열 수 없어 #588 부터 위반이다. */
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/legacy")
+    public String legacyAdminRole() {
+        return "legacyAdminRole";
     }
 
     @PreAuthorize("hasAuthority('ADMIN_FOO_READ')")

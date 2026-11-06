@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.onboarding.adapter.in.admin.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -103,6 +105,20 @@ class OnboardingAdminControllerTest {
     @Nested
     @DisplayName("권한")
     class Authorization {
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+        @DisplayName("본인 진행이라 OPERATOR — OWNER · MANAGER · STAFF 도 조회 · 기록이 200 이고 운영자는 토큰의 memberId 다 (#588)")
+        void everyOperatorMayUseOwnProgress(MemberRole role) {
+            given(onboardingAdminUseCase.getMine(TestTokens.MEMBER_ID)).willReturn(new OnboardingAdminResponse(List.of(), List.of()));
+            given(onboardingAdminUseCase.updateTour(anyLong(), any())).willReturn(item(TourStatus.IN_PROGRESS, 2, null));
+
+            assertThat(get(role)).hasStatusOk();
+            assertThat(patch(TOUR_PATH, BODY, role)).hasStatusOk();
+
+            verify(onboardingAdminUseCase).getMine(TestTokens.MEMBER_ID);
+            verify(onboardingAdminUseCase).updateTour(eq(TestTokens.MEMBER_ID), any(TourProgressUpdateCommand.class));
+        }
 
         @Test
         @DisplayName("토큰이 없으면 조회 · 기록 모두 401 · SECURITY_001 이고 유스케이스를 부르지 않는다")
