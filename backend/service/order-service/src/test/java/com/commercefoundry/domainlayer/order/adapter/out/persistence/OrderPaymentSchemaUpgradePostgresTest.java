@@ -46,7 +46,9 @@ class OrderPaymentSchemaUpgradePostgresTest {
             // Preserve both valid legacy C1 shapes without backfill.
             insert(jdbc, 1, "REJECTED_ORDER_CANCELED", 51L, null, null);
             insert(jdbc, 2, "REJECTED_ORDER_CANCELED", 52L, 62L, null);
-            var migration = new ResourceDatabasePopulator(new ClassPathResource("ddl/order-payment-c2b-restoration.sql"));
+            // 운영 적용 순서 그대로: c2b → #16 PR-2a 1단계 → 2단계. 현재 매핑 전체를 validate 하므로 뒤 단계도 적용한다.
+            var migration = new ResourceDatabasePopulator(new ClassPathResource("ddl/order-payment-c2b-restoration.sql"),
+                    new ClassPathResource("ddl/claim-cancellation.sql"), new ClassPathResource("ddl/claim-cancellation-cleanup.sql"));
             migration.setSqlScriptEncoding("UTF-8");
             migration.execute(source);
             return database;
