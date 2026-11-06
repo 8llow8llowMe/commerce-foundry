@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.member.application.port.out;
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.port.out.query.MemberListQueryResult;
 import com.commercefoundry.domainlayer.member.application.port.out.query.MemberNameQueryResult;
+import com.commercefoundry.domainlayer.member.application.port.out.query.OperatorAccountQueryResult;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
 import java.util.Collection;
@@ -39,6 +40,14 @@ public interface MemberRepositoryPort {
      * @param page 0 부터
      */
     Page<MemberListQueryResult> findPage(MemberRole role, int page, int size);
+
+    /**
+     * 운영자 계정 목록 (#236) — 운영자 역할 전체(ADMIN · OWNER · MANAGER · STAFF), 최신순(아이디 내림차순) 한 페이지. 총계는 자르기 전 건수다.
+     *
+     * @param active true 면 활성만, false 면 비활성만, null 이면 전체
+     * @param page 0 부터
+     */
+    Page<OperatorAccountQueryResult> findOperatorPage(Boolean active, int page, int size);
 
     /**
      * 회원 아이디로 이름만 한 번에 읽는다. 없는 아이디는 빠지고, 이름이 없는 회원은 name 이 null 이다.

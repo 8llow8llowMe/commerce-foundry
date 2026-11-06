@@ -89,6 +89,21 @@ public class AdminAuditLogRepositoryAdapter implements AdminAuditPort, AdminAudi
     }
 
     @Override
+    public void adminAccountReactivated(long actorMemberId, long targetMemberId, boolean succeeded) {
+        record(AdminAuditRecord.adminReactivated(actorMemberId, targetMemberId, succeeded));
+    }
+
+    @Override
+    public void adminRoleChanged(long actorMemberId, long targetMemberId, boolean succeeded) {
+        record(AdminAuditRecord.adminRoleChanged(actorMemberId, targetMemberId, succeeded));
+    }
+
+    @Override
+    public void operatorsSearched(long adminMemberId, Boolean active, int page, int size) {
+        record(AdminAuditRecord.operatorsSearched(adminMemberId, active, page, size));
+    }
+
+    @Override
     public void adminPasswordChanged(long adminMemberId, boolean succeeded) {
         record(AdminAuditRecord.adminPasswordChanged(adminMemberId, succeeded));
     }

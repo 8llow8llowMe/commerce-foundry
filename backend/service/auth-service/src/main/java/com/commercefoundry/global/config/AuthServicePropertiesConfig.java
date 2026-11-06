@@ -7,6 +7,7 @@ import com.commercefoundry.global.properties.AdminSeedProperties;
 import com.commercefoundry.global.properties.AgreementProperties;
 import com.commercefoundry.global.properties.AuthLoginGuardProperties;
 import com.commercefoundry.global.properties.AuthTokenProperties;
+import com.commercefoundry.global.properties.OperatorRoleProperties;
 import com.commercefoundry.global.properties.ShippingAddressProperties;
 import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
 import com.commercefoundry.security.internal.InternalTokenPropertiesConfig;
@@ -31,6 +32,7 @@ import org.springframework.context.annotation.Import;
     AgreementProperties.class,
     AuthLoginGuardProperties.class,
     AuthTokenProperties.class,
+    OperatorRoleProperties.class,
     com.commercefoundry.global.properties.SocialLoginProperties.class,
     ShippingAddressProperties.class
 })

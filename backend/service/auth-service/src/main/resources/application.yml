@@ -112,6 +112,10 @@ auth:
     email: ${ADMIN_SEED_EMAIL:}
     password: ${ADMIN_SEED_PASSWORD:}
     name: ${ADMIN_SEED_NAME:}
+  operator-roles:
+    # 새 운영자 역할(OWNER · MANAGER · STAFF) 발급 · 역할 변경 (#236, OperatorRoleProperties). 기본 꺼짐 — 꺼져 있으면 409 AUTH_049.
+    # 어드민 화면 전환(#237) 뒤에 켠다. 역할 없는 운영자 추가(ADMIN) · 상태 변경 · 목록은 이 값과 무관하다. 비밀이 아니다
+    issuance-enabled: ${AUTH_OPERATOR_ROLES_ISSUANCE_ENABLED:false}
   admin-audit:
     # 관리자 감사 로그 보관 (#286, security-guide.md §11-4). 기본 2년. 1년 미만이면 기동하지 않는다(AdminAuditRetentionProperties).
     # 지난 행은 Snowflake 아이디가 컷오프보다 작은 것만 배치로 지운다. created_at 인덱스는 두지 않는다.

@@ -69,6 +69,10 @@ public final class MemberValidationMessage {
     public static final String NOTIFICATION_RECIPIENT_AFTER_ID_MIN = "AUTH_157:afterId 는 0 이상이어야 합니다.";
     public static final String NOTIFICATION_RECIPIENT_SIZE_RANGE = "AUTH_158:size 는 1 이상 100 이하여야 합니다.";
 
+    /** 운영자 계정 역할 · 상태 변경 (#236). 운영자 추가의 선택 역할도 159 를 쓴다. ADMIN 은 이행용 역할이라 새로 주지 않는다. */
+    public static final String ADMIN_ACCOUNT_ROLE_INVALID = "AUTH_159:역할은 OWNER · MANAGER · STAFF 중 하나여야 합니다.";
+    public static final String ADMIN_ACCOUNT_ACTIVE_REQUIRED = "AUTH_160:사용 여부(active)는 필수입니다.";
+
     private MemberValidationMessage() {
     }
 }

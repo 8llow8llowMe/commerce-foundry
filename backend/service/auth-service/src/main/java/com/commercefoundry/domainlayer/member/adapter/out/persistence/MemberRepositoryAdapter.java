@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.member.application.mapper.MemberMapper;
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.application.port.out.query.MemberListQueryResult;
 import com.commercefoundry.domainlayer.member.application.port.out.query.MemberNameQueryResult;
+import com.commercefoundry.domainlayer.member.application.port.out.query.OperatorAccountQueryResult;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.security.principal.MemberRole;
@@ -71,6 +72,29 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
         Pageable pageable = PageRequest.of(page, size, LATEST_FIRST);
         Page<MemberEntity> rows = role == null ? memberRepository.findAll(pageable) : memberRepository.findAllByRole(role, pageable);
         return rows.map(MemberRepositoryAdapter::toListRow);
+    }
+
+    /**
+     * 운영자 역할 전체를 최신순(아이디 내림차순)으로 — 유일한 키라 페이지 경계가 흔들리지 않는다. 운영자 수는 작아(가게 직원) 별도 정렬 인덱스를 두지 않는다.
+     * 질의는 목록 한 번 · count 한 번이다.
+     */
+    @Override
+    public Page<OperatorAccountQueryResult> findOperatorPage(Boolean active, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, LATEST_FIRST);
+        Page<MemberEntity> rows;
+        if (active == null) {
+            rows = memberRepository.findAllByRoleIn(MemberRole.OPERATOR_ROLES, pageable);
+        } else if (active) {
+            rows = memberRepository.findAllByRoleInAndDeactivatedAtIsNull(MemberRole.OPERATOR_ROLES, pageable);
+        } else {
+            rows = memberRepository.findAllByRoleInAndDeactivatedAtIsNotNull(MemberRole.OPERATOR_ROLES, pageable);
+        }
+        return rows.map(MemberRepositoryAdapter::toOperatorRow);
+    }
+
+    private static OperatorAccountQueryResult toOperatorRow(MemberEntity entity) {
+        return new OperatorAccountQueryResult(
+            entity.getId(), entity.getEmail(), entity.getName(), entity.getRole(), entity.getDeactivatedAt(), entity.getCreatedAt());
     }
 
     private static MemberListQueryResult toListRow(MemberEntity entity) {
