@@ -233,6 +233,25 @@ product-service 어드민 엔드포인트 → 권한 (#586). 조회(GET)는 `*_R
 - 이미지 업로드는 presigned PUT 이다. 서비스는 `{contentType, contentLength}` JSON 만 받고 파일 본문을 받지 않는다(product-service 에 `MultipartFile` 핸들러가 없다).
   multipart 요청이 오더라도 Boot 기본 한도(10MB) 안에서만 인가 전에 파싱된다.
 
+order-service · payment-service 어드민 엔드포인트 → 권한 (#587):
+
+| 엔드포인트 | 식 (`AdminAuthority`) | ADMIN · OWNER | MANAGER | STAFF |
+|------------|----------------------|---------------|---------|-------|
+| `GET /api/v1/admin/orders` · `GET /api/v1/admin/orders/{orderId}` | `ORDER_READ` | 200 | 200 | 200 |
+| `PATCH /api/v1/admin/orders/{orderId}/status` · `POST /api/v1/admin/orders/status-changes` | `ORDER_MANAGE` | 200 | 200 | 403 |
+| `GET /api/v1/admin/claims` · `GET /api/v1/admin/claims/{claimId}` | `ORDER_READ` | 200 | 200 | 200 |
+| `GET /api/v1/admin/payments` | `SETTLEMENT_READ` | 200 | 403 | 403 |
+
+- 클레임(반품 접수) 조회는 주문 업무라 `ORDER_READ` 다. 결제 목록은 금액 · 결제 수단 · PG 회신을 보는 정산 업무라 `SETTLEMENT_READ` 다.
+- `ORDER_MANAGE` 의 수동 상태 변경은 `AdminStatusChangePolicy` 의 세 전이(결제 완료 → 제작 중 · 상품 준비중, 제작 중 → 상품 준비중, 배송 중 → 배송 완료)뿐이다.
+  취소 · 환불 · 반품 전이는 들어 있지 않다. MANAGER 의 배송 완료 확정은 구매 확정 대기 시작을 앞당긴다 — 감사 기록(`@AdminAudited`)으로 남는다.
+  앞으로 클레임 승인 · 환불 실행 · `REFUND_FAILED` 재시도 핸들러를 만들면 `ORDER_MANAGE` 에 그대로 얹지 말고 `CS_MANAGE` · `SETTLEMENT_MANAGE` 와 함께 따로 정한다.
+  클레임 조회와 처리 권한은 갈라질 수 있다.
+- 게이트웨이 URL 층은 의도적으로 운영자 역할 전체만 본다 — MANAGER 토큰도 `/api/v1/admin/payments` 를 하류까지 통과하고(`GatewaySecurityTest`), 정산 403 은
+  payment-service 의 메서드 `@PreAuthorize` 가 낸다. 게이트웨이에 기능별 경로 규칙을 두지 않는다.
+- 핸들러 전체 표는 `OrderAdminAuthorizationMappingTest` · `PaymentAdminAuthorizationMappingTest` 가, 역할별 200 · 403 은 `OrderAdminControllerTest` ·
+  `ClaimAdminControllerTest` · `PaymentAdminControllerTest` 슬라이스가 고정한다.
+
 **메서드 식은 `AdminAuthority` 상수로 쓴다.** `com.commercefoundry.security.principal.AdminAuthority`에 기능별 상수 22개
 (`ORDER_MANAGE = "hasAuthority('ADMIN_ORDER_MANAGE')"` 등, `AdminPermission`과 1:1)와 운영자 본인 API용 `OPERATOR`
 (`"hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')"`)를 둔다. 조회 핸들러는 `*_READ`, 변경 핸들러는 `*_MANAGE`를 쓰고 식 문자열을 직접 적지 않는다.
@@ -253,7 +272,7 @@ product-service 어드민 엔드포인트 → 권한 (#586). 조회(GET)는 `*_R
 머리 뒤에는 `and`·`&&`로 좁히는 조건만 붙일 수 있고, 괄호 밖 `or`·`||`·`?`는 실패다(§5). `hasAnyAuthority(...)`·정의되지 않은 기능
 (`hasAuthority('ADMIN_FOO_READ')`)·`hasAuthority('ROLE_ADMIN')`·순서나 공백이 다른 `hasAnyRole(...)`도 실패다.
 
-auth-service · product-service 는 위 표대로 전환했다. 아직 `hasRole('ADMIN')`인 그 밖의 서비스 컨트롤러는 새 역할 토큰이 URL 층을 지나도 메서드에서 403 `SECURITY_005`로
+auth-service · product-service · order-service · payment-service 는 위 표대로 전환했다. 아직 `hasRole('ADMIN')`인 그 밖의 서비스 컨트롤러는 새 역할 토큰이 URL 층을 지나도 메서드에서 403 `SECURITY_005`로
 막힌다(fail-closed). 각 서비스 컨트롤러를 `AdminAuthority` 상수로 전환하고 테스트한 뒤에만 새 역할 계정을 생성·발급한다.
 어드민 회원 목록의 `role` 필터는 enum 바인딩이라 새 역할 이름도 수락하지만, 발급 전에는 해당 역할 행이 없어 빈 결과다.
 

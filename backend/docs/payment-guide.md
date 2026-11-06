@@ -202,7 +202,7 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 ### 어드민 결제 목록 (#15)
 
 운영자는 `GET /api/v1/admin/payments`로 기존 결제 상태(UNKNOWN 포함) · 주문 아이디 · 주문 성공 회신 여부를 조합해 페이지 조회한다.
-계약은 `api-design-guide.md` §2-15이며 ADMIN 전용이다. 결제 시도 원금·상태·시각과 미확정 이유·주문 회신 거절 코드를 읽기만 하고, 결제키·고객 멱등 키·PG 원문·회원 개인정보를 싣지 않는다.
+계약은 `api-design-guide.md` §2-15이며 `AdminAuthority.SETTLEMENT_READ`(ADMIN · OWNER)만 연다 — MANAGER · STAFF 는 게이트웨이를 지나도 메서드에서 403 이다(`security-guide.md` §3-1). 결제 시도 원금·상태·시각과 미확정 이유·주문 회신 거절 코드를 읽기만 하고, 결제키·고객 멱등 키·PG 원문·회원 개인정보를 싣지 않는다.
 미확정 이유는 해결된 결제에도 이력으로 남을 수 있다. `orderSynced=false` 전체가 복구 대상은 아니며 DONE + false 중 null 거절 코드는 회신 미확인, 코드가 있으면 주문 거절 회신이다.
 `status=REFUND_FAILED`는 조회 전용 **취소거절 이력** 필터다. PG 취소가 확정 거절된 원장(`payment_cancel.status=REJECTED`)이 하나 이상 있는 결제를 조회한다.
 실제 결제 상태를 새로 만들지 않으며 응답의 `status`는 DONE · CANCELED 등 저장된 결제 상태 metadata 그대로다. PENDING 미확정은 이 필터에 포함하지 않는다.

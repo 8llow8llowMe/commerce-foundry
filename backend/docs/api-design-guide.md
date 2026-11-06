@@ -1178,7 +1178,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 #### 어드민 결제 목록 (#15, 읽기 범위)
 
-`GET /api/v1/admin/payments` — `hasRole('ADMIN')`, `PageResponse<PaymentAdminItem>`. 고객 · internal DTO 와 분리한다.
+`GET /api/v1/admin/payments` — `AdminAuthority.SETTLEMENT_READ`(ADMIN · OWNER — MANAGER · STAFF 는 403 `SECURITY_005`, `security-guide.md` §3-1), `PageResponse<PaymentAdminItem>`. 고객 · internal DTO 와 분리한다.
 
 | 파라미터 | 규칙 | 오류 |
 |---|---|---|
@@ -1208,10 +1208,10 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 | API | 권한 | 응답 | 오류 |
 |-----|------|------|------|
-| `GET /api/v1/admin/orders?status=&from=&to=&page=0&size=20` | `hasRole('ADMIN')` | 200 `PageResponse<{orderId, memberId, status, orderName, totalAmount, currency, recipientName, createdAt, paymentDueAt}>` — 최신순(주문 시각 · 아이디 내림차순) | 400 `ORDER_144`(page) · `145`(size 1~100) · `146`(from ≥ to) · `198`(모르는 상태 · 시각 형식) |
-| `GET /api/v1/admin/orders/{orderId}` | `hasRole('ADMIN')` | 200 `{orderId, memberId, status, nextStatuses[], currency, items[], amounts{itemsAmount, shippingFee, totalAmount}, shippingAddress, histories[], paymentDueAt, createdAt}` — 어드민 전용 DTO(고객 응답과 나눈다) | 400 `ORDER_141` · 404 `ORDER_001` |
-| `PATCH /api/v1/admin/orders/{orderId}/status` `{status, reason?}` | `hasRole('ADMIN')` | 200 바뀐 상세(위와 같은 모양). 이미 그 상태면 바꾸지 않고 200 | 400 `ORDER_147`(status) · `148`(사유 200자) · `151`(사유 제어 문자 · 깨진 문자) · `027`(배송 완료 사유 없음) · 404 `ORDER_001` · 409 `ORDER_020` · `023` · `024` · `025` |
-| `POST /api/v1/admin/orders/status-changes` `{orderIds[], status, reason?}` | `hasRole('ADMIN')` | 200 `{changedCount, unchangedCount, failedCount, results[{orderId, result, errorCode, message}]}` — 요청 순서 | 400 `ORDER_147` · `148` · `149`(1~100개) · `150`(중복) · `151` · `152`(숫자 문자열 · long 범위) · `153`(배송 완료는 일괄 불가) |
+| `GET /api/v1/admin/orders?status=&from=&to=&page=0&size=20` | `AdminAuthority.ORDER_READ` | 200 `PageResponse<{orderId, memberId, status, orderName, totalAmount, currency, recipientName, createdAt, paymentDueAt}>` — 최신순(주문 시각 · 아이디 내림차순) | 400 `ORDER_144`(page) · `145`(size 1~100) · `146`(from ≥ to) · `198`(모르는 상태 · 시각 형식) |
+| `GET /api/v1/admin/orders/{orderId}` | `AdminAuthority.ORDER_READ` | 200 `{orderId, memberId, status, nextStatuses[], currency, items[], amounts{itemsAmount, shippingFee, totalAmount}, shippingAddress, histories[], paymentDueAt, createdAt}` — 어드민 전용 DTO(고객 응답과 나눈다) | 400 `ORDER_141` · 404 `ORDER_001` |
+| `PATCH /api/v1/admin/orders/{orderId}/status` `{status, reason?}` | `AdminAuthority.ORDER_MANAGE` | 200 바뀐 상세(위와 같은 모양). 이미 그 상태면 바꾸지 않고 200 | 400 `ORDER_147`(status) · `148`(사유 200자) · `151`(사유 제어 문자 · 깨진 문자) · `027`(배송 완료 사유 없음) · 404 `ORDER_001` · 409 `ORDER_020` · `023` · `024` · `025` |
+| `POST /api/v1/admin/orders/status-changes` `{orderIds[], status, reason?}` | `AdminAuthority.ORDER_MANAGE` | 200 `{changedCount, unchangedCount, failedCount, results[{orderId, result, errorCode, message}]}` — 요청 순서 | 400 `ORDER_147` · `148` · `149`(1~100개) · `150`(중복) · `151` · `152`(숫자 문자열 · long 범위) · `153`(배송 완료는 일괄 불가) |
 
 - **어드민이 직접 바꾸는 전이**(`AdminStatusChangePolicy`): 결제 완료 → 제작 중(맞춤 제작 항목이 있을 때만) · 상품 준비중, 제작 중 → 상품 준비중, 배송 중 → 배송 완료.
   전이 표(`order-flow-guide.md` §1) 밖은 `ORDER_020`, 표 안이지만 다른 흐름이 바꾸는 전이(결제 완료 #14 · 만료 #96 · 출고=송장 등록 #18 · 취소 · 반품 #15 · #16 · 구매 확정)는
@@ -1232,7 +1232,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 #### 어드민 클레임 조회 (#17)
 
-두 경로 모두 `hasRole('ADMIN')`이다. CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 어드민 Swagger 그룹에 포함된다.
+두 경로 모두 `AdminAuthority.ORDER_READ`다(ADMIN · OWNER · MANAGER · STAFF, `security-guide.md` §3-1). CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 어드민 Swagger 그룹에 포함된다.
 
 | API | 응답 | 검증/오류 |
 |-----|------|-----------|
