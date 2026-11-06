@@ -230,7 +230,12 @@ export const ko = {
     reload: '다시 불러오기',
     breadcrumb: '카테고리 경로',
     /** 상세 아래 공통 안내 아코디언 */
-    info: { sizeGuide: '사이즈 가이드', shipping: '배송 · 교환', measures: '재는 방법' },
+    info: {
+      sizeGuide: '사이즈 가이드',
+      shipping: '배송 · 교환',
+      measures: '재는 방법',
+      unit: '치수 단위',
+    },
     /** 상품 사이즈표(#218) — 표 첫 칸 머리 · 단위 안내 */
     sizeChart: { size: '사이즈', unit: '단위 {unit}', units: { CM: 'cm', INCH: 'inch' } },
     gallery: {

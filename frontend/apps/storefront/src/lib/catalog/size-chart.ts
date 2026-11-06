@@ -25,15 +25,16 @@ export type ProductSizeChart = {
 
 export type SizeChartUnit = 'CM' | 'INCH';
 
-/**
- * 언어별로 받을 단위. null 이면 저장 단위 그대로다(서버가 바꾸지 않는다).
- * 영문 스토어(#31)는 아직 열지 않아 모든 언어가 저장 단위다 — 영문 스토어를 열 때 `en: 'INCH'` 로 바꾸면
- * 서버가 1 in = 2.54 cm, 소수 둘째 자리 반올림으로 바꿔 준다(화면은 계산하지 않는다).
- * cm · inch 를 고객이 고르는 전환 버튼은 그때 같은 API 의 `unit` 으로 붙인다.
- */
-const UNIT_BY_LOCALE: Record<Locale, SizeChartUnit | null> = { ko: null, en: null };
+/** 고객이 고를 수 있는 단위 — 전환 버튼 순서다 */
+export const SIZE_CHART_UNITS: readonly SizeChartUnit[] = ['CM', 'INCH'];
 
-export function sizeChartUnit(locale: Locale): SizeChartUnit | null {
+/**
+ * 언어별로 처음 보일 단위. 영문 스토어는 inch, 국문은 cm 이다(#218). 값은 두 단위 모두 서버가 바꿔 준다
+ * (1 in = 2.54 cm, 소수 둘째 자리 반올림 — 화면은 계산하지 않는다). 고객은 전환 버튼으로 다른 단위를 본다.
+ */
+const UNIT_BY_LOCALE: Record<Locale, SizeChartUnit> = { ko: 'CM', en: 'INCH' };
+
+export function sizeChartUnit(locale: Locale): SizeChartUnit {
   return UNIT_BY_LOCALE[locale];
 }
 
@@ -46,6 +47,15 @@ export function sizeChartPath(productId: string, unit: SizeChartUnit | null): st
 export type SizeMeasure = { name: string; description: string };
 
 export type SizeChartView = SizeGuide & { measures: SizeMeasure[] };
+
+/**
+ * 상품 상세에 넘기는 사이즈표 — 받은 단위마다 표 하나. 한 단위만 받았으면(다른 단위 조회 실패) 전환 버튼 없이 그 표다.
+ * `initial` 은 언어 기본 단위이고, 그 단위를 못 받았으면 받은 첫 단위다.
+ */
+export type SizeChartSet = {
+  initial: SizeChartUnit;
+  views: { unit: SizeChartUnit; label: string; view: SizeChartView }[];
+};
 
 const byOrder = <T extends { displayOrder: number }>(items: readonly T[]) =>
   [...items].sort((a, b) => a.displayOrder - b.displayOrder);
@@ -79,5 +89,29 @@ export function sizeChartView(
     measures: columns.flatMap((column) =>
       column.description ? [{ name: column.name, description: column.description }] : [],
     ),
+  };
+}
+
+/**
+ * 단위별 응답 → 상품 상세 사이즈표. 표가 없거나(null · 빈 행 · 빈 항목) 조회가 실패한 단위는 뺀다.
+ * 남은 단위가 없으면 null — 화면은 기존 표시(브랜드 공통 사이즈 가이드 · 상세 설명 속 이미지)를 둔다.
+ */
+export function sizeChartSet(
+  charts: Partial<Record<SizeChartUnit, ProductSizeChart | null>>,
+  locale: Locale,
+  labels: Dictionary['product']['sizeChart'],
+): SizeChartSet | null {
+  const views = SIZE_CHART_UNITS.flatMap((unit) => {
+    const chart = charts[unit];
+    return chart && chart.rows.length > 0 && chart.columns.length > 0
+      ? [{ unit, label: labels.units[unit], view: sizeChartView(chart, locale, labels) }]
+      : [];
+  });
+  const [first] = views;
+  if (!first) return null;
+  const preferred = sizeChartUnit(locale);
+  return {
+    initial: views.some((entry) => entry.unit === preferred) ? preferred : first.unit,
+    views,
   };
 }
