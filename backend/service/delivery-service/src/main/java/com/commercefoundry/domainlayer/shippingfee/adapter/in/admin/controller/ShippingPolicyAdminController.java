@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.shippingfee.application.exception.Deliver
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.ShippingPolicyAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -52,7 +53,7 @@ public class ShippingPolicyAdminController {
         summary = "국내 배송비 정책 조회",
         description = "정책이 아직 설정되지 않았으면 dataBody 가 null 이다 — 교체(PUT)를 version 없이 보내 처음 만든다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.FULFILLMENT_READ)
     @GetMapping
     public ResponseEntity<Response<ShippingPolicyAdminResponse>> getDomesticPolicy() {
         return ResponseEntity.ok().body(Response.success(shippingPolicyAdminUseCase.getDomesticPolicy()));
@@ -66,7 +67,7 @@ public class ShippingPolicyAdminController {
             + "저장된 정책과 통화가 다르면 409(DELIVERY_012)다 — 정책 통화는 처음 만들 때 정한다. "
             + "성공하면 교체 전 · 후 값과 교체한 어드민으로 이력을 한 건 남긴다(값이 그대로인 교체도 남긴다)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "SHIPPING_POLICY_DOMESTIC_REPLACE")
     @PutMapping
     public ResponseEntity<Response<ShippingPolicyAdminResponse>> replaceDomesticPolicy(
@@ -81,7 +82,7 @@ public class ShippingPolicyAdminController {
         description = "교체 이력을 최신순으로 페이지 단위로 읽는다. 항목은 교체 전(처음 만든 교체면 null) · 후 정책 값, 교체한 어드민 회원 아이디, "
             + "마스킹한 표시 이름(adminDisplayName, 모르면 null), 교체 시각이다. 이력이 없으면 빈 목록이다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.FULFILLMENT_READ)
     @GetMapping("/histories")
     public ResponseEntity<Response<PageResponse<ShippingPolicyHistoryAdminItem>>> getDomesticPolicyHistories(
         @Parameter(description = "페이지 (0부터)") @RequestParam(defaultValue = "0") @PositiveOrZero(message = DeliveryValidationMessage.PAGE_MIN) int page,

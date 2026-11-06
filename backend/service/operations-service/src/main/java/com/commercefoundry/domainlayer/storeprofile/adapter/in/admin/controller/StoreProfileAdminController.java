@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.storeprofile.adapter.in.admin.dto.request
 import com.commercefoundry.domainlayer.storeprofile.adapter.in.admin.dto.response.StoreProfileAdminResponse;
 import com.commercefoundry.domainlayer.storeprofile.application.port.in.StoreProfileAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -31,14 +32,14 @@ public class StoreProfileAdminController {
     private final StoreProfileAdminUseCase useCase;
 
     @Operation(summary = "쇼핑몰 공개 정보 조회", description = "미등록은 404입니다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_READ)
     @GetMapping
     public ResponseEntity<Response<StoreProfileAdminResponse>> get() {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Response.success(useCase.get()));
     }
 
     @Operation(summary = "쇼핑몰 공개 정보 전체 교체", description = "저장 즉시 공개됩니다. 최초 생성은 expectedVersion=null, 수정은 조회한 version을 보냅니다. 경합은 409입니다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "STORE_PROFILE_UPDATE")
     @PutMapping
     public ResponseEntity<Response<StoreProfileAdminResponse>> save(

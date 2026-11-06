@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.legaldocument.application.exception.Legal
 import com.commercefoundry.domainlayer.legaldocument.application.port.in.LegalDocumentAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -41,14 +42,14 @@ public class LegalDocumentAdminController {
     private final LegalDocumentAdminUseCase useCase;
 
     @Operation(summary = "법적 문서 목록", description = "등록한 문서의 버전과 포인터만 조회합니다. 본문은 포함하지 않습니다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_READ)
     @GetMapping("/legal-documents")
     public ResponseEntity<Response<List<LegalDocumentAdminResponses.Summary>>> list() {
         return ok(useCase.list());
     }
 
     @Operation(summary = "법적 문서 최신 초안 조회")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_READ)
     @GetMapping("/legal-documents/{type}/{locale}")
     public ResponseEntity<Response<LegalDocumentAdminResponses.Detail>> detail(
         @Parameter(description = "문서 유형 제어 코드", schema = @Schema(allowableValues = {"TERMS", "PRIVACY"})) @PathVariable String type,
@@ -58,7 +59,7 @@ public class LegalDocumentAdminController {
     }
 
     @Operation(summary = "새 초안 저장", description = "항상 다음 리비전을 추가하며 현재 게시본은 유지합니다. 최초 등록은 expectedVersion=null입니다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "LEGAL_DOCUMENT_DRAFT_SAVE")
     @PutMapping("/legal-documents/{type}/{locale}/draft")
     public ResponseEntity<Response<LegalDocumentAdminResponses.Detail>> save(
@@ -71,7 +72,7 @@ public class LegalDocumentAdminController {
     }
 
     @Operation(summary = "최신 초안 즉시 게시", description = "검토 확인과 미치환 표시 제거가 필요합니다. 현재 게시본의 재요청은 변경 없이 성공합니다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "LEGAL_DOCUMENT_PUBLISH")
     @PostMapping("/legal-documents/{type}/{locale}/publish")
     public ResponseEntity<Response<LegalDocumentAdminResponses.Detail>> publish(
@@ -84,7 +85,7 @@ public class LegalDocumentAdminController {
     }
 
     @Operation(summary = "리비전 이력", description = "최신 번호순으로 조회합니다. 이전 내용 복원은 새 초안 저장 후 게시합니다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_READ)
     @GetMapping("/legal-documents/{type}/{locale}/revisions")
     public ResponseEntity<Response<PageResponse<LegalDocumentAdminResponses.Revision>>> revisions(
         @Parameter(description = "문서 유형 제어 코드", schema = @Schema(allowableValues = {"TERMS", "PRIVACY"})) @PathVariable String type,
@@ -98,7 +99,7 @@ public class LegalDocumentAdminController {
     }
 
     @Operation(summary = "법적 문서 시작 템플릿", description = "질문·빈칸 구조와 체크리스트입니다. 법적 적합성을 보장하지 않으며 저장·게시·AI 호출은 하지 않습니다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_READ)
     @GetMapping("/legal-document-templates/{type}")
     public ResponseEntity<Response<LegalDocumentAdminResponses.Template>> template(
         @Parameter(description = "문서 유형 제어 코드", schema = @Schema(allowableValues = {"TERMS", "PRIVACY"})) @PathVariable String type,

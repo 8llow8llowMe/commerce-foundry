@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.request.
 import com.commercefoundry.domainlayer.shippingfee.adapter.in.admin.dto.response.InternationalShippingPolicyAdminResponse;
 import com.commercefoundry.domainlayer.shippingfee.application.port.in.InternationalShippingPolicyAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -40,7 +41,7 @@ public class InternationalShippingPolicyAdminController {
         summary = "해외 배송비 정책 조회",
         description = "정책이 아직 설정되지 않았으면 dataBody 가 null 이다 — 교체(PUT)를 version 없이 보내 처음 만든다. 해외 배송 기능이 꺼진 스토어에서도 조회 · 교체할 수 있다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.FULFILLMENT_READ)
     @GetMapping
     public ResponseEntity<Response<InternationalShippingPolicyAdminResponse>> getInternationalPolicy() {
         return ResponseEntity.ok().body(Response.success(internationalShippingPolicyAdminUseCase.getInternationalPolicy()));
@@ -54,7 +55,7 @@ public class InternationalShippingPolicyAdminController {
             + "한 그룹의 구간 상한이 겹치면 400(DELIVERY_008), KR 을 넣으면 400(DELIVERY_009), 그룹 이름이 겹치면 400(DELIVERY_010), "
             + "remoteAreas(도서산간)를 보내면 400(DELIVERY_136)이다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "SHIPPING_POLICY_INTERNATIONAL_REPLACE")
     @PutMapping
     public ResponseEntity<Response<InternationalShippingPolicyAdminResponse>> replaceInternationalPolicy(

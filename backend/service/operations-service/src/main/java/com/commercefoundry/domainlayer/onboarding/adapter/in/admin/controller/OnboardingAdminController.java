@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.onboarding.adapter.in.admin.dto.response.
 import com.commercefoundry.domainlayer.onboarding.application.exception.OnboardingValidationMessage;
 import com.commercefoundry.domainlayer.onboarding.application.port.in.OnboardingAdminUseCase;
 import com.commercefoundry.security.audit.AdminAuditExempt;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -47,7 +48,7 @@ public class OnboardingAdminController {
             + "설정으로 활성화된 경우 PRODUCT_REGISTERED(상품 1건 등록) 순서다. "
             + "스토어 준비(storeStatus)와 본인 실습(myStatus)을 따로 낸다. 담당 서비스 장애여도 200 이고 그 업무만 UNAVAILABLE 이다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @GetMapping
     public ResponseEntity<Response<OnboardingAdminResponse>> getMine(@AuthenticationPrincipal MemberPrincipal member) {
         return ResponseEntity.ok().body(Response.success(onboardingAdminUseCase.getMine(member.memberId())));
@@ -63,7 +64,7 @@ public class OnboardingAdminController {
             + "허용 목록에 없는 안내면 404(ONBOARDING_001) — 로컬 저장으로 돌아간다. 배포된 버전보다 오래된 버전이면 409(ONBOARDING_020), "
             + "다른 기기와 계속 겹치면 409(ONBOARDING_021) — 다시 시도한다. 배포되지 않은 버전이면 400(ONBOARDING_103)이다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @AdminAuditExempt(reason = "본인 안내 투어 진행만 기록할 뿐 상품 · 설정 같은 업무 데이터를 바꾸지 않는다")
     @PatchMapping("/tours/{guideKey}")
     public ResponseEntity<Response<OnboardingTourItem>> updateTour(
@@ -83,7 +84,7 @@ public class OnboardingAdminController {
             + "상태 · 단계 병합, NOT_STARTED 재실행과 버전 · 오류 계약도 PATCH 와 같다.",
         deprecated = true
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @AdminAuditExempt(reason = "본인 안내 투어 진행만 기록할 뿐 상품 · 설정 같은 업무 데이터를 바꾸지 않는다")
     @PutMapping("/tours/{guideKey}")
     public ResponseEntity<Response<OnboardingTourItem>> updateTourLegacy(

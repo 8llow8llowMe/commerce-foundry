@@ -5,6 +5,7 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.job.adapter.in.admin.dto.response.JobResultDownloadResponse;
 import com.commercefoundry.domainlayer.job.application.exception.JobValidationMessage;
 import com.commercefoundry.domainlayer.job.application.port.in.JobResultDownloadUseCase;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.security.audit.AdminAudited;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,7 +35,7 @@ public class JobResultDownloadController {
         description = "성공한 현재 시도의 비공개 결과만 내려준다. 파일 없음 JOB_004(404), 보관 만료 JOB_023(410), 저장소 장애 JOB_501(503). "
             + "URL은 최대 60초이며 저장·로그 수집하지 않는다. 실제 GET은 attachment·octet-stream·private,no-store다.")
     @AdminAudited(action = "JOB_RESULT_DOWNLOAD")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.REPORT_READ)
     @PostMapping("/{jobId}/result-download")
     public ResponseEntity<Response<JobResultDownloadResponse>> download(
         @AuthenticationPrincipal MemberPrincipal member,

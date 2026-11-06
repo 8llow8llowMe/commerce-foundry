@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.notification.application.port.in.Notifica
 import com.commercefoundry.global.properties.NotificationProperties;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAuditExempt;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -60,7 +61,7 @@ public class NotificationAdminController {
     }
 
     @Operation(summary = "알림 목록", description = "내 알림을 최신순으로 본다. 없으면 빈 목록이다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @GetMapping
     public ResponseEntity<Response<PageResponse<NotificationAdminItem>>> list(
         @AuthenticationPrincipal MemberPrincipal member,
@@ -72,14 +73,14 @@ public class NotificationAdminController {
     }
 
     @Operation(summary = "읽지 않은 알림 수")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @GetMapping("/unread-count")
     public ResponseEntity<Response<NotificationUnreadCountResponse>> unreadCount(@AuthenticationPrincipal MemberPrincipal member) {
         return ResponseEntity.ok().body(Response.success(notificationAdminUseCase.unreadCount(member.memberId())));
     }
 
     @Operation(summary = "알림 읽음", description = "이미 읽은 알림이면 같은 내용이다. 없거나 내 알림이 아니면 404(NOTIFICATION_001)다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @AdminAuditExempt(reason = "본인 알림을 읽음으로 표시할 뿐 업무 데이터를 바꾸지 않는다")
     @PostMapping("/{notificationId}/read")
     public ResponseEntity<Response<NotificationAdminItem>> markRead(
@@ -90,7 +91,7 @@ public class NotificationAdminController {
     }
 
     @Operation(summary = "알림 모두 읽음", description = "처리 뒤 읽지 않은 수를 돌려준다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @AdminAuditExempt(reason = "본인 알림을 읽음으로 표시할 뿐 업무 데이터를 바꾸지 않는다")
     @PostMapping("/read-all")
     public ResponseEntity<Response<NotificationUnreadCountResponse>> markAllRead(@AuthenticationPrincipal MemberPrincipal member) {
@@ -98,7 +99,7 @@ public class NotificationAdminController {
     }
 
     @Operation(summary = "알림 스트림", description = "이벤트 이름 notification. 끊기면 목록으로 따라잡고 다시 연다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.OPERATOR)
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@AuthenticationPrincipal MemberPrincipal member) {
         SseEmitter emitter = new SseEmitter(notificationProperties.streamTimeout().toMillis());

@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.shipment.application.model.ShipmentStatus
 import com.commercefoundry.domainlayer.shippingfee.application.exception.DeliveryValidationMessage;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -66,7 +67,7 @@ public class ShipmentAdminController {
             + "본문 오류는 400 — items 1~20(DELIVERY_140) · null 원소(141) · orderId 숫자 문자열(142) · 같은 주문 중복(143) · carrier 없음(144) · 송장 번호 형식(145), "
             + "모르는 택배사 · 깨진 JSON 은 DELIVERY_100."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.FULFILLMENT_MANAGE)
     @AdminAudited(action = "SHIPMENT_REGISTER")
     @PostMapping
     public ResponseEntity<Response<ShipmentRegisterAdminResponse>> registerShipments(
@@ -85,7 +86,7 @@ public class ShipmentAdminController {
             + "배송 상태는 송장 상태 그대로라 주문 상태와 다를 수 있다(주문 화면의 수동 배송 완료 등). "
             + "오류: orderId 1 이상(DELIVERY_142) · page 0 이상(DELIVERY_137) · size 1~100(DELIVERY_149) · 숫자 · 상태 · true/false 형식(DELIVERY_198)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.FULFILLMENT_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<ShipmentSummaryAdminItem>>> searchShipments(
         @Parameter(description = "주문 아이디 (숫자)", example = "4611686018427387904")
@@ -105,7 +106,7 @@ public class ShipmentAdminController {
         description = "송장과 배송 상태 이력(시간순)을 낸다. 배송 상태는 송장 상태 그대로다 — 주문 화면의 수동 배송 완료처럼 배송을 거치지 않은 변경이 있으면 주문 상태와 다를 수 있고, "
             + "그때 배송 완료(DELIVERED)로 바꾸면 주문은 그대로 두고 송장만 맞춰진다. 없는 송장은 404(DELIVERY_023)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.FULFILLMENT_READ)
     @GetMapping("/{deliveryId}")
     public ResponseEntity<Response<ShipmentAdminResponse>> getShipment(
         @Parameter(description = "송장(배송) 아이디", example = "4611686018427387906") @PathVariable long deliveryId
@@ -123,7 +124,7 @@ public class ShipmentAdminController {
             + "배송 완료 반영 대기(completionPending)로 남는다 — 배송 완료를 다시 보내면 처음 배송 완료 시각으로 다시 반영한다. 저장 실패 500(DELIVERY_031). "
             + "본문 오류는 400 — status 는 IN_TRANSIT · DELIVERED(DELIVERY_146) · 사유 200자(147) · 사유 제어 문자(148), 모르는 상태 · 깨진 JSON 은 DELIVERY_100."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.FULFILLMENT_MANAGE)
     @AdminAudited(action = "SHIPMENT_STATUS_CHANGE")
     @PatchMapping("/{deliveryId}/status")
     public ResponseEntity<Response<ShipmentAdminResponse>> changeShipmentStatus(
