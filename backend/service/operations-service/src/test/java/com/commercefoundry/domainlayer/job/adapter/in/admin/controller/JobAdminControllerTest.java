@@ -18,6 +18,7 @@ import com.commercefoundry.domainlayer.job.application.model.JobStatusFilter;
 import com.commercefoundry.domainlayer.job.application.port.in.JobAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.error.SecurityErrorCode;
+import com.commercefoundry.security.principal.AdminPermission;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
@@ -112,11 +113,13 @@ class JobAdminControllerTest {
         @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER"})
         @DisplayName("목록 · 상세는 REPORT_READ 라 ADMIN · OWNER · MANAGER 는 200 이다 (#588)")
         void reportReadersMayRead(MemberRole role) {
-            given(jobAdminUseCase.getJobs(any())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
-            given(jobAdminUseCase.getJob(4611686018427387904L)).willReturn(response());
+            given(jobAdminUseCase.getJobs(any(), any())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+            given(jobAdminUseCase.getJob(4611686018427387904L, AdminPermission.grantedTo(role))).willReturn(response());
 
             assertThat(get(PATH, role)).hasStatusOk();
             assertThat(get(JOB_PATH, role)).hasStatusOk();
+            verify(jobAdminUseCase).getJobs(new JobAdminSearchCommand(null, null, 0, 20), AdminPermission.grantedTo(role));
+            verify(jobAdminUseCase).getJob(4611686018427387904L, AdminPermission.grantedTo(role));
         }
 
         @Test
@@ -165,7 +168,7 @@ class JobAdminControllerTest {
         @Test
         @DisplayName("기본값은 전체 · page 0 · size 20 이고, 아이디는 문자열 · 상태는 {code, name, description} · 시각은 ISO-8601 이다")
         void defaults() {
-            given(jobAdminUseCase.getJobs(any())).willReturn(new PageResponse<>(List.of(item()), 0, 20, 1, 1));
+            given(jobAdminUseCase.getJobs(any(), any())).willReturn(new PageResponse<>(List.of(item()), 0, 20, 1, 1));
 
             MvcTestResult result = get(PATH, MemberRole.ADMIN);
 
@@ -178,17 +181,17 @@ class JobAdminControllerTest {
             assertThat(result).bodyJson().doesNotHavePath("$.dataBody.contents[0].errorCode");
             assertThat(result).bodyJson().doesNotHavePath("$.dataBody.contents[0].attempt");
             assertThat(result).bodyJson().extractingPath("$.dataBody.totalElements").asNumber().isEqualTo(1);
-            verify(jobAdminUseCase).getJobs(new JobAdminSearchCommand(null, null, 0, 20));
+            verify(jobAdminUseCase).getJobs(new JobAdminSearchCommand(null, null, 0, 20), AdminPermission.grantedTo(MemberRole.ADMIN));
         }
 
         @Test
         @DisplayName("상태 · 종류 · 페이지를 command 로 넘긴다")
         void passesFilters() {
-            given(jobAdminUseCase.getJobs(any())).willReturn(new PageResponse<>(List.of(), 2, 50, 0, 0));
+            given(jobAdminUseCase.getJobs(any(), any())).willReturn(new PageResponse<>(List.of(), 2, 50, 0, 0));
 
             assertThat(get(PATH + "?status=FAILED&type=SALES_REPORT_EXPORT&page=2&size=50", MemberRole.ADMIN)).hasStatusOk();
 
-            verify(jobAdminUseCase).getJobs(new JobAdminSearchCommand(JobStatusFilter.FAILED, "SALES_REPORT_EXPORT", 2, 50));
+            verify(jobAdminUseCase).getJobs(new JobAdminSearchCommand(JobStatusFilter.FAILED, "SALES_REPORT_EXPORT", 2, 50), AdminPermission.grantedTo(MemberRole.ADMIN));
         }
 
         @ParameterizedTest(name = "{0} → {1}")
@@ -215,7 +218,7 @@ class JobAdminControllerTest {
         @Test
         @DisplayName("상세를 200 으로 낸다 — 운영자 칸(이름 · 상태 · 진행 · 안내 · 시각)만 있고 기술 칸(시도 · 입력 · 결과 · 오류 원문 · 워커)은 없다")
         void returnsDetail() {
-            given(jobAdminUseCase.getJob(4611686018427387904L)).willReturn(response());
+            given(jobAdminUseCase.getJob(4611686018427387904L, AdminPermission.grantedTo(MemberRole.ADMIN))).willReturn(response());
 
             MvcTestResult result = get(JOB_PATH, MemberRole.ADMIN);
 
@@ -232,7 +235,7 @@ class JobAdminControllerTest {
         @Test
         @DisplayName("없는 작업은 404 · JOB_001")
         void notFound() {
-            given(jobAdminUseCase.getJob(anyLong())).willThrow(new JobException(JobErrorCode.NOT_FOUND_JOB));
+            given(jobAdminUseCase.getJob(anyLong(), any())).willThrow(new JobException(JobErrorCode.NOT_FOUND_JOB));
 
             assertFail(get(JOB_PATH, MemberRole.ADMIN), HttpStatus.NOT_FOUND, "JOB_001");
         }

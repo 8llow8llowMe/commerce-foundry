@@ -11,6 +11,7 @@ import com.commercefoundry.domainlayer.job.application.port.in.JobAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
+import com.commercefoundry.security.principal.AdminPermission;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -55,6 +56,7 @@ public class JobAdminController {
     @PreAuthorize(AdminAuthority.REPORT_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<JobAdminItem>>> getJobs(
+        @AuthenticationPrincipal MemberPrincipal member,
         @Parameter(description = "상태. 없으면 전체") @RequestParam(required = false) JobStatusFilter status,
         @Parameter(description = "작업 종류 (영문 대문자 · 숫자 · 밑줄 1 ~ 64자). 없으면 전체", example = "SALES_REPORT_EXPORT")
         @RequestParam(required = false) @Pattern(regexp = "[A-Z0-9_]{1,64}", message = JobValidationMessage.TYPE_PATTERN) String type,
@@ -62,7 +64,7 @@ public class JobAdminController {
         @Parameter(description = "페이지 크기 (1~100)") @RequestParam(defaultValue = "20")
         @Min(value = 1, message = JobValidationMessage.SIZE_RANGE) @Max(value = 100, message = JobValidationMessage.SIZE_RANGE) int size
     ) {
-        return ResponseEntity.ok().body(Response.success(jobAdminUseCase.getJobs(new JobAdminSearchCommand(status, type, page, size))));
+        return ResponseEntity.ok().body(Response.success(jobAdminUseCase.getJobs(new JobAdminSearchCommand(status, type, page, size), AdminPermission.grantedTo(member.role()))));
     }
 
     @Operation(
@@ -72,9 +74,10 @@ public class JobAdminController {
     @PreAuthorize(AdminAuthority.REPORT_READ)
     @GetMapping("/{jobId}")
     public ResponseEntity<Response<JobAdminResponse>> getJob(
+        @AuthenticationPrincipal MemberPrincipal member,
         @Parameter(description = "작업 아이디") @PathVariable @Positive(message = JobValidationMessage.JOB_ID_POSITIVE) long jobId
     ) {
-        return ResponseEntity.ok().body(Response.success(jobAdminUseCase.getJob(jobId)));
+        return ResponseEntity.ok().body(Response.success(jobAdminUseCase.getJob(jobId, AdminPermission.grantedTo(member.role()))));
     }
 
     @Operation(

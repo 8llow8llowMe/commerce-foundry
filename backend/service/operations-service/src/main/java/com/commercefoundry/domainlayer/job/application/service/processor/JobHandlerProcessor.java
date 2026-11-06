@@ -4,11 +4,13 @@ import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandler;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandlerOptions;
 import com.commercefoundry.global.properties.JobProperties;
+import com.commercefoundry.security.principal.AdminPermission;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
@@ -31,12 +33,16 @@ public class JobHandlerProcessor {
             if (type == null || !Job.TYPE_PATTERN.matcher(type).matches()) {
                 throw new IllegalStateException("작업 종류는 [A-Z0-9_]{1,64} 이어야 합니다: " + type + " (" + handler.getClass().getName() + ")");
             }
+            AdminPermission permission = handler.permission();
+            if (permission == null || !permission.name().endsWith("_READ")) {
+                throw new IllegalStateException(type + " 핸들러에 명시적 READ permission 이 필요합니다.");
+            }
             JobHandlerOptions options = (handler.options() == null ? JobHandlerOptions.defaults() : handler.options()).orDefaults(defaults);
             JobProperties.requireHeartbeatWithinLease(jobProperties.worker().heartbeatInterval(), options.leaseDuration(), type + " 핸들러의 leaseDuration");
             if (options.maxConcurrencyPerInstance() > jobProperties.worker().concurrency()) {
                 throw new IllegalStateException(type + " 핸들러의 maxConcurrencyPerInstance 가 operations.jobs.worker.concurrency 를 넘습니다.");
             }
-            RegisteredJobHandler previous = registered.putIfAbsent(type, new RegisteredJobHandler(handler, options));
+            RegisteredJobHandler previous = registered.putIfAbsent(type, new RegisteredJobHandler(handler, options, permission));
             if (previous != null) {
                 throw new IllegalStateException("작업 종류 " + type + " 를 맡는 핸들러가 둘입니다: "
                     + previous.handler().getClass().getName() + ", " + handler.getClass().getName());
@@ -54,11 +60,19 @@ public class JobHandlerProcessor {
         return handlersByType.keySet();
     }
 
+    /** 등록된 종류 중 호출자에게 허용된 종류만 반환한다. */
+    public Set<String> readableTypes(Set<AdminPermission> permissions) {
+        return handlersByType.entrySet().stream()
+            .filter(entry -> permissions.contains(entry.getValue().permission()))
+            .map(Map.Entry::getKey)
+            .collect(Collectors.toUnmodifiableSet());
+    }
+
     /**
      * 핸들러와 기본값을 채운 옵션.
      *
      * @param options 모든 칸이 있다
      */
-    public record RegisteredJobHandler(JobHandler handler, JobHandlerOptions options) {
+    public record RegisteredJobHandler(JobHandler handler, JobHandlerOptions options, AdminPermission permission) {
     }
 }

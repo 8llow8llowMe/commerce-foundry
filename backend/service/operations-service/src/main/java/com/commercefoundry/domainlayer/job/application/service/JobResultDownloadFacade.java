@@ -5,9 +5,12 @@ import com.commercefoundry.domainlayer.job.adapter.in.admin.presenter.JobResultD
 import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.port.in.JobResultDownloadUseCase;
+import com.commercefoundry.domainlayer.job.application.service.processor.JobQueryProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobResultAuditProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobResultDownloadProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobResultFileProcessor;
+import com.commercefoundry.security.principal.AdminPermission;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -15,14 +18,16 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class JobResultDownloadFacade implements JobResultDownloadUseCase {
+    private final JobQueryProcessor jobs;
     private final JobResultFileProcessor files;
     private final JobResultDownloadProcessor downloads;
     private final JobResultAuditProcessor audit;
     private final JobResultDownloadPresenter presenter;
 
     @Override
-    public JobResultDownloadResponse download(long jobId, long adminMemberId) {
+    public JobResultDownloadResponse download(long jobId, long adminMemberId, Set<AdminPermission> permissions) {
         try {
+            jobs.get(jobId, permissions);
             var file = files.downloadable(jobId);
             var signed = downloads.sign(file);
             var current = files.downloadable(jobId);

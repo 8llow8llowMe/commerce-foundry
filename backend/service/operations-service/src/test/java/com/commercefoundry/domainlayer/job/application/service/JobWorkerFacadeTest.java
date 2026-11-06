@@ -13,10 +13,9 @@ import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.info.JobDispatchResult;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobClaimProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobHandlerProcessor;
-import com.commercefoundry.domainlayer.job.application.service.processor.JobRunProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobResultFileProcessor;
 import com.commercefoundry.domainlayer.job.application.service.processor.JobResultUploadProcessor;
-import com.commercefoundry.domainlayer.job.domain.model.JobResultContent;
+import com.commercefoundry.domainlayer.job.application.service.processor.JobRunProcessor;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobCancelledException;
 import com.commercefoundry.domainlayer.job.domain.model.JobExecution;
@@ -25,11 +24,13 @@ import com.commercefoundry.domainlayer.job.domain.model.JobFinishedEvent;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandler;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandlerOptions;
 import com.commercefoundry.domainlayer.job.domain.model.JobOutcome;
+import com.commercefoundry.domainlayer.job.domain.model.JobResultContent;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.domainlayer.job.support.InMemoryJobRepositoryPort;
 import com.commercefoundry.domainlayer.job.support.RecordingJobDispatchPort;
 import com.commercefoundry.global.properties.JobProperties;
 import com.commercefoundry.global.support.JobWorkerIdentity;
+import com.commercefoundry.security.principal.AdminPermission;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -436,6 +437,9 @@ class JobWorkerFacadeTest {
 
     private static JobHandler handler(String type, Function<JobExecution, JobOutcome> body, JobHandlerOptions options) {
         return new JobHandler() {
+            @Override
+            public AdminPermission permission() { return AdminPermission.REPORT_READ; }
+
             @Override
             public String type() {
                 return type;

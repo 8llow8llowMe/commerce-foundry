@@ -12,6 +12,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -50,10 +51,10 @@ public class InMemoryJobRepositoryPort implements JobRepositoryPort {
 
     /** 어댑터와 같은 순서 — 아이디 내림차순. */
     @Override
-    public Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, String type, int page, int size) {
+    public Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, Set<String> types, int page, int size) {
         List<Job> matched = jobs.values().stream()
             .filter(job -> status == null || job.status() == status)
-            .filter(job -> type == null || type.equals(job.type()))
+            .filter(job -> types.contains(job.type()))
             .sorted(Comparator.comparingLong(Job::id).reversed())
             .toList();
         List<JobSummaryQueryResult> content = matched.stream().skip((long) page * size).limit(size).map(this::toSummary).toList();

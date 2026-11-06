@@ -30,6 +30,8 @@ import com.commercefoundry.global.messaging.OutboxRepository;
 import com.commercefoundry.messaging.publish.DomainEvent;
 import com.commercefoundry.messaging.publish.EventPublisher;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
+import com.commercefoundry.security.principal.AdminPermission;
+import com.commercefoundry.security.principal.MemberRole;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -209,9 +211,9 @@ class JobWorkerFlowTest {
             assertThat(signal.getAvailableAt()).isEqualTo(scheduledAt);
             assertThat(signal.getPublishedAt()).isNull();
         });
-        assertThat(jobAdminUseCase.getJobs(new JobAdminSearchCommand(JobStatusFilter.QUEUED, FlowHandlers.OK, 0, 100)).contents())
+        assertThat(jobAdminUseCase.getJobs(new JobAdminSearchCommand(JobStatusFilter.QUEUED, FlowHandlers.OK, 0, 100), AdminPermission.grantedTo(MemberRole.OWNER)).contents())
             .extracting(JobAdminItem::jobId).contains(String.valueOf(jobId));
-        assertThat(jobAdminUseCase.getJob(jobId).status().code()).isEqualTo("QUEUED");
+        assertThat(jobAdminUseCase.getJob(jobId, AdminPermission.grantedTo(MemberRole.OWNER)).status().code()).isEqualTo("QUEUED");
 
         JobAdminResponse cancelled = jobAdminUseCase.cancel(jobId, 9L);
 
@@ -402,6 +404,9 @@ class JobWorkerFlowTest {
         @Bean
         JobHandler serialHandler(Executions executions) {
             return new JobHandler() {
+            @Override
+            public AdminPermission permission() { return AdminPermission.REPORT_READ; }
+
                 @Override
                 public String type() {
                     return SERIAL;
@@ -437,6 +442,9 @@ class JobWorkerFlowTest {
 
         private static JobHandler handler(String type, Function<JobExecution, JobOutcome> body) {
             return new JobHandler() {
+            @Override
+            public AdminPermission permission() { return AdminPermission.REPORT_READ; }
+
                 @Override
                 public String type() {
                     return type;

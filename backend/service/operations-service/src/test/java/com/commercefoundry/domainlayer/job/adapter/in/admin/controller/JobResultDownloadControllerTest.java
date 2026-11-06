@@ -11,6 +11,7 @@ import com.commercefoundry.domainlayer.job.application.exception.JobErrorCode;
 import com.commercefoundry.domainlayer.job.application.exception.JobException;
 import com.commercefoundry.domainlayer.job.application.port.in.JobResultDownloadUseCase;
 import com.commercefoundry.security.error.SecurityErrorCode;
+import com.commercefoundry.security.principal.AdminPermission;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
@@ -47,32 +48,43 @@ class JobResultDownloadControllerTest {
             mvc.post().uri(PATH).header(HttpHeaders.AUTHORIZATION, token(MemberRole.STAFF)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
         verifyNoInteractions(useCase);
 
-        given(useCase.download(42L, TestTokens.MEMBER_ID)).willReturn(
+        given(useCase.download(42L, TestTokens.MEMBER_ID, AdminPermission.grantedTo(MemberRole.MANAGER))).willReturn(
             new JobResultDownloadResponse("https://private.example.test/file?signature=SECRET", Instant.parse("2026-11-01T00:01:00Z"), "report.csv", "text/csv", 3));
         assertThat(mvc.post().uri(PATH).header(HttpHeaders.AUTHORIZATION, token(MemberRole.MANAGER)).exchange()).hasStatusOk();
-        verify(useCase).download(42L, TestTokens.MEMBER_ID);
+        verify(useCase).download(42L, TestTokens.MEMBER_ID, AdminPermission.grantedTo(MemberRole.MANAGER));
     }
 
     @Test
     void adminIdentityComesFromAccessTokenAndResponseIsNoStore() {
         var expires = Instant.parse("2026-11-01T00:01:00Z");
-        given(useCase.download(42L, TestTokens.MEMBER_ID)).willReturn(
+        given(useCase.download(42L, TestTokens.MEMBER_ID, AdminPermission.grantedTo(MemberRole.ADMIN))).willReturn(
             new JobResultDownloadResponse("https://private.example.test/file?signature=SECRET", expires, "report.csv", "text/csv", 3));
         var result = mvc.post().uri(PATH).header(HttpHeaders.AUTHORIZATION, token(MemberRole.ADMIN)).exchange();
         assertThat(result).hasStatusOk();
         assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
         assertThat(result).bodyJson().extractingPath("$.dataBody.fileName").isEqualTo("report.csv");
-        verify(useCase).download(42L, TestTokens.MEMBER_ID);
+        verify(useCase).download(42L, TestTokens.MEMBER_ID, AdminPermission.grantedTo(MemberRole.ADMIN));
     }
 
     @Test
     void expiredAndStorageFailuresUseDomainEnvelope() {
-        given(useCase.download(42L, TestTokens.MEMBER_ID)).willThrow(new JobException(JobErrorCode.RESULT_FILE_EXPIRED));
+        given(useCase.download(42L, TestTokens.MEMBER_ID, AdminPermission.grantedTo(MemberRole.ADMIN))).willThrow(new JobException(JobErrorCode.RESULT_FILE_EXPIRED));
         var expired = mvc.post().uri(PATH).header(HttpHeaders.AUTHORIZATION, token(MemberRole.ADMIN)).exchange();
         assertThat(expired).hasStatus(410);
         assertThat(expired).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("JOB_023");
-        willThrow(new JobException(JobErrorCode.RESULT_STORAGE_UNAVAILABLE)).given(useCase).download(42L, TestTokens.MEMBER_ID);
+        willThrow(new JobException(JobErrorCode.RESULT_STORAGE_UNAVAILABLE)).given(useCase).download(42L, TestTokens.MEMBER_ID, AdminPermission.grantedTo(MemberRole.ADMIN));
         assertThat(mvc.post().uri(PATH).header(HttpHeaders.AUTHORIZATION, token(MemberRole.ADMIN)).exchange()).hasStatus(503);
+    }
+
+    @Test
+    void hiddenJobUsesNotFoundEnvelope() {
+        given(useCase.download(42L, TestTokens.MEMBER_ID, AdminPermission.grantedTo(MemberRole.MANAGER)))
+            .willThrow(new JobException(JobErrorCode.NOT_FOUND_JOB));
+        var result = mvc.post().uri(PATH + "?role=OWNER&permissions=SETTLEMENT_READ")
+            .header(HttpHeaders.AUTHORIZATION, token(MemberRole.MANAGER)).exchange();
+        assertThat(result).hasStatus(404);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("JOB_001");
+        verify(useCase).download(42L, TestTokens.MEMBER_ID, AdminPermission.grantedTo(MemberRole.MANAGER));
     }
 
     private static String token(MemberRole role) {

@@ -1,5 +1,7 @@
 package com.commercefoundry.domainlayer.job.domain.model;
 
+import com.commercefoundry.security.principal.AdminPermission;
+
 /**
  * 작업 종류 하나의 실행 코드. 기능 컨텍스트의 {@code *JobProcessor} 가 구현하고 빈으로 등록하면 워커가 {@link #type()} 으로 찾아 부른다
  * ({@code architecture-guide.md} "백그라운드 작업 실행").
@@ -19,6 +21,9 @@ public interface JobHandler {
 
     /** 작업 종류. {@code [A-Z0-9_]{1,64}} 이고 서비스 안에서 유일하다 — 어긋나면 기동하지 않는다. */
     String type();
+
+    /** 이 종류의 상태·결과를 조회하는 명시적 READ 권한. null 이면 기동하지 않는다. */
+    AdminPermission permission();
 
     /** 어드민 작업 목록에 보이는 작업 이름(예: "월 매출 리포트 내보내기"). 정하지 않으면 종류 코드가 그대로 보인다. */
     default String displayName() {

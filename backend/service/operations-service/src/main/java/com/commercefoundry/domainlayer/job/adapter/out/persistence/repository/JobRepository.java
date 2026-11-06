@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -28,17 +29,11 @@ public interface JobRepository extends JpaRepository<JobEntity, Long> {
     /** 같은 종류 · 같은 멱등 키의 작업 — 끝난 작업의 {@code dedup_key} 도 포함한다. {@code idx_job_type_dedup_key}. */
     boolean existsByTypeAndDedupKey(String type, String dedupKey);
 
-    /** 어드민 목록 — 조건 없음. 아이디 내림차순(등록 최신순). */
-    Page<JobEntity> findAllByOrderByIdDesc(Pageable pageable);
+    /** 허용된 등록 종류만 DB에서 거른 뒤 페이지·count를 계산한다. */
+    Page<JobEntity> findAllByTypeInOrderByIdDesc(Set<String> types, Pageable pageable);
 
-    /** 어드민 목록 — 상태 조건. */
-    Page<JobEntity> findAllByStatusOrderByIdDesc(JobStatus status, Pageable pageable);
-
-    /** 어드민 목록 — 종류 조건. {@code idx_job_type_id} 순서 그대로 읽는다. */
-    Page<JobEntity> findAllByTypeOrderByIdDesc(String type, Pageable pageable);
-
-    /** 어드민 목록 — 상태 · 종류 조건. */
-    Page<JobEntity> findAllByStatusAndTypeOrderByIdDesc(JobStatus status, String type, Pageable pageable);
+    /** 상태와 허용된 등록 종류를 함께 적용한다. */
+    Page<JobEntity> findAllByStatusAndTypeInOrderByIdDesc(JobStatus status, Set<String> types, Pageable pageable);
 
     /** lease 가 만료된 RUNNING(워커가 죽었다)의 첫 배치 — {@code idx_job_status_lease_expires_at}. 오래 만료된 것부터. */
     @Query("""

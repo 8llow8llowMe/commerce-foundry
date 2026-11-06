@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.data.domain.Page;
 
 /**
@@ -23,10 +24,10 @@ public interface JobRepositoryPort {
      * 운영자 화면용 읽기 모델이다 — 시도 · 입력 · 결과 원문은 읽지 않는다 (#305).
      *
      * @param status 없으면 전체
-     * @param type 없으면 전체
+     * @param types 허용된 등록 종류. 비어 있으면 빈 페이지
      * @param page 0 부터 센다
      */
-    Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, String type, int page, int size);
+    Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, Set<String> types, int page, int size);
 
     /** 어드민 작업 상세 — 목록과 같은 읽기 모델. */
     Optional<JobSummaryQueryResult> findSummary(long jobId);
