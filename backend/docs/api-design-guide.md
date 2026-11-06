@@ -1314,7 +1314,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 ### 2-19. 어드민 송장 등록 · 출고 (delivery-service, #18 PR-B1)
 
-`hasRole('ADMIN')`. 흐름 · 실패 처리의 정본은 `order-flow-guide.md` §4 다. 감사는 `SHIPMENT_REGISTER`(대상 `order:<id>`, 주문마다 한 줄 — `security-guide.md` §11-4).
+`AdminAuthority.FULFILLMENT_MANAGE`(ADMIN · OWNER · MANAGER — STAFF 는 403, `security-guide.md` §3-1). 흐름 · 실패 처리의 정본은 `order-flow-guide.md` §4 다. 감사는 `SHIPMENT_REGISTER`(대상 `order:<id>`, 주문마다 한 줄 — `security-guide.md` §11-4).
 
 | API | 응답 | 오류 |
 |-----|------|------|
@@ -1353,9 +1353,9 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 | API | 권한 | 응답 | 오류 |
 |-----|------|------|------|
-| `GET /api/v1/admin/deliveries?orderId=&status=&synced=&page=0&size=20` | `hasRole('ADMIN')` | 200 `PageResponse<{deliveryId, orderId, carrier, trackingNumber, status, orderSynced, completionPending, shippedAt, deliveredAt}>` — 최신순(송장 아이디 내림차순) | 400 `DELIVERY_142`(orderId 1 이상) · `137`(page) · `149`(size 1~100) · `198`(숫자 · 상태 · true/false 형식) |
-| `GET /api/v1/admin/deliveries/{deliveryId}` | `hasRole('ADMIN')` | 200 상세 `{deliveryId, orderId, carrier, trackingNumber, status, orderSynced, completionPending, shippedAt, deliveredAt, histories[{fromStatus, toStatus, changedBy, changedById, reason, changedAt}]}` — 이력 시간순 | 400 `DELIVERY_198`(숫자 아님) · 404 `DELIVERY_023` |
-| `PATCH /api/v1/admin/deliveries/{deliveryId}/status` `{status: IN_TRANSIT\|DELIVERED, reason?}` | `hasRole('ADMIN')` | 200 바뀐 상세(위와 같은 모양). 이미 그 상태면 바꾸지 않고 200 | 400 `DELIVERY_146`(status) · `147`(사유 200자) · `148`(사유 제어 문자) · `100`(모르는 상태 · 깨진 JSON) · `198` · 404 `DELIVERY_023` · 409 `024` · `025` · `026` · 배송 완료 반영 실패(아래 표) |
+| `GET /api/v1/admin/deliveries?orderId=&status=&synced=&page=0&size=20` | `AdminAuthority.FULFILLMENT_READ` | 200 `PageResponse<{deliveryId, orderId, carrier, trackingNumber, status, orderSynced, completionPending, shippedAt, deliveredAt}>` — 최신순(송장 아이디 내림차순) | 400 `DELIVERY_142`(orderId 1 이상) · `137`(page) · `149`(size 1~100) · `198`(숫자 · 상태 · true/false 형식) |
+| `GET /api/v1/admin/deliveries/{deliveryId}` | `AdminAuthority.FULFILLMENT_READ` | 200 상세 `{deliveryId, orderId, carrier, trackingNumber, status, orderSynced, completionPending, shippedAt, deliveredAt, histories[{fromStatus, toStatus, changedBy, changedById, reason, changedAt}]}` — 이력 시간순 | 400 `DELIVERY_198`(숫자 아님) · 404 `DELIVERY_023` |
+| `PATCH /api/v1/admin/deliveries/{deliveryId}/status` `{status: IN_TRANSIT\|DELIVERED, reason?}` | `AdminAuthority.FULFILLMENT_MANAGE` | 200 바뀐 상세(위와 같은 모양). 이미 그 상태면 바꾸지 않고 200 | 400 `DELIVERY_146`(status) · `147`(사유 200자) · `148`(사유 제어 문자) · `100`(모르는 상태 · 깨진 JSON) · `198` · 404 `DELIVERY_023` · 409 `024` · `025` · `026` · 배송 완료 반영 실패(아래 표) |
 | `GET /api/v1/deliveries?orderId=` | `hasRole('CUSTOMER')`(ADMIN 403) | 200 `{deliveryId, orderId, carrier, trackingNumber, status, shippedAt, deliveredAt}` 또는 `dataBody: null` | 400 `DELIVERY_199`(orderId 없음) · `198` · `142` |
 
 - **조회 경로를 나눈 이유** — 한 경로가 쿼리에 따라 단건 · 페이지 두 모양으로 답하지 않게 한다. 주문의 송장은 목록 `?orderId=`(주문당 1건이라 0~1건)로 찾고, 이력이 필요하면
@@ -1431,7 +1431,7 @@ Info → Presenter → Response
 ## 5. 보안 API 설계
 
 - 고객·어드민 API(`adapter/in/web` · `adapter/in/admin`)의 **모든 핸들러에 `@PreAuthorize` 를 단다.** 서비스 URL 단계가 열려 있어(default-allow)
-  빠뜨리면 공개 API 가 된다. 공개 API 도 `@PreAuthorize("permitAll()")` 로 명시하고, 로그인 필요는 `isAuthenticated()`, 어드민은 `AdminAuthority` 기능 상수(전환 전 서비스는 `hasRole('ADMIN')`)다(`security-guide.md` §3-1).
+  빠뜨리면 공개 API 가 된다. 공개 API 도 `@PreAuthorize("permitAll()")` 로 명시하고, 로그인 필요는 `isAuthenticated()`, 어드민은 `AdminAuthority` 상수다 — `hasRole('ADMIN')` 은 #588 부터 정적 규칙 · 인가 스모크가 거부한다(`security-guide.md` §3-1).
   본문 검증(`@RequestBody @Valid`)은 인자 바인딩 단계라 메서드 보안보다 먼저 돈다 — `isAuthenticated()` 쓰기 API 에 익명으로 형식이 틀린 본문을 보내면
   401 이 아니라 400 이다(형식이 맞으면 401 · `SECURITY_001`). 400 응답에는 리소스 데이터가 없고 유스케이스에 닿지 않는다 (처음 확인: 장바구니 #12).
 - internal API(`adapter/in/internal`, `/internal/**`)의 **모든 핸들러에 허용 호출자를 `@PreAuthorize` 로 단다** —
@@ -1525,7 +1525,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 ### 7-1. 어드민 작업 API (operations-service, #212 PR-C)
 
-모두 `hasRole('ADMIN')` 이다. 게이트웨이 라우트는 `ServiceRoute.OPERATIONS`(`/api/v1/admin/jobs/**`).
+목록 · 상세 · 결과 다운로드는 `AdminAuthority.REPORT_READ`(ADMIN · OWNER · MANAGER), 취소는 `REPORT_MANAGE`(ADMIN · OWNER)다(`security-guide.md` §3-1). 게이트웨이 라우트는 `ServiceRoute.OPERATIONS`(`/api/v1/admin/jobs/**`).
 
 | API | 응답 | 오류 |
 |-----|------|------|
@@ -1552,7 +1552,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 ### 7-2. 어드민 알림 센터 (operations-service, #213)
 
-모두 `hasRole('ADMIN')` 이다. 게이트웨이 라우트는 `ServiceRoute.OPERATIONS`(`/api/v1/admin/notifications/**`).
+모두 `AdminAuthority.OPERATOR`(운영자 역할 전체 — 본인 수신함)다(`security-guide.md` §3-1). 게이트웨이 라우트는 `ServiceRoute.OPERATIONS`(`/api/v1/admin/notifications/**`).
 알림은 요청한 어드민 것만 보인다. 다른 관리자 알림 아이디는 404(`NOTIFICATION_001`)다.
 
 | API | 응답 | 오류 |
@@ -1674,7 +1674,7 @@ FE 영향: 로그인 시작/콜백과 sessionStorage verifier 처리를 추가�
 
 ## 운영자 온보딩 계약 (#357)
 
-어드민 안내 투어(#228)의 진행을 브라우저가 아니라 운영자별로 서버에 둔다. 조회·기록 API 모두 `hasRole('ADMIN')` 이고 operations-service 다(게이트웨이 `ServiceRoute.OPERATIONS`,
+어드민 안내 투어(#228)의 진행을 브라우저가 아니라 운영자별로 서버에 둔다. 조회·기록 API 모두 `AdminAuthority.OPERATOR`(운영자 역할 전체 — 본인 진행)이고 operations-service 다(게이트웨이 `ServiceRoute.OPERATIONS`,
 `/api/v1/admin/onboarding/**`). 운영자는 access 토큰의 memberId 로만 정한다 — 경로 · 본문으로 받지 않아 남의 기록을 읽거나 쓸 수 없다.
 
 | API | 입력 | 응답 dataBody |
@@ -1792,7 +1792,7 @@ FE는 기존 400·409와 별도로 429 안내 및 Retry-After 대기를 처리�
 
 ## 상담 지식 ADMIN API (#469 PR-B)
 
-`/api/v1/admin/support/knowledge`는 ADMIN 전용이며 GET 목록·POST 생성, `/{documentId}` GET 상세·PUT 최신 초안 전체 편집·DELETE 리비전 보관을 제공한다.
+`/api/v1/admin/support/knowledge`는 목록 · 상세 `AdminAuthority.CS_READ`, 생성 · 편집 · 새 초안 `CS_MANAGE`, 승인 · 게시 · 보관 `SETTINGS_MANAGE`(대표만 — `security-guide.md` §3-1)이며 GET 목록·POST 생성, `/{documentId}` GET 상세·PUT 최신 초안 전체 편집·DELETE 리비전 보관을 제공한다.
 `/{documentId}/revisions` POST는 새 초안(201), `/approve` POST는 최신 초안 승인, `/publish` POST는 최신 승인본 게시다.
 계약 정본은 [support-knowledge-guide.md](support-knowledge-guide.md)의 관리자 계약이다. 같은 문서의 PR-C 절은 HTTP 없는 내부 키워드 검색 포트를 정의한다. 고객 FAQ·AI 진입은 후속이다.
 목록은 optional type/locale, page=0/size=20(1~100), 문서 ID 내림차순 PageResponse이며 본문을 제외한다.
@@ -1806,7 +1806,7 @@ FE는 응답의 문서/리비전 버전을 보관해 요청에 포함하고 409�
 
 ### 캠페인 수신자 동의 미리보기 (#230 PR-B)
 
-`POST /api/v1/admin/campaigns/recipient-previews`는 operations-service의 ADMIN API다.
+`POST /api/v1/admin/campaigns/recipient-previews`는 operations-service의 어드민 API다(`AdminAuthority.CS_READ` — ADMIN · OWNER · MANAGER · STAFF, 저장 · 발송 없음).
 최대100개 양수 `memberIds`로 auth의 최신 동의를 한 번 조회한다. 요청·응답·검증·실패·감사·발송 후속 경계는
 [마케팅 동의 조회 계약](marketing-consent-guide.md#관리자-수신자-미리보기-230-pr-b)을 따른다.
 중복 제거 후 첫 요청 순서의 `members[{memberId:String,marketingAgreed:boolean}]`와
@@ -1815,9 +1815,9 @@ FE는 응답의 문서/리비전 버전을 보관해 요청에 포함하고 409�
 ## 쇼핑몰 공개 정보 (#566)
 
 - 정본: operations-service `storeprofile`, 배포당 단일 `store_profile` 행(id=1). 다른 고객사는 다른 배포·DB를 사용한다.
-- ADMIN `GET /api/v1/admin/store/profile`, `PUT /api/v1/admin/store/profile`; 익명 `GET /api/v1/store/profile`.
+- 어드민 `GET /api/v1/admin/store/profile`(`AdminAuthority.SETTINGS_READ`), `PUT /api/v1/admin/store/profile`(`SETTINGS_MANAGE`) — 둘 다 ADMIN · OWNER; 익명 `GET /api/v1/store/profile`.
   조회·저장 성공 응답은 공통 `Response` 봉투와 `Cache-Control: no-store`를 사용한다. 미등록 조회는 404 `STORE_PROFILE_001`이다.
-- PUT은 전체 교체이며 **저장 즉시 공개**된다. 최초 생성 `expectedVersion: null`, 수정은 ADMIN GET의 `version`을 전달한다.
+- PUT은 전체 교체이며 **저장 즉시 공개**된다. 최초 생성 `expectedVersion: null`, 수정은 어드민 GET의 `version`을 전달한다.
   오래된 편집·중복 최초 등록·DB 낙관 락 경합은 409 `STORE_PROFILE_020`이다. FE는 다시 조회해 편집 내용을 확인한 뒤 저장한다.
   동일 값 저장은 Hibernate의 변경 감지에 따라 버전을 유지할 수 있다. 실제 변경은 버전을 증가시킨다.
 - 필수 필드(최대 문자 수): `storeName`(100), `companyName`(200), `representativeName`(100), `countryCode`(2, 대문자 ISO 3166-1 alpha-2),
@@ -1826,15 +1826,15 @@ FE는 응답의 문서/리비전 버전을 보관해 요청에 포함하고 409�
   사업자 식별 번호는 국가별 형식을 하드코딩하지 않는다. 버전은 null 또는 0 이상이다. 필드 검증은 `STORE_PROFILE_101`~`111`,
   모든 표시 필드는 NUL·줄바꿈을 포함한 Unicode Cc 제어문자를 허용하지 않는다.
   알 수 없는 ISO 국가·깨진 JSON 등은 `STORE_PROFILE_100` 오류 봉투다.
-- 공개 응답은 위 표시 필드 10개만 허용한다. ADMIN 응답만 `version`을 추가한다. 내부 고정 ID·감사 행위자·비밀키는 반환하지 않는다.
-  쓰기는 JWT ADMIN만 가능하며 감사에는 `STORE_PROFILE_UPDATE`, 실제 JWT 행위자, `store-profile:1`, 성공/실패만 남긴다.
+- 공개 응답은 위 표시 필드 10개만 허용한다. 어드민 응답만 `version`을 추가한다. 내부 고정 ID·감사 행위자·비밀키는 반환하지 않는다.
+  쓰기는 `SETTINGS_MANAGE`(ADMIN · OWNER)만 가능하며 감사에는 `STORE_PROFILE_UPDATE`, 실제 JWT 행위자, `store-profile:1`, 성공/실패만 남긴다.
 - FE 연계 #568: 설정 화면은 저장이 즉시 공개됨을 안내하고 `expectedVersion`을 전달한다. 푸터 `BUSINESS_*`와 쇼핑몰 표시 이름을
   공개 API로 이행한다. 미등록 404는 설정 필요 상태로 다루고 실정보 기본값을 번들에 넣지 않는다. API 조회는 캐시하지 않는다.
   이용약관·개인정보처리방침 관리(#569)는 별도 계약이다. 새 비밀키·FE 코드 변경은 없다. 계약 검토자 `seonghoho`.
 
 ## 스토어 약관·개인정보처리방침 (#569)
 
-operations-service의 ADMIN `/api/v1/admin/store/legal-documents`와 `/api/v1/admin/store/legal-document-templates/{type}`는
+operations-service의 어드민(조회 `AdminAuthority.SETTINGS_READ`, 초안 저장 · 게시 `SETTINGS_MANAGE` — ADMIN · OWNER) `/api/v1/admin/store/legal-documents`와 `/api/v1/admin/store/legal-document-templates/{type}`는
 불변 초안 저장·명시적 즉시 게시·이력·시작 템플릿을 제공한다. 고객 `/api/v1/store/legal-documents`는 익명으로 실제 게시본만 읽는다.
 `type=TERMS|PRIVACY`, `locale=ko|en`은 원시 문자열 제어 코드다. 표준 봉투·no-store, 언어 fallback 없음, 미게시 404를 적용한다.
 FE는 버전 충돌 409 후 상세를 재조회하고 본문을 escape한 텍스트로 렌더링한다. 템플릿은 법적 적합성 보장이 아니다.

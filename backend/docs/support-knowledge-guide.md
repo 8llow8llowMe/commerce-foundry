@@ -20,7 +20,7 @@ H2·PostgreSQL 공통 계약으로 실제 JPQL, 초안의 게시본 보존, 원�
 
 ## 관리자 계약 (#469 PR-B)
 
-모든 `/api/v1/admin/support/knowledge` 진입은 ADMIN 권한을 요구한다. 승인·감사의 행위자는 인증 주체에서만 읽는다.
+`/api/v1/admin/support/knowledge` 는 기능 권한으로 나눈다(#588, `security-guide.md` §3-1) — 목록 · 상세는 `AdminAuthority.CS_READ`, 생성 · 편집 · 새 초안은 `CS_MANAGE`(매니저 초안), 승인 · 게시 · 보관은 고객 AI 응답에 나가는 결정이라 `SETTINGS_MANAGE`(ADMIN · OWNER — 대표 승인)다. 승인·감사의 행위자는 인증 주체에서만 읽는다.
 GET 목록은 optional type/locale, page=0, size=20(최대100), 문서 ID 내림차순이며 본문 없는 최신 리비전 요약과 PageResponse를 반환한다.
 요청 본문·필터의 enum wire 값은 type=`FAQ|POLICY|TEMPLATE`, locale=`KO|EN`(한국어/영어, 대문자 코드)이다. category는 Swagger enum을 따른다.
 GET `/{documentId}`는 최신 리비전 상세와 문서 유형·언어·최신/게시 번호·문서/리비전 버전을 반환한다. 식별자는 문자열, enum은 metadata다.

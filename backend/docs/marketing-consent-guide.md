@@ -48,7 +48,7 @@ Docker 없는 로컬의 PostgreSQL 계약은 skip으로 구분하고 CI에서 �
 
 ## 관리자 수신자 미리보기 (#230 PR-B)
 
-operations-service의 `POST /api/v1/admin/campaigns/recipient-previews`는 ADMIN access 토큰만 허용한다.
+operations-service의 `POST /api/v1/admin/campaigns/recipient-previews`는 `AdminAuthority.CS_READ`(ADMIN · OWNER · MANAGER · STAFF — 회원 목록과 같은 노출 수준, 저장 · 발송 없음)다(`security-guide.md` §3-1).
 요청은 위 internal API와 같은 `{memberIds}`이며, 중복 포함 1~100개·원소 양수 필수다. 400 검증 코드는
 `CAMPAIGN_101`(필수), `CAMPAIGN_102`(최대100), `CAMPAIGN_103`(원소 null·0·음수)이고 깨진 JSON은 `CAMPAIGN_100`이다.
 공통 `Response`의 `dataBody`는 다음과 같다.

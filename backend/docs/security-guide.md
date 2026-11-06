@@ -153,7 +153,8 @@
 ## 3. 인증 주체
 
 검증을 통과한 토큰은 `MemberPrincipal(long memberId, MemberRole role, String tokenId, Instant issuedAt)` 이 된다.
-역할 권한은 `ROLE_CUSTOMER` · 기존 `ROLE_ADMIN` 등 `ROLE_<role>` 한 개이며, 기존 `hasRole('ADMIN')` 선언은 그대로 동작한다.
+역할 권한은 `ROLE_CUSTOMER` · 기존 `ROLE_ADMIN` 등 `ROLE_<role>` 한 개다. `hasRole('ADMIN')` 식은 런타임에 여전히 동작하지만,
+어드민 핸들러에는 쓰지 않는다 — 정적 규칙 · 인가 스모크가 #588 부터 거부한다(§3-1).
 
 ### 3-1. 운영자 권한 모델 준비 (#236 PR-A)
 
@@ -252,6 +253,42 @@ order-service · payment-service 어드민 엔드포인트 → 권한 (#587):
 - 핸들러 전체 표는 `OrderAdminAuthorizationMappingTest` · `PaymentAdminAuthorizationMappingTest` 가, 역할별 200 · 403 은 `OrderAdminControllerTest` ·
   `ClaimAdminControllerTest` · `PaymentAdminControllerTest` 슬라이스가 고정한다.
 
+delivery-service · operations-service · support-service 어드민 엔드포인트 → 권한 (#588):
+
+| 엔드포인트 | 식 (`AdminAuthority`) | ADMIN · OWNER | MANAGER | STAFF |
+|------------|----------------------|---------------|---------|-------|
+| `GET /api/v1/admin/deliveries` · `GET /api/v1/admin/deliveries/{deliveryId}` | `FULFILLMENT_READ` | 200 | 200 | 200 |
+| `POST /api/v1/admin/deliveries`(송장 등록) · `PATCH /api/v1/admin/deliveries/{deliveryId}/status` | `FULFILLMENT_MANAGE` | 200 | 200 | 403 |
+| `GET /api/v1/admin/shipping-policies/domestic` · `.../domestic/histories` · `GET .../international` | `FULFILLMENT_READ` | 200 | 200 | 200 |
+| `PUT /api/v1/admin/shipping-policies/domestic` · `PUT .../international` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
+| `POST /api/v1/admin/campaigns/recipient-previews` | `CS_READ` | 200 | 200 | 200 |
+| `GET /api/v1/admin/jobs` · `GET /api/v1/admin/jobs/{jobId}` · `POST .../{jobId}/result-download` | `REPORT_READ` | 200 | 200 | 403 |
+| `POST /api/v1/admin/jobs/{jobId}/cancel` | `REPORT_MANAGE` | 200 | 403 | 403 |
+| `GET /api/v1/admin/store/legal-documents` · `.../{type}/{locale}` · `.../revisions` · `GET /api/v1/admin/store/legal-document-templates/{type}` | `SETTINGS_READ` | 200 | 403 | 403 |
+| `PUT /api/v1/admin/store/legal-documents/{type}/{locale}/draft` · `POST .../publish` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
+| `GET /api/v1/admin/store/profile` | `SETTINGS_READ` | 200 | 403 | 403 |
+| `PUT /api/v1/admin/store/profile` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
+| `/api/v1/admin/notifications/**` 5개 · `/api/v1/admin/onboarding/me/**` 3개 | `OPERATOR` | 200 | 200 | 200 |
+| `GET /api/v1/admin/support/knowledge` · `GET .../{documentId}` | `CS_READ` | 200 | 200 | 200 |
+| `POST /api/v1/admin/support/knowledge` · `PUT .../{documentId}` · `POST .../{documentId}/revisions` | `CS_MANAGE` | 200 | 200 | 403 |
+| `POST .../{documentId}/approve` · `POST .../{documentId}/publish` · `DELETE .../{documentId}`(보관) | `SETTINGS_MANAGE` | 200 | 403 | 403 |
+
+- **배송비 정책 교체는 대표만(`SETTINGS_MANAGE`)** 이다 — 배송비는 고객 결제 금액을 바꾸는 상점 설정이다. 조회는 출고 업무에 필요해 `FULFILLMENT_READ` 로 연다.
+- **지식 승인 · 게시 · 보관은 대표만(`SETTINGS_MANAGE`)** 이다 — 게시본이 고객 AI 응답에 그대로 나간다. 매니저가 초안을 쓰고(`CS_MANAGE`) 대표가 승인 · 게시한다.
+- **알림 · 온보딩은 `OPERATOR`(본인)** 다. 수신자 · 운영자는 언제나 access 토큰의 memberId 이고 저장소가 그 아이디로 거른다 — 남의 알림 아이디는 404(`NOTIFICATION_001`).
+  시스템 경보(DLT · 결제 아웃박스)는 발행 쪽이 대표 관리자(ADMIN · OWNER)에게만 만든다(auth `AdminNotificationRecipientQueryAdapter`). 작업 완료 알림은 요청자에게 간다.
+  알림은 받은 시점의 역할로 만들어진다 — 대표가 매니저 · 스태프로 바뀌어도 이미 받은 경보는 본인 수신함에 남는다(읽을 때 현재 역할로 다시 거르지 않는다).
+- **캠페인 수신 대상 미리보기는 `CS_READ`** — 회원 아이디별 마케팅 동의 여부만 보이고(회원 목록과 같은 노출 수준) 저장 · 발송하지 않는다.
+  응답 차이(없는 아이디가 섞이면 503 `CAMPAIGN_001`)로 아이디 존재 여부를 알 수 있고 운영자 아이디도 거르지 않는다 — 동의 여부만 보이고 호출은 감사에 남아 받아들인다.
+  발송 · 예약 API 를 만들 때 권한을 따로 정한다.
+- **백그라운드 작업은 `REPORT_READ` / `REPORT_MANAGE`** 다. 목록 · 상세 · 결과 다운로드는 요청자와 무관하게 모든 작업을 보인다(결과 파일은 서명 URL 로 내려받는다).
+  지금 운영 코드에 등록된 작업 종류(`JobHandler` 구현)는 없다. **정산 · 원가 · 개인정보를 담는 작업 종류를 더할 때는 `REPORT_READ` 에 그대로 얹지 말고 종류별로 권한을 따로 정한다**
+  (종류별 필터 또는 기능 API 쪽 조회로 나눈다 — 강제 장치는 #639).
+- 법적 문서 · 상점 공개 정보는 공개 사업자 정보와 약관이라 조회도 `SETTINGS_READ`(대표만)다.
+- 이 세 서비스에 `MultipartFile` 핸들러는 없다(`spring.servlet.multipart.*` 설정도 없음 — Boot 기본 한도).
+- 핸들러 전체 표는 `DeliveryAdminAuthorizationMappingTest` · `OperationsAdminAuthorizationMappingTest` · `SupportAdminAuthorizationMappingTest` 가,
+  역할별 200 · 403 은 각 `*AdminControllerTest`(송장 · 배송비 정책 · 작업 · 결과 다운로드 · 법적 문서 · 상점 정보 · 알림 · 온보딩 · 캠페인 · 지식) 슬라이스가 고정한다.
+
 **메서드 식은 `AdminAuthority` 상수로 쓴다.** `com.commercefoundry.security.principal.AdminAuthority`에 기능별 상수 22개
 (`ORDER_MANAGE = "hasAuthority('ADMIN_ORDER_MANAGE')"` 등, `AdminPermission`과 1:1)와 운영자 본인 API용 `OPERATOR`
 (`"hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')"`)를 둔다. 조회 핸들러는 `*_READ`, 변경 핸들러는 `*_MANAGE`를 쓰고 식 문자열을 직접 적지 않는다.
@@ -261,19 +298,20 @@ order-service · payment-service 어드민 엔드포인트 → 권한 (#587):
 @PatchMapping("/api/v1/admin/orders/{orderId}/status")
 ```
 
-**어드민 식 가드(R2 · 인가 스모크)는 머리 3종만 받는다** — testFixtures `AuthorizationExpressions.requiresOperatorAuthority`.
+**어드민 식 가드(R2 · 인가 스모크)는 머리 2종만 받는다** — testFixtures `AuthorizationExpressions.requiresOperatorAuthority`.
 
 | 머리 | 뜻 |
 |------|----|
-| `hasRole('ADMIN')` | 전환 전 표기(호환). 새 운영자 역할에는 열리지 않는다 |
 | `hasAuthority('ADMIN_<기능>_READ' \| '..._MANAGE')` | `AdminPermission`에 있는 기능만. `AdminAuthority` 기능 상수 |
 | `hasAnyRole('ADMIN','OWNER','MANAGER','STAFF')` | `AdminAuthority.OPERATOR`와 정확히 같은 문자열만 |
 
 머리 뒤에는 `and`·`&&`로 좁히는 조건만 붙일 수 있고, 괄호 밖 `or`·`||`·`?`는 실패다(§5). `hasAnyAuthority(...)`·정의되지 않은 기능
 (`hasAuthority('ADMIN_FOO_READ')`)·`hasAuthority('ROLE_ADMIN')`·순서나 공백이 다른 `hasAnyRole(...)`도 실패다.
+#236 이전 표기 `hasRole('ADMIN')` 도 #588 부터 실패다 — 런타임에는 ADMIN 만 통과시켜 fail-closed 지만 새 역할에 기능을 열 수 없어 다시 들어오지 않게 막는다.
 
-auth-service · product-service · order-service · payment-service 는 위 표대로 전환했다. 아직 `hasRole('ADMIN')`인 그 밖의 서비스 컨트롤러는 새 역할 토큰이 URL 층을 지나도 메서드에서 403 `SECURITY_005`로
-막힌다(fail-closed). 각 서비스 컨트롤러를 `AdminAuthority` 상수로 전환하고 테스트한 뒤에만 새 역할 계정을 생성·발급한다.
+모든 서비스(auth · product · order · payment · delivery · operations · support)의 어드민 핸들러를 위 표대로 전환했다(#586 · #587 · #588).
+서비스 main 코드에 `hasRole('ADMIN')` 선언은 남아 있지 않다 — "컨트롤러를 전환 · 테스트한 뒤에만 새 역할 계정을 발급한다" 는 선행 조건이 서비스 메서드 층에서는 채워졌다.
+발급 자체(운영자 추가 · 시드가 새 역할로 만드는 것)는 어드민 화면 전환(#237) 범위다(`api-design-guide.md` 회원 · 관리자 절).
 어드민 회원 목록의 `role` 필터는 enum 바인딩이라 새 역할 이름도 수락하지만, 발급 전에는 해당 역할 행이 없어 빈 결과다.
 
 ```java
@@ -335,7 +373,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 | 경로 | 규칙 |
 |------|------|
-| `/api/v1/admin/**` | URL 규칙으로 운영자 역할(`MemberRole.OPERATOR_ROLES`)을 요구한다(§3-1). 기능 판정은 컨트롤러의 `@PreAuthorize`(`AdminAuthority` 상수 또는 전환 전 `hasRole('ADMIN')`)와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
+| `/api/v1/admin/**` | URL 규칙으로 운영자 역할(`MemberRole.OPERATOR_ROLES`)을 요구한다(§3-1). 기능 판정은 컨트롤러의 `@PreAuthorize`(`AdminAuthority` 상수)와 이중이다. 토큰 없으면 401(001), CUSTOMER 면 403(005) |
 | `/internal/**` | 이 체인에서는 **`denyAll`**(익명 001 · 로그인 005)이다. 앞 순서의 서비스 인증 체인(§9-3)만 서비스 토큰으로 연다 — 서비스가 그 Configurer 를 빠뜨려도 internal API 가 열리지 않는다(fail-closed). **internal 컨트롤러 메서드마다 허용 호출자를 `@PreAuthorize("hasAuthority('SERVICE_<service-id>')")` 로 선언한다**(§9-4). 사설망 전제(게이트웨이가 라우팅하지 않고 서비스 포트를 외부에 열지 않는다, 아래 강제 수단)는 그대로 둔다 — 1단계 서비스 토큰은 그 위의 두 번째 방어다 |
 | 그 밖의 `/api/v1/**` | URL 단계에서는 열어 두고(default-allow) 메서드의 `@PreAuthorize` 가 정한다. 비로그인 상품 조회 같은 API 가 있다 (아래 보완 규칙) |
 | `/actuator/**` | `health`(하위 경로 포함)만 `permitAll` 이다. 웹에 노출된 다른 엔드포인트와 링크(`/actuator`)는 `denyAll` — 토큰 없으면 401(001), 로그인했으면 403(005). 노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — **노출 설정(`exposure.include: health`)이 1차, URL 규칙이 2차** 방어다. 경로는 Boot 의 `EndpointRequest` 로 잡아 management base-path 를 바꿔도 따라간다. **어느 서비스도 `heapdump` 를 노출하지 않는다** — 서비스 전부의 힙에 `INTERNAL_JWT_SECRET` 이 있고, auth 의 힙에는 개인키도 있다 |
@@ -363,7 +401,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 **default-allow 보완 규칙** — URL 단계가 열려 있으니 메서드 애노테이션이 빠지면 그대로 공개 API 가 된다.
 
 - `adapter/in/web` · `adapter/in/admin` 의 **모든 핸들러 메서드에 `@PreAuthorize` 를 단다.** 공개 API 도 `@PreAuthorize("permitAll()")` 로 적어
-  빠뜨린 메서드가 리뷰에서 보이게 한다. 로그인 필요는 `isAuthenticated()`, 어드민은 `AdminAuthority` 상수(전환 전 `hasRole('ADMIN')`)다(§3-1).
+  빠뜨린 메서드가 리뷰에서 보이게 한다. 로그인 필요는 `isAuthenticated()`, 어드민은 `AdminAuthority` 상수다(§3-1, `hasRole('ADMIN')` 은 #588 부터 실패).
   빠뜨리면 **빌드가 실패한다** — 경로 기준 런타임 가드(§9-10 스모크)와 패키지 기준 정적 가드(§9-11 ArchUnit)가 둘 다 본다.
 
 **`/internal/**` 사설망 전제의 강제 수단**
@@ -969,7 +1007,7 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
 | R0 컨트롤러 위치 | `@Controller`(메타 포함, `@RestController` 포함 · `@(Rest)ControllerAdvice` 제외) 클래스 | `adapter.in.web`(고객) · `adapter.in.admin`(어드민) · `adapter.in.internal`(서비스 간) · `adapter.in.webhook`(외부 콜백) 중 하나로 옮긴다 |
 | R7 매핑은 컨트롤러에 직접 | web · admin · internal 컨트롤러의 상위 클래스 · 인터페이스 | springdoc `XxxApi` 인터페이스나 추상 기반 컨트롤러에 매핑을 두지 않는다. 매핑 · `@PreAuthorize` · Swagger 애노테이션을 컨트롤러 메서드에 직접 둔다 (상속받은 핸들러는 R1~R3 이 보지 못한다) |
 | R1 핸들러 인가 선언 | `..adapter.in.web..` · `..adapter.in.admin..` 의 `@Controller`(·`@RestController`) 매핑 메서드 | 보고된 `클래스#메서드` **메서드에** `@PreAuthorize` 를 단다 — 공개 `permitAll()`, 로그인 `isAuthenticated()`, 어드민 `AdminAuthority` 상수(§3-1). 클래스 선언은 대신하지 않는다 |
-| R2 어드민은 운영자 권한 필요 | `..adapter.in.admin..` 핸들러 | §3-1 의 머리 3종(`AdminAuthority` 기능 상수 · `OPERATOR` · 전환 전 `hasRole('ADMIN')`) 단독 또는 `<머리> and <추가 조건>`. `permitAll()` · `isAuthenticated()` · 괄호 밖 `or` · `\|\|` · 삼항은 실패다. 고객도 부르는 API 면 admin 이 아니라 web 패키지에 따로 만든다(DTO 공유 금지) |
+| R2 어드민은 운영자 권한 필요 | `..adapter.in.admin..` 핸들러 | §3-1 의 머리 2종(`AdminAuthority` 기능 상수 · `OPERATOR`) 단독 또는 `<머리> and <추가 조건>`. `permitAll()` · `isAuthenticated()` · 괄호 밖 `or` · `\|\|` · 삼항 · #236 이전 표기 `hasRole('ADMIN')`(#588) 은 실패다. 고객도 부르는 API 면 admin 이 아니라 web 패키지에 따로 만든다(DTO 공유 금지) |
 | R3 internal 허용 호출자 | `..adapter.in.internal..` 핸들러(메서드, 없으면 클래스) | `hasAuthority('SERVICE_<호출 서비스>')` 또는 `hasAnyAuthority('SERVICE_a', 'SERVICE_b')` **그 자체**. `isAuthenticated()` · `or` 금지 (§9-4) |
 | R4 `RequestContextHolder` 금지 | 서비스 main 전체 | 사용자 토큰 · 헤더를 꺼내 넘기지 않는다. memberId 를 본문 · 파라미터로 넘긴다 (§9-4, `coding-conventions.md` §10) |
 | R5 Feign 전역 빈 금지 | `feign.RequestInterceptor` · `feign.Capability`(구현 포함)를 반환하는 `@Bean`, 그리고 그 둘을 구현한 `@Component`(메타 포함 — `@Configuration` · `@Service` 등) 클래스 | 전역 빈 · 스캔되는 구현을 지운다(OpenFeign 은 컨텍스트의 인터셉터를 모든 클라이언트에 붙인다). internal 클라이언트는 `@FeignClient(configuration = InternalFeignClientConfiguration.class)` 로 붙이고, 그 configuration 클래스에도 `@Configuration` 을 달지 않는다 (§9-5) |
@@ -1166,7 +1204,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - **서비스 전용 이력 테이블 사례 — delivery-service 배송비 정책 교체 이력 (#69).** 어드민 공통 감사 로그(DB)가 아직 없어 `delivery.shipping_policy_history`
   (+ 구간 스냅숏 `shipping_policy_history_area`)에 교체 전 · 후 값 · 교체한 관리자(`admin_member_id` — access 토큰의 memberId, 본문 값을 쓰지 않는다) · 시각을 남긴다.
   교체와 **같은 트랜잭션**이라 이력 저장이 실패하면 교체도 롤백된다 — 기록 없는 변경이 생기지 않는다(로그 한 줄 방식은 트랜잭션 밖이라 이 보장이 없다).
-  조회는 `GET /api/v1/admin/shipping-policies/domestic/histories`(ADMIN, `api-design-guide.md` §6-2). append-only 라 고치거나 지우는 API 가 없다.
+  조회는 `GET /api/v1/admin/shipping-policies/domestic/histories`(`FULFILLMENT_READ`, `api-design-guide.md` §6-2). append-only 라 고치거나 지우는 API 가 없다.
   `adminDisplayName` 은 auth-service 표시 이름 벌크 조회가 마스킹해 준 값이다 (#322). 원문 이름은 delivery 에 들어오지 않는다.
   #163 결정(C′)으로 이 표가 정본이고 `admin.audit` 줄(`SHIPPING_POLICY_DOMESTIC_REPLACE`)도 함께 남긴다(#163 PR-D).
 - 적용 대상 (#6 · #238): 관리자 로그인 성공 · 실패(`AdminAuthWebFacade` — 1단계 · 2단계), 어드민 회원 목록 조회(`MemberAdminFacade` — 마스킹했어도 개인정보를 읽는 행위다).
