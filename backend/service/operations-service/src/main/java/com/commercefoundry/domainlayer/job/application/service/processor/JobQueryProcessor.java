@@ -9,8 +9,10 @@ import com.commercefoundry.domainlayer.job.application.port.out.query.JobSummary
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandler;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
+import com.commercefoundry.security.principal.AdminPermission;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
@@ -39,14 +41,26 @@ public class JobQueryProcessor {
     private final JobRepositoryPort jobRepositoryPort;
     private final JobHandlerProcessor jobHandlerProcessor;
 
-    public Page<JobSummaryInfo> search(JobAdminSearchCommand command) {
+    public Page<JobSummaryInfo> search(JobAdminSearchCommand command, Set<AdminPermission> permissions) {
         JobStatus status = command.status() == null ? null : command.status().toJobStatus();
-        return jobRepositoryPort.findSummaryPage(status, command.type(), command.page(), command.size()).map(this::toInfo);
+        Set<String> types = jobHandlerProcessor.readableTypes(permissions);
+        if (command.type() != null) {
+            types = types.contains(command.type()) ? Set.of(command.type()) : Set.of();
+        }
+        return jobRepositoryPort.findSummaryPage(status, types, command.page(), command.size()).map(this::toInfo);
     }
 
     /** @throws JobException {@code NOT_FOUND_JOB} */
     public JobSummaryInfo get(long jobId) {
         return jobRepositoryPort.findSummary(jobId).map(this::toInfo).orElseThrow(() -> new JobException(JobErrorCode.NOT_FOUND_JOB));
+    }
+
+    /** 조회 권한이 없거나 등록되지 않은 종류도 존재하지 않는 작업으로 처리한다. */
+    public JobSummaryInfo get(long jobId, Set<AdminPermission> permissions) {
+        return jobRepositoryPort.findSummary(jobId)
+            .filter(job -> jobHandlerProcessor.readableTypes(permissions).contains(job.type()))
+            .map(this::toInfo)
+            .orElseThrow(() -> new JobException(JobErrorCode.NOT_FOUND_JOB));
     }
 
     private JobSummaryInfo toInfo(JobSummaryQueryResult job) {

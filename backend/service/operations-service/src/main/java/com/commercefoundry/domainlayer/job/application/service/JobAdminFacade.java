@@ -12,6 +12,8 @@ import com.commercefoundry.domainlayer.job.application.service.processor.JobQuer
 import com.commercefoundry.domainlayer.job.application.service.processor.JobRunProcessor;
 import com.commercefoundry.domainlayer.job.domain.model.Job;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.AdminPermission;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,14 +39,14 @@ public class JobAdminFacade implements JobAdminUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResponse<JobAdminItem> getJobs(JobAdminSearchCommand command) {
-        return jobAdminPresenter.toPageResponse(jobQueryProcessor.search(command));
+    public PageResponse<JobAdminItem> getJobs(JobAdminSearchCommand command, Set<AdminPermission> permissions) {
+        return jobAdminPresenter.toPageResponse(jobQueryProcessor.search(command, permissions));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public JobAdminResponse getJob(long jobId) {
-        return jobAdminPresenter.toResponse(jobQueryProcessor.get(jobId));
+    public JobAdminResponse getJob(long jobId, Set<AdminPermission> permissions) {
+        return jobAdminPresenter.toResponse(jobQueryProcessor.get(jobId, permissions));
     }
 
     /**

@@ -306,9 +306,9 @@ delivery-service · operations-service · support-service 어드민 엔드포인
 - **캠페인 수신 대상 미리보기는 `CS_READ`** — 회원 아이디별 마케팅 동의 여부만 보이고(회원 목록과 같은 노출 수준) 저장 · 발송하지 않는다.
   응답 차이(없는 아이디가 섞이면 503 `CAMPAIGN_001`)로 아이디 존재 여부를 알 수 있고 운영자 아이디도 거르지 않는다 — 동의 여부만 보이고 호출은 감사에 남아 받아들인다.
   발송 · 예약 API 를 만들 때 권한을 따로 정한다.
-- **백그라운드 작업은 `REPORT_READ` / `REPORT_MANAGE`** 다. 목록 · 상세 · 결과 다운로드는 요청자와 무관하게 모든 작업을 보인다(결과 파일은 서명 URL 로 내려받는다).
-  지금 운영 코드에 등록된 작업 종류(`JobHandler` 구현)는 없다. **정산 · 원가 · 개인정보를 담는 작업 종류를 더할 때는 `REPORT_READ` 에 그대로 얹지 말고 종류별로 권한을 따로 정한다**
-  (종류별 필터 또는 기능 API 쪽 조회로 나눈다 — 강제 장치는 #639).
+- **백그라운드 작업은 `REPORT_READ` / `REPORT_MANAGE`** 로 진입을 제한한다. 목록·상세·결과 다운로드는 `JobHandler.permission()`에 선언한
+  종류별 READ 권한을 추가로 확인한다(#639). 미등록 종류와 권한 없는 종류는 목록에서 숨기고 상세·다운로드는 404다. 아래 종류별 조회 규칙을 따른다.
+  취소는 기존 `REPORT_MANAGE` 계약을 유지한다.
 - 법적 문서 · 상점 공개 정보는 공개 사업자 정보와 약관이라 조회도 `SETTINGS_READ`(대표만)다.
 - 이 세 서비스에 `MultipartFile` 핸들러는 없다(`spring.servlet.multipart.*` 설정도 없음 — Boot 기본 한도).
 - 핸들러 전체 표는 `DeliveryAdminAuthorizationMappingTest` · `OperationsAdminAuthorizationMappingTest` · `SupportAdminAuthorizationMappingTest` 가,
@@ -371,6 +371,19 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 - **프론트(BFF)는 재발급 여부를 코드로 가르지 않는다.** 401 이면 refresh 쿠키로 한 번 재발급하고 원 요청을 한 번 재시도한다.
   재발급이 명시적으로 거절되면 로그인, 일시 장애면 쿠키를 둔 채 `BFF_002` 503 이다. 006(503)으로는 로그아웃시키지 않는다
   ([frontend/docs/architecture.md](../../frontend/docs/architecture.md) §2 · §3, `api-design-guide.md` §2-1). 코드는 원인을 알리는 용도다(로그 · 모니터링 · 화면 문구).
+
+#### 백그라운드 작업 종류별 조회 권한 (#639)
+
+- `JobHandler.permission()`은 해당 종류의 조회에 필요한 `AdminPermission` READ 권한을 명시한다. 기본 권한은 없다.
+  null·READ 이외의 권한을 선언한 핸들러는 레지스트리 구성 시 기동에 실패한다.
+- 작업 목록·상세·결과 다운로드의 `REPORT_READ` 기본 진입 권한은 유지한다. Controller는 인증된 `MemberPrincipal.role()`을
+  `AdminPermission.grantedTo(...)`로 펼쳐 UseCase에 전달한다. 요청 파라미터로 역할·권한을 받지 않는다.
+- 목록은 등록된 핸들러의 조회 권한과 호출자 권한을 비교해 허용 종류를 구하고, 요청한 종류 조건과 교집합을 만든다.
+  DB 쿼리에 이 종류 집합을 적용한 뒤 페이지·전체 건수를 계산한다. 허용 종류가 없으면 빈 페이지다.
+- 상세·결과 다운로드는 권한이 없거나 핸들러가 등록되지 않은 과거 종류면 없는 작업과 같은 404 `JOB_001`(`NOT_FOUND_JOB`)이다.
+  다운로드는 파일 조회·서명 전에 확인한다. 과거의 미등록 종류는 OWNER에게도 노출하지 않는다.
+- 취소는 기존 `REPORT_MANAGE`, 상태 전이·재시도·감사 처리 계약을 유지한다. 엔티티·스키마 변경은 없다.
+
 
 ### 4-1. 판정 규칙 (`SecurityErrorResolver`)
 

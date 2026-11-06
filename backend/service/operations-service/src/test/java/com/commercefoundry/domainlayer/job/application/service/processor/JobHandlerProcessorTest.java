@@ -16,6 +16,23 @@ import org.junit.jupiter.params.provider.ValueSource;
 class JobHandlerProcessorTest {
 
     @Test
+    void rejectsMissingPermissionDeclaration() {
+        var handler = org.mockito.Mockito.mock(com.commercefoundry.domainlayer.job.domain.model.JobHandler.class);
+        org.mockito.Mockito.when(handler.type()).thenReturn("UNDECLARED");
+        assertThatThrownBy(() -> new JobHandlerProcessor(handlers(handler), properties()))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("permission");
+    }
+
+    @Test
+    void rejectsManagePermissionAsReadDeclaration() {
+        var handler = org.mockito.Mockito.mock(com.commercefoundry.domainlayer.job.domain.model.JobHandler.class);
+        org.mockito.Mockito.when(handler.type()).thenReturn("MANAGE_ONLY");
+        org.mockito.Mockito.when(handler.permission()).thenReturn(com.commercefoundry.security.principal.AdminPermission.REPORT_MANAGE);
+        assertThatThrownBy(() -> new JobHandlerProcessor(handlers(handler), properties()))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("permission");
+    }
+
+    @Test
     @DisplayName("종류로 핸들러를 찾고, 비운 옵션 칸은 설정 기본값으로 채운다")
     void resolvesHandlersWithDefaults() {
         JobHandlerProcessor processor = new JobHandlerProcessor(

@@ -5,9 +5,10 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.job.adapter.in.admin.dto.response.JobResultDownloadResponse;
 import com.commercefoundry.domainlayer.job.application.exception.JobValidationMessage;
 import com.commercefoundry.domainlayer.job.application.port.in.JobResultDownloadUseCase;
-import com.commercefoundry.security.principal.AdminAuthority;
-import com.commercefoundry.security.principal.MemberPrincipal;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
+import com.commercefoundry.security.principal.AdminPermission;
+import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -41,6 +42,7 @@ public class JobResultDownloadController {
         @AuthenticationPrincipal MemberPrincipal member,
         @Parameter(description = "작업 아이디") @PathVariable @Positive(message = JobValidationMessage.JOB_ID_POSITIVE) long jobId
     ) {
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Response.success(useCase.download(jobId, member.memberId())));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(Response.success(useCase.download(jobId, member.memberId(), AdminPermission.grantedTo(member.role()))));
     }
 }

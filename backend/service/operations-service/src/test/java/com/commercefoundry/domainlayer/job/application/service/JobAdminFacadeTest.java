@@ -29,6 +29,8 @@ import com.commercefoundry.domainlayer.job.domain.model.RetryPolicy;
 import com.commercefoundry.domainlayer.job.support.InMemoryJobRepositoryPort;
 import com.commercefoundry.domainlayer.job.support.RecordingJobDispatchPort;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.AdminPermission;
+import com.commercefoundry.security.principal.MemberRole;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -69,7 +71,7 @@ class JobAdminFacadeTest {
 
     private JobAdminFacade facade() {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-        JobHandlerProcessor handlerProcessor = new JobHandlerProcessor(handlers(new ReportHandler()), properties());
+        JobHandlerProcessor handlerProcessor = new JobHandlerProcessor(handlers(new ReportHandler(), new SettlementHandler()), properties());
         return new JobAdminFacade(
             new JobQueryProcessor(repository, handlerProcessor),
             new JobRunProcessor(
@@ -95,14 +97,15 @@ class JobAdminFacadeTest {
     }
 
     @Test
-    @DisplayName("목록은 아이디 내림차순이고 상태 · 종류로 거른다 — 작업 이름은 핸들러 표시명, 모르는 종류는 코드 그대로다")
+    @DisplayName("목록은 아이디 내림차순이고 상태 · 종류로 거른다 — 작업 이름은 핸들러 표시명, 미등록 종류는 숨긴다")
     void searches() {
         queued(1L, REPORT);
         running(2L, REPORT);
         queued(3L, "SETTLEMENT");
+        queued(4L, "UNKNOWN_HISTORY");
 
-        PageResponse<JobAdminItem> all = facade().getJobs(new JobAdminSearchCommand(null, null, 0, 2));
-        PageResponse<JobAdminItem> queuedReports = facade().getJobs(new JobAdminSearchCommand(JobStatusFilter.QUEUED, REPORT, 0, 20));
+        PageResponse<JobAdminItem> all = facade().getJobs(new JobAdminSearchCommand(null, null, 0, 2), AdminPermission.grantedTo(MemberRole.OWNER));
+        PageResponse<JobAdminItem> queuedReports = facade().getJobs(new JobAdminSearchCommand(JobStatusFilter.QUEUED, REPORT, 0, 20), AdminPermission.grantedTo(MemberRole.OWNER));
 
         assertThat(all.contents()).extracting(JobAdminItem::jobId).containsExactly("3", "2");
         assertThat(all.totalElements()).isEqualTo(3);
@@ -122,12 +125,12 @@ class JobAdminFacadeTest {
         failFinally(2L, Job.RUN_TIMEOUT);
         failFinally(3L, "UNKNOWN_FAILURE");
 
-        JobAdminResponse handlerCode = facade().getJob(1L);
+        JobAdminResponse handlerCode = facade().getJob(1L, AdminPermission.grantedTo(MemberRole.OWNER));
         assertThat(handlerCode.status().code()).isEqualTo("FAILED");
         assertThat(handlerCode.notice()).isEqualTo("조회 기간을 확인해 주세요.");
         assertThat(handlerCode.cancellable()).isFalse();
-        assertThat(facade().getJob(2L).notice()).isEqualTo("작업이 너무 오래 걸려 중단했습니다. 범위를 줄여 다시 요청해 주세요.");
-        assertThat(facade().getJob(3L).notice()).startsWith("작업을 끝내지 못했습니다.");
+        assertThat(facade().getJob(2L, AdminPermission.grantedTo(MemberRole.OWNER)).notice()).isEqualTo("작업이 너무 오래 걸려 중단했습니다. 범위를 줄여 다시 요청해 주세요.");
+        assertThat(facade().getJob(3L, AdminPermission.grantedTo(MemberRole.OWNER)).notice()).startsWith("작업을 끝내지 못했습니다.");
         assertThat(handlerCode.toString()).doesNotContain("내부 진단 원문", "INVALID_PERIOD");
     }
 
@@ -136,7 +139,7 @@ class JobAdminFacadeTest {
     void retryWaitingNotice() {
         repository.overwrite(running(1L, REPORT).fail("UPSTREAM_DOWN", "내부 진단 원문", true, NOW, RETRY));
 
-        JobAdminResponse response = facade().getJob(1L);
+        JobAdminResponse response = facade().getJob(1L, AdminPermission.grantedTo(MemberRole.OWNER));
 
         assertThat(response.status().code()).isEqualTo("QUEUED");
         assertThat(response.notice()).isEqualTo("일시적인 오류로 잠시 뒤 다시 시도합니다.");
@@ -146,7 +149,7 @@ class JobAdminFacadeTest {
     @Test
     @DisplayName("없는 작업 상세는 404(JOB_001)다")
     void notFound() {
-        assertThatThrownBy(() -> facade().getJob(404L))
+        assertThatThrownBy(() -> facade().getJob(404L, AdminPermission.grantedTo(MemberRole.OWNER)))
             .isInstanceOfSatisfying(JobException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(JobErrorCode.NOT_FOUND_JOB));
     }
 
@@ -285,8 +288,49 @@ class JobAdminFacadeTest {
         verifyNoMoreInteractions(auditProcessor);
     }
 
+
+    @Test
+    void roleDependentPaginationAndCount() {
+        queued(1L, REPORT);
+        queued(2L, "SETTLEMENT");
+        queued(3L, REPORT);
+        queued(4L, "UNKNOWN_HISTORY");
+        var manager = AdminPermission.grantedTo(MemberRole.MANAGER);
+        var owner = AdminPermission.grantedTo(MemberRole.OWNER);
+        var first = facade().getJobs(new JobAdminSearchCommand(null, null, 0, 1), manager);
+        assertThat(first.contents()).extracting(JobAdminItem::jobId).containsExactly("3");
+        assertThat(first.totalElements()).isEqualTo(2);
+        assertThat(first.totalPages()).isEqualTo(2);
+        assertThat(facade().getJobs(new JobAdminSearchCommand(null, null, 1, 1), manager).contents())
+            .extracting(JobAdminItem::jobId).containsExactly("1");
+        assertThat(facade().getJobs(new JobAdminSearchCommand(null, null, 0, 1), owner).totalElements()).isEqualTo(3);
+        assertThat(facade().getJobs(new JobAdminSearchCommand(null, "SETTLEMENT", 0, 1), manager).totalElements()).isZero();
+        assertThat(facade().getJobs(new JobAdminSearchCommand(null, "UNKNOWN_HISTORY", 0, 1), owner).totalElements()).isZero();
+        assertThat(facade().getJobs(new JobAdminSearchCommand(null, null, 0, 1), java.util.Set.of()).totalElements()).isZero();
+    }
+
+    @Test
+    void unreadableAndUnregisteredDetailsAreNotFound() {
+        queued(1L, "SETTLEMENT");
+        queued(2L, "UNKNOWN_HISTORY");
+        assertThat(facade().getJob(1L, AdminPermission.grantedTo(MemberRole.OWNER)).jobId()).isEqualTo("1");
+        assertThatThrownBy(() -> facade().getJob(1L, AdminPermission.grantedTo(MemberRole.MANAGER)))
+            .isInstanceOfSatisfying(JobException.class, error -> assertThat(error.getErrorCode()).isEqualTo(JobErrorCode.NOT_FOUND_JOB));
+        assertThatThrownBy(() -> facade().getJob(2L, AdminPermission.grantedTo(MemberRole.OWNER)))
+            .isInstanceOfSatisfying(JobException.class, error -> assertThat(error.getErrorCode()).isEqualTo(JobErrorCode.NOT_FOUND_JOB));
+    }
+
+    private static final class SettlementHandler implements JobHandler {
+        @Override public AdminPermission permission() { return AdminPermission.SETTLEMENT_READ; }
+        @Override public String type() { return "SETTLEMENT"; }
+        @Override public JobOutcome execute(JobExecution execution) { return JobOutcome.empty(); }
+    }
+
     /** 표시명과 고유 실패 문구를 가진 합성 핸들러. */
     private static final class ReportHandler implements JobHandler {
+        @Override
+        public AdminPermission permission() { return AdminPermission.REPORT_READ; }
+
 
         @Override
         public String type() {

@@ -14,6 +14,7 @@ import com.commercefoundry.persistence.util.ConstraintViolations;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Limit;
@@ -40,20 +41,16 @@ public class JobRepositoryAdapter implements JobRepositoryPort {
         return jobRepository.findById(jobId).map(jobMapper::toDomain);
     }
 
-    /** 조건 조합마다 파생 쿼리 하나 — 종류 조건은 {@code idx_job_type_id} 를 그대로 탄다. 상태 조건은 상태 선두 인덱스로 거른 뒤 정렬한다(어드민 전용). */
+    /** 허용된 등록 종류를 DB 조건에 포함한다. 페이지와 count 모두 같은 조건을 적용한다. */
     @Override
-    public Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, String type, int page, int size) {
+    public Page<JobSummaryQueryResult> findSummaryPage(JobStatus status, Set<String> types, int page, int size) {
         PageRequest pageable = PageRequest.of(page, size);
-        Page<JobEntity> jobs;
-        if (status != null && type != null) {
-            jobs = jobRepository.findAllByStatusAndTypeOrderByIdDesc(status, type, pageable);
-        } else if (status != null) {
-            jobs = jobRepository.findAllByStatusOrderByIdDesc(status, pageable);
-        } else if (type != null) {
-            jobs = jobRepository.findAllByTypeOrderByIdDesc(type, pageable);
-        } else {
-            jobs = jobRepository.findAllByOrderByIdDesc(pageable);
+        if (types.isEmpty()) {
+            return Page.empty(pageable);
         }
+        Page<JobEntity> jobs = status == null
+            ? jobRepository.findAllByTypeInOrderByIdDesc(types, pageable)
+            : jobRepository.findAllByStatusAndTypeInOrderByIdDesc(status, types, pageable);
         return jobs.map(JobRepositoryAdapter::toSummary);
     }
 

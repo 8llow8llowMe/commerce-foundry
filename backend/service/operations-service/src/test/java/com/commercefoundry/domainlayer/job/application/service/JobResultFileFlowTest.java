@@ -17,6 +17,8 @@ import com.commercefoundry.domainlayer.job.domain.model.JobResultContent;
 import com.commercefoundry.domainlayer.job.domain.model.JobResultFile;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
 import com.commercefoundry.domainlayer.job.support.FakeJobResultStorage;
+import com.commercefoundry.security.principal.AdminPermission;
+import com.commercefoundry.security.principal.MemberRole;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -91,7 +93,7 @@ class JobResultFileFlowTest {
         assertThat(run.succeed(job.id(), WORKER, 1, "{\"rows\":1}", prepared)).isTrue();
         assertThat(jobs.findById(job.id()).orElseThrow().status()).isEqualTo(JobStatus.SUCCEEDED);
         assertThat(processor.downloadable(job.id()).state()).isEqualTo(JobResultFile.State.AVAILABLE);
-        var response = download.download(job.id(), 7L);
+        var response = download.download(job.id(), 7L, AdminPermission.grantedTo(MemberRole.OWNER));
         assertThat(response.fileName()).isEqualTo("report.csv");
         assertThat(storage.ttl).isEqualTo(Duration.ofSeconds(60));
         assertThat(response.toString()).doesNotContain("signature", "SECRET");
@@ -156,7 +158,7 @@ class JobResultFileFlowTest {
     void availableExpiresAndDeleteFailureRetries() {
         var file = available();
         clock.now = file.expiresAt();
-        assertThatThrownBy(() -> download.download(file.jobId(), 7L)).isInstanceOfSatisfying(JobException.class,
+        assertThatThrownBy(() -> download.download(file.jobId(), 7L, AdminPermission.grantedTo(MemberRole.OWNER))).isInstanceOfSatisfying(JobException.class,
             error -> assertThat(error.getErrorCode()).isEqualTo(JobErrorCode.RESULT_FILE_EXPIRED));
         storage.failDelete = true;
         cleanup.cleanup();
@@ -168,7 +170,7 @@ class JobResultFileFlowTest {
         cleanup.cleanup();
         assertThat(storage.objects).isEmpty();
         assertThat(storage.deletes).isEqualTo(2);
-        assertThatThrownBy(() -> download.download(file.jobId(), 7L)).isInstanceOfSatisfying(JobException.class,
+        assertThatThrownBy(() -> download.download(file.jobId(), 7L, AdminPermission.grantedTo(MemberRole.OWNER))).isInstanceOfSatisfying(JobException.class,
             error -> assertThat(error.getErrorCode()).isEqualTo(JobErrorCode.RESULT_FILE_EXPIRED));
     }
 
@@ -186,16 +188,16 @@ class JobResultFileFlowTest {
     void headIdentityAndTtlBoundariesAreValidated() {
         var file = available();
         storage.objects.put(file.objectKey(), new JobResultStoragePort.Metadata(file.sizeBytes(), file.contentType(), "changed"));
-        assertThatThrownBy(() -> download.download(file.jobId(), 7L)).isInstanceOf(JobException.class);
+        assertThatThrownBy(() -> download.download(file.jobId(), 7L, AdminPermission.grantedTo(MemberRole.OWNER))).isInstanceOf(JobException.class);
         storage.objects.put(file.objectKey(), new JobResultStoragePort.Metadata(file.sizeBytes(), file.contentType(), file.eTag()));
         clock.now = file.expiresAt().minusMillis(1_900);
-        assertThat(download.download(file.jobId(), 7L).expiresAt()).isEqualTo(clock.now.plusSeconds(1));
+        assertThat(download.download(file.jobId(), 7L, AdminPermission.grantedTo(MemberRole.OWNER)).expiresAt()).isEqualTo(clock.now.plusSeconds(1));
         assertThat(storage.ttl).isEqualTo(Duration.ofSeconds(1));
         clock.now = file.expiresAt().minusMillis(999);
-        assertThatThrownBy(() -> download.download(file.jobId(), 7L)).isInstanceOf(JobException.class);
+        assertThatThrownBy(() -> download.download(file.jobId(), 7L, AdminPermission.grantedTo(MemberRole.OWNER))).isInstanceOf(JobException.class);
         clock.now = file.expiresAt().minusSeconds(60);
         storage.extraExpiry = Duration.ofSeconds(1);
-        assertThatThrownBy(() -> download.download(file.jobId(), 7L)).isInstanceOf(JobException.class);
+        assertThatThrownBy(() -> download.download(file.jobId(), 7L, AdminPermission.grantedTo(MemberRole.OWNER))).isInstanceOf(JobException.class);
     }
 
     @Test
@@ -263,6 +265,9 @@ class JobResultFileFlowTest {
 
     @TestConfiguration
     static class Config {
+        @Bean com.commercefoundry.domainlayer.job.domain.model.JobHandler resultHandler() {
+            return com.commercefoundry.domainlayer.job.support.JobFixtures.handler("RESULT_TEST");
+        }
         @Bean @Primary MutableClock resultClock() { return new MutableClock(); }
         @Bean @Primary FakeJobResultStorage resultStorage(MutableClock clock) { return new FakeJobResultStorage(clock); }
     }

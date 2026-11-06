@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.job.domain.model.JobHandler;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandlerOptions;
 import com.commercefoundry.domainlayer.job.domain.model.JobOutcome;
 import com.commercefoundry.global.properties.JobProperties;
+import com.commercefoundry.security.principal.AdminPermission;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
@@ -32,6 +33,9 @@ public final class JobFixtures {
     /** 아무것도 하지 않고 성공하는 핸들러. */
     public static JobHandler handler(String type, JobHandlerOptions options) {
         return new JobHandler() {
+            @Override
+            public AdminPermission permission() { return AdminPermission.REPORT_READ; }
+
             @Override
             public String type() {
                 return type;

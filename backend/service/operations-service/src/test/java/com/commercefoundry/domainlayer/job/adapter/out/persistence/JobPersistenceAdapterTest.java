@@ -19,6 +19,7 @@ import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -137,23 +138,35 @@ class JobPersistenceAdapterTest {
         jobRepositoryPort.insert(queued(32L, "OTHER", 0, NOW, null));
         jobRepositoryPort.update(jobRepositoryPort.insert(queued(33L, "REPORT", 0, NOW, null)).claim(WORKER, NOW, LEASE));
         jobRepositoryPort.insert(queued(34L, "REPORT", 0, NOW, null));
+        jobRepositoryPort.insert(queued(35L, "UNKNOWN_HISTORY", 0, NOW, null));
         entityManager.clear();
 
-        Page<JobSummaryQueryResult> all = jobRepositoryPort.findSummaryPage(null, null, 0, 3);
+        Page<JobSummaryQueryResult> all = jobRepositoryPort.findSummaryPage(null, Set.of("REPORT", "OTHER"), 0, 3);
 
         assertThat(all.getContent()).extracting(JobSummaryQueryResult::jobId).containsExactly(34L, 33L, 32L);
         assertThat(all.getContent()).allSatisfy(summary -> assertThat(summary.requestedAt()).isNotNull());
         assertThat(all.getTotalElements()).isEqualTo(4);
-        assertThat(jobRepositoryPort.findSummaryPage(JobStatus.QUEUED, null, 0, 10).getContent())
+        assertThat(jobRepositoryPort.findSummaryPage(JobStatus.QUEUED, Set.of("REPORT", "OTHER"), 0, 10).getContent())
             .extracting(JobSummaryQueryResult::jobId).containsExactly(34L, 32L, 31L);
-        assertThat(jobRepositoryPort.findSummaryPage(null, "REPORT", 0, 10).getContent())
+        assertThat(jobRepositoryPort.findSummaryPage(null, Set.of("REPORT"), 0, 10).getContent())
             .extracting(JobSummaryQueryResult::jobId).containsExactly(34L, 33L, 31L);
-        assertThat(jobRepositoryPort.findSummaryPage(JobStatus.RUNNING, "REPORT", 0, 10).getContent())
+        assertThat(jobRepositoryPort.findSummaryPage(JobStatus.RUNNING, Set.of("REPORT"), 0, 10).getContent())
             .extracting(JobSummaryQueryResult::jobId).containsExactly(33L);
         assertThat(jobRepositoryPort.findSummary(33L)).hasValueSatisfying(summary -> assertThat(summary.status()).isEqualTo(JobStatus.RUNNING));
-        Page<JobSummaryQueryResult> beyond = jobRepositoryPort.findSummaryPage(null, null, 5, 3);
+        Page<JobSummaryQueryResult> beyond = jobRepositoryPort.findSummaryPage(null, Set.of("REPORT", "OTHER"), 5, 3);
         assertThat(beyond.getContent()).isEmpty();
         assertThat(beyond.getTotalElements()).isEqualTo(4);
+        Page<JobSummaryQueryResult> reports = jobRepositoryPort.findSummaryPage(null, Set.of("REPORT"), 0, 2);
+        assertThat(reports.getContent()).extracting(JobSummaryQueryResult::jobId).containsExactly(34L, 33L);
+        assertThat(reports.getTotalElements()).isEqualTo(3);
+        assertThat(reports.getTotalPages()).isEqualTo(2);
+        assertThat(jobRepositoryPort.findSummaryPage(null, Set.of("REPORT"), 1, 2).getContent())
+            .extracting(JobSummaryQueryResult::jobId).containsExactly(31L);
+        var queuedReports = jobRepositoryPort.findSummaryPage(JobStatus.QUEUED, Set.of("REPORT"), 0, 1);
+        assertThat(queuedReports.getTotalElements()).isEqualTo(2);
+        assertThat(queuedReports.getContent()).extracting(JobSummaryQueryResult::jobId).containsExactly(34L);
+        assertThat(jobRepositoryPort.findSummaryPage(null, Set.of(), 0, 2).getTotalElements()).isZero();
+
     }
 
     @Test

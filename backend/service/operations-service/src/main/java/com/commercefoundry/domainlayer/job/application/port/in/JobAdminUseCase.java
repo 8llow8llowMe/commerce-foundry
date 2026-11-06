@@ -4,14 +4,16 @@ import com.commercefoundry.domainlayer.job.adapter.in.admin.dto.item.JobAdminIte
 import com.commercefoundry.domainlayer.job.adapter.in.admin.dto.response.JobAdminResponse;
 import com.commercefoundry.domainlayer.job.application.command.JobAdminSearchCommand;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.AdminPermission;
+import java.util.Set;
 
 public interface JobAdminUseCase {
 
     /** 등록 최신순 한 페이지. 조건에 맞는 작업이 없으면 빈 페이지다. */
-    PageResponse<JobAdminItem> getJobs(JobAdminSearchCommand command);
+    PageResponse<JobAdminItem> getJobs(JobAdminSearchCommand command, Set<AdminPermission> permissions);
 
     /** @throws com.commercefoundry.domainlayer.job.application.exception.JobException {@code NOT_FOUND_JOB} */
-    JobAdminResponse getJob(long jobId);
+    JobAdminResponse getJob(long jobId, Set<AdminPermission> permissions);
 
     /**
      * 취소한다. QUEUED 는 바로 CANCELLED, RUNNING 은 취소 요청 플래그만 세운다(이미 세웠으면 그대로 — 멱등). 성공 · 실패 모두 감사 로그를 남긴다.
