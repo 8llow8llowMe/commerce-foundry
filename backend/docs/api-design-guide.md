@@ -1239,7 +1239,9 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 | `GET /api/v1/admin/claims?orderId=&type=&status=&page=0&size=20` | 200 `PageResponse<{claimId,orderId,type,status,expectedRefund,requestedAt}>` | page 0 이상 `ORDER_144`, size 1~100 `ORDER_145`, orderId 양수 `ORDER_141`, page×size가 JPA offset 한도 초과 `ORDER_167`, 타입·범위 오류 `ORDER_198` (400) |
 | `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}]}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
 
-- 필터는 모두 선택적이고 함께 지정하면 AND다. 현재 지원 값은 `type=RETURN`, `status=REQUESTED`다. 필터에 맞는 접수의 claimId 내림차순으로 정렬하며 임의 정렬 입력은 받지 않는다.
+- 필터는 모두 선택적이고 함께 지정하면 AND다. 지원 값은 `type=RETURN|CANCELLATION`, `status=REQUESTED|REFUNDED|COMPLETED|REFUND_FAILED|RESTORATION_FAILED`다
+  (#16 PR-2a, 도메인 `Claim.Type` · `Claim.Status` 와 같은 집합). 반품 접수는 아직 `REQUESTED`만 생기고, 결제 후 취소 클레임은 #16 PR-2a-2 부터 생긴다.
+  모르는 값은 400 `ORDER_198`이다. 필터에 맞는 접수의 claimId 내림차순으로 정렬하며 임의 정렬 입력은 받지 않는다.
 - `page`는 0부터, 기본 크기는 20이다. `page×size`는 2,147,483,647 이하여야 하고 초과 입력은 DB 조회 전에 400으로 거절한다. `totalElements`는 같은 조건의 실제 count이고 빈 페이지에서도 전체 건수를 보존한다. 목록은 헤더와 count만 조회하고 상세만 항목을 읽는다.
 - ID는 문자열, type/status/reason은 `{code,name,description}` metadata다. `expectedRefund`는 `{amount,currency}` 또는 미산정 `null`이며 null을 0원으로 표시하지 않는다.
 - UUID 멱등키·회원/배송 개인정보·버전·워커 정보는 응답에 포함하지 않는다. 조회는 주문/접수 상태·이력·outbox를 변경하지 않고 외부 서비스를 호출하지 않는다.
@@ -1273,6 +1275,9 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 `POST /api/v1/orders/{orderId}/returns` — CUSTOMER 본인 주문만, 새 접수 201·같은 요청 재생 200. 접수는 승인·환불 보장이 아니다.
 필수 `Idempotency-Key`는 완전한 UUID 36자(대소문자 정규화), 본문은 `{items:[{orderItemId,quantity,reason}]}`다.
 항목 1~50개·수량 1~99, 사유는 `CHANGE_OF_MIND|DEFECTIVE|WRONG_ITEM`이며 자유 텍스트·금액·통화·회원 ID를 받지 않는다.
+클레임 사유 enum 에는 결제 후 취소 사유(`ORDER_MISTAKE|PAYMENT_ISSUE|OTHER`, #16)도 있지만 반품 접수는 받지 않는다 — 400 `ORDER_168`,
+`fieldErrors[].field`는 `items[i].returnReason`(항목 제약 이름)이다. enum 에 없는 문자열은 이전과 같은 본문 해석 오류(400)다.
+같은 주문의 결제 후 취소 클레임과 같은 키(취소의 결정적 키)를 보내면 반품 재생이 아니라 409 `ORDER_031`이다.
 일반 §6의 `(memberId,key)`와 다른 **주문 하위 반품의 예외**로 키 범위는 `(orderId,key)`다. 다른 주문에서 같은 UUID를 사용할 수 있다.
 소유 확인 뒤 항목 ID 순으로 정렬한 수량·사유가 같으면 기존 접수를 반환한다. 같은 키의 본문 변경은 409 `ORDER_031`이다.
 

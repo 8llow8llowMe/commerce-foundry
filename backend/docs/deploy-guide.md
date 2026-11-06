@@ -368,6 +368,28 @@ docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) �
 테스트 클래스패스 원본은 UTF-8 파일로 전달하고 Java launcher 임시 argfile은 native 인코딩으로 엄격 변환한다. 지원하지 않는 문자는 치환하지 않고 경로·환경값을 노출하지 않는 인코딩 실패로 분류한다.
 실제 order PostgreSQL과 부모 생존 HTTP fake의 원격 상태가 근거이며 실제 product DB 수량·PG 취소 완료·운영 환경에서의 실행을 검증한 것은 아니다.
 
+### 결제 후 취소 클레임 배포 (#16 PR-2a)
+
+`claim`에 결제 후 취소(CANCELLATION) 유형 · 환불/복원 상태 · 재시도 칸(`payment_id`, `attempt_count`, `next_attempt_at`, `failure_code`)을 더한다.
+ALTER 는 두 단계다. 정본은 `ClaimEntity` · `ClaimItemEntity`와 PostgreSQL 스냅숏 `ddl/order-schema.sql`이다.
+
+1. **preflight · 1단계 (배포 전)** — `service/order-service/src/test/resources/ddl/claim-cancellation.sql`을 `psql -v ON_ERROR_STOP=1 -f`로 UTF-8 실행한다.
+   - 첫 SELECT 는 읽기 전용 preflight 다. enum check 의 기본 이름 3개(`claim | claim_status_check`, `claim | claim_type_check`, `claim_item | claim_item_reason_check`)가
+     정확히 나와야 한다. 하나라도 빠지거나 다르면 멈추고 실제 이름(`\d orders.claim`)으로 스크립트를 고친다. `IF EXISTS` 로 건너뛰지 않는다.
+   - 이어지는 ALTER 는 `lock_timeout = 5s`의 한 트랜잭션이다 — 열 4개(`attempt_count`는 `NOT NULL DEFAULT 0`), enum check 3개 교체,
+     `ck_claim_attempt_count_non_negative` · `ck_claim_cancellation_payment` · `ck_claim_payment_cancellation_only` · `ck_claim_cancellation_next_attempt` ·
+     `ck_claim_cancellation_failure_code`, 인덱스 `idx_claim_type_next_attempt_at_id`, comment.
+   - 기존 반품 행은 그대로이고(`attempt_count = 0`, 나머지 null) 새 check 를 모두 통과한다.
+2. **앱 배포** — 모든 order 인스턴스를 새 코드로 교체한다. 롤링 중 이전 앱의 반품 INSERT 는 `attempt_count` DEFAULT 0 으로 받는다.
+3. **2단계 (배포 후 정리)** — 이전 앱이 하나도 남지 않은 뒤 `ddl/claim-cancellation-cleanup.sql`로 `attempt_count`의 DEFAULT 를 지운다. 이 뒤로 스냅숏과 같다.
+
+**dev 포함 모든 환경에서 새 앱 기동 전에 1단계를 적용한다.** dev 의 `ddl-auto=update`는 새 열만 만들고 enum check · ck 제약은 바꾸지 않는다 —
+먼저 기동하면 새 상태 · 유형 행이 옛 check 에 막히거나 제약이 빠진 채 남는다.
+이번 배포만으로 고객 결제 후 취소가 열리지는 않는다(호출 흐름 · 스케줄러는 #16 PR-2a-2, `order.cancellation.retry.enabled` 기본 false).
+
+`ClaimCancellationSchemaUpgradePostgresTest`는 동결 7c5c0a6f 스냅숏 + C2b ALTER 에 반품 행을 넣고 1단계 → 이전 앱 모양 INSERT → 2단계를 적용한 뒤,
+새 매핑 validate 와 claim · claim_item 의 열 · 제약 · 인덱스 · comment 가 새 스냅숏으로 만든 DB 와 같은지 본다.
+
 ### 시스템 알림 수신자 조회 배포 (#477 A1)
 
 auth 배포 전에 `idx_member_role_deactivated_at_id`(`auth.member(role, deactivated_at, id)`)를 적용한다.
