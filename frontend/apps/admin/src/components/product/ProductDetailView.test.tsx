@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { adminProduct } from '@/lib/product/test-fixtures';
+import { helpTopicFor } from '@/lib/tour/tours';
 import { ProductDetailView } from './ProductDetailView';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
@@ -9,6 +10,11 @@ const render = (product = adminProduct()) =>
   renderToStaticMarkup(<ProductDetailView product={product} categories={null} />);
 
 describe('ProductDetailView', () => {
+  it('상품 상세 투어(#228 product-detail-v1)가 가리키는 앵커를 모두 한 번씩 정의 순서로 단다', () => {
+    const anchors = [...render().matchAll(/data-tour="([^"]+)"/g)].map((match) => match[1]);
+    expect(anchors).toEqual(helpTopicFor('/products/42').tour?.steps.map((step) => step.target));
+  });
+
   it('숨긴 상품의 저장된 상태 · 가격을 서버 이름과 formatMoney 로 보인다', () => {
     const html = render();
     expect(html).toContain('테스트 저고리');

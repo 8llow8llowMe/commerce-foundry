@@ -57,7 +57,9 @@ export function ClaimList({ query }: { query: ClaimQuery }) {
         </p>
       </div>
 
-      <ClaimFilters key={claimsHref(query)} query={query} />
+      <div data-tour="claim-filters">
+        <ClaimFilters key={claimsHref(query)} query={query} />
+      </div>
 
       {!current && <p className="text-sm text-muted-fg">불러오는 중…</p>}
       {current?.kind === 'denied' && <AccessNotice denied={current.denied} />}
@@ -91,7 +93,9 @@ export function ClaimList({ query }: { query: ClaimQuery }) {
           <p className="text-sm text-muted-fg" aria-live="polite">
             {current.data.totalElements}건
           </p>
-          <ClaimTable claims={current.data.contents} />
+          <div data-tour="claim-table">
+            <ClaimTable claims={current.data.contents} />
+          </div>
           {current.data.totalPages > 1 && (
             <nav aria-label="페이지" className="flex items-center gap-3 text-sm">
               <PageLink query={query} page={query.page - 1} disabled={query.page === 0}>

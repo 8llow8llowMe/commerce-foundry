@@ -438,7 +438,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 ### 도움말 · 온보딩 투어 (#228)
 
 - **상단 바 도움말(?)** — 지금 화면의 짧은 설명 · 자주 묻는 질문(`<details>`)과 "이 화면 안내 다시 보기" · "처음 안내 다시 보기" · "모든 화면 안내 다시 켜기". 내용은 `lib/tour/tours.ts` 의 경로 → 도움말 표 한 곳이다.
-- **투어** — 처음 콘솔에 들어오면 콘솔 투어(메뉴 · 알림 · 도움말), 그다음 화면 투어(재고 · 옵션별 재고 · 사이즈표 고르기 · 사이즈표 입력 · 사이즈표 템플릿 · 국내 배송비 정책 · 상품 등록 · 상품 기본 정보 수정 · 주문 목록 · 주문 상세 · 결제 확인)를 한 번씩 자동으로 보인다.
+- **투어** — 처음 콘솔에 들어오면 콘솔 투어(메뉴 · 알림 · 도움말), 그다음 화면 투어(재고 · 옵션별 재고 · 사이즈표 고르기 · 사이즈표 입력 · 사이즈표 템플릿 · 국내 배송비 정책 · 상품 목록 · 상품 등록 · 상품 상세 · 상품 기본 정보 수정 · 주문 목록 · 주문 상세 · 결제 확인 · 클레임 목록)를 한 번씩 자동으로 보인다.
   끝내거나(마치기) 닫으면(×, Esc, 바깥 누르기) 본 것으로 남기고 다시 띄우지 않는다. 화면을 옮겨 끊긴 투어는 본 것으로 남기지 않는다. 실행은 콘솔 레이아웃의 `TourRunner` 하나다.
 - **가리키는 요소는 `data-tour="<이름>"` 속성**이다 — 클래스 · 문구가 바뀌어도 투어가 깨지지 않게. 목록 · 표는 API 응답 뒤에 그려져 모두 나타날 때까지(최대 4초) 기다리고,
   빈 목록 · 템플릿을 고르기 전의 표처럼 없을 수 있는 요소는 `optional` 단계라 없으면 그 단계만 뺀다. 필수 요소가 없으면(권한 없음 안내 · 불러오기 실패)
@@ -475,8 +475,13 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **상품 기본 정보 수정 투어**(`product-edit-v1`, `/products/[productId]/edit`) — 문구(`product-edit-text`) · 판매 상태 · 노출(`product-edit-status`) · 저장 줄(`product-edit-save`).
   폼은 서버에서 상품을 읽은 뒤 그려지고, 권한이 없으면 권한 안내라 필수 요소가 없어 시작하지 않는다. 폼 테스트가 앵커 목록과 정의를 맞춰 본다.
 - **결제 확인 투어**(`payments-v1`, `/payments`) — 조건(`payment-filters`) · 표(`payment-table`, 빈 목록이면 없어 선택) · 읽기 전용 안내(가운데).
+- **상품 목록 투어**(`products-v1`, `/products`) — 상품 등록 시작점(`product-create`) · 조건(`product-filters`) · 표(`product-table`, 빈 목록이면 없어 선택).
+  등록 자체는 상품 등록 투어가 안내한다.
+- **상품 상세 투어**(`product-detail-v1`, `/products/[productId]`) — 구역별 수정 링크(`product-edit-links`) · 재고 · 원가 · 사이즈표 링크(`product-related`) ·
+  SKU 구역(`product-detail-skus`) · 판매 중지 · 삭제(`product-delete`, 권한 안내로 바뀔 수 있어 선택). 투어는 삭제 버튼을 누르지 않는다. 상세 테스트가 앵커 목록과 정의를 맞춰 본다.
+- **클레임 목록 투어**(`claims-v1`, `/claims`) — 조건(`claim-filters`) · 표(`claim-table`, 빈 목록이면 없어 선택) · 처리(승인 · 거절 · 환불) 준비 중 안내(가운데). 클레임 상세는 도움말만 있다.
 - 전시 편집(`/displays/main`)에는 아직 투어가 없다.
-- 서버 허용 목록(BE #544 로 `orders` · `order-detail` · `product-new` · `product-edit` · `payments` 까지 올랐다)의 버전과 투어 아이디의 버전이 같아야 서버 기록을 쓴다(다르면 `ONBOARDING_103`).
+- 서버 허용 목록(BE #544 로 `orders` · `order-detail` · `product-new` · `product-edit` · `payments` 까지 올랐다. `products` · `product-detail` · `claims` 는 아직 없어 이 브라우저 기록으로만 간다)의 버전과 투어 아이디의 버전이 같아야 서버 기록을 쓴다(다르면 `ONBOARDING_103`).
 
 ### 샘플 주문 업무 연습 (`/practice`, #365)
 

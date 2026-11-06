@@ -4,6 +4,7 @@ import { DEFAULT_QUERY } from '@/lib/claim/query';
 import type { ClaimDetail, ClaimListItem } from '@/lib/claim/types';
 import { ClaimDetailView } from './ClaimDetailView';
 import { ClaimFilters } from './ClaimFilters';
+import { ClaimList } from './ClaimList';
 import { ClaimTable } from './ClaimTable';
 import { OrderClaimsBody } from './OrderClaims';
 
@@ -73,6 +74,15 @@ describe('ClaimDetailView', () => {
     expect(html).toContain('>상품 불량<');
     expect(html).toContain('93,000원');
     expect(html).not.toContain('<button');
+  });
+});
+
+describe('ClaimList', () => {
+  it('불러오기 전에는 투어(#228 claims-v1)의 조건 앵커만 있다 — 표 단계는 선택이다', () => {
+    const html = renderToStaticMarkup(<ClaimList query={DEFAULT_QUERY} />);
+    expect([...html.matchAll(/data-tour="([^"]+)"/g)].map((match) => match[1])).toEqual([
+      'claim-filters',
+    ]);
   });
 });
 

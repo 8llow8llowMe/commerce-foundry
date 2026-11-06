@@ -32,8 +32,13 @@ describe('helpTopicFor · toursFor', () => {
       CONSOLE_TOUR.id,
       PRODUCT_NEW_TOUR.id,
     ]);
-    expect(toursFor('/products').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
-    expect(toursFor('/products/42').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
+    expect(toursFor('/products').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'products-v1']);
+    expect(toursFor('/products/42').map((tour) => tour.id)).toEqual([
+      CONSOLE_TOUR.id,
+      'product-detail-v1',
+    ]);
+    expect(toursFor('/claims').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'claims-v1']);
+    expect(toursFor('/claims/42').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
     expect(toursFor('/products/42/edit').map((tour) => tour.id)).toEqual([
       CONSOLE_TOUR.id,
       'product-edit-v1',
@@ -48,6 +53,34 @@ describe('helpTopicFor · toursFor', () => {
     expect(helpTopicFor('/products/42/edit/pricing').title).toBe('상품 구역 수정');
     expect(toursFor('/products/42/edit/options').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
     expect(helpTopicFor('/payments').title).toBe('결제 확인');
+  });
+
+  it('클레임 목록 · 상세에 도움말이 있고, 목록 투어는 표가 빈 목록이면 없어 선택이며 처리 준비 중 안내는 가운데에 뜬다', () => {
+    expect(helpTopicFor('/claims').title).toBe('클레임');
+    expect(helpTopicFor('/claims/42').title).toBe('클레임 상세');
+    expect(
+      toursFor('/claims')[1]?.steps.map((step) => [step.target, step.optional ?? false]),
+    ).toEqual([
+      ['claim-filters', false],
+      ['claim-table', true],
+      [null, false],
+    ]);
+  });
+
+  it('상품 목록 · 상세 투어는 등록 시작점 · 수정 링크 같은 늘 있는 요소를 필수로, 빈 표 · 삭제 칸은 선택으로 가리킨다', () => {
+    const targets = (pathname: string) =>
+      toursFor(pathname)[1]?.steps.map((step) => [step.target, step.optional ?? false]);
+    expect(targets('/products')).toEqual([
+      ['product-create', false],
+      ['product-filters', false],
+      ['product-table', true],
+    ]);
+    expect(targets('/products/42')).toEqual([
+      ['product-edit-links', false],
+      ['product-related', false],
+      ['product-detail-skus', false],
+      ['product-delete', true],
+    ]);
   });
 
   it('결제 확인 투어는 표가 빈 목록이면 없어 선택이고, 읽기 전용 안내는 가운데에 뜬다', () => {

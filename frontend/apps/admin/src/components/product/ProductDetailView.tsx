@@ -55,7 +55,11 @@ export function ProductDetailView({
           구역마다 따로 수정합니다. 1회 최대 수량 · 프리오더 수정은 준비 중입니다. 판매 중지 ·
           삭제는 맨 아래에 있습니다.
         </p>
-        <nav aria-label="상품 수정" className="flex flex-wrap gap-3 text-sm">
+        <nav
+          aria-label="상품 수정"
+          data-tour="product-edit-links"
+          className="flex flex-wrap gap-3 text-sm"
+        >
           <Link href={productEditHref(product.productId)} className="underline underline-offset-4">
             기본 정보 수정
           </Link>
@@ -69,7 +73,7 @@ export function ProductDetailView({
             </Link>
           ))}
         </nav>
-        <nav aria-label="상품 관련 화면" className="flex gap-3 text-sm">
+        <nav aria-label="상품 관련 화면" data-tour="product-related" className="flex gap-3 text-sm">
           {/* 재고 · 원가 화면은 아직 고객 상세에서 SKU 를 읽어 노출 상품만 열린다(목록과 같은 규칙) */}
           {product.visible && (
             <Link href={`/stocks/${product.productId}`} className="underline underline-offset-4">
@@ -156,7 +160,7 @@ export function ProductDetailView({
         )}
       </Section>
 
-      <Section title="SKU">
+      <Section title="SKU" tour="product-detail-skus">
         {product.skus.length === 0 ? (
           <Empty>SKU 가 없습니다.</Empty>
         ) : (
@@ -351,14 +355,17 @@ export function ProductDetailView({
         )}
       </Section>
 
-      <ProductDeleteAction productId={product.productId} productName={product.name} />
+      <div data-tour="product-delete">
+        <ProductDeleteAction productId={product.productId} productName={product.name} />
+      </div>
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** `tour` — 안내 투어가 가리키는 구역(`data-tour`) */
+function Section({ title, tour, children }: { title: string; tour?: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-3">
+    <section data-tour={tour} className="flex flex-col gap-3">
       <h2 className="text-base font-semibold">{title}</h2>
       {children}
     </section>
