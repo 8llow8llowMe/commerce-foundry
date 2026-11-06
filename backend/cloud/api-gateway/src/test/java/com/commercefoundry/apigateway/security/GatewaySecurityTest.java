@@ -219,6 +219,22 @@ class GatewaySecurityTest {
         assertThat(UPSTREAM_REQUESTS).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(ADMIN_PATH));
     }
 
+    /**
+     * #236 완료 기준의 게이트웨이 쪽 — MANAGER 토큰은 주문 목록과 결제(정산) 목록 둘 다 URL 층을 통과한다. 정산 403 은 payment-service 의
+     * {@code @PreAuthorize(AdminAuthority.SETTLEMENT_READ)} 가 낸다 ({@code PaymentAdminControllerTest}, {@code security-guide.md} §3-1).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/admin/orders", "/api/v1/admin/claims", "/api/v1/admin/payments"})
+    @DisplayName("MANAGER · STAFF 토큰은 주문 · 클레임 · 결제 어드민 목록 모두 게이트웨이 인가를 통과해 하류에 닿는다 — 기능 권한(정산 403)은 서비스 메서드가 판정한다 (#587)")
+    void managerReachesOrderAndPaymentAdminRoutes(String path) {
+        for (MemberRole role : List.of(MemberRole.MANAGER, MemberRole.STAFF)) {
+            UPSTREAM_REQUESTS.clear();
+            get(path, token(role)).expectStatus().isOk();
+
+            assertThat(UPSTREAM_REQUESTS).as(role.name()).singleElement().satisfies(request -> assertThat(request.path()).isEqualTo(path));
+        }
+    }
+
     // ── 어드민 회원 조회 · 관리자 로그인 (#6) ─────────────────────
 
     @Test
