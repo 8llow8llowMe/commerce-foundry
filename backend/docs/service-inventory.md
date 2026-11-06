@@ -40,6 +40,8 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 "관리자 계정" 은 초기 관리자 시드(환경변수 `ADMIN_SEED_*`, 기동 시 멱등) · 관리자 로그인(`POST /api/v1/auth/admin/login`, access 만) ·
 어드민 회원 조회(`GET /api/v1/admin/members`, 마스킹 · `PageResponse`) · 관리자 감사 로그(`admin.audit` 로거 한 줄)가 있는 상태다 (`security-guide.md` §11).
 가게 운영자 계정 추가 · 비활성화 · 본인 비밀번호 변경이 있다 (`POST /api/v1/admin/admins`, `PATCH /api/v1/admin/admins/{memberId}`, `PATCH /api/v1/admin/me/password`, #193).
+운영자 목록 · 역할 변경 · 사용 여부 변경이 있다 (`GET /api/v1/admin/admins`, `PATCH /api/v1/admin/admins/{memberId}/role`, `PATCH /api/v1/admin/admins/{memberId}/status`, #236 PR-B1).
+역할을 지정한 추가 · 역할 변경은 `auth.operator-roles.issuance-enabled`(기본 꺼짐)가 켜져야 받는다. 본문 없는 `PATCH /admins/{memberId}` 는 deprecated 이고 #237 뒤 지운다.
 고객 이메일은 관리자로 올리지 않고, 마지막 활성 대표 관리자(ADMIN · OWNER)는 끄지 못한다. 관리자 감사는 로그 한 줄과 `auth.admin_audit_log` 에 함께 남고 `GET /api/v1/admin/audit-logs` 로 본다 (#192).
 응답에는 마스킹한 `actorDisplayName` · `targetDisplayName` 을 붙인다 (#322). 감사 로그를 거를 관리자 선택용 경량 목록은 두지 않는다.
 관리자 본인 OTP 상태 · 등록 시작 · 확인 · 해제 · 복구 코드 재발급이 있다 (`/api/v1/admin/me/otp/**`, #238 PR-A2). OTP 를 등록한 관리자는 로그인 2단계(`POST /api/v1/auth/admin/login/otp`, TOTP 또는 복구 코드)를 거쳐야 토큰을 받는다 (#238 PR-B). 동료 OTP 복구는 행위자의 재인증 뒤 대상 자격을 새 ID·비밀·복구 코드로 교체한다 (`POST /api/v1/admin/admins/{memberId}/otp/recovery`, PR-C).
