@@ -220,12 +220,18 @@ product-service 어드민 엔드포인트 → 권한 (#586). 조회(GET)는 `*_R
 | SKU 원가 현재 · 이력 조회 | `COST_READ` | 200 | 403 | 403 |
 | SKU 원가 추가 | `COST_MANAGE` | 200 | 403 | 403 |
 
-- SKU 교체 · 추가 · 옵션 은퇴는 상품 구조(옵션 · SKU 조합)를 바꾸고 편집용 상품 상세를 돌려주므로 `CATALOG_MANAGE` 다. 재고 수량 변경은 `/stocks` 의 `INVENTORY_MANAGE` 다.
+- SKU 교체 · 추가 · 옵션 은퇴는 상품 구조(옵션 · SKU 조합)를 바꾸고 편집용 상품 상세를 돌려주므로 `CATALOG_MANAGE` 다. 기존 SKU 의 재고 수량 변경은 `/stocks` 의 `INVENTORY_MANAGE` 다.
+  단 상품 등록 · SKU 추가의 초기 재고(`initialStock`, 신규 SKU 한정)는 `CATALOG_MANAGE` 로 받는다. 지금은 두 권한이 같은 역할(ADMIN · OWNER)에만 있어 차이가 없다 —
+  `CATALOG_MANAGE` 만 가진 역할을 만들 때 이 경로를 다시 본다.
 - 전시 미리보기(`POST /displays/preview`)는 저장하지 않지만 편집 흐름의 일부라 `CATALOG_MANAGE` 다.
+- 상품 초안 조회는 작성자와 무관하게 `CATALOG_READ` 전원이 본다(상품 사실 · 공개 미디어 URL). 상품 상세 · 초안의 등록자 memberId, 재고 조정 이력의 운영자 memberId · 메모도
+  각 조회 권한자에게 보인다 — 조정 메모에 고객 개인정보를 적지 않는다.
+- 본문 · 경로 값 형식 오류는 MVC 메서드 검증이 `@PreAuthorize` 보다 먼저 돌아 기능 권한이 없어도 400 이다(URL 층이 운영자 역할을 먼저 요구하므로 고객 · 익명은 닿지 않는다).
+  유효한 요청이면 기능 권한이 없을 때 403 `SECURITY_005` 다.
 - 핸들러 전체 표는 `ProductAdminAuthorizationMappingTest` 가 실제 MVC 매핑과 양방향으로 대조한다. 표에 없는 새 어드민 핸들러가 생기면 실패한다.
-  역할별 200 · 403 은 각 `*AdminControllerTest` 슬라이스가 고정한다.
-- 이미지 업로드는 presigned PUT 이다. 서비스는 `{contentType, contentLength}` JSON 만 받고 multipart 를 받지 않는다(product-service 에 `MultipartFile` · multipart 설정이 없다).
-  따라서 메서드 인가 전에 큰 파일 본문을 받는 문제가 없다.
+  역할 → 권한 펼침은 `AdminPermission` 테스트가, 대표 핸들러(상품 · 카테고리 · 재고 · 품절 임박 · 원가 · 전시 · 룩 · 이미지 업로드)의 역할별 200 · 403 은 `*AdminControllerTest` 슬라이스가 고정한다.
+- 이미지 업로드는 presigned PUT 이다. 서비스는 `{contentType, contentLength}` JSON 만 받고 파일 본문을 받지 않는다(product-service 에 `MultipartFile` 핸들러가 없다).
+  multipart 요청이 오더라도 Boot 기본 한도(10MB) 안에서만 인가 전에 파싱된다.
 
 **메서드 식은 `AdminAuthority` 상수로 쓴다.** `com.commercefoundry.security.principal.AdminAuthority`에 기능별 상수 22개
 (`ORDER_MANAGE = "hasAuthority('ADMIN_ORDER_MANAGE')"` 등, `AdminPermission`과 1:1)와 운영자 본인 API용 `OPERATOR`
