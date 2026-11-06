@@ -255,6 +255,69 @@ const PRODUCT_EDIT_TOUR: Tour = {
   ],
 };
 
+/**
+ * 상품 목록(#208) — 상품 등록 시작점 · 조건 · 표. 빈 목록이면 표가 없어 선택 단계다.
+ * 등록 자체는 상품 등록 화면의 투어(`product-new`)가 안내한다 — 여기서는 어디서 시작하는지만 가리킨다.
+ */
+const PRODUCTS_TOUR: Tour = {
+  id: 'products-v1',
+  steps: [
+    {
+      target: 'product-create',
+      title: '상품 등록',
+      body: '새 상품은 여기서 등록합니다. 숨김으로 등록해 두고 상세에서 확인한 뒤 노출할 수 있습니다.',
+      side: 'bottom',
+    },
+    {
+      target: 'product-filters',
+      title: '상품 찾기',
+      body: '상품명 · 카테고리 · 판매 상태 · 노출 · 판매 가능 여부로 찾고 정렬합니다. 숨긴 상품 · 판매 종료 상품도 목록에 나옵니다.',
+    },
+    {
+      target: 'product-table',
+      title: '상품 고르기',
+      body: '상품명을 누르면 상세를 봅니다. 판매 가능은 재고를 반영한 값이고, 줄 끝의 재고 · 원가 · 사이즈표로 바로 갑니다. 숨긴 상품은 재고 · 원가 화면을 아직 열 수 없습니다.',
+      side: 'top',
+      optional: true,
+    },
+  ],
+};
+
+/**
+ * 상품 상세(#418) — 구역별 수정 링크 · 관련 화면 · SKU · 판매 중지와 삭제. 서버에서 상품을 읽은 뒤에만 그려진다.
+ * 투어는 위치만 알려 주고 판매 중지 · 삭제 버튼을 누르지 않는다.
+ */
+const PRODUCT_DETAIL_TOUR: Tour = {
+  id: 'product-detail-v1',
+  steps: [
+    {
+      target: 'product-edit-links',
+      title: '구역별 수정',
+      body: '기본 정보 · 가격 · 카테고리 · 이미지 · 옵션과 SKU · 맞춤 제작을 구역마다 따로 고칩니다. 한 구역을 저장해도 다른 구역은 바뀌지 않습니다.',
+      side: 'bottom',
+    },
+    {
+      target: 'product-related',
+      title: '재고 · 원가 · 사이즈표',
+      body: '이 상품의 재고 조정 · 원가 · 사이즈표 화면으로 갑니다. 재고는 상품 상세가 아니라 재고 화면에서 조정합니다.',
+      side: 'bottom',
+    },
+    {
+      target: 'product-detail-skus',
+      title: 'SKU',
+      body: '옵션 조합마다 하나씩 있는 판매 단위입니다. 판매 종료한 SKU 도 기록으로 남아 표시가 붙습니다.',
+      side: 'top',
+    },
+    {
+      target: 'product-delete',
+      title: '판매 중지 · 삭제',
+      body: '맨 아래에 있습니다. 누르면 확인 단계가 먼저 열립니다. 삭제하면 고객 화면과 상품 목록에서 빠지고 되돌릴 수 없으니, 판매만 멈추려면 기본 정보 수정에서 노출을 끄세요. 이미 들어온 주문 · 재고 기록은 남습니다.',
+      side: 'top',
+      optional: true,
+    },
+  ],
+};
+
 /** 결제 확인 목록(#30 · #504) — 조건 · 표 · 읽기 전용 안내. 빈 목록이면 표가 없어 선택 단계다 */
 const PAYMENTS_TOUR: Tour = {
   id: 'payments-v1',
@@ -343,6 +406,33 @@ const ORDER_DETAIL_TOUR: Tour = {
   ],
 };
 
+/**
+ * 클레임 목록(#30) — 고객이 접수한 반품을 찾고 본다. 승인 · 거절 · 환불은 아직 이 화면에 없어 투어도 누르지 않는다.
+ * 빈 목록이면 표가 없어 선택 단계다.
+ */
+const CLAIMS_TOUR: Tour = {
+  id: 'claims-v1',
+  steps: [
+    {
+      target: 'claim-filters',
+      title: '클레임 찾기',
+      body: '유형 · 상태로 거르거나 주문 아이디로 그 주문의 클레임만 봅니다.',
+    },
+    {
+      target: 'claim-table',
+      title: '클레임 보기',
+      body: '클레임을 누르면 반품 항목과 사유를, 주문을 누르면 주문 상세를 봅니다. 예상 환불액이 미산정이면 아직 금액이 정해지지 않은 것입니다(0원이 아닙니다).',
+      side: 'top',
+      optional: true,
+    },
+    {
+      target: null,
+      title: '처리는 준비 중',
+      body: '반품 승인 · 거절 · 환불은 아직 이 화면에서 하지 않습니다. 지금은 접수된 반품과 진행 상태를 확인하는 화면입니다.',
+    },
+  ],
+};
+
 const COMMON_FAQ = [
   {
     question: '로그인이 자꾸 풀려요.',
@@ -372,7 +462,7 @@ const ROUTES: Route[] = [
       summary:
         '숨긴 상품까지 모든 상품을 찾고 판매 상태 · 재고 반영 판매 가능 여부를 봅니다. "상품 등록" 으로 새 상품을 등록하고, 상품을 눌러 상세에서 기본 정보를 고칩니다.',
       faq: COMMON_FAQ,
-      tour: null,
+      tour: PRODUCTS_TOUR,
     },
   },
   {
@@ -443,7 +533,7 @@ const ROUTES: Route[] = [
       summary:
         '상품 정보 · 옵션 조합(SKU)을 보고, 구역별 수정 링크로 기본 정보 · 가격 · 카테고리 · 이미지 · 옵션 · SKU · 맞춤 제작을 고칩니다. 재고는 재고 화면에서 조정합니다.',
       faq: COMMON_FAQ,
-      tour: null,
+      tour: PRODUCT_DETAIL_TOUR,
     },
   },
   {
@@ -478,7 +568,7 @@ const ROUTES: Route[] = [
         {
           question: '송장 등록 · 취소 · 반품 처리는 어디서 하나요?',
           answer:
-            '송장은 상품 준비중 주문을 이 화면 아래 송장 일괄 등록이나 주문 상세에서 등록합니다. 취소 · 반품 처리는 준비 중입니다.',
+            '송장은 상품 준비중 주문을 이 화면 아래 송장 일괄 등록이나 주문 상세에서 등록합니다. 고객이 접수한 반품은 클레임 화면에서 보고, 운영자의 취소 · 반품 처리(승인 · 거절 · 환불)는 준비 중입니다.',
         },
         ...COMMON_FAQ,
       ],
@@ -505,6 +595,33 @@ const ROUTES: Route[] = [
         ...COMMON_FAQ,
       ],
       tour: ORDER_DETAIL_TOUR,
+    },
+  },
+  {
+    pattern: /^\/claims$/,
+    topic: {
+      title: '클레임',
+      summary:
+        '고객이 접수한 반품을 유형 · 상태 · 주문 아이디로 찾아봅니다. 승인 · 거절 · 환불 처리는 아직 이 화면에서 하지 않습니다.',
+      faq: [
+        {
+          question: '예상 환불액이 "미산정" 이에요.',
+          answer:
+            '아직 환불 금액이 정해지지 않았다는 뜻입니다. 0원이 아니니 고객에게 금액을 안내하기 전에 확정을 기다리세요.',
+        },
+        ...COMMON_FAQ,
+      ],
+      tour: CLAIMS_TOUR,
+    },
+  },
+  {
+    pattern: /^\/claims\/[^/]+$/,
+    topic: {
+      title: '클레임 상세',
+      summary:
+        '반품 접수 내용과 항목별 수량 · 사유를 봅니다. 주문 링크로 주문 상세와 상태 이력을 함께 확인하세요.',
+      faq: COMMON_FAQ,
+      tour: null,
     },
   },
   {

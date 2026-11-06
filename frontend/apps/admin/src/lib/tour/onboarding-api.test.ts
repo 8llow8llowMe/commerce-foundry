@@ -19,11 +19,14 @@ describe('guideOf', () => {
   it('모든 투어가 서버 안내 키로 바뀐다(서버 허용 목록 operations.onboarding.guides 와 맞춘다)', () => {
     expect(ALL_TOURS.map((tour) => guideOf(tour.id))).toEqual([
       { key: 'console', version: 1 },
+      { key: 'products', version: 1 },
       { key: 'product-new', version: 2 },
       { key: 'product-edit', version: 1 },
+      { key: 'product-detail', version: 1 },
       { key: 'payments', version: 1 },
       { key: 'orders', version: 2 },
       { key: 'order-detail', version: 2 },
+      { key: 'claims', version: 1 },
       { key: 'stocks', version: 1 },
       { key: 'stock-detail', version: 1 },
       { key: 'size-charts', version: 1 },

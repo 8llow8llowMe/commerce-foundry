@@ -81,13 +81,16 @@ export function ProductList({ query }: { query: ProductQuery }) {
         </div>
         <Link
           href="/products/new"
+          data-tour="product-create"
           className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-fg hover:opacity-90"
         >
           상품 등록
         </Link>
       </div>
 
-      <ProductFilters key={href} query={query} categories={categories} />
+      <div data-tour="product-filters">
+        <ProductFilters key={href} query={query} categories={categories} />
+      </div>
 
       {!current && <p className="text-sm text-muted-fg">불러오는 중…</p>}
       {current?.kind === 'denied' && <AccessNotice denied={current.denied} />}
@@ -121,7 +124,7 @@ export function ProductList({ query }: { query: ProductQuery }) {
         <>
           <p className="text-sm text-muted-fg">{current.data.totalElements}개</p>
           {/* sr-only 같은 absolute 요소가 스크롤 상자 밖으로 나가지 않게 relative 를 준다(§9 재고) */}
-          <div className="relative overflow-x-auto">
+          <div data-tour="product-table" className="relative overflow-x-auto">
             <table className="w-full min-w-[56rem] text-left text-sm">
               <caption className="sr-only">상품 목록</caption>
               <thead className="text-muted-fg">
