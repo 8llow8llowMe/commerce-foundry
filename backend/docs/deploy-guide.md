@@ -208,7 +208,7 @@ Infra 의 Kafka 는 3노드 KRaft 클러스터(apache/kafka 4.3 · RF 3 · min I
 | 이름 | **namespace `commerce-foundry.<env>`**(local · dev · prod). 토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`(예: `commerce-foundry.dev.order.order-expired`), DLT `<토픽>.dlt`, 컨슈머 그룹 `<ns>.<소비 서비스>.<목적>`(예: `commerce-foundry.dev.product.order-stock-release`). 다른 고객사가 같은 클러스터를 쓰면 namespace 만 바꾼다 — 코드에 스토어 이름을 넣지 않는다 | prefix 를 `commerce-foundry` 로 둘지 `cf` 로 줄일지(#304 Q7 — 권장 `commerce-foundry`) |
 | 토픽 생성 | **앱은 만들지 않는다**(브로커 자동 생성 끔 · `spring.kafka.admin.auto-create=false` · `NewTopic` 빈 금지 — #306). 목록의 정본은 `backend/docker/kafka/topics.txt`(`<생산 서비스>.<aggregate>-<event> <보존 ms>`). 로컬은 `create-topics.sh` 가 만들고, dev · prod 는 `create-topics.sh dev` · `prod` 가 출력한 목록을 Infra 레포의 선언 스크립트가 `--if-not-exists` 로 만든다. 파티션 local 3 · dev 3 · prod 6, 복제 local 1 · dev · prod 3, DLT 는 같이 만든다 | prod 파티션 6 · 보존 168h 확정, dev · prod 가 한 클러스터를 namespace 로만 나눠 써도 되는지(#304 Q6) |
 | 토픽 추가 절차 | **이벤트를 정의하는 PR(#307 · #308 · #309 …)이 `topics.txt` 에 그 토픽을 더하고**, PR 본문에 `create-topics.sh dev` · `prod` 출력을 붙여 Infra 반영을 요청한다. 앱은 기동 때 토픽이 있는지 보고 없으면 뜨지 않는다(#306) — Infra 반영이 배포보다 먼저다 | — |
-| 결제 → 주문 반영 켜는 순서 (#308) | 거꾸로 켜면 기동이 실패하거나(토픽 · 테이블 부재) 이벤트가 쌓인다. ① 운영 DDL — 각 PR 본문의 테이블(order 의 `order_payment` · `processed_event` · 확정 증거 테이블, payment 의 `outbox` · `processed_event`) ② 토픽 — `payment.payment-approved` · `order.order-paid` · `order.order-payment-rejected`(+ `.dlt`)를 Infra 에 반영 ③ `MESSAGING_ENABLED=true`(order · payment) ④ order 컨슈머 `ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED=true` — 기동 때 위 토픽을 확인한다 ⑤ payment 회신 컨슈머(#308 PR-C3 머지 뒤) ⑥ 운영 결제 게이트 `payment.enabled`(#15 복구 경로까지 갖춘 뒤, `payment-guide.md` §3-4). 끌 때는 거꾸로 — 결제 게이트부터 닫는다 | — |
+| 결제 → 주문 반영 켜는 순서 (#308) | 거꾸로 켜면 기동이 실패하거나(토픽 · 테이블 부재) 이벤트가 쌓인다. ① 운영 DDL — 각 PR 본문의 테이블(order 의 `order_payment` · `processed_event` · 확정 증거 테이블, payment 의 `outbox` · `processed_event`) ② 토픽 — `payment.payment-approved` · `order.order-paid` · `order.order-payment-rejected`(+ `.dlt`)를 Infra 에 반영 ③ `MESSAGING_ENABLED=true`(order · payment) ④ order 컨슈머 `ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED=true` — 기동 때 위 토픽을 확인한다 ⑤ payment 회신 컨슈머(#308 PR-C3 머지 뒤) ⑥ 운영 결제 게이트 `payment.enabled`(#15 복구 경로까지 갖춘 뒤, `payment-guide.md` §3-4) ⑦ 결제 후 취소 재시도 `order.cancellation.retry.enabled=true`(환경 변수 `ORDER_CANCELLATION_RETRY_ENABLED`, #16 PR-2 — ⑥ 과 같은 배포 또는 그 전에 켠다. 꺼져 있으면 결제 후 고객 취소가 503 `ORDER_035` 로 닫힌다, `order-flow-guide.md` §1-1 · §5) ⑧ **결제 후 취소 종결 실패 수습 경로 확인 — #17 어드민 처리 또는 #477 알림 연결 전에는 운영 결제를 열지 않는다.** 그 전까지 운영자는 어드민 클레임 목록(`GET /api/v1/admin/claims?type=CANCELLATION&status=`)에서 `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인하고, 실패 코드(`failure_code` — 지금 어드민 응답에는 없어 error 로그 `cancellation claim failed` 또는 DB 로 본다)가 `*_UNCONFIRMED` 면 PG 거래 · 재고의 실제 상태를 먼저 확인한다. 끌 때는 거꾸로 — 결제 게이트부터 닫는다 | — |
 | 접속 주소 | 키 이름 `KAFKA_BOOTSTRAP_SERVERS`, 값은 Vault | **결정 대기** — backend 컨테이너가 공유 클러스터에 닿는 방식(EXTERNAL 리스너 [권장] vs Infra 공유 네트워크 합류, #304 Q1) |
 | 보안 | 로컬 · 지금은 `PLAINTEXT`, SASL 키는 예약만 | **결정 대기** — 공유 클러스터 ACL(SASL/SCRAM + prefix ACL)은 Infra 후속, 그 전까지 ACL 없이 출발할지(#304 Q6) |
 
@@ -385,7 +385,10 @@ ALTER 는 두 단계다. 정본은 `ClaimEntity` · `ClaimItemEntity`와 Postgre
 
 **dev 포함 모든 환경에서 새 앱 기동 전에 1단계를 적용한다.** dev 의 `ddl-auto=update`는 새 열만 만들고 enum check · ck 제약은 바꾸지 않는다 —
 먼저 기동하면 새 상태 · 유형 행이 옛 check 에 막히거나 제약이 빠진 채 남는다.
-이번 배포만으로 고객 결제 후 취소가 열리지는 않는다(호출 흐름 · 스케줄러는 #16 PR-2a-2, `order.cancellation.retry.enabled` 기본 false).
+PR-2a-1 배포만으로는 고객 결제 후 취소가 열리지 않는다. PR-2a-2(스키마 변경 없음 — 위 1단계가 먼저 적용돼 있어야 한다)도 **결제 후 취소를 재시도 스케줄러에 묶는다** —
+`order.cancellation.retry.enabled`(기본 false)가 꺼진 동안 결제 완료 · 상품 준비중 주문의 고객 취소는 503 `ORDER_035` 이고 `cancelable` 도 false 다(결제 전 취소는 그대로).
+dev 는 `application-dev.yml` 에서 켠다. 운영은 결제 게이트(`payment.enabled`)를 열 때 함께 켠다(§ 결제 → 주문 반영 켜는 순서 ⑦ · ⑧).
+스케줄링 스레드는 3개(`spring.task.scheduling.pool.size`)다 — 재시도 배치(원격 호출)가 미결제 만료 · 자동 구매 확정을 막지 않게.
 
 `ClaimCancellationSchemaUpgradePostgresTest`는 동결 7c5c0a6f 스냅숏 + C2b ALTER 에 반품 행을 넣고 1단계 → 이전 앱 모양 INSERT → 2단계를 적용한 뒤,
 새 매핑 validate 와 claim · claim_item 의 열 · 제약 · 인덱스 · comment 가 새 스냅숏으로 만든 DB 와 같은지 본다.
