@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { en } from '@/lib/i18n/dictionaries/en';
 import { ko } from '@/lib/i18n/dictionaries/ko';
-import { sizeChartPath, sizeChartUnit, sizeChartView, type ProductSizeChart } from './size-chart';
+import {
+  sizeChartPath,
+  sizeChartSet,
+  sizeChartUnit,
+  sizeChartView,
+  type ProductSizeChart,
+} from './size-chart';
 
 const CHART: ProductSizeChart = {
   productId: '1',
@@ -57,10 +63,42 @@ describe('sizeChartView', () => {
 });
 
 describe('sizeChartUnit · sizeChartPath', () => {
-  it('영문 스토어(#31)를 열기 전에는 모든 언어가 저장 단위다(unit 을 싣지 않는다)', () => {
-    expect(sizeChartUnit('ko')).toBeNull();
-    expect(sizeChartUnit('en')).toBeNull();
+  it('국문은 cm, 영문은 inch 를 먼저 보이고 단위를 query 로 싣는다', () => {
+    expect(sizeChartUnit('ko')).toBe('CM');
+    expect(sizeChartUnit('en')).toBe('INCH');
     expect(sizeChartPath('42', null)).toBe('/api/v1/products/42/size-chart');
     expect(sizeChartPath('42', 'INCH')).toBe('/api/v1/products/42/size-chart?unit=INCH');
+  });
+});
+
+describe('sizeChartSet', () => {
+  const INCH: ProductSizeChart = {
+    ...CHART,
+    displayUnit: { code: 'INCH', name: '인치' },
+    rows: [{ sizeLabel: 'M', displayOrder: 0, cells: [{ columnId: '12', value: 27.56 }] }],
+  };
+
+  it('두 단위를 cm · inch 순서로 두고, 처음 단위는 언어 기본이다', () => {
+    const ko_ = sizeChartSet({ CM: CHART, INCH }, 'ko', ko.product.sizeChart);
+    expect(ko_?.initial).toBe('CM');
+    expect(ko_?.views.map((entry) => [entry.unit, entry.label])).toEqual([
+      ['CM', 'cm'],
+      ['INCH', 'inch'],
+    ]);
+    expect(ko_?.views[1]?.view.rows).toEqual([['M', '', '27.56']]);
+    expect(sizeChartSet({ CM: CHART, INCH }, 'en', en.product.sizeChart)?.initial).toBe('INCH');
+  });
+
+  it('한 단위만 받았으면 그 단위 하나이고 처음 단위도 그것이다', () => {
+    const only = sizeChartSet({ CM: CHART, INCH: null }, 'en', en.product.sizeChart);
+    expect(only?.initial).toBe('CM');
+    expect(only?.views).toHaveLength(1);
+  });
+
+  it('표가 없거나(null) 비었거나 둘 다 실패하면 null — 기존 표시를 둔다', () => {
+    expect(sizeChartSet({ CM: null, INCH: null }, 'ko', ko.product.sizeChart)).toBeNull();
+    expect(sizeChartSet({}, 'ko', ko.product.sizeChart)).toBeNull();
+    const empty = { ...CHART, rows: [] };
+    expect(sizeChartSet({ CM: empty, INCH: empty }, 'ko', ko.product.sizeChart)).toBeNull();
   });
 });

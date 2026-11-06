@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { en } from '@/lib/i18n/dictionaries/en';
 import { ko } from '@/lib/i18n/dictionaries/ko';
-import type { SizeChartView } from '@/lib/catalog/size-chart';
+import type { SizeChartSet, SizeChartView } from '@/lib/catalog/size-chart';
 import { ProductInfoAccordion } from './ProductInfoAccordion';
 
 // 실제 상점 값이 아닌 자리 값
@@ -22,11 +22,21 @@ const FULL: ProductInfo = {
 const render = (info: ProductInfo, labels = ko.product.info) =>
   renderToStaticMarkup(<ProductInfoAccordion info={info} labels={labels} />);
 
-const CHART: SizeChartView = {
+const CM_VIEW: SizeChartView = {
   columns: ['사이즈', '가슴 단면'],
   rows: [['M', '52']],
   note: '단위 cm',
   measures: [{ name: '가슴 단면', description: '겨드랑이 끝에서 끝' }],
+};
+
+const INCH_VIEW: SizeChartView = { ...CM_VIEW, rows: [['M', '20.47']], note: '단위 inch' };
+
+const CHART: SizeChartSet = {
+  initial: 'CM',
+  views: [
+    { unit: 'CM', label: 'cm', view: CM_VIEW },
+    { unit: 'INCH', label: 'inch', view: INCH_VIEW },
+  ],
 };
 
 describe('ProductInfoAccordion', () => {
@@ -110,5 +120,37 @@ describe('ProductInfoAccordion', () => {
     expect(html).toMatch(/<th scope="col" class="[^"]*sticky left-0 bg-bg[^"]*">사이즈<\/th>/);
     expect(html).toMatch(/<th scope="row" class="[^"]*sticky left-0 bg-bg[^"]*">M<\/th>/);
     expect(html).toContain('<div class="relative overflow-x-auto">');
+  });
+
+  it('상품 사이즈표는 처음 단위 표만 그리고 cm · inch 를 고르는 라디오를 둔다(#218)', () => {
+    const html = renderToStaticMarkup(
+      <ProductInfoAccordion info={FULL} sizeChart={CHART} labels={ko.product.info} />,
+    );
+    expect(html).toContain('<legend class="sr-only">치수 단위</legend>');
+    expect(html).toMatch(/<input type="radio"[^>]*checked="" value="CM"/);
+    expect(html).toMatch(/<input type="radio"[^>]*value="INCH"/);
+    expect(html).toContain('>52</td>');
+    expect(html).not.toContain('20.47');
+    const inch = renderToStaticMarkup(
+      <ProductInfoAccordion
+        info={FULL}
+        sizeChart={{ ...CHART, initial: 'INCH' }}
+        labels={en.product.info}
+      />,
+    );
+    expect(inch).toContain('>20.47</td>');
+    expect(inch).toContain('Measurement unit');
+  });
+
+  it('받은 단위가 하나면 전환 라디오 없이 그 표만 그린다', () => {
+    const html = renderToStaticMarkup(
+      <ProductInfoAccordion
+        info={FULL}
+        sizeChart={{ initial: 'CM', views: [{ unit: 'CM', label: 'cm', view: CM_VIEW }] }}
+        labels={ko.product.info}
+      />,
+    );
+    expect(html).not.toContain('type="radio"');
+    expect(html).toContain('>52</td>');
   });
 });

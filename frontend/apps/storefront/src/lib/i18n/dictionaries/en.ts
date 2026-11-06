@@ -211,7 +211,12 @@ export const en: Dictionary = {
     loadFailed: 'We could not load this product. Please try again in a moment.',
     reload: 'Reload',
     breadcrumb: 'Breadcrumb',
-    info: { sizeGuide: 'Size guide', shipping: 'Shipping & returns', measures: 'How to measure' },
+    info: {
+      sizeGuide: 'Size guide',
+      shipping: 'Shipping & returns',
+      measures: 'How to measure',
+      unit: 'Measurement unit',
+    },
     sizeChart: {
       size: 'Size',
       unit: 'Measurements in {unit}',
