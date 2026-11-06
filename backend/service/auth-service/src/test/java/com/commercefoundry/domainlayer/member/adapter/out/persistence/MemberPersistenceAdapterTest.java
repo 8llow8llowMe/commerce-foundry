@@ -244,6 +244,31 @@ class MemberPersistenceAdapterTest {
     }
 
     @Test
+    @DisplayName("운영자 목록은 운영자 역할 전체를 아이디 내림차순으로 주고 고객을 빼며, active 로 활성 · 비활성을 거른다 (#236)")
+    void findOperatorPage() {
+        memberRepositoryPort.save(Member.signUp(1L, "c1@example.com", HASH, "고객1", null));
+        memberRepositoryPort.save(Member.admin(2L, "admin2@example.com", HASH, "관리자"));
+        memberRepositoryPort.save(Member.operator(3L, "owner3@example.com", HASH, "대표", MemberRole.OWNER));
+        memberRepositoryPort.save(Member.operator(4L, "manager4@example.com", HASH, "매니저", MemberRole.MANAGER).deactivate(Instant.parse("2026-11-03T00:00:00Z")));
+        memberRepositoryPort.save(Member.operator(5L, "staff5@example.com", HASH, "스태프", MemberRole.STAFF));
+        memberRepositoryPort.save(Member.signUp(6L, "c6@example.com", HASH, "고객6", null));
+        entityManager.clear();
+
+        var all = memberRepositoryPort.findOperatorPage(null, 0, 3);
+        assertThat(all.getContent()).extracting(row -> row.memberId()).containsExactly(5L, 4L, 3L);
+        assertThat(all.getTotalElements()).isEqualTo(4);
+        assertThat(memberRepositoryPort.findOperatorPage(null, 1, 3).getContent()).extracting(row -> row.memberId()).containsExactly(2L);
+
+        assertThat(memberRepositoryPort.findOperatorPage(true, 0, 20).getContent()).extracting(row -> row.memberId()).containsExactly(5L, 3L, 2L);
+        assertThat(memberRepositoryPort.findOperatorPage(false, 0, 20).getContent()).singleElement().satisfies(row -> {
+            assertThat(row.memberId()).isEqualTo(4L);
+            assertThat(row.role()).isEqualTo(MemberRole.MANAGER);
+            assertThat(row.deactivatedAt()).isEqualTo(Instant.parse("2026-11-03T00:00:00Z"));
+            assertThat(row.createdAt()).isNotNull();
+        });
+    }
+
+    @Test
     @DisplayName("빈 목록은 쿼리 없이 끝난다")
     void appendNothing() {
         memberAgreementRepositoryPort.appendAll(List.of());

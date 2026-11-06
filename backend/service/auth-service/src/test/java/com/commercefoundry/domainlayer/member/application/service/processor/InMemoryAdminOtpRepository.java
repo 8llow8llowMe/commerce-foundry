@@ -7,11 +7,14 @@ import com.commercefoundry.domainlayer.member.domain.model.AdminOtpCredential;
 import com.commercefoundry.domainlayer.member.domain.model.AdminOtpRecoveryCode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 /**
  * Processor 단위 테스트용 관리자 OTP 저장소 — 어댑터의 조건부 UPDATE 의미(마지막 step 보다 늦을 때만 · 안 쓴 코드일 때만)를 메모리로 흉내 낸다.
@@ -34,6 +37,11 @@ class InMemoryAdminOtpRepository implements AdminOtpRepositoryPort {
     @Override
     public Optional<Instant> findConfirmedAt(long memberId) {
         return findByMemberId(memberId).map(AdminOtpCredential::confirmedAt);
+    }
+
+    @Override
+    public Set<Long> findEnrolledMemberIds(Collection<Long> memberIds) {
+        return memberIds.stream().filter(credentials::containsKey).collect(Collectors.toUnmodifiableSet());
     }
 
     @Override
