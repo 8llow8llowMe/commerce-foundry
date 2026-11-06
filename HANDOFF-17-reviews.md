@@ -31,3 +31,10 @@
 - LOW: 수동 확정 · completion 에 paidCancellationOpen 게이트 없음(스케줄러 꺼져 있으면 REFUNDED 방치 알림). 거절 원상태 판정 · 전이 표 확장 · ORDER_STATUS_UNEXPECTED 재시도 금지 · 수동 확정 뒤 복원 멱등은 정상.
 
 ### 최종 reviewer — 마감까지 미도착 → 집에서 다시 돌린다.
+- HIGH: HANDOFF-17*.md 3개가 커밋돼 public 원격에 있음 → PR 전에 빼고(이력 정리는 새 브랜치 이름으로), 남길 내용은 이슈 댓글로. (계획대로)
+- HIGH: security-guide.md:250 규칙과 ORDER_MANAGE 권한 모순(보안 HIGH 와 같음, ★ 결정).
+- MEDIUM: 재시도가 lease 무시(결제 HIGH-2 · DB 와 같음).
+- MEDIUM: completion 이 ORDER_STATUS_UNEXPECTED 에서 주문 상태를 안 봄 → 환불된 살아 있는 주문이 실패 목록에서 사라지고 출고될 수 있음 → 409 로 막거나 주문 CANCELED 확인, 또는 "주문을 먼저 손으로 맞춘 뒤 completion" 절차 문서화.
+- LOW: 거절 · 종결 뒤 failureCode null(화면에서 PG 거절 코드 사라짐 — 결제 MEDIUM-4 와 같음), 결정 덮어쓰기(수용 가능), api-design-guide.md:1254 빈 코드 스팬 오타, 통합 시험의 "PAYMENT_016 재시도 성공"은 운영에서 불가능한 경로 → REFUND_UNCONFIRMED 로 바꾸고 016 재시도는 "다시 REFUND_FAILED 200", 본문 없는 요청은 ORDER_169 가 아니라 공통 400(문서 문구 좁히기), retries 는 PG 재거절이어도 200 이니 FE 는 status 를 읽어야 함을 문서에.
+- 13개 판단 대부분 타당(거절 전제는 결과적으로 설계와 같다고 판단 — 단 결제 HIGH-1 은 016 · 017 의 의미 자체가 섞여 있다는 지적이라 별개로 반영).
+- 시험 공백: RESTORATION_FAILED 재시도 통합, PATCH 상태 변경 CANCEL_REQUESTED → PAID 409 ORDER_023 웹 시험, 활성 lease 중 재시도, ORDER_STATUS_UNEXPECTED completion, PAID · MAKING 원상태 거절 통합, completion 2회 200, 본문 없는 400.
