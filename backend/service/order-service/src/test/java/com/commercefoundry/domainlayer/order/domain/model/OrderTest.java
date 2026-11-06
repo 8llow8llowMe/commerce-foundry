@@ -344,4 +344,93 @@ class OrderTest {
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> OrderStatusHistory.changedByService(11L, preparing, shipped, null)).isInstanceOf(NullPointerException.class);
     }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"PAID", "MAKING", "PREPARING"})
+    @DisplayName("requestCancellation — 결제 완료 · 제작 중 · 상품 준비중이면 취소 요청(나머지 값 그대로), 완료는 취소 요청에서 취소 완료다")
+    void requestAndCompleteCancellation(OrderStatus status) {
+        Order paid = withStatus(status);
+
+        Order requested = paid.requestCancellation();
+        Order canceled = requested.completeCancellation();
+
+        assertThat(requested.status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        assertThat(requested).usingRecursiveComparison().ignoringFields("status").isEqualTo(paid);
+        assertThat(canceled.status()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(requested.requestCancellation()).as("더블클릭 · 재시도").isSameAs(requested);
+        assertThat(canceled.requestCancellation()).isSameAs(canceled);
+        assertThat(canceled.completeCancellation()).as("확정 반영 재시도").isSameAs(canceled);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PAID", "MAKING", "PREPARING", "CANCEL_REQUESTED", "CANCELED"})
+    @DisplayName("결제 전 · 만료 · 출고 이후 주문의 결제 후 취소 요청은 도메인 전이 예외다")
+    void requestCancellationRejected(OrderStatus status) {
+        assertThatThrownBy(() -> withStatus(status).requestCancellation()).isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+            assertThat(exception.getCurrentStatus()).isEqualTo(status);
+            assertThat(exception.getTargetStatus()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        });
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"CANCEL_REQUESTED", "CANCELED"})
+    @DisplayName("취소 요청이 아닌 주문의 취소 완료는 도메인 전이 예외다 — 결제 전 취소는 cancelBeforePayment 다")
+    void completeCancellationRejected(OrderStatus status) {
+        assertThatThrownBy(() -> withStatus(status).completeCancellation()).isInstanceOf(OrderStatusTransitionException.class);
+    }
+
+    @Test
+    @DisplayName("저장 전 주문은 결제 후 취소 전이를 하지 않는다")
+    void cancellationRequiresStoredOrder() {
+        Order placed = placed();
+        Order unsavedPaid = new Order(placed.id(), placed.memberId(), OrderStatus.PAID, placed.quote(), placed.itemIds(), placed.shippingAddress(),
+            placed.stockReservationId(), placed.paymentDueAt(), null, null, null, null);
+        Order unsavedRequested = new Order(placed.id(), placed.memberId(), OrderStatus.CANCEL_REQUESTED, placed.quote(), placed.itemIds(),
+            placed.shippingAddress(), placed.stockReservationId(), placed.paymentDueAt(), null, null, null, null);
+
+        assertThatThrownBy(unsavedPaid::requestCancellation).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(unsavedRequested::completeCancellation).isInstanceOf(OrderStatusTransitionException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(OrderStatus.class)
+    @DisplayName("고객 취소 가능(플래그 판정) — 결제 대기 · 결제 완료 · 상품 준비중, 제작 중은 플래그일 때만. 무인자 판정(결제 대기만)은 그대로다")
+    void cancelableByCustomerWithFlag(OrderStatus status) {
+        Order order = withStatus(status);
+        boolean always = EnumSet.of(OrderStatus.PENDING_PAYMENT, OrderStatus.PAID, OrderStatus.PREPARING).contains(status);
+
+        assertThat(order.isCancelableByCustomer(false)).isEqualTo(always);
+        assertThat(order.isCancelableByCustomer(true)).isEqualTo(always || status == OrderStatus.MAKING);
+        assertThat(order.isCancelableByCustomer()).isEqualTo(status == OrderStatus.PENDING_PAYMENT);
+        if (order.isCancelableByCustomer(true) && status != OrderStatus.PENDING_PAYMENT) {
+            assertThat(order.requestCancellation().status()).as("판정이 열면 전이도 된다").isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        }
+    }
+
+    @Test
+    @DisplayName("결제 후 취소 요청 이력은 고객 · 회원 아이디 · 사유 코드, 환불 완료 이력은 SERVICE · CANCELLATION_REFUNDED 다")
+    void cancellationHistories() {
+        Order preparing = withStatus(OrderStatus.PREPARING);
+        Order requested = preparing.requestCancellation();
+
+        OrderStatusHistory request = OrderStatusHistory.cancellationRequestedByCustomer(11L, preparing, OrderCancelReason.CHANGE_OF_MIND);
+        OrderStatusHistory refunded = OrderStatusHistory.cancellationRefunded(12L, requested);
+
+        assertThat(request.fromStatus()).isEqualTo(OrderStatus.PREPARING);
+        assertThat(request.toStatus()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        assertThat(request.changedByType()).isEqualTo(StatusChangedBy.CUSTOMER);
+        assertThat(request.changedById()).isEqualTo(preparing.memberId());
+        assertThat(request.reason()).isEqualTo("CHANGE_OF_MIND");
+        assertThat(refunded.fromStatus()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        assertThat(refunded.toStatus()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(refunded.changedByType()).isEqualTo(StatusChangedBy.SERVICE);
+        assertThat(refunded.changedById()).isNull();
+        assertThat(refunded.reason()).isEqualTo(OrderStatusHistory.CANCELLATION_REFUNDED);
+        for (OrderStatus status : EnumSet.of(OrderStatus.PENDING_PAYMENT, OrderStatus.SHIPPING, OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELED)) {
+            assertThatThrownBy(() -> OrderStatusHistory.cancellationRequestedByCustomer(13L, withStatus(status), OrderCancelReason.OTHER))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, preparing)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, requested.completeCancellation())).isInstanceOf(IllegalArgumentException.class);
+    }
 }

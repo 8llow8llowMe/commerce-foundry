@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderValidati
 import com.commercefoundry.domainlayer.order.domain.model.ClaimItem;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
@@ -41,5 +42,12 @@ public record OrderReturnRequest(
         @NotNull(message = OrderValidationMessage.RETURN_REASON_REQUIRED)
         ClaimItem.Reason reason
     ) {
+
+        /** 클레임 사유에는 결제 후 취소 사유도 있다(#16 PR-2) — 반품 접수는 반품 사유 3종만 받는다. 없음은 {@code @NotNull} 이 먼저 막는다. */
+        @Schema(hidden = true)
+        @AssertTrue(message = OrderValidationMessage.RETURN_REASON_INVALID)
+        public boolean isReturnReason() {
+            return reason == null || reason.isReturnReason();
+        }
     }
 }

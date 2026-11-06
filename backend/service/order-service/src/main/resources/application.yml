@@ -54,6 +54,11 @@ spring:
           default:
             connect-timeout: 2000
             read-timeout: 3000
+          # 결제 취소 (PaymentCancelClient, #16 PR-2). payment 가 PG 취소(토스 read 6초)를 기다린 뒤 답하므로 기본 3초보다 길게 둔다.
+          # 넘으면 UNKNOWN 으로 보고 같은 클레임 아이디로 다시 부른다(payment 멱등 200)
+          paymentCancelClient:
+            connect-timeout: 2000
+            read-timeout: 10000
 
 # 서비스 간 호출 서킷 (coding-conventions.md §10). adapter/out/client/support 의 *InternalResponseSupport 가 인스턴스 이름으로 감싼다.
 # spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다 — 서킷과 예외 변환을 한 곳(support)에서 한다
@@ -81,6 +86,10 @@ resilience4j:
         base-config: default
       # 결제 승인 이벤트의 결제 재조회 (GET /internal/v1/payments/{paymentId}, #308). 404 PAYMENT_001 은 없는 결제 — 4xx 라 서킷이 세지 않는다
       payment-service:
+        base-config: default
+      # 결제 후 취소의 환불 실행 (POST /internal/v1/payments/{paymentId}/cancellations, #16 PR-2). 조회와 나눠 PG 취소 장애가 승인 반영 재조회를 막지 않게 한다.
+      # 503 PAYMENT_018(미확정)은 실패로 센다. 서킷이 열리면 UNKNOWN — 재시도 스케줄러가 같은 클레임으로 다시 보낸다
+      payment-cancellation:
         base-config: default
 
 eureka:
@@ -203,3 +212,17 @@ order:
       interval: 1h
       batch-size: 100
       max-batches-per-run: 10
+  # 결제 후 고객 취소 (OrderCancellationProperties, #16 PR-2). 제작 중(MAKING) 주문은 allow-while-making 일 때만 고객 취소를 연다.
+  # 재시도: 미확정 환불 · 재고 복원을 같은 클레임 아이디로 다시 보낸다. 간격은 1분부터 두 배씩, 상한 1시간. 환불이 max-attempts 를 넘으면 REFUND_FAILED.
+  # max-backoff × max-attempts 가 14일(payment 취소 키 유효 기간)을 넘으면 기동하지 않는다. 스케줄러는 #16 PR-2a-2 에서 붙는다
+  cancellation:
+    allow-while-making: false
+    retry:
+      enabled: false
+      interval: 1m
+      batch-size: 50
+      max-attempts: 48
+      initial-backoff: 1m
+      max-backoff: 1h
+      # 고객 요청이 접수한 클레임을 스케줄러가 집지 않는 시간. paymentCancelClient read-timeout(10초)보다 충분히 커야 한다(30s~1h)
+      lease: 2m

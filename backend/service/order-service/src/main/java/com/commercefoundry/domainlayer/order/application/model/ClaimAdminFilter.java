@@ -15,12 +15,12 @@ public record ClaimAdminFilter(Long orderId, Type type, Status status, int page,
     }
 
     public enum Type {
-        RETURN;
+        RETURN, CANCELLATION;
         public Claim.Type toDomain() { return Claim.Type.valueOf(name()); }
     }
 
     public enum Status {
-        REQUESTED;
+        REQUESTED, REFUNDED, COMPLETED, REFUND_FAILED, RESTORATION_FAILED;
         public Claim.Status toDomain() { return Claim.Status.valueOf(name()); }
     }
 }

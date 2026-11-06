@@ -82,17 +82,26 @@
         id bigint not null,
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
+        attempt_count integer not null,
         expected_refund_amount bigint,
         expected_refund_currency varchar(3) check ((expected_refund_currency in ('KRW','USD'))),
+        failure_code varchar(40),
+        next_attempt_at timestamp(6) with time zone,
         order_id bigint not null,
+        payment_id bigint,
         request_key uuid not null,
-        status varchar(20) not null check ((status in ('REQUESTED'))),
-        type varchar(20) not null check ((type in ('RETURN'))),
+        status varchar(20) not null check ((status in ('REQUESTED','REFUNDED','COMPLETED','REFUND_FAILED','RESTORATION_FAILED'))),
+        type varchar(20) not null check ((type in ('RETURN','CANCELLATION'))),
         version bigint not null,
         primary key (id),
         constraint uk_claim_order_id_request_key unique (order_id, request_key),
         constraint ck_claim_identifiers_positive check (id > 0 and order_id > 0 and version >= 0),
-        constraint ck_claim_expected_refund_pair check ((expected_refund_amount is null and expected_refund_currency is null) or (expected_refund_amount is not null and expected_refund_currency is not null and expected_refund_amount >= 0))
+        constraint ck_claim_expected_refund_pair check ((expected_refund_amount is null and expected_refund_currency is null) or (expected_refund_amount is not null and expected_refund_currency is not null and expected_refund_amount >= 0)),
+        constraint ck_claim_attempt_count_non_negative check (attempt_count >= 0),
+        constraint ck_claim_cancellation_payment check (type <> 'CANCELLATION' or (payment_id is not null and payment_id > 0 and expected_refund_amount is not null and expected_refund_amount > 0)),
+        constraint ck_claim_payment_cancellation_only check (type = 'CANCELLATION' or payment_id is null),
+        constraint ck_claim_cancellation_next_attempt check (type <> 'CANCELLATION' or ((status in ('REQUESTED', 'REFUNDED')) = (next_attempt_at is not null))),
+        constraint ck_claim_cancellation_failure_code check (type <> 'CANCELLATION' or ((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null)))
     );
 
     comment on table orders.claim is
@@ -107,23 +116,35 @@
     comment on column orders.claim.updated_at is
         '수정 시각';
 
+    comment on column orders.claim.attempt_count is
+        '지금 단계(환불 · 재고 복원)의 미확정 재시도 횟수';
+
     comment on column orders.claim.expected_refund_amount is
         '예상 환불 최소 단위 금액 (미산정이면 null)';
 
     comment on column orders.claim.expected_refund_currency is
         '예상 환불 통화 (미산정이면 null)';
 
+    comment on column orders.claim.failure_code is
+        '종결 실패 사유 코드 (REFUND_FAILED · RESTORATION_FAILED). 아니면 null';
+
+    comment on column orders.claim.next_attempt_at is
+        '재시도 스케줄러가 다시 집을 시각. 종결이면 null';
+
     comment on column orders.claim.order_id is
         '주문 아이디 (FK: orders.id)';
 
+    comment on column orders.claim.payment_id is
+        '환불할 결제 아이디 (외부 FK: payment-service payment.id). 취소 클레임에만';
+
     comment on column orders.claim.request_key is
-        '주문별 멱등 접수 키 (UUID)';
+        '주문별 멱등 접수 키 (UUID). 전체 취소는 주문 아이디로 만든 결정적 키';
 
     comment on column orders.claim.status is
-        '클레임 상태 (REQUESTED)';
+        '클레임 상태 (REQUESTED / REFUNDED / COMPLETED / REFUND_FAILED / RESTORATION_FAILED)';
 
     comment on column orders.claim.type is
-        '클레임 유형 (RETURN)';
+        '클레임 유형 (RETURN / CANCELLATION)';
 
     comment on column orders.claim.version is
         '낙관적 락 버전';
@@ -135,7 +156,7 @@
         claim_id bigint not null,
         order_item_id bigint not null,
         quantity integer not null,
-        reason varchar(20) not null check ((reason in ('CHANGE_OF_MIND','DEFECTIVE','WRONG_ITEM'))),
+        reason varchar(20) not null check ((reason in ('CHANGE_OF_MIND','DEFECTIVE','WRONG_ITEM','ORDER_MISTAKE','PAYMENT_ISSUE','OTHER'))),
         primary key (id),
         constraint uk_claim_item_claim_id_order_item_id unique (claim_id, order_item_id),
         constraint ck_claim_item_identifiers_positive check (id > 0 and claim_id > 0 and order_item_id > 0),
@@ -143,7 +164,7 @@
     );
 
     comment on table orders.claim_item is
-        '반품 접수 항목 스냅숏';
+        '클레임 항목 스냅숏';
 
     comment on column orders.claim_item.id is
         '클레임 항목 아이디 (Snowflake)';
@@ -161,10 +182,10 @@
         '주문 항목 아이디 (FK: order_item.id)';
 
     comment on column orders.claim_item.quantity is
-        '반품 접수 수량';
+        '클레임 수량';
 
     comment on column orders.claim_item.reason is
-        '접수 사유 (CHANGE_OF_MIND / DEFECTIVE / WRONG_ITEM)';
+        '접수 사유 (반품 CHANGE_OF_MIND / DEFECTIVE / WRONG_ITEM, 취소 CHANGE_OF_MIND / ORDER_MISTAKE / PAYMENT_ISSUE / OTHER)';
 
     create table orders.order_item (
         id bigint not null,
@@ -838,6 +859,9 @@
 
     comment on column orders.shedlock.locked_by is
         '락을 잡은 인스턴스 (호스트 이름)';
+
+    create index idx_claim_type_next_attempt_at_id
+       on orders.claim (type, next_attempt_at, id);
 
     create index idx_order_item_custom_option_order_id_order_item_id
        on orders.order_item_custom_option (order_id, order_item_id);

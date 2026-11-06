@@ -28,7 +28,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "[어드민] 클레임 조회", description = "반품 접수 목록과 상세 조회")
+@Tag(name = "[어드민] 클레임 조회", description = "반품 · 결제 후 취소 클레임 목록과 상세 조회")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -36,7 +36,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class ClaimAdminController {
     private final ClaimAdminUseCase useCase;
 
-    @Operation(summary = "클레임 목록 조회", description = "클레임 아이디 내림차순. 현재 RETURN/REQUESTED 접수만 지원하며 예상 환불액 null은 미산정이다. "
+    @Operation(summary = "클레임 목록 조회", description = "클레임 아이디 내림차순. 유형은 반품(RETURN) · 결제 후 취소(CANCELLATION), 상태는 REQUESTED · REFUNDED · COMPLETED · "
+        + "REFUND_FAILED · RESTORATION_FAILED 다(반품은 아직 REQUESTED 만 생긴다). 예상 환불액 null은 미산정이다. "
         + "page는 0 이상, size는 1~100이며 page×size가 2,147,483,647을 넘으면 조회 전에 400(ORDER_167)이다.")
     @PreAuthorize(AdminAuthority.ORDER_READ)
     @GetMapping
