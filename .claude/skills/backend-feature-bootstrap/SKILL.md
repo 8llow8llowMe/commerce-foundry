@@ -30,7 +30,7 @@ description: commerce-foundry 백엔드에 새 서비스 또는 기존 서비스
 
 2. **공개 인터페이스 정의** — 고객 / 어드민 / internal 을 나눠 적는다
    - 경로: `api-design-guide.md` §1 의 체계와 서비스별 경로 소유 표
-   - 인증: 비로그인 허용 / `CUSTOMER` / `hasRole('ADMIN')`, 소유 확인 위치
+   - 인증: 비로그인 허용 / `CUSTOMER` / 어드민 `AdminAuthority` 기능 상수(`security-guide.md` §3-1), 소유 확인 위치
    - 목록 응답: 고객 `SliceResponse`, 어드민 `PageResponse`
    - 쓰기 API 의 멱등성 필요 여부 (`Idempotency-Key`)
    - 금액 필드는 `{amount, currency}`
