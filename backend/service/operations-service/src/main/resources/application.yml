@@ -167,6 +167,20 @@ operations:
       schedules: []
   # 어드민 알림 센터 (#213). 값이 빠지거나 0 · 음수면 기동하지 않는다 (NotificationProperties)
   notifications:
+    # 다른 관측·messaging·결제 복구 게이트와 독립. 실제 활성화는 PG/포화 계측 검증 뒤 별도 판단한다.
+    payment-anomaly-alert:
+      enabled: ${PAYMENT_ANOMALY_ALERT_ENABLED:false}
+      unknown: 5m
+      manual-review-unknown: 0s
+      in-progress: 5m
+      returned-ready: 10m
+      late-approved: 0s
+      done-order-unsynced: 10m
+      suppression: 1h
+      max-observation-age: 30s
+      initial-delay: 1m
+      fixed-delay: 1m
+      lock-at-most: 2m
     payment-outbox-alert:
       enabled: ${PAYMENT_OUTBOX_ALERT_ENABLED:false}
       threshold: 5m

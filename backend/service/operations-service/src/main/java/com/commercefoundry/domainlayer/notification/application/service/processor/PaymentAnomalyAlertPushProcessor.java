@@ -6,7 +6,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-/** E3b의 커밋 완료 반환 뒤 연결할 전달 경계다. 현재 자동 호출 경로는 없다. */
+/** 수집 Facade가 상태 저장 프록시의 커밋 완료 반환 뒤 부르는 전달 경계다. */
 @Component
 @RequiredArgsConstructor
 public class PaymentAnomalyAlertPushProcessor {
