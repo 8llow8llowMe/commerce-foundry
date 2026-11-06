@@ -44,10 +44,10 @@ class OrderTest {
         Order pending = withStatus(OrderStatus.PENDING_PAYMENT);
         Order canceled = pending.cancelBeforePayment();
 
-        assertThat(pending.isCancelableByCustomer()).isTrue();
+        assertThat(pending.isCancelableBeforePayment()).isTrue();
         assertThat(canceled.status()).isEqualTo(OrderStatus.CANCELED);
         assertThat(canceled).usingRecursiveComparison().ignoringFields("status").isEqualTo(pending);
-        assertThat(canceled.isCancelableByCustomer()).isFalse();
+        assertThat(canceled.isCancelableBeforePayment()).isFalse();
         // 일반 상태 변경으로는 결제 전 취소를 못 한다 — 재고 해제 이벤트 없이 CANCELED 가 되지 않게
         assertThatThrownBy(() -> pending.changeStatus(OrderStatus.CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
         assertThat(canceled.cancelBeforePayment()).isSameAs(canceled);
@@ -57,7 +57,7 @@ class OrderTest {
     @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PENDING_PAYMENT", "CANCELED"})
     @DisplayName("결제 대기 · 취소 완료가 아닌 주문의 결제 전 취소는 도메인 전이 예외다 — 결제 뒤 취소는 다른 흐름(#16 PR-2)이다")
     void cancelBeforePaymentRejected(OrderStatus status) {
-        assertThat(withStatus(status).isCancelableByCustomer()).isFalse();
+        assertThat(withStatus(status).isCancelableBeforePayment()).isFalse();
         assertThatThrownBy(() -> withStatus(status).cancelBeforePayment()).isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
             assertThat(exception.getCurrentStatus()).isEqualTo(status);
             assertThat(exception.getTargetStatus()).isEqualTo(OrderStatus.CANCELED);
@@ -401,7 +401,10 @@ class OrderTest {
 
         assertThat(order.isCancelableByCustomer(false)).isEqualTo(always);
         assertThat(order.isCancelableByCustomer(true)).isEqualTo(always || status == OrderStatus.MAKING);
-        assertThat(order.isCancelableByCustomer()).isEqualTo(status == OrderStatus.PENDING_PAYMENT);
+        assertThat(order.isCancelableBeforePayment()).isEqualTo(status == OrderStatus.PENDING_PAYMENT);
+        assertThat(status.isCancelableByCustomer(true, false)).as("결제 후 취소 게이트가 닫히면 결제 대기만").isEqualTo(status == OrderStatus.PENDING_PAYMENT);
+        assertThat(status.isCancelableByCustomer(false, true)).isEqualTo(order.isCancelableByCustomer(false));
+        assertThat(status.isCancelableByCustomer(true, true)).isEqualTo(order.isCancelableByCustomer(true));
         if (order.isCancelableByCustomer(true) && status != OrderStatus.PENDING_PAYMENT) {
             assertThat(order.requestCancellation().status()).as("판정이 열면 전이도 된다").isEqualTo(OrderStatus.CANCEL_REQUESTED);
         }

@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.global.properties.OrderCancellationProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Slice;
@@ -28,10 +29,19 @@ public class OrderHistoryProcessor {
     private final OrderRepositoryPort orderRepositoryPort;
     private final OrderEventPort orderEventPort;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
+    private final OrderCancellationProperties orderCancellationProperties;
 
     @Transactional(readOnly = true, timeout = 5)
     public Slice<OrderMemberSummaryInfo> findSlice(long memberId, int page, int size) {
-        return orderRepositoryPort.findMemberSummarySlice(memberId, page, size).map(OrderMemberSummaryInfo::from);
+        return orderRepositoryPort.findMemberSummarySlice(memberId, page, size).map(result -> OrderMemberSummaryInfo.from(result, cancelable(result.status())));
+    }
+
+    /**
+     * 고객 응답의 {@code cancelable} — 결제 대기는 늘, 결제 후 상태는 결제 후 취소가 열려 있을 때({@code order.cancellation.retry.enabled})만 true 다.
+     * 제작 중은 {@code allow-while-making} 을 따른다 (#16 PR-2). 판정의 정본은 {@link OrderStatus#isCancelableByCustomer(boolean, boolean)} 다.
+     */
+    public boolean cancelable(OrderStatus status) {
+        return status.isCancelableByCustomer(orderCancellationProperties.allowWhileMaking(), orderCancellationProperties.paidCancellationOpen());
     }
 
     /** 없거나 남의 주문이면 {@code NOT_FOUND_ORDER}(404). */
@@ -53,7 +63,7 @@ public class OrderHistoryProcessor {
         if (order.status() == OrderStatus.CANCELED) {
             return order;
         }
-        if (!order.isCancelableByCustomer()) {
+        if (!order.isCancelableBeforePayment()) {
             throw new OrderException(OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID, order.status().getDisplayName());
         }
         Order canceled = order.cancelBeforePayment();

@@ -6,12 +6,14 @@ import com.commercefoundry.domainlayer.order.application.service.processor.Order
 import com.commercefoundry.domainlayer.order.support.OrderCancelPersistenceContract;
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
 import com.commercefoundry.global.messaging.JpaOutboxStore;
+import com.commercefoundry.global.properties.OrderCancellationProperties;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
 import com.commercefoundry.messaging.outbox.OutboxStore;
 import com.commercefoundry.messaging.publish.EventPublisher;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
 import java.time.ZoneOffset;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -43,8 +45,9 @@ import org.springframework.transaction.annotation.Transactional;
 })
 public class OrderCancelH2Test extends OrderCancelPersistenceContract {
 
-    /** 시계 · 아이디 · 발행기 — 메시징 설정기를 띄우지 않고 outbox 로만 쓰는 발행기를 직접 만든다. */
+    /** 시계 · 아이디 · 발행기 — 메시징 설정기를 띄우지 않고 outbox 로만 쓰는 발행기를 직접 만든다. 취소 설정은 기본값(결제 후 취소 닫힘)이다. */
     @TestConfiguration
+    @EnableConfigurationProperties(OrderCancellationProperties.class)
     public static class Config {
 
         @Bean

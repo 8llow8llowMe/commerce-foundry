@@ -53,6 +53,22 @@ public enum OrderStatus implements CodeNameDescribable {
         return TRANSITIONS.get(this).contains(next);
     }
 
+    /**
+     * 고객이 지금 취소를 요청할 수 있는가 (#16) — 고객 취소 판정의 정본이다(주문 내역 · 상세의 {@code cancelable}, 결제 후 취소 접수).
+     * 결제 대기는 늘 된다(결제 전 취소). 결제 완료 · 상품 준비중 · 제작 중(설정)은 결제 후 취소가 열려 있을 때만이다.
+     *
+     * @param allowWhileMaking {@code order.cancellation.allow-while-making} — 제작에 들어간 맞춤 상품의 취소를 고객에게 열지
+     * @param paidCancellationOpen 결제 후 취소를 받을 수 있는가 — 환불 · 복원 재시도가 돌 때만 연다({@code order.cancellation.retry.enabled})
+     */
+    public boolean isCancelableByCustomer(boolean allowWhileMaking, boolean paidCancellationOpen) {
+        return switch (this) {
+            case PENDING_PAYMENT -> true;
+            case PAID, PREPARING -> paidCancellationOpen;
+            case MAKING -> paidCancellationOpen && allowWhileMaking;
+            default -> false;
+        };
+    }
+
     /** 이 상태에서 갈 수 있는 상태 — 바꿀 수 없다. */
     public Set<OrderStatus> nextStatuses() {
         return TRANSITIONS.get(this);

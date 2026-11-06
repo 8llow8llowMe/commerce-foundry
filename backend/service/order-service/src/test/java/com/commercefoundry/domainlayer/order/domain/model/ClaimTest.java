@@ -244,6 +244,46 @@ class ClaimTest {
             .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    @DisplayName("미확정으로 닫힌 환불 실패(REFUND_UNCONFIRMED)만 늦게 온 환불 성공을 받아 REFUNDED 로 간다 — 종결 거절 코드는 그대로 거절한다")
+    void lateRefundSuccessOnlyForUnconfirmed() {
+        Claim base = requested();
+        Claim unconfirmed = base.retryLater(NOW, MINUTE, HOUR).failRefund(Claim.REFUND_UNCONFIRMED);
+        Claim rejected = base.failRefund("PAYMENT_016");
+
+        Claim refunded = unconfirmed.markRefunded(NOW.plus(LEASE));
+
+        assertThat(refunded.status()).isEqualTo(Claim.Status.REFUNDED);
+        assertThat(refunded.failureCode()).isNull();
+        assertThat(refunded.attemptCount()).as("복원 단계 횟수는 0 부터").isZero();
+        assertThat(refunded.nextAttemptAt()).isEqualTo(Instant.parse("2026-11-06T00:02:00.123456Z"));
+        assertThatThrownBy(() -> rejected.markRefunded(NOW)).isInstanceOf(IllegalStateException.class);
+        Claim restorationUnconfirmed = base.markRefunded(NOW).failRestoration(Claim.RESTORATION_UNCONFIRMED);
+        assertThatThrownBy(() -> restorationUnconfirmed.markRefunded(NOW)).isInstanceOf(IllegalStateException.class);
+        assertThat(Claim.REFUND_UNCONFIRMED.length()).isLessThanOrEqualTo(Claim.FAILURE_CODE_MAX_LENGTH);
+        assertThat(Claim.RESTORATION_UNCONFIRMED.length()).isLessThanOrEqualTo(Claim.FAILURE_CODE_MAX_LENGTH);
+    }
+
+    @Test
+    @DisplayName("선점은 대기 상태(REQUESTED · REFUNDED)의 다음 시각만 미루고 상태 · 횟수는 두며, 종결 · 저장 전 클레임은 선점하지 않는다")
+    void holdUntilDefersOnlyAwaitingClaims() {
+        Claim requested = requested().retryLater(NOW, MINUTE, HOUR);
+        Instant until = NOW.plus(LEASE);
+
+        Claim held = requested.holdUntil(until);
+        Claim heldRefunded = requested.markRefunded(NOW).holdUntil(until);
+
+        assertThat(held.status()).isEqualTo(Claim.Status.REQUESTED);
+        assertThat(held.attemptCount()).isEqualTo(1);
+        assertThat(held.nextAttemptAt()).isEqualTo(Instant.parse("2026-11-06T00:02:00.123456Z"));
+        assertThat(heldRefunded.status()).isEqualTo(Claim.Status.REFUNDED);
+        assertThatThrownBy(() -> requested.failRefund("PAYMENT_016").holdUntil(until)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested.markRefunded(NOW).complete().holdUntil(until)).isInstanceOf(IllegalStateException.class);
+        Order order = paidOrder();
+        Claim unsaved = Claim.requestCancellation(400L, order, 77L, krw(100), OrderCancelReason.OTHER, new AtomicLong(500)::incrementAndGet, NOW, LEASE);
+        assertThatThrownBy(() -> unsaved.holdUntil(until)).isInstanceOf(IllegalStateException.class);
+    }
+
     private static Claim cancellation(Claim.Status status, Instant next, String failureCode, List<ClaimItem> items) {
         return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 0, next, failureCode, items, NOW, 0L);
     }

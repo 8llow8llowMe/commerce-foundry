@@ -36,6 +36,15 @@ public record Claim(
     /** {@code claim.failure_code} 길이와 같다. */
     public static final int FAILURE_CODE_MAX_LENGTH = 40;
 
+    /**
+     * 환불 재시도 상한을 넘었다 — 결과를 끝내 확인하지 못해 REFUND_FAILED 로 넘긴 실패 코드 (#16 PR-2). PG 에서는 실제로 취소됐을 수 있으므로
+     * 이 코드일 때만 늦게 온 환불 성공을 받는다({@link #markRefunded}).
+     */
+    public static final String REFUND_UNCONFIRMED = "REFUND_UNCONFIRMED";
+
+    /** 재고 복원 재시도 상한을 넘었다 — 결과를 확인하지 못해 RESTORATION_FAILED 로 넘긴 실패 코드 (#16 PR-2). 운영자가 재고를 확인한다. */
+    public static final String RESTORATION_UNCONFIRMED = "RESTORATION_UNCONFIRMED";
+
     public Claim {
         if (id <= 0 || orderId <= 0 || (version != null && version < 0) || (paymentId != null && paymentId <= 0) || attemptCount < 0) {
             throw new IllegalArgumentException("Invalid claim identifiers");
@@ -113,12 +122,18 @@ public record Claim(
             nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null, items, null, null);
     }
 
-    /** 환불이 확정됐다 — REQUESTED → REFUNDED(재고 복원 대기). 재시도 횟수는 복원 단계용으로 0 부터 다시 센다. 이미 REFUNDED 면 그대로다. */
+    /**
+     * 환불이 확정됐다 — REQUESTED → REFUNDED(재고 복원 대기). 재시도 횟수는 복원 단계용으로 0 부터 다시 센다. 이미 REFUNDED 면 그대로다.
+     * 재시도 상한을 넘어 미확정으로 닫은 REFUND_FAILED({@link #REFUND_UNCONFIRMED})도 받는다 — 늦게 온 성공이 실제 결과다. 다른 실패 코드(종결 거절)는 받지 않는다.
+     */
     public Claim markRefunded(Instant nextAttemptAt) {
         Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
         requireCancellation();
         if (status == Status.REFUNDED) {
             return this;
+        }
+        if (!isNew() && status == Status.REFUND_FAILED && REFUND_UNCONFIRMED.equals(failureCode)) {
+            return with(Status.REFUNDED, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null);
         }
         requireStatus(Status.REQUESTED, Status.REFUNDED);
         return with(Status.REFUNDED, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null);
@@ -174,6 +189,19 @@ public record Claim(
             backoff = maxBackoff;
         }
         return with(status, attemptCount + 1, now.plus(backoff).truncatedTo(ChronoUnit.MICROS), null);
+    }
+
+    /**
+     * 재시도 스케줄러가 원격 호출 전에 이 클레임을 선점한다 — 상태 · 횟수는 그대로 두고 다음 시각만 {@code until} 로 미룬다 (#16 PR-2).
+     * 저장(버전 비교)에서 이긴 워커만 호출하고, 그 사이 다른 워커 · 고객 요청은 이 시각까지 집지 않는다.
+     */
+    public Claim holdUntil(Instant until) {
+        Objects.requireNonNull(until, "until");
+        requireCancellation();
+        if (isNew() || !status.isAwaitingAttempt()) {
+            throw new IllegalStateException("선점은 저장된 환불 대기 · 복원 대기 클레임만 합니다: status=" + status);
+        }
+        return with(status, attemptCount, until.truncatedTo(ChronoUnit.MICROS), null);
     }
 
     public boolean isNew() {

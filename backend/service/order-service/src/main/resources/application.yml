@@ -4,6 +4,12 @@ server:
 spring:
   application:
     name: order-service
+  task:
+    scheduling:
+      # 미결제 만료 · 자동 구매 확정 · 결제 후 취소 재시도(#16 PR-2)가 각자 스레드에서 돈다 — 기본 1개면 긴 재시도 배치(원격 호출)가 만료 스윕을 막는다
+      pool:
+        size: 3
+      thread-name-prefix: order-scheduling-
   # 값은 환경변수로 받는다 (secret-management.md). local 은 backend/.env 를 읽는다 (application-local.yml)
   datasource:
     url: ${DB_URL}

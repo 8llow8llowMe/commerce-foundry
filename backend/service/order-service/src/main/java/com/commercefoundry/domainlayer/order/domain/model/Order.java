@@ -247,22 +247,19 @@ public record Order(
         return transitionTo(OrderStatus.CANCELED);
     }
 
-    /** 고객이 지금 취소할 수 있는가 — 결제 전(결제 대기)만이다(#16 PR-1). 결제 후 취소의 판정은 {@link #isCancelableByCustomer(boolean)} 다. */
-    public boolean isCancelableByCustomer() {
+    /** 결제 전 취소({@link #cancelBeforePayment()})를 할 수 있는가 — 결제 대기만이다(#16 PR-1). */
+    public boolean isCancelableBeforePayment() {
         return status == OrderStatus.PENDING_PAYMENT;
     }
 
     /**
      * 결제 전 · 결제 후를 합친 고객 취소 가능 판정 (#16 PR-2) — 결제 대기 · 결제 완료 · 상품 준비중이고, 제작 중은 {@code allowWhileMaking} 일 때만이다.
+     * 결제 후 취소의 운영 게이트(재시도 스케줄러)는 보지 않는다 — 게이트까지 합친 판정은 {@link OrderStatus#isCancelableByCustomer(boolean, boolean)} 다.
      *
      * @param allowWhileMaking {@code order.cancellation.allow-while-making} — 제작에 들어간 맞춤 상품의 취소를 고객에게 열지
      */
     public boolean isCancelableByCustomer(boolean allowWhileMaking) {
-        return switch (status) {
-            case PENDING_PAYMENT, PAID, PREPARING -> true;
-            case MAKING -> allowWhileMaking;
-            default -> false;
-        };
+        return status.isCancelableByCustomer(allowWhileMaking, true);
     }
 
     public boolean isNew() {
