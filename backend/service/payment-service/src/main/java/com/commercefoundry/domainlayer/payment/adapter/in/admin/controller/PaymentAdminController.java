@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.payment.application.exception.PaymentVali
 import com.commercefoundry.domainlayer.payment.application.model.PaymentAdminStatusFilter;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.principal.AdminAuthority;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -33,7 +34,7 @@ public class PaymentAdminController {
     private final PaymentAdminUseCase paymentAdminUseCase;
 
     @Operation(summary = "결제 목록 조회", description = "결제 시도를 아이디 내림차순으로 조회한다. REFUND_FAILED는 PG 취소 확정 거절 이력 필터이며 실제 결제 상태는 그대로 반환한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTLEMENT_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<PaymentAdminItem>>> search(
         @Parameter(description = "결제 상태. REFUND_FAILED는 취소거절 이력(REJECTED)이 있는 결제이며 후속 성공 뒤에도 포함한다. 미지정이면 전체")
