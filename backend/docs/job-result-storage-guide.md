@@ -41,7 +41,7 @@ STAGED 확정 기한은 보관 만료와 staging timeout 중 이른 시각이며
 
 ## 관리자 다운로드와 FE 계약
 
-`POST /api/v1/admin/jobs/{jobId}/result-download`는 ADMIN 전용이다. 본문은 없다.
+`POST /api/v1/admin/jobs/{jobId}/result-download`는 `AdminAuthority.REPORT_READ`(ADMIN · OWNER · MANAGER, `security-guide.md` §3-1)다. 본문은 없다.
 감사 주체는 access token의 memberId이며 요청 body로 받지 않는다.
 응답은 `Response<{url,expiresAt,fileName,contentType,sizeBytes}>`와 `Cache-Control: no-store`다.
 성공한 현재 시도의 AVAILABLE만 대상으로 HEAD 존재·ETag·크기·MIME를 확인한다.

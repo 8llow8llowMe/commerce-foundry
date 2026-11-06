@@ -7,7 +7,7 @@ operations-service `legaldocument`가 고객사별 이용약관·개인정보처
 
 ## ADMIN 계약
 
-모두 `hasRole('ADMIN')`, 표준 `Response` 봉투와 `Cache-Control: no-store`를 사용한다.
+조회 4종은 `AdminAuthority.SETTINGS_READ`, 초안 저장 · 게시는 `SETTINGS_MANAGE`(둘 다 ADMIN · OWNER, `security-guide.md` §3-1)이고 표준 `Response` 봉투와 `Cache-Control: no-store`를 사용한다.
 쓰기 행위자는 실제 access JWT의 memberId로만 정하며 요청이 지정할 수 없다.
 
 | 경로 | 요청 | 응답 dataBody |
