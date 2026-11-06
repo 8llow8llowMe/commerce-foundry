@@ -51,7 +51,7 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 "어드민 카테고리 관리" 는 숨김 포함 트리 조회 · 생성 · 수정(이동 포함) · 삭제(`/api/v1/admin/categories/**`)가 있는 상태다 — 깊이 3단계 · 순환 금지, 하위나 연결 상품이 있으면 삭제 409 (`api-design-guide.md` §2-5).
 "어드민 상품 목록" 은 숨김 포함 상품 페이지 목록(`GET /api/v1/admin/products` — 상품명 · 카테고리(하위 포함) · 판매 상태 · 노출 · 재고 반영 판매 가능 상태 조건,
 최신순 · 이름순)이 있는 상태다 (`api-design-guide.md` §2-6). 상품 soft delete · 옵션 은퇴 · 낙관적 락 버전 · 등록자 컬럼과 그 조회 규칙(삭제 상품은 고객 · 어드민 목록에서 빠지고
-서비스 간 SKU 조회에는 판매 불가로 남는다)이 있다. 상품 삭제 API(`DELETE /api/v1/admin/products/{productId}`)는 ADMIN 전용이며 이미 삭제된 상품도 200이다.
+서비스 간 SKU 조회에는 판매 불가로 남는다)이 있다. 상품 삭제 API(`DELETE /api/v1/admin/products/{productId}`)는 `AdminAuthority.CATALOG_MANAGE` 이며 이미 삭제된 상품도 200이다.
 읽은 버전과 merge 시점이 충돌하면 409 `PRODUCT_010`이며 자식·재고·기존 선점은 유지한다. 옵션 은퇴 쓰기는 `POST /option-retirements`(#9 PR-C2)다 (`api-design-guide.md` §2-13). 어드민 상품 상세(`GET /api/v1/admin/products/{productId}`)는 숨김 · 은퇴 옵션 · 판매 종료 SKU 와 저장된 설정을 포함하며 삭제 상품은 404 다.
 재고 · 원가는 기존 별도 API 로 조회한다. 상품 등록(E1)·이미지 업로드 발급(F1)·등록 시 첨부(F2)·정지 이미지 전체 편집(F3)·상품 삭제와 기본 정보/상태·카테고리·가격 수정이 구현됐다. 정지 이미지 편집은 VIDEO와 기존 객체 속성을 보존하고 신규 복사만 트랜잭션 밖에서 수행한다. 기존 옵션 이름·노출 순서 편집은 `/options`, 기존 SKU 필드 편집은 `/skus`, 맞춤 제작 설정(사용 여부 · 안내 · 소요일 · 입력 항목) 전체 교체는 `/custom-order` API로 제공하고 등록 본문도 `customOrder` 를 받는다(#9 PR-B). 옵션 값 · 새 조합 SKU 추가는 `POST /skus`(#9 PR-C1)이고, 옵션 · 값 은퇴는 `POST /option-retirements`(#9 PR-C2)다. 새 옵션 그룹 추가 · 은퇴 되돌리기는 v1 에 없다.
 옵션 그룹·값의 ko/en 이름은 기존 `/options`에서 편집한다(#20). 영문명 미지정/null은 보존하고 빈 값은 삭제하며 어드민 상세는 저장된 두 언어를 반환한다.
