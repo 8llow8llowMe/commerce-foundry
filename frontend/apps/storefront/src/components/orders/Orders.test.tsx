@@ -7,6 +7,7 @@ import type { OrderDetail, OrderSummary } from '@/lib/orders/history';
 import type { Delivery, DeliveryLoad } from '@/lib/orders/delivery';
 import {
   CancelPanel,
+  CancelProgress,
   ConfirmPurchasePanel,
   DeliveryView,
   OrderDetail as OrderDetailContainer,
@@ -286,6 +287,25 @@ describe('CancelPanel', () => {
 
   it('실패 문구는 alert 다', () => {
     expect(panel({ error: t.cancelFailed })).toContain('role="alert"');
+  });
+
+  it('결제 후 취소는 전액 환불 안내로 바꾼다', () => {
+    const html = panel({ paid: true });
+    expect(html).toContain(t.cancelPaidCaution);
+    expect(html).not.toContain(t.cancelCaution);
+  });
+});
+
+describe('CancelProgress', () => {
+  it('처리 중 안내와 다시 확인 버튼을 두고, 다시 읽는 동안 막는다', () => {
+    const html = renderToStaticMarkup(
+      <CancelProgress t={t} rechecking={false} onRecheck={() => {}} />,
+    );
+    expect(html).toContain(t.cancelInProgress);
+    expect(html).toContain(t.cancelRecheck);
+    expect(renderToStaticMarkup(<CancelProgress t={t} rechecking onRecheck={() => {}} />)).toMatch(
+      /<button[^>]*disabled=""/,
+    );
   });
 });
 

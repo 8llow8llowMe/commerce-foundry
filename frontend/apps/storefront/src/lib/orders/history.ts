@@ -5,9 +5,10 @@ import type { QuoteLine } from '@/lib/checkout/quote';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 
 /**
- * 고객 주문 내역 · 상세 · 결제 전 취소 · 구매 확정 · 부분 반품 접수(order-service, BE #16). 고객 전용이고 남의 주문은 없는 주문처럼 404 `ORDER_001` 이다.
+ * 고객 주문 내역 · 상세 · 취소(결제 전 · 결제 후 전체) · 구매 확정 · 부분 반품 접수(order-service, BE #16). 고객 전용이고 남의 주문은 없는 주문처럼 404 `ORDER_001` 이다.
  * 정본은 `backend/docs/api-design-guide.md` §2-17 · `backend/docs/order-flow-guide.md` §1-1.
- * 결제 뒤 취소 · 환불은 BE 전이라 화면에 자리도 두지 않는다. 배송 조회는 `delivery.ts`(BE #18 PR-B2).
+ * 결제 후 취소(BE #16 PR-2a-2)는 같은 취소 API 로 전액 환불 → 취소 → 재고 복원을 잇는다. 부분 취소 · 환불액 표시는 BE PR-2b 뒤다.
+ * 배송 조회는 `delivery.ts`(BE #18 PR-B2).
  */
 export const ORDER_HISTORY_PATH = '/api/v1/orders';
 export const ORDER_HISTORY_PAGE_SIZE = 20;
@@ -22,7 +23,7 @@ export type OrderSummary = {
   orderName: string | null;
   itemCount: number;
   totalAmount: Money;
-  /** 지금 취소 버튼을 보일지 — 결제 전(결제 대기)만 true */
+  /** 지금 취소 버튼을 보일지 — 결제 대기, 그리고 결제 후 취소가 열린 환경의 결제 완료 · 상품 준비중이 true(서버 판정) */
   cancelable: boolean;
   paymentDueAt: string;
   createdAt: string;
@@ -134,7 +135,7 @@ export function canResumePayment(
 
 /**
  * 주문 상세에서 보일 액션 — BE 허용 전이 그대로다. 배송 중 · 확정 뒤에는 어느 쪽도 없다.
- * - cancel: 서버의 `cancelable`(결제 전 · 결제 대기만 true). 화면에서 상태로 다시 추측하지 않는다
+ * - cancel: 서버의 `cancelable`(결제 대기 · 결제 후 취소가 열린 환경의 결제 완료 · 상품 준비중). 화면에서 상태로 다시 추측하지 않는다
  * - confirmPurchase: 배송 완료(`DELIVERED → PURCHASE_CONFIRMED` 만 허용). 이미 확정됐으면 보이지 않는다
  * - requestReturn: 배송 완료 · 반품 요청(추가 접수)에서, 반품으로 고를 항목이 있을 때만. 남은 수량은 서버가 판단한다
  */
@@ -152,6 +153,24 @@ export function orderActions(order: Pick<OrderDetail, 'status' | 'cancelable' | 
   };
 }
 
+/** 결제 후 취소인지 — 결제 대기 밖에서 취소 버튼이 보이면 환불이 따른다(확인 패널 안내를 가른다) */
+export function isPaidCancel(order: Pick<OrderDetail, 'status'>): boolean {
+  return order.status.code !== 'PENDING_PAYMENT';
+}
+
+/**
+ * 결제 후 취소가 처리 중인지 — 환불이 아직 확정되지 않았다(미확정 · 거절, BE 재시도 스케줄러가 잇는다). 클레임 상태(`REFUND_UNCONFIRMED` 등)는
+ * 고객 응답에 없어 주문 상태 `CANCEL_REQUESTED` 하나로만 보인다. 확정되면 다시 읽었을 때 `CANCELED` 다.
+ */
+export function cancelInProgress(order: Pick<OrderDetail, 'status'>): boolean {
+  return order.status.code === 'CANCEL_REQUESTED';
+}
+
+/** 취소 응답 뒤 안내 — 응답은 요청 끝 시점 상세라 환불이 확정되지 않았으면 `CANCEL_REQUESTED` 다 */
+export function cancelNotice(order: Pick<OrderDetail, 'status'>, t: Dictionary['orders']): string {
+  return cancelInProgress(order) ? t.cancelRequested : t.canceled;
+}
+
 /** 다음 조각을 붙인다 — 그 사이 새 주문이 생기면 OFFSET 이 밀려 앞 조각의 주문이 다시 올 수 있어 아이디로 거른다 */
 export function appendOrders(current: OrderSummary[], next: OrderSummary[]): OrderSummary[] {
   const seen = new Set(current.map((order) => order.orderId));
@@ -164,19 +183,30 @@ export function readOrderPathId(value: string): string | null {
 }
 
 /**
- * 결제 전 취소 실패를 화면 처리로 가른다. 취소는 멱등이다(이미 취소됐으면 200) — 결과를 모르면 상세를 다시 읽어 확인하고,
- * 아직 취소할 수 있으면 다시 눌러도 된다. BE 에 멱등 키가 없다.
+ * 취소 실패를 화면 처리로 가른다. 취소는 멱등이다(이미 취소 완료 · 취소 요청이면 200) — 결과를 모르면 상세를 다시 읽어 확인하고,
+ * 아직 취소할 수 있으면 다시 눌러도 된다. 헤더 멱등 키는 없다 — 결제 후 취소는 서버가 주문마다 결정적 키로 클레임을 하나만 만들어
+ * 다시 보내도 환불을 다시 부르지 않는다.
  * - signedOut: 401
- * - reload: 상세를 다시 읽는다 — 409 `ORDER_020`(결제 완료 · 만료가 먼저 커밋 — `@Version` 경합에서 진 경우 포함) · `ORDER_025` ·
+ * - reload: 상세를 다시 읽는다 — 409 `ORDER_020`(결제 완료 · 만료 · 출고가 먼저 커밋 — `@Version` 경합에서 진 경우 포함) · `ORDER_025` ·
  *   404 `ORDER_001` · 결과를 모르는 실패(502/504 · 5xx · 연결 실패 · 봉투 아님)
- * - retry: 반영되지 않았다 — 429(쿨다운) · 503 · 그 밖의 4xx
+ * - support: 접수되지 않았고 다시 눌러도 같다 — 고객센터 안내 후 상세를 다시 읽는다. 503 `ORDER_035`(결제 후 취소 미개방) ·
+ *   500 `ORDER_033`(결제 기록 없음) · `ORDER_034`(환불액 불일치). 500 이지만 서버가 접수 전에 거절한 코드라 결과 모름이 아니다
+ * - retry: 반영되지 않았다 — 429(쿨다운) · 그 밖의 503 · 그 밖의 4xx
  */
 export type OrderActionFailure =
   { kind: 'signedOut' } | { kind: 'reload'; message: string } | { kind: 'retry'; message: string };
 
+export type CancelFailure = OrderActionFailure | { kind: 'support'; message: string };
+
 const UNKNOWN_KINDS = new Set<ApiError['kind']>(['network', 'invalidResponse', 'unknownOutcome']);
 
-export function cancelFailure(cause: unknown, t: Dictionary['orders']): OrderActionFailure {
+/** 결제 후 취소를 접수하지 않은 코드 — 고객이 다시 눌러도 바뀌지 않아 고객센터로 안내한다 */
+const CANCEL_SUPPORT_CODES = new Set(['ORDER_033', 'ORDER_034', 'ORDER_035']);
+
+export function cancelFailure(cause: unknown, t: Dictionary['orders']): CancelFailure {
+  if (cause instanceof ApiError && cause.code && CANCEL_SUPPORT_CODES.has(cause.code)) {
+    return { kind: 'support', message: t.cancelErrors[cause.code] ?? t.cancelSupport };
+  }
   return actionFailure(cause, {
     errors: t.cancelErrors,
     failed: t.cancelFailed,
