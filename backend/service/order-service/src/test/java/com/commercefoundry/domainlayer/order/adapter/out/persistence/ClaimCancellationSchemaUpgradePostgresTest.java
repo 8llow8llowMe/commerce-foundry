@@ -30,6 +30,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 /**
  * 직전 운영 형태(동결 7c5c0a6f 스냅숏 + C2b ALTER = develop 84eee730 의 스냅숏)에 반품 행을 넣고 1단계 {@code ddl/claim-cancellation.sql} →
  * 이전 앱 모양의 INSERT(attempt_count 생략) → 2단계 {@code ddl/claim-cancellation-cleanup.sql} 을 적용한 뒤 (#16 PR-2a-1) 엔티티 검증({@code validate})이 통과하고,
+ * 뒤이어 #17 PR-A 의 {@code ddl/claim-admin-decision.sql}(수습 결정 칸 · APPROVED · REJECTED)도 적용한다.
  * claim · claim_item 의 열 · 제약 · 인덱스 · 코멘트가 새 스냅숏({@code ddl/order-schema.sql})으로 만든 DB 와 같은지 본다.
  */
 @DataJpaTest
@@ -64,6 +65,8 @@ class ClaimCancellationSchemaUpgradePostgresTest {
             jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, version, created_at, updated_at) "
                 + "values (?, 101, ?, 'RETURN', 'REQUESTED', 0, now(), now())", ROLLING_CLAIM_ID, UUID.randomUUID());
             run(source, "ddl/claim-cancellation-cleanup.sql");
+            // #17 PR-A — 결제 후 취소 수습 결정 칸 · APPROVED · REJECTED (배포 전 1단계뿐)
+            run(source, "ddl/claim-admin-decision.sql");
             jdbc.execute("create database fresh");
             run(new DriverManagerDataSource(database.getJdbcUrl().replace("/" + database.getDatabaseName(), "/fresh"), database.getUsername(),
                 database.getPassword()), "ddl/order-schema.sql");
@@ -129,5 +132,19 @@ class ClaimCancellationSchemaUpgradePostgresTest {
         assertThatThrownBy(() -> jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, version, created_at, updated_at) "
             + "values (23, 100, ?, 'CANCELLATION', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID()))
             .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void upgradedChecksAcceptRejectedWithDecisionAndRejectMissingDecision() {
+        jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, expected_refund_amount, expected_refund_currency, payment_id, "
+            + "attempt_count, decision_reason, decided_by_member_id, decided_at, version, created_at, updated_at) values (31, 100, ?, 'CANCELLATION', "
+            + "'REJECTED', 1000, 'KRW', 77, 0, 'PG 거절 확인', 9, now(), 0, now(), now())", UUID.randomUUID());
+        assertThatThrownBy(() -> jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, expected_refund_amount, "
+            + "expected_refund_currency, payment_id, attempt_count, version, created_at, updated_at) values (32, 100, ?, 'CANCELLATION', 'REJECTED', 1000, "
+            + "'KRW', 77, 0, 0, now(), now())", UUID.randomUUID()))
+            .as("거절에는 결정 칸이 있어야 한다").isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, decision_reason, version, "
+            + "created_at, updated_at) values (33, 100, ?, 'RETURN', 'REQUESTED', 0, '사유만', 0, now(), now())", UUID.randomUUID()))
+            .as("결정 칸은 셋 다 있거나 셋 다 없다").isInstanceOf(DataIntegrityViolationException.class);
     }
 }

@@ -20,17 +20,20 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>취소 클레임의 수명은 {@code REQUESTED}(환불 대기) → {@code REFUNDED}(재고 복원 대기) → {@code COMPLETED} 이고, 종결 실패는
  * {@code REFUND_FAILED} · {@code RESTORATION_FAILED} 다. 상태는 아래 도메인 메서드로만 바꾼다. 환불 · 복원 호출은 이 클레임 아이디를 멱등 키로 쓴다.
+ * 종결 실패의 운영자 수습(#17 PR-A)은 재시도 {@link #reopen} · 거절 {@link #reject}(REJECTED) · 수동 환불 확정 {@link #confirmRefundByAdmin} ·
+ * 복원 생략 종결 {@link #completeByAdmin} 이다.
  *
  * @param paymentId 환불할 결제 아이디 (외부 FK: payment-service payment.id). 취소 클레임에만 있다
  * @param attemptCount 지금 단계(환불 또는 복원)의 미확정 재시도 횟수. 단계가 넘어가면 0 으로 돌아간다
  * @param nextAttemptAt 재시도 스케줄러가 다시 집을 시각. 종결 상태면 null
  * @param failureCode 종결 실패 사유 코드(원격 resultCode 등, 40자 이하). 종결 실패가 아니면 null
+ * @param decision 운영자의 마지막 수습 결정(거절 · 수동 환불 확정 · 복원 생략 종결, #17). 운영자가 결정한 적 없으면 null. 거절(REJECTED)이면 반드시 있다
  * @param requestedAt 저장된 시각(읽기 전용). 저장 전이면 null
  * @param version 낙관적 락 버전. 저장 전이면 null
  */
 public record Claim(
     long id, long orderId, UUID requestKey, Type type, Status status, Money expectedRefund, Long paymentId, int attemptCount, Instant nextAttemptAt,
-    String failureCode, List<ClaimItem> items, Instant requestedAt, Long version
+    String failureCode, Decision decision, List<ClaimItem> items, Instant requestedAt, Long version
 ) {
 
     /** {@code claim.failure_code} 길이와 같다. */
@@ -59,6 +62,10 @@ public record Claim(
         if (failureCode != null && (failureCode.isBlank() || failureCode.length() > FAILURE_CODE_MAX_LENGTH)) {
             throw new IllegalArgumentException("Invalid claim failure code");
         }
+        // DB 의 ck_claim_rejected_decision 과 같다 — 거절은 누가 · 언제 · 왜 했는지 없이 남기지 않는다
+        if (status == Status.REJECTED && decision == null) {
+            throw new IllegalArgumentException("거절된 클레임에는 운영자 결정(사유 · 결정자 · 시각)이 있어야 합니다");
+        }
         // DB 의 ck_claim_cancellation_payment · ck_claim_payment_cancellation_only · ck_claim_cancellation_next_attempt ·
         // ck_claim_cancellation_failure_code 와 같다. 항목 사유와 유형의 짝은 도메인만 본다
         if (type == Type.CANCELLATION) {
@@ -79,6 +86,14 @@ public record Claim(
                 throw new IllegalArgumentException("반품 접수 항목은 반품 사유만 씁니다");
             }
         }
+    }
+
+    /** 운영자 결정 없이 만든다 — 접수 · 원격 결과 반영 · 읽기(결정 칸이 빈 행)가 쓴다. */
+    public Claim(
+        long id, long orderId, UUID requestKey, Type type, Status status, Money expectedRefund, Long paymentId, int attemptCount, Instant nextAttemptAt,
+        String failureCode, List<ClaimItem> items, Instant requestedAt, Long version
+    ) {
+        this(id, orderId, requestKey, type, status, expectedRefund, paymentId, attemptCount, nextAttemptAt, failureCode, null, items, requestedAt, version);
     }
 
     /** 반품 접수 — 결제 아이디 · 재시도 칸 없이 만든다. */
@@ -204,6 +219,69 @@ public record Claim(
         return with(status, attemptCount, until.truncatedTo(ChronoUnit.MICROS), null);
     }
 
+    /**
+     * 운영자 재시도 (#17 PR-A) — 종결 실패를 그 단계의 대기 상태로 되돌린다: REFUND_FAILED → REQUESTED(환불 다시), RESTORATION_FAILED → REFUNDED(복원 다시).
+     * 횟수는 0, 실패 코드는 비우고, 다음 시각은 {@code until}(lease) 이라 이 요청이 바로 잇는 동안 스케줄러가 집지 않는다. 운영자 결정 칸은 그대로 둔다.
+     *
+     * @throws IllegalStateException 저장 전 · 종결 실패가 아닌 상태 · 반품
+     */
+    public Claim reopen(Instant until) {
+        Objects.requireNonNull(until, "until");
+        requireCancellation();
+        if (isNew() || !status.isFailed()) {
+            throw new IllegalStateException("다시 열기는 저장된 종결 실패 클레임만 합니다: status=" + status);
+        }
+        Status reopened = status == Status.REFUND_FAILED ? Status.REQUESTED : Status.REFUNDED;
+        return with(reopened, 0, until.truncatedTo(ChronoUnit.MICROS), null);
+    }
+
+    /**
+     * 운영자 수동 환불 확정 (#17 PR-A) — 운영자가 PG · 결제 기록에서 환불을 확인했다. REFUND_FAILED(실패 코드 무관) → REFUNDED(재고 복원 대기, 횟수 0,
+     * 다음 시각 {@code nextAttemptAt}). 이어서 복원 단계가 돈다.
+     *
+     * @throws IllegalStateException 저장 전 · REFUND_FAILED 가 아닌 상태 · 반품
+     */
+    public Claim confirmRefundByAdmin(Decision decision, Instant nextAttemptAt) {
+        Objects.requireNonNull(decision, "decision");
+        Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
+        requireCancellation();
+        requireStatus(Status.REFUND_FAILED, Status.REFUNDED);
+        return with(Status.REFUNDED, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null, decision);
+    }
+
+    /**
+     * 운영자 거절 (#17 PR-A) — 환불이 종결 거절된 취소를 받아들이지 않는다. REFUND_FAILED → REJECTED(다음 시각 · 실패 코드 없음). 미확정으로 닫힌
+     * 클레임({@link #REFUND_UNCONFIRMED})은 PG 에서 실제로 취소됐을 수 있어 거절하지 않는다 — 돈은 나갔는데 주문이 살아나는 일을 막는다.
+     *
+     * @throws IllegalStateException 저장 전 · REFUND_FAILED 가 아닌 상태 · 미확정 실패 · 반품
+     */
+    public Claim reject(Decision decision) {
+        Objects.requireNonNull(decision, "decision");
+        requireCancellation();
+        requireStatus(Status.REFUND_FAILED, Status.REJECTED);
+        if (isRefundUnconfirmed()) {
+            throw new IllegalStateException("환불 결과를 확인하지 못한 클레임은 거절하지 않습니다: claimId=" + id);
+        }
+        return with(Status.REJECTED, attemptCount, null, null, decision);
+    }
+
+    /**
+     * 운영자 종결 (#17 PR-A) — 재고 복원이 종결 실패한 클레임을 복원 없이 끝낸다. RESTORATION_FAILED → COMPLETED. 재고는 운영자가 재고 조정으로 먼저 맞춘다.
+     *
+     * @throws IllegalStateException 저장 전 · RESTORATION_FAILED 가 아닌 상태 · 반품
+     */
+    public Claim completeByAdmin(Decision decision) {
+        Objects.requireNonNull(decision, "decision");
+        requireCancellation();
+        requireStatus(Status.RESTORATION_FAILED, Status.COMPLETED);
+        return with(Status.COMPLETED, attemptCount, null, null, decision);
+    }
+
+    /** 환불 재시도 상한을 넘어 결과를 모른 채 닫힌 클레임인가 — 거절할 수 없고 늦은 성공을 받는다. */
+    public boolean isRefundUnconfirmed() {
+        return status == Status.REFUND_FAILED && REFUND_UNCONFIRMED.equals(failureCode);
+    }
+
     public boolean isNew() {
         return version == null;
     }
@@ -221,8 +299,34 @@ public record Claim(
     }
 
     private Claim with(Status nextStatus, int nextAttemptCount, Instant nextAttempt, String nextFailureCode) {
-        return new Claim(id, orderId, requestKey, type, nextStatus, expectedRefund, paymentId, nextAttemptCount, nextAttempt, nextFailureCode, items,
-            requestedAt, version);
+        return with(nextStatus, nextAttemptCount, nextAttempt, nextFailureCode, decision);
+    }
+
+    private Claim with(Status nextStatus, int nextAttemptCount, Instant nextAttempt, String nextFailureCode, Decision nextDecision) {
+        return new Claim(id, orderId, requestKey, type, nextStatus, expectedRefund, paymentId, nextAttemptCount, nextAttempt, nextFailureCode, nextDecision,
+            items, requestedAt, version);
+    }
+
+    /**
+     * 운영자의 수습 결정 (#17 PR-A) — 사유 · 결정한 관리자 · 시각. 감사 줄과 주문 상태 이력(ADMIN)에도 남지만, 클레임 화면이 바로 보여 주려고 클레임에도 둔다.
+     * 결정이 다시 나면(예: 수동 환불 확정 뒤 복원 생략 종결) 마지막 결정으로 덮는다 — 앞선 결정은 감사 줄 · 주문 이력에 있다.
+     *
+     * @param reason 사유 (1~200자, 공백만은 안 된다) — {@code claim.decision_reason} 길이와 같다
+     * @param decidedByMemberId 결정한 관리자 회원 아이디
+     * @param decidedAt 결정 시각 — DB 정밀도(마이크로초)로 자른다
+     */
+    public record Decision(String reason, long decidedByMemberId, Instant decidedAt) {
+
+        public static final int REASON_MAX_LENGTH = 200;
+
+        public Decision {
+            Objects.requireNonNull(reason, "reason");
+            Objects.requireNonNull(decidedAt, "decidedAt");
+            if (reason.isBlank() || reason.length() > REASON_MAX_LENGTH || decidedByMemberId <= 0) {
+                throw new IllegalArgumentException("Invalid claim decision");
+            }
+            decidedAt = decidedAt.truncatedTo(ChronoUnit.MICROS);
+        }
     }
 
     @Getter
@@ -242,7 +346,10 @@ public record Claim(
         REFUNDED("환불 완료", "환불이 확정되었습니다. 재고 복원을 기다립니다."),
         COMPLETED("완료", "환불과 재고 복원이 끝났습니다."),
         REFUND_FAILED("환불 실패", "환불이 거절되었습니다. 운영자 확인이 필요합니다."),
-        RESTORATION_FAILED("재고 복원 실패", "환불은 확정되었지만 재고 복원이 거절되었습니다. 운영자 확인이 필요합니다.");
+        RESTORATION_FAILED("재고 복원 실패", "환불은 확정되었지만 재고 복원이 거절되었습니다. 운영자 확인이 필요합니다."),
+        /** 반품 승인(검수 완료) — #17 PR-B 가 전이를 만든다. 지금은 DDL check · 조회 필터에만 있다. */
+        APPROVED("승인", "운영자가 클레임을 승인했습니다. 환불을 진행합니다."),
+        REJECTED("거절", "운영자가 클레임을 거절했습니다.");
 
         private final String displayName;
         private final String description;

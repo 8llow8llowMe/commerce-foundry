@@ -2,13 +2,24 @@ package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public interface ClaimRepositoryPort {
     Optional<Claim> findByOrderIdAndRequestKey(long orderId, UUID requestKey);
+
+    /** 클레임 하나(항목 포함, #17 어드민 수습). 호출자 트랜잭션에서 읽는다. */
+    Optional<Claim> findById(long claimId);
+
+    /**
+     * 주어진 주문 중 결제 후 취소 클레임이 거절(REJECTED)된 주문 아이디 (#17 PR-A) — 고객 응답의 {@code cancelable} 을 끄는 데 쓴다. 한 번의 IN 조회다.
+     * 빈 입력이면 조회하지 않는다.
+     */
+    Set<Long> findRejectedCancellationOrderIds(Collection<Long> orderIds);
 
     /** REQUESTED 반품의 항목별 수량을 한 번에 읽는다. */
     Map<Long, Long> sumRequestedReturnQuantities(long orderId);

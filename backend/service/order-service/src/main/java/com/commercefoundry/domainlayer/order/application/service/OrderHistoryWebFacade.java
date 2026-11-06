@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.order.adapter.in.web.presenter.OrderHisto
 import com.commercefoundry.domainlayer.order.application.exception.ClaimRequestKeyConflictException;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.info.OrderMemberSummaryInfo;
 import com.commercefoundry.domainlayer.order.application.port.in.OrderHistoryWebUseCase;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
@@ -19,11 +20,13 @@ import jakarta.persistence.LockTimeoutException;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.persistence.PessimisticLockException;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,7 +51,12 @@ public class OrderHistoryWebFacade implements OrderHistoryWebUseCase {
 
     @Override
     public SliceResponse<OrderSummaryItem> getOrders(long memberId, int page, int size) {
-        return orderHistoryWebPresenter.toSliceResponse(orderHistoryProcessor.findSlice(memberId, page, size));
+        Slice<OrderMemberSummaryInfo> slice = orderHistoryProcessor.findSlice(memberId, page, size);
+        // 운영자가 취소를 거절한 결제 후 주문은 취소 버튼을 끈다(#17) — 취소 가능으로 판정된 결제 후 주문만 모아 한 번에 묻는다
+        List<Long> paidCancelable = slice.getContent().stream()
+            .filter(row -> row.cancelable() && PAID_BEFORE_SHIPMENT.contains(row.status())).map(OrderMemberSummaryInfo::orderId).toList();
+        Set<Long> rejected = paidCancelable.isEmpty() ? Set.of() : orderCancellationProcessor.findRejectedOrderIds(paidCancelable);
+        return orderHistoryWebPresenter.toSliceResponse(rejected.isEmpty() ? slice : slice.map(row -> rejected.contains(row.orderId()) ? row.notCancelable() : row));
     }
 
     @Override
@@ -130,8 +138,15 @@ public class OrderHistoryWebFacade implements OrderHistoryWebUseCase {
         return toDetail(confirmed);
     }
 
-    /** 상세 응답 — {@code cancelable} 은 Processor 가 판정한 값을 함께 넘긴다(결제 후 취소 게이트 · 제작 중 설정). */
+    /**
+     * 상세 응답 — {@code cancelable} 은 Processor 가 판정한 값을 함께 넘긴다(결제 후 취소 게이트 · 제작 중 설정). 운영자가 결제 후 취소를 거절한 주문은
+     * false 다(#17 — 다시 취소하면 {@code ORDER_037}).
+     */
     private OrderDetailResponse toDetail(Order order) {
-        return orderHistoryWebPresenter.toDetailResponse(order, orderHistoryProcessor.cancelable(order.status()));
+        boolean cancelable = orderHistoryProcessor.cancelable(order.status());
+        if (cancelable && PAID_BEFORE_SHIPMENT.contains(order.status())) {
+            cancelable = orderCancellationProcessor.findRejectedOrderIds(List.of(order.id())).isEmpty();
+        }
+        return orderHistoryWebPresenter.toDetailResponse(order, cancelable);
     }
 }

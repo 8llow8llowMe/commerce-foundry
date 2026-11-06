@@ -333,6 +333,20 @@ class OrderCancellationProcessorTest {
     }
 
     @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"PAID", "PREPARING"})
+    @DisplayName("운영자가 이 주문의 취소를 거절했으면(#17) 고객 재취소는 409 ORDER_037 이고 결제 기록 · 상태 · 클레임을 건드리지 않는다")
+    void rejectedCancellationBlocksCustomerRetry(OrderStatus status) {
+        Order order = order(status);
+        givenLocked(order);
+        when(claims.findRejectedCancellationOrderIds(java.util.List.of(order.id()))).thenReturn(java.util.Set.of(order.id()));
+
+        assertRejected(() -> processor(false).request(MEMBER, order.id(), OrderCancelReason.OTHER), OrderErrorCode.CANCELLATION_REJECTED);
+        verifyNoInteractions(payments);
+        verify(orders, never()).saveStatusChange(any(), any());
+        verify(claims, never()).insert(any());
+    }
+
+    @ParameterizedTest
     @EnumSource(value = OrderStatus.class, names = {"PAID", "PREPARING", "MAKING"})
     @DisplayName("재시도 스케줄러가 꺼져 있으면(결제 후 취소 닫힘) 결제 후 상태는 접수 전에 503 ORDER_035 이고 아무것도 쓰지 않는다")
     void closedGateRejectsPaidCancellation(OrderStatus status) {

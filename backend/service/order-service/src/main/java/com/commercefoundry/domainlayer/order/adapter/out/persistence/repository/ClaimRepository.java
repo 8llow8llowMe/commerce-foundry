@@ -23,6 +23,13 @@ public interface ClaimRepository extends JpaRepository<ClaimEntity, Long> {
         """)
     List<RequestedReturnQuantityQueryResult> sumQuantities(long orderId, Claim.Type type, Claim.Status status);
 
+    /** 주어진 주문 중 그 유형 · 상태 클레임이 있는 주문 아이디 (#17) — {@code uk_claim_order_id_request_key} 의 앞 열(order_id)을 탄다. */
+    @Query("""
+        select distinct c.orderId from ClaimEntity c
+         where c.orderId in :orderIds and c.type = :type and c.status = :status
+        """)
+    List<Long> findOrderIds(Collection<Long> orderIds, Claim.Type type, Claim.Status status);
+
     /** {@code idx_claim_type_next_attempt_at_id} 를 탄다. 종결 클레임은 {@code next_attempt_at} 이 null 이라 걸리지 않는다(상태 조건은 이중 안전장치). */
     @Query("""
         select c from ClaimEntity c

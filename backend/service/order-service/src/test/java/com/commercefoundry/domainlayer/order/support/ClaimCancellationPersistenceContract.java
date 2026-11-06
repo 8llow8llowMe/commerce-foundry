@@ -117,6 +117,32 @@ public abstract class ClaimCancellationPersistenceContract {
     }
 
     @Test
+    void adminDecisionColumnsRoundTripAndRejectedOrdersAreFoundInBulk() {
+        Order rejectedOrder = paidOrder();
+        Order confirmedOrder = paidOrder();
+        Order untouchedOrder = paidOrder();
+        Claim.Decision decision = new Claim.Decision("PG 거절 확인", 9L, NOW.plusNanos(123_456_789));
+        Claim rejected = update(insert(newCancellation(rejectedOrder, NOW)).failRefund("PAYMENT_016").reject(decision));
+        Claim confirmed = update(insert(newCancellation(confirmedOrder, NOW)).failRefund(Claim.REFUND_UNCONFIRMED)
+            .confirmRefundByAdmin(decision, NOW.plus(LEASE)));
+        insert(newCancellation(untouchedOrder, NOW));
+
+        Claim readRejected = claims.findById(rejected.id()).orElseThrow();
+        assertThat(readRejected).isEqualTo(rejected);
+        assertThat(readRejected.status()).isEqualTo(Claim.Status.REJECTED);
+        assertThat(readRejected.decision()).isEqualTo(decision);
+        assertThat(readRejected.decision().decidedAt()).as("마이크로초로 잘려 저장된다").isEqualTo(NOW.plusNanos(123_456_000));
+        assertThat(readRejected.failureCode()).isNull();
+        assertThat(claims.findById(confirmed.id()).orElseThrow().decision()).isEqualTo(decision);
+        assertThat(claims.findById(IDS.incrementAndGet())).isEmpty();
+        assertThat(claims.findRejectedCancellationOrderIds(List.of(rejectedOrder.id(), confirmedOrder.id(), untouchedOrder.id(), IDS.incrementAndGet())))
+            .containsExactly(rejectedOrder.id());
+        assertThat(claims.findRejectedCancellationOrderIds(List.of())).isEmpty();
+        assertThatThrownBy(() -> jdbc.update("update orders.claim set decided_at = null where id = ?", rejected.id()))
+            .as("결정 칸은 셋 다 있거나 셋 다 없다 · 거절에는 결정이 있다").isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
     void deterministicKeyAllowsOneFullCancellationPerOrder() {
         Order order = paidOrder();
         insert(newCancellation(order, NOW));

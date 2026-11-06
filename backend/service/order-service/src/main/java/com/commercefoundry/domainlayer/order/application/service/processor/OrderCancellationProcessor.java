@@ -18,8 +18,10 @@ import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.shared.commerce.Money;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -31,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
  * {@code @Version} 으로 진 쪽을 가른다 — 넘겨받은 클레임의 버전이 낡았으면 저장에서 {@code OptimisticLockingFailureException} 이다(다른 워커가 이미 처리했다).
  *
  * <p>종결 실패(REFUND_FAILED · RESTORATION_FAILED)는 운영자가 어드민 클레임 목록으로 확인한다 — 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를
- * error 로그로 남긴다(금액은 남기지 않는다). 수습 화면은 #17 이다.
+ * error 로그로 남긴다(금액은 남기지 않는다). 수습은 어드민 클레임 API(#17 PR-A, {@code ClaimAdminActionProcessor})다.
  */
 @Slf4j
 @Component
@@ -55,6 +57,7 @@ public class OrderCancellationProcessor {
      * <p>이미 취소 요청 · 취소 완료이고 이 주문의 취소 클레임이 있으면 아무것도 쓰지 않고 재생({@code created = false})이다 — 결제 후 취소가 닫혀 있어도 재생은 된다.
      *
      * @throws OrderException 없거나 남의 주문 {@code NOT_FOUND_ORDER} · 취소할 수 없는 상태 {@code ORDER_STATUS_TRANSITION_INVALID} ·
+     *     운영자가 이 주문의 취소를 거절함 {@code CANCELLATION_REJECTED}(#17) ·
      *     결제 후 취소가 닫힘 {@code CANCELLATION_UNAVAILABLE} · 결제 반영 기록 없음 {@code CANCELLATION_PAYMENT_MISSING} ·
      *     환불액과 승인 금액 불일치 {@code CANCELLATION_AMOUNT_MISMATCH}
      */
@@ -70,6 +73,10 @@ public class OrderCancellationProcessor {
         // 결제 대기는 결제 전 취소 경로다 — 이 흐름에 들어왔다면 판정 뒤 상태가 바뀐 것이라 거절한다
         if (order.status() == OrderStatus.PENDING_PAYMENT || !order.isCancelableByCustomer(properties.allowWhileMaking())) {
             throw new OrderException(OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID, order.status().getDisplayName());
+        }
+        // 운영자가 이 주문의 취소를 거절했다(#17) — 같은 결정적 키로 다시 접수할 수 없고, 다시 받을지는 고객센터가 정한다
+        if (!claimRepositoryPort.findRejectedCancellationOrderIds(List.of(orderId)).isEmpty()) {
+            throw new OrderException(OrderErrorCode.CANCELLATION_REJECTED);
         }
         // 재시도 스케줄러가 꺼진 채 받으면 미확정 환불 · 복원이 영영 따라오지 않는다 — 접수 전에 닫는다
         if (!properties.paidCancellationOpen()) {
@@ -104,6 +111,12 @@ public class OrderCancellationProcessor {
             return Optional.empty();
         }
         return findCancellationClaim(orderId).map(claim -> order);
+    }
+
+    /** 주어진 주문 중 운영자가 결제 후 취소를 거절한 주문 (#17 PR-A) — 고객 응답의 {@code cancelable} 을 끈다. 빈 입력이면 조회하지 않는다. */
+    @Transactional(readOnly = true, timeout = 5)
+    public Set<Long> findRejectedOrderIds(Collection<Long> orderIds) {
+        return claimRepositoryPort.findRejectedCancellationOrderIds(orderIds);
     }
 
     /** 주문의 결제 후 취소 클레임(지금 저장된 값 · 버전). 없으면 빈 값이다. */

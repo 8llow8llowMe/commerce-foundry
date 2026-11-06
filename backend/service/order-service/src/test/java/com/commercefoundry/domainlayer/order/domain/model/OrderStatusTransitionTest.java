@@ -22,7 +22,8 @@ class OrderStatusTransitionTest {
         Map.entry(OrderStatus.SHIPPING, EnumSet.of(OrderStatus.DELIVERED)),
         Map.entry(OrderStatus.DELIVERED, EnumSet.of(OrderStatus.PURCHASE_CONFIRMED, OrderStatus.RETURN_REQUESTED)),
         Map.entry(OrderStatus.PURCHASE_CONFIRMED, EnumSet.noneOf(OrderStatus.class)),
-        Map.entry(OrderStatus.CANCEL_REQUESTED, EnumSet.of(OrderStatus.CANCELED)),
+        // 취소 거절(#17) — 요청 전 상태로 돌아간다. 어드민 상태 변경 화면의 전이는 아니다(AdminStatusChangePolicy)
+        Map.entry(OrderStatus.CANCEL_REQUESTED, EnumSet.of(OrderStatus.CANCELED, OrderStatus.PAID, OrderStatus.MAKING, OrderStatus.PREPARING)),
         Map.entry(OrderStatus.CANCELED, EnumSet.noneOf(OrderStatus.class)),
         Map.entry(OrderStatus.RETURN_REQUESTED, EnumSet.of(OrderStatus.RETURNED)),
         Map.entry(OrderStatus.RETURNED, EnumSet.noneOf(OrderStatus.class)));

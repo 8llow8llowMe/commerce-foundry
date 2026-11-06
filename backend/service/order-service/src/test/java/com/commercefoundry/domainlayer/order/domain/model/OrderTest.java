@@ -436,4 +436,33 @@ class OrderTest {
         assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, preparing)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, requested.completeCancellation())).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"PAID", "MAKING", "PREPARING"})
+    @DisplayName("rejectCancellation (#17) — 취소 요청을 요청 전 상태(결제 완료 · 제작 중 · 상품 준비중)로 되돌리고 나머지 값은 그대로다. changeStatus 로는 못 간다")
+    void rejectCancellationRestoresStatusBeforeRequest(OrderStatus restored) {
+        Order requested = withStatus(restored).requestCancellation();
+
+        Order reverted = requested.rejectCancellation(restored);
+
+        assertThat(reverted.status()).isEqualTo(restored);
+        assertThat(reverted).usingRecursiveComparison().ignoringFields("status").isEqualTo(requested);
+        assertThatThrownBy(() -> requested.changeStatus(restored)).as("어드민 상태 변경 · 다른 흐름은 이 전이를 하지 않는다")
+            .isInstanceOf(OrderStatusTransitionException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"CANCEL_REQUESTED"})
+    @DisplayName("rejectCancellation — 취소 요청이 아닌 주문 · 결제 후 출고 전이 아닌 되돌릴 상태 · 저장 전 주문은 도메인 전이 예외다")
+    void rejectCancellationRejected(OrderStatus status) {
+        assertThatThrownBy(() -> withStatus(status).rejectCancellation(OrderStatus.PAID)).isInstanceOf(OrderStatusTransitionException.class);
+        Order requested = withStatus(OrderStatus.PAID).requestCancellation();
+        if (status != OrderStatus.PAID && status != OrderStatus.MAKING && status != OrderStatus.PREPARING) {
+            assertThatThrownBy(() -> requested.rejectCancellation(status)).as(status.name()).isInstanceOf(OrderStatusTransitionException.class);
+        }
+        Order placed = placed();
+        Order unsavedRequested = new Order(placed.id(), placed.memberId(), OrderStatus.CANCEL_REQUESTED, placed.quote(), placed.itemIds(),
+            placed.shippingAddress(), placed.stockReservationId(), placed.paymentDueAt(), null, null, null, null);
+        assertThatThrownBy(() -> unsavedRequested.rejectCancellation(OrderStatus.PAID)).isInstanceOf(OrderStatusTransitionException.class);
+    }
 }

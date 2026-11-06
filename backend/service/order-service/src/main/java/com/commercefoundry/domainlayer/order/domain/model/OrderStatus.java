@@ -22,7 +22,8 @@ import lombok.RequiredArgsConstructor;
  *   <tr><td>PREPARING</td><td>SHIPPING · CANCEL_REQUESTED</td></tr>
  *   <tr><td>SHIPPING</td><td>DELIVERED</td></tr>
  *   <tr><td>DELIVERED</td><td>PURCHASE_CONFIRMED · RETURN_REQUESTED</td></tr>
- *   <tr><td>CANCEL_REQUESTED</td><td>CANCELED</td></tr>
+ *   <tr><td>CANCEL_REQUESTED</td><td>CANCELED · PAID · MAKING · PREPARING — 뒤의 셋은 운영자 취소 거절로 요청 전 상태에 돌아갈 때만
+ *       ({@link Order#rejectCancellation}, #17). 어드민 상태 변경 화면의 전이가 아니다</td></tr>
  *   <tr><td>RETURN_REQUESTED</td><td>RETURNED</td></tr>
  * </table>
  */
@@ -86,7 +87,7 @@ public enum OrderStatus implements CodeNameDescribable {
         table.put(PREPARING, Collections.unmodifiableSet(EnumSet.of(SHIPPING, CANCEL_REQUESTED)));
         table.put(SHIPPING, Collections.unmodifiableSet(EnumSet.of(DELIVERED)));
         table.put(DELIVERED, Collections.unmodifiableSet(EnumSet.of(PURCHASE_CONFIRMED, RETURN_REQUESTED)));
-        table.put(CANCEL_REQUESTED, Collections.unmodifiableSet(EnumSet.of(CANCELED)));
+        table.put(CANCEL_REQUESTED, Collections.unmodifiableSet(EnumSet.of(CANCELED, PAID, MAKING, PREPARING)));
         table.put(RETURN_REQUESTED, Collections.unmodifiableSet(EnumSet.of(RETURNED)));
         return Collections.unmodifiableMap(table);
     }

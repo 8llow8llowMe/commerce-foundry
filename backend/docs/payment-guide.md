@@ -505,6 +505,10 @@ ANALYZE 후 실제 Hibernate 생성 SQL·동일 바인딩의 EXPLAIN(ANALYZE,BUF
   (클레임 `REFUND_FAILED` + 그 코드, 운영자 확인). 그 밖(503 `PAYMENT_018` · `PAYMENT_012` · 타임아웃 · 5xx · 모르는 4xx · 401/403 · 서킷 오픈 · 계약 위반 ·
   Feign 밖 예외) → 미확정 — 같은 클레임 · 같은 본문으로 백오프 재시도, `max-attempts` 를 넘으면 `REFUND_FAILED`(`REFUND_UNCONFIRMED`). 키 유효 기간(14일) 안에서
   끝나도록 `max-backoff × max-attempts ≤ 14d` 를 기동 때 검사한다.
+- **운영자 수습과 payment** (#17 PR-A, `order-flow-guide.md` §5) — 어드민 재시도는 같은 클레임 아이디 · 저장된 금액으로 다시 부를 뿐이라 payment 의 멱등(성공이면 PG 를
+  다시 부르지 않고 200, 이미 REJECTED 면 영구 `PAYMENT_016`)이 그대로 지킨다. 수동 환불 확정 · 거절은 **payment 를 부르지 않는 order 쪽 기록**이다 — 수동 확정은 운영자가 PG 에서
+  환불을 확인했을 때만 쓰고, 거절은 종결 거절(`PAYMENT_016` 등) 클레임에만 쓴다(`REFUND_UNCONFIRMED` 는 PG 에서 실제로 취소됐을 수 있어 거절 불가). 거절된 클레임 아이디는
+  다시 쓰지 않는다(재시도 · 스케줄러 · 늦게 온 성공 반영 모두 거부).
 - **타임아웃 · 서킷** — `paymentCancelClient`(contextId) read timeout **10초**(PG 취소 대기, 조회 3초와 따로), 서킷 `payment-cancellation` 은 조회 서킷
   `payment-service` 와 분리한다 — PG 취소 장애가 승인 반영 재조회를 막지 않게. 클레임 lease(`order.cancellation.retry.lease`, 기본 2분)는 read timeout 보다 충분히 길어야 한다.
 

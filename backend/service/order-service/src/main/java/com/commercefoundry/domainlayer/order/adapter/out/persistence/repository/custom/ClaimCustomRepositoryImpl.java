@@ -33,7 +33,9 @@ public class ClaimCustomRepositoryImpl implements ClaimCustomRepository {
         }
         List<ClaimAdminSummaryQueryResult> rows = queryFactory.select(Projections.constructor(ClaimAdminSummaryQueryResult.class,
                 claimEntity.id, claimEntity.orderId, claimEntity.type, claimEntity.status,
-                claimEntity.expectedRefundAmount, claimEntity.expectedRefundCurrency, claimEntity.createdAt))
+                claimEntity.expectedRefundAmount, claimEntity.expectedRefundCurrency, claimEntity.paymentId, claimEntity.failureCode,
+                claimEntity.attemptCount, claimEntity.nextAttemptAt, claimEntity.decisionReason, claimEntity.decidedByMemberId, claimEntity.decidedAt,
+                claimEntity.createdAt))
             .from(claimEntity).where(filter).orderBy(claimEntity.id.desc()).offset(pageable.getOffset()).limit(pageable.getPageSize()).fetch();
         // 같은 조건으로 항상 실제 count를 조회하여 빈 페이지의 전체 건수도 보존한다.
         Long total = queryFactory.select(claimEntity.count()).from(claimEntity).where(filter).fetchOne();

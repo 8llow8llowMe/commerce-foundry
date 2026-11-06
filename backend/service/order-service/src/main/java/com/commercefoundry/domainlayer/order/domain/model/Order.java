@@ -114,12 +114,14 @@ public record Order(
      *
      * 결제 전 취소(결제 대기 → 취소 완료)는 이 메서드로 하지 않는다 — 재고 해제 이벤트가 따라가야 해 {@link #cancelBeforePayment()} 를 쓴다(#16).
      * 출고(배송 중) · 배송 완료도 이 메서드로 하지 않는다 — 시각을 함께 남겨야 해 {@link #ship(Instant)} · {@link #deliver(Instant)} 를 쓴다(#18).
+     * 취소 거절(취소 요청 → 요청 전 상태)도 이 메서드로 하지 않는다 — 클레임 거절과 함께 가야 해 {@link #rejectCancellation(OrderStatus)} 를 쓴다(#17).
      *
-     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문 · 결제 전 취소 · 출고 · 배송 완료
+     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문 · 결제 전 취소 · 출고 · 배송 완료 · 취소 거절
      */
     public Order changeStatus(OrderStatus next) {
         Objects.requireNonNull(next, "next");
         if (isNew() || (status == OrderStatus.PENDING_PAYMENT && next == OrderStatus.CANCELED)
+            || (status == OrderStatus.CANCEL_REQUESTED && PAID_BEFORE_SHIPMENT.contains(next))
             || next == OrderStatus.SHIPPING || next == OrderStatus.DELIVERED) {
             throw new OrderStatusTransitionException(status, next);
         }
@@ -245,6 +247,21 @@ public record Order(
             throw new OrderStatusTransitionException(status, OrderStatus.CANCELED);
         }
         return transitionTo(OrderStatus.CANCELED);
+    }
+
+    /**
+     * 운영자 취소 거절 (#17 PR-A) — 환불이 종결 거절된 취소 요청을 요청 전 상태(결제 완료 · 제작 중 · 상품 준비중)로 되돌린다. 요청 전 상태는 부르는 쪽이
+     * 상태 이력(취소 요청으로 바뀐 마지막 줄의 이전 상태)에서 찾는다. 클레임 거절과 같은 트랜잭션이어야 한다.
+     *
+     * @param restored 되돌릴 상태 — 결제 완료 · 제작 중 · 상품 준비중
+     * @throws OrderStatusTransitionException 취소 요청이 아닌 상태 · 그 밖의 되돌릴 상태 · 저장 전 주문
+     */
+    public Order rejectCancellation(OrderStatus restored) {
+        Objects.requireNonNull(restored, "restored");
+        if (isNew() || status != OrderStatus.CANCEL_REQUESTED || !PAID_BEFORE_SHIPMENT.contains(restored)) {
+            throw new OrderStatusTransitionException(status, restored);
+        }
+        return transitionTo(restored);
     }
 
     /** 결제 전 취소({@link #cancelBeforePayment()})를 할 수 있는가 — 결제 대기만이다(#16 PR-1). */

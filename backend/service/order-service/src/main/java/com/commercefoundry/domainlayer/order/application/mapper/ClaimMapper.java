@@ -12,10 +12,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class ClaimMapper {
     public ClaimEntity toEntity(Claim claim) {
+        Claim.Decision decision = claim.decision();
         return ClaimEntity.builder().id(claim.id()).orderId(claim.orderId()).requestKey(claim.requestKey()).type(claim.type()).status(claim.status())
             .expectedRefundAmount(claim.expectedRefund() == null ? null : claim.expectedRefund().amount())
             .expectedRefundCurrency(claim.expectedRefund() == null ? null : claim.expectedRefund().currency())
             .paymentId(claim.paymentId()).attemptCount(claim.attemptCount()).nextAttemptAt(claim.nextAttemptAt()).failureCode(claim.failureCode())
+            .decisionReason(decision == null ? null : decision.reason())
+            .decidedByMemberId(decision == null ? null : decision.decidedByMemberId())
+            .decidedAt(decision == null ? null : decision.decidedAt())
             .version(claim.version()).build();
     }
 
@@ -25,9 +29,12 @@ public class ClaimMapper {
     }
 
     public Claim toDomain(ClaimEntity entity, List<ClaimItemEntity> items) {
+        // 결정 칸은 셋 다 있거나 셋 다 없다(ck_claim_decision_all_or_none)
+        Claim.Decision decision = entity.getDecidedAt() == null ? null
+            : new Claim.Decision(entity.getDecisionReason(), entity.getDecidedByMemberId(), entity.getDecidedAt());
         return new Claim(entity.getId(), entity.getOrderId(), entity.getRequestKey(), entity.getType(), entity.getStatus(),
             MoneyColumns.nullable(entity.getExpectedRefundAmount(), entity.getExpectedRefundCurrency()), entity.getPaymentId(), entity.getAttemptCount(),
-            entity.getNextAttemptAt(), entity.getFailureCode(),
+            entity.getNextAttemptAt(), entity.getFailureCode(), decision,
             items.stream().map(item -> new ClaimItem(item.getId(), item.getOrderItemId(), item.getQuantity(), item.getReason())).toList(),
             entity.getCreatedAt(), entity.getVersion());
     }

@@ -284,7 +284,109 @@ class ClaimTest {
         assertThatThrownBy(() -> unsaved.holdUntil(until)).isInstanceOf(IllegalStateException.class);
     }
 
+    private static final Claim.Decision DECISION = new Claim.Decision("PG 거절 확인", 9L, NOW);
+
+    @Test
+    @DisplayName("운영자 재시도 — 환불 실패는 환불 대기로, 복원 실패는 복원 대기로 다시 열고 횟수 0 · 실패 코드 없음 · 다음 시각 lease, 결정 칸은 둔다")
+    void reopenReturnsFailedClaimToItsAwaitingStep() {
+        Claim requested = requested().retryLater(NOW, MINUTE, HOUR);
+        Instant until = NOW.plus(LEASE);
+
+        Claim refundReopened = requested.failRefund("PAYMENT_016").reopen(until);
+        Claim restorationFailed = requested.markRefunded(NOW).retryLater(NOW, MINUTE, HOUR).failRestoration(Claim.RESTORATION_UNCONFIRMED);
+        Claim restorationReopened = restorationFailed.reopen(until);
+        Claim confirmedThenFailed = requested.failRefund("PAYMENT_016").confirmRefundByAdmin(DECISION, NOW).failRestoration("PRODUCT_028");
+
+        assertThat(refundReopened.status()).isEqualTo(Claim.Status.REQUESTED);
+        assertThat(refundReopened.attemptCount()).isZero();
+        assertThat(refundReopened.failureCode()).isNull();
+        assertThat(refundReopened.nextAttemptAt()).isEqualTo(Instant.parse("2026-11-06T00:02:00.123456Z"));
+        assertThat(restorationReopened.status()).isEqualTo(Claim.Status.REFUNDED);
+        assertThat(restorationReopened.attemptCount()).isZero();
+        assertThat(restorationReopened.failureCode()).isNull();
+        assertThat(confirmedThenFailed.reopen(until).decision()).as("앞선 운영자 결정은 지우지 않는다").isEqualTo(DECISION);
+        for (Claim notFailed : List.of(requested, requested.markRefunded(NOW), requested.markRefunded(NOW).complete(), requested.failRefund("PAYMENT_016").reject(DECISION))) {
+            assertThatThrownBy(() -> notFailed.reopen(until)).as(notFailed.status().name()).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 — 환불 실패(코드 무관)만 REFUNDED(횟수 0, 다음 시각, 결정 칸)로 가고, 그 밖의 상태는 거절한다")
+    void confirmRefundByAdminOnlyFromRefundFailed() {
+        Claim requested = requested().retryLater(NOW, MINUTE, HOUR);
+
+        for (String code : List.of("PAYMENT_016", Claim.REFUND_UNCONFIRMED)) {
+            Claim confirmed = requested.failRefund(code).confirmRefundByAdmin(DECISION, NOW.plus(LEASE));
+            assertThat(confirmed.status()).isEqualTo(Claim.Status.REFUNDED);
+            assertThat(confirmed.attemptCount()).isZero();
+            assertThat(confirmed.failureCode()).isNull();
+            assertThat(confirmed.nextAttemptAt()).isEqualTo(Instant.parse("2026-11-06T00:02:00.123456Z"));
+            assertThat(confirmed.decision()).isEqualTo(DECISION);
+        }
+        for (Claim other : List.of(requested, requested.markRefunded(NOW), requested.markRefunded(NOW).failRestoration("PRODUCT_028"))) {
+            assertThatThrownBy(() -> other.confirmRefundByAdmin(DECISION, NOW)).as(other.status().name()).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("거절 — 종결 거절 코드의 환불 실패만 REJECTED(다음 시각 · 실패 코드 없음, 결정 칸)로 가고, 미확정(REFUND_UNCONFIRMED)은 거절하지 않는다")
+    void rejectOnlyTerminalRefundFailure() {
+        Claim requested = requested();
+
+        Claim rejected = requested.failRefund("PAYMENT_016").reject(DECISION);
+
+        assertThat(rejected.status()).isEqualTo(Claim.Status.REJECTED);
+        assertThat(rejected.failureCode()).isNull();
+        assertThat(rejected.nextAttemptAt()).isNull();
+        assertThat(rejected.decision()).isEqualTo(DECISION);
+        Claim unconfirmed = requested.failRefund(Claim.REFUND_UNCONFIRMED);
+        assertThat(unconfirmed.isRefundUnconfirmed()).isTrue();
+        assertThatThrownBy(() -> unconfirmed.reject(DECISION)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested.reject(DECISION)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested.markRefunded(NOW).failRestoration("PRODUCT_028").reject(DECISION)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> rejected.reject(DECISION)).as("거절된 클레임은 다시 거절하지 않는다(멱등은 부르는 쪽이 본다)").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> rejected.markRefunded(NOW)).as("거절 뒤 늦게 온 성공도 받지 않는다").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> rejected.holdUntil(NOW)).as("거절은 스케줄러가 집지 않는다").isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("복원 생략 종결 — 재고 복원 실패만 COMPLETED(실패 코드 없음, 결정 칸)로 간다")
+    void completeByAdminOnlyFromRestorationFailed() {
+        Claim refunded = requested().markRefunded(NOW);
+
+        Claim completed = refunded.failRestoration("PRODUCT_028").completeByAdmin(DECISION);
+
+        assertThat(completed.status()).isEqualTo(Claim.Status.COMPLETED);
+        assertThat(completed.failureCode()).isNull();
+        assertThat(completed.nextAttemptAt()).isNull();
+        assertThat(completed.decision()).isEqualTo(DECISION);
+        for (Claim other : List.of(requested(), refunded, refunded.complete(), requested().failRefund("PAYMENT_016"))) {
+            assertThatThrownBy(() -> other.completeByAdmin(DECISION)).as(other.status().name()).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("결정 칸 불변식 — 거절에는 결정이 있어야 하고, 결정 사유는 1~200자 · 결정자 양수 · 시각 필수(마이크로초로 자른다), 반품은 수습 전이를 하지 않는다")
+    void decisionInvariants() {
+        List<ClaimItem> items = List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER));
+
+        assertThatThrownBy(() -> new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.REJECTED, krw(1_000), 77L, 0, null, null, null, items,
+            NOW, 0L)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.COMPLETED, krw(1_000), 77L, 0, null, null, DECISION, items, NOW, 0L)
+            .decision()).isEqualTo(DECISION);
+        assertThat(DECISION.decidedAt()).isEqualTo(Instant.parse("2026-11-06T00:00:00.123456Z"));
+        assertThatThrownBy(() -> new Claim.Decision(" ", 9L, NOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Claim.Decision("x".repeat(201), 9L, NOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Claim.Decision("사유", 0L, NOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Claim.Decision("사유", 9L, null)).isInstanceOf(NullPointerException.class);
+        Claim returnClaim = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+            List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
+        assertThatThrownBy(() -> returnClaim.reject(DECISION)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> returnClaim.reopen(NOW)).isInstanceOf(IllegalStateException.class);
+    }
+
     private static Claim cancellation(Claim.Status status, Instant next, String failureCode, List<ClaimItem> items) {
-        return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 0, next, failureCode, items, NOW, 0L);
+        return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 0, next, failureCode,
+            status == Claim.Status.REJECTED ? DECISION : null, items, NOW, 0L);
     }
 }

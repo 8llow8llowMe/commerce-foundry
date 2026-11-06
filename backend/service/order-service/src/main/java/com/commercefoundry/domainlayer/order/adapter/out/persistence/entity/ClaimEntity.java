@@ -29,6 +29,8 @@ import lombok.NoArgsConstructor;
  *   <li>{@code ck_claim_payment_cancellation_only} — 결제 아이디는 취소 클레임에만 있다</li>
  *   <li>{@code ck_claim_cancellation_next_attempt} — 취소 클레임의 다음 시도 시각은 대기 상태(REQUESTED · REFUNDED)에만 있다</li>
  *   <li>{@code ck_claim_cancellation_failure_code} — 취소 클레임의 실패 코드는 종결 실패(REFUND_FAILED · RESTORATION_FAILED)에만 있다</li>
+ *   <li>{@code ck_claim_decision_all_or_none} — 운영자 결정(사유 · 결정자 · 시각)은 셋 다 있거나 셋 다 없다 (#17)</li>
+ *   <li>{@code ck_claim_rejected_decision} — 거절(REJECTED)에는 운영자 결정이 있다 (#17)</li>
  * </ul>
  *
  * <p>재시도 스케줄러는 {@code idx_claim_type_next_attempt_at_id} 를
@@ -49,7 +51,10 @@ import lombok.NoArgsConstructor;
         @CheckConstraint(name = "ck_claim_cancellation_next_attempt", constraint = "type <> 'CANCELLATION' or "
             + "((status in ('REQUESTED', 'REFUNDED')) = (next_attempt_at is not null))"),
         @CheckConstraint(name = "ck_claim_cancellation_failure_code", constraint = "type <> 'CANCELLATION' or "
-            + "((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))")
+            + "((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))"),
+        @CheckConstraint(name = "ck_claim_decision_all_or_none", constraint = "(decision_reason is null and decided_by_member_id is null and decided_at is null) or "
+            + "(decision_reason is not null and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null)"),
+        @CheckConstraint(name = "ck_claim_rejected_decision", constraint = "status <> 'REJECTED' or decided_at is not null")
     })
 @Getter
 @Builder
@@ -72,7 +77,7 @@ public class ClaimEntity extends BaseEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20,
-        comment = "클레임 상태 (REQUESTED / REFUNDED / COMPLETED / REFUND_FAILED / RESTORATION_FAILED)")
+        comment = "클레임 상태 (REQUESTED / REFUNDED / COMPLETED / REFUND_FAILED / RESTORATION_FAILED / APPROVED / REJECTED)")
     private Claim.Status status;
 
     @Column(name = "expected_refund_amount", comment = "예상 환불 최소 단위 금액 (미산정이면 null)")
@@ -93,6 +98,15 @@ public class ClaimEntity extends BaseEntity {
 
     @Column(name = "failure_code", length = Claim.FAILURE_CODE_MAX_LENGTH, comment = "종결 실패 사유 코드 (REFUND_FAILED · RESTORATION_FAILED). 아니면 null")
     private String failureCode;
+
+    @Column(name = "decision_reason", length = Claim.Decision.REASON_MAX_LENGTH, comment = "운영자 수습 결정 사유 (거절 · 수동 환불 확정 · 복원 생략 종결). 없으면 null")
+    private String decisionReason;
+
+    @Column(name = "decided_by_member_id", comment = "운영자 수습 결정을 한 관리자 회원 아이디 (외부 FK: auth-service member.id). 없으면 null")
+    private Long decidedByMemberId;
+
+    @Column(name = "decided_at", comment = "운영자 수습 결정 시각. 없으면 null")
+    private Instant decidedAt;
 
     @Version
     @Column(name = "version", nullable = false, comment = "낙관적 락 버전")

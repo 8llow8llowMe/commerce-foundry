@@ -22,6 +22,7 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 
 EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해제는 order-canceled 이벤트)
+CANCEL_REQUESTED ──▶ PAID · MAKING · PREPARING (어드민 취소 거절, #17 — 요청 전 상태로 복귀)
 ```
 
 | 상태 | 뜻 | 누가 바꾸나 |
@@ -34,7 +35,8 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
 | `SHIPPING` | 송장 등록, 배송 중 | delivery-service (internal 출고 반영, #18 — §4) |
 | `DELIVERED` | 배송 완료 | delivery-service (internal 배송 완료 반영, #18 — §4). 어드민 수동 완료(사유 필수, #17)는 예외 경로 |
 | `PURCHASE_CONFIRMED` | 구매 확정 (고객 확정 또는 N일 경과 자동) | 고객 / 스케줄러 |
-| `CANCEL_REQUESTED` → `CANCELED` | 출고 전 취소 (환불 포함) | 고객 요청 → 환불 확정 시 자동(#16 PR-2, 어드민 승인 단계 없음). 환불 실패 · 미확정은 운영자(#17) |
+| `CANCEL_REQUESTED` → `CANCELED` | 출고 전 취소 (환불 포함) | 고객 요청 → 환불 확정 시 자동(#16 PR-2, 어드민 승인 단계 없음). 환불 실패 · 미확정은 운영자 수습(#17 PR-A, §5) |
+| `CANCEL_REQUESTED` → `PAID` · `MAKING` · `PREPARING` | 취소 거절 — 요청 전 상태로 복귀 | 어드민 취소 거절(#17 PR-A, `POST /api/v1/admin/claims/{claimId}/rejection`)만. 일반 상태 변경 API 는 `ORDER_023` |
 | `PENDING_PAYMENT` → `CANCELED` | 결제 전 취소 (환불 없음, 선점 해제) | 고객 (#16) |
 | `RETURN_REQUESTED` → `RETURNED` | 배송 후 반품 (회수 후 환불) | 고객 요청 → 어드민 |
 
@@ -56,8 +58,10 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
   응답은 그 시점 상세다 — 환불 확정이면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(200). 이미 취소 요청 · 취소 완료이고 취소 클레임이 있으면 다시 돌리지 않고
   현재 상세 200 이다(더블 클릭 — 잠금 · 버전 · 결정적 키에서 진 쪽도 다시 읽어 같으면 200, 다시 판정할 수 없으면 409 `ORDER_025`). 결제 완료 기록(`order_payment` PAID)이
   없으면 500 `ORDER_033`, 전체 취소액이 승인 금액과 다르면 500 `ORDER_034` 로 접수하지 않는다.
-  **취소 거절 전이(`CANCEL_REQUESTED` → 원래 상태)는 표에 넣지 않는다** — `REFUND_FAILED` 어드민 처리와 함께 #17 · PR-2b 에서 정한다. 그때까지 환불 거절 주문은
-  `CANCEL_REQUESTED` 로 남고 출고하지 않는다.
+  **취소 거절 전이(`CANCEL_REQUESTED` → 요청 전 상태)** 는 어드민 취소 거절(#17 PR-A, §5 "종결 실패 수습")만 한다 — `Order#rejectCancellation(restored)` 로,
+  되돌릴 상태는 상태 이력에서 `to = CANCEL_REQUESTED` 인 마지막 줄의 `from`(결제 완료 · 제작 중 · 상품 준비중)이다. `Order#changeStatus` 와 어드민 일반 상태 변경
+  (`AdminStatusChangePolicy` 표 밖이라 `ORDER_023`)으로는 가지 않고, 어드민 상세 `nextStatuses` 에도 나오지 않는다. 거절 전까지 환불 거절 주문은 `CANCEL_REQUESTED` 로 남고
+  출고하지 않는다. 거절된 주문을 고객이 다시 취소하면 409 `ORDER_037`(고객센터 안내)이고, 고객 내역 · 상세의 `cancelable` 은 false 다.
 - **결제 전 취소** (`Order#cancelBeforePayment`): 상태 · `CUSTOMER` 이력(사유 = 취소 사유 코드) · `order-canceled` outbox 를 한 트랜잭션으로 쓴다(§3-5).
   이미 취소됐으면 아무것도 쓰지 않고 성공이다. 읽은 뒤 결제 완료 · 만료가 먼저 커밋하면 `@Version` 비교로 롤백하고 다시 읽는다 — 취소 완료면 200,
   결제 완료 · 상품 준비중 · 제작 중이면 결제 후 취소로 넘기고(#16 PR-2), 그 밖(만료 등)은 409 `ORDER_020` 이다.
@@ -76,7 +80,7 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
   — 시각 없이 배송 중 · 배송 완료가 되지 않게. 어드민 수동 배송 완료(#17)도 `deliver(now)` 를 거쳐 `delivered_at` 을 채운다. 이미 그 뒤 상태면(`ship` 은 배송 중 ·
   배송 완료 · 구매 확정 · 반품, `deliver` 는 배송 완료 · 구매 확정 · 반품 — 전이 표에서 배송 중 · 배송 완료로부터 닿는 상태와 같고 `OrderTest` 가 표로 계산해 맞춘다)
   바꾸지 않은 값을 돌려주고 처음 시각을 덮지 않는다. 그 밖은 `ORDER_020` 이다 — 상품 준비중에서 바로 배송 완료하지 않는다. 취소 요청(`CANCEL_REQUESTED`) 주문도
-  출고하지 않는다 — 먼저 취소를 처리한다. 취소 거절 전이(취소 요청 → 상품 준비중)는 표에 없다(#17 · #16 PR-2b, 위 "결제 후 취소").
+  출고하지 않는다 — 먼저 취소를 처리한다. 어드민이 취소를 거절해 요청 전 상태(상품 준비중 등)로 돌아간 뒤에는 정상 출고된다(#17 PR-A, 위 "결제 후 취소").
   `delivered_at` 은 자동 구매 확정(#18 PR-C)의 기준이고 `idx_orders_status_delivered_at_id(status, delivered_at, id)` 로 읽는다.
   두 칸이 생기기 전에 배송 중 · 배송 완료가 된 주문은 **배포 전 운영 SQL(PR 본문)** 로 상태 이력 시각을 채운다 — 채우지 못한 행은 null 로 남을 수 있어
   상태와 묶는 check 를 두지 않는다.
@@ -901,12 +905,33 @@ order → delivery 역방향 호출은 두지 않는다(`service-inventory.md` �
   | `REQUESTED` | 환불 대기 | 환불 200 → `REFUNDED`(+ 주문 `CANCELED`), 종결 거절 → `REFUND_FAILED`(원격 코드), 미확정 → 백오프 재시도. 환불 200 인데 주문이 취소 요청 · 취소 완료가 아니면(데이터 이상) 복원 없이 `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`) |
   | `REFUNDED` | 환불 확정, 재고 복원 대기 | 복원 200 → `COMPLETED`, 종결 409 → `RESTORATION_FAILED`(`PRODUCT_027/028/029/003` — 원격 코드, 환불의 `PAYMENT_*` 와 같은 방식), 클레임 항목이 주문 스냅숏과 안 맞으면 `RESTORATION_DATA_INVALID`, 그 밖 → 백오프 재시도 |
   | `COMPLETED` | 끝 | — |
-  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | `failure_code = REFUND_UNCONFIRMED`(재시도 소진)일 때만 늦게 온 환불 성공을 받아 `REFUNDED`(파이프라인이 반영에서 진 뒤 다시 읽어 이 상태면 한 번 더 반영하고 복원까지 잇는다) |
-  | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 `CANCELED`(`ORDER_STATUS_UNEXPECTED` 면 그 상태 그대로) | — |
+  | `REFUND_FAILED` | 운영자 수습(#17 PR-A) — 주문은 `CANCEL_REQUESTED` 그대로 | `failure_code = REFUND_UNCONFIRMED`(재시도 소진)일 때만 늦게 온 환불 성공을 받아 `REFUNDED`(파이프라인이 반영에서 진 뒤 다시 읽어 이 상태면 한 번 더 반영하고 복원까지 잇는다). 어드민 재시도 → `REQUESTED`, 수동 환불 확정 → `REFUNDED`(+ 주문 `CANCELED`), 거절 → `REJECTED`(종결 거절 코드만) |
+  | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 `CANCELED`(`ORDER_STATUS_UNEXPECTED` 면 그 상태 그대로) | 어드민 재시도 → `REFUNDED`(`ORDER_STATUS_UNEXPECTED` 는 재시도 불가), 복원 생략 종결 → `COMPLETED` |
+  | `REJECTED` | 운영자가 취소를 거절(#17 PR-A) — 주문은 요청 전 상태로 복귀. 끝 | — (재시도 · 스케줄러 · 늦게 온 환불 성공 모두 받지 않는다) |
+  | `APPROVED` | 반품 승인(#17 PR-B 용) — 지금은 DDL check · 조회 필터에만 있고 만드는 경로가 없다 | — |
 
-  - **종결 실패 수습** — 어드민 처리(#17) · 알림(#477)이 붙기 전에는 코드 경로가 없다. 종결 실패를 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를 error 로그로
-    남기고(금액 제외), 운영자는 어드민 클레임 목록(`GET /api/v1/admin/claims?status=`)으로 `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인한다.
-    `*_UNCONFIRMED` 는 결과를 끝내 확인하지 못한 것이라 PG 거래 · 재고의 실제 상태를 먼저 본다(`deploy-guide.md` 결제 개방 순서).
+  - **종결 실패 수습** (#17 PR-A, `ClaimAdminFacade` · `ClaimAdminActionProcessor`, 권한 `AdminAuthority.ORDER_MANAGE`, 계약은 `api-design-guide.md` §2-16) —
+    종결 실패를 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를 error 로그로 남기고(금액 제외), 운영자는 어드민 클레임 목록(`GET /api/v1/admin/claims?status=`)으로
+    `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인한 뒤 아래 넷 중 하나로 수습한다(알림은 #477). `*_UNCONFIRMED` 는 결과를 끝내 확인하지 못한 것이라 PG 거래 ·
+    재고의 실제 상태를 먼저 본다(`deploy-guide.md` 결제 개방 순서).
+
+    | API (`POST /api/v1/admin/claims/{claimId}/…`) | 전제 | 동작 | 같은 결과 다시 / 모순 |
+    |---|---|---|---|
+    | `retries` (본문 없음) | 실패(`REFUND_FAILED` · `RESTORATION_FAILED`) 또는 대기(`REQUESTED` · `REFUNDED`) | 실패면 그 단계의 대기로 다시 열고(`Claim#reopen` — 횟수 0, 실패 코드 없음, `next_attempt_at = now + lease`), 대기면 선점(`holdUntil`) → 커밋 → 파이프라인을 바로 잇는다 | `COMPLETED` 200 / `REJECTED` · 반품 · `ORDER_STATUS_UNEXPECTED` 409 `ORDER_036`, 스케줄러 꺼짐 503 `ORDER_035` |
+    | `rejection` `{reason}` | `REFUND_FAILED` 이고 실패 코드가 종결 거절(`PAYMENT_*` 등, `REFUND_UNCONFIRMED` 아님) | 한 트랜잭션: 클레임 `REJECTED`(결정 칸) + 주문 `CANCEL_REQUESTED → 요청 전 상태`(§1-1) + `ADMIN` 이력(사유) | `REJECTED` 200 / `REFUND_UNCONFIRMED` 409 `ORDER_038`, 그 밖 409 `ORDER_036`, 원상태 못 찾음 500 `ORDER_041` |
+    | `refund-confirmation` `{reason}` | `REFUND_FAILED`(코드 무관) — 운영자가 PG 에서 환불을 확인했다 | 한 트랜잭션: 클레임 `REFUNDED`(결정 칸, `next_attempt_at = now + lease`) + 주문 `CANCELED` + `ADMIN` 이력 → 트랜잭션 밖 재고 복원 → tx3(파이프라인의 `REFUNDED` 단계) | `REFUNDED` · `COMPLETED` · `RESTORATION_FAILED` 200 / 그 밖 409 `ORDER_036` |
+    | `completion` `{reason}` | `RESTORATION_FAILED` — 재고는 운영자가 재고 조정(#86)으로 먼저 맞춘다 | 클레임 `COMPLETED`(결정 칸). 주문은 그대로 | `COMPLETED` 200 / 그 밖 409 `ORDER_036` |
+
+    - **멱등** — 헤더 없이 상태 전제로 가른다. 같은 결과가 이미 났으면 아무것도 쓰지 않고 200, 모순이면 409 `ORDER_036`. 각 단계는 클레임 · 주문 `` 으로 진 쪽을
+      가리고(주문 행 비관 잠금 없음), 진 쪽은 다시 읽어 원하는 결과면 200, 아니면 409 `ORDER_025` 다(`OrderAdminFacade` 와 같은 규칙).
+    - **경합** — 스케줄러 선점과 어드민 재시도는 같은 `` 선점이라 한쪽만 이긴다(진 재시도는 `ORDER_025`). 거절과 재시도가 겹치면 먼저 커밋한 쪽만 남는다 —
+      재시도가 다시 열었으면 거절은 `ORDER_025`/`ORDER_036`. 거절 뒤에는 스케줄러 · 늦게 온 환불 성공 모두 받지 않으므로 `REFUND_UNCONFIRMED` 는 거절하지 않는다
+      (PG 에서 실제로 취소됐을 수 있다 — 재시도로 결과를 보거나 수동 확정한다).
+    - **결정 칸** — `decision_reason`(1~200자) · `decided_by_member_id` · `decided_at` 은 셋 다 있거나 셋 다 없고(`ck_claim_decision_all_or_none`), `REJECTED` 면 반드시 있다
+      (`ck_claim_rejected_decision`). 결정이 다시 나면(수동 확정 뒤 복원 생략 종결) 마지막 결정으로 덮는다 — 앞선 결정은 감사 줄 · 주문 이력에 있다. 거절은 실패 코드를 지운다
+      (`ck_claim_cancellation_failure_code`) — 거절 사유는 결정 칸과 error 로그(실패 코드 포함)에 남는다.
+    - **감사** — `CLAIM_RETRY` · `CLAIM_REJECT` · `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE`, 실패도 `FAILURE` 로 남긴다(사유 원문은 감사 줄에 싣지 않는다).
+    - 원격 단계(재시도 · 수동 확정 뒤 복원)가 커밋 뒤 끊기면 미확정 한 번으로 세고 응답은 그 시점 상세 200 이다 — 클레임이 대기 상태 + lease 로 남아 스케줄러가 잇는다.
 
   - **트랜잭션 경계** — 접수(tx1) · 환불 결과 반영(tx2) · 복원 결과 반영(tx3)은 각각 짧은 트랜잭션이고 환불 · 복원 호출은 그 사이 트랜잭션 밖이다
     (`OrderCancellationProcessor` · `OrderCancellationPipelineProcessor`). 각 반영은 클레임 · 주문 `@Version` 으로 진 쪽을 가려 조용히 멈춘다(다른 워커가 처리).
@@ -930,5 +955,5 @@ order → delivery 역방향 호출은 두지 않는다(`service-inventory.md` �
 - 주문 목록(상태·기간·결제수단 필터, `PageResponse`), 주문 상세(항목·결제·배송·이력) — #17 PR-1 이 상태 · 기간 필터와 상세(이력 · 다음 상태)를 연다.
   결제수단 필터 · 결제 정보는 결제 연동(#14) 뒤다
 - 상태 일괄 변경(`PAID → PREPARING`) — #17 PR-1(`POST /api/v1/admin/orders/status-changes`, 주문마다 따로 · 건별 결과), 송장 일괄 등록(#18)
-- 취소·반품 요청 처리(승인/거절, 환불 실행)
+- 취소·반품 요청 처리(승인/거절, 환불 실행) — 결제 후 취소의 종결 실패 수습(재시도 · 거절 · 수동 환불 확정 · 복원 생략 종결)은 #17 PR-A(§5), 반품 승인 · 거절은 #17 PR-B
 - 결제 `UNKNOWN`·`REFUND_FAILED`·대사 불일치 건 목록 — **사람이 봐야 하는 건을 모아서 보여준다**

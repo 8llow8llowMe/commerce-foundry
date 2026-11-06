@@ -11,10 +11,12 @@ import com.commercefoundry.domainlayer.order.application.port.out.query.Requeste
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import com.commercefoundry.persistence.util.ConstraintViolations;
@@ -39,6 +41,19 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
     public Optional<Claim> findByOrderIdAndRequestKey(long orderId, UUID requestKey) {
         return claimRepository.findByOrderIdAndRequestKey(orderId, requestKey)
             .map(entity -> claimMapper.toDomain(entity, claimItemRepository.findAllByClaimIdOrderByOrderItemIdAsc(entity.getId())));
+    }
+
+    @Override
+    public Optional<Claim> findById(long claimId) {
+        return claimRepository.findById(claimId).map(entity -> claimMapper.toDomain(entity, claimItemRepository.findAllByClaimIdOrderByOrderItemIdAsc(claimId)));
+    }
+
+    @Override
+    public Set<Long> findRejectedCancellationOrderIds(Collection<Long> orderIds) {
+        if (orderIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(claimRepository.findOrderIds(orderIds, Claim.Type.CANCELLATION, Claim.Status.REJECTED));
     }
 
     @Override
@@ -82,7 +97,7 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
         ClaimEntity saved = claimRepository.saveAndFlush(claimMapper.toEntity(claim));
         // 쓰기 매핑은 생성 시각을 싣지 않아 merge 결과의 생성 시각을 믿지 않는다 — 읽어 온 접수 시각과 항목은 그대로, 버전만 올린다
         return new Claim(claim.id(), claim.orderId(), claim.requestKey(), claim.type(), claim.status(), claim.expectedRefund(), claim.paymentId(),
-            claim.attemptCount(), claim.nextAttemptAt(), claim.failureCode(), claim.items(), claim.requestedAt(), saved.getVersion());
+            claim.attemptCount(), claim.nextAttemptAt(), claim.failureCode(), claim.decision(), claim.items(), claim.requestedAt(), saved.getVersion());
     }
 
     @Override

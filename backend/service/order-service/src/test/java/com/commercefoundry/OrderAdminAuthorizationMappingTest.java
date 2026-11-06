@@ -39,7 +39,12 @@ class OrderAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/orders/status-changes", AdminAuthority.ORDER_MANAGE),
         // 클레임
         Map.entry("GET /api/v1/admin/claims", AdminAuthority.ORDER_READ),
-        Map.entry("GET /api/v1/admin/claims/{claimId}", AdminAuthority.ORDER_READ)
+        Map.entry("GET /api/v1/admin/claims/{claimId}", AdminAuthority.ORDER_READ),
+        // 결제 후 취소 수습 (#17 PR-A) — 변경이라 ORDER_MANAGE
+        Map.entry("POST /api/v1/admin/claims/{claimId}/retries", AdminAuthority.ORDER_MANAGE),
+        Map.entry("POST /api/v1/admin/claims/{claimId}/rejection", AdminAuthority.ORDER_MANAGE),
+        Map.entry("POST /api/v1/admin/claims/{claimId}/refund-confirmation", AdminAuthority.ORDER_MANAGE),
+        Map.entry("POST /api/v1/admin/claims/{claimId}/completion", AdminAuthority.ORDER_MANAGE)
     );
 
     @Autowired

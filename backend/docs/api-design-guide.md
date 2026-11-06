@@ -1228,25 +1228,46 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   지역 정보라 그대로 둔다. 맞춤 제작 입력값(치수 등)도 제작에 필요해 그대로 보인다. 원문은 송장 출력(#18)처럼 꼭 필요한 경로가 감사와 함께 다룬다. 사유 · 배송지는 로그에 남기지 않는다.
 - **감사** — 목록 · 상세 열람과 상태 변경(성공 · 실패, 일괄은 주문마다)을 `admin.audit` 한 줄로 남긴다(`security-guide.md` §11-4 — `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE`).
 - **목록** — 기간은 주문 시각 `[from, to)` (UTC)이고 비면 그쪽 끝이 열려 있다. 정렬은 주문 시각 → 아이디 내림차순이고 `idx_orders_status_created_at_id` · `idx_orders_created_at_id` 범위로 읽는다(건수 쿼리도). 첫 상품명 · 항목 수 · 받는 분은 그 페이지 주문만 묶어 읽는다(항목 1번 · 배송지 1번).
-  결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 조회는 아래 계약이며 승인 · 환불 · `REFUND_FAILED` 재시도는 후속이다.
+  결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 조회 · 결제 후 취소 수습은 아래 계약이며 반품 승인 · 거절 · 환불은 #17 PR-B 다.
 
-#### 어드민 클레임 조회 (#17)
+#### 어드민 클레임 조회 · 결제 후 취소 수습 (#17)
 
-두 경로 모두 `AdminAuthority.ORDER_READ`다(ADMIN · OWNER · MANAGER · STAFF, `security-guide.md` §3-1). CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 어드민 Swagger 그룹에 포함된다.
+조회 두 경로는 `AdminAuthority.ORDER_READ`다(ADMIN · OWNER · MANAGER · STAFF, `security-guide.md` §3-1). CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 어드민 Swagger 그룹에 포함된다.
 
 | API | 응답 | 검증/오류 |
 |-----|------|-----------|
-| `GET /api/v1/admin/claims?orderId=&type=&status=&page=0&size=20` | 200 `PageResponse<{claimId,orderId,type,status,expectedRefund,requestedAt}>` | page 0 이상 `ORDER_144`, size 1~100 `ORDER_145`, orderId 양수 `ORDER_141`, page×size가 JPA offset 한도 초과 `ORDER_167`, 타입·범위 오류 `ORDER_198` (400) |
-| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}]}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
+| `GET /api/v1/admin/claims?orderId=&type=&status=&page=0&size=20` | 200 `PageResponse<{claimId,orderId,type,status,expectedRefund,paymentId,failureCode,attemptCount,nextAttemptAt,decisionReason,decidedById,decidedAt,requestedAt}>` | page 0 이상 `ORDER_144`, size 1~100 `ORDER_145`, orderId 양수 `ORDER_141`, page×size가 JPA offset 한도 초과 `ORDER_167`, 타입·범위 오류 `ORDER_198` (400) |
+| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,paymentId,failureCode,attemptCount,nextAttemptAt,decisionReason,decidedById,decidedAt,requestedAt,items:[{orderItemId,quantity,reason}]}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
 
-- 필터는 모두 선택적이고 함께 지정하면 AND다. 지원 값은 `type=RETURN|CANCELLATION`, `status=REQUESTED|REFUNDED|COMPLETED|REFUND_FAILED|RESTORATION_FAILED`다
-  (#16 PR-2a, 도메인 `Claim.Type` · `Claim.Status` 와 같은 집합). 반품 접수는 아직 `REQUESTED`만 생기고, 결제 후 취소 클레임은 #16 PR-2a-2 부터 생긴다.
+- 필터는 모두 선택적이고 함께 지정하면 AND다. 지원 값은 `type=RETURN|CANCELLATION`, `status=REQUESTED|REFUNDED|COMPLETED|REFUND_FAILED|RESTORATION_FAILED|APPROVED|REJECTED`다
+  (#16 PR-2a · #17 PR-A, 도메인 `Claim.Type` · `Claim.Status` 와 같은 집합). 반품 접수는 아직 `REQUESTED`만 생기고, `APPROVED`(반품 승인)는 #17 PR-B 전까지 생기지 않는다.
   모르는 값은 400 `ORDER_198`이다. 필터에 맞는 접수의 claimId 내림차순으로 정렬하며 임의 정렬 입력은 받지 않는다.
 - `page`는 0부터, 기본 크기는 20이다. `page×size`는 2,147,483,647 이하여야 하고 초과 입력은 DB 조회 전에 400으로 거절한다. `totalElements`는 같은 조건의 실제 count이고 빈 페이지에서도 전체 건수를 보존한다. 목록은 헤더와 count만 조회하고 상세만 항목을 읽는다.
 - ID는 문자열, type/status/reason은 `{code,name,description}` metadata다. `expectedRefund`는 `{amount,currency}` 또는 미산정 `null`이며 null을 0원으로 표시하지 않는다.
+- 수습 칸(#17 PR-A) — `paymentId`(결제 후 취소만, 문자열) · `failureCode`(종결 실패일 때만 — 원격 `PAYMENT_*` · `PRODUCT_*` 또는 `REFUND_UNCONFIRMED` · `RESTORATION_UNCONFIRMED` ·
+  `ORDER_STATUS_UNEXPECTED` · `RESTORATION_DATA_INVALID`) · `attemptCount` · `nextAttemptAt`(대기 상태만) · 운영자 결정 `decisionReason` · `decidedById`(관리자 회원 아이디 문자열,
+  어드민 이력의 `changedById` 와 같은 관례) · `decidedAt`(셋 다 있거나 셋 다 null). 반품은 결제 · 실패 · 결정 칸이 null 이다.
 - UUID 멱등키·회원/배송 개인정보·버전·워커 정보는 응답에 포함하지 않는다. 조회는 주문/접수 상태·이력·outbox를 변경하지 않고 외부 서비스를 호출하지 않는다.
 - 성공한 조회 뒤 `admin.audit`에 `CLAIM_SEARCH` 또는 `CLAIM_VIEW`를 남긴다. JWT 관리자 ID와 검증된 필터/대상만 기록하며 요청 원문·항목·멱등키는 기록하지 않는다.
-- 승인·거절·환불 계산/실행·실패 재시도·재고 복원과 새 상태는 후속이다. FE는 현 상태를 접수로 표시하고 이 조회 API만으로 처리 완료 버튼을 제공하지 않는다. 계약 리뷰어는 `seonghoho`다.
+- 반품 승인 · 거절 · 환불 계산/실행은 #17 PR-B 다. 계약 리뷰어는 `seonghoho`다.
+
+**결제 후 취소 수습 (#17 PR-A)** — 네 경로 모두 `AdminAuthority.ORDER_MANAGE`(STAFF 403)이고 ``, 200 은 처리 뒤의 클레임 상세(위 상세와 같은 모양)다.
+공통 오류: 클레임 없음 404 `ORDER_032`, 양수가 아닌 아이디 400 `ORDER_166`, 결제 후 취소가 아닌(반품) 클레임 409 `ORDER_036`, 동시 변경 409 `ORDER_025`.
+본문 `{reason}` 은 처리 사유 1~200자(없음 · 공백 400 `ORDER_169`, 200자 초과 `ORDER_148`, 제어 · 깨진 문자 `ORDER_151`)이고 클레임 결정 칸과 주문 이력(`ADMIN`)에 남는다.
+흐름 · 경합의 정본은 `order-flow-guide.md` §5 "종결 실패 수습"이다.
+
+| API | 전제 → 결과 | 같은 결과 다시 | 그 밖 오류 |
+|-----|-------------|----------------|-----------|
+| `POST /api/v1/admin/claims/{claimId}/retries` (본문 없음) | `REFUND_FAILED` → `REQUESTED`, `RESTORATION_FAILED` → `REFUNDED` 로 다시 열거나 대기(`REQUESTED` · `REFUNDED`)를 선점한 뒤 환불 · 복원을 바로 다시 돌린다. 원격 결과를 아직 모르면 대기 상태 그대로 200 | `COMPLETED` 200 | 409 `ORDER_036`(`REJECTED` · `ORDER_STATUS_UNEXPECTED`), 503 `ORDER_035`(재시도 스케줄러 꺼짐) |
+| `POST /api/v1/admin/claims/{claimId}/rejection` `{reason}` | `REFUND_FAILED`(종결 거절 코드) → `REJECTED`, 주문 `CANCEL_REQUESTED` → 요청 전 상태(결제 완료 · 제작 중 · 상품 준비중) | `REJECTED` 200 | 409 `ORDER_038`(`REFUND_UNCONFIRMED` — 재시도 또는 수동 확정), `ORDER_036`, `ORDER_020`(주문이 취소 요청 아님), 500 `ORDER_041`(되돌릴 상태를 이력에서 못 찾음) |
+| `POST /api/v1/admin/claims/{claimId}/refund-confirmation` `{reason}` | `REFUND_FAILED`(코드 무관) → `REFUNDED` + 주문 `CANCELED` → 재고 복원(→ `COMPLETED` · 미확정이면 `REFUNDED` · 종결 실패면 `RESTORATION_FAILED`) | `REFUNDED` · `COMPLETED` · `RESTORATION_FAILED` 200 | 409 `ORDER_036`, `ORDER_020`(주문이 취소 요청 · 취소 완료 아님) |
+| `POST /api/v1/admin/claims/{claimId}/completion` `{reason}` | `RESTORATION_FAILED` → `COMPLETED`(재고는 재고 조정 #86 으로 먼저 맞춘다, 주문 그대로) | `COMPLETED` 200 | 409 `ORDER_036` |
+
+- 멱등 헤더는 없다 — 상태 전제가 멱등 키다. 응답 유실 뒤 같은 요청을 다시 보내면 200(같은 결과) 이다.
+- 감사 `admin.audit` — `CLAIM_RETRY` · `CLAIM_REJECT` · `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE`, 실패도 `FAILURE`. 사유 원문은 감사 줄에 싣지 않는다.
+- 거절된 주문을 고객이 다시 취소하면 409 `ORDER_037`(고객센터 안내)이고 고객 응답의 `cancelable` 은 false 다(§2-17).
+- FE 영향 — 목록 · 상세 응답 칸이 늘었다(추가만). 어드민 클레임 화면은 실패 상태에서 위 네 버튼을 상태별로 보이고(`retries` 는 실패 · 대기, `rejection` 은
+  `REFUND_FAILED` 이고 `failureCode != REFUND_UNCONFIRMED`, `refund-confirmation` 은 `REFUND_FAILED`, `completion` 은 `RESTORATION_FAILED`), 사유 입력을 받는다.
 
 ### 2-17. 고객 주문 내역 · 결제 전 취소 · 구매 확정 · 반품 접수 (order-service, #16)
 
@@ -1256,7 +1277,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 |-----|------|------|
 | `GET /api/v1/orders?page=0&size=20` | 200 `SliceResponse<{orderId, status, orderName, itemCount, totalAmount, cancelable, paymentDueAt, createdAt}>` — 최신순(주문 아이디 내림차순), 전체 건수 없음 | 400 `ORDER_144`(page) · `145`(size 1~100) |
 | `GET /api/v1/orders/{orderId}` | 200 `{orderId, status, cancelable, paymentDueAt, currency, items[], amounts, shipping, shippingAddress, createdAt}` — 주문 생성 응답과 같은 스냅숏 모양 | 400 `ORDER_141` · 404 `ORDER_001` |
-| `POST /api/v1/orders/{orderId}/cancellation` `{reason}` | 200 현재 상세 — 결제 대기는 `CANCELED`. 결제 완료 · 상품 준비중(제작 중은 설정)은 환불이 확정되면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(#16 PR-2). 이미 취소 완료 · 취소 요청이면 바꾸지 않고 200 | 400 `ORDER_154`(사유 없음) · `100`(모르는 사유 · 깨진 JSON) · `141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 중 이후 · 만료 · 제작 중 불허 등), `ORDER_025`(동시 변경 뒤 다시 판정 불가 — 상세를 다시 조회한 뒤 필요하면 다시 요청) · 500 `ORDER_033`(결제 완료 기록 없음) · `ORDER_034`(환불액 ≠ 승인 금액) · 503 `ORDER_035`(결제 후 취소가 닫혀 있음 — 재시도 스케줄러 꺼짐, 고객센터 안내) |
+| `POST /api/v1/orders/{orderId}/cancellation` `{reason}` | 200 현재 상세 — 결제 대기는 `CANCELED`. 결제 완료 · 상품 준비중(제작 중은 설정)은 환불이 확정되면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(#16 PR-2). 이미 취소 완료 · 취소 요청이면 바꾸지 않고 200 | 400 `ORDER_154`(사유 없음) · `100`(모르는 사유 · 깨진 JSON) · `141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 중 이후 · 만료 · 제작 중 불허 등), `ORDER_025`(동시 변경 뒤 다시 판정 불가 — 상세를 다시 조회한 뒤 필요하면 다시 요청) · 500 `ORDER_033`(결제 완료 기록 없음) · `ORDER_034`(환불액 ≠ 승인 금액) · 409 `ORDER_037`(운영자가 이 주문의 취소를 거절함, #17 — 고객센터 안내) · 503 `ORDER_035`(결제 후 취소가 닫혀 있음 — 재시도 스케줄러 꺼짐, 고객센터 안내) |
 | `PATCH /api/v1/orders/{orderId}/purchase-confirmation` | 200 구매 확정된 상세. 이미 확정됐으면 바꾸지 않고 200 | 400 `ORDER_141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 완료 전 · 반품 등), `ORDER_025`(다른 전이가 먼저 커밋) |
 
 - **취소 범위** — 결제 전(결제 대기 → 취소 완료)은 환불이 없고 잡아 둔 재고는 `order-canceled` 이벤트로 풀린다(`order-flow-guide.md` §1-1 · §3-5).
@@ -1264,7 +1285,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   응답은 요청 끝 시점의 상세라 `CANCEL_REQUESTED` 일 수 있다 — 화면은 "취소 처리 중"으로 보이고 다시 조회해 `CANCELED` 를 확인한다. 같은 요청을 다시 보내도 환불을
   다시 부르지 않는다. 부분 취소 · 응답의 환불액 블록은 PR-2b, 반품 승인/환불 연계는 후속이다. 고객 부분 반품 접수는 아래 계약으로 제공한다. 구매 확정은 배송 완료 주문에서 가능하다.
 - **`cancelable`** — 지금 취소 버튼을 보여 줄지다. 결제 대기면 true. 결제 완료 · 상품 준비중은 결제 후 취소가 열려 있을 때(`order.cancellation.retry.enabled=true`)만 true,
-  제작 중은 거기에 `order.cancellation.allow-while-making`(기본 false)까지 켜져야 true 다. 취소 요청 · 취소 완료 · 배송 중 이후 · 만료는 false. 판정의 정본은
+  제작 중은 거기에 `order.cancellation.allow-while-making`(기본 false)까지 켜져야 true 다. 운영자가 결제 후 취소를 거절한 주문(#17)과 취소 요청 · 취소 완료 · 배송 중 이후 · 만료는 false. 판정의 정본은
   `OrderStatus#isCancelableByCustomer(allowWhileMaking, paidCancellationOpen)` 이고 결제 후 취소 접수(503 `ORDER_035`)와 같은 게이트를 쓴다. 결제 뒤 true 는 #16 PR-2 에서
   넓어진 뜻이다(FE 확인 필요 — `CANCEL_REQUESTED` 를 "취소 처리 중"으로 보여 준다).
 - **사유** — `CHANGE_OF_MIND`(단순 변심) · `ORDER_MISTAKE`(주문 내용 잘못 선택) · `PAYMENT_ISSUE`(결제 문제) · `OTHER`(기타). 자유 입력은 받지 않는다 —

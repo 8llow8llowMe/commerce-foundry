@@ -241,6 +241,7 @@ order-service · payment-service 어드민 엔드포인트 → 권한 (#587):
 | `GET /api/v1/admin/orders` · `GET /api/v1/admin/orders/{orderId}` | `ORDER_READ` | 200 | 200 | 200 |
 | `PATCH /api/v1/admin/orders/{orderId}/status` · `POST /api/v1/admin/orders/status-changes` | `ORDER_MANAGE` | 200 | 200 | 403 |
 | `GET /api/v1/admin/claims` · `GET /api/v1/admin/claims/{claimId}` | `ORDER_READ` | 200 | 200 | 200 |
+| `POST /api/v1/admin/claims/{claimId}/retries` · `…/rejection` · `…/refund-confirmation` · `…/completion` (#17 PR-A 결제 후 취소 수습) | `ORDER_MANAGE` | 200 | 200 | 403 |
 | `GET /api/v1/admin/payments` | `SETTLEMENT_READ` | 200 | 403 | 403 |
 
 - 클레임(반품 접수) 조회는 주문 업무라 `ORDER_READ` 다. 결제 목록은 금액 · 결제 수단 · PG 회신을 보는 정산 업무라 `SETTLEMENT_READ` 다.
@@ -1273,7 +1274,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | 서비스 | 행위 | 상태 |
 |--------|------|------|
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 계정 3개·OTP 4개 선언 완료, OTP 등록 시작 면제(#163) — 기존 Port · 로그 + DB 경로 유지 |
-| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor`와 조회 후 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출. 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·개인정보는 제외한다 (#17) |
+| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` · `CLAIM_RETRY` · `CLAIM_REJECT` · `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor`와 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출. 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·개인정보·처리 사유는 제외한다. 수습 4개(#17 PR-A)는 실패도 `FAILURE` 로 남긴다 (#17) |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음(`markRead` · `markAllRead`) · 온보딩 투어 기록(`updateTour` · `updateTourLegacy`)은 본인 상태라 `@AdminAuditExempt` (#163 PR-E) |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `PRODUCT_CUSTOM_ORDER_REPLACE` (`product:<id>`, #9 PR-B) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |

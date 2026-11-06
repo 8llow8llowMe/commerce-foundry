@@ -114,6 +114,20 @@ public enum OrderErrorCode {
      * 이미 접수된 취소의 재요청(현재 상세)과 결제 전 취소는 그대로 된다.
      */
     CANCELLATION_UNAVAILABLE("ORDER_035", "지금은 결제 후 취소를 처리할 수 없습니다. 고객센터에 문의해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /**
+     * 어드민 클레임 수습(#17 PR-A)의 전제가 맞지 않는다 — 클레임의 지금 상태 · 유형에서는 할 수 없는 처리다(예: 거절된 클레임의 재시도, 접수 상태의 거절,
+     * 반품 클레임의 취소 수습). 같은 결과를 다시 요청한 것(이미 거절 · 이미 확정 · 이미 완료)은 이 오류가 아니라 바꾸지 않은 200 이다.
+     */
+    CLAIM_STATUS_INVALID("ORDER_036", "현재 클레임 상태(%s)에서는 할 수 없는 처리입니다.", HttpStatus.CONFLICT),
+    /** 운영자가 이 주문의 결제 후 취소를 거절했다 (#17 PR-A) — 같은 주문의 고객 재취소는 받지 않고 고객센터로 안내한다. */
+    CANCELLATION_REJECTED("ORDER_037", "이 주문의 취소 요청은 처리되지 않았습니다. 고객센터에 문의해 주세요.", HttpStatus.CONFLICT),
+    /**
+     * 환불 결과를 확인하지 못한 클레임(REFUND_UNCONFIRMED)은 거절할 수 없다 (#17 PR-A) — PG 에서 실제로 취소됐을 수 있다. 재시도로 결과를 확인하거나,
+     * PG 에서 환불을 확인했으면 수동 환불 확정을 쓴다.
+     */
+    REFUND_UNVERIFIED("ORDER_038", "환불 결과를 확인하지 못한 클레임은 거절할 수 없습니다. 재시도하거나 환불을 확인한 뒤 수동 확정해 주세요.", HttpStatus.CONFLICT),
+    /** 취소를 거절하며 되돌릴 주문 상태를 상태 이력에서 찾지 못했다 (#17 PR-A) — 데이터 이상이라 아무것도 바꾸지 않는다. ORDER_039 · 040 은 반품 승인(PR-B) 몫이다. */
+    CANCELLATION_ORIGIN_NOT_FOUND("ORDER_041", "취소 전 주문 상태를 확인할 수 없어 거절하지 못했습니다. 주문 이력을 확인해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

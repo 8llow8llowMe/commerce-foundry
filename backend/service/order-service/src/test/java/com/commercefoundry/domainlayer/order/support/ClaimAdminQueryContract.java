@@ -84,7 +84,7 @@ public abstract class ClaimAdminQueryContract {
         "/api/v1/admin/claims?page=2147483647&size=100 | ORDER_167",
         "/api/v1/admin/claims?orderId=0 | ORDER_141",
         "/api/v1/admin/claims?type=CANCEL | ORDER_198",
-        "/api/v1/admin/claims?status=APPROVED | ORDER_198",
+        "/api/v1/admin/claims?status=CANCELED | ORDER_198",
         "/api/v1/admin/claims/0 | ORDER_166",
         "/api/v1/admin/claims/not-an-id | ORDER_198"
     })
@@ -106,6 +106,11 @@ public abstract class ClaimAdminQueryContract {
         jsonPath("$.dataBody.contents[0].expectedRefund.amount").value(0).match(result);
         jsonPath("$.dataBody.contents[0].expectedRefund.currency").value("KRW").match(result);
         jsonPath("$.dataBody.contents[1].expectedRefund").value((Object) null).match(result);
+        // 수습 칸(#17 PR-A) — 반품 접수에는 결제 아이디 · 실패 · 결정이 없고 횟수는 0 이다
+        jsonPath("$.dataBody.contents[0].paymentId").value((Object) null).match(result);
+        jsonPath("$.dataBody.contents[0].failureCode").value((Object) null).match(result);
+        jsonPath("$.dataBody.contents[0].attemptCount").value(0).match(result);
+        jsonPath("$.dataBody.contents[0].decidedById").value((Object) null).match(result);
         jsonPath("$.dataBody.totalElements").value(2).match(result);
         jsonPath("$.dataBody.page").value(0).match(result);
         jsonPath("$.dataBody.size").value(20).match(result);
