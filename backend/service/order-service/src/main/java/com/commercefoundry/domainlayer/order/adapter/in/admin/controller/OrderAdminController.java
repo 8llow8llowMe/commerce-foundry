@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.order.application.port.in.OrderAdminUseCa
 import com.commercefoundry.domainlayer.order.application.model.OrderStatusFilter;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -57,7 +58,7 @@ public class OrderAdminController {
         description = "최신 주문부터 페이지 단위로 읽는다. 상태 · 주문 기간([from, to), UTC)으로 거를 수 있고 없으면 전체다. 받는 분 이름은 가린다. "
             + "기간 시작이 끝보다 늦으면 400(ORDER_146). 결제수단 필터는 결제 연동(#14) 뒤에 더한다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.ORDER_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<OrderAdminItem>>> getOrders(
         @AuthenticationPrincipal MemberPrincipal admin,
@@ -76,7 +77,7 @@ public class OrderAdminController {
         description = "항목 · 금액 · 배송지 · 상태 이력과, 이 화면에서 지금 바꿀 수 있는 다음 상태(nextStatuses)를 본다. 배송지의 받는 분 · 연락처 · 상세 주소 · "
             + "요청 사항은 가린다. 없는 주문이면 404(ORDER_001)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.ORDER_READ)
     @GetMapping("/{orderId}")
     public ResponseEntity<Response<OrderAdminResponse>> getOrder(
         @AuthenticationPrincipal MemberPrincipal admin,
@@ -92,7 +93,7 @@ public class OrderAdminController {
             + "허용되지 않은 전이 409(ORDER_020), 결제 · 출고 · 취소 · 반품처럼 다른 흐름이 바꾸는 상태 409(ORDER_023), 맞춤 제작 상품이 없는 주문의 제작 중 409(ORDER_024), "
             + "읽은 뒤 다른 곳(고객 취소 · 결제 · 다른 운영자)이 먼저 바꿈 409(ORDER_025 — 새로고침 후 다시), 없는 주문 404(ORDER_001)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.ORDER_MANAGE)
     @AdminAudited(action = "ORDER_STATUS_CHANGE")
     @PatchMapping("/{orderId}/status")
     public ResponseEntity<Response<OrderAdminResponse>> changeStatus(
@@ -109,7 +110,7 @@ public class OrderAdminController {
             + "주문별 결과(CHANGED · UNCHANGED · FAILED)와 실패 사유가 요청 순서로 담긴다. 실패한 주문만 골라 다시 보내면 된다(이미 바뀐 주문은 UNCHANGED). "
             + "주문 아이디가 비었거나 100개를 넘거나 겹치면 400(ORDER_149 · ORDER_150)."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.ORDER_MANAGE)
     @AdminAudited(action = "ORDER_STATUS_CHANGE")
     @PostMapping("/status-changes")
     public ResponseEntity<Response<OrderStatusBulkChangeResponse>> changeStatuses(
