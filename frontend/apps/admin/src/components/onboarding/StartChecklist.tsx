@@ -3,10 +3,11 @@
 import { Button } from '@cf/ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useId, useSyncExternalStore } from 'react';
+import { useEffect, useId, useRef, useSyncExternalStore } from 'react';
 import { tourNoteOf, type TaskProgress, type TaskView } from '@/lib/onboarding/start-tasks';
 import {
   onboardingTasks,
+  refreshOnReturn,
   serverStartCardPref,
   serverTasksState,
   startCardPref,
@@ -20,7 +21,7 @@ import { serverTourState, tourProgress, type TourState } from '@/lib/tour/progre
  * - 업무 완료는 서버가 담당 서비스 사실로 판정한 값만 보인다. 카드에서 완료로 바꾸는 체크박스는 없다.
  * - 안내(투어)를 본 것은 업무 완료와 다른 문구로 따로 보인다.
  * - "안내와 함께 열기" 는 기존 투어 실행기(`TourRunner`)에 다시 보기 요청을 남기고 업무 화면으로 간다. 카드가 스스로 투어를 띄우지 않는다.
- * - 홈에 올 때마다 서버에서 다시 읽는다(다른 기기에서 한 업무 · 저장 직후 상태).
+ * - 홈에 올 때마다, 그리고 카드를 띄워 둔 채 이 탭으로 돌아올 때 서버에서 다시 읽는다(다른 기기에서 한 업무 · 저장 직후 상태).
  */
 export function StartChecklist() {
   const router = useRouter();
@@ -37,7 +38,9 @@ export function StartChecklist() {
   );
 
   useEffect(() => {
-    void onboardingTasks.load();
+    const load = () => void onboardingTasks.load();
+    load();
+    return refreshOnReturn(document, load);
   }, []);
 
   return (
@@ -89,6 +92,22 @@ export function StartChecklistView({
   const titleId = useId();
   const bodyId = useId();
   const views = tasks.tasks;
+  const showRef = useRef<HTMLButtonElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const focusAfter = useRef(false);
+
+  // 나중에 · 다시 보기는 누른 버튼이 사라진다 — 키보드 포커스를 그 자리에 생긴 버튼으로 옮긴다(문서 처음으로 튀지 않게)
+  useEffect(() => {
+    if (!focusAfter.current) return;
+    focusAfter.current = false;
+    if (pref === 'hidden') showRef.current?.focus();
+    else actionsRef.current?.querySelector('button')?.focus();
+  }, [pref]);
+
+  const swap = (next: StartCardPref) => {
+    focusAfter.current = true;
+    onPref(next);
+  };
 
   // 서버가 그릴 업무를 하나도 주지 않았다(업무가 아직 배포되지 않은 서버) — 카드를 두지 않는다
   if (views !== null && views.length === 0 && !tasks.loading && !tasks.failed) return null;
@@ -96,8 +115,9 @@ export function StartChecklistView({
   if (pref === 'hidden') {
     return (
       <button
+        ref={showRef}
         type="button"
-        onClick={() => onPref('open')}
+        onClick={() => swap('open')}
         className="self-start rounded-md px-2 py-1 text-sm text-muted-fg underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary"
       >
         시작 체크리스트 보기
@@ -131,7 +151,7 @@ export function StartChecklistView({
             {summary}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div ref={actionsRef} className="flex gap-2">
           <Button
             variant="secondary"
             aria-expanded={!collapsed}
@@ -140,7 +160,7 @@ export function StartChecklistView({
           >
             {collapsed ? '펼치기' : '접기'}
           </Button>
-          <Button variant="secondary" onClick={() => onPref('hidden')}>
+          <Button variant="secondary" onClick={() => swap('hidden')}>
             나중에
           </Button>
         </div>

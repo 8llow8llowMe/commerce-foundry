@@ -1,9 +1,11 @@
 import { ApiError } from '@cf/api-client';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { OnboardingMe, ServerTaskItem } from '@/lib/tour/onboarding-api';
 import {
   createOnboardingTasksStore,
   createStartCardPref,
+  refreshOnReturn,
+  RETURN_REFRESH_MS,
   START_CARD_PREF_KEY,
 } from './tasks-store';
 
@@ -116,6 +118,80 @@ describe('createOnboardingTasksStore', () => {
     calls[0]!.resolve(me('COMPLETED'));
     await loading;
     expect(store.get()).toEqual({ tasks: null, loading: false, failed: false });
+  });
+
+  it('다른 기기에서 업무를 하면 다시 읽을 때 서버 상태로 바뀐다 — 이 기기 기록으로 추정하지 않는다', async () => {
+    const { api, calls } = manualApi();
+    const store = createOnboardingTasksStore(api);
+    const first = store.load();
+    calls[0]!.resolve(me('NOT_COMPLETED'));
+    await first;
+    expect(store.get().tasks?.[0]?.progress).toBe('todo');
+    const again = store.load();
+    calls[1]!.resolve(me('COMPLETED'));
+    await again;
+    expect(store.get().tasks?.[0]?.progress).toBe('done');
+  });
+
+  it('업무가 실패해 서버가 미완료라고 하면 미완료로 남는다', async () => {
+    const { api, calls } = manualApi();
+    const store = createOnboardingTasksStore(api);
+    const first = store.load();
+    calls[0]!.resolve(me('NOT_COMPLETED'));
+    await first;
+    store.subscribe(() => {});
+    store.invalidate();
+    calls[1]!.resolve(me('NOT_COMPLETED'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.get()).toMatchObject({ loading: false, failed: false });
+    expect(store.get().tasks?.[0]?.progress).toBe('todo');
+  });
+});
+
+describe('refreshOnReturn', () => {
+  function fakeDoc() {
+    const listeners = new Set<() => void>();
+    return {
+      visibilityState: 'visible' as DocumentVisibilityState,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+      fire() {
+        for (const listener of listeners) listener();
+      },
+      listeners,
+    };
+  }
+
+  it('탭으로 돌아오면 다시 읽는다. 숨겨질 때 · 간격 안에서는 읽지 않는다', () => {
+    const doc = fakeDoc();
+    const load = vi.fn();
+    let t = 0;
+    refreshOnReturn(doc as unknown as Document, load, () => t);
+
+    t = RETURN_REFRESH_MS - 1;
+    doc.fire();
+    expect(load).not.toHaveBeenCalled();
+
+    t = RETURN_REFRESH_MS;
+    doc.visibilityState = 'hidden';
+    doc.fire();
+    expect(load).not.toHaveBeenCalled();
+
+    doc.visibilityState = 'visible';
+    doc.fire();
+    expect(load).toHaveBeenCalledTimes(1);
+
+    doc.fire();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('돌려준 함수로 듣기를 멈춘다(홈을 떠나면)', () => {
+    const doc = fakeDoc();
+    const stop = refreshOnReturn(doc as unknown as Document, vi.fn());
+    expect(doc.listeners.size).toBe(1);
+    stop();
+    expect(doc.listeners.size).toBe(0);
   });
 });
 
