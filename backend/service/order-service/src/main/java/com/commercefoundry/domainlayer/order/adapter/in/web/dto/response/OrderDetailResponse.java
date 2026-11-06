@@ -20,7 +20,7 @@ public record OrderDetailResponse(
     @Schema(description = "주문 상태", example = "{\"code\":\"CANCELED\",\"name\":\"취소 완료\",\"description\":\"주문이 취소되었습니다.\"}")
     CodeNameDescriptionMetadata status,
 
-    @Schema(description = "지금 취소할 수 있는가 — 결제 전(결제 대기)만 true. 결제 뒤 취소는 후속(#16 PR-2)", example = "true")
+    @Schema(description = "지금 취소를 요청할 수 있는가 — 결제 대기면 true, 결제 완료 · 상품 준비중(제작 중은 운영 설정)은 결제 후 취소가 열려 있을 때 true. 결제 뒤 취소는 환불을 거친다", example = "true")
     boolean cancelable,
 
     @Schema(description = "결제 기한 (UTC, ISO-8601)", example = "2026-10-18T09:30:00Z")

@@ -5,20 +5,41 @@ import static com.commercefoundry.domainlayer.order.support.OrderFixtures.domest
 import static com.commercefoundry.domainlayer.order.support.OrderFixtures.quoteLine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import com.commercefoundry.domainlayer.order.application.exception.ClaimRequestKeyConflictException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelQueryResult;
+import com.commercefoundry.domainlayer.order.application.service.OrderHistoryWebFacade;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.CancellationRefundPolicy;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.ClaimItem;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
+import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +58,10 @@ public abstract class ClaimCancellationPersistenceContract {
     @Autowired protected ClaimRepositoryPort claims;
     @Autowired protected JdbcTemplate jdbc;
     @Autowired protected PlatformTransactionManager transactionManager;
+    @Autowired protected OrderPaymentRepositoryPort payments;
+    @Autowired protected OrderHistoryWebFacade facade;
+    @Autowired protected OrderCancellationProcessor cancellationProcessor;
+    @Autowired protected PaymentCancelPort paymentCancelPort;
 
     protected TransactionTemplate tx() {
         return new TransactionTemplate(transactionManager);
@@ -96,7 +121,8 @@ public abstract class ClaimCancellationPersistenceContract {
         Order order = paidOrder();
         insert(newCancellation(order, NOW));
 
-        assertThatThrownBy(() -> insert(newCancellation(order, NOW))).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insert(newCancellation(order, NOW))).as("PostgreSQL 은 요청 키 충돌로 가르고, 제약 이름이 없는 H2 는 원래 예외다")
+            .isInstanceOfAny(ClaimRequestKeyConflictException.class, DataIntegrityViolationException.class);
         assertThat(jdbc.queryForObject("select count(*) from orders.claim where order_id = ?", Long.class, order.id())).isEqualTo(1);
     }
 
@@ -176,6 +202,75 @@ public abstract class ClaimCancellationPersistenceContract {
         }
         violates(() -> jdbc.update("insert into orders.claim_item (id, claim_id, order_item_id, quantity, reason, created_at, updated_at) "
             + "values (?, ?, ?, 1, 'LOST', ?, ?)", IDS.incrementAndGet(), claimId, IDS.incrementAndGet(), Timestamp.from(NOW), Timestamp.from(NOW)), "모르는 사유");
+    }
+
+    /**
+     * 같은 주문의 고객 결제 후 취소 두 건이 동시에 들어오면(#16 PR-2) 행 잠금 · 결정적 키로 클레임은 하나, 결제 취소 호출도 한 번이다. 진 쪽은 같은 취소의 재생 200 이거나
+     * 아직 커밋 전이면 409 {@code ORDER_025} 다.
+     */
+    @Test
+    void concurrentPaidCancellationsCreateOneClaimAndOneRefundCall() throws Exception {
+        Order order = paidOrder();
+        long paymentId = IDS.incrementAndGet();
+        tx().executeWithoutResult(s -> payments.insert(OrderPayment.paid(IDS.incrementAndGet(), order, paymentId, order.quote().totalAmount(), NOW,
+            UUID.randomUUID())));
+        when(paymentCancelPort.cancel(eq(paymentId), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
+
+        List<String> results = race(2, () -> {
+            try {
+                return facade.cancel(order.memberId(), order.id(), OrderCancelReason.ORDER_MISTAKE).status().code();
+            } catch (OrderException exception) {
+                return exception.getErrorCode().getCode();
+            }
+        });
+
+        assertThat(results).contains("CANCELED").allSatisfy(result -> assertThat(result).isIn("CANCELED", "CANCEL_REQUESTED", "ORDER_025"));
+        assertThat(jdbc.queryForObject("select count(*) from orders.claim where order_id = ?", Long.class, order.id())).isEqualTo(1);
+        verify(paymentCancelPort, times(1)).cancel(eq(paymentId), anyLong(), any());
+    }
+
+    /** 재시도 선점 두 건이 같은 클레임을 동시에 집으면 하나만 이긴다 — 진 쪽은 낙관적 락 예외로 원격 호출을 하지 않는다 (#16 PR-2). */
+    @Test
+    void concurrentHoldsLetOnlyOneWorkerWin() throws Exception {
+        Claim due = insert(newCancellation(paidOrder(), Instant.parse("2000-01-01T00:00:00Z")));
+
+        List<String> results = race(2, () -> {
+            try {
+                cancellationProcessor.hold(due);
+                return "WON";
+            } catch (OptimisticLockingFailureException exception) {
+                return "LOST";
+            }
+        });
+
+        assertThat(results).containsExactlyInAnyOrder("WON", "LOST");
+    }
+
+    /** 여러 스레드를 같은 시점에 출발시켜 결과(또는 예상 밖 예외의 타입 이름)를 모은다. */
+    private static List<String> race(int threads, Callable<String> task) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(threads);
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<String>> futures = new ArrayList<>();
+            for (int index = 0; index < threads; index++) {
+                futures.add(executor.submit(() -> {
+                    start.await();
+                    try {
+                        return task.call();
+                    } catch (RuntimeException exception) {
+                        return exception.getClass().getSimpleName();
+                    }
+                }));
+            }
+            start.countDown();
+            List<String> results = new ArrayList<>();
+            for (Future<String> future : futures) {
+                results.add(future.get(30, TimeUnit.SECONDS));
+            }
+            return results;
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     private static void violates(Runnable insert, String description) {

@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositor
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.global.properties.OrderCancellationProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,7 @@ class OrderHistoryPurchaseConfirmationProcessorTest {
     private final OrderRepositoryPort orders = mock(OrderRepositoryPort.class);
     private final OrderEventPort events = mock(OrderEventPort.class);
     private final SnowflakeIdGenerator ids = mock(SnowflakeIdGenerator.class);
-    private final OrderHistoryProcessor processor = new OrderHistoryProcessor(orders, events, ids);
+    private final OrderHistoryProcessor processor = new OrderHistoryProcessor(orders, events, ids, mock(OrderCancellationProperties.class));
 
     @Test
     void deliveredOrderRecordsCustomerHistoryWithoutInventoryEvent() {

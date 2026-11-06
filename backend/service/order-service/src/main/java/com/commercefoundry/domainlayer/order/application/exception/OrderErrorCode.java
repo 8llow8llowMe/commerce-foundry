@@ -105,6 +105,15 @@ public enum OrderErrorCode {
     RETURN_QUANTITY_EXCEEDED("ORDER_030", "이미 접수한 반품을 포함하면 주문 수량을 넘습니다.", HttpStatus.CONFLICT),
     RETURN_KEY_REUSED("ORDER_031", "같은 Idempotency-Key 로 다른 반품을 요청할 수 없습니다.", HttpStatus.CONFLICT),
     NOT_FOUND_CLAIM("ORDER_032", "존재하지 않는 클레임입니다.", HttpStatus.NOT_FOUND),
+    /** 결제 완료 계열 주문인데 결제 반영 기록(order_payment PAID)이 없다 — 데이터 이상이라 취소를 접수하지 않는다 (#16 PR-2). */
+    CANCELLATION_PAYMENT_MISSING("ORDER_033", "결제 정보를 확인할 수 없어 취소를 접수하지 못했습니다. 고객센터에 문의해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
+    /** 전체 취소 환불액(주문 스냅숏 총액)과 결제 반영 기록의 승인 금액 · 통화가 다르다 — 데이터 이상이라 취소를 접수하지 않는다 (#16 PR-2). */
+    CANCELLATION_AMOUNT_MISMATCH("ORDER_034", "결제 금액을 확인할 수 없어 취소를 접수하지 못했습니다. 고객센터에 문의해 주세요.", HttpStatus.INTERNAL_SERVER_ERROR),
+    /**
+     * 결제 후 취소가 닫혀 있다 — 환불 · 재고 복원 재시도({@code order.cancellation.retry.enabled})가 꺼진 동안은 결제 후 취소를 접수하지 않는다 (#16 PR-2).
+     * 이미 접수된 취소의 재요청(현재 상세)과 결제 전 취소는 그대로 된다.
+     */
+    CANCELLATION_UNAVAILABLE("ORDER_035", "지금은 결제 후 취소를 처리할 수 없습니다. 고객센터에 문의해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

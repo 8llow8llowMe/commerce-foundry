@@ -22,13 +22,21 @@ public record OrderCancellationProperties(
     }
 
     /**
+     * 결제 후 고객 취소를 받는가 — 재시도 스케줄러가 켜져 있을 때만이다. 꺼진 채 받으면 미확정 환불 · 재고 복원이 영영 따라오지 않는다
+     * (돈은 나갔는데 주문 · 재고가 남는다). 닫혀 있으면 결제 후 상태의 취소는 503 {@code ORDER_035} 이고 {@code cancelable} 도 false 다.
+     */
+    public boolean paidCancellationOpen() {
+        return retry.enabled();
+    }
+
+    /**
      * 미확정 환불 · 재고 복원의 재시도 (#16 PR-2). 다음 시각은 {@code min(maxBackoff, initialBackoff × 2^횟수)} 다.
      * 환불 단계에서 {@code maxAttempts} 를 넘으면 REFUND_FAILED 로 어드민에 넘긴다 — payment 의 취소 키 유효 기간(14일) 안에서 끝나야 한다.
      *
-     * @param enabled 스케줄러를 켜는가. 기본 false — 운영 개방은 결제 개방(#15)과 함께 정한다
+     * @param enabled 스케줄러를 켜는가. 기본 false — 운영 개방은 결제 개방(#15)과 함께 정한다. 꺼져 있으면 결제 후 고객 취소도 받지 않는다({@link #paidCancellationOpen()})
      * @param interval 스케줄러 주기
-     * @param batchSize 한 번에 집는 클레임 수 (1~100)
-     * @param maxAttempts 단계별 재시도 상한 (1~1000)
+     * @param batchSize 한 번에 집는 클레임 수 (1~100). 한 번 실행은 {@code lease} 의 절반을 넘기면 남은 행을 다음 실행으로 넘긴다
+     * @param maxAttempts 단계별 재시도 횟수 상한 (1~1000) — 한 단계는 첫 시도 + 재시도 {@code maxAttempts} 회까지 하고, 그다음 미확정이면 종결 실패(*_UNCONFIRMED)다
      * @param initialBackoff 첫 재시도 간격
      * @param maxBackoff 재시도 간격 상한 — {@code initialBackoff} 이상
      * @param lease 고객 요청이 접수한 클레임을 직접 처리할 시간(30초~1시간). 접수 때 다음 시도 시각을 {@code now + lease} 로 두어 스케줄러가 처리 중인 클레임을

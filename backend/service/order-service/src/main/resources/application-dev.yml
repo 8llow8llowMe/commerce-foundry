@@ -11,3 +11,9 @@ springdoc:
     enabled: true
   swagger-ui:
     enabled: true
+
+order:
+  cancellation:
+    retry:
+      # dev 는 결제 후 취소를 열어 둔다 — 재시도 스케줄러가 꺼져 있으면 결제 후 취소는 503 ORDER_035 다 (#16 PR-2)
+      enabled: true

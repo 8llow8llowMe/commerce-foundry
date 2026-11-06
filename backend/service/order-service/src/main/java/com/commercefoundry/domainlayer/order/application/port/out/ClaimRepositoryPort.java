@@ -13,7 +13,12 @@ public interface ClaimRepositoryPort {
     /** REQUESTED 반품의 항목별 수량을 한 번에 읽는다. */
     Map<Long, Long> sumRequestedReturnQuantities(long orderId);
 
-    /** 호출자의 주문 잠금 트랜잭션에 참여한다. */
+    /**
+     * 호출자의 주문 잠금 트랜잭션에 참여한다.
+     *
+     * @throws com.commercefoundry.domainlayer.order.application.exception.ClaimRequestKeyConflictException 같은 주문 · 같은 요청 키의 클레임이 이미 있을 때(PostgreSQL).
+     *     그 밖의 제약 위반은 {@code DataIntegrityViolationException} 그대로다
+     */
     Claim insert(Claim claim);
 
     /**

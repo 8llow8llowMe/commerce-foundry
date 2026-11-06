@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 고객 주문 내역 · 상세 (#16). 항목 · 금액 · 배송비 · 배송지 모양은 주문 생성 응답과 같다 — {@link OrderQuoteWebPresenter} · {@link OrderWebPresenter} 의 변환을 쓴다.
+ * {@code cancelable} 은 application 이 판정한 값을 옮기기만 한다(#16 PR-2 — 결제 후 취소 게이트 · 제작 중 설정이 섞인 정책이다).
  */
 @Component
 @RequiredArgsConstructor
@@ -23,11 +24,12 @@ public class OrderHistoryWebPresenter {
         return SliceResponse.of(slice).map(OrderHistoryWebPresenter::toSummaryItem);
     }
 
-    public OrderDetailResponse toDetailResponse(Order order) {
+    /** @param cancelable Processor 가 판정한 지금 취소 가능 여부 */
+    public OrderDetailResponse toDetailResponse(Order order, boolean cancelable) {
         return OrderDetailResponse.builder()
             .orderId(String.valueOf(order.id()))
             .status(order.status().toMetadata())
-            .cancelable(order.isCancelableByCustomer())
+            .cancelable(cancelable)
             .paymentDueAt(order.paymentDueAt())
             .currency(order.quote().currency().name())
             .items(orderQuoteWebPresenter.toLineItems(order.quote().lines()))
