@@ -110,7 +110,9 @@ class ProductAdminAuthorizationMappingTest {
                 assertThat(mapping.getMethodsCondition().getMethods()).as("%s 는 HTTP 메서드를 하나로 고정한다", pattern).hasSize(1);
                 PreAuthorize preAuthorize = AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(), PreAuthorize.class);
                 String expression = preAuthorize == null ? "@PreAuthorize 없음" : preAuthorize.value();
-                actual.put(mapping.getMethodsCondition().getMethods().iterator().next() + " " + pattern, expression);
+                String key = mapping.getMethodsCondition().getMethods().iterator().next() + " " + pattern;
+                assertThat(actual).as("%s 에 조건만 다른 핸들러가 둘이면 표 대조가 한쪽을 놓친다", key).doesNotContainKey(key);
+                actual.put(key, expression);
             }));
 
         assertThat(actual).as("어드민 핸들러 → AdminAuthority (security-guide.md §3-1)").containsExactlyInAnyOrderEntriesOf(EXPECTED);
