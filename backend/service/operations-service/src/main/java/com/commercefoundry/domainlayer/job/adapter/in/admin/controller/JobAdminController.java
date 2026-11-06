@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.job.application.model.JobStatusFilter;
 import com.commercefoundry.domainlayer.job.application.port.in.JobAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -51,7 +52,7 @@ public class JobAdminController {
         description = "등록 최신순(아이디 내림차순)으로 페이지 단위로 읽는다. 상태 · 종류로 거를 수 있고, 없으면 전체다. 조건에 맞는 작업이 없으면 빈 목록이다. "
             + "입력 · 결과 JSON 은 상세에서 본다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.REPORT_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<JobAdminItem>>> getJobs(
         @Parameter(description = "상태. 없으면 전체") @RequestParam(required = false) JobStatusFilter status,
@@ -68,7 +69,7 @@ public class JobAdminController {
         summary = "작업 상세 조회",
         description = "상태 · 진행률 · 시도 · 입력 · 결과 · 오류를 본다. 작업이 실패해도 200 이고 status 가 FAILED, errorCode 가 이유다. 없는 작업이면 404(JOB_001)다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.REPORT_READ)
     @GetMapping("/{jobId}")
     public ResponseEntity<Response<JobAdminResponse>> getJob(
         @Parameter(description = "작업 아이디") @PathVariable @Positive(message = JobValidationMessage.JOB_ID_POSITIVE) long jobId
@@ -82,7 +83,7 @@ public class JobAdminController {
             + "CANCELLED 가 되고, 그 전에 끝나면 그 결과로 끝난다. 이미 취소를 요청한 실행 중 작업에 다시 보내도 같은 응답이다(멱등). "
             + "이미 끝난 작업이면 409(JOB_022), 없는 작업이면 404(JOB_001)다. 워커와 계속 겹쳐 반영하지 못하면 409(JOB_021) — 다시 시도한다."
     )
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.REPORT_MANAGE)
     @AdminAudited(action = "JOB_CANCEL")
     @PostMapping("/{jobId}/cancel")
     public ResponseEntity<Response<JobAdminResponse>> cancel(

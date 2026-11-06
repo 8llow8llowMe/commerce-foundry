@@ -11,7 +11,9 @@ package com.commercefoundry.security.principal;
  * <ul>
  *   <li>기능 상수는 {@link AdminPermission#authority()} 와 1:1 이다 ({@code AdminAuthorityTest} 가 대조한다).
  *       {@code MANAGE} 가 {@code READ} 를 포함하지 않는다 — 조회 핸들러는 {@code *_READ}, 변경 핸들러는 {@code *_MANAGE} 를 쓴다.</li>
- *   <li>{@link #OPERATOR} 는 기능과 무관하게 운영자 본인에게 열린 API(내 비밀번호 · 내 OTP)에만 쓴다. 역할 목록은 {@link MemberRole#OPERATOR_ROLES} 와 같다.</li>
+ *   <li>{@link #OPERATOR} 는 기능과 무관하게 운영자 본인에게 열린 API(내 비밀번호 · 내 OTP · 내 알림 · 내 온보딩 진행)에만 쓴다.
+ *       역할 목록은 {@link MemberRole#OPERATOR_ROLES} 와 같다.</li>
+ *   <li>어드민 핸들러의 식은 이 상수만 쓴다. 정적 규칙 · 인가 스모크는 #236 이전 표기 {@code hasRole('ADMIN')} 을 받지 않는다 (#588).</li>
  * </ul>
  */
 public final class AdminAuthority {

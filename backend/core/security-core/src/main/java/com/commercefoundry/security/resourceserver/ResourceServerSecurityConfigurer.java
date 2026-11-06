@@ -31,7 +31,7 @@ import tools.jackson.databind.json.JsonMapper;
  *       노출하지 않은 엔드포인트는 이 규칙에 걸리지 않고 404 다 — 노출 설정이 1차, URL 규칙이 2차 방어다. management base-path 를 바꿔도 따라간다.
  *       실행 모듈은 actuator 를 가진다는 전제다({@code backend/build.gradle} 이 실행 모듈마다 넣는다).</li>
  *   <li>{@code /api/v1/admin/**} 은 URL 규칙으로 운영자 역할({@link MemberRole#OPERATOR_ROLES})을 요구한다. 기능 단위 판정은 컨트롤러 메서드의
- *       {@code @PreAuthorize}({@code AdminAuthority} 상수 또는 {@code hasRole('ADMIN')}) 가 맡는다 — URL 층은 고객 · 익명을 끊는 1차 방어다.</li>
+ *       {@code @PreAuthorize}({@code AdminAuthority} 상수) 가 맡는다 — URL 층은 고객 · 익명을 끊는 1차 방어다.</li>
  *   <li>{@code /internal/**} 은 이 체인에서 {@code denyAll} 이다(익명 001 · 로그인 005). 서비스 토큰으로 여는 것은 그보다 앞 순서의
  *       {@link InternalResourceServerConfigurer} 체인이다 — 서비스가 그 import 를 빠뜨려도 internal API 가 열리지 않는다(fail-closed).
  *       internal 컨트롤러 메서드는 허용 호출자를 {@code @PreAuthorize("hasAuthority('SERVICE_<service-id>')")} 로 반드시 선언한다.</li>

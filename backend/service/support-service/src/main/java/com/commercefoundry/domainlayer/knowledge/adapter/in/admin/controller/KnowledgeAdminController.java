@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.knowledge.adapter.in.admin.dto.response.K
 import com.commercefoundry.domainlayer.knowledge.application.port.in.KnowledgeAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
+import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -44,7 +45,7 @@ public class KnowledgeAdminController {
     private final KnowledgeAdminUseCase useCase;
 
     @Operation(summary = "지식 목록 조회", description = "최신 리비전 요약을 문서 아이디 내림차순으로 반환한다. 본문은 상세에서 조회한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CS_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<KnowledgeAdminResponses.Summary>>> list(
         @ParameterObject @Valid @ModelAttribute KnowledgeAdminRequests.ListQuery request
@@ -53,7 +54,7 @@ public class KnowledgeAdminController {
     }
 
     @Operation(summary = "지식 상세 조회", description = "문서 포인터와 최신 리비전 내용 · 승인 정보 · 낙관적 잠금 버전을 반환한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CS_READ)
     @GetMapping("/{documentId}")
     public ResponseEntity<Response<KnowledgeAdminResponses.Detail>> get(
         @Parameter(description = "문서 아이디") @PathVariable @Positive(message = DOCUMENT_ID) long documentId
@@ -62,7 +63,7 @@ public class KnowledgeAdminController {
     }
 
     @Operation(summary = "지식 문서 생성", description = "문서와 첫 초안을 생성한다. 요청 재시도의 멱등성은 보장하지 않는다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CS_MANAGE)
     @AdminAudited(action = "KNOWLEDGE_CREATE")
     @PostMapping
     public ResponseEntity<Response<KnowledgeAdminResponses.Detail>> create(
@@ -74,7 +75,7 @@ public class KnowledgeAdminController {
     }
 
     @Operation(summary = "최신 초안 전체 편집", description = "최신 DRAFT만 편집한다. 리비전 버전 충돌은 409다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CS_MANAGE)
     @AdminAudited(action = "KNOWLEDGE_EDIT")
     @PutMapping("/{documentId}")
     public ResponseEntity<Response<KnowledgeAdminResponses.Detail>> edit(
@@ -87,7 +88,7 @@ public class KnowledgeAdminController {
     }
 
     @Operation(summary = "새 초안 생성", description = "기존 게시본은 유지한다. 이전 문서 버전으로 재시도하면 409이므로 재조회해야 한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.CS_MANAGE)
     @AdminAudited(action = "KNOWLEDGE_DRAFT_CREATE")
     @PostMapping("/{documentId}/revisions")
     public ResponseEntity<Response<KnowledgeAdminResponses.Detail>> createDraft(
@@ -100,7 +101,7 @@ public class KnowledgeAdminController {
     }
 
     @Operation(summary = "최신 초안 승인", description = "인증된 관리자를 승인자로 기록한다. 승인 후 내용은 새 초안으로만 변경한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "KNOWLEDGE_APPROVE")
     @PostMapping("/{documentId}/approve")
     public ResponseEntity<Response<KnowledgeAdminResponses.Detail>> approve(
@@ -112,7 +113,7 @@ public class KnowledgeAdminController {
     }
 
     @Operation(summary = "최신 승인본 게시", description = "문서 · 리비전 버전을 모두 검사한다. 현재 게시본의 동일 요청은 버전 검사 전에 성공한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "KNOWLEDGE_PUBLISH")
     @PostMapping("/{documentId}/publish")
     public ResponseEntity<Response<KnowledgeAdminResponses.Detail>> publish(
@@ -125,7 +126,7 @@ public class KnowledgeAdminController {
     }
 
     @Operation(summary = "지식 리비전 보관", description = "물리 삭제 없이 ARCHIVED로 바꾼다. 현재 게시본이면 게시 포인터를 지운다. 보관된 대상의 재요청은 성공한다.")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "KNOWLEDGE_ARCHIVE")
     @DeleteMapping("/{documentId}")
     public ResponseEntity<Response<Void>> archive(
