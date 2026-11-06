@@ -265,19 +265,88 @@ class MemberTest {
     }
 
     @Test
-    @DisplayName("대표 관리자 계정은 활성 대표 관리자만 끈다 — 매니저 · 스태프 · 행위자 없음은 거절, 매니저 · 스태프 계정은 행위자를 따지지 않는다 (#236)")
-    void canBeDeactivatedBy() {
+    @DisplayName("대표 관리자 계정의 역할 · 상태는 활성 대표 관리자만 바꾼다 — 매니저 · 스태프 · 행위자 없음은 거절, 매니저 · 스태프 계정은 행위자를 따지지 않는다 (#236)")
+    void canBeManagedBy() {
         Member owner = operator(2L, MemberRole.OWNER);
         Member manager = operator(3L, MemberRole.MANAGER);
         Member formerAdmin = operator(6L, MemberRole.ADMIN).deactivate(Instant.parse("2026-11-03T00:00:00Z"));
 
-        assertThat(owner.canBeDeactivatedBy(Optional.of(operator(1L, MemberRole.ADMIN)))).isTrue();
-        assertThat(owner.canBeDeactivatedBy(Optional.of(owner))).isTrue();
-        assertThat(owner.canBeDeactivatedBy(Optional.of(manager))).isFalse();
-        assertThat(owner.canBeDeactivatedBy(Optional.of(operator(4L, MemberRole.STAFF)))).isFalse();
-        assertThat(owner.canBeDeactivatedBy(Optional.of(formerAdmin))).isFalse();
-        assertThat(owner.canBeDeactivatedBy(Optional.empty())).isFalse();
-        assertThat(manager.canBeDeactivatedBy(Optional.empty())).isTrue();
+        assertThat(owner.canBeManagedBy(Optional.of(operator(1L, MemberRole.ADMIN)))).isTrue();
+        assertThat(owner.canBeManagedBy(Optional.of(owner))).isTrue();
+        assertThat(owner.canBeManagedBy(Optional.of(manager))).isFalse();
+        assertThat(owner.canBeManagedBy(Optional.of(operator(4L, MemberRole.STAFF)))).isFalse();
+        assertThat(owner.canBeManagedBy(Optional.of(formerAdmin))).isFalse();
+        assertThat(owner.canBeManagedBy(Optional.empty())).isFalse();
+        assertThat(manager.canBeManagedBy(Optional.empty())).isTrue();
+    }
+
+    @ParameterizedTest(name = "{0} 가 {1} 를 주면 {2}")
+    @CsvSource({
+        "ADMIN,   OWNER,   true",
+        "OWNER,   OWNER,   true",
+        "OWNER,   MANAGER, true",
+        "OWNER,   STAFF,   true",
+        "MANAGER, OWNER,   false",
+        "MANAGER, MANAGER, true",
+        "MANAGER, STAFF,   true",
+        "STAFF,   OWNER,   false",
+        "STAFF,   MANAGER, false",
+        "STAFF,   STAFF,   true",
+        "ADMIN,   ADMIN,   false",
+        "OWNER,   ADMIN,   false",
+        "OWNER,   CUSTOMER, false"
+    })
+    @DisplayName("줄 수 있는 역할 — 대표 관리자 역할은 대표 관리자만, 대표 관리자가 아니면 자기보다 높은 역할은 못 준다. ADMIN · CUSTOMER 는 누구도 못 준다 (#236)")
+    void canAssignRole(MemberRole actorRole, MemberRole newRole, boolean allowed) {
+        assertThat(Member.canAssignRole(Optional.of(operator(1L, actorRole)), newRole)).isEqualTo(allowed);
+    }
+
+    @Test
+    @DisplayName("행위자가 없거나 꺼졌으면 어떤 역할도 줄 수 없다 (#236)")
+    void inactiveActorCannotAssignRole() {
+        Member formerOwner = operator(1L, MemberRole.OWNER).deactivate(Instant.parse("2026-11-03T00:00:00Z"));
+
+        assertThat(Member.canAssignRole(Optional.of(formerOwner), MemberRole.STAFF)).isFalse();
+        assertThat(Member.canAssignRole(Optional.empty(), MemberRole.STAFF)).isFalse();
+    }
+
+    @Test
+    @DisplayName("역할 변경은 역할만 바꾸고 다른 값은 그대로다 — 같은 역할이면 같은 값 (#236)")
+    void changeRole() {
+        Member manager = operator(3L, MemberRole.MANAGER);
+
+        assertThat(manager.changeRole(MemberRole.STAFF)).isEqualTo(Member.restore(3L, "3@example.com", HASH, "운영", null, MemberRole.STAFF, 0L));
+        assertThat(manager.changeRole(MemberRole.MANAGER)).isEqualTo(manager);
+    }
+
+    @Test
+    @DisplayName("고객의 역할은 바꾸지 않고, 운영자에게 고객 역할을 주지 않는다 — 호출 코드의 오류다 (#236)")
+    void changeRoleRejectsCustomer() {
+        Member customer = Member.restore(1L, "a@example.com", HASH, "홍길동", null, MemberRole.CUSTOMER, 0L);
+
+        assertThatThrownBy(() -> customer.changeRole(MemberRole.STAFF)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> operator(2L, MemberRole.STAFF).changeRole(MemberRole.CUSTOMER)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("역할 변경으로 이행용 ADMIN 을 주지 않는다 — ADMIN 에서 OWNER 로는 바꾼다 (#236)")
+    void changeRoleRejectsAdmin() {
+        assertThatThrownBy(() -> operator(2L, MemberRole.MANAGER).changeRole(MemberRole.ADMIN)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> operator(3L, MemberRole.OWNER).changeRole(MemberRole.ADMIN)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(operator(4L, MemberRole.ADMIN).changeRole(MemberRole.OWNER).role()).isEqualTo(MemberRole.OWNER);
+    }
+
+    @Test
+    @DisplayName("재활성화는 비활성화 시각만 지운다 — 비밀번호 해시는 그대로 (#236)")
+    void reactivate() {
+        Member former = operator(3L, MemberRole.MANAGER).deactivate(Instant.parse("2026-11-03T00:00:00Z"));
+
+        Member reactivated = former.reactivate();
+
+        assertThat(reactivated.isActiveOperator()).isTrue();
+        assertThat(reactivated).isEqualTo(operator(3L, MemberRole.MANAGER));
+        assertThatThrownBy(() -> Member.restore(1L, "a@example.com", HASH, "홍길동", null, MemberRole.CUSTOMER, 0L).reactivate())
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static Member operator(long id, MemberRole role) {
@@ -310,6 +379,25 @@ class MemberTest {
         @DisplayName("이름이 공백만이면(전각 공백 포함) 거절한다")
         void blankName(String name) {
             assertThatThrownBy(() -> Member.admin(1L, "admin@example.com", HASH, name)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = MemberRole.class, names = {"OWNER", "MANAGER", "STAFF"})
+        @DisplayName("운영자 계정은 줄 수 있는 역할(OWNER · MANAGER · STAFF) 그대로 만들고 이메일 · 이름을 정규화한다 (#236)")
+        void createsOperator(MemberRole role) {
+            Member operator = Member.operator(1L, "  Staff@Example.COM ", HASH, " 직원 ", role);
+
+            assertThat(operator).extracting(Member::email, Member::name, Member::phone, Member::role, Member::version, Member::deactivatedAt)
+                .containsExactly("staff@example.com", "직원", null, role, null, null);
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = MemberRole.class, names = {"CUSTOMER", "ADMIN"})
+        @NullSource
+        @DisplayName("줄 수 있는 역할이 아니면 운영자 계정을 만들지 않는다 — 이행용 ADMIN 은 Member.admin() 으로만 만든다 (#236)")
+        void operatorRejectsNonOperatorRole(MemberRole role) {
+            assertThatThrownBy(() -> Member.operator(1L, "staff@example.com", HASH, "직원", role))
+                .isInstanceOfAny(IllegalArgumentException.class, NullPointerException.class);
         }
     }
 }

@@ -101,6 +101,15 @@ class AdminOtpPersistenceTest {
     }
 
     @Test
+    @DisplayName("운영자 목록의 OTP 등록 여부 — 자격이 있는 회원 아이디만 in 절 한 번으로 돌려주고, 빈 목록은 질의 없이 빈 집합이다 (#236)")
+    void findEnrolledMemberIds() {
+        port.save(confirmed(5101L, 1101L, 1L));
+
+        assertThat(port.findEnrolledMemberIds(List.of(1101L, 1102L))).containsExactly(1101L);
+        assertThat(port.findEnrolledMemberIds(List.of())).isEmpty();
+    }
+
+    @Test
     @DisplayName("회원당 하나 — 같은 회원으로 두 번 저장하면 uk_admin_otp_credential_member_id 가 막고 AUTH_037 이다")
     void memberIdUnique() {
         port.save(confirmed(5002L, 1002L, 1L));
