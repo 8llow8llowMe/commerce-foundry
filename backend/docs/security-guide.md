@@ -186,14 +186,37 @@ PR-A는 권한 이름과 역할표를 도입하고 `auth.member.role`의 check �
 시스템 알림 수신자(#477 `AdminNotificationRecipientQueryAdapter`)·"마지막 관리자" 가드(`AdminAccountProcessor#deactivate`)는 `OWNER_ROLES`만 센다
 (#236 PR-A2). 매니저·스태프에게 운영 경보를 넓히지 않고, 대표 관리자(`ADMIN`·`OWNER`)가 한 명 남으면 그 사람은 끌 수 없다 — 매니저·스태프만 남으면
 운영자 계정을 관리할 사람이 없다. 매니저·스태프는 대표 관리자 수와 무관하게 끌 수 있다. 비활성화는 활성 운영자 전체를 한 번에 잠가 읽어 동시 요청도 줄을 세운다.
-판정은 도메인(`Member.isLastActiveOwner` · `Member#canBeDeactivatedBy`)에 있고, 대표 관리자 계정은 활성 대표 관리자만 끈다(403 `AUTH_046`, 메서드 보안 뒤의 이중 방어).
+판정은 도메인(`Member.isLastActiveOwner` · `Member#canBeManagedBy` · `Member.canAssignRole`)에 있고, 대표 관리자 계정의 역할 · 상태는 활성 대표 관리자만 바꾼다
+(403 `AUTH_046`, 메서드 보안 뒤의 이중 방어). 마지막 활성 대표 관리자를 매니저 · 스태프로 내리는 것도 같은 잠금 안에서 막는다(409 `AUTH_048`, PR-B1 — 판정 순서는 아래).
 알림 수신자 · 잠금 조회는 `role in (...)` 다값 조건이라 `(role, deactivated_at, id)` 인덱스로 정렬까지 끝나지 않고 아이디 정렬(Sort)이 붙는다 — 대표 관리자 · 운영자 수가 작아 비용은 무시할 만하다.
 
 **auth-service 계정 경로 (#236 PR-A2).** 관리자 로그인(`MemberLoginProcessor#authenticateAdmin`)과 관리자 access 발급(`AuthTokenProcessor#issueAdminAccessToken`)은
 운영자 역할 전체(`Member#isActiveOperator`)를 받는다. 비밀번호 변경·비활성화·OTP 대상 판정도 운영자 전체다. 고객 로그인 발급(`issueForLogin`)은 고객만 받는다 —
 운영자 계정에 refresh family 를 붙이지 않는 규칙을 호출 실수로도 깨지 않게 `IllegalArgumentException` 으로 막는다(§11-1).
-**계정 발급은 아직 `ADMIN`이다** — 운영자 추가(`Member.admin()`)·초기 시드는 계속 `ADMIN` 행을 만든다. 어드민 화면이 `'ADMIN'` 리터럴로 세션을 판정하므로
-`OWNER`·`MANAGER`·`STAFF` 발급은 화면 전환(#237)과 함께 연다. 시드의 "이미 있는 관리자" 판정은 운영자 전체(`isOperator`)다.
+**새 역할 발급은 플래그 뒤에 있다 (PR-B1).** 역할 없는 운영자 추가(`Member.admin()`)·초기 시드는 계속 `ADMIN` 행을 만든다. 역할을 지정한 추가
+(`Member.operator()`, `role` = `OWNER`·`MANAGER`·`STAFF`)와 역할 변경(`PATCH /admins/{memberId}/role`)은 `auth.operator-roles.issuance-enabled`
+(`OperatorRoleProperties`, 기본 `false`, 환경변수 `AUTH_OPERATOR_ROLES_ISSUANCE_ENABLED`)가 켜져야 받고, 꺼져 있으면 409 `AUTH_049` 다 —
+어드민 화면이 `'ADMIN'` 리터럴로 세션을 판정하므로 화면 전환(#237) 뒤에 켠다. 목록 · 상태 변경은 플래그와 무관하다. 시드의 "이미 있는 관리자" 판정은 운영자 전체(`isOperator`)다.
+
+**운영자 계정 관리 규칙 (PR-B1).** 줄 수 있는 역할은 `OWNER`·`MANAGER`·`STAFF` 이고(`ADMIN` 은 이행용이라 새로 주지 않는다, 400 `AUTH_159`),
+대표 관리자 역할은 활성 대표 관리자만 주며 대표 관리자가 아닌 행위자는 자기보다 높은 역할을 주지 못한다(스태프 < 매니저 < 대표 관리자, 403 `AUTH_046`).
+역할 · 상태 변경의 대상이 행위자 본인이면 400 `AUTH_047` 이다 — 스스로 강등 · 정지해 대표 관리자가 사라지는 실수를 막는다(본문 없는 이전 `PATCH /admins/{memberId}` 는
+#193 동작 그대로 본인도 끈다). 역할 변경 · 정지는 저장 → 컷오프(§11-3) → 감사 순서이고, 같은 역할 · 같은 상태여도 200 이며 컷오프를 다시 쓴다 —
+컷오프 쓰기가 실패한 503 `AUTH_013` 을 같은 요청 재시도로 복구한다. 재활성화는 컷오프를 쓰지 않고, 끄기 전 비밀번호 · OTP 자격을 그대로 되살린다(의도 —
+OTP 를 잃었으면 동료 OTP 복구 #238 PR-C 를 쓴다).
+**운영 주의: 끈 이유가 계정 유출(비밀번호 · OTP 기기 분실 · 퇴사자 공유 의심)이면 재활성화하지 말고 새 계정을 만든다** — 재활성화하면 옛 비밀번호 · OTP 가 그대로 살아난다.
+
+**판정 순서 (PR-B1).** 역할 변경: 발급 플래그(409 `AUTH_049`) → 본인(400 `AUTH_047`) → 대상 없음 · 고객 · 꺼짐(404 `AUTH_033`) → 관리 권한 · 줄 수 있는 역할
+(403 `AUTH_046`) → 마지막 대표 관리자 강등(409 `AUTH_048`). 사용 여부 변경: 본인(047) → 대상 없음 · 고객(033) → 관리 권한(046) → 마지막 대표 관리자 정지(409 `AUTH_031`).
+관리 권한(403)을 마지막 대표 관리자 판정(409)보다 먼저 본다 — 대표 관리자가 아닌 행위자에게 대상이 "마지막 대표 관리자"인지 새지 않게. 그 결과 지금 규칙에서
+048 · 031 은 정상 경로로 닿지 않는 방어다(대표 관리자 대상은 다른 활성 대표 관리자만 바꾸므로 대표 관리자가 둘 이상이다). 본문 없는 이전 PATCH 는 #193 순서
+(046 → 031, 본인 허용) 그대로다. 대표 두 명이 서로를 동시에 강등 · 정지해도 활성 운영자 전체 잠금이 줄을 세워 뒤 요청은 403 이다(`AdminAccountConcurrencyTest`, PostgreSQL).
+**운영자 추가도 행위자를 DB 로 다시 판정한다** — 행위자 행을 잠가 읽고, 역할 없는 추가(ADMIN)는 활성 대표 관리자만, 역할을 준 추가는 그 역할을 줄 수 있는
+행위자만 받는다(403 `AUTH_046`). 강등 · 정지 뒤 컷오프가 실패해 옛 대표 관리자 토큰이 살아 있어도 운영자를 만들지 못한다. 도메인도 `Member.operator()` ·
+`changeRole` 에 `ADMIN` · `CUSTOMER` 를 받지 않는다(`Member.ASSIGNABLE_ROLES`) — `ADMIN` 은 `Member.admin()`(시드 · 역할 없는 추가)으로만 만든다.
+
+**ADMIN → OWNER 이행 경로.** 본인 역할은 바꿀 수 없으므로(`AUTH_047`) 대표 관리자가 기존 `ADMIN` 한 명뿐인 가게는, 플래그를 켠 뒤 그 `ADMIN` 이 먼저
+`OWNER` 계정을 하나 만들고(`POST /admins {role: OWNER}`), 그 `OWNER` 가 기존 `ADMIN` 을 `OWNER` 로 바꾼다. 일괄 이행 · 플래그 제거는 #237 뒤 후속이다.
 
 auth-service 어드민 엔드포인트 → 권한:
 
@@ -201,7 +224,9 @@ auth-service 어드민 엔드포인트 → 권한:
 |------------|----------------------|---------------|---------|-------|
 | `GET /api/v1/admin/members` | `CS_READ` | 200 | 200 | 200 |
 | `GET /api/v1/admin/audit-logs` | `SECURITY_READ` | 200 | 403 | 403 |
-| `POST /api/v1/admin/admins` · `PATCH /api/v1/admin/admins/{memberId}` | `STAFF_MANAGE` | 200 | 403 | 403 |
+| `GET /api/v1/admin/admins` (운영자 목록, PR-B1) | `STAFF_READ` | 200 | 403 | 403 |
+| `POST /api/v1/admin/admins` · `PATCH /api/v1/admin/admins/{memberId}/role` · `PATCH /api/v1/admin/admins/{memberId}/status` | `STAFF_MANAGE` | 200 | 403 | 403 |
+| `PATCH /api/v1/admin/admins/{memberId}` (본문 없는 비활성화, deprecated — #237 뒤 제거) | `STAFF_MANAGE` | 200 | 403 | 403 |
 | `POST /api/v1/admin/admins/{memberId}/otp/recovery` (동료 OTP 복구) | `SECURITY_MANAGE` | 200 | 403 | 403 |
 | `PATCH /api/v1/admin/me/password` · `/api/v1/admin/me/otp` 5개 | `OPERATOR` | 200 | 200 | 200 |
 
@@ -1113,6 +1138,10 @@ Spring 컨텍스트를 띄우지 않는다. `./gradlew check` 에서 돈다. 새
   어드민은 상품을 파는 사업자의 직원 계정이다. 고객 이메일은 관리자로 승격하지 않는다. 마지막 활성 대표 관리자(`ADMIN`·`OWNER`)는 끄지 못한다(409 `AUTH_031`,
 문구는 #237 전까지 "마지막 관리자는 …" 그대로). 매니저·스태프는 대표 관리자 수와 무관하게 끌 수 있다(§3-1). 대표 관리자 계정은 활성 대표 관리자만 끈다(403 `AUTH_046`).
 추가·비활성화는 `STAFF_MANAGE`, 본인 비밀번호는 `OPERATOR` 다.
+  운영자 목록 · 역할 변경 · 사용 여부 변경(`GET /admins` · `PATCH /admins/{memberId}/role` · `PATCH /admins/{memberId}/status`)은 #236 PR-B1 이다(§3-1).
+  역할 변경과 정지(`active=false`)도 같은 컷오프를 쓴다 — 바뀐 역할은 다시 로그인한 새 토큰부터 적용되고, 옛 토큰은 게이트웨이에서 끊긴다.
+  **컷오프 쓰기가 실패하면 역할 · 상태는 이미 바뀐 채 503 `AUTH_013` 이고, 옛 토큰은 만료(최대 access 수명)까지 옛 권한으로 남는다.** 같은 요청을 다시 보내면
+  (같은 값 · 같은 상태라도) 컷오프를 다시 써 복구한다. 재활성화(`active=true`)는 컷오프를 쓰지 않는다.
   비밀번호 변경 · 비활성화는 Redis `auth:admin-access-cutoff:{memberId}` 에 다음 초를 쓰고, 게이트웨이가 관리자 토큰의 `iat` 가 그 시각보다 이르면 004 로 끊는다.
   본인 요청의 `jti` 는 로그아웃 차단 목록에도 넣는다. 다른 관리자를 끌 때는 그 사람의 jti 를 저장하지 않으므로 컷오프만 쓴다.
   컷오프는 로그아웃 차단과 같이 게이트웨이만 본다. 서비스로 직접 붙는 호출은 만료까지 옛 토큰이 남는다. 보관 TTL 은 access 수명 상한 + 시계 오차(기본 61분)다.
@@ -1137,7 +1166,11 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
     2단계 시도 제한 429 · 계수기 장애 503 은 남기지 않는다. TOTP 였는지 복구 코드였는지는 싣지 않는다 — 감사 조회 결과로 어떤 코드를 썼는지 드러나지 않게.
     동료 OTP 복구는 `ADMIN_OTP_PEER_RECOVERY` 로 행위자 memberId · 대상 `member:<id>` · 결과만 남긴다. 비밀번호·TOTP·복구 코드·비밀은 남기지 않는다. Redis 컷오프 실패 전에 DB 교체가 끝났으면 보안 상태 변경 자체는 성공으로 감사하고 503과 운영 경보를 별도로 남긴다.
   - `actorMemberId` — 행위한 관리자의 `member.id`(access 토큰의 `sub`). 요청 본문 값을 쓰지 않는다.
-  - `target` — 대상 리소스 · 조건(`member:<id>` · `members?role=..&page=..&size=..`).
+  - `target` — 대상 리소스 · 조건(`member:<id>` · `members?role=..&page=..&size=..` · `admins?active=ALL|true|false&page=..&size=..`).
+    운영자 계정 관리(#236 PR-B1)는 `ADMIN_SEARCH`(목록) · `ADMIN_ROLE_CHANGE` · `ADMIN_REACTIVATE` 이고 정지는 기존 `ADMIN_DEACTIVATE` 다. 대상은 `member:<id>` 다.
+    **역할 변경 감사에는 바꾸기 전 · 뒤 역할이 없다** — 네 칸 형식 밖이라 싣지 않는다. 누가 언제 어느 계정의 역할을 바꿨는지만 남고, 무엇에서 무엇으로는
+    현재 역할(운영자 목록)로만 알 수 있다. **알려진 한계: 새 역할이 남지 않아 대표 관리자(OWNER) 부여를 감사만으로 추적할 수 없다** — 운영자 추가(`ADMIN_CREATE`)도
+    역할을 싣지 않는다. 역할 이력 표 또는 target 확장(예: `member:<id>#role=OWNER`)은 후속에서 정한다.
   - `result` — `SUCCESS` · `FAILURE`. 실패 이유(회원 없음 · 비밀번호 틀림 · 고객 계정)는 나누지 않는다.
 - **개인정보 · 비밀을 싣지 않는다** — 이메일 · 이름 · 전화 원문, 비밀번호 · 토큰, 검색어 원문. 관리자 로그인 실패는 이메일 원문 대신 그 이메일이 관리자 계정일 때만
   `target=member:<id>` 를 남긴다(고객 memberId 는 남기지 않는다) — 한 관리자 계정에 몰리는 대입을 찾을 수 있게.
@@ -1148,6 +1181,8 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   업무 이력이 이미 DB 에 있는 행위(재고 조정 이력 #86 · SKU 원가 이력 #361 등)는 그 이력이 감사의 정본이고, `admin.audit` 줄도 함께 남긴다(아래 C′).
 - **영속화 (auth-service, #192)** — `AdminAuditPort` 계약은 그대로이고 구현이 `adapter/out/persistence/AdminAuditLogRepositoryAdapter` 다.
   - 계정 생성 · 비활성화 · 본인 비밀번호 변경은 `@AdminAudited`로 선언하고 기존 `AdminAuditProcessor → AdminAuditPort → 로그 + DB` 경로만 쓴다 (#163).
+    역할 변경은 `ADMIN_ROLE_CHANGE`, 사용 여부 변경(`PATCH /admins/{memberId}/status`)은 선언이 행위 하나만 담아 `ADMIN_DEACTIVATE` 로 선언하고
+    Facade 가 `active=true` 일 때 `ADMIN_REACTIVATE` 줄을 쓴다 (#236 PR-B1). 역할 변경 · 정지 SUCCESS 는 저장과 컷오프까지 끝난 뒤다.
     생성 SUCCESS는 업무 DB 커밋 뒤이며 이후 Presenter 실패로 뒤집지 않는다. 비활성화 · 비밀번호 변경 SUCCESS는 DB 변경과 필수 cutoff · 현재 jti 차단까지 완료한 뒤다.
     업무 RuntimeException(필수 Redis 단계 포함)은 기존 예외를 그대로 반환하고 FAILURE를 한 번 시도한다. 검증 400 · 보안 401 · 진입 인가 403은 무감사이며 업무 AUTH_046은 감사한다.
     이 세 행위의 감사 Port RuntimeException과 진단 로거 실패는 업무 결과를 바꾸지 않는다. 진단에는 고정 action · actor ID · 예외 타입만 남기고 메시지 · cause · stack은 싣지 않는다.
@@ -1272,7 +1307,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 
 | 서비스 | 행위 | 상태 |
 |--------|------|------|
-| auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 계정 3개·OTP 4개 선언 완료, OTP 등록 시작 면제(#163) — 기존 Port · 로그 + DB 경로 유지 |
+| auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_REACTIVATE` · `ADMIN_ROLE_CHANGE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 계정 5개(#236 PR-B1 역할 · 상태 포함)·OTP 4개 선언 완료, OTP 등록 시작 면제(#163) — 기존 Port · 로그 + DB 경로 유지 |
 | order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor`와 조회 후 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출. 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·개인정보는 제외한다 (#17) |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음(`markRead` · `markAllRead`) · 온보딩 투어 기록(`updateTour` · `updateTourLegacy`)은 본인 상태라 `@AdminAuditExempt` (#163 PR-E) |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
