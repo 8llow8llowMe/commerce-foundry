@@ -122,6 +122,20 @@ class OrderReturnWebIntegrationTest {
             .contains("items[0].orderItemId", "items[0].quantity", "items[0].reason");
     }
 
+    /** 클레임 사유에 결제 후 취소 사유가 더해졌어도(#16 PR-2) 반품 접수는 반품 사유 3종만 받는다 — 접수 전에 400 ORDER_168 이고 클레임이 생기지 않는다. */
+    @Test
+    void cancellationOnlyReasonsAreRejectedForReturns() {
+        Order order = create();
+        for (String reason : new String[]{"ORDER_MISTAKE", "PAYMENT_ISSUE", "OTHER"}) {
+            var result = post(order.id(), UUID.randomUUID().toString(), body(order, 1).replace("DEFECTIVE", reason), MemberRole.CUSTOMER, TestTokens.MEMBER_ID);
+            assertThat(result).hasStatus(400);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[*].code").asArray().contains("ORDER_168");
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[?(@.code=='ORDER_168')].field").asArray()
+                .containsExactly("items[0].returnReason");
+        }
+        assertThat(jdbc.queryForObject("select count(*) from orders.claim where order_id = ?", Long.class, order.id())).isZero();
+    }
+
     @Test
     void invalidHeaderAndBodyPreserveBothFieldPathsAndCodes() {
         Order order = create();

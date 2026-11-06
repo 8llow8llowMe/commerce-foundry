@@ -46,6 +46,10 @@ public record Order(
     private static final Set<OrderStatus> DELIVERED_OR_LATER = Collections.unmodifiableSet(EnumSet.of(
         OrderStatus.DELIVERED, OrderStatus.PURCHASE_CONFIRMED, OrderStatus.RETURN_REQUESTED, OrderStatus.RETURNED));
 
+    /** 결제 뒤 출고 전 상태 — 고객 결제 후 취소({@link #requestCancellation()})가 취소 요청으로 보낼 수 있는 상태다. 전이 표와 같아야 한다. */
+    private static final Set<OrderStatus> PAID_BEFORE_SHIPMENT = Collections.unmodifiableSet(EnumSet.of(
+        OrderStatus.PAID, OrderStatus.MAKING, OrderStatus.PREPARING));
+
     public Order {
         if (id <= 0 || memberId <= 0 || stockReservationId <= 0 || (version != null && version < 0)) {
             throw new IllegalArgumentException("Invalid order identifiers or version");
@@ -212,9 +216,53 @@ public record Order(
         return status == OrderStatus.PENDING_PAYMENT || status == OrderStatus.EXPIRED;
     }
 
-    /** 고객이 지금 취소할 수 있는가 — 결제 전(결제 대기)만이다(#16 PR-1). */
+    /**
+     * 결제 후 고객 취소 요청 (#16 PR-2) — 결제 완료 · 제작 중 · 상품 준비중이면 취소 요청(CANCEL_REQUESTED)으로 바꾼다. 환불 · 재고 복원은 클레임이 이어 간다.
+     * 이미 취소 요청 · 취소 완료면 바꾸지 않은 이 값을 돌려준다(더블클릭 · 재시도). 제작 중 허용 여부는 부르는 쪽이 {@link #isCancelableByCustomer(boolean)} 로 먼저 본다.
+     *
+     * @throws OrderStatusTransitionException 그 밖의 상태(결제 대기 · 만료 · 배송 중 이후 등) · 저장 전 주문
+     */
+    public Order requestCancellation() {
+        if (status == OrderStatus.CANCEL_REQUESTED || status == OrderStatus.CANCELED) {
+            return this;
+        }
+        if (isNew() || !PAID_BEFORE_SHIPMENT.contains(status)) {
+            throw new OrderStatusTransitionException(status, OrderStatus.CANCEL_REQUESTED);
+        }
+        return transitionTo(OrderStatus.CANCEL_REQUESTED);
+    }
+
+    /**
+     * 결제 후 취소 완료 (#16 PR-2) — 환불이 확정된 취소 요청을 취소 완료(CANCELED)로 바꾼다. 이미 취소 완료면 바꾸지 않은 이 값을 돌려준다(확정 반영 재시도).
+     *
+     * @throws OrderStatusTransitionException 취소 요청 · 취소 완료가 아닌 상태 · 저장 전 주문
+     */
+    public Order completeCancellation() {
+        if (status == OrderStatus.CANCELED) {
+            return this;
+        }
+        if (isNew() || status != OrderStatus.CANCEL_REQUESTED) {
+            throw new OrderStatusTransitionException(status, OrderStatus.CANCELED);
+        }
+        return transitionTo(OrderStatus.CANCELED);
+    }
+
+    /** 고객이 지금 취소할 수 있는가 — 결제 전(결제 대기)만이다(#16 PR-1). 결제 후 취소의 판정은 {@link #isCancelableByCustomer(boolean)} 다. */
     public boolean isCancelableByCustomer() {
         return status == OrderStatus.PENDING_PAYMENT;
+    }
+
+    /**
+     * 결제 전 · 결제 후를 합친 고객 취소 가능 판정 (#16 PR-2) — 결제 대기 · 결제 완료 · 상품 준비중이고, 제작 중은 {@code allowWhileMaking} 일 때만이다.
+     *
+     * @param allowWhileMaking {@code order.cancellation.allow-while-making} — 제작에 들어간 맞춤 상품의 취소를 고객에게 열지
+     */
+    public boolean isCancelableByCustomer(boolean allowWhileMaking) {
+        return switch (status) {
+            case PENDING_PAYMENT, PAID, PREPARING -> true;
+            case MAKING -> allowWhileMaking;
+            default -> false;
+        };
     }
 
     public boolean isNew() {

@@ -20,7 +20,7 @@ import org.springframework.data.domain.Persistable;
 
 @Entity
 @Immutable
-@Table(name = "claim_item", comment = "반품 접수 항목 스냅숏",
+@Table(name = "claim_item", comment = "클레임 항목 스냅숏",
     uniqueConstraints = @UniqueConstraint(name = "uk_claim_item_claim_id_order_item_id", columnNames = {"claim_id", "order_item_id"}),
     check = {
         @CheckConstraint(name = "ck_claim_item_identifiers_positive", constraint = "id > 0 and claim_id > 0 and order_item_id > 0"),
@@ -41,11 +41,12 @@ public class ClaimItemEntity extends BaseEntity implements Persistable<Long> {
     @Column(name = "order_item_id", nullable = false, comment = "주문 항목 아이디 (FK: order_item.id)")
     private Long orderItemId;
 
-    @Column(name = "quantity", nullable = false, comment = "반품 접수 수량")
+    @Column(name = "quantity", nullable = false, comment = "클레임 수량")
     private int quantity;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "reason", nullable = false, length = 20, comment = "접수 사유 (CHANGE_OF_MIND / DEFECTIVE / WRONG_ITEM)")
+    @Column(name = "reason", nullable = false, length = 20,
+        comment = "접수 사유 (반품 CHANGE_OF_MIND / DEFECTIVE / WRONG_ITEM, 취소 CHANGE_OF_MIND / ORDER_MISTAKE / PAYMENT_ISSUE / OTHER)")
     private ClaimItem.Reason reason;
 
     @Override

@@ -34,7 +34,8 @@ public class OrderReturnProcessor {
         var existing = claimRepositoryPort.findByOrderIdAndRequestKey(orderId, requestKey);
         // 소유 확인 뒤 재생을 먼저 판단한다. 주문 상태나 남은 수량이 바뀌어도 동일 접수는 재생된다.
         if (existing.isPresent()) {
-            if (!command.matches(existing.get().items())) {
+            // 같은 주문 · 같은 키의 결제 후 취소 클레임(#16, 결정적 키)을 반품 재생으로 돌려주지 않는다 — 키 재사용으로 거절한다
+            if (existing.get().type() != Claim.Type.RETURN || !command.matches(existing.get().items())) {
                 throw new OrderException(OrderErrorCode.RETURN_KEY_REUSED);
             }
             return new Result(false, existing.get());

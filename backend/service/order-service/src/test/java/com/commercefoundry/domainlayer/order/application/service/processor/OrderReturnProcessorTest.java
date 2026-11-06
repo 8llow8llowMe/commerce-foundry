@@ -70,4 +70,20 @@ class OrderReturnProcessorTest {
             .isInstanceOfSatisfying(OrderException.class, e -> assertThat(e.getErrorCode()).isEqualTo(OrderErrorCode.RETURN_KEY_REUSED));
         verify(claims, never()).sumRequestedReturnQuantities(anyLong());
     }
+
+    /** 반품 API 에 결제 후 취소의 결정적 키를 넣어도(사유 · 수량이 같아 보여도) 취소 클레임을 반품으로 재생하지 않는다 (#16 PR-2). */
+    @Test
+    void cancellationClaimUnderSameKeyIsKeyReuse() {
+        UUID key = Claim.cancellationRequestKey(1);
+        Claim cancellation = new Claim(2, 1, key, Claim.Type.CANCELLATION, Claim.Status.REQUESTED, krw(4_000), 77L, 0,
+            Instant.parse("2026-11-03T00:02:00Z"), null, List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.CHANGE_OF_MIND)),
+            Instant.parse("2026-11-03T00:00:00Z"), 0L);
+        when(orders.findByIdAndMemberIdForUpdate(1, 7)).thenReturn(Optional.of(order(OrderStatus.DELIVERED)));
+        when(claims.findByOrderIdAndRequestKey(1, key)).thenReturn(Optional.of(cancellation));
+
+        assertThatThrownBy(() -> processor.request(7, 1, key, command(ClaimItem.Reason.CHANGE_OF_MIND)))
+            .isInstanceOfSatisfying(OrderException.class, e -> assertThat(e.getErrorCode()).isEqualTo(OrderErrorCode.RETURN_KEY_REUSED));
+        verify(claims, never()).insert(any());
+        verify(orders, never()).saveStatusChange(any(), any());
+    }
 }
