@@ -3,8 +3,10 @@ package com.commercefoundry.domainlayer.member.application.port.out;
 import com.commercefoundry.domainlayer.member.domain.model.AdminOtpCredential;
 import com.commercefoundry.domainlayer.member.domain.model.AdminOtpRecoveryCode;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 관리자 OTP 자격 · 복구 코드 저장 (#238). 비밀은 원문으로 주고받고, 암호화 · 키 식별자 · 키 회전은 어댑터가 한다.
@@ -24,6 +26,12 @@ public interface AdminOtpRepositoryPort {
      * 확정 자격의 확인 시각만 읽는다 — 등록 여부 판정 · 상태 조회용. 비밀을 복호화하지 않아 암호화 키 문제({@code AUTH_039})와 무관하다 (#238 PR-A2).
      */
     Optional<Instant> findConfirmedAt(long memberId);
+
+    /**
+     * 주어진 회원 중 OTP 자격이 있는(등록한) 회원 아이디 — 운영자 목록(#236)의 등록 여부를 페이지 한 번에 채운다(N+1 없음). 비밀을 복호화하지 않는다.
+     * 빈 목록이면 조회하지 않는다.
+     */
+    Set<Long> findEnrolledMemberIds(Collection<Long> memberIds);
 
     /** 아직 쓰지 않은 복구 코드 수. 자격이 없으면 0 이다. */
     long countUnusedRecoveryCodes(long memberId);

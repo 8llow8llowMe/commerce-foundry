@@ -4,6 +4,8 @@ import com.commercefoundry.domainlayer.member.adapter.out.persistence.entity.Adm
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.QueryHint;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -25,6 +27,10 @@ public interface AdminOtpCredentialRepository extends JpaRepository<AdminOtpCred
     /** 등록 여부 · 상태 조회 — 암호문을 읽지 않는다. {@code uk_admin_otp_credential_member_id} 를 탄다. */
     @Query("select c.confirmedAt from AdminOtpCredentialEntity c where c.memberId = :memberId")
     Optional<Instant> findConfirmedAtByMemberId(Long memberId);
+
+    /** 운영자 목록(#236)의 OTP 등록 여부 — 회원 아이디 {@code in} 절 한 번. {@code uk_admin_otp_credential_member_id} 를 탄다. 암호문을 읽지 않는다. */
+    @Query("select c.memberId from AdminOtpCredentialEntity c where c.memberId in :memberIds")
+    List<Long> findMemberIdsByMemberIdIn(Collection<Long> memberIds);
 
     /** 사용 기록 전에 저장된 암호문의 키 식별자만 읽는다 — 재암호화가 필요한지 어댑터가 판정한다. 엔티티를 영속성 컨텍스트에 올리지 않는다. */
     @Query("select c.keyId from AdminOtpCredentialEntity c where c.id = :id and c.memberId = :memberId")

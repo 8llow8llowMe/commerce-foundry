@@ -31,6 +31,15 @@ public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
     /** 어드민 회원 목록 (#6) — 역할 조건. 정렬은 {@link Pageable} 이 정한다. 역할 없는 전체 목록은 {@code findAll(Pageable)} 이다. */
     Page<MemberEntity> findAllByRole(MemberRole role, Pageable pageable);
 
+    /** 운영자 계정 목록 (#236) — 역할 묶음 전체. 정렬은 {@link Pageable} 이 정한다. */
+    Page<MemberEntity> findAllByRoleIn(Collection<MemberRole> roles, Pageable pageable);
+
+    /** 운영자 계정 목록 (#236) — 활성(비활성화 시각 없음)만. */
+    Page<MemberEntity> findAllByRoleInAndDeactivatedAtIsNull(Collection<MemberRole> roles, Pageable pageable);
+
+    /** 운영자 계정 목록 (#236) — 비활성만. */
+    Page<MemberEntity> findAllByRoleInAndDeactivatedAtIsNotNull(Collection<MemberRole> roles, Pageable pageable);
+
     /** 표시 이름용 — 기본 키 {@code in} 절 한 번. 아이디 · 이름만 읽는다 (#322). */
     List<MemberNameView> findByIdIn(Collection<Long> ids);
 

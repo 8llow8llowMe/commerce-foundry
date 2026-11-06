@@ -50,6 +50,21 @@ public record AdminAuditRecord(AdminAuditAction action, Long actorMemberId, Stri
         return new AdminAuditRecord(AdminAuditAction.ADMIN_PASSWORD_CHANGE, adminMemberId, member(adminMemberId), succeeded);
     }
 
+    public static AdminAuditRecord adminReactivated(long actorMemberId, long targetMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_REACTIVATE, actorMemberId, member(targetMemberId), succeeded);
+    }
+
+    /** 역할 변경 (#236). 바꾸기 전 · 뒤 역할은 남기지 않는다 — 네 칸 형식({@code security-guide.md} §11-4) 밖이다. */
+    public static AdminAuditRecord adminRoleChanged(long actorMemberId, long targetMemberId, boolean succeeded) {
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_ROLE_CHANGE, actorMemberId, member(targetMemberId), succeeded);
+    }
+
+    /** @param active 상태 조건. 없으면 null(전체) */
+    public static AdminAuditRecord operatorsSearched(long adminMemberId, Boolean active, int page, int size) {
+        String target = "admins?active=" + (active == null ? "ALL" : active.toString()) + "&page=" + page + "&size=" + size;
+        return new AdminAuditRecord(AdminAuditAction.ADMIN_SEARCH, adminMemberId, target, true);
+    }
+
     /** OTP 등록 확인 (#238). 비밀 · 코드 · 복구 코드는 남기지 않는다 — 본인 계정만 바꾸므로 대상은 행위자 자신이다. */
     public static AdminAuditRecord adminOtpEnrolled(long adminMemberId, boolean succeeded) {
         return new AdminAuditRecord(AdminAuditAction.ADMIN_OTP_ENROLL, adminMemberId, member(adminMemberId), succeeded);

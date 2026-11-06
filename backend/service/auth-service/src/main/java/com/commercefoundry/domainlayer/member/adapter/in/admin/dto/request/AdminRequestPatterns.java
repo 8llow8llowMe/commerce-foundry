@@ -24,6 +24,9 @@ public final class AdminRequestPatterns {
     /** 인증 코드 길이 상한 — 정규식 전에 긴 입력을 끊는다. */
     public static final int OTP_CODE_MAX_LENGTH = 32;
 
+    /** 운영자 추가 · 역할 변경으로 줄 수 있는 역할 (#236). 기존 ADMIN 은 이행용이라 새로 주지 않고, CUSTOMER 는 운영자가 아니다. 대소문자를 구분한다. */
+    public static final String ASSIGNABLE_ROLE = "^(OWNER|MANAGER|STAFF)$";
+
     private AdminRequestPatterns() {
     }
 }

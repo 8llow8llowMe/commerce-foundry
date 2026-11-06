@@ -3,9 +3,12 @@ package com.commercefoundry.domainlayer.member.domain.model;
 import com.commercefoundry.security.principal.MemberRole;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -28,6 +31,9 @@ import java.util.regex.Pattern;
 public record Member(long id, String email, String passwordHash, String name, String phone, MemberRole role, Long version, Instant deactivatedAt) {
 
     public static final int EMAIL_MAX_LENGTH = 254;
+
+    /** 운영자 추가 · 역할 변경으로 줄 수 있는 역할 (#236). 기존 ADMIN 은 이행용이라 {@link #admin} 으로만 만들고, 새로 주거나 되돌리지 않는다. */
+    public static final Set<MemberRole> ASSIGNABLE_ROLES = Collections.unmodifiableSet(EnumSet.of(MemberRole.OWNER, MemberRole.MANAGER, MemberRole.STAFF));
     public static final int NAME_MAX_LENGTH = 50;
 
     /** 국내 휴대폰 번호 — 숫자만 10~11자리. 해외 번호는 영문 스토어 회원가입 이슈에서 넓힌다. */
@@ -47,12 +53,27 @@ public record Member(long id, String email, String passwordHash, String name, St
     }
 
     /**
-     * 관리자 계정 — 초기 시드(#6)와 가게 운영자 추가(#193)가 쓴다. 이메일 · 이름을 가입과 같은 규칙으로 정규화 · 검증하고, 역할은 언제나 {@link MemberRole#ADMIN} 이다 —
-     * 어드민 화면이 아직 ADMIN 으로 세션을 판정해 OWNER · MANAGER · STAFF 발급은 화면 전환(#237)과 함께 연다 (#236).
-     * 전화번호는 없다(null). 고객 가입({@link #signUp})과 달리 동의 이력을 남기지 않는다 — 관리자는 이용약관 동의 대상이 아니다.
+     * 관리자 계정 — 초기 시드(#6)와 역할 없이 부른 가게 운영자 추가(#193)가 쓴다. 기존 {@link MemberRole#ADMIN} 은 이행용 역할이라 이 경로로만 만든다.
+     * 어드민 화면이 아직 ADMIN 으로 세션을 판정해 OWNER · MANAGER · STAFF 발급은 발급 플래그({@code auth.operator-roles.issuance-enabled}) 뒤에 있다 (#236).
      */
     public static Member admin(long id, String email, String passwordHash, String name) {
-        return new Member(id, normalizeEmail(email), passwordHash, normalizeName(name), null, MemberRole.ADMIN, null, null);
+        return newOperator(id, email, passwordHash, name, MemberRole.ADMIN);
+    }
+
+    /**
+     * 운영자 계정 (#236). 이메일 · 이름을 가입과 같은 규칙으로 정규화 · 검증한다. 전화번호는 없다(null). 고객 가입({@link #signUp})과 달리 동의 이력을 남기지 않는다 —
+     * 운영자는 이용약관 동의 대상이 아니다.
+     *
+     * @param role 줄 수 있는 역할({@link #ASSIGNABLE_ROLES} — OWNER · MANAGER · STAFF). ADMIN 은 {@link #admin} 으로만 만든다
+     * @throws IllegalArgumentException 줄 수 있는 역할이 아니다(ADMIN · CUSTOMER)
+     */
+    public static Member operator(long id, String email, String passwordHash, String name, MemberRole role) {
+        requireAssignableRole(role);
+        return newOperator(id, email, passwordHash, name, role);
+    }
+
+    private static Member newOperator(long id, String email, String passwordHash, String name, MemberRole role) {
+        return new Member(id, normalizeEmail(email), passwordHash, normalizeName(name), null, role, null, null);
     }
 
     /** 저장된 행을 검증 없이 되살린다 — 영속성 매퍼만 쓴다. 규칙 밖 값(이관 데이터)도 그대로 둔다. 비활성화 시각은 없다. */
@@ -98,6 +119,32 @@ public record Member(long id, String email, String passwordHash, String name, St
         return new Member(id, email, passwordHash, name, phone, role, version, at);
     }
 
+    /**
+     * 다시 켠 운영자 계정 (#236). 비활성화 시각만 지운다 — 비밀번호 · OTP 자격은 끄기 전 그대로라 예전 자격으로 다시 로그인한다(의도).
+     *
+     * @throws IllegalArgumentException 운영자가 아니다
+     */
+    public Member reactivate() {
+        if (!isOperator()) {
+            throw new IllegalArgumentException("운영자 계정만 다시 켠다");
+        }
+        return new Member(id, email, passwordHash, name, phone, role, version, null);
+    }
+
+    /**
+     * 역할을 바꾼 운영자 계정 (#236). 같은 역할이면 같은 값({@code equals})이다. 누가 바꿀 수 있는지는 {@link #canBeManagedBy} · {@link #canAssignRole} 이,
+     * 마지막 대표 관리자 강등은 {@link #isLastActiveOwner} 가 따진다.
+     *
+     * @throws IllegalArgumentException 이 계정이 운영자가 아니거나, 새 역할이 줄 수 있는 역할(OWNER · MANAGER · STAFF)이 아니다 — 이행용 ADMIN 으로 되돌리지 않는다
+     */
+    public Member changeRole(MemberRole newRole) {
+        if (!isOperator()) {
+            throw new IllegalArgumentException("운영자 계정만 역할을 바꾼다");
+        }
+        requireAssignableRole(newRole);
+        return new Member(id, email, passwordHash, name, phone, newRole, version, deactivatedAt);
+    }
+
     /** 고객 로그인 · 토큰 재발급을 쓸 수 있는 계정인가. 관리자 계정은 고객 로그인으로 들어오지 못한다 (#4 결정 4, 관리자 로그인은 #6). */
     public boolean isCustomer() {
         return role == MemberRole.CUSTOMER;
@@ -133,13 +180,52 @@ public record Member(long id, String email, String passwordHash, String name, St
     }
 
     /**
-     * 이 운영자 계정을 {@code actor} 가 끌 수 있는가. 대표 관리자 계정은 활성 대표 관리자만 끈다 — 매니저 · 스태프가 직원 관리 권한을 받게 되더라도
-     * 대표 관리자를 내보내지 못하게 (#236). 매니저 · 스태프 계정은 행위자를 따지지 않는다(권한 판정은 메서드 보안이 한다).
+     * 이 운영자 계정의 역할 · 상태(비활성화 · 재활성화)를 {@code actor} 가 바꿀 수 있는가. 대표 관리자 계정은 활성 대표 관리자만 바꾼다 —
+     * 매니저 · 스태프가 직원 관리 권한을 받게 되더라도 대표 관리자를 내보내거나 강등하지 못하게 (#236). 매니저 · 스태프 계정은 행위자를 따지지 않는다
+     * (권한 판정은 메서드 보안이 하고, 줄 수 있는 역할은 {@link #canAssignRole} 이 본다).
      *
      * @param actor 행위자. 활성 운영자가 아니면(없음 · 비활성) 빈 값
      */
-    public boolean canBeDeactivatedBy(Optional<Member> actor) {
+    public boolean canBeManagedBy(Optional<Member> actor) {
         return !isOwner() || actor.filter(Member::isActiveOperator).filter(Member::isOwner).isPresent();
+    }
+
+    /**
+     * {@code actor} 가 {@code newRole} 을 줄 수 있는가 (#236). 행위자는 활성 운영자여야 한다. 대표 관리자 역할(OWNER)은 활성 대표 관리자만 주고,
+     * 대표 관리자가 아닌 행위자는 자기보다 높은 역할을 주지 못한다(스태프 &lt; 매니저 &lt; 대표 관리자). 이행용 ADMIN · 고객 역할은 누구도 주지 못한다(false).
+     *
+     * @param actor 행위자. 활성 운영자가 아니면(없음 · 비활성) 빈 값
+     */
+    public static boolean canAssignRole(Optional<Member> actor, MemberRole newRole) {
+        Objects.requireNonNull(newRole, "newRole");
+        if (!isAssignableRole(newRole)) {
+            return false;
+        }
+        return actor.filter(Member::isActiveOperator)
+            .filter(granter -> granter.isOwner() || (!newRole.isOwner() && rank(newRole) <= rank(granter.role())))
+            .isPresent();
+    }
+
+    /** 역할 높낮이 — 대표 관리자(ADMIN · OWNER) 3, 매니저 2, 스태프 1, 고객 0. */
+    private static int rank(MemberRole role) {
+        return switch (role) {
+            case ADMIN, OWNER -> 3;
+            case MANAGER -> 2;
+            case STAFF -> 1;
+            case CUSTOMER -> 0;
+        };
+    }
+
+    /** 줄 수 있는 역할인가 ({@link #ASSIGNABLE_ROLES}). */
+    public static boolean isAssignableRole(MemberRole role) {
+        return role != null && ASSIGNABLE_ROLES.contains(role);
+    }
+
+    private static void requireAssignableRole(MemberRole role) {
+        Objects.requireNonNull(role, "role");
+        if (!isAssignableRole(role)) {
+            throw new IllegalArgumentException("줄 수 있는 운영자 역할이 아니다: " + role);
+        }
     }
 
     /**

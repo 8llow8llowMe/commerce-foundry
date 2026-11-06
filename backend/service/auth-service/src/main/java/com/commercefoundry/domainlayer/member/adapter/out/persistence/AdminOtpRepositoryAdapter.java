@@ -14,8 +14,10 @@ import com.commercefoundry.domainlayer.member.domain.model.AdminOtpRecoveryCode;
 import com.commercefoundry.persistence.util.ConstraintViolations;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
@@ -52,6 +54,14 @@ public class AdminOtpRepositoryAdapter implements AdminOtpRepositoryPort {
     @Override
     public Optional<Instant> findConfirmedAt(long memberId) {
         return credentialRepository.findConfirmedAtByMemberId(memberId);
+    }
+
+    @Override
+    public Set<Long> findEnrolledMemberIds(Collection<Long> memberIds) {
+        if (memberIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(credentialRepository.findMemberIdsByMemberIdIn(memberIds));
     }
 
     @Override

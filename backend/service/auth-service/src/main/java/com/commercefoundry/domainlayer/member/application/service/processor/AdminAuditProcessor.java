@@ -57,6 +57,19 @@ public class AdminAuditProcessor {
         safelyRecord(AdminAuditAction.ADMIN_DEACTIVATE, actorMemberId, () -> adminAuditPort.adminAccountDeactivated(actorMemberId, targetMemberId, succeeded));
     }
 
+    public void adminAccountReactivated(long actorMemberId, long targetMemberId, boolean succeeded) {
+        safelyRecord(AdminAuditAction.ADMIN_REACTIVATE, actorMemberId, () -> adminAuditPort.adminAccountReactivated(actorMemberId, targetMemberId, succeeded));
+    }
+
+    public void adminRoleChanged(long actorMemberId, long targetMemberId, boolean succeeded) {
+        safelyRecord(AdminAuditAction.ADMIN_ROLE_CHANGE, actorMemberId, () -> adminAuditPort.adminRoleChanged(actorMemberId, targetMemberId, succeeded));
+    }
+
+    /** @param active 상태 조건. 없으면 null(전체) */
+    public void operatorsSearched(long adminMemberId, Boolean active, int page, int size) {
+        safelyRecord(AdminAuditAction.ADMIN_SEARCH, adminMemberId, () -> adminAuditPort.operatorsSearched(adminMemberId, active, page, size));
+    }
+
     public void adminPasswordChanged(long adminMemberId, boolean succeeded) {
         safelyRecord(AdminAuditAction.ADMIN_PASSWORD_CHANGE, adminMemberId, () -> adminAuditPort.adminPasswordChanged(adminMemberId, succeeded));
     }

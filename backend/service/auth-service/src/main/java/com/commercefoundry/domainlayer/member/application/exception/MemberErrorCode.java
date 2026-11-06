@@ -8,7 +8,7 @@ import org.springframework.http.HttpStatus;
  * 회원 · 인증 오류 코드 ({@code coding-conventions.md} §8). 필드별 검증 코드(101~)는 {@link MemberValidationMessage} 에 둔다.
  *
  * <p>접두어는 서비스 단위 {@code AUTH_} 다 — 로그인 · 토큰(#4 A3 · A4)도 같은 코드 공간을 쓴다. 001~009 는 회원, 010~ 은 토큰, 030~ 은 관리자(#6) — 034~039 는 관리자 OTP(#238),
- * 040~049 는 시도 제한(#66 · OTP 시도 043) · OTP 잠금 대기 044 다.
+ * 040~049 는 시도 제한(#66 · OTP 시도 043) · OTP 잠금 대기 044 · 동료 OTP 복구 045 · 운영자 계정 관리(#236) 046~049 다.
  * 로그인 실패는 401 이 아니라 400 이다 — 401 은 토큰(access · refresh) 거절에만 쓴다 (#4 결정 5).
  */
 @Getter
@@ -76,8 +76,20 @@ public enum MemberErrorCode {
     OTP_BUSY("AUTH_044", "다른 OTP 요청을 처리하고 있습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT),
     /** 동료 OTP 복구 엔드포인트는 자신을 대상으로 쓸 수 없다. */
     OTP_PEER_RECOVERY_SELF("AUTH_045", "본인 OTP는 내 OTP 메뉴에서 관리해 주세요.", HttpStatus.BAD_REQUEST),
-    /** 대표 관리자(ADMIN · OWNER) 계정은 활성 대표 관리자만 끈다 (#236). 지금은 직원 관리 권한이 대표 관리자에게만 있어 메서드 보안 뒤의 이중 방어다. */
-    ADMIN_DEACTIVATION_FORBIDDEN("AUTH_046", "이 계정을 비활성화할 권한이 없습니다.", HttpStatus.FORBIDDEN),
+    /**
+     * 운영자 계정 관리 권한 밖 (#236) — 대표 관리자(ADMIN · OWNER) 계정의 역할 · 상태는 활성 대표 관리자만 바꾸고, 대표 관리자 역할은 활성 대표 관리자만 주며,
+     * 대표 관리자가 아닌 행위자는 자기보다 높은 역할을 주지 못한다. 지금은 직원 관리 권한이 대표 관리자에게만 있어 메서드 보안 뒤의 이중 방어다.
+     */
+    ADMIN_MANAGEMENT_FORBIDDEN("AUTH_046", "이 계정을 관리할 권한이 없습니다.", HttpStatus.FORBIDDEN),
+    /** 역할 · 상태 변경 API 의 대상이 행위자 본인이다 (#236). 스스로 강등 · 정지해 대표 관리자가 사라지는 실수를 막는다. 본인 비밀번호 · OTP 는 내 계정 메뉴를 쓴다. */
+    ADMIN_SELF_MANAGEMENT("AUTH_047", "본인 계정의 역할·상태는 다른 대표 관리자에게 요청해 주세요.", HttpStatus.BAD_REQUEST),
+    /** 활성 대표 관리자 중 마지막 한 명을 매니저 · 스태프로 내리려 했다 (#236). 비활성화의 {@link #LAST_ACTIVE_ADMIN} 과 같은 가드다. */
+    LAST_ACTIVE_OWNER_ROLE("AUTH_048", "마지막 대표 관리자의 역할은 바꿀 수 없습니다.", HttpStatus.CONFLICT),
+    /**
+     * 새 운영자 역할(OWNER · MANAGER · STAFF) 발급 · 역할 변경이 꺼져 있다 ({@code auth.operator-roles.issuance-enabled=false}, #236).
+     * 어드민 화면 전환(#237) 전에는 ADMIN 외 역할로 로그인한 운영자가 화면을 쓰지 못해 막아 둔다. 상태 변경 · 목록은 플래그와 무관하다.
+     */
+    OPERATOR_ROLE_ISSUANCE_DISABLED("AUTH_049", "역할 나누기는 아직 준비 중입니다.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패(깨진 JSON, 본문 없음)의 폴백. */
     SOCIAL_PROVIDER_UNSUPPORTED("AUTH_050", "지원하지 않는 소셜 로그인 제공자입니다.", HttpStatus.BAD_REQUEST),

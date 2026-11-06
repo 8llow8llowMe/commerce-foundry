@@ -39,6 +39,19 @@ public interface AdminAuditPort {
     /** 관리자 계정을 비활성화했다 (#193). */
     void adminAccountDeactivated(long actorMemberId, long targetMemberId, boolean succeeded);
 
+    /** 비활성 운영자 계정을 다시 켰다 (#236). */
+    void adminAccountReactivated(long actorMemberId, long targetMemberId, boolean succeeded);
+
+    /** 운영자 계정의 역할을 바꿨다 (#236). 바꾸기 전 · 뒤 역할은 넘기지 않는다. */
+    void adminRoleChanged(long actorMemberId, long targetMemberId, boolean succeeded);
+
+    /**
+     * 운영자 계정 목록 조회 (#236) — {@code AdminAccountFacade#searchAdmins}.
+     *
+     * @param active 상태 조건. 없으면 null(전체)
+     */
+    void operatorsSearched(long adminMemberId, Boolean active, int page, int size);
+
     /** 로그인한 관리자가 자기 비밀번호를 바꿨다 (#193). */
     void adminPasswordChanged(long adminMemberId, boolean succeeded);
 
