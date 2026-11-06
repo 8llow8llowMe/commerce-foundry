@@ -31,4 +31,25 @@ python -X utf8 scripts/be_supervisor.py reconcile
 
 실패 상태라면 `.commerce-foundry-be-supervisor/issue-번호.jsonl`을 확인하고 관리자가 원인을 해결한다. 오류가 있는 세션을 자동 재할당하지 않는다. 정리 실패 시 `reconcile`을 재실행할 수 있다. Windows 긴 경로 때문에 `git worktree remove`가 실패하면 `docs/git-workflow.md` §7-2를 따른다.
 
-**운영 경계:** 현재 채팅 세션은 종료 뒤 스스로 깨어나지 않는다. 지속 운영에는 `watch` 프로세스를 별도 터미널이나 작업 스케줄러에서 실행해야 한다. 관리 세션은 `status` 결과와 PR·이슈 내용을 보고 대기열을 갱신한다. 기존 Codex 앱 창의 독립 세션은 이 도구가 제어하지 않는다.
+**운영 경계:** 현재 채팅 세션은 종료 뒤 스스로 깨어나지 않는다. 지속 운영에는 `watch` 프로세스를 별도 터미널이나 작업 스케줄러에서 실행해야 한다. 관리 세션은 `status` 결과와 PR·이슈 내용을 보고 대기열을 갱신한다. 위의 `be_supervisor.py`는 자신이 생성한 세션만 관리하며, 아래의 `be_queue_supervisor.py`는 이미 열린 독립 세션 ID를 등록해 관리한다.
+
+## 이미 열린 독립 Codex 세션 연결
+
+`scripts/be_queue_supervisor.py`는 Codex CLI의 `codex queue`로 **기존 세션 ID**에 메시지를 전달한다. 세션은 `S1`~`S6`으로 등록하고, 이미 푸시된 handoff 브랜치를 해당 이슈 워크트리에 가져온 뒤 배정한다. 감독 상태는 저장소 밖 `.commerce-foundry-be-queue/workers.json`에 기록된다.
+
+```powershell
+python -B -X utf8 scripts/be_queue_supervisor.py register S1 <세션-UUID>
+python -B -X utf8 scripts/be_queue_supervisor.py assign S1 20 feature/be/20-usd-legacy-price-writers --handoff backend/docs/handoffs/2026-11-06-20-s1.md
+python -B -X utf8 scripts/be_queue_supervisor.py status
+```
+
+세션이 이미 지시를 받은 뒤 감독 상태만 추가할 때는 `track S5 589 feature/be/589-admin-password-reset`을 사용한다. 각 작업자는 `$dev-orchestrator`와 `$pr`을 적용하고, 검증 후 PR 본문에 실제 완료한 이슈 체크박스 문구를 `## 완료된 이슈 항목`으로 적는다. 사용자만 PR을 Rebase and merge한다.
+
+머지 이후 후속 작업은 슬롯별 대기열에 넣는다. `watch`는 머지된 PR의 브랜치·이슈 연결과 완료 항목, 워크트리 청결도·커밋 반영 여부를 확인하고 이슈 체크·종료·로컬 정리를 수행한 다음 해당 슬롯의 대기열을 배정한다. 근거가 없는 항목은 자동 체크하지 않고 보류한다.
+
+```powershell
+python -B -X utf8 scripts/be_queue_supervisor.py queue S1 217 ai-size-chart
+python -B -X utf8 scripts/be_queue_supervisor.py watch --interval 300
+```
+
+작업 세션의 기본 cwd가 루트이고 워크트리가 쓰기 허용 범위 밖인 경우, 사용자가 해당 세션의 `/permissions`에서 쓰기 범위를 조정해야 한다. `codex queue`가 성공해도 권한 정책이 자동으로 확장되지는 않는다. GitHub 앱/MCP 도구 승인은 로컬 셸 권한과 별도일 수 있다.
