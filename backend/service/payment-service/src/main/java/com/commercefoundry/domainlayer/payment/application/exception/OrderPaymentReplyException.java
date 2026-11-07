@@ -14,7 +14,7 @@ public final class OrderPaymentReplyException extends RuntimeException {
     }
 
     public enum Reason {
-        SOURCE_NOT_READY(true), SOURCE_UNAVAILABLE(true), SOURCE_UNAUTHORIZED(true),
+        INVALID_COMMAND(false), SOURCE_NOT_READY(true), SOURCE_UNAVAILABLE(true), SOURCE_UNAUTHORIZED(true),
         SOURCE_CONTRACT(false), SOURCE_MISMATCH(false), LOCAL_MISMATCH(false), LOCAL_NOT_FOUND(false), INVALID_ORIGIN(false),
         PAYMENT_VERSION(true), INBOX_DUPLICATE(true), STORAGE_UNAVAILABLE(true), STORAGE_CONTRACT(false);
 

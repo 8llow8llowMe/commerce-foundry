@@ -393,7 +393,7 @@ pending 의도는 같은 claim으로 재개하고 전액취소 원천에는 추�
 미반영(`ORDER_028`)·인증/통신 실패·응답 계약 위반을 구분하며, 원격 본문·Feign 원인을 전파하거나 어댑터·Feign 재시도를 추가하지 않는다.
 정확한 실패 분류는 위 가이드의 "payment 호출 경계"를 따른다. 아직 이벤트/로컬 결제 대조·ACK 소비·inbox·플래그 저장은 연결하지 않는다.
 `order-paid.paidAt`는 주문 처리 시각이고 원천 `approvedAt`는 PG 승인 시각이므로 서로 같다고 비교하지 않는다.
-후속 C1b2에서 원천과 로컬 결제의 승인 시각을 마이크로초 정밀도로 대조하고, 취소 경합·inbox 원자 기록을 함께 구현한다.
+C3b의 `OrderPaymentReplyEventUseCase`가 원천과 로컬 결제의 승인 시각을 마이크로초 정밀도로 대조하고 payment/inbox를 원자 기록한다. Kafka 진입은 C3c 후속이다.
 
 결제 승인(DONE)을 주문의 결제 완료(PAID)로 반영하는 단계는 **Kafka 이벤트**다(#304 · #308, `architecture-guide.md` §8-1). 동기 internal 호출 + 재전송 플래그 + 스케줄러로 하던 이전 설계는
 쓰지 않는다 — 전달은 outbox 릴레이(적어도 한 번)와 컨슈머 재시도 · DLT 가 보장하고(소비 · 회신 쪽은 PR-B · C 예정), 중복은 inbox · 유니크 키 · `@Version` 이 막는다.
@@ -444,7 +444,17 @@ pending 의도는 같은 claim으로 재개하고 전액취소 원천에는 추�
   | true | null | `order-paid` 를 받았다(주문 PAID 확정) | 없음 |
   | false | 코드 | `order-payment-rejected(reason)` 를 받았다 — 다시 보내도 바뀌지 않는다 | ERROR 로그 · 지표 + **자동 전액 취소 · 어드민 확인** 대상 |
   | true | 코드 | 금지(check) — 반영 성공 뒤 늦게 온 거절은 무시한다 | — |
-- **전액 취소** — 거절 회신은 `PaymentCancelPolicy` 훅(기본 로그 · 지표, PR-C 예정)으로 넘기고, 실제 PG 전액 취소와 종결 뒤 승인(LATE_APPROVED)의 `payment-late-approved` 알림은 #15 다.
+- **전액 취소** — C3b의 최초 유효 거절·잔액 존재 시 커밋 후 비PG `PaymentCancelPolicy` 훅을 최대 1회 시도한다. 실제 PG 취소는 #579, 유실 복구는 #591 후속이다.
+
+#### C3b 기록·빠른 훅 경계
+
+Facade는 외부 TX를 거절한다. 원천 조회와 훅은 TX 밖, 로컬 원승인 금액·회원·주문·통화·시각 대조 및 payment/inbox 기록은 하나의 짧은 TX다.
+원격 조회·저장소 실패 분류·정책 포트는 Processor만 호출한다. QueryResult는 Processor 안에서 application 스냅숏으로 바꾸고 Facade에는 노출하지 않는다.
+정상 DONE 기원의 DONE/PARTIAL_CANCELED/CANCELED만 기록하고 성공 단조성·같은 결과 no-op을 유지한다. inbox 정리 뒤에도 업무 멱등성으로 훅을 재시도하지 않는다.
+훅 후보는 최초 거절 기록이며 CANCELED가 아니고 성공 취소 누계를 뺀 잔액이 양수인 경우다. 후보는 실행 권한이 아니며 #579는 실행 직전 상태·잔액을 다시 확인해야 한다.
+기본 정책은 PG를 호출하지 않는다. 고정 enum 로그만 남기며 훅·관측 예외는 기록 커밋을 되돌리지 않는다. 커밋 후 훅 전 중단과 훅 예외의 실행 유실은 #591이 복구한다.
+commit/unique/version 실패는 TX 밖에서 분류하며 원문·식별자·cause를 전파하지 않는다. 정확 inbox 제약+23505만 중복이고 다른 무결성 위반은 영구 계약 실패다.
+생산 listener/ACK/DLT·게이트 활성화는 포함하지 않는다. 작성한 H2/실제 PG 계약·경합 시험은 main 검증 및 CI 실행 전이며 완료 근거로 삼지 않는다.
   돈만 받고 상품이 없는 주문을 남기지 않는다.
 
 ### 6-1. payment 회신 저장소 기반 (#308 C3a-1)

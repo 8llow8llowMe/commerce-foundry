@@ -8,6 +8,9 @@
 payment-service의 #308 C3a-2는 주문 미회신 지연 건수·최대 나이·거절 잔존·관측 실패 지표를 제공한다.
 세 Gauge는 독립 읽기이며 기존 #616 A4a API와 별도다. 생산 회신 소비나 게이트 활성화는 포함하지 않는다(`payment-guide.md` §6-2).
 
+payment-service C3b는 `OrderPaymentReplyEventUseCase`의 원천/로컬 대조·payment/inbox 원자 기록과 커밋 후 비PG 정책 훅을 제공한다.
+listener/실제 PG 취소/스윕/게이트 활성화는 후속이며 FE·HTTP 계약은 바뀌지 않는다. 신규 시험의 실제 실행 결과는 main/CI 검증 대기다.
+
 | 모듈 | 포트 | 상태 | 책임 |
 |------|------|------|------|
 | `cloud/service-discovery` | 8761 | 구성됨 (#3) | Eureka 서버 |
