@@ -101,12 +101,42 @@ class AdminAuthWebFacadeTest {
     }
 
     @Test
+    void loginLockContentionUsesGenericFailureAndFailureAudit() {
+        given(memberLoginProcessor.normalizeEmail(any())).willReturn(Optional.of(EMAIL));
+        given(memberLoginProcessor.findByEmail(EMAIL)).willReturn(Optional.of(ADMIN));
+        given(memberLoginProcessor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).willReturn(ADMIN);
+        RuntimeException[] failures = {new PessimisticLockingFailureException("busy"), new org.springframework.dao.QueryTimeoutException("busy"),
+            new org.springframework.transaction.TransactionTimedOutException("busy")};
+        for (RuntimeException failure : failures) {
+            willThrow(failure).given(memberLoginProcessor).revalidateAdmin(ADMIN);
+            assertThatThrownBy(() -> facade.login(COMMAND)).isInstanceOf(MemberException.class)
+                .extracting(error -> ((MemberException) error).getErrorCode()).isEqualTo(MemberErrorCode.ADMIN_LOGIN_FAILED);
+        }
+        verify(adminAuditPort, times(3)).adminLoginFailed(OptionalLong.of(ADMIN.id()));
+        verifyNoInteractions(authTokenProcessor, adminOtpProcessor, adminLoginChallengeProcessor);
+    }
+
+    @Test
+    void changedCredentialAfterBcryptFailsBeforeChallengeOrAccess() {
+        given(memberLoginProcessor.normalizeEmail(any())).willReturn(Optional.of(EMAIL));
+        given(memberLoginProcessor.findByEmail(EMAIL)).willReturn(Optional.of(ADMIN));
+        given(memberLoginProcessor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).willReturn(ADMIN);
+        given(memberLoginProcessor.revalidateAdmin(ADMIN)).willThrow(new MemberException(MemberErrorCode.ADMIN_LOGIN_FAILED));
+
+        assertThatThrownBy(() -> facade.login(COMMAND)).isInstanceOf(MemberException.class)
+            .extracting(failure -> ((MemberException) failure).getErrorCode()).isEqualTo(MemberErrorCode.ADMIN_LOGIN_FAILED);
+        verifyNoInteractions(adminOtpProcessor, adminLoginChallengeProcessor, authTokenProcessor);
+        verify(adminAuditPort).adminLoginFailed(OptionalLong.of(ADMIN.id()));
+    }
+
+    @Test
     @DisplayName("정규화 → 관리자 시도 제한(ADMIN_LOGIN) → 조회 → 관리자 인증 → access 발급 순서이고, 성공을 감사 로그에 남긴다 — 성공해도 창을 지우지 않는다")
     void login() {
         given(memberLoginProcessor.normalizeEmail("Admin@Example.com")).willReturn(Optional.of(EMAIL));
         given(memberLoginProcessor.findByEmail(EMAIL)).willReturn(Optional.of(ADMIN));
         given(memberLoginProcessor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).willReturn(ADMIN);
-        given(authTokenProcessor.issueAdminAccessToken(ADMIN)).willReturn(new AdminAccessTokenInfo("access", 1800));
+        given(memberLoginProcessor.revalidateAdmin(ADMIN)).willReturn(ADMIN);
+        given(authTokenProcessor.issueAdminAccessToken(ADMIN, NOW)).willReturn(new AdminAccessTokenInfo("access", 1800));
 
         AdminLoginResponse response = facade.login(COMMAND);
 
@@ -115,7 +145,8 @@ class AdminAuthWebFacadeTest {
         order.verify(loginGuardProcessor).admit(AttemptKind.ADMIN_LOGIN, EMAIL);
         order.verify(memberLoginProcessor).findByEmail(EMAIL);
         order.verify(memberLoginProcessor).authenticateAdmin(Optional.of(ADMIN), "admin-password-1");
-        order.verify(authTokenProcessor).issueAdminAccessToken(ADMIN);
+        order.verify(memberLoginProcessor).revalidateAdmin(ADMIN);
+        order.verify(authTokenProcessor).issueAdminAccessToken(ADMIN, NOW);
         order.verify(adminAuditPort).adminLoginSucceeded(9L);
         verify(adminAuditPort, never()).adminLoginFailed(any());
         verify(loginGuardProcessor, never()).admit(AttemptKind.LOGIN, EMAIL);
@@ -207,6 +238,7 @@ class AdminAuthWebFacadeTest {
         given(memberLoginProcessor.normalizeEmail(any())).willReturn(Optional.of(EMAIL));
         given(memberLoginProcessor.findByEmail(EMAIL)).willReturn(Optional.of(ADMIN));
         given(memberLoginProcessor.authenticateAdmin(Optional.of(ADMIN), "admin-password-1")).willReturn(ADMIN);
+        given(memberLoginProcessor.revalidateAdmin(ADMIN)).willReturn(ADMIN);
         given(adminOtpProcessor.isEnrolled(9L)).willReturn(true);
         given(adminLoginChallengeProcessor.issue(9L, NOW)).willReturn(new AdminLoginChallengeInfo(CHALLENGE, 300));
 
@@ -234,6 +266,7 @@ class AdminAuthWebFacadeTest {
             time.set(NOW.plusSeconds(2));
             return ADMIN;
         });
+        given(memberLoginProcessor.revalidateAdmin(ADMIN)).willReturn(ADMIN);
         given(adminOtpProcessor.isEnrolled(9L)).willReturn(true);
         given(adminLoginChallengeProcessor.issue(9L, NOW)).willReturn(new AdminLoginChallengeInfo(CHALLENGE, 300));
 

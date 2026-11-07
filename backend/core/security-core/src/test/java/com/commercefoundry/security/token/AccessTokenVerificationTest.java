@@ -45,6 +45,25 @@ class AccessTokenVerificationTest {
     private static final Instant VERIFIED_AT = NOW.plus(Duration.ofMinutes(1));
 
     @Test
+    void backdatedIssuanceKeepsExpiryBoundToOriginalAuthentication() {
+        Instant authenticationAt = NOW.minusSeconds(120).plusMillis(987);
+        IssuedAccessToken issued = TestTokens.issuer(NOW).issueAccessToken(MEMBER_ID, MemberRole.ADMIN, authenticationAt);
+        Jwt jwt = AccessTokenDecoderFactory.create(TestTokens.verification(), TestTokens.clockAt(NOW)).decode(issued.tokenValue());
+
+        assertThat(jwt.getIssuedAt()).isEqualTo(NOW.minusSeconds(120));
+        assertThat(jwt.getExpiresAt()).isEqualTo(NOW.minusSeconds(120).plus(TestTokens.ACCESS_TOKEN_TTL)).isEqualTo(issued.expiresAt());
+    }
+
+    @Test
+    void issuanceAfterOriginalLifetimeCannotCreateFreshToken() {
+        Instant signingAt = NOW.plus(TestTokens.ACCESS_TOKEN_TTL).plus(TestTokens.CLOCK_SKEW).plusSeconds(1);
+        IssuedAccessToken issued = TestTokens.issuer(signingAt).issueAccessToken(MEMBER_ID, MemberRole.ADMIN, NOW);
+
+        assertThat(issued.expiresAt()).isEqualTo(NOW.plus(TestTokens.ACCESS_TOKEN_TTL));
+        assertThatThrownBy(() -> authenticate(issued.tokenValue(), signingAt)).isInstanceOf(AuthenticationException.class);
+    }
+
+    @Test
     @DisplayName("발급한 토큰은 memberId · 역할 · jti 를 가진 MemberPrincipal 로 인증된다")
     void issuedTokenAuthenticatesAsMemberPrincipal() {
         IssuedAccessToken issued = TestTokens.issuer(NOW).issueAccessToken(MEMBER_ID, MemberRole.CUSTOMER);

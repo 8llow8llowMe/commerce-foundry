@@ -428,6 +428,27 @@ return ResponseEntity.ok().body(Response.success(response));
 - 동료는 새 코드 중 하나를 대상에게 안전하게 전달한다. 대상은 비밀번호 + 새 코드로 로그인하고, 다른 코드로 본인 OTP를 해제한 뒤 새 기기에 재등록한다. 첫 로그인에 쓴 코드는 재사용할 수 없으므로 **최소 두 코드**를 전달한다. 원문을 로그·URL·감사·이슈에 남기지 않는다.
 - DB 교체 뒤 대상 access 컷오프를 쓴다. Redis 실패면 503이지만 DB 교체와 행위자 코드 소비는 이미 끝났을 수 있다. 동료는 **새 TOTP step 또는 미사용 복구 코드**로 API를 다시 호출해 다시 교체·컷오프하고 **마지막 성공 응답의 코드만** 전달한다. 감사에는 행위자·대상·성공/실패를 남기고 비밀 값은 넣지 않는다.
 
+#### 운영자 비밀번호 재설정 (#589)
+
+두 경로 모두 `Cache-Control: no-store`, 기존 `Response` 봉투와 성공 `dataBody: null`을 사용한다.
+
+| API | 권한·입력 | 성공·오류 계약 |
+|---|---|---|
+| `POST /api/v1/admin/admins/{memberId}/password-reset-link` | `AdminAuthority.STAFF_MANAGE`, 본문 없음. DB에서도 활성 대표(ADMIN·OWNER) 확인 | 200은 대상 없음·고객·비활성·SMTP 실패에도 같음. 403 `AUTH_046`, 429 `AUTH_062`, 503 `AUTH_013`·`AUTH_063` |
+| `POST /api/v1/auth/admin/password-reset` | `permitAll()`, `{token, newPassword}`. 토큰은 메일 fragment의 base64url 43자, 비밀번호는 영문·숫자를 포함한 공백 없는 ASCII 10~64자 | 200 후 다시 로그인. 400 `AUTH_061`(만료·위조·재사용·상태·버전 변경 동일), 검증 오류, 409 `AUTH_064`(잠금 경합·새 링크 필요), 429 `AUTH_062`, 503 `AUTH_013`·`AUTH_063` |
+
+FE는 메일 링크 `#token=...`을 읽은 뒤 URL에서 제거하고 JSON 본문으로만 전송한다. 토큰을 query·로그·분석 도구에 전달하지 않는다.
+발송 응답으로 계정 존재·메일 도착을 단정하지 않는다. 발송은 전체 100회/15분·행위자 10회/15분·대상 3회/15분 제한이다.
+사용은 게이트웨이가 주입한 유효 `X-Client-Subject` 주체당 10회/분이며 FE는 헤더를 만들지 않는다. 누락·형식 오류면 해당 제한을 건너뛴다.
+
+링크 GETDEL·BCrypt 이후 회원 행 잠금에서 활성·버전을 검사하고, 비밀번호 저장·flush와 필수 컷오프가 완료돼야 DB를 커밋한다.
+컷오프 쓰기 실패 `AUTH_013`이면 비밀번호는 롤백되지만 소비한 링크는 복구하지 않는다. 새 링크가 필요하다.
+회원 행 NOWAIT 잠금 경합·조회 2초 또는 Processor 트랜잭션 5초 상한 초과는 409 `AUTH_064`다. 링크는 이미 소진됐으므로 새 링크를 요청한다.
+관리자 로그인 재검사의 경합·시간 초과는 계정 존재 여부를 드러내지 않도록 일반 로그인 실패 `AUTH_030`으로 답한다.
+컷오프 성공 후 DB 커밋 실패·결과 불명이어도 컷오프는 보상 삭제하지 않는다. 오류 응답만으로 DB 반영 여부를 단정하지 않는다.
+관리자 access의 `iat`는 로그인 조회 전 시작 시각, `exp = iat + accessTokenTtl`이다. OTP 대기·서명 지연만큼 `accessTokenExpiresIn`이 줄어든다.
+설정·장애 표는 [재설정 문서](../service/auth-service/docs/admin-password-reset.md), 보안 경계는 `security-guide.md` §11을 따른다.
+
 #### 배송지 주소록 (#7)
 
 모두 `isAuthenticated()` 이고 회원은 JWT 의 memberId 로만 정한다. 주소는 언제나 (`addressId`, memberId) 로 찾는다 — 없거나 남의 주소는 같은 404 `AUTH_020` 이다.

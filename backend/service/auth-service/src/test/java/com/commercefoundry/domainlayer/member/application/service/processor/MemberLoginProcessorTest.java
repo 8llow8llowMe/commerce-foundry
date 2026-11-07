@@ -43,6 +43,24 @@ class MemberLoginProcessorTest {
     }
 
     @Test
+    void revalidationAcceptsSameActiveVersionUnderMemberLock() {
+        given(memberRepositoryPort.findByIdForSecurityUpdate(ADMIN.id())).willReturn(Optional.of(ADMIN));
+        assertThat(processor.revalidateAdmin(ADMIN)).isEqualTo(ADMIN);
+        verify(memberRepositoryPort).findByIdForSecurityUpdate(ADMIN.id());
+    }
+
+    @Test
+    void revalidationRejectsChangedVersionInactiveCustomerAndMissingWithSameError() {
+        Member changed = Member.restore(ADMIN.id(), ADMIN.email(), ADMIN.passwordHash(), ADMIN.name(), null, MemberRole.ADMIN, 1L);
+        given(memberRepositoryPort.findByIdForSecurityUpdate(ADMIN.id()))
+            .willReturn(Optional.of(changed), Optional.of(DEACTIVATED_ADMIN), Optional.of(CUSTOMER), Optional.empty());
+        for (int attempt = 0; attempt < 4; attempt++) {
+            assertThatThrownBy(() -> processor.revalidateAdmin(ADMIN)).isInstanceOf(MemberException.class)
+                .extracting(failure -> ((MemberException) failure).getErrorCode()).isEqualTo(MemberErrorCode.ADMIN_LOGIN_FAILED);
+        }
+    }
+
+    @Test
     @DisplayName("이메일은 한 번 정규화(앞뒤 공백 제거 · 소문자)하고, 조회는 그 값을 그대로 쓴다")
     void findByNormalizedEmail() {
         given(memberRepositoryPort.findByEmail("a@example.com")).willReturn(Optional.of(CUSTOMER));

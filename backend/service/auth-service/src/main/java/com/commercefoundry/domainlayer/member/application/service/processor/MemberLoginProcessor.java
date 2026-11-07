@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.member.application.exception.MemberErrorC
 import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -108,5 +109,14 @@ public class MemberLoginProcessor {
         } catch (IllegalArgumentException rejected) {
             return false;
         }
+    }
+
+    /** BCrypt 이후 동일 회원 행을 잠가 오래된 비밀번호·상태·역할의 인증 결과를 거절한다. */
+    @Transactional(timeout = 5)
+    public Member revalidateAdmin(Member authenticated) {
+        return memberRepositoryPort.findByIdForSecurityUpdate(authenticated.id())
+            .filter(Member::isActiveOperator)
+            .filter(current -> Objects.equals(current.version(), authenticated.version()))
+            .orElseThrow(() -> new MemberException(MemberErrorCode.ADMIN_LOGIN_FAILED));
     }
 }

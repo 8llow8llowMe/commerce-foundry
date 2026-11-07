@@ -1,6 +1,7 @@
 package com.commercefoundry;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.member.application.command.AdminSeedCommand;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminSeedUseCase;
@@ -18,6 +19,14 @@ import com.commercefoundry.support.AdjustableClock;
 import com.commercefoundry.support.InMemoryAdminAccessCutoffStore;
 import com.commercefoundry.support.InMemoryAuthStoresConfig;
 import com.jayway.jsonpath.JsonPath;
+import com.commercefoundry.domainlayer.member.application.service.processor.AdminPasswordResetAccountProcessor;
+import com.commercefoundry.domainlayer.member.application.service.processor.MemberLoginProcessor;
+import com.nimbusds.jwt.SignedJWT;
+import java.time.temporal.ChronoUnit;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
@@ -68,6 +77,9 @@ class AdminPasswordResetFlowIntegrationTest {
     @Autowired AdjustableClock clock;
     @Autowired InMemoryAdminAccessCutoffStore cutoffs;
     @Autowired AdminAccessCutoffProcessor cutoffProcessor;
+    @Autowired AdminPasswordResetAccountProcessor resetAccounts;
+    @Autowired MemberLoginProcessor logins;
+    @Autowired PlatformTransactionManager transactions;
 
     @AfterEach
     void clear() {
@@ -118,16 +130,59 @@ class AdminPasswordResetFlowIntegrationTest {
     }
 
     @Test
-    void cutoffFailureCommitsPasswordAndBurnsLinkWithoutRetryRepair() throws Exception {
+    void cutoffFailureRollsBackPasswordAndBurnsLinkWithoutRetryRepair() throws Exception {
         Member owner = seed();
         send(owner, owner.id());
         String token = mailbox.token();
         cutoffs.failNextWrite();
         code(reset(token), HttpStatus.SERVICE_UNAVAILABLE, "AUTH_013");
-        assertThat(passwords.matches(NEXT, members.findById(owner.id()).orElseThrow().passwordHash())).isTrue();
+        assertThat(passwords.matches(OLD, members.findById(owner.id()).orElseThrow().passwordHash())).isTrue();
+        assertThat(members.findById(owner.id()).orElseThrow().version()).isEqualTo(owner.version());
         assertThat(cutoffs.findCutoff(owner.id())).isEmpty();
         code(reset(token), HttpStatus.BAD_REQUEST, "AUTH_061");
         assertThat(cutoffs.findCutoff(owner.id())).isEmpty();
+    }
+
+    @Test
+    void resetBeforeLoginRevalidationRejectsOldPasswordSnapshot() throws Exception {
+        Member owner = seed();
+        Member authenticated = logins.authenticateAdmin(Optional.of(owner), OLD);
+        send(owner, owner.id());
+        assertThat(reset(mailbox.token())).hasStatusOk();
+
+        assertThatThrownBy(() -> logins.revalidateAdmin(authenticated)).isInstanceOf(MemberException.class)
+            .extracting(failure -> ((MemberException) failure).getErrorCode()).isEqualTo(MemberErrorCode.ADMIN_LOGIN_FAILED);
+    }
+
+    @Test
+    void loginValidatedBeforeResetKeepsCutoffIatWhenSigningFinishesLater() throws Exception {
+        Member owner = seed();
+        Instant loginStartedAt = clock.instant();
+        Member authenticated = logins.revalidateAdmin(logins.authenticateAdmin(Optional.of(owner), OLD));
+        send(owner, owner.id());
+        assertThat(reset(mailbox.token())).hasStatusOk();
+        clock.advance(Duration.ofSeconds(3));
+
+        var issued = TestTokens.issuer(clock.instant()).issueAccessToken(authenticated.id(), authenticated.role(), loginStartedAt);
+        Instant actualIat = SignedJWT.parse(issued.tokenValue()).getJWTClaimsSet().getIssueTime().toInstant();
+        assertThat(actualIat).isEqualTo(loginStartedAt.truncatedTo(ChronoUnit.SECONDS));
+        assertThat(cutoffProcessor.issuedBeforeCutoff(owner.id(), actualIat)).isTrue();
+    }
+
+    @Test
+    void databaseCommitFailureDoesNotCompensateSuccessfulCutoff() {
+        Member owner = seed();
+        String hash = passwords.encode(NEXT);
+        Instant oldAccessIat = clock.instant();
+        assertThatThrownBy(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            resetAccounts.reset(new AdminPasswordResetGrant(owner.id(), owner.version()), hash);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void beforeCommit(boolean readOnly) { throw new IllegalStateException("simulated commit failure"); }
+            });
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(passwords.matches(OLD, members.findById(owner.id()).orElseThrow().passwordHash())).isTrue();
+        assertThat(cutoffProcessor.issuedBeforeCutoff(owner.id(), oldAccessIat)).isTrue();
     }
 
     @Test

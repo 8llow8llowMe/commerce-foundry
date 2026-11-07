@@ -183,6 +183,11 @@ Info → Presenter → Response
 ### Processor
 
 - 실제 애플리케이션 로직을 처리한다. `Info` / domain model / application model 을 반환한다.
+- **보안 예외 (#589)**: `AdminPasswordResetAccountProcessor#reset`은 회원 행 잠금 → 활성·버전 검사 → 비밀번호 저장·flush → Redis 컷오프 → DB 커밋을
+  한 Processor 트랜잭션에서 수행한다. 컷오프 실패 시 비밀번호를 롤백해야 하므로 Redis 호출 중에도 행 잠금·커넥션을 유지한다. Redis 명령 타임아웃은 1초다.
+  성공한 컷오프는 이후 DB 커밋 실패에도 삭제하지 않는다. 링크 GETDEL·BCrypt·SMTP는 트랜잭션 밖이다(`security-guide.md` §11).
+  관리자 로그인은 BCrypt 이후 동일 회원 행 잠금에서 활성·버전을 재검사하고, 토큰·챌린지는 조회 전 로그인 시작 시각을 사용한다.
+  두 보안 경로의 전용 잠금은 PostgreSQL NOWAIT, 조회 2초·Processor 트랜잭션 5초 상한이다. 로그인 경합은 열거 방지로 `AUTH_030`, 재설정은 새 링크가 필요한 409 `AUTH_064`다.
 - **Response DTO 를 직접 만들지 않는다.**
 - Port 호출, 도메인 조합, 검증, ID 생성 책임을 가진다.
 

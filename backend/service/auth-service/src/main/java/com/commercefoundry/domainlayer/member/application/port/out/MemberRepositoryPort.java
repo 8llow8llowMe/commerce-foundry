@@ -30,6 +30,9 @@ public interface MemberRepositoryPort {
      */
     Optional<Member> findByIdForUpdate(long memberId);
 
+    /** 보안 자격 변경·재검사 전용 NOWAIT 행 잠금. 경합·문장 시간 초과는 호출자가 진입점에 맞는 오류로 바꾼다. */
+    Optional<Member> findByIdForSecurityUpdate(long memberId);
+
     /** 활성 운영자(운영자 역할 전체 — ADMIN · OWNER · MANAGER · STAFF, 비활성화 시각 없음)를 쓰기 잠금으로 읽는다 (#193 · #236). 아이디 오름차순이다. */
     List<Member> findActiveOperatorsForUpdate();
 

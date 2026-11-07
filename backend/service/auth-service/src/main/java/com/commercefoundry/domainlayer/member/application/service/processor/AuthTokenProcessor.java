@@ -70,11 +70,11 @@ public class AuthTokenProcessor {
         return adminTokenInfo(jwtIssuer.issueAccessToken(admin.id(), admin.role()));
     }
 
-    /** OTP 2단계 완료 토큰의 iat 를 챌린지 발급 시각에 묶어 이후 관리자 컷오프가 언제나 이 토큰을 끊게 한다. */
-    public AdminAccessTokenInfo issueAdminAccessToken(Member admin, Instant challengeIssuedAt) {
+    /** 관리자 access의 iat·만료를 조회 전 로그인 시작 시각에 묶어 지연 서명도 컷오프 수명을 넘지 않게 한다. */
+    public AdminAccessTokenInfo issueAdminAccessToken(Member admin, Instant loginStartedAt) {
         requireOperator(admin);
-        Objects.requireNonNull(challengeIssuedAt, "challengeIssuedAt");
-        return adminTokenInfo(jwtIssuer.issueAccessToken(admin.id(), admin.role(), challengeIssuedAt));
+        Objects.requireNonNull(loginStartedAt, "loginStartedAt");
+        return adminTokenInfo(jwtIssuer.issueAccessToken(admin.id(), admin.role(), loginStartedAt));
     }
 
     private static void requireOperator(Member admin) {
