@@ -18,10 +18,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.context.TestPropertySource;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@TestPropertySource(properties = "spring.datasource.url=jdbc:h2:mem:store-profile-flow-217;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;"
+    + "DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1;INIT=CREATE SCHEMA IF NOT EXISTS operations")
 class StoreProfileFlowTest extends ResourceServerSmokeTestSupport {
     private static final String ADMIN = "/api/v1/admin/store/profile";
     private static final String PUBLIC = "/api/v1/store/profile";
