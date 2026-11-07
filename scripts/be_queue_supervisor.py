@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Coordinate existing independent Codex CLI threads through `codex queue`.
 
-Only the four registered threads receive work. PR merge is always performed by the user.
+Only registered threads receive work. PR merge is always performed by the user.
 State lives outside this public repository.
 """
 
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager, nullcontext
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -32,16 +34,59 @@ def state_file() -> Path:
     return STATE / "workers.json"
 
 
+@contextmanager
+def state_lock():
+    """Serialize changes made by the watcher and interactive supervisor commands."""
+    STATE.mkdir(parents=True, exist_ok=True)
+    with (STATE / "workers.lock").open("a+b") as stream:
+        if stream.tell() == 0:
+            stream.write(b"0")
+            stream.flush()
+        stream.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
 def read_state() -> dict:
     if not state_file().exists():
         return {"workers": {}, "queue": []}
-    return json.loads(state_file().read_text(encoding="utf-8"))
+    try:
+        return json.loads(state_file().read_text(encoding="utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        backup = STATE / "workers.json.bak"
+        if backup.exists():
+            print("상태 파일이 손상돼 마지막 정상 백업을 읽습니다", file=sys.stderr)
+            return json.loads(backup.read_text(encoding="utf-8"))
+        raise RuntimeError("감독 상태 파일이 손상됐고 정상 백업이 없습니다")
 
 
 def write_state(data: dict) -> None:
     STATE.mkdir(parents=True, exist_ok=True)
-    tmp = state_file().with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    json.loads(content)
+    tmp = STATE / "workers.json.tmp"
+    if state_file().exists():
+        try:
+            json.loads(state_file().read_text(encoding="utf-8"))
+            backup_tmp = STATE / "workers.json.bak.tmp"
+            shutil.copy2(state_file(), backup_tmp)
+            backup_tmp.replace(STATE / "workers.json.bak")
+        except (UnicodeError, json.JSONDecodeError):
+            pass
+    tmp.write_text(content, encoding="utf-8", newline="\n")
+    json.loads(tmp.read_text(encoding="utf-8"))
     tmp.replace(state_file())
 
 
@@ -121,6 +166,7 @@ def worker_prompt(number: int, title: str, branch: str, handoff: str | None, not
         "모듈 검사와 필요한 리뷰를 끝낸 뒤 $pr 스킬로 develop 대상 PR을 올리세요. "
         "PR에 `Issue Number: #번호`와 `## 완료된 이슈 항목` 아래 실제 끝낸 이슈 체크박스의 정확한 문구를 `- [x]`로 적으세요. "
         "미검증을 통과로 보고하지 말고 PR을 직접 머지하지 마세요. 사용자 머지 후 정리는 관리 세션이 합니다. "
+        "PR을 올린 뒤 본인 PR의 CI가 끝날 때까지 확인하세요. 실패한 job·테스트 원인을 고쳐 관련 검증을 다시 돌리고 같은 PR에 푸시해 모든 필수 검사가 통과한 뒤 완료 보고하세요. "
         "결과는 PR URL, 실행한 검증, 남은 항목, 후속 이슈로 보고하세요."
     )
     return message + (f" 추가 인계 경계: {note}" if note else "")
@@ -253,39 +299,121 @@ def merged_pr(job: dict, prs: list[dict]) -> dict | None:
                  and str(job["issue"]) in ISSUE_LINK_RE.findall(p["body"] or "")), None)
 
 
+def continued_branch(job: dict) -> str | None:
+    path = Path(job["worktree"]).resolve()
+    current = next((name for name, worktree in shared.worktree_map().items()
+                    if worktree == path), None)
+    if not current or current == job["branch"]:
+        return None
+    match = BRANCH_RE.fullmatch(current)
+    if not match or int(match.group(1)) != job["issue"]:
+        raise ValueError("머지 뒤 워크트리가 다른 이슈 브랜치로 전환됐습니다")
+    return current
+
+
+def remove_merged_branch(branch: str) -> None:
+    if shared.run("git", "show-ref", "--verify", f"refs/heads/{branch}", check=False) == "":
+        return
+    cherry = run("git", "cherry", "origin/develop", branch)
+    if any(line.startswith("+ ") for line in cherry.splitlines()):
+        raise ValueError("이전 브랜치에 develop 미반영 커밋이 있습니다")
+    run("git", "branch", "-D", branch)
+
+
+def failed_checks(pr: dict) -> list[str]:
+    failed = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+    return sorted({check["name"] for check in pr.get("statusCheckRollup") or []
+                   if check.get("status") == "COMPLETED" and check.get("conclusion") in failed})
+
+
+def check_ci() -> None:
+    data = read_state()
+    prs = shared.gh_json("pr", "list", "--state", "open", "--limit", "500", "--json",
+                         "number,headRefName,baseRefName,headRefOid,statusCheckRollup")
+    for slot, worker in data["workers"].items():
+        job = worker.get("job")
+        if not job or job.get("reconciled"):
+            continue
+        pr = next((p for p in prs if p["headRefName"] == job["branch"]
+                   and p["baseRefName"] == "develop"), None)
+        if not pr:
+            continue
+        failures = failed_checks(pr)
+        if not failures:
+            continue
+        signature = f"{pr['number']}:{pr['headRefOid']}:{','.join(failures)}"
+        if job.get("ci_alerted") == signature:
+            continue
+        names = ", ".join(failures)
+        queue_message(worker["thread"], Path(job["worktree"]),
+                      f"[관리 감독 CI 실패] 본인 PR #{pr['number']}의 {names} 검사가 실패했습니다. "
+                      "실패 job 로그로 원인을 확인해 수정하고, 관련 모듈을 다시 검증해 같은 PR에 푸시하세요. "
+                      "필수 CI가 모두 통과할 때까지 완료로 보고하지 말고 머지하지 마세요.")
+        job["ci_alerted"] = signature
+        write_state(data)
+        print(f"{slot}: PR #{pr['number']} CI 실패를 담당 세션에 전달")
+
+
+def reconcile_one(slot: str, worker: dict, data: dict, prs: list[dict]) -> None:
+    job = worker.get("job")
+    if not job or job.get("reconciled"):
+        return
+    pr = merged_pr(job, prs)
+    if not pr:
+        return
+    issue_data = shared.gh_json("issue", "view", str(job["issue"]), "--json", "body,state")
+    items = shared.completed_items(issue_data["body"], pr["body"] or "")
+    if not items:
+        print(f"{slot}: PR #{pr['number']} 머지됨, 완료 항목은 수동 확인 필요")
+    updated = shared.checked_body(issue_data["body"], items)
+    if updated != issue_data["body"]:
+        body_file = STATE / f"issue-{job['issue']}-body.md"
+        body_file.write_text(updated, encoding="utf-8", newline="\n")
+        run("gh", "issue", "edit", str(job["issue"]), "--body-file", str(body_file))
+        body_file.unlink()
+    next_branch = continued_branch(job)
+    if next_branch:
+        remove_merged_branch(job["branch"])
+        job["last_merged_pr"] = pr["number"]
+        job["branch"] = next_branch
+        write_state(data)
+        print(f"{slot}: PR #{pr['number']} 반영, 같은 워크트리의 {next_branch} 후속 작업 보존")
+        return
+    if not job.get("cleaned"):
+        path = Path(job["worktree"])
+        if not path.exists() and job["branch"] not in shared.worktree_map():
+            remove_merged_branch(job["branch"])
+            job["cleaned"] = True
+        else:
+            try:
+                shared.safe_cleanup(job)
+                job["cleaned"] = True
+            except RuntimeError:
+                if path.exists() and job["branch"] not in shared.worktree_map():
+                    remove_merged_branch(job["branch"])
+                    job["cleanup_pending_path"] = str(path)
+                    print(f"{slot}: Windows 폴더 삭제 실패, 고아 폴더 {path} 수동 정리 필요")
+                else:
+                    raise
+        write_state(data)
+    if items and not any(mark == " " for mark, _ in shared.ITEM_RE.findall(updated)):
+        if issue_data["state"] == "OPEN":
+            run("gh", "issue", "close", str(job["issue"]))
+    job["reconciled"] = True
+    job["merged_pr"] = pr["number"]
+    write_state(data)
+    print(f"{slot}: PR #{pr['number']} 반영, 이슈 #{job['issue']} {len(items)}항목 체크")
+
+
 def reconcile() -> None:
     run("git", "fetch", "--prune", "origin")
     data = read_state()
     prs = shared.pr_list("merged")
     for slot, worker in data["workers"].items():
-        job = worker.get("job")
-        if not job or job.get("reconciled"):
-            continue
-        pr = merged_pr(job, prs)
-        if not pr:
-            continue
-        issue_data = shared.gh_json("issue", "view", str(job["issue"]), "--json", "body,state")
-        items = shared.completed_items(issue_data["body"], pr["body"] or "")
-        if not items:
-            print(f"{slot}: PR #{pr['number']} 머지됨, 완료 항목 수동 확인 필요")
-            continue
-        updated = shared.checked_body(issue_data["body"], items)
-        if updated != issue_data["body"]:
-            body_file = STATE / f"issue-{job['issue']}-body.md"
-            body_file.write_text(updated, encoding="utf-8", newline="\n")
-            run("gh", "issue", "edit", str(job["issue"]), "--body-file", str(body_file))
-            body_file.unlink()
-        if not job.get("cleaned"):
-            shared.safe_cleanup(job)
-            job["cleaned"] = True
-            write_state(data)
-        if not any(mark == " " for mark, _ in shared.ITEM_RE.findall(updated)):
-            if issue_data["state"] == "OPEN":
-                run("gh", "issue", "close", str(job["issue"]))
-        job["reconciled"] = True
-        job["merged_pr"] = pr["number"]
-        write_state(data)
-        print(f"{slot}: PR #{pr['number']} 정리, 이슈 #{job['issue']} {len(items)}항목 체크")
+        try:
+            reconcile_one(slot, worker, data, prs)
+        except (RuntimeError, ValueError) as exc:
+            print(f"{slot}: 머지 정리 보류: {exc}", file=sys.stderr)
 
 
 def show() -> None:
@@ -300,6 +428,12 @@ def show() -> None:
         print(f"{slot}: {status} · {worker['thread']}")
     if data["queue"]:
         print("후속 대기열: " + ", ".join(f"{x['slot']}→#{x['issue']}" for x in data["queue"]))
+
+
+def tick() -> None:
+    reconcile()
+    check_ci()
+    dispatch_queue()
 
 
 def main() -> None:
@@ -324,31 +458,36 @@ def main() -> None:
     waiting.add_argument("slug")
     sub.add_parser("status")
     sub.add_parser("reconcile")
+    sub.add_parser("tick")
     watch = sub.add_parser("watch")
     watch.add_argument("--interval", type=int, default=300)
     args = parser.parse_args()
-    if args.command == "register":
-        register(args.slot, args.thread)
-    elif args.command == "assign":
-        assign(args.slot, args.issue, args.branch, args.handoff, args.note)
-    elif args.command == "track":
-        track(args.slot, args.issue, args.branch)
-    elif args.command == "queue":
-        enqueue(args.slot, args.issue, args.slug)
-    elif args.command == "status":
-        show()
-    elif args.command == "reconcile":
-        reconcile()
-    else:
+    if args.command == "watch":
         if args.interval < 30:
             parser.error("interval은 30초 이상이어야 합니다")
         while True:
             try:
-                reconcile()
-                dispatch_queue()
+                with state_lock():
+                    tick()
             except (ValueError, RuntimeError) as exc:
                 print(f"감독 오류: {exc}", file=sys.stderr)
             time.sleep(args.interval)
+    else:
+        with nullcontext() if args.command == "status" else state_lock():
+            if args.command == "register":
+                register(args.slot, args.thread)
+            elif args.command == "assign":
+                assign(args.slot, args.issue, args.branch, args.handoff, args.note)
+            elif args.command == "track":
+                track(args.slot, args.issue, args.branch)
+            elif args.command == "queue":
+                enqueue(args.slot, args.issue, args.slug)
+            elif args.command == "status":
+                show()
+            elif args.command == "reconcile":
+                reconcile()
+            else:
+                tick()
 
 
 if __name__ == "__main__":
