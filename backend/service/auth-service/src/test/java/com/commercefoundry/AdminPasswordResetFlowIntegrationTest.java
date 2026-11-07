@@ -4,13 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.member.application.command.AdminSeedCommand;
+import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
+import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.port.in.AdminSeedUseCase;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminPasswordResetMailPort;
 import com.commercefoundry.domainlayer.member.application.port.out.AdminPasswordResetTokenPort;
 import com.commercefoundry.domainlayer.member.application.port.out.MemberRepositoryPort;
-import com.commercefoundry.domainlayer.member.application.exception.MemberErrorCode;
-import com.commercefoundry.domainlayer.member.application.exception.MemberException;
 import com.commercefoundry.domainlayer.member.application.service.processor.AdminAccessCutoffProcessor;
+import com.commercefoundry.domainlayer.member.application.service.processor.AdminPasswordResetAccountProcessor;
+import com.commercefoundry.domainlayer.member.application.service.processor.MemberLoginProcessor;
 import com.commercefoundry.domainlayer.member.domain.model.AdminPasswordResetGrant;
 import com.commercefoundry.domainlayer.member.domain.model.Member;
 import com.commercefoundry.security.principal.MemberRole;
@@ -19,22 +21,19 @@ import com.commercefoundry.support.AdjustableClock;
 import com.commercefoundry.support.InMemoryAdminAccessCutoffStore;
 import com.commercefoundry.support.InMemoryAuthStoresConfig;
 import com.jayway.jsonpath.JsonPath;
-import com.commercefoundry.domainlayer.member.application.service.processor.AdminPasswordResetAccountProcessor;
-import com.commercefoundry.domainlayer.member.application.service.processor.MemberLoginProcessor;
 import com.nimbusds.jwt.SignedJWT;
-import java.time.temporal.ChronoUnit;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -50,6 +49,10 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(properties = {
     "auth.admin-password-reset.enabled=true",
@@ -83,9 +86,10 @@ class AdminPasswordResetFlowIntegrationTest {
 
     @AfterEach
     void clear() {
-        store.values.clear();
+        store.clear();
         mailbox.link = null;
         mailbox.fail = false;
+        mailbox.attempts = 0;
         clock.reset();
         cutoffs.clear();
     }
@@ -108,13 +112,24 @@ class AdminPasswordResetFlowIntegrationTest {
     }
 
     @Test
-    void expiredForgedAndMalformedLinksShareOneError() throws Exception {
+    void expiredForgedAndReusedValidFormatLinksShareOneErrorWithoutTokenEcho() throws Exception {
         Member owner = seed();
         assertThat(send(owner, owner.id())).hasStatusOk();
-        String token = mailbox.token();
+        String reused = mailbox.token();
+        assertThat(reset(reused)).hasStatusOk();
+        MvcTestResult replay = reset(reused);
+        assertThat(send(owner, owner.id())).hasStatusOk();
+        String expired = mailbox.token();
         clock.advance(Duration.ofMinutes(16));
-        code(reset(token), HttpStatus.BAD_REQUEST, "AUTH_061");
-        code(reset("a".repeat(43)), HttpStatus.BAD_REQUEST, "AUTH_061");
+        MvcTestResult expiry = reset(expired);
+        String forged = "a".repeat(43);
+        MvcTestResult forgery = reset(forged);
+        for (MvcTestResult result : new MvcTestResult[] {replay, expiry, forgery}) {
+            code(result, HttpStatus.BAD_REQUEST, "AUTH_061");
+            assertThat(result.getResponse().getContentAsString()).doesNotContain(reused, expired, forged);
+            assertThat(JsonPath.<Object>read(result.getResponse().getContentAsString(), "$.dataHeader"))
+                .isEqualTo(JsonPath.<Object>read(replay.getResponse().getContentAsString(), "$.dataHeader"));
+        }
         code(reset("malformed"), HttpStatus.BAD_REQUEST, "AUTH_061");
     }
 
@@ -211,14 +226,79 @@ class AdminPasswordResetFlowIntegrationTest {
         assertThat(mailbox.link).isNull();
     }
 
+    @ParameterizedTest
+    @CsvSource({"Abcdefgh1,AUTH_141", "\ud55c\uae00abcdefg1,AUTH_142", "abcdefg 12,AUTH_142"})
+    void publicResetRejectsInvalidPasswordBeforeConsumingLink(String password, String expectedCode) throws Exception {
+        assertInvalidPasswordPreservesLink(password, expectedCode);
+    }
+
     @Test
-    void publicResetValidatesPasswordBeforeConsumingLink() throws Exception {
+    void publicResetRejects65CharacterPasswordBeforeConsumingLink() throws Exception {
+        assertInvalidPasswordPreservesLink("a".repeat(64) + "1", "AUTH_141");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void lateStoreFailuresReturnSameEmptyUncacheableSuccessAsAbsentTarget(boolean smtpThenDiscardFailure) throws Exception {
         Member owner = seed();
-        send(owner, owner.id());
+        MvcTestResult absent = send(owner, Long.MAX_VALUE);
+        mailbox.fail = smtpThenDiscardFailure;
+        store.failSave = !smtpThenDiscardFailure;
+        store.failDiscard = smtpThenDiscardFailure;
+        MvcTestResult failed = send(owner, owner.id());
+        for (MvcTestResult result : new MvcTestResult[] {absent, failed}) {
+            assertThat(result).hasStatusOk();
+            assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+            assertThat(JsonPath.<Object>read(result.getResponse().getContentAsString(), "$.dataBody")).isNull();
+        }
+        assertThat(failed.getResponse().getContentAsString()).isEqualTo(absent.getResponse().getContentAsString());
+        assertThat(mailbox.link).isNull();
+        assertThat(mailbox.attempts).isEqualTo(smtpThenDiscardFailure ? 1 : 0);
+        assertThat(store.values).hasSize(smtpThenDiscardFailure ? 1 : 0);
+        assertThat(store.discardAttempts).isEqualTo(smtpThenDiscardFailure ? 1 : 0);
+    }
+
+    @Test
+    void limiterOutageReturnsIdentical503ForExistingAndAbsentTargetsWithoutMail() throws Exception {
+        Member owner = seed();
+        store.failLimit = true;
+        MvcTestResult existing = send(owner, owner.id());
+        MvcTestResult absent = send(owner, Long.MAX_VALUE);
+        code(existing, HttpStatus.SERVICE_UNAVAILABLE, "AUTH_013");
+        code(absent, HttpStatus.SERVICE_UNAVAILABLE, "AUTH_013");
+        assertThat(existing.getResponse().getContentAsString()).isEqualTo(absent.getResponse().getContentAsString());
+        assertThat(mailbox.attempts).isZero();
+        assertThat(store.values).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void sendTargetFourthAttemptIsLimitedEvenForAbsentTarget(boolean absent) throws Exception {
+        Member owner = seed();
+        long target = absent ? Long.MAX_VALUE : owner.id();
+        for (int attempt = 0; attempt < 3; attempt++) { assertThat(send(owner, target)).hasStatusOk(); }
+        code(send(owner, target), HttpStatus.TOO_MANY_REQUESTS, "AUTH_062");
+        assertThat(mailbox.attempts).isEqualTo(absent ? 0 : 3);
+        assertThat(send(owner, absent ? owner.id() : Long.MAX_VALUE)).hasStatusOk();
+        clock.advance(Duration.ofMinutes(15));
+        assertThat(send(owner, target)).hasStatusOk();
+    }
+
+    @Test
+    void useClientEleventhAttemptIsLimitedWithoutBlockingAnotherClientOrConsumingLink() throws Exception {
+        Member owner = seed();
+        assertThat(send(owner, owner.id())).hasStatusOk();
         String token = mailbox.token();
-        assertThat(mvc.post().uri(RESET).contentType(MediaType.APPLICATION_JSON)
-            .content("{\"token\":\"" + token + "\",\"newPassword\":\"short\"}").exchange()).hasStatus(HttpStatus.BAD_REQUEST);
-        assertThat(reset(token)).hasStatusOk();
+        String subject = "A".repeat(22);
+        for (int attempt = 0; attempt < 10; attempt++) {
+            code(reset("a".repeat(43), NEXT, subject), HttpStatus.BAD_REQUEST, "AUTH_061");
+        }
+        code(reset(token, NEXT, subject), HttpStatus.TOO_MANY_REQUESTS, "AUTH_062");
+        assertThat(store.values).hasSize(1);
+        assertThat(store.consumeAttempts).isEqualTo(10);
+        assertThat(reset(token, NEXT, "B".repeat(22))).hasStatusOk();
+        clock.advance(Duration.ofMinutes(1));
+        code(reset("a".repeat(43), NEXT, subject), HttpStatus.BAD_REQUEST, "AUTH_061");
     }
 
     @Test
@@ -228,6 +308,18 @@ class AdminPasswordResetFlowIntegrationTest {
         assertThat(send(owner, owner.id())).hasStatusOk();
         assertThat(store.values).isEmpty();
         assertThat(send(owner, Long.MAX_VALUE)).hasStatusOk();
+    }
+
+    private void assertInvalidPasswordPreservesLink(String password, String expectedCode) throws Exception {
+        Member owner = seed();
+        assertThat(send(owner, owner.id())).hasStatusOk();
+        String token = mailbox.token();
+        Map<String, ResetStore.Entry> before = Map.copyOf(store.values);
+        code(reset(token, password, "A".repeat(22)), HttpStatus.BAD_REQUEST, expectedCode);
+        assertThat(store.values).isEqualTo(before);
+        assertThat(store.consumeAttempts).isZero();
+        assertThat(store.limits).doesNotContainKey("use-client:" + "A".repeat(22));
+        assertThat(reset(token)).hasStatusOk();
     }
 
     private Member seed() {
@@ -242,8 +334,12 @@ class AdminPasswordResetFlowIntegrationTest {
     }
 
     private MvcTestResult reset(String token) {
-        return mvc.post().uri(RESET).contentType(MediaType.APPLICATION_JSON)
-            .content("{\"token\":\"" + token + "\",\"newPassword\":\"" + NEXT + "\"}").exchange();
+        return reset(token, NEXT, "");
+    }
+
+    private MvcTestResult reset(String token, String password, String subject) {
+        return mvc.post().uri(RESET).contentType(MediaType.APPLICATION_JSON).header("X-Client-Subject", subject)
+            .content("{\"token\":\"" + token + "\",\"newPassword\":\"" + password + "\"}").exchange();
     }
 
     private static String bearer(long id, MemberRole role) {
@@ -264,7 +360,9 @@ class AdminPasswordResetFlowIntegrationTest {
     static class Mailbox implements AdminPasswordResetMailPort {
         String link;
         boolean fail;
+        int attempts;
         @Override public void send(String recipient, String link) {
+            attempts++;
             if (fail) { throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_RESET_UNAVAILABLE); }
             this.link = link;
         }
@@ -273,17 +371,47 @@ class AdminPasswordResetFlowIntegrationTest {
 
     static class ResetStore implements AdminPasswordResetTokenPort {
         final Map<String, Entry> values = new HashMap<>();
+        final Map<String, Window> limits = new HashMap<>();
         final AdjustableClock clock;
+        boolean failSave;
+        boolean failDiscard;
+        boolean failLimit;
+        int consumeAttempts;
+        int discardAttempts;
         ResetStore(AdjustableClock clock) { this.clock = clock; }
         @Override public synchronized void save(String fingerprint, AdminPasswordResetGrant grant, Duration ttl) {
+            if (failSave) { throw new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE); }
             values.put(fingerprint, new Entry(grant, clock.instant().plus(ttl)));
         }
         @Override public synchronized Optional<AdminPasswordResetGrant> consume(String fingerprint) {
+            consumeAttempts++;
             Entry entry = values.remove(fingerprint);
             return entry == null || !clock.instant().isBefore(entry.expires()) ? Optional.empty() : Optional.of(entry.grant());
         }
-        @Override public synchronized void discard(String fingerprint) { values.remove(fingerprint); }
-        @Override public void limit(String dimension, int maximum, Duration window) { }
+        @Override public synchronized void discard(String fingerprint) {
+            discardAttempts++;
+            if (failDiscard) { throw new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE); }
+            values.remove(fingerprint);
+        }
+        @Override public synchronized void limit(String dimension, int maximum, Duration window) {
+            if (failLimit) { throw new MemberException(MemberErrorCode.TOKEN_STORE_UNAVAILABLE); }
+            Instant now = clock.instant();
+            Window current = limits.get(dimension);
+            if (current == null || !now.isBefore(current.expires())) { current = new Window(0, now.plus(window)); }
+            Window next = new Window(current.count() + 1, current.expires());
+            limits.put(dimension, next);
+            if (next.count() > maximum) { throw new MemberException(MemberErrorCode.ADMIN_PASSWORD_RESET_LIMITED); }
+        }
+        synchronized void clear() {
+            values.clear();
+            limits.clear();
+            failSave = false;
+            failDiscard = false;
+            failLimit = false;
+            consumeAttempts = 0;
+            discardAttempts = 0;
+        }
+        record Window(int count, Instant expires) { }
         record Entry(AdminPasswordResetGrant grant, Instant expires) { }
     }
 }
