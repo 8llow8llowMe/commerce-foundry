@@ -26,6 +26,11 @@ import com.commercefoundry.domainlayer.storeprofile.adapter.in.admin.presenter.S
 import com.commercefoundry.domainlayer.storeprofile.application.command.StoreProfileSaveCommand;
 import com.commercefoundry.domainlayer.storeprofile.application.service.StoreProfileAdminFacade;
 import com.commercefoundry.domainlayer.storeprofile.application.service.processor.StoreProfileProcessor;
+import com.commercefoundry.domainlayer.storefooter.adapter.in.admin.controller.StoreFooterAdminController;
+import com.commercefoundry.domainlayer.storefooter.adapter.in.admin.presenter.StoreFooterAdminPresenter;
+import com.commercefoundry.domainlayer.storefooter.application.command.StoreFooterCommands;
+import com.commercefoundry.domainlayer.storefooter.application.service.StoreFooterAdminFacade;
+import com.commercefoundry.domainlayer.storefooter.application.service.processor.StoreFooterProcessor;
 import com.commercefoundry.security.audit.AdminAuditLog;
 import com.commercefoundry.security.audit.AdminAudited;
 import java.util.Arrays;
@@ -44,12 +49,57 @@ class OperationsAdminAuditProcessorTest {
 
     @Test
     void enumMatchesOnlyMigratedControllersNotAllOperationsActions() {
-        var declared = Stream.of(StoreProfileAdminController.class, LegalDocumentAdminController.class)
+        var declared = Stream.of(StoreProfileAdminController.class, LegalDocumentAdminController.class, StoreFooterAdminController.class)
             .flatMap(type -> Arrays.stream(type.getDeclaredMethods()))
             .filter(method -> method.isAnnotationPresent(AdminAudited.class))
             .map(method -> method.getAnnotation(AdminAudited.class).action()).toList();
         assertThat(declared).containsExactlyInAnyOrderElementsOf(Arrays.stream(OperationsAdminAuditAction.values()).map(Enum::name).toList());
-        assertThat(declared).hasSize(3).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
+        assertThat(declared).hasSize(5).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void footerActionsUseFixedTargetAndAuditFailureCannotEscape(boolean publish) {
+        String action = publish ? "STORE_FOOTER_PUBLISH" : "STORE_FOOTER_DRAFT_SAVE";
+        doThrow(diagnosticFailure).when(diagnostic).warn(anyString(), any(), any(), any());
+        try (var writer = mockStatic(AdminAuditLog.class)) {
+            writer.when(() -> AdminAuditLog.write(action, 7L, "store-footer:1", true)).thenThrow(auditFailure);
+            assertThatCode(() -> {
+                if (publish) {
+                    audit.footerPublished(7L, true);
+                } else {
+                    audit.footerDraftSaved(7L, true);
+                }
+            }).doesNotThrowAnyException();
+            writer.verify(() -> AdminAuditLog.write(action, 7L, "store-footer:1", true), times(1));
+            writer.verifyNoMoreInteractions();
+            verify(diagnostic).warn("Admin audit unavailable action={} actorMemberId={} exceptionType={}",
+                action, 7L, IllegalArgumentException.class.getName());
+            verifyNoMoreInteractions(diagnostic);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void footerPresenterFailurePreservesOriginalExceptionAndNeverWritesSuccess(boolean publish) {
+        var processor = mock(StoreFooterProcessor.class);
+        var presenter = mock(StoreFooterAdminPresenter.class);
+        when(presenter.detail(any())).thenThrow(original);
+        var facade = new StoreFooterAdminFacade(processor, presenter, audit);
+        String action = publish ? "STORE_FOOTER_PUBLISH" : "STORE_FOOTER_DRAFT_SAVE";
+        doThrow(diagnosticFailure).when(diagnostic).warn(anyString(), any(), any(), any());
+        try (var writer = mockStatic(AdminAuditLog.class)) {
+            writer.when(() -> AdminAuditLog.write(action, 7L, "store-footer:1", false)).thenThrow(auditFailure);
+            assertThatThrownBy(() -> {
+                if (publish) {
+                    facade.publish(7L, new StoreFooterCommands.Publish(0L, 1));
+                } else {
+                    facade.save(7L, new StoreFooterCommands.SaveDraft(null, null));
+                }
+            }).isSameAs(original);
+            writer.verify(() -> AdminAuditLog.write(action, 7L, "store-footer:1", false), times(1));
+            writer.verifyNoMoreInteractions();
+        }
     }
 
     @ParameterizedTest

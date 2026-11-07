@@ -147,7 +147,9 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
         for (int i = 0; i < 5; i++) {
             assertThat(after.get(i).get("created_at")).isEqualTo(before.get(i).get("created_at"));
             assertThat(after.get(i).get("version")).isEqualTo(1L);
-            assertThat(after.get(i).get("updated_at")).isNotEqualTo(before.get(i).get("updated_at"));
+            // 서로 다른 쓰기도 DB의 마이크로초 시각에서는 같은 값일 수 있다. 버전 증가가 실제 갱신을 확인한다.
+            assertThat((java.time.OffsetDateTime) after.get(i).get("updated_at"))
+                .isAfterOrEqualTo((java.time.OffsetDateTime) before.get(i).get("updated_at"));
         }
         assertThatThrownBy(() -> result.saved().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
