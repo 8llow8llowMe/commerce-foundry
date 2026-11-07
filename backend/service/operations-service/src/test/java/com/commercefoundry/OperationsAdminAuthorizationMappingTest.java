@@ -34,7 +34,7 @@ class OperationsAdminAuthorizationMappingTest {
      * <ul>
      *   <li>캠페인 수신 대상 미리보기 = CS_READ — 회원 목록과 같은 노출 수준이고 저장 · 발송하지 않는다.</li>
      *   <li>백그라운드 작업 = REPORT. 지금 등록되는 작업 종류는 리포트 · 집계다. 정산 · 원가 · 개인정보를 담는 작업 종류가 생기면 종류별로 따로 정한다.</li>
-     *   <li>법적 문서 · 상점 프로필 = SETTINGS — 공개 사업자 정보와 약관이라 변경은 대표만(SETTINGS_MANAGE).</li>
+     *   <li>법적 문서 · 상점 프로필 · 푸터 = SETTINGS — 공개 설정 변경은 대표만(SETTINGS_MANAGE).</li>
      *   <li>알림 · 온보딩 = OPERATOR — 본인 수신함 · 본인 진행만 다룬다(유스케이스가 토큰의 memberId 로 거른다).</li>
      * </ul>
      */
@@ -53,6 +53,11 @@ class OperationsAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/store/legal-documents/{type}/{locale}/publish", AdminAuthority.SETTINGS_MANAGE),
         Map.entry("GET /api/v1/admin/store/legal-documents/{type}/{locale}/revisions", AdminAuthority.SETTINGS_READ),
         Map.entry("GET /api/v1/admin/store/legal-document-templates/{type}", AdminAuthority.SETTINGS_READ),
+        // 푸터 초안·게시
+        Map.entry("GET /api/v1/admin/store/footer", AdminAuthority.SETTINGS_READ),
+        Map.entry("GET /api/v1/admin/store/footer/revisions", AdminAuthority.SETTINGS_READ),
+        Map.entry("PUT /api/v1/admin/store/footer", AdminAuthority.SETTINGS_MANAGE),
+        Map.entry("POST /api/v1/admin/store/footer/publication", AdminAuthority.SETTINGS_MANAGE),
         // 상점 프로필
         Map.entry("GET /api/v1/admin/store/profile", AdminAuthority.SETTINGS_READ),
         Map.entry("PUT /api/v1/admin/store/profile", AdminAuthority.SETTINGS_MANAGE),
