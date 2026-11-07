@@ -84,6 +84,13 @@ resilience4j:
 payment:
   order-result:
     pending-after: 5m
+    reconciliation:
+      enabled: false
+      initial-delay: 1m
+      fixed-delay: 1m
+      lock-at-most-for: 10m
+      page-size: 10
+      max-pages-per-lane: 1
   recovery:
     enabled: false
     initial-delay: 1m

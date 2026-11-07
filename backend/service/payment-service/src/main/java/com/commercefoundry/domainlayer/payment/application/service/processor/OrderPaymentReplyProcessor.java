@@ -66,9 +66,17 @@ public class OrderPaymentReplyProcessor {
     @Transactional(propagation = Propagation.NEVER)
     public OrderPaymentReplySnapshot fetchSource(OrderPaymentReplyCommand command) {
         requireCommand(command);
+        var snapshot = fetchSource(command.paymentId());
+        validateSource(command, snapshot);
+        return snapshot;
+    }
+
+    /** 재대조도 원천을 한 번만 읽고 같은 snapshot을 record에서 검증한다. */
+    @Transactional(propagation = Propagation.NEVER)
+    public OrderPaymentReplySnapshot fetchSource(long paymentId) {
         OrderPaymentResultQueryResult source;
         try {
-            source = orderPaymentResultQueryPort.query(command.paymentId());
+            source = orderPaymentResultQueryPort.query(paymentId);
         } catch (OrderPaymentResultQueryException failure) {
             throw new OrderPaymentReplyException(switch (failure.getFailure()) {
                 case NOT_READY -> SOURCE_NOT_READY;
@@ -85,7 +93,8 @@ public class OrderPaymentReplyProcessor {
         boolean paid = source.result() == Result.PAID;
         var snapshot = new OrderPaymentReplySnapshot(source.paymentId(), source.orderId(), source.memberId(), paid,
             paid ? null : source.result().name().substring("REJECTED_".length()), source.amount(), source.approvedAt(), source.stockReservationId());
-        validateSource(command, snapshot);
+        validateSourceFields(snapshot);
+        if (snapshot.paymentId() != paymentId) throw new OrderPaymentReplyException(SOURCE_MISMATCH);
         return snapshot;
     }
 
@@ -126,6 +135,16 @@ public class OrderPaymentReplyProcessor {
 
     private static void validateSource(OrderPaymentReplyCommand command, OrderPaymentReplySnapshot source) {
         requireCommand(command);
+        validateSourceFields(source);
+        boolean paid = source.paid();
+        if (source.paymentId() != command.paymentId() || source.orderId() != command.orderId()
+            || paid != (command.kind() == OrderPaymentReplyCommand.Kind.PAID)
+            || !paid && !source.rejectionReason().equals(command.rejectionReason())) {
+            throw new OrderPaymentReplyException(SOURCE_MISMATCH);
+        }
+    }
+
+    private static void validateSourceFields(OrderPaymentReplySnapshot source) {
         if (source == null || source.amount() == null || source.amount().amount() <= 0
             || (source.paid() ? source.rejectionReason() != null
                 : source.rejectionReason() == null || !OrderPaymentReplyCommand.REJECTION_REASONS.contains(source.rejectionReason()))
@@ -134,12 +153,6 @@ public class OrderPaymentReplyProcessor {
             || source.paid() && (source.approvedAt() == null || source.stockReservationId() == null)
             || !source.paid() && !"ORDER_CANCELED".equals(source.rejectionReason()) && source.stockReservationId() != null) {
             throw new OrderPaymentReplyException(SOURCE_CONTRACT);
-        }
-        boolean paid = source.paid();
-        if (source.paymentId() != command.paymentId() || source.orderId() != command.orderId()
-            || paid != (command.kind() == OrderPaymentReplyCommand.Kind.PAID)
-            || !paid && !source.rejectionReason().equals(command.rejectionReason())) {
-            throw new OrderPaymentReplyException(SOURCE_MISMATCH);
         }
     }
 

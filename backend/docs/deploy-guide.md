@@ -426,4 +426,4 @@ auth A1 활성 관리자 API와 payment A3a 관측 API(PR #548)를 먼저 배포
 
 ### DLT 알림 활성화 (#477 A2)
 
-operations 스키마 스냅숏에서 신규 `operations.dlt_alert_state`·`operations.dlt_partition_checkpoint` DDL만 추출해 `DLT_ALERT_ENABLED=true` 활성화 전에 적용한다. `ddl-auto=none`은 테이블을 만들지 않는다. 실제 프로세스에 `MESSAGING_ENABLED=true`·올바른 `KAFKA_NAMESPACE`도 주입한다. 기존 네 DLT 토픽 READ/DESCRIBE와 namespace가 붙은 `operations.dlt-alerts` 그룹 READ ACL, auth A1 활성 관리자 API·operations internal 서비스 토큰 허용을 확인한다. 새 비밀 키는 없다. 허용 목록·재시도·롤백·상한·토픽 재생성 대응은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
+operations 스키마 스냅숏에서 신규 `operations.dlt_alert_state`·`operations.dlt_partition_checkpoint` DDL만 추출해 `DLT_ALERT_ENABLED=true` 활성화 전에 적용한다. `ddl-auto=none`은 테이블을 만들지 않는다. 실제 프로세스에 `MESSAGING_ENABLED=true`·올바른 `KAFKA_NAMESPACE`도 주입한다. 기존 네 DLT와 주문 결제 회신 DLT 두 토픽의 READ/DESCRIBE, namespace가 붙은 `operations.dlt-alerts` 그룹 READ ACL, auth A1 활성 관리자 API·operations internal 서비스 토큰 허용을 확인한다. 두 회신 DLT 토픽은 #308 C3c 배포 시 생성돼야 하며, 없으면 DLT 알림 활성 상태의 operations 기동이 실패한다. 새 비밀 키는 없다. 허용 목록·재시도·롤백·상한·토픽 재생성 대응은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.

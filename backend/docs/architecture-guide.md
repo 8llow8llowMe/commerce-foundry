@@ -361,6 +361,7 @@ Info → Presenter → Response
 - **업무 주기 조회는 두 곳에만 남는다** — ① outbox 릴레이 ② 시간 기준 만료 판정 트리거(주문 만료 · 재고 선점 안전망 · 작업 lease 회수 · 결제 재조회 등).
   운영 관측 예외로 operations는 읽기 전용 internal outbox 사실을 주기 조회하여 발행 지연·해소 알림만 저장할 수 있다(#477). 업무 상태 변경·PG 호출·후속 업무 처리를 폴링으로 실행하지 않는다.
   그 밖의 업무 처리는 모두 Kafka 컨슈머가 한다. 만료 트리거는 판정 + 상태 전이 + outbox 발행만 하고(건별 트랜잭션 · `@Version`), 후속 처리는 컨슈머가 한다.
+  #591 payment 주문 회신 재대조는 유실된 회신의 금전 정합성을 위한 한정 예외다. 오래된 미회신 결제와 DB에 남은 거절을 제한된 영속 커서로 순회하고 order의 기존 결과 조회로만 원천을 확인한다. 승인·주문 상태를 재실행하거나 Kafka 이벤트를 재발행하지 않으며, payment/inbox 기록은 기존 컨슈머와 같은 도메인 전이·짧은 트랜잭션을 쓴다(`payment-guide.md` §6-3). 일반 업무 폴링 허용 규칙으로 확대하지 않는다.
 - **발행 정합성 = transactional outbox + 폴링 릴레이**(CDC · Debezium 은 쓰지 않는다 — 사용자 결정). 업무 트랜잭션과 같은 커밋으로 서비스 스키마의 `outbox` 에 행을 넣고,
   릴레이가 `published_at is null and available_at <= now` 를 id 순으로 읽어 발행한 뒤 `published_at` 을 조건부 UPDATE 로 기록한다. 발행은 트랜잭션 밖이다.
   다중 인스턴스는 단일 실행 락(ShedLock)으로 한 인스턴스만 릴레이를 돌려 같은 키의 발행 순서를 지킨다. 지연 발행(작업 예약 · 백오프)은 `available_at` 으로 한다.
@@ -373,7 +374,7 @@ Info → Presenter → Response
 - **컨슈머는 멱등이다** — 수동 ack, at-least-once 전제. 상태를 바꾸는 트랜잭션 안에서 `processed_event` 를 넣는다 — `(consumer_group, event_id)` 유니크다.
   처리 전에 `exists` 로 이미 처리한 이벤트를 건너뛰고, 동시에 두 번 받아 유니크 위반이 나면 그 트랜잭션이 롤백 → 컨슈머 재시도 → `exists` 로 건너뛴다.
   상태 전이 멱등(이미 PAID · RELEASED 면 no-op)이 2차 방어다. 일시 오류는 컨슈머 안 지수 백오프 뒤 DLT(`<topic>.dlt`), 종결 오류는 바로 DLT 다.
-  `@RetryableTopic`(재시도 토픽 체인)은 쓰지 않는다. DLT 재처리는 사람이 한다.
+  `@RetryableTopic`(재시도 토픽 체인)은 쓰지 않는다. DLT 레코드 자체의 재처리는 사람이 한다. #591 재대조는 레코드를 다시 발행하지 않고 order에 이미 커밋된 결과만 독립 조회해 payment 기록을 복구한다.
   inbox 의 첫 구현은 product-service 의 주문 만료 · 취소 컨슈머다(`global/messaging/JpaProcessedEventStore`, `order-flow-guide.md` §3-5).
   order-service 도 결제 승인 컨슈머용으로 같은 모양을 둔다(#308, `orders.processed_event`).
   처리 기록은 보존 기간(`inbox.retention`) 뒤 messaging-core 기록 정리가 지운다 — 릴레이와 따로 돌아 outbox 없는 서비스도 지워진다(#378, 락은 서비스 스키마의 `shedlock`).
