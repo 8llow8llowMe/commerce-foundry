@@ -45,11 +45,18 @@ python -B -X utf8 scripts/be_queue_supervisor.py status
 
 세션이 이미 지시를 받은 뒤 감독 상태만 추가할 때는 `track S5 589 feature/be/589-admin-password-reset`을 사용한다. 각 작업자는 `$dev-orchestrator`와 `$pr`을 적용하고, 검증 후 PR 본문에 실제 완료한 이슈 체크박스 문구를 `## 완료된 이슈 항목`으로 적는다. 사용자만 PR을 Rebase and merge한다.
 
-머지 이후 후속 작업은 슬롯별 대기열에 넣는다. `watch`는 머지된 PR의 브랜치·이슈 연결과 완료 항목, 워크트리 청결도·커밋 반영 여부를 확인하고 이슈 체크·종료·로컬 정리를 수행한 다음 해당 슬롯의 대기열을 배정한다. 근거가 없는 항목은 자동 체크하지 않고 보류한다.
+머지 이후 후속 작업은 슬롯별 대기열에 넣는다. `watch`는 머지된 PR의 브랜치·이슈 연결과 완료 항목, 워크트리 청결도·커밋 반영 여부를 확인하고 이슈 체크·종료·로컬 정리를 수행한 다음 해당 슬롯의 대기열을 배정한다. 완료 항목 문구가 없으면 이슈 체크·종료만 보류하고, 머지 반영이 확인된 로컬 브랜치·워크트리는 정리한다.
+
+작업자가 같은 워크트리에서 다음 브랜치로 전환했다면 이전 머지 브랜치의 커밋 반영만 확인해 그 브랜치를 정리하고, 워크트리와 다음 브랜치는 보존한다. 열린 PR의 CI가 실패하면 PR 번호·실패 job·head SHA를 기준으로 담당 세션에 한 번만 수정 지시를 보낸다. 새 커밋에서 다시 실패하면 다시 알린다. 작업자에게는 실패 원인 수정·모듈 재검증·같은 PR 푸시와 필수 CI 통과 확인을 요구한다.
 
 ```powershell
 python -B -X utf8 scripts/be_queue_supervisor.py queue S1 217 ai-size-chart
+python -B -X utf8 scripts/be_queue_supervisor.py tick
 python -B -X utf8 scripts/be_queue_supervisor.py watch --interval 300
 ```
+
+`tick`은 한 번만 확인하므로 Windows 작업 스케줄러의 5분 반복 작업에 적합하다. `watch`는 프로세스가 살아 있는 동안 반복한다. 둘 다 같은 상태 잠금을 사용해 중복 실행 시 쓰기를 직렬화한다. 상태 갱신 전 정상 JSON을 `workers.json.bak`에 보관하며, 주 파일이 손상되면 마지막 정상 백업을 읽는다. 감독 상태 파일을 사람이 편집하는 동안 감시 프로세스를 동시에 실행하지 않는다.
+
+Windows 긴 경로 때문에 `git worktree remove`가 등록은 풀고 폴더 삭제만 실패하면, 감독 도구는 반영된 로컬 브랜치를 정리하고 남은 폴더를 `cleanup_pending_path`에 기록한다. 다른 PR·CI 감시는 계속하며 폴더 삭제는 `docs/git-workflow.md` §7-2에 따라 별도로 처리한다. 미커밋 변경이나 미반영 커밋 때문에 실패한 정리는 계속 보류한다.
 
 작업 세션의 기본 cwd가 루트이고 워크트리가 쓰기 허용 범위 밖인 경우, 사용자가 해당 세션의 `/permissions`에서 쓰기 범위를 조정해야 한다. `codex queue`가 성공해도 권한 정책이 자동으로 확장되지는 않는다. GitHub 앱/MCP 도구 승인은 로컬 셸 권한과 별도일 수 있다.
