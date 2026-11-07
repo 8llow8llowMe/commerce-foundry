@@ -112,6 +112,9 @@ class SkuBulkUpdateIntegrationTest {
         auditLogger.detachAppender(audit);
         reset(productRepository, writes, details);
         tx.executeWithoutResult(s -> {
+            em.createQuery("delete from SkuPriceEntity where skuId in (select id from SkuEntity where productId = :id)")
+                .setParameter("id", ID).executeUpdate();
+            em.createQuery("delete from ProductPriceEntity where productId = :id").setParameter("id", ID).executeUpdate();
             em.remove(em.find(com.commercefoundry.domainlayer.skucost.adapter.out.persistence.entity.SkuCostEntity.class, ID));
             em.remove(em.find(StockReservationItemEntity.class, ID));
             em.remove(em.find(StockReservationEntity.class, ID));

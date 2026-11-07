@@ -36,7 +36,8 @@ B1a는 `product_price`·`sku_price` 엔티티와 가격 값/집합, passive 벌�
 
 B1b A에서 `LegacyPriceSnapshot`·`LegacyPriceWritePlan`·`LegacyPriceWriteProcessor`의 caller 없는 준비·쓰기 조율기를 추가한다.
 기준통화 누락행 보완, 기존 가격 drift·추가 통화 불변식 검사와 기준통화 금액 변경 계획을 담당한다. 세 Processor 메서드는 호출자 트랜잭션을 요구한다.
-기존 다섯 writer 연결·부모 CAS 적용, backfill·정본 전환은 아직 완료되지 않았다. 이 단계만으로 기존 가격행의 실시간 동기화나 신규 USD 구매가 활성화되지 않는다.
+B1b B는 기존 다섯 writer를 같은 트랜잭션의 부모 CAS/@Version 보호 아래 연결한다. 실제 변경 시 기준통화 누락행을 보완하고 추가 통화 불변식을 검사한다.
+가격 동일값·기은퇴 no-op은 가격행을 조회하거나 보완하지 않는다. backfill·정본 전환·운영 검증은 미완료이며 신규 USD 구매는 활성화하지 않는다.
 
 ## 2. 가격 모델과 불변식
 

@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-/** B1a passive 저장소. 호출자 TX만 강제하며 부모 상품 CAS는 후속 B1b caller의 책임이다. */
+/** 통화별 가격 벌크 저장소. 호출자 TX를 강제하며 선행 부모 상품 CAS/@Version 보호는 writer의 책임이다. */
 @Component
 @RequiredArgsConstructor
 public class PriceBookRepositoryAdapter implements PriceBookRepositoryPort {

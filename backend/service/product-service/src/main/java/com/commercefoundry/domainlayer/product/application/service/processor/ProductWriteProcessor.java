@@ -11,6 +11,8 @@ import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositor
 import com.commercefoundry.domainlayer.product.application.port.out.StockAdjustmentHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.domain.model.HsCode;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceSnapshot;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
@@ -57,6 +59,7 @@ public class ProductWriteProcessor {
     private final StockRepositoryPort stockRepositoryPort;
     private final StockAdjustmentHistoryRepositoryPort stockAdjustmentHistoryRepositoryPort;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
+    private final LegacyPriceWriteProcessor legacyPrices;
 
     /** 진열 카테고리 — 받은 순서에서 중복을 빼고, 대표 카테고리가 없으면 맨 앞에 더한다(대표는 진열에도 들어 있어야 한다). */
     public List<Long> displayCategoryIdsOf(ProductCreateCommand command) {
@@ -101,12 +104,13 @@ public class ProductWriteProcessor {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public long create(ProductCreateCommand command, String descriptionHtml, List<Long> categoryIds, long productId) {
-        productRepositoryPort.insert(new Product(
+        Product product = new Product(
             productId, command.categoryId(), command.name(), command.summary(), descriptionHtml,
             command.saleStatus(), command.visible(), command.salePrice(), command.listPrice(), command.maxQuantityPerOrder(),
             command.customOrder().enabled(), command.customOrder().notice(), command.customOrder().leadTimeDays(),
             command.preorder(), command.expectedShipDate(), null, null, command.createdByMemberId()
-        ));
+        );
+        productRepositoryPort.insert(product);
         productCategoryRepositoryPort.insertLinks(productId, categoryIds, categoryIds.stream().map(id -> snowflakeIdGenerator.generateId()).toList());
 
         List<OptionGroup> groups = new ArrayList<>();
@@ -145,6 +149,11 @@ public class ProductWriteProcessor {
         skuRepositoryPort.insertAll(skus);
         // 재고 행 INSERT(saveAndFlush)보다 먼저 내보낸다 — 앞 단계의 제약 위반이 재고 충돌(PRODUCT_020)로 잘못 붙지 않게
         productRepositoryPort.flushNewProduct();
+        try {
+            legacyPrices.write(legacyPrices.prepareNew(LegacyPriceSnapshot.of(product, skus)));
+        } catch (LegacyPriceWritePlan.RequestRuleViolationException exception) {
+            throw new ProductException(ProductErrorCode.PRODUCT_PRICE_RULE_VIOLATED, exception.getMessage());
+        }
 
         StockSnapshot empty = StockSnapshot.empty();
         initialStocks.forEach((skuId, initial) -> {

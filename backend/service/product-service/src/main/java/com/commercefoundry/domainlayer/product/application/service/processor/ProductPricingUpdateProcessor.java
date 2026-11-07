@@ -6,6 +6,8 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductExce
 import com.commercefoundry.domainlayer.product.application.info.ProductAdminDetailInfo;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceSnapshot;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan;
 import com.commercefoundry.domainlayer.product.domain.model.ProductPricing;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,7 @@ public class ProductPricingUpdateProcessor {
     private final ProductRepositoryPort productRepositoryPort;
     private final SkuRepositoryPort skuRepositoryPort;
     private final ProductAdminDetailProcessor productAdminDetailProcessor;
+    private final LegacyPriceWriteProcessor legacyPrices;
 
     @Transactional(propagation = Propagation.MANDATORY)
     public ProductAdminDetailInfo update(ProductPricingUpdateCommand command) {
@@ -37,7 +40,15 @@ public class ProductPricingUpdateProcessor {
             .ifPresent(reason -> { throw new ProductException(ProductErrorCode.PRODUCT_PRICE_RULE_VIOLATED, reason); });
         // 동일 값도 먼저 버전과 가격 불변식을 검사한다. 감사 필드의 merge 여부에 기대지 않고 저장을 생략한다.
         if (!current.salePrice().equals(command.salePrice()) || !java.util.Objects.equals(current.listPrice(), command.listPrice())) {
-            productRepositoryPort.update(current.withPricing(command.salePrice(), command.listPrice()));
+            var before = LegacyPriceSnapshot.of(current, skus);
+            var changed = current.withPricing(command.salePrice(), command.listPrice());
+            // Prepare prices only after saveAndFlush has secured the parent's @Version fence.
+            productRepositoryPort.update(changed);
+            try {
+                legacyPrices.write(legacyPrices.prepare(before, LegacyPriceSnapshot.of(changed, skus)));
+            } catch (LegacyPriceWritePlan.RequestRuleViolationException exception) {
+                throw new ProductException(ProductErrorCode.PRODUCT_PRICE_RULE_VIOLATED, exception.getMessage());
+            }
         }
         return productAdminDetailProcessor.getProduct(command.productId());
     }

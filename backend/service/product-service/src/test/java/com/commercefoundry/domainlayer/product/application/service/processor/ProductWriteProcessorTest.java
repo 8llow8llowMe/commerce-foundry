@@ -7,8 +7,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.commercefoundry.domainlayer.category.domain.model.Category;
 import com.commercefoundry.domainlayer.category.domain.model.CategoryTree;
@@ -22,6 +24,8 @@ import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositor
 import com.commercefoundry.domainlayer.product.application.port.out.StockAdjustmentHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceSnapshot;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
@@ -34,8 +38,10 @@ import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -49,9 +55,16 @@ class ProductWriteProcessorTest {
     private final SkuRepositoryPort skuPort = mock(SkuRepositoryPort.class);
     private final StockRepositoryPort stockPort = mock(StockRepositoryPort.class);
     private final StockAdjustmentHistoryRepositoryPort historyPort = mock(StockAdjustmentHistoryRepositoryPort.class);
+    private final LegacyPriceWriteProcessor legacyPrices = mock(LegacyPriceWriteProcessor.class);
     private final ProductWriteProcessor processor = new ProductWriteProcessor(
-        productPort, categoryPort, optionPort, skuPort, stockPort, historyPort, new SnowflakeIdGenerator(1, 1)
+        productPort, categoryPort, optionPort, skuPort, stockPort, historyPort, new SnowflakeIdGenerator(1, 1), legacyPrices
     );
+
+    @BeforeEach
+    void prepareRealPricePlan() {
+        var ids = new AtomicLong(100000);
+        when(legacyPrices.prepareNew(any())).thenAnswer(call -> LegacyPriceWritePlan.prepareNew(call.getArgument(0), List.of(), List.of(), ids::incrementAndGet));
+    }
 
     private static ProductCreateCommand.OptionGroup group(String name, String... values) {
         return new ProductCreateCommand.OptionGroup(name, List.of(values));
@@ -165,6 +178,9 @@ class ProductWriteProcessorTest {
             ArgumentCaptor<List<Sku>> skus = ArgumentCaptor.forClass(List.class);
             verify(skuPort).insertAll(skus.capture());
             assertThat(skus.getValue().getFirst().optionKey()).isEqualTo(SkuOptionKey.of(List.of(valueIds.get("파랑"), valueIds.get("S"))));
+            var snapshot = ArgumentCaptor.forClass(LegacyPriceSnapshot.class);
+            verify(legacyPrices).prepareNew(snapshot.capture());
+            assertThat(snapshot.getValue()).isEqualTo(LegacyPriceSnapshot.of(product.getValue(), skus.getValue()));
             verify(stockPort, never()).create(any());
             verify(historyPort, never()).append(any());
         }
@@ -223,6 +239,14 @@ class ProductWriteProcessorTest {
             assertThat(history.getValue().memo()).isEqualTo(ProductWriteProcessor.INITIAL_STOCK_MEMO);
             assertThat(history.getValue().adminMemberId()).isEqualTo(100L);
             assertThat(skus.getValue()).extracting(Sku::id).hasSize(2).doesNotHaveDuplicates();
+
+            var order = inOrder(skuPort, productPort, legacyPrices, stockPort, historyPort);
+            order.verify(skuPort).insertAll(any());
+            order.verify(productPort).flushNewProduct();
+            order.verify(legacyPrices).prepareNew(any());
+            order.verify(legacyPrices).write(any(LegacyPriceWritePlan.class));
+            order.verify(stockPort).create(any());
+            order.verify(historyPort).append(any());
         }
     }
 }

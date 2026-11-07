@@ -9,6 +9,8 @@ import com.commercefoundry.domainlayer.product.application.port.out.SkuAdminRepo
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockAdjustmentHistoryRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceSnapshot;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
@@ -57,6 +59,7 @@ public class SkuAddProcessor {
     private final StockRepositoryPort stocks;
     private final StockAdjustmentHistoryRepositoryPort stockHistories;
     private final SnowflakeIdGenerator ids;
+    private final LegacyPriceWriteProcessor legacyPrices;
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void add(SkuAddCommand command) {
@@ -131,6 +134,13 @@ public class SkuAddProcessor {
         options.insertAll(List.of(), added);
         skus.insertAll(newSkus);
         flushClassified();
+        // Keep price failures outside the option constraint classification and before stock writes.
+        try {
+            legacyPrices.write(legacyPrices.prepare(LegacyPriceSnapshot.of(current, existingSkus),
+                LegacyPriceSnapshot.of(current, Stream.concat(existingSkus.stream(), newSkus.stream()).toList())));
+        } catch (LegacyPriceWritePlan.RequestRuleViolationException exception) {
+            throw new SkuAdminException(SkuAdminErrorCode.PRICE_INVALID, exception.getMessage());
+        }
         StockSnapshot empty = StockSnapshot.empty();
         initialStocks.forEach((skuId, initial) -> {
             Stock after = new Stock(skuId, initial.stockManaged(), initial.quantity());
