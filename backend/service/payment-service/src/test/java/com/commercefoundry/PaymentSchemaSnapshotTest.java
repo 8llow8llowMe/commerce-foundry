@@ -100,6 +100,56 @@ class PaymentSchemaSnapshotTest {
         assertThat(reconciliationStatements(operational)).containsExactlyElementsOf(expected);
     }
 
+    @Test
+    void automaticOperationalScriptsSetUtf8BeforeTransaction() throws IOException {
+        for (String name : List.of("payment-auto-cancel.sql", "payment-auto-cancel-scheduler.sql")) {
+            try (var input = getClass().getResourceAsStream("/ddl/" + name)) {
+                assertThat(input).isNotNull();
+                String sql = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                int encoding = sql.indexOf("set client_encoding = 'UTF8';");
+                assertThat(encoding).isGreaterThanOrEqualTo(0).isLessThan(sql.indexOf("begin;"));
+            }
+        }
+    }
+
+    @Test
+    void automaticCancellationOperationalDdlMatchesHibernateOutput() throws IOException {
+        String operational;
+        try (var input = getClass().getResourceAsStream("/ddl/payment-auto-cancel.sql")) {
+            assertThat(input).isNotNull();
+            operational = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        assertThat(automaticCancellationStatements(operational))
+            .containsExactlyElementsOf(automaticCancellationStatements(generateDdl()));
+    }
+
+    @Test
+    void automaticCancellationSchedulerDdlMatchesHibernateOutput() throws IOException {
+        String operational;
+        try (var input = getClass().getResourceAsStream("/ddl/payment-auto-cancel-scheduler.sql")) {
+            assertThat(input).isNotNull();
+            operational = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        assertThat(automaticSchedulerStatements(operational)).containsExactlyElementsOf(automaticSchedulerStatements(generateDdl()));
+    }
+
+    private static List<String> automaticSchedulerStatements(String sql) {
+        return java.util.Arrays.stream(sql.replaceAll("(?m)^--.*$", "").split(";"))
+            .map(String::trim)
+            .filter(s -> (s.startsWith("create table") || s.startsWith("comment on") || s.startsWith("create index"))
+                && (s.contains("payment.auto_cancel_cursor") || s.contains("idx_payment_status_id")))
+            .map(s -> s.replaceAll("\\s+", " ")).sorted().toList();
+    }
+
+    private static List<String> automaticCancellationStatements(String sql) {
+        return java.util.Arrays.stream(sql.replaceAll("(?m)^--.*$", "").split(";"))
+            .map(String::trim)
+            .filter(s -> (s.startsWith("create table") || s.startsWith("comment on") || s.startsWith("create index"))
+                && s.contains("payment.payment_auto_cancel"))
+            .map(s -> s.replaceAll("\\s+", " "))
+            .sorted().toList();
+    }
+
     private static List<String> reconciliationStatements(String sql) {
         return java.util.Arrays.stream(sql.replaceAll("(?m)^--.*$", "").split(";"))
             .map(String::trim)

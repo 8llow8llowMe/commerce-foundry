@@ -2,6 +2,7 @@ package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
 import com.commercefoundry.global.properties.PaymentGateProperties;
+import com.commercefoundry.global.properties.PaymentAutoCancelSchedulerProperties;
 import com.commercefoundry.global.properties.PaymentRecoveryProperties;
 import com.commercefoundry.global.properties.PaymentOrderReconciliationProperties;
 import com.commercefoundry.global.properties.PaymentPrepareProperties;
@@ -22,7 +23,8 @@ import org.springframework.context.annotation.Import;
     SnowflakePropertiesConfig.class,
     SwaggerPropertiesConfig.class
 })
-@EnableConfigurationProperties({PaymentGateProperties.class, PaymentRecoveryProperties.class, PaymentOrderReconciliationProperties.class,
+@EnableConfigurationProperties({PaymentAutoCancelSchedulerProperties.class, PaymentGateProperties.class, PaymentRecoveryProperties.class,
+    PaymentOrderReconciliationProperties.class,
     PaymentPrepareProperties.class, TossPaymentsProperties.class})
 public class PaymentServicePropertiesConfig {
 

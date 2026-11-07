@@ -27,7 +27,13 @@ public class PaymentCancelProcessor {
 
     @Transactional
     public Prepared prepare(long paymentId, long claimId, Money amount) {
+        if (claimId <= 0) {
+            throw new PaymentException(PaymentErrorCode.CANCELLATION_KEY_REUSED);
+        }
         Payment payment = cancelPort.lockPayment(paymentId).orElseThrow(() -> new PaymentException(PaymentErrorCode.NOT_FOUND_PAYMENT));
+        if (cancelPort.isAutoClaim(claimId)) {
+            throw new PaymentException(PaymentErrorCode.CANCELLATION_KEY_REUSED);
+        }
         if (amount.isZero() || amount.currency() != payment.amount().currency()) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_AMOUNT_INVALID);
         }

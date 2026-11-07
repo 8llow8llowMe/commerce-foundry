@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.payment.application.model.PgApprovalReque
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.shared.commerce.Money;
 
@@ -17,6 +18,13 @@ import com.commercefoundry.shared.commerce.Money;
  * 미승인을 확인하려면 결제키 조회({@link #inquireByPaymentKey})의 {@link PgInquiryQueryResult.Failed} 가 이 결제 시도의 결제키에 대한 답이어야 한다.
  */
 public interface PaymentGatewayPort {
+
+    /** Uses the exact persisted key in the header/body; a 2xx supplies evidence, never completion. */
+    PgCancellationQueryResult cancelAutomatic(Payment payment, String pgKey, Money amount);
+
+    /** Payment-key GET with identity, totals, balance and request-specific cancellation history validation. */
+    PgCancellationQueryResult inquireCancellation(
+        Payment payment, Money amount, String pgKey, String transactionKey);
 
     /** 같은 claimId 는 같은 PG 멱등 키와 금액으로만 재시도한다. */
     PgCancelResult cancel(Payment payment, long claimId, Money cancelAmount, Money cumulativeCanceled);
