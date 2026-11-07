@@ -32,6 +32,12 @@ B1a는 `product_price`·`sku_price` 엔티티와 가격 값/집합, passive 벌�
 구 스키마 확장 테스트는 동결한 product/sku 두 테이블의 모든 컬럼값·구조 보존과 관련 네 매핑만 검증한다.
 나머지 서비스 스키마 검증은 전체 생성 스냅숏과 모듈 검증으로 구분하며 실제 운영 이행 완료를 뜻하지 않는다.
 
+### B1b A 미연결 가격 조율기의 구현 범위
+
+B1b A에서 `LegacyPriceSnapshot`·`LegacyPriceWritePlan`·`LegacyPriceWriteProcessor`의 caller 없는 준비·쓰기 조율기를 추가한다.
+기준통화 누락행 보완, 기존 가격 drift·추가 통화 불변식 검사와 기준통화 금액 변경 계획을 담당한다. 세 Processor 메서드는 호출자 트랜잭션을 요구한다.
+기존 다섯 writer 연결·부모 CAS 적용, backfill·정본 전환은 아직 완료되지 않았다. 이 단계만으로 기존 가격행의 실시간 동기화나 신규 USD 구매가 활성화되지 않는다.
+
 ## 2. 가격 모델과 불변식
 
 가격은 product-service의 기존 상품 컨텍스트가 소유한다. 별도 가격 서비스를 만들지 않는다.
