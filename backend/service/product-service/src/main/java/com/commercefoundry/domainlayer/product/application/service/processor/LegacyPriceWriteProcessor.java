@@ -12,8 +12,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 아직 production caller가 없는 B1b A 조율기. MANDATORY는 TX 존재만 확인하며 부모 보호를 증명하지 않는다.
- * 후속 writer는 같은 상품의 CAS/@Version 보호 아래 같은 TX에서 prepare와 write를 호출해야 한다.
+ * 다섯 legacy writer가 공유하는 B1b 가격 조율기. MANDATORY는 TX 존재만 확인하며 부모 보호를 증명하지 않는다.
+ * 호출 writer는 같은 상품의 CAS/@Version 보호 아래 같은 TX에서 prepare와 write를 호출해야 한다.
  */
 @Component
 @RequiredArgsConstructor

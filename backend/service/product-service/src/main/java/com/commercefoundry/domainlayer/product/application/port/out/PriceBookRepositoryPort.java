@@ -6,8 +6,8 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * 미연결 가격 저장 기반. 기존 서비스 caller는 아직 사용하지 않는다.
- * 쓰기는 호출자의 DB 트랜잭션과 선행 부모 상품 CAS가 필요하다. CAS 연결은 B1b 범위다.
+ * 통화별 가격 벌크 저장·조회. LegacyPriceWriteProcessor가 다섯 legacy writer의 가격행을 동기화한다.
+ * 쓰기는 호출자의 DB 트랜잭션과 선행 부모 상품 CAS/@Version 보호가 필요하다.
  */
 public interface PriceBookRepositoryPort {
     List<ProductCurrencyPrice> findProductPrices(Collection<Long> productIds);

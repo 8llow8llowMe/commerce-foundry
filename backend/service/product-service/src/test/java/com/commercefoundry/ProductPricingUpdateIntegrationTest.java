@@ -91,6 +91,9 @@ class ProductPricingUpdateIntegrationTest {
     void cleanup() {
         reset(repository, details);
         tx.executeWithoutResult(s -> {
+            em.createQuery("delete from SkuPriceEntity where skuId in (select id from SkuEntity where productId = :id)")
+                .setParameter("id", ID).executeUpdate();
+            em.createQuery("delete from ProductPriceEntity where productId = :id").setParameter("id", ID).executeUpdate();
             em.remove(em.find(StockReservationItemEntity.class, ID));
             em.remove(em.find(StockReservationEntity.class, ID));
             em.remove(em.find(StockEntity.class, SKU));

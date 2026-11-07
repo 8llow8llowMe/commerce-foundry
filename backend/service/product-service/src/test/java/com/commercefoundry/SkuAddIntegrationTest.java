@@ -75,6 +75,9 @@ class SkuAddIntegrationTest {
     @AfterEach
     void cleanup() {
         tx.executeWithoutResult(s -> {
+            em.createQuery("delete from SkuPriceEntity where skuId in (select id from SkuEntity where productId = :id)")
+                .setParameter("id", ID).executeUpdate();
+            em.createQuery("delete from ProductPriceEntity where productId = :id").setParameter("id", ID).executeUpdate();
             List<Long> skuIds = em.createQuery("select e.id from SkuEntity e where e.productId = :id", Long.class).setParameter("id", ID).getResultList();
             em.createQuery("delete from StockAdjustmentHistoryEntity where skuId in :ids").setParameter("ids", skuIds).executeUpdate();
             em.createQuery("delete from StockEntity where skuId in :ids").setParameter("ids", skuIds).executeUpdate();

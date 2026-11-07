@@ -7,6 +7,8 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductOptio
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuAdminRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceSnapshot;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
@@ -41,6 +43,7 @@ public class OptionRetirementProcessor {
     private final SkuRepositoryPort skus;
     private final ProductOptionRepositoryPort options;
     private final SkuAdminRepositoryPort writes;
+    private final LegacyPriceWriteProcessor legacyPrices;
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void retire(OptionRetirementCommand command) {
@@ -89,8 +92,16 @@ public class OptionRetirementProcessor {
             .toList())
             .ifPresent(reason -> { throw new SkuAdminException(SkuAdminErrorCode.PRICE_INVALID, reason + " — 남는 판매중 SKU 의 추가금을 먼저 맞춰 주세요"); });
 
-        options.retire(command.productId(), groupTargets, valueTargets, Instant.now().truncatedTo(ChronoUnit.MICROS));
-        writes.replaceEditableProperties(stopped);
+        var stoppedById = stopped.stream().collect(Collectors.toMap(Sku::id, Function.identity()));
+        var after = existing.stream().map(sku -> stoppedById.getOrDefault(sku.id(), sku)).toList();
+        try {
+            var plan = legacyPrices.prepare(LegacyPriceSnapshot.of(current, existing), LegacyPriceSnapshot.of(current, after));
+            options.retire(command.productId(), groupTargets, valueTargets, Instant.now().truncatedTo(ChronoUnit.MICROS));
+            writes.replaceEditableProperties(stopped);
+            legacyPrices.write(plan);
+        } catch (LegacyPriceWritePlan.RequestRuleViolationException exception) {
+            throw new SkuAdminException(SkuAdminErrorCode.PRICE_INVALID, exception.getMessage());
+        }
     }
 
     private static void requireOwned(Set<Long> requested, Set<Long> owned, String reason) {

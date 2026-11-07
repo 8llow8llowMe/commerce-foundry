@@ -76,6 +76,9 @@ class OptionRetirementIntegrationTest {
     @AfterEach
     void cleanup() {
         tx.executeWithoutResult(s -> {
+            em.createQuery("delete from SkuPriceEntity where skuId in (select id from SkuEntity where productId = :id)")
+                .setParameter("id", ID).executeUpdate();
+            em.createQuery("delete from ProductPriceEntity where productId = :id").setParameter("id", ID).executeUpdate();
             em.createQuery("delete from StockEntity where skuId = :id").setParameter("id", WHITE_S).executeUpdate();
             for (var entity : List.of("SkuEntity", "ProductOptionValueEntity", "ProductOptionGroupEntity")) {
                 em.createQuery("delete from " + entity + " where productId = :id").setParameter("id", ID).executeUpdate();

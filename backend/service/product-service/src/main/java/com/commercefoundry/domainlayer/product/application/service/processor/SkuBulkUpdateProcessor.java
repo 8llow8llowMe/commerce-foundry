@@ -7,6 +7,8 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductOptio
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuAdminRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceSnapshot;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.ProductPricing;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
@@ -25,6 +27,7 @@ public class SkuBulkUpdateProcessor {
     private final SkuRepositoryPort skus;
     private final ProductOptionRepositoryPort options;
     private final SkuAdminRepositoryPort writes;
+    private final LegacyPriceWriteProcessor legacyPrices;
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void replace(SkuBulkUpdateCommand command) {
@@ -58,7 +61,14 @@ public class SkuBulkUpdateProcessor {
         if (retiredOnSale) {
             throw new SkuAdminException(SkuAdminErrorCode.RETIRED_OPTION_ON_SALE);
         }
-        writes.replaceEditableProperties(changed);
+        try {
+            var plan = legacyPrices.prepare(LegacyPriceSnapshot.of(current, existing), LegacyPriceSnapshot.of(current, changed));
+            // The adapter saves and flushes in ascending SKU ID order before price rows become dirty.
+            writes.replaceEditableProperties(changed);
+            legacyPrices.write(plan);
+        } catch (LegacyPriceWritePlan.RequestRuleViolationException exception) {
+            throw new SkuAdminException(SkuAdminErrorCode.PRICE_INVALID, exception.getMessage());
+        }
     }
 
     private Product product(long productId) {
