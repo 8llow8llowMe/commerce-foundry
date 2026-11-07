@@ -55,6 +55,7 @@ import lombok.NoArgsConstructor;
     },
     indexes = {
         @Index(name = "idx_payment_status_approval_started_at_id", columnList = "status, approval_started_at, id"),
+        @Index(name = "idx_payment_status_id", columnList = "status, id"),
         @Index(name = "idx_payment_order_id", columnList = "order_id"),
         @Index(name = "idx_payment_member_id_id", columnList = "member_id, id"),
         @Index(name = "idx_payment_status_order_synced_id", columnList = "status, order_synced, id"),

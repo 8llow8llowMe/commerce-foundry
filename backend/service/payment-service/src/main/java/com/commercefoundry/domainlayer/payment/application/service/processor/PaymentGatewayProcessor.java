@@ -9,6 +9,9 @@ import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import com.commercefoundry.domainlayer.payment.application.model.PaymentCancellationInfo;
 
 /**
  * PG 승인 요청. <b>트랜잭션을 걸지 않는다</b> — DB 커넥션을 쥔 채 PG 응답을 기다리지 않고, PG 승인 뒤 롤백으로 기록이 사라지지 않게
@@ -28,6 +31,18 @@ public class PaymentGatewayProcessor {
             case PgCancelResult.Rejected ignored -> CancelOutcome.REJECTED;
             case PgCancelResult.Unknown ignored -> CancelOutcome.UNKNOWN;
         };
+    }
+
+    @Transactional(propagation = Propagation.NEVER)
+    public PaymentCancellationInfo cancelAutomatic(Payment payment, String pgKey, Money amount) {
+        var result = paymentGatewayPort.cancelAutomatic(payment, pgKey, amount);
+        return new PaymentCancellationInfo(PaymentCancellationInfo.State.valueOf(result.state().name()), result.transactionKey());
+    }
+
+    @Transactional(propagation = Propagation.NEVER)
+    public PaymentCancellationInfo inquireCancellation(Payment payment, Money amount, String pgKey, String transactionKey) {
+        var result = paymentGatewayPort.inquireCancellation(payment, amount, pgKey, transactionKey);
+        return new PaymentCancellationInfo(PaymentCancellationInfo.State.valueOf(result.state().name()), result.transactionKey());
     }
 
     public enum CancelOutcome { SUCCEEDED, REJECTED, UNKNOWN }

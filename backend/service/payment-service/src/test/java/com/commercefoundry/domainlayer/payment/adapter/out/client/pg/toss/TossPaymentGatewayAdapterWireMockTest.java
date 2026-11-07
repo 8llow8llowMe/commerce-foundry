@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.payment.application.model.PgApprovalRequest;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult.State;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult.NotSentReason;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
@@ -605,6 +606,106 @@ class TossPaymentGatewayAdapterWireMockTest {
         void connectionRefused() {
             assertThat(closedPortGateway.approve(PgApprovalRequest.of(PaymentFixtures.inProgress())))
                 .isEqualTo(new PgApprovalQueryResult.NotSent(NotSentReason.CONNECT_FAILED));
+        }
+    }
+
+    @Nested
+    class AutomaticCancellation {
+        private final String key = "payment-auto-cancel-v1-" + PaymentFixtures.PAYMENT_ID;
+        private final String path = PAYMENT_KEY_INQUIRY_PATH + "/cancel";
+
+        @Test
+        void postEvidenceAndGetTransactionConfirmationUseExactFrozenKey() {
+            String body = canceled("txn-1", key, "PAYMENT_AUTO_CANCEL:" + key);
+            TOSS.stubFor(post(urlEqualTo(path)).willReturn(json(200, body)));
+            stubPaymentKeyInquiry(200, body);
+            var post = paymentGatewayPort.cancelAutomatic(PaymentFixtures.done(), key, krw(129000));
+            assertThat(post.state()).isEqualTo(State.EVIDENCE);
+            assertThat(post.transactionKey()).isEqualTo("txn-1");
+            assertThat(paymentGatewayPort.inquireCancellation(PaymentFixtures.done(), krw(129000), key, "txn-1").state()).isEqualTo(State.CONFIRMED);
+            TOSS.verify(1, postRequestedFor(urlEqualTo(path)).withHeader("Idempotency-Key", equalTo(key))
+                .withRequestBody(equalToJson("""
+                    {"cancelReason":"PAYMENT_AUTO_CANCEL:%s","cancelAmount":129000,"cancelRequestId":"%s","currency":"KRW"}
+                    """.formatted(key, key))));
+            TOSS.verify(1, getRequestedFor(urlEqualTo(PAYMENT_KEY_INQUIRY_PATH)));
+            // General payments may return a null request ID. The request-specific reason and POST transaction remain mandatory.
+            TOSS.stubFor(post(urlEqualTo(path)).willReturn(json(200, body.replace("\"cancelRequestId\":\"" + key + "\"", "\"cancelRequestId\":null"))));
+            assertThat(paymentGatewayPort.cancelAutomatic(PaymentFixtures.done(), key, krw(129000)).state()).isEqualTo(State.EVIDENCE);
+        }
+
+        @Test
+        void fullExternalCancelAndWrongTransactionCannotConfirmFromBalanceAlone() {
+            stubPaymentKeyInquiry(200, canceled("external-txn", "external-request", "external reason"));
+            assertThat(paymentGatewayPort.inquireCancellation(PaymentFixtures.done(), krw(129000), key, null).state()).isEqualTo(State.UNATTRIBUTED);
+            assertThat(paymentGatewayPort.inquireCancellation(PaymentFixtures.done(), krw(129000), key, "our-txn").state()).isEqualTo(State.MANUAL_REVIEW);
+            TOSS.stubFor(post(urlEqualTo(path)).willReturn(json(200, canceled("external-txn", "external-request", "external reason"))));
+            assertThat(paymentGatewayPort.cancelAutomatic(PaymentFixtures.done(), key, krw(129000)).state()).isEqualTo(State.MANUAL_REVIEW);
+        }
+
+        @Test
+        void getRecoversCrashBeforeEvidenceOnlyWithExactRequestMarkerAmountAndLastTransaction() {
+            stubPaymentKeyInquiry(200, canceled("txn-recovered", key, "PAYMENT_AUTO_CANCEL:" + key));
+            var recovered = paymentGatewayPort.inquireCancellation(PaymentFixtures.done(), krw(129000), key, null);
+            assertThat(recovered.state()).isEqualTo(State.CONFIRMED);
+            assertThat(recovered.transactionKey()).isEqualTo("txn-recovered");
+            stubPaymentKeyInquiry(200, canceled("txn-recovered", key, "PAYMENT_AUTO_CANCEL:" + key)
+                .replace("lastTransactionKey\":\"txn-recovered", "lastTransactionKey\":\"external"));
+            assertThat(paymentGatewayPort.inquireCancellation(PaymentFixtures.done(), krw(129000), key, null).state()).isEqualTo(State.UNATTRIBUTED);
+            TOSS.verify(0, postRequestedFor(urlEqualTo(path)));
+        }
+
+        @Test
+        void unchangedBalanceRequiresMatchingHistoryAndIdentity() {
+            String open = """
+                {"paymentKey":"%s","orderId":"%s","currency":"KRW","totalAmount":129000,"balanceAmount":129000,"status":"DONE","cancels":[]}
+                """.formatted(PAYMENT_KEY, PG_ORDER_ID);
+            stubPaymentKeyInquiry(200, open);
+            assertThat(paymentGatewayPort.inquireCancellation(PaymentFixtures.done(), krw(129000), key, null).state()).isEqualTo(State.OPEN);
+            for (String invalid : java.util.List.of(open.replace(PG_ORDER_ID, "other-order"), open.replace(PAYMENT_KEY, "other-key"),
+                open.replace("KRW", "USD"), open.replace("totalAmount\":129000", "totalAmount\":129001"),
+                open.replace("balanceAmount\":129000", "balanceAmount\":128999"))) {
+                stubPaymentKeyInquiry(200, invalid);
+                assertThat(paymentGatewayPort.inquireCancellation(PaymentFixtures.done(), krw(129000), key, null).state()).isEqualTo(State.MANUAL_REVIEW);
+            }
+        }
+
+        @Test
+        void incompleteOrInconsistentCancelHistoryCannotSupplyEvidence() {
+            String body = canceled("txn-1", key, "PAYMENT_AUTO_CANCEL:" + key);
+            for (String invalid : java.util.List.of(body.replace("cancelAmount\":129000", "cancelAmount\":1"),
+                body.replace("cancelStatus\":\"DONE", "cancelStatus\":\"PENDING"),
+                body.replace("lastTransactionKey\":\"txn-1", "lastTransactionKey\":\"other"))) {
+                TOSS.stubFor(post(urlEqualTo(path)).willReturn(json(200, invalid)));
+                assertThat(paymentGatewayPort.cancelAutomatic(PaymentFixtures.done(), key, krw(129000)).state()).isEqualTo(State.MANUAL_REVIEW);
+            }
+        }
+
+        @ParameterizedTest
+        @CsvSource({"429,TOO_MANY_REQUESTS", "500,PROVIDER_ERROR", "409,ALREADY_PROCESSING_REQUEST"})
+        void retryablePostAndGetStayPending(int status, String code) {
+            TOSS.stubFor(post(urlEqualTo(path)).willReturn(json(status, errorJson(code, "synthetic"))));
+            stubPaymentKeyInquiry(status, errorJson(code, "synthetic"));
+            assertThat(paymentGatewayPort.cancelAutomatic(PaymentFixtures.done(), key, krw(129000)).state()).isEqualTo(State.RETRY);
+            assertThat(paymentGatewayPort.inquireCancellation(PaymentFixtures.done(), krw(129000), key, null).state()).isEqualTo(State.RETRY);
+            TOSS.verify(1, postRequestedFor(urlEqualTo(path)));
+        }
+
+        @Test
+        void timeoutDoesNotRetryHttpPostAndTerminalRejectionRequiresReview() {
+            TOSS.stubFor(post(urlEqualTo(path)).willReturn(json(200, "{}").withFixedDelay(TIMEOUT_DELAY_MILLIS)));
+            assertThat(paymentGatewayPort.cancelAutomatic(PaymentFixtures.done(), key, krw(129000)).state()).isEqualTo(State.RETRY);
+            TOSS.verify(1, postRequestedFor(urlEqualTo(path)));
+            circuitBreaker().reset();
+            TOSS.stubFor(post(urlEqualTo(path)).willReturn(json(400, errorJson("NOT_CANCELABLE_PAYMENT", "synthetic"))));
+            assertThat(paymentGatewayPort.cancelAutomatic(PaymentFixtures.done(), key, krw(129000)).state()).isEqualTo(State.MANUAL_REVIEW);
+        }
+
+        private String canceled(String transaction, String requestId, String reason) {
+            return """
+                {"paymentKey":"%s","orderId":"%s","currency":"KRW","totalAmount":129000,"balanceAmount":0,"status":"CANCELED",
+                 "lastTransactionKey":"%s","cancels":[{"cancelAmount":129000,"transactionKey":"%s","cancelStatus":"DONE",
+                 "cancelRequestId":"%s","cancelReason":"%s"}]}
+                """.formatted(PAYMENT_KEY, PG_ORDER_ID, transaction, transaction, requestId, reason);
         }
     }
 
