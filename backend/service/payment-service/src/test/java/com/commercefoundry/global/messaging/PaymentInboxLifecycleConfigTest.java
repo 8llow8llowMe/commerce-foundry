@@ -64,7 +64,7 @@ class PaymentInboxLifecycleConfigTest {
             if (messaging && relay && cleanup) {
                 verify(inbox, timeout(2000).atLeastOnce()).deleteProcessedBefore(PaymentProcessedEventStoreContract.NOW.minus(Duration.ofDays(7)), 100);
                 verify(outbox, atLeastOnce()).deletePublishedBefore(PaymentProcessedEventStoreContract.NOW.minus(Duration.ofDays(7)), 100);
-                verify(repository, atLeastOnce()).findIdsProcessedBefore(any(), any());
+                verify(repository, timeout(2000).atLeastOnce()).findIdsProcessedBefore(any(), any());
             } else {
                 verify(inbox, after(100).never()).deleteProcessedBefore(any(), anyInt());
                 verify(outbox, org.mockito.Mockito.never()).deletePublishedBefore(any(), anyInt());

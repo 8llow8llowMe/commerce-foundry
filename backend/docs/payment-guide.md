@@ -533,7 +533,7 @@ result는 PAID/여섯 REJECTED의 고정 enum이며 ID·원문·cause를 로그/
 
 운영 DDL은 `service/payment-service/src/test/resources/ddl/payment-order-reconciliation.sql`이다. 새 cursor 테이블의 CREATE·comment·check와 기존 payment 테이블의 후보 복합 인덱스는
 Hibernate 7.2.24/PostgreSQL 17 출력에서 추출했다. lane PK가 두 행 조회 인덱스를 겸하며 기존 인덱스·payment 행은 보존한다.
-PG17의 추가 인덱스 전 10만 행 편향 계획은 `payment_pkey`로 99,980행을 필터링했다(약 17ms/26ms, shared hit 3,598/3,391). 새 인덱스의 선택·필터 제거 행·버퍼와 2초 제한은 동일 합성 분포를 CI에서 다시 확인한다. 이 합성 측정은 운영 분포의 성능 보장이 아니다.
+PG17의 추가 인덱스 전 10만 행 편향 계획은 `payment_pkey`로 99,980행을 필터링했다(약 17ms/26ms, shared hit 3,598/3,391). 인덱스 추가 후 같은 CI 합성 분포의 첫 페이지는 두 lane 모두 새 인덱스를 선택하고 필터 제거 0행이었다. RECONCILE은 Index Scan·shared hit 25·실행 0.096ms, REJECTED는 Index Only Scan·shared hit 1,378·실행 1.529ms였다(CI run 42374033251). REJECTED의 버퍼 사용은 계속 관찰하며 이 합성 측정은 운영 분포의 성능 보장이 아니다.
 구 DB에 **스케줄러 OFF → DDL 전체 트랜잭션 적용(기존 payment 후보 인덱스와 두 lane seed 포함) → validate/배포 → 운영 선행 조건 확인 후 별도 활성화** 순서다. 인덱스 생성은 기존 payment 쓰기를 막을 수 있으므로 결제 게이트를 닫고 진행 중인 승인·취소·복구·웹훅 쓰기를 drain한 작업 창에서 적용한다.
 기존 payment 행·컬럼·제약 변경은 없고 인덱스만 추가한다. 새 DB 전체 스냅숏은 별도로 적용한 뒤 운영 스크립트의 seed INSERT만 적용한다.
 Hibernate create/update는 seed를 만들지 않는다. 스위퍼 ON의 schema guard는 cursor 칼럼·두 seed·inbox·shedlock을 확인하고 누락이면 원문 없이 기동 실패한다.
