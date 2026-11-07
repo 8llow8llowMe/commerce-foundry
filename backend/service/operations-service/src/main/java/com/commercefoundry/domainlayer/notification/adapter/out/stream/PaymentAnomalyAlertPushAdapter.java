@@ -12,6 +12,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.core.Ordered;
@@ -19,8 +21,9 @@ import org.springframework.core.Ordered;
 /** 실행기와 종료 책임을 단독 소유한다. 생성만으로 worker 스레드를 시작하지 않는다. */
 @Slf4j
 @Component
-public class PaymentAnomalyAlertPushAdapter implements PaymentAnomalyAlertPushPort, ApplicationListener<ContextClosedEvent>, Ordered {
+public class PaymentAnomalyAlertPushAdapter implements PaymentAnomalyAlertPushPort, ApplicationContextAware, ApplicationListener<ContextClosedEvent>, Ordered {
     private final NotificationPushPort push;
+    private ApplicationContext context;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(16), task -> {
@@ -32,6 +35,9 @@ public class PaymentAnomalyAlertPushAdapter implements PaymentAnomalyAlertPushPo
     public PaymentAnomalyAlertPushAdapter(NotificationPushPort push) {
         this.push = push;
     }
+
+    @Override
+    public void setApplicationContext(ApplicationContext context) { this.context = context; }
 
     @Override
     public void enqueue(List<Notification> notifications) {
@@ -71,6 +77,7 @@ public class PaymentAnomalyAlertPushAdapter implements PaymentAnomalyAlertPushPo
 
     @Override
     public void onApplicationEvent(ContextClosedEvent event) {
+        if (event.getApplicationContext() != context) { return; }
         // lifecycle stop로 수집기를 기다리기 전에 차단·대기 폐기·interrupt 요청을 한다. 여기서는 기다리지 않는다.
         stopAccepting();
     }
