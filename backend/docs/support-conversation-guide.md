@@ -134,3 +134,43 @@ revoke가 먼저 잠근 경우 NOWAIT 409, 폐기 커밋 뒤에는 401이다. �
 별도 H2/PostgreSQL 읽기 계약으로 소유·인증 우선순위, 커서·크기 경계, 모든 상태 읽기, 오름차순 무누락 페이지,
 DB의 size+1 제한과 count 부재, 두 SELECT 사이 append, 오래된 부모의 scalar 상한, 호출자 자기 쓰기·롤백을 검증한다.
 PostgreSQL 17 전용 검증은 양방향 비회원 조회·폐기 잠금 경합을 확인하며 기존 support DDL 스냅숏과 Hibernate validate를 사용한다.
+
+## 고객 REST 진입 (#470 PR-B2a)
+
+기존 대화에 대한 공개 진입은 Controller → ConversationWebUseCase → ConversationWebFacade → 기존 Processor → Presenter다.
+WebFacade는 InternalUseCase/Facade를 호출하지 않는다. 회원·비회원 분기는 검증된 JWT memberId의 존재로 정하고
+회원일 때 guest 헤더는 무시한다. 비회원 인증 잠금을 유지하기 위해 Facade의 짧은 쓰기 트랜잭션 안에서
+GuestSessionProcessor.resolveForUpdate → Conversation/MessageProcessor 순서로 조합한다. 외부 I/O는 없다.
+
+| 메서드·경로 | 입력 | 성공 dataBody |
+|---|---|---|
+| GET /api/v1/support/conversations/{id} | 인증 헤더 | id(String), locale, channel, status, lastSeq |
+| GET /api/v1/support/conversations/{id}/messages | cursor=0, size=20 기본 | messages, hasNext, nextCursor, lastSeq |
+| POST /api/v1/support/conversations/{id}/messages | Idempotency-Key, {content} | id(String), conversationId(String), seq, authorType, status, content |
+
+모두 Response 봉투와 Cache-Control: no-store를 사용한다. POST 신규·동일 키 재생은 모두 200이며
+저장된 마스킹 본문만 반환한다. 소문자 canonical UUID, 본문 2000 UTF-16 상한·NUL 거절·소유 우선 검증은
+기존 Processor가 담당한다. 형식이 유효한 다른 소유자·없는 대화는 같은 404 SUPPORT_010이다.
+잘못된 JSON·숫자 바인딩은 400 SUPPORT_100이며 본문 값과 자격 증명을 오류에 싣지 않는다.
+
+유효한 CUSTOMER bearer는 JWT memberId만 사용하고 비회원 헤더를 무시한다. 잘못되거나 만료된 bearer는
+공개 경로에서도 security-core가 먼저 401로 거절하며 비회원으로 대체하지 않는다. 운영자는 403이다.
+bearer가 없으면 기존 X-Support-Guest-Token이 필요하며 누락·형식 오류·미등록·폐기·만료는 동일한 401 GUEST_SESSION_001이다.
+인증 오류도 캐시하지 않는다. 문법상 잘못된 JSON·숫자는 MVC 바인딩에서 먼저 400이 될 수 있다.
+
+POST 메시지는 게이트웨이 support-write 필수 정책을 통과해야 한다. 제한기/IP 해석 비활성·주체 부재·Redis 장애/타임아웃은
+503 GATEWAY_002, 실제 한도 초과만 429 GATEWAY_006 + Retry-After다. 조회는 이 쓰기 정책으로 세지 않는다.
+배포는 기존 신뢰 프록시/IP HMAC 설정과 Redis가 필요하다. 전역 IP 해석의 기본 OFF에서는 상담 쓰기를 열지 않는다.
+
+FE #223은 재시도 시 같은 키와 본문을 유지하고 다음 조회에 nextCursor를 사용한다. hasNext=false 후에도 같은 커서로 폴링할 수 있다.
+계약 검토자는 seonghoho다. 이 PR에는 비회원 발급·대화 생성 HTTP(B2b), WS·티켓(C), AI·이벤트·새 DDL이 없다.
+
+
+B2a의 locale/channel/status/authorType/message status는 coding-conventions §11의 제어 코드 예외다.
+FE는 코드 자체를 문구로 표시하지 않고 언어 선택, 채널 처리, 입력·종료 동작, 말풍선 배치·완료 렌더링에만 사용한다.
+표시가 필요하면 FE의 코드별 ko/en 문구로 변환한다. wire 값은 locale=KO|EN, channel=WEB,
+대화 status=AI_ACTIVE|WAITING_AGENT|HUMAN_ACTIVE|RESOLVED|CLOSED, authorType=CUSTOMER,
+메시지 status=COMPLETED로 고정하며 각 응답 필드의 Swagger allowableValues에 명시한다.
+명칭 변경·삭제는 계약 변경이고, 새 작성자·상태는 후속 API 계약과 FE 처리를 함께 확장한다.
+게이트웨이의 /api/v1/support/** 응답도 초기 WebFilter와 커밋 직전 헤더 적용으로 no-store를 보장한다.
+서비스에 닿지 않은 401·429·503에도 같은 계약을 적용하며 다른 서비스 경로의 캐시 정책은 바꾸지 않는다.

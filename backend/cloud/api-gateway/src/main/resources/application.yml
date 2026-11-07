@@ -75,6 +75,10 @@ gateway:
     # 고객 쓰기 API 회원 · 클라이언트 IP 단위 요청 제한 (security-guide.md §7-3). 대상 경로는 RateLimitPolicy 가 정하고 한도만 여기서 바꾼다.
     # requests-per-minute 는 60 의 약수 또는 배수, burst 는 한 번에 몰아서 허용하는 요청 수다. Redis 장애 때는 통과(fail-open)한다
     enabled: true
+    # 상담 메시지 POST는 필수 보호다. 전역/IP OFF 또는 Redis 장애는 503이다.
+    support-write:
+      requests-per-minute: 20
+      burst: 5
     cart-merge:
       requests-per-minute: 6
       burst: 3

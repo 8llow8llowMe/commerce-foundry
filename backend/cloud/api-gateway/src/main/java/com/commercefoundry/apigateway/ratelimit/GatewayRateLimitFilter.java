@@ -23,7 +23,7 @@ import reactor.core.publisher.Mono;
 
 /**
  * 고객 쓰기 API 를 주체 단위로 센다 ({@code security-guide.md} §7-3, 정책 {@link RateLimitPolicy}). 한도를 넘으면 하류로 보내지 않고
- * 429 {@code GATEWAY_006} + {@code Retry-After} 로 끊는다.
+ * 429 {@code GATEWAY_006} + {@code Retry-After} 로 끊는다. 상담 메시지 쓰기만 필수 보호이며 보호 부재·저장소 장애는 503이다.
  *
  * <ul>
  *   <li><b>라우트 전역 필터(GlobalFilter)다.</b> 라우트에 걸린 요청만 오고, 보안 체인(토큰 검증 · 차단 목록 · 어드민 인가)이 끝난 뒤라 검증된 회원 id 를 쓴다.</li>
@@ -76,11 +76,15 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        if (!properties.enabled()) {
-            return chain.filter(exchange);
-        }
         Optional<RateLimitPolicy> policy = RateLimitPolicy.match(exchange.getRequest().getMethod(), exchange.getRequest().getPath().pathWithinApplication());
         if (policy.isEmpty()) {
+            return chain.filter(exchange);
+        }
+        boolean mandatory = policy.get() == RateLimitPolicy.SUPPORT_WRITE;
+        if (mandatory && (!properties.enabled() || !clientSubjectResolver.enabled() || clientSubject(exchange).isEmpty())) {
+            return unavailable(exchange);
+        }
+        if (!properties.enabled()) {
             return chain.filter(exchange);
         }
         return ReactiveSecurityContextHolder.getContext()
@@ -91,7 +95,8 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
             .switchIfEmpty(Mono.defer(() -> Mono.justOrEmpty(clientSubject(exchange))))
             .flatMap(subject -> acquire(policy.get(), subject, exchange))
             .defaultIfEmpty(true)
-            .flatMap(allowed -> allowed ? chain.filter(exchange) : reject(policy.get(), exchange));
+            .flatMap(allowed -> allowed ? chain.filter(exchange) : reject(policy.get(), exchange))
+            .onErrorResume(RateLimitUnavailableException.class, failure -> unavailable(exchange));
     }
 
     /**
@@ -115,6 +120,9 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
             .single()
             .timeout(CHECK_TIMEOUT)
             .onErrorResume(failure -> {
+                if (policy == RateLimitPolicy.SUPPORT_WRITE) {
+                    return Mono.error(new RateLimitUnavailableException());
+                }
                 logFailOpen(policy, subject, exchange, failure);
                 return Mono.just(true);
             })
@@ -125,6 +133,12 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
                 }
             });
     }
+
+    private Mono<Void> unavailable(ServerWebExchange exchange) {
+        return errorResponseWriter.write(exchange.getResponse(), GatewayErrorCode.SERVICE_UNAVAILABLE.getHttpStatus(), GatewayErrorCode.SERVICE_UNAVAILABLE);
+    }
+
+    private static final class RateLimitUnavailableException extends RuntimeException { }
 
     /** {@code Retry-After} 는 쓰기가 시작되기 전에 넣는다. CORS 헤더는 보안 체인의 CORS 필터가 이미 실었다. */
     private Mono<Void> reject(RateLimitPolicy policy, ServerWebExchange exchange) {

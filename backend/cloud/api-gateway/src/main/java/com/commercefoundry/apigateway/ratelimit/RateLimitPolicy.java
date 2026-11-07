@@ -20,6 +20,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
 @Getter
 public enum RateLimitPolicy {
 
+    SUPPORT_WRITE("support-write", "/api/v1/support/conversations/{id}/messages", Set.of(HttpMethod.POST), GatewayRateLimitProperties::supportWrite),
     CART_MERGE("cart-merge", "/api/v1/carts/*/merge", Set.of(HttpMethod.POST), GatewayRateLimitProperties::cartMerge),
     CART_WRITE("cart-write", "/api/v1/carts/**", WriteMethods.ALL, GatewayRateLimitProperties::cartWrite),
     // 주문서 미리보기는 수량 · 배송지를 바꿀 때마다 나간다 — 주문 생성과 한도를 나누지 않으면 몇 번 바꾼 뒤 "주문하기" 가 429 를 받는다 (#158)

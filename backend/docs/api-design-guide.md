@@ -1882,3 +1882,24 @@ operations-service의 `GET/PUT /api/v1/admin/store/footer`, `POST /api/v1/admin/
 `expectedVersion`으로 충돌을 막고, 반복 게시는 현재 게시본을 변경하지 않는다. 모든 응답은 공통 봉투·no-store다.
 정확한 이중 언어 필드·허용 호스트·오류·FE #600 안전 anchor 계약은 [스토어 푸터 가이드](store-footer-guide.md)를 따른다.
 Gateway는 기존 `/api/v1/store/**`·`/api/v1/admin/store/**` 라우트를 재사용한다. 계약 검토자 `seonghoho`다.
+
+## 기존 고객 상담 REST (#470 PR-B2a)
+
+support-service는 GET /api/v1/support/conversations/{id}, GET .../{id}/messages?cursor=0&size=20,
+POST .../{id}/messages만 공개한다. 기존 CUSTOMER JWT 또는 기존 X-Support-Guest-Token으로 본인 대화에 접근한다.
+회원 JWT가 우선이며 잘못된 bearer는 비회원으로 대체하지 않는다. 운영자 403, 자격 누락/오류 401, 타인/없는 대화는 동일한 404다.
+POST는 소문자 canonical UUID Idempotency-Key와 {content}를 받고 신규·재생 모두 200이다.
+Response 봉투·no-store·문자열 ID를 사용한다. 페이지는 messages/hasNext/nextCursor/lastSeq이며 다음 입력은 nextCursor다.
+기존 메시지/커서 정책과 오류는 support-conversation-guide.md를 따른다.
+필수 support-write 제한의 보호 설정 부재/Redis 장애는 503, 실제 초과만 429 + Retry-After다.
+게스트 발급·대화 생성(B2b)·WebSocket(C)은 후속이다. FE #223 계약 검토자는 seonghoho다.
+
+
+B2a의 locale/channel/status/authorType/message status는 coding-conventions §11의 제어 코드 예외다.
+FE는 코드 자체를 문구로 표시하지 않고 언어 선택, 채널 처리, 입력·종료 동작, 말풍선 배치·완료 렌더링에만 사용한다.
+표시가 필요하면 FE의 코드별 ko/en 문구로 변환한다. wire 값은 locale=KO|EN, channel=WEB,
+대화 status=AI_ACTIVE|WAITING_AGENT|HUMAN_ACTIVE|RESOLVED|CLOSED, authorType=CUSTOMER,
+메시지 status=COMPLETED로 고정하며 각 응답 필드의 Swagger allowableValues에 명시한다.
+명칭 변경·삭제는 계약 변경이고, 새 작성자·상태는 후속 API 계약과 FE 처리를 함께 확장한다.
+게이트웨이의 /api/v1/support/** 응답도 초기 WebFilter와 커밋 직전 헤더 적용으로 no-store를 보장한다.
+서비스에 닿지 않은 401·429·503에도 같은 계약을 적용하며 다른 서비스 경로의 캐시 정책은 바꾸지 않는다.
