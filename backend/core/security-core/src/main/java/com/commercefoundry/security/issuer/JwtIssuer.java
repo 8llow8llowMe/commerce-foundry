@@ -67,19 +67,14 @@ public final class JwtIssuer {
     }
 
     public IssuedAccessToken issueAccessToken(long memberId, MemberRole role) {
-        Instant now = clock.instant();
-        return issueAccessToken(memberId, role, now, now);
+        return issueAccessToken(memberId, role, clock.instant());
     }
 
     /**
      * 2단계 로그인에서 토큰의 발급 시각을 1단계 챌린지 시각에 묶는다. 그 뒤 비밀번호 변경·비활성화 컷오프가 기록되면
-     * 서명이 늦게 끝나도 토큰이 무효가 된다. 만료 시각은 실제 서명 시각을 기준으로 해 정상 세션 수명을 유지한다.
+     * 서명이 늦게 끝나도 토큰이 무효가 된다. 만료도 issuedAt + accessTokenTtl 이다. 서명 지연으로 컷오프 보관 TTL 을 넘는 토큰을 만들지 않는다.
      */
     public IssuedAccessToken issueAccessToken(long memberId, MemberRole role, Instant issuedAt) {
-        return issueAccessToken(memberId, role, issuedAt, clock.instant());
-    }
-
-    private IssuedAccessToken issueAccessToken(long memberId, MemberRole role, Instant issuedAt, Instant signedAt) {
         if (memberId <= 0) {
             throw new IllegalArgumentException("memberId 는 양수여야 합니다");
         }
@@ -91,7 +86,7 @@ public final class JwtIssuer {
         }
         // JWT 의 시각은 초 단위다. 돌려주는 만료 시각이 토큰의 exp 와 같도록 먼저 자른다
         Instant issuedSecond = issuedAt.truncatedTo(ChronoUnit.SECONDS);
-        Instant expiresAt = signedAt.truncatedTo(ChronoUnit.SECONDS).plus(accessTokenTtl);
+        Instant expiresAt = issuedSecond.plus(accessTokenTtl);
         String tokenId = UUID.randomUUID().toString();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()

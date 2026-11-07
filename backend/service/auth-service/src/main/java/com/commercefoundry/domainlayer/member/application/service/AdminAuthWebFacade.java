@@ -34,7 +34,8 @@ import org.springframework.transaction.TransactionTimedOutException;
 /**
  * 관리자 로그인 (#6 · #238 PR-B). 트랜잭션을 여기에 걸지 않는다 — 고객 로그인({@link AuthWebFacade})과 같은 이유로 비밀번호 · 복구 코드 비교(BCrypt)는
  * 의도적으로 느린 CPU 작업이고 시도 계수 · 챌린지 · 컷오프 저장소(Redis)는 외부 I/O 다. DB 구간(회원 · OTP 조회)은 각 Processor 에서 readOnly 로, 코드 소비만
- * {@link AdminOtpProcessor#consumeForLogin} 의 짧은 쓰기 트랜잭션으로 건다. 토큰 발급은 서명뿐이다(refresh 없음).
+ * {@link AdminOtpProcessor#consumeForLogin} 의 짧은 쓰기 트랜잭션으로 건다. BCrypt 뒤 회원 활성·버전 재검사도 회원 행 잠금 트랜잭션이다.
+ * 토큰 발급은 서명뿐이다(refresh 없음).
  *
  * <p>OTP 를 등록한 관리자(#238)는 비밀번호만으로 토큰을 받지 못한다 — 1단계는 챌린지만 주고 2단계({@link #loginWithOtp})가 코드를 확인한 뒤에 토큰을 준다.
  */
@@ -78,9 +79,14 @@ public class AdminAuthWebFacade implements AdminAuthWebUseCase {
         Member admin;
         try {
             admin = memberLoginProcessor.authenticateAdmin(candidate, command.rawPassword());
+            admin = memberLoginProcessor.revalidateAdmin(admin);
         } catch (MemberException loginFailed) {
             adminAuditProcessor.adminLoginFailed(candidate);
             throw loginFailed;
+        } catch (QueryTimeoutException | TransactionTimedOutException | PessimisticLockingFailureException contention) {
+            // 409로 구별하면 존재하는 계정의 잠금 경합을 노출한다. 트랜잭션 롤백 뒤 일반 로그인 실패로 통일한다.
+            adminAuditProcessor.adminLoginFailed(candidate);
+            throw new MemberException(MemberErrorCode.ADMIN_LOGIN_FAILED, contention);
         }
         // 창을 지우지 않는다(clear 없음) — 성공 DEL 이 관리자 여부 · 로그인 시점의 오라클이 된다 (메서드 설명)
         if (adminOtpProcessor.isEnrolled(admin.id())) {
@@ -88,7 +94,7 @@ public class AdminAuthWebFacade implements AdminAuthWebUseCase {
             adminAuditProcessor.adminLoginPasswordVerified(admin.id());
             return adminAuthWebPresenter.toOtpRequiredResponse(challenge);
         }
-        AdminLoginResponse response = adminAuthWebPresenter.toLoginResponse(authTokenProcessor.issueAdminAccessToken(admin));
+        AdminLoginResponse response = adminAuthWebPresenter.toLoginResponse(authTokenProcessor.issueAdminAccessToken(admin, loginStartedAt));
         adminAuditProcessor.adminLoginSucceeded(admin.id());
         return response;
     }

@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.member.adapter.out.persistence.repositor
 import com.commercefoundry.domainlayer.member.adapter.out.persistence.entity.MemberEntity;
 import com.commercefoundry.security.principal.MemberRole;
 import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -13,8 +14,12 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.QueryHints;
 
 public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
+
+    String SECURITY_LOCK_TIMEOUT_MILLIS = "0";
+    String SECURITY_QUERY_TIMEOUT_MILLIS = "2000";
 
     /** 수신자 조회는 ID만 읽는다. 운영자 계정 변경에 쓰는 잠금 조회와 분리한다 (#477). 역할 묶음은 대표 관리자 역할({@code OWNER_ROLES})이다 (#236). */
     interface AdminRecipientIdView {
@@ -49,6 +54,14 @@ public interface MemberRepository extends JpaRepository<MemberEntity, Long> {
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<MemberEntity> findWithLockById(Long id);
+
+    /** 보안 자격 재검사·재설정 전용. PostgreSQL NOWAIT로 다른 요청의 잠금을 기다리지 않는다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints({
+        @QueryHint(name = "jakarta.persistence.lock.timeout", value = SECURITY_LOCK_TIMEOUT_MILLIS),
+        @QueryHint(name = "jakarta.persistence.query.timeout", value = SECURITY_QUERY_TIMEOUT_MILLIS)
+    })
+    Optional<MemberEntity> findWithSecurityLockById(Long id);
 
     /**
      * 주어진 역할의 활성 계정 전부를 쓰기 잠금으로 읽는다. 마지막 대표 관리자 비활성화를 한 트랜잭션에서 막는다 (#193).

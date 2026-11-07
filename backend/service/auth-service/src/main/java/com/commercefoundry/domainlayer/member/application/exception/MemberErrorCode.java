@@ -108,6 +108,7 @@ public enum MemberErrorCode {
     ADMIN_PASSWORD_RESET_INVALID("AUTH_061", "재설정 링크가 만료되었거나 올바르지 않습니다. 새 링크를 요청해 주세요.", HttpStatus.BAD_REQUEST),
     ADMIN_PASSWORD_RESET_LIMITED("AUTH_062", "재설정 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.TOO_MANY_REQUESTS),
     ADMIN_PASSWORD_RESET_UNAVAILABLE("AUTH_063", "지금은 비밀번호 재설정을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    ADMIN_PASSWORD_RESET_BUSY("AUTH_064", "다른 계정 변경을 처리하고 있습니다. 새 재설정 링크를 요청해 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
     INVALID_REQUEST("AUTH_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_TYPE_INVALID("AUTH_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

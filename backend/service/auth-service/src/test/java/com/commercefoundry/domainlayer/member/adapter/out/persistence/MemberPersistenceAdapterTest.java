@@ -19,6 +19,14 @@ import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import java.time.Instant;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import com.commercefoundry.domainlayer.member.adapter.out.persistence.repository.MemberRepository;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -66,11 +74,34 @@ class MemberPersistenceAdapterTest {
     @Autowired
     private TestEntityManager entityManager;
 
+    @Autowired PlatformTransactionManager transactions;
+    @Autowired MemberRepository repository;
+
     @Autowired
     private MemberRepositoryPort memberRepositoryPort;
 
     @Autowired
     private MemberAgreementRepositoryPort memberAgreementRepositoryPort;
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void securityMemberLockUsesPostgresNowaitUnderContention() {
+        var transaction = new TransactionTemplate(transactions);
+        long memberId = 9_000_001L;
+        transaction.executeWithoutResult(status -> memberRepositoryPort.save(Member.admin(memberId, "lock-bound@example.com", HASH, "operator")));
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            transaction.executeWithoutResult(status -> {
+                memberRepositoryPort.findByIdForUpdate(memberId).orElseThrow();
+                var contender = executor.submit(() -> transaction.execute(other -> memberRepositoryPort.findByIdForSecurityUpdate(memberId)));
+                // The holder remains locked: NOWAIT must reject without waiting for this transaction to finish.
+                assertThatThrownBy(() -> contender.get(3, TimeUnit.SECONDS)).hasCauseInstanceOf(PessimisticLockingFailureException.class);
+            });
+            transaction.executeWithoutResult(status -> assertThat(memberRepositoryPort.findByIdForSecurityUpdate(memberId))
+                .hasValueSatisfying(member -> assertThat(member.version()).isZero()));
+        } finally {
+            transaction.executeWithoutResult(status -> repository.deleteById(memberId));
+        }
+    }
 
     @Test
     @DisplayName("새 회원을 넣으면 버전 0 · 감사 시각이 채워지고, 아이디 · 정규화한 이메일로 다시 읽힌다")

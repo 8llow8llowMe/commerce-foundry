@@ -58,6 +58,11 @@ public class MemberRepositoryAdapter implements MemberRepositoryPort {
     }
 
     @Override
+    public Optional<Member> findByIdForSecurityUpdate(long memberId) {
+        return memberRepository.findWithSecurityLockById(memberId).map(memberMapper::toDomain);
+    }
+
+    @Override
     public List<Member> findActiveOperatorsForUpdate() {
         return memberRepository.findActiveByRoleInForUpdate(MemberRole.OPERATOR_ROLES).stream().map(memberMapper::toDomain).toList();
     }

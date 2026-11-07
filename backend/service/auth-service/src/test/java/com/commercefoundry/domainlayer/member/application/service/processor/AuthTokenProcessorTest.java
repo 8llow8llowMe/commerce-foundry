@@ -93,7 +93,7 @@ class AuthTokenProcessorTest {
     }
 
     @Test
-    @DisplayName("OTP 2단계 토큰은 챌린지 발급 초를 iat 로 쓰고 실제 서명 초를 만료 기준으로 쓴다 — 이후 컷오프가 옛 챌린지 토큰을 끊는다")
+    @DisplayName("OTP 2단계 토큰은 챌린지 발급 초를 iat 로 쓰고 iat + TTL 을 만료 기준으로 쓴다")
     void issueAdminAccessTokenForChallenge() throws Exception {
         Member admin = Member.restore(TestTokens.MEMBER_ID, "admin@example.com", "$2a$10$hash", "관리자", null, MemberRole.ADMIN, 0L);
         Instant challengeIssuedAt = TestTokens.NOW.minusSeconds(2).plusMillis(800);
@@ -102,9 +102,9 @@ class AuthTokenProcessorTest {
         var claims = SignedJWT.parse(info.accessToken()).getJWTClaimsSet();
 
         assertThat(claims.getIssueTime().toInstant()).isEqualTo(TestTokens.NOW.minusSeconds(2));
-        assertThat(claims.getExpirationTime().toInstant()).isEqualTo(TestTokens.NOW.plusSeconds(1800));
+        assertThat(claims.getExpirationTime().toInstant()).isEqualTo(TestTokens.NOW.plusSeconds(1798));
         assertThat(claims.getIssueTime().toInstant()).isBefore(TestTokens.NOW.plusSeconds(1));
-        assertThat(info.accessTokenExpiresIn()).isEqualTo(1800);
+        assertThat(info.accessTokenExpiresIn()).isEqualTo(1798);
         verifyNoInteractions(store, revocation);
     }
 
