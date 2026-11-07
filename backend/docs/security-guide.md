@@ -1664,3 +1664,24 @@ IP 식별자는 §7-3의 22자 base64url 형식만 받고 대소문자를 보존
 ## 15. 비회원 상담 세션 자격 증명
 
 비회원 상담 자격 증명은 256비트 불투명 토큰을 발급하고 SHA-256 지문만 저장한다. 절대 만료는 7일이며, 폐기와 만료 오류를 동일하게 처리한다. 내부 발급의 트랜잭션 경계와 후속 공개 API의 보호 조건은 [support-guest-session-guide.md](support-guest-session-guide.md)를 따른다(#470 PR-B1a).
+
+### 고객 상담 REST 인증과 필수 쓰기 제한 (#470 PR-B2a)
+
+기존 대화 상세·메시지 조회/POST는 CUSTOMER 또는 기존 guest 자격만 허용한다. CUSTOMER bearer가 우선하며
+JWT memberId만 사용한다. 잘못된/만료 bearer는 401로 종료하고 guest 헤더로 대체하지 않는다. 운영자는 403이다.
+bearer가 없을 때 guest 누락·오류·폐기·만료는 같은 401 GUEST_SESSION_001이다. 인증/소유 검증은 매 요청 수행하고 타인/부재는 404다.
+개인 메시지 응답은 인증 실패를 포함해 no-store다. 자격·본문·키는 로그에 싣지 않는다.
+
+POST /api/v1/support/conversations/{id}/messages만 support-write 버킷(기본 분당 20, burst 5)으로 센다.
+gateway.rate-limit.support-write로 한도를 조정한다. 회원은 memberId, 비회원은 기존 IP HMAC 버킷을 사용한다.
+보호는 필수다: 전역 rate-limit OFF, client-ip OFF, 신뢰 가능한 주체 계산 불가, Redis 오류/빈 응답/2초 상한 초과면
+하류로 보내지 않고 503 GATEWAY_002다. 회원 요청도 IP 보호 설정과 주체 계산이 준비되어야 한다.
+실제 한도 초과만 429 GATEWAY_006 + Retry-After다. 기존 cart/order/payment의 fail-open 정책은 유지한다.
+IP 해석은 기본 OFF이므로 공개 쓰기를 활성화하려면 기존 신뢰 프록시·HMAC 키·Redis 설정을 먼저 갖춘다.
+비회원 발급·대화 생성·WS 티켓은 이번 정책 대상이 아니며 후속 보호와 함께 공개한다.
+
+
+상담 /api/v1/support/**의 no-store는 게이트웨이 초기 WebFilter에서도 적용한다.
+보안·요청 제한 필터보다 앞에서 헤더를 설정하고 응답 커밋 직전에 다시 고정하므로,
+하류에 닿지 않은 인증 401·한도 429·보호 장애 503과 하류 응답 모두 캐시하지 않는다.
+이 필터는 다른 서비스 경로의 Cache-Control을 수정하지 않는다.

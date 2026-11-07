@@ -13,6 +13,7 @@ public enum ConversationErrorCode {
     CONCURRENTLY_CHANGED("SUPPORT_013", "Conversation was concurrently changed.", HttpStatus.CONFLICT),
     MESSAGE_CONFLICT("SUPPORT_014", "Message request conflicts with an existing message.", HttpStatus.CONFLICT),
     SEQUENCE_EXHAUSTED("SUPPORT_015", "Conversation sequence is exhausted.", HttpStatus.CONFLICT),
+    INVALID_REQUEST("SUPPORT_100", "Invalid request.", HttpStatus.BAD_REQUEST),
     INVALID_OWNER("SUPPORT_110", "Conversation owner must be a positive identifier.", HttpStatus.BAD_REQUEST),
     INVALID_LOCALE("SUPPORT_111", "Conversation locale is required.", HttpStatus.BAD_REQUEST),
     INVALID_MESSAGE_KEY("SUPPORT_112", "Message key must be a canonical lowercase UUID.", HttpStatus.BAD_REQUEST),

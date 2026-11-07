@@ -2,11 +2,13 @@ package com.commercefoundry.apigateway.properties;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * 고객 쓰기 API 의 회원 · 클라이언트 IP 단위 요청 제한 ({@code security-guide.md} §7-3). 정책과 대상 경로는 {@code RateLimitPolicy} 가 정하고, 한도만 여기서 바꾼다.
  *
- * @param enabled    끄면 어떤 요청도 세지 않는다. 기본 켬
+ * @param enabled    기본 켬. 끄면 상담 메시지 POST는 503이고 그 밖의 요청은 세지 않는다
+ * @param supportWrite 상담 메시지 POST — 필수 보호, 설정 부재·저장소 장애 시 503
  * @param cartMerge  장바구니 병합(로그인 직후 한 번) — 한 번에 항목을 많이 쓰는 가장 무거운 쓰기라 따로 센다
  * @param cartWrite  그 밖의 장바구니 쓰기 (담기 · 수량 변경 · 삭제)
  * @param orderWrite 주문 쓰기 (생성 · 취소 요청 등)
@@ -20,10 +22,12 @@ public record GatewayRateLimitProperties(
     Limit cartWrite,
     Limit orderWrite,
     Limit orderQuote,
-    Limit paymentWrite
+    Limit paymentWrite,
+    Limit supportWrite
 ) {
 
     private static final int SECONDS_PER_MINUTE = 60;
+    static final Limit DEFAULT_SUPPORT_WRITE = new Limit(20, 5);
 
     /** yml 에 적지 않은 정책의 기본 한도. 값의 근거는 {@code security-guide.md} §7-3. */
     static final Limit DEFAULT_CART_MERGE = new Limit(6, 3);
@@ -32,7 +36,13 @@ public record GatewayRateLimitProperties(
     static final Limit DEFAULT_ORDER_QUOTE = new Limit(60, 20);
     static final Limit DEFAULT_PAYMENT_WRITE = new Limit(6, 3);
 
+    public GatewayRateLimitProperties(boolean enabled, Limit cartMerge, Limit cartWrite, Limit orderWrite, Limit orderQuote, Limit paymentWrite) {
+        this(enabled, cartMerge, cartWrite, orderWrite, orderQuote, paymentWrite, null);
+    }
+
+    @ConstructorBinding
     public GatewayRateLimitProperties {
+        supportWrite = supportWrite == null ? DEFAULT_SUPPORT_WRITE : supportWrite;
         cartMerge = cartMerge == null ? DEFAULT_CART_MERGE : cartMerge;
         cartWrite = cartWrite == null ? DEFAULT_CART_WRITE : cartWrite;
         orderWrite = orderWrite == null ? DEFAULT_ORDER_WRITE : orderWrite;

@@ -38,7 +38,7 @@ class RedisBucketRateLimiterUnitTest {
     void registersPolicyConfigs() {
         limiter();
 
-        assertThat(registered).containsOnlyKeys("cart-merge", "cart-write", "order-quote", "order-write", "payment-write");
+        assertThat(registered).containsOnlyKeys("cart-merge", "cart-write", "order-quote", "order-write", "payment-write", "support-write");
         RedisRateLimiter.Config merge = registered.get("cart-merge");
         assertThat(merge.getReplenishRate()).isEqualTo(1);
         assertThat(merge.getRequestedTokens()).isEqualTo(10);
@@ -47,6 +47,10 @@ class RedisBucketRateLimiterUnitTest {
         assertThat(payment.getReplenishRate()).isEqualTo(1);
         assertThat(payment.getRequestedTokens()).isEqualTo(10);
         assertThat(payment.getBurstCapacity()).isEqualTo(30);
+        RedisRateLimiter.Config support = registered.get("support-write");
+        assertThat(support.getReplenishRate()).isEqualTo(1);
+        assertThat(support.getRequestedTokens()).isEqualTo(3);
+        assertThat(support.getBurstCapacity()).isEqualTo(15);
     }
 
     @Test

@@ -46,3 +46,11 @@ HTTP·WebSocket·Redis·Gateway·요청 제한·회원 연결·AI 호출은 후�
 물리 삭제·보존 스케줄러는 후속에서 대화 참조와 함께 설계한다. #470 전체는 OPEN을 유지한다.
 H2와 PostgreSQL이 같은 영속성 계약을 실행한다. PG17 생성 스냅숏을 init script로 적용하고 validate하며,
 발행 전에는 기존 지식 엔티티를 포함한 전체 엔티티 스캔으로 support-schema.sql을 다시 생성한다.
+
+## 기존 자격 증명의 REST 사용 (#470 PR-B2a)
+
+기존 비회원은 X-Support-Guest-Token으로 본인 대화 상세·메시지 커서 조회·메시지 POST만 호출할 수 있다.
+공개 발급·대화 생성·쿠키 발급은 B2b 범위다. 매 요청 resolveForUpdate와 기존 소유 검증을 같은 트랜잭션으로 묶는다.
+유효한 CUSTOMER JWT가 함께 있으면 회원 신원이 우선하고 guest 헤더는 무시한다. 잘못된 bearer는 401이며 guest로 대체하지 않는다.
+운영자는 403이다. 자격 누락·오류·폐기·만료는 동일한 GUEST_SESSION_001이며 토큰은 응답·로그에 남기지 않는다.
+상세 HTTP 계약과 필수 게이트웨이 쓰기 제한은 support-conversation-guide.md를 따른다.

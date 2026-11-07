@@ -234,6 +234,23 @@ class GatewayRateLimitTest {
         assertThat(UPSTREAM_PATHS).containsExactly("/api/v1/payments/confirm");
     }
 
+    @Test
+    void supportAuthenticationLimitAndStorageErrorsCannotBeCached() {
+        String path = "/api/v1/support/conversations/123/messages";
+        post(path, "Bearer invalid").expectStatus().isUnauthorized()
+            .expectHeader().valueEquals(HttpHeaders.CACHE_CONTROL, "no-store");
+        assertThat(rateLimiter.calls).isEmpty();
+        rateLimiter.deny = true;
+        post(path, BEARER + token()).expectStatus().isEqualTo(429)
+            .expectHeader().valueEquals(HttpHeaders.CACHE_CONTROL, "no-store")
+            .expectHeader().valueEquals(HttpHeaders.RETRY_AFTER, "3");
+        rateLimiter.deny = false;
+        rateLimiter.fail = true;
+        post(path, BEARER + token()).expectStatus().isEqualTo(503)
+            .expectHeader().valueEquals(HttpHeaders.CACHE_CONTROL, "no-store");
+        assertThat(UPSTREAM_PATHS).isEmpty();
+    }
+
     private static final String BEARER = "Bearer ";
 
     private WebTestClient.ResponseSpec post(String path, String authorization) {

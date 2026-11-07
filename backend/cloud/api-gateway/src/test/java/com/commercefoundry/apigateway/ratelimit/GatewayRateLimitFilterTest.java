@@ -202,6 +202,69 @@ class GatewayRateLimitFilterTest {
         assertThat(fixedClockFilter.claimWarnSlot()).isFalse();
     }
 
+    private static final String SUPPORT_MESSAGES = "/api/v1/support/conversations/123/messages";
+
+    @Test
+    void supportPolicyIsPostMessagesOnly() {
+        assertThat(RateLimitPolicy.match(org.springframework.http.HttpMethod.POST,
+            org.springframework.http.server.PathContainer.parsePath(SUPPORT_MESSAGES))).contains(RateLimitPolicy.SUPPORT_WRITE);
+        for (String path : List.of("/api/v1/support/conversations", "/api/v1/support/conversations/123", "/api/v1/support/guest-sessions")) {
+            assertThat(RateLimitPolicy.match(org.springframework.http.HttpMethod.POST,
+                org.springframework.http.server.PathContainer.parsePath(path))).isEmpty();
+        }
+        assertThat(RateLimitPolicy.match(org.springframework.http.HttpMethod.GET,
+            org.springframework.http.server.PathContainer.parsePath(SUPPORT_MESSAGES))).isEmpty();
+    }
+
+    @Test
+    void supportDisabledOrUnresolvedProtectionFailsClosedEvenForMembers() {
+        for (GatewayRateLimitFilter target : List.of(filter(false), filter(true, CLIENT_IP_DISABLED))) {
+            AtomicBoolean routed = new AtomicBoolean();
+            MockServerWebExchange exchange = post(SUPPORT_MESSAGES, "192.0.2.1");
+            run(target, exchange, member(), routed);
+            assertThat(routed).isFalse();
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        }
+        AtomicBoolean routed = new AtomicBoolean();
+        MockServerWebExchange noAddress = post(SUPPORT_MESSAGES);
+        run(filter, noAddress, member(), routed);
+        assertThat(routed).isFalse();
+        assertThat(noAddress.getResponse().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(limiter.calls).isEmpty();
+    }
+
+    @Test
+    void supportStorageFailureEmptyAndTimeoutFailClosed() {
+        for (Mono<Boolean> answer : List.<Mono<Boolean>>of(Mono.error(new IllegalStateException()), Mono.empty(), Mono.never())) {
+            limiter.answer = answer;
+            AtomicBoolean routed = new AtomicBoolean();
+            MockServerWebExchange exchange = post(SUPPORT_MESSAGES, "192.0.2.1");
+            run(exchange, member(), routed);
+            assertThat(routed).isFalse();
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+            assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isNull();
+        }
+    }
+
+    @Test
+    void supportLimitReturns429AndAllowedMembersAndGuestsAreCounted() {
+        limiter.answer = Mono.just(false);
+        AtomicBoolean routed = new AtomicBoolean();
+        MockServerWebExchange exchange = post(SUPPORT_MESSAGES, "192.0.2.1");
+        run(exchange, member(), routed);
+        assertThat(routed).isFalse();
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("3");
+        limiter.answer = Mono.just(true);
+        for (Authentication authentication : new Authentication[]{member(), null}) {
+            routed.set(false);
+            run(post(SUPPORT_MESSAGES, "192.0.2.1"), authentication, routed);
+            assertThat(routed).isTrue();
+        }
+        assertThat(limiter.calls).anyMatch(call -> call.startsWith("SUPPORT_WRITE:member:"))
+            .anyMatch(call -> call.startsWith("SUPPORT_WRITE:ip:"));
+    }
+
     private void run(ServerWebExchange exchange, Authentication authentication, AtomicBoolean routed) {
         run(filter, exchange, authentication, routed);
     }
