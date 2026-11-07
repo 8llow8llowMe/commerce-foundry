@@ -778,6 +778,7 @@
         updated_at timestamp(6) with time zone not null,
         note varchar(500),
         product_id bigint not null,
+        revision bigint default 0 not null,
         template_id bigint not null,
         primary key (id),
         constraint uk_product_size_chart_product_id unique (product_id)
@@ -800,6 +801,9 @@
 
     comment on column product.product_size_chart.product_id is
         '상품 아이디 (FK: product.id)';
+
+    comment on column product.product_size_chart.revision is
+        '업무 리비전. 최초 0, 전체 교체마다 1 증가';
 
     comment on column product.product_size_chart.template_id is
         '사이즈표 템플릿 아이디 (FK: size_chart_template.id)';
@@ -861,12 +865,127 @@
     comment on column product.shedlock.locked_by is
         '락을 잡은 인스턴스 (호스트 이름)';
 
+    create table product.size_chart_draft (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        applied_at timestamp(6) with time zone,
+        applied_by_member_id bigint,
+        apply_hash varchar(64),
+        apply_receipt_json text,
+        base_chart_id bigint,
+        base_chart_revision bigint,
+        candidate_hash varchar(64),
+        candidate_json text,
+        expires_at timestamp(6) with time zone not null,
+        idempotency_key uuid not null,
+        input_hash varchar(64) not null,
+        job_id bigint,
+        product_id bigint not null,
+        request_hash varchar(64) not null,
+        requested_by_member_id bigint not null,
+        source_json text not null,
+        status varchar(16) not null check ((status in ('REQUESTED','READY','FAILED','CANCELLED','APPLIED'))),
+        template_id bigint not null,
+        template_json text not null,
+        template_revision bigint not null,
+        version bigint not null,
+        primary key (id),
+        constraint uk_size_chart_draft_requested_by_member_id_idempotency_key unique (requested_by_member_id, idempotency_key),
+        constraint uk_size_chart_draft_job_id unique (job_id),
+        constraint ck_size_chart_draft_base_chart_pair check ((base_chart_id is null and base_chart_revision is null) or (base_chart_id is not null and base_chart_id > 0 and base_chart_revision is not null and base_chart_revision >= 0)),
+        constraint ck_size_chart_draft_candidate check ((status in ('READY', 'APPLIED') and job_id is not null and candidate_json is not null and candidate_hash is not null) or (status not in ('READY', 'APPLIED') and candidate_json is null and candidate_hash is null)),
+        constraint ck_size_chart_draft_apply_receipt check ((status = 'APPLIED' and apply_hash is not null and apply_receipt_json is not null and applied_by_member_id is not null and applied_at is not null) or (status <> 'APPLIED' and apply_hash is null and apply_receipt_json is null and applied_by_member_id is null and applied_at is null)),
+        constraint ck_size_chart_draft_revision check (template_revision >= 0 and version >= 0),
+        constraint ck_size_chart_draft_hash_length check (char_length(request_hash) = 64 and char_length(input_hash) = 64 and (candidate_hash is null or char_length(candidate_hash) = 64) and (apply_hash is null or char_length(apply_hash) = 64)),
+        constraint ck_size_chart_draft_source_json_length check (char_length(source_json) between 1 and 32768),
+        constraint ck_size_chart_draft_template_json_length check (char_length(template_json) between 1 and 32768),
+        constraint ck_size_chart_draft_candidate_json_length check (char_length(candidate_json) between 1 and 32768),
+        constraint ck_size_chart_draft_apply_receipt_json_length check (char_length(apply_receipt_json) between 1 and 32768)
+    );
+
+    comment on table product.size_chart_draft is
+        'AI size chart draft and application receipt';
+
+    comment on column product.size_chart_draft.id is
+        'Draft ID (Snowflake)';
+
+    comment on column product.size_chart_draft.created_at is
+        '생성 시각';
+
+    comment on column product.size_chart_draft.updated_at is
+        '수정 시각';
+
+    comment on column product.size_chart_draft.applied_at is
+        'Original apply time';
+
+    comment on column product.size_chart_draft.applied_by_member_id is
+        'Applying admin ID (external FK: auth.member.id)';
+
+    comment on column product.size_chart_draft.apply_hash is
+        'Canonical apply request SHA-256 lowercase hex';
+
+    comment on column product.size_chart_draft.apply_receipt_json is
+        'Sanitized original apply response, at most 32768 characters';
+
+    comment on column product.size_chart_draft.base_chart_id is
+        'Captured chart ID (FK: product_size_chart.id), absent with revision';
+
+    comment on column product.size_chart_draft.base_chart_revision is
+        'Captured chart revision, absent with ID';
+
+    comment on column product.size_chart_draft.candidate_hash is
+        'Candidate JSON SHA-256 lowercase hex';
+
+    comment on column product.size_chart_draft.candidate_json is
+        'Validated candidate snapshot, at most 32768 characters';
+
+    comment on column product.size_chart_draft.expires_at is
+        'Content expiry; mutations are rejected from this instant';
+
+    comment on column product.size_chart_draft.idempotency_key is
+        'Actor scoped request key';
+
+    comment on column product.size_chart_draft.input_hash is
+        'Generation input SHA-256 lowercase hex';
+
+    comment on column product.size_chart_draft.job_id is
+        'Generation job ID (external FK: operations.job.id)';
+
+    comment on column product.size_chart_draft.product_id is
+        'Product ID (FK: product.id)';
+
+    comment on column product.size_chart_draft.request_hash is
+        'Canonical request SHA-256 lowercase hex';
+
+    comment on column product.size_chart_draft.requested_by_member_id is
+        'Requesting admin ID (external FK: auth.member.id)';
+
+    comment on column product.size_chart_draft.source_json is
+        'Sanitized source snapshot, at most 32768 characters';
+
+    comment on column product.size_chart_draft.status is
+        'REQUESTED / READY / FAILED / CANCELLED / APPLIED';
+
+    comment on column product.size_chart_draft.template_id is
+        'Template ID (FK: size_chart_template.id)';
+
+    comment on column product.size_chart_draft.template_json is
+        'Sanitized template snapshot, at most 32768 characters';
+
+    comment on column product.size_chart_draft.template_revision is
+        'Captured template revision';
+
+    comment on column product.size_chart_draft.version is
+        'Optimistic lock version';
+
     create table product.size_chart_template (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
         base_unit varchar(10) not null check ((base_unit in ('CM','INCH'))),
         name varchar(50) not null,
+        revision bigint default 0 not null,
         primary key (id),
         constraint ck_size_chart_template_base_unit check (base_unit in ('CM', 'INCH'))
     );
@@ -888,6 +1007,9 @@
 
     comment on column product.size_chart_template.name is
         '템플릿 이름';
+
+    comment on column product.size_chart_template.revision is
+        '업무 리비전. 최초 0, 수정마다 1 증가';
 
     create table product.size_chart_template_column (
         id bigint not null,
@@ -1329,38 +1451,47 @@
     comment on column product.stock_restoration_item.sku_id is
         'SKU 아이디 (FK: sku.id)';
 
-    create index idx_look_item_product_id_look_id 
+    create index idx_look_item_product_id_look_id
        on product.look_item (product_id, look_id);
 
-    create index idx_processed_event_processed_at 
+    create index idx_processed_event_processed_at
        on product.processed_event (processed_at);
 
-    create index idx_product_visible_sale_price_amount_id 
+    create index idx_product_visible_sale_price_amount_id
        on product.product (visible, sale_price_amount, id);
 
     create index idx_product_created_by_member_id_deleted_at_created_at
        on product.product (created_by_member_id, deleted_at, created_at);
 
-    create index idx_product_category_category_id_product_id 
+    create index idx_product_category_category_id_product_id
        on product.product_category (category_id, product_id);
 
-    create index idx_product_option_value_product_id 
+    create index idx_product_option_value_product_id
        on product.product_option_value (product_id);
 
-    create index idx_product_size_chart_template_id 
+    create index idx_product_size_chart_template_id
        on product.product_size_chart (template_id);
 
-    create index idx_size_chart_template_column_template_id_display_order 
+    create index idx_size_chart_draft_product_id_id
+       on product.size_chart_draft (product_id, id);
+
+    create index idx_size_chart_draft_requested_by_member_id_id
+       on product.size_chart_draft (requested_by_member_id, id);
+
+    create index idx_size_chart_draft_expires_at_id
+       on product.size_chart_draft (expires_at, id);
+
+    create index idx_size_chart_template_column_template_id_display_order
        on product.size_chart_template_column (template_id, display_order);
 
-    create index idx_stock_adjustment_history_sku_id_id 
+    create index idx_stock_adjustment_history_sku_id_id
        on product.stock_adjustment_history (sku_id, id);
 
-    create index idx_stock_reservation_status_expires_at_id 
+    create index idx_stock_reservation_status_expires_at_id
        on product.stock_reservation (status, expires_at, id);
 
-    create index idx_stock_reservation_order_id 
+    create index idx_stock_reservation_order_id
        on product.stock_reservation (order_id);
 
-    create index idx_stock_restoration_reservation_id 
+    create index idx_stock_restoration_reservation_id
        on product.stock_restoration (reservation_id);

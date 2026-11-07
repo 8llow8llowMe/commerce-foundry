@@ -30,7 +30,7 @@
 | 서비스 | 고객 | 어드민 |
 |--------|------|--------|
 | auth-service | `/api/v1/auth/**`, `/api/v1/members/**` | `/api/v1/admin/members/**`, `/api/v1/admin/audit-logs/**`, `/api/v1/admin/admins/**`, `/api/v1/admin/me/**` |
-| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**`, `/api/v1/looks/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**`, `/api/v1/admin/looks/**`, `/api/v1/admin/skus/**`, `/api/v1/admin/product-drafts/**` |
+| product-service | `/api/v1/categories/**`, `/api/v1/products/**`, `/api/v1/displays/**`, `/api/v1/looks/**` | `/api/v1/admin/categories/**`, `/api/v1/admin/products/**`, `/api/v1/admin/stocks/**`, `/api/v1/admin/displays/**`, `/api/v1/admin/size-chart-templates/**`, `/api/v1/admin/size-chart-drafts/**`, `/api/v1/admin/looks/**`, `/api/v1/admin/skus/**`, `/api/v1/admin/product-drafts/**` |
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
@@ -40,6 +40,7 @@
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
 상품 사이즈표(#216)의 고객 · 어드민 조회는 새 접두어가 아니다 — `GET /api/v1/products/{productId}/size-chart`,
 `GET|PUT /api/v1/admin/products/{productId}/size-chart` 는 기존 `products/**` 다. 템플릿 컬렉션만 `/api/v1/admin/size-chart-templates/**` 다.
+AI 사이즈표 초안(#217)의 상품별 생성은 기존 `products/**` 이고, 초안 목록·상세·새로고침·적용은 새 `/api/v1/admin/size-chart-drafts/**` 다.
 SKU 원가 이력(#361)은 SKU 하위 리소스라 `/api/v1/admin/skus/**` 를 새로 둔다(§2-12).
 AI 상품 초안(#359)은 상품이 아직 없는 자원이라 `/api/v1/admin/product-drafts/**` 를 새로 둔다(§2-14).
 고객 상담(#470)은 `support-service` 의 `/api/v1/support/**` · `/api/v1/admin/support/**` 다. 비회원 상담을 받으므로 고객 경로는 게이트웨이에서 무토큰도 통과하고 인가는 서비스가 정한다.
@@ -897,6 +898,27 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
   행위자는 access 토큰의 memberId 다. 본문 검증 400 · 401 · 403 은 남기지 않는다. 치수 · 항목 값은 싣지 않는다.
 - **게이트웨이**: 상품 사이즈표는 기존 `products/**` 로 라우팅된다. 템플릿 접두어 `/api/v1/admin/size-chart-templates/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다.
 
+#### AI 사이즈표 초안 (#217, TEXT 단계)
+
+기존 GET/PUT 사이즈표 응답은 유지한다. 새 초안은 AI 결과를 상품 표에 바로 쓰지 않고 운영자가 검토·수정한 뒤 적용한다.
+현재는 승인된 측정 항목 어휘의 TEXT 입력만 받는다. IMAGE·일괄 이관은 [AI 사이즈표 계약](ai-size-chart-guide.md)의 후속 범위다.
+
+| 경로 | 권한 | 성공·주요 오류 |
+|---|---|---|
+| `POST /api/v1/admin/products/{productId}/size-chart/drafts` | `CATALOG_MANAGE` | UUID `Idempotency-Key` 필수, `{templateId,mode:TEXT,sourceText}` → 202 `{draftId,jobId}`. 결합이 불명확하면 503 `SIZE_CHART_DRAFT_501` + 복구용 `Location` |
+| `GET /api/v1/admin/size-chart-drafts?productId=&requestedByMe=&page=&size=` | `CATALOG_READ` | 200 최신순 `PageResponse`. operations 항목별 조회 없음 |
+| `GET /api/v1/admin/size-chart-drafts/{draftId}` | `CATALOG_READ` | 200 템플릿·구조화 후보·경고·상태·버전. 만료 410 `SIZE_CHART_DRAFT_005` |
+| `POST /api/v1/admin/size-chart-drafts/{draftId}/refresh` | `CATALOG_MANAGE` | 200 확정 작업 결과를 초안에 반영. 진행 중이면 기존 상태 반환 |
+| `POST /api/v1/admin/size-chart-drafts/{draftId}/apply` | `CATALOG_MANAGE` | `{expectedDraftVersion,correctedChart,acknowledgedWarningIds}` → 200 적용 영수증. 최신 표·템플릿과 충돌하면 409 |
+
+모든 초안 응답은 `Cache-Control: no-store`이며 ID와 중첩 열 ID는 문자열이다. 상세에는 원문 입력·프롬프트·요청 해시를 내지 않는다.
+GET은 product의 저장 상태만 읽는다. 작업 완료는 기존 operations 작업 알림으로 확인하고 refresh를 명시적으로 호출한다.
+같은 운영자·키·정규 입력은 보관 기간 안에 같은 draft/job을 돌려주고, 다른 입력은 409 `SIZE_CHART_DRAFT_002`다.
+내용과 product 측 멱등 키는 기본 7일이다. 만료 직후 상세·refresh·apply는 410, 목록은 제외한다.
+동일 키를 만료 뒤 자동 재시도하면 새 유료 작업이 생길 수 있으므로 FE는 만료된 키를 재사용하지 않는다.
+apply는 기존 #216의 완전한 행·칸 검증과 캡처한 템플릿·표 revision을 확인하고, 표 교체와 초안 영수증을 한 트랜잭션으로 저장한다.
+생성 경로는 기존 `products/**`, 목록·상세·refresh·apply는 `ServiceRoute.PRODUCT`의 새 `size-chart-drafts/**` 접두어다.
+
 ### 2-11. 룩 — Shop the Look (product-service, #62)
 
 룩 대표 이미지의 브라우저 업로드는 §2-9의 공용 발급 → PUT → 확정 흐름을 사용한다(#508).
@@ -1552,6 +1574,8 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 
 - 제출은 각 기능 API 다 — `POST {resource}` → `202 Accepted` + `jobId`. 기능 Facade 가 작업을 등록한다(같은 서비스면 `JobRegistrationProcessor`).
   같은 요청이 진행 중이면 멱등 키(`dedupKey`, 종류마다 따로)로 기존 `jobId` 를 돌려준다. **범용 등록 API 는 두지 않는다.**
+- #217처럼 기능 API와 작업 엔진이 다른 서비스이면 기능 전용 internal 등록만 둔다. product 초안을 먼저 커밋한 뒤 operations의
+  draft ID 영수증을 등록·재생하고, job ID 결합을 확인해야 202로 답한다([AI 사이즈표 계약](ai-size-chart-guide.md)).
 - 상태 조회 · 취소는 어드민 작업 API 하나로 한다 — `GET /api/v1/admin/jobs` · `GET /api/v1/admin/jobs/{jobId}` · `POST /api/v1/admin/jobs/{jobId}/cancel`
   (ADMIN, operations-service). 계약은 아래 §7-1.
 - 작업 실패는 `200 OK` + `status=FAILED` + `errorCode/errorMessage` 로 답한다 (HTTP 5xx 가 아니다).

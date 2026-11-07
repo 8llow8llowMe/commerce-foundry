@@ -99,7 +99,7 @@ public class SizeChartTemplateRepositoryAdapter implements SizeChartTemplateRepo
     }
 
     private SizeChartTemplate toDomain(SizeChartTemplateEntity entity) {
-        return new SizeChartTemplate(entity.getId(), entity.getName(), entity.getBaseUnit());
+        return new SizeChartTemplate(entity.getId(), entity.getName(), entity.getBaseUnit(), entity.getRevision());
     }
 
     private SizeChartTemplateColumn toDomain(SizeChartTemplateColumnEntity entity) {

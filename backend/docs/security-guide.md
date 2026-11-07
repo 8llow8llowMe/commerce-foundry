@@ -934,6 +934,17 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
 
   결제 단건 정보는 order-service만, 비식별 승인 집계는 operations-service만 읽는다. 각 허용 호출자 외 서비스는 403이다(`PaymentInternalControllerTest`, `PaymentApprovalSummaryInternalControllerTest`).
 
+  AI 사이즈표 초안(#217)은 기능 전용 internal 계약만 추가한다([ai-size-chart-guide.md](ai-size-chart-guide.md)).
+
+  | 엔드포인트 | 허용 호출자 | 비고 |
+  |------------|-------------|------|
+  | `GET /internal/v1/size-chart-drafts/{draftId}/generation-input` (product) | `SERVICE_operations-service` | 만료 전 안전한 TEXT·템플릿 불변 스냅숏만, `no-store`. 원문 이미지·서명 URL 없음 |
+  | `POST /internal/v1/size-chart-generation-jobs` (operations) | `SERVICE_product-service` | draft ID·입력 해시·요청자·만료만 등록. 완료 뒤에도 같은 영수증 재생 |
+  | `GET /internal/v1/size-chart-generation-jobs/{jobId}/result` (operations) | `SERVICE_product-service` | 확정 상태·검증 결과만, 원래 job payload·Provider 오류 원문 없음 |
+
+  product와 operations의 outbound Feign은 각각 `InternalFeignClientConfiguration`으로 서비스 토큰만 보낸다.
+  ADMIN 초안 생성·refresh·apply는 `CATALOG_MANAGE`, 상세·목록은 `CATALOG_READ`다.
+
 ### 9-5. 호출 쪽 — Feign Capability
 
 ```java
