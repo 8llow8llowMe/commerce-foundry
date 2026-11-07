@@ -63,7 +63,7 @@ dependencies {
 // 컨텍스트 2~3개(H2) 와 흐름 테스트에 충분한 크기다
 tasks.named('test') {
     maxHeapSize = '768m'
-    // 성공한 CI는 테스트 artifact를 올리지 않는다. 합성 outbox 실측만 로그에 남겨 결과를 회수한다(#476).
+    // 성공한 CI는 테스트 artifact를 올리지 않는다. 지정한 합성 계측만 로그에 남겨 결과를 회수한다.
     onOutput { descriptor, event ->
         if (descriptor.className == 'com.commercefoundry.global.messaging.OutboxIndexExplainTest' && event.message.startsWith('OUTBOX_INDEX_')) {
             logger.lifecycle(event.message.stripTrailing())
@@ -74,6 +74,10 @@ tasks.named('test') {
             'com.commercefoundry.domainlayer.notification.adapter.out.persistence.PaymentAnomalyPersistenceH2Test',
             'com.commercefoundry.domainlayer.notification.adapter.out.persistence.PaymentAnomalyPersistencePostgresTest'
         ] && event.message.startsWith('ANOMALY_STORAGE_PROBE ')) {
+            logger.lifecycle(event.message.stripTrailing())
+        }
+        if (descriptor.className == 'com.commercefoundry.domainlayer.notification.application.service.PaymentAnomalySaturationPostgresTest'
+            && event.message.startsWith('ANOMALY_SATURATION_PROBE ')) {
             logger.lifecycle(event.message.stripTrailing())
         }
     }

@@ -335,6 +335,23 @@ class PaymentAnomalyAlertPushAdapterTest {
         }
     }
 
+    @Test
+    void childContextCloseDoesNotStopParentPushAdapter() throws Exception {
+        var push = mock(NotificationPushPort.class);
+        try (var parent = context(push); var child = new AnnotationConfigApplicationContext()) {
+            child.setParent(parent);
+            child.refresh();
+            var adapter = parent.getBean(PaymentAnomalyAlertPushAdapter.class);
+            child.close();
+            assertThat(executor(adapter).isShutdown()).isFalse();
+            adapter.enqueue(batch(1));
+            Awaitility.await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> verify(push).push(any()));
+            parent.close();
+            assertThat(executor(adapter).isShutdown()).isTrue();
+            assertThat(executor(adapter).awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
     private static AnnotationConfigApplicationContext context(NotificationPushPort push) {
         var context = new AnnotationConfigApplicationContext();
         context.registerBean(NotificationPushPort.class, () -> push);

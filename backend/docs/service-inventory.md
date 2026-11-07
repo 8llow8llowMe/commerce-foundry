@@ -266,6 +266,11 @@ CUSTOMER JWT와 기존 비밀번호 재인증으로 기존 member_id에만 연�
 
 operations-service는 auth 활성 관리자 목록과 payment-service의 읽기 전용 A3a 관측 API(PR #548)를 수집해 발행 지연 CRITICAL·ready 대기 해소 INFO를 알린다. 신규 `operations.outbox_alert_state`는 PAYMENT 단일 소스의 사고 상태·관측 워터마크를 소유한다. 결제/주문 업무 상태·PG·downstream 건강 판정은 소유하지 않는다. 기본 비활성 플래그·배포·실패 보존·시계 제약은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다. FE 스키마 변경과 새 Vault 비밀은 없다.
 
+operations-service는 payment-service의 읽기 전용 결제 이상 후보 관측 API도 기본 비활성 주기 수집으로 읽는다(#477 E3b).
+활성 관리자 전체 수신자와 다섯 사건의 상태·알림을 원자 저장하고 정상 커밋 뒤 SSE로 최선 전달한다. 결제·주문 상태를
+바꾸거나 후보 소멸을 복구 완료로 판정하지 않는다. 설정·억제·실패 보존·종료 한계는
+[anomaly-notifications.md](anomaly-notifications.md)의 E3b 절을 따른다. 새 공개 API·FE 계약·Vault 비밀·DDL은 없다.
+
 ### DLT 이상 징후 알림 (#477 A2)
 
 operations-service는 기본 비활성 기능으로 기존 네 DLT를 구독하고 auth A1 internal 수신자 API의 활성 관리자에게 ANOMALY 알림을 저장한다. 결제 승인 DLT는 CRITICAL, 나머지는 WARNING이다. 토픽별 억제·파티션별 워터마크로 상태를 제한하며 업무 상태는 변경하지 않는다. 신규 operations 테이블은 `dlt_alert_state`·`dlt_partition_checkpoint`다. 배포·ACL·실패/복구·FE 계약은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
