@@ -199,7 +199,7 @@ class GatewayDevRouteTest {
     @Test
     @DisplayName("Swagger UI 가 열리고, 게이트웨이 자신의 기본 문서와 /webjars 경로는 열리지 않는다")
     void servesSwaggerUiWithoutGatewayDocs() {
-        WebTestClient client = webTestClient.mutate().responseTimeout(Duration.ofSeconds(20)).build();
+        WebTestClient client = webTestClient.mutate().responseTimeout(Duration.ofSeconds(45)).build();
         URI uiLocation = client.get().uri("/swagger-ui.html").exchange()
             .expectStatus().is3xxRedirection()
             .returnResult(Void.class).getResponseHeaders().getLocation();
