@@ -106,6 +106,14 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
         return jdbc.queryForList("select * from operations.payment_anomaly_alert_state order by family");
     }
 
+    private static Instant auditInstant(Object value) {
+        return switch (value) {
+            case java.time.OffsetDateTime timestamp -> timestamp.toInstant();
+            case java.sql.Timestamp timestamp -> timestamp.toInstant();
+            default -> throw new AssertionError("Unexpected audit timestamp type: " + value.getClass().getName());
+        };
+    }
+
     @Test
     void firstNormalPersistsFiveSortedStatesWithoutNotificationsAndReplayDoesNotWrite() {
         var first = measure("E2_FIRST_NORMAL", 0, 1, () -> accept(sample(NOW, false), List.of(1L), SETTINGS));
@@ -148,8 +156,8 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
             assertThat(after.get(i).get("created_at")).isEqualTo(before.get(i).get("created_at"));
             assertThat(after.get(i).get("version")).isEqualTo(1L);
             // 서로 다른 쓰기도 DB의 마이크로초 시각에서는 같은 값일 수 있다. 버전 증가가 실제 갱신을 확인한다.
-            assertThat((java.time.OffsetDateTime) after.get(i).get("updated_at"))
-                .isAfterOrEqualTo((java.time.OffsetDateTime) before.get(i).get("updated_at"));
+            assertThat(auditInstant(after.get(i).get("updated_at")))
+                .isAfterOrEqualTo(auditInstant(before.get(i).get("updated_at")));
         }
         assertThatThrownBy(() -> result.saved().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
