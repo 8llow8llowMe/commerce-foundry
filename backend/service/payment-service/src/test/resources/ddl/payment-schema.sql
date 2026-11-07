@@ -416,6 +416,9 @@
     create index idx_payment_auto_cancel_state_next_attempt_at_payment_id
        on payment.payment_auto_cancel (state, next_attempt_at, payment_id);
 
+    create index idx_payment_auto_cancel_state_lease_until_payment_id
+       on payment.payment_auto_cancel (state, lease_until, payment_id);
+
     create index idx_payment_cancel_payment_id
        on payment.payment_cancel (payment_id);
 

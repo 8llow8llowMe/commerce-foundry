@@ -76,7 +76,7 @@ commit;
 ## #579 자동 취소 메타데이터 이행
 
 `service/payment-service/src/test/resources/ddl/payment-auto-cancel.sql`을 운영자가 `psql -v ON_ERROR_STOP=1 -f <파일>`로 적용한다.
-`payment_auto_cancel`은 금전 원장이 아닌 실행 의도·고정 PG 키·재시도·lease·거래 증거다. payment_id는 결제 ID 참조이며 **DB FK 제약은 없다**.
+`payment_auto_cancel`은 금전 원장이 아닌 실행 의도·고정 PG 키·재시도·lease·거래 증거다. payment_id는 결제 ID 참조이며 **DB FK 제약은 없다**. 운영 DDL에는 due 시각과 미만료 lease가 각각 편향된 대기열을 위한 두 후보 인덱스가 포함된다.
 양수 claim_id에는 nullable 유니크 제약을 둔다. enqueue는 claimId·금액을 비워 두고, 최초 acquire가 새 양수 원장 INSERT와 메타데이터 할당을 함께 커밋한다.
 충돌하면 전체 롤백 후 새 트랜잭션에서만 새 ID를 시도한다. 커밋된 claimId·PG 키·금액은 변경하지 않는다. 원장 누락·불일치는 재발급 없이 수동 확인이다.
 구버전 양수 전용 원장 독자와 호환되며 음수 원장 행을 생성하지 않는다. 기존 #591 커서·lane·두 seed·가드는 변경하지 않는다.
