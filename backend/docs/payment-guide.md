@@ -531,10 +531,11 @@ result는 PAID/여섯 REJECTED의 고정 enum이며 ID·원문·cause를 로그/
 커밋 직후 프로세스 종료로 counter 증가를 놓칠 수 있어 회계 원장이 아니다. 기존 `pending.oldest.age`와 core의 실제 DLT counter를 재사용하고,
 재대조 실패를 DLT 발행 횟수에 합산하지 않는다. operations의 기본 OFF DLT 관리자 알림은 `order-paid`·`order-payment-rejected` DLT 두 토픽도 CRITICAL로 구독한다. 토픽 생성·ACL을 확인한 뒤 별도 활성화하며, 알림은 복구 완료 증거가 아니다.
 
-운영 DDL은 `service/payment-service/src/test/resources/ddl/payment-order-reconciliation.sql`이다. 새 cursor 테이블의 CREATE·comment·check는
-Hibernate 7.2.24/PostgreSQL 17 출력에서 추출했고 lane PK가 두 행 조회 인덱스를 겸한다. 추가 중복 인덱스/기존 payment 인덱스 변경은 없다.
-구 DB에 **스케줄러 OFF → DDL 전체 트랜잭션 적용(두 lane seed 포함) → validate/배포 → 운영 선행 조건 확인 후 별도 활성화** 순서다.
-기존 테이블 변경이 없어 ALTER는 없다. 새 DB 전체 스냅숏은 별도로 적용한 뒤 운영 스크립트의 seed INSERT만 적용한다.
+운영 DDL은 `service/payment-service/src/test/resources/ddl/payment-order-reconciliation.sql`이다. 새 cursor 테이블의 CREATE·comment·check와 기존 payment 테이블의 후보 복합 인덱스는
+Hibernate 7.2.24/PostgreSQL 17 출력에서 추출했다. lane PK가 두 행 조회 인덱스를 겸하며 기존 인덱스·payment 행은 보존한다.
+PG17의 추가 인덱스 전 10만 행 편향 계획은 `payment_pkey`로 99,980행을 필터링했다(약 17ms/26ms, shared hit 3,598/3,391). 새 인덱스의 선택·필터 제거 행·버퍼와 2초 제한은 동일 합성 분포를 CI에서 다시 확인한다. 이 합성 측정은 운영 분포의 성능 보장이 아니다.
+구 DB에 **스케줄러 OFF → DDL 전체 트랜잭션 적용(기존 payment 후보 인덱스와 두 lane seed 포함) → validate/배포 → 운영 선행 조건 확인 후 별도 활성화** 순서다. 인덱스 생성은 기존 payment 쓰기를 막을 수 있으므로 결제 게이트를 닫고 진행 중인 승인·취소·복구·웹훅 쓰기를 drain한 작업 창에서 적용한다.
+기존 payment 행·컬럼·제약 변경은 없고 인덱스만 추가한다. 새 DB 전체 스냅숏은 별도로 적용한 뒤 운영 스크립트의 seed INSERT만 적용한다.
 Hibernate create/update는 seed를 만들지 않는다. 스위퍼 ON의 schema guard는 cursor 칼럼·두 seed·inbox·shedlock을 확인하고 누락이면 원문 없이 기동 실패한다.
 DDL 중간 실패는 rollback하고 catalog/기존 행을 확인한 뒤 재적용한다. 성공 뒤 스크립트를 다시 실행하거나 진행 cursor를 초기화하지 않는다.
 배포 rollback은 스위퍼 OFF와 구 버전 재배포로 수행하고 추가 테이블/진행값을 보존한다.

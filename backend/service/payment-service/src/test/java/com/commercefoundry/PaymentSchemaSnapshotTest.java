@@ -88,24 +88,26 @@ class PaymentSchemaSnapshotTest {
     }
 
     @Test
-    @DisplayName("주문 회신 커서 운영 CREATE와 comment는 Hibernate 출력에서 추출한다")
+    @DisplayName("주문 회신 커서와 후보 인덱스의 운영 DDL은 Hibernate 출력에서 추출한다")
     void reconciliationOperationalDdlMatchesHibernateOutput() throws IOException {
         String operational;
         try (var input = getClass().getResourceAsStream("/ddl/payment-order-reconciliation.sql")) {
             assertThat(input).isNotNull();
             operational = new String(input.readAllBytes(), StandardCharsets.UTF_8);
         }
-        var expected = cursorStatements(generateDdl());
+        var expected = reconciliationStatements(generateDdl());
         assertThat(expected).isNotEmpty();
-        assertThat(cursorStatements(operational)).containsExactlyElementsOf(expected);
+        assertThat(reconciliationStatements(operational)).containsExactlyElementsOf(expected);
     }
 
-    private static List<String> cursorStatements(String sql) {
+    private static List<String> reconciliationStatements(String sql) {
         return java.util.Arrays.stream(sql.replaceAll("(?m)^--.*$", "").split(";"))
             .map(String::trim)
             .filter(s -> (s.startsWith("create table") || s.startsWith("comment on") || s.startsWith("create index"))
-                && s.contains("payment.order_reconciliation_cursor"))
+                && (s.contains("payment.order_reconciliation_cursor")
+                    || s.contains("idx_payment_status_order_synced_order_sync_failure_code_id")))
             .map(s -> s.replaceAll("\\s+", " "))
+            .sorted()
             .toList();
     }
 
