@@ -52,6 +52,8 @@ refresh 토큰을 Redis 에 지문으로 두고 회전 · 재사용 감지(30초
 고객 이메일은 관리자로 올리지 않고, 마지막 활성 대표 관리자(ADMIN · OWNER)는 끄지 못한다. 관리자 감사는 로그 한 줄과 `auth.admin_audit_log` 에 함께 남고 `GET /api/v1/admin/audit-logs` 로 본다 (#192).
 응답에는 마스킹한 `actorDisplayName` · `targetDisplayName` 을 붙인다 (#322). 감사 로그를 거를 관리자 선택용 경량 목록은 두지 않는다.
 관리자 본인 OTP 상태 · 등록 시작 · 확인 · 해제 · 복구 코드 재발급이 있다 (`/api/v1/admin/me/otp/**`, #238 PR-A2). OTP 를 등록한 관리자는 로그인 2단계(`POST /api/v1/auth/admin/login/otp`, TOTP 또는 복구 코드)를 거쳐야 토큰을 받는다 (#238 PR-B). 동료 OTP 복구는 행위자의 재인증 뒤 대상 자격을 새 ID·비밀·복구 코드로 교체한다 (`POST /api/v1/admin/admins/{memberId}/otp/recovery`, PR-C).
+운영자 분실 비밀번호 재설정(#589)은 대표의 발송 요청·익명 일회용 사용 API와 auth 전용 SMTP 어댑터를 소유한다.
+Redis 지문 grant·시도 제한과 DB 비밀번호 변경/컷오프를 묶되, 고객 회원용 재설정과 메일 발송 범용 API는 제공하지 않는다.
 서비스 간 회원 표시 이름은 `GET /internal/v1/member-display-names`(마스킹된 이름만, 허용 호출자 delivery-service)다.
 보관 기간(기본 2년, 하한 1년)이 지난 행은 auth-service 스케줄러가 Snowflake 아이디 범위로 지운다 (#286, `security-guide.md` §11-4).
 "카탈로그 조회" 는 고객 카테고리 트리 · 상품 목록 · 상품 상세(`/api/v1/categories` · `/api/v1/products/**`)와 서비스 간 SKU 벌크 조회(`/internal/v1/skus`)가 있는 상태다.

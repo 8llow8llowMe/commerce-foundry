@@ -29,7 +29,7 @@ public enum MemberErrorCode {
     /** 이미 회전한 refresh 토큰이 재사용 유예 밖에서 다시 왔다 — 탈취로 보고 그 family 를 모두 폐기했다. */
     REFRESH_TOKEN_REUSED("AUTH_012", "보안을 위해 로그아웃되었습니다. 다시 로그인해 주세요.", HttpStatus.UNAUTHORIZED),
     /** refresh 토큰 · 로그아웃 차단 목록 저장소(Redis)에 닿지 못했다. 로그인 상태는 그대로 두고 다시 시도하게 한다. */
-    TOKEN_STORE_UNAVAILABLE("AUTH_013", "일시적으로 로그인을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    TOKEN_STORE_UNAVAILABLE("AUTH_013", "지금은 요청을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
 
     /**
      * 관리자 로그인 실패 (#6) — 이메일 없음 · 비밀번호 틀림 · 고객 계정을 구분하지 않는다. 문구 · 상태는 고객 로그인 실패({@link #LOGIN_FAILED})와 같고
