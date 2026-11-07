@@ -19,8 +19,10 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "payment_auto_cancel", indexes = @Index(name = "idx_payment_auto_cancel_state_next_attempt_at_payment_id",
-    columnList = "state,next_attempt_at,payment_id"),
+@Table(name = "payment_auto_cancel", indexes = {
+    @Index(name = "idx_payment_auto_cancel_state_next_attempt_at_payment_id", columnList = "state,next_attempt_at,payment_id"),
+    @Index(name = "idx_payment_auto_cancel_state_lease_until_payment_id", columnList = "state,lease_until,payment_id")
+},
     uniqueConstraints = @UniqueConstraint(name = "uk_payment_auto_cancel_claim_id", columnNames = "claim_id"), check = {
         @CheckConstraint(name = "ck_payment_auto_cancel_amount",
             constraint = "(amount is null and currency is null) or (amount is not null and amount > 0 and currency is not null)"),

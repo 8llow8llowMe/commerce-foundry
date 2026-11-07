@@ -63,13 +63,13 @@ class PaymentAutoCancelDuePlanPostgresTest {
                 assertThat(measure(scenario, 100_000, 100_000, repeat)).isEmpty();
             }
         } finally {
-            jdbc.update("delete from payment.payment_auto_cancel");
+            jdbc.execute("truncate table payment.payment_auto_cancel");
             jdbc.execute("analyze payment.payment_auto_cancel");
         }
     }
 
     private void fixture(String scenario) {
-        jdbc.update("delete from payment.payment_auto_cancel");
+        jdbc.execute("truncate table payment.payment_auto_cancel");
         String now = "'2026-11-08 00:00:00+00'::timestamptz";
         String dueAt = switch (scenario) {
             case "sparse-tail" -> "case when g>99980 then " + now + "-interval '1 minute' else " + now + "+interval '1 day' end";
