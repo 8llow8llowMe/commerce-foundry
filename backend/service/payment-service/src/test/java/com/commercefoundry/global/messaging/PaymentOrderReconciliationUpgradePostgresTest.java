@@ -54,8 +54,12 @@ class PaymentOrderReconciliationUpgradePostgresTest {
         migrate(resource("payment-order-reconciliation.sql"));
         validate();
         assertThat(jdbc.queryForList("select * from payment.payment")).isEqualTo(before);
-        assertThat(jdbc.queryForList("select tablename,indexname,indexdef from pg_indexes where schemaname='payment'"
-            + " and tablename<>'order_reconciliation_cursor' order by tablename,indexname")).isEqualTo(beforeIndexes);
+        var afterIndexes = jdbc.queryForList("select tablename,indexname,indexdef from pg_indexes where schemaname='payment'"
+            + " and tablename<>'order_reconciliation_cursor' order by tablename,indexname");
+        assertThat(afterIndexes).containsAll(beforeIndexes).hasSize(beforeIndexes.size() + 1);
+        assertThat(jdbc.queryForList("select indexname from pg_indexes where schemaname='payment' and tablename='payment'"
+            + " and indexname='idx_payment_status_order_synced_order_sync_failure_code_id'", String.class))
+            .containsExactly("idx_payment_status_order_synced_order_sync_failure_code_id");
         assertThat(jdbc.queryForList("select conname,pg_get_constraintdef(oid) from pg_constraint where connamespace='payment'::regnamespace"
             + " and conrelid<>'payment.order_reconciliation_cursor'::regclass order by conname")).isEqualTo(beforeConstraints);
         assertThat(jdbc.queryForList("select lane,last_id,cycle_upper_id,version from payment.order_reconciliation_cursor order by lane"))
@@ -81,6 +85,8 @@ class PaymentOrderReconciliationUpgradePostgresTest {
         var script = resource("payment-order-reconciliation.sql");
         assertThatThrownBy(() -> migrate(script.replace("commit;", "select 1/0; commit;"))).isInstanceOf(SQLException.class);
         assertThat(jdbc.queryForObject("select to_regclass('payment.order_reconciliation_cursor')", String.class)).isNull();
+        assertThat(jdbc.queryForList("select indexname from pg_indexes where schemaname='payment' and indexname="
+            + "'idx_payment_status_order_synced_order_sync_failure_code_id'", String.class)).isEmpty();
         assertThat(jdbc.queryForList("select * from payment.payment")).isEqualTo(before);
         migrate(script);
         validate();

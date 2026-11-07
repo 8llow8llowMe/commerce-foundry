@@ -2,6 +2,10 @@
 -- Existing schema only: do not run against an already upgraded database.
 set client_encoding = 'UTF8';
 begin;
+-- 구 payment.payment 행은 보존하고 후보 lane 조건의 편향 스캔을 줄인다.
+    create index idx_payment_status_order_synced_order_sync_failure_code_id
+       on payment.payment (status, order_synced, order_sync_failure_code, id);
+
     create table payment.order_reconciliation_cursor (
         lane varchar(16) not null check ((lane in ('RECONCILE','REJECTED'))),
         created_at timestamp(6) with time zone not null,

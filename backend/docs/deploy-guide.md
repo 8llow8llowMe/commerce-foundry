@@ -342,6 +342,12 @@ docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) �
 모두 ON이면 기존 core가 outbox 후 inbox를 정리한다. listener OFF와 cleanup OFF를 혼동하지 않는다. 앱 rollback 시 추가 inbox 테이블/행을 자동 DROP하지 않는다.
 이전 앱은 추가 테이블을 무시할 수 있다. 후속 소비 단계의 rollback은 별도 OFF/drain 계획으로 정한다.
 
+### payment 주문 회신 재대조 배포 (#591)
+
+`payment.order-result.reconciliation.enabled`는 기본 OFF다. 운영 결제·회신 소비 게이트도 닫은 상태에서 `service/payment-service/src/test/resources/ddl/payment-order-reconciliation.sql`을 적용한다. 먼저 `payment.order_reconciliation_cursor`와 `idx_payment_status_order_synced_order_sync_failure_code_id`의 기존 존재 여부를 카탈로그로 확인한다. 스크립트는 UTF-8, 단일 BEGIN/COMMIT이며 기존 `payment.payment` 행·컬럼·제약을 보존하고 후보 인덱스·cursor 테이블·두 lane seed를 추가한다. 기존 payment 테이블의 인덱스 생성은 쓰기를 막을 수 있어 진행 중인 승인·취소·복구·웹훅 쓰기를 drain한 작업 창을 잡는다.
+
+중간 실패는 전체 rollback 후 새 객체·기존 행·인덱스를 확인하고 재적용한다. 성공 스크립트를 무조건 다시 실행하거나 진행 cursor를 초기화하지 않는다. 새 매핑을 validate하고 `payment.processed_event`·`payment.shedlock` 및 두 cursor seed를 확인한 다음 별도 배포에서 재대조를 활성화한다. #591을 닫고 #579의 실제 취소 멱등 경로와 #582의 주문 복원 경로를 확인하기 전에는 `ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED`·운영 `payment.enabled`를 켜지 않는다. 재대조 OFF로 rollback할 때 새 테이블·인덱스·cursor 진행값은 보존한다(`payment-guide.md` §6-3).
+
 ### 주문 결제 복원 의도 fence 배포 (#14 C2a)
 
 소비 게이트 OFF → 기존 consumer의 진행 중 처리 drain → 모든 order 인스턴스에 C2a 적용 순서다. 구 consumer와 혼합 소비하지 않는다.

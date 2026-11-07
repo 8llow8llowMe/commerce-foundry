@@ -351,6 +351,9 @@
     create index idx_payment_status_order_synced_id
        on payment.payment (status, order_synced, id);
 
+    create index idx_payment_status_order_synced_order_sync_failure_code_id
+       on payment.payment (status, order_synced, order_sync_failure_code, id);
+
     create index idx_payment_cancel_payment_id
        on payment.payment_cancel (payment_id);
 
