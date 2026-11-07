@@ -73,6 +73,8 @@ public final class MemberValidationMessage {
     public static final String ADMIN_ACCOUNT_ROLE_INVALID = "AUTH_159:역할은 OWNER · MANAGER · STAFF 중 하나여야 합니다.";
     public static final String ADMIN_ACCOUNT_ACTIVE_REQUIRED = "AUTH_160:사용 여부(active)는 필수입니다.";
 
+    public static final String ADMIN_PASSWORD_RESET_TOKEN_REQUIRED = "AUTH_161:재설정 토큰은 필수입니다.";
+
     private MemberValidationMessage() {
     }
 }

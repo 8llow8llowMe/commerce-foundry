@@ -21,6 +21,15 @@ public class AdminAuditProcessor {
 
     private final AdminAuditPort adminAuditPort;
 
+    public void adminPasswordResetLinkSent(long actorMemberId, long targetMemberId, boolean succeeded) {
+        safelyRecord(AdminAuditAction.ADMIN_PASSWORD_RESET_LINK_SEND, actorMemberId,
+            () -> adminAuditPort.adminPasswordResetLinkSent(actorMemberId, targetMemberId, succeeded));
+    }
+
+    public void adminPasswordResetUsed(long memberId, boolean succeeded) {
+        safelyRecord(AdminAuditAction.ADMIN_PASSWORD_RESET_USE, memberId, () -> adminAuditPort.adminPasswordResetUsed(memberId, succeeded));
+    }
+
     public void adminLoginSucceeded(long adminMemberId) {
         adminAuditPort.adminLoginSucceeded(adminMemberId);
     }

@@ -6,6 +6,8 @@ package com.commercefoundry.domainlayer.member.application.model;
  */
 public enum AdminAuditAction {
 
+    ADMIN_PASSWORD_RESET_LINK_SEND,
+    ADMIN_PASSWORD_RESET_USE,
     ADMIN_LOGIN,
     /**
      * OTP 를 등록한 관리자가 로그인 1단계(비밀번호)를 통과해 2단계 챌린지를 받았다 (#238 PR-B). 로그인 성공({@code ADMIN_LOGIN})과 다르다 — 아직 토큰이 나가지 않았다.
