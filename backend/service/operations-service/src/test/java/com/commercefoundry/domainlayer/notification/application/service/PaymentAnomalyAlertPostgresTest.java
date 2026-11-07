@@ -33,6 +33,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
@@ -54,6 +55,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @ActiveProfiles("test")
 @Testcontainers
 @EnabledWithDockerOrOnCi
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class PaymentAnomalyAlertPostgresTest {
     private static final String LOCK_NAME = "operations-payment-anomaly-alert";
 
