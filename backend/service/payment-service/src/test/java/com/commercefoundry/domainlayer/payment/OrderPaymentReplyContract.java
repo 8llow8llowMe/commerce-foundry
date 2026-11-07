@@ -166,11 +166,11 @@ abstract class OrderPaymentReplyContract {
             assertThat(fresh().orderSyncFailureCode()).isNull();
             assertThat(fresh().version()).isZero();
             assertThat(inboxCount()).isEqualTo(1);
-            doAnswer(call -> {
+            tx().executeWithoutResult(s -> doAnswer(call -> {
                 call.callRealMethod();
                 em.flush();
                 throw new IllegalStateException(OrderPaymentReplyUnitTest.CANARY);
-            }).when(inbox).record(eq(GROUP), any(), anyString(), any());
+            }).when(inbox).record(eq(GROUP), any(), anyString(), any()));
             assertThatThrownBy(() -> facade.handle(command(Result.REJECTED_ORDER_CANCELED))).isInstanceOfSatisfying(OrderPaymentReplyException.class,
                 e -> assertThat(e.getCause()).isNull());
             assertThat(fresh().orderSyncFailureCode()).isNull();
