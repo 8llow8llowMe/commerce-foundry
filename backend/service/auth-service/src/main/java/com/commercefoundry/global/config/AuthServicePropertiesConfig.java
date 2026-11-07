@@ -26,6 +26,7 @@ import org.springframework.context.annotation.Import;
     SwaggerPropertiesConfig.class
 })
 @EnableConfigurationProperties({
+    com.commercefoundry.global.properties.AdminPasswordResetProperties.class,
     AdminAuditRetentionProperties.class,
     AdminOtpProperties.class,
     AdminSeedProperties.class,

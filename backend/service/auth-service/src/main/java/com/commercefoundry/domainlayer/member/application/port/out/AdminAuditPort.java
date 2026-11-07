@@ -12,6 +12,9 @@ import java.util.OptionalLong;
  */
 public interface AdminAuditPort {
 
+    void adminPasswordResetLinkSent(long actorMemberId, long targetMemberId, boolean succeeded);
+    void adminPasswordResetUsed(long memberId, boolean succeeded);
+
     /** 관리자 로그인 성공 — {@code AdminAuthWebFacade#login}. */
     void adminLoginSucceeded(long adminMemberId);
 

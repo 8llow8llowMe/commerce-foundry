@@ -57,6 +57,18 @@ public class AdminAuditLogRepositoryAdapter implements AdminAuditPort, AdminAudi
     }
 
     @Override
+    public void adminPasswordResetLinkSent(long actorMemberId, long targetMemberId, boolean succeeded) {
+        record(new AdminAuditRecord(com.commercefoundry.domainlayer.member.application.model.AdminAuditAction.ADMIN_PASSWORD_RESET_LINK_SEND,
+            actorMemberId, "member:" + targetMemberId, succeeded));
+    }
+
+    @Override
+    public void adminPasswordResetUsed(long memberId, boolean succeeded) {
+        record(new AdminAuditRecord(com.commercefoundry.domainlayer.member.application.model.AdminAuditAction.ADMIN_PASSWORD_RESET_USE,
+            null, "member:" + memberId, succeeded));
+    }
+
+    @Override
     public void adminLoginSucceeded(long adminMemberId) {
         record(AdminAuditRecord.adminLoginSucceeded(adminMemberId));
     }
