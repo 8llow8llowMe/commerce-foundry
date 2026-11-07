@@ -809,6 +809,121 @@
     comment on column operations.shedlock.locked_by is
         '락을 잡은 인스턴스 (호스트 이름)';
 
+    create table operations.store_footer (
+        id bigint not null,
+        latest_revision integer not null,
+        published_revision integer,
+        version bigint not null,
+        primary key (id),
+        constraint ck_store_footer_singleton check (id = 1),
+        constraint ck_store_footer_pointers check (latest_revision > 0 and (published_revision is null or (published_revision > 0 and published_revision <= latest_revision))),
+        constraint ck_store_footer_version check (version >= 0)
+    );
+
+    comment on table operations.store_footer is
+        '스토어 푸터 단일 설정 루트';
+
+    comment on column operations.store_footer.id is
+        '고정 루트 아이디 (1)';
+
+    comment on column operations.store_footer.latest_revision is
+        '최신 리비전 번호';
+
+    comment on column operations.store_footer.published_revision is
+        '게시 리비전 번호 (미게시 null)';
+
+    comment on column operations.store_footer.version is
+        '낙관적 편집 버전';
+
+    create table operations.store_footer_link (
+        id bigint not null,
+        display_order integer not null,
+        label_en varchar(80) not null,
+        label_ko varchar(80) not null,
+        revision_id bigint not null,
+        type varchar(20) not null,
+        url varchar(2048) not null,
+        visible boolean not null,
+        primary key (id),
+        constraint uk_store_footer_link_revision_id_display_order unique (revision_id, display_order),
+        constraint ck_store_footer_link_type check (type in ('INSTAGRAM', 'KAKAO_CHANNEL', 'CUSTOM')),
+        constraint ck_store_footer_link_order check (display_order between 0 and 999)
+    );
+
+    comment on table operations.store_footer_link is
+        '푸터 리비전별 불변 링크';
+
+    comment on column operations.store_footer_link.id is
+        '링크 행 아이디 (Snowflake)';
+
+    comment on column operations.store_footer_link.display_order is
+        '표시 순서';
+
+    comment on column operations.store_footer_link.label_en is
+        '영문 표시명';
+
+    comment on column operations.store_footer_link.label_ko is
+        '국문 표시명';
+
+    comment on column operations.store_footer_link.revision_id is
+        '리비전 아이디 (FK: store_footer_revision.id)';
+
+    comment on column operations.store_footer_link.type is
+        '링크 유형 제어 코드';
+
+    comment on column operations.store_footer_link.url is
+        '검증한 외부 HTTPS 주소';
+
+    comment on column operations.store_footer_link.visible is
+        '공개 노출 여부';
+
+    create table operations.store_footer_revision (
+        id bigint not null,
+        copyright_en varchar(200),
+        copyright_ko varchar(200),
+        created_at timestamp(6) with time zone not null,
+        created_by bigint not null,
+        footer_id bigint not null,
+        published_at timestamp(6) with time zone,
+        published_by bigint,
+        revision_number integer not null,
+        primary key (id),
+        constraint uk_store_footer_revision_footer_id_revision_number unique (footer_id, revision_number),
+        constraint ck_store_footer_revision_number check (revision_number > 0),
+        constraint ck_store_footer_revision_root check (footer_id = 1),
+        constraint ck_store_footer_revision_publication check ((published_by is null and published_at is null) or (published_by is not null and published_at is not null))
+    );
+
+    comment on table operations.store_footer_revision is
+        '푸터 불변 이중 언어 리비전';
+
+    comment on column operations.store_footer_revision.id is
+        '리비전 아이디 (Snowflake)';
+
+    comment on column operations.store_footer_revision.copyright_en is
+        '영문 저작권 문구';
+
+    comment on column operations.store_footer_revision.copyright_ko is
+        '국문 저작권 문구';
+
+    comment on column operations.store_footer_revision.created_at is
+        '작성 시각 (UTC)';
+
+    comment on column operations.store_footer_revision.created_by is
+        '작성 관리자 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column operations.store_footer_revision.footer_id is
+        '푸터 루트 아이디 (FK: store_footer.id)';
+
+    comment on column operations.store_footer_revision.published_at is
+        '최초 게시 시각 (UTC)';
+
+    comment on column operations.store_footer_revision.published_by is
+        '최초 게시 관리자 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column operations.store_footer_revision.revision_number is
+        '리비전 번호';
+
     create table operations.store_profile (
         id bigint not null,
         address varchar(500) not null,

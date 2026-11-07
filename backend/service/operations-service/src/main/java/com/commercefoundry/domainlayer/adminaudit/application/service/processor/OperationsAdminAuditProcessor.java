@@ -7,7 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-/** Protects synchronous profile/legal HTTP audits, not deferred callbacks in an external transaction. */
+/** Protects synchronous profile/legal/footer HTTP audits, not deferred callbacks in an external transaction. */
 @Component
 public class OperationsAdminAuditProcessor {
     private final Logger diagnostic;
@@ -30,6 +30,14 @@ public class OperationsAdminAuditProcessor {
 
     public void legalPublished(long actorMemberId, String type, String locale, boolean succeeded) {
         legalDocumentFinished(OperationsAdminAuditAction.LEGAL_DOCUMENT_PUBLISH, actorMemberId, type, locale, succeeded);
+    }
+
+    public void footerDraftSaved(long actorMemberId, boolean succeeded) {
+        write(OperationsAdminAuditAction.STORE_FOOTER_DRAFT_SAVE, actorMemberId, "store-footer:1", succeeded);
+    }
+
+    public void footerPublished(long actorMemberId, boolean succeeded) {
+        write(OperationsAdminAuditAction.STORE_FOOTER_PUBLISH, actorMemberId, "store-footer:1", succeeded);
     }
 
     private void legalDocumentFinished(OperationsAdminAuditAction action, long actorMemberId, String type, String locale, boolean succeeded) {
