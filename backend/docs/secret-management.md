@@ -84,7 +84,13 @@
 - **초기 관리자 시드(`ADMIN_SEED_EMAIL` · `ADMIN_SEED_PASSWORD` · `ADMIN_SEED_NAME`, auth 전용, #6)는 Vault 등록 필요(dev/prod)다.**
   실제 관리자 이메일 · 비밀번호를 yml · 테스트 픽스처 · 이슈 · PR 에 쓰지 않는다 — yml 은 `${ADMIN_SEED_EMAIL:}` 플레이스홀더만 둔다.
   비밀번호는 10~64자, 영문 · 숫자 포함 공백 없는 ASCII 이고(`openssl rand -base64 24` 로 만들고 영문 · 숫자가 모두 들었는지 본다), 같은 이메일의 관리자가 이미 있으면 덮어쓰지 않으므로
-  첫 배포로 관리자를 만든 뒤 Vault 값을 지워도 된다. 비밀번호 교체 API 는 아직 없다 — 바꾸려면 후속 이슈를 쓴다. 규칙 정본은 [security-guide.md](security-guide.md) §11-3.
+  첫 배포로 관리자를 만든 뒤 Vault 값을 지워도 된다. 운영자 본인 비밀번호 변경(#193)과 분실 시 대표 발송 재설정(#589)은 별도 API다.
+  고객 회원의 분실 복구는 아직 이 흐름을 사용하지 않는다. 규칙 정본은 [security-guide.md](security-guide.md) §11-3.
+- **운영자 비밀번호 재설정 SMTP(#589)**: `AUTH_ADMIN_PASSWORD_RESET_SMTP_USERNAME`·`AUTH_ADMIN_PASSWORD_RESET_SMTP_PASSWORD`는
+  auth-service 전용 Vault 키로 dev/prod에 등록해야 한다. 실제 발신 주소·호스트·재설정 화면 URL도 저장소에 쓰지 않고
+  `AUTH_ADMIN_PASSWORD_RESET_SENDER`·`_SMTP_HOST`·`_URL` 런타임 환경변수로 주입한다. 포트는 `_SMTP_PORT`(기본 587),
+  기능 스위치는 `_ENABLED`(기본 false)다. 모든 이름은 `.env.example`·auth Compose·application.yml에서 같아야 한다.
+  Vault 등록만으로 메일 도착을 증명하지 못하므로 발신 주소 검증·SMTP STARTTLS·실수신을 활성화 전에 확인한다.
 
 ## 3. 환경별 값의 출처
 

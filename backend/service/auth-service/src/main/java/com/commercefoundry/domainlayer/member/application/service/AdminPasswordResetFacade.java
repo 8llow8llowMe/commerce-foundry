@@ -32,8 +32,9 @@ public class AdminPasswordResetFacade implements AdminPasswordResetAdminUseCase,
                 try {
                     adminPasswordResetProcessor.send(recipient.get());
                 } catch (MemberException unavailable) {
-                    if (unavailable.getErrorCode() != MemberErrorCode.ADMIN_PASSWORD_RESET_UNAVAILABLE) { throw unavailable; }
-                    // SMTP 장애에도 계정 존재 여부를 응답으로 노출하지 않는다. 실패 링크는 Processor가 폐기했다.
+                    if (unavailable.getErrorCode() != MemberErrorCode.ADMIN_PASSWORD_RESET_UNAVAILABLE
+                        && unavailable.getErrorCode() != MemberErrorCode.TOKEN_STORE_UNAVAILABLE) { throw unavailable; }
+                    // 대상 조회 뒤 SMTP·토큰 저장·폐기 장애도 중립 응답이다. 폐기 실패 시 grant는 TTL까지 남을 수 있다.
                     adminAuditProcessor.adminPasswordResetLinkSent(actorMemberId, targetMemberId, false);
                     return;
                 }

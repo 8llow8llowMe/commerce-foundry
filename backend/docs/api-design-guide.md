@@ -434,11 +434,12 @@ return ResponseEntity.ok().body(Response.success(response));
 
 | API | 권한·입력 | 성공·오류 계약 |
 |---|---|---|
-| `POST /api/v1/admin/admins/{memberId}/password-reset-link` | `AdminAuthority.STAFF_MANAGE`, 본문 없음. DB에서도 활성 대표(ADMIN·OWNER) 확인 | 200은 대상 없음·고객·비활성·SMTP 실패에도 같음. 403 `AUTH_046`, 429 `AUTH_062`, 503 `AUTH_013`·`AUTH_063` |
+| `POST /api/v1/admin/admins/{memberId}/password-reset-link` | `AdminAuthority.STAFF_MANAGE`, 본문 없음. DB에서도 활성 대표(ADMIN·OWNER) 확인 | 200은 대상 없음·고객·비활성·SMTP/대상별 토큰 저장·폐기 실패에도 같음. 403 `AUTH_046`, 429 `AUTH_062`, 대상 조회 전 Redis 장애만 503 `AUTH_013`; 기능 비활성 503 `AUTH_063` |
 | `POST /api/v1/auth/admin/password-reset` | `permitAll()`, `{token, newPassword}`. 토큰은 메일 fragment의 base64url 43자, 비밀번호는 영문·숫자를 포함한 공백 없는 ASCII 10~64자 | 200 후 다시 로그인. 400 `AUTH_061`(만료·위조·재사용·상태·버전 변경 동일), 검증 오류, 409 `AUTH_064`(잠금 경합·새 링크 필요), 429 `AUTH_062`, 503 `AUTH_013`·`AUTH_063` |
 
 FE는 메일 링크 `#token=...`을 읽은 뒤 URL에서 제거하고 JSON 본문으로만 전송한다. 토큰을 query·로그·분석 도구에 전달하지 않는다.
 발송 응답으로 계정 존재·메일 도착을 단정하지 않는다. 발송은 전체 100회/15분·행위자 10회/15분·대상 3회/15분 제한이다.
+대상 조회 뒤 Redis 저장·폐기 실패는 실패 감사와 중립 200을 남긴다. 폐기 실패 grant는 TTL까지 남을 수 있고 즉시 무효라고 답하지 않는다.
 사용은 게이트웨이가 주입한 유효 `X-Client-Subject` 주체당 10회/분이며 FE는 헤더를 만들지 않는다. 누락·형식 오류면 해당 제한을 건너뛴다.
 
 링크 GETDEL·BCrypt 이후 회원 행 잠금에서 활성·버전을 검사하고, 비밀번호 저장·flush와 필수 컷오프가 완료돼야 DB를 커밋한다.
