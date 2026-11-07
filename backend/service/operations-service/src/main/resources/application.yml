@@ -368,3 +368,8 @@ storage:
   connect-timeout: 2s
   read-timeout: 5s
   api-call-timeout: 8s
+
+# 푸터 CUSTOM 링크에 허용할 정확한 외부 DNS 호스트 (쉼표 구분, 기본 비어 있음, 비밀 아님).
+store:
+  footer:
+    allowed-external-hosts: ${STORE_FOOTER_ALLOWED_EXTERNAL_HOSTS:}

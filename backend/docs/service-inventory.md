@@ -289,3 +289,10 @@ operations-service `legaldocument`는 TERMS/PRIVACY × ko/en의 불변 초안 �
 ADMIN 편집·검토 확인 후 즉시 게시·이력·브랜드 비종속 시작 템플릿과 익명 게시본 조회를 제공한다.
 AI·외부 수집·auth 동의 수집을 호출하지 않으며 새 초안은 공개 게시본을 바꾸지 않는다.
 계약·운영 DDL·FE #570 영향과 #566 store route 배포 의존은 [store-legal-guide.md](store-legal-guide.md)를 따른다.
+
+## 스토어 푸터 링크 (#597)
+
+operations-service `storefooter`는 배포당 하나의 이중 언어 푸터 초안·게시본·이력과 외부 링크 순서를 소유한다.
+`storeprofile`(#566)의 회사·CS 실정보와 `legaldocument`(#569)의 정책 본문·게시 여부를 복제하지 않는다.
+관리자 저장은 공개 포인터를 바꾸지 않고 명시적 게시 후에만 공개 GET에 반영된다. 새 테이블·호스트 허용 설정,
+FE #600 안전 렌더링과 운영 DDL은 [store-footer-guide.md](store-footer-guide.md)를 따른다. 새 Vault 비밀은 없다.

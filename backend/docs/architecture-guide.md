@@ -419,6 +419,9 @@ store:
 - 쇼핑몰 이름·상호·대표자·사업자 식별 번호·공개 주소·CS 연락처는 operations-service `storeprofile`의 **런타임 DB 정본**으로 관리한다(#566).
   배포당 단일 행이며 ADMIN 저장은 즉시 공개 변경이다. 비밀키는 받지 않고, 고객사 실정보를 저장소·픽스처·이슈에 넣지 않는다.
   PG·JWT·DB 비밀은 계속 Vault에서 주입한다. API·FE 이행은 `api-design-guide.md` 쇼핑몰 공개 정보 절을 따른다.
+- 푸터 채널·추가 외부 링크와 저작권 문구는 operations-service `storefooter`의 별도 초안·게시 리비전으로 관리한다(#597).
+  `storeprofile`의 회사·CS 실정보와 `legaldocument`의 정책 본문·게시 상태를 복제하지 않는다. 계약은
+  [store-footer-guide.md](store-footer-guide.md)를 따른다. 배포당 한 설정의 ko/en 문구를 함께 게시한다.
 - 브랜드 특화 요구가 생기면 먼저 "다른 쇼핑몰에도 의미가 있는 일반 기능인가" 를 묻는다. 그렇다면
   플래그가 있는 공통 기능으로, 아니라면 확장 지점(전략 인터페이스)으로 만든다.
 

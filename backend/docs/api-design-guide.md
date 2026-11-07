@@ -1852,3 +1852,12 @@ operations-service의 어드민(조회 `AdminAuthority.SETTINGS_READ`, 초안 �
 `type=TERMS|PRIVACY`, `locale=ko|en`은 원시 문자열 제어 코드다. 표준 봉투·no-store, 언어 fallback 없음, 미게시 404를 적용한다.
 FE는 버전 충돌 409 후 상세를 재조회하고 본문을 escape한 텍스트로 렌더링한다. 템플릿은 법적 적합성 보장이 아니다.
 정확한 필드·오류·게시 재시도·배포 의존(#566)은 [스토어 법적 문서 계약](store-legal-guide.md)을 따른다. FE #570, API 리뷰 대상은 `seonghoho`다.
+
+## 스토어 푸터 채널·추가 링크 (#597)
+
+operations-service의 `GET/PUT /api/v1/admin/store/footer`, `POST /api/v1/admin/store/footer/publication`,
+`GET /api/v1/admin/store/footer/revisions`는 SETTINGS_READ/SETTINGS_MANAGE에 따라 초안·이력·게시를 분리한다.
+익명 `GET /api/v1/store/footer?locale=ko|en`은 게시된 링크·문구만 반환한다. PUT은 링크 목록 전체 교체이며
+`expectedVersion`으로 충돌을 막고, 반복 게시는 현재 게시본을 변경하지 않는다. 모든 응답은 공통 봉투·no-store다.
+정확한 이중 언어 필드·허용 호스트·오류·FE #600 안전 anchor 계약은 [스토어 푸터 가이드](store-footer-guide.md)를 따른다.
+Gateway는 기존 `/api/v1/store/**`·`/api/v1/admin/store/**` 라우트를 재사용한다. 계약 검토자 `seonghoho`다.

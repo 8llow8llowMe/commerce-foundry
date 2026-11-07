@@ -1287,17 +1287,19 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 - **선언 — `@AdminAudited(action = "...")` · `@AdminAuditExempt(reason = "...")`** (같은 패키지, METHOD · RUNTIME). 애노테이션은 줄을 쓰지 않는 선언이다.
   실제 줄은 Facade → 서비스 `adminaudit` Processor 가 `AdminAuditLog.write` 로 쓴다.
 - **서비스 쪽 구성** — 서비스당 `domainlayer/adminaudit`(application 만): `<Svc>AdminAuditAction` enum + `<Svc>AdminAuditProcessor`. Port/Adapter 는 DB 싱크가 있을 때만(auth).
-  **operations 부분 통합 (#163 R1)**: `OperationsAdminAuditAction`·`OperationsAdminAuditProcessor`는 프로필 `STORE_PROFILE_UPDATE`와 법적 문서
-  `LEGAL_DOCUMENT_DRAFT_SAVE`·`LEGAL_DOCUMENT_PUBLISH` 세 행위만 소유한다. enum은 전체 서비스 선언 집합이 아닌 이관한 두 컨텍스트의 부분집합이다.
+  **operations 부분 통합 (#163 R1, #597)**: `OperationsAdminAuditAction`·`OperationsAdminAuditProcessor`는 프로필 `STORE_PROFILE_UPDATE`, 법적 문서
+  `LEGAL_DOCUMENT_DRAFT_SAVE`·`LEGAL_DOCUMENT_PUBLISH`, 푸터 `STORE_FOOTER_DRAFT_SAVE`·`STORE_FOOTER_PUBLISH`를 소유한다.
+  enum은 전체 서비스 선언 집합이 아닌 이관한 세 컨텍스트의 부분집합이다.
   JOB 취소·결과 다운로드와 CAMPAIGN 미리보기는 기존 경로를 유지하며 서비스 전체 감사 통합은 후속 범위다.
   프로필 입력 검증 400은 감사하지 않으며, 저장 성공·버전 충돌 실패에는 본문 없이 `store-profile:1`만 기록한다.
   행위자는 컨트롤러의 `@AuthenticationPrincipal MemberPrincipal` 에서 꺼낸다 — 감사에만 쓰면 UseCase 마지막 인자 `long actorMemberId`, 업무 데이터(이력 표의 관리자 칸 등)면 Command 에 싣는다.
-  요청 본문 값을 행위자로 쓰지 않는다. 컨트롤러의 `@AdminAudited.action()` 집합과 enum 값 집합이 같은지 서비스 테스트가 본다(operations R1은 이관한 두 컨트롤러만 비교한다).
+  요청 본문 값을 행위자로 쓰지 않는다. 컨트롤러의 `@AdminAudited.action()` 집합과 enum 값 집합이 같은지 서비스 테스트가 본다(operations는 이관한 세 컨트롤러만 비교한다).
   **target 은 업무 호출 전에 만든다** — 경로 변수 · Command 의 식별자로 `AdminAuditLog.target(...)` 을 먼저 만들어 두어야 업무가 예외로 끝나도 같은 대상으로 `FAILURE` 를 남긴다.
-- **프로필·법적 문서 감사 경계 (#566·#569·#163 R1)** — 두 AdminFacade가 공통 `OperationsAdminAuditProcessor`를 호출한다.
+- **프로필·법적 문서·푸터 감사 경계 (#566·#569·#597·#163 R1)** — 세 AdminFacade가 공통 `OperationsAdminAuditProcessor`를 호출한다.
   `@AdminAudited` 선언, 실제 JWT 행위자, 고정 허용 코드 대상 `legal-document:{terms|privacy}-{ko|en}`, 네 칸 형식과 본문 금지는 동일하다.
   adapter 트랜잭션 완료와 Presenter 조립이 모두 성공한 뒤 `SUCCESS`를 기록한다. Presenter 실패는 기존대로 `FAILURE`이며 DB 변경이 이미 커밋됐을 수 있다.
   프로필 사전 validate는 감사 범위 밖이고 법적 문서 도메인 키 검증 실패는 범위 안이므로 `target=- result=FAILURE`다. HTTP 본문 검증 400·401·403은 진입 전이라 감사하지 않는다.
+  푸터 쓰기의 업무 실패는 고정 대상 `store-footer:1`로 기록한다. 링크 URL·표시명·저작권 문구는 감사·진단에 싣지 않는다.
   성공 감사는 업무 try 밖에서 한 번만 호출한다. 공통 Processor가 동기 writer의 RuntimeException을 격리하고, 진단도 실패하면 격리해 업무 응답·원래 예외를 보존한다.
   진단에는 코드가 정한 action·actorMemberId·예외 타입만 남기며 message·cause·stack·target·입력 본문은 전달하지 않는다.
   보호 범위는 현재 동기 HTTP 경로다. 외부 실제 트랜잭션에서 나중에 실행되는 afterCompletion 콜백 장애까지 보호하는 전역 보장은 아니다.
@@ -1325,6 +1327,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` | 사용 중 — 상태 변경 선언 · `OrderAdminAuditProcessor`와 조회 후 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출. 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·개인정보는 제외한다 (#17) |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음(`markRead` · `markAllRead`) · 온보딩 투어 기록(`updateTour` · `updateTourLegacy`)은 본인 상태라 `@AdminAuditExempt` (#163 PR-E) |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
+| operations | `STORE_FOOTER_DRAFT_SAVE` · `STORE_FOOTER_PUBLISH` | #597. SETTINGS_MANAGE의 실제 JWT 관리자, 고정 target=`store-footer:1`, 성공·실패 한 줄. URL·표시명·저작권 문구는 기록하지 않는다. 수정 이력은 푸터 리비전 표가 소유한다 |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `PRODUCT_CUSTOM_ORDER_REPLACE` (`product:<id>`, #9 PR-B) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
 | product | `MEDIA_IMAGE_UPLOAD_ISSUE` · `MEDIA_IMAGE_UPLOAD_CONFIRM` (대상 `media-upload:<UUID>`, 식별자 없는 실패는 `-`) — URL · 전체 키 · ETag · MIME · 바이트 · 헤더 제외 | 사용 중 (#508, `ProductAdminAuditAction`) |
 | product | `DISPLAY_SECTION_*` · `LOOK_*` (전시 미리보기는 면제) | #163 PR-C |
