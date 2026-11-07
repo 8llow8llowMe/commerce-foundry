@@ -302,3 +302,13 @@ operations-service `storefooter`는 배포당 하나의 이중 언어 푸터 초
 `storeprofile`(#566)의 회사·CS 실정보와 `legaldocument`(#569)의 정책 본문·게시 여부를 복제하지 않는다.
 관리자 저장은 공개 포인터를 바꾸지 않고 명시적 게시 후에만 공개 GET에 반영된다. 새 테이블·호스트 허용 설정,
 FE #600 안전 렌더링과 운영 DDL은 [store-footer-guide.md](store-footer-guide.md)를 따른다. 새 Vault 비밀은 없다.
+
+### 결제 자동 취소와 복구 (#579)
+
+payment-service가 주문 반영 거절·LATE_APPROVED 자동 취소 의도와 lease/token 실행, 별도 세 lane의 발견·재시도를 담당한다.
+금전 원장은 payment_cancel이며 최초 준비 시 생성한 **양수 Snowflake claimId**를 payment_auto_cancel에 영속 매핑한다.
+PG 키는 payment-auto-cancel-v1-<paymentId>로 동결하고 결제키 GET의 요청별 거래 증거로 확정한다.
+빠른 정책은 의도만 저장하며 payment.auto_cancel_cursor 스케줄러가 커밋 뒤 실행과 중단 복구를 담당한다.
+단일 게이트 payment.auto-cancel.enabled는 기본 OFF다. #591 커서·두 seed·가드와 order-service는 변경하지 않는다.
+운영 DDL·게이트·롤백은 payment-guide §8과 payment-cancellation-ddl을 따른다. #213/operations 어드민 알림 연동은 미구현이다.
+FE·HTTP 응답 계약 영향은 없다.

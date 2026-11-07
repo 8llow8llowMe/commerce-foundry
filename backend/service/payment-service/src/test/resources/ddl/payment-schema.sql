@@ -1,6 +1,28 @@
 
     create schema payment;
 
+    create table payment.auto_cancel_cursor (
+        lane varchar(16) not null check ((lane in ('REJECTED','LATE_APPROVED','PENDING'))),
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        cycle_upper_id bigint not null,
+        due_before timestamp(6) with time zone not null,
+        last_id bigint not null,
+        version bigint not null,
+        primary key (lane),
+        constraint ck_auto_cancel_cursor_lane check (lane in ('REJECTED','LATE_APPROVED','PENDING')),
+        constraint ck_auto_cancel_cursor_bounds check (last_id >= 0 and cycle_upper_id >= last_id)
+    );
+
+    comment on table payment.auto_cancel_cursor is
+        'Automatic cancellation discovery and execution cursors';
+
+    comment on column payment.auto_cancel_cursor.created_at is
+        '생성 시각';
+
+    comment on column payment.auto_cancel_cursor.updated_at is
+        '수정 시각';
+
     create table payment.order_reconciliation_cursor (
         lane varchar(16) not null check ((lane in ('RECONCILE','REJECTED'))),
         created_at timestamp(6) with time zone not null,
@@ -225,6 +247,40 @@
     comment on column payment.payment.version is
         '낙관적 락 버전';
 
+    create table payment.payment_auto_cancel (
+        payment_id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        amount bigint,
+        attempts integer not null,
+        claim_id bigint,
+        currency varchar(3) check ((currency in ('KRW','USD'))),
+        first_attempt_at timestamp(6) with time zone,
+        lease_token varchar(36),
+        lease_until timestamp(6) with time zone,
+        manual_reason varchar(40),
+        next_attempt_at timestamp(6) with time zone not null,
+        pg_key varchar(64) not null,
+        state varchar(20) not null check ((state in ('PENDING','SUCCEEDED','MANUAL_REVIEW'))),
+        transaction_key varchar(64),
+        version bigint,
+        primary key (payment_id),
+        constraint uk_payment_auto_cancel_claim_id unique (claim_id),
+        constraint ck_payment_auto_cancel_amount check ((amount is null and currency is null) or (amount is not null and amount > 0 and currency is not null)),
+        constraint ck_payment_auto_cancel_claim check ((claim_id is null and amount is null) or (claim_id is not null and claim_id > 0 and amount is not null)),
+        constraint ck_payment_auto_cancel_attempts check (attempts >= 0),
+        constraint ck_payment_auto_cancel_lease check ((lease_until is null and lease_token is null) or (lease_until is not null and lease_token is not null))
+    );
+
+    comment on column payment.payment_auto_cancel.payment_id is
+        'Payment ID reference to payment.id (no database FK constraint)';
+
+    comment on column payment.payment_auto_cancel.created_at is
+        '생성 시각';
+
+    comment on column payment.payment_auto_cancel.updated_at is
+        '수정 시각';
+
     create table payment.payment_cancel (
         claim_id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -342,6 +398,9 @@
     create index idx_payment_status_approval_started_at_id
        on payment.payment (status, approval_started_at, id);
 
+    create index idx_payment_status_id
+       on payment.payment (status, id);
+
     create index idx_payment_order_id
        on payment.payment (order_id);
 
@@ -353,6 +412,9 @@
 
     create index idx_payment_status_order_synced_order_sync_failure_code_id
        on payment.payment (status, order_synced, order_sync_failure_code, id);
+
+    create index idx_payment_auto_cancel_state_next_attempt_at_payment_id
+       on payment.payment_auto_cancel (state, next_attempt_at, payment_id);
 
     create index idx_payment_cancel_payment_id
        on payment.payment_cancel (payment_id);

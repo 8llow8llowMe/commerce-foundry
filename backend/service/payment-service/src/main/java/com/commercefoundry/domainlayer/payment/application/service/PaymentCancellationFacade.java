@@ -11,9 +11,12 @@ import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /** PG 취소는 두 짧은 DB 트랜잭션 사이에서 호출한다. */
 @Service
+@Transactional(propagation = Propagation.NEVER)
 @RequiredArgsConstructor
 public class PaymentCancellationFacade implements PaymentCancellationUseCase {
 
@@ -22,7 +25,7 @@ public class PaymentCancellationFacade implements PaymentCancellationUseCase {
 
     @Override
     public PaymentCancelResponse cancel(long paymentId, long claimId, long amount, CurrencyCode currency, String idempotencyKey) {
-        if (!Long.toString(claimId).equals(idempotencyKey)) {
+        if (claimId <= 0 || !Long.toString(claimId).equals(idempotencyKey)) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_KEY_REUSED);
         }
         PaymentCancelProcessor.Prepared prepared = processor.prepare(paymentId, claimId, Money.of(amount, currency));

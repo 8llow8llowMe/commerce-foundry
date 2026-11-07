@@ -15,8 +15,11 @@ import java.math.BigDecimal;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TossPaymentResponse(
     String paymentKey, String orderId, String currency, String method, String status, String approvedAt, BigDecimal totalAmount, BigDecimal balanceAmount,
-    EasyPay easyPay, Failure failure
+    EasyPay easyPay, Failure failure, java.util.List<Cancellation> cancels, String lastTransactionKey
 ) {
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Cancellation(BigDecimal cancelAmount, String transactionKey, String cancelStatus, String cancelRequestId, String cancelReason) { }
 
     /** 결제키 전체 · 실패 메시지를 로그에 남기지 않는다 ({@code coding-conventions.md} §8). */
     @Override

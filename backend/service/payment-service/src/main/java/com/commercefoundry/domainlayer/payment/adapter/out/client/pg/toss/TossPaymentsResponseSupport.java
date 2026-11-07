@@ -6,6 +6,8 @@ import com.commercefoundry.domainlayer.payment.application.port.out.query.PgAppr
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult.NotSentReason;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult.State;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentApproval;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentMethod;
@@ -236,6 +238,102 @@ public class TossPaymentsResponseSupport {
                 yield new PgInquiryQueryResult.Unknown(indeterminate.reason());
             }
         };
+    }
+
+    /** POST supplies request-specific evidence only; GET must confirm that transaction separately. */
+    public PgCancellationQueryResult automaticPost(Payment payment, Money amount, String pgKey, Supplier<byte[]> remoteCall) {
+        Exchange exchanged = exchange(remoteCall);
+        if (!(exchanged instanceof Exchange.Success success)) {
+            return automaticFailure(exchanged);
+        }
+        try {
+            TossPaymentResponse response = cancellationResponse(payment, success.body());
+            var matches = response.cancels().stream().filter(c -> matchesAutomatic(c, amount, pgKey)).toList();
+            if (matches.size() != 1 || !Objects.equals(matches.getFirst().transactionKey(), response.lastTransactionKey())) {
+                return PgCancellationQueryResult.of(State.MANUAL_REVIEW);
+            }
+            return new PgCancellationQueryResult(State.EVIDENCE, matches.getFirst().transactionKey());
+        } catch (RuntimeException exception) {
+            return PgCancellationQueryResult.of(State.MANUAL_REVIEW);
+        }
+    }
+
+    public PgCancellationQueryResult cancellationInquiry(
+        Payment payment, Money amount, String pgKey, String transactionKey, Supplier<byte[]> remoteCall) {
+        Exchange exchanged = exchange(remoteCall);
+        if (!(exchanged instanceof Exchange.Success success)) {
+            return automaticFailure(exchanged);
+        }
+        try {
+            TossPaymentResponse response = cancellationResponse(payment, success.body());
+            Money balance = Money.ofMajorUnit(response.balanceAmount(), payment.amount().currency());
+            if (balance.equals(amount) && ("DONE".equals(response.status()) || "PARTIAL_CANCELED".equals(response.status()))) {
+                return PgCancellationQueryResult.of(State.OPEN);
+            }
+            if (balance.isZero() && "CANCELED".equals(response.status())) {
+                if (transactionKey == null) {
+                    // Crash before evidence commit: the fixed request marker, amount and last transaction must all agree.
+                    var marked = response.cancels().stream().filter(c -> matchesAutomatic(c, amount, pgKey)).toList();
+                    return marked.size() == 1 && Objects.equals(marked.getFirst().transactionKey(), response.lastTransactionKey())
+                        ? new PgCancellationQueryResult(State.CONFIRMED, marked.getFirst().transactionKey())
+                        : PgCancellationQueryResult.of(State.UNATTRIBUTED);
+                }
+                long matches = response.cancels().stream()
+                    .filter(c -> transactionKey.equals(c.transactionKey()) && matchesAutomatic(c, amount, pgKey)).count();
+                return PgCancellationQueryResult.of(matches == 1 ? State.CONFIRMED : State.MANUAL_REVIEW);
+            }
+            return PgCancellationQueryResult.of(State.MANUAL_REVIEW);
+        } catch (RuntimeException exception) {
+            return PgCancellationQueryResult.of(State.MANUAL_REVIEW);
+        }
+    }
+
+    private TossPaymentResponse cancellationResponse(Payment payment, byte[] body) {
+        TossPaymentResponse response = jsonMapper.readValue(body, TossPaymentResponse.class);
+        if (response == null || !payment.pgOrderId().equals(response.orderId()) || !payment.paymentKey().equals(response.paymentKey())
+            || !payment.amount().currency().name().equals(response.currency()) || response.totalAmount() == null || response.balanceAmount() == null
+            || !Money.ofMajorUnit(response.totalAmount(), payment.amount().currency()).equals(payment.amount())) {
+            throw new IllegalArgumentException("Cancellation contract mismatch");
+        }
+        Money balance = Money.ofMajorUnit(response.balanceAmount(), payment.amount().currency());
+        if (balance.isGreaterThan(payment.amount())) {
+            throw new IllegalArgumentException("Invalid balance");
+        }
+        java.util.List<TossPaymentResponse.Cancellation> history = response.cancels() == null ? java.util.List.of() : response.cancels();
+        Money total = Money.zero(payment.amount().currency());
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        for (var cancel : history) {
+            if (cancel == null || cancel.transactionKey() == null || cancel.transactionKey().isBlank() || cancel.transactionKey().length() > 64
+                || !keys.add(cancel.transactionKey()) || cancel.cancelAmount() == null || !"DONE".equals(cancel.cancelStatus())) {
+                throw new IllegalArgumentException("Invalid cancellation history");
+            }
+            Money canceled = Money.ofMajorUnit(cancel.cancelAmount(), payment.amount().currency());
+            if (canceled.isZero()) {
+                throw new IllegalArgumentException("Empty cancellation");
+            }
+            total = total.plus(canceled);
+        }
+        if (!total.plus(balance).equals(payment.amount())) {
+            throw new IllegalArgumentException("Cancellation history does not match balance");
+        }
+        return new TossPaymentResponse(response.paymentKey(), response.orderId(), response.currency(), response.method(), response.status(), response.approvedAt(),
+            response.totalAmount(), response.balanceAmount(), response.easyPay(), response.failure(), history, response.lastTransactionKey());
+    }
+
+    private static boolean matchesAutomatic(TossPaymentResponse.Cancellation cancel, Money amount, String pgKey) {
+        return "DONE".equals(cancel.cancelStatus()) && (cancel.cancelRequestId() == null || pgKey.equals(cancel.cancelRequestId()))
+            && ("PAYMENT_AUTO_CANCEL:" + pgKey).equals(cancel.cancelReason())
+            && Money.ofMajorUnit(cancel.cancelAmount(), amount.currency()).equals(amount);
+    }
+
+    private static PgCancellationQueryResult automaticFailure(Exchange exchanged) {
+        // Unknown transport/HTTP outcomes retain PENDING. Never copy raw PG messages into metadata.
+        if (exchanged instanceof Exchange.ClientError error && error.status() != 429
+            && (error.status() == 401 || (error.status() == 403 && !FORBIDDEN_CONSECUTIVE_REQUEST.equals(error.code()))
+                || (error.code() != null && (CANCEL_REJECTION_CODES.contains(error.code()) || CONFIG_ERROR_CODES.contains(error.code()))))) {
+            return PgCancellationQueryResult.of(State.MANUAL_REVIEW);
+        }
+        return PgCancellationQueryResult.of(State.RETRY);
     }
 
     /** 토스 결제수단 표시명 → {@link PaymentMethod}. 모르는 값 · null 은 {@link PaymentMethod#OTHER} 다 — 승인 기록을 결제수단 때문에 잃지 않는다. */

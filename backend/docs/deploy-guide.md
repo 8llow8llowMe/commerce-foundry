@@ -433,3 +433,17 @@ auth A1 활성 관리자 API와 payment A3a 관측 API(PR #548)를 먼저 배포
 ### DLT 알림 활성화 (#477 A2)
 
 operations 스키마 스냅숏에서 신규 `operations.dlt_alert_state`·`operations.dlt_partition_checkpoint` DDL만 추출해 `DLT_ALERT_ENABLED=true` 활성화 전에 적용한다. `ddl-auto=none`은 테이블을 만들지 않는다. 실제 프로세스에 `MESSAGING_ENABLED=true`·올바른 `KAFKA_NAMESPACE`도 주입한다. 기존 네 DLT와 주문 결제 회신 DLT 두 토픽의 READ/DESCRIBE, namespace가 붙은 `operations.dlt-alerts` 그룹 READ ACL, auth A1 활성 관리자 API·operations internal 서비스 토큰 허용을 확인한다. 두 회신 DLT 토픽은 #308 C3c 배포 시 생성돼야 하며, 없으면 DLT 알림 활성 상태의 operations 기동이 실패한다. 새 비밀 키는 없다. 허용 목록·재시도·롤백·상한·토픽 재생성 대응은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
+
+### #579 자동 취소 배포·롤백
+
+자동 취소는 `payment.auto-cancel.enabled` 단일 게이트이며 기본 OFF다. 별도 scheduler.enabled는 사용하지 않는다.
+게이트 OFF·승인/취소/웹훅/복구 실행자 drain·백업을 확인한 작업 창에서 `payment-auto-cancel.sql` → `payment-auto-cancel-scheduler.sql` 순서로 적용한다.
+스케줄러 DDL은 새 auto_cancel_cursor·세 seed와 payment(status,id) 인덱스만 추가한다. #591 order_reconciliation_cursor·두 seed·가드는 유지한다.
+Hibernate validate·생성 DDL/스냅숏 일치·PG 계약/복구/락 시험을 확인한 뒤 전체 실행자를 배포하고 별도 승인으로 게이트를 연다.
+새 DB 전체 스냅숏 사용 시 CREATE를 반복하지 말고 새 커서의 세 seed INSERT만 적용한다.
+
+양수 자동 claimId는 최초 acquire에서 새 원장 INSERT와 메타데이터에 원자적으로 저장한다. 충돌은 PG 호출 전 롤백하며 커밋 뒤에는 재발급하지 않는다.
+기본 주기 1분·lane당 5건·ShedLock 15분은 명목 예산이다. JVM 정지 등으로 락이 만료돼도 고정 PG 키·lease/token fencing으로 중복을 막는다.
+롤백은 단일 게이트 OFF → 실행자 drain → 구버전 배포 순서이며 원장·의도·커서 진행값·키를 보존한다.
+구버전 양수 원장 독자와 #591 exact-two-seed 가드는 호환된다. 보정 전 음수 설계의 실제 운영 행이 있으면 별도 승인된 이행이 필요하다.
+고정 수동 사유와 원문 없는 실패 로그를 점검하되 #213 어드민 알림·operations-service 연동이 구현됐다고 간주하지 않는다.

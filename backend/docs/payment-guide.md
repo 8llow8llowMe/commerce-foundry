@@ -582,6 +582,77 @@ FAILED 실패 코드 필수 · 메시지/코드 쌍 · 다른 상태 제약은 �
 이전 제약 때문에 PG 취소 성공 후 DB 기록이 실패한 건은 원장이 PENDING일 수 있다. 임의 SQL로 성공 처리하거나 새 키로 재청구하지 않는다.
 PG 거래 · 취소 내역과 기존 클레임 멱등 키를 대조한 뒤, 키 유효기간 안에서 기존 취소 조회/재시도로 복구하며 불명확하면 수동 확인한다.
 
+### 자동 취소와 영속 실행 (#579)
+
+`payment.auto-cancel.enabled`는 기본 false다. 거절 회신 뒤 빠른 `PaymentCancelPolicy`는 PG를 부르지 않고 의도만 커밋한다.
+결제 행을 잠가 현재 주문 반영 거절이 있는 DONE/PARTIAL_CANCELED 또는 LATE_APPROVED인지 다시 확인하며, 일반 DONE과 전액 취소는 새 의도를 만들지 않는다.
+
+금전 원장은 기존 `payment.payment_cancel` 하나다. 자동 취소 claimId는 **양수 Snowflake**이며 메타데이터 `payment_auto_cancel.claim_id`에 한 번 저장한다.
+의도 생성 시 claimId·금액·통화는 null이다. 최초 acquire는 결제 행 잠금 아래 성공 취소 누계를 원승인액에서 뺀 잔액을 동결하고,
+새 양수 claim을 **INSERT 전용 + flush**로 저장한 뒤 claimId·금액·lease를 같은 짧은 트랜잭션에 저장한다. 다른 PENDING claim은 준비를 막는다.
+사전 ID 충돌 또는 동시 PK 충돌은 전체 롤백하며, Executor가 최대 3회 새 트랜잭션으로 재시도한다. 성공 커밋 전에는 PG를 부르지 않는다.
+한 번 커밋한 claimId는 바꾸지 않는다. 원장이 없거나 식별자·금액이 어긋나면 수동 확인이며 대체 claim을 만들지 않는다.
+기존 `save`도 paymentId·금액·통화 불일치 시 기존 원장을 변경하지 않고 거절한다. 외부 0·음수 claim은 DB/PG 호출 전에 거절한다.
+양수 전용 구버전 원장 독자와 같은 형식을 유지하며 #591의 lane·커서·두 seed·가드는 수정하지 않는다.
+
+PG 키는 claimId와 독립적인 `payment-auto-cancel-v1-<paymentId>`다. 의도 생성부터 정확한 문자열을 저장하고 헤더와 cancelRequestId에 그대로 쓴다.
+작은 테스트 ID도 토스 길이 제한을 만족한다. 미확정 결과·재시도·재배포에서 키·금액·통화·커밋된 claimId를 재발급하지 않는다.
+명시 실행 `PaymentAutoCancelUseCase.execute`는 NEVER이며 Processor의 준비 커밋 뒤 PG Processor(NEVER)를 호출한다.
+attempts·nextAttemptAt·firstAttemptAt·2분 lease·token은 영속화한다. 재시도는 실행 시도 후 60초부터 최대 1시간까지 증가한다.
+증거 저장과 완료는 유효 token 소유자만 할 수 있고, 결제 상태·SUCCEEDED 원장·완료 의도는 한 트랜잭션으로 커밋한다.
+
+취소 전용 paymentKey GET은 결제키·주문번호·원금·통화·잔액·중복 없는 DONE 취소 이력과 이력합+잔액=원금을 검증한다.
+검증된 준비 잔액이 그대로인 OPEN만 같은 키의 POST를 허용한다. POST 2xx만으로 완료하지 않는다.
+정확한 고정 사유 `PAYMENT_AUTO_CANCEL:<pgKey>`·금액·선택적 requestId·마지막 transactionKey가 요청별 취소를 가리켜야 증거로 저장하고,
+별도 GET에서 같은 거래와 잔액 0을 확인한다. 일반결제의 cancelRequestId는 null일 수 있어 단독 식별 근거로 쓰지 않는다.
+POST 직후 증거 저장 전 중단도 GET 이력에 정확한 사유·동결 금액·DONE·마지막 거래키가 하나로 일치하면 거래 증거를 먼저 저장해 복구한다.
+외부 같은 금액 취소·표식 부재·모순은 잔액만으로 귀속하지 않고 MANUAL_REVIEW로 남기며 POST하지 않는다.
+
+최초 시도 후 14일부터 POST를 금지한다(토스 15일 유효기간 안의 보수적 여유). 만료 후에도 GET 확정을 먼저 허용한다.
+만료된 키의 GET이 timeout/5xx 등 RETRY를 포함해 미확정이면 메타데이터는 수동 확인으로 종결하고 금전 원장은 PENDING으로 보존한다.
+유효기간 안의 timeout·5xx·429·서킷·전송 불명은 PENDING/nextAttemptAt으로 재시도한다. 종결 거절·계약 모호성은 고정 사유
+`AUTO_CANCEL_MANUAL_REVIEW`만 저장하며 PG 원문을 로그·메타데이터에 싣지 않는다.
+
+운영 적용은 [취소 DDL 문서](payment-cancellation-ddl.md)와 실제 `ddl/payment-auto-cancel.sql`을 따른다.
+양수 claimId 보정과 스케줄러·관측 변경은 대상 모듈 컴파일/시험, 생성 스냅숏 일치, 실제 PostgreSQL 이행 시험으로 검증한 뒤 배포한다.
+이 문서는 운영 게이트 활성화 승인이 아니다.
+#213 어드민 알림·operations-service 연동은 구현하지 않았다. FE/HTTP 응답 계약은 유지한다.
+
+#### 자동 발견·재시도 스케줄러
+
+게이트는 **`payment.auto-cancel.enabled` 하나**이며 기본 false다. ON이면 빠른 훅·실행기·스케줄러·스키마 가드가 함께 활성화된다.
+`payment.auto-cancel.scheduler`에는 주기·락 기간·페이지 예산만 둔다. 별도 scheduler.enabled는 사용하지 않으며 남아 있어도 단일 게이트를 우회하거나 스케줄러만 끌 수 없다.
+
+`PaymentAutoCancelScheduler → UseCase → SchedulerFacade → Processor → Port/Adapter` 순서다.
+새 `payment.auto_cancel_cursor`는 REJECTED(DONE/PARTIAL_CANCELED 거절), LATE_APPROVED, PENDING(기한 도래·lease 없음/만료)을 독립 순회한다.
+이미 의도가 있는 결제는 발견에서 제외한다. cycle 시작 시 payment/intent ID 상한과 due cutoff를 동결하고 제한된 ID keyset만 예약한다.
+예약은 5초 REQUIRES_NEW에서 커서 진행까지 커밋하며 PG I/O나 의도 생성을 하지 않는다. 커밋 뒤 발견은 enqueue, PENDING은 명시 실행 UseCase를 호출한다.
+후보 실패는 다음 후보, lane 조회 실패는 다음 lane으로 격리한다. 처리 전 프로세스가 중단된 후보도 다음 유한 cycle에서 다시 발견한다.
+PENDING은 만료 lease를 다시 획득해 저장된 claimId·PG 키·금액으로 중단 복구한다.
+
+기본 초기/반복 주기는 각 1분, page-size 5·lane당 최대 1페이지다. page-size 1~50·페이지 수 1~10·곱 100 이하를 검사한다.
+ShedLock은 `payment.shedlock` 테이블을 공유하되 락 이름 `payment-auto-cancel`과 전용 provider로 분리한다. 기본 락 기간은 15분이다.
+명목 예산은 `(발견 2×10초 + PENDING 실행 90초)×page-size×페이지수 + 커서 3×5초×페이지수 + 여유 60초`다.
+PENDING은 최대 3회의 충돌 acquire·증거/결과 TX·최대 3회 PG 호출을 포함한다. 더 짧은 락 설정은 기동 실패다.
+이는 벽시계 완료 보장이 아니다. JVM 정지 등으로 락이 만료돼 실행자가 겹쳐도 원장 INSERT·고정 ID/키·의도 lease/token fencing이 정합성을 지킨다.
+
+단일 게이트 ON의 가드는 ddl-auto=none에서도 새 커서 컬럼·정확한 세 seed·양수 claim 메타데이터·공용 원장·payment.shedlock을 검사한다.
+DB 원문/cause는 보존하지 않는다. #591 커서·두 seed·가드는 변경하지 않는다.
+배포는 metadata DDL → scheduler DDL(기존 payment의 status,id 인덱스 포함) → 매핑 validate/생성 DDL 검증 → 전체 실행자 배포 → 별도 활성화 승인 순서다.
+전체 스냅숏으로 새 DB를 만들면 CREATE를 반복하지 말고 운영 스크립트의 세 seed INSERT만 적용한다.
+롤백은 단일 게이트 OFF·실행자 drain 후 구버전을 배포하고 양수 원장·의도·커서 진행값·PG 키를 보존한다. seed/claimId/키를 초기화하지 않는다.
+#213 어드민 알림·operations-service 연동은 구현하지 않았다.
+
+수동 확인은 MANUAL_REVIEW 영속 상태와 고정 사유 `AUTO_CANCEL_MANUAL_REVIEW`로 남긴다.
+최초 전이 커밋 후 같은 고정 코드 로그와 태그 없는 `commerce.payment.auto-cancel.manual-review` counter를 기록한다.
+롤백·같은 완료의 재호출은 counter를 늘리지 않는다. 커밋 직후 프로세스 중단으로 로그/counter가 유실될 수 있으므로 정확한 누적 사건 원장으로 쓰지 않는다.
+gauge 질의는 read-only 트랜잭션 timeout 2초와 JPA query timeout 2000ms를 함께 적용한다. 풀 대기나 전체 scrape의 2초 벽시계 상한을 보장하지 않는다.
+`commerce.payment.auto-cancel.manual-review.pending` gauge는 DB의 MANUAL_REVIEW 건수를 다시 조회해 재기동 후에도 대상을 보여 준다.
+조회 실패는 0 대신 NaN이며 ID·PG 키·원문·cause를 metric 태그나 로그에 넣지 않는다. 이는 **#213 어드민 알림 전달이 아니다**.
+
+토스 계약 확인: [코어 API](https://docs.tosspayments.com/reference), [취소 안내](https://docs.tosspayments.com/guides/v2/cancel-payment).
+고정 사유 표식은 취소 귀속을 보수적으로 판단하기 위한 애플리케이션 규칙이다.
+
 ## 9. 해외 결제 (USD · PayPal)
 
 - 금액은 **USD 센트(minor unit) 정수**로 저장하고, PG 요청 시 adapter 가 소수 표현(`89.50`)으로 바꾼다.

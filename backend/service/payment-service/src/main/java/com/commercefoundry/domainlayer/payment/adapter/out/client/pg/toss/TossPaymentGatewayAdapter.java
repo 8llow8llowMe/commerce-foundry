@@ -2,11 +2,13 @@ package com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss;
 
 import com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.dto.TossConfirmRequest;
 import com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.dto.TossCancelRequest;
+import com.commercefoundry.domainlayer.payment.adapter.out.client.pg.toss.dto.TossAutomaticCancelRequest;
 import com.commercefoundry.domainlayer.payment.application.model.PgApprovalRequest;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.global.properties.TossPaymentsProperties;
@@ -25,6 +27,25 @@ public class TossPaymentGatewayAdapter implements PaymentGatewayPort {
     private final TossPaymentsClient tossPaymentsClient;
     private final TossPaymentsResponseSupport tossPaymentsResponseSupport;
     private final TossPaymentsProperties tossPaymentsProperties;
+
+    @Override
+    public PgCancellationQueryResult cancelAutomatic(
+        Payment payment, String pgKey, Money amount) {
+        if (pgKey == null || !pgKey.matches("[A-Za-z0-9_=-]{6,64}") || amount.currency() != payment.amount().currency()
+            || amount.isZero() || amount.isGreaterThan(payment.amount())) {
+            return PgCancellationQueryResult.of(PgCancellationQueryResult.State.MANUAL_REVIEW);
+        }
+        TossAutomaticCancelRequest body = new TossAutomaticCancelRequest("PAYMENT_AUTO_CANCEL:" + pgKey, amount.toMajorUnit(), pgKey, amount.currency().name());
+        return tossPaymentsResponseSupport.automaticPost(payment, amount, pgKey,
+            () -> tossPaymentsClient.cancelAutomatic(tossPaymentsProperties.basicAuthorization(), pgKey, payment.paymentKey(), body));
+    }
+
+    @Override
+    public PgCancellationQueryResult inquireCancellation(
+        Payment payment, Money amount, String pgKey, String transactionKey) {
+        return tossPaymentsResponseSupport.cancellationInquiry(payment, amount, pgKey, transactionKey,
+            () -> tossPaymentsClient.getPaymentByPaymentKey(tossPaymentsProperties.basicAuthorization(), payment.paymentKey()));
+    }
 
     @Override
     public PgCancelResult cancel(Payment payment, long claimId, Money cancelAmount, Money cumulativeCanceled) {

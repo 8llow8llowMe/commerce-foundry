@@ -22,6 +22,14 @@ class PaymentCancellationFacadeTest {
     private final PaymentCancellationFacade facade = new PaymentCancellationFacade(processor, gateway);
     private final Payment payment = PaymentFixtures.done();
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0, -1, -9000000001L})
+    void nonpositiveClaimWithMatchingHeaderRejectsBeforeDbAndPg(long claimId) {
+        assertThatThrownBy(() -> facade.cancel(payment.id(), claimId, 10000, krw(1).currency(), Long.toString(claimId)))
+            .isInstanceOf(PaymentException.class);
+        verifyNoInteractions(processor, gateway);
+    }
+
     @Test
     void successfulPgCancelRecordsResultAndResponds() {
         PaymentCancel pending = new PaymentCancel(42, payment.id(), krw(129_000), PaymentCancel.Status.PENDING);
