@@ -12,7 +12,8 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class DltAlertEventFacade implements DltAlertEventUseCase {
-    public static final List<String> TOPICS = List.of("operations.job-run.dlt", "order.order-expired.dlt", "order.order-canceled.dlt", "payment.payment-approved.dlt");
+    public static final List<String> TOPICS = List.of("operations.job-run.dlt", "order.order-expired.dlt", "order.order-canceled.dlt",
+        "payment.payment-approved.dlt", "order.order-paid.dlt", "order.order-payment-rejected.dlt");
     private final DltAlertProcessor processor;
     private final TopicNames topicNames;
 
@@ -23,7 +24,9 @@ public class DltAlertEventFacade implements DltAlertEventUseCase {
         }
         // DLT alert metadata only; see anomaly-notifications.md.
         var recipientIds = processor.recipients();
-        var severity = command.topic().equals(topicNames.qualified("payment.payment-approved.dlt"))
+        var severity = (command.topic().equals(topicNames.qualified("payment.payment-approved.dlt"))
+            || command.topic().equals(topicNames.qualified("order.order-paid.dlt"))
+            || command.topic().equals(topicNames.qualified("order.order-payment-rejected.dlt")))
             ? NotificationSeverity.CRITICAL : NotificationSeverity.WARNING;
         processor.record(command, recipientIds, severity);
     }

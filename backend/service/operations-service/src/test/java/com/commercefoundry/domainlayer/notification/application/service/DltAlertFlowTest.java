@@ -31,7 +31,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @ActiveProfiles("test")
 @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
 @EmbeddedKafka(partitions = 1, topics = {"dlt.test.operations.job-run", "dlt.test.operations.job-run.dlt", "dlt.test.order.order-expired.dlt",
-    "dlt.test.order.order-canceled.dlt", "dlt.test.payment.payment-approved.dlt"}, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
+    "dlt.test.order.order-canceled.dlt", "dlt.test.payment.payment-approved.dlt", "dlt.test.order.order-paid.dlt",
+    "dlt.test.order.order-payment-rejected.dlt"}, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 class DltAlertFlowTest {
     @MockitoBean
     NotificationRecipientPort recipients;
@@ -44,6 +45,8 @@ class DltAlertFlowTest {
     KafkaTemplate<String, String> kafka;
     @Autowired
     DltAlertProcessor processor;
+    @Autowired
+    DltAlertEventFacade facade;
     @Autowired
     NotificationRepository notifications;
     @Autowired
@@ -84,6 +87,33 @@ class DltAlertFlowTest {
         }
         assertThat(checkpoints.findAll()).singleElement().satisfies(c -> assertThat(c.getWatermark()).isGreaterThanOrEqualTo(1));
         assertThat(notifications.count()).isEqualTo(2);
+    }
+
+    @Test
+    void lostPaymentReplyDltCreatesCriticalPaymentAlerts(org.springframework.boot.test.system.CapturedOutput output) throws Exception {
+        for (String topic : List.of("dlt.test.order.order-paid.dlt", "dlt.test.order.order-payment-rejected.dlt")) {
+            kafka.send(topic, "SENTINEL_REPLY_KEY", "SENTINEL_REPLY_BODY").get(10, TimeUnit.SECONDS);
+            assertThat(received.poll(15, TimeUnit.SECONDS)).isNotNull();
+            assertThat(received.poll(15, TimeUnit.SECONDS)).isNotNull();
+        }
+        assertThat(notifications.findAll()).hasSize(4).allSatisfy(n -> {
+            assertThat(n.getSeverity()).isEqualTo(NotificationSeverity.CRITICAL);
+            assertThat(n.getLinkPath()).isEqualTo("/admin/payments");
+            assertThat(n.getTitle()).doesNotContain("SENTINEL_REPLY_KEY", "SENTINEL_REPLY_BODY");
+        });
+        assertThat(output.getAll()).doesNotContain("SENTINEL_REPLY_KEY", "SENTINEL_REPLY_BODY");
+    }
+
+    @Test
+    void similarOrOtherNamespaceReplyTopicsAreRejectedBeforeRecipientLookup() {
+        for (String topic : List.of("other.order.order-paid.dlt", "dlt.test.order.order-paid.dlt.extra",
+            "dlt.test.order.order-payment-rejected.dlt.backup")) {
+            assertThatThrownBy(() -> facade.receive(new DltAlertCommand(topic, 0, 0)))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        verifyNoInteractions(recipients);
+        assertThat(notifications.count()).isZero();
+        assertThat(states.count()).isZero();
     }
 
     @Test

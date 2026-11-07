@@ -82,7 +82,7 @@ public final class PaymentOrderSyncPlanSupport {
         plan.forEach(line -> System.out.println("C3a-2 PG plan " + line));
     }
 
-    private void fixture(int size, String scenario) {
+    void fixture(int size, String scenario) {
         jdbc.update("delete from payment.payment");
         String status;
         String synced;
@@ -102,6 +102,11 @@ public final class PaymentOrderSyncPlanSupport {
                 status = "case when g%100<20 then 'PARTIAL_CANCELED' when g%100<23 then 'CANCELED' else 'DONE' end";
                 synced = "g%100>=23 and g%100<33";
                 rejected = "g%100<20 or g%100>=33 and g%100<98";
+            }
+            case "reconcile-sparse-tail", "rejected-sparse-tail" -> {
+                status = "case when g%2=0 then 'PARTIAL_CANCELED' else 'DONE' end";
+                synced = "false";
+                rejected = scenario.equals("reconcile-sparse-tail") ? "g <= " + (size - 20) : "g > " + (size - 20);
             }
             default -> throw new IllegalArgumentException("Unknown synthetic scenario");
         }

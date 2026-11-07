@@ -88,6 +88,28 @@ class PaymentSchemaSnapshotTest {
     }
 
     @Test
+    @DisplayName("주문 회신 커서 운영 CREATE와 comment는 Hibernate 출력에서 추출한다")
+    void reconciliationOperationalDdlMatchesHibernateOutput() throws IOException {
+        String operational;
+        try (var input = getClass().getResourceAsStream("/ddl/payment-order-reconciliation.sql")) {
+            assertThat(input).isNotNull();
+            operational = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        var expected = cursorStatements(generateDdl());
+        assertThat(expected).isNotEmpty();
+        assertThat(cursorStatements(operational)).containsExactlyElementsOf(expected);
+    }
+
+    private static List<String> cursorStatements(String sql) {
+        return java.util.Arrays.stream(sql.replaceAll("(?m)^--.*$", "").split(";"))
+            .map(String::trim)
+            .filter(s -> (s.startsWith("create table") || s.startsWith("comment on") || s.startsWith("create index"))
+                && s.contains("payment.order_reconciliation_cursor"))
+            .map(s -> s.replaceAll("\\s+", " "))
+            .toList();
+    }
+
+    @Test
     @DisplayName("DB 연결 없이 운영과 같은 방언 버전(PostgreSQL 17)으로 DDL 을 만든다")
     void dialectVersionIsPinned() {
         StandardServiceRegistry registry = buildRegistry();

@@ -10,9 +10,9 @@ operations-service가 기존 DLT 메타데이터를 받아 활성 관리자에�
 | 전용 이상 징후 이벤트 | 향후 도메인이 확인한 이상·복구 증거 전달 | 생산자 계약·outbox·버전 관리 필요. A2 미구현 |
 | internal POST | 향후 동기 운영 신호 전달 | 서비스 인증·재시도·중복 방지·가용성 결합 검토 필요. A2 미구현 |
 
-`TopicNames`로 namespace를 붙인 `operations.job-run.dlt`, `order.order-expired.dlt`, `order.order-canceled.dlt`, `payment.payment-approved.dlt`만 명시적으로 구독한다. 패턴 구독·DLT 재발행은 없다. 리스너는 topic·partition·offset만 읽고 key·value·headers는 읽거나 남기지 않는다. 결제·주문·재고 상태를 바꾸지 않는다.
+`TopicNames`로 namespace를 붙인 `operations.job-run.dlt`, `order.order-expired.dlt`, `order.order-canceled.dlt`, `payment.payment-approved.dlt`, `order.order-paid.dlt`, `order.order-payment-rejected.dlt`만 명시적으로 구독한다. 패턴 구독·DLT 재발행은 없다. 리스너는 topic·partition·offset만 읽고 key·value·headers는 읽거나 남기지 않는다. 결제·주문·재고 상태를 바꾸지 않는다.
 
-결제 승인 DLT는 CRITICAL, 나머지는 WARNING이다. 제목은 담당자의 점검을 요청하는 고정 한국어 문구다. 개인정보·주문번호·예외 원문·Kafka 이름을 넣지 않는다. 결제는 기존 `/admin/payments`, 작업은 `/admin/jobs`로 연결하고 주문 이벤트 알림 링크는 null이다. 목록·읽음·모두 읽음·SSE 계약은 유지한다. `sourceType=DLT_ALERT`, `sourceId=수신자별 알림 Snowflake ID`로 기존 JOB 출처 유니크 제약을 보존한다. FE 신규 API·화면은 필요하지 않다.
+결제 승인과 주문 결제 회신 DLT는 CRITICAL, 나머지는 WARNING이다. 제목은 담당자의 점검을 요청하는 고정 한국어 문구다. 개인정보·주문번호·예외 원문·Kafka 이름을 넣지 않는다. 결제 관련 알림은 기존 `/admin/payments`, 작업은 `/admin/jobs`로 연결하고 그 밖의 주문 이벤트 알림 링크는 null이다. 목록·읽음·모두 읽음·SSE 계약은 유지한다. `sourceType=DLT_ALERT`, `sourceId=수신자별 알림 Snowflake ID`로 기존 JOB 출처 유니크 제약을 보존한다. FE 신규 API·화면은 필요하지 않다.
 
 ## 억제·중복·트랜잭션
 
@@ -45,7 +45,7 @@ SSE는 커밋 뒤 현재 인스턴스 연결로 최선 전달한다. 커밋 후 
 ## 배포·ACL·활성화
 
 1. `service/operations-service/src/test/resources/ddl/operations-schema.sql`에서 신규 두 테이블·감사 컬럼·버전 컬럼·토픽 PK·`(topic, partition_number)` 유니크 제약 DDL을 추출해 활성화 전에 적용한다. 운영 ddl-auto는 none이다. 전체 스냅숏을 기존 DB에 재실행하지 않는다.
-2. `docker/kafka/topics.txt`의 기존 네 DLT와 namespace를 확인한다. operations에는 해당 토픽 DESCRIBE·READ, `<namespace>.operations.dlt-alerts` 그룹 READ가 필요하다. DLT WRITE는 필요 없다. 기존 outbox·워커 ACL은 별개다. 활성화 시 토픽 조회 실패는 기동을 멈춘다.
+2. `docker/kafka/topics.txt`의 기존 네 DLT와 주문 결제 회신 DLT 두 개의 namespace를 확인한다. operations에는 여섯 토픽 DESCRIBE·READ, `<namespace>.operations.dlt-alerts` 그룹 READ가 필요하다. DLT WRITE는 필요 없다. 기존 outbox·워커 ACL은 별개다. 활성화 시 토픽 조회 실패는 기동을 멈춘다.
 3. auth A1 수신자 API 배포, operations-service internal 토큰 허용, 활성 관리자 존재, auth 서킷·시간 제한을 확인한다.
 4. 실제 배포 프로세스에 `MESSAGING_ENABLED=true`, 올바른 `KAFKA_NAMESPACE`, `DLT_ALERT_ENABLED=true`를 주입한다. 새 비밀 키는 없다. 억제 기간은 대응 주기에 맞춰 변경한다.
 5. 그룹 lag·고정 재시도 WARN·저장된 알림·SSE와 목록 복원을 확인한다. 새 그룹은 보존된 DLT를 처음부터 읽으며 토픽 단위 억제를 적용한다.

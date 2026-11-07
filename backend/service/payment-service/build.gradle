@@ -1,4 +1,7 @@
 dependencies {
+    // 주문 회신 복구는 메시징 게이트와 독립적으로 같은 payment.shedlock을 쓴다.
+    implementation "net.javacrumbs.shedlock:shedlock-core:${rootProject.ext.shedlockVersion}"
+    implementation "net.javacrumbs.shedlock:shedlock-provider-jdbc:${rootProject.ext.shedlockVersion}"
     implementation project(':core:common-core')
     // 결제 승인 이벤트(payment-approved) outbox 발행 (#308, payment-guide.md §6)
     implementation project(':core:messaging-core')

@@ -7,6 +7,8 @@ import jakarta.persistence.QueryHint;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Optional;
+import java.util.List;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -15,6 +17,19 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 public interface PaymentRepository extends JpaRepository<PaymentEntity, Long> {
+
+    @Query("select coalesce(max(p.id), 0) from PaymentEntity p")
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    long findReconciliationUpperId();
+
+    @Query("select p.id" + AWAITING_ORDER_REPLY + " and p.id > :afterId and p.id <= :upperId order by p.id")
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    List<Long> findReconciliationIds(Collection<PaymentStatus> statuses, Instant approvedBefore, long afterId, long upperId, Pageable page);
+
+    @Query("select p.id from PaymentEntity p where p.status in :statuses and p.orderSynced = false"
+        + " and p.orderSyncFailureCode is not null and p.id > :afterId and p.id <= :upperId order by p.id")
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    List<Long> findRejectedReconciliationIds(Collection<PaymentStatus> statuses, long afterId, long upperId, Pageable page);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from PaymentEntity p where p.id = :id")

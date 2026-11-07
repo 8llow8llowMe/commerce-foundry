@@ -369,6 +369,7 @@ public final class ProductValidationMessage {
 - 루프·스트림 안에서 `Port.` / `Repository.` / `Client.` 단건 호출을 하지 않는다.
 - DB 반복 → `in` 절 벌크 조회. 원격(Feign) 반복 → 대상 서비스에 **벌크 내부 엔드포인트**를 연다
   (예: 장바구니 상품 20개 가격 조회 → `GET /internal/v1/skus?ids=...` 한 번).
+- #591 주문 회신 재대조는 제한된 백그라운드 복구의 예외다. ID 후보를 기본 10개(설정 상한 100개)씩 예약하고 기존 7필드 원천 API를 건별 호출한다. 각 payment/inbox 기록은 별도 짧은 트랜잭션에서 현재 값을 다시 검증해야 하며 한 건의 원천·DB 실패가 나머지 후보를 막지 않는다. 페이지·실행 주기·원격 timeout·영속 순회 커서를 명시하고 측정한다. 이 예외를 고객 요청의 반복 원격 조회나 무제한 스캔에 적용하지 않는다.
 - 서비스 `application.yml` 은 `spring.jpa.properties.hibernate.query.in_clause_parameter_padding: true` 를 둔다. IN 절 파라미터 수를 2의 거듭제곱으로
   채워(3개 → 4개, 5개 → 8개) 개수마다 다른 SQL 이 생기지 않게 한다 — 그대로면 쿼리 계획 캐시와 PreparedStatement 캐시가 개수만큼 늘어난다 (#8 DB 검토).
 - 한 요청에서 행을 수십~수백 개 INSERT 하는 서비스는 `spring.jpa.properties.hibernate.jdbc.batch_size: 50` · `order_inserts: true` · `order_updates: true` 를 둔다.

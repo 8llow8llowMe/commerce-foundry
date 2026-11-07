@@ -440,11 +440,11 @@ C3b의 `OrderPaymentReplyEventUseCase`가 원천과 로컬 결제의 승인 시�
 
   | `order_synced` | `order_sync_failure_code` | 뜻 | 처리 |
   |----------------|---------------------------|----|------|
-  | false | null | 아직 회신을 받지 않았다 | 없음 — 전달은 릴레이 · 컨슈머 재시도가 보장한다. 오래 남으면 outbox · DLT 지표로 본다 |
+  | false | null | 아직 회신을 받지 않았다 | 릴레이·컨슈머 재시도 뒤 유실/DLT는 §6-3 재대조 또는 수동 처리 |
   | true | null | `order-paid` 를 받았다(주문 PAID 확정) | 없음 |
   | false | 코드 | `order-payment-rejected(reason)` 를 받았다 — 다시 보내도 바뀌지 않는다 | ERROR 로그 · 지표 + **자동 전액 취소 · 어드민 확인** 대상 |
   | true | 코드 | 금지(check) — 반영 성공 뒤 늦게 온 거절은 무시한다 | — |
-- **전액 취소** — C3b의 최초 유효 거절·잔액 존재 시 커밋 후 비PG `PaymentCancelPolicy` 훅을 최대 1회 시도한다. 실제 PG 취소는 #579, 유실 복구는 #591 후속이다.
+- **전액 취소** — C3b의 최초 유효 거절·잔액 존재 시 커밋 후 비PG `PaymentCancelPolicy` 훅을 최대 1회 시도한다. DB 거절 재시도는 §6-3, 실제 PG 취소는 #579다.
 
 #### C3b 기록·빠른 훅 경계
 
@@ -471,7 +471,7 @@ tx 밖 호출은 실패한다. 중복 INSERT나 후속 업무 실패는 같은 t
 listener OFF는 cleanup OFF가 아니다. **cleanup OFF라도 배포 전 `ddl/payment-processed-event.sql` 적용이 필수**다(`deploy-guide.md` C3a-1 절).
 기본 inbox 보존 7d 이후의 재전달은 inbox가 막지 못한다. C3c 소비 활성화 전에 토픽·DLT 보존/재시도/수동 재처리 창과 후속 도메인 멱등성을 함께 확인한다.
 C3a-2 지표와 기존 #616 A4a 관측 API는 별도 범위이며 #550은 approval-summary다. 기존 관측 API의 의미는 유지한다.
-실제 회신 소비·PG 취소 #579·재대조 #591 및 소비/결제 게이트 활성화는 후속 범위다.
+실제 회신 소비·PG 취소 #579 및 소비/결제 게이트 활성화는 후속 범위다. 재대조 구현은 §6-3을 따른다.
 
 ### 6-2. 주문 회신 지연 관측 (#308 C3a-2)
 
@@ -491,6 +491,56 @@ strict `<`이므로 동등·미래 승인 행은 pending에서 제외한다. 정
 PostgreSQL 시험은 ACCESS EXCLUSIVE 잠금으로 실제 취소·rollback·같은 풀 연결 회복을 확인하고, PG17 합성 10k/100k의 정상·미회신/거절 backlog에서
 ANALYZE 후 실제 Hibernate 생성 SQL·동일 바인딩의 EXPLAIN(ANALYZE,BUFFERS)을 first/repeat로 기록한다. 운영 분포 효율이나 cold cache를 보장하지 않으며 생산 인덱스를 추가하지 않는다.
 이 절은 구현 계약이며 실제 시험 실행·로컬 Docker skip·CI PG 실행 결과는 PR 검증 근거로 구분한다.
+
+### 6-3. 회신 재대조와 DB 거절 재시도 (#591 payment 범위)
+
+`payment.order-result.reconciliation.enabled`는 기본 **false**다. 메시징/listener/운영 결제 게이트와 독립이며 이번 변경으로 어느 게이트도 열지 않는다.
+DLT 또는 회신 유실 뒤 기존 `OrderPaymentResultQueryPort` 원천으로 결과를 재대조한다. 원천에 결과가 없거나 실패하면 다음 cycle에서 재시도하며 운영자가 수동으로 원인을 확인할 수 있다.
+
+| lane | DB 후보 |
+|---|---|
+| RECONCILE | DONE/PARTIAL_CANCELED + order_synced=false + 거절 코드 없음 + approved_at < cycle 시작 시각 - 기존 pending-after(기본 5m) |
+| REJECTED | DONE/PARTIAL_CANCELED + order_synced=false + 거절 코드 있음. 시간 cutoff 없음 |
+
+두 lane은 `payment.order_reconciliation_cursor`의 별도 행으로 순회한다. cycle 시작에 전체 결제의 최대 ID와 승인 cutoff를 고정하고
+`last_id < id <= cycle_upper_id`를 ID 오름차순·limit으로 읽는다. 신규/나중에 자격을 얻은 행은 다음 cycle에서 방문한다.
+후보가 없으면 cursor를 0으로 되돌리고 해당 tick의 lane을 끝낸다. 마지막 페이지 뒤 빈 조회가 cycle을 닫으므로 작은 backlog는 빈 tick이 하나 생길 수 있다.
+실패한 앞부분/계속 유입되는 큰 ID/재시작이 뒤 후보를 계속 굶기지 않도록 **배치 예약 cursor를 먼저 별도 TX로 커밋**한다.
+예약 커밋 뒤 작업 중 중단되면 그 배치는 다음 cycle에서 재방문한다. 프로세스가 살아 있고 DB 예약이 성공하는 동안 유한한 cycle을 순회하며, 처리 완료 큐나 exactly-once 실행을 뜻하지 않는다.
+
+기본 initial-delay/fixed-delay는 각 1m, page-size=10(1~100), max-pages-per-lane=1(1~10), lock-at-most-for=10m이다.
+lane별 예산과 실패 처리는 독립이다. 건별 작업에서 기존 단건 원천 API를 재사용하며 새 벌크 API를 추가하지 않는다.
+기존 connect/read timeout·서킷과 record TX timeout을 유지한다. 배치 한도는 작업 수의 상한이며 전체 tick의 벽시계 시간 상한은 아니다.
+
+ShedLock 이름은 `payment-order-reconciliation`, 테이블은 서비스 운영 계약상 **payment.shedlock**으로 고정한다.
+`commerce.messaging.outbox.relay.lock-table`도 같은 값이어야 하며 스위퍼 ON에서 다른 값이면 기동을 거절한다.
+core 릴레이/cleanup의 락 이름과 다르고 LockProvider 빈을 새로 노출하지 않아 core의 provider 선택을 바꾸지 않는다.
+실행이 lock-at-most-for를 넘으면 동시 실행 가능성이 있으므로 호출 timeout·페이지 예산에 맞춰 lease를 설정한다. 예약 행 잠금과 payment @Version/inbox unique는 겹친 실행에도 최종 기록을 보호한다.
+
+원천 조회는 한 후보당 한 번, TX 밖에서 수행한다. `payment-order-reconcile:v1:<paymentId>`의 UTF-8 바이트로 만든 name UUID를
+기존 `order-payment-result` inbox 그룹에 기록한다. 같은 C3b record를 사용해 원천/로컬 주문·회원·원승인 금액/통화/마이크로초 시각·승인 기원을 재검증하고
+payment/inbox를 같은 TX로 커밋한다. 실제 이벤트와의 경합은 @Version/unique로 롤백하고 후속 진입에서 판정한다. 성공 단조성과 같은 결과 no-op을 유지한다.
+
+REJECTED lane은 inbox/빠른 훅 성공 이력을 보지 않고 `PaymentCancelPolicy.onRejected(paymentId)`를 TX 밖에서 반복 호출한다.
+기본 정책은 계속 no-op이며 **이번 범위에는 PG 호출이 없다**. 같은 tick의 빠른 훅과 DB lane이 중복 호출할 수 있다.
+원천 거절은 재고 복원 진행 중에도 존재할 수 있다. 거절 기록/정책 전달만 수행하고 복원 완료·실행 권한을 추정하지 않는다.
+#579는 실제 실행 직전 상태·잔액·멱등성을 재검증해야 하며, 이번 변경은 재고 복원 API나 그 완료 신호를 추가하지 않는다.
+
+`commerce.payment.order-sync.reconciled{result}` counter는 재대조가 **커밋 후 changed=true**인 경우만 증가한다.
+result는 PAID/여섯 REJECTED의 고정 enum이며 ID·원문·cause를 로그/태그에 넣지 않는다. 중복/no-op/롤백/정책 재시도는 세지 않는다.
+커밋 직후 프로세스 종료로 counter 증가를 놓칠 수 있어 회계 원장이 아니다. 기존 `pending.oldest.age`와 core의 실제 DLT counter를 재사용하고,
+재대조 실패를 DLT 발행 횟수에 합산하지 않는다. operations의 기본 OFF DLT 관리자 알림은 `order-paid`·`order-payment-rejected` DLT 두 토픽도 CRITICAL로 구독한다. 토픽 생성·ACL을 확인한 뒤 별도 활성화하며, 알림은 복구 완료 증거가 아니다.
+
+운영 DDL은 `service/payment-service/src/test/resources/ddl/payment-order-reconciliation.sql`이다. 새 cursor 테이블의 CREATE·comment·check는
+Hibernate 7.2.24/PostgreSQL 17 출력에서 추출했고 lane PK가 두 행 조회 인덱스를 겸한다. 추가 중복 인덱스/기존 payment 인덱스 변경은 없다.
+구 DB에 **스케줄러 OFF → DDL 전체 트랜잭션 적용(두 lane seed 포함) → validate/배포 → 운영 선행 조건 확인 후 별도 활성화** 순서다.
+기존 테이블 변경이 없어 ALTER는 없다. 새 DB 전체 스냅숏은 별도로 적용한 뒤 운영 스크립트의 seed INSERT만 적용한다.
+Hibernate create/update는 seed를 만들지 않는다. 스위퍼 ON의 schema guard는 cursor 칼럼·두 seed·inbox·shedlock을 확인하고 누락이면 원문 없이 기동 실패한다.
+DDL 중간 실패는 rollback하고 catalog/기존 행을 확인한 뒤 재적용한다. 성공 뒤 스크립트를 다시 실행하거나 진행 cursor를 초기화하지 않는다.
+배포 rollback은 스위퍼 OFF와 구 버전 재배포로 수행하고 추가 테이블/진행값을 보존한다.
+
+H2/PG 계약·동시 lock/실제 이벤트 경합·구 스키마→추가 DDL→validate 시험을 추가했다. 이 slice의 Gradle 실행은 공유 build.lock을 소유한 main이 수행한다.
+현재 컴파일/시험 성공을 주장하지 않으며, adapter 재생성 시험은 실제 JVM 종료·재기동 시험을 대신하지 않는다. FE/HTTP 계약 영향은 없다.
 
 ## 7. 웹훅
 
