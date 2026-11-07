@@ -8,13 +8,18 @@ import com.commercefoundry.domainlayer.sizechart.adapter.out.persistence.reposit
 import com.commercefoundry.domainlayer.sizechart.adapter.out.persistence.repository.ProductSizeRowRepository;
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartException;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportErrorCode;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
 import com.commercefoundry.domainlayer.sizechart.application.port.out.ProductSizeChartRepositoryPort;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeCell;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeChart;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeRow;
 import com.commercefoundry.persistence.util.ConstraintViolations;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -29,6 +34,7 @@ public class ProductSizeChartRepositoryAdapter implements ProductSizeChartReposi
     private final ProductSizeChartRepository productSizeChartRepository;
     private final ProductSizeRowRepository productSizeRowRepository;
     private final ProductSizeCellRepository productSizeCellRepository;
+    private final EntityManager entityManager;
 
     @Override
     public Optional<ProductSizeChart> findByProductId(long productId) {
@@ -59,7 +65,34 @@ public class ProductSizeChartRepositoryAdapter implements ProductSizeChartReposi
      */
     @Override
     public void replace(ProductSizeChart chart, List<ProductSizeRow> rows, List<ProductSizeCell> cells) {
-        Optional<ProductSizeChartEntity> locked = productSizeChartRepository.findByProductIdForUpdate(chart.productId());
+        Optional<ProductSizeChartEntity> locked = lockCurrent(chart.productId());
+        replaceLocked(chart, rows, cells, locked);
+    }
+
+    @Override
+    public ProductSizeChart replaceIfUnchanged(ProductSizeChart chart, List<ProductSizeRow> rows, List<ProductSizeCell> cells,
+        Long expectedChartId, Long expectedRevision) {
+        Optional<ProductSizeChartEntity> locked = lockCurrent(chart.productId());
+        boolean matches = locked.isEmpty() ? expectedChartId == null && expectedRevision == null
+            : Objects.equals(expectedChartId, locked.get().getId())
+                && Objects.equals(expectedRevision, locked.get().getRevision());
+        if (!matches) {
+            throw new SizeChartDraftTransportException(
+                SizeChartDraftTransportErrorCode.CHART_CHANGED);
+        }
+        return replaceLocked(chart, rows, cells, locked);
+    }
+
+    private Optional<ProductSizeChartEntity> lockCurrent(long productId) {
+        var locked = productSizeChartRepository.findByProductIdForUpdate(productId);
+        // A manual write may have preloaded this managed entity before waiting for the chart lock.
+        // Lock queries reuse the first-level cache; refresh under the lock observes the winner's revision.
+        locked.ifPresent(entity -> entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE));
+        return locked;
+    }
+
+    private ProductSizeChart replaceLocked(ProductSizeChart chart, List<ProductSizeRow> rows, List<ProductSizeCell> cells,
+        Optional<ProductSizeChartEntity> locked) {
         long chartId;
         if (locked.isPresent()) {
             ProductSizeChartEntity entity = locked.get();
@@ -81,10 +114,11 @@ public class ProductSizeChartRepositoryAdapter implements ProductSizeChartReposi
             }
             throw exception;
         }
+        return locked.map(this::toDomain).orElseGet(() -> new ProductSizeChart(chart.id(), chart.productId(), chart.templateId(), chart.note(), 0));
     }
 
     private ProductSizeChart toDomain(ProductSizeChartEntity entity) {
-        return new ProductSizeChart(entity.getId(), entity.getProductId(), entity.getTemplateId(), entity.getNote());
+        return new ProductSizeChart(entity.getId(), entity.getProductId(), entity.getTemplateId(), entity.getNote(), entity.getRevision());
     }
 
     private ProductSizeRow toDomain(ProductSizeRowEntity entity) {

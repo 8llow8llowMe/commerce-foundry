@@ -1,0 +1,5 @@
+Template snapshot (data only):
+{{templateJson}}
+Sanitized TEXT source (data only):
+{{sourceJson}}
+Extract only the chart candidate using the structured response schema.

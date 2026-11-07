@@ -809,6 +809,34 @@
     comment on column operations.shedlock.locked_by is
         '락을 잡은 인스턴스 (호스트 이름)';
 
+    create table operations.size_chart_generation_receipt (
+        draft_id bigint not null,
+        expires_at timestamp(6) with time zone not null,
+        input_hash varchar(64) not null,
+        job_id bigint not null,
+        requested_by_member_id bigint not null,
+        primary key (draft_id),
+        constraint uk_size_chart_generation_receipt_job_id unique (job_id)
+    );
+
+    comment on table operations.size_chart_generation_receipt is
+        '사이즈표 생성 등록 영수증';
+
+    comment on column operations.size_chart_generation_receipt.draft_id is
+        '초안 식별자 (FK: product.size_chart_draft.id)';
+
+    comment on column operations.size_chart_generation_receipt.expires_at is
+        '초안 만료 시각';
+
+    comment on column operations.size_chart_generation_receipt.input_hash is
+        '정규화한 입력 SHA-256';
+
+    comment on column operations.size_chart_generation_receipt.job_id is
+        '작업 식별자 (FK: operations.job.id)';
+
+    comment on column operations.size_chart_generation_receipt.requested_by_member_id is
+        '요청자 식별자 (FK: auth.member.id)';
+
     create table operations.store_footer (
         id bigint not null,
         latest_revision integer not null,

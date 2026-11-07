@@ -27,16 +27,19 @@ public interface SizeChartTemplateRepositoryPort {
     /** 노출 순서 → 아이디 오름차순. */
     List<SizeChartTemplateColumn> findColumns(long templateId);
 
+    /** 업무 리비전 0으로 생성한다. 입력 리비전은 쓰지 않는다. */
     void insert(SizeChartTemplate template, List<SizeChartTemplateColumn> columns);
 
     /**
      * 쓰는 중인 템플릿. 항목 아이디는 유지하고 이름 · 설명 · 순서만 바꾼다. 이름 유니크를 맞바꾸려면 임시 이름으로 한 번 밀고 다시 쓴다.
+     * 항목만 바뀌거나 같은 내용이어도 저장된 업무 리비전을 1 올린다. 입력 리비전은 쓰지 않는다.
      * 호출 전에 {@link #lockById} 로 같은 트랜잭션에서 잠가 둔다.
      */
     void updateColumns(SizeChartTemplate template, List<SizeChartTemplateColumn> columns);
 
     /**
      * 아무도 안 쓰는 템플릿. 항목을 지우고 새 아이디로 다시 넣는다.
+     * 항목만 바뀌거나 같은 내용이어도 저장된 업무 리비전을 1 올린다. 입력 리비전은 쓰지 않는다.
      * 호출 전에 {@link #lockById} 로 같은 트랜잭션에서 잠가 두고, 항목 엔티티를 읽어 두지 않는다.
      */
     void replaceColumns(SizeChartTemplate template, List<SizeChartTemplateColumn> columns);

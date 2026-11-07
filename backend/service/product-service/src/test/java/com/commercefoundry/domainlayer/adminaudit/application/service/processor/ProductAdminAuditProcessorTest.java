@@ -111,4 +111,24 @@ class ProductAdminAuditProcessorTest {
     private List<String> lines() {
         return audit.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
     }
+
+    @Test
+    @DisplayName("초안 감사는 생성 상품과 검토 초안 아이디 및 성공 여부만 기록한다")
+    void sizeChartDraftActionsHaveSuccessAndFailureRecords() {
+        processor.sizeChartDraftCreated(ACTOR, 700, true);
+        processor.sizeChartDraftCreated(ACTOR, 700, false);
+        processor.sizeChartDraftRefreshed(ACTOR, 9, true);
+        processor.sizeChartDraftRefreshed(ACTOR, 9, false);
+        processor.sizeChartDraftApplied(ACTOR, 9, true);
+        processor.sizeChartDraftApplied(ACTOR, 9, false);
+
+        assertThat(lines()).containsExactly(
+            "action=SIZE_CHART_DRAFT_CREATE actorMemberId=" + ACTOR + " target=product:700 result=SUCCESS",
+            "action=SIZE_CHART_DRAFT_CREATE actorMemberId=" + ACTOR + " target=product:700 result=FAILURE",
+            "action=SIZE_CHART_DRAFT_REFRESH actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=SUCCESS",
+            "action=SIZE_CHART_DRAFT_REFRESH actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=FAILURE",
+            "action=SIZE_CHART_DRAFT_APPLY actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=SUCCESS",
+            "action=SIZE_CHART_DRAFT_APPLY actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=FAILURE"
+        );
+    }
 }

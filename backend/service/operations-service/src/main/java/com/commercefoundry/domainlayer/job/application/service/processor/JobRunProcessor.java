@@ -14,6 +14,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,7 +66,7 @@ public class JobRunProcessor {
     /**
      * 성공으로 끝낸다. 결과 JSON 이 상한({@code operations.jobs.result.max-json-bytes})을 넘으면 다시 시도해도 같아 FAILED({@link Job#RESULT_TOO_LARGE})다.
      *
-     * @return 기록했으면 true, 이미 이 워커의 시도가 아니어서 결과를 버렸으면 false
+     * @return 기록했으면 true, 이미 이 워커의 시도가 아니거나 lease 가 만료돼 결과를 버렸으면 false
      * @throws JobException {@code JOB_CONFLICT} — 읽은 뒤 취소 요청 등이 버전을 올렸다. 다시 부르면 새로 읽는다
      */
     @Transactional
@@ -74,9 +75,10 @@ public class JobRunProcessor {
         if (resultJson != null && Job.payloadBytes(resultJson) > maxJsonBytes) {
             return finish(jobId, workerId, attempt, "succeed", job -> job.fail(
                 Job.RESULT_TOO_LARGE, "결과 JSON 이 " + maxJsonBytes + " 바이트를 넘습니다.", false, clock.instant(), jobProperties.retry().toPolicy()
-            ));
+            ), job -> JobResultFileProcessor.owns(job, workerId, attempt, clock.instant()));
         }
-        return finish(jobId, workerId, attempt, "succeed", job -> job.succeed(resultJson, clock.instant()));
+        return finish(jobId, workerId, attempt, "succeed", job -> job.succeed(resultJson, clock.instant()),
+            job -> JobResultFileProcessor.owns(job, workerId, attempt, clock.instant()));
     }
 
     /** JSON 검증·유효 lease 확인·성공·첨부·종료 이벤트를 같은 트랜잭션으로 확정한다. */
@@ -159,8 +161,12 @@ public class JobRunProcessor {
     }
 
     private boolean finish(long jobId, String workerId, int attempt, String action, UnaryOperator<Job> transition) {
+        return finish(jobId, workerId, attempt, action, transition, job -> job.isOwnedBy(workerId, attempt));
+    }
+
+    private boolean finish(long jobId, String workerId, int attempt, String action, UnaryOperator<Job> transition, Predicate<Job> owns) {
         Optional<Job> found = jobRepositoryPort.findById(jobId);
-        if (found.isEmpty() || !found.get().isOwnedBy(workerId, attempt)) {
+        if (found.isEmpty() || !owns.test(found.get())) {
             log.warn("job result discarded, no longer owned by this attempt. jobId={}, attempt={}, action={}, currentStatus={}, currentAttempt={}",
                 jobId, attempt, action, found.map(Job::status).orElse(null), found.map(Job::attempt).orElse(null));
             return false;

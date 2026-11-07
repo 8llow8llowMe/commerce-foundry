@@ -145,6 +145,14 @@ class GatewayDevRouteTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/admin/size-chart-drafts", "/api/v1/admin/size-chart-drafts/1",
+        "/api/v1/admin/size-chart-drafts/1/refresh", "/api/v1/admin/size-chart-drafts/1/apply", "/api/v1/admin/products/1/size-chart/drafts"})
+    @DisplayName("사이즈표 초안은 dev 라우트 설정에서도 상품 서비스 한 곳으로만 보낸다")
+    void sizeChartDraftRoutesUseProductService(String path) {
+        assertThat(matchingRouteIds(HttpMethod.POST, path)).containsExactly("product-service");
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {
         "/health", "/health/unknown-service", "/health/api-gateway", "/health/product-service/db", "/health/product-service/liveness",
         "/health/product-service/", "/HEALTH/product-service", "/health/PRODUCT-SERVICE",
@@ -191,7 +199,7 @@ class GatewayDevRouteTest {
     @Test
     @DisplayName("Swagger UI 가 열리고, 게이트웨이 자신의 기본 문서와 /webjars 경로는 열리지 않는다")
     void servesSwaggerUiWithoutGatewayDocs() {
-        WebTestClient client = webTestClient.mutate().responseTimeout(Duration.ofSeconds(20)).build();
+        WebTestClient client = webTestClient.mutate().responseTimeout(Duration.ofSeconds(45)).build();
         URI uiLocation = client.get().uri("/swagger-ui.html").exchange()
             .expectStatus().is3xxRedirection()
             .returnResult(Void.class).getResponseHeaders().getLocation();

@@ -176,3 +176,12 @@ logging:
     org.apache.kafka.clients.producer.ProducerConfig: WARN
     org.apache.kafka.clients.consumer.ConsumerConfig: WARN
     org.apache.kafka.clients.admin.AdminClientConfig: WARN
+
+# AI size chart content lifetime; validated between 1h and 30d.
+size-chart:
+  draft:
+    content-ttl: 7d
+    cleanup-batch-size: 100
+    cleanup-max-batches-per-run: 10
+    cleanup-fixed-delay: 1h
+    cleanup-initial-delay: 1m
