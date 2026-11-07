@@ -26,8 +26,17 @@ WORKTREES = shared.WORKTREES
 STATE = REPO.parent / ".commerce-foundry-be-queue"
 THREAD_RE = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$", re.I)
 BRANCH_RE = re.compile(r"^(?:feature|fix|chore|refactor|docs|test|style)/be/(\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)$")
+ISSUE_BRANCH_RE = re.compile(
+    r"^(?:feature|fix|chore|refactor|docs|test|style|wip)/(?:be/|fe/|infra/|common/)?(\d+)-[a-z0-9]+(?:-[a-z0-9]+)*$")
 ISSUE_LINK_RE = re.compile(r"(?:Issue Number:|Refs|Closes)\s*#(\d+)", re.I)
 SLOTS = {"S1", "S2", "S3", "S4", "S5", "S6"}
+AUTO_SLOTS = ("S1", "S2", "S3", "S4", "S5")
+DEPENDENCY_LINE_RE = re.compile(
+    r"(?:선행(?:\s+(?:이슈|조건|작업))?|blocked by|depends on)", re.I)
+ISSUE_REF_RE = re.compile(r"#(\d+)")
+FOLLOWUP_TITLE_RE = re.compile(r"#(\d+)\s*후속")
+EXTERNAL_PENDING_RE = re.compile(r"Vault|Jenkins|Infra|실측|실값|서버 주소|환경 설정|운영 적용", re.I)
+UNCHECKED_RE = re.compile(r"^(\s*)[-*]\s+\[ \]\s+(.+)$")
 
 
 def state_file() -> Path:
@@ -246,21 +255,25 @@ def assign_new(slot: str, number: int, slug: str) -> None:
     path = branch_worktree(branch)
     if path.exists() or branch in shared.worktree_map():
         raise ValueError("이슈 워크트리·브랜치가 이미 있습니다")
-    occupied = [name for name in shared.worktree_map() if (m := BRANCH_RE.fullmatch(name))
+    occupied = [name for name in shared.worktree_map() if (m := ISSUE_BRANCH_RE.fullmatch(name))
                 and int(m.group(1)) == number]
+    occupied += [name for name in run("git", "branch", "--format=%(refname:short)").splitlines()
+                 if (m := ISSUE_BRANCH_RE.fullmatch(name)) and int(m.group(1)) == number]
     occupied += [pr["headRefName"] for pr in shared.pr_list("open")
-                 if (m := BRANCH_RE.fullmatch(pr["headRefName"])) and int(m.group(1)) == number]
+                 if (m := ISSUE_BRANCH_RE.fullmatch(pr["headRefName"])) and int(m.group(1)) == number]
     if occupied:
         raise ValueError(f"같은 이슈의 기존 작업이 있습니다: {occupied[0]}")
     run("git", "fetch", "origin")
     remote_branches = run("git", "branch", "-r", "--format=%(refname:short)").splitlines()
-    if any((m := BRANCH_RE.fullmatch(ref.removeprefix("origin/")))
+    if any((m := ISSUE_BRANCH_RE.fullmatch(ref.removeprefix("origin/")))
            and int(m.group(1)) == number for ref in remote_branches):
         raise ValueError("같은 이슈의 원격 작업 브랜치가 이미 있습니다")
     run("git", "worktree", "add", "--no-track", "-b", branch, str(path), "origin/develop")
-    response = queue_message(worker["thread"], path, worker_prompt(number, info["title"], branch, None))
     worker["job"] = {"issue": number, "branch": branch, "worktree": str(path),
-                     "handoff": None, "reconciled": False}
+                     "handoff": None, "reconciled": False, "dispatch_pending": True}
+    write_state(data)  # reserve before delivery; an uncertain queue result must never free the slot
+    response = queue_message(worker["thread"], path, worker_prompt(number, info["title"], branch, None))
+    worker["job"]["dispatch_pending"] = False
     write_state(data)
     print(f"{slot} → #{number} {branch}: {response or '메시지 큐에 등록'}")
 
@@ -291,6 +304,175 @@ def dispatch_queue() -> None:
     fresh = read_state()
     fresh["queue"] = remaining
     write_state(fresh)
+
+
+def occupied_issues(branches: set[str], prs: list[dict]) -> set[int]:
+    """Include inactive worktrees and PRs that may not have a local branch."""
+    numbers = {int(match.group(1)) for branch in branches
+               if (match := ISSUE_BRANCH_RE.fullmatch(branch.removeprefix("origin/")))}
+    for pr in prs:
+        match = ISSUE_BRANCH_RE.fullmatch(pr["headRefName"])
+        if match:
+            numbers.add(int(match.group(1)))
+        numbers.update(int(ref) for ref in ISSUE_LINK_RE.findall(pr.get("body") or ""))
+    return numbers
+
+
+def pending_items(body: str) -> list[str]:
+    """Read nested unchecked boxes and their indented continuation lines."""
+    lines = body.splitlines()
+    items = []
+    for index, line in enumerate(lines):
+        match = UNCHECKED_RE.match(line)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        parts = [match.group(2)]
+        for next_line in lines[index + 1:]:
+            if not next_line.strip():
+                continue
+            next_indent = len(next_line) - len(next_line.lstrip())
+            if next_indent <= indent or re.match(r"^\s*[-*]\s+\[[ xX]\]", next_line):
+                break
+            parts.append(next_line.strip())
+        items.append(" ".join(parts))
+    return items
+
+
+def predecessor_references(info: dict) -> set[int] | None:
+    """Return None when a declared predecessor cannot be resolved to an issue number."""
+    references = {int(ref) for ref in FOLLOWUP_TITLE_RE.findall(info.get("title") or "")}
+    lines = (info.get("body") or "").splitlines()
+    for index, line in enumerate(lines):
+        if not DEPENDENCY_LINE_RE.search(line):
+            continue
+        header = bool(re.match(r"^\s*#{1,6}\s", line))
+        indent = len(line) - len(line.lstrip())
+        block = [line]
+        for next_line in lines[index + 1:]:
+            if not next_line.strip():
+                continue
+            if re.match(r"^\s*#{1,6}\s", next_line):
+                break
+            next_indent = len(next_line) - len(next_line.lstrip())
+            if header and not re.match(r"^\s*[-*]\s+", next_line):
+                break
+            if not header and next_indent <= indent:
+                break
+            block.append(next_line)
+        found = set()
+        for offset, part in enumerate(block):
+            if "http://" in part or "https://" in part:
+                return None  # cross-repository issue numbers cannot be verified locally
+            part_refs = {int(ref) for ref in ISSUE_REF_RE.findall(part)}
+            if not part_refs and offset > 0:
+                return None
+            found.update(part_refs)
+        if not found:
+            return None
+        references.update(found)
+    return references
+
+
+def predecessors_closed(info: dict, states: dict[int, str]) -> bool:
+    """Treat an incomplete GitHub relation or an unreadable predecessor as blocked."""
+    relation = info.get("blockedBy") or {}
+    nodes = relation.get("nodes") or []
+    if relation.get("totalCount", len(nodes)) > len(nodes):
+        return False
+    references = predecessor_references(info)
+    if references is None:
+        return False
+    for node in nodes:
+        if (not isinstance(node, dict) or not isinstance(node.get("number"), int)
+                or node.get("state") != "CLOSED"):
+            return False
+        if node["number"] == info["number"]:
+            return False
+    for number in references:
+        if number == info["number"]:
+            return False
+        if number not in states:
+            states[number] = shared.gh_json("issue", "view", str(number), "--json", "state")["state"]
+        if states[number] != "CLOSED":
+            return False
+    return True
+
+
+def auto_slug(info: dict) -> str:
+    service = sorted(services(info))[0].removeprefix("backend-").removesuffix("-service")
+    return f"{service}-task"
+
+
+def observed_issues() -> set[int]:
+    run("git", "fetch", "--prune", "origin")
+    prs = shared.pr_list("open")
+    branches = set(run("git", "branch", "--format=%(refname:short)").splitlines())
+    branches.update(run("git", "branch", "-r", "--format=%(refname:short)").splitlines())
+    return occupied_issues(branches, prs)
+
+
+def occupied_services(numbers: set[int], issues: dict[int, dict]) -> set[str]:
+    active = set()
+    for number in numbers:
+        info = issues.get(number)
+        if info is None:
+            info = shared.gh_json("issue", "view", str(number), "--json", "title,labels")
+        owned = services(info)
+        if shared.ISSUE_RE.match(info["title"]) and not owned:
+            raise ValueError(f"기존 [BE] 이슈 #{number}의 서비스 소유 범위가 없습니다")
+        active |= owned
+    return active
+
+
+def dispatch_auto() -> None:
+    """Fill S1-S5 only after the explicit queue is empty; never infer external settings."""
+    data = read_state()
+    if data["queue"]:
+        return
+    free = [slot for slot in AUTO_SLOTS if (worker := data["workers"].get(slot))
+            and (not worker.get("job") or worker["job"].get("reconciled"))]
+    if not free:
+        return
+    issues = shared.gh_json("issue", "list", "--state", "open", "--limit", "500", "--json",
+                            "number,title,body,labels,blockedBy")
+    by_number = {item["number"]: item for item in issues}
+    states = {number: "OPEN" for number in by_number}
+    occupied = observed_issues()
+    for worker in data["workers"].values():
+        job = worker.get("job")
+        if job and not job.get("reconciled"):
+            occupied.add(job["issue"])
+    try:
+        active_services = occupied_services(occupied, by_number)
+    except (RuntimeError, ValueError) as exc:
+        print(f"자동 배정 보류: {exc}", file=sys.stderr)
+        return
+    for info in sorted(issues, key=lambda item: item["number"]):
+        if not free:
+            break
+        number = info["number"]
+        candidate_services = services(info)
+        unchecked = pending_items(info.get("body") or "")
+        if (not shared.ISSUE_RE.match(info["title"]) or number in occupied or not candidate_services
+                or candidate_services & active_services or not unchecked
+                or any(EXTERNAL_PENDING_RE.search(item) for item in unchecked)):
+            continue
+        try:
+            if not predecessors_closed(info, states):
+                continue
+            latest = observed_issues()
+            active_services |= occupied_services(latest - occupied, by_number)
+            occupied |= latest
+            if number in occupied or candidate_services & active_services:
+                continue
+            assign_new(free[0], number, auto_slug(info))
+        except (RuntimeError, ValueError) as exc:
+            print(f"자동 배정 보류: #{number}: {exc}", file=sys.stderr)
+            return  # worktree creation or message delivery may have succeeded; never reuse this slot in this tick
+        print(f"{free.pop(0)}: 안전한 열린 이슈 #{number} 자동 배정")
+        occupied.add(number)
+        active_services |= candidate_services
 
 
 def merged_pr(job: dict, prs: list[dict]) -> dict | None:
@@ -430,10 +612,12 @@ def show() -> None:
         print("후속 대기열: " + ", ".join(f"{x['slot']}→#{x['issue']}" for x in data["queue"]))
 
 
-def tick() -> None:
+def tick(auto_assign: bool = False) -> None:
     reconcile()
     check_ci()
     dispatch_queue()
+    if auto_assign:
+        dispatch_auto()
 
 
 def main() -> None:
@@ -458,9 +642,11 @@ def main() -> None:
     waiting.add_argument("slug")
     sub.add_parser("status")
     sub.add_parser("reconcile")
-    sub.add_parser("tick")
+    tick_parser = sub.add_parser("tick")
+    tick_parser.add_argument("--auto-assign", action="store_true")
     watch = sub.add_parser("watch")
     watch.add_argument("--interval", type=int, default=300)
+    watch.add_argument("--auto-assign", action="store_true")
     args = parser.parse_args()
     if args.command == "watch":
         if args.interval < 30:
@@ -468,7 +654,7 @@ def main() -> None:
         while True:
             try:
                 with state_lock():
-                    tick()
+                    tick(args.auto_assign)
             except (ValueError, RuntimeError) as exc:
                 print(f"감독 오류: {exc}", file=sys.stderr)
             time.sleep(args.interval)
@@ -487,7 +673,7 @@ def main() -> None:
             elif args.command == "reconcile":
                 reconcile()
             else:
-                tick()
+                tick(args.auto_assign)
 
 
 if __name__ == "__main__":
