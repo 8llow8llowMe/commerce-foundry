@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.AopTestUtils;
@@ -46,6 +47,7 @@ import org.springframework.transaction.support.TransactionTemplate;
     "commerce.messaging.enabled=false", "operations.jobs.worker.enabled=false", "operations.jobs.planner.enabled=false"
 })
 @ActiveProfiles("test")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class PaymentAnomalyAlertFlowTest {
     private static final Instant START = Instant.parse("2026-11-07T00:00:00Z");
 
