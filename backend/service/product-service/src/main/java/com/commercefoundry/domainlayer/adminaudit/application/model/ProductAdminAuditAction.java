@@ -46,6 +46,12 @@ public enum ProductAdminAuditAction {
     SIZE_CHART_TEMPLATE_DELETE,
     /** 상품 사이즈표 전체 교체(없으면 생성). 대상 {@code product:<productId>} */
     PRODUCT_SIZE_CHART_REPLACE,
+    /** 초안 생성 요청. 대상 product:<productId> */
+    SIZE_CHART_DRAFT_CREATE,
+    /** 초안 결과 새로고침. 대상 size-chart-draft:<draftId> */
+    SIZE_CHART_DRAFT_REFRESH,
+    /** 검토한 초안 적용. 대상 size-chart-draft:<draftId> */
+    SIZE_CHART_DRAFT_APPLY,
     MEDIA_IMAGE_UPLOAD_ISSUE,
     MEDIA_IMAGE_UPLOAD_CONFIRM
 }

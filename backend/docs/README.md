@@ -15,6 +15,7 @@
 | `put-patch-review.md` | PUT API 15개 점검, 전체 교체 유지 근거와 온보딩 병합 PATCH 전환 (#561) |
 | `payment-guide.md` | 토스페이먼츠 통합 결제 — 승인 흐름, 중복 방지, UNKNOWN, 웹훅, 환불, USD/PayPal |
 | [usd-pricing-guide.md](usd-pricing-guide.md) | #20 A 확정 정책·구현 전 계획 — 수동 고정 가격, 통화별 가격행, 호환 이행, B~E 승인·검증 경계 |
+| [ai-size-chart-guide.md](ai-size-chart-guide.md) | #217 AI 사이즈표 초안·작업 등록·검토 적용의 계약과 이미지 개인정보 개방 경계 |
 | `order-flow-guide.md` | 주문·재고·배송·클레임 상태 전이와 동시성 |
 | `concurrency-control-review.md` | BE 락 사용처 점검, Redis·조건부 갱신·DB 락 선택 근거와 재검토 조건 (#510) |
 | `security-guide.md` | JWT 토큰 사양(RS256 · claim · refresh 불투명 토큰), 인증·인가 오류 코드, Resource Server 정책, 키 생성·교체, 서비스 간 인증(서비스 토큰 · 허용 호출자) |

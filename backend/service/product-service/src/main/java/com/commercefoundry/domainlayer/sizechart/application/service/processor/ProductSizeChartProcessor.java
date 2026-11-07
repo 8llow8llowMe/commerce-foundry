@@ -76,13 +76,32 @@ public class ProductSizeChartProcessor {
         SizeChartTemplate template = sizeChartTemplateRepositoryPort.lockById(command.templateId())
             .orElseThrow(() -> new SizeChartException(SizeChartErrorCode.TEMPLATE_REFERENCE_NOT_FOUND));
         List<SizeChartTemplateColumn> columns = sizeChartTemplateRepositoryPort.findColumns(template.id());
+        return replaceValidated(productId, command, template, columns, null).info();
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ProductSizeChart replaceCaptured(long productId, ProductSizeChartUpsertCommand command, SizeChartTemplate template,
+        List<SizeChartTemplateColumn> columns, Long expectedChartId, Long expectedRevision) {
+        requireDistinctRows(command.rows());
+        return replaceValidated(productId, command, template, columns, new Baseline(expectedChartId, expectedRevision)).chart();
+    }
+
+    private record Baseline(Long id, Long revision) { }
+    private record Replacement(ProductSizeChart chart, ProductSizeChartInfo info) { }
+
+    private Replacement replaceValidated(long productId, ProductSizeChartUpsertCommand command, SizeChartTemplate template,
+        List<SizeChartTemplateColumn> columns, Baseline baseline) {
         Set<Long> columnIds = new HashSet<>();
         columns.forEach(column -> columnIds.add(column.id()));
         for (ProductSizeChartUpsertCommand.Row row : command.rows()) {
             throwIfInvalid(SizeChartCells.violation(columnIds, row.cells().stream().map(ProductSizeChartUpsertCommand.Cell::columnId).toList()));
         }
 
-        long chartId = productSizeChartRepositoryPort.findByProductId(productId).map(ProductSizeChart::id).orElseGet(snowflakeIdGenerator::generateId);
+        // Manual writes preserve the existing chart ID; apply uses the captured baseline ID.
+        // The adapter refreshes any managed chart under its write lock before comparing/incrementing revisions.
+        long chartId = baseline == null
+            ? productSizeChartRepositoryPort.findByProductId(productId).map(ProductSizeChart::id).orElseGet(snowflakeIdGenerator::generateId)
+            : baseline.id() == null ? snowflakeIdGenerator.generateId() : baseline.id();
         ProductSizeChart chart = new ProductSizeChart(chartId, productId, template.id(), command.note());
         List<ProductSizeRow> rows = new ArrayList<>(command.rows().size());
         List<ProductSizeCell> cells = new ArrayList<>();
@@ -93,8 +112,13 @@ public class ProductSizeChartProcessor {
                 cells.add(new ProductSizeCell(snowflakeIdGenerator.generateId(), rowId, cell.columnId(), stored(cell.value())));
             }
         }
-        productSizeChartRepositoryPort.replace(chart, rows, cells);
-        return toInfo(chart, template, columns, rows, cells, template.baseUnit());
+        ProductSizeChart saved = chart;
+        if (baseline == null) {
+            productSizeChartRepositoryPort.replace(chart, rows, cells);
+        } else {
+            saved = productSizeChartRepositoryPort.replaceIfUnchanged(chart, rows, cells, baseline.id(), baseline.revision());
+        }
+        return new Replacement(saved, toInfo(saved, template, columns, rows, cells, template.baseUnit()));
     }
 
     private ProductSizeChartInfo toInfo(ProductSizeChart chart, SizeChartUnit displayUnit) {

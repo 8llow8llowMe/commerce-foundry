@@ -21,6 +21,9 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * 실행 중인 시도의 기록 — heartbeat 판정, 주인 확인 뒤 종료, 재시도 · 상한, 취소 요청. 종료(끝난 상태)일 때만 종료 이벤트가 한 번 나가고,
@@ -95,6 +98,80 @@ class JobRunProcessorTest {
         assertThat(saved.errorCode()).isEqualTo(Job.RESULT_TOO_LARGE);
         assertThat(saved.resultJson()).isNull();
         assertThat(events).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0,false", "1,false", "0,true", "1,true"})
+    @DisplayName("sweep 전이라도 lease 만료 시각부터 정상 · 용량 초과 결과를 모두 버린다 — 취소 요청 유무와 무관하다")
+    void succeedDiscardsExpiredLeaseBeforeSweep(long expiredByMillis, boolean oversized) {
+        Instant claimedAt = NOW.minus(LEASE).minusMillis(expiredByMillis);
+        String result = oversized ? "x".repeat(properties().result().maxJsonBytes() + 1) : "{}";
+        for (long jobId = 1L; jobId <= 2L; jobId++) {
+            repository.insert(Job.register(jobId, "REPORT_EXPORT", "{}", null, null, 0, claimedAt, 3).claim(WORKER, claimedAt, LEASE));
+            if (jobId == 2L) {
+                repository.requestCancel(jobId, 7L, NOW);
+            }
+            Job before = repository.get(jobId);
+            assertThat(before.status()).isEqualTo(JobStatus.RUNNING);
+            assertThat(before.isOwnedBy(WORKER, 1)).isTrue();
+            assertThat(NOW.isBefore(before.leaseExpiresAt())).isFalse();
+            assertThat(before.isLeaseExpired(NOW)).isEqualTo(expiredByMillis > 0);
+
+            assertThat(processor.succeed(jobId, WORKER, 1, result)).isFalse();
+
+            assertThat(repository.get(jobId)).isEqualTo(before);
+        }
+        assertThat(events).isEmpty();
+        assertThat(dispatchPort.dispatched()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("lease 만료 직전까지 정상 성공을 기록할 수 있다")
+    void succeedJustBeforeLeaseExpires() {
+        Instant claimedAt = NOW.minus(LEASE).plusNanos(1);
+        repository.insert(Job.register(1L, "REPORT_EXPORT", "{}", null, null, 0, claimedAt, 3).claim(WORKER, claimedAt, LEASE));
+
+        assertThat(processor.succeed(1L, WORKER, 1, "{}")).isTrue();
+
+        assertThat(repository.get(1L).status()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(events).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("유효 lease 에서 취소 요청 뒤 반환 — 정상 결과는 SUCCEEDED, 용량 초과 실패는 기존 정책대로 CANCELLED 다")
+    void cancelRequestBeforeSuccessPreservesCooperativePolicy(boolean oversized) {
+        insertRunning(1L, 3);
+        processor.requestCancel(1L, 7L);
+        String result = oversized ? "x".repeat(properties().result().maxJsonBytes() + 1) : "{}";
+
+        assertThat(processor.succeed(1L, WORKER, 1, result)).isTrue();
+
+        Job saved = repository.get(1L);
+        JobStatus expected = oversized ? JobStatus.CANCELLED : JobStatus.SUCCEEDED;
+        assertThat(saved.status()).isEqualTo(expected);
+        assertThat(saved.resultJson()).isEqualTo(oversized ? null : result);
+        assertThat(saved.errorCode()).isEqualTo(oversized ? Job.RESULT_TOO_LARGE : null);
+        assertThat(saved.cancelRequested()).isTrue();
+        assertThat(events).singleElement().isInstanceOfSatisfying(JobFinishedEvent.class,
+            event -> assertThat(event.status()).isEqualTo(expected));
+        assertThat(dispatchPort.dispatched()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("성공이 먼저 확정되면 늦은 취소 요청을 거절하고 성공 결과와 종료 이벤트 1회를 유지한다")
+    void successBeforeCancelRejectsCancellation() {
+        insertRunning(1L, 3);
+        assertThat(processor.succeed(1L, WORKER, 1, "{}")).isTrue();
+        Job succeeded = repository.get(1L);
+
+        assertThatThrownBy(() -> processor.requestCancel(1L, 7L))
+            .isInstanceOfSatisfying(JobException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(JobErrorCode.JOB_ALREADY_FINISHED));
+
+        assertThat(repository.get(1L)).isEqualTo(succeeded);
+        assertThat(events).singleElement().isInstanceOfSatisfying(JobFinishedEvent.class,
+            event -> assertThat(event.status()).isEqualTo(JobStatus.SUCCEEDED));
+        assertThat(dispatchPort.dispatched()).isEmpty();
     }
 
     @Test

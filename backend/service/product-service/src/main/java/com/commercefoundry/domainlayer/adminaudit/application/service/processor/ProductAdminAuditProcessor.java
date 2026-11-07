@@ -92,6 +92,18 @@ public class ProductAdminAuditProcessor {
         write(ProductAdminAuditAction.PRODUCT_SIZE_CHART_REPLACE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
     }
 
+    public void sizeChartDraftCreated(long actorMemberId, long productId, boolean succeeded) {
+        write(ProductAdminAuditAction.SIZE_CHART_DRAFT_CREATE, actorMemberId, AdminAuditLog.target(PRODUCT, productId), succeeded);
+    }
+
+    public void sizeChartDraftRefreshed(long actorMemberId, long draftId, boolean succeeded) {
+        write(ProductAdminAuditAction.SIZE_CHART_DRAFT_REFRESH, actorMemberId, AdminAuditLog.target("size-chart-draft", draftId), succeeded);
+    }
+
+    public void sizeChartDraftApplied(long actorMemberId, long draftId, boolean succeeded) {
+        write(ProductAdminAuditAction.SIZE_CHART_DRAFT_APPLY, actorMemberId, AdminAuditLog.target("size-chart-draft", draftId), succeeded);
+    }
+
     public void mediaImageUploadIssued(long actorMemberId, java.util.UUID id, boolean succeeded) {
         write(ProductAdminAuditAction.MEDIA_IMAGE_UPLOAD_ISSUE, actorMemberId,
             id == null ? null : AdminAuditLog.target("media-upload", id.toString()), succeeded);

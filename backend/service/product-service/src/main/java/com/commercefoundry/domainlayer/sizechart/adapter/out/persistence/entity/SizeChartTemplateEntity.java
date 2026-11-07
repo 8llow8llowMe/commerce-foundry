@@ -14,6 +14,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.ColumnDefault;
 import org.springframework.data.domain.Persistable;
 
 /**
@@ -44,9 +45,15 @@ public class SizeChartTemplateEntity extends BaseEntity implements Persistable<L
     @Column(name = "base_unit", nullable = false, length = 10, comment = "치수 저장 단위 (CM 또는 INCH). 화면 변환은 응답에서만 한다")
     private SizeChartUnit baseUnit;
 
+    /** 자식 항목만 바뀌어도 증가하는 업무 리비전. JPA 낙관적 잠금 버전과는 별개다. */
+    @ColumnDefault("0")
+    @Column(name = "revision", nullable = false, comment = "업무 리비전. 최초 0, 수정마다 1 증가")
+    private long revision;
+
     public void change(String name, SizeChartUnit baseUnit) {
         this.name = name;
         this.baseUnit = baseUnit;
+        this.revision++;
     }
 
     @Override

@@ -482,6 +482,10 @@ store:
 - **종료 이벤트** — 끝난 상태(SUCCEEDED · FAILED · CANCELLED)를 저장하는 트랜잭션 안에서 `JobFinishedEvent`(domain)를 한 번 낸다.
   알림 센터(#213)의 `adapter/in/event` 가 받는다 — 다른 컨텍스트 domain 만 읽고 자기 UseCase 만 부른다 (§3 허용 목록 5).
   같은 트랜잭션에서 알림 행을 만들고, 커밋 뒤에 그 어드민의 SSE 연결로 민다. 요청한 어드민이 없으면(시스템 등록) 알림을 만들지 않는다.
+- **AI 사이즈표 작업 (#217)** — product-service가 초안과 적용을 소유하고 operations-service는 기능 전용 internal 등록 영수증·
+  `SIZE_CHART_GENERATION` 핸들러·확정 결과를 소유한다. 범용 등록 API는 만들지 않는다. 두 서비스 호출은 Facade의 DB 트랜잭션 밖에서 하고,
+  operations의 job·dispatch·영수증은 한 트랜잭션으로 저장한다. 완료 알림은 기존 `JobFinishedEvent`이며 초안 적용을 뜻하지 않는다.
+  JSON 성공 확정은 워커·시도와 만료 전 lease를 함께 검사한다. 상세 실패·복구·보관 경계는 [ai-size-chart-guide.md](ai-size-chart-guide.md)다.
 - **실행 스레드** — 전용 `jobWorkerTaskExecutor`(core = max = `worker.concurrency`, 큐 0)와 heartbeat 전용 `jobLeaseTaskScheduler` 를 둔다. `@Async` 는 쓰지 않는다.
   두 빈은 `@Bean(defaultCandidate = false)` 다 — 일반 빈으로 두면 Boot 가 `applicationTaskExecutor` · `taskScheduler` 를 만들지 않는다.
   워커 아이디(`{앱}:{호스트}:{pid}:{난수}`)는 `JobWorkerIdentity` 빈 하나로 만든다.

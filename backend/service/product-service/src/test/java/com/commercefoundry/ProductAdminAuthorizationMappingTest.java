@@ -62,6 +62,11 @@ class ProductAdminAuthorizationMappingTest {
         Map.entry("PUT /api/v1/admin/size-chart-templates/{templateId}", AdminAuthority.CATALOG_MANAGE),
         Map.entry("DELETE /api/v1/admin/size-chart-templates/{templateId}", AdminAuthority.CATALOG_MANAGE),
         // AI 상품 초안
+        Map.entry("POST /api/v1/admin/products/{productId}/size-chart/drafts", AdminAuthority.CATALOG_MANAGE),
+        Map.entry("GET /api/v1/admin/size-chart-drafts", AdminAuthority.CATALOG_READ),
+        Map.entry("GET /api/v1/admin/size-chart-drafts/{draftId}", AdminAuthority.CATALOG_READ),
+        Map.entry("POST /api/v1/admin/size-chart-drafts/{draftId}/refresh", AdminAuthority.CATALOG_MANAGE),
+        Map.entry("POST /api/v1/admin/size-chart-drafts/{draftId}/apply", AdminAuthority.CATALOG_MANAGE),
         Map.entry("GET /api/v1/admin/product-drafts/{draftId}", AdminAuthority.CATALOG_READ),
         Map.entry("POST /api/v1/admin/product-drafts", AdminAuthority.CATALOG_MANAGE),
         Map.entry("POST /api/v1/admin/product-drafts/{draftId}/reject", AdminAuthority.CATALOG_MANAGE),
