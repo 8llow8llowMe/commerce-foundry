@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * messaging-core {@link ProcessedEventStore} 의 payment 스키마 구현 (#308 C3a-1).
- * 후속 회신 처리기는 업무 트랜잭션 안에서 {@link #record} 해야 한다. 이 단계에는 생산 회신 처리기나 리스너가 없다.
+ * 회신 Processor는 업무 트랜잭션 안에서 {@link #record} 한다. 생산 Kafka 리스너는 아직 없다.
  * messaging · relay · cleanup 이 모두 켜지면 messaging-core 정리가 보존 기간이 지난 처리 기록을 지운다.
  *
  * <ul>
