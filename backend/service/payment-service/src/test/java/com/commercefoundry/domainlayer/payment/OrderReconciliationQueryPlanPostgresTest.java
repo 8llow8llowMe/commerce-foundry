@@ -106,6 +106,11 @@ class OrderReconciliationQueryPlanPostgresTest {
         }, (rows, rowNumber) -> rows.getString(1));
         assertThat(plan).anyMatch(line -> line.contains("actual time="));
         assertThat(plan).anyMatch(line -> line.contains("Buffers:"));
+        long filtered = plan.stream().mapToLong(line -> {
+            var matcher = java.util.regex.Pattern.compile("Rows Removed by Filter: (\\d+)").matcher(line);
+            return matcher.find() ? Long.parseLong(matcher.group(1)) : 0;
+        }).sum();
+        assertThat(filtered).as("100k sparse-tail keyset plan: %s", String.join(" | ", plan)).isLessThan(1_000);
         System.out.println("#591 PG lane=" + (pending ? "RECONCILE" : "REJECTED") + " repeat=" + repeat
             + " elapsedMs=" + elapsedMs + " rows=" + ids.size() + " sql=" + sql
             + " bindings=[DONE,PARTIAL_CANCELED" + (pending ? ",synthetic-cutoff=" + CUTOFF : "")
