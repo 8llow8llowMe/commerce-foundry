@@ -10,7 +10,7 @@ import type { JobItem } from '@/lib/job/types';
 export function JobTable({ jobs }: { jobs: JobItem[] }) {
   return (
     // sr-only 같은 absolute 요소가 스크롤 상자 밖으로 나가지 않게 relative 를 준다
-    <div className="relative overflow-x-auto">
+    <div data-tour="job-table" className="relative overflow-x-auto">
       <table className="w-full min-w-[48rem] text-left text-sm">
         <caption className="sr-only">백그라운드 작업 목록</caption>
         <thead className="text-muted-fg">

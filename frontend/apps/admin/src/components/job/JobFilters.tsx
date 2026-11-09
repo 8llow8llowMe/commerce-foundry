@@ -45,6 +45,7 @@ export function JobFilters({ query }: { query: JobQuery }) {
 
   return (
     <form
+      data-tour="job-filters"
       role="search"
       aria-label="작업 조건"
       noValidate
