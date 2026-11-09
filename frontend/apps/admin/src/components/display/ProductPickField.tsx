@@ -3,7 +3,7 @@
 import { apiFetch, ApiError, type PageResponse } from '@cf/api-client';
 import { Button, FieldError } from '@cf/ui';
 import { useEffect, useId, useRef, useState } from 'react';
-import { LOAD_FAILED } from '@/lib/api-errors';
+import { FORBIDDEN_TITLE, LOAD_FAILED } from '@/lib/api-errors';
 import type { ProductFormItem } from '@/lib/display/form';
 import { moveItem } from '@/lib/display/order';
 import { addProduct, productNotice } from '@/lib/display/products';
@@ -24,7 +24,7 @@ function searchFailure(cause: unknown): string {
   if (cause instanceof ApiError && cause.kind === 'unauthorized') {
     return '로그인이 만료되었습니다. 새 탭에서 어드민에 다시 로그인한 뒤 검색해 주세요.';
   }
-  if (cause instanceof ApiError && cause.kind === 'forbidden') return '관리자 권한이 없습니다.';
+  if (cause instanceof ApiError && cause.kind === 'forbidden') return FORBIDDEN_TITLE;
   return LOAD_FAILED;
 }
 

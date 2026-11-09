@@ -1,6 +1,7 @@
 import { ApiError } from '@cf/api-client';
 import {
   accessDeniedOf,
+  FORBIDDEN_DETAIL,
   SAVE_FAILED,
   SESSION_EXPIRED_ON_SAVE,
   type AccessDenied,
@@ -238,8 +239,7 @@ export const PREVIEW_CHECK_INPUT =
   '입력값을 확인해 주세요. 고칠 때까지 마지막으로 그린 미리보기를 그대로 둡니다.';
 export const PREVIEW_ITEM_COUNT =
   '이미지 · 영상 · 상품 · 룩 수가 섹션이 받을 수 있는 범위를 벗어났습니다.';
-export const PREVIEW_FORBIDDEN =
-  '관리자 권한이 없어 미리보기를 그리지 못했습니다. 관리자 계정으로 다시 로그인해 주세요.';
+export const PREVIEW_FORBIDDEN = `권한이 없어 미리보기를 그리지 못했습니다. ${FORBIDDEN_DETAIL}`;
 export const PREVIEW_FAILED = '미리보기를 새로 그리지 못했습니다. 잠시 후 다시 시도해 주세요.';
 /** 저장 401 과 같이 입력을 지킨다(`SESSION_EXPIRED_ON_SAVE`) — 로그인 화면으로 보내면 열린 폼 값이 사라진다 */
 export const SESSION_EXPIRED_ON_PREVIEW =

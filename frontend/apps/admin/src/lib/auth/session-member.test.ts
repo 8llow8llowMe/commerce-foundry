@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { memberIdOfToken } from './session-member';
+import { memberIdOfToken, operatorRoleOfToken } from './session-member';
 
 const base64url = (value: string) =>
   btoa(String.fromCharCode(...new TextEncoder().encode(value)))
@@ -30,5 +30,21 @@ describe('memberIdOfToken', () => {
     expect(memberIdOfToken(token({ sub: 12 }))).toBeNull();
     expect(memberIdOfToken(token({ sub: 'abc' }))).toBeNull();
     expect(memberIdOfToken(token({}))).toBeNull();
+  });
+});
+
+describe('operatorRoleOfToken', () => {
+  it('payload 의 role 이 운영자 역할이면 그대로 돌려준다', () => {
+    expect(operatorRoleOfToken(token({ sub: '1', role: 'MANAGER' }))).toBe('MANAGER');
+    expect(operatorRoleOfToken(token({ sub: '1', role: 'ADMIN' }))).toBe('ADMIN');
+  });
+
+  it('고객 · 모르는 값 · 대소문자 다름 · 읽을 수 없음은 null 이다', () => {
+    expect(operatorRoleOfToken(token({ role: 'CUSTOMER' }))).toBeNull();
+    expect(operatorRoleOfToken(token({ role: 'manager' }))).toBeNull();
+    expect(operatorRoleOfToken(token({ role: ['OWNER'] }))).toBeNull();
+    expect(operatorRoleOfToken(token({}))).toBeNull();
+    expect(operatorRoleOfToken(null)).toBeNull();
+    expect(operatorRoleOfToken('opaque-token')).toBeNull();
   });
 });
