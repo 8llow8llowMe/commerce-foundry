@@ -199,6 +199,10 @@ export const ko = {
     verify: '사업자 정보 확인',
     /** 공개 정보 API 장애 — 지난 값을 대신 보이지 않는다 */
     businessUnavailable: '사업자 정보를 잠시 불러오지 못했습니다. 잠시 후 다시 확인해 주세요.',
+    /** 채널(Instagram · 카카오톡 채널 등) 링크 묶음 이름(#600) */
+    channels: '채널',
+    /** 외부 링크 뒤에 붙는 스크린리더 안내 */
+    newWindow: '새 창에서 열림',
   },
   shop: {
     categories: '카테고리',

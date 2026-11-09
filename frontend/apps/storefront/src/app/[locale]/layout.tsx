@@ -12,6 +12,7 @@ import { hasLocale, localeRouting } from '@/lib/i18n/config';
 import { getDictionary } from '@/lib/i18n/dictionaries';
 import { localePrefix, localeTarget, localeUrl } from '@/lib/i18n/routing';
 import { getI18n, localeHomeHref } from '@/lib/i18n/server';
+import { loadStoreFooter } from '@/lib/store-footer';
 import { loadStoreProfile } from '@/lib/store-profile';
 import '../globals.css';
 
@@ -43,7 +44,8 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
   const content = brand.content[locale];
   // 스토어프론트 화면은 이미 요청마다 렌더링된다(언어 판별) — 쿠키를 읽어도 정적 생성을 잃지 않는다
   const signedIn = await hasSession();
-  const store = await loadStoreProfile();
+  // 사업자 정보(#566)와 게시 푸터(#600)는 따로 실패한다 — 한쪽 장애가 다른 쪽을 숨기지 않게 나란히 부른다
+  const [store, channels] = await Promise.all([loadStoreProfile(), loadStoreFooter(locale)]);
   const languages = brand.locales.map((code) => ({
     locale: code,
     name: getDictionary(code).languageName,
@@ -70,6 +72,7 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
               brandName={brand.name}
               links={content.footerLinks}
               store={store}
+              channels={channels}
               labels={dict.footer}
               backdrop={content.footerBackdrop}
             />

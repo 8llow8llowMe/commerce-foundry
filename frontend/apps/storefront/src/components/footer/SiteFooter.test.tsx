@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { en } from '@/lib/i18n/dictionaries/en';
 import { ko } from '@/lib/i18n/dictionaries/ko';
+import type { StoreFooterState } from '@/lib/store-footer';
 import type { StoreProfileState } from '@/lib/store-profile';
 import { STORE_PROFILE_FIXTURE } from '@/lib/store-profile-fixtures';
 import { SiteFooter } from './SiteFooter';
@@ -140,5 +141,71 @@ describe('SiteFooter', () => {
     expect(html).toContain('data-backdrop=""');
     expect(html).not.toContain('<img');
     expect(html).not.toContain('촬영 전');
+  });
+
+  describe('게시 푸터 채널 · 저작권(#600)', () => {
+    const PUBLISHED: StoreFooterState = {
+      kind: 'published',
+      footer: {
+        copyrightText: 'Copyright <b>테스트</b>',
+        links: [
+          { type: 'INSTAGRAM', label: '인스타그램', url: 'https://www.instagram.com/example_shop' },
+          { type: 'KAKAO_CHANNEL', label: '카카오 상담', url: 'https://pf.kakao.com/_abc/chat' },
+          { type: 'CUSTOM', label: '블로그', url: 'https://blog.example.com' },
+        ],
+      },
+    };
+    const renderWith = (channels: StoreFooterState, labels = ko.footer) =>
+      renderToStaticMarkup(
+        <SiteFooter
+          brandName="ACME"
+          links={LINKS}
+          store={FULL}
+          channels={channels}
+          labels={labels}
+          year={2026}
+        />,
+      ).replace(/<!-- -->/g, '');
+
+    it('채널은 새 창 안전 속성 · 로케일 표시명 · 새 창 안내로, 아이콘 채널은 이름을 스크린리더로 단다', () => {
+      const html = renderWith(PUBLISHED);
+      expect(html).toContain('aria-label="채널"');
+      expect(html).toMatch(
+        /<a href="https:\/\/www.instagram.com\/example_shop" target="_blank" rel="noopener noreferrer" title="인스타그램"[^>]*><svg aria-hidden="true"[^]*?<span class="sr-only">인스타그램<\/span><span class="sr-only"> \(새 창에서 열림\)<\/span><\/a>/,
+      );
+      expect(html).toMatch(
+        /<a href="https:\/\/blog.example.com" target="_blank" rel="noopener noreferrer" class=/,
+      );
+      expect(html).toContain('<span class="">블로그</span>');
+      expect(html.indexOf('인스타그램')).toBeLessThan(html.indexOf('카카오 상담'));
+    });
+
+    it('저작권 문구는 게시본을 글자 그대로(이스케이프) 보이고 기본 표기를 대신한다', () => {
+      const html = renderWith(PUBLISHED);
+      expect(html).toContain('Copyright &lt;b&gt;테스트&lt;/b&gt;');
+      expect(html).not.toContain('© 2026 테스트몰');
+    });
+
+    it('저작권 문구가 없는 게시본은 기본 표기, 링크가 없으면 채널 줄이 없다', () => {
+      const html = renderWith({ kind: 'published', footer: { copyrightText: null, links: [] } });
+      expect(html).toContain('© 2026 테스트몰');
+      expect(html).not.toContain('aria-label="채널"');
+    });
+
+    it('미게시 · 장애면 채널 · 저작권만 숨기고 기존 푸터는 그대로다', () => {
+      for (const channels of [{ kind: 'unpublished' }, { kind: 'unavailable' }] as const) {
+        const html = renderWith(channels);
+        expect(html).not.toContain('aria-label="채널"');
+        expect(html).toContain('© 2026 테스트몰');
+        expect(html).toContain('aria-label="사업자 정보"');
+        expect(html).toContain('href="/terms"');
+      }
+    });
+
+    it('영문 사전으로 묶음 이름 · 새 창 안내를 바꾼다', () => {
+      const html = renderWith(PUBLISHED, en.footer);
+      expect(html).toContain('aria-label="Channels"');
+      expect(html).toContain('(opens in a new window)');
+    });
   });
 });

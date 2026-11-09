@@ -56,6 +56,7 @@ const NAV: NavGroup[] = [
     items: [
       { label: '쇼핑몰 정보', href: '/store/profile' },
       { label: '약관 · 개인정보처리방침', href: '/store/legal-documents' },
+      { label: '푸터', href: '/store/footer' },
     ],
   },
   {
