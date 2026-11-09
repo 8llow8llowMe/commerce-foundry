@@ -1,8 +1,9 @@
 import type { FooterLink, HomeMediaSlot } from '@cf/ui';
-import { cx } from '@cf/ui';
+import { cx, FooterChannelIcon } from '@cf/ui';
 import { Link } from '@/components/i18n/Link';
 import { businessVerificationUrl, registrationLabel } from '@/lib/business-info';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
+import type { StoreFooterLink, StoreFooterState } from '@/lib/store-footer';
 import type { StoreProfile, StoreProfileState } from '@/lib/store-profile';
 import { FooterSurface } from './FooterSurface';
 import { Wordmark } from './Wordmark';
@@ -13,6 +14,8 @@ export type SiteFooterProps = {
   links: FooterLink[];
   /** 쇼핑몰 공개 정보(#566). 저작권 표시 이름은 등록된 쇼핑몰 이름, 없으면 brandName */
   store: StoreProfileState;
+  /** 게시한 채널 · 링크 · 저작권 문구(#600). 게시본이 아니면(미등록 · 장애) 그 부분만 숨긴다 */
+  channels?: StoreFooterState;
   labels: Dictionary['footer'];
   /** 메인에서만 까는 전폭 화보(브랜드 설정). null 이면 어디서나 muted 면 */
   backdrop?: HomeMediaSlot | null;
@@ -25,12 +28,14 @@ export type SiteFooterProps = {
  * 가운데: 화면 폭 가득 워드마크, 아래: 법정 표시 정보(쇼핑몰 공개 정보 API, #568) 13px. 모바일은 링크 1열 → 워드마크 → 법정 정보.
  * 미등록이면 사업자 · 고객센터 블록을 그리지 않고, 장애면 지난 값 대신 안내 한 줄만 둔다 — 어느 쪽도 푸터가 깨지지 않는다.
  * 등록번호 이름 · 확인 링크는 국가 코드로 고른다(`lib/business-info.ts`).
+ * 채널 · 링크와 저작권 문구는 어드민이 게시한 푸터(#600)다. 미게시 · 장애면 채널 줄을 숨기고 기본 저작권 표기(© 연도 이름)를 둔다.
  * 보조 글자는 바탕을 따라 바뀐다 — muted 면에선 muted-fg, 화보 위에선 Porcelain 을 조금 낮춘 불투명도.
  */
 export function SiteFooter({
   brandName,
   links,
   store,
+  channels = { kind: 'unpublished' },
   labels,
   backdrop = null,
   year = new Date().getFullYear(),
@@ -53,11 +58,14 @@ export function SiteFooter({
     profile && businessVerificationUrl(profile.countryCode, profile.businessRegistrationNumber);
   const displayName = profile?.storeName ?? brandName;
   const subtle = 'text-muted-fg group-data-backdrop/footer:text-bg/85';
+  const published = channels.kind === 'published' ? channels.footer : null;
+  const channelLinks = published?.links ?? [];
+  const copyright = published?.copyrightText ?? `© ${year} ${displayName}`;
 
   return (
     <FooterSurface backdrop={backdrop}>
       <div className="mx-auto flex max-w-screen-2xl flex-col gap-12 px-4 pt-14 pb-8 lg:gap-20 lg:px-8 lg:pt-24">
-        {(links.length > 0 || profile) && (
+        {(links.length > 0 || profile || channelLinks.length > 0) && (
           <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
             {links.length > 0 && (
               <nav aria-label={labels.customerLinks}>
@@ -75,7 +83,12 @@ export function SiteFooter({
                 </ul>
               </nav>
             )}
-            {profile && <CustomerService profile={profile} labels={labels} subtle={subtle} />}
+            {(profile || channelLinks.length > 0) && (
+              <div className="flex flex-col gap-6 lg:items-end">
+                {profile && <CustomerService profile={profile} labels={labels} subtle={subtle} />}
+                {channelLinks.length > 0 && <Channels links={channelLinks} labels={labels} />}
+              </div>
+            )}
           </div>
         )}
 
@@ -107,12 +120,46 @@ export function SiteFooter({
               )}
             </section>
           )}
-          <p className="tracking-[0.15em]">
-            © {year} {displayName}
-          </p>
+          <p className="tracking-[0.15em] break-words">{copyright}</p>
         </div>
       </div>
     </FooterSurface>
+  );
+}
+
+/**
+ * 채널 · 외부 링크(#600). Instagram · 카카오톡 채널은 아이콘만 보이고 로케일 표시명이 접근 가능한 이름이다.
+ * 기타 링크는 아이콘 + 표시명. 모두 새 창(`noopener noreferrer`)이며 스크린리더에 새 창 안내를 붙인다.
+ * 모바일은 여러 줄로 감긴다.
+ */
+function Channels({ links, labels }: { links: StoreFooterLink[]; labels: Dictionary['footer'] }) {
+  return (
+    <nav aria-label={labels.channels}>
+      <ul className="flex flex-wrap items-center gap-x-5 gap-y-3 text-sm">
+        {links.map((link) => {
+          const iconOnly = link.type !== 'CUSTOM';
+          return (
+            <li key={`${link.type}-${link.url}-${link.label}`}>
+              {/* 스토어 밖 주소라 언어 접두어를 붙이는 i18n Link 가 아니라 <a> 다 */}
+              <a
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={iconOnly ? link.label : undefined}
+                className={cx(
+                  'flex min-h-6 items-center gap-1.5 break-all hover:opacity-70',
+                  iconOnly && 'min-w-6 justify-center',
+                )}
+              >
+                <FooterChannelIcon type={link.type} />
+                <span className={cx(iconOnly && 'sr-only')}>{link.label}</span>
+                <span className="sr-only"> ({labels.newWindow})</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 

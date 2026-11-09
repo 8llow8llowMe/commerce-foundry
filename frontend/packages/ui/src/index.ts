@@ -24,4 +24,5 @@ export type {
 } from './home';
 export { cx } from './cx';
 export { FieldError, type FieldErrorProps } from './FieldError';
+export { FooterChannelIcon, type FooterChannelType } from './FooterChannelIcon';
 export { TextField, type TextFieldProps } from './TextField';

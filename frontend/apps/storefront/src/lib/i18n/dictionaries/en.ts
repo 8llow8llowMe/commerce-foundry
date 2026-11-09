@@ -180,6 +180,8 @@ export const en: Dictionary = {
     verify: 'Verify business information',
     businessUnavailable:
       'Company information is temporarily unavailable. Please check back shortly.',
+    channels: 'Channels',
+    newWindow: 'opens in a new window',
   },
   shop: {
     categories: 'Categories',
