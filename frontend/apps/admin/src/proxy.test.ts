@@ -4,19 +4,28 @@ import { describe, expect, it } from 'vitest';
 import { config, proxy } from './proxy';
 
 describe('proxy matcher', () => {
-  it.each(['/', '/stocks', '/stocks/12', '/shipping-policies/domestic', '/apix', '/login-history'])(
-    '%s 는 진입을 확인한다',
-    (url) => {
-      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
-    },
-  );
+  it.each([
+    '/',
+    '/stocks',
+    '/stocks/12',
+    '/shipping-policies/domestic',
+    '/apix',
+    '/login-history',
+    '/password-reset-x',
+  ])('%s 는 진입을 확인한다', (url) => {
+    expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
+  });
 
-  it.each(['/login', '/api/v1/admin/stocks', '/api/health', '/_next/static/a.js', '/favicon.ico'])(
-    '%s 는 로그인 없이 연다',
-    (url) => {
-      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false);
-    },
-  );
+  it.each([
+    '/login',
+    '/password-reset',
+    '/api/v1/admin/stocks',
+    '/api/health',
+    '/_next/static/a.js',
+    '/favicon.ico',
+  ])('%s 는 로그인 없이 연다', (url) => {
+    expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false);
+  });
 });
 
 describe('proxy', () => {

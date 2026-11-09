@@ -6,6 +6,11 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
 import { deactivateFailure } from '@/lib/admin-account/errors';
+import {
+  passwordResetLinkPath,
+  resetLinkFailure,
+  resetLinkRequested,
+} from '@/lib/admin-account/password-reset';
 import { canRecoverPeer } from '@/lib/admin-account/peer-otp';
 import { adminsApiPath, adminsHref, deactivatePath } from '@/lib/admin-account/query';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
@@ -38,6 +43,8 @@ const dateTime = new Intl.DateTimeFormat('ko-KR', {
  * 목록 응답에 활성 여부가 없어 비활성화한 계정도 계속 보인다 — 이번 방문에서 끈 계정만 표시를 붙이고 버튼을 거둔다.
  * 동료 OTP 복구(#428)는 내 계정(`selfMemberId`)이 아닌 줄에만 둔다. 내 아이디를 모르면 어느 줄에도 두지 않는다.
  * 비활성 · 없는 대상은 서버가 `AUTH_033` 으로 거절하고, 그 뒤 그 줄의 복구 버튼을 거둔다.
+ * 비밀번호 재설정 링크(#237, BE #589)도 내 계정이 아닌 줄에 둔다 — 내 비밀번호는 내 계정 화면에서 바꾼다.
+ * 서버는 대상이 없거나 메일이 실패해도 같은 성공으로 답하므로, 화면은 "요청했다" 까지만 말한다.
  */
 export function AdminAccountManager({
   page,
@@ -54,6 +61,7 @@ export function AdminAccountManager({
   const [notice, setNotice] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deactivating, setDeactivating] = useState<string | null>(null);
+  const [sendingReset, setSendingReset] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ memberId: string; message: string } | null>(null);
   const [deactivated, setDeactivated] = useState<ReadonlySet<string>>(() => new Set());
   const [denied, setDenied] = useState<AccessDenied | null>(null);
@@ -124,6 +132,23 @@ export function AdminAccountManager({
       }
     } finally {
       setDeactivating(null);
+    }
+  };
+
+  const sendResetLink = async (member: MemberListItem) => {
+    if (sendingReset) return;
+    setSendingReset(member.memberId);
+    setRowError(null);
+    setNotice(null);
+    try {
+      await apiFetch<null>(passwordResetLinkPath(member.memberId), { method: 'POST' });
+      setNotice(resetLinkRequested(member.name));
+    } catch (cause) {
+      const failure = resetLinkFailure(cause);
+      if (failure.kind === 'access') setDenied(failure.denied);
+      else setRowError({ memberId: member.memberId, message: failure.message });
+    } finally {
+      setSendingReset(null);
     }
   };
 
@@ -344,6 +369,21 @@ export function AdminAccountManager({
                                   }}
                                 >
                                   OTP 복구
+                                </button>
+                              )}
+                              {!self && (
+                                // 보내는 중에도 disabled 로 두지 않는다 — 포커스가 body 로 빠진다. 겹친 요청은 sendResetLink 가 막는다
+                                <button
+                                  type="button"
+                                  className={linkButton}
+                                  aria-label={`${member.name} 비밀번호 재설정 링크 보내기`}
+                                  aria-disabled={sendingReset !== null || undefined}
+                                  disabled={deactivating !== null || adding || recovery !== null}
+                                  onClick={() => void sendResetLink(member)}
+                                >
+                                  {sendingReset === member.memberId
+                                    ? '요청하는 중…'
+                                    : '재설정 링크'}
                                 </button>
                               )}
                               <button

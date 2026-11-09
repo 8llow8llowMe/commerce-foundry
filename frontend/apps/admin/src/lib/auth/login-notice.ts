@@ -3,10 +3,13 @@
  */
 const NOTICES = {
   'password-changed': '비밀번호를 바꿨습니다. 새 비밀번호로 다시 로그인해 주세요.',
+  'password-reset': '비밀번호를 새로 정했습니다. 새 비밀번호로 로그인해 주세요.',
 } as const;
 
 /** 비밀번호를 바꾼 뒤 가는 로그인 화면. 돌아갈 경로(`next`)는 붙이지 않는다 — 콘솔 홈으로 */
 export const PASSWORD_CHANGED_LOGIN = '/login?reason=password-changed';
+/** 메일 링크로 비밀번호를 새로 정한 뒤 가는 로그인 화면(#237) */
+export const PASSWORD_RESET_LOGIN = '/login?reason=password-reset';
 
 /** `?reason=` → 안내 문구. 모르는 값은 null */
 export function loginNotice(reason: string | string[] | undefined): string | null {
