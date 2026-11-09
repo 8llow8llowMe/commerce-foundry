@@ -14,6 +14,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // BFF(/api) · Next 내부(/_next) · 확장자가 있는 정적 파일 · 로그인 화면은 로그인 없이 연다
-  matcher: ['/((?!api/|api$|_next/|login$|.*\\..*).*)'],
+  // BFF(/api) · Next 내부(/_next) · 확장자가 있는 정적 파일 · 로그인 · 비밀번호 재설정(메일 링크) 화면은 로그인 없이 연다
+  matcher: ['/((?!api/|api$|_next/|login$|password-reset$|.*\\..*).*)'],
 };
