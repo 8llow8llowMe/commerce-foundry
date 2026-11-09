@@ -15,6 +15,16 @@ export function accessDeniedOf(cause: unknown): AccessDenied | null {
   return cause.kind === 'unauthorized' || cause.kind === 'forbidden' ? cause.kind : null;
 }
 
+/**
+ * 403(권한 없음) 공통 문구(#237). 어드민 API 403 은 게이트웨이(운영자 역할이 아님)나 서비스 `@PreAuthorize`(기능 권한 없음, `SECURITY_005`)가 낸다.
+ * 서버 `resultMessage` 대신 이 문구를 쓴다 — 화면마다 같은 말로 다음 행동(다른 계정 · 대표 관리자에게 요청)을 알려 준다.
+ */
+export const FORBIDDEN_TITLE = '이 기능을 사용할 권한이 없습니다.';
+export const FORBIDDEN_DETAIL =
+  '권한이 필요하면 대표 관리자에게 요청하거나, 권한이 있는 계정으로 다시 로그인해 주세요.';
+/** 칸 · 줄 안에 짧게 붙이는 403 문구 */
+export const FORBIDDEN_INLINE = '권한이 없어 처리하지 못했습니다.';
+
 export const LOAD_FAILED = '불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
 export const SAVE_FAILED = '저장하지 못했습니다. 잠시 후 다시 시도해 주세요.';
 /**

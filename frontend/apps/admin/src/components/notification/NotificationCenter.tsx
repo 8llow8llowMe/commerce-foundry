@@ -82,7 +82,7 @@ export function NotificationCenter() {
               {state.denied === 'unauthorized'
                 ? '로그인이 만료되어 알림을 받지 못합니다. 다시 로그인해 주세요.'
                 : state.denied === 'forbidden'
-                  ? '관리자 권한이 없어 알림을 받지 못합니다.'
+                  ? '운영자 권한이 없어 알림을 받지 못합니다.'
                   : state.actionError}
             </p>
             <div className="min-h-0 flex-1 overflow-y-auto">

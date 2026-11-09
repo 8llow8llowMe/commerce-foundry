@@ -1,6 +1,7 @@
 import { ApiError } from '@cf/api-client';
 import {
   accessDeniedOf,
+  FORBIDDEN_INLINE,
   SAVE_FAILED,
   SESSION_EXPIRED_ON_SAVE,
   type AccessDenied,
@@ -242,7 +243,7 @@ function requestFailure(cause: unknown): {
   const denied = accessDeniedOf(cause);
   if (denied === 'unauthorized')
     return { ...base, result: 'NOT_SENT', message: SESSION_EXPIRED_ON_SAVE, sessionExpired: true };
-  if (denied) return { ...base, result: 'NOT_SENT', message: '관리자 권한이 없습니다.', denied };
+  if (denied) return { ...base, result: 'NOT_SENT', message: FORBIDDEN_INLINE, denied };
   if (!(cause instanceof ApiError))
     return { ...base, result: 'UNKNOWN', message: SHIPMENT_UNKNOWN };
   if (cause.kind === 'unknownOutcome' || cause.kind === 'network')

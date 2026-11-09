@@ -431,7 +431,15 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **읽기 · 쓰기는 클라이언트에서 BFF 로** — 편집 화면은 `apiFetch` 로 같은 origin BFF(`app/api/[...path]`, 어드민 쿠키 `cf_admin_at`)를 부른다.
   CSRF 규칙은 스토어프론트와 같고(§2), 재발급은 하지 않는다(§3 refresh 쿠키가 없는 설정).
 - **401 · 403 은 오류가 아니라 상태다** — `accessDeniedOf` 로 가르고 `AccessNotice` 를 그린다. 401(세션 끝 — 만료 · 로그아웃 · 차단)이면
-  지금 경로를 `next` 로 붙인 로그인 화면으로 바로 보낸다(이동이 늦어도 누를 수 있게 로그인 링크를 같이 둔다). 403(ADMIN 아닌 토큰)은 "관리자 권한이 없습니다" 안내와 로그인 링크만 둔다.
+  지금 경로를 `next` 로 붙인 로그인 화면으로 바로 보낸다(이동이 늦어도 누를 수 있게 로그인 링크를 같이 둔다). 403(운영자가 아닌 토큰 · 기능 권한 없음, BE `SECURITY_005`)은
+  공통 문구(`FORBIDDEN_TITLE` · `FORBIDDEN_DETAIL` — 대표 관리자에게 요청하거나 권한 있는 계정으로 다시 로그인)와 로그인 링크만 둔다. 칸 · 줄 안의 짧은 403 은 `FORBIDDEN_INLINE` 이다.
+  서버 `resultMessage` 대신 이 문구를 써서 화면마다 같은 말을 한다(`lib/api-errors.ts`).
+- **역할별 메뉴 · 화면 진입 (#237 · BE #236)** — 콘솔 레이아웃(서버 컴포넌트)이 access 쿠키 JWT 의 `role` claim 만 읽어(`operatorRoleOfToken`, 서명 검증 없음 —
+  `memberIdOfToken` 과 같은 규칙) `AdminShell` 에 넘긴다. 토큰은 브라우저로 보내지 않는다. 역할 → 조회 권한 → 화면 경로 표는 `lib/auth/permissions.ts` 에 있고
+  BE `AdminPermission.grantedTo` · `security-guide.md` 권한표의 **사본**이다(BE 표가 바뀌면 같이 바꾼다). 권한 없는 메뉴는 빼고(`visibleNav`, 비는 묶음은 제목째),
+  그런 화면에 주소로 들어오면 본문 대신 403 안내를 그린다(`RouteGate`). 예: MANAGER 는 결제 확인(정산) · 원가 · 쇼핑몰 설정 · 관리자 계정 · 감사 로그가 안 보인다.
+  **인가의 정본은 서버다** — 숨김은 보조이고, 역할을 읽지 못하면(고객 · 모르는 값 · 모양 다름) 거르지 않고 서버 403 안내에 맡긴다.
+  역할 · 권한을 내려주는 BE API 가 생기면 claim 읽기와 사본을 그 응답으로 바꾼다. 버튼 단위(`*_MANAGE`) 숨김은 아직 없다 — 쓰기는 서버 403 → `AccessNotice` 다.
   **저장(쓰기) 중 401 은 예외다** — 세션이 30분뿐이라 폼을 오래 쓰면 생기는데, 로그인 화면으로 보내면 입력이 사라진다. 폼을 그대로 두고
   `SESSION_EXPIRED_ON_SAVE`("새 탭에서 다시 로그인한 뒤 저장해 주세요")를 폼 전체 오류로 둔다. 401 은 서버가 처리하지 않은 요청이라 다시 저장해도 안전하다.
 
