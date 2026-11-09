@@ -96,7 +96,7 @@ function templateKey(path: string): string {
 }
 
 /** 상품 사이즈표 본문 경로 → 폼 칸 키. 칸 순서는 보낸 순서(= 화면 항목 순서)다 */
-function chartKey(path: string, columns: readonly TemplateColumn[]): string {
+export function chartFieldKey(path: string, columns: readonly TemplateColumn[]): string {
   if (path === 'note' || path === 'templateId') return path;
   const cell = /^rows\[(\d+)\]\.cells\[(\d+)\]/.exec(path);
   if (cell) {
@@ -180,7 +180,7 @@ export function chartSaveFailure(
   if (result.fieldErrors.length > 0)
     return {
       kind: 'errors',
-      errors: collect(result.fieldErrors, (path) => chartKey(path, columns)),
+      errors: collect(result.fieldErrors, (path) => chartFieldKey(path, columns)),
     };
   switch (result.code) {
     case 'PRODUCT_064':
