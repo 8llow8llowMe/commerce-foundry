@@ -3,14 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { SAVE_FAILED, SESSION_EXPIRED_ON_SAVE } from '@/lib/api-errors';
 import {
   changePasswordFailure,
-  ALREADY_OFF,
   CREATE_UNKNOWN,
   createAdminFailure,
-  DEACTIVATE_UNKNOWN,
-  OFF_BUT_SESSION_LIVE,
   PASSWORD_UNKNOWN,
-  DEACTIVATE_FAILED,
-  deactivateFailure,
   passwordProblem,
 } from './errors';
 
@@ -102,11 +97,6 @@ describe('결과를 모르는 실패(unknownOutcome)', () => {
       errors: { form: [PASSWORD_UNKNOWN] },
       uncertain: true,
     });
-    expect(deactivateFailure(cause())).toEqual({
-      kind: 'row',
-      message: DEACTIVATE_UNKNOWN,
-      reload: true,
-    });
   });
 });
 
@@ -147,39 +137,19 @@ describe('changePasswordFailure', () => {
   });
 });
 
-describe('deactivateFailure', () => {
-  it('마지막 관리자(AUTH_031)는 서버 문구를 줄에 두고 다시 읽지 않는다', () => {
-    expect(
-      deactivateFailure(
-        apiError('conflict', 409, 'AUTH_031', '마지막 관리자는 비활성화할 수 없습니다.'),
-      ),
-    ).toEqual({ kind: 'row', message: '마지막 관리자는 비활성화할 수 없습니다.', reload: false });
-  });
-
-  it('AUTH_033(이미 꺼짐) · AUTH_013(끈 뒤 컷오프 실패)은 꺼진 것으로 표시한다', () => {
-    expect(
-      deactivateFailure(apiError('notFound', 404, 'AUTH_033', '관리자 계정을 찾을 수 없습니다.')),
-    ).toEqual({ kind: 'row', message: ALREADY_OFF, reload: false, off: true });
-    // 서버 문구("로그인을 처리할 수 없습니다")가 아니라 기존 로그인이 남는다는 화면 문구
-    expect(
-      deactivateFailure(
-        apiError('unavailable', 503, 'AUTH_013', '일시적으로 로그인을 처리할 수 없습니다.'),
-      ),
-    ).toEqual({ kind: 'row', message: OFF_BUT_SESSION_LIVE, reload: false, off: true });
-  });
-
-  it('연결 실패는 목록을 다시 읽는다', () => {
-    expect(deactivateFailure(new Error('boom'))).toEqual({
-      kind: 'row',
-      message: DEACTIVATE_FAILED,
-      reload: true,
+describe('createAdminFailure — 역할(#237)', () => {
+  it('역할 나누기 꺼짐(AUTH_049) · 줄 수 없는 역할(403 AUTH_046)은 역할 칸에 둔다', () => {
+    expect(createAdminFailure(apiError('conflict', 409, 'AUTH_049', '준비 중'))).toEqual({
+      kind: 'errors',
+      errors: { role: ['준비 중'] },
     });
-  });
-
-  it('401 · 403 은 화면 상태다', () => {
-    expect(deactivateFailure(apiError('unauthorized', 401, 'SECURITY_001', 'x'))).toEqual({
+    expect(createAdminFailure(apiError('forbidden', 403, 'AUTH_046', '권한 없음'))).toEqual({
+      kind: 'errors',
+      errors: { role: ['권한 없음'] },
+    });
+    expect(createAdminFailure(apiError('forbidden', 403, 'SECURITY_002', 'x'))).toEqual({
       kind: 'access',
-      denied: 'unauthorized',
+      denied: 'forbidden',
     });
   });
 });
