@@ -1,7 +1,7 @@
 'use client';
 
 import { ApiError, apiFetch, type PageResponse } from '@cf/api-client';
-import { Button, cx, FieldError, TextField } from '@cf/ui';
+import { Button, Checkbox, cx, FieldError, TextField } from '@cf/ui';
 import Link from 'next/link';
 import {
   useCallback,
@@ -13,6 +13,16 @@ import {
 } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied, type FormErrors } from '@/lib/api-errors';
+import {
+  applyDraftPath,
+  draftApplyFailure,
+  draftToForm,
+  DRAFT_WARNINGS_UNACKED,
+  statusOf,
+  warningText,
+  type DraftApplyResult,
+  type SizeChartDraft,
+} from '@/lib/size-chart/draft';
 import {
   chartSaveFailure,
   PRODUCT_GONE,
@@ -42,6 +52,8 @@ import {
   type Template,
   type TemplateSummary,
 } from '@/lib/size-chart/types';
+import { SizeChartDraftPanel } from './SizeChartDraftPanel';
+import { useSizeChartDraft } from './useSizeChartDraft';
 
 /** 템플릿 고르기 목록은 한 번에 최대치(100)를 읽는다. 넘으면 최신 100개만 보인다고 알린다 */
 const TEMPLATE_PAGE_SIZE = 100;
@@ -55,6 +67,15 @@ type Status =
 
 type Templates = { kind: 'ok'; list: PageResponse<TemplateSummary> } | { kind: 'failed' };
 
+/** 표에서 검토 중인 AI 초안과 운영자가 확인한 경고 */
+type Review = { draft: SizeChartDraft; acked: string[] };
+
+export const REVIEW_STARTED =
+  'AI 초안을 표에 불러왔습니다. 빈칸을 채우고 경고를 확인한 뒤 초안 적용을 눌러 주세요. 적용 전까지 저장된 표는 그대로입니다.';
+export const REVIEW_STOPPED = '검토를 그만두고 저장된 사이즈표를 다시 불러왔습니다.';
+export const DRAFT_APPLIED =
+  '초안을 적용했습니다. 스토어 상품 상세의 사이즈 가이드에 바로 보입니다.';
+
 const errorsOf = (errors: FormErrors, key: string) => errors[key] ?? [];
 
 /**
@@ -62,6 +83,8 @@ const errorsOf = (errors: FormErrors, key: string) => errors[key] ?? [];
  * - 저장은 전체 교체 PUT 이다(없으면 만든다). 버전이 없어 마지막 쓰기가 이긴다.
  * - 엑셀 · 구글 시트에서 복사한 표를 아무 칸에 붙여넣으면 그 칸부터 오른쪽 · 아래로 채운다(`pasteIntoChart`).
  * - 삭제 API 는 없다(BE #216 범위 밖) — 한 번 저장한 표는 고쳐 쓴다.
+ * - AI 초안(#217)은 표에 불러와 검토 모드로 고친 뒤 저장 대신 초안 적용(apply)으로 확정한다. 적용은 초안 버전과
+ *   초안 당시 표 · 템플릿 revision 을 서버가 다시 확인한다 — 그사이 사람이 고친 표를 AI 가 덮지 않는다.
  */
 export function SizeChartEditor({ productId }: { productId: string }) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
@@ -73,7 +96,10 @@ export function SizeChartEditor({ productId }: { productId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [review, setReview] = useState<Review | null>(null);
   const templateId = useId();
+  const onDenied = useCallback((denied: AccessDenied) => setStatus({ kind: 'denied', denied }), []);
+  const ai = useSizeChartDraft(productId, onDenied);
 
   // 상태는 응답 콜백에서만 바꾼다 — 마운트 effect 가 부른다
   const load = useCallback(
@@ -184,9 +210,96 @@ export function SizeChartEditor({ productId }: { productId: string }) {
     setNotice(result.notice ?? '붙여넣었습니다. 값을 확인한 뒤 저장해 주세요.');
   };
 
+  const templateNameOf = (id: string) =>
+    (templates?.kind === 'ok'
+      ? templates.list.contents.find((t) => t.templateId === id)?.name
+      : undefined) ?? (form.templateId === id ? form.templateName : '');
+
+  const startReview = (draft: SizeChartDraft) => {
+    const next = draftToForm(draft, form, templateNameOf(draft.template.templateId));
+    if (!next) return;
+    setForm(next);
+    setErrors({});
+    setReview({ draft, acked: [] });
+    setNotice(REVIEW_STARTED);
+  };
+
+  const stopReview = async () => {
+    setReview(null);
+    setErrors({});
+    if (await load()) setNotice(REVIEW_STOPPED);
+  };
+
+  const toggleAck = (warningId: string, checked: boolean) =>
+    setReview(
+      (current) =>
+        current && {
+          ...current,
+          acked: checked
+            ? [...current.acked.filter((id) => id !== warningId), warningId]
+            : current.acked.filter((id) => id !== warningId),
+        },
+    );
+
+  /** 검토한 초안 적용 — 상품 표 전체 교체. 같은 내용의 재전송은 서버가 원래 결과를 돌려준다(가이드 §3-8) */
+  const applyDraft = async (current: Review) => {
+    const built = chartRequest(form);
+    if (!built.ok) {
+      setErrors(withSummary(built.errors));
+      setNotice(null);
+      return;
+    }
+    const warnings = current.draft.candidate?.warnings ?? [];
+    if (warnings.some((warning) => !current.acked.includes(warning.warningId))) {
+      setErrors({ form: [DRAFT_WARNINGS_UNACKED] });
+      setNotice(null);
+      return;
+    }
+    setSaving(true);
+    setErrors({});
+    setNotice(null);
+    try {
+      await apiFetch<DraftApplyResult>(applyDraftPath(current.draft.draftId), {
+        method: 'POST',
+        json: {
+          expectedDraftVersion: current.draft.version,
+          correctedChart: built.request,
+          acknowledgedWarningIds: current.acked,
+        },
+      });
+      setReview(null);
+      if (await load()) setNotice(DRAFT_APPLIED);
+      void ai.reload();
+    } catch (cause) {
+      const failure = draftApplyFailure(cause, form.columns);
+      if (failure.kind === 'access') setStatus({ kind: 'denied', denied: failure.denied });
+      else if (failure.kind === 'errors') setErrors(failure.errors);
+      else if (failure.kind === 'gone') {
+        // 표의 값은 남겨 둔다 — 필요하면 직접 저장할 수 있다
+        setReview(null);
+        ai.dismiss(failure.message);
+        setNotice(failure.message);
+      } else if (failure.kind === 'chartChanged') {
+        setReview(null);
+        ai.dismiss(failure.message);
+        if (await load()) setNotice(failure.message);
+      } else {
+        const next = await ai.reload();
+        if (next && statusOf(next) === 'READY') {
+          const ids = new Set(next.candidate?.warnings.map((w) => w.warningId) ?? []);
+          setReview({ draft: next, acked: current.acked.filter((id) => ids.has(id)) });
+        } else setReview(null);
+        setNotice(failure.message);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (saving) return;
+    if (review) return applyDraft(review);
     const built = chartRequest(form);
     if (!built.ok) {
       setErrors(withSummary(built.errors));
@@ -303,7 +416,7 @@ export function SizeChartEditor({ productId }: { productId: string }) {
             <select
               id={templateId}
               value={form.templateId ?? ''}
-              disabled={switching || templates?.kind !== 'ok'}
+              disabled={switching || templates?.kind !== 'ok' || review !== null}
               aria-invalid={errorsOf(errors, 'templateId').length > 0 || undefined}
               aria-describedby={
                 errorsOf(errors, 'templateId').length > 0 ? `${templateId}-error` : undefined
@@ -353,6 +466,14 @@ export function SizeChartEditor({ productId }: { productId: string }) {
           )}
           <FieldError id={`${templateId}-error`} messages={errorsOf(errors, 'templateId')} />
         </div>
+
+        <SizeChartDraftPanel
+          ai={ai}
+          templateId={form.templateId}
+          reviewing={review !== null && review.draft.draftId === ai.draft?.draftId}
+          busy={saving || switching}
+          onReview={startReview}
+        />
 
         {form.templateId && form.columns.length > 0 && (
           <section aria-labelledby={`${templateId}-grid`} className="flex flex-col gap-3">
@@ -528,12 +649,61 @@ export function SizeChartEditor({ productId }: { productId: string }) {
       <p role="status" className="text-sm empty:hidden">
         {notice ?? ''}
       </p>
+      {review && <ReviewChecklist review={review} onToggle={toggleAck} disabled={saving} />}
       <FieldError messages={errorsOf(errors, 'form')} />
-      <div data-tour="size-save">
+      <div data-tour="size-save" className="flex flex-wrap gap-2">
         <Button type="submit" disabled={saving || switching || !form.templateId}>
-          {saving ? '저장 중…' : '저장'}
+          {review ? (saving ? '적용 중…' : '초안 적용') : saving ? '저장 중…' : '저장'}
         </Button>
+        {review && (
+          <Button variant="secondary" disabled={saving} onClick={() => void stopReview()}>
+            검토 그만두기
+          </Button>
+        )}
       </div>
     </form>
+  );
+}
+
+/** 적용 전에 확인할 경고. 모두 확인해야 적용된다(서버 SIZE_CHART_DRAFT_009) */
+function ReviewChecklist({
+  review,
+  onToggle,
+  disabled,
+}: {
+  review: Review;
+  onToggle: (warningId: string, checked: boolean) => void;
+  disabled: boolean;
+}) {
+  const warnings = review.draft.candidate?.warnings ?? [];
+  return (
+    <section
+      data-tour="size-ai-review"
+      aria-label="AI 초안 검토"
+      className="flex flex-col gap-2 rounded-md border border-border p-4"
+    >
+      <h2 className="text-base font-semibold">AI 초안 검토</h2>
+      {warnings.length === 0 ? (
+        <p className="text-sm text-muted-fg">
+          확인할 경고가 없습니다. 치수를 확인한 뒤 적용해 주세요.
+        </p>
+      ) : (
+        <>
+          <p className="text-sm text-muted-fg">
+            AI 가 확인이 필요하다고 표시한 칸입니다. 표에서 값을 확인 · 수정하고 하나씩 확인해
+            주세요. (위치는 초안을 불러온 때의 순서입니다)
+          </p>
+          {warnings.map((warning) => (
+            <Checkbox
+              key={warning.warningId}
+              label={warningText(review.draft, warning)}
+              checked={review.acked.includes(warning.warningId)}
+              disabled={disabled}
+              onChange={(event) => onToggle(warning.warningId, event.currentTarget.checked)}
+            />
+          ))}
+        </>
+      )}
+    </section>
   );
 }
