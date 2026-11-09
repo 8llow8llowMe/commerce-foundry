@@ -10,6 +10,12 @@ import {
   passwordProblem,
 } from '@/lib/admin-account/errors';
 import { ADMIN_ACCOUNTS_PATH } from '@/lib/admin-account/query';
+import {
+  ASSIGNABLE_ROLES,
+  isAssignableRole,
+  ROLE_HINT,
+  ROLE_LABEL,
+} from '@/lib/admin-account/roles';
 import type { AccessDenied, FormErrors } from '@/lib/api-errors';
 
 const CHECK_INPUT = '입력값을 확인해 주세요.';
@@ -44,6 +50,7 @@ export function AdminCreateForm({
       setErrors({ password: [problem] });
       return;
     }
+    const role = data.get('role');
     setSubmitting(true);
     setErrors({});
     try {
@@ -53,6 +60,8 @@ export function AdminCreateForm({
           email: String(data.get('staffEmail') ?? ''),
           password,
           name: String(data.get('name') ?? ''),
+          // 고르지 않으면 보내지 않는다 — 서버가 기존 관리자(ADMIN)로 만든다
+          ...(isAssignableRole(role) ? { role } : {}),
         },
       });
       form.reset();
@@ -97,6 +106,31 @@ export function AdminCreateForm({
           required
           errors={errors.name}
         />
+        <div className="flex flex-col gap-1">
+          <label htmlFor="add-role" className="text-sm font-medium">
+            역할
+          </label>
+          {/* 고르지 않으면 역할 없이(기존 관리자 · 모든 권한) 만든다. 역할을 고르면 서버의 역할 나누기가 켜져 있어야 한다(아니면 AUTH_049) */}
+          <select
+            id="add-role"
+            name="role"
+            defaultValue=""
+            aria-describedby="add-role-hint"
+            aria-invalid={errors.role?.length ? true : undefined}
+            className="h-10 min-w-0 rounded-md border border-border bg-bg px-3"
+          >
+            <option value="">{ROLE_LABEL.ADMIN} — 모든 권한</option>
+            {ASSIGNABLE_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {ROLE_LABEL[role]} — {ROLE_HINT[role]}
+              </option>
+            ))}
+          </select>
+          <p id="add-role-hint" className="text-xs text-muted-fg">
+            역할에 따라 볼 수 있는 메뉴가 달라집니다. 나중에 목록에서 바꿀 수 있습니다.
+          </p>
+          <FieldError messages={errors.role ?? []} />
+        </div>
         <div className="flex flex-col gap-1">
           <TextField
             label="처음 비밀번호"
