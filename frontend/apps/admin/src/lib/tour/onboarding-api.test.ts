@@ -30,9 +30,10 @@ describe('guideOf', () => {
       { key: 'stocks', version: 1 },
       { key: 'stock-detail', version: 1 },
       { key: 'size-charts', version: 1 },
-      { key: 'size-chart-editor', version: 1 },
+      { key: 'size-chart-editor', version: 2 },
       { key: 'size-chart-templates', version: 1 },
       { key: 'shipping-domestic', version: 1 },
+      { key: 'jobs', version: 1 },
     ]);
   });
 });

@@ -83,6 +83,31 @@ describe('helpTopicFor · toursFor', () => {
     ]);
   });
 
+  it('사이즈표 입력 투어(v2)는 AI 초안 단계를 필수로, 검토 칸은 초안을 불러왔을 때만 있어 선택으로 가리킨다', () => {
+    const tour = toursFor('/size-charts/42')[1];
+    expect(tour?.id).toBe('size-chart-editor-v2');
+    expect(tour?.steps.map((step) => [step.target, step.optional ?? false])).toEqual([
+      ['size-template', false],
+      ['size-ai-draft', false],
+      ['size-grid', true],
+      ['size-ai-review', true],
+      ['size-save', false],
+    ]);
+  });
+
+  it('알림 센터 투어는 늘 있는 알림 버튼만 필수이고, 작업 목록 조건 · 표는 선택이라 작업 상세에서도 돈다', () => {
+    for (const pathname of ['/jobs', '/jobs/9']) {
+      const tour = toursFor(pathname)[1];
+      expect(tour?.id).toBe('jobs-v1');
+      expect(tour?.steps.map((step) => [step.target, step.optional ?? false])).toEqual([
+        ['notifications', false],
+        ['job-filters', true],
+        ['job-table', true],
+        [null, false],
+      ]);
+    }
+  });
+
   it('결제 확인 투어는 표가 빈 목록이면 없어 선택이고, 읽기 전용 안내는 가운데에 뜬다', () => {
     expect(
       toursFor('/payments')[1]?.steps.map((step) => [step.target, step.optional ?? false]),
