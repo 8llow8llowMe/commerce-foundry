@@ -39,6 +39,38 @@ B1b A에서 `LegacyPriceSnapshot`·`LegacyPriceWritePlan`·`LegacyPriceWriteProc
 B1b B는 기존 다섯 writer를 같은 트랜잭션의 부모 CAS/@Version 보호 아래 연결한다. 실제 변경 시 기준통화 누락행을 보완하고 추가 통화 불변식을 검사한다.
 가격 동일값·기은퇴 no-op은 가격행을 조회하거나 보완하지 않는다. backfill·정본 전환·운영 검증은 미완료이며 신규 USD 구매는 활성화하지 않는다.
 
+### B1c-A 미연결 원시 조회 기반
+
+B1c는 A 조회 기반과 B 사전검증 실행기로 분리한다. A는 분류기·집계 보고서·이행 도구가 아니다.
+`product`·`sku`·`product_price`·`sku_price` 각각에서 직접 시작하는 읽기 Port/QueryDSL adapter를 제공한다.
+부모 존재·판매 상태·노출 여부로 필터하지 않아 고아·중복·STOP/은퇴·soft-delete 원시행도 누락하지 않는다.
+다섯 legacy writer·기존 조회·Money·가격행 제약·스키마·인덱스·구매 gate는 변경하지 않는다.
+
+| 입력/출력 | A 계약 |
+|---|---|
+| 상한 | 네 테이블 각각의 nullable `max(id)`. 빈 테이블과 ID 0을 구별한다 |
+| 페이지 | lane, nullable upper/after, pageSize 1~500. ID 오름차순, 최대 pageSize행의 불변 목록 |
+| 첫 페이지 | after=null이면 하한 조건 없음. 손상된 음수·0·Long.MIN_VALUE도 읽는다 |
+| 종료 경계 | upper=null 또는 after>=upper는 빈 목록. `id<=upper`, 다음은 `id>lastId`이며 +1 연산 없음 |
+| 원시행 | 소속·식별자·금액·통화 각 컬럼, nullable 정가 양쪽, SKU 판매 상태·상품 version을 내부 검사용으로 보존 |
+
+통화·상태는 enum으로 hydrate하지 않고 문자열 scalar로 읽으며 Money/도메인 생성·0원 보완·통화 추정을 하지 않는다.
+논리 중복·고아도 원시행 그대로 반환한다. 이를 발견사항으로 판정·집계하는 기능은 B이며 A가 검출 완료를 뜻하지 않는다.
+원시행·상한·cursor는 공개 응답이나 운영 보고서가 아니며 식별자·가격·통화·원문을 로그에 출력하지 않는다. `toString`도 가린다.
+
+상한 캡처는 별도 read-only REPEATABLE_READ TX에서 SELECT 4개, 유효한 페이지는 별도 TX에서 SELECT 최대1개다.
+각 TX는 REQUIRES_NEW·timeout 5초, 질의 timeout hint 2000ms를 사용한다. 전체 호출·커넥션 대기까지 2초 상한은 아니다.
+호출자 TX를 계속 사용하지 않으며 상한과 페이지들은 서로 다른 snapshot이다. 기존 행 수정/삭제·지연 삽입을 fence하지 않는다.
+상한은 유한한 순회 경계일 뿐 한 시점 전체 snapshot·완전성·무오염 인증이 아니다. B의 일관성/실패/재실행 계약도 후속이다.
+입력 오류는 값을 싣지 않는 고정 오류, 시작·질의·TX 종료 실패는 원문/cause 없는 읽기 실패로 구분한다. 자동 재시도하지 않는다.
+정제한 반환 예외가 JDBC/Hibernate 자체 로그도 모두 가린다는 뜻은 아니며 실제 실패 관측·보안 검토로 확인한다.
+
+검증은 합성 H2/실제 PostgreSQL의 PK 경계·손상 raw 값·고아/중복 보존·큰 상품의 bounded 조회와
+네 테이블의 전체 값/시각/version 보존·DML 0건·질의 수를 포함한다. native SQL·DDL은 생산 코드에 추가하지 않는다.
+A에는 생산 caller·UseCase·스케줄러·ADMIN API·운영 CLI가 없고, 운영 DB 조회·실제 backfill·정본 전환을 실행하지 않는다.
+기준통화 누락/불일치·zero/partial 판정, 전체 분류·집계·실패/경합·재실행 실행기는 A 머지 후 B에서 구현한다.
+A 완료는 B1c 사전검증 전체나 가격 이행·#20 전체 완료가 아니다.
+
 ## 2. 가격 모델과 불변식
 
 가격은 product-service의 기존 상품 컨텍스트가 소유한다. 별도 가격 서비스를 만들지 않는다.
