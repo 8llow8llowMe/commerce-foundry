@@ -25,14 +25,14 @@ class ClaimRecoverySituationTest {
 
     @ParameterizedTest(name = "{0} → {1}")
     @CsvSource({"REFUND_FAILED, REQUESTED", "RESTORATION_FAILED, REFUNDED"})
-    @DisplayName("다시 열기는 종결 실패를 그 단계의 대기 상태로 돌리고 횟수 0 · 실패 코드 없음 · 다음 시각 lease 로 둔다. 금액 · 결제 · 키는 그대로다")
+    @DisplayName("다시 열기는 종결 실패를 그 단계의 대기 상태로 돌리고 받은 시작 횟수 · 실패 코드 없음 · 다음 시각 lease 로 둔다. 금액 · 결제 · 키는 그대로다")
     void reopenReturnsToAwaitingStepOfFailure(Claim.Status failed, Claim.Status awaiting) {
-        Claim source = cancellation(failed, Claim.REFUND_UNCONFIRMED, 8);
+        Claim source = cancellation(failed, failed == Claim.Status.REFUND_FAILED ? Claim.REFUND_UNCONFIRMED : Claim.RESTORATION_UNCONFIRMED, 8);
 
-        Claim reopened = source.reopen(NOW.plusSeconds(120));
+        Claim reopened = source.reopen(NOW.plusSeconds(120), 3);
 
         assertThat(reopened.status()).isEqualTo(awaiting);
-        assertThat(reopened.attemptCount()).isZero();
+        assertThat(reopened.attemptCount()).isEqualTo(3);
         assertThat(reopened.failureCode()).isNull();
         assertThat(reopened.nextAttemptAt()).isEqualTo(Instant.parse("2026-11-10T00:02:00.123456Z"));
         assertThat(reopened.hasSameRefundRequest(source)).isTrue();
@@ -43,7 +43,18 @@ class ClaimRecoverySituationTest {
     @EnumSource(value = Claim.Status.class, names = {"REQUESTED", "REFUNDED", "COMPLETED"})
     @DisplayName("종결 실패가 아니면 다시 열지 않는다")
     void reopenRejectsNonFailedClaim(Claim.Status status) {
-        assertThatThrownBy(() -> cancellation(status, null, 0).reopen(NOW)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> cancellation(status, null, 0).reopen(NOW, 0)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"PAYMENT_016", "PAYMENT_017", "PAYMENT_019"})
+    @DisplayName("결제사가 거절한 환불은 다시 열지 않는다 — 같은 claimId 는 늘 같은 거절이라 진짜 사유 코드만 지워진다")
+    void rejectedRefundIsNotReopened(String failure) {
+        Claim rejected = cancellation(Claim.Status.REFUND_FAILED, failure, 0);
+
+        assertThat(rejected.isRefundRejected()).isTrue();
+        assertThatThrownBy(() -> rejected.reopen(NOW, 0)).isInstanceOf(IllegalStateException.class);
+        assertThat(cancellation(Claim.Status.REFUND_FAILED, Claim.REFUND_UNCONFIRMED, 0).isRefundRejected()).isFalse();
     }
 
     @Test
@@ -54,8 +65,8 @@ class ClaimRecoverySituationTest {
         Claim returned = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
             List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
 
-        assertThatThrownBy(() -> unsaved.reopen(NOW)).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> returned.reopen(NOW)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> unsaved.reopen(NOW, 0)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> returned.reopen(NOW, 0)).isInstanceOf(IllegalStateException.class);
     }
 
     @ParameterizedTest(name = "{0} · {1} → {2}")
