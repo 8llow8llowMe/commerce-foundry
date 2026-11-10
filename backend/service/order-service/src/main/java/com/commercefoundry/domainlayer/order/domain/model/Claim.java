@@ -233,6 +233,21 @@ public record Claim(
         return with(status, attemptCount, until.truncatedTo(ChronoUnit.MICROS), null);
     }
 
+    /**
+     * 운영자 재시도로 종결 실패를 그 단계의 대기 상태로 다시 연다 (#17 A2b) — REFUND_FAILED → REQUESTED, RESTORATION_FAILED → REFUNDED. 횟수는 0, 실패 코드는
+     * 지우고 다음 시각을 {@code until}(선점 lease)로 둔다. 같은 클레임 아이디 · 저장된 결제 · 금액으로 다시 보내므로 원격은 멱등이다. 재시도 자격은
+     * {@link ClaimAdminRecoveryPolicy#requireRetry} 가 먼저 본다.
+     */
+    public Claim reopen(Instant until) {
+        Objects.requireNonNull(until, "until");
+        requireCancellation();
+        if (isNew() || !status.isFailed()) {
+            throw new IllegalStateException("다시 열기는 저장된 종결 실패 클레임만 합니다: status=" + status);
+        }
+        Status reopened = status == Status.REFUND_FAILED ? Status.REQUESTED : Status.REFUNDED;
+        return with(reopened, 0, until.truncatedTo(ChronoUnit.MICROS), null);
+    }
+
     public boolean isNew() {
         return version == null;
     }

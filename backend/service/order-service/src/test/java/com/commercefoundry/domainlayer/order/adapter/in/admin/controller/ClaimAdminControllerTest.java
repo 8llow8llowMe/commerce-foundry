@@ -23,10 +23,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -83,6 +86,53 @@ class ClaimAdminControllerTest {
                 mvc.get().uri(uri).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange().getResponse(), SecurityErrorCode.FORBIDDEN);
             SecurityEnvelopeAssertions.assertEnvelope(mvc.get().uri(uri).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
         }
+        verifyNoInteractions(claimAdminUseCase);
+    }
+
+    private MvcTestResult retry(MemberRole role, String body) {
+        return mvc.post().uri(PATH + "/1/retries").header(HttpHeaders.AUTHORIZATION, bearer(role)).contentType(MediaType.APPLICATION_JSON).content(body)
+            .exchange();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER", "MANAGER"})
+    @DisplayName("다시 시도는 ORDER_MANAGE 라 ADMIN · OWNER · MANAGER 가 유스케이스에 닿고 버전은 본문, 관리자 아이디는 토큰에서 온다 (#17 A2b)")
+    void orderManagersMayRetry(MemberRole role) {
+        assertThat(retry(role, "{\"expectedVersion\":3}")).hasStatusOk();
+
+        verify(claimAdminUseCase).retry(1L, 3L, TestTokens.MEMBER_ID);
+    }
+
+    @Test
+    @DisplayName("STAFF · 고객은 다시 시도 403 · SECURITY_005, 토큰 없으면 401 이고 유스케이스를 부르지 않는다 (#17 A2b)")
+    void readersMayNotRetry() {
+        for (MemberRole role : List.of(MemberRole.STAFF, MemberRole.CUSTOMER)) {
+            SecurityEnvelopeAssertions.assertEnvelope(retry(role, "{\"expectedVersion\":3}").getResponse(), SecurityErrorCode.FORBIDDEN);
+        }
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH + "/1/retries").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"expectedVersion\":3}").exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        verifyNoInteractions(claimAdminUseCase);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"{}", "{\"expectedVersion\":null}", "{\"expectedVersion\":-1}"})
+    @DisplayName("expectedVersion 이 없거나 음수면 400 · ORDER_169 이고 유스케이스를 부르지 않는다 (#17 A2b)")
+    void retryRequiresExpectedVersion(String body) {
+        MvcTestResult result = retry(MemberRole.ADMIN, body);
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_169");
+        verifyNoInteractions(claimAdminUseCase);
+    }
+
+    @Test
+    @DisplayName("양수가 아닌 클레임 아이디의 다시 시도는 400 · ORDER_166 이다 (#17 A2b)")
+    void retryRejectsNonPositiveClaimId() {
+        MvcTestResult result = mvc.post().uri(PATH + "/0/retries").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":3}").exchange();
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_166");
         verifyNoInteractions(claimAdminUseCase);
     }
 }

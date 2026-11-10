@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.order.adapter.in.admin.presenter;
 import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminItem;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminLineItem;
+import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminRecoveryItem;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.ClaimAdminResponse;
 import com.commercefoundry.domainlayer.order.application.info.ClaimAdminSummaryInfo;
 import com.commercefoundry.domainlayer.order.application.info.ClaimAdminDetailInfo;
@@ -18,8 +19,10 @@ public class ClaimAdminPresenter {
     }
 
     public ClaimAdminResponse toResponse(ClaimAdminDetailInfo claim) {
+        ClaimAdminDetailInfo.Recovery recovery = claim.recovery();
         return new ClaimAdminResponse(String.valueOf(claim.claimId()), String.valueOf(claim.orderId()), claim.type().toMetadata(), claim.status().toMetadata(),
             MoneyItems.of(claim.expectedRefund()), claim.requestedAt(), claim.items().stream()
-                .map(item -> new ClaimAdminLineItem(String.valueOf(item.orderItemId()), item.quantity(), item.reason().toMetadata())).toList());
+                .map(item -> new ClaimAdminLineItem(String.valueOf(item.orderItemId()), item.quantity(), item.reason().toMetadata())).toList(),
+            new ClaimAdminRecoveryItem(recovery.situation().toMetadata(), recovery.nextAutomaticAttemptAt(), recovery.retryable(), recovery.version()));
     }
 }

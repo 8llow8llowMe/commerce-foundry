@@ -43,6 +43,12 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
     }
 
     @Override
+    public Optional<Claim> findById(long claimId) {
+        return claimRepository.findById(claimId)
+            .map(entity -> claimMapper.toDomain(entity, claimItemRepository.findAllByClaimIdOrderByOrderItemIdAsc(claimId)));
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Optional<Claim> findByIdForUpdate(long claimId) {
         return claimRepository.findById(claimId).map(entity -> {

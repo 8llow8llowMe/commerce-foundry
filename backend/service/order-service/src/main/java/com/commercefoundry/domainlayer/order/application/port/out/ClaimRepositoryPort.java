@@ -10,6 +10,9 @@ import java.util.UUID;
 public interface ClaimRepositoryPort {
     Optional<Claim> findByOrderIdAndRequestKey(long orderId, UUID requestKey);
 
+    /** 클레임 하나(항목 · 버전 포함). 쓰기 쪽 Processor 가 버전을 대조한 뒤 {@link #update} 로 저장한다 — 잠그지 않는다. */
+    Optional<Claim> findById(long claimId);
+
     /** 호출자의 짧은 쓰기 트랜잭션에서 최신 행을 NOWAIT 잠근다. 잠금 중 외부 I/O를 하지 않는다. */
     Optional<Claim> findByIdForUpdate(long claimId);
 

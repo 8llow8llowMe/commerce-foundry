@@ -117,6 +117,14 @@ public enum OrderErrorCode {
     /** 환불 성공 응답은 받았지만 주문 DB 반영을 확정하지 못했다. 환불 실패나 취소 접수 롤백을 뜻하지 않는다. */
     CANCELLATION_REFUND_RECORDING_UNAVAILABLE("ORDER_036", "결제 취소 결과를 주문에 반영하지 못했습니다. 잠시 후 주문 상태를 확인해 주세요.",
         HttpStatus.SERVICE_UNAVAILABLE),
+    /** 운영자가 본 클레임 버전(expectedVersion)과 지금 저장된 버전이 다르다 — 스케줄러 · 고객 · 다른 운영자가 먼저 바꿨다 (#17 A2b). */
+    CLAIM_CONCURRENTLY_CHANGED("ORDER_037", "다른 곳에서 클레임이 먼저 바뀌었습니다. 새로고침한 뒤 다시 확인해 주세요.", HttpStatus.CONFLICT),
+    /** 재시도할 수 없는 클레임 — 처리 완료 · 반품 · 주문 상태 확인이 필요한 접수 (#17 A2b). */
+    CLAIM_RETRY_NOT_ALLOWED("ORDER_038", "이 클레임은 지금 다시 시도할 수 없습니다. 처리 상황을 확인해 주세요.", HttpStatus.CONFLICT),
+    /** 자동 처리(고객 요청 · 재시도 스케줄러)가 아직 이 클레임을 쥐고 있다 — 겹쳐 보내면 같은 환불 · 복원이 동시에 나간다 (#17 A2b). */
+    CLAIM_AUTO_PROCESSING("ORDER_039", "자동 처리가 진행 중입니다. 다음 자동 시도 시각 뒤에 다시 확인해 주세요.", HttpStatus.CONFLICT),
+    /** 재시도 스케줄러가 꺼져 있다 — 다시 열어도 미확정 결과를 따라갈 쪽이 없다. 고객 접수의 {@code ORDER_035} 와 같은 게이트다 (#17 A2b). */
+    CLAIM_RETRY_UNAVAILABLE("ORDER_040", "지금은 자동 환불 처리가 꺼져 있어 다시 시도할 수 없습니다. 시스템 관리자에게 확인해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

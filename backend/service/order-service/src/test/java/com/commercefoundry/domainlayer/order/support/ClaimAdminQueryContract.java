@@ -136,6 +136,8 @@ public abstract class ClaimAdminQueryContract {
             jsonPath("$.dataBody.items[0].orderItemId").isString().match(result);
             jsonPath("$.dataBody.items[0].reason.code").value("DEFECTIVE").match(result);
             jsonPath("$.dataBody.items.length()").value(id == f.older() ? 1 : 2).match(result);
+            jsonPath("$.dataBody.recovery.version").isNumber().match(result);
+            jsonPath("$.dataBody.recovery.retryable").value(false).match(result);
             assertSafe(result.getResponse());
         }
         assertThat(snapshot(f)).isEqualTo(before);
@@ -183,8 +185,14 @@ public abstract class ClaimAdminQueryContract {
         return "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, MemberRole.ADMIN).tokenValue();
     }
 
+    /**
+     * 멱등 키 · 개인정보 · 원시 실패 코드 · 시도 횟수 · 결제 아이디는 내지 않는다. 버전은 상세의 {@code recovery.version}(다시 시도의 expectedVersion, #17 A2b)에만 있다 —
+     * 그 칸을 뺀 나머지 본문에는 여전히 없다.
+     */
     private void assertSafe(MockHttpServletResponse response) throws Exception {
-        assertThat(response.getContentAsString()).doesNotContain("requestKey", "version", "memberId", "recipient", "shippingAddress", "테스트수령인", "01000000001");
+        String body = response.getContentAsString().replaceAll("\"recovery\":\\{[^{}]*(\\{[^{}]*\\}[^{}]*)*\\}", "\"recovery\":{}");
+        assertThat(body).doesNotContain("requestKey", "version", "memberId", "recipient", "shippingAddress", "테스트수령인", "01000000001",
+            "attemptCount", "failureCode", "paymentId");
     }
 
     private List<Object> snapshot(Fixture f) {

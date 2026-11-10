@@ -88,5 +88,7 @@ public final class OrderValidationMessage {
     public static final String RETURN_REASON_REQUIRED = "ORDER_165:반품 사유(reason)는 필수입니다.";
     /** 반품 접수는 반품 사유 3종만 받는다 — 결제 후 취소 사유(ORDER_MISTAKE · PAYMENT_ISSUE · OTHER)는 클레임 사유에 함께 있지만 반품 API 로 받지 않는다 (#16 PR-2). */
     public static final String RETURN_REASON_INVALID = "ORDER_168:반품 사유(reason)는 CHANGE_OF_MIND, DEFECTIVE, WRONG_ITEM 중 하나여야 합니다.";
-    public static final String IDEMPOTENCY_KEY_FORMAT = "ORDER_198:Idempotency-Key 는 완전한 UUID 형식이어야 합니다.";
+    /** 어드민 클레임 재시도의 화면 버전 (#17 A2b) — 상세 조회 응답의 {@code recovery.version} 을 그대로 보낸다. */
+    public static final String CLAIM_EXPECTED_VERSION = "ORDER_169:expectedVersion 은 필수이며 0 이상이어야 합니다.";
+    public static final String IDEMPOTENCY_KEY_FORMAT ="ORDER_198:Idempotency-Key 는 완전한 UUID 형식이어야 합니다.";
 }
