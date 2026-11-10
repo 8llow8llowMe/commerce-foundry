@@ -3,17 +3,20 @@ package com.commercefoundry.domainlayer.order.adapter.in.admin.controller;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminItem;
+import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.request.ClaimRetryRequest;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.ClaimAdminResponse;
 import com.commercefoundry.domainlayer.order.application.exception.OrderValidationMessage;
 import com.commercefoundry.domainlayer.order.application.model.ClaimAdminFilter;
 import com.commercefoundry.domainlayer.order.application.port.in.ClaimAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
@@ -24,11 +27,13 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "[어드민] 클레임 조회", description = "반품 · 결제 후 취소 클레임 목록과 상세 조회")
+@Tag(name = "[어드민] 클레임", description = "반품 · 결제 후 취소 클레임 목록 · 상세 조회와 결제 후 취소 다시 시도")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -62,5 +67,20 @@ public class ClaimAdminController {
         @Parameter(description = "클레임 아이디") @PathVariable @Positive(message = OrderValidationMessage.CLAIM_ID_POSITIVE) long claimId
     ) {
         return ResponseEntity.ok(Response.success(useCase.getClaim(claimId, admin.memberId())));
+    }
+
+    @Operation(summary = "결제 후 취소 다시 시도", description = "결제 취소 · 재고 복원이 멈춘 취소 접수를 같은 금액 · 같은 접수로 다시 보낸 뒤 현재 상세를 준다. "
+        + "본문 expectedVersion 은 상세의 recovery.version 이다. 200 이어도 결제사가 다시 거절했을 수 있으니 status · recovery.situation 을 다시 읽는다. "
+        + "버전 불일치 · 동시 변경 409(ORDER_037), 다시 시도할 수 없는 접수 409(ORDER_038), 자동 처리 중 409(ORDER_039), 자동 처리 꺼짐 503(ORDER_040), "
+        + "결제 취소 결과 미반영 503(ORDER_036), 없는 접수 404(ORDER_032), expectedVersion 누락 · 음수 400(ORDER_169).")
+    @PreAuthorize(AdminAuthority.ORDER_MANAGE)
+    @AdminAudited(action = "CLAIM_RETRY")
+    @PostMapping("/{claimId}/retries")
+    public ResponseEntity<Response<ClaimAdminResponse>> retry(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @Parameter(description = "클레임 아이디") @PathVariable @Positive(message = OrderValidationMessage.CLAIM_ID_POSITIVE) long claimId,
+        @RequestBody @Valid ClaimRetryRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(useCase.retry(claimId, request.expectedVersion(), admin.memberId())));
     }
 }

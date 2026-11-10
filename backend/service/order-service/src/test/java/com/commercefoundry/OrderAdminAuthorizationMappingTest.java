@@ -39,7 +39,9 @@ class OrderAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/orders/status-changes", AdminAuthority.ORDER_MANAGE),
         // 클레임
         Map.entry("GET /api/v1/admin/claims", AdminAuthority.ORDER_READ),
-        Map.entry("GET /api/v1/admin/claims/{claimId}", AdminAuthority.ORDER_READ)
+        Map.entry("GET /api/v1/admin/claims/{claimId}", AdminAuthority.ORDER_READ),
+        // 결제 후 취소 다시 시도(#17 A2b) — 같은 금액 · 같은 접수로 자동 처리를 다시 돌린다. 사용자 결정(2026-11-06)으로 ORDER_MANAGE
+        Map.entry("POST /api/v1/admin/claims/{claimId}/retries", AdminAuthority.ORDER_MANAGE)
     );
 
     @Autowired

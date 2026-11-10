@@ -18,4 +18,9 @@ public class ClaimAdminAuditProcessor {
     public void viewed(long adminId, long claimId) {
         AdminAuditLog.write("CLAIM_VIEW", adminId, AdminAuditLog.target("claim", claimId), true);
     }
+
+    /** 다시 시도 (#17 A2b) — 거절(409 · 503 · 404)도 false 로 남긴다. 성공은 선점이 커밋됐다는 뜻이고 환불 · 복원 결과는 상세 상태로 본다. */
+    public void retried(long adminId, long claimId, boolean success) {
+        AdminAuditLog.write("CLAIM_RETRY", adminId, AdminAuditLog.target("claim", claimId), success);
+    }
 }

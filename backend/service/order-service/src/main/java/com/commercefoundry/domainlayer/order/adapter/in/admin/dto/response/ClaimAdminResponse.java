@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminLineItem;
+import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminRecoveryItem;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
@@ -28,6 +29,9 @@ public record ClaimAdminResponse(
     Instant requestedAt,
 
     @Schema(description = "접수 항목. 주문 항목 아이디 오름차순")
-    List<ClaimAdminLineItem> items
+    List<ClaimAdminLineItem> items,
+
+    @Schema(description = "결제 후 취소 처리 상황 · 다시 시도 가능 여부 · 화면 버전 (#17)")
+    ClaimAdminRecoveryItem recovery
 ) {
 }
