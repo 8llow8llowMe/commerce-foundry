@@ -46,9 +46,12 @@ class OrderPaymentSchemaUpgradePostgresTest {
             // Preserve both valid legacy C1 shapes without backfill.
             insert(jdbc, 1, "REJECTED_ORDER_CANCELED", 51L, null, null);
             insert(jdbc, 2, "REJECTED_ORDER_CANCELED", 52L, 62L, null);
+            jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, version, created_at, updated_at) "
+                + "values (11, 100, ?, 'RETURN', 'REQUESTED', 0, now(), now())", UUID.randomUUID());
             // 운영 적용 순서 그대로: c2b → #16 PR-2a 1단계 → 2단계. 현재 매핑 전체를 validate 하므로 뒤 단계도 적용한다.
             var migration = new ResourceDatabasePopulator(new ClassPathResource("ddl/order-payment-c2b-restoration.sql"),
-                    new ClassPathResource("ddl/claim-cancellation.sql"), new ClassPathResource("ddl/claim-cancellation-cleanup.sql"));
+                    new ClassPathResource("ddl/claim-cancellation.sql"), new ClassPathResource("ddl/claim-cancellation-cleanup.sql"),
+                    new ClassPathResource("ddl/claim-admin-decision.sql"));
             migration.setSqlScriptEncoding("UTF-8");
             migration.execute(source);
             return database;
@@ -71,6 +74,25 @@ class OrderPaymentSchemaUpgradePostgresTest {
         assertThatThrownBy(() -> insert(jdbc, 7, "REJECTED_PAYMENT_NOT_DONE", null, 67L, "2026-11-02T00:00:00Z"))
             .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         assertThatThrownBy(() -> insert(jdbc, 8, "REJECTED_ALREADY_PAID", 58L, 68L, "2026-11-02T00:00:00Z"))
+            .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void decisionMigrationPreservesOldWritesAndEnforcesNewEvidenceCheck() {
+        jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, version, created_at, updated_at) "
+            + "values (12, 101, ?, 'RETURN', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID());
+        jdbc.update("update orders.claim set version = version + 1 where id = 11");
+        assertThat(jdbc.queryForObject("select count(*) from orders.claim where id in (11, 12) and decision_reason is null "
+            + "and decided_by_member_id is null and decided_at is null and decision_failure_code is null", Long.class)).isEqualTo(2);
+        assertThatThrownBy(() -> jdbc.update("update orders.claim set decided_by_member_id = 7 where id = 11"))
+            .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, expected_refund_amount, expected_refund_currency, payment_id, "
+            + "attempt_count, next_attempt_at, failure_code, version, created_at, updated_at) "
+            + "values (13, 102, ?, 'CANCELLATION', 'RESTORATION_FAILED', 1000, 'KRW', 77, 0, null, 'PRODUCT_028', 0, now(), now())", UUID.randomUUID());
+        jdbc.update("update orders.claim set decision_reason = '운영 확인', decided_by_member_id = 7, decided_at = now(), "
+            + "decision_failure_code = 'PAYMENT_016' where id = 13");
+        assertThat(jdbc.queryForObject("select failure_code from orders.claim where id = 13", String.class)).isEqualTo("PRODUCT_028");
+        assertThatThrownBy(() -> jdbc.update("update orders.claim set failure_code = null where id = 13"))
             .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
 

@@ -92,6 +92,71 @@ public abstract class ClaimCancellationPersistenceContract {
         return tx().execute(s -> claims.update(claim));
     }
 
+    private static Claim decided(Claim claim, String reason) {
+        return new Claim(claim.id(), claim.orderId(), claim.requestKey(), claim.type(), claim.status(), claim.expectedRefund(), claim.paymentId(),
+            claim.attemptCount(), claim.nextAttemptAt(), claim.failureCode(), new Claim.Decision(reason, 7, NOW.plusNanos(123_456_789), "PAYMENT_016"),
+            claim.items(), claim.requestedAt(), claim.version());
+    }
+
+    @Test
+    void decisionRoundTripUpdateAndStaleWriterPreserveEvidence() {
+        Claim original = insert(newCancellation(paidOrder(), NOW));
+        assertThat(original.decision()).isNull();
+        Claim saved = update(decided(original, "운영 확인"));
+        assertThat(saved.decision()).isEqualTo(decided(original, "운영 확인").decision());
+        assertThat(saved.decision().decidedAt()).isEqualTo(NOW.plusNanos(123_456_000));
+        Claim read = claims.findByOrderIdAndRequestKey(saved.orderId(), saved.requestKey()).orElseThrow();
+        assertThat(read).isEqualTo(saved);
+        Claim refunded = update(saved.markRefunded(NOW));
+        Claim completed = update(refunded.complete());
+        assertThat(completed.decision()).isEqualTo(saved.decision());
+        assertThat(completed.failureCode()).isNull();
+        assertThatThrownBy(() -> update(original.holdUntil(NOW.plusSeconds(60)))).isInstanceOf(OptimisticLockingFailureException.class);
+        assertThat(claims.findByOrderIdAndRequestKey(saved.orderId(), saved.requestKey()).orElseThrow()).isEqualTo(completed);
+    }
+
+    @Test
+    void concurrentDecisionWritersHaveOneWinnerWithoutLosingEvidence() throws Exception {
+        Claim original = insert(newCancellation(paidOrder(), NOW));
+        AtomicLong writer = new AtomicLong();
+        List<String> results = race(2, () -> {
+            String reason = "운영 확인 " + writer.incrementAndGet();
+            try {
+                update(decided(original, reason));
+                return reason;
+            } catch (OptimisticLockingFailureException exception) {
+                return "LOST";
+            }
+        });
+        assertThat(results).filteredOn("LOST"::equals).hasSize(1);
+        Claim read = claims.findByOrderIdAndRequestKey(original.orderId(), original.requestKey()).orElseThrow();
+        assertThat(results).contains(read.decision().reason());
+        assertThat(read.version()).isEqualTo(original.version() + 1);
+        assertThat(read.decision().previousFailureCode()).isEqualTo("PAYMENT_016");
+    }
+
+    @Test
+    void decisionColumnsAreAllNullOrCompleteCancellationEvidence() {
+        Order order = paidOrder();
+        long id = rawClaim(order.id(), "CANCELLATION", "REFUND_FAILED", 77L, 1000L, 0, null, "PAYMENT_019");
+        for (String assignment : List.of("decision_reason = '확인'", "decided_by_member_id = 7", "decided_at = current_timestamp",
+            "decision_failure_code = 'PAYMENT_016'")) {
+            violates(() -> jdbc.update("update orders.claim set " + assignment + " where id = ?", id), "부분 결정 정보");
+        }
+        jdbc.update("update orders.claim set decision_reason = ?, decided_by_member_id = 7, decided_at = ?, decision_failure_code = ? where id = ?",
+            "운영 확인", Timestamp.from(NOW), "PAYMENT_016", id);
+        for (String assignment : List.of("decision_reason = null", "decided_by_member_id = null", "decided_at = null", "decision_failure_code = null",
+            "decision_reason = ' '", "decision_failure_code = ' '", "decided_by_member_id = 0", "decided_by_member_id = -1")) {
+            violates(() -> jdbc.update("update orders.claim set " + assignment + " where id = ?", id), "불완전 결정 정보");
+        }
+        violates(() -> jdbc.update("update orders.claim set decision_reason = ? where id = ?", "가".repeat(201), id), "사유 길이");
+        violates(() -> jdbc.update("update orders.claim set decision_failure_code = ? where id = ?", "X".repeat(41), id), "코드 길이");
+        violates(() -> jdbc.update("update orders.claim set failure_code = null where id = ?", id), "기존 실패 코드 제약 유지");
+        long returned = rawClaim(order.id(), "RETURN", "REQUESTED", null, null, 0, null, null);
+        violates(() -> jdbc.update("update orders.claim set decision_reason = '확인', decided_by_member_id = 7, decided_at = ?, "
+            + "decision_failure_code = 'PAYMENT_016' where id = ?", Timestamp.from(NOW), returned), "반품에는 결정 정보 없음");
+    }
+
     @Test
     void insertsAndReadsCancellationClaimWithNewColumnsAndReasons() {
         Order order = paidOrder();

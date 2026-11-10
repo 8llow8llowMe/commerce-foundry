@@ -16,7 +16,10 @@ public class ClaimMapper {
             .expectedRefundAmount(claim.expectedRefund() == null ? null : claim.expectedRefund().amount())
             .expectedRefundCurrency(claim.expectedRefund() == null ? null : claim.expectedRefund().currency())
             .paymentId(claim.paymentId()).attemptCount(claim.attemptCount()).nextAttemptAt(claim.nextAttemptAt()).failureCode(claim.failureCode())
-            .version(claim.version()).build();
+            .decisionReason(claim.decision() == null ? null : claim.decision().reason())
+            .decidedByMemberId(claim.decision() == null ? null : claim.decision().decidedByMemberId())
+            .decidedAt(claim.decision() == null ? null : claim.decision().decidedAt())
+            .decisionFailureCode(claim.decision() == null ? null : claim.decision().previousFailureCode()).version(claim.version()).build();
     }
 
     public List<ClaimItemEntity> toItemEntities(Claim claim) {
@@ -27,7 +30,8 @@ public class ClaimMapper {
     public Claim toDomain(ClaimEntity entity, List<ClaimItemEntity> items) {
         return new Claim(entity.getId(), entity.getOrderId(), entity.getRequestKey(), entity.getType(), entity.getStatus(),
             MoneyColumns.nullable(entity.getExpectedRefundAmount(), entity.getExpectedRefundCurrency()), entity.getPaymentId(), entity.getAttemptCount(),
-            entity.getNextAttemptAt(), entity.getFailureCode(),
+            entity.getNextAttemptAt(), entity.getFailureCode(), entity.getDecisionReason() == null ? null : new Claim.Decision(entity.getDecisionReason(),
+                entity.getDecidedByMemberId(), entity.getDecidedAt(), entity.getDecisionFailureCode()),
             items.stream().map(item -> new ClaimItem(item.getId(), item.getOrderItemId(), item.getQuantity(), item.getReason())).toList(),
             entity.getCreatedAt(), entity.getVersion());
     }

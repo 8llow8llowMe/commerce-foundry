@@ -885,6 +885,23 @@ order → delivery 역방향 호출은 두지 않는다(`service-inventory.md` �
 
 ## 5. 클레임 (취소 · 반품 · 교환)
 
+### 운영자 수습 저장 기반 (#17 A1)
+
+`Claim.Decision`은 마지막 운영자 결정의 사유(1~200자)·관리자 양수 아이디·마이크로초 시각·결정 직전 실패 코드(1~40자)를 묶는다.
+사유에 개인정보를 넣지 않는다. nullable 네 열(`decision_reason`, `decided_by_member_id`, `decided_at`, `decision_failure_code`)은 모두 없거나
+취소 클레임에 완전하게 있어야 한다(`ck_claim_admin_decision`). 기존 `failure_code`의 실패 상태 제약은 그대로이며 결정 이전 원인을 별도 열에 보존한다.
+기존 생성자는 결정 없이 동작하며 저장 반환·재조회·기존 후속 전이는 결정을 유지한다. 누적 감사 이력은 후속 구현 범위다.
+
+`ClaimAdminRecoveryPolicy`는 상태를 바꾸지 않는 신규 실행 자격 검사다. 저장된 취소만 대상으로 활성 lease(`next_attempt_at > now`)와
+`ORDER_STATUS_UNEXPECTED` 재시도를 막는다. 환불 수동 확정 대상은 `REFUND_FAILED`뿐이다. 수동 종결 대상은 같은 저장 주문이 `CANCELED`이고
+클레임이 `RESTORATION_FAILED`이며 코드가 `PRODUCT_027/028/029/003`, `RESTORATION_DATA_INVALID`, `ORDER_STATUS_UNEXPECTED` 중 하나일 때뿐이다.
+`RESTORATION_UNCONFIRMED`·알 수 없는 코드는 수동 종결할 수 없다. `PAYMENT_016/017/019`만으로 무환불을 확정하거나 거절을 허용하지 않는다.
+정책은 이미 처리됨의 멱등 성공 판정기가 아니므로 `COMPLETED`도 신규 실행 자격이 없다.
+
+A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변경·PG/재고 호출 연결이 없다. A2에서 기능권한·원천 증거·현재 주문 상태·결정 감사와
+멱등 재호출 및 늦은 결과 경계를 갖춘 처리 흐름을 별도 구현한다. 이 기반으로 #17 전체 완료나 운영 결제 개방 조건 충족을 주장하지 않는다.
+배포 DDL과 구 앱의 결정 보존 제한은 `deploy-guide.md`의 운영자 수습 기반 절을 따른다.
+
 - 클레임은 `claim` 엔티티로 따로 둔다 (유형, 대상 주문 항목, 수량, 사유, 상태, 환불 예정 금액).
 - **부분 클레임**을 전제로 설계한다 — 주문 3개 중 1개만 반품.
 - 환불 금액 계산(배송비 차감, 무료배송 기준 미달 시 재부과)은 order-service 가 하고, 실행은 payment-service 가 한다.

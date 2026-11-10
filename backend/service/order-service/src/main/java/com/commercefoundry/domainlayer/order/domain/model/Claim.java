@@ -30,7 +30,7 @@ import lombok.RequiredArgsConstructor;
  */
 public record Claim(
     long id, long orderId, UUID requestKey, Type type, Status status, Money expectedRefund, Long paymentId, int attemptCount, Instant nextAttemptAt,
-    String failureCode, List<ClaimItem> items, Instant requestedAt, Long version
+    String failureCode, Decision decision, List<ClaimItem> items, Instant requestedAt, Long version
 ) {
 
     /** {@code claim.failure_code} 길이와 같다. */
@@ -72,6 +72,9 @@ public record Claim(
                 throw new IllegalArgumentException("취소 클레임 항목은 취소 사유만 씁니다");
             }
         } else {
+            if (decision != null) {
+                throw new IllegalArgumentException("운영자 수습 결정은 취소 클레임에만 둡니다");
+            }
             if (paymentId != null) {
                 throw new IllegalArgumentException("결제 아이디는 취소 클레임에만 둡니다");
             }
@@ -79,6 +82,12 @@ public record Claim(
                 throw new IllegalArgumentException("반품 접수 항목은 반품 사유만 씁니다");
             }
         }
+    }
+
+    /** 기존 취소 생성자와 저장된 결정 없는 행의 호환을 유지한다. */
+    public Claim(long id, long orderId, UUID requestKey, Type type, Status status, Money expectedRefund, Long paymentId, int attemptCount,
+        Instant nextAttemptAt, String failureCode, List<ClaimItem> items, Instant requestedAt, Long version) {
+        this(id, orderId, requestKey, type, status, expectedRefund, paymentId, attemptCount, nextAttemptAt, failureCode, null, items, requestedAt, version);
     }
 
     /** 반품 접수 — 결제 아이디 · 재시도 칸 없이 만든다. */
@@ -221,8 +230,24 @@ public record Claim(
     }
 
     private Claim with(Status nextStatus, int nextAttemptCount, Instant nextAttempt, String nextFailureCode) {
-        return new Claim(id, orderId, requestKey, type, nextStatus, expectedRefund, paymentId, nextAttemptCount, nextAttempt, nextFailureCode, items,
+        return new Claim(id, orderId, requestKey, type, nextStatus, expectedRefund, paymentId, nextAttemptCount, nextAttempt, nextFailureCode, decision, items,
             requestedAt, version);
+    }
+
+    /** 마지막 수습 결정과 그 직전 실패. 이전 결정의 누적 감사는 후속 호출부가 담당한다. 사유에 개인정보를 넣지 않는다. */
+    public record Decision(String reason, long decidedByMemberId, Instant decidedAt, String previousFailureCode) {
+        public static final int REASON_MAX_LENGTH = 200;
+
+        public Decision {
+            Objects.requireNonNull(reason, "reason");
+            Objects.requireNonNull(decidedAt, "decidedAt");
+            Objects.requireNonNull(previousFailureCode, "previousFailureCode");
+            if (reason.isBlank() || reason.length() > REASON_MAX_LENGTH || decidedByMemberId <= 0 || previousFailureCode.isBlank()
+                || previousFailureCode.length() > FAILURE_CODE_MAX_LENGTH) {
+                throw new IllegalArgumentException("Invalid claim decision");
+            }
+            decidedAt = decidedAt.truncatedTo(ChronoUnit.MICROS);
+        }
     }
 
     @Getter

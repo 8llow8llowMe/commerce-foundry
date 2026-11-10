@@ -64,6 +64,11 @@ class ClaimCancellationSchemaUpgradePostgresTest {
             jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, version, created_at, updated_at) "
                 + "values (?, 101, ?, 'RETURN', 'REQUESTED', 0, now(), now())", ROLLING_CLAIM_ID, UUID.randomUUID());
             run(source, "ddl/claim-cancellation-cleanup.sql");
+            run(source, "ddl/claim-admin-decision.sql");
+            // 새 nullable 열을 모르는 이전 앱의 INSERT와 UPDATE도 결정 없는 기존 행을 보존한다.
+            jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, version, created_at, updated_at) "
+                + "values (16, 103, ?, 'RETURN', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID());
+            jdbc.update("update orders.claim set version = version + 1 where id = ?", LEGACY_CLAIM_ID);
             jdbc.execute("create database fresh");
             run(new DriverManagerDataSource(database.getJdbcUrl().replace("/" + database.getDatabaseName(), "/fresh"), database.getUsername(),
                 database.getPassword()), "ddl/order-schema.sql");
@@ -114,6 +119,11 @@ class ClaimCancellationSchemaUpgradePostgresTest {
             .containsEntry("payment_id", null).containsEntry("next_attempt_at", null).containsEntry("failure_code", null);
         assertThat(jdbc.queryForObject("select attempt_count from orders.claim where id = ?", Integer.class, ROLLING_CLAIM_ID))
             .as("1단계 뒤 이전 앱 INSERT 는 DEFAULT 0 으로 들어갔다").isZero();
+        assertThat(jdbc.queryForObject("select count(*) from orders.claim where id in (?, ?, 16) and decision_reason is null "
+            + "and decided_by_member_id is null and decided_at is null and decision_failure_code is null", Long.class,
+            LEGACY_CLAIM_ID, ROLLING_CLAIM_ID)).isEqualTo(3);
+        assertThatThrownBy(() -> jdbc.update("update orders.claim set decision_reason = '불완전' where id = ?", LEGACY_CLAIM_ID))
+            .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, version, created_at, updated_at) "
             + "values (15, 102, ?, 'RETURN', 'REQUESTED', 0, now(), now())", UUID.randomUUID()))
             .as("2단계 뒤에는 기본값이 없다(스냅숏과 같다)").isInstanceOf(DataIntegrityViolationException.class);

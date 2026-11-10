@@ -49,7 +49,11 @@ import lombok.NoArgsConstructor;
         @CheckConstraint(name = "ck_claim_cancellation_next_attempt", constraint = "type <> 'CANCELLATION' or "
             + "((status in ('REQUESTED', 'REFUNDED')) = (next_attempt_at is not null))"),
         @CheckConstraint(name = "ck_claim_cancellation_failure_code", constraint = "type <> 'CANCELLATION' or "
-            + "((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))")
+            + "((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))"),
+        @CheckConstraint(name = "ck_claim_admin_decision", constraint = "(decision_reason is null and decided_by_member_id is null and decided_at is null "
+            + "and decision_failure_code is null) or (type = 'CANCELLATION' and decision_reason is not null and length(trim(decision_reason)) > 0 "
+            + "and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null and decision_failure_code is not null "
+            + "and length(trim(decision_failure_code)) > 0)")
     })
 @Getter
 @Builder
@@ -93,6 +97,18 @@ public class ClaimEntity extends BaseEntity {
 
     @Column(name = "failure_code", length = Claim.FAILURE_CODE_MAX_LENGTH, comment = "종결 실패 사유 코드 (REFUND_FAILED · RESTORATION_FAILED). 아니면 null")
     private String failureCode;
+
+    @Column(name = "decision_reason", length = Claim.Decision.REASON_MAX_LENGTH, comment = "마지막 운영자 수습 사유. 개인정보 입력 금지")
+    private String decisionReason;
+
+    @Column(name = "decided_by_member_id", comment = "수습 결정 관리자 아이디 (외부 FK: auth-service member.id)")
+    private Long decidedByMemberId;
+
+    @Column(name = "decided_at", comment = "마지막 운영자 수습 결정 시각")
+    private Instant decidedAt;
+
+    @Column(name = "decision_failure_code", length = Claim.FAILURE_CODE_MAX_LENGTH, comment = "마지막 수습 결정 직전 실패 코드")
+    private String decisionFailureCode;
 
     @Version
     @Column(name = "version", nullable = false, comment = "낙관적 락 버전")
