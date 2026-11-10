@@ -19,6 +19,10 @@ public class ProductAdminAuditProcessor {
     static final String SIZE_CHART_TEMPLATE = "size-chart-template";
     static final String PRODUCT = "product";
     static final String PRODUCT_IMAGE_UPLOAD = "product-image-upload";
+    static final String DISPLAY_SECTION = "display-section";
+    static final String LOOK = "look";
+    /** 순서 변경은 여러 행을 한 번에 바꿔 고정 키를 대상으로 둔다 — 받은 아이디 목록은 싣지 않는다. */
+    static final String ORDER = "order";
 
     /** @param productId 만든 상품 아이디 — 실패해 없으면 {@code null}({@code target=-}) */
     public void productCreated(long actorMemberId, Long productId, boolean succeeded) {
@@ -112,6 +116,45 @@ public class ProductAdminAuditProcessor {
     public void mediaImageUploadConfirmed(long actorMemberId, java.util.UUID id, boolean succeeded) {
         write(ProductAdminAuditAction.MEDIA_IMAGE_UPLOAD_CONFIRM, actorMemberId,
             id == null ? null : AdminAuditLog.target("media-upload", id.toString()), succeeded);
+    }
+
+    /** @param sectionId 만든 섹션 아이디 — 실패해 없으면 {@code null}({@code target=-}) */
+    public void displaySectionCreated(long actorMemberId, Long sectionId, boolean succeeded) {
+        write(
+            ProductAdminAuditAction.DISPLAY_SECTION_CREATE, actorMemberId,
+            sectionId == null ? null : AdminAuditLog.target(DISPLAY_SECTION, sectionId), succeeded
+        );
+    }
+
+    public void displaySectionUpdated(long actorMemberId, long sectionId, boolean succeeded) {
+        write(ProductAdminAuditAction.DISPLAY_SECTION_UPDATE, actorMemberId, AdminAuditLog.target(DISPLAY_SECTION, sectionId), succeeded);
+    }
+
+    public void displaySectionDeleted(long actorMemberId, long sectionId, boolean succeeded) {
+        write(ProductAdminAuditAction.DISPLAY_SECTION_DELETE, actorMemberId, AdminAuditLog.target(DISPLAY_SECTION, sectionId), succeeded);
+    }
+
+    /** 대상은 고정 {@code display-section:order} — 받은 섹션 아이디 목록은 싣지 않는다. */
+    public void displaySectionsReordered(long actorMemberId, boolean succeeded) {
+        write(ProductAdminAuditAction.DISPLAY_SECTION_REORDER, actorMemberId, AdminAuditLog.target(DISPLAY_SECTION, ORDER), succeeded);
+    }
+
+    /** @param lookId 만든 룩 아이디 — 실패해 없으면 {@code null}({@code target=-}) */
+    public void lookCreated(long actorMemberId, Long lookId, boolean succeeded) {
+        write(ProductAdminAuditAction.LOOK_CREATE, actorMemberId, lookId == null ? null : AdminAuditLog.target(LOOK, lookId), succeeded);
+    }
+
+    public void lookUpdated(long actorMemberId, long lookId, boolean succeeded) {
+        write(ProductAdminAuditAction.LOOK_UPDATE, actorMemberId, AdminAuditLog.target(LOOK, lookId), succeeded);
+    }
+
+    public void lookDeleted(long actorMemberId, long lookId, boolean succeeded) {
+        write(ProductAdminAuditAction.LOOK_DELETE, actorMemberId, AdminAuditLog.target(LOOK, lookId), succeeded);
+    }
+
+    /** 대상은 고정 {@code look:order} — 받은 룩 아이디 목록은 싣지 않는다. */
+    public void looksReordered(long actorMemberId, boolean succeeded) {
+        write(ProductAdminAuditAction.LOOK_REORDER, actorMemberId, AdminAuditLog.target(LOOK, ORDER), succeeded);
     }
 
     private static void write(ProductAdminAuditAction action, long actorMemberId, String target, boolean succeeded) {

@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.request.Disp
 import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.request.DisplaySectionUpsertRequest;
 import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.response.DisplayPreviewAdminResponse;
 import com.commercefoundry.domainlayer.display.application.port.in.DisplayPreviewAdminUseCase;
+import com.commercefoundry.security.audit.AdminAuditExempt;
 import com.commercefoundry.security.principal.AdminAuthority;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -36,6 +37,7 @@ public class DisplayPreviewAdminController {
             + "sectionId · itemId는 요청 배열 위치 기반 임시 문자열이며 저장 아이디가 아니다. 응답은 no-store다."
     )
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAuditExempt(reason = "저장 없는 미리보기 — 전시 조회 · 저장 · 잠금 · 아이디 발급을 하지 않아 아무것도 바꾸지 않는다")
     @PostMapping
     public ResponseEntity<Response<DisplayPreviewAdminResponse>> preview(@RequestBody @Valid DisplayPreviewRequest request) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Response.success(

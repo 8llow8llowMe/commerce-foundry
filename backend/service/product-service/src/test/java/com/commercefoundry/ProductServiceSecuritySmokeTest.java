@@ -36,15 +36,6 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     @Override
     protected Map<String, String> auditDeclarationPending() {
         return Map.ofEntries(
-            Map.entry("DisplayAdminController#createSection", "#163 PR-C"),
-            Map.entry("DisplayAdminController#updateSection", "#163 PR-C"),
-            Map.entry("DisplayAdminController#deleteSection", "#163 PR-C"),
-            Map.entry("DisplayAdminController#reorderSections", "#163 PR-C"),
-            Map.entry("DisplayPreviewAdminController#preview", "#163 PR-C (면제 대상 — 저장 없는 미리보기)"),
-            Map.entry("LookAdminController#create", "#163 PR-C"),
-            Map.entry("LookAdminController#update", "#163 PR-C"),
-            Map.entry("LookAdminController#delete", "#163 PR-C"),
-            Map.entry("LookAdminController#reorder", "#163 PR-C"),
             Map.entry("StockAdminController#adjustStock", "#163 PR-C′"),
             Map.entry("SkuCostAdminController#createCost", "#163 PR-C′"),
             Map.entry("ProductDraftAdminController#create", "#163 PR-C′"),

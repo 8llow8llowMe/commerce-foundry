@@ -62,6 +62,8 @@ class LookAdminConcurrencyTest {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/product-schema.sql");
 
     private static final long PRODUCT_ID = 700L;
+    /** 감사(#163)에만 쓰는 행위자 — 룩 표에는 남지 않는다. */
+    private static final long ACTOR = 1L;
 
     private static final LookUpsertCommand COMMAND = LookUpsertCommand.builder()
         .title("가을 룩")
@@ -114,7 +116,7 @@ class LookAdminConcurrencyTest {
             assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
 
             long startedAt = System.nanoTime();
-            Throwable failure = catchThrowable(() -> lookAdminUseCase.delete(1L));
+            Throwable failure = catchThrowable(() -> lookAdminUseCase.delete(1L, ACTOR));
             long waitedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
             release.countDown();
             holding.get(30, TimeUnit.SECONDS);
@@ -187,7 +189,7 @@ class LookAdminConcurrencyTest {
             assertThat(createdInHolder.await(10, TimeUnit.SECONDS)).isTrue();
 
             try {
-                return lookAdminUseCase.create(COMMAND);
+                return lookAdminUseCase.create(COMMAND, ACTOR);
             } finally {
                 holding.get(30, TimeUnit.SECONDS);
             }

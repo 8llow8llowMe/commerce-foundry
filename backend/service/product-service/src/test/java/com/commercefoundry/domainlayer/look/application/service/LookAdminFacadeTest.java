@@ -9,8 +9,10 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.look.adapter.in.admin.presenter.LookAdminPresenter;
 import com.commercefoundry.domainlayer.look.application.command.LookUpsertCommand;
 import com.commercefoundry.domainlayer.look.application.exception.LookErrorCode;
@@ -36,6 +38,8 @@ import org.springframework.transaction.TransactionTimedOutException;
  */
 class LookAdminFacadeTest {
 
+    private static final long ACTOR = 42L;
+
     private static final LookImage IMAGE = new LookImage("https://cdn.example.com/media/a.jpg", null, null, null);
     private static final LookUpsertCommand COMMAND = LookUpsertCommand.builder()
         .title("가을 룩").image(LookUpsertCommand.Image.builder().url(IMAGE.url()).build()).visible(true).productIds(List.of(7L))
@@ -45,7 +49,8 @@ class LookAdminFacadeTest {
 
     private final LookProcessor processor = mock(LookProcessor.class);
     private final ProductLookupProcessor productLookupProcessor = mock(ProductLookupProcessor.class);
-    private final LookAdminFacade facade = new LookAdminFacade(processor, productLookupProcessor, new LookAdminPresenter());
+    private final ProductAdminAuditProcessor audit = mock(ProductAdminAuditProcessor.class);
+    private final LookAdminFacade facade = new LookAdminFacade(processor, productLookupProcessor, new LookAdminPresenter(), audit);
 
     LookAdminFacadeTest() {
         given(processor.toAdminInfo(any(), any())).willReturn(INFO);
@@ -59,24 +64,26 @@ class LookAdminFacadeTest {
         given(productLookupProcessor.findAllIncludingHidden(anyCollection())).willReturn(Map.of());
         given(processor.create(any(), any())).willReturn(DRAFT);
 
-        assertThat(facade.create(COMMAND).lookId()).isEqualTo("1");
+        assertThat(facade.create(COMMAND, ACTOR).lookId()).isEqualTo("1");
 
-        InOrder order = inOrder(processor, productLookupProcessor);
+        InOrder order = inOrder(processor, productLookupProcessor, audit);
         order.verify(processor).draftOf(COMMAND);
         order.verify(processor).lockAll();
         order.verify(processor).validateCanCreate(List.of());
         order.verify(productLookupProcessor).findAllIncludingHidden(DRAFT.productIds());
         order.verify(processor).validateProductsExist(DRAFT.productIds(), Map.of());
         order.verify(processor).create(DRAFT, List.of());
+        order.verify(audit).lookCreated(ACTOR, DRAFT.look().id(), true);
     }
 
     @Test
-    @DisplayName("초안 판정에서 걸리면 잠그지 않는다")
+    @DisplayName("초안 판정에서 걸리면 잠그지 않고, 대상 없는(-) 생성 실패를 감사에 남긴다")
     void invalidDraftDoesNotLock() {
         given(processor.draftOf(COMMAND)).willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_DUPLICATED));
 
-        assertThatThrownBy(() -> facade.create(COMMAND)).isInstanceOf(LookException.class);
+        assertThatThrownBy(() -> facade.create(COMMAND, ACTOR)).isInstanceOf(LookException.class);
         verify(processor, never()).lockAll();
+        verify(audit).lookCreated(ACTOR, null, false);
     }
 
     @Test
@@ -87,11 +94,23 @@ class LookAdminFacadeTest {
         )) {
             willThrow(failure).given(processor).lockAll();
 
-            assertThatThrownBy(() -> facade.delete(1L))
+            assertThatThrownBy(() -> facade.delete(1L, ACTOR))
                 .isInstanceOf(LookException.class)
                 .satisfies(exception -> assertThat(((LookException) exception).getErrorCode()).isEqualTo(LookErrorCode.LOOK_BUSY))
                 .hasCause(failure);
         }
+        verify(audit, times(3)).lookDeleted(ACTOR, 1L, false);
+    }
+
+    @Test
+    @DisplayName("순서 변경 실패는 고정 대상으로 FAILURE 를 남기고 다시 던진다")
+    void reorderFailureIsAudited() {
+        given(processor.lockAll()).willReturn(List.of());
+        LookException failure = new LookException(LookErrorCode.LOOK_ORDER_MISMATCH);
+        willThrow(failure).given(processor).reorder(any(), any());
+
+        assertThatThrownBy(() -> facade.reorder(List.of(9L), ACTOR)).isSameAs(failure);
+        verify(audit).looksReordered(ACTOR, false);
     }
 
     @Test
@@ -106,12 +125,15 @@ class LookAdminFacadeTest {
         given(processor.getAllContents()).willReturn(List.of());
         given(processor.toAdminInfos(any(), any())).willReturn(List.of(INFO));
 
-        facade.update(5L, COMMAND);
-        facade.delete(5L);
-        assertThat(facade.reorder(List.of(5L)).looks()).hasSize(1);
+        facade.update(5L, COMMAND, ACTOR);
+        facade.delete(5L, ACTOR);
+        assertThat(facade.reorder(List.of(5L), ACTOR).looks()).hasSize(1);
 
         verify(processor).replace(current, DRAFT);
         verify(processor).delete(5L);
         verify(processor).reorder(List.of(current), List.of(5L));
+        verify(audit).lookUpdated(ACTOR, 5L, true);
+        verify(audit).lookDeleted(ACTOR, 5L, true);
+        verify(audit).looksReordered(ACTOR, true);
     }
 }

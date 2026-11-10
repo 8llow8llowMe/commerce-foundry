@@ -163,14 +163,14 @@ class DisplayAdminControllerTest {
         @Test
         @DisplayName("생성은 201 — 문자열 productId 를 받고, 문구는 앞뒤 공백을 빼며 빈 문구는 null 로 넘긴다")
         void create() {
-            given(displayAdminUseCase.createSection(any())).willReturn(sectionResponse());
+            given(displayAdminUseCase.createSection(any(), anyLong())).willReturn(sectionResponse());
 
             MvcTestResult result = exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN);
 
             assertThat(result).hasStatus(HttpStatus.CREATED);
             assertThat(result).bodyJson().extractingPath("$.dataBody.sectionId").isEqualTo("4611686018427387904");
             ArgumentCaptor<DisplaySectionUpsertCommand> captor = ArgumentCaptor.forClass(DisplaySectionUpsertCommand.class);
-            verify(displayAdminUseCase).createSection(captor.capture());
+            verify(displayAdminUseCase).createSection(captor.capture(), eq(TestTokens.MEMBER_ID));
             DisplaySectionUpsertCommand command = captor.getValue();
             assertThat(command.sectionType()).isEqualTo(DisplaySectionType.LOOK);
             assertThat(command.title()).isEqualTo("가을 룩");
@@ -184,12 +184,12 @@ class DisplayAdminControllerTest {
         }
 
         @Test
-        @DisplayName("수정은 200 이고 경로 아이디와 본문을 넘긴다")
+        @DisplayName("수정은 200 이고 경로 아이디 · 본문 · 행위자(access 토큰의 memberId)를 넘긴다")
         void update() {
-            given(displayAdminUseCase.updateSection(eq(5L), any())).willReturn(sectionResponse());
+            given(displayAdminUseCase.updateSection(eq(5L), any(), anyLong())).willReturn(sectionResponse());
 
             assertThat(exchange(HttpMethod.PUT, PATH + "/5", VALID_BODY, MemberRole.ADMIN)).hasStatusOk();
-            verify(displayAdminUseCase).updateSection(eq(5L), any());
+            verify(displayAdminUseCase).updateSection(eq(5L), any(), eq(TestTokens.MEMBER_ID));
         }
 
         @Test
@@ -199,25 +199,25 @@ class DisplayAdminControllerTest {
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
-            verify(displayAdminUseCase).deleteSection(5L);
+            verify(displayAdminUseCase).deleteSection(5L, TestTokens.MEMBER_ID);
         }
 
         @Test
         @DisplayName("순서 변경은 문자열 아이디를 받아 순서대로 넘긴다")
         void reorder() {
-            given(displayAdminUseCase.reorderSections(anyList())).willReturn(DisplaySectionAdminListResponse.builder().sections(List.of()).build());
+            given(displayAdminUseCase.reorderSections(anyList(), anyLong())).willReturn(DisplaySectionAdminListResponse.builder().sections(List.of()).build());
 
             assertThat(exchange(HttpMethod.PATCH, PATH + "/order", "{\"sectionIds\": [\"3\", \"1\", \"2\"]}", MemberRole.ADMIN)).hasStatusOk();
-            verify(displayAdminUseCase).reorderSections(List.of(3L, 1L, 2L));
+            verify(displayAdminUseCase).reorderSections(List.of(3L, 1L, 2L), TestTokens.MEMBER_ID);
         }
 
         @Test
         @DisplayName("도메인 오류는 그 코드 · 상태의 봉투다 (예: 섹션 수 상한 409 · PRODUCT_056, 미디어 저장소 미설정 503 · PRODUCT_055)")
         void domainErrors() {
-            given(displayAdminUseCase.createSection(any())).willThrow(new DisplayException(DisplayErrorCode.DISPLAY_SECTION_LIMIT_EXCEEDED, 50));
+            given(displayAdminUseCase.createSection(any(), anyLong())).willThrow(new DisplayException(DisplayErrorCode.DISPLAY_SECTION_LIMIT_EXCEEDED, 50));
             assertFailure(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "PRODUCT_056", "전시 섹션은 최대 50개까지 만들 수 있습니다.");
 
-            given(displayAdminUseCase.updateSection(anyLong(), any())).willThrow(new DisplayException(DisplayErrorCode.DISPLAY_MEDIA_STORAGE_NOT_CONFIGURED));
+            given(displayAdminUseCase.updateSection(anyLong(), any(), anyLong())).willThrow(new DisplayException(DisplayErrorCode.DISPLAY_MEDIA_STORAGE_NOT_CONFIGURED));
             assertFailure(exchange(HttpMethod.PUT, PATH + "/1", VALID_BODY, MemberRole.ADMIN), HttpStatus.SERVICE_UNAVAILABLE, "PRODUCT_055",
                 "미디어 저장소 주소가 설정되지 않아 이미지 · 영상을 등록할 수 없습니다.");
         }
@@ -275,7 +275,7 @@ class DisplayAdminControllerTest {
         @Test
         @DisplayName("본문은 개행 · 탭을 받는다")
         void bodyAllowsLineBreaks() {
-            given(displayAdminUseCase.createSection(any())).willReturn(sectionResponse());
+            given(displayAdminUseCase.createSection(any(), anyLong())).willReturn(sectionResponse());
 
             assertThat(exchange(HttpMethod.POST, PATH, "{\"sectionType\": \"STORY\", \"visible\": true, \"body\": \"a\\r\\n\\tb\", \"items\": []}", MemberRole.ADMIN))
                 .hasStatus(HttpStatus.CREATED);
