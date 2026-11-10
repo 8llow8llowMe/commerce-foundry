@@ -958,11 +958,14 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
     `*_UNCONFIRMED` 는 결과를 끝내 확인하지 못한 것이라 PG 거래 · 재고의 실제 상태를 먼저 본다(`deploy-guide.md` 결제 개방 순서).
   - **어드민 다시 시도 (#17 A2b, `POST /api/v1/admin/claims/{claimId}/retries`)** — `ClaimAdminRecoveryProcessor.prepareRetry` 가 짧은 트랜잭션에서
     화면 버전(`expectedVersion`)을 대조하고 `ClaimAdminRecoveryPolicy.requireRetry` 를 통과한 클레임만 선점한다. 종결 실패는 `Claim#reopen`(그 단계의 대기 상태 ·
-    횟수 0 · 실패 코드 지움), lease 가 끝난 대기 상태는 `holdUntil` 이고 둘 다 다음 시각을 `now + lease` 로 미뤄 커밋한다. 그 뒤 트랜잭션 밖에서 같은
+    실패 코드 지움), lease 가 끝난 대기 상태는 `holdUntil` 이고 둘 다 다음 시각을 `now + lease` 로 미뤄 커밋한다. 결제사가 거절한 환불(`Claim#isRefundRejected`)은
+    다시 열지 않는다(도메인이 막는다 — 같은 claimId 는 늘 `PAYMENT_016` 이라 진짜 사유 코드만 지워진다). 환불 단계의 다시 열기는 시작 횟수를
+    `maxAttempts − ⌊(접수 + 14일 − now) / maxBackoff⌋` 로 둬 설정의 "`max-backoff × max-attempts ≤ 14일`" 불변식을 지키고, 기한이 lease 안에 끝나면 받지 않는다(038).
+    재고 복원 단계는 product 에 기한이 없어 0 부터다. 그 뒤 트랜잭션 밖에서 같은
     `OrderCancellationPipelineProcessor.progress` 를 돌린다 — 저장된 클레임 아이디 · 결제 · 금액이라 payment · product 는 멱등이다(재계산하지 않는다).
     lease 안(자동 처리 중)은 409 `ORDER_039`, 버전 불일치 · 저장 경합은 409 `ORDER_037` 이라 스케줄러 · 고객 · 다른 운영자와 겹쳐도 원격은 한 번만 나간다.
     재시도 스케줄러가 꺼져 있으면 503 `ORDER_040` 이다(다시 연 뒤 미확정을 따라갈 쪽이 없다). 원격 단계가 반영 없이 끊기면 스케줄러처럼 미확정 한 번으로 센다.
-    다시 연 `PAYMENT_016` · `017` 같은 종결 거절은 payment 가 같은 claimId 로 다시 거절해 `REFUND_FAILED` 로 돌아온다 — 다시 시도는 무환불을 확정하지 않는다.
+    다시 시도는 무환불을 확정하지 않는다. CAS 경합(저장 직전에 멈춘 쪽이 다른 운영자 · 스케줄러의 커밋 뒤 지는 경로)은 `ClaimAdminRetryWebIntegrationTest` 가 래치로 직접 만든다.
     수동 환불 확정 · 복원 생략 종결(A3) · 취소 거절(A4)은 후속이다.
 
   - **트랜잭션 경계** — 접수(tx1) · 환불 결과 반영(tx2) · 복원 결과 반영(tx3)은 각각 짧은 트랜잭션이고 환불 · 복원 호출은 그 사이 트랜잭션 밖이다

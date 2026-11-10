@@ -1297,9 +1297,14 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
   `REFUND_REJECTED` · `RESTORATION_UNCONFIRMED` · `RESTORATION_REJECTED` · `ORDER_STATUS_MISMATCH` 다(도메인 `ClaimRecoverySituation`). 화면은 name · description 을 그대로 보인다.
   `nextAutomaticAttemptAt` 은 대기 상태일 때 자동 처리가 다시 확인할 시각, 아니면 null 이다. `retryable` 은 다시 시도 버튼을 보일지이며 선점 조건과 같은 판정이다.
   `version` 은 다시 시도 요청의 `expectedVersion` 으로 그대로 보내는 화면 버전(0 이상 정수)이다.
-- **다시 시도 (#17 A2b)** — 종결 실패(`REFUND_FAILED` · `RESTORATION_FAILED`)는 그 단계의 대기 상태로 다시 열고(횟수 0), lease 가 끝난 대기 상태는 그대로 선점한다.
+- **다시 시도 (#17 A2b)** — 결과 미확인 환불 실패(`REFUND_UNCONFIRMED`) · 재고 복원 실패(`RESTORATION_FAILED`)는 그 단계의 대기 상태로 다시 열고,
+  lease 가 끝난 대기 상태는 그대로 선점한다. **결제사가 거절한 환불(`REFUND_REJECTED`)은 다시 시도하지 않는다(409 `ORDER_038`, `retryable=false`)** —
+  payment 는 같은 claimId 의 거절 원장 때문에 늘 `PAYMENT_016` 을 돌려주므로 다시 보내도 진짜 거절 사유만 지워진다. 그 건은 대표 관리자의 수동 확정(A3) 몫이다.
+  환불 단계는 결제 취소 키 기한(접수 + 14일, 지나면 payment 가 `PAYMENT_018`)이 lease 안에 끝나면 409 `ORDER_038` 이고, 다시 열 때는 남은 자동 재시도
+  (회당 최대 `max-backoff`)가 기한 안에 끝나도록 시작 횟수를 올린다 — 다시 연 건이 며칠씩 "자동 처리 중"에 묻히지 않는다.
   선점 커밋 뒤 트랜잭션 밖에서 고객 취소 · 재시도 스케줄러와 같은 환불 → 복원 경로를 돌린다. 같은 클레임 아이디 · 저장된 결제 · 금액으로 보내므로 원격은 멱등이다.
-  **200 은 "다시 보냈다"는 뜻이지 성공이 아니다** — 결제사가 다시 거절했으면 `status=REFUND_FAILED` 그대로다. FE 는 응답의 `status` · `recovery.situation` 을 읽는다.
+  **200 은 "다시 보냈다"는 뜻이지 성공이 아니다** — 결과가 또 미확인이면 `status=REQUESTED`(자동 처리 중)다. FE 는 응답의 `status` · `recovery.situation` 을 읽는다.
+  한계: 확정 환불 미기록 503 `ORDER_036` 은 선점이 커밋됐어도 감사에 `success=false` 로 남는다. `recovery.version` 은 저장 횟수라 자동 시도 횟수를 간접적으로 드러낸다.
   원격 단계가 반영 없이 끊기면 미확정 한 번으로 세고 그 시점 상세 200 을 낸다(클레임은 lease 로 남아 스케줄러가 잇는다). 409 `ORDER_037` 이면 상세를 다시 조회한 뒤 판단한다.
   헤더 멱등 키는 쓰지 않는다 — 화면 버전 대조와 `@Version` 저장이 한 번만 선점되게 한다. 주문 상태가 맞지 않아 닫힌 접수(`ORDER_STATUS_MISMATCH`)는 다시 시도하지 않는다(재고가 늘 수 있다).
 
