@@ -63,8 +63,8 @@
   │                                                   ③ 승인 요청 (Idempotency-Key) ───▶ 승인
   │                                                   ④ DONE 기록 + payment-approved outbox ◀──┘  (같은 트랜잭션, #308 PR-A1)
   │                            ◀── Kafka payment-approved ──┘  (릴레이 · 키 orderId)
-  │                            ⑤ 결제 재조회(internal) · 선점 확정 · PAID 전이 (#308 PR-B 예정)
-  │                            ⑥ order-paid / order-payment-rejected 회신 ──▶ order_synced 기록 (#308 PR-C 예정)
+  │                            ⑤ 결제 재조회(internal) · 선점 확정 · PAID 전이 (#308 PR-B · C1 · C2)
+  │                            ⑥ order-paid / order-payment-rejected 회신 ──▶ order_synced 기록 (#308 PR-C3)
 ```
 
 ### 3-1. 금액은 서버가 정하고 서버가 검증한다
@@ -396,14 +396,14 @@ pending 의도는 같은 claim으로 재개하고 전액취소 원천에는 추�
 C3b의 `OrderPaymentReplyEventUseCase`가 원천과 로컬 결제의 승인 시각을 마이크로초 정밀도로 대조하고 payment/inbox를 원자 기록한다. Kafka 진입은 C3c 후속이다.
 
 결제 승인(DONE)을 주문의 결제 완료(PAID)로 반영하는 단계는 **Kafka 이벤트**다(#304 · #308, `architecture-guide.md` §8-1). 동기 internal 호출 + 재전송 플래그 + 스케줄러로 하던 이전 설계는
-쓰지 않는다 — 전달은 outbox 릴레이(적어도 한 번)와 컨슈머 재시도 · DLT 가 보장하고(소비 · 회신 쪽은 PR-B · C 예정), 중복은 inbox · 유니크 키 · `@Version` 이 막는다.
+쓰지 않는다 — 전달은 outbox 릴레이(적어도 한 번)와 컨슈머 재시도 · DLT 가 보장하고(order 소비 PR-B · C1 · C2, payment 회신 소비 PR-C3), 중복은 inbox · 유니크 키 · `@Version` 이 막는다.
 **payment 에 재전송 스케줄러를 두지 않는다.** **#308 이 끝나기 전에는 운영 결제를 열지 않는다(`payment.enabled=false`, §3-4).**
 
 | 이벤트 | 토픽 · 키 | 생산 → 컨슈머 그룹 | 페이로드 (v1, 아이디는 문자열) | 상태 |
 |--------|-----------|--------------------|-------------------------------|------|
-| `payment-approved` | `<ns>.payment.payment-approved` · orderId | payment → `<ns>.order.payment-approved` | `paymentId` · `orderId` · `memberId` · `amount`(최소 단위 정수) · `currency` · `approvedAt` · `method`(수단 코드) | 발행 구현(PR-A1) · 소비 PR-B 예정 |
-| `order-paid` | `<ns>.order.order-paid` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `stockReservationId` · `paidAt` | PR-B 예정 |
-| `order-payment-rejected` | `<ns>.order.order-payment-rejected` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `reason`(`ORDER_CANCELED` · `ORDER_NOT_FOUND` · `PAYMENT_MISMATCH` · `STOCK_UNAVAILABLE` · `ALREADY_PAID` · `PAYMENT_NOT_DONE`) | PR-B 예정 |
+| `payment-approved` | `<ns>.payment.payment-approved` · orderId | payment → `<ns>.order.payment-approved` | `paymentId` · `orderId` · `memberId` · `amount`(최소 단위 정수) · `currency` · `approvedAt` · `method`(수단 코드) | 발행 구현(PR-A1) · 소비 구현(PR-B2, 게이트 `order.payment-approval.consumer.enabled` 기본 OFF) |
+| `order-paid` | `<ns>.order.order-paid` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `stockReservationId` · `paidAt` | 발행 구현(PR-B2) · 소비 구현(PR-C3, 게이트 `payment.order-result.consumer.enabled` 기본 OFF) |
+| `order-payment-rejected` | `<ns>.order.order-payment-rejected` · orderId | order → `<ns>.payment.order-payment-result` | `orderId` · `paymentId` · `reason`(`ORDER_CANCELED` · `ORDER_NOT_FOUND` · `PAYMENT_MISMATCH` · `STOCK_UNAVAILABLE` · `ALREADY_PAID` · `PAYMENT_NOT_DONE`) | 발행 구현(PR-B2 · C1 · C2) · 소비 구현(PR-C3, 같은 게이트) |
 
 - **발행(payment, 구현)** — `PaymentProcessor` 가 DONE 저장과 `PaymentEventPort.approved` 를 한 트랜잭션에서 한다(`saveApproved` 하나로 묶었다 — #15 의 UNKNOWN 재조회 확정도
   이 메서드로 DONE 을 저장해야 한다). 전이가 멱등 no-op(이미 DONE, 같은 인스턴스)이면 저장도 발행도 하지 않는다 — 같은 결제의 승인 이벤트가 두 번 나가지 않는다.
@@ -413,7 +413,7 @@ C3b의 `OrderPaymentReplyEventUseCase`가 원천과 로컬 결제의 승인 시�
   메시징이 꺼져 있어도(`MESSAGING_ENABLED=false`) outbox(`payment.outbox`)에는 쌓이고 릴레이만 멈춘다.
   **결제 게이트(`payment.enabled`) 또는 복구 게이트(`payment.recovery.enabled`)가 열려 있으면 `payment.outbox` · `payment.shedlock` 이 없을 때 기동하지 않는다**(`PaymentOutboxSchemaGuard`) — 운영 DDL 을 빠뜨린 채
   PG 승인 뒤 매 결제가 500 이 되는 것을 막는다. 게이트가 닫혀 있으면 WARN 만 남긴다.
-- **진위 확인(order, PR-B 예정)** — 봉투에는 서명이 없다. order 컨슈머는 이벤트를 알림으로만 보고 payment internal 결제 조회(`GET /internal/v1/payments/{paymentId}`, PR-A2 구현)로
+- **진위 확인(order, PR-B2 구현)** — 봉투에는 서명이 없다. order 컨슈머는 이벤트를 알림으로만 보고 payment internal 결제 조회(`GET /internal/v1/payments/{paymentId}`, PR-A2 구현)로
   재조회해 상태 · 금액 · 통화 · 주문 · 회원을 확정한다. 두 불일치를 나눈다 — **이벤트 ↔ 재조회** 불일치(이벤트가 말한 주문 · 금액이 payment 원본과 다름 — 위조 · 버그)와
   재조회 404 는 DLT 로 보내고 주문을 바꾸지 않는다. **재조회 ↔ 주문** 불일치(payment 원본의 금액 · 통화 · 회원이 주문과 다름)는 `PAYMENT_MISMATCH` 거절 회신이다.
   재조회가 DONE 이 아니면(이미 취소 · 부분 취소 등) WARN 과 `order_payment` 기록(`REJECTED_PAYMENT_NOT_DONE`)을 남긴다(판정은 PR-B2).
@@ -436,7 +436,7 @@ C3b의 `OrderPaymentReplyEventUseCase`가 원천과 로컬 결제의 승인 시�
   `PRODUCT_028`은 부분 복원일 수도 있어 의도 유지 · DLT · 운영 확인이며 restored_at/inbox/회신을 쓰지 않는다. 확인 절차는 위 가이드 §3-6을 따른다.
   order 의도 없는 외부 복원은 기존 confirm 응답으로 판별할 수 없다. 소비 OFF/drain 뒤 모든 order 인스턴스에 적용하고 게이트는 유지한다.
   취소/부분취소 재전달의 NOT_DONE 복구와 내부/외부 계약 정렬은 C2b이며 C2a만으로 전체 결제 복구 완료를 뜻하지 않는다.
-- **회신과 `order_synced`(payment, PR-C 예정)** — 두 칸은 그대로 두고 뜻을 **"주문의 회신 이벤트를 받았는가"** 로 바꾼다(DONE 계열만 쓴다 — LATE_APPROVED 는 주문에 반영하지 않는다, #14):
+- **회신과 `order_synced`(payment, PR-C3a · C3b · C3c 구현)** — 두 칸은 그대로 두고 뜻을 **"주문의 회신 이벤트를 받았는가"** 로 바꾼다(DONE 계열만 쓴다 — LATE_APPROVED 는 주문에 반영하지 않는다, #14):
 
   | `order_synced` | `order_sync_failure_code` | 뜻 | 처리 |
   |----------------|---------------------------|----|------|
