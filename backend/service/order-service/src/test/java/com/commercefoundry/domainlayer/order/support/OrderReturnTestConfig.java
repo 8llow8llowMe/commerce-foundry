@@ -16,6 +16,7 @@ import com.commercefoundry.domainlayer.order.application.service.OrderHistoryWeb
 import com.commercefoundry.domainlayer.order.application.service.OrderReturnWebFacade;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderClaimHistoryProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderHistoryProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderReturnProcessor;
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
@@ -33,7 +34,7 @@ import org.springframework.context.annotation.Import;
  */
 @TestConfiguration
 @Import({OrderServiceFeaturesConfig.class, OrderRepositoryAdapter.class, OrderMapperImpl.class, ClaimRepositoryAdapter.class, ClaimMapper.class,
-    OrderReturnProcessor.class, OrderReturnWebFacade.class, OrderReturnWebPresenter.class, OrderHistoryProcessor.class,
+    OrderReturnProcessor.class, OrderReturnWebFacade.class, OrderReturnWebPresenter.class, OrderHistoryProcessor.class, OrderClaimHistoryProcessor.class,
     OrderPaymentRepositoryAdapter.class, OrderPaymentMapperImpl.class, OrderCancellationProcessor.class, OrderCancellationPipelineProcessor.class,
     OrderHistoryWebFacade.class, OrderHistoryWebPresenter.class, OrderQuoteWebPresenter.class})
 public class OrderReturnTestConfig {

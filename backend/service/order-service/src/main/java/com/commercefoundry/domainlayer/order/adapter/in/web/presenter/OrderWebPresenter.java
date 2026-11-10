@@ -22,7 +22,7 @@ public class OrderWebPresenter {
             .status(order.status().toMetadata())
             .paymentDueAt(order.paymentDueAt())
             .currency(order.quote().currency().name())
-            .items(orderQuoteWebPresenter.toLineItems(order.quote().lines()))
+            .items(orderQuoteWebPresenter.toLineItems(order.quote().lines(), order.itemIds()))
             .amounts(orderQuoteWebPresenter.toAmountsItem(order.quote()))
             .shipping(orderQuoteWebPresenter.toShippingFeeItem(order.quote().shippingFeeQuote()))
             .shippingAddress(toShippingAddressItem(order.shippingAddress()))

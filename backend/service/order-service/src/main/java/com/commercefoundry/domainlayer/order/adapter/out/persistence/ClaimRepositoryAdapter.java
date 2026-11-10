@@ -102,17 +102,26 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
     }
 
     @Override
-    public List<Claim> findCancellationRetryTargets(Instant now, int limit) {
-        if (limit < 1) {
-            throw new IllegalArgumentException("positive limit required");
-        }
-        List<ClaimEntity> claims = claimRepository.findRetryTargets(Claim.Type.CANCELLATION, EnumSet.of(Claim.Status.REQUESTED, Claim.Status.REFUNDED), now,
-            Limit.of(limit));
+    public List<Claim> findAllByOrderId(long orderId) {
+        return withItems(claimRepository.findAllByOrderIdOrderByIdDesc(orderId));
+    }
+
+    private List<Claim> withItems(List<ClaimEntity> claims) {
         if (claims.isEmpty()) {
             return List.of();
         }
         Map<Long, List<ClaimItemEntity>> items = claimItemRepository.findAllByClaimIdInOrderByClaimIdAscOrderItemIdAsc(claims.stream().map(ClaimEntity::getId).toList())
             .stream().collect(Collectors.groupingBy(ClaimItemEntity::getClaimId));
         return claims.stream().map(entity -> claimMapper.toDomain(entity, items.getOrDefault(entity.getId(), List.of()))).toList();
+    }
+
+    @Override
+    public List<Claim> findCancellationRetryTargets(Instant now, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("positive limit required");
+        }
+        List<ClaimEntity> claims = claimRepository.findRetryTargets(Claim.Type.CANCELLATION, EnumSet.of(Claim.Status.REQUESTED, Claim.Status.REFUNDED), now,
+            Limit.of(limit));
+        return withItems(claims);
     }
 }

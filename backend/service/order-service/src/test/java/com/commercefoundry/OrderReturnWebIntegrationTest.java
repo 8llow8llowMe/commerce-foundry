@@ -146,6 +146,51 @@ class OrderReturnWebIntegrationTest {
         assertThat(invalid).bodyJson().extractingPath("$.dataHeader.fieldErrors[*].code").asArray().contains("ORDER_198");
     }
 
+    private MvcTestResult get(String uri, long orderId, MemberRole role, long member) {
+        var request = mvc.get().uri(uri, orderId);
+        if (role != null) {
+            request.header(HttpHeaders.AUTHORIZATION, "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(member, role).tokenValue());
+        }
+        return request.exchange();
+    }
+
+    /** #609 — 고객 주문 상세의 항목 아이디만으로 반품 본문을 만들어 접수하고, 접수한 반품이 내 주문 클레임에 상태와 함께 보인다. */
+    @Test
+    void detailItemIdBuildsReturnAndClaimIsListedForOwnerOnly() throws Exception {
+        Order order = create();
+        assertThat(get("/api/v1/orders/{orderId}/claims", order.id(), MemberRole.CUSTOMER, TestTokens.MEMBER_ID))
+            .bodyJson().extractingPath("$.dataBody").asArray().isEmpty();
+
+        var detail = get("/api/v1/orders/{orderId}", order.id(), MemberRole.CUSTOMER, TestTokens.MEMBER_ID);
+        assertThat(detail).hasStatus(200);
+        String orderItemId = com.jayway.jsonpath.JsonPath.read(detail.getResponse().getContentAsString(), "$.dataBody.items[0].orderItemId");
+        assertThat(orderItemId).isEqualTo(String.valueOf(order.itemIds().getFirst()));
+
+        String body = "{\"items\":[{\"orderItemId\":\"" + orderItemId + "\",\"quantity\":2,\"reason\":\"DEFECTIVE\"}]}";
+        var created = post(order.id(), UUID.randomUUID().toString(), body, MemberRole.CUSTOMER, TestTokens.MEMBER_ID);
+        assertThat(created).hasStatus(201);
+        String claimId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.dataBody.claimId");
+
+        var claims = get("/api/v1/orders/{orderId}/claims", order.id(), MemberRole.CUSTOMER, TestTokens.MEMBER_ID);
+        assertThat(claims).hasStatus(200);
+        assertThat(claims).bodyJson().extractingPath("$.dataBody.length()").isEqualTo(1);
+        assertThat(claims).bodyJson().extractingPath("$.dataBody[0].claimId").isEqualTo(claimId);
+        assertThat(claims).bodyJson().extractingPath("$.dataBody[0].type.code").isEqualTo("RETURN");
+        assertThat(claims).bodyJson().extractingPath("$.dataBody[0].status.code").isEqualTo("REQUESTED");
+        assertThat(claims).bodyJson().extractingPath("$.dataBody[0].expectedRefund").isNull();
+        assertThat(claims).bodyJson().extractingPath("$.dataBody[0].items[0].orderItemId").isEqualTo(orderItemId);
+        assertThat(claims).bodyJson().extractingPath("$.dataBody[0].items[0].quantity").isEqualTo(2);
+        assertThat(claims).bodyJson().extractingPath("$.dataBody[0].items[0].reason.code").isEqualTo("DEFECTIVE");
+        assertThat(claims.getResponse().getContentAsString()).doesNotContain("requestKey", "paymentId", "failureCode", "version", "attemptCount");
+
+        var others = get("/api/v1/orders/{orderId}/claims", order.id(), MemberRole.CUSTOMER, TestTokens.MEMBER_ID + 1);
+        assertThat(others).hasStatus(404);
+        assertThat(others).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_001");
+        assertThat(get("/api/v1/orders/{orderId}/claims", order.id(), MemberRole.ADMIN, TestTokens.MEMBER_ID)).hasStatus(403);
+        assertThat(get("/api/v1/orders/{orderId}/claims", order.id(), null, 0)).hasStatus(401);
+        assertThat(get("/api/v1/orders/{orderId}/claims", 0, MemberRole.CUSTOMER, TestTokens.MEMBER_ID)).hasStatus(400);
+    }
+
     @Nested
     @TestPropertySource(properties = {"springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true"})
     class SwaggerContract {
