@@ -929,7 +929,7 @@ DB 불가 중 주문 기록의 즉시 보존·자동 무손실 복구를 보장�
 정책은 이미 처리됨의 멱등 성공 판정기가 아니므로 `COMPLETED`도 신규 실행 자격이 없다.
 
 A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변경·PG/재고 호출 연결이 없다. A2에서 기능권한·원천 증거·현재 주문 상태·결정 감사와
-멱등 재호출 및 늦은 결과 경계를 갖춘 처리 흐름을 별도 구현한다. 이 기반으로 #17 전체 완료나 운영 결제 개방 조건 충족을 주장하지 않는다.
+멱등 재호출 및 늦은 결과 경계를 갖춘 처리 흐름을 별도 구현한다 — `requireRetry` 의 호출부는 A2b 어드민 다시 시도(아래 §5 표 다음 "어드민 다시 시도")다. 이 기반으로 #17 전체 완료나 운영 결제 개방 조건 충족을 주장하지 않는다.
 배포 DDL과 구 앱의 결정 보존 제한은 `deploy-guide.md`의 운영자 수습 기반 절을 따른다.
 
 - 클레임은 `claim` 엔티티로 따로 둔다 (유형, 대상 주문 항목, 수량, 사유, 상태, 환불 예정 금액).
@@ -950,12 +950,20 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
   | `REQUESTED` | 환불 대기 | 환불 200 → `REFUNDED`(+ 주문 `CANCELED`), 종결 거절 → `REFUND_FAILED`(원격 코드), 미확정 → 백오프 재시도. 환불 200 인데 주문이 취소 요청 · 취소 완료가 아니면(데이터 이상) 복원 없이 `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`) |
   | `REFUNDED` | 환불 확정, 재고 복원 대기 | 복원 200 → `COMPLETED`, 종결 409 → `RESTORATION_FAILED`(`PRODUCT_027/028/029/003` — 원격 코드, 환불의 `PAYMENT_*` 와 같은 방식), 클레임 항목이 주문 스냅숏과 안 맞으면 `RESTORATION_DATA_INVALID`, 그 밖 → 백오프 재시도 |
   | `COMPLETED` | 끝 | — |
-  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다 |
-  | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 `CANCELED`(`ORDER_STATUS_UNEXPECTED` 면 그 상태 그대로) | — |
+  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다. 어드민 다시 시도(#17 A2b) → `REQUESTED` |
+  | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 `CANCELED`(`ORDER_STATUS_UNEXPECTED` 면 그 상태 그대로) | 어드민 다시 시도(#17 A2b) → `REFUNDED`. `ORDER_STATUS_UNEXPECTED` 는 다시 시도하지 않는다 |
 
-  - **종결 실패 수습** — 어드민 처리(#17) · 알림(#477)이 붙기 전에는 코드 경로가 없다. 종결 실패를 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를 error 로그로
-    남기고(금액 제외), 운영자는 어드민 클레임 목록(`GET /api/v1/admin/claims?status=`)으로 `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인한다.
+  - **종결 실패 수습** — 종결 실패를 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를 error 로그로 남기고(금액 제외), 운영자는 어드민 클레임 목록
+    (`GET /api/v1/admin/claims?status=`)으로 `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인한다. 상세의 `recovery.situation` 이 업무 언어로 원인을 보인다.
     `*_UNCONFIRMED` 는 결과를 끝내 확인하지 못한 것이라 PG 거래 · 재고의 실제 상태를 먼저 본다(`deploy-guide.md` 결제 개방 순서).
+  - **어드민 다시 시도 (#17 A2b, `POST /api/v1/admin/claims/{claimId}/retries`)** — `ClaimAdminRecoveryProcessor.prepareRetry` 가 짧은 트랜잭션에서
+    화면 버전(`expectedVersion`)을 대조하고 `ClaimAdminRecoveryPolicy.requireRetry` 를 통과한 클레임만 선점한다. 종결 실패는 `Claim#reopen`(그 단계의 대기 상태 ·
+    횟수 0 · 실패 코드 지움), lease 가 끝난 대기 상태는 `holdUntil` 이고 둘 다 다음 시각을 `now + lease` 로 미뤄 커밋한다. 그 뒤 트랜잭션 밖에서 같은
+    `OrderCancellationPipelineProcessor.progress` 를 돌린다 — 저장된 클레임 아이디 · 결제 · 금액이라 payment · product 는 멱등이다(재계산하지 않는다).
+    lease 안(자동 처리 중)은 409 `ORDER_039`, 버전 불일치 · 저장 경합은 409 `ORDER_037` 이라 스케줄러 · 고객 · 다른 운영자와 겹쳐도 원격은 한 번만 나간다.
+    재시도 스케줄러가 꺼져 있으면 503 `ORDER_040` 이다(다시 연 뒤 미확정을 따라갈 쪽이 없다). 원격 단계가 반영 없이 끊기면 스케줄러처럼 미확정 한 번으로 센다.
+    다시 연 `PAYMENT_016` · `017` 같은 종결 거절은 payment 가 같은 claimId 로 다시 거절해 `REFUND_FAILED` 로 돌아온다 — 다시 시도는 무환불을 확정하지 않는다.
+    수동 환불 확정 · 복원 생략 종결(A3) · 취소 거절(A4)은 후속이다.
 
   - **트랜잭션 경계** — 접수(tx1) · 환불 결과 반영(tx2) · 복원 결과 반영(tx3)은 각각 짧은 트랜잭션이고 환불 · 복원 호출은 그 사이 트랜잭션 밖이다
     (`OrderCancellationProcessor` · `OrderCancellationPipelineProcessor`). 각 반영은 클레임 · 주문 `@Version` 으로 진 쪽을 가려 조용히 멈춘다(다른 워커가 처리).

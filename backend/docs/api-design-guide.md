@@ -1281,23 +1281,36 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 - **목록** — 기간은 주문 시각 `[from, to)` (UTC)이고 비면 그쪽 끝이 열려 있다. 정렬은 주문 시각 → 아이디 내림차순이고 `idx_orders_status_created_at_id` · `idx_orders_created_at_id` 범위로 읽는다(건수 쿼리도). 첫 상품명 · 항목 수 · 받는 분은 그 페이지 주문만 묶어 읽는다(항목 1번 · 배송지 1번).
   결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 조회는 아래 계약이며 승인 · 환불 · `REFUND_FAILED` 재시도는 후속이다.
 
-#### 어드민 클레임 조회 (#17)
+#### 어드민 클레임 조회 · 결제 후 취소 다시 시도 (#17)
 
-두 경로 모두 `AdminAuthority.ORDER_READ`다(ADMIN · OWNER · MANAGER · STAFF, `security-guide.md` §3-1). CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 어드민 Swagger 그룹에 포함된다.
+조회 두 경로는 `AdminAuthority.ORDER_READ`(ADMIN · OWNER · MANAGER · STAFF), 다시 시도는 `AdminAuthority.ORDER_MANAGE`(ADMIN · OWNER · MANAGER, `security-guide.md` §3-1)다.
+CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 어드민 Swagger 그룹에 포함된다.
 
 | API | 응답 | 검증/오류 |
 |-----|------|-----------|
 | `GET /api/v1/admin/claims?orderId=&type=&status=&page=0&size=20` | 200 `PageResponse<{claimId,orderId,type,status,expectedRefund,requestedAt}>` | page 0 이상 `ORDER_144`, size 1~100 `ORDER_145`, orderId 양수 `ORDER_141`, page×size가 JPA offset 한도 초과 `ORDER_167`, 타입·범위 오류 `ORDER_198` (400) |
-| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}]}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
+| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}],recovery:{situation,nextAutomaticAttemptAt,retryable,version}}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
+| `POST /api/v1/admin/claims/{claimId}/retries` `{expectedVersion}` (#17 A2b) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 다시 시도할 수 없음(처리 완료 · 반품 · 주문 상태 이상) `ORDER_038` · 자동 처리 중(lease 안) `ORDER_039` (409), 결제 취소 결과 미반영 `ORDER_036` · 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
+
+- **처리 상황 `recovery` (#17 A2b)** — 운영자는 비개발자라 원시 오류 코드(`PAYMENT_*` · `PRODUCT_*`) · 시도 횟수 · 결제 아이디를 내지 않는다.
+  `situation` 은 `{code,name,description}` metadata 이고 `NO_ACTION`(처리 끝 · 반품) · `AUTO_PROCESSING`(환불 대기 · 복원 대기) · `REFUND_UNCONFIRMED` ·
+  `REFUND_REJECTED` · `RESTORATION_UNCONFIRMED` · `RESTORATION_REJECTED` · `ORDER_STATUS_MISMATCH` 다(도메인 `ClaimRecoverySituation`). 화면은 name · description 을 그대로 보인다.
+  `nextAutomaticAttemptAt` 은 대기 상태일 때 자동 처리가 다시 확인할 시각, 아니면 null 이다. `retryable` 은 다시 시도 버튼을 보일지이며 선점 조건과 같은 판정이다.
+  `version` 은 다시 시도 요청의 `expectedVersion` 으로 그대로 보내는 화면 버전(0 이상 정수)이다.
+- **다시 시도 (#17 A2b)** — 종결 실패(`REFUND_FAILED` · `RESTORATION_FAILED`)는 그 단계의 대기 상태로 다시 열고(횟수 0), lease 가 끝난 대기 상태는 그대로 선점한다.
+  선점 커밋 뒤 트랜잭션 밖에서 고객 취소 · 재시도 스케줄러와 같은 환불 → 복원 경로를 돌린다. 같은 클레임 아이디 · 저장된 결제 · 금액으로 보내므로 원격은 멱등이다.
+  **200 은 "다시 보냈다"는 뜻이지 성공이 아니다** — 결제사가 다시 거절했으면 `status=REFUND_FAILED` 그대로다. FE 는 응답의 `status` · `recovery.situation` 을 읽는다.
+  원격 단계가 반영 없이 끊기면 미확정 한 번으로 세고 그 시점 상세 200 을 낸다(클레임은 lease 로 남아 스케줄러가 잇는다). 409 `ORDER_037` 이면 상세를 다시 조회한 뒤 판단한다.
+  헤더 멱등 키는 쓰지 않는다 — 화면 버전 대조와 `@Version` 저장이 한 번만 선점되게 한다. 주문 상태가 맞지 않아 닫힌 접수(`ORDER_STATUS_MISMATCH`)는 다시 시도하지 않는다(재고가 늘 수 있다).
 
 - 필터는 모두 선택적이고 함께 지정하면 AND다. 지원 값은 `type=RETURN|CANCELLATION`, `status=REQUESTED|REFUNDED|COMPLETED|REFUND_FAILED|RESTORATION_FAILED`다
   (#16 PR-2a, 도메인 `Claim.Type` · `Claim.Status` 와 같은 집합). 반품 접수는 아직 `REQUESTED`만 생기고, 결제 후 취소 클레임은 #16 PR-2a-2 부터 생긴다.
   모르는 값은 400 `ORDER_198`이다. 필터에 맞는 접수의 claimId 내림차순으로 정렬하며 임의 정렬 입력은 받지 않는다.
 - `page`는 0부터, 기본 크기는 20이다. `page×size`는 2,147,483,647 이하여야 하고 초과 입력은 DB 조회 전에 400으로 거절한다. `totalElements`는 같은 조건의 실제 count이고 빈 페이지에서도 전체 건수를 보존한다. 목록은 헤더와 count만 조회하고 상세만 항목을 읽는다.
 - ID는 문자열, type/status/reason은 `{code,name,description}` metadata다. `expectedRefund`는 `{amount,currency}` 또는 미산정 `null`이며 null을 0원으로 표시하지 않는다.
-- UUID 멱등키·회원/배송 개인정보·버전·워커 정보는 응답에 포함하지 않는다. 조회는 주문/접수 상태·이력·outbox를 변경하지 않고 외부 서비스를 호출하지 않는다.
-- 성공한 조회 뒤 `admin.audit`에 `CLAIM_SEARCH` 또는 `CLAIM_VIEW`를 남긴다. JWT 관리자 ID와 검증된 필터/대상만 기록하며 요청 원문·항목·멱등키는 기록하지 않는다.
-- 승인·거절·환불 계산/실행·실패 재시도·재고 복원과 새 상태는 후속이다. FE는 현 상태를 접수로 표시하고 이 조회 API만으로 처리 완료 버튼을 제공하지 않는다. 계약 리뷰어는 `seonghoho`다.
+- UUID 멱등키·회원/배송 개인정보·워커 정보는 응답에 포함하지 않는다. 버전은 상세의 `recovery.version`(다시 시도의 화면 버전)으로만 낸다. 조회는 주문/접수 상태·이력·outbox를 변경하지 않고 외부 서비스를 호출하지 않는다.
+- 성공한 조회 뒤 `admin.audit`에 `CLAIM_SEARCH` 또는 `CLAIM_VIEW`를 남긴다. 다시 시도는 성공 · 거절 모두 `CLAIM_RETRY`(대상 `claim:{id}`, success true/false)로 남긴다. JWT 관리자 ID와 검증된 필터/대상만 기록하며 요청 원문·항목·멱등키는 기록하지 않는다.
+- 수동 환불 확정 · 복원 생략 종결(A3), 취소 거절(A4), 반품 승인 · 환불(B1 · B2)은 후속이다. 반품 접수는 다시 시도 대상이 아니다(409 `ORDER_038`). 계약 리뷰어는 `seonghoho`다.
 
 ### 2-17. 고객 주문 내역 · 결제 전 취소 · 구매 확정 · 반품 접수 (order-service, #16)
 
@@ -1316,7 +1329,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   다시 부르지 않는다. 부분 취소 · 응답의 환불액 블록은 PR-2b, 반품 승인/환불 연계는 후속이다. 고객 부분 반품 접수는 아래 계약으로 제공한다. 구매 확정은 배송 완료 주문에서 가능하다.
 - **확정 환불 미기록(#17 A2a)** — `ORDER_036` 503은 취소 접수 롤백이나 환불 실패가 아니다. FE는 실패로 단정하거나 새 취소를 만들지 말고 현재 주문 상태를 확인한다.
   같은 요청 재전송은 원 claim의 현재 상세를 조회하며 환불을 재실행하지 않는다. 실제 환불 동기화 완료를 보장하는 응답은 아니다.
-  기존 `ORDER_035` 게이트 기본값과 그 밖의 Runtime 처리 계약은 유지한다. 재시도 API/권한/expectedVersion·관측 응답은 A2b 후속이며 오류 계약 변경 리뷰어는 `seonghoho`다.
+  기존 `ORDER_035` 게이트 기본값과 그 밖의 Runtime 처리 계약은 유지한다. 어드민 다시 시도 API(A2b)는 위 "어드민 클레임" 절이며 오류 계약 변경 리뷰어는 `seonghoho`다.
 - **`cancelable`** — 지금 취소 버튼을 보여 줄지다. 결제 대기면 true. 결제 완료 · 상품 준비중은 결제 후 취소가 열려 있을 때(`order.cancellation.retry.enabled=true`)만 true,
   제작 중은 거기에 `order.cancellation.allow-while-making`(기본 false)까지 켜져야 true 다. 취소 요청 · 취소 완료 · 배송 중 이후 · 만료는 false. 판정의 정본은
   `OrderStatus#isCancelableByCustomer(allowWhileMaking, paidCancellationOpen)` 이고 결제 후 취소 접수(503 `ORDER_035`)와 같은 게이트를 쓴다. 결제 뒤 true 는 #16 PR-2 에서
