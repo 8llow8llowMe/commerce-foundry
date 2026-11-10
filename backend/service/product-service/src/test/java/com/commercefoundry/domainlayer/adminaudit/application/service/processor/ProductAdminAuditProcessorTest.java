@@ -159,4 +159,28 @@ class ProductAdminAuditProcessorTest {
             "action=SIZE_CHART_DRAFT_APPLY actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=FAILURE"
         );
     }
+
+    @Test
+    @DisplayName("재고 조정 · SKU 원가는 sku:<id>, 상품 초안은 product-draft:<id> 이고 아이디 없이 실패한 초안 생성은 - 다 (#163 PR-C′)")
+    void stockCostAndProductDraftTargets() {
+        processor.stockAdjusted(ACTOR, 31, true);
+        processor.stockAdjusted(ACTOR, 31, false);
+        processor.skuCostCreated(ACTOR, 31, true);
+        processor.skuCostCreated(ACTOR, 31, false);
+        processor.productDraftCreated(ACTOR, 41L, true);
+        processor.productDraftCreated(ACTOR, null, false);
+        processor.productDraftRejected(ACTOR, 41, true);
+        processor.productDraftRejected(ACTOR, 41, false);
+
+        assertThat(lines()).containsExactly(
+            "action=STOCK_ADJUST actorMemberId=" + ACTOR + " target=sku:31 result=SUCCESS",
+            "action=STOCK_ADJUST actorMemberId=" + ACTOR + " target=sku:31 result=FAILURE",
+            "action=SKU_COST_CREATE actorMemberId=" + ACTOR + " target=sku:31 result=SUCCESS",
+            "action=SKU_COST_CREATE actorMemberId=" + ACTOR + " target=sku:31 result=FAILURE",
+            "action=PRODUCT_DRAFT_CREATE actorMemberId=" + ACTOR + " target=product-draft:41 result=SUCCESS",
+            "action=PRODUCT_DRAFT_CREATE actorMemberId=" + ACTOR + " target=- result=FAILURE",
+            "action=PRODUCT_DRAFT_REJECT actorMemberId=" + ACTOR + " target=product-draft:41 result=SUCCESS",
+            "action=PRODUCT_DRAFT_REJECT actorMemberId=" + ACTOR + " target=product-draft:41 result=FAILURE"
+        );
+    }
 }

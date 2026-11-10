@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.skucost.application.exception.SkuCostVali
 import com.commercefoundry.domainlayer.skucost.application.model.SkuCostTypeCode;
 import com.commercefoundry.domainlayer.skucost.application.port.in.SkuCostAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
@@ -89,6 +90,7 @@ public class SkuCostAdminController {
             + "다른 원가 저장과 겹쳐 잠금을 얻지 못하면 409(SKU_COST_005 — 다시 시도)다. 없는 SKU 는 404(PRODUCT_002)다."
     )
     @PreAuthorize(AdminAuthority.COST_MANAGE)
+    @AdminAudited(action = "SKU_COST_CREATE")
     @PostMapping
     public ResponseEntity<Response<SkuCostAdminItem>> createCost(
         @AuthenticationPrincipal MemberPrincipal member,

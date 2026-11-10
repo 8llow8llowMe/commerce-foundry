@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.service;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.item.StockAdjustmentHistoryAdminItem;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.StockAdminListResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.StockAdminResponse;
@@ -22,6 +23,7 @@ public class StockAdminFacade implements StockAdminUseCase {
     private final StockAdjustmentProcessor stockAdjustmentProcessor;
     private final StockAdminQueryProcessor stockAdminQueryProcessor;
     private final StockAdminPresenter stockAdminPresenter;
+    private final ProductAdminAuditProcessor productAdminAuditProcessor;
 
     /**
      * 재고 행과 선점 합을 같은 스냅숏에서 읽는다. 읽기 전용이라 직렬화 실패가 없다.
@@ -42,10 +44,24 @@ public class StockAdminFacade implements StockAdminUseCase {
         return stockAdminPresenter.toAdjustmentPageResponse(stockAdminQueryProcessor.getAdjustments(skuId, page, size));
     }
 
-    /** 외부 I/O 가 없어 Facade 에 트랜잭션을 건다 — 재고 변경과 조정 이력이 함께 커밋되거나 함께 롤백된다. */
+    /**
+     * 외부 I/O 가 없어 Facade 에 트랜잭션을 건다 — 재고 변경과 조정 이력이 함께 커밋되거나 함께 롤백된다.
+     *
+     * <p><b>감사 (#163 PR-C′)</b> — 조정 결과를 {@link ProductAdminAuditProcessor} 로 {@code sku:<skuId>} 대상 한 줄 남긴다(선례: {@code CategoryAdminFacade}).
+     * 트랜잭션 안에서 불러도 줄은 커밋 결과로 남는다(롤백되면 성공으로 부른 것도 {@code FAILURE}). 업무 예외는 기록한 뒤 그대로 다시 던진다.
+     * 수량 · 관리 여부 · 사유 · 메모는 싣지 않는다 — 정본은 조정 이력 표다. {@code FAILURE} 는 요청이 오류로 끝났다는 뜻이지 반영되지 않았다는 뜻이 아니다.
+     */
     @Override
     @Transactional
     public StockAdminResponse adjustStock(StockAdjustmentCommand command) {
-        return stockAdminPresenter.toResponse(stockAdjustmentProcessor.adjust(command));
+        StockAdminResponse response;
+        try {
+            response = stockAdminPresenter.toResponse(stockAdjustmentProcessor.adjust(command));
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.stockAdjusted(command.adminMemberId(), command.skuId(), false);
+            throw exception;
+        }
+        productAdminAuditProcessor.stockAdjusted(command.adminMemberId(), command.skuId(), true);
+        return response;
     }
 }

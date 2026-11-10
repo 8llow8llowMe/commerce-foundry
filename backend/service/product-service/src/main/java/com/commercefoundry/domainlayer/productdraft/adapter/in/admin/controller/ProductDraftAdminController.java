@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.request
 import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.response.ProductDraftAdminResponse;
 import com.commercefoundry.domainlayer.productdraft.application.exception.ProductDraftValidationMessage;
 import com.commercefoundry.domainlayer.productdraft.application.port.in.ProductDraftAdminUseCase;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
@@ -47,6 +48,7 @@ public class ProductDraftAdminController {
             + "대표 이미지 두 장 이상은 400(PRODUCT_DRAFT_034), 같은 주소 두 번은 400(PRODUCT_DRAFT_035)이다. 이미지 유형은 THUMBNAIL · GALLERY 만 받는다(영상 등은 400 PRODUCT_100)."
     )
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "PRODUCT_DRAFT_CREATE")
     @PostMapping
     public ResponseEntity<Response<ProductDraftAdminResponse>> create(
         @AuthenticationPrincipal MemberPrincipal member,
@@ -70,6 +72,7 @@ public class ProductDraftAdminController {
             + "보관 기간이 지났으면 409(PRODUCT_DRAFT_022), 다른 변경과 겹치면 409(PRODUCT_DRAFT_025)다. 없는 초안은 404(PRODUCT_DRAFT_001)다."
     )
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "PRODUCT_DRAFT_REJECT")
     @PostMapping("/{draftId}/reject")
     public ResponseEntity<Response<ProductDraftAdminResponse>> reject(
         @AuthenticationPrincipal MemberPrincipal member,

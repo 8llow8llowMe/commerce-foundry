@@ -70,5 +70,13 @@ public enum ProductAdminAuditAction {
     /** 룩 삭제. 대상 {@code look:<id>} */
     LOOK_DELETE,
     /** 룩 순서 변경. 고정 대상 {@code look:order} — 아이디 목록은 싣지 않는다 */
-    LOOK_REORDER
+    LOOK_REORDER,
+    /** 재고 조정 (#163 PR-C′). 대상 {@code sku:<skuId>} — 수량 · 관리 여부 · 사유 · 메모는 싣지 않는다(정본은 조정 이력 표) */
+    STOCK_ADJUST,
+    /** SKU 원가 이력 추가 (#163 PR-C′). 대상 {@code sku:<skuId>} — 금액 · 통화 · 유형 · 적용 시각 · 사유는 싣지 않는다(정본은 원가 이력 표) */
+    SKU_COST_CREATE,
+    /** AI 상품 초안 생성 (#163 PR-C′). 대상 {@code product-draft:<id>} — 만들지 못했으면 {@code -} */
+    PRODUCT_DRAFT_CREATE,
+    /** AI 상품 초안 거절 (#163 PR-C′). 대상 {@code product-draft:<id>} — 이미 거절한 초안의 재전송(그대로 200)도 {@code SUCCESS} */
+    PRODUCT_DRAFT_REJECT
 }
