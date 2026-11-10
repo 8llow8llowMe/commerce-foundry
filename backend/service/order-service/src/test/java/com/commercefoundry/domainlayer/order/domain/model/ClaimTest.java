@@ -284,6 +284,36 @@ class ClaimTest {
         assertThatThrownBy(() -> unsaved.holdUntil(until)).isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void confirmedSuccessOverridesFailureWithoutChangingOrdinaryContract() {
+        Claim base = requested();
+        for (String code : List.of("PAYMENT_016", "PAYMENT_019", Claim.REFUND_UNCONFIRMED)) {
+            Claim failed = base.failRefund(code);
+            assertThat(base.hasSameRefundRequest(failed)).isTrue();
+            assertThat(failed.markConfirmedRefund(NOW).status()).isEqualTo(Claim.Status.REFUNDED);
+        }
+        assertThat(base.hasSameRefundRequest(null)).isFalse();
+        assertThat(base.markConfirmedRefund(NOW).hasRecordedRefund()).isTrue();
+        assertThatThrownBy(() -> base.markRefunded(NOW).markConfirmedRefund(NOW)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void refundFingerprintIncludesAllImmutableRequestFields() {
+        Claim source = requested();
+        for (int field = 0; field < 7; field++) {
+            Claim.Type type = field == 3 ? Claim.Type.RETURN : source.type();
+            Money amount = field == 5 ? krw(source.expectedRefund().amount() + 1)
+                : field == 6 ? Money.of(source.expectedRefund().amount(), CurrencyCode.USD) : source.expectedRefund();
+            List<ClaimItem> items = field == 3 ? source.items().stream()
+                .map(item -> new ClaimItem(item.id(), item.orderItemId(), item.quantity(), ClaimItem.Reason.DEFECTIVE)).toList() : source.items();
+            Claim changed = new Claim(field == 0 ? source.id() + 1 : source.id(), field == 1 ? source.orderId() + 1 : source.orderId(),
+                field == 2 ? UUID.randomUUID() : source.requestKey(), type, source.status(), amount,
+                field == 3 ? null : field == 4 ? source.paymentId() + 1 : source.paymentId(), source.attemptCount(),
+                field == 3 ? null : source.nextAttemptAt(), source.failureCode(), items, source.requestedAt(), source.version());
+            assertThat(source.hasSameRefundRequest(changed)).as("field %s", field).isFalse();
+        }
+    }
+
     private static Claim cancellation(Claim.Status status, Instant next, String failureCode, List<ClaimItem> items) {
         return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 0, next, failureCode, items, NOW, 0L);
     }

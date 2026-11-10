@@ -10,6 +10,9 @@ import java.util.UUID;
 public interface ClaimRepositoryPort {
     Optional<Claim> findByOrderIdAndRequestKey(long orderId, UUID requestKey);
 
+    /** 호출자의 짧은 쓰기 트랜잭션에서 최신 행을 NOWAIT 잠근다. 잠금 중 외부 I/O를 하지 않는다. */
+    Optional<Claim> findByIdForUpdate(long claimId);
+
     /** REQUESTED 반품의 항목별 수량을 한 번에 읽는다. */
     Map<Long, Long> sumRequestedReturnQuantities(long orderId);
 

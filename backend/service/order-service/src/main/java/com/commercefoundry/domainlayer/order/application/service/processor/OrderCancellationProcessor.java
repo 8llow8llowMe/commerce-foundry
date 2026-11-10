@@ -20,10 +20,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 /**
  * 결제 후 고객 취소의 DB 단계 (#16 PR-2, {@code order-flow-guide.md} §5) — 접수(tx1) · 환불 결과 반영(tx2) · 재고 복원 결과 반영(tx3) · 재시도 선점 · 실패 기록.
@@ -158,12 +160,34 @@ public class OrderCancellationProcessor {
     }
 
     /**
-     * 원격 결과를 반영하지 못하고 끝난 시도(낙관적 락이 아닌 예외 — DB 장애 · 버그)를 미확정 한 번으로 센다. 지금 저장된 클레임을 다시 읽어 대기 상태면
-     * 그 단계의 재시도(상한을 넘으면 *_UNCONFIRMED 종결)로 저장한다 — 같은 실패가 횟수 없이 영영 반복되지 않게. 이미 종결이면 아무것도 하지 않는다.
+     * 일반 시도 실패를 당시 스냅숏의 id · version · status가 현재 대기 단계와 일치할 때만 한 번 센다. 새 선점 · 단계 · 종결 결과는 건드리지 않는다.
+     * 확정 환불 미기록은 이 메서드로 보내지 않는다. 비교 뒤 경합도 UPDATE의 버전에서 패배한다.
      */
     @Transactional(timeout = 5)
-    public void recordAttemptFailure(long orderId) {
-        findCancellationClaim(orderId).filter(claim -> claim.status().isAwaitingAttempt()).ifPresent(this::retryOrGiveUp);
+    public void recordAttemptFailure(Claim attempted) {
+        findCancellationClaim(attempted.orderId())
+            .filter(claim -> claim.id() == attempted.id() && Objects.equals(claim.version(), attempted.version())
+                && claim.status() == attempted.status() && claim.status().isAwaitingAttempt())
+            .ifPresent(this::retryOrGiveUp);
+    }
+
+    /**
+     * 확정 성공의 낙관적 반영이 소진된 뒤 독립 TX에서 최신 claim → order를 NOWAIT로 잠근다. 원격 호출 없이 함께 커밋하며,
+     * 이미 환불 이후 단계면 빈 값으로 현재 실행의 복원 재진입을 막는다. 커밋 실패도 호출자에게 전달된다.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 5)
+    public Optional<Claim> recordConfirmedRefundWithLock(Claim source) {
+        Claim current = claimRepositoryPort.findByIdForUpdate(source.id()).orElseThrow(() -> new IllegalStateException("claim not found"));
+        if (!source.hasSameRefundRequest(current)) {
+            throw new IllegalStateException("refund request changed");
+        }
+        if (current.hasRecordedRefund()) {
+            return Optional.empty();
+        }
+        Order order = loadOrder(current.orderId());
+        orderRepositoryPort.findByIdAndMemberIdForUpdate(order.id(), order.memberId())
+            .orElseThrow(() -> new IllegalStateException("claim order not found"));
+        return Optional.of(applyRefunded(current));
     }
 
     /** 재시도 대상 — 환불 대기 · 복원 대기이고 다음 시각이 지난 취소 클레임을 다음 시각 순으로 {@code batch-size} 건까지. */
@@ -200,7 +224,7 @@ public class OrderCancellationProcessor {
     /** 환불 확정 반영 — 주문 상태에 따라 취소 완료로 바꾸거나(취소 요청), 클레임만 바꾸거나(이미 취소 완료), 데이터 이상으로 닫는다. */
     private Claim applyRefunded(Claim claim) {
         Instant now = clock.instant();
-        Claim refunded = claim.markRefunded(now.plus(properties.retry().lease()));
+        Claim refunded = claim.markConfirmedRefund(now.plus(properties.retry().lease()));
         Order order = loadOrder(claim.orderId());
         if (order.status() == OrderStatus.CANCEL_REQUESTED) {
             Claim saved = claimRepositoryPort.update(refunded);

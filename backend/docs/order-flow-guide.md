@@ -885,6 +885,36 @@ order → delivery 역방향 호출은 두지 않는다(`service-inventory.md` �
 
 ## 5. 클레임 (취소 · 반품 · 교환)
 
+### 환불 결과 파이프라인 호환 보완 (#17 A2a)
+
+관리자 재시도 API(A2b) 이전의 기존 고객 취소·스케줄러 보완이다. 새 API·권한·관측 응답·관리자 재개 전이는 추가하지 않는다.
+기존 스케줄러의 일반 실패 계수는 실행 당시 `Claim`의 id/version/status가 현재 대기 단계와 일치할 때만 CAS로 저장한다.
+새 선점·lease·단계·결정 또는 다른 실행의 성공을 오래된 실패가 덮어쓰지 않는다.
+
+동일 id/type/orderId/requestKey/paymentId/환불 금액·통화의 확정 성공은 최신 `REQUESTED` 또는 `REFUND_FAILED`에 실패 코드와 관계없이 반영한다.
+일반 `markRefunded`의 제한은 유지하고 확정 성공 전용 도메인 메서드를 사용한다. 두 번의 낙관적 기록이 충돌하면 별도 5초 트랜잭션에서
+claim→order 순서로 NOWAIT 잠금을 잡아 최신 값을 확인한다. 잠금 중 원격 호출은 없고, 실제 환불 전이 승자의 커밋 뒤에만 복원을 이어간다.
+이미 `REFUNDED/RESTORATION_FAILED/COMPLETED`면 기존 성공과 복원 소유권을 유지하고 현재 실행은 복원을 다시 호출하지 않는다.
+주문 상태가 모순이면 기존 `RESTORATION_FAILED(ORDER_STATUS_UNEXPECTED)` 경계를 유지하며 재고를 복원하지 않는다.
+
+| 실패 지점 | 관측 결과 | 다음 처리 |
+|---|---|---|
+| 늦은 일반 실패 | 최신 세대·단계 유지 | 현재 소유 실행 또는 스케줄러 |
+| 확정 성공의 CAS 소진 | 짧은 행 잠금 경계로 이동 | 최신 동일 요청에 확정 반영 |
+| 잠금·DB·flush·commit 실패 | 전용 503 `ORDER_036` | 성공 원장과 주문 상태 대조 |
+| 이미 환불 이후 단계 | 현재 실행의 복원 재진입 없음 | 기존 소유 실행 또는 lease 이후 복원 재시도 |
+
+`ORDER_036`은 취소 접수의 롤백이나 환불 실패가 아니다. 고객 Facade는 이 오류만 재전파하고 기존 generic Runtime 처리 계약은 유지한다.
+스케줄러는 이를 처리 실패로 진단하되 일반 원격 미확정 횟수를 올리지 않는다. 고객은 주문 상태를 확인하며 같은 요청 재전송도 기존 claim을 조회할 뿐
+새 claim이나 환불을 만들지 않는다. 이 고객 재생 응답 자체가 환불 결과 동기화 완료를 뜻하지 않는다(FE 계약 검토: `seonghoho`).
+
+운영 수습은 원 payment의 `SUCCEEDED`와 동일 claim/payment/원금액·통화·멱등 키를 대조하고 DB 복구·다른 claim의 `PENDING` 해소·게이트 조건을 확인한 뒤
+기존 원격 계약으로 결과를 다시 회수하는 순서다. payment는 확정 성공 커밋 뒤 응답하지만 `prepare`의 다른 PENDING 검사가 기존 성공 재사용보다 앞서므로
+재전송의 즉시 200을 보장하지 않는다. 대기 claim은 lease 이후 기존 스케줄러가 잇고, 종결 실패의 관리자 재개 경로는 A2b까지 미연결이다.
+DB 불가 중 주문 기록의 즉시 보존·자동 무손실 복구를 보장하지 않는다. 스키마·원장·payment/core·운영 게이트 기본값을 바꾸지 않는다.
+
+검증은 실제 PostgreSQL 독립 TX/latch·실제 Feign/adapter와 loopback HTTP fake를 사용한다. fake의 성공 기억과 멱등 계약 검증은 실제 PG 환불 증거가 아니다.
+
 ### 운영자 수습 저장 기반 (#17 A1)
 
 `Claim.Decision`은 마지막 운영자 결정의 사유(1~200자)·관리자 양수 아이디·마이크로초 시각·결정 직전 실패 코드(1~40자)를 묶는다.
@@ -920,7 +950,7 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
   | `REQUESTED` | 환불 대기 | 환불 200 → `REFUNDED`(+ 주문 `CANCELED`), 종결 거절 → `REFUND_FAILED`(원격 코드), 미확정 → 백오프 재시도. 환불 200 인데 주문이 취소 요청 · 취소 완료가 아니면(데이터 이상) 복원 없이 `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`) |
   | `REFUNDED` | 환불 확정, 재고 복원 대기 | 복원 200 → `COMPLETED`, 종결 409 → `RESTORATION_FAILED`(`PRODUCT_027/028/029/003` — 원격 코드, 환불의 `PAYMENT_*` 와 같은 방식), 클레임 항목이 주문 스냅숏과 안 맞으면 `RESTORATION_DATA_INVALID`, 그 밖 → 백오프 재시도 |
   | `COMPLETED` | 끝 | — |
-  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | `failure_code = REFUND_UNCONFIRMED`(재시도 소진)일 때만 늦게 온 환불 성공을 받아 `REFUNDED`(파이프라인이 반영에서 진 뒤 다시 읽어 이 상태면 한 번 더 반영하고 복원까지 잇는다) |
+  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다 |
   | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 `CANCELED`(`ORDER_STATUS_UNEXPECTED` 면 그 상태 그대로) | — |
 
   - **종결 실패 수습** — 어드민 처리(#17) · 알림(#477)이 붙기 전에는 코드 경로가 없다. 종결 실패를 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를 error 로그로

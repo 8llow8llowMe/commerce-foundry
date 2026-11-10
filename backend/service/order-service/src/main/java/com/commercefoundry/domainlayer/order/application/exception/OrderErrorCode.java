@@ -114,6 +114,9 @@ public enum OrderErrorCode {
      * 이미 접수된 취소의 재요청(현재 상세)과 결제 전 취소는 그대로 된다.
      */
     CANCELLATION_UNAVAILABLE("ORDER_035", "지금은 결제 후 취소를 처리할 수 없습니다. 고객센터에 문의해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /** 환불 성공 응답은 받았지만 주문 DB 반영을 확정하지 못했다. 환불 실패나 취소 접수 롤백을 뜻하지 않는다. */
+    CANCELLATION_REFUND_RECORDING_UNAVAILABLE("ORDER_036", "결제 취소 결과를 주문에 반영하지 못했습니다. 잠시 후 주문 상태를 확인해 주세요.",
+        HttpStatus.SERVICE_UNAVAILABLE),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

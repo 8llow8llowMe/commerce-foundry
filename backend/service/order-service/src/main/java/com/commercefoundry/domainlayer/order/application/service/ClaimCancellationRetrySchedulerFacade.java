@@ -1,6 +1,8 @@
 package com.commercefoundry.domainlayer.order.application.service;
 
 import com.commercefoundry.common.exception.RedactedThrowable;
+import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
+import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.port.in.ClaimCancellationRetrySchedulerUseCase;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
@@ -71,7 +73,10 @@ public class ClaimCancellationRetrySchedulerFacade implements ClaimCancellationR
         } catch (RuntimeException exception) {
             log.error("cancellation claim retry failed. claimId={}, error={}, rootCause={}", target.id(), exception.getClass().getSimpleName(),
                 NestedExceptionUtils.getMostSpecificCause(exception).getClass().getSimpleName(), RedactedThrowable.of(exception));
-            countFailure(held);
+            if (!(exception instanceof OrderException failure
+                && failure.getErrorCode() == OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE)) {
+                countFailure(held);
+            }
             return false;
         }
     }
@@ -79,7 +84,7 @@ public class ClaimCancellationRetrySchedulerFacade implements ClaimCancellationR
     /** 반영하지 못한 시도를 미확정 한 번으로 센다 — 이것마저 실패하면 다음 시각(lease)에 다시 집힌다. */
     private void countFailure(Claim held) {
         try {
-            orderCancellationProcessor.recordAttemptFailure(held.orderId());
+            orderCancellationProcessor.recordAttemptFailure(held);
         } catch (RuntimeException exception) {
             log.error("cancellation claim failure count not saved. claimId={}, error={}", held.id(), exception.getClass().getSimpleName(),
                 RedactedThrowable.of(exception));

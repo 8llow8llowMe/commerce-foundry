@@ -72,7 +72,7 @@ class ClaimCancellationRetrySchedulerFacadeTest {
         verify(pipeline, never()).progress(lost);
         verify(pipeline, never()).progress(won);
         verify(pipeline).progress(held);
-        verify(processor, never()).recordAttemptFailure(anyLong());
+        verify(processor, never()).recordAttemptFailure(any());
     }
 
     @Test
@@ -92,13 +92,13 @@ class ClaimCancellationRetrySchedulerFacadeTest {
         when(processor.hold(ok)).thenReturn(heldOk);
         when(pipeline.progress(heldFailing)).thenThrow(new IllegalStateException("boom"));
         when(pipeline.progress(heldCountFails)).thenThrow(new CannotCreateTransactionException("db"));
-        doThrow(new CannotCreateTransactionException("db")).when(processor).recordAttemptFailure(3L);
+        doThrow(new CannotCreateTransactionException("db")).when(processor).recordAttemptFailure(heldCountFails);
 
         facade.retryDueCancellations();
 
-        verify(processor).recordAttemptFailure(2L);
-        verify(processor).recordAttemptFailure(3L);
-        verify(processor, never()).recordAttemptFailure(1L);
+        verify(processor).recordAttemptFailure(heldFailing);
+        verify(processor).recordAttemptFailure(heldCountFails);
+        verify(processor, never()).recordAttemptFailure(holdFails);
         verify(pipeline).progress(heldOk);
     }
 
@@ -119,6 +119,18 @@ class ClaimCancellationRetrySchedulerFacadeTest {
 
         verify(pipeline).progress(held);
         verify(processor, never()).hold(second);
+    }
+
+    @Test
+    void knownRefundRecordingFailureDoesNotConsumeUnknownAttempts() {
+        Claim target = claim(1);
+        Claim held = claim(1);
+        when(processor.findRetryTargets()).thenReturn(List.of(target));
+        when(processor.hold(target)).thenReturn(held);
+        when(pipeline.progress(held)).thenThrow(new com.commercefoundry.domainlayer.order.application.exception.OrderException(
+            com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE));
+        facade.retryDueCancellations();
+        verify(processor, never()).recordAttemptFailure(any());
     }
 
     @Test

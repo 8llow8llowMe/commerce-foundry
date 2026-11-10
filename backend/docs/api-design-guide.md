@@ -1307,13 +1307,16 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 |-----|------|------|
 | `GET /api/v1/orders?page=0&size=20` | 200 `SliceResponse<{orderId, status, orderName, itemCount, totalAmount, cancelable, paymentDueAt, createdAt}>` — 최신순(주문 아이디 내림차순), 전체 건수 없음 | 400 `ORDER_144`(page) · `145`(size 1~100) |
 | `GET /api/v1/orders/{orderId}` | 200 `{orderId, status, cancelable, paymentDueAt, currency, items[], amounts, shipping, shippingAddress, createdAt}` — 주문 생성 응답과 같은 스냅숏 모양 | 400 `ORDER_141` · 404 `ORDER_001` |
-| `POST /api/v1/orders/{orderId}/cancellation` `{reason}` | 200 현재 상세 — 결제 대기는 `CANCELED`. 결제 완료 · 상품 준비중(제작 중은 설정)은 환불이 확정되면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(#16 PR-2). 이미 취소 완료 · 취소 요청이면 바꾸지 않고 200 | 400 `ORDER_154`(사유 없음) · `100`(모르는 사유 · 깨진 JSON) · `141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 중 이후 · 만료 · 제작 중 불허 등), `ORDER_025`(동시 변경 뒤 다시 판정 불가 — 상세를 다시 조회한 뒤 필요하면 다시 요청) · 500 `ORDER_033`(결제 완료 기록 없음) · `ORDER_034`(환불액 ≠ 승인 금액) · 503 `ORDER_035`(결제 후 취소가 닫혀 있음 — 재시도 스케줄러 꺼짐, 고객센터 안내) |
+| `POST /api/v1/orders/{orderId}/cancellation` `{reason}` | 200 현재 상세 — 결제 대기는 `CANCELED`. 결제 완료 · 상품 준비중(제작 중은 설정)은 환불이 확정되면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(#16 PR-2). 이미 취소 완료 · 취소 요청이면 바꾸지 않고 200 | 400 `ORDER_154`(사유 없음) · `100`(모르는 사유 · 깨진 JSON) · `141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 중 이후 · 만료 · 제작 중 불허 등), `ORDER_025`(동시 변경 뒤 다시 판정 불가 — 상세를 다시 조회한 뒤 필요하면 다시 요청) · 500 `ORDER_033`(결제 완료 기록 없음) · `ORDER_034`(환불액 ≠ 승인 금액) · 503 `ORDER_035`(결제 후 취소가 닫혀 있음 — 재시도 스케줄러 꺼짐, 고객센터 안내) · `ORDER_036`(확정 환불의 주문 DB 반영 미확인, 현재 상태 확인) |
 | `PATCH /api/v1/orders/{orderId}/purchase-confirmation` | 200 구매 확정된 상세. 이미 확정됐으면 바꾸지 않고 200 | 400 `ORDER_141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 완료 전 · 반품 등), `ORDER_025`(다른 전이가 먼저 커밋) |
 
 - **취소 범위** — 결제 전(결제 대기 → 취소 완료)은 환불이 없고 잡아 둔 재고는 `order-canceled` 이벤트로 풀린다(`order-flow-guide.md` §1-1 · §3-5).
   결제 뒤(#16 PR-2)는 같은 API 로 전체 취소를 접수하고 전액 환불(배송비 포함) → 재고 복원을 자동으로 잇는다(어드민 승인 없음, `order-flow-guide.md` §5).
   응답은 요청 끝 시점의 상세라 `CANCEL_REQUESTED` 일 수 있다 — 화면은 "취소 처리 중"으로 보이고 다시 조회해 `CANCELED` 를 확인한다. 같은 요청을 다시 보내도 환불을
   다시 부르지 않는다. 부분 취소 · 응답의 환불액 블록은 PR-2b, 반품 승인/환불 연계는 후속이다. 고객 부분 반품 접수는 아래 계약으로 제공한다. 구매 확정은 배송 완료 주문에서 가능하다.
+- **확정 환불 미기록(#17 A2a)** — `ORDER_036` 503은 취소 접수 롤백이나 환불 실패가 아니다. FE는 실패로 단정하거나 새 취소를 만들지 말고 현재 주문 상태를 확인한다.
+  같은 요청 재전송은 원 claim의 현재 상세를 조회하며 환불을 재실행하지 않는다. 실제 환불 동기화 완료를 보장하는 응답은 아니다.
+  기존 `ORDER_035` 게이트 기본값과 그 밖의 Runtime 처리 계약은 유지한다. 재시도 API/권한/expectedVersion·관측 응답은 A2b 후속이며 오류 계약 변경 리뷰어는 `seonghoho`다.
 - **`cancelable`** — 지금 취소 버튼을 보여 줄지다. 결제 대기면 true. 결제 완료 · 상품 준비중은 결제 후 취소가 열려 있을 때(`order.cancellation.retry.enabled=true`)만 true,
   제작 중은 거기에 `order.cancellation.allow-while-making`(기본 false)까지 켜져야 true 다. 취소 요청 · 취소 완료 · 배송 중 이후 · 만료는 false. 판정의 정본은
   `OrderStatus#isCancelableByCustomer(allowWhileMaking, paidCancellationOpen)` 이고 결제 후 취소 접수(503 `ORDER_035`)와 같은 게이트를 쓴다. 결제 뒤 true 는 #16 PR-2 에서

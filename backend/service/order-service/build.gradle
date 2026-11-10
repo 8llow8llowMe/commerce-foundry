@@ -59,5 +59,8 @@ tasks.named('test') {
             || descriptor.className?.endsWith('OrderPaymentCrashRecoveryPostgresTest')) {
             logger.lifecycle("C2b critical ${descriptor.className}.${descriptor.name}: ${result.resultType}")
         }
+        if (descriptor.className?.endsWith('CancellationRefundRecoveryPostgresTest')) {
+            logger.lifecycle("A2a refund recovery ${descriptor.className}.${descriptor.name}: ${result.resultType}")
+        }
     }
 }

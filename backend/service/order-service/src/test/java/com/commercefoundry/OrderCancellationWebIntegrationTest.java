@@ -6,6 +6,9 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
+import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
@@ -34,6 +37,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -58,6 +62,7 @@ class OrderCancellationWebIntegrationTest {
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoBean PaymentCancelPort paymentCancelPort;
     @MockitoBean StockRestorationPort stockRestorationPort;
+    @MockitoSpyBean OrderCancellationPipelineProcessor pipeline;
 
     @BeforeEach
     void succeedByDefault() {
@@ -108,6 +113,29 @@ class OrderCancellationWebIntegrationTest {
         verify(stockRestorationPort).restoreCancellation(claimId, order.stockReservationId(), new TreeMap<>(Map.of(101L, 2, 102L, 1)));
         assertThat(jdbc.queryForList("select to_status from orders.order_status_history where order_id = ? order by id", String.class, order.id()))
             .containsSubsequence("CANCEL_REQUESTED", "CANCELED");
+    }
+
+    @Test
+    void confirmedRefundRecordingFailureIs503AndSameCustomerRequestDoesNotCreateAnotherClaim() {
+        Order order = create(OrderStatus.PAID, ids.generateId());
+        doThrow(new OrderException(OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE)).when(pipeline).progress(any());
+        var failed = cancel(order.id(), TestTokens.MEMBER_ID);
+        assertThat(failed).hasStatus(503);
+        assertThat(failed).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_036");
+        long claimId = ((Number) claim(order.id()).get("id")).longValue();
+        assertThat(cancel(order.id(), TestTokens.MEMBER_ID)).hasStatus(200);
+        assertThat(((Number) claim(order.id()).get("id")).longValue()).isEqualTo(claimId);
+        assertThat(jdbc.queryForObject("select count(*) from orders.claim where order_id = ?", Long.class, order.id())).isEqualTo(1);
+        verify(pipeline, times(1)).progress(any());
+        verifyNoInteractions(paymentCancelPort, stockRestorationPort);
+    }
+
+    @Test
+    void unrelatedPipelineRuntimeKeepsExistingAcceptedCancellationContract() {
+        Order order = create(OrderStatus.PAID, ids.generateId());
+        doThrow(new IllegalStateException("unrelated failure")).when(pipeline).progress(any());
+        assertThat(cancel(order.id(), TestTokens.MEMBER_ID)).hasStatus(200);
+        assertThat(claim(order.id())).containsEntry("status", "REQUESTED");
     }
 
     @Test

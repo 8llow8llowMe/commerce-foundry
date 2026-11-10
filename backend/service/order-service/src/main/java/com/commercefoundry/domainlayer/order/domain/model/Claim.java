@@ -148,6 +148,26 @@ public record Claim(
         return with(Status.REFUNDED, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null);
     }
 
+    /** 동일 환불 요청의 확정 성공 증거 전용. 실패 코드보다 성공을 우선하며 일반 markRefunded 계약은 유지한다. */
+    public Claim markConfirmedRefund(Instant nextAttemptAt) {
+        Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
+        requireCancellation();
+        if (isNew() || (status != Status.REQUESTED && status != Status.REFUND_FAILED)) {
+            throw new IllegalStateException("확정 환불은 저장된 환불 대기 · 실패에만 반영합니다");
+        }
+        return with(Status.REFUNDED, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null);
+    }
+
+    /** 버전 · lease · 단계가 바뀌어도 같은 원격 환불 요청인지 확인한다. */
+    public boolean hasSameRefundRequest(Claim other) {
+        return other != null && type == Type.CANCELLATION && other.type == type && id == other.id && orderId == other.orderId
+            && requestKey.equals(other.requestKey) && Objects.equals(paymentId, other.paymentId) && Objects.equals(expectedRefund, other.expectedRefund);
+    }
+
+    public boolean hasRecordedRefund() {
+        return status == Status.REFUNDED || status == Status.RESTORATION_FAILED || status == Status.COMPLETED;
+    }
+
     /** 재고 복원까지 끝났다 — REFUNDED → COMPLETED. 이미 COMPLETED 면 그대로다. */
     public Claim complete() {
         requireCancellation();

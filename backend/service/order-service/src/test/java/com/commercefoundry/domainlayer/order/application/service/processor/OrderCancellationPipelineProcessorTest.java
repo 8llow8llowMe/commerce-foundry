@@ -5,6 +5,7 @@ import static com.commercefoundry.domainlayer.order.support.OrderFixtures.domest
 import static com.commercefoundry.domainlayer.order.support.OrderFixtures.krw;
 import static com.commercefoundry.domainlayer.order.support.OrderFixtures.quoteLine;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
@@ -16,6 +17,8 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
 
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.model.CancellationStepOutcome;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
@@ -184,6 +187,7 @@ class OrderCancellationPipelineProcessorTest {
         Claim claim = requested();
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
         when(processor.recordRefund(claim, CancellationStepOutcome.done())).thenThrow(new ObjectOptimisticLockingFailureException("claim", 400L));
+        when(processor.findClaim(claim.orderId())).thenReturn(java.util.Optional.of(refunded()));
 
         assertThat(pipeline.progress(claim)).isSameAs(claim);
 
@@ -233,6 +237,35 @@ class OrderCancellationPipelineProcessorTest {
 
         verify(processor, times(2)).recordRefund(any(), any());
         verify(processor, times(1)).findClaim(claim.orderId());
+        verifyNoInteractions(stockRestorationPort);
+    }
+
+    @Test
+    void exhaustedCasUsesIndependentLockedBoundaryAndOnlyWinnerRestores() {
+        Claim source = requested();
+        Claim reopened = stored(source.holdUntil(NOW), 3L);
+        Claim confirmed = stored(reopened.markConfirmedRefund(NOW), 4L);
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
+        when(processor.recordRefund(any(), any())).thenThrow(new ObjectOptimisticLockingFailureException("ClaimEntity", source.id()));
+        when(processor.findClaim(source.orderId())).thenReturn(java.util.Optional.of(reopened));
+        when(processor.recordConfirmedRefundWithLock(source)).thenReturn(java.util.Optional.of(confirmed));
+        when(processor.getOrder(source.orderId())).thenReturn(order());
+        when(processor.recordRestoration(confirmed, CancellationStepOutcome.done())).thenReturn(stored(confirmed.complete(), 5L));
+        assertThat(pipeline.progress(source).status()).isEqualTo(Claim.Status.COMPLETED);
+        verify(processor, times(2)).recordRefund(any(), any());
+        verify(processor).recordConfirmedRefundWithLock(source);
+        verify(stockRestorationPort).restoreCancellation(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void lockedFailureAndCommitFailureAreExplicitAndDoNotRestore() {
+        Claim source = requested();
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
+        when(processor.recordRefund(any(), any())).thenThrow(new ObjectOptimisticLockingFailureException("ClaimEntity", source.id()));
+        when(processor.findClaim(source.orderId())).thenReturn(java.util.Optional.of(stored(source, 3L)));
+        when(processor.recordConfirmedRefundWithLock(source)).thenThrow(new org.springframework.transaction.TransactionSystemException("commit failed"));
+        assertThatThrownBy(() -> pipeline.progress(source)).isInstanceOfSatisfying(OrderException.class,
+            failure -> assertThat(failure.getErrorCode()).isEqualTo(OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE));
         verifyNoInteractions(stockRestorationPort);
     }
 

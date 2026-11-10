@@ -107,6 +107,9 @@ public class OrderHistoryWebFacade implements OrderHistoryWebUseCase {
             try {
                 orderCancellationPipelineProcessor.progress(requested.claim());
             } catch (RuntimeException exception) {
+                if (exception instanceof OrderException failure && failure.getErrorCode() == OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE) {
+                    throw failure;
+                }
                 // 접수는 커밋됐다 — 클레임의 다음 시각에 재시도 스케줄러가 같은 클레임으로 잇는다
                 log.error("paid cancel pipeline interrupted after request. orderId={}, claimId={}, error={}", orderId, requested.claim().id(),
                     exception.getClass().getSimpleName(), RedactedThrowable.of(exception));

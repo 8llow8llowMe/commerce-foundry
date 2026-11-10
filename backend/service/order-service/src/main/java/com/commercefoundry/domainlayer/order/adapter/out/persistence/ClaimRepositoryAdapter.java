@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositor
 import com.commercefoundry.domainlayer.order.application.port.out.query.RequestedReturnQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
@@ -39,6 +40,15 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
     public Optional<Claim> findByOrderIdAndRequestKey(long orderId, UUID requestKey) {
         return claimRepository.findByOrderIdAndRequestKey(orderId, requestKey)
             .map(entity -> claimMapper.toDomain(entity, claimItemRepository.findAllByClaimIdOrderByOrderItemIdAsc(entity.getId())));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<Claim> findByIdForUpdate(long claimId) {
+        return claimRepository.findById(claimId).map(entity -> {
+            entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE, Map.of("jakarta.persistence.lock.timeout", 0));
+            return claimMapper.toDomain(entity, claimItemRepository.findAllByClaimIdOrderByOrderItemIdAsc(claimId));
+        });
     }
 
     @Override
