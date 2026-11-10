@@ -151,6 +151,78 @@ public abstract class OrderPaymentConsumerContract {
         }
     }
 
+    /** #308 완료 기준 — order 컨슈머가 내려가 있던 동안 발행된 승인도 같은 그룹으로 다시 뜨면 committed offset 다음부터 반영된다. */
+    @Test
+    void approvalsPublishedWhileConsumerIsDownAreReflectedOnceAfterRestart() throws Exception {
+        PaymentApprovalCommand before = arrange(OrderStatus.PENDING_PAYMENT);
+        PaymentApprovalCommand downFirst = arrange(OrderStatus.PENDING_PAYMENT);
+        PaymentApprovalCommand downSecond = arrange(OrderStatus.PENDING_PAYMENT);
+        for (PaymentApprovalCommand command : List.of(before, downFirst, downSecond)) {
+            long reservationId = order(command).stockReservationId();
+            when(remotePayment.findPayment(command.paymentId())).thenReturn(
+                Optional.of(new PaymentQueryResult(command.paymentId(), command.orderId(), command.memberId(), "DONE", command.amount(), NOW, "CARD")));
+            when(stock.confirm(reservationId)).thenReturn(new StockConfirmationQueryResult(reservationId, command.orderId()));
+        }
+        String topic = "commerce-foundry.test.payment.payment-approved-backlog-" + UUID.randomUUID();
+        String group = GROUP + "-backlog-" + UUID.randomUUID();
+        var codec = new EventEnvelopeCodec(65536);
+        var producerFactory = new DefaultKafkaProducerFactory<String, String>(Map.of("bootstrap.servers", bootstrapServers()),
+            new StringSerializer(), new StringSerializer());
+        var kafka = new KafkaTemplate<>(producerFactory);
+        var consumers = new DefaultKafkaConsumerFactory<String, String>(Map.of("bootstrap.servers", bootstrapServers(), "group.id", group,
+            "auto.offset.reset", "earliest", "enable.auto.commit", false, "max.poll.records", 1), new StringDeserializer(), new StringDeserializer());
+        AtomicInteger deliveries = new AtomicInteger();
+        ConcurrentMessageListenerContainer<String, String> container = null;
+        try (var admin = AdminClient.create(Map.of("bootstrap.servers", bootstrapServers()))) {
+            admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1), new NewTopic(topic + ".dlt", 1, (short) 1))).all().get();
+            container = startConsumer(topic, consumers, kafka, deliveries);
+            send(kafka, topic, codec, before);
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(deliveries).hasValue(1));
+            awaitCommittedOffset(admin, group, topic, 1);
+            container.stop(); // 컨슈머 중단 — 아래 두 승인은 아무도 읽지 않는 동안 쌓인다
+            container = null;
+
+            send(kafka, topic, codec, downFirst);
+            send(kafka, topic, codec, downSecond);
+            assertThat(order(downFirst).status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+            assertThat(order(downSecond).status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+            verify(remotePayment, never()).findPayment(downFirst.paymentId());
+            verify(remotePayment, never()).findPayment(downSecond.paymentId());
+
+            container = startConsumer(topic, consumers, kafka, deliveries); // 같은 그룹으로 복구
+            await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(deliveries).hasValue(3));
+            awaitCommittedOffset(admin, group, topic, 3);
+            for (PaymentApprovalCommand command : List.of(before, downFirst, downSecond)) {
+                assertThat(order(command).status()).isEqualTo(OrderStatus.PAID);
+                assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.PAID);
+                assertThat(replies(command.orderId())).isEqualTo(1);
+                verify(remotePayment, times(1)).findPayment(command.paymentId()); // 중단 전 처리분은 재처리하지 않는다
+                verify(stock, times(1)).confirm(order(command).stockReservationId());
+            }
+        } finally {
+            if (container != null) {
+                container.stop();
+            }
+            producerFactory.destroy();
+        }
+    }
+
+    private static void send(KafkaTemplate<String, String> kafka, String topic, EventEnvelopeCodec codec, PaymentApprovalCommand command)
+        throws Exception {
+        var envelope = new EventEnvelope(command.eventId(), "payment-approved", 1, NOW, "payment", "payment", Long.toString(command.orderId()),
+            codec.toTree(new PaymentApprovedEventListener.PaymentApprovedMessage(Long.toString(command.paymentId()), Long.toString(command.orderId()),
+                Long.toString(command.memberId()), command.amount().amount(), command.amount().currency().name(), NOW, "CARD")));
+        kafka.send(topic, envelope.aggregateId(), codec.encode(envelope)).get();
+    }
+
+    private static void awaitCommittedOffset(AdminClient admin, String group, String topic, long expected) {
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            var offsets = admin.listConsumerGroupOffsets(group).partitionsToOffsetAndMetadata().get();
+            assertThat(offsets.get(new TopicPartition(topic, 0))).isNotNull();
+            assertThat(offsets.get(new TopicPartition(topic, 0)).offset()).isEqualTo(expected);
+        });
+    }
+
     protected ConcurrentMessageListenerContainer<String, String> startConsumer(String topic, DefaultKafkaConsumerFactory<String, String> consumers,
         KafkaTemplate<String, String> kafka, AtomicInteger deliveries) {
         return startConsumer(topic, consumers, kafka, deliveries, failure -> {});
