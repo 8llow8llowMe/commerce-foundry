@@ -71,6 +71,50 @@ A에는 생산 caller·UseCase·스케줄러·ADMIN API·운영 CLI가 없고, �
 기준통화 누락/불일치·zero/partial 판정, 전체 분류·집계·실패/경합·재실행 실행기는 A 머지 후 B에서 구현한다.
 A 완료는 B1c 사전검증 전체나 가격 이행·#20 전체 완료가 아니다.
 
+### B1c-B 미연결 사전검증 실행기
+
+`PriceMigrationPreflightUseCase`·Facade·Processor가 A의 읽기 Port로 네 원천을 끝까지 읽고 발견 코드별 건수와 판정을 만든다.
+생산 caller·ADMIN API·스케줄러·운영 CLI가 없고 쓰기·backfill·정본 전환·운영 DB 실행을 하지 않는다. Facade에는 TX를 걸지 않는다.
+UseCase·Facade는 미연결이라 역할 접미사(Admin·Scheduler 등)를 보류하고, 연결할 때 진입 종류에 맞게 바꾼다.
+운영 주의: 인덱스는 서비스 힙을 같이 쓰며 상한 근처에서 대략 수백 MB가 될 수 있다. 호출자 트랜잭션 밖에서 실행한다.
+
+- 흐름: 상한 1회 캡처 → PRODUCT·SKU·PRODUCT_PRICE·SKU_PRICE 순서로 after=null부터 lastId keyset 순회(기본 500행, 빈 페이지면 종료,
+  상한 null이면 질의 없음) → 판정에 필요한 값만 담은 메모리 인덱스로 교차 판정. 루프 안 단건 조회는 없다.
+- 네 lane 합계 스캔 행이 2,000,000을 넘으면 `SCAN_LIMIT_EXCEEDED`로, Port가 상한 null을 주거나 keyset 계약(증가 ID·상한·lane·크기)을
+  어기면 `PORT_CONTRACT_VIOLATION`으로 중단한다. 둘 다 원문·cause가 없는 고정 사유이며 부분 결과를 반환하지 않는다. A의 읽기 실패는 그대로 전파하고 재시도하지 않는다.
+- 결과는 lane별 스캔 건수, 모든 코드의 건수(0 포함), 판정이다. BLOCKING 코드가 1건 이상이면 BLOCKED, 없으면 READY다.
+  식별자·금액·통화 원문은 결과·예외·로그·`toString`에 넣지 않는다.
+- soft-delete·STOP·은퇴·비노출 행도 제외하지 않는다. 통화는 enum 이름과 정확히 같을 때만 인정하고 손상 값에서 예외로 죽지 않는다.
+  판매중은 SKU 상태 문자열 `ON_SALE`만이다. 한 대상이 여러 코드에 집계될 수 있고 같은 코드에는 한 번만 집계한다.
+- 기준통화는 legacy 상품 판매가 통화다. 누락·drift·zero·overflow 판정은 legacy 상품(·SKU) 값이 유효하고 통화가 같을 때만 한다.
+  아니면 이미 legacy 차단 코드가 있다.
+- 기준통화 SKU 가격행만 있고 상품 기준통화 행이 없으면 backfill 대상(`PRODUCT_PRICE_BASE_MISSING`)으로 보고 차단하지 않는다.
+- 가격행은 부모 상품·SKU 인덱스에 통화 bitmask로만 기록한다. 부모가 없는 고아 가격행은 세기만 하므로 고아끼리의 중복은 따로 세지 않는다.
+
+| 코드 | 등급 | 집계 단위·조건 |
+|---|---|---|
+| `LEGACY_ID_INVALID` | BLOCKING | 상품·SKU: 행 id ≤ 0 또는 SKU의 상품 id ≤ 0 (가격행의 id ≤ 0 부모 참조는 고아로 센다) |
+| `LEGACY_PRODUCT_PRICE_INVALID` | BLOCKING | 상품: 판매가 금액/통화 null·미지원 통화·음수, 정가 한쪽만 null, 정가 통화≠판매가 통화, 정가<=판매가 |
+| `LEGACY_SKU_PRICE_INVALID` | BLOCKING | SKU: 추가금 null·미지원 통화·음수 |
+| `LEGACY_SKU_STATUS_INVALID` | BLOCKING | SKU: 판매 상태 null 또는 판매 상태 enum 이름이 아님(zero 판정 오염) |
+| `LEGACY_SKU_ORPHAN` | BLOCKING | SKU: 상품 없음 |
+| `LEGACY_SKU_CURRENCY_MISMATCH` | BLOCKING | SKU: 인식된 SKU 통화≠상품 판매가 통화 |
+| `LEGACY_ZERO_SKU_MISSING` | BLOCKING | 상품: 기준통화 ON_SALE SKU가 있는데 추가금 0 SKU 없음(STOP 전용 상품 제외) |
+| `PRODUCT_PRICE_ORPHAN` / `_DUPLICATE` / `_INVALID` | BLOCKING | 가격행: 상품 없음 / (productId, currency) 두 번째 이후 행 / 상품 값 규칙 위반 |
+| `PRODUCT_PRICE_BASE_MISSING` | BACKFILL | 상품: 기준통화 가격행 없음 |
+| `PRODUCT_PRICE_BASE_DRIFT` | BLOCKING | 가격행: 기준통화 판매가·정가가 legacy와 다름 |
+| `SKU_PRICE_ORPHAN` / `_DUPLICATE` / `_INVALID` | BLOCKING | 가격행: SKU 없음 / (skuId, currency) 두 번째 이후 행 / 추가금 null·미지원 통화·음수 |
+| `SKU_PRICE_BASE_MISSING` | BACKFILL | SKU: 기준통화 추가금행 없음 |
+| `SKU_PRICE_BASE_DRIFT` | BLOCKING | 가격행: 기준통화 추가금이 legacy와 다름 |
+| `SKU_PRICE_EXTRA_DORMANT` | BLOCKING | 가격행: 같은 상품·통화 상품 가격행 없이 남은 추가 통화 SKU 가격(§2 휴면 가격 금지) |
+| `EXTRA_CURRENCY_ZERO_SKU_MISSING` | BLOCKING | 상품×추가 통화: 그 통화 지원 ON_SALE SKU가 있는데 추가금 0 SKU 없음 |
+| `SKU_SALE_PRICE_OVERFLOW` | BLOCKING | 판매가+추가금이 long 범위 초과. 기준통화는 legacy SKU, 추가 통화는 sku_price 행(같은 통화 product_price 판매가 기준) |
+
+한계: 상한과 각 페이지는 서로 다른 snapshot이다. 동시 편집 중에는 일시적 고아·drift·누락이 관측될 수 있고 상한 이후 삽입은 보지 않는다.
+결과는 "그 실행에서 관측한 것"이며 READY도 이행 시점의 무결성 인증이 아니다. backfill·version fence·정본 전환·운영 실행·API는 후속 범위다.
+검증은 분류 테스트(KRW·USD 기준, 손상 값·상태·ID, overflow, 페이지 경계), 포트 스텁 순회·중단·전파 테스트,
+H2/PostgreSQL 혼합 데이터 전체 실행(DML 0건)이다.
+
 ## 2. 가격 모델과 불변식
 
 가격은 product-service의 기존 상품 컨텍스트가 소유한다. 별도 가격 서비스를 만들지 않는다.

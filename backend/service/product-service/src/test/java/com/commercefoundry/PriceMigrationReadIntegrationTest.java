@@ -13,6 +13,11 @@ import com.commercefoundry.domainlayer.product.application.port.out.query.PriceM
 import com.commercefoundry.domainlayer.product.application.port.out.query.PriceMigrationReadQueryResult.SkuPriceRow;
 import com.commercefoundry.domainlayer.product.application.port.out.query.PriceMigrationReadQueryResult.SkuRow;
 import com.commercefoundry.domainlayer.product.application.port.out.PriceMigrationReadPort;
+import com.commercefoundry.domainlayer.product.application.model.PriceMigrationPreflightModel.Finding;
+import com.commercefoundry.domainlayer.product.application.model.PriceMigrationPreflightModel.Verdict;
+import com.commercefoundry.domainlayer.product.application.port.in.PriceMigrationPreflightUseCase;
+import com.commercefoundry.domainlayer.product.application.service.PriceMigrationPreflightFacade;
+import com.commercefoundry.domainlayer.product.application.service.processor.PriceMigrationPreflightProcessor;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import jakarta.persistence.EntityManagerFactory;
@@ -43,7 +48,8 @@ import org.springframework.transaction.annotation.Transactional;
     "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.commercefoundry.PriceMigrationReadIntegrationTest$SqlCounter",
     "spring.datasource.url=jdbc:h2:mem:price-migration-read;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;INIT=CREATE SCHEMA IF NOT EXISTS product"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({ProductServiceFeaturesConfig.class, QuerydslConfigurer.class, PriceMigrationReadAdapter.class})
+@Import({ProductServiceFeaturesConfig.class, QuerydslConfigurer.class, PriceMigrationReadAdapter.class,
+    PriceMigrationPreflightFacade.class, PriceMigrationPreflightProcessor.class})
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -63,6 +69,7 @@ class PriceMigrationReadIntegrationTest {
     }
 
     @Autowired PriceMigrationReadPort port;
+    @Autowired PriceMigrationPreflightUseCase preflight;
     @Autowired DataSource dataSource;
     @Autowired EntityManagerFactory emf;
     JdbcTemplate jdbc;
@@ -318,6 +325,44 @@ class PriceMigrationReadIntegrationTest {
             assertThat(criteria.toString()).isEqualTo("Criteria[redacted]");
             assertThat(port.readPage(criteria).toString()).contains("[redacted]").doesNotContain("1234567", "KRW", "999");
         }
+    }
+
+    @Test
+    void preflightClassifiesMixedKrwUsdSourcesEndToEndWithoutDml() {
+        for (long id : List.of(1L, 2L, 3L)) insert(Lane.PRODUCT, id);
+        jdbc.update("update product.product set sale_price_amount=10000,list_price_amount=12000,list_price_currency='KRW' where id=1");
+        jdbc.update("update product.product set sale_price_amount=1500,sale_price_currency='USD' where id=2");
+        jdbc.update("update product.product set sale_price_currency='ZZZ',sale_status='STOP_SELLING',visible=false,deleted_at=current_timestamp where id=3");
+        for (long id : List.of(11L, 12L, 21L, 22L, 41L)) insert(Lane.SKU, id);
+        jdbc.update("update product.sku set product_id=1 where id in (11,12)");
+        jdbc.update("update product.sku set additional_price_amount=500 where id=12");
+        jdbc.update("update product.sku set product_id=2,additional_price_currency='USD' where id in (21,22)");
+        jdbc.update("update product.sku set additional_price_amount=300,sale_status='STOP_SELLING' where id=22");
+        for (long id : List.of(101L, 102L, 103L, 104L)) insert(Lane.PRODUCT_PRICE, id);
+        jdbc.update("update product.product_price set product_id=1,sale_price_amount=10000,list_price_amount=12000,list_price_currency='KRW' where id in (101,104)");
+        jdbc.update("update product.product_price set product_id=1,sale_price_amount=999,sale_price_currency='USD' where id=102");
+        for (long id : List.of(1011L, 1012L, 1013L, 1021L, 1022L, 1030L, 1099L)) insert(Lane.SKU_PRICE, id);
+        jdbc.update("update product.sku_price set sku_id=11 where id=1011");
+        jdbc.update("update product.sku_price set sku_id=12,additional_price_amount=500 where id=1012");
+        jdbc.update("update product.sku_price set sku_id=11,additional_price_amount=100,additional_price_currency='USD' where id=1013");
+        jdbc.update("update product.sku_price set sku_id=21,additional_price_amount=50,additional_price_currency='USD' where id=1021");
+        jdbc.update("update product.sku_price set sku_id=21 where id=1022");
+        jdbc.update("update product.sku_price set sku_id=12,additional_price_amount=-1,additional_price_currency='ZZZ' where id=1030");
+        var before = snapshot();
+        measure();
+        var report = preflight.run();
+        // 상한 4 + lane마다 첫 페이지 1. 마지막 ID가 상한이면 다음 페이지는 질의 없이 빈 목록이다.
+        assertCounts(8);
+        assertThat(snapshot()).isEqualTo(before);
+        assertThat(report.scanned().values()).containsExactly(3L, 5L, 4L, 7L);
+        var expected = new java.util.EnumMap<Finding, Long>(Finding.class);
+        for (Finding finding : Finding.values()) expected.put(finding, 0L);
+        expected.putAll(Map.of(Finding.LEGACY_PRODUCT_PRICE_INVALID, 1L, Finding.LEGACY_SKU_ORPHAN, 1L, Finding.PRODUCT_PRICE_ORPHAN, 1L,
+            Finding.PRODUCT_PRICE_DUPLICATE, 1L, Finding.PRODUCT_PRICE_BASE_MISSING, 1L, Finding.SKU_PRICE_ORPHAN, 1L, Finding.SKU_PRICE_INVALID, 1L,
+            Finding.SKU_PRICE_BASE_MISSING, 1L, Finding.SKU_PRICE_BASE_DRIFT, 1L, Finding.SKU_PRICE_EXTRA_DORMANT, 1L));
+        expected.put(Finding.EXTRA_CURRENCY_ZERO_SKU_MISSING, 1L);
+        assertThat(report.counts()).isEqualTo(expected);
+        assertThat(report.verdict()).isEqualTo(Verdict.BLOCKED);
     }
 
     private List<Long> scan(Lane lane, Long upper, int size) {
