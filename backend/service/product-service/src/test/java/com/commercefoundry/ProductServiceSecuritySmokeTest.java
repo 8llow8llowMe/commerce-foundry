@@ -35,12 +35,7 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
     /** 감사 선언(#163)을 아직 붙이지 않은 어드민 쓰기 핸들러 — 맡은 PR 에서 선언을 붙이고 지운다 ({@code security-guide.md} §11-4). */
     @Override
     protected Map<String, String> auditDeclarationPending() {
-        return Map.ofEntries(
-            Map.entry("StockAdminController#adjustStock", "#163 PR-C′"),
-            Map.entry("SkuCostAdminController#createCost", "#163 PR-C′"),
-            Map.entry("ProductDraftAdminController#create", "#163 PR-C′"),
-            Map.entry("ProductDraftAdminController#reject", "#163 PR-C′")
-        );
+        return Map.of();
     }
 
     @ParameterizedTest

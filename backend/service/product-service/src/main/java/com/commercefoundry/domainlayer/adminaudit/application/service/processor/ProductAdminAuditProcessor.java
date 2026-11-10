@@ -21,6 +21,9 @@ public class ProductAdminAuditProcessor {
     static final String PRODUCT_IMAGE_UPLOAD = "product-image-upload";
     static final String DISPLAY_SECTION = "display-section";
     static final String LOOK = "look";
+    /** 재고 알림 정책 감사({@code StockAlertAuditProcessor})와 같은 대상 이름이다. */
+    static final String SKU = "sku";
+    static final String PRODUCT_DRAFT = "product-draft";
     /** 순서 변경은 여러 행을 한 번에 바꿔 고정 키를 대상으로 둔다 — 받은 아이디 목록은 싣지 않는다. */
     static final String ORDER = "order";
 
@@ -155,6 +158,28 @@ public class ProductAdminAuditProcessor {
     /** 대상은 고정 {@code look:order} — 받은 룩 아이디 목록은 싣지 않는다. */
     public void looksReordered(long actorMemberId, boolean succeeded) {
         write(ProductAdminAuditAction.LOOK_REORDER, actorMemberId, AdminAuditLog.target(LOOK, ORDER), succeeded);
+    }
+
+    /** 재고 조정 (#163 PR-C′). 대상 {@code sku:<skuId>} — 수량 · 기대 수량 · 관리 여부 · 사유 · 메모는 싣지 않는다(정본은 조정 이력 표). */
+    public void stockAdjusted(long actorMemberId, long skuId, boolean succeeded) {
+        write(ProductAdminAuditAction.STOCK_ADJUST, actorMemberId, AdminAuditLog.target(SKU, skuId), succeeded);
+    }
+
+    /**
+     * SKU 원가 이력 추가 (#163 PR-C′). 대상은 원가 행 아이디가 아니라 {@code sku:<skuId>} 다 — 실패하면 행 아이디가 없고, 원가 조회 · 이력 화면의 열쇠가 SKU 다.
+     * 금액 · 통화 · 원가 유형 · 적용 시작 시각 · 사유는 싣지 않는다(정본은 원가 이력 표).
+     */
+    public void skuCostCreated(long actorMemberId, long skuId, boolean succeeded) {
+        write(ProductAdminAuditAction.SKU_COST_CREATE, actorMemberId, AdminAuditLog.target(SKU, skuId), succeeded);
+    }
+
+    /** @param draftId 만든 초안 아이디 — 실패해 없으면 {@code null}({@code target=-}). 입력 사실 · 문구 · 이미지는 싣지 않는다 */
+    public void productDraftCreated(long actorMemberId, Long draftId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_DRAFT_CREATE, actorMemberId, draftId == null ? null : AdminAuditLog.target(PRODUCT_DRAFT, draftId), succeeded);
+    }
+
+    public void productDraftRejected(long actorMemberId, long draftId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_DRAFT_REJECT, actorMemberId, AdminAuditLog.target(PRODUCT_DRAFT, draftId), succeeded);
     }
 
     private static void write(ProductAdminAuditAction action, long actorMemberId, String target, boolean succeeded) {

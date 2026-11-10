@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.product.adapter.in.admin.dto.response.Sto
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.port.in.StockAdminUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
@@ -97,6 +98,7 @@ public class StockAdminController {
             + "실사 수량을 입력할 때는 실물 − reservedQuantity 를 quantity 로 보낸다."
     )
     @PreAuthorize(AdminAuthority.INVENTORY_MANAGE)
+    @AdminAudited(action = "STOCK_ADJUST")
     @PatchMapping("/{skuId}")
     public ResponseEntity<Response<StockAdminResponse>> adjustStock(
         @AuthenticationPrincipal MemberPrincipal member,
