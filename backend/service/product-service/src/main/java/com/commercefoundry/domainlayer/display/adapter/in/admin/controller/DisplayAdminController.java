@@ -8,7 +8,9 @@ import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.response.Dis
 import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.response.DisplaySectionAdminResponse;
 import com.commercefoundry.domainlayer.display.application.exception.DisplayValidationMessage;
 import com.commercefoundry.domainlayer.display.application.port.in.DisplayAdminUseCase;
+import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
+import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -19,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -31,7 +34,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 어드민 메인 전시 관리. {@code /api/v1/admin/**} 은 URL 규칙이 운영자 역할을 먼저 요구하고, 메서드의 {@code AdminAuthority.CATALOG_*} 이 기능 권한으로 다시 막는다
- * ({@code security-guide.md} §5-1). 전시 표에 작성자 · 수정자 칸이 없어 어드민 memberId 를 받지 않는다. 고객 메인({@code DisplayWebController})과 DTO 를 공유하지 않는다.
+ * ({@code security-guide.md} §5-1). 전시 표에 작성자 · 수정자 칸이 없어 어드민 memberId 는 감사(#163, {@code DISPLAY_SECTION_*})에만 넘긴다.
+ * 고객 메인({@code DisplayWebController})과 DTO 를 공유하지 않는다.
  * 파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
  *
  * <p>순서 변경({@code PATCH .../sections/order})은 경로 변수 {@code {sectionId}} 와 같은 깊이지만 메서드가 달라(PATCH 는 이 경로 하나뿐) 겹치지 않는다.
@@ -73,9 +77,13 @@ public class DisplayAdminController {
             + "미디어 저장소 미설정은 503(PRODUCT_055), 섹션 50개 초과는 409(PRODUCT_056), 다른 전시 변경과 겹치면 409(PRODUCT_058)다. 201 과 만든 섹션을 돌려준다."
     )
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "DISPLAY_SECTION_CREATE")
     @PostMapping
-    public ResponseEntity<Response<DisplaySectionAdminResponse>> createSection(@RequestBody @Valid DisplaySectionUpsertRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(displayAdminUseCase.createSection(request.toCommand())));
+    public ResponseEntity<Response<DisplaySectionAdminResponse>> createSection(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @RequestBody @Valid DisplaySectionUpsertRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(Response.success(displayAdminUseCase.createSection(request.toCommand(), admin.memberId())));
     }
 
     @Operation(
@@ -84,12 +92,14 @@ public class DisplayAdminController {
             + "버전 칸이 없어 동시에 고치면 마지막 쓰기가 이긴다."
     )
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "DISPLAY_SECTION_UPDATE")
     @PutMapping("/{sectionId}")
     public ResponseEntity<Response<DisplaySectionAdminResponse>> updateSection(
+        @AuthenticationPrincipal MemberPrincipal admin,
         @Parameter(description = "섹션 아이디") @PathVariable @Positive(message = DisplayValidationMessage.SECTION_ID_POSITIVE) long sectionId,
         @RequestBody @Valid DisplaySectionUpsertRequest request
     ) {
-        return ResponseEntity.ok().body(Response.success(displayAdminUseCase.updateSection(sectionId, request.toCommand())));
+        return ResponseEntity.ok().body(Response.success(displayAdminUseCase.updateSection(sectionId, request.toCommand(), admin.memberId())));
     }
 
     @Operation(
@@ -97,11 +107,13 @@ public class DisplayAdminController {
         description = "섹션과 아이템을 함께 지운다(행 삭제). 없는 섹션은 404(PRODUCT_046)다 — 삭제 성공 뒤 같은 요청을 다시 보내도 404 다. 남은 섹션의 순서는 다시 매기지 않는다."
     )
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "DISPLAY_SECTION_DELETE")
     @DeleteMapping("/{sectionId}")
     public ResponseEntity<Response<Void>> deleteSection(
+        @AuthenticationPrincipal MemberPrincipal admin,
         @Parameter(description = "섹션 아이디") @PathVariable @Positive(message = DisplayValidationMessage.SECTION_ID_POSITIVE) long sectionId
     ) {
-        displayAdminUseCase.deleteSection(sectionId);
+        displayAdminUseCase.deleteSection(sectionId, admin.memberId());
         return ResponseEntity.ok().body(Response.success());
     }
 
@@ -111,8 +123,12 @@ public class DisplayAdminController {
             + "응답은 새 순서의 전체 목록이다."
     )
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "DISPLAY_SECTION_REORDER")
     @PatchMapping("/order")
-    public ResponseEntity<Response<DisplaySectionAdminListResponse>> reorderSections(@RequestBody @Valid DisplaySectionOrderRequest request) {
-        return ResponseEntity.ok().body(Response.success(displayAdminUseCase.reorderSections(request.sectionIds())));
+    public ResponseEntity<Response<DisplaySectionAdminListResponse>> reorderSections(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @RequestBody @Valid DisplaySectionOrderRequest request
+    ) {
+        return ResponseEntity.ok().body(Response.success(displayAdminUseCase.reorderSections(request.sectionIds(), admin.memberId())));
     }
 }

@@ -53,5 +53,22 @@ public enum ProductAdminAuditAction {
     /** 검토한 초안 적용. 대상 size-chart-draft:<draftId> */
     SIZE_CHART_DRAFT_APPLY,
     MEDIA_IMAGE_UPLOAD_ISSUE,
-    MEDIA_IMAGE_UPLOAD_CONFIRM
+    MEDIA_IMAGE_UPLOAD_CONFIRM,
+
+    /** 메인 전시 섹션 생성 (#163 PR-C). 대상 {@code display-section:<id>} — 만들지 못했으면 {@code -} */
+    DISPLAY_SECTION_CREATE,
+    /** 메인 전시 섹션 전체 교체. 대상 {@code display-section:<id>} */
+    DISPLAY_SECTION_UPDATE,
+    /** 메인 전시 섹션 삭제. 대상 {@code display-section:<id>} */
+    DISPLAY_SECTION_DELETE,
+    /** 메인 전시 섹션 순서 변경. 고정 대상 {@code display-section:order} — 아이디 목록은 싣지 않는다 */
+    DISPLAY_SECTION_REORDER,
+    /** 룩 생성 (#163 PR-C). 대상 {@code look:<id>} — 만들지 못했으면 {@code -} */
+    LOOK_CREATE,
+    /** 룩 전체 교체. 대상 {@code look:<id>} */
+    LOOK_UPDATE,
+    /** 룩 삭제. 대상 {@code look:<id>} */
+    LOOK_DELETE,
+    /** 룩 순서 변경. 고정 대상 {@code look:order} — 아이디 목록은 싣지 않는다 */
+    LOOK_REORDER
 }

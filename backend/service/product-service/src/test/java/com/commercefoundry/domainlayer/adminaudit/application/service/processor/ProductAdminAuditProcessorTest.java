@@ -55,6 +55,34 @@ class ProductAdminAuditProcessorTest {
     }
 
     @Test
+    @DisplayName("전시 섹션 · 룩은 target=display-section:<id> · look:<id>, 순서 변경은 고정 :order, 만들지 못한 생성은 target=- 다 (#163 PR-C)")
+    void displayAndLook() {
+        processor.displaySectionCreated(ACTOR, 31L, true);
+        processor.displaySectionCreated(ACTOR, null, false);
+        processor.displaySectionUpdated(ACTOR, 31L, false);
+        processor.displaySectionDeleted(ACTOR, 31L, true);
+        processor.displaySectionsReordered(ACTOR, true);
+        processor.lookCreated(ACTOR, 41L, true);
+        processor.lookCreated(ACTOR, null, false);
+        processor.lookUpdated(ACTOR, 41L, true);
+        processor.lookDeleted(ACTOR, 41L, false);
+        processor.looksReordered(ACTOR, false);
+
+        assertThat(lines()).containsExactly(
+            "action=DISPLAY_SECTION_CREATE actorMemberId=" + ACTOR + " target=display-section:31 result=SUCCESS",
+            "action=DISPLAY_SECTION_CREATE actorMemberId=" + ACTOR + " target=- result=FAILURE",
+            "action=DISPLAY_SECTION_UPDATE actorMemberId=" + ACTOR + " target=display-section:31 result=FAILURE",
+            "action=DISPLAY_SECTION_DELETE actorMemberId=" + ACTOR + " target=display-section:31 result=SUCCESS",
+            "action=DISPLAY_SECTION_REORDER actorMemberId=" + ACTOR + " target=display-section:order result=SUCCESS",
+            "action=LOOK_CREATE actorMemberId=" + ACTOR + " target=look:41 result=SUCCESS",
+            "action=LOOK_CREATE actorMemberId=" + ACTOR + " target=- result=FAILURE",
+            "action=LOOK_UPDATE actorMemberId=" + ACTOR + " target=look:41 result=SUCCESS",
+            "action=LOOK_DELETE actorMemberId=" + ACTOR + " target=look:41 result=FAILURE",
+            "action=LOOK_REORDER actorMemberId=" + ACTOR + " target=look:order result=FAILURE"
+        );
+    }
+
+    @Test
     @DisplayName("사이즈표 템플릿은 target=size-chart-template:<id>, 상품 사이즈표 교체는 target=product:<productId> 다")
     void sizeChart() {
         processor.sizeChartTemplateCreated(ACTOR, 7L, true);

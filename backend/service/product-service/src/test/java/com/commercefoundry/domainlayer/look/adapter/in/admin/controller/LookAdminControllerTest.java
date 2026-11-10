@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.look.adapter.in.admin.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
@@ -179,7 +180,7 @@ class LookAdminControllerTest {
         @Test
         @DisplayName("생성은 201 — 문자열 productId 를 받고 배열 순서를 지키며, 문구는 앞뒤 공백을 빼고 빈 문구는 null 로 넘긴다")
         void create() {
-            given(lookAdminUseCase.create(any())).willReturn(lookResponse());
+            given(lookAdminUseCase.create(any(), anyLong())).willReturn(lookResponse());
 
             MvcTestResult result = exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN);
 
@@ -187,7 +188,7 @@ class LookAdminControllerTest {
             assertThat(result).bodyJson().extractingPath("$.dataBody.lookId").isEqualTo("4611686018427387904");
             assertThat(result).bodyJson().extractingPath("$.dataBody.products[0].deleted").isEqualTo(false);
             ArgumentCaptor<LookUpsertCommand> captor = ArgumentCaptor.forClass(LookUpsertCommand.class);
-            verify(lookAdminUseCase).create(captor.capture());
+            verify(lookAdminUseCase).create(captor.capture(), eq(TestTokens.MEMBER_ID));
             LookUpsertCommand command = captor.getValue();
             assertThat(command.title()).isEqualTo("가을 룩");
             assertThat(command.description()).isNull();
@@ -201,12 +202,12 @@ class LookAdminControllerTest {
         @Test
         @DisplayName("수정은 200 이고 경로 아이디와 본문을 넘긴다")
         void update() {
-            given(lookAdminUseCase.update(eq(5L), any())).willReturn(lookResponse());
+            given(lookAdminUseCase.update(eq(5L), any(), anyLong())).willReturn(lookResponse());
 
             MvcTestResult result = exchange(HttpMethod.PUT, PATH + "/5", VALID_BODY, MemberRole.ADMIN);
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody.products[0].deleted").isEqualTo(false);
-            verify(lookAdminUseCase).update(eq(5L), any());
+            verify(lookAdminUseCase).update(eq(5L), any(), eq(TestTokens.MEMBER_ID));
         }
 
         @Test
@@ -216,18 +217,18 @@ class LookAdminControllerTest {
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
-            verify(lookAdminUseCase).delete(5L);
+            verify(lookAdminUseCase).delete(5L, TestTokens.MEMBER_ID);
         }
 
         @Test
         @DisplayName("순서 변경은 문자열 아이디를 받아 순서대로 넘기고, 집합이 다르면 400 · LOOK_007 봉투다")
         void reorder() {
-            given(lookAdminUseCase.reorder(anyList())).willReturn(LookAdminListResponse.builder().looks(List.of()).build());
+            given(lookAdminUseCase.reorder(anyList(), anyLong())).willReturn(LookAdminListResponse.builder().looks(List.of()).build());
 
             assertThat(exchange(HttpMethod.PATCH, PATH + "/order", "{\"lookIds\": [\"3\", \"1\", \"2\"]}", MemberRole.ADMIN)).hasStatusOk();
-            verify(lookAdminUseCase).reorder(List.of(3L, 1L, 2L));
+            verify(lookAdminUseCase).reorder(List.of(3L, 1L, 2L), TestTokens.MEMBER_ID);
 
-            given(lookAdminUseCase.reorder(anyList())).willThrow(new LookException(LookErrorCode.LOOK_ORDER_MISMATCH));
+            given(lookAdminUseCase.reorder(anyList(), anyLong())).willThrow(new LookException(LookErrorCode.LOOK_ORDER_MISMATCH));
             assertFailure(exchange(HttpMethod.PATCH, PATH + "/order", "{\"lookIds\": [\"1\"]}", MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "LOOK_007",
                 "순서 변경에는 현재 룩 아이디를 빠짐없이 한 번씩 보내야 합니다.");
         }
@@ -235,23 +236,23 @@ class LookAdminControllerTest {
         @Test
         @DisplayName("도메인 오류는 그 코드 · 상태의 봉투다 (상한 409 · 없는 상품 400 · 저장소 미설정 503 · 잠금 409)")
         void domainErrors() {
-            given(lookAdminUseCase.create(any())).willThrow(new LookException(LookErrorCode.LOOK_LIMIT_EXCEEDED, 100));
+            given(lookAdminUseCase.create(any(), anyLong())).willThrow(new LookException(LookErrorCode.LOOK_LIMIT_EXCEEDED, 100));
             assertFailure(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "LOOK_002", "룩은 최대 100개까지 만들 수 있습니다.");
 
-            willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_NOT_FOUND, "7, 8")).given(lookAdminUseCase).create(any());
+            willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_NOT_FOUND, "7, 8")).given(lookAdminUseCase).create(any(), anyLong());
             assertFailure(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "LOOK_004", "존재하지 않는 상품이 있습니다: 7, 8");
 
-            willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_DELETED, "7, 8")).given(lookAdminUseCase).create(any());
+            willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_DELETED, "7, 8")).given(lookAdminUseCase).create(any(), anyLong());
             assertFailure(exchange(HttpMethod.POST, PATH, VALID_BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "LOOK_009", "삭제된 상품이 있습니다: 7, 8");
 
-            given(lookAdminUseCase.update(eq(3L), any())).willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_DELETED, "7"));
+            given(lookAdminUseCase.update(eq(3L), any(), anyLong())).willThrow(new LookException(LookErrorCode.LOOK_PRODUCT_DELETED, "7"));
             assertFailure(exchange(HttpMethod.PUT, PATH + "/3", VALID_BODY, MemberRole.ADMIN), HttpStatus.BAD_REQUEST, "LOOK_009", "삭제된 상품이 있습니다: 7");
 
-            given(lookAdminUseCase.update(eq(1L), any())).willThrow(new LookException(LookErrorCode.LOOK_MEDIA_STORAGE_NOT_CONFIGURED));
+            given(lookAdminUseCase.update(eq(1L), any(), anyLong())).willThrow(new LookException(LookErrorCode.LOOK_MEDIA_STORAGE_NOT_CONFIGURED));
             assertFailure(exchange(HttpMethod.PUT, PATH + "/1", VALID_BODY, MemberRole.ADMIN), HttpStatus.SERVICE_UNAVAILABLE, "LOOK_006",
                 "미디어 저장소 주소가 설정되지 않아 룩 이미지를 등록할 수 없습니다.");
 
-            given(lookAdminUseCase.update(eq(2L), any())).willThrow(new LookException(LookErrorCode.LOOK_BUSY));
+            given(lookAdminUseCase.update(eq(2L), any(), anyLong())).willThrow(new LookException(LookErrorCode.LOOK_BUSY));
             assertFailure(exchange(HttpMethod.PUT, PATH + "/2", VALID_BODY, MemberRole.ADMIN), HttpStatus.CONFLICT, "LOOK_008", "다른 룩 변경을 처리 중입니다. 다시 시도해 주세요.");
         }
     }
@@ -303,13 +304,13 @@ class LookAdminControllerTest {
         @Test
         @DisplayName("선택 칸(설명 · 대체 텍스트)은 전각 공백만 있어도 판정과 같은 strip 기준으로 null 이 되어 201 이다")
         void optionalTextBlankByStripBecomesNull() {
-            given(lookAdminUseCase.create(any())).willReturn(lookResponse());
+            given(lookAdminUseCase.create(any(), anyLong())).willReturn(lookResponse());
             String body = "{\"title\": \"a\", \"description\": \"\\u3000\", \"visible\": true,"
                 + " \"image\": {\"url\": \"https://c/a.jpg\", \"altText\": \"\\u3000\"}, \"productIds\": [1]}";
 
             assertThat(exchange(HttpMethod.POST, PATH, body, MemberRole.ADMIN)).hasStatus(HttpStatus.CREATED);
             ArgumentCaptor<LookUpsertCommand> captor = ArgumentCaptor.forClass(LookUpsertCommand.class);
-            verify(lookAdminUseCase).create(captor.capture());
+            verify(lookAdminUseCase).create(captor.capture(), eq(TestTokens.MEMBER_ID));
             assertThat(captor.getValue().description()).isNull();
             assertThat(captor.getValue().image().altText()).isNull();
         }
@@ -317,7 +318,7 @@ class LookAdminControllerTest {
         @Test
         @DisplayName("설명은 개행 · 탭을 받는다")
         void descriptionAllowsLineBreaks() {
-            given(lookAdminUseCase.create(any())).willReturn(lookResponse());
+            given(lookAdminUseCase.create(any(), anyLong())).willReturn(lookResponse());
 
             String body = "{\"title\": \"a\", \"description\": \"a\\r\\n\\tb\",\"visible\": true, " + IMAGE + ", \"productIds\": [1]}";
             assertThat(exchange(HttpMethod.POST, PATH, body, MemberRole.ADMIN))

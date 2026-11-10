@@ -54,6 +54,9 @@ class DisplayAdminConcurrencyTest {
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/product-schema.sql");
 
+    /** 감사(#163)에만 쓰는 행위자 — 전시 표에는 남지 않는다. */
+    private static final long ACTOR = 1L;
+
     /** 미디어 · 상품이 없는 섹션 — 저장소 공개 주소 · 상품 행 없이 만들 수 있다. */
     private static final DisplaySectionUpsertCommand STORY = DisplaySectionUpsertCommand.builder()
         .sectionType(DisplaySectionType.STORY).title("이야기").visible(true).items(List.of()).build();
@@ -84,7 +87,7 @@ class DisplayAdminConcurrencyTest {
     @DisplayName("다른 트랜잭션이 전시 잠금을 쥐고 있으면 생성은 시간 상한(5초) 안에 409 · PRODUCT_058 로 끊긴다 — 무한정 기다리지 않고 아무것도 쓰지 않는다")
     void lockWaitIsBounded() throws Exception {
         // 잠글 행이 하나는 있어야 한다 — 빈 표는 잠글 것이 없다(그때만 직렬화되지 않는다)
-        displayAdminUseCase.createSection(STORY);
+        displayAdminUseCase.createSection(STORY, ACTOR);
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         ExecutorService holder = Executors.newSingleThreadExecutor();
@@ -97,7 +100,7 @@ class DisplayAdminConcurrencyTest {
             assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
 
             long startedAt = System.nanoTime();
-            Throwable failure = catchThrowable(() -> displayAdminUseCase.createSection(STORY));
+            Throwable failure = catchThrowable(() -> displayAdminUseCase.createSection(STORY, ACTOR));
             long waitedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
             release.countDown();
             holding.get(30, TimeUnit.SECONDS);
@@ -117,7 +120,7 @@ class DisplayAdminConcurrencyTest {
     @Test
     @DisplayName("잠금을 기다린 생성은 앞선 생성이 커밋한 새 행을 순서 판정에 넣는다 — 맨 뒤(최대 + 1) 순서를 받는다")
     void waitedCreateSeesPriorRowForOrder() throws Exception {
-        displayAdminUseCase.createSection(STORY);
+        displayAdminUseCase.createSection(STORY, ACTOR);
 
         DisplaySectionAdminResponse created = createWhileAnotherCreateHoldsLock();
 
@@ -168,7 +171,7 @@ class DisplayAdminConcurrencyTest {
             assertThat(createdInHolder.await(10, TimeUnit.SECONDS)).isTrue();
 
             try {
-                return displayAdminUseCase.createSection(STORY);
+                return displayAdminUseCase.createSection(STORY, ACTOR);
             } finally {
                 holding.get(30, TimeUnit.SECONDS);
             }

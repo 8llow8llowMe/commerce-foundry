@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.display.application.service;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.response.DisplaySectionAdminListResponse;
 import com.commercefoundry.domainlayer.display.adapter.in.admin.dto.response.DisplaySectionAdminResponse;
 import com.commercefoundry.domainlayer.display.adapter.in.admin.presenter.DisplayAdminPresenter;
@@ -38,6 +39,10 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>직렬화되지 않는 유일한 경우 — 섹션이 하나도 없을 때</b>다. 잠글 행이 없어 동시 생성 둘이 줄을 서지 않고, 결과는 노출 순서 0 이 둘(유니크 키 없음 — 아이디 순으로
  * 정렬되어 화면 순서는 정해진다)이다. 0개에서 출발하므로 상한(50)을 넘지는 않는다. 섹션이 하나라도 있으면 모든 쓰기가 그 행 잠금에서 줄을 선다.
+ *
+ * <p><b>감사 (#163 PR-C)</b> — 쓰기는 성공 · 실패를 {@link ProductAdminAuditProcessor} 로 남긴다(선례: {@code CategoryAdminFacade}). 트랜잭션 안에서 불러도 줄은
+ * 커밋 결과로 남는다(롤백되면 성공으로 부른 것도 {@code FAILURE}). 잠금 전 규칙 판정({@code draftOf})도 업무 실패라 같이 기록한다. 업무 예외는 기록한 뒤 그대로 다시 던진다.
+ * 섹션 내용(제목 · 문구 · 링크 · 미디어 · 상품 · 룩)과 순서 변경의 아이디 목록은 싣지 않는다.
  */
 @Service
 @RequiredArgsConstructor
@@ -50,6 +55,7 @@ public class DisplayAdminFacade implements DisplayAdminUseCase {
     private final ProductLookupProcessor productLookupProcessor;
     private final DisplayAdminPresenter displayAdminPresenter;
     private final LookProcessor lookProcessor;
+    private final ProductAdminAuditProcessor productAdminAuditProcessor;
 
     @Override
     @Transactional(readOnly = true)
@@ -67,49 +73,85 @@ public class DisplayAdminFacade implements DisplayAdminUseCase {
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public DisplaySectionAdminResponse createSection(DisplaySectionUpsertCommand command) {
-        DisplaySectionContent draft = displaySectionProcessor.draftOf(command);
-        return inDisplayQueue(locked -> {
-            displaySectionProcessor.validateCanCreate(locked);
-            Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
-            displaySectionProcessor.validateProductsExist(draft.productIds(), products);
-            displaySectionProcessor.validateLooksExist(draft.lookIds(), lookProcessor.existingIds(draft.lookIds()));
-            DisplaySectionContent created = displaySectionProcessor.create(draft, locked);
-            return displayAdminPresenter.toResponse(displaySectionProcessor.toAdminInfo(created, products));
-        });
+    public DisplaySectionAdminResponse createSection(DisplaySectionUpsertCommand command, long actorMemberId) {
+        Created created;
+        try {
+            DisplaySectionContent draft = displaySectionProcessor.draftOf(command);
+            created = inDisplayQueue(locked -> {
+                displaySectionProcessor.validateCanCreate(locked);
+                Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
+                displaySectionProcessor.validateProductsExist(draft.productIds(), products);
+                displaySectionProcessor.validateLooksExist(draft.lookIds(), lookProcessor.existingIds(draft.lookIds()));
+                return new Created(displaySectionProcessor.create(draft, locked), products);
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.displaySectionCreated(actorMemberId, null, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.displaySectionCreated(actorMemberId, created.content().section().id(), true);
+        return displayAdminPresenter.toResponse(displaySectionProcessor.toAdminInfo(created.content(), created.products()));
     }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public DisplaySectionAdminResponse updateSection(long sectionId, DisplaySectionUpsertCommand command) {
-        DisplaySectionContent draft = displaySectionProcessor.draftOf(command);
-        return inDisplayQueue(locked -> {
-            DisplaySection current = displaySectionProcessor.requireSection(locked, sectionId);
-            Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
-            displaySectionProcessor.validateProductsExist(draft.productIds(), products);
-            displaySectionProcessor.validateLooksExist(draft.lookIds(), lookProcessor.existingIds(draft.lookIds()));
-            DisplaySectionContent replaced = displaySectionProcessor.replace(current, draft);
-            return displayAdminPresenter.toResponse(displaySectionProcessor.toAdminInfo(replaced, products));
-        });
+    public DisplaySectionAdminResponse updateSection(long sectionId, DisplaySectionUpsertCommand command, long actorMemberId) {
+        DisplaySectionAdminResponse response;
+        try {
+            DisplaySectionContent draft = displaySectionProcessor.draftOf(command);
+            response = inDisplayQueue(locked -> {
+                DisplaySection current = displaySectionProcessor.requireSection(locked, sectionId);
+                Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
+                displaySectionProcessor.validateProductsExist(draft.productIds(), products);
+                displaySectionProcessor.validateLooksExist(draft.lookIds(), lookProcessor.existingIds(draft.lookIds()));
+                DisplaySectionContent replaced = displaySectionProcessor.replace(current, draft);
+                return displayAdminPresenter.toResponse(displaySectionProcessor.toAdminInfo(replaced, products));
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.displaySectionUpdated(actorMemberId, sectionId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.displaySectionUpdated(actorMemberId, sectionId, true);
+        return response;
     }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public void deleteSection(long sectionId) {
-        inDisplayQueue(locked -> {
-            displaySectionProcessor.requireSection(locked, sectionId);
-            displaySectionProcessor.delete(sectionId);
-            return null;
-        });
+    public void deleteSection(long sectionId, long actorMemberId) {
+        try {
+            inDisplayQueue(locked -> {
+                displaySectionProcessor.requireSection(locked, sectionId);
+                displaySectionProcessor.delete(sectionId);
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.displaySectionDeleted(actorMemberId, sectionId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.displaySectionDeleted(actorMemberId, sectionId, true);
     }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public DisplaySectionAdminListResponse reorderSections(List<Long> sectionIds) {
-        return inDisplayQueue(locked -> {
-            displaySectionProcessor.reorder(locked, sectionIds);
-            return toListResponse(displaySectionProcessor.getAllContents());
-        });
+    public DisplaySectionAdminListResponse reorderSections(List<Long> sectionIds, long actorMemberId) {
+        DisplaySectionAdminListResponse response;
+        try {
+            response = inDisplayQueue(locked -> {
+                displaySectionProcessor.reorder(locked, sectionIds);
+                return toListResponse(displaySectionProcessor.getAllContents());
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.displaySectionsReordered(actorMemberId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.displaySectionsReordered(actorMemberId, true);
+        return response;
+    }
+
+    /**
+     * 생성 결과 — 감사에 섹션 아이디를 넘긴 뒤 같은 상품 조회 결과로 응답을 만든다(상품을 다시 읽지 않는다).
+     * 응답 조립은 잠금 큐({@code inDisplayQueue}) 밖이라 DB 를 읽지 않는 순수 매핑이어야 한다 — 조회를 더하면 잠금 시간 초과가 {@code DISPLAY_BUSY} 로 바뀌지 않는다.
+     */
+    private record Created(DisplaySectionContent content, Map<Long, Product> products) {
     }
 
     private DisplaySectionAdminListResponse toListResponse(List<DisplaySectionContent> contents) {

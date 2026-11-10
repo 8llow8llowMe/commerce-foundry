@@ -9,8 +9,10 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.display.adapter.in.admin.presenter.DisplayAdminPresenter;
 import com.commercefoundry.domainlayer.display.application.command.DisplaySectionUpsertCommand;
 import com.commercefoundry.domainlayer.display.application.exception.DisplayErrorCode;
@@ -39,6 +41,8 @@ import org.springframework.transaction.TransactionTimedOutException;
  */
 class DisplayAdminFacadeTest {
 
+    private static final long ACTOR = 42L;
+
     private static final DisplaySectionUpsertCommand COMMAND = DisplaySectionUpsertCommand.builder()
         .sectionType(DisplaySectionType.PRODUCT_PICK).visible(true)
         .items(List.of(DisplaySectionUpsertCommand.Item.builder().itemType(DisplayItemType.PRODUCT).productId(7L).build()))
@@ -54,7 +58,8 @@ class DisplayAdminFacadeTest {
 
     private final DisplaySectionProcessor processor = mock(DisplaySectionProcessor.class);
     private final ProductLookupProcessor productLookupProcessor = mock(ProductLookupProcessor.class);
-    private final DisplayAdminFacade facade = new DisplayAdminFacade(processor, productLookupProcessor, new DisplayAdminPresenter(), mock(LookProcessor.class));
+    private final ProductAdminAuditProcessor audit = mock(ProductAdminAuditProcessor.class);
+    private final DisplayAdminFacade facade = new DisplayAdminFacade(processor, productLookupProcessor, new DisplayAdminPresenter(), mock(LookProcessor.class), audit);
 
     DisplayAdminFacadeTest() {
         given(processor.toAdminInfo(any(), any())).willReturn(INFO);
@@ -68,24 +73,26 @@ class DisplayAdminFacadeTest {
         given(productLookupProcessor.findAllIncludingHidden(anyCollection())).willReturn(Map.of());
         given(processor.create(any(), any())).willReturn(DRAFT);
 
-        facade.createSection(COMMAND);
+        facade.createSection(COMMAND, ACTOR);
 
-        InOrder order = inOrder(processor, productLookupProcessor);
+        InOrder order = inOrder(processor, productLookupProcessor, audit);
         order.verify(processor).draftOf(COMMAND);
         order.verify(processor).lockAll();
         order.verify(processor).validateCanCreate(List.of());
         order.verify(productLookupProcessor).findAllIncludingHidden(DRAFT.productIds());
         order.verify(processor).validateProductsExist(DRAFT.productIds(), Map.of());
         order.verify(processor).create(DRAFT, List.of());
+        order.verify(audit).displaySectionCreated(ACTOR, DRAFT.section().id(), true);
     }
 
     @Test
-    @DisplayName("초안 판정에서 걸리면 잠그지 않는다")
+    @DisplayName("초안 판정에서 걸리면 잠그지 않고, 대상 없는(-) 생성 실패를 감사에 남긴다")
     void invalidDraftDoesNotLock() {
         given(processor.draftOf(COMMAND)).willThrow(new DisplayException(DisplayErrorCode.DISPLAY_PRODUCT_DUPLICATED));
 
-        assertThatThrownBy(() -> facade.createSection(COMMAND)).isInstanceOf(DisplayException.class);
+        assertThatThrownBy(() -> facade.createSection(COMMAND, ACTOR)).isInstanceOf(DisplayException.class);
         verify(processor, never()).lockAll();
+        verify(audit).displaySectionCreated(ACTOR, null, false);
     }
 
     @Test
@@ -96,11 +103,28 @@ class DisplayAdminFacadeTest {
         )) {
             willThrow(failure).given(processor).lockAll();
 
-            assertThatThrownBy(() -> facade.deleteSection(1L))
+            assertThatThrownBy(() -> facade.deleteSection(1L, ACTOR))
                 .isInstanceOf(DisplayException.class)
                 .satisfies(exception -> assertThat(((DisplayException) exception).getErrorCode()).isEqualTo(DisplayErrorCode.DISPLAY_BUSY))
                 .hasCause(failure);
         }
+        verify(audit, times(3)).displaySectionDeleted(ACTOR, 1L, false);
+    }
+
+    @Test
+    @DisplayName("순서 변경은 고정 대상으로 성공 · 실패를 남긴다 — 실패는 다시 던진다")
+    void reorderIsAudited() {
+        given(processor.lockAll()).willReturn(List.of());
+        given(processor.getAllContents()).willReturn(List.of());
+        given(productLookupProcessor.findAllIncludingHidden(anyCollection())).willReturn(Map.of());
+
+        facade.reorderSections(List.of(), ACTOR);
+        verify(audit).displaySectionsReordered(ACTOR, true);
+
+        DisplayException failure = new DisplayException(DisplayErrorCode.DISPLAY_SECTION_ORDER_MISMATCH);
+        willThrow(failure).given(processor).reorder(any(), any());
+        assertThatThrownBy(() -> facade.reorderSections(List.of(9L), ACTOR)).isSameAs(failure);
+        verify(audit).displaySectionsReordered(ACTOR, false);
     }
 
     @Test
@@ -113,10 +137,12 @@ class DisplayAdminFacadeTest {
         given(productLookupProcessor.findAllIncludingHidden(anyCollection())).willReturn(Map.of());
         given(processor.replace(current, DRAFT)).willReturn(DRAFT);
 
-        facade.updateSection(5L, COMMAND);
-        facade.deleteSection(5L);
+        facade.updateSection(5L, COMMAND, ACTOR);
+        facade.deleteSection(5L, ACTOR);
 
         verify(processor).replace(current, DRAFT);
         verify(processor).delete(5L);
+        verify(audit).displaySectionUpdated(ACTOR, 5L, true);
+        verify(audit).displaySectionDeleted(ACTOR, 5L, true);
     }
 }

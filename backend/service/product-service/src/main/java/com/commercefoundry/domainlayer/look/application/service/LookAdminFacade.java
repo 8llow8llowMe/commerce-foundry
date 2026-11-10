@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.look.application.service;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.look.adapter.in.admin.dto.response.LookAdminListResponse;
 import com.commercefoundry.domainlayer.look.adapter.in.admin.dto.response.LookAdminResponse;
 import com.commercefoundry.domainlayer.look.adapter.in.admin.presenter.LookAdminPresenter;
@@ -36,6 +37,10 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>직렬화되지 않는 유일한 경우 — 룩이 하나도 없을 때</b>다. 잠글 행이 없어 동시 생성 둘이 줄을 서지 않고, 결과는 노출 순서 0 이 둘이다(유니크 키 없음 — 아이디 순으로 정렬된다).
  * 0개에서 출발하므로 상한(100)을 넘지는 않는다.
+ *
+ * <p><b>감사 (#163 PR-C)</b> — 쓰기는 성공 · 실패를 {@link ProductAdminAuditProcessor} 로 남긴다(선례: {@code CategoryAdminFacade}). 트랜잭션 안에서 불러도 줄은
+ * 커밋 결과로 남는다(롤백되면 성공으로 부른 것도 {@code FAILURE}). 잠금 전 규칙 판정({@code draftOf})도 업무 실패라 같이 기록한다. 업무 예외는 기록한 뒤 그대로 다시 던진다.
+ * 룩 내용(제목 · 설명 · 이미지 · 구성 상품)과 순서 변경의 아이디 목록은 싣지 않는다.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,6 +52,7 @@ public class LookAdminFacade implements LookAdminUseCase {
     private final LookProcessor lookProcessor;
     private final ProductLookupProcessor productLookupProcessor;
     private final LookAdminPresenter lookAdminPresenter;
+    private final ProductAdminAuditProcessor productAdminAuditProcessor;
 
     @Override
     @Transactional(readOnly = true)
@@ -64,47 +70,83 @@ public class LookAdminFacade implements LookAdminUseCase {
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public LookAdminResponse create(LookUpsertCommand command) {
-        LookContent draft = lookProcessor.draftOf(command);
-        return inLookQueue(locked -> {
-            lookProcessor.validateCanCreate(locked);
-            Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
-            lookProcessor.validateProductsExist(draft.productIds(), products);
-            LookContent created = lookProcessor.create(draft, locked);
-            return lookAdminPresenter.toResponse(lookProcessor.toAdminInfo(created, products));
-        });
+    public LookAdminResponse create(LookUpsertCommand command, long actorMemberId) {
+        Created created;
+        try {
+            LookContent draft = lookProcessor.draftOf(command);
+            created = inLookQueue(locked -> {
+                lookProcessor.validateCanCreate(locked);
+                Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
+                lookProcessor.validateProductsExist(draft.productIds(), products);
+                return new Created(lookProcessor.create(draft, locked), products);
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.lookCreated(actorMemberId, null, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.lookCreated(actorMemberId, created.content().look().id(), true);
+        return lookAdminPresenter.toResponse(lookProcessor.toAdminInfo(created.content(), created.products()));
     }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public LookAdminResponse update(long lookId, LookUpsertCommand command) {
-        LookContent draft = lookProcessor.draftOf(command);
-        return inLookQueue(locked -> {
-            Look current = lookProcessor.requireLook(locked, lookId);
-            Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
-            lookProcessor.validateProductsExist(draft.productIds(), products);
-            LookContent replaced = lookProcessor.replace(current, draft);
-            return lookAdminPresenter.toResponse(lookProcessor.toAdminInfo(replaced, products));
-        });
+    public LookAdminResponse update(long lookId, LookUpsertCommand command, long actorMemberId) {
+        LookAdminResponse response;
+        try {
+            LookContent draft = lookProcessor.draftOf(command);
+            response = inLookQueue(locked -> {
+                Look current = lookProcessor.requireLook(locked, lookId);
+                Map<Long, Product> products = productLookupProcessor.findAllIncludingHidden(draft.productIds());
+                lookProcessor.validateProductsExist(draft.productIds(), products);
+                LookContent replaced = lookProcessor.replace(current, draft);
+                return lookAdminPresenter.toResponse(lookProcessor.toAdminInfo(replaced, products));
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.lookUpdated(actorMemberId, lookId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.lookUpdated(actorMemberId, lookId, true);
+        return response;
     }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public void delete(long lookId) {
-        inLookQueue(locked -> {
-            lookProcessor.requireLook(locked, lookId);
-            lookProcessor.delete(lookId);
-            return null;
-        });
+    public void delete(long lookId, long actorMemberId) {
+        try {
+            inLookQueue(locked -> {
+                lookProcessor.requireLook(locked, lookId);
+                lookProcessor.delete(lookId);
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.lookDeleted(actorMemberId, lookId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.lookDeleted(actorMemberId, lookId, true);
     }
 
     @Override
     @Transactional(timeout = LOCKING_TIMEOUT_SECONDS)
-    public LookAdminListResponse reorder(List<Long> lookIds) {
-        return inLookQueue(locked -> {
-            lookProcessor.reorder(locked, lookIds);
-            return toListResponse(lookProcessor.getAllContents());
-        });
+    public LookAdminListResponse reorder(List<Long> lookIds, long actorMemberId) {
+        LookAdminListResponse response;
+        try {
+            response = inLookQueue(locked -> {
+                lookProcessor.reorder(locked, lookIds);
+                return toListResponse(lookProcessor.getAllContents());
+            });
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.looksReordered(actorMemberId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.looksReordered(actorMemberId, true);
+        return response;
+    }
+
+    /**
+     * 생성 결과 — 감사에 룩 아이디를 넘긴 뒤 같은 상품 조회 결과로 응답을 만든다(상품을 다시 읽지 않는다).
+     * 응답 조립은 잠금 큐({@code inLookQueue}) 밖이라 DB 를 읽지 않는 순수 매핑이어야 한다 — 조회를 더하면 잠금 시간 초과가 {@code LOOK_BUSY} 로 바뀌지 않는다.
+     */
+    private record Created(LookContent content, Map<Long, Product> products) {
     }
 
     private LookAdminListResponse toListResponse(List<LookContent> contents) {
