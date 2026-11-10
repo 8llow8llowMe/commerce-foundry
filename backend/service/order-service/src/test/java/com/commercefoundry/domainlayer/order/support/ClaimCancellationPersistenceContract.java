@@ -99,6 +99,19 @@ public abstract class ClaimCancellationPersistenceContract {
     }
 
     @Test
+    void staleAttemptFailureCannotRewritePersistedNewLeaseOrRefundPhase() {
+        Claim source = insert(newCancellation(paidOrder(), NOW));
+        Claim held = update(source.holdUntil(NOW.plusSeconds(300)));
+        cancellationProcessor.recordAttemptFailure(source);
+        assertThat(claims.findByOrderIdAndRequestKey(source.orderId(), source.requestKey()).orElseThrow()).isEqualTo(held);
+        Claim refunded = update(held.markConfirmedRefund(NOW));
+        cancellationProcessor.recordAttemptFailure(held);
+        assertThat(claims.findByOrderIdAndRequestKey(source.orderId(), source.requestKey()).orElseThrow()).isEqualTo(refunded);
+        Claim locked = tx().execute(status -> claims.findByIdForUpdate(source.id()).orElseThrow());
+        assertThat(locked).isEqualTo(refunded);
+    }
+
+    @Test
     void decisionRoundTripUpdateAndStaleWriterPreserveEvidence() {
         Claim original = insert(newCancellation(paidOrder(), NOW));
         assertThat(original.decision()).isNull();

@@ -1,6 +1,8 @@
 package com.commercefoundry.domainlayer.order.application.service.processor;
 
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
+import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
+import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.model.CancellationStepOutcome;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
@@ -11,6 +13,7 @@ import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderQuoteLine;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -40,19 +43,22 @@ public class OrderCancellationPipelineProcessor {
     private final StockRestorationPort stockRestorationPort;
 
     /**
-     * 클레임 상태에 맞는 남은 단계를 실행한다. 결과 반영에서 버전으로 지면(다른 워커 · 요청이 먼저 처리) 조용히 멈춘다 — 단, 환불이 <b>확정</b>됐는데 그 사이
-     * 클레임이 미확정으로 닫혔으면({@link Claim#REFUND_UNCONFIRMED}) 다시 읽은 클레임으로 확정을 한 번 더 반영하고 복원까지 잇는다(늦게 온 환불 성공).
-     * 그 밖의 DB 실패는 그대로 나간다 — 클레임은 다음 시각에 재시도 스케줄러가 다시 집는다.
+     * 클레임 상태에 맞는 남은 단계를 실행한다. 실패 · 복원 결과의 낙관적 충돌은 멈추지만, 확정 환불은 동일 요청 검증 후 두 번의 CAS와 짧은 행 잠금 경계를 쓴다.
+     * 이미 환불 이후 단계면 현재 실행의 복원을 중단한다. 확정 환불 기록의 DB · 잠금 · 커밋 실패는 전용 503으로 전달하며 환불 실패 횟수로 세지 않는다.
      *
      * @param claim 접수 · 선점에서 막 저장한 클레임(버전 포함)
-     * @return 마지막으로 저장된 클레임. 버전에서 졌으면 그 직전 값
+     * @return 현재 실행이 마지막으로 저장한 클레임. 다른 실행이 환불을 반영했거나 일반 버전 충돌로 멈췄으면 직전 값(조회 응답의 정본이 아님)
      */
     @Transactional(propagation = Propagation.NEVER)
     public Claim progress(Claim claim) {
         Claim current = claim;
         try {
             if (current.status() == Claim.Status.REQUESTED) {
-                current = recordRefund(current, refund(current));
+                Optional<Claim> recorded = recordRefund(current, refund(current));
+                if (recorded.isEmpty()) {
+                    return current;
+                }
+                current = recorded.get();
             }
             if (current.status() == Claim.Status.REFUNDED) {
                 Order order = orderCancellationProcessor.getOrder(current.orderId());
@@ -64,20 +70,33 @@ public class OrderCancellationPipelineProcessor {
         return current;
     }
 
-    /** tx2 — 확정을 반영하다 버전에서 졌고 클레임이 미확정으로 닫혀 있으면 다시 읽은 값으로 한 번 더 반영한다. 그 밖의 경합은 그대로 던진다. */
-    private Claim recordRefund(Claim claim, CancellationStepOutcome outcome) {
+    /** 확정 성공은 실패와 달리 소진 후 버리지 않는다. 두 번의 CAS 뒤 별도 행 잠금 TX로 넘기며 모든 미기록 실패를 503으로 구분한다. */
+    private Optional<Claim> recordRefund(Claim source, CancellationStepOutcome outcome) {
+        if (outcome.kind() != CancellationStepOutcome.Kind.DONE) {
+            return Optional.of(orderCancellationProcessor.recordRefund(source, outcome));
+        }
         try {
-            return orderCancellationProcessor.recordRefund(claim, outcome);
-        } catch (OptimisticLockingFailureException exception) {
-            if (outcome.kind() != CancellationStepOutcome.Kind.DONE) {
-                throw exception;
+            Claim current = source;
+            for (int attempt = 0; attempt < 2; attempt++) {
+                try {
+                    return Optional.of(orderCancellationProcessor.recordRefund(current, outcome));
+                } catch (OptimisticLockingFailureException conflict) {
+                    if (attempt == 1) {
+                        break;
+                    }
+                    current = orderCancellationProcessor.findClaim(source.orderId())
+                        .orElseThrow(() -> new IllegalStateException("claim not found"));
+                    if (!source.hasSameRefundRequest(current)) {
+                        throw new IllegalStateException("refund request changed");
+                    }
+                    if (current.hasRecordedRefund()) {
+                        return Optional.empty();
+                    }
+                }
             }
-            Claim reloaded = orderCancellationProcessor.findClaim(claim.orderId())
-                .filter(read -> read.status() == Claim.Status.REFUND_FAILED && Claim.REFUND_UNCONFIRMED.equals(read.failureCode()))
-                .orElseThrow(() -> exception);
-            log.warn("late refund success for unconfirmed cancellation claim, applying. claimId={}, orderId={}, paymentId={}",
-                reloaded.id(), reloaded.orderId(), reloaded.paymentId());
-            return orderCancellationProcessor.recordRefund(reloaded, outcome);
+            return orderCancellationProcessor.recordConfirmedRefundWithLock(source);
+        } catch (RuntimeException failure) {
+            throw new OrderException(OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE, failure);
         }
     }
 

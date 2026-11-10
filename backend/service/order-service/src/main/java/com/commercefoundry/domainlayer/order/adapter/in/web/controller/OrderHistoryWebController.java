@@ -72,7 +72,8 @@ public class OrderHistoryWebController {
         description = "결제 대기 주문은 바로 취소 완료로 바꾸고 잡아 둔 재고를 푼다. 결제 완료 · 상품 준비중(제작 중은 운영 설정이 허용할 때만) 주문은 취소 요청을 접수하고 "
             + "전액 환불 → 재고 복원을 잇는다 — 환불이 확정되면 200 status=CANCELED, 미확정 · 실패면 200 status=CANCEL_REQUESTED(자동 재시도 · 운영자 확인). "
             + "이미 취소 완료 · 취소 요청이면 바꾸지 않고 200 현재 상세. 배송 중 이후 · 만료 등은 409 ORDER_020, 동시 변경 뒤 다시 판정할 수 없으면 409 ORDER_025, "
-            + "결제 기록 이상 500 ORDER_033 · ORDER_034. 사유 없음 400 ORDER_154, 모르는 사유 400 ORDER_100, 없거나 남의 주문 404 ORDER_001"
+            + "결제 기록 이상 500 ORDER_033 · ORDER_034. 확정 환불의 주문 반영을 확인하지 못하면 503 ORDER_036(접수 롤백 · 환불 실패 뜻이 아니며 현재 상태 확인 필요). "
+            + "사유 없음 400 ORDER_154, 모르는 사유 400 ORDER_100, 없거나 남의 주문 404 ORDER_001"
     )
     @PreAuthorize("hasRole('CUSTOMER')")
     @PostMapping("/{orderId}/cancellation")

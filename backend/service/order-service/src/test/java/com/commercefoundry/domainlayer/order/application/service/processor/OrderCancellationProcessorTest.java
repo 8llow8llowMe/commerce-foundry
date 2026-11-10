@@ -385,8 +385,8 @@ class OrderCancellationProcessorTest {
             .thenReturn(Optional.of(requested), Optional.of(refundedAtMax), Optional.of(completed), Optional.empty());
         ArgumentCaptor<Claim> saved = ArgumentCaptor.forClass(Claim.class);
 
-        for (int call = 0; call < 4; call++) {
-            processor(false).recordAttemptFailure(1L);
+        for (Claim attempted : java.util.List.of(requested, refundedAtMax, completed, requested)) {
+            processor(false).recordAttemptFailure(attempted);
         }
 
         verify(claims, times(2)).update(saved.capture());
@@ -394,6 +394,16 @@ class OrderCancellationProcessorTest {
         assertThat(saved.getAllValues().get(0).attemptCount()).isEqualTo(1);
         assertThat(saved.getAllValues().get(1).status()).isEqualTo(Claim.Status.RESTORATION_FAILED);
         assertThat(saved.getAllValues().get(1).failureCode()).isEqualTo(Claim.RESTORATION_UNCONFIRMED);
+    }
+
+    @Test
+    void oldAttemptCannotCountFailureAgainstNewLeaseOrPhase() {
+        Claim attempted = requestedClaim();
+        for (Claim current : java.util.List.of(stored(attempted.holdUntil(NOW.plusSeconds(60)), 1L), stored(attempted.markRefunded(NOW), 1L))) {
+            when(claims.findByOrderIdAndRequestKey(eq(1L), any())).thenReturn(Optional.of(current));
+            processor(false).recordAttemptFailure(attempted);
+        }
+        verify(claims, never()).update(any());
     }
 
     private static void assertRejected(org.assertj.core.api.ThrowableAssert.ThrowingCallable call, OrderErrorCode code) {
