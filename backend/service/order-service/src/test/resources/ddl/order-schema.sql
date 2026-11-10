@@ -83,6 +83,10 @@
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
         attempt_count integer not null,
+        decided_at timestamp(6) with time zone,
+        decided_by_member_id bigint,
+        decision_failure_code varchar(40),
+        decision_reason varchar(200),
         expected_refund_amount bigint,
         expected_refund_currency varchar(3) check ((expected_refund_currency in ('KRW','USD'))),
         failure_code varchar(40),
@@ -101,7 +105,8 @@
         constraint ck_claim_cancellation_payment check (type <> 'CANCELLATION' or (payment_id is not null and payment_id > 0 and expected_refund_amount is not null and expected_refund_amount > 0)),
         constraint ck_claim_payment_cancellation_only check (type = 'CANCELLATION' or payment_id is null),
         constraint ck_claim_cancellation_next_attempt check (type <> 'CANCELLATION' or ((status in ('REQUESTED', 'REFUNDED')) = (next_attempt_at is not null))),
-        constraint ck_claim_cancellation_failure_code check (type <> 'CANCELLATION' or ((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null)))
+        constraint ck_claim_cancellation_failure_code check (type <> 'CANCELLATION' or ((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))),
+        constraint ck_claim_admin_decision check ((decision_reason is null and decided_by_member_id is null and decided_at is null and decision_failure_code is null) or (type = 'CANCELLATION' and decision_reason is not null and length(trim(decision_reason)) > 0 and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null and decision_failure_code is not null and length(trim(decision_failure_code)) > 0))
     );
 
     comment on table orders.claim is
@@ -118,6 +123,18 @@
 
     comment on column orders.claim.attempt_count is
         '지금 단계(환불 · 재고 복원)의 미확정 재시도 횟수';
+
+    comment on column orders.claim.decided_at is
+        '마지막 운영자 수습 결정 시각';
+
+    comment on column orders.claim.decided_by_member_id is
+        '수습 결정 관리자 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column orders.claim.decision_failure_code is
+        '마지막 수습 결정 직전 실패 코드';
+
+    comment on column orders.claim.decision_reason is
+        '마지막 운영자 수습 사유. 개인정보 입력 금지';
 
     comment on column orders.claim.expected_refund_amount is
         '예상 환불 최소 단위 금액 (미산정이면 null)';

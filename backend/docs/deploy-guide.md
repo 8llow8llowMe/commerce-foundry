@@ -374,6 +374,18 @@ docker ps --format '{{.Names}} {{.Status}}'                       # (healthy) �
 테스트 클래스패스 원본은 UTF-8 파일로 전달하고 Java launcher 임시 argfile은 native 인코딩으로 엄격 변환한다. 지원하지 않는 문자는 치환하지 않고 경로·환경값을 노출하지 않는 인코딩 실패로 분류한다.
 실제 order PostgreSQL과 부모 생존 HTTP fake의 원격 상태가 근거이며 실제 product DB 수량·PG 취소 완료·운영 환경에서의 실행을 검증한 것은 아니다.
 
+### 운영자 수습 저장 기반 (#17 A1)
+
+`service/order-service/src/test/resources/ddl/claim-admin-decision.sql`은 기존 #16 취소 DDL 적용 뒤 운영자가
+`psql -v ON_ERROR_STOP=1 -f`로 UTF-8 실행한다. Hibernate PostgreSQL 17 생성 스냅숏의 신규 nullable 네 열·묶음 check·코멘트를 기존 테이블에 더하며
+기존 행은 모두 결정 없음으로 남긴다. 기존 상태 enum·`failure_code` check는 교체하지 않는다. 트랜잭션 전체가 실패하면 롤백하고 원인을 확인하며 성공 뒤 재실행하지 않는다.
+새 열·check가 이미 있는지 사전 확인하고 잠금 영향을 고려한 작업 창에서 적용한다. 운영 적용은 자동화하지 않는다.
+
+순서는 추가 DDL → 모든 order-service 쓰기 인스턴스 배포 → 생성 스냅숏/매핑 validate 확인이다. A1은 결정 생성 호출부가 없어 기존 앱과 롤링할 수 있다.
+구 앱은 `Decision`을 읽고 검증하지 못하므로, 후속 결정 쓰기 기능을 연결하기 전에 모든 writer의 새 매핑 배포를 확인한다.
+결정 행을 활용하기 시작한 뒤 구 앱으로 롤백하는 것은 안전하다고 보장하지 않는다. 기존 취소 스케줄러·운영 결제 게이트 설정은 그대로다.
+이 기반은 배포 조건 ⑧의 실제 수습 경로가 아니며 관리자 API·수동 확정·종결·거절·실환불 연결과 운영 개방은 후속 검증 및 별도 활성화 대상이다.
+
 ### 결제 후 취소 클레임 배포 (#16 PR-2a)
 
 `claim`에 결제 후 취소(CANCELLATION) 유형 · 환불/복원 상태 · 재시도 칸(`payment_id`, `attempt_count`, `next_attempt_at`, `failure_code`)을 더한다.
