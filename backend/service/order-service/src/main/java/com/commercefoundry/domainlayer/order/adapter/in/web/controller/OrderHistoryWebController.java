@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.adapter.in.web.controller;
 
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderClaimItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderSummaryItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.request.OrderCancelRequest;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.response.OrderDetailResponse;
@@ -18,6 +19,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -36,7 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>파라미터 검증은 Spring MVC 의 메서드 검증이 한다 — 클래스에 {@code @Validated} 를 달지 않는다 ({@code coding-conventions.md} §8-2).
  */
-@Tag(name = "주문 내역", description = "내 주문 목록 · 상세 · 결제 전 취소")
+@Tag(name = "주문 내역", description = "내 주문 목록 · 상세 · 클레임 · 취소 · 구매 확정")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -65,6 +67,17 @@ public class OrderHistoryWebController {
         @Parameter(description = "주문 아이디") @PathVariable @Positive(message = OrderValidationMessage.ORDER_ID_POSITIVE) long orderId
     ) {
         return ResponseEntity.ok().body(Response.success(orderHistoryWebUseCase.getOrder(member.memberId(), orderId)));
+    }
+
+    @Operation(summary = "내 주문 클레임", description = "이 주문의 반품 · 결제 후 취소 접수(유형 · 상태 · 항목 · 수량 · 사유 · 접수 시각 · 환불 예정액). "
+        + "최신순 전체 목록이며 없으면 빈 배열. 환불 예정액 null 은 미산정. 없거나 남의 주문은 404 ORDER_001, 양수가 아닌 아이디 400 ORDER_141")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @GetMapping("/{orderId}/claims")
+    public ResponseEntity<Response<List<OrderClaimItem>>> getClaims(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "주문 아이디") @PathVariable @Positive(message = OrderValidationMessage.ORDER_ID_POSITIVE) long orderId
+    ) {
+        return ResponseEntity.ok().body(Response.success(orderHistoryWebUseCase.getClaims(member.memberId(), orderId)));
     }
 
     @Operation(

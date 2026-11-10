@@ -1,9 +1,11 @@
 package com.commercefoundry.domainlayer.order.application.port.in;
 
+import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderClaimItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderSummaryItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.response.OrderDetailResponse;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
 import com.commercefoundry.persistence.dto.SliceResponse;
+import java.util.List;
 
 /**
  * 고객 주문 내역 · 상세 · 취소 (#16). memberId 는 컨트롤러가 JWT 주체에서만 꺼낸다 — 남의 주문은 없는 주문처럼 404 다.
@@ -15,6 +17,13 @@ public interface OrderHistoryWebUseCase {
 
     /** @throws com.commercefoundry.domainlayer.order.application.exception.OrderException {@code NOT_FOUND_ORDER}(404) — 없거나 남의 주문 */
     OrderDetailResponse getOrder(long memberId, long orderId);
+
+    /**
+     * 내 주문의 클레임(반품 · 결제 후 취소) — 아이디 내림차순, 없으면 빈 목록 (#609).
+     *
+     * @throws com.commercefoundry.domainlayer.order.application.exception.OrderException {@code NOT_FOUND_ORDER}(404) — 없거나 남의 주문
+     */
+    List<OrderClaimItem> getClaims(long memberId, long orderId);
 
     /**
      * 고객 취소.

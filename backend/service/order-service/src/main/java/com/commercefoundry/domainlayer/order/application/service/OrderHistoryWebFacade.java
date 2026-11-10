@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.order.application.service;
 
 import com.commercefoundry.common.exception.RedactedThrowable;
+import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderClaimItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderSummaryItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.response.OrderDetailResponse;
 import com.commercefoundry.domainlayer.order.adapter.in.web.presenter.OrderHistoryWebPresenter;
@@ -10,6 +11,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderExceptio
 import com.commercefoundry.domainlayer.order.application.port.in.OrderHistoryWebUseCase;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderClaimHistoryProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderHistoryProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
@@ -19,6 +21,7 @@ import jakarta.persistence.LockTimeoutException;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.persistence.PessimisticLockException;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +45,7 @@ public class OrderHistoryWebFacade implements OrderHistoryWebUseCase {
     private static final Set<OrderStatus> PAID_BEFORE_SHIPMENT = EnumSet.of(OrderStatus.PAID, OrderStatus.MAKING, OrderStatus.PREPARING);
 
     private final OrderHistoryProcessor orderHistoryProcessor;
+    private final OrderClaimHistoryProcessor orderClaimHistoryProcessor;
     private final OrderCancellationProcessor orderCancellationProcessor;
     private final OrderCancellationPipelineProcessor orderCancellationPipelineProcessor;
     private final OrderHistoryWebPresenter orderHistoryWebPresenter;
@@ -54,6 +58,11 @@ public class OrderHistoryWebFacade implements OrderHistoryWebUseCase {
     @Override
     public OrderDetailResponse getOrder(long memberId, long orderId) {
         return toDetail(orderHistoryProcessor.get(memberId, orderId));
+    }
+
+    @Override
+    public List<OrderClaimItem> getClaims(long memberId, long orderId) {
+        return orderHistoryWebPresenter.toClaimItems(orderClaimHistoryProcessor.findClaims(memberId, orderId));
     }
 
     /**

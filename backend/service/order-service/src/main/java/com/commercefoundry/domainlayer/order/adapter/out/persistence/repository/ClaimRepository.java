@@ -15,6 +15,9 @@ import org.springframework.data.jpa.repository.Query;
 public interface ClaimRepository extends JpaRepository<ClaimEntity, Long> {
     Optional<ClaimEntity> findByOrderIdAndRequestKey(long orderId, UUID requestKey);
 
+    /** 한 주문의 클레임 — {@code uk_claim_order_id_request_key} 의 앞 열(order_id)을 탄다 (#609). */
+    List<ClaimEntity> findAllByOrderIdOrderByIdDesc(long orderId);
+
     @Query("""
         select new com.commercefoundry.domainlayer.order.application.port.out.query.RequestedReturnQuantityQueryResult(i.orderItemId, sum(i.quantity))
           from ClaimEntity c, ClaimItemEntity i

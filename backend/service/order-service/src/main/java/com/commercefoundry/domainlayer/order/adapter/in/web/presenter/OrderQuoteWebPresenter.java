@@ -12,6 +12,7 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderQuoteLine;
 import com.commercefoundry.domainlayer.order.domain.model.ShippingFeeQuote;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
+import java.util.stream.IntStream;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,8 +31,17 @@ public class OrderQuoteWebPresenter {
             .build();
     }
 
+    /** 미리보기 — 주문이 아직 없어 항목 아이디는 null 이다. */
     public List<OrderLineItem> toLineItems(List<OrderQuoteLine> lines) {
-        return lines.stream().map(OrderQuoteWebPresenter::toLineItem).toList();
+        return lines.stream().map(line -> toLineItem(null, line)).toList();
+    }
+
+    /** 저장된 주문 — 항목 아이디는 스냅숏 줄과 같은 순서다({@code Order#itemIds}, #609). */
+    public List<OrderLineItem> toLineItems(List<OrderQuoteLine> lines, List<Long> itemIds) {
+        if (lines.size() != itemIds.size()) {
+            throw new IllegalStateException("order item ids do not match quote lines");
+        }
+        return IntStream.range(0, lines.size()).mapToObj(index -> toLineItem(itemIds.get(index), lines.get(index))).toList();
     }
 
     /** 상품 합계 · 배송비 · 총액. */
@@ -61,8 +71,9 @@ public class OrderQuoteWebPresenter {
         return money == null ? null : MoneyItem.of(money.amount(), money.currency().name());
     }
 
-    private static OrderLineItem toLineItem(OrderQuoteLine line) {
+    private static OrderLineItem toLineItem(Long orderItemId, OrderQuoteLine line) {
         return OrderLineItem.builder()
+            .orderItemId(orderItemId == null ? null : String.valueOf(orderItemId))
             .skuId(String.valueOf(line.skuId()))
             .productId(String.valueOf(line.productId()))
             .productName(line.productName())

@@ -1,11 +1,14 @@
 package com.commercefoundry.domainlayer.order.adapter.in.web.presenter;
 
 import com.commercefoundry.common.dto.item.MoneyItem;
+import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderClaimItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderSummaryItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.response.OrderDetailResponse;
 import com.commercefoundry.domainlayer.order.application.info.OrderMemberSummaryInfo;
+import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.persistence.dto.SliceResponse;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Component;
@@ -32,12 +35,19 @@ public class OrderHistoryWebPresenter {
             .cancelable(cancelable)
             .paymentDueAt(order.paymentDueAt())
             .currency(order.quote().currency().name())
-            .items(orderQuoteWebPresenter.toLineItems(order.quote().lines()))
+            .items(orderQuoteWebPresenter.toLineItems(order.quote().lines(), order.itemIds()))
             .amounts(orderQuoteWebPresenter.toAmountsItem(order.quote()))
             .shipping(orderQuoteWebPresenter.toShippingFeeItem(order.quote().shippingFeeQuote()))
             .shippingAddress(OrderWebPresenter.toShippingAddressItem(order.shippingAddress()))
             .createdAt(order.createdAt())
             .build();
+    }
+
+    /** 내 주문의 클레임 (#609) — 식별자는 문자열, 유형 · 상태 · 사유는 metadata, 환불 예정액 null 은 미산정이다. 결제 아이디 · 실패 코드 · 멱등 키는 내지 않는다. */
+    public List<OrderClaimItem> toClaimItems(List<Claim> claims) {
+        return claims.stream().map(claim -> new OrderClaimItem(String.valueOf(claim.id()), claim.type().toMetadata(), claim.status().toMetadata(),
+            OrderQuoteWebPresenter.toMoneyItem(claim.expectedRefund()), claim.requestedAt(), claim.items().stream()
+                .map(item -> new OrderClaimItem.Line(String.valueOf(item.orderItemId()), item.quantity(), item.reason().toMetadata())).toList())).toList();
     }
 
     private static OrderSummaryItem toSummaryItem(OrderMemberSummaryInfo summary) {

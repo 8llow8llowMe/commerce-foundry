@@ -13,6 +13,9 @@ public interface ClaimRepositoryPort {
     /** 클레임 하나(항목 · 버전 포함). 쓰기 쪽 Processor 가 버전을 대조한 뒤 {@link #update} 로 저장한다 — 잠그지 않는다. */
     Optional<Claim> findById(long claimId);
 
+    /** 한 주문의 클레임(반품 · 취소)을 아이디 내림차순으로, 항목과 함께 읽는다 — 항목은 한 번의 IN 조회다 (#609). 없으면 빈 목록. */
+    List<Claim> findAllByOrderId(long orderId);
+
     /** 호출자의 짧은 쓰기 트랜잭션에서 최신 행을 NOWAIT 잠근다. 잠금 중 외부 I/O를 하지 않는다. */
     Optional<Claim> findByIdForUpdate(long claimId);
 

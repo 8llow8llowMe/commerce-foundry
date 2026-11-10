@@ -9,6 +9,10 @@ import lombok.Builder;
 @Schema(description = "주문 항목 한 줄. 미리보기는 지금 값, 주문은 주문 시점 스냅숏이다")
 public record OrderLineItem(
 
+    @Schema(description = "주문 항목 아이디 — 반품 접수 items[].orderItemId 로 그대로 보낸다 (#609). 주문이 아직 없는 미리보기(quotes)는 null",
+        example = "4611686018427387906", nullable = true)
+    String orderItemId,
+
     @Schema(description = "SKU 아이디", example = "9004")
     String skuId,
 

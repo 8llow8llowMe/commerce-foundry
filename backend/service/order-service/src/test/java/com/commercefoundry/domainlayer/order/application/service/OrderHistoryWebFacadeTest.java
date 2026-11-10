@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.order.application.service;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.commercefoundry.domainlayer.order.adapter.in.web.dto.item.OrderClaimItem;
 import com.commercefoundry.domainlayer.order.adapter.in.web.dto.response.OrderDetailResponse;
 import com.commercefoundry.domainlayer.order.adapter.in.web.presenter.OrderHistoryWebPresenter;
 import com.commercefoundry.domainlayer.order.application.exception.ClaimRequestKeyConflictException;
@@ -10,12 +11,14 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCod
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderClaimHistoryProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderHistoryProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import jakarta.persistence.LockTimeoutException;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,7 +36,20 @@ class OrderHistoryWebFacadeTest {
     private final OrderCancellationProcessor cancellation = mock(OrderCancellationProcessor.class);
     private final OrderCancellationPipelineProcessor pipeline = mock(OrderCancellationPipelineProcessor.class);
     private final OrderHistoryWebPresenter presenter = mock(OrderHistoryWebPresenter.class);
-    private final OrderHistoryWebFacade facade = new OrderHistoryWebFacade(processor, cancellation, pipeline, presenter);
+    private final OrderClaimHistoryProcessor claims = mock(OrderClaimHistoryProcessor.class);
+    private final OrderHistoryWebFacade facade = new OrderHistoryWebFacade(processor, claims, cancellation, pipeline, presenter);
+
+    @Test
+    @DisplayName("내 주문 클레임은 소유를 확인한 Processor 결과를 Presenter 로 옮긴다 (#609)")
+    void claimsArePresented() {
+        List<Claim> found = List.of(mock(Claim.class));
+        List<OrderClaimItem> items = List.of(mock(OrderClaimItem.class));
+        when(claims.findClaims(7L, 1L)).thenReturn(found);
+        when(presenter.toClaimItems(found)).thenReturn(items);
+
+        assertThat(facade.getClaims(7L, 1L)).isSameAs(items);
+        verifyNoInteractions(cancellation, pipeline);
+    }
 
     private Order orderIn(OrderStatus status) {
         Order order = mock(Order.class);
