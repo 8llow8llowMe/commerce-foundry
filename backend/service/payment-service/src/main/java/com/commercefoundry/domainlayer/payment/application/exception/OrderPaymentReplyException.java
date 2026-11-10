@@ -1,6 +1,6 @@
 package com.commercefoundry.domainlayer.payment.application.exception;
 
-/** 내부 회신 실패 분류. 원문, 식별자, 원인 사슬은 보존하지 않는다. 자동 재시도 실행기는 아직 없다. */
+/** 내부 회신 실패 분류. 원문, 식별자, 원인 사슬은 보존하지 않으며 Kafka 진입이 retryable 분류를 사용한다. */
 public final class OrderPaymentReplyException extends RuntimeException {
     private final Reason reason;
 

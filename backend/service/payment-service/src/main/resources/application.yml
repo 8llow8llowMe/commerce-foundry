@@ -91,6 +91,8 @@ payment:
       page-size: 5
       max-pages-per-lane: 1
   order-result:
+    consumer:
+      enabled: false
     pending-after: 5m
     reconciliation:
       enabled: false

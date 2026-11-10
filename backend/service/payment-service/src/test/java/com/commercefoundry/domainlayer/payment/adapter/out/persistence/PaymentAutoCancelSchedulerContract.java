@@ -143,7 +143,7 @@ abstract class PaymentAutoCancelSchedulerContract extends PaymentAutoCancelContr
         }).when(blocked).sweep();
         var second = mock(PaymentAutoCancelSchedulerUseCase.class);
         var props = new PaymentAutoCancelSchedulerProperties(true, null, null, null, null, null);
-        var actualClock = Clock.systemUTC();
+        var actualClock = Clock.tickMillis(ZoneOffset.UTC);
         var a = new PaymentAutoCancelScheduler(blocked, new JdbcLockProvider(source, "payment.shedlock"), props, actualClock);
         var b = new PaymentAutoCancelScheduler(second, new JdbcLockProvider(source, "payment.shedlock"), props, actualClock);
         try (var pool = java.util.concurrent.Executors.newSingleThreadExecutor()) {
