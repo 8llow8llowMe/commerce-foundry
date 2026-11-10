@@ -454,7 +454,7 @@ Facade는 외부 TX를 거절한다. 원천 조회와 훅은 TX 밖, 로컬 원�
 훅 후보는 최초 거절 기록이며 CANCELED가 아니고 성공 취소 누계를 뺀 잔액이 양수인 경우다. 후보는 실행 권한이 아니며 #579는 실행 직전 상태·잔액을 다시 확인해야 한다.
 기본 정책은 PG를 호출하지 않는다. 고정 enum 로그만 남기며 훅·관측 예외는 기록 커밋을 되돌리지 않는다. 커밋 후 훅 전 중단과 훅 예외의 실행 유실은 #591이 복구한다.
 commit/unique/version 실패는 TX 밖에서 분류하며 원문·식별자·cause를 전파하지 않는다. 정확 inbox 제약+23505만 중복이고 다른 무결성 위반은 영구 계약 실패다.
-생산 listener/ACK/DLT·게이트 활성화는 포함하지 않는다. 작성한 H2/실제 PG 계약·경합 시험은 main 검증 및 CI 실행 전이며 완료 근거로 삼지 않는다.
+기록 계약은 PR #654로 완료했다. Kafka 진입은 아래 C3c가 연결하며 운영 게이트 활성화는 별도다.
   돈만 받고 상품이 없는 주문을 남기지 않는다.
 
 ### 6-1. payment 회신 저장소 기반 (#308 C3a-1)
@@ -522,7 +522,7 @@ core 릴레이/cleanup의 락 이름과 다르고 LockProvider 빈을 새로 노
 payment/inbox를 같은 TX로 커밋한다. 실제 이벤트와의 경합은 @Version/unique로 롤백하고 후속 진입에서 판정한다. 성공 단조성과 같은 결과 no-op을 유지한다.
 
 REJECTED lane은 inbox/빠른 훅 성공 이력을 보지 않고 `PaymentCancelPolicy.onRejected(paymentId)`를 TX 밖에서 반복 호출한다.
-기본 정책은 계속 no-op이며 **이번 범위에는 PG 호출이 없다**. 같은 tick의 빠른 훅과 DB lane이 중복 호출할 수 있다.
+#579의 기본 OFF 정책은 취소 의도만 기록한다. 실제 PG 호출은 별도 자동 취소 실행자가 맡는다. 같은 tick의 빠른 훅과 DB lane이 중복 호출할 수 있다.
 원천 거절은 재고 복원 진행 중에도 존재할 수 있다. 거절 기록/정책 전달만 수행하고 복원 완료·실행 권한을 추정하지 않는다.
 #579는 실제 실행 직전 상태·잔액·멱등성을 재검증해야 하며, 이번 변경은 재고 복원 API나 그 완료 신호를 추가하지 않는다.
 
@@ -542,6 +542,36 @@ DDL 중간 실패는 rollback하고 catalog/기존 행을 확인한 뒤 재적�
 
 H2/PG 계약·동시 lock/실제 이벤트 경합·구 스키마→추가 DDL→validate 시험을 추가했다. 이 slice의 Gradle 실행은 공유 build.lock을 소유한 main이 수행한다.
 현재 컴파일/시험 성공을 주장하지 않으며, adapter 재생성 시험은 실제 JVM 종료·재기동 시험을 대신하지 않는다. FE/HTTP 계약 영향은 없다.
+
+### 6-4. Kafka 회신 소비 (#308 C3c)
+
+`OrderPaymentReplyEventListener`는 `TopicNames`의 `order.order-paid`·`order.order-payment-rejected` 두 원본 토픽만 소비한다.
+그룹은 기존 inbox와 같은 `<ns>.payment.order-payment-result`다. producer/aggregate는 order, 키는 aggregateId 및 payload의 문자열 orderId와 같아야 한다.
+UUID/v1 봉투·문자열 양수 long 식별자·PAID 선점/시각·여섯 거절 사유를 검증한다. `paidAt`는 주문 처리 시각이므로 PG 승인 시각과 비교하지 않는다.
+이벤트는 알림이며 기존 C3b `handle`이 서비스 토큰 원천 7필드와 로컬 payment를 다시 대조한다. 새 API·스키마·PG 정책은 없다.
+
+`commerce.messaging.enabled`와 `payment.order-result.consumer.enabled`가 모두 true일 때만 등록한다. 전용 소비자는 기본 false다.
+두 원본 토픽·두 `.dlt`가 없으면 기동을 거절하며 앱은 토픽을 생성하지 않는다. 기존 메시징만 켜진 인스턴스에는 회신 토픽을 새로 요구하지 않는다.
+운영 결제·재대조·자동취소 게이트 값은 그대로 유지한다. 소비자 구현 완료만으로 운영 활성화나 #308 전체 완료를 뜻하지 않는다.
+
+공용 컨테이너의 자동 커밋 OFF·RECORD ACK·지수 재시도·DLT를 재사용한다. `handle`의 DB 커밋과 커밋 후 훅 시도가 끝나고 정상 반환한 뒤 offset을 커밋한다.
+기존 `Reason.retryable()`의 일시 실패는 제한 재시도한다. 영구 실패와 잘못된 봉투는 즉시 DLT다. SOURCE_UNAUTHORIZED도 키 교체/배포 복구 시간을 위한 제한 재시도다.
+기본 재시도는 총 5회, 1/2/4/8초 대기이며 동일 파티션의 후속 주문 처리가 지연될 수 있다. 시간 상한에는 원격 호출·DB 대기 시간이 추가된다.
+DB 커밋 뒤 ACK 전 중단은 같은 그룹의 재전달로 복구한다. inbox가 있으면 중복 반환하고, 정리 뒤에는 원천 재검증과 업무 no-op·성공 단조성에 의존한다.
+훅 전 중단/훅 예외에서 빠른 훅은 복구되지 않을 수 있다. 기존 #591의 DB 재방문과 #579의 의도 발견·별도 PG 실행이 보완한다.
+
+DLT 진단은 공용 정책의 토픽·partition·offset·정규 event UUID·예외 타입만 허용한다. payment/order/member ID·record key·금액·payload·원격 본문·cause는 로그에 추가하지 않는다.
+DLT 본문/키는 재처리를 위해 원본을 보존하지만 예외 메시지·stack 헤더는 제거한다. Kafka 접근 ACL과 기존 개인정보 없는 이벤트 계약이 전제다.
+
+수동 재처리는 다음 순서로 수행한다. DLT는 자동 소비하지 않으며 #591도 DLT 레코드를 재발행하지 않는다.
+
+1. 원인·원천 결과·현재 payment와 inbox를 확인하고 계약/인증/장애 원인을 먼저 해결한다. DLT의 토픽·partition·offset을 운영 원장에 남긴다.
+2. 같은 namespace의 대응 원본 토픽으로 **동일 eventId·key·봉투**를 재전송한다. 새 eventId 생성이나 DB 플래그 직접 변경으로 우회하지 않는다.
+3. 새 원본 offset의 처리와 payment/inbox·실제 취소 원장을 확인한다. 재전송 성공 자체를 업무 완료 또는 환불 완료로 보지 않는다.
+
+기본 원본·DLT 보존은 각각 7d, inbox 보존은 processedAt 기준 7d다. 순차 대기한 두 Kafka 창의 합이 inbox 보존보다 길 수 있어 중복 제거를 항상 보장하지 않는다.
+운영 활성화 전에 실제 topic retention·재시도·수동 처리 목표 시간을 확인한다. 창 초과/영구 불일치는 수동 조사하고 보존시간만 늘려 자동 해결로 간주하지 않는다.
+listener OFF와 cleanup OFF는 독립이다. cleanup은 기존 messaging/relay/cleanup 조건을 유지한다.
 
 ## 7. 웹훅
 

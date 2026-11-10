@@ -9,10 +9,11 @@ payment-service의 #308 C3a-2는 주문 미회신 지연 건수·최대 나이·
 세 Gauge는 독립 읽기이며 기존 #616 A4a API와 별도다. 생산 회신 소비나 게이트 활성화는 포함하지 않는다(`payment-guide.md` §6-2).
 
 payment-service C3b는 `OrderPaymentReplyEventUseCase`의 원천/로컬 대조·payment/inbox 원자 기록과 커밋 후 비PG 정책 훅을 제공한다.
-listener/실제 PG 취소/게이트 활성화는 후속이며 FE·HTTP 계약은 바뀌지 않는다. 신규 시험의 실제 실행 결과는 main/CI 검증 대기다.
+C3b는 PR #654로 완료했다. C3c는 기본 OFF Kafka listener에서 같은 UseCase를 호출하며 FE·HTTP 계약은 바뀌지 않는다.
+consumer와 messaging 두 게이트가 모두 켜졌을 때만 두 회신 토픽·두 DLT를 요구한다(`payment-guide.md` §6-4). 운영 활성화는 별도다.
 
 payment-service #591은 기본 OFF 재대조와 DB 거절 재시도를 제공한다. payment.shedlock의 독립 이름과 두 lane 영속 cursor로
-제한된 ID 순회를 수행하고 C3b 원자 기록을 재사용한다. 정책은 여전히 비PG no-op이며 복원 완료를 추정하지 않는다.
+제한된 ID 순회를 수행하고 C3b 원자 기록을 재사용한다. #579의 기본 OFF 정책은 취소 의도만 기록하고 별도 실행자가 PG를 호출하며 복원 완료를 추정하지 않는다.
 운영 추가 DDL·seed·lease와 처리 예산·실행 대기 시험은 `payment-guide.md` §6-3을 따른다. operations-service는 주문 결제 회신 DLT 두 토픽을 기본 OFF 관리자 이상 알림에 포함한다(`anomaly-notifications.md`).
 
 | 모듈 | 포트 | 상태 | 책임 |
