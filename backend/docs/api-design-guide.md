@@ -1319,7 +1319,8 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 | API | 응답 | 오류 |
 |-----|------|------|
 | `GET /api/v1/orders?page=0&size=20` | 200 `SliceResponse<{orderId, status, orderName, itemCount, totalAmount, cancelable, paymentDueAt, createdAt}>` — 최신순(주문 아이디 내림차순), 전체 건수 없음 | 400 `ORDER_144`(page) · `145`(size 1~100) |
-| `GET /api/v1/orders/{orderId}` | 200 `{orderId, status, cancelable, paymentDueAt, currency, items[], amounts, shipping, shippingAddress, createdAt}` — 주문 생성 응답과 같은 스냅숏 모양 | 400 `ORDER_141` · 404 `ORDER_001` |
+| `GET /api/v1/orders/{orderId}` | 200 `{orderId, status, cancelable, paymentDueAt, currency, items[], amounts, shipping, shippingAddress, createdAt}` — 주문 생성 응답과 같은 스냅숏 모양. `items[].orderItemId`(문자열, #609)는 반품 접수 본문에 그대로 쓴다 | 400 `ORDER_141` · 404 `ORDER_001` |
+| `GET /api/v1/orders/{orderId}/claims` (#609) | 200 `[{claimId, type, status, expectedRefund, requestedAt, items:[{orderItemId, quantity, reason}]}]` — 이 주문의 반품 · 결제 후 취소 접수, 아이디 내림차순 전체(페이지 없음), 없으면 `[]` | 400 `ORDER_141` · 404 `ORDER_001`(없거나 남의 주문) |
 | `POST /api/v1/orders/{orderId}/cancellation` `{reason}` | 200 현재 상세 — 결제 대기는 `CANCELED`. 결제 완료 · 상품 준비중(제작 중은 설정)은 환불이 확정되면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(#16 PR-2). 이미 취소 완료 · 취소 요청이면 바꾸지 않고 200 | 400 `ORDER_154`(사유 없음) · `100`(모르는 사유 · 깨진 JSON) · `141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 중 이후 · 만료 · 제작 중 불허 등), `ORDER_025`(동시 변경 뒤 다시 판정 불가 — 상세를 다시 조회한 뒤 필요하면 다시 요청) · 500 `ORDER_033`(결제 완료 기록 없음) · `ORDER_034`(환불액 ≠ 승인 금액) · 503 `ORDER_035`(결제 후 취소가 닫혀 있음 — 재시도 스케줄러 꺼짐, 고객센터 안내) · `ORDER_036`(확정 환불의 주문 DB 반영 미확인, 현재 상태 확인) |
 | `PATCH /api/v1/orders/{orderId}/purchase-confirmation` | 200 구매 확정된 상세. 이미 확정됐으면 바꾸지 않고 200 | 400 `ORDER_141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 완료 전 · 반품 등), `ORDER_025`(다른 전이가 먼저 커밋) |
 
@@ -1363,6 +1364,12 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 `expectedRefund=null`은 미산정이며 0원이 아니다. 접수 시각은 같은 키 재생에서도 동일하다. 환불·배송비 계산·재고 복원은 호출하지 않는다.
 구매 확정과 반품은 상태·버전 검사로 한쪽만 성공한다. 기간 제한·맞춤 제작 반품 금지 정책은 신설하지 않는다.
 상세 상태·원자성·후속 경계는 [order-return-request-guide.md](order-return-request-guide.md), 흐름은 `order-flow-guide.md` §5를 따른다. FE 리뷰어는 `seonghoho`다.
+
+**반품 본문 만들기 · 접수 확인 (#609)** — `orderItemId` 는 고객 주문 상세(와 주문 생성 응답)의 `items[].orderItemId` 다. 주문이 없는 미리보기
+(`POST /api/v1/orders/quotes`)의 같은 칸은 null 이다. 항목별 반품 가능 수량은 응답에 두지 않는다 — FE 는 `quantity` 를 상한으로 쓰고,
+이미 접수한 수량을 넘으면 서버가 409 `ORDER_030` 으로 거절한다. 접수한 반품 · 결제 후 취소는 `GET /api/v1/orders/{orderId}/claims` 로 상태와 함께 본다.
+이 조회는 결제 아이디 · 실패 코드 · 멱등 키 · 버전을 내지 않는다. `status` 의 `REFUND_FAILED` · `RESTORATION_FAILED` 는 운영자 처리 대기이며 FE 는
+"처리 중" 계열로 보여 준다(원인 문구는 어드민 몫). 소유 확인과 클레임 읽기는 한 읽기 트랜잭션이고 항목은 IN 한 번으로 읽는다(쿼리 3번).
 
 ### 2-18. 출고 · 배송 완료 반영 internal (order-service, #18 PR-A)
 
