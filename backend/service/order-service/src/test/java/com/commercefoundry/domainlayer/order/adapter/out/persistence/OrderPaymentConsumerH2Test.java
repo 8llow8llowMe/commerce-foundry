@@ -10,12 +10,16 @@ import com.commercefoundry.domainlayer.order.application.port.out.PaymentQueryPo
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.in.OrderPaymentEventUseCase;
+import com.commercefoundry.domainlayer.order.application.mapper.OrderStockRestorationMapperImpl;
 import com.commercefoundry.domainlayer.order.application.service.OrderPaymentEventFacade;
+import com.commercefoundry.domainlayer.order.application.service.PaymentRestorationSweepFacade;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderStockProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentApprovalProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.PaymentStockRestorationProcessor;
 import com.commercefoundry.domainlayer.order.support.OrderPaymentConsumerContract;
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
 import com.commercefoundry.global.messaging.JpaOutboxStore;
 import com.commercefoundry.global.messaging.JpaProcessedEventStore;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
@@ -23,6 +27,7 @@ import com.commercefoundry.messaging.event.TopicNames;
 import com.commercefoundry.messaging.publish.EventPublisher;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -59,9 +64,14 @@ public class OrderPaymentConsumerH2Test extends OrderPaymentConsumerContract {
     @TestConfiguration
     @Import({OrderServiceFeaturesConfig.class, OrderRepositoryAdapter.class, OrderMapperImpl.class, OrderPaymentRepositoryAdapter.class,
         OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, JpaProcessedEventStore.class, JpaOutboxStore.class, OrderEventAdapter.class, OrderPaymentProcessor.class,
-        PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class})
+        PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class, OrderStockRestorationRepositoryAdapter.class,
+        OrderStockRestorationMapperImpl.class, PaymentStockRestorationProcessor.class, PaymentRestorationSweepFacade.class})
     public static class Config {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
+        @Bean OrderPaymentRestorationProperties orderPaymentRestorationProperties() {
+            return new OrderPaymentRestorationProperties(new OrderPaymentRestorationProperties.Sweep(false, Duration.ofMinutes(1), 20, Duration.ofMinutes(5),
+                Duration.ofMinutes(1), Duration.ofHours(1)));
+        }
         @Bean SnowflakeIdGenerator snowflakeIdGenerator() { return new SnowflakeIdGenerator(4, 4); }
         @Bean TopicNames topicNames() { return new TopicNames("commerce-foundry.test", "order"); }
         @Bean PaymentQueryPort paymentQueryPort() { return mock(PaymentQueryPort.class); }

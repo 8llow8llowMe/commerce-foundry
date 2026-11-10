@@ -65,6 +65,7 @@ class ClaimCancellationSchemaUpgradePostgresTest {
                 + "values (?, 101, ?, 'RETURN', 'REQUESTED', 0, now(), now())", ROLLING_CLAIM_ID, UUID.randomUUID());
             run(source, "ddl/claim-cancellation-cleanup.sql");
             run(source, "ddl/claim-admin-decision.sql");
+            run(source, "ddl/order-stock-restoration.sql"); // #582 — 현재 매핑 전체를 validate 하므로 뒤 단계도 적용한다
             // 새 nullable 열을 모르는 이전 앱의 INSERT와 UPDATE도 결정 없는 기존 행을 보존한다.
             jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, version, created_at, updated_at) "
                 + "values (16, 103, ?, 'RETURN', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID());

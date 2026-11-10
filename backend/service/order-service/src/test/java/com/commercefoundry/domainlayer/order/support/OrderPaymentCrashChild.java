@@ -4,10 +4,12 @@ import com.commercefoundry.domainlayer.order.adapter.out.event.OrderEventAdapter
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderRepositoryAdapter;
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderPaymentRepositoryAdapter;
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderStockConfirmationRepositoryAdapter;
+import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderStockRestorationRepositoryAdapter;
 import com.commercefoundry.domainlayer.order.application.command.PaymentApprovalCommand;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapperImpl;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderPaymentMapperImpl;
+import com.commercefoundry.domainlayer.order.application.mapper.OrderStockRestorationMapperImpl;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentQueryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
@@ -19,6 +21,7 @@ import com.commercefoundry.domainlayer.order.application.service.processor.Order
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderStockProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentApprovalProcessor;
 import com.commercefoundry.global.config.OrderServiceFeaturesConfig;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
 import com.commercefoundry.global.messaging.JpaOutboxStore;
 import com.commercefoundry.global.messaging.JpaProcessedEventStore;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
@@ -93,9 +96,14 @@ public final class OrderPaymentCrashChild {
     @EnableJpaRepositories(basePackages = {"com.commercefoundry.domainlayer.order.adapter.out.persistence.repository", "com.commercefoundry.global.messaging"})
     @Import({QuerydslConfigurer.class, OrderServiceFeaturesConfig.class, OrderRepositoryAdapter.class, OrderMapperImpl.class, OrderPaymentRepositoryAdapter.class,
         OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, JpaProcessedEventStore.class, JpaOutboxStore.class,
-        OrderEventAdapter.class, OrderPaymentProcessor.class, PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class})
+        OrderEventAdapter.class, OrderPaymentProcessor.class, PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class,
+        OrderStockRestorationRepositoryAdapter.class, OrderStockRestorationMapperImpl.class})
     public static class Config {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
+        @Bean OrderPaymentRestorationProperties restorationProperties() {
+            return new OrderPaymentRestorationProperties(new OrderPaymentRestorationProperties.Sweep(false, Duration.ofMinutes(1), 20, Duration.ofMinutes(5),
+                Duration.ofMinutes(1), Duration.ofHours(1)));
+        }
         @Bean SnowflakeIdGenerator ids() { return new SnowflakeIdGenerator(5, 5); }
         @Bean TopicNames topics() { return new TopicNames("commerce-foundry.test", "order"); }
         @Bean EventPublisher publisher(JpaOutboxStore store, Clock clock) {

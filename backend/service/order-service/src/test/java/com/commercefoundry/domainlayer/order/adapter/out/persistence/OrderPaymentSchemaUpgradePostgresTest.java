@@ -54,11 +54,37 @@ class OrderPaymentSchemaUpgradePostgresTest {
                     new ClassPathResource("ddl/claim-admin-decision.sql"));
             migration.setSqlScriptEncoding("UTF-8");
             migration.execute(source);
+            // #582 backfill 대상: 복원 대기 NOT_DONE(9) · 기존 C1(2). 복원 끝난 기록(10) · 클레임 없는 기록(1)은 대상이 아니다. 두 번 적용해도 같다.
+            insert(jdbc, 9, "REJECTED_PAYMENT_NOT_DONE", 59L, 69L, "2026-11-02T00:00:00Z");
+            insert(jdbc, 10, "REJECTED_ORDER_CANCELED", 60L, 70L, null);
+            jdbc.update("update orders.order_payment set restored_at = now() where id = 10");
+            var restoration = new ResourceDatabasePopulator(new ClassPathResource("ddl/order-stock-restoration.sql"),
+                new ClassPathResource("ddl/order-stock-restoration.sql"));
+            restoration.setSqlScriptEncoding("UTF-8");
+            restoration.execute(source);
             return database;
         } catch (RuntimeException | Error failure) {
             database.stop();
             throw failure;
         }
+    }
+
+    @Test
+    void restorationBackfillCreatesPendingWorkOnlyForUnrestoredClaims() {
+        var rows = jdbc.queryForList("select id, claim_id, stock_reservation_id, payment_id, origin, status, attempts from orders.order_stock_restoration "
+            + "where id in (1, 2, 9, 10) order by id");
+        assertThat(rows).extracting(row -> row.get("id")).containsExactly(2L, 9L);
+        assertThat(rows).extracting(row -> row.get("claim_id")).containsExactly(62L, 69L);
+        assertThat(rows).extracting(row -> row.get("stock_reservation_id")).containsExactly(52L, 59L);
+        assertThat(rows).allSatisfy(row -> {
+            assertThat(row.get("origin")).isEqualTo("PAYMENT_RECORD");
+            assertThat(row.get("status")).isEqualTo("RESTORE_PENDING");
+            assertThat(row.get("attempts")).isEqualTo(0);
+        });
+        assertThat(jdbc.queryForObject("select count(*) from orders.order_stock_restoration where id in (2, 9) and next_attempt_at is not null", Long.class))
+            .isEqualTo(2);
+        assertThatThrownBy(() -> jdbc.update("update orders.order_stock_restoration set status = 'HELD' where id = 2"))
+            .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
 
     @Test

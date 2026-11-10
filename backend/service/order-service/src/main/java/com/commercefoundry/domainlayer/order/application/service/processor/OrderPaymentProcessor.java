@@ -11,11 +11,14 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderEventPort
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockConfirmationRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment.Result;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
 import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.messaging.consume.NonRetryableEventException;
 import com.commercefoundry.messaging.event.TopicNames;
@@ -48,6 +51,8 @@ public class OrderPaymentProcessor {
     private final TopicNames topicNames;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final Clock clock;
+    private final OrderStockRestorationRepositoryPort orderStockRestorationRepositoryPort;
+    private final OrderPaymentRestorationProperties restorationProperties;
 
     @Transactional(readOnly = true, timeout = 10)
     public boolean isProcessed(UUID eventId) {
@@ -128,6 +133,7 @@ public class OrderPaymentProcessor {
                 throw new NonRetryableEventException("restoration order ownership mismatch");
             }
             requireRestorableOrder(canceled);
+            ensureRestorationWork(existing.get());
             return Optional.of(new StockRestorationTarget(existing.get(), canceled));
         }
         if (existing.isPresent() || processedEventStore.exists(group(), command.eventId())) {
@@ -159,6 +165,8 @@ public class OrderPaymentProcessor {
                 requireRestorableOrder(before);
                 OrderPayment restorable = orderPaymentRepositoryPort.insert(OrderPayment.rejectedAfterConfirmation(nextId(), payment.orderId(), payment.paymentId(),
                     payment.memberId(), payment.amount(), payment.approvedAt(), rejected, confirmation.reservationId(), command.eventId(), nextId()));
+                // 복원 작업도 같은 커밋 — 컨슈머 재시도 예산(DLT)을 넘겨도 스윕이 같은 클레임으로 끝낸다 (#582)
+                ensureRestorationWork(restorable);
                 return Optional.of(new StockRestorationTarget(restorable, before));
             }
             // 다른 결제가 이미 결제 완료한 뒤 취소된 주문 — 확정 선점은 이긴 결제의 것이고 그 취소 클레임이 복원한다. 여기서 복원하면 두 번 는다.
@@ -189,11 +197,46 @@ public class OrderPaymentProcessor {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 10)
     public void completeRestoration(UUID eventId, OrderPayment restored, VerifiedPayment payment) {
-        boolean marked = orderPaymentRepositoryPort.markRestored(restored.id(), clock.instant());
+        boolean marked = markRestored(restored);
         record(eventId);
         // 일반 거절과 같다 — 재전달 때 다시 조회한 결제가 이미 전액 취소면 환불할 돈이 없어 회신하지 않는다.
         if (marked && !payment.fullyCanceled()) {
             orderEventPort.paymentRejected(restored);
+        }
+    }
+
+    /**
+     * 스윕의 복원 뒤 마무리 (#582) — {@link #completeRestoration} 과 같은 규칙이고 inbox 만 남기지 않는다(스윕은 이벤트가 없다).
+     * 결제 기록의 복원 시각을 이번에 채웠고 전액 취소가 아닐 때만 거절 회신 1건 — 컨슈머 재전달과 동시에 마무리해도 조건부 UPDATE 가 하나만 통과시킨다.
+     *
+     * @return 이번 호출이 거절 회신을 쌓았는가
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 10)
+    public boolean completeSweptRestoration(OrderPayment restored, boolean fullyCanceled) {
+        boolean marked = markRestored(restored);
+        if (marked && !fullyCanceled) {
+            orderEventPort.paymentRejected(restored);
+            return true;
+        }
+        return false;
+    }
+
+    /** 결제 기록 · 복원 작업의 복원 완료를 같은 커밋에 둘 다 조건부로 표시한다. 결제 기록을 이번에 채웠으면 true. */
+    private boolean markRestored(OrderPayment restored) {
+        Instant now = clock.instant();
+        boolean marked = orderPaymentRepositoryPort.markRestored(restored.id(), now);
+        orderStockRestorationRepositoryPort.markRestored(restored.restorationClaimId(), now);
+        return marked;
+    }
+
+    /**
+     * 복원 대기 결제 기록의 스윕 작업을 둔다 — 없을 때만(운영 DDL 의 backfill 전후로 남은 기록 포함). 같은 결제의 동시 처리가 함께 넣으면 늦은 쪽이
+     * 유니크 위반으로 롤백되고 Facade 가 새 트랜잭션에서 다시 판정한다.
+     */
+    private void ensureRestorationWork(OrderPayment restorable) {
+        if (!orderStockRestorationRepositoryPort.existsByClaimId(restorable.restorationClaimId())) {
+            orderStockRestorationRepositoryPort.insert(OrderStockRestoration.forPaymentRecord(nextId(), restorable,
+                clock.instant().plus(restorationProperties.sweep().minAge())));
         }
     }
 

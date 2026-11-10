@@ -232,3 +232,14 @@ order:
       max-backoff: 1h
       # 고객 요청이 접수한 클레임을 스케줄러가 집지 않는 시간. paymentCancelClient read-timeout(10초)보다 충분히 커야 한다(30s~1h)
       lease: 2m
+  # 결제 반영 재고 복원 스윕 (OrderPaymentRestorationProperties, #582). 확정 뒤 취소 · 미승인 거절의 복원을 컨슈머 DLT 와 상관없이 같은 클레임으로 끝낸다.
+  # 켜는 순서: 운영 DDL(order_stock_restoration + backfill) → 이 스윕 ON → #591 재대조 ON → 소비 게이트 (deploy-guide.md §4-4).
+  # min-age: 복원 의도가 생긴 뒤 처음 집기까지 — 컨슈머 인라인 복원 · 재전달과 겹치지 않게. initial-backoff 는 복원 read timeout 보다 커야 한다(선점이 lease)
+  payment-restoration:
+    sweep:
+      enabled: false
+      interval: 1m
+      batch-size: 20
+      min-age: 5m
+      initial-backoff: 1m
+      max-backoff: 1h

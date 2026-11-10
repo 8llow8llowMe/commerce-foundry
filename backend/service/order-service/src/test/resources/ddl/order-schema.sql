@@ -621,6 +621,69 @@
     comment on column orders.order_stock_confirmation.stock_reservation_id is
         '확정하려는 재선점 아이디 (외부 FK: product-service stock_reservation.id)';
 
+    create table orders.order_stock_restoration (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        attempts integer not null,
+        claim_id bigint not null,
+        hold_code varchar(30),
+        next_attempt_at timestamp(6) with time zone,
+        order_id bigint not null,
+        origin varchar(30) not null check ((origin in ('PAYMENT_RECORD','ABANDONED_CONFIRMATION','DEFERRED_PROBE'))),
+        payment_id bigint not null,
+        restored_at timestamp(6) with time zone,
+        status varchar(20) not null check ((status in ('PROBE_PENDING','RESTORE_PENDING','RESTORED','NOT_NEEDED','HELD'))),
+        stock_reservation_id bigint not null,
+        primary key (id),
+        constraint uk_order_stock_restoration_stock_reservation_id unique (stock_reservation_id),
+        constraint uk_order_stock_restoration_claim_id unique (claim_id),
+        constraint ck_order_stock_restoration_attempts_non_negative check (attempts >= 0),
+        constraint ck_order_stock_restoration_state_consistent check ((status in ('PROBE_PENDING', 'RESTORE_PENDING') and next_attempt_at is not null and restored_at is null and hold_code is null) or (status = 'RESTORED' and next_attempt_at is null and restored_at is not null and hold_code is null) or (status = 'HELD' and next_attempt_at is null and restored_at is null and hold_code is not null) or (status = 'NOT_NEEDED' and next_attempt_at is null and restored_at is null and hold_code is null))
+    );
+
+    comment on table orders.order_stock_restoration is
+        '결제 반영 재고 복원 작업 (확정 선점 1건당 1행, 스윕이 같은 클레임으로 복원)';
+
+    comment on column orders.order_stock_restoration.id is
+        '복원 작업 아이디 (Snowflake)';
+
+    comment on column orders.order_stock_restoration.created_at is
+        '생성 시각';
+
+    comment on column orders.order_stock_restoration.updated_at is
+        '수정 시각';
+
+    comment on column orders.order_stock_restoration.attempts is
+        '스윕이 선점한 횟수';
+
+    comment on column orders.order_stock_restoration.claim_id is
+        '재고 복원 클레임 아이디 (product stock-restorations 멱등 키, 결제 기록 출처면 order_payment.restoration_claim_id)';
+
+    comment on column orders.order_stock_restoration.hold_code is
+        'HELD 사유 (상품 오류 코드 또는 OWNERSHIP_MISMATCH). HELD 가 아니면 null';
+
+    comment on column orders.order_stock_restoration.next_attempt_at is
+        '스윕이 다음에 집을 시각. 대기 상태에서만 있다';
+
+    comment on column orders.order_stock_restoration.order_id is
+        '주문 아이디 (FK: orders.id)';
+
+    comment on column orders.order_stock_restoration.origin is
+        '복원 의도 출처 (PAYMENT_RECORD / ABANDONED_CONFIRMATION / DEFERRED_PROBE)';
+
+    comment on column orders.order_stock_restoration.payment_id is
+        '결제 아이디 (외부 FK: payment-service payment.id)';
+
+    comment on column orders.order_stock_restoration.restored_at is
+        '재고 복원 200 을 받은 시각. RESTORED 에서만 있다';
+
+    comment on column orders.order_stock_restoration.status is
+        '작업 상태 (PROBE_PENDING / RESTORE_PENDING / RESTORED / NOT_NEEDED / HELD)';
+
+    comment on column orders.order_stock_restoration.stock_reservation_id is
+        '되돌릴 확정 선점 아이디 (외부 FK: product-service stock_reservation.id)';
+
     create table orders.orders (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -891,6 +954,9 @@
 
     create index idx_order_status_history_order_id_id
        on orders.order_status_history (order_id, id);
+
+    create index idx_order_stock_restoration_status_next_id
+       on orders.order_stock_restoration (status, next_attempt_at, id);
 
     create index idx_orders_member_id_id
        on orders.orders (member_id, id);

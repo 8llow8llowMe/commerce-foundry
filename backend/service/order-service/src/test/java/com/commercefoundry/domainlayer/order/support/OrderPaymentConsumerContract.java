@@ -23,7 +23,9 @@ import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentQ
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
 import com.commercefoundry.domainlayer.order.application.service.OrderPaymentEventFacade;
+import com.commercefoundry.domainlayer.order.application.service.PaymentRestorationSweepFacade;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.PaymentStockRestorationProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.*;
 import com.commercefoundry.global.messaging.JpaProcessedEventStore;
 import com.commercefoundry.messaging.consume.MessagingErrorHandlers;
@@ -85,6 +87,8 @@ public abstract class OrderPaymentConsumerContract {
     @Autowired protected JdbcTemplate jdbc;
     @Autowired protected PlatformTransactionManager transactions;
     @Autowired protected PaymentApprovedEventListener listener;
+    @Autowired protected PaymentRestorationSweepFacade sweep;
+    @Autowired protected PaymentStockRestorationProcessor sweepSteps;
     @MockitoSpyBean protected OrderEventAdapter events;
     @MockitoSpyBean protected OrderRepositoryAdapter orderWrites;
 
@@ -972,6 +976,194 @@ public abstract class OrderPaymentConsumerContract {
         assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
         assertThat(replies(command.orderId())).isZero();
         verifyNoInteractions(stock, restorations);
+    }
+
+    // #582 PR-1: 복원 스윕 — 컨슈머가 재시도 예산을 넘긴(DLT) 복원도 같은 클레임으로 끝내고 거절 회신은 한 번이다.
+    @Test
+    void sweepFinishesRestorationLeftByDltWithSameClaimAndRepliesOnce() {
+        PaymentApprovalCommand command = pendingRestoration(new StockReservationException(StockReservationException.Failure.UNKNOWN));
+        OrderPayment pending = payment(command);
+        long reservationId = pending.stockReservationId();
+        doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN)).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+        // 재시도 예산(첫 전달 + 재시도 3회)이 모두 503 — 이 레코드는 DLT 로 갔고 다시 전달되지 않는다
+        for (int retry = 0; retry < 3; retry++) {
+            assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(OrderException.class);
+        }
+        assertThat(restorationStatus(pending)).isEqualTo("RESTORE_PENDING");
+        reset(restorations);
+
+        sweep.sweepDueRestorations(); // min-age 전 — 집지 않는다
+        verify(restorations, never()).restoreCancellation(eq(pending.restorationClaimId()), anyLong(), any());
+        makeDue(pending);
+        sweep.sweepDueRestorations();
+
+        verify(restorations, times(1)).restoreCancellation(pending.restorationClaimId(), reservationId, skus());
+        assertSweptOnce(command, 1);
+        makeDue(pending); // RESTORED 행은 다음 시각을 바꿔도 대상이 아니다
+        sweep.sweepDueRestorations();
+        verify(restorations, times(1)).restoreCancellation(pending.restorationClaimId(), reservationId, skus());
+        assertSweptOnce(command, 1);
+    }
+
+    @Test
+    void redeliveryFinishingDuringSweepLeavesSingleReply() {
+        PaymentApprovalCommand command = pendingRestoration(new StockReservationException(StockReservationException.Failure.UNKNOWN));
+        OrderPayment pending = payment(command);
+        AtomicInteger calls = new AtomicInteger();
+        doAnswer(invocation -> {
+            if (calls.incrementAndGet() == 1) {
+                facade.approve(command); // 스윕의 복원 200 과 마무리 사이에 컨슈머 재전달이 먼저 마무리한다
+            }
+            return null;
+        }).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+        makeDue(pending);
+
+        sweep.sweepDueRestorations();
+
+        assertThat(calls).hasValue(2);
+        assertSweptOnce(command, 1);
+        assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
+        assertThat(processor.completeSweptRestoration(pending, false)).isFalse(); // 늦은 마무리는 회신을 다시 쌓지 않는다
+        assertSweptOnce(command, 1);
+    }
+
+    @Test
+    void sweptRestorationOfFullyCanceledPaymentDoesNotReply() {
+        PaymentApprovalCommand command = pendingRestoration(new StockReservationException(StockReservationException.Failure.UNKNOWN));
+        OrderPayment pending = payment(command);
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(
+            new PaymentQueryResult(command.paymentId(), command.orderId(), command.memberId(), "CANCELED", command.amount(), NOW, "CARD")));
+        makeDue(pending);
+
+        sweep.sweepDueRestorations();
+
+        verify(restorations).restoreCancellation(pending.restorationClaimId(), pending.stockReservationId(), skus());
+        assertSweptOnce(command, 0);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"NOT_CONFIRMED,PRODUCT_027", "QUANTITY_EXCEEDED,PRODUCT_028"})
+    void permanentRestorationRejectionIsHeldAndNotCalledAgain(StockReservationException.Failure failure, String holdCode) {
+        PaymentApprovalCommand command = pendingRestoration(new StockReservationException(failure));
+        OrderPayment pending = payment(command);
+        doThrow(new StockReservationException(failure)).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+        makeDue(pending);
+
+        sweep.sweepDueRestorations();
+        assertThat(restorationStatus(pending)).isEqualTo("HELD");
+        assertThat(jdbc.queryForObject("select hold_code from orders.order_stock_restoration where claim_id=?", String.class, pending.restorationClaimId()))
+            .isEqualTo(holdCode);
+        sweep.sweepDueRestorations(); // 다음 tick — HELD 는 집지 않는다(028 무한 재생 금지)
+
+        verify(restorations, times(1)).restoreCancellation(pending.restorationClaimId(), pending.stockReservationId(), skus());
+        assertThat(payment(command).restoredAt()).isNull();
+        assertThat(rejectedReplies(command.orderId())).isZero();
+    }
+
+    @Test
+    void revalidationMismatchIsHeldWithoutRemoteRestoration() {
+        PaymentApprovalCommand command = pendingRestoration(new StockReservationException(StockReservationException.Failure.UNKNOWN));
+        OrderPayment pending = payment(command);
+        jdbc.update("update orders.orders set member_id=8 where id=?", command.orderId());
+        makeDue(pending);
+
+        sweep.sweepDueRestorations();
+
+        assertThat(restorationStatus(pending)).isEqualTo("HELD");
+        assertThat(jdbc.queryForObject("select hold_code from orders.order_stock_restoration where claim_id=?", String.class, pending.restorationClaimId()))
+            .isEqualTo("OWNERSHIP_MISMATCH");
+        verify(restorations, never()).restoreCancellation(eq(pending.restorationClaimId()), anyLong(), any());
+        assertThat(rejectedReplies(command.orderId())).isZero();
+    }
+
+    @Test
+    void finishFailureAfterRestorationIsRetriedNextTickWithOneReply() {
+        PaymentApprovalCommand command = pendingRestoration(new StockReservationException(StockReservationException.Failure.UNKNOWN));
+        OrderPayment pending = payment(command);
+        doThrow(new IllegalStateException("outbox down")).doCallRealMethod().when(events).paymentRejected(any());
+        makeDue(pending);
+
+        sweep.sweepDueRestorations(); // 복원 200 뒤 마무리 실패 — 마무리 트랜잭션은 롤백, 작업은 backoff 뒤 다시
+        assertThat(restorationStatus(pending)).isEqualTo("RESTORE_PENDING");
+        assertThat(payment(command).restoredAt()).isNull();
+        assertThat(rejectedReplies(command.orderId())).isZero();
+        makeDue(pending);
+        sweep.sweepDueRestorations();
+
+        verify(restorations, times(2)).restoreCancellation(pending.restorationClaimId(), pending.stockReservationId(), skus());
+        assertSweptOnce(command, 1);
+        assertThat(jdbc.queryForObject("select attempts from orders.order_stock_restoration where claim_id=?", Integer.class,
+            pending.restorationClaimId())).isEqualTo(2);
+    }
+
+    @Test
+    void concurrentSweepTicksRestoreOnce() throws Exception {
+        PaymentApprovalCommand command = pendingRestoration(new StockReservationException(StockReservationException.Failure.UNKNOWN));
+        OrderPayment pending = payment(command);
+        makeDue(pending);
+        var snapshot = sweepSteps.findDueTargets().stream().filter(row -> row.claimId() == pending.restorationClaimId()).findFirst().orElseThrow();
+        assertThat(sweepSteps.claim(snapshot)).isPresent();
+        assertThat(sweepSteps.claim(snapshot)).isEmpty(); // 같은 스냅숏으로 늦게 선점한 쪽은 진다
+
+        makeDue(pending);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> { awaitStart(start); sweep.sweepDueRestorations(); });
+            var second = executor.submit(() -> { awaitStart(start); sweep.sweepDueRestorations(); });
+            start.countDown();
+            first.get(30, TimeUnit.SECONDS);
+            second.get(30, TimeUnit.SECONDS);
+        }
+
+        verify(restorations, times(1)).restoreCancellation(pending.restorationClaimId(), pending.stockReservationId(), skus());
+        assertSweptOnce(command, 1);
+    }
+
+    /** 확정 뒤 취소가 이긴 결제의 복원이 첫 전달에서 {@code failure} 로 실패해 작업이 RESTORE_PENDING 으로 남는다. */
+    private PaymentApprovalCommand pendingRestoration(StockReservationException failure) {
+        PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservationId = order(command).stockReservationId();
+        cancel(command);
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+        doThrow(failure).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOfAny(OrderException.class, NonRetryableEventException.class);
+        OrderPayment pending = payment(command);
+        assertThat(pending.awaitsRestoration()).isTrue();
+        assertThat(restorationStatus(pending)).isEqualTo("RESTORE_PENDING");
+        reset(restorations);
+        return command;
+    }
+
+    private String restorationStatus(OrderPayment record) {
+        return jdbc.queryForObject("select status from orders.order_stock_restoration where claim_id=? and stock_reservation_id=? and origin='PAYMENT_RECORD'",
+            String.class, record.restorationClaimId(), record.stockReservationId());
+    }
+
+    private void makeDue(OrderPayment record) {
+        jdbc.update("update orders.order_stock_restoration set next_attempt_at=? where claim_id=? and status='RESTORE_PENDING'",
+            java.sql.Timestamp.from(NOW.minusSeconds(1)), record.restorationClaimId());
+    }
+
+    /** 스윕 마무리: 결제 기록 · 작업 복원 완료, 거절 회신 {@code expectedReplies} 건. */
+    private void assertSweptOnce(PaymentApprovalCommand command, int expectedReplies) {
+        OrderPayment record = payment(command);
+        assertThat(record.restoredAt()).isNotNull();
+        assertThat(restorationStatus(record)).isEqualTo("RESTORED");
+        assertThat(rejectedReplies(command.orderId())).isEqualTo(expectedReplies);
+    }
+
+    private long rejectedReplies(long orderId) {
+        return jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=? and event_type='order-payment-rejected'", Long.class,
+            Long.toString(orderId));
+    }
+
+    private static void awaitStart(CountDownLatch start) {
+        try {
+            assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
     }
 
     private void cancel(PaymentApprovalCommand command) {

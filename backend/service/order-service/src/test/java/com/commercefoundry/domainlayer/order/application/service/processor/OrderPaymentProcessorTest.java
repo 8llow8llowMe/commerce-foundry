@@ -20,11 +20,14 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderEventPort
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockConfirmationRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
 import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.messaging.event.TopicNames;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
@@ -42,7 +45,9 @@ class OrderPaymentProcessorTest {
     private final OrderEventPort events = mock(OrderEventPort.class);
     private final ProcessedEventStore inbox = mock(ProcessedEventStore.class);
     private final OrderPaymentProcessor processor = new OrderPaymentProcessor(orders, payments, evidence, events, inbox,
-        new TopicNames("commerce-foundry.test", "order"), new SnowflakeIdGenerator(1, 1), Clock.fixed(NOW, ZoneOffset.UTC));
+        new TopicNames("commerce-foundry.test", "order"), new SnowflakeIdGenerator(1, 1), Clock.fixed(NOW, ZoneOffset.UTC),
+        mock(OrderStockRestorationRepositoryPort.class), new OrderPaymentRestorationProperties(new OrderPaymentRestorationProperties.Sweep(false,
+            Duration.ofMinutes(1), 20, Duration.ofMinutes(5), Duration.ofMinutes(1), Duration.ofHours(1))));
     private final PaymentApprovalCommand command = new PaymentApprovalCommand(UUID.randomUUID(), 10, 20, 30, krw(4000), NOW, "CARD");
     private final VerifiedPayment done = new VerifiedPayment(10, 20, 30, krw(4000), NOW, "DONE");
     private final OrderPayment restorable = OrderPayment.canceledAfterConfirmation(1, 20, 10, 30, krw(4000), NOW, 77, command.eventId(), 555);

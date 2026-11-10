@@ -678,15 +678,58 @@ claimId로 재개한다. 회신은 3의 한 번뿐이다. 재전달 때 결제�
 
 **DLT 는 거절(환불) 회신 미발행이다.** 위 프로브 장애 초과 · 복원 `PRODUCT_027` · `PRODUCT_028` · `PRODUCT_029` · 404 `PRODUCT_003` · 확정 선점 미기록이 DLT 로 가면
 payment 는 거절 회신을 받지 못해 환불 대상으로 넘어가지 않는다. 재처리 담당은 원인을 고친 뒤 재전송하고 **재고 복원(`restored_at`)과 거절 회신 · 환불까지** 확인한다.
-DLT · 복원 대기 행의 자동 재처리 스윕은 #582 이고, **소비 게이트를 열기 전에 닫아야 한다.** 그 전까지 아래 쿼리로 점검한다.
+DLT · 복원 대기 행의 자동 재처리 스윕은 #582 이고, **소비 게이트를 열기 전에 닫아야 한다.** PR-1(아래 "복원 스윕")이 복원 대기 결제 기록을 닫는다 —
+버려진 확정 선점(확정 선점 미기록 DLT)은 PR-2, 프로브 장애 초과는 PR-3 이 닫는다. 점검은 아래 쿼리로 한다.
+
+**복원 스윕 (#582 PR-1)** — 복원 의도는 `orders.order_stock_restoration`(확정 선점 · 클레임당 1행) 작업 행으로도 남는다. 위 1의 `order_payment` INSERT 와
+**같은 커밋**(origin `PAYMENT_RECORD`, `RESTORE_PENDING`, `next_attempt_at = now + min-age`)이고, 3의 마무리도 같은 커밋에서 작업 행을 조건부로 `RESTORED` 로 바꾼다.
+스윕(`OrderPaymentRestorationSweepScheduler` → `PaymentRestorationSweepFacade`, `order.payment-restoration.sweep.*`, 기본 OFF)은 Kafka 재시도 예산과 상관없이
+같은 claimId 로 끝낸다. ShedLock 없이 행 선점으로 인스턴스 중복을 막는다(`ClaimCancellationRetryScheduler` 와 같다). inbox 는 쓰지 않는다.
+
+1. 대상 — `status = RESTORE_PENDING and next_attempt_at <= now` 를 `(next_attempt_at, id)` 순으로 batch-size 개(`idx_order_stock_restoration_status_next_id`).
+2. 짧은 tx 선점 — `where id = ? and status = ? and next_attempt_at = ?` 조건부 UPDATE 로 attempts+1 · `next_attempt_at = now + min(max-backoff, initial-backoff × 2^(attempts-1))`.
+   0행이면 건너뛴다. 선점이 곧 lease 라 중간에 끊긴 행은 backoff 뒤 다시 집힌다.
+3. 읽기 tx 재검증 — 결제 기록이 같은 주문 · 선점 · claim 의 복원 대기, 주문 존재 · 회원 · 금액 일치, 같은 주문 PAID 기록 없음, 주문이 결제 대기 · 만료 · 취소.
+   어긋나면 `HELD(OWNERSHIP_MISMATCH)` + ERROR. 결제 기록이 이미 `restored_at` 을 가졌으면 작업만 `RESTORED`.
+4. tx 밖 복원 — 컨슈머와 같은 인자. `PRODUCT_027` · `PRODUCT_028` · `PRODUCT_029` · 404 `PRODUCT_003` → `HELD(hold_code = 그 코드)` + ERROR, 다시 집지 않는다
+   (028 무한 재생 금지). `PRODUCT_026` · `PRODUCT_030` · `PRODUCT_031` · 5xx · 타임아웃 → 그대로 두고 다음 backoff 에 재시도.
+5. tx 밖 결제 재조회 — 전액 취소(CANCELED) 여부. 실패하면 이번 실행은 넘긴다(다음 시각에 같은 claim 으로 다시 복원 → 200).
+6. REQUIRES_NEW 마무리 — 결제 기록 `restored_at` 조건부 UPDATE + 작업 행 `RESTORED`. 결제 기록이 1행 영향이고 전액 취소가 아닐 때만 저장된 사유로
+   `order-payment-rejected` 1건. 컨슈머 재전달과 동시에 마무리해도 조건부 UPDATE 가 회신을 하나로 묶는다. 실패하면 롤백되고 backoff 뒤 다시 한다.
+
+**`HELD` 는 그 결제의 거절 회신(환불 트리거)도 멈춘다** — 확정 뒤 취소(C1) 건이면 돈은 받았고 주문은 취소됐는데 환불이 시작되지 않는다. 지금은 HELD 지표 · 경보가 없다
+(ERROR 로그 `payment restoration ... holding` 뿐, 지표는 #582 후속 · 경보 연결은 #477). 그래서 **소비 게이트를 연 뒤에는 운영자가 아래 HELD 목록을 매일 확인한다** — 경보가 연결될 때까지
+운영 결제 게이트를 여는 조건이다(`deploy-guide.md` §4-4). 결제 재조회가 계속 비는(payment 기록 없음) 행은 HELD 로 가지 않고 backoff 1h 로 재시도만 하므로
+`attempts` 상위 행도 함께 본다.
+
+`HELD` 해제는 당분간 운영 SQL 이다(어드민 화면 없음). 원인(028 이면 아래 진단)을 확인한 뒤에만 되돌린다:
+
+```sql
+-- HELD 작업 목록
+select id, order_id, payment_id, stock_reservation_id, claim_id, hold_code, attempts, updated_at
+from orders.order_stock_restoration where status = 'HELD' order by updated_at;
+
+-- 오래 재시도 중인 작업(결제 재조회 실패 반복 등) — attempts 10 이상
+select id, order_id, payment_id, attempts, next_attempt_at, created_at
+from orders.order_stock_restoration where status = 'RESTORE_PENDING' and attempts >= 10 order by attempts desc;
+
+-- 원인 해결 뒤 다시 스윕 대상으로 (한 건씩)
+update orders.order_stock_restoration
+set status = 'RESTORE_PENDING', hold_code = null, next_attempt_at = now(), updated_at = now()
+where id = :id and status = 'HELD';
+```
 
 payment의 #591 재대조는 order 원천 `order_payment` 결과가 이미 존재하지만 회신 전달이 유실·DLT로 끝난 경우에만 payment 기록을 복구한다. 승인 소비가 DLT로 가 원천 결과가 없거나 재고 복원 처리가 멈춘 경우를 해결하지 않으며, 이 경로는 #582 복원과 재전달이 담당한다. 원천 거절 기록만으로 복원 완료를 추정하지 않고 실제 자동 PG 취소는 #579가 실행 직전 상태·잔액을 다시 검증한다.
 
 ```sql
--- 복원 대기(awaitsRestoration) 행 수 · 가장 오래된 나이
+-- 복원 대기(awaitsRestoration) 행 수 · 가장 오래된 나이 — 확정 뒤 취소(C1)와 미승인 거절(C2b) 모두
 select count(*), now() - min(created_at) as oldest_age
 from orders.order_payment
-where result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null and restoration_claim_id is not null and restored_at is null;
+where result in ('REJECTED_ORDER_CANCELED', 'REJECTED_PAYMENT_NOT_DONE')
+  and stock_reservation_id is not null and restoration_claim_id is not null and restored_at is null;
+
+-- 스윕 작업 상태별 수 · 가장 오래된 행 (#582). 위 복원 대기 수와 RESTORE_PENDING + HELD 수가 같아야 한다
+select status, count(*), now() - min(created_at) as oldest_age from orders.order_stock_restoration group by status;
 
 -- B2 형식 행(확정 선점은 있는데 복원 클레임이 없음) — PR-C1 은 복원하지 않는다. 0 이어야 한다
 select count(*) from orders.order_payment
@@ -697,7 +740,8 @@ where result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null an
 남은 수량을 확인하고, 책임자와 승인된 보정 경로를 협의한다. 실제 복원 증거를 확인한 뒤 재처리/종결을 결정한다. 수량 10 중 3만 복원돼도 10 요청은 028이므로
 028만 무한 재전송하거나 근거 없이 `restored_at`을 채우지 않는다. 오류에서는 `restored_at` · inbox · 회신 outbox를 쓰지 않는다.
 
-이 fence는 **product 호출 전에 order 의도를 남긴 복원 경로**에 한정된다. 기존 복원 호출자는 `OrderStockProcessor.restoreCanceledPayment` 하나다.
+이 fence는 **product 호출 전에 order 의도를 남긴 복원 경로**에 한정된다. 결제 복원 호출자는 컨슈머(`OrderStockProcessor.restoreCanceledPayment`)와
+#582 스윕(`PaymentStockRestorationProcessor.restore`) 둘이고, 둘 다 `order_payment` 의 같은 claimId · 선점으로만 부른다.
 order 기록 없는 외부 복원은 기존 confirm 200으로 구별하지 못한다(product는 복원 뒤에도 CONFIRMED). 외부 복원까지 원자적으로 보호하려면 별도 소유권/조건부 확정 계약이 필요하다.
 구 consumer는 fence 규약을 모르므로 소비 OFF · 기존 consumer drain 후 모든 order 인스턴스를 적용한다. C2a는 스키마 변경이 없으며 게이트 활성화 승인이 아니다.
 

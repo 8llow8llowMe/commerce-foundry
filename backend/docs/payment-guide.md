@@ -496,6 +496,8 @@ ANALYZE 후 실제 Hibernate 생성 SQL·동일 바인딩의 EXPLAIN(ANALYZE,BUF
 
 `payment.order-result.reconciliation.enabled`는 기본 **false**다. 메시징/listener/운영 결제 게이트와 독립이며 이번 변경으로 어느 게이트도 열지 않는다.
 DLT 또는 회신 유실 뒤 기존 `OrderPaymentResultQueryPort` 원천으로 결과를 재대조한다. 원천에 결과가 없거나 실패하면 다음 cycle에서 재시도하며 운영자가 수동으로 원인을 확인할 수 있다.
+order 쪽에서 재고 복원이 남아 거절 회신이 아직 없는 결과(복원 대기 결제 기록)는 order 의 복원 스윕(#582, `order-flow-guide.md` §3-6 "복원 스윕")이 같은 클레임으로 복원한 뒤
+회신한다 — 켜는 순서는 스윕 → 이 재대조다(`deploy-guide.md` §4-4).
 
 | lane | DB 후보 |
 |---|---|
