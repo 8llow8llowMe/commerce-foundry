@@ -101,6 +101,8 @@ public abstract class ClaimCancellationPersistenceContract {
     @Test
     void staleAttemptFailureCannotRewritePersistedNewLeaseOrRefundPhase() {
         Claim source = insert(newCancellation(paidOrder(), NOW));
+        assertThatThrownBy(() -> claims.update(source)).isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> claims.findByIdForUpdate(source.id())).isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
         Claim held = update(source.holdUntil(NOW.plusSeconds(300)));
         cancellationProcessor.recordAttemptFailure(source);
         assertThat(claims.findByOrderIdAndRequestKey(source.orderId(), source.requestKey()).orElseThrow()).isEqualTo(held);

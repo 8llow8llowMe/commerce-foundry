@@ -93,6 +93,8 @@ class CancellationRefundRecoveryPostgresTest {
 
     @BeforeEach
     void resetFaults() {
+        ClaimRepositoryAdapter adapterSpy = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(adapter);
+        OrderCancellationProcessor processorSpy = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(processor);
         REQUESTS.clear(); SUCCEEDED.clear(); RESTORES.set(0); DROP.set(false);
         entered = new CountDownLatch(0); release = new CountDownLatch(0);
         doAnswer(call -> {
@@ -119,8 +121,8 @@ class CancellationRefundRecoveryPostgresTest {
                 });
             }
             return result;
-        }).when(adapter).update(any());
-        doAnswer(call -> { beforeFallback.run(); return call.callRealMethod(); }).when(processor).recordConfirmedRefundWithLock(any());
+        }).when(adapterSpy).update(any());
+        doAnswer(call -> { beforeFallback.run(); return call.callRealMethod(); }).when(processorSpy).recordConfirmedRefundWithLock(any());
     }
 
     private TransactionTemplate tx() { return new TransactionTemplate(transactions); }
@@ -294,6 +296,8 @@ class CancellationRefundRecoveryPostgresTest {
     @Test
     void lockedRefreshSeesLatestVersionAndRejectsChangedFingerprint() throws Exception {
         Claim source = seed();
+        assertThatThrownBy(() -> claims.update(source)).isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> claims.findByIdForUpdate(source.id())).isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
         tx().executeWithoutResult(status -> {
             entityManager.find(com.commercefoundry.domainlayer.order.adapter.out.persistence.entity.ClaimEntity.class, source.id());
             try { THREADS.submit(() -> tx().executeWithoutResult(other -> claims.update(source.holdUntil(Instant.now())))).get(10, TimeUnit.SECONDS); }
