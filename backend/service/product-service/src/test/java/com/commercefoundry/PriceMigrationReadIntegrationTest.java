@@ -72,13 +72,22 @@ class PriceMigrationReadIntegrationTest {
     void prepare() {
         jdbc = new JdbcTemplate(dataSource);
         statistics = emf.unwrap(SessionFactory.class).getStatistics();
+        boolean h2 = isH2();
+        var protectedBefore = protectedStructure();
         // 오직 테스트 전용 DB에서 손상 원천을 주입한다. 운영 DDL·엔티티는 바꾸지 않는다.
         // unrelated CHECK·SKU 옵션 UNIQUE·PK·NOT NULL은 보존한다.
         for (Lane lane : Lane.values()) {
             String table = table(lane);
-            var checks = jdbc.queryForList("select tc.constraint_name, cc.check_clause from information_schema.table_constraints tc "
-                + "join information_schema.check_constraints cc on tc.constraint_schema=cc.constraint_schema and tc.constraint_name=cc.constraint_name "
-                + "where tc.table_schema='product' and tc.table_name=? and tc.constraint_type='CHECK'", table);
+            // PostgreSQL information_schema는 NOT NULL도 합성 CHECK로 노출한다.
+            // 실제 DROP 가능한 pg_constraint의 CHECK만 선택해 NOT NULL을 완화 대상으로 오인하지 않는다.
+            var checks = h2
+                ? jdbc.queryForList("select tc.constraint_name, cc.check_clause from information_schema.table_constraints tc "
+                    + "join information_schema.check_constraints cc on tc.constraint_schema=cc.constraint_schema and tc.constraint_name=cc.constraint_name "
+                    + "where tc.table_schema='product' and tc.table_name=? and tc.constraint_type='CHECK'", table)
+                : jdbc.queryForList("select c.conname as constraint_name, pg_catalog.pg_get_constraintdef(c.oid) as check_clause "
+                    + "from pg_catalog.pg_constraint c join pg_catalog.pg_class t on t.oid=c.conrelid "
+                    + "join pg_catalog.pg_namespace n on n.oid=t.relnamespace "
+                    + "where n.nspname='product' and t.relname=? and c.contype='c'", table);
             for (Map<String, Object> check : checks) {
                 String clause = check.get("check_clause").toString().toLowerCase(Locale.ROOT);
                 if (clause.contains("price_") || clause.contains("sale_status") && !clause.contains("deleted_at")
@@ -92,23 +101,42 @@ class PriceMigrationReadIntegrationTest {
                 for (String name : names) drop(table, name);
             }
         }
-        try (var connection = dataSource.getConnection()) {
-            if (connection.getMetaData().getDatabaseProductName().equals("H2")) {
-                // H2는 enum을 자체 타입으로 생성한다. 손상 관측 fixture에서만 문자열 컬럼으로 완화한다.
-                for (Lane lane : Lane.values()) {
-                    String amountCurrency = lane == Lane.PRODUCT || lane == Lane.PRODUCT_PRICE ? "sale_price_currency" : "additional_price_currency";
-                    jdbc.execute("alter table product." + table(lane) + " alter column " + amountCurrency + " varchar(3)");
-                    if (lane == Lane.PRODUCT || lane == Lane.PRODUCT_PRICE) {
-                        jdbc.execute("alter table product." + table(lane) + " alter column list_price_currency varchar(3)");
-                    }
-                    if (lane == Lane.PRODUCT || lane == Lane.SKU) {
-                        jdbc.execute("alter table product." + table(lane) + " alter column sale_status varchar(20)");
-                    }
+        if (h2) {
+            // H2는 enum을 자체 타입으로 생성한다. 손상 관측 fixture에서만 문자열 컬럼으로 완화한다.
+            for (Lane lane : Lane.values()) {
+                String amountCurrency = lane == Lane.PRODUCT || lane == Lane.PRODUCT_PRICE ? "sale_price_currency" : "additional_price_currency";
+                jdbc.execute("alter table product." + table(lane) + " alter column " + amountCurrency + " varchar(3)");
+                if (lane == Lane.PRODUCT || lane == Lane.PRODUCT_PRICE) {
+                    jdbc.execute("alter table product." + table(lane) + " alter column list_price_currency varchar(3)");
+                }
+                if (lane == Lane.PRODUCT || lane == Lane.SKU) {
+                    jdbc.execute("alter table product." + table(lane) + " alter column sale_status varchar(20)");
                 }
             }
+        }
+        assertThat(protectedStructure()).as("손상 fixture 준비가 NOT NULL·PK·SKU 옵션 UNIQUE를 보존한다").isEqualTo(protectedBefore);
+    }
+
+    private boolean isH2() {
+        try (var connection = dataSource.getConnection()) {
+            return connection.getMetaData().getDatabaseProductName().equals("H2");
         } catch (java.sql.SQLException failure) {
             throw new AssertionError("테스트 DB 메타데이터 확인 실패", failure);
         }
+    }
+
+    private List<List<Map<String, Object>>> protectedStructure() {
+        var columns = jdbc.queryForList("select table_name,column_name,is_nullable from information_schema.columns "
+            + "where table_schema='product' and table_name in ('product','sku','product_price','sku_price') order by table_name,ordinal_position");
+        assertThat(columns).filteredOn(column -> "id".equals(column.get("column_name")))
+            .hasSize(4).allSatisfy(column -> assertThat(column.get("is_nullable")).isEqualTo("NO"));
+        var constraints = jdbc.queryForList("select table_name,constraint_name,constraint_type from information_schema.table_constraints "
+            + "where table_schema='product' and table_name in ('product','sku','product_price','sku_price') "
+            + "and (constraint_type='PRIMARY KEY' or (table_name='sku' and constraint_type='UNIQUE')) order by table_name,constraint_name");
+        assertThat(constraints).filteredOn(constraint -> "PRIMARY KEY".equals(constraint.get("constraint_type"))).hasSize(4);
+        assertThat(constraints).filteredOn(constraint -> "UNIQUE".equals(constraint.get("constraint_type")))
+            .singleElement().satisfies(constraint -> assertThat(constraint.get("constraint_name")).isEqualTo("uk_sku_product_id_option_value_key"));
+        return List.of(columns, constraints);
     }
 
     private void drop(String table, String name) {
