@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.ClaimAdminRecoveryPolicy;
 import com.commercefoundry.global.properties.OrderCancellationProperties;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 @RequiredArgsConstructor
 public class ClaimAdminRecoveryProcessor {
+
+    /** payment 가 같은 claimId 의 취소를 받는 기간 — 처음 PENDING 뒤 14일이 지나면 영구 {@code PAYMENT_018} 이다. order 설정의 재시도 상한도 이 값에 맞춘다. */
+    static final Duration REFUND_KEY_VALIDITY = Duration.ofDays(14);
 
     private final ClaimRepositoryPort claimRepositoryPort;
     private final OrderCancellationProperties properties;
@@ -53,7 +57,7 @@ public class ClaimAdminRecoveryProcessor {
         Instant now = clock.instant();
         requireRetryable(claim, now);
         Instant until = now.plus(properties.retry().lease());
-        Claim prepared = claim.status().isFailed() ? claim.reopen(until) : claim.holdUntil(until);
+        Claim prepared = claim.status().isFailed() ? claim.reopen(until, startAttempt(claim, now)) : claim.holdUntil(until);
         Claim saved;
         try {
             saved = claimRepositoryPort.update(prepared);
@@ -78,17 +82,48 @@ public class ClaimAdminRecoveryProcessor {
         }
     }
 
-    private static void requireRetryable(Claim claim, Instant now) {
+    private void requireRetryable(Claim claim, Instant now) {
         if (claim.type() != Claim.Type.CANCELLATION) {
             throw new OrderException(OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
         }
         if (claim.status().isAwaitingAttempt() && claim.nextAttemptAt() != null && claim.nextAttemptAt().isAfter(now)) {
             throw new OrderException(OrderErrorCode.CLAIM_AUTO_PROCESSING);
         }
+        // 결제사가 거절한 환불은 다시 보내도 같은 거절(PAYMENT_016)이고 진짜 사유만 지워진다 — 대표 관리자의 수동 확정으로 넘긴다
+        if (claim.isRefundRejected()) {
+            throw new OrderException(OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
+        }
+        // 결제 취소 키가 끝난 뒤에는 payment 가 018 로 막는다 — 자동 처리 중으로 묻히지 않게 다시 시도부터 받지 않는다
+        if (isRefundStage(claim) && !now.plus(properties.retry().lease()).isBefore(refundDeadline(claim))) {
+            throw new OrderException(OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
+        }
         try {
             ClaimAdminRecoveryPolicy.requireRetry(claim, now);
         } catch (IllegalStateException exception) {
             throw new OrderException(OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
         }
+    }
+
+    /**
+     * 다시 연 단계의 시작 횟수. 환불 단계는 남은 자동 재시도({@code maxAttempts − n}회, 회당 최대 {@code maxBackoff})가 결제 취소 키 기한 안에 끝나도록
+     * {@code n = maxAttempts − ⌊남은 기간 / maxBackoff⌋} 로 둔다 — order 설정의 {@code maxBackoff × maxAttempts ≤ 14일} 불변식을 다시 연 뒤에도 지킨다.
+     * 재고 복원 단계는 product 에 기한이 없어 0 이다.
+     */
+    private int startAttempt(Claim claim, Instant now) {
+        if (!isRefundStage(claim)) {
+            return 0;
+        }
+        OrderCancellationProperties.Retry retry = properties.retry();
+        long fits = Duration.between(now, refundDeadline(claim)).dividedBy(retry.maxBackoff());
+        return (int) Math.max(0, Math.min(retry.maxAttempts(), retry.maxAttempts() - fits));
+    }
+
+    private static boolean isRefundStage(Claim claim) {
+        return claim.status() == Claim.Status.REQUESTED || claim.status() == Claim.Status.REFUND_FAILED;
+    }
+
+    /** 접수 시각 + 결제 취소 키 유효 기간({@code payment-guide.md} — PENDING 14일 뒤 {@code PAYMENT_018}). */
+    private static Instant refundDeadline(Claim claim) {
+        return claim.requestedAt().plus(REFUND_KEY_VALIDITY);
     }
 }

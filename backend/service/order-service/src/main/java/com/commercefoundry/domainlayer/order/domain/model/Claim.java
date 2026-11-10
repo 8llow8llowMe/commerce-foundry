@@ -234,18 +234,30 @@ public record Claim(
     }
 
     /**
-     * 운영자 재시도로 종결 실패를 그 단계의 대기 상태로 다시 연다 (#17 A2b) — REFUND_FAILED → REQUESTED, RESTORATION_FAILED → REFUNDED. 횟수는 0, 실패 코드는
-     * 지우고 다음 시각을 {@code until}(선점 lease)로 둔다. 같은 클레임 아이디 · 저장된 결제 · 금액으로 다시 보내므로 원격은 멱등이다. 재시도 자격은
-     * {@link ClaimAdminRecoveryPolicy#requireRetry} 가 먼저 본다.
+     * 운영자 재시도로 종결 실패를 그 단계의 대기 상태로 다시 연다 (#17 A2b) — REFUND_FAILED({@link #REFUND_UNCONFIRMED}) → REQUESTED, RESTORATION_FAILED → REFUNDED.
+     * 실패 코드는 지우고 다음 시각을 {@code until}(선점 lease)로 둔다. 같은 클레임 아이디 · 저장된 결제 · 금액으로 다시 보내므로 원격은 멱등이다.
+     *
+     * <p>결과 미확인이 아닌 환불 실패(결제사의 종결 거절)는 다시 열지 않는다 — payment 는 같은 claimId 의 거절 원장 때문에 늘 {@code PAYMENT_016} 을 돌려주므로
+     * 다시 보내도 진짜 거절 사유 코드만 지워진다. 그 건은 대표 관리자의 수동 확정(A3) 몫이다. 재시도 자격은 {@link ClaimAdminRecoveryPolicy#requireRetry} 가 먼저 본다.
+     *
+     * @param attemptCount 다시 연 단계의 시작 횟수 — 결제 취소 키의 유효 기간 안에서 자동 재시도가 끝나도록 부르는 쪽이 정한다(0 이상)
      */
-    public Claim reopen(Instant until) {
+    public Claim reopen(Instant until, int attemptCount) {
         Objects.requireNonNull(until, "until");
         requireCancellation();
-        if (isNew() || !status.isFailed()) {
+        if (isNew() || !status.isFailed() || attemptCount < 0) {
             throw new IllegalStateException("다시 열기는 저장된 종결 실패 클레임만 합니다: status=" + status);
         }
+        if (status == Status.REFUND_FAILED && !REFUND_UNCONFIRMED.equals(failureCode)) {
+            throw new IllegalStateException("결제사가 거절한 환불은 다시 열지 않습니다: failureCode=" + failureCode);
+        }
         Status reopened = status == Status.REFUND_FAILED ? Status.REQUESTED : Status.REFUNDED;
-        return with(reopened, 0, until.truncatedTo(ChronoUnit.MICROS), null);
+        return with(reopened, attemptCount, until.truncatedTo(ChronoUnit.MICROS), null);
+    }
+
+    /** 결제사의 종결 거절로 닫힌 환불 실패인가 — 결과 미확인({@link #REFUND_UNCONFIRMED})과 달리 다시 보내도 같은 거절이다 (#17). */
+    public boolean isRefundRejected() {
+        return type == Type.CANCELLATION && status == Status.REFUND_FAILED && !REFUND_UNCONFIRMED.equals(failureCode);
     }
 
     public boolean isNew() {

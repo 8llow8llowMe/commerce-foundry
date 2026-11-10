@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.order.application.exception.StockReservat
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
+import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
@@ -63,6 +64,8 @@ class OrderCancellationWebIntegrationTest {
     @MockitoBean PaymentCancelPort paymentCancelPort;
     @MockitoBean StockRestorationPort stockRestorationPort;
     @MockitoSpyBean OrderCancellationPipelineProcessor pipeline;
+    /** 이 시험은 쓰지 않는다 — {@code ClaimAdminRetryWebIntegrationTest} 와 빈 구성을 같게 둬 Spring 컨텍스트를 공유한다(CI 메모리, #17). */
+    @MockitoSpyBean ClaimRepositoryPort claimRepository;
 
     @BeforeEach
     void succeedByDefault() {

@@ -15,6 +15,8 @@ import static org.mockito.Mockito.when;
 
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
+import com.commercefoundry.domainlayer.order.application.port.in.ClaimCancellationRetrySchedulerUseCase;
+import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
@@ -28,13 +30,9 @@ import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -75,6 +73,9 @@ class ClaimAdminRetryWebIntegrationTest {
     @MockitoBean StockRestorationPort stockRestorationPort;
     /** 쓰지 않지만 {@code OrderCancellationWebIntegrationTest} 와 빈 구성을 같게 둬 Spring 컨텍스트 캐시를 공유한다 — 컨텍스트가 늘면 CI 에서 메모리가 모자란다. */
     @MockitoSpyBean OrderCancellationPipelineProcessor pipeline;
+    /** 경합 창을 만드는 데 쓴다. {@code OrderCancellationWebIntegrationTest} 도 같은 spy 를 둬 컨텍스트를 공유한다. */
+    @MockitoSpyBean ClaimRepositoryPort claimRepository;
+    @Autowired ClaimCancellationRetrySchedulerUseCase retryScheduler;
 
     @BeforeEach
     void succeedByDefault() {
@@ -129,22 +130,36 @@ class ClaimAdminRetryWebIntegrationTest {
         return jdbc.queryForObject("select status from orders.orders where id = ?", String.class, orderId);
     }
 
-    @Test
-    @DisplayName("결제사가 거절해 멈춘 취소는 상세에 업무 언어 · 다시 시도 가능으로 보이고, 다시 시도하면 같은 접수로 환불 · 복원까지 끝나 주문이 취소 완료다")
-    void rejectedRefundCanBeRetriedToCompletion() throws Exception {
-        Order order = paidOrder();
-        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.rejected("PAYMENT_019"));
+    /**
+     * 결과 미확인으로 닫힌 환불 — 고객 취소의 PG 응답이 미확인(UNKNOWN)이었고 재시도 상한을 넘은 상태를 만든다. 상한을 다 채우는 대신 스케줄러가 남기는 값
+     * ({@code REFUND_FAILED · REFUND_UNCONFIRMED}, 다음 시각 없음)을 직접 쓴다.
+     */
+    private void exhaustUnconfirmedRefund(long orderId) {
+        jdbc.update("update orders.claim set status = 'REFUND_FAILED', failure_code = 'REFUND_UNCONFIRMED', next_attempt_at = null, version = version + 1 "
+            + "where order_id = ? and type = 'CANCELLATION'", orderId);
+    }
+
+    private long unconfirmedClaim(Order order) {
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.unknown());
         customerCancel(order.id());
-        long claimId = claimId(order.id());
-        assertThat(claim(order.id())).containsEntry("status", "REFUND_FAILED");
+        exhaustUnconfirmedRefund(order.id());
+        return claimId(order.id());
+    }
+
+    @Test
+    @DisplayName("결과 미확인으로 멈춘 취소는 상세에 업무 언어 · 다시 시도 가능으로 보이고, 다시 시도하면 같은 접수로 환불 · 복원까지 끝나 주문이 취소 완료다")
+    void unconfirmedRefundCanBeRetriedToCompletion() throws Exception {
+        Order order = paidOrder();
+        long claimId = unconfirmedClaim(order);
 
         MvcTestResult before = detail(claimId);
         assertThat(before).hasStatus(200);
-        assertThat(before).bodyJson().extractingPath("$.dataBody.recovery.situation.code").isEqualTo("REFUND_REJECTED");
+        assertThat(before).bodyJson().extractingPath("$.dataBody.recovery.situation.code").isEqualTo("REFUND_UNCONFIRMED");
         assertThat(before).bodyJson().extractingPath("$.dataBody.recovery.retryable").isEqualTo(true);
         assertThat(before).bodyJson().extractingPath("$.dataBody.recovery.nextAutomaticAttemptAt").isNull();
-        assertThat(before.getResponse().getContentAsString()).doesNotContain("PAYMENT_019").doesNotContain("attemptCount");
+        assertThat(before.getResponse().getContentAsString()).doesNotContain("REFUND_UNCONFIRMED\"}").doesNotContain("attemptCount");
 
+        // payment 는 같은 claimId 의 늦은 성공을 그대로 돌려준다(SUCCEEDED 재요청은 PG 를 부르지 않고 200)
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
         MvcTestResult retried = retry(claimId, version(order.id()), MemberRole.MANAGER);
 
@@ -157,19 +172,34 @@ class ClaimAdminRetryWebIntegrationTest {
     }
 
     @Test
-    @DisplayName("결제사가 다시 거절해도 200 이고 상태 · 처리 상황으로 결과를 읽는다")
-    void retryRejectedAgainIsStill200() {
+    @DisplayName("다시 시도해도 결과가 미확인이면 200 이고 자동 처리 중으로 돌아간다 — 응답의 상태 · 처리 상황으로 결과를 읽는다")
+    void retryStillUnknownIsAutoProcessing() {
+        Order order = paidOrder();
+        long claimId = unconfirmedClaim(order);
+
+        MvcTestResult retried = retry(claimId, version(order.id()), MemberRole.ADMIN);
+
+        assertThat(retried).hasStatus(200);
+        assertThat(retried).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("REQUESTED");
+        assertThat(retried).bodyJson().extractingPath("$.dataBody.recovery.situation.code").isEqualTo("AUTO_PROCESSING");
+        assertThat(orderStatus(order.id())).isEqualTo("CANCEL_REQUESTED");
+    }
+
+    @Test
+    @DisplayName("결제사가 거절한 환불은 다시 시도할 수 없다 — 상세 retryable=false, 요청은 409 ORDER_038 이고 결제를 다시 부르지 않는다")
+    void rejectedRefundIsNotRetried() {
         Order order = paidOrder();
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.rejected("PAYMENT_019"));
         customerCancel(order.id());
         long claimId = claimId(order.id());
 
+        assertThat(detail(claimId)).bodyJson().extractingPath("$.dataBody.recovery.retryable").isEqualTo(false);
         MvcTestResult retried = retry(claimId, version(order.id()), MemberRole.ADMIN);
 
-        assertThat(retried).hasStatus(200);
-        assertThat(retried).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("REFUND_FAILED");
-        assertThat(retried).bodyJson().extractingPath("$.dataBody.recovery.situation.code").isEqualTo("REFUND_REJECTED");
-        assertThat(orderStatus(order.id())).isEqualTo("CANCEL_REQUESTED");
+        assertThat(retried).hasStatus(409);
+        assertThat(retried).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_038");
+        assertThat(claim(order.id())).containsEntry("failure_code", "PAYMENT_019");
+        verify(paymentCancelPort, times(1)).cancel(anyLong(), anyLong(), any());
     }
 
     @Test
@@ -239,28 +269,83 @@ class ClaimAdminRetryWebIntegrationTest {
         assertThat(version(order.id())).isEqualTo(before);
     }
 
+    /**
+     * {@code racer} 스레드의 첫 클레임 저장만 버전을 읽은 뒤 · 저장 직전에 멈춘다. 그동안 다른 쪽이 같은 버전으로 끝까지 커밋한 뒤 풀어 주면, 멈춘 쪽은
+     * 낡은 버전으로 저장해 CAS 에서 져야 한다 — 두 요청이 순서대로 실행돼 우연히 통과하는 것이 아니라 경합 창을 직접 만든다.
+     */
+    private Thread pauseFirstUpdateOf(Runnable racer, CountDownLatch reached, CountDownLatch release) {
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("racer") && reached.getCount() > 0) {
+                reached.countDown();
+                if (!release.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("racer was not released");
+                }
+            }
+            return invocation.callRealMethod();
+            // 주입된 빈은 트랜잭션 프록시라 stub 은 그 안의 spy 에 건다(프록시로 부르면 MANDATORY 트랜잭션 검사에 걸린다)
+        }).when(org.springframework.test.util.AopTestUtils.<ClaimRepositoryPort>getUltimateTargetObject(claimRepository)).update(any());
+        Thread thread = new Thread(racer, "racer");
+        thread.start();
+        return thread;
+    }
+
     @Test
-    @DisplayName("같은 화면 버전으로 두 운영자가 동시에 누르면 한 쪽만 선점해 결제 취소는 한 번만 다시 나가고 다른 쪽은 409 ORDER_037 이다")
-    void concurrentRetriesSendRefundOnce() throws Exception {
+    @DisplayName("같은 화면 버전의 두 운영자 요청 — 저장 직전에 멈춘 쪽은 다른 쪽이 먼저 커밋한 뒤 CAS 에서 져 409 ORDER_037 이고 결제 취소는 한 번만 다시 나간다")
+    void concurrentRetriesLoseOnCasAndSendRefundOnce() throws Exception {
         Order order = paidOrder();
-        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.rejected("PAYMENT_019"));
+        long claimId = unconfirmedClaim(order);
+        long seen = version(order.id());
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
+        CountDownLatch reached = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        int[] racerStatus = new int[1];
+        String[] racerCode = new String[1];
+
+        Thread racer = pauseFirstUpdateOf(() -> {
+            MvcTestResult result = retry(claimId, seen, MemberRole.ADMIN);
+            racerStatus[0] = result.getResponse().getStatus();
+            try {
+                racerCode[0] = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.dataHeader.resultCode");
+            } catch (Exception exception) {
+                racerCode[0] = exception.getClass().getSimpleName();
+            }
+        }, reached, release);
+        assertThat(reached.await(10, TimeUnit.SECONDS)).isTrue();
+
+        MvcTestResult winner = retry(claimId, seen, MemberRole.MANAGER);
+        release.countDown();
+        racer.join(15_000);
+
+        assertThat(winner).hasStatus(200);
+        assertThat(winner).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("COMPLETED");
+        assertThat(racerStatus[0]).isEqualTo(409);
+        assertThat(racerCode[0]).isEqualTo("ORDER_037");
+        verify(paymentCancelPort, times(2)).cancel(anyLong(), org.mockito.ArgumentMatchers.eq(claimId), any());
+        assertThat(claim(order.id())).containsEntry("status", "COMPLETED");
+    }
+
+    @Test
+    @DisplayName("재시도 스케줄러가 선점 저장 직전에 멈춘 사이 운영자가 다시 시도해 커밋하면 스케줄러는 CAS 에서 져 건너뛴다 — 결제 취소는 한 번만 다시 나간다")
+    void schedulerLosesToOperatorOnCas() throws Exception {
+        Order order = paidOrder();
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.unknown());
         customerCancel(order.id());
+        // 백오프가 끝나 스케줄러 · 운영자 둘 다 집을 수 있는 환불 대기
+        jdbc.update("update orders.claim set next_attempt_at = ?, version = version + 1 where order_id = ? and type = 'CANCELLATION'",
+            java.sql.Timestamp.from(Instant.now().minusSeconds(60)), order.id());
         long claimId = claimId(order.id());
         long seen = version(order.id());
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
+        CountDownLatch reached = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
 
-        CountDownLatch start = new CountDownLatch(1);
-        ExecutorService pool = Executors.newFixedThreadPool(2);
-        try {
-            List<Future<Integer>> results = List.of(
-                pool.submit(() -> { start.await(); return retry(claimId, seen, MemberRole.ADMIN).getResponse().getStatus(); }),
-                pool.submit(() -> { start.await(); return retry(claimId, seen, MemberRole.MANAGER).getResponse().getStatus(); }));
-            start.countDown();
-            List<Integer> statuses = List.of(results.get(0).get(30, TimeUnit.SECONDS), results.get(1).get(30, TimeUnit.SECONDS));
-            assertThat(statuses).containsExactlyInAnyOrder(200, 409);
-        } finally {
-            pool.shutdownNow();
-        }
+        Thread scheduler = pauseFirstUpdateOf(() -> retryScheduler.retryDueCancellations(), reached, release);
+        assertThat(reached.await(10, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(retry(claimId, seen, MemberRole.ADMIN)).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("COMPLETED");
+        release.countDown();
+        scheduler.join(15_000);
+
         verify(paymentCancelPort, times(2)).cancel(anyLong(), org.mockito.ArgumentMatchers.eq(claimId), any());
         assertThat(claim(order.id())).containsEntry("status", "COMPLETED");
     }

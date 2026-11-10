@@ -54,11 +54,12 @@ class ClaimAdminRecoveryProcessorTest {
 
     private Claim stored(Claim claim) {
         when(claims.findById(2L)).thenReturn(Optional.of(claim));
-        when(claims.update(any())).thenAnswer(invocation -> {
+        // doAnswer 형식 — 두 번째 stored() 가 앞 stub 을 null 인자로 부르지 않게 한다
+        org.mockito.Mockito.doAnswer(invocation -> {
             Claim saved = invocation.getArgument(0);
             return new Claim(saved.id(), saved.orderId(), saved.requestKey(), saved.type(), saved.status(), saved.expectedRefund(), saved.paymentId(),
                 saved.attemptCount(), saved.nextAttemptAt(), saved.failureCode(), saved.decision(), saved.items(), saved.requestedAt(), saved.version() + 1);
-        });
+        }).when(claims).update(any());
         return claim;
     }
 
@@ -68,7 +69,7 @@ class ClaimAdminRecoveryProcessorTest {
     }
 
     @ParameterizedTest(name = "{0} → {1}")
-    @CsvSource({"REFUND_FAILED, REFUND_UNCONFIRMED, REQUESTED", "REFUND_FAILED, PAYMENT_016, REQUESTED",
+    @CsvSource({"REFUND_FAILED, REFUND_UNCONFIRMED, REQUESTED",
         "RESTORATION_FAILED, RESTORATION_UNCONFIRMED, REFUNDED", "RESTORATION_FAILED, PRODUCT_028, REFUNDED"})
     @DisplayName("종결 실패는 그 단계의 대기 상태로 다시 열어 lease 까지 선점하고 저장된 값(올라간 버전)을 돌려준다")
     void reopensFailedClaim(Claim.Status status, String failure, Claim.Status reopened) {
@@ -81,6 +82,48 @@ class ClaimAdminRecoveryProcessorTest {
         assertThat(held.failureCode()).isNull();
         assertThat(held.nextAttemptAt()).isEqualTo(NOW.plus(LEASE));
         assertThat(held.version()).isEqualTo(5L);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"PAYMENT_016", "PAYMENT_017", "PAYMENT_019"})
+    @DisplayName("결제사가 거절한 환불은 409 ORDER_038 이고 저장하지 않는다 — 다시 보내도 같은 거절이라 수동 확정(A3)으로 넘긴다")
+    void rejectedRefundIsNotRetried(String failure) {
+        Claim rejected = stored(cancellation(Claim.Status.REFUND_FAILED, null, failure));
+
+        assertCode(() -> processor(true).prepareRetry(2, 4), OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
+        assertThat(processor(true).isRetryable(rejected)).isFalse();
+        verify(claims, never()).update(any());
+    }
+
+    private static Claim requestedLongAgo(Claim.Status status, Instant next, String failure, Duration age) {
+        return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 5, next, failure, ITEMS, NOW.minus(age), 4L);
+    }
+
+    @Test
+    @DisplayName("결제 취소 키(접수 + 14일)가 lease 안에 끝나는 환불 단계는 409 ORDER_038 이다 — 재고 복원 단계는 기한과 무관하다")
+    void refundStageAfterKeyValidityIsNotRetried() {
+        Duration expired = Duration.ofDays(14).minus(LEASE);
+        for (Claim refundStage : List.of(requestedLongAgo(Claim.Status.REFUND_FAILED, null, Claim.REFUND_UNCONFIRMED, expired),
+            requestedLongAgo(Claim.Status.REQUESTED, NOW, null, expired))) {
+            stored(refundStage);
+            assertCode(() -> processor(true).prepareRetry(2, 4), OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
+            assertThat(processor(true).isRetryable(refundStage)).isFalse();
+        }
+        verify(claims, never()).update(any());
+        stored(requestedLongAgo(Claim.Status.RESTORATION_FAILED, null, Claim.RESTORATION_UNCONFIRMED, Duration.ofDays(30)));
+        assertThat(processor(true).prepareRetry(2, 4).attemptCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("기한이 가까운 환불을 다시 열면 남은 자동 재시도(회당 최대 1시간)가 기한 안에 끝나도록 시작 횟수를 올린다")
+    void reopenedRefundKeepsRetriesInsideKeyValidity() {
+        // 남은 기간 10시간 → 최대 10회만 남기고 48 − 10 = 38 회부터 센다
+        stored(requestedLongAgo(Claim.Status.REFUND_FAILED, null, Claim.REFUND_UNCONFIRMED, Duration.ofDays(14).minusHours(10)));
+
+        Claim held = processor(true).prepareRetry(2, 4);
+
+        assertThat(held.status()).isEqualTo(Claim.Status.REQUESTED);
+        assertThat(held.attemptCount()).isEqualTo(38);
     }
 
     @ParameterizedTest
