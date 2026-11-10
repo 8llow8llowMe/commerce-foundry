@@ -14,6 +14,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
@@ -47,6 +48,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -71,6 +73,8 @@ class ClaimAdminRetryWebIntegrationTest {
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoBean PaymentCancelPort paymentCancelPort;
     @MockitoBean StockRestorationPort stockRestorationPort;
+    /** 쓰지 않지만 {@code OrderCancellationWebIntegrationTest} 와 빈 구성을 같게 둬 Spring 컨텍스트 캐시를 공유한다 — 컨텍스트가 늘면 CI 에서 메모리가 모자란다. */
+    @MockitoSpyBean OrderCancellationPipelineProcessor pipeline;
 
     @BeforeEach
     void succeedByDefault() {
