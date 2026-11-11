@@ -66,16 +66,48 @@ class ClaimAdminRecoveryPolicyTest {
     @ParameterizedTest
     @EnumSource(Claim.Status.class)
     void refundConfirmationAcceptsOnlyRefundFailure(Claim.Status status) {
-        Claim source = claim(status, status.isFailed() ? Claim.REFUND_UNCONFIRMED : null);
+        Claim source = claim(status, status.isFailed() ? "PAYMENT_016" : null);
+        Order order = order(1, OrderStatus.CANCEL_REQUESTED, 0L);
         if (status == Claim.Status.REFUND_FAILED) {
-            assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(source)).doesNotThrowAnyException();
+            assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(source, false)).isTrue();
+            assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(source, order, false)).doesNotThrowAnyException();
         } else {
-            assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(source)).isInstanceOf(IllegalStateException.class);
+            assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(source, true)).isFalse();
+            assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(source, order, true)).isInstanceOf(IllegalStateException.class);
         }
     }
 
+    @Test
+    void unconfirmedRefundIsConfirmableOnlyAfterRetryClosed() {
+        Claim unconfirmed = claim(Claim.Status.REFUND_FAILED, Claim.REFUND_UNCONFIRMED);
+        Order order = order(1, OrderStatus.CANCEL_REQUESTED, 0L);
+        assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(unconfirmed, false)).isFalse();
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(unconfirmed, order, false)).isInstanceOf(IllegalStateException.class);
+        assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(unconfirmed, true)).isTrue();
+        assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(unconfirmed, order, true)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void refundConfirmationRequiresSameStoredCancelRequestedOrCanceledOrder() {
+        Claim rejected = claim(Claim.Status.REFUND_FAILED, "PAYMENT_019");
+        for (OrderStatus status : OrderStatus.values()) {
+            if (status == OrderStatus.CANCEL_REQUESTED || status == OrderStatus.CANCELED) {
+                assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, order(1, status, 0L), false))
+                    .as(status.name()).doesNotThrowAnyException();
+            } else {
+                assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, order(1, status, 0L), false))
+                    .as(status.name()).isInstanceOf(IllegalStateException.class);
+            }
+        }
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, order(2, OrderStatus.CANCEL_REQUESTED, 0L), false))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, order(1, OrderStatus.CANCEL_REQUESTED, null), false))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, null, false)).isInstanceOf(NullPointerException.class);
+    }
+
     @ParameterizedTest
-    @ValueSource(strings = {"PRODUCT_027", "PRODUCT_028", "PRODUCT_029", "PRODUCT_003", "RESTORATION_DATA_INVALID", "ORDER_STATUS_UNEXPECTED"})
+    @ValueSource(strings = {"PRODUCT_027", "PRODUCT_028", "PRODUCT_029", "PRODUCT_003", "RESTORATION_DATA_INVALID"})
     void completionRequiresSameStoredCanceledOrder(String failure) {
         Claim source = claim(Claim.Status.RESTORATION_FAILED, failure);
         assertThatCode(() -> ClaimAdminRecoveryPolicy.requireCompletion(source, order(1, OrderStatus.CANCELED, 0L))).doesNotThrowAnyException();
@@ -92,10 +124,32 @@ class ClaimAdminRecoveryPolicyTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"RESTORATION_UNCONFIRMED", "REFUND_UNCONFIRMED", "PAYMENT_016", "PAYMENT_017", "PAYMENT_019", "UNKNOWN_001"})
+    @ValueSource(strings = {"RESTORATION_UNCONFIRMED", "REFUND_UNCONFIRMED", "PAYMENT_016", "PAYMENT_017", "PAYMENT_019", "UNKNOWN_001", "ORDER_STATUS_UNEXPECTED"})
     void ambiguousOrUnknownFailuresCannotBeCompleted(String failure) {
         assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireCompletion(claim(Claim.Status.RESTORATION_FAILED, failure),
             order(1, OrderStatus.CANCELED, 0L))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void completionCandidateIsRequireCompletionWithoutOrder() {
+        for (String failure : List.of("PRODUCT_027", "PRODUCT_028", "PRODUCT_029", "PRODUCT_003", "RESTORATION_DATA_INVALID")) {
+            assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(claim(Claim.Status.RESTORATION_FAILED, failure))).as(failure).isTrue();
+        }
+        // 주문 상태 이상은 주문이 취소 완료로 갈 경로가 없어 종결 버튼만 보이고 늘 409 였다 — 후보가 아니다(수습 경로는 #695)
+        for (String failure : List.of("RESTORATION_UNCONFIRMED", "REFUND_UNCONFIRMED", "PAYMENT_016", "UNKNOWN_001", "ORDER_STATUS_UNEXPECTED")) {
+            assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(claim(Claim.Status.RESTORATION_FAILED, failure))).as(failure).isFalse();
+        }
+        for (Claim.Status status : List.of(Claim.Status.REQUESTED, Claim.Status.REFUNDED, Claim.Status.REFUND_FAILED, Claim.Status.COMPLETED)) {
+            assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(claim(status, status.isFailed() ? "PRODUCT_028" : null))).as(status.name()).isFalse();
+        }
+        Claim base = claim(Claim.Status.RESTORATION_FAILED, "PRODUCT_028");
+        Claim unsaved = new Claim(base.id(), base.orderId(), base.requestKey(), base.type(), base.status(), base.expectedRefund(), base.paymentId(),
+            base.attemptCount(), base.nextAttemptAt(), base.failureCode(), base.items(), null, null);
+        Claim returned = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+            List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
+        assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(unsaved)).isFalse();
+        assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(returned)).isFalse();
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.isCompletionCandidate(null)).isInstanceOf(NullPointerException.class);
     }
 
     @ParameterizedTest
@@ -114,7 +168,9 @@ class ClaimAdminRecoveryPolicyTest {
             List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
         for (Claim source : List.of(unsaved, returned)) {
             assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRetry(source, NOW)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(source)).isInstanceOf(IllegalStateException.class);
+            assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(source, true)).isFalse();
+            assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(source, order(1, OrderStatus.CANCEL_REQUESTED, 0L), true))
+                .isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireCompletion(source, order(1, OrderStatus.CANCELED, 0L)))
                 .isInstanceOf(IllegalStateException.class);
         }

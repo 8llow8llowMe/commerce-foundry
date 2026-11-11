@@ -123,8 +123,15 @@ public enum OrderErrorCode {
     CLAIM_RETRY_NOT_ALLOWED("ORDER_038", "이 클레임은 지금 다시 시도할 수 없습니다. 처리 상황을 확인해 주세요.", HttpStatus.CONFLICT),
     /** 자동 처리(고객 요청 · 재시도 스케줄러)가 아직 이 클레임을 쥐고 있다 — 겹쳐 보내면 같은 환불 · 복원이 동시에 나간다 (#17 A2b). */
     CLAIM_AUTO_PROCESSING("ORDER_039", "자동 처리가 진행 중입니다. 다음 자동 시도 시각 뒤에 다시 확인해 주세요.", HttpStatus.CONFLICT),
-    /** 재시도 스케줄러가 꺼져 있다 — 다시 열어도 미확정 결과를 따라갈 쪽이 없다. 고객 접수의 {@code ORDER_035} 와 같은 게이트다 (#17 A2b). */
-    CLAIM_RETRY_UNAVAILABLE("ORDER_040", "지금은 자동 환불 처리가 꺼져 있어 다시 시도할 수 없습니다. 시스템 관리자에게 확인해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /**
+     * 재시도 스케줄러가 꺼져 있다 — 다시 열거나(A2b) 수동 환불을 확정해도(A3) 이어지는 미확정 결과를 따라갈 쪽이 없다. 고객 접수의 {@code ORDER_035} 와 같은 게이트다.
+     */
+    CLAIM_RETRY_UNAVAILABLE("ORDER_040", "지금은 자동 환불 처리가 꺼져 있어 이 처리를 할 수 없습니다. 시스템 관리자에게 확인해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /**
+     * 수동 환불 확정 · 복원 생략 종결의 자격이 없다 — 상태 · 실패 코드 · 주문 상태가 맞지 않거나, 결과 미확인 환불이 아직 다시 시도 기한 안이다(#17 A3).
+     * 화면은 상세를 다시 읽어 {@code retryable} 이면 다시 시도를 안내한다.
+     */
+    CLAIM_DECISION_NOT_ALLOWED("ORDER_041", "이 클레임은 지금 이 처리를 할 수 없습니다. 처리 상황과 주문 상태를 확인하고, 다시 시도할 수 있으면 다시 시도해 주세요.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

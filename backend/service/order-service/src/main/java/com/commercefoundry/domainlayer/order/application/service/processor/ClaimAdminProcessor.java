@@ -24,9 +24,9 @@ public class ClaimAdminProcessor {
             filter.status() == null ? null : filter.status().toDomain(), filter.page(), filter.size()).map(ClaimAdminSummaryInfo::from);
     }
 
-    /** 상세 — 재시도 가능 여부는 재시도 선점과 같은 조건({@link ClaimAdminRecoveryProcessor#isRetryable})으로 판정한다(#17 A2b). */
+    /** 상세 — 처리 버튼 표시 여부는 각 실행과 같은 조건({@link ClaimAdminRecoveryProcessor})으로 판정한다. 주문은 읽지 않는다(쿼리 2번 유지, #17). */
     public ClaimAdminDetailInfo getDetail(long claimId) {
         Claim claim = claims.findById(claimId).orElseThrow(() -> new OrderException(OrderErrorCode.NOT_FOUND_CLAIM));
-        return ClaimAdminDetailInfo.from(claim, recovery.isRetryable(claim));
+        return ClaimAdminDetailInfo.from(claim, recovery.isRetryable(claim), recovery.isRefundConfirmable(claim), recovery.isCompletable(claim));
     }
 }

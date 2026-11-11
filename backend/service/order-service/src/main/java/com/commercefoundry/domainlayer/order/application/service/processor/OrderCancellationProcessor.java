@@ -221,7 +221,10 @@ public class OrderCancellationProcessor {
             .filter(claim -> claim.type() == Claim.Type.CANCELLATION);
     }
 
-    /** 환불 확정 반영 — 주문 상태에 따라 취소 완료로 바꾸거나(취소 요청), 클레임만 바꾸거나(이미 취소 완료), 데이터 이상으로 닫는다. */
+    /**
+     * 환불 확정 반영 — 주문 상태에 따라 취소 완료로 바꾸거나(취소 요청), 클레임만 바꾸거나(이미 취소 완료), 데이터 이상으로 닫는다.
+     * 운영자 수동 환불 확정({@link ClaimAdminRecoveryProcessor#confirmRefund})도 같은 저장 분기를 쓴다 — 그쪽은 이력이 ADMIN · 사유이고, 그 밖의 주문 상태는 저장 전에 409 로 거절한다.
+     */
     private Claim applyRefunded(Claim claim) {
         Instant now = clock.instant();
         Claim refunded = claim.markConfirmedRefund(now.plus(properties.retry().lease()));

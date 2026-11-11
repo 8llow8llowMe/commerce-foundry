@@ -108,4 +108,83 @@ class ClaimAdminFacadeTest {
         verify(cancellation, never()).recordAttemptFailure(any());
         verify(audit).retried(ADMIN, 2, false);
     }
+
+    // ---- 수동 환불 확정 · 복원 생략 종결 (#17 A3) ----
+
+    private static final String REASON = "결제 관리 화면에서 취소 완료 확인";
+
+    private void detailReady() {
+        when(processor.getDetail(2)).thenReturn(detail);
+        when(presenter.toResponse(detail)).thenReturn(response);
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 — 확정 커밋 뒤 같은 원격 경로로 재고 복원을 잇고, 성공 감사 뒤 다시 읽은 상세를 낸다")
+    void confirmRefundThenProgressesRestoration() {
+        detailReady();
+        when(recovery.confirmRefund(2, 4, REASON, ADMIN)).thenReturn(held);
+
+        assertThat(facade.confirmRefund(2, 4, REASON, ADMIN)).isSameAs(response);
+
+        InOrder order = inOrder(recovery, pipeline, processor, audit);
+        order.verify(recovery).confirmRefund(2, 4, REASON, ADMIN);
+        order.verify(pipeline).progress(held);
+        order.verify(audit).refundConfirmed(ADMIN, 2, true);
+        order.verify(processor).getDetail(2);
+        verify(audit, never()).refundConfirmed(ADMIN, 2, false);
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 — 거절(409 · 503 · 404)이면 원격을 부르지 않고 실패 감사를 한 번 남긴 뒤 그대로 던진다")
+    void confirmRefundRejectionIsAudited() {
+        OrderException refused = new OrderException(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+        when(recovery.confirmRefund(2, 4, REASON, ADMIN)).thenThrow(refused);
+
+        assertThatThrownBy(() -> facade.confirmRefund(2, 4, REASON, ADMIN)).isSameAs(refused);
+
+        verify(pipeline, never()).progress(any());
+        verify(audit).refundConfirmed(ADMIN, 2, false);
+        verify(audit, never()).refundConfirmed(ADMIN, 2, true);
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 — 확정은 커밋됐고 복원만 끊기면 미확정 한 번으로 세고 200(성공 감사)이다 — 스케줄러가 복원을 잇는다")
+    void confirmRefundInterruptedRestorationIsCounted() {
+        detailReady();
+        when(recovery.confirmRefund(2, 4, REASON, ADMIN)).thenReturn(held);
+        when(pipeline.progress(held)).thenThrow(new CannotCreateTransactionException("db down"));
+
+        assertThat(facade.confirmRefund(2, 4, REASON, ADMIN)).isSameAs(response);
+
+        verify(cancellation).recordAttemptFailure(held);
+        verify(audit).refundConfirmed(ADMIN, 2, true);
+    }
+
+    @Test
+    @DisplayName("복원 생략 종결 — 원격을 부르지 않고 성공 감사 뒤 다시 읽은 상세를 낸다")
+    void completeWithoutRemoteCall() {
+        detailReady();
+        when(recovery.complete(2, 4, REASON, ADMIN)).thenReturn(held);
+
+        assertThat(facade.complete(2, 4, REASON, ADMIN)).isSameAs(response);
+
+        InOrder order = inOrder(recovery, audit, processor);
+        order.verify(recovery).complete(2, 4, REASON, ADMIN);
+        order.verify(audit).completed(ADMIN, 2, true);
+        order.verify(processor).getDetail(2);
+        verify(pipeline, never()).progress(any());
+    }
+
+    @Test
+    @DisplayName("복원 생략 종결 — 거절이면 실패 감사를 한 번 남기고 그대로 던진다")
+    void completeRejectionIsAudited() {
+        OrderException stale = new OrderException(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        when(recovery.complete(2, 4, REASON, ADMIN)).thenThrow(stale);
+
+        assertThatThrownBy(() -> facade.complete(2, 4, REASON, ADMIN)).isSameAs(stale);
+
+        verify(audit).completed(ADMIN, 2, false);
+        verify(audit, never()).completed(ADMIN, 2, true);
+        verify(processor, never()).getDetail(2);
+    }
 }

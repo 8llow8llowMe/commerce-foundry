@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.order.adapter.in.admin.controller;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminItem;
+import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.request.ClaimDecisionRequest;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.request.ClaimRetryRequest;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.ClaimAdminResponse;
 import com.commercefoundry.domainlayer.order.application.exception.OrderValidationMessage;
@@ -33,7 +34,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "[어드민] 클레임", description = "반품 · 결제 후 취소 클레임 목록 · 상세 조회와 결제 후 취소 다시 시도")
+@Tag(name = "[어드민] 클레임", description = "반품 · 결제 후 취소 클레임 목록 · 상세 조회와 결제 후 취소 다시 시도 · 수동 환불 확정 · 복원 생략 종결")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -82,5 +83,37 @@ public class ClaimAdminController {
         @RequestBody @Valid ClaimRetryRequest request
     ) {
         return ResponseEntity.ok(Response.success(useCase.retry(claimId, request.expectedVersion(), admin.memberId())));
+    }
+
+    @Operation(summary = "결제 후 취소 환불 완료로 확정", description = "결제사 · 결제 관리 화면에서 환불을 확인한 '환불 실패' 접수를 환불 완료로 기록하고 재고 복원을 잇는다. "
+        + "결제사에 다시 요청하지 않는다 — 실제 환불을 확인한 뒤에만 누른다. 대표 관리자만(SETTLEMENT_MANAGE). 본문 {expectedVersion, reason}. "
+        + "결제사 거절은 늘, 결과 미확인은 다시 시도 기한(접수 + 14일)이 지나 다시 시도가 닫힌 뒤에만 확정한다. "
+        + "버전 불일치 · 동시 변경 409(ORDER_037), 환불 실패가 아님 · 기한 안의 결과 미확인(다시 시도) · 주문이 취소 요청 · 취소 완료가 아님 409(ORDER_041), "
+        + "자동 처리 꺼짐 503(ORDER_040), 없는 접수 404(ORDER_032), 사유 없음 · 공백만 400(ORDER_170) · 200자 초과(ORDER_148) · 제어 · 서식 문자(ORDER_151), "
+        + "expectedVersion 400(ORDER_169), 양수가 아닌 아이디 400(ORDER_166).")
+    @PreAuthorize(AdminAuthority.SETTLEMENT_MANAGE)
+    @AdminAudited(action = "CLAIM_REFUND_CONFIRM")
+    @PostMapping("/{claimId}/refund-confirmation")
+    public ResponseEntity<Response<ClaimAdminResponse>> confirmRefund(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @Parameter(description = "클레임 아이디") @PathVariable @Positive(message = OrderValidationMessage.CLAIM_ID_POSITIVE) long claimId,
+        @RequestBody @Valid ClaimDecisionRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(useCase.confirmRefund(claimId, request.expectedVersion(), request.reason(), admin.memberId())));
+    }
+
+    @Operation(summary = "결제 후 취소 재고 복원 없이 종결", description = "재고 복원이 거절된 취소 접수를 복원 없이 완료로 닫는다. 재고는 재고 조정 화면에서 먼저 맞춘다. "
+        + "복원 결과 미확인 접수는 실제로 복원됐을 수 있어 종결할 수 없다(다시 시도). 주문 상태가 맞지 않아 닫힌 접수도 종결 대상이 아니다. "
+        + "대표 관리자만(SETTLEMENT_MANAGE). 본문 {expectedVersion, reason}. "
+        + "버전 불일치 409(ORDER_037), 종결할 수 없는 접수 · 주문이 취소 완료가 아님 409(ORDER_041), 없는 접수 404(ORDER_032), 본문 검증 400(ORDER_169 · 170 · 148 · 151), 양수가 아닌 아이디 400(ORDER_166).")
+    @PreAuthorize(AdminAuthority.SETTLEMENT_MANAGE)
+    @AdminAudited(action = "CLAIM_COMPLETE")
+    @PostMapping("/{claimId}/completion")
+    public ResponseEntity<Response<ClaimAdminResponse>> complete(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @Parameter(description = "클레임 아이디") @PathVariable @Positive(message = OrderValidationMessage.CLAIM_ID_POSITIVE) long claimId,
+        @RequestBody @Valid ClaimDecisionRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(useCase.complete(claimId, request.expectedVersion(), request.reason(), admin.memberId())));
     }
 }

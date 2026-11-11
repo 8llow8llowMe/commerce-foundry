@@ -135,4 +135,79 @@ class ClaimAdminControllerTest {
         assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_166");
         verifyNoInteractions(claimAdminUseCase);
     }
+
+    // ---- 수동 환불 확정 · 복원 생략 종결 (#17 A3) ----
+
+    private static final String DECISION_BODY = "{\"expectedVersion\":3,\"reason\":\"결제 관리 화면에서 취소 완료 확인\"}";
+
+    private MvcTestResult decide(String action, MemberRole role, String body) {
+        return mvc.post().uri(PATH + "/1/" + action).header(HttpHeaders.AUTHORIZATION, bearer(role)).contentType(MediaType.APPLICATION_JSON).content(body)
+            .exchange();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER"})
+    @DisplayName("수동 환불 확정 · 복원 생략 종결은 SETTLEMENT_MANAGE 라 ADMIN · OWNER 만 유스케이스에 닿고 버전 · 사유는 본문, 관리자 아이디는 토큰에서 온다 (#17 A3)")
+    void settlementManagersMayDecide(MemberRole role) {
+        assertThat(decide("refund-confirmation", role, DECISION_BODY)).hasStatusOk();
+        assertThat(decide("completion", role, DECISION_BODY)).hasStatusOk();
+
+        verify(claimAdminUseCase).confirmRefund(1L, 3L, "결제 관리 화면에서 취소 완료 확인", TestTokens.MEMBER_ID);
+        verify(claimAdminUseCase).complete(1L, 3L, "결제 관리 화면에서 취소 완료 확인", TestTokens.MEMBER_ID);
+    }
+
+    @Test
+    @DisplayName("MANAGER(다시 시도는 가능) · STAFF · 고객은 확정 · 종결 403 · SECURITY_005, 토큰 없으면 401 이고 유스케이스를 부르지 않는다 (#17 A3)")
+    void othersMayNotDecide() {
+        for (String action : List.of("refund-confirmation", "completion")) {
+            for (MemberRole role : List.of(MemberRole.MANAGER, MemberRole.STAFF, MemberRole.CUSTOMER)) {
+                SecurityEnvelopeAssertions.assertEnvelope(decide(action, role, DECISION_BODY).getResponse(), SecurityErrorCode.FORBIDDEN);
+            }
+            SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH + "/1/" + action).contentType(MediaType.APPLICATION_JSON).content(DECISION_BODY)
+                .exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        }
+        verifyNoInteractions(claimAdminUseCase);
+    }
+
+    @ParameterizedTest(name = "{0} → {1}")
+    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = {
+        "{\"reason\":\"확인\"}|ORDER_169",
+        "{\"expectedVersion\":-1,\"reason\":\"확인\"}|ORDER_169",
+        "{\"expectedVersion\":3}|ORDER_170",
+        "{\"expectedVersion\":3,\"reason\":\"   \"}|ORDER_170",
+        "{\"expectedVersion\":3,\"reason\":\"확인\\n완료\"}|ORDER_151",
+        // 도메인 isBlank(Character.isWhitespace)와 같은 기준 — @NotBlank 가 못 거르는 유니코드 공백만인 사유도 ORDER_170 하나다
+        "{\"expectedVersion\":3,\"reason\":\"\\u3000\\u3000\"}|ORDER_170",
+        "{\"expectedVersion\":3,\"reason\":\"\\u2028\"}|ORDER_170",
+        "{\"expectedVersion\":3,\"reason\":\" \\u2029\\u3000\\t\"}|ORDER_170",
+        // 이 DTO 만 서식 문자(Cf) · 줄 · 문단 구분자(Zl · Zp)를 섞어 쓰지 못한다
+        "{\"expectedVersion\":3,\"reason\":\"확인\\u2028완료\"}|ORDER_151",
+        "{\"expectedVersion\":3,\"reason\":\"확인\\u2029완료\"}|ORDER_151",
+        "{\"expectedVersion\":3,\"reason\":\"확인\\u200B완료\"}|ORDER_151",
+        "{\"expectedVersion\":3,\"reason\":\"\\u200B\"}|ORDER_151"
+    })
+    @DisplayName("확정 · 종결 본문 — expectedVersion 누락 · 음수 ORDER_169, 사유 없음 · 공백 ORDER_170, 제어 문자 ORDER_151 이고 유스케이스를 부르지 않는다 (#17 A3)")
+    void decisionBodyValidation(String body, String code) {
+        for (String action : List.of("refund-confirmation", "completion")) {
+            MvcTestResult result = decide(action, MemberRole.OWNER, body);
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        }
+        verifyNoInteractions(claimAdminUseCase);
+    }
+
+    @Test
+    @DisplayName("확정 · 종결 사유는 200자까지 받고 201자는 400 · ORDER_148 이다 (#17 A3)")
+    void decisionReasonLength() {
+        String max = "{\"expectedVersion\":3,\"reason\":\"" + "가".repeat(200) + "\"}";
+        String over = "{\"expectedVersion\":3,\"reason\":\"" + "가".repeat(201) + "\"}";
+
+        assertThat(decide("refund-confirmation", MemberRole.OWNER, max)).hasStatusOk();
+        MvcTestResult result = decide("completion", MemberRole.OWNER, over);
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_148");
+        verify(claimAdminUseCase).confirmRefund(1L, 3L, "가".repeat(200), TestTokens.MEMBER_ID);
+    }
 }

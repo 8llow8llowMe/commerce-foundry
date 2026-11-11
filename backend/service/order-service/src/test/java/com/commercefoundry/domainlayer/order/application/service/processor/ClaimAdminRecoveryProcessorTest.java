@@ -1,6 +1,9 @@
 package com.commercefoundry.domainlayer.order.application.service.processor;
 
+import static com.commercefoundry.domainlayer.order.support.OrderFixtures.address;
+import static com.commercefoundry.domainlayer.order.support.OrderFixtures.domesticQuote;
 import static com.commercefoundry.domainlayer.order.support.OrderFixtures.krw;
+import static com.commercefoundry.domainlayer.order.support.OrderFixtures.quoteLine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -12,9 +15,15 @@ import static org.mockito.Mockito.when;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.ClaimItem;
+import com.commercefoundry.domainlayer.order.domain.model.Order;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.domainlayer.order.domain.model.StatusChangedBy;
 import com.commercefoundry.global.properties.OrderCancellationProperties;
+import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,6 +31,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,6 +47,7 @@ class ClaimAdminRecoveryProcessorTest {
     private static final List<ClaimItem> ITEMS = List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER));
 
     private final ClaimRepositoryPort claims = mock(ClaimRepositoryPort.class);
+    private final OrderRepositoryPort orders = mock(OrderRepositoryPort.class);
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
     private static OrderCancellationProperties properties(boolean enabled) {
@@ -45,7 +56,15 @@ class ClaimAdminRecoveryProcessorTest {
     }
 
     private ClaimAdminRecoveryProcessor processor(boolean enabled) {
-        return new ClaimAdminRecoveryProcessor(claims, properties(enabled), clock);
+        return new ClaimAdminRecoveryProcessor(claims, orders, new SnowflakeIdGenerator(1, 3), properties(enabled), clock);
+    }
+
+    private Order storedOrder(OrderStatus status) {
+        Order placed = Order.place(1, 7, domesticQuote(quoteLine(101, 1_000, 1)), new AtomicLong(10)::incrementAndGet, address("KR"), 99, NOW);
+        Order order = new Order(1, placed.memberId(), status, placed.quote(), placed.itemIds(), placed.shippingAddress(), placed.stockReservationId(),
+            placed.paymentDueAt(), null, null, NOW, 6L);
+        when(orders.findById(1L)).thenReturn(Optional.of(order));
+        return order;
     }
 
     private static Claim cancellation(Claim.Status status, Instant next, String failure) {
@@ -218,5 +237,209 @@ class ClaimAdminRecoveryProcessorTest {
         verify(claims).update(saved.capture());
         assertThat(saved.getValue().hasSameRefundRequest(source)).isTrue();
         assertThat(saved.getValue().version()).isEqualTo(4L);
+    }
+
+    // ---- 수동 환불 확정 · 복원 생략 종결 (#17 A3) ----
+
+    private static final String REASON = "결제 관리 화면에서 취소 완료 확인";
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"PAYMENT_016", Claim.REFUND_UNCONFIRMED})
+    @DisplayName("수동 환불 확정 — 주문이 취소 요청이면 클레임 REFUNDED(lease) + 주문 취소 완료 + ADMIN 이력(사유)을 같이 저장한다. PG 는 부르지 않는다")
+    void confirmRefundCompletesCancelRequestedOrder(String failure) {
+        // 결과 미확인은 다시 시도 기한(접수 + 14일)이 lease 안에 끝난 뒤에만 확정 대상이다 — 거절은 기한과 무관하다
+        stored(requestedLongAgo(Claim.Status.REFUND_FAILED, null, failure, Duration.ofDays(14).minus(LEASE)));
+        Order order = storedOrder(OrderStatus.CANCEL_REQUESTED);
+
+        Claim refunded = processor(true).confirmRefund(2, 4, REASON, 9);
+
+        assertThat(refunded.status()).isEqualTo(Claim.Status.REFUNDED);
+        assertThat(refunded.attemptCount()).isZero();
+        assertThat(refunded.nextAttemptAt()).isEqualTo(NOW.plus(LEASE));
+        assertThat(refunded.failureCode()).isNull();
+        assertThat(refunded.decision()).isEqualTo(new Claim.Decision(REASON, 9, NOW, failure));
+        assertThat(refunded.version()).isEqualTo(5L);
+        ArgumentCaptor<Order> changed = ArgumentCaptor.forClass(Order.class);
+        ArgumentCaptor<OrderStatusHistory> history = ArgumentCaptor.forClass(OrderStatusHistory.class);
+        verify(orders).saveStatusChange(changed.capture(), history.capture());
+        assertThat(changed.getValue().status()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(changed.getValue().version()).isEqualTo(order.version());
+        assertThat(history.getValue()).extracting(OrderStatusHistory::orderId, OrderStatusHistory::fromStatus, OrderStatusHistory::toStatus,
+                OrderStatusHistory::changedByType, OrderStatusHistory::changedById, OrderStatusHistory::reason)
+            .containsExactly(1L, OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELED, StatusChangedBy.ADMIN, 9L, REASON);
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 — 주문이 이미 취소 완료면 클레임만 바꾼다")
+    void confirmRefundLeavesCanceledOrder() {
+        stored(cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016"));
+        storedOrder(OrderStatus.CANCELED);
+
+        assertThat(processor(true).confirmRefund(2, 4, REASON, 9).status()).isEqualTo(Claim.Status.REFUNDED);
+        verify(orders, never()).saveStatusChange(any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"CANCEL_REQUESTED", "CANCELED"}, mode = EnumSource.Mode.EXCLUDE)
+    @DisplayName("수동 환불 확정 — 주문이 취소 요청 · 취소 완료가 아니면 409 ORDER_041 이고 아무것도 저장하지 않는다")
+    void confirmRefundRejectsUnexpectedOrderStatus(OrderStatus status) {
+        stored(cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016"));
+        storedOrder(status);
+
+        assertCode(() -> processor(true).confirmRefund(2, 4, REASON, 9), OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+        verify(claims, never()).update(any());
+        verify(orders, never()).saveStatusChange(any(), any());
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 — 환불 실패가 아닌 클레임 · 반품은 409 ORDER_041 이고 저장하지 않는다")
+    void confirmRefundRejectsNonRefundFailure() {
+        storedOrder(OrderStatus.CANCEL_REQUESTED);
+        for (Claim claim : List.of(cancellation(Claim.Status.REQUESTED, NOW, null), cancellation(Claim.Status.REFUNDED, NOW, null),
+            cancellation(Claim.Status.COMPLETED, null, null), cancellation(Claim.Status.RESTORATION_FAILED, null, "PRODUCT_028"),
+            new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null, List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)),
+                NOW, 4L))) {
+            when(claims.findById(2L)).thenReturn(Optional.of(claim));
+            assertCode(() -> processor(true).confirmRefund(2, 4, REASON, 9), OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+            assertThat(processor(true).isRefundConfirmable(claim)).as(claim.status().name()).isFalse();
+        }
+        verify(claims, never()).update(any());
+    }
+
+    @Test
+    @DisplayName("결과 미확인 환불은 다시 시도 기한 안이면 확정 409 ORDER_041 · refundConfirmable=false(다시 시도 가능), 기한이 lease 안에 끝나면 반대로 바뀐다")
+    void unconfirmedRefundConfirmableOnlyAfterRetryCloses() {
+        storedOrder(OrderStatus.CANCEL_REQUESTED);
+        Duration closes = Duration.ofDays(14).minus(LEASE);
+        Claim open = stored(requestedLongAgo(Claim.Status.REFUND_FAILED, null, Claim.REFUND_UNCONFIRMED, closes.minusNanos(1_000)));
+
+        assertCode(() -> processor(true).confirmRefund(2, 4, REASON, 9), OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+        assertThat(processor(true).isRefundConfirmable(open)).isFalse();
+        assertThat(processor(true).isRetryable(open)).isTrue();
+        verify(claims, never()).update(any());
+
+        Claim closed = stored(requestedLongAgo(Claim.Status.REFUND_FAILED, null, Claim.REFUND_UNCONFIRMED, closes));
+        assertThat(processor(true).isRetryable(closed)).isFalse();
+        assertThat(processor(true).isRefundConfirmable(closed)).isTrue();
+        assertThat(processor(true).confirmRefund(2, 4, REASON, 9).status()).isEqualTo(Claim.Status.REFUNDED);
+    }
+
+    @Test
+    @DisplayName("결제사가 거절한 환불은 접수 직후(기한 안)에도 확정할 수 있다 — 다시 시도는 닫혀 있다")
+    void rejectedRefundConfirmableRegardlessOfDeadline() {
+        Claim rejected = cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016");
+
+        assertThat(processor(true).isRefundConfirmable(rejected)).isTrue();
+        assertThat(processor(true).isRetryable(rejected)).isFalse();
+    }
+
+    @Test
+    @DisplayName("상세 completable 은 종결 후보와 같다 — 주문 상태 이상(ORDER_STATUS_UNEXPECTED) · 복원 결과 미확인은 false")
+    void completableMatchesCompletionCandidate() {
+        assertThat(processor(true).isCompletable(cancellation(Claim.Status.RESTORATION_FAILED, null, "PRODUCT_028"))).isTrue();
+        assertThat(processor(true).isCompletable(cancellation(Claim.Status.RESTORATION_FAILED, null, OrderCancellationProcessor.ORDER_STATUS_UNEXPECTED)))
+            .isFalse();
+        assertThat(processor(true).isCompletable(cancellation(Claim.Status.RESTORATION_FAILED, null, Claim.RESTORATION_UNCONFIRMED))).isFalse();
+        assertThat(processor(true).isCompletable(cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016"))).isFalse();
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 — 재시도 스케줄러가 꺼져 있으면 읽기 전에 503 ORDER_040 이다(이어지는 복원을 따라갈 쪽이 없다)")
+    void confirmRefundClosedWhenSchedulerDisabled() {
+        Claim failed = cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016");
+
+        assertCode(() -> processor(false).confirmRefund(2, 4, REASON, 9), OrderErrorCode.CLAIM_RETRY_UNAVAILABLE);
+        verify(claims, never()).findById(2L);
+        assertThat(processor(false).isRefundConfirmable(failed)).isFalse();
+        assertThat(processor(true).isRefundConfirmable(failed)).isTrue();
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 · 종결 — 화면 버전이 다르면 409 ORDER_037 이다. 이미 바뀐 뒤의 같은 요청(더블클릭 · 재전송)도 이 응답이다")
+    void decisionsRejectStaleVersion() {
+        stored(cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016"));
+        assertCode(() -> processor(true).confirmRefund(2, 3, REASON, 9), OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        stored(cancellation(Claim.Status.RESTORATION_FAILED, null, "PRODUCT_028"));
+        assertCode(() -> processor(true).complete(2, 3, REASON, 9), OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        // 확정이 이미 커밋돼 REFUNDED(저장 버전 4)가 된 뒤 낡은 화면 버전(3)으로 다시 온 요청
+        stored(cancellation(Claim.Status.REFUNDED, NOW, null));
+        assertCode(() -> processor(true).confirmRefund(2, 3, REASON, 9), OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        verify(claims, never()).update(any());
+        verify(orders, never()).findById(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정 — 버전 대조 뒤 클레임 · 주문 저장에서 지면(스케줄러 · 늦은 환불 결과 · 다른 운영자가 먼저 커밋) 409 ORDER_037 이다")
+    void confirmRefundLostSaveIsConcurrentChange() {
+        when(claims.findById(2L)).thenReturn(Optional.of(cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016")));
+        storedOrder(OrderStatus.CANCEL_REQUESTED);
+        when(claims.update(any())).thenThrow(new ObjectOptimisticLockingFailureException("ClaimEntity", 2L));
+
+        assertCode(() -> processor(true).confirmRefund(2, 4, REASON, 9), OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        verify(orders, never()).saveStatusChange(any(), any());
+
+        stored(cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016"));
+        org.mockito.Mockito.doThrow(new ObjectOptimisticLockingFailureException("OrderEntity", 1L)).when(orders).saveStatusChange(any(), any());
+
+        assertCode(() -> processor(true).confirmRefund(2, 4, REASON, 9), OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+    }
+
+    @Test
+    @DisplayName("없는 클레임의 확정 · 종결은 404 ORDER_032 다")
+    void decisionsNotFound() {
+        when(claims.findById(2L)).thenReturn(Optional.empty());
+
+        assertCode(() -> processor(true).confirmRefund(2, 4, REASON, 9), OrderErrorCode.NOT_FOUND_CLAIM);
+        assertCode(() -> processor(true).complete(2, 4, REASON, 9), OrderErrorCode.NOT_FOUND_CLAIM);
+    }
+
+    @Test
+    @DisplayName("복원 생략 종결 — 확정 실패 코드의 RESTORATION_FAILED + 주문 취소 완료면 COMPLETED 로 닫고 주문은 바꾸지 않는다. 스케줄러가 꺼져 있어도 된다")
+    void completeClosesRejectedRestoration() {
+        stored(cancellation(Claim.Status.RESTORATION_FAILED, null, "PRODUCT_028"));
+        storedOrder(OrderStatus.CANCELED);
+
+        Claim completed = processor(false).complete(2, 4, "재고 조정 화면에서 수량을 맞춤", 9);
+
+        assertThat(completed.status()).isEqualTo(Claim.Status.COMPLETED);
+        assertThat(completed.failureCode()).isNull();
+        assertThat(completed.nextAttemptAt()).isNull();
+        assertThat(completed.decision()).isEqualTo(new Claim.Decision("재고 조정 화면에서 수량을 맞춤", 9, NOW, "PRODUCT_028"));
+        assertThat(completed.version()).isEqualTo(5L);
+        verify(orders, never()).saveStatusChange(any(), any());
+    }
+
+    @Test
+    @DisplayName("복원 생략 종결 — 결과 미확인(RESTORATION_UNCONFIRMED) · 환불 실패 · 완료는 409 ORDER_041 이다(실제로 복원됐을 수 있다 — 다시 시도)")
+    void completeRejectsUnconfirmedAndOtherClaims() {
+        storedOrder(OrderStatus.CANCELED);
+        for (Claim claim : List.of(cancellation(Claim.Status.RESTORATION_FAILED, null, Claim.RESTORATION_UNCONFIRMED),
+            cancellation(Claim.Status.REFUND_FAILED, null, "PAYMENT_016"), cancellation(Claim.Status.COMPLETED, null, null),
+            cancellation(Claim.Status.REFUNDED, NOW, null))) {
+            when(claims.findById(2L)).thenReturn(Optional.of(claim));
+            assertCode(() -> processor(true).complete(2, 4, REASON, 9), OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+        }
+        verify(claims, never()).update(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = "CANCELED", mode = EnumSource.Mode.EXCLUDE)
+    @DisplayName("복원 생략 종결 — 주문이 취소 완료가 아니면 409 ORDER_041 이다")
+    void completeRequiresCanceledOrder(OrderStatus status) {
+        stored(cancellation(Claim.Status.RESTORATION_FAILED, null, OrderCancellationProcessor.ORDER_STATUS_UNEXPECTED));
+        storedOrder(status);
+
+        assertCode(() -> processor(true).complete(2, 4, REASON, 9), OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+        verify(claims, never()).update(any());
+    }
+
+    @Test
+    @DisplayName("복원 생략 종결 — 버전 대조 뒤 저장에서 지면 409 ORDER_037 이다")
+    void completeLostSaveIsConcurrentChange() {
+        when(claims.findById(2L)).thenReturn(Optional.of(cancellation(Claim.Status.RESTORATION_FAILED, null, "PRODUCT_028")));
+        storedOrder(OrderStatus.CANCELED);
+        when(claims.update(any())).thenThrow(new ObjectOptimisticLockingFailureException("ClaimEntity", 2L));
+
+        assertCode(() -> processor(true).complete(2, 4, REASON, 9), OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
     }
 }

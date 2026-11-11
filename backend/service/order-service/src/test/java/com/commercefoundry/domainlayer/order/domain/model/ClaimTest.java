@@ -314,6 +314,70 @@ class ClaimTest {
         }
     }
 
+    @Test
+    @DisplayName("수동 환불 확정 — 저장된 REFUND_FAILED 만 REFUNDED(횟수 0, 다음 시각 마이크로초, 실패 코드 비움)로 가고 결정에 직전 실패 코드를 남긴다 (#17 A3)")
+    void adminRefundConfirmation() {
+        for (String code : List.of("PAYMENT_016", Claim.REFUND_UNCONFIRMED)) {
+            Claim failed = requested().retryLater(NOW, MINUTE, HOUR).failRefund(code);
+            Claim.Decision decision = new Claim.Decision("결제 관리 화면에서 취소 완료 확인", 9, NOW, code);
+
+            Claim refunded = failed.confirmRefundByAdmin(decision, NOW.plus(LEASE));
+
+            assertThat(refunded.status()).isEqualTo(Claim.Status.REFUNDED);
+            assertThat(refunded.attemptCount()).isZero();
+            assertThat(refunded.nextAttemptAt()).isEqualTo(Instant.parse("2026-11-06T00:02:00.123456Z"));
+            assertThat(refunded.failureCode()).isNull();
+            assertThat(refunded.decision()).isEqualTo(decision);
+            assertThat(refunded.hasSameRefundRequest(failed)).isTrue();
+            assertThat(refunded.version()).isEqualTo(failed.version());
+        }
+    }
+
+    @Test
+    @DisplayName("수동 환불 확정은 실패 코드가 다른 결정 · 환불 실패가 아닌 상태 · 저장 전 · 반품 · 결정 없음을 거부한다")
+    void adminRefundConfirmationRejections() {
+        Claim failed = requested().failRefund("PAYMENT_016");
+        assertThatThrownBy(() -> failed.confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, "PAYMENT_019"), NOW))
+            .as("화면이 본 실패와 지금 실패가 다르다").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> failed.confirmRefundByAdmin(null, NOW)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> failed.confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, "PAYMENT_016"), null)).isInstanceOf(NullPointerException.class);
+        Claim requested = requested();
+        Claim restorationFailed = requested.markRefunded(NOW).failRestoration("PAYMENT_016");
+        for (Claim claim : List.of(requested, requested.markRefunded(NOW), requested.markRefunded(NOW).complete(), restorationFailed)) {
+            assertThatThrownBy(() -> claim.confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, "PAYMENT_016"), NOW))
+                .as(claim.status().name()).isInstanceOf(IllegalStateException.class);
+        }
+        Claim unsaved = new Claim(failed.id(), failed.orderId(), failed.requestKey(), failed.type(), failed.status(), failed.expectedRefund(), failed.paymentId(),
+            0, null, "PAYMENT_016", failed.items(), null, null);
+        assertThatThrownBy(() -> unsaved.confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, "PAYMENT_016"), NOW)).isInstanceOf(IllegalStateException.class);
+        Claim returned = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+            List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
+        assertThatThrownBy(() -> returned.confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, "PAYMENT_016"), NOW))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> returned.completeByAdmin(new Claim.Decision("확인", 9, NOW, "PRODUCT_028"))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("복원 생략 종결 — 저장된 RESTORATION_FAILED 만 COMPLETED(다음 시각 · 실패 코드 없음)로 가고 결정에 직전 실패 코드를 남긴다 (#17 A3)")
+    void adminCompletion() {
+        Claim failed = requested().markRefunded(NOW).failRestoration("PRODUCT_028");
+        Claim.Decision decision = new Claim.Decision("재고 조정으로 맞춤", 9, NOW, "PRODUCT_028");
+
+        Claim completed = failed.completeByAdmin(decision);
+
+        assertThat(completed.status()).isEqualTo(Claim.Status.COMPLETED);
+        assertThat(completed.nextAttemptAt()).isNull();
+        assertThat(completed.failureCode()).isNull();
+        assertThat(completed.decision()).isEqualTo(decision);
+        assertThat(completed.hasRecordedRefund()).isTrue();
+        assertThatThrownBy(() -> failed.completeByAdmin(new Claim.Decision("확인", 9, NOW, "PRODUCT_027"))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> completed.completeByAdmin(decision)).as("이미 종결").isInstanceOf(IllegalStateException.class);
+        Claim refundFailed = requested().failRefund("PRODUCT_028");
+        assertThatThrownBy(() -> refundFailed.completeByAdmin(decision)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested().completeByAdmin(decision)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> failed.completeByAdmin(null)).isInstanceOf(NullPointerException.class);
+    }
+
     private static Claim cancellation(Claim.Status status, Instant next, String failureCode, List<ClaimItem> items) {
         return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 0, next, failureCode, items, NOW, 0L);
     }

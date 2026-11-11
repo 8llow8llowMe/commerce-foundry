@@ -90,5 +90,7 @@ public final class OrderValidationMessage {
     public static final String RETURN_REASON_INVALID = "ORDER_168:반품 사유(reason)는 CHANGE_OF_MIND, DEFECTIVE, WRONG_ITEM 중 하나여야 합니다.";
     /** 어드민 클레임 재시도의 화면 버전 (#17 A2b) — 상세 조회 응답의 {@code recovery.version} 을 그대로 보낸다. */
     public static final String CLAIM_EXPECTED_VERSION = "ORDER_169:expectedVersion 은 필수이며 0 이상이어야 합니다.";
+    /** 수동 환불 확정 · 복원 생략 종결의 사유 (#17 A3). 길이는 {@link #REASON_LENGTH_MAX}, 제어 문자는 {@link #REASON_INVALID_CHARACTER} 다. */
+    public static final String CLAIM_DECISION_REASON_REQUIRED = "ORDER_170:처리 사유(reason)를 적어 주세요.";
     public static final String IDEMPOTENCY_KEY_FORMAT ="ORDER_198:Idempotency-Key 는 완전한 UUID 형식이어야 합니다.";
 }
