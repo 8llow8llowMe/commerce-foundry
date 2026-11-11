@@ -152,6 +152,10 @@ export function quoteFailure(
     return { kind: 'cart', message: textOf(cause.code, t.cartInvalid) };
   }
   // 그 밖의 검증(줄 · 맞춤 입력 형식)은 장바구니 데이터 문제다 — 고칠 곳은 장바구니다
-  if (cause.kind === 'validation') return { kind: 'cart', message: t.cartInvalid };
+  // 맞춤 입력 value 의 제어 문자(400 ORDER_143, #426)는 고칠 곳이 장바구니라고 알린다 — 견적 배송지에는 자유 텍스트가 없다
+  if (cause.kind === 'validation') {
+    const invalidCharacter = cause.code === 'ORDER_143' && t.errors.ORDER_143;
+    return { kind: 'cart', message: invalidCharacter || t.cartInvalid };
+  }
   return { kind: 'retry', message: (cause.code && t.errors[cause.code]) || t.quoteFailed };
 }

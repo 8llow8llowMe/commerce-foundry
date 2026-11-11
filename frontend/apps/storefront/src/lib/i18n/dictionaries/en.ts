@@ -369,6 +369,21 @@ export const en: Dictionary = {
     orderFailed: 'We couldn’t place your order. Please try again in a moment.',
     toPayment: 'Your order has been placed. Taking you to payment…',
     ordersLink: 'View your orders',
+    /** Control characters in a shipping address field (400 ORDER_143) — {field}: a name below */
+    invalidCharacterField:
+      'The {field} in the shipping address contains characters that cannot be used (such as line breaks or tabs). Please edit the address and place the order again.',
+    invalidCharacterAddress:
+      'The shipping address contains characters that cannot be used (such as line breaks or tabs). Please edit the address and place the order again.',
+    addressFieldNames: {
+      recipientName: 'recipient name',
+      recipientPhone: 'phone number',
+      postalCode: 'postal code',
+      addressLine1: 'address',
+      addressLine2: 'address line 2',
+      city: 'city',
+      stateProvince: 'state or province',
+      deliveryMemo: 'delivery note',
+    } as Record<string, string>,
     orderErrors: {
       ORDER_010: 'The total has changed. Please check the new total and place the order again.',
       ORDER_016: 'Some items are out of stock. Please check the quantities in your bag.',
@@ -406,6 +421,8 @@ export const en: Dictionary = {
       ORDER_122: 'Please check the country of the shipping address.',
       ORDER_123: 'Addresses in Korea need a postal code. Please edit the address.',
       ORDER_124: 'The postal code format is not valid.',
+      ORDER_143:
+        'The made-to-order details contain characters that cannot be used (such as line breaks or tabs). Please check the item in your bag.',
       GATEWAY_006: 'Too many requests. Please recalculate in a moment.',
     } as Record<string, string>,
   },

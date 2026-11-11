@@ -56,6 +56,34 @@ describe('toAddressBody', () => {
     });
   });
 
+  it('제어 문자는 지우고 탭 · 개행은 공백으로 바꾼다 — 주문 생성이 400 ORDER_143 으로 거절한다 (#708)', () => {
+    const body = toAddressBody(
+      {
+        ...emptyDraft('US'),
+        label: '\u0000',
+        recipientName: '홍\u0000길동',
+        recipientPhone: '010\t1234',
+        postalCode: '\u0007',
+        addressLine1: '테스트로\r\n1',
+        addressLine2: '101호\u007f',
+        city: 'New\tYork',
+        stateProvince: '\ud800NY',
+      },
+      false,
+    );
+    expect(body).toEqual({
+      label: null,
+      recipientName: '홍길동',
+      recipientPhone: '010 1234',
+      countryCode: 'US',
+      postalCode: null,
+      addressLine1: '테스트로 1',
+      addressLine2: '101호',
+      city: 'New York',
+      stateProvince: 'NY',
+    });
+  });
+
   it('국내는 화면에 없는 도시 · 주 값을 보내지 않는다 (해외에서 국내로 바꾼 경우)', () => {
     const draft = { ...emptyDraft('KR'), city: 'Tokyo', stateProvince: 'Tokyo-to' };
     expect(toAddressBody(draft, false)).toMatchObject({ city: null, stateProvince: null });

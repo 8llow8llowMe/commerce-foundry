@@ -418,6 +418,23 @@ export const ko = {
     toPayment: '주문이 접수되었습니다. 결제 화면으로 이동합니다.',
     /** 활성 주문 시도 상한(409 ORDER_022) 아래 — 결제 대기 주문이 있으면 이어 결제할 수 있다 */
     ordersLink: '주문 내역 보기',
+    /** 배송지 칸의 제어 문자(400 ORDER_143) — {field}: 아래 칸 이름 */
+    invalidCharacterField:
+      '배송지의 {field}에 쓸 수 없는 문자(줄바꿈 · 탭 등)가 있습니다. 배송지를 수정한 뒤 다시 주문해 주세요.',
+    /** 어느 칸인지 모를 때 */
+    invalidCharacterAddress:
+      '배송지에 쓸 수 없는 문자(줄바꿈 · 탭 등)가 있습니다. 배송지를 수정한 뒤 다시 주문해 주세요.',
+    /** 주문 배송지 칸 이름(오류 fieldErrors 의 shippingAddress.* 뒤) */
+    addressFieldNames: {
+      recipientName: '받는 사람',
+      recipientPhone: '연락처',
+      postalCode: '우편번호',
+      addressLine1: '주소',
+      addressLine2: '상세 주소',
+      city: '도시',
+      stateProvince: '주 · 도',
+      deliveryMemo: '배송 요청 사항',
+    } as Record<string, string>,
     /**
      * 주문 생성 오류 코드별 문구 — 없으면 위 errors(견적과 같은 코드), 그다음 국문 서버 문구 · 범용 문구다.
      * 배송지 칸 코드(117~128 · 138~140)의 서버 문구에는 필드 이름이 섞여 있어 여기 문구만 쓴다.
@@ -457,6 +474,9 @@ export const ko = {
       ORDER_122: '배송지의 국가를 확인해 주세요.',
       ORDER_123: '국내 배송지는 우편번호가 필요합니다. 배송지를 수정해 주세요.',
       ORDER_124: '우편번호 형식이 올바르지 않습니다. 국내는 숫자 5자리입니다.',
+      /** 맞춤 입력 value 의 제어 문자(400 ORDER_143) — 견적 · 주문 모두 고칠 곳은 장바구니다 */
+      ORDER_143:
+        '맞춤 제작 입력에 쓸 수 없는 문자(줄바꿈 · 탭 등)가 있습니다. 장바구니에서 해당 상품을 확인해 주세요.',
       GATEWAY_006: '요청이 너무 많습니다. 잠시 후 다시 계산해 주세요.',
     } as Record<string, string>,
   },

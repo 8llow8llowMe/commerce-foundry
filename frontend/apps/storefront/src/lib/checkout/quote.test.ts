@@ -114,6 +114,17 @@ describe('quoteFailure', () => {
     }
   });
 
+  it('맞춤 입력의 제어 문자(400 ORDER_143)는 장바구니 자리에 사전 문구로 둔다 (#708)', () => {
+    const custom = apiError('validation', 400, 'ORDER_143', '서버 문구', [
+      { field: 'items[0].customOptions[0].value', code: 'ORDER_143', message: '서버 문구' },
+    ]);
+    expect(ko_(custom)).toEqual({ kind: 'cart', message: t.errors.ORDER_143 });
+    expect(quoteFailure(custom, en.checkout, 'en')).toEqual({
+      kind: 'cart',
+      message: en.checkout.errors.ORDER_143,
+    });
+  });
+
   it('배송지 칸 검증은 fieldErrors 의 코드로 배송지 자리에 둔다(배송지 없음 포함)', () => {
     const postal = apiError('validation', 400, 'ORDER_124', '형식', [
       { field: 'destination.postalCode', code: 'ORDER_124', message: '형식' },

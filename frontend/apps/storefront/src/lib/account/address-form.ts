@@ -1,4 +1,5 @@
 import { ApiError } from '@cf/api-client';
+import { stripRejectedCharacters } from '@/lib/cart/custom-input';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import type { ShippingAddress, ShippingAddressBody } from './types';
 
@@ -65,20 +66,22 @@ export function draftFrom(address: ShippingAddress): AddressDraft {
 
 /**
  * 폼 값을 요청 본문으로. 앞뒤 공백을 지우고 빈 선택 칸은 null 이다 — 전체 교체(PUT)는 보내지 않은 칸을 지우므로 언제나 모든 칸을 싣는다.
- * 형식(연락처 · 우편번호 · 국가별 필수 칸)은 BE 가 정본이라 여기서 거르지 않는다. `withDefault` 는 추가(POST)만 — PUT 은 기본 여부를 무시한다.
+ * 형식(연락처 · 우편번호 · 국가별 필수 칸)은 BE 가 정본이라 여기서 거르지 않는다. 제어 문자 · 짝 없는 서로게이트는 지운다(탭 · 개행은 공백). `withDefault` 는 추가(POST)만 — PUT 은 기본 여부를 무시한다.
  */
 export function toAddressBody(draft: AddressDraft, withDefault: boolean): ShippingAddressBody {
-  const optional = (value: string) => value.trim() || null;
+  // 제어 문자는 입력 단계에서 지우지만(AddressForm) 보내기 직전에도 한 번 더 지운다 — 주문 생성이 400 ORDER_143 으로 거절한다
+  const clean = (value: string) => stripRejectedCharacters(value).trim();
+  const optional = (value: string) => clean(value) || null;
   const countryCode = draft.countryCode.trim().toUpperCase();
   // 국내는 도시 · 주 칸을 보이지 않는다 — 해외에서 국내로 바꾼 뒤 숨은 값이 저장되지 않게 비운다
   const domestic = countryCode === DOMESTIC_COUNTRY;
   const body: ShippingAddressBody = {
     label: optional(draft.label),
-    recipientName: draft.recipientName.trim(),
-    recipientPhone: draft.recipientPhone.trim(),
+    recipientName: clean(draft.recipientName),
+    recipientPhone: clean(draft.recipientPhone),
     countryCode,
     postalCode: optional(draft.postalCode),
-    addressLine1: draft.addressLine1.trim(),
+    addressLine1: clean(draft.addressLine1),
     addressLine2: optional(draft.addressLine2),
     city: domestic ? null : optional(draft.city),
     stateProvince: domestic ? null : optional(draft.stateProvince),
