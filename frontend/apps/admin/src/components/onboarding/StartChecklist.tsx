@@ -4,6 +4,7 @@ import { Button } from '@cf/ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useId, useRef, useSyncExternalStore } from 'react';
+import { formatDateTime } from '@/lib/display/text';
 import { tourNoteOf, type TaskProgress, type TaskView } from '@/lib/onboarding/start-tasks';
 import {
   onboardingTasks,
@@ -72,6 +73,29 @@ const PROGRESS_CLASS: Record<TaskProgress, string> = {
   unknown: 'text-danger',
 };
 
+/** 완료면 처음 해낸 날을 붙인다(`완료 · 2026.10.01`). 날짜는 이 컴퓨터 시간대다 */
+export function progressLabel(view: Pick<TaskView, 'progress' | 'completedAt'>): string {
+  const text = PROGRESS_TEXT[view.progress];
+  if (view.progress !== 'done' || !view.completedAt) return text;
+  const date = formatDateTime(view.completedAt).slice(0, 10);
+  return /^\d{4}\.\d{2}\.\d{2}$/.test(date) ? `${text} · ${date}` : text;
+}
+
+type Focusable = { focus: () => void };
+
+/**
+ * 나중에 · 다시 보기는 누른 버튼이 사라진다 — 키보드 포커스를 그 자리에 새로 생긴 버튼으로 옮긴다(문서 처음으로 튀지 않게).
+ * 숨겼으면 "시작 체크리스트 보기", 다시 펼쳤으면 카드 머리의 첫 버튼(접기)이다.
+ */
+export function focusAfterSwap(
+  pref: StartCardPref,
+  show: Focusable | null,
+  actions: { querySelector: (selector: 'button') => Focusable | null } | null,
+): void {
+  if (pref === 'hidden') show?.focus();
+  else actions?.querySelector('button')?.focus();
+}
+
 export type StartChecklistViewProps = {
   tasks: TasksState;
   tours: TourState;
@@ -96,12 +120,10 @@ export function StartChecklistView({
   const actionsRef = useRef<HTMLDivElement>(null);
   const focusAfter = useRef(false);
 
-  // 나중에 · 다시 보기는 누른 버튼이 사라진다 — 키보드 포커스를 그 자리에 생긴 버튼으로 옮긴다(문서 처음으로 튀지 않게)
   useEffect(() => {
     if (!focusAfter.current) return;
     focusAfter.current = false;
-    if (pref === 'hidden') showRef.current?.focus();
-    else actionsRef.current?.querySelector('button')?.focus();
+    focusAfterSwap(pref, showRef.current, actionsRef.current);
   }, [pref]);
 
   const swap = (next: StartCardPref) => {
@@ -118,7 +140,7 @@ export function StartChecklistView({
         ref={showRef}
         type="button"
         onClick={() => swap('open')}
-        className="self-start rounded-md px-2 py-1 text-sm text-muted-fg underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+        className="inline-flex min-h-10 items-center self-start rounded-md px-2 text-sm text-muted-fg underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-primary"
       >
         시작 체크리스트 보기
       </button>
@@ -222,19 +244,24 @@ function TaskItem({
         <p
           className={`mt-0.5 text-sm font-medium ${checking ? 'text-muted-fg' : PROGRESS_CLASS[progress]}`}
         >
-          {checking ? '확인 중…' : PROGRESS_TEXT[progress]}
+          {checking ? '확인 중…' : progressLabel(view)}
         </p>
         <p className="mt-1 text-sm text-muted-fg">{task.description}</p>
         {tourNote && <p className="mt-1 text-xs text-muted-fg">{tourNote}</p>}
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">
         {task.tourId && (
-          <Button variant="secondary" onClick={onOpenWithTour}>
+          <Button
+            variant="secondary"
+            onClick={onOpenWithTour}
+            aria-label={`${task.title} — 안내와 함께 열기`}
+          >
             안내와 함께 열기
           </Button>
         )}
         <Link
           href={task.href}
+          aria-label={`${task.title} — ${progress === 'done' ? '화면 보기' : '바로 하기'}`}
           className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-fg hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
           {progress === 'done' ? '화면 보기' : '바로 하기'}
