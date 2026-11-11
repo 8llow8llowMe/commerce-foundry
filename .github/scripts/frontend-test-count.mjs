@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const REQUIRED = ['packages/api-client/', 'packages/ui/'];
+const REQUIRED = ['packages/api-client/', 'packages/ui/', 'packages/sanitize/'];
 
 const reportPath = process.argv[2];
 if (!reportPath) {
