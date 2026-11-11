@@ -54,6 +54,17 @@ public interface ObjectStorageClient {
     byte[] readRange(String key, int length, String expectedETag);
 
     /**
+     * 객체 전체를 최대 {@code maxBytes} 바이트까지 읽는다 — 검증한 바이트를 그대로 써야 하는 작은 객체(해시 재검증 등)용이다.
+     * {@code maxBytes} 보다 길면 나머지를 내려받지 않고 끊은 뒤 {@link StorageException.Reason#TOO_LARGE} 다.
+     * 없으면 {@link StorageException.Reason#NOT_FOUND}, ETag 가 {@code expectedETag} 와 다르면 {@link StorageException.Reason#CHANGED},
+     * 빈 객체면 빈 배열이다. 상한만큼 메모리에 올릴 수 있으므로 서비스는 작은 상한(수 MiB)만 넘긴다.
+     *
+     * @param maxBytes     1 이상, {@code Integer.MAX_VALUE} 미만
+     * @param expectedETag {@link #head} 가 돌려준 {@link StoredObject#eTag()} 그대로(따옴표 포함). 비면 {@link IllegalArgumentException}
+     */
+    byte[] read(String key, int maxBytes, String expectedETag);
+
+    /**
      * 같은 버킷 안에서 서버 측 복사한다. 메타데이터는 원본을 잇지 않고 인자로 바꾼다(업로더가 붙인 메타데이터가 따라오지 않게).
      * 원본이 없으면 {@link StorageException.Reason#NOT_FOUND}, 원본 ETag 가 {@code expectedETag} 와 다르면
      * {@link StorageException.Reason#CHANGED} 다.

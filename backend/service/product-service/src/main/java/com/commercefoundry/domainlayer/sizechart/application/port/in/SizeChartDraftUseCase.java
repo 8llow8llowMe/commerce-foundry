@@ -4,7 +4,10 @@ import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.S
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftApplyResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftSummaryResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageInspectionResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageSourceResponse;
 import com.commercefoundry.persistence.dto.PageResponse;
+import java.util.List;
 import com.commercefoundry.domainlayer.sizechart.application.command.ProductSizeChartUpsertCommand;
 import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftCreateCommand;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
@@ -15,6 +18,12 @@ import org.springframework.data.domain.Page;
 
 public interface SizeChartDraftUseCase {
     SizeChartDraftAcceptedResponse createAdmin(SizeChartDraftCreateCommand command);
+
+    /** IMAGE 입력 후보. 내려받지 않는다. */
+    List<SizeChartImageSourceResponse> imageSourcesAdmin(long productId);
+
+    /** 승인 전 확인. 이 상품 후보의 관리 키만 읽는다. */
+    SizeChartImageInspectionResponse inspectImageAdmin(long productId, String sourceId);
 
     SizeChartDraftResponse getAdmin(long draftId);
 

@@ -44,6 +44,7 @@ class StorageStartupGuardTest {
             assertDisabled(() -> client.presignPut("uploads/a.jpg", "image/jpeg", 10));
             assertDisabled(() -> client.head("uploads/a.jpg"));
             assertDisabled(() -> client.readRange("uploads/a.jpg", 12, "\"etag\""));
+            assertDisabled(() -> client.read("uploads/a.jpg", 12, "\"etag\""));
             assertDisabled(() -> client.copy("uploads/a.jpg", "products/1/2.jpg", "image/jpeg", null, "\"etag\""));
             assertDisabled(() -> client.delete("uploads/a.jpg"));
             assertDisabled(() -> client.put("migrated/a.jpg", new byte[] {1}, "image/jpeg", null));

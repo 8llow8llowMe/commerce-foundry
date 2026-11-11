@@ -101,6 +101,8 @@ class SizeChartDraftApplicationPersistenceTest {
     @MockitoBean private SnowflakeIdGenerator ids;
     @MockitoBean private SizeChartGenerationPort generation;
     @MockitoBean private com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftApplyProcessor applyProcessor;
+    @MockitoBean private com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor imageSources;
+    @MockitoBean private com.commercefoundry.domainlayer.product.application.service.processor.ProductImageLookupProcessor productImages;
 
     @BeforeEach
     void setup() {

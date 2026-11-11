@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDr
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartException;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftSummaryInfo;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartGenerationRegistration;
@@ -44,7 +45,9 @@ public class SizeChartDraftProcessor {
     private final SizeChartDraftProperties properties;
     private final SizeChartDraftValidationProcessor validation;
 
-    public SizeChartDraft createOrReplay(SizeChartDraftCreateCommand command, String requestHash, Map<Long, Product> products) {
+    /** @param images IMAGE 입력에서 트랜잭션 밖에서 재검증을 마친 승인 이미지. TEXT 면 비어 있다 */
+    public SizeChartDraft createOrReplay(SizeChartDraftCreateCommand command, String requestHash, Map<Long, Product> products,
+        List<SizeChartDraftImage> images) {
         Optional<SizeChartDraft> existing = findReplay(command, requestHash);
         if (existing.isPresent()) {
             return existing.get();
@@ -58,7 +61,8 @@ public class SizeChartDraftProcessor {
         var columns = templates.findColumns(template.id()).stream()
             .sorted(Comparator.comparingInt(SizeChartTemplateColumn::displayOrder).thenComparingLong(SizeChartTemplateColumn::id)).toList();
         String templateJson = validation.template(template, columns);
-        String sourceJson = validation.source(command, template, columns);
+        String sourceJson = "IMAGE".equals(command.mode())
+            ? validation.imageSource(template, columns, images) : validation.source(command, template, columns);
         var chart = charts.findByProductId(command.productId()).orElse(null);
         var captured = new SizeChartDraft.Input(command.productId(), template.id(), template.revision(), command.actorId(), command.idempotencyKey(),
             requestHash, "0".repeat(64), sourceJson, templateJson, chart == null ? null : chart.id(), chart == null ? null : chart.revision());

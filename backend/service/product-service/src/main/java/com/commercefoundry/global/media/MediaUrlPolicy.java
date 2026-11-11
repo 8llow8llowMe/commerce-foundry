@@ -72,6 +72,17 @@ public final class MediaUrlPolicy {
     }
 
     /**
+     * 허용 주소({@link #isAllowed})면 공개 주소 뒤의 저장소 키 원문이다. 퍼센트 인코딩이 있으면 비어 있다 — 인코딩을 풀어 키를 추정하지 않는다.
+     * I/O 가 없다. 키가 실제로 있는지, 어느 자원 소속인지는 호출한 쪽이 따로 확인한다.
+     */
+    public java.util.Optional<String> keyOf(String url) {
+        if (!isAllowed(url) || url.indexOf('%') >= 0) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(url.substring(baseUrl.length() + 1));
+    }
+
+    /**
      * 키(공개 주소 + {@code /} 뒤)는 허용 문자 집합으로만 판정한다 — 영숫자 · {@code . _ ~ - /} 와 {@code %XX}(16진수 두 자리) 퍼센트 인코딩만 받는다.
      * 빈 키, {@code /} 로 시작하는 키(경계의 {@code //}), 연속된 {@code //}, {@code /} 로 끝나는 키(빈 마지막 구간)는 거절한다.
      *

@@ -18,7 +18,11 @@ import org.junit.jupiter.api.Test;
 
 class SizeChartDraftInputProcessorTest {
     private final SizeChartDraftRepositoryPort repository = mock(SizeChartDraftRepositoryPort.class);
-    private final SizeChartDraftInputProcessor processor = new SizeChartDraftInputProcessor(repository, Clock.fixed(NOW, ZoneOffset.UTC));
+    private final SizeChartDraftInputProcessor processor = new SizeChartDraftInputProcessor(repository, Clock.fixed(NOW, ZoneOffset.UTC),
+        new SizeChartDraftValidationProcessor());
+    private static final String KEY = "products/10/4611686018427387905.png";
+    private static final String IMAGE_SOURCE = "{\"mode\":\"IMAGE\",\"images\":[{\"key\":\"" + KEY + "\",\"sha256\":\"" + "b".repeat(64)
+        + "\",\"contentType\":\"image/png\",\"length\":12}]}";
 
     @Test
     void returnsStoredSnapshotsEvenBeforeRegistrationResponseBindsJob() {
@@ -28,7 +32,31 @@ class SizeChartDraftInputProcessorTest {
         assertThat(info.inputHash()).isEqualTo(draft().input().inputHash());
         assertThat(info.sourceJson()).isEqualTo(draft().input().sourceJson());
         assertThat(info.templateJson()).isEqualTo(draft().input().templateJson());
+        assertThat(info.mode()).isEqualTo("TEXT");
+        assertThat(info.images()).isEmpty();
         assertThat(info.toString()).doesNotContain("M 40", "columns");
+    }
+
+    @Test
+    void imageInputExposesOrderHashAndTypeButNeverTheStorageKey() {
+        when(repository.findById(7)).thenReturn(Optional.of(imageDraft()));
+        var info = processor.generationInput(7);
+        assertThat(info.mode()).isEqualTo("IMAGE");
+        assertThat(info.images()).extracting(i -> i.sha256() + "|" + i.contentType()).containsExactly("b".repeat(64) + "|image/png");
+        assertThat(info.sourceJson()).doesNotContain(KEY, "key").contains("b".repeat(64));
+        assertThat(processor.generationImage(7, 0).key()).isEqualTo(KEY);
+        assertThatThrownBy(() -> processor.generationImage(7, 1)).isInstanceOfSatisfying(SizeChartDraftTransportException.class,
+            exception -> assertThat(exception.getErrorCode()).isEqualTo(SizeChartDraftTransportErrorCode.NOT_FOUND));
+        when(repository.findById(7)).thenReturn(Optional.of(draft()));
+        assertThatThrownBy(() -> processor.generationImage(7, 0)).isInstanceOfSatisfying(SizeChartDraftTransportException.class,
+            exception -> assertThat(exception.getErrorCode()).isEqualTo(SizeChartDraftTransportErrorCode.NOT_FOUND));
+    }
+
+    private static SizeChartDraft imageDraft() {
+        var d = draft().input();
+        var input = new SizeChartDraft.Input(d.productId(), d.templateId(), d.templateRevision(), d.requestedByMemberId(), d.idempotencyKey(),
+            d.requestHash(), d.inputHash(), IMAGE_SOURCE, d.templateJson(), null, null);
+        return SizeChartDraft.request(7, input, NOW.plusSeconds(60));
     }
 
     @Test

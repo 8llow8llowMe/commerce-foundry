@@ -373,6 +373,45 @@ class S3CompatibleObjectStorageClientTest {
         }
 
         @Test
+        @DisplayName("상한 읽기 — 상한 이하 객체는 전부 돌려주고, 상한 + 1 바이트를 If-Match 로 요청한다")
+        void readReturnsWholeObjectWithinLimit() {
+            Abortable abortable = mock(Abortable.class);
+            when(s3Client.getObject(any(GetObjectRequest.class))).thenReturn(objectStream(new byte[100], 100L, abortable));
+
+            assertThat(client.read(KEY, 100, ETAG)).hasSize(100);
+
+            verify(abortable, never()).abort();
+            ArgumentCaptor<GetObjectRequest> request = ArgumentCaptor.forClass(GetObjectRequest.class);
+            verify(s3Client).getObject(request.capture());
+            assertThat(request.getValue().range()).isEqualTo("bytes=0-100");
+            assertThat(request.getValue().ifMatch()).isEqualTo(ETAG);
+        }
+
+        @Test
+        @DisplayName("상한 읽기 — 상한보다 큰 객체는 나머지를 끊고 TOO_LARGE, 확인 뒤 바뀐 객체(412)는 CHANGED, 빈 객체는 빈 배열")
+        void readRejectsOversizedAndChanged() {
+            Abortable abortable = mock(Abortable.class);
+            when(s3Client.getObject(any(GetObjectRequest.class)))
+                .thenReturn(objectStream(new byte[1000], 1000L, abortable))
+                .thenThrow(s3Exception(412, "PreconditionFailed"))
+                .thenThrow(s3Exception(416, "InvalidRange"));
+
+            assertReason(() -> client.read(KEY, 100, ETAG), Reason.TOO_LARGE);
+            verify(abortable).abort();
+            assertReason(() -> client.read(KEY, 100, ETAG), Reason.CHANGED);
+            assertThat(client.read(KEY, 100, ETAG)).isEmpty();
+        }
+
+        @ParameterizedTest
+        @ValueSource(ints = {0, -1, Integer.MAX_VALUE})
+        @DisplayName("상한 읽기 — 상한이 범위 밖이면 스토리지를 부르지 않는다")
+        void readRequiresValidLimit(int maxBytes) {
+            assertThatThrownBy(() -> client.read(KEY, maxBytes, ETAG)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> client.read(KEY, 100, " ")).isInstanceOf(IllegalArgumentException.class);
+            verifyNoInteractions(s3Client);
+        }
+
+        @Test
         @DisplayName("복사 — 원본 ETag 조건 · 메타데이터 교체를 싣고, 확인 뒤 바뀐 원본(412)은 CHANGED")
         void copySendsSourceETagCondition() {
             when(s3Client.copyObject(any(CopyObjectRequest.class)))

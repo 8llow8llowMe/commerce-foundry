@@ -51,6 +51,50 @@ class SizeChartDraftValidationProcessorTest {
     }
 
     @Test
+    void textRequestHashShapeIsUnchangedForInFlightIdempotencyKeys() {
+        assertThat(validation.normalizedRequestHash(command("S 50 cm")))
+            .isEqualTo(SizeChartImageSourceProcessor.sha256("[10,20,\"TEXT\",\"S 50 cm\"]".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    }
+
+    @Test
+    void imageRequestHashCoversOrderAndApprovedHashesAndRejectsUnsafeShapes() {
+        var a = new SizeChartDraftCreateCommand.Image("IMG-4611686018427387905", "a".repeat(64));
+        var b = new SizeChartDraftCreateCommand.Image("DESC-" + "0".repeat(32), "b".repeat(64));
+        String hash = validation.normalizedRequestHash(image(List.of(a, b), true));
+        assertThat(hash).isEqualTo(validation.normalizedRequestHash(image(List.of(a, b), true)));
+        assertThat(hash).isNotEqualTo(validation.normalizedRequestHash(image(List.of(b, a), true)));
+        assertThat(hash).isNotEqualTo(validation.normalizedRequestHash(image(List.of(a, new SizeChartDraftCreateCommand.Image(b.sourceId(), "c".repeat(64))), true)));
+        for (var unsafe : List.of(image(List.of(), true), image(List.of(a, a), true), image(List.of(a), false),
+            image(List.of(new SizeChartDraftCreateCommand.Image("products/700/1.png", "a".repeat(64))), true),
+            image(List.of(new SizeChartDraftCreateCommand.Image(a.sourceId(), "A".repeat(64))), true),
+            new SizeChartDraftCreateCommand(10, 20, 40, UUID.randomUUID(), "IMAGE", "S 50", List.of(a), true),
+            new SizeChartDraftCreateCommand(10, 20, 40, UUID.randomUUID(), "TEXT", "S 50", List.of(a), true))) {
+            assertThatThrownBy(() -> validation.normalizedRequestHash(unsafe)).isInstanceOf(SizeChartDraftTransportException.class).hasNoCause();
+        }
+    }
+
+    @Test
+    void imageSourceSnapshotRoundTripsAndPublicFormDropsKeys() {
+        var images = List.of(new com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage(
+            "products/700/4611686018427387905.png", "a".repeat(64), "image/png", 12));
+        String source = validation.imageSource(template, columns, images);
+        assertThat(source).isEqualTo("{\"mode\":\"IMAGE\",\"images\":[{\"key\":\"products/700/4611686018427387905.png\",\"sha256\":\""
+            + "a".repeat(64) + "\",\"contentType\":\"image/png\",\"length\":12}]}");
+        assertThat(validation.mode(source)).isEqualTo("IMAGE");
+        assertThat(validation.images(source)).isEqualTo(images);
+        assertThat(validation.publicImageSource(images)).doesNotContain("products/", "key");
+        assertThat(validation.images("{\"mode\":\"TEXT\",\"text\":\"S 50\"}")).isEmpty();
+        assertThatThrownBy(() -> validation.imageSource(template, columns, List.of(new com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage(
+            "products/700/1.gif", "a".repeat(64), "image/gif", 12)))).isInstanceOf(SizeChartDraftTransportException.class);
+        assertThatThrownBy(() -> validation.images("{\"mode\":\"IMAGE\",\"images\":[{\"key\":\"../x\",\"sha256\":\"" + "a".repeat(64)
+            + "\",\"contentType\":\"image/png\",\"length\":12}]}")).isInstanceOf(SizeChartDraftTransportException.class);
+    }
+
+    private static SizeChartDraftCreateCommand image(List<SizeChartDraftCreateCommand.Image> images, boolean confirmed) {
+        return new SizeChartDraftCreateCommand(10, 20, 40, UUID.fromString("11111111-1111-4111-8111-111111111111"), "IMAGE", null, images, confirmed);
+    }
+
+    @Test
     void knownPiiIsMaskedThenRemovedBeforeStorageAndNeverAppearsInErrors() {
         String text = "S Chest 50cm sample@example.invalid 010-1234-5678 " + "\uac15\ub0a8\ub85c 123";
         String source = validation.source(command(text), template, columns);

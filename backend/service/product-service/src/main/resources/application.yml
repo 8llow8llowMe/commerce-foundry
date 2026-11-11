@@ -185,3 +185,5 @@ size-chart:
     cleanup-max-batches-per-run: 10
     cleanup-fixed-delay: 1h
     cleanup-initial-delay: 1m
+    # IMAGE input (managed product image keys only). Keep closed until the operations IMAGE path is verified.
+    image-enabled: false

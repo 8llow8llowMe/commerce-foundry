@@ -39,6 +39,11 @@ final class DisabledObjectStorageClient implements ObjectStorageClient {
     }
 
     @Override
+    public byte[] read(String key, int maxBytes, String expectedETag) {
+        throw disabled(Operation.READ_RANGE);
+    }
+
+    @Override
     public void copy(String sourceKey, String targetKey, String contentType, String cacheControl, String expectedETag) {
         throw disabled(Operation.COPY);
     }
