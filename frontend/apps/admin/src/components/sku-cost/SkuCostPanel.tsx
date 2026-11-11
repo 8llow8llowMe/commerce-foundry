@@ -108,7 +108,9 @@ export function SkuCostPanel({
             <CurrentCostList current={current.current} />
           </section>
           <CostAddForm
-            key={formRevision}
+            // 이력과 같은 자리(형제)라 숫자 key 만 쓰면 둘 다 0 · 1 로 겹쳐 React 가 폼을 새로 그리지 못했다 —
+            // 추가 뒤 "추가 중…" 이 남던 원인(#395 시연). 접두사로 갈라 둔다
+            key={`form-${formRevision}`}
             skuId={skuId}
             current={current.current}
             onAdded={() => {
@@ -122,7 +124,7 @@ export function SkuCostPanel({
             }}
             onDenied={onDenied}
           />
-          <CostHistory key={historyRevision} skuId={skuId} onDenied={onDenied} />
+          <CostHistory key={`history-${historyRevision}`} skuId={skuId} onDenied={onDenied} />
         </>
       )}
     </section>

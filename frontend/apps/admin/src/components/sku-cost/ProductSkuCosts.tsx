@@ -90,9 +90,9 @@ export function ProductSkuCosts({ productId }: { productId: string }) {
             <table className="w-full min-w-[28rem] text-left text-sm">
               <thead className="text-muted-fg">
                 <tr>
-                  <th className="py-2 pr-4 font-medium">옵션</th>
+                  <th className="py-2 pr-4 pl-3 font-medium">옵션</th>
                   <th className="py-2 pr-4 font-medium">판매가</th>
-                  <th className="py-2 font-medium">
+                  <th className="py-2 pr-3 text-right font-medium">
                     <span className="sr-only">동작</span>
                   </th>
                 </tr>
@@ -103,19 +103,23 @@ export function ProductSkuCosts({ productId }: { productId: string }) {
                   return (
                     <tr
                       key={sku.skuId}
-                      className={cx('odd:bg-muted/50', selected === sku.skuId && 'bg-muted')}
+                      // 고른 줄은 배경을 바꾸지 않고 왼쪽 막대로 표시한다 — 줄 배경이 보조 버튼 색과 같아 버튼이 사라져 보였다(#395 시연)
+                      className={cx(
+                        'border-l-4 odd:bg-muted/50',
+                        selected === sku.skuId ? 'border-primary' : 'border-transparent',
+                      )}
                     >
-                      <td className="py-2 pr-4">{label}</td>
+                      <td className="py-2 pr-4 pl-3 font-medium">{label}</td>
                       <td className="py-2 pr-4 whitespace-nowrap">{formatMoney(sku.salePrice)}</td>
-                      <td className="py-2 whitespace-nowrap">
+                      <td className="py-2 pr-3 text-right whitespace-nowrap">
                         <Button
-                          variant="secondary"
+                          variant={selected === sku.skuId ? 'primary' : 'secondary'}
                           className="h-8 px-3"
                           aria-label={`${label} 원가`}
                           aria-pressed={selected === sku.skuId}
                           onClick={() => setSelected(sku.skuId)}
                         >
-                          원가
+                          {selected === sku.skuId ? '보는 중' : '원가 보기'}
                         </Button>
                       </td>
                     </tr>
