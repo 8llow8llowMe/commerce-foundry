@@ -1,5 +1,6 @@
 // 앱 UI 문구(국문). 브랜드 문구(메뉴 · 메인 · 푸터 링크)는 브랜드 설정 content 에 있다.
 // 키를 더하면 en.ts 도 채워야 타입 검사를 통과한다.
+import type { ClaimStatusGroup } from '@/lib/orders/claims';
 import type { CancelReason, ReturnReason } from '@/lib/orders/history';
 
 export const ko = {
@@ -659,6 +660,22 @@ export const ko = {
     /** 영문 스토어의 배송 상태 · 택배사 이름(국문은 서버 이름) */
     deliveryStatuses: {} as Record<string, string>,
     carriers: {} as Record<string, string>,
+    /** 내 주문 클레임(#28 · BE #609) — 반품 · 결제 후 취소 접수 내역 */
+    claims: '취소 · 반품 내역',
+    claimRequestedAt: '접수 일시',
+    claimReason: '사유',
+    /** 주문 상세에서 항목을 찾지 못했다 */
+    claimUnknownItem: '주문 상품',
+    claimsLoadFailed: '취소 · 반품 내역을 불러오지 못했습니다.',
+    /** 고객용 클레임 상태(두 언어 모두 사전). 환불 · 재고 복원 실패 등 운영자 처리 대기는 처리 중이다 */
+    claimStatuses: {
+      requested: '접수',
+      refunded: '환불 완료',
+      completed: '처리 완료',
+      processing: '처리 중',
+    } as Record<ClaimStatusGroup, string>,
+    /** 영문 스토어의 클레임 유형 이름(국문은 서버 이름) */
+    claimTypes: {} as Record<string, string>,
   },
   account: {
     title: '마이페이지',

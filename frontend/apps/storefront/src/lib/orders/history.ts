@@ -30,10 +30,10 @@ export type OrderSummary = {
 };
 
 /**
- * 주문 상세 항목 — 주문 시점 스냅숏 + 주문 항목 아이디. 아이디는 반품 접수 본문에 싣는다.
- * 고객 상세 응답에 아직 없어(BE #609) 없으면 그 항목은 반품 대상에서 빠진다.
+ * 주문 상세 항목 — 주문 시점 스냅숏 + 주문 항목 아이디(BE #609, 문자열). 아이디는 반품 접수 본문에 그대로 싣고,
+ * 클레임 조회(`claims.ts`)의 항목을 상품명과 잇는 데 쓴다.
  */
-export type OrderDetailLine = QuoteLine & { orderItemId?: string };
+export type OrderDetailLine = QuoteLine & { orderItemId: string };
 
 /** 주문 상세 — 주문 생성 응답과 같은 스냅숏 + 취소 가능 여부 */
 export type OrderDetail = Omit<OrderCreated, 'items'> & {
@@ -81,15 +81,6 @@ export type OrderReturnBody = {
   items: { orderItemId: string; quantity: number; reason: ReturnReason }[];
 };
 
-/** 반품으로 고를 수 있는 항목 — 주문 항목 아이디가 있는 줄만(BE #609 전에는 없을 수 있다) */
-export function returnableLines(
-  order: Pick<OrderDetail, 'items'>,
-): (OrderDetailLine & { orderItemId: string })[] {
-  return order.items.filter(
-    (line): line is OrderDetailLine & { orderItemId: string } => !!line.orderItemId,
-  );
-}
-
 /**
  * 반품 접수 본문 — 고른 항목(주문 항목 아이디 → 수량)을 주문 순서대로 싣고 사유는 모두 같은 것을 쓴다.
  * 고른 항목이 없거나 사유가 없으면 null(버튼을 막는다). 수량은 1 ~ 주문 수량으로 자른다 —
@@ -101,7 +92,7 @@ export function returnRequestBody(
   reason: ReturnReason | null,
 ): OrderReturnBody | null {
   if (!reason) return null;
-  const items = returnableLines(order).flatMap((line) => {
+  const items = order.items.flatMap((line) => {
     const quantity = selected[line.orderItemId];
     if (!quantity) return [];
     const max = Math.min(line.quantity, 99);
@@ -137,7 +128,7 @@ export function canResumePayment(
  * 주문 상세에서 보일 액션 — BE 허용 전이 그대로다. 배송 중 · 확정 뒤에는 어느 쪽도 없다.
  * - cancel: 서버의 `cancelable`(결제 대기 · 결제 후 취소가 열린 환경의 결제 완료 · 상품 준비중). 화면에서 상태로 다시 추측하지 않는다
  * - confirmPurchase: 배송 완료(`DELIVERED → PURCHASE_CONFIRMED` 만 허용). 이미 확정됐으면 보이지 않는다
- * - requestReturn: 배송 완료 · 반품 요청(추가 접수)에서, 반품으로 고를 항목이 있을 때만. 남은 수량은 서버가 판단한다
+ * - requestReturn: 배송 완료 · 반품 요청(추가 접수)에서, 항목이 있을 때만. 남은 수량은 서버가 판단한다
  */
 export function orderActions(order: Pick<OrderDetail, 'status' | 'cancelable' | 'items'>): {
   cancel: boolean;
@@ -148,8 +139,7 @@ export function orderActions(order: Pick<OrderDetail, 'status' | 'cancelable' | 
   return {
     cancel: order.cancelable,
     confirmPurchase: code === 'DELIVERED',
-    requestReturn:
-      (code === 'DELIVERED' || code === 'RETURN_REQUESTED') && returnableLines(order).length > 0,
+    requestReturn: (code === 'DELIVERED' || code === 'RETURN_REQUESTED') && order.items.length > 0,
   };
 }
 
@@ -159,8 +149,8 @@ export function isPaidCancel(order: Pick<OrderDetail, 'status'>): boolean {
 }
 
 /**
- * 결제 후 취소가 처리 중인지 — 환불이 아직 확정되지 않았다(미확정 · 거절, BE 재시도 스케줄러가 잇는다). 클레임 상태(`REFUND_UNCONFIRMED` 등)는
- * 고객 응답에 없어 주문 상태 `CANCEL_REQUESTED` 하나로만 보인다. 확정되면 다시 읽었을 때 `CANCELED` 다.
+ * 결제 후 취소가 처리 중인지 — 환불이 아직 확정되지 않았다(미확정 · 거절, BE 재시도 스케줄러가 잇는다). 주문 상태는 `CANCEL_REQUESTED`
+ * 하나이고, 클레임 상태는 클레임 조회(`claims.ts`, BE #609)에 "처리 중" 계열로 보인다. 확정되면 다시 읽었을 때 `CANCELED` 다.
  */
 export function cancelInProgress(order: Pick<OrderDetail, 'status'>): boolean {
   return order.status.code === 'CANCEL_REQUESTED';

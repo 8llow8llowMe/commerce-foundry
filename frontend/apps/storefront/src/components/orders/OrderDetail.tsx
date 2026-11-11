@@ -14,6 +14,14 @@ import { paymentPageHref } from '@/lib/checkout/payment';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { fill } from '@/lib/i18n/format';
 import {
+  claimLineViews,
+  claimReasonLabel,
+  claimStatusLabel,
+  claimTypeLabel,
+  readOrderClaims,
+  type ClaimsLoad,
+} from '@/lib/orders/claims';
+import {
   deliveryLabel,
   readOrderDelivery,
   trackingUrl,
@@ -34,7 +42,6 @@ import {
   orderPurchaseConfirmationPath,
   orderReturnPath,
   RETURN_REASONS,
-  returnableLines,
   returnFailure,
   returnRequestBody,
   statusLabel,
@@ -63,6 +70,7 @@ type Load =
  * 결제 후 취소(BE #16 PR-2a-2)는 같은 취소 API 다 — 확인 패널에 전액 환불 안내를 두고, 응답이 `CANCEL_REQUESTED`(환불 미확정)면
  * "처리 중" 안내와 다시 확인 버튼을 둔다(서버가 재시도로 잇는다). 미개방(503 `ORDER_035`) 등 접수 거절은 고객센터로 안내한다.
  * 배송 조회(BE #18 PR-B2)는 상세와 함께 따로 읽는다 — 실패해도 상세는 그대로 보이고 배송 자리에서만 다시 시도한다.
+ * 내 클레임(취소 · 반품 접수, BE #609)도 같은 방식으로 따로 읽고, 취소 · 반품 접수와 그 뒤 다시 읽기마다 함께 다시 읽는다.
  */
 export function OrderDetail({ orderId }: { orderId: string }) {
   const t = useDictionary().orders;
@@ -91,15 +99,17 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const cooldown = useRetryCooldown();
   // 패널이 열리고 닫히면 누른 버튼이 사라진다 — 다음 렌더 뒤 포커스를 옮길 곳(주문서의 pendingFocus 와 같은 방식)
-  const pendingFocus = useRef<'panel' | 'trigger' | 'returnTrigger' | 'notice' | 'delivery' | null>(
-    null,
-  );
+  const pendingFocus = useRef<
+    'panel' | 'trigger' | 'returnTrigger' | 'notice' | 'delivery' | 'claims' | null
+  >(null);
   const panelTitle = useRef<HTMLHeadingElement>(null);
   const trigger = useRef<HTMLDivElement>(null);
   const returnTrigger = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLParagraphElement>(null);
   const deliveryTitle = useRef<HTMLHeadingElement>(null);
   const [delivery, setDelivery] = useState<DeliveryLoad>({ status: 'loading' });
+  const claimsTitle = useRef<HTMLHeadingElement>(null);
+  const [claims, setClaims] = useState<ClaimsLoad>({ status: 'loading' });
 
   const read = useCallback(
     () =>
@@ -117,11 +127,14 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   );
 
   const readDelivery = useCallback(() => readOrderDelivery(orderId).then(setDelivery), [orderId]);
+  // 다시 읽는 동안에는 지금 목록을 그대로 둔다(로딩으로 바꾸면 자리가 깜빡인다)
+  const readClaims = useCallback(() => readOrderClaims(orderId).then(setClaims), [orderId]);
 
   useEffect(() => {
     void read();
     void readDelivery();
-  }, [read, readDelivery]);
+    void readClaims();
+  }, [read, readDelivery, readClaims]);
 
   useEffect(() => {
     const target = pendingFocus.current;
@@ -137,7 +150,9 @@ export function OrderDetail({ orderId }: { orderId: string }) {
             ? (returnTrigger.current?.querySelector('button') ?? noticeRef.current)
             : target === 'delivery'
               ? deliveryTitle.current
-              : noticeRef.current;
+              : target === 'claims'
+                ? claimsTitle.current
+                : noticeRef.current;
     element?.focus();
   });
 
@@ -241,6 +256,8 @@ export function OrderDetail({ orderId }: { orderId: string }) {
       closeCancel('notice');
       // 결제 후 취소는 환불이 확정되지 않으면 취소 요청(처리 중) 상태로 온다
       setNotice(cancelNotice(canceled, t));
+      // 결제 후 취소는 클레임이 생긴다(결제 전 취소는 없다)
+      void readClaims();
     } catch (cause) {
       cooldown.startFrom(cause);
       const failure = cancelFailure(cause, t);
@@ -250,13 +267,13 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         // 경합에서 졌거나 결과를 모른다 — 지금 상태를 다시 읽어 보인다. 아직 취소할 수 있으면 다시 누르면 된다(취소는 멱등)
         closeCancel('notice');
         setNotice(failure.message);
-        await read();
+        await Promise.all([read(), readClaims()]);
       } else if (failure.kind === 'support') {
         // 서버가 접수하지 않았다(결제 후 취소 미개방 등) — 다시 눌러도 같아 패널을 닫고 고객센터로 안내한다.
         // 다시 읽으면 서버 판정(cancelable)이 버튼을 거둘 수 있다
         closeCancel('notice');
         setNotice(failure.message);
-        await read();
+        await Promise.all([read(), readClaims()]);
       } else {
         setCancelError(failure.message);
       }
@@ -283,7 +300,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
     setRechecking(true);
     setNotice(null);
     try {
-      await read();
+      await Promise.all([read(), readClaims()]);
     } finally {
       setRechecking(false);
     }
@@ -312,8 +329,8 @@ export function OrderDetail({ orderId }: { orderId: string }) {
       });
       closeReturn('notice');
       setNotice(t.returned);
-      // 배송 완료였으면 반품 요청으로 바뀌었다 — 상태는 서버에서 다시 읽는다
-      await read();
+      // 배송 완료였으면 반품 요청으로 바뀌었다 — 상태와 접수 내역은 서버에서 다시 읽는다
+      await Promise.all([read(), readClaims()]);
     } catch (cause) {
       cooldown.startFrom(cause);
       const failure = returnFailure(cause, t);
@@ -323,7 +340,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         // 구매 확정 등으로 반품할 수 없게 됐다 — 지금 상태를 다시 읽는다(반품할 수 없으면 버튼이 사라진다)
         closeReturn('notice');
         setNotice(failure.message);
-        await read();
+        await Promise.all([read(), readClaims()]);
       } else {
         if (!failure.sameKey) returnAttempt.current = null;
         setReturnError(failure.message);
@@ -368,6 +385,23 @@ export function OrderDetail({ orderId }: { orderId: string }) {
             }}
           />
         }
+        claims={
+          <ClaimsView
+            load={claims}
+            order={order}
+            titleRef={claimsTitle}
+            t={t}
+            locale={locale}
+            onRetry={() => {
+              if (claims.status === 'failed' && claims.retrying) return;
+              setClaims({ status: 'failed', retrying: true });
+              void readOrderClaims(orderId).then((next) => {
+                pendingFocus.current = 'claims';
+                setClaims(next);
+              });
+            }}
+          />
+        }
       />
       {cancelInProgress(order) && (
         <CancelProgress t={t} rechecking={rechecking} onRecheck={() => void recheckCancel()} />
@@ -379,7 +413,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           <ReturnPanel
             titleRef={panelTitle}
             t={t}
-            lines={returnableLines(order)}
+            lines={order.items}
             selected={returnSelected}
             onSelect={(orderItemId, quantity) => {
               setReturnSelected((current) => {
@@ -479,7 +513,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   );
 }
 
-/** 주문 상세(표시만) — 상태 · 주문 번호 · 일시 · 결제 이어하기 · 배송(`shipment`) · 항목 · 금액(서버 값) · 배송지 */
+/** 주문 상세(표시만) — 상태 · 주문 번호 · 일시 · 결제 이어하기 · 배송(`shipment`) · 취소 · 반품 내역(`claims`) · 항목 · 금액(서버 값) · 배송지 */
 export function OrderDetailView({
   order,
   now,
@@ -487,6 +521,7 @@ export function OrderDetailView({
   locale,
   formatMoney,
   shipment,
+  claims,
 }: {
   order: Order;
   now: number;
@@ -494,6 +529,7 @@ export function OrderDetailView({
   locale: Locale;
   formatMoney: (money: Money) => string;
   shipment?: ReactNode;
+  claims?: ReactNode;
 }) {
   const resumable = canResumePayment(order, now);
   const address = order.shippingAddress;
@@ -532,6 +568,8 @@ export function OrderDetailView({
       </section>
 
       {shipment}
+
+      {claims}
 
       <section aria-labelledby="order-items" className="flex flex-col gap-4">
         <h2 id="order-items" className="text-lg">
@@ -672,6 +710,85 @@ export function DeliveryView({
           </a>
         )}
       </div>
+    </section>
+  );
+}
+
+/**
+ * 취소 · 반품 내역 — 최신순 클레임마다 유형 · 상태 · 접수 일시와 항목(상품명 · 옵션 · 수량 · 사유)을 보인다.
+ * 상태는 고객용 묶음 문구(`claimStatusLabel`)다. 불러오는 중이거나 접수가 없으면 아무것도 그리지 않는다.
+ * 실패하면 이 자리에서만 다시 시도한다 — 주문 상세는 그대로 보인다. 환불 예정액은 보이지 않는다(부분 취소 · 환불액 표시는 BE #16 PR-2b 뒤).
+ */
+export function ClaimsView({
+  load,
+  order,
+  titleRef,
+  t,
+  locale,
+  onRetry,
+}: {
+  load: ClaimsLoad;
+  order: Pick<Order, 'items'>;
+  /** 다시 읽기가 성공하면 포커스를 받을 제목 */
+  titleRef?: Ref<HTMLHeadingElement>;
+  t: Dictionary['orders'];
+  locale: Locale;
+  onRetry: () => void;
+}) {
+  if (load.status === 'loading') return null;
+  if (load.status === 'failed') {
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        {/* 상세 본문은 보이고 있어 끼어들지 않는다(status) */}
+        <p role="status" className="text-muted-fg">
+          {t.claimsLoadFailed}
+        </p>
+        <Button
+          variant="secondary"
+          disabled={load.retrying}
+          aria-busy={load.retrying}
+          onClick={onRetry}
+        >
+          {t.reload}
+        </Button>
+      </div>
+    );
+  }
+  if (load.claims.length === 0) return null;
+  return (
+    <section aria-labelledby="order-claims" className="flex flex-col gap-3">
+      <h2 id="order-claims" ref={titleRef} tabIndex={-1} className="text-lg">
+        {t.claims}
+      </h2>
+      <ul className="flex flex-col gap-2">
+        {load.claims.map((claim) => (
+          <li key={claim.claimId} className="flex flex-col gap-3 bg-muted px-5 py-4 text-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <p className="font-medium">
+                {claimTypeLabel(claim.type, t, locale)} · {claimStatusLabel(claim.status, t)}
+              </p>
+              <p className="text-muted-fg">
+                <span className="sr-only">{t.claimRequestedAt} </span>
+                {formatDueAt(claim.requestedAt, locale)}
+              </p>
+            </div>
+            <ul className="flex flex-col gap-1.5">
+              {claimLineViews(claim, order).map((line) => (
+                <li key={line.orderItemId} className="flex flex-col gap-0.5">
+                  <span>
+                    {line.productName ?? t.claimUnknownItem}
+                    {line.optionName && <span className="text-muted-fg"> · {line.optionName}</span>}
+                  </span>
+                  <span className="text-muted-fg">
+                    {fill(t.quantity, { count: line.quantity })} · {t.claimReason}:{' '}
+                    {claimReasonLabel(line.reason, t, locale)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -830,7 +947,7 @@ export function ConfirmPurchasePanel({
 }
 
 /**
- * 부분 반품 접수 — 항목(주문 항목 아이디가 있는 줄)을 고르고 수량(1 ~ 주문 수량) · 사유(모든 항목 공통)를 정한다.
+ * 부분 반품 접수 — 항목(주문 항목 아이디로 구분)을 고르고 수량(1 ~ 주문 수량) · 사유(모든 항목 공통)를 정한다.
  * 고른 항목과 사유가 있어야 누를 수 있다. 이미 접수한 수량을 뺀 잔여 수량은 서버가 판단한다(넘으면 `ORDER_030`).
  */
 export function ReturnPanel({
@@ -851,7 +968,7 @@ export function ReturnPanel({
   /** 패널이 열리면 포커스를 받을 제목 */
   titleRef?: Ref<HTMLHeadingElement>;
   t: Dictionary['orders'];
-  lines: (OrderDetailLine & { orderItemId: string })[];
+  lines: OrderDetailLine[];
   /** 주문 항목 아이디 → 반품 수량 */
   selected: Record<string, number>;
   /** 수량 0 은 고르지 않음 */
