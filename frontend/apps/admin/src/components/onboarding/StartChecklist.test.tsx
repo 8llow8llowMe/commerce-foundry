@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { taskViewsOf } from '@/lib/onboarding/start-tasks';
 import type { StartCardPref, TasksState } from '@/lib/onboarding/tasks-store';
 import type { ServerProgress, TourState } from '@/lib/tour/progress';
-import { StartChecklistView } from './StartChecklist';
+import { focusAfterSwap, progressLabel, StartChecklistView } from './StartChecklist';
 
 const views = (my: string) =>
   taskViewsOf({
@@ -65,7 +65,7 @@ describe('StartChecklistView', () => {
     const html = render({ tasks: both('NOT_COMPLETED'), loading: false, failed: false });
     expect(html.indexOf('국내 배송비 정책 저장')).toBeLessThan(html.indexOf('첫 상품 등록'));
     expect(html).toContain('href="/products/new"');
-    expect(html.match(/안내와 함께 열기/g)).toHaveLength(2);
+    expect(html.match(/>안내와 함께 열기</g)).toHaveLength(2);
     expect(html).toContain('2개 중 0개 완료');
     // 다른 운영자가 등록한 상품만 있으면(스토어만) · 상품 서비스 장애면(확인 불가) 완료도 미완료도 아니다
     const storeOnly = render({ tasks: both('NO_EVIDENCE'), loading: false, failed: false });
@@ -137,5 +137,94 @@ describe('StartChecklistView', () => {
 
   it('서버가 그릴 업무를 주지 않으면 카드를 두지 않는다', () => {
     expect(render({ tasks: [], loading: false, failed: false })).toBe('');
+  });
+
+  it('완료한 업무는 처음 해낸 날을 같이 보인다', () => {
+    const html = render({ tasks: views('COMPLETED'), loading: false, failed: false });
+    expect(html).toMatch(/완료 · \d{4}\.\d{2}\.\d{2}/);
+    expect(html).toContain('화면 보기');
+    expect(progressLabel({ progress: 'done', completedAt: null })).toBe('완료');
+    expect(progressLabel({ progress: 'done', completedAt: 'not-a-date' })).toBe('완료');
+    expect(progressLabel({ progress: 'todo', completedAt: '2026-10-01T00:00:00Z' })).toBe(
+      '아직 하지 않음',
+    );
+  });
+
+  describe('키보드', () => {
+    const both = render(
+      {
+        tasks: taskViewsOf({
+          tours: [],
+          tasks: ['PRODUCT_REGISTERED', 'SHIPPING_POLICY_SAVED'].map((taskKey) => ({
+            taskKey,
+            storeStatus: { code: 'READY' },
+            myStatus: { code: 'NOT_COMPLETED' },
+            myCompletedAt: null,
+          })),
+        }),
+        loading: false,
+        failed: false,
+      },
+      'open',
+    );
+
+    it('조작은 모두 버튼 · 링크라 Tab 으로 닿고, 포커스 링이 보이며, Tab 에서 빼는 요소가 없다', () => {
+      expect(both).not.toContain('tabindex="-1"');
+      expect(both).not.toMatch(/<(div|li|p|span)[^>]*onclick/i);
+      for (const link of both.match(/<a [^>]*>/g) ?? []) {
+        expect(link).toContain('focus-visible:outline-2');
+      }
+      expect(both.match(/<a /g)).toHaveLength(2);
+    });
+
+    it('업무마다 "바로 하기" · "안내와 함께 열기" 의 접근 이름이 달라 화면 낭독기 목록에서 구분된다', () => {
+      expect(both).toContain('aria-label="첫 상품 등록 — 바로 하기"');
+      expect(both).toContain('aria-label="국내 배송비 정책 저장 — 바로 하기"');
+      expect(both).toContain('aria-label="첫 상품 등록 — 안내와 함께 열기"');
+      expect(both).toContain('aria-label="국내 배송비 정책 저장 — 안내와 함께 열기"');
+    });
+
+    it('나중에 · 다시 보기 뒤에 포커스를 새로 생긴 버튼으로 옮긴다', () => {
+      const show = { focus: vi.fn() };
+      const first = { focus: vi.fn() };
+      const actions = { querySelector: vi.fn(() => first) };
+      focusAfterSwap('hidden', show, actions);
+      expect(show.focus).toHaveBeenCalledTimes(1);
+      expect(first.focus).not.toHaveBeenCalled();
+      focusAfterSwap('open', show, actions);
+      expect(actions.querySelector).toHaveBeenCalledWith('button');
+      expect(first.focus).toHaveBeenCalledTimes(1);
+      // 아직 그려지지 않았으면 아무것도 하지 않는다
+      expect(() => focusAfterSwap('open', null, null)).not.toThrow();
+    });
+  });
+
+  describe('모바일', () => {
+    it('좁은 화면에서는 업무 설명과 버튼이 위아래로 쌓이고, 넓으면 나란히 둔다', () => {
+      const html = render({ tasks: views('NOT_COMPLETED'), loading: false, failed: false });
+      expect(html).toMatch(/<li class="[^"]*flex-col[^"]*sm:flex-row/);
+      // 업무 버튼 묶음 — 좁으면 줄을 바꾸고, 넓으면 설명 옆에서 줄어들지 않는다
+      expect(html).toContain('<div class="flex shrink-0 flex-wrap gap-2">');
+    });
+
+    it('누를 곳은 모두 40px 이상 높이다(숨긴 뒤의 "시작 체크리스트 보기" 포함)', () => {
+      const open = render({ tasks: views('NOT_COMPLETED'), loading: false, failed: false });
+      for (const control of open.match(/<(a|button) [^>]*>/g) ?? []) {
+        expect(control).toMatch(/\b(h-10|min-h-10)\b/);
+      }
+      const hidden = render(
+        { tasks: views('NOT_COMPLETED'), loading: false, failed: false },
+        'hidden',
+      );
+      expect(hidden).toContain('min-h-10');
+    });
+  });
+
+  it('동작 줄이기 — 카드에는 애니메이션이 없고, 버튼 전환 효과는 동작 줄이기에서 꺼진다', () => {
+    const html = render({ tasks: views('NOT_COMPLETED'), loading: true, failed: true });
+    expect(html).not.toMatch(/\banimate-/);
+    for (const cls of html.match(/class="[^"]*\btransition\b[^"]*"/g) ?? []) {
+      expect(cls).toContain('motion-reduce:transition-none');
+    }
   });
 });
