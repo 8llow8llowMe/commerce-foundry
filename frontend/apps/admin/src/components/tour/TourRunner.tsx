@@ -5,7 +5,7 @@ import { driver } from 'driver.js';
 import { usePathname } from 'next/navigation';
 import { useEffect, useSyncExternalStore } from 'react';
 import { nextTour, serverTourState, tourProgress } from '@/lib/tour/progress';
-import { driveSteps, tourSelector } from '@/lib/tour/steps';
+import { driveSteps, prefersReducedMotion, tourMotion, tourSelector } from '@/lib/tour/steps';
 import { toursFor } from '@/lib/tour/tours';
 
 /** 화면 요소가 그려지기를 기다리는 최대 시간. 목록 · 표는 API 응답 뒤에 그려진다 */
@@ -71,13 +71,10 @@ export function TourRunner() {
         return;
       }
       const returnFocus = document.activeElement;
-      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       instance = driver({
         steps,
-        animate: !reduced,
-        // 부드러운 스크롤을 쓰면 스크롤이 끝나기 전에 팝오버 위치를 잡아, 화면 아래 요소(상품 상세 SKU 표)로 넘어갈 때
-        // 팝오버가 요소와 떨어진 자리에 뜬다(#29 시연). 즉시 스크롤로 두어 위치를 스크롤 뒤에 잡게 한다
-        smoothScroll: false,
+        // 동작 줄이기면 애니메이션을 끈다. 스크롤은 늘 즉시(`tourMotion`)
+        ...tourMotion(prefersReducedMotion(window)),
         showProgress: steps.length > 1,
         progressText: '{{current}} / {{total}}',
         nextBtnText: '다음',
