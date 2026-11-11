@@ -38,7 +38,10 @@ describe('helpTopicFor · toursFor', () => {
       'product-detail-v1',
     ]);
     expect(toursFor('/claims').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'claims-v1']);
-    expect(toursFor('/claims/42').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id]);
+    expect(toursFor('/claims/42').map((tour) => tour.id)).toEqual([
+      CONSOLE_TOUR.id,
+      'claim-detail-v1',
+    ]);
     expect(toursFor('/products/42/edit').map((tour) => tour.id)).toEqual([
       CONSOLE_TOUR.id,
       'product-edit-v1',
@@ -64,6 +67,27 @@ describe('helpTopicFor · toursFor', () => {
       ['claim-filters', false],
       ['claim-table', true],
       [null, false],
+    ]);
+  });
+
+  it('클레임 상세 투어는 늘 있는 접수 내용 · 항목만 필수이고, 결제 후 취소에만 있는 처리 상황 · 다시 시도는 선택이다', () => {
+    const tour = toursFor('/claims/42')[1];
+    expect(tour?.steps.map((step) => [step.target, step.optional ?? false])).toEqual([
+      ['claim-summary', false],
+      ['claim-items', false],
+      ['claim-recovery', true],
+      ['claim-retry', true],
+      [null, false],
+    ]);
+    // 반품 접수(처리 상황 · 다시 시도 없음)에서도 필수 요소만으로 돈다
+    const steps = driveSteps(
+      tour!,
+      (target) => target === 'claim-summary' || target === 'claim-items',
+    );
+    expect(steps?.map((step) => step.element ?? null)).toEqual([
+      '[data-tour="claim-summary"]',
+      '[data-tour="claim-items"]',
+      null,
     ]);
   });
 

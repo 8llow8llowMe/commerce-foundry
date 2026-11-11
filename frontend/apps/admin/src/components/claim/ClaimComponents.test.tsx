@@ -82,6 +82,12 @@ describe('ClaimDetailView', () => {
     expect(html).toContain('93,000원');
     expect(html).not.toContain('<button');
   });
+
+  it('투어(#228 claim-detail-v1)의 필수 앵커 — 접수 내용 · 접수 항목 — 를 단다', () => {
+    const html = renderToStaticMarkup(<ClaimDetailView claim={detail()} />);
+    expect(html).toContain('data-tour="claim-summary"');
+    expect(html).toContain('data-tour="claim-items"');
+  });
 });
 
 describe('ClaimList', () => {
@@ -174,6 +180,9 @@ describe('ClaimRecovery', () => {
     expect(html).toContain('5일 남음');
     expect(html).toContain('할 수 있습니다');
     expect(html).toContain('>다시 시도</button>');
+    // 투어(#228 claim-detail-v1)의 선택 앵커 — 처리 상황 칸과 다시 시도 버튼
+    expect(html).toContain('data-tour="claim-recovery"');
+    expect(html).toMatch(/<button[^>]*data-tour="claim-retry"[^>]*>다시 시도<\/button>/);
   });
 
   it('다시 시도할 수 없으면 버튼을 두지 않고, 자동 처리 중이면 다음 확인 시각을 보인다', () => {
@@ -186,6 +195,9 @@ describe('ClaimRecovery', () => {
     expect(rejected).toContain('할 수 없습니다');
     expect(rejected).not.toContain('>다시 시도</button>');
     expect(rejected).not.toContain('결제 취소 기한');
+    // 버튼이 없으면 투어의 다시 시도 단계도 빠진다(선택 단계)
+    expect(rejected).toContain('data-tour="claim-recovery"');
+    expect(rejected).not.toContain('data-tour="claim-retry"');
 
     const auto = render(
       cancellation({

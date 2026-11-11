@@ -16,7 +16,7 @@ describe('guideOf', () => {
     expect(guideOf(`${'a'.repeat(65)}-v1`)).toBeNull();
   });
 
-  it('모든 투어가 서버 안내 키로 바뀐다(서버 허용 목록 operations.onboarding.guides 와 맞춘다)', () => {
+  it('모든 투어가 서버 안내 키 형식으로 바뀐다(서버 허용 목록 operations.onboarding.guides 에 없는 키 · 버전은 이 브라우저 기록으로만 간다 — docs/architecture.md)', () => {
     expect(ALL_TOURS.map((tour) => guideOf(tour.id))).toEqual([
       { key: 'console', version: 1 },
       { key: 'products', version: 1 },
@@ -27,6 +27,7 @@ describe('guideOf', () => {
       { key: 'orders', version: 2 },
       { key: 'order-detail', version: 2 },
       { key: 'claims', version: 1 },
+      { key: 'claim-detail', version: 1 },
       { key: 'stocks', version: 1 },
       { key: 'stock-detail', version: 1 },
       { key: 'size-charts', version: 1 },

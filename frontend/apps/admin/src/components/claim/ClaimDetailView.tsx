@@ -12,6 +12,7 @@ export function ClaimDetailView({ claim }: { claim: ClaimDetail }) {
     <>
       <section
         aria-labelledby="claim-summary"
+        data-tour="claim-summary"
         className="flex flex-col gap-3 rounded-md border border-border p-4"
       >
         <h2 id="claim-summary" className="font-medium">
@@ -33,7 +34,11 @@ export function ClaimDetailView({ claim }: { claim: ClaimDetail }) {
         </dl>
       </section>
 
-      <section aria-labelledby="claim-items" className="flex flex-col gap-3">
+      <section
+        aria-labelledby="claim-items"
+        data-tour="claim-items"
+        className="flex flex-col gap-3"
+      >
         <h2 id="claim-items" className="font-medium">
           접수 항목
         </h2>
