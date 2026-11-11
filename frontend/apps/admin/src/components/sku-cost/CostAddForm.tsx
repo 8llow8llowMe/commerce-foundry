@@ -114,11 +114,11 @@ export function CostAddForm({
             value={form.costType}
             aria-invalid={errorsOf('costType').length > 0 || undefined}
             aria-describedby={errorsOf('costType').length > 0 ? `${id}-type-error` : undefined}
-            onChange={(event) =>
-              setForm((value) =>
-                withCostType(value, current, event.currentTarget.value as CostTypeCode),
-              )
-            }
+            onChange={(event) => {
+              // 값은 지금 읽는다 — 갱신 함수는 이벤트가 끝난 뒤 돌 수 있고, 그때 currentTarget 은 null 이라 화면이 깨진다(#395 시연 중 발견)
+              const costType = event.currentTarget.value as CostTypeCode;
+              setForm((value) => withCostType(value, current, costType));
+            }}
             className={selectClass}
           >
             {COST_TYPES.map((costType) => (
