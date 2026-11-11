@@ -352,7 +352,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 |------|------|-----|
 | `/mypage` | 하위 화면 메뉴 | — |
 | `/mypage/orders` | 주문 내역 — 최신순 조각을 "더 보기"로 이어 붙인다 | `GET /api/v1/orders?page&size=20` (BE #16 PR-1) |
-| `/mypage/orders/[orderId]` | 주문 상세 · 결제 이어하기 · 결제 전 취소 · 배송 조회 | `GET /api/v1/orders/{orderId}` · `POST .../cancellation` (BE #16 PR-1) · `GET /api/v1/deliveries?orderId=` (BE #18 PR-B2) |
+| `/mypage/orders/[orderId]` | 주문 상세 · 결제 이어하기 · 취소 · 구매 확정 · 반품 접수 · 배송 조회 · 취소 · 반품 내역 | `GET /api/v1/orders/{orderId}` · `POST .../cancellation` (BE #16 PR-1) · `GET /api/v1/deliveries?orderId=` (BE #18 PR-B2) · `GET .../claims` (BE #609) |
 | `/mypage/profile` | 회원 정보 수정 — 이메일은 읽기만 | `GET` · `PATCH /api/v1/members/me` |
 | `/mypage/addresses` | 배송지 목록 · 추가 · 수정 · 삭제 · 기본 지정 | `/api/v1/members/me/shipping-addresses/**` (BE #7) |
 | `/mypage/social` | 카카오 · 네이버 간편 로그인 연결 — 연결 여부 · 비밀번호 재인증 후 연결(§3-2) | `/api/v1/members/me/social-accounts/**` (BE #355) |
@@ -378,7 +378,15 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
     택배사 · 송장 번호 · 배송 상태 · 출고 · 배송 완료 일시를 보이고, 상태 · 택배사 이름은 주문 상태와 같은 방식(국문 서버 이름, 영문 사전 `orders.deliveryStatuses` · `orders.carriers`)이다.
     서버 택배사 추적(`ShipmentTrackingPort`)은 후속이라 택배사 공개 조회 주소에 송장 번호를 붙인 링크를 새 창으로 연다(`trackingUrl`, `OTHER` · 모르는 택배사 · 형식이 어긋난 송장 번호는 링크 없음).
     배송 조회가 실패해도 상세는 그대로 보이고 배송 자리에서만 다시 불러온다(401 · 404 는 상세 쪽이 같이 받아 화면을 바꾼다).
-  - **아직 없는 것** — 결제 뒤 취소 · 반품 · 구매 확정(BE #16 PR-2)은 버튼 자리도 두지 않는다.
+  - **반품 접수** — 항목은 서버가 준 주문 항목 아이디(`items[].orderItemId`, BE #609 — 늘 온다)로 고르고 본문에 그대로 싣는다.
+    항목별 남은 수량은 응답에 없어 주문 수량을 상한으로 쓰고, 넘으면 서버가 409 `ORDER_030` 으로 거절한다.
+  - **취소 · 반품 내역**(`lib/orders/claims.ts`, BE #609) — 상세와 함께 `GET /api/v1/orders/{orderId}/claims` 를 따로 읽는다(최신순 전체, 없으면 `[]` 라 자리를 그리지 않는다).
+    클레임마다 유형 · 상태 · 접수 일시와 항목(주문 항목 아이디로 상세의 상품명 · 옵션을 찾는다) · 수량 · 사유를 보인다.
+    유형 · 사유 이름은 주문 상태와 같은 방식(국문 서버 이름, 영문 사전 `orders.claimTypes` · 취소 · 반품 사유 사전)이다.
+    상태는 서버 이름이 운영자 말(환불 실패 · 재고 복원 실패)이라 두 언어 모두 고객용 묶음 사전(`orders.claimStatuses`)이다 — `REFUND_FAILED` · `RESTORATION_FAILED` · 모르는 상태는 "처리 중".
+    응답 모양이 어긋난 클레임이 하나라도 있으면 실패로 보인다(`parseOrderClaims` — 한 건을 조용히 빼지 않는다). 실패해도 상세는 그대로 보이고 그 자리에서만 다시 불러온다.
+    취소 · 반품 접수 뒤, 그리고 실패 뒤 상세를 다시 읽을 때 함께 다시 읽는다. 환불 예정액은 아직 보이지 않는다(부분 취소 · 환불액 표시는 BE #16 PR-2b 뒤).
+  - **아직 없는 것** — 결제 후 부분 취소 · 취소 응답의 환불액 표시(BE #16 PR-2b 뒤), 취소 실패 사유 노출(BE #17 뒤).
 - **회원 정보** — 바뀐 칸만 `PATCH` 하고, 바뀐 것이 없으면 보내지 않는다(보내면 400 `AUTH_115`). 이름은 앞뒤 공백, 연락처는 하이픈 · 공백을 빼고 비교한다.
   연락처를 비우면 `""`(BE 의 "지우기")를 보낸다. 동시 수정(409 `AUTH_004`)이면 다시 읽어 와 확인 후 다시 저장하게 한다(`lib/account/profile-form.ts`).
 - **배송지** — 쓰기가 끝나면 목록을 다시 읽는다. 기본 승격(기본을 지우면 최근 주소) · 정렬(기본 먼저, 최신순)을 화면에서 흉내 내지 않는다.

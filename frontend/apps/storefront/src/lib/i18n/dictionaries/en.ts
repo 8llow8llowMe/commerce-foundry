@@ -621,6 +621,21 @@ export const en: Dictionary = {
       UPS: 'UPS',
       OTHER: 'Other carrier',
     } as Record<string, string>,
+    claims: 'Cancellations & returns',
+    claimRequestedAt: 'Requested on',
+    claimReason: 'Reason',
+    claimUnknownItem: 'Ordered item',
+    claimsLoadFailed: 'We couldn’t load your cancellations and returns.',
+    claimStatuses: {
+      requested: 'Requested',
+      refunded: 'Refunded',
+      completed: 'Completed',
+      processing: 'In progress',
+    },
+    claimTypes: {
+      RETURN: 'Return',
+      CANCELLATION: 'Cancellation',
+    } as Record<string, string>,
   },
   account: {
     title: 'My account',

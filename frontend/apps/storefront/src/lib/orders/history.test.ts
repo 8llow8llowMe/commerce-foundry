@@ -36,8 +36,8 @@ const summary = (orderId: string, patch: Partial<OrderSummary> = {}): OrderSumma
   createdAt: '2026-11-02T01:00:00Z',
   ...patch,
 });
-const line = (orderItemId: string | undefined, quantity = 1): OrderDetailLine => ({
-  ...(orderItemId ? { orderItemId } : {}),
+const line = (orderItemId: string, quantity = 1): OrderDetailLine => ({
+  orderItemId,
   skuId: '9001',
   productId: '1001',
   productName: '모시 저고리',
@@ -265,16 +265,15 @@ describe('orderActions — 반품', () => {
     }
   });
 
-  it('주문 항목 아이디가 없으면(BE #609 전) 반품 버튼을 숨긴다', () => {
-    expect(at('DELIVERED', [line(undefined)])).toBe(false);
-    expect(at('DELIVERED', [line(undefined), line('2')])).toBe(true);
+  it('항목이 없으면 반품 버튼을 숨긴다', () => {
+    expect(at('DELIVERED', [])).toBe(false);
   });
 });
 
 describe('returnRequestBody', () => {
-  const order = { items: [line('11', 3), line(undefined, 1), line('12', 2)] };
+  const order = { items: [line('11', 3), line('13', 1), line('12', 2)] };
 
-  it('고른 항목을 주문 순서대로 싣고 사유는 공통이다 — 아이디 없는 줄은 빠진다', () => {
+  it('고른 항목을 주문 순서대로 서버 주문 항목 아이디로 싣고 사유는 공통이다 — 고르지 않은 줄은 빠진다', () => {
     expect(returnRequestBody(order, { '12': 1, '11': 2 }, 'DEFECTIVE')).toEqual({
       items: [
         { orderItemId: '11', quantity: 2, reason: 'DEFECTIVE' },

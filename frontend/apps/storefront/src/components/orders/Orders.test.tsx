@@ -5,9 +5,11 @@ import { en } from '@/lib/i18n/dictionaries/en';
 import { ko } from '@/lib/i18n/dictionaries/ko';
 import type { OrderDetail, OrderSummary } from '@/lib/orders/history';
 import type { Delivery, DeliveryLoad } from '@/lib/orders/delivery';
+import type { ClaimsLoad, OrderClaim } from '@/lib/orders/claims';
 import {
   CancelPanel,
   CancelProgress,
+  ClaimsView,
   ConfirmPurchasePanel,
   DeliveryView,
   OrderDetail as OrderDetailContainer,
@@ -43,6 +45,7 @@ const detail = (patch: Partial<OrderDetail> = {}): OrderDetail => ({
   currency: 'KRW',
   items: [
     {
+      orderItemId: '11',
       skuId: '9001',
       productId: '1001',
       productName: '모시 저고리',
@@ -251,6 +254,119 @@ describe('DeliveryView', () => {
     );
     expect(html.indexOf('order-delivery')).toBeGreaterThan(html.indexOf('결제 완료'));
     expect(html.indexOf('order-delivery')).toBeLessThan(html.indexOf('order-items'));
+  });
+});
+
+const claim = (patch: Partial<OrderClaim> = {}): OrderClaim => ({
+  claimId: '501',
+  type: { code: 'RETURN', name: '반품', description: '' },
+  status: { code: 'REQUESTED', name: '접수', description: '' },
+  expectedRefund: null,
+  requestedAt: '2026-11-05T02:00:00Z',
+  items: [
+    {
+      orderItemId: '11',
+      quantity: 1,
+      reason: { code: 'DEFECTIVE', name: '상품 불량', description: '' },
+    },
+  ],
+  ...patch,
+});
+const claimsView = (load: ClaimsLoad, locale: 'ko' | 'en' = 'ko') =>
+  renderToStaticMarkup(
+    <ClaimsView
+      load={load}
+      order={detail()}
+      t={locale === 'ko' ? t : en.orders}
+      locale={locale}
+      onRetry={() => {}}
+    />,
+  );
+
+describe('ClaimsView', () => {
+  it('불러오는 중이거나 접수가 없으면 그리지 않는다', () => {
+    expect(claimsView({ status: 'loading' })).toBe('');
+    expect(claimsView({ status: 'ready', claims: [] })).toBe('');
+  });
+
+  it('유형 · 상태 · 접수 일시와 항목(상품명 · 옵션 · 수량 · 사유)을 보인다', () => {
+    const html = claimsView({ status: 'ready', claims: [claim()] });
+    expect(html).toContain(t.claims);
+    expect(html).toContain('반품 · 접수');
+    expect(html).toContain(t.claimRequestedAt);
+    expect(html).toContain('모시 저고리');
+    expect(html).toContain('네이비 / M');
+    expect(html).toContain('수량 1');
+    expect(html).toContain('상품 불량');
+  });
+
+  it('운영자 처리 대기 상태는 처리 중으로, 환불 예정액은 보이지 않는다', () => {
+    const html = claimsView({
+      status: 'ready',
+      claims: [
+        claim({
+          type: { code: 'CANCELLATION', name: '취소', description: '' },
+          status: { code: 'REFUND_FAILED', name: '환불 실패', description: '' },
+          expectedRefund: won(39000),
+        }),
+      ],
+    });
+    expect(html).toContain('취소 · 처리 중');
+    expect(html).not.toContain('환불 실패');
+    expect(html).not.toContain(krw(won(39000)));
+  });
+
+  it('주문 상세에 없는 항목은 대체 문구로 보인다', () => {
+    const html = claimsView({
+      status: 'ready',
+      claims: [claim({ items: [{ ...claim().items[0]!, orderItemId: '99' }] })],
+    });
+    expect(html).toContain(t.claimUnknownItem);
+  });
+
+  it('영문 스토어는 사전 이름을 쓴다', () => {
+    const html = claimsView({ status: 'ready', claims: [claim()] }, 'en');
+    expect(html).toContain('Return · Requested');
+    expect(html).toContain(en.orders.returnReasons.DEFECTIVE);
+  });
+
+  it('실패하면 그 자리에서만 안내와 다시 불러오기 — 다시 읽는 중에는 막는다', () => {
+    const html = claimsView({ status: 'failed', retrying: false });
+    expect(html).toContain(t.claimsLoadFailed);
+    expect(html).toContain('role="status"');
+    expect(html).not.toContain('disabled=""');
+    expect(claimsView({ status: 'failed', retrying: true })).toContain('disabled=""');
+  });
+
+  it('상세의 배송 정보 다음 · 주문 상품 앞에 놓인다', () => {
+    const html = renderToStaticMarkup(
+      <OrderDetailView
+        order={detail({ status: paid, cancelable: false })}
+        now={NOW}
+        t={t}
+        locale="ko"
+        formatMoney={krw}
+        shipment={
+          <DeliveryView
+            load={{ status: 'ready', delivery: shipped }}
+            t={t}
+            locale="ko"
+            onRetry={() => {}}
+          />
+        }
+        claims={
+          <ClaimsView
+            load={{ status: 'ready', claims: [claim()] }}
+            order={detail()}
+            t={t}
+            locale="ko"
+            onRetry={() => {}}
+          />
+        }
+      />,
+    );
+    expect(html.indexOf('order-claims')).toBeGreaterThan(html.indexOf('order-delivery'));
+    expect(html.indexOf('order-claims')).toBeLessThan(html.indexOf('order-items'));
   });
 });
 
