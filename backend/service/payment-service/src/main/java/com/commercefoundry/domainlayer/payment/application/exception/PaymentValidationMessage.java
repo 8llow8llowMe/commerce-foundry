@@ -41,6 +41,9 @@ public final class PaymentValidationMessage {
     public static final String SUMMARY_TO_REQUIRED = "PAYMENT_120:집계 종료 시각은 필수입니다.";
     public static final String SUMMARY_TO_FORMAT = "PAYMENT_121:집계 종료 시각 형식이 올바르지 않습니다.";
 
+    // 결제 후 취소 무환불 판정 경로 (POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/void) — 122 는 집계 기간 오류 코드가 쓴다
+    public static final String CLAIM_ID_POSITIVE = "PAYMENT_123:클레임 아이디가 올바르지 않습니다.";
+
     private PaymentValidationMessage() {
     }
 }

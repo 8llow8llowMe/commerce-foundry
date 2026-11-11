@@ -240,7 +240,7 @@ abstract class PaymentAutoCancelContract {
         assertThat(committed.claimId()).isEqualTo(9900000099L);
         assertThat(cancellations.findByPaymentId(PAYMENT_ID)).singleElement().satisfies(row -> {
             // The pre-#579 positive-only domain reader accepts this unmodified ledger format.
-            assertThat(new PaymentCancel(row.claimId(), row.paymentId(), row.amount(), row.status(), row.createdAt())).isEqualTo(row);
+            assertThat(new PaymentCancel(row.claimId(), row.paymentId(), row.amount(), row.status(), row.createdAt(), row.updatedAt())).isEqualTo(row);
             assertThat(row.claimId()).isPositive();
         });
         clock.now = clock.now.plusSeconds(121);

@@ -90,6 +90,10 @@ payment:
       lock-at-most-for: 15m
       page-size: 5
       max-pages-per-lane: 1
+  # 결제 후 취소 무환불 판정(#691, payment-guide.md §8-1) — PG 거절을 기록한 뒤 이 시간 안에는 거절을 무환불 근거로 쓰지 않고 미확정으로 답한다. 0 이하는 기동 실패
+  cancellation:
+    void:
+      rejection-settle-grace: 60s
   order-result:
     consumer:
       enabled: false

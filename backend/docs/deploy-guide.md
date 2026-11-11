@@ -465,3 +465,10 @@ Hibernate validate·생성 DDL/스냅숏 일치·PG 계약/복구/락 시험을 
 롤백은 단일 게이트 OFF → 실행자 drain → 구버전 배포 순서이며 원장·의도·커서 진행값·키를 보존한다.
 구버전 양수 원장 독자와 #591 exact-two-seed 가드는 호환된다. 보정 전 음수 설계의 실제 운영 행이 있으면 별도 승인된 이행이 필요하다.
 고정 수동 사유와 원문 없는 실패 로그를 점검하되 #213 어드민 알림·operations-service 연동이 구현됐다고 간주하지 않는다.
+
+### 결제 후 취소 무환불 봉인 배포 (#691)
+
+새 payment-service 기동 **전**(dev 포함)에 `service/payment-service/src/test/resources/ddl/payment-cancel-voided-status.sql`로 `payment_cancel.status` check 에 `VOIDED` 를 더한다 — 제약 이름 확인 조회 · 잠금 · 롤백 불가 이유는 [취소 DDL 문서](payment-cancellation-ddl.md) "#691 VOIDED 상태", 미적용 상태의 봉인은 500 이고 order 는 거절을 막는다(안전 쪽 실패).
+
+- dev 를 포함해 모든 환경에 DDL 을 먼저 적용한다(`ddl-auto=update` 는 기존 check 제약을 고치지 않는다).
+- order-service 의 void 호출(#17 A4 2단계)은 payment-service 모든 인스턴스가 새 버전이 된 뒤에 켠다 — 롤링 중 옛 인스턴스는 `VOIDED` 행을 읽으면 enum 변환에 실패한다.

@@ -52,14 +52,16 @@ public class TossPaymentGatewayAdapter implements PaymentGatewayPort {
 
     /**
      * 카드 · 간편결제처럼 취소가 동기로 잔액에 반영되는 KRW 결제만 대조한다. 가상계좌(환불 계좌 송금) · USD(PayPal 비동기 환불)는
-     * 끝나지 않은 환불이 조회에 안 보일 수 있어 부르지 않고 모름이다 ({@code payment-guide.md} §8-1).
+     * 끝나지 않은 환불이 조회에 안 보일 수 있어 부르지 않고 대조 대상 아님(UNSUPPORTED)이다. 기대 잔액이 결제와 다른 통화이거나 결제액보다 크면
+     * 호출자 버그라 부르지 않고 모름(UNKNOWN)이다 ({@code payment-guide.md} §8-1).
      */
     @Override
     public PgRetentionQueryResult inquireRetention(Payment payment, Money expectedBalance) {
         Objects.requireNonNull(payment, "payment");
-        if (payment.paymentKey() == null || payment.method() == PaymentMethod.VIRTUAL_ACCOUNT || payment.amount().currency() != CurrencyCode.KRW
-            || expectedBalance == null || expectedBalance.currency() != payment.amount().currency()
-            || expectedBalance.isGreaterThan(payment.amount())) {
+        if (payment.paymentKey() == null || payment.method() == PaymentMethod.VIRTUAL_ACCOUNT || payment.amount().currency() != CurrencyCode.KRW) {
+            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNSUPPORTED);
+        }
+        if (expectedBalance == null || expectedBalance.currency() != payment.amount().currency() || expectedBalance.isGreaterThan(payment.amount())) {
             return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
         }
         return tossPaymentsResponseSupport.retentionInquiry(payment, expectedBalance,

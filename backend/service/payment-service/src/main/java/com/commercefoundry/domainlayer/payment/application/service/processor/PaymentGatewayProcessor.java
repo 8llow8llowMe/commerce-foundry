@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.payment.application.model.PgApprovalReque
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgRetentionQueryResult;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import lombok.RequiredArgsConstructor;
@@ -45,7 +46,28 @@ public class PaymentGatewayProcessor {
         return new PaymentCancellationInfo(PaymentCancellationInfo.State.valueOf(result.state().name()), result.transactionKey());
     }
 
+    /**
+     * PG 잔액이 원장 기대 잔액과 같은지 결제키 GET 한 번으로 본다 (#691 무환불 판정, {@code payment-guide.md} §8-1). DB 트랜잭션 밖에서만 호출한다.
+     * 자동 재시도에 붙이지 않는다 — 승인과 같은 {@code toss} 서킷을 쓴다.
+     */
+    @Transactional(propagation = Propagation.NEVER)
+    public RetentionOutcome inquireRetention(Payment payment, Money expectedBalance) {
+        PgRetentionQueryResult result = paymentGatewayPort.inquireRetention(payment, expectedBalance);
+        if (result == null || result.state() == null) {
+            return RetentionOutcome.UNKNOWN;
+        }
+        return switch (result.state()) {
+            case MATCHED -> RetentionOutcome.MATCHED;
+            case MISMATCHED -> RetentionOutcome.MISMATCHED;
+            case UNKNOWN -> RetentionOutcome.UNKNOWN;
+            case UNSUPPORTED -> RetentionOutcome.UNSUPPORTED;
+        };
+    }
+
     public enum CancelOutcome { SUCCEEDED, REJECTED, UNKNOWN }
+
+    /** {@code MATCHED} 만 무환불 확정의 근거다. {@code UNSUPPORTED} 는 대조 대상이 아닌 결제(PG 미호출)다. */
+    public enum RetentionOutcome { MATCHED, MISMATCHED, UNKNOWN, UNSUPPORTED }
 
     /**
      * IN_PROGRESS 로 저장한 결제 시도의 승인을 요청한다. PG 멱등 키는 결제 시도 아이디라 같은 시도의 재요청(되돌린 READY 의 재승인 포함)이 같은 값을 싣는다 —

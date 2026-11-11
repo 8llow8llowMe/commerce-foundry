@@ -52,7 +52,8 @@ public class PaymentCancelProcessor {
         Money succeeded = all.stream().filter(c -> c.status() == PaymentCancel.Status.SUCCEEDED)
             .map(PaymentCancel::amount).reduce(Money.zero(payment.amount().currency()), Money::plus);
         if (existing != null) {
-            if (existing.status() == PaymentCancel.Status.REJECTED) {
+            if (existing.status().refusesRefund()) {
+                // REJECTED · VOIDED. VOIDED 는 무환불 봉인이다(#691) — 주문이 거절 · 재출고를 확정했을 수 있어 이 클레임으로는 PG 를 부르지 않는다.
                 throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
             }
             if (existing.status() == PaymentCancel.Status.PENDING && existing.createdAt() != null

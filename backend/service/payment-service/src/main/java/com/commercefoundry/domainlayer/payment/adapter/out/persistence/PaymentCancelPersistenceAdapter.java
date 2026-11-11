@@ -54,13 +54,35 @@ public class PaymentCancelPersistenceAdapter implements PaymentCancelPersistence
             // A null @Version makes Spring Data persist this NEW entity even with an assigned ID.
             return cancelRepository.saveAndFlush(PaymentCancelEntity.from(cancel)).toDomain();
         } catch (DataIntegrityViolationException failure) {
-            for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-                if (cause instanceof SQLException sql && "23505".equals(sql.getSQLState())) {
-                    throw new PaymentAutoCancelClaimCollisionException();
-                }
+            if (isUniqueViolation(failure)) {
+                throw new PaymentAutoCancelClaimCollisionException();
             }
             throw failure;
         }
+    }
+
+    @Override
+    public PaymentCancel insertVoided(PaymentCancel cancel) {
+        if (cancel.status() != PaymentCancel.Status.VOIDED) throw new IllegalArgumentException("Seal row must be voided");
+        try {
+            // insertNewAutoClaim 과 같다 — null @Version 이라 persist(INSERT) 만 하고 기존 행을 덮어쓰지 않는다.
+            return cancelRepository.saveAndFlush(PaymentCancelEntity.from(cancel)).toDomain();
+        } catch (DataIntegrityViolationException failure) {
+            if (isUniqueViolation(failure)) {
+                // 같은 claimId 를 다른 결제 행 잠금 아래에서 먼저 넣었다. 판정을 다시 받아야 한다.
+                throw new PaymentException(PaymentErrorCode.PAYMENT_REQUEST_CONFLICT, failure);
+            }
+            throw failure;
+        }
+    }
+
+    private static boolean isUniqueViolation(DataIntegrityViolationException failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sql && "23505".equals(sql.getSQLState())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

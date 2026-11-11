@@ -57,7 +57,7 @@ public class PaymentCancelEntity extends BaseEntity {
     }
 
     public PaymentCancel toDomain() {
-        return new PaymentCancel(claimId, paymentId, Money.of(amount, currency), status, getCreatedAt());
+        return new PaymentCancel(claimId, paymentId, Money.of(amount, currency), status, getCreatedAt(), getUpdatedAt());
     }
 
     public void setStatus(PaymentCancel.Status status) {

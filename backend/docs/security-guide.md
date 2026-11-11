@@ -935,6 +935,7 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
   | 엔드포인트 | 허용 호출자 | 비고 |
   |------------|-------------|------|
   | `GET /internal/v1/payments/{paymentId}` | `SERVICE_order-service` | 읽기, 회원 필터 없음 — `payment-approved` 진위 재조회 (#308). 결제키 · 멱등 키 · 주문명은 내리지 않는다 |
+  | `POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/void` | `SERVICE_order-service` | 쓰기(무환불 봉인), 회원 필터 없음 — 환불 실패 클레임 거절 전 판정 (#691). 결제키 · PG 원문은 내리지 않는다 |
   | `GET /internal/v1/payments/approval-summary` | `SERVICE_operations-service` | 읽기, 최대 31일의 정상 승인 건수 · 원금 집계만 반환. 식별자 · 결제키 없음, `no-store` (#550) |
   | `GET /internal/v1/outbox-observations/ready` | `SERVICE_operations-service` | 읽기, 발행 가능한 미발행 건수·최소시각·조회 기준시각만 반환. 결제 정보·outbox 본문 없음 (#477 A3a) |
   | `GET /internal/v1/payment-observations/anomalies` | `SERVICE_operations-service` | 읽기, 고정 여섯 후보 건수·최소시각·관측시각만 반환. 원문 결제 정보 없음, DB 실패는 원인 없는 고정 503 (#477 A4a, [계약](payment-observation-guide.md)) |

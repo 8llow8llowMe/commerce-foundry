@@ -9,6 +9,7 @@ import com.commercefoundry.domainlayer.payment.adapter.in.internal.presenter.Pay
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentErrorCode;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentException;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationUseCase;
+import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationVoidUseCase;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentInternalUseCase;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentApprovalSummaryQueryPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PaymentApprovalSummaryQueryResult;
@@ -54,6 +55,7 @@ class PaymentApprovalSummaryInternalControllerTest {
     @MockitoBean PaymentApprovalSummaryQueryPort queryPort;
     @MockitoBean PaymentInternalUseCase paymentInternalUseCase;
     @MockitoBean PaymentCancellationUseCase paymentCancellationUseCase;
+    @MockitoBean PaymentCancellationVoidUseCase paymentCancellationVoidUseCase;
 
     @Test
     void operationsGetsOnlyAnonymousAggregateFieldsWithMoneyMetadataAndUtcEchoAt31Days() {

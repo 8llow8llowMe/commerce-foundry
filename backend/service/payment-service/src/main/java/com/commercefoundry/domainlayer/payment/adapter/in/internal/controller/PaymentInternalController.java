@@ -3,8 +3,11 @@ package com.commercefoundry.domainlayer.payment.adapter.in.internal.controller;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentInternalResponse;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.request.PaymentCancelRequest;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.request.PaymentCancelVoidRequest;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelResponse;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelVoidResponse;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationUseCase;
+import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationVoidUseCase;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentValidationMessage;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentInternalUseCase;
 import io.swagger.v3.oas.annotations.Hidden;
@@ -36,6 +39,7 @@ public class PaymentInternalController {
 
     private final PaymentInternalUseCase paymentInternalUseCase;
     private final PaymentCancellationUseCase paymentCancellationUseCase;
+    private final PaymentCancellationVoidUseCase paymentCancellationVoidUseCase;
 
     @PreAuthorize("hasAuthority('SERVICE_order-service')")
     @PostMapping("/{paymentId}/cancellations")
@@ -46,6 +50,22 @@ public class PaymentInternalController {
     ) {
         return ResponseEntity.ok(Response.success(paymentCancellationUseCase.cancel(
             paymentId, request.claimId(), request.amount(), request.currency(), idempotencyKey)));
+    }
+
+    /**
+     * 결제 후 취소 클레임의 무환불 판정 · 봉인 (#691, {@code payment-guide.md} §8-1). 판정은 200 데이터({@code outcome})다.
+     * 멱등 키 헤더가 없다 — 경로의 claimId 가 키이고, 다시 부르면 PG 잔액까지 새로 대조한 현재 판정을 답한다.
+     * 본문 {@code orderId} 는 결제의 주문과 대조한다 — order 가 다른 주문의 결제를 가리키면 409 {@code PAYMENT_019} 다.
+     */
+    @PreAuthorize("hasAuthority('SERVICE_order-service')")
+    @PostMapping("/{paymentId}/cancellations/{claimId}/void")
+    public ResponseEntity<Response<PaymentCancelVoidResponse>> voidCancellation(
+        @PathVariable @Positive(message = PaymentValidationMessage.PAYMENT_ID_POSITIVE) long paymentId,
+        @PathVariable @Positive(message = PaymentValidationMessage.CLAIM_ID_POSITIVE) long claimId,
+        @Valid @RequestBody PaymentCancelVoidRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(paymentCancellationVoidUseCase.voidCancellation(
+            paymentId, request.orderId(), claimId, request.amount(), request.currency())));
     }
 
     @PreAuthorize("hasAuthority('SERVICE_order-service')")
