@@ -18,6 +18,13 @@ import { productEditHref } from '@/lib/product/update';
 import { ProductDeleteAction } from './ProductDeleteAction';
 
 /** 섹션 수정 화면 링크(#29) */
+/** 수정 화면으로 가는 링크 — `@cf/ui` 보조 버튼(secondary)과 같은 모양 */
+const EDIT_LINK =
+  'inline-flex h-9 items-center rounded-md bg-accent px-3 text-sm font-medium text-accent-fg hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2';
+/** 다른 화면으로 옮기는 링크 — 수정 버튼과 구분되게 테두리만 둔다 */
+const RELATED_LINK =
+  'inline-flex h-9 items-center rounded-md border border-border px-3 text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2';
+
 const SECTION_LINKS: [ProductSection, string][] = [
   ['pricing', '가격 수정'],
   ['categories', '카테고리 수정'],
@@ -55,40 +62,55 @@ export function ProductDetailView({
           구역마다 따로 수정합니다. 1회 최대 수량 · 프리오더 수정은 준비 중입니다. 판매 중지 ·
           삭제는 맨 아래에 있습니다.
         </p>
-        <nav
-          aria-label="상품 수정"
-          data-tour="product-edit-links"
-          className="flex flex-wrap gap-3 text-sm"
-        >
-          <Link href={productEditHref(product.productId)} className="underline underline-offset-4">
-            기본 정보 수정
-          </Link>
-          {SECTION_LINKS.map(([section, label]) => (
-            <Link
-              key={section}
-              href={productSectionHref(product.productId, section)}
-              className="underline underline-offset-4"
-            >
-              {label}
+        {/* 밑줄 글자만으로는 누를 곳인지 몰랐다(#29 시연) — 무리마다 이름을 달고 버튼 모양 링크로 둔다 */}
+        <div className="flex flex-col gap-1.5">
+          <span id="product-edit-label" className="text-xs font-medium text-muted-fg">
+            수정할 구역 고르기
+          </span>
+          <nav
+            aria-labelledby="product-edit-label"
+            data-tour="product-edit-links"
+            className="flex flex-wrap gap-2"
+          >
+            <Link href={productEditHref(product.productId)} className={EDIT_LINK}>
+              기본 정보 수정
             </Link>
-          ))}
-        </nav>
-        <nav aria-label="상품 관련 화면" data-tour="product-related" className="flex gap-3 text-sm">
-          {/* 재고 · 원가 화면은 아직 고객 상세에서 SKU 를 읽어 노출 상품만 열린다(목록과 같은 규칙) */}
-          {product.visible && (
-            <Link href={`/stocks/${product.productId}`} className="underline underline-offset-4">
-              재고
+            {SECTION_LINKS.map(([section, label]) => (
+              <Link
+                key={section}
+                href={productSectionHref(product.productId, section)}
+                className={EDIT_LINK}
+              >
+                {label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span id="product-related-label" className="text-xs font-medium text-muted-fg">
+            이 상품의 다른 화면
+          </span>
+          <nav
+            aria-labelledby="product-related-label"
+            data-tour="product-related"
+            className="flex flex-wrap gap-2"
+          >
+            {/* 재고 · 원가 화면은 아직 고객 상세에서 SKU 를 읽어 노출 상품만 열린다(목록과 같은 규칙) */}
+            {product.visible && (
+              <Link href={`/stocks/${product.productId}`} className={RELATED_LINK}>
+                재고 →
+              </Link>
+            )}
+            {product.visible && (
+              <Link href={`/sku-costs/${product.productId}`} className={RELATED_LINK}>
+                원가 →
+              </Link>
+            )}
+            <Link href={`/size-charts/${product.productId}`} className={RELATED_LINK}>
+              사이즈표 →
             </Link>
-          )}
-          {product.visible && (
-            <Link href={`/sku-costs/${product.productId}`} className="underline underline-offset-4">
-              원가
-            </Link>
-          )}
-          <Link href={`/size-charts/${product.productId}`} className="underline underline-offset-4">
-            사이즈표
-          </Link>
-        </nav>
+          </nav>
+        </div>
       </div>
 
       <Section title="기본 정보">

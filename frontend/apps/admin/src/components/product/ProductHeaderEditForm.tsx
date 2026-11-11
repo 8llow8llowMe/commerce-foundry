@@ -1,7 +1,7 @@
 'use client';
 
 import { apiFetch, ApiError } from '@cf/api-client';
-import { Button, Checkbox, FieldError, TextField } from '@cf/ui';
+import { Button, FieldError, TextField } from '@cf/ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useId, useRef, useState } from 'react';
@@ -28,6 +28,7 @@ import {
   type ProductHeaderUpdateResponse,
 } from '@/lib/product/update';
 import { DescriptionHtmlField } from './DescriptionHtmlField';
+import { VisibleField } from './VisibleField';
 
 /**
  * 어드민 상품 기본 정보 수정(#29 · BE #9 후속) — `PUT .../products/{productId}/header`.
@@ -202,11 +203,11 @@ export function ProductHeaderEditForm({ product }: { product: AdminProductDetail
             </select>
             <FieldError messages={errorsOf('saleStatus')} />
           </div>
-          <Checkbox
-            label="스토어에 노출 — 끄면 고객에게 보이지 않습니다"
+          <VisibleField
             checked={form.visible}
-            onChange={(event) => set({ visible: event.currentTarget.checked })}
+            onChange={(visible) => set({ visible })}
             errors={errorsOf('visible')}
+            hiddenNote="판매만 잠시 멈추려면 이 칸을 끄고 저장합니다."
           />
         </div>
       </fieldset>
