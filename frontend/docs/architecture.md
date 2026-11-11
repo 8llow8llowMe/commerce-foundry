@@ -748,6 +748,33 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **정제 안내** — 응답 `descriptionHtmlSanitized: true` 면 상세 주소에 `?sanitized=1` 을 붙여 옮기고, 상세가 안내를 한 번 보인 뒤 주소에서 지운다(`SanitizedNotice`, `history.replaceState`).
 - 입력 중 이탈 경고(beforeunload)는 두지 않는다 — 어드민 폼에 그 규칙이 없다.
 
+### AI 상품 초안 (`/products/drafts/new` · `/products/drafts/[draftId]`, #360 · BE #359)
+
+- 계약 정본은 `backend/docs/api-design-guide.md` §2-14. 코드는 `lib/product-draft/`(`form.ts` 폼 · 본문 · 미리 보는 검증, `errors.ts` 요청 · 거절 실패 처리, `detail.ts` 응답 타입 · 읽기 · 상태 판정),
+  화면은 `components/product-draft/`(`ProductDraftRequestForm` · `DraftImagesField` · `DraftListField` · `ProductDraftDetailView` · `ProductDraftRejectAction`)다.
+  상품 등록 화면 머리에 "AI 초안으로 시작" 링크가 있다. 경로 권한은 `/products` 아래라 `CATALOG_READ` 로 열리고, 요청 · 거절은 서버가 `CATALOG_MANAGE` 로 막는다(403 은 `AccessNotice` · 칸 문구).
+- **요청(`POST /api/v1/admin/product-drafts`)** — 사진(대표 1 + 추가 7)과 사실(상품명 후보 · 카테고리 · 원산지 · 치수 메모 · 소재 · 세탁 · 인증 · 문구 분위기 · 꼭 넣을/쓰지 않을 표현)이 모두 선택이다.
+  목록 칸은 한 줄씩 "더하기"(또는 Enter)로 칩을 더하고 칩마다 "빼기"다(`addListItem` — 1~100자 한 줄, 10개, 같은 항목 한 번). 빈 칸 · 빈 목록 · 사진 없음은 본문에서 뺀다.
+  사진 칸에 "고객 정보(이름 · 연락처 · 주소 · 주문 화면 · 송장)를 넣지 마세요"(사진 속 글자는 가려지지 않고 AI 에 간다), 폼 머리에 "여기 적은 값만 사실로 쓰입니다" 를 둔다.
+- **사진 업로드는 전시 · 룩과 같은 확정 흐름이다**(`DisplayImageUploadButton` → `uploadDisplayImage`) — 초안은 업로드 확정이 만든 `products/media/...` 공개 주소만 받기 때문이다(`PRODUCT_DRAFT_031`).
+  새 업로드 방식은 만들지 않았고, 버튼에 칸별 추가 검사(`checkFile`)와 안내(`hint`)만 더했다 — 초안은 장당 5MB(ai-core 상한)라 전시 상한 10MB 보다 큰 파일은 올리기 전에 막는다.
+  미리보기는 그 공개 주소로 그린다. 올리는 중에는 제출을 막는다.
+- **문구 검사는 BE `ProductDraftValidationMessage` 와 같다** — 한 줄 칸은 제어 문자(C0 · DEL · C1) · 짝 없는 서로게이트 · 줄/문단 구분자 · 방향 제어 · 태그 문자를 받지 않고(개행 · 탭 포함),
+  치수 메모만 개행 · 탭을 더 받는다. 이모지 ZWJ · 변형 선택자는 받는다(상품 폼 `isPlainText` 보다 좁다). 앞뒤 공백을 뺀 값으로 길이를 본다. 판정은 서버다.
+- **오류는 코드별 운영자 문구다**(`draftCreateFailure`) — 검증 `PRODUCT_DRAFT_101~126` 은 `fieldErrors.field` 경로의 칸(`materials[1].<list element>` → 소재, `images[0].url` → 사진),
+  이미지 `030` · `031` · `033` · `034` · `035` · `036` 은 사진 칸, 503 `032`(저장소 미설정) · `501`(저장소 장애)은 폼 전체 문구이고 저장 전에 난 오류라 **결과 모름으로 보지 않는다**.
+  칸 없는 `PRODUCT_100` 은 "새로고침 뒤 다시 입력". 서버 문구는 칸 이름이 영문이라 쓰지 않는다. 401 은 폼을 지키고, 429 는 서버 문구다.
+- **멱등 키가 없다** — 다시 보내면 초안이 하나 더 생긴다(상품은 생기지 않고 쓰지 않은 초안은 7일 뒤 만료). 제출은 ref 로 한 번만 받고 성공하면 상세로 `replace` 한다.
+  결과 모름(연결 실패 · 봉투 아님 · 502 · 503 · 504 · 5xx, 응답 아이디 모양이 틀림)은 그 사실을 알리고 제출을 막아 두며, "알고 있습니다 — 다시 요청할 수 있게 하기" 로만 다시 연다(초안 목록이 없어 확인할 곳이 없다).
+- **상세(`GET .../{draftId}`, 서버 컴포넌트)** — 상태(`status.name` · `description`) · 요청 · 만료 · 거절 시각(한국 시각) · 부족한 입력(`missingRequiredInputs` 의 `name` · `description`) · 입력한 사실(입력한 칸만, 평문) · 사진.
+  카테고리는 트리로 찾은 경로 이름이다(못 읽으면 "이름을 불러오지 못함", 없으면 "삭제됐거나 찾을 수 없음"). **초안 · 회원 아이디와 상태 코드는 보이지 않는다**(#305).
+  형식이 틀린 주소 · 404 `001` · 400 `127` 은 not-found 다. "새로고침"은 `router.refresh()` 다.
+- **거절(`POST .../{draftId}/reject`)** — 한 번 더 확인한 뒤 보낸다. 끝난 초안(적용 · 거절 · 만료)에는 버튼이 없다(`canReject`). 이미 거절한 초안에 다시 보내도 200 이라 결과 모름은 다시 눌러도 된다.
+  409 `020`(적용함) · `022`(만료) · `025`(동시 변경)는 문구와 함께 화면을 다시 읽는다(`rejectFailure`).
+- **한계(#360 의 첫 PR)** — 생성(AI 호출) 작업 · 결과 칸 · 적용 API 가 아직 없고 생성 플래그가 기본 꺼짐이라 초안은 "생성 대기" 에 머문다. 화면은 이를 그대로 안내한다
+  ("AI 초안 생성은 준비 중, 결과가 준비되면 이 화면에서 확인", 검토 대기 · 생성 실패에서는 적용 · 다시 생성이 준비 중임을 덧붙인다). 초안 목록 API 가 없어 **다시 찾기는 상세 주소뿐이다**(상세 · not-found 가 안내한다).
+  BE 투어 허용 목록에 초안 화면이 없어 투어는 두지 않았다. 남은 것: AI 결과 검수(운영자 사실 · AI 제안 · 미확인 구분) · 상품 등록 폼에 적용 · 작업 진행 알림 · 다시 열기 · 투어.
+
 ### 이미지 업로드 (`components/upload/ImageUploadField`, #29 · BE #9 F1)
 
 - **presigned PUT** — ① `apiFetch` 로 BFF 를 거쳐 업로드 자리를 발급받고(`POST /api/v1/admin/products/image-uploads`, `{ contentType, contentLength }` → `uploadKey` · `uploadUrl` · `method` · `headers` · `expiresAt`)
