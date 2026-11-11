@@ -1187,7 +1187,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
-| `POST /api/v1/admin/product-drafts` | `CATALOG_MANAGE` | 201 초안 — 생성 대기(`REQUESTED`) | 400 `PRODUCT_DRAFT_030` · `034` · `035` · `101~126` · `PRODUCT_100` · 503 `PRODUCT_DRAFT_032` |
+| `POST /api/v1/admin/product-drafts` | `CATALOG_MANAGE` | 201 초안 — 생성 대기(`REQUESTED`) | 400 `PRODUCT_DRAFT_030` · `031` · `033` · `034` · `035` · `036` · `101~126` · `PRODUCT_100` · 503 `PRODUCT_DRAFT_032` · `501` |
 | `GET /api/v1/admin/product-drafts/{draftId}` | `CATALOG_READ` | 200 초안 | 404 `PRODUCT_DRAFT_001` · 400 `PRODUCT_DRAFT_127` |
 | `POST /api/v1/admin/product-drafts/{draftId}/reject` | `CATALOG_MANAGE` | 200 초안 — 거절(`REJECTED`). 이미 거절했으면 그대로 200 | 404 `PRODUCT_DRAFT_001` · 409 `PRODUCT_DRAFT_020`(적용함) · `022`(만료) · `025`(동시 변경) · 400 `PRODUCT_DRAFT_127` |
 
@@ -1196,7 +1196,18 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   목록 칸은 최대 10개 · 원소 1~100자, 이미지는 최대 8장이다. **여기 적은 값만 사실이다** — 소재 · 세탁 · 치수 · 원산지 · 인증을 AI 가 이미지로 정하지 않는다. 고객 정보를 적지 않는다.
 - **이미지**: 스토어 미디어 저장소의 공개 주소 아래만 받는다(`MediaUrlPolicy`, 밖이면 `030`, 저장소 미설정은 503 `032`). 유형은 `THUMBNAIL`(대표, 한 장까지 — 넘으면 `034`) ·
   `GALLERY` 뿐이다 — 영상 등 다른 값은 본문 오류 `PRODUCT_100` 이다(초안 전용 유형 `ProductDraftImageType`, 상품 이미지 유형과 이름이 같고 적용 때 옮긴다).
-  같은 주소 두 번은 `035` 다. 판정 순서는 `034` → `035` → `032` → `030`. 업로드 키(#9 이미지 업로드)는 그 API 뒤에 받는다.
+  같은 주소 두 번은 `035` 다. 판정 순서는 `034` → `035` → `032` → `030` → `031` → (저장소) `033` · `036` · `501`.
+  **키 · ETag 고정 (#359 PR-2a, D3 · D11)** — 주소를 `MediaUrlPolicy.keyOf` 로 관리 키로 바꾸고(퍼센트 인코딩 · 저장소 공개 주소 불일치면 키가 없다) 키가
+  미디어 업로드 확정(#9, [display-media-upload-guide.md](display-media-upload-guide.md))이 만든 `products/media/{actorId}/{UUID}/{SHA-256}.{jpg|png|webp}` 모양이어야 한다 —
+  아니면 `031`(업로드 확정 전 원본 `uploads/...` · 상품별 키 `products/{id}/...` · 이관 이미지 포함). 그 뒤 장마다 저장소 HEAD 로 있는지(`033`), 크기 1B~5MiB ·
+  저장 형식 JPEG · PNG · WebP · 키 확장자와 같은 형식인지(`036`) 보고, 키 · ETag · 크기 · 형식을 초안 입력(`input_json`)에 고정한다. 저장소 꺼짐 · 장애는 503 `501`(다시 시도).
+  상한은 ai-core `AiImage`(장당 5MiB · 8장)와 요청 상한 8장 중 작은 값이다. HEAD 는 DB 트랜잭션 밖에서 하고 저장만 짧은 쓰기 트랜잭션이다.
+  고정은 생성 플래그와 상관없이 늘 한다 — 저장되는 초안이 늘 생성할 수 있는 모양이 되게. 응답의 `images` 에는 키 · ETag 를 싣지 않는다(주소 그대로).
+  상품 이미지 아이디 입력은 받지 않는다(D10 — 이관 이미지가 관리 키를 갖게 된 #678 뒤에 연다).
+- **이미지 경계 · 개인정보 (D3 · D12)**: product 는 외부 주소를 내려받지 않고 operations 도 공개 주소를 HTTP 로 내려받지 않는다 — operations 는 아래 internal 로 고정한 키의 바이트만 받는다
+  (사이즈표 IMAGE 와 같은 경계, [ai-size-chart-guide.md](ai-size-chart-guide.md) §4). 사이즈표와 달리 해시 승인 · 개인정보 제거 확인을 요구하지 않는다 — 근거는 입력이 운영자가
+  상품 등록용으로 직접 올린 상품 사진(이미 공개 확정한 `products/media` 객체)이고, 초안 결과가 운영자 검토를 거쳐서만 상품에 들어가기 때문이다.
+  대신 **사진에 고객 정보(이름 · 연락처 · 주소 · 주문 화면 · 송장)를 넣지 않는다** — 이미지 안의 글자는 마스킹되지 않고 AI 에 그대로 간다. 어드민 화면은 업로드 칸에 이 안내를 둔다.
 - **응답**: `{draftId, status{code,name,description}, facts{...입력 그대로}, images[{url, imageType, width, height}], missingRequiredInputs[{code,name,description}],
   requestedByMemberId, requestedAt, expiresAt, rejectedAt}`. `missingRequiredInputs` 는 서버가 운영자 입력으로 계산한다(AI 출력이 아니다) — `PRODUCT_NAME` → `CATEGORY` →
   `THUMBNAIL_IMAGE` 순이고, 가격 · 옵션 · 재고는 초안이 담지 않아 적용 단계에서 입력한다. 카테고리 존재는 적용 때 상품 등록 검증이 본다.
@@ -1207,11 +1218,24 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 - **문구 검증(프롬프트 안전)**: 한 줄 칸은 유니코드 제어 문자(C0 · DEL · C1 — U+0085 포함) · 짝 없는 서로게이트 · 줄/문단 구분자(U+2028 · U+2029) ·
   방향 제어 문자(U+200E · U+200F · U+202A~202E · U+2066~2069) · 태그 문자(U+E0000~E007F)를 받지 않는다. 치수 메모는 여기에 `\n` · `\r` · 탭만 더 받는다.
   보이지 않는 지시 · 줄 나눔으로 프롬프트 데이터 칸 경계를 흉내 내지 못하게 하고, 검토 화면에 보이는 값과 저장 값이 같게 한다. 이모지용 ZWJ · 변형 선택자는 받는다.
-- **단계** — 이번 단계는 초안 저장 · 조회 · 거절이다. 새 초안은 생성 작업 연결 전까지 `REQUESTED` 에 머문다. 후속:
-  operations 생성 작업(`PRODUCT_DRAFT_GENERATE`, ai-core 원장 연결 뒤) → product ↔ operations 서비스 간 연결 · 재생성 · AI 제안 응답 칸
+- **생성 입력 internal (#359 PR-2a, operations 전용)** — 허용 호출자는 `SERVICE_operations-service` 뿐이다(그 밖의 서비스 토큰 · 사용자 403, 토큰 없음 401).
+  플래그 `product-draft.generation-enabled`(기본 `false`)가 닫혀 있으면 둘 다 400 `PRODUCT_DRAFT_040` 이다(중단 스위치 — 이미 만든 초안의 바이트도 내보내지 않는다).
+  응답은 `Cache-Control: no-store` 이고, 오류는 `Accept` 와 상관없이 JSON 봉투(`ProductDraftInternalExceptionHandler`)다.
+
+  | 경로 | 성공 | 오류 |
+  |------|------|------|
+  | `GET /internal/v1/product-drafts/{draftId}/generation-input` | 200 `{draftId, status, expiresAt, facts{nameHint, materials, careNotes, measurementsNote, origin, certifications, tone, mustInclude, mustAvoid}, imageCount, images[{index, imageType, contentType, byteLength, width, height}]}` | 404 `001`(없음 · draftId ≤ 0) · 409 `022`(만료) · `041`(거절) · `042`(검토 대기 · 실패 · 적용) · `043`(원본 미고정 — PR-2a 이전 초안) · 400 `040` |
+  | `GET /internal/v1/product-drafts/{draftId}/generation-images/{index}` | 200 바이트(`application/octet-stream`, `nosniff`, 봉투 없음) | 위 사유 + 404 `045`(index 음수 · 범위 밖) · 410 `044`(고정한 이미지가 없어졌거나 바뀜 — 재시도 불가) · 503 `501`(저장소 장애 — 재시도) |
+
+  생성 대기 · 생성 중(`REQUESTED` · `GENERATING`)만 읽힌다 — 생성 대기도 받는 것은 등록 응답 유실로 상태가 아직 안 바뀌었을 수 있어서다. 스토리지 키 · ETag · 공개 주소 ·
+  만든 어드민 · 카테고리 아이디는 싣지 않는다. 바이트는 고정한 ETag 조건 · 5MiB 상한으로 읽고 magic bytes 를 다시 판별해 크기 · 형식이 고정 값과 다르면 `044` 다.
+- **단계** — 지금은 초안 저장 · 조회 · 거절과 생성 입력 internal(플래그 닫힘)이다. 새 초안은 생성 작업 연결 전까지 `REQUESTED` 에 머문다. 후속:
+  operations 생성 작업(`PRODUCT_DRAFT_GENERATE`, #359 PR-2b) → product ↔ operations 서비스 간 연결 · 재생성 · AI 제안 응답 칸
   (상품명 · 설명 · 검색 태그 · SEO · 대체 텍스트 · 확인이 필요한 속성) → 적용(`POST /{draftId}/apply` — 상품 등록 #9 PR-E1 의 검증을 그대로 거치고, 같은 초안의 재시도는 상품을 하나만 만든다).
 - 오류 코드: 업무 `PRODUCT_DRAFT_001`(없음 404) · `020`(적용한 초안 거절 409) · `022`(만료 409) · `025`(동시 변경 409) · `030`(이미지 주소 400) · `032`(저장소 미설정 503) ·
-  `034`(대표 두 장 400) · `035`(같은 이미지 400). 필드 검증 `PRODUCT_DRAFT_101~126`, 경로 draftId 양수 `127`(`ProductDraftValidationMessage`).
+  `034`(대표 두 장 400) · `035`(같은 이미지 400) · `031`(업로드 확정 미디어 키 아님 400) · `033`(저장소에 없음 400) · `036`(크기 · 형식 400) · `501`(이미지 저장소 장애 503).
+  internal 전용 `040`(생성 기능 닫힘 400) · `041`(거절 409) · `042`(생성할 수 없는 상태 409) · `043`(원본 미고정 409) · `044`(이미지 바뀜 410) · `045`(이미지 순번 없음 404).
+  필드 검증 `PRODUCT_DRAFT_101~126`, 경로 draftId 양수 `127`(`ProductDraftValidationMessage`).
   `PRODUCT_1xx` 검증 대역이 차서 컨텍스트 접두어 `PRODUCT_DRAFT_` 를 새로 열었다(§2-11 · §2-12 와 같다). 깨진 JSON · 타입 불일치(`imageType` 오타 포함)는 서비스 공용 `PRODUCT_100` · `198` 이다.
 - **게이트웨이**: 새 접두어 `/api/v1/admin/product-drafts/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다.
 

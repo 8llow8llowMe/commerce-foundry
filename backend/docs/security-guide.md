@@ -953,6 +953,20 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
   product와 operations의 outbound Feign은 각각 `InternalFeignClientConfiguration`으로 서비스 토큰만 보낸다.
   ADMIN 초안 생성·refresh·apply는 `CATALOG_MANAGE`, 상세·목록은 `CATALOG_READ`다.
 
+  AI 상품 초안(#359 PR-2a)도 같은 경계의 operations 전용 internal 만 둔다([api-design-guide.md](api-design-guide.md) §2-14). 플래그
+  `product-draft.generation-enabled`(기본 닫힘)가 닫혀 있으면 400 `PRODUCT_DRAFT_040` 이다. 그 밖의 서비스 토큰 · 사용자는 403 이다(`ProductDraftInternalControllerTest`).
+
+  | 엔드포인트 | 허용 호출자 | 비고 |
+  |------------|-------------|------|
+  | `GET /internal/v1/product-drafts/{draftId}/generation-input` (product) | `SERVICE_operations-service` | 생성 대기 · 생성 중 초안의 운영자 사실과 이미지 순번 · 유형 · 형식 · 크기만, `no-store`. 스토리지 키 · ETag · 공개 주소 · 만든 어드민 없음 |
+  | `GET /internal/v1/product-drafts/{draftId}/generation-images/{index}` (product) | `SERVICE_operations-service` | 생성 요청 때 고정한 관리 키 바이트(`application/octet-stream`, `no-store`, `nosniff`). 고정 ETag 조건 읽기 · magic bytes 재판별, 바뀌면 410 `PRODUCT_DRAFT_044` |
+
+  **키 패턴 허용 목록 (D11)** — 초안 이미지는 미디어 업로드 확정이 만든 `products/media/{actorId}/{UUID}/{SHA-256}.{jpg|png|webp}` 키만 받는다. 업로드 확정 전 원본
+  (`uploads/...`, 공개 403) · 상품별 키(`products/{id}/...`, 초안은 상품이 없어 소속을 확인할 수 없다) · 이관 이미지 · 퍼센트 인코딩 주소는 400 `PRODUCT_DRAFT_031` 이다.
+  공개 주소를 키로 바꿀 때 저장소가 만드는 공개 주소와 정확히 같아야 한다. 어느 서비스도 운영자가 준 주소를 HTTP 로 내려받지 않는다(SSRF 경로 없음 — 외부 다운로더는 #678).
+  `products/media` 객체는 이미 공개 확정된 미디어라 업로더(actorId) 소속을 보지 않는다 — 다른 운영자가 올린 공개 미디어도 초안 근거로 쓸 수 있다(수용한 위험, 사이즈표와 같다).
+  상품 사진 초안은 개인정보 제거 확인을 요구하지 않는다(D12) — 대신 사진에 고객 정보를 넣지 않는다는 안내를 둔다.
+
 ### 9-5. 호출 쪽 — Feign Capability
 
 ```java
