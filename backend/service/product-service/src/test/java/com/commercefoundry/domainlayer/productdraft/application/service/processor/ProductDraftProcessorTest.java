@@ -15,6 +15,7 @@ import com.commercefoundry.domainlayer.productdraft.application.port.out.Product
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftFacts;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImage;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageSource;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageType;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftStatus;
 import com.commercefoundry.global.media.MediaUrlPolicy;
@@ -43,11 +44,15 @@ class ProductDraftProcessorTest {
 
     private ProductDraftProcessor processor(String publicBaseUrl) {
         return new ProductDraftProcessor(port, new SnowflakeIdGenerator(1, 1), MediaUrlPolicy.of(publicBaseUrl),
-            new ProductDraftProperties(Duration.ofDays(7)), Clock.fixed(NOW, ZoneOffset.UTC));
+            new ProductDraftProperties(Duration.ofDays(7), false), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private static ProductDraftImage image(String path, ProductDraftImageType type) {
         return new ProductDraftImage(BASE + path, type, null, null);
+    }
+
+    private static ProductDraftImage pinned(String path, ProductDraftImageType type) {
+        return image(path, type).pinned(new ProductDraftImageSource("products/media" + path, "\"etag\"", 10L, "image/jpeg"));
     }
 
     private static ProductDraftCreateCommand command(List<ProductDraftImage> images) {
@@ -62,7 +67,7 @@ class ProductDraftProcessorTest {
         @DisplayName("생성 대기 초안을 저장한다 — 만료는 지금 + 7일, 만든 어드민 · 입력 · 이미지 순서가 그대로다")
         void creates() {
             given(port.insert(any())).willAnswer(invocation -> invocation.getArgument(0));
-            List<ProductDraftImage> images = List.of(image("/a.jpg", ProductDraftImageType.THUMBNAIL), image("/b.jpg", ProductDraftImageType.GALLERY));
+            List<ProductDraftImage> images = List.of(pinned("/a.jpg", ProductDraftImageType.THUMBNAIL), pinned("/b.jpg", ProductDraftImageType.GALLERY));
 
             processor.create(command(images));
 
@@ -98,9 +103,80 @@ class ProductDraftProcessorTest {
             verify(port, never()).insert(any());
         }
 
+        @Test
+        @DisplayName("원본을 고정하지 않은 이미지는 저장하지 않는다 — 키 고정을 건너뛴 호출 순서 버그다")
+        void refusesUnpinnedImages() {
+            assertThatThrownBy(() -> processor.create(command(List.of(image("/a.jpg", ProductDraftImageType.THUMBNAIL)))))
+                .isInstanceOf(IllegalStateException.class);
+            verify(port, never()).insert(any());
+        }
+
         private void assertCode(ProductDraftProcessor target, List<ProductDraftImage> images, ProductDraftErrorCode code) {
-            assertThatThrownBy(() -> target.create(command(images)))
+            assertThatThrownBy(() -> target.validateImages(images))
                 .isInstanceOfSatisfying(ProductDraftException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(code));
+        }
+    }
+
+    @Nested
+    @DisplayName("생성 입력 (internal)")
+    class Generation {
+
+        private void stored(ProductDraftStatus status, Instant expiresAt, List<ProductDraftImage> images) {
+            given(port.findById(7L)).willReturn(Optional.of(new ProductDraft(7L, status, 100L, FACTS, images, null, null, expiresAt, NOW.minusSeconds(60))));
+        }
+
+        @Test
+        @DisplayName("생성 대기 · 생성 중이고 원본을 고정한 초안이면 그대로 돌려준다 — 이미지가 없는 초안도 된다")
+        void readable() {
+            stored(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(pinned("/a.jpg", ProductDraftImageType.THUMBNAIL)));
+            assertThat(processor.generationDraft(7L).id()).isEqualTo(7L);
+
+            stored(ProductDraftStatus.GENERATING, NOW.plusSeconds(60), List.of());
+            assertThat(processor.generationDraft(7L).images()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("없음 001 · 만료 022 · 거절 041 · 검토 대기 · 실패 · 적용 042 를 구분한다")
+        void refusals() {
+            assertCode(() -> processor.generationDraft(0L), ProductDraftErrorCode.NOT_FOUND_DRAFT);
+            given(port.findById(8L)).willReturn(Optional.empty());
+            assertCode(() -> processor.generationDraft(8L), ProductDraftErrorCode.NOT_FOUND_DRAFT);
+
+            stored(ProductDraftStatus.REQUESTED, NOW, List.of());
+            assertCode(() -> processor.generationDraft(7L), ProductDraftErrorCode.DRAFT_EXPIRED);
+
+            given(port.findById(7L)).willReturn(Optional.of(
+                new ProductDraft(7L, ProductDraftStatus.REJECTED, 100L, FACTS, List.of(), 200L, NOW.minusSeconds(5), NOW.plusSeconds(60), NOW.minusSeconds(60))));
+            assertCode(() -> processor.generationDraft(7L), ProductDraftErrorCode.GENERATION_DRAFT_REJECTED);
+
+            for (ProductDraftStatus status : List.of(ProductDraftStatus.READY, ProductDraftStatus.FAILED, ProductDraftStatus.APPLIED)) {
+                stored(status, NOW.plusSeconds(60), List.of());
+                assertCode(() -> processor.generationDraft(7L), ProductDraftErrorCode.GENERATION_STATUS_INVALID);
+            }
+        }
+
+        @Test
+        @DisplayName("원본을 고정하지 않은 옛 초안(키 없음)은 입력 불가 043 이다 — 바이트 읽기도 같다")
+        void legacyDraftWithoutSource() {
+            stored(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(pinned("/a.jpg", ProductDraftImageType.THUMBNAIL), image("/b.jpg", ProductDraftImageType.GALLERY)));
+
+            assertCode(() -> processor.generationDraft(7L), ProductDraftErrorCode.GENERATION_INPUT_UNAVAILABLE);
+            assertCode(() -> processor.generationImage(7L, 0), ProductDraftErrorCode.GENERATION_INPUT_UNAVAILABLE);
+        }
+
+        @Test
+        @DisplayName("이미지 순번은 0부터이고 음수 · 범위 밖은 045 다")
+        void imageIndex() {
+            ProductDraftImage second = pinned("/b.jpg", ProductDraftImageType.GALLERY);
+            stored(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(pinned("/a.jpg", ProductDraftImageType.THUMBNAIL), second));
+
+            assertThat(processor.generationImage(7L, 1)).isEqualTo(second);
+            assertCode(() -> processor.generationImage(7L, -1), ProductDraftErrorCode.GENERATION_IMAGE_NOT_FOUND);
+            assertCode(() -> processor.generationImage(7L, 2), ProductDraftErrorCode.GENERATION_IMAGE_NOT_FOUND);
+        }
+
+        private void assertCode(org.assertj.core.api.ThrowableAssert.ThrowingCallable call, ProductDraftErrorCode code) {
+            assertThatThrownBy(call).isInstanceOfSatisfying(ProductDraftException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(code));
         }
     }
 

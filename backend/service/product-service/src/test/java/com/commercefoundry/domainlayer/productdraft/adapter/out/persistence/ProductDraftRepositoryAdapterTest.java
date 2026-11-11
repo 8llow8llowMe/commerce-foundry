@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.productdraft.application.port.out.Product
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftFacts;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImage;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageSource;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageType;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftStatus;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
@@ -62,7 +63,8 @@ class ProductDraftRepositoryAdapterTest {
         ProductDraftFacts facts = new ProductDraftFacts("린넨 \"저고리\"", 12L, List.of("린넨 100%", "면 안감"), List.of("찬물 손세탁"), "총장 62cm\n가슴단면 54cm",
             "대한민국", List.of(), "차분하게", List.of("여름"), List.of("최고"));
         List<ProductDraftImage> images = List.of(
-            new ProductDraftImage("https://cdn.example.com/media/b.jpg", ProductDraftImageType.GALLERY, null, null),
+            new ProductDraftImage("https://cdn.example.com/media/b.jpg", ProductDraftImageType.GALLERY, null, null,
+                new ProductDraftImageSource("products/media/7/0f8fad5b-d9cb-469f-a165-70867728950e/" + "b".repeat(64) + ".jpg", "\"etag-b\"", 5_242_880L, "image/jpeg")),
             new ProductDraftImage("https://cdn.example.com/media/a.jpg", ProductDraftImageType.THUMBNAIL, 1200, 1600)
         );
         return ProductDraft.request(id, 100L, facts, images, EXPIRES_AT);
@@ -85,6 +87,25 @@ class ProductDraftRepositoryAdapterTest {
         assertThat(found.expiresAt()).isEqualTo(EXPIRES_AT);
         assertThat(found.createdAt()).as("생성 응답과 조회 응답의 시각이 같다(마이크로초)").isEqualTo(saved.createdAt());
         assertThat(port.findById(2L)).isEmpty();
+        assertThat(found.images().get(0).source()).as("고정한 키 · ETag · 크기 · 형식도 돌아온다").isEqualTo(draft(1L).images().get(0).source());
+        assertThat(found.images().get(1).source()).isNull();
+    }
+
+    @Test
+    @DisplayName("원본 칸이 없는 PR-1 모양 입력 JSON 도 읽는다 — 이미지 원본은 null 이다(생성 internal 이 043 으로 거절)")
+    void readsLegacyInputWithoutSource() {
+        entityManager.persist(entityBuilder().inputJson(
+            "{\"facts\":{\"nameHint\":\"저고리\"},\"images\":[{\"url\":\"https://cdn.example.com/media/a.jpg\",\"imageType\":\"THUMBNAIL\",\"width\":null,\"height\":null}]}"
+        ).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        ProductDraft found = port.findById(1L).orElseThrow();
+
+        assertThat(found.images()).singleElement().satisfies(image -> {
+            assertThat(image.url()).isEqualTo("https://cdn.example.com/media/a.jpg");
+            assertThat(image.source()).isNull();
+        });
     }
 
     @Test

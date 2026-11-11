@@ -219,7 +219,7 @@ class StockCostDraftAdminAuditIntegrationTest {
     }
 
     @Test
-    @DisplayName("초안 — 커밋된 생성 · 거절은 product-draft:<id> SUCCESS 줄이고, 이미 거절한 초안의 재전송(그대로 200)도 SUCCESS 다. 줄에 입력 문구 · 이미지 주소가 없다")
+    @DisplayName("초안 — 커밋된 생성 · 거절은 product-draft:<id> SUCCESS 줄이고, 이미 거절한 초안의 재전송(그대로 200)도 SUCCESS 다. 줄에 입력 문구가 없다")
     void draftCommittedIsSuccess() {
         long id = createDraft();
         productDraftAdminUseCase.reject(id, ACTOR);
@@ -291,8 +291,12 @@ class StockCostDraftAdminAuditIntegrationTest {
             .build();
     }
 
+    /**
+     * 사실만으로 만든다 — 이미지가 있으면 생성이 저장소 HEAD 로 키 · ETag 를 고정하는데(#359 PR-2a) 이 컨텍스트는 저장소가 꺼져 있다.
+     * 저장소를 목으로 바꾸면 {@link LookAdminAuditIntegrationTest} 와 컨텍스트를 같이 쓰지 못한다. 이미지 주소가 줄에 없는지는 업무 실패 경로(대표 두 장)가 본다.
+     */
     private long createDraft() {
-        return Long.parseLong(productDraftAdminUseCase.create(draftCommand(List.of(thumbnail("")))).draftId());
+        return Long.parseLong(productDraftAdminUseCase.create(draftCommand(List.of())).draftId());
     }
 
     private static ProductDraftImage thumbnail(String suffix) {

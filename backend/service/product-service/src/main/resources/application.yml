@@ -134,6 +134,8 @@ stock:
 product-draft:
   # 초안 보관 기간 — 지나면 적용 · 거절할 수 없다. 읽을 때 판정하고 정리 작업은 두지 않는다
   ttl: 7d
+  # operations 생성 작업 전용 internal(generation-input · generation-images)을 연다. 생성 핸들러(PR-2b) · 연결(PR-3) · 운영 검증 전까지 닫아 둔다
+  generation-enabled: false
 
 security:
   jwt:
