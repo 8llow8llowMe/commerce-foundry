@@ -98,6 +98,7 @@ export function ClaimRecovery({
     <section
       ref={rootRef}
       aria-labelledby="claim-recovery"
+      data-tour="claim-recovery"
       className="flex flex-col gap-3 rounded-md border border-border p-4"
     >
       <h2 id="claim-recovery" className="font-medium">
@@ -157,6 +158,7 @@ export function ClaimRecovery({
             <Button
               variant="secondary"
               data-focus="retry"
+              data-tour="claim-retry"
               onClick={() => {
                 setConfirming(true);
                 setNotice(null);
