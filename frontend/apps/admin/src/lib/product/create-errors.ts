@@ -301,14 +301,45 @@ function isUncertain(cause: ApiError): boolean {
   return cause.status !== null && cause.status >= 500;
 }
 
+/** 요약에 보일 칸 이름 — 오류 키의 첫 마디(`skus.0.hsCode` → `skus`)로 찾는다 */
+const FIELD_LABELS: Record<string, string> = {
+  name: '상품명',
+  summary: '요약',
+  descriptionHtml: '상세 설명',
+  images: '이미지',
+  thumbnail: '대표 이미지',
+  gallery: '추가 이미지',
+  categoryId: '카테고리',
+  categoryIds: '카테고리',
+  saleStatus: '판매 상태',
+  visible: '스토어 노출',
+  currency: '통화',
+  salePrice: '판매가',
+  listPrice: '정가',
+  maxQuantityPerOrder: '1회 최대 수량',
+  preorder: '프리오더',
+  expectedShipDate: '출고 예정일',
+  optionGroups: '옵션',
+  skus: 'SKU',
+  customOrder: '맞춤 제작',
+};
+
 /**
- * 폼 위 요약 — 폼 전체 문구와, 칸 오류가 있으면 "입력값을 확인해 주세요(n곳)". 칸 문구는 칸 옆에 있다.
+ * 폼 위 요약 — 폼 전체 문구와, 칸 오류가 있으면 "입력값을 확인해 주세요." 아래에 **어느 칸이 왜** 틀렸는지 한 줄씩(#29 시연).
+ * 같은 칸 이름은 한 줄로 모은다(옵션 1 · 옵션 2 → 옵션). 이름을 모르는 칸은 "그 밖의 칸 n곳" 으로 센다. 칸 옆에도 같은 문구가 있다.
  */
 export function errorSummary(errors: FormErrors): string[] {
-  const fieldCount = Object.entries(errors).filter(
-    ([key, messages]) => key !== 'form' && messages.length > 0,
-  ).length;
   const summary = [...(errors.form ?? [])];
-  if (fieldCount > 0) summary.push(`${CHECK_FIELDS} (${fieldCount}곳)`);
+  const lines = new Map<string, string>();
+  let unknown = 0;
+  for (const [key, messages] of Object.entries(errors)) {
+    if (key === 'form' || messages.length === 0) continue;
+    const label = FIELD_LABELS[key.split('.')[0] ?? ''];
+    if (!label) unknown += 1;
+    else if (!lines.has(label)) lines.set(label, `${label} — ${messages[0]}`);
+  }
+  if (lines.size === 0 && unknown === 0) return summary;
+  summary.push(CHECK_FIELDS, ...lines.values());
+  if (unknown > 0) summary.push(`그 밖의 칸 ${unknown}곳`);
   return summary;
 }

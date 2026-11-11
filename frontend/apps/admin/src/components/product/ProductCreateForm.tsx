@@ -30,6 +30,7 @@ import {
 } from '@/lib/product/create';
 import { createFailure, errorSummary } from '@/lib/product/create-errors';
 import { CategoryFields } from './CategoryFields';
+import { VisibleField } from './VisibleField';
 import { CustomOrderFields } from './CustomOrderFields';
 import { DescriptionHtmlField } from './DescriptionHtmlField';
 import { OptionEditor } from './OptionEditor';
@@ -276,13 +277,23 @@ export function ProductCreateForm() {
             </div>
           )}
           {categories.kind === 'ok' && categoryRows.length === 0 && (
-            <p className="text-sm text-muted-fg">
-              카테고리가 없습니다.{' '}
-              <Link href="/categories" className="text-fg underline underline-offset-4">
-                카테고리 화면
-              </Link>
-              에서 먼저 만들어 주세요.
-            </p>
+            // 카테고리가 없으면 고를 칸이 없어 "대표 카테고리를 골라 주세요" 가 보일 곳이 없다 — 이 안내 아래에 붙인다(#29 시연)
+            <div className="flex flex-col gap-1">
+              <p
+                className={
+                  errorsOf('categoryId').length > 0
+                    ? 'text-sm text-danger'
+                    : 'text-sm text-muted-fg'
+                }
+              >
+                상품은 카테고리가 있어야 등록할 수 있는데, 아직 카테고리가 없습니다.{' '}
+                <Link href="/categories" className="text-fg underline underline-offset-4">
+                  카테고리 화면
+                </Link>
+                에서 먼저 만들어 주세요.
+              </p>
+              <FieldError messages={errorsOf('categoryId')} />
+            </div>
           )}
           {categories.kind === 'ok' && categoryRows.length > 0 && (
             <CategoryFields
@@ -314,11 +325,11 @@ export function ProductCreateForm() {
             </select>
             <FieldError messages={errorsOf('saleStatus')} />
           </div>
-          <Checkbox
-            label="스토어에 노출 — 끄면 숨긴 상품으로 등록되고 고객에게 보이지 않습니다"
+          <VisibleField
             checked={form.visible}
-            onChange={(event) => set({ visible: event.currentTarget.checked })}
+            onChange={(visible) => set({ visible })}
             errors={errorsOf('visible')}
+            hiddenNote="끈 채로 등록하면 숨긴 상품이 되어 고객에게 보이지 않습니다."
           />
         </Section>
 

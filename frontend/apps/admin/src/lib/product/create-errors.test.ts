@@ -226,11 +226,29 @@ describe('createFailure', () => {
 });
 
 describe('errorSummary', () => {
-  it('폼 전체 문구와 칸 오류 수를 보인다', () => {
+  it('폼 전체 문구와, 어느 칸이 왜 틀렸는지 한 줄씩 보인다', () => {
     expect(errorSummary({})).toEqual([]);
     expect(errorSummary({ form: ['a'], name: ['b'], 'skus.0.hsCode': ['c'], skus: [] })).toEqual([
       'a',
-      `${CHECK_FIELDS} (2곳)`,
+      CHECK_FIELDS,
+      '상품명 — b',
+      'SKU — c',
+    ]);
+  });
+
+  it('카테고리 미선택도 이름으로 알리고, 같은 칸은 한 줄 · 모르는 칸은 수로 센다', () => {
+    expect(
+      errorSummary({
+        categoryId: ['대표 카테고리를 골라 주세요.'],
+        'optionGroups.0.name': ['x'],
+        'optionGroups.1.name': ['y'],
+        mystery: ['z'],
+      }),
+    ).toEqual([
+      CHECK_FIELDS,
+      '카테고리 — 대표 카테고리를 골라 주세요.',
+      '옵션 — x',
+      '그 밖의 칸 1곳',
     ]);
   });
 });

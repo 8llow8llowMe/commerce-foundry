@@ -75,7 +75,9 @@ export function TourRunner() {
       instance = driver({
         steps,
         animate: !reduced,
-        smoothScroll: !reduced,
+        // 부드러운 스크롤을 쓰면 스크롤이 끝나기 전에 팝오버 위치를 잡아, 화면 아래 요소(상품 상세 SKU 표)로 넘어갈 때
+        // 팝오버가 요소와 떨어진 자리에 뜬다(#29 시연). 즉시 스크롤로 두어 위치를 스크롤 뒤에 잡게 한다
+        smoothScroll: false,
         showProgress: steps.length > 1,
         progressText: '{{current}} / {{total}}',
         nextBtnText: '다음',
