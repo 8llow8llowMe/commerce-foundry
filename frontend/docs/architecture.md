@@ -447,7 +447,9 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   BE `AdminPermission.grantedTo` · `security-guide.md` 권한표의 **사본**이다(BE 표가 바뀌면 같이 바꾼다). 권한 없는 메뉴는 빼고(`visibleNav`, 비는 묶음은 제목째),
   그런 화면에 주소로 들어오면 본문 대신 403 안내를 그린다(`RouteGate`). 예: MANAGER 는 결제 확인(정산) · 원가 · 쇼핑몰 설정 · 관리자 계정 · 감사 로그가 안 보인다.
   **인가의 정본은 서버다** — 숨김은 보조이고, 역할을 읽지 못하면(고객 · 모르는 값 · 모양 다름) 거르지 않고 서버 403 안내에 맡긴다.
-  역할 · 권한을 내려주는 BE API 가 생기면 claim 읽기와 사본을 그 응답으로 바꾼다. 버튼 단위(`*_MANAGE`) 숨김은 아직 없다 — 쓰기는 서버 403 → `AccessNotice` 다.
+  역할 · 권한을 내려주는 BE API 가 생기면 claim 읽기와 사본을 그 응답으로 바꾼다. 버튼 단위(`*_MANAGE`) 숨김은 클레임 상세의 확정 · 종결(`SETTLEMENT_MANAGE`,
+  `canManageSettlement` — 대표 ADMIN · OWNER 만) 하나다. 그 페이지(서버 컴포넌트)가 같은 claim 읽기로 정해 넘기고, 역할을 모르면 숨기지 않는다.
+  그 밖의 쓰기는 서버 403 → `AccessNotice` 다.
   **저장(쓰기) 중 401 은 예외다** — 세션이 30분뿐이라 폼을 오래 쓰면 생기는데, 로그인 화면으로 보내면 입력이 사라진다. 폼을 그대로 두고
   `SESSION_EXPIRED_ON_SAVE`("새 탭에서 다시 로그인한 뒤 저장해 주세요")를 폼 전체 오류로 둔다. 401 은 서버가 처리하지 않은 요청이라 다시 저장해도 안전하다.
 
@@ -496,9 +498,10 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **상품 상세 투어**(`product-detail-v1`, `/products/[productId]`) — 구역별 수정 링크(`product-edit-links`) · 재고 · 원가 · 사이즈표 링크(`product-related`) ·
   SKU 구역(`product-detail-skus`) · 판매 중지 · 삭제(`product-delete`, 권한 안내로 바뀔 수 있어 선택). 투어는 삭제 버튼을 누르지 않는다. 상세 테스트가 앵커 목록과 정의를 맞춰 본다.
 - **클레임 목록 투어**(`claims-v1`, `/claims`) — 조건(`claim-filters`) · 표(`claim-table`, 빈 목록이면 없어 선택) · 처리(승인 · 거절 · 환불) 준비 중 안내(가운데).
-- **클레임 상세 투어**(`claim-detail-v1`, `/claims/[claimId]`) — 접수 내용(`claim-summary`) · 접수 항목(`claim-items`) · 처리 상황(`claim-recovery`) ·
-  다시 시도(`claim-retry`) · 반품 처리 준비 중 안내(가운데). 처리 상황 · 다시 시도는 결제 후 취소에만 있고 버튼은 다시 시도할 수 있을 때만 있어 선택 단계다.
-  투어는 다시 시도를 누르지 않는다(가리킨 요소는 투어 동안 눌리지 않는다). 클레임 컴포넌트 테스트가 앵커를 맞춰 본다.
+- **클레임 상세 투어**(`claim-detail-v2`, `/claims/[claimId]`) — 접수 내용(`claim-summary`) · 접수 항목(`claim-items`) · 처리 상황(`claim-recovery`) ·
+  다시 시도(`claim-retry`) · 운영자 확정(`claim-decisions`, v2 에서 더함) · 반품 처리 준비 중 안내(가운데). 처리 상황 · 다시 시도 · 운영자 확정은 결제 후 취소에만 있고
+  버튼은 할 수 있을 때만(확정 · 종결은 대표 관리자에게만) 있어 선택 단계다. 투어는 다시 시도 · 확정을 누르지 않는다(가리킨 요소는 투어 동안 눌리지 않는다).
+  클레임 컴포넌트 테스트가 앵커를 맞춰 본다.
 - 전시 편집(`/displays/main`)에는 아직 투어가 없다.
 - 서버 허용 목록(BE #544 로 `orders` · `order-detail` · `product-new` · `product-edit` · `payments` 까지 올랐다. `products` · `product-detail` · `claims` · `claim-detail` · `jobs` 는 아직 없고 `size-chart-editor` 는 서버가 v1 이라 이 브라우저 기록으로만 간다)의 버전과 투어 아이디의 버전이 같아야 서버 기록을 쓴다(다르면 `ONBOARDING_103`).
 
@@ -1046,17 +1049,30 @@ PG 재조회 · 재승인 · 취소 · 환불은 하지 않는다(BE #15 잔여)
   원금은 결제 시도 금액이지 환불 뒤 잔액이 아니다. 미확정 사유는 DONE · FAILED 에도 과거 원인으로 남을 수 있다. 주문 회신은 수신 · 거절(코드) · 미수신이며, 미수신이 곧 복구 대상은 아니다.
 - 결제키 · 멱등 키 · PG 원문 · 회원 정보는 서버가 내려 주지 않고 화면도 다루지 않는다.
 
-### 클레임 (`/claims` · `/claims/[claimId]`, #30 · BE #574)
+### 클레임 (`/claims` · `/claims/[claimId]`, #30 · BE #574 · #687 · #696)
 
-메뉴 `주문 > 클레임`. order-service `GET /api/v1/admin/claims?type=&status=&orderId=&page=&size=20`(ADMIN, 조건 AND, 클레임 아이디 내림차순 `PageResponse`) ·
-`GET /api/v1/admin/claims/{claimId}` — **읽기만 있다.** 승인 · 거절 · 환불 실행 · 환불 실패 재시도는 BE #17 잔여라 버튼 자리도 두지 않는다.
-BFF 는 범용 프록시가 넘긴다. 코드는 `lib/claim/`(계약 `types.ts` · 조건 `query.ts`), 화면은 `components/claim/` 다.
+메뉴 `주문 > 클레임`. order-service `GET /api/v1/admin/claims?type=&status=&orderId=&page=&size=20`(ORDER_READ, 조건 AND, 클레임 아이디 내림차순 `PageResponse`) ·
+`GET /api/v1/admin/claims/{claimId}` 와 결제 후 취소의 쓰기 셋 — 다시 시도 `POST .../retries`(ORDER_MANAGE) · 수동 환불 확정 `POST .../refund-confirmation` ·
+재고 복원 없이 종결 `POST .../completion`(둘 다 SETTLEMENT_MANAGE, BE #17 A3). 반품 승인 · 거절 · 환불과 취소 거절은 BE #17 잔여라 버튼 자리도 두지 않는다.
+BFF 는 범용 프록시가 넘긴다. 코드는 `lib/claim/`(계약 `types.ts` · 조건 `query.ts` · 다시 시도 `retry.ts` · 확정 · 종결 `decision.ts`), 화면은 `components/claim/` 다.
 
 - **조건은 주소가 정본이다**(`parseClaimQuery`) — 서버가 지금 받는 값은 유형 `RETURN` · 상태 `REQUESTED` 뿐이다(다른 값은 400). 그 밖의 값 · long 범위 밖 주문 아이디는 "전체" 로 읽는다.
   BE 가 상태 · 유형을 늘리면 `CLAIM_TYPES` · `CLAIM_STATUSES` 에 BE enum 이름 그대로 더한다.
 - **목록 · 상세** — 유형 · 상태 · 사유는 서버 `name`(설명은 `title`)이다. 예상 환불액은 `formatMoney` 로 표시만 하고, `null` 은 "미산정"(0원과 다르다)이다.
   상세는 접수 항목(주문 항목 아이디 · 수량 · 사유)을 보인다. 상품 이름 · 옵션은 응답에 없고 어드민 주문 상세 응답에도 주문 항목 아이디가 없어
   화면에서 잇지 않는다(순서로 짐작하지 않는다) — 주문 링크로 주문 상세에서 확인한다.
+- **처리 상황 · 다시 시도**(`ClaimRecovery`, 결제 후 취소에만) — 서버 `recovery.situation` 의 name · description, 다음 자동 확인 시각, 결과 미확인 환불의 결제 취소 기한(접수 + 14일, 참고용)을 보인다.
+  "다시 시도" 는 `retryable` 일 때만 두고 확인 단계를 거쳐 `{expectedVersion: recovery.version}` 을 보낸다. 200 은 "다시 보냈다" 일 뿐이라 응답 상세를 그대로 다시 그린다.
+- **운영자 확정 · 종결**(`ClaimDecisions`, 처리 상황 칸 안) — **둘 다 결제사(PG)는 부르지 않는다.** 확정은 커밋 뒤 주문 취소 완료와 재고 복원(원격)으로 이어지고, 종결만 원격 호출이 없다.
+  확인 단계에서 먼저 말한다 — 확정은 PG 상점관리자(결제사 콘솔)에서 실제 환불을 확인한 뒤에만 누르고, 결제 쪽 장부(결제 확인 화면의 환불 실패)가 그대로라
+  PG 상점관리자에서 다시 취소하면 두 번 환불될 수 있다(BE #693). 종결은 재고 조정 전에 재고 이력에서 이 주문의 복원이 이미 들어갔는지 먼저 확인하고(`PRODUCT_029` 처럼 이미 복원됐을 수 있다),
+  이미 복원됐으면 조정 없이 종결한다. 문구에서 "결제 관리 화면" 처럼 모호한 말을 쓰지 않는다 — 결제사 콘솔은 "PG 상점관리자", 우리 어드민은 "결제 확인 화면" 이다.
+  버튼은 서버 플래그(`refundConfirmable` · `completable`)가 true 이고 대표 관리자일 때만 둔다 — 플래그는 보는 사람 권한과 무관해서 역할로 한 번 더 거른다(`decisionActions`).
+  대표가 아니면 버튼 대신 "대표 관리자만" 안내를 두고, 역할을 모르면 숨기지 않고 403 → 공통 403 안내다. 본문은 `{expectedVersion, reason}` 이고 멱등 키는 없다.
+  사유는 필수 · 200자 · 한 줄 입력이며, 보내기 전에 앞뒤 공백을 빼고 빈 값 · 길이 · 제어 · 서식 문자를 미리 본다(정본은 서버 `ORDER_170` · `148` · `151`, 이 셋은 확인 단계를 열어 둔 채 사유 칸에 붙인다).
+  보내는 중에는 ref 로 연타를 막고 버튼은 `aria-disabled` 로 둔다(포커스 유지). 409 `ORDER_037`(버전 · 겹친 요청) · `ORDER_041`(지금 상태에서 할 수 없음) · `ORDER_169` · 404 `ORDER_032` ·
+  503 `ORDER_040` · 결과 모름 · 연결 끊김은 서버 문구(결과 모름 · 연결 끊김은 고정 문구)를 두고 상세를 다시 읽는다 — `ORDER_041` 뒤 다시 읽은 상세가 `retryable` 이면 다시 시도 버튼이 보인다.
+  쓰기 401 은 입력한 사유를 지키려고 로그인 화면으로 보내지 않고 확인 단계 전체 오류(`role="alert"`, 사유 칸의 `aria-invalid` 는 아님)로 둔다. 한글 조합 중 Enter 로는 보내지 않는다. 마지막 결정(`lastDecision` 사유 · 시각)은 처리 상황 표에 보인다(결정자는 내려오지 않는다).
 - **주문 ↔ 클레임** — 클레임 목록 · 상세의 주문 아이디는 주문 상세 링크다. 주문 상세는 아래에 이 주문의 클레임(`?orderId=`)을 클레임 상세 링크로 보인다(`OrderClaims`).
   이 칸이 실패해도 주문 상세는 그대로 두고 이 칸만 안내한다.
 
