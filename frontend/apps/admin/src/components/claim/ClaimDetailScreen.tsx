@@ -19,10 +19,17 @@ type Status =
 
 /**
  * 어드민 클레임 상세(#30 · BE #574 · #680 · #686) — `GET /api/v1/admin/claims/{claimId}`.
- * 결제 후 취소 접수는 처리 상황과 "다시 시도"(`ClaimRecovery`)를 함께 보인다.
+ * 결제 후 취소 접수는 처리 상황과 "다시 시도" · 대표 관리자의 환불 완료 확정 · 재고 복원 없이 종결(`ClaimRecovery`)을 함께 보인다.
  * 없는 클레임(404 `ORDER_032`)과 형식이 틀린 아이디(400 `ORDER_166`)는 없는 클레임으로 안내한다.
  */
-export function ClaimDetailScreen({ claimId }: { claimId: string }) {
+export function ClaimDetailScreen({
+  claimId,
+  canSettle = null,
+}: {
+  claimId: string;
+  /** 정산 쓰기 권한(서버 컴포넌트가 access 쿠키의 역할로 정한다, #237). null 은 역할을 모름 */
+  canSettle?: boolean | null;
+}) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   /** 마지막으로 보낸 읽기 — 늦게 온 이전 응답(다시 불러오기 연타)이 최신을 덮지 않게 */
   const latest = useRef(0);
@@ -89,6 +96,7 @@ export function ClaimDetailScreen({ claimId }: { claimId: string }) {
           {/* 다시 읽기는 '불러오는 중' 으로 바꾸지 않는다 — 처리 상황 칸의 결과 문구가 남게 */}
           <ClaimRecovery
             claim={status.claim}
+            canSettle={canSettle}
             onUpdated={(claim) => {
               ++latest.current;
               setStatus({ kind: 'ready', claim });

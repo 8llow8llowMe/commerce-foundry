@@ -29,6 +29,9 @@ const claim = (type: string, situation: string, requestedAt = '2026-11-01T00:00:
       situation: { code: situation, name: situation, description: '' },
       nextAutomaticAttemptAt: null,
       retryable: true,
+      refundConfirmable: false,
+      completable: false,
+      lastDecision: null,
       version: 3,
     },
   }) satisfies ClaimDetail;
