@@ -12,10 +12,12 @@ import {
 } from '@/lib/account/address-form';
 import type { CountryOption } from '@/lib/account/countries';
 import { openPostcode, preloadPostcode } from '@/lib/account/postcode';
+import { stripRejectedCharacters } from '@/lib/cart/custom-input';
 
 /**
  * 배송지 추가 · 수정 폼. 저장(`onSave`)은 호출자가 하고, 칸 오류를 돌려주면 그 자리에 붙인다(null 이면 끝났다 — 호출자가 폼을 닫는다).
  * 국내는 우편번호가 필수이고 주소 검색(카카오 우편번호)으로 채울 수 있다. 해외는 도시가 필수다. 형식 검증은 BE 가 정본이다.
+ * 텍스트 칸은 제어 문자를 입력 단계에서 지운다(BE `ORDER_143` · 장바구니 `CART_115` 와 같은 판정).
  */
 export function AddressForm({
   title,
@@ -64,8 +66,9 @@ export function AddressForm({
   const text = (field: keyof Omit<AddressDraft, 'isDefault'>) => ({
     name: field,
     value: draft[field],
+    // 주문 생성이 거절하는 제어 문자(탭 · NUL 등, 붙여넣기 포함 — 400 ORDER_143)는 입력 단계에서 지운다
     onChange: (event: { currentTarget: HTMLInputElement }) =>
-      update({ [field]: event.currentTarget.value }),
+      update({ [field]: stripRejectedCharacters(event.currentTarget.value) }),
     errors: errors[field],
     required: required.has(field),
   });

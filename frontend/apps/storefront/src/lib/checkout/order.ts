@@ -4,6 +4,7 @@ import { toAddressBody, type AddressDraft } from '@/lib/account/address-form';
 import type { ShippingAddress } from '@/lib/account/types';
 import type { CartLine } from '@/lib/cart/types';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
+import { fill } from '@/lib/i18n/format';
 import { quoteRequest, type QuoteLine, type QuoteRequest, type ShippingQuote } from './quote';
 
 /**
@@ -88,8 +89,8 @@ export function orderRequest(
  * - signedOut: 401 — 세션이 끝났다
  * - amountChanged: 409 `ORDER_010` — 금액이 바뀌었다. 견적을 다시 받아 새 금액을 확인하게 한다
  * - stock: 409 `ORDER_016` — 재고 부족. 장바구니에서 수량을 고치게 한다
- * - cart: 담은 상품을 고쳐야 한다(판매 불가 · 수량 상한 · 통화 혼합 · 맞춤 입력 등) — 장바구니로 안내
- * - destination: 배송지를 고쳐야 한다(배송 불가 · 받는 사람 · 연락처 · 주소 형식)
+ * - cart: 담은 상품을 고쳐야 한다(판매 불가 · 수량 상한 · 통화 혼합 · 맞춤 입력 · 맞춤 입력 제어 문자 `ORDER_143` 등) — 장바구니로 안내
+ * - destination: 배송지를 고쳐야 한다(배송 불가 · 받는 사람 · 연락처 · 주소 형식 · 제어 문자 400 `ORDER_143` — 칸 이름을 붙인다)
  * - attemptLimit: 409 `ORDER_022` — 활성 주문 시도 상한. 잠시 뒤 다시 누르거나, 결제 대기 주문이 있으면 주문 내역에서 이어 결제한다
  * - retry: 잠시 뒤 다시 누른다
  */
@@ -120,6 +121,15 @@ const DESTINATION_CODES = new Set([
     (n) => `ORDER_${n}`,
   ),
 ]);
+/** 저장을 깨는 제어 문자 · 짝 없는 서로게이트(BE `NoControlCharacters`, #426) — 배송지 자유 텍스트 · 맞춤 입력 value */
+const INVALID_CHARACTER = 'ORDER_143';
+
+/** `shippingAddress.addressLine1` → 칸 이름을 넣은 문구. 모르는 칸(또는 칸 없음)이면 배송지 전체 문구다 */
+function invalidCharacterText(field: string | null, t: Dictionary['checkout']): string {
+  const name = field ? t.addressFieldNames[field.slice('shippingAddress.'.length)] : undefined;
+  return name ? fill(t.invalidCharacterField, { field: name }) : t.invalidCharacterAddress;
+}
+
 /** 같은 키로 다시 보낼 수 있는 결과 — 반영 여부를 모르거나 서비스에 닿지 않았다. `server` 는 5xx 일 때만이다(그 밖의 400 도 server 다) */
 const SAME_KEY_KINDS = new Set<ApiError['kind']>([
   'network',
@@ -163,6 +173,16 @@ export function orderFailure(
   const destinationField = cause.fieldErrors.find((item) =>
     item.field.startsWith('shippingAddress'),
   );
+  // 제어 문자(400 ORDER_143, #426) — 배송지 칸이면 어느 칸인지 붙여 고칠 곳을 알린다. 서버 문구에는 칸 이름이 없다
+  // 칸 오류 없이 코드만 오면(계약 밖) 고칠 곳을 모르므로 배송지 전체 문구다
+  const noField = cause.fieldErrors.length === 0 && code === INVALID_CHARACTER;
+  if (destinationField?.code === INVALID_CHARACTER || noField) {
+    return {
+      kind: 'destination',
+      message: invalidCharacterText(destinationField?.field ?? null, t),
+      sameKey: false,
+    };
+  }
   if (destinationField || DESTINATION_CODES.has(code)) {
     // 칸 검증 서버 문구에는 필드 이름(영문 식별자)이 섞여 있어 사전 문구 · 범용 문구만 쓴다
     const shown = destinationField?.code || code;
@@ -170,7 +190,11 @@ export function orderFailure(
     return { kind: 'destination', message, sameKey: false };
   }
   if (CART_CODES.has(code)) return { kind: 'cart', message: textOf(t.cartInvalid), sameKey: false };
-  if (cause.kind === 'validation') return { kind: 'cart', message: t.cartInvalid, sameKey: false };
+  if (cause.kind === 'validation') {
+    // 맞춤 입력(items[].customOptions[].value)의 제어 문자는 장바구니에서 고친다
+    const message = code === INVALID_CHARACTER ? (t.errors[code] ?? t.cartInvalid) : t.cartInvalid;
+    return { kind: 'cart', message, sameKey: false };
+  }
   // 022 는 결제 대기 주문만 세는 게 아니라(30분 창의 모든 시도) 문구는 잠시 뒤를 안내하고(#425), 주문 내역(#28) 링크는
   // 덧붙이기만 한다 — 결제 대기 주문이 있으면 새로 만들지 않고 이어 결제할 수 있다. 새 키로 다시 누를 수 있다
   if (code === 'ORDER_022') {

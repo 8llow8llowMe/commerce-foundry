@@ -300,6 +300,9 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
     활성 주문 시도 상한(409 `ORDER_022`): 잠시 뒤 다시 누르라는 문구에 주문 내역(`/mypage/orders`, §7) 링크를 덧붙인다 — 상한은 30분 창의 모든 시도를 세므로
     결제 대기 주문이 있다고 단정하지 않지만, 있으면 새로 만들지 않고 이어 결제할 수 있다(#425 · #28). 다음 누름은 새 키다.
     장바구니 · 배송지 코드는 견적과 같은 자리로 가르고, 배송지 칸 검증(`shippingAddress.*`, `ORDER_117~128` · `138~140`)은 서버 문구에 필드 이름이 섞여 있어 `checkout.orderErrors` 사전 문구만 쓴다.
+    제어 문자 · 짝 없는 서로게이트(400 `ORDER_143`, BE #426 · FE #708)는 칸 오류로 온다 — `shippingAddress.*` 면 칸 이름(`checkout.addressFieldNames`)을 넣은 배송지 문구,
+    `items[].customOptions[].value` 면 장바구니 안내(`checkout.errors.ORDER_143`, 견적도 같다)다. 입력 단계에서는 배송지 폼(`AddressForm`, 주문서 새 배송지 · 마이페이지 배송지)의
+    모든 텍스트 칸이 맞춤 입력과 같은 판정(`stripRejectedCharacters`)으로 지우고, 보내기 직전 `toAddressBody` 가 한 번 더 지운다. 이미 저장된 배송지는 고치지 않고 보낸다(서버가 정본 — 안내 후 배송지 관리에서 고친다).
     실패 안내는 같은 배송지 · 줄에서만 보이고, 배송지를 바꾸면 사라진다.
   - **주문 뒤** — 결제 화면(`/checkout/payment?orderId=`, §6-2)으로 `router.replace` 한다(뒤로 가기로 주문서에 돌아와 같은 주문을 또 만들지 않게).
     BE 가 장바구니를 비우지 않고, 결제 완료 뒤에도 비우지 않는다(§6-2).

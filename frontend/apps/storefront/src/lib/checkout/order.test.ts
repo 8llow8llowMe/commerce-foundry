@@ -249,6 +249,63 @@ describe('orderFailure', () => {
     });
   });
 
+  it('배송지 칸의 제어 문자(400 ORDER_143)는 칸 이름을 넣은 문구로 배송지 실패 · 새 키다 (#708)', () => {
+    const address = apiError('validation', 400, 'ORDER_143', '서버 문구', [
+      { field: 'shippingAddress.addressLine1', code: 'ORDER_143', message: '서버 문구' },
+    ]);
+    expect(fail(address)).toEqual({
+      kind: 'destination',
+      message:
+        '배송지의 주소에 쓸 수 없는 문자(줄바꿈 · 탭 등)가 있습니다. 배송지를 수정한 뒤 다시 주문해 주세요.',
+      sameKey: false,
+    });
+    expect(orderFailure(address, en.checkout, 'en')).toMatchObject({
+      kind: 'destination',
+      message: expect.stringContaining('The address in the shipping address') as string,
+    });
+    // 모르는 칸 · 칸 오류 없이 코드만 — 배송지 전체 문구
+    const unknownField = apiError('validation', 400, 'ORDER_143', null, [
+      { field: 'shippingAddress.extra', code: 'ORDER_143', message: 'x' },
+    ]);
+    expect(fail(unknownField)).toMatchObject({
+      kind: 'destination',
+      message: ko.checkout.invalidCharacterAddress,
+    });
+    expect(fail(apiError('server', 400, 'ORDER_143', null))).toMatchObject({
+      kind: 'destination',
+      message: ko.checkout.invalidCharacterAddress,
+    });
+  });
+
+  it('맞춤 입력의 제어 문자(400 ORDER_143, items[])는 장바구니 안내다 (#708)', () => {
+    const custom = apiError('validation', 400, 'ORDER_143', '서버 문구', [
+      { field: 'items[0].customOptions[0].value', code: 'ORDER_143', message: '서버 문구' },
+    ]);
+    expect(fail(custom)).toEqual({
+      kind: 'cart',
+      message: ko.checkout.errors.ORDER_143,
+      sameKey: false,
+    });
+    expect(orderFailure(custom, en.checkout, 'en')).toMatchObject({
+      kind: 'cart',
+      message: en.checkout.errors.ORDER_143,
+    });
+    // 다른 칸 검증은 그대로 범용 장바구니 문구다
+    expect(
+      fail(
+        apiError('validation', 400, 'ORDER_107', 'x', [
+          { field: 'items[0].quantity', code: 'ORDER_107', message: 'x' },
+        ]),
+      ),
+    ).toMatchObject({ kind: 'cart', message: ko.checkout.cartInvalid });
+  });
+
+  it('배송지 칸 이름은 국문 · 영문 사전에 같은 칸이 있다', () => {
+    expect(Object.keys(en.checkout.addressFieldNames).sort()).toEqual(
+      Object.keys(ko.checkout.addressFieldNames).sort(),
+    );
+  });
+
   it('활성 시도 상한(409 ORDER_022)은 사전 문구 + 주문 내역 안내로 이 시도를 끝내고 새 키다 — 거절은 아무것도 쓰지 않았다', () => {
     expect(fail(apiError('conflict', 409, 'ORDER_022', '서버 문구'))).toEqual({
       kind: 'attemptLimit',
