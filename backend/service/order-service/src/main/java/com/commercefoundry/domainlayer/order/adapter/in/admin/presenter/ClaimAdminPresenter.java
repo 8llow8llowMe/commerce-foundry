@@ -20,9 +20,12 @@ public class ClaimAdminPresenter {
 
     public ClaimAdminResponse toResponse(ClaimAdminDetailInfo claim) {
         ClaimAdminDetailInfo.Recovery recovery = claim.recovery();
+        ClaimAdminDetailInfo.LastDecision decision = recovery.lastDecision();
         return new ClaimAdminResponse(String.valueOf(claim.claimId()), String.valueOf(claim.orderId()), claim.type().toMetadata(), claim.status().toMetadata(),
             MoneyItems.of(claim.expectedRefund()), claim.requestedAt(), claim.items().stream()
                 .map(item -> new ClaimAdminLineItem(String.valueOf(item.orderItemId()), item.quantity(), item.reason().toMetadata())).toList(),
-            new ClaimAdminRecoveryItem(recovery.situation().toMetadata(), recovery.nextAutomaticAttemptAt(), recovery.retryable(), recovery.version()));
+            new ClaimAdminRecoveryItem(recovery.situation().toMetadata(), recovery.nextAutomaticAttemptAt(), recovery.retryable(), recovery.refundConfirmable(),
+                recovery.completable(), decision == null ? null : new ClaimAdminRecoveryItem.DecisionItem(decision.reason(), decision.decidedAt()),
+                recovery.version()));
     }
 }

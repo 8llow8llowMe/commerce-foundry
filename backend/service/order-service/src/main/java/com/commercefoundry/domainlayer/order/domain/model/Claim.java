@@ -260,6 +260,35 @@ public record Claim(
         return type == Type.CANCELLATION && status == Status.REFUND_FAILED && !REFUND_UNCONFIRMED.equals(failureCode);
     }
 
+    /**
+     * 운영자 수동 환불 확정 (#17 A3) — 대표 관리자가 PG · 결제 기록에서 환불을 확인한 환불 실패를 REFUNDED(재고 복원 대기, 횟수 0, 다음 시각
+     * {@code nextAttemptAt})로 바꾼다. 결정의 직전 실패 코드는 지금 실패 코드와 같아야 한다 — 실패 코드 칸은 비지만 근거는 결정에 남는다.
+     */
+    public Claim confirmRefundByAdmin(Decision decision, Instant nextAttemptAt) {
+        Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
+        requireDecisionOn(Status.REFUND_FAILED, decision);
+        return new Claim(id, orderId, requestKey, type, Status.REFUNDED, expectedRefund, paymentId, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null,
+            decision, items, requestedAt, version);
+    }
+
+    /**
+     * 운영자 복원 생략 종결 (#17 A3) — 재고 복원이 종결 실패한 클레임을 복원 없이 COMPLETED 로 닫는다. 재고는 운영자가 재고 조정으로 먼저 맞춘다.
+     * 종결 자격(주문 취소 완료 · 확정 실패 코드)은 {@link ClaimAdminRecoveryPolicy#requireCompletion} 이 먼저 본다.
+     */
+    public Claim completeByAdmin(Decision decision) {
+        requireDecisionOn(Status.RESTORATION_FAILED, decision);
+        return new Claim(id, orderId, requestKey, type, Status.COMPLETED, expectedRefund, paymentId, attemptCount, null, null, decision, items, requestedAt,
+            version);
+    }
+
+    private void requireDecisionOn(Status expected, Decision decision) {
+        Objects.requireNonNull(decision, "decision");
+        requireCancellation();
+        if (isNew() || status != expected || !decision.previousFailureCode().equals(failureCode)) {
+            throw new IllegalStateException("운영자 결정은 저장된 %s 클레임의 지금 실패 코드로만 남깁니다: status=%s".formatted(expected, status));
+        }
+    }
+
     public boolean isNew() {
         return version == null;
     }
