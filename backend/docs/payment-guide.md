@@ -598,6 +598,14 @@ listener OFF와 cleanup OFF는 독립이다. cleanup은 기존 messaging/relay/c
   끝나도록 `max-backoff × max-attempts ≤ 14d` 를 기동 때 검사한다.
 - **타임아웃 · 서킷** — `paymentCancelClient`(contextId) read timeout **10초**(PG 취소 대기, 조회 3초와 따로), 서킷 `payment-cancellation` 은 조회 서킷
   `payment-service` 와 분리한다 — PG 취소 장애가 승인 반영 재조회를 막지 않게. 클레임 lease(`order.cancellation.retry.lease`, 기본 2분)는 read timeout 보다 충분히 길어야 한다.
+- **order 의 수동 환불 확정과 결제 장부 (#17 A3)** — 대표가 order 어드민에서 환불 실패 클레임을 수동 확정(`refund-confirmation`)해도 **payment-service 에는 알리지 않는다.**
+  그 결제의 `payment_cancel` 은 `REJECTED`(결제사 거절) · `PENDING`(결과 미확인) 그대로, `payment` 는 `DONE` 그대로 남는다 — 거절 원장이 있는 건은 위 어드민 결제 목록의
+  `status=REFUND_FAILED`(취소거절 이력)에 계속 보이고, PENDING 만 있는 건은 그 필터에도 잡히지 않는다. 운영 규칙:
+  - **PG 상점관리자(콘솔)에서 다시 취소하지 않는다** — order 는 이미 환불 완료로 보고 재고를 돌렸다. 콘솔 재취소는 이중 환불이 되거나 우리 장부에 없는 취소를 만든다.
+  - **대사 기준** — 클레임 아이디(= 결제 취소 멱등 키 · `payment_cancel` 의 클레임 아이디) · 결제 아이디로 맞춘다. order-service 가 확정 때 남기는 warn 로그
+    `cancellation refund confirmed by admin without PG call. claimId=…, orderId=…, paymentId=…, previousFailureCode=…, adminId=…` 와
+    감사 행위 `CLAIM_REFUND_CONFIRM` 이 수동 확정 목록의 근거다. PG 거래 내역에서 그 결제의 취소가 실제로 있는지 대조한다(§10).
+  - 결제 쪽 장부를 order 의 확정에 맞추는 정합(취소 원장 · 결제 상태 반영)은 후속 #693 이다. 그 전까지 결제 어드민의 환불 실패 표시는 "order 수동 확정 여부"를 모른다.
 
 ### 전액 취소 실패 필드 제약 보정 (#551)
 

@@ -267,6 +267,7 @@ order-service · payment-service 어드민 엔드포인트 → 권한 (#587):
 | `PATCH /api/v1/admin/orders/{orderId}/status` · `POST /api/v1/admin/orders/status-changes` | `ORDER_MANAGE` | 200 | 200 | 403 |
 | `GET /api/v1/admin/claims` · `GET /api/v1/admin/claims/{claimId}` | `ORDER_READ` | 200 | 200 | 200 |
 | `POST /api/v1/admin/claims/{claimId}/retries` (#17 A2b) | `ORDER_MANAGE` | 200 | 200 | 403 |
+| `POST /api/v1/admin/claims/{claimId}/refund-confirmation` · `POST /api/v1/admin/claims/{claimId}/completion` (#17 A3) | `SETTLEMENT_MANAGE` | 200 | 403 | 403 |
 | `GET /api/v1/admin/payments` | `SETTLEMENT_READ` | 200 | 403 | 403 |
 
 - 클레임(반품 접수) 조회는 주문 업무라 `ORDER_READ` 다. 결제 목록은 금액 · 결제 수단 · PG 회신을 보는 정산 업무라 `SETTLEMENT_READ` 다.
@@ -274,8 +275,11 @@ order-service · payment-service 어드민 엔드포인트 → 권한 (#587):
   취소 · 환불 · 반품 전이는 들어 있지 않다. MANAGER 의 배송 완료 확정은 구매 확정 대기 시작을 앞당긴다 — 감사 기록(`@AdminAudited`)으로 남는다.
   클레임 조회와 처리 권한은 갈라진다. **결제 후 취소 다시 시도(#17 A2b)는 `ORDER_MANAGE`** 다(사용자 결정 2026-11-06) — 새 금액 · 새 결정을 만들지 않고
   저장된 클레임 아이디 · 결제 · 금액으로 자동 처리(고객 요청 · 재시도 스케줄러와 같은 경로)를 한 번 더 돌릴 뿐이라 MANAGER 에게 연다. 감사는 `CLAIM_RETRY` 다.
-  운영자 판단으로 돈 · 재고 기록을 확정하는 수동 환불 확정 · 복원 생략 종결(A3)과 취소 거절(A4)은 권한을 그 PR 에서 다시 정한다 — `ORDER_MANAGE` 에 그대로 얹지 않고
-  `SETTLEMENT_MANAGE`(대표만) 여부를 사용자 결정으로 확인한다.
+  **수동 환불 확정 · 복원 생략 종결(#17 A3)은 `SETTLEMENT_MANAGE`(ADMIN · OWNER — 대표만)** 다 — PG 를 부르지 않고 운영자 판단으로 돈(환불 완료) · 재고(복원 생략)
+  기록을 닫으므로 `ORDER_MANAGE` 에 얹지 않는다. MANAGER 는 다시 시도는 되지만 확정 · 종결은 403 이다. 감사는 `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` 다.
+  상세의 `refundConfirmable` · `completable` 은 보는 사람 권한과 무관한 클레임 판정이라 FE 가 역할로 버튼을 한 번 더 거른다. 취소 거절(A4)의 권한은 그 PR 에서 정한다.
+  클레임 결정 사유(`recovery.lastDecision.reason`)는 결정은 대표만 하지만 클레임 상세를 보는 `ORDER_READ`(STAFF 포함) 전원에게 보인다 — 결정 사유에 고객 개인정보 ·
+  계좌번호를 적지 않는다(재고 조정 메모와 같다). 결정자 아이디는 응답에 싣지 않는다.
 - 게이트웨이 URL 층은 의도적으로 운영자 역할 전체만 본다 — MANAGER 토큰도 `/api/v1/admin/payments` 를 하류까지 통과하고(`GatewaySecurityTest`), 정산 403 은
   payment-service 의 메서드 `@PreAuthorize` 가 낸다. 게이트웨이에 기능별 경로 규칙을 두지 않는다.
 - 핸들러 전체 표는 `OrderAdminAuthorizationMappingTest` · `PaymentAdminAuthorizationMappingTest` 가, 역할별 200 · 403 은 `OrderAdminControllerTest` ·
@@ -1372,7 +1376,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | 서비스 | 행위 | 상태 |
 |--------|------|------|
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_REACTIVATE` · `ADMIN_ROLE_CHANGE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 계정 5개(#236 PR-B1 역할 · 상태 포함)·OTP 4개 선언 완료, OTP 등록 시작 면제(#163) — 기존 Port · 로그 + DB 경로 유지 |
-| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` · `CLAIM_RETRY` | 사용 중 — 상태 변경 · 다시 시도(#17 A2b, 실패도 false) 선언 · `OrderAdminAuditProcessor`와 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출. 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·개인정보는 제외한다 (#17) |
+| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` · `CLAIM_RETRY` · `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` | 사용 중 — 상태 변경 · 다시 시도(#17 A2b) · 수동 환불 확정 · 복원 생략 종결(#17 A3, 모두 실패도 false) 선언 · `OrderAdminAuditProcessor`와 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출(요청당 한 줄). 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·사유 원문·개인정보는 제외한다. 결정 사유는 클레임 결정 칸에 **마지막 결정만** 남고(확정 뒤 종결하면 덮인다) 결정 누적 원장은 후속 #694 다 (#17) |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음(`markRead` · `markAllRead`) · 온보딩 투어 기록(`updateTour` · `updateTourLegacy`)은 본인 상태라 `@AdminAuditExempt` (#163 PR-E) |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | operations | `STORE_FOOTER_DRAFT_SAVE` · `STORE_FOOTER_PUBLISH` | #597. SETTINGS_MANAGE의 실제 JWT 관리자, 고정 target=`store-footer:1`, 성공·실패 한 줄. URL·표시명·저작권 문구는 기록하지 않는다. 수정 이력은 푸터 리비전 표가 소유한다 |
