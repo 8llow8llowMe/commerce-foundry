@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.payment.application.port.out.query.PgAppr
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgRetentionQueryResult;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.shared.commerce.Money;
 
@@ -25,6 +26,15 @@ public interface PaymentGatewayPort {
     /** Payment-key GET with identity, totals, balance and request-specific cancellation history validation. */
     PgCancellationQueryResult inquireCancellation(
         Payment payment, Money amount, String pgKey, String transactionKey);
+
+    /**
+     * 결제키로 결제를 조회해 PG 잔액이 {@code expectedBalance} 이고 결제 상태가 그 잔액과 맞는지 본다 (#691 무환불 판정의 PG 교차 확인).
+     * 응답의 신원 · 총액 · 취소 이력 합계 검증은 {@link #inquireCancellation} 과 같다.
+     *
+     * @param expectedBalance 결제액 − 로컬 원장의 확정(SUCCEEDED) 취소 합계. 결제와 다른 통화이거나 결제액보다 크면 PG 를 부르지 않고 모름이다
+     * @return 일치 · 불일치 · 모름 중 하나. null 이 아니다
+     */
+    PgRetentionQueryResult inquireRetention(Payment payment, Money expectedBalance);
 
     /** 같은 claimId 는 같은 PG 멱등 키와 금액으로만 재시도한다. */
     PgCancelResult cancel(Payment payment, long claimId, Money cancelAmount, Money cumulativeCanceled);

@@ -683,6 +683,41 @@ gauge 질의는 read-only 트랜잭션 timeout 2초와 JPA query timeout 2000ms�
 토스 계약 확인: [코어 API](https://docs.tosspayments.com/reference), [취소 안내](https://docs.tosspayments.com/guides/v2/cancel-payment).
 고정 사유 표식은 취소 귀속을 보수적으로 판단하기 위한 애플리케이션 규칙이다.
 
+### 8-1. PG 잔액 대조 (#691)
+
+결제 후 취소를 **거절**하면 주문이 다시 출고된다(#17 A4). 그래서 거절하려면 payment 가 "이 클레임으로 환불이 없었다"를 원천에서 확정해야 한다.
+`PAYMENT_016` · `017` · `019` 같은 종결 거절 코드는 그 증거가 아니다.
+
+- `016` 에는 여러 경우가 섞여 있다: 콘솔 취소, 같은 결제의 다른 PENDING, PG 성공 뒤 이미 REJECTED.
+- `017` 은 이미 일부 환불됐다는 뜻이다.
+
+콘솔 취소는 로컬에 반영되지 않는다(`payment-webhook-guide.md` 취소 웹훅 = MANUAL_REVIEW). 따라서 로컬 결제 상태가 `DONE` 이라도 PG 잔액이 그대로라고 볼 수 없다.
+무환불 판정 계약(`.../cancellations/{claimId}/void`)은 PR 1b 에서 이 절에 더한다. 1a 는 그 판정이 쓰는 PG 교차 확인 포트만 둔다.
+
+- **포트** — `PaymentGatewayPort.inquireRetention(payment, expectedBalance)` 는 토스 결제키 GET 을 한 번 부르고, `MATCHED` · `MISMATCHED` · `UNKNOWN` 중 하나로 답한다.
+  - `expectedBalance` 는 결제액 − 로컬 원장의 `SUCCEEDED` 취소 합계다.
+  - 응답의 신원 · 총액 · 통화 · 취소 이력 검증은 자동 취소 조회(`inquireCancellation`)와 같다. 이력은 전부 `DONE`, 거래키 중복이 없어야 하고, 이력 합 + 잔액 = 결제액이어야 한다.
+
+| 조회 결과 | 판정 |
+|-----------|------|
+| 4xx · 5xx · 429 · 타임아웃 · 서킷 열림 · 연결 실패 | `UNKNOWN` |
+| 응답 계약 위반(신원 · 총액 · 이력 · 잔액) | `UNKNOWN` |
+| 결제 상태가 잔액과 맞지 않음 — 잔액 = 결제액 ↔ `DONE`, 0 ↔ `CANCELED`, 그 사이 ↔ `PARTIAL_CANCELED`. 그 밖의 상태(`WAITING_FOR_DEPOSIT` 등)와 상태 누락도 여기 | `UNKNOWN` |
+| 상태는 잔액과 맞는데 잔액 ≠ `expectedBalance` | `MISMATCHED` — 원장에 없는 환불이 PG 에 있다 |
+| 상태가 잔액과 맞고 잔액 = `expectedBalance` | `MATCHED` |
+
+- **근거는 `MATCHED` 만** — 무환불 확정의 근거는 `MATCHED` 하나다. `MISMATCHED` 와 `UNKNOWN` 은 둘 다 거절 금지 쪽으로 닫힌다. `MISMATCHED` 만 "외부 환불 감지"로 읽을 수 있다.
+- **대상** — 카드 · 간편결제처럼 취소가 동기로 잔액에 반영되는 **KRW 결제만** 대조한다. 아래는 PG 를 부르지 않고 `UNKNOWN` 이다.
+  - 가상계좌: 환불이 환불 계좌 송금이라, 끝나지 않은 환불이 조회에 보이지 않을 수 있다.
+  - USD(PayPal 비동기 환불)
+  - 결제키가 없는 결제
+- **합계 판정의 전제** — 로컬 `SUCCEEDED` 가 모두 실제 PG 취소일 때만 성립한다. 지금은 PG 취소가 `Succeeded` 를 돌려준 뒤에만 `complete()` 가 불린다.
+  PG 거래 없이 `SUCCEEDED` 를 기록하는 경로(수동 확정 등)가 생기면, 합계 대조 대신 로컬 거래키 집합을 `cancels[]` 와 맞추는 방식으로 바꾼다.
+- **경합** — `MATCHED` 는 GET 시점의 사실이다. 이 결과를 쓰는 쪽은 결제 행 잠금 아래에서 두 가지를 다시 확인한 뒤 봉인한다.
+  - 대상 claim 이 PENDING 이 아니다
+  - `SUCCEEDED` 합계가 GET 직전과 같다
+- **서킷** — 승인과 같은 `toss` 서킷을 쓴다. 이 조회는 어드민 동작 1회당 한 번이다. 자동 재시도 스케줄러에 붙이지 않는다 — 토스 장애 때 이 GET 의 타임아웃이 쌓여 서킷이 열리면 승인 요청을 보내지 못한다.
+
 ## 9. 해외 결제 (USD · PayPal)
 
 - 금액은 **USD 센트(minor unit) 정수**로 저장하고, PG 요청 시 adapter 가 소수 표현(`89.50`)으로 바꾼다.

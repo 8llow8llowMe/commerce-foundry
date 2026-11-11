@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInqu
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult.State;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgRetentionQueryResult;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentApproval;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentMethod;
@@ -286,6 +287,46 @@ public class TossPaymentsResponseSupport {
         } catch (RuntimeException exception) {
             return PgCancellationQueryResult.of(State.MANUAL_REVIEW);
         }
+    }
+
+    /**
+     * 결제키 조회로 PG 잔액이 원장의 기대 잔액과 같은지 본다 (#691, {@code payment-guide.md} §8-1). 판정 근거가 없으면 모름이다 — 불일치로 올리지 않는다.
+     * <ul>
+     *   <li>답이 없음(4xx · 5xx · 429 · 타임아웃 · 서킷 · 연결 실패) · 응답 계약 위반 → 모름</li>
+     *   <li>결제 상태가 DONE · PARTIAL_CANCELED · CANCELED 밖이거나, 잔액과 맞지 않음(잔액 = 결제액 ↔ DONE, 0 ↔ CANCELED, 사이 ↔ PARTIAL_CANCELED) → 모름</li>
+     *   <li>잔액 ≠ 기대 잔액 → 불일치 (원장에 없는 환불)</li>
+     * </ul>
+     */
+    public PgRetentionQueryResult retentionInquiry(Payment payment, Money expectedBalance, Supplier<byte[]> remoteCall) {
+        Exchange exchanged = exchange(remoteCall);
+        if (!(exchanged instanceof Exchange.Success success)) {
+            log.warn("toss retention inquiry got no answer. pgOrderId={}, outcome={}", payment.pgOrderId(), exchanged.getClass().getSimpleName());
+            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
+        }
+        TossPaymentResponse response;
+        try {
+            response = cancellationResponse(payment, success.body());
+        } catch (RuntimeException exception) {
+            log.error("toss retention inquiry violates contract. pgOrderId={}, type={}", payment.pgOrderId(), exception.getClass().getSimpleName());
+            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
+        }
+        Money balance = Money.ofMajorUnit(response.balanceAmount(), payment.amount().currency());
+        if (!statusForBalance(payment.amount(), balance).equals(response.status())) {
+            log.warn("toss retention inquiry status disagrees with balance. pgOrderId={}, status={}", payment.pgOrderId(), response.status());
+            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
+        }
+        if (!balance.equals(expectedBalance)) {
+            log.warn("toss balance differs from ledger. pgOrderId={}, status={}", payment.pgOrderId(), response.status());
+            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.MISMATCHED);
+        }
+        return PgRetentionQueryResult.of(PgRetentionQueryResult.State.MATCHED);
+    }
+
+    private static String statusForBalance(Money total, Money balance) {
+        if (balance.equals(total)) {
+            return "DONE";
+        }
+        return balance.isZero() ? "CANCELED" : "PARTIAL_CANCELED";
     }
 
     private TossPaymentResponse cancellationResponse(Payment payment, byte[] body) {
