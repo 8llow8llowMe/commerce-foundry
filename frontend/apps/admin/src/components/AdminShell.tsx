@@ -7,6 +7,7 @@ import { JobTray } from './job/JobTray';
 import { NavLinks, type NavGroup } from './NavLinks';
 import { NotificationCenter } from './notification/NotificationCenter';
 import { RouteGate } from './RouteGate';
+import { MAIN_ID, SkipLink } from './SkipLink';
 import { HelpMenu } from './tour/HelpMenu';
 import { TourRunner } from './tour/TourRunner';
 
@@ -75,6 +76,7 @@ const NAV: NavGroup[] = [
  * 어드민 콘솔 화면 틀 — 상단 바(홈 · 작업 진행 · 알림 · 도움말 · 계정 메뉴) · 왼쪽 메뉴 · 본문. 좁은 화면에서는 메뉴가 본문 위로 온다.
  * 작업 진행(`JobTray`)과 알림(`NotificationCenter`)은 이 틀에 붙어 화면을 옮겨도 이어진다(#214).
  * 도움말(`HelpMenu`)과 온보딩 투어(`TourRunner`, #228)도 여기 붙는다 — 투어가 가리키는 요소에는 `data-tour` 를 단다.
+ * 맨 앞에 키보드용 "본문으로 건너뛰기"(`SkipLink`)가 있다.
  * 로그인 화면은 이 틀 밖이다(`app/login`).
  * 운영자 역할(#237)로 권한 없는 메뉴를 빼고, 그런 화면에 주소로 들어오면 `RouteGate` 가 403 안내를 그린다 — 인가의 정본은 서버다.
  */
@@ -82,6 +84,7 @@ export function AdminShell({ role, children }: { role: OperatorRole | null; chil
   const permissions = permissionsOf(role);
   return (
     <div className="flex min-h-dvh flex-col">
+      <SkipLink />
       <header className="flex h-14 items-center justify-between gap-4 bg-primary px-4 text-primary-fg">
         <Link href="/" className="text-sm font-semibold">
           {brand.name} 어드민
@@ -101,7 +104,9 @@ export function AdminShell({ role, children }: { role: OperatorRole | null; chil
         <aside data-tour="nav" className="bg-muted px-3 py-6 md:w-56 md:shrink-0">
           <NavLinks groups={visibleNav(NAV, permissions)} />
         </aside>
-        <main className="min-w-0 flex-1 px-4 py-8 md:px-10">
+        {/* tabIndex 를 두지 않는다 — 브라우저가 #main 을 다음 Tab 의 시작점으로 삼는다. tabIndex -1 이면 본문 빈 곳을 누를 때마다
+            main 이 포커스를 받아 투어가 끝난 뒤 그리로 돌아간다 */}
+        <main id={MAIN_ID} className="min-w-0 flex-1 px-4 py-8 md:px-10">
           <RouteGate permissions={permissions}>{children}</RouteGate>
         </main>
       </div>
