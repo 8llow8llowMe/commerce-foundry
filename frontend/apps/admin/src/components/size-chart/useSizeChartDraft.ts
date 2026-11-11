@@ -21,6 +21,7 @@ import {
   type DraftSummary,
   type SizeChartDraft,
 } from '@/lib/size-chart/draft';
+import { draftBody, type DraftInput, type ImageFollowUp } from '@/lib/size-chart/draft-image';
 
 /** 생성 중인 초안의 작업을 상단 작업 표시(#214)에 올린다 — 끝나면 알림 센터로도 알린다 */
 function watch(next: SizeChartDraft) {
@@ -39,12 +40,15 @@ export type SizeChartDraftState = {
   draft: SizeChartDraft | null;
   /** 패널 안내(실패 · 진행). 없으면 null */
   message: string | null;
-  /** 텍스트 칸 오류 */
+  /** 입력 칸 오류(치수 텍스트 · 이미지 선택) */
   sourceError: string | null;
   submitting: boolean;
   checking: boolean;
-  /** 생성 요청. 같은 템플릿 · 텍스트의 재요청(응답 유실 · 두 번 누름)은 같은 멱등 키다 */
-  request: (templateId: string, sourceText: string) => Promise<void>;
+  /**
+   * 생성 요청. 같은 템플릿 · 입력의 재요청(응답 유실 · 두 번 누름)은 같은 멱등 키다.
+   * IMAGE 입력의 후속 처리(기능 닫힘 · 후보 다시 읽기 · 다시 확인)가 필요하면 그 동작을 돌려준다 — 이미지 상태는 패널이 가진다.
+   */
+  request: (templateId: string, input: DraftInput) => Promise<ImageFollowUp | null>;
   /** 결과 확인(refresh). 작업이 끝났으면 결과를 초안에 반영한다 */
   check: () => Promise<void>;
   /** 저장된 초안을 다시 읽는다(적용 충돌 뒤) */
@@ -188,21 +192,21 @@ export function useSizeChartDraft(
   }, [requested, draftId, jobId, refresh]);
 
   const request = useCallback(
-    async (templateId: string, sourceText: string) => {
-      if (submittingRef.current) return;
+    async (templateId: string, input: DraftInput): Promise<ImageFollowUp | null> => {
+      if (submittingRef.current) return null;
       submittingRef.current = true;
       setSubmitting(true);
       setMessage(null);
       setSourceError(null);
       // 끝난 초안(실패 · 취소 · 적용)이 보이는 중의 요청은 새 의도다 — 같은 키면 서버가 그 초안을 그대로 돌려준다
       if (draft) keyRef.current = null;
-      const key = keyFor(keyRef.current, templateId, sourceText, createIdempotencyKey);
+      const key = keyFor(keyRef.current, templateId, input, createIdempotencyKey);
       keyRef.current = key;
       try {
         const accepted = await apiFetch<DraftAccepted>(createDraftPath(productId), {
           method: 'POST',
           idempotencyKey: key.key,
-          json: { templateId, mode: 'TEXT', sourceText: sourceText.trim() },
+          json: draftBody(templateId, input),
         });
         if (isJobId(accepted.jobId)) trackedJobs.track(accepted.jobId);
         try {
@@ -210,14 +214,19 @@ export function useSizeChartDraft(
         } catch (cause) {
           readFailed(cause);
         }
+        return null;
       } catch (cause) {
-        const failure = draftCreateFailure(cause);
+        const failure = draftCreateFailure(cause, input.mode);
         if (failure.kind === 'access') deniedRef.current(failure.denied);
         else if (failure.kind === 'source') setSourceError(failure.message);
-        else {
+        else if (failure.kind === 'image') {
+          setSourceError(failure.message);
+          return { action: failure.action, message: failure.message };
+        } else {
           if (failure.kind === 'newKey') keyRef.current = null;
           setMessage(failure.message);
         }
+        return null;
       } finally {
         submittingRef.current = false;
         setSubmitting(false);

@@ -11,6 +11,7 @@ import {
   draftToForm,
   DRAFT_CHART_CHANGED,
   DRAFT_EXPIRED,
+  DRAFT_IMAGE_UNSAFE,
   DRAFT_INPUT_CONFLICT,
   DRAFT_REGISTRATION_UNKNOWN,
   DRAFT_RESULT_EXPIRED,
@@ -27,6 +28,7 @@ import {
   type DraftSummary,
   type SizeChartDraft,
 } from './draft';
+import { IMAGE_CHANGED, IMAGE_FORMAT, IMAGE_INPUT_CLOSED } from './draft-image';
 
 const apiError = (
   kind: ApiErrorKind,
@@ -107,10 +109,11 @@ describe('keyFor', () => {
   const create = () => `key-${++n}`;
 
   it('같은 템플릿 · 텍스트(앞뒤 공백 무시)는 같은 키를, 바뀌면 새 키를 쓴다', () => {
-    const first = keyFor(null, '5', 'S 50', create);
-    expect(keyFor(first, '5', '  S 50\n', create)).toBe(first);
-    expect(keyFor(first, '5', 'S 51', create).key).not.toBe(first.key);
-    expect(keyFor(first, '6', 'S 50', create).key).not.toBe(first.key);
+    const text = (sourceText: string) => ({ mode: 'TEXT' as const, sourceText });
+    const first = keyFor(null, '5', text('S 50'), create);
+    expect(keyFor(first, '5', text('  S 50\n'), create)).toBe(first);
+    expect(keyFor(first, '5', text('S 51'), create).key).not.toBe(first.key);
+    expect(keyFor(first, '6', text('S 50'), create).key).not.toBe(first.key);
   });
 });
 
@@ -189,6 +192,31 @@ describe('draftCreateFailure', () => {
         ]),
       ),
     ).toEqual({ kind: 'source', message: DRAFT_SOURCE_LENGTH });
+  });
+
+  it('IMAGE 입력의 030 은 이미지 안내로, 이미지 전용 코드는 후속 동작으로 접는다', () => {
+    expect(draftCreateFailure(apiError('server', 400, 'SIZE_CHART_DRAFT_030'), 'IMAGE')).toEqual({
+      kind: 'source',
+      message: DRAFT_IMAGE_UNSAFE,
+    });
+    expect(draftCreateFailure(apiError('conflict', 409, 'SIZE_CHART_DRAFT_015'), 'IMAGE')).toEqual({
+      kind: 'image',
+      action: 'reinspect',
+      message: IMAGE_CHANGED,
+    });
+    expect(draftCreateFailure(apiError('server', 400, 'SIZE_CHART_DRAFT_011'), 'IMAGE')).toEqual({
+      kind: 'image',
+      action: 'closed',
+      message: IMAGE_INPUT_CLOSED,
+    });
+    expect(draftCreateFailure(apiError('server', 400, 'SIZE_CHART_DRAFT_014'), 'IMAGE')).toEqual({
+      kind: 'source',
+      message: IMAGE_FORMAT,
+    });
+    // 저장소 장애(504)는 같은 키로 다시 보내면 된다
+    expect(
+      draftCreateFailure(apiError('unavailable', 503, 'SIZE_CHART_DRAFT_504'), 'IMAGE').kind,
+    ).toBe('retry');
   });
 
   it('같은 키 다른 입력(002)은 새 키, 등록 불명(501) · 결과 모름은 같은 키로 다시 보낸다', () => {

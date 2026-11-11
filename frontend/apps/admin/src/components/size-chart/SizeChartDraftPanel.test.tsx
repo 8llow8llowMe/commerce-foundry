@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { SizeChartDraft } from '@/lib/size-chart/draft';
 import { SizeChartDraftPanel } from './SizeChartDraftPanel';
 import type { SizeChartDraftState } from './useSizeChartDraft';
+import type { SizeChartImageSourcesState } from './useSizeChartImageSources';
 
 const noop = () => {};
 const meta = (code: string, name: string, description = '') => ({ code, name, description });
@@ -34,7 +35,7 @@ function state(overrides: Partial<SizeChartDraftState> = {}): SizeChartDraftStat
     sourceError: null,
     submitting: false,
     checking: false,
-    request: async () => {},
+    request: async () => null,
     check: async () => {},
     reload: async () => null,
     dismiss: noop,
@@ -43,10 +44,30 @@ function state(overrides: Partial<SizeChartDraftState> = {}): SizeChartDraftStat
   };
 }
 
+function imagesState(
+  overrides: Partial<SizeChartImageSourcesState> = {},
+): SizeChartImageSourcesState {
+  return {
+    status: 'idle',
+    sources: [],
+    message: null,
+    selected: [],
+    inspections: {},
+    approved: null,
+    load: noop,
+    reload: async () => {},
+    toggle: noop,
+    reinspect: noop,
+    close: noop,
+    ...overrides,
+  };
+}
+
 const render = (ai: SizeChartDraftState, templateId: string | null = '5', reviewing = false) =>
   renderToStaticMarkup(
     <SizeChartDraftPanel
       ai={ai}
+      images={imagesState()}
       templateId={templateId}
       reviewing={reviewing}
       busy={false}
@@ -60,7 +81,11 @@ describe('SizeChartDraftPanel', () => {
     expect(html).toContain('치수 텍스트');
     expect(html).toContain('AI 초안 요청');
     expect(html).toContain('먼저 위에서 템플릿을 골라 주세요.');
-    expect(html).toContain('텍스트만 받습니다');
+    // 입력 방식은 텍스트가 기본이고, 이미지 입력을 고를 수 있다(목록은 고를 때 읽는다)
+    expect(html).toContain('입력 방식');
+    expect(html).toContain('상품 이미지');
+    expect(html).toMatch(/<input(?=[^>]*value="TEXT")(?=[^>]*checked="")[^>]*>/);
+    expect(html).not.toContain('이미지 목록을 불러오는 중');
   });
 
   it('생성 중이면 서버 상태 이름 · 작업 진행 링크 · 결과 확인을 보이고 입력칸은 숨긴다', () => {
