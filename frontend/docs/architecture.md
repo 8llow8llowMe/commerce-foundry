@@ -1129,30 +1129,39 @@ BFF 는 범용 프록시가 넘긴다. 코드는 `lib/claim/`(계약 `types.ts` 
 - **이력** — `GET /revisions` 10개씩, 공개 중 · 최신 · 게시 시각을 보이고 펼치면 본문이다. 관리자 아이디 원문은 보이지 않는다.
 - 회원가입 · 주문 동의 증빙 갱신, 예약 게시, AI 초안(#572)은 범위 밖이다.
 
-### 관리자 감사 로그 (`/audit-logs`, #320 · #329 · #405)
+### 관리자 감사 로그 (`/audit-logs`, #320 · #329 · #405 · #712)
 
 메뉴 `운영 > 관리자 감사 로그`. auth-service 감사 로그 조회 `GET /api/v1/admin/audit-logs?action=&result=&page=&size=`(BE #192 · #286 · #322, ADMIN,
 계약 정본 `backend/docs/api-design-guide.md` §2-4 · 기록 방식 `security-guide.md` §11-4) — 최신순 `PageResponse`, 페이지 20개, 읽기만 있다.
 코드는 `lib/audit/`(계약 `types.ts` · 조건 `query.ts` · 문구 `view.ts` · 읽기 `load.ts`), 화면은 `components/audit/` 다.
 
-- **응답 칸** — `auditLogId` · `action`(`ADMIN_LOGIN` · `MEMBER_SEARCH`) · `actorMemberId`(로그인 실패는 null) · `actorDisplayName`(마스킹 이름, null 가능) · `target`(원문, null 가능) ·
+- **응답 칸** — `auditLogId` · `action`(BE `AdminAuditAction` 15종, 아래) · `actorMemberId`(로그인 실패 · 인증 전 기록은 null) · `actorDisplayName`(마스킹 이름, null 가능) · `target`(원문, null 가능) ·
   `targetDisplayName`(`target` 이 `member:<id>` 일 때만 마스킹 이름, 그 밖 · 이름 없음은 null) · `result`(`SUCCESS` · `FAILURE`) · `createdAt`.
-  기록하는 행위는 관리자 로그인 성공 · 실패와 어드민 회원 목록 조회다. 이 조회 자체는 기록되지 않는다.
+  기록하는 행위는 로그인 · 운영자 계정 · 보안(OTP · 비밀번호) · 회원 목록 조회다. 이 조회 자체는 기록되지 않는다.
+
+  | 묶음(필터 `optgroup`) | 행위 → 화면 이름 |
+  |------|------|
+  | 로그인 | `ADMIN_LOGIN` 관리자 로그인 · `ADMIN_LOGIN_PASSWORD_VERIFIED` 로그인 1단계(비밀번호) 통과 |
+  | 운영자 계정 | `ADMIN_CREATE` 운영자 추가 · `ADMIN_DEACTIVATE` 운영자 비활성화 · `ADMIN_REACTIVATE` 운영자 다시 켜기 · `ADMIN_ROLE_CHANGE` 운영자 역할 변경 · `ADMIN_SEARCH` 운영자 목록 조회 |
+  | 보안(OTP · 비밀번호) | `ADMIN_PASSWORD_CHANGE` 비밀번호 변경 · `ADMIN_PASSWORD_RESET_LINK_SEND` 비밀번호 재설정 링크 발송 · `ADMIN_PASSWORD_RESET_USE` 비밀번호 재설정 링크 사용 · `ADMIN_OTP_ENROLL` OTP 등록 · `ADMIN_OTP_DISABLE` OTP 해제 · `ADMIN_OTP_RECOVERY_REGENERATE` OTP 복구 코드 재발급 · `ADMIN_OTP_PEER_RECOVERY` 동료 OTP 복구 |
+  | 회원 | `MEMBER_SEARCH` 회원 목록 조회 |
 - **운영자 문구만 보인다(#305)** — 행위 · 결과 코드, `target` 원문, 회원 · 감사 로그 아이디를 화면에 내지 않는다(`describeAuditLog`).
-  - 행위는 업무 이름(`AUDIT_ACTION_LABELS` — 서버가 이름을 주지 않아 화면 사본이다. BE 가 행위를 더하면 같이 더한다), 모르는 행위는 "기타" 다. 결과는 성공 · 실패(실패는 `text-danger`), 모르는 값은 "알 수 없음".
+  - 행위는 업무 이름(`AUDIT_ACTION_LABELS` — 서버가 이름을 주지 않아 화면 사본이다. BE 가 행위를 더하면 `AUDIT_ACTIONS` · 이름 · 묶음(`AUDIT_ACTION_GROUPS`)을 같이 더한다), 모르는 행위는 "기타" 다. 결과는 성공 · 실패(실패는 `text-danger`), 모르는 값은 "알 수 없음".
   - 대상은 BE `AdminAuditRecord` 가 만드는 두 형식만 문장으로 바꾼다(`targetText`). 그 밖의 형식 · 값(모르는 역할 · 남는 칸 · 겹친 칸)은 원문 대신 "기타", 없으면 `—`.
 
     | 원문 | 화면 |
     |------|------|
     | `members?role=<ALL\|CUSTOMER\|ADMIN>&page=<0부터>&size=<n>` | `역할: 전체 · 1쪽` (역할은 `roleLabel`, 쪽은 +1) |
-    | `member:<id>` (관리자 로그인 — 성공은 자기 계정, 실패는 노린 관리자 계정) | `targetDisplayName`(예: `김*수`), null 이면 `관리자 계정`(다른 행위는 `회원 계정`) |
+    | `admins?active=<ALL\|true\|false>&page=<0부터>&size=<n>` (운영자 목록 조회) | `상태: 사용 중 · 1쪽` (전체 · 사용 중 · 사용 안 함, 쪽은 +1) |
+    | `member:<id>` (운영자 행위 — 로그인은 자기 · 노린 계정, 운영자 계정 · OTP · 비밀번호는 바뀐 계정) | `targetDisplayName`(예: `김*수`), null 이면 `관리자 계정`(`MEMBER_SEARCH` · 모르는 행위는 `회원 계정`) |
 
   - 관리자 칸은 **`actorDisplayName`(마스킹 이름)** 을 보이고, null 이면 "관리자" 다. `actorMemberId` 가 null 이면 "확인 안 됨"(로그인 실패는 누가 시도했는지 모른다, 설명은 `title`).
+    단 인증 전 기록 — 로그인 1단계(비밀번호) 통과 · 재설정 링크 사용 — 은 원래 행위자가 없어 "인증 전" 이고, `title` 이 대상 칸이 그 계정임을 알린다.
   - 이름은 서버가 마스킹한 값을 그대로 쓴다(빈 문자열 · 공백은 없는 것으로 본다, `displayNameOf`). 이름이 없어도 아이디 원문으로 대신하지 않는다(#305).
 - **관리자 필터는 두지 않는다** — BE #322 는 표시 이름만 더했고, 관리자를 고를 경량 목록 API 를 두지 않았다(어드민 회원 목록은 감사 대상이다). 관리자 조건(`actorMemberId`)을 보내지 않는다.
 - **조건은 행위 · 결과 두 가지다**(#329) — 행위(전체 · 업무 이름)와 결과(전체 · 성공 · 실패, `AUDIT_RESULT_LABELS`)를 함께 쓸 수 있다. 실패한 관리자 로그인만 보려면 행위 "관리자 로그인" · 결과 "실패" 다.
   - **대상 조건(`target`, BE #286)은 두지 않는다** — 완전 일치 원문(`member:<id>`)을 입력 · 표시해야 해서 #305(아이디 · 코드 원문을 보이지 않는다)와 맞지 않는다. 보내지도 않는다.
-- **조건은 주소가 정본이다**(상품 목록과 같은 규칙) — 화면 주소는 `?action=&result=&page=`, `parseAuditLogQuery` 가 행위 · 결과(enum 이름 그대로, 대소문자까지) · 페이지(숫자 6자리)만 받고
+- **조건은 주소가 정본이다**(상품 목록과 같은 규칙) — 화면 주소는 `?action=&result=&page=`, `parseAuditLogQuery` 가 행위(`AUDIT_ACTIONS` 15종) · 결과(enum 이름 그대로, 대소문자까지) · 페이지(숫자 6자리)만 받고
   나머지는 "전체" 다(손으로 고친 주소가 400 `AUTH_198` 이 되지 않게). 모르는 파라미터(옛 주소의 `actor`, `target` 등)는 무시한다.
   조건을 고르고 "검색" 을 눌러야 주소로 가고 1쪽부터 다시 본다. 페이지 이동은 조건을 그대로 둔다.
 - **실패** — 401 · 403 은 `AccessNotice`, 그 밖(400 · 5xx · 연결)은 "다시 불러오기" 다(`loadAuditLogs`). 400 서버 문구는 영문 파라미터 이름이 들어 있어 보이지 않는다.

@@ -17,6 +17,20 @@ describe('AuditLogFilters', () => {
     expect(html).toContain('조건 초기화');
   });
 
+  it('행위 15종을 로그인 · 운영자 계정 · 보안 · 회원 묶음으로 보인다(#712)', () => {
+    const html = renderToStaticMarkup(
+      <AuditLogFilters query={{ ...DEFAULT_QUERY, action: 'ADMIN_OTP_PEER_RECOVERY' }} />,
+    );
+    const groups = [...html.matchAll(/<optgroup label="([^"]+)">/g)].map((match) => match[1]);
+    expect(groups).toEqual(['로그인', '운영자 계정', '보안(OTP · 비밀번호)', '회원']);
+    expect(html).toContain(
+      '<option value="ADMIN_OTP_PEER_RECOVERY" selected="">동료 OTP 복구</option>',
+    );
+    expect(html).toContain('<option value="ADMIN_SEARCH">운영자 목록 조회</option>');
+    // 전체 + 행위 15 + 결과(전체 · 성공 · 실패) 3
+    expect(html.match(/<option /g)).toHaveLength(19);
+  });
+
   it('결과를 전체 · 성공 · 실패로 고른다 — 코드는 보이지 않는다', () => {
     const html = renderToStaticMarkup(
       <AuditLogFilters query={{ ...DEFAULT_QUERY, result: 'FAILURE' }} />,

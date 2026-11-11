@@ -71,4 +71,52 @@ describe('AuditLogTable', () => {
       expect(html, raw).not.toContain(raw);
     }
   });
+
+  it('운영자 계정 · OTP · 비밀번호 행위도 업무 문구로 보인다 — 코드 · 원문을 내지 않는다(#712)', () => {
+    const html = renderToStaticMarkup(
+      <AuditLogTable
+        logs={[
+          auditLog({
+            auditLogId: '910',
+            action: 'ADMIN_SEARCH',
+            target: 'admins?active=false&page=1&size=20',
+          }),
+          auditLog({ auditLogId: '911', action: 'ADMIN_ROLE_CHANGE', target: 'member:103' }),
+          auditLog({
+            auditLogId: '912',
+            action: 'ADMIN_LOGIN_PASSWORD_VERIFIED',
+            actorMemberId: null,
+            target: 'member:104',
+          }),
+          auditLog({
+            auditLogId: '913',
+            action: 'ADMIN_OTP_PEER_RECOVERY',
+            target: 'member:105',
+            result: 'FAILURE',
+          }),
+        ]}
+      />,
+    );
+    expect(html).toContain('운영자 목록 조회');
+    expect(html).toContain('상태: 사용 안 함 · 2쪽');
+    expect(html).toContain('운영자 역할 변경');
+    expect(html).toContain('로그인 1단계(비밀번호) 통과');
+    expect(html).toContain('인증 전');
+    expect(html).toContain('동료 OTP 복구');
+    expect(html).not.toContain('기타');
+    expect(html).not.toContain('회원 계정');
+    for (const raw of [
+      'ADMIN_',
+      'admins?',
+      'active=',
+      'member:',
+      '103',
+      '104',
+      '105',
+      '910',
+      '913',
+    ]) {
+      expect(html, raw).not.toContain(raw);
+    }
+  });
 });

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent } from 'react';
 import { auditLogsHref, DEFAULT_QUERY, hasFilter, type AuditLogQuery } from '@/lib/audit/query';
 import {
+  AUDIT_ACTION_GROUPS,
   AUDIT_ACTION_LABELS,
   AUDIT_ACTIONS,
   AUDIT_RESULT_LABELS,
@@ -13,7 +14,7 @@ import {
 } from '@/lib/audit/types';
 
 /**
- * 감사 로그 조건(#320 · #329) — 행위 · 결과. 고친 조건은 "검색" 을 눌러야 주소로 간다(주소가 조건의 정본이다).
+ * 감사 로그 조건(#320 · #329) — 행위 · 결과. 행위는 업무 묶음(`AUDIT_ACTION_GROUPS`, #712)으로 나눠 보인다. 고친 조건은 "검색" 을 눌러야 주소로 간다(주소가 조건의 정본이다).
  * 부모가 `key` 로 지금 주소를 넘겨, 주소가 바뀌면(뒤로 가기 · 페이지 이동) 폼을 새로 시작한다.
  * 관리자 조건은 두지 않는다 — 관리자를 고를 목록 API 가 없다(#322 범위 밖). 대상 조건은 원문을 다뤄 두지 않는다(#305).
  */
@@ -53,10 +54,14 @@ export function AuditLogFilters({ query }: { query: AuditLogQuery }) {
           className="h-10 min-w-0 rounded-md border border-border bg-bg px-3"
         >
           <option value="">전체</option>
-          {AUDIT_ACTIONS.map((value) => (
-            <option key={value} value={value}>
-              {AUDIT_ACTION_LABELS[value]}
-            </option>
+          {AUDIT_ACTION_GROUPS.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.actions.map((value) => (
+                <option key={value} value={value}>
+                  {AUDIT_ACTION_LABELS[value]}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </div>
