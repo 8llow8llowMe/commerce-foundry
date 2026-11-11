@@ -11,6 +11,10 @@ import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.S
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse.Template;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse.Warning;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftSummaryResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageInspectionResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageSourceResponse;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageInspectionInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageSourceInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftSummaryInfo;
@@ -71,6 +75,16 @@ public class SizeChartDraftAdminPresenter {
 
     public SizeChartDraftApplyResponse applied(SizeChartDraftApplyInfo info) {
         return new SizeChartDraftApplyResponse(id(info.draftId()), id(info.productId()), id(info.chartId()), info.chartRevision(), info.appliedAt());
+    }
+
+    public List<SizeChartImageSourceResponse> imageSources(List<SizeChartImageSourceInfo> infos) {
+        return infos.stream().map(info -> new SizeChartImageSourceResponse(info.sourceId(), info.previewUrl(), info.eligible(),
+            info.rejection() == null ? null : info.rejection().toMetadata()))
+            .toList();
+    }
+
+    public SizeChartImageInspectionResponse inspection(SizeChartImageInspectionInfo info) {
+        return new SizeChartImageInspectionResponse(info.sourceId(), info.contentHash(), info.contentType(), info.contentLength());
     }
 
     private Warning warning(WarningData warning) {

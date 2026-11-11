@@ -47,7 +47,10 @@ class SizeChartDraftFacadeAuditTest {
     private final ProductLookupProcessor products = mock(ProductLookupProcessor.class);
     private final SizeChartDraftFacade facade = new SizeChartDraftFacade(apply, processor, validation, new SizeChartDraftRemoteProcessor(generation), products,
         Clock.fixed(NOW, ZoneOffset.UTC), new ProductAdminAuditProcessor(),
-        new com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter());
+        new com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter(),
+        mock(com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor.class),
+        mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImageLookupProcessor.class),
+        new com.commercefoundry.global.config.SizeChartDraftProperties());
     private final SizeChartDraftCreateCommand command = new SizeChartDraftCreateCommand(10, 20, 40, UUID.randomUUID(), "TEXT", "S 50 cm");
     private final Logger logger = (Logger) LoggerFactory.getLogger(AdminAuditLog.LOGGER_NAME);
     private final ListAppender<ILoggingEvent> audit = new ListAppender<>();
@@ -67,7 +70,7 @@ class SizeChartDraftFacadeAuditTest {
     @Test
     void createSuccessAndLostRegistrationResponseAreBothAudited() {
         var bound = draft().bindJob(200, NOW);
-        when(processor.createOrReplay(any(), any(), any())).thenReturn(bound).thenReturn(draft());
+        when(processor.createOrReplay(any(), any(), any(), any())).thenReturn(bound).thenReturn(draft());
         when(generation.register(any())).thenThrow(new IllegalStateException("private provider source"));
         facade.create(command);
         assertThatThrownBy(() -> facade.create(command)).isInstanceOf(SizeChartDraftUnavailableException.class);

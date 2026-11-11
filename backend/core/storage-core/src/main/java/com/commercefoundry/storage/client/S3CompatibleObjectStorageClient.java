@@ -243,6 +243,19 @@ final class S3CompatibleObjectStorageClient implements ObjectStorageClient, Auto
     }
 
     @Override
+    public byte[] read(String key, int maxBytes, String expectedETag) {
+        if (maxBytes <= 0 || maxBytes == Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("maxBytes 는 1 이상 Integer.MAX_VALUE 미만이어야 합니다");
+        }
+        // 상한 + 1 바이트를 요청한다 — 그만큼 왔으면 상한보다 큰 객체다. readRange 가 남은 본문을 끊는다(abort)
+        byte[] bytes = readRange(key, maxBytes + 1, expectedETag);
+        if (bytes.length > maxBytes) {
+            throw new StorageException(Reason.TOO_LARGE, Operation.READ_RANGE);
+        }
+        return bytes;
+    }
+
+    @Override
     public void copy(String sourceKey, String targetKey, String contentType, String cacheControl, String expectedETag) {
         ObjectKeys.requireValid(sourceKey);
         ObjectKeys.requireValid(targetKey);

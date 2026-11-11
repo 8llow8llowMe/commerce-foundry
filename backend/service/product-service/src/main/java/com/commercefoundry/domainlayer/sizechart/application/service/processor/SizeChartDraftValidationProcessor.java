@@ -4,6 +4,8 @@ import com.commercefoundry.ai.masking.PiiMasker;
 import com.commercefoundry.domainlayer.sizechart.application.command.ProductSizeChartUpsertCommand;
 import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftCreateCommand;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartImageLimits;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraft;
@@ -60,12 +62,81 @@ public class SizeChartDraftValidationProcessor {
         "rise", "front rise", "back rise", "hem", "hem width", "inseam", "outseam", "neck circumference",
         "arm length", "arm circumference", "wrist circumference", "foot length", "foot width", "heel height", "width", "height");
     private static final Set<String> WARNINGS = Set.of("SIZE_ORDER", "MISSING_CELL", "MEASUREMENT_OUTLIER", "MEASUREMENT_ORDER");
+    private static final String TEXT_MODE = "TEXT";
+    private static final String IMAGE_MODE = "IMAGE";
+    private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
+    private static final Pattern IMAGE_SOURCE_ID = Pattern.compile(SizeChartImageLimits.SOURCE_ID_PATTERN);
+    private static final Set<String> IMAGE_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
 
     public String normalizedRequestHash(SizeChartDraftCreateCommand command) {
         require(command != null && command.productId() > 0 && command.templateId() > 0 && command.actorId() > 0
-            && command.idempotencyKey() != null && "TEXT".equals(command.mode()), SizeChartDraftTransportErrorCode.UNSAFE_INPUT);
-        String text = normalize(command.sourceText());
-        return hash(json(List.of(command.productId(), command.templateId(), "TEXT", text)));
+            && command.idempotencyKey() != null && (TEXT_MODE.equals(command.mode()) || IMAGE_MODE.equals(command.mode())),
+            SizeChartDraftTransportErrorCode.UNSAFE_INPUT);
+        if (TEXT_MODE.equals(command.mode())) {
+            require(command.images().isEmpty(), SizeChartDraftTransportErrorCode.UNSAFE_INPUT);
+            String text = normalize(command.sourceText());
+            // 기존 TEXT 초안의 멱등 해시와 같아야 7일 안의 재시도가 같은 초안을 돌려준다. 모양을 바꾸지 않는다.
+            return hash(json(List.of(command.productId(), command.templateId(), TEXT_MODE, text)));
+        }
+        var images = command.images();
+        require(command.sourceText() == null && command.personalInfoRemovedConfirmed() && !images.isEmpty() && images.size() <= SizeChartImageLimits.MAX_IMAGES
+            && images.stream().allMatch(i -> i != null && i.sourceId() != null && IMAGE_SOURCE_ID.matcher(i.sourceId()).matches()
+                && i.approvedContentHash() != null && SHA256.matcher(i.approvedContentHash()).matches())
+            && images.stream().map(SizeChartDraftCreateCommand.Image::sourceId).distinct().count() == images.size(),
+            SizeChartDraftTransportErrorCode.UNSAFE_INPUT);
+        // 순서도 입력이다. 승인 해시가 다르면 같은 키라도 다른 요청이다(409).
+        return hash(json(List.of(command.productId(), command.templateId(), IMAGE_MODE,
+            images.stream().map(i -> List.of(i.sourceId(), i.approvedContentHash())).toList(), true)));
+    }
+
+    /** IMAGE 입력 스냅숏. 키는 product 안에서만 쓰고 internal 응답에는 싣지 않는다. */
+    public String imageSource(SizeChartTemplate template, List<SizeChartTemplateColumn> columns, List<SizeChartDraftImage> images) {
+        template(template, columns);
+        require(images != null && !images.isEmpty() && images.size() <= SizeChartImageLimits.MAX_IMAGES
+            && images.stream().allMatch(this::validImage)
+            && images.stream().map(SizeChartDraftImage::key).distinct().count() == images.size(), SizeChartDraftTransportErrorCode.UNSAFE_INPUT);
+        return json(ordered("mode", IMAGE_MODE, "images", images.stream()
+            .map(i -> ordered("key", i.key(), "sha256", i.sha256(), "contentType", i.contentType(), "length", i.length())).toList()));
+    }
+
+    /** 저장된 입력의 방식. 알 수 없는 모양이면 계약 오류다. */
+    public String mode(String sourceJson) {
+        String mode = string(object(sourceJson).get("mode"));
+        require(TEXT_MODE.equals(mode) || IMAGE_MODE.equals(mode), SizeChartDraftTransportErrorCode.INVALID_CONTRACT);
+        return mode;
+    }
+
+    /** 저장된 IMAGE 입력의 승인 이미지. TEXT 면 비어 있다. */
+    public List<SizeChartDraftImage> images(String sourceJson) {
+        JsonNode node = object(sourceJson);
+        if (TEXT_MODE.equals(mode(sourceJson))) {
+            return List.of();
+        }
+        fields(node, Set.of("mode", "images"));
+        JsonNode images = node.get("images");
+        require(images.isArray() && !images.isEmpty() && images.size() <= SizeChartImageLimits.MAX_IMAGES, SizeChartDraftTransportErrorCode.INVALID_CONTRACT);
+        List<SizeChartDraftImage> result = new ArrayList<>();
+        for (JsonNode image : images) {
+            fields(image, Set.of("key", "sha256", "contentType", "length"));
+            JsonNode length = image.get("length");
+            require(length.isIntegralNumber() && length.canConvertToLong(), SizeChartDraftTransportErrorCode.INVALID_CONTRACT);
+            var parsed = new SizeChartDraftImage(string(image.get("key")), string(image.get("sha256")), string(image.get("contentType")), length.longValue());
+            require(validImage(parsed), SizeChartDraftTransportErrorCode.INVALID_CONTRACT);
+            result.add(parsed);
+        }
+        return List.copyOf(result);
+    }
+
+    /** internal 생성 입력으로 내보내는 IMAGE 입력. 키를 빼고 순서 · 해시 · 형식만 남긴다. */
+    public String publicImageSource(List<SizeChartDraftImage> images) {
+        return json(ordered("mode", IMAGE_MODE, "images", images.stream()
+            .map(i -> ordered("sha256", i.sha256(), "contentType", i.contentType())).toList()));
+    }
+
+    private boolean validImage(SizeChartDraftImage image) {
+        return image != null && image.key() != null && image.key().length() <= 512 && image.key().matches("products/[0-9a-z/._-]+")
+            && !image.key().contains("..") && image.sha256() != null && SHA256.matcher(image.sha256()).matches()
+            && IMAGE_TYPES.contains(image.contentType()) && image.length() > 0 && image.length() <= SizeChartImageLimits.MAX_IMAGE_BYTES;
     }
 
     public String source(SizeChartDraftCreateCommand command, SizeChartTemplate template, List<SizeChartTemplateColumn> columns) {

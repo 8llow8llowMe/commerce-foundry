@@ -88,7 +88,7 @@ import org.springframework.transaction.support.TransactionTemplate;
     com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter.class,
     SizeChartTemplateRepositoryAdapter.class, SizeChartDraftRepositoryAdapter.class, ProductSizeChartProcessor.class,
     SizeChartDraftApplyProcessor.class, SizeChartDraftValidationProcessor.class, SizeChartDraftRemoteProcessor.class, SizeChartDraftFacade.class,
-    SizeChartDraftApplyPersistenceTest.TimeConfig.class})
+    com.commercefoundry.global.config.SizeChartDraftProperties.class, SizeChartDraftApplyPersistenceTest.TimeConfig.class})
 class SizeChartDraftApplyPersistenceTest {
     private static final Instant NOW = Instant.parse("2026-11-07T00:00:00Z");
     private static final String SOURCE = "{\"text\":\"private source never belongs in receipt\"}";
@@ -116,6 +116,8 @@ class SizeChartDraftApplyPersistenceTest {
     @MockitoBean private Clock clock;
     @MockitoBean private SizeChartDraftProcessor draftProcessor;
     @MockitoBean private SizeChartGenerationPort generation;
+    @MockitoBean private com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor imageSources;
+    @MockitoBean private com.commercefoundry.domainlayer.product.application.service.processor.ProductImageLookupProcessor productImages;
     private final AtomicLong sequence = new AtomicLong(1000);
 
     @BeforeEach

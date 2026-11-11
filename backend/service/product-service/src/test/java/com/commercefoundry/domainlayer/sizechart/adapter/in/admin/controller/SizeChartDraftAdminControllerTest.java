@@ -22,7 +22,11 @@ import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigu
 import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageInspectionInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageSourceInfo;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartImageSourceRejection;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -47,6 +51,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 class SizeChartDraftAdminControllerTest {
     private static final String CREATE = "/api/v1/admin/products/700/size-chart/drafts";
     private static final String DRAFTS = "/api/v1/admin/size-chart-drafts";
+    private static final String IMAGE_SOURCES = "/api/v1/admin/products/700/size-chart/image-sources";
     private static final String KEY = "11111111-1111-4111-8111-111111111111";
     private static final String BODY = "{\"templateId\":\"1\",\"mode\":\"TEXT\",\"sourceText\":\"S 가슴 50\"}";
     private static final String APPLY = """
@@ -61,11 +66,82 @@ class SizeChartDraftAdminControllerTest {
     @ParameterizedTest
     @CsvSource({"GET,/api/v1/admin/size-chart-drafts", "GET,/api/v1/admin/size-chart-drafts/9",
         "POST,/api/v1/admin/products/700/size-chart/drafts", "POST,/api/v1/admin/size-chart-drafts/9/refresh",
-        "POST,/api/v1/admin/size-chart-drafts/9/apply"})
+        "POST,/api/v1/admin/size-chart-drafts/9/apply", "GET,/api/v1/admin/products/700/size-chart/image-sources",
+        "GET,/api/v1/admin/products/700/size-chart/image-sources/IMG-1/inspection"})
     void customerAndAnonymousCannotCallAnyDraftHandler(String method, String path) {
         var verb = HttpMethod.valueOf(method);
         SecurityEnvelopeAssertions.assertEnvelope(exchange(verb, path, BODY, KEY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
         SecurityEnvelopeAssertions.assertEnvelope(exchange(verb, path, BODY, KEY, null).getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        verifyNoInteractions(useCase);
+    }
+
+    @Test
+    void imageSourcesExposeOnlyStringIdsPublicPreviewAndBusinessReason() {
+        given(useCase.imageSourcesAdmin(700)).willReturn(presenter.imageSources(List.of(
+            new SizeChartImageSourceInfo("IMG-4611686018427387905", "https://cdn.example.com/products/700/4611686018427387905.png", true, null),
+            new SizeChartImageSourceInfo("DESC-" + "0".repeat(32), null, false, SizeChartImageSourceRejection.EXTERNAL_IMAGE))));
+        var result = exchange(HttpMethod.GET, IMAGE_SOURCES, null, null, MemberRole.ADMIN);
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataBody[0].sourceId").isEqualTo("IMG-4611686018427387905");
+        assertThat(result).bodyJson().extractingPath("$.dataBody[0].eligible").isEqualTo(true);
+        assertThat(result).bodyJson().extractingPath("$.dataBody[1].reason.code").isEqualTo("EXTERNAL_IMAGE");
+        assertThat(result).bodyJson().extractingPath("$.dataBody[1].reason.name").isEqualTo("외부 주소 이미지");
+        assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+    }
+
+    @Test
+    void inspectionReturnsHashTypeAndLengthOnly() throws Exception {
+        given(useCase.inspectImageAdmin(700, "IMG-4611686018427387905"))
+            .willReturn(presenter.inspection(new SizeChartImageInspectionInfo("IMG-4611686018427387905", "a".repeat(64), "image/png", 12)));
+        var result = exchange(HttpMethod.GET, IMAGE_SOURCES + "/IMG-4611686018427387905/inspection", null, null, MemberRole.ADMIN);
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataBody").asMap().containsOnlyKeys("sourceId", "contentHash", "contentType", "contentLength")
+            .containsEntry("contentHash", "a".repeat(64));
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("products/");
+    }
+
+    @Test
+    void readOnlyStaffCanListCandidatesButCannotInspectBytes() {
+        given(useCase.imageSourcesAdmin(700)).willReturn(List.of());
+        assertThat(exchange(HttpMethod.GET, IMAGE_SOURCES, null, null, MemberRole.STAFF)).hasStatusOk();
+        SecurityEnvelopeAssertions.assertEnvelope(
+            exchange(HttpMethod.GET, IMAGE_SOURCES + "/IMG-4611686018427387905/inspection", null, null, MemberRole.STAFF).getResponse(),
+            SecurityErrorCode.FORBIDDEN);
+        verify(useCase, org.mockito.Mockito.never()).inspectImageAdmin(org.mockito.ArgumentMatchers.anyLong(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"products%2F700%2Fa.png", "IMG-0", "DESC-xyz", "IMG-1;x"})
+    void malformedSourceIdIsRejectedBeforeUseCase(String sourceId) {
+        var result = exchange(HttpMethod.GET, IMAGE_SOURCES + "/" + sourceId + "/inspection", null, null, MemberRole.ADMIN);
+        assertThat(result.getResponse().getStatus()).isBetween(400, 404);
+        verifyNoInteractions(useCase);
+    }
+
+    @Test
+    void imageCreatePassesApprovalsAndConfirmation() {
+        given(useCase.createAdmin(any())).willReturn(presenter.accepted(info(12L)));
+        String body = "{\"templateId\":\"1\",\"mode\":\"IMAGE\",\"personalInfoRemovedConfirmed\":true,"
+            + "\"images\":[{\"sourceId\":\"IMG-4611686018427387905\",\"approvedContentHash\":\"" + "a".repeat(64) + "\"}]}";
+        assertThat(exchange(HttpMethod.POST, CREATE, body, KEY, MemberRole.ADMIN)).hasStatus(HttpStatus.ACCEPTED);
+        verify(useCase).createAdmin(org.mockito.ArgumentMatchers.argThat(c -> "IMAGE".equals(c.mode()) && c.sourceText() == null
+            && c.personalInfoRemovedConfirmed() && c.images().size() == 1 && c.images().getFirst().approvedContentHash().equals("a".repeat(64))));
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+        "{\"templateId\":1,\"mode\":\"IMAGE\",\"personalInfoRemovedConfirmed\":true,\"images\":[]}|SIZE_CHART_DRAFT_112",
+        "{\"templateId\":1,\"mode\":\"IMAGE\",\"personalInfoRemovedConfirmed\":false,\"images\":[{\"sourceId\":\"IMG-1\",\"approvedContentHash\":\"HASH\"}]}|SIZE_CHART_DRAFT_115",
+        "{\"templateId\":1,\"mode\":\"IMAGE\",\"personalInfoRemovedConfirmed\":true,\"images\":[{\"sourceId\":\"IMG-1\",\"approvedContentHash\":\"nothex\"}]}|SIZE_CHART_DRAFT_114",
+        "{\"templateId\":1,\"mode\":\"IMAGE\",\"sourceText\":\"S 50\",\"personalInfoRemovedConfirmed\":true,\"images\":[{\"sourceId\":\"IMG-1\",\"approvedContentHash\":\"HASH\"}]}|SIZE_CHART_DRAFT_116",
+        "{\"templateId\":1,\"mode\":\"TEXT\",\"sourceText\":\"S 50\",\"images\":[{\"sourceId\":\"IMG-1\",\"approvedContentHash\":\"HASH\"}]}|SIZE_CHART_DRAFT_117",
+        "{\"templateId\":1,\"mode\":\"IMAGE\",\"personalInfoRemovedConfirmed\":true,\"images\":[{\"sourceId\":\"IMG-1\",\"approvedContentHash\":\"HASH\"},"
+            + "{\"sourceId\":\"IMG-1\",\"approvedContentHash\":\"HASH\"}]}|SIZE_CHART_DRAFT_112",
+        "{\"templateId\":1,\"mode\":\"VIDEO\",\"sourceText\":\"S 50\"}|SIZE_CHART_DRAFT_103"})
+    void invalidImageCreateBodiesUseFieldCodes(String body, String code) {
+        var result = exchange(HttpMethod.POST, CREATE, body.replace("HASH", "a".repeat(64)), KEY, MemberRole.ADMIN);
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
         verifyNoInteractions(useCase);
     }
 

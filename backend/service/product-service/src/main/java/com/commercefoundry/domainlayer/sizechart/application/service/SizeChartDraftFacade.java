@@ -1,8 +1,16 @@
 package com.commercefoundry.domainlayer.sizechart.application.service;
 
 import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductImageLookupProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductLookupProcessor;
+import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftAcceptedResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageInspectionResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageSourceResponse;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor;
+import com.commercefoundry.global.config.SizeChartDraftProperties;
+import java.util.Map;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftApplyResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftSummaryResponse;
@@ -57,10 +65,46 @@ public class SizeChartDraftFacade implements SizeChartDraftUseCase {
     private final Clock clock;
     private final ProductAdminAuditProcessor audit;
     private final SizeChartDraftAdminPresenter presenter;
+    private final SizeChartImageSourceProcessor imageSources;
+    private final ProductImageLookupProcessor productImages;
+    private final SizeChartDraftProperties properties;
 
     @Override
     public SizeChartDraftAcceptedResponse createAdmin(SizeChartDraftCreateCommand command) {
         return presenter.accepted(create(command));
+    }
+
+    @Override
+    public List<SizeChartImageSourceResponse> imageSourcesAdmin(long productId) {
+        requireImageEnabled();
+        Product product = product(productId);
+        return presenter.imageSources(imageSources.sources(productId, product, productImages.findStillImagesIncludingHidden(productId)));
+    }
+
+    /** 스토리지 읽기(외부 I/O)가 있어 트랜잭션을 걸지 않는다. 상품 · 이미지 조회는 각 Processor 의 짧은 읽기다. */
+    @Override
+    public SizeChartImageInspectionResponse inspectImageAdmin(long productId, String sourceId) {
+        requireImageEnabled();
+        Product product = product(productId);
+        return presenter.inspection(imageSources.inspect(productId, product, productImages.findStillImagesIncludingHidden(productId), sourceId));
+    }
+
+    private void requireImageEnabled() {
+        if (!properties.isImageEnabled()) {
+            throw new SizeChartDraftTransportException(SizeChartDraftTransportErrorCode.IMAGE_INPUT_DISABLED);
+        }
+    }
+
+    private Product product(long productId) {
+        return product(products.findAllIncludingHidden(List.of(productId)), productId);
+    }
+
+    private static Product product(Map<Long, Product> found, long productId) {
+        Product product = found.get(productId);
+        if (product == null) {
+            throw new SizeChartException(SizeChartErrorCode.PRODUCT_NOT_FOUND);
+        }
+        return product;
     }
 
     @Override
@@ -92,12 +136,23 @@ public class SizeChartDraftFacade implements SizeChartDraftUseCase {
     }
 
     private SizeChartDraftInfo createDraft(SizeChartDraftCreateCommand command) {
+        boolean image = command != null && "IMAGE".equals(command.mode());
+        if (image) {
+            requireImageEnabled();
+        }
         String requestHash = validation.normalizedRequestHash(command);
         SizeChartDraft draft;
         try {
             var replay = processor.replay(command, requestHash);
-            draft = replay.isPresent() ? replay.get() : processor.createOrReplay(command, requestHash,
-                products.findAllIncludingHidden(List.of(command.productId())));
+            if (replay.isPresent()) {
+                draft = replay.get();
+            } else {
+                var found = products.findAllIncludingHidden(List.of(command.productId()));
+                // IMAGE: 저장 전, 트랜잭션 밖에서 지금 바이트를 다시 읽어 승인 해시와 대조한다. 바뀌었으면 초안을 만들지 않는다.
+                List<SizeChartDraftImage> approved = image ? imageSources.approve(command.productId(), product(found, command.productId()),
+                    productImages.findStillImagesIncludingHidden(command.productId()), command.images()) : List.of();
+                draft = processor.createOrReplay(command, requestHash, found, approved);
+            }
         } catch (DataIntegrityViolationException exception) {
             // The insert transaction has rolled back. Re-read the winning actor+key in a fresh transaction.
             draft = processor.replay(command, requestHash)
