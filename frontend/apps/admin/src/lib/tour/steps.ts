@@ -33,3 +33,25 @@ export function driveSteps(tour: Tour, exists: (target: string) => boolean): Dri
     },
   }));
 }
+
+/**
+ * 운영자가 OS · 브라우저에서 동작 줄이기(`prefers-reduced-motion: reduce`)를 켰는지. `matchMedia` 가 없거나 실패하면
+ * 켜지 않은 것으로 본다(라이브러리 기본 동작).
+ */
+export function prefersReducedMotion(
+  win: { matchMedia?: Window['matchMedia'] } | undefined,
+): boolean {
+  try {
+    return win?.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 투어 움직임 옵션. 동작 줄이기면 단계 전환 · 오버레이 애니메이션을 끈다. 스크롤은 늘 즉시다 —
+ * 부드러운 스크롤을 쓰면 스크롤이 끝나기 전에 팝오버 위치를 잡아 화면 아래 요소(상품 상세 SKU 표)에서 팝오버가 떨어져 뜬다(#29 시연).
+ */
+export function tourMotion(reduced: boolean): { animate: boolean; smoothScroll: false } {
+  return { animate: !reduced, smoothScroll: false };
+}
