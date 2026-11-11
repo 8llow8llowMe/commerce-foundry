@@ -31,12 +31,13 @@ export const LOOK_TOO_LONG: Record<LookTextKey, string> = {
 };
 
 export const TITLE_REQUIRED = '제목을 써 주세요.';
-export const IMAGE_REQUIRED = '대표 이미지 주소를 넣어 주세요.';
+export const IMAGE_REQUIRED = '대표 이미지를 올리거나 주소를 넣어 주세요.';
 export const IMAGE_URL_FORMAT = '이미지 주소에는 공백 · 줄바꿈을 넣을 수 없습니다.';
 export const SINGLE_LINE_ONLY = '줄바꿈 · 탭 같은 특수 문자는 쓸 수 없습니다.';
 export const DESCRIPTION_CHARACTER = '설명에는 줄바꿈과 탭 외의 특수 문자를 쓸 수 없습니다.';
 export const PRODUCT_COUNT = `구성 상품은 1개 이상 ${LOOK_LIMITS.products}개 이하로 넣어 주세요.`;
 export const PRODUCT_DUPLICATED = '같은 상품이 두 번 들어 있습니다.';
+export const PRODUCT_DELETED = '삭제된 상품이 들어 있습니다. 표시된 상품을 빼고 저장해 주세요.';
 
 /** 목록 · 안내 문구의 룩 이름 */
 export const lookName = (look: Pick<LookAdmin, 'title'>) => look.title;
@@ -57,6 +58,7 @@ export function editLookForm(look: LookAdmin): LookForm {
       visible: product.visible,
       availability: product.saleStatus,
       caption: null,
+      deleted: product.deleted,
     })),
   };
 }
@@ -88,6 +90,7 @@ const IMAGE_URL_REJECTED = /[\s\p{Zs}\p{Cc}\p{Cs}]/u;
  * - 문구는 앞뒤 공백을 빼고, 선택 칸(설명 · 대체 텍스트)은 비면 null 이다. 길이는 UTF-16 코드 유닛.
  * - 이미지 주소가 쇼핑몰 저장소 주소인지는 서버 설정을 봐야 해서 서버가 판정한다(`LOOK_005`).
  * - 원본 크기는 그 주소의 크기를 알 때만 보낸다.
+ * - 삭제된 상품(`deleted`)이 있으면 보내지 않는다(서버 `LOOK_009`).
  */
 export function lookRequest(form: LookForm): LookBuildResult {
   const errors: FormErrors = {};
@@ -122,6 +125,8 @@ export function lookRequest(form: LookForm): LookBuildResult {
   if (new Set(form.products.map((item) => item.productId)).size !== form.products.length) {
     push(errors, 'products', PRODUCT_DUPLICATED);
   }
+  // 서버가 400 `LOOK_009` 로 거절한다 — 보내지 않고 줄 표시(`productNotice`)로 뺄 상품을 알린다
+  if (form.products.some((item) => item.deleted)) push(errors, 'products', PRODUCT_DELETED);
 
   if (Object.keys(errors).length > 0 || title === null || url === null) {
     return { ok: false, errors };
@@ -160,10 +165,14 @@ export function lookWarnings(form: LookForm): string[] {
   return [];
 }
 
-/** 목록 줄 요약 — `상품 3개 · 숨긴 상품 1개` */
+/** 목록 줄 요약 — `상품 3개 · 숨긴 상품 1개`. 삭제된 상품은 따로 알린다(`deletedProductCount`) */
 export function lookSummary(look: LookAdmin): string {
-  const hidden = look.products.filter((product) => !product.visible).length;
+  const hidden = look.products.filter((product) => !product.visible && !product.deleted).length;
   const parts = [`상품 ${look.products.length}개`];
   if (hidden > 0) parts.push(`숨긴 상품 ${hidden}개`);
   return parts.join(' · ');
 }
+
+/** 구성 상품 중 삭제된 상품 수 — 0 이 아니면 그대로는 저장 · 노출 바꾸기를 할 수 없다(`LOOK_009`) */
+export const deletedProductCount = (look: Pick<LookAdmin, 'products'>) =>
+  look.products.filter((product) => product.deleted).length;

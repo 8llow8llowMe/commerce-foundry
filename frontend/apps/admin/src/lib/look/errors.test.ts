@@ -5,6 +5,7 @@ import {
   BUSY,
   CHECK_FIELDS,
   DELETE_FAILED,
+  deletedProductIdsOf,
   IMAGE_URL_NOT_ALLOWED,
   LOOK_GONE_NOTICE,
   LOOK_LIMIT,
@@ -14,10 +15,17 @@ import {
   MEDIA_STORAGE_UNAVAILABLE,
   ORDER_CHANGED_NOTICE,
   PRODUCT_MISSING,
+  TOGGLE_DELETED_PRODUCT,
   TOGGLE_FAILED,
   UNKNOWN_OUTCOME_NOTICE,
 } from './errors';
-import { LOOK_TOO_LONG, PRODUCT_COUNT, PRODUCT_DUPLICATED, TITLE_REQUIRED } from './form';
+import {
+  LOOK_TOO_LONG,
+  PRODUCT_COUNT,
+  PRODUCT_DELETED,
+  PRODUCT_DUPLICATED,
+  TITLE_REQUIRED,
+} from './form';
 
 const apiError = (
   kind: ApiErrorKind,
@@ -99,6 +107,18 @@ describe('lookSaveFailure', () => {
     });
   });
 
+  it('삭제 상품(LOOK_009)은 구성 상품 칸 문구와 줄 표시용 아이디를 돌려주고, 문구에 아이디를 싣지 않는다', () => {
+    const failure = lookSaveFailure(
+      apiError('server', 400, 'LOOK_009', '삭제된 상품이 있습니다: 4611686018427387904, 12'),
+    );
+    expect(failure).toEqual({
+      kind: 'errors',
+      errors: { products: [PRODUCT_DELETED], form: [CHECK_FIELDS] },
+      deletedProductIds: ['4611686018427387904', '12'],
+    });
+    expect(failure.kind === 'errors' && JSON.stringify(failure.errors)).not.toContain('12');
+  });
+
   it('409 는 룩 상한 · 잠금 대기다', () => {
     expect(lookSaveFailure(apiError('conflict', 409, 'LOOK_002'))).toEqual({
       kind: 'errors',
@@ -156,6 +176,23 @@ describe('lookRowFailure', () => {
       kind: 'message',
       message: TOGGLE_FAILED,
     });
+  });
+
+  it('노출 바꾸기가 삭제 상품(LOOK_009)으로 거절되면 수정 화면에서 빼라고 안내한다', () => {
+    expect(
+      lookRowFailure(
+        apiError('server', 400, 'LOOK_009', '삭제된 상품이 있습니다: 1'),
+        TOGGLE_FAILED,
+      ),
+    ).toEqual({ kind: 'message', message: TOGGLE_DELETED_PRODUCT });
+  });
+});
+
+describe('deletedProductIdsOf', () => {
+  it('서버 문구의 콜론 뒤 아이디를 요청 순서대로 꺼내고, 모양이 다르면 빈 목록이다', () => {
+    expect(deletedProductIdsOf('삭제된 상품이 있습니다: 3, 1')).toEqual(['3', '1']);
+    expect(deletedProductIdsOf('삭제된 상품이 있습니다')).toEqual([]);
+    expect(deletedProductIdsOf('x: abc, 2')).toEqual(['2']);
   });
 });
 

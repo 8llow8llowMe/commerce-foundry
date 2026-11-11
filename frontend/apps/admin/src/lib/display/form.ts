@@ -86,6 +86,8 @@ export type ProductFormItem = {
   visible: boolean;
   availability: CodeName | null;
   caption: string | null;
+  /** 삭제된 상품(룩 응답의 `deleted`, BE #424). 메인 전시는 이 값이 없다 — 빼야 저장할 수 있다고 그 줄에 알린다 */
+  deleted?: boolean;
 };
 
 /** 폼 칸은 글자 그대로 둔다. 기간은 datetime-local 글자(이 컴퓨터 시간대) */

@@ -27,6 +27,11 @@ export type LookProductAdmin = {
   visible: boolean;
   /** 저장한 판매 상태 — 판매중(ON_SALE) · 판매 종료(STOP_SELLING). 상품 행이 없으면 null */
   saleStatus: CodeName | null;
+  /**
+   * 소프트 삭제된 상품(BE #424). 이미 구성된 상품이 나중에 삭제되어도 룩에 남지만, 고객 룩에서는 빠지고
+   * 그대로 저장(생성 · 수정 · 노출 바꾸기)하면 400 `LOOK_009` 다 — 빼야 저장할 수 있다
+   */
+  deleted: boolean;
 };
 
 /** 어드민 룩 — 내부 순서 번호 · 아이템 아이디는 오지 않는다(#305). 순서는 목록의 배열 순서다 */

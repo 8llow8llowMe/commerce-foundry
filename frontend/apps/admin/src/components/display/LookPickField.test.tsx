@@ -10,7 +10,7 @@ const look = (overrides: Partial<LookAdmin> = {}): LookAdmin => ({
   description: null,
   image: { url: 'https://cdn.example.test/looks/a.jpg', width: null, height: null, altText: null },
   visible: true,
-  products: [{ productId: '11', name: '상품 11', visible: true, saleStatus: null }],
+  products: [{ productId: '11', name: '상품 11', visible: true, saleStatus: null, deleted: false }],
   ...overrides,
 });
 
@@ -22,7 +22,11 @@ describe('lookNotice', () => {
     expect(lookNotice(look({ visible: false }))).toContain('숨긴 룩');
     expect(
       lookNotice(
-        look({ products: [{ productId: '11', name: null, visible: false, saleStatus: null }] }),
+        look({
+          products: [
+            { productId: '11', name: null, visible: false, saleStatus: null, deleted: false },
+          ],
+        }),
       ),
     ).toContain('화보만 보입니다');
   });

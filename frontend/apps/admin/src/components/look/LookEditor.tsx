@@ -5,6 +5,7 @@ import { Button, Checkbox, FieldError } from '@cf/ui';
 import { useEffect, useId, useRef, useState } from 'react';
 import { TextInput } from '@/components/display/SectionEditor';
 import { ProductPickField } from '@/components/display/ProductPickField';
+import { DisplayImageUploadButton } from '@/components/upload/DisplayImageUploadButton';
 import type { AccessDenied, FormErrors } from '@/lib/api-errors';
 import { normalizeText } from '@/lib/display/text';
 import { lookSaveFailure, withSummary } from '@/lib/look/errors';
@@ -42,11 +43,14 @@ export function LookEditor({
   const [form, setForm] = useState<LookForm>(initial);
   const [errors, setErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
+  // 올리는 중 — 확정한 주소가 들어오기 전에 저장하면 이미지가 빠지므로 그동안 저장을 막는다(메인 전시와 같다)
+  const [uploads, setUploads] = useState(0);
+  const uploading = uploads > 0;
   const errorsOf = (key: string) => errors[key] ?? [];
   const set = (patch: Partial<LookForm>) => setForm((current) => ({ ...current, ...patch }));
 
   const submit = async () => {
-    if (saving) return;
+    if (saving || uploading) return;
     const built = lookRequest(form);
     if (!built.ok) {
       setErrors(withSummary(built.errors));
@@ -65,7 +69,19 @@ export function LookEditor({
       const failure = lookSaveFailure(cause);
       if (failure.kind === 'access') onDenied(failure.denied);
       else if (failure.kind === 'reload') onReload(failure.notice);
-      else setErrors(failure.errors);
+      else {
+        setErrors(failure.errors);
+        // 삭제 상품(`LOOK_009`)은 그 줄에 삭제 표시를 한다 — 아이디는 화면에 내지 않는다(#305)
+        const deleted = new Set(failure.deletedProductIds ?? []);
+        if (deleted.size > 0) {
+          setForm((current) => ({
+            ...current,
+            products: current.products.map((item) =>
+              deleted.has(item.productId) ? { ...item, deleted: true } : item,
+            ),
+          }));
+        }
+      }
     }
   };
 
@@ -113,6 +129,8 @@ export function LookEditor({
           form={form}
           errorsOf={errorsOf}
           onChange={(patch) => set(patch)}
+          onUploadingChange={(busy) => setUploads((count) => Math.max(0, count + (busy ? 1 : -1)))}
+          onAccessDenied={onDenied}
           onMeasured={(size) =>
             setForm((current) =>
               current.imageUrl.trim() === size.url ? { ...current, imageSize: size } : current,
@@ -156,8 +174,17 @@ export function LookEditor({
         </ul>
       )}
       <FieldError messages={errorsOf('form')} />
+      {uploading && (
+        <p id={`${id}-uploading`} className="text-sm text-muted-fg">
+          이미지를 올리는 중입니다. 다 올라가면 저장할 수 있습니다.
+        </p>
+      )}
       <div className="flex gap-2">
-        <Button type="submit" disabled={saving}>
+        <Button
+          type="submit"
+          disabled={saving || uploading}
+          aria-describedby={uploading ? `${id}-uploading` : undefined}
+        >
           {saving ? '저장 중…' : '저장'}
         </Button>
         <Button variant="secondary" onClick={onCancel} disabled={saving}>
@@ -169,19 +196,25 @@ export function LookEditor({
 }
 
 /**
- * 대표 이미지 — 업로드(#9)가 아직 없어 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣는다. 저장소 주소인지는 서버가 본다(`LOOK_005`).
- * 넣은 주소의 이미지를 작게 보여 주고, 불러오면 원본 크기를 함께 보낸다(고객 화면이 자리를 미리 잡는다).
+ * 대표 이미지 — 파일을 올리면(#706, BE #508 전시 · 룩 공용 발급 → PUT → 확정) 확정한 공개 주소가 주소 칸에 들어간다.
+ * 메인 전시 미디어 칸과 같은 `DisplayImageUploadButton` 이다. 주소 칸은 그대로 둬서 이미 주소로 저장한 룩도 보이고 고칠 수 있다.
+ * 저장소 주소인지는 서버가 본다(`LOOK_005`). 주소의 이미지를 작게 보여 주고, 불러오면 원본 크기를 함께 보낸다
+ * (서버는 크기를 계산하지 않는다 — 고객 화면이 자리를 미리 잡는 데 쓴다).
  */
 export function ImageFields({
   form,
   errorsOf,
   onChange,
   onMeasured,
+  onUploadingChange,
+  onAccessDenied,
 }: {
   form: Pick<LookForm, 'imageUrl' | 'altText'>;
   errorsOf: (key: string) => string[];
   onChange: (patch: Partial<Pick<LookForm, 'imageUrl' | 'altText'>>) => void;
   onMeasured: (size: { url: string; width: number; height: number }) => void;
+  onUploadingChange?: (uploading: boolean) => void;
+  onAccessDenied?: (denied: AccessDenied) => void;
 }) {
   const url = normalizeText(form.imageUrl);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
@@ -190,8 +223,8 @@ export function ImageFields({
     <fieldset className="flex min-w-0 flex-col gap-3">
       <legend className="text-sm font-medium">대표 이미지</legend>
       <p className="text-xs text-muted-fg">
-        이미지 업로드는 준비 중입니다. 지금은 쇼핑몰 이미지 저장소에 이미 올린 이미지의 주소를 넣어
-        주세요. 다른 사이트의 이미지 주소는 저장되지 않습니다.
+        파일을 올리면 주소 칸이 채워집니다. 쇼핑몰 이미지 저장소에 이미 있는 이미지는 주소를 그대로
+        넣어도 됩니다. 다른 사이트의 이미지 주소는 저장되지 않습니다.
       </p>
       <div className="flex flex-wrap items-start gap-4">
         <div className="w-28 shrink-0">
@@ -231,6 +264,12 @@ export function ImageFields({
             }
             errors={errorsOf('imageUrl')}
             onChange={(imageUrl) => onChange({ imageUrl })}
+          />
+          <DisplayImageUploadButton
+            label="대표 이미지 파일 올리기"
+            onUploaded={(imageUrl) => onChange({ imageUrl })}
+            onUploadingChange={onUploadingChange}
+            onAccessDenied={onAccessDenied}
           />
           <TextInput
             label={LOOK_LABELS.altText}
