@@ -21,6 +21,16 @@ describe('ProductOptionsEditor(#29)', () => {
     expect(html).toMatch(/<button(?=[^>]*type="submit")(?=[^>]*disabled="")[^>]*>은퇴<\/button>/);
   });
 
+  it('옵션 · 값마다 영문 이름 칸을 저장값으로 채운다(#707)', () => {
+    const html = renderToStaticMarkup(<ProductOptionsEditor product={adminProduct()} />);
+    expect(html).toContain('영문 이름 (선택, 30자 이하)');
+    expect(html).toContain('값 1 영문 (선택, 50자 이하)');
+    expect(html).toMatch(/<input[^>]*lang="en"[^>]*value="Color"/);
+    expect(html).toMatch(/<input[^>]*lang="en"[^>]*value="Indigo"/);
+    // 번역이 없는 칸은 비어 있다(3 = 사이즈 그룹 · M · L)
+    expect(html.match(/<input[^>]*lang="en"[^>]*value=""/g)).toHaveLength(3);
+  });
+
   it('옵션 없는 상품은 조합 추가를 막고 은퇴 폼이 없다', () => {
     const html = renderToStaticMarkup(
       <ProductOptionsEditor product={adminProduct({ optionGroups: [], skus: [] })} />,

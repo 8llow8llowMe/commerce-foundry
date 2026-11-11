@@ -1,3 +1,4 @@
+import { ApiError } from '@cf/api-client';
 import { describe, expect, it } from 'vitest';
 import { emptySku, HS_CODE_INVALID, VALUE_DUPLICATED, ZERO_ADDITIONAL_REQUIRED } from './create';
 import {
@@ -5,6 +6,9 @@ import {
   ADD_NONE_SELECTED,
   ADD_RETIRED_GROUP,
   emptySkuAddForm,
+  GROUP_NAME_EN_INVALID,
+  OPTIONS_VALIDATION,
+  VALUE_NAME_EN_INVALID,
   newValueProblem,
   optionNamesFormOf,
   optionsRequest,
@@ -21,6 +25,7 @@ import {
   skuEditRowsOf,
   skusRequest,
 } from './options';
+import { sectionFailure, underAny } from './section';
 import { adminProduct } from './test-fixtures';
 
 describe('옵션 이름 · 순서', () => {
@@ -44,6 +49,121 @@ describe('옵션 이름 · 순서', () => {
     expect(optionsRequest(groups, 0)).toEqual({
       ok: false,
       errors: { 'optionGroups.1.values.1.name': [VALUE_DUPLICATED] },
+    });
+  });
+});
+
+describe('옵션 영문 이름(#707)', () => {
+  const sent = (groups: ReturnType<typeof optionNamesFormOf>) => {
+    const built = optionsRequest(groups, 4);
+    if (!built.ok) throw new Error(JSON.stringify(built.errors));
+    return built.request.optionGroups;
+  };
+
+  it('저장된 영문 이름을 칸에 채운다(번역 없으면 빈 칸)', () => {
+    const [color, size] = optionNamesFormOf(adminProduct());
+    expect([color?.nameEn, color?.savedNameEn, color?.values[0]?.nameEn]).toEqual([
+      'Color',
+      'Color',
+      'Indigo',
+    ]);
+    expect([size?.nameEn, size?.savedNameEn, size?.values[0]?.nameEn]).toEqual(['', null, '']);
+  });
+
+  it('손대지 않은 영문 칸은 본문에서 빼 저장된 번역을 지우지 않는다(한국어만 고쳐도)', () => {
+    const groups = optionNamesFormOf(adminProduct());
+    groups[0]!.name = '색깔';
+    groups[0]!.values[0]!.name = '남색';
+    const [color, size] = sent(groups);
+    expect(color).toEqual({
+      optionGroupId: '201',
+      name: '색깔',
+      values: [{ optionValueId: '301', name: '남색' }],
+    });
+    expect(color).not.toHaveProperty('nameEn');
+    expect(size?.values.every((value) => !('nameEn' in value))).toBe(true);
+  });
+
+  it('순서를 바꿔도 영문 이름은 그 행을 따라가고, 앞뒤 공백만 다르면 손대지 않은 것이다', () => {
+    const groups = optionNamesFormOf(adminProduct()).reverse();
+    groups[1]!.nameEn = '  Color ';
+    const request = sent(groups);
+    expect(request.map((group) => [group.optionGroupId, 'nameEn' in group])).toEqual([
+      ['202', false],
+      ['201', false],
+    ]);
+  });
+
+  it('새로 넣거나 고친 영문 이름은 다듬어 보낸다', () => {
+    const groups = optionNamesFormOf(adminProduct());
+    groups[0]!.nameEn = ' Colour ';
+    groups[1]!.nameEn = 'Size';
+    groups[1]!.values[0]!.nameEn = 'Medium';
+    expect(sameOptionNames(groups, optionNamesFormOf(adminProduct()))).toBe(false);
+    const [color, size] = sent(groups);
+    expect(color?.nameEn).toBe('Colour');
+    expect(size?.nameEn).toBe('Size');
+    expect(size?.values).toEqual([
+      { optionValueId: '311', name: 'M', nameEn: 'Medium' },
+      { optionValueId: '312', name: 'L' },
+    ]);
+  });
+
+  it('일부러 비운 영문 칸은 빈 값으로 보내 지운다(공백만 남겨도)', () => {
+    const groups = optionNamesFormOf(adminProduct());
+    groups[0]!.nameEn = '';
+    groups[0]!.values[0]!.nameEn = '   ';
+    expect(sameOptionNames(groups, optionNamesFormOf(adminProduct()))).toBe(false);
+    const [color] = sent(groups);
+    expect(color?.nameEn).toBe('');
+    expect(color?.values[0]).toEqual({ optionValueId: '301', name: '쪽빛', nameEn: '' });
+  });
+
+  it('영문 칸만 고쳐도 바뀐 것으로 본다', () => {
+    const groups = optionNamesFormOf(adminProduct());
+    expect(sameOptionNames(groups, optionNamesFormOf(adminProduct()))).toBe(true);
+    groups[1]!.values[1]!.nameEn = 'Large';
+    expect(sameOptionNames(groups, optionNamesFormOf(adminProduct()))).toBe(false);
+  });
+
+  it('길이(그룹 30 · 값 50)와 제어 · 서식 문자를 서버와 같게 미리 막는다', () => {
+    const groups = optionNamesFormOf(adminProduct());
+    groups[0]!.nameEn = 'a'.repeat(30);
+    groups[0]!.values[0]!.nameEn = 'b'.repeat(50);
+    expect(optionsRequest(groups, 0).ok).toBe(true);
+    groups[0]!.nameEn = 'a'.repeat(31);
+    groups[0]!.values[0]!.nameEn = 'b'.repeat(51);
+    groups[1]!.nameEn = 'Si\tze';
+    groups[1]!.values[0]!.nameEn = 'M\u200b';
+    expect(optionsRequest(groups, 0)).toEqual({
+      ok: false,
+      errors: {
+        'optionGroups.0.nameEn': [GROUP_NAME_EN_INVALID],
+        'optionGroups.0.values.0.nameEn': [VALUE_NAME_EN_INVALID],
+        'optionGroups.1.nameEn': [GROUP_NAME_EN_INVALID],
+        'optionGroups.1.values.0.nameEn': [VALUE_NAME_EN_INVALID],
+      },
+    });
+  });
+
+  it('서버 칸 오류(PRODUCT_EDIT_113 · 114)는 해당 영문 칸에 붙인다', () => {
+    const cause = new ApiError('validation', 400, 'COMMON_400', '서버 문구', [
+      { field: 'optionGroups[1].nameEn', code: 'PRODUCT_EDIT_113', message: '그룹 서버 문구' },
+      {
+        field: 'optionGroups[0].values[0].nameEn',
+        code: 'PRODUCT_EDIT_114',
+        message: '값 서버 문구',
+      },
+    ]);
+    expect(
+      sectionFailure(cause, { isField: underAny('optionGroups'), validation: OPTIONS_VALIDATION }),
+    ).toEqual({
+      kind: 'errors',
+      errors: {
+        'optionGroups.1.nameEn': [GROUP_NAME_EN_INVALID],
+        'optionGroups.0.values.0.nameEn': [VALUE_NAME_EN_INVALID],
+      },
+      reload: false,
     });
   });
 });

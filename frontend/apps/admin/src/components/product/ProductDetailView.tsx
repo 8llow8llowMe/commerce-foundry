@@ -159,6 +159,7 @@ export function ProductDetailView({
               <li key={group.optionGroupId}>
                 <p className="font-medium">
                   {group.name}
+                  <NameEn text={group.nameEn} />
                   {group.retiredAt && <Retired at={group.retiredAt} />}
                 </p>
                 <ul className="mt-1 flex flex-wrap gap-2">
@@ -172,6 +173,7 @@ export function ProductDetailView({
                       }
                     >
                       {value.name}
+                      <NameEn text={value.nameEn} />
                       {value.retiredAt && <Retired at={value.retiredAt} />}
                     </li>
                   ))}
@@ -412,6 +414,16 @@ function Retired({ at }: { at: string }) {
   return (
     <span className="ml-1 text-xs text-muted-fg" title={`${formatRetiredAt(at)}부터 사용 안 함`}>
       (사용 안 함)
+    </span>
+  );
+}
+
+/** 옵션 영문 이름(#707). 번역이 없으면 그리지 않는다 — 영문 스토어는 한국어 이름을 보인다 */
+function NameEn({ text }: { text: string | null }) {
+  if (!text) return null;
+  return (
+    <span lang="en" className="ml-1 font-normal text-muted-fg">
+      / {text}
     </span>
   );
 }
