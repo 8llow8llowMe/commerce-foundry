@@ -21,4 +21,17 @@ describe('DisplayImageUploadButton', () => {
     );
     expect(html).toMatch(/<input[^>]*disabled=""/);
   });
+
+  it('칸마다 형식 · 용량 안내를 바꿀 수 있다(AI 상품 초안 5MB)', () => {
+    const html = renderToStaticMarkup(
+      <DisplayImageUploadButton
+        label="대표 사진"
+        hint="한 장에 5MB 이하"
+        checkFile={() => null}
+        onUploaded={() => {}}
+      />,
+    );
+    expect(html).toContain('한 장에 5MB 이하');
+    expect(html).not.toContain('10MB');
+  });
 });

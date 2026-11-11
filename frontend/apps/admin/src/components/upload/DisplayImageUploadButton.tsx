@@ -23,6 +23,10 @@ export type DisplayImageUploadButtonProps = {
   /** 403 — 화면이 `AccessNotice` 를 그린다 */
   onAccessDenied?: (denied: AccessDenied) => void;
   disabled?: boolean;
+  /** 이 칸만의 추가 검사(예: AI 상품 초안의 장당 5MB). 문구를 돌려주면 올리지 않고 그 문구를 보인다 */
+  checkFile?: (file: File) => string | null;
+  /** 형식 · 용량 안내를 바꾼다(기본: 10MB · 주소 칸 안내) */
+  hint?: string;
 };
 
 /**
@@ -37,6 +41,8 @@ export function DisplayImageUploadButton({
   onUploadingChange,
   onAccessDenied,
   disabled = false,
+  checkFile,
+  hint = `JPG · PNG · WebP, ${formatBytes(IMAGE_MAX_BYTES)} 이하. 올리면 주소 칸이 채워집니다.`,
 }: DisplayImageUploadButtonProps) {
   const id = useId();
   const [uploading, setUploading] = useState(false);
@@ -115,15 +121,20 @@ export function DisplayImageUploadButton({
           const picked = event.currentTarget.files?.[0];
           // 같은 파일을 다시 고를 수 있게 비운다
           event.currentTarget.value = '';
-          if (picked) void run((signal) => uploadDisplayImage(picked, { signal }));
+          if (!picked) return;
+          const invalid = checkFile?.(picked) ?? null;
+          if (invalid) {
+            setError(invalid);
+            setRetryKey(null);
+            return;
+          }
+          void run((signal) => uploadDisplayImage(picked, { signal }));
         }}
         className="w-fit text-sm file:mr-3 file:rounded-md file:border file:border-border file:bg-bg file:px-3 file:py-1.5 file:text-sm disabled:opacity-50"
       />
       {/* 올리는 중을 화면 낭독기에도 알린다(완료는 주소 칸 · 미리보기, 실패는 오류의 role="alert") */}
       <p id={`${id}-hint`} aria-live="polite" className="text-xs text-muted-fg">
-        {uploading
-          ? '올리는 중…'
-          : `JPG · PNG · WebP, ${formatBytes(IMAGE_MAX_BYTES)} 이하. 올리면 주소 칸이 채워집니다.`}
+        {uploading ? '올리는 중…' : hint}
       </p>
       <FieldError id={`${id}-error`} messages={error ? [error] : []} />
       {retryKey && !uploading && (

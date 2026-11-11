@@ -196,6 +196,13 @@ export function ProductCreateForm() {
           상품 등록
         </h1>
         <p className="text-sm text-muted-fg">같은 내용으로 두 번 등록하면 상품이 두 개 생깁니다.</p>
+        <p className="text-sm text-muted-fg">
+          사진과 아는 사실로 상품 문구 초안부터 받아 보려면{' '}
+          <Link href="/products/drafts/new" className="text-fg underline underline-offset-4">
+            AI 초안으로 시작
+          </Link>
+          하세요. 초안은 상품을 만들거나 공개하지 않습니다.
+        </p>
       </div>
 
       <div ref={summaryRef} tabIndex={-1} className="outline-none">

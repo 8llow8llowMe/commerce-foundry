@@ -50,6 +50,12 @@ describe('ProductCreateForm', () => {
     expect(html).not.toContain('서버 기능이 준비되면 열립니다');
   });
 
+  it('AI 초안으로 시작하는 링크(#360)를 둔다', () => {
+    expect(render(false)).toMatch(
+      /<a[^>]*href="\/products\/drafts\/new"[^>]*>AI 초안으로 시작<\/a>/,
+    );
+  });
+
   it('맞춤 제작은 꺼진 채 항목 없이 시작하고 등록 화면에서 켜고 항목을 더할 수 있다', () => {
     const html = render(true);
     expect(html).toContain('맞춤 제작 (선택)');
