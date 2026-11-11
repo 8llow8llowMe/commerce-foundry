@@ -40,7 +40,7 @@ describe('helpTopicFor · toursFor', () => {
     expect(toursFor('/claims').map((tour) => tour.id)).toEqual([CONSOLE_TOUR.id, 'claims-v1']);
     expect(toursFor('/claims/42').map((tour) => tour.id)).toEqual([
       CONSOLE_TOUR.id,
-      'claim-detail-v1',
+      'claim-detail-v2',
     ]);
     expect(toursFor('/products/42/edit').map((tour) => tour.id)).toEqual([
       CONSOLE_TOUR.id,
@@ -77,6 +77,7 @@ describe('helpTopicFor · toursFor', () => {
       ['claim-items', false],
       ['claim-recovery', true],
       ['claim-retry', true],
+      ['claim-decisions', true],
       [null, false],
     ]);
     // 반품 접수(처리 상황 · 다시 시도 없음)에서도 필수 요소만으로 돈다

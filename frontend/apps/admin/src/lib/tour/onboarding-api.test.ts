@@ -27,7 +27,7 @@ describe('guideOf', () => {
       { key: 'orders', version: 2 },
       { key: 'order-detail', version: 2 },
       { key: 'claims', version: 1 },
-      { key: 'claim-detail', version: 1 },
+      { key: 'claim-detail', version: 2 },
       { key: 'stocks', version: 1 },
       { key: 'stock-detail', version: 1 },
       { key: 'size-charts', version: 1 },
