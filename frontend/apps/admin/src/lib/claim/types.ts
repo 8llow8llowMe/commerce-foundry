@@ -11,17 +11,32 @@ export const adminClaimPath = (claimId: string) =>
   `${ADMIN_CLAIMS_PATH}/${encodeURIComponent(claimId)}`;
 export const adminClaimRetryPath = (claimId: string) => `${adminClaimPath(claimId)}/retries`;
 
-/** 서버 `ClaimAdminFilter.Type` — 목록 조건에만 쓴다. 지금은 반품만 받는다(다른 값은 400) */
-export const CLAIM_TYPES = ['RETURN'] as const;
+/** 서버 `ClaimAdminFilter.Type` — 목록 조건에만 쓴다(다른 값은 400). 취소는 결제 뒤 출고 전 주문의 취소 클레임이다 */
+export const CLAIM_TYPES = ['RETURN', 'CANCELLATION'] as const;
 export type ClaimTypeCode = (typeof CLAIM_TYPES)[number];
 
-/** 서버 `ClaimAdminFilter.Status` — 목록 조건에만 쓴다. 지금은 접수만 받는다(다른 값은 400) */
-export const CLAIM_STATUSES = ['REQUESTED'] as const;
+/** 서버 `ClaimAdminFilter.Status` — 목록 조건에만 쓴다(다른 값은 400). 실패 둘은 운영자 확인이 필요한 상태다 */
+export const CLAIM_STATUSES = [
+  'REQUESTED',
+  'REFUNDED',
+  'COMPLETED',
+  'REFUND_FAILED',
+  'RESTORATION_FAILED',
+] as const;
 export type ClaimStatusCode = (typeof CLAIM_STATUSES)[number];
 
 /** 조건 고르기용 이름 — 서버 `Claim.Type` · `Claim.Status` displayName 과 같다. 응답에 온 값은 응답의 `name` 을 그대로 보인다 */
-export const CLAIM_TYPE_LABELS: Record<ClaimTypeCode, string> = { RETURN: '반품' };
-export const CLAIM_STATUS_LABELS: Record<ClaimStatusCode, string> = { REQUESTED: '접수' };
+export const CLAIM_TYPE_LABELS: Record<ClaimTypeCode, string> = {
+  RETURN: '반품',
+  CANCELLATION: '취소',
+};
+export const CLAIM_STATUS_LABELS: Record<ClaimStatusCode, string> = {
+  REQUESTED: '접수',
+  REFUNDED: '환불 완료',
+  COMPLETED: '완료',
+  REFUND_FAILED: '환불 실패',
+  RESTORATION_FAILED: '재고 복원 실패',
+};
 
 /** `ClaimAdminItem`. 시각은 UTC ISO 다 */
 export type ClaimListItem = {

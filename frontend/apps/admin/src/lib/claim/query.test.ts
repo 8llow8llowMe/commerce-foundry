@@ -19,9 +19,21 @@ describe('parseClaimQuery', () => {
     ).toEqual({ type: 'RETURN', status: 'REQUESTED', orderId: '42', page: 3 });
   });
 
-  it('서버가 아직 받지 않는 유형 · 상태, 잘못된 주문 아이디 · 페이지는 전체(기본값)다', () => {
+  it('결제 후 취소 · 실패 상태도 받는다(BE #17 ClaimAdminFilter)', () => {
+    expect(parseClaimQuery({ type: 'CANCELLATION', status: 'REFUND_FAILED' })).toEqual({
+      ...DEFAULT_QUERY,
+      type: 'CANCELLATION',
+      status: 'REFUND_FAILED',
+    });
+    expect(parseClaimQuery({ status: 'RESTORATION_FAILED' }).status).toBe('RESTORATION_FAILED');
+    expect(claimsApiPath({ ...DEFAULT_QUERY, type: 'CANCELLATION', status: 'REFUND_FAILED' })).toBe(
+      '/api/v1/admin/claims?type=CANCELLATION&status=REFUND_FAILED&page=0&size=20',
+    );
+  });
+
+  it('서버가 받지 않는 유형 · 상태, 잘못된 주문 아이디 · 페이지는 전체(기본값)다', () => {
     expect(
-      parseClaimQuery({ type: 'CANCEL', status: 'REFUND_FAILED', orderId: '0', page: '-1' }),
+      parseClaimQuery({ type: 'CANCEL', status: 'refund_failed', orderId: '0', page: '-1' }),
     ).toEqual(DEFAULT_QUERY);
     expect(parseClaimQuery({ orderId: '9223372036854775808' }).orderId).toBeNull();
     expect(parseClaimQuery({ page: '1234567' }).page).toBe(0);
