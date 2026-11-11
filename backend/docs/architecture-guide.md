@@ -179,6 +179,8 @@ Info → Presenter → Response
   쪽이 커넥션을 하나 더 잡고, 읽는 순서 자체가 정합성 규칙이면 한 트랜잭션으로 묶을 이유도 없다 (예: order `OrderProcessor#heldQuantitiesByProduct`, #436).
 - **단일 프로필의 버전 비교·저장 결과를 감사할 때** 는 진입 Facade에 트랜잭션을 걸지 않고 저장소 adapter의 한 트랜잭션에서 조회·버전 비교·flush를 끝낸다
   (operations `StoreProfileAdminFacade`, #566). 커밋 또는 충돌 롤백이 확정된 뒤 Facade가 성공·실패 감사를 기록하며, 경합을 재시도하지 않고 409로 반환한다.
+- **sizechart 이미지 후보·확인·승인 재검증(#217)** 은 오브젝트 스토리지 읽기가 섞여 `SizeChartDraftFacade` 를 `NOT_SUPPORTED` 로 두고,
+  상품 · 이미지는 product 의 짧은 readOnly 읽기 Processor(`ProductLookupProcessor` · `ProductImageLookupProcessor`)로 받은 뒤 트랜잭션 밖에서 바이트를 읽는다.
 
 ### Processor
 
@@ -226,7 +228,7 @@ Info → Presenter → Response
 - 그 밖(UseCase · Facade · Presenter · Info · Port · Adapter · Mapper · Entity · Repository · Q 타입)은 쓰지 않는다.
   다른 컨텍스트의 포트 · 리포지토리를 직접 부르면 그 컨텍스트의 조회 규칙(숨김 · 정렬 · 캐시)을 비켜 간다.
 - domain 은 다른 컨텍스트 domain 을 필드로 갖지 않고 아이디로만 가리킨다 (예: `Product.categoryId`).
-- 의존은 한 방향으로만 둔다 (지금 product → category, cart → catalog, order → catalog, skucost → product, 어드민 쓰기 컨텍스트 → adminaudit). adminaudit 는 어느 컨텍스트에도 의존하지 않는 가로 컨텍스트다(application 만 — `security-guide.md` §11-4). 역방향이 필요해지면 컨텍스트 경계를 다시 정한다.
+- 의존은 한 방향으로만 둔다 (지금 product → category, cart → catalog, order → catalog, skucost → product, sizechart → product, 어드민 쓰기 컨텍스트 → adminaudit). adminaudit 는 어느 컨텍스트에도 의존하지 않는 가로 컨텍스트다(application 만 — `security-guide.md` §11-4). 역방향이 필요해지면 컨텍스트 경계를 다시 정한다.
 - 트랜잭션은 호출한 Facade 가 건다.
 - 다른 컨텍스트 Processor 가 던진 도메인 예외는 같은 서비스 · 같은 코드 접두어(예: auth 의 `AUTH_`)면 번역하지 않고 그대로 올린다 —
   예: auth 배송지 Facade 가 부르는 `MemberLockProcessor` 의 `AUTH_003`(회원 없음)은 그 컨텍스트의 advice 가 봉투로 만든다 (#7).

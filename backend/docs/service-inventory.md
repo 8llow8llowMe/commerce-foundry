@@ -31,6 +31,8 @@ payment-service #591은 기본 OFF 재대조와 DB 거절 재시도를 제공한
 #217 TEXT 단계에서 product-service의 `sizechart` 컨텍스트는 생성 입력·템플릿 스냅숏, 7일 초안 보관·정리, 관리자 검토·revision 조건부 적용과
 `/api/v1/admin/size-chart-drafts/**`를 소유한다. operations-service의 `sizechartgeneration` 컨텍스트는 draft ID별 영구 등록 영수증,
 `SIZE_CHART_GENERATION` JobHandler·AI 호출·확정 결과를 소유하고 기존 job 완료 알림을 재사용한다.
+IMAGE 입력(플래그 `size-chart.draft.image-enabled`, 기본 닫힘)은 product가 관리 키 상품 이미지의 후보·확인·해시 재검증과
+internal 이미지 바이트 읽기(`generation-images/{index}`)를 소유한다. 외부 주소는 내려받지 않는다.
 양 서비스의 기능 전용 internal API와 허용 호출자는 `security-guide.md` §9-4, API·복구 계약은 [ai-size-chart-guide.md](ai-size-chart-guide.md)다.
 이미지·일괄 이관은 후속 범위이며 두 서비스 모두 무승인 이미지 AI 전송을 허용하지 않는다.
 
