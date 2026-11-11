@@ -2,13 +2,14 @@ import type { Money } from '@cf/api-client';
 import type { CodeName } from '@/lib/product/detail';
 
 /**
- * 어드민 클레임 조회 API(#17 · BE PR #574, order-service `ClaimAdminController`). 읽기 전용이다 —
- * 승인 · 거절 · 환불 실행 · 환불 실패 재시도는 아직 API 가 없다(BE #17 잔여) — 화면에도 자리를 두지 않는다.
- * BFF 는 범용 프록시(`app/api/[...path]`)가 그대로 넘긴다.
+ * 어드민 클레임 API(#17 · BE PR #574 · #680 · #686, order-service `ClaimAdminController`) — 목록 · 상세 조회와
+ * 결제 후 취소 "다시 시도"(`POST {claimId}/retries`). 승인 · 거절 · 수동 환불 확정은 아직 API 가 없다(BE #17 잔여) —
+ * 화면에도 자리를 두지 않는다. BFF 는 범용 프록시(`app/api/[...path]`)가 그대로 넘긴다.
  */
 export const ADMIN_CLAIMS_PATH = '/api/v1/admin/claims';
 export const adminClaimPath = (claimId: string) =>
   `${ADMIN_CLAIMS_PATH}/${encodeURIComponent(claimId)}`;
+export const adminClaimRetryPath = (claimId: string) => `${adminClaimPath(claimId)}/retries`;
 
 /** 서버 `ClaimAdminFilter.Type` — 목록 조건에만 쓴다. 지금은 반품만 받는다(다른 값은 400) */
 export const CLAIM_TYPES = ['RETURN'] as const;
@@ -43,5 +44,19 @@ export type ClaimLine = {
   reason: CodeName;
 };
 
-/** `ClaimAdminResponse` — 항목은 주문 항목 아이디 오름차순 */
-export type ClaimDetail = ClaimListItem & { items: ClaimLine[] };
+/**
+ * `ClaimAdminRecoveryItem` — 결제 후 취소 처리 상황(#17 A2b). 다시 시도할 수 있는지의 정본은 서버의 `retryable` 이다 —
+ * 결제사 거절 환불(`REFUND_REJECTED`) · 결제 취소 키 기한(접수 + 14일)이 lease 안에 끝나는 건은 서버가 false 로 준다.
+ */
+export type ClaimRecovery = {
+  /** NO_ACTION · AUTO_PROCESSING · REFUND_UNCONFIRMED · REFUND_REJECTED · RESTORATION_UNCONFIRMED · RESTORATION_REJECTED · ORDER_STATUS_MISMATCH. name · description 을 그대로 보인다 */
+  situation: CodeName;
+  /** 자동 처리가 다시 확인할 시각(UTC ISO). 자동 처리 중이 아니면 null */
+  nextAutomaticAttemptAt: string | null;
+  retryable: boolean;
+  /** 화면 버전 — 다시 시도 본문의 `expectedVersion` 으로 그대로 보낸다(멱등 키 대신 낙관적 버전으로 겹친 요청을 막는다) */
+  version: number;
+};
+
+/** `ClaimAdminResponse` — 항목은 주문 항목 아이디 오름차순. 다시 시도 응답도 같은 모양(현재 상세)이다 */
+export type ClaimDetail = ClaimListItem & { items: ClaimLine[]; recovery: ClaimRecovery };

@@ -5,6 +5,7 @@ import type { ClaimDetail, ClaimListItem } from '@/lib/claim/types';
 import { ClaimDetailView } from './ClaimDetailView';
 import { ClaimFilters } from './ClaimFilters';
 import { ClaimList } from './ClaimList';
+import { ClaimRecovery } from './ClaimRecovery';
 import { ClaimTable } from './ClaimTable';
 import { OrderClaimsBody } from './OrderClaims';
 
@@ -29,6 +30,12 @@ const detail = (overrides: Partial<ClaimDetail> = {}): ClaimDetail => ({
       reason: { code: 'DEFECTIVE', name: '상품 불량', description: '불량 설명' },
     },
   ],
+  recovery: {
+    situation: { code: 'NO_ACTION', name: '처리할 일 없음', description: '없음 설명' },
+    nextAutomaticAttemptAt: null,
+    retryable: false,
+    version: 0,
+  },
   ...overrides,
 });
 
@@ -128,5 +135,65 @@ describe('OrderClaimsBody', () => {
         <OrderClaimsBody orderId="1" loaded={{ orderId: '1', kind: 'failed' }} />,
       ),
     ).toContain('불러오지 못했습니다');
+  });
+});
+
+describe('ClaimRecovery', () => {
+  const cancellation = (recovery: Partial<ClaimDetail['recovery']>) =>
+    detail({
+      type: { code: 'CANCELLATION', name: '결제 후 취소', description: '' },
+      status: { code: 'REFUND_FAILED', name: '환불 실패', description: '' },
+      requestedAt: '2026-11-01T00:00:00Z',
+      recovery: {
+        situation: { code: 'REFUND_UNCONFIRMED', name: '환불 미확정', description: '확인 필요' },
+        nextAutomaticAttemptAt: null,
+        retryable: true,
+        version: 3,
+        ...recovery,
+      },
+    });
+  const render = (claim: ClaimDetail) =>
+    renderToStaticMarkup(
+      <ClaimRecovery
+        claim={claim}
+        onUpdated={vi.fn()}
+        onReload={vi.fn()}
+        now={Date.parse('2026-11-10T00:00:00Z')}
+      />,
+    );
+
+  it('반품 접수에는 그리지 않는다', () => {
+    expect(render(detail())).toBe('');
+  });
+
+  it('처리 상황 name · description, 결제 취소 기한 · 남은 시간, 다시 시도 버튼을 보인다', () => {
+    const html = render(cancellation({}));
+    expect(html).toContain('환불 미확정');
+    expect(html).toContain('확인 필요');
+    expect(html).toContain('결제 취소 기한');
+    expect(html).toContain('5일 남음');
+    expect(html).toContain('할 수 있습니다');
+    expect(html).toContain('>다시 시도</button>');
+  });
+
+  it('다시 시도할 수 없으면 버튼을 두지 않고, 자동 처리 중이면 다음 확인 시각을 보인다', () => {
+    const rejected = render(
+      cancellation({
+        situation: { code: 'REFUND_REJECTED', name: '환불 거절', description: '' },
+        retryable: false,
+      }),
+    );
+    expect(rejected).toContain('할 수 없습니다');
+    expect(rejected).not.toContain('>다시 시도</button>');
+    expect(rejected).not.toContain('결제 취소 기한');
+
+    const auto = render(
+      cancellation({
+        situation: { code: 'AUTO_PROCESSING', name: '자동 처리 중', description: '' },
+        nextAutomaticAttemptAt: '2026-11-10T01:00:00Z',
+        retryable: false,
+      }),
+    );
+    expect(auto).toContain('다음 자동 확인');
   });
 });
