@@ -11,14 +11,15 @@ import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 /**
- * 초안 근거 이미지. 주소는 스토어 미디어 저장소의 공개 주소 아래만 받는다 — 판정은 서버 설정을 봐야 해서 Processor 가 한다({@code PRODUCT_DRAFT_030} · {@code 032}).
- * 업로드 키(#9 이미지 업로드)는 그 API 가 생긴 뒤 받는다.
+ * 초안 근거 이미지. 주소는 미디어 업로드 확정(#9)이 돌려준 상품 미디어 공개 주소({@code products/media/**})만 받는다 — 판정은 서버 설정 · 저장소를 봐야 해서
+ * Processor 가 한다({@code PRODUCT_DRAFT_030} · {@code 031} · {@code 032} · {@code 033} · {@code 036} · {@code 501}). 상품 이미지 아이디 입력은 받지 않는다(#359 D10).
  */
 @Builder
 @Schema(description = "초안 근거 이미지")
 public record ProductDraftImageRequest(
 
-    @Schema(description = "이미지 주소 (500자 이하) — 스토어 미디어 저장소의 공개 주소 아래여야 한다", example = "https://cdn.example.com/media/drafts/a.jpg")
+    @Schema(description = "이미지 주소 (500자 이하) — 미디어 업로드 확정이 돌려준 공개 주소(products/media/...)여야 한다. JPEG · PNG · WebP, 5MB 이하",
+        example = "https://cdn.example.com/products/media/7/0f8fad5b-d9cb-469f-a165-70867728950e/3b1f...e9.jpg")
     @NotBlank(message = ProductDraftValidationMessage.IMAGE_URL_REQUIRED)
     @Size(max = 500, message = ProductDraftValidationMessage.IMAGE_URL_SIZE_MAX)
     String url,

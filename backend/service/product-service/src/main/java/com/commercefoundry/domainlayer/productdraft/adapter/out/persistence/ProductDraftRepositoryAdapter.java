@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.productdraft.application.port.out.Product
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftFacts;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImage;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageSource;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageType;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -115,14 +116,32 @@ public class ProductDraftRepositoryAdapter implements ProductDraftRepositoryPort
         }
     }
 
-    record ImageDocument(String url, ProductDraftImageType imageType, Integer width, Integer height) {
+    /** @param source 고정한 원본(#359 PR-2a). 그 전에 저장한 초안에는 칸이 없어 null 이다 — 생성 internal 이 "입력 불가"({@code 043})로 거절한다 */
+    record ImageDocument(String url, ProductDraftImageType imageType, Integer width, Integer height, SourceDocument source) {
 
         static ImageDocument of(ProductDraftImage image) {
-            return new ImageDocument(image.url(), image.imageType(), image.width(), image.height());
+            return new ImageDocument(image.url(), image.imageType(), image.width(), image.height(), SourceDocument.of(image.source()));
         }
 
         ProductDraftImage toDomain() {
-            return new ProductDraftImage(url, imageType, width, height);
+            return new ProductDraftImage(url, imageType, width, height, source == null ? null : source.toDomain());
+        }
+    }
+
+    /** 고정한 원본의 저장 모양. 이름은 Jackson 접근자 규칙에 흔들리지 않게 소문자 한 단어로 쓴다({@code etag}). */
+    record SourceDocument(String key, String etag, long length, String contentType) {
+
+        static SourceDocument of(ProductDraftImageSource source) {
+            return source == null ? null : new SourceDocument(source.key(), source.eTag(), source.length(), source.contentType());
+        }
+
+        ProductDraftImageSource toDomain() {
+            return new ProductDraftImageSource(key, etag, length, contentType);
+        }
+
+        @Override
+        public String toString() {
+            return "SourceDocument[redacted]";
         }
     }
 }
