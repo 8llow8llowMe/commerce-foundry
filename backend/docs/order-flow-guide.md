@@ -923,9 +923,11 @@ DB 불가 중 주문 기록의 즉시 보존·자동 무손실 복구를 보장�
 기존 생성자는 결정 없이 동작하며 저장 반환·재조회·기존 후속 전이는 결정을 유지한다. 누적 감사 이력은 후속 구현 범위다.
 
 `ClaimAdminRecoveryPolicy`는 상태를 바꾸지 않는 신규 실행 자격 검사다. 저장된 취소만 대상으로 활성 lease(`next_attempt_at > now`)와
-`ORDER_STATUS_UNEXPECTED` 재시도를 막는다. 환불 수동 확정 대상은 `REFUND_FAILED`뿐이다. 수동 종결 대상은 같은 저장 주문이 `CANCELED`이고
-클레임이 `RESTORATION_FAILED`이며 코드가 `PRODUCT_027/028/029/003`, `RESTORATION_DATA_INVALID`, `ORDER_STATUS_UNEXPECTED` 중 하나일 때뿐이다.
-`RESTORATION_UNCONFIRMED`·알 수 없는 코드는 수동 종결할 수 없다. `PAYMENT_016/017/019`만으로 무환불을 확정하거나 거절을 허용하지 않는다.
+`ORDER_STATUS_UNEXPECTED` 재시도를 막는다. 환불 수동 확정 대상은 같은 저장 주문이 `CANCEL_REQUESTED` · `CANCELED` 인 `REFUND_FAILED` 중 결제사 거절이거나,
+다시 시도가 결제 취소 키 기한으로 닫힌 결과 미확인(`REFUND_UNCONFIRMED`)뿐이다(#17 A3). 수동 종결 대상은 같은 저장 주문이 `CANCELED`이고
+클레임이 `RESTORATION_FAILED`이며 코드가 `PRODUCT_027/028/029/003`, `RESTORATION_DATA_INVALID` 중 하나일 때뿐이다.
+`RESTORATION_UNCONFIRMED`·알 수 없는 코드는 수동 종결할 수 없다. `ORDER_STATUS_UNEXPECTED` 도 종결 후보에서 뺐다(#17 A3) — 주문이 `CANCELED` 로 갈 경로가 없어
+버튼만 보이고 늘 409 였다. 그 건의 수습 경로는 #695 다. `PAYMENT_016/017/019`만으로 무환불을 확정하거나 거절을 허용하지 않는다.
 정책은 이미 처리됨의 멱등 성공 판정기가 아니므로 `COMPLETED`도 신규 실행 자격이 없다.
 
 A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변경·PG/재고 호출 연결이 없다. A2에서 기능권한·원천 증거·현재 주문 상태·결정 감사와
@@ -950,8 +952,8 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
   | `REQUESTED` | 환불 대기 | 환불 200 → `REFUNDED`(+ 주문 `CANCELED`), 종결 거절 → `REFUND_FAILED`(원격 코드), 미확정 → 백오프 재시도. 환불 200 인데 주문이 취소 요청 · 취소 완료가 아니면(데이터 이상) 복원 없이 `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`) |
   | `REFUNDED` | 환불 확정, 재고 복원 대기 | 복원 200 → `COMPLETED`, 종결 409 → `RESTORATION_FAILED`(`PRODUCT_027/028/029/003` — 원격 코드, 환불의 `PAYMENT_*` 와 같은 방식), 클레임 항목이 주문 스냅숏과 안 맞으면 `RESTORATION_DATA_INVALID`, 그 밖 → 백오프 재시도 |
   | `COMPLETED` | 끝 | — |
-  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다. 어드민 다시 시도(#17 A2b) → `REQUESTED` |
-  | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 `CANCELED`(`ORDER_STATUS_UNEXPECTED` 면 그 상태 그대로) | 어드민 다시 시도(#17 A2b) → `REFUNDED`. `ORDER_STATUS_UNEXPECTED` 는 다시 시도하지 않는다 |
+  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다. 어드민 다시 시도(#17 A2b, 기한 안의 `REFUND_UNCONFIRMED` 만) → `REQUESTED`. 대표의 수동 환불 확정(#17 A3, 결제사 거절 · 기한이 지난 `REFUND_UNCONFIRMED`) → `REFUNDED`(+ 주문 `CANCELED`, PG 호출 없음) |
+  | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 `CANCELED`(`ORDER_STATUS_UNEXPECTED` 면 그 상태 그대로) | 어드민 다시 시도(#17 A2b) → `REFUNDED`. `ORDER_STATUS_UNEXPECTED` 는 다시 시도 · 종결하지 않는다(수습 경로는 #695). 대표의 복원 생략 종결(#17 A3, 확정 실패 코드 + 주문 `CANCELED`) → `COMPLETED` |
 
   - **종결 실패 수습** — 종결 실패를 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를 error 로그로 남기고(금액 제외), 운영자는 어드민 클레임 목록
     (`GET /api/v1/admin/claims?status=`)으로 `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인한다. 상세의 `recovery.situation` 이 업무 언어로 원인을 보인다.
@@ -966,7 +968,31 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
     lease 안(자동 처리 중)은 409 `ORDER_039`, 버전 불일치 · 저장 경합은 409 `ORDER_037` 이라 스케줄러 · 고객 · 다른 운영자와 겹쳐도 원격은 한 번만 나간다.
     재시도 스케줄러가 꺼져 있으면 503 `ORDER_040` 이다(다시 연 뒤 미확정을 따라갈 쪽이 없다). 원격 단계가 반영 없이 끊기면 스케줄러처럼 미확정 한 번으로 센다.
     다시 시도는 무환불을 확정하지 않는다. CAS 경합(저장 직전에 멈춘 쪽이 다른 운영자 · 스케줄러의 커밋 뒤 지는 경로)은 `ClaimAdminRetryWebIntegrationTest` 가 래치로 직접 만든다.
-    수동 환불 확정 · 복원 생략 종결(A3) · 취소 거절(A4)은 후속이다.
+    취소 거절(A4)은 후속이다.
+  - **수동 환불 확정 (#17 A3, `POST /api/v1/admin/claims/{claimId}/refund-confirmation`, `SETTLEMENT_MANAGE` — 대표만)** — 대표가 PG · 결제 관리 화면에서 환불을
+    확인한 `REFUND_FAILED` 를 `ClaimAdminRecoveryProcessor.confirmRefund` 가 한 트랜잭션에서 바꾼다 — 화면 버전 대조 → 주문 조회 →
+    `ClaimAdminRecoveryPolicy.requireRefundConfirmation(claim, order, refundRetryClosed)`(같은 저장 주문 · 주문 `CANCEL_REQUESTED`|`CANCELED` · 결제사 거절이거나
+    다시 시도가 기한으로 닫힌 결과 미확인 — 기한 판정은 다시 시도의 038 과 같은 `isRefundRetryClosed`) → `Claim#confirmRefundByAdmin`(→ `REFUNDED`, 횟수 0,
+    다음 시각 `now + lease`, 실패 코드는 비우고 직전 실패 코드 · 사유 · 결정자 · 시각은 `decision` 칸에) → 주문이 `CANCEL_REQUESTED` 면 `Order#completeCancellation`
+    (허용 전이 표 그대로) + `ADMIN` 이력(사유), 이미 `CANCELED` 면 클레임만. 자격이 없으면 저장 전에 409 `ORDER_041` 이다. Processor 의 저장 분기는 자동 환불 확정 반영
+    `OrderCancellationProcessor#applyRefunded` 와 같다(이력만 `SERVICE` 대신 `ADMIN` · 사유). 클레임 · 주문 저장은 한 트랜잭션이라 주문 저장이 낙관락에서 지면
+    클레임 확정 · 결정도 함께 롤백된다(`ClaimAdminDecisionWebIntegrationTest`). PG 는 부르지 않는다. 커밋 뒤 Facade 가 트랜잭션 밖에서 다시 시도와 같은
+    `progress` 로 재고 복원을 잇고, 끊기면 미확정 한 번으로 세 스케줄러에 넘긴다 — 그래서 스케줄러가 꺼져 있으면 503 `ORDER_040` 이다.
+  - **복원 생략 종결 (#17 A3, `POST /api/v1/admin/claims/{claimId}/completion`, `SETTLEMENT_MANAGE`)** — `ClaimAdminRecoveryPolicy.requireCompletion`(A1 자격 —
+    같은 저장 주문 `CANCELED` + `RESTORATION_FAILED` + 확정 실패 코드)을 통과한 클레임만 `Claim#completeByAdmin` 으로 `COMPLETED` 로 닫는다. 재고는 운영자가
+    재고 조정으로 먼저 맞춘다 — 그 전에 product 의 복원 기록을 확인한다(`PRODUCT_029` 는 같은 선점에 다른 복원 기록이 이미 있다는 뜻이라 재고가 돌아갔을 수 있다).
+    원격 · 주문 변경이 없다. `RESTORATION_UNCONFIRMED` 는 실제로 복원됐을 수 있어 종결하지 않는다(다시 시도로 확인). `ORDER_STATUS_UNEXPECTED` 는 후보가 아니다(#695).
+  - **상세 버튼 (#17 A3)** — `retryable` · `refundConfirmable` · `completable` 은 모두 `ClaimAdminRecoveryProcessor`(`isRetryable` · `isRefundConfirmable` ·
+    `isCompletable`)가 실행과 같은 클레임 조건으로 판정해 `ClaimAdminDetailInfo.from` 에 넘긴다. 확정 · 종결 판정은 주문을 읽지 않는 정책 후보
+    (`isRefundConfirmationCandidate` · `isCompletionCandidate`)라 주문 상태가 맞지 않으면 실행 때 409 일 수 있다.
+  - **A3 의 경합 · 멱등** — 두 결정 모두 대상이 종결 실패 상태라 자동 처리 lease 가 없다(다음 시각 null). 그래서 다시 시도의 `ORDER_039` 검사는 두지 않고, 늦게 끝난
+    파이프라인 · 다른 운영자의 다시 시도 · 늦은 환불 성공과의 경합은 클레임 · 주문 `@Version` 저장으로 가린다 — 확정이 먼저 커밋되면 늦은 환불 성공 반영은
+    `hasRecordedRefund` 로 복원에 재진입하지 않고, 늦은 쪽이 먼저 커밋되면 운영자 요청이 409 `ORDER_037` 이다. 이미 바뀐 뒤 같은 화면 버전으로 다시 온 요청도 409 `ORDER_037` 이다
+    (헤더 멱등 키 없음). 감사는 `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` 한 줄(성공 · 거절 모두, 사유 원문 제외)이다.
+  - **A3 한계** — 수동 확정은 payment-service 에 알리지 않는다 — 결제 쪽 `payment_cancel` 은 `REJECTED` · `PENDING`, `payment` 는 `DONE` 그대로라 order `REFUNDED` 와
+    장부가 갈라진다(운영 규칙 · 대사 기준은 `payment-guide.md` §8 "order 의 수동 환불 확정과 결제 장부", 정합은 #693). 클레임 결정 칸은 **마지막 결정만 남는다** —
+    확정 뒤 종결하면 확정 사유 · 결정자는 덮인다. 남는 것은 감사 로그(행위 · 관리자 · 시각, 사유 제외)와 주문 이력(확정이 주문을 취소 완료로 바꾼 경우의 사유)뿐이다.
+    결정 누적 원장은 후속 #694 다.
 
   - **트랜잭션 경계** — 접수(tx1) · 환불 결과 반영(tx2) · 복원 결과 반영(tx3)은 각각 짧은 트랜잭션이고 환불 · 복원 호출은 그 사이 트랜잭션 밖이다
     (`OrderCancellationProcessor` · `OrderCancellationPipelineProcessor`). 각 반영은 클레임 · 주문 `@Version` 으로 진 쪽을 가려 조용히 멈춘다(다른 워커가 처리).
