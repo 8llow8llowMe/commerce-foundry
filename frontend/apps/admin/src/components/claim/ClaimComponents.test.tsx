@@ -2,11 +2,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_QUERY } from '@/lib/claim/query';
 import type { ClaimDetail, ClaimListItem } from '@/lib/claim/types';
+import { ClaimDecisions } from './ClaimDecisions';
 import { ClaimDetailView } from './ClaimDetailView';
 import { ClaimFilters } from './ClaimFilters';
 import { ClaimList } from './ClaimList';
 import { ClaimRecovery } from './ClaimRecovery';
-import { ClaimTable } from './ClaimTable';
+import { ClaimTable, formatClaimTime } from './ClaimTable';
 import { OrderClaimsBody } from './OrderClaims';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -34,6 +35,9 @@ const detail = (overrides: Partial<ClaimDetail> = {}): ClaimDetail => ({
     situation: { code: 'NO_ACTION', name: '처리할 일 없음', description: '없음 설명' },
     nextAutomaticAttemptAt: null,
     retryable: false,
+    refundConfirmable: false,
+    completable: false,
+    lastDecision: null,
     version: 0,
   },
   ...overrides,
@@ -83,7 +87,7 @@ describe('ClaimDetailView', () => {
     expect(html).not.toContain('<button');
   });
 
-  it('투어(#228 claim-detail-v1)의 필수 앵커 — 접수 내용 · 접수 항목 — 를 단다', () => {
+  it('투어(#228 claim-detail-v2)의 필수 앵커 — 접수 내용 · 접수 항목 — 를 단다', () => {
     const html = renderToStaticMarkup(<ClaimDetailView claim={detail()} />);
     expect(html).toContain('data-tour="claim-summary"');
     expect(html).toContain('data-tour="claim-items"');
@@ -154,6 +158,9 @@ describe('ClaimRecovery', () => {
         situation: { code: 'REFUND_UNCONFIRMED', name: '환불 미확정', description: '확인 필요' },
         nextAutomaticAttemptAt: null,
         retryable: true,
+        refundConfirmable: false,
+        completable: false,
+        lastDecision: null,
         version: 3,
         ...recovery,
       },
@@ -180,7 +187,7 @@ describe('ClaimRecovery', () => {
     expect(html).toContain('5일 남음');
     expect(html).toContain('할 수 있습니다');
     expect(html).toContain('>다시 시도</button>');
-    // 투어(#228 claim-detail-v1)의 선택 앵커 — 처리 상황 칸과 다시 시도 버튼
+    // 투어(#228 claim-detail-v2)의 선택 앵커 — 처리 상황 칸과 다시 시도 버튼
     expect(html).toContain('data-tour="claim-recovery"');
     expect(html).toMatch(/<button[^>]*data-tour="claim-retry"[^>]*>다시 시도<\/button>/);
   });
@@ -207,5 +214,100 @@ describe('ClaimRecovery', () => {
       }),
     );
     expect(auto).toContain('다음 자동 확인');
+  });
+});
+
+describe('ClaimDecisions · 마지막 운영자 결정', () => {
+  const cancellation = (recovery: Partial<ClaimDetail['recovery']>) =>
+    detail({
+      type: { code: 'CANCELLATION', name: '결제 후 취소', description: '' },
+      status: { code: 'REFUND_FAILED', name: '환불 실패', description: '' },
+      recovery: {
+        situation: { code: 'REFUND_REJECTED', name: '환불 거절', description: '' },
+        nextAutomaticAttemptAt: null,
+        retryable: false,
+        refundConfirmable: false,
+        completable: false,
+        lastDecision: null,
+        version: 4,
+        ...recovery,
+      },
+    });
+  const decisions = (claim: ClaimDetail, canSettle: boolean | null) =>
+    renderToStaticMarkup(
+      <ClaimDecisions claim={claim} canSettle={canSettle} onUpdated={vi.fn()} onReload={vi.fn()} />,
+    );
+
+  it('대표 관리자에게 서버 플래그가 true 인 버튼만 보인다', () => {
+    const confirmable = decisions(cancellation({ refundConfirmable: true }), true);
+    expect(confirmable).toContain('>환불 완료로 확정</button>');
+    expect(confirmable).not.toContain('재고 복원 없이 종결');
+    expect(confirmable).toContain('data-tour="claim-decisions"');
+
+    const completable = decisions(
+      cancellation({
+        situation: { code: 'RESTORATION_REJECTED', name: '복원 거절', description: '' },
+        completable: true,
+      }),
+      true,
+    );
+    expect(completable).toContain('>재고 복원 없이 종결</button>');
+    expect(completable).not.toContain('환불 완료로 확정');
+  });
+
+  it('플래그가 모두 false 면 그리지 않는다', () => {
+    expect(decisions(cancellation({}), true)).toBe('');
+    expect(decisions(cancellation({}), false)).toBe('');
+  });
+
+  it('대표가 아니면(MANAGER · STAFF) 버튼 대신 대표 관리자만 할 수 있다고 안내한다', () => {
+    const html = decisions(cancellation({ refundConfirmable: true, completable: true }), false);
+    expect(html).not.toContain('</button>');
+    expect(html).toContain('대표 관리자만 할 수 있습니다');
+  });
+
+  it('역할을 모르면(null) 숨기지 않고 서버 403 안내에 맡긴다', () => {
+    expect(decisions(cancellation({ refundConfirmable: true }), null)).toContain(
+      '>환불 완료로 확정</button>',
+    );
+  });
+
+  it('반품 접수에는 그리지 않는다', () => {
+    expect(
+      decisions(
+        detail({
+          recovery: { ...detail().recovery, refundConfirmable: true, completable: true },
+        }),
+        true,
+      ),
+    ).toBe('');
+  });
+
+  it('처리 상황 칸 안에 결정 버튼과 마지막 운영자 결정(사유 · 시각)을 보인다', () => {
+    const html = renderToStaticMarkup(
+      <ClaimRecovery
+        claim={cancellation({
+          refundConfirmable: true,
+          lastDecision: {
+            reason: '결제 관리 화면에서 취소 완료 확인',
+            decidedAt: '2026-11-10T03:00:00Z',
+          },
+        })}
+        canSettle
+        onUpdated={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    );
+    expect(html).toContain('마지막 운영자 결정');
+    expect(html).toContain('결제 관리 화면에서 취소 완료 확인');
+    expect(html).toContain(formatClaimTime('2026-11-10T03:00:00Z'));
+    expect(html).toContain('>환불 완료로 확정</button>');
+  });
+
+  it('마지막 결정이 없으면 그 줄을 두지 않는다', () => {
+    const html = renderToStaticMarkup(
+      <ClaimRecovery claim={cancellation({})} onUpdated={vi.fn()} onReload={vi.fn()} />,
+    );
+    expect(html).not.toContain('마지막 운영자 결정');
   });
 });

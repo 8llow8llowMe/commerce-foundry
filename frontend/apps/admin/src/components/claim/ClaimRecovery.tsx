@@ -7,22 +7,26 @@ import { AccessNotice } from '@/components/AccessNotice';
 import type { AccessDenied } from '@/lib/api-errors';
 import { refundDeadlineOf, RETRY_SENT, retryFailure } from '@/lib/claim/retry';
 import { adminClaimRetryPath, type ClaimDetail } from '@/lib/claim/types';
+import { ClaimDecisions } from './ClaimDecisions';
 import { formatClaimTime } from './ClaimTable';
 
 type Notice = { tone: 'info' | 'error'; message: string };
 
 /**
- * 결제 후 취소 처리 상황 + "다시 시도"(#30 · BE #17 A2b). 반품 접수에는 그리지 않는다(다시 시도 대상이 아니다).
+ * 결제 후 취소 처리 상황 + "다시 시도"(#30 · BE #17 A2b) + 운영자 확정 · 종결(`ClaimDecisions`, #17 A3). 반품 접수에는 그리지 않는다(대상이 아니다).
  * 버튼은 서버 `retryable` 일 때만 두고, 한 번 더 확인한 뒤 보낸다. 보내는 중에는 다시 누를 수 없다.
  * 성공 · 실패 문구는 이 칸에 둔다 — 상세를 다시 읽어도 이 칸은 그대로라 문구가 남는다.
  */
 export function ClaimRecovery({
   claim,
+  canSettle = null,
   onUpdated,
   onReload,
   now,
 }: {
   claim: ClaimDetail;
+  /** 정산 쓰기 권한(`canManageSettlement`) — 확정 · 종결 버튼을 거른다. null(모름)이면 숨기지 않는다 */
+  canSettle?: boolean | null;
   /** 다시 시도 응답(현재 상세)으로 화면을 바꾼다 */
   onUpdated: (claim: ClaimDetail) => void;
   /** 서버 상태가 화면과 다를 수 있을 때 상세를 다시 읽는다(화면은 그대로 둔 채) */
@@ -127,6 +131,15 @@ export function ClaimRecovery({
         )}
         <dt className="text-muted-fg">다시 시도</dt>
         <dd>{recovery.retryable ? '할 수 있습니다' : '할 수 없습니다'}</dd>
+        {recovery.lastDecision && (
+          <>
+            <dt className="text-muted-fg">마지막 운영자 결정</dt>
+            <dd>
+              <p className="break-words">{recovery.lastDecision.reason}</p>
+              <p className="text-muted-fg">{formatClaimTime(recovery.lastDecision.decidedAt)}</p>
+            </dd>
+          </>
+        )}
       </dl>
 
       {recovery.retryable &&
@@ -182,6 +195,13 @@ export function ClaimRecovery({
         </p>
       )}
       {denied && <AccessNotice denied={denied} />}
+
+      <ClaimDecisions
+        claim={claim}
+        canSettle={canSettle}
+        onUpdated={onUpdated}
+        onReload={onReload}
+      />
     </section>
   );
 }

@@ -2,14 +2,21 @@ import type { Money } from '@cf/api-client';
 import type { CodeName } from '@/lib/product/detail';
 
 /**
- * 어드민 클레임 API(#17 · BE PR #574 · #680 · #686, order-service `ClaimAdminController`) — 목록 · 상세 조회와
- * 결제 후 취소 "다시 시도"(`POST {claimId}/retries`). 승인 · 거절 · 수동 환불 확정은 아직 API 가 없다(BE #17 잔여) —
+ * 어드민 클레임 API(#17 · BE PR #574 · #680 · #686 · #696, order-service `ClaimAdminController`) — 목록 · 상세 조회,
+ * 결제 후 취소 "다시 시도"(`POST {claimId}/retries`), 수동 환불 확정(`POST {claimId}/refund-confirmation`) ·
+ * 재고 복원 없이 종결(`POST {claimId}/completion`). 반품 승인 · 거절 · 취소 거절은 아직 API 가 없다(BE #17 잔여) —
  * 화면에도 자리를 두지 않는다. BFF 는 범용 프록시(`app/api/[...path]`)가 그대로 넘긴다.
  */
 export const ADMIN_CLAIMS_PATH = '/api/v1/admin/claims';
 export const adminClaimPath = (claimId: string) =>
   `${ADMIN_CLAIMS_PATH}/${encodeURIComponent(claimId)}`;
 export const adminClaimRetryPath = (claimId: string) => `${adminClaimPath(claimId)}/retries`;
+/** 수동 환불 확정(#17 A3, SETTLEMENT_MANAGE) — 결제사를 부르지 않고 기록만 한다 */
+export const adminClaimRefundConfirmationPath = (claimId: string) =>
+  `${adminClaimPath(claimId)}/refund-confirmation`;
+/** 재고 복원 없이 종결(#17 A3, SETTLEMENT_MANAGE) — 재고 서비스를 부르지 않고 닫기만 한다 */
+export const adminClaimCompletionPath = (claimId: string) =>
+  `${adminClaimPath(claimId)}/completion`;
 
 /** 서버 `ClaimAdminFilter.Type` — 목록 조건에만 쓴다(다른 값은 400). 취소는 결제 뒤 출고 전 주문의 취소 클레임이다 */
 export const CLAIM_TYPES = ['RETURN', 'CANCELLATION'] as const;
@@ -69,9 +76,26 @@ export type ClaimRecovery = {
   /** 자동 처리가 다시 확인할 시각(UTC ISO). 자동 처리 중이 아니면 null */
   nextAutomaticAttemptAt: string | null;
   retryable: boolean;
-  /** 화면 버전 — 다시 시도 본문의 `expectedVersion` 으로 그대로 보낸다(멱등 키 대신 낙관적 버전으로 겹친 요청을 막는다) */
+  /**
+   * 지금 "환불 완료로 확정" 을 할 수 있는가(#17 A3). 보는 사람의 권한과 무관한 클레임 판정이다 — 화면은 역할로 한 번 더 거른다.
+   * 주문 상태는 실행 때 다시 보므로 true 여도 409 `ORDER_041` 일 수 있다.
+   */
+  refundConfirmable: boolean;
+  /** 지금 "재고 복원 없이 종결" 을 할 수 있는가(#17 A3). `refundConfirmable` 과 같은 규칙이다 */
+  completable: boolean;
+  /** 마지막 운영자 결정(확정 · 종결). 없으면 null. 마지막 결정만 남는다(확정 뒤 종결하면 확정 사유는 덮인다, BE #694) */
+  lastDecision: ClaimDecision | null;
+  /** 화면 버전 — 다시 시도 · 확정 · 종결 본문의 `expectedVersion` 으로 그대로 보낸다(멱등 키 대신 낙관적 버전으로 겹친 요청을 막는다) */
   version: number;
 };
 
-/** `ClaimAdminResponse` — 항목은 주문 항목 아이디 오름차순. 다시 시도 응답도 같은 모양(현재 상세)이다 */
+/** `ClaimAdminRecoveryItem.DecisionItem` — 결정자 아이디는 내려오지 않는다(감사 로그 · 주문 이력에 남는다) */
+export type ClaimDecision = {
+  /** 판단 근거 — plain text 라 React 텍스트로만 보인다 */
+  reason: string;
+  /** 결정 시각(UTC ISO) */
+  decidedAt: string;
+};
+
+/** `ClaimAdminResponse` — 항목은 주문 항목 아이디 오름차순. 다시 시도 · 확정 · 종결 응답도 같은 모양(현재 상세)이다 */
 export type ClaimDetail = ClaimListItem & { items: ClaimLine[]; recovery: ClaimRecovery };

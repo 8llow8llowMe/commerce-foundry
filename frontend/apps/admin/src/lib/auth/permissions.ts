@@ -9,7 +9,7 @@
 export const OPERATOR_ROLES = ['ADMIN', 'OWNER', 'MANAGER', 'STAFF'] as const;
 export type OperatorRole = (typeof OPERATOR_ROLES)[number];
 
-/** 화면 진입을 가르는 조회 권한만 둔다(BE `AdminPermission` 의 `*_READ`). 버튼 단위(`*_MANAGE`)는 아직 쓰지 않는다 */
+/** 화면 진입을 가르는 조회 권한만 둔다(BE `AdminPermission` 의 `*_READ`). 버튼 단위(`*_MANAGE`)는 아래 `canManageSettlement` 하나뿐이다 */
 export type AdminReadPermission =
   | 'CATALOG_READ'
   | 'INVENTORY_READ'
@@ -58,6 +58,15 @@ const GRANTED: Record<OperatorRole, readonly AdminReadPermission[]> = {
  */
 export function permissionsOf(role: OperatorRole | null): readonly AdminReadPermission[] | null {
   return role === null ? null : GRANTED[role];
+}
+
+/**
+ * 정산 쓰기(`SETTLEMENT_MANAGE`) — 클레임 수동 환불 확정 · 재고 복원 없이 종결(#17 A3) 버튼을 거른다. BE `grantedTo` 에서 대표(ADMIN · OWNER)만 갖는다.
+ * 역할을 모르면(null) null — 버튼을 숨기지 않고 서버 403 안내에 맡긴다(`permissionsOf` 와 같은 규칙).
+ */
+export function canManageSettlement(role: OperatorRole | null): boolean | null {
+  if (role === null) return null;
+  return role === 'ADMIN' || role === 'OWNER';
 }
 
 /**
