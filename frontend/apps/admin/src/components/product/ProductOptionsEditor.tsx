@@ -7,6 +7,7 @@ import { AccessNotice } from '@/components/AccessNotice';
 import { GROUP_NAME_MAX, VALUE_NAME_MAX } from '@/lib/product/create';
 import type { AdminProductDetail } from '@/lib/product/detail';
 import {
+  GROUP_NAME_EN_MAX,
   OPTIONS_VALIDATION,
   optionNamesFormOf,
   optionsRequest,
@@ -16,6 +17,7 @@ import {
   sameOptionNames,
   type OptionGroupNameForm,
   type RetireForm,
+  VALUE_NAME_EN_MAX,
 } from '@/lib/product/options';
 import {
   moveSlot,
@@ -104,7 +106,7 @@ function OptionNamesPanel({ product, locked, onDirty, onSaved, onReloaded }: Pan
       description={
         product.optionGroups.length === 0
           ? '옵션이 없는 상품입니다.'
-          : '옵션과 값의 이름 · 고객에게 보이는 순서를 바꿉니다. 옵션 · 값을 더하거나 빼지는 않습니다(값 추가는 아래 "옵션 값 · 조합 추가", 빼기는 "옵션 은퇴").'
+          : '옵션과 값의 이름 · 영문 이름 · 고객에게 보이는 순서를 바꿉니다. 영문 이름은 영문 스토어에 보이고, 비워 두면 한국어 이름이 보입니다. 옵션 · 값을 더하거나 빼지는 않습니다(값 추가는 아래 "옵션 값 · 조합 추가", 빼기는 "옵션 은퇴").'
       }
       unchanged={unchanged}
       locked={locked}
@@ -133,6 +135,14 @@ function OptionNamesPanel({ product, locked, onDirty, onSaved, onReloaded }: Pan
               value={group.name}
               onChange={(event) => patchGroup(index, { name: event.currentTarget.value })}
               errors={section.errorsOf(`optionGroups.${index}.name`)}
+              className="w-64"
+            />
+            <TextField
+              label={`영문 이름 (선택, ${GROUP_NAME_EN_MAX}자 이하)`}
+              lang="en"
+              value={group.nameEn}
+              onChange={(event) => patchGroup(index, { nameEn: event.currentTarget.value })}
+              errors={section.errorsOf(`optionGroups.${index}.nameEn`)}
               className="w-64"
             />
             <button
@@ -165,6 +175,21 @@ function OptionNamesPanel({ product, locked, onDirty, onSaved, onReloaded }: Pan
                     });
                   }}
                   errors={section.errorsOf(`optionGroups.${index}.values.${at}.name`)}
+                  className="w-56"
+                />
+                <TextField
+                  label={`값 ${at + 1} 영문 (선택, ${VALUE_NAME_EN_MAX}자 이하)`}
+                  lang="en"
+                  value={value.nameEn}
+                  onChange={(event) => {
+                    const nameEn = event.currentTarget.value;
+                    patchGroup(index, {
+                      values: group.values.map((item, i) =>
+                        i === at ? { ...item, nameEn } : item,
+                      ),
+                    });
+                  }}
+                  errors={section.errorsOf(`optionGroups.${index}.values.${at}.nameEn`)}
                   className="w-56"
                 />
                 <button

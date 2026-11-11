@@ -25,20 +25,31 @@ export function adminProduct(overrides: Partial<AdminProductDetail> = {}): Admin
       {
         optionGroupId: '201',
         name: '색상',
+        nameEn: 'Color',
         displayOrder: 0,
         retiredAt: null,
-        values: [{ optionValueId: '301', name: '쪽빛', displayOrder: 0, retiredAt: null }],
+        values: [
+          {
+            optionValueId: '301',
+            name: '쪽빛',
+            nameEn: 'Indigo',
+            displayOrder: 0,
+            retiredAt: null,
+          },
+        ],
       },
       {
         optionGroupId: '202',
         name: '사이즈',
+        nameEn: null,
         displayOrder: 1,
         retiredAt: null,
         values: [
-          { optionValueId: '311', name: 'M', displayOrder: 0, retiredAt: null },
+          { optionValueId: '311', name: 'M', nameEn: null, displayOrder: 0, retiredAt: null },
           {
             optionValueId: '312',
             name: 'L',
+            nameEn: null,
             displayOrder: 1,
             retiredAt: '2026-10-01T03:00:00Z',
           },

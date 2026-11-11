@@ -37,10 +37,30 @@ import { addError } from './section';
 
 // ---------- 1. 옵션 이름 · 순서 ----------
 
-export type OptionValueNameForm = { optionValueId: string; name: string; retired: boolean };
+// 영문 이름 `nameEn`(BE #620, 선택) — 칸이 없거나 null 이면 서버가 저장된 번역을 그대로 두고, 빈 값이면 지운다.
+// 화면은 불러온 값(`savedNameEn`)과 다를 때만 싣는다: 손대지 않은 칸은 빼서 그사이 다른 화면이 넣은 번역도 지우지 않고,
+// 일부러 비운 칸만 `''` 로 보내 지운다. 등록 · 값 추가 API 는 영문 이름을 받지 않는다(새 행은 번역 없음).
+
+/** BE `ProductOptionsUpdateRequest` — 그룹 30자 · 값 50자(빈 값 허용), 제어 · 서식 문자 금지 */
+export const GROUP_NAME_EN_MAX = GROUP_NAME_MAX;
+export const VALUE_NAME_EN_MAX = VALUE_NAME_MAX;
+export const GROUP_NAME_EN_INVALID = `옵션 영문 이름은 줄바꿈 · 탭 · 보이지 않는 문자 없이 ${GROUP_NAME_EN_MAX}자 이하로 입력해 주세요.`;
+export const VALUE_NAME_EN_INVALID = `옵션 값 영문 이름은 줄바꿈 · 탭 · 보이지 않는 문자 없이 ${VALUE_NAME_EN_MAX}자 이하로 입력해 주세요.`;
+
+export type OptionValueNameForm = {
+  optionValueId: string;
+  name: string;
+  /** 입력 칸. 번역이 없으면 '' */
+  nameEn: string;
+  /** 불러온 저장값 — 보낼지 가르는 기준이다 */
+  savedNameEn: string | null;
+  retired: boolean;
+};
 export type OptionGroupNameForm = {
   optionGroupId: string;
   name: string;
+  nameEn: string;
+  savedNameEn: string | null;
   retired: boolean;
   values: OptionValueNameForm[];
 };
@@ -50,7 +70,9 @@ export type OptionsRequest = {
   optionGroups: {
     optionGroupId: string;
     name: string;
-    values: { optionValueId: string; name: string }[];
+    /** 빠지면 저장된 번역 유지, '' 면 삭제 */
+    nameEn?: string;
+    values: { optionValueId: string; name: string; nameEn?: string }[];
   }[];
 };
 
@@ -59,19 +81,39 @@ export function optionNamesFormOf(product: AdminProductDetail): OptionGroupNameF
   return product.optionGroups.map((group) => ({
     optionGroupId: group.optionGroupId,
     name: group.name,
+    nameEn: group.nameEn ?? '',
+    savedNameEn: group.nameEn,
     retired: group.retiredAt !== null,
     values: group.values.map((value) => ({
       optionValueId: value.optionValueId,
       name: value.name,
+      nameEn: value.nameEn ?? '',
+      savedNameEn: value.nameEn,
       retired: value.retiredAt !== null,
     })),
   }));
 }
 
+/**
+ * 영문 이름 칸 → 본문 조각. 불러온 값과 같으면(손대지 않음) 칸을 빼 보존하고, 다르면 다듬은 값을 싣는다 — 비웠으면 `''`(삭제).
+ * 형식이 틀리면 칸 오류를 더한다.
+ */
+function nameEnPart(
+  row: { nameEn: string; savedNameEn: string | null },
+  max: number,
+  key: string,
+  message: string,
+  errors: FormErrors,
+): { nameEn?: string } {
+  const typed = row.nameEn.trim();
+  if (typed.length > max || !isPlainText(typed)) addError(errors, key, message);
+  return typed === (row.savedNameEn ?? '').trim() ? {} : { nameEn: typed };
+}
+
 export type BuildOptions =
   { ok: true; request: OptionsRequest } | { ok: false; errors: FormErrors };
 
-/** 폼 → PUT 본문. 칸 오류 키는 `optionGroups.0.name` · `optionGroups.0.values.1.name` */
+/** 폼 → PUT 본문. 칸 오류 키는 `optionGroups.0.name` · `optionGroups.0.nameEn` · `optionGroups.0.values.1.name` */
 export function optionsRequest(groups: OptionGroupNameForm[], version: number): BuildOptions {
   const errors: FormErrors = {};
   const groupNames = new Set<string>();
@@ -83,17 +125,31 @@ export function optionsRequest(groups: OptionGroupNameForm[], version: number): 
       addError(errors, `optionGroups.${index}.name`, GROUP_NAME_DUPLICATED);
     }
     groupNames.add(name);
+    const groupEn = nameEnPart(
+      group,
+      GROUP_NAME_EN_MAX,
+      `optionGroups.${index}.nameEn`,
+      GROUP_NAME_EN_INVALID,
+      errors,
+    );
     const valueNames = new Set<string>();
     const values = group.values.map((value, at) => {
       const valueName = value.name.trim();
-      const key = `optionGroups.${index}.values.${at}.name`;
+      const key = `optionGroups.${index}.values.${at}`;
       if (valueName === '' || valueName.length > VALUE_NAME_MAX || !isPlainText(valueName)) {
-        addError(errors, key, VALUE_INVALID);
-      } else if (valueNames.has(valueName)) addError(errors, key, VALUE_DUPLICATED);
+        addError(errors, `${key}.name`, VALUE_INVALID);
+      } else if (valueNames.has(valueName)) addError(errors, `${key}.name`, VALUE_DUPLICATED);
       valueNames.add(valueName);
-      return { optionValueId: value.optionValueId, name: valueName };
+      const valueEn = nameEnPart(
+        value,
+        VALUE_NAME_EN_MAX,
+        `${key}.nameEn`,
+        VALUE_NAME_EN_INVALID,
+        errors,
+      );
+      return { optionValueId: value.optionValueId, name: valueName, ...valueEn };
     });
-    return { optionGroupId: group.optionGroupId, name, values };
+    return { optionGroupId: group.optionGroupId, name, ...groupEn, values };
   });
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return { ok: true, request: { version, optionGroups } };
@@ -105,7 +161,8 @@ export function sameOptionNames(a: OptionGroupNameForm[], b: OptionGroupNameForm
       groups.map((group) => [
         group.optionGroupId,
         group.name.trim(),
-        group.values.map((value) => [value.optionValueId, value.name.trim()]),
+        group.nameEn.trim(),
+        group.values.map((value) => [value.optionValueId, value.name.trim(), value.nameEn.trim()]),
       ]),
     );
   return body(a) === body(b);
@@ -114,6 +171,8 @@ export function sameOptionNames(a: OptionGroupNameForm[], b: OptionGroupNameForm
 /** 옵션 이름 요청 검증 코드 → 문구 */
 export const OPTIONS_VALIDATION: Record<string, string> = {
   PRODUCT_013: '옵션 구성이 바뀌었습니다. 최신 내용을 불러온 뒤 다시 고쳐 주세요.',
+  PRODUCT_EDIT_113: GROUP_NAME_EN_INVALID,
+  PRODUCT_EDIT_114: VALUE_NAME_EN_INVALID,
 };
 
 // ---------- 2. 기존 SKU ----------

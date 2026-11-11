@@ -35,6 +35,14 @@ describe('ProductDetailView', () => {
     }
   });
 
+  it('옵션 영문 이름을 보이고 번역이 없는 옵션에는 그리지 않는다(#707)', () => {
+    const html = render();
+    expect(html).toMatch(/색상<span lang="en"[^>]*>\/ Color<\/span>/);
+    expect(html).toMatch(/쪽빛<span lang="en"[^>]*>\/ Indigo<\/span>/);
+    expect(html).not.toMatch(/사이즈<span lang="en"/);
+    expect(html.match(/lang="en"/g)).toHaveLength(2);
+  });
+
   it('은퇴 옵션 · 판매 종료 SKU 를 표시한다', () => {
     const html = render();
     expect(html).toContain('(사용 안 함)');

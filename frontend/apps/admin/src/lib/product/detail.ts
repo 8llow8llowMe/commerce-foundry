@@ -17,6 +17,8 @@ export type CodeName = { code: string; name: string; description: string };
 export type AdminOptionValue = {
   optionValueId: string;
   name: string;
+  /** 관리자가 넣은 영문 이름(BE #620). 번역이 없으면 null */
+  nameEn: string | null;
   displayOrder: number;
   /** 은퇴 시각(UTC ISO). 사용 중이면 null */
   retiredAt: string | null;
@@ -25,6 +27,7 @@ export type AdminOptionValue = {
 export type AdminOptionGroup = {
   optionGroupId: string;
   name: string;
+  nameEn: string | null;
   displayOrder: number;
   retiredAt: string | null;
   values: AdminOptionValue[];

@@ -31,7 +31,8 @@ export function OptionEditor({
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-fg">
         옵션이 없으면 비워 두세요 — SKU 한 개(기본)로 등록됩니다. 옵션 그룹은 {GROUPS_MAX}개,
-        조합(SKU)은 {SKUS_MAX}개까지입니다. 지금 조합 {count}개.
+        조합(SKU)은 {SKUS_MAX}개까지입니다. 지금 조합 {count}개. 영문 이름은 등록한 뒤 옵션 · SKU
+        수정에서 넣습니다.
       </p>
       {groups.map((group, index) => (
         <OptionGroupRow
