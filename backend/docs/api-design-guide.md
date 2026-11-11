@@ -87,6 +87,12 @@ WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 —
 - 결제 조회(단건): payment-service `GET /internal/v1/payments/{paymentId}` (#308 PR-A2). 허용 호출자는 order-service — `payment-approved` 이벤트의 진위 재조회다.
   회원을 거르지 않는다. 응답은 `{paymentId, orderId, memberId, status(metadata), amount(§2-3), method(metadata) | null, approvedAt | null}` 이고
   결제키 · 멱등 키 · 주문명 · PG 원문은 없다. 없으면 404 `PAYMENT_001`, `paymentId` 가 양수가 아니면 `PAYMENT_115`, 숫자가 아니면 `PAYMENT_198`. 계약은 `payment-guide.md` §6.
+- 결제 후 취소 무환불 판정(단건 명령): payment-service `POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/void` (#691 PR 1b). 허용 호출자는 order-service —
+  어드민이 환불 실패 클레임을 거절하기 전에 부른다. 본문 `{orderId, amount, currency}`(접수 때 저장한 주문 · 환불액, `orderId` 는 결제의 주문과 대조),
+  멱등 키 헤더 없음(경로 claimId 가 키). 판정은 200 데이터 `{paymentId, claimId, outcome, reason, paymentStatus(metadata), retainedAmount(§2-3), sealed}` 이고
+  `outcome` 은 `NO_REFUND_CONFIRMED` · `REFUNDED` · `UNCONFIRMED` 다(`sealed` 는 영구 거부 행 존재 여부로 outcome 과 따로다).
+  404 `PAYMENT_001`, 409 `PAYMENT_019` · `017` · `012`, 400 `PAYMENT_101` · `102` · `110` · `111` · `115` · `123` · `198`.
+  계약 · 판정 표는 `payment-guide.md` §8-1.
 - 정상 승인 집계: payment-service `GET /internal/v1/payments/approval-summary?from=&to=` (#550). 허용 호출자는 operations-service다.
   필수 UTC `[from, to)`, 양의 기간 · 최대 31일이며 `Cache-Control: no-store`다. `{from, to, groups:[{method(metadata), approvalCount,
   grossApprovedAmount:{amount, currency}}]}`를 기존 봉투로 반환한다. 그룹은 통화 · 수단 코드순, 빈 범위는 빈 배열이다.

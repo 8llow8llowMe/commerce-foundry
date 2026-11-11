@@ -39,7 +39,9 @@ public final class PaymentAdminQueryFixtures {
         return List.of(cancel(11, 1, PaymentCancel.Status.REJECTED), cancel(12, 1, PaymentCancel.Status.REJECTED),
             cancel(21, 2, PaymentCancel.Status.REJECTED), cancel(22, 2, PaymentCancel.Status.SUCCEEDED),
             cancel(31, 3, PaymentCancel.Status.PENDING), cancel(41, 4, PaymentCancel.Status.SUCCEEDED),
-            cancel(61, 6, PaymentCancel.Status.REJECTED));
+            cancel(61, 6, PaymentCancel.Status.REJECTED),
+            // #691 무환불 봉인(VOIDED)은 환불 실패 이력이 아니다 — 3 · 4 는 환불 실패 필터에 나오지 않아야 한다
+            cancel(32, 3, PaymentCancel.Status.VOIDED), cancel(42, 4, PaymentCancel.Status.VOIDED));
     }
 
     private static PaymentCancelEntity cancel(long claimId, int offset, PaymentCancel.Status status) {

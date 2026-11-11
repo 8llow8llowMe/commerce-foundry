@@ -28,7 +28,7 @@ create table payment.payment_cancel (
     amount bigint not null,
     currency varchar(3) not null check (currency in ('KRW','USD')),
     payment_id bigint not null,
-    status varchar(20) not null check (status in ('PENDING','SUCCEEDED','REJECTED')),
+    status varchar(20) not null check (status in ('PENDING','SUCCEEDED','REJECTED','VOIDED')),
     version bigint,
     primary key (claim_id),
     constraint ck_payment_cancel_amount_positive check (amount > 0)
@@ -63,6 +63,53 @@ alter table payment.payment add constraint ck_payment_abort_reason_status check 
 
 commit;
 ```
+
+위 최초 설치 DDL 은 #691 의 `VOIDED` 를 이미 포함한다. 이미 원장이 있는 DB 는 아래 "#691 VOIDED 상태" 스크립트를 적용한다.
+
+## #691 VOIDED 상태 (무환불 봉인)
+
+무환불 판정(`payment-guide.md` §8-1)은 환불을 요청한 적 없는 클레임을 `VOIDED` 행으로 봉인한다. 기존 DB 의 `payment_cancel.status` check 에는 이 값이 없다.
+Hibernate 가 이름 없이 만든 칼럼 check 라 PostgreSQL 기본 이름 `payment_cancel_status_check` 이다. **적용 전에 실제 이름을 catalog 로 확인한다.**
+
+```sql
+select conname, pg_get_constraintdef(oid)
+  from pg_constraint
+ where conrelid = 'payment.payment_cancel'::regclass and contype = 'c' and pg_get_constraintdef(oid) ilike '%status%';
+```
+
+결과는 아래 한 줄이어야 한다(PostgreSQL 이 varchar 칼럼의 `in (...)` 을 바꿔 쓴 실제 형식).
+
+```text
+payment_cancel_status_check | CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'SUCCEEDED'::character varying, 'REJECTED'::character varying])::text[])))
+```
+
+이름이 다르면 스크립트의 이름을 그 이름으로 고친 뒤 적용한다. `IF EXISTS` 로 건너뛰지 않는다.
+스크립트도 BEGIN 직후 `DO` 블록으로 같은 조회를 해, status 를 다루는 check 가 정확히 1건이고 이름이 `payment_cancel_status_check` 가 아니면
+`RAISE EXCEPTION` 으로 아무것도 바꾸지 않고 롤백한다. 적용 뒤에도 같은 이름 1건이라 재실행해도 통과한다.
+
+[`payment-cancel-voided-status.sql`](../service/payment-service/src/test/resources/ddl/payment-cancel-voided-status.sql)을 `psql -v ON_ERROR_STOP=1 -f <파일>`로 적용한다.
+
+```sql
+begin;
+set local lock_timeout = '2s';
+set local statement_timeout = '30s';
+do $$ ... $$;  -- 자기 점검: status check 가 정확히 1건 · 이름 payment_cancel_status_check 가 아니면 raise exception (전문은 파일)
+alter table payment.payment_cancel drop constraint payment_cancel_status_check;
+alter table payment.payment_cancel add constraint payment_cancel_status_check
+    check (status in ('PENDING','SUCCEEDED','REJECTED','VOIDED'));
+commit;
+```
+
+- **순서** — 새 payment-service 기동 **전**에 적용한다. dev 포함이다: `ddl-auto=update` 는 기존 enum check 를 고치지 않는다.
+- **미적용 상태로 호출되면** — 봉인 INSERT 가 check 위반으로 500 이다. 원장은 바뀌지 않고, order 는 200 이 아닌 응답을 무환불 확정으로 읽지 않으므로 거절이 막힌다(안전 쪽 실패).
+  판정이 PG 를 부른 뒤라 토스 GET 한 번은 이미 나갔다.
+- **잠금** — `ACCESS EXCLUSIVE` 잠금과 기존 행 전체 검사가 필요하다. 잠금 대기 2초 · 문장 30초 상한이며 실패하면 롤백해 원래 제약이 남는다. 같은 최종 제약으로 다시 실행할 수 있다.
+- **확인** — 적용 뒤 위 조회가 `VOIDED` 를 포함한 한 줄이고 `pg_constraint.convalidated = true` 인지 본다. Hibernate 스냅숏은 `ddl/payment-schema.sql` 이다.
+- **롤백** — 이전 앱은 `VOIDED` 행을 읽으면 enum 변환에 실패한다. 봉인 행이 생긴 뒤에는 이전 앱으로 내리지 않는다. 제약을 되돌리는 스크립트는 두지 않는다 —
+  `VOIDED` 행이 있으면 이전 제약을 다시 걸 수 없고, 봉인 행을 지우면 그 클레임의 환불 봉인이 풀린다.
+
+`PaymentCancelVoidPostgresTest` 가 이전 제약 → 봉인 INSERT 실패 → 스크립트 두 번 적용 → 봉인 성공 · 모르는 상태 거절을 보고,
+제약 이름이 다를 때 자기 점검이 `P0001` 로 실패하고 제약을 그대로 두는지 본다.
 
 ## 운영 관측
 

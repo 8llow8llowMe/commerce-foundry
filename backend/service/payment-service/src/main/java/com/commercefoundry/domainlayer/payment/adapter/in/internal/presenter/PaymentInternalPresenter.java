@@ -1,7 +1,9 @@
 package com.commercefoundry.domainlayer.payment.adapter.in.internal.presenter;
 
 import com.commercefoundry.commerce.support.web.MoneyItems;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelVoidResponse;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentInternalResponse;
+import com.commercefoundry.domainlayer.payment.application.info.PaymentCancelVoidInfo;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import org.springframework.stereotype.Component;
 
@@ -21,6 +23,19 @@ public class PaymentInternalPresenter {
             .amount(MoneyItems.of(payment.amount()))
             .method(payment.method() == null ? null : payment.method().toMetadata())
             .approvedAt(payment.approvedAt())
+            .build();
+    }
+
+    /** 무환불 판정 (#691). 판정 · 이유는 제어 코드 문자열로 낸다. */
+    public PaymentCancelVoidResponse toVoidResponse(PaymentCancelVoidInfo info) {
+        return PaymentCancelVoidResponse.builder()
+            .paymentId(String.valueOf(info.paymentId()))
+            .claimId(String.valueOf(info.claimId()))
+            .outcome(info.outcome().name())
+            .reason(info.reason().name())
+            .paymentStatus(info.paymentStatus().toMetadata())
+            .retainedAmount(MoneyItems.of(info.retainedAmount()))
+            .sealed(info.sealed())
             .build();
     }
 }

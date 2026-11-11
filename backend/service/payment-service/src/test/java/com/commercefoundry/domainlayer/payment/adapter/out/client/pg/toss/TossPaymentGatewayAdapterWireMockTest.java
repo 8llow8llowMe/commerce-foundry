@@ -805,13 +805,19 @@ class TossPaymentGatewayAdapterWireMockTest {
         }
 
         @Test
-        @DisplayName("결제키 없음 · 가상계좌 · 다른 통화 · 결제액보다 큰 기대 잔액은 PG 를 부르지 않고 모름 (USD 결제는 도메인이 아직 만들지 않는다)")
-        void invalidInputIsUnknownWithoutCall() {
+        @DisplayName("결제키 없음 · 가상계좌는 대조 대상이 아니라 PG 를 부르지 않고 UNSUPPORTED (USD 결제는 도메인이 아직 만들지 않는다)")
+        void unsupportedPaymentIsUnsupportedWithoutCall() {
             assertThat(paymentGatewayPort.inquireRetention(PaymentFixtures.ready(), krw(129000)).state())
-                .isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+                .isEqualTo(PgRetentionQueryResult.State.UNSUPPORTED);
             Payment virtualAccount = PaymentFixtures.inProgress()
                 .approve(new PaymentApproval(PAYMENT_KEY, PaymentMethod.VIRTUAL_ACCOUNT, null, APPROVED_AT, "DONE", krw(129000)));
-            assertThat(paymentGatewayPort.inquireRetention(virtualAccount, krw(129000)).state()).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+            assertThat(paymentGatewayPort.inquireRetention(virtualAccount, krw(129000)).state()).isEqualTo(PgRetentionQueryResult.State.UNSUPPORTED);
+            TOSS.verify(0, getRequestedFor(urlEqualTo(PAYMENT_KEY_INQUIRY_PATH)));
+        }
+
+        @Test
+        @DisplayName("기대 잔액의 통화가 다르거나 결제액보다 크면 호출자 버그라 PG 를 부르지 않고 모름")
+        void invalidExpectedBalanceIsUnknownWithoutCall() {
             assertThat(paymentGatewayPort.inquireRetention(PaymentFixtures.done(), Money.ofMajorUnit(java.math.BigDecimal.ONE, CurrencyCode.USD)).state())
                 .isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
             assertThat(retention(krw(129001))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);

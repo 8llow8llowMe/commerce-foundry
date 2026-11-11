@@ -288,7 +288,7 @@
         amount bigint not null,
         currency varchar(3) not null check ((currency in ('KRW','USD'))),
         payment_id bigint not null,
-        status varchar(20) not null check ((status in ('PENDING','SUCCEEDED','REJECTED'))),
+        status varchar(20) not null check ((status in ('PENDING','SUCCEEDED','REJECTED','VOIDED'))),
         version bigint,
         primary key (claim_id),
         constraint ck_payment_cancel_amount_positive check (amount > 0)

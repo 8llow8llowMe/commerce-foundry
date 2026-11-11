@@ -7,6 +7,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentInternalResponse;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelResponse;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelVoidResponse;
+import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationVoidUseCase;
+import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentErrorCode;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentException;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentInternalUseCase;
@@ -68,6 +71,118 @@ class PaymentInternalControllerTest {
 
     @MockitoBean
     private PaymentCancellationUseCase paymentCancellationUseCase;
+
+    @MockitoBean
+    private PaymentCancellationVoidUseCase paymentCancellationVoidUseCase;
+
+    private static final long ORDER_ID = 4611686018427387905L;
+    private static final String VOID_BODY = "{\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\"}";
+
+    private MvcTestResult voidAs(String authorization, String claimId, String body) {
+        return voidAs(authorization, String.valueOf(PAYMENT_ID), claimId, body);
+    }
+
+    private MvcTestResult voidAs(String authorization, String paymentId, String claimId, String body) {
+        var request = mvc.post().uri("/internal/v1/payments/" + paymentId + "/cancellations/" + claimId + "/void")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body);
+        if (authorization != null) {
+            request.header(HttpHeaders.AUTHORIZATION, authorization);
+        }
+        return request.exchange();
+    }
+
+    @Nested
+    @DisplayName("무환불 판정 (#691)")
+    class VoidCancellation {
+
+        @Test
+        @DisplayName("order-service 면 200 — 판정은 데이터다. 식별자는 문자열, 상태는 metadata, 잔액은 {amount, currency}")
+        void orderServiceGetsDecision() {
+            given(paymentCancellationVoidUseCase.voidCancellation(PAYMENT_ID, ORDER_ID, 42, 10_000, CurrencyCode.KRW))
+                .willReturn(PaymentCancelVoidResponse.builder().paymentId(String.valueOf(PAYMENT_ID)).claimId("42")
+                    .outcome("NO_REFUND_CONFIRMED").reason("CLAIM_NEVER_REQUESTED").paymentStatus(PaymentStatus.DONE.toMetadata())
+                    .retainedAmount(MoneyItem.of(129_000, "KRW")).sealed(true).build());
+
+            MvcTestResult result = voidAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), "42", VOID_BODY);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.success").isEqualTo(true);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.paymentId").isEqualTo("4611686018427387906");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.claimId").isEqualTo("42");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.outcome").isEqualTo("NO_REFUND_CONFIRMED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.reason").isEqualTo("CLAIM_NEVER_REQUESTED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.paymentStatus.code").isEqualTo("DONE");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.retainedAmount.amount").asNumber().isEqualTo(129_000);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.retainedAmount.currency").isEqualTo("KRW");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.sealed").isEqualTo(true);
+        }
+
+        @Test
+        @DisplayName("서비스 토큰이 없으면 401 · SECURITY_007, 다른 서비스면 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")
+        void onlyOrderService() {
+            SecurityEnvelopeAssertions.assertEnvelope(voidAs(null, "42", VOID_BODY).getResponse(), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+            SecurityEnvelopeAssertions.assertEnvelope(voidAs(TestServiceTokens.bearer("delivery-service", SELF), "42", VOID_BODY).getResponse(),
+                SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(paymentCancellationVoidUseCase);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(MemberRole.class)
+        @DisplayName("회원 access 토큰은 역할과 상관없이 401 · SECURITY_007 이다 — internal 체인은 서비스 토큰만 받는다")
+        void memberTokenIsRejected(MemberRole role) {
+            String member = "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, role).tokenValue();
+
+            SecurityEnvelopeAssertions.assertEnvelope(voidAs(member, "42", VOID_BODY).getResponse(), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+            verifyNoInteractions(paymentCancellationVoidUseCase);
+        }
+
+        @ParameterizedTest(name = "claimId={0} body={1} → {2}")
+        @CsvSource(delimiter = '|', value = {
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":0,\"currency\":\"KRW\"}  | PAYMENT_110",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":-1,\"currency\":\"KRW\"} | PAYMENT_110",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000}                    | PAYMENT_111",
+            "42 | {\"amount\":10000,\"currency\":\"KRW\"}                                    | PAYMENT_101",
+            "42 | {\"orderId\":0,\"amount\":10000,\"currency\":\"KRW\"}                      | PAYMENT_102",
+            "0  | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\"} | PAYMENT_123"
+        })
+        @DisplayName("금액 양수 · 통화 필수 · orderId 필수 · 양수 · claimId 양수가 아니면 400 이고 유스케이스를 부르지 않는다")
+        void validation(String claimId, String body, String code) {
+            MvcTestResult result = voidAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), claimId, body);
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+            verifyNoInteractions(paymentCancellationVoidUseCase);
+        }
+
+        @ParameterizedTest(name = "paymentId={0} → {1}")
+        @CsvSource(delimiter = '|', value = {"0 | PAYMENT_115", "abc | PAYMENT_198"})
+        @DisplayName("경로 paymentId 가 양수가 아니면 115, 숫자가 아니면 198 로 400 이고 유스케이스를 부르지 않는다")
+        void paymentIdValidation(String paymentId, String code) {
+            MvcTestResult result = voidAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), paymentId, "42", VOID_BODY);
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.fieldErrors[0].field").isEqualTo("paymentId");
+            verifyNoInteractions(paymentCancellationVoidUseCase);
+        }
+
+        @Test
+        @DisplayName("결제가 없으면 404 PAYMENT_001, 다른 주문의 결제 · claimId 재사용이면 409 PAYMENT_019 다")
+        void domainErrors() {
+            given(paymentCancellationVoidUseCase.voidCancellation(PAYMENT_ID, ORDER_ID, 42, 10_000, CurrencyCode.KRW))
+                .willThrow(new PaymentException(PaymentErrorCode.NOT_FOUND_PAYMENT))
+                .willThrow(new PaymentException(PaymentErrorCode.CANCELLATION_KEY_REUSED));
+
+            MvcTestResult missing = voidAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), "42", VOID_BODY);
+            assertThat(missing).hasStatus(HttpStatus.NOT_FOUND);
+            assertThat(missing).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PAYMENT_001");
+
+            MvcTestResult reused = voidAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), "42", VOID_BODY);
+            assertThat(reused).hasStatus(HttpStatus.CONFLICT);
+            assertThat(reused).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PAYMENT_019");
+        }
+    }
 
     private MvcTestResult getAs(String authorization, String paymentId) {
         var request = mvc.get().uri("/internal/v1/payments/" + paymentId);
