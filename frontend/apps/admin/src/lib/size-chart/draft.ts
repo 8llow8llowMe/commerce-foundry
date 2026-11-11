@@ -1,17 +1,24 @@
 import { ApiError } from '@cf/api-client';
 import { accessDeniedOf, type AccessDenied, type FormErrors } from '@/lib/api-errors';
+import {
+  imageCreateFailure,
+  inputFingerprint,
+  type DraftInput,
+  type ImageFollowUp,
+} from './draft-image';
 import { CHECK_FIELDS, chartFieldKey, withSummary } from './errors';
 import { rowKey, valueText, type ChartForm } from './form';
 import type { CodeName, TemplateColumn } from './types';
 
 /**
  * AI 사이즈표 초안(BE #217, product-service `SizeChartDraftAdminController`). 정본은 `backend/docs/ai-size-chart-guide.md`.
- * - 생성 `POST /products/{id}/size-chart/drafts` — UUID `Idempotency-Key` 필수, `{templateId, mode:'TEXT', sourceText}` → 202 `{draftId, jobId}`
+ * - 생성 `POST /products/{id}/size-chart/drafts` — UUID `Idempotency-Key` 필수, `{templateId, mode:'TEXT', sourceText}` 또는
+ *   IMAGE `{templateId, mode:'IMAGE', images, personalInfoRemovedConfirmed:true}`(`./draft-image`) → 202 `{draftId, jobId}`
  * - 상세 `GET /size-chart-drafts/{id}` — 저장된 상태만 읽는다(작업 결과를 가져오지 않는다)
  * - 목록 `GET /size-chart-drafts?productId=&requestedByMe=&page=&size=` — 최신순, 만료 초안 제외
  * - 새로고침 `POST /{id}/refresh` — 끝난 작업 결과를 검증해 초안에 반영(감사 기록이 남아 반복 호출하지 않는다)
  * - 적용 `POST /{id}/apply` — `{expectedDraftVersion, correctedChart, acknowledgedWarningIds}` → 상품 표 전체 교체
- * 지금은 TEXT 만 열려 있다. IMAGE · 일괄 이관(batches)은 BE 후속 범위라 화면에 없다.
+ * IMAGE 는 BE 플래그가 열린 환경에서만 받는다(닫혀 있으면 011). 일괄 이관(batches)은 BE 후속 범위라 화면에 없다.
  */
 export const SOURCE_TEXT_MAX = 12000;
 
@@ -94,22 +101,22 @@ export function resumableDraft(list: readonly DraftSummary[], now: number): Draf
 }
 
 /**
- * 생성 요청 멱등 키. "같은 템플릿 + 같은 텍스트" 한 번의 의도에 키 하나 — 응답을 못 받았거나(네트워크 · 503) 두 번 눌러도
- * 같은 키를 다시 보내 서버가 같은 초안 · 작업을 돌려준다(새 과금 없음). 입력이 바뀌면 새 키다.
+ * 생성 요청 멱등 키. "같은 템플릿 + 같은 입력(텍스트 · 이미지 순서와 확인값)" 한 번의 의도에 키 하나 — 응답을 못 받았거나(네트워크 · 503)
+ * 두 번 눌러도 같은 키를 다시 보내 서버가 같은 초안 · 작업을 돌려준다(새 과금 없음). 입력이 바뀌면 새 키다.
  * 키는 메모리에만 둔다 — 7일이 지난 키를 자동으로 다시 보내지 않게(가이드 §3).
  */
 export type DraftKey = { key: string; fingerprint: string };
 
 export const draftFingerprint = (templateId: string, sourceText: string) =>
-  `${templateId}\n${sourceText.trim()}`;
+  inputFingerprint(templateId, { mode: 'TEXT', sourceText });
 
 export function keyFor(
   previous: DraftKey | null,
   templateId: string,
-  sourceText: string,
+  input: DraftInput,
   create: () => string,
 ): DraftKey {
-  const fingerprint = draftFingerprint(templateId, sourceText);
+  const fingerprint = inputFingerprint(templateId, input);
   return previous?.fingerprint === fingerprint ? previous : { key: create(), fingerprint };
 }
 
@@ -174,6 +181,8 @@ export function warningText(draft: SizeChartDraft, warning: DraftWarning): strin
 
 export const DRAFT_SOURCE_UNSAFE =
   '치수 텍스트만 보낼 수 있습니다. 상품 설명 · 이름 · 주소 같은 문장은 빼고 사이즈와 숫자 부분만 붙여넣어 주세요.';
+export const DRAFT_IMAGE_UNSAFE =
+  '이 이미지로는 초안을 만들 수 없습니다. 이름 · 연락처 · 주소 같은 개인정보가 없는 사이즈표 이미지만 골라 주세요.';
 export const DRAFT_SOURCE_LENGTH = `치수 텍스트를 1~${SOURCE_TEXT_MAX.toLocaleString('ko-KR')}자로 입력해 주세요.`;
 export const DRAFT_INPUT_CONFLICT =
   '같은 요청 번호로 다른 내용이 접수돼 있었습니다. 새 요청 번호로 다시 보내 주세요.';
@@ -207,14 +216,29 @@ export type DraftCreateFailure =
   /** 같은 키 다른 입력(002) — 키를 버리고 새로 만든다 */
   | { kind: 'newKey'; message: string }
   /** 결과 모름 · 일시 장애 — 같은 키로 다시 보내면 된다 */
-  | { kind: 'retry'; message: string };
+  | { kind: 'retry'; message: string }
+  /**
+   * IMAGE 입력 후속 처리 — 기능 닫힘(011) · 후보 다시 읽기(012) · 선택 비우기(112 · 113) · 다시 확인(015 · 114).
+   * 다시 확인하면 확인값이 바뀌어 지문도 바뀌므로 키는 저절로 새로 만든다.
+   */
+  | ({ kind: 'image' } & ImageFollowUp);
 
-export function draftCreateFailure(cause: unknown): DraftCreateFailure {
+export function draftCreateFailure(
+  cause: unknown,
+  mode: DraftInput['mode'] = 'TEXT',
+): DraftCreateFailure {
   const denied = accessDeniedOf(cause);
   if (denied === 'unauthorized') return { kind: 'retry', message: DRAFT_SESSION_EXPIRED };
   if (denied) return { kind: 'access', denied };
   if (!(cause instanceof ApiError)) return { kind: 'retry', message: DRAFT_REQUEST_FAILED };
-  if (cause.code === CODE('030')) return { kind: 'source', message: DRAFT_SOURCE_UNSAFE };
+  if (cause.code === CODE('030'))
+    return { kind: 'source', message: mode === 'IMAGE' ? DRAFT_IMAGE_UNSAFE : DRAFT_SOURCE_UNSAFE };
+  const image = imageCreateFailure(cause);
+  if (image) {
+    if (image.kind === 'image') return { kind: 'source', message: image.message };
+    if (image.kind === 'retry') return { kind: 'retry', message: image.message };
+    return { kind: 'image', action: image.kind, message: image.message };
+  }
   if (cause.fieldErrors.some((item) => item.code === CODE('104')))
     return { kind: 'source', message: DRAFT_SOURCE_LENGTH };
   if (cause.code === CODE('002')) return { kind: 'newKey', message: DRAFT_INPUT_CONFLICT };

@@ -1,19 +1,26 @@
 'use client';
 
-import { Button, FieldError } from '@cf/ui';
+import { Button, Checkbox, FieldError } from '@cf/ui';
 import Link from 'next/link';
 import { useId, useState } from 'react';
 import { formatDateTime } from '@/lib/display/text';
+import { confirmationKey, imageFollowUpPlan } from '@/lib/size-chart/draft-image';
 import {
   candidateSummary,
   SOURCE_TEXT_MAX,
   statusOf,
   type SizeChartDraft,
 } from '@/lib/size-chart/draft';
+import { SizeChartImagePicker } from './SizeChartImagePicker';
 import type { SizeChartDraftState } from './useSizeChartDraft';
+import type { SizeChartImageSourcesState } from './useSizeChartImageSources';
+
+type InputMode = 'TEXT' | 'IMAGE';
 
 type Props = {
   ai: SizeChartDraftState;
+  /** IMAGE 입력의 상품 이미지 후보 · 선택 · 확인 */
+  images: SizeChartImageSourcesState;
   /** 편집기에서 고른 템플릿. 없으면 요청할 수 없다 */
   templateId: string | null;
   /** 이 초안을 표에서 검토 중이다 */
@@ -24,19 +31,54 @@ type Props = {
 };
 
 /**
- * AI 사이즈표 초안 패널(#218). 치수 텍스트 → 초안 요청 → 생성 진행 → 표에 불러와 검토 → (편집기의) 초안 적용.
- * 이미지 입력은 BE 가 아직 거절해(가이드 §4) 텍스트만 받는다.
+ * AI 사이즈표 초안 패널(#218). 치수 텍스트 또는 상품 관리 이미지 → 초안 요청 → 생성 진행 → 표에 불러와 검토 → (편집기의) 초안 적용.
+ * 이미지 입력은 BE 플래그가 열린 환경에서만 쓸 수 있다 — 닫혀 있으면(011) 안내만 두고 텍스트로 요청하게 한다.
  */
-export function SizeChartDraftPanel({ ai, templateId, reviewing, busy, onReview }: Props) {
+export function SizeChartDraftPanel({ ai, images, templateId, reviewing, busy, onReview }: Props) {
   const id = useId();
+  const [mode, setMode] = useState<InputMode>('TEXT');
   const [sourceText, setSourceText] = useState('');
+  // 개인정보 확인은 승인할 이미지 바이트(이미지 · 확인값 묶음)에 대한 것이다 — 선택이나 확인값이 바뀌면 다시 확인받는다
+  const [confirmedFor, setConfirmedFor] = useState<string | null>(null);
+  const selectionKey = confirmationKey(images.approved);
+  const confirmed = selectionKey !== null && confirmedFor === selectionKey;
   const { draft } = ai;
   const status = draft ? statusOf(draft) : null;
   const open =
     status === null || status === 'FAILED' || status === 'CANCELLED' || status === 'APPLIED';
   const tooLong = sourceText.length > SOURCE_TEXT_MAX;
+  const imageClosed = images.status === 'closed';
   const canRequest =
-    templateId !== null && sourceText.trim() !== '' && !tooLong && !ai.submitting && !busy;
+    templateId !== null &&
+    !ai.submitting &&
+    !busy &&
+    (mode === 'TEXT'
+      ? sourceText.trim() !== '' && !tooLong
+      : !imageClosed && images.approved !== null && confirmed);
+
+  const switchMode = (next: InputMode) => {
+    setMode(next);
+    ai.clearSourceError();
+    if (next === 'IMAGE') images.load();
+  };
+
+  const submit = async () => {
+    if (!templateId) return;
+    if (mode === 'TEXT') {
+      await ai.request(templateId, { mode: 'TEXT', sourceText });
+      return;
+    }
+    if (!images.approved) return;
+    const follow = await ai.request(templateId, { mode: 'IMAGE', images: images.approved });
+    if (!follow) return;
+    const plan = imageFollowUpPlan(follow);
+    if (plan.clearSourceError) ai.clearSourceError();
+    if (plan.resetConfirmation) setConfirmedFor(null);
+    if (plan.images.kind === 'close') images.close(plan.images.message);
+    else if (plan.images.kind === 'reload')
+      void images.reload(plan.images.message, { clearSelection: plan.images.clearSelection });
+    else images.reinspect();
+  };
 
   return (
     <section
@@ -49,9 +91,9 @@ export function SizeChartDraftPanel({ ai, templateId, reviewing, busy, onReview 
           AI 초안 (선택)
         </h2>
         <p className="mt-1 text-xs text-muted-fg">
-          기존 상세 설명 · 다른 표의 치수 부분만 복사해 붙여넣으면 고른 템플릿 항목에 맞춘 초안을
-          만듭니다. 초안은 표에 불러와 검토하고 적용하기 전까지 스토어에 보이지 않습니다. 지금은
-          텍스트만 받습니다 — 이미지로 된 사이즈표는 표에 직접 입력해 주세요.
+          기존 상세 설명 · 다른 표의 치수 부분을 붙여넣거나, 이 상품에 올린 사이즈표 이미지를 고르면
+          고른 템플릿 항목에 맞춘 초안을 만듭니다. 초안은 표에 불러와 검토하고 적용하기 전까지
+          스토어에 보이지 않습니다.
         </p>
       </div>
 
@@ -122,33 +164,85 @@ export function SizeChartDraftPanel({ ai, templateId, reviewing, busy, onReview 
               <span className="text-muted-fg"> · {draft.status.description}</span>
             </p>
           )}
-          <label htmlFor={`${id}-source`} className="text-sm font-medium">
-            치수 텍스트
-          </label>
-          <textarea
-            id={`${id}-source`}
-            value={sourceText}
-            rows={6}
-            disabled={ai.submitting || busy}
-            placeholder={'예:\nS 가슴단면 50 총장 60\nM 가슴단면 52 총장 62'}
-            aria-invalid={ai.sourceError !== null || tooLong || undefined}
-            aria-describedby={`${id}-source-help${ai.sourceError ? ` ${id}-source-error` : ''}`}
-            onChange={(event) => {
-              setSourceText(event.currentTarget.value);
-              ai.clearSourceError();
-            }}
-            className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:ring-2 focus:ring-primary"
-          />
-          <p id={`${id}-source-help`} className="text-xs text-muted-fg">
-            {sourceText.length.toLocaleString('ko-KR')} / {SOURCE_TEXT_MAX.toLocaleString('ko-KR')}
-            자. 이름 · 연락처 · 주소 같은 문장은 넣지 마세요(서버가 거절합니다).
-          </p>
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-sm font-medium">입력 방식</legend>
+            <div className="flex flex-wrap gap-4">
+              {(
+                [
+                  ['TEXT', '치수 텍스트'],
+                  ['IMAGE', '상품 이미지'],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name={`${id}-mode`}
+                    value={value}
+                    checked={mode === value}
+                    disabled={ai.submitting || busy}
+                    onChange={() => switchMode(value)}
+                    className="size-4 cursor-pointer accent-primary"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          {mode === 'TEXT' && (
+            <>
+              <label htmlFor={`${id}-source`} className="text-sm font-medium">
+                치수 텍스트
+              </label>
+              <textarea
+                id={`${id}-source`}
+                value={sourceText}
+                rows={6}
+                disabled={ai.submitting || busy}
+                placeholder={'예:\nS 가슴단면 50 총장 60\nM 가슴단면 52 총장 62'}
+                aria-invalid={ai.sourceError !== null || tooLong || undefined}
+                aria-describedby={`${id}-source-help${ai.sourceError ? ` ${id}-source-error` : ''}`}
+                onChange={(event) => {
+                  setSourceText(event.currentTarget.value);
+                  ai.clearSourceError();
+                }}
+                className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:ring-2 focus:ring-primary"
+              />
+              <p id={`${id}-source-help`} className="text-xs text-muted-fg">
+                {sourceText.length.toLocaleString('ko-KR')} /{' '}
+                {SOURCE_TEXT_MAX.toLocaleString('ko-KR')}
+                자. 이름 · 연락처 · 주소 같은 문장은 넣지 마세요(서버가 거절합니다).
+              </p>
+            </>
+          )}
+
+          {mode === 'IMAGE' && (
+            <>
+              <SizeChartImagePicker
+                images={images}
+                disabled={ai.submitting || busy}
+                idPrefix={id}
+                errorId={ai.sourceError ? `${id}-source-error` : null}
+              />
+              {/* 목록 안내(닫힘 · 실패 · 다시 읽음)도 live region 으로 알린다 */}
+              <p role="status" className="text-sm empty:hidden">
+                {images.message ?? ''}
+              </p>
+              {!imageClosed && images.selected.length > 0 && (
+                <Checkbox
+                  label="고른 이미지에 주문자 이름 · 연락처 · 주소 같은 고객 개인정보가 없음을 확인했습니다."
+                  checked={confirmed}
+                  disabled={ai.submitting || busy || selectionKey === null}
+                  onChange={(event) =>
+                    setConfirmedFor(event.currentTarget.checked ? selectionKey : null)
+                  }
+                />
+              )}
+            </>
+          )}
           <FieldError id={`${id}-source-error`} messages={ai.sourceError ? [ai.sourceError] : []} />
           <div className="flex flex-wrap items-center gap-3">
-            <Button
-              disabled={!canRequest}
-              onClick={() => templateId && void ai.request(templateId, sourceText)}
-            >
+            <Button disabled={!canRequest} onClick={() => void submit()}>
               {ai.submitting ? '요청 중…' : 'AI 초안 요청'}
             </Button>
             {templateId === null && (
