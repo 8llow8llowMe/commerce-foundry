@@ -495,9 +495,12 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   등록 자체는 상품 등록 투어가 안내한다.
 - **상품 상세 투어**(`product-detail-v1`, `/products/[productId]`) — 구역별 수정 링크(`product-edit-links`) · 재고 · 원가 · 사이즈표 링크(`product-related`) ·
   SKU 구역(`product-detail-skus`) · 판매 중지 · 삭제(`product-delete`, 권한 안내로 바뀔 수 있어 선택). 투어는 삭제 버튼을 누르지 않는다. 상세 테스트가 앵커 목록과 정의를 맞춰 본다.
-- **클레임 목록 투어**(`claims-v1`, `/claims`) — 조건(`claim-filters`) · 표(`claim-table`, 빈 목록이면 없어 선택) · 처리(승인 · 거절 · 환불) 준비 중 안내(가운데). 클레임 상세는 도움말만 있다.
+- **클레임 목록 투어**(`claims-v1`, `/claims`) — 조건(`claim-filters`) · 표(`claim-table`, 빈 목록이면 없어 선택) · 처리(승인 · 거절 · 환불) 준비 중 안내(가운데).
+- **클레임 상세 투어**(`claim-detail-v1`, `/claims/[claimId]`) — 접수 내용(`claim-summary`) · 접수 항목(`claim-items`) · 처리 상황(`claim-recovery`) ·
+  다시 시도(`claim-retry`) · 반품 처리 준비 중 안내(가운데). 처리 상황 · 다시 시도는 결제 후 취소에만 있고 버튼은 다시 시도할 수 있을 때만 있어 선택 단계다.
+  투어는 다시 시도를 누르지 않는다(가리킨 요소는 투어 동안 눌리지 않는다). 클레임 컴포넌트 테스트가 앵커를 맞춰 본다.
 - 전시 편집(`/displays/main`)에는 아직 투어가 없다.
-- 서버 허용 목록(BE #544 로 `orders` · `order-detail` · `product-new` · `product-edit` · `payments` 까지 올랐다. `products` · `product-detail` · `claims` 는 아직 없어 이 브라우저 기록으로만 간다)의 버전과 투어 아이디의 버전이 같아야 서버 기록을 쓴다(다르면 `ONBOARDING_103`).
+- 서버 허용 목록(BE #544 로 `orders` · `order-detail` · `product-new` · `product-edit` · `payments` 까지 올랐다. `products` · `product-detail` · `claims` · `claim-detail` · `jobs` 는 아직 없고 `size-chart-editor` 는 서버가 v1 이라 이 브라우저 기록으로만 간다)의 버전과 투어 아이디의 버전이 같아야 서버 기록을 쓴다(다르면 `ONBOARDING_103`).
 
 ### 샘플 주문 업무 연습 (`/practice`, #365)
 
