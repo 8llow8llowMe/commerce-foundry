@@ -21,6 +21,9 @@ import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCanc
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgApprovalQueryResult.NotSentReason;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgRetentionQueryResult;
+import com.commercefoundry.shared.commerce.CurrencyCode;
+import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentAbortReason;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentApproval;
@@ -706,6 +709,133 @@ class TossPaymentGatewayAdapterWireMockTest {
                  "lastTransactionKey":"%s","cancels":[{"cancelAmount":129000,"transactionKey":"%s","cancelStatus":"DONE",
                  "cancelRequestId":"%s","cancelReason":"%s"}]}
                 """.formatted(PAYMENT_KEY, PG_ORDER_ID, transaction, transaction, requestId, reason);
+        }
+    }
+
+    @Nested
+    @DisplayName("PG 잔액 대조 (#691)")
+    class RetentionInquiry {
+
+        @Test
+        @DisplayName("취소 이력 없는 DONE 이 기대 잔액과 같으면 일치 — 결제키 GET 한 번")
+        void untouchedPaymentMatches() {
+            stubPaymentKeyInquiry(200, retention("DONE", 129000, "[]"));
+
+            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.MATCHED);
+            TOSS.verify(1, getRequestedFor(urlEqualTo(PAYMENT_KEY_INQUIRY_PATH)).withHeader("Authorization", equalTo(EXPECTED_AUTHORIZATION)));
+        }
+
+        @Test
+        @DisplayName("부분 취소 뒤 잔액이 원장 기대와 같으면 일치, 원장이 그 취소를 모르면 불일치")
+        void partialCancellationMatchesOnlyLedgerBalance() {
+            stubPaymentKeyInquiry(200, retention("PARTIAL_CANCELED", 100000, cancel("txn-1", 29000)));
+
+            assertThat(retention(krw(100000))).isEqualTo(PgRetentionQueryResult.State.MATCHED);
+            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.MISMATCHED);
+        }
+
+        @Test
+        @DisplayName("콘솔 전액 취소처럼 원장에 없는 환불은 불일치")
+        void externalFullCancellationMismatches() {
+            stubPaymentKeyInquiry(200, retention("CANCELED", 0, cancel("external-txn", 129000)));
+
+            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.MISMATCHED);
+        }
+
+        @Test
+        @DisplayName("부분 취소가 쌓여 잔액 0 · CANCELED 이고 원장도 전액을 알면 일치")
+        void fullyCanceledByLedgerMatches() {
+            stubPaymentKeyInquiry(200, retention("CANCELED", 0,
+                "[" + cancelItem("txn-1", 29000) + "," + cancelItem("txn-2", 100000) + "]"));
+
+            assertThat(retention(krw(0))).isEqualTo(PgRetentionQueryResult.State.MATCHED);
+        }
+
+        @ParameterizedTest
+        @CsvSource({"CANCELED,129000", "PARTIAL_CANCELED,129000", "ABORTED,129000", "WAITING_FOR_DEPOSIT,129000", "IN_PROGRESS,129000"})
+        @DisplayName("결제 상태가 잔액과 맞지 않거나 대조할 수 없는 상태면 모름 — 환불 증거가 아니다")
+        void statusMustAgreeWithBalance(String status, long balance) {
+            stubPaymentKeyInquiry(200, retention(status, balance, "[]"));
+
+            assertThat(retention(krw(balance))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+        }
+
+        @Test
+        @DisplayName("결제 상태가 없으면 모름")
+        void missingStatusIsUnknown() {
+            stubPaymentKeyInquiry(200, retention("DONE", 129000, "[]").replace(",\"status\":\"DONE\"", ""));
+
+            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+        }
+
+        @Test
+        @DisplayName("신원 · 총액 · 잔액 · 취소 이력이 계약을 어기면 모름 — 불일치로 올리지 않는다")
+        void contractViolationsAreUnknown() {
+            String open = retention("DONE", 129000, "[]");
+            String partial = retention("PARTIAL_CANCELED", 100000, cancel("txn-1", 29000));
+            for (String invalid : java.util.List.of(open.replace(PG_ORDER_ID, "other-order"), open.replace(PAYMENT_KEY, "other-key"),
+                open.replace("KRW", "USD"), open.replace("totalAmount\":129000", "totalAmount\":129001"),
+                open.replace("balanceAmount\":129000", "balanceAmount\":129001"), open.replace(",\"balanceAmount\":129000", ""),
+                partial.replace("cancelAmount\":29000", "cancelAmount\":1"), partial.replace("cancelStatus\":\"DONE", "cancelStatus\":\"PENDING"),
+                "not-json")) {
+                stubPaymentKeyInquiry(200, invalid);
+                assertThat(retention(krw(129000))).as(invalid).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+            }
+        }
+
+        @ParameterizedTest
+        @CsvSource({"429,TOO_MANY_REQUESTS", "500,PROVIDER_ERROR", "404,NOT_FOUND_PAYMENT", "401,UNAUTHORIZED_KEY", "403,FORBIDDEN_REQUEST"})
+        @DisplayName("오류 응답은 모름")
+        void errorResponsesAreUnknown(int status, String code) {
+            stubPaymentKeyInquiry(status, errorJson(code, "synthetic"));
+
+            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+        }
+
+        @Test
+        @DisplayName("응답 타임아웃 · 서킷 열림은 모름")
+        void timeoutAndCircuitOpenAreUnknown() {
+            TOSS.stubFor(get(urlEqualTo(PAYMENT_KEY_INQUIRY_PATH))
+                .willReturn(json(200, retention("DONE", 129000, "[]")).withFixedDelay(TIMEOUT_DELAY_MILLIS)));
+            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+
+            circuitBreaker().transitionToOpenState();
+            stubPaymentKeyInquiry(200, retention("DONE", 129000, "[]"));
+            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+        }
+
+        @Test
+        @DisplayName("결제키 없음 · 가상계좌 · 다른 통화 · 결제액보다 큰 기대 잔액은 PG 를 부르지 않고 모름 (USD 결제는 도메인이 아직 만들지 않는다)")
+        void invalidInputIsUnknownWithoutCall() {
+            assertThat(paymentGatewayPort.inquireRetention(PaymentFixtures.ready(), krw(129000)).state())
+                .isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+            Payment virtualAccount = PaymentFixtures.inProgress()
+                .approve(new PaymentApproval(PAYMENT_KEY, PaymentMethod.VIRTUAL_ACCOUNT, null, APPROVED_AT, "DONE", krw(129000)));
+            assertThat(paymentGatewayPort.inquireRetention(virtualAccount, krw(129000)).state()).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+            assertThat(paymentGatewayPort.inquireRetention(PaymentFixtures.done(), Money.ofMajorUnit(java.math.BigDecimal.ONE, CurrencyCode.USD)).state())
+                .isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+            assertThat(retention(krw(129001))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+            TOSS.verify(0, getRequestedFor(urlEqualTo(PAYMENT_KEY_INQUIRY_PATH)));
+        }
+
+        private PgRetentionQueryResult.State retention(Money expectedBalance) {
+            return paymentGatewayPort.inquireRetention(PaymentFixtures.done(), expectedBalance).state();
+        }
+
+        private String retention(String status, long balance, String cancels) {
+            return """
+                {"paymentKey":"%s","orderId":"%s","currency":"KRW","totalAmount":129000,"balanceAmount":%d,"status":"%s","cancels":%s}
+                """.formatted(PAYMENT_KEY, PG_ORDER_ID, balance, status, cancels);
+        }
+
+        private String cancel(String transaction, long amount) {
+            return "[" + cancelItem(transaction, amount) + "]";
+        }
+
+        private String cancelItem(String transaction, long amount) {
+            return """
+                {"cancelAmount":%d,"transactionKey":"%s","cancelStatus":"DONE","cancelRequestId":null,"cancelReason":"synthetic"}"""
+                .formatted(amount, transaction);
         }
     }
 

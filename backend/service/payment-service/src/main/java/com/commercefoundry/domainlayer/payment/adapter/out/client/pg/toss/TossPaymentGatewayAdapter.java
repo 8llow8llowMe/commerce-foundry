@@ -9,7 +9,10 @@ import com.commercefoundry.domainlayer.payment.application.port.out.query.PgAppr
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgInquiryQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancelResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.PgCancellationQueryResult;
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PgRetentionQueryResult;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
+import com.commercefoundry.domainlayer.payment.domain.model.PaymentMethod;
+import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.global.properties.TossPaymentsProperties;
 import java.util.Objects;
@@ -44,6 +47,22 @@ public class TossPaymentGatewayAdapter implements PaymentGatewayPort {
     public PgCancellationQueryResult inquireCancellation(
         Payment payment, Money amount, String pgKey, String transactionKey) {
         return tossPaymentsResponseSupport.cancellationInquiry(payment, amount, pgKey, transactionKey,
+            () -> tossPaymentsClient.getPaymentByPaymentKey(tossPaymentsProperties.basicAuthorization(), payment.paymentKey()));
+    }
+
+    /**
+     * 카드 · 간편결제처럼 취소가 동기로 잔액에 반영되는 KRW 결제만 대조한다. 가상계좌(환불 계좌 송금) · USD(PayPal 비동기 환불)는
+     * 끝나지 않은 환불이 조회에 안 보일 수 있어 부르지 않고 모름이다 ({@code payment-guide.md} §8-1).
+     */
+    @Override
+    public PgRetentionQueryResult inquireRetention(Payment payment, Money expectedBalance) {
+        Objects.requireNonNull(payment, "payment");
+        if (payment.paymentKey() == null || payment.method() == PaymentMethod.VIRTUAL_ACCOUNT || payment.amount().currency() != CurrencyCode.KRW
+            || expectedBalance == null || expectedBalance.currency() != payment.amount().currency()
+            || expectedBalance.isGreaterThan(payment.amount())) {
+            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
+        }
+        return tossPaymentsResponseSupport.retentionInquiry(payment, expectedBalance,
             () -> tossPaymentsClient.getPaymentByPaymentKey(tossPaymentsProperties.basicAuthorization(), payment.paymentKey()));
     }
 
