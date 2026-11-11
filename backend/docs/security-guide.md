@@ -239,8 +239,8 @@ product-service 어드민 엔드포인트 → 권한 (#586). 조회(GET)는 `*_R
 
 | 기능 묶음 | 식 (`AdminAuthority`) | ADMIN · OWNER | MANAGER | STAFF |
 |-----------|----------------------|---------------|---------|-------|
-| 상품 · 카테고리 · 사이즈표 · AI 초안 · 전시 · 룩 조회 | `CATALOG_READ` | 200 | 200 | 200 |
-| 위의 쓰기 · SKU 구조(`/skus` · `/option-retirements`) · 이미지 업로드 발급 · 확정 · 전시 미리보기 | `CATALOG_MANAGE` | 200 | 403 | 403 |
+| 상품 · 카테고리 · 사이즈표 · AI 초안(사이즈표 초안 이미지 후보 포함) · 전시 · 룩 조회 | `CATALOG_READ` | 200 | 200 | 200 |
+| 위의 쓰기 · SKU 구조(`/skus` · `/option-retirements`) · 이미지 업로드 발급 · 확정 · 전시 미리보기 · 사이즈표 초안 이미지 확인(`GET …/image-sources/{sourceId}/inspection` — 승인 흐름이고 요청마다 최대 5MiB 를 읽어 GET 이지만 관리 권한, #217) | `CATALOG_MANAGE` | 200 | 403 | 403 |
 | 재고 · 조정 이력 · 품절 임박 기준 · 품절 임박 조회 | `INVENTORY_READ` | 200 | 200 | 403 |
 | 재고 조정(PATCH) · 품절 임박 기준 설정 · 해제 | `INVENTORY_MANAGE` | 200 | 403 | 403 |
 | SKU 원가 현재 · 이력 조회 | `COST_READ` | 200 | 403 | 403 |
@@ -941,7 +941,8 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
 
   | 엔드포인트 | 허용 호출자 | 비고 |
   |------------|-------------|------|
-  | `GET /internal/v1/size-chart-drafts/{draftId}/generation-input` (product) | `SERVICE_operations-service` | 만료 전 안전한 TEXT·템플릿 불변 스냅숏만, `no-store`. 원문 이미지·서명 URL 없음 |
+  | `GET /internal/v1/size-chart-drafts/{draftId}/generation-input` (product) | `SERVICE_operations-service` | 만료 전 안전한 TEXT·템플릿 불변 스냅숏과 IMAGE 이미지별 해시·형식만, `no-store`. 원문 이미지·스토리지 키·서명 URL 없음 |
+  | `GET /internal/v1/size-chart-drafts/{draftId}/generation-images/{index}` (product) | `SERVICE_operations-service` | 승인한 관리 키 이미지 바이트(`application/octet-stream`, `no-store`, `nosniff`). 읽는 시점 SHA-256 재검증, 불일치 410 `SIZE_CHART_DRAFT_016` |
   | `POST /internal/v1/size-chart-generation-jobs` (operations) | `SERVICE_product-service` | draft ID·입력 해시·요청자·만료만 등록. 완료 뒤에도 같은 영수증 재생 |
   | `GET /internal/v1/size-chart-generation-jobs/{jobId}/result` (operations) | `SERVICE_product-service` | 확정 상태·검증 결과만, 원래 job payload·Provider 오류 원문 없음 |
 
