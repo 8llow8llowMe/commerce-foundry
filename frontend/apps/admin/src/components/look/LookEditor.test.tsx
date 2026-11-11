@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createLookForm, editLookForm } from '@/lib/look/form';
+import { IMAGE_ACCEPT } from '@/lib/upload/image-upload';
 import { ImageFields, LookEditor } from './LookEditor';
 
 const noop = () => {};
@@ -16,9 +17,12 @@ const renderImage = (imageUrl: string, altText = '') =>
   );
 
 describe('ImageFields', () => {
-  it('업로드 대신 저장소에 올린 이미지 주소를 넣으라고 안내하고, 주소가 없으면 빈 자리를 보인다', () => {
+  it('파일 올리기 칸(전시 · 룩 공용 형식)과 주소 칸을 함께 두고, 주소가 없으면 빈 자리를 보인다', () => {
     const html = renderImage('');
-    expect(html).toContain('이미지 업로드는 준비 중입니다');
+    expect(html).toContain('대표 이미지 파일 올리기');
+    expect(html).toContain(`accept="${IMAGE_ACCEPT}"`);
+    expect(html).toContain('파일을 올리면 주소 칸이 채워집니다');
+    expect(html).toContain('대표 이미지 주소');
     expect(html).toContain('이미지 없음');
     expect(html).not.toContain('<img');
   });
@@ -66,6 +70,7 @@ describe('LookEditor', () => {
             name: '치마',
             visible: true,
             saleStatus: { code: 'STOP_SELLING', name: '판매 종료', description: '' },
+            deleted: false,
           },
         ],
       }),
@@ -73,6 +78,56 @@ describe('LookEditor', () => {
     expect(html).not.toContain('새 룩은 꺼진 채로 시작합니다');
     expect(html).toContain('치마');
     expect(html).toContain('판매 종료 상품입니다. 룩에 보이지만 지금은 살 수 없습니다.');
+    expect(html).not.toMatch(/>[^<]*4611686018427387904[^<]*</);
+  });
+
+  it('주소로 저장된 기존 룩은 주소 칸 · 미리보기에 그대로 보인다', () => {
+    const html = render(
+      '1',
+      editLookForm({
+        lookId: '1',
+        title: '봄 룩',
+        description: null,
+        image: {
+          url: 'https://media.example.test/old.jpg',
+          width: null,
+          height: null,
+          altText: null,
+        },
+        visible: false,
+        products: [],
+      }),
+    );
+    expect(html).toContain('value="https://media.example.test/old.jpg"');
+    expect(html).toContain('src="https://media.example.test/old.jpg"');
+  });
+
+  it('삭제된 구성 상품 줄에 빼야 저장할 수 있다고 알린다', () => {
+    const html = render(
+      '1',
+      editLookForm({
+        lookId: '1',
+        title: '봄 룩',
+        description: null,
+        image: {
+          url: 'https://media.example.test/a.jpg',
+          width: null,
+          height: null,
+          altText: null,
+        },
+        visible: true,
+        products: [
+          {
+            productId: '4611686018427387904',
+            name: '치마',
+            visible: true,
+            saleStatus: null,
+            deleted: true,
+          },
+        ],
+      }),
+    );
+    expect(html).toContain('삭제된 상품 — 빼야 저장할 수 있습니다.');
     expect(html).not.toMatch(/>[^<]*4611686018427387904[^<]*</);
   });
 });

@@ -22,8 +22,20 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied } from '@/lib/api-errors';
 import { moveItem, sameOrder } from '@/lib/display/order';
-import { DELETE_FAILED, lookOrderFailure, lookRowFailure, TOGGLE_FAILED } from '@/lib/look/errors';
-import { createLookForm, editLookForm, lookName, unchangedLookRequest } from '@/lib/look/form';
+import {
+  DELETE_FAILED,
+  lookOrderFailure,
+  lookRowFailure,
+  TOGGLE_DELETED_PRODUCT,
+  TOGGLE_FAILED,
+} from '@/lib/look/errors';
+import {
+  createLookForm,
+  deletedProductCount,
+  editLookForm,
+  lookName,
+  unchangedLookRequest,
+} from '@/lib/look/form';
 import {
   LOOK_LIMITS,
   LOOK_ORDER_PATH,
@@ -158,9 +170,14 @@ export function LookManager() {
 
   const toggle = async (look: LookAdmin) => {
     if (actionsLocked) return;
+    setNotice(null);
+    // 전체 교체 PUT 이라 삭제된 상품이 든 룩은 400 `LOOK_009` 다 — 보내지 않고 수정 화면으로 안내한다
+    if (deletedProductCount(look) > 0) {
+      setRowError({ lookId: look.lookId, message: TOGGLE_DELETED_PRODUCT });
+      return;
+    }
     setRowBusy({ lookId: look.lookId, action: 'toggle' });
     setRowError(null);
-    setNotice(null);
     const visible = !look.visible;
     try {
       const updated = await apiFetch<LookAdmin>(lookPath(look.lookId), {

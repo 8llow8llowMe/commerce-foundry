@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ProductFormItem } from '@/lib/display/form';
 import {
   createLookForm,
+  deletedProductCount,
   DESCRIPTION_CHARACTER,
   editLookForm,
   IMAGE_REQUIRED,
@@ -11,6 +12,7 @@ import {
   lookSummary,
   lookWarnings,
   PRODUCT_COUNT,
+  PRODUCT_DELETED,
   PRODUCT_DUPLICATED,
   SINGLE_LINE_ONLY,
   TITLE_REQUIRED,
@@ -46,8 +48,8 @@ const look = (patch: Partial<LookAdmin> = {}): LookAdmin => ({
   image: { url: IMAGE, width: 1200, height: 1600, altText: '가을 코디' },
   visible: true,
   products: [
-    { productId: '11', name: '저고리', visible: true, saleStatus: ON_SALE },
-    { productId: '12', name: '치마', visible: false, saleStatus: STOP },
+    { productId: '11', name: '저고리', visible: true, saleStatus: ON_SALE, deleted: false },
+    { productId: '12', name: '치마', visible: false, saleStatus: STOP, deleted: false },
   ],
   ...patch,
 });
@@ -78,7 +80,19 @@ describe('editLookForm', () => {
       visible: false,
       availability: STOP,
       caption: null,
+      deleted: false,
     });
+  });
+
+  it('삭제된 구성 상품은 삭제 표시를 옮긴다(BE #424)', () => {
+    const form = editLookForm(
+      look({
+        products: [
+          { productId: '11', name: '저고리', visible: true, saleStatus: ON_SALE, deleted: true },
+        ],
+      }),
+    );
+    expect(form.products[0]?.deleted).toBe(true);
   });
 
   it('원본 크기를 모르거나 선택 칸이 없으면 비운다', () => {
@@ -148,6 +162,23 @@ describe('lookRequest', () => {
     });
     expect(lookRequest(filled({ description: '첫 줄\n\t둘째 줄' })).ok).toBe(true);
   });
+
+  it('삭제된 상품이 있으면 보내지 않고 구성 상품 칸에 빼라고 알린다(LOOK_009)', () => {
+    expect(
+      lookRequest(filled({ products: [product('1'), { ...product('2'), deleted: true }] })),
+    ).toEqual({ ok: false, errors: { products: [PRODUCT_DELETED] } });
+    expect(lookRequest(filled({ products: [{ ...product('1'), deleted: false }] })).ok).toBe(true);
+  });
+
+  it('업로드로 바뀐 주소에도 같은 규칙이고, 주소로 저장된 기존 룩은 그대로 다시 보낸다', () => {
+    const saved = lookRequest(editLookForm(look()));
+    expect(saved.ok && saved.request.image).toEqual({
+      url: IMAGE,
+      width: 1200,
+      height: 1600,
+      altText: '가을 코디',
+    });
+  });
 });
 
 describe('unchangedLookRequest', () => {
@@ -172,5 +203,17 @@ describe('lookWarnings · lookSummary', () => {
   it('상품 수와 숨긴 상품 수를 요약한다', () => {
     expect(lookSummary(look())).toBe('상품 2개 · 숨긴 상품 1개');
     expect(lookSummary(look({ products: [] }))).toBe('상품 0개');
+  });
+
+  it('삭제된 상품은 숨긴 상품으로 세지 않고 따로 센다', () => {
+    const withDeleted = look({
+      products: [
+        { productId: '11', name: '저고리', visible: false, saleStatus: ON_SALE, deleted: true },
+        { productId: '12', name: '치마', visible: false, saleStatus: STOP, deleted: false },
+      ],
+    });
+    expect(lookSummary(withDeleted)).toBe('상품 2개 · 숨긴 상품 1개');
+    expect(deletedProductCount(withDeleted)).toBe(1);
+    expect(deletedProductCount(look())).toBe(0);
   });
 });

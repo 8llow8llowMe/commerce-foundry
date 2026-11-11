@@ -14,8 +14,14 @@ const look = (patch: Partial<LookAdmin> = {}): LookAdmin => ({
   image: { url: 'https://media.example.test/a.jpg', width: null, height: null, altText: null },
   visible: true,
   products: [
-    { productId: '4611686018427387904', name: '저고리', visible: true, saleStatus: null },
-    { productId: '12', name: '치마', visible: false, saleStatus: null },
+    {
+      productId: '4611686018427387904',
+      name: '저고리',
+      visible: true,
+      saleStatus: null,
+      deleted: false,
+    },
+    { productId: '12', name: '치마', visible: false, saleStatus: null, deleted: false },
   ],
   ...patch,
 });
@@ -62,6 +68,25 @@ describe('LookRow', () => {
     // 아이디는 포커스 표식(data-focus)에만 있고 글자로는 보이지 않는다
     expect(html).not.toMatch(/>[^<]*46116860184273879\d\d[^<]*</);
     expect(html).not.toContain('4611686018427387904');
+  });
+
+  it('삭제된 상품이 있으면 그 수와 빼야 저장할 수 있다는 안내를 보인다(아이디는 보이지 않는다)', () => {
+    const html = render(
+      look({
+        products: [
+          {
+            productId: '4611686018427387904',
+            name: '저고리',
+            visible: true,
+            saleStatus: null,
+            deleted: true,
+          },
+        ],
+      }),
+    );
+    expect(html).toContain('삭제된 상품 1개 — 수정 화면에서 빼야 저장할 수 있습니다.');
+    expect(html).not.toContain('4611686018427387904');
+    expect(render(look())).not.toContain('삭제된 상품');
   });
 
   it('숨긴 룩은 숨김으로 보인다', () => {

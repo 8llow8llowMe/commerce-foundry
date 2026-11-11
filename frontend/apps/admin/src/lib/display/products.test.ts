@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProductFormItem } from './form';
-import { addProduct, productNotice } from './products';
+import { addProduct, DELETED_PRODUCT_NOTICE, productNotice } from './products';
 
 const ON_SALE = { code: 'ON_SALE', name: '판매중', description: '' };
 const SOLD_OUT = { code: 'SOLD_OUT', name: '품절', description: '' };
@@ -57,6 +57,13 @@ describe('productNotice', () => {
     );
     expect(productNotice({ ...item('1'), availability: ON_SALE })).toBeNull();
     expect(productNotice(item('1'))).toBeNull();
+  });
+
+  it('삭제된 상품(룩)은 숨김 · 판매 상태보다 먼저 빼야 저장할 수 있다고 알린다', () => {
+    expect(productNotice({ ...item('1'), deleted: true, visible: false }, '룩')).toBe(
+      DELETED_PRODUCT_NOTICE,
+    );
+    expect(productNotice({ ...item('1'), deleted: false })).toBeNull();
   });
 
   it('고객 화면 이름을 받으면 그 이름으로 알린다(룩)', () => {

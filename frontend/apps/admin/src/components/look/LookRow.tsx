@@ -3,7 +3,7 @@
 import { cx } from '@cf/ui';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { lookName, lookSummary } from '@/lib/look/form';
+import { deletedProductCount, lookName, lookSummary } from '@/lib/look/form';
 import type { LookAdmin } from '@/lib/look/types';
 
 const linkButton =
@@ -33,7 +33,7 @@ export type LookRowProps = {
 
 /**
  * 룩 목록의 한 줄 — 대표 이미지 · 제목 · 구성 상품 수 · 노출. 손잡이를 끌거나(dnd-kit, 키보드 포함) 위 · 아래 버튼으로 순서를 바꾼다.
- * 룩 아이디 · 상품 아이디는 보이지 않는다(#305).
+ * 룩 아이디 · 상품 아이디는 보이지 않는다(#305). 삭제된 구성 상품(BE #424)이 있으면 그 수와 빼야 저장할 수 있다는 안내를 붙인다.
  */
 export function LookRow({
   look,
@@ -54,6 +54,7 @@ export function LookRow({
 }: LookRowProps) {
   const name = lookName(look);
   const id = look.lookId;
+  const deleted = deletedProductCount(look);
   const {
     attributes,
     listeners,
@@ -145,6 +146,11 @@ export function LookRow({
             </span>
           </div>
           <p className="text-xs text-muted-fg">{lookSummary(look)}</p>
+          {deleted > 0 && (
+            <p className="text-xs text-danger">
+              삭제된 상품 {deleted}개 — 수정 화면에서 빼야 저장할 수 있습니다.
+            </p>
+          )}
         </div>
 
         <label className="flex cursor-pointer items-center gap-2 text-sm">

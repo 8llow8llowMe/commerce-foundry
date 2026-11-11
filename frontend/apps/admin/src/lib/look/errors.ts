@@ -11,6 +11,7 @@ import {
   IMAGE_REQUIRED,
   LOOK_TOO_LONG,
   PRODUCT_COUNT,
+  PRODUCT_DELETED,
   PRODUCT_DUPLICATED,
   SINGLE_LINE_ONLY,
   TITLE_REQUIRED,
@@ -28,12 +29,14 @@ export const BUSY = '다른 관리자가 룩을 바꾸는 중입니다. 잠시 �
 export const LOOK_LIMIT = `룩은 최대 ${LOOK_LIMITS.looks}개까지 만들 수 있습니다. 쓰지 않는 룩을 지운 뒤 다시 시도해 주세요.`;
 export const PRODUCT_MISSING = '찾을 수 없는 상품이 있습니다. 그 상품을 빼고 저장해 주세요.';
 export const IMAGE_URL_NOT_ALLOWED =
-  '쇼핑몰 이미지 저장소에 올린 이미지 주소만 넣을 수 있습니다. 주소를 확인해 주세요.';
+  '쇼핑몰 이미지 저장소에 올린 이미지 주소만 넣을 수 있습니다. 파일을 올리거나 주소를 확인해 주세요.';
 export const MEDIA_STORAGE_UNAVAILABLE =
   '이미지 저장소 설정이 맞지 않아 지금은 룩을 저장할 수 없습니다. 개발 담당자에게 문의해 주세요.';
 export const ORDER_CHANGED_NOTICE =
   '그사이 다른 곳에서 룩이 추가되거나 삭제되어 순서를 저장하지 못했습니다. 목록을 다시 불러왔으니 순서를 다시 정해 주세요.';
 export const DELETE_FAILED = '삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+export const TOGGLE_DELETED_PRODUCT =
+  '삭제된 상품이 들어 있어 노출을 바꿀 수 없습니다. 수정 화면에서 삭제된 상품을 뺀 뒤 저장해 주세요.';
 export const TOGGLE_FAILED =
   '노출을 바꾸지 못했습니다. 수정 화면에서 내용을 확인한 뒤 다시 시도해 주세요.';
 
@@ -72,12 +75,28 @@ export type LookSaveFailure =
   | { kind: 'access'; denied: AccessDenied }
   /** 대상이 없어졌거나(404) 결과를 모름(502 · 504) — 목록을 다시 읽고 안내한다 */
   | { kind: 'reload'; notice: string }
-  | { kind: 'errors'; errors: FormErrors };
+  /** `deletedProductIds` — 400 `LOOK_009` 의 삭제 상품 아이디. 화면에 내지 않고 그 상품 줄 표시에만 쓴다(#305) */
+  | { kind: 'errors'; errors: FormErrors; deletedProductIds?: string[] };
+
+/**
+ * `LOOK_009` 서버 문구(`삭제된 상품이 있습니다: 1, 2`)에서 삭제 상품 아이디를 꺼낸다. 모양이 다르면 빈 목록이다(줄 표시 없이 폼 문구만 보인다).
+ * 아이디는 화면에 보이지 않는다 — 폼의 구성 상품과 맞춰 그 줄에 삭제 표시를 할 때만 쓴다.
+ */
+export function deletedProductIdsOf(message: string): string[] {
+  const at = message.lastIndexOf(':');
+  if (at < 0) return [];
+  return message
+    .slice(at + 1)
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => /^\d+$/.test(part));
+}
 
 /**
  * 생성 · 수정 실패를 화면 처리로 가른다.
  * - 401 은 폼을 지키고 다시 로그인을 안내한다. 403 은 권한 안내.
- * - fieldErrors 는 칸에, 룩 규칙 오류(`LOOK_002~006`)는 그 칸 · 폼 전체에 업무 문구로 붙인다.
+ * - fieldErrors 는 칸에, 룩 규칙 오류(`LOOK_002~006` · `009`)는 그 칸 · 폼 전체에 업무 문구로 붙인다.
+ *   삭제 상품(`LOOK_009`)은 아이디를 함께 돌려줘 그 상품 줄에 삭제 표시를 한다.
  * - 버전이 없어 마지막 쓰기가 이긴다. 409 는 잠금 대기(`LOOK_008`) · 룩 상한(`LOOK_002`)뿐이다.
  */
 export function lookSaveFailure(cause: unknown): LookSaveFailure {
@@ -111,6 +130,12 @@ export function lookSaveFailure(cause: unknown): LookSaveFailure {
       return { kind: 'errors', errors: { form: [MEDIA_STORAGE_UNAVAILABLE] } };
     case 'LOOK_008':
       return { kind: 'errors', errors: { form: [BUSY] } };
+    case 'LOOK_009':
+      return {
+        kind: 'errors',
+        errors: withSummary({ products: [PRODUCT_DELETED] }),
+        deletedProductIds: deletedProductIdsOf(cause.message),
+      };
   }
   // 요청 제한(429)은 기본 문구가 운영자 문구다. 그 밖은 일반 실패 문구(서버 원문을 보이지 않는다)
   if (cause.kind === 'rateLimited') return { kind: 'errors', errors: { form: [cause.message] } };
@@ -134,6 +159,7 @@ export function lookRowFailure(cause: unknown, fallback: string): LookRowFailure
   if (cause.kind === 'unknownOutcome') return { kind: 'reload', notice: UNKNOWN_OUTCOME_NOTICE };
   if (cause.code === 'LOOK_008') return { kind: 'message', message: BUSY };
   if (cause.code === 'LOOK_006') return { kind: 'message', message: MEDIA_STORAGE_UNAVAILABLE };
+  if (cause.code === 'LOOK_009') return { kind: 'message', message: TOGGLE_DELETED_PRODUCT };
   if (cause.kind === 'rateLimited') return { kind: 'message', message: cause.message };
   return { kind: 'message', message: fallback };
 }
