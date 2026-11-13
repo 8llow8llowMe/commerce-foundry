@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.payment.adapter.in.admin.presenter;
 
 import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
+import com.commercefoundry.domainlayer.payment.adapter.in.admin.dto.item.PaymentAdminExternalRefundItem;
 import com.commercefoundry.domainlayer.payment.adapter.in.admin.dto.item.PaymentAdminItem;
 import com.commercefoundry.domainlayer.payment.application.info.PaymentAdminInfo;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentUnknownReason;
@@ -15,7 +16,14 @@ public class PaymentAdminPresenter {
         return PageResponse.of(page).map(info -> new PaymentAdminItem(String.valueOf(info.paymentId()), String.valueOf(info.orderId()),
             info.status().toMetadata(), MoneyItems.of(info.amount()), info.method() == null ? null : info.method().toMetadata(),
             unknownReasonOf(info.unknownReason()), info.orderSynced(), info.orderSyncFailureCode(), info.createdAt(), info.updatedAt(),
-            info.approvalStartedAt(), info.approvedAt()));
+            info.approvalStartedAt(), info.approvedAt(), externalRefundOf(info.externalRefund())));
+    }
+
+    private static PaymentAdminExternalRefundItem externalRefundOf(PaymentAdminInfo.ExternalRefund refund) {
+        if (refund == null) {
+            return null;
+        }
+        return new PaymentAdminExternalRefundItem(MoneyItems.of(refund.pgAmount()), MoneyItems.of(refund.offPgAmount()));
     }
 
     private static CodeNameDescriptionMetadata unknownReasonOf(PaymentUnknownReason reason) {

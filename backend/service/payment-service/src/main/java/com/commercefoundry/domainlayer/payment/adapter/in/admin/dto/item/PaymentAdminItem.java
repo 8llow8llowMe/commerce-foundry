@@ -41,6 +41,9 @@ public record PaymentAdminItem(
     Instant approvalStartedAt,
 
     @Schema(description = "승인 완료 시각(UTC)", nullable = true)
-    Instant approvedAt
+    Instant approvedAt,
+
+    @Schema(description = "외부 확인 환불 합계. 그런 취소 원장이 없으면 null. amount 원금에서 빼지 않은 값이다", nullable = true)
+    PaymentAdminExternalRefundItem externalRefund
 ) {
 }

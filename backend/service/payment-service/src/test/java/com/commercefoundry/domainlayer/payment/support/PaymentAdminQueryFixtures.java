@@ -44,8 +44,36 @@ public final class PaymentAdminQueryFixtures {
             cancel(32, 3, PaymentCancel.Status.VOIDED), cancel(42, 4, PaymentCancel.Status.VOIDED));
     }
 
+    /**
+     * 외부 확인 환불(#693) 목록 시나리오. 결제 1~5 는 DONE · 3 만 PARTIAL_CANCELED, 6 은 원장 없음.
+     * <ul>
+     *   <li>1 — EXTERNAL_PG 300 + 200, OFF_PG 500 → pg 500 · offPg 500 (두 채널 · 여러 행)</li>
+     *   <li>2 — OFF_PG 700 만 → pg 0 · offPg 700. 이전 REJECTED 가 외부 환불로 바뀐 건이라 환불 실패 필터에서 빠진다</li>
+     *   <li>3 — EXTERNAL_PG 400 + SUCCEEDED 100 → pg 400 · offPg 0 (우리 PG 취소 성공은 외부 환불이 아니다)</li>
+     *   <li>4 — REJECTED + OFF_PG 50 → 두 이력 필터에 모두 나온다</li>
+     *   <li>5 — REJECTED · VOIDED · PENDING → 외부 환불 없음(null), 환불 실패 필터에만 나온다</li>
+     * </ul>
+     */
+    public static List<PaymentEntity> externalRefundPayments() {
+        return List.of(entity(1, PaymentStatus.DONE, false), entity(2, PaymentStatus.DONE, false), entity(3, PaymentStatus.PARTIAL_CANCELED, false),
+            entity(4, PaymentStatus.DONE, false), entity(5, PaymentStatus.DONE, false), entity(6, PaymentStatus.DONE, true));
+    }
+
+    public static List<PaymentCancelEntity> externalRefundCancellations() {
+        return List.of(cancel(11, 1, PaymentCancel.Status.EXTERNAL_PG_REFUNDED, 300), cancel(12, 1, PaymentCancel.Status.EXTERNAL_PG_REFUNDED, 200),
+            cancel(13, 1, PaymentCancel.Status.OFF_PG_REFUNDED, 500), cancel(21, 2, PaymentCancel.Status.OFF_PG_REFUNDED, 700),
+            cancel(31, 3, PaymentCancel.Status.EXTERNAL_PG_REFUNDED, 400), cancel(32, 3, PaymentCancel.Status.SUCCEEDED, 100),
+            cancel(41, 4, PaymentCancel.Status.REJECTED, 100), cancel(42, 4, PaymentCancel.Status.OFF_PG_REFUNDED, 50),
+            cancel(51, 5, PaymentCancel.Status.REJECTED, 100), cancel(52, 5, PaymentCancel.Status.VOIDED, 100),
+            cancel(53, 5, PaymentCancel.Status.PENDING, 100));
+    }
+
     private static PaymentCancelEntity cancel(long claimId, int offset, PaymentCancel.Status status) {
         long amount = offset == 2 && status == PaymentCancel.Status.SUCCEEDED ? 129000L + offset : 100;
+        return cancel(claimId, offset, status, amount);
+    }
+
+    private static PaymentCancelEntity cancel(long claimId, int offset, PaymentCancel.Status status, long amount) {
         return PaymentCancelEntity.from(new PaymentCancel(claimId, ID + offset, Money.of(amount, CurrencyCode.KRW), status));
     }
 
