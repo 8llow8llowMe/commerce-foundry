@@ -213,6 +213,21 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 `idx_payment_cancel_payment_id`를 사용 가능한 기존 인덱스로 유지한다. 새 DDL · PG 조회 · 승인/취소 재시도 · 주문 이벤트 재발행은 없다.
 FE는 새 필터를 "취소거절 이력"으로 표시하고 응답 상태를 그대로 사용한다. 계약 검토자는 `seonghoho`다. 자동 복구 · 웹훅 · 알림은 후속이다.
 
+**외부 확인 환불 표시 (#693 PR C)** — 우리 PG 취소 호출 밖에서 확인해 기록한 환불(`EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED`, 아래 "취소 원장 상태와 두 합계")을 목록에서 본다.
+
+- `status=EXTERNAL_REFUNDED` 는 `REFUND_FAILED` 와 같은 조회 전용 **이력 필터**다. 외부 확인 환불 원장이 하나 이상 있는 결제를 조회한다. 실제 결제 상태가 아니며
+  응답 `status` 는 저장된 결제 상태 그대로다 — `OFF_PG_REFUNDED` 는 결제 상태에 반영하지 않으므로 PG 밖 환불만 있는 결제는 DONE 으로 보인다.
+  상태 집합은 도메인 `PaymentCancel.Status#refundedExternally()` 하나로만 정한다. 같은 상관 EXISTS 를 목록 · count 에 적용한다.
+- **`REFUND_FAILED` 의 예외** — 거절 원장(`REJECTED`)이 외부 확인 환불로 바뀌면 그 행은 더 이상 거절 이력이 아니므로 `REFUND_FAILED` 에서 **저절로 빠진다.**
+  "거절 이력은 지우지 않는다"는 위 규칙은 다른 클레임의 후속 성공 · 현재 결제 상태에 대한 것이고, 같은 원장 행의 상태가 바뀐 경우는 예외다.
+  같은 결제에 거절 행이 남아 있으면(다른 클레임) 두 필터에 모두 나온다.
+- 항목 `externalRefund` = `{pgAmount, offPgAmount}`(각각 `{amount, currency}`), 외부 확인 환불 원장이 없으면 null. `pgAmount` 는 `EXTERNAL_PG_REFUNDED` 합(PG 잔액이
+  줄었다), `offPgAmount` 는 `OFF_PG_REFUNDED` 합(PG 잔액 · 결제 상태 무관)이고 없는 채널은 0 이다. 우리 PG 취소 성공(`SUCCEEDED`)은 넣지 않는다 — §8-1 의
+  `pgCanceled` · `refundedTotal` 과 다른 값이며, `amount`(결제 시도 원금)에서 빼지 않는다. 필터와 무관하게 모든 항목에 싣는다.
+- 집계는 **페이지 단위 한 번**이다 — 목록의 결제 아이디(최대 100개)로 `payment_cancel` 을 `payment_id IN (...)` · 외부 확인 환불 상태로 거르고
+  결제 · 상태 · 통화별 GROUP BY 한 문장(`idx_payment_cancel_payment_id`). 빈 페이지면 질의하지 않는다. 그래서 목록은 최대 3회 질의(목록 · count · 집계)이며 같은
+  읽기 스냅숏(REPEATABLE_READ)이다. 원장 통화가 결제 통화와 다르면 데이터 오류라 조용히 넘기지 않고 실패한다(`PaymentCancelLedger` 와 같은 태도).
+
 ### 리포트용 정상 승인 집계 internal (#550)
 
 `GET /internal/v1/payments/approval-summary?from=&to=`는 `SERVICE_operations-service`만 호출한다(`@Hidden`, `Cache-Control: no-store`).
