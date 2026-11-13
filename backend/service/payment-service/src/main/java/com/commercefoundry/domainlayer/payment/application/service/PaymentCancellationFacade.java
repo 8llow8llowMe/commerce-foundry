@@ -29,8 +29,13 @@ public class PaymentCancellationFacade implements PaymentCancellationUseCase {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_KEY_REUSED);
         }
         PaymentCancelProcessor.Prepared prepared = processor.prepare(paymentId, claimId, Money.of(amount, currency));
-        if (prepared.cancel().status() == PaymentCancel.Status.SUCCEEDED) {
+        // SUCCEEDED 와 외부 확인 환불(EXTERNAL_PG_REFUNDED · OFF_PG_REFUNDED, #693) 모두 환불 확정이다 — PG 를 다시 부르면 이중 환불이 된다.
+        if (prepared.cancel().status().countsAsRefunded()) {
             return response(paymentId, claimId, prepared.payment().status().name(), amount);
+        }
+        if (prepared.cancel().status() != PaymentCancel.Status.PENDING) {
+            // 준비가 PENDING 만 넘기지만, 새 상태가 생겨도 PG 를 여는 쪽으로 새지 않게 닫는다.
+            throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
         }
         PaymentGatewayProcessor.CancelOutcome result = gateway.cancel(prepared.payment(), claimId, prepared.cancel().amount(), prepared.cumulative());
         if (result == PaymentGatewayProcessor.CancelOutcome.SUCCEEDED) {

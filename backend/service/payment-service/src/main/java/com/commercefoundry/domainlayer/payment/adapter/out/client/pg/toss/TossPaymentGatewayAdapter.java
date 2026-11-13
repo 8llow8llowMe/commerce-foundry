@@ -59,10 +59,10 @@ public class TossPaymentGatewayAdapter implements PaymentGatewayPort {
     public PgRetentionQueryResult inquireRetention(Payment payment, Money expectedBalance) {
         Objects.requireNonNull(payment, "payment");
         if (payment.paymentKey() == null || payment.method() == PaymentMethod.VIRTUAL_ACCOUNT || payment.amount().currency() != CurrencyCode.KRW) {
-            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNSUPPORTED);
+            return PgRetentionQueryResult.unsupported();
         }
         if (expectedBalance == null || expectedBalance.currency() != payment.amount().currency() || expectedBalance.isGreaterThan(payment.amount())) {
-            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
+            return PgRetentionQueryResult.unknown();
         }
         return tossPaymentsResponseSupport.retentionInquiry(payment, expectedBalance,
             () -> tossPaymentsClient.getPaymentByPaymentKey(tossPaymentsProperties.basicAuthorization(), payment.paymentKey()));

@@ -104,6 +104,19 @@ class OrderPaymentReplyUnitTest {
         verifyNoInteractions(policy);
     }
     @Test
+    void autoCancelCandidateUsesPgBalanceSoExternalPgCountsAndOffPgDoesNot() {
+        // #693 후보 = PG 에 돈이 남았는가(결제액 > pgCanceled). OFF_PG 결제는 후보로 넘겨 자동 취소 획득이 MANUAL_REVIEW 로 드러낸다
+        when(query.query(PAYMENT_ID)).thenReturn(source(Result.REJECTED_ORDER_CANCELED));
+        when(payments.findById(PAYMENT_ID)).thenReturn(Optional.of(done()));
+        when(cancels.findByPaymentId(PAYMENT_ID)).thenReturn(List.of(new PaymentCancel(42, PAYMENT_ID, krw(129000), PaymentCancel.Status.EXTERNAL_PG_REFUNDED)));
+        assertThat(facade.handle(command(Result.REJECTED_ORDER_CANCELED)).cancelCandidate()).isFalse();
+
+        when(cancels.findByPaymentId(PAYMENT_ID)).thenReturn(List.of(
+            new PaymentCancel(42, PAYMENT_ID, krw(29000), PaymentCancel.Status.EXTERNAL_PG_REFUNDED),
+            new PaymentCancel(43, PAYMENT_ID, krw(100000), PaymentCancel.Status.OFF_PG_REFUNDED)));
+        assertThat(facade.handle(command(Result.REJECTED_ORDER_CANCELED)).cancelCandidate()).isTrue();
+    }
+    @Test
     void unwrapsCommitVersionAndExactUniqueButNeverMistakesOtherConstraintsForDuplicates() {
         assertThat(failures.classify(new TransactionSystemException(CANARY, new RollbackException(CANARY, new OptimisticLockException(CANARY)))))
             .isEqualTo(PAYMENT_VERSION);

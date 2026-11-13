@@ -68,8 +68,17 @@ class PaymentCancelVoidProcessorTest {
         given(cancelPort.findByPaymentId(locked.id())).willReturn(all);
     }
 
+    /** MATCHED 는 기대 잔액 그대로, MISMATCHED 는 0원(콘솔 전액 취소)을 관측 잔액으로 답한다. */
     private void pg(PgRetentionQueryResult.State state) {
-        given(gatewayPort.inquireRetention(any(), any())).willReturn(PgRetentionQueryResult.of(state));
+        given(gatewayPort.inquireRetention(any(), any())).willAnswer(invocation -> {
+            Money expected = invocation.getArgument(1);
+            return switch (state) {
+                case MATCHED -> PgRetentionQueryResult.matched(expected);
+                case MISMATCHED -> PgRetentionQueryResult.mismatched(Money.zero(expected.currency()));
+                case UNKNOWN -> PgRetentionQueryResult.unknown();
+                case UNSUPPORTED -> PgRetentionQueryResult.unsupported();
+            };
+        });
     }
 
     private PaymentCancelVoidResponse callVoid() {
@@ -158,7 +167,7 @@ class PaymentCancelVoidProcessorTest {
         }
 
         @Test
-        @DisplayName("기대 잔액은 결제액 − SUCCEEDED 합계다 — VOIDED · REJECTED 금액은 빼지 않는다")
+        @DisplayName("기대 잔액은 결제액 − pgCanceled(SUCCEEDED 합계) 다 — VOIDED · REJECTED 금액은 빼지 않는다")
         void expectedBalanceIgnoresVoidedAndRejected() {
             Payment partial = payment.recordCancellation(krw(29_000));
             ledger(partial, null, List.of(
@@ -381,7 +390,7 @@ class PaymentCancelVoidProcessorTest {
         }
 
         @Test
-        @DisplayName("SUCCEEDED 합계가 바뀌면 LEDGER_CHANGED 이고 바뀐 잔액 · 상태로 답한다")
+        @DisplayName("PG 취소 합계(SUCCEEDED)가 바뀌면 LEDGER_CHANGED 이고 바뀐 잔액 · 상태로 답한다")
         void succeededSumChanged() {
             Payment partial = payment.recordCancellation(krw(5_000));
             given(cancelPort.lockPayment(payment.id())).willReturn(Optional.of(payment), Optional.of(partial));
@@ -493,9 +502,155 @@ class PaymentCancelVoidProcessorTest {
             Arguments.of("다른 통화", new PaymentCancel(CLAIM, PaymentFixtures.PAYMENT_ID, Money.of(10_000, CurrencyCode.USD), PaymentCancel.Status.REJECTED)));
     }
 
+    @Nested
+    @DisplayName("#693 외부 확인 환불 · 두 합계")
+    class ExternalRefund {
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = PaymentCancel.Status.class, names = {"EXTERNAL_PG_REFUNDED", "OFF_PG_REFUNDED"})
+        @DisplayName("이 claimId 가 외부 확인 환불이면 REFUNDED · CLAIM_REFUNDED_EXTERNALLY 이고 PG 를 부르지 않는다 — 남은 금액은 결제액 − refundedTotal")
+        void externallyRefundedClaimIsRefunded(PaymentCancel.Status status) {
+            Payment locked = status.reducesPgBalance() ? payment.recordCancellation(krw(10_000)) : payment;
+            PaymentCancel refunded = claim(status);
+            ledger(locked, refunded, List.of(refunded));
+
+            PaymentCancelVoidResponse result = callVoid();
+
+            assertThat(result.outcome()).isEqualTo("REFUNDED");
+            assertThat(result.reason()).isEqualTo("CLAIM_REFUNDED_EXTERNALLY");
+            assertThat(result.sealed()).isFalse();
+            assertThat(result.paymentStatus().code()).isEqualTo(locked.status().name());
+            assertThat(result.retainedAmount().amount()).isEqualTo(119_000);
+            assertNoPgNoSeal();
+        }
+
+        @Test
+        @DisplayName("PG 기대 잔액은 OFF_PG 를 빼지 않고(결제액 − pgCanceled), 남은 금액은 OFF_PG 까지 뺀다(결제액 − refundedTotal)")
+        void expectedBalanceExcludesOffPgButRetainedIncludesIt() {
+            Payment partial = payment.recordCancellation(krw(20_000));
+            ledger(partial, null, List.of(
+                new PaymentCancel(40, partial.id(), krw(20_000), PaymentCancel.Status.EXTERNAL_PG_REFUNDED),
+                new PaymentCancel(41, partial.id(), krw(30_000), PaymentCancel.Status.OFF_PG_REFUNDED)));
+            pg(PgRetentionQueryResult.State.MATCHED);
+
+            PaymentCancelVoidResponse result = callVoid();
+
+            verify(gatewayPort).inquireRetention(partial, krw(109_000));
+            assertThat(result.outcome()).isEqualTo("NO_REFUND_CONFIRMED");
+            assertThat(result.retainedAmount().amount()).isEqualTo(79_000);
+            verify(cancelPort).insertVoided(PaymentCancel.voided(CLAIM, partial.id(), krw(10_000)));
+        }
+
+        @ParameterizedTest(name = "{0} → {1}")
+        @CsvSource({"MISMATCHED, PG_LEDGER_MISMATCH", "UNKNOWN, PG_UNAVAILABLE", "UNSUPPORTED, PG_CHECK_UNSUPPORTED"})
+        @DisplayName("PG 가 MATCHED 가 아닐 때의 남은 금액도 결제액 − refundedTotal 이다 — PG 기대 잔액을 답하지 않는다")
+        void notMatchedAnswersRetainedNotExpectedBalance(PgRetentionQueryResult.State state, String reason) {
+            ledger(payment, null, List.of(new PaymentCancel(41, payment.id(), krw(30_000), PaymentCancel.Status.OFF_PG_REFUNDED)));
+            pg(state);
+
+            PaymentCancelVoidResponse result = callVoid();
+
+            assertUnconfirmed(result, reason, false);
+            verify(gatewayPort).inquireRetention(payment, krw(129_000));
+            assertThat(result.retainedAmount().amount()).isEqualTo(99_000);
+        }
+
+        @Test
+        @DisplayName("RETAINED_SHORT 는 OFF_PG 를 포함한 환불 합계로 본다 — 남은 금액 = 환불액이면 통과, 1원 적으면 PG 를 부르지 않는다")
+        void retainedShortCountsOffPg() {
+            ledger(payment, null, List.of(new PaymentCancel(41, payment.id(), krw(119_000), PaymentCancel.Status.OFF_PG_REFUNDED)));
+            pg(PgRetentionQueryResult.State.MATCHED);
+
+            PaymentCancelVoidResponse boundary = callVoid();
+
+            assertThat(boundary.outcome()).isEqualTo("NO_REFUND_CONFIRMED");
+            assertThat(boundary.retainedAmount().amount()).isEqualTo(10_000);
+            verify(gatewayPort).inquireRetention(payment, krw(129_000));
+
+            org.mockito.Mockito.clearInvocations(gatewayPort, cancelPort);
+            ledger(payment, null, List.of(new PaymentCancel(41, payment.id(), krw(119_001), PaymentCancel.Status.OFF_PG_REFUNDED)));
+
+            PaymentCancelVoidResponse shortBy1 = callVoid();
+
+            assertUnconfirmed(shortBy1, "RETAINED_SHORT", false);
+            assertThat(shortBy1.retainedAmount().amount()).isEqualTo(9_999);
+            assertNoPgNoSeal();
+        }
+
+        @Test
+        @DisplayName("PG 조회 사이에 OFF_PG 기록이 생기면 PG 합계가 같아도 원장이 바뀐 것이다 — LEDGER_CHANGED 이고 봉인하지 않는다")
+        void offPgAppearedDuringInquiry() {
+            given(cancelPort.lockPayment(payment.id())).willReturn(Optional.of(payment));
+            given(cancelPort.findByClaimId(CLAIM)).willReturn(Optional.empty());
+            given(cancelPort.findByPaymentId(payment.id()))
+                .willReturn(List.of(), List.of(new PaymentCancel(43, payment.id(), krw(5_000), PaymentCancel.Status.OFF_PG_REFUNDED)));
+            pg(PgRetentionQueryResult.State.MATCHED);
+
+            PaymentCancelVoidResponse result = callVoid();
+
+            assertUnconfirmed(result, "LEDGER_CHANGED", false);
+            assertThat(result.retainedAmount().amount()).isEqualTo(124_000);
+            verify(cancelPort, never()).insertVoided(any());
+        }
+
+        @Test
+        @DisplayName("PG 조회 사이에 EXTERNAL_PG 기록이 생겨 pgCanceled 가 바뀌면 LEDGER_CHANGED 이고 봉인하지 않는다 — 결제 상태가 아직 같아도")
+        void externalPgAppearedDuringInquiry() {
+            given(cancelPort.lockPayment(payment.id())).willReturn(Optional.of(payment));
+            given(cancelPort.findByClaimId(CLAIM)).willReturn(Optional.empty());
+            given(cancelPort.findByPaymentId(payment.id()))
+                .willReturn(List.of(), List.of(new PaymentCancel(43, payment.id(), krw(5_000), PaymentCancel.Status.EXTERNAL_PG_REFUNDED)));
+            pg(PgRetentionQueryResult.State.MATCHED);
+
+            PaymentCancelVoidResponse result = callVoid();
+
+            verify(gatewayPort).inquireRetention(payment, krw(129_000));
+            assertUnconfirmed(result, "LEDGER_CHANGED", false);
+            assertThat(result.retainedAmount().amount()).isEqualTo(124_000);
+            verify(cancelPort, never()).insertVoided(any());
+        }
+
+        @Test
+        @DisplayName("PG 관측 잔액은 MATCHED · MISMATCHED 에만 있고, UNKNOWN · UNSUPPORTED 에는 없다")
+        void observedBalanceOnlyWithEvidence() {
+            assertThat(PgRetentionQueryResult.mismatched(krw(0)).observedBalance()).isEqualTo(krw(0));
+            assertThat(PgRetentionQueryResult.unknown().observedBalance()).isNull();
+            assertThatThrownBy(() -> new PgRetentionQueryResult(PgRetentionQueryResult.State.MATCHED, null)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new PgRetentionQueryResult(PgRetentionQueryResult.State.UNSUPPORTED, krw(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> PgRetentionQueryResult.matched(null)).isInstanceOf(NullPointerException.class);
+        }
+
+        @Test
+        @DisplayName("환불됨 판정은 두 이유로만 만든다")
+        void refundedReasonIsRestricted() {
+            assertThat(PaymentCancelVoidInfo.refunded(1, CLAIM, Reason.CLAIM_REFUNDED_EXTERNALLY, PaymentStatus.DONE, krw(1)).outcome())
+                .isEqualTo(PaymentCancelVoidInfo.Outcome.REFUNDED);
+            assertThatThrownBy(() -> PaymentCancelVoidInfo.refunded(1, CLAIM, Reason.CLAIM_REFUND_PENDING, PaymentStatus.DONE, krw(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @ParameterizedTest(name = "{0} → {1}")
+    @CsvSource({
+        "PENDING, CLAIM_REFUND_PENDING",
+        "SUCCEEDED, CLAIM_REFUND_SUCCEEDED",
+        "REJECTED, PG_REJECTED",
+        "VOIDED, CLAIM_NEVER_REQUESTED",
+        "EXTERNAL_PG_REFUNDED, CLAIM_REFUNDED_EXTERNALLY",
+        "OFF_PG_REFUNDED, CLAIM_REFUNDED_EXTERNALLY"})
+    @DisplayName("상태별 판정 이유 전수 — 외부 확인 환불 두 상태는 CLAIM_REFUNDED_EXTERNALLY(REFUNDED) 다")
+    void classifyEveryStatus(PaymentCancel.Status status, Reason expected) {
+        PaymentCancel row = new PaymentCancel(CLAIM, PaymentFixtures.PAYMENT_ID, krw(10_000), status, NOW.minusSeconds(3_600), NOW.minusSeconds(3_600));
+
+        assertThat(PaymentCancelVoidProcessor.classify(row, NOW, GRACE)).isEqualTo(expected);
+        assertThat(Stream.of(PaymentCancel.Status.values()).map(Enum::name)).as("표가 모든 상태를 덮는다")
+            .containsExactlyInAnyOrder("PENDING", "SUCCEEDED", "REJECTED", "VOIDED", "EXTERNAL_PG_REFUNDED", "OFF_PG_REFUNDED");
+    }
+
     @ParameterizedTest(name = "{0}")
     @EnumSource(PaymentCancel.Status.class)
-    @DisplayName("후보(PG 대조로 갈 수 있는 판정)는 행 없음 · VOIDED · 유예 지난 REJECTED 뿐이다 — 새 상태(#693)는 기본값으로 미확정에 닫힌다")
+    @DisplayName("후보(PG 대조로 갈 수 있는 판정)는 행 없음 · VOIDED · 유예 지난 REJECTED 뿐이다 — 외부 확인 환불(#693)은 후보가 아니다")
     void onlyVoidedAndSettledRejectedCanBecomeCandidates(PaymentCancel.Status status) {
         PaymentCancel row = new PaymentCancel(CLAIM, PaymentFixtures.PAYMENT_ID, krw(10_000), status, NOW.minusSeconds(3_600), NOW.minusSeconds(3_600));
 

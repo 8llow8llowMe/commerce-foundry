@@ -88,7 +88,7 @@ abstract class PaymentCancelVoidContract {
     }
 
     void pgMatches() {
-        given(gateway.inquireRetention(any(), any())).willReturn(PgRetentionQueryResult.of(PgRetentionQueryResult.State.MATCHED));
+        given(gateway.inquireRetention(any(), any())).willAnswer(call -> PgRetentionQueryResult.matched(call.getArgument(1)));
     }
 
     @Test
@@ -117,6 +117,26 @@ abstract class PaymentCancelVoidContract {
         assertThat(prepared.cumulative()).isEqualTo(krw(129_000));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = PaymentCancel.Status.class, names = {"EXTERNAL_PG_REFUNDED", "OFF_PG_REFUNDED"})
+    void externallyRefundedClaimIsStoredAndNeverReachesPgAgain(PaymentCancel.Status status) {
+        // #693 새 상태가 status 칼럼(check 포함)에 들어가고, 그 claimId 로는 결제 후 취소 · void 모두 PG 를 다시 부르지 않는다
+        save(status.reducesPgBalance() ? done().recordCancellation(krw(10_000)) : done());
+        new TransactionTemplate(transactions).executeWithoutResult(tx ->
+            cancellations.save(new PaymentCancel(42, PAYMENT_ID, krw(10_000), status)));
+
+        var refund = orderFacade.cancel(PAYMENT_ID, 42, 10_000, CurrencyCode.KRW, "42");
+        PaymentCancelVoidResponse decision = callVoid(42);
+
+        assertThat(refund.claimId()).isEqualTo("42");
+        assertThat(decision.outcome()).isEqualTo("REFUNDED");
+        assertThat(decision.reason()).isEqualTo("CLAIM_REFUNDED_EXTERNALLY");
+        assertThat(decision.retainedAmount().amount()).isEqualTo(119_000);
+        assertThat(cancellations.findByClaimId(42).orElseThrow().status()).isEqualTo(status);
+        verify(gateway, never()).cancel(any(), anyLong(), any(), any());
+        verify(gateway, never()).inquireRetention(any(), any());
+    }
+
     @Test
     void strictVoidedInsertNeverOverwritesExistingClaim() {
         save(done());
@@ -133,7 +153,7 @@ abstract class PaymentCancelVoidContract {
         given(gateway.inquireRetention(any(), any())).willAnswer(call -> {
             // PG 조회는 트랜잭션 밖이다 — 그 사이 같은 클레임의 결제 후 취소 준비가 PENDING 을 커밋한다
             orderCancellations.prepare(PAYMENT_ID, 42, krw(10_000));
-            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.MATCHED);
+            return PgRetentionQueryResult.matched(call.getArgument(1));
         });
 
         PaymentCancelVoidResponse result = callVoid(42);
@@ -202,7 +222,7 @@ abstract class PaymentCancelVoidContract {
             if (nested.compareAndSet(false, true)) {
                 inner[0] = callVoid(42);
             }
-            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.MATCHED);
+            return PgRetentionQueryResult.matched(call.getArgument(1));
         });
 
         PaymentCancelVoidResponse outer = callVoid(42);

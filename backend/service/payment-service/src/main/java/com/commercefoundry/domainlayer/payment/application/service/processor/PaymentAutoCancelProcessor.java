@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.payment.application.port.out.PaymentRepos
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentAutoCancel;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentCancel;
+import com.commercefoundry.domainlayer.payment.domain.model.PaymentCancelLedger;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
@@ -53,6 +54,12 @@ public class PaymentAutoCancelProcessor {
             return null;
         }
         List<PaymentCancel> all = cancellations.findByPaymentId(paymentId);
+        PaymentCancelLedger ledger = PaymentCancelLedger.of(all, payment.amount().currency());
+        if (ledger.hasOffPgRefund()) {
+            // PG 밖(OFF_PG)으로 이미 돌려준 돈은 PG 잔액에 남아 있다(#693). PG 잔액 전부를 자동 취소하면 이중 환불이 되므로 사람이 정한다.
+            manual(intent);
+            return null;
+        }
         PaymentCancel owned = all.stream().filter(c -> Objects.equals(c.claimId(), intent.claimId())).findFirst().orElse(null);
         if (intent.claimId() != null && (owned == null || owned.status() != PaymentCancel.Status.PENDING || !owned.amount().equals(intent.amount()))) {
             manual(intent);
@@ -62,12 +69,13 @@ public class PaymentAutoCancelProcessor {
             intents.save(intent.retry(now));
             return null;
         }
-        Money succeeded = succeeded(payment, all);
-        if (succeeded.isGreaterThan(payment.amount()) || succeeded.equals(payment.amount())) {
+        // 남은 금액은 PG 에 남은 돈이다 — PG 취소 합계(SUCCEEDED + EXTERNAL_PG_REFUNDED)를 뺀다.
+        Money pgCanceled = ledger.pgCanceled();
+        if (pgCanceled.isGreaterThan(payment.amount()) || pgCanceled.equals(payment.amount())) {
             manual(intent);
             return null;
         }
-        Money remaining = payment.amount().minus(succeeded);
+        Money remaining = payment.amount().minus(pgCanceled);
         PaymentCancel existing = all.stream().filter(c -> Objects.equals(c.claimId(), intent.claimId())).findFirst().orElse(null);
         if ((intent.amount() != null && !intent.amount().equals(remaining))
             || (intent.claimId() != null && (existing == null || existing.status() != PaymentCancel.Status.PENDING || !existing.amount().equals(remaining)))) {
@@ -121,7 +129,14 @@ public class PaymentAutoCancelProcessor {
             manual(intent);
             return true;
         }
-        Money cumulative = succeeded(payment, all).plus(cancel.amount());
+        PaymentCancelLedger ledger = PaymentCancelLedger.of(all, payment.amount().currency());
+        if (ledger.hasOffPgRefund()) {
+            // acquire 가드의 이중 방어(#693): 획득 뒤 PG 밖 환불이 기록됐으면 PG 자동 취소와 겹친 이중 환불일 수 있다.
+            // 자동 확정하지 않고 사람이 PG 거래 · 송금 내역을 맞춘다 — 원장은 PENDING, 결제 상태는 그대로 둔다.
+            manual(intent);
+            return true;
+        }
+        Money cumulative = ledger.pgCanceled().plus(cancel.amount());
         if (cancel.status() != PaymentCancel.Status.PENDING || !cancel.amount().equals(intent.amount()) || !cumulative.equals(payment.amount())
             || all.stream().anyMatch(c -> c.status() == PaymentCancel.Status.PENDING && !Objects.equals(c.claimId(), intent.claimId()))) {
             manual(intent);
@@ -147,11 +162,6 @@ public class PaymentAutoCancelProcessor {
         return payment.status() == PaymentStatus.LATE_APPROVED
             || ((payment.status() == PaymentStatus.DONE || payment.status() == PaymentStatus.PARTIAL_CANCELED)
                 && !payment.orderSynced() && payment.orderSyncFailureCode() != null);
-    }
-
-    private static Money succeeded(Payment payment, List<PaymentCancel> all) {
-        return all.stream().filter(c -> c.status() == PaymentCancel.Status.SUCCEEDED).map(PaymentCancel::amount)
-            .reduce(Money.zero(payment.amount().currency()), Money::plus);
     }
 
     public record Attempt(Payment payment, PaymentAutoCancel intent) { }

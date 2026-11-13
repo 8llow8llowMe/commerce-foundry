@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.payment.application.port.out.PaymentCance
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentRepositoryPort;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentCancel;
+import com.commercefoundry.domainlayer.payment.domain.model.PaymentCancelLedger;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
@@ -42,6 +43,12 @@ public class PaymentCancelProcessor {
         if (existing != null && (existing.paymentId() != paymentId || !existing.amount().equals(amount))) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_KEY_REUSED);
         }
+        PaymentCancelLedger ledger = PaymentCancelLedger.of(all, payment.amount().currency());
+        if (existing != null && existing.status().countsAsRefunded()) {
+            // SUCCEEDED · EXTERNAL_PG_REFUNDED · OFF_PG_REFUNDED — 이 클레임의 환불은 이미 확정됐다. PG 를 다시 부르지 않고 200 으로 답한다(#693 이중 환불 차단).
+            // 다른 클레임의 PENDING 보다 먼저 본다 — 확정된 환불의 재요청을 016(종결 거절)로 돌려 주문을 REFUND_FAILED 로 만들지 않게.
+            return new Prepared(payment, existing, ledger.pgCanceled());
+        }
         if (existing == null && payment.status() != PaymentStatus.DONE && payment.status() != PaymentStatus.PARTIAL_CANCELED
             && payment.status() != PaymentStatus.LATE_APPROVED) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
@@ -49,29 +56,27 @@ public class PaymentCancelProcessor {
         if (all.stream().anyMatch(c -> c.status() == PaymentCancel.Status.PENDING && c.claimId() != claimId)) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
         }
-        Money succeeded = all.stream().filter(c -> c.status() == PaymentCancel.Status.SUCCEEDED)
-            .map(PaymentCancel::amount).reduce(Money.zero(payment.amount().currency()), Money::plus);
+        Money pgCumulative = ledger.pgCanceled().plus(amount);
         if (existing != null) {
-            if (existing.status().refusesRefund()) {
-                // REJECTED · VOIDED. VOIDED 는 무환불 봉인이다(#691) — 주문이 거절 · 재출고를 확정했을 수 있어 이 클레임으로는 PG 를 부르지 않는다.
+            if (existing.status() != PaymentCancel.Status.PENDING) {
+                // REJECTED · VOIDED(refusesRefund) 와 모르는 상태. VOIDED 는 무환불 봉인이다(#691) — 주문이 거절 · 재출고를 확정했을 수 있어 이 클레임으로는 PG 를 부르지 않는다.
                 throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
             }
-            if (existing.status() == PaymentCancel.Status.PENDING && existing.createdAt() != null
-                && existing.createdAt().isBefore(Instant.now(clock).minus(Duration.ofDays(14)))) {
+            if (existing.createdAt() != null && existing.createdAt().isBefore(Instant.now(clock).minus(Duration.ofDays(14)))) {
                 // PG 멱등 키는 첫 요청 후 15일만 유효하다. 이후 같은 키 재전송은 이중 취소가 될 수 있다.
                 throw new PaymentException(PaymentErrorCode.CANCELLATION_UNCONFIRMED);
             }
-            return new Prepared(payment, existing, existing.status() == PaymentCancel.Status.SUCCEEDED ? succeeded : succeeded.plus(amount));
+            return new Prepared(payment, existing, pgCumulative);
         }
-        Money cumulative = succeeded.plus(amount);
-        if (cumulative.isGreaterThan(payment.amount())) {
+        // 한도는 PG 밖 환불(OFF_PG)까지 포함한 환불 합계로 본다 — PG 잔액이 남아 있어도 고객에게 이미 돌려준 돈을 다시 보내지 않는다.
+        if (ledger.refundedTotal().plus(amount).isGreaterThan(payment.amount())) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_AMOUNT_INVALID);
         }
-        if (payment.status() == PaymentStatus.LATE_APPROVED && !cumulative.equals(payment.amount())) {
+        if (payment.status() == PaymentStatus.LATE_APPROVED && !pgCumulative.equals(payment.amount())) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_AMOUNT_INVALID);
         }
         PaymentCancel created = cancelPort.save(new PaymentCancel(claimId, paymentId, amount, PaymentCancel.Status.PENDING));
-        return new Prepared(payment, created, cumulative);
+        return new Prepared(payment, created, pgCumulative);
     }
 
     @Transactional
@@ -87,9 +92,8 @@ public class PaymentCancelProcessor {
         if (cancel.status() != PaymentCancel.Status.PENDING) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
         }
-        Money cumulative = cancelPort.findByPaymentId(paymentId).stream()
-            .filter(c -> c.status() == PaymentCancel.Status.SUCCEEDED)
-            .map(PaymentCancel::amount).reduce(Money.zero(payment.amount().currency()), Money::plus).plus(cancel.amount());
+        // 결제 상태는 PG 상태의 거울이다 — PG 취소 누계(pgCanceled)로 전이하고, PG 밖 환불(OFF_PG)은 넣지 않는다.
+        Money cumulative = PaymentCancelLedger.of(cancelPort.findByPaymentId(paymentId), payment.amount().currency()).pgCanceled().plus(cancel.amount());
         Payment changed = paymentPort.save(payment.recordCancellation(cumulative));
         cancelPort.save(cancel.succeeded());
         return changed;
@@ -107,5 +111,9 @@ public class PaymentCancelProcessor {
         }
     }
 
+    /**
+     * @param cumulative 이 취소가 성공하면 될 PG 취소 누계(pgCanceled + 이 금액) — PG 취소 요청에 싣는다.
+     *     이 클레임의 환불이 이미 확정됐으면({@link PaymentCancel.Status#countsAsRefunded}) 지금의 pgCanceled 이고 PG 를 부르지 않는다
+     */
     public record Prepared(Payment payment, PaymentCancel cancel, Money cumulative) { }
 }
