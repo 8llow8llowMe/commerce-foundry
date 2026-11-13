@@ -1738,10 +1738,16 @@ product AI 상품 초안(§2-14)의 생성 실행이다. 컨텍스트는 `domain
 - **payload** — `{"draftId": <양수>}` 하나다(다른 칸이 있으면 `PRODUCT_DRAFT_INVALID_DATA`). 입력 해시를 두지 않는다 — 초안 사실은 만든 뒤 바뀌지 않고, 이미지는
   product 가 키 · ETag 를 고정해 바뀌면 410 `PRODUCT_DRAFT_044` 로 알린다.
 - **실행** — product `GET /internal/v1/product-drafts/{draftId}/generation-input` → (이미지가 있으면) 순번마다 `GET …/generation-images/{index}` → AI(`ai.features.product-draft`)
-  → 출력 검증 → 결과 JSON. DB 에 쓰지 않는다. 앞뒤로 checkpoint(5 · 15 · 20 · 35 · 85 · 100)를 둬 취소 · lease 상실 · 실행 시간 초과를 그 자리에서 받는다.
+  → 출력 검증 → 결과 JSON. DB 에 쓰지 않는다. 앞뒤로 checkpoint(5 · 15 · 20 · 장마다 20~34 · 35 · 85 · 100)를 둬 취소 · lease 상실 · 실행 시간 초과를
+  그 자리에서 받는다 — 이미지는 한 장을 받아 검증하고 checkpoint 를 지난 뒤에 다음 장을 읽는다.
   Feign 은 contextId `productDraftGenerationInputClient`(서비스 토큰, 읽기 10초 — 장당 5MiB), 서킷은 product 호출 공용 `product-service` 다.
-- **이미지 상한** — 8장 · 장당 5MiB(ai-core `AiImage`) · 원본 합계 **20MiB**. 합계는 바이트를 받기 전에 생성 입력의 `byteLength` 로 본다([ai-provider-guide.md](ai-provider-guide.md)).
-  받은 바이트의 크기 · 형식(magic bytes)이 고정 값과 다르면 바뀐 이미지로 본다.
+- **이미지 상한** — 8장 · 장당 5MiB · 원본 합계 **20MiB**(검증 Processor 자체 상수, ai-core `AiImage` 와 같은지는 AI 어댑터 테스트가 본다).
+  1. **메타데이터로 먼저 막는다** — 바이트를 받기 전에 생성 입력의 장수 · 장당 `byteLength` · 합계를 본다([ai-provider-guide.md](ai-provider-guide.md)).
+  2. **받는 바이트는 장마다 상한까지만 읽는다** — 어댑터가 원시 응답의 `Content-Length` 가 없거나 고정 `byteLength` 와 다르면 본문을 읽지 않고,
+     `Content-Type` 이 계약(`application/octet-stream`) 또는 고정 형식이 아니면 바뀐 이미지다. 본문은 `byteLength + 1` 바이트까지만 읽어 길면 바로 끊는다.
+     오류 응답 본문도 4KiB 까지만 읽는다.
+  3. **장마다 바로 검증한다** — 순번 · 크기 · magic bytes 가 고정 값과 다르면 바뀐 이미지, 받은 누적이 20MiB 를 넘으면 `IMAGES_TOO_LARGE` 로 남은 장을 읽지 않는다.
+     AI 요청의 이미지 형식은 응답 헤더가 아니라 magic bytes 로 확인한 고정 메타데이터 형식이다.
 - **결과 JSON**(`job.result_json`, 32KiB 이하, 파일 없음) — product 가 읽어 초안에 반영한다(PR-3). 운영자 입력 사실은 다시 싣지 않는다(정본은 product 초안).
 
   ```json
@@ -1753,19 +1759,20 @@ product AI 상품 초안(§2-14)의 생성 실행이다. 컨텍스트는 `domain
   `unconfirmedFacts` 는 운영자가 넣지 않은 사실(소재 · 세탁 · 치수 · 원산지 · 인증)이고 서버가 계산한다 — AI 출력에는 이 칸들이 없어 이미지로 채워질 수 없다.
   `warnings[].index` 는 `mustInclude`(상품명 · 설명에 없음) · `mustAvoid`(어느 칸에든 있음) 목록의 순번이고 문구를 다시 싣지 않는다.
   출력 상한: 상품명 100 · 설명 4000(개행만) · 태그 20개 × 30(대소문자 무시 중복 제거) · SEO 제목 70 · 설명 160 · 대체 텍스트 이미지마다 정확히 하나 × 200.
-  제어 · 방향 제어 · 태그 문자와 `://` 가 든 출력은 거절한다.
+  제어 · 방향 제어 · 태그 문자, 링크(`://` · `www.` 로 시작하는 토큰), 꺾쇠(`<` · `>`)가 든 출력은 거절한다(`PRODUCT_DRAFT_INVALID_DATA`).
+  이메일 · 전화번호 모양은 여기서 막지 않는다 — **PR-3 에서 product 가 초안에 반영할 때 product sanitize 를 반드시 거친다.**
 - **실패 코드**(작업 `errorCode`, 어드민 작업 API 는 `failureNotice` 문구만 보인다)
 
   | 코드 | 재시도 | 사유 |
   |------|--------|------|
-  | `PRODUCT_DRAFT_INPUT_UNAVAILABLE` | O | product 5xx(`501` 포함) · 타임아웃 · 전송 실패 · 디코딩 실패 · 서킷 열림 |
+  | `PRODUCT_DRAFT_INPUT_UNAVAILABLE` | O | product 5xx(`501` 포함) · 타임아웃 · 전송 실패 · 디코딩 실패 · 이미지 본문을 읽다 끊김 · 서킷 열림 |
   | `PRODUCT_DRAFT_AI_FAILED` | ai-core 사유대로 | AI 호출 실패(`BUSY` · `RATE_LIMITED` · `UNAVAILABLE` · `METERING_FAILED` 만 재시도) |
-  | `PRODUCT_DRAFT_IMAGE_CHANGED` | X | product 410 `044`, 또는 받은 바이트가 고정 크기 · 형식과 다름 |
+  | `PRODUCT_DRAFT_IMAGE_CHANGED` | X | product 410 `044`, 또는 응답 `Content-Length` · `Content-Type` · 본문 길이 · magic bytes 가 고정 값과 다름 |
   | `PRODUCT_DRAFT_INPUT_EXPIRED` | X | product 409 `022` |
   | `PRODUCT_DRAFT_INPUT_REJECTED` | X | 그 밖의 product 4xx — `001` · `040` · `041` · `042` · `043` · `045` · 인가 · 읽을 수 없는 오류 본문 |
   | `PRODUCT_DRAFT_INPUT_INVALID` | X | 2xx 인데 봉투 · 본문이 계약 밖 |
   | `PRODUCT_DRAFT_INPUT_MISMATCH` | X | 응답 초안 아이디가 payload 와 다름 |
-  | `PRODUCT_DRAFT_IMAGES_TOO_LARGE` | X | 이미지 원본 합계가 20MiB 초과 |
+  | `PRODUCT_DRAFT_IMAGES_TOO_LARGE` | X | 이미지 원본 합계가 20MiB 초과(메타데이터 합계 또는 받은 누적) |
   | `PRODUCT_DRAFT_AI_BUDGET_EXCEEDED` | X | AI 월 사용 한도 초과(보내지 않음) |
   | `PRODUCT_DRAFT_AI_INVALID` | X | AI 요청을 만들 수 없음 |
   | `PRODUCT_DRAFT_INVALID_DATA` | X | payload · 생성 입력 · AI 출력이 계약 밖 — 같은 입력의 두 번째 유료 호출을 막으려 재시도하지 않는다 |

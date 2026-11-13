@@ -560,6 +560,13 @@ DB 마이그레이션 도구(Flyway · Liquibase)를 쓰지 않는다. 스키마
     예: `ProductInternalResponseSupport`(SKU 조회) · `ShippingFeeInternalResponseSupport`. 한 서비스를 두 컨텍스트가 부르면 자원 이름으로 나눈다.
   - 4xx(`FeignClientException`)는 `ignore-exceptions` 로 제외한다 — 호출한 쪽의 요청 · 설정 문제이거나 업무 거절이다 — 대상 장애가 아니다.
   - `CallNotPermittedException`·`FeignException` 은 도메인 예외(`{DOMAIN}_xxx INTERNAL_SERVICE_UNAVAILABLE`, 503)로 바꾼다.
+  - **작업 핸들러의 원격 실패 모델은 `application/model/*RemoteFailure` 다** — HTTP 로 나가지 않는 내부 실패라 도메인 503 예외 대신 고정 코드 · 재시도 여부만 싣고
+    원인 · 원격 본문 · 메시지를 갖지 않는다. 핸들러(`*JobProcessor`)가 코드를 그대로 `JobExecutionException` 으로 옮긴다
+    (operations `SizeChartGenerationRemoteFailure` · `ProductDraftGenerationRemoteFailure`).
+  - **크기를 미리 아는 바이트 본문은 원시 `feign.Response` 로 받는다**(operations `ProductDraftGenerationInputClient#getGenerationImage`, #359) — `byte[]` 반환은 길이를
+    확인하기 전에 본문을 다 읽는다. 이 반환형은 ErrorDecoder 를 지나지 않으므로 support 가 **서킷 안에서** 2xx 가 아닌 응답을 기본 ErrorDecoder 와 같은 예외 타입으로 바꿔
+    던지고(`ignore-exceptions` 유지, 오류 본문은 상한까지만 읽음), 어댑터가 `Content-Length` · `Content-Type` 을 먼저 본 뒤 본문을 기대 길이 + 1 바이트까지만 읽고 닫는다.
+    헤더 · 본문 불일치는 서킷 안에서 예외로 던지지 않는다(대상은 정상 응답했다) — 결과로 돌려 서킷 밖에서 실패로 바꾼다.
   - 대상의 4xx 업무 코드(`resultCode`)로 분기해야 하면 support 가 **서킷 밖에서**(서킷 호출을 감싼 `catch`) 응답 본문의 `dataHeader.resultCode` 만 파싱한다.
     서킷 안에서는 `FeignClientException` 을 그대로 두어 `ignore-exceptions` 를 지킨다 — 안에서 다른 예외로 바꾸면 업무 거절(배송할 수 없는 국가 등)이 서킷 실패로 세어져 서킷이 열린다.
     아는 코드만 자기 코드로 바꾸고, 모르는 코드 · 파싱 실패(본문 없음 · JSON 아님) · 401 `SECURITY_007` 은 error 로그를 남기고 503 이다.

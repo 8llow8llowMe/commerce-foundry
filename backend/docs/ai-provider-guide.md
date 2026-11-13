@@ -70,8 +70,13 @@ ai-core 는 이미지 **장수**(`AiImage.MAX_COUNT` 8)와 **장당 크기**(`Ai
 
 | 기능 | 합계 상한 | 검사 위치 · 시점 | 넘으면 |
 |------|-----------|------------------|--------|
-| `product-draft` (작업 `PRODUCT_DRAFT_GENERATE`) | 20MiB (`20 * 1024 * 1024`) | `ProductDraftGenerationValidationProcessor` — 바이트를 받기 전, product 생성 입력의 `byteLength` 합계 | 작업 실패 `PRODUCT_DRAFT_IMAGES_TOO_LARGE`(재시도 불가) |
+| `product-draft` (작업 `PRODUCT_DRAFT_GENERATE`) | 20MiB (`20 * 1024 * 1024`) | `ProductDraftGenerationValidationProcessor` — 바이트를 받기 전 product 생성 입력의 `byteLength` 합계, 받으면서 장마다 누적 | 작업 실패 `PRODUCT_DRAFT_IMAGES_TOO_LARGE`(재시도 불가) |
 
 근거: 20MiB 를 base64 로 바꾸면 4/3 배로 약 26.7MB 이고, 32MB 에서 남는 약 5MB 를 시스템 · 사용자 프롬프트 · 구조화 출력 스키마 · JSON 여유분으로 둔다.
+
+**메모리** — 상한은 메타데이터로 먼저 막고, 받는 바이트도 상한까지만 읽는다. `product-draft` 입력 어댑터는 원시 응답의 `Content-Length` 가 고정 `byteLength` 와 같을 때만
+본문을 `byteLength + 1` 바이트까지 읽고(넘으면 끊고 `PRODUCT_DRAFT_IMAGE_CHANGED`), 한 장을 받을 때마다 검증 · checkpoint 를 지난 뒤 다음 장을 읽는다.
+기능 쪽 장수 · 장당 상한은 검증 Processor 의 자체 상수이고 ai-core `AiImage.MAX_COUNT` · `MAX_BYTES` 와 같은지는 기능의 AI 어댑터 테스트가 단언한다.
+AI 요청에 실을 때 바이트 복사는 `AiImage` 생성자의 한 번이다.
 사이즈표 IMAGE(`size-chart`)는 아직 operations 가 IMAGE 를 거절하므로 해당 없다 — 열 때 같은 방식으로 상한을 정한다.
 PR-3 할 일: product 초안 등록 검증에도 같은 20MiB 합계를 둬 운영자가 생성 전에 알게 한다(지금은 product 가 장당 5MiB · 8장만 본다).
