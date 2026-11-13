@@ -1374,15 +1374,18 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 - **사유 검증 (#17 A3)** — 비었음은 도메인 `Claim.Decision`(`String#isBlank`)과 같은 기준이라 전각 공백(U+3000) · 줄 구분자(U+2028)처럼 유니코드 공백만인 사유도 400 `ORDER_170` 이다. `Character#isWhitespace` 가 공백으로 보지 않는 NBSP(U+00A0) · U+2007 · U+202F · 한글 채움 문자(U+3164 · U+115F)만인 사유는 지금 받는다 — 서버 · 도메인 · DB 기준이 같아 정합 문제는 없고, 막을지는 #694(결정 누적 이력)에서 함께 정한다.
   이 본문만 다른 사유 입력보다 금지 문자를 넓혀 서식 문자(Cf, 예: U+200B) · 줄 · 문단 구분자(U+2028 · U+2029)를 섞으면 400 `ORDER_151` 이다.
 
-- 필터는 모두 선택적이고 함께 지정하면 AND다. 지원 값은 `type=RETURN|CANCELLATION`, `status=REQUESTED|REFUNDED|COMPLETED|REFUND_FAILED|RESTORATION_FAILED`다
-  (#16 PR-2a, 도메인 `Claim.Type` · `Claim.Status` 와 같은 집합). 반품 접수는 아직 `REQUESTED`만 생기고, 결제 후 취소 클레임은 #16 PR-2a-2 부터 생긴다.
+- 필터는 모두 선택적이고 함께 지정하면 AND다. 지원 값은 `type=RETURN|CANCELLATION`,
+  `status=REQUESTED|APPROVED|REFUNDED|COMPLETED|REJECTED|REFUND_FAILED|RESTORATION_FAILED`다 (#16 PR-2a · #17 B1, 도메인 `Claim.Type` · `Claim.Status` 와 같은 집합 ·
+  같은 순서). 반품 접수는 아직 `REQUESTED`만 생긴다 — 반품 승인 `APPROVED` · 거절 `REJECTED` 는 B1 에서 값만 생기고 승인 · 거절 API(B2) 뒤에 행이 생긴다.
+  FE(#30 어드민 클레임 목록)는 두 값을 필터 · 상태 표시에 미리 더해도 된다(metadata `name` 은 "승인" · "거절"). 결제 후 취소 클레임은 #16 PR-2a-2 부터 생긴다.
   모르는 값은 400 `ORDER_198`이다. 필터에 맞는 접수의 claimId 내림차순으로 정렬하며 임의 정렬 입력은 받지 않는다.
 - `page`는 0부터, 기본 크기는 20이다. `page×size`는 2,147,483,647 이하여야 하고 초과 입력은 DB 조회 전에 400으로 거절한다. `totalElements`는 같은 조건의 실제 count이고 빈 페이지에서도 전체 건수를 보존한다. 목록은 헤더와 count만 조회하고 상세만 항목을 읽는다.
 - ID는 문자열, type/status/reason은 `{code,name,description}` metadata다. `expectedRefund`는 `{amount,currency}` 또는 미산정 `null`이며 null을 0원으로 표시하지 않는다.
 - UUID 멱등키·회원/배송 개인정보·워커 정보는 응답에 포함하지 않는다. 버전은 상세의 `recovery.version`(다시 시도 · 확정 · 종결의 화면 버전)으로만 낸다. 조회는 주문/접수 상태·이력·outbox를 변경하지 않고 외부 서비스를 호출하지 않는다.
 - 성공한 조회 뒤 `admin.audit`에 `CLAIM_SEARCH` 또는 `CLAIM_VIEW`를 남긴다. 다시 시도 · 수동 환불 확정 · 복원 생략 종결은 성공 · 거절 모두 `CLAIM_RETRY` · `CLAIM_REFUND_CONFIRM` ·
   `CLAIM_COMPLETE`(대상 `claim:{id}`, success true/false)로 한 줄씩 남긴다. JWT 관리자 ID와 검증된 필터/대상만 기록하며 요청 원문·사유·항목·멱등키는 기록하지 않는다.
-- 취소 거절(A4), 반품 승인 · 환불(B1 · B2)은 후속이다. 반품 접수는 다시 시도 · 확정 · 종결 대상이 아니다(409 `ORDER_038` · `ORDER_041`). 계약 리뷰어는 `seonghoho`다.
+- 취소 거절(A4), 반품 승인 · 거절 · 환불 API(B2)는 후속이다 — B1 은 저장 기반 · 환불 산식만이다(`order-flow-guide.md` §5 "반품 저장 기반 · 환불 산식").
+  반품 클레임은 다시 시도 · 확정 · 종결 대상이 아니다(409 `ORDER_038` · `ORDER_041`, B2 까지). 계약 리뷰어는 `seonghoho`다.
 
 ### 2-17. 고객 주문 내역 · 결제 전 취소 · 구매 확정 · 반품 접수 (order-service, #16)
 
@@ -1428,7 +1431,7 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 소유 확인 뒤 항목 ID 순으로 정렬한 수량·사유가 같으면 기존 접수를 반환한다. 같은 키의 본문 변경은 409 `ORDER_031`이다.
 
 새 요청은 `DELIVERED|RETURN_REQUESTED`만 허용한다. 첫 접수는 주문을 `RETURN_REQUESTED`로 바꾸고 추가 부분 접수는 같은 상태 이력을 반복하지 않는다.
-이미 접수한 REQUESTED 수량과 이번 수량의 합이 주문 스냅숏 수량을 넘으면 409 `ORDER_030`, 외부/중복 항목은 400 `ORDER_029`이다.
+이미 반품에 잡힌 수량(거절 `REJECTED` 만 뺀 모든 반품 상태, #17 B1)과 이번 수량의 합이 주문 스냅숏 수량을 넘으면 409 `ORDER_030`, 외부/중복 항목은 400 `ORDER_029`이다.
 그 밖의 상태는 409 `ORDER_020`, 잠금·버전 경합은 409 `ORDER_025`, 저장 실패는 500 `ORDER_021`, 헤더 형식/누락은 400 `ORDER_198/199`다.
 경합·응답 유실 뒤에는 같은 키와 본문으로 재시도한다. 없는 주문·타인 주문은 404 `ORDER_001`이다.
 
