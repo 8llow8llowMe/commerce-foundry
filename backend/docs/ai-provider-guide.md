@@ -62,3 +62,16 @@ PostgreSQL 원장 시험도 Provider 보존과 과거 NULL 로드·정산·회�
 
 자동 Provider 전환은 하지 않는다(#468 확정 결정). 같은 Provider의 SDK 재시도 이후에는 기존 `AiException`으로 실패를 전달한다.
 새 Provider도 단일·구조화·대화·도구·스트리밍 모든 경로에서 개인정보 마스킹과 계량을 적용해야 한다.
+
+## 이미지 요청 크기 — 기능 쪽 합계 상한 (#359)
+
+ai-core 는 이미지 **장수**(`AiImage.MAX_COUNT` 8)와 **장당 크기**(`AiImage.MAX_BYTES` 5MiB)만 막고 요청 전체 크기는 보지 않는다. 8장 × 5MiB(40MiB)는 base64 로
+약 53MB 라 Messages API 요청 본문 상한 32MB 를 넘는다(넘으면 413 — 보낸 뒤 실패, 재시도해도 같다). 그래서 이미지를 싣는 기능은 **원본 바이트 합계 상한을 스스로 둔다.**
+
+| 기능 | 합계 상한 | 검사 위치 · 시점 | 넘으면 |
+|------|-----------|------------------|--------|
+| `product-draft` (작업 `PRODUCT_DRAFT_GENERATE`) | 20MiB (`20 * 1024 * 1024`) | `ProductDraftGenerationValidationProcessor` — 바이트를 받기 전, product 생성 입력의 `byteLength` 합계 | 작업 실패 `PRODUCT_DRAFT_IMAGES_TOO_LARGE`(재시도 불가) |
+
+근거: 20MiB 를 base64 로 바꾸면 4/3 배로 약 26.7MB 이고, 32MB 에서 남는 약 5MB 를 시스템 · 사용자 프롬프트 · 구조화 출력 스키마 · JSON 여유분으로 둔다.
+사이즈표 IMAGE(`size-chart`)는 아직 operations 가 IMAGE 를 거절하므로 해당 없다 — 열 때 같은 방식으로 상한을 정한다.
+PR-3 할 일: product 초안 등록 검증에도 같은 20MiB 합계를 둬 운영자가 생성 전에 알게 한다(지금은 product 가 장당 5MiB · 8장만 본다).

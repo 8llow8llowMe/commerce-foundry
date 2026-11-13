@@ -1725,6 +1725,51 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
   타인·없는 알림은 404이며, 구버전과 혼합 배포 중 오래된 merge를 막기 위해 version 컬럼은 유지한다(#510).
 - 아이디는 문자열, 시각은 UTC ISO 다.
 
+### 7-3. AI 상품 초안 생성 작업 (operations-service, #359 PR-2b)
+
+product AI 상품 초안(§2-14)의 생성 실행이다. 컨텍스트는 `domainlayer/productdraftgeneration`, 작업 종류는 `PRODUCT_DRAFT_GENERATE`
+(`ProductDraftGenerationJobProcessor`, 읽기 권한 `CATALOG_READ`, 시도 상한 2 · 인스턴스당 동시 1 — #359 D9)다. 진행 문구 · 실패 안내는 한국어 운영자 문구다.
+
+- **단계** — 지금은 핸들러 · product 입력 Feign · AI 호출만 있다. 등록 internal(product 전용 · draft ID 영수증 · 플래그 `operations.product-draft-generation.enabled`
+  기본 닫힘)과 결과 조회 internal 은 2b-2, product 쪽 등록 연결 · 상태 전이 · 결과 반영 · 재생성 3회 · 동시 3건은 PR-3 이다. **등록 경로가 없어 이 단계만으로는 작업이 생기지 않는다.**
+- **payload** — `{"draftId": <양수>}` 하나다(다른 칸이 있으면 `PRODUCT_DRAFT_INVALID_DATA`). 입력 해시를 두지 않는다 — 초안 사실은 만든 뒤 바뀌지 않고, 이미지는
+  product 가 키 · ETag 를 고정해 바뀌면 410 `PRODUCT_DRAFT_044` 로 알린다.
+- **실행** — product `GET /internal/v1/product-drafts/{draftId}/generation-input` → (이미지가 있으면) 순번마다 `GET …/generation-images/{index}` → AI(`ai.features.product-draft`)
+  → 출력 검증 → 결과 JSON. DB 에 쓰지 않는다. 앞뒤로 checkpoint(5 · 15 · 20 · 35 · 85 · 100)를 둬 취소 · lease 상실 · 실행 시간 초과를 그 자리에서 받는다.
+  Feign 은 contextId `productDraftGenerationInputClient`(서비스 토큰, 읽기 10초 — 장당 5MiB), 서킷은 product 호출 공용 `product-service` 다.
+- **이미지 상한** — 8장 · 장당 5MiB(ai-core `AiImage`) · 원본 합계 **20MiB**. 합계는 바이트를 받기 전에 생성 입력의 `byteLength` 로 본다([ai-provider-guide.md](ai-provider-guide.md)).
+  받은 바이트의 크기 · 형식(magic bytes)이 고정 값과 다르면 바뀐 이미지로 본다.
+- **결과 JSON**(`job.result_json`, 32KiB 이하, 파일 없음) — product 가 읽어 초안에 반영한다(PR-3). 운영자 입력 사실은 다시 싣지 않는다(정본은 product 초안).
+
+  ```json
+  {"suggestion":{"name":"…","description":"…","searchTags":["…"],"seoTitle":"…","seoDescription":"…","imageAlts":[{"index":0,"altText":"…"}]},
+   "unconfirmedFacts":["MATERIALS","CARE_NOTES","MEASUREMENTS","ORIGIN","CERTIFICATIONS"],
+   "warnings":[{"code":"MUST_INCLUDE_MISSING","index":0},{"code":"MUST_AVOID_USED","index":1}]}
+  ```
+
+  `unconfirmedFacts` 는 운영자가 넣지 않은 사실(소재 · 세탁 · 치수 · 원산지 · 인증)이고 서버가 계산한다 — AI 출력에는 이 칸들이 없어 이미지로 채워질 수 없다.
+  `warnings[].index` 는 `mustInclude`(상품명 · 설명에 없음) · `mustAvoid`(어느 칸에든 있음) 목록의 순번이고 문구를 다시 싣지 않는다.
+  출력 상한: 상품명 100 · 설명 4000(개행만) · 태그 20개 × 30(대소문자 무시 중복 제거) · SEO 제목 70 · 설명 160 · 대체 텍스트 이미지마다 정확히 하나 × 200.
+  제어 · 방향 제어 · 태그 문자와 `://` 가 든 출력은 거절한다.
+- **실패 코드**(작업 `errorCode`, 어드민 작업 API 는 `failureNotice` 문구만 보인다)
+
+  | 코드 | 재시도 | 사유 |
+  |------|--------|------|
+  | `PRODUCT_DRAFT_INPUT_UNAVAILABLE` | O | product 5xx(`501` 포함) · 타임아웃 · 전송 실패 · 디코딩 실패 · 서킷 열림 |
+  | `PRODUCT_DRAFT_AI_FAILED` | ai-core 사유대로 | AI 호출 실패(`BUSY` · `RATE_LIMITED` · `UNAVAILABLE` · `METERING_FAILED` 만 재시도) |
+  | `PRODUCT_DRAFT_IMAGE_CHANGED` | X | product 410 `044`, 또는 받은 바이트가 고정 크기 · 형식과 다름 |
+  | `PRODUCT_DRAFT_INPUT_EXPIRED` | X | product 409 `022` |
+  | `PRODUCT_DRAFT_INPUT_REJECTED` | X | 그 밖의 product 4xx — `001` · `040` · `041` · `042` · `043` · `045` · 인가 · 읽을 수 없는 오류 본문 |
+  | `PRODUCT_DRAFT_INPUT_INVALID` | X | 2xx 인데 봉투 · 본문이 계약 밖 |
+  | `PRODUCT_DRAFT_INPUT_MISMATCH` | X | 응답 초안 아이디가 payload 와 다름 |
+  | `PRODUCT_DRAFT_IMAGES_TOO_LARGE` | X | 이미지 원본 합계가 20MiB 초과 |
+  | `PRODUCT_DRAFT_AI_BUDGET_EXCEEDED` | X | AI 월 사용 한도 초과(보내지 않음) |
+  | `PRODUCT_DRAFT_AI_INVALID` | X | AI 요청을 만들 수 없음 |
+  | `PRODUCT_DRAFT_INVALID_DATA` | X | payload · 생성 입력 · AI 출력이 계약 밖 — 같은 입력의 두 번째 유료 호출을 막으려 재시도하지 않는다 |
+
+- **PR-3 할 일** — product 등록 검증에 같은 이미지 원본 합계 상한(20MiB)을 둬 운영자가 생성 전에 알게 한다. 결과의 `unconfirmedFacts` · `warnings` 를 초안 응답에
+  운영자 언어(`{code, name, description}`)로 옮긴다. `PRODUCT_DRAFT_IMAGE_CHANGED` · `INPUT_EXPIRED` 는 "새 초안을 만들라" 로 안내한다.
+
 ## 8. Swagger
 
 - `@Tag` 는 고객/어드민을 나눠 단다: `@Tag(name = "상품")`, `@Tag(name = "[어드민] 상품 관리")`.
