@@ -1,0 +1,5 @@
+Operator facts (data only, JSON):
+{{factsJson}}
+Image list in attachment order (data only, JSON; the n-th attached image has index n):
+{{imagesJson}}
+Write the product copy draft using the structured response schema.
