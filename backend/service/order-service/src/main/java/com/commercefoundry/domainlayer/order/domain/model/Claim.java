@@ -26,7 +26,9 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>반품 클레임의 수명 (#17 B1 저장 기반) — {@code REQUESTED}(접수 · 검수 대기) → 운영자 승인 {@code APPROVED}(환불 대기) 또는 거절 {@code REJECTED}(끝).
  * 환불 대기를 뜻하는 상태가 유형마다 다르다 — 취소는 {@code REQUESTED}, 반품은 {@code APPROVED} 다. 그래서 대기 판정은 상태가 아니라 클레임
- * ({@link #isAwaitingAttempt()} · {@link #isAwaitingRefund()})이 한다. 승인 뒤 환불 · 복원 전이(기존 취소 전이의 반품 확장)는 #17 B2 다.
+ * ({@link #isAwaitingAttempt()} · {@link #isAwaitingRefund()})이 한다. 승인 뒤 환불 · 복원 전이는 취소와 같은 메서드다(#17 B2a) — 환불 대기 자리만
+ * 유형별({@link #awaitingRefundStatus()})이고, {@code restock=false} 반품은 복원 없이 REFUNDED → COMPLETED 다({@link #requiresRestoration()}).
+ * 다시 열기 · 운영자 수습 결정({@link #reopen} · {@link #confirmRefundByAdmin} · {@link #completeByAdmin})은 아직 취소만이다(#17 B2b).
  *
  * @param paymentId 환불할 결제 아이디 (외부 FK: payment-service payment.id). 취소 클레임과 승인된 반품에만 있다
  * @param attemptCount 지금 단계(환불 또는 복원)의 미확정 재시도 횟수. 단계가 넘어가면 0 으로 돌아간다
@@ -182,35 +184,33 @@ public record Claim(
     }
 
     /**
-     * 환불이 확정됐다 — REQUESTED → REFUNDED(재고 복원 대기). 재시도 횟수는 복원 단계용으로 0 부터 다시 센다. 이미 REFUNDED 면 그대로다.
+     * 환불이 확정됐다 — 환불 대기(취소 REQUESTED · 반품 APPROVED) → REFUNDED(재고 복원 대기). 재시도 횟수는 복원 단계용으로 0 부터 다시 센다. 이미 REFUNDED 면 그대로다.
      * 재시도 상한을 넘어 미확정으로 닫은 REFUND_FAILED({@link #REFUND_UNCONFIRMED})도 받는다 — 늦게 온 성공이 실제 결과다. 다른 실패 코드(종결 거절)는 받지 않는다.
      */
     public Claim markRefunded(Instant nextAttemptAt) {
         Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
-        requireCancellation();
         if (status == Status.REFUNDED) {
             return this;
         }
         if (!isNew() && status == Status.REFUND_FAILED && REFUND_UNCONFIRMED.equals(failureCode)) {
             return with(Status.REFUNDED, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null);
         }
-        requireStatus(Status.REQUESTED, Status.REFUNDED);
+        requireStatus(awaitingRefundStatus(), Status.REFUNDED);
         return with(Status.REFUNDED, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null);
     }
 
-    /** 동일 환불 요청의 확정 성공 증거 전용. 실패 코드보다 성공을 우선하며 일반 markRefunded 계약은 유지한다. */
+    /** 동일 환불 요청의 확정 성공 증거 전용. 실패 코드보다 성공을 우선하며 일반 markRefunded 계약은 유지한다. 환불 대기 자리는 유형별이다. */
     public Claim markConfirmedRefund(Instant nextAttemptAt) {
         Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
-        requireCancellation();
-        if (isNew() || (status != Status.REQUESTED && status != Status.REFUND_FAILED)) {
+        if (isNew() || (!isAwaitingRefund() && status != Status.REFUND_FAILED)) {
             throw new IllegalStateException("확정 환불은 저장된 환불 대기 · 실패에만 반영합니다");
         }
         return with(Status.REFUNDED, 0, nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null);
     }
 
-    /** 버전 · lease · 단계가 바뀌어도 같은 원격 환불 요청인지 확인한다. */
+    /** 버전 · lease · 단계가 바뀌어도 같은 원격 환불 요청인지 확인한다. 유형이 다르면 다른 요청이다. */
     public boolean hasSameRefundRequest(Claim other) {
-        return other != null && type == Type.CANCELLATION && other.type == type && id == other.id && orderId == other.orderId
+        return other != null && other.type == type && id == other.id && orderId == other.orderId
             && requestKey.equals(other.requestKey) && Objects.equals(paymentId, other.paymentId) && Objects.equals(expectedRefund, other.expectedRefund);
     }
 
@@ -256,7 +256,20 @@ public record Claim(
 
     /** 환불을 기다리는가 — 취소는 REQUESTED, 반품은 승인된 APPROVED 다. 승인 전 반품(REQUESTED)은 환불 대상이 아직 아니다. */
     public boolean isAwaitingRefund() {
-        return status == (type == Type.CANCELLATION ? Status.REQUESTED : Status.APPROVED);
+        return status == awaitingRefundStatus();
+    }
+
+    /** 이 유형의 환불 대기 상태 — 취소 REQUESTED, 반품 APPROVED. 환불 확정 · 실패 · 재시도 상한이 이 자리에서 출발한다. */
+    public Status awaitingRefundStatus() {
+        return type.awaitingRefundStatus();
+    }
+
+    /**
+     * 환불 뒤 재고 복원을 부르는가 — 취소는 늘, 반품은 승인 때 재고로 되돌림({@link ReturnApproval#restock()})을 고른 경우만이다 (#17 B2a).
+     * 부르지 않는 반품은 환불 기록 때 REFUNDED 를 거쳐 바로 COMPLETED 다.
+     */
+    public boolean requiresRestoration() {
+        return type == Type.CANCELLATION || (approval != null && approval.restock());
     }
 
     /**
@@ -320,9 +333,8 @@ public record Claim(
         return with(Status.REJECTED, attemptCount, null, null);
     }
 
-    /** 재고 복원까지 끝났다 — REFUNDED → COMPLETED. 이미 COMPLETED 면 그대로다. */
+    /** 재고 복원까지 끝났다(또는 복원하지 않는 반품의 환불 기록) — REFUNDED → COMPLETED. 이미 COMPLETED 면 그대로다. */
     public Claim complete() {
-        requireCancellation();
         if (status == Status.COMPLETED) {
             return this;
         }
@@ -330,32 +342,29 @@ public record Claim(
         return with(Status.COMPLETED, attemptCount, null, null);
     }
 
-    /** 환불이 종결 거절됐다(또는 재시도 상한을 넘었다) — REQUESTED → REFUND_FAILED. 재고는 복원하지 않는다. */
+    /** 환불이 종결 거절됐다(또는 재시도 상한을 넘었다) — 환불 대기(취소 REQUESTED · 반품 APPROVED) → REFUND_FAILED. 재고는 복원하지 않는다. */
     public Claim failRefund(String failureCode) {
         Objects.requireNonNull(failureCode, "failureCode");
-        requireCancellation();
-        requireStatus(Status.REQUESTED, Status.REFUND_FAILED);
+        requireStatus(awaitingRefundStatus(), Status.REFUND_FAILED);
         return with(Status.REFUND_FAILED, attemptCount, null, failureCode);
     }
 
     /** 재고 복원이 종결 거절됐다 — REFUNDED → RESTORATION_FAILED. 환불은 이미 확정이라 되돌리지 않는다. */
     public Claim failRestoration(String failureCode) {
         Objects.requireNonNull(failureCode, "failureCode");
-        requireCancellation();
         requireStatus(Status.REFUNDED, Status.RESTORATION_FAILED);
         return with(Status.RESTORATION_FAILED, attemptCount, null, failureCode);
     }
 
     /**
-     * 결과가 미확정이라 나중에 같은 클레임 아이디 · 같은 본문으로 다시 보낸다 — 상태는 그대로(REQUESTED · REFUNDED), 횟수 +1,
+     * 결과가 미확정이라 나중에 같은 클레임 아이디 · 같은 본문으로 다시 보낸다 — 상태는 그대로(환불 대기 · REFUNDED), 횟수 +1,
      * 다음 시각은 {@code now + min(maxBackoff, initialBackoff × 2^지금 횟수)} 다. 재시도 상한 판정은 부르는 쪽이 한다.
      */
     public Claim retryLater(Instant now, Duration initialBackoff, Duration maxBackoff) {
         Objects.requireNonNull(now, "now");
         Objects.requireNonNull(initialBackoff, "initialBackoff");
         Objects.requireNonNull(maxBackoff, "maxBackoff");
-        requireCancellation();
-        if (isNew() || (status != Status.REQUESTED && status != Status.REFUNDED)) {
+        if (isNew() || !isAwaitingAttempt()) {
             throw new IllegalStateException("재시도는 저장된 환불 대기 · 복원 대기 클레임만 합니다: status=" + status);
         }
         if (initialBackoff.isNegative() || initialBackoff.isZero() || maxBackoff.compareTo(initialBackoff) < 0) {
@@ -378,7 +387,6 @@ public record Claim(
      */
     public Claim holdUntil(Instant until) {
         Objects.requireNonNull(until, "until");
-        requireCancellation();
         if (isNew() || !isAwaitingAttempt()) {
             throw new IllegalStateException("선점은 저장된 환불 대기 · 복원 대기 클레임만 합니다: status=" + status);
         }
@@ -407,9 +415,9 @@ public record Claim(
         return with(reopened, attemptCount, until.truncatedTo(ChronoUnit.MICROS), null);
     }
 
-    /** 결제사의 종결 거절로 닫힌 환불 실패인가 — 결과 미확인({@link #REFUND_UNCONFIRMED})과 달리 다시 보내도 같은 거절이다 (#17). */
+    /** 결제사의 종결 거절로 닫힌 환불 실패인가 — 결과 미확인({@link #REFUND_UNCONFIRMED})과 달리 다시 보내도 같은 거절이다 (#17). 반품도 같다(#17 B2a). */
     public boolean isRefundRejected() {
-        return type == Type.CANCELLATION && status == Status.REFUND_FAILED && !REFUND_UNCONFIRMED.equals(failureCode);
+        return status == Status.REFUND_FAILED && !REFUND_UNCONFIRMED.equals(failureCode);
     }
 
     /**
@@ -522,7 +530,17 @@ public record Claim(
          */
         public boolean isAwaitingAttempt(Status status) {
             Objects.requireNonNull(status, "status");
-            return status == Status.REFUNDED || status == (this == CANCELLATION ? Status.REQUESTED : Status.APPROVED);
+            return status == Status.REFUNDED || status == awaitingRefundStatus();
+        }
+
+        /** 이 유형의 환불 대기 상태 — 취소 REQUESTED(접수 즉시 환불), 반품 APPROVED(검수 · 승인 뒤 환불). */
+        public Status awaitingRefundStatus() {
+            return this == CANCELLATION ? Status.REQUESTED : Status.APPROVED;
+        }
+
+        /** 이 유형에서 다음 시도를 기다리는 상태 전부(환불 대기 · 복원 대기) — 재시도 스케줄러 질의의 상태 조건이다. */
+        public Set<Status> awaitingAttemptStatuses() {
+            return Collections.unmodifiableSet(EnumSet.of(awaitingRefundStatus(), Status.REFUNDED));
         }
     }
 

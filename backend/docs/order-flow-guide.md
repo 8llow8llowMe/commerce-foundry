@@ -104,6 +104,10 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
   `order_payment` insert → inbox record → 회신 outbox 다.
 
 - 주문 행에 `@Version` 을 둔다. 고객 취소와 어드민 출고 처리가 동시에 오면 하나만 성공해야 한다.
+- **반품 상태를 바꾸는 트랜잭션은 주문 행을 먼저 잠근다 (#17 B2a)** — 고객 반품 접수(`findByIdAndMemberIdForUpdate`)와 같게, 반품 환불 기록(B2a) · 승인 · 거절(B2c) ·
+  반품 수동 확정(B2b)은 `OrderRepositoryPort#findByIdForUpdate(orderId)`(NOWAIT)로 주문을 잡은 뒤 클레임 목록을 읽고 바꾼다. 클레임 행마다의 `@Version` 만으로는
+  write skew 를 못 막는다 — "열린 반품이 없는데 `RETURN_REQUESTED` 에 멈춘 주문", "열린 `REQUESTED` 반품이 있는데 `DELIVERED` 로 돌아간 주문"이 생긴다.
+  잠금에서 지면 기다리지 않고 잠금 예외다(반품 환불 기록은 503 `ORDER_036` → 같은 클레임 재전송, §5 B2a). 결제 후 취소 경로의 낙관적 방식은 그대로다.
 - 같은 결제 승인 이벤트는 다시 올 수 있다(릴레이 재발행 · 컨슈머 재전달) — inbox(`orders.processed_event`)가 같은 eventId 를 거르고, 다른 eventId 의 같은 결제는
   `order_payment.payment_id` 유니크가 막는다. 이미 그 결제로 `PAID` 이후 상태면 아무것도 바꾸지 않는다. 재전송 스케줄러는 없다(`payment-guide.md` §6).
 
@@ -939,14 +943,15 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
 ### 반품 저장 기반 · 환불 산식 (#17 B1)
 
 호출부 없는 저장 기반과 순수 도메인이다(A1 과 같은 방식). 엔드포인트 · 응답 모양 · 고객 반품 접수 동작은 바꾸지 않고, 새 상태 행을 만들지 않는다.
-승인 · 거절 API, 스케줄러 · 파이프라인의 반품 분기, 기존 전이(`markRefunded` 등)의 반품 해제, 재고 복원 연결은 B2 다.
+기존 전이(`markRefunded` 등)의 반품 해제 · 스케줄러 · 파이프라인의 반품 분기 · 재고 복원 연결은 B2a(아래 "반품 환불 · 복원 엔진"), 반품 수습 확장은 B2b,
+승인 · 거절 API 는 B2c 다.
 
 | 반품 상태 | 뜻 | 칸 | 다음 |
 |-----------|----|----|------|
 | `REQUESTED` | 고객 접수 · 검수 대기 | 결제 아이디 · 승인 칸 · 다음 시각 · 실패 코드 없음, 환불액 null(미산정) | 운영자 승인 `Claim#approveReturn` → `APPROVED`, 거절 `Claim#rejectReturn` → `REJECTED` |
-| `APPROVED` | 승인 · 환불 대기 | 결제 아이디 · 환불액(> 0) · 승인 기록(`restock` · 차감액 · 승인자 · 승인 시각) · 다음 시각(lease) | (B2) 환불 200 → `REFUNDED`, 종결 거절 → `REFUND_FAILED` — 취소의 `REQUESTED` 와 같은 자리 |
+| `APPROVED` | 승인 · 환불 대기 | 결제 아이디 · 환불액(> 0) · 승인 기록(`restock` · 차감액 · 승인자 · 승인 시각) · 다음 시각(lease) | (B2a) 환불 200 → `REFUNDED`(+ 주문 정리), 종결 거절 → `REFUND_FAILED`, 미확정 → 백오프 재시도 — 취소의 `REQUESTED` 와 같은 자리 |
 | `REJECTED` | 거절(끝) | 결제 · 승인 칸 없음 | 없음. 수량 합산에서 빠진다 |
-| `REFUNDED` · `COMPLETED` · `REFUND_FAILED` · `RESTORATION_FAILED` | 취소와 같은 뜻 | 승인 칸은 그대로 남는다 | (B2) 취소와 같은 전이. `restock=false` 면 복원 없이 `COMPLETED` |
+| `REFUNDED` · `COMPLETED` · `REFUND_FAILED` · `RESTORATION_FAILED` | 취소와 같은 뜻 | 승인 칸은 그대로 남는다 | (B2a) 취소와 같은 전이. `restock=false` 면 환불 기록 때 복원 없이 `COMPLETED`. 다시 시도 · 수동 확정 · 종결은 B2b |
 
 - **대기 판정은 유형을 본다** — 환불 대기는 취소 `REQUESTED` · 반품 `APPROVED`, 복원 대기는 둘 다 `REFUNDED` 다(`Claim.Type#isAwaitingAttempt`,
   `Claim#isAwaitingAttempt` · `#isAwaitingRefund`). `Claim.Status` 의 상태만 보는 대기 판정은 없앴다 — 취소 결과는 그대로다.
@@ -963,7 +968,7 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
   아니고 열린 반품이 있으면 `RETURN_REQUESTED` 유지(`STILL_REQUESTED`), 그 밖(일부만 환불 · 전부 거절)이면 `DELIVERED`. 결과 타입은 `ReturnOutcome` 셋뿐이다.
   `Order#settleReturn(ReturnOutcome)` 만 `RETURN_REQUESTED` → `RETURNED` · `DELIVERED` 를 하고 배송 완료 · 출고 시각을 보존한다 — 주문은 클레임을 읽지 않는다.
   `changeStatus(DELIVERED)` 는 여전히 거절이고 어드민 직접 전이(`AdminStatusChangePolicy`)에도 넣지 않았다 — 어드민 PATCH 로 `RETURN_REQUESTED` → `DELIVERED` 는 이제 표 안이라 `ORDER_020` 대신 `ORDER_023` 이다.
-  배송 완료로 돌아간 주문은 보존된 배송 완료 시각 기준으로 자동 구매 확정 대상이 된다 — 기간이 이미 지났으면 다음 배치에서 바로 확정된다(B2 가 정리 시점을 정할 때 본다).
+  배송 완료로 돌아간 주문은 보존된 배송 완료 시각 기준으로 자동 구매 확정 대상이 된다 — 기간이 이미 지났으면 다음 배치에서 바로 확정된다(정리 시점은 반품 환불 기록 트랜잭션 — 아래 B2a).
 
 **환불 산식 `ReturnRefundPolicy`** — 주문 스냅숏만 쓴다(§2 "클레임의 배송비 재부과는 주문 스냅숏으로"). `R = 남은 결제액 = 결제 총액 − 정산한 반품의 정책 금액 합`
 (정산 = 정산된 반품, 정책 금액 = 환불액 + 차감액 — `ReturnRefundPolicy.Settled#of(order, claims, target)`), `before` · `after` = 이번 반품 전 · 뒤에 남는 수량이다.
@@ -1064,12 +1069,46 @@ B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지
     `now + min(max-backoff, initial-backoff × 2^횟수)`(기본 1분 → 1시간 상한). 한 단계는 **첫 시도 + 재시도 `max-attempts`(기본 48) 회**까지 하고, 그다음
     미확정이면 환불은 `REFUND_FAILED`(`REFUND_UNCONFIRMED`), 복원은 `RESTORATION_FAILED`(`RESTORATION_UNCONFIRMED`)다. 원격 호출의 Feign 밖 예외도 미확정이다.
   - **재시도 스케줄러** `ClaimCancellationRetryScheduler` — `order.cancellation.retry.enabled`(기본 **false**, 결제 개방과 함께 켠다 — 꺼져 있으면 결제 후 취소도
-    받지 않는다, §1-1) · `interval` · `batch-size`. `type = CANCELLATION`, `status in (REQUESTED, REFUNDED)`, `next_attempt_at <= now` 를 집어 행마다
+    받지 않는다, §1-1) · `interval` · `batch-size`. `(type = CANCELLATION and status in (REQUESTED, REFUNDED)) or (type = RETURN and status in (APPROVED, REFUNDED))`
+    (반품 포함 #17 B2a — 설정 키 · 클래스 이름은 그대로, batch · 시간 예산을 두 유형이 나눠 쓴다), `next_attempt_at <= now` 를 집어 행마다
     **원격 호출 전에** `next_attempt_at = now + lease` 를 먼저 커밋한다(`@Version` 선점, ShedLock 없음) — 진 행은 건너뛰고, 이긴 행만 같은 클레임 · 저장된 금액으로
     남은 단계를 다시 실행한다. 낙관적 락이 아닌 예외(DB 장애 · 버그)로 그 행이 실패하면 짧은 트랜잭션으로 다시 읽어 그 단계의 미확정 한 번으로 센다 —
     같은 실패가 횟수 없이 영영 반복되지 않는다. 한 행의 실패는 배치를 멈추지 않고, 한 번 실행이 lease 의 절반을 넘기면 남은 행은 다음 실행으로 넘긴다.
     스케줄링 스레드는 3개다(`spring.task.scheduling.pool.size`) — 긴 재시도 배치가 미결제 만료 · 자동 구매 확정을 막지 않는다.
 - 교환은 v1 에서 "반품 + 재주문" 으로 운영하고, 전용 흐름은 필요해질 때 만든다.
+
+### 반품 환불 · 복원 엔진 (#17 B2a)
+
+승인된 반품(`APPROVED`)의 환불 → 기록 · 주문 정리 → 재고 복원을 **결제 후 취소와 같은 파이프라인**(`OrderCancellationPipelineProcessor` · `OrderCancellationProcessor` ·
+재시도 스케줄러)으로 돌린다. 새 파이프라인 · 2-CAS · 잠금 TX · 503 `ORDER_036` 을 복제하지 않고 유형 분기는 아래 넷뿐이다. 반품 `APPROVED` 행을 만드는 승인 API 는
+B2c 라 B2a 만 배포된 동안 호출부는 스케줄러뿐이고 실제로 도는 행은 없다(시험은 도메인 승인으로 만든 시드 행).
+
+| 분기 | 취소 | 반품 |
+|------|------|------|
+| 환불 대기 (`Claim#isAwaitingRefund` · `awaitingRefundStatus`) | `REQUESTED` | `APPROVED` — 승인 전 `REQUESTED` 반품이 파이프라인에 들어오면 아무것도 하지 않는다 |
+| 재조회(2-CAS 의 두 번째 · 실패 횟수 세기) | 주문의 취소 클레임(`findClaim(orderId)`, 기존 그대로) | 클레임 아이디(`findClaimById`) — 한 주문에 반품이 여럿이다 |
+| 환불 확정 반영(tx2) | 기존 그대로(주문 `CANCEL_REQUESTED` → `CANCELED`) | `applyReturnRefunded` — 아래 |
+| 재고 복원 | `StockRestorationPort#restoreCancellation`(사유 `CANCELLATION`) | `restoreReturn`(사유 `RETURN`). `restock=false`(`Claim#requiresRestoration` 아님)면 부르지 않는다 |
+
+- **도메인 전이** — `markRefunded` · `markConfirmedRefund` · `complete` · `failRefund` · `failRestoration` · `retryLater` · `holdUntil` 의 취소 전용 제한을 풀고,
+  `REQUESTED` 고정 자리를 유형별 환불 대기 상태로 바꿨다. `hasSameRefundRequest` 는 유형이 같아야 같은 요청이고, `isRefundRejected` 는 유형을 보지 않는다.
+  `reopen` · `confirmRefundByAdmin` · `completeByAdmin` 은 아직 취소만이다(B2b).
+- **반품 환불 기록(tx2, `applyReturnRefunded`)** — 주문 FOR UPDATE(NOWAIT, §1-2) → `markConfirmedRefund`(`restock=false` 면 이어서 `complete` — `ck_claim_return_next_attempt`
+  가 `REFUNDED` 에 다음 시각을 요구하므로 복원하지 않는 반품은 같은 커밋에서 `COMPLETED` 로 닫는다) → 주문의 클레임 목록에서 이 행을 메모리로 바꿔 넣어
+  `ReturnRefundPolicy.outcome` → `Order#settleReturn` → 바뀌었으면 `SERVICE` 이력(사유 `RETURN_REFUNDED`)까지 **한 커밋**이다. 정리 결과는 `RETURNED`(전량 환불) ·
+  `DELIVERED`(열린 반품 없이 일부) · 그대로 `RETURN_REQUESTED`(열린 반품 있음, 이력 없음) 셋이다.
+- **주문이 `RETURN_REQUESTED` 가 아니면(또는 정리 판정이 불가능하면) fail-closed** — 환불은 이미 나갔으니 클레임을 `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`)로
+  닫고 재고 · 주문은 건드리지 않는다. 잠금 규칙상 도달하지 않는 데이터 이상이라 운영자 조사 몫이다(수습 경로는 B2b · #695).
+- **주문 잠금에서 지면** 기록 트랜잭션이 잠금 예외로 롤백되고 파이프라인이 503 `ORDER_036` 으로 바꾼다 — 클레임은 `APPROVED` + lease 그대로라 스케줄러가 같은
+  클레임 아이디 · 같은 본문으로 다시 보내고, payment 는 같은 claimId 의 성공 원장을 보고 PG 없이 200 이다(`payment-guide.md` §8). 실패 횟수로 세지 않는다.
+- **복원은 주문 상태를 보지 않는다** — `REFUNDED` · `RESTORATION_FAILED` 반품의 복원은 주문이 정리 뒤 `DELIVERED` → `PURCHASE_CONFIRMED` 로 갔어도 진행한다.
+  복원 사유는 클레임 유형에서만 나온다 — product 는 같은 claimId 의 사유 · 수량이 다르면 `PRODUCT_029` 다.
+- **귀책은 저장하지 않는다** — 귀책(`Fault`)은 승인 때 환불액 계산에만 쓰고 클레임 칸이 없다(B2c 의 감사 detail 에 남긴다). 엔진은 저장된 환불액 · 결제만 보낸다.
+- **로그 문구는 그대로다** — 파이프라인 · 스케줄러의 `cancellation …` 로그를 반품도 같이 쓴다(취소 문구를 바꾸지 않으려고). 반품 정리 실패만 `return refunded but …` 다.
+  클레임 아이디로 유형을 가린다.
+- 시험 — `ClaimTest`(반품 전이 전수), `ReturnRefundPipelineContract`(H2 · PostgreSQL: 승인 전 무동작, 정리 3결과 · `SERVICE` 이력, `restock=false` 복원 미호출,
+  같은 주문 반품 둘의 아이디 재조회, 구매 확정 뒤 복원, `ORDER_STATUS_UNEXPECTED`, 거절 · 미확정 · 실패 횟수, 두 유형 섞인 스케줄러 질의),
+  `ReturnRefundPipelinePostgresTest`(주문 잠금 경합 → 503 → 같은 클레임 재전송). 취소 시험은 바꾸지 않았다.
 
 ## 6. 어드민 운영 화면이 보는 것
 

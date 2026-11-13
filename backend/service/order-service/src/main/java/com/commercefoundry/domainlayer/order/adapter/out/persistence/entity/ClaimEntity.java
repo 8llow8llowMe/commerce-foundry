@@ -37,7 +37,8 @@ import lombok.NoArgsConstructor;
  * </ul>
  *
  * <p>재시도 스케줄러는 {@code idx_claim_type_next_attempt_at_id} 를
- * {@code type = CANCELLATION and next_attempt_at <= now order by next_attempt_at, id} 로 탄다 — 다음 시도 시각은 대기 상태에만 있어 상태 열을 인덱스에 두지 않는다.
+ * 유형마다({@code type = CANCELLATION} · {@code type = RETURN}, #17 B2a) {@code next_attempt_at <= now} 범위로 타고 두 범위를 합쳐 {@code order by next_attempt_at, id} 한다
+ * — 다음 시도 시각은 대기 상태에만 있어 상태 열을 인덱스에 두지 않는다.
  */
 @Entity
 @Table(name = "claim", comment = "주문 클레임 접수",

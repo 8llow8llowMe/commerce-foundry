@@ -12,7 +12,6 @@ import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -121,8 +120,8 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
         if (limit < 1) {
             throw new IllegalArgumentException("positive limit required");
         }
-        List<ClaimEntity> claims = claimRepository.findRetryTargets(Claim.Type.CANCELLATION, EnumSet.of(Claim.Status.REQUESTED, Claim.Status.REFUNDED), now,
-            Limit.of(limit));
+        List<ClaimEntity> claims = claimRepository.findRetryTargets(Claim.Type.CANCELLATION, Claim.Type.CANCELLATION.awaitingAttemptStatuses(),
+            Claim.Type.RETURN, Claim.Type.RETURN.awaitingAttemptStatuses(), now, Limit.of(limit));
         return withItems(claims);
     }
 }

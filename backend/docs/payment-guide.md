@@ -601,6 +601,15 @@ listener OFF와 cleanup OFF는 독립이다. cleanup은 기존 messaging/relay/c
   (클레임 `REFUND_FAILED` + 그 코드, 운영자 확인). 그 밖(503 `PAYMENT_018` · `PAYMENT_012` · 타임아웃 · 5xx · 모르는 4xx · 401/403 · 서킷 오픈 · 계약 위반 ·
   Feign 밖 예외) → 미확정 — 같은 클레임 · 같은 본문으로 백오프 재시도, `max-attempts` 를 넘으면 `REFUND_FAILED`(`REFUND_UNCONFIRMED`). 키 유효 기간(14일) 안에서
   끝나도록 `max-backoff × max-attempts ≤ 14d` 를 기동 때 검사한다.
+- **반품 환불도 같은 호출이다 (#17 B2a)** — 승인된 반품(`APPROVED`)은 같은 `POST /internal/v1/payments/{paymentId}/cancellations` 를 같은 본문 · 키(`Idempotency-Key`
+  = 반품 클레임 아이디, `{claimId, amount, currency}`)로 부른다 — 금액은 승인 때 저장한 환불액(정책 금액 − 차감액)이고 결제의 부분 취소다. 분류 · 재시도 · 상한 ·
+  14일 기한(반품은 **승인 시각** 기준, `Claim#refundDeadlineBase`)도 취소와 같다. payment 쪽 변경은 없다. 흐름은 `order-flow-guide.md` §5 "반품 환불 · 복원 엔진".
+  - **한계 — 같은 결제에 다른 claimId 의 `PENDING` 이 있으면 409 `PAYMENT_016`** (아래 판정 순서) — 앞선 반품의 결과 미확인이 남은 결제의 다음 반품은 결제사 종결
+    거절처럼 `REFUND_FAILED`(`PAYMENT_016`)로 닫힌다. order 는 같은 주문에 `APPROVED` · `REFUND_FAILED` 반품이 있으면 승인을 받지 않아(B2c, 409) 정상 흐름에서는
+    겹치지 않지만, 반품 수동 확정 뒤 payment 원장이 `PENDING` 으로 남는 경우(#693 PR B + order 호출 전)는 연쇄될 수 있다.
+  - 이미 환불된 claimId 의 재요청은 PG 없이 200 이다 — 반품 환불 기록이 주문 잠금에서 져 503 `ORDER_036` 으로 끝난 뒤 스케줄러가 같은 클레임을 다시 보낼 때의 수습 경로다.
+  - `LATE_APPROVED` 결제는 대상이 아니다 — 반품의 결제 아이디는 order 의 결제 완료 기록(`order_payment` `PAID`)에서 오고, `LATE_APPROVED` 는 주문에 반영하지 않는다(§6).
+    order 가 사전 차단할 필요가 없다.
 - **타임아웃 · 서킷** — `paymentCancelClient`(contextId) read timeout **10초**(PG 취소 대기, 조회 3초와 따로), 서킷 `payment-cancellation` 은 조회 서킷
   `payment-service` 와 분리한다 — PG 취소 장애가 승인 반영 재조회를 막지 않게. 클레임 lease(`order.cancellation.retry.lease`, 기본 2분)는 read timeout 보다 충분히 길어야 한다.
 - **order 의 수동 환불 확정과 결제 장부 (#17 A3)** — 대표가 order 어드민에서 환불 실패 클레임을 수동 확정(`refund-confirmation`)해도 **payment-service 에는 알리지 않는다.**

@@ -29,6 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
  * <p><b>트랜잭션을 걸지 않는다</b> — 환불은 PG 취소를 기다리는 긴 원격 호출이라 DB 커넥션을 쥔 채 기다리지 않고, 원격이 성공한 뒤 롤백돼 "PG 는 취소했는데 DB 는 모르는"
  * 창을 만들지 않으려고 DB 구간만 {@link OrderCancellationProcessor} 의 짧은 트랜잭션으로 나눈다. 그 사이 끊겨도 클레임이 남아 같은 클레임 아이디 · 저장된 금액으로
  * 다시 보낸다(payment · product 둘 다 클레임 아이디로 멱등).
+ *
+ * <p>승인된 반품(#17 B2a)도 이 경로 하나를 같이 쓴다 — 새 파이프라인을 두지 않는다. 유형이 가르는 것은 환불 대기 상태({@link Claim#isAwaitingRefund()}),
+ * 재조회 키, 복원 사유 · 생략뿐이다. 로그 문구("cancellation …")는 반품도 그대로 쓴다 — 클레임 아이디로 유형을 가린다.
  */
 @Slf4j
 @Component
@@ -53,7 +56,8 @@ public class OrderCancellationPipelineProcessor {
     public Claim progress(Claim claim) {
         Claim current = claim;
         try {
-            if (current.status() == Claim.Status.REQUESTED) {
+            // 환불 대기는 유형별이다(취소 REQUESTED · 반품 APPROVED) — 승인 전 반품(REQUESTED)은 아무 단계도 하지 않는다
+            if (current.isAwaitingRefund()) {
                 Optional<Claim> recorded = recordRefund(current, refund(current));
                 if (recorded.isEmpty()) {
                     return current;
@@ -84,8 +88,7 @@ public class OrderCancellationPipelineProcessor {
                     if (attempt == 1) {
                         break;
                     }
-                    current = orderCancellationProcessor.findClaim(source.orderId())
-                        .orElseThrow(() -> new IllegalStateException("claim not found"));
+                    current = reload(source).orElseThrow(() -> new IllegalStateException("claim not found"));
                     if (!source.hasSameRefundRequest(current)) {
                         throw new IllegalStateException("refund request changed");
                     }
@@ -98,6 +101,12 @@ public class OrderCancellationPipelineProcessor {
         } catch (RuntimeException failure) {
             throw new OrderException(OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE, failure);
         }
+    }
+
+    /** 같은 클레임의 지금 저장된 값 — 취소는 주문당 하나라 주문의 취소 클레임, 반품은 주문에 여럿일 수 있어 클레임 아이디로 읽는다. */
+    private Optional<Claim> reload(Claim source) {
+        return source.type() == Claim.Type.CANCELLATION
+            ? orderCancellationProcessor.findClaim(source.orderId()) : orderCancellationProcessor.findClaimById(source.id());
     }
 
     /** ext1 — 저장된 결제 아이디 · 환불액만 보낸다(다시 계산하지 않는다, {@code PAYMENT_019} 방지). Feign 밖 예외(토큰 발급 실패 등)도 미확정이다. */
@@ -125,8 +134,15 @@ public class OrderCancellationPipelineProcessor {
      *   <li>클레임 항목이 주문에 없음 — 종결 {@link #RESTORATION_DATA_INVALID}(호출하지 않는다)</li>
      *   <li>026 · 030 · 031 {@code CONFLICT} · 모르는 4xx {@code REJECTED} · 전송 실패 · 타임아웃 · 5xx · 서킷 · 계약 위반 {@code UNKNOWN} · 그 밖의 예외 — 미확정</li>
      * </ul>
+     *
+     * <p>복원 사유는 클레임 유형에서만 나온다(취소 {@code CANCELLATION} · 반품 {@code RETURN}, #17 B2a) — 같은 클레임 아이디의 사유가 바뀌면 product 가 029 로 거절한다.
+     * 재고로 되돌리지 않는 반품({@link Claim#requiresRestoration()} 이 아님)은 부르지 않고 완료다 — 보통은 환불 기록 때 이미 COMPLETED 라 여기 오지 않는다.
+     * 복원은 주문 상태를 보지 않는다 — 반품 정리 뒤 배송 완료 · 구매 확정으로 간 주문의 환불된 반품도 복원한다.
      */
     private CancellationStepOutcome restore(Claim claim, Order order) {
+        if (!claim.requiresRestoration()) {
+            return CancellationStepOutcome.done();
+        }
         SortedMap<Long, Integer> quantities;
         try {
             quantities = quantitiesBySkuId(claim, order);
@@ -135,7 +151,11 @@ public class OrderCancellationPipelineProcessor {
             return CancellationStepOutcome.failed(RESTORATION_DATA_INVALID);
         }
         try {
-            stockRestorationPort.restoreCancellation(claim.id(), order.stockReservationId(), quantities);
+            if (claim.type() == Claim.Type.RETURN) {
+                stockRestorationPort.restoreReturn(claim.id(), order.stockReservationId(), quantities);
+            } else {
+                stockRestorationPort.restoreCancellation(claim.id(), order.stockReservationId(), quantities);
+            }
             return CancellationStepOutcome.done();
         } catch (StockReservationException exception) {
             String code = switch (exception.getFailure()) {

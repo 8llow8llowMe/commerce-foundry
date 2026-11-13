@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.domainlayer.order.domain.model.ReturnRefundPolicy;
 import com.commercefoundry.global.properties.OrderCancellationProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.shared.commerce.Money;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Propagation;
 
 /**
  * 결제 후 고객 취소의 DB 단계 (#16 PR-2, {@code order-flow-guide.md} §5) — 접수(tx1) · 환불 결과 반영(tx2) · 재고 복원 결과 반영(tx3) · 재시도 선점 · 실패 기록.
+ * 승인된 반품(#17 B2a)도 tx2 · tx3 · 선점 · 실패 기록을 같이 쓴다 — 유형 분기는 환불 확정 반영({@link #applyRefunded})과 재조회 키뿐이다.
  * 원격 호출(환불 · 복원)은 이 사이에 트랜잭션 밖에서 한다({@link OrderCancellationPipelineProcessor}). 각 단계는 짧은 트랜잭션(5초)이고 클레임 · 주문의
  * {@code @Version} 으로 진 쪽을 가른다 — 넘겨받은 클레임의 버전이 낡았으면 저장에서 {@code OptimisticLockingFailureException} 이다(다른 워커가 이미 처리했다).
  *
@@ -115,17 +117,26 @@ public class OrderCancellationProcessor {
     }
 
     /**
+     * 클레임 하나(지금 저장된 값 · 버전, 유형 무관) (#17 B2a) — 한 주문에 반품이 여럿일 수 있어 반품의 재조회는 주문이 아니라 클레임 아이디로 한다.
+     * 취소 재조회는 {@link #findClaim} 그대로다(같은 행).
+     */
+    @Transactional(readOnly = true, timeout = 5)
+    public Optional<Claim> findClaimById(long claimId) {
+        return claimRepositoryPort.findById(claimId);
+    }
+
+    /**
      * 환불 결과 반영(tx2).
      *
      * <ul>
      *   <li>DONE — 주문이 취소 요청이면 클레임 REFUNDED(다음 시각 {@code now + lease}, 이어서 재고를 복원한다) + 주문 취소 완료 + {@code SERVICE} 이력.
      *       이미 취소 완료면 클레임만. 주문이 그 밖의 상태(데이터 이상)면 복원하지 않고 RESTORATION_FAILED({@link #ORDER_STATUS_UNEXPECTED}).
-     *       미확정으로 닫힌 클레임({@link Claim#REFUND_UNCONFIRMED})의 늦은 성공도 받는다</li>
-     *   <li>FAILED — 클레임 REFUND_FAILED(원격 코드). 주문은 취소 요청 그대로 운영자에게 넘긴다</li>
+     *       미확정으로 닫힌 클레임({@link Claim#REFUND_UNCONFIRMED})의 늦은 성공도 받는다. 반품은 주문을 먼저 잠그고 정리한다({@link #applyReturnRefunded})</li>
+     *   <li>FAILED — 클레임 REFUND_FAILED(원격 코드). 주문은 취소 요청(반품은 반품 요청) 그대로 운영자에게 넘긴다</li>
      *   <li>RETRY — 재시도 상한 안이면 다음 시각을 미루고, 넘었으면 REFUND_FAILED({@link Claim#REFUND_UNCONFIRMED})</li>
      * </ul>
      *
-     * @param claim 환불을 보낸 클레임 — 그 뒤 다른 쪽이 바꿨으면 저장에서 낙관적 락 예외다
+     * @param claim 환불을 보낸 클레임(환불 대기 — 취소 REQUESTED · 반품 APPROVED) — 그 뒤 다른 쪽이 바꿨으면 저장에서 낙관적 락 예외다
      * @return 저장된 클레임(올라간 버전)
      */
     @Transactional(timeout = 5)
@@ -133,7 +144,7 @@ public class OrderCancellationProcessor {
         if (outcome.kind() == CancellationStepOutcome.Kind.DONE) {
             return applyRefunded(claim);
         }
-        if (claim.status() != Claim.Status.REQUESTED) {
+        if (!claim.isAwaitingRefund()) {
             // 늦게 온 미확정 · 거절은 이미 닫힌 클레임을 바꾸지 않는다
             log.warn("refund outcome ignored for non-requested claim. claimId={}, status={}, outcome={}", claim.id(), claim.status(), outcome.kind());
             return claim;
@@ -161,11 +172,13 @@ public class OrderCancellationProcessor {
 
     /**
      * 일반 시도 실패를 당시 스냅숏의 id · version · status가 현재 대기 단계와 일치할 때만 한 번 센다. 새 선점 · 단계 · 종결 결과는 건드리지 않는다.
-     * 확정 환불 미기록은 이 메서드로 보내지 않는다. 비교 뒤 경합도 UPDATE의 버전에서 패배한다.
+     * 확정 환불 미기록은 이 메서드로 보내지 않는다. 비교 뒤 경합도 UPDATE의 버전에서 패배한다. 반품은 주문에 여럿일 수 있어 클레임 아이디로 다시 읽는다.
      */
     @Transactional(timeout = 5)
     public void recordAttemptFailure(Claim attempted) {
-        findCancellationClaim(attempted.orderId())
+        Optional<Claim> stored = attempted.type() == Claim.Type.CANCELLATION
+            ? findCancellationClaim(attempted.orderId()) : claimRepositoryPort.findById(attempted.id());
+        stored
             .filter(claim -> claim.id() == attempted.id() && Objects.equals(claim.version(), attempted.version())
                 && claim.status() == attempted.status() && claim.isAwaitingAttempt())
             .ifPresent(this::retryOrGiveUp);
@@ -190,7 +203,7 @@ public class OrderCancellationProcessor {
         return Optional.of(applyRefunded(current));
     }
 
-    /** 재시도 대상 — 환불 대기 · 복원 대기이고 다음 시각이 지난 취소 클레임을 다음 시각 순으로 {@code batch-size} 건까지. */
+    /** 재시도 대상 — 환불 대기 · 복원 대기이고 다음 시각이 지난 취소 · 반품 클레임을 다음 시각 순으로 {@code batch-size} 건까지(두 유형이 배치를 나눠 쓴다). */
     @Transactional(readOnly = true, timeout = 5)
     public List<Claim> findRetryTargets() {
         return claimRepositoryPort.findCancellationRetryTargets(clock.instant(), properties.retry().batchSize());
@@ -224,8 +237,12 @@ public class OrderCancellationProcessor {
     /**
      * 환불 확정 반영 — 주문 상태에 따라 취소 완료로 바꾸거나(취소 요청), 클레임만 바꾸거나(이미 취소 완료), 데이터 이상으로 닫는다.
      * 운영자 수동 환불 확정({@link ClaimAdminRecoveryProcessor#confirmRefund})도 같은 저장 분기를 쓴다 — 그쪽은 이력이 ADMIN · 사유이고, 그 밖의 주문 상태는 저장 전에 409 로 거절한다.
+     * 반품은 {@link #applyReturnRefunded} 다 — 아래 취소 분기는 반품 확장 전과 같다.
      */
     private Claim applyRefunded(Claim claim) {
+        if (claim.type() == Claim.Type.RETURN) {
+            return applyReturnRefunded(claim);
+        }
         Instant now = clock.instant();
         Claim refunded = claim.markConfirmedRefund(now.plus(properties.retry().lease()));
         Order order = loadOrder(claim.orderId());
@@ -243,11 +260,51 @@ public class OrderCancellationProcessor {
         return saveFailure(refunded.failRestoration(ORDER_STATUS_UNEXPECTED));
     }
 
+    /**
+     * 반품 환불 확정 반영 (#17 B2a) — <b>주문을 먼저 NOWAIT 으로 잠근다</b>(반품 상태를 바꾸는 트랜잭션의 공통 규칙, {@code order-flow-guide.md} §1-2). 승인 · 거절 ·
+     * 고객 추가 접수와 겹쳐 "열린 반품이 없는데 반품 요청에 멈춘 주문"이나 "열린 반품이 있는데 배송 완료로 돌아간 주문"이 생기지 않게 한다. 잠금에서 지면 잠금 예외가
+     * 그대로 나가 파이프라인이 503 {@code ORDER_036} 으로 바꾸고, 클레임은 승인 + lease 로 남아 스케줄러가 같은 클레임으로 다시 보낸다(payment 200, PG 없음).
+     *
+     * <p>클레임 REFUNDED(재고로 되돌리지 않는 반품은 바로 COMPLETED) → 이 주문의 클레임 목록에 이 행을 메모리로 바꿔 넣어 {@link ReturnRefundPolicy#outcome} →
+     * {@link Order#settleReturn} → 바뀌었으면 {@code SERVICE} 이력({@link OrderStatusHistory#RETURN_REFUNDED})까지 한 커밋이다. 주문이 반품 요청이 아니거나
+     * 정리 판정이 불가능하면(데이터 이상 — 잠금 규칙상 도달하지 않는다) 재고를 건드리지 않고 RESTORATION_FAILED({@link #ORDER_STATUS_UNEXPECTED})로 닫는다.
+     */
+    private Claim applyReturnRefunded(Claim claim) {
+        Order order = orderRepositoryPort.findByIdForUpdate(claim.orderId())
+            .orElseThrow(() -> new IllegalStateException("claim order not found: orderId=" + claim.orderId()));
+        Claim refunded = claim.markConfirmedRefund(clock.instant().plus(properties.retry().lease()));
+        Claim recorded = refunded.requiresRestoration() ? refunded : refunded.complete();
+        ReturnRefundPolicy.ReturnOutcome outcome = null;
+        if (order.status() == OrderStatus.RETURN_REQUESTED) {
+            List<Claim> claims = claimRepositoryPort.findAllByOrderId(order.id()).stream()
+                .map(stored -> stored.id() == recorded.id() ? recorded : stored).toList();
+            try {
+                outcome = ReturnRefundPolicy.outcome(order, claims);
+            } catch (IllegalStateException | IllegalArgumentException invalid) {
+                log.error("return refunded but order claims cannot be settled. claimId={}, orderId={}, error={}", claim.id(), claim.orderId(),
+                    invalid.getClass().getSimpleName());
+            }
+        }
+        if (outcome == null) {
+            // 환불은 이미 나갔다 — 재고 · 주문은 건드리지 않고 클레임을 종결 실패로 닫아 운영자에게 넘긴다
+            log.error("return refunded but order status unexpected, restoration skipped. claimId={}, orderId={}, paymentId={}, status={}",
+                claim.id(), claim.orderId(), claim.paymentId(), order.status());
+            return saveFailure(refunded.failRestoration(ORDER_STATUS_UNEXPECTED));
+        }
+        Claim saved = claimRepositoryPort.update(recorded);
+        Order settled = order.settleReturn(outcome);
+        if (settled.status() != order.status()) {
+            orderRepositoryPort.saveStatusChange(settled,
+                OrderStatusHistory.changedByService(snowflakeIdGenerator.generateId(), order, settled, OrderStatusHistory.RETURN_REFUNDED));
+        }
+        return saved;
+    }
+
     /** 미확정 — 상한 안이면 다음 시각을 미루고, 넘었으면 그 단계의 미확정 코드(환불 {@code REFUND_UNCONFIRMED} · 복원 {@code RESTORATION_UNCONFIRMED})로 종결한다. */
     private Claim retryOrGiveUp(Claim claim) {
         OrderCancellationProperties.Retry retry = properties.retry();
         if (claim.attemptCount() >= retry.maxAttempts()) {
-            return saveFailure(claim.status() == Claim.Status.REQUESTED
+            return saveFailure(claim.isAwaitingRefund()
                 ? claim.failRefund(Claim.REFUND_UNCONFIRMED) : claim.failRestoration(Claim.RESTORATION_UNCONFIRMED));
         }
         return claimRepositoryPort.update(claim.retryLater(clock.instant(), retry.initialBackoff(), retry.maxBackoff()));

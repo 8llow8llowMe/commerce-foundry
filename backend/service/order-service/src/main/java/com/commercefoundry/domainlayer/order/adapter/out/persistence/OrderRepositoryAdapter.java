@@ -73,6 +73,18 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
         });
     }
 
+    /** {@link #findByIdAndMemberIdForUpdate} 와 같은 방식이다 — 엔티티를 미리 적재하지 않고(존재만 본다) refresh 로 최신 행을 NOWAIT 잠근다. */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<Order> findByIdForUpdate(long orderId) {
+        if (!orderRepository.existsById(orderId)) {
+            return Optional.empty();
+        }
+        OrderEntity entity = entityManager.getReference(OrderEntity.class, orderId);
+        entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE, Map.of("jakarta.persistence.lock.timeout", 0));
+        return Optional.of(toDomain(entity));
+    }
+
     /**
      * 주문 행을 {@code saveAndFlush} 로 바로 넣고(버전 null → persist) 그 자리에서 제약 위반을 가른다 — 커밋 때 터지면 Facade 밖에서 나 바꿀 자리가 없다
      * ({@code coding-conventions.md} §9-1). 배송지 · 항목 · 입력 · 이력은 {@code Persistable} 이라 SELECT 없이 넣고(배치 insert) 마지막에 flush 한다.

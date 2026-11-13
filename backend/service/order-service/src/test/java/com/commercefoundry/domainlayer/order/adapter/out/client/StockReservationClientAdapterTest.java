@@ -473,6 +473,20 @@ class StockReservationClientAdapterTest {
         });
     }
 
+    @Test
+    @DisplayName("반품 복원 — 같은 경로 · 본문에 사유만 RETURN 이고, 응답 사유도 RETURN 이어야 한다. CANCELLATION 응답은 계약 위반(UNKNOWN)이다 (#17 B2a)")
+    void restoresReturn() {
+        RESPONSE_BODY.set(restoration(CLAIM_ID).replace("\"reason\":\"CANCELLATION\"", "\"reason\":\"RETURN\""));
+
+        stockRestorationPort.restoreReturn(CLAIM_ID, RESERVATION_ID, items());
+
+        assertThat(PATHS).containsExactly("/internal/v1/stock-restorations");
+        assertThat(BODIES.getFirst()).contains("\"claimId\":" + CLAIM_ID).contains("\"reason\":\"RETURN\"").contains("{\"skuId\":9001,\"quantity\":2}");
+        RESPONSE_BODY.set(restoration(CLAIM_ID));
+        assertThatThrownBy(() -> stockRestorationPort.restoreReturn(CLAIM_ID, RESERVATION_ID, items()))
+            .isInstanceOfSatisfying(StockReservationException.class, exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNKNOWN));
+    }
+
     @ParameterizedTest(name = "복원 {0} {1} → {2}")
     @CsvSource({
         "409, PRODUCT_027, NOT_CONFIRMED",
