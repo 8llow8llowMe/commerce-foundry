@@ -1,7 +1,9 @@
 package com.commercefoundry.domainlayer.productdraftgeneration.application.service.processor;
 
-import com.commercefoundry.ai.client.AiImage;
 import com.commercefoundry.domainlayer.job.domain.model.JobExecutionException;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure.Code;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationAiPort.Attachment;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationInputPort.ImageRequest;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationImageQueryResult;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationInputQueryResult;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationInputQueryResult.Facts;
@@ -15,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
@@ -27,11 +30,13 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <ul>
  *   <li><b>입력</b> — product 가 고정한 생성 입력을 다시 본다(product 요청 검증과 같은 상한). 사실 · 이미지 메타데이터가 계약 밖이면 AI 를 부르지 않는다.</li>
- *   <li><b>요청 크기</b> — 이미지는 {@link AiImage#MAX_COUNT}(8)장 · 장당 {@link AiImage#MAX_BYTES}(5MiB)이고, 원본 합계는 {@link #MAX_TOTAL_IMAGE_BYTES}(20MiB)다.
+ *   <li><b>요청 크기</b> — 이미지는 {@link #MAX_IMAGE_COUNT}(8)장 · 장당 {@link #MAX_IMAGE_BYTES}(5MiB)이고, 원본 합계는 {@link #MAX_TOTAL_IMAGE_BYTES}(20MiB)다.
  *       ai-core 는 장수 · 장당 크기만 보고 요청 전체 크기는 보지 않는다 — Messages API 요청 본문 상한(32MB, 넘으면 413)에서 base64 4/3 배(약 26.7MB)를
- *       빼고 남는 몫을 프롬프트 · JSON 여유분으로 둔다. 바이트를 받기 전에 메타데이터 {@code byteLength} 합계로 막는다(재시도 불가).</li>
- *   <li><b>이미지 바이트</b> — 받은 크기 · magic bytes 가 고정 값과 다르면 바뀐 이미지로 본다(product 410 {@code PRODUCT_DRAFT_044} 와 같은 코드).</li>
- *   <li><b>출력</b> — AI 출력은 불신 입력이다. 길이 · 줄바꿈 · 제어 문자 · 링크 · 이미지 순번을 다시 보고, 확인이 필요한 속성 · 경고는 서버가 운영자 입력으로 계산한다.
+ *       빼고 남는 몫을 프롬프트 · JSON 여유분으로 둔다. 바이트를 받기 전에 메타데이터 {@code byteLength} 합계로 막고(재시도 불가), 받으면서도 장마다 누적을 다시 본다.</li>
+ *   <li><b>이미지 바이트</b> — 장을 받을 때마다 순번 · 크기 · magic bytes 가 고정 값과 다르면 바뀐 이미지로 본다(product 410 {@code PRODUCT_DRAFT_044} 와 같은 코드).
+ *       응답 헤더 · 본문 상한은 입력 어댑터가 먼저 본다.</li>
+ *   <li><b>출력</b> — AI 출력은 불신 입력이다. 길이 · 줄바꿈 · 제어 문자 · 링크({@code ://} · {@code www.}) · 꺾쇠({@code <} {@code >}) · 이미지 순번을 다시 보고,
+ *       확인이 필요한 속성 · 경고는 서버가 운영자 입력으로 계산한다. 이메일 · 전화번호는 여기서 막지 않는다 — product 가 반영할 때(PR-3) sanitize 를 거친다.
  *       결과에 운영자 입력 사실을 다시 싣지 않는다 — 사실의 정본은 product 초안이다.</li>
  * </ul>
  */
@@ -39,20 +44,33 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class ProductDraftGenerationValidationProcessor {
 
+    /** 이미지 장수 상한. ai-core {@code AiImage.MAX_COUNT} 와 같다(같은지는 AI 어댑터 테스트가 본다). */
+    public static final int MAX_IMAGE_COUNT = 8;
+    /** 장당 바이트 상한. ai-core {@code AiImage.MAX_BYTES}(API 의 5MiB)와 같다. */
+    public static final int MAX_IMAGE_BYTES = 5 * 1024 * 1024;
     /** 이미지 원본 합계 상한. 근거는 클래스 설명. */
     public static final long MAX_TOTAL_IMAGE_BYTES = 20L * 1024 * 1024;
     /** 결과 JSON 상한 — 엔진 상한(64KiB)보다 작게 둔다. */
     public static final int MAX_RESULT_BYTES = 32 * 1024;
 
+    public static final String JPEG = "image/jpeg";
+    public static final String PNG = "image/png";
+    public static final String WEBP = "image/webp";
+    /** product 가 고정하는 형식(JPEG · PNG · WebP). GIF 는 product 가 받지 않는다. ai-core 가 받는 형식 안이다. */
+    public static final Set<String> IMAGE_CONTENT_TYPES = Set.of(JPEG, PNG, WEBP);
+
     public static final String INVALID_DATA = "PRODUCT_DRAFT_INVALID_DATA";
     public static final String INPUT_MISMATCH = "PRODUCT_DRAFT_INPUT_MISMATCH";
     public static final String IMAGES_TOO_LARGE = "PRODUCT_DRAFT_IMAGES_TOO_LARGE";
-    public static final String IMAGE_CHANGED = "PRODUCT_DRAFT_IMAGE_CHANGED";
+    /** 입력 어댑터의 바뀐 이미지와 같은 코드다 — 운영자 안내가 하나다. */
+    public static final String IMAGE_CHANGED = Code.PRODUCT_DRAFT_IMAGE_CHANGED.name();
 
     private static final Set<String> STATUSES = Set.of("REQUESTED", "GENERATING");
     private static final Set<String> IMAGE_TYPES = Set.of("THUMBNAIL", "GALLERY");
-    /** product 가 고정하는 형식(JPEG · PNG · WebP). GIF 는 product 가 받지 않는다. */
-    private static final Set<String> CONTENT_TYPES = Set.of(AiImage.JPEG, AiImage.PNG, AiImage.WEBP);
+    /** magic bytes 판별에 필요한 앞부분 길이(WebP 12바이트). */
+    private static final int MAGIC_BYTES = 12;
+    /** {@code www.} 로 시작하는 토큰 — 앞이 영문 · 숫자가 아니면 링크로 본다(대소문자 무시). 한글 바로 뒤에 붙인 {@code 는www.} 도 잡는다. */
+    private static final Pattern BARE_LINK = Pattern.compile("(?<![A-Za-z0-9])www\\.", Pattern.CASE_INSENSITIVE);
     private static final int MAX_LIST = 10;
     private static final int MAX_ITEM = 100;
 
@@ -137,12 +155,12 @@ public class ProductDraftGenerationValidationProcessor {
         list(facts.mustAvoid());
 
         List<Image> images = input.images();
-        require(input.imageCount() == images.size() && images.size() <= AiImage.MAX_COUNT);
+        require(input.imageCount() == images.size() && images.size() <= MAX_IMAGE_COUNT);
         long total = 0;
         for (int index = 0; index < images.size(); index++) {
             Image image = images.get(index);
-            require(image != null && image.index() == index && oneOf(IMAGE_TYPES, image.imageType()) && oneOf(CONTENT_TYPES, image.contentType())
-                && image.byteLength() >= 1 && image.byteLength() <= AiImage.MAX_BYTES);
+            require(image != null && image.index() == index && oneOf(IMAGE_TYPES, image.imageType()) && oneOf(IMAGE_CONTENT_TYPES, image.contentType())
+                && image.byteLength() >= 1 && image.byteLength() <= MAX_IMAGE_BYTES);
             total += image.byteLength();
         }
         if (total > MAX_TOTAL_IMAGE_BYTES) {
@@ -158,21 +176,44 @@ public class ProductDraftGenerationValidationProcessor {
         }
     }
 
-    /** 받은 바이트가 고정한 크기 · 형식과 같은지 본다. 다르면 바뀐 이미지다(재시도 불가). */
-    public List<ProductDraftGenerationImageQueryResult> images(Prepared prepared, List<ProductDraftGenerationImageQueryResult> received) {
+    /** 입력 포트에 넘길 장별 기대 값(순번 · 길이 · 형식). {@link #input} 을 지난 메타데이터라 길이는 장당 상한 안이다. */
+    public List<ImageRequest> imageRequests(Prepared prepared) {
+        return prepared.images().stream().map(image -> new ImageRequest(image.index(), Math.toIntExact(image.byteLength()), image.contentType())).toList();
+    }
+
+    /**
+     * 방금 받은 한 장을 본다 — 다음 장을 읽기 전에 부른다. 순번 · 크기 · magic bytes 가 고정 값과 다르면 {@code IMAGE_CHANGED},
+     * 이미 받은 장과 합친 바이트가 {@link #MAX_TOTAL_IMAGE_BYTES} 를 넘으면 {@code IMAGES_TOO_LARGE}(둘 다 재시도 불가).
+     * 형식은 응답 헤더가 아니라 magic bytes 로 확인한 고정 메타데이터 형식이다.
+     *
+     * @param accepted 이미 받아 통과한 장(순서대로). 이 장의 자리는 {@code accepted.size()} 다
+     */
+    public Attachment image(Prepared prepared, List<Attachment> accepted, ProductDraftGenerationImageQueryResult received) {
         List<Image> expected = prepared.images();
-        if (received == null || received.size() != expected.size()) {
+        int position = accepted.size();
+        if (received == null || position >= expected.size()) {
             throw new JobExecutionException(IMAGE_CHANGED, false);
         }
-        for (int index = 0; index < expected.size(); index++) {
-            Image image = expected.get(index);
-            ProductDraftGenerationImageQueryResult bytes = received.get(index);
-            if (bytes == null || bytes.index() != image.index() || !image.contentType().equals(bytes.mediaType()) || bytes.length() != image.byteLength()
-                || !magic(image.contentType(), bytes.bytes())) {
-                throw new JobExecutionException(IMAGE_CHANGED, false);
-            }
+        Image image = expected.get(position);
+        if (received.index() != image.index() || received.length() != image.byteLength() || !magic(image.contentType(), received.head(MAGIC_BYTES))) {
+            throw new JobExecutionException(IMAGE_CHANGED, false);
         }
-        return List.copyOf(received);
+        long total = received.length();
+        for (Attachment previous : accepted) {
+            total += previous.image().length();
+        }
+        if (total > MAX_TOTAL_IMAGE_BYTES) {
+            throw new JobExecutionException(IMAGES_TOO_LARGE, false);
+        }
+        return new Attachment(image.contentType(), received);
+    }
+
+    /** 고정한 장을 모두 받았는가. 모자라면 {@code IMAGE_CHANGED}(재시도 불가). */
+    public List<Attachment> images(Prepared prepared, List<Attachment> accepted) {
+        if (accepted.size() != prepared.images().size()) {
+            throw new JobExecutionException(IMAGE_CHANGED, false);
+        }
+        return List.copyOf(accepted);
     }
 
     /** AI 출력을 검증 · 정규화하고 결과 JSON 을 만든다. 계약 밖이면 {@code INVALID_DATA}(재시도 불가 — 같은 입력의 두 번째 유료 호출을 막는다). */
@@ -273,14 +314,14 @@ public class ProductDraftGenerationValidationProcessor {
         require(!value.isBlank() && value.length() <= max && !unsafe(value, false));
     }
 
-    /** AI 출력 한 줄 칸 — 앞뒤 공백을 빼고, 링크 · 제어 문자를 받지 않는다. */
+    /** AI 출력 한 줄 칸 — 앞뒤 공백을 빼고, 링크 · 꺾쇠 · 제어 문자를 받지 않는다. */
     private String singleLine(String value, int max, boolean nullable) {
         if (value == null) {
             require(nullable);
             return null;
         }
         String stripped = value.strip();
-        require(!stripped.isEmpty() && stripped.length() <= max && !unsafe(stripped, false) && !stripped.contains("://"));
+        require(!stripped.isEmpty() && stripped.length() <= max && !unsafe(stripped, false) && !markupOrLink(stripped));
         return stripped;
     }
 
@@ -288,8 +329,16 @@ public class ProductDraftGenerationValidationProcessor {
     private String text(String value) {
         require(value != null);
         String normalized = value.replace("\r\n", "\n").strip();
-        require(!normalized.isEmpty() && normalized.length() <= DESCRIPTION_MAX && !normalized.contains("://") && !unsafe(normalized, true));
+        require(!normalized.isEmpty() && normalized.length() <= DESCRIPTION_MAX && !markupOrLink(normalized) && !unsafe(normalized, true));
         return normalized;
+    }
+
+    /**
+     * 링크({@code ://} · {@code www.} 로 시작하는 토큰)나 꺾쇠({@code <} · {@code >})가 있는가. 꺾쇠는 문구에 필요 없고 HTML · 스크립트 조각의 신호라 막는다.
+     * 이메일 · 전화번호는 보지 않는다 — product 가 반영할 때(PR-3) sanitize 를 반드시 거친다.
+     */
+    private static boolean markupOrLink(String value) {
+        return value.indexOf('<') >= 0 || value.indexOf('>') >= 0 || value.contains("://") || BARE_LINK.matcher(value).find();
     }
 
     /**
@@ -314,10 +363,10 @@ public class ProductDraftGenerationValidationProcessor {
 
     private static boolean magic(String contentType, byte[] bytes) {
         return switch (contentType) {
-            case AiImage.JPEG -> bytes.length >= 3 && (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8 && (bytes[2] & 0xFF) == 0xFF;
-            case AiImage.PNG -> bytes.length >= 8 && (bytes[0] & 0xFF) == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G'
+            case JPEG -> bytes.length >= 3 && (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8 && (bytes[2] & 0xFF) == 0xFF;
+            case PNG -> bytes.length >= 8 && (bytes[0] & 0xFF) == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G'
                 && bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A;
-            case AiImage.WEBP -> bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F'
+            case WEBP -> bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F'
                 && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P';
             default -> false;
         };

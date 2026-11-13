@@ -19,7 +19,10 @@ public interface ProductDraftGenerationInputClient {
     @GetMapping("/internal/v1/product-drafts/{draftId}/generation-input")
     Response<ProductDraftGenerationInputInternalResponse> getGenerationInput(@PathVariable("draftId") long draftId);
 
-    /** 고정한 이미지 원본 바이트(봉투 없음, {@code application/octet-stream}). 오류는 JSON 봉투라 {@code FeignException} 의 본문에서 코드를 읽는다. */
+    /**
+     * 고정한 이미지 원본 바이트(봉투 없음, {@code application/octet-stream}). 원시 {@link feign.Response} 로 받는다 — 헤더를 보고 본문을 상한까지만 읽으려고.
+     * 이 반환형은 Feign 이 상태 코드로 오류를 디코딩하지 않으므로(ErrorDecoder 를 지나지 않는다) 어댑터가 상태 · 헤더 · 스트림을 모두 보고 닫는다.
+     */
     @GetMapping("/internal/v1/product-drafts/{draftId}/generation-images/{index}")
-    byte[] getGenerationImage(@PathVariable("draftId") long draftId, @PathVariable("index") int index);
+    feign.Response getGenerationImage(@PathVariable("draftId") long draftId, @PathVariable("index") int index);
 }

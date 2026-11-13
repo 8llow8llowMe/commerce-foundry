@@ -17,7 +17,9 @@ import com.commercefoundry.ai.prompt.PromptTemplates;
 import com.commercefoundry.ai.properties.AiProperties;
 import com.commercefoundry.domainlayer.productdraftgeneration.adapter.out.client.ai.ProductDraftGenerationAiAdapter;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationAiPort.Attachment;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationImageQueryResult;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.service.processor.ProductDraftGenerationValidationProcessor;
 import com.commercefoundry.domainlayer.productdraftgeneration.domain.model.ProductDraftGenerationCandidate;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +54,7 @@ class ProductDraftGenerationAiAdapterTest {
             .thenReturn(new AiStructuredResult<>(candidate, "stub", 1, 1, "end_turn", "id"));
 
         var result = adapter.generate("{\"nameHint\":\"셔츠\"}", "[{\"index\":0,\"imageType\":\"GALLERY\"}]",
-            List.of(new ProductDraftGenerationImageQueryResult(0, AiImage.WEBP, WEBP)), 9, 2);
+            List.of(new Attachment(AiImage.WEBP, new ProductDraftGenerationImageQueryResult(0, "application/octet-stream", WEBP))), 9, 2);
 
         assertThat(result).isSameAs(candidate);
         var request = ArgumentCaptor.forClass(AiRequest.class);
@@ -92,8 +94,45 @@ class ProductDraftGenerationAiAdapterTest {
 
     @Test
     void imageThatAiCoreRejectsNeverReachesTheClient() {
-        assertThatThrownBy(() -> adapter.generate("{}", "[]", List.of(new ProductDraftGenerationImageQueryResult(0, AiImage.JPEG, new byte[0])), 9, 1))
+        var empty = new Attachment(AiImage.JPEG, new ProductDraftGenerationImageQueryResult(0, "application/octet-stream", new byte[0]));
+        assertThatThrownBy(() -> adapter.generate("{}", "[]", List.of(empty), 9, 1))
             .isInstanceOfSatisfying(ProductDraftGenerationRemoteFailure.class, failure -> assertThat(failure.getErrorCode()).isEqualTo("PRODUCT_DRAFT_AI_INVALID"));
+    }
+
+    @Test
+    void imageBytesAreCopiedOnceIntoTheRequestAndTheResultStaysImmutable() {
+        when(ai.complete(any(AiRequest.class), eq(ProductDraftGenerationCandidate.class)))
+            .thenReturn(new AiStructuredResult<>(new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "t", "d", List.of()), "stub", 1, 1, "end_turn", "id"));
+        byte[] source = WEBP.clone();
+        var received = new ProductDraftGenerationImageQueryResult(0, "application/octet-stream", source);
+        source[0] = 'X';
+
+        adapter.generate("{}", "[]", List.of(new Attachment(AiImage.WEBP, received)), 9, 1);
+
+        var request = ArgumentCaptor.forClass(AiRequest.class);
+        verify(ai).complete(request.capture(), eq(ProductDraftGenerationCandidate.class));
+        byte[] sent = request.getValue().images().getFirst().bytes();
+        assertThat(sent).isEqualTo(WEBP);
+        // AiImage 가 가진 배열은 받은 결과의 내부 배열과 다르다 — 요청 쪽을 바꿔도 받은 결과는 그대로다
+        received.withBytes(internal -> {
+            assertThat(sent).isNotSameAs(internal);
+            return null;
+        });
+        sent[0] = 'Y';
+        assertThat(received.bytes()).isEqualTo(WEBP);
+        assertThat(received.head(4)).isEqualTo(new byte[] {'R', 'I', 'F', 'F'});
+        assertThat(received.head(100)).isEqualTo(WEBP);
+    }
+
+    /** 검증 Processor 는 ai-core 를 import 하지 않고 자체 상한을 둔다 — 두 값이 갈라지지 않게 여기서 맞춘다. */
+    @Test
+    void validationImageLimitsMatchAiCore() {
+        assertThat(ProductDraftGenerationValidationProcessor.MAX_IMAGE_COUNT).isEqualTo(AiImage.MAX_COUNT);
+        assertThat(ProductDraftGenerationValidationProcessor.MAX_IMAGE_BYTES).isEqualTo(AiImage.MAX_BYTES);
+        assertThat(ProductDraftGenerationValidationProcessor.JPEG).isEqualTo(AiImage.JPEG);
+        assertThat(ProductDraftGenerationValidationProcessor.PNG).isEqualTo(AiImage.PNG);
+        assertThat(ProductDraftGenerationValidationProcessor.WEBP).isEqualTo(AiImage.WEBP);
+        assertThat(AiImage.MEDIA_TYPES).containsAll(ProductDraftGenerationValidationProcessor.IMAGE_CONTENT_TYPES);
     }
 
     private void assertFailure(String code, boolean retryable) {
