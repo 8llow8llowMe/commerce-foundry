@@ -64,3 +64,16 @@ python -B -X utf8 scripts/be_queue_supervisor.py watch --interval 300
 Windows 긴 경로 때문에 `git worktree remove`가 등록은 풀고 폴더 삭제만 실패하면, 감독 도구는 반영된 로컬 브랜치를 정리하고 남은 폴더를 `cleanup_pending_path`에 기록한다. 다른 PR·CI 감시는 계속하며 폴더 삭제는 `docs/git-workflow.md` §7-2에 따라 별도로 처리한다. 미커밋 변경이나 미반영 커밋 때문에 실패한 정리는 계속 보류한다.
 
 작업 세션의 기본 cwd가 루트이고 워크트리가 쓰기 허용 범위 밖인 경우, 사용자가 해당 세션의 `/permissions`에서 쓰기 범위를 조정해야 한다. `codex queue`가 성공해도 권한 정책이 자동으로 확장되지는 않는다. GitHub 앱/MCP 도구 승인은 로컬 셸 권한과 별도일 수 있다.
+
+## 새 독립 세션 발견·메시지 전달
+
+`scripts/codex_session_mail.py`는 등록된 S1~S6 외에도 로컬 Codex가 기록한 사용자 세션을 찾는다. CLI·VS Code 세션을 대상으로 하며 하위 에이전트는 제외한다. 사용자가 입력하기 전의 빈 VS Code 세션도 Codex 상태 DB에 기록되면 발견할 수 있다. 이는 로컬 Codex 상태 DB를 읽기 전용으로 조회하는 방식이므로 Codex 버전에서 스키마가 바뀌면 오류를 보고하고 수정해야 한다.
+
+```powershell
+python -B -X utf8 scripts/codex_session_mail.py list --empty
+python -B -X utf8 scripts/codex_session_mail.py list --limit 30
+python -B -X utf8 scripts/codex_session_mail.py send <세션-ID> --message "수신 확인을 답하세요."
+python -B -X utf8 scripts/codex_session_mail.py read <세션-ID>
+```
+
+`send`는 전체 UUID, 유일한 UUID 접두어, 정확한 세션 이름을 받는다. 여러 세션이 일치하면 보내지 않고 후보를 출력한다. 작업 경로가 다른 브랜치를 맡기는 경우에는 `--cwd <워크트리>`를 지정한다. `--message-file`로 긴 지시를 보낼 수 있다. 메시지는 `codex queue --resume`으로 전달되며 큐 등록 성공만으로 화면 수신이나 답변을 확정하지 않는다. `list`는 큐 대기 건수와 최근 턴 상태를 보여주고, `read`에서 해당 세션의 답변을 확인한다. 상태 DB만으로는 동일한 작업 경로의 빈 세션 ID를 화면의 어느 터미널 칸과 연결할지 알 수 없으므로, 처음에는 수신 확인 메시지로 식별한다. 새 빈 세션 다섯 개를 발견했다는 이유만으로 진행 중인 기존 다섯 작업을 다시 배정하지 않는다.
