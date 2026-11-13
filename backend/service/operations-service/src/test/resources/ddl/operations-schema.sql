@@ -786,6 +786,39 @@
     comment on column operations.payment_anomaly_alert_state.version is
         '낙관적 락 버전';
 
+    create table operations.product_draft_generation_receipt (
+        draft_id bigint not null,
+        expires_at timestamp(6) with time zone not null,
+        generation_no integer not null,
+        input_hash varchar(64) not null,
+        job_id bigint not null,
+        requested_by_member_id bigint not null,
+        primary key (draft_id, generation_no),
+        constraint uk_product_draft_generation_receipt_job_id unique (job_id),
+        constraint ck_product_draft_generation_receipt_generation_no check (generation_no between 1 and 3)
+    );
+
+    comment on table operations.product_draft_generation_receipt is
+        '상품 초안 생성 등록 영수증';
+
+    comment on column operations.product_draft_generation_receipt.draft_id is
+        '초안 식별자 (FK: product.product_draft.id)';
+
+    comment on column operations.product_draft_generation_receipt.expires_at is
+        '초안 만료 시각';
+
+    comment on column operations.product_draft_generation_receipt.generation_no is
+        '생성 회차 (1~3)';
+
+    comment on column operations.product_draft_generation_receipt.input_hash is
+        '정규화한 입력 SHA-256';
+
+    comment on column operations.product_draft_generation_receipt.job_id is
+        '작업 식별자 (FK: operations.job.id)';
+
+    comment on column operations.product_draft_generation_receipt.requested_by_member_id is
+        '요청자 식별자 (FK: auth.member.id)';
+
     create table operations.shedlock (
         name varchar(64) not null,
         lock_until timestamp(6) with time zone not null,

@@ -5,9 +5,29 @@
 ## 상태 (2026-11-13 13:20, 세션 92)
 
 - 2b-1 은 PR #720 으로 머지됐다(`4ddc445e`). 핸들러 `PRODUCT_DRAFT_GENERATE`(maxAttempts 2 · 동시 1)는 이미 develop 에 있다.
-- 2b-2 는 **코드 작성 전**이다. 이 브랜치에는 이 HANDOFF 파일만 있다. 기준은 origin/develop `36fd2a47` 이다.
-- 브랜치는 `feature/be/359-product-draft-generation-register`, 워크트리는 `commerce-foundry-wt/359-draft-gen-register` 다.
-- 검증: 아직 돌린 것이 없다.
+- 기준은 origin/develop `36fd2a47` 이다. 브랜치는 `feature/be/359-product-draft-generation-register`, 워크트리는 `commerce-foundry-wt/359-draft-gen-register` 다.
+- 13:40 기준으로 **영속성 조각은 끝냈다**(WIP 커밋에 있다).
+  - `domain/model/ProductDraftGenerationReceipt`: 회차 1~3, hash 는 64자 소문자 hex.
+  - `adapter/out/persistence/entity/ProductDraftGenerationReceiptEntity`
+    - `@IdClass(Key)` 로 (draft_id, generation_no) 복합 PK 를 둔다.
+    - job_id UNIQUE, `@CheckConstraint` generation_no 1~3.
+  - `...repository/ProductDraftGenerationReceiptRepository`: findByDraftIdAndGenerationNo · findByJobId.
+  - `ProductDraftGenerationReceiptRepositoryAdapter`: persist + flush, 제약 위반은 DataIntegrityViolationException 으로 바꾼다.
+  - `application/port/out/ProductDraftGenerationReceiptPort`
+  - 테스트 `ProductDraftGenerationReceiptEntityMappingTest` 4건.
+  - `src/test/resources/ddl/operations-schema.sql` 에 테이블을 더했다.
+  - 플래그 `operations.product-draft-generation.enabled` 를 `application.yml` 과 `backend/.env.example` 에 더했다.
+- 검증(13:32, 직접 실행): `--tests '*ProductDraftGenerationReceipt*' --tests '*LegalDocumentH2Test'` → 4 + 8건 통과, 실패 0.
+  - LegalDocumentH2Test 는 operations-schema.sql 위에서 `ddl-auto=validate` 로 기동한다. 그래서 새 엔티티와 DDL 이 맞는지도 확인된다.
+  - 모듈 check 와 Postgres 검증은 아직 안 돌렸다.
+- **남은 것**(아래 대응표에서 영속성 줄을 뺀 나머지):
+  - Controller · DTO · ExceptionHandler · Presenter
+  - Command · ErrorCode · Exception · ValidationMessage
+  - Info · UseCase
+  - ReceiptProcessor · ResultProcessor · InternalFacade 와 그 테스트
+  - RegistrationH2Test · PostgresTest
+  - 운영 DDL 문서와 docs 갱신
+- 참고: 사이즈표 영수증 DDL 에는 input_hash CHECK 가 없다. 그래서 이 테이블에도 넣지 않았고, hash 형식 검사는 도메인 record 에서만 한다. DB CHECK 를 더할지는 be-db-reviewer 검토 때 정한다.
 
 ## 범위
 
