@@ -8,7 +8,6 @@ import com.commercefoundry.ai.prompt.PromptValues;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure.Code;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationAiPort;
-import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationImageQueryResult;
 import com.commercefoundry.domainlayer.productdraftgeneration.domain.model.ProductDraftGenerationCandidate;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -28,10 +27,10 @@ public class ProductDraftGenerationAiAdapter implements ProductDraftGenerationAi
     private final PromptTemplates templates;
 
     @Override
-    public ProductDraftGenerationCandidate generate(String factsJson, String imagesJson, List<ProductDraftGenerationImageQueryResult> images,
-                                                    long jobId, int attempt) {
+    public ProductDraftGenerationCandidate generate(String factsJson, String imagesJson, List<Attachment> images, long jobId, int attempt) {
         try {
-            List<AiImage> attached = images.stream().map(image -> new AiImage(image.mediaType(), image.bytes())).toList();
+            // 복사는 AiImage 생성자의 한 번뿐이다 — 받은 바이트의 내부 배열을 바로 넘긴다
+            List<AiImage> attached = images.stream().map(image -> image.image().withBytes(bytes -> new AiImage(image.mediaType(), bytes))).toList();
             var request = templates.get(FEATURE).render(PromptValues.create().put("factsJson", factsJson).put("imagesJson", imagesJson))
                 .withImages(attached).withCallerRef("job:" + jobId + ":" + attempt);
             return aiClient.complete(request, ProductDraftGenerationCandidate.class).value();

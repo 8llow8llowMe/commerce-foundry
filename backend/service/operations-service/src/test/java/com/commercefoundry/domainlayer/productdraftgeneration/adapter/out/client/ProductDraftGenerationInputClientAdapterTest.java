@@ -4,19 +4,24 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationInputPort;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationInputPort.ImageRequest;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationImageQueryResult;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationInputQueryResult;
 import com.commercefoundry.security.internal.InternalTokenDecoderFactory;
 import com.commercefoundry.security.support.TestServiceTokens;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,8 +54,10 @@ import org.springframework.test.context.DynamicPropertySource;
 class ProductDraftGenerationInputClientAdapterTest {
 
     private static final String INPUT = "/internal/v1/product-drafts/7/generation-input";
-    private static final String IMAGE_0 = "/internal/v1/product-drafts/7/generation-images/0";
-    private static final String IMAGE_1 = "/internal/v1/product-drafts/7/generation-images/1";
+    private static final String IMAGES = "/internal/v1/product-drafts/7/generation-images/";
+    private static final String IMAGE_0 = IMAGES + "0";
+    private static final String IMAGE_1 = IMAGES + "1";
+    private static final List<ImageRequest> TWO_IMAGES = List.of(new ImageRequest(0, 5, "image/jpeg"), new ImageRequest(1, 9, "image/png"));
     private static final String SENTINEL = "SENTINEL_PRIVATE_PRODUCT_BODY";
     private static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x10, 0x00};
     private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x7F};
@@ -62,6 +69,8 @@ class ProductDraftGenerationInputClientAdapterTest {
     CircuitBreakerRegistry circuits;
     @Autowired
     Environment environment;
+
+    private final List<ProductDraftGenerationImageQueryResult> received = new ArrayList<>();
 
     private static WireMockServer start() {
         var server = new WireMockServer(wireMockConfig().dynamicPort());
@@ -132,20 +141,117 @@ class ProductDraftGenerationInputClientAdapterTest {
     }
 
     @Test
-    void imageEndpointDecodesOctetStreamBytesAsByteArrayInMetadataOrder() {
+    void imageEndpointStreamsOctetStreamBytesInMetadataOrderOneByOne() {
         bytes(IMAGE_0, JPEG);
         bytes(IMAGE_1, PNG);
+        List<String> steps = new ArrayList<>();
 
-        var images = port.getGenerationImages(7, List.of(new ProductDraftGenerationInputQueryResult.Image(0, "THUMBNAIL", "image/jpeg", 5, null, null),
-            new ProductDraftGenerationInputQueryResult.Image(1, "GALLERY", "image/png", 9, null, null)));
+        port.readGenerationImages(7, TWO_IMAGES, image -> {
+            // 다음 장은 콜백이 끝난 뒤에 읽는다
+            steps.add(image.index() + ":" + SERVER.findAll(getRequestedFor(urlMatching(IMAGES + ".*"))).size());
+            received.add(image);
+        });
 
-        assertThat(images).hasSize(2);
-        assertThat(images.get(0).bytes()).isEqualTo(JPEG);
-        assertThat(images.get(0).mediaType()).isEqualTo("image/jpeg");
-        assertThat(images.get(1).bytes()).isEqualTo(PNG);
-        assertThat(images.get(1).index()).isEqualTo(1);
+        assertThat(steps).containsExactly("0:1", "1:2");
+        assertThat(received).hasSize(2);
+        assertThat(received.get(0).bytes()).isEqualTo(JPEG);
+        // 형식은 응답 헤더에서 읽은 값 그대로다 — 이미지 형식은 검증 Processor 가 메타데이터 + magic bytes 로 정한다
+        assertThat(received.get(0).mediaType()).isEqualTo("application/octet-stream");
+        assertThat(received.get(1).bytes()).isEqualTo(PNG);
+        assertThat(received.get(1).index()).isEqualTo(1);
         SERVER.verify(1, getRequestedFor(urlEqualTo(IMAGE_0)));
         SERVER.verify(1, getRequestedFor(urlEqualTo(IMAGE_1)));
+        assertThat(circuit().getMetrics().getNumberOfSuccessfulCalls()).isEqualTo(2);
+    }
+
+    @Test
+    void contentTypeEqualToThePinnedTypeIsAlsoAcceptedWithParameters() {
+        image(IMAGE_0, 200, "image/JPEG; charset=binary", JPEG, String.valueOf(JPEG.length));
+        port.readGenerationImages(7, List.of(TWO_IMAGES.getFirst()), received::add);
+        assertThat(received).singleElement().satisfies(image -> assertThat(image.mediaType()).isEqualTo("image/jpeg"));
+    }
+
+    @ParameterizedTest(name = "Content-Type {0}")
+    @ValueSource(strings = {"image/png", "text/html", "application/json", "image/jpegx"})
+    void contentTypeOutsideTheContractIsChangedImageWithoutRetry(String contentType) {
+        image(IMAGE_0, 200, contentType, JPEG, String.valueOf(JPEG.length));
+        imageChanged(() -> port.readGenerationImages(7, TWO_IMAGES, received::add));
+        assertThat(received).isEmpty();
+        SERVER.verify(0, getRequestedFor(urlEqualTo(IMAGE_1)));
+        // product 는 정상 응답했다 — 서킷에는 성공으로 남는다
+        assertThat(circuit().getMetrics().getNumberOfFailedCalls()).isZero();
+        assertThat(circuit().getMetrics().getNumberOfSuccessfulCalls()).isEqualTo(1);
+    }
+
+    @Test
+    void contentLengthDifferentFromPinnedLengthIsChangedImage() {
+        bytes(IMAGE_0, JPEG);
+        var longer = new ImageRequest(0, JPEG.length + 1, "image/jpeg");
+        imageChanged(() -> port.readGenerationImages(7, List.of(longer), received::add));
+        var shorter = new ImageRequest(0, JPEG.length - 1, "image/jpeg");
+        imageChanged(() -> port.readGenerationImages(7, List.of(shorter), received::add));
+        assertThat(received).isEmpty();
+        assertThat(circuit().getMetrics().getNumberOfFailedCalls()).isZero();
+    }
+
+    @Test
+    void missingContentLengthIsChangedImage() {
+        // 청크 전송이면 Content-Length 가 없다 — 길이를 미리 알 수 없는 본문은 읽지 않는다
+        SERVER.stubFor(get(urlEqualTo(IMAGE_0)).willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/octet-stream")
+            .withBody(JPEG).withChunkedDribbleDelay(2, 10)));
+        imageChanged(() -> port.readGenerationImages(7, TWO_IMAGES, received::add));
+        assertThat(received).isEmpty();
+    }
+
+    @Test
+    void imageServerErrorIsRetryableAndCountsAsCircuitFailureButClientErrorDoesNot() {
+        json(IMAGE_0, 503, error("PRODUCT_DRAFT_501"));
+        failure("PRODUCT_DRAFT_INPUT_UNAVAILABLE", true, () -> port.readGenerationImages(7, TWO_IMAGES, received::add));
+        assertThat(circuit().getMetrics().getNumberOfFailedCalls()).isEqualTo(1);
+
+        json(IMAGE_0, 410, error("PRODUCT_DRAFT_044"));
+        failure("PRODUCT_DRAFT_IMAGE_CHANGED", false, () -> port.readGenerationImages(7, TWO_IMAGES, received::add));
+        // 4xx 는 ignore-exceptions(FeignClientException) — 실패로도 성공으로도 세지 않는다
+        assertThat(circuit().getMetrics().getNumberOfFailedCalls()).isEqualTo(1);
+        assertThat(circuit().getMetrics().getNumberOfSuccessfulCalls()).isZero();
+        assertThat(received).isEmpty();
+        SERVER.verify(0, getRequestedFor(urlEqualTo(IMAGE_1)));
+    }
+
+    @Test
+    void retryAfterOnImageMatchesTheDefaultErrorDecoder() {
+        SERVER.stubFor(get(urlEqualTo(IMAGE_0)).willReturn(aResponse().withStatus(503).withHeader("Retry-After", "1")
+            .withHeader("Content-Type", "application/json").withBody(error("PRODUCT_DRAFT_501"))));
+        failure("PRODUCT_DRAFT_INPUT_UNAVAILABLE", true, () -> port.readGenerationImages(7, TWO_IMAGES, received::add));
+    }
+
+    @Test
+    void oversizedImageErrorBodyIsNotParsedAndFallsBackToStatus(CapturedOutput output) {
+        String padded = error("PRODUCT_DRAFT_044").replace(SENTINEL, SENTINEL + "x".repeat(5000));
+        json(IMAGE_0, 410, padded);
+        failure("PRODUCT_DRAFT_INPUT_REJECTED", false, () -> port.readGenerationImages(7, TWO_IMAGES, received::add));
+        assertThat(output.getAll()).doesNotContain(SENTINEL);
+    }
+
+    @Test
+    void openCircuitSkipsImageCallsAndIsRetryable() {
+        circuit().transitionToOpenState();
+        failure("PRODUCT_DRAFT_INPUT_UNAVAILABLE", true, () -> port.readGenerationImages(7, TWO_IMAGES, received::add));
+        SERVER.verify(0, getRequestedFor(urlMatching(IMAGES + ".*")));
+    }
+
+    @Test
+    void callbackFailureStopsReadingAndIsNotACircuitFailure() {
+        bytes(IMAGE_0, JPEG);
+        bytes(IMAGE_1, PNG);
+        var stop = new IllegalStateException("stop");
+
+        assertThatThrownBy(() -> port.readGenerationImages(7, TWO_IMAGES, image -> {
+            throw stop;
+        })).isSameAs(stop);
+
+        SERVER.verify(0, getRequestedFor(urlEqualTo(IMAGE_1)));
+        assertThat(circuit().getMetrics().getNumberOfFailedCalls()).isZero();
     }
 
     @ParameterizedTest(name = "{0} {1} -> {2}")
@@ -166,8 +272,8 @@ class ProductDraftGenerationInputClientAdapterTest {
         json(IMAGE_0, status, error(productCode));
 
         failure(expected, retryable, () -> port.getGenerationInput(7));
-        failure(expected, retryable, () -> port.getGenerationImages(7, List.of(new ProductDraftGenerationInputQueryResult.Image(0, "THUMBNAIL", "image/jpeg", 5,
-            null, null))));
+        failure(expected, retryable, () -> port.readGenerationImages(7, TWO_IMAGES, received::add));
+        assertThat(received).isEmpty();
         assertThat(output.getAll()).doesNotContain(SENTINEL);
     }
 
@@ -203,9 +309,22 @@ class ProductDraftGenerationInputClientAdapterTest {
         SERVER.stubFor(get(urlEqualTo(path)).willReturn(aResponse().withStatus(status).withHeader("Content-Type", "application/json").withBody(body)));
     }
 
+    /** product {@code generationImage} 성공 응답 모양 — octet-stream · Content-Length · nosniff · no-store. */
     private static void bytes(String path, byte[] body) {
-        SERVER.stubFor(get(urlEqualTo(path)).willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/octet-stream")
-            .withHeader("X-Content-Type-Options", "nosniff").withHeader("Cache-Control", "no-store").withBody(body)));
+        image(path, 200, "application/octet-stream", body, String.valueOf(body.length));
+    }
+
+    private static void image(String path, int status, String contentType, byte[] body, String contentLength) {
+        SERVER.stubFor(get(urlEqualTo(path)).willReturn(aResponse().withStatus(status).withHeader("Content-Type", contentType)
+            .withHeader("Content-Length", contentLength).withHeader("X-Content-Type-Options", "nosniff").withHeader("Cache-Control", "no-store").withBody(body)));
+    }
+
+    private CircuitBreaker circuit() {
+        return circuits.circuitBreaker("product-service");
+    }
+
+    private static void imageChanged(Executable call) {
+        failure("PRODUCT_DRAFT_IMAGE_CHANGED", false, call);
     }
 
     private static void failure(String code, boolean retryable, Executable call) {

@@ -31,6 +31,7 @@ import com.commercefoundry.domainlayer.productdraftgeneration.adapter.out.client
 import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure.Code;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationInputPort;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationInputPort.ImageRequest;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationImageQueryResult;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationInputQueryResult;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationInputQueryResult.Facts;
@@ -42,6 +43,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,12 +56,14 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/** AI 는 스텁이다 — 실제 프롬프트 템플릿(main 리소스)과 검증 Processor 를 지나간다. */
+/** AI 는 스텁이다 — 실제 프롬프트 템플릿(main 리소스)과 검증 Processor 를 지나간다. 이미지 포트 스텁은 장마다 콜백을 부르는 어댑터 계약을 흉내 낸다. */
 @ExtendWith(OutputCaptureExtension.class)
 class ProductDraftGenerationJobProcessorTest {
 
     static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x01, 0x02};
     static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00};
+    /** product 이미지 응답의 계약 Content-Type. 실제 형식은 메타데이터 + magic bytes 로 정한다. */
+    static final String OCTET = "application/octet-stream";
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final String SECRET = "person@example.invalid provider-secret";
 
@@ -67,6 +71,7 @@ class ProductDraftGenerationJobProcessorTest {
     private final AiClient ai = mock(AiClient.class);
     private final JobExecution execution = mock(JobExecution.class);
     private final ProductDraftGenerationValidationProcessor validation = new ProductDraftGenerationValidationProcessor(JSON);
+    private final List<String> steps = new ArrayList<>();
     private ProductDraftGenerationJobProcessor handler;
 
     @BeforeEach
@@ -80,8 +85,7 @@ class ProductDraftGenerationJobProcessorTest {
         when(execution.jobId()).thenReturn(9L);
         when(execution.attempt()).thenReturn(1);
         when(input.getGenerationInput(7)).thenReturn(input(fullFacts(), twoImages()));
-        when(input.getGenerationImages(eq(7L), anyList())).thenReturn(List.of(
-            new ProductDraftGenerationImageQueryResult(0, AiImage.JPEG, JPEG), new ProductDraftGenerationImageQueryResult(1, AiImage.PNG, PNG)));
+        images(new ProductDraftGenerationImageQueryResult(0, OCTET, JPEG), new ProductDraftGenerationImageQueryResult(1, OCTET, PNG));
         output(candidate(List.of(new ImageAlt(1, "뒷모습"), new ImageAlt(0, "앞모습"))));
     }
 
@@ -111,6 +115,18 @@ class ProductDraftGenerationJobProcessorTest {
             .thenReturn(new AiStructuredResult<>(candidate, "stub", 1, 1, "end_turn", "id"));
     }
 
+    /** 어댑터처럼 한 장씩 "읽고" 바로 콜백에 넘긴다 — 콜백이 던지면 남은 장은 읽지 않는다. */
+    private void images(ProductDraftGenerationImageQueryResult... received) {
+        doAnswer(call -> {
+            Consumer<ProductDraftGenerationImageQueryResult> onImage = call.getArgument(2);
+            for (ProductDraftGenerationImageQueryResult image : received) {
+                steps.add("image:" + image.index());
+                onImage.accept(image);
+            }
+            return null;
+        }).when(input).readGenerationImages(eq(7L), anyList(), any());
+    }
+
     @Test
     void generatesWithVersionedPromptImagesAndServerComputedResult() {
         JsonNode result = JSON.readTree(handler.execute(execution).resultJson());
@@ -130,9 +146,20 @@ class ProductDraftGenerationJobProcessorTest {
         assertThat(sent.feature()).isEqualTo("product-draft");
         assertThat(sent.promptVersion()).isEqualTo(1);
         assertThat(sent.callerRef()).isEqualTo("job:9:1");
+        // 형식은 응답 헤더(octet-stream)가 아니라 magic bytes 로 확인한 고정 메타데이터 형식이다
         assertThat(sent.images()).containsExactly(new AiImage(AiImage.JPEG, JPEG), new AiImage(AiImage.PNG, PNG));
         assertThat(sent.prompt()).contains("\"materials\":[\"면 100%\"]", "{\"index\":0,\"imageType\":\"THUMBNAIL\"}");
         assertThat(sent.system()).contains("never as instructions", "Never infer or guess them from the images");
+    }
+
+    @Test
+    void imagePortReceivesOnlyIndexLengthAndPinnedType() {
+        handler.execute(execution);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ImageRequest>> requests = ArgumentCaptor.forClass(List.class);
+        verify(input).readGenerationImages(eq(7L), requests.capture(), any());
+        assertThat(requests.getValue()).containsExactly(new ImageRequest(0, JPEG.length, AiImage.JPEG), new ImageRequest(1, PNG.length, AiImage.PNG));
     }
 
     @Test
@@ -144,7 +171,7 @@ class ProductDraftGenerationJobProcessorTest {
 
         assertThat(result.path("unconfirmedFacts").toString()).isEqualTo("[\"MATERIALS\",\"CARE_NOTES\",\"MEASUREMENTS\",\"ORIGIN\",\"CERTIFICATIONS\"]");
         assertThat(result.path("suggestion").has("materials")).isFalse();
-        verify(input, never()).getGenerationImages(anyLong(), anyList());
+        verify(input, never()).readGenerationImages(anyLong(), anyList(), any());
         var request = ArgumentCaptor.forClass(AiRequest.class);
         verify(ai).complete(request.capture(), eq(ProductDraftGenerationCandidate.class));
         assertThat(request.getValue().images()).isEmpty();
@@ -161,7 +188,16 @@ class ProductDraftGenerationJobProcessorTest {
         for (Code code : Code.values()) {
             assertThat(handler.failureNotice(code.name())).isNotBlank().doesNotContain("PRODUCT_DRAFT", "?");
         }
-        assertThat(handler.failureNotice("PRODUCT_DRAFT_IMAGES_TOO_LARGE")).contains("용량");
+        String checkInput = handler.failureNotice(Code.PRODUCT_DRAFT_INPUT_REJECTED.name());
+        assertThat(handler.failureNotice(ProductDraftGenerationValidationProcessor.IMAGES_TOO_LARGE)).contains("용량");
+        assertThat(handler.failureNotice(ProductDraftGenerationValidationProcessor.IMAGE_CHANGED)).contains("이미지가 바뀌어");
+        assertThat(handler.failureNotice(Code.PRODUCT_DRAFT_INPUT_EXPIRED.name())).contains("보관 기간");
+        assertThat(handler.failureNotice(Code.PRODUCT_DRAFT_AI_BUDGET_EXCEEDED.name())).contains("한도");
+        assertThat(handler.failureNotice(Code.PRODUCT_DRAFT_INPUT_UNAVAILABLE.name())).isEqualTo(handler.failureNotice(Code.PRODUCT_DRAFT_AI_FAILED.name()))
+            .contains("잠시 뒤");
+        assertThat(List.of(ProductDraftGenerationValidationProcessor.INVALID_DATA, ProductDraftGenerationValidationProcessor.INPUT_MISMATCH,
+            Code.PRODUCT_DRAFT_INPUT_INVALID.name(), Code.PRODUCT_DRAFT_AI_INVALID.name(), "UNKNOWN_CODE"))
+            .allSatisfy(code -> assertThat(handler.failureNotice(code)).isEqualTo(checkInput));
         assertThat(handler.failureNotice(null)).isNull();
     }
 
@@ -212,22 +248,36 @@ class ProductDraftGenerationJobProcessorTest {
 
     @Test
     void productImageChangedIsTerminalAndNeverReachesAi() {
-        doThrow(new ProductDraftGenerationRemoteFailure(Code.PRODUCT_DRAFT_IMAGE_CHANGED, false)).when(input).getGenerationImages(eq(7L), anyList());
+        doThrow(new ProductDraftGenerationRemoteFailure(Code.PRODUCT_DRAFT_IMAGE_CHANGED, false)).when(input).readGenerationImages(eq(7L), anyList(), any());
         assertFailure("PRODUCT_DRAFT_IMAGE_CHANGED", false);
         verifyNoInteractions(ai);
     }
 
     @Test
     void productUnavailableWhileReadingImagesIsRetryable() {
-        doThrow(new ProductDraftGenerationRemoteFailure(Code.PRODUCT_DRAFT_INPUT_UNAVAILABLE, true)).when(input).getGenerationImages(eq(7L), anyList());
+        doThrow(new ProductDraftGenerationRemoteFailure(Code.PRODUCT_DRAFT_INPUT_UNAVAILABLE, true)).when(input).readGenerationImages(eq(7L), anyList(), any());
         assertFailure("PRODUCT_DRAFT_INPUT_UNAVAILABLE", true);
         verifyNoInteractions(ai);
     }
 
     @Test
     void imageBytesDifferentFromPinnedMetadataAreTerminal() {
-        when(input.getGenerationImages(eq(7L), anyList())).thenReturn(List.of(
-            new ProductDraftGenerationImageQueryResult(0, AiImage.JPEG, JPEG), new ProductDraftGenerationImageQueryResult(1, AiImage.PNG, JPEG)));
+        images(new ProductDraftGenerationImageQueryResult(0, OCTET, JPEG), new ProductDraftGenerationImageQueryResult(1, OCTET, JPEG));
+        assertFailure("PRODUCT_DRAFT_IMAGE_CHANGED", false);
+        verifyNoInteractions(ai);
+    }
+
+    @Test
+    void firstChangedImageStopsBeforeTheNextImageIsRead() {
+        images(new ProductDraftGenerationImageQueryResult(0, OCTET, PNG), new ProductDraftGenerationImageQueryResult(1, OCTET, PNG));
+        assertFailure("PRODUCT_DRAFT_IMAGE_CHANGED", false);
+        assertThat(steps).containsExactly("image:0");
+        verifyNoInteractions(ai);
+    }
+
+    @Test
+    void portThatDeliversFewerImagesThanPinnedIsTerminalChanged() {
+        images(new ProductDraftGenerationImageQueryResult(0, OCTET, JPEG));
         assertFailure("PRODUCT_DRAFT_IMAGE_CHANGED", false);
         verifyNoInteractions(ai);
     }
@@ -242,7 +292,7 @@ class ProductDraftGenerationJobProcessorTest {
         when(input.getGenerationInput(7)).thenReturn(input(fullFacts(), images));
 
         assertFailure("PRODUCT_DRAFT_IMAGES_TOO_LARGE", false);
-        verify(input, never()).getGenerationImages(anyLong(), anyList());
+        verify(input, never()).readGenerationImages(anyLong(), anyList(), any());
         verifyNoInteractions(ai);
     }
 
@@ -250,7 +300,7 @@ class ProductDraftGenerationJobProcessorTest {
     void draftMismatchPreventsImagesAndAi() {
         when(input.getGenerationInput(7)).thenReturn(new ProductDraftGenerationInputQueryResult(8, "REQUESTED", null, fullFacts(), 0, List.of()));
         assertFailure("PRODUCT_DRAFT_INPUT_MISMATCH", false);
-        verify(input, never()).getGenerationImages(anyLong(), anyList());
+        verify(input, never()).readGenerationImages(anyLong(), anyList(), any());
         verifyNoInteractions(ai);
     }
 
@@ -263,7 +313,7 @@ class ProductDraftGenerationJobProcessorTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {5, 15, 20, 35, 85, 100})
+    @ValueSource(ints = {5, 15, 20, 27, 34, 35, 85, 100})
     void checkpointsPropagateCancellationWithoutWrapping(int percent) {
         var cancelled = new JobCancelledException(JobCancelledException.Reason.CANCEL_REQUESTED);
         doThrow(cancelled).when(execution).checkpoint(eq(percent), anyString());
@@ -274,8 +324,17 @@ class ProductDraftGenerationJobProcessorTest {
     }
 
     @Test
-    void checkpointsSurroundEveryRemoteCall() {
-        List<String> steps = new ArrayList<>();
+    void cancellationBetweenImagesStopsBeforeTheNextImageIsRead() {
+        var cancelled = new JobCancelledException(JobCancelledException.Reason.LEASE_LOST);
+        doThrow(cancelled).when(execution).checkpoint(eq(27), anyString());
+
+        assertThatThrownBy(() -> handler.execute(execution)).isSameAs(cancelled);
+        assertThat(steps).containsExactly("image:0");
+        verifyNoInteractions(ai);
+    }
+
+    @Test
+    void checkpointsSurroundEveryRemoteCallAndEveryImage() {
         doAnswer(call -> {
             steps.add("checkpoint:" + call.getArgument(0));
             return null;
@@ -284,10 +343,6 @@ class ProductDraftGenerationJobProcessorTest {
             steps.add("input");
             return input(fullFacts(), twoImages());
         });
-        when(input.getGenerationImages(eq(7L), anyList())).thenAnswer(call -> {
-            steps.add("images");
-            return List.of(new ProductDraftGenerationImageQueryResult(0, AiImage.JPEG, JPEG), new ProductDraftGenerationImageQueryResult(1, AiImage.PNG, PNG));
-        });
         when(ai.complete(any(AiRequest.class), eq(ProductDraftGenerationCandidate.class))).thenAnswer(call -> {
             steps.add("ai");
             return new AiStructuredResult<>(candidate(List.of(new ImageAlt(0, "앞"), new ImageAlt(1, "뒤"))), "stub", 1, 1, "end_turn", "id");
@@ -295,8 +350,8 @@ class ProductDraftGenerationJobProcessorTest {
 
         handler.execute(execution);
 
-        assertThat(steps).containsExactly("checkpoint:5", "input", "checkpoint:15", "checkpoint:20", "images", "checkpoint:35", "ai", "checkpoint:85",
-            "checkpoint:100");
+        assertThat(steps).containsExactly("checkpoint:5", "input", "checkpoint:15", "checkpoint:20", "image:0", "checkpoint:27", "image:1", "checkpoint:34",
+            "checkpoint:35", "ai", "checkpoint:85", "checkpoint:100");
     }
 
     private void assertFailure(String code, boolean retryable) {

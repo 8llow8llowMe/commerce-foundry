@@ -6,10 +6,12 @@ import com.commercefoundry.domainlayer.job.domain.model.JobHandler;
 import com.commercefoundry.domainlayer.job.domain.model.JobHandlerOptions;
 import com.commercefoundry.domainlayer.job.domain.model.JobOutcome;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.model.ProductDraftGenerationRemoteFailure.Code;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationAiPort;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationAiPort.Attachment;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationInputPort;
-import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationImageQueryResult;
 import com.commercefoundry.security.principal.AdminPermission;
+import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -27,6 +29,8 @@ import org.springframework.stereotype.Component;
 public class ProductDraftGenerationJobProcessor implements JobHandler {
 
     public static final String TYPE = "PRODUCT_DRAFT_GENERATE";
+
+    private static final String CHECK_INPUT = "AI 상품 초안을 만들지 못했습니다. 입력한 내용과 이미지를 확인한 뒤 새 초안을 만들어 주세요.";
 
     private final ProductDraftGenerationInputPort inputPort;
     private final ProductDraftGenerationAiPort aiPort;
@@ -47,18 +51,33 @@ public class ProductDraftGenerationJobProcessor implements JobHandler {
         return "AI 상품 초안 만들기";
     }
 
+    /**
+     * 코드 문자열을 직접 쓰지 않는다 — 원격 실패는 {@link Code} 로 되돌려 빠짐없이 분기하고(코드가 늘면 컴파일이 막는다), 검증 실패는 Validation 상수와 비교한다.
+     */
     @Override
     public String failureNotice(String errorCode) {
         if (errorCode == null) {
             return null;
         }
-        return switch (errorCode) {
-            case "PRODUCT_DRAFT_IMAGE_CHANGED" -> "초안 이미지가 바뀌어 만들지 못했습니다. 새 초안을 만들어 주세요.";
-            case "PRODUCT_DRAFT_IMAGES_TOO_LARGE" -> "이미지 용량 합계가 너무 커서 만들지 못했습니다. 이미지 수나 용량을 줄여 새 초안을 만들어 주세요.";
-            case "PRODUCT_DRAFT_INPUT_EXPIRED" -> "보관 기간이 지난 초안이라 만들지 못했습니다. 새 초안을 만들어 주세요.";
-            case "PRODUCT_DRAFT_AI_BUDGET_EXCEEDED" -> "이번 달 AI 사용 한도를 넘어 만들지 못했습니다. 한도를 확인한 뒤 다시 시도해 주세요.";
-            case "PRODUCT_DRAFT_INPUT_UNAVAILABLE", "PRODUCT_DRAFT_AI_FAILED" -> "AI 상품 초안을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
-            default -> "AI 상품 초안을 만들지 못했습니다. 입력한 내용과 이미지를 확인한 뒤 새 초안을 만들어 주세요.";
+        if (ProductDraftGenerationValidationProcessor.IMAGES_TOO_LARGE.equals(errorCode)) {
+            return "이미지 용량 합계가 너무 커서 만들지 못했습니다. 이미지 수나 용량을 줄여 새 초안을 만들어 주세요.";
+        }
+        for (Code code : Code.values()) {
+            if (code.name().equals(errorCode)) {
+                return notice(code);
+            }
+        }
+        // INVALID_DATA · INPUT_MISMATCH
+        return CHECK_INPUT;
+    }
+
+    private static String notice(Code code) {
+        return switch (code) {
+            case PRODUCT_DRAFT_IMAGE_CHANGED -> "초안 이미지가 바뀌어 만들지 못했습니다. 새 초안을 만들어 주세요.";
+            case PRODUCT_DRAFT_INPUT_EXPIRED -> "보관 기간이 지난 초안이라 만들지 못했습니다. 새 초안을 만들어 주세요.";
+            case PRODUCT_DRAFT_AI_BUDGET_EXCEEDED -> "이번 달 AI 사용 한도를 넘어 만들지 못했습니다. 한도를 확인한 뒤 다시 시도해 주세요.";
+            case PRODUCT_DRAFT_INPUT_UNAVAILABLE, PRODUCT_DRAFT_AI_FAILED -> "AI 상품 초안을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
+            case PRODUCT_DRAFT_INPUT_REJECTED, PRODUCT_DRAFT_INPUT_INVALID, PRODUCT_DRAFT_AI_INVALID -> CHECK_INPUT;
         };
     }
 
@@ -76,12 +95,12 @@ public class ProductDraftGenerationJobProcessor implements JobHandler {
             var input = inputPort.getGenerationInput(draftId);
             execution.checkpoint(15, "상품 초안 입력을 읽었습니다");
             var prepared = validation.input(draftId, input);
-            List<ProductDraftGenerationImageQueryResult> images = List.of();
+            List<Attachment> images = List.of();
             if (!prepared.images().isEmpty()) {
                 execution.checkpoint(20, "상품 이미지를 읽는 중");
-                images = validation.images(prepared, inputPort.getGenerationImages(draftId, prepared.images()));
+                images = readImages(execution, draftId, prepared);
             }
-            execution.checkpoint(35,"AI 상품 초안을 만드는 중");
+            execution.checkpoint(35, "AI 상품 초안을 만드는 중");
             var candidate = aiPort.generate(prepared.factsJson(), prepared.imagesJson(), images, execution.jobId(), execution.attempt());
             execution.checkpoint(85, "AI 상품 초안을 확인하는 중");
             String json = validation.outcome(candidate, prepared);
@@ -91,5 +110,18 @@ public class ProductDraftGenerationJobProcessor implements JobHandler {
             // 허용된 경계에서 코드만 옮긴다 — 원인 · 원격 본문을 워커 로그로 넘기지 않는다
             throw new JobExecutionException(failure.getErrorCode(), failure.isRetryable());
         }
+    }
+
+    /**
+     * 장을 받을 때마다 다음 장을 읽기 전에 검증하고 checkpoint 를 둔다(진행률 20 ~ 34) — 바뀐 이미지 · 합계 초과 · 취소 · lease 상실이면 남은 장을 읽지 않는다.
+     */
+    private List<Attachment> readImages(JobExecution execution, long draftId, ProductDraftGenerationValidationProcessor.Prepared prepared) {
+        int count = prepared.images().size();
+        List<Attachment> accepted = new ArrayList<>(count);
+        inputPort.readGenerationImages(draftId, validation.imageRequests(prepared), received -> {
+            accepted.add(validation.image(prepared, accepted, received));
+            execution.checkpoint(20 + 14 * accepted.size() / count, "상품 이미지를 읽는 중 (" + accepted.size() + "/" + count + ")");
+        });
+        return validation.images(prepared, accepted);
     }
 }

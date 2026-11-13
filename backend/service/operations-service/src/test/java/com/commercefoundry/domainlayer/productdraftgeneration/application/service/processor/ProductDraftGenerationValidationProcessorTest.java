@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.productdraftgeneration.application.service.processor;
 
 import static com.commercefoundry.domainlayer.productdraftgeneration.application.service.processor.ProductDraftGenerationJobProcessorTest.JPEG;
+import static com.commercefoundry.domainlayer.productdraftgeneration.application.service.processor.ProductDraftGenerationJobProcessorTest.OCTET;
 import static com.commercefoundry.domainlayer.productdraftgeneration.application.service.processor.ProductDraftGenerationJobProcessorTest.PNG;
 import static com.commercefoundry.domainlayer.productdraftgeneration.application.service.processor.ProductDraftGenerationJobProcessorTest.emptyFacts;
 import static com.commercefoundry.domainlayer.productdraftgeneration.application.service.processor.ProductDraftGenerationJobProcessorTest.fullFacts;
@@ -11,6 +12,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.ai.client.AiImage;
 import com.commercefoundry.domainlayer.job.domain.model.JobExecutionException;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationAiPort.Attachment;
+import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.ProductDraftGenerationInputPort.ImageRequest;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationImageQueryResult;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationInputQueryResult;
 import com.commercefoundry.domainlayer.productdraftgeneration.application.port.out.query.ProductDraftGenerationInputQueryResult.Facts;
@@ -119,22 +122,60 @@ class ProductDraftGenerationValidationProcessorTest {
     // ---- 이미지 바이트 ----
 
     @Test
-    void imageBytesMustMatchPinnedLengthTypeAndMagic() {
+    void imageRequestsCarryOnlyIndexLengthAndPinnedType() {
         var prepared = validation.input(7, input(fullFacts(), twoImages()));
-        var jpeg = new ProductDraftGenerationImageQueryResult(0, AiImage.JPEG, JPEG);
-        var png = new ProductDraftGenerationImageQueryResult(1, AiImage.PNG, PNG);
-        assertThat(validation.images(prepared, List.of(jpeg, png))).containsExactly(jpeg, png);
+        assertThat(validation.imageRequests(prepared))
+            .containsExactly(new ImageRequest(0, JPEG.length, AiImage.JPEG), new ImageRequest(1, PNG.length, AiImage.PNG));
+    }
+
+    @Test
+    void eachImageMustMatchPinnedIndexLengthAndMagicAndUsesThePinnedTypeNotTheHeader() {
+        var prepared = validation.input(7, input(fullFacts(), twoImages()));
+        var jpeg = new ProductDraftGenerationImageQueryResult(0, OCTET, JPEG);
+        var png = new ProductDraftGenerationImageQueryResult(1, OCTET, PNG);
+        List<Attachment> accepted = new ArrayList<>();
+        accepted.add(validation.image(prepared, accepted, jpeg));
+        accepted.add(validation.image(prepared, accepted, png));
+
+        assertThat(validation.images(prepared, accepted)).containsExactly(new Attachment(AiImage.JPEG, jpeg), new Attachment(AiImage.PNG, png));
 
         byte[] fakePng = PNG.clone();
         fakePng[1] = 'X';
-        for (List<ProductDraftGenerationImageQueryResult> received : List.of(
-            List.of(jpeg),
-            List.of(jpeg, new ProductDraftGenerationImageQueryResult(1, AiImage.PNG, fakePng)),
-            List.of(jpeg, new ProductDraftGenerationImageQueryResult(1, AiImage.JPEG, PNG)),
-            List.of(jpeg, new ProductDraftGenerationImageQueryResult(1, AiImage.PNG, new byte[0])),
-            List.of(png, jpeg))) {
-            failure("PRODUCT_DRAFT_IMAGE_CHANGED", () -> validation.images(prepared, received));
+        List<Attachment> first = List.of(new Attachment(AiImage.JPEG, jpeg));
+        for (ProductDraftGenerationImageQueryResult received : Arrays.asList(
+            new ProductDraftGenerationImageQueryResult(1, OCTET, fakePng),
+            new ProductDraftGenerationImageQueryResult(1, OCTET, JPEG),
+            new ProductDraftGenerationImageQueryResult(0, OCTET, PNG),
+            new ProductDraftGenerationImageQueryResult(1, OCTET, new byte[0]),
+            null)) {
+            failure("PRODUCT_DRAFT_IMAGE_CHANGED", () -> validation.image(prepared, first, received));
         }
+        // 고정한 장보다 많이 오거나 모자라도 바뀐 이미지다
+        failure("PRODUCT_DRAFT_IMAGE_CHANGED", () -> validation.image(prepared, accepted, png));
+        failure("PRODUCT_DRAFT_IMAGE_CHANGED", () -> validation.images(prepared, first));
+    }
+
+    @Test
+    void receivedTotalIsCheckedAgainOnEveryImage() {
+        // 메타데이터 합계(4 + 5 바이트)는 통과하지만, 이미 받은 장의 누적이 상한을 채웠으면 다음 장에서 멈춘다
+        List<Image> images = new ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            images.add(new Image(index, "GALLERY", AiImage.JPEG, index < 4 ? 1 : JPEG.length, null, null));
+        }
+        var prepared = validation.input(7, input(fullFacts(), images));
+        var filler = new ProductDraftGenerationImageQueryResult(0, OCTET, new byte[ProductDraftGenerationValidationProcessor.MAX_IMAGE_BYTES]);
+        List<Attachment> accepted = List.of(new Attachment(AiImage.JPEG, filler), new Attachment(AiImage.JPEG, filler),
+            new Attachment(AiImage.JPEG, filler), new Attachment(AiImage.JPEG, filler));
+
+        failure("PRODUCT_DRAFT_IMAGES_TOO_LARGE", () -> validation.image(prepared, accepted, new ProductDraftGenerationImageQueryResult(4, OCTET, JPEG)));
+    }
+
+    @Test
+    void validationImageLimitsAreItsOwnConstants() {
+        assertThat(ProductDraftGenerationValidationProcessor.MAX_IMAGE_COUNT).isEqualTo(8);
+        assertThat(ProductDraftGenerationValidationProcessor.MAX_IMAGE_BYTES).isEqualTo(5 * 1024 * 1024);
+        assertThat(ProductDraftGenerationValidationProcessor.IMAGE_CONTENT_TYPES).containsExactlyInAnyOrder("image/jpeg", "image/png", "image/webp");
+        assertThat(ProductDraftGenerationValidationProcessor.IMAGE_CHANGED).isEqualTo("PRODUCT_DRAFT_IMAGE_CHANGED");
     }
 
     // ---- AI 출력 ----
@@ -174,7 +215,32 @@ class ProductDraftGenerationValidationProcessorTest {
             Arguments.of("duplicate alt", new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "t", "d", List.of(new ImageAlt(0, "앞"), new ImageAlt(0, "뒤")))),
             Arguments.of("alt out of range", new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "t", "d", List.of(new ImageAlt(0, "앞"), new ImageAlt(2, "뒤")))),
             Arguments.of("long alt", new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "t", "d", List.of(new ImageAlt(0, "앞"), new ImageAlt(1, "a".repeat(201))))),
-            Arguments.of("null candidate", null));
+            Arguments.of("null candidate", null),
+            // 꺾쇠 — 어느 칸이든 계약 위반이다
+            Arguments.of("angle in name", new ProductDraftGenerationCandidate("<b>셔츠</b>", "설명", List.of(), "t", "d", alts)),
+            Arguments.of("angle in description", new ProductDraftGenerationCandidate("셔츠", "설명 <script>alert(1)</script>", List.of(), "t", "d", alts)),
+            Arguments.of("gt in description", new ProductDraftGenerationCandidate("셔츠", "가격 > 정가", List.of(), "t", "d", alts)),
+            Arguments.of("angle in tag", new ProductDraftGenerationCandidate("셔츠", "설명", List.of("<img>"), "t", "d", alts)),
+            Arguments.of("angle in seo title", new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "셔츠<", "d", alts)),
+            Arguments.of("angle in seo description", new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "t", ">설명", alts)),
+            Arguments.of("angle in alt", new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "t", "d", List.of(new ImageAlt(0, "앞"), new ImageAlt(1, "<뒤>")))),
+            // www. 로 시작하는 토큰 — 스킴이 없어도 링크다
+            Arguments.of("www in description", new ProductDraftGenerationCandidate("셔츠", "자세한 내용은 www.example.invalid 참고", List.of(), "t", "d", alts)),
+            Arguments.of("www glued to hangul", new ProductDraftGenerationCandidate("셔츠", "주소는www.example.invalid", List.of(), "t", "d", alts)),
+            Arguments.of("upper WWW in tag", new ProductDraftGenerationCandidate("셔츠", "설명", List.of("WWW.example.invalid"), "t", "d", alts)),
+            Arguments.of("www in seo", new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "t", "(www.example.invalid)", alts)),
+            Arguments.of("www in alt", new ProductDraftGenerationCandidate("셔츠", "설명", List.of(), "t", "d", List.of(new ImageAlt(0, "www.x"), new ImageAlt(1, "뒤")))));
+    }
+
+    @Test
+    void wordsThatOnlyContainWwwAndContactLikeTextAreNotBlockedHere() {
+        // 앞이 영문 · 숫자인 www. 는 링크 토큰이 아니다. 이메일 · 전화번호는 여기서 막지 않는다 — product 반영(PR-3) 때 sanitize 를 거친다
+        var prepared = validation.input(7, input(fullFacts(), List.of()));
+        var candidate = new ProductDraftGenerationCandidate("셔츠", "awww.와 함께 · 문의 shop@example.invalid · 02-0000-0000", List.of(), "t", "d", List.of());
+
+        JsonNode result = JSON.readTree(validation.outcome(candidate, prepared));
+
+        assertThat(result.path("suggestion").path("description").stringValue()).contains("awww.", "shop@example.invalid", "02-0000-0000");
     }
 
     @ParameterizedTest(name = "{0}")
