@@ -1,8 +1,10 @@
 package com.commercefoundry.domainlayer.payment.adapter.in.internal.presenter;
 
 import com.commercefoundry.commerce.support.web.MoneyItems;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelExternalRefundResponse;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelVoidResponse;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentInternalResponse;
+import com.commercefoundry.domainlayer.payment.application.info.PaymentCancelExternalRefundInfo;
 import com.commercefoundry.domainlayer.payment.application.info.PaymentCancelVoidInfo;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
 import org.springframework.stereotype.Component;
@@ -36,6 +38,20 @@ public class PaymentInternalPresenter {
             .paymentStatus(info.paymentStatus().toMetadata())
             .retainedAmount(MoneyItems.of(info.retainedAmount()))
             .sealed(info.sealed())
+            .build();
+    }
+
+    /** 외부 확인 환불 기록 (#693). 판정 · 이유 · 채널은 제어 코드 문자열로 낸다. */
+    public PaymentCancelExternalRefundResponse toExternalRefundResponse(PaymentCancelExternalRefundInfo info) {
+        return PaymentCancelExternalRefundResponse.builder()
+            .paymentId(String.valueOf(info.paymentId()))
+            .claimId(String.valueOf(info.claimId()))
+            .outcome(info.outcome().name())
+            .reason(info.reason().name())
+            .channel(info.channel() == null ? null : info.channel().name())
+            .paymentStatus(info.paymentStatus().toMetadata())
+            .refundedAmount(MoneyItems.of(info.refundedAmount()))
+            .retainedAmount(MoneyItems.of(info.retainedAmount()))
             .build();
     }
 }

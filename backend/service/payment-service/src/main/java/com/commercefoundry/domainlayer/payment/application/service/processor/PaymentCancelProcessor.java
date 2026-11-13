@@ -11,16 +11,20 @@ import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.List;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 결제 행 잠금으로 한 시점에 한 클레임만 PG 취소를 진행하게 한다. PG 호출은 이 컴포넌트 밖에서 수행한다. */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class PaymentCancelProcessor {
+
+    /** 확정(complete)이 외부 확인 환불 행을 만났다는 이상 신호 코드 (#693, {@code payment-guide.md} §8). 로그 검색 · 알림 규칙이 이 값을 찾는다. */
+    public static final String EXTERNAL_REFUND_COMPLETION_CONFLICT = "PAYMENT_CANCEL_EXTERNAL_REFUND_CONFLICT";
 
     private final PaymentCancelPersistencePort cancelPort;
     private final PaymentRepositoryPort paymentPort;
@@ -62,7 +66,7 @@ public class PaymentCancelProcessor {
                 // REJECTED · VOIDED(refusesRefund) 와 모르는 상태. VOIDED 는 무환불 봉인이다(#691) — 주문이 거절 · 재출고를 확정했을 수 있어 이 클레임으로는 PG 를 부르지 않는다.
                 throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
             }
-            if (existing.createdAt() != null && existing.createdAt().isBefore(Instant.now(clock).minus(Duration.ofDays(14)))) {
+            if (existing.createdAt() != null && existing.createdAt().isBefore(Instant.now(clock).minus(PaymentCancel.PG_RETRY_WINDOW))) {
                 // PG 멱등 키는 첫 요청 후 15일만 유효하다. 이후 같은 키 재전송은 이중 취소가 될 수 있다.
                 throw new PaymentException(PaymentErrorCode.CANCELLATION_UNCONFIRMED);
             }
@@ -88,6 +92,13 @@ public class PaymentCancelProcessor {
         }
         if (cancel.status() == PaymentCancel.Status.SUCCEEDED) {
             return payment;
+        }
+        if (cancel.status().refundedExternally()) {
+            // 우리 PG 취소가 성공했는데 이 claimId 가 이미 외부 확인 환불로 기록돼 있다(#693). 기록 명령은 PG 재전송 기간 + 여유가 지난 PENDING 만 바꾸므로
+            // 정상 흐름에서는 없다 — PG 에서 두 번 빠졌을 수 있어 운영자가 PG 거래와 대조한다. 응답은 기존대로 016 이고, 금액 · 사유는 남기지 않는다.
+            log.warn("payment cancel succeeded at PG but claim is already externally refunded. code={}, paymentId={}, claimId={}, status={}",
+                EXTERNAL_REFUND_COMPLETION_CONFLICT, paymentId, claimId, cancel.status());
+            throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
         }
         if (cancel.status() != PaymentCancel.Status.PENDING) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);

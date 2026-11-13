@@ -1,6 +1,7 @@
 package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
+import com.commercefoundry.global.properties.PaymentCancelExternalRefundProperties;
 import com.commercefoundry.global.properties.PaymentCancelVoidProperties;
 import com.commercefoundry.global.properties.PaymentGateProperties;
 import com.commercefoundry.global.properties.PaymentAutoCancelSchedulerProperties;
@@ -25,7 +26,7 @@ import org.springframework.context.annotation.Import;
     SwaggerPropertiesConfig.class
 })
 @EnableConfigurationProperties({PaymentAutoCancelSchedulerProperties.class, PaymentGateProperties.class, PaymentRecoveryProperties.class,
-    PaymentCancelVoidProperties.class, PaymentOrderReconciliationProperties.class,
+    PaymentCancelVoidProperties.class, PaymentCancelExternalRefundProperties.class, PaymentOrderReconciliationProperties.class,
     PaymentPrepareProperties.class, TossPaymentsProperties.class})
 public class PaymentServicePropertiesConfig {
 

@@ -13,6 +13,7 @@ import com.commercefoundry.domainlayer.payment.application.exception.PaymentErro
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentAutoCancelClaimCollisionException;
 import java.sql.SQLException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -76,6 +77,26 @@ public class PaymentCancelPersistenceAdapter implements PaymentCancelPersistence
         }
     }
 
+    @Override
+    public PaymentCancel recordExternalRefund(PaymentCancel cancel) {
+        if (!cancel.status().refundedExternally()) throw new IllegalArgumentException("External refund row must be externally refunded");
+        try {
+            if (cancelRepository.findById(cancel.claimId()).isEmpty()) {
+                // insertVoided 와 같다 — null @Version 이라 persist(INSERT) 만 하고 먼저 커밋된 같은 claimId 행을 덮어쓰지 않는다.
+                return cancelRepository.saveAndFlush(PaymentCancelEntity.from(cancel)).toDomain();
+            }
+            return update(cancel);
+        } catch (DataIntegrityViolationException failure) {
+            if (isUniqueViolation(failure)) {
+                throw new PaymentException(PaymentErrorCode.PAYMENT_REQUEST_CONFLICT, failure);
+            }
+            throw failure;
+        } catch (OptimisticLockingFailureException failure) {
+            // 결제 행 잠금 밖에서 같은 행을 바꾼 쓰기가 있었다. 판정을 다시 받아야 한다.
+            throw new PaymentException(PaymentErrorCode.PAYMENT_REQUEST_CONFLICT, failure);
+        }
+    }
+
     private static boolean isUniqueViolation(DataIntegrityViolationException failure) {
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
             if (cause instanceof SQLException sql && "23505".equals(sql.getSQLState())) {
@@ -87,11 +108,21 @@ public class PaymentCancelPersistenceAdapter implements PaymentCancelPersistence
 
     @Override
     public PaymentCancel save(PaymentCancel cancel) {
+        if (cancel.status().refundedExternally()) {
+            // 외부 확인 환불은 PG 검증 · 결제 행 잠금을 거친 recordExternalRefund 로만 쓴다 — 일반 저장 경로로 새지 않게 막는다
+            throw new IllegalArgumentException("External refund must be written through recordExternalRefund");
+        }
+        return update(cancel);
+    }
+
+    /** 행이 없으면 만들고, 있으면 전이 표 안에서 상태만 바꾼다. 같은 트랜잭션에서 읽은 엔티티면 그 버전으로 낙관 락을 확인한다. */
+    private PaymentCancel update(PaymentCancel cancel) {
         PaymentCancelEntity entity = cancelRepository.findById(cancel.claimId()).orElseGet(() -> PaymentCancelEntity.from(cancel));
         if (entity.getPaymentId() != cancel.paymentId() || entity.getAmount() != cancel.amount().amount() || entity.getCurrency() != cancel.amount().currency()) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_KEY_REUSED);
         }
-        if (entity.getStatus() != cancel.status() && entity.getStatus() != PaymentCancel.Status.PENDING) {
+        // 전이 표(PaymentCancel.Status.canBecome) 밖의 상태 변경은 거부한다 — 종결 행을 되돌리거나 VOIDED 를 PG 밖 환불로 바꾸지 않는다
+        if (entity.getStatus() != cancel.status() && !entity.getStatus().canBecome(cancel.status())) {
             throw new PaymentException(PaymentErrorCode.CANCELLATION_CONFLICT);
         }
         entity.setStatus(cancel.status());

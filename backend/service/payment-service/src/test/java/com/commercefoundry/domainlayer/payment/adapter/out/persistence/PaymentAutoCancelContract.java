@@ -129,7 +129,7 @@ abstract class PaymentAutoCancelContract {
         // #693 EXTERNAL_PG_REFUNDED 는 PG 잔액을 줄였다 — 자동 취소 남은 금액 · 확정 누계는 SUCCEEDED 와 같이 뺀다
         save(done().recordCancellation(krw(29_000)).markOrderSyncFailed("ORDER_CANCELED"));
         new TransactionTemplate(transactions).executeWithoutResult(tx ->
-            cancellations.save(new PaymentCancel(42, PAYMENT_ID, krw(29_000), PaymentCancel.Status.EXTERNAL_PG_REFUNDED)));
+            cancellations.recordExternalRefund(new PaymentCancel(42, PAYMENT_ID, krw(29_000), PaymentCancel.Status.EXTERNAL_PG_REFUNDED)));
         processor.enqueue(PAYMENT_ID);
         var attempt = processor.acquire(PAYMENT_ID);
         assertThat(attempt.intent().amount()).isEqualTo(krw(100_000));
@@ -145,7 +145,7 @@ abstract class PaymentAutoCancelContract {
         // #693 PG 밖 환불은 PG 잔액에 남아 있다 — PG 잔액 전부를 자동 취소하면 이중 환불이라 사람이 정한다
         save(done().markOrderSyncFailed("ORDER_CANCELED"));
         new TransactionTemplate(transactions).executeWithoutResult(tx ->
-            cancellations.save(new PaymentCancel(42, PAYMENT_ID, krw(29_000), PaymentCancel.Status.OFF_PG_REFUNDED)));
+            cancellations.recordExternalRefund(new PaymentCancel(42, PAYMENT_ID, krw(29_000), PaymentCancel.Status.OFF_PG_REFUNDED)));
         processor.enqueue(PAYMENT_ID);
         assertThat(processor.acquire(PAYMENT_ID)).isNull();
         assertThat(intent().state()).isEqualTo(PaymentAutoCancel.State.MANUAL_REVIEW);
@@ -165,7 +165,7 @@ abstract class PaymentAutoCancelContract {
         var attempt = processor.acquire(PAYMENT_ID);
         assertThat(processor.recordEvidence(PAYMENT_ID, attempt.intent().leaseToken(), "auto-txn")).isTrue();
         new TransactionTemplate(transactions).executeWithoutResult(tx ->
-            cancellations.save(new PaymentCancel(43, PAYMENT_ID, krw(1_000), PaymentCancel.Status.OFF_PG_REFUNDED)));
+            cancellations.recordExternalRefund(new PaymentCancel(43, PAYMENT_ID, krw(1_000), PaymentCancel.Status.OFF_PG_REFUNDED)));
 
         assertThat(processor.finish(PAYMENT_ID, attempt.intent().leaseToken(), Outcome.CONFIRMED)).isTrue();
 

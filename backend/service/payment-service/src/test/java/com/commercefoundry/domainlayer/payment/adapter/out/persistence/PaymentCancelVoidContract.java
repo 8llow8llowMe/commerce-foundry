@@ -123,7 +123,7 @@ abstract class PaymentCancelVoidContract {
         // #693 새 상태가 status 칼럼(check 포함)에 들어가고, 그 claimId 로는 결제 후 취소 · void 모두 PG 를 다시 부르지 않는다
         save(status.reducesPgBalance() ? done().recordCancellation(krw(10_000)) : done());
         new TransactionTemplate(transactions).executeWithoutResult(tx ->
-            cancellations.save(new PaymentCancel(42, PAYMENT_ID, krw(10_000), status)));
+            cancellations.recordExternalRefund(new PaymentCancel(42, PAYMENT_ID, krw(10_000), status)));
 
         var refund = orderFacade.cancel(PAYMENT_ID, 42, 10_000, CurrencyCode.KRW, "42");
         PaymentCancelVoidResponse decision = callVoid(42);
