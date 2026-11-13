@@ -48,10 +48,10 @@ class OrderPaymentSchemaUpgradePostgresTest {
             insert(jdbc, 2, "REJECTED_ORDER_CANCELED", 52L, 62L, null);
             jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, version, created_at, updated_at) "
                 + "values (11, 100, ?, 'RETURN', 'REQUESTED', 0, now(), now())", UUID.randomUUID());
-            // 운영 적용 순서 그대로: c2b → #16 PR-2a 1단계 → 2단계. 현재 매핑 전체를 validate 하므로 뒤 단계도 적용한다.
+            // 운영 적용 순서 그대로: c2b → #16 PR-2a 1단계 → 2단계 → #17 A1 → #17 B1. 현재 매핑 전체를 validate 하므로 뒤 단계도 적용한다.
             var migration = new ResourceDatabasePopulator(new ClassPathResource("ddl/order-payment-c2b-restoration.sql"),
                     new ClassPathResource("ddl/claim-cancellation.sql"), new ClassPathResource("ddl/claim-cancellation-cleanup.sql"),
-                    new ClassPathResource("ddl/claim-admin-decision.sql"));
+                    new ClassPathResource("ddl/claim-admin-decision.sql"), new ClassPathResource("ddl/claim-return-approval.sql"));
             migration.setSqlScriptEncoding("UTF-8");
             migration.execute(source);
             return database;

@@ -59,7 +59,7 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
 
     @Override
     public Map<Long, Long> sumRequestedReturnQuantities(long orderId) {
-        return claimRepository.sumQuantities(orderId, Claim.Type.RETURN, Claim.Status.REQUESTED).stream()
+        return claimRepository.sumQuantities(orderId, Claim.Type.RETURN, Claim.returnQuantityReservingStatuses()).stream()
             .collect(Collectors.toMap(RequestedReturnQuantityQueryResult::orderItemId, RequestedReturnQuantityQueryResult::quantity));
     }
 
@@ -98,7 +98,8 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
         ClaimEntity saved = claimRepository.saveAndFlush(claimMapper.toEntity(claim));
         // 쓰기 매핑은 생성 시각을 싣지 않아 merge 결과의 생성 시각을 믿지 않는다 — 읽어 온 접수 시각과 항목은 그대로, 버전만 올린다
         return new Claim(claim.id(), claim.orderId(), claim.requestKey(), claim.type(), claim.status(), claim.expectedRefund(), claim.paymentId(),
-            claim.attemptCount(), claim.nextAttemptAt(), claim.failureCode(), claim.decision(), claim.items(), claim.requestedAt(), saved.getVersion());
+            claim.attemptCount(), claim.nextAttemptAt(), claim.failureCode(), claim.decision(), claim.approval(), claim.items(), claim.requestedAt(),
+            saved.getVersion());
     }
 
     @Override

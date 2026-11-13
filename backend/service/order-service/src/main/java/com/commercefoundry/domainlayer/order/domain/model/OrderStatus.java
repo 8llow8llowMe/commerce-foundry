@@ -23,7 +23,7 @@ import lombok.RequiredArgsConstructor;
  *   <tr><td>SHIPPING</td><td>DELIVERED</td></tr>
  *   <tr><td>DELIVERED</td><td>PURCHASE_CONFIRMED · RETURN_REQUESTED</td></tr>
  *   <tr><td>CANCEL_REQUESTED</td><td>CANCELED</td></tr>
- *   <tr><td>RETURN_REQUESTED</td><td>RETURNED</td></tr>
+ *   <tr><td>RETURN_REQUESTED</td><td>RETURNED · DELIVERED — 반품 정리({@link Order#settleReturn}): 전량 환불이면 반품 완료, 열린 반품 없이 일부만이면 배송 완료로 (#17 B1)</td></tr>
  * </table>
  */
 @Getter
@@ -87,7 +87,7 @@ public enum OrderStatus implements CodeNameDescribable {
         table.put(SHIPPING, Collections.unmodifiableSet(EnumSet.of(DELIVERED)));
         table.put(DELIVERED, Collections.unmodifiableSet(EnumSet.of(PURCHASE_CONFIRMED, RETURN_REQUESTED)));
         table.put(CANCEL_REQUESTED, Collections.unmodifiableSet(EnumSet.of(CANCELED)));
-        table.put(RETURN_REQUESTED, Collections.unmodifiableSet(EnumSet.of(RETURNED)));
+        table.put(RETURN_REQUESTED, Collections.unmodifiableSet(EnumSet.of(RETURNED, DELIVERED)));
         return Collections.unmodifiableMap(table);
     }
 }

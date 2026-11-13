@@ -20,7 +20,7 @@ public record ClaimAdminFilter(Long orderId, Type type, Status status, int page,
     }
 
     public enum Status {
-        REQUESTED, REFUNDED, COMPLETED, REFUND_FAILED, RESTORATION_FAILED;
+        REQUESTED, APPROVED, REFUNDED, COMPLETED, REJECTED, REFUND_FAILED, RESTORATION_FAILED;
         public Claim.Status toDomain() { return Claim.Status.valueOf(name()); }
     }
 }

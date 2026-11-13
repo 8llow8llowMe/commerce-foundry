@@ -19,7 +19,11 @@ public interface ClaimRepositoryPort {
     /** 호출자의 짧은 쓰기 트랜잭션에서 최신 행을 NOWAIT 잠근다. 잠금 중 외부 I/O를 하지 않는다. */
     Optional<Claim> findByIdForUpdate(long claimId);
 
-    /** REQUESTED 반품의 항목별 수량을 한 번에 읽는다. */
+    /**
+     * 이미 반품에 잡힌 항목별 수량을 한 번에 읽는다 — {@link Claim#reservesReturnQuantity()} 인 반품(거절만 뺀 전부)을 더한다 (#17 B1). 이름은 B1 이전(REQUESTED 만 있던 때) 그대로다.
+     * 환불 실패(REFUND_FAILED)는 수동 확정으로 환불될 수 있고, 복원 실패(RESTORATION_FAILED)는 환불이 이미 나갔다 — 빼면 같은 수량을 다시 반품 접수해
+     * 이중 환불이 될 수 있다. 취소 클레임은 넣지 않는다.
+     */
     Map<Long, Long> sumRequestedReturnQuantities(long orderId);
 
     /**

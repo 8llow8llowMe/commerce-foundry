@@ -167,7 +167,7 @@ public class OrderCancellationProcessor {
     public void recordAttemptFailure(Claim attempted) {
         findCancellationClaim(attempted.orderId())
             .filter(claim -> claim.id() == attempted.id() && Objects.equals(claim.version(), attempted.version())
-                && claim.status() == attempted.status() && claim.status().isAwaitingAttempt())
+                && claim.status() == attempted.status() && claim.isAwaitingAttempt())
             .ifPresent(this::retryOrGiveUp);
     }
 

@@ -26,9 +26,14 @@ import lombok.NoArgsConstructor;
  *
  * <ul>
  *   <li>{@code ck_claim_cancellation_payment} — 취소 클레임은 양수 결제 아이디 · 0보다 큰 환불액이 있다</li>
- *   <li>{@code ck_claim_payment_cancellation_only} — 결제 아이디는 취소 클레임에만 있다</li>
+ *   <li>{@code ck_claim_cancellation_not_approved} — 취소 클레임에는 반품 승인 상태(APPROVED)가 없다 (#17 B1)</li>
+ *   <li>{@code ck_claim_return_approval} — 승인 이후 반품(REQUESTED · REJECTED 가 아닌 반품)은 양수 결제 아이디 · 0보다 큰 환불액 · 승인 칸 넷이 모두 있고,
+ *       그 밖의 클레임에는 승인 칸이 없으며 승인 전 · 거절 반품에는 결제 아이디도 없다 (#17 B1, 이전의 {@code ck_claim_payment_cancellation_only} 를 대신한다)</li>
  *   <li>{@code ck_claim_cancellation_next_attempt} — 취소 클레임의 다음 시도 시각은 대기 상태(REQUESTED · REFUNDED)에만 있다</li>
- *   <li>{@code ck_claim_cancellation_failure_code} — 취소 클레임의 실패 코드는 종결 실패(REFUND_FAILED · RESTORATION_FAILED)에만 있다</li>
+ *   <li>{@code ck_claim_return_next_attempt} — 반품 클레임의 다음 시도 시각은 대기 상태(APPROVED · REFUNDED)에만 있다 (#17 B1)</li>
+ *   <li>{@code ck_claim_cancellation_failure_code} · {@code ck_claim_return_failure_code} — 실패 코드는 종결 실패(REFUND_FAILED · RESTORATION_FAILED)에만 있다</li>
+ *   <li>{@code ck_claim_admin_decision} — 결정 칸 넷은 모두 없거나 모두 있고, 직전 실패 코드는 거절(REJECTED) 결정일 때만 비울 수 있다. 접수(REQUESTED)
+ *       반품에는 결정이 없다. 승인 뒤 반품의 결정 · 거절 결정은 B2 가 쓴다 — B1 도메인({@code Claim})은 같은 규칙으로 읽기만 한다</li>
  * </ul>
  *
  * <p>재시도 스케줄러는 {@code idx_claim_type_next_attempt_at_id} 를
@@ -45,15 +50,24 @@ import lombok.NoArgsConstructor;
         @CheckConstraint(name = "ck_claim_attempt_count_non_negative", constraint = "attempt_count >= 0"),
         @CheckConstraint(name = "ck_claim_cancellation_payment", constraint = "type <> 'CANCELLATION' or "
             + "(payment_id is not null and payment_id > 0 and expected_refund_amount is not null and expected_refund_amount > 0)"),
-        @CheckConstraint(name = "ck_claim_payment_cancellation_only", constraint = "type = 'CANCELLATION' or payment_id is null"),
+        @CheckConstraint(name = "ck_claim_cancellation_not_approved", constraint = "type <> 'CANCELLATION' or status <> 'APPROVED'"),
+        @CheckConstraint(name = "ck_claim_return_approval", constraint = "(type = 'RETURN' and status not in ('REQUESTED', 'REJECTED') "
+            + "and payment_id is not null and payment_id > 0 and expected_refund_amount is not null and expected_refund_amount > 0 "
+            + "and approved_at is not null and approved_by_member_id is not null and approved_by_member_id > 0 and restock is not null "
+            + "and deduction_amount is not null and deduction_amount >= 0) or ((type <> 'RETURN' or (status in ('REQUESTED', 'REJECTED') and payment_id is null)) "
+            + "and approved_at is null and approved_by_member_id is null and restock is null and deduction_amount is null)"),
         @CheckConstraint(name = "ck_claim_cancellation_next_attempt", constraint = "type <> 'CANCELLATION' or "
             + "((status in ('REQUESTED', 'REFUNDED')) = (next_attempt_at is not null))"),
+        @CheckConstraint(name = "ck_claim_return_next_attempt", constraint = "type <> 'RETURN' or "
+            + "((status in ('APPROVED', 'REFUNDED')) = (next_attempt_at is not null))"),
         @CheckConstraint(name = "ck_claim_cancellation_failure_code", constraint = "type <> 'CANCELLATION' or "
             + "((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))"),
+        @CheckConstraint(name = "ck_claim_return_failure_code", constraint = "type <> 'RETURN' or "
+            + "((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))"),
         @CheckConstraint(name = "ck_claim_admin_decision", constraint = "(decision_reason is null and decided_by_member_id is null and decided_at is null "
-            + "and decision_failure_code is null) or (type = 'CANCELLATION' and decision_reason is not null and length(trim(decision_reason)) > 0 "
-            + "and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null and decision_failure_code is not null "
-            + "and length(trim(decision_failure_code)) > 0)")
+            + "and decision_failure_code is null) or ((type = 'CANCELLATION' or status <> 'REQUESTED') and decision_reason is not null and length(trim(decision_reason)) > 0 "
+            + "and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null "
+            + "and ((decision_failure_code is not null and length(trim(decision_failure_code)) > 0) or (decision_failure_code is null and status = 'REJECTED')))")
     })
 @Getter
 @Builder
@@ -76,7 +90,7 @@ public class ClaimEntity extends BaseEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20,
-        comment = "클레임 상태 (REQUESTED / REFUNDED / COMPLETED / REFUND_FAILED / RESTORATION_FAILED)")
+        comment = "클레임 상태 (REQUESTED / APPROVED / REFUNDED / COMPLETED / REJECTED / REFUND_FAILED / RESTORATION_FAILED)")
     private Claim.Status status;
 
     @Column(name = "expected_refund_amount", comment = "예상 환불 최소 단위 금액 (미산정이면 null)")
@@ -86,7 +100,7 @@ public class ClaimEntity extends BaseEntity {
     @Column(name = "expected_refund_currency", length = 3, comment = "예상 환불 통화 (미산정이면 null)")
     private CurrencyCode expectedRefundCurrency;
 
-    @Column(name = "payment_id", comment = "환불할 결제 아이디 (외부 FK: payment-service payment.id). 취소 클레임에만")
+    @Column(name = "payment_id", comment = "환불할 결제 아이디 (외부 FK: payment-service payment.id). 취소 클레임 · 승인 이후 반품에만")
     private Long paymentId;
 
     @Column(name = "attempt_count", nullable = false, comment = "지금 단계(환불 · 재고 복원)의 미확정 재시도 횟수")
@@ -109,6 +123,18 @@ public class ClaimEntity extends BaseEntity {
 
     @Column(name = "decision_failure_code", length = Claim.FAILURE_CODE_MAX_LENGTH, comment = "마지막 수습 결정 직전 실패 코드")
     private String decisionFailureCode;
+
+    @Column(name = "approved_at", comment = "반품 승인 시각 — 반품 환불의 결제 취소 키 기한 기준. 승인 이후 반품에만")
+    private Instant approvedAt;
+
+    @Column(name = "approved_by_member_id", comment = "반품 승인 관리자 아이디 (외부 FK: auth-service member.id). 승인 이후 반품에만")
+    private Long approvedByMemberId;
+
+    @Column(name = "restock", comment = "검수 뒤 재고로 되돌릴지. 승인 이후 반품에만")
+    private Boolean restock;
+
+    @Column(name = "deduction_amount", comment = "반품 정책 금액에서 뺀 최소 단위 금액 (반품 배송비 등, 통화는 expected_refund_currency). 승인 이후 반품에만")
+    private Long deductionAmount;
 
     @Version
     @Column(name = "version", nullable = false, comment = "낙관적 락 버전")

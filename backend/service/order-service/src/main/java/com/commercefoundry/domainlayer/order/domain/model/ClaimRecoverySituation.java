@@ -28,12 +28,16 @@ public enum ClaimRecoverySituation implements CodeNameDescribable {
 
     public static ClaimRecoverySituation of(Claim claim) {
         Objects.requireNonNull(claim, "claim");
+        // 반품은 아직 수습 대상이 아니다 — 승인 뒤 환불 · 복원 파이프라인(#17 B2)이 생기면 연다
         if (claim.type() != Claim.Type.CANCELLATION) {
             return NO_ACTION;
         }
+        if (claim.isAwaitingAttempt()) {
+            return AUTO_PROCESSING;
+        }
         return switch (claim.status()) {
-            case REQUESTED, REFUNDED -> AUTO_PROCESSING;
-            case COMPLETED -> NO_ACTION;
+            // 대기 상태(REQUESTED · REFUNDED)는 위에서 끝났다. APPROVED 는 취소에 없고, REJECTED 는 취소 거절(A4) 뒤의 끝 상태다
+            case REQUESTED, APPROVED, REFUNDED, COMPLETED, REJECTED -> NO_ACTION;
             case REFUND_FAILED -> Claim.REFUND_UNCONFIRMED.equals(claim.failureCode()) ? REFUND_UNCONFIRMED : REFUND_REJECTED;
             case RESTORATION_FAILED -> {
                 if (ORDER_STATUS_UNEXPECTED.equals(claim.failureCode())) {

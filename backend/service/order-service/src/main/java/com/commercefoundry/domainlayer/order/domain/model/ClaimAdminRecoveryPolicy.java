@@ -25,7 +25,7 @@ public final class ClaimAdminRecoveryPolicy {
     public static void requireRetry(Claim claim, Instant now) {
         requireStoredCancellation(claim);
         Objects.requireNonNull(now, "now");
-        if ((!claim.status().isAwaitingAttempt() && !claim.status().isFailed()) || ORDER_STATUS_UNEXPECTED.equals(claim.failureCode())
+        if ((!claim.isAwaitingAttempt() && !claim.status().isFailed()) || ORDER_STATUS_UNEXPECTED.equals(claim.failureCode())
             || (claim.nextAttemptAt() != null && claim.nextAttemptAt().isAfter(now))) {
             throw new IllegalStateException("활성 선점 · 종결 완료 · 주문 상태 이상 클레임은 재시도하지 않습니다");
         }

@@ -185,7 +185,7 @@ public class ClaimAdminRecoveryProcessor {
         if (claim.type() != Claim.Type.CANCELLATION) {
             throw new OrderException(OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
         }
-        if (claim.status().isAwaitingAttempt() && claim.nextAttemptAt() != null && claim.nextAttemptAt().isAfter(now)) {
+        if (claim.isAwaitingAttempt() && claim.nextAttemptAt() != null && claim.nextAttemptAt().isAfter(now)) {
             throw new OrderException(OrderErrorCode.CLAIM_AUTO_PROCESSING);
         }
         // 결제사가 거절한 환불은 다시 보내도 같은 거절(PAYMENT_016)이고 진짜 사유만 지워진다 — 대표 관리자의 수동 확정으로 넘긴다
@@ -218,19 +218,23 @@ public class ClaimAdminRecoveryProcessor {
     }
 
     /**
-     * 환불 단계의 다시 시도가 결제 취소 키 기한으로 닫혔는가 — {@code now + lease ≥ 접수 + 14일}. 다시 시도(038)와 결과 미확인 환불의 수동 확정 자격(#17 A3)이
+     * 환불 단계의 다시 시도가 결제 취소 키 기한으로 닫혔는가 — {@code now + lease ≥ 기한 기준(취소는 접수) + 14일}. 다시 시도(038)와 결과 미확인 환불의 수동 확정 자격(#17 A3)이
      * 같은 기준을 쓴다 — 하나가 닫히는 순간 다른 하나가 열린다.
      */
     private boolean isRefundRetryClosed(Claim claim, Instant now) {
         return isRefundStage(claim) && !now.plus(properties.retry().lease()).isBefore(refundDeadline(claim));
     }
 
+    /** 환불 대기(취소 REQUESTED · 반품 APPROVED) 또는 환불 실패 — 승인 전 반품(REQUESTED)은 아직 환불 단계가 아니다(#17 B1). */
     private static boolean isRefundStage(Claim claim) {
-        return claim.status() == Claim.Status.REQUESTED || claim.status() == Claim.Status.REFUND_FAILED;
+        return claim.isAwaitingRefund() || claim.status() == Claim.Status.REFUND_FAILED;
     }
 
-    /** 접수 시각 + 결제 취소 키 유효 기간({@code payment-guide.md} — PENDING 14일 뒤 {@code PAYMENT_018}). */
+    /**
+     * 기한 기준(취소는 접수, 반품은 승인 시각 — {@link Claim#refundDeadlineBase()}) + 결제 취소 키 유효 기간
+     * ({@code payment-guide.md} — PENDING 14일 뒤 {@code PAYMENT_018}).
+     */
     private static Instant refundDeadline(Claim claim) {
-        return claim.requestedAt().plus(REFUND_KEY_VALIDITY);
+        return claim.refundDeadlineBase().plus(REFUND_KEY_VALIDITY);
     }
 }
