@@ -1,7 +1,6 @@
 package com.commercefoundry.domainlayer.payment.application.service.processor;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
@@ -69,11 +68,18 @@ class PaymentAdminQueryProcessorTest {
     }
 
     @Test
-    @DisplayName("원장 통화가 결제 통화와 다르면 데이터 오류라 조용히 넘기지 않는다")
-    void currencyMismatchFailsLoudly() {
-        given(port.search(any())).willReturn(page(row(1, CurrencyCode.KRW)));
-        given(port.findExternalRefundTotals(any())).willReturn(List.of(total(1, PaymentCancel.Status.OFF_PG_REFUNDED, 100, CurrencyCode.USD)));
-        assertThatThrownBy(() -> processor.search(COMMAND)).isInstanceOf(IllegalArgumentException.class);
+    @DisplayName("원장 통화가 결제 통화와 다르면 그 결제만 externalRefund 를 비우고 나머지 페이지는 그대로 보여 준다")
+    void currencyMismatchBlanksOnlyThatPayment() {
+        given(port.search(any())).willReturn(page(row(2, CurrencyCode.KRW), row(1, CurrencyCode.KRW)));
+        given(port.findExternalRefundTotals(any())).willReturn(List.of(
+            total(1, PaymentCancel.Status.EXTERNAL_PG_REFUNDED, 500, CurrencyCode.KRW), total(1, PaymentCancel.Status.OFF_PG_REFUNDED, 100, CurrencyCode.USD),
+            total(2, PaymentCancel.Status.OFF_PG_REFUNDED, 300, CurrencyCode.KRW)));
+
+        List<PaymentAdminInfo> infos = processor.search(COMMAND).getContent();
+
+        assertThat(infos).extracting(PaymentAdminInfo::externalRefund).containsExactly(
+            new PaymentAdminInfo.ExternalRefund(Money.zero(CurrencyCode.KRW), Money.of(300, CurrencyCode.KRW)),
+            null);
     }
 
     private static Page<PaymentAdminQueryResult> page(PaymentAdminQueryResult... rows) {
