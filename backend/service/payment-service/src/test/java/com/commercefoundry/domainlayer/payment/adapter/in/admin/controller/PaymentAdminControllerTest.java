@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.common.dto.item.MoneyItem;
+import com.commercefoundry.domainlayer.payment.adapter.in.admin.dto.item.PaymentAdminExternalRefundItem;
 import com.commercefoundry.domainlayer.payment.adapter.in.admin.dto.item.PaymentAdminItem;
 import com.commercefoundry.domainlayer.payment.application.command.PaymentAdminSearchCommand;
 import com.commercefoundry.domainlayer.payment.application.model.PaymentAdminStatusFilter;
@@ -46,7 +47,8 @@ class PaymentAdminControllerTest {
     @Test
     void adminReceivesPageAndSafeContractAndAllFilters() {
         PaymentAdminItem item = new PaymentAdminItem("4611686018427387904", "4611686018427387905", PaymentStatus.UNKNOWN.toMetadata(),
-            MoneyItem.of(129000, "KRW"), null, null, false, null, Instant.parse("2026-11-01T00:00:00Z"), Instant.parse("2026-11-01T00:00:00Z"), null, null);
+            MoneyItem.of(129000, "KRW"), null, null, false, null, Instant.parse("2026-11-01T00:00:00Z"), Instant.parse("2026-11-01T00:00:00Z"), null, null,
+            null);
         given(useCase.search(any())).willReturn(new PageResponse<>(List.of(item), 0, 20, 1, 1));
         var result = mvc.get().uri(PATH + "?status=UNKNOWN&orderId=100&orderSynced=false").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
         assertThat(result).hasStatusOk();
@@ -55,15 +57,35 @@ class PaymentAdminControllerTest {
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].amount.amount").isEqualTo(129000);
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].status.code").isEqualTo("UNKNOWN");
         assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].method").isNull();
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].externalRefund").isNull();
         assertThat(result).bodyJson().extractingPath("$.dataBody.totalElements").isEqualTo(1);
         verify(useCase).search(new PaymentAdminSearchCommand(PaymentAdminStatusFilter.UNKNOWN, 100L, false, 0, 20));
         assertThat(Arrays.stream(PaymentAdminItem.class.getRecordComponents()).map(RecordComponent::getName)).containsExactly(
             "paymentId", "orderId", "status", "amount", "method", "unknownReason", "orderSynced", "orderSyncFailureCode",
-            "createdAt", "updatedAt", "approvalStartedAt", "approvedAt");
+            "createdAt", "updatedAt", "approvalStartedAt", "approvedAt", "externalRefund");
+        assertThat(Arrays.stream(PaymentAdminExternalRefundItem.class.getRecordComponents()).map(RecordComponent::getName))
+            .containsExactly("pgAmount", "offPgAmount");
+    }
+
+    @Test
+    @DisplayName("EXTERNAL_REFUNDED 필터를 받고 외부 확인 환불 합계를 채널별 금액 객체로 싣는다 — 실제 결제 상태는 그대로다 (#693)")
+    void externalRefundedFilterIsAcceptedAndResponseCarriesChannelTotals() {
+        PaymentAdminItem item = new PaymentAdminItem("4611686018427387904", "4611686018427387905", PaymentStatus.DONE.toMetadata(),
+            MoneyItem.of(129000, "KRW"), null, null, false, null, Instant.parse("2026-11-01T00:00:00Z"), Instant.parse("2026-11-01T00:00:00Z"), null, null,
+            new PaymentAdminExternalRefundItem(MoneyItem.of(500, "KRW"), MoneyItem.of(0, "KRW")));
+        given(useCase.search(any())).willReturn(new PageResponse<>(List.of(item), 0, 20, 1, 1));
+        var result = mvc.get().uri(PATH + "?status=EXTERNAL_REFUNDED&orderId=100").header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].status.code").isEqualTo("DONE");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].externalRefund.pgAmount.amount").isEqualTo(500);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].externalRefund.pgAmount.currency").isEqualTo("KRW");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].externalRefund.offPgAmount.amount").isEqualTo(0);
+        assertThat(result).bodyJson().extractingPath("$.dataBody.contents[0].externalRefund.offPgAmount.currency").isEqualTo("KRW");
+        verify(useCase).search(new PaymentAdminSearchCommand(PaymentAdminStatusFilter.EXTERNAL_REFUNDED, 100L, null, 0, 20));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "?status=REFUND_FAILED"})
+    @ValueSource(strings = {"", "?status=REFUND_FAILED", "?status=EXTERNAL_REFUNDED"})
     void anonymousAndCustomerCannotRead(String query) {
         assertThat(mvc.get().uri(PATH + query).exchange()).hasStatus(401);
         assertThat(mvc.get().uri(PATH + query).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.CUSTOMER)).exchange()).hasStatus(403);
@@ -84,7 +106,8 @@ class PaymentAdminControllerTest {
     @ValueSource(strings = {"DONE", "CANCELED"})
     void refundFailedIsAcceptedAndResponseKeepsActualPaymentStatus(String actualStatus) {
         PaymentAdminItem item = new PaymentAdminItem("4611686018427387904", "4611686018427387905", PaymentStatus.valueOf(actualStatus).toMetadata(),
-            MoneyItem.of(129000, "KRW"), null, null, false, null, Instant.parse("2026-11-01T00:00:00Z"), Instant.parse("2026-11-01T00:00:00Z"), null, null);
+            MoneyItem.of(129000, "KRW"), null, null, false, null, Instant.parse("2026-11-01T00:00:00Z"), Instant.parse("2026-11-01T00:00:00Z"), null, null,
+            null);
         given(useCase.search(any())).willReturn(new PageResponse<>(List.of(item), 0, 20, 1, 1));
         var result = mvc.get().uri(PATH + "?status=REFUND_FAILED&orderId=100&orderSynced=false")
             .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN)).exchange();

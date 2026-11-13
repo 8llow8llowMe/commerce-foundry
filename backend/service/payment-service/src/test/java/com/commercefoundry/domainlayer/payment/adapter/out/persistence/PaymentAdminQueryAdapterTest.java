@@ -2,9 +2,17 @@ package com.commercefoundry.domainlayer.payment.adapter.out.persistence;
 
 import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.entity;
 import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.ID;
+import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.externalRefundCancellations;
+import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.externalRefundPayments;
 import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.refundHistoryPayments;
 import static com.commercefoundry.domainlayer.payment.support.PaymentAdminQueryFixtures.refundHistoryCancellations;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
+
+import com.commercefoundry.domainlayer.payment.application.port.out.query.PaymentAdminExternalRefundQueryResult;
+import com.commercefoundry.domainlayer.payment.domain.model.PaymentCancel;
+import com.commercefoundry.shared.commerce.CurrencyCode;
+import java.util.List;
 
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.repository.custom.PaymentAdminCustomRepositoryImpl;
 import com.commercefoundry.domainlayer.payment.application.model.PaymentAdminSearchCriteria;
@@ -85,5 +93,35 @@ class PaymentAdminQueryAdapterTest {
         assertThat(port.search(new PaymentAdminSearchCriteria(PaymentAdminStatusFilter.CANCELED, null, false, 0, 20)).getContent()).singleElement();
         assertThat(port.search(new PaymentAdminSearchCriteria(PaymentAdminStatusFilter.FAILED, null, false, 0, 20)).getContent()).singleElement()
             .satisfies(row -> assertThat(row.paymentId()).isEqualTo(ID + 5));
+    }
+
+    @Test
+    void postgresExternalRefundFilterAndGroupedTotalsReadOnlyExternalRefundRows() {
+        externalRefundPayments().forEach(em::persist);
+        externalRefundCancellations().forEach(em::persist);
+        em.flush();
+        em.clear();
+        var external = port.search(new PaymentAdminSearchCriteria(PaymentAdminStatusFilter.EXTERNAL_REFUNDED, null, null, 0, 20));
+        assertThat(external.getContent()).extracting(row -> row.paymentId()).containsExactly(ID + 4, ID + 3, ID + 2, ID + 1);
+        assertThat(external.getTotalElements()).isEqualTo(4);
+        assertThat(port.search(new PaymentAdminSearchCriteria(PaymentAdminStatusFilter.REFUND_FAILED, null, null, 0, 20)).getContent())
+            .extracting(row -> row.paymentId()).containsExactly(ID + 5, ID + 4);
+
+        var stats = em.getEntityManager().getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
+        stats.clear();
+        List<PaymentAdminExternalRefundQueryResult> totals = port.findExternalRefundTotals(List.of(ID + 1, ID + 2, ID + 3, ID + 4, ID + 5, ID + 6));
+        assertThat(stats.getPrepareStatementCount()).isEqualTo(1);
+        assertThat(totals).extracting(PaymentAdminExternalRefundQueryResult::paymentId, PaymentAdminExternalRefundQueryResult::status,
+                PaymentAdminExternalRefundQueryResult::amount, PaymentAdminExternalRefundQueryResult::currency)
+            .containsExactlyInAnyOrder(
+                tuple(ID + 1, PaymentCancel.Status.EXTERNAL_PG_REFUNDED, 500L, CurrencyCode.KRW),
+                tuple(ID + 1, PaymentCancel.Status.OFF_PG_REFUNDED, 500L, CurrencyCode.KRW),
+                tuple(ID + 2, PaymentCancel.Status.OFF_PG_REFUNDED, 700L, CurrencyCode.KRW),
+                tuple(ID + 3, PaymentCancel.Status.EXTERNAL_PG_REFUNDED, 400L, CurrencyCode.KRW),
+                tuple(ID + 4, PaymentCancel.Status.OFF_PG_REFUNDED, 50L, CurrencyCode.KRW));
+        assertThat(port.findExternalRefundTotals(List.of(ID + 5, ID + 6))).isEmpty();
+        stats.clear();
+        assertThat(port.findExternalRefundTotals(List.of())).isEmpty();
+        assertThat(stats.getPrepareStatementCount()).isZero();
     }
 }

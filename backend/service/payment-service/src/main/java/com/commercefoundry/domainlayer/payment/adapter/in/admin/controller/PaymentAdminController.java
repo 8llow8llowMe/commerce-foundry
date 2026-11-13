@@ -33,11 +33,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class PaymentAdminController {
     private final PaymentAdminUseCase paymentAdminUseCase;
 
-    @Operation(summary = "결제 목록 조회", description = "결제 시도를 아이디 내림차순으로 조회한다. REFUND_FAILED는 PG 취소 확정 거절 이력 필터이며 실제 결제 상태는 그대로 반환한다.")
+    @Operation(summary = "결제 목록 조회", description = "결제 시도를 아이디 내림차순으로 조회한다. REFUND_FAILED · EXTERNAL_REFUNDED는 취소 원장 이력 필터이며 "
+        + "실제 결제 상태는 그대로 반환한다. 외부 확인 환불이 있는 결제는 externalRefund에 채널별 합계를 싣는다.")
     @PreAuthorize(AdminAuthority.SETTLEMENT_READ)
     @GetMapping
     public ResponseEntity<Response<PageResponse<PaymentAdminItem>>> search(
-        @Parameter(description = "결제 상태. REFUND_FAILED는 취소거절 이력(REJECTED)이 있는 결제이며 후속 성공 뒤에도 포함한다. 미지정이면 전체")
+        @Parameter(description = "결제 상태. REFUND_FAILED는 취소거절 이력(REJECTED)이 있는 결제이며 후속 성공 뒤에도 포함하지만, 거절 원장이 외부 확인 환불로 바뀌면 빠진다. "
+            + "EXTERNAL_REFUNDED는 외부 확인 환불(EXTERNAL_PG_REFUNDED · OFF_PG_REFUNDED) 원장이 있는 결제다. 미지정이면 전체")
         @RequestParam(required = false) PaymentAdminStatusFilter status,
         @Parameter(description = "주문 아이디. 미지정이면 전체") @RequestParam(required = false)
         @Positive(message = PaymentValidationMessage.ORDER_ID_POSITIVE) Long orderId,
