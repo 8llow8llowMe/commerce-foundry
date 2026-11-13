@@ -44,6 +44,9 @@ public final class PaymentValidationMessage {
     // 결제 후 취소 무환불 판정 경로 (POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/void) — 122 는 집계 기간 오류 코드가 쓴다
     public static final String CLAIM_ID_POSITIVE = "PAYMENT_123:클레임 아이디가 올바르지 않습니다.";
 
+    // 외부 확인 환불 기록 (POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/external-refund, #693) — 채널 누락 · 모르는 값
+    public static final String EXTERNAL_REFUND_CHANNEL_INVALID = "PAYMENT_124:환불 경로는 PG 또는 OFF_PG 여야 합니다.";
+
     private PaymentValidationMessage() {
     }
 }

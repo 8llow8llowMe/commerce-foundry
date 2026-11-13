@@ -7,7 +7,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentInternalResponse;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelResponse;
+import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelExternalRefundResponse;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.dto.response.PaymentCancelVoidResponse;
+import com.commercefoundry.domainlayer.payment.application.info.PaymentCancelExternalRefundInfo.Channel;
+import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationExternalRefundUseCase;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationVoidUseCase;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentErrorCode;
@@ -74,6 +77,9 @@ class PaymentInternalControllerTest {
 
     @MockitoBean
     private PaymentCancellationVoidUseCase paymentCancellationVoidUseCase;
+
+    @MockitoBean
+    private PaymentCancellationExternalRefundUseCase paymentCancellationExternalRefundUseCase;
 
     private static final long ORDER_ID = 4611686018427387905L;
     private static final String VOID_BODY = "{\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\"}";
@@ -181,6 +187,141 @@ class PaymentInternalControllerTest {
             MvcTestResult reused = voidAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), "42", VOID_BODY);
             assertThat(reused).hasStatus(HttpStatus.CONFLICT);
             assertThat(reused).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PAYMENT_019");
+        }
+    }
+
+    private static final String EXTERNAL_BODY = "{\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"PG\"}";
+
+    private MvcTestResult externalAs(String authorization, String paymentId, String claimId, String body) {
+        var request = mvc.post().uri("/internal/v1/payments/" + paymentId + "/cancellations/" + claimId + "/external-refund")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body);
+        if (authorization != null) {
+            request.header(HttpHeaders.AUTHORIZATION, authorization);
+        }
+        return request.exchange();
+    }
+
+    private MvcTestResult externalAs(String authorization, String claimId, String body) {
+        return externalAs(authorization, String.valueOf(PAYMENT_ID), claimId, body);
+    }
+
+    @Nested
+    @DisplayName("외부 확인 환불 기록 (#693)")
+    class ExternalRefund {
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(Channel.class)
+        @DisplayName("order-service 면 200 — 판정은 데이터다. 식별자는 문자열, 채널은 제어 코드, 상태는 metadata, 금액은 {amount, currency}")
+        void orderServiceGetsDecision(Channel channel) {
+            given(paymentCancellationExternalRefundUseCase.recordExternalRefund(PAYMENT_ID, ORDER_ID, 42, 10_000, CurrencyCode.KRW, channel))
+                .willReturn(PaymentCancelExternalRefundResponse.builder().paymentId(String.valueOf(PAYMENT_ID)).claimId("42")
+                    .outcome("RECORDED").reason("PG_VERIFIED").channel(channel.name()).paymentStatus(PaymentStatus.PARTIAL_CANCELED.toMetadata())
+                    .refundedAmount(MoneyItem.of(10_000, "KRW")).retainedAmount(MoneyItem.of(119_000, "KRW")).build());
+            String body = "{\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"" + channel.name() + "\"}";
+
+            MvcTestResult result = externalAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), "42", body);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.paymentId").isEqualTo("4611686018427387906");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.claimId").isEqualTo("42");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.outcome").isEqualTo("RECORDED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.reason").isEqualTo("PG_VERIFIED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.channel").isEqualTo(channel.name());
+            assertThat(result).bodyJson().extractingPath("$.dataBody.paymentStatus.code").isEqualTo("PARTIAL_CANCELED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.refundedAmount.amount").asNumber().isEqualTo(10_000);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.retainedAmount.amount").asNumber().isEqualTo(119_000);
+            assertThat(result).bodyJson().extractingPath("$.dataBody.retainedAmount.currency").isEqualTo("KRW");
+        }
+
+        @Test
+        @DisplayName("미확정 판정의 channel 은 null 로 나간다")
+        void unconfirmedHasNullChannel() {
+            given(paymentCancellationExternalRefundUseCase.recordExternalRefund(PAYMENT_ID, ORDER_ID, 42, 10_000, CurrencyCode.KRW, Channel.PG))
+                .willReturn(PaymentCancelExternalRefundResponse.builder().paymentId(String.valueOf(PAYMENT_ID)).claimId("42")
+                    .outcome("UNCONFIRMED").reason("PG_LEDGER_MISMATCH").paymentStatus(PaymentStatus.DONE.toMetadata())
+                    .refundedAmount(MoneyItem.of(0, "KRW")).retainedAmount(MoneyItem.of(129_000, "KRW")).build());
+
+            MvcTestResult result = externalAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), "42", EXTERNAL_BODY);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody.outcome").isEqualTo("UNCONFIRMED");
+            assertThat(result).bodyJson().extractingPath("$.dataBody.channel").isNull();
+        }
+
+        @Test
+        @DisplayName("서비스 토큰이 없으면 401 · SECURITY_007, order 외 서비스면 403 · SECURITY_005 이고 유스케이스를 부르지 않는다")
+        void onlyOrderService() {
+            SecurityEnvelopeAssertions.assertEnvelope(externalAs(null, "42", EXTERNAL_BODY).getResponse(), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+            for (String other : new String[] {"delivery-service", "operations-service", "product-service", "auth-service"}) {
+                SecurityEnvelopeAssertions.assertEnvelope(externalAs(TestServiceTokens.bearer(other, SELF), "42", EXTERNAL_BODY).getResponse(),
+                    SecurityErrorCode.FORBIDDEN);
+            }
+            verifyNoInteractions(paymentCancellationExternalRefundUseCase);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(MemberRole.class)
+        @DisplayName("회원 access 토큰은 역할과 상관없이 401 · SECURITY_007 이다 — internal 체인은 서비스 토큰만 받는다")
+        void memberTokenIsRejected(MemberRole role) {
+            String member = "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, role).tokenValue();
+
+            SecurityEnvelopeAssertions.assertEnvelope(externalAs(member, "42", EXTERNAL_BODY).getResponse(), SecurityErrorCode.SERVICE_UNAUTHORIZED);
+            verifyNoInteractions(paymentCancellationExternalRefundUseCase);
+        }
+
+        @ParameterizedTest(name = "claimId={0} body={1} → {2}")
+        @CsvSource(delimiter = '|', value = {
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\"}                           | PAYMENT_124",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\",\"channel\":null}           | PAYMENT_124",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"\"}           | PAYMENT_124",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"pg\"}         | PAYMENT_124",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"CARD\"}       | PAYMENT_124",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"SUCCEEDED\"}  | PAYMENT_124",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":0,\"currency\":\"KRW\",\"channel\":\"PG\"}             | PAYMENT_110",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":-1,\"currency\":\"KRW\",\"channel\":\"PG\"}            | PAYMENT_110",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":1e20,\"currency\":\"KRW\",\"channel\":\"PG\"}          | PAYMENT_100",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"XYZ\",\"channel\":\"PG\"}         | PAYMENT_100",
+            "42 | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"channel\":\"PG\"}                             | PAYMENT_111",
+            "42 | {\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"PG\"}                                             | PAYMENT_101",
+            "42 | {\"orderId\":0,\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"OFF_PG\"}                       | PAYMENT_102",
+            "0  | {\"orderId\":\"4611686018427387905\",\"amount\":10000,\"currency\":\"KRW\",\"channel\":\"PG\"}         | PAYMENT_123"
+        })
+        @DisplayName("채널 누락 · 모르는 값은 124, 금액 · 통화 · orderId · claimId 는 무환불 판정과 같은 코드로 400 이고 유스케이스를 부르지 않는다")
+        void validation(String claimId, String body, String code) {
+            MvcTestResult result = externalAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), claimId, body);
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+            verifyNoInteractions(paymentCancellationExternalRefundUseCase);
+        }
+
+        @ParameterizedTest(name = "paymentId={0} → {1}")
+        @CsvSource(delimiter = '|', value = {"0 | PAYMENT_115", "abc | PAYMENT_198"})
+        @DisplayName("경로 paymentId 가 양수가 아니면 115, 숫자가 아니면 198 로 400 이다")
+        void paymentIdValidation(String paymentId, String code) {
+            MvcTestResult result = externalAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), paymentId, "42", EXTERNAL_BODY);
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+            verifyNoInteractions(paymentCancellationExternalRefundUseCase);
+        }
+
+        @Test
+        @DisplayName("도메인 오류는 404 PAYMENT_001 · 409 PAYMENT_019 · 409 PAYMENT_017 · 409 PAYMENT_012 로 나간다")
+        void domainErrors() {
+            given(paymentCancellationExternalRefundUseCase.recordExternalRefund(PAYMENT_ID, ORDER_ID, 42, 10_000, CurrencyCode.KRW, Channel.PG))
+                .willThrow(new PaymentException(PaymentErrorCode.NOT_FOUND_PAYMENT))
+                .willThrow(new PaymentException(PaymentErrorCode.CANCELLATION_KEY_REUSED))
+                .willThrow(new PaymentException(PaymentErrorCode.CANCELLATION_AMOUNT_INVALID))
+                .willThrow(new PaymentException(PaymentErrorCode.PAYMENT_REQUEST_CONFLICT));
+
+            String[][] expected = {{"404", "PAYMENT_001"}, {"409", "PAYMENT_019"}, {"409", "PAYMENT_017"}, {"409", "PAYMENT_012"}};
+            for (String[] row : expected) {
+                MvcTestResult result = externalAs(TestServiceTokens.bearer(ORDER_SERVICE, SELF), "42", EXTERNAL_BODY);
+                assertThat(result).hasStatus(Integer.parseInt(row[0]));
+                assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(row[1]);
+            }
         }
     }
 

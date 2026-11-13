@@ -49,7 +49,7 @@ public class PaymentCancellationVoidFacade implements PaymentCancellationVoidUse
     }
 
     private PaymentCancelVoidInfo settle(Candidate candidate) {
-        RetentionOutcome outcome = gateway.inquireRetention(candidate.payment(), candidate.expectedBalance());
+        RetentionOutcome outcome = gateway.inquireRetention(candidate.payment(), candidate.expectedBalance()).outcome();
         return outcome == RetentionOutcome.MATCHED ? processor.seal(candidate) : candidate.unconfirmedBy(outcome);
     }
 }

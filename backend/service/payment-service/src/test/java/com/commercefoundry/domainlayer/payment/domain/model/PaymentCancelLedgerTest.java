@@ -108,4 +108,41 @@ class PaymentCancelLedgerTest {
         assertThat(Status.values()).extracting(Enum::name)
             .containsExactly("PENDING", "SUCCEEDED", "REJECTED", "VOIDED", "EXTERNAL_PG_REFUNDED", "OFF_PG_REFUNDED");
     }
+
+    @ParameterizedTest(name = "{0} 관측 잔액 {1} → {2}")
+    @CsvSource({
+        // 결제 129,000 · pgCanceled 29,000(SUCCEEDED 20,000 + EXTERNAL_PG 9,000) · OFF_PG 5,000 → 기대 잔액 100,000, 신고 금액 10,000
+        "EXTERNAL_PG_REFUNDED, 90000, EXACT",
+        "EXTERNAL_PG_REFUNDED, 89999, SURPLUS",
+        "EXTERNAL_PG_REFUNDED, 0, SURPLUS",
+        "EXTERNAL_PG_REFUNDED, 90001, NONE",
+        "EXTERNAL_PG_REFUNDED, 100000, NONE",
+        "EXTERNAL_PG_REFUNDED, 100001, NONE",
+        "OFF_PG_REFUNDED, 100000, EXACT",
+        "OFF_PG_REFUNDED, 99999, NONE",
+        "OFF_PG_REFUNDED, 90000, NONE",
+        "OFF_PG_REFUNDED, 100001, NONE"
+    })
+    @DisplayName("외부 환불 증거 — 원장에 없는 환불액 = (결제액 − pgCanceled) − 관측 잔액. PG 는 = 금액 EXACT · > 금액 SURPLUS, PG 밖은 0 일 때만, 관측 > 기대면 NONE")
+    void externalRefundEvidenceBoundaries(Status refunded, long observed, PaymentCancelLedger.Evidence expected) {
+        PaymentCancelLedger ledger = PaymentCancelLedger.of(List.of(
+            row(41, 20_000, Status.SUCCEEDED),
+            row(42, 9_000, Status.EXTERNAL_PG_REFUNDED),
+            row(43, 5_000, Status.OFF_PG_REFUNDED)), CurrencyCode.KRW);
+
+        PaymentCancelLedger.Evidence evidence = ledger.externalRefundEvidence(krw(129_000), krw(observed), krw(10_000), refunded);
+
+        assertThat(evidence).isEqualTo(expected);
+        assertThat(evidence.recordable()).isEqualTo(expected != PaymentCancelLedger.Evidence.NONE);
+    }
+
+    @Test
+    @DisplayName("외부 환불 증거는 외부 확인 환불 상태에만 묻는다")
+    void externalRefundEvidenceRejectsOtherStatuses() {
+        PaymentCancelLedger ledger = PaymentCancelLedger.of(List.of(), CurrencyCode.KRW);
+
+        for (Status status : new Status[] {Status.SUCCEEDED, Status.PENDING, Status.VOIDED, null}) {
+            assertThatThrownBy(() -> ledger.externalRefundEvidence(krw(129_000), krw(0), krw(1), status)).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
 }

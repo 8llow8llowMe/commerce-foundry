@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.domainlayer.payment.adapter.in.internal.presenter.PaymentApprovalSummaryInternalPresenter;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentErrorCode;
 import com.commercefoundry.domainlayer.payment.application.exception.PaymentException;
+import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationExternalRefundUseCase;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationUseCase;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentCancellationVoidUseCase;
 import com.commercefoundry.domainlayer.payment.application.port.in.PaymentInternalUseCase;
@@ -56,6 +57,7 @@ class PaymentApprovalSummaryInternalControllerTest {
     @MockitoBean PaymentInternalUseCase paymentInternalUseCase;
     @MockitoBean PaymentCancellationUseCase paymentCancellationUseCase;
     @MockitoBean PaymentCancellationVoidUseCase paymentCancellationVoidUseCase;
+    @MockitoBean PaymentCancellationExternalRefundUseCase paymentCancellationExternalRefundUseCase;
 
     @Test
     void operationsGetsOnlyAnonymousAggregateFieldsWithMoneyMetadataAndUtcEchoAt31Days() {

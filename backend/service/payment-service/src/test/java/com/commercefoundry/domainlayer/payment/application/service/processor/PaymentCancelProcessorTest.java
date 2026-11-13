@@ -26,8 +26,11 @@ import java.util.Optional;
 import java.time.Clock;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 class PaymentCancelProcessorTest {
     private final PaymentCancelPersistencePort cancelPort = mock(PaymentCancelPersistencePort.class);
@@ -279,6 +282,22 @@ class PaymentCancelProcessorTest {
         assertCode(() -> processor.complete(payment.id(), 42), PaymentErrorCode.CANCELLATION_CONFLICT);
         processor.reject(payment.id(), 42);
 
+        verify(cancelPort, never()).save(any());
+        verifyNoInteractions(paymentPort);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = PaymentCancel.Status.class, names = {"EXTERNAL_PG_REFUNDED", "OFF_PG_REFUNDED"})
+    @DisplayName("#693 PG 취소 성공 뒤 확정이 외부 확인 환불 행을 만나면 016 은 그대로이고 정해진 코드의 WARN 을 남긴다 — 금액은 남기지 않는다")
+    @ExtendWith(OutputCaptureExtension.class)
+    void completeOnExternallyRefundedClaimLeavesAnomalySignal(PaymentCancel.Status status, CapturedOutput output) {
+        PaymentCancel refunded = new PaymentCancel(42, payment.id(), krw(12_345), status);
+        ledger(payment, refunded, List.of(refunded));
+
+        assertCode(() -> processor.complete(payment.id(), 42), PaymentErrorCode.CANCELLATION_CONFLICT);
+
+        assertThat(output.getAll()).contains("WARN", PaymentCancelProcessor.EXTERNAL_REFUND_COMPLETION_CONFLICT, "claimId=42", status.name())
+            .doesNotContain("12345").doesNotContain("12,345");
         verify(cancelPort, never()).save(any());
         verifyNoInteractions(paymentPort);
     }

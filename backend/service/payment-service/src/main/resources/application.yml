@@ -94,6 +94,10 @@ payment:
   cancellation:
     void:
       rejection-settle-grace: 60s
+    # 외부 확인 환불 기록(#693, payment-guide.md §8) — 이 claimId 의 PENDING 은 생성 14일(PG 재전송 기간) + 이 여유가 지나야 외부 환불로 바꾼다.
+    # PG 취소 호출 최대 시간(토스 연결 2s + 읽기 6s, 재시도 없음)보다 넉넉히 둔다. 1시간 미만은 기동 실패
+    external-refund:
+      pending-call-margin: 1h
   order-result:
     consumer:
       enabled: false

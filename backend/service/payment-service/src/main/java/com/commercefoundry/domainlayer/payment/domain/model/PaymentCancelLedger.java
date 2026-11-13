@@ -62,4 +62,49 @@ public record PaymentCancelLedger(Money pgCanceled, Money refundedTotal) {
     public Money retained(Money paid) {
         return paid.minus(refundedTotal);
     }
+
+    /**
+     * PG 관측 잔액이 외부 확인 환불 신고를 설명하는가 (#693, {@code payment-guide.md} §8). 원장에 없는 환불액 = (결제액 − {@code pgCanceled}) − 관측 잔액.
+     *
+     * <ul>
+     *   <li>{@code EXTERNAL_PG_REFUNDED} — 원장에 없는 환불액 = 금액이면 {@link Evidence#EXACT}, 금액보다 크면 {@link Evidence#SURPLUS}(다른 클레임의 몫이 섞였을 수 있음)</li>
+     *   <li>{@code OFF_PG_REFUNDED} — 원장에 없는 환불액 = 0 일 때만 {@link Evidence#EXACT}</li>
+     *   <li>관측 잔액이 기대 잔액보다 크면(원장의 PG 취소가 PG 에 없음) 어느 쪽도 {@link Evidence#NONE}</li>
+     * </ul>
+     *
+     * @param refunded 기록하려는 상태 — {@code EXTERNAL_PG_REFUNDED} 또는 {@code OFF_PG_REFUNDED}
+     */
+    public Evidence externalRefundEvidence(Money paid, Money observedBalance, Money amount, PaymentCancel.Status refunded) {
+        Objects.requireNonNull(observedBalance, "observedBalance");
+        Objects.requireNonNull(amount, "amount");
+        if (refunded == null || !refunded.refundedExternally()) {
+            throw new IllegalArgumentException("외부 확인 환불 상태가 아닙니다: " + refunded);
+        }
+        Money expected = expectedPgBalance(paid);
+        if (observedBalance.isGreaterThan(expected)) {
+            return Evidence.NONE;
+        }
+        Money unexplained = expected.minus(observedBalance);
+        if (refunded == PaymentCancel.Status.OFF_PG_REFUNDED) {
+            return unexplained.isZero() ? Evidence.EXACT : Evidence.NONE;
+        }
+        if (unexplained.equals(amount)) {
+            return Evidence.EXACT;
+        }
+        return unexplained.isGreaterThan(amount) ? Evidence.SURPLUS : Evidence.NONE;
+    }
+
+    /** 외부 확인 환불 신고에 대한 PG 증거. {@code EXACT} · {@code SURPLUS} 면 기록해도 된다. */
+    public enum Evidence {
+        /** 원장에 없는 환불액이 신고와 정확히 맞는다. */
+        EXACT,
+        /** PG 채널 — 원장에 없는 환불액이 신고 금액보다 크다. 기록하되 claim 별 귀속은 확인하지 못했다(거래키 저장 후속). */
+        SURPLUS,
+        /** 신고를 설명하지 못한다. */
+        NONE;
+
+        public boolean recordable() {
+            return this != NONE;
+        }
+    }
 }
