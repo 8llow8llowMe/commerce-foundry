@@ -34,6 +34,11 @@ spring:
           default:
             connect-timeout: 2000
             read-timeout: 3000
+          # AI 상품 초안 생성 입력 · 이미지 바이트 (product GET /internal/v1/product-drafts/{draftId}/generation-*, #359 PR-2b). 한 장이 최대 5MiB 라 읽기를 늘린다.
+          # 작업 시도 한 번에 최대 9번(입력 1 + 이미지 8) 부른다 — 작업 워커 스레드에서만 부른다
+          productDraftGenerationInputClient:
+            connect-timeout: 2000
+            read-timeout: 10000
   # Kafka 접속 (deploy-guide.md §4-4). 주소는 Vault 값이다 — 저장소에 쓰지 않는다. 앱은 토픽을 만들지 않는다
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
@@ -308,13 +313,15 @@ ai:
   max-retries: 2
   max-concurrency: 4
   acquire-timeout: 10s
-  # 기능별 모델 · 최대 토큰 · effort · 프롬프트 버전. 기능을 붙이는 PR 이 더한다(#359 상품 초안 등) — 템플릿 버전을 적으면 그 파일이 없을 때 기동하지 않는다
-  #   product-draft:
-  #     max-tokens: 4000
-  #     effort: medium
-  #     prompt-version: 1
+  # 기능별 모델 · 최대 토큰 · effort · 프롬프트 버전. 기능을 붙이는 PR 이 더한다 — 템플릿 버전을 적으면 그 파일이 없을 때 기동하지 않는다
   features:
     size-chart:
+      model: claude-opus-5-5
+      max-tokens: 8000
+      prompt-version: 1
+    # AI 상품 초안 (#359 PR-2b, 작업 PRODUCT_DRAFT_GENERATE). 출력 — 상품명 100 · 설명 4000 · 태그 20 · SEO · 이미지 8장 대체 텍스트.
+    # 이미지는 장당 5MiB · 8장 · 원본 합계 20MiB 까지 싣는다(ProductDraftGenerationValidationProcessor — 요청 본문 32MB 상한, ai-provider-guide.md)
+    product-draft:
       model: claude-opus-5-5
       max-tokens: 8000
       prompt-version: 1
