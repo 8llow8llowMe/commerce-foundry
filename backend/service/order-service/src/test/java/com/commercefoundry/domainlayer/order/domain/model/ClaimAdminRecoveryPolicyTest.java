@@ -24,7 +24,7 @@ class ClaimAdminRecoveryPolicyTest {
 
     private static Claim claim(Claim.Status status, String failure) {
         return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 2,
-            status.isAwaitingAttempt() ? NOW : null, failure, ITEMS, NOW, 0L);
+            Claim.Type.CANCELLATION.isAwaitingAttempt(status) ? NOW : null, failure, ITEMS, NOW, 0L);
     }
 
     private static Order order(long id, OrderStatus status, Long version) {
@@ -35,7 +35,7 @@ class ClaimAdminRecoveryPolicyTest {
     }
 
     @ParameterizedTest
-    @EnumSource(Claim.Status.class)
+    @EnumSource(value = Claim.Status.class, names = {"APPROVED", "REJECTED"}, mode = EnumSource.Mode.EXCLUDE)
     void retryEligibilityDoesNotChangeState(Claim.Status status) {
         Claim source = claim(status, status.isFailed() ? "PAYMENT_016" : null);
         if (status == Claim.Status.COMPLETED) {
@@ -64,7 +64,7 @@ class ClaimAdminRecoveryPolicyTest {
     }
 
     @ParameterizedTest
-    @EnumSource(Claim.Status.class)
+    @EnumSource(value = Claim.Status.class, names = "APPROVED", mode = EnumSource.Mode.EXCLUDE)
     void refundConfirmationAcceptsOnlyRefundFailure(Claim.Status status) {
         Claim source = claim(status, status.isFailed() ? "PAYMENT_016" : null);
         Order order = order(1, OrderStatus.CANCEL_REQUESTED, 0L);
@@ -177,6 +177,22 @@ class ClaimAdminRecoveryPolicyTest {
     }
 
     @Test
+    void newStatusesAreNotRecoveryTargets() {
+        // #17 B1 — 거절된 취소(A4 몫, 아직 전이 없음)와 승인 · 거절된 반품은 다시 시도 · 수동 확정 · 종결 대상이 아니다(반품 수습은 B2)
+        Claim rejectedCancellation = claim(Claim.Status.REJECTED, null);
+        Claim requestedReturn = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+            List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
+        Claim approvedReturn = new Claim(2, 1, requestedReturn.requestKey(), Claim.Type.RETURN, Claim.Status.APPROVED, krw(1_000), 77L, 0, NOW, null, null,
+            new Claim.ReturnApproval(true, krw(0), 7, NOW), requestedReturn.items(), NOW, 0L);
+        for (Claim source : List.of(rejectedCancellation, approvedReturn, requestedReturn.rejectReturn())) {
+            assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRetry(source, NOW.plusSeconds(1))).as(source.type() + " " + source.status())
+                .isInstanceOf(IllegalStateException.class);
+            assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(source, true)).isFalse();
+            assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(source)).isFalse();
+        }
+    }
+
+    @Test
     void decisionValidatesWholeEvidenceAndTruncatesTime() {
         Claim.Decision decision = new Claim.Decision("운영 확인", 7, NOW, Claim.REFUND_UNCONFIRMED);
         assertThat(decision.decidedAt()).isEqualTo(Instant.parse("2026-11-10T00:00:00.123456Z"));
@@ -189,7 +205,8 @@ class ClaimAdminRecoveryPolicyTest {
         }
         assertThatThrownBy(() -> new Claim.Decision(null, 7, NOW, "CODE")).isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new Claim.Decision("확인", 7, null, "CODE")).isInstanceOf(NullPointerException.class);
-        assertThatThrownBy(() -> new Claim.Decision("확인", 7, NOW, null)).isInstanceOf(NullPointerException.class);
+        // #17 B1 — 직전 실패 코드 없는 결정은 거절(REJECTED) 클레임용으로 받는다(DB ck_claim_admin_decision 과 같다). 상태와의 짝은 클레임 생성자가 본다
+        assertThat(new Claim.Decision("확인", 7, NOW, null).previousFailureCode()).isNull();
         assertThatThrownBy(() -> new Claim.Decision("확인", 0, NOW, "CODE")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new Claim.Decision("확인", -1, NOW, "CODE")).isInstanceOf(IllegalArgumentException.class);
     }

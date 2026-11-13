@@ -8,6 +8,7 @@ import static com.commercefoundry.domainlayer.order.support.OrderFixtures.quoteL
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.commercefoundry.domainlayer.order.domain.model.ReturnRefundPolicy.ReturnOutcome;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -435,5 +436,52 @@ class OrderTest {
         }
         assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, preparing)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, requested.completeCancellation())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("반품 정리 — 정책 결과(ReturnOutcome)만 받아 반품 요청에서 반품 완료 · 배송 완료로만 가고 출고 · 배송 완료 시각을 그대로 둔다. 이미 그 상태면 그대로다 (#17 B1)")
+    void settleReturn() {
+        Order requested = returnRequested();
+
+        Order returned = requested.settleReturn(ReturnOutcome.RETURNED);
+        Order delivered = requested.settleReturn(ReturnOutcome.DELIVERED);
+
+        assertThat(returned.status()).isEqualTo(OrderStatus.RETURNED);
+        assertThat(delivered.status()).isEqualTo(OrderStatus.DELIVERED);
+        assertThat(delivered).usingRecursiveComparison().ignoringFields("status").isEqualTo(requested);
+        assertThat(delivered.deliveredAt()).as("자동 구매 확정 기준을 덮지 않는다").isEqualTo(DELIVERED_AT);
+        assertThat(returned.shippedAt()).isEqualTo(SHIPPED_AT);
+        assertThat(requested.settleReturn(ReturnOutcome.STILL_REQUESTED)).isSameAs(requested);
+        assertThat(returned.settleReturn(ReturnOutcome.RETURNED)).isSameAs(returned);
+        assertThat(delivered.settleReturn(ReturnOutcome.DELIVERED)).isSameAs(delivered);
+        assertThatThrownBy(() -> returned.settleReturn(ReturnOutcome.DELIVERED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> delivered.settleReturn(ReturnOutcome.RETURNED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> delivered.settleReturn(ReturnOutcome.STILL_REQUESTED)).as("배송 완료에서 반품 요청으로 되돌리지 않는다")
+            .isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> withStatus(OrderStatus.PAID).settleReturn(ReturnOutcome.DELIVERED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> withStatus(OrderStatus.PURCHASE_CONFIRMED).settleReturn(ReturnOutcome.DELIVERED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> requested.settleReturn(null)).isInstanceOf(NullPointerException.class);
+        Order unsaved = new Order(requested.id(), requested.memberId(), OrderStatus.RETURN_REQUESTED, requested.quote(), requested.itemIds(),
+            requested.shippingAddress(), requested.stockReservationId(), requested.paymentDueAt(), SHIPPED_AT, DELIVERED_AT, null, null);
+        assertThatThrownBy(() -> unsaved.settleReturn(ReturnOutcome.DELIVERED)).isInstanceOf(OrderStatusTransitionException.class);
+    }
+
+    @Test
+    @DisplayName("반품 요청 → 배송 완료는 반품 정리만 한다 — 일반 상태 변경은 여전히 거절하고, 어드민 직접 전이(023)도 아니다")
+    void deliveredFromReturnOnlyBySettlement() {
+        Order requested = returnRequested();
+
+        assertThat(OrderStatus.RETURN_REQUESTED.canTransitionTo(OrderStatus.DELIVERED)).isTrue();
+        assertThatThrownBy(() -> requested.changeStatus(OrderStatus.DELIVERED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThat(AdminStatusChangePolicy.decide(requested, OrderStatus.DELIVERED)).isEqualTo(AdminStatusChangePolicy.Decision.NOT_MANUAL);
+        assertThat(AdminStatusChangePolicy.decide(requested, OrderStatus.RETURNED)).isEqualTo(AdminStatusChangePolicy.Decision.NOT_MANUAL);
+        assertThat(AdminStatusChangePolicy.manualTargets(requested)).isEmpty();
+        assertThat(requested.autoConfirmPurchase(DELIVERED_AT.plusSeconds(1))).as("반품 요청 중에는 자동 구매 확정하지 않는다").isSameAs(requested);
+    }
+
+    private static Order returnRequested() {
+        Order order = placed();
+        return new Order(order.id(), order.memberId(), OrderStatus.RETURN_REQUESTED, order.quote(), order.itemIds(), order.shippingAddress(),
+            order.stockReservationId(), order.paymentDueAt(), SHIPPED_AT, DELIVERED_AT, Instant.EPOCH, 5L);
     }
 }

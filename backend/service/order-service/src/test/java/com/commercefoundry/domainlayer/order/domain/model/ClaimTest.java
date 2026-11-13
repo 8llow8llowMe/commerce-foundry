@@ -199,11 +199,11 @@ class ClaimTest {
     }
 
     @ParameterizedTest
-    @EnumSource(Claim.Status.class)
+    @EnumSource(value = Claim.Status.class, names = "APPROVED", mode = EnumSource.Mode.EXCLUDE)
     @DisplayName("취소 클레임의 다음 시도 시각은 대기 상태(REQUESTED · REFUNDED)에만, 실패 코드는 종결 실패에만 있다 — DB check 와 같다")
     void cancellationAttemptColumnsFollowStatus(Claim.Status status) {
         List<ClaimItem> items = List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER));
-        Instant next = status.isAwaitingAttempt() ? NOW : null;
+        Instant next = Claim.Type.CANCELLATION.isAwaitingAttempt(status) ? NOW : null;
         String code = status.isFailed() ? "PAYMENT_016" : null;
 
         assertThat(cancellation(status, next, code, items).status()).isEqualTo(status);
@@ -376,6 +376,231 @@ class ClaimTest {
         assertThatThrownBy(() -> refundFailed.completeByAdmin(decision)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> requested().completeByAdmin(decision)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> failed.completeByAdmin(null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("반품 승인 — 저장된 REQUESTED 반품만 APPROVED 로 가고, 환불액 · 차감액 · 통화는 정책 결과 하나에서, 다음 시각은 now + lease(마이크로초)다 (#17 B1)")
+    void approveReturn() {
+        Claim requested = returnRequested();
+
+        Claim approved = requested.approveReturn(paidOrder(), 77L, new ReturnRefundPolicy.Refund(10_000, 3_000, CurrencyCode.KRW), true, 9, NOW, LEASE);
+
+        assertThat(approved.status()).isEqualTo(Claim.Status.APPROVED);
+        assertThat(approved.expectedRefund()).as("정책 금액 − 차감액").isEqualTo(krw(7_000));
+        assertThat(approved.paymentId()).isEqualTo(77L);
+        assertThat(approved.approval()).isEqualTo(new Claim.ReturnApproval(true, krw(3_000), 9, NOW));
+        assertThat(approved.approval().approvedAt()).isEqualTo(Instant.parse("2026-11-06T00:00:00.123456Z"));
+        assertThat(approved.attemptCount()).isZero();
+        assertThat(approved.nextAttemptAt()).isEqualTo(Instant.parse("2026-11-06T00:02:00.123456Z"));
+        assertThat(approved.failureCode()).isNull();
+        assertThat(approved.isAwaitingAttempt()).isTrue();
+        assertThat(approved.isAwaitingRefund()).isTrue();
+        assertThat(approved.hasRecordedRefund()).isFalse();
+        assertThat(approved.refundDeadlineBase()).as("반품의 결제 취소 키 기한은 승인 시각부터").isEqualTo(approved.approval().approvedAt());
+        assertThat(approved).usingRecursiveComparison().comparingOnlyFields("id", "orderId", "requestKey", "type", "items", "requestedAt", "version")
+            .isEqualTo(requested);
+    }
+
+    @Test
+    @DisplayName("반품 승인은 반품 · 저장된 REQUESTED · 이 반품의 저장된 주문 · 0보다 큰 환불액(정책 − 차감) · 주문 통화 · 결제 총액 이하 · 양수 lease 만 받는다")
+    void approveReturnRejections() {
+        Claim requested = returnRequested();
+        Order order = paidOrder();
+        ReturnRefundPolicy.Refund refund = new ReturnRefundPolicy.Refund(100, 0, CurrencyCode.KRW);
+
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(100, 100, CurrencyCode.KRW), true, 9, NOW, LEASE))
+            .as("정책 금액 = 차감액이면 0 원").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(-1_000, 0, CurrencyCode.KRW), true, 9, NOW, LEASE))
+            .as("음수 정책 금액").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(100, 0, CurrencyCode.USD), true, 9, NOW, LEASE))
+            .as("주문과 다른 통화").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(28_001, 1, CurrencyCode.KRW), true, 9, NOW, LEASE))
+            .as("결제 총액 28,000 을 넘는 정책 금액").isInstanceOf(IllegalArgumentException.class);
+        assertThat(requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(28_000, 0, CurrencyCode.KRW), true, 9, NOW, LEASE).expectedRefund())
+            .as("결제 총액까지는 받는다").isEqualTo(krw(28_000));
+        assertThatThrownBy(() -> requested.approveReturn(order, 0L, refund, true, 9, NOW, LEASE)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, refund, true, 0, NOW, LEASE)).as("승인자 0").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, refund, true, 9, NOW, Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
+        Order other = new Order(2L, order.memberId(), order.status(), order.quote(), order.itemIds(), order.shippingAddress(), order.stockReservationId(),
+            order.paymentDueAt(), null, null, Instant.EPOCH, 2L);
+        assertThatThrownBy(() -> requested.approveReturn(other, 77L, refund, true, 9, NOW, LEASE)).as("다른 주문").isInstanceOf(IllegalArgumentException.class);
+        Order missingItem = new Order(1L, order.memberId(), order.status(), order.quote(), List.of(98L, 99L), order.shippingAddress(), order.stockReservationId(),
+            order.paymentDueAt(), null, null, Instant.EPOCH, 2L);
+        assertThatThrownBy(() -> requested.approveReturn(missingItem, 77L, refund, true, 9, NOW, LEASE)).as("주문에 없는 항목")
+            .isInstanceOf(IllegalArgumentException.class);
+        Order unsavedOrder = new Order(1L, order.memberId(), order.status(), order.quote(), order.itemIds(), order.shippingAddress(), order.stockReservationId(),
+            order.paymentDueAt(), null, null, null, null);
+        assertThatThrownBy(() -> requested.approveReturn(unsavedOrder, 77L, refund, true, 9, NOW, LEASE)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> requested.approveReturn(null, 77L, refund, true, 9, NOW, LEASE)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, null, true, 9, NOW, LEASE)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, refund, true, 9, null, LEASE)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> requested.approveReturn(order, 77L, refund, true, 9, NOW, null)).isInstanceOf(NullPointerException.class);
+        Claim approved = requested.approveReturn(order, 77L, refund, true, 9, NOW, LEASE);
+        assertThatThrownBy(() -> approved.approveReturn(order, 77L, refund, true, 9, NOW, LEASE)).as("이미 승인").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested.rejectReturn().approveReturn(order, 77L, refund, true, 9, NOW, LEASE)).as("거절 뒤")
+            .isInstanceOf(IllegalStateException.class);
+        Claim unsaved = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null, requested.items(), null, null);
+        assertThatThrownBy(() -> unsaved.approveReturn(order, 77L, refund, true, 9, NOW, LEASE)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested().approveReturn(order, 77L, refund, true, 9, NOW, LEASE)).as("취소 클레임").isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("반품 거절 — 저장된 REQUESTED 반품만 REJECTED(끝 — 다음 시각 · 결제 · 승인 없음)로 간다. 취소 클레임 · 거절 뒤 · 저장 전은 거절하지 않는다 (#17 B1)")
+    void rejectReturn() {
+        Claim requested = returnRequested();
+
+        Claim rejected = requested.rejectReturn();
+
+        assertThat(rejected.status()).isEqualTo(Claim.Status.REJECTED);
+        assertThat(rejected.paymentId()).isNull();
+        assertThat(rejected.approval()).isNull();
+        assertThat(rejected.nextAttemptAt()).isNull();
+        assertThat(rejected.isAwaitingAttempt()).isFalse();
+        assertThat(rejected.isAwaitingRefund()).isFalse();
+        assertThat(rejected.hasRecordedRefund()).isFalse();
+        assertThat(rejected.version()).isEqualTo(requested.version());
+        assertThatThrownBy(rejected::rejectReturn).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requested().rejectReturn()).isInstanceOf(IllegalStateException.class);
+        Claim unsaved = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null, requested.items(), null, null);
+        assertThatThrownBy(unsaved::rejectReturn).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("대기 판정은 유형을 본다 — 환불 대기는 취소 REQUESTED · 반품 APPROVED, 복원 대기는 둘 다 REFUNDED 다")
+    void awaitingAttemptDependsOnType() {
+        for (Claim.Status status : Claim.Status.values()) {
+            assertThat(Claim.Type.CANCELLATION.isAwaitingAttempt(status)).as("취소 %s", status)
+                .isEqualTo(status == Claim.Status.REQUESTED || status == Claim.Status.REFUNDED);
+            assertThat(Claim.Type.RETURN.isAwaitingAttempt(status)).as("반품 %s", status)
+                .isEqualTo(status == Claim.Status.APPROVED || status == Claim.Status.REFUNDED);
+        }
+        assertThat(returnRequested().isAwaitingAttempt()).as("승인 전 반품은 시도 대상이 아니다").isFalse();
+        assertThat(returnRequested().isAwaitingRefund()).isFalse();
+        assertThat(requested().isAwaitingAttempt()).isTrue();
+        assertThat(requested().isAwaitingRefund()).isTrue();
+        assertThat(requested().markRefunded(NOW).isAwaitingRefund()).isFalse();
+        assertThat(requested().refundDeadlineBase()).as("취소의 기한 기준은 접수 시각").isEqualTo(NOW);
+        assertThatThrownBy(() -> returnRequested().refundDeadlineBase()).as("승인 전 반품은 기준이 없다").isInstanceOf(IllegalStateException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(Claim.Status.class)
+    @DisplayName("반품 불변식 — 승인 이후(REQUESTED · REJECTED 밖)는 결제 · 승인 기록 · 0보다 큰 환불액이 있고, 다음 시각 · 실패 코드는 상태를 따른다. DB check 와 같다")
+    void returnColumnsFollowStatus(Claim.Status status) {
+        boolean approvedOrLater = status != Claim.Status.REQUESTED && status != Claim.Status.REJECTED;
+        Instant next = Claim.Type.RETURN.isAwaitingAttempt(status) ? NOW : null;
+        String code = status.isFailed() ? "PAYMENT_016" : null;
+        Long payment = approvedOrLater ? 77L : null;
+        Claim.ReturnApproval approval = approvedOrLater ? new Claim.ReturnApproval(true, krw(500), 9, NOW) : null;
+        Money refund = approvedOrLater ? krw(1_000) : null;
+
+        assertThat(returnClaim(status, refund, payment, next, code, approval).status()).isEqualTo(status);
+        assertThatThrownBy(() -> returnClaim(status, refund, payment, next == null ? NOW : null, code, approval)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> returnClaim(status, refund, payment, next, code == null ? "PAYMENT_016" : null, approval))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> returnClaim(status, refund, payment == null ? 77L : null, next, code, approval)).isInstanceOf(IllegalArgumentException.class);
+        Claim.ReturnApproval flipped = approval == null ? new Claim.ReturnApproval(true, krw(500), 9, NOW) : null;
+        assertThatThrownBy(() -> returnClaim(status, refund, payment, next, code, flipped)).isInstanceOf(IllegalArgumentException.class);
+        if (approvedOrLater) {
+            assertThatThrownBy(() -> returnClaim(status, null, payment, next, code, approval)).as("환불액 없음").isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> returnClaim(status, krw(0), payment, next, code, approval)).as("0 원").isInstanceOf(IllegalArgumentException.class);
+            Claim.ReturnApproval usd = new Claim.ReturnApproval(true, Money.of(1, CurrencyCode.USD), 9, NOW);
+            assertThatThrownBy(() -> returnClaim(status, refund, payment, next, code, usd)).as("차감 통화").isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("취소 클레임은 APPROVED · 승인 기록을 두지 않는다 — 거절 상태 취소는 막지 않는다(A4 몫)")
+    void typeSpecificInvariants() {
+        List<ClaimItem> items = List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER));
+        assertThatThrownBy(() -> cancellation(Claim.Status.APPROVED, NOW, null, items)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.REQUESTED, krw(1_000), 77L, 0, NOW, null, null,
+            new Claim.ReturnApproval(true, krw(0), 9, NOW), items, NOW, 0L)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(cancellation(Claim.Status.REJECTED, null, null, items).status()).isEqualTo(Claim.Status.REJECTED);
+    }
+
+    @Test
+    @DisplayName("운영자 결정은 DB ck_claim_admin_decision 과 같다 — 접수 반품에는 없고, 직전 실패 코드 없는 결정은 거절에만 있다. B2 가 쓴 반품 결정은 읽을 수 있다 (#17 B1)")
+    void decisionShapeMatchesDatabase() {
+        Claim.Decision withCode = new Claim.Decision("검수 확인", 9, NOW, "PAYMENT_016");
+        Claim.Decision rejection = new Claim.Decision("검수 불합격", 9, NOW, null);
+        List<ClaimItem> returnItems = returnRequested().items();
+        List<ClaimItem> cancelItems = List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER));
+
+        assertThatThrownBy(() -> new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null, null, 0, null, null, withCode,
+            returnItems, NOW, 0L)).as("접수 반품의 결정").isInstanceOf(IllegalArgumentException.class);
+        Claim rejectedReturn = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REJECTED, null, null, 0, null, null, rejection,
+            returnItems, NOW, 0L);
+        assertThat(rejectedReturn.decision()).as("B2 거절 사유(직전 실패 코드 없음)를 읽는다 — B2 → B1 롤백").isEqualTo(rejection);
+        assertThat(rejectedReturn.reservesReturnQuantity()).isFalse();
+        Claim failedReturn = returnClaim(Claim.Status.REFUND_FAILED, krw(1_000), 77L, null, "PAYMENT_016", new Claim.ReturnApproval(true, krw(0), 9, NOW));
+        assertThat(new Claim(failedReturn.id(), failedReturn.orderId(), failedReturn.requestKey(), failedReturn.type(), failedReturn.status(),
+            failedReturn.expectedRefund(), failedReturn.paymentId(), 0, null, "PAYMENT_016", withCode, failedReturn.approval(), failedReturn.items(), NOW, 0L)
+            .decision()).as("승인 뒤 반품의 수습 결정").isEqualTo(withCode);
+        assertThatThrownBy(() -> new Claim(failedReturn.id(), failedReturn.orderId(), failedReturn.requestKey(), failedReturn.type(), failedReturn.status(),
+            failedReturn.expectedRefund(), failedReturn.paymentId(), 0, null, "PAYMENT_016", rejection, failedReturn.approval(), failedReturn.items(), NOW, 0L))
+            .as("거절이 아닌 반품의 실패 코드 없는 결정").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.REQUESTED, krw(1_000), 77L, 0, NOW, null, rejection,
+            cancelItems, NOW, 0L)).as("거절이 아닌 취소의 실패 코드 없는 결정").isInstanceOf(IllegalArgumentException.class);
+        assertThat(new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.REJECTED, krw(1_000), 77L, 0, null, null, rejection,
+            cancelItems, NOW, 0L).decision()).as("취소 거절 결정(A4)").isEqualTo(rejection);
+        assertThat(new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.REQUESTED, krw(1_000), 77L, 0, NOW, null, withCode,
+            cancelItems, NOW, 0L).decision()).as("취소 클레임 결정은 그대로").isEqualTo(withCode);
+    }
+
+    @ParameterizedTest
+    @EnumSource(Claim.Status.class)
+    @DisplayName("반품 술어 — 수량을 잡는 반품 = 정산된 반품 + 열린 반품(서로 겹치지 않음) = 거절 밖 전부, 환불 진행 중은 승인 · 환불 실패. 취소 클레임은 모두 아니다")
+    void returnPredicates(Claim.Status status) {
+        boolean approvedOrLater = status != Claim.Status.REQUESTED && status != Claim.Status.REJECTED;
+        Claim claim = returnClaim(status, approvedOrLater ? krw(1_000) : null, approvedOrLater ? 77L : null, Claim.Type.RETURN.isAwaitingAttempt(status) ? NOW : null,
+            status.isFailed() ? "PAYMENT_016" : null, approvedOrLater ? new Claim.ReturnApproval(true, krw(0), 9, NOW) : null);
+
+        assertThat(claim.reservesReturnQuantity()).isEqualTo(status != Claim.Status.REJECTED)
+            .isEqualTo(Claim.returnQuantityReservingStatuses().contains(status)).isEqualTo(claim.isSettledReturn() || claim.isOpenReturn());
+        assertThat(claim.isSettledReturn() && claim.isOpenReturn()).isFalse();
+        assertThat(claim.isSettledReturn()).isEqualTo(claim.hasRecordedRefund());
+        assertThat(claim.isOpenReturn()).isEqualTo(status == Claim.Status.REQUESTED || status == Claim.Status.APPROVED || status == Claim.Status.REFUND_FAILED);
+        assertThat(claim.isReturnRefundInFlight()).isEqualTo(status == Claim.Status.APPROVED || status == Claim.Status.REFUND_FAILED);
+        if (status != Claim.Status.APPROVED) {
+            Claim cancellation = cancellation(status, Claim.Type.CANCELLATION.isAwaitingAttempt(status) ? NOW : null, status.isFailed() ? "PAYMENT_016" : null,
+                List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER)));
+            assertThat(List.of(cancellation.reservesReturnQuantity(), cancellation.isSettledReturn(), cancellation.isOpenReturn(),
+                cancellation.isReturnRefundInFlight())).containsOnly(false);
+        }
+    }
+
+    @Test
+    @DisplayName("반품 승인 기록 — 관리자 양수 · 차감액 · 시각이 있어야 하고 시각은 마이크로초로 자른다")
+    void returnApprovalValidation() {
+        assertThat(new Claim.ReturnApproval(false, krw(0), 1, NOW).approvedAt()).isEqualTo(Instant.parse("2026-11-06T00:00:00.123456Z"));
+        assertThatThrownBy(() -> new Claim.ReturnApproval(true, krw(0), 0, NOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Claim.ReturnApproval(true, null, 1, NOW)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> new Claim.ReturnApproval(true, krw(0), 1, null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("승인된 반품도 B1 에서는 취소 수명 전이(환불 확정 · 실패 · 재시도 · 선점 · 다시 열기 · 수동 결정)를 하지 않는다 — B2 에서 연다")
+    void approvedReturnDoesNotUseCancellationTransitionsYet() {
+        Claim approved = returnRequested().approveReturn(paidOrder(), 77L, new ReturnRefundPolicy.Refund(100, 0, CurrencyCode.KRW), true, 9, NOW, LEASE);
+
+        assertThatThrownBy(() -> approved.markRefunded(NOW)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> approved.markConfirmedRefund(NOW)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> approved.failRefund("PAYMENT_016")).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> approved.retryLater(NOW, MINUTE, HOUR)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> approved.holdUntil(NOW)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> approved.reopen(NOW, 0)).isInstanceOf(IllegalStateException.class);
+        assertThat(approved.hasSameRefundRequest(approved)).as("환불 지문은 아직 취소만").isFalse();
+    }
+
+    private static Claim returnRequested() {
+        return new Claim(600, 1, UUID.fromString("00000000-0000-0000-0000-000000000600"), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+            List.of(new ClaimItem(601, 11, 1, ClaimItem.Reason.CHANGE_OF_MIND)), NOW, 3L);
+    }
+
+    private static Claim returnClaim(Claim.Status status, Money refund, Long paymentId, Instant next, String failureCode, Claim.ReturnApproval approval) {
+        return new Claim(600, 1, UUID.randomUUID(), Claim.Type.RETURN, status, refund, paymentId, 0, next, failureCode, null, approval,
+            List.of(new ClaimItem(601, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
     }
 
     private static Claim cancellation(Claim.Status status, Instant next, String failureCode, List<ClaimItem> items) {

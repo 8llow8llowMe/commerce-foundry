@@ -84,7 +84,7 @@ public abstract class ClaimAdminQueryContract {
         "/api/v1/admin/claims?page=2147483647&size=100 | ORDER_167",
         "/api/v1/admin/claims?orderId=0 | ORDER_141",
         "/api/v1/admin/claims?type=CANCEL | ORDER_198",
-        "/api/v1/admin/claims?status=APPROVED | ORDER_198",
+        "/api/v1/admin/claims?status=UNKNOWN | ORDER_198",
         "/api/v1/admin/claims/0 | ORDER_166",
         "/api/v1/admin/claims/not-an-id | ORDER_198"
     })

@@ -24,7 +24,7 @@ class OrderStatusTransitionTest {
         Map.entry(OrderStatus.PURCHASE_CONFIRMED, EnumSet.noneOf(OrderStatus.class)),
         Map.entry(OrderStatus.CANCEL_REQUESTED, EnumSet.of(OrderStatus.CANCELED)),
         Map.entry(OrderStatus.CANCELED, EnumSet.noneOf(OrderStatus.class)),
-        Map.entry(OrderStatus.RETURN_REQUESTED, EnumSet.of(OrderStatus.RETURNED)),
+        Map.entry(OrderStatus.RETURN_REQUESTED, EnumSet.of(OrderStatus.RETURNED, OrderStatus.DELIVERED)),
         Map.entry(OrderStatus.RETURNED, EnumSet.noneOf(OrderStatus.class)));
 
     @ParameterizedTest

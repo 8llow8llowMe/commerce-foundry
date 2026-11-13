@@ -29,7 +29,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * 직전 운영 형태(동결 7c5c0a6f 스냅숏 + C2b ALTER = develop 84eee730 의 스냅숏)에 반품 행을 넣고 1단계 {@code ddl/claim-cancellation.sql} →
- * 이전 앱 모양의 INSERT(attempt_count 생략) → 2단계 {@code ddl/claim-cancellation-cleanup.sql} 을 적용한 뒤 (#16 PR-2a-1) 엔티티 검증({@code validate})이 통과하고,
+ * 이전 앱 모양의 INSERT(attempt_count 생략) → 2단계 {@code ddl/claim-cancellation-cleanup.sql} → #17 A1 {@code ddl/claim-admin-decision.sql} →
+ * #17 B1 {@code ddl/claim-return-approval.sql} 을 적용한 뒤 엔티티 검증({@code validate})이 통과하고,
  * claim · claim_item 의 열 · 제약 · 인덱스 · 코멘트가 새 스냅숏({@code ddl/order-schema.sql})으로 만든 DB 와 같은지 본다.
  */
 @DataJpaTest
@@ -69,6 +70,11 @@ class ClaimCancellationSchemaUpgradePostgresTest {
             jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, version, created_at, updated_at) "
                 + "values (16, 103, ?, 'RETURN', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID());
             jdbc.update("update orders.claim set version = version + 1 where id = ?", LEGACY_CLAIM_ID);
+            run(source, "ddl/claim-return-approval.sql");
+            // #17 B1 뒤 롤링 · 롤백 중 승인 칸을 모르는 B1 이전 앱의 반품 INSERT · UPDATE 도 새 check 를 통과한다
+            jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, version, created_at, updated_at) "
+                + "values (17, 104, ?, 'RETURN', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID());
+            jdbc.update("update orders.claim set version = version + 1 where id = ?", ROLLING_CLAIM_ID);
             jdbc.execute("create database fresh");
             run(new DriverManagerDataSource(database.getJdbcUrl().replace("/" + database.getDatabaseName(), "/fresh"), database.getUsername(),
                 database.getPassword()), "ddl/order-schema.sql");
@@ -139,5 +145,26 @@ class ClaimCancellationSchemaUpgradePostgresTest {
         assertThatThrownBy(() -> jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, version, created_at, updated_at) "
             + "values (23, 100, ?, 'CANCELLATION', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID()))
             .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void returnApprovalMigrationKeepsLegacyReturnsAndEnforcesApprovalChecks() {
+        // #17 B1 — 기존 반품 행은 승인 칸 없이 그대로이고, 승인 칸 없는 승인 · 승인 전 결제 · 취소 승인은 막는다
+        assertThat(jdbc.queryForObject("select count(*) from orders.claim where id in (?, ?, 16, 17) and type = 'RETURN' and status = 'REQUESTED' "
+            + "and approved_at is null and approved_by_member_id is null and restock is null and deduction_amount is null", Long.class,
+            LEGACY_CLAIM_ID, ROLLING_CLAIM_ID)).isEqualTo(4);
+        assertThatThrownBy(() -> jdbc.update("update orders.claim set payment_id = 77 where id = ?", LEGACY_CLAIM_ID))
+            .as("승인 전 반품의 결제 아이디").isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("update orders.claim set status = 'APPROVED', payment_id = 77, expected_refund_amount = 900, "
+            + "expected_refund_currency = 'KRW', next_attempt_at = now() where id = ?", LEGACY_CLAIM_ID)).as("승인 칸 없는 승인")
+            .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(jdbc.update("update orders.claim set status = 'APPROVED', payment_id = 77, expected_refund_amount = 900, expected_refund_currency = 'KRW', "
+            + "next_attempt_at = now(), approved_at = now(), approved_by_member_id = 9, restock = true, deduction_amount = 100 where id = ?", 17L)).isEqualTo(1);
+        assertThatThrownBy(() -> jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, expected_refund_amount, "
+            + "expected_refund_currency, payment_id, attempt_count, version, created_at, updated_at) values (24, 100, ?, 'CANCELLATION', 'APPROVED', 1000, "
+            + "'KRW', 77, 0, 0, now(), now())", UUID.randomUUID())).as("취소 승인 없음").isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, decision_reason, decided_by_member_id, "
+            + "decided_at, version, created_at, updated_at) values (18, 105, ?, 'RETURN', 'REJECTED', 0, '검수 불합격', 9, now(), 0, now(), now())", UUID.randomUUID()))
+            .as("반품 거절 결정은 직전 실패 코드 없이 받는다(B2 가 쓰고 B1 도메인은 읽기만)").isEqualTo(1);
     }
 }

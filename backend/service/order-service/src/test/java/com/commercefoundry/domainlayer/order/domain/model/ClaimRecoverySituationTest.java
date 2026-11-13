@@ -20,7 +20,7 @@ class ClaimRecoverySituationTest {
 
     private static Claim cancellation(Claim.Status status, String failure, int attempts) {
         return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, attempts,
-            status.isAwaitingAttempt() ? NOW : null, failure, ITEMS, NOW, 4L);
+            Claim.Type.CANCELLATION.isAwaitingAttempt(status) ? NOW : null, failure, ITEMS, NOW, 4L);
     }
 
     @ParameterizedTest(name = "{0} → {1}")
@@ -94,6 +94,19 @@ class ClaimRecoverySituationTest {
             List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
 
         assertThat(ClaimRecoverySituation.of(returned)).isEqualTo(ClaimRecoverySituation.NO_ACTION);
+    }
+
+    @Test
+    @DisplayName("거절된 취소(A4 몫)와 승인 · 거절된 반품도 조치 필요 없음이다 — 반품 수습 화면은 B2 에서 연다 (#17 B1)")
+    void newStatusesHaveNoRecoverySituation() {
+        Claim requested = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+            List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.CHANGE_OF_MIND)), NOW, 0L);
+        Claim approved = new Claim(2, 1, requested.requestKey(), Claim.Type.RETURN, Claim.Status.APPROVED, krw(1_000), 77L, 0, NOW, null, null,
+            new Claim.ReturnApproval(false, krw(500), 9, NOW), requested.items(), NOW, 0L);
+
+        assertThat(ClaimRecoverySituation.of(cancellation(Claim.Status.REJECTED, null, 0))).isEqualTo(ClaimRecoverySituation.NO_ACTION);
+        assertThat(ClaimRecoverySituation.of(approved)).isEqualTo(ClaimRecoverySituation.NO_ACTION);
+        assertThat(ClaimRecoverySituation.of(requested.rejectReturn())).isEqualTo(ClaimRecoverySituation.NO_ACTION);
     }
 
     @ParameterizedTest

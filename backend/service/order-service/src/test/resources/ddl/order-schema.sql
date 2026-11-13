@@ -82,11 +82,14 @@
         id bigint not null,
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
+        approved_at timestamp(6) with time zone,
+        approved_by_member_id bigint,
         attempt_count integer not null,
         decided_at timestamp(6) with time zone,
         decided_by_member_id bigint,
         decision_failure_code varchar(40),
         decision_reason varchar(200),
+        deduction_amount bigint,
         expected_refund_amount bigint,
         expected_refund_currency varchar(3) check ((expected_refund_currency in ('KRW','USD'))),
         failure_code varchar(40),
@@ -94,7 +97,8 @@
         order_id bigint not null,
         payment_id bigint,
         request_key uuid not null,
-        status varchar(20) not null check ((status in ('REQUESTED','REFUNDED','COMPLETED','REFUND_FAILED','RESTORATION_FAILED'))),
+        restock boolean,
+        status varchar(20) not null check ((status in ('REQUESTED','APPROVED','REFUNDED','COMPLETED','REJECTED','REFUND_FAILED','RESTORATION_FAILED'))),
         type varchar(20) not null check ((type in ('RETURN','CANCELLATION'))),
         version bigint not null,
         primary key (id),
@@ -103,10 +107,13 @@
         constraint ck_claim_expected_refund_pair check ((expected_refund_amount is null and expected_refund_currency is null) or (expected_refund_amount is not null and expected_refund_currency is not null and expected_refund_amount >= 0)),
         constraint ck_claim_attempt_count_non_negative check (attempt_count >= 0),
         constraint ck_claim_cancellation_payment check (type <> 'CANCELLATION' or (payment_id is not null and payment_id > 0 and expected_refund_amount is not null and expected_refund_amount > 0)),
-        constraint ck_claim_payment_cancellation_only check (type = 'CANCELLATION' or payment_id is null),
+        constraint ck_claim_cancellation_not_approved check (type <> 'CANCELLATION' or status <> 'APPROVED'),
+        constraint ck_claim_return_approval check ((type = 'RETURN' and status not in ('REQUESTED', 'REJECTED') and payment_id is not null and payment_id > 0 and expected_refund_amount is not null and expected_refund_amount > 0 and approved_at is not null and approved_by_member_id is not null and approved_by_member_id > 0 and restock is not null and deduction_amount is not null and deduction_amount >= 0) or ((type <> 'RETURN' or (status in ('REQUESTED', 'REJECTED') and payment_id is null)) and approved_at is null and approved_by_member_id is null and restock is null and deduction_amount is null)),
         constraint ck_claim_cancellation_next_attempt check (type <> 'CANCELLATION' or ((status in ('REQUESTED', 'REFUNDED')) = (next_attempt_at is not null))),
+        constraint ck_claim_return_next_attempt check (type <> 'RETURN' or ((status in ('APPROVED', 'REFUNDED')) = (next_attempt_at is not null))),
         constraint ck_claim_cancellation_failure_code check (type <> 'CANCELLATION' or ((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))),
-        constraint ck_claim_admin_decision check ((decision_reason is null and decided_by_member_id is null and decided_at is null and decision_failure_code is null) or (type = 'CANCELLATION' and decision_reason is not null and length(trim(decision_reason)) > 0 and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null and decision_failure_code is not null and length(trim(decision_failure_code)) > 0))
+        constraint ck_claim_return_failure_code check (type <> 'RETURN' or ((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))),
+        constraint ck_claim_admin_decision check ((decision_reason is null and decided_by_member_id is null and decided_at is null and decision_failure_code is null) or ((type = 'CANCELLATION' or status <> 'REQUESTED') and decision_reason is not null and length(trim(decision_reason)) > 0 and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null and ((decision_failure_code is not null and length(trim(decision_failure_code)) > 0) or (decision_failure_code is null and status = 'REJECTED'))))
     );
 
     comment on table orders.claim is
@@ -120,6 +127,12 @@
 
     comment on column orders.claim.updated_at is
         '수정 시각';
+
+    comment on column orders.claim.approved_at is
+        '반품 승인 시각 — 반품 환불의 결제 취소 키 기한 기준. 승인 이후 반품에만';
+
+    comment on column orders.claim.approved_by_member_id is
+        '반품 승인 관리자 아이디 (외부 FK: auth-service member.id). 승인 이후 반품에만';
 
     comment on column orders.claim.attempt_count is
         '지금 단계(환불 · 재고 복원)의 미확정 재시도 횟수';
@@ -135,6 +148,9 @@
 
     comment on column orders.claim.decision_reason is
         '마지막 운영자 수습 사유. 개인정보 입력 금지';
+
+    comment on column orders.claim.deduction_amount is
+        '반품 정책 금액에서 뺀 최소 단위 금액 (반품 배송비 등, 통화는 expected_refund_currency). 승인 이후 반품에만';
 
     comment on column orders.claim.expected_refund_amount is
         '예상 환불 최소 단위 금액 (미산정이면 null)';
@@ -152,13 +168,16 @@
         '주문 아이디 (FK: orders.id)';
 
     comment on column orders.claim.payment_id is
-        '환불할 결제 아이디 (외부 FK: payment-service payment.id). 취소 클레임에만';
+        '환불할 결제 아이디 (외부 FK: payment-service payment.id). 취소 클레임 · 승인 이후 반품에만';
 
     comment on column orders.claim.request_key is
         '주문별 멱등 접수 키 (UUID). 전체 취소는 주문 아이디로 만든 결정적 키';
 
+    comment on column orders.claim.restock is
+        '검수 뒤 재고로 되돌릴지. 승인 이후 반품에만';
+
     comment on column orders.claim.status is
-        '클레임 상태 (REQUESTED / REFUNDED / COMPLETED / REFUND_FAILED / RESTORATION_FAILED)';
+        '클레임 상태 (REQUESTED / APPROVED / REFUNDED / COMPLETED / REJECTED / REFUND_FAILED / RESTORATION_FAILED)';
 
     comment on column orders.claim.type is
         '클레임 유형 (RETURN / CANCELLATION)';

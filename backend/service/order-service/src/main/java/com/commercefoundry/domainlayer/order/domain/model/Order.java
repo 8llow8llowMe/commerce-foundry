@@ -114,6 +114,7 @@ public record Order(
      *
      * 결제 전 취소(결제 대기 → 취소 완료)는 이 메서드로 하지 않는다 — 재고 해제 이벤트가 따라가야 해 {@link #cancelBeforePayment()} 를 쓴다(#16).
      * 출고(배송 중) · 배송 완료도 이 메서드로 하지 않는다 — 시각을 함께 남겨야 해 {@link #ship(Instant)} · {@link #deliver(Instant)} 를 쓴다(#18).
+     * 반품 요청 → 배송 완료 복귀도 마찬가지로 {@link #settleReturn(ReturnRefundPolicy.ReturnOutcome)} 만 한다(#17 B1).
      *
      * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문 · 결제 전 취소 · 출고 · 배송 완료
      */
@@ -169,6 +170,27 @@ public record Order(
             return this;
         }
         return transitionTo(OrderStatus.PURCHASE_CONFIRMED);
+    }
+
+    /**
+     * 반품 정리 (#17 B1) — 반품 요청 주문을 {@link ReturnRefundPolicy#outcome} 이 판정한 상태로 바꾼다. 반품 완료(전량 환불) 또는 배송 완료(열린 반품 없이
+     * 일부만 환불 · 전부 거절)로 가고, 배송 완료 시각 · 출고 시각은 그대로 둔다. 이미 그 상태면(반품 요청 유지 포함) 바꾸지 않은 이 값을 돌려준다.
+     * 목표는 정책 결과 {@link ReturnRefundPolicy.ReturnOutcome} 으로만 받는다 — 주문은 클레임을 읽지 않는다.
+     *
+     * <p>배송 완료로 돌아가는 전이는 이 메서드만 한다 — {@link #changeStatus} 는 여전히 배송 완료를 거절하고, 어드민 직접 전이({@link AdminStatusChangePolicy})에도 없다.
+     *
+     * @throws OrderStatusTransitionException 반품 요청이 아닌 상태에서의 전이 · 저장 전 주문
+     */
+    public Order settleReturn(ReturnRefundPolicy.ReturnOutcome outcome) {
+        Objects.requireNonNull(outcome, "outcome");
+        OrderStatus next = outcome.getOrderStatus();
+        if (status == next) {
+            return this;
+        }
+        if (isNew() || status != OrderStatus.RETURN_REQUESTED) {
+            throw new OrderStatusTransitionException(status, next);
+        }
+        return transitionTo(next);
     }
 
     /** 맞춤 제작 항목이 하나라도 있는가 — 제작 중(MAKING) 단계는 이런 주문만 거친다 ({@code order-flow-guide.md} §1). */
