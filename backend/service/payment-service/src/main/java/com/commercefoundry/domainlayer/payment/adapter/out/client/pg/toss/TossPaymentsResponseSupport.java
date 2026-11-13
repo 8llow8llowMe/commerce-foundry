@@ -296,30 +296,32 @@ public class TossPaymentsResponseSupport {
      *   <li>결제 상태가 DONE · PARTIAL_CANCELED · CANCELED 밖이거나, 잔액과 맞지 않음(잔액 = 결제액 ↔ DONE, 0 ↔ CANCELED, 사이 ↔ PARTIAL_CANCELED) → 모름</li>
      *   <li>잔액 ≠ 기대 잔액 → 불일치 (원장에 없는 환불)</li>
      * </ul>
+     * 일치 · 불일치에만 PG 가 답한 잔액(관측 잔액, #693)을 싣는다 — 신원 · 총액 · 이력 검증과 상태-잔액 일치를 통과한 값이라 외부 환불액 계산의 근거가 된다.
+     * 모름에는 싣지 않는다(검증을 통과하지 못한 잔액은 근거가 아니다).
      */
     public PgRetentionQueryResult retentionInquiry(Payment payment, Money expectedBalance, Supplier<byte[]> remoteCall) {
         Exchange exchanged = exchange(remoteCall);
         if (!(exchanged instanceof Exchange.Success success)) {
             log.warn("toss retention inquiry got no answer. pgOrderId={}, outcome={}", payment.pgOrderId(), exchanged.getClass().getSimpleName());
-            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
+            return PgRetentionQueryResult.unknown();
         }
         TossPaymentResponse response;
         try {
             response = cancellationResponse(payment, success.body());
         } catch (RuntimeException exception) {
             log.error("toss retention inquiry violates contract. pgOrderId={}, type={}", payment.pgOrderId(), exception.getClass().getSimpleName());
-            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
+            return PgRetentionQueryResult.unknown();
         }
         Money balance = Money.ofMajorUnit(response.balanceAmount(), payment.amount().currency());
         if (!statusForBalance(payment.amount(), balance).equals(response.status())) {
             log.warn("toss retention inquiry status disagrees with balance. pgOrderId={}, status={}", payment.pgOrderId(), response.status());
-            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.UNKNOWN);
+            return PgRetentionQueryResult.unknown();
         }
         if (!balance.equals(expectedBalance)) {
             log.warn("toss balance differs from ledger. pgOrderId={}, status={}", payment.pgOrderId(), response.status());
-            return PgRetentionQueryResult.of(PgRetentionQueryResult.State.MISMATCHED);
+            return PgRetentionQueryResult.mismatched(balance);
         }
-        return PgRetentionQueryResult.of(PgRetentionQueryResult.State.MATCHED);
+        return PgRetentionQueryResult.matched(balance);
     }
 
     private static String statusForBalance(Money total, Money balance) {

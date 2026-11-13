@@ -721,25 +721,25 @@ class TossPaymentGatewayAdapterWireMockTest {
         void untouchedPaymentMatches() {
             stubPaymentKeyInquiry(200, retention("DONE", 129000, "[]"));
 
-            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.MATCHED);
+            assertThat(inquire(krw(129000))).isEqualTo(PgRetentionQueryResult.matched(krw(129000)));
             TOSS.verify(1, getRequestedFor(urlEqualTo(PAYMENT_KEY_INQUIRY_PATH)).withHeader("Authorization", equalTo(EXPECTED_AUTHORIZATION)));
         }
 
         @Test
-        @DisplayName("부분 취소 뒤 잔액이 원장 기대와 같으면 일치, 원장이 그 취소를 모르면 불일치")
+        @DisplayName("부분 취소 뒤 잔액이 원장 기대와 같으면 일치, 원장이 그 취소를 모르면 불일치 — 두 경우 모두 PG 관측 잔액(#693)을 싣는다")
         void partialCancellationMatchesOnlyLedgerBalance() {
             stubPaymentKeyInquiry(200, retention("PARTIAL_CANCELED", 100000, cancel("txn-1", 29000)));
 
-            assertThat(retention(krw(100000))).isEqualTo(PgRetentionQueryResult.State.MATCHED);
-            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.MISMATCHED);
+            assertThat(inquire(krw(100000))).isEqualTo(PgRetentionQueryResult.matched(krw(100000)));
+            assertThat(inquire(krw(129000))).isEqualTo(PgRetentionQueryResult.mismatched(krw(100000)));
         }
 
         @Test
-        @DisplayName("콘솔 전액 취소처럼 원장에 없는 환불은 불일치")
+        @DisplayName("콘솔 전액 취소처럼 원장에 없는 환불은 불일치 — 관측 잔액 0 이라 원장에 없는 환불액 = 기대 잔액 − 0")
         void externalFullCancellationMismatches() {
             stubPaymentKeyInquiry(200, retention("CANCELED", 0, cancel("external-txn", 129000)));
 
-            assertThat(retention(krw(129000))).isEqualTo(PgRetentionQueryResult.State.MISMATCHED);
+            assertThat(inquire(krw(129000))).isEqualTo(PgRetentionQueryResult.mismatched(krw(0)));
         }
 
         @Test
@@ -748,16 +748,16 @@ class TossPaymentGatewayAdapterWireMockTest {
             stubPaymentKeyInquiry(200, retention("CANCELED", 0,
                 "[" + cancelItem("txn-1", 29000) + "," + cancelItem("txn-2", 100000) + "]"));
 
-            assertThat(retention(krw(0))).isEqualTo(PgRetentionQueryResult.State.MATCHED);
+            assertThat(inquire(krw(0))).isEqualTo(PgRetentionQueryResult.matched(krw(0)));
         }
 
         @ParameterizedTest
         @CsvSource({"CANCELED,129000", "PARTIAL_CANCELED,129000", "ABORTED,129000", "WAITING_FOR_DEPOSIT,129000", "IN_PROGRESS,129000"})
-        @DisplayName("결제 상태가 잔액과 맞지 않거나 대조할 수 없는 상태면 모름 — 환불 증거가 아니다")
+        @DisplayName("결제 상태가 잔액과 맞지 않거나 대조할 수 없는 상태면 모름 — 환불 증거가 아니라 관측 잔액도 싣지 않는다")
         void statusMustAgreeWithBalance(String status, long balance) {
             stubPaymentKeyInquiry(200, retention(status, balance, "[]"));
 
-            assertThat(retention(krw(balance))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
+            assertThat(inquire(krw(balance))).isEqualTo(PgRetentionQueryResult.unknown());
         }
 
         @Test
@@ -822,6 +822,10 @@ class TossPaymentGatewayAdapterWireMockTest {
                 .isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
             assertThat(retention(krw(129001))).isEqualTo(PgRetentionQueryResult.State.UNKNOWN);
             TOSS.verify(0, getRequestedFor(urlEqualTo(PAYMENT_KEY_INQUIRY_PATH)));
+        }
+
+        private PgRetentionQueryResult inquire(Money expectedBalance) {
+            return paymentGatewayPort.inquireRetention(PaymentFixtures.done(), expectedBalance);
         }
 
         private PgRetentionQueryResult.State retention(Money expectedBalance) {

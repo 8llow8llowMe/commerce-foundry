@@ -23,16 +23,16 @@ public record PaymentCancelVoidResponse(
         example = "NO_REFUND_CONFIRMED")
     String outcome,
 
-    @Schema(description = "판정 이유 — CLAIM_NEVER_REQUESTED · PG_REJECTED · CLAIM_REFUND_SUCCEEDED · CLAIM_REFUND_PENDING · REJECTION_SETTLING · "
-        + "OTHER_CANCEL_PENDING · RETAINED_SHORT · PG_UNAVAILABLE · PG_CHECK_UNSUPPORTED · PG_LEDGER_MISMATCH · PAYMENT_STATE_UNSUPPORTED · "
-        + "CLAIM_STATE_UNSUPPORTED · LEDGER_CHANGED", example = "CLAIM_NEVER_REQUESTED")
+    @Schema(description = "판정 이유 — CLAIM_NEVER_REQUESTED · PG_REJECTED · CLAIM_REFUND_SUCCEEDED · CLAIM_REFUNDED_EXTERNALLY(외부 확인 환불, REFUNDED) · "
+        + "CLAIM_REFUND_PENDING · REJECTION_SETTLING · OTHER_CANCEL_PENDING · RETAINED_SHORT · PG_UNAVAILABLE · PG_CHECK_UNSUPPORTED · PG_LEDGER_MISMATCH · "
+        + "PAYMENT_STATE_UNSUPPORTED · CLAIM_STATE_UNSUPPORTED · LEDGER_CHANGED", example = "CLAIM_NEVER_REQUESTED")
     String reason,
 
     @Schema(description = "판정에 쓴 결제 상태 — code 가 PaymentStatus 제어 코드다",
         example = "{\"code\":\"DONE\",\"name\":\"결제 완료\",\"description\":\"결제가 승인되었습니다.\"}")
     CodeNameDescriptionMetadata paymentStatus,
 
-    @Schema(description = "남은 결제 금액 — 결제액 − 이 결제의 확정 취소 합계")
+    @Schema(description = "남은 결제 금액 — 결제액 − 이 결제의 환불 확정 합계(PG 취소 + 외부 확인 환불)")
     MoneyItem retainedAmount,
 
     @Schema(description = "판정에 쓴 스냅숏 시점(PG 대조 미확정이면 tx1)에 이 클레임이 payment 에서 영구 거부되는 상태(VOIDED 또는 REJECTED)인지 — outcome 과 따로 본다. "

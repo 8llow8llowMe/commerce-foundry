@@ -1,11 +1,25 @@
 package com.commercefoundry.domainlayer.payment.application.port.out.query;
 
+import com.commercefoundry.shared.commerce.Money;
+import java.util.Objects;
+
 /**
  * 결제키 조회로 본 PG 잔액이 로컬 원장이 기대하는 잔액과 같은지 ({@code payment-guide.md} §8, #691).
  *
  * <p>{@link State#MATCHED} 만 "원장에 없는 환불(콘솔 취소 등)이 PG 에 없다" 의 근거다. 나머지 셋은 무환불을 확정하지 못한다.
+ *
+ * @param observedBalance PG 가 답한 잔액(#693). 응답 계약을 지켰고 결제 상태가 잔액과 맞을 때({@code MATCHED} · {@code MISMATCHED})만 있다.
+ *     {@code UNKNOWN} · {@code UNSUPPORTED} 는 근거가 없어 언제나 null 이다
  */
-public record PgRetentionQueryResult(State state) {
+public record PgRetentionQueryResult(State state, Money observedBalance) {
+
+    public PgRetentionQueryResult {
+        Objects.requireNonNull(state, "state");
+        boolean observed = state == State.MATCHED || state == State.MISMATCHED;
+        if (observed != (observedBalance != null)) {
+            throw new IllegalArgumentException("관측 잔액은 MATCHED · MISMATCHED 에만 있다: " + state);
+        }
+    }
 
     public enum State {
         /** 신원 · 총액 · 취소 이력 · 잔액 검증을 통과했고, 잔액과 결제 상태가 기대와 같다. */
@@ -24,7 +38,19 @@ public record PgRetentionQueryResult(State state) {
         UNSUPPORTED
     }
 
-    public static PgRetentionQueryResult of(State state) {
-        return new PgRetentionQueryResult(state);
+    public static PgRetentionQueryResult matched(Money observedBalance) {
+        return new PgRetentionQueryResult(State.MATCHED, Objects.requireNonNull(observedBalance, "observedBalance"));
+    }
+
+    public static PgRetentionQueryResult mismatched(Money observedBalance) {
+        return new PgRetentionQueryResult(State.MISMATCHED, Objects.requireNonNull(observedBalance, "observedBalance"));
+    }
+
+    public static PgRetentionQueryResult unknown() {
+        return new PgRetentionQueryResult(State.UNKNOWN, null);
+    }
+
+    public static PgRetentionQueryResult unsupported() {
+        return new PgRetentionQueryResult(State.UNSUPPORTED, null);
     }
 }

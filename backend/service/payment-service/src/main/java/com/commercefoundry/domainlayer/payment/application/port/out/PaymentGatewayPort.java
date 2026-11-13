@@ -31,8 +31,10 @@ public interface PaymentGatewayPort {
      * 결제키로 결제를 조회해 PG 잔액이 {@code expectedBalance} 이고 결제 상태가 그 잔액과 맞는지 본다 (#691 무환불 판정의 PG 교차 확인).
      * 응답의 신원 · 총액 · 취소 이력 합계 검증은 {@link #inquireCancellation} 과 같다.
      *
-     * @param expectedBalance 결제액 − 로컬 원장의 확정(SUCCEEDED) 취소 합계. 결제와 다른 통화이거나 결제액보다 크면(호출자 버그) PG 를 부르지 않고 모름이다
-     * @return 일치 · 불일치 · 모름 · 대조 대상 아님(가상계좌 · KRW 외 · 결제키 없음 — PG 를 부르지 않음) 중 하나. null 이 아니다
+     * @param expectedBalance 결제액 − 로컬 원장의 PG 취소 합계(pgCanceled = SUCCEEDED + EXTERNAL_PG_REFUNDED, {@code PaymentCancelLedger}).
+     *     PG 밖 환불(OFF_PG_REFUNDED)은 빼지 않는다. 결제와 다른 통화이거나 결제액보다 크면(호출자 버그) PG 를 부르지 않고 모름이다
+     * @return 일치 · 불일치 · 모름 · 대조 대상 아님(가상계좌 · KRW 외 · 결제키 없음 — PG 를 부르지 않음) 중 하나. null 이 아니다.
+     *     일치 · 불일치면 PG 가 답한 잔액({@code observedBalance}, #693)을 함께 싣는다
      */
     PgRetentionQueryResult inquireRetention(Payment payment, Money expectedBalance);
 

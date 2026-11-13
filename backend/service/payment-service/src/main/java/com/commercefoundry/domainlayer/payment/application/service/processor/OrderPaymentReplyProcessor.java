@@ -15,7 +15,7 @@ import com.commercefoundry.domainlayer.payment.application.port.out.PaymentCance
 import com.commercefoundry.domainlayer.payment.application.port.out.query.OrderPaymentResultQueryResult;
 import com.commercefoundry.domainlayer.payment.application.port.out.query.OrderPaymentResultQueryResult.Result;
 import com.commercefoundry.domainlayer.payment.domain.model.Payment;
-import com.commercefoundry.domainlayer.payment.domain.model.PaymentCancel;
+import com.commercefoundry.domainlayer.payment.domain.model.PaymentCancelLedger;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentTransitionException;
@@ -126,9 +126,10 @@ public class OrderPaymentReplyProcessor {
         boolean rejection = changed && !source.paid();
         boolean candidate = rejection && payment.orderSyncFailureCode() == null && payment.status() != PaymentStatus.CANCELED;
         if (candidate) {
-            Money canceled = cancelPort.findByPaymentId(payment.id()).stream().filter(c -> c.status() == PaymentCancel.Status.SUCCEEDED)
-                .map(PaymentCancel::amount).reduce(Money.zero(payment.amount().currency()), Money::plus);
-            candidate = payment.amount().isGreaterThan(canceled);
+            // 자동 취소 후보 = PG 에 돈이 남았는가. 자동 취소는 PG 잔액(결제액 − pgCanceled)을 취소하므로 같은 합계로 본다.
+            // PG 밖 환불(OFF_PG)이 있는 결제도 후보로 넘긴다 — 자동 취소 획득(acquire)이 사람 확인(MANUAL_REVIEW)으로 보내 운영자 눈에 띄게 한다.
+            Money pgCanceled = PaymentCancelLedger.of(cancelPort.findByPaymentId(payment.id()), payment.amount().currency()).pgCanceled();
+            candidate = payment.amount().isGreaterThan(pgCanceled);
         }
         return new OrderPaymentReplyOutcome(false, changed, rejection, candidate);
     }

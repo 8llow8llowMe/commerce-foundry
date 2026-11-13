@@ -4,6 +4,7 @@
 -- 아래 자기 점검이 status 를 다루는 check 가 정확히 1개이고 그 이름이 payment_cancel_status_check 인지 보고, 아니면 아무것도 바꾸지 않고 실패한다.
 -- 이름이 다르면 이 파일의 이름을 그 이름으로 고친 뒤 적용한다(payment-cancellation-ddl.md "#691 VOIDED 상태").
 -- 같은 최종 제약으로 다시 실행할 수 있다.
+-- #693 스크립트(payment-cancel-external-refund-status.sql)를 적용한 DB 에서는 실패한다 — 6값 check 를 4값으로 줄이지 않게 자기 점검이 막는다.
 SET client_encoding = 'UTF8';
 BEGIN;
 SET LOCAL lock_timeout = '2s';
@@ -12,13 +13,17 @@ DO $$
 DECLARE
     found_count integer;
     found_name text;
+    found_definition text;
 BEGIN
-    SELECT count(*), min(conname::text) INTO found_count, found_name
+    SELECT count(*), min(conname::text), min(pg_get_constraintdef(oid)) INTO found_count, found_name, found_definition
       FROM pg_constraint
      WHERE conrelid = 'payment.payment_cancel'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) ILIKE '%status%';
     IF found_count <> 1 OR found_name <> 'payment_cancel_status_check' THEN
         RAISE EXCEPTION 'payment.payment_cancel status check must be exactly one constraint named payment_cancel_status_check (found %: %)',
             found_count, coalesce(found_name, '-');
+    END IF;
+    IF found_definition ILIKE '%EXTERNAL_PG_REFUNDED%' THEN
+        RAISE EXCEPTION 'payment.payment_cancel status check already includes #693 states; do not narrow it with the #691 script';
     END IF;
 END
 $$;
