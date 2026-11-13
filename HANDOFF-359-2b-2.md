@@ -41,7 +41,16 @@ operations-service 와 backend/docs 만 바꾼다. order · payment · product-s
 - `src/test/resources/ddl/operations-schema.sql` 에 영수증 테이블을 더한다. 운영 DDL 문서는 사이즈표 영수증 DDL 이 적힌 곳을 찾아 같은 형식으로 쓴다. 사용자가 손으로 적용한다.
 - 문서: service-inventory · api-design-guide(internal API 표) · job-result-storage-guide · 에러 코드 표.
 
-## 먼저 정할 것 (구현 전에 사용자에게 묻는다)
+## 사용자 결정 (2026-11-13 13:12, 셋 다 추천안)
+
+1. 영수증 PK 는 **`(draft_id, generation_no)`** 다.
+   - product 가 회차를 보낸다. 2b-2 에서는 1~3 을 받는다.
+   - 회차 상한은 DB CHECK `generation_no BETWEEN 1 AND 3` 으로 지킨다.
+   - 같은 회차를 다시 요청하면 기존 영수증을 그대로 돌려준다(재생).
+2. **input_hash 를 받는다.** 같은 (draft_id, generation_no) 인데 hash · 요청자 · 만료 시각이 다르면 409 `INPUT_CONFLICT` 다.
+3. **expires_at 을 받는다.** 만료된 초안의 새 등록은 409 `EXPIRED` 다. 이미 있는 영수증을 재생하는 것은 사이즈표 규칙을 따른다.
+
+## (기록용) 처음에 정리했던 선택지
 
 1. **영수증 키.**
    - 사이즈표는 `draft_id` 가 PK 라서 초안 하나에 작업 하나다.
@@ -59,7 +68,9 @@ operations-service 와 backend/docs 만 바꾼다. order · payment · product-s
 
 ## 진행 순서
 
-1. 위 결정 1~3 을 사용자에게 묻는다(AskUserQuestion, 추천 표시).
+1. 결정 1~3 은 위 "사용자 결정" 에 적었다. 다시 묻지 않는다.
+   - 요청 DTO 는 `draftId · generationNo · inputHash · actorMemberId · expiresAt` 이다.
+   - job payload 는 2b-1 계약 `{draftId}` 를 그대로 둔다. 회차는 영수증에만 둔다.
 2. `/dev-orchestrator` 로 분류한다(FEATURE, 영속성 · internal API · 플래그 → T2). be-executor 한 번에 위 표를 구현한다.
 3. 반복 중에는 바꾼 클래스만 돈다: `./gradlew :service:operations-service:test --tests '*ProductDraftGeneration*'`.
 4. PR 직전에 `:service:operations-service:cleanTest :service:operations-service:check --no-build-cache` 를 돌리고, XML 로 집계한다.
@@ -73,6 +84,6 @@ operations-service 와 backend/docs 만 바꾼다. order · payment · product-s
 ```
 #359 PR-2b-2 를 이어서 한다. 워크트리 D:/ProjectWorkSpace/commerce-foundry-wt/359-draft-gen-register
 (브랜치 feature/be/359-product-draft-generation-register) 의 HANDOFF-359-2b-2.md 를 먼저 읽고,
-"먼저 정할 것" 1~3 을 나에게 물은 뒤 /dev-orchestrator 로 구현 → 검증 → 검토 → /pr 까지 간다.
+"사용자 결정" 1~3(확정)을 따라 /dev-orchestrator 로 구현 → 검증 → 검토 → /pr 까지 간다.
 범위는 operations-service + backend/docs 만. 단계마다 [n/7 ...] 한글 보고.
 ```
