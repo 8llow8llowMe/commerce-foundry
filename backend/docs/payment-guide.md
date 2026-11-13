@@ -188,6 +188,7 @@ prod 는 프로파일 yml 이 없어 false 다. 꺼져 있으면 결제 준비 �
 | `PAYMENT_113` · `114` | 400 | `Idempotency-Key` 헤더 필수 · UUID 형식 (`fieldErrors[0].field` = 헤더 이름) |
 | `PAYMENT_115` | 400 | internal 결제 조회(`GET /internal/v1/payments/{paymentId}`)의 `paymentId` 양수 아님 (§6) |
 | `PAYMENT_123` | 400 | internal 무환불 판정(`.../cancellations/{claimId}/void`)의 `claimId` 양수 아님 (§8-1). 같은 요청의 본문 `orderId` 는 `101` · `102`, 금액 · 통화는 `110` · `111` |
+| `PAYMENT_124` | 400 | internal 외부 확인 환불 기록(`.../cancellations/{claimId}/external-refund`)의 `channel` 누락 · `PG` · `OFF_PG` 밖의 값 (§8). 나머지 필드 · 경로는 `123` 과 같은 코드 |
 | `PAYMENT_198` · `199` | 400 | 파라미터 형식(결제 아이디 등) · 필수 파라미터 누락 |
 
 - 응답 메시지는 언제나 오류 코드의 고정 문구다 — 핸들러는 예외 메시지가 아니라 `errorCode.getMessage()` 를 싣는다.
@@ -610,13 +611,25 @@ listener OFF와 cleanup OFF는 독립이다. cleanup은 기존 messaging/relay/c
   - **대사 기준** — 클레임 아이디(= 결제 취소 멱등 키 · `payment_cancel` 의 클레임 아이디) · 결제 아이디로 맞춘다. order-service 가 확정 때 남기는 warn 로그
     `cancellation refund confirmed by admin without PG call. claimId=…, orderId=…, paymentId=…, previousFailureCode=…, adminId=…` 와
     감사 행위 `CLAIM_REFUND_CONFIRM` 이 수동 확정 목록의 근거다. PG 거래 내역에서 그 결제의 취소가 실제로 있는지 대조한다(§10).
-  - 결제 쪽 장부를 order 의 확정에 맞추는 정합(취소 원장 · 결제 상태 반영)은 #693 이다. PR A 는 원장 상태 · 두 합계 · 이중 환불 차단만 준비했고(아래
-    "취소 원장 상태와 두 합계"), 기록 명령(internal `.../external-refund`)은 PR B, order 호출은 그 뒤다. 그 전까지 결제 어드민의 환불 실패 표시는 "order 수동 확정 여부"를 모른다.
+  - 결제 쪽 장부를 order 의 확정에 맞추는 정합(취소 원장 · 결제 상태 반영)은 #693 이다. PR A 는 원장 상태 · 두 합계 · 이중 환불 차단을 준비했고(아래
+    "취소 원장 상태와 두 합계"), PR B 는 받는 쪽 기록 명령(아래 "외부 확인 환불 기록 명령")을 더했다. **order 의 호출은 아직 없다**(#693 order 2단계 —
+    payment 를 먼저 부르고 order 를 나중에 커밋한다). 그 전까지 결제 어드민의 환불 실패 표시는 "order 수동 확정 여부"를 모른다.
 
 ### 취소 원장 상태와 두 합계 (#691 · #693)
 
-`payment_cancel.status` 는 여섯 값이다. PR A 기준으로는 `PENDING` 만 바뀌고 나머지는 종결 상태다(`PaymentCancel` 의 도메인 메서드로만 바뀐다).
-PR B(외부 환불 기록)에서 `REJECTED` · `VOIDED` → `EXTERNAL_PG_REFUNDED`(PG 증거가 있을 때) 전이가 생긴다 — 그때 이 문장과 `PaymentCancel.updatedAt` 설명을 함께 고친다.
+`payment_cancel.status` 는 여섯 값이다. 상태는 `PaymentCancel` 의 도메인 메서드로만 바뀌고, 허용 전이 표는 `PaymentCancel.Status.canBecome` 한 곳이다.
+저장 어댑터(`PaymentCancelPersistenceAdapter.save`)도 기존 행의 상태 변경을 이 표로 거르고, 표 밖이면 409 `PAYMENT_016` 이다.
+외부 확인 환불 상태는 일반 `save` 로 쓰지 않는다(`IllegalArgumentException`) — PG 검증 · 결제 행 잠금을 거친 `recordExternalRefund` 가 유일한 경로다.
+
+| 기존 | 갈 수 있는 상태 | 누가 |
+|------|-----------------|------|
+| `PENDING` | `SUCCEEDED` · `REJECTED` | 결제 후 취소의 PG 결과(`complete` · `reject`) |
+| `PENDING` | `EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED` | 외부 확인 환불 기록 — 생성 14일 + 여유가 지난 뒤, PG 검증을 통과할 때만 |
+| `REJECTED` | `EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED` | 외부 확인 환불 기록 — 거절 유예가 지난 뒤 |
+| `VOIDED` | `EXTERNAL_PG_REFUNDED` | 외부 확인 환불 기록 — PG 증거가 있을 때만. PG 밖 신고는 받지 않는다 |
+| `SUCCEEDED` · `EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED` | 없음(종결) | |
+
+`updated_at` 은 마지막 전이 시각이다 — `REJECTED` 에서는 거절을 기록한 시각이고(무환불 판정 · 외부 환불 기록의 유예 기준), `REJECTED` 에서 나가는 전이는 외부 확인 환불 하나뿐이다.
 
 | 상태 | 뜻 | `pgCanceled` | `refundedTotal` | 같은 claimId 의 결제 후 취소 |
 |------|----|:---:|:---:|------|
@@ -641,8 +654,104 @@ PR B(외부 환불 기록)에서 `REJECTED` · `VOIDED` → `EXTERNAL_PG_REFUNDE
 - **자동 취소(#579)** — 결제에 `OFF_PG_REFUNDED` 행이 하나라도 있으면 획득(acquire)이 PG 를 부르지 않고 `MANUAL_REVIEW` 로 보낸다. PG 잔액 전부를 자동 취소하면
   이미 송금한 돈을 한 번 더 돌려주게 되기 때문이다. 완료(finish)도 같은 가드로 `MANUAL_REVIEW` 다(획득 뒤 OFF_PG 가 생긴 경우의 이중 방어).
   `EXTERNAL_PG_REFUNDED` 는 `SUCCEEDED` 처럼 남은 금액에서 뺀다.
-- **기록 명령은 아직 없다(PR A)** — 새 두 상태를 쓰는 경로는 PR B 의 internal `POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/external-refund` 다.
-  PR A 만 배포된 동안 동작은 바뀌지 않는다(위 판정 순서 변경 제외). DDL 은 [취소 DDL 문서](payment-cancellation-ddl.md) "#693 외부 확인 환불 상태".
+- **기록 명령** — 새 두 상태를 쓰는 경로는 아래 internal `.../external-refund` 하나다(PR B). DDL 은 [취소 DDL 문서](payment-cancellation-ddl.md)
+  "#693 외부 확인 환불 상태" — PR B 는 DDL 을 더하지 않는다(6값 check 는 PR A 에서 적용).
+
+#### 외부 확인 환불 기록 명령 (#693 PR B)
+
+`POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/external-refund` — `SERVICE_order-service` 만(`@Hidden`). order 어드민이 환불 실패 클레임을
+수동 환불 확정하기 **전에** 부른다(order 2단계 — payment 먼저, order 커밋 나중, outbox 없음. 호출 구현은 아직 없다).
+
+- **본문** `{orderId, amount, currency, channel}` — 주문 · 금액 · 통화는 접수 때 클레임에 저장한 값이다(`orderId` 는 문자열로 보내도 된다).
+  `channel` 은 운영자가 신고한 경로 `PG`(상점관리자 콘솔 환불) | `OFF_PG`(계좌 송금 등)이고, 없거나 그 밖의 값(소문자 포함)이면 400 `PAYMENT_124` 다.
+  운영자 식별 · 사유 · 확정 시각 · 거래키는 받지 않는다 — 감사는 order 의 몫이고, 거래키 저장은 별도 이슈다. 멱등 키 헤더는 없다(경로 claimId 가 키).
+- **응답** 200 `{paymentId, claimId, outcome, reason, channel, paymentStatus(metadata), refundedAmount, retainedAmount}`.
+  - `outcome` — `RECORDED`(외부 확인 환불로 원장에 있음) · `ALREADY_REFUNDED`(우리 PG 취소가 이미 성공) · `UNCONFIRMED`(지금은 기록 못 함).
+    order 는 `RECORDED` · `ALREADY_REFUNDED` 일 때만 수동 확정한다.
+  - `channel` 은 `RECORDED` 에만 있고 그 밖은 null 이다. **응답 `channel` 이 원장의 정본이다** — 이미 기록된 claimId 면 요청 채널이 아니라 기록된 채널을 답하므로
+    요청과 다를 수 있다. order 2단계는 응답 `channel` 로 확정을 기록하고, 요청 채널과 다르면 경고(운영자 확인)를 남긴다.
+  - `refundedAmount` = 이 결제의 `refundedTotal`, `retainedAmount` = 결제액 − `refundedTotal`. 기록됐으면 기록 뒤 값, 아니면 판정에 쓴 원장 값이다.
+  - `paymentStatus` 는 응답 시점의 결제 상태다 — PG 채널 기록이면 전이 뒤 값, PG 밖 채널은 그대로다.
+
+오류는 결제 후 취소 준비 · 무환불 판정과 같은 순서로 본다.
+
+| 순서 | 오류 | 코드 |
+|------|------|------|
+| 1 | claimId 양수 아님(검증을 지나친 호출) | 409 `PAYMENT_019` — DB · PG 전(Facade) |
+| 2 | 결제 없음 | 404 `PAYMENT_001` |
+| 3 | 결제의 주문이 본문 `orderId` 와 다름 | 409 `PAYMENT_019` |
+| 4 | 자동 취소(#579)가 가진 claimId | 409 `PAYMENT_019` |
+| 5 | 금액 0 · 통화가 결제와 다름 | 409 `PAYMENT_017` |
+| 6 | 이 claimId 행과 결제 · 금액 · 통화가 다름(상태 무관) | 409 `PAYMENT_019` |
+| — | 기록 INSERT 가 같은 claimId 의 **다른 결제** 행과 부딪침 · UPDATE 가 낙관 락에서 짐(tx2) | 409 `PAYMENT_012` — 다시 부르면 새로 판정한다 |
+
+Facade 는 `NEVER` 다. tx1(결제 행 `PESSIMISTIC_WRITE`) 스냅숏 → PG 조회(트랜잭션 밖) → tx2(재잠금) 재확인 · 기록 순서다 — 무환불 판정과 같은 골격이고,
+결제 후 취소 준비 · 확정 · 거절 · void 와 같은 잠금으로 줄을 선다. **잠금 없이 기록하지 않는다** — 동시에 들어온 준비가 한도를 넘겨 초과 환불할 수 있다.
+tx1 · tx2 는 `@Transactional(timeout = 5)` 다(자동 취소 스캔 · 회신 처리와 같은 수준) — 잠금 대기가 길어지면 끊고 order 가 다시 부른다.
+tx1 판정은 위에서부터 처음 맞는 행이다.
+
+| 순서 | 조건 (tx1) | outcome | reason | PG |
+|------|------------|---------|--------|----|
+| 1 | 이 claimId 행 `EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED` | `RECORDED`(기록된 채널) | `CLAIM_ALREADY_RECORDED` | 안 부름 |
+| 2 | 이 claimId 행 `SUCCEEDED` | `ALREADY_REFUNDED` | `CLAIM_REFUND_SUCCEEDED` | 안 부름 |
+| 3 | 결제 상태가 `DONE` · `PARTIAL_CANCELED` 가 아님(`CANCELED` · `LATE_APPROVED` · 승인 전 · 실패 등) | `UNCONFIRMED` | `PAYMENT_STATE_UNSUPPORTED` | 안 부름 |
+| 4 | 이 claimId 행 `PENDING`, 생성 뒤 14일 + 여유(기본 1시간) 안(또는 생성 시각 모름) | `UNCONFIRMED` | `CLAIM_REFUND_PENDING` | 안 부름 |
+| 5 | 이 claimId 행 `REJECTED`, 거절 기록 뒤 유예 안(또는 시각 모름) | `UNCONFIRMED` | `REJECTION_SETTLING` | 안 부름 |
+| 6 | 이 claimId 행 `VOIDED` 이고 채널 `OFF_PG` — 전이 표(`canBecome`)에 없음 | `UNCONFIRMED` | `CLAIM_VOIDED` | 안 부름 |
+| 7 | 이 claimId 행에서 신고 채널 상태로 가는 전이가 표에 없음 — 닫힌 쪽 | `UNCONFIRMED` | `CLAIM_STATE_UNSUPPORTED` | 안 부름 |
+| 8 | 같은 결제에 다른 claimId 의 미정착 취소 — `PENDING`(오래된 것 포함), 또는 거절 유예 안(시각 모름 포함)의 `REJECTED` | `UNCONFIRMED` | `OTHER_CANCEL_PENDING` | 안 부름 |
+| 9 | `refundedTotal` + 금액 > 결제액 | `UNCONFIRMED` | `RETAINED_SHORT` | 안 부름 |
+| 10 | 후보 — 행 없음(INSERT) · 14일 + 여유가 지난 `PENDING` · 유예 지난 `REJECTED` · PG 채널의 `VOIDED`(UPDATE) | PG 검증으로 | | 부름 |
+
+멱등 판정(1 · 2)을 결제 상태(3)보다 앞에 둔 것은, PG 채널 전액 기록으로 결제가 `CANCELED` 가 된 뒤에도 같은 요청이 같은 답(`RECORDED`)을 받게 하려는 것이다.
+전이 가능 여부(6 · 7)는 도메인 표에 묻고, Processor 는 시간 규칙(4 · 5 · 8 의 REJECTED 유예)만 본다.
+8 에 유예 안의 `REJECTED` 를 넣은 것은, PG 조회 즈음 다른 claim 의 취소가 PG 에 실제로 반영된 채 거절로 끝났다면 그 금액이 "원장에 없는 환불액"으로 보여
+이 claim 이 흡수할 수 있기 때문이다.
+
+- **운영 — 오래 남은 다른 `PENDING`** — 같은 결제에 오래 남은 다른 claim 의 `PENDING`(PG 키 기한이 지난 결제 후 취소, 키 만료로 멈춘 자동 취소 등)이 있으면
+  이 결제의 외부 환불 기록은 계속 `OTHER_CANCEL_PENDING` 이다. 먼저 그 행을 정리한다 — 결제 후 취소 claim 이면 그 claimId 로 외부 확인 환불을 기록하고(14일 + 여유 뒤),
+  자동 취소 행이면 자동 취소 수동 검토 절차(아래 "자동 취소와 영속 실행")로 닫은 뒤 다시 부른다.
+
+**PG 검증** — 후보는 `inquireRetention(payment, 결제액 − pgCanceled)` 를 한 번 부른다(OFF_PG 는 빼지 않는다).
+**원장에 없는 환불액 = (결제액 − `pgCanceled`) − PG 관측 잔액**이다. 관측 잔액은 `MATCHED` · `MISMATCHED` 에만 있다.
+
+| PG 결과 · 관측 | `PG` 채널 | `OFF_PG` 채널 |
+|----------------|-----------|---------------|
+| `UNKNOWN` | `PG_UNAVAILABLE` | `PG_UNAVAILABLE` |
+| `UNSUPPORTED`(가상계좌 · KRW 외 · 결제키 없음) | `PG_CHECK_UNSUPPORTED` | `PG_CHECK_UNSUPPORTED` |
+| 관측 잔액 > 기대 잔액(원장의 PG 취소가 PG 에 없음) | `PG_LEDGER_MISMATCH` | `PG_LEDGER_MISMATCH` |
+| 원장에 없는 환불액 = 금액 | 기록 → `EXTERNAL_PG_REFUNDED` | `PG_LEDGER_MISMATCH`(0 이 아님) |
+| 원장에 없는 환불액 > 금액 | 기록 → `EXTERNAL_PG_REFUNDED` + WARN `code=PAYMENT_EXTERNAL_REFUND_PG_SURPLUS` | `PG_LEDGER_MISMATCH`(0 이 아님) |
+| 0 < 원장에 없는 환불액 < 금액 | `PG_LEDGER_MISMATCH` | `PG_LEDGER_MISMATCH` |
+| 원장에 없는 환불액 = 0(`MATCHED`) | `PG_LEDGER_MISMATCH` | 기록 → `OFF_PG_REFUNDED` |
+
+이 산술은 도메인 `PaymentCancelLedger.externalRefundEvidence`(`EXACT` · `SURPLUS` · `NONE`) 한 곳에 있다. 후보의 `resolve(retention)` 가 PG 결과를 판정 · 기록 여부로 바꾸고,
+Facade 는 순서만 잇는다.
+
+- **원장에 없는 환불액 > 금액(SURPLUS)** — 기록하되 WARN(결제 · 클레임 아이디만, 금액 없음)을 남긴다. PG 에서 원장 밖으로 빠진 돈이 이 신고보다 많다는 뜻이라
+  다른 claim 의 콘솔 환불이 섞였을 수 있다. **claim 별 귀속은 거래키 저장 이슈 후속**이다 — 그 전에는 합계로만 검증하고, 같은 결제의 다른 claim 이
+  같은 잔액을 두 번 흡수하는 것은 tx2 재확인(아래)이 막는다(동시 두 건이면 하나만 `RECORDED`, 나머지는 `LEDGER_CHANGED` · `PG_LEDGER_MISMATCH`).
+
+- **기록(tx2)** — 결제 행을 다시 잠그고 스냅숏(이 claimId 행 상태 · 두 합계 · 결제 상태 · 다른 미정착 취소 없음 · 남은 금액 ≥ 금액)이 tx1 과 같은지 본다.
+  다르면 `UNCONFIRMED` · `LEDGER_CHANGED` 이고 쓰지 않는다 — PG 조회 사이 다른 claim 이 `PENDING` → `REJECTED`(유예 안)로 끝난 경우도 합계가 같아도 여기다.
+  그 사이 이 claimId 의 환불이 확정됐으면 쓰지 않고 그 상태로 답한다 — 같은 요청이 먼저 기록했으면 `RECORDED` · `CLAIM_ALREADY_RECORDED`,
+  우리 PG 취소가 `SUCCEEDED` 가 됐으면 `ALREADY_REFUNDED` · `CLAIM_REFUND_SUCCEEDED` 다.
+  같으면 행이 없을 때 엄격 INSERT, 있으면 전이 표대로 버전 확인 UPDATE(`PaymentCancelPersistencePort.recordExternalRefund`) 한다.
+  - `PG` 채널은 결제 상태를 `recordCancellation(pgCanceled + 금액)` 으로 옮긴다(`DONE` → `PARTIAL_CANCELED` · `CANCELED`).
+  - `OFF_PG` 는 결제 상태를 바꾸지 않는다 — `payment.status` 는 PG 상태의 거울이다.
+- **오래된 PENDING 기준** — 결제 후 취소 준비는 생성 14일(`PaymentCancel.PG_RETRY_WINDOW`) 안의 `PENDING` 에만 PG 취소를 다시 보내고, 그 PG 호출은 준비 직후 시작해
+  토스 클라이언트 타임아웃(연결 2초 + 읽기 6초, `Retryer.NEVER_RETRY`)이면 끝난다. 기록은 그보다 넉넉한 **14일 + `payment.cancellation.external-refund.pending-call-margin`**
+  (기본 1시간, 1시간 미만은 기동 실패) 뒤에만 한다 — 그 안에서는 우리 PG 취소가 진행 중일 수 있어 기록하면 이중 환불이 된다.
+- **거절 유예** — 무환불 판정과 같은 `payment.cancellation.void.rejection-settle-grace`(기본 60초)를 쓴다.
+- **기록 뒤** — 같은 claimId 의 결제 후 취소는 PG 없이 200(위 "외부 확인 환불은 PG 를 다시 부르지 않는다"), void 는 `REFUNDED` · `CLAIM_REFUNDED_EXTERNALLY` 다.
+  PG 채널 기록 뒤의 void · 다음 기록은 기대 잔액에 이 금액이 빠져 PG 와 다시 맞는다.
+- **확정 이상 신호** — 결제 후 취소의 PG 성공 뒤 확정(`complete`)이 외부 확인 환불 행을 만나면 응답은 그대로 409 `PAYMENT_016` 이고,
+  WARN `code=PAYMENT_CANCEL_EXTERNAL_REFUND_CONFLICT` 를 결제 · 클레임 아이디와 상태만으로 남긴다. PG 에서 두 번 빠졌을 수 있어 운영자가 PG 거래와 대조한다.
+  기록이 14일 + 여유 뒤에만 `PENDING` 을 바꾸므로 정상 흐름에서는 나오지 않는다.
+- **로그** — 기록 · `LEDGER_CHANGED` 로그는 결제 · 클레임 아이디 · 채널 · 상태만 남긴다. 금액 · 사유는 남기지 않는다.
+- **재호출** — 같은 claimId 로 다시 부르면 기록된 상태에서는 PG 를 다시 조회하지 않는다. 미확정(`UNCONFIRMED`)은 쓰지 않았으므로 원인을 해소한 뒤 다시 부른다.
+  이 조회는 승인과 같은 `toss` 서킷을 쓴다 — 어드민 동작 1회당 1회로 부르고 자동 재시도 루프를 만들지 않는다.
+- **롤백** — 이 명령으로 외부 환불 행이 한 건이라도 생기면 이전 앱으로 롤백할 수 없다([취소 DDL 문서](payment-cancellation-ddl.md) "#693").
 
 ### 전액 취소 실패 필드 제약 보정 (#551)
 
@@ -745,7 +854,8 @@ gauge 질의는 read-only 트랜잭션 timeout 2초와 JPA query timeout 2000ms�
   - `expectedBalance` 는 결제액 − `pgCanceled`(`SUCCEEDED` + `EXTERNAL_PG_REFUNDED`)다. PG 밖 환불(`OFF_PG_REFUNDED`)은 PG 잔액을 줄이지 않으므로 빼지 않는다.
   - 응답의 신원 · 총액 · 통화 · 취소 이력 검증은 자동 취소 조회(`inquireCancellation`)와 같다. 이력은 전부 `DONE`, 거래키 중복이 없어야 하고, 이력 합 + 잔액 = 결제액이어야 한다.
   - **관측 잔액(#693)** — `PgRetentionQueryResult.observedBalance` 는 PG 가 답한 잔액이다. 응답 계약을 지켰고 결제 상태가 잔액과 맞을 때(`MATCHED` · `MISMATCHED`)만 있고,
-    `UNKNOWN` · `UNSUPPORTED` 는 근거가 없어 언제나 null 이다(생성자가 강제). 외부 확인 환불 기록(PR B)이 "원장에 없는 환불액 = (결제액 − `pgCanceled`) − 관측 잔액"을 계산하는 데 쓴다.
+    `UNKNOWN` · `UNSUPPORTED` 는 근거가 없어 언제나 null 이다(생성자가 강제). 외부 확인 환불 기록(§8)이 "원장에 없는 환불액 = (결제액 − `pgCanceled`) − 관측 잔액"을 계산하는 데 쓴다.
+    `PaymentGatewayProcessor.inquireRetention` 이 `Retention(outcome, observedBalance)` 로 올려 준다.
     무환불 판정(void)은 지금처럼 `state` 만 본다.
 
 | 조회 결과 | 판정 |
@@ -836,15 +946,16 @@ tx2 는 결제 행을 다시 잠그고 스냅숏(이 claimId 행 상태 · 두 �
 
 - **봉인 효과** — `VOIDED` 는 `REJECTED` 와 같이 결제 후 취소 준비가 409 `PAYMENT_016` 으로 영구 거절하고 PG 를 부르지 않는다. 확정 · 거절 경로는 `PENDING` 이 아니라 손대지 않는다.
   `VOIDED` 금액은 어떤 취소 합계(누계 한도 · 자동 취소 잔액 · PG 기대 잔액)에도 넣지 않고, 어드민 환불 실패 필터(`REJECTED` 존재)에도 잡히지 않는다.
-  `VOIDED` 는 다른 상태로 가지 않는다 — 봉인은 영구다.
+  `VOIDED` 에서 나가는 길은 하나다 — PG 증거로 검증한 외부 확인 환불(`EXTERNAL_PG_REFUNDED`, §8 "외부 확인 환불 기록 명령"). 그 밖에는 봉인이 영구다.
 - **유예** — `payment.cancellation.void.rejection-settle-grace`(기본 60초, 0 이하는 기동 실패). `REJECTED` 의 거절 시각은 `payment_cancel.updated_at` 이다 —
-  `REJECTED` 는 종결 상태라 다시 갱신되지 않는다.
+  `REJECTED` 에서 나가는 전이는 외부 확인 환불 하나뿐이고, 그 뒤 행은 `REJECTED` 가 아니라 이 판정의 2' 행(`CLAIM_REFUNDED_EXTERNALLY`)이다.
 - **재호출 멱등** — 같은 claimId 로 다시 부르면 `VOIDED` 가 있어도 매번 PG 를 다시 대조하고 그때의 판정을 답한다. `VOIDED` 뒤 PG 가 `MATCHED` 가 아니면
   `UNCONFIRMED`(`PG_LEDGER_MISMATCH` · `PG_UNAVAILABLE` · `PG_CHECK_UNSUPPORTED`) · `sealed=true` 로 답하고 `VOIDED` 행은 그대로 둔다.
 - **재호출 상한** — order 의 void 재호출은 백오프 · 상한을 둔다. 어드민 동작 1회당 1회이며 자동 재시도 루프를 만들지 않는다 — 이 조회는 승인과 같은 `toss` 서킷을 쓴다.
 - **경합** — void 와 같은 클레임의 결제 후 취소 준비가 겹치면 결과는 둘 중 하나다: `VOIDED` + 준비 016, 또는 `PENDING` + void `UNCONFIRMED`(`CLAIM_REFUND_PENDING` · `LEDGER_CHANGED`).
   같은 클레임의 void 둘이 겹치면 둘 다 `NO_REFUND_CONFIRMED` 이고 `VOIDED` 행은 하나다. 모두 결제 행 잠금으로 줄을 선다(`PaymentCancelVoidContract`).
-- **PENDING 14일 막다른 길** — 생성 14일이 지난 `PENDING` 은 PG 재전송을 막으므로(§8 #16 PR-2) void 도 영영 `CLAIM_REFUND_PENDING` 이다. 출구는 수동 확정(#693)이다.
+- **PENDING 14일 막다른 길** — 생성 14일이 지난 `PENDING` 은 PG 재전송을 막으므로(§8 #16 PR-2) void 도 영영 `CLAIM_REFUND_PENDING` 이다. 출구는 수동 확정(#693)이다 —
+  외부 확인 환불 기록이 생성 14일 + 여유(기본 1시간)가 지난 `PENDING` 을 PG 검증을 통과할 때 바꾼다(§8 "외부 확인 환불 기록 명령").
 
 | 실패 · 수습 | 결과 |
 |-------------|------|

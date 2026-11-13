@@ -93,6 +93,13 @@ WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 —
   `outcome` 은 `NO_REFUND_CONFIRMED` · `REFUNDED` · `UNCONFIRMED` 다(`sealed` 는 영구 거부 행 존재 여부로 outcome 과 따로다).
   404 `PAYMENT_001`, 409 `PAYMENT_019` · `017` · `012`, 400 `PAYMENT_101` · `102` · `110` · `111` · `115` · `123` · `198`.
   계약 · 판정 표는 `payment-guide.md` §8-1.
+- 외부 확인 환불 기록(단건 명령): payment-service `POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/external-refund` (#693 PR B). 허용 호출자는 order-service —
+  어드민이 환불 실패 클레임을 수동 환불 확정하기 전에 부른다(호출 구현은 order 2단계). 본문 `{orderId, amount, currency, channel(PG | OFF_PG)}` —
+  운영자 · 사유 · 시각 · 거래키는 받지 않는다. 멱등 키 헤더 없음(경로 claimId 가 키, 기록된 claimId 는 PG 재조회 없이 같은 답).
+  판정은 200 데이터 `{paymentId, claimId, outcome, reason, channel | null, paymentStatus(metadata), refundedAmount(§2-3), retainedAmount(§2-3)}` 이고
+  `outcome` 은 `RECORDED` · `ALREADY_REFUNDED` · `UNCONFIRMED` 다. 응답 `channel` 이 원장 정본이다 — 이미 기록된 claimId 면 요청과 다를 수 있어
+  호출자는 응답 값으로 확정하고 다르면 경고한다. 404 `PAYMENT_001`, 409 `PAYMENT_019` · `017` · `012`,
+  400 `PAYMENT_100`(알 수 없는 통화 · 범위 밖 금액) · `101` · `102` · `110` · `111` · `115` · `123` · `124`(channel) · `198`. 계약 · 판정 표는 `payment-guide.md` §8 "외부 확인 환불 기록 명령".
 - 정상 승인 집계: payment-service `GET /internal/v1/payments/approval-summary?from=&to=` (#550). 허용 호출자는 operations-service다.
   필수 UTC `[from, to)`, 양의 기간 · 최대 31일이며 `Cache-Control: no-store`다. `{from, to, groups:[{method(metadata), approvalCount,
   grossApprovedAmount:{amount, currency}}]}`를 기존 봉투로 반환한다. 그룹은 통화 · 수단 코드순, 빈 범위는 빈 배열이다.
