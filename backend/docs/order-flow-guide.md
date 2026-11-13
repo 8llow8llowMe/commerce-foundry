@@ -22,6 +22,7 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 
 EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해제는 order-canceled 이벤트)
+RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일부만 환불 · 전부 거절, #17 B1. Order#settleReturn 만)
 ```
 
 | 상태 | 뜻 | 누가 바꾸나 |
@@ -36,7 +37,8 @@ PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해
 | `PURCHASE_CONFIRMED` | 구매 확정 (고객 확정 또는 N일 경과 자동) | 고객 / 스케줄러 |
 | `CANCEL_REQUESTED` → `CANCELED` | 출고 전 취소 (환불 포함) | 고객 요청 → 환불 확정 시 자동(#16 PR-2, 어드민 승인 단계 없음). 환불 실패 · 미확정은 운영자(#17) |
 | `PENDING_PAYMENT` → `CANCELED` | 결제 전 취소 (환불 없음, 선점 해제) | 고객 (#16) |
-| `RETURN_REQUESTED` → `RETURNED` | 배송 후 반품 (회수 후 환불) | 고객 요청 → 어드민 |
+| `RETURN_REQUESTED` → `RETURNED` | 배송 후 반품 (회수 후 환불) — 환불이 기록된 반품 수량이 주문 전 수량일 때 | 고객 요청 → 어드민 승인 · 환불(#17 B2) |
+| `RETURN_REQUESTED` → `DELIVERED` | 반품 정리 — 열린 반품(접수 · 승인 · 환불 실패) 없이 일부만 환불됐거나 전부 거절됐을 때. 배송 완료 시각은 그대로다 | 반품 처리(#17 B2) — `Order#settleReturn` 만. 어드민 상태 변경(PATCH)은 `ORDER_023` |
 
 ### 1-1. 전이 규칙 (필수)
 
@@ -933,6 +935,66 @@ DB 불가 중 주문 기록의 즉시 보존·자동 무손실 복구를 보장�
 A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변경·PG/재고 호출 연결이 없다. A2에서 기능권한·원천 증거·현재 주문 상태·결정 감사와
 멱등 재호출 및 늦은 결과 경계를 갖춘 처리 흐름을 별도 구현한다 — `requireRetry` 의 호출부는 A2b 어드민 다시 시도(아래 §5 표 다음 "어드민 다시 시도")다. 이 기반으로 #17 전체 완료나 운영 결제 개방 조건 충족을 주장하지 않는다.
 배포 DDL과 구 앱의 결정 보존 제한은 `deploy-guide.md`의 운영자 수습 기반 절을 따른다.
+
+### 반품 저장 기반 · 환불 산식 (#17 B1)
+
+호출부 없는 저장 기반과 순수 도메인이다(A1 과 같은 방식). 엔드포인트 · 응답 모양 · 고객 반품 접수 동작은 바꾸지 않고, 새 상태 행을 만들지 않는다.
+승인 · 거절 API, 스케줄러 · 파이프라인의 반품 분기, 기존 전이(`markRefunded` 등)의 반품 해제, 재고 복원 연결은 B2 다.
+
+| 반품 상태 | 뜻 | 칸 | 다음 |
+|-----------|----|----|------|
+| `REQUESTED` | 고객 접수 · 검수 대기 | 결제 아이디 · 승인 칸 · 다음 시각 · 실패 코드 없음, 환불액 null(미산정) | 운영자 승인 `Claim#approveReturn` → `APPROVED`, 거절 `Claim#rejectReturn` → `REJECTED` |
+| `APPROVED` | 승인 · 환불 대기 | 결제 아이디 · 환불액(> 0) · 승인 기록(`restock` · 차감액 · 승인자 · 승인 시각) · 다음 시각(lease) | (B2) 환불 200 → `REFUNDED`, 종결 거절 → `REFUND_FAILED` — 취소의 `REQUESTED` 와 같은 자리 |
+| `REJECTED` | 거절(끝) | 결제 · 승인 칸 없음 | 없음. 수량 합산에서 빠진다 |
+| `REFUNDED` · `COMPLETED` · `REFUND_FAILED` · `RESTORATION_FAILED` | 취소와 같은 뜻 | 승인 칸은 그대로 남는다 | (B2) 취소와 같은 전이. `restock=false` 면 복원 없이 `COMPLETED` |
+
+- **대기 판정은 유형을 본다** — 환불 대기는 취소 `REQUESTED` · 반품 `APPROVED`, 복원 대기는 둘 다 `REFUNDED` 다(`Claim.Type#isAwaitingAttempt`,
+  `Claim#isAwaitingAttempt` · `#isAwaitingRefund`). `Claim.Status` 의 상태만 보는 대기 판정은 없앴다 — 취소 결과는 그대로다.
+  취소 클레임은 `APPROVED` · 승인 기록을 두지 않는다(`ck_claim_cancellation_not_approved`). `REJECTED` 는 취소 거절(A4)에도 쓸 수 있게 취소에서 막지 않지만 전이는 아직 없다.
+- **결제 취소 키 기한(14일)의 기준** — `Claim#refundDeadlineBase()`: 취소는 접수 시각, 반품은 **승인 시각**이다(검수 뒤 승인할 때 처음 환불을 보낸다).
+  어드민 다시 시도 · 수동 확정의 기한 판정(`ClaimAdminRecoveryProcessor`)이 이 값을 쓰고, 환불 단계 판정도 `Claim#isAwaitingRefund` 로 바꿨다 — 승인 전 반품은 환불 단계가 아니다.
+- **어떤 반품이 수량 · 환불 · 정리에 잡히나 — `Claim` 술어 한 곳** — `reservesReturnQuantity()`(거절만 뺀 전부) = `isSettledReturn()`(환불 기록:
+  `REFUNDED` · `RESTORATION_FAILED` · `COMPLETED`) + `isOpenReturn()`(`REQUESTED` · `APPROVED` · `REFUND_FAILED`), 그중 승인 뒤 환불 미완은
+  `isReturnRefundInFlight()`(`APPROVED` · `REFUND_FAILED`). 정책 · 판정 · 영속 어댑터가 이것만 쓴다.
+- **수량 합산** — 고객 반품 접수의 "이미 반품에 잡힌 수량"(`ClaimRepositoryPort#sumRequestedReturnQuantities`, 이름은 그대로)은 **거절(`REJECTED`)만 빼고** 반품의 모든 상태를 더한다
+  — 어댑터는 도메인이 준 상태 집합(`Claim.returnQuantityReservingStatuses()`)으로 `in` 질의한다.
+  `REFUND_FAILED` 는 수동 확정으로 환불될 수 있고 `RESTORATION_FAILED` 는 환불이 이미 나갔다 — 빼면 같은 수량을 다시 접수해 이중 환불이 된다. 취소 클레임은 넣지 않는다.
+- **주문 정리** — `ReturnRefundPolicy.outcome(order, claims)` 이 다음 상태를 정한다: 정산된 반품의 항목 수량이 모든 주문 항목 수량과 같으면 `RETURNED`,
+  아니고 열린 반품이 있으면 `RETURN_REQUESTED` 유지(`STILL_REQUESTED`), 그 밖(일부만 환불 · 전부 거절)이면 `DELIVERED`. 결과 타입은 `ReturnOutcome` 셋뿐이다.
+  `Order#settleReturn(ReturnOutcome)` 만 `RETURN_REQUESTED` → `RETURNED` · `DELIVERED` 를 하고 배송 완료 · 출고 시각을 보존한다 — 주문은 클레임을 읽지 않는다.
+  `changeStatus(DELIVERED)` 는 여전히 거절이고 어드민 직접 전이(`AdminStatusChangePolicy`)에도 넣지 않았다 — 어드민 PATCH 로 `RETURN_REQUESTED` → `DELIVERED` 는 이제 표 안이라 `ORDER_020` 대신 `ORDER_023` 이다.
+  배송 완료로 돌아간 주문은 보존된 배송 완료 시각 기준으로 자동 구매 확정 대상이 된다 — 기간이 이미 지났으면 다음 배치에서 바로 확정된다(B2 가 정리 시점을 정할 때 본다).
+
+**환불 산식 `ReturnRefundPolicy`** — 주문 스냅숏만 쓴다(§2 "클레임의 배송비 재부과는 주문 스냅숏으로"). `R = 남은 결제액 = 결제 총액 − 정산한 반품의 정책 금액 합`
+(정산 = 정산된 반품, 정책 금액 = 환불액 + 차감액 — `ReturnRefundPolicy.Settled#of(order, claims, target)`), `before` · `after` = 이번 반품 전 · 뒤에 남는 수량이다.
+
+| 귀책 | 정책 금액 |
+|------|-----------|
+| 고객(단순 변심) | `min(R, max(R − due(after), due(before) − due(after)))` — `due` 는 취소 산식(`CancellationRefundPolicy`)과 같다. 앞선 반품이 모두 변심이면 `R = due(before)` 라 취소 산식 `due(before) − due(after)` 와 같다 |
+| 판매자(불량 · 오배송) | 반품 항목 금액. 남는 수량이 0 이면 남은 결제액 전부(남아 있던 배송비 포함). 재부과 없음 |
+
+- **변심 전량 반품은 처음 배송비까지 돌려준다**(사용자 결정 — 산식 유지). 원주문의 `due` 가 결제 총액이라서다. 반품 배송비(왕복 등)는 운영자가 승인 때
+  **차감액**(`deduction`, 0 이상)으로 뺀다 — 고객사별 예외 플래그는 두지 않는다. 환불액 = 정책 금액 − 차감액.
+- **판매자 귀책이 만든 재부과는 판매자가 진다**(사용자 결정 11-13) — 판매자 귀책 반품으로 무료배송 기준 아래로 내려가도 그 재부과를 다음 변심 반품 고객에게 넘기지 않는다.
+  변심 반품은 적어도 그 반품이 만든 차이(`due(before) − due(after)`)를 돌려주고, `min(R, …)` 로 남은 결제액을 넘지 않는다.
+  예: A 40,000 · B 10,000 · C 10,000(결제 60,000, 무료배송 기준 50,000, 기본 배송비 3,000). A 불량 → 40,000. 이어 B 변심 → `due(B,C) 23,000 − due(C) 13,000` = **10,000**
+  (`R − due(after)` 만 쓰면 `20,000 − 13,000 = 7,000` 으로 고객이 3,000 을 떠안는다). 마지막 C 변심 → 남은 결제액 10,000. 합 60,000 = 결제 총액.
+- 귀책 기본값은 항목 사유가 모두 `DEFECTIVE` · `WRONG_ITEM` 이면 판매자, 하나라도 `CHANGE_OF_MIND` 면 고객이다(`Fault#defaultOf`). 운영자가 검수 뒤 인자로 덮어쓴다.
+- 매 단계 정책 금액이 남은 결제액 이하라 귀책 · 순서가 섞인 순차 반품도 환불 합이 결제 총액을 넘지 않고, 전부 반품하면 환불 합은 결제 총액이다(`ReturnRefundPolicyTest` 가
+  국내 무료 · 유료 · 해외 무료배송 주문에서 모든 순서 · 귀책 조합으로 확인).
+- **진행 중 반품이 있으면 계산하지 않는다(fail-closed)** — `Settled#of` 는 대상이 아닌 반품 중 `APPROVED` · `REFUND_FAILED`(`isReturnRefundInFlight`)가 있으면
+  `IllegalStateException` 이다. 그 정책 금액이 아직 `R` 에서 빠지지 않아 겹쳐 승인하면 상점 손실(재부과 누락)이나 고객 과소 환불(전량인데 처음 배송비 누락)이 난다.
+  대상은 `REQUESTED` 여야 하고 이미 정산에 들어간 클레임은 다시 계산하지 않는다. B2 는 이 예외를 409 로 바꾸고, 주문 FOR UPDATE 뒤 클레임 목록을 읽는다.
+- **거절이 아닌 취소 클레임이 있는 주문은 계산 · 정리 판정을 하지 않는다(fail-closed)** — 지금 전이표로는 도달할 수 없다(취소는 출고 전, 반품은 배송 완료 뒤).
+  **부분 취소(#684)가 들어오면 반품 기준액(`R`) · 정산 수량에 취소 환불 · 취소 수량을 합산해야 한다.**
+- **환불액이 0 이하면 승인을 거부한다**(사용자 결정, B2 에서 409 오류 코드) — 소액 변심 반품의 재부과가 상품 금액보다 크거나 차감액이 정책 금액 이상인 경우다.
+  B1 정책은 `Refund#isPayable()` 로 드러낸다. 도메인 `Claim#approveReturn(order, paymentId, refund, restock, memberId, now, lease)` 는 `Refund` 하나에서 환불액(정책 − 차감) ·
+  차감액 · 통화를 꺼내고(0 이하는 `Refund#toMoney` 가 거부), 주문 통화 · 결제 총액 · 항목을 대조하며, 다음 시각을 `now + lease` 로 둔다(`requestCancellation` 과 대칭).
+
+**DB 와 도메인** — `ClaimEntity` 의 check 는 도메인 생성자와 같다(`ck_claim_return_approval` · `ck_claim_return_next_attempt` · `ck_claim_return_failure_code` ·
+`ck_claim_cancellation_not_approved` · `ck_claim_admin_decision`). 결정 check 는 B2 를 위해 운영 DDL 한 번으로 넓혔다 — 취소 또는 접수가 아닌 반품의 결정을 받고,
+거절(`REJECTED`) 결정은 직전 실패 코드 없이 받는다. B1 도메인은 이 결정을 **읽기만** 한다(`Claim.Decision` 의 직전 실패 코드는 거절일 때만 null) — 만드는 전이는 B2 다.
+B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지지 않는다. 거절 사유를 싣는 전이 모양은 B2 가 정한다. 배포 DDL 은 `deploy-guide.md` 의 반품 기반 절이다.
 
 - 클레임은 `claim` 엔티티로 따로 둔다 (유형, 대상 주문 항목, 수량, 사유, 상태, 환불 예정 금액).
 - **부분 클레임**을 전제로 설계한다 — 주문 3개 중 1개만 반품.

@@ -392,6 +392,31 @@ A3 → A2(A1 이후 · A3 이전) 롤백은 안전하다 — A3 는 새 열이 �
 수동 확정은 payment-service 에 알리지 않으므로 결제 쪽 `payment_cancel` 과의 대사는 운영자가 따로 한다(`payment-guide.md` §8 "order 의 수동 환불 확정과 결제 장부",
 정합은 #693). 운영 결제 개방 게이트 ⑧ 의 수동 환불 확정 조건을 따른다.
 
+### 반품 기반 (#17 B1)
+
+`service/order-service/src/test/resources/ddl/claim-return-approval.sql` 을 `psql -v ON_ERROR_STOP=1 -f` 로 UTF-8 실행한다. 직전 운영 형태는
+#16 PR-2a 1 · 2단계와 A1(`claim-admin-decision.sql`)까지 적용된 상태다. 정본은 `ClaimEntity` 와 스냅숏 `ddl/order-schema.sql` 이다.
+
+1. **preflight (읽기 전용)** — 첫 SELECT 는 바꿀 기존 제약 이름이 정확히 3행(`ck_claim_admin_decision`, `ck_claim_payment_cancellation_only`, `claim_status_check`)인지 본다.
+   두 번째 SELECT 는 새 반품 check 에 걸릴 기존 반품 행(REQUESTED 가 아니거나 결제 · 재시도 · 결정 칸이 있는 반품)이 **0행**인지 본다.
+   세 번째 SELECT 는 새 열 4개 · 새 제약 4개가 아직 없는지(**0행**) 본다 — dev 에서 `ddl-auto=update` 인 새 앱이 먼저 기동해 열만 생겼으면 열 행이 나온다.
+   그 열이 모두 비어 있으면(스크립트 주석의 count 가 0) `DROP COLUMN` 으로 지운 뒤 적용한다. 하나라도 어긋나면 멈추고
+   실제 이름(`\d orders.claim`) · 데이터를 확인해 스크립트를 고친다(`IF EXISTS` 로 건너뛰지 않는다).
+2. **ALTER (배포 전, 1회)** — `lock_timeout = 5s` 의 한 트랜잭션이다. 열 4개(`approved_at`, `approved_by_member_id`, `deduction_amount`, `restock`, 모두 nullable),
+   `claim_status_check` 교체(`APPROVED` · `REJECTED` 추가), `ck_claim_payment_cancellation_only` 를 `ck_claim_return_approval` 로 대체,
+   `ck_claim_cancellation_not_approved` · `ck_claim_return_next_attempt` · `ck_claim_return_failure_code` 추가, `ck_claim_admin_decision` 교체, comment.
+   실패하면 아무것도 바뀌지 않는다. 성공 뒤 재실행하지 않는다.
+3. **앱 배포** — 모든 order-service 인스턴스를 교체한다. **dev 포함 모든 환경에서 새 앱 기동 전에 2를 적용한다** — dev 의 `ddl-auto=update` 는 새 열만 만들고
+   enum check · ck 제약은 바꾸지 않는다.
+
+- **롤링 · 롤백** — 이전 앱은 반품을 `REQUESTED`(새 칸 null)로만 쓰므로 새 제약을 만족한다(`ClaimCancellationSchemaUpgradePostgresTest` 가 이전 앱 모양 INSERT · UPDATE 로 확인).
+  B1 앱은 새 상태 행(`APPROVED` · `REJECTED`)을 쓰지 않으므로 B1 → 이전 앱 롤백은 안전하다. **B2 가 승인 · 거절 행을 쓴 뒤로는 B1 이전 앱으로 롤백하지 않는다** —
+  이전 앱은 새 상태 값을 읽지 못하고, **반품 수량 합산이 `status = 'REQUESTED'` 만 세서 `APPROVED` · `REFUNDED` · `COMPLETED` · `REFUND_FAILED` ·
+  `RESTORATION_FAILED` 수량을 빼고 센다 — 반품 수량 상한이 풀려 이미 환불한 수량을 다시 접수할 수 있다(이중 환불)**. DDL 자체를 되돌리는 스크립트는 두지 않는다.
+- **B2 → B1 롤백** — B1 도메인은 B2 가 쓸 반품 결정(승인 뒤 반품의 수습 결정, 직전 실패 코드 없는 거절 결정)을 **읽을 수 있다**(`Claim` 불변식이
+  `ck_claim_admin_decision` 과 같다). 만드는 전이는 B2 에만 있다. B2 가 새 상태 · 칸을 더 넓히면 이 롤백 안전성을 B2 에서 다시 본다.
+- 이 기반만으로 반품 환불이 열리지 않는다 — 승인 · 거절 API(권한 `ORDER_MANAGE`), 반품 환불 파이프라인 · 재시도 스케줄러 분기, 재고 복원 연결은 B2 다.
+
 ### 결제 후 취소 클레임 배포 (#16 PR-2a)
 
 `claim`에 결제 후 취소(CANCELLATION) 유형 · 환불/복원 상태 · 재시도 칸(`payment_id`, `attempt_count`, `next_attempt_at`, `failure_code`)을 더한다.
