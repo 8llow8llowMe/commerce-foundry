@@ -28,7 +28,7 @@ create table payment.payment_cancel (
     amount bigint not null,
     currency varchar(3) not null check (currency in ('KRW','USD')),
     payment_id bigint not null,
-    status varchar(20) not null check (status in ('PENDING','SUCCEEDED','REJECTED','VOIDED')),
+    status varchar(20) not null check (status in ('PENDING','SUCCEEDED','REJECTED','VOIDED','EXTERNAL_PG_REFUNDED','OFF_PG_REFUNDED')),
     version bigint,
     primary key (claim_id),
     constraint ck_payment_cancel_amount_positive check (amount > 0)
@@ -64,7 +64,9 @@ alter table payment.payment add constraint ck_payment_abort_reason_status check 
 commit;
 ```
 
-위 최초 설치 DDL 은 #691 의 `VOIDED` 를 이미 포함한다. 이미 원장이 있는 DB 는 아래 "#691 VOIDED 상태" 스크립트를 적용한다.
+위 최초 설치 DDL 은 #691 의 `VOIDED` 와 #693 의 `EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED` 를 이미 포함한다.
+이미 원장이 있는 DB 는 아래 "#693 외부 확인 환불 상태" 스크립트 하나만 적용하면 된다 — 최종 check 가 `VOIDED` 를 포함하므로 #691 스크립트를 따로 돌릴 필요가 없다.
+#691 스크립트를 이미 적용했어도 그대로 적용한다.
 
 ## #691 VOIDED 상태 (무환불 봉인)
 
@@ -110,6 +112,64 @@ commit;
 
 `PaymentCancelVoidPostgresTest` 가 이전 제약 → 봉인 INSERT 실패 → 스크립트 두 번 적용 → 봉인 성공 · 모르는 상태 거절을 보고,
 제약 이름이 다를 때 자기 점검이 `P0001` 로 실패하고 제약을 그대로 두는지 본다.
+
+> #693 스크립트를 적용한 뒤에는 이 스크립트를 다시 돌리지 않는다. 돌려도 **자기 점검이 막는다** — 현재 status check 정의에 `EXTERNAL_PG_REFUNDED` 가 있으면
+> `DO` 블록이 DROP 전에 `RAISE EXCEPTION`(`P0001`)으로 롤백해, 외부 확인 환불 행이 있든 없든 6값 check 가 그대로 남는다.
+
+## #693 외부 확인 환불 상태
+
+order 의 수동 환불 확정(#17 A3)을 payment 원장에 남기는 두 종결 상태를 `payment_cancel.status` check 에 더한다(`payment-guide.md` §8-1).
+
+| 상태 | 뜻 | PG 잔액 | 결제 상태(`payment.status`) |
+|------|----|---------|------------------------------|
+| `EXTERNAL_PG_REFUNDED` | PG 상점관리자(콘솔) 등 우리 취소 호출 밖에서 PG 가 환불했다 | 줄었다 | PG 취소 누계에 넣어 전이한다 |
+| `OFF_PG_REFUNDED` | PG 밖(계좌 송금 등)으로 환불했다 | 그대로다 | 바꾸지 않는다 — PG 상태의 거울 |
+
+두 이름 모두 칼럼 폭 20자 안이라 칼럼은 바꾸지 않는다. DDL 은 check 교체 하나다.
+이번 배포(PR A)에는 새 상태를 쓰는 경로가 없다 — 기록 명령은 다음 배포(internal `.../external-refund`, PR B)에서 생긴다. 그래도 DDL 은 이번 배포 전에 적용한다.
+
+적용 전에 위 "#691 VOIDED 상태" 의 catalog 조회로 이름을 확인한다. 출발 상태는 둘 중 하나다 — 둘 다 그대로 적용한다.
+아래 출력은 읽기 쉽게 줄을 나눴다. 실제 결과는 한 줄이다.
+
+```text
+-- #691 미적용 (3값)
+payment_cancel_status_check | CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'SUCCEEDED'::character varying, 'REJECTED'::character varying])::text[])))
+-- #691 적용 (4값)
+payment_cancel_status_check | CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'SUCCEEDED'::character varying, 'REJECTED'::character varying,
+  'VOIDED'::character varying])::text[])))
+```
+
+[`payment-cancel-external-refund-status.sql`](../service/payment-service/src/test/resources/ddl/payment-cancel-external-refund-status.sql)을
+`psql -v ON_ERROR_STOP=1 -f <파일>`로 적용한다. 뼈대(자기 점검 `DO` 블록 · 잠금 상한 · 한 트랜잭션)는 #691 스크립트와 같다.
+
+```sql
+begin;
+set local lock_timeout = '2s';
+set local statement_timeout = '30s';
+do $$ ... $$;  -- 자기 점검: status check 가 정확히 1건 · 이름 payment_cancel_status_check 가 아니면 raise exception (전문은 파일)
+alter table payment.payment_cancel drop constraint payment_cancel_status_check;
+alter table payment.payment_cancel add constraint payment_cancel_status_check
+    check (status in ('PENDING','SUCCEEDED','REJECTED','VOIDED','EXTERNAL_PG_REFUNDED','OFF_PG_REFUNDED'));
+commit;
+```
+
+적용 뒤 catalog 기대 출력(한 줄, `convalidated = true`):
+
+```text
+payment_cancel_status_check | CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'SUCCEEDED'::character varying, 'REJECTED'::character varying,
+  'VOIDED'::character varying, 'EXTERNAL_PG_REFUNDED'::character varying, 'OFF_PG_REFUNDED'::character varying])::text[])))
+```
+
+- **순서** — 새 payment-service 기동 **전**에 적용한다(dev 포함, `ddl-auto=update` 는 enum check 를 고치지 않는다). 배포 순서는 [`deploy-guide.md` "외부 확인 환불 상태 배포 (#693)"](deploy-guide.md#외부-확인-환불-상태-배포-693).
+- **재실행** — 최종 check 가 기존 값을 모두 포함하므로 새 상태 행이 생긴 뒤에도 다시 실행할 수 있다.
+- **잠금** — #691 과 같다: `ACCESS EXCLUSIVE` · 기존 행 전체 검사, 잠금 대기 2초 · 문장 30초 상한, 실패하면 롤백해 원래 제약이 남는다.
+- **롤백** — 외부 확인 환불 행이 **한 건이라도 생기면 이전 앱으로 내릴 수 없다.** 이전 앱은 새 값을 enum 으로 읽지 못한다 — 그 결제의 취소 원장을 읽는 경로
+  (결제 후 취소 준비 · 무환불 판정 · 자동 취소)가 enum 변환 실패로 5xx 가 되고, order 는 결제 후 취소 5xx 를 미확정으로 읽어 같은 클레임을 재시도 상한까지 되풀이한다
+  (상한을 넘으면 `REFUND_FAILED` · `REFUND_UNCONFIRMED`). 돈은 나가지 않지만 그 결제의 환불 · 판정이 멈춘다. 제약을 되돌리는 스크립트는 두지 않는다.
+  행이 생기기 전(PR A 만 배포된 동안)에는 이전 앱으로 내려도 된다 — 넓힌 check 는 그대로 둔다.
+
+`PaymentCancelVoidPostgresTest` 가 3값 · 4값 출발 → 새 상태 INSERT 실패 → 적용 → 새 상태 · VOIDED INSERT → 새 행 위 재실행 · 모르는 상태 거절,
+#691 스크립트를 거꾸로 다시 돌렸을 때 외부 환불 행이 있든 없든 `P0001` 로 막히고 6값이 남는지, 제약 이름이 다를 때 `P0001` 로 아무것도 바꾸지 않는지 본다.
 
 ## 운영 관측
 
