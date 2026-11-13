@@ -117,3 +117,17 @@ graceful release의 같은 attempt 재사용을 재생한다.
 `JobResultDownloadControllerTest`는 ADMIN 200·익명401·고객403·no-store·오류 봉투·주체 전달을 확인한다.
 `JobResultAuditLogAdapterTest`는 감사 네 칸을 고정한다. 실제 S3 서명·MinIO 왕복은 storage-core의 기존 계약 테스트가 담당한다.
 DDL 스냅숏은 `OperationsSchemaSnapshotTest`가 생성한 PostgreSQL SQL을 복사하여 갱신한다. 손으로 SQL을 만들지 않는다.
+
+## 결과 파일을 쓰지 않는 작업
+
+작은 구조화 결과만 내는 작업은 결과 파일 없이 `new JobOutcome(json)` 으로 `job.result_json`(엔진 상한 `operations.jobs.result.max-json-bytes`, 기본 64KiB)에 둔다.
+이 문서의 예약 · 확정 · 서명 다운로드 · 만료 정리는 적용되지 않고, 보관은 작업 행과 같다. 끝난 작업 보존 정리(`JOB_RETENTION_CLEANUP`, 90일 예정, #212 PR-D)는
+아직 없어 지금은 지워지지 않는다.
+
+| 작업 종류 | 결과 | 자체 상한 | 읽는 쪽 |
+|-----------|------|-----------|---------|
+| `SIZE_CHART_GENERATION` (#217) | 검증한 사이즈표 후보 · 경고 | 32KiB | product 결과 조회 internal |
+| `PRODUCT_DRAFT_GENERATE` (#359 PR-2b) | AI 상품 문구 제안 · 확인이 필요한 속성 · 경고(스키마는 `api-design-guide.md` §7-3) | 32KiB | product 결과 조회 internal(2b-2 · PR-3) |
+
+결과 JSON 에 운영자 입력 사실 · 프롬프트 · provider 원문 · 이미지 바이트를 싣지 않는다. 보존 정리를 넣을 때 보관 기간은 product 초안 보관(7일)보다 길게 둬
+초안이 살아 있는 동안 결과가 먼저 사라지지 않게 한다.
