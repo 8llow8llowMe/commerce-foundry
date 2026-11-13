@@ -472,3 +472,10 @@ Hibernate validate·생성 DDL/스냅숏 일치·PG 계약/복구/락 시험을 
 
 - dev 를 포함해 모든 환경에 DDL 을 먼저 적용한다(`ddl-auto=update` 는 기존 check 제약을 고치지 않는다).
 - order-service 의 void 호출(#17 A4 2단계)은 payment-service 모든 인스턴스가 새 버전이 된 뒤에 켠다 — 롤링 중 옛 인스턴스는 `VOIDED` 행을 읽으면 enum 변환에 실패한다.
+
+### 외부 확인 환불 상태 배포 (#693)
+
+새 payment-service 기동 **전**(dev 포함)에 `service/payment-service/src/test/resources/ddl/payment-cancel-external-refund-status.sql`로 `payment_cancel.status` check 를 6값(`EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED` 추가)으로 바꾼다 — #691 적용 여부와 무관하게 이 스크립트 하나면 된다. 이름 확인 · 롤백 불가 조건은 [취소 DDL 문서](payment-cancellation-ddl.md) "#693 외부 확인 환불 상태".
+
+- 적용 뒤 #691 스크립트를 다시 돌리지 않는다. 돌려도 자기 점검이 `P0001` 로 막아 6값이 남는다.
+- 외부 확인 환불 행이 한 건이라도 생기면 이전 payment-service 로 롤백하지 않는다. 기록 명령(internal `.../external-refund`)과 order 의 호출은 payment-service 모든 인스턴스가 새 버전이 된 뒤에 켠다.
