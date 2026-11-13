@@ -1276,20 +1276,22 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 | 파라미터 | 규칙 | 오류 |
 |---|---|---|
-| `status` | `PaymentStatus` 10개 상태 또는 조회 전용 `REFUND_FAILED`(취소거절 이력). 미지정이면 전체 | 변환 실패 400 `PAYMENT_198` |
+| `status` | `PaymentStatus` 10개 상태 또는 조회 전용 `REFUND_FAILED`(취소거절 이력) · `EXTERNAL_REFUNDED`(외부 확인 환불 이력, #693). 미지정이면 전체 | 변환 실패 400 `PAYMENT_198` |
 | `orderId` | 선택적 양의 주문 아이디. 다른 서비스는 호출하지 않고 저장된 아이디만 비교 | 400 `PAYMENT_102` · `198` |
 | `orderSynced` | 선택적 boolean. 저장된 주문 성공 회신 수신 여부로 거른다 | 변환 실패 400 `PAYMENT_198` |
 | `page` · `size` | 0부터 · 기본 20, size 1~100. 고정 결제 아이디 내림차순 | 400 `PAYMENT_116` · `117` |
 
 - 필터는 AND 이다. 없는 주문이나 조건에 맞는 결제가 없으면 200 빈 `contents`이며, 뒤쪽 빈 페이지도 필터 전체의 정확한 `totalElements`를 보존한다.
 - 항목은 `paymentId`, `orderId`, `status`, `amount`, `method`, `unknownReason`, `orderSynced`, `orderSyncFailureCode`,
-  `createdAt`, `updatedAt`, `approvalStartedAt`, `approvedAt` 이다. 아이디는 문자열, 금액은 `{amount, currency}`, 상태 · 수단 · 미확정 이유는 metadata, 시각은 UTC ISO 이다.
-  수단 · 미확정 이유 · 주문 회신 거절 코드 · 승인 시작/완료 시각은 null 일 수 있다. `unknownReason`은 DONE/FAILED에도 과거 원인으로 남을 수 있어 지우지 않는다.
+  `createdAt`, `updatedAt`, `approvalStartedAt`, `approvedAt`, `externalRefund` 이다. 아이디는 문자열, 금액은 `{amount, currency}`, 상태 · 수단 · 미확정 이유는 metadata,
+  시각은 UTC ISO 이다. 수단 · 미확정 이유 · 주문 회신 거절 코드 · 승인 시작/완료 시각 · `externalRefund` 는 null 일 수 있다.
+  `unknownReason`은 DONE/FAILED에도 과거 원인으로 남을 수 있어 지우지 않는다.
 - `amount`는 서버에 저장된 **결제 시도 원금**이다. 환불 차감 잔액 · 실제 수납액 · PG 대사 결과로 해석하지 않는다.
 - `orderSynced=false`는 READY 등 미승인 상태에도 있다. DONE 중 성공 회신 미확인을 보려면 `status=DONE&orderSynced=false`로 조회한다.
   그중 `orderSyncFailureCode=null`은 회신 미확인, 코드가 있으면 거절 회신이다. 어느 쪽도 자동 재전송 대상으로 보지 않는다 (`payment-guide.md` §6).
 - 결제키 · 고객 승인 멱등 키 · PG 원문 메시지 · 회원 개인정보는 projection과 응답에서 제외한다. 목록은 외부 호출 · 쓰기 · PG 재조회 · 재승인을 하지 않는다.
-- `PaymentAdminFacade`의 읽기 전용 REPEATABLE_READ에서 목록/count를 같은 조건으로 읽으며 최대 2회 질의다. N+1과 스키마 변경은 없다.
+- `PaymentAdminFacade`의 읽기 전용 REPEATABLE_READ에서 목록/count를 같은 조건으로 읽고, 비어 있지 않은 페이지면 외부 확인 환불 집계를 한 번 더 읽어 최대 3회 질의다
+  (#693, 아래). N+1과 스키마 변경은 없다.
   주문 조건은 `idx_payment_order_id`, 상태+회신 조건은 `idx_payment_status_order_synced_id`, 전체 최신순은 PK를 활용할 수 있다.
   상태만 거르면 중간 회신 컬럼 때문에 별도 정렬이 필요할 수 있으며 초기 운영자 조회 규모에서 수용한다.
 - `status=REFUND_FAILED`는 조회 전용 **취소거절 이력** 필터다. 해당 결제의 `payment_cancel.status=REJECTED` 원장이 하나 이상 존재하면 포함한다.
@@ -1297,6 +1299,15 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   응답 `status`는 실제 PaymentStatus metadata(DONE · CANCELED 등)를 유지한다. 거절 원장이 여러 개여도 결제는 한 번만 나오며 `orderId` · `orderSynced`와 AND로 조합한다.
   기존 페이지 · ID 내림차순 · 목록/count 동일 조건을 유지하고, 알 수 없는 상태 입력은 계속 400 `PAYMENT_198`이다. 새 상태 · 엔티티 · DDL · PG 호출은 없다.
   FE는 선택 항목을 "취소거절 이력"으로 표시하고 실제 응답 상태를 사용한다(계약 검토자 `seonghoho`). 웹훅 · 자동 복구 · 알림은 #15 후속 범위다.
+  **예외(#693)** — 거절 원장이 외부 확인 환불(`EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED`)로 바뀌면 그 행은 더 이상 `REJECTED` 가 아니므로 이 필터에서 저절로 빠진다.
+  같은 결제에 다른 거절 행이 남아 있으면 계속 포함하고 `EXTERNAL_REFUNDED` 에도 나온다.
+- `status=EXTERNAL_REFUNDED`(#693)는 조회 전용 **외부 확인 환불 이력** 필터다. `payment_cancel.status` 가 `EXTERNAL_PG_REFUNDED` · `OFF_PG_REFUNDED` 인 원장이
+  하나 이상 있는 결제를 포함한다. `REFUND_FAILED` 와 같은 상관 EXISTS · 목록/count 동일 조건 · AND 조합 · 결제 한 번만 반환 규칙을 따르고, 응답 `status` 는 실제
+  결제 상태다(PG 밖 환불만 있는 결제는 DONE 그대로). FE 표시 문구 제안은 "외부 환불 확인".
+- `externalRefund`(#693) = `{pgAmount: {amount, currency}, offPgAmount: {amount, currency}}`, 외부 확인 환불 원장이 없으면 null. 필터와 무관하게 모든 항목에 싣는다.
+  `pgAmount` 는 `EXTERNAL_PG_REFUNDED` 합(PG 상점관리자 등 — PG 잔액이 줄었다), `offPgAmount` 는 `OFF_PG_REFUNDED` 합(계좌 송금 등 — PG 잔액 · 결제 상태 무관)이며
+  둘 다 결제 통화, 없는 채널은 `amount: 0` 이다. 우리 PG 취소 성공(`SUCCEEDED`)은 넣지 않으며 `amount`(결제 시도 원금)에서 빼지 않는다.
+  집계는 페이지의 결제 아이디로 `payment_id IN (...)` + 상태 · 통화별 GROUP BY 한 문장이다(`idx_payment_cancel_payment_id`, `payment-guide.md` "어드민 결제 목록").
 
 ### 2-16. 어드민 주문 관리 (order-service, #17 PR-1)
 
