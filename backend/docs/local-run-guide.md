@@ -161,6 +161,9 @@ Claude 세션이나 하위 에이전트 여러 개가 worktree 를 나눠 같은
   클래스 전용 PostgreSQL·내장 Kafka 테스트는 `@DirtiesContext(AFTER_CLASS)`로 캐시에서 컨텍스트를 제거하고 풀·브로커를 해제한다.
   이때 create-drop H2 스키마가 다른 캐시된 컨텍스트에 영향을 주지 않도록 카테고리 교체 테스트는 전용 H2 DB를 사용한다.
   product 테스트의 OOM은 `ExitOnOutOfMemoryError`로 즉시 실패시키며, 테스트 제외나 대기 시간 상향으로 감추지 않는다.
+- order-service의 테스트 JVM은 **CI 에서만** 최대 힙 1.5GB다(#731). Testcontainers 통합 시험까지 돌아 캐시되는 컨텍스트가 많기 때문이다.
+  로컬은 Gradle 기본 512MB 그대로다(Docker 통합 시험이 건너뛰어지고, 같은 PC 를 여러 세션이 쓴다). OOM 은 `ExitOnOutOfMemoryError` 로 즉시 실패한다.
+  새 `@SpringBootTest` 는 가장 가까운 기존 시험과 오버라이드 빈 · 속성을 맞춰 컨텍스트 수를 늘리지 않는다.
 - 데몬은 켠 채로 쓴다(저장소 기본값). `--no-daemon` 은 매번 JVM 을 새로 띄워 느리다 — JVM 크래시 직후 한 번 다시 돌릴 때만 쓴다(§6).
   **`./gradlew --stop` 은 쓰지 않는다** — 같은 Gradle 버전의 데몬을 모두 내려 같은 PC 의 다른 세션 빌드까지 끊긴다.
 - 개인 설정 `~/.gradle/gradle.properties`(Windows 는 `%USERPROFILE%\.gradle\gradle.properties`)는 저장소 설정보다 우선하고,
