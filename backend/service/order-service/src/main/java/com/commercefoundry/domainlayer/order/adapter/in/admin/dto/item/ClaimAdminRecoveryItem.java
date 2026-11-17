@@ -6,7 +6,7 @@ import java.time.Instant;
 
 @Schema(description = "결제 후 취소 처리 상황 (#17). 원시 오류 코드 · 시도 횟수 · 결정자 아이디는 내지 않는다")
 public record ClaimAdminRecoveryItem(
-    @Schema(description = "처리 상황 — NO_ACTION · AUTO_PROCESSING · REFUND_UNCONFIRMED · REFUND_REJECTED · RESTORATION_UNCONFIRMED · "
+    @Schema(description = "처리 상황 — NO_ACTION · AUTO_PROCESSING · REFUND_UNCONFIRMED · REFUND_WAITING(반품 — 같은 결제의 다른 환불 대기) · REFUND_REJECTED · RESTORATION_UNCONFIRMED · "
         + "RESTORATION_REJECTED · ORDER_STATUS_MISMATCH. name · description 을 그대로 보여 준다")
     CodeNameDescriptionMetadata situation,
 

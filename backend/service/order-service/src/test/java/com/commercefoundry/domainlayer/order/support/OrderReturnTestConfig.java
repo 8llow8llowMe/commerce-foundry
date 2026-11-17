@@ -14,6 +14,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelP
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.service.OrderHistoryWebFacade;
 import com.commercefoundry.domainlayer.order.application.service.OrderReturnWebFacade;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminRecoveryProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderClaimHistoryProcessor;
@@ -36,7 +37,7 @@ import org.springframework.context.annotation.Import;
 @Import({OrderServiceFeaturesConfig.class, OrderRepositoryAdapter.class, OrderMapperImpl.class, ClaimRepositoryAdapter.class, ClaimMapper.class,
     OrderReturnProcessor.class, OrderReturnWebFacade.class, OrderReturnWebPresenter.class, OrderHistoryProcessor.class, OrderClaimHistoryProcessor.class,
     OrderPaymentRepositoryAdapter.class, OrderPaymentMapperImpl.class, OrderCancellationProcessor.class, OrderCancellationPipelineProcessor.class,
-    OrderHistoryWebFacade.class, OrderHistoryWebPresenter.class, OrderQuoteWebPresenter.class})
+    OrderHistoryWebFacade.class, OrderHistoryWebPresenter.class, OrderQuoteWebPresenter.class, ClaimAdminRecoveryProcessor.class})
 public class OrderReturnTestConfig {
     @Bean
     SnowflakeIdGenerator snowflakeIdGenerator() {

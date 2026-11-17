@@ -55,6 +55,12 @@ public record Claim(
     /** 재고 복원 재시도 상한을 넘었다 — 결과를 확인하지 못해 RESTORATION_FAILED 로 넘긴 실패 코드 (#16 PR-2). 운영자가 재고를 확인한다. */
     public static final String RESTORATION_UNCONFIRMED = "RESTORATION_UNCONFIRMED";
 
+    /**
+     * 결제 취소 불가 · 겹침(payment {@code PAYMENT_016}) — 반품에서는 같은 결제의 다른 환불에 막힌 것일 수 있어 거절이 아니라 막힘으로 본다
+     * ({@link #isRefundWaiting}, #17 B2b). 원격 코드 그대로 실패 코드에 저장된다.
+     */
+    public static final String REFUND_BLOCKED_CODE = "PAYMENT_016";
+
     private static final Set<Status> RETURN_QUANTITY_RESERVING_STATUSES = Collections.unmodifiableSet(EnumSet.complementOf(EnumSet.of(Status.REJECTED)));
 
     public Claim {
@@ -394,7 +400,8 @@ public record Claim(
     }
 
     /**
-     * 운영자 재시도로 종결 실패를 그 단계의 대기 상태로 다시 연다 (#17 A2b) — REFUND_FAILED({@link #REFUND_UNCONFIRMED}) → REQUESTED, RESTORATION_FAILED → REFUNDED.
+     * 운영자 재시도로 종결 실패를 그 단계의 대기 상태로 다시 연다 (#17 A2b, 반품 B2b) — REFUND_FAILED({@link #REFUND_UNCONFIRMED} · 반품의 {@link #REFUND_BLOCKED_CODE})
+     * → 유형별 환불 대기(취소 REQUESTED · 반품 APPROVED), RESTORATION_FAILED → REFUNDED.
      * 실패 코드는 지우고 다음 시각을 {@code until}(선점 lease)로 둔다. 같은 클레임 아이디 · 저장된 결제 · 금액으로 다시 보내므로 원격은 멱등이다.
      *
      * <p>결과 미확인이 아닌 환불 실패(결제사의 종결 거절)는 다시 열지 않는다 — payment 는 같은 claimId 의 거절 원장 때문에 늘 {@code PAYMENT_016} 을 돌려주므로
@@ -404,20 +411,33 @@ public record Claim(
      */
     public Claim reopen(Instant until, int attemptCount) {
         Objects.requireNonNull(until, "until");
-        requireCancellation();
         if (isNew() || !status.isFailed() || attemptCount < 0) {
             throw new IllegalStateException("다시 열기는 저장된 종결 실패 클레임만 합니다: status=" + status);
         }
-        if (status == Status.REFUND_FAILED && !REFUND_UNCONFIRMED.equals(failureCode)) {
+        if (isRefundRejected()) {
             throw new IllegalStateException("결제사가 거절한 환불은 다시 열지 않습니다: failureCode=" + failureCode);
         }
-        Status reopened = status == Status.REFUND_FAILED ? Status.REQUESTED : Status.REFUNDED;
+        // 환불 단계는 유형별 환불 대기(취소 REQUESTED · 반품 APPROVED)로, 복원 단계는 REFUNDED 로 연다 (반품 #17 B2b)
+        Status reopened = status == Status.REFUND_FAILED ? awaitingRefundStatus() : Status.REFUNDED;
         return with(reopened, attemptCount, until.truncatedTo(ChronoUnit.MICROS), null);
     }
 
-    /** 결제사의 종결 거절로 닫힌 환불 실패인가 — 결과 미확인({@link #REFUND_UNCONFIRMED})과 달리 다시 보내도 같은 거절이다 (#17). 반품도 같다(#17 B2a). */
+    /**
+     * 결제사의 종결 거절로 닫힌 환불 실패인가 — 결과 미확인({@link #REFUND_UNCONFIRMED})과 달리 다시 보내도 같은 거절이다 (#17). 반품도 같지만(#17 B2a)
+     * 반품의 {@link #REFUND_BLOCKED_CODE} 는 거절이 아니라 {@linkplain #isRefundWaiting 막힘}이다(#17 B2b).
+     */
     public boolean isRefundRejected() {
-        return status == Status.REFUND_FAILED && !REFUND_UNCONFIRMED.equals(failureCode);
+        return status == Status.REFUND_FAILED && !REFUND_UNCONFIRMED.equals(failureCode) && !isRefundWaiting();
+    }
+
+    /**
+     * 반품 환불이 같은 결제의 다른 환불에 막혀 나가지 않았을 수 있는가 (#17 B2b) — 반품은 한 결제에 클레임이 여럿이라, 다른 claimId 의 결제 취소가 아직
+     * 처리 중(payment 원장 PENDING)이면 payment 는 이 클레임의 행을 만들지 않고 {@code PAYMENT_016} 을 준다(일시적 겹침). order 는 payment 원장을 읽지 못해
+     * 겹침과 이 클레임 자체의 거절을 가르지 못하므로, 돈이 나가지 않았다고 보고 <b>다시 시도</b>(같은 claimId — 겹침이 풀리면 환불, 진짜 거절이면 다시 016 이라 무해)를
+     * 정본 경로로 둔다. 수동 환불 확정은 결제 취소 키 기한이 닫힌 뒤에만 받는다(결과 미확인과 같다). 취소 클레임의 016 은 그대로 거절이다(주문당 하나).
+     */
+    public boolean isRefundWaiting() {
+        return type == Type.RETURN && status == Status.REFUND_FAILED && REFUND_BLOCKED_CODE.equals(failureCode);
     }
 
     /**
@@ -443,7 +463,6 @@ public record Claim(
 
     private void requireDecisionOn(Status expected, Decision decision) {
         Objects.requireNonNull(decision, "decision");
-        requireCancellation();
         if (isNew() || status != expected || !Objects.equals(decision.previousFailureCode(), failureCode)) {
             throw new IllegalStateException("운영자 결정은 저장된 %s 클레임의 지금 실패 코드로만 남깁니다: status=%s".formatted(expected, status));
         }
@@ -451,12 +470,6 @@ public record Claim(
 
     public boolean isNew() {
         return version == null;
-    }
-
-    private void requireCancellation() {
-        if (type != Type.CANCELLATION) {
-            throw new IllegalStateException("취소 클레임만 이 전이를 합니다: type=" + type);
-        }
     }
 
     private void requireReturn() {

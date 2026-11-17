@@ -9,15 +9,20 @@ import com.commercefoundry.domainlayer.order.domain.model.ClaimAdminRecoveryPoli
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.domainlayer.order.domain.model.ReturnRefundPolicy;
 import com.commercefoundry.global.properties.OrderCancellationProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
+import jakarta.persistence.LockTimeoutException;
+import jakarta.persistence.PessimisticLockException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -61,15 +66,12 @@ public class ClaimAdminRecoveryProcessor {
             throw new OrderException(OrderErrorCode.CLAIM_RETRY_UNAVAILABLE);
         }
         Claim claim = loadExpected(claimId, expectedVersion);
+        if (claim.type() == Claim.Type.RETURN) {
+            return confirmReturnRefund(claim, reason, adminId);
+        }
         Order order = orderRepositoryPort.findById(claim.orderId()).orElseThrow(() -> new IllegalStateException("claim order not found"));
         Instant now = clock.instant();
-        try {
-            ClaimAdminRecoveryPolicy.requireRefundConfirmation(claim, order, isRefundRetryClosed(claim, now));
-        } catch (IllegalStateException exception) {
-            log.warn("refund confirmation refused. claimId={}, orderId={}, claimStatus={}, failureCode={}, orderStatus={}", claim.id(), order.id(),
-                claim.status(), claim.failureCode(), order.status());
-            throw new OrderException(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
-        }
+        requireRefundConfirmation(claim, order, now);
         Claim refunded = claim.confirmRefundByAdmin(decision(claim, reason, adminId, now), now.plus(properties.retry().lease()));
         Claim saved;
         try {
@@ -86,6 +88,66 @@ public class ClaimAdminRecoveryProcessor {
         log.warn("cancellation refund confirmed by admin without PG call. claimId={}, orderId={}, paymentId={}, previousFailureCode={}, adminId={}",
             claim.id(), claim.orderId(), claim.paymentId(), claim.failureCode(), adminId);
         return saved;
+    }
+
+    /**
+     * 반품 수동 환불 확정 (#17 B2b) — 반품의 열림 → 정산 전이라 <b>주문을 먼저 NOWAIT 으로 잠근다</b>({@code order-flow-guide.md} §1-2). 확정 · 주문 정리
+     * ({@link ReturnRefundPolicy#outcome} → {@link Order#settleReturn}) · {@code ADMIN} 이력(사유)이 한 커밋이다 — 자동 반영
+     * ({@code OrderCancellationProcessor#applyReturnRefunded})과 같은 정리이고 이력만 SERVICE 대신 ADMIN 이다. 재고로 되돌리지 않는 반품은 같은 커밋에서 COMPLETED 다.
+     * 정리 판정이 불가능하면(데이터 이상) 저장하지 않고 409 다 — 자동 반영과 달리 운영자 앞이라 fail-closed 저장 대신 거절한다.
+     */
+    private Claim confirmReturnRefund(Claim claim, String reason, long adminId) {
+        // 클레임만으로 후보가 아니면 주문을 잠그지 않고 바로 거절한다 — 잠금은 실제로 바꿀 요청만 잡는다
+        if (!ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(claim, isRefundRetryClosed(claim, clock.instant()))) {
+            log.warn("refund confirmation refused. claimId={}, orderId={}, claimStatus={}, failureCode={}", claim.id(), claim.orderId(), claim.status(),
+                claim.failureCode());
+            throw new OrderException(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+        }
+        Order order;
+        try {
+            order = orderRepositoryPort.findByIdForUpdate(claim.orderId()).orElseThrow(() -> new IllegalStateException("claim order not found"));
+        } catch (PessimisticLockingFailureException | PessimisticLockException | LockTimeoutException exception) {
+            // 같은 주문의 다른 반품 결정 · 환불 기록이 잡고 있다 — 기다리지 않고 화면을 다시 읽게 한다
+            throw new OrderException(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        }
+        Instant now = clock.instant();
+        requireRefundConfirmation(claim, order, now);
+        Claim refunded = claim.confirmRefundByAdmin(decision(claim, reason, adminId, now), now.plus(properties.retry().lease()));
+        Claim recorded = refunded.requiresRestoration() ? refunded : refunded.complete();
+        List<Claim> claims = claimRepositoryPort.findAllByOrderId(order.id()).stream()
+            .map(stored -> stored.id() == recorded.id() ? recorded : stored).toList();
+        ReturnRefundPolicy.ReturnOutcome outcome;
+        try {
+            outcome = ReturnRefundPolicy.outcome(order, claims);
+        } catch (IllegalStateException | IllegalArgumentException invalid) {
+            log.warn("return refund confirmation refused, order claims cannot be settled. claimId={}, orderId={}, error={}", claim.id(), order.id(),
+                invalid.getClass().getSimpleName());
+            throw new OrderException(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+        }
+        Claim saved;
+        try {
+            saved = claimRepositoryPort.update(recorded);
+            Order settled = order.settleReturn(outcome);
+            if (settled.status() != order.status()) {
+                orderRepositoryPort.saveStatusChange(settled,
+                    OrderStatusHistory.changedByAdmin(snowflakeIdGenerator.generateId(), order, settled, adminId, reason));
+            }
+        } catch (OptimisticLockingFailureException exception) {
+            throw new OrderException(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        }
+        log.warn("return refund confirmed by admin without PG call. claimId={}, orderId={}, paymentId={}, previousFailureCode={}, adminId={}",
+            claim.id(), claim.orderId(), claim.paymentId(), claim.failureCode(), adminId);
+        return saved;
+    }
+
+    private void requireRefundConfirmation(Claim claim, Order order, Instant now) {
+        try {
+            ClaimAdminRecoveryPolicy.requireRefundConfirmation(claim, order, isRefundRetryClosed(claim, now));
+        } catch (IllegalStateException exception) {
+            log.warn("refund confirmation refused. claimId={}, orderId={}, claimStatus={}, failureCode={}, orderStatus={}", claim.id(), order.id(),
+                claim.status(), claim.failureCode(), order.status());
+            throw new OrderException(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
+        }
     }
 
     /**
@@ -182,13 +244,11 @@ public class ClaimAdminRecoveryProcessor {
     }
 
     private void requireRetryable(Claim claim, Instant now) {
-        if (claim.type() != Claim.Type.CANCELLATION) {
-            throw new OrderException(OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
-        }
         if (claim.isAwaitingAttempt() && claim.nextAttemptAt() != null && claim.nextAttemptAt().isAfter(now)) {
             throw new OrderException(OrderErrorCode.CLAIM_AUTO_PROCESSING);
         }
-        // 결제사가 거절한 환불은 다시 보내도 같은 거절(PAYMENT_016)이고 진짜 사유만 지워진다 — 대표 관리자의 수동 확정으로 넘긴다
+        // 결제사가 거절한 환불은 다시 보내도 같은 거절(PAYMENT_016)이고 진짜 사유만 지워진다 — 대표 관리자의 수동 확정으로 넘긴다.
+        // 반품의 016 은 다른 환불에 막힌 것일 수 있어 거절이 아니다({@link Claim#isRefundWaiting}) — 같은 claimId 로 다시 보내는 것이 정본 경로다(#17 B2b)
         if (claim.isRefundRejected()) {
             throw new OrderException(OrderErrorCode.CLAIM_RETRY_NOT_ALLOWED);
         }

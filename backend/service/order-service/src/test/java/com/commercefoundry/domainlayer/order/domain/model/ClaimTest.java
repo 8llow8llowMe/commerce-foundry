@@ -11,6 +11,7 @@ import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
@@ -630,7 +631,11 @@ class ClaimTest {
         assertThat(refundFailed.status()).isEqualTo(Claim.Status.REFUND_FAILED);
         assertThat(refundFailed.failureCode()).isEqualTo("PAYMENT_016");
         assertThat(refundFailed.nextAttemptAt()).isNull();
-        assertThat(refundFailed.isRefundRejected()).as("결제사 거절은 반품도 같다").isTrue();
+        // #17 B2b — 반품의 PAYMENT_016 은 같은 결제의 다른 환불에 막힌 것일 수 있어 거절이 아니라 막힘이다. 다른 종결 코드는 취소와 같은 거절이다
+        assertThat(refundFailed.isRefundRejected()).as("반품의 016 은 거절이 아니다").isFalse();
+        assertThat(refundFailed.isRefundWaiting()).isTrue();
+        assertThat(approved.failRefund("PAYMENT_017").isRefundRejected()).as("그 밖의 결제사 거절은 반품도 같다").isTrue();
+        assertThat(approved.failRefund("PAYMENT_017").isRefundWaiting()).isFalse();
         assertThat(unconfirmed.isRefundRejected()).isFalse();
         assertThat(unconfirmed.markRefunded(NOW).status()).isEqualTo(Claim.Status.REFUNDED);
         assertThatThrownBy(() -> refundFailed.markRefunded(NOW)).isInstanceOf(IllegalStateException.class);
@@ -671,7 +676,7 @@ class ClaimTest {
     }
 
     @Test
-    @DisplayName("승인 전 · 거절된 반품은 환불 수명 전이를 하지 않고, 다시 열기 · 수동 결정은 아직 취소만이다(반품 수습은 #17 B2b)")
+    @DisplayName("승인 전 · 거절된 반품은 환불 수명 전이를 하지 않는다. 승인된 반품의 다시 열기 · 수동 결정은 #17 B2b 에서 열렸다")
     void returnTransitionsRequireApprovalAndRecoveryStaysCancellationOnly() {
         Claim requested = returnRequested();
         Claim rejected = requested.rejectReturn();
@@ -686,10 +691,13 @@ class ClaimTest {
         }
         Claim refundFailed = approvedReturn(true).failRefund(Claim.REFUND_UNCONFIRMED);
         Claim restorationFailed = approvedReturn(true).markRefunded(NOW).failRestoration("PRODUCT_028");
-        assertThatThrownBy(() -> refundFailed.reopen(NOW, 0)).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> refundFailed.confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, Claim.REFUND_UNCONFIRMED), NOW))
-            .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> restorationFailed.completeByAdmin(new Claim.Decision("확인", 9, NOW, "PRODUCT_028"))).isInstanceOf(IllegalStateException.class);
+        // #17 B2b — 승인된 반품의 수습 전이가 열렸다(자격은 ClaimAdminRecoveryPolicy 가 먼저 본다). 승인 전 · 거절 반품은 위에서처럼 여전히 막힌다
+        assertThat(refundFailed.reopen(NOW, 0).status()).isEqualTo(Claim.Status.APPROVED);
+        assertThat(refundFailed.confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, Claim.REFUND_UNCONFIRMED), NOW).status()).isEqualTo(Claim.Status.REFUNDED);
+        assertThat(restorationFailed.completeByAdmin(new Claim.Decision("확인", 9, NOW, "PRODUCT_028")).status()).isEqualTo(Claim.Status.COMPLETED);
+        for (Claim claim : List.of(requested, rejected)) {
+            assertThatThrownBy(() -> claim.reopen(NOW, 0)).as(claim.status().name()).isInstanceOf(IllegalStateException.class);
+        }
         assertThat(Claim.Type.CANCELLATION.awaitingAttemptStatuses()).containsExactlyInAnyOrder(Claim.Status.REQUESTED, Claim.Status.REFUNDED);
         assertThat(Claim.Type.RETURN.awaitingAttemptStatuses()).containsExactlyInAnyOrder(Claim.Status.APPROVED, Claim.Status.REFUNDED);
         assertThat(requested.awaitingRefundStatus()).isEqualTo(Claim.Status.APPROVED);
@@ -705,6 +713,37 @@ class ClaimTest {
 
         assertThat(approved.hasSameRefundRequest(cancellation)).isFalse();
         assertThat(cancellation.hasSameRefundRequest(approved)).isFalse();
+    }
+
+    @Test
+    @DisplayName("반품 수습 전이 — 막힘(016) · 미확인 환불 실패는 APPROVED 로, 복원 실패는 REFUNDED 로 다시 열고, 그 밖의 거절은 다시 열지 않는다. 수동 확정 · 종결도 반품을 받는다 (#17 B2b)")
+    void returnRecoveryTransitions() {
+        Claim approved = approvedReturn(true);
+        Instant until = NOW.plus(LEASE);
+
+        Claim waiting = approved.failRefund(Claim.REFUND_BLOCKED_CODE).reopen(until, 5);
+        assertThat(waiting.status()).isEqualTo(Claim.Status.APPROVED);
+        assertThat(waiting.failureCode()).isNull();
+        assertThat(waiting.attemptCount()).isEqualTo(5);
+        assertThat(waiting.nextAttemptAt()).isEqualTo(until.truncatedTo(ChronoUnit.MICROS));
+        assertThat(waiting.approval()).as("승인 기록은 그대로").isEqualTo(approved.approval());
+        assertThat(approved.failRefund(Claim.REFUND_UNCONFIRMED).reopen(until, 0).status()).isEqualTo(Claim.Status.APPROVED);
+        assertThat(approved.markRefunded(NOW).failRestoration("PRODUCT_028").reopen(until, 0).status()).isEqualTo(Claim.Status.REFUNDED);
+        Claim rejected = approved.failRefund("PAYMENT_017");
+        assertThatThrownBy(() -> rejected.reopen(until, 0)).isInstanceOf(IllegalStateException.class);
+
+        Claim confirmed = rejected.confirmRefundByAdmin(new Claim.Decision("콘솔 환불 확인", 9, NOW, "PAYMENT_017"), until);
+        assertThat(confirmed.status()).isEqualTo(Claim.Status.REFUNDED);
+        assertThat(confirmed.failureCode()).isNull();
+        assertThat(confirmed.decision().previousFailureCode()).isEqualTo("PAYMENT_017");
+        assertThat(approvedReturn(false).failRefund("PAYMENT_017").confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, "PAYMENT_017"), until)
+            .complete().status()).as("재고로 되돌리지 않는 반품은 확정과 함께 완료로 닫을 수 있다").isEqualTo(Claim.Status.COMPLETED);
+
+        Claim restorationFailed = approved.markRefunded(NOW).failRestoration("PRODUCT_028");
+        Claim completed = restorationFailed.completeByAdmin(new Claim.Decision("재고 조정 완료", 9, NOW, "PRODUCT_028"));
+        assertThat(completed.status()).isEqualTo(Claim.Status.COMPLETED);
+        assertThat(completed.nextAttemptAt()).isNull();
+        assertThat(completed.isSettledReturn()).isTrue();
     }
 
     private static Claim approvedReturn(boolean restock) {

@@ -6,7 +6,7 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 어드민 운영자에게 보이는 결제 후 취소 클레임의 처리 상황 (#17 A2b). 운영자는 비개발자라 원격 오류 코드 · 시도 횟수 대신 이 업무 언어로 본다 —
+ * 어드민 운영자에게 보이는 결제 후 취소 · 승인된 반품 클레임의 처리 상황 (#17 A2b, 반품 B2b). 운영자는 비개발자라 원격 오류 코드 · 시도 횟수 대신 이 업무 언어로 본다 —
  * 원시 실패 코드는 로그(클레임 · 주문 · 결제 아이디)에만 남긴다.
  */
 @Getter
@@ -15,6 +15,7 @@ public enum ClaimRecoverySituation implements CodeNameDescribable {
     NO_ACTION("조치 필요 없음", "처리가 끝났거나 운영자가 손댈 일이 없는 접수입니다."),
     AUTO_PROCESSING("자동 처리 중", "결제 취소 또는 재고 복원을 자동으로 진행하고 있습니다. 다음 자동 시도 시각에 다시 확인합니다."),
     REFUND_UNCONFIRMED("결제 취소 결과 미확인", "결제 취소 결과를 끝내 확인하지 못했습니다. 다시 시도하면 같은 결제 취소를 한 번 더 확인합니다."),
+    REFUND_WAITING("다른 환불 처리 대기", "같은 결제의 다른 환불이 아직 끝나지 않아 이 환불을 보내지 못했습니다. 돈은 아직 나가지 않았습니다. 잠시 뒤 다시 시도해 주세요."),
     REFUND_REJECTED("결제 취소 거절", "결제사가 결제 취소를 받지 않았습니다. 다시 시도해도 같은 결과라 결제 관리 화면에서 결제 상태를 확인한 뒤 대표 관리자가 처리합니다."),
     RESTORATION_UNCONFIRMED("재고 복원 결과 미확인", "결제 취소는 끝났지만 재고 복원 결과를 확인하지 못했습니다. 다시 시도하면 같은 복원을 한 번 더 확인합니다."),
     RESTORATION_REJECTED("재고 복원 거절", "결제 취소는 끝났지만 재고를 되돌리지 못했습니다. 재고 관리 화면에서 수량을 확인해 주세요."),
@@ -28,17 +29,19 @@ public enum ClaimRecoverySituation implements CodeNameDescribable {
 
     public static ClaimRecoverySituation of(Claim claim) {
         Objects.requireNonNull(claim, "claim");
-        // 반품은 아직 수습 대상이 아니다 — 승인 뒤 환불 · 복원 파이프라인(#17 B2)이 생기면 연다
-        if (claim.type() != Claim.Type.CANCELLATION) {
-            return NO_ACTION;
-        }
+        // 취소 · 승인된 반품 모두 같은 파이프라인 · 수습을 쓴다(반품 #17 B2b). 승인 전 반품(REQUESTED)은 대기 상태가 아니라 아래에서 조치 필요 없음이다
         if (claim.isAwaitingAttempt()) {
             return AUTO_PROCESSING;
         }
         return switch (claim.status()) {
-            // 대기 상태(REQUESTED · REFUNDED)는 위에서 끝났다. APPROVED 는 취소에 없고, REJECTED 는 취소 거절(A4) 뒤의 끝 상태다
+            // 대기 상태(취소 REQUESTED · 반품 APPROVED · REFUNDED)는 위에서 끝났다. 반품 REQUESTED 는 승인 전(검수는 B2c 화면), REJECTED 는 거절 뒤의 끝 상태다
             case REQUESTED, APPROVED, REFUNDED, COMPLETED, REJECTED -> NO_ACTION;
-            case REFUND_FAILED -> Claim.REFUND_UNCONFIRMED.equals(claim.failureCode()) ? REFUND_UNCONFIRMED : REFUND_REJECTED;
+            case REFUND_FAILED -> {
+                if (claim.isRefundWaiting()) {
+                    yield REFUND_WAITING;
+                }
+                yield Claim.REFUND_UNCONFIRMED.equals(claim.failureCode()) ? REFUND_UNCONFIRMED : REFUND_REJECTED;
+            }
             case RESTORATION_FAILED -> {
                 if (ORDER_STATUS_UNEXPECTED.equals(claim.failureCode())) {
                     yield ORDER_STATUS_MISMATCH;
