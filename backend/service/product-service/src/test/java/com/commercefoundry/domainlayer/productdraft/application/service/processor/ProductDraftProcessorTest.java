@@ -82,6 +82,20 @@ class ProductDraftProcessorTest {
         }
 
         @Test
+        @DisplayName("만료 시각은 마이크로초로 자른다 — operations 영수증이 timestamp(6) 저장 값과 대조해 같은 회차 재시도가 재생되게 (#359 PR-B1)")
+        void expiresAtMicrosecondPrecision() {
+            given(port.insert(any())).willAnswer(invocation -> invocation.getArgument(0));
+            Instant withNanos = NOW.plusNanos(123_456_789);
+            ProductDraftProcessor nanoClock = new ProductDraftProcessor(port, new SnowflakeIdGenerator(1, 1), MediaUrlPolicy.of(BASE),
+                new ProductDraftProperties(Duration.ofDays(7), false), Clock.fixed(withNanos, ZoneOffset.UTC));
+
+            ProductDraft created = nanoClock.create(command(List.of()));
+
+            assertThat(created.expiresAt()).isEqualTo(NOW.plus(Duration.ofDays(7)).plusNanos(123_456_000));
+            assertThat(created.expiresAt().getNano() % 1_000).isZero();
+        }
+
+        @Test
         @DisplayName("이미지가 없으면 미디어 저장소 설정을 보지 않는다 — 사실만으로도 만든다")
         void noImagesWithoutStorage() {
             given(port.insert(any())).willAnswer(invocation -> invocation.getArgument(0));

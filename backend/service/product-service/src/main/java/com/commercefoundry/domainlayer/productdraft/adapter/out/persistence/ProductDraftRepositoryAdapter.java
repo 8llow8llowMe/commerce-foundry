@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.productdraft.adapter.out.persistence.repo
 import com.commercefoundry.domainlayer.productdraft.application.port.out.ProductDraftRepositoryPort;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftFacts;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftGeneration;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImage;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageSource;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageType;
@@ -44,24 +45,43 @@ public class ProductDraftRepositoryAdapter implements ProductDraftRepositoryPort
             .rejectedByMemberId(draft.rejectedByMemberId())
             .rejectedAt(draft.rejectedAt())
             .expiresAt(draft.expiresAt())
+            .generationNo(draft.generation().generationNo())
+            .generationRequestedByMemberId(draft.generation().requestedByMemberId())
+            .generationRequestedAt(draft.generation().requestedAt())
+            .inputHash(draft.generation().inputHash())
+            .jobId(draft.generation().jobId())
             .build();
         return toDomain(productDraftRepository.save(entity));
     }
 
     @Override
     public void updateDecision(ProductDraft draft) {
-        ProductDraftEntity entity = productDraftRepository.findById(draft.id())
-            .orElseThrow(() -> new IllegalStateException("바꿀 초안이 없습니다. draftId=" + draft.id()));
+        ProductDraftEntity entity = managed(draft.id());
         entity.decide(draft.status(), draft.rejectedByMemberId(), draft.rejectedAt());
         productDraftRepository.flush();
     }
 
+    @Override
+    public void updateGeneration(ProductDraft draft) {
+        ProductDraftEntity entity = managed(draft.id());
+        ProductDraftGeneration generation = draft.generation();
+        entity.recordGeneration(draft.status(), generation.generationNo(), generation.requestedByMemberId(), generation.requestedAt(), generation.inputHash(),
+            generation.jobId());
+        productDraftRepository.flush();
+    }
+
+    private ProductDraftEntity managed(long draftId) {
+        return productDraftRepository.findById(draftId).orElseThrow(() -> new IllegalStateException("바꿀 초안이 없습니다. draftId=" + draftId));
+    }
+
     private static ProductDraft toDomain(ProductDraftEntity entity) {
         InputDocument input = readInput(entity);
+        ProductDraftGeneration generation = new ProductDraftGeneration(entity.getGenerationNo(), entity.getGenerationRequestedByMemberId(),
+            entity.getGenerationRequestedAt(), entity.getInputHash(), entity.getJobId());
         return new ProductDraft(
             entity.getId(), entity.getStatus(), entity.getRequestedByMemberId(), input.facts().toDomain(),
             input.images().stream().map(ImageDocument::toDomain).toList(),
-            entity.getRejectedByMemberId(), entity.getRejectedAt(), entity.getExpiresAt(), toDbPrecision(entity.getCreatedAt())
+            entity.getRejectedByMemberId(), entity.getRejectedAt(), entity.getExpiresAt(), toDbPrecision(entity.getCreatedAt()), generation
         );
     }
 

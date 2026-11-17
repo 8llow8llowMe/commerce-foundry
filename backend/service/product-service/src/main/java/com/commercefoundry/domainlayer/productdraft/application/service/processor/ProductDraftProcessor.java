@@ -13,6 +13,7 @@ import com.commercefoundry.global.properties.ProductDraftProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -70,6 +71,9 @@ public class ProductDraftProcessor {
     /**
      * 생성 대기 초안을 저장한다. 만료 시각 = 지금 + {@code product-draft.ttl}. 이미지는 {@link ProductDraftImageProcessor#pin} 으로 원본을 고정한 것만 받는다 —
      * 고정하지 않은 이미지가 오면 호출 순서 버그다. 저장소 확인을 마친 뒤 이 짧은 쓰기 트랜잭션만 연다.
+     *
+     * <p>만료 시각은 마이크로초로 자른다(#359 PR-B1). 생성 등록이 이 값을 그대로 보내고 operations 영수증은 저장 값(timestamp(6))과 대조한다 —
+     * 나노초가 남으면 응답 유실 뒤 같은 회차 재시도가 409 {@code PRODUCT_DRAFT_GENERATION_002} 가 된다.
      */
     @Transactional
     public ProductDraft create(ProductDraftCreateCommand command) {
@@ -78,7 +82,8 @@ public class ProductDraftProcessor {
         }
         Instant now = now();
         ProductDraft draft = ProductDraft.request(
-            snowflakeIdGenerator.generateId(), command.requestedByMemberId(), command.facts(), command.images(), now.plus(productDraftProperties.ttl())
+            snowflakeIdGenerator.generateId(), command.requestedByMemberId(), command.facts(), command.images(),
+            now.plus(productDraftProperties.ttl()).truncatedTo(ChronoUnit.MICROS)
         );
         return productDraftRepositoryPort.insert(draft);
     }

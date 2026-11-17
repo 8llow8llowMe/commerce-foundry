@@ -20,7 +20,8 @@ import org.springframework.stereotype.Component;
  * 외부 주소를 내려받지 않는다. 로그 · 예외에 키 · 주소 · ETag · 바이트를 싣지 않는다.
  *
  * <p><b>상한</b> — 장당 바이트는 ai-core {@link AiImage#MAX_BYTES}(5MiB)다. 장수는 요청 DTO 의 8장(PRODUCT_DRAFT_120)이 {@link AiImage#MAX_COUNT}(8)와 같아
- * 여기서 다시 세지 않는다 — 둘 중 작은 값이 8 이다.
+ * 여기서 다시 세지 않는다 — 둘 중 작은 값이 8 이다. 원본 합계는 {@link #MAX_TOTAL_IMAGE_BYTES}(20MiB)다 — operations 생성 핸들러의 같은 상한
+ * (AI 요청 본문 32MB 를 base64 4/3 배로 나눈 값, {@code ai-provider-guide.md})을 저장 단계에서 먼저 알린다. 값은 product 안에 둔다(ai-core 에 합계 상수가 없다).
  *
  * <p><b>허용 키</b> — 업로드를 마친 상품 미디어 키 {@code products/media/{actorId}/{UUID}/{SHA-256}.{jpg|png|webp}} 만이다(D11, 모양은 미디어 업로드 확정
  * {@code MediaImageStorageAdapter} 가 만든다). 업로드 확정 전 원본({@code uploads/...}) · 상품별 키({@code products/{id}/...}) · 이관 이미지는 받지 않는다.
@@ -31,6 +32,8 @@ import org.springframework.stereotype.Component;
 public class ProductDraftImageProcessor {
 
     public static final int MAX_IMAGE_BYTES = AiImage.MAX_BYTES;
+    /** 고정한 원본 합계 상한(#359 PR-B1) — operations 생성 핸들러의 원본 합계 20MiB 와 같다. */
+    public static final long MAX_TOTAL_IMAGE_BYTES = 20L * 1024 * 1024;
     static final Pattern MEDIA_KEY = Pattern.compile(
         "products/media/[1-9][0-9]{0,18}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{64}\\.(jpg|png|webp)");
     private static final Map<String, String> CONTENT_TYPE_BY_EXTENSION = Map.of("jpg", "image/jpeg", "png", "image/png", "webp", "image/webp");
@@ -39,9 +42,10 @@ public class ProductDraftImageProcessor {
 
     /**
      * 요청 이미지를 관리 키로 바꾸고 HEAD 값을 고정한다. 순서를 지킨다. 키 판정을 전부 마친 뒤에 HEAD 를 부른다 — 잘못된 키 하나 때문에 저장소를 부르지 않는다.
-     * HEAD 는 장마다 한 번(최대 8번)이다 — 저장소에 여러 객체를 한 번에 확인하는 API 가 없다.
+     * HEAD 는 장마다 한 번(최대 8번)이다 — 저장소에 여러 객체를 한 번에 확인하는 API 가 없다. 합계({@code 037})는 모든 HEAD 를 마친 뒤 본다 — 장마다의 사유
+     * ({@code 033} · {@code 036})가 먼저다.
      *
-     * @throws ProductDraftException {@code 031}(관리 키 아님) · {@code 033}(없음) · {@code 036}(크기 · 형식) · {@code 501}(저장소 장애, 503)
+     * @throws ProductDraftException {@code 031}(관리 키 아님) · {@code 033}(없음) · {@code 036}(크기 · 형식) · {@code 037}(합계 20MiB 초과) · {@code 501}(저장소 장애, 503)
      */
     public List<ProductDraftImage> pin(List<ProductDraftImage> images) {
         if (images.isEmpty()) {
@@ -49,8 +53,14 @@ public class ProductDraftImageProcessor {
         }
         List<String> keys = images.stream().map(image -> managedKey(image.url())).toList();
         List<ProductDraftImage> pinned = new ArrayList<>(images.size());
+        long totalBytes = 0;
         for (int i = 0; i < images.size(); i++) {
-            pinned.add(images.get(i).pinned(head(keys.get(i))));
+            ProductDraftImage image = images.get(i).pinned(head(keys.get(i)));
+            totalBytes += image.source().length();
+            pinned.add(image);
+        }
+        if (totalBytes > MAX_TOTAL_IMAGE_BYTES) {
+            throw new ProductDraftException(ProductDraftErrorCode.IMAGES_TOO_LARGE);
         }
         return List.copyOf(pinned);
     }

@@ -43,9 +43,11 @@ public class ProductDraftAdminController {
 
     @Operation(
         summary = "초안 만들기",
-        description = "운영자가 아는 사실과 근거 사진을 저장하고 생성 대기(REQUESTED) 초안을 돌려준다(201). 상품을 만들거나 바꾸지 않는다. "
+        description = "운영자가 아는 사실과 근거 사진을 저장하고 초안을 돌려준다(201). 상품을 만들거나 바꾸지 않는다. "
+            + "AI 생성을 쓸 수 있으면 저장 뒤 생성을 바로 시작해 생성 중(GENERATING)으로, 시작하지 못했으면 생성 대기(REQUESTED)로 돌려준다 — 생성 대기면 '생성 시작'으로 다시 시도한다. "
             + "이미지는 스토어 미디어 저장소의 공개 주소만 받는다 — 밖이면 400(PRODUCT_DRAFT_030), 저장소 미설정은 503(PRODUCT_DRAFT_032), "
-            + "대표 이미지 두 장 이상은 400(PRODUCT_DRAFT_034), 같은 주소 두 번은 400(PRODUCT_DRAFT_035)이다. 이미지 유형은 THUMBNAIL · GALLERY 만 받는다(영상 등은 400 PRODUCT_100)."
+            + "대표 이미지 두 장 이상은 400(PRODUCT_DRAFT_034), 같은 주소 두 번은 400(PRODUCT_DRAFT_035), 용량 합계 20MB 초과는 400(PRODUCT_DRAFT_037)이다. "
+            + "이미지 유형은 THUMBNAIL · GALLERY 만 받는다(영상 등은 400 PRODUCT_100)."
     )
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_DRAFT_CREATE")
@@ -79,5 +81,22 @@ public class ProductDraftAdminController {
         @Parameter(description = "초안 아이디") @PathVariable @Positive(message = ProductDraftValidationMessage.DRAFT_ID_POSITIVE) long draftId
     ) {
         return ResponseEntity.ok().body(Response.success(productDraftAdminUseCase.reject(draftId, member.memberId())));
+    }
+
+    @Operation(
+        summary = "생성 시작",
+        description = "생성 대기 초안의 AI 생성을 시작하거나 다시 시도하고 초안을 돌려준다(200). 이미 생성 중이면 그대로 200 이다. "
+            + "생성을 쓸 수 없으면 400(PRODUCT_DRAFT_050), 보관 기간이 지났으면 409(PRODUCT_DRAFT_022), 다른 변경과 겹치면 409(PRODUCT_DRAFT_025), "
+            + "생성 대기가 아니면 409(PRODUCT_DRAFT_051), 생성할 수 없는 옛 초안은 409(PRODUCT_DRAFT_052)다. "
+            + "생성을 시작하지 못했으면 503(PRODUCT_DRAFT_502), 시작 결과를 확인하지 못했으면 502(PRODUCT_DRAFT_504)이고 잠시 뒤 다시 시도한다. 없는 초안은 404(PRODUCT_DRAFT_001)다."
+    )
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "PRODUCT_DRAFT_GENERATE")
+    @PostMapping("/{draftId}/generate")
+    public ResponseEntity<Response<ProductDraftAdminResponse>> generate(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "초안 아이디") @PathVariable @Positive(message = ProductDraftValidationMessage.DRAFT_ID_POSITIVE) long draftId
+    ) {
+        return ResponseEntity.ok().body(Response.success(productDraftAdminUseCase.generate(draftId, member.memberId())));
     }
 }

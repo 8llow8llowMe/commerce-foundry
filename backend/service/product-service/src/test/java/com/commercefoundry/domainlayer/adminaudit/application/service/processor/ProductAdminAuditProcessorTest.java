@@ -171,6 +171,8 @@ class ProductAdminAuditProcessorTest {
         processor.productDraftCreated(ACTOR, null, false);
         processor.productDraftRejected(ACTOR, 41, true);
         processor.productDraftRejected(ACTOR, 41, false);
+        processor.productDraftGenerated(ACTOR, 41, true);
+        processor.productDraftGenerated(ACTOR, 41, false);
 
         assertThat(lines()).containsExactly(
             "action=STOCK_ADJUST actorMemberId=" + ACTOR + " target=sku:31 result=SUCCESS",
@@ -180,7 +182,9 @@ class ProductAdminAuditProcessorTest {
             "action=PRODUCT_DRAFT_CREATE actorMemberId=" + ACTOR + " target=product-draft:41 result=SUCCESS",
             "action=PRODUCT_DRAFT_CREATE actorMemberId=" + ACTOR + " target=- result=FAILURE",
             "action=PRODUCT_DRAFT_REJECT actorMemberId=" + ACTOR + " target=product-draft:41 result=SUCCESS",
-            "action=PRODUCT_DRAFT_REJECT actorMemberId=" + ACTOR + " target=product-draft:41 result=FAILURE"
+            "action=PRODUCT_DRAFT_REJECT actorMemberId=" + ACTOR + " target=product-draft:41 result=FAILURE",
+            "action=PRODUCT_DRAFT_GENERATE actorMemberId=" + ACTOR + " target=product-draft:41 result=SUCCESS",
+            "action=PRODUCT_DRAFT_GENERATE actorMemberId=" + ACTOR + " target=product-draft:41 result=FAILURE"
         );
     }
 }
