@@ -508,15 +508,28 @@
         created_at timestamp(6) with time zone not null,
         updated_at timestamp(6) with time zone not null,
         expires_at timestamp(6) with time zone not null,
+        failure_code varchar(64),
+        generation_no integer default 0 not null,
+        generation_requested_at timestamp(6) with time zone,
+        generation_requested_by_member_id bigint,
+        input_hash varchar(64),
         input_json text not null,
+        job_id bigint,
         rejected_at timestamp(6) with time zone,
         rejected_by_member_id bigint,
         requested_by_member_id bigint not null,
+        result_json text,
         status varchar(16) not null check ((status in ('REQUESTED','GENERATING','READY','FAILED','APPLIED','REJECTED','EXPIRED'))),
         version bigint not null,
         primary key (id),
+        constraint uk_product_draft_job_id unique (job_id),
         constraint ck_product_draft_rejected check ((status = 'REJECTED') = (rejected_by_member_id is not null and rejected_at is not null)),
-        constraint ck_product_draft_input_json_length check (char_length(input_json) <= 32768)
+        constraint ck_product_draft_input_json_length check (char_length(input_json) <= 32768),
+        constraint ck_product_draft_generation_no check (generation_no between 0 and 3),
+        constraint ck_product_draft_generation_fields check ((generation_no = 0 and generation_requested_by_member_id is null and generation_requested_at is null and input_hash is null and job_id is null) or (generation_no > 0 and generation_requested_by_member_id is not null and generation_requested_at is not null and input_hash is not null)),
+        constraint ck_product_draft_generating_job check (status <> 'GENERATING' or job_id is not null),
+        constraint ck_product_draft_ready_result check (status <> 'READY' or result_json is not null),
+        constraint ck_product_draft_result_json_length check (char_length(result_json) <= 32768)
     );
 
     comment on table product.product_draft is
@@ -534,8 +547,26 @@
     comment on column product.product_draft.expires_at is
         '보관 만료 시각 — 지나면 적용 · 거절할 수 없다';
 
+    comment on column product.product_draft.failure_code is
+        '생성 실패 코드 (operations 결과의 고정 코드). 실패 전에는 null';
+
+    comment on column product.product_draft.generation_no is
+        '시작한 AI 생성 회차 (0 = 시작 전, 1~3)';
+
+    comment on column product.product_draft.generation_requested_at is
+        '현재 회차 생성을 시작한 시각. 시작 전에는 null';
+
+    comment on column product.product_draft.generation_requested_by_member_id is
+        '현재 회차 생성을 시작한 어드민 회원 아이디 (외부 FK: auth-service member.id). 시작 전에는 null';
+
+    comment on column product.product_draft.input_hash is
+        '생성 입력 정규 JSON 의 SHA-256 (소문자 hex 64자). 첫 회차를 시작할 때 정하고 재시도는 이 값을 보낸다';
+
     comment on column product.product_draft.input_json is
         '운영자 입력(사실 · 이미지) JSON — 고객 개인정보 없음, 32768자 이하';
+
+    comment on column product.product_draft.job_id is
+        '현재 회차 생성 작업 아이디 (외부 FK: operations-service job.id). 등록 응답 반영 전에는 null';
 
     comment on column product.product_draft.rejected_at is
         '거절 시각. 거절 전에는 null';
@@ -546,11 +577,26 @@
     comment on column product.product_draft.requested_by_member_id is
         '초안을 만든 어드민 회원 아이디 (auth member.id, 서비스 밖 참조)';
 
+    comment on column product.product_draft.result_json is
+        'AI 생성 결과 JSON — 32768자 이하, 결과 반영 전에는 null';
+
     comment on column product.product_draft.status is
         '초안 상태 (REQUESTED / GENERATING / READY / FAILED / APPLIED / REJECTED / EXPIRED). 만료는 읽을 때 expires_at 으로 판정한다';
 
     comment on column product.product_draft.version is
         '낙관적 락 버전';
+
+    create table product.product_draft_generation_gate (
+        id integer not null,
+        primary key (id),
+        constraint ck_product_draft_generation_gate_singleton check (id = 1)
+    );
+
+    comment on table product.product_draft_generation_gate is
+        'AI 상품 초안 매장 전체 생성 게이트';
+
+    comment on column product.product_draft_generation_gate.id is
+        '단일 게이트 행 (항상 1)';
 
     create table product.product_image (
         id bigint not null,
@@ -1465,6 +1511,9 @@
 
     create index idx_product_category_category_id_product_id
        on product.product_category (category_id, product_id);
+
+    create index idx_product_draft_status_expires_at
+       on product.product_draft (status, expires_at);
 
     create index idx_product_option_value_product_id
        on product.product_option_value (product_id);

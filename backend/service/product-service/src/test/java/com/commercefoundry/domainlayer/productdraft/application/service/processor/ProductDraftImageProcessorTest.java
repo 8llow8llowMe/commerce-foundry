@@ -106,6 +106,42 @@ class ProductDraftImageProcessorTest {
         }
 
         @Test
+        @DisplayName("원본 합계는 20MiB 까지 받고(5MiB × 4), 넘으면(5MiB × 5) 037 이다 — 판정은 모든 HEAD 를 마친 뒤다")
+        void totalBytes() {
+            List<ProductDraftImage> four = sizedImages(4, AiImage.MAX_BYTES);
+            assertThat(processor.pin(four)).hasSize(4);
+            assertThat(4L * AiImage.MAX_BYTES).isEqualTo(ProductDraftImageProcessor.MAX_TOTAL_IMAGE_BYTES);
+
+            List<ProductDraftImage> five = sizedImages(5, AiImage.MAX_BYTES);
+            assertCode(() -> processor.pin(five), ProductDraftErrorCode.IMAGES_TOO_LARGE);
+            verify(storage).head(galleryKey(4));
+        }
+
+        @Test
+        @DisplayName("장마다의 사유가 합계보다 먼저다 — 합계가 넘어도 5MiB 초과 한 장이 있으면 036 이다")
+        void perImageBeforeTotal() {
+            List<ProductDraftImage> images = sizedImages(5, AiImage.MAX_BYTES);
+            given(storage.head(galleryKey(4))).willReturn(new ProductDraftImageObjectQueryResult.Stored(AiImage.MAX_BYTES + 1L, "image/png", ETAG));
+
+            assertCode(() -> processor.pin(images), ProductDraftErrorCode.IMAGE_FORMAT_NOT_ALLOWED);
+        }
+
+        private static String galleryKey(int index) {
+            return "products/media/7/0f8fad5b-d9cb-469f-a165-7086772895" + String.format("%02d", index) + "/" + "c".repeat(64) + ".png";
+        }
+
+        private List<ProductDraftImage> sizedImages(int count, long length) {
+            List<ProductDraftImage> images = new java.util.ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                String key = galleryKey(i);
+                managed(key);
+                given(storage.head(key)).willReturn(new ProductDraftImageObjectQueryResult.Stored(length, "image/png", ETAG));
+                images.add(image(key, ProductDraftImageType.GALLERY));
+            }
+            return images;
+        }
+
+        @Test
         @DisplayName("저장소에 없으면 033 이다")
         void missing() {
             managed(KEY_A);

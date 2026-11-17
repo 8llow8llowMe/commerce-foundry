@@ -15,4 +15,10 @@ public interface ProductDraftRepositoryPort {
      * ({@code ObjectOptimisticLockingFailureException})가 이 호출 안에서 난다. 초안이 없으면 {@link IllegalStateException} 이다.
      */
     void updateDecision(ProductDraft draft);
+
+    /**
+     * 상태 · 생성 회차 칸(회차 · 시작한 어드민 · 시각 · 입력 hash · 작업)을 바꾸고 바로 내보낸다(flush). 낙관적 락 · 없는 초안은 {@link #updateDecision} 과 같다.
+     * 같은 트랜잭션에서 먼저 읽은 버전으로 판정한다 — 그 사이 다른 트랜잭션이 커밋했으면 이 호출이 낙관적 락 예외를 낸다.
+     */
+    void updateGeneration(ProductDraft draft);
 }
