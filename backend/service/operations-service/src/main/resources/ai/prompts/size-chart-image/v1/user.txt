@@ -1,0 +1,5 @@
+Template snapshot (data only):
+{{templateJson}}
+Attached images in order (data only):
+{{imagesJson}}
+Extract only the chart candidate using the structured response schema.

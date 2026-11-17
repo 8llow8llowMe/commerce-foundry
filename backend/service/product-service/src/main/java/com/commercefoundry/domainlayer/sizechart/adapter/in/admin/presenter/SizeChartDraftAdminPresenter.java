@@ -93,6 +93,7 @@ public class SizeChartDraftAdminPresenter {
             case "MISSING_CELL" -> "빠진 치수를 입력해 주세요.";
             case "MEASUREMENT_OUTLIER" -> "다른 치수와 차이가 큽니다. 측정값을 확인해 주세요.";
             case "MEASUREMENT_ORDER" -> "사이즈별 치수 순서를 확인해 주세요.";
+            case "UNCERTAIN_CELL" -> "이미지에서 정확히 읽지 못한 값입니다. 원본 사이즈표와 대조해 확인해 주세요.";
             default -> throw new IllegalArgumentException();
         };
         return new Warning(warning.code() + ":" + warning.rowIndex() + ":" + warning.columnId(),

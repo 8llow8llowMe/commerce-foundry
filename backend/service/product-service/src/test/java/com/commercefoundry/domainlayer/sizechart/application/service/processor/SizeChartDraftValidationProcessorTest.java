@@ -126,6 +126,17 @@ class SizeChartDraftValidationProcessorTest {
         assertThat(candidate.toString()).doesNotContain("50.25");
     }
 
+    @Test
+    void imageUncertainCellWarningIsAcceptedOnlyOnATemplateColumn() {
+        String json = """
+            {"unit":"CM","rows":[{"sizeLabel":"S","cells":[{"columnId":30,"value":50}]}],
+             "warnings":[{"code":"UNCERTAIN_CELL","rowIndex":0,"columnId":30}]}
+            """;
+        assertThat(validation.candidate(json, validation.template(template, columns)).json()).contains("UNCERTAIN_CELL");
+        assertThatThrownBy(() -> validation.candidate(json.replace("\"columnId\":30}]}", "\"columnId\":0}]}"),
+            validation.template(template, columns))).isInstanceOf(SizeChartDraftTransportException.class);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
         "[]", "{} {}", "{\"unit\":\"CM\",\"unit\":\"CM\",\"rows\":[],\"warnings\":[]}",

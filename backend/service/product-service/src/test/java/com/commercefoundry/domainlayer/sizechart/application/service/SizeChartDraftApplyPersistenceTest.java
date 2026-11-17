@@ -351,6 +351,20 @@ class SizeChartDraftApplyPersistenceTest {
     }
 
     @Test
+    void imageUncertainCellMustAlwaysBeAcknowledgedEvenAfterCorrection() {
+        String candidate = """
+            {"unit":"CM","rows":[{"sizeLabel":"S","cells":[{"columnId":30,"value":50}]}],
+              "warnings":[{"code":"UNCERTAIN_CELL","rowIndex":0,"columnId":30}]}
+            """;
+        var ready = ready(false, candidate);
+        var corrected = new ProductSizeChartUpsertCommand(20, null, List.of(
+            new ProductSizeChartUpsertCommand.Row("S", 0, List.of(new ProductSizeChartUpsertCommand.Cell(30, new BigDecimal("51"))))));
+        rejects(() -> applyWithProducts(request(ready, corrected, Set.of())), SizeChartDraftTransportErrorCode.WARNING_ACK_REQUIRED);
+        applyWithProducts(request(ready, corrected, Set.of("UNCERTAIN_CELL:0:30")));
+        assertThat(drafts.findById(ready.id()).orElseThrow().status()).isEqualTo(SizeChartDraftStatus.APPLIED);
+    }
+
+    @Test
     void newOperatorOrderAnomaliesAlsoFollowManualPutPolicy() {
         var ready = ready(false, CANDIDATE);
         var corrected = new ProductSizeChartUpsertCommand(20, null, List.of(

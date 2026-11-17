@@ -9,7 +9,9 @@ public final class SizeChartGenerationRemoteFailure extends RuntimeException {
         SIZE_CHART_AI_INVALID,
         SIZE_CHART_INPUT_REJECTED,
         SIZE_CHART_INPUT_UNAVAILABLE,
-        SIZE_CHART_INPUT_INVALID
+        SIZE_CHART_INPUT_INVALID,
+        /** 승인한 IMAGE 바이트가 읽는 시점에 바뀌었거나 사라졌다(product 410 {@code SIZE_CHART_DRAFT_016}, 응답 헤더 · 길이 · 해시 불일치). 재시도 불가. */
+        SIZE_CHART_IMAGE_CHANGED
     }
 
     private final Code code;
