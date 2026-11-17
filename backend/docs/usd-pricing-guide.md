@@ -115,6 +115,37 @@ UseCase·Facade는 미연결이라 역할 접미사(Admin·Scheduler 등)를 보
 검증은 분류 테스트(KRW·USD 기준, 손상 값·상태·ID, overflow, 페이지 경계), 포트 스텁 순회·중단·전파 테스트,
 H2/PostgreSQL 혼합 데이터 전체 실행(DML 0건)이다.
 
+### B1c-C 기준통화 가격행 backfill (PR-2a)
+
+빠진 기준통화 `product_price`·`sku_price` 행을 legacy 값과 실제 currency 그대로 채운다. 정본은 아직 legacy 컬럼이고(§4 1~2단계),
+정본 전환(PR-2b)은 이 backfill 이 운영에서 끝나 사전 점검이 READY · BACKFILL 0 이 된 뒤에 한다. 스키마 · 인덱스 변경은 없다.
+
+- 진입: product `adapter/in/bootstrap/PriceBackfillRunner`(ApplicationRunner). 설정 `price-backfill.mode`(환경 변수 `PRICE_BACKFILL_MODE`)는
+  `OFF`(기본) · `DRY_RUN` · `APPLY` 다. **운영 APPLY 는 사용자 승인 사항**이며, 끝나면 OFF 로 되돌려 재기동마다 다시 돌지 않게 한다.
+  실패해도 기동은 멈추지 않고 예외 종류만 로그에 남긴다. 결과 로그는 건수 · 판정만이며 식별자 · 금액 · 통화 원문은 남기지 않는다.
+- 흐름: B1c-B 사전 점검 → BLOCKED 면 DML 없이 끝 → READY 면 상품 lane 을 keyset(500)으로 끝까지 돌며 상품마다 새 TX(REQUIRES_NEW)
+  → APPLY 면 사전 점검을 다시 돌려 결과에 붙인다. Facade 에는 TX 를 걸지 않는다.
+- 상품 TX: 상품(삭제 · 숨김 포함)과 전체 SKU(판매중지 · 은퇴 포함)를 다시 읽고 B1b `LegacyPriceWriteProcessor.prepare` 에
+  같은 스냅숏을 before · after 로 넘긴다. 기존 행은 바꾸지 않고 빠진 기준통화 행만 INSERT 계획에 담긴다. drift · 통화 불일치 · 휴면 행은
+  그 자리에서 거절되고 롤백한다(보정 · 통화 추정 · 0원 보정 없음).
+- version fence: APPLY 는 INSERT 전에 `version = ?` 조건으로 버전만 +1 한다(수정 시각은 그대로, 삭제 상품 포함).
+  writer 는 가격 계획 전에 부모 CAS 로 행을 잡으므로, writer 가 잡고 있으면 fence 가 잠금을 기다렸다가 버전 불일치로 실패한다.
+  backfill 이 먼저 커밋했으면 이전 버전을 들고 있던 writer 가 PRODUCT_010(409)으로 끝난다.
+  두 경로 모두 가격행 unique(`uk_product_price_product_id_sale_price_currency` · `uk_sku_price_sku_id_additional_price_currency`) 위반이
+  먼저 나더라도 `PriceBookRepositoryAdapter.insertAll` 이 PRODUCT_010 으로 바꾼다(500 이 아니다).
+- 상품 결과: COMPLETE(이미 완비) · FILLED(APPLY 로 넣음) · WOULD_FILL(DRY_RUN) · CONFLICT(동시 변경, 롤백) · INVALID(불변식 위반, 롤백) · NOT_FOUND.
+  상품 한 건의 CONFLICT · INVALID 는 세고 다음 상품으로 간다. 자동 재시도는 없다. 그 밖의 예외(DB 장애 등)와 읽기 Port 계약 위반은 실행을 멈춘다.
+- 재실행 · 중단 재개: 빠진 행만 계획되므로 다시 돌리면 이어서 처리하고, 다 채운 뒤 다시 돌리면 COMPLETE 만 나온다(DML 0).
+  상한 이후 새로 생긴 상품은 보지 않는다 — 새 상품은 등록 writer 가 같은 TX 에서 가격행을 만든다.
+
+운영 실행 창 안내: 실행 중에 열려 있던 어드민 상품 편집 화면은 backfill 이 올린 버전 때문에 저장할 때 한 번 409 가 날 수 있다(새로 고친 뒤 다시 저장).
+여러 인스턴스가 함께 APPLY 로 떠도 fence 와 unique 때문에 같은 행이 두 번 들어가지 않지만, 한 인스턴스만 켜는 것을 원칙으로 한다.
+compose 에는 아직 `PRICE_BACKFILL_MODE` 보간이 없다 — 운영 실행 때 product 컨테이너 환경에 넣는 인프라 변경을 같이 승인받는다(`deploy-guide.md` 표에 그때 추가).
+순서는 DRY_RUN(계획 건수 · BLOCKED 여부 확인) → 사용자 승인 → APPLY → 결과 로그의 after=READY · 두 BASE_MISSING 0 확인 → OFF 복귀다.
+검증은 상품 순회 · 분류 · 중단 단위 테스트, runner 모드 테스트, H2/PostgreSQL 에서 KRW · USD · 정가 · 판매중지 · 삭제 · 추가 통화 혼합 fixture 로
+DRY_RUN DML 0, APPLY 값 · ID · 버전 · 수정 시각, 재실행 멱등, BLOCKED 무변경, 이전 버전 어드민 저장 409, PostgreSQL 에서 unique → 409 와
+writer 잠금 대기 → CONFLICT 다.
+
 ## 2. 가격 모델과 불변식
 
 가격은 product-service의 기존 상품 컨텍스트가 소유한다. 별도 가격 서비스를 만들지 않는다.
