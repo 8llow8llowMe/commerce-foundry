@@ -118,6 +118,9 @@ operations:
   size-chart-generation:
     # 신규 등록만 제어한다. 기존 영수증 재생과 결과 조회는 유지한다.
     enabled: ${SIZE_CHART_GENERATION_ENABLED:false}
+  product-draft-generation:
+    # 신규 등록만 제어한다. 기존 영수증 재생과 결과 조회는 유지한다.
+    enabled: ${PRODUCT_DRAFT_GENERATION_ENABLED:false}
   jobs:
     result-file:
       cleanup-initial-delay: ${OPERATIONS_JOBS_RESULTFILE_CLEANUPINITIALDELAY:1m}

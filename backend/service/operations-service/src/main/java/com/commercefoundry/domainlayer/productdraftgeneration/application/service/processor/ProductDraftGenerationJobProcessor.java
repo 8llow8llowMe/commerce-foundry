@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
  * AI 상품 초안 생성 작업 {@code PRODUCT_DRAFT_GENERATE} (#359 PR-2b, 선례: {@code SizeChartGenerationJobProcessor}).
  * product 가 고정한 입력 · 이미지 바이트를 internal 로 읽고 AI 제안을 검증해 결과 JSON 으로 낸다. DB 에 쓰지 않는다 — 결과 반영은 product(PR-3)가 한다.
  *
- * <p>등록은 아직 없다(2b-2 의 product 전용 internal 등록). 이 PR 만으로는 작업이 생기지 않는다.
+ * <p>등록은 product 전용 internal({@code ProductDraftGenerationInternalFacade}, 2b-2)만 한다. product 가 부르는 연결은 PR-3 이다.
  * <b>시도 상한 2(D9)</b> — AI 타임아웃은 이미 과금됐을 수 있어(ai-core {@code AiException.Reason#UNAVAILABLE}) 상한을 낮게 둔다. 사용량 원장은 시도마다
  * {@code job:<jobId>:<attempt>} 로 따로 남는다. 핸들러는 부수 효과가 없어 같은 시도를 다시 실행해도 결과가 하나다.
  */
