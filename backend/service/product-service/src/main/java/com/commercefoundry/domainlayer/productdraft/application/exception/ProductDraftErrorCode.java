@@ -7,7 +7,8 @@ import org.springframework.http.HttpStatus;
 /**
  * AI 상품 초안 오류 코드 ({@code coding-conventions.md} §8). {@code PRODUCT_1xx} 검증 대역이 다 차서 컨텍스트 접두어 {@code PRODUCT_DRAFT_} 를 새로 연다
  * (§8-2, 선례: 룩 {@code LOOK_} · SKU 원가 {@code SKU_COST_}). 업무 오류는 001~, 필드별 검증 코드(101~)는 {@link ProductDraftValidationMessage} 에 둔다.
- * 번호 대역: 0xx 초안 존재 · 상태, 03x 이미지, 04x 생성 internal, 5xx 저장소 장애. 메시지는 운영자가 읽는 문구다 — 설정값 · 내부 상태 이름 · 키 · 주소를 싣지 않는다.
+ * 번호 대역: 0xx 초안 존재 · 상태, 03x 이미지, 04x 생성 internal(operations 전용 — 어드민에 나가지 않는다), 05x 어드민 생성 시작, 5xx 저장소 · 생성 작업 서비스 장애.
+ * 메시지는 운영자가 읽는 문구다 — 설정값 · 내부 상태 이름 · 키 · 주소 · 작업 · 프롬프트 · 토큰 · 비용을 싣지 않는다.
  *
  * <p>요청 검증 실패는 서비스 공용 검증 처리({@code ProductExceptionHandler})가 봉투로 바꾼다 — 메시지 앞의 {@code PRODUCT_DRAFT_1xx} 를 그대로 쓰고,
  * 역직렬화 실패 · 타입 불일치 · 필수 파라미터 누락은 서비스 공용 {@code PRODUCT_100} · {@code PRODUCT_198} · {@code PRODUCT_199} 다.
@@ -41,6 +42,11 @@ public enum ProductDraftErrorCode {
     IMAGE_NOT_FOUND("PRODUCT_DRAFT_033", "이미지를 찾을 수 없습니다. 업로드한 이미지인지 다시 확인해 주세요.", HttpStatus.BAD_REQUEST),
     /** 비었거나 장당 상한(5MiB, ai-core {@code AiImage.MAX_BYTES})보다 크거나 JPEG · PNG · WebP 가 아니다. */
     IMAGE_FORMAT_NOT_ALLOWED("PRODUCT_DRAFT_036", "JPEG, PNG, WebP 형식의 5MB 이하 이미지만 넣을 수 있습니다.", HttpStatus.BAD_REQUEST),
+    /**
+     * 고정한 이미지 원본 합계가 20MiB({@code ProductDraftImageProcessor.MAX_TOTAL_IMAGE_BYTES})를 넘는다(#359 PR-B1). operations 생성 작업의 같은 상한
+     * ({@code PRODUCT_DRAFT_IMAGES_TOO_LARGE}, 재시도 불가)에 걸리기 전에 저장 단계에서 알린다. 판정은 장마다 {@link #IMAGE_FORMAT_NOT_ALLOWED} 를 본 뒤다.
+     */
+    IMAGES_TOO_LARGE("PRODUCT_DRAFT_037", "이미지 용량 합계는 20MB 이하여야 합니다. 이미지 수나 크기를 줄여 주세요.", HttpStatus.BAD_REQUEST),
 
     /*
      * 04x — operations 생성 작업 전용 internal(generation-input · generation-images). 운영자에게 나가지 않는다.
@@ -59,8 +65,25 @@ public enum ProductDraftErrorCode {
     /** 이미지 순번이 음수거나 초안 이미지 수를 넘는다. */
     GENERATION_IMAGE_NOT_FOUND("PRODUCT_DRAFT_045", "초안에 해당 순번의 이미지가 없습니다.", HttpStatus.NOT_FOUND),
 
+    /*
+     * 05x — 어드민 생성 시작({@code POST /{draftId}/generate}, #359 PR-B1). 만료 · 동시 변경 · 없음은 {@link #DRAFT_EXPIRED} · {@link #DRAFT_BUSY} · {@link #NOT_FOUND_DRAFT} 를 쓴다.
+     */
+    /** 생성 기능이 닫혀 있다({@code product-draft.generation-enabled=false}). 중단 스위치라 다시 시도하지 않는다 — 04x 의 {@link #GENERATION_DISABLED} 와 같은 사유의 어드민 코드다. */
+    GENERATION_START_DISABLED("PRODUCT_DRAFT_050", "AI 상품 초안 생성은 아직 사용할 수 없습니다.", HttpStatus.BAD_REQUEST),
+    /** 생성 대기가 아니다(검토 대기 · 생성 실패 · 적용 · 거절). 재생성은 후속 단계에서 연다. */
+    GENERATION_NOT_STARTABLE("PRODUCT_DRAFT_051", "현재 초안 상태에서는 생성을 시작할 수 없습니다.", HttpStatus.CONFLICT),
+    /** 이미지 원본을 고정하지 않은 초안(#359 PR-2a 이전)이다. 같은 초안으로는 생성할 수 없다. */
+    GENERATION_SOURCE_MISSING("PRODUCT_DRAFT_052", "이 초안은 생성할 수 없습니다. 새 초안을 만들어 주세요.", HttpStatus.CONFLICT),
+
     /** 이미지 저장소를 확인하지 못했다(꺼짐 · 장애). 초안 생성 · internal 이미지 읽기 공통이고, 잠시 뒤 같은 요청을 다시 보내면 된다. */
-    IMAGE_STORAGE_UNAVAILABLE("PRODUCT_DRAFT_501", "이미지 저장소를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE);
+    IMAGE_STORAGE_UNAVAILABLE("PRODUCT_DRAFT_501", "이미지 저장소를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /**
+     * 생성 작업 등록 여부를 확인하지 못했다 — operations 5xx · 타임아웃 · 전송 실패 · 서킷 열림 · 401/403/408/429, 또는 등록 뒤 작업 연결 저장 실패.
+     * 시작한 회차는 그대로 두므로 다시 시도하면 같은 값으로 등록해 operations 가 같은 작업을 돌려준다.
+     */
+    GENERATION_UNAVAILABLE("PRODUCT_DRAFT_502", "AI 초안 생성을 시작하지 못했습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /** 생성 작업 서비스의 응답이 계약 밖이다(같은 회차 입력 충돌 · 그 밖의 4xx · 봉투 불량 · 초안 · 회차 · hash 불일치). 초안은 바꾸지 않는다. */
+    GENERATION_CONTRACT_VIOLATION("PRODUCT_DRAFT_504", "AI 초안 생성 요청 결과를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.BAD_GATEWAY);
 
     private final String code;
     private final String message;

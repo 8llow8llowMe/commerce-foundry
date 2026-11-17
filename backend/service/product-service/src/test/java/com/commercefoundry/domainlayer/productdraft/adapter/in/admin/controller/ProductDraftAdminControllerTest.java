@@ -69,7 +69,8 @@ class ProductDraftAdminControllerTest {
     class Authorization {
 
         @ParameterizedTest(name = "{0} {1}")
-        @CsvSource({"POST, /api/v1/admin/product-drafts", "GET, /api/v1/admin/product-drafts/1", "POST, /api/v1/admin/product-drafts/1/reject"})
+        @CsvSource({"POST, /api/v1/admin/product-drafts", "GET, /api/v1/admin/product-drafts/1", "POST, /api/v1/admin/product-drafts/1/reject",
+            "POST, /api/v1/admin/product-drafts/1/generate"})
         @DisplayName("CUSTOMER 면 403 · SECURITY_005, 토큰이 없으면 401 · SECURITY_001 이고 유스케이스를 부르지 않는다")
         void onlyAdmin(String method, String uri) {
             SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.valueOf(method), uri, VALID_BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
@@ -191,6 +192,48 @@ class ProductDraftAdminControllerTest {
                 "다른 변경과 겹쳤습니다. 다시 확인한 뒤 시도해 주세요.");
             assertThat(exchange(HttpMethod.POST, PATH + "/0/reject", null, MemberRole.ADMIN))
                 .bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_DRAFT_127");
+        }
+    }
+
+    @Nested
+    @DisplayName("생성 시작 (#359 PR-B1)")
+    class Generate {
+
+        @Test
+        @DisplayName("200 이고 시작한 어드민은 토큰의 memberId 다. 응답에 작업 · 회차 · 입력 hash 를 싣지 않는다")
+        void generates() {
+            given(productDraftAdminUseCase.generate(7L, TestTokens.MEMBER_ID)).willReturn(response());
+
+            MvcTestResult result = exchange(HttpMethod.POST, PATH + "/7/generate", null, MemberRole.ADMIN);
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson().extractingPath("$.dataBody").asMap()
+                .doesNotContainKeys("jobId", "generationNo", "inputHash", "prompt", "model", "token", "cost");
+        }
+
+        @ParameterizedTest(name = "{0} {1}")
+        @CsvSource(delimiter = '|', value = {
+            "GENERATION_START_DISABLED|400|PRODUCT_DRAFT_050|AI 상품 초안 생성은 아직 사용할 수 없습니다.",
+            "DRAFT_EXPIRED|409|PRODUCT_DRAFT_022|보관 기간이 지난 초안입니다. 새 초안을 만들어 주세요.",
+            "DRAFT_BUSY|409|PRODUCT_DRAFT_025|다른 변경과 겹쳤습니다. 다시 확인한 뒤 시도해 주세요.",
+            "GENERATION_NOT_STARTABLE|409|PRODUCT_DRAFT_051|현재 초안 상태에서는 생성을 시작할 수 없습니다.",
+            "GENERATION_SOURCE_MISSING|409|PRODUCT_DRAFT_052|이 초안은 생성할 수 없습니다. 새 초안을 만들어 주세요.",
+            "GENERATION_UNAVAILABLE|503|PRODUCT_DRAFT_502|AI 초안 생성을 시작하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
+            "GENERATION_CONTRACT_VIOLATION|502|PRODUCT_DRAFT_504|AI 초안 생성 요청 결과를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요."
+        })
+        @DisplayName("업무 오류는 도메인 봉투다 — 운영자 문구만 싣는다")
+        void failures(ProductDraftErrorCode errorCode, int status, String code, String message) {
+            given(productDraftAdminUseCase.generate(7L, TestTokens.MEMBER_ID)).willThrow(new ProductDraftException(errorCode));
+
+            assertFailure(exchange(HttpMethod.POST, PATH + "/7/generate", null, MemberRole.ADMIN), HttpStatus.valueOf(status), code, message);
+        }
+
+        @Test
+        @DisplayName("경로 아이디가 양수가 아니면 400 · PRODUCT_DRAFT_127 이고 유스케이스를 부르지 않는다")
+        void invalidPath() {
+            assertThat(exchange(HttpMethod.POST, PATH + "/0/generate", null, MemberRole.ADMIN))
+                .bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_DRAFT_127");
+            verifyNoInteractions(productDraftAdminUseCase);
         }
     }
 

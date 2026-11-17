@@ -1203,9 +1203,10 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
 | 경로 | 권한 | 성공 | 주요 오류 |
 |------|------|------|-----------|
-| `POST /api/v1/admin/product-drafts` | `CATALOG_MANAGE` | 201 초안 — 생성 대기(`REQUESTED`) | 400 `PRODUCT_DRAFT_030` · `031` · `033` · `034` · `035` · `036` · `101~126` · `PRODUCT_100` · 503 `PRODUCT_DRAFT_032` · `501` |
+| `POST /api/v1/admin/product-drafts` | `CATALOG_MANAGE` | 201 초안 — 생성 시작 성공이면 `GENERATING`, 시작 실패 · 플래그 닫힘이면 `REQUESTED` | 400 `PRODUCT_DRAFT_030` · `031` · `033` · `034` · `035` · `036` · `037` · `101~126` · `PRODUCT_100` · 503 `PRODUCT_DRAFT_032` · `501` |
 | `GET /api/v1/admin/product-drafts/{draftId}` | `CATALOG_READ` | 200 초안 | 404 `PRODUCT_DRAFT_001` · 400 `PRODUCT_DRAFT_127` |
 | `POST /api/v1/admin/product-drafts/{draftId}/reject` | `CATALOG_MANAGE` | 200 초안 — 거절(`REJECTED`). 이미 거절했으면 그대로 200 | 404 `PRODUCT_DRAFT_001` · 409 `PRODUCT_DRAFT_020`(적용함) · `022`(만료) · `025`(동시 변경) · 400 `PRODUCT_DRAFT_127` |
+| `POST /api/v1/admin/product-drafts/{draftId}/generate` | `CATALOG_MANAGE` | 200 초안 — 생성 시작 · 같은 회차 등록 재시도. 이미 생성 중이면 그대로 200 | 400 `PRODUCT_DRAFT_037` · `050` · `127` · 404 `001` · 409 `022` · `025` · `051` · `052` · 502 `504` · 503 `502` |
 
 - **본문(생성)**: `{nameHint?, categoryId?, materials?[], careNotes?[], measurementsNote?, origin?, certifications?[], tone?, mustInclude?[], mustAvoid?[], images?[{url, imageType, width?, height?}]}`.
   모든 칸이 선택이다. 문구는 앞뒤 공백을 빼고 빈 문구는 null 이다. 한 줄 문구는 제어 문자를, 치수 메모는 개행 · 탭 외 제어 문자를 받지 않는다(입력은 AI 프롬프트의 데이터 칸으로만 쓰인다).
@@ -1219,6 +1220,8 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   저장 형식 JPEG · PNG · WebP · 키 확장자와 같은 형식인지(`036`) 보고, 키 · ETag · 크기 · 형식을 초안 입력(`input_json`)에 고정한다. 저장소 꺼짐 · 장애는 503 `501`(다시 시도).
   상한은 ai-core `AiImage`(장당 5MiB · 8장)와 요청 상한 8장 중 작은 값이다. HEAD 는 DB 트랜잭션 밖에서 하고 저장만 짧은 쓰기 트랜잭션이다.
   고정은 생성 플래그와 상관없이 늘 한다 — 저장되는 초안이 늘 생성할 수 있는 모양이 되게. 응답의 `images` 에는 키 · ETag 를 싣지 않는다(주소 그대로).
+  원본 크기 합계는 20MiB 이하여야 한다(`037`). 생성 연결 전 저장한 초안도 첫 claim 에서 같은 상한을 확인하므로 초과하면 회차를 소모하지 않는다.
+  이 경우 같은 초안의 `/generate` 재시도로는 해결되지 않으므로 더 적거나 작은 이미지로 새 초안을 만든다.
   상품 이미지 아이디 입력은 받지 않는다(D10 — 이관 이미지가 관리 키를 갖게 된 #678 뒤에 연다).
 - **이미지 경계 · 개인정보 (D3 · D12)**: product 는 외부 주소를 내려받지 않고 operations 도 공개 주소를 HTTP 로 내려받지 않는다 — operations 는 아래 internal 로 고정한 키의 바이트만 받는다
   (사이즈표 IMAGE 와 같은 경계, [ai-size-chart-guide.md](ai-size-chart-guide.md) §4). 사이즈표와 달리 해시 승인 · 개인정보 제거 확인을 요구하지 않는다 — 근거는 입력이 운영자가
@@ -1231,6 +1234,13 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   (`REQUESTED` · `GENERATING` · `READY` · `FAILED`)이 보관 기간(`product-draft.ttl`, 7일)을 넘으면 저장 값과 상관없이 `EXPIRED`(기간 만료)로 보이고 적용 · 거절할 수 없다 —
   읽을 때 판정하고 정리 작업은 두지 않는다. 상태는 domain 메서드로만 바뀌고 행의 `@Version` 이 동시 변경을 막는다 — 같은 거절이 **동시에** 겹치면
   늦은 쪽은 409 `025` 다(다시 조회하면 `REJECTED`). 차례로 다시 보낸 거절만 200 이다.
+- **생성 연결(B1)**: 플래그 `product-draft.generation-enabled` 가 열려 있으면 일반 어드민 요청에서 저장 커밋 뒤 1회차 등록을 자동 시도한다. 실패해도 저장은 201 이며 반환한 `draftId` 의
+  `/generate` 로 같은 회차를 재시도한다. create 를 다시 보내면 다른 초안이 생길 수 있다. 상위 트랜잭션에서 저장했으면 자동 등록 없이 `REQUESTED` 를 돌려주고,
+  커밋 뒤 `/generate` 를 명시적으로 부른다. 롤백되면 등록할 초안도 없다. 명시적 `/generate` 는 트랜잭션 밖에서만 원격 등록한다. claim · bind 는 별도의 짧은 트랜잭션이다.
+  operations 영수증은 `(draftId, generationNo)` 와 고정한 hash · 요청자 · 만료 시각으로 재생한다. 등록 응답과 같은 초안 · 회차 · hash 인지 검증한 뒤 jobId 를 붙인다.
+  등록과 bind 사이에 거절되면 거절 상태를 유지한 채 jobId 만 기록한다. 등록 응답이 유실된 뒤 거절됐으면 추가 작업을 만들지 않으려고 `/generate` 를 막는다;
+  operations 에 남은 작업은 거절된 입력 조회에서 실패하며 product 는 바뀌지 않는다.
+  플래그 기본값은 false 이며 B3 동시 3건 게이트와 재생성이 연결되기 전까지 열지 않는다.
 - **문구 검증(프롬프트 안전)**: 한 줄 칸은 유니코드 제어 문자(C0 · DEL · C1 — U+0085 포함) · 짝 없는 서로게이트 · 줄/문단 구분자(U+2028 · U+2029) ·
   방향 제어 문자(U+200E · U+200F · U+202A~202E · U+2066~2069) · 태그 문자(U+E0000~E007F)를 받지 않는다. 치수 메모는 여기에 `\n` · `\r` · 탭만 더 받는다.
   보이지 않는 지시 · 줄 나눔으로 프롬프트 데이터 칸 경계를 흉내 내지 못하게 하고, 검토 화면에 보이는 값과 저장 값이 같게 한다. 이모지용 ZWJ · 변형 선택자는 받는다.
@@ -1245,15 +1255,67 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
   생성 대기 · 생성 중(`REQUESTED` · `GENERATING`)만 읽힌다 — 생성 대기도 받는 것은 등록 응답 유실로 상태가 아직 안 바뀌었을 수 있어서다. 스토리지 키 · ETag · 공개 주소 ·
   만든 어드민 · 카테고리 아이디는 싣지 않는다. 바이트는 고정한 ETag 조건 · 5MiB 상한으로 읽고 magic bytes 를 다시 판별해 크기 · 형식이 고정 값과 다르면 `044` 다.
-- **단계** — 지금은 초안 저장 · 조회 · 거절과 생성 입력 internal(플래그 닫힘)이다. 새 초안은 생성 작업 연결 전까지 `REQUESTED` 에 머문다. 후속:
-  operations 생성 작업(`PRODUCT_DRAFT_GENERATE`, #359 PR-2b) → product ↔ operations 서비스 간 연결 · 재생성 · AI 제안 응답 칸
-  (상품명 · 설명 · 검색 태그 · SEO · 대체 텍스트 · 확인이 필요한 속성) → 적용(`POST /{draftId}/apply` — 상품 등록 #9 PR-E1 의 검증을 그대로 거치고, 같은 초안의 재시도는 상품을 하나만 만든다).
+- **단계** — 초안 저장 · 조회 · 거절, 생성 입력 internal, operations 작업과 등록 API, product 등록 연결(B1)까지 있다. 후속:
+  결과 반영(B2 — 상품명 · 설명 · 검색 태그 · SEO · 대체 텍스트 · 확인이 필요한 속성) → 재생성 · 매장 전체 동시 3건 게이트(B3) →
+  이미지 첨부 준비(C1) → 적용(`POST /{draftId}/apply` — 상품 등록 #9 PR-E1 의 검증을 그대로 거치고, 같은 초안의 재시도는 상품을 하나만 만든다).
 - 오류 코드: 업무 `PRODUCT_DRAFT_001`(없음 404) · `020`(적용한 초안 거절 409) · `022`(만료 409) · `025`(동시 변경 409) · `030`(이미지 주소 400) · `032`(저장소 미설정 503) ·
-  `034`(대표 두 장 400) · `035`(같은 이미지 400) · `031`(업로드 확정 미디어 키 아님 400) · `033`(저장소에 없음 400) · `036`(크기 · 형식 400) · `501`(이미지 저장소 장애 503).
+  `034`(대표 두 장 400) · `035`(같은 이미지 400) · `031`(업로드 확정 미디어 키 아님 400) · `033`(저장소에 없음 400) · `036`(크기 · 형식 400) · `037`(이미지 합계 초과 400) · `501`(이미지 저장소 장애 503).
+  생성 연결 `050`(기능 닫힘 400) · `051`(시작 불가 상태 409) · `052`(원본 미고정 409) · `502`(등록 불가 503) · `504`(등록 응답 계약 위반 502).
   internal 전용 `040`(생성 기능 닫힘 400) · `041`(거절 409) · `042`(생성할 수 없는 상태 409) · `043`(원본 미고정 409) · `044`(이미지 바뀜 410) · `045`(이미지 순번 없음 404).
   필드 검증 `PRODUCT_DRAFT_101~126`, 경로 draftId 양수 `127`(`ProductDraftValidationMessage`).
   `PRODUCT_1xx` 검증 대역이 차서 컨텍스트 접두어 `PRODUCT_DRAFT_` 를 새로 열었다(§2-11 · §2-12 와 같다). 깨진 JSON · 타입 불일치(`imageType` 오타 포함)는 서비스 공용 `PRODUCT_100` · `198` 이다.
 - **게이트웨이**: 새 접두어 `/api/v1/admin/product-drafts/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다.
+
+#### #359 B1 운영 DDL
+
+`ProductSchemaSnapshotTest` 의 PostgreSQL 17 생성본에서 `product_draft` 증분과 단일 게이트 테이블을 옮겼다. 운영자가 DDL 적용 계정으로 먼저 적용하고
+product 배포 뒤에도 생성 플래그는 B3 전까지 닫아 둔다. 기존 초안은 `generation_no=0` 이다. 게이트 행은 B3 잠금 구현 전에 한 번 만든다.
+
+```sql
+set client_encoding = 'UTF8';
+begin;
+set local lock_timeout = '5s';
+
+alter table product.product_draft
+    add column failure_code varchar(64),
+    add column generation_no integer default 0 not null,
+    add column generation_requested_at timestamp(6) with time zone,
+    add column generation_requested_by_member_id bigint,
+    add column input_hash varchar(64),
+    add column job_id bigint,
+    add column result_json text;
+
+alter table product.product_draft
+    add constraint uk_product_draft_job_id unique (job_id),
+    add constraint ck_product_draft_generation_no check (generation_no between 0 and 3),
+    add constraint ck_product_draft_generation_fields check ((generation_no = 0 and generation_requested_by_member_id is null and generation_requested_at is null and input_hash is null and job_id is null) or (generation_no > 0 and generation_requested_by_member_id is not null and generation_requested_at is not null and input_hash is not null)),
+    add constraint ck_product_draft_generating_job check (status <> 'GENERATING' or job_id is not null),
+    add constraint ck_product_draft_ready_result check (status <> 'READY' or result_json is not null),
+    add constraint ck_product_draft_result_json_length check (char_length(result_json) <= 32768);
+
+create index idx_product_draft_status_expires_at
+    on product.product_draft (status, expires_at);
+
+create table product.product_draft_generation_gate (
+    id integer not null,
+    primary key (id),
+    constraint ck_product_draft_generation_gate_singleton check (id = 1)
+);
+
+insert into product.product_draft_generation_gate (id) values (1);
+
+comment on column product.product_draft.failure_code is '생성 실패 코드 (operations 결과의 고정 코드). 실패 전에는 null';
+comment on column product.product_draft.generation_no is '시작한 AI 생성 회차 (0 = 시작 전, 1~3)';
+comment on column product.product_draft.generation_requested_at is '현재 회차 생성을 시작한 시각. 시작 전에는 null';
+comment on column product.product_draft.generation_requested_by_member_id is '현재 회차 생성을 시작한 어드민 회원 아이디 (외부 FK: auth-service member.id). 시작 전에는 null';
+comment on column product.product_draft.input_hash is '생성 입력 정규 JSON 의 SHA-256 (소문자 hex 64자). 첫 회차를 시작할 때 정하고 재시도는 이 값을 보낸다';
+comment on column product.product_draft.job_id is '현재 회차 생성 작업 아이디 (외부 FK: operations-service job.id). 등록 응답 반영 전에는 null';
+comment on column product.product_draft.result_json is 'AI 생성 결과 JSON — 32768자 이하, 결과 반영 전에는 null';
+comment on table product.product_draft_generation_gate is 'AI 상품 초안 매장 전체 생성 게이트';
+comment on column product.product_draft_generation_gate.id is '단일 게이트 행 (항상 1)';
+
+commit;
+```
 
 ### 2-15. 결제 준비 · 승인 · 조회 (payment-service, #14)
 

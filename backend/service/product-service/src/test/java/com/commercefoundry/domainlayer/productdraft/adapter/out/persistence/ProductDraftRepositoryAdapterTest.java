@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.productdraft.adapter.out.persistence.enti
 import com.commercefoundry.domainlayer.productdraft.application.port.out.ProductDraftRepositoryPort;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftFacts;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftGeneration;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImage;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageSource;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageType;
@@ -48,6 +49,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class ProductDraftRepositoryAdapterTest {
 
     private static final Instant EXPIRES_AT = Instant.parse("2026-11-08T03:00:00Z");
+    private static final String HASH = "f".repeat(64);
 
     @Container
     @ServiceConnection
@@ -152,7 +154,87 @@ class ProductDraftRepositoryAdapterTest {
         assertThatThrownBy(() -> entityManager.flush()).rootCause().hasMessageContaining("ck_product_draft_rejected");
     }
 
+    @Test
+    @DisplayName("생성 회차 — 새 초안은 회차 0 · 기록 없음이고, claim · 작업 연결이 회차 칸을 그대로 왕복하며 버전을 올린다 (#359 PR-B1)")
+    void generationRoundTrip() {
+        ProductDraft saved = port.insert(draft(1L));
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(port.findById(1L).orElseThrow().generation()).isEqualTo(ProductDraftGeneration.NONE);
+
+        Instant claimedAt = Instant.parse("2026-11-02T03:00:00.123456Z");
+        ProductDraft claimed = port.findById(1L).orElseThrow().claimGeneration(200L, HASH, claimedAt);
+        port.updateGeneration(claimed);
+        entityManager.clear();
+        ProductDraft foundClaimed = port.findById(1L).orElseThrow();
+        assertThat(foundClaimed.generation()).isEqualTo(new ProductDraftGeneration(1, 200L, claimedAt, HASH, null));
+        assertThat(foundClaimed.expiresAt()).isEqualTo(saved.expiresAt());
+
+        port.updateGeneration(foundClaimed.bindJob(1L, 1, HASH, 31L));
+        entityManager.clear();
+        ProductDraftEntity entity = entityManager.find(ProductDraftEntity.class, 1L);
+        assertThat(entity.getStatus()).isEqualTo(ProductDraftStatus.GENERATING);
+        assertThat(entity.getJobId()).isEqualTo(31L);
+        assertThat(entity.getGenerationRequestedByMemberId()).as("작업 연결은 시작한 어드민을 바꾸지 않는다").isEqualTo(200L);
+        assertThat(entity.getResultJson()).isNull();
+        assertThat(entity.getVersion()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("claim 갱신도 읽은 뒤 다른 트랜잭션이 바꿨으면 그 호출 안에서 낙관적 락 예외를 낸다")
+    void optimisticLockInsideGenerationUpdate() {
+        port.insert(draft(1L));
+        entityManager.flush();
+        entityManager.clear();
+        ProductDraft read = port.findById(1L).orElseThrow();
+        entityManager.getEntityManager().createNativeQuery("update product.product_draft set version = version + 1 where id = 1").executeUpdate();
+
+        assertThatThrownBy(() -> port.updateGeneration(read.claimGeneration(200L, HASH, Instant.parse("2026-11-02T03:00:00Z"))))
+            .isInstanceOf(ObjectOptimisticLockingFailureException.class);
+    }
+
+    @Test
+    @DisplayName("생성 중인데 작업이 없으면 ck_product_draft_generating_job, 회차가 0~3 밖이면 ck_product_draft_generation_no 에 걸린다")
+    void generationChecks() {
+        entityManager.persist(claimedEntityBuilder().status(ProductDraftStatus.GENERATING).build());
+        assertThatThrownBy(() -> entityManager.flush()).rootCause().hasMessageContaining("ck_product_draft_generating_job");
+    }
+
+    @Test
+    @DisplayName("회차가 0~3 밖이면 ck_product_draft_generation_no 에 걸린다")
+    void generationNoCheck() {
+        entityManager.persist(claimedEntityBuilder().generationNo(4).build());
+        assertThatThrownBy(() -> entityManager.flush()).rootCause().hasMessageContaining("ck_product_draft_generation_no");
+    }
+
+    @Test
+    @DisplayName("시작한 회차의 요청자 · 시각 · hash 가 빠지면 ck_product_draft_generation_fields 에 걸린다")
+    void generationFieldsCheck() {
+        entityManager.persist(entityBuilder().generationNo(1).build());
+        assertThatThrownBy(() -> entityManager.flush()).rootCause().hasMessageContaining("ck_product_draft_generation_fields");
+    }
+
+    @Test
+    @DisplayName("검토 대기인데 결과가 없으면 ck_product_draft_ready_result 에 걸린다")
+    void readyResultCheck() {
+        entityManager.persist(entityBuilder().status(ProductDraftStatus.READY).build());
+        assertThatThrownBy(() -> entityManager.flush()).rootCause().hasMessageContaining("ck_product_draft_ready_result");
+    }
+
+    @Test
+    @DisplayName("같은 작업 아이디를 두 초안이 가질 수 없다 — uk_product_draft_job_id")
+    void jobIdUnique() {
+        entityManager.persist(claimedEntityBuilder().status(ProductDraftStatus.GENERATING).jobId(31L).build());
+        entityManager.persist(claimedEntityBuilder().id(2L).status(ProductDraftStatus.GENERATING).jobId(31L).build());
+        assertThatThrownBy(() -> entityManager.flush()).rootCause().hasMessageContaining("uk_product_draft_job_id");
+    }
+
     private static ProductDraftEntity.ProductDraftEntityBuilder entityBuilder() {
         return ProductDraftEntity.builder().id(1L).status(ProductDraftStatus.REQUESTED).requestedByMemberId(100L).inputJson("{}").expiresAt(EXPIRES_AT);
+    }
+
+    private static ProductDraftEntity.ProductDraftEntityBuilder claimedEntityBuilder() {
+        return entityBuilder().generationNo(1).generationRequestedByMemberId(200L).generationRequestedAt(Instant.parse("2026-11-02T03:00:00Z"))
+            .inputHash(HASH);
     }
 }

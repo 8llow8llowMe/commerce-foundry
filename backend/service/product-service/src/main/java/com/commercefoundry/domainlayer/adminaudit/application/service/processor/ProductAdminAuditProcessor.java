@@ -182,6 +182,11 @@ public class ProductAdminAuditProcessor {
         write(ProductAdminAuditAction.PRODUCT_DRAFT_REJECT, actorMemberId, AdminAuditLog.target(PRODUCT_DRAFT, draftId), succeeded);
     }
 
+    /** 생성 시작 · 재시도 (#359 PR-B1). 회차 · 작업 아이디 · 입력 hash 는 싣지 않는다 */
+    public void productDraftGenerated(long actorMemberId, long draftId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_DRAFT_GENERATE, actorMemberId, AdminAuditLog.target(PRODUCT_DRAFT, draftId), succeeded);
+    }
+
     private static void write(ProductAdminAuditAction action, long actorMemberId, String target, boolean succeeded) {
         AdminAuditLog.write(action.name(), actorMemberId, target, succeeded);
     }

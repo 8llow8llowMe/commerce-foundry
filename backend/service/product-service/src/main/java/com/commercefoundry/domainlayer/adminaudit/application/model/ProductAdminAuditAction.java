@@ -78,5 +78,7 @@ public enum ProductAdminAuditAction {
     /** AI 상품 초안 생성 (#163 PR-C′). 대상 {@code product-draft:<id>} — 만들지 못했으면 {@code -} */
     PRODUCT_DRAFT_CREATE,
     /** AI 상품 초안 거절 (#163 PR-C′). 대상 {@code product-draft:<id>} — 이미 거절한 초안의 재전송(그대로 200)도 {@code SUCCESS} */
-    PRODUCT_DRAFT_REJECT
+    PRODUCT_DRAFT_REJECT,
+    /** AI 상품 초안 생성 시작 · 재시도 (#359 PR-B1). 대상 {@code product-draft:<id>} — 이미 생성 중이라 그대로 200 인 재전송도 {@code SUCCESS}. 회차 · 작업은 싣지 않는다 */
+    PRODUCT_DRAFT_GENERATE
 }
