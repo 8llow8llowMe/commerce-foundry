@@ -137,6 +137,11 @@ product-draft:
   # operations 생성 작업 전용 internal(generation-input · generation-images)을 연다. 생성 핸들러(PR-2b) · 연결(PR-3) · 운영 검증 전까지 닫아 둔다
   generation-enabled: false
 
+# 기준통화 가격행 backfill 기동 실행 (#20 PR-2a, usd-pricing-guide.md §1 B1c-C). OFF · DRY_RUN · APPLY.
+# 운영 APPLY 는 사용자 승인 뒤 환경 변수 PRICE_BACKFILL_MODE 로만 켜고, 끝나면 OFF 로 되돌린다. YAML 에서 OFF 는 불리언이라 따옴표로 둔다
+price-backfill:
+  mode: "OFF"
+
 security:
   jwt:
     # access 토큰 검증 공개키 — PEM 본문 한 줄 (security-guide.md §5-3 · §6). 비었거나 풀리지 않으면 기동하지 않는다.

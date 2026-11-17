@@ -16,6 +16,11 @@ public interface ProductRepository extends JpaRepository<ProductEntity, Long>, P
         + "where p.id = :productId and p.version = :version and p.deletedAt is null")
     int bumpVersion(long productId, long version, Instant updatedAt);
 
+    /** 가격 backfill version fence (#20). 수정 시각은 바꾸지 않고, 삭제 상품도 대상이다. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update ProductEntity p set p.version = p.version + 1 where p.id = :productId and p.version = :version")
+    int fenceVersion(long productId, long version);
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update ProductEntity p set p.categoryId = :categoryId, p.version = p.version + 1, p.updatedAt = :updatedAt "
         + "where p.id = :productId and p.version = :version and p.deletedAt is null")
