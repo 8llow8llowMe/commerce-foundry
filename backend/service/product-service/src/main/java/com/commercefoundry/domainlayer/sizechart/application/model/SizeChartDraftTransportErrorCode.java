@@ -25,6 +25,9 @@ public enum SizeChartDraftTransportErrorCode {
     IMAGE_APPROVAL_MISMATCH("SIZE_CHART_DRAFT_015", "확인한 뒤 이미지가 바뀌었습니다. 이미지를 다시 확인하고 승인해 주세요.", HttpStatus.CONFLICT),
     /** internal 생성 이미지 읽기 전용. 같은 초안으로는 다시 시도해도 성공할 수 없다. */
     IMAGE_INPUT_CHANGED("SIZE_CHART_DRAFT_016", "승인한 이미지가 바뀌어 이 초안으로는 생성할 수 없습니다. 새 초안을 만들어 주세요.", HttpStatus.GONE),
+    TEXT_SELECTION_CHANGED("SIZE_CHART_DRAFT_017", "검토한 본문 또는 선택한 치수가 바뀌었습니다. 후보를 다시 확인해 주세요.", HttpStatus.CONFLICT),
+    INVALID_BATCH("SIZE_CHART_DRAFT_118", "상품과 UUID가 겹치지 않게 1~20개 항목을 보내 주세요.", HttpStatus.BAD_REQUEST),
+    BATCH_ITEM_UNAVAILABLE("SIZE_CHART_DRAFT_505", "항목 처리를 확인할 수 없습니다. 같은 UUID와 입력으로 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
     REGISTRATION_UNAVAILABLE("SIZE_CHART_DRAFT_501", "작업 등록 여부를 확인할 수 없습니다. 같은 초안으로 재시도하세요.", HttpStatus.SERVICE_UNAVAILABLE),
     RESULT_UNAVAILABLE("SIZE_CHART_DRAFT_502", "작업 결과를 조회할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
     INVALID_CONTRACT("SIZE_CHART_DRAFT_503", "생성 결과를 안전하게 확인할 수 없습니다. 잠시 뒤 다시 확인해 주세요.", HttpStatus.BAD_GATEWAY),

@@ -12,16 +12,18 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductImageLookupProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductLookupProcessor;
-import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage;
-import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
-import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor;
-import com.commercefoundry.global.config.SizeChartDraftProperties;
+import com.commercefoundry.domainlayer.product.domain.model.Product;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter;
 import com.commercefoundry.domainlayer.sizechart.application.command.ProductSizeChartUpsertCommand;
+import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftApplyCommand;
 import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftCreateCommand;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportErrorCode;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftUnavailableException;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartGenerationRegistration;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartGenerationResult;
@@ -30,11 +32,15 @@ import com.commercefoundry.domainlayer.sizechart.application.port.out.SizeChartG
 import com.commercefoundry.domainlayer.sizechart.application.port.out.query.SizeChartGenerationRegistrationQueryResult;
 import com.commercefoundry.domainlayer.sizechart.application.port.out.query.SizeChartGenerationResultQueryResult;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftApplyProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftBatchProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftRemoteProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftValidationProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartTextSourceProcessor;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraft;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraftStatus;
+import com.commercefoundry.global.config.SizeChartDraftProperties;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -43,6 +49,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.LongStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -60,8 +67,9 @@ class SizeChartDraftFacadeTest {
     private final SizeChartDraftProperties properties = new SizeChartDraftProperties();
     private final SizeChartDraftFacade facade = new SizeChartDraftFacade(
         applyProcessor, processor, validation, new SizeChartDraftRemoteProcessor(generation), products, Clock.fixed(NOW, ZoneOffset.UTC),
-        new com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor(),
-        new com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter(), imageSources, productImages, properties);
+        new ProductAdminAuditProcessor(),
+        new SizeChartDraftAdminPresenter(), imageSources, productImages, properties, new SizeChartTextSourceProcessor(),
+        new SizeChartDraftBatchProcessor());
     private final SizeChartDraftCreateCommand command = new SizeChartDraftCreateCommand(10, 20, 40, UUID.randomUUID(), "TEXT", "S 50 cm");
     private final SizeChartDraftCreateCommand imageCommand = new SizeChartDraftCreateCommand(10, 20, 40, UUID.randomUUID(), "IMAGE", null,
         List.of(new SizeChartDraftCreateCommand.Image("IMG-4611686018427387905", "c".repeat(64))), true);
@@ -81,7 +89,7 @@ class SizeChartDraftFacadeTest {
     @Test
     void imageInputRevalidatesBytesOutsideTransactionThenStoresApprovedSnapshot() {
         properties.setImageEnabled(true);
-        var product = org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.domain.model.Product.class);
+        var product = org.mockito.Mockito.mock(Product.class);
         when(products.findAllIncludingHidden(List.of(10L))).thenReturn(java.util.Map.of(10L, product));
         when(productImages.findStillImagesIncludingHidden(10)).thenReturn(List.of());
         var approved = List.of(new SizeChartDraftImage("products/10/4611686018427387905.png", "c".repeat(64), "image/png", 12));
@@ -98,7 +106,7 @@ class SizeChartDraftFacadeTest {
     @Test
     void imageApprovalMismatchCreatesNoDraft() {
         properties.setImageEnabled(true);
-        var product = org.mockito.Mockito.mock(com.commercefoundry.domainlayer.product.domain.model.Product.class);
+        var product = org.mockito.Mockito.mock(Product.class);
         when(products.findAllIncludingHidden(List.of(10L))).thenReturn(java.util.Map.of(10L, product));
         when(processor.replay(any(), any())).thenReturn(Optional.empty());
         when(imageSources.approve(org.mockito.ArgumentMatchers.anyLong(), any(), any(), any()))
@@ -221,7 +229,7 @@ class SizeChartDraftFacadeTest {
             List.of(new ProductSizeChartUpsertCommand.Cell(30, new BigDecimal("50"))))));
         var receipt = new SizeChartDraftApplyInfo(100, 10, 50, 0, 40, NOW);
         when(applyProcessor.apply(any(), any())).thenAnswer(i -> {
-            com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftApplyCommand apply = i.getArgument(0);
+            SizeChartDraftApplyCommand apply = i.getArgument(0);
             assertThat(apply.expectedDraftVersion()).isEqualTo(7);
             return receipt;
         });
@@ -231,6 +239,111 @@ class SizeChartDraftFacadeTest {
         order.verify(processor).verifyResult(requested, resultValue(result));
         order.verify(processor).complete(requested, resultValue(result), null);
         order.verify(applyProcessor).apply(any(), any());
+    }
+
+
+    @Test
+    void batchRejectsDuplicateProductsKeysAndOversizeBeforeAnyLookupOrWrite() {
+        var sameProduct = new SizeChartDraftCreateCommand(10, 20, 40, UUID.randomUUID(), "TEXT", "S 50 cm");
+        var sameKey = new SizeChartDraftCreateCommand(11, 20, 40, command.idempotencyKey(), "TEXT", "S 50 cm");
+        var oversized = LongStream.range(1, 22)
+            .mapToObj(id -> new SizeChartDraftCreateCommand(id, 20, 40, UUID.randomUUID(), "TEXT", "S 50 cm")).toList();
+        for (var commands : List.of(List.of(command, sameProduct), List.of(command, sameKey), oversized, List.<SizeChartDraftCreateCommand>of())) {
+            assertThatThrownBy(() -> facade.createBatchAdmin(commands)).isInstanceOfSatisfying(SizeChartDraftTransportException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(SizeChartDraftTransportErrorCode.INVALID_BATCH));
+        }
+        verifyNoInteractions(products, productImages, processor, generation);
+    }
+
+    @Test
+    void batchPreservesSuccessfulItemsAndRecoveryIdThenRetriesSameFailedKeyWithoutNewDraft() {
+        var other = new SizeChartDraftCreateCommand(11, 20, 40, UUID.randomUUID(), "TEXT", "S 50 cm");
+        var requested = draft();
+        when(products.findAllIncludingHidden(List.of(10L, 11L))).thenReturn(java.util.Map.of());
+        when(processor.replay(org.mockito.ArgumentMatchers.eq(other), any())).thenReturn(Optional.of(requested.bindJob(200, NOW)));
+        when(processor.createOrReplay(org.mockito.ArgumentMatchers.eq(command), any(), any(), any())).thenReturn(requested);
+        when(generation.register(requested)).thenThrow(new IllegalStateException("private remote diagnostics"));
+        var results = facade.createBatchAdmin(List.of(command, other)).items();
+        assertThat(results).hasSize(2);
+        assertThat(results.getFirst().productId()).isEqualTo("10");
+        assertThat(results.getFirst().idempotencyKey()).isEqualTo(command.idempotencyKey().toString());
+        assertThat(results.getFirst().draftId()).isEqualTo("100");
+        assertThat(results.getFirst().errorCode()).isEqualTo("SIZE_CHART_DRAFT_501");
+        assertThat(results.getFirst().retryable()).isTrue();
+        assertThat(results.get(1).jobId()).isEqualTo("200");
+        assertThat(results.get(1).errorCode()).isNull();
+        assertThat(results.toString()).doesNotContain("private", "S 50 cm");
+        when(products.findAllIncludingHidden(List.of(10L))).thenReturn(java.util.Map.of());
+        when(processor.replay(org.mockito.ArgumentMatchers.eq(command), any())).thenReturn(Optional.of(requested));
+        when(generation.register(requested)).thenReturn(registration());
+        when(processor.bind(requested, registrationValue(registration()))).thenReturn(requested.bindJob(200, NOW));
+        var retry = facade.createBatchAdmin(List.of(command)).items().getFirst();
+        assertThat(retry.draftId()).isEqualTo("100");
+        assertThat(retry.jobId()).isEqualTo("200");
+        assertThat(retry.idempotencyKey()).isEqualTo(results.getFirst().idempotencyKey());
+        verify(processor).createOrReplay(org.mockito.ArgumentMatchers.eq(command), any(), any(), any());
+        verifyNoInteractions(productImages, imageSources);
+    }
+
+    @Test
+    void disabledImageIsPermanentItemFailureAndDoesNotPreventTextReplay() {
+        var other = new SizeChartDraftCreateCommand(11, 20, 40, UUID.randomUUID(), "TEXT", "S 50 cm");
+        when(products.findAllIncludingHidden(List.of(10L, 11L))).thenReturn(java.util.Map.of());
+        when(processor.replay(org.mockito.ArgumentMatchers.eq(other), any())).thenReturn(Optional.of(draft().bindJob(200, NOW)));
+        var results = facade.createBatchAdmin(List.of(imageCommand, other)).items();
+        assertThat(results.getFirst().errorCode()).isEqualTo("SIZE_CHART_DRAFT_011");
+        assertThat(results.getFirst().retryable()).isFalse();
+        assertThat(results.get(1).jobId()).isEqualTo("200");
+        verifyNoInteractions(productImages, imageSources, generation);
+    }
+
+    @Test
+    void twentyProductsAreAcceptedAndReadInOneBulkLookup() {
+        var commands = LongStream.rangeClosed(1, 20)
+            .mapToObj(id -> new SizeChartDraftCreateCommand(id, 20, 40, UUID.randomUUID(), "TEXT", "S 50 cm")).toList();
+        var productIds = commands.stream().map(SizeChartDraftCreateCommand::productId).toList();
+        when(products.findAllIncludingHidden(productIds)).thenReturn(java.util.Map.of());
+        when(processor.replay(any(), any())).thenReturn(Optional.of(draft().bindJob(200, NOW)));
+        assertThat(facade.createBatchAdmin(commands).items()).hasSize(20).allSatisfy(item -> {
+            assertThat(item.jobId()).isEqualTo("200");
+            assertThat(item.errorCode()).isNull();
+        });
+        verify(products).findAllIncludingHidden(productIds);
+        verifyNoInteractions(productImages, imageSources, generation);
+    }
+
+    @Test
+    void imageBatchUsesOneBulkLookupAndExistingApprovalForEachItem() {
+        properties.setImageEnabled(true);
+        var second = new SizeChartDraftCreateCommand(11, 20, 40, UUID.randomUUID(), "IMAGE", null, imageCommand.images(), true);
+        var product = mock(Product.class);
+        var other = mock(Product.class);
+        when(products.findAllIncludingHidden(List.of(10L, 11L))).thenReturn(java.util.Map.of(10L, product, 11L, other));
+        when(productImages.findStillImagesIncludingHidden(List.of(10L, 11L))).thenReturn(List.of());
+        var approved = List.of(new SizeChartDraftImage("products/10/1.png", "c".repeat(64), "image/png", 12));
+        when(imageSources.approve(org.mockito.ArgumentMatchers.eq(10L), org.mockito.ArgumentMatchers.eq(product), any(), any())).thenReturn(approved);
+        when(imageSources.approve(org.mockito.ArgumentMatchers.eq(11L), org.mockito.ArgumentMatchers.eq(other), any(), any())).thenReturn(approved);
+        when(processor.createOrReplay(any(), any(), any(), any())).thenReturn(draft().bindJob(200, NOW));
+        assertThat(facade.createBatchAdmin(List.of(imageCommand, second)).items()).allSatisfy(item -> assertThat(item.errorCode()).isNull());
+        verify(productImages).findStillImagesIncludingHidden(List.of(10L, 11L));
+        verify(productImages, never()).findStillImagesIncludingHidden(org.mockito.ArgumentMatchers.anyLong());
+        verify(imageSources).approve(10, product, List.of(), imageCommand.images());
+        verify(imageSources).approve(11, other, List.of(), second.images());
+    }
+
+    @Test
+    void staleSelectedTextNeverCreatesDraftButExistingInputCanReplayAfterBodyChanges() {
+        var selected = new SizeChartDraftCreateCommand(10, 20, 40, command.idempotencyKey(), "TEXT", "S 50 cm", List.of(), false,
+            new SizeChartDraftCreateCommand.TextSelection("TEXT-KO-1", "0".repeat(64)));
+        var product = mock(Product.class);
+        when(product.id()).thenReturn(10L);
+        when(products.findAllIncludingHidden(List.of(10L))).thenReturn(java.util.Map.of(10L, product));
+        assertThatThrownBy(() -> facade.create(selected)).isInstanceOfSatisfying(SizeChartDraftTransportException.class,
+            e -> assertThat(e.getErrorCode()).isEqualTo(SizeChartDraftTransportErrorCode.TEXT_SELECTION_CHANGED));
+        verify(processor, never()).createOrReplay(any(), any(), any(), any());
+        verifyNoInteractions(generation);
+        when(processor.replay(org.mockito.ArgumentMatchers.eq(selected), any())).thenReturn(Optional.of(draft().bindJob(200, NOW)));
+        assertThat(facade.create(selected).jobId()).isEqualTo(200);
     }
 
     private static SizeChartGenerationRegistration registrationValue(

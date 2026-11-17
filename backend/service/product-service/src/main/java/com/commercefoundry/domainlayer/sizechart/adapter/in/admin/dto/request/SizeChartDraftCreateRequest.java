@@ -36,8 +36,33 @@ public record SizeChartDraftCreateRequest(
     List<@NotNull(message = SizeChartDraftValidationMessage.IMAGES) @Valid Image> images,
 
     @Schema(description = "IMAGE일 때 이미지에 고객 개인정보가 없음을 운영자가 확인했는지. IMAGE에서는 true여야 합니다", example = "true")
-    Boolean personalInfoRemovedConfirmed
+    Boolean personalInfoRemovedConfirmed,
+
+    @Schema(description = "본문 후보에서 선택한 TEXT의 출처. sourceText와 함께 현재 본문 후보에 대조합니다")
+    @Valid
+    TextSelection textSelection
 ) {
+    @Schema(description = "검토한 본문 텍스트 후보")
+    public record TextSelection(
+        @Schema(description = "텍스트 후보 아이디", example = "TEXT-KO-1")
+        @NotNull(message = SizeChartDraftValidationMessage.TEXT_SELECTION)
+        @Pattern(regexp = "TEXT-(KO|EN)-[1-9][0-9]?", message = SizeChartDraftValidationMessage.TEXT_SELECTION)
+        String sourceId,
+
+        @Schema(description = "검토한 본문 SHA-256 소문자 16진수 64자")
+        @NotNull(message = SizeChartDraftValidationMessage.TEXT_SELECTION)
+        @Pattern(regexp = "[0-9a-f]{64}", message = SizeChartDraftValidationMessage.TEXT_SELECTION)
+        String bodyHash
+    ) {
+    }
+
+    @JsonIgnore
+    @Schema(hidden = true)
+    @AssertTrue(message = SizeChartDraftValidationMessage.TEXT_SELECTION)
+    public boolean isTextSelectionModeValid() {
+        return textSelection == null || "TEXT".equals(mode);
+    }
+
     @Schema(description = "승인한 사이즈표 이미지")
     public record Image(
         @Schema(description = "이미지 후보 목록의 이미지 아이디", example = "IMG-4611686018427387905")
@@ -97,7 +122,8 @@ public record SizeChartDraftCreateRequest(
         List<SizeChartDraftCreateCommand.Image> commandImages = images == null ? List.of()
             : images.stream().map(image -> new SizeChartDraftCreateCommand.Image(image.sourceId(), image.approvedContentHash())).toList();
         return new SizeChartDraftCreateCommand(productId, templateId, actorId, key, mode, sourceText, commandImages,
-            Boolean.TRUE.equals(personalInfoRemovedConfirmed));
+            Boolean.TRUE.equals(personalInfoRemovedConfirmed), textSelection == null ? null
+                : new SizeChartDraftCreateCommand.TextSelection(textSelection.sourceId(), textSelection.bodyHash()));
     }
 
     @Override

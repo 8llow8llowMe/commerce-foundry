@@ -2,22 +2,29 @@ package com.commercefoundry.domainlayer.sizechart.application.port.in;
 
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftAcceptedResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftApplyResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftBatchResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftSummaryResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageInspectionResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageSourceResponse;
-import com.commercefoundry.persistence.dto.PageResponse;
-import java.util.List;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartTextSourceResponse;
 import com.commercefoundry.domainlayer.sizechart.application.command.ProductSizeChartUpsertCommand;
 import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftCreateCommand;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftSummaryInfo;
+import com.commercefoundry.persistence.dto.PageResponse;
+import java.util.List;
 import java.util.Set;
 import org.springframework.data.domain.Page;
 
 public interface SizeChartDraftUseCase {
     SizeChartDraftAcceptedResponse createAdmin(SizeChartDraftCreateCommand command);
+
+    SizeChartDraftBatchResponse createBatchAdmin(
+        List<SizeChartDraftCreateCommand> commands);
+
+    List<SizeChartTextSourceResponse> textSourcesAdmin(long productId);
 
     /** IMAGE 입력 후보. 내려받지 않는다. */
     List<SizeChartImageSourceResponse> imageSourcesAdmin(long productId);

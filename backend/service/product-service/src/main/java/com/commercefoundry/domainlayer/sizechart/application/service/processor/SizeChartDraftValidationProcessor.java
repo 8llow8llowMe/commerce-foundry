@@ -5,9 +5,9 @@ import com.commercefoundry.domainlayer.sizechart.application.command.ProductSize
 import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftCreateCommand;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage;
-import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartImageLimits;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartImageLimits;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraft;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartLimits;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartTemplate;
@@ -68,10 +68,16 @@ public class SizeChartDraftValidationProcessor {
     private static final Pattern IMAGE_SOURCE_ID = Pattern.compile(SizeChartImageLimits.SOURCE_ID_PATTERN);
     private static final Set<String> IMAGE_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
 
+    /** 본문 후보에도 같은 측정 어휘를 적용한다. 수동 템플릿에는 적용하지 않는다. */
+    public static boolean isMeasurementLabel(String value) {
+        return value != null && MEASUREMENTS.contains(value.toLowerCase(Locale.ROOT));
+    }
+
     public String normalizedRequestHash(SizeChartDraftCreateCommand command) {
         require(command != null && command.productId() > 0 && command.templateId() > 0 && command.actorId() > 0
             && command.idempotencyKey() != null && (TEXT_MODE.equals(command.mode()) || IMAGE_MODE.equals(command.mode())),
             SizeChartDraftTransportErrorCode.UNSAFE_INPUT);
+        require(command.textSelection() == null || TEXT_MODE.equals(command.mode()), SizeChartDraftTransportErrorCode.UNSAFE_INPUT);
         if (TEXT_MODE.equals(command.mode())) {
             require(command.images().isEmpty(), SizeChartDraftTransportErrorCode.UNSAFE_INPUT);
             String text = normalize(command.sourceText());

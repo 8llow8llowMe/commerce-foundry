@@ -10,7 +10,9 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductImageLookupProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductLookupProcessor;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter;
 import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftCreateCommand;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
@@ -20,10 +22,14 @@ import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartGene
 import com.commercefoundry.domainlayer.sizechart.application.port.out.SizeChartGenerationPort;
 import com.commercefoundry.domainlayer.sizechart.application.port.out.query.SizeChartGenerationResultQueryResult;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftApplyProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftBatchProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftRemoteProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftValidationProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartTextSourceProcessor;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraft;
+import com.commercefoundry.global.config.SizeChartDraftProperties;
 import com.commercefoundry.security.audit.AdminAuditLog;
 import java.time.Clock;
 import java.time.Instant;
@@ -47,10 +53,12 @@ class SizeChartDraftFacadeAuditTest {
     private final ProductLookupProcessor products = mock(ProductLookupProcessor.class);
     private final SizeChartDraftFacade facade = new SizeChartDraftFacade(apply, processor, validation, new SizeChartDraftRemoteProcessor(generation), products,
         Clock.fixed(NOW, ZoneOffset.UTC), new ProductAdminAuditProcessor(),
-        new com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter(),
-        mock(com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor.class),
-        mock(com.commercefoundry.domainlayer.product.application.service.processor.ProductImageLookupProcessor.class),
-        new com.commercefoundry.global.config.SizeChartDraftProperties());
+        new SizeChartDraftAdminPresenter(),
+        mock(SizeChartImageSourceProcessor.class),
+        mock(ProductImageLookupProcessor.class),
+        new SizeChartDraftProperties(),
+        new SizeChartTextSourceProcessor(),
+        new SizeChartDraftBatchProcessor());
     private final SizeChartDraftCreateCommand command = new SizeChartDraftCreateCommand(10, 20, 40, UUID.randomUUID(), "TEXT", "S 50 cm");
     private final Logger logger = (Logger) LoggerFactory.getLogger(AdminAuditLog.LOGGER_NAME);
     private final ListAppender<ILoggingEvent> audit = new ListAppender<>();

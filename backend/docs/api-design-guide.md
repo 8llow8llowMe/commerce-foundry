@@ -915,7 +915,7 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 
 기존 GET/PUT 사이즈표 응답은 유지한다. 새 초안은 AI 결과를 상품 표에 바로 쓰지 않고 운영자가 검토·수정한 뒤 적용한다.
 TEXT 는 승인된 측정 항목 어휘만 받는다. IMAGE 는 관리 키 상품 이미지만 받고 플래그 `size-chart.draft.image-enabled`(기본 `false`)로 닫혀 있다 —
-닫혀 있으면 IMAGE 생성 · 이미지 후보 · 확인 모두 400 `SIZE_CHART_DRAFT_011` 이다. 일괄 이관은 후속 범위다. 정본은 [AI 사이즈표 계약](ai-size-chart-guide.md)이다.
+닫혀 있으면 IMAGE 생성 · 이미지 후보 · 확인 모두 400 `SIZE_CHART_DRAFT_011` 이다. TEXT 후보는 `GET /api/v1/admin/products/{productId}/size-chart/text-sources`(CATALOG_READ), 일괄 제출은 `POST /api/v1/admin/size-chart-drafts/batches`(CATALOG_MANAGE, 최대 20개)다. 둘 다 no-store다. 배치는 항목별 UUID·성공/실패·재시도 가능 여부를 반환하고 중복 상품·키는 부작용 전에 거절한다. 선택 TEXT는 sourceText 및 textSelection의 sourceId·bodyHash를 현재 본문 후보와 대조한다. 기존 단건 해시·입력·적용과 IMAGE 승인 계약은 유지한다. 정본은 [AI 사이즈표 계약](ai-size-chart-guide.md)이다.
 
 | 경로 | 권한 | 성공·주요 오류 |
 |---|---|---|

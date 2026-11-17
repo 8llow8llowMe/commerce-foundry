@@ -21,6 +21,10 @@ public final class SizeChartDraftValidationMessage {
     public static final String SOURCE_NOT_ALLOWED = "SIZE_CHART_DRAFT_116:이미지 입력에는 치수 텍스트를 함께 보내지 않습니다.";
     public static final String IMAGES_NOT_ALLOWED = "SIZE_CHART_DRAFT_117:텍스트 입력에는 이미지를 함께 보내지 않습니다.";
 
+    public static final String BATCH = "SIZE_CHART_DRAFT_118:상품과 UUID가 겹치지 않게 1~20개 항목을 보내 주세요.";
+    public static final String TEXT_SELECTION = "SIZE_CHART_DRAFT_119:검토한 텍스트 후보와 본문 확인값을 그대로 보내 주세요.";
+    public static final String ITEM_KEY = "SIZE_CHART_DRAFT_120:항목별 UUID를 입력하고 재시도 시 같은 값을 사용해 주세요.";
+
     /** 이미지 후보 아이디 모양. 정본은 {@link SizeChartImageLimits#SOURCE_ID_PATTERN}. */
     public static final String IMAGE_SOURCE_ID_PATTERN = SizeChartImageLimits.SOURCE_ID_PATTERN;
 

@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter;
 
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftAcceptedResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftApplyResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftBatchResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse.Candidate;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse.Cell;
@@ -13,11 +14,14 @@ import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.S
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftSummaryResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageInspectionResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageSourceResponse;
-import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageInspectionInfo;
-import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageSourceInfo;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartTextSourceResponse;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftBatchItemInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftSummaryInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageInspectionInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageSourceInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartTextSourceInfo;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftUnavailableException;
@@ -40,6 +44,19 @@ public class SizeChartDraftAdminPresenter {
         .streamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(8).maxStringLength(12000).build()).build())
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+
+    public List<SizeChartTextSourceResponse> textSources(
+        List<SizeChartTextSourceInfo> infos) {
+        return infos.stream().map(info -> new SizeChartTextSourceResponse(
+            info.sourceId(), info.bodyHash(), info.sourceText())).toList();
+    }
+
+    public SizeChartDraftBatchResponse batch(
+        List<SizeChartDraftBatchItemInfo> infos) {
+        return new SizeChartDraftBatchResponse(infos.stream()
+            .map(info -> new SizeChartDraftBatchResponse.Item(
+                id(info.productId()), info.idempotencyKey().toString(), id(info.draftId()), id(info.jobId()), info.errorCode(), info.retryable())).toList());
+    }
 
     public SizeChartDraftAcceptedResponse accepted(SizeChartDraftInfo info) {
         if (info.jobId() == null || info.jobId() <= 0) {

@@ -20,6 +20,11 @@ public class ProductImageLookupProcessor {
     /** 대표 · 갤러리 이미지를 노출 순서 → 아이디 오름차순으로 한 번에 읽는다. 호출한 쪽에 트랜잭션이 없어도 짧은 읽기 트랜잭션으로 읽는다. */
     @Transactional(readOnly = true)
     public List<ProductImage> findStillImagesIncludingHidden(long productId) {
-        return productImageRepositoryPort.findStillImagesByProductIds(List.of(productId));
+        return findStillImagesIncludingHidden(List.of(productId));
+    }
+    /** 배치 제출도 상품마다 조회하지 않고 한 번에 읽는다. */
+    @Transactional(readOnly = true)
+    public List<ProductImage> findStillImagesIncludingHidden(List<Long> productIds) {
+        return productIds.isEmpty() ? List.of() : productImageRepositoryPort.findStillImagesByProductIds(productIds);
     }
 }
