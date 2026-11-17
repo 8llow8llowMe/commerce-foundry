@@ -434,6 +434,15 @@ A3 → A2(A1 이후 · A3 이전) 롤백은 안전하다 — A3 는 새 열이 �
   실패 코드 포함)로 남는다. 이 문구로 건 알림 규칙은 반품 실패도 함께 잡으므로 따로 규칙을 더하지 않는다. 취소인지 반품인지는 어드민 클레임 상세에서 확인한다.
   반품 환불 기록 중 주문 정리가 불가능한 경우는 `return refunded but …` ERROR 로그가 하나 더 남는다.
 
+### 반품 수습 (#17 B2b)
+
+- **DDL 없음** — 반품의 다시 시도 · 수동 확정 · 종결이 만드는 상태 조합(`APPROVED` + 다음 시각, 결정 칸이 있는 `REFUNDED` · `COMPLETED`)은 B1 check
+  (`ck_claim_return_*` · `ck_claim_admin_decision`)가 이미 받는다.
+- **FE 계약** — 처리 상황(`recovery.situation`)에 `REFUND_WAITING`(반품 — 다른 환불 처리 대기)이 더해진다. 화면은 name · description 을 그대로 보이므로
+  FE 는 새 값을 따로 다루지 않아도 되지만, 확정 · 다시 시도 버튼은 `retryable` · `refundConfirmable` 플래그를 그대로 따른다.
+- **배포 순서** — B2a 뒤, B2c(승인 API) 전. B2b 만 배포된 동안은 반품 `APPROVED` 행이 없어 실제로 쓰이지 않는다. B2b → B2a 롤백은 승인 행이 생기기 전까지 안전하다.
+- **운영 알림** — 반품 수동 확정은 `return refund confirmed by admin without PG call` WARN 을 남긴다(취소는 `cancellation refund confirmed …`).
+
 ### 결제 후 취소 클레임 배포 (#16 PR-2a)
 
 `claim`에 결제 후 취소(CANCELLATION) 유형 · 환불/복원 상태 · 재시도 칸(`payment_id`, `attempt_count`, `next_attempt_at`, `failure_code`)을 더한다.

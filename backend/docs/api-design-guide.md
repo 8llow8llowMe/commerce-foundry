@@ -1348,13 +1348,20 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 |-----|------|-----------|
 | `GET /api/v1/admin/claims?orderId=&type=&status=&page=0&size=20` | 200 `PageResponse<{claimId,orderId,type,status,expectedRefund,requestedAt}>` | page 0 이상 `ORDER_144`, size 1~100 `ORDER_145`, orderId 양수 `ORDER_141`, page×size가 JPA offset 한도 초과 `ORDER_167`, 타입·범위 오류 `ORDER_198` (400) |
 | `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}],recovery:{situation,nextAutomaticAttemptAt,retryable,refundConfirmable,completable,lastDecision:{reason,decidedAt}\|null,version}}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
-| `POST /api/v1/admin/claims/{claimId}/retries` `{expectedVersion}` (#17 A2b) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 다시 시도할 수 없음(처리 완료 · 반품 · 주문 상태 이상) `ORDER_038` · 자동 처리 중(lease 안) `ORDER_039` (409), 결제 취소 결과 미반영 `ORDER_036` · 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
-| `POST /api/v1/admin/claims/{claimId}/refund-confirmation` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · 사유 없음 · 공백 `ORDER_170` · 200자 초과 `ORDER_148` · 제어 문자 `ORDER_151` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 환불 실패가 아님(반품 포함) · 결과 미확인인데 다시 시도 기한 안 · 주문이 취소 요청 · 취소 완료가 아님 `ORDER_041` (409), 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
-| `POST /api/v1/admin/claims/{claimId}/completion` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | 본문 검증은 위와 같다(`ORDER_169` · `170` · `148` · `151`, 400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 종결 후보가 아님(복원 결과 미확인 · 주문 상태 이상 · 다른 상태 · 반품) · 주문이 취소 완료가 아님 `ORDER_041` (409) |
+| `POST /api/v1/admin/claims/{claimId}/retries` `{expectedVersion}` (#17 A2b) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 다시 시도할 수 없음(처리 완료 · 승인 전 · 거절된 반품 · 주문 상태 이상) `ORDER_038` · 자동 처리 중(lease 안) `ORDER_039` (409), 결제 취소 결과 미반영 `ORDER_036` · 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
+| `POST /api/v1/admin/claims/{claimId}/refund-confirmation` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · 사유 없음 · 공백 `ORDER_170` · 200자 초과 `ORDER_148` · 제어 문자 `ORDER_151` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(반품은 같은 주문 잠금 경합 포함) `ORDER_037` · 환불 실패가 아님 · 결과 미확인 · 반품 막힘인데 다시 시도 기한 안 · 주문이 취소 요청 · 취소 완료(반품은 반품 요청)가 아님 · 반품 정리 판정 불가 `ORDER_041` (409), 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
+| `POST /api/v1/admin/claims/{claimId}/completion` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | 본문 검증은 위와 같다(`ORDER_169` · `170` · `148` · `151`, 400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 종결 후보가 아님(복원 결과 미확인 · 주문 상태 이상 · 다른 상태) · 취소인데 주문이 취소 완료가 아님 `ORDER_041` (409) |
 
 - **처리 상황 `recovery` (#17 A2b)** — 운영자는 비개발자라 원시 오류 코드(`PAYMENT_*` · `PRODUCT_*`) · 시도 횟수 · 결제 아이디를 내지 않는다.
-  `situation` 은 `{code,name,description}` metadata 이고 `NO_ACTION`(처리 끝 · 반품) · `AUTO_PROCESSING`(환불 대기 · 복원 대기) · `REFUND_UNCONFIRMED` ·
-  `REFUND_REJECTED` · `RESTORATION_UNCONFIRMED` · `RESTORATION_REJECTED` · `ORDER_STATUS_MISMATCH` 다(도메인 `ClaimRecoverySituation`). 화면은 name · description 을 그대로 보인다.
+  `situation` 은 `{code,name,description}` metadata 이고 `NO_ACTION`(처리 끝 · 승인 전 · 거절된 반품) · `AUTO_PROCESSING`(환불 대기 · 복원 대기) · `REFUND_UNCONFIRMED` ·
+  `REFUND_WAITING`(반품 — 같은 결제의 다른 환불에 막힘, #17 B2b) · `REFUND_REJECTED` · `RESTORATION_UNCONFIRMED` · `RESTORATION_REJECTED` · `ORDER_STATUS_MISMATCH` 다
+  (도메인 `ClaimRecoverySituation`). 화면은 name · description 을 그대로 보인다. 승인된 반품(#17 B2b)도 취소와 같은 처리 상황 · 버튼 플래그 · 수습 API 를 쓴다.
+- **반품 수습 (#17 B2b)** — 다시 시도는 반품 환불 실패를 `APPROVED`(환불 대기)로, 복원 실패를 `REFUNDED` 로 다시 연다. 결제 취소 키 기한 기준은 **승인 시각** + 14일이다.
+  **반품의 `REFUND_WAITING`(실패 코드 `PAYMENT_016`)은 결제사 거절이 아니다** — 같은 결제의 다른 반품 환불이 아직 처리 중이면 payment 가 이 반품의 결제 취소를 만들지 않고
+  016 을 준다. **돈이 나가지 않았을 수 있으므로** 다시 시도가 열려 있고(`retryable=true`), 수동 환불 확정은 결과 미확인과 같이 다시 시도 기한이 닫힌 뒤에만 열린다.
+  반품 수동 확정은 주문이 반품 요청일 때만 받고, 같은 커밋에서 주문을 정리한다(전량 환불 → 반품 완료, 열린 반품 없이 일부 → 배송 완료, 열린 반품 있음 → 그대로).
+  주문 상태가 바뀌면 주문 이력에 `ADMIN` · 사유를 남긴다. 재고로 되돌리지 않는 반품은 확정과 함께 `COMPLETED` 다. 같은 주문의 다른 반품 처리와 겹치면 409 `ORDER_037` 이다.
+  반품 복원 생략 종결은 주문 상태를 보지 않는다(반품 복원은 주문이 구매 확정으로 갔어도 진행한다). 반품의 `ORDER_STATUS_MISMATCH` 는 취소와 같이 수습 대상이 아니다(#695 계열).
   `nextAutomaticAttemptAt` 은 대기 상태일 때 자동 처리가 다시 확인할 시각, 아니면 null 이다. `retryable` 은 다시 시도 버튼을 보일지이며 선점 조건과 같은 판정이다.
   `version` 은 다시 시도 · 확정 · 종결 요청의 `expectedVersion` 으로 그대로 보내는 화면 버전(0 이상 정수)이다.
 - **다시 시도 (#17 A2b)** — 결과 미확인 환불 실패(`REFUND_UNCONFIRMED`) · 재고 복원 실패(`RESTORATION_FAILED`)는 그 단계의 대기 상태로 다시 열고,
