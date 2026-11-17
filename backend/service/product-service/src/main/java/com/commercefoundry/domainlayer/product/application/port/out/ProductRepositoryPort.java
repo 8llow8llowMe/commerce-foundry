@@ -48,6 +48,12 @@ public interface ProductRepositoryPort {
     /** Version CAS only; a mismatch is PRODUCT_010. */
     void bumpVersion(long productId, long version);
 
+    /**
+     * 가격 backfill 의 version fence (#20). 삭제 상품을 포함해 버전만 CAS 로 올리고 수정 시각은 바꾸지 않는다.
+     * 같은 버전을 읽어 둔 동시 writer 는 이후 CAS 에서 PRODUCT_010 으로 끝난다. 불일치는 PRODUCT_010 이다.
+     */
+    void fenceVersion(long productId, long version);
+
     /** 새 상품 INSERT (#9 E1). 아이디는 호출한 쪽이 발급했고 버전은 비어 있다(0 으로 저장된다). */
     void insert(Product product);
 

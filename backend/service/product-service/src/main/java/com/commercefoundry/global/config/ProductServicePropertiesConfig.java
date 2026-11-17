@@ -1,6 +1,7 @@
 package com.commercefoundry.global.config;
 
 import com.commercefoundry.common.config.SwaggerPropertiesConfig;
+import com.commercefoundry.global.properties.PriceBackfillProperties;
 import com.commercefoundry.global.properties.ProductDraftProperties;
 import com.commercefoundry.global.properties.StockProperties;
 import com.commercefoundry.global.properties.StoreMediaProperties;
@@ -23,7 +24,9 @@ import org.springframework.context.annotation.Import;
     StoragePropertiesConfig.class,
     SwaggerPropertiesConfig.class
 })
-@EnableConfigurationProperties({ProductDraftProperties.class, StockProperties.class, StoreProperties.class, StoreMediaProperties.class})
+@EnableConfigurationProperties({
+    PriceBackfillProperties.class, ProductDraftProperties.class, StockProperties.class, StoreProperties.class, StoreMediaProperties.class
+})
 public class ProductServicePropertiesConfig {
 
 }
