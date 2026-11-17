@@ -63,4 +63,12 @@ tasks.named('test') {
             logger.lifecycle("A2a refund recovery ${descriptor.className}.${descriptor.name}: ${result.resultType}")
         }
     }
+    // 테스트 worker 힙(#731). 지정하지 않으면 Gradle 기본 512m 다. CI 는 Testcontainers(PostgreSQL · Kafka) 통합 시험까지 돌아
+    // 캐시되는 Spring 컨텍스트가 많아져 512m 에서 클래스패스 스캔 중 OOM 이 났다. 로컬은 여러 세션이 같은 PC 에서 빌드하고
+    // Docker 통합 시험이 건너뛰어지므로 기본값을 유지한다.
+    if (System.getenv('CI') == 'true') {
+        maxHeapSize = '1536m'
+    }
+    // OOM 뒤 Kafka/Hikari 스레드만 살아 CI 제한 시간까지 대기하지 않도록 worker 를 즉시 실패시킨다(product-service 와 같다).
+    jvmArgs '-XX:+ExitOnOutOfMemoryError'
 }
