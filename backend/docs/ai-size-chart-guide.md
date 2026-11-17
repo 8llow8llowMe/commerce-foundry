@@ -136,6 +136,10 @@ IMAGE는 운영자가 개인정보 제거를 확인한 사이즈표 자산의 **
 - product DB: 멱등 키 경합, 초안·차트 revision, 중복 적용, 수동 편집 경합, 행·칸 전체 롤백과 실제 PostgreSQL DDL.
 - operations DB: 완료 뒤 같은 draft 등록 재생, 중복 작업 억제, lease 만료·취소 경합, 실패 재시도와 job 완료 알림.
 - 통합: 등록 응답 유실, 결과 조회 장애, 작업은 성공했으나 product가 일시 중단된 경우, 일괄 부분 실패와 재시도.
+- 완료 기준(#217): `SizeChartDraftCompletionTest`가 TEXT·IMAGE 각각 초안 생성 → 결과 반영(refresh) → 적용 → 상품 사이즈표 교체를
+  실제 Facade·저장소(H2)로 확인한다. operations 등록·결과 조회만 스텁이고 결과 JSON은 operations 검증기의 출력 모양과 같다(AI 미호출).
+  IMAGE는 생성 입력에 스토리지 키가 없고, `UNCERTAIN_CELL` 확인 없이는 값을 고쳐도 적용되지 않는 것까지 본다.
+  operations IMAGE 핸들러(바이트 읽기·해시 재검증·AI 스텁)는 `SizeChartGenerationImageJobProcessorTest`가 본다.
 - 보안: ADMIN 역할·internal 허용 호출자, 이미지 소속·형식·용량, 로그·감사에 개인정보·바이트·서명 URL 없음.
 
 새 엔티티와 revision 컬럼의 실제 운영 DDL은 PostgreSQL 17 생성 스냅숏으로 확인해 해당 PR 본문에 싣는다.
