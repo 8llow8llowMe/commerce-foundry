@@ -61,7 +61,9 @@ public class SizeChartDraftValidationProcessor {
         "waist", "waist circumference", "waist width", "hip", "hips", "hip circumference", "thigh", "thigh circumference",
         "rise", "front rise", "back rise", "hem", "hem width", "inseam", "outseam", "neck circumference",
         "arm length", "arm circumference", "wrist circumference", "foot length", "foot width", "heel height", "width", "height");
-    private static final Set<String> WARNINGS = Set.of("SIZE_ORDER", "MISSING_CELL", "MEASUREMENT_OUTLIER", "MEASUREMENT_ORDER");
+    /** UNCERTAIN_CELL: IMAGE 입력에서 AI 가 확실히 읽지 못한 값. 값을 고쳤든 아니든 운영자가 원본과 대조했다고 확인해야 적용할 수 있다. */
+    private static final Set<String> WARNINGS = Set.of("SIZE_ORDER", "MISSING_CELL", "MEASUREMENT_OUTLIER", "MEASUREMENT_ORDER", "UNCERTAIN_CELL");
+    private static final String UNCERTAIN_CELL = "UNCERTAIN_CELL";
     private static final String TEXT_MODE = "TEXT";
     private static final String IMAGE_MODE = "IMAGE";
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
@@ -306,7 +308,8 @@ public class SizeChartDraftValidationProcessor {
             long column = warning.get("columnId").longValue();
             String id = warningId(code, index, column);
             known.add(id);
-            if (!code.equals("MISSING_CELL") && unresolved(code, index, column, candidate, corrected)) {
+            // UNCERTAIN_CELL cannot be re-evaluated from numbers: only the operator can confirm the value against the source image.
+            if (code.equals(UNCERTAIN_CELL) || !code.equals("MISSING_CELL") && unresolved(code, index, column, candidate, corrected)) {
                 required.add(id);
             }
         }

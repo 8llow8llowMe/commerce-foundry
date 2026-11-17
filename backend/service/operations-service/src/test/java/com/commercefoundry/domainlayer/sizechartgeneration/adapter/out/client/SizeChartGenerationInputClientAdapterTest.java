@@ -30,7 +30,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 class SizeChartGenerationInputClientAdapterTest {
     private final SizeChartGenerationInputClient client = mock(SizeChartGenerationInputClient.class);
     private final CircuitBreakerRegistry registry = CircuitBreakerRegistry.ofDefaults();
-    private final SizeChartGenerationInputInternalResponseSupport support = new SizeChartGenerationInputInternalResponseSupport(registry);
+    private final SizeChartGenerationInputInternalResponseSupport support =
+        new SizeChartGenerationInputInternalResponseSupport(registry, tools.jackson.databind.json.JsonMapper.builder().build());
     private final SizeChartGenerationInputClientAdapter adapter = new SizeChartGenerationInputClientAdapter(client, support);
 
     @BeforeEach
