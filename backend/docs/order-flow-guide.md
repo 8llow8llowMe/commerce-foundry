@@ -1093,7 +1093,7 @@ B2c 라 B2a 만 배포된 동안 호출부는 스케줄러뿐이고 실제로 �
 
 - **도메인 전이** — `markRefunded` · `markConfirmedRefund` · `complete` · `failRefund` · `failRestoration` · `retryLater` · `holdUntil` 의 취소 전용 제한을 풀고,
   `REQUESTED` 고정 자리를 유형별 환불 대기 상태로 바꿨다. `hasSameRefundRequest` 는 유형이 같아야 같은 요청이고, `isRefundRejected` 는 유형을 보지 않는다.
-  `reopen` · `confirmRefundByAdmin` · `completeByAdmin` 은 아직 취소만이다(B2b).
+  `reopen` · `confirmRefundByAdmin` · `completeByAdmin` 의 반품 확장은 B2b 다(아래 "반품 수습").
 - **반품 환불 기록(tx2, `applyReturnRefunded`)** — 주문 FOR UPDATE(NOWAIT, §1-2) → `markConfirmedRefund`(`restock=false` 면 이어서 `complete` — `ck_claim_return_next_attempt`
   가 `REFUNDED` 에 다음 시각을 요구하므로 복원하지 않는 반품은 같은 커밋에서 `COMPLETED` 로 닫는다) → 주문의 클레임 목록에서 이 행을 메모리로 바꿔 넣어
   `ReturnRefundPolicy.outcome` → `Order#settleReturn` → 바뀌었으면 `SERVICE` 이력(사유 `RETURN_REFUNDED`)까지 **한 커밋**이다. 정리 결과는 `RETURNED`(전량 환불) ·
@@ -1107,9 +1107,8 @@ B2c 라 B2a 만 배포된 동안 호출부는 스케줄러뿐이고 실제로 �
   수동 확정 · 종결 — 는 반드시 주문을 먼저 잠근다(§1-2). 새 전이를 더할 때 이 분류를 넘으면 주문 잠금을 붙인다.
 - **스케줄러 질의는 유형마다 따로** — `idx_claim_type_next_attempt_at_id`(type, next_attempt_at, id)를 유형별 정렬 범위 스캔으로 `batch-size` 건까지 읽고
   어댑터가 `(next_attempt_at, id)` 순으로 병합해 앞의 `batch-size` 건을 쓴다. 유형을 OR 로 섞은 한 질의는 BitmapOr 뒤 전체 정렬이라 장애 뒤 대기 행이 쌓이면 조기 종료를 잃는다.
-- **B2b 로 넘기는 한계 — 반품의 `REFUND_FAILED(PAYMENT_016)` 는 환불이 나가지 않은 상태일 수 있다** — 같은 결제에 다른 claimId 의 `PENDING` 원장이 있으면
-  payment 는 이 클레임 행을 만들지 않고 016 을 준다(일시적 겹침). 엔진은 이것을 종결 거절로 닫는다. B2b 는 반품의 016 을 **수동 환불 확정 후보로 보지 않는다**
-  (B2b 의 첫 완료 기준) — 확정하면 주문은 정리되고 재고는 복원되는데 고객 환불은 빠진다. payment 원장에 이 claimId 행이 없음을 확인한 뒤 다시 열 수 있게 하는 쪽으로 설계한다.
+- **반품의 `REFUND_FAILED(PAYMENT_016)` 는 환불이 나가지 않은 상태일 수 있다** — 같은 결제에 다른 claimId 의 `PENDING` 원장이 있으면
+  payment 는 이 클레임 행을 만들지 않고 016 을 준다(일시적 겹침). 엔진은 이것을 종결 실패로 닫고, B2b 는 이것을 거절이 아니라 **막힘**으로 다룬다(아래 "반품 수습").
 - **복원은 주문 상태를 보지 않는다** — `REFUNDED` · `RESTORATION_FAILED` 반품의 복원은 주문이 정리 뒤 `DELIVERED` → `PURCHASE_CONFIRMED` 로 갔어도 진행한다.
   복원 사유는 클레임 유형에서만 나온다 — product 는 같은 claimId 의 사유 · 수량이 다르면 `PRODUCT_029` 다.
 - **귀책은 저장하지 않는다** — 귀책(`Fault`)은 승인 때 환불액 계산에만 쓰고 클레임 칸이 없다(B2c 의 감사 detail 에 남긴다). 엔진은 저장된 환불액 · 결제만 보낸다.
@@ -1119,6 +1118,37 @@ B2c 라 B2a 만 배포된 동안 호출부는 스케줄러뿐이고 실제로 �
   같은 주문 반품 둘의 아이디 재조회, 구매 확정 뒤 복원, `ORDER_STATUS_UNEXPECTED`(`restock=false` 포함), 거절 · 미확정 · 실패 횟수, 두 유형 섞인 스케줄러 질의),
   `ReturnRefundPipelinePostgresTest`(주문 잠금 경합 → NOWAIT 으로 2초 안에 503 → 같은 클레임 재전송). 취소 시험은 바꾸지 않았다.
   시험하지 않은 경로: 반품의 잠금 TX(2-CAS 소진 뒤) 경로, 같은 주문 반품 둘의 동시 기록, 미확정 상한 도달 — 잠금 TX 는 취소와 같은 코드에 잠금 순서만 다르다.
+
+### 반품 수습 (#17 B2b)
+
+결제 후 취소의 운영자 수습(다시 시도 A2b · 수동 환불 확정 · 복원 생략 종결 A3)을 **승인된 반품**에도 연다. API · 권한(다시 시도 `ORDER_MANAGE`, 확정 · 종결
+`SETTLEMENT_MANAGE`) · 오류 코드 · 화면 버전 대조는 취소와 같다(`api-design-guide.md` 클레임 어드민 절). 유형마다 다른 점만 적는다.
+
+| 수습 | 취소 | 반품 |
+|------|------|------|
+| 다시 시도 — 환불 실패 | `REFUND_UNCONFIRMED` → `REQUESTED` | `REFUND_UNCONFIRMED` · **`PAYMENT_016`(막힘)** → `APPROVED` |
+| 다시 시도 — 복원 실패 | `RESTORATION_FAILED` → `REFUNDED` | 같다 |
+| 결제 취소 키 기한 기준 | 접수 시각 + 14일 | 승인 시각 + 14일(`Claim#refundDeadlineBase`) |
+| 수동 환불 확정 후보 | 결제사 거절은 늘, 미확인은 기한이 닫힌 뒤 | 같다 + **막힘(016)도 기한이 닫힌 뒤에만** |
+| 수동 확정 때 주문 | `CANCEL_REQUESTED`(→ 취소 완료) · `CANCELED` | `RETURN_REQUESTED` 만 — **주문 FOR UPDATE NOWAIT 먼저**, 같은 커밋에서 반품 정리 + `ADMIN` 이력 |
+| 복원 생략 종결 때 주문 | `CANCELED` 여야 한다 | 보지 않는다(정산 → 정산 전이, 주문 잠금 없음) |
+
+- **막힘(`Claim#isRefundWaiting`, 처리 상황 `REFUND_WAITING`) — 첫 완료 기준** — 반품의 `REFUND_FAILED(PAYMENT_016)` 는 같은 결제의 다른 환불이 처리 중이라
+  이 반품의 결제 취소가 만들어지지 않았을 수 있다. order 는 payment 원장을 읽지 못해 겹침과 이 클레임 자체의 거절을 가르지 못하므로 **돈이 나가지 않았다고 보고**
+  다시 시도를 정본 경로로 둔다 — 같은 claimId 로 다시 보내므로 겹침이 풀렸으면 환불되고, 진짜 거절이면 다시 016 이라 무해하다. 수동 환불 확정은 결과 미확인과 같이
+  다시 시도가 기한으로 닫힌 뒤에만 열린다 — 그 전에 확정하면 주문이 정리되고 재고가 돌아가는데 고객 환불이 빠질 수 있다. 취소 클레임의 016 은 그대로 결제사 거절이다
+  (한 주문에 결제 후 취소는 하나라 겹침이 없다).
+- **반품 수동 환불 확정** — 열림 → 정산 전이라 주문을 먼저 잠근다(§1-2). 대표가 확정하면 `confirmRefundByAdmin`(재고로 되돌리지 않는 반품은 이어서 `complete`) →
+  `ReturnRefundPolicy.outcome` → `Order#settleReturn` → 바뀌었으면 `ADMIN` 이력(운영자 사유)까지 한 커밋이다(자동 반영과 같은 정리, 이력만 다르다). 정리 판정이 불가능하면
+  자동 반영처럼 fail-closed 로 저장하지 않고 409 `ORDER_041` 로 거절한다(운영자 앞이라). 주문 잠금에서 지면 409 `ORDER_037` 이다. 커밋 뒤 Facade 가 트랜잭션 밖에서 복원을 잇는다.
+- **반품 복원 생략 종결** — 확정 복원 실패 코드(`PRODUCT_027/028/029/003` · `RESTORATION_DATA_INVALID`)만 받는다. 주문 상태를 보지 않는다 — 반품 복원이 주문 상태와 무관하기 때문이다.
+- **수습 대상이 아닌 것** — 승인 전(`REQUESTED`) · 거절(`REJECTED`) 반품, 반품의 `ORDER_STATUS_UNEXPECTED`(환불은 됐는데 주문 정리 불가 — 취소의 #695 와 같은 계열,
+  운영자 조사 몫)는 다시 시도 · 확정 · 종결 모두 받지 않는다.
+- **한계** — 수동 확정은 payment 에 알리지 않는다(취소와 같다, #693 order 2단계). 확정된 반품의 payment 원장이 `PENDING` 으로 남으면 같은 결제의 다음 반품이 016 막힘이 될 수
+  있다 — 다시 시도 기한(승인 + 14일) 안에 그 원장이 정리되지 않으면 대표가 PG 를 확인한 뒤 확정한다.
+- 시험 — `ClaimTest`(반품 수습 전이), `ClaimAdminRecoveryPolicyTest`(막힘 · 거절 · 주문 상태 · 종결), `ClaimRecoverySituationTest`(`REFUND_WAITING`),
+  `ReturnRefundPipelineContract`(H2 · PostgreSQL: 거절 확정 → 반품 완료 + `ADMIN` 이력, `restock=false` 확정 → 완료 · 열린 반품이면 주문 그대로, 막힘은 확정 409 → 다시 시도 → 환불,
+  주문이 반품 요청이 아니면 409, 구매 확정 주문의 복원 종결). 바꾼 기존 단언 4곳(`ClaimTest` 2 · `ClaimRecoverySituationTest` 1 · `ClaimAdminRecoveryPolicyTest` 1)은 모두 "반품은 아직 수습 대상이 아니다" · "반품의 016 은 거절"이었다.
 
 ## 6. 어드민 운영 화면이 보는 것
 
