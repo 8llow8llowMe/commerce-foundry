@@ -63,7 +63,8 @@ resilience4j:
       # 배송비 정책 이력의 관리자 표시 이름 (GET /internal/v1/member-display-names, #322)
       auth-service:
         base-config: default
-      # 송장 등록의 출고 반영 (POST /internal/v1/orders/{orderId}/shipment, #18). 4xx(업무 거절 ORDER_001 · 020 · 025 · 159~161)는 세지 않는다 — default 의 ignore-exceptions
+      # 송장 등록의 출고 반영 (POST /internal/v1/orders/{orderId}/shipment, #18). 4xx(업무 거절 ORDER_001 · 020 · 025 · 159~161)는 세지 않는다 — default 의 ignore-exceptions.
+      # 출고 묶음의 피킹 스냅숏 조회 (GET /internal/v1/orders/picking-snapshots, #363)도 같은 인스턴스를 쓴다
       order-service:
         base-config: default
 

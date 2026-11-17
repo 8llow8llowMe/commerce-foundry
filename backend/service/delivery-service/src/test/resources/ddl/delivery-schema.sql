@@ -1,6 +1,153 @@
 
     create schema delivery;
 
+    create table delivery.picking_batch (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        check_count integer not null,
+        version bigint not null,
+        primary key (id),
+        constraint ck_picking_batch_check_count check (check_count >= 0)
+    );
+
+    comment on table delivery.picking_batch is
+        '출고 묶음(피킹 리스트) — 검수 완료는 출고 완료가 아니다';
+
+    comment on column delivery.picking_batch.id is
+        '출고 묶음 아이디 (Snowflake)';
+
+    comment on column delivery.picking_batch.created_at is
+        '생성 시각';
+
+    comment on column delivery.picking_batch.updated_at is
+        '수정 시각';
+
+    comment on column delivery.picking_batch.check_count is
+        '검수 기록 수 — 기록을 더할 때마다 올려 버전 비교 갱신을 일으킨다';
+
+    comment on column delivery.picking_batch.version is
+        '낙관적 락 버전';
+
+    create table delivery.picking_check (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        attempt_no integer not null,
+        batch_id bigint not null,
+        failure varchar(32) not null check ((failure in ('NONE','ORDER_NOT_IN_BATCH','INVALID_QUANTITY','WRONG_SKU','SHORTAGE','EXCESS','ALREADY_CHECKED'))),
+        order_id bigint not null,
+        quantities_key text not null,
+        primary key (id),
+        constraint uk_picking_check_batch_id_attempt_no unique (batch_id, attempt_no),
+        constraint ck_picking_check_attempt_no check (attempt_no >= 1)
+    );
+
+    comment on table delivery.picking_check is
+        '포장 검수 기록 (append-only) — 검수 성공은 출고가 아니다';
+
+    comment on column delivery.picking_check.id is
+        '검수 기록 아이디 (Snowflake)';
+
+    comment on column delivery.picking_check.created_at is
+        '생성 시각';
+
+    comment on column delivery.picking_check.updated_at is
+        '수정 시각';
+
+    comment on column delivery.picking_check.attempt_no is
+        '묶음 안 검수 순번 (1부터) — 묶음 행의 check_count 와 같다';
+
+    comment on column delivery.picking_check.batch_id is
+        '출고 묶음 아이디 (FK: picking_batch.id)';
+
+    comment on column delivery.picking_check.failure is
+        '검수 결과 (PickingCheck.Failure). NONE 이 성공';
+
+    comment on column delivery.picking_check.order_id is
+        '검수한 주문 아이디 (외부 FK: order-service orders.id) — 묶음 밖 주문이면 실패 기록이다';
+
+    comment on column delivery.picking_check.quantities_key is
+        '보낸 수량 — 상품 옵션 오름차순 옵션:수량 을 쉼표로 이은 값. 같은 주문 같은 수량 재요청을 알아보는 키';
+
+    create table delivery.picking_item (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        batch_id bigint not null,
+        order_id bigint not null,
+        quantity bigint not null,
+        sku_id bigint not null,
+        primary key (id),
+        constraint uk_picking_item_batch_id_order_id_sku_id unique (batch_id, order_id, sku_id),
+        constraint ck_picking_item_quantity check (quantity > 0)
+    );
+
+    comment on table delivery.picking_item is
+        '출고 묶음 대상 주문의 상품 옵션별 수량';
+
+    comment on column delivery.picking_item.id is
+        '출고 묶음 수량 아이디 (Snowflake)';
+
+    comment on column delivery.picking_item.created_at is
+        '생성 시각';
+
+    comment on column delivery.picking_item.updated_at is
+        '수정 시각';
+
+    comment on column delivery.picking_item.batch_id is
+        '출고 묶음 아이디 (FK: picking_batch.id)';
+
+    comment on column delivery.picking_item.order_id is
+        '주문 아이디 (외부 FK: order-service orders.id)';
+
+    comment on column delivery.picking_item.quantity is
+        '이 주문에서 꺼낼 수량 — 같은 상품 옵션 줄을 합친 값';
+
+    comment on column delivery.picking_item.sku_id is
+        '상품 옵션 아이디 (외부 FK: product-service sku.id)';
+
+    create table delivery.picking_order (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        batch_id bigint not null,
+        country_code varchar(2),
+        exclusion_reason varchar(32) check ((exclusion_reason in ('ORDER_NOT_FOUND','PAYMENT_PENDING','CANCELED_OR_EXPIRED','ALREADY_SHIPPED','NOT_READY_TO_SHIP','OVERSEAS_SHIPPING','CUSTOM_ORDER_INCLUDED','NO_ORDER_ITEMS'))),
+        order_id bigint not null,
+        order_status varchar(32),
+        primary key (id),
+        constraint uk_picking_order_batch_id_order_id unique (batch_id, order_id),
+        constraint ck_picking_order_target_snapshot check ((exclusion_reason is null and order_status is not null and country_code is not null) or (exclusion_reason is not null and order_status is null and country_code is null))
+    );
+
+    comment on table delivery.picking_order is
+        '출고 묶음 요청 주문 — 대상과 제외(사유) 주문';
+
+    comment on column delivery.picking_order.id is
+        '출고 묶음 주문 아이디 (Snowflake)';
+
+    comment on column delivery.picking_order.created_at is
+        '생성 시각';
+
+    comment on column delivery.picking_order.updated_at is
+        '수정 시각';
+
+    comment on column delivery.picking_order.batch_id is
+        '출고 묶음 아이디 (FK: picking_batch.id)';
+
+    comment on column delivery.picking_order.country_code is
+        '묶음 생성 때 배송 국가 코드 — 대상 주문에만 있다';
+
+    comment on column delivery.picking_order.exclusion_reason is
+        '제외 사유 (PickingExclusion.Reason). null 이면 묶음에 담은 대상 주문';
+
+    comment on column delivery.picking_order.order_id is
+        '주문 아이디 (외부 FK: order-service orders.id)';
+
+    comment on column delivery.picking_order.order_status is
+        '묶음 생성 때 주문 상태 코드 — 대상 주문에만 있다';
+
     create table delivery.shipment (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
