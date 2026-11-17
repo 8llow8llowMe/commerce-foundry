@@ -125,9 +125,17 @@ public final class OrderPaymentCrashChild {
             };
         }
         @Bean StockRestorationPort restoration() {
-            return (claim, reservation, quantities) -> {
-                request("/restore/" + claim + "/" + reservation + "/" + quantities.get(101L));
-                barrier("restore");
+            return new StockRestorationPort() {
+                @Override
+                public void restoreCancellation(long claim, long reservation, java.util.SortedMap<Long, Integer> quantities) {
+                    request("/restore/" + claim + "/" + reservation + "/" + quantities.get(101L));
+                    barrier("restore");
+                }
+
+                @Override
+                public void restoreReturn(long claim, long reservation, java.util.SortedMap<Long, Integer> quantities) {
+                    throw new UnsupportedOperationException("crash child does not exercise return restoration");
+                }
             };
         }
     }

@@ -26,6 +26,12 @@ public interface OrderRepositoryPort {
     Optional<Order> findByIdAndMemberIdForUpdate(long orderId, long memberId);
 
     /**
+     * 주문 하나(회원 무관)의 최신 헤더를 NOWAIT 으로 잠근다 (#17 B2a) — 반품 상태를 바꾸는 시스템 · 어드민 트랜잭션(반품 환불 기록 · 승인 · 거절 · 수동 확정)이
+     * 클레임보다 먼저 잡는다. 호출 트랜잭션이 필요하고, 다른 트랜잭션이 쥐고 있으면 기다리지 않고 잠금 예외다. 없으면 빈 값이다.
+     */
+    Optional<Order> findByIdForUpdate(long orderId);
+
+    /**
      * 새 주문(배송지 · 항목 · 입력 포함)과 첫 상태 이력을 넣고(persist — 같은 아이디는 PK 위반) 바로 flush 한다. 입력 행 아이디는 저장할 때 발급한다.
      *
      * @return 저장된 주문 — 생성 시각 · 버전(0)이 채워진다. 생성 시각은 감사가 채운 메모리 값이라 DB 에 저장된 값({@code timestamp(6)}, 드라이버가 반올림)과

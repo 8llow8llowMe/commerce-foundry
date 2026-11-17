@@ -43,7 +43,8 @@ public interface ClaimRepositoryPort {
     Claim update(Claim claim);
 
     /**
-     * 다시 보낼 결제 후 취소 클레임 (#16 PR-2) — {@code type = CANCELLATION}, {@code status in (REQUESTED, REFUNDED)}, {@code next_attempt_at <= now} 를
+     * 다시 보낼 클레임 (#16 PR-2, 반품 포함 #17 B2a — 이름은 그대로) — 유형별 대기 상태({@link Claim.Type#awaitingAttemptStatuses()}: 취소
+     * {@code REQUESTED · REFUNDED}, 반품 {@code APPROVED · REFUNDED})이고 {@code next_attempt_at <= now} 인 클레임을 두 유형 섞어 한 질의로
      * 다음 시각 · 아이디 순으로 {@code limit} 건까지, 항목과 함께 읽는다(항목은 한 번의 IN 조회).
      */
     List<Claim> findCancellationRetryTargets(Instant now, int limit);
