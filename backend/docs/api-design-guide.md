@@ -108,6 +108,9 @@ WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 —
 - 시점 원가(벌크): product-service `POST /internal/v1/sku-costs/query` (#361 PR-B). 허용 호출자는 operations-service(공헌이익 집계 #362).
   조회 키가 `ids` 가 아니라 (SKU, 시각) 쌍 목록이라 본문으로 받는 **읽기 전용 POST** 다 — 위 표의 상한(원문 100개) · 중복(첫 등장 순서로 합침) · 없는 아이디(뺌) ·
   순서(요청 순서) · in 절 벌크 규칙은 그대로 따른다. 계약은 §2-12 "서비스 간 시점 원가 조회".
+- AI 상품 초안 생성 등록 · 결과(단건 명령 · 단건 조회): operations-service `POST /internal/v1/product-draft-generation-jobs` ·
+  `GET /internal/v1/product-draft-generation-jobs/{jobId}/result` (#359 PR-2b-2). 허용 호출자는 product-service 하나다(호출 연결은 PR-3).
+  (draftId, generationNo 1~3) 영수증으로 재생하고 hash · 요청자 · 만료가 다르면 409 `PRODUCT_DRAFT_GENERATION_002`. 계약 · 코드 표는 §7-3 "등록 · 결과 조회 internal".
 
 - 마케팅 동의 상태(벌크): auth-service `POST /internal/v1/marketing-consents/query` (#230). 허용 호출자는 operations-service 하나다.
   ID 목록을 URL 대신 본문 `{memberIds: [...]}`로 받는 **읽기 전용 POST**이며 중복 포함 1~100개 양수 ID를 받는다.
@@ -1692,6 +1695,7 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
   같은 요청이 진행 중이면 멱등 키(`dedupKey`, 종류마다 따로)로 기존 `jobId` 를 돌려준다. **범용 등록 API 는 두지 않는다.**
 - #217처럼 기능 API와 작업 엔진이 다른 서비스이면 기능 전용 internal 등록만 둔다. product 초안을 먼저 커밋한 뒤 operations의
   draft ID 영수증을 등록·재생하고, job ID 결합을 확인해야 202로 답한다([AI 사이즈표 계약](ai-size-chart-guide.md)).
+  AI 상품 초안(#359)도 같은 모양이고 영수증 키가 (draft ID, 회차)다(§7-3).
 - 상태 조회 · 취소는 어드민 작업 API 하나로 한다 — `GET /api/v1/admin/jobs` · `GET /api/v1/admin/jobs/{jobId}` · `POST /api/v1/admin/jobs/{jobId}/cancel`
   (ADMIN, operations-service). 계약은 아래 §7-1.
 - 작업 실패는 `200 OK` + `status=FAILED` + `errorCode/errorMessage` 로 답한다 (HTTP 5xx 가 아니다).
@@ -1751,10 +1755,10 @@ public ResponseEntity<Response<OrderDetailResponse>> getOrder(
 product AI 상품 초안(§2-14)의 생성 실행이다. 컨텍스트는 `domainlayer/productdraftgeneration`, 작업 종류는 `PRODUCT_DRAFT_GENERATE`
 (`ProductDraftGenerationJobProcessor`, 읽기 권한 `CATALOG_READ`, 시도 상한 2 · 인스턴스당 동시 1 — #359 D9)다. 진행 문구 · 실패 안내는 한국어 운영자 문구다.
 
-- **단계** — 지금은 핸들러 · product 입력 Feign · AI 호출만 있다. 등록 internal(product 전용 · draft ID 영수증 · 플래그 `operations.product-draft-generation.enabled`
-  기본 닫힘)과 결과 조회 internal 은 2b-2, product 쪽 등록 연결 · 상태 전이 · 결과 반영 · 재생성 3회 · 동시 3건은 PR-3 이다. **등록 경로가 없어 이 단계만으로는 작업이 생기지 않는다.**
-- **payload** — `{"draftId": <양수>}` 하나다(다른 칸이 있으면 `PRODUCT_DRAFT_INVALID_DATA`). 입력 해시를 두지 않는다 — 초안 사실은 만든 뒤 바뀌지 않고, 이미지는
-  product 가 키 · ETag 를 고정해 바뀌면 410 `PRODUCT_DRAFT_044` 로 알린다.
+- **단계** — 2b-1 은 핸들러 · product 입력 Feign · AI 호출, 2b-2 는 product 전용 등록 · 결과 조회 internal 과 (초안, 회차) 영수증이다(아래 "등록 · 결과 조회 internal").
+  product 쪽 등록 연결 · 상태 전이 · 결과 반영 · 재생성 3회 · 동시 3건은 PR-3 이다. **product 가 아직 부르지 않고 플래그도 기본 닫힘이라 이 단계만으로는 작업이 생기지 않는다.**
+- **payload** — `{"draftId": <양수>}` 하나다(다른 칸이 있으면 `PRODUCT_DRAFT_INVALID_DATA`). payload 에는 입력 해시 · 회차를 두지 않는다 — 초안 사실은 만든 뒤 바뀌지 않고, 이미지는
+  product 가 키 · ETag 를 고정해 바뀌면 410 `PRODUCT_DRAFT_044` 로 알린다. 해시 · 회차는 등록 영수증에만 둔다(재요청이 같은 입력인지 대조하는 용도).
 - **실행** — product `GET /internal/v1/product-drafts/{draftId}/generation-input` → (이미지가 있으면) 순번마다 `GET …/generation-images/{index}` → AI(`ai.features.product-draft`)
   → 출력 검증 → 결과 JSON. DB 에 쓰지 않는다. 앞뒤로 checkpoint(5 · 15 · 20 · 장마다 20~34 · 35 · 85 · 100)를 둬 취소 · lease 상실 · 실행 시간 초과를
   그 자리에서 받는다 — 이미지는 한 장을 받아 검증하고 checkpoint 를 지난 뒤에 다음 장을 읽는다.
@@ -1797,6 +1801,94 @@ product AI 상품 초안(§2-14)의 생성 실행이다. 컨텍스트는 `domain
 
 - **PR-3 할 일** — product 등록 검증에 같은 이미지 원본 합계 상한(20MiB)을 둬 운영자가 생성 전에 알게 한다. 결과의 `unconfirmedFacts` · `warnings` 를 초안 응답에
   운영자 언어(`{code, name, description}`)로 옮긴다. `PRODUCT_DRAFT_IMAGE_CHANGED` · `INPUT_EXPIRED` 는 "새 초안을 만들라" 로 안내한다.
+
+#### 등록 · 결과 조회 internal (#359 PR-2b-2)
+
+product 전용이다(`ProductDraftGenerationInternalController`, `@Hidden`, `@PreAuthorize("hasAuthority('SERVICE_product-service')")`). 범용 작업 등록 API 가 아니다.
+그 밖의 서비스 토큰은 403, 토큰 없음 · 사용자 토큰 · 다른 audience 는 401 이다. 모든 응답은 공통 봉투 · `Cache-Control: no-store` 다.
+선례는 AI 사이즈표 등록(#217, [ai-size-chart-guide.md](ai-size-chart-guide.md))이고 다른 점은 영수증 키에 회차가 있다는 것이다.
+
+| API | 입력 | 응답 dataBody |
+|---|---|---|
+| `POST /internal/v1/product-draft-generation-jobs` → 202 | `{draftId, generationNo(1~3), inputHash(소문자 hex 64자), actorMemberId, expiresAt}` | `{draftId, generationNo, jobId, inputHash}` |
+| `GET /internal/v1/product-draft-generation-jobs/{jobId}/result` → 200 | — | `{draftId, generationNo, jobId, inputHash, status, failureCode, resultJson}` |
+
+- **영수증** `operations.product_draft_generation_receipt` — PK `(draft_id, generation_no)`, `job_id` UNIQUE, `generation_no between 1 and 3` CHECK. insert 만 하고 고치지 않는다.
+  회차는 product 가 매기고 operations 는 1~3 만 받는다(DTO 검증 · 도메인 record · DB CHECK).
+  작업 · outbox(실행 신호) · 영수증을 한 트랜잭션으로 저장한다. Facade 는 감싸는 트랜잭션 없이 `REQUIRES_NEW` · `READ_COMMITTED` · 5초 템플릿을 쓴다.
+- **멱등 키** `product-draft:{draftId}:{generationNo}` — 회차를 넣어 다음 회차가 이전 회차의 활성 작업을 받지 않게 한다. payload 는 위 `{draftId}` 그대로다.
+- **같은 (draftId, generationNo) 재요청** — hash · 요청자 · `expiresAt`(마이크로초로 맞춘 값)이 모두 같으면 기존 영수증을 재생한다(작업을 새로 만들지 않는다).
+  하나라도 다르면 409 `PRODUCT_DRAFT_GENERATION_002`. 재생은 만료 · 플래그와 무관하다 — 작업이 끝났거나 초안이 만료된 뒤에도 같은 답이다.
+- **동시 등록** — 진 쪽은 작업 · outbox · 영수증을 모두 롤백한 뒤 새 읽기 트랜잭션에서 이긴 영수증과 대조한다 — 같으면 재생, hash · 요청자 · 만료가 다르면 409 `002`,
+  이긴 영수증이 없으면 503 `501` 이다. 진 쪽이 영수증 없음을 읽은 뒤 이긴 쪽이 커밋해 엔진이 이긴 쪽의 활성 작업을 돌려줘도(`created=false`) 같다 —
+  그 작업과 결합되지 않으면(요청자 등) 영수증을 붙이지 않고 내부 경합 예외로 롤백한 뒤 같은 대조를 한다. 바인딩 검증은 늘 하므로 남의 작업에 영수증이 붙지 않는다.
+- **신규 등록** — `expiresAt` 이 지금 이전이거나 같으면 409 `005`. 플래그 `operations.product-draft-generation.enabled`(`PRODUCT_DRAFT_GENERATION_ENABLED`, 기본 false)가
+  닫혀 있으면 503 `501` — 신규 등록만 막고 재생 · 결과 조회는 유지한다.
+- **결과** — `status` 는 `PENDING`(QUEUED · RUNNING) · `SUCCEEDED` · `FAILED` · `CANCELLED`. 작업의 종류 · 요청자 · payload 의 `draftId` 가 영수증과 다르면 502 `503` 이다.
+  - `resultJson` 은 `SUCCEEDED` 일 때만 위 결과 JSON 객체 문자열이고(UTF-8 32KiB 이하, 객체가 아니거나 깨졌으면 `503`), 그 밖에는 null 이다.
+  - `failureCode` 는 `FAILED` 일 때만 낸다. 위 실패 코드 표의 코드와 엔진 코드(`LEASE_EXPIRED` · `RUN_TIMEOUT` · `HANDLER_ERROR` · `RESULT_TOO_LARGE`)만 그대로 넘기고, 그 밖은 `GENERATION_FAILED` 다.
+    사이즈표는 핸들러 코드를 `GENERATION_FAILED` 로 접지만, 상품 초안은 product 가 "새 초안을 만들라" 와 "다시 시도" 를 가려 안내해야 해서 고정 코드를 넘긴다.
+  - 프롬프트 · AI 원문 · 토큰 · 비용 · 원래 payload · 파서 진단은 응답에 싣지 않는다.
+  - 작업 행이 없거나 성공 결과가 비었으면 410 `010` 이다.
+
+| 코드 | HTTP | 의미 |
+|---|---|---|
+| `PRODUCT_DRAFT_GENERATION_001` | 404 | 그 작업 아이디의 영수증이 없다 |
+| `PRODUCT_DRAFT_GENERATION_002` | 409 | 같은 (초안, 회차) 영수증과 hash · 요청자 · 만료 시각이 다르다 |
+| `PRODUCT_DRAFT_GENERATION_005` | 409 | 만료된 초안의 신규 등록 |
+| `PRODUCT_DRAFT_GENERATION_010` | 410 | 작업 행 · 성공 결과가 없다(보관 만료) |
+| `PRODUCT_DRAFT_GENERATION_100` | 400 | 깨진 JSON · 타입 불일치 폴백 |
+| `PRODUCT_DRAFT_GENERATION_101` · `111` · `121` · `131` · `141` · `151` | 400 | draftId · generationNo · inputHash · actorMemberId · expiresAt · 경로 jobId |
+| `PRODUCT_DRAFT_GENERATION_501` | 503 | 등록 불가(플래그 닫힘 · DB 실패 · 이긴 영수증 없음) |
+| `PRODUCT_DRAFT_GENERATION_502` | 503 | 결과 조회 DB 실패 |
+| `PRODUCT_DRAFT_GENERATION_503` | 502 | 작업이 영수증과 결합되지 않거나 결과 JSON 이 계약 밖 |
+
+접두어 `PRODUCT_DRAFT_GENERATION_` 은 product 의 `PRODUCT_DRAFT_0xx` · 핸들러 실패 코드(`PRODUCT_DRAFT_INPUT_*` 등, 숫자 없음)와 겹치지 않는다.
+
+#### #359 PR-2b-2 운영 DDL
+
+엔티티 전체 PostgreSQL 17 생성 스냅숏은 `service/operations-service/src/test/resources/ddl/operations-schema.sql` 이다. 새 테이블 하나만 만든다.
+운영자가 DDL 적용 계정으로 직접 적용하고, 적용 뒤 배포한다. 플래그는 product 연결(PR-3) 전까지 닫아 둔다.
+
+```sql
+set client_encoding = 'UTF8';
+begin;
+
+create table operations.product_draft_generation_receipt (
+    draft_id bigint not null,
+    generation_no integer not null,
+    expires_at timestamp(6) with time zone not null,
+    input_hash varchar(64) not null,
+    job_id bigint not null,
+    requested_by_member_id bigint not null,
+    primary key (draft_id, generation_no),
+    constraint uk_product_draft_generation_receipt_job_id unique (job_id),
+    constraint ck_product_draft_generation_receipt_generation_no check (generation_no between 1 and 3)
+);
+
+comment on table operations.product_draft_generation_receipt is
+    '상품 초안 생성 등록 영수증';
+
+comment on column operations.product_draft_generation_receipt.draft_id is
+    '초안 식별자 (외부 FK: product-service product_draft.id)';
+
+comment on column operations.product_draft_generation_receipt.generation_no is
+    '생성 회차 (1~3)';
+
+comment on column operations.product_draft_generation_receipt.expires_at is
+    '초안 만료 시각';
+
+comment on column operations.product_draft_generation_receipt.input_hash is
+    '정규화한 입력 SHA-256';
+
+comment on column operations.product_draft_generation_receipt.job_id is
+    '작업 식별자 (FK: operations.job.id)';
+
+comment on column operations.product_draft_generation_receipt.requested_by_member_id is
+    '요청자 식별자 (외부 FK: auth-service member.id)';
+
+commit;
+```
 
 ## 8. Swagger
 

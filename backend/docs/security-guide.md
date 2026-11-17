@@ -962,6 +962,10 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
   |------------|-------------|------|
   | `GET /internal/v1/product-drafts/{draftId}/generation-input` (product) | `SERVICE_operations-service` | 생성 대기 · 생성 중 초안의 운영자 사실과 이미지 순번 · 유형 · 형식 · 크기만, `no-store`. 스토리지 키 · ETag · 공개 주소 · 만든 어드민 없음 |
   | `GET /internal/v1/product-drafts/{draftId}/generation-images/{index}` (product) | `SERVICE_operations-service` | 생성 요청 때 고정한 관리 키 바이트(`application/octet-stream`, `no-store`, `nosniff`). 고정 ETag 조건 읽기 · magic bytes 재판별, 바뀌면 410 `PRODUCT_DRAFT_044` |
+  | `POST /internal/v1/product-draft-generation-jobs` (operations, #359 PR-2b-2) | `SERVICE_product-service` | draft ID · 회차(1~3) · 입력 해시 · 요청자 · 만료만 등록. 완료 · 만료 뒤에도 같은 영수증 재생, 다르면 409 |
+  | `GET /internal/v1/product-draft-generation-jobs/{jobId}/result` (operations, #359 PR-2b-2) | `SERVICE_product-service` | 확정 상태 · 검증 결과 JSON · 허용 목록 실패 코드만. 원래 payload · 프롬프트 · AI 원문 · 토큰 · 비용 없음 |
+
+  operations 의 두 등록 · 결과 internal 은 그 밖의 서비스 토큰 403, 토큰 없음 · 사용자 토큰 401 이다(`ProductDraftGenerationInternalControllerTest`).
 
   **키 패턴 허용 목록 (D11)** — 초안 이미지는 미디어 업로드 확정이 만든 `products/media/{actorId}/{UUID}/{SHA-256}.{jpg|png|webp}` 키만 받는다. 업로드 확정 전 원본
   (`uploads/...`, 공개 403) · 상품별 키(`products/{id}/...`, 초안은 상품이 없어 소속을 확인할 수 없다) · 이관 이미지 · 퍼센트 인코딩 주소는 400 `PRODUCT_DRAFT_031` 이다.

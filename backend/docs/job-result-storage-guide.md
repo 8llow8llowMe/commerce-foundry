@@ -127,7 +127,7 @@ DDL 스냅숏은 `OperationsSchemaSnapshotTest`가 생성한 PostgreSQL SQL을 �
 | 작업 종류 | 결과 | 자체 상한 | 읽는 쪽 |
 |-----------|------|-----------|---------|
 | `SIZE_CHART_GENERATION` (#217) | 검증한 사이즈표 후보 · 경고 | 32KiB | product 결과 조회 internal |
-| `PRODUCT_DRAFT_GENERATE` (#359 PR-2b) | AI 상품 문구 제안 · 확인이 필요한 속성 · 경고(스키마는 `api-design-guide.md` §7-3) | 32KiB | product 결과 조회 internal(2b-2 · PR-3) |
+| `PRODUCT_DRAFT_GENERATE` (#359 PR-2b) | AI 상품 문구 제안 · 확인이 필요한 속성 · 경고(스키마는 `api-design-guide.md` §7-3) | 32KiB | product 결과 조회 internal `GET /internal/v1/product-draft-generation-jobs/{jobId}/result`(2b-2, product 호출은 PR-3) |
 
 결과 JSON 에 운영자 입력 사실 · 프롬프트 · provider 원문 · 이미지 바이트를 싣지 않는다. 보존 정리를 넣을 때 보관 기간은 product 초안 보관(7일)보다 길게 둬
 초안이 살아 있는 동안 결과가 먼저 사라지지 않게 한다.
