@@ -70,14 +70,15 @@ class PriceBackfillPostgresIntegrationTest extends PriceBackfillIntegrationTest 
         var writerPrepared = new CountDownLatch(1);
         var releaseWriter = new CountDownLatch(1);
         var first = new java.util.concurrent.atomic.AtomicBoolean(true);
-        doAnswer(call -> {
+        // prepare 는 MANDATORY 라 Spring 프록시를 지나는 스텁 호출도 TX 안에서 한다(writer 시험과 같은 방식)
+        tx.executeWithoutResult(s -> doAnswer(call -> {
             Object plan = call.callRealMethod();
             if (first.getAndSet(false)) { // writer 의 prepare 만 멈추고 backfill 의 prepare 는 그대로 둔다
                 writerPrepared.countDown();
                 await(releaseWriter);
             }
             return plan;
-        }).when(coordinator).prepare(any(), any());
+        }).when(coordinator).prepare(any(), any()));
 
         try (var executor = Executors.newFixedThreadPool(2)) {
             var writer = executor.submit(() -> products.updatePricing(new ProductPricingUpdateCommand(KRW_PRODUCT, 0, 99, Money.of(1200, KRW), null)));
