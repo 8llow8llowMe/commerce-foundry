@@ -37,7 +37,7 @@ public ProductListInfo searchProducts(
 |------|------|
 | Controller | `*WebController` · `*AdminController` · `*InternalController` · `*WebhookController` |
 | Scheduler | `adapter/in/scheduler/*Scheduler` — `@Scheduled` 진입점. `*SchedulerUseCase` 만 부르고, 건별 트랜잭션은 Facade 프록시를 건마다 불러 나눈다 |
-| Bootstrap | `adapter/in/bootstrap/*Runner` — 기동 진입점(`ApplicationRunner`). 설정을 커맨드로 옮겨 `*SeedUseCase` 만 부른다. 설정 오류는 `IllegalStateException` 으로 기동을 멈춘다 (#6) |
+| Bootstrap | `adapter/in/bootstrap/*Runner` — 기동 진입점(`ApplicationRunner`). 설정을 커맨드로 옮겨 `*SeedUseCase` 만 부른다. 설정 오류는 `IllegalStateException` 으로 기동을 멈춘다 (#6). 일회성 데이터 이관 runner(`PriceBackfillRunner`, #20)는 기본 OFF 이고 실패해도 기동을 멈추지 않으며 예외 종류만 로그에 남긴다 |
 | UseCase | `*WebUseCase` · `*AdminUseCase` · `*InternalUseCase` · `*SchedulerUseCase` (스케줄러 진입점) · `*SeedUseCase` (기동 진입점) |
 | Facade | `*WebFacade` · `*AdminFacade` · `*InternalFacade` · `*SchedulerFacade` · `*SeedFacade` |
 | Processor / Presenter | `*Processor` / `*Presenter` (고객 응답은 `*WebPresenter`, 어드민 응답은 `*AdminPresenter`, 서비스 간 응답은 `*InternalPresenter`) |

@@ -87,7 +87,7 @@ com.commercefoundry
   |  |  |- in/support           진입 adapter 들이 같이 쓰는 변환 함수 (예: Money → MoneyItem). DTO 는 두지 않는다
   |  |  |- in/webhook           외부 시스템 콜백 — PG 웹훅 등 (payment-service)
   |  |  |- in/scheduler         시각이 부르는 진입점 (@Scheduled — 재고 선점 만료, 미결제 주문 정리 등)
-  |  |  |- in/bootstrap         기동이 부르는 진입점 (ApplicationRunner — 초기 관리자 시드 #6). 설정을 커맨드로 옮겨 UseCase 만 부른다
+  |  |  |- in/bootstrap         기동이 부르는 진입점 (ApplicationRunner — 초기 관리자 시드 #6, 가격행 backfill #20). 설정을 커맨드로 옮겨 UseCase 만 부른다
   |  |  |- in/metering          ai-core 계량 SPI 구현(AiCallInterceptor — AI 호출 앞뒤 예약 · 정산, operations #435). UseCase 만 부른다
   |  |  |- in/event             이벤트가 부르는 진입점 — 같은 서비스 안 ApplicationEvent(작업 종료 → 알림 #213)와 Kafka *EventListener(주문 만료 → 재고 해제 #309). UseCase 만 부른다
   |  |  \- out
