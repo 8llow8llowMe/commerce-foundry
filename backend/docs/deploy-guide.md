@@ -417,6 +417,19 @@ A3 → A2(A1 이후 · A3 이전) 롤백은 안전하다 — A3 는 새 열이 �
   `ck_claim_admin_decision` 과 같다). 만드는 전이는 B2 에만 있다. B2 가 새 상태 · 칸을 더 넓히면 이 롤백 안전성을 B2 에서 다시 본다.
 - 이 기반만으로 반품 환불이 열리지 않는다 — 승인 · 거절 API(권한 `ORDER_MANAGE`), 반품 환불 파이프라인 · 재시도 스케줄러 분기, 재고 복원 연결은 B2 다.
 
+### 반품 환불 · 복원 엔진 (#17 B2a)
+
+- **DDL 없음** — B1 의 check(`ck_claim_return_approval` · `ck_claim_return_next_attempt` · `ck_claim_return_failure_code`)가 B2 의 상태 조합을 이미 받는다.
+  B1 DDL 이 적용된 환경에만 배포한다.
+- **배포 순서 B2a → B2b → B2c** — B2a 는 엔진(파이프라인 · 스케줄러의 반품 분기, 반품 재고 복원 호출)뿐이고 반품 `APPROVED` 행을 만드는 호출부가 없다. 승인 API(B2c)가
+  먼저 나가면 엔진 없는 앱이 승인 행을 받게 되므로 순서를 바꾸지 않는다.
+- **게이트는 취소와 같다** — 반품 환불의 미확정 · 복원 재시도도 `order.cancellation.retry.enabled`(이름 그대로) 스케줄러가 맡는다. 꺼져 있으면 승인 뒤 미확정이
+  따라오지 않으므로 B2c 승인 API 는 이 설정이 꺼져 있으면 받지 않는다(B2c). batch · 시간 예산은 두 유형이 나눠 쓴다.
+- **product-service 계약** — 반품 복원은 기존 `POST /internal/v1/stock-restorations` 에 사유 `RETURN` 을 싣는다. product 의 `StockRestorationReason` 은 이미
+  `RETURN` 을 받으므로 product 배포는 필요 없다.
+- **롤백** — 반품 `APPROVED` 행이 생긴 뒤(B2c 배포 뒤)로는 B2a 이전 앱으로 롤백하지 않는다 — 이전 앱의 스케줄러는 취소만 집고 도메인 전이가 반품을 거절해,
+  승인된 반품의 환불 · 복원이 멈춘다(데이터는 깨지지 않지만 고객 환불이 지연된다). B2a 만 배포된 동안(승인 행 없음)은 B1 로 롤백해도 안전하다.
+
 ### 결제 후 취소 클레임 배포 (#16 PR-2a)
 
 `claim`에 결제 후 취소(CANCELLATION) 유형 · 환불/복원 상태 · 재시도 칸(`payment_id`, `attempt_count`, `next_attempt_at`, `failure_code`)을 더한다.
