@@ -37,7 +37,8 @@ import lombok.NoArgsConstructor;
  * </ul>
  *
  * <p>재시도 스케줄러는 {@code idx_claim_type_next_attempt_at_id} 를
- * 유형마다({@code type = CANCELLATION} · {@code type = RETURN}, #17 B2a) {@code next_attempt_at <= now} 범위로 타고 두 범위를 합쳐 {@code order by next_attempt_at, id} 한다
+ * 유형마다({@code type = CANCELLATION} · {@code type = RETURN}, #17 B2a) 따로 {@code next_attempt_at <= now} 범위를 정렬 순서대로 읽어 limit 에서 멈추고,
+ * 어댑터가 두 결과를 {@code (next_attempt_at, id)} 순으로 병합한다
  * — 다음 시도 시각은 대기 상태에만 있어 상태 열을 인덱스에 두지 않는다.
  */
 @Entity

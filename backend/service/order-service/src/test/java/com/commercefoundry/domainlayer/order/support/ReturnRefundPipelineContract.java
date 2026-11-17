@@ -236,6 +236,26 @@ public abstract class ReturnRefundPipelineContract {
     }
 
     @Test
+    void refundRecordedWithoutRestockWhileOrderIsNotReturnRequestedAlsoFailsClosedWithoutCompleting() {
+        Order order = order(OrderStatus.RETURN_REQUESTED);
+        Claim approved = approve(requestReturn(order, 1, 0), order, 10_000, false, NOW);
+        setOrderStatus(order, OrderStatus.DELIVERED);
+        paymentAnswers(PaymentCancelQueryResult.succeeded());
+
+        Claim done = pipeline.progress(approved);
+
+        // 재고로 되돌리지 않는 반품도 주문을 정리할 수 없으면 바로 완료하지 않고 운영자에게 넘긴다
+        assertThat(done.status()).isEqualTo(Claim.Status.RESTORATION_FAILED);
+        assertThat(done.failureCode()).isEqualTo(OrderCancellationProcessor.ORDER_STATUS_UNEXPECTED);
+        assertThat(done.nextAttemptAt()).isNull();
+        assertThat(readClaim(approved.id())).isEqualTo(done);
+        verify(stockRestorationPort, never()).restoreReturn(anyLong(), anyLong(), any());
+        verify(stockRestorationPort, never()).restoreCancellation(anyLong(), anyLong(), any());
+        assertThat(read(order.id()).status()).isEqualTo(OrderStatus.DELIVERED);
+        assertThat(returnHistories(order)).isEmpty();
+    }
+
+    @Test
     void rejectedUnknownAndUncountedAttemptsKeepOrderRequested() {
         Order order = order(OrderStatus.RETURN_REQUESTED);
         Claim rejectedSource = approve(requestReturn(order, 1, 0), order, 10_000, true, NOW);

@@ -25,7 +25,7 @@ public interface StockRestorationPort {
     /**
      * 반품의 재고 복원 (#17 B2a) — 사유만 {@code RETURN} 이고 계약은 {@link #restoreCancellation} 과 같다. 승인 때 재고로 되돌림을 고른 반품만 부른다.
      *
-     * <p>Every adapter must explicitly implement return restoration.
+     * <p>기본 구현을 두지 않는다 — 모든 어댑터(시험 대역 포함)가 반품 복원을 직접 구현해, 빠뜨리면 컴파일에서 드러난다.
      */
     void restoreReturn(long claimId, long reservationId, SortedMap<Long, Integer> quantitiesBySkuId);
 }
