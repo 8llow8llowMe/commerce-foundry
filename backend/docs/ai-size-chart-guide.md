@@ -5,8 +5,8 @@
 상품 사이즈표의 정본은 product-service의 기존 `sizechart` 컨텍스트다(#216). AI 출력은 정본에 바로 쓰지 않는다.
 operations-service의 작업 엔진(#212)과 알림 센터(#213), ai-core(#215)를 재사용한다.
 이 문서는 #217의 구현 명세다. TEXT 입력의 생성·초안·운영자 적용 경계가 연결되어 있다.
-IMAGE 입력은 product-service 쪽(후보·확인·해시 재검증·internal 바이트 읽기)만 구현되어 있고 플래그 `size-chart.draft.image-enabled`(기본 `false`)로 닫혀 있다.
-operations-service의 IMAGE 생성 경로(#217 PR2)와 운영 검증이 끝난 뒤에만 켠다. 닫혀 있으면 IMAGE 요청은 400 `SIZE_CHART_DRAFT_011`이다.
+IMAGE 입력은 product-service 쪽(후보·확인·해시 재검증·internal 바이트 읽기, PR1 #690)과 operations-service의 IMAGE 생성 경로(PR2)가 구현되어 있다.
+product 플래그 `size-chart.draft.image-enabled`(기본 `false`)로 닫혀 있으며 운영 검증이 끝난 뒤에만 켠다. 닫혀 있으면 IMAGE 요청은 400 `SIZE_CHART_DRAFT_011`이다.
 일괄 제출은 후속 범위이며 API가 열리지 않는다. 실제 운영 AI 호출은 별도 설정·배포 검증 뒤에만 한다.
 
 | 소유자 | 책임 |
@@ -47,6 +47,8 @@ IMAGE 입력은 아래 순서를 따른다. 응답·오류·로그에는 스토�
    저장 입력은 `{"mode":"IMAGE","images":[{"key","sha256","contentType","length"}]}`이며 기존 `source_json` 열을 쓴다(DDL 변경 없음).
 본문의 임의 URL을 따라가지 않는다. 템플릿 열 ID·단위와 상품 ID는 서버에서 다시 확인한다.
 부분 치수는 초안에 남기되 빠진 칸을 0이나 추정값으로 채우지 않는다. 비정상적인 크기·순서는 경고 코드로 표시한다.
+경고 코드는 `SIZE_ORDER`·`MISSING_CELL`·`MEASUREMENT_OUTLIER`·`MEASUREMENT_ORDER`·`UNCERTAIN_CELL`이다. `UNCERTAIN_CELL`은 IMAGE에서 AI가 값은 읽었지만
+확실하지 않다고 표시한 칸이다(읽지 못한 칸은 `null` + `MISSING_CELL`). 숫자로 다시 판정할 수 없으므로 값을 고쳤는지와 관계없이 적용 시 항상 확인(ack)이 필요하다.
 적용 요청은 빠진 칸을 모두 채우고 기존 #216의 1~30행·1~20열·값 범위·소수 둘째 자리 규칙을 통과해야 한다.
 
 operations-service에는 범용 job 등록 API를 만들지 않는다. `POST /internal/v1/size-chart-generation-jobs`는
@@ -99,13 +101,23 @@ operations의 기존 draft ID별 등록 영수증과 job 결과는 최소 90일 
 
 ## 4. AI·이미지 안전 경계
 
-operations의 기존 `AiClient` 구조화 출력과 설정된 `size-chart` 기능을 쓴다. SDK·Provider를 서비스가 직접 만들지 않는다.
+operations의 기존 `AiClient` 구조화 출력을 쓴다. TEXT는 `size-chart`, IMAGE는 `size-chart-image` 기능(프롬프트 `ai/prompts/size-chart-image/v1`)이다.
+SDK·Provider를 서비스가 직접 만들지 않는다. 두 입력 모두 같은 작업 타입 `SIZE_CHART_GENERATION`이고 핸들러가 생성 입력의 `mode`로 나눈다.
 AI 출력은 불신 입력이다. 서버가 템플릿 열 소속, 크기·행 수·중복, 숫자 범위와 경고 코드를 다시 검증한다.
 원문 출력·프롬프트·이미지 바이트·Provider 오류 본문은 로그·감사·작업 결과에 남기지 않는다.
 텍스트는 운영자가 차트 부분만 선택해 제출한다. 공통 마스커와 승인 측정 어휘 검사로 알려진 패턴을 가리고
 가릴 수 없는 이름·주소가 섞인 자유 문장 및 템플릿 이름은 AI 경로에서 거절한다. #216 수동 템플릿 편집은 제한하지 않는다.
 
-`AiImage`는 이미지 안의 글자를 마스킹하지 않는다. **operations-service는 아직 IMAGE mode를 거절하고(PR2), product-service는 플래그가 닫혀 있다.**
+`AiImage`는 이미지 안의 글자를 마스킹하지 않는다. **product-service 플래그가 닫혀 있는 동안 IMAGE 작업은 생기지 않는다.**
+
+operations IMAGE 핸들러(PR2)의 순서는 다음과 같다. 어느 단계든 어긋나면 AI를 부르지 않는다.
+
+1. 생성 입력의 `mode`·`images[{index,sha256,contentType}]`와 `sourceJson`의 이미지 목록이 순서·해시·형식까지 같아야 한다(1~4장, JPEG·PNG·WebP, 해시 중복 불가).
+2. 이미지를 순번대로 한 장씩 읽는다. `Content-Length` 1~5MiB, `Content-Type: application/octet-stream`, 본문 길이 일치만 받고, 그 밖이면 본문을 더 읽지 않는다.
+3. 장마다 다음 장을 읽기 전에 magic bytes와 **operations가 받은 바이트의 SHA-256**을 승인 해시와 대조하고 checkpoint를 둔다.
+   어긋나거나 product가 410 `SIZE_CHART_DRAFT_016`을 주면 `SIZE_CHART_IMAGE_CHANGED`(재시도 불가)다. product 5xx·읽기 중 끊김은 재시도 가능하다.
+4. AI에는 템플릿 스냅숏과 이미지 순번·형식만 데이터로 싣는다(해시·키 없음). 출력 칸의 `uncertain=true`는 값이 있을 때 `UNCERTAIN_CELL`이 된다.
+5. 결과는 TEXT와 같은 검증(열 소속·행 수·숫자 범위·크기 상한)을 거쳐 `JobOutcome`으로 낸다. 바이트·출력 원문은 로그·결과에 남기지 않는다.
 IMAGE는 운영자가 개인정보 제거를 확인한 사이즈표 자산의 **정확한 바이트 해시**를 승인한 경우에만 허용한다. 승인 뒤 자산이 바뀌면 다시 승인해야 한다
 (생성 시 409 `015`, 생성 작업이 읽는 시점 410 `016`).
 임의 외부 URL·HTML `<img>`를 직접 다운로드하지 않는다. 관리되는 상품 이미지 키만 소속·크기·MIME·magic bytes·ETag로 검증한다.
