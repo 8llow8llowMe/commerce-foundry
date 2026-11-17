@@ -18,6 +18,7 @@ import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SkuCurrencyPrice;
 import com.commercefoundry.domainlayer.product.domain.model.SkuOptionKey;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
+import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.shared.commerce.Money;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
@@ -49,6 +51,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ProductServiceFeaturesConfig.class, QuerydslConfigurer.class, PriceBookRepositoryAdapter.class,
     CurrencyPriceMapperImpl.class, LegacyPriceWriteProcessor.class})
+@EnableConfigurationProperties(PriceSourceProperties.class)
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)

@@ -40,7 +40,7 @@ public class PriceBackfillProductProcessor {
         }
         Product product = found.get(0);
         LegacyPriceSnapshot snapshot = LegacyPriceSnapshot.of(product, skuRepositoryPort.findAllByProductId(productId));
-        LegacyPriceWritePlan plan = legacyPriceWriteProcessor.prepare(snapshot, snapshot);
+        LegacyPriceWritePlan plan = legacyPriceWriteProcessor.prepareBackfill(snapshot);
         if (!plan.productUpdates().isEmpty() || !plan.skuUpdates().isEmpty()) {
             // 같은 스냅숏이면 수정 계획이 나올 수 없다. 나오면 계약 위반이라 쓰지 않는다.
             throw new IllegalStateException("backfill 계획에 수정 행이 있습니다");

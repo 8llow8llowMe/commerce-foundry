@@ -142,6 +142,11 @@ product-draft:
 price-backfill:
   mode: "OFF"
 
+# 가격 정본 모드 (#20 PR-2b, usd-pricing-guide.md §4-2). LEGACY · PRICE_BOOK.
+# PRICE_BOOK 은 운영 backfill 완료(사전 점검 READY · BASE_MISSING 0) 확인과 사용자 승인 뒤 환경 변수 PRICE_SOURCE_MODE 로만 켠다. 되돌릴 때는 LEGACY
+price-source:
+  mode: LEGACY
+
 security:
   jwt:
     # access 토큰 검증 공개키 — PEM 본문 한 줄 (security-guide.md §5-3 · §6). 비었거나 풀리지 않으면 기동하지 않는다.

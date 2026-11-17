@@ -3,6 +3,8 @@ package com.commercefoundry.domainlayer.product.application.service.processor;
 import com.commercefoundry.domainlayer.product.application.port.out.PriceBookRepositoryPort;
 import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceSnapshot;
 import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan.MissingBase;
+import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.List;
 import java.util.TreeSet;
@@ -14,21 +16,38 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 다섯 legacy writer가 공유하는 B1b 가격 조율기. MANDATORY는 TX 존재만 확인하며 부모 보호를 증명하지 않는다.
  * 호출 writer는 같은 상품의 CAS/@Version 보호 아래 같은 TX에서 prepare와 write를 호출해야 한다.
+ *
+ * <p>정본 모드({@code price-source.mode}, #20 PR-2b): LEGACY 는 before 의 빠진 기준통화 행을 보완하고(B1b),
+ * PRICE_BOOK 은 보완하지 않고 {@link LegacyPriceWritePlan.BaseRowMissingException}(500, 전체 롤백)으로 거절한다.
+ * 두 모드 모두 legacy 컬럼은 같은 TX 에서 같은 값으로 쓰이는 기준통화 투영이고, drift 는 500 이다.
  */
 @Component
 @RequiredArgsConstructor
 public class LegacyPriceWriteProcessor {
     private final PriceBookRepositoryPort priceBookRepositoryPort;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
+    private final PriceSourceProperties priceSourceProperties;
 
+    /** writer 진입. 빠진 기준통화 행 처리는 정본 모드를 따른다. */
     @Transactional(propagation = Propagation.MANDATORY)
     public LegacyPriceWritePlan prepare(LegacyPriceSnapshot before, LegacyPriceSnapshot after) {
+        return prepare(before, after, priceSourceProperties.mode() == PriceSourceProperties.Mode.PRICE_BOOK
+            ? MissingBase.REJECT : MissingBase.REPAIR);
+    }
+
+    /** backfill 진입(PR-2a). 정본 모드와 상관없이 빠진 기준통화 행을 legacy 값으로 채운다 — 정본 모드에서도 복구 도구로 쓴다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public LegacyPriceWritePlan prepareBackfill(LegacyPriceSnapshot snapshot) {
+        return prepare(snapshot, snapshot, MissingBase.REPAIR);
+    }
+
+    private LegacyPriceWritePlan prepare(LegacyPriceSnapshot before, LegacyPriceSnapshot after, MissingBase missingBase) {
         before.requireSuccessor(after);
         var skuIds = new TreeSet<>(before.skuStatuses().keySet());
         skuIds.addAll(after.skuStatuses().keySet());
         var products = priceBookRepositoryPort.findProductPrices(List.of(before.productId()));
         var skus = priceBookRepositoryPort.findSkuPrices(skuIds);
-        return LegacyPriceWritePlan.prepare(before, after, products, skus, snowflakeIdGenerator::generateId);
+        return LegacyPriceWritePlan.prepare(before, after, products, skus, snowflakeIdGenerator::generateId, missingBase);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
