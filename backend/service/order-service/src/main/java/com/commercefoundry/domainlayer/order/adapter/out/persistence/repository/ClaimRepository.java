@@ -28,15 +28,14 @@ public interface ClaimRepository extends JpaRepository<ClaimEntity, Long> {
     List<RequestedReturnQuantityQueryResult> sumQuantities(long orderId, Claim.Type type, Collection<Claim.Status> statuses);
 
     /**
-     * 두 유형의 재시도 대상을 한 질의로 섞어 읽는다 (#17 B2a) — 유형마다 {@code idx_claim_type_next_attempt_at_id} 범위를 타고(PostgreSQL 은 두 범위를 합친 뒤 정렬),
-     * 종결 클레임은 {@code next_attempt_at} 이 null 이라 걸리지 않는다(상태 조건은 이중 안전장치). 상태 집합은 도메인이 준다({@link Claim.Type#awaitingAttemptStatuses()}).
+     * 한 유형의 재시도 대상 (#16 PR-2, 유형 인자화 #17 B2a) — 유형이 하나라 {@code idx_claim_type_next_attempt_at_id}(type, next_attempt_at, id) 를
+     * 정렬된 범위 스캔으로 읽고 {@code limit} 건에서 멈춘다. 유형을 OR 로 섞으면 BitmapOr 뒤 전체 정렬이 되어 조기 종료를 잃으므로 유형마다 따로 부르고
+     * 어댑터가 병합한다. 종결 클레임은 {@code next_attempt_at} 이 null 이라 걸리지 않는다(상태 조건은 이중 안전장치). 상태 집합은 도메인이 준다({@link Claim.Type#awaitingAttemptStatuses()}).
      */
     @Query("""
         select c from ClaimEntity c
-         where c.nextAttemptAt <= :now
-           and ((c.type = :firstType and c.status in :firstStatuses) or (c.type = :secondType and c.status in :secondStatuses))
+         where c.type = :type and c.status in :statuses and c.nextAttemptAt <= :now
          order by c.nextAttemptAt asc, c.id asc
         """)
-    List<ClaimEntity> findRetryTargets(Claim.Type firstType, Collection<Claim.Status> firstStatuses, Claim.Type secondType,
-        Collection<Claim.Status> secondStatuses, Instant now, Limit limit);
+    List<ClaimEntity> findRetryTargets(Claim.Type type, Collection<Claim.Status> statuses, Instant now, Limit limit);
 }

@@ -30,7 +30,8 @@ import org.springframework.transaction.annotation.Propagation;
 
 /**
  * 결제 후 고객 취소의 DB 단계 (#16 PR-2, {@code order-flow-guide.md} §5) — 접수(tx1) · 환불 결과 반영(tx2) · 재고 복원 결과 반영(tx3) · 재시도 선점 · 실패 기록.
- * 승인된 반품(#17 B2a)도 tx2 · tx3 · 선점 · 실패 기록을 같이 쓴다 — 유형 분기는 환불 확정 반영({@link #applyRefunded})과 재조회 키뿐이다.
+ * 승인된 반품(#17 B2a)도 tx2 · tx3 · 선점 · 실패 기록을 같이 쓴다 — 유형 분기는 환불 확정 반영({@link #applyRefunded}), 잠금 TX 의 잠금 순서(반품은 주문 먼저,
+ * {@link #lockOrderBeforeReturnClaim}), 재조회 키뿐이다.
  * 원격 호출(환불 · 복원)은 이 사이에 트랜잭션 밖에서 한다({@link OrderCancellationPipelineProcessor}). 각 단계는 짧은 트랜잭션(5초)이고 클레임 · 주문의
  * {@code @Version} 으로 진 쪽을 가른다 — 넘겨받은 클레임의 버전이 낡았으면 저장에서 {@code OptimisticLockingFailureException} 이다(다른 워커가 이미 처리했다).
  *
@@ -190,11 +191,8 @@ public class OrderCancellationProcessor {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 5)
     public Optional<Claim> recordConfirmedRefundWithLock(Claim source) {
-        // Lock the order before the claim for return transitions.
-        if (source.type() == Claim.Type.RETURN) {
-            orderRepositoryPort.findByIdForUpdate(source.orderId())
-                .orElseThrow(() -> new IllegalStateException("claim order not found"));
-        }
+        // 반품은 클레임보다 주문을 먼저 잠근다(§1-2 반품 잠금 규칙) — 잠근 주문을 그대로 반영에 넘겨 같은 행을 다시 잠그지 않는다
+        Order lockedReturnOrder = source.type() == Claim.Type.RETURN ? lockOrderBeforeReturnClaim(source.orderId()) : null;
         Claim current = claimRepositoryPort.findByIdForUpdate(source.id()).orElseThrow(() -> new IllegalStateException("claim not found"));
         if (!source.hasSameRefundRequest(current)) {
             throw new IllegalStateException("refund request changed");
@@ -202,11 +200,12 @@ public class OrderCancellationProcessor {
         if (current.hasRecordedRefund()) {
             return Optional.empty();
         }
-        if (current.type() == Claim.Type.CANCELLATION) {
-            Order order = loadOrder(current.orderId());
-            orderRepositoryPort.findByIdAndMemberIdForUpdate(order.id(), order.memberId())
-                .orElseThrow(() -> new IllegalStateException("claim order not found"));
+        if (lockedReturnOrder != null) {
+            return Optional.of(applyReturnRefunded(current, lockedReturnOrder));
         }
+        Order order = loadOrder(current.orderId());
+        orderRepositoryPort.findByIdAndMemberIdForUpdate(order.id(), order.memberId())
+            .orElseThrow(() -> new IllegalStateException("claim order not found"));
         return Optional.of(applyRefunded(current));
     }
 
@@ -236,6 +235,15 @@ public class OrderCancellationProcessor {
         return orderRepositoryPort.findById(orderId).orElseThrow(() -> new IllegalStateException("claim order not found: orderId=" + orderId));
     }
 
+    /**
+     * 반품 상태를 바꾸기 전에 주문을 NOWAIT 으로 잠근다 (#17 B2a, {@code order-flow-guide.md} §1-2) — 반품의 열림 · 정산을 바꾸는 트랜잭션끼리 주문 행에서
+     * 직렬화해 write skew 를 막는다. 잠금에서 지면 기다리지 않고 잠금 예외가 나간다. 한 트랜잭션에서 한 번만 부른다.
+     */
+    private Order lockOrderBeforeReturnClaim(long orderId) {
+        return orderRepositoryPort.findByIdForUpdate(orderId)
+            .orElseThrow(() -> new IllegalStateException("claim order not found: orderId=" + orderId));
+    }
+
     private Optional<Claim> findCancellationClaim(long orderId) {
         return claimRepositoryPort.findByOrderIdAndRequestKey(orderId, Claim.cancellationRequestKey(orderId))
             .filter(claim -> claim.type() == Claim.Type.CANCELLATION);
@@ -248,7 +256,7 @@ public class OrderCancellationProcessor {
      */
     private Claim applyRefunded(Claim claim) {
         if (claim.type() == Claim.Type.RETURN) {
-            return applyReturnRefunded(claim);
+            return applyReturnRefunded(claim, lockOrderBeforeReturnClaim(claim.orderId()));
         }
         Instant now = clock.instant();
         Claim refunded = claim.markConfirmedRefund(now.plus(properties.retry().lease()));
@@ -268,7 +276,7 @@ public class OrderCancellationProcessor {
     }
 
     /**
-     * 반품 환불 확정 반영 (#17 B2a) — <b>주문을 먼저 NOWAIT 으로 잠근다</b>(반품 상태를 바꾸는 트랜잭션의 공통 규칙, {@code order-flow-guide.md} §1-2). 승인 · 거절 ·
+     * 반품 환불 확정 반영 (#17 B2a) — <b>호출자가 {@link #lockOrderBeforeReturnClaim} 으로 주문을 먼저 NOWAIT 으로 잠가 넘긴다</b>(반품 상태를 바꾸는 트랜잭션의 공통 규칙, {@code order-flow-guide.md} §1-2). 승인 · 거절 ·
      * 고객 추가 접수와 겹쳐 "열린 반품이 없는데 반품 요청에 멈춘 주문"이나 "열린 반품이 있는데 배송 완료로 돌아간 주문"이 생기지 않게 한다. 잠금에서 지면 잠금 예외가
      * 그대로 나가 파이프라인이 503 {@code ORDER_036} 으로 바꾸고, 클레임은 승인 + lease 로 남아 스케줄러가 같은 클레임으로 다시 보낸다(payment 200, PG 없음).
      *
@@ -276,9 +284,7 @@ public class OrderCancellationProcessor {
      * {@link Order#settleReturn} → 바뀌었으면 {@code SERVICE} 이력({@link OrderStatusHistory#RETURN_REFUNDED})까지 한 커밋이다. 주문이 반품 요청이 아니거나
      * 정리 판정이 불가능하면(데이터 이상 — 잠금 규칙상 도달하지 않는다) 재고를 건드리지 않고 RESTORATION_FAILED({@link #ORDER_STATUS_UNEXPECTED})로 닫는다.
      */
-    private Claim applyReturnRefunded(Claim claim) {
-        Order order = orderRepositoryPort.findByIdForUpdate(claim.orderId())
-            .orElseThrow(() -> new IllegalStateException("claim order not found: orderId=" + claim.orderId()));
+    private Claim applyReturnRefunded(Claim claim, Order order) {
         Claim refunded = claim.markConfirmedRefund(clock.instant().plus(properties.retry().lease()));
         Claim recorded = refunded.requiresRestoration() ? refunded : refunded.complete();
         ReturnRefundPolicy.ReturnOutcome outcome = null;

@@ -14,6 +14,7 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.support.OrderReturnTestConfig;
 import com.commercefoundry.domainlayer.order.support.ReturnRefundPipelineContract;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -74,8 +75,11 @@ class ReturnRefundPipelinePostgresTest extends ReturnRefundPipelineContract {
             }));
             assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
 
+            long startedAt = System.nanoTime();
             assertThatThrownBy(() -> pipeline.progress(approved)).isInstanceOfSatisfying(OrderException.class,
                 failure -> assertThat(failure.getErrorCode()).isEqualTo(OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE));
+            // NOWAIT 이면 곧바로 진다 — 기다렸다면 트랜잭션 제한 시간(5초) 뒤에야 같은 오류가 난다
+            assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).as("주문 잠금은 기다리지 않는다").isLessThan(Duration.ofSeconds(2));
             assertThat(readClaim(approved.id())).as("기록하지 못한 성공은 클레임을 바꾸지 않는다").isEqualTo(approved);
             assertThat(read(order.id()).status()).isEqualTo(OrderStatus.RETURN_REQUESTED);
 

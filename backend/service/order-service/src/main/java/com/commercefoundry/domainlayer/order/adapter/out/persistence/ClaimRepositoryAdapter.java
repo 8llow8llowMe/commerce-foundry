@@ -12,6 +12,8 @@ import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -120,8 +122,12 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
         if (limit < 1) {
             throw new IllegalArgumentException("positive limit required");
         }
-        List<ClaimEntity> claims = claimRepository.findRetryTargets(Claim.Type.CANCELLATION, Claim.Type.CANCELLATION.awaitingAttemptStatuses(),
-            Claim.Type.RETURN, Claim.Type.RETURN.awaitingAttemptStatuses(), now, Limit.of(limit));
+        // 유형마다 정렬된 인덱스 범위를 limit 건까지 읽고, (다음 시각, 아이디) 순으로 합쳐 앞의 limit 건만 쓴다 — 모든 유형이 재시도 대상이다
+        List<ClaimEntity> claims = Arrays.stream(Claim.Type.values())
+            .flatMap(type -> claimRepository.findRetryTargets(type, type.awaitingAttemptStatuses(), now, Limit.of(limit)).stream())
+            .sorted(Comparator.comparing(ClaimEntity::getNextAttemptAt).thenComparing(ClaimEntity::getId))
+            .limit(limit)
+            .toList();
         return withItems(claims);
     }
 }
