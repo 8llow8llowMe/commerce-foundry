@@ -93,6 +93,9 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 배송 상태 변경(`PATCH /api/v1/admin/deliveries/{deliveryId}/status` — `IN_TRANSIT` 은 delivery 안, `DELIVERED` 는 order 배송 완료 반영) · 어드민 송장 상세(`GET .../{deliveryId}`) ·
 목록(`GET /api/v1/admin/deliveries?orderId=&status=&synced=`) · 고객 배송 조회(`GET /api/v1/deliveries?orderId=`, 송장 회원 스냅숏으로 로컬 소유 판정)가 있다 (#18 PR-B2). 택배사 추적은 후속 이슈다
 (`order-flow-guide.md` §4, `api-design-guide.md` §2-19).
+"출고 묶음(피킹 · 포장 검수)" 은 도메인 · 저장까지 있는 상태다 (#363 PR-2, 어드민 API 는 PR-3). 요청 주문 1~20건을 order 피킹 스냅숏(Feign, 서킷 `order-service` 공유)으로 판정해
+상품 준비 중 · 국내 · 일반 상품 주문만 묶음에 담고 나머지는 제외 사유와 함께 남긴다 — `delivery.picking_batch`(낙관적 락 · 검수 수) · `picking_order`(대상 · 제외 사유) ·
+`picking_item`(대상 주문의 상품 옵션별 수량) · `picking_check`(검수 기록, append-only). **검수 완료는 출고가 아니다** — 주문 상태 · 송장 · 재고를 바꾸지 않고 출고는 송장 등록이 그때의 주문 상태로 판정한다.
 "장바구니" 는 회원 장바구니(`/api/v1/carts/me/**` — 조회 · 담기 · 수량 변경 · 삭제 · 로컬 장바구니 병합)가 있고, 가격 · 판매 상태를 product-service SKU 벌크 조회(Feign, 서비스 토큰 · 서킷)로 매번 읽는 상태다. 정책은 `order-flow-guide.md` §2-1.
 
 ## 2. 서비스 간 호출 (동기, Feign)
