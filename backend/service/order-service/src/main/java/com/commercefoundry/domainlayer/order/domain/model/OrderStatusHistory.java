@@ -21,6 +21,11 @@ public record OrderStatusHistory(
     public static final String PAYMENT_APPROVED = "PAYMENT_APPROVED";
     /** 결제 후 취소의 환불이 확정됐다 — 취소 요청 → 취소 완료 (#16 PR-2). {@link #cancellationRefunded} 로 남긴다. */
     public static final String CANCELLATION_REFUNDED = "CANCELLATION_REFUNDED";
+    /**
+     * 반품 환불이 기록되어 주문을 정리했다 — 반품 요청 → 반품 완료 · 배송 완료 (#17 B2a, {@link Order#settleReturn}). 주체 {@code SERVICE},
+     * {@link #changedByService} 로 남긴다 — 환불 호출은 order-service 의 파이프라인(승인 직후 · 재시도 스케줄러)이 한다.
+     */
+    public static final String RETURN_REFUNDED = "RETURN_REFUNDED";
 
     public OrderStatusHistory {
         if (id <= 0 || orderId <= 0 || (changedById != null && changedById <= 0) || (reason != null && reason.length() > 200)) {
@@ -82,7 +87,7 @@ public record OrderStatusHistory(
     /**
      * 다른 서비스의 internal 호출이 상태를 바꿨다 (#18 출고 · 배송 완료) — 주체 {@code SERVICE}, 아이디 없음. {@code before} 는 전이 전 주문, {@code after} 는 전이 뒤 주문이다.
      *
-     * @param reason 사유 코드 — {@link #SHIPMENT_REGISTERED} · {@link #DELIVERY_COMPLETED} · {@link #PAYMENT_APPROVED}(#308)
+     * @param reason 사유 코드 — {@link #SHIPMENT_REGISTERED} · {@link #DELIVERY_COMPLETED} · {@link #PAYMENT_APPROVED}(#308) · {@link #RETURN_REFUNDED}(#17 B2a)
      */
     public static OrderStatusHistory changedByService(long id, Order before, Order after, String reason) {
         Objects.requireNonNull(reason, "reason");
