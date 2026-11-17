@@ -97,7 +97,7 @@ class ClaimRecoverySituationTest {
     }
 
     @Test
-    @DisplayName("거절된 취소(A4 몫)와 승인 · 거절된 반품도 조치 필요 없음이다 — 반품 수습 화면은 B2 에서 연다 (#17 B1)")
+    @DisplayName("거절된 취소(A4 몫)와 거절된 반품은 조치 필요 없음, 승인된 반품은 자동 처리 중이다 (#17 B1 · B2b)")
     void newStatusesHaveNoRecoverySituation() {
         Claim requested = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
             List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.CHANGE_OF_MIND)), NOW, 0L);
@@ -105,7 +105,14 @@ class ClaimRecoverySituationTest {
             new Claim.ReturnApproval(false, krw(500), 9, NOW), requested.items(), NOW, 0L);
 
         assertThat(ClaimRecoverySituation.of(cancellation(Claim.Status.REJECTED, null, 0))).isEqualTo(ClaimRecoverySituation.NO_ACTION);
-        assertThat(ClaimRecoverySituation.of(approved)).isEqualTo(ClaimRecoverySituation.NO_ACTION);
+        // #17 B2b — 승인된 반품은 환불 대기(APPROVED + 다음 시각)라 취소의 REQUESTED 와 같이 자동 처리 중이다
+        assertThat(ClaimRecoverySituation.of(approved)).isEqualTo(ClaimRecoverySituation.AUTO_PROCESSING);
+        // 반품의 016 은 막힘(다른 환불 처리 대기), 그 밖은 취소와 같은 상황이다. 취소의 016 은 그대로 결제사 거절이다
+        assertThat(ClaimRecoverySituation.of(approved.failRefund(Claim.REFUND_BLOCKED_CODE))).isEqualTo(ClaimRecoverySituation.REFUND_WAITING);
+        assertThat(ClaimRecoverySituation.of(approved.failRefund("PAYMENT_017"))).isEqualTo(ClaimRecoverySituation.REFUND_REJECTED);
+        assertThat(ClaimRecoverySituation.of(approved.failRefund(Claim.REFUND_UNCONFIRMED))).isEqualTo(ClaimRecoverySituation.REFUND_UNCONFIRMED);
+        assertThat(ClaimRecoverySituation.of(approved.markRefunded(NOW).failRestoration("PRODUCT_028"))).isEqualTo(ClaimRecoverySituation.RESTORATION_REJECTED);
+        assertThat(ClaimRecoverySituation.of(cancellation(Claim.Status.REFUND_FAILED, "PAYMENT_016", 0))).isEqualTo(ClaimRecoverySituation.REFUND_REJECTED);
         assertThat(ClaimRecoverySituation.of(requested.rejectReturn())).isEqualTo(ClaimRecoverySituation.NO_ACTION);
     }
 

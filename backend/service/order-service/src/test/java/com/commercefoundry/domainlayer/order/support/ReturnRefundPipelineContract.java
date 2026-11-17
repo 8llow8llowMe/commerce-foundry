@@ -5,20 +5,26 @@ import static com.commercefoundry.domainlayer.order.support.OrderFixtures.domest
 import static com.commercefoundry.domainlayer.order.support.OrderFixtures.krw;
 import static com.commercefoundry.domainlayer.order.support.OrderFixtures.quoteLine;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
+import com.commercefoundry.domainlayer.order.application.exception.OrderException;
+import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
 import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelQueryResult;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminRecoveryProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.CancellationRefundPolicy;
@@ -63,6 +69,7 @@ public abstract class ReturnRefundPipelineContract {
     @Autowired protected PlatformTransactionManager transactionManager;
     @Autowired protected OrderCancellationPipelineProcessor pipeline;
     @Autowired protected OrderCancellationProcessor processor;
+    @Autowired protected ClaimAdminRecoveryProcessor recovery;
     @Autowired protected PaymentCancelPort paymentCancelPort;
     @Autowired protected StockRestorationPort stockRestorationPort;
 
@@ -253,6 +260,111 @@ public abstract class ReturnRefundPipelineContract {
         verify(stockRestorationPort, never()).restoreCancellation(anyLong(), anyLong(), any());
         assertThat(read(order.id()).status()).isEqualTo(OrderStatus.DELIVERED);
         assertThat(returnHistories(order)).isEmpty();
+    }
+
+    @Test
+    void adminConfirmsRejectedReturnRefundAndSettlesOrderWithAdminHistoryInOneCommit() {
+        // #17 B2b — 결제사 거절(017)로 닫힌 반품을 대표가 콘솔 환불을 확인하고 확정한다: 클레임 REFUNDED + 주문 정리 + ADMIN 이력(사유)이 한 커밋이다
+        Order order = order(OrderStatus.RETURN_REQUESTED);
+        Claim approved = approve(requestReturn(order, 2, 1), order, 28_000, true, NOW);
+        paymentAnswers(PaymentCancelQueryResult.rejected("PAYMENT_017"));
+        Claim rejected = pipeline.progress(approved);
+        assertThat(rejected.status()).isEqualTo(Claim.Status.REFUND_FAILED);
+
+        Claim confirmed = recovery.confirmRefund(rejected.id(), rejected.version(), "콘솔 환불 확인", 9L);
+
+        assertThat(confirmed.status()).isEqualTo(Claim.Status.REFUNDED);
+        assertThat(confirmed.decision().previousFailureCode()).isEqualTo("PAYMENT_017");
+        assertThat(readClaim(rejected.id())).isEqualTo(confirmed);
+        assertThat(read(order.id()).status()).isEqualTo(OrderStatus.RETURNED);
+        assertThat(adminHistories(order)).singleElement().satisfies(history -> {
+            assertThat(history.get("from_status")).isEqualTo("RETURN_REQUESTED");
+            assertThat(history.get("to_status")).isEqualTo("RETURNED");
+            assertThat(history.get("reason")).isEqualTo("콘솔 환불 확인");
+        });
+        verify(paymentCancelPort, times(1)).cancel(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void adminConfirmsRejectedReturnWithoutRestockCompletesAndOtherOpenReturnKeepsOrderRequested() {
+        Order order = order(OrderStatus.RETURN_REQUESTED);
+        Claim approved = approve(requestReturn(order, 1, 0), order, 10_000, false, NOW);
+        Claim other = requestReturn(order, 0, 1);
+        paymentAnswers(PaymentCancelQueryResult.rejected("PAYMENT_017"));
+        Claim rejected = pipeline.progress(approved);
+
+        Claim confirmed = recovery.confirmRefund(rejected.id(), rejected.version(), "송금 환불 확인", 9L);
+
+        assertThat(confirmed.status()).as("재고로 되돌리지 않는 반품은 확정과 함께 완료").isEqualTo(Claim.Status.COMPLETED);
+        assertThat(confirmed.nextAttemptAt()).isNull();
+        assertThat(readClaim(other.id())).isEqualTo(other);
+        assertThat(read(order.id()).status()).as("열린 반품이 남아 주문은 그대로").isEqualTo(OrderStatus.RETURN_REQUESTED);
+        assertThat(adminHistories(order)).as("주문 상태가 그대로면 이력도 없다").isEmpty();
+    }
+
+    @Test
+    void blockedReturnRefundIsRetriedNotConfirmedWhileRetryWindowIsOpen() {
+        // #17 B2b — 반품의 016(같은 결제의 다른 환불에 막힘)은 돈이 나가지 않았을 수 있다: 기한 안에는 확정을 거절하고 다시 시도로 같은 claimId 를 다시 보낸다
+        Order order = order(OrderStatus.RETURN_REQUESTED);
+        // 기한(승인 + 14일)이 실제 시계 기준으로 열려 있어야 한다 — 고정 시각이 아니라 지금 승인한다
+        Claim approved = approve(requestReturn(order, 1, 0), order, 10_000, true, Instant.now());
+        paymentAnswers(PaymentCancelQueryResult.rejected(Claim.REFUND_BLOCKED_CODE));
+        Claim blocked = pipeline.progress(approved);
+        assertThat(blocked.isRefundWaiting()).isTrue();
+
+        assertThatThrownBy(() -> recovery.confirmRefund(blocked.id(), blocked.version(), "확인", 9L)).isInstanceOfSatisfying(OrderException.class,
+            failure -> assertThat(failure.getErrorCode()).isEqualTo(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED));
+        assertThat(readClaim(blocked.id())).isEqualTo(blocked);
+        assertThat(recovery.isRefundConfirmable(blocked)).isFalse();
+        assertThat(recovery.isRetryable(blocked)).isTrue();
+
+        Claim reopened = recovery.prepareRetry(blocked.id(), blocked.version());
+        assertThat(reopened.status()).isEqualTo(Claim.Status.APPROVED);
+        assertThat(reopened.failureCode()).isNull();
+        paymentAnswers(PaymentCancelQueryResult.succeeded());
+        Claim done = pipeline.progress(reopened);
+
+        assertThat(done.status()).isEqualTo(Claim.Status.COMPLETED);
+        assertThat(read(order.id()).status()).isEqualTo(OrderStatus.DELIVERED);
+        verify(paymentCancelPort, times(2)).cancel(PAYMENT_ID, approved.id(), krw(10_000));
+    }
+
+    @Test
+    void returnRefundConfirmationIsRefusedWhenOrderIsNotReturnRequested() {
+        Order order = order(OrderStatus.RETURN_REQUESTED);
+        Claim approved = approve(requestReturn(order, 1, 0), order, 10_000, true, NOW);
+        paymentAnswers(PaymentCancelQueryResult.rejected("PAYMENT_017"));
+        Claim rejected = pipeline.progress(approved);
+        setOrderStatus(order, OrderStatus.DELIVERED);
+
+        assertThatThrownBy(() -> recovery.confirmRefund(rejected.id(), rejected.version(), "확인", 9L)).isInstanceOfSatisfying(OrderException.class,
+            failure -> assertThat(failure.getErrorCode()).isEqualTo(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED));
+        assertThat(readClaim(rejected.id())).isEqualTo(rejected);
+        assertThat(read(order.id()).status()).isEqualTo(OrderStatus.DELIVERED);
+    }
+
+    @Test
+    void adminCompletesRejectedReturnRestorationRegardlessOfOrderStatus() {
+        Order order = order(OrderStatus.RETURN_REQUESTED);
+        Claim approved = approve(requestReturn(order, 2, 1), order, 28_000, true, NOW);
+        paymentAnswers(PaymentCancelQueryResult.succeeded());
+        doThrow(new StockReservationException(StockReservationException.Failure.QUANTITY_EXCEEDED)).when(stockRestorationPort)
+            .restoreReturn(anyLong(), anyLong(), any());
+        Claim failed = pipeline.progress(approved);
+        assertThat(failed.status()).isEqualTo(Claim.Status.RESTORATION_FAILED);
+        assertThat(failed.failureCode()).isEqualTo("PRODUCT_028");
+        // 반품 복원은 주문 상태를 보지 않으므로 종결도 같다 — 정리 뒤 자동 구매 확정이 먼저 갔어도 종결한다
+        setOrderStatus(order, OrderStatus.PURCHASE_CONFIRMED);
+
+        Claim completed = recovery.complete(failed.id(), failed.version(), "재고 조정 완료", 9L);
+
+        assertThat(completed.status()).isEqualTo(Claim.Status.COMPLETED);
+        assertThat(read(order.id()).status()).as("종결은 주문을 바꾸지 않는다").isEqualTo(OrderStatus.PURCHASE_CONFIRMED);
+    }
+
+    protected List<Map<String, Object>> adminHistories(Order order) {
+        return jdbc.queryForList("select from_status, to_status, changed_by_type, changed_by_id, reason from orders.order_status_history"
+            + " where order_id = ? and changed_by_type = 'ADMIN'", order.id());
     }
 
     @Test

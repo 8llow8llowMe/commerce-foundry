@@ -184,7 +184,11 @@ class ClaimAdminRecoveryPolicyTest {
             List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
         Claim approvedReturn = new Claim(2, 1, requestedReturn.requestKey(), Claim.Type.RETURN, Claim.Status.APPROVED, krw(1_000), 77L, 0, NOW, null, null,
             new Claim.ReturnApproval(true, krw(0), 7, NOW), requestedReturn.items(), NOW, 0L);
-        for (Claim source : List.of(rejectedCancellation, approvedReturn, requestedReturn.rejectReturn())) {
+        // #17 B2b — 승인된 반품은 수습 대상이다: lease 가 끝난 환불 대기는 취소의 REQUESTED 와 같이 다시 시도(선점)한다. 확정 · 종결 후보는 아니다
+        assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRetry(approvedReturn, NOW.plusSeconds(1))).doesNotThrowAnyException();
+        assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(approvedReturn, true)).isFalse();
+        assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(approvedReturn)).isFalse();
+        for (Claim source : List.of(rejectedCancellation, requestedReturn, requestedReturn.rejectReturn())) {
             assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRetry(source, NOW.plusSeconds(1))).as(source.type() + " " + source.status())
                 .isInstanceOf(IllegalStateException.class);
             assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(source, true)).isFalse();
@@ -226,5 +230,52 @@ class ClaimAdminRecoveryPolicyTest {
         assertThat(evidence.markRefunded(NOW).failRestoration("PRODUCT_028").decision()).isEqualTo(decision);
         assertThatThrownBy(() -> new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null, null, 0, null, null,
             decision, List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static Claim returnClaim(Claim.Status status, String failure) {
+        return new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, status, krw(1_000), 77L, 0, Claim.Type.RETURN.isAwaitingAttempt(status) ? NOW : null, failure,
+            null, new Claim.ReturnApproval(true, krw(0), 7, NOW), List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
+    }
+
+    @Test
+    void returnBlockedRefundIsRetriedFirstAndConfirmedOnlyAfterRetryCloses() {
+        // #17 B2b — 반품의 016 은 같은 결제의 다른 환불에 막힌 것일 수 있다(돈이 나가지 않았을 수 있다) — 다시 시도가 먼저, 수동 확정은 기한이 닫힌 뒤에만
+        Claim waiting = returnClaim(Claim.Status.REFUND_FAILED, Claim.REFUND_BLOCKED_CODE);
+        assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRetry(waiting, NOW)).doesNotThrowAnyException();
+        assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(waiting, false)).isFalse();
+        assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(waiting, true)).isTrue();
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(waiting, order(1, OrderStatus.RETURN_REQUESTED, 0L), false))
+            .isInstanceOf(IllegalStateException.class);
+
+        Claim rejected = returnClaim(Claim.Status.REFUND_FAILED, "PAYMENT_017");
+        assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(rejected, false)).as("그 밖의 결제사 거절은 늘 후보").isTrue();
+        // 취소의 016 은 그대로 결제사 거절이다(주문당 한 건이라 겹침이 없다)
+        assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(claim(Claim.Status.REFUND_FAILED, "PAYMENT_016"), false)).isTrue();
+    }
+
+    @Test
+    void returnRefundConfirmationRequiresReturnRequestedOrder() {
+        Claim rejected = returnClaim(Claim.Status.REFUND_FAILED, "PAYMENT_017");
+        assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, order(1, OrderStatus.RETURN_REQUESTED, 0L), false))
+            .doesNotThrowAnyException();
+        for (OrderStatus status : List.of(OrderStatus.DELIVERED, OrderStatus.RETURNED, OrderStatus.PURCHASE_CONFIRMED, OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELED)) {
+            assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, order(1, status, 0L), false)).as(status.name())
+                .isInstanceOf(IllegalStateException.class);
+        }
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, order(9, OrderStatus.RETURN_REQUESTED, 0L), false))
+            .as("다른 주문").isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void returnCompletionDoesNotLookAtOrderStatusButKeepsUnconfirmedAndMismatchOut() {
+        Claim restorationFailed = returnClaim(Claim.Status.RESTORATION_FAILED, "PRODUCT_028");
+        for (OrderStatus status : List.of(OrderStatus.RETURN_REQUESTED, OrderStatus.RETURNED, OrderStatus.DELIVERED, OrderStatus.PURCHASE_CONFIRMED)) {
+            assertThatCode(() -> ClaimAdminRecoveryPolicy.requireCompletion(restorationFailed, order(1, status, 0L))).as(status.name()).doesNotThrowAnyException();
+        }
+        assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(returnClaim(Claim.Status.RESTORATION_FAILED, Claim.RESTORATION_UNCONFIRMED))).isFalse();
+        Claim mismatch = returnClaim(Claim.Status.RESTORATION_FAILED, "ORDER_STATUS_UNEXPECTED");
+        assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(mismatch)).isFalse();
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRetry(mismatch, NOW)).isInstanceOf(IllegalStateException.class);
+        assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRetry(restorationFailed, NOW)).doesNotThrowAnyException();
     }
 }
