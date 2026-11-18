@@ -1,6 +1,6 @@
 {
   "models": {
-    "fast": "gpt-6-luna",
+    "fast": "gpt-6.1-terra",
     "design": "gpt-6.2-astra",
     "work": "gpt-6.2-sol"
   },
