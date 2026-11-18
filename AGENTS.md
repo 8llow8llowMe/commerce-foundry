@@ -43,6 +43,8 @@ Claude Code용 대응 엔트리는 `CLAUDE.md`, `backend/CLAUDE.md`, `frontend/C
 
 ## 스킬과 역할
 
+독립 Codex 세션 팀의 등록·새 감독 인수·전경 실행·메시지 인계는 [docs/codex-team.md](docs/codex-team.md)와 `codex-team` 스킬을 따른다. 사용자가 현재 채팅을 감독으로 지정하면 기존 역할 상태와 inbox를 확인한 뒤 인수한다. 저장된 세션 ID만으로 화면 연결을 단정하지 않는다.
+
 Codex·Cursor용 스킬은 `.agents/skills/<name>/SKILL.md`에 있다. Codex는 `$스킬명`, Cursor는 `/스킬명`으로 호출한다.
 Cursor에서 Claude 호환 스킬이 함께 보이면 이 저장소의 `.agents/skills/` 정의를 사용한다.
 
