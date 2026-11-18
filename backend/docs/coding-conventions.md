@@ -343,6 +343,15 @@ public final class ProductValidationMessage {
     (예: `ck_sku_hs_code_format`). `translate(col, '0123456789', '')` 는 H2 에서 문자를 지우지 않아(빈 치환 문자열을 무시) 맞는 값까지 거절한다.
 - PostgreSQL 식별자 상한은 **63자**다. 넘으면 의미를 해치지 않는 범위에서 축약한다. 스냅숏 테스트가 접두어(`idx_` · `uk_` · `ck_` + 테이블명)와 길이를 검사한다.
 
+### 9-4a. 재고 복원 작업원장 CAS 예외 (#582 A)
+
+`OrderStockRestorationEntity`만 상태 `@Version`/merge 원칙(§9-1)의 예외다. 최초 INSERT는 `Persistable.isNew()`로 persist하고,
+이후 save/merge는 금지한다. 상태 변경은 도메인이 허용한 전이를 JPQL 조건부 UPDATE로만 반영한다.
+선점·HELD는 기존 상태와 마이크로초 단위 `next_attempt_at`을 비교하고, 선점은 다음 시각을 반드시 앞으로 미룬다.
+완료는 같은 claim의 RESTORE_PENDING·HELD만 RESTORED로 바꾼다. 영향 1행만 성공이며 0행은 경합 패배·종결·부재다.
+claim·reservation 유니크와 상태 CHECK가 단일 작업·종결 상태 불변식을 보장한다. 모든 쓰기는 호출자 트랜잭션(MANDATORY)에 참여한다.
+일반 상태 엔티티에 이 예외를 확대하지 않는다. 독립 트랜잭션 경합·롤백·커밋 가시성과 DB CHECK를 PostgreSQL 17에서 검증한다.
+
 ### 9-5. 쿼리 작성 (필수)
 
 위에서 해결되면 아래로 내려가지 않는다.
@@ -361,6 +370,7 @@ public final class ProductValidationMessage {
   **bulk UPDATE 는 감사 리스너를 거치지 않으므로 `updatedAt` 을 인자로 받아 쿼리에서 직접 세팅한다** (`StockRepository`).
 - 조건부 UPDATE 는 대상마다 한 문장이라 여러 SKU 를 루프에서 부르는 것은 §9-6 의 예외다. 대신 **SKU 아이디 오름차순**으로 부른다 — 행 잠금 순서를 맞춰 교착을 막는다.
 - 상태 엔티티의 상태를 JPQL bulk UPDATE 로 바꾸지 않는다 — 도메인 전이 → merge(`@Version`) 로만 바꾼다 (§9-1).
+  단, `OrderStockRestoration` 작업원장은 §9-4a의 CAS 예외를 적용한다.
 - `@Param` 은 쓰지 않는다 (`-parameters` 가 켜져 있다).
 - **커스텀 구현과 JPQL 은 컴파일로 검증되지 않는다.** `@DataJpaTest` 슬라이스 테스트로 실제 스키마에 질의한다.
 
