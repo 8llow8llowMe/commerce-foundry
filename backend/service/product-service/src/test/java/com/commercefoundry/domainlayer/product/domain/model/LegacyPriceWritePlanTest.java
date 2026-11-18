@@ -19,6 +19,29 @@ import org.junit.jupiter.params.provider.EnumSource;
 class LegacyPriceWritePlanTest {
     @ParameterizedTest
     @EnumSource(CurrencyCode.class)
+    void rejectMissingExistingRowsButAllowNewSkuAndNewProduct(CurrencyCode currency) {
+        var before = snapshot(currency, 100, sku(10, 0, SaleStatus.ON_SALE, currency));
+        var after = snapshot(currency, 100, sku(10, 0, SaleStatus.ON_SALE, currency), sku(11, 5, SaleStatus.STOP_SELLING, currency));
+        var products = List.of(product(1, 100, currency));
+        var skus = List.of(price(3, 10, 0, currency));
+        var ids = new AtomicLong(1000);
+        for (var missingProducts : List.of(List.<ProductCurrencyPrice>of(), products)) {
+            var missingSkus = missingProducts.isEmpty() ? skus : List.<SkuCurrencyPrice>of();
+            assertThatThrownBy(() -> LegacyPriceWritePlan.prepare(before, after, missingProducts, missingSkus, noIds(),
+                LegacyPriceWritePlan.MissingBase.REJECT)).isExactlyInstanceOf(LegacyPriceWritePlan.BaseRowMissingException.class)
+                .hasMessage("기준통화 가격행이 없습니다").hasNoCause();
+            var repaired = LegacyPriceWritePlan.prepare(before, before, missingProducts, missingSkus, ids::incrementAndGet);
+            assertThat(repaired.productInserts().size() + repaired.skuInserts().size()).isEqualTo(1);
+        }
+        var plan = LegacyPriceWritePlan.prepare(before, after, products, skus, ids::incrementAndGet, LegacyPriceWritePlan.MissingBase.REJECT);
+        assertThat(plan.productInserts()).isEmpty();
+        assertThat(plan.skuInserts()).hasSize(1);
+        assertThat(plan.skuInserts().get(0).skuId()).isEqualTo(11);
+        assertThat(LegacyPriceWritePlan.prepareNew(after, List.of(), List.of(), ids::incrementAndGet).skuInserts()).hasSize(2);
+    }
+
+    @ParameterizedTest
+    @EnumSource(CurrencyCode.class)
     void absentRowsGetOneIdEachAndInsertOnlyFinalAmounts(CurrencyCode currency) {
         var before = snapshot(currency, 100, sku(10, 0, SaleStatus.ON_SALE, currency), sku(11, 5, SaleStatus.STOP_SELLING, currency));
         var after = snapshot(currency, 200, sku(10, 0, SaleStatus.ON_SALE, currency), sku(11, 8, SaleStatus.STOP_SELLING, currency));

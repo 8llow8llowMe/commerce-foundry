@@ -71,7 +71,8 @@ tasks.named('test') {
     // 데몬의 org.gradle.jvmargs 와 별도인 테스트 worker 힙. PostgreSQL · MVC · Kafka 컨텍스트를 함께 검증한다.
     // PostgreSQL 원천 읽기 계약의 실제 실행·skip을 CI 콘솔에서도 개별 식별한다.
     afterTest { descriptor, result ->
-        if (descriptor.className?.endsWith('PriceMigrationReadPostgresIntegrationTest')) {
+        if (descriptor.className?.endsWith('PriceMigrationReadPostgresIntegrationTest')
+            || descriptor.className?.endsWith('LegacyPriceWritePostgresIntegrationTest')) {
             logger.lifecycle("${descriptor.className}.${descriptor.name}: ${result.resultType}")
         }
     }
