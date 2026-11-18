@@ -146,6 +146,37 @@ compose 에는 아직 `PRICE_BACKFILL_MODE` 보간이 없다 — 운영 실행 �
 DRY_RUN DML 0, APPLY 값 · ID · 버전 · 수정 시각, 재실행 멱등, BLOCKED 무변경, 이전 버전 어드민 저장 409, PostgreSQL 에서 unique → 409 와
 writer 잠금 대기 → CONFLICT 다.
 
+### PR-2b-B1 미연결 가격 원천 snapshot
+
+`PriceSourceSnapshotRepositoryPort.readByProductIds`는 최대 50개 상품의 legacy 상품·전체 SKU와 상품·SKU 통화 가격행을
+하나의 읽기 snapshot으로 반환한다. 입력은 한 번 복사한 뒤 중복을 제거하고 ID 오름차순으로 정규화한다.
+null 목록·null 원소·0 이하 ID·서로 다른 상품 51개 이상은 TX 전에 `INVALID_INPUT`으로 거절한다.
+빈 입력은 불변 빈 결과이며 TX·SQL이 모두 0회다. 숨김·soft-delete·판매중지 상품과 STOP·은퇴 옵션 소속 SKU도 포함한다.
+
+제한 파생 조회는 상품(ID순, 51행) → 전체 SKU(상품/ID순, 2001행) → 상품 가격행(상품/통화/ID순) →
+SKU 가격행(SKU/통화/ID순) 순서다. 가격행의 SQL 상한은 실제 부모 수 × `CurrencyCode` 개수 + 1행이다.
+상품 하나라도 누락되면 `PRODUCT_MISSING`, SKU 2000개 또는 가격행 상한을 초과하면 `ROW_LIMIT_EXCEEDED`로 전체 실패한다.
+판정 순서는 상품 누락 → SKU 초과 → 상품 가격 초과 → SKU 가격 초과이며 실패 뒤 조회는 생략한다.
+정상 호출은 최대 4 SELECT, SKU가 없으면 마지막 조회를 생략하여 최대 3 SELECT다. count 질의·N+1·신규 인덱스·DDL은 없다.
+상한은 행 수 제한이며 상품 본문을 포함한 엄밀한 힙 바이트 제한이나 가격행 완전성·중복 검증은 아니다.
+
+Adapter의 단일 `TransactionTemplate`은 `REQUIRES_NEW`·`REPEATABLE_READ`·read-only·TX timeout 5초를 사용하고,
+각 조회에는 2000ms query timeout hint를 둔다. 첫 SELECT 시점의 snapshot이며 이후 커밋은 다음 호출에서 보인다.
+호출자 TX는 정지·복원하고 미커밋 변경을 읽거나 호출자 Entity를 flush·clear·detach하지 않는다.
+반환 시점 최신성이나 다음 쓰기의 정합성 인증이 아니므로 writer CAS 이후 검증·저장 직후 응답 구성에 사용하지 않는다.
+후속 연결에서는 두 snapshot과 추가 connection 사용을 다시 설계한다. hint는 pool 대기나 전체 호출 2초 deadline 보장이 아니다.
+
+결과는 결정적 순서의 불변 도메인 목록이며 Entity·Q·HTTP DTO를 노출하지 않고 `toString`을 가린다.
+기존 mapper와 개별 Money·행 검증을 사용하되 가격행 누락·drift를 보완하거나 투영하지 않는다.
+PriceBook의 cross-row zero·휴면·합산 overflow·drift 인증은 후속 B2다. 손상 enum·금액을 원시 문자열로 보존하는 B1c와 달리
+매핑 불가 상태는 `READ_FAILED`다. 내부 예외는 고정 reason만 보유하고 원문·ID·금액·SQL·cause·suppressed를 담지 않는다.
+callback 내부와 TX 실행 외부에서 정제하며 어댑터가 직접 판정한 누락·상한 사유만 보존한다.
+저장소가 같은 예외 타입을 던져도 `READ_FAILED`로 취급하고 시작·commit·rollback 실패도 원인 없이 정제한다.
+callback 오류는 정제한 뒤 rollback 경계로 전달하되 하부 JDBC·서버 로그 전체가 정제된다고 주장하지 않는다.
+
+생산 caller·Facade/Processor 연결·캐시·쓰기·보완·재시도·reader/writer 전환은 추가하지 않는다.
+`LEGACY` 기본과 `PRICE_BOOK` 기동 차단을 유지한다. B1 완료는 기준통화 resolver(B2)·전체 읽기 전환·#20 완료가 아니다.
+
 ## 2. 가격 모델과 불변식
 
 가격은 product-service의 기존 상품 컨텍스트가 소유한다. 별도 가격 서비스를 만들지 않는다.

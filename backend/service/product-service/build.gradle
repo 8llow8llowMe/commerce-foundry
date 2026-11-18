@@ -72,7 +72,8 @@ tasks.named('test') {
     // PostgreSQL 원천 읽기 계약의 실제 실행·skip을 CI 콘솔에서도 개별 식별한다.
     afterTest { descriptor, result ->
         if (descriptor.className?.endsWith('PriceMigrationReadPostgresIntegrationTest')
-            || descriptor.className?.endsWith('LegacyPriceWritePostgresIntegrationTest')) {
+            || descriptor.className?.endsWith('LegacyPriceWritePostgresIntegrationTest')
+            || descriptor.className?.endsWith('PriceSourceSnapshotPostgresIntegrationTest')) {
             logger.lifecycle("${descriptor.className}.${descriptor.name}: ${result.resultType}")
         }
     }
