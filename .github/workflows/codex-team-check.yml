@@ -1,0 +1,28 @@
+name: codex-team-check
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/*.py'
+      - '.agents/skills/codex-team/**'
+      - '.github/workflows/codex-team-check.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scripts/*.py'
+      - '.github/workflows/codex-team-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 독립 세션 도구 회귀 및 Windows 프로세스 종료 검증
+        run: python -B -X utf8 -m unittest discover -s scripts -p "test_*.py"
