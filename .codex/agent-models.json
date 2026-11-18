@@ -1,0 +1,13 @@
+{
+  "models": {
+    "fast": "gpt-6-luna",
+    "design": "gpt-6.2-astra",
+    "work": "gpt-6.2-sol"
+  },
+  "reasoning_effort": {
+    "explorer": "medium",
+    "git-ops": "low",
+    "design": "high",
+    "work": "medium"
+  }
+}

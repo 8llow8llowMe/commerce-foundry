@@ -1,7 +1,7 @@
 # scripts/sync-agent-skills.py 가 .claude/agents/ 에서 생성한다. 직접 고치지 않는다.
 name = "be_hexagonal_reviewer"
 description = "commerce-foundry 백엔드의 Hexagonal 계층 흐름, Port/Adapter 경계, 고객/어드민 진입 분리를 전용 검토할 때 사용한다. Controller·Facade·Processor·Presenter·Port·Adapter 를 추가/변경했거나 계층이 흐릿해질 조짐이 보일 때가 트리거다. 읽기 전용이며 코드를 수정하지 않는다."
-model = "gpt-6.1-sol"
+model = "gpt-6.2-sol"
 model_reasoning_effort = "medium"
 developer_instructions = '''
 # be-hexagonal-reviewer
