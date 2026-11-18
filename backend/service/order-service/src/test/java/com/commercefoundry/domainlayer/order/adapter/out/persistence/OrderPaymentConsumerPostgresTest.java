@@ -1,6 +1,14 @@
 package com.commercefoundry.domainlayer.order.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.order.support.OrderPaymentConsumerContract;
+import com.commercefoundry.domainlayer.order.application.command.PaymentApprovalCommand;
+import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
 import com.commercefoundry.domainlayer.order.application.model.StockConfirmation;
 import com.commercefoundry.domainlayer.order.application.model.VerifiedPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
@@ -58,6 +66,137 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Import(OrderPaymentConsumerH2Test.Config.class)
 class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
     private static final AtomicLong IDS = new AtomicLong(70_000_000);
+    @MockitoSpyBean OrderPaymentRepositoryAdapter paymentWrites;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void workInsertOrDeferredCommitFailureRollsBackBothIntentsBeforeRemoteRestoration(boolean deferred) {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        long reservation = jdbc.queryForObject("select stock_reservation_id from orders.orders where id=?", Long.class, command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservation, command.orderId());
+        try {
+            installFailure(command, deferred, false);
+            var failure = org.assertj.core.api.Assertions.catchThrowable(() -> facade.approve(command));
+            assertThat(failure).isInstanceOf(RuntimeException.class);
+            if (deferred) { assertThat(sqlState(failure)).isEqualTo("P0001"); }
+            JdbcTemplate fresh = freshJdbc();
+            assertThat(fresh.queryForObject("select count(*) from orders.order_payment where payment_id=?", Long.class, command.paymentId())).isZero();
+            assertThat(fresh.queryForObject("select count(*) from orders.order_stock_restoration where payment_id=?", Long.class, command.paymentId())).isZero();
+            assertThat(fresh.queryForObject("select count(*) from orders.processed_event where event_id=?", Long.class, command.eventId())).isZero();
+            assertThat(fresh.queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(command.orderId()))).isZero();
+            verifyNoInteractions(restorations);
+        } finally {
+            removeFailure(command, deferred);
+        }
+        facade.approve(command);
+        assertWork(payments.findByPaymentId(command.paymentId()).orElseThrow(), "RESTORED");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void restore200ThenCompletionRollbackOrCommitFailureRedeliversSameClaimAtomically(boolean deferred) {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        long reservation = jdbc.queryForObject("select stock_reservation_id from orders.orders where id=?", Long.class, command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservation, command.orderId());
+        var appliedClaims = new java.util.HashSet<Long>();
+        AtomicInteger requests = new AtomicInteger();
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            requests.incrementAndGet();
+            appliedClaims.add(invocation.getArgument(0));
+            return null;
+        }).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+        try {
+            installFailure(command, deferred, true);
+            var failure = org.assertj.core.api.Assertions.catchThrowable(() -> facade.approve(command));
+            assertThat(failure).isInstanceOf(RuntimeException.class);
+            if (deferred) { assertThat(sqlState(failure)).isEqualTo("P0001"); }
+            JdbcTemplate fresh = freshJdbc();
+            assertThat(fresh.queryForObject("select restored_at from orders.order_payment where payment_id=?", Object.class, command.paymentId())).isNull();
+            assertThat(fresh.queryForObject("select status from orders.order_stock_restoration where payment_id=?", String.class, command.paymentId()))
+                .isEqualTo("RESTORE_PENDING");
+            assertThat(fresh.queryForObject("select count(*) from orders.processed_event where event_id=?", Long.class, command.eventId())).isZero();
+            assertThat(fresh.queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(command.orderId()))).isZero();
+            assertThat(requests).hasValue(1);
+        } finally {
+            removeFailure(command, deferred);
+        }
+        OrderPayment pending = payments.findByPaymentId(command.paymentId()).orElseThrow();
+        assertThat(appliedClaims).containsExactly(pending.restorationClaimId());
+        assertWork(pending, "RESTORE_PENDING");
+        facade.approve(command);
+        assertThat(requests).hasValue(2);
+        assertThat(appliedClaims).containsExactly(pending.restorationClaimId());
+        assertWork(payments.findByPaymentId(command.paymentId()).orElseThrow(), "RESTORED");
+        assertThat(freshJdbc().queryForObject("select count(*) from orders.processed_event where event_id=?", Long.class, command.eventId())).isEqualTo(1);
+        assertThat(freshJdbc().queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(command.orderId())))
+            .isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void independentCompletionTransactionsHaveOneReplyWinnerOrZeroForFullyCanceled(boolean fullyCanceled) throws Exception {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        long reservation = jdbc.queryForObject("select stock_reservation_id from orders.orders where id=?", Long.class, command.orderId());
+        var payment = new VerifiedPayment(command.paymentId(), command.orderId(), command.memberId(), command.amount(), NOW,
+            fullyCanceled ? "CANCELED" : "DONE");
+        OrderPayment pending = processor.complete(command, payment, StockConfirmation.confirmed(reservation)).orElseThrow().orderPayment();
+        CountDownLatch started = new CountDownLatch(2);
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            started.countDown();
+            assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
+            return invocation.callRealMethod();
+        }).when(paymentWrites).markRestored(eq(pending.id()), any());
+        UUID otherEvent = UUID.randomUUID();
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> processor.completeRestoration(command.eventId(), pending, payment));
+            var second = executor.submit(() -> processor.completeRestoration(otherEvent, pending, payment));
+            first.get(20, TimeUnit.SECONDS);
+            second.get(20, TimeUnit.SECONDS);
+        }
+        assertWork(payments.findByPaymentId(command.paymentId()).orElseThrow(), "RESTORED");
+        assertThat(freshJdbc().queryForObject("select count(*) from orders.processed_event where event_id in (?,?)", Long.class,
+            command.eventId(), otherEvent)).isEqualTo(2);
+        assertThat(freshJdbc().queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(command.orderId())))
+            .isEqualTo(fullyCanceled ? 0 : 1);
+    }
+
+    private void installFailure(PaymentApprovalCommand command, boolean deferred, boolean completion) {
+        String name = "test_b1_fail_" + command.paymentId();
+        String condition = "payment_id=" + command.paymentId() + (completion ? " and status='RESTORED'" : "");
+        if (!deferred) {
+            jdbc.execute("alter table orders.order_stock_restoration add constraint " + name + " check (not (" + condition + "))");
+            return;
+        }
+        // 시험 대상 결제 행만 flush 이후 실제 connection commit에서 거절한다.
+        jdbc.execute("create function orders." + name + "() returns trigger language plpgsql as $$ begin "
+            + "raise exception using errcode='P0001', message='B1 test deferred commit failure'; end $$");
+        jdbc.execute("create constraint trigger " + name + " after " + (completion ? "update" : "insert")
+            + " on orders.order_stock_restoration deferrable initially deferred for each row when (new.payment_id=" + command.paymentId()
+            + (completion ? " and new.status='RESTORED'" : "") + ") execute function orders." + name + "()");
+    }
+
+    private void removeFailure(PaymentApprovalCommand command, boolean deferred) {
+        String name = "test_b1_fail_" + command.paymentId();
+        if (deferred) {
+            jdbc.execute("drop trigger if exists " + name + " on orders.order_stock_restoration");
+            jdbc.execute("drop function if exists orders." + name + "()");
+        } else {
+            jdbc.execute("alter table orders.order_stock_restoration drop constraint if exists " + name);
+        }
+    }
+
+    private static String sqlState(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.sql.SQLException sql) { return sql.getSQLState(); }
+        }
+        return null;
+    }
+
+    private static JdbcTemplate freshJdbc() {
+        return new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
+    }
 
     @Test
     void kafkaRedeliversAfterActualNowaitExhaustionAndCommitsPaidExactlyOnce() throws Exception {
@@ -185,6 +324,7 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
         var loser = payments.findByPaymentId(command.paymentId()).orElseThrow();
         assertThat(loser.result()).isEqualTo(paidFirst ? OrderPayment.Result.REJECTED_ORDER_CANCELED : OrderPayment.Result.REJECTED_STOCK_UNAVAILABLE);
         assertThat(loser.restorationClaimId()).isNull();
+        assertNoWork(command.paymentId());
         assertThat(payments.findPaidByOrderId(command.orderId()).isPresent()).isEqualTo(paidFirst);
         assertThat(payments.existsRestorationIntent(command.orderId(), reservationId)).isEqualTo(!paidFirst);
         assertThat(inbox.exists("commerce-foundry.test.order.payment-approved", command.eventId())).isTrue();

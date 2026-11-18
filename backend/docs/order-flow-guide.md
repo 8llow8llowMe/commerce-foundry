@@ -690,7 +690,13 @@ DLT · 복원 대기 행의 자동 재처리 스윕은 #582 이고, **소비 게
 출처는 PAYMENT_RECORD, 상태는 RESTORE_PENDING·HELD·RESTORED만 지원한다. 다음 시각 이하의 대기를 시각·id 순으로 제한 조회하고,
 상태·마이크로초 다음 시각 CAS로 선점과 HELD를 갱신한다. 같은 claim 복원 증거는 HELD에서도 RESTORED로 마무리할 수 있다.
 쓰기 전체는 호출자 트랜잭션에 참여하며 저장 뒤 merge는 금지한다(`coding-conventions.md` §9-4a).
-A에서는 producer·consumer·완료 훅·스윕·설정을 연결하지 않는다. 자동 복원은 후속 구현이며 #582 소비·운영 결제 게이트는 계속 닫는다.
+A 저장 기반 위에 B1이 결제 반영 producer와 인라인 완료를 연결한다. 새 CANCELED·승인 근거가 있는 NOT_DONE 복원 의도와 작업원장은 같은 커밋이다.
+기존 pending 재전달에서 작업이 없으면 동일 claim으로 보충하고, 있으면 claim·order·payment·reservation·origin을 모두 대조한다.
+불일치는 재시도 불가로 중단하며 덮어쓰거나 새 claim으로 우회하지 않는다. 기존 작업의 attempts·next_attempt_at·상태는 보존한다.
+`order.payment-restoration.min-age`는 기본 5분, 0~1일이며 최초 등록 시각 + min-age를 다음 시각으로 한 번 저장한다. created_at 필터는 쓰지 않는다.
+product 복원 성공 뒤 결제 restored_at·작업 RESTORED·inbox·필요한 거절 outbox를 한 커밋으로 마무리한다.
+결제 restored_at 조건부 UPDATE 승자만 회신하며 이미 전액 취소된 결제는 회신하지 않는다. 완료 실패는 같은 claim의 재전달로 수렴한다.
+스윕·ShedLock·스윕 설정과 게이트는 B2 후속이며 장기 장애/DLT의 자동 수복은 아직 제공하지 않는다. #582 소비·운영 결제 게이트는 계속 닫는다.
 작업 `created_at`은 작업 등록 시각이다. 과거 결제 대기 나이는 `order_payment.created_at`으로 계산한다.
 운영 DDL `ddl/order-stock-restoration.sql`은 미복원 C1·NOT_DONE 기록을 backfill하며 같은 claim의 기존 작업 상태·시각은 보존한다.
 원천 중복 claim이나 기존 작업과 주문·결제·선점이 다른 claim, 중복 reservation은 전체 트랜잭션을 실패시킨다.

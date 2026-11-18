@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.order.application.port.out;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 결제 반영 재고 복원 작업 (#582, {@code orders.order_stock_restoration}). 넣은 뒤에는 읽고 merge 하지 않고 이전 값을 조건으로 건 UPDATE 한 문장으로만 바꾼다 —
@@ -14,6 +15,9 @@ public interface OrderStockRestorationRepositoryPort {
     OrderStockRestoration insert(OrderStockRestoration restoration);
 
     boolean existsByClaimId(long claimId);
+
+    /** 재전달 시 작업의 전체 출처와 기존 시도·다음 시각을 확인한다. */
+    Optional<OrderStockRestoration> findByClaimId(long claimId);
 
     /** 다음 시각이 {@code now} 이하인 복원 대기 행 — 다음 시각 · 아이디 순으로 {@code limit} 개. */
     List<OrderStockRestoration> findDueRestorations(Instant now, int limit);

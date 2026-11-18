@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -14,6 +15,8 @@ import org.springframework.data.jpa.repository.Query;
 public interface OrderStockRestorationRepository extends JpaRepository<OrderStockRestorationEntity, Long> {
 
     boolean existsByClaimId(Long claimId);
+
+    Optional<OrderStockRestorationEntity> findByClaimId(Long claimId);
 
     /** 스윕 대상 — {@code idx_order_stock_restoration_status_next_attempt_at_id} 순서 그대로 읽는다. */
     List<OrderStockRestorationEntity> findByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(

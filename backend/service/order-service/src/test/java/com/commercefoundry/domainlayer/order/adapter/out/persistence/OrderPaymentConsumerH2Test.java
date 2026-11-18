@@ -6,6 +6,9 @@ import com.commercefoundry.domainlayer.order.adapter.in.event.PaymentApprovedEve
 import com.commercefoundry.domainlayer.order.adapter.out.event.OrderEventAdapter;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapperImpl;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderPaymentMapperImpl;
+import com.commercefoundry.domainlayer.order.application.mapper.OrderStockRestorationMapperImpl;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentQueryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
@@ -57,9 +60,12 @@ public class OrderPaymentConsumerH2Test extends OrderPaymentConsumerContract {
     @Override protected String bootstrapServers() { return BROKER.getBrokersAsString(); }
 
     @TestConfiguration
+    @EnableConfigurationProperties(OrderPaymentRestorationProperties.class)
     @Import({OrderServiceFeaturesConfig.class, OrderRepositoryAdapter.class, OrderMapperImpl.class, OrderPaymentRepositoryAdapter.class,
-        OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, JpaProcessedEventStore.class, JpaOutboxStore.class, OrderEventAdapter.class, OrderPaymentProcessor.class,
-        PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class})
+        OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, JpaProcessedEventStore.class, JpaOutboxStore.class,
+        OrderEventAdapter.class, OrderPaymentProcessor.class,
+        PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class,
+        OrderStockRestorationRepositoryAdapter.class, OrderStockRestorationMapperImpl.class})
     public static class Config {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
         @Bean SnowflakeIdGenerator snowflakeIdGenerator() { return new SnowflakeIdGenerator(4, 4); }

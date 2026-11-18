@@ -189,6 +189,9 @@ commerce:
 # 미결제 주문 만료 스윕 (order-flow-guide.md §1-3, OrderPaymentExpiryProperties). 분산 락 없이 인스턴스마다 돈다 — 버전 검사로 한 건만 커밋한다.
 # 끄는 env 스위치를 두지 않는다(product 재고 선점 만료 스윕과 같다). test 프로파일만 enabled: false 로 끈다
 order:
+  # #582 B1: 최초 작업 등록 때만 적용한다. 스윕 실행은 아직 연결하지 않는다.
+  payment-restoration:
+    min-age: 5m
   # #308 PR-C 복원 복구 경로와 #15 완료 전 운영에서 열지 않는다. 기존 outbox 릴레이와 독립이다.
   payment-approval:
     consumer:

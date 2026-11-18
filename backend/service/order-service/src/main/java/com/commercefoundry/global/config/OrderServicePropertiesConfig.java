@@ -4,6 +4,7 @@ import com.commercefoundry.common.config.SwaggerPropertiesConfig;
 import com.commercefoundry.global.properties.OrderAutoConfirmationProperties;
 import com.commercefoundry.global.properties.OrderCancellationProperties;
 import com.commercefoundry.global.properties.OrderPaymentExpiryProperties;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
 import com.commercefoundry.global.properties.OrderProperties;
 import com.commercefoundry.global.properties.OrderQuantityLimitProperties;
 import com.commercefoundry.messaging.config.MessagingPropertiesConfig;
@@ -17,7 +18,7 @@ import org.springframework.context.annotation.Import;
 @Configuration
 @EnableConfigurationProperties({
     OrderProperties.class, OrderPaymentExpiryProperties.class, OrderAutoConfirmationProperties.class, OrderQuantityLimitProperties.class,
-    OrderCancellationProperties.class
+    OrderCancellationProperties.class, OrderPaymentRestorationProperties.class
 })
 @Import({
     InternalTokenPropertiesConfig.class,
