@@ -32,8 +32,21 @@ public final class LegacyPriceWritePlan {
     public List<ProductCurrencyPrice> productUpdates() { return productUpdates; }
     public List<SkuCurrencyPrice> skuUpdates() { return skuUpdates; }
 
+    /** 기존 동작(B1b): before 의 빠진 기준통화 행을 before 값으로 메모리 보완해 INSERT 한다. */
     public static LegacyPriceWritePlan prepare(LegacyPriceSnapshot before, LegacyPriceSnapshot after,
                                                List<ProductCurrencyPrice> products, List<SkuCurrencyPrice> skus, LongSupplier ids) {
+        return prepare(before, after, products, skus, ids, MissingBase.REPAIR);
+    }
+
+    /**
+     * @param missingBase before 에 있던 상품 · SKU 의 기준통화 행이 없을 때. REPAIR 는 before 값으로 보완하고,
+     *     REJECT 는 보완하지 않고 {@link BaseRowMissingException} 으로 거절한다(미연결 정본 전환 기반, #20 PR-2b-A).
+     *     after 에서 새로 생긴 SKU 의 행은 두 정책 모두 INSERT 한다.
+     */
+    public static LegacyPriceWritePlan prepare(LegacyPriceSnapshot before, LegacyPriceSnapshot after,
+                                               List<ProductCurrencyPrice> products, List<SkuCurrencyPrice> skus, LongSupplier ids,
+                                               MissingBase missingBase) {
+        Objects.requireNonNull(missingBase, "missingBase");
         before.requireSuccessor(after);
         var base = before.salePrice().currency();
         var beforeSkus = new HashMap<Long, Sku>();
@@ -72,6 +85,11 @@ public final class LegacyPriceWritePlan {
         var completedProducts = new ArrayList<>(products);
         var completedSkus = new ArrayList<>(skus);
         boolean missingProduct = baseProduct == null;
+        if (missingBase == MissingBase.REJECT
+            && (missingProduct || before.skus().stream().anyMatch(sku -> !baseSkus.containsKey(sku.id())))) {
+            // 구조 · drift 검사를 먼저 통과한 뒤에만 판정한다 — 누락보다 손상이 먼저 보고된다
+            throw new BaseRowMissingException();
+        }
         if (missingProduct) {
             long id = nextId(ids, productIds);
             try {
@@ -176,6 +194,19 @@ public final class LegacyPriceWritePlan {
 
     private static IllegalStateException invalidBefore() {
         return new IllegalStateException("기존 가격행 또는 legacy 가격 불변식이 올바르지 않습니다");
+    }
+
+    /** before 기준통화 행 누락 정책. 현재 writer/backfill은 REPAIR, REJECT 연결은 B 후속이다. */
+    public enum MissingBase { REPAIR, REJECT }
+
+    /**
+     * REJECT 정책에서 기존 상품 · SKU의 기준통화 행이 없다. 값을 보완하지 않는다. 현재 생산 writer에는 미연결이다.
+     * 내부 상태 오류라 {@link IllegalStateException} 이며 정제된 500(COMMON_000)과 전체 롤백으로 끝난다. 식별자 · 금액을 싣지 않는다.
+     */
+    public static final class BaseRowMissingException extends IllegalStateException {
+        private BaseRowMissingException() {
+            super("기준통화 가격행이 없습니다");
+        }
     }
 
     /** B의 writer가 PRODUCT_016 또는 SKU_ADMIN_004로 변환할 요청 가격규칙 위반. 금액 원문을 싣지 않는다. */

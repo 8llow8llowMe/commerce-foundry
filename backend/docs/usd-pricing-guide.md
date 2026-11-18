@@ -260,12 +260,33 @@ ADMIN 인가와 감사 원칙을 유지하고 가격 원문을 감사 로그에 
 재실행 가능함은 최신 편집까지 덮어써도 된다는 뜻이 아니다.
 정본 전환 전후 경합·행 누락·불변식 위반을 대조하고 미해결 차이가 있으면 전환을 멈춘다.
 
+### PR-2b-A 미연결 투영·대조 기반
+
+현재 생산 정본은 legacy 컬럼이다. A는 `BaseCurrencyPriceProjection`과 별도 `LegacyPriceDrift.requireMatch`를 제공한다.
+투영은 기존 상품의 기준통화 포인터·전체 SKU 상태와 실제 가격행을 받아 `PriceBook`으로 전체 통화 불변식을 검증한 뒤
+가격행의 기준통화 판매가·정가·SKU 추가금을 선택한다. 상품 ID·version·비가격 필드, SKU ID·순서·상태·옵션·배송 필드를 보존한다.
+추가 통화 partial·zero 및 STOP SKU도 검증하며, 누락·소속·중복·통화·overflow 오류는 원문·cause 없는 고정 내부 오류다.
+drift가 있어도 투영 자체는 실제 가격행을 선택하며, 별도 대조 호출이 legacy 판매가·nullable 정가·전체 SKU 추가금의 차이를 거절한다.
+어느 동작도 값을 보완·저장하지 않는다. 신규 DB 조회·Port·SQL·reader 연결·가격 writer 전환은 포함하지 않는다.
+
+`price-source.mode`(`PRICE_SOURCE_MODE`)는 미설정·null·빈값과 `LEGACY`만 허용한다. `PRICE_BOOK`은 예약값이며
+잘못된 enum과 함께 설정 바인딩 단계에서 기동을 거절하므로 ApplicationRunner/backfill이 시작되지 않는다.
+현재 다섯 writer와 전환 전 backfill은 기존 `REPAIR` 계약을 유지한다. `MissingBase.REJECT`는 순수 계획의 미연결 가드로,
+기존 상품·SKU 기준통화 누락을 거절하면서 신규 상품·신규 SKU의 INSERT는 허용한다. 설정만으로 이 가드에 전환하지 않는다.
+
+B 후속은 모든 고객·internal·admin reader, 목록 정렬·페이지/count·SKU 집계·display/look과 다섯 가격 writer,
+전체 Product 저장 경로를 같은 단일 정본으로 연결하는 작업이다. 동시 읽기 일관성·양방향 writer 경합·실패 rollback·혼합 배포와
+원복 검증을 마친 뒤 운영 전환을 별도로 승인한다. A 완료는 PR-2b·B1·#20 전체 완료나 USD 구매 개방을 뜻하지 않는다.
+
 ### 4-1. 롤백 순서
 
 1. 신규 기능을 OFF로 유지하거나 끄고 신규 유입을 중단한다.
 2. 새 통화 가격행과 기존 가격·버전 정보를 보존한다. 신규 가격을 삭제해 구모델에 맞추지 않는다.
 3. 신규 가격과 부모 CAS를 이해하는 호환 writer로만 복귀한다.
 4. 정본·투영·writer 대조 후 재개 여부를 결정한다. 신규 가격을 모르는 구 binary로 복귀하지 않는다.
+
+가격행 정본으로 전환한 뒤 `LEGACY` 설정으로 단순 원복하거나 legacy 호환 투영을 원천으로 자동 backfill 복구하지 않는다.
+가격행·부모 버전을 보존하고 별도 승인된 복구·대조 절차를 거친다. 현재 legacy backfill은 전환 전 전용이다.
 
 실행용 DDL과 적용·복구 순서는 B1의 별도 산출물이다. A에는 SQL을 포함하지 않는다.
 이행을 실제 PostgreSQL에서 검증하기 전에는 운영 적용 가능 또는 무중단 완료라고 보고하지 않는다.

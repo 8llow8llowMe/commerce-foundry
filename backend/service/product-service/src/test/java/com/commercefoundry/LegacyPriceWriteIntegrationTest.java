@@ -12,12 +12,16 @@ import com.commercefoundry.domainlayer.product.application.mapper.CurrencyPriceM
 import com.commercefoundry.domainlayer.product.application.port.out.PriceBookRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.service.processor.LegacyPriceWriteProcessor;
 import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceSnapshot;
+import com.commercefoundry.domainlayer.product.domain.model.BaseCurrencyPriceProjection;
+import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceDrift;
+import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.ProductCurrencyPrice;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SkuCurrencyPrice;
 import com.commercefoundry.domainlayer.product.domain.model.SkuOptionKey;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
+import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.shared.commerce.Money;
@@ -29,7 +33,10 @@ import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
@@ -49,6 +56,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ProductServiceFeaturesConfig.class, QuerydslConfigurer.class, PriceBookRepositoryAdapter.class,
     CurrencyPriceMapperImpl.class, LegacyPriceWriteProcessor.class})
+@EnableConfigurationProperties(PriceSourceProperties.class)
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -164,6 +172,68 @@ class LegacyPriceWriteIntegrationTest {
         })).isInstanceOf(IllegalStateException.class);
         assertThat(prices.findProductPrices(List.of(1L))).containsExactly(product(1, 100, KRW));
         assertThat(prices.findSkuPrices(List.of(10L))).isEmpty();
+    }
+
+    @ParameterizedTest
+    @EnumSource(com.commercefoundry.shared.commerce.CurrencyCode.class)
+    void bulkProjectionAndDriftReadOnlyPreserveAllStoredRows(com.commercefoundry.shared.commerce.CurrencyCode base) {
+        var extra = base == KRW ? USD : KRW;
+        var legacy = legacyProduct(base);
+        var skus = List.of(new Sku(11, 1, SkuOptionKey.of(List.of(11L)), Money.of(5, base), SaleStatus.STOP_SELLING, null, null),
+            new Sku(10, 1, SkuOptionKey.of(List.of(10L)), Money.zero(base), SaleStatus.ON_SALE, null, null));
+        tx.executeWithoutResult(status -> prices.insertAll(List.of(product(1, 0, base), product(2, 300, extra)),
+            List.of(price(3, 10, 0, base), price(4, 11, 7, base), price(5, 10, 0, extra))));
+        var beforeProducts = jdbc.queryForList("select * from product.product_price order by id");
+        var beforeSkus = jdbc.queryForList("select * from product.sku_price order by id");
+        statistics.clear();
+        tx.executeWithoutResult(status -> {
+            var projection = BaseCurrencyPriceProjection.project(legacy, skus, prices.findProductPrices(List.of(1L)),
+                prices.findSkuPrices(List.of(10L, 11L)));
+            assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);
+            assertThat(projection.product().salePrice()).isEqualTo(Money.zero(base));
+            assertThat(projection.product().version()).isEqualTo(17);
+            assertThat(projection.skus()).extracting(Sku::id).containsExactly(11L, 10L);
+            assertThat(projection.skus()).extracting(sku -> sku.additionalPrice().amount()).containsExactly(7L, 0L);
+            assertThat(projection.priceBook().skuSalePrice(11, extra)).isEmpty();
+            assertThatThrownBy(() -> LegacyPriceDrift.requireMatch(legacy, skus, projection))
+                .isExactlyInstanceOf(IllegalStateException.class).hasNoCause();
+            LegacyPriceDrift.requireMatch(projection.product(), projection.skus(), projection);
+        });
+        assertNoPriceDml();
+        assertThat(jdbc.queryForList("select * from product.product_price order by id")).isEqualTo(beforeProducts);
+        assertThat(jdbc.queryForList("select * from product.sku_price order by id")).isEqualTo(beforeSkus);
+    }
+
+    @Test
+    void projectionRejectsMissingProductAndStoppedSkuBaseWithoutDmlOrRepair() {
+        var legacy = legacyProduct(KRW);
+        var skus = List.of(sku(10, 0, SaleStatus.STOP_SELLING));
+        for (boolean missingProduct : List.of(true, false)) {
+            tx.executeWithoutResult(status -> prices.insertAll(missingProduct ? List.of() : List.of(product(1, 100, KRW)),
+                missingProduct ? List.of(price(3, 10, 0, KRW)) : List.of()));
+            var beforeProducts = jdbc.queryForList("select * from product.product_price order by id");
+            var beforeSkus = jdbc.queryForList("select * from product.sku_price order by id");
+            statistics.clear();
+            assertThatThrownBy(() -> tx.execute(status -> BaseCurrencyPriceProjection.project(legacy, skus,
+                prices.findProductPrices(List.of(1L)), prices.findSkuPrices(List.of(10L)))))
+                .isExactlyInstanceOf(IllegalStateException.class).hasMessage("기준통화 가격 투영 입력이 올바르지 않습니다").hasNoCause();
+            assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);
+            assertNoPriceDml();
+            assertThat(jdbc.queryForList("select * from product.product_price order by id")).isEqualTo(beforeProducts);
+            assertThat(jdbc.queryForList("select * from product.sku_price order by id")).isEqualTo(beforeSkus);
+            clean();
+        }
+    }
+
+    private void assertNoPriceDml() {
+        assertThat(statistics.getEntityInsertCount()).isZero();
+        assertThat(statistics.getEntityUpdateCount()).isZero();
+        assertThat(statistics.getEntityDeleteCount()).isZero();
+    }
+
+    private static Product legacyProduct(com.commercefoundry.shared.commerce.CurrencyCode base) {
+        return new Product(1, 9, "상품", "요약", null, SaleStatus.STOP_SELLING, false, Money.of(100, base), null,
+            null, false, null, null, false, null, 17L, null, null);
     }
 
     private static LegacyPriceSnapshot snapshot(long sale, Sku... skus) {
