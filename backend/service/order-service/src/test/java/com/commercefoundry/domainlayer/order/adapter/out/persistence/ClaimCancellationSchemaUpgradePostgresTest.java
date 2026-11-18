@@ -71,6 +71,7 @@ class ClaimCancellationSchemaUpgradePostgresTest {
                 + "values (16, 103, ?, 'RETURN', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID());
             jdbc.update("update orders.claim set version = version + 1 where id = ?", LEGACY_CLAIM_ID);
             run(source, "ddl/claim-return-approval.sql");
+            RestorationSchemaMigration.run(source);
             // #17 B1 뒤 롤링 · 롤백 중 승인 칸을 모르는 B1 이전 앱의 반품 INSERT · UPDATE 도 새 check 를 통과한다
             jdbc.update("insert into orders.claim (id, order_id, request_key, type, status, attempt_count, version, created_at, updated_at) "
                 + "values (17, 104, ?, 'RETURN', 'REQUESTED', 0, 0, now(), now())", UUID.randomUUID());

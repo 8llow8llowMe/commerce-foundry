@@ -686,6 +686,16 @@ claimId로 재개한다. 회신은 3의 한 번뿐이다. 재전달 때 결제�
 payment 는 거절 회신을 받지 못해 환불 대상으로 넘어가지 않는다. 재처리 담당은 원인을 고친 뒤 재전송하고 **재고 복원(`restored_at`)과 거절 회신 · 환불까지** 확인한다.
 DLT · 복원 대기 행의 자동 재처리 스윕은 #582 이고, **소비 게이트를 열기 전에 닫아야 한다.** 그 전까지 아래 쿼리로 점검한다.
 
+**#582 A 저장 기반:** `orders.order_stock_restoration`에 확정 선점·claim마다 유니크 작업 한 행을 둔다.
+출처는 PAYMENT_RECORD, 상태는 RESTORE_PENDING·HELD·RESTORED만 지원한다. 다음 시각 이하의 대기를 시각·id 순으로 제한 조회하고,
+상태·마이크로초 다음 시각 CAS로 선점과 HELD를 갱신한다. 같은 claim 복원 증거는 HELD에서도 RESTORED로 마무리할 수 있다.
+쓰기 전체는 호출자 트랜잭션에 참여하며 저장 뒤 merge는 금지한다(`coding-conventions.md` §9-4a).
+A에서는 producer·consumer·완료 훅·스윕·설정을 연결하지 않는다. 자동 복원은 후속 구현이며 #582 소비·운영 결제 게이트는 계속 닫는다.
+작업 `created_at`은 작업 등록 시각이다. 과거 결제 대기 나이는 `order_payment.created_at`으로 계산한다.
+운영 DDL `ddl/order-stock-restoration.sql`은 미복원 C1·NOT_DONE 기록을 backfill하며 같은 claim의 기존 작업 상태·시각은 보존한다.
+원천 중복 claim이나 기존 작업과 주문·결제·선점이 다른 claim, 중복 reservation은 전체 트랜잭션을 실패시킨다.
+backfill 중 두 테이블 쓰기 잠금이 필요하다. 후속 producer 배포와 구버전 트랜잭션 drain 뒤 재실행하여 혼합 배포 누락을 채운 후 스윕을 켠다.
+
 payment의 #591 재대조는 order 원천 `order_payment` 결과가 이미 존재하지만 회신 전달이 유실·DLT로 끝난 경우에만 payment 기록을 복구한다. 승인 소비가 DLT로 가 원천 결과가 없거나 재고 복원 처리가 멈춘 경우를 해결하지 않으며, 이 경로는 #582 복원과 재전달이 담당한다. 원천 거절 기록만으로 복원 완료를 추정하지 않고 실제 자동 PG 취소는 #579가 실행 직전 상태·잔액을 다시 검증한다.
 
 ```sql

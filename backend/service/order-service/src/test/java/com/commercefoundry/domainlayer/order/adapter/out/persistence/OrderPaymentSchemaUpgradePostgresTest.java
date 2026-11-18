@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -37,6 +38,13 @@ class OrderPaymentSchemaUpgradePostgresTest {
     static final PostgreSQLContainer POSTGRES = upgradedDatabase();
     @Autowired JdbcTemplate jdbc;
 
+    @BeforeEach
+    void isolateRestorationFixtures() {
+        jdbc.update("delete from orders.order_stock_restoration where id not in (2,9)");
+        jdbc.update("delete from orders.order_payment where id not in (1,2,9,10)");
+        jdbc.update("update orders.order_stock_restoration set status='RESTORE_PENDING', hold_code=null, restored_at=null, attempts=0, next_attempt_at=now()");
+    }
+
     private static PostgreSQLContainer upgradedDatabase() {
         PostgreSQLContainer database = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/order-schema-c2a-7c5c0a6f.sql");
         try {
@@ -54,6 +62,11 @@ class OrderPaymentSchemaUpgradePostgresTest {
                     new ClassPathResource("ddl/claim-admin-decision.sql"), new ClassPathResource("ddl/claim-return-approval.sql"));
             migration.setSqlScriptEncoding("UTF-8");
             migration.execute(source);
+            insert(jdbc, 9, "REJECTED_PAYMENT_NOT_DONE", 59L, 69L, "2026-11-02T00:00:00Z");
+            insert(jdbc, 10, "REJECTED_ORDER_CANCELED", 60L, 70L, null);
+            jdbc.update("update orders.order_payment set restored_at = now() where id = 10");
+            RestorationSchemaMigration.run(source);
+            RestorationSchemaMigration.run(source);
             return database;
         } catch (RuntimeException | Error failure) {
             database.stop();
@@ -94,6 +107,83 @@ class OrderPaymentSchemaUpgradePostgresTest {
         assertThat(jdbc.queryForObject("select failure_code from orders.claim where id = 13", String.class)).isEqualTo("PRODUCT_028");
         assertThatThrownBy(() -> jdbc.update("update orders.claim set failure_code = null where id = 13"))
             .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void restorationBackfillIsEligibleIdempotentAndPreservesExistingWork() {
+        var rows = jdbc.queryForList("select id, claim_id, stock_reservation_id, origin, status, attempts from orders.order_stock_restoration "
+            + "where id in (2,9) order by id");
+        assertThat(rows).extracting(row -> row.get("id")).containsExactly(2L, 9L);
+        assertThat(rows).extracting(row -> row.get("claim_id")).containsExactly(62L, 69L);
+        assertThat(rows).extracting(row -> row.get("stock_reservation_id")).containsExactly(52L, 59L);
+        assertThat(jdbc.queryForObject("select count(*) from orders.order_stock_restoration where id in (1,10)", Long.class)).isZero();
+        assertThat(rows).allSatisfy(row -> {
+            assertThat(row.get("origin")).isEqualTo("PAYMENT_RECORD");
+            assertThat(row.get("status")).isEqualTo("RESTORE_PENDING");
+            assertThat(row.get("attempts")).isEqualTo(0);
+        });
+        try {
+            jdbc.update("update orders.order_stock_restoration set status='HELD', hold_code='PRODUCT_028', next_attempt_at=null, attempts=3 where id=2");
+            jdbc.update("update orders.order_stock_restoration set status='RESTORED', restored_at=now(), next_attempt_at=null where id=9");
+            var before = jdbc.queryForList("select * from orders.order_stock_restoration where id in (2,9) order by id");
+            RestorationSchemaMigration.run(jdbc.getDataSource());
+            assertThat(jdbc.queryForList("select * from orders.order_stock_restoration where id in (2,9) order by id")).isEqualTo(before);
+        } finally {
+            jdbc.update("update orders.order_stock_restoration set status='RESTORE_PENDING', hold_code=null, restored_at=null, attempts=0, next_attempt_at=now()");
+        }
+    }
+
+    @Test
+    void restorationBackfillRejectsDuplicateReservationOrClaimAndRollsBackWholeBatch() {
+        for (boolean duplicateClaim : new boolean[] {false, true}) {
+            try {
+                insert(jdbc, 201, "REJECTED_ORDER_CANCELED", 251L, 261L, null);
+                insert(jdbc, 202, "REJECTED_ORDER_CANCELED", duplicateClaim ? 252L : 251L, duplicateClaim ? 261L : 262L, null);
+                assertThatThrownBy(() -> RestorationSchemaMigration.run(jdbc.getDataSource())).isInstanceOf(IllegalStateException.class);
+                assertThat(jdbc.queryForObject("select count(*) from orders.order_stock_restoration where id in (201,202)", Long.class)).isZero();
+            } finally {
+                jdbc.update("delete from orders.order_payment where id in (201,202)");
+            }
+        }
+    }
+
+    @Test
+    void failedFirstMigrationRollsBackCreatedTableAndPreservesSourceRows() {
+        String databaseName = "restoration_rollback_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.execute("create database " + databaseName);
+        try {
+            var source = new DriverManagerDataSource(POSTGRES.getJdbcUrl().replace("/" + POSTGRES.getDatabaseName(), "/" + databaseName),
+                POSTGRES.getUsername(), POSTGRES.getPassword());
+            var isolated = new JdbcTemplate(source);
+            isolated.execute("create schema orders");
+            isolated.execute("create table orders.order_payment (id bigint, order_id bigint, payment_id bigint, restoration_claim_id bigint, "
+                + "stock_reservation_id bigint, result varchar(50), restored_at timestamptz)");
+            isolated.update("insert into orders.order_payment values (1,10,20,101,201,'REJECTED_ORDER_CANCELED',null), "
+                + "(2,10,21,102,201,'REJECTED_ORDER_CANCELED',null), (3,10,22,103,203,'REJECTED_ORDER_CANCELED',null)");
+            var before = isolated.queryForList("select * from orders.order_payment order by id");
+            assertThatThrownBy(() -> RestorationSchemaMigration.run(source)).isInstanceOf(IllegalStateException.class)
+                .hasCauseInstanceOf(java.sql.SQLException.class)
+                .satisfies(failure -> assertThat(((java.sql.SQLException) failure.getCause()).getSQLState()).isEqualTo("23505"));
+            // 최초 CREATE TABLE·COMMENT·INDEX와 backfill이 같은 트랜잭션에서 롤백되는지 확인한다.
+            assertThat(isolated.queryForObject("select to_regclass('orders.order_stock_restoration')", String.class)).isNull();
+            assertThat(isolated.queryForList("select * from orders.order_payment order by id")).isEqualTo(before);
+        } finally {
+            jdbc.execute("drop database " + databaseName);
+        }
+    }
+
+    @Test
+    void restorationBackfillRejectsSameClaimWithDifferentOwnershipAndKeepsExistingRow() {
+        for (String column : java.util.List.of("order_id", "payment_id", "stock_reservation_id")) {
+            try {
+                jdbc.update("update orders.order_stock_restoration set " + column + "=" + column + "+1000 where id=2");
+                var before = jdbc.queryForList("select * from orders.order_stock_restoration order by id");
+                assertThatThrownBy(() -> RestorationSchemaMigration.run(jdbc.getDataSource())).isInstanceOf(IllegalStateException.class);
+                assertThat(jdbc.queryForList("select * from orders.order_stock_restoration order by id")).isEqualTo(before);
+            } finally {
+                jdbc.update("update orders.order_stock_restoration set " + column + "=" + column + "-1000 where id=2");
+            }
+        }
     }
 
     private static void insert(JdbcTemplate jdbc, long id, String result, Long reservation, Long claim, String approvedAt) {

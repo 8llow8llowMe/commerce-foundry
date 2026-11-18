@@ -1,6 +1,10 @@
 # Service Inventory
 
 > 서비스별 책임 · 상태 · 의존의 요약이다. 서비스 책임이 바뀌면 이 문서를 같은 PR 에서 갱신한다.
+
+order-service의 #582 A는 `order_stock_restoration` 작업원장·CAS·운영 DDL/backfill 저장 기반만 제공한다.
+PAYMENT_RECORD의 RESTORE_PENDING·HELD·RESTORED를 보존하며 producer·consumer·완료 훅·스윕 연결은 후속이다.
+API·FE 계약 변화는 없으며 #582 자동 복원 완료와 소비·운영 결제 게이트 개방을 의미하지 않는다.
 > 포트는 확정했다(#3 · #36). 바꾸면 이 표와 모듈의 `application.yml`, 서비스의 `*ApplicationTests`, `local-run-guide.md` §5 를 같이 고친다.
 
 ## 1. 실행 모듈
