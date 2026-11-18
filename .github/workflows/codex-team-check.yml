@@ -4,12 +4,23 @@ on:
   pull_request:
     paths:
       - 'scripts/*.py'
-      - '.agents/skills/codex-team/**'
+      - '.codex/agent-models.json'
+      - '.codex/agents/**'
+      - '.claude/agents/**'
+      - '.claude/skills/**'
+      - '.agents/**'
+      - '.cursor/agents/**'
       - '.github/workflows/codex-team-check.yml'
   push:
     branches: [develop]
     paths:
       - 'scripts/*.py'
+      - '.codex/agent-models.json'
+      - '.codex/agents/**'
+      - '.claude/agents/**'
+      - '.claude/skills/**'
+      - '.agents/**'
+      - '.cursor/agents/**'
       - '.github/workflows/codex-team-check.yml'
 
 permissions:
@@ -24,5 +35,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: 에이전트 생성 설정 동기화 확인
+        run: python -B -X utf8 scripts/sync-agent-skills.py
       - name: 독립 세션 도구 회귀 및 Windows 프로세스 종료 검증
         run: python -B -X utf8 -m unittest discover -s scripts -p "test_*.py"

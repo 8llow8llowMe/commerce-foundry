@@ -58,11 +58,11 @@ rg -n 'set s\.available|available =' backend/service/product-service -g '*.java'
 rg -l '@Version' backend/service/order-service backend/service/product-service backend/service/delivery-service -g '*.java'""",
 }
 
-# 저비용 모델로 돌리는 역할 → Codex reasoning effort. 모델 ID 가 바뀌면 아래 상수만 고치고 --write 한다.
-FAST_ROLES = {"explorer": "medium", "git-ops": "low"}
-CODEX_FAST_MODEL = "gpt-6-luna"
-CODEX_WORK_MODEL = "gpt-6.1-sol"
-CODEX_DESIGN_MODEL = "gpt-6-astra"
+FAST_ROLES = {"explorer", "git-ops"}
+CODEX_MODEL_CONFIG = ROOT / ".codex/agent-models.json"
+REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+# Codex 전용으로 관리하며 Claude 원본이 없는 스킬.
+STANDALONE_SKILLS = {ROOT / ".agents/skills/codex-team/SKILL.md"}
 CURSOR_FAST_MODEL = "claude-haiku-5-5"
 GENERATED_NOTE = "scripts/sync-agent-skills.py 가 .claude/agents/ 에서 생성한다. 직접 고치지 않는다."
 
@@ -75,9 +75,9 @@ ROUTING = """## 모델 라우팅
 | 분류·계획·범위 결정, 검증 실행·결과 확인, 완료 판단 | 메인 세션 |
 | 위치·호출 흐름을 모르는 탐색, 여러 파일 훑기 | `explorer` (저비용 모델) |
 | 이슈 시작·푸시·PR 생성·머지 후 정리 같은 git·gh 작업 | `git-ops` (Codex `git_ops`, 저비용 모델) |
-| 설계·구현·검토 | 해당 역할 (Codex 설계 `gpt-6-astra`, 구현·검토 `gpt-6.1-sol`; Cursor `inherit`) |
+| 설계·구현·검토 | 해당 역할 (Codex 설계는 design, 구현·검토는 work, Cursor는 `inherit`) |
 
-- 저비용 모델은 `.codex/agents/`·`.cursor/agents/` 정의에 있다. 위임할 수 없으면 메인 세션이 같은 순서로 처리한다.
+- Codex 모델과 추론 수준은 `.codex/agent-models.json`에서 관리한다. 실제 사용 모델은 생성된 역할 정의를 따른다. 위임할 수 없으면 메인 세션이 같은 순서로 처리한다.
 - 위치를 아는 파일 몇 개 읽기, 단일 git 명령은 메인 세션이 직접 한다. 하위 에이전트는 새 컨텍스트로 시작하므로 띄우는 비용이 더 크다.
 - 하위 에이전트는 대화 기록을 보지 못한다. 경로·브랜치·이슈 번호·검증 결과·원하는 출력 형식을 전달한다.
 - 결과는 요약으로 받는다. diff·파일 원문을 통째로 돌려받지 않는다.
@@ -202,15 +202,44 @@ def cursor_agent_content(path):
             f"readonly: {str(readonly).lower()}\n---\n\n{role_content(path)}")
 
 
-def codex_agent_content(path):
+def load_codex_profiles(path):
+    config = json.loads(path.read_text(encoding="utf-8"))
+    models, efforts = config["models"], config["reasoning_effort"]
+    if set(models) != {"fast", "design", "work"}:
+        raise ValueError("models must contain fast, design and work")
+    if set(efforts) != FAST_ROLES | {"design", "work"}:
+        raise ValueError("reasoning_effort must contain explorer, git-ops, design and work")
+    if any(not isinstance(model, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]*", model)
+           for model in models.values()):
+        raise ValueError("invalid Codex model ID")
+    if any(not isinstance(effort, str) or effort not in REASONING_EFFORTS for effort in efforts.values()):
+        raise ValueError("invalid Codex reasoning effort")
+    return {key: (models["fast" if key in FAST_ROLES else key], effort)
+            for key, effort in efforts.items()}
+
+
+def validate_catalog(path, profiles):
+    catalog = json.loads(path.read_text(encoding="utf-8"))
+    supported = {
+        model["slug"]: {level["effort"] for level in model["supported_reasoning_levels"]}
+        for model in catalog["models"] if model.get("visibility") == "list"
+    }
+    for role, (model, effort) in profiles.items():
+        if model not in supported:
+            raise ValueError(f"{role}: {model} is not selectable in {path}")
+        if effort not in supported[model]:
+            raise ValueError(f"{role}: {model} does not support {effort} in {path}")
+
+
+def codex_agent_content(path, profiles):
     meta, _ = split_source(path)
     body = role_content(path)
     if "'''" in body:
         raise ValueError(f"Role body cannot be a TOML literal string: {path.relative_to(ROOT)}")
     description = json.dumps(adapt(meta["description"]), ensure_ascii=False)
     role = path.stem
-    model = CODEX_FAST_MODEL if role in FAST_ROLES else (CODEX_DESIGN_MODEL if role == "architect" else CODEX_WORK_MODEL)
-    effort = FAST_ROLES.get(role, "high" if role == "architect" else "medium")
+    profile = role if role in FAST_ROLES else ("design" if role == "architect" else "work")
+    model, effort = profiles[profile]
     return (f"# {GENERATED_NOTE}\n"
             f'name = "{codex_name(path.stem)}"\n'
             f"description = {description}\n"
@@ -222,7 +251,14 @@ def codex_agent_content(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="Write generated skills and role instructions; otherwise check for drift")
+    parser.add_argument("--model-catalog", type=Path, help="Validate models and effort against a local Codex models cache")
     args = parser.parse_args()
+    try:
+        profiles = load_codex_profiles(CODEX_MODEL_CONFIG)
+        if args.model_catalog is not None:
+            validate_catalog(args.model_catalog, profiles)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        parser.error(f"Codex model configuration: {error}")
     sources = sorted((ROOT / ".claude/skills").glob("*/SKILL.md"))
     names = {path.parent.name for path in sources}
     if names != set(DESCRIPTIONS):
@@ -233,11 +269,11 @@ def main():
         parser.error(f"FAST_ROLES without source agent: {sorted(set(FAST_ROLES) - {p.stem for p in roles})}")
     expected.update({ROOT / ".agents/roles" / p.name: role_content(p) for p in roles})
     expected.update({ROOT / ".cursor/agents" / p.name: cursor_agent_content(p) for p in roles})
-    expected.update({ROOT / ".codex/agents" / f"{codex_name(p.stem)}.toml": codex_agent_content(p)
+    expected.update({ROOT / ".codex/agents" / f"{codex_name(p.stem)}.toml": codex_agent_content(p, profiles)
                      for p in roles})
     actual = (set((ROOT / ".agents/skills").glob("*/SKILL.md")) | set((ROOT / ".agents/roles").glob("*.md"))
               | set((ROOT / ".cursor/agents").glob("*.md")) | set((ROOT / ".codex/agents").glob("*.toml")))
-    stale = actual - set(expected)
+    stale = actual - set(expected) - STANDALONE_SKILLS
     failures = []
     for path, content in expected.items():
         if args.write:
