@@ -20,6 +20,8 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderEventPort
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockConfirmationRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.messaging.event.TopicNames;
@@ -39,9 +41,11 @@ class OrderPaymentProcessorTest {
     private final OrderRepositoryPort orders = mock(OrderRepositoryPort.class);
     private final OrderPaymentRepositoryPort payments = mock(OrderPaymentRepositoryPort.class);
     private final OrderStockConfirmationRepositoryPort evidence = mock(OrderStockConfirmationRepositoryPort.class);
+    private final OrderStockRestorationRepositoryPort work = mock(OrderStockRestorationRepositoryPort.class);
     private final OrderEventPort events = mock(OrderEventPort.class);
     private final ProcessedEventStore inbox = mock(ProcessedEventStore.class);
-    private final OrderPaymentProcessor processor = new OrderPaymentProcessor(orders, payments, evidence, events, inbox,
+    private final OrderPaymentProcessor processor = new OrderPaymentProcessor(orders, payments, evidence, work,
+        new OrderPaymentRestorationProperties(java.time.Duration.ofMinutes(5)), events, inbox,
         new TopicNames("commerce-foundry.test", "order"), new SnowflakeIdGenerator(1, 1), Clock.fixed(NOW, ZoneOffset.UTC));
     private final PaymentApprovalCommand command = new PaymentApprovalCommand(UUID.randomUUID(), 10, 20, 30, krw(4000), NOW, "CARD");
     private final VerifiedPayment done = new VerifiedPayment(10, 20, 30, krw(4000), NOW, "DONE");
@@ -91,6 +95,7 @@ class OrderPaymentProcessorTest {
         processor.completeRestoration(command.eventId(), restorable, done);
 
         verify(events, never()).paymentRejected(any());
+        verify(work).markRestored(555, NOW);
         verify(inbox).record(any(), eq(command.eventId()), any(), any());
     }
 

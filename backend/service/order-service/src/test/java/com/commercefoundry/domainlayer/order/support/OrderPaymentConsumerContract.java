@@ -16,6 +16,7 @@ import com.commercefoundry.domainlayer.order.application.model.StockConfirmation
 import com.commercefoundry.domainlayer.order.application.model.VerifiedPayment;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentQueryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
@@ -76,6 +77,7 @@ public abstract class OrderPaymentConsumerContract {
     private static final String GROUP = "commerce-foundry.test.order.payment-approved";
     @Autowired protected OrderRepositoryPort orders;
     @Autowired protected OrderPaymentRepositoryPort payments;
+    @Autowired protected OrderStockRestorationRepositoryPort workLedger;
     @Autowired protected JpaProcessedEventStore inbox;
     @Autowired protected OrderPaymentEventFacade facade;
     @Autowired protected OrderPaymentProcessor processor;
@@ -251,6 +253,7 @@ public abstract class OrderPaymentConsumerContract {
     protected void assertSingleReflection(PaymentApprovalCommand command, EventEnvelopeCodec codec) {
         assertThat(order(command).status()).isEqualTo(OrderStatus.PAID);
         assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.PAID);
+        assertNoWork(command.paymentId());
         assertThat(jdbc.queryForObject("select count(*) from orders.order_payment where payment_id=?", Long.class, command.paymentId())).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from orders.order_status_history where order_id=? and to_status='PAID'",
             Long.class, command.orderId())).isEqualTo(1);
@@ -658,6 +661,7 @@ public abstract class OrderPaymentConsumerContract {
         assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(OrderException.class);
         OrderPayment pending = payment(command);
         assertThat(pending.awaitsRestoration()).isTrue();
+        assertWork(pending, "RESTORE_PENDING");
         assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
         assertThat(replies(command.orderId())).isZero();
 
@@ -667,6 +671,47 @@ public abstract class OrderPaymentConsumerContract {
         verify(stock, times(1)).release(anyLong(), anyLong());
         assertThat(payment(command).restorationClaimId()).isEqualTo(pending.restorationClaimId());
         assertRestoredOnce(command, reservationId);
+    }
+
+    @Test
+    void redeliveryPreservesExistingLeaseAndAttemptsAndRepairsMissingWorkWithSameClaim() {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        long reservationId = order(command).stockReservationId();
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservationId, command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN))
+            .doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN)).doNothing()
+            .when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(OrderException.class);
+        OrderPayment pending = payment(command);
+        OrderStockRestoration original = workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow();
+        assertThat(original.nextAttemptAt()).isEqualTo(NOW.plus(Duration.ofMinutes(5)));
+        OrderStockRestoration claimed = original.claimAttempt(original.nextAttemptAt(), Duration.ofMinutes(1), Duration.ofMinutes(5));
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> assertThat(workLedger.claim(original, claimed, original.nextAttemptAt())).isTrue());
+        OrderStockRestoration saved = workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow();
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(OrderException.class);
+        assertThat(workLedger.findByClaimId(pending.restorationClaimId())).contains(saved);
+        jdbc.update("delete from orders.order_stock_restoration where claim_id=?", pending.restorationClaimId());
+        facade.approve(command);
+        assertThat(payment(command).restorationClaimId()).isEqualTo(pending.restorationClaimId());
+        assertWork(payment(command), "RESTORED");
+        verify(restorations, times(3)).restoreCancellation(pending.restorationClaimId(), reservationId, skus());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"order_id", "payment_id", "stock_reservation_id"})
+    void existingWorkOwnershipMismatchStopsBeforeRemoteRestoration(String column) {
+        PaymentApprovalCommand command = arrange(OrderStatus.CANCELED);
+        long reservation = order(command).stockReservationId();
+        OrderPayment pending = processor.complete(command,
+            new VerifiedPayment(command.paymentId(), command.orderId(), command.memberId(), command.amount(), NOW, "DONE"),
+            StockConfirmation.confirmed(reservation)).orElseThrow().orderPayment();
+        jdbc.update("update orders.order_stock_restoration set " + column + "=" + column + "+1000000 where claim_id=?", pending.restorationClaimId());
+        var before = jdbc.queryForMap("select * from orders.order_stock_restoration where claim_id=?", pending.restorationClaimId());
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
+        assertThat(jdbc.queryForMap("select * from orders.order_stock_restoration where claim_id=?", pending.restorationClaimId())).isEqualTo(before);
+        assertThat(payment(command).restoredAt()).isNull();
+        assertThat(replies(command.orderId())).isZero();
+        verifyNoInteractions(restorations);
     }
 
     @Test
@@ -817,6 +862,7 @@ public abstract class OrderPaymentConsumerContract {
         assertThat(first.stockReservationId()).isEqualTo(confirmed);
         assertThat(first.approvedAt()).isEqualTo(NOW);
         assertThat(first.restoredAt()).isNotNull();
+        assertWork(first, "RESTORED");
         assertThat(order(command).status()).isEqualTo(status);
         assertThat(replies(command.orderId())).isEqualTo(source.equals("CANCELED") ? 0 : 1);
         facade.approve(command);
@@ -862,6 +908,7 @@ public abstract class OrderPaymentConsumerContract {
         assertThat(payment(command).approvedAt()).isNull();
         assertThat(payment(command).result()).isEqualTo(OrderPayment.Result.REJECTED_PAYMENT_NOT_DONE);
         assertThat(replies(command.orderId())).isEqualTo(1);
+        assertNoWork(command.paymentId());
         verifyNoInteractions(stock, restorations);
     }
 
@@ -988,10 +1035,26 @@ public abstract class OrderPaymentConsumerContract {
         assertThat(record.restorationClaimId()).isNotNull();
         assertThat(record.restoredAt()).isNotNull();
         assertThat(record.awaitsRestoration()).isFalse();
+        assertWork(record, "RESTORED");
         verify(restorations, atLeastOnce()).restoreCancellation(record.restorationClaimId(), reservationId, skus());
         assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=? and event_type='order-payment-rejected'",
             Long.class, Long.toString(command.orderId()))).isEqualTo(1);
         assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
+    }
+
+    protected void assertWork(OrderPayment record, String status) {
+        assertThat(jdbc.queryForObject("select count(*) from orders.order_stock_restoration where payment_id=?", Long.class, record.paymentId())).isEqualTo(1);
+        OrderStockRestoration work = workLedger.findByClaimId(record.restorationClaimId()).orElseThrow();
+        assertThat(work.orderId()).isEqualTo(record.orderId());
+        assertThat(work.paymentId()).isEqualTo(record.paymentId());
+        assertThat(work.stockReservationId()).isEqualTo(record.stockReservationId());
+        assertThat(work.origin()).isEqualTo(OrderStockRestoration.Origin.PAYMENT_RECORD);
+        assertThat(work.status().name()).isEqualTo(status);
+        assertThat(work.restoredAt()).isEqualTo(record.restoredAt());
+    }
+
+    protected void assertNoWork(long paymentId) {
+        assertThat(jdbc.queryForObject("select count(*) from orders.order_stock_restoration where payment_id=?", Long.class, paymentId)).isZero();
     }
 
     protected PaymentApprovalCommand arrange(OrderStatus status) {

@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
@@ -34,6 +35,11 @@ public class OrderStockRestorationRepositoryAdapter implements OrderStockRestora
     @Override
     public boolean existsByClaimId(long claimId) {
         return orderStockRestorationRepository.existsByClaimId(claimId);
+    }
+
+    @Override
+    public Optional<OrderStockRestoration> findByClaimId(long claimId) {
+        return orderStockRestorationRepository.findByClaimId(claimId).map(orderStockRestorationMapper::toDomain);
     }
 
     @Override

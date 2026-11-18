@@ -4,6 +4,10 @@ import com.commercefoundry.domainlayer.order.adapter.out.event.OrderEventAdapter
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderRepositoryAdapter;
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderPaymentRepositoryAdapter;
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderStockConfirmationRepositoryAdapter;
+import com.commercefoundry.domainlayer.order.adapter.out.persistence.OrderStockRestorationRepositoryAdapter;
+import com.commercefoundry.domainlayer.order.application.mapper.OrderStockRestorationMapperImpl;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import com.commercefoundry.domainlayer.order.application.command.PaymentApprovalCommand;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderMapperImpl;
@@ -88,11 +92,13 @@ public final class OrderPaymentCrashChild {
     }
 
     @TestConfiguration(proxyBeanMethods = false)
+    @EnableConfigurationProperties(OrderPaymentRestorationProperties.class)
     @EnableAutoConfiguration
     @EntityScan(basePackages = {"com.commercefoundry.domainlayer.order.adapter.out.persistence.entity", "com.commercefoundry.global.messaging"})
     @EnableJpaRepositories(basePackages = {"com.commercefoundry.domainlayer.order.adapter.out.persistence.repository", "com.commercefoundry.global.messaging"})
     @Import({QuerydslConfigurer.class, OrderServiceFeaturesConfig.class, OrderRepositoryAdapter.class, OrderMapperImpl.class, OrderPaymentRepositoryAdapter.class,
-        OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, JpaProcessedEventStore.class, JpaOutboxStore.class,
+        OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, OrderStockRestorationRepositoryAdapter.class,
+        OrderStockRestorationMapperImpl.class, JpaProcessedEventStore.class, JpaOutboxStore.class,
         OrderEventAdapter.class, OrderPaymentProcessor.class, PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class})
     public static class Config {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }

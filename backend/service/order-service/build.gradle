@@ -56,6 +56,8 @@ tasks.named('test') {
     }
     afterTest { descriptor, result ->
         if (descriptor.className?.endsWith('OrderPaymentSchemaUpgradePostgresTest')
+            || descriptor.className?.endsWith('OrderStockRestorationRepositoryPostgresTest')
+            || descriptor.className?.endsWith('OrderPaymentConsumerPostgresTest')
             || descriptor.className?.endsWith('OrderPaymentCrashRecoveryPostgresTest')) {
             logger.lifecycle("C2b critical ${descriptor.className}.${descriptor.name}: ${result.resultType}")
         }

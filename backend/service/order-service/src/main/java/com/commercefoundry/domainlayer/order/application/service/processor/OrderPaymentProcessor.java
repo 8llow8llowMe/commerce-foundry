@@ -11,11 +11,14 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderEventPort
 import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockConfirmationRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment.Result;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
+import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
 import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.messaging.consume.NonRetryableEventException;
 import com.commercefoundry.messaging.event.TopicNames;
@@ -43,6 +46,8 @@ public class OrderPaymentProcessor {
     private final OrderRepositoryPort orderRepositoryPort;
     private final OrderPaymentRepositoryPort orderPaymentRepositoryPort;
     private final OrderStockConfirmationRepositoryPort orderStockConfirmationRepositoryPort;
+    private final OrderStockRestorationRepositoryPort orderStockRestorationRepositoryPort;
+    private final OrderPaymentRestorationProperties restorationProperties;
     private final OrderEventPort orderEventPort;
     private final ProcessedEventStore processedEventStore;
     private final TopicNames topicNames;
@@ -106,7 +111,7 @@ public class OrderPaymentProcessor {
 
     /**
      * 원격 I/O 없이 DB 구간만 새 트랜잭션으로 묶는다. 충돌은 바깥 Facade가 잡고 새 트랜잭션에서 재판정한다.
-     * orders NOWAIT 잠금 → payment 조회/의도 INSERT 또는 PAID 저장 → inbox → 회신 outbox 순서다. 뒤 단계 실패는 모두 롤백한다.
+     * orders NOWAIT 잠금 → payment 조회/의도와 복원 작업 INSERT 또는 PAID 저장 → inbox → 회신 outbox 순서다. 뒤 단계 실패는 모두 롤백한다.
      * 의도 INSERT는 주문 버전을 바꾸지 않으므로 @Version만으로 PAID와 상호 배제되지 않는다. 원격 I/O는 이 잠금 밖이다.
      *
      * <p>확정 뒤 취소가 이긴 경합(#308 PR-C1)은 거절 기록(확정 선점 · 새 복원 클레임 아이디)만 넣고 inbox · 회신은 남기지 않는다 — 돌려준 대상으로 Facade 가
@@ -128,6 +133,7 @@ public class OrderPaymentProcessor {
                 throw new NonRetryableEventException("restoration order ownership mismatch");
             }
             requireRestorableOrder(canceled);
+            ensureRestorationWork(existing.get());
             return Optional.of(new StockRestorationTarget(existing.get(), canceled));
         }
         if (existing.isPresent() || processedEventStore.exists(group(), command.eventId())) {
@@ -159,6 +165,7 @@ public class OrderPaymentProcessor {
                 requireRestorableOrder(before);
                 OrderPayment restorable = orderPaymentRepositoryPort.insert(OrderPayment.rejectedAfterConfirmation(nextId(), payment.orderId(), payment.paymentId(),
                     payment.memberId(), payment.amount(), payment.approvedAt(), rejected, confirmation.reservationId(), command.eventId(), nextId()));
+                ensureRestorationWork(restorable);
                 return Optional.of(new StockRestorationTarget(restorable, before));
             }
             // 다른 결제가 이미 결제 완료한 뒤 취소된 주문 — 확정 선점은 이긴 결제의 것이고 그 취소 클레임이 복원한다. 여기서 복원하면 두 번 는다.
@@ -184,16 +191,31 @@ public class OrderPaymentProcessor {
     }
 
     /**
-     * 재고 복원 뒤 마무리 — 복원 시각 조건부 UPDATE → inbox → 저장된 거절 reason의 회신 outbox 를 한 커밋으로 남긴다.
+     * 재고 복원 뒤 마무리 — 결제 복원 시각 조건부 UPDATE → 작업 RESTORED → inbox → 저장된 거절 reason의 회신 outbox 를 한 커밋으로 남긴다.
      * 복원 시각을 이번에 채우지 못했으면(같은 결제의 다른 처리가 먼저 마무리) inbox 만 남기고 회신을 다시 쌓지 않는다.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 10)
     public void completeRestoration(UUID eventId, OrderPayment restored, VerifiedPayment payment) {
-        boolean marked = orderPaymentRepositoryPort.markRestored(restored.id(), clock.instant());
+        ensureRestorationWork(restored);
+        Instant now = clock.instant();
+        boolean marked = orderPaymentRepositoryPort.markRestored(restored.id(), now);
+        orderStockRestorationRepositoryPort.markRestored(restored.restorationClaimId(), now);
         record(eventId);
         // 일반 거절과 같다 — 재전달 때 다시 조회한 결제가 이미 전액 취소면 환불할 돈이 없어 회신하지 않는다.
         if (marked && !payment.fullyCanceled()) {
             orderEventPort.paymentRejected(restored);
+        }
+    }
+
+    /** 결제 복원 의도와 같은 트랜잭션이다. 기존 작업은 출처 전체를 대조하고 시도·다음 시각·상태를 보존한다. */
+    private void ensureRestorationWork(OrderPayment record) {
+        OrderStockRestoration work = orderStockRestorationRepositoryPort.findByClaimId(record.restorationClaimId()).orElse(null);
+        if (work == null) {
+            orderStockRestorationRepositoryPort.insert(OrderStockRestoration.forPaymentRecord(nextId(), record,
+                clock.instant().plus(restorationProperties.minAge())));
+        } else if (work.claimId() != record.restorationClaimId() || work.orderId() != record.orderId() || work.paymentId() != record.paymentId()
+            || work.stockReservationId() != record.stockReservationId() || work.origin() != OrderStockRestoration.Origin.PAYMENT_RECORD) {
+            throw new NonRetryableEventException("restoration work ownership mismatch");
         }
     }
 

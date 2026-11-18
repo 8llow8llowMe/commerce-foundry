@@ -132,6 +132,7 @@ class OrderPaymentCrashRecoveryPostgresTest {
             await().atMost(Duration.ofSeconds(90)).until(() -> barrier.get() || !first.isAlive());
             assertThat(barrier).as("child boundary: %s", diagnostics(temporary.resolve("first.log"))).isTrue();
             assertThat(count("order_payment", "payment_id", paymentId)).isZero();
+            assertThat(count("order_stock_restoration", "payment_id", paymentId)).isZero();
             if (reReserved) {
                 assertThat(jdbc.queryForObject("select stock_reservation_id from orders.order_stock_confirmation where payment_id=?",
                     Long.class, paymentId)).isEqualTo(replacement);
@@ -148,6 +149,10 @@ class OrderPaymentCrashRecoveryPostgresTest {
                 var pending = row(paymentId);
                 assertThat(pending.get("restoration_claim_id")).isNotNull();
                 assertThat(pending.get("restored_at")).isNull();
+                var pendingWork = jdbc.queryForMap("select claim_id, stock_reservation_id, status from orders.order_stock_restoration where payment_id=?", paymentId);
+                assertThat(pendingWork.get("claim_id")).isEqualTo(pending.get("restoration_claim_id"));
+                assertThat(pendingWork.get("stock_reservation_id")).isEqualTo(replacement);
+                assertThat(pendingWork.get("status")).isEqualTo("RESTORE_PENDING");
                 assertThat(inbox(event)).isZero();
                 assertThat(outbox(orderId)).isZero();
                 kill(resumed);
@@ -161,6 +166,11 @@ class OrderPaymentCrashRecoveryPostgresTest {
             }
             assertThat(row(paymentId).get("result")).isEqualTo("REJECTED_PAYMENT_NOT_DONE");
             assertThat(row(paymentId).get("restored_at")).isNotNull();
+            assertThat(count("order_stock_restoration", "payment_id", paymentId)).isEqualTo(1);
+            var completedWork = jdbc.queryForMap("select claim_id, status, restored_at from orders.order_stock_restoration where payment_id=?", paymentId);
+            assertThat(completedWork.get("claim_id")).isEqualTo(row(paymentId).get("restoration_claim_id"));
+            assertThat(completedWork.get("status")).isEqualTo("RESTORED");
+            assertThat(completedWork.get("restored_at")).isEqualTo(row(paymentId).get("restored_at"));
             assertThat(applications).hasValue(1);
             assertThat(inbox(event)).isEqualTo(1);
             assertThat(outbox(orderId)).isEqualTo(reReserved ? 1 : 0);
