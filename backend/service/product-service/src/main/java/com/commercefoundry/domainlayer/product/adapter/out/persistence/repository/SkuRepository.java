@@ -7,6 +7,7 @@ import jakarta.persistence.QueryHint;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -27,4 +28,8 @@ public interface SkuRepository extends JpaRepository<SkuEntity, Long>, SkuCustom
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = LOCK_TIMEOUT_MILLIS))
     @Query("select sku from SkuEntity sku where sku.id = :skuId")
     Optional<SkuEntity> findByIdForUpdate(long skuId);
+
+    /** 미연결 가격 snapshot 전용 제한 조회. count 질의와 노출·삭제·판매 상태 필터를 사용하지 않는다. */
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    List<SkuEntity> findAllByProductIdInOrderByProductIdAscIdAsc(Collection<Long> productIds, Pageable pageable);
 }
