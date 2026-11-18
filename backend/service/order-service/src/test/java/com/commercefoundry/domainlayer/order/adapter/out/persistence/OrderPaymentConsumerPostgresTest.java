@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.order.application.exception.StockReservat
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -142,12 +143,15 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
             fullyCanceled ? "CANCELED" : "DONE");
         OrderPayment pending = processor.complete(command, payment, StockConfirmation.confirmed(reservation)).orElseThrow().orderPayment();
         CountDownLatch started = new CountDownLatch(2);
+        // 설정 시에만 MANDATORY 프록시를 우회한다. 실제 Processor 호출은 기존 트랜잭션 프록시를 통과한다.
+        OrderPaymentRepositoryAdapter target = AopTestUtils.getUltimateTargetObject(paymentWrites);
+        assertThat(mockingDetails(target).isSpy()).isTrue();
         doAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
             started.countDown();
             assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
             return invocation.callRealMethod();
-        }).when(paymentWrites).markRestored(eq(pending.id()), any());
+        }).when(target).markRestored(eq(pending.id()), any());
         UUID otherEvent = UUID.randomUUID();
         try (var executor = Executors.newFixedThreadPool(2)) {
             var first = executor.submit(() -> processor.completeRestoration(command.eventId(), pending, payment));
