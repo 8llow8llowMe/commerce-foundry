@@ -696,11 +696,22 @@ A 저장 기반 위에 B1이 결제 반영 producer와 인라인 완료를 연�
 `order.payment-restoration.min-age`는 기본 5분, 0~1일이며 최초 등록 시각 + min-age를 다음 시각으로 한 번 저장한다. created_at 필터는 쓰지 않는다.
 product 복원 성공 뒤 결제 restored_at·작업 RESTORED·inbox·필요한 거절 outbox를 한 커밋으로 마무리한다.
 결제 restored_at 조건부 UPDATE 승자만 회신하며 이미 전액 취소된 결제는 회신하지 않는다. 완료 실패는 같은 claim의 재전달로 수렴한다.
-스윕·ShedLock·스윕 설정과 게이트는 B2 후속이며 장기 장애/DLT의 자동 수복은 아직 제공하지 않는다. #582 소비·운영 결제 게이트는 계속 닫는다.
+#582 소비·운영 결제 게이트는 계속 닫는다. B2-E1은 아래 내부 실행만 제공하며 스케줄러 연결과 DLT 자동 수복의 운영 검증은 B2-E2에서 다룬다.
 작업 `created_at`은 작업 등록 시각이다. 과거 결제 대기 나이는 `order_payment.created_at`으로 계산한다.
 운영 DDL `ddl/order-stock-restoration.sql`은 미복원 C1·NOT_DONE 기록을 backfill하며 같은 claim의 기존 작업 상태·시각은 보존한다.
 원천 중복 claim이나 기존 작업과 주문·결제·선점이 다른 claim, 중복 reservation은 전체 트랜잭션을 실패시킨다.
 backfill 중 두 테이블 쓰기 잠금이 필요하다. 후속 producer 배포와 구버전 트랜잭션 drain 뒤 재실행하여 혼합 배포 누락을 채운 후 스윕을 켠다.
+
+**#582 B2-E1 복원 실행:** 내부 유스케이스가 due PAYMENT_RECORD 대기를 순서대로 최대 10건 읽는다.
+각 건의 출처 조회는 독립 CAS, 원격 효과, 실패 격리를 위해 분리한다.
+선점은 상태·다음 시각 CAS와 독립 커밋으로 확정하며, 원장·주문 스냅숏·작업 출처와 PAID 충돌을 확인한다.
+첫 결제 재조회에서 출처·금액·통화·승인 근거를 대조한 뒤 저장한 claim·선점·SKU 수량으로 product를 호출한다.
+product 성공 뒤에 회신 판정용 결제 재조회를 한 번 더 한다. 두 조회와 상품 호출은 DB 트랜잭션 밖이다.
+상품의 003·027·028·029 및 출처 불일치는 해당 선점이 그대로일 때만 HELD로 기록한다. 전송·응답 장애는 다음 시각부터 같은 claim으로 재시도한다.
+검증된 같은 claim의 늦은 성공은 HELD에서도 완료할 수 있다. 동일 출처의 이미 완료된 결제는 기존 restored_at으로 작업행을 맞춘다.
+완료는 결제 CAS → 작업 갱신 → 필요한 거절 outbox 순서로 한 커밋이다. 마지막 원천이 CANCELED면 회신은 0건이다.
+스윕은 inbox를 쓰지 않는다. 최종 조회 뒤 전액취소되거나 이전 원천을 읽은 B1 인라인 실행이 CAS를 먼저 이기면 회신이 남을 수 있다.
+payment의 회신 처리와 자동 취소 획득이 자체 원장 상태·잔액·기존 작업을 다시 확인한다. #591 재대조는 복원 전에 거절 원장을 볼 수 있다.
 
 payment의 #591 재대조는 order 원천 `order_payment` 결과가 이미 존재하지만 회신 전달이 유실·DLT로 끝난 경우에만 payment 기록을 복구한다. 승인 소비가 DLT로 가 원천 결과가 없거나 재고 복원 처리가 멈춘 경우를 해결하지 않으며, 이 경로는 #582 복원과 재전달이 담당한다. 원천 거절 기록만으로 복원 완료를 추정하지 않고 실제 자동 PG 취소는 #579가 실행 직전 상태·잔액을 다시 검증한다.
 
@@ -719,7 +730,7 @@ where result = 'REJECTED_ORDER_CANCELED' and stock_reservation_id is not null an
 남은 수량을 확인하고, 책임자와 승인된 보정 경로를 협의한다. 실제 복원 증거를 확인한 뒤 재처리/종결을 결정한다. 수량 10 중 3만 복원돼도 10 요청은 028이므로
 028만 무한 재전송하거나 근거 없이 `restored_at`을 채우지 않는다. 오류에서는 `restored_at` · inbox · 회신 outbox를 쓰지 않는다.
 
-이 fence는 **product 호출 전에 order 의도를 남긴 복원 경로**에 한정된다. 기존 복원 호출자는 `OrderStockProcessor.restoreCanceledPayment` 하나다.
+이 fence는 **product 호출 전에 order 의도를 남긴 복원 경로**에 한정된다. 인라인 주문 반영과 B2-E1 내부 실행 모두 이 fence 안에서 같은 복원 포트를 호출한다.
 order 기록 없는 외부 복원은 기존 confirm 200으로 구별하지 못한다(product는 복원 뒤에도 CONFIRMED). 외부 복원까지 원자적으로 보호하려면 별도 소유권/조건부 확정 계약이 필요하다.
 구 consumer는 fence 규약을 모르므로 소비 OFF · 기존 consumer drain 후 모든 order 인스턴스를 적용한다. C2a는 스키마 변경이 없으며 게이트 활성화 승인이 아니다.
 

@@ -2,6 +2,8 @@ package com.commercefoundry.domainlayer.order.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.order.support.OrderPaymentConsumerContract;
 import com.commercefoundry.domainlayer.order.application.command.PaymentApprovalCommand;
+import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -68,6 +70,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
     private static final AtomicLong IDS = new AtomicLong(70_000_000);
     @MockitoSpyBean OrderPaymentRepositoryAdapter paymentWrites;
+    @Autowired PaymentRestorationSweepProcessor sweepProcessor;
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -164,6 +167,148 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
             command.eventId(), otherEvent)).isEqualTo(2);
         assertThat(freshJdbc().queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(command.orderId())))
             .isEqualTo(fullyCanceled ? 0 : 1);
+    }
+
+    @Test
+    void sweepClaimCommitFailureSkipsRemoteAndContinuesOtherRows() {
+        var rejected = arrange(OrderStatus.CANCELED);
+        var unclaimed = sweepIntent(rejected);
+        var next = arrange(OrderStatus.CANCELED);
+        sweepIntent(next);
+        try {
+            installSweepCommitFailure(rejected, "new.attempts > old.attempts and new.status='RESTORE_PENDING'");
+            var due = workLedger.findByClaimId(unclaimed.restorationClaimId()).orElseThrow();
+            var claim = due.claimAttempt(NOW, Duration.ofMinutes(1), Duration.ofHours(1));
+            var failure = org.assertj.core.api.Assertions.catchThrowable(() -> sweepProcessor.claim(due, claim, NOW));
+            assertThat(sqlState(failure)).isEqualTo("P0001");
+            sweepBatch();
+
+            assertThat(freshJdbc().queryForObject("select attempts from orders.order_stock_restoration where claim_id=?",
+                Integer.class, unclaimed.restorationClaimId())).isZero();
+            assertWork(payments.findByPaymentId(rejected.paymentId()).orElseThrow(), "RESTORE_PENDING");
+            verify(remotePayment, never()).findPayment(rejected.paymentId());
+            assertSweepResult(next, "RESTORED", 1, false);
+            verify(restorations, times(1)).restoreCancellation(anyLong(), anyLong(), any());
+        } finally {
+            removeFailure(rejected, true);
+            jdbc.update("update orders.order_stock_restoration set next_attempt_at=? where claim_id=?",
+                java.sql.Timestamp.from(NOW.plusSeconds(7200)), unclaimed.restorationClaimId());
+        }
+    }
+
+    @Test
+    void sweepCompletionCommitFailureRollsBackBothLedgersAndReplyThenReusesClaim() {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        try {
+            installSweepCommitFailure(command, "new.status='RESTORED'");
+            sweepBatch();
+            var claim = workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow();
+            var failure = org.assertj.core.api.Assertions.catchThrowable(() -> sweepProcessor.complete(claim, false));
+            assertThat(sqlState(failure)).isEqualTo("P0001");
+
+            assertThat(freshJdbc().queryForObject("select attempts from orders.order_stock_restoration where claim_id=?",
+                Integer.class, pending.restorationClaimId())).isEqualTo(1);
+            assertSweepResult(command, "RESTORE_PENDING", 0, false);
+            assertThat(freshJdbc().queryForObject("select restored_at from orders.order_payment where payment_id=?",
+                Object.class, command.paymentId())).isNull();
+            verify(restorations).restoreCancellation(eq(pending.restorationClaimId()), eq(pending.stockReservationId()), any());
+        } finally {
+            removeFailure(command, true);
+        }
+        expireSweepLease(pending);
+        sweepBatch();
+        assertSweepResult(command, "RESTORED", 1, false);
+        verify(restorations, times(2)).restoreCancellation(eq(pending.restorationClaimId()), eq(pending.stockReservationId()), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void sweepLateFailureDoesNotOverwriteNewLeaseAndLateSuccessCanFinishHeld(boolean firstFails) throws Exception {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        doAnswer(invocation -> {
+            if (calls.incrementAndGet() == 1) {
+                entered.countDown();
+                awaitLatch(release);
+                if (!firstFails) { return null; }
+            } else if (firstFails) {
+                throw new StockReservationException(StockReservationException.Failure.UNKNOWN);
+            }
+            throw new StockReservationException(StockReservationException.Failure.NOT_CONFIRMED);
+        }).when(restorations).restoreCancellation(eq(pending.restorationClaimId()), eq(pending.stockReservationId()), any());
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var first = executor.submit(this::sweepBatch);
+            try {
+                awaitLatch(entered);
+                sweepBatch();
+                assertThat(calls).hasValue(1);
+                expireSweepLease(pending);
+                sweepBatch();
+                assertThat(calls).hasValue(2);
+                assertSweepResult(command, firstFails ? "RESTORE_PENDING" : "HELD", 0, false);
+            } finally {
+                release.countDown();
+            }
+            first.get(20, TimeUnit.SECONDS);
+        }
+        assertSweepResult(command, firstFails ? "RESTORE_PENDING" : "RESTORED", firstFails ? 0 : 1, false);
+        assertThat(workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow().attempts()).isEqualTo(2);
+    }
+
+    @Test
+    void sweepAndInlineCompeteForCompletionInIndependentTransactions() throws Exception {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        var payment = new VerifiedPayment(command.paymentId(), command.orderId(), command.memberId(), command.amount(), NOW, "DONE");
+        CountDownLatch sweepAtCas = new CountDownLatch(1);
+        CountDownLatch inlineAtCas = new CountDownLatch(1);
+        var writes = (OrderPaymentRepositoryAdapter) AopTestUtils.getUltimateTargetObject(paymentWrites);
+        AtomicInteger writers = new AtomicInteger();
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            if (writers.incrementAndGet() == 1) {
+                sweepAtCas.countDown();
+                awaitLatch(inlineAtCas);
+            } else {
+                inlineAtCas.countDown();
+            }
+            return invocation.callRealMethod();
+        }).when(writes).markRestored(eq(pending.id()), any());
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var sweeping = executor.submit(this::sweepBatch);
+            try {
+                awaitLatch(sweepAtCas);
+                processor.completeRestoration(command.eventId(), pending, payment);
+            } finally {
+                inlineAtCas.countDown();
+            }
+            sweeping.get(20, TimeUnit.SECONDS);
+        }
+        assertThat(writers).hasValue(2);
+        assertSweepResult(command, "RESTORED", 1, true);
+    }
+
+    private void assertSweepResult(PaymentApprovalCommand command, String status, long replies, boolean inline) {
+        JdbcTemplate fresh = freshJdbc();
+        assertWork(payments.findByPaymentId(command.paymentId()).orElseThrow(), status);
+        assertThat(fresh.queryForObject("select count(*) from orders.outbox where aggregate_id=?",
+            Long.class, Long.toString(command.orderId()))).isEqualTo(replies);
+        assertThat(fresh.queryForObject("select count(*) from orders.processed_event where event_id=?",
+            Long.class, command.eventId())).isEqualTo(inline ? 1 : 0);
+    }
+
+    private void installSweepCommitFailure(PaymentApprovalCommand command, String condition) {
+        String name = "test_b1_fail_" + command.paymentId();
+        jdbc.execute("create function orders." + name + "() returns trigger language plpgsql as $$ begin "
+            + "raise exception using errcode='P0001', message='sweep test deferred commit failure'; end $$");
+        jdbc.execute("create constraint trigger " + name + " after update on orders.order_stock_restoration "
+            + "deferrable initially deferred for each row when (new.payment_id=" + command.paymentId() + " and " + condition
+            + ") execute function orders." + name + "()");
     }
 
     private void installFailure(PaymentApprovalCommand command, boolean deferred, boolean completion) {

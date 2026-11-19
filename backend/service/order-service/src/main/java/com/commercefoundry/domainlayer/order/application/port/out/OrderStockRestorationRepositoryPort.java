@@ -19,7 +19,7 @@ public interface OrderStockRestorationRepositoryPort {
     /** 재전달 시 작업의 전체 출처와 기존 시도·다음 시각을 확인한다. */
     Optional<OrderStockRestoration> findByClaimId(long claimId);
 
-    /** 다음 시각이 {@code now} 이하인 복원 대기 행 — 다음 시각 · 아이디 순으로 {@code limit} 개. */
+    /** PAYMENT_RECORD 중 다음 시각이 {@code now} 이하인 복원 대기 행 — 다음 시각 · 아이디 순으로 {@code limit} 개. */
     List<OrderStockRestoration> findDueRestorations(Instant now, int limit);
 
     /** 스윕 선점 — {@code before} 의 상태 · 다음 시각이 그대로일 때만 {@code claimed}(= {@code before.claimAttempt(...)}) 로 바꾼다. */

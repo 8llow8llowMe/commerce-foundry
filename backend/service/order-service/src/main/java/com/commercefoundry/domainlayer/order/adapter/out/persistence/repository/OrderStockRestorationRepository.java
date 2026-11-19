@@ -19,8 +19,8 @@ public interface OrderStockRestorationRepository extends JpaRepository<OrderStoc
     Optional<OrderStockRestorationEntity> findByClaimId(Long claimId);
 
     /** 스윕 대상 — {@code idx_order_stock_restoration_status_next_attempt_at_id} 순서 그대로 읽는다. */
-    List<OrderStockRestorationEntity> findByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(
-        OrderStockRestoration.Status status, Instant now, Limit limit);
+    List<OrderStockRestorationEntity> findByStatusAndOriginAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(
+        OrderStockRestoration.Status status, OrderStockRestoration.Origin origin, Instant now, Limit limit);
 
     /** 스윕 선점 — 읽은 상태 · 다음 시각이 그대로일 때만 시도 횟수 · 다음 시각을 바꾼다. 0행이면 다른 처리가 먼저 집었다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)

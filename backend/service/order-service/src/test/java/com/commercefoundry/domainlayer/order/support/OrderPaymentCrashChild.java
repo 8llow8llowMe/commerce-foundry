@@ -19,6 +19,9 @@ import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentQ
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
 import com.commercefoundry.domainlayer.order.application.service.OrderPaymentEventFacade;
+import com.commercefoundry.domainlayer.order.application.port.in.PaymentRestorationSweepUseCase;
+import com.commercefoundry.domainlayer.order.application.service.PaymentRestorationSweepFacade;
+import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderStockProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentApprovalProcessor;
@@ -62,8 +65,12 @@ public final class OrderPaymentCrashChild {
         SpringApplication app = new SpringApplication(Config.class);
         app.setWebApplicationType(WebApplicationType.NONE);
         try (var context = app.run()) {
-            context.getBean(OrderPaymentEventFacade.class).approve(new PaymentApprovalCommand(UUID.fromString(env("CASE_EVENT")), number("CASE_PAYMENT"),
-                number("CASE_ORDER"), 7L, Money.of(4000, CurrencyCode.KRW), NOW, "CARD"));
+            if (env("CASE_SWEEP_SECONDS") != null) {
+                context.getBean(PaymentRestorationSweepUseCase.class).sweep(5, Duration.ofMinutes(1), Duration.ofHours(1));
+            } else {
+                context.getBean(OrderPaymentEventFacade.class).approve(new PaymentApprovalCommand(UUID.fromString(env("CASE_EVENT")), number("CASE_PAYMENT"),
+                    number("CASE_ORDER"), 7L, Money.of(4000, CurrencyCode.KRW), NOW, "CARD"));
+            }
         }
     }
 
@@ -99,9 +106,12 @@ public final class OrderPaymentCrashChild {
     @Import({QuerydslConfigurer.class, OrderServiceFeaturesConfig.class, OrderRepositoryAdapter.class, OrderMapperImpl.class, OrderPaymentRepositoryAdapter.class,
         OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, OrderStockRestorationRepositoryAdapter.class,
         OrderStockRestorationMapperImpl.class, JpaProcessedEventStore.class, JpaOutboxStore.class,
-        OrderEventAdapter.class, OrderPaymentProcessor.class, PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class})
+        OrderEventAdapter.class, OrderPaymentProcessor.class, PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class,
+        PaymentRestorationSweepFacade.class, PaymentRestorationSweepProcessor.class})
     public static class Config {
-        @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
+        @Bean Clock clock() {
+            return Clock.fixed(env("CASE_SWEEP_SECONDS") == null ? NOW : NOW.plusSeconds(number("CASE_SWEEP_SECONDS")), ZoneOffset.UTC);
+        }
         @Bean SnowflakeIdGenerator ids() { return new SnowflakeIdGenerator(5, 5); }
         @Bean TopicNames topics() { return new TopicNames("commerce-foundry.test", "order"); }
         @Bean EventPublisher publisher(JpaOutboxStore store, Clock clock) {

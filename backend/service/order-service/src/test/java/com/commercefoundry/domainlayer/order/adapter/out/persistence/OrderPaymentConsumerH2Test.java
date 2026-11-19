@@ -14,6 +14,8 @@ import com.commercefoundry.domainlayer.order.application.port.out.StockReservati
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.in.OrderPaymentEventUseCase;
 import com.commercefoundry.domainlayer.order.application.service.OrderPaymentEventFacade;
+import com.commercefoundry.domainlayer.order.application.service.PaymentRestorationSweepFacade;
+import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderStockProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentApprovalProcessor;
@@ -65,7 +67,8 @@ public class OrderPaymentConsumerH2Test extends OrderPaymentConsumerContract {
         OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, JpaProcessedEventStore.class, JpaOutboxStore.class,
         OrderEventAdapter.class, OrderPaymentProcessor.class,
         PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class,
-        OrderStockRestorationRepositoryAdapter.class, OrderStockRestorationMapperImpl.class})
+        OrderStockRestorationRepositoryAdapter.class, OrderStockRestorationMapperImpl.class, PaymentRestorationSweepFacade.class,
+        PaymentRestorationSweepProcessor.class})
     public static class Config {
         @Bean Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
         @Bean SnowflakeIdGenerator snowflakeIdGenerator() { return new SnowflakeIdGenerator(4, 4); }

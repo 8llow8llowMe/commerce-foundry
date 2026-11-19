@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.order.adapter.out.persistence.repository.
 import com.commercefoundry.domainlayer.order.application.mapper.OrderStockRestorationMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Origin;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Status;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -44,7 +45,8 @@ public class OrderStockRestorationRepositoryAdapter implements OrderStockRestora
 
     @Override
     public List<OrderStockRestoration> findDueRestorations(Instant now, int limit) {
-        return orderStockRestorationRepository.findByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(Status.RESTORE_PENDING, now, Limit.of(limit))
+        return orderStockRestorationRepository.findByStatusAndOriginAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(Status.RESTORE_PENDING,
+            Origin.PAYMENT_RECORD, now, Limit.of(limit))
             .stream().map(orderStockRestorationMapper::toDomain).toList();
     }
 
