@@ -56,4 +56,13 @@ public class DeliveryAdminAuditProcessor {
             DeliveryAdminAuditAction.SHIPPING_POLICY_INTERNATIONAL_REPLACE.name(), adminMemberId, AdminAuditLog.target(SHIPPING_POLICY, INTERNATIONAL), succeeded
         );
     }
+
+    public void pickingBatchCreated(long adminMemberId, Long batchId, boolean succeeded) {
+        String target = batchId == null ? null : AdminAuditLog.target("picking-batch", batchId);
+        AdminAuditLog.write(DeliveryAdminAuditAction.PICKING_BATCH_CREATE.name(), adminMemberId, target, succeeded);
+    }
+
+    public void pickingOrderChecked(long adminMemberId, long batchId, boolean succeeded) {
+        AdminAuditLog.write(DeliveryAdminAuditAction.PICKING_ORDER_CHECK.name(), adminMemberId, AdminAuditLog.target("picking-batch", batchId), succeeded);
+    }
 }

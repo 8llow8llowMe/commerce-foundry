@@ -10,7 +10,8 @@ public final class PickingValidationMessage {
     public static final String ORDER_ID = "DELIVERY_151:주문 번호(orderId)는 1 이상의 숫자여야 합니다.";
     public static final String QUANTITIES = "DELIVERY_152:검수 수량(quantities)은 필수이며 상품 옵션은 100개까지 보낼 수 있습니다.";
     public static final String SKU_ID = "DELIVERY_153:상품 옵션 번호는 1 이상의 숫자여야 합니다.";
-    public static final String QUANTITY = "DELIVERY_154:검수 수량은 1 이상이어야 합니다.";
+    public static final String QUANTITY = "DELIVERY_154:검수 수량은 1 이상의 정수여야 합니다.";
+    public static final String DUPLICATE_ORDER_IDS = "DELIVERY_155:출고 묶음에 같은 주문을 두 번 담을 수 없습니다.";
 
     private PickingValidationMessage() {
     }
