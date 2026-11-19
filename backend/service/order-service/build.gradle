@@ -1,4 +1,8 @@
 dependencies {
+    // 결제 반영 복원은 메시징 릴레이와 다른 락 이름으로 orders.shedlock을 사용한다.
+    implementation "net.javacrumbs.shedlock:shedlock-core:${rootProject.ext.shedlockVersion}"
+    implementation "net.javacrumbs.shedlock:shedlock-provider-jdbc:${rootProject.ext.shedlockVersion}"
+
     implementation project(':core:common-core')
     implementation project(':core:messaging-core')
     implementation project(':core:commerce-support')
@@ -55,6 +59,9 @@ tasks.named('test') {
         systemProperty 'order.test.runtimeClasspathFile', classpathFile.absolutePath
     }
     afterTest { descriptor, result ->
+        if (descriptor.className?.endsWith('OrderPaymentRestorationLockPostgresTest')) {
+            logger.lifecycle("#582 restoration lock ${descriptor.className}.${descriptor.name}: ${result.resultType}")
+        }
         if (descriptor.className?.endsWith('OrderPaymentSchemaUpgradePostgresTest')
             || descriptor.className?.endsWith('OrderStockRestorationRepositoryPostgresTest')
             || descriptor.className?.endsWith('OrderPaymentConsumerPostgresTest')

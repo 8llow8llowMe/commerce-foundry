@@ -374,6 +374,13 @@ A 배포만으로 #582 자동 복원·소비 게이트 선행 완료를 표시�
 스윕·락·스윕 gate는 B2 후속이므로 B1만 배포해 장기 장애/DLT가 자동 복구된다고 판단하거나 결제·소비 게이트를 열지 않는다.
 PostgreSQL 시험은 시험 결제 행에만 지연 제약 트리거를 달아 실제 commit 실패를 주입한다. 운영 DB·실제 PG에 이 장치를 적용하지 않는다.
 
+**B2-L 스윕 락과 스키마 검사:** 기본 OFF다. 테스트에서 명시적으로 ON 하면 `ddl-auto=none`에서도
+`orders.order_stock_restoration`, `orders.order_payment`, `orders.outbox`, `orders.shedlock`의 필수 컬럼을 확인한다.
+스윕은 `orders.shedlock`의 `order-payment-restoration` 이름을 사용하며 메시징 릴레이의 락 공급자 선택과 독립이다.
+컬럼 조회 검사는 제약·쓰기 권한을 확인하지 않는다. JDBC 락은 만료 뒤 이전 실행의 늦은 반납이 새 lease를 앞당길 수 있어
+B2-E는 행 CAS와 동일 claim으로 중복 업무를 제어하고, 늦은 반납이 겹치는 경우도 검증한다.
+이 단계에는 스케줄러나 배포 환경 연결이 없다. 실제 스윕과 소비·운영 결제 게이트의 배포 순서는 후속 단계의 검증을 따른다.
+
 ### 취소 원천 재고 복원 배포 (#14 C2b)
 
 1. 운영 결제·소비 게이트를 OFF로 유지한다. 기존 order consumer와 진행 중인 원격 확정/복원 호출을 모두 drain한 뒤 중단한다.
