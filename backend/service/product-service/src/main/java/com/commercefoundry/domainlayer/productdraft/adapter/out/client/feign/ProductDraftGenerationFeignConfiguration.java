@@ -2,6 +2,8 @@ package com.commercefoundry.domainlayer.productdraft.adapter.out.client.feign;
 
 import feign.Logger;
 import feign.Request;
+import feign.Response;
+import feign.ResponseInterceptor;
 import feign.Retryer;
 import java.util.concurrent.TimeUnit;
 import org.springframework.context.annotation.Bean;
@@ -26,5 +28,11 @@ public class ProductDraftGenerationFeignConfiguration {
     @Bean
     public Logger.Level productDraftGenerationLoggerLevel() {
         return Logger.Level.NONE;
+    }
+
+    /** Feign 의 작은 본문 사전 버퍼링을 건너뛴다. 압축 전송 길이와 풀린 본문 크기가 다를 수 있다. 결과 어댑터가 상한까지 읽고 닫는다. */
+    @Bean
+    public ResponseInterceptor productDraftGenerationResultStream() {
+        return (context, chain) -> context.returnType() == Response.class ? context.response() : chain.next(context);
     }
 }
