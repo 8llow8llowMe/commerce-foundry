@@ -379,7 +379,11 @@ PostgreSQL 시험은 시험 결제 행에만 지연 제약 트리거를 달아 �
 스윕은 `orders.shedlock`의 `order-payment-restoration` 이름을 사용하며 메시징 릴레이의 락 공급자 선택과 독립이다.
 컬럼 조회 검사는 제약·쓰기 권한을 확인하지 않는다. JDBC 락은 만료 뒤 이전 실행의 늦은 반납이 새 lease를 앞당길 수 있어
 B2-E는 행 CAS와 동일 claim으로 중복 업무를 제어하고, 늦은 반납이 겹치는 경우도 검증한다.
-이 단계에는 스케줄러나 배포 환경 연결이 없다. 실제 스윕과 소비·운영 결제 게이트의 배포 순서는 후속 단계의 검증을 따른다.
+**B2-E2 스윕 배포:** `ORDER_PAYMENT_RESTORATION_SWEEP_ENABLED`는 기본 false다. 모든 order 인스턴스가 B1 producer를 포함하는 버전으로 교체된 뒤,
+구버전 소비·트랜잭션·진행 중 원격 호출을 drain하고 위 A DDL/backfill을 재실행한다. 주문 승인 소비·운영 결제 gate를 닫은 상태에서 스윕을 별도로 검증한다.
+기동 검사가 확인하는 네 테이블 외에도 기존 orders·order_shipping_address·order_item·order_item_custom_option 스냅숏 조회 및 기존 쓰기 권한을 점검한다.
+완료 후 같은 claim의 양 원장 시각과 거절 outbox를 확인한다. 중지할 때는 스윕 게이트를 끈 뒤 진행 중 틱을 drain하고 작업행·락 기록을 보존한다.
+버려진 확정 선점·프로브 장애 분리 및 운영 알림은 #582 후속으로 확인한다. 기존 운영 결제·소비 활성화 선행 조건을 지킨다.
 
 ### 취소 원천 재고 복원 배포 (#14 C2b)
 

@@ -114,7 +114,7 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
 ### 1-3. 미결제 주문 만료 스윕 (#96)
 
 - `OrderExpiryScheduler → OrderSchedulerUseCase → OrderSchedulerFacade → OrderExpiryProcessor` 순서다. `order.payment-expiry.sweep`의 기본값은 `enabled=true`, `interval=30s`, `batch-size=100`, `max-batches-per-run=10`이다. 간격은 양수 밀리초 이상, 건수는 각각 1–100·1–10이며 잘못된 설정은 기동을 막는다. 끄는 env 스위치는 두지 않고(product 선점 만료 스윕과 같다) 테스트 프로파일만 `enabled: false` 로 스케줄러를 끈다.
-- 만료 스윕은 ShedLock을 쓰지 않는다 — 인스턴스마다 훑어도 같은 주문은 `@Version` 검사로 한 건만 커밋한다(product `StockReservationExpiryScheduler` 선례). `orders.shedlock`은 outbox 릴레이·정리용이다.
+- 만료 스윕은 ShedLock을 쓰지 않는다 — 인스턴스마다 훑어도 같은 주문은 `@Version` 검사로 한 건만 커밋한다(product `StockReservationExpiryScheduler` 선례). `orders.shedlock`은 outbox 릴레이·정리와 결제 반영 재고 복원 전용 락에 쓰인다.
 - 실행 시작 시각 하나(마이크로초로 자름 — DB `timestamp(6)` 판정과 도메인 `expire(now)` 판정을 같은 값으로)로 기한을 판정하고 `(payment_due_at, id)` 오름차순 키셋을 읽는다. 첫 배치와 다음 배치는 쿼리를 나눈다(null 커서를 `:after is null or …` 로 넘기면 PostgreSQL 이 파라미터 타입을 정하지 못한다). 다음 배치 쿼리는 OR 키셋 조건에 뜻이 같은 하한 `payment_due_at >= :afterDueAt` 을 더해 인덱스 range 시작점으로 쓴다. 조회는 아이디·기한만 투영해 out-port 가 `OrderExpiryCandidateQueryResult` 로 돌려주고, Processor 가 Facade 용 커서(`OrderExpiryCandidate`)로 바꾼다 — 다음 배치는 Processor 가 커서의 (기한, 아이디)를 풀어 넘긴다. `idx_orders_status_payment_due_at_id(status, payment_due_at, id)`를 사용한다. 처리 실패도 커서를 전진시켜 뒤 주문을 계속 처리하고, 다음 실행은 처음부터 읽어 실패 주문을 재시도한다.
 - Facade는 트랜잭션 밖이고 각 주문은 별도 `REQUIRES_NEW`, 제한 5초다. 건별 트랜잭션에서 주문 전체를 재조회하고 도메인 `expire(now)`를 호출한다. 이는 서로 다른 주문을 배치 조립하는 N+1 조회가 아니라 주문별 원자적 전이 경계이며, 각 주문은 기존 집계 조회(주문·배송지·항목·입력) 4문장을 사용한다.
 - 저장은 만료 전용 `OrderRepositoryPort.saveExpiry`다. 주문 헤더만 `@Version`을 포함해 `saveAndFlush`(merge의 `UPDATE … where version = ?`가 실제 보호)한 뒤 `SYSTEM`·`PAYMENT_TIMEOUT` 이력과 `order-expired` outbox를 같은 트랜잭션으로 넣는다. 배송지·항목·맞춤 입력을 다시 저장하지 않는다. 이미 만료·결제 완료·미래 기한이면 건너뛰고 동시 결제·중복 만료는 버전 충돌로 한쪽만 커밋한다. 이력·outbox 실패도 주문 상태와 함께 롤백한다. 버전 충돌(정상 경합)은 WARN, 그 밖의 실패는 ERROR 로 남기고 다음 주문으로 간다. ERROR 는 주문 아이디 · 예외 타입 · 루트 원인 타입과 `RedactedThrowable` 사본(타입 · 스택 프레임 · SQLState)만 남긴다 — 원래 예외를 넘기면 원인 사슬의 메시지(PostgreSQL `Failing row contains (...)` 같은 행 값)가 찍힌다(`coding-conventions.md` §8).
@@ -696,7 +696,7 @@ A 저장 기반 위에 B1이 결제 반영 producer와 인라인 완료를 연�
 `order.payment-restoration.min-age`는 기본 5분, 0~1일이며 최초 등록 시각 + min-age를 다음 시각으로 한 번 저장한다. created_at 필터는 쓰지 않는다.
 product 복원 성공 뒤 결제 restored_at·작업 RESTORED·inbox·필요한 거절 outbox를 한 커밋으로 마무리한다.
 결제 restored_at 조건부 UPDATE 승자만 회신하며 이미 전액 취소된 결제는 회신하지 않는다. 완료 실패는 같은 claim의 재전달로 수렴한다.
-#582 소비·운영 결제 게이트는 계속 닫는다. B2-E1은 아래 내부 실행만 제공하며 스케줄러 연결과 DLT 자동 수복의 운영 검증은 B2-E2에서 다룬다.
+#582 소비·운영 결제 게이트는 계속 닫는다. B2-E2는 PAYMENT_RECORD 범위에서 기본 OFF 스윕을 연결한다.
 작업 `created_at`은 작업 등록 시각이다. 과거 결제 대기 나이는 `order_payment.created_at`으로 계산한다.
 운영 DDL `ddl/order-stock-restoration.sql`은 미복원 C1·NOT_DONE 기록을 backfill하며 같은 claim의 기존 작업 상태·시각은 보존한다.
 원천 중복 claim이나 기존 작업과 주문·결제·선점이 다른 claim, 중복 reservation은 전체 트랜잭션을 실패시킨다.
@@ -712,6 +712,13 @@ product 성공 뒤에 회신 판정용 결제 재조회를 한 번 더 한다. �
 완료는 결제 CAS → 작업 갱신 → 필요한 거절 outbox 순서로 한 커밋이다. 마지막 원천이 CANCELED면 회신은 0건이다.
 스윕은 inbox를 쓰지 않는다. 최종 조회 뒤 전액취소되거나 이전 원천을 읽은 B1 인라인 실행이 CAS를 먼저 이기면 회신이 남을 수 있다.
 payment의 회신 처리와 자동 취소 획득이 자체 원장 상태·잔액·기존 작업을 다시 확인한다. #591 재대조는 복원 전에 거절 원장을 볼 수 있다.
+
+**#582 B2-E2 스케줄러:** 스윕을 켠 경우 전용 ShedLock 아래 한 배치를 실행한다. 기본 fixed delay와 첫 지연은 1분(1초~1일),
+배치 크기는 5건(1~10), 행 재시도는 초기 1분 이상·최대 기본 1시간(1일 이내)이다. 락 기본 5분이며 최대 1시간이다.
+락 최저 명목 예산은 due 조회 5초 + 행당 45초 × 배치 크기 + 락 I/O·여유 60초다. 행당 45초에는 DB 30초(선점·재검증·완료와 보류 갱신)
+및 HTTP 15초(결제 GET 두 번·상품 POST 한 번)가 포함된다. 기동 시 해당 Feign 설정의 연결 2초·읽기 3초 상한을 확인하고 `Retryer` 속성 덮어쓰기를 거절한다.
+명목 예산은 정상 단일 HTTP 요청 기준이다. 연결 풀 획득·DNS·리다이렉트·드라이버·스케줄러 및 JVM 정지의 벽시계 시간을 보증하지 않는다. 락과 행 lease가 먼저 만료될 수 있다. 행 CAS와 동일 claim으로 중복 효과를 막는다.
+기존 스케줄러가 스윕을 기다리지 않도록 order 스케줄러 풀을 4개로 둔다. 실제 DLT 복구는 PAYMENT_RECORD가 커밋된 사건을 대상으로 한다.
 
 payment의 #591 재대조는 order 원천 `order_payment` 결과가 이미 존재하지만 회신 전달이 유실·DLT로 끝난 경우에만 payment 기록을 복구한다. 승인 소비가 DLT로 가 원천 결과가 없거나 재고 복원 처리가 멈춘 경우를 해결하지 않으며, 이 경로는 #582 복원과 재전달이 담당한다. 원천 거절 기록만으로 복원 완료를 추정하지 않고 실제 자동 PG 취소는 #579가 실행 직전 상태·잔액을 다시 검증한다.
 

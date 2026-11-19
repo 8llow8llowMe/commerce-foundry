@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
+import com.commercefoundry.domainlayer.order.adapter.in.scheduler.OrderPaymentRestorationSweepScheduler;
+import com.commercefoundry.domainlayer.order.application.port.in.PaymentRestorationSweepUseCase;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -97,6 +99,7 @@ class OrderPaymentRestorationLockPostgresTest {
             assertThat(context).hasNotFailed()
                 .hasSingleBean(OrderPaymentRestorationLock.class)
                 .hasSingleBean(OrderPaymentRestorationSchemaGuard.class)
+                .hasSingleBean(OrderPaymentRestorationSweepScheduler.class)
                 .hasSingleBean(LockProvider.class);
             assertThat(context.getBean(LockProvider.class)).isSameAs(messaging);
         });
@@ -120,7 +123,10 @@ class OrderPaymentRestorationLockPostgresTest {
 
     private ApplicationContextRunner enabledContext() {
         return new ApplicationContextRunner().withUserConfiguration(OrderPaymentRestorationLockConfig.class)
-            .withPropertyValues("order.payment-restoration.sweep.enabled=true", "spring.jpa.hibernate.ddl-auto=none")
+            .withPropertyValues("order.payment-restoration.sweep.enabled=true", "spring.jpa.hibernate.ddl-auto=none",
+                "spring.cloud.openfeign.client.config.default.connect-timeout=2000",
+                "spring.cloud.openfeign.client.config.default.read-timeout=3000")
+            .withBean(PaymentRestorationSweepUseCase.class, () -> (batch, initial, maximum) -> {})
             .withBean(DataSource.class, () -> source)
             .withBean(Clock.class, () -> CLOCK);
     }

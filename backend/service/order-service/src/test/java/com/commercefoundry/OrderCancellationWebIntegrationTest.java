@@ -220,10 +220,10 @@ class OrderCancellationWebIntegrationTest {
         assertThat(list).bodyJson().extractingPath("$.dataBody.contents[?(@.orderId=='" + paid.id() + "')].cancelable").asArray().containsExactly(true);
     }
 
-    /** 미결제 만료 · 자동 구매 확정 · 취소 재시도가 서로 막지 않게 스케줄링 스레드가 여럿이다(application.yml {@code spring.task.scheduling.pool.size}). */
+    /** 미결제 만료 · 자동 구매 확정 · 취소 재시도 · 결제 반영 재고 복원이 서로 막지 않게 스케줄링 스레드가 여럿이다(application.yml {@code spring.task.scheduling.pool.size}). */
     @Test
     void schedulingPoolHasRoomForEachScheduler() {
-        assertThat(taskScheduler.getScheduledThreadPoolExecutor().getCorePoolSize()).isGreaterThanOrEqualTo(3);
+        assertThat(taskScheduler.getScheduledThreadPoolExecutor().getCorePoolSize()).isGreaterThanOrEqualTo(4);
     }
 
     private static void assertFailure(MvcTestResult result, int status, String code) {
