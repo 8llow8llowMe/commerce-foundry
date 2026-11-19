@@ -6,6 +6,7 @@ import com.commercefoundry.domainlayer.productdraft.application.port.out.query.P
 import com.commercefoundry.domainlayer.productdraft.application.port.out.query.ProductDraftGenerationResultQueryResult.FailureCode;
 import com.commercefoundry.domainlayer.productdraft.application.port.out.query.ProductDraftGenerationResultQueryResult.Status;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftCandidate;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftGeneration;
 import feign.FeignException;
 import feign.Response;
@@ -101,7 +102,7 @@ public class ProductDraftGenerationResultResponseSupport {
     }
 
     private static ProductDraftGenerationResultQueryResult outcome(ProductDraft draft, Status status, FailureCode failure,
-        ProductDraftGenerationResultQueryResult.Candidate candidate) {
+        ProductDraftCandidate candidate) {
         ProductDraftGeneration generation = draft.generation();
         return new ProductDraftGenerationResultQueryResult(draft.id(), generation.generationNo(), generation.jobId(),
             generation.inputHash(), status, failure, candidate);

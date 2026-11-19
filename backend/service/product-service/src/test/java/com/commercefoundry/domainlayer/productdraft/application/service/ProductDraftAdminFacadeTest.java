@@ -20,6 +20,7 @@ import com.commercefoundry.domainlayer.productdraft.application.command.ProductD
 import com.commercefoundry.domainlayer.productdraft.application.exception.ProductDraftErrorCode;
 import com.commercefoundry.domainlayer.productdraft.application.exception.ProductDraftException;
 import com.commercefoundry.domainlayer.productdraft.application.service.processor.ProductDraftGenerationProcessor;
+import com.commercefoundry.domainlayer.productdraft.application.service.processor.ProductDraftGenerationResultProcessor;
 import com.commercefoundry.domainlayer.productdraft.application.service.processor.ProductDraftImageProcessor;
 import com.commercefoundry.domainlayer.productdraft.application.service.processor.ProductDraftProcessor;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
@@ -56,11 +57,12 @@ class ProductDraftAdminFacadeTest {
     private final ProductDraftProcessor processor = mock(ProductDraftProcessor.class);
     private final ProductDraftImageProcessor imageProcessor = mock(ProductDraftImageProcessor.class);
     private final ProductDraftGenerationProcessor generationProcessor = mock(ProductDraftGenerationProcessor.class);
+    private final ProductDraftGenerationResultProcessor resultProcessor = mock(ProductDraftGenerationResultProcessor.class);
     private final ProductAdminAuditProcessor audit = mock(ProductAdminAuditProcessor.class);
     private final ProductDraftAdminFacade facade = facade(false);
 
     private ProductDraftAdminFacade facade(boolean generationEnabled) {
-        return new ProductDraftAdminFacade(processor, imageProcessor, generationProcessor,
+        return new ProductDraftAdminFacade(processor, imageProcessor, generationProcessor, resultProcessor,
             new ProductDraftProperties(Duration.ofDays(7), generationEnabled), new ProductDraftAdminPresenter(), audit);
     }
 
@@ -81,6 +83,46 @@ class ProductDraftAdminFacadeTest {
 
     private static void assertCode(org.assertj.core.api.ThrowableAssert.ThrowingCallable call, ProductDraftErrorCode code) {
         assertThatThrownBy(call).isInstanceOfSatisfying(ProductDraftException.class, exception -> assertThat(exception.getErrorCode()).isEqualTo(code));
+    }
+
+    @Test
+    void detailReadsPersistedStateEvenWhenGenerationIsEnabled() {
+        given(processor.now()).willReturn(NOW);
+        given(processor.getDraft(9L)).willReturn(generating());
+
+        assertThat(facade(true).getDraft(9L).status().code()).isEqualTo("GENERATING");
+        verifyNoInteractions(generationProcessor, resultProcessor, audit);
+    }
+
+    @Test
+    void refreshWithClosedGateDoesNotQueryAndAuditsFailure() {
+        given(processor.now()).willReturn(NOW);
+        given(processor.getDraft(9L)).willReturn(generating());
+
+        assertCode(() -> facade.refresh(9L, 200L), ProductDraftErrorCode.GENERATION_START_DISABLED);
+        verifyNoInteractions(generationProcessor, resultProcessor);
+        verify(audit).productDraftRefreshed(200L, 9L, false);
+    }
+
+    @Test
+    void refreshWithInitialDatabaseFailureAuditsFailureWithoutAQuery() {
+        given(processor.getDraft(9L)).willThrow(new QueryTimeoutException("db"));
+
+        assertCode(() -> facade(true).refresh(9L, 200L), ProductDraftErrorCode.GENERATION_UNAVAILABLE);
+        verifyNoInteractions(resultProcessor);
+        verify(audit).productDraftRefreshed(200L, 9L, false);
+    }
+
+    @Test
+    void refreshWithAmbientTransactionDoesNotQuery() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertCode(() -> facade(true).refresh(9L, 200L), ProductDraftErrorCode.GENERATION_UNAVAILABLE);
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+        verifyNoInteractions(processor, generationProcessor, resultProcessor);
+        verify(audit).productDraftRefreshed(200L, 9L, false);
     }
 
     @Nested

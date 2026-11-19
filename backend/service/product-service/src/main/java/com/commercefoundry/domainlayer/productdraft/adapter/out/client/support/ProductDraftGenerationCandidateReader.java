@@ -5,12 +5,12 @@ import static com.commercefoundry.domainlayer.productdraft.adapter.out.client.su
 import static com.commercefoundry.domainlayer.productdraft.adapter.out.client.support.ProductDraftGenerationResultResponseSupport.require;
 
 import com.commercefoundry.ai.masking.PiiMasker;
-import com.commercefoundry.domainlayer.productdraft.application.port.out.query.ProductDraftGenerationResultQueryResult.Candidate;
-import com.commercefoundry.domainlayer.productdraft.application.port.out.query.ProductDraftGenerationResultQueryResult.ImageAlt;
-import com.commercefoundry.domainlayer.productdraft.application.port.out.query.ProductDraftGenerationResultQueryResult.Suggestion;
-import com.commercefoundry.domainlayer.productdraft.application.port.out.query.ProductDraftGenerationResultQueryResult.UnconfirmedFact;
-import com.commercefoundry.domainlayer.productdraft.application.port.out.query.ProductDraftGenerationResultQueryResult.Warning;
-import com.commercefoundry.domainlayer.productdraft.application.port.out.query.ProductDraftGenerationResultQueryResult.WarningCode;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftCandidate;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftCandidate.ImageAlt;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftCandidate.Suggestion;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftCandidate.UnconfirmedFact;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftCandidate.Warning;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftCandidate.WarningCode;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftFacts;
 import java.nio.charset.StandardCharsets;
@@ -35,7 +35,7 @@ final class ProductDraftGenerationCandidateReader {
     private ProductDraftGenerationCandidateReader() {
     }
 
-    static Candidate read(ProductDraft draft, String json) {
+    static ProductDraftCandidate read(ProductDraft draft, String json) {
         require(json.getBytes(StandardCharsets.UTF_8).length <= MAX_RESULT_BYTES);
         JsonNode root = JSON.readTree(json);
         require(root.isObject() && root.size() == 3);
@@ -46,7 +46,7 @@ final class ProductDraftGenerationCandidateReader {
             tags(suggestion.path("searchTags")), text(suggestion.path("seoTitle"), 70, false),
             text(suggestion.path("seoDescription"), 160, false), alts(suggestion.path("imageAlts"), draft.images().size())
         );
-        return new Candidate(candidate, facts(root.path("unconfirmedFacts"), draft.facts()), warnings(root.path("warnings"), draft.facts()));
+        return new ProductDraftCandidate(candidate, facts(root.path("unconfirmedFacts"), draft.facts()), warnings(root.path("warnings"), draft.facts()));
     }
 
     private static List<String> tags(JsonNode tags) {

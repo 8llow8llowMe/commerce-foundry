@@ -2,7 +2,9 @@ package com.commercefoundry.domainlayer.productdraft.adapter.in.admin.controller
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -70,13 +72,33 @@ class ProductDraftAdminControllerTest {
 
         @ParameterizedTest(name = "{0} {1}")
         @CsvSource({"POST, /api/v1/admin/product-drafts", "GET, /api/v1/admin/product-drafts/1", "POST, /api/v1/admin/product-drafts/1/reject",
-            "POST, /api/v1/admin/product-drafts/1/generate"})
+            "POST, /api/v1/admin/product-drafts/1/generate", "POST, /api/v1/admin/product-drafts/1/refresh"})
         @DisplayName("CUSTOMER 면 403 · SECURITY_005, 토큰이 없으면 401 · SECURITY_001 이고 유스케이스를 부르지 않는다")
         void onlyAdmin(String method, String uri) {
             SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.valueOf(method), uri, VALID_BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
             SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.valueOf(method), uri, VALID_BODY, null).getResponse(), SecurityErrorCode.UNAUTHORIZED);
             verifyNoInteractions(productDraftAdminUseCase);
         }
+    }
+
+    @Test
+    void refreshUsesTokenActorAndDisablesCaching() {
+        given(productDraftAdminUseCase.refresh(7L, TestTokens.MEMBER_ID)).willReturn(response());
+        MvcTestResult result = exchange(HttpMethod.POST, PATH + "/7/refresh", null, MemberRole.ADMIN);
+
+        assertThat(result).hasStatus(HttpStatus.OK);
+        assertThat(result).hasHeader("Cache-Control", "no-store");
+        verify(productDraftAdminUseCase).refresh(7L, TestTokens.MEMBER_ID);
+    }
+
+    @Test
+    void catalogReaderCanGetButCannotRefresh() {
+        given(productDraftAdminUseCase.getDraft(7L)).willReturn(response());
+        assertThat(exchange(HttpMethod.GET, PATH + "/7", null, MemberRole.STAFF)).hasStatusOk();
+        var refresh = exchange(HttpMethod.POST, PATH + "/7/refresh", null, MemberRole.STAFF);
+
+        SecurityEnvelopeAssertions.assertEnvelope(refresh.getResponse(), SecurityErrorCode.FORBIDDEN);
+        verify(productDraftAdminUseCase, never()).refresh(anyLong(), anyLong());
     }
 
     @Nested

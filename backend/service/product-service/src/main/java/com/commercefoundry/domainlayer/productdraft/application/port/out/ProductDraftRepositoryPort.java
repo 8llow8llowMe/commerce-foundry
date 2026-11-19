@@ -21,4 +21,7 @@ public interface ProductDraftRepositoryPort {
      * 같은 트랜잭션에서 먼저 읽은 버전으로 판정한다 — 그 사이 다른 트랜잭션이 커밋했으면 이 호출이 낙관적 락 예외를 낸다.
      */
     void updateGeneration(ProductDraft draft);
+
+    /** 같은 트랜잭션에서 읽은 버전으로 상태와 결과 칸만 바꾸고 flush 한다. */
+    void updateGenerationResult(ProductDraft draft);
 }

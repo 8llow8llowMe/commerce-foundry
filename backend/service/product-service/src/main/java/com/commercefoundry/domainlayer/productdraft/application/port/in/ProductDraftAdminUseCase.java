@@ -5,7 +5,7 @@ import com.commercefoundry.domainlayer.productdraft.application.command.ProductD
 
 /**
  * 어드민 AI 상품 초안 (#359). 초안은 상품을 바꾸거나 공개하지 않는다 — 검토한 값만 적용 단계(후속 PR)에서 상품 등록 검증을 거친다.
- * 이 단계는 초안 저장 · 조회 · 거절과 생성 시작(operations 작업 등록, #359 PR-B1)이다. 생성 결과 반영 · 재생성은 후속 PR 이다.
+ * 초안 저장 · 조회 · 거절, 생성 시작과 현재 회차의 결과 반영을 제공한다.
  */
 public interface ProductDraftAdminUseCase {
 
@@ -21,6 +21,9 @@ public interface ProductDraftAdminUseCase {
      * 등록 여부 모름 {@code 502}(503) · 응답 계약 위반 {@code 504}(502)이다.
      */
     ProductDraftAdminResponse generate(long draftId, long memberId);
+
+    /** 생성 작업의 확정 결과를 현재 회차에 반영한다. */
+    ProductDraftAdminResponse refresh(long draftId, long memberId);
 
     /** 없으면 {@code PRODUCT_DRAFT_001}(404)이다. 보관 기간이 지난 진행 중 초안은 만료로 보인다. */
     ProductDraftAdminResponse getDraft(long draftId);

@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -65,7 +66,7 @@ public class ProductDraftAdminController {
     public ResponseEntity<Response<ProductDraftAdminResponse>> getDraft(
         @Parameter(description = "초안 아이디") @PathVariable @Positive(message = ProductDraftValidationMessage.DRAFT_ID_POSITIVE) long draftId
     ) {
-        return ResponseEntity.ok().body(Response.success(productDraftAdminUseCase.getDraft(draftId)));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Response.success(productDraftAdminUseCase.getDraft(draftId)));
     }
 
     @Operation(
@@ -99,5 +100,17 @@ public class ProductDraftAdminController {
         @Parameter(description = "초안 아이디") @PathVariable @Positive(message = ProductDraftValidationMessage.DRAFT_ID_POSITIVE) long draftId
     ) {
         return ResponseEntity.ok().body(Response.success(productDraftAdminUseCase.generate(draftId, member.memberId())));
+    }
+
+    @Operation(summary = "생성 결과 반영", description = "생성 중인 초안의 작업 결과를 확인해 현재 회차에 반영한다. 초안은 상품에 적용되지 않는다.")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "PRODUCT_DRAFT_REFRESH")
+    @PostMapping("/{draftId}/refresh")
+    public ResponseEntity<Response<ProductDraftAdminResponse>> refresh(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "초안 아이디") @PathVariable @Positive(message = ProductDraftValidationMessage.DRAFT_ID_POSITIVE) long draftId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(Response.success(productDraftAdminUseCase.refresh(draftId, member.memberId())));
     }
 }

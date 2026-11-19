@@ -73,7 +73,8 @@ tasks.named('test') {
     afterTest { descriptor, result ->
         if (descriptor.className?.endsWith('PriceMigrationReadPostgresIntegrationTest')
             || descriptor.className?.endsWith('LegacyPriceWritePostgresIntegrationTest')
-            || descriptor.className?.endsWith('PriceSourceSnapshotPostgresIntegrationTest')) {
+            || descriptor.className?.endsWith('PriceSourceSnapshotPostgresIntegrationTest')
+            || descriptor.className?.endsWith('ProductDraftRefreshPostgresTest')) {
             logger.lifecycle("${descriptor.className}.${descriptor.name}: ${result.resultType}")
         }
     }
