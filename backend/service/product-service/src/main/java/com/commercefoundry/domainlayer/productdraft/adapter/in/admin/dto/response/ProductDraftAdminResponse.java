@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.respon
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.item.ProductDraftFactsAdminItem;
 import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.item.ProductDraftImageAdminItem;
+import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.item.ProductDraftResultAdminItem;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
@@ -10,7 +11,6 @@ import lombok.Builder;
 
 /**
  * 어드민 AI 상품 초안. 운영자가 읽는 상태 · 안내만 낸다 — 모델 · 프롬프트 · 토큰 · 비용 · 작업 내부 정보를 내지 않는다 ({@code api-design-guide.md} §2-8).
- * AI 제안(상품명 · 설명 · 검색 태그 · 대체 텍스트 · 확인이 필요한 속성)은 생성 연결 PR 에서 더한다.
  */
 @Builder
 @Schema(description = "어드민 AI 상품 초안")
@@ -43,6 +43,12 @@ public record ProductDraftAdminResponse(
     Instant expiresAt,
 
     @Schema(description = "거절 시각 (UTC). 거절 전에는 null", nullable = true)
-    Instant rejectedAt
+    Instant rejectedAt,
+
+    @Schema(description = "검토 대기 초안의 정제된 AI 제안", nullable = true)
+    ProductDraftResultAdminItem result,
+
+    @Schema(description = "생성 실패 초안의 운영자 안내", nullable = true)
+    String failureNotice
 ) {
 }

@@ -27,8 +27,13 @@ public record ProductDraft(
     Instant rejectedAt,
     Instant expiresAt,
     Instant createdAt,
-    ProductDraftGeneration generation
+    ProductDraftGeneration generation,
+    ProductDraftCandidate candidate,
+    String failureCode
 ) {
+
+    public static final String GENERATION_CANCELLED = "GENERATION_CANCELLED";
+    public static final String GENERATION_RESULT_EXPIRED = "GENERATION_RESULT_EXPIRED";
 
     public ProductDraft {
         Objects.requireNonNull(status, "status");
@@ -36,6 +41,11 @@ public record ProductDraft(
         Objects.requireNonNull(expiresAt, "expiresAt");
         images = images == null ? List.of() : List.copyOf(images);
         generation = generation == null ? ProductDraftGeneration.NONE : generation;
+    }
+
+    public ProductDraft(long id, ProductDraftStatus status, long requestedByMemberId, ProductDraftFacts facts, List<ProductDraftImage> images,
+        Long rejectedByMemberId, Instant rejectedAt, Instant expiresAt, Instant createdAt, ProductDraftGeneration generation) {
+        this(id, status, requestedByMemberId, facts, images, rejectedByMemberId, rejectedAt, expiresAt, createdAt, generation, null, null);
     }
 
     /** 생성을 시작하지 않은 초안 — 생성 회차 칸이 생기기 전 모양이다. */
@@ -105,6 +115,16 @@ public record ProductDraft(
         return new ProductDraft(id, nextStatus, requestedByMemberId, facts, images, rejectedByMemberId, rejectedAt, expiresAt, createdAt, nextGeneration);
     }
 
+    /** 현재 회차의 확정 결과를 저장한다. 결합값과 상태를 확인한 쓰기 트랜잭션에서만 호출한다. */
+    public ProductDraft finishGeneration(Instant now, ProductDraftCandidate candidate, String failureCode) {
+        if (statusAt(now) != ProductDraftStatus.GENERATING || generation.jobId() == null || (candidate == null) == (failureCode == null)) {
+            throw new IllegalStateException("생성 결과를 반영할 수 없는 초안입니다.");
+        }
+        ProductDraftStatus next = candidate == null ? ProductDraftStatus.FAILED : ProductDraftStatus.READY;
+        return new ProductDraft(id, next, requestedByMemberId, facts, images, rejectedByMemberId, rejectedAt, expiresAt, createdAt,
+            generation, candidate, failureCode);
+    }
+
     /** {@code now} 기준 상태 — 끝나지 않은 초안이 보관 기간을 넘었으면 {@code EXPIRED} 다. */
     public ProductDraftStatus statusAt(Instant now) {
         if (status.isOpen() && !now.isBefore(expiresAt)) {
@@ -122,7 +142,8 @@ public record ProductDraft(
         if (!statusAt(now).isOpen()) {
             throw new IllegalStateException("거절할 수 없는 초안 상태입니다: " + statusAt(now));
         }
-        return new ProductDraft(id, ProductDraftStatus.REJECTED, requestedByMemberId, facts, images, memberId, now, expiresAt, createdAt, generation);
+        return new ProductDraft(id, ProductDraftStatus.REJECTED, requestedByMemberId, facts, images, memberId, now, expiresAt, createdAt,
+            generation, candidate, failureCode);
     }
 
     /** 운영자 입력에 아직 없는 등록 필수 입력 — 상품명 → 카테고리 → 대표 이미지 순. 가격 · 옵션 · 재고는 적용 단계에서 받는다. */

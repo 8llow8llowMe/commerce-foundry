@@ -6,17 +6,22 @@ import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.presenter.P
 import com.commercefoundry.domainlayer.productdraft.application.command.ProductDraftCreateCommand;
 import com.commercefoundry.domainlayer.productdraft.application.exception.ProductDraftErrorCode;
 import com.commercefoundry.domainlayer.productdraft.application.exception.ProductDraftException;
+import com.commercefoundry.domainlayer.productdraft.application.model.ProductDraftGenerationCompletion;
 import com.commercefoundry.domainlayer.productdraft.application.port.in.ProductDraftAdminUseCase;
 import com.commercefoundry.domainlayer.productdraft.application.service.processor.ProductDraftGenerationProcessor;
+import com.commercefoundry.domainlayer.productdraft.application.service.processor.ProductDraftGenerationResultProcessor;
 import com.commercefoundry.domainlayer.productdraft.application.service.processor.ProductDraftImageProcessor;
 import com.commercefoundry.domainlayer.productdraft.application.service.processor.ProductDraftProcessor;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftStatus;
 import com.commercefoundry.global.properties.ProductDraftProperties;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -48,6 +53,7 @@ public class ProductDraftAdminFacade implements ProductDraftAdminUseCase {
     private final ProductDraftProcessor productDraftProcessor;
     private final ProductDraftImageProcessor productDraftImageProcessor;
     private final ProductDraftGenerationProcessor productDraftGenerationProcessor;
+    private final ProductDraftGenerationResultProcessor productDraftGenerationResultProcessor;
     private final ProductDraftProperties productDraftProperties;
     private final ProductDraftAdminPresenter productDraftAdminPresenter;
     private final ProductAdminAuditProcessor productAdminAuditProcessor;
@@ -76,6 +82,50 @@ public class ProductDraftAdminFacade implements ProductDraftAdminUseCase {
     @Transactional(readOnly = true)
     public ProductDraftAdminResponse getDraft(long draftId) {
         return productDraftAdminPresenter.toResponse(productDraftProcessor.getDraft(draftId), productDraftProcessor.now());
+    }
+
+    @Override
+    public ProductDraftAdminResponse refresh(long draftId, long memberId) {
+        ProductDraftAdminResponse response;
+        try {
+            if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                throw new ProductDraftException(ProductDraftErrorCode.GENERATION_UNAVAILABLE);
+            }
+            ProductDraft draft = productDraftProcessor.getDraft(draftId);
+            Instant now = productDraftProcessor.now();
+            ProductDraftStatus status = draft.statusAt(now);
+            if (status == ProductDraftStatus.EXPIRED) {
+                throw new ProductDraftException(ProductDraftErrorCode.DRAFT_EXPIRED);
+            }
+            if (status == ProductDraftStatus.GENERATING) {
+                if (!productDraftProperties.generationEnabled()) {
+                    throw new ProductDraftException(ProductDraftErrorCode.GENERATION_START_DISABLED);
+                }
+                draft = completeResult(productDraftGenerationResultProcessor.query(draft));
+                now = productDraftProcessor.now();
+            }
+            response = productDraftAdminPresenter.toResponse(draft, now);
+        } catch (DataAccessException | TransactionException exception) {
+            productAdminAuditProcessor.productDraftRefreshed(memberId, draftId, false);
+            throw new ProductDraftException(ProductDraftErrorCode.GENERATION_UNAVAILABLE);
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.productDraftRefreshed(memberId, draftId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.productDraftRefreshed(memberId, draftId, true);
+        return response;
+    }
+
+    private ProductDraft completeResult(ProductDraftGenerationCompletion result) {
+        try {
+            try {
+                return productDraftGenerationResultProcessor.complete(result);
+            } catch (OptimisticLockingFailureException exception) {
+                return productDraftGenerationResultProcessor.complete(result);
+            }
+        } catch (OptimisticLockingFailureException exception) {
+            throw new ProductDraftException(ProductDraftErrorCode.DRAFT_BUSY);
+        }
     }
 
     @Override

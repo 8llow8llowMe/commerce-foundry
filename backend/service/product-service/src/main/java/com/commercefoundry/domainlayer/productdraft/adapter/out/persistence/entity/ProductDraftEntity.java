@@ -130,6 +130,12 @@ public class ProductDraftEntity extends BaseEntity implements Persistable<Long> 
         this.jobId = jobId;
     }
 
+    public void recordGenerationResult(ProductDraftStatus status, String resultJson, String failureCode) {
+        this.status = status;
+        this.resultJson = resultJson;
+        this.failureCode = failureCode;
+    }
+
     /** 생성 시각은 최초 INSERT 때 감사 리스너가 채운다 — 비어 있으면 아직 저장하지 않은 행이다. */
     @Override
     public boolean isNew() {

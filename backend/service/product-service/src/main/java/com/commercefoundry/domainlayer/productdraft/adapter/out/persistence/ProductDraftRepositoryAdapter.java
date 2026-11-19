@@ -4,11 +4,13 @@ import com.commercefoundry.domainlayer.productdraft.adapter.out.persistence.enti
 import com.commercefoundry.domainlayer.productdraft.adapter.out.persistence.repository.ProductDraftRepository;
 import com.commercefoundry.domainlayer.productdraft.application.port.out.ProductDraftRepositoryPort;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftCandidate;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftFacts;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftGeneration;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImage;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageSource;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageType;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -70,6 +72,16 @@ public class ProductDraftRepositoryAdapter implements ProductDraftRepositoryPort
         productDraftRepository.flush();
     }
 
+    @Override
+    public void updateGenerationResult(ProductDraft draft) {
+        String result = draft.candidate() == null ? null : JSON.writeValueAsString(draft.candidate());
+        if (result != null && result.getBytes(StandardCharsets.UTF_8).length > 32 * 1024) {
+            throw new IllegalStateException("초안 결과가 저장 상한을 넘었습니다.");
+        }
+        managed(draft.id()).recordGenerationResult(draft.status(), result, draft.failureCode());
+        productDraftRepository.flush();
+    }
+
     private ProductDraftEntity managed(long draftId) {
         return productDraftRepository.findById(draftId).orElseThrow(() -> new IllegalStateException("바꿀 초안이 없습니다. draftId=" + draftId));
     }
@@ -81,8 +93,20 @@ public class ProductDraftRepositoryAdapter implements ProductDraftRepositoryPort
         return new ProductDraft(
             entity.getId(), entity.getStatus(), entity.getRequestedByMemberId(), input.facts().toDomain(),
             input.images().stream().map(ImageDocument::toDomain).toList(),
-            entity.getRejectedByMemberId(), entity.getRejectedAt(), entity.getExpiresAt(), toDbPrecision(entity.getCreatedAt()), generation
+            entity.getRejectedByMemberId(), entity.getRejectedAt(), entity.getExpiresAt(), toDbPrecision(entity.getCreatedAt()), generation,
+            readResult(entity), entity.getFailureCode()
         );
+    }
+
+    private static ProductDraftCandidate readResult(ProductDraftEntity entity) {
+        if (entity.getResultJson() == null) {
+            return null;
+        }
+        try {
+            return JSON.readValue(entity.getResultJson(), ProductDraftCandidate.class);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("초안 결과를 읽을 수 없습니다. draftId=" + entity.getId());
+        }
     }
 
     /**

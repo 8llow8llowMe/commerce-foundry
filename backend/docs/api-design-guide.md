@@ -1207,6 +1207,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 | `GET /api/v1/admin/product-drafts/{draftId}` | `CATALOG_READ` | 200 초안 | 404 `PRODUCT_DRAFT_001` · 400 `PRODUCT_DRAFT_127` |
 | `POST /api/v1/admin/product-drafts/{draftId}/reject` | `CATALOG_MANAGE` | 200 초안 — 거절(`REJECTED`). 이미 거절했으면 그대로 200 | 404 `PRODUCT_DRAFT_001` · 409 `PRODUCT_DRAFT_020`(적용함) · `022`(만료) · `025`(동시 변경) · 400 `PRODUCT_DRAFT_127` |
 | `POST /api/v1/admin/product-drafts/{draftId}/generate` | `CATALOG_MANAGE` | 200 초안 — 생성 시작 · 같은 회차 등록 재시도. 이미 생성 중이면 그대로 200 | 400 `PRODUCT_DRAFT_037` · `050` · `127` · 404 `001` · 409 `022` · `025` · `051` · `052` · 502 `504` · 503 `502` |
+| `POST /api/v1/admin/product-drafts/{draftId}/refresh` | `CATALOG_MANAGE` | 200 초안 — 작업 결과를 현재 회차에 반영 | 400 `PRODUCT_DRAFT_050` · `127` · 404 `001` · 409 `022` · `025` · 502 `504` · 503 `502` |
 
 - **본문(생성)**: `{nameHint?, categoryId?, materials?[], careNotes?[], measurementsNote?, origin?, certifications?[], tone?, mustInclude?[], mustAvoid?[], images?[{url, imageType, width?, height?}]}`.
   모든 칸이 선택이다. 문구는 앞뒤 공백을 빼고 빈 문구는 null 이다. 한 줄 문구는 제어 문자를, 치수 메모는 개행 · 탭 외 제어 문자를 받지 않는다(입력은 AI 프롬프트의 데이터 칸으로만 쓰인다).
@@ -1228,7 +1229,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   상품 등록용으로 직접 올린 상품 사진(이미 공개 확정한 `products/media` 객체)이고, 초안 결과가 운영자 검토를 거쳐서만 상품에 들어가기 때문이다.
   대신 **사진에 고객 정보(이름 · 연락처 · 주소 · 주문 화면 · 송장)를 넣지 않는다** — 이미지 안의 글자는 마스킹되지 않고 AI 에 그대로 간다. 어드민 화면은 업로드 칸에 이 안내를 둔다.
 - **응답**: `{draftId, status{code,name,description}, facts{...입력 그대로}, images[{url, imageType, width, height}], missingRequiredInputs[{code,name,description}],
-  requestedByMemberId, requestedAt, expiresAt, rejectedAt}`. `missingRequiredInputs` 는 서버가 운영자 입력으로 계산한다(AI 출력이 아니다) — `PRODUCT_NAME` → `CATEGORY` →
+  requestedByMemberId, requestedAt, expiresAt, rejectedAt, result?, failureNotice?}`. `missingRequiredInputs` 는 서버가 운영자 입력으로 계산한다(AI 출력이 아니다) — `PRODUCT_NAME` → `CATEGORY` →
   `THUMBNAIL_IMAGE` 순이고, 가격 · 옵션 · 재고는 초안이 담지 않아 적용 단계에서 입력한다. 카테고리 존재는 적용 때 상품 등록 검증이 본다.
 - **상태**: `REQUESTED`(생성 대기) → `GENERATING`(생성 중) → `READY`(검토 대기) / `FAILED`(생성 실패) → `APPLIED`(적용 완료) / `REJECTED`(거절). 끝나지 않은 초안
   (`REQUESTED` · `GENERATING` · `READY` · `FAILED`)이 보관 기간(`product-draft.ttl`, 7일)을 넘으면 저장 값과 상관없이 `EXPIRED`(기간 만료)로 보이고 적용 · 거절할 수 없다 —
@@ -1241,6 +1242,15 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   등록과 bind 사이에 거절되면 거절 상태를 유지한 채 jobId 만 기록한다. 등록 응답이 유실된 뒤 거절됐으면 추가 작업을 만들지 않으려고 `/generate` 를 막는다;
   operations 에 남은 작업은 거절된 입력 조회에서 실패하며 product 는 바뀌지 않는다.
   플래그 기본값은 false 이며 B3 동시 3건 게이트와 재생성이 연결되기 전까지 열지 않는다.
+- **결과 반영(B2b)** — 상세 GET은 저장 값만 읽는다. refresh는 JWT 행위자로 감사(`PRODUCT_DRAFT_REFRESH`)를 한 번 남기며 두 응답 모두 `Cache-Control: no-store`다.
+  refresh는 기한이 남은 `GENERATING` 초안과 연결된 작업을 대상으로 하고 이 경우 기존 생성 플래그가 닫혀 있으면 400 `050`이다. 다른 상태는 저장 값을 반환하며 초안 만료는 409 `022`다.
+  operations 결과 조회(§7-3)는 트랜잭션 밖에서 한 번 실행한다. 새 저장 트랜잭션에서 초안 · 회차 · 작업 · 입력 해시와 현재 만료 · 상태를 다시 검사한다.
+  `PENDING`은 저장하지 않는다. `SUCCEEDED`는 정제된 제안과 `READY`, 실패 · 취소 · 확인된 작업 결과 보관 만료는 고정 실패 사유와 `FAILED`를 같이 저장한다.
+  응답 계약 위반(502 `504`)과 조회·DB 장애(503 `502`)는 초안을 바꾸지 않는다. 낙관적 락 충돌은 같은 원격 결과를 새 트랜잭션에서 한 번 재판정한다.
+  같은 회차가 먼저 확정되었거나 거절되었으면 그 상태를 반환한다. 회차가 바뀌거나 다시 충돌하면 409 `025`, 보관 기한이 지났으면 409 `022`다.
+  `READY`의 `result`는 `{suggestion{name,description,searchTags,seoTitle,seoDescription,imageAlts[{index,altText}]},unconfirmedFacts[{code,name,description}],warnings[{code,name,description,index}]}`다.
+  경고 순번은 `mustInclude` 또는 `mustAvoid`의 순번이며 정제된 제안과 정규화한 표현을 비교해 계산한다. `FAILED`는 `failureNotice`로 안내한다. 그 외 상태는 두 칸 모두 null이다.
+  사실·이미지는 기존 저장 값이며 작업 ID·입력 해시·원격 실패 코드·AI 원문은 응답과 감사에 싣지 않는다. 재생성과 상품 적용은 후속 단계다.
 - **문구 검증(프롬프트 안전)**: 한 줄 칸은 유니코드 제어 문자(C0 · DEL · C1 — U+0085 포함) · 짝 없는 서로게이트 · 줄/문단 구분자(U+2028 · U+2029) ·
   방향 제어 문자(U+200E · U+200F · U+202A~202E · U+2066~2069) · 태그 문자(U+E0000~E007F)를 받지 않는다. 치수 메모는 여기에 `\n` · `\r` · 탭만 더 받는다.
   보이지 않는 지시 · 줄 나눔으로 프롬프트 데이터 칸 경계를 흉내 내지 못하게 하고, 검토 화면에 보이는 값과 저장 값이 같게 한다. 이모지용 ZWJ · 변형 선택자는 받는다.

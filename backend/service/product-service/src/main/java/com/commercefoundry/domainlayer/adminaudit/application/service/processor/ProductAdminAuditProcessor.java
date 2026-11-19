@@ -187,6 +187,10 @@ public class ProductAdminAuditProcessor {
         write(ProductAdminAuditAction.PRODUCT_DRAFT_GENERATE, actorMemberId, AdminAuditLog.target(PRODUCT_DRAFT, draftId), succeeded);
     }
 
+    public void productDraftRefreshed(long actorMemberId, long draftId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_DRAFT_REFRESH, actorMemberId, AdminAuditLog.target(PRODUCT_DRAFT, draftId), succeeded);
+    }
+
     private static void write(ProductAdminAuditAction action, long actorMemberId, String target, boolean succeeded) {
         AdminAuditLog.write(action.name(), actorMemberId, target, succeeded);
     }
