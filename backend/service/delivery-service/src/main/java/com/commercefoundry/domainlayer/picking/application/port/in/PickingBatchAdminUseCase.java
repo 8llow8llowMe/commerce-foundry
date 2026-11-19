@@ -9,5 +9,7 @@ public interface PickingBatchAdminUseCase {
 
     PickingBatchAdminResponse detail(long batchId);
 
+    byte[] downloadPickingList(long batchId, long actorMemberId);
+
     PickingBatchAdminResponse check(long batchId, long orderId, Map<Long, Long> quantities, long actorMemberId);
 }

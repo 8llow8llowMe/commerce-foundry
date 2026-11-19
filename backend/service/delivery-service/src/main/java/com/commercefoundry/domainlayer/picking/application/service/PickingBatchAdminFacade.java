@@ -49,6 +49,19 @@ public class PickingBatchAdminFacade implements PickingBatchAdminUseCase {
     }
 
     @Override
+    public byte[] downloadPickingList(long batchId, long actorMemberId) {
+        byte[] csv;
+        try {
+            csv = presenter.pickingListCsv(new PickingBatchInfo(batches.detail(batchId)));
+        } catch (RuntimeException exception) {
+            audit.pickingListDownloaded(actorMemberId, batchId, false);
+            throw exception;
+        }
+        audit.pickingListDownloaded(actorMemberId, batchId, true);
+        return csv;
+    }
+
+    @Override
     public PickingBatchAdminResponse check(long batchId, long orderId, Map<Long, Long> quantities, long actorMemberId) {
         PickingBatch batch;
         PickingBatchAdminResponse response;

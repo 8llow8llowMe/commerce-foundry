@@ -35,5 +35,8 @@ public enum DeliveryAdminAuditAction {
     PICKING_BATCH_CREATE,
 
     /** 검수 결과를 묶음 ID로 찾는다. 제출한 수량과 상품 옵션은 검수 이력에만 남긴다. */
-    PICKING_ORDER_CHECK
+    PICKING_ORDER_CHECK,
+
+    /** 피킹 리스트 내려받기 — 대상은 묶음 ID이며 파일의 행이나 값은 기록하지 않는다. */
+    PICKING_LIST_DOWNLOAD
 }

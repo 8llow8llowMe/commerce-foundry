@@ -62,6 +62,10 @@ public class DeliveryAdminAuditProcessor {
         AdminAuditLog.write(DeliveryAdminAuditAction.PICKING_BATCH_CREATE.name(), adminMemberId, target, succeeded);
     }
 
+    public void pickingListDownloaded(long adminMemberId, long batchId, boolean succeeded) {
+        AdminAuditLog.write(DeliveryAdminAuditAction.PICKING_LIST_DOWNLOAD.name(), adminMemberId, AdminAuditLog.target("picking-batch", batchId), succeeded);
+    }
+
     public void pickingOrderChecked(long adminMemberId, long batchId, boolean succeeded) {
         AdminAuditLog.write(DeliveryAdminAuditAction.PICKING_ORDER_CHECK.name(), adminMemberId, AdminAuditLog.target("picking-batch", batchId), succeeded);
     }
