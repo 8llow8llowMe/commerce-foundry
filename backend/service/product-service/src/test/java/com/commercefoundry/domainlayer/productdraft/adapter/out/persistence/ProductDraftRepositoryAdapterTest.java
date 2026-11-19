@@ -62,12 +62,21 @@ class ProductDraftRepositoryAdapterTest {
     private ProductDraftRepositoryPort port;
 
     private static ProductDraft draft(long id) {
+        return draft(id, false);
+    }
+
+    private static ProductDraft draft(long id, boolean pinThumbnail) {
         ProductDraftFacts facts = new ProductDraftFacts("린넨 \"저고리\"", 12L, List.of("린넨 100%", "면 안감"), List.of("찬물 손세탁"), "총장 62cm\n가슴단면 54cm",
             "대한민국", List.of(), "차분하게", List.of("여름"), List.of("최고"));
+        var thumbnail = new ProductDraftImage("https://cdn.example.com/media/a.jpg", ProductDraftImageType.THUMBNAIL, 1200, 1600);
+        if (pinThumbnail) {
+            thumbnail = thumbnail.pinned(new ProductDraftImageSource(
+                "products/media/7/0f8fad5b-d9cb-469f-a165-70867728950e/" + "a".repeat(64) + ".jpg", "\"etag-a\"", 1024L, "image/jpeg"));
+        }
         List<ProductDraftImage> images = List.of(
             new ProductDraftImage("https://cdn.example.com/media/b.jpg", ProductDraftImageType.GALLERY, null, null,
                 new ProductDraftImageSource("products/media/7/0f8fad5b-d9cb-469f-a165-70867728950e/" + "b".repeat(64) + ".jpg", "\"etag-b\"", 5_242_880L, "image/jpeg")),
-            new ProductDraftImage("https://cdn.example.com/media/a.jpg", ProductDraftImageType.THUMBNAIL, 1200, 1600)
+            thumbnail
         );
         return ProductDraft.request(id, 100L, facts, images, EXPIRES_AT);
     }
@@ -157,18 +166,21 @@ class ProductDraftRepositoryAdapterTest {
     @Test
     @DisplayName("생성 회차 — 새 초안은 회차 0 · 기록 없음이고, claim · 작업 연결이 회차 칸을 그대로 왕복하며 버전을 올린다 (#359 PR-B1)")
     void generationRoundTrip() {
-        ProductDraft saved = port.insert(draft(1L));
+        ProductDraft saved = port.insert(draft(1L, true));
         entityManager.flush();
         entityManager.clear();
-        assertThat(port.findById(1L).orElseThrow().generation()).isEqualTo(ProductDraftGeneration.NONE);
+        ProductDraft initial = port.findById(1L).orElseThrow();
+        assertThat(initial.imagesPinned()).isTrue();
+        assertThat(initial.generation()).isEqualTo(ProductDraftGeneration.NONE);
 
         Instant claimedAt = Instant.parse("2026-11-02T03:00:00.123456Z");
-        ProductDraft claimed = port.findById(1L).orElseThrow().claimGeneration(200L, HASH, claimedAt);
+        ProductDraft claimed = initial.claimGeneration(200L, HASH, claimedAt);
         port.updateGeneration(claimed);
         entityManager.clear();
         ProductDraft foundClaimed = port.findById(1L).orElseThrow();
         assertThat(foundClaimed.generation()).isEqualTo(new ProductDraftGeneration(1, 200L, claimedAt, HASH, null));
         assertThat(foundClaimed.expiresAt()).isEqualTo(saved.expiresAt());
+        assertThat(entityManager.find(ProductDraftEntity.class, 1L).getVersion()).isEqualTo(1L);
 
         port.updateGeneration(foundClaimed.bindJob(1L, 1, HASH, 31L));
         entityManager.clear();
@@ -183,13 +195,15 @@ class ProductDraftRepositoryAdapterTest {
     @Test
     @DisplayName("claim 갱신도 읽은 뒤 다른 트랜잭션이 바꿨으면 그 호출 안에서 낙관적 락 예외를 낸다")
     void optimisticLockInsideGenerationUpdate() {
-        port.insert(draft(1L));
+        port.insert(draft(1L, true));
         entityManager.flush();
         entityManager.clear();
         ProductDraft read = port.findById(1L).orElseThrow();
+        assertThat(read.imagesPinned()).isTrue();
+        ProductDraft claimed = read.claimGeneration(200L, HASH, Instant.parse("2026-11-02T03:00:00Z"));
         entityManager.getEntityManager().createNativeQuery("update product.product_draft set version = version + 1 where id = 1").executeUpdate();
 
-        assertThatThrownBy(() -> port.updateGeneration(read.claimGeneration(200L, HASH, Instant.parse("2026-11-02T03:00:00Z"))))
+        assertThatThrownBy(() -> port.updateGeneration(claimed))
             .isInstanceOf(ObjectOptimisticLockingFailureException.class);
     }
 
