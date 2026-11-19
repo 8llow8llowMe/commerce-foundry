@@ -54,6 +54,6 @@ class DeliveryCodeUniquenessTest {
         assertThat(codes).allMatch(code -> code.matches("DELIVERY_\\d{3}"));
         assertThat(codes).doesNotHaveDuplicates();
         assertThat(codes).contains("DELIVERY_013", "DELIVERY_014", "DELIVERY_031", "DELIVERY_032", "DELIVERY_037",
-            "DELIVERY_139", "DELIVERY_140", "DELIVERY_149", "DELIVERY_150", "DELIVERY_154");
+            "DELIVERY_139", "DELIVERY_140", "DELIVERY_149", "DELIVERY_150", "DELIVERY_155");
     }
 }

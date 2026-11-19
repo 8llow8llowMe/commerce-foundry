@@ -29,5 +29,11 @@ public enum DeliveryAdminAuditAction {
      * 해외 배송비 정책 전체 교체 — 대상 {@code shipping-policy:international}(스토어에 하나). 처음 만들기도 같은 행위다.
      * 바꾼 금액 · 국가 그룹 · 관세 안내 문구는 싣지 않는다.
      */
-    SHIPPING_POLICY_INTERNATIONAL_REPLACE
+    SHIPPING_POLICY_INTERNATIONAL_REPLACE,
+
+    /** 생성된 묶음 ID만 남긴다. 묶음이 없으면 대상은 비워 둔다. */
+    PICKING_BATCH_CREATE,
+
+    /** 검수 결과를 묶음 ID로 찾는다. 제출한 수량과 상품 옵션은 검수 이력에만 남긴다. */
+    PICKING_ORDER_CHECK
 }

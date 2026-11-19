@@ -1576,6 +1576,22 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
   - 반영 대기 · 미반영 송장 화면은 `?synced=false`.
   - 스토어프론트 주문 상세는 `GET /api/v1/deliveries?orderId=` 를 주문 상세와 함께 부르고 null 이면 "출고 전" 으로 그린다. 반영 대기는 배송 중으로 온다.
 
+### 2-20. 어드민 출고 묶음 · 포장 검수 (delivery-service, #363)
+
+기존 게이트웨이의 `/api/v1/admin/deliveries/**` 경로로 연결한다. 아래 경로는 `/api/v1/admin/deliveries/picking-batches`를 기준으로 한다.
+
+| 요청 | 기능 권한 | 성공 응답 |
+|------|-----------|-----------|
+| `POST` 기준 경로 · `{"orderIds":["123","456"]}` | `FULFILLMENT_MANAGE` | 201 · 상세 · 생성된 상세 경로를 `Location`으로 반환 |
+| `GET /{batchId}` | `FULFILLMENT_READ` | 200 · 상세 |
+| `POST /{batchId}/orders/{orderId}/checks` · `{"quantities":{"789":2}}` | `FULFILLMENT_MANAGE` | 200 · 검수 결과를 포함한 상세 |
+
+- **대상 판정**은 주문 스냅숏으로 수행한다. 서로 다른 주문 1~20건 중 상품 준비 중(`PREPARING`)인 국내 일반 주문만 담고, 나머지는 `exclusions`에 주문별 사유를 남긴다. 모두 제외되면 409(`DELIVERY_033`)이며 묶음을 저장하지 않는다. 생성 요청을 다시 보내면 대상 판정 뒤 새 묶음을 만든다.
+- **상세**는 `{batchId, version, inspectionComplete, totalQuantity, pickingQuantities, orders, exclusions, checks}`를 제공한다. 수량 항목은 `{skuId, quantity}`, 대상 주문은 `{orderId, status, countryCode, checked, quantities}`, 제외 주문은 `{orderId, reason}`, 검수 기록은 `{orderId, successful, reason, quantities}`다. ID는 문자열이고 사유는 `{code, name, description}`이다. 주문과 옵션을 ID 오름차순으로, 검수는 기록 순서대로 내린다.
+- **검수**는 옵션 100개까지 센 수량을 양의 정수로 받는다. 빈 객체는 수량 부족으로 기록된다. 잘못된 옵션(`WRONG_SKU`), 부족(`SHORTAGE`), 초과(`EXCESS`) 등은 200의 `checks`에서 확인한다. 같은 주문·수량의 재시도는 기존 기록을 사용한다. 다른 수량으로 다시 확인해도 이전 검수 성공은 보존한다. `inspectionComplete`는 대상 주문 전부의 포장 검수 결과이며, 송장 등록은 출고 시점의 주문 상태를 다시 확인한다.
+- **오류**는 공통 봉투로 반환한다. 주문 목록 범위·형식·중복은 400(`DELIVERY_150`·`151`·`155`), 검수 맵·옵션 ID·수량은 400(`152`·`153`·`154`), 경로 ID 숫자 변환 실패는 400(`198`)이다. 없는 묶음은 404(`034`), 주문 스냅숏 조회 실패는 503(`036`)이다. 동시 검수 충돌 409(`037`)은 상세를 다시 조회한 뒤 재시도한다.
+- **감사**는 JWT 행위자로 `PICKING_BATCH_CREATE`·`PICKING_ORDER_CHECK`를 기록한다. 대상은 묶음 ID이며, 검수에 제출한 수량과 상품 옵션은 검수 이력에서 확인한다. FE 계약 리뷰어는 `seonghoho`다.
+
 ## 3. 계층 흐름
 
 ```text
