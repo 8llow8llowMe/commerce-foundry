@@ -38,5 +38,8 @@ public enum DeliveryAdminAuditAction {
     PICKING_ORDER_CHECK,
 
     /** 피킹 리스트 내려받기 — 대상은 묶음 ID이며 파일의 행이나 값은 기록하지 않는다. */
-    PICKING_LIST_DOWNLOAD
+    PICKING_LIST_DOWNLOAD,
+
+    /** 묶음 포장 일괄 검수 — 주문별 검수 결과와 수량은 검수 이력에서 확인한다. */
+    PICKING_BULK_CHECK
 }

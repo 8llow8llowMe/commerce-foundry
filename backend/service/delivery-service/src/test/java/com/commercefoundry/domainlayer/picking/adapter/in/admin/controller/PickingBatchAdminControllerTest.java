@@ -15,6 +15,8 @@ import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -34,6 +36,10 @@ class PickingBatchAdminControllerTest {
     private static final String PATH = PickingBatchAdminController.PATH;
     private static final String DETAIL = PATH + "/1";
     private static final String CHECK = DETAIL + "/orders/2/checks";
+    private static final String BULK_CHECK = DETAIL + "/checks";
+    private static final String BULK_BODY = """
+        {"items":[{"orderId":"2","check":{"quantities":{"10":2}}}]}
+        """;
     private static final String CREATE_BODY = """
         {"orderIds":["2"]}
         """;
@@ -66,10 +72,12 @@ class PickingBatchAdminControllerTest {
     @Test
     void rejectsAnonymousCustomersAndStaffWrites() {
         assertCode(mvc.get().uri(DETAIL).exchange(), 401, "SECURITY_001");
+        assertCode(mvc.post().uri(BULK_CHECK).contentType(MediaType.APPLICATION_JSON).content(BULK_BODY).exchange(), 401, "SECURITY_001");
         assertCode(get(DETAIL, MemberRole.CUSTOMER), 403, "SECURITY_005");
         for (MemberRole role : List.of(MemberRole.CUSTOMER, MemberRole.STAFF)) {
             assertCode(post(PATH, CREATE_BODY, role), 403, "SECURITY_005");
             assertCode(post(CHECK, CHECK_BODY, role), 403, "SECURITY_005");
+            assertCode(post(BULK_CHECK, BULK_BODY, role), 403, "SECURITY_005");
         }
         verifyNoInteractions(useCase);
     }
@@ -97,6 +105,28 @@ class PickingBatchAdminControllerTest {
         """)
     void rejectsInvalidCheck(String body, String code) {
         assertCode(post(CHECK, body, MemberRole.MANAGER), 400, code);
+        verifyNoInteractions(useCase);
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', textBlock = """
+        {"items":[]} | DELIVERY_156
+        {"items":[null]} | DELIVERY_157
+        {"items":[{"orderId":"2"}]} | DELIVERY_157
+        {"items":[{"orderId":"9223372036854775808","check":{"quantities":{}}}]} | DELIVERY_151
+        {"items":[{"orderId":"2","check":{"quantities":{"10":1.5}}}]} | DELIVERY_154
+        """)
+    void rejectsInvalidBulkChecksBeforeCallingUseCase(String body, String code) {
+        assertCode(post(BULK_CHECK, body, MemberRole.MANAGER), 400, code);
+        verifyNoInteractions(useCase);
+    }
+
+    @Test
+    void rejectsMoreThanTwentyBulkOrdersBeforeCallingUseCase() {
+        String body = LongStream.rangeClosed(1, 21).mapToObj(id -> """
+            {"orderId":"%d","check":{"quantities":{}}}
+            """.formatted(id)).collect(Collectors.joining(",", "{\"items\":[", "]}"));
+        assertCode(post(BULK_CHECK, body, MemberRole.MANAGER), 400, "DELIVERY_156");
         verifyNoInteractions(useCase);
     }
 

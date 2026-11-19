@@ -1670,6 +1670,25 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 - FE #364는 다운로드 클릭마다 이 API를 호출해 200은 첨부 파일로 처리하고 오류는 JSON 봉투로 처리한다.
   `Accept: text/csv, application/json`을 보낸다. 계약 리뷰어는 `seonghoho`다.
 
+#### 일괄 포장 검수 (#740)
+
+`POST /api/v1/admin/deliveries/picking-batches/{batchId}/checks`는 `FULFILLMENT_MANAGE`가 필요하다.
+본문은 `{"items":[{"orderId":"123","check":{"quantities":{"789":2}}}]}` 모양이며, 각 `check`는 단건 검수와 같은 검증을 거친다.
+서로 다른 주문 1~20건을 한 번에 보내며 실제 묶음의 대상 주문 수를 넘을 수 없다. 요청 안에 중복 주문이 있거나 묶음의 대상 수를 넘으면
+검수를 기록하기 전에 400 `DELIVERY_038`로 응답한다. `items` 누락·범위 위반은 400 `DELIVERY_156`, 빈 항목·`check` 누락은 400 `DELIVERY_157`,
+없는 묶음은 404 `DELIVERY_034`다.
+
+- 200 `dataBody`는 `{batchId, results:[{orderId, successful, reason, retryable}]}`다. ID는 문자열이고, 결과는 요청 순서이며, 사유는
+  `{code, name, description}`이다. 성공 `NONE`, 부족 `SHORTAGE`, 초과 `EXCESS`, 다른 상품 옵션 `WRONG_SKU`, 이미 검수됨
+  `ALREADY_CHECKED`, 대상 밖 주문 `ORDER_NOT_IN_BATCH`는 단건 검수와 같은 뜻이다.
+- 주문 하나의 검수 기록은 해당 주문의 트랜잭션에서 저장한다. 동시 검수로 묶음 버전이 바뀌면 해당 주문만 `DELIVERY_037`·`retryable=true`로
+  표시하고 다음 주문을 처리한다. 충돌한 주문의 새 기록은 롤백하고 앞서 커밋된 기록을 보존한다.
+- FE #364는 충돌 건만 상세를 새로 읽은 뒤 같은 수량으로 다시 보내고, 부족·초과·다른 옵션은 수량을 바로잡은 주문만 다시 보낸다.
+  같은 주문과 같은 수량을 재전송하면 성공과 실패 모두 해당 검수 기록을 재사용한다. 입력 순서만 바뀐 SKU 맵도 같게 취급한다.
+  개별 결과 대신 예기치 않은 서버 오류로 끝난 경우에도 먼저 커밋된 기록은 남으므로 같은 주문·수량을 다시 보낼 수 있다.
+- 감사 `PICKING_BULK_CHECK`는 요청당 JWT 행위자·묶음 ID·결과만 남긴다. 모든 주문이 성공하면 `SUCCESS`이며 부분 실패는 `FAILURE`다.
+  FE 계약 리뷰어는 `seonghoho`다.
+
 ## 3. 계층 흐름
 
 ```text

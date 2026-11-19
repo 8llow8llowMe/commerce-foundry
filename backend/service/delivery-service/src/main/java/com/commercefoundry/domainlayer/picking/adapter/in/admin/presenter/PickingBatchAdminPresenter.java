@@ -2,7 +2,10 @@ package com.commercefoundry.domainlayer.picking.adapter.in.admin.presenter;
 
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.PickingBatchAdminResponse;
+import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.PickingBulkCheckAdminResponse;
+import com.commercefoundry.domainlayer.picking.application.exception.PickingErrorCode;
 import com.commercefoundry.domainlayer.picking.application.info.PickingBatchInfo;
+import com.commercefoundry.domainlayer.picking.application.info.PickingBulkCheckInfo;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingBatch;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingCheck;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingExclusion;
@@ -32,6 +35,23 @@ public class PickingBatchAdminPresenter {
                 .map(this::exclusion).toList(),
             batch.checks().stream().map(this::check).toList()
         );
+    }
+
+    public PickingBulkCheckAdminResponse presentBulkCheck(PickingBulkCheckInfo info) {
+        return new PickingBulkCheckAdminResponse(Long.toString(info.batchId()), info.results().stream().map(this::bulkOrderResult).toList());
+    }
+
+    private PickingBulkCheckAdminResponse.OrderResult bulkOrderResult(PickingBulkCheckInfo.OrderResult result) {
+        String orderId = Long.toString(result.orderId());
+        return switch (result) {
+            case PickingBulkCheckInfo.Recorded recorded ->
+                new PickingBulkCheckAdminResponse.OrderResult(orderId, recorded.successful(), reason(recorded.reason()), false);
+            case PickingBulkCheckInfo.Conflict conflict -> {
+                PickingErrorCode error = PickingErrorCode.CONCURRENTLY_CHANGED;
+                yield new PickingBulkCheckAdminResponse.OrderResult(orderId, false,
+                    CodeNameDescriptionMetadata.of(error.getCode(), "다시 시도", error.getMessage()), true);
+            }
+        };
     }
 
     public byte[] pickingListCsv(PickingBatchInfo info) {

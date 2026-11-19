@@ -3,8 +3,10 @@ package com.commercefoundry.domainlayer.picking.adapter.in.admin.controller;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.request.PickingBatchCreateRequest;
+import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.request.PickingBulkCheckRequest;
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.request.PickingOrderCheckRequest;
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.PickingBatchAdminResponse;
+import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.PickingBulkCheckAdminResponse;
 import com.commercefoundry.domainlayer.picking.application.exception.PickingValidationMessage;
 import com.commercefoundry.domainlayer.picking.application.port.in.PickingBatchAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
@@ -92,6 +94,22 @@ public class PickingBatchAdminController {
         ContentDisposition attachment = ContentDisposition.attachment().filename("picking-list-" + batchId + ".csv").build();
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).contentType(CSV)
             .header(HttpHeaders.CONTENT_DISPOSITION, attachment.toString()).body(csv);
+    }
+
+    @Operation(
+        summary = "포장 일괄 검수",
+        description = "출고 묶음 한 개에서 대상 주문 수 이하로 포장 검수를 보낸다. 주문별 결과를 요청 순서대로 반환한다. "
+            + "동시 검수 충돌은 해당 주문 결과의 DELIVERY_037로 표시하며, 같은 수량으로 다시 보낼 수 있다."
+    )
+    @PreAuthorize(AdminAuthority.FULFILLMENT_MANAGE)
+    @AdminAudited(action = "PICKING_BULK_CHECK")
+    @PostMapping("/{batchId}/checks")
+    public ResponseEntity<Response<PickingBulkCheckAdminResponse>> checkBulk(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "출고 묶음 식별자", example = "4611686018427387904") @PathVariable long batchId,
+        @Valid @RequestBody PickingBulkCheckRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(useCase.checkBulk(batchId, request.toCommands(), member.memberId())));
     }
 
     @Operation(

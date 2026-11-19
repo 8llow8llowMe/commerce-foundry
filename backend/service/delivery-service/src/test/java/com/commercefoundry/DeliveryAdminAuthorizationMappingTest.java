@@ -43,6 +43,7 @@ class DeliveryAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/deliveries/picking-batches", AdminAuthority.FULFILLMENT_MANAGE),
         Map.entry("GET /api/v1/admin/deliveries/picking-batches/{batchId}", AdminAuthority.FULFILLMENT_READ),
         Map.entry("GET /api/v1/admin/deliveries/picking-batches/{batchId}/picking-list", AdminAuthority.FULFILLMENT_READ),
+        Map.entry("POST /api/v1/admin/deliveries/picking-batches/{batchId}/checks", AdminAuthority.FULFILLMENT_MANAGE),
         Map.entry("POST /api/v1/admin/deliveries/picking-batches/{batchId}/orders/{orderId}/checks", AdminAuthority.FULFILLMENT_MANAGE),
         // 국내 배송비 정책
         Map.entry("GET /api/v1/admin/shipping-policies/domestic", AdminAuthority.FULFILLMENT_READ),
