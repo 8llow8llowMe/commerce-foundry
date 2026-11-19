@@ -13,6 +13,9 @@ public final class PickingValidationMessage {
     public static final String QUANTITY = "DELIVERY_154:검수 수량은 1 이상의 정수여야 합니다.";
     public static final String DUPLICATE_ORDER_IDS = "DELIVERY_155:출고 묶음에 같은 주문을 두 번 담을 수 없습니다.";
 
+    public static final String BULK_CHECK_ITEMS = "DELIVERY_156:검수 주문(items)은 1건 이상 20건 이하여야 합니다.";
+    public static final String BULK_CHECK_ITEM = "DELIVERY_157:검수할 주문과 수량을 채워 주세요.";
+
     private PickingValidationMessage() {
     }
 }

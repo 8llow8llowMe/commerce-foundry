@@ -28,7 +28,9 @@ public enum PickingErrorCode {
     /** order 조회가 타임아웃 · 5xx · 서킷 열림 · 계약과 다른 응답이다. 묶음을 만들지 않았다 — 같은 요청을 다시 보내면 된다. */
     SNAPSHOT_UNAVAILABLE("DELIVERY_036", "주문 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
     /** 같은 출고 묶음의 검수가 동시에 겹쳐 이 요청은 저장하지 않았다(버전 충돌). 새로고침한 뒤 다시 보내면 같은 수량은 이전 결과를 그대로 쓴다. */
-    CONCURRENTLY_CHANGED("DELIVERY_037", "다른 곳에서 같은 출고 묶음을 먼저 검수했습니다. 새로고침한 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT);
+    CONCURRENTLY_CHANGED("DELIVERY_037", "다른 곳에서 같은 출고 묶음을 먼저 검수했습니다. 새로고침한 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /** 같은 주문을 두 번 보내거나 묶음의 대상 주문 수를 넘으면 쓰기 전에 요청 전체를 거절한다. */
+    INVALID_BULK_CHECK("DELIVERY_038", "서로 다른 주문을 출고 묶음의 대상 주문 수 이하로 보내 주세요.", HttpStatus.BAD_REQUEST);
 
     private final String code;
     private final String message;
