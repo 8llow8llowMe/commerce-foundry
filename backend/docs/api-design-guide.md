@@ -1654,6 +1654,22 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 - **오류**는 공통 봉투로 반환한다. 주문 목록 범위·형식·중복은 400(`DELIVERY_150`·`151`·`155`), 검수 맵·옵션 ID·수량은 400(`152`·`153`·`154`), 경로 ID 숫자 변환 실패는 400(`198`)이다. 없는 묶음은 404(`034`), 주문 스냅숏 조회 실패는 503(`036`)이다. 동시 검수 충돌 409(`037`)은 상세를 다시 조회한 뒤 재시도한다.
 - **감사**는 JWT 행위자로 `PICKING_BATCH_CREATE`·`PICKING_ORDER_CHECK`를 기록한다. 대상은 묶음 ID이며, 검수에 제출한 수량과 상품 옵션은 검수 이력에서 확인한다. FE 계약 리뷰어는 `seonghoho`다.
 
+#### 피킹 리스트 다운로드 (#739)
+
+`GET /api/v1/admin/deliveries/picking-batches/{batchId}/picking-list`는 요청마다 `FULFILLMENT_READ`를 확인한다. 200 응답은
+`Content-Type: text/csv;charset=UTF-8`, `Content-Disposition: attachment; filename="picking-list-<batchId>.csv"`와
+`Cache-Control: no-store`를 포함한다. 묶음 한 개(최대 20주문)에서 파일을 바로 만들어 전송하며 링크 발급이나 서버 파일 보관은 없다.
+없는 묶음은 404 `DELIVERY_034` JSON 봉투다.
+
+- 파일은 UTF-8 BOM과 CRLF를 쓰며 열은 `구분,출고 묶음,주문,상품 옵션,꺼낼 수량`이다. 수량은 정수, ID는 Excel에서 긴 숫자가 반올림되지 않도록
+  `#` 접두어를 붙인 문자열이다. 파일에는 받는 분·연락처·주소가 들어가지 않는다.
+- `합계` 행은 기존 상세의 상품 옵션별 합계와 같다. 주문 칸을 비워 두고 옵션 ID 오름차순으로 기록한다.
+  `주문별` 행은 대상 주문 ID와 옵션 ID 오름차순으로 기록한다. 묶음의 총 수량을 계산할 때는 `합계` 행만 더한다.
+- 서버에서 파일을 준비했거나 업무 오류가 발생하면 `PICKING_LIST_DOWNLOAD`에 JWT 행위자, `picking-batch:<batchId>`, 결과를 기록한다.
+  파일 내용은 감사 로그에 싣지 않는다.
+- FE #364는 다운로드 클릭마다 이 API를 호출해 200은 첨부 파일로 처리하고 오류는 JSON 봉투로 처리한다.
+  `Accept: text/csv, application/json`을 보낸다. 계약 리뷰어는 `seonghoho`다.
+
 ## 3. 계층 흐름
 
 ```text

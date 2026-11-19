@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.picking.domain.model.PickingBatch;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingCheck;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingExclusion;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingSnapshot;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -31,6 +32,26 @@ public class PickingBatchAdminPresenter {
                 .map(this::exclusion).toList(),
             batch.checks().stream().map(this::check).toList()
         );
+    }
+
+    public byte[] pickingListCsv(PickingBatchInfo info) {
+        PickingBatch batch = info.batch();
+        StringBuilder csv = new StringBuilder("\uFEFF구분,출고 묶음,주문,상품 옵션,꺼낼 수량\r\n");
+        for (var quantity : quantities(batch.pickingQuantities())) {
+            appendRow(csv, "합계", batch.id(), "", quantity);
+        }
+        for (PickingSnapshot order : batch.orders().stream().sorted(Comparator.comparingLong(PickingSnapshot::orderId)).toList()) {
+            for (var quantity : quantities(order.quantities())) {
+                appendRow(csv, "주문별", batch.id(), "#" + order.orderId(), quantity);
+            }
+        }
+        return csv.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    // 행 구분은 고정 문자열이고 동적 값은 양의 정수다. ID에 붙인 #은 엑셀에서 긴 숫자의 반올림을 막는다.
+    private void appendRow(StringBuilder csv, String kind, long batchId, String orderId, PickingBatchAdminResponse.Quantity quantity) {
+        csv.append(kind).append(",#").append(batchId).append(',').append(orderId)
+            .append(",#").append(quantity.skuId()).append(',').append(quantity.quantity()).append("\r\n");
     }
 
     private List<PickingBatchAdminResponse.Quantity> quantities(Map<Long, Long> quantities) {

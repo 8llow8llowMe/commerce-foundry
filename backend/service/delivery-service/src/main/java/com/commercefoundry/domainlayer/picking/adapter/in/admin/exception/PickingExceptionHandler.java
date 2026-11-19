@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.picking.application.exception.PickingErro
 import com.commercefoundry.domainlayer.picking.application.exception.PickingException;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -15,6 +16,8 @@ public class PickingExceptionHandler {
     @ExceptionHandler(PickingException.class)
     public ResponseEntity<Response<Void>> handle(PickingException exception) {
         PickingErrorCode code = exception.getErrorCode();
-        return ResponseEntity.status(code.getHttpStatus()).body(Response.fail(code.getCode(), exception.getMessage()));
+        // CSV만 요청한 클라이언트에도 업무 오류는 공통 JSON 봉투로 보낸다.
+        return ResponseEntity.status(code.getHttpStatus()).contentType(MediaType.APPLICATION_JSON)
+            .body(Response.fail(code.getCode(), exception.getMessage()));
     }
 }
