@@ -211,7 +211,7 @@ public abstract class OrderPaymentConsumerContract {
         }
     }
 
-    private static void send(KafkaTemplate<String, String> kafka, String topic, EventEnvelopeCodec codec, PaymentApprovalCommand command)
+    protected static void send(KafkaTemplate<String, String> kafka, String topic, EventEnvelopeCodec codec, PaymentApprovalCommand command)
         throws Exception {
         var envelope = new EventEnvelope(command.eventId(), "payment-approved", 1, NOW, "payment", "payment", Long.toString(command.orderId()),
             codec.toTree(new PaymentApprovedEventListener.PaymentApprovedMessage(Long.toString(command.paymentId()), Long.toString(command.orderId()),
@@ -219,7 +219,7 @@ public abstract class OrderPaymentConsumerContract {
         kafka.send(topic, envelope.aggregateId(), codec.encode(envelope)).get();
     }
 
-    private static void awaitCommittedOffset(AdminClient admin, String group, String topic, long expected) {
+    protected static void awaitCommittedOffset(AdminClient admin, String group, String topic, long expected) {
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
             var offsets = admin.listConsumerGroupOffsets(group).partitionsToOffsetAndMetadata().get();
             assertThat(offsets.get(new TopicPartition(topic, 0))).isNotNull();
@@ -234,6 +234,13 @@ public abstract class OrderPaymentConsumerContract {
 
     protected ConcurrentMessageListenerContainer<String, String> startConsumer(String topic, DefaultKafkaConsumerFactory<String, String> consumers,
         KafkaTemplate<String, String> kafka, AtomicInteger deliveries, java.util.function.Consumer<RuntimeException> onFailure) {
+        return startConsumer(topic, consumers, kafka, deliveries, onFailure,
+            new MessagingProperties.Retry(3, Duration.ofMillis(50), 2, Duration.ofMillis(100)));
+    }
+
+    protected ConcurrentMessageListenerContainer<String, String> startConsumer(String topic, DefaultKafkaConsumerFactory<String, String> consumers,
+        KafkaTemplate<String, String> kafka, AtomicInteger deliveries, java.util.function.Consumer<RuntimeException> onFailure,
+        MessagingProperties.Retry retry) {
         var properties = new ContainerProperties(topic);
         properties.setAckMode(ContainerProperties.AckMode.RECORD);
         properties.setMessageListener((MessageListener<String, String>) record -> {
@@ -246,8 +253,7 @@ public abstract class OrderPaymentConsumerContract {
             deliveries.incrementAndGet();
         });
         var container = new ConcurrentMessageListenerContainer<>(consumers, properties);
-        container.setCommonErrorHandler(MessagingErrorHandlers.create(kafka,
-            new MessagingProperties.Retry(3, Duration.ofMillis(50), 2, Duration.ofMillis(100)), null));
+        container.setCommonErrorHandler(MessagingErrorHandlers.create(kafka, retry, null));
         container.start();
         return container;
     }
@@ -1089,6 +1095,26 @@ public abstract class OrderPaymentConsumerContract {
         assertThat(workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow().holdCode()).isEqualTo("OWNERSHIP_MISMATCH");
         verifyNoInteractions(restorations);
         assertThat(replies(command.orderId())).isZero();
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"NOT_FOUND,PRODUCT_003", "NOT_CONFIRMED,PRODUCT_027",
+        "QUANTITY_EXCEEDED,PRODUCT_028", "RESTORATION_MISMATCH,PRODUCT_029"})
+    void sweepHoldsTerminalProductRejectionWithoutReclaimOrReply(StockReservationException.Failure failure, String code) {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        doThrow(new StockReservationException(failure)).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+
+        sweepBatch();
+        sweepBatch();
+
+        assertWork(payment(command), "HELD");
+        var held = workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow();
+        assertThat(held.holdCode()).isEqualTo(code);
+        assertThat(held.attempts()).isEqualTo(1);
+        verify(restorations).restoreCancellation(pending.restorationClaimId(), pending.stockReservationId(), skus());
+        assertThat(replies(command.orderId())).isZero();
+        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
     }
 
     @Test

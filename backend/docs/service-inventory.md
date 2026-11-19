@@ -4,8 +4,8 @@
 
 order-service의 #582 A는 `order_stock_restoration` 작업원장·CAS·운영 DDL/backfill 저장 기반을 제공한다.
 B1은 PAYMENT_RECORD 의도·작업 동시 생성, 재전달 누락 보충·전체 출처 대조, 인라인 복원 완료의 작업·결제·inbox·outbox 원자 저장을 연결한다.
-최초 등록 min-age만 지원하며 스윕·ShedLock·장기 장애/DLT 자동 수복은 B2 후속이다.
-API·FE 계약 변화는 없으며 #582 자동 복원 완료와 소비·운영 결제 게이트 개방을 의미하지 않는다.
+B2는 기본 OFF 전용 ShedLock 스윕으로 커밋된 PAYMENT_RECORD의 장기 장애·DLT 복구를 지원한다. 소비·운영 결제 게이트의 기존 선행 조건을 지킨다.
+API·FE 계약은 유지한다. 버려진 확정 선점, 프로브 장애 이관, 지표·알림은 #582 후속이다.
 > 포트는 확정했다(#3 · #36). 바꾸면 이 표와 모듈의 `application.yml`, 서비스의 `*ApplicationTests`, `local-run-guide.md` §5 를 같이 고친다.
 
 ## 1. 실행 모듈

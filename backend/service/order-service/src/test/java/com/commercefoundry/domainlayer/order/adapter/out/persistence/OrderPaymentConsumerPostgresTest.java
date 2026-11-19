@@ -22,7 +22,25 @@ import com.commercefoundry.messaging.support.MessagingKafkaContainers;
 import com.commercefoundry.domainlayer.order.adapter.in.event.PaymentApprovedEventListener;
 import com.commercefoundry.messaging.event.EventEnvelope;
 import com.commercefoundry.messaging.event.EventEnvelopeCodec;
+import com.commercefoundry.domainlayer.order.adapter.in.scheduler.OrderPaymentRestorationSweepScheduler;
+import com.commercefoundry.domainlayer.order.application.port.in.PaymentRestorationSweepUseCase;
+import com.commercefoundry.global.config.OrderPaymentRestorationLock;
+import com.commercefoundry.global.config.OrderPaymentRestorationLockConfig;
+import com.commercefoundry.messaging.event.TopicNames;
+import com.commercefoundry.messaging.properties.MessagingProperties;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import javax.sql.DataSource;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -291,6 +309,167 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
         }
         assertThat(writers).hasValue(2);
         assertSweepResult(command, "RESTORED", 1, true);
+    }
+
+    @Test
+    void kafkaExhaustionReachesDltThenScheduledSweepRecoversWithoutRedelivery() throws Exception {
+        var command = arrange(OrderStatus.CANCELED);
+        long reservation = jdbc.queryForObject("select stock_reservation_id from orders.orders where id=?", Long.class, command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservation, command.orderId());
+        AtomicBoolean productAvailable = new AtomicBoolean();
+        var appliedClaims = java.util.concurrent.ConcurrentHashMap.<Long>newKeySet();
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            if (!productAvailable.get()) {
+                throw new StockReservationException(StockReservationException.Failure.UNKNOWN);
+            }
+            appliedClaims.add(invocation.getArgument(0));
+            return null;
+        }).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+
+        String topic = "commerce-foundry.test.payment.sweep-" + UUID.randomUUID();
+        String dlt = TopicNames.deadLetterTopic(topic);
+        String group = "sweep-source-" + UUID.randomUUID();
+        var codec = new EventEnvelopeCodec(65536);
+        var producer = new DefaultKafkaProducerFactory<String, String>(Map.of("bootstrap.servers", bootstrapServers()),
+            new StringSerializer(), new StringSerializer());
+        var kafka = new KafkaTemplate<>(producer);
+        var consumers = new DefaultKafkaConsumerFactory<String, String>(Map.of("bootstrap.servers", bootstrapServers(),
+            "group.id", group, "auto.offset.reset", "earliest", "enable.auto.commit", false, "max.poll.records", 1),
+            new StringDeserializer(), new StringDeserializer());
+        AtomicInteger failures = new AtomicInteger();
+        AtomicInteger accepted = new AtomicInteger();
+        try (var admin = AdminClient.create(Map.of("bootstrap.servers", bootstrapServers()));
+            var deadLetters = new KafkaConsumer<String, String>(Map.of("bootstrap.servers", bootstrapServers(), "enable.auto.commit", false),
+                new StringDeserializer(), new StringDeserializer())) {
+            admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1), new NewTopic(dlt, 1, (short) 1))).all().get(10, TimeUnit.SECONDS);
+            var partition = new TopicPartition(dlt, 0);
+            deadLetters.assign(List.of(partition));
+            deadLetters.seekToBeginning(List.of(partition));
+            var consumer = startConsumer(topic, consumers, kafka, accepted, failure -> failures.incrementAndGet(),
+                new MessagingProperties.Retry(8, Duration.ofMillis(50), 2, Duration.ofMillis(100)));
+            try {
+                send(kafka, topic, codec, command);
+                var records = await().pollInSameThread().atMost(Duration.ofSeconds(40))
+                    .until(() -> deadLetters.poll(Duration.ofMillis(100)), batch -> !batch.isEmpty());
+                assertThat(records.count()).isEqualTo(1);
+                var record = records.iterator().next();
+                assertThat(record.key()).isEqualTo(Long.toString(command.orderId()));
+                assertThat(codec.decode(record.value()).eventId()).isEqualTo(command.eventId());
+                assertThat(new String(record.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_TOPIC).value(), StandardCharsets.UTF_8)).isEqualTo(topic);
+                assertThat(ByteBuffer.wrap(record.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_PARTITION).value()).getInt()).isZero();
+                assertThat(ByteBuffer.wrap(record.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_OFFSET).value()).getLong()).isZero();
+                awaitCommittedOffset(admin, group, topic, 1L);
+                assertThat(failures).hasValue(8);
+                assertThat(accepted).hasValue(0);
+                assertSweepResult(command, "RESTORE_PENDING", 0, false);
+            } finally {
+                consumer.stop();
+            }
+            assertThat(consumer.isRunning()).isFalse();
+
+            var pending = payments.findByPaymentId(command.paymentId()).orElseThrow();
+            assertThat(pending.awaitsRestoration()).isTrue();
+            productAvailable.set(true);
+            expireSweepLease(pending);
+            AtomicInteger ticks = new AtomicInteger();
+            schedulerContext((batch, initial, maximum) -> {
+                sweep.sweep(batch, initial, maximum);
+                ticks.incrementAndGet();
+            }).withUserConfiguration(SchedulingFixture.class).run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context).hasSingleBean(OrderPaymentRestorationSweepScheduler.class);
+                await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertThat(ticks.get()).isGreaterThanOrEqualTo(2));
+                assertSweepResult(command, "RESTORED", 1, false);
+            });
+
+            assertThat(failures).hasValue(8);
+            assertThat(accepted).hasValue(0);
+            awaitCommittedOffset(admin, group, topic, 1L);
+            assertThat(deadLetters.poll(Duration.ofMillis(200)).count()).isZero();
+            assertThat(appliedClaims).containsExactly(pending.restorationClaimId());
+            verify(restorations, times(9)).restoreCancellation(pending.restorationClaimId(), reservation,
+                new TreeMap<>(Map.of(101L, 1)));
+            String payload = freshJdbc().queryForObject("select payload from orders.outbox where aggregate_id=? and event_type='order-payment-rejected'",
+                String.class, Long.toString(command.orderId()));
+            assertThat(codec.decode(payload).payload().get("reason").asString()).isEqualTo("ORDER_CANCELED");
+        } finally {
+            producer.destroy();
+        }
+    }
+
+    @Test
+    void lateShedLockUnlockLetsThirdTickEnterWithoutRepeatingTheRestoration() {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        CountDownLatch firstStock = new CountDownLatch(1);
+        CountDownLatch secondStock = new CountDownLatch(1);
+        CountDownLatch finishFirst = new CountDownLatch(1);
+        CountDownLatch finishSecond = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        var appliedClaims = java.util.concurrent.ConcurrentHashMap.<Long>newKeySet();
+        doAnswer(invocation -> {
+            boolean first = calls.getAndIncrement() == 0;
+            (first ? firstStock : secondStock).countDown();
+            awaitLatch(first ? finishFirst : finishSecond);
+            if (first) {
+                throw new StockReservationException(StockReservationException.Failure.NOT_CONFIRMED);
+            }
+            appliedClaims.add(invocation.getArgument(0));
+            return null;
+        }).when(restorations).restoreCancellation(eq(pending.restorationClaimId()), eq(pending.stockReservationId()), any());
+
+        var runner = schedulerContext(sweep);
+        runner.run(first -> runner.run(second -> runner.run(third -> {
+            assertThat(first).hasNotFailed();
+            assertThat(second).hasNotFailed();
+            assertThat(third).hasNotFailed();
+            try (var executor = Executors.newFixedThreadPool(2)) {
+                var beforeExpiry = executor.submit(first.getBean(OrderPaymentRestorationSweepScheduler.class)::sweepDuePaymentRestorations);
+                try {
+                    awaitLatch(firstStock);
+                    assertThat(second.getBean(OrderPaymentRestorationLock.class).runIfAcquired(Duration.ofMinutes(5), () -> {
+                        throw new AssertionError("the first scheduler still owns the lock");
+                    })).isFalse();
+                    assertThat(calls).hasValue(1);
+                    jdbc.update("update orders.shedlock set lock_until=clock_timestamp()-interval '1 second' where name='order-payment-restoration'");
+                    expireSweepLease(pending);
+                    var afterExpiry = executor.submit(second.getBean(OrderPaymentRestorationSweepScheduler.class)::sweepDuePaymentRestorations);
+                    awaitLatch(secondStock);
+                    finishFirst.countDown();
+                    beforeExpiry.get(20, TimeUnit.SECONDS);
+                    assertSweepResult(command, "RESTORE_PENDING", 0, false);
+                    var active = workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow();
+                    assertThat(active.attempts()).isEqualTo(2);
+                    assertThat(active.nextAttemptAt()).isAfter(NOW);
+                    assertThat(third.getBean(OrderPaymentRestorationLock.class).runIfAcquired(Duration.ofMinutes(5), this::sweepBatch)).isTrue();
+                    assertThat(calls).hasValue(2);
+                    assertThat(workLedger.findByClaimId(pending.restorationClaimId())).contains(active);
+                    finishSecond.countDown();
+                    afterExpiry.get(20, TimeUnit.SECONDS);
+                } finally {
+                    finishFirst.countDown();
+                    finishSecond.countDown();
+                }
+            }
+        })));
+        assertThat(appliedClaims).containsExactly(pending.restorationClaimId());
+        assertSweepResult(command, "RESTORED", 1, false);
+    }
+
+    private ApplicationContextRunner schedulerContext(PaymentRestorationSweepUseCase useCase) {
+        return new ApplicationContextRunner().withUserConfiguration(OrderPaymentRestorationLockConfig.class)
+            .withPropertyValues("order.payment-restoration.sweep.enabled=true", "order.payment-restoration.sweep.interval=1s",
+                "spring.cloud.openfeign.client.config.default.connect-timeout=2000",
+                "spring.cloud.openfeign.client.config.default.read-timeout=3000")
+            .withBean(DataSource.class, () -> new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()))
+            .withBean(Clock.class, Clock::systemUTC)
+            .withBean(PaymentRestorationSweepUseCase.class, () -> useCase);
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    @EnableScheduling
+    static class SchedulingFixture {
     }
 
     private void assertSweepResult(PaymentApprovalCommand command, String status, long replies, boolean inline) {
