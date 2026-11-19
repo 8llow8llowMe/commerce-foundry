@@ -24,6 +24,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentQ
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.StockReservationQueryResult;
 import com.commercefoundry.domainlayer.order.application.service.OrderPaymentEventFacade;
+import com.commercefoundry.domainlayer.order.application.port.in.PaymentRestorationSweepUseCase;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.*;
 import com.commercefoundry.global.messaging.JpaProcessedEventStore;
@@ -81,6 +82,7 @@ public abstract class OrderPaymentConsumerContract {
     @Autowired protected JpaProcessedEventStore inbox;
     @Autowired protected OrderPaymentEventFacade facade;
     @Autowired protected OrderPaymentProcessor processor;
+    @Autowired protected PaymentRestorationSweepUseCase sweep;
     @Autowired protected PaymentQueryPort remotePayment;
     @Autowired protected StockReservationPort stock;
     @Autowired protected StockRestorationPort restorations;
@@ -1023,6 +1025,129 @@ public abstract class OrderPaymentConsumerContract {
 
     private void cancel(PaymentApprovalCommand command) {
         jdbc.update("update orders.orders set status='CANCELED',version=version+1 where id=?", command.orderId());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CANCELED", "PARTIAL_CANCELED", "UNKNOWN"})
+    void sweepUsesLastVerifiedSourceAndKeepsOriginalReason(String latest) {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        AtomicInteger queries = new AtomicInteger();
+        when(remotePayment.findPayment(command.paymentId())).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            var claimed = workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow();
+            assertThat(claimed.attempts()).isEqualTo(1);
+            assertThat(claimed.nextAttemptAt()).isEqualTo(NOW.plusSeconds(60));
+            String status = queries.getAndIncrement() == 0 ? "DONE" : latest;
+            return Optional.of(sweepSource(command, status, status.equals("UNKNOWN") ? null : NOW));
+        });
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(queries).hasValue(1);
+            return null;
+        }).when(restorations).restoreCancellation(anyLong(), anyLong(), any());
+
+        sweepBatch();
+        assertWork(payment(command), "RESTORED");
+        assertThat(queries).hasValue(2);
+        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+        assertThat(replies(command.orderId())).isEqualTo(latest.equals("CANCELED") ? 0 : 1);
+        if (!latest.equals("CANCELED")) {
+            verify(events).paymentRejected(argThat(record -> record.result() == pending.result()));
+        }
+        verify(restorations).restoreCancellation(pending.restorationClaimId(), pending.stockReservationId(), skus());
+    }
+
+    @Test
+    void sweepLeavesPendingWhenSecondLookupFailsAndRetriesWithSameClaim() {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        var verified = Optional.of(sweepSource(command, "DONE", NOW));
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(verified, Optional.empty(), verified, verified);
+
+        sweepBatch();
+        assertWork(payment(command), "RESTORE_PENDING");
+        assertThat(replies(command.orderId())).isZero();
+        expireSweepLease(pending);
+
+        sweepBatch();
+        assertWork(payment(command), "RESTORED");
+        verify(restorations, times(2)).restoreCancellation(pending.restorationClaimId(), pending.stockReservationId(), skus());
+        assertThat(replies(command.orderId())).isEqualTo(1);
+        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+    }
+
+    @Test
+    void sweepHoldsExternalApprovalMismatchBeforeCallingProduct() {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        when(remotePayment.findPayment(command.paymentId())).thenReturn(Optional.of(sweepSource(command, "DONE", NOW.plusSeconds(1))));
+
+        sweepBatch();
+
+        assertWork(payment(command), "HELD");
+        assertThat(workLedger.findByClaimId(pending.restorationClaimId()).orElseThrow().holdCode()).isEqualTo("OWNERSHIP_MISMATCH");
+        verifyNoInteractions(restorations);
+        assertThat(replies(command.orderId())).isZero();
+    }
+
+    @Test
+    void sweepHoldsPaidConflictBeforeCallingEitherService() {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> payments.insert(new OrderPayment(IDS.incrementAndGet(),
+            command.orderId(), IDS.incrementAndGet(), command.memberId(), command.amount(), NOW, OrderPayment.Result.PAID,
+            pending.stockReservationId(), UUID.randomUUID(), null, null, null)));
+        clearInvocations(remotePayment);
+
+        sweepBatch();
+
+        assertWork(payment(command), "HELD");
+        verifyNoInteractions(remotePayment, restorations);
+        assertThat(replies(command.orderId())).isZero();
+    }
+
+    @Test
+    void sweepMirrorsExistingTimestampAfterCheckingTheWholeSource() {
+        var command = arrange(OrderStatus.CANCELED);
+        var pending = sweepIntent(command);
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> payments.markRestored(pending.id(), NOW.minusSeconds(15)));
+        var mismatched = arrange(OrderStatus.CANCELED);
+        var second = sweepIntent(mismatched);
+        new TransactionTemplate(transactions).executeWithoutResult(tx -> payments.markRestored(second.id(), NOW.minusSeconds(30)));
+        jdbc.update("update orders.order_stock_restoration set stock_reservation_id=stock_reservation_id+1000000 where claim_id=?",
+            second.restorationClaimId());
+        clearInvocations(remotePayment);
+
+        sweepBatch();
+
+        assertWork(payment(command), "RESTORED");
+        assertThat(payment(command).restoredAt()).isEqualTo(NOW.minusSeconds(15));
+        assertThat(workLedger.findByClaimId(second.restorationClaimId()).orElseThrow().status()).isEqualTo(OrderStockRestoration.Status.HELD);
+        verifyNoInteractions(remotePayment, restorations);
+        assertThat(replies(command.orderId())).isZero();
+        assertThat(replies(mismatched.orderId())).isZero();
+    }
+
+    protected OrderPayment sweepIntent(PaymentApprovalCommand command) {
+        var pending = processor.complete(command, new VerifiedPayment(command.paymentId(), command.orderId(), command.memberId(),
+            command.amount(), NOW, "DONE"), StockConfirmation.confirmed(order(command).stockReservationId())).orElseThrow().orderPayment();
+        expireSweepLease(pending);
+        return pending;
+    }
+
+    protected void expireSweepLease(OrderPayment payment) {
+        jdbc.update("update orders.order_stock_restoration set next_attempt_at=? where claim_id=?", java.sql.Timestamp.from(NOW),
+            payment.restorationClaimId());
+    }
+
+    protected void sweepBatch() {
+        sweep.sweep(10, Duration.ofMinutes(1), Duration.ofHours(1));
+    }
+
+    private static PaymentQueryResult sweepSource(PaymentApprovalCommand command, String status, Instant approvedAt) {
+        return new PaymentQueryResult(command.paymentId(), command.orderId(), command.memberId(), status, command.amount(), approvedAt,
+            approvedAt == null ? null : "CARD");
     }
 
     private static SortedMap<Long, Integer> skus() {

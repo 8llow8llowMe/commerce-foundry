@@ -68,15 +68,20 @@ class OrderPaymentCrashRecoveryPostgresTest {
 
     @Test
     void killAfterInitialConfirm200ThenFreshJvmCanceledReplayRestoresExactlyOnce() throws Exception {
-        runCrash(false);
+        runCrash(false, false);
     }
 
     @Test
     void killAfterReReservedPartialCancelRestore200ThenFreshJvmUsesSameClaim() throws Exception {
-        runCrash(true);
+        runCrash(true, false);
     }
 
-    private void runCrash(boolean reReserved) throws Exception {
+    @Test
+    void killSweepJvmAfterProduct200ThenFreshSweepUsesSameClaimWithoutInbox() throws Exception {
+        runCrash(true, true);
+    }
+
+    private void runCrash(boolean reReserved, boolean sweepRecovery) throws Exception {
         long orderId = IDS.incrementAndGet();
         long paymentId = IDS.incrementAndGet();
         long original = IDS.incrementAndGet();
@@ -156,10 +161,25 @@ class OrderPaymentCrashRecoveryPostgresTest {
                 assertThat(inbox(event)).isZero();
                 assertThat(outbox(orderId)).isZero();
                 kill(resumed);
-                resumed = start(temporary, "third", http, orderId, paymentId, event, "none");
+                if (sweepRecovery) {
+                    barrier.set(false);
+                    resumed = start(temporary, "sweep-stop", http, orderId, paymentId, event, "restore", "1000");
+                    Process interruptedSweep = resumed;
+                    await().atMost(Duration.ofSeconds(90)).until(() -> barrier.get() || !interruptedSweep.isAlive());
+                    assertThat(barrier).as("sweep boundary: %s", diagnostics(temporary.resolve("sweep-stop.log"))).isTrue();
+                    assertThat(jdbc.queryForObject("select attempts from orders.order_stock_restoration where payment_id=?",
+                        Integer.class, paymentId)).isEqualTo(1);
+                    assertThat(row(paymentId).get("restored_at")).isNull();
+                    assertThat(inbox(event)).isZero();
+                    assertThat(outbox(orderId)).isZero();
+                    kill(resumed);
+                    resumed = start(temporary, "sweep-resume", http, orderId, paymentId, event, "none", "1120");
+                } else {
+                    resumed = start(temporary, "third", http, orderId, paymentId, event, "none");
+                }
                 assertSuccess(resumed);
                 assertThat(row(paymentId).get("restoration_claim_id")).isEqualTo(pending.get("restoration_claim_id"));
-                assertThat(restoreRequests).hasValue(2);
+                assertThat(restoreRequests).hasValue(sweepRecovery ? 3 : 2);
             } else {
                 assertSuccess(resumed);
                 assertThat(restoreRequests).hasValue(1);
@@ -172,7 +192,7 @@ class OrderPaymentCrashRecoveryPostgresTest {
             assertThat(completedWork.get("status")).isEqualTo("RESTORED");
             assertThat(completedWork.get("restored_at")).isEqualTo(row(paymentId).get("restored_at"));
             assertThat(applications).hasValue(1);
-            assertThat(inbox(event)).isEqualTo(1);
+            assertThat(inbox(event)).isEqualTo(sweepRecovery ? 0 : 1);
             assertThat(outbox(orderId)).isEqualTo(reReserved ? 1 : 0);
             resumed = start(temporary, "duplicate", http, orderId, paymentId, UUID.randomUUID(), "none");
             assertSuccess(resumed);
@@ -202,6 +222,10 @@ class OrderPaymentCrashRecoveryPostgresTest {
     }
 
     private Process start(Path directory, String run, String http, long order, long payment, UUID event, String stage) throws Exception {
+        return start(directory, run, http, order, payment, event, stage, null);
+    }
+
+    private Process start(Path directory, String run, String http, long order, long payment, UUID event, String stage, String sweepSeconds) throws Exception {
         Path arguments = directory.resolve(run + ".args");
         Path classpathFile = Path.of(Objects.requireNonNull(System.getProperty("order.test.runtimeClasspathFile"), "test runtime classpath file property"));
         // Gradle의 원본 파일은 UTF-8, Java launcher의 임시 argfile은 native 인코딩이다. 미지원 문자는 치환 없이 실패한다.
@@ -236,6 +260,7 @@ class OrderPaymentCrashRecoveryPostgresTest {
         env.put("LOGGING_LEVEL_ROOT", "ERROR");
         env.put("CASE_HTTP", http); env.put("CASE_ORDER", Long.toString(order)); env.put("CASE_PAYMENT", Long.toString(payment));
         env.put("CASE_EVENT", event.toString()); env.put("CASE_STOP", stage);
+        if (sweepSeconds != null) { env.put("CASE_SWEEP_SECONDS", sweepSeconds); }
         return builder.start();
     }
 
