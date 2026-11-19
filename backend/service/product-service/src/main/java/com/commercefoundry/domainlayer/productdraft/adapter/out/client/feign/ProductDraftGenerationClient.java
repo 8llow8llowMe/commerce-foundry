@@ -5,6 +5,8 @@ import com.commercefoundry.domainlayer.productdraft.adapter.out.client.feign.dto
 import com.commercefoundry.domainlayer.productdraft.adapter.out.client.feign.dto.ProductDraftGenerationRegistrationResponse;
 import com.commercefoundry.security.internal.client.InternalFeignClientConfiguration;
 import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
@@ -15,4 +17,7 @@ public interface ProductDraftGenerationClient {
 
     @PostMapping("/internal/v1/product-draft-generation-jobs")
     Response<ProductDraftGenerationRegistrationResponse> register(@RequestBody ProductDraftGenerationRegisterRequest request);
+
+    @GetMapping("/internal/v1/product-draft-generation-jobs/{jobId}/result")
+    feign.Response result(@PathVariable("jobId") long jobId);
 }

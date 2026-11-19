@@ -200,6 +200,7 @@ class ProductDraftGenerationClientAdapterTest {
     private ProductDraftGenerationClientAdapter adapter(Client transport) {
         ProductDraftGenerationClient client = Feign.builder().contract(new SpringMvcContract()).client(transport)
             .options(config.productDraftGenerationOptions()).retryer(config.productDraftGenerationRetryer())
+            .responseInterceptor(config.productDraftGenerationResultStream())
             .encoder((object, type, template) -> template.body(mapper.writeValueAsBytes(object), StandardCharsets.UTF_8))
             .decoder((response, type) -> {
                 try {
