@@ -12,6 +12,7 @@ import { BulkStatusPanel } from './BulkStatusPanel';
 import { OrderFilters } from './OrderFilters';
 import { OrderTable } from './OrderTable';
 import { ShipmentBulkPanel } from './ShipmentBulkPanel';
+import { PickingBatchPanel } from '@/components/picking/PickingBatchPanel';
 
 /** `reload` — 어느 다시 읽기의 응답인지. 지금 값과 다르면 일괄 변경 뒤 새 목록을 기다리는 중이다 */
 type Loaded =
@@ -154,6 +155,9 @@ export function OrderList({ query }: { query: OrderQuery }) {
           }}
           onDenied={setDenied}
         />
+      )}
+      {current?.kind !== 'denied' && (
+        <PickingBatchPanel selected={selectedOrders} onDenied={setDenied} />
       )}
       {current?.kind !== 'denied' && (
         <ShipmentBulkPanel

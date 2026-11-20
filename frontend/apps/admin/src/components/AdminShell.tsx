@@ -85,7 +85,7 @@ export function AdminShell({ role, children }: { role: OperatorRole | null; chil
   return (
     <div className="flex min-h-dvh flex-col">
       <SkipLink />
-      <header className="flex h-14 items-center justify-between gap-4 bg-primary px-4 text-primary-fg">
+      <header className="flex h-14 items-center print:hidden justify-between gap-4 bg-primary px-4 text-primary-fg">
         <Link href="/" className="text-sm font-semibold">
           {brand.name} 어드민
         </Link>
@@ -101,7 +101,7 @@ export function AdminShell({ role, children }: { role: OperatorRole | null; chil
         </div>
       </header>
       <div className="flex flex-1 flex-col md:flex-row">
-        <aside data-tour="nav" className="bg-muted px-3 py-6 md:w-56 md:shrink-0">
+        <aside data-tour="nav" className="bg-muted px-3 print:hidden py-6 md:w-56 md:shrink-0">
           <NavLinks groups={visibleNav(NAV, permissions)} />
         </aside>
         {/* tabIndex 를 두지 않는다 — 브라우저가 #main 을 다음 Tab 의 시작점으로 삼는다. tabIndex -1 이면 본문 빈 곳을 누를 때마다

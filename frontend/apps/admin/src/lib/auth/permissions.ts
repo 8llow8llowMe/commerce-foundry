@@ -85,6 +85,7 @@ const ROUTE_PERMISSIONS: readonly (readonly [prefix: string, permission: AdminRe
   ['/claims', 'ORDER_READ'],
   ['/payments', 'SETTLEMENT_READ'],
   ['/shipping-policies', 'FULFILLMENT_READ'],
+  ['/picking', 'FULFILLMENT_READ'],
   ['/members', 'CS_READ'],
   ['/support', 'CS_READ'],
   ['/store', 'SETTINGS_READ'],

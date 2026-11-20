@@ -485,7 +485,7 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
 - **다른 운영자 기록이 보이지 않게** — 로그인 화면에 오면(로그아웃 · 세션 만료 · 계정 전환, `LoginForm`) 그리고 로그아웃 버튼에서 `signOut` 으로 메모리 기록 · 못 보낸 기록 ·
   이 브라우저 기록을 지운다. 콘솔에 다시 들어오면 새 운영자 기록을 불러온다. 운영자가 바뀌었을 수 있는 때(`refresh` · `signOut`)는 진행 중인 보내기 · 불러오기 결과를 버린다.
 - 실제 업무 완료(`tasks`)와 시작 체크리스트는 #358 이다 — 투어 완료는 안내를 본 기록일 뿐 업무 완료가 아니다. 리포트 화면(#221)이 생기면 같은 표에 투어를 더한다.
-- **주문 투어** — 목록(`orders-v2`: 조건 · 표 · 일괄 변경 · 송장 일괄 등록)과 상세(`order-detail-v2`: 현재 상태 · 상태 바꾸기 · 송장 등록 · 상태 이력). 상세의 `order-status-actions` 는
+- **주문 투어** — 목록(`orders-v2`: 조건 · 표 · 일괄 변경 · 출고 묶음 만들기(`order-picking`, #364) · 송장 일괄 등록)과 상세(`order-detail-v2`: 현재 상태 · 상태 바꾸기 · 송장 등록 · 상태 이력). 상세의 `order-status-actions` 는
   바꿀 수 있는 상태가 없을 때 버튼 대신 나오는 안내 문구에도 달아 필수 단계로 둔다(종료된 주문에서도 4초를 기다리지 않게).
   상세의 송장 등록(`order-shipment`)은 상품 준비중 주문에만 있어 선택 단계다. 서버 허용 목록에 `orders` · `order-detail` 이 오르기 전에는 이 브라우저 기록으로만 간다.
 - **상품 등록 투어**(`product-new-v2`, `/products/new`) — 기본 정보 · 이미지 · 통화 · 가격 · 옵션 · 옵션 조합(SKU) · 등록 버튼. 앵커(`product-basic` · `product-images` · `product-price` ·
@@ -495,6 +495,9 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   시작 체크리스트의 "첫 상품 등록" 업무(`PRODUCT_REGISTERED`)의 "안내와 함께 열기" 가 이 투어를 연다.
 - **상품 기본 정보 수정 투어**(`product-edit-v1`, `/products/[productId]/edit`) — 문구(`product-edit-text`) · 판매 상태 · 노출(`product-edit-status`) · 저장 줄(`product-edit-save`).
   폼은 서버에서 상품을 읽은 뒤 그려지고, 권한이 없으면 권한 안내라 필수 요소가 없어 시작하지 않는다. 폼 테스트가 앵커 목록과 정의를 맞춰 본다.
+- **출고 작업대 투어**(`picking-v1`, `/picking/[batchId]`, #364) — 피킹 목록(`picking-list`) · 주문별 검수(`picking-checks`) · 일괄 검수(`picking-check-all`) · 송장 등록 안내(가운데).
+  묶음을 읽은 뒤에만 그려져 모두 필수 단계다. 주문 목록 투어는 출고 묶음 단계를 더했지만 버전을 올리지 않았다 — 서버 허용 목록의 `orders` 가 v2 라
+  올리면 서버 기록을 못 쓴다. 이미 본 운영자는 도움말의 "다시 보기" 로 새 단계를 본다. `picking` 은 아직 서버 허용 목록에 없어 이 브라우저 기록으로만 간다.
 - **결제 확인 투어**(`payments-v1`, `/payments`) — 조건(`payment-filters`) · 표(`payment-table`, 빈 목록이면 없어 선택) · 읽기 전용 안내(가운데).
 - **상품 목록 투어**(`products-v1`, `/products`) — 상품 등록 시작점(`product-create`) · 조건(`product-filters`) · 표(`product-table`, 빈 목록이면 없어 선택).
   등록 자체는 상품 등록 투어가 안내한다.
@@ -631,6 +634,25 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   교체한 사람은 서버가 마스킹한 `adminDisplayName`(BE #322, #405)을 보이고, null 이면 "관리자" 다(`historyAdminLabel`). 내부 회원 아이디(`adminMemberId`) 원문은 보이지 않는다(#305).
   이름 조회(auth-service)가 실패하면 서버가 이름을 비우지 않고 503 `DELIVERY_013` 을 준다 — "관리자 이름을 불러오지 못했습니다" 와 다시 불러오기로 안내한다(`historyLoadFailure`).
   저장 성공 · 409 · 결과 모름으로 다시 읽은 뒤에는 `usePolicyEditor` 의 `revision` 을 `key` 로 써서 이력을 첫 페이지부터 다시 읽는다.
+
+### 출고 작업대 (`/picking/[batchId]`, #364 · BE #363 · #739 · #740)
+
+계약 정본은 `backend/docs/api-design-guide.md` §2-20 이다. 화면은 `FULFILLMENT_READ`(경로 권한), 묶음 생성 · 검수는 `FULFILLMENT_MANAGE` 다.
+
+- **묶음 만들기** — 주문 목록에서 고른 주문(1~20건)으로 `POST .../picking-batches` 를 보내고 작업대로 간다(`PickingBatchPanel`).
+  담을 수 있는지(상품 준비중 · 국내 · 일반)는 서버가 정한다. 빠진 주문은 작업대에 이유와 함께 보인다. 다시 보내면 새 묶음이 생겨
+  보내는 중 두 번째 클릭을 막고, 결과를 모르는 실패(연결 끊김 · 5xx)는 자동으로 다시 보내지 않고 안내만 한다. 전부 빠지면 409 `DELIVERY_033` 안내다.
+- **복원** — 묶음 ID 가 주소에 있어 새로고침 · 복귀 때 상세를 다시 읽는다. 센 수량 입력은 메모리에만 두고 브라우저 저장소에 남기지 않는다.
+  묶음 목록 API 가 없어 주소를 잃으면 새 묶음을 만든다(검수 기록은 서버에 남는다).
+- **피킹 목록** — 상세의 `pickingQuantities` 를 그대로 보인다(화면에서 합계를 다시 계산하지 않는다). 옵션 이름은 대상 주문 상세(`ORDER_READ`)의 항목에서 모으고,
+  못 읽으면 옵션 ID 만 보인다. 인쇄는 브라우저 인쇄(콘솔 머리 · 메뉴 · 검수 구역은 `print:hidden`), 파일은 누를 때마다 `GET .../picking-list` 를
+  `Accept: text/csv, application/json` 으로 받아 200 CSV 는 파일로, 오류는 봉투로 푼다(`fetchPickingList`). 둘 다 받는 분 · 주소가 없다.
+- **검수** — 주문마다 주문 수량 옆에 센 수량을 넣는다. 비운 · 0 칸은 보내지 않는다(서버가 부족으로 기록). 주문에 없는 옵션이 들어갔으면 묶음의 다른 옵션을 골라
+  같이 보낸다(`WRONG_SKU` 판정은 서버). 한 주문은 `POST .../orders/{orderId}/checks`(응답이 상세), 여러 주문은 `POST .../checks`(#740) 뒤 상세를 다시 읽는다.
+  성공 여부는 상세의 `checked` 가 정본이다 — 다른 수량으로 다시 확인해 실패해도 이전 성공은 남는다.
+- **실패** — 저장 충돌(409 `DELIVERY_037`) · 결과 모름은 상세를 다시 읽고 안내한다. 일괄 결과의 `retryable` 주문만 "다시 보내기" 로 같은 수량을 다시 보낸다
+  (같은 주문 · 수량은 서버가 기존 기록을 쓴다). 부족 · 초과 · 다른 옵션은 수량을 고친 주문만 다시 검수한다. 400 은 서버 문구, 404 `DELIVERY_034` 는 없는 묶음 안내다.
+- **송장 등록** — `inspectionComplete` 면 주문 목록(상품 준비중)으로 보낸다. 송장 등록이 출고 시점의 주문 상태를 다시 확인한다(검수 완료가 출고 확정이 아니다).
 
 ### 상품 목록 (`/products`, #208)
 
