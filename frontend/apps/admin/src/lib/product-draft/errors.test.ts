@@ -20,6 +20,10 @@ import {
   rejectFailure,
   THUMBNAIL_DUPLICATED,
   UNKNOWN_OUTCOME,
+  generationFailure,
+  GENERATION_SESSION_EXPIRED,
+  GENERATION_UNKNOWN,
+  REFRESH_UNAVAILABLE,
 } from './errors';
 import { IMAGE_DUPLICATED, INVALID_CHARACTER, LIST_ITEM_INVALID, tooLong } from './form';
 
@@ -171,5 +175,49 @@ describe('rejectFailure', () => {
       message: REJECT_UNKNOWN,
       refresh: false,
     });
+  });
+});
+
+describe('generationFailure', () => {
+  it('운영자 문구 코드는 서버 문구, 상태가 바뀐 코드는 다시 읽는다', () => {
+    expect(
+      generationFailure(new ApiError('conflict', 409, 'PRODUCT_DRAFT_051', '시작할 수 없습니다.')),
+    ).toEqual({ message: '시작할 수 없습니다.', refresh: true });
+    expect(
+      generationFailure(
+        new ApiError('server', 400, 'PRODUCT_DRAFT_050', '아직 사용할 수 없습니다.'),
+      ),
+    ).toEqual({ message: '아직 사용할 수 없습니다.', refresh: false });
+    expect(
+      generationFailure(new ApiError('unavailable', 503, 'PRODUCT_DRAFT_502', '잠시 뒤 다시')),
+    ).toEqual({ message: '잠시 뒤 다시', refresh: false });
+  });
+
+  it('401 은 다시 로그인 안내, 403 은 권한 문구, 연결 실패는 결과 모름', () => {
+    expect(generationFailure(new ApiError('unauthorized', 401, null, null))).toEqual({
+      message: GENERATION_SESSION_EXPIRED,
+      refresh: false,
+    });
+    expect(generationFailure(new ApiError('forbidden', 403, null, null)).message).toBe(
+      FORBIDDEN_INLINE,
+    );
+    expect(generationFailure(new ApiError('network', null, null, null))).toEqual({
+      message: GENERATION_UNKNOWN,
+      refresh: false,
+    });
+  });
+
+  it('결과 확인의 503 `502` 는 "생성 시작 실패" 서버 문구 대신 진행 중 안내를 쓴다', () => {
+    const cause = new ApiError(
+      'unavailable',
+      503,
+      'PRODUCT_DRAFT_502',
+      '생성을 시작하지 못했습니다.',
+    );
+    expect(generationFailure(cause, 'refresh')).toEqual({
+      message: REFRESH_UNAVAILABLE,
+      refresh: false,
+    });
+    expect(generationFailure(cause, 'generate').message).toBe('생성을 시작하지 못했습니다.');
   });
 });

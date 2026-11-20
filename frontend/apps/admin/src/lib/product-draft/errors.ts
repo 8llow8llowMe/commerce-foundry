@@ -199,3 +199,56 @@ export function rejectFailure(cause: unknown): { message: string; refresh: boole
   }
   return { message: REJECT_UNKNOWN, refresh: false };
 }
+
+// ---------- 생성 시작 · 결과 확인 ----------
+
+export const GENERATION_SESSION_EXPIRED =
+  '로그인이 만료되어 요청하지 못했습니다. 새 탭에서 어드민에 다시 로그인한 뒤 다시 눌러 주세요.';
+/**
+ * 결과를 모르는 실패. 생성 시작은 같은 회차를 재시도하고(이미 생성 중이면 200), 결과 확인은 저장된 결과를 다시 읽을 뿐이라
+ * 다시 눌러도 생성이 두 번 걸리지 않는다.
+ */
+export const GENERATION_UNKNOWN =
+  '처리 결과를 확인하지 못했습니다. 새로고침해 상태를 확인하거나 잠시 후 다시 눌러 주세요. 다시 눌러도 생성이 두 번 걸리지 않습니다.';
+
+/** 서버 문구가 운영자 문구인 코드(BE `ProductDraftErrorCode`) — 상태가 바뀌었으면 화면을 다시 읽는다 */
+const GENERATION_CODES: Record<string, { refresh: boolean }> = {
+  PRODUCT_DRAFT_022: { refresh: true }, // 보관 만료
+  PRODUCT_DRAFT_025: { refresh: true }, // 동시 변경
+  PRODUCT_DRAFT_037: { refresh: false }, // 이미지 합계 20MB 초과 — 새 초안으로만 해결
+  PRODUCT_DRAFT_050: { refresh: false }, // 생성 꺼짐
+  PRODUCT_DRAFT_051: { refresh: true }, // 시작할 수 없는 상태
+  PRODUCT_DRAFT_052: { refresh: true }, // 생성할 수 없는 초안
+  PRODUCT_DRAFT_502: { refresh: false }, // 생성 서비스 장애
+  PRODUCT_DRAFT_504: { refresh: false }, // 결과 확인 불가
+};
+
+/**
+ * 결과 확인의 503 `502` — operations 결과 조회 장애다. 서버 문구("생성을 시작하지 못했습니다")는 생성 등록 실패용이라
+ * 이미 생성 중인 초안에서는 틀린 말이 된다(운영자가 새 초안을 또 요청하게 된다).
+ */
+export const REFRESH_UNAVAILABLE =
+  '결과를 가져오지 못했습니다. 생성은 계속 진행 중이니 잠시 뒤 다시 확인해 주세요.';
+/** 결과 확인을 눌렀는데 작업이 아직 끝나지 않았다(서버는 `PENDING` 을 저장하지 않고 그대로 `GENERATING` 을 돌려준다) */
+export const STILL_GENERATING = '아직 만들고 있습니다. 잠시 뒤 다시 확인해 주세요.';
+
+/** 생성 시작(`/generate`) · 결과 확인(`/refresh`) 실패 → 안내 문구와 화면을 다시 읽을지 */
+export function generationFailure(
+  cause: unknown,
+  action: 'generate' | 'refresh' = 'generate',
+): { message: string; refresh: boolean } {
+  const denied = accessDeniedOf(cause);
+  if (denied === 'unauthorized') return { message: GENERATION_SESSION_EXPIRED, refresh: false };
+  if (denied) return { message: FORBIDDEN_INLINE, refresh: false };
+  if (cause instanceof ApiError) {
+    if (action === 'refresh' && cause.code === 'PRODUCT_DRAFT_502')
+      return { message: REFRESH_UNAVAILABLE, refresh: false };
+    const known = cause.code ? GENERATION_CODES[cause.code] : undefined;
+    if (known) return { message: cause.message, refresh: known.refresh };
+    if (cause.code === 'PRODUCT_DRAFT_001' || cause.code === 'PRODUCT_DRAFT_127')
+      return { message: REJECT_NOT_FOUND, refresh: false };
+    if (cause.kind === 'notFound') return { message: REJECT_NOT_FOUND, refresh: false };
+    if (cause.kind === 'rateLimited') return { message: cause.message, refresh: false };
+  }
+  return { message: GENERATION_UNKNOWN, refresh: false };
+}

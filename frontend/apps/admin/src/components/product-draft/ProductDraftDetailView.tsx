@@ -2,12 +2,17 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { RefreshButton } from '@/components/product/RefreshButton';
 import {
+  canGenerate,
+  canRefreshResult,
   canReject,
   FACT_LABELS,
   formatDraftTime,
   statusNote,
+  warningPhrase,
   type ProductDraft,
+  type ProductDraftResult,
 } from '@/lib/product-draft/detail';
+import { ProductDraftGenerationAction } from './ProductDraftGenerationAction';
 import { ProductDraftRejectAction } from './ProductDraftRejectAction';
 
 /**
@@ -76,11 +81,24 @@ export function ProductDraftDetailView({
             {note}
           </p>
         )}
+        {draft.failureNotice && (
+          <p role="alert" className="text-sm text-danger">
+            {draft.failureNotice}
+          </p>
+        )}
         <div className="flex flex-wrap items-start gap-3">
+          {canGenerate(status) && (
+            <ProductDraftGenerationAction draftId={draft.draftId} action="generate" />
+          )}
+          {canRefreshResult(status) && (
+            <ProductDraftGenerationAction draftId={draft.draftId} action="refresh" />
+          )}
           <RefreshButton>새로고침</RefreshButton>
           {canReject(status) && <ProductDraftRejectAction draftId={draft.draftId} />}
         </div>
       </Section>
+
+      {draft.result && <ResultSection draft={draft} result={draft.result} />}
 
       {draft.missingRequiredInputs.length > 0 && (
         <Section title="상품 등록 전에 더 넣어야 할 것">
@@ -136,6 +154,88 @@ export function ProductDraftDetailView({
         )}
       </Section>
     </div>
+  );
+}
+
+/**
+ * AI 제안 · 확인이 필요한 사실 · 경고. 제안은 아직 상품에 들어가지 않았다 — 운영자가 검토해 옮겨 적는다(적용 API 는 #359 후속).
+ * 경고는 운영자가 넣은 "꼭 넣을 · 쓰지 않을 표현" 중 어느 것인지 함께 보인다.
+ */
+function ResultSection({ draft, result }: { draft: ProductDraft; result: ProductDraftResult }) {
+  const { suggestion } = result;
+  const rows: [label: string, value: string | null][] = [
+    ['상품명', suggestion.name],
+    ['상품 설명', suggestion.description],
+    ['검색 태그', suggestion.searchTags.length > 0 ? suggestion.searchTags.join(', ') : null],
+    ['검색 노출 제목', suggestion.seoTitle],
+    ['검색 노출 설명', suggestion.seoDescription],
+  ];
+  const filled = rows.filter(([, value]) => value !== null && value !== '');
+  const imageLabel = (index: number) =>
+    draft.images[index]?.imageType === 'THUMBNAIL' ? '대표 사진' : `사진 ${index + 1}`;
+
+  return (
+    <Section title="AI 제안">
+      <p className="text-xs text-muted-fg">
+        검토 전 제안입니다. 상품에는 아직 들어가지 않았고 스토어에 보이지 않습니다.
+      </p>
+      {result.warnings.length > 0 && (
+        <ul
+          role="alert"
+          className="flex flex-col gap-1 rounded-md border border-danger px-4 py-3 text-sm"
+        >
+          {result.warnings.map((warning) => {
+            const phrase = warningPhrase(warning, draft.facts);
+            return (
+              <li key={`${warning.code}-${warning.index}`}>
+                <span className="font-medium">{warning.name}</span>
+                {phrase ? ` "${phrase}"` : ''} — {warning.description}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {filled.length === 0 ? (
+        <p className="text-sm text-muted-fg">제안된 문구가 없습니다.</p>
+      ) : (
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
+          {filled.map(([label, value]) => (
+            <div key={label} className="contents">
+              <dt className="text-muted-fg">{label}</dt>
+              <dd className="whitespace-pre-line break-words">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {suggestion.imageAlts.length > 0 && (
+        <div className="flex flex-col gap-1 text-sm">
+          <h3 className="font-medium">사진 대체 텍스트</h3>
+          <ul className="list-disc space-y-1 pl-5">
+            {suggestion.imageAlts.map((alt) => (
+              <li key={alt.index}>
+                {imageLabel(alt.index)}: {alt.altText}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {result.unconfirmedFacts.length > 0 && (
+        <div className="flex flex-col gap-1 text-sm">
+          <h3 className="font-medium">직접 확인해야 할 사실</h3>
+          <ul className="list-disc space-y-1 pl-5">
+            {result.unconfirmedFacts.map((fact) => (
+              <li key={fact.code}>
+                <span className="font-medium">{fact.name}</span> — {fact.description}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-fg">
+            AI 는 사진으로 소재 · 치수 · 원산지 · 인증을 정하지 않습니다. 확인한 값만 상품에 적어
+            주세요.
+          </p>
+        </div>
+      )}
+    </Section>
   );
 }
 

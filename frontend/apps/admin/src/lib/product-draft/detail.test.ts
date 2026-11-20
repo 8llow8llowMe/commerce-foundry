@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CategoryRow } from '@/lib/category/tree';
 import { draftFixture } from './test-fixtures';
 import {
+  canGenerate,
+  canRefreshResult,
   canReject,
   CATEGORY_MISSING,
   CATEGORY_UNKNOWN,
@@ -10,6 +12,7 @@ import {
   formatDraftTime,
   loadProductDraft,
   statusNote,
+  warningPhrase,
 } from './detail';
 
 const status = (code: string) => ({ code, name: code, description: '' });
@@ -28,8 +31,8 @@ describe('상태 판정', () => {
   });
 
   it('생성 대기 · 생성 중은 결과가 아직 없다고 정직하게 안내한다', () => {
-    expect(statusNote(status('REQUESTED'))).toContain('AI 초안 생성은 준비 중');
-    expect(statusNote(status('REQUESTED'))).toContain('이 화면에서 확인');
+    expect(statusNote(status('REQUESTED'))).toContain('"생성 시작"');
+    expect(statusNote(status('GENERATING'))).toContain('"결과 확인"');
     expect(statusNote(status('READY'))).toContain('적용하는 기능은 준비 중');
     expect(statusNote(status('REJECTED'))).toBeNull();
   });
@@ -79,5 +82,24 @@ describe('formatDraftTime', () => {
     expect(formatDraftTime('2026-11-01T03:00:00Z')).toContain('12:00');
     expect(formatDraftTime(null)).toBe('—');
     expect(formatDraftTime('nope')).toBe('—');
+  });
+});
+
+describe('생성 시작 · 결과 확인 · 경고', () => {
+  it('생성 시작은 REQUESTED, 결과 확인은 GENERATING 에서만', () => {
+    expect(canGenerate(status('REQUESTED'))).toBe(true);
+    expect(canGenerate(status('GENERATING'))).toBe(false);
+    expect(canGenerate(status('FAILED'))).toBe(false);
+    expect(canRefreshResult(status('GENERATING'))).toBe(true);
+    expect(canRefreshResult(status('READY'))).toBe(false);
+  });
+
+  it('경고 순번으로 꼭 넣을 · 쓰지 않을 표현을 찾고, 범위 밖이면 null', () => {
+    const facts = { ...draftFixture().facts, mustInclude: ['수제'], mustAvoid: ['최고'] };
+    const warning = (code: string, index: number) => ({ code, name: '', description: '', index });
+    expect(warningPhrase(warning('MUST_INCLUDE_MISSING', 0), facts)).toBe('수제');
+    expect(warningPhrase(warning('MUST_AVOID_USED', 0), facts)).toBe('최고');
+    expect(warningPhrase(warning('MUST_AVOID_USED', 3), facts)).toBeNull();
+    expect(warningPhrase(warning('OTHER', 0), facts)).toBeNull();
   });
 });
