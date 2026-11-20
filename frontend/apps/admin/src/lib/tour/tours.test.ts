@@ -150,8 +150,16 @@ describe('helpTopicFor · toursFor', () => {
       ['order-filters', false],
       ['order-table', true],
       ['order-bulk', false],
+      ['order-picking', false],
       ['order-shipment-bulk', false],
     ]);
+    expect(targets('/picking/42')).toEqual([
+      ['picking-list', false],
+      ['picking-checks', false],
+      ['picking-check-all', false],
+      [null, false],
+    ]);
+    expect(helpTopicFor('/picking/42').title).toBe('출고 작업대');
     expect(targets('/orders/42')).toEqual([
       ['order-status', false],
       ['order-status-actions', false],
