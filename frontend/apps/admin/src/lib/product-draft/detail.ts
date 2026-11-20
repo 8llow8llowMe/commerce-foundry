@@ -25,6 +25,25 @@ export type ProductDraftFacts = {
   mustAvoid: string[];
 };
 
+/** 경고 — `index` 는 `MUST_INCLUDE_MISSING` 이면 `facts.mustInclude`, `MUST_AVOID_USED` 면 `facts.mustAvoid` 의 순번이다 */
+export type DraftWarning = CodeNameDescription & { index: number };
+
+/** `READY` 의 생성 결과(BE #359 B2b). 서버가 정제한 제안이다 — 화면은 평문(텍스트 노드)으로만 그린다 */
+export type ProductDraftResult = {
+  suggestion: {
+    name: string | null;
+    description: string | null;
+    searchTags: string[];
+    seoTitle: string | null;
+    seoDescription: string | null;
+    /** `index` 는 `images` 의 순번 */
+    imageAlts: { index: number; altText: string }[];
+  };
+  /** AI 가 확정하지 않은 사실 — 운영자가 확인해야 한다 */
+  unconfirmedFacts: CodeNameDescription[];
+  warnings: DraftWarning[];
+};
+
 export type ProductDraft = {
   draftId: string;
   status: CodeNameDescription;
@@ -40,28 +59,49 @@ export type ProductDraft = {
   requestedAt: string;
   expiresAt: string;
   rejectedAt: string | null;
+  /** `READY` 일 때만 있다 */
+  result: ProductDraftResult | null;
+  /** `FAILED` 일 때만 있는 운영자 안내 */
+  failureNotice: string | null;
 };
 
 /** 끝난 상태 — 거절할 수 없다(BE `ProductDraftStatus.isOpen` 의 반대) */
 const CLOSED: ReadonlySet<string> = new Set(['APPLIED', 'REJECTED', 'EXPIRED']);
 export const canReject = (status: CodeNameDescription) => !CLOSED.has(status.code);
 
+/** 생성을 시작할 수 있다 — 서버는 `REQUESTED` 에서만 시작한다(`GENERATING` 은 그대로 200 이라 버튼을 두지 않는다) */
+export const canGenerate = (status: CodeNameDescription) => status.code === 'REQUESTED';
+/** 생성 작업 결과를 가져와 반영할 수 있다 — 서버는 기한이 남은 `GENERATING` 만 반영한다 */
+export const canRefreshResult = (status: CodeNameDescription) => status.code === 'GENERATING';
+
 /**
- * 상태별 화면 덧붙임. 생성 작업 · AI 결과 칸 · 적용 API 가 아직 없다(#359 후속) — 서버 설명이 말하는 "적용" · "다시 생성" 을 이 화면에서
- * 할 수 없음을 정직하게 알린다.
+ * 상태별 화면 덧붙임. 상품 적용 · 다시 생성 API 는 아직 없다(#359 후속) — 서버 설명이 말하는 "적용" · "다시 생성" 을
+ * 이 화면에서 할 수 없음을 정직하게 알린다.
  */
 export function statusNote(status: CodeNameDescription): string | null {
   switch (status.code) {
     case 'REQUESTED':
+      return '아직 생성을 시작하지 않았습니다. "생성 시작" 을 누르면 AI 가 입력한 사실과 사진으로 초안을 만듭니다. 그동안 상품은 상품 등록 화면에서 직접 등록할 수 있습니다.';
     case 'GENERATING':
-      return 'AI 초안 생성은 준비 중입니다. 결과가 준비되면 이 화면에서 확인할 수 있습니다. 그동안 상품은 상품 등록 화면에서 직접 등록할 수 있습니다.';
+      return 'AI 가 초안을 만들고 있습니다. 다른 화면에 다녀와도 됩니다. "결과 확인" 을 누르면 끝난 결과를 가져옵니다.';
     case 'READY':
-      return '초안을 상품에 적용하는 기능은 준비 중입니다.';
+      return '초안을 상품에 바로 적용하는 기능은 준비 중입니다. 아래 제안을 검토한 뒤 상품 등록 화면에 옮겨 적어 주세요. 확인이 필요한 사실은 직접 확인한 값만 쓰세요.';
     case 'FAILED':
       return '다시 생성하는 기능은 준비 중입니다. 새 초안을 요청하거나 상품을 직접 등록해 주세요.';
     default:
       return null;
   }
+}
+
+/** 경고가 가리키는 운영자 입력 표현. 순번이 범위 밖이면 null */
+export function warningPhrase(warning: DraftWarning, facts: ProductDraftFacts): string | null {
+  const list =
+    warning.code === 'MUST_INCLUDE_MISSING'
+      ? facts.mustInclude
+      : warning.code === 'MUST_AVOID_USED'
+        ? facts.mustAvoid
+        : [];
+  return list[warning.index] ?? null;
 }
 
 export type ProductDraftLoad =

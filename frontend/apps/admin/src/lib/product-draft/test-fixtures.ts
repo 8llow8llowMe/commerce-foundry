@@ -35,5 +35,7 @@ export const draftFixture = (patch: Partial<ProductDraft> = {}): ProductDraft =>
   requestedAt: '2026-11-01T03:00:00Z',
   expiresAt: '2026-11-08T03:00:00Z',
   rejectedAt: null,
+  result: null,
+  failureNotice: null,
   ...patch,
 });
