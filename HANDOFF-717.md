@@ -28,10 +28,23 @@
    이 가설은 약하다(정상 JDK 경로에선 이중 반납 없음).
 3. 루트 `build.gradle:133` `maxParallelForks = 2` — 포크 간 공유 자원(같은 H2 이름 `operations-flow`, 포트)이 섞이는지.
 
+### 가설 1 보강 (감독 세션 힌트: 컨텍스트 캐시로 다른 클래스의 워커가 같은 DB 작업을 집어감)
+
+- 17:35 확인: operations 의 `@SpringBootTest` 24개 중 `commerce.messaging.enabled=true` 는 4개
+  (JobWorkerFlowTest · DltAlertFlowTest · DltAlertKafkaPostgresTest · DltAlertActivationTest), `@EmbeddedKafka` 는 2개(JobWorkerFlowTest · DltAlertFlowTest).
+- H2 이름 `operations-flow` 는 JobWorkerFlowTest 만 쓴다. 나머지는 `application-test.yml` 의 `operations-context` → 다른 컨텍스트의
+  lease 만료 판정이 이 테스트의 작업 행을 볼 수는 없다. 다만 **DltAlertFlowTest 컨텍스트에도 job 리스너·워커 빈이 뜨는지**,
+  그 컨텍스트가 같은 내장 브로커(JVM 안 공유 여부)·같은 컨슈머 그룹 `<ns>.operations.job-runner` 를 쓰는지는 아직 확인 못 했다.
+  같은 브로커·그룹이면 파티션 재배정 순간 한쪽이 `FLOW_SERIAL` 을 모르는 종류로 DLT 에 보내는 쪽이지 이중 실행은 아니다
+  → 이중 실행을 만들려면 **SERIAL 핸들러를 가진 컨텍스트가 둘**이어야 한다. 계측(워커 id·스레드·컨텍스트 id)으로 확정할 것.
+- 확인 방법: `Executions.started` 에 `execution.workerId()`, `Thread.currentThread().getName()`, `ApplicationContext#getId()` 를 함께 기록하고,
+  `maxConcurrent` 실패 메시지에 겹친 두 기록을 찍는다. 스케줄러·워커 on/off 속성(`operations.jobs.*`)이 컨텍스트별로 어떤지도 본다.
+
 ## 재현
 
-`./gradlew :service:operations-service:cleanTest :service:operations-service:test --tests "*JobWorkerFlowTest"` 3회 결과:
-(아래 "재현 결과" 에 적음)
+`./gradlew :service:operations-service:cleanTest :service:operations-service:test --tests "*JobWorkerFlowTest"` 3회(17:34, develop ac60b3cc 그대로):
+3회 모두 11건 통과, 실패 0 — **단독 실행으로는 재현 안 됨**. 이슈 보고는 모듈 전체 테스트 중 실패였으므로
+다음엔 `:service:operations-service:test` 전체(다른 클래스와 같은 JVM·`maxParallelForks=2`)로 반복해 본다.
 
 ## 다음 프롬프트
 
