@@ -60,7 +60,13 @@ class OrderPaymentResultClientAdapterTest {
     private static final Instant APPROVED_AT = Instant.parse("2026-11-01T03:30:00.123456Z");
     private static final String PATH = "/internal/v1/order-payments/" + PAYMENT_ID;
     private static final String CANARY = "private-body-payment-key-canary";
-    private static final int READ_TIMEOUT = 300;
+    /**
+     * 정상 응답 케이스도 이 read timeout 을 공유한다. 300ms 로 두면 PC · CI 부하에서 즉시 응답도 타임아웃(UNAVAILABLE)으로 떨어지고,
+     * 끊긴 요청이 다음 케이스의 {@code resetAll()} 뒤에야 WireMock 저널에 남아 같은 경로의 호출 수 검증이 "received 8" 로 흔들린다(#699).
+     * 그래서 {@code TossPaymentGatewayAdapterWireMockTest} 와 같이 2초로 두고, 지연 스텁은 이 두 배({@link #TIMEOUT_DELAY})다.
+     */
+    private static final int READ_TIMEOUT = 2_000;
+    private static final int TIMEOUT_DELAY = READ_TIMEOUT * 2;
     private static final WireMockServer ORDER = startedServer();
 
     @Autowired
@@ -248,7 +254,7 @@ class OrderPaymentResultClientAdapterTest {
     void timeoutIsUnavailableWithoutRetry() {
         String timeoutPath = "/internal/v1/order-payments/" + (PAYMENT_ID + 10);
         ORDER.stubFor(get(urlPathEqualTo(timeoutPath)).willReturn(aResponse().withStatus(200)
-            .withHeader("Content-Type", "application/json").withBody(success(validBody())).withFixedDelay(READ_TIMEOUT * 3)));
+            .withHeader("Content-Type", "application/json").withBody(success(validBody())).withFixedDelay(TIMEOUT_DELAY)));
 
         assertThatThrownBy(() -> port.query(PAYMENT_ID + 10)).isInstanceOfSatisfying(OrderPaymentResultQueryException.class,
             exception -> assertThat(exception.getFailure()).isEqualTo(Failure.UNAVAILABLE));
