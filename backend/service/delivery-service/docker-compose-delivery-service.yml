@@ -31,7 +31,7 @@ x-delivery-service-environment: &delivery_service_environment
   # access 토큰 검증 공개키(PEM 본문 한 줄). 이전 키는 교체 중에만 채운다 — 비면 yml 기본값(빈 값)과 같다
   JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?deploy-guide.md 4절}
   JWT_PUBLIC_KEY_PREVIOUS: ${JWT_PUBLIC_KEY_PREVIOUS:-}
-  # 서비스 간 토큰 비밀(서비스 5종 같은 값, 게이트웨이 제외). 이전 비밀은 교체 중에만 채운다
+  # 서비스 간 토큰 비밀(서비스 전부 같은 값, 게이트웨이 제외). 이전 비밀은 교체 중에만 채운다
   INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:?deploy-guide.md 4절}
   INTERNAL_JWT_SECRET_PREVIOUS: ${INTERNAL_JWT_SECRET_PREVIOUS:-}
   # 기능 플래그 — yml 기본값과 같은 false. dev 프로파일은 yml 이 켜 두어 이 값을 읽지 않는다

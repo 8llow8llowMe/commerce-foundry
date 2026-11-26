@@ -9,7 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * 서비스 토큰 설정 ({@code security.internal.*}). 서비스 5종이 쓴다 — 게이트웨이는 internal API 를 부르지도 받지도 않는다.
+ * 서비스 토큰 설정 ({@code security.internal.*}). 서비스 전부가 쓴다 — 게이트웨이는 internal API 를 부르지도 받지도 않는다.
  *
  * <p>비밀은 서비스 전부가 같은 값을 쓰는 HS256 키다 — base64 로 인코딩한 32바이트 이상 난수({@code openssl rand -base64 32}).
  * 아래 중 하나라도 어긋나면 <b>기동하지 않는다.</b> 메시지에는 프로퍼티 · 환경변수 이름만 넣고 비밀 내용은 넣지 않는다.

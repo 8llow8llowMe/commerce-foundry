@@ -97,7 +97,7 @@ PR 에서 파이프라인을 바꿔 그 잡이 닿는 credential(Vault AppRole �
 | `*.md`(어디에 있든) · `backend/docs/**` · `.env.example` · 로컬 compose · `frontend/**` · `.github/**` · 남의 Jenkinsfile | `none` — 건너뛴다 |
 
 - 의존은 실행할 때 `build.gradle` 을 읽어 계산한다(표로 두지 않는다). `implementation` · `compileOnly` · `testFixtures` 를 가리지 않는다 —
-  지금은 security-core 의 `compileOnly project(':core:redis-core')` 때문에 서비스 5종이 redis-core 변경에도 돈다. 읽는 형식은 `backend-ci-matrix.py` 와 같다.
+  지금은 security-core 의 `compileOnly project(':core:redis-core')` 때문에 서비스 전부가 redis-core 변경에도 돈다. 읽는 형식은 `backend-ci-matrix.py` 와 같다.
   그 형식 밖의 참조(`projects.x` · `findProject` · `apply from` · 루트 build.gradle 의 project 참조)가 보이면 좁히지 않고 `backend/core/**` 전체를 의존으로 본다.
 - **빌드는 fail-open, 배포는 fail-closed 다.** 판단할 수 없으면(따옴표로 감싼 경로 등) `own` 으로 보고 빌드한다. 배포는 §5 가 따로 막는다.
   특히 배포 브랜치에서 **이전 성공 커밋이 없으면**(첫 빌드 · 잡 재등록 · 인덱싱 · 성공 커밋이 저장소에 없음) 무엇이 바뀌었는지 모르므로 자동 배포하지 않는다.

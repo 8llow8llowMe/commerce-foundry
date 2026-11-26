@@ -226,6 +226,9 @@ class ProductServiceSecuritySmokeTest extends ResourceServerSmokeTestSupport {
 
 ## 보안 (서블릿 서비스 전부)
 
+주석 · 문서 · 에이전트 정의에 "서비스 N종" 처럼 서비스 개수를 쓰지 않고 "서비스 전부" 로 쓴다(서비스가 늘면 낡는다, #253).
+개수 자체가 확인 수단인 곳(Eureka 등록 수 · 게이트웨이 라우트 수를 단언하는 테스트)과 이름을 함께 적은 목록만 예외다.
+
 security-core 는 서블릿·Boot 보안 자동설정을 끌고 오지 않는다(게이트웨이가 리액티브라서). 서비스 `build.gradle` 이 직접 선언한다.
 
 ```groovy

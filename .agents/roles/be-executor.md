@@ -8,7 +8,7 @@ Codex·Cursor 공통 역할 지침. 실행 방식은 `docs/ai-agents.md`를 따�
 
 - git root 는 `commerce-foundry`. **BE 파일 경로에는 `backend/` 접두사가 붙는다.** Gradle 명령은 `backend/` 에서 실행한다.
 - 모듈: `core:{common,persistence,redis,security,storage}-core`, `core:shared-commerce`, `cloud:{api-gateway,service-discovery}`,
-  `service:{auth,product,order,payment,delivery}-service`
+  `service:{auth,product,order,payment,delivery,operations,support}-service`
 - 루트 패키지 `com.commercefoundry`, 서비스 내부는 `domainlayer.<context>` 와 `global` 로만 나눈다.
 - **모든 파일은 UTF-8 (no BOM).** 인코딩 설정을 덮어쓰지 않는다.
 - **공개 저장소다.** 시크릿 키·사업자 정보를 yml·테스트 픽스처에 쓰지 않는다. 환경변수 플레이스홀더(`${TOSS_SECRET_KEY}`)만 쓴다.
