@@ -33,7 +33,7 @@ git status --short
 
 1. **인가 누락** — `adapter/in/web` · `adapter/in/admin` 의 **모든** 핸들러에 `@PreAuthorize` (공개 API 도 `permitAll()` 명시, 어드민은 `AdminAuthority` 기능 상수, 본인 API 는 `AdminAuthority.OPERATOR` — `security-guide.md` §3-1).
    `adapter/in/internal` 의 **모든** 핸들러에 허용 호출자 `hasAuthority('SERVICE_<호출 서비스>')` (`security-guide.md` §9-4) —
-   없거나 `isAuthenticated()` · `permitAll()` 이면 서비스 5종 누구나 부를 수 있다(결제 · 재고 상태 변경이면 HIGH). 허용 호출자가 `service-inventory.md` §2 의 호출 관계와 맞는가
+   없거나 `isAuthenticated()` · `permitAll()` 이면 어느 서비스든 부를 수 있다(결제 · 재고 상태 변경이면 HIGH). 허용 호출자가 `service-inventory.md` §2 의 호출 관계와 맞는가
 2. **소유 확인 (IDOR)** — 주문·배송지·결제·클레임 조회/변경이 JWT memberId 로 소유를 확인하는가.
    요청 바디·쿼리의 memberId 를 믿으면 CRITICAL. 타인 리소스는 404
 3. **게이트웨이 라우트** — 새 경로가 `/internal/**` 을 외부에 열지 않는가, admin 경로가 ADMIN 필터를 타는가

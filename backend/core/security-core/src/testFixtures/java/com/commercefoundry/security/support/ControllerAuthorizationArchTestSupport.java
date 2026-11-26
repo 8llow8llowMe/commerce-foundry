@@ -114,7 +114,7 @@ public abstract class ControllerAuthorizationArchTestSupport {
 
     /**
      * R3. internal 핸들러는 허용 호출자({@code hasAuthority('SERVICE_<id>')} · {@code hasAnyAuthority(...)}) 그 자체를 선언한다(메서드, 없으면 클래스).
-     * internal 체인은 "서비스 토큰이 있다" 까지만 보므로 빠뜨리면 서비스 5종 누구나 부른다 ({@code security-guide.md} §9-4).
+     * internal 체인은 "서비스 토큰이 있다" 까지만 보므로 빠뜨리면 어느 서비스든 부른다 ({@code security-guide.md} §9-4).
      */
     public static final ArchRule INTERNAL_HANDLERS_ALLOW_SERVICE_CALLERS_ONLY = methods()
         .that(handlerMethodsIn("adapter.in.internal 컨트롤러의 핸들러 메서드", INTERNAL_PACKAGE))

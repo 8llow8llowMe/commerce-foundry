@@ -177,11 +177,11 @@ compose 가 env 파일과 무관하게 고정하는 값:
 | `COMMERCE_DOCKER_NETWORK` · 자기 환경의 `<MODULE>_PORT_{DEV|PROD}` | compose 해석 실패로 배포 중단. 반대 환경 포트는 파이프라인이 `'0'` 자리값으로 채운다(§3) |
 | `EUREKA_HOST` | compose 해석 실패 |
 | `EUREKA_PASSWORD` | compose 해석 실패. 8개 모듈 같은 값, 형식이 틀리면 Eureka 가 기동하지 않는다: `security-guide.md` §12 |
-| `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` | compose 해석 실패. dev 와 prod 는 다른 DB 서버라 값은 환경별 secret 에서 갈라 넣는다(키 이름은 같다). 서비스 6종은 한 DB 의 서비스별 스키마(`auth` · `product` · `orders` · `payment` · `delivery` · `support`, yml `hibernate.default_schema`)를 쓰므로 URL 은 환경당 하나다. 스키마는 미리 만들어 둔다 — JPA 는 스키마를 만들지 않는다. 정본은 [`docker/postgres/init/01-create-schemas.sql`](../docker/postgres/init/01-create-schemas.sql) 이다. 환경 분리 · 계정 원칙은 [`service-inventory.md`](service-inventory.md) §4-2 |
+| `DB_URL` · `DB_USERNAME` · `DB_PASSWORD` | compose 해석 실패. dev 와 prod 는 다른 DB 서버라 값은 환경별 secret 에서 갈라 넣는다(키 이름은 같다). 서비스 전부은 한 DB 의 서비스별 스키마(`auth` · `product` · `orders` · `payment` · `delivery` · `support`, yml `hibernate.default_schema`)를 쓰므로 URL 은 환경당 하나다. 스키마는 미리 만들어 둔다 — JPA 는 스키마를 만들지 않는다. 정본은 [`docker/postgres/init/01-create-schemas.sql`](../docker/postgres/init/01-create-schemas.sql) 이다. 환경 분리 · 계정 원칙은 [`service-inventory.md`](service-inventory.md) §4-2 |
 | `REDIS_*` | compose 해석 실패. auth 와 gateway 는 같은 Redis 여야 한다. support 도 같은 Redis 를 쓰고 키 접두어(`support:`)로 가른다 |
 | `SNOWFLAKE_DATACENTER_ID` | compose 해석 실패. 0~31 |
 | `JWT_PUBLIC_KEY` · `JWT_PRIVATE_KEY` | compose 해석 실패. 만들기 · 교체: `security-guide.md` §6 |
-| `INTERNAL_JWT_SECRET` | compose 해석 실패. 서비스 6종 같은 값: `security-guide.md` §9-6 |
+| `INTERNAL_JWT_SECRET` | compose 해석 실패. 서비스 전부 같은 값: `security-guide.md` §9-6 |
 | `AUTH_OTP_SECRET_KEY` | compose 해석 실패 (#238). 값이 base64 로 정확히 32바이트가 아니거나 저장소의 테스트 키면 auth 가 기동하지 않는다. auth 인스턴스 전부 같은 값이고, 잃으면 등록된 관리자 OTP 를 모두 읽지 못한다(`AUTH_039`). 만들기 · 회전: `secret-management.md` (관리자 OTP 키). 기동 실패 메시지별 조치는 `local-run-guide.md` §6 |
 | `TOSS_SECRET_KEY` | compose 해석 실패 (#432). dev 는 `test_gsk_` · `test_sk_`, prod 는 `live_` 키만 기동한다 — 클라이언트 키(ck · gck)를 넣으면 기동하지 않는다: `payment-guide.md` §2 |
 | `GATEWAY_CORS_ALLOWED_ORIGINS` | 뜨지만 브라우저 요청이 전부 CORS 로 막힌다 |
@@ -217,12 +217,12 @@ Infra 의 Kafka 는 3노드 KRaft 클러스터(apache/kafka 4.3 · RF 3 · min I
 **헬스 체크** — compose `healthcheck` 가 컨테이너 안에서 `curl -fsS http://localhost:<컨테이너 포트>/actuator/health` 를 부른다.
 
 - 8개 모듈 모두 actuator 가 있고(`backend/build.gradle` 이 실행 모듈마다 넣는다) `management.endpoints.web.exposure.include: health` 다.
-- 익명으로 열려 있다 — 서비스 6종은 security-core(`ResourceServerSecurityConfigurer`)가 `health` 만 `permitAll`, 게이트웨이는 `/api/v1/admin/**` 밖을 `permitAll`,
+- 익명으로 열려 있다 — 서비스 전부은 security-core(`ResourceServerSecurityConfigurer`)가 `health` 만 `permitAll`, 게이트웨이는 `/api/v1/admin/**` 밖을 `permitAll`,
   Eureka 는 `health` 만 익명이고 나머지는 HTTP Basic 이다(#248). 응답은 상태만 낸다(`{"status":"UP"}`), DOWN 이면 503 이라 `curl -f` 가 실패한다.
 - 서비스 헬스에는 DB 가 들어 있다(DB 가 내려가면 unhealthy). Redis 는 auth · 게이트웨이 · support 모두 헬스에서 뺐다(`management.health.redis.enabled: false`) — Redis 장애로 컨테이너를 빼지 않는다.
 - `curl` 은 베이스 이미지(§7)에 들어 있다. 간격 15초 · 제한 5초 · 4회, 기동 유예 120초.
 
-**기동 순서** — Eureka → 게이트웨이 → 서비스 6종.
+**기동 순서** — Eureka → 게이트웨이 → 서비스 전부.
 
 ```text
 1. service-discovery    등록 대상

@@ -11,7 +11,7 @@ omitClaudeMd: true
 ## 저장소 좌표
 
 - 루트 엔트리 `CLAUDE.md`, 백엔드 엔트리 `backend/CLAUDE.md`, 규칙 정본 `backend/docs/*.md`
-- 백엔드 모듈: `backend/core/*`, `backend/cloud/{api-gateway,service-discovery}`, `backend/service/{auth,product,order,payment,delivery}-service`
+- 백엔드 모듈: `backend/core/*`, `backend/cloud/{api-gateway,service-discovery}`, `backend/service/{auth,product,order,payment,delivery,operations,support}-service`
 - 서비스 내부 패키지: `com.commercefoundry.domainlayer.<context>.{adapter,application,domain}`, `com.commercefoundry.global`
 - 진입점: `adapter/in/web`(고객) · `adapter/in/admin`(어드민) · `adapter/in/internal`(서비스 간) · `adapter/in/webhook` · `adapter/in/scheduler`
 

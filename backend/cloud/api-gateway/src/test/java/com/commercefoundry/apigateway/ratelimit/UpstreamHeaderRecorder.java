@@ -51,7 +51,7 @@ final class UpstreamHeaderRecorder {
         server.start();
     }
 
-    /** 서비스 5종의 인스턴스를 이 서버로 돌린다. */
+    /** {@code SERVICE_IDS} 의 서비스 인스턴스를 이 서버로 돌린다. */
     void register(DynamicPropertyRegistry registry) {
         String uri = "http://127.0.0.1:" + server.getAddress().getPort();
         for (String serviceId : SERVICE_IDS) {

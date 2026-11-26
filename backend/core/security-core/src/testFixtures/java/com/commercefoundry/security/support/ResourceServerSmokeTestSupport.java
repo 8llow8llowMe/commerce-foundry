@@ -301,7 +301,7 @@ public abstract class ResourceServerSmokeTestSupport {
 
     /**
      * URL 단계는 {@code /api/**} 를 열어 두고(default-allow) internal 체인은 "서비스 토큰이 있다" 까지만 보므로, 메서드의 {@code @PreAuthorize} 가
-     * 빠지면 공개 API 가 되거나 서비스 5종 누구나 부르는 internal API 가 된다 ({@code security-guide.md} §5-1 · §9-4). 서비스의 실제 매핑을 모두 돈다.
+     * 빠지면 공개 API 가 되거나 어느 서비스든 부르는 internal API 가 된다 ({@code security-guide.md} §5-1 · §9-4). 서비스의 실제 매핑을 모두 돈다.
      *
      * <ul>
      *   <li>{@code /internal/} — 메서드(없으면 클래스)의 {@code @PreAuthorize} 식이 {@code hasAuthority('SERVICE_<id>')} 또는
