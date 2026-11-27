@@ -97,6 +97,8 @@ class GatewayRouteCoverageTest {
         new Sample("/api/v1/admin/shipping-policies", "delivery-service"),
         new Sample("/api/v1/store/profile", "operations-service"),
         new Sample("/api/v1/admin/store/profile", "operations-service"),
+        new Sample("/api/v1/analytics/events", "operations-service"),
+        new Sample("/api/v1/admin/analytics/products/top", "operations-service"),
         new Sample("/api/v1/admin/jobs/1", "operations-service"),
         new Sample("/api/v1/admin/campaigns/recipient-previews", "operations-service"),
         new Sample("/api/v1/admin/notifications/1", "operations-service"),

@@ -18,6 +18,9 @@ import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.web.util.pattern.PathPattern;
+import org.springframework.web.util.pattern.PathPatternParser;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
@@ -58,6 +61,8 @@ import reactor.core.publisher.SynchronousSink;
 @RequiredArgsConstructor
 public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
 
+    private static final long ANALYTICS_BODY_LIMIT = 1024;
+    private static final PathPattern ANALYTICS_EVENTS = PathPatternParser.defaultInstance.parse("/api/v1/analytics/events");
     private static final int LOG_PATH_MAX_LENGTH = 200;
     private static final byte[] EMPTY = new byte[0];
     private static final String DISCARD_READ_FAILED = "read-failed";
@@ -75,7 +80,9 @@ public class GatewayRequestBodySizeFilter implements WebFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
-        long limit = properties.maxSize().toBytes();
+        long defaultLimit = properties.maxSize().toBytes();
+        boolean analytics = HttpMethod.POST.equals(request.getMethod()) && ANALYTICS_EVENTS.matches(request.getPath().pathWithinApplication());
+        long limit = analytics ? Math.min(defaultLimit, ANALYTICS_BODY_LIMIT) : defaultLimit;
         // chunked 를 먼저 본다 — Content-Length 와 함께 오면 chunked 가 경계를 정하므로(RFC 9112 §6.3) 길이를 믿지 않고 센다.
         // 하위 계층(Reactor Netty)이 이때 Content-Length 를 지우는지에 기대지 않는다
         if (!isChunked(request.getHeaders())) {

@@ -265,6 +265,34 @@ class GatewayRateLimitFilterTest {
             .anyMatch(call -> call.startsWith("SUPPORT_WRITE:ip:"));
     }
 
+    @Test
+    void analyticsSharesClientBucketAcrossMemberAndGuestAndFailsClosed() {
+        String analytics = "/api/v1/analytics/events";
+        AtomicBoolean routed = new AtomicBoolean();
+        run(post(analytics, "192.0.2.1"), member(), routed);
+        assertThat(routed.get()).isTrue();
+        run(post(analytics, "192.0.2.1"), null, routed);
+        assertThat(limiter.calls).hasSize(2).containsOnly(limiter.calls.getFirst());
+        assertThat(limiter.calls.getFirst()).startsWith("ANALYTICS_EVENTS:ip:");
+
+        routed.set(false);
+        MockServerWebExchange missing = post(analytics);
+        run(missing, member(), routed);
+        assertThat(missing.getResponse().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+
+        limiter.answer = Mono.error(new IllegalStateException());
+        MockServerWebExchange unavailable = post(analytics, "192.0.2.1");
+        run(unavailable, null, routed);
+        assertThat(unavailable.getResponse().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(routed.get()).isFalse();
+
+        limiter.answer = Mono.just(false);
+        MockServerWebExchange limited = post(analytics, "192.0.2.1");
+        run(limited, null, routed);
+        assertThat(limited.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(limited.getResponse().getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("1");
+    }
+
     private void run(ServerWebExchange exchange, Authentication authentication, AtomicBoolean routed) {
         run(filter, exchange, authentication, routed);
     }

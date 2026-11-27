@@ -21,6 +21,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
 public enum RateLimitPolicy {
 
     SUPPORT_WRITE("support-write", "/api/v1/support/conversations/{id}/messages", Set.of(HttpMethod.POST), GatewayRateLimitProperties::supportWrite),
+    ANALYTICS_EVENTS("analytics-events", "/api/v1/analytics/events", Set.of(HttpMethod.POST), AnalyticsLimit::select),
     CART_MERGE("cart-merge", "/api/v1/carts/*/merge", Set.of(HttpMethod.POST), GatewayRateLimitProperties::cartMerge),
     CART_WRITE("cart-write", "/api/v1/carts/**", WriteMethods.ALL, GatewayRateLimitProperties::cartWrite),
     // 주문서 미리보기는 수량 · 배송지를 바꿀 때마다 나간다 — 주문 생성과 한도를 나누지 않으면 몇 번 바꾼 뒤 "주문하기" 가 429 를 받는다 (#158)
@@ -53,6 +54,18 @@ public enum RateLimitPolicy {
             .filter(policy -> policy.methods.contains(method) && policy.pathPattern.matches(path)
                 && (policy != PAYMENT_WRITE || !PAYMENT_WEBHOOKS.matches(path)))
             .findFirst();
+    }
+
+    boolean requiresClientIp() {
+        return this == SUPPORT_WRITE || this == ANALYTICS_EVENTS;
+    }
+
+    private static final class AnalyticsLimit {
+        private static final GatewayRateLimitProperties.Limit LIMIT = new GatewayRateLimitProperties.Limit(60, 10);
+
+        private static GatewayRateLimitProperties.Limit select(GatewayRateLimitProperties properties) {
+            return LIMIT;
+        }
     }
 
     private static final class WriteMethods {

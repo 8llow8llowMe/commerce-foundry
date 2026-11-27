@@ -34,8 +34,10 @@
 | order-service | `/api/v1/carts/**`, `/api/v1/orders/**` | `/api/v1/admin/orders/**`, `/api/v1/admin/claims/**` |
 | payment-service | `/api/v1/payments/**` | `/api/v1/admin/payments/**` |
 | delivery-service | `/api/v1/deliveries/**`, `/api/v1/shipping-fees/**` | `/api/v1/admin/deliveries/**`, `/api/v1/admin/shipping-policies/**` |
-| operations-service | `/api/v1/store/**` | `/api/v1/admin/store/**`, `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**`, `/api/v1/admin/onboarding/**`, `/api/v1/admin/campaigns/**` |
+| operations-service | `/api/v1/store/**`, `/api/v1/analytics/events` | `/api/v1/admin/store/**`, `/api/v1/admin/jobs/**`, `/api/v1/admin/notifications/**`, `/api/v1/admin/onboarding/**`, `/api/v1/admin/campaigns/**`, `/api/v1/admin/analytics/**` |
 | support-service | `/api/v1/support/**` | `/api/v1/admin/support/**` |
+
+상품 방문 수집과 어드민 집계 소비 계약은 [방문 분석](visit-analytics.md)을 따른다 (#226 · #227).
 
 게이트웨이 라우트는 이 표를 그대로 옮긴다. 새 경로 접두어를 만들면 이 표와 게이트웨이를 함께 고친다.
 상품 사이즈표(#216)의 고객 · 어드민 조회는 새 접두어가 아니다 — `GET /api/v1/products/{productId}/size-chart`,
