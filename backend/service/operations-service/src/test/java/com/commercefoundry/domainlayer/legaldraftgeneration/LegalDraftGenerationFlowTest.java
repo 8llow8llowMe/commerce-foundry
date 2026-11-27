@@ -20,7 +20,8 @@ import com.commercefoundry.domainlayer.job.application.service.processor.JobRunP
 import com.commercefoundry.domainlayer.job.domain.model.JobExecution;
 import com.commercefoundry.domainlayer.job.domain.model.JobExecutionException;
 import com.commercefoundry.domainlayer.job.domain.model.JobStatus;
-import com.commercefoundry.domainlayer.legaldraftgeneration.application.port.in.LegalDraftGenerationUseCase;
+import com.commercefoundry.domainlayer.legaldraftgeneration.application.command.LegalDraftRegisterCommand;
+import com.commercefoundry.domainlayer.legaldraftgeneration.application.port.in.LegalDraftGenerationAdminUseCase;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.service.processor.LegalDraftGenerationGate;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.service.processor.LegalDraftJobProcessor;
 import com.commercefoundry.domainlayer.legaldraftgeneration.domain.model.LegalDraftPlan;
@@ -71,7 +72,7 @@ class LegalDraftGenerationFlowTest extends ResourceServerSmokeTestSupport {
 
     @MockitoBean AiClient client;
     @MockitoSpyBean LegalDraftGenerationGate gate;
-    @Autowired LegalDraftGenerationUseCase useCase;
+    @Autowired LegalDraftGenerationAdminUseCase useCase;
     @Autowired LegalDraftJobProcessor worker;
     @Autowired JobClaimProcessor claims;
     @Autowired JobRunProcessor runs;
@@ -114,12 +115,15 @@ class LegalDraftGenerationFlowTest extends ResourceServerSmokeTestSupport {
         failure(admin(register(requestKey, REQUEST.replace(FACT, "Changed company"))), 409, "LEGAL_DRAFT_GENERATION_002");
 
         var result = data(admin(get(PATH + "/" + id)), 200);
-        assertThat(result.get("status").stringValue()).isEqualTo("SUCCEEDED");
+        assertThat(result.get("status").get("code").stringValue()).isEqualTo("SUCCEEDED");
         var candidate = result.get("candidate");
         assertThat(candidate.get("body").stringValue()).contains(FACT, "Example retention period", "{{DATA_PURPOSES_AND_FIELDS}}");
         assertThat(candidate.get("unresolvedItems")).extracting(JsonNode::stringValue).contains("DATA_PURPOSES_AND_FIELDS")
             .doesNotContain("RETENTION_AND_DELETION");
         assertThat(candidate.get("templateId").stringValue()).isEqualTo("legal-privacy-en");
+        assertThat(candidate.get("type").get("code").stringValue()).isEqualTo("PRIVACY");
+        assertThat(candidate.get("type").get("name").stringValue()).isEqualTo("개인정보처리방침");
+        assertThat(result.get("status").get("name").stringValue()).isEqualTo("성공");
         assertThat(result.get("reviewedAt").isNull()).isTrue();
         var other = "Bearer " + TestTokens.issuer(Instant.now()).issueAccessToken(MEMBER + 1, MemberRole.OWNER).tokenValue();
         for (var request : List.of(get(PATH + "/" + id), post(PATH + "/" + id + "/review"), post(PATH + "/" + id + "/cancel"))) {
@@ -136,6 +140,7 @@ class LegalDraftGenerationFlowTest extends ResourceServerSmokeTestSupport {
         doReturn(true).when(gate).enabled();
         failure(admin(register(key(), REQUEST.replace(FACT, "<script>bad</script>"))), 400, "LEGAL_DRAFT_GENERATION_100");
         failure(admin(register(key(), REQUEST.replace("COMPANY_NAME", "TOKEN"))), 400, "LEGAL_DRAFT_GENERATION_100");
+        failure(admin(register(key(), REQUEST.replace("\"templateVersion\":1,", ""))), 400, "LEGAL_DRAFT_GENERATION_100");
         failure(admin(register(key(), REQUEST.replace("Version\":1", "Version\":2"))), 409, "LEGAL_DRAFT_GENERATION_003");
         verifyNoInteractions(client);
         when(client.complete(any(AiRequest.class), org.mockito.ArgumentMatchers.eq(LegalDraftPlan.class)))
@@ -151,7 +156,7 @@ class LegalDraftGenerationFlowTest extends ResourceServerSmokeTestSupport {
                 assertThat(runs.fail(id, "test", 1, code, null, false)).isTrue();
             });
             var result = data(admin(get(PATH + "/" + id)), 200);
-            assertThat(result.get("status").stringValue()).isEqualTo("FAILED");
+            assertThat(result.get("status").get("code").stringValue()).isEqualTo("FAILED");
             assertThat(result.get("candidate").isNull()).isTrue();
         }
     }
@@ -171,14 +176,14 @@ class LegalDraftGenerationFlowTest extends ResourceServerSmokeTestSupport {
             start.countDown();
             long id = left.get(15, TimeUnit.SECONDS);
             assertThat(right.get(15, TimeUnit.SECONDS)).isEqualTo(id);
-            assertThat(data(admin(post(PATH + "/" + id + "/cancel")), 200).get("status").stringValue()).isEqualTo("CANCELLED");
+            assertThat(data(admin(post(PATH + "/" + id + "/cancel")), 200).get("status").get("code").stringValue()).isEqualTo("CANCELLED");
             assertThat(registerDirect(requestKey)).isEqualTo(id);
             verifyNoInteractions(client);
         }
     }
 
     private long registerDirect(String requestKey) {
-        return useCase.register(MEMBER, requestKey, "PRIVACY", "en", 1, Map.of("COMPANY_NAME", FACT));
+        return Long.parseLong(useCase.register(new LegalDraftRegisterCommand(MEMBER, requestKey, "PRIVACY", "en", 1, Map.of("COMPANY_NAME", FACT))).jobId());
     }
 
     private JobExecution execution(long jobId) {

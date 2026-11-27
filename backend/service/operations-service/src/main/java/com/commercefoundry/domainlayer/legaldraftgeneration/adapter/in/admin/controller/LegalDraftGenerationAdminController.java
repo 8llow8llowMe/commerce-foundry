@@ -4,9 +4,8 @@ import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.legaldraftgeneration.adapter.in.admin.dto.request.LegalDraftGenerationRequest;
 import com.commercefoundry.domainlayer.legaldraftgeneration.adapter.in.admin.dto.response.LegalDraftGenerationResponse;
-import com.commercefoundry.domainlayer.legaldraftgeneration.adapter.in.admin.presenter.LegalDraftGenerationPresenter;
-import com.commercefoundry.domainlayer.legaldraftgeneration.application.port.in.LegalDraftGenerationUseCase;
-import com.commercefoundry.domainlayer.legaldraftgeneration.application.service.processor.LegalDraftAuditProcessor;
+import com.commercefoundry.domainlayer.legaldraftgeneration.application.command.LegalDraftRegisterCommand;
+import com.commercefoundry.domainlayer.legaldraftgeneration.application.port.in.LegalDraftGenerationAdminUseCase;
 import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
@@ -31,48 +30,43 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/admin/store/legal-document-drafts/generations")
-public class LegalDraftGenerationController {
-    private final LegalDraftGenerationUseCase useCase;
-    private final LegalDraftGenerationPresenter presenter;
+public class LegalDraftGenerationAdminController {
+    private final LegalDraftGenerationAdminUseCase useCase;
 
     @Operation(summary = "검토용 생성 작업 접수", description = "Idempotency-Key는 16~80자의 영문·숫자·하이픈·밑줄입니다.")
     @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
-    @AdminAudited(action = LegalDraftAuditProcessor.REGISTER)
+    @AdminAudited(action = "LEGAL_DRAFT_GENERATION_REGISTER")
     @PostMapping
     public ResponseEntity<Response<LegalDraftGenerationResponse.Accepted>> register(
         @AuthenticationPrincipal MemberPrincipal member, @RequestHeader("Idempotency-Key") String requestKey,
         @RequestBody LegalDraftGenerationRequest request
     ) {
-        long id = useCase.register(member.memberId(), requestKey, request.type(), request.locale(), request.templateVersion(),
+        var command = new LegalDraftRegisterCommand(member.memberId(), requestKey, request.type(), request.locale(), request.templateVersion(),
             request.confirmedFacts());
-        return ResponseEntity.accepted().cacheControl(CacheControl.noStore()).body(Response.success(presenter.accepted(id)));
+        return ResponseEntity.accepted().cacheControl(CacheControl.noStore()).body(Response.success(useCase.register(command)));
     }
 
     @Operation(summary = "내 생성 작업 상태와 검토용 후보 조회")
     @PreAuthorize(AdminAuthority.SETTINGS_READ)
     @GetMapping("/{jobId}")
     public ResponseEntity<Response<LegalDraftGenerationResponse>> get(@AuthenticationPrincipal MemberPrincipal member, @PathVariable long jobId) {
-        return ok(presenter.toResponse(useCase.get(member.memberId(), jobId)));
+        return ok(useCase.get(member.memberId(), jobId));
     }
 
     @Operation(summary = "검토 확인 기록", description = "최초 검토 확인 시각을 기록합니다. 사용하려면 법률 문서 초안 저장 API에서 별도 저장해 주세요.")
     @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
-    @AdminAudited(action = LegalDraftAuditProcessor.REVIEW)
+    @AdminAudited(action = "LEGAL_DRAFT_GENERATION_REVIEW")
     @PostMapping("/{jobId}/review")
-    public ResponseEntity<Response<LegalDraftGenerationResponse>> review(
-        @AuthenticationPrincipal MemberPrincipal member, @PathVariable long jobId
-    ) {
-        return ok(presenter.toResponse(useCase.review(member.memberId(), jobId)));
+    public ResponseEntity<Response<LegalDraftGenerationResponse>> review(@AuthenticationPrincipal MemberPrincipal member, @PathVariable long jobId) {
+        return ok(useCase.review(member.memberId(), jobId));
     }
 
     @Operation(summary = "내 생성 작업 취소 요청")
     @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
-    @AdminAudited(action = LegalDraftAuditProcessor.CANCEL)
+    @AdminAudited(action = "LEGAL_DRAFT_GENERATION_CANCEL")
     @PostMapping("/{jobId}/cancel")
-    public ResponseEntity<Response<LegalDraftGenerationResponse>> cancel(
-        @AuthenticationPrincipal MemberPrincipal member, @PathVariable long jobId
-    ) {
-        return ok(presenter.toResponse(useCase.cancel(member.memberId(), jobId)));
+    public ResponseEntity<Response<LegalDraftGenerationResponse>> cancel(@AuthenticationPrincipal MemberPrincipal member, @PathVariable long jobId) {
+        return ok(useCase.cancel(member.memberId(), jobId));
     }
 
     private ResponseEntity<Response<LegalDraftGenerationResponse>> ok(LegalDraftGenerationResponse data) {

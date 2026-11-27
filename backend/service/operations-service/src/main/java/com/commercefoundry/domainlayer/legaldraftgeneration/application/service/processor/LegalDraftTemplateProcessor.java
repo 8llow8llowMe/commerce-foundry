@@ -2,9 +2,11 @@ package com.commercefoundry.domainlayer.legaldraftgeneration.application.service
 
 import com.commercefoundry.domainlayer.legaldocument.application.info.LegalDocumentInfos.Template;
 import com.commercefoundry.domainlayer.legaldocument.application.service.processor.LegalDocumentTemplateProcessor;
+import com.commercefoundry.domainlayer.legaldocument.domain.model.LegalDocumentKey;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.exception.LegalDraftErrorCode;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.exception.LegalDraftException;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.info.LegalDraftInfo.Candidate;
+import com.commercefoundry.domainlayer.legaldraftgeneration.application.model.LegalDraftDocumentType;
 import com.commercefoundry.domainlayer.legaldraftgeneration.domain.model.LegalDraftInput;
 import com.commercefoundry.domainlayer.legaldraftgeneration.domain.model.LegalDraftPlan;
 import java.util.ArrayList;
@@ -24,7 +26,7 @@ public class LegalDraftTemplateProcessor {
     private final LegalDocumentTemplateProcessor templates;
 
     public Outline prepare(LegalDraftInput input) {
-        Template template = templates.get(input.document());
+        Template template = templates.get(new LegalDocumentKey(LegalDocumentKey.Type.valueOf(input.type()), input.locale()));
         if (template.version() != input.templateVersion()) {
             throw new LegalDraftException(LegalDraftErrorCode.TEMPLATE_CONFLICT);
         }
@@ -75,7 +77,7 @@ public class LegalDraftTemplateProcessor {
             body.append("\n\n").append(++index).append(". ").append(section.title()).append("\n").append(fact);
         }
         Template template = outline.template();
-        return new Candidate(template.type(), template.locale(), template.title(), body.toString(), template.templateId(),
+        return new Candidate(LegalDraftDocumentType.valueOf(template.type()).toMetadata(), template.locale(), template.title(), body.toString(), template.templateId(),
             template.version(), List.copyOf(unresolved), template.checklist());
     }
 

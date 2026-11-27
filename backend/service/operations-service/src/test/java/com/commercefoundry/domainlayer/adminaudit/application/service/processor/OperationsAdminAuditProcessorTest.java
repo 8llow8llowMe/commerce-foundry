@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 import com.commercefoundry.domainlayer.adminaudit.application.model.OperationsAdminAuditAction;
 import com.commercefoundry.domainlayer.legaldocument.adapter.in.admin.controller.LegalDocumentAdminController;
+import com.commercefoundry.domainlayer.legaldraftgeneration.adapter.in.admin.controller.LegalDraftGenerationAdminController;
 import com.commercefoundry.domainlayer.legaldocument.adapter.in.admin.presenter.LegalDocumentAdminPresenter;
 import com.commercefoundry.domainlayer.legaldocument.application.command.LegalDocumentCommands;
 import com.commercefoundry.domainlayer.legaldocument.application.service.LegalDocumentAdminFacade;
@@ -56,12 +57,12 @@ class OperationsAdminAuditProcessorTest {
     @Test
     void enumMatchesOnlyMigratedControllersNotAllOperationsActions() {
         var declared = Stream.of(StoreProfileAdminController.class, LegalDocumentAdminController.class, StoreFooterAdminController.class,
-                StoreNavigationAdminController.class, BrandAssetAdminController.class)
+                StoreNavigationAdminController.class, BrandAssetAdminController.class, LegalDraftGenerationAdminController.class)
             .flatMap(type -> Arrays.stream(type.getDeclaredMethods()))
             .filter(method -> method.isAnnotationPresent(AdminAudited.class))
             .map(method -> method.getAnnotation(AdminAudited.class).action()).toList();
         assertThat(declared).containsExactlyInAnyOrderElementsOf(Arrays.stream(OperationsAdminAuditAction.values()).map(Enum::name).toList());
-        assertThat(declared).hasSize(10).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
+        assertThat(declared).hasSize(13).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
     }
 
     @ParameterizedTest
