@@ -398,7 +398,7 @@ logging:
     org.apache.kafka.clients.consumer.ConsumerConfig: WARN
     org.apache.kafka.clients.admin.AdminClientConfig: WARN
 
-# 작업 결과 전용 비공개 버킷. 공개 이미지 credential과 공유하지 않는다(job-result-storage-guide.md).
+# 작업 결과와 스토어 브랜드 이미지용 비공개 버킷. 두 기능은 서로 다른 키 접두사를 사용한다(job-result-storage-guide.md, store-brand-assets-guide.md).
 storage:
   enabled: ${STORAGE_ENABLED:false}
   endpoint: ${STORAGE_ENDPOINT:}
