@@ -3,7 +3,8 @@ package com.commercefoundry.domainlayer.legaldraftgeneration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doReturn;
 
-import com.commercefoundry.domainlayer.legaldraftgeneration.application.port.in.LegalDraftGenerationUseCase;
+import com.commercefoundry.domainlayer.legaldraftgeneration.application.command.LegalDraftRegisterCommand;
+import com.commercefoundry.domainlayer.legaldraftgeneration.application.port.in.LegalDraftGenerationAdminUseCase;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.service.processor.LegalDraftGenerationGate;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.service.processor.LegalDraftJobProcessor;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
@@ -39,7 +40,7 @@ class LegalDraftGenerationPostgresTest {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine")
         .withInitScript("ddl/operations-schema.sql");
 
-    @Autowired LegalDraftGenerationUseCase useCase;
+    @Autowired LegalDraftGenerationAdminUseCase useCase;
     @Autowired DataSource dataSource;
     @MockitoSpyBean LegalDraftGenerationGate gate;
 
@@ -57,7 +58,7 @@ class LegalDraftGenerationPostgresTest {
         var start = new CountDownLatch(1);
         Callable<Long> register = () -> {
             assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
-            return useCase.register(42L, key, "TERMS", "ko", 1, Map.of("COMPANY_NAME", "예시 상점"));
+            return Long.parseLong(useCase.register(new LegalDraftRegisterCommand(42L, key, "TERMS", "ko", 1, Map.of("COMPANY_NAME", "예시 상점"))).jobId());
         };
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var left = executor.submit(register);

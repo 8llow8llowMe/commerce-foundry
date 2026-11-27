@@ -113,11 +113,13 @@ H2·PostgreSQL persistence 계약은 실제 조회/롤백·불변성·제약을 
 | `POST /{jobId}/cancel` | `SETTINGS_MANAGE` | 활성 작업 취소 요청과 현재 상태 반환. 종료 후 재요청은 현재 상태 반환 |
 
 - 요청 키는 16~80자의 영문·숫자·하이픈·밑줄이며 첫 글자는 영문 또는 숫자다. 요청자별 같은 키와 정규화된 입력을 사용하면 종료 상태에서도 원래 작업을 반환한다. 같은 키에 다른 입력은 409다. 재생성은 새 키를 사용한다.
-- `type`은 `TERMS` 또는 `PRIVACY`, `locale`은 `ko` 또는 `en`이다. `templateVersion`은 시작 템플릿 응답에서 읽는다. `confirmedFacts`는 템플릿에 표시된 빈칸 식별자를 키로 쓰는 객체다. 확인하지 않은 항목은 생략한다. 빈 객체도 허용한다.
+- `type`은 `TERMS` 또는 `PRIVACY`, `locale`은 `ko` 또는 `en`이다. `templateVersion`은 시작 템플릿 응답에서 읽은 정수이며 빠지면 `400 LEGAL_DRAFT_GENERATION_100`이다. `confirmedFacts`는 템플릿에 표시된 빈칸 식별자를 키로 쓰는 객체다. 확인하지 않은 항목은 생략한다. 빈 객체도 허용한다.
 - 각 사실은 최대 600 UTF-16 코드 단위의 공개 예정 운영 정보 한 줄이다. 최대 6개이며 HTML·제어문자·템플릿 표시를 거부한다. 회원 원문·비밀값을 입력하지 않는다.
-- 결과의 `candidate`는 성공 상태에서만 존재한다. `{type, locale, title, body, templateId, templateVersion, unresolvedItems, reviewChecklist}`이다. 관리자는 후보를 기존 문서와 비교하고, 사용할 부분을 편집한 뒤 기존 초안 저장 API에서 버전을 확인하여 별도 저장한다. 게시 API의 최신 리비전·검토 확인·미치환 표시 검사도 적용된다.
+- 응답은 `{jobId, status, notice, candidate, reviewedAt}`이다. `status`는 작업 어드민 응답과 같은 `{code, name, description}` metadata(`QUEUED`·`RUNNING`·`SUCCEEDED`·`FAILED`·`CANCELLED`, 예: `{"code":"SUCCEEDED","name":"성공","description":"실행을 마쳤습니다."}`)다.
+- 결과의 `candidate`는 성공 상태에서만 존재한다. `{type, locale, title, body, templateId, templateVersion, unresolvedItems, reviewChecklist}`이며 `type`은 `{code, name, description}` metadata(`TERMS`=이용약관, `PRIVACY`=개인정보처리방침), `locale`은 문자열이다. 관리자는 후보를 기존 문서와 비교하고, 사용할 부분을 편집한 뒤 기존 초안 저장 API에서 버전을 확인하여 별도 저장한다. 게시 API의 최신 리비전·검토 확인·미치환 표시 검사도 적용된다.
 - `unresolvedItems`는 확인된 값이 없는 빈칸 식별자다. 본문에는 질문과 `{{빈칸}}`을 남긴다. 모델은 서버가 제공한 절 ID의 순서만 제안한다. 서버는 정확한 순열인지 검사하고 시작 템플릿 및 관리자가 입력한 값으로 제목과 단순 텍스트 본문을 조립한다. 사업자 사실의 진위와 법적 적합성은 운영자가 검토한다.
-- 새 생성에는 `OPERATIONS_LEGAL_DRAFT_GENERATION_ENABLED=true`와 공통 `AI_ENABLED=true`가 모두 필요하다. 기본은 꺼져 있으며 기존 작업은 조회할 수 있다. 실행 직전에도 플래그를 검사한다.
+- 새 생성에는 `OPERATIONS_LEGAL_DRAFT_GENERATION_ENABLED=true`와 공통 `AI_ENABLED=true`가 모두 필요하다. 기본은 꺼져 있으며 기존 작업은 조회할 수 있다. 실행 직전에도 같은 값을 검사하지만, 값은 기동 시 읽으므로 플래그 변경은 재기동 뒤 반영된다.
+- 후보는 조회할 때마다 영수증의 입력과 현재 시작 템플릿으로 다시 조립한다(사실값을 더 저장하지 않는다). 시작 템플릿 버전을 올려 배포하면 이전 버전으로 성공한 작업은 `candidate`가 `null`이고 `notice`가 "시작 템플릿이 바뀌어 이전 결과를 다시 만들 수 없습니다."이며, 그 작업의 검토 확인은 `409 LEGAL_DRAFT_GENERATION_004`다. 새 버전으로 다시 생성한다.
 - `legal-draft`의 프롬프트 버전은 1, 모델 기본 설정은 `claude-opus-5-5`, 출력 상한은 512토큰이다. 공급자별 모델 해석은 공통 ai-core 설정을 따른다. 프롬프트에는 문서 유형·언어·템플릿 버전과 허용·확인된 절 식별자만 보낸다. 원문 값은 작업 입력, 작업 결과, 원장, 감사에 싣지 않는다. 별도 영수증이 입력과 최초 검토 시각을 저장한다.
 - 작업 참조 `job:<id>:<attempt>`로 공통 월 예산 예약과 사용량 정산을 연결한다. 예산 거절, 공급자 실패, 검증 실패 시 후보를 반환하지 않는다. 작업 시도는 1회, 작업 상한은 15분이다. ai-core 전송 재시도·타임아웃 정책은 공통 설정을 따르며 취소·응답 유실·결과 거절 전에 발생한 비용은 공통 원장 정책대로 정산한다.
 - 감사 줄에는 행위, 행위자, 작업 식별자, 성공 여부만 기록한다. 검토 확인은 법률 문서 리비전이나 게시 기록을 생성하지 않는다. 영수증과 작업의 서버 보존 기간 동안 동일 키 재생과 후보 조회를 지원한다.

@@ -4,7 +4,7 @@ import com.commercefoundry.ai.client.AiClient;
 import com.commercefoundry.ai.client.AiException;
 import com.commercefoundry.ai.prompt.PromptTemplates;
 import com.commercefoundry.ai.prompt.PromptValues;
-import com.commercefoundry.domainlayer.job.domain.model.JobExecutionException;
+import com.commercefoundry.domainlayer.legaldraftgeneration.application.model.LegalDraftRemoteFailure;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.port.out.LegalDraftAiPort;
 import com.commercefoundry.domainlayer.legaldraftgeneration.domain.model.LegalDraftPlan;
 import java.util.List;
@@ -28,14 +28,14 @@ public class LegalDraftAiAdapter implements LegalDraftAiPort {
                 .withCallerRef("job:" + jobId + ":" + attempt);
             return client.complete(request, LegalDraftPlan.class).value();
         } catch (AiException exception) {
-            String code = switch (exception.reason()) {
-                case BUDGET_EXCEEDED -> "LEGAL_DRAFT_BUDGET_EXCEEDED";
-                case INVALID_RESPONSE -> "LEGAL_DRAFT_AI_INVALID";
-                default -> "LEGAL_DRAFT_AI_FAILED";
+            var code = switch (exception.reason()) {
+                case BUDGET_EXCEEDED -> LegalDraftRemoteFailure.Code.LEGAL_DRAFT_BUDGET_EXCEEDED;
+                case INVALID_RESPONSE -> LegalDraftRemoteFailure.Code.LEGAL_DRAFT_AI_INVALID;
+                default -> LegalDraftRemoteFailure.Code.LEGAL_DRAFT_AI_FAILED;
             };
-            throw new JobExecutionException(code, false);
+            throw new LegalDraftRemoteFailure(code);
         } catch (IllegalArgumentException exception) {
-            throw new JobExecutionException("LEGAL_DRAFT_AI_INVALID", false);
+            throw new LegalDraftRemoteFailure(LegalDraftRemoteFailure.Code.LEGAL_DRAFT_AI_INVALID);
         }
     }
 

@@ -60,6 +60,23 @@ public class OperationsAdminAuditProcessor {
         write(OperationsAdminAuditAction.STORE_BRAND_UPLOAD, actorMemberId, "store-brand:1", succeeded);
     }
 
+    /** 법률 문서 AI 초안 생성. 행위 · 행위자 · 작업 식별자 · 성공 여부만 남기고 요청 · 본문은 남기지 않는다. 작업 식별자를 모르면 대상은 비운다. */
+    public void legalDraftGenerationRegistered(long actorMemberId, Long jobId, boolean succeeded) {
+        write(OperationsAdminAuditAction.LEGAL_DRAFT_GENERATION_REGISTER, actorMemberId, legalDraftGenerationTarget(jobId), succeeded);
+    }
+
+    public void legalDraftGenerationReviewed(long actorMemberId, long jobId, boolean succeeded) {
+        write(OperationsAdminAuditAction.LEGAL_DRAFT_GENERATION_REVIEW, actorMemberId, legalDraftGenerationTarget(jobId), succeeded);
+    }
+
+    public void legalDraftGenerationCancelled(long actorMemberId, long jobId, boolean succeeded) {
+        write(OperationsAdminAuditAction.LEGAL_DRAFT_GENERATION_CANCEL, actorMemberId, legalDraftGenerationTarget(jobId), succeeded);
+    }
+
+    private static String legalDraftGenerationTarget(Long jobId) {
+        return jobId == null ? null : AdminAuditLog.target("legal-draft-generation", jobId);
+    }
+
     private void legalDocumentFinished(OperationsAdminAuditAction action, long actorMemberId, String type, String locale, boolean succeeded) {
         // Only fixed codes may reach audit metadata; never pass path input or document text.
         String target = ("TERMS".equals(type) || "PRIVACY".equals(type)) && ("ko".equals(locale) || "en".equals(locale))

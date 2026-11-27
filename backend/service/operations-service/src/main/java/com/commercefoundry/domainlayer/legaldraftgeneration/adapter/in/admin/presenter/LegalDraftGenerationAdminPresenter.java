@@ -5,7 +5,7 @@ import com.commercefoundry.domainlayer.legaldraftgeneration.application.info.Leg
 import org.springframework.stereotype.Component;
 
 @Component
-public class LegalDraftGenerationPresenter {
+public class LegalDraftGenerationAdminPresenter {
     public LegalDraftGenerationResponse.Accepted accepted(long jobId) {
         return new LegalDraftGenerationResponse.Accepted(Long.toString(jobId));
     }
@@ -15,6 +15,6 @@ public class LegalDraftGenerationPresenter {
         var body = candidate == null ? null : new LegalDraftGenerationResponse.Candidate(candidate.type(), candidate.locale(),
             candidate.title(), candidate.body(), candidate.templateId(), candidate.templateVersion(), candidate.unresolvedItems(),
             candidate.reviewChecklist());
-        return new LegalDraftGenerationResponse(Long.toString(info.jobId()), info.status().name(), info.notice(), body, info.reviewedAt());
+        return new LegalDraftGenerationResponse(Long.toString(info.jobId()), info.status(), info.notice(), body, info.reviewedAt());
     }
 }
