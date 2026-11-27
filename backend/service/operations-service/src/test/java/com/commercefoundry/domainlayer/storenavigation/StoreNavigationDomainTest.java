@@ -229,4 +229,56 @@ class StoreNavigationDomainTest {
         var code = StoreNavigationErrorCode.valueOf(reason.name());
         assertThat(code.getHttpStatus()).isEqualTo(reason == Reason.CONFLICT ? HttpStatus.CONFLICT : HttpStatus.BAD_REQUEST);
     }
+
+    private static Item placed(String key, String parent, int order, Text descriptions, boolean visible, boolean primary, boolean shortcut) {
+        return new Item(key, parent, "NONE", new Text("국문-" + key, "en-" + key), descriptions, null, null, order, visible, primary, shortcut);
+    }
+
+    @Test
+    void descriptionsAreOptionalButBothLanguagesWhenPresent() {
+        assertThatCode(() -> validate(List.of(placed("a", null, 1, new Text("전체 상품", "All products"), true, false, false))))
+            .doesNotThrowAnyException();
+        assertThatCode(() -> validate(List.of(placed("a", null, 1, new Text("가".repeat(80), "a".repeat(80)), true, false, false))))
+            .doesNotThrowAnyException();
+        rejects(List.of(placed("a", null, 1, new Text("전체 상품", null), true, false, false)), Reason.DESCRIPTION);
+        rejects(List.of(placed("a", null, 1, new Text(null, "All"), true, false, false)), Reason.DESCRIPTION);
+        rejects(List.of(placed("a", null, 1, new Text(" ", "All"), true, false, false)), Reason.DESCRIPTION);
+        rejects(List.of(placed("a", null, 1, new Text("가".repeat(81), "All"), true, false, false)), Reason.DESCRIPTION);
+        rejects(List.of(placed("a", null, 1, new Text("전체\n상품", "All"), true, false, false)), Reason.DESCRIPTION);
+        // 숨김 항목도 같은 규칙이다.
+        rejects(List.of(placed("a", null, 1, new Text("전체", "a".repeat(81)), false, false, false)), Reason.DESCRIPTION);
+    }
+
+    @Test
+    void primaryAndShortcutOnlyOnTopLevelItemsIncludingHidden() {
+        assertThatCode(() -> validate(List.of(placed("a", null, 1, null, true, true, true), placed("b", null, 2, null, false, true, false))))
+            .doesNotThrowAnyException();
+        rejects(List.of(placed("a", null, 1, null, true, false, false), placed("b", "a", 1, null, true, true, false)), Reason.PLACEMENT);
+        rejects(List.of(placed("a", null, 1, null, true, false, false), placed("b", "a", 1, null, true, false, true)), Reason.PLACEMENT);
+        rejects(List.of(placed("a", null, 1, null, false, false, false), placed("b", "a", 1, null, false, true, true)), Reason.PLACEMENT);
+    }
+
+    @Test
+    void publicTreeCarriesLocalizedDescriptionAndPlacementFlagsAndDropsHiddenFlags() {
+        List<Item> items = List.of(
+            placed("shop", null, 1, new Text("전체 상품 / 카테고리", "All products / Categories"), true, true, false),
+            placed("sale", null, 2, null, true, false, true),
+            placed("hidden", null, 3, new Text("숨김 설명", "Hidden description"), false, true, true),
+            new Item("shop-new", "shop", "INTERNAL", new Text("신상", "New"), "/collections/new", null, 1, true));
+        validate(items);
+
+        List<PublicNode> ko = new StoreNavigationContent(items).publicTree("ko");
+        assertThat(ko).extracting(PublicNode::label).containsExactly("국문-shop", "국문-sale");
+        assertThat(ko.get(0).description()).isEqualTo("전체 상품 / 카테고리");
+        assertThat(ko.get(0).primary()).isTrue();
+        assertThat(ko.get(0).shortcut()).isFalse();
+        assertThat(ko.get(1).description()).isNull();
+        assertThat(ko.get(1).shortcut()).isTrue();
+        assertThat(ko.get(0).children()).singleElement().satisfies(child -> {
+            assertThat(child.description()).isNull();
+            assertThat(child.primary()).isFalse();
+            assertThat(child.shortcut()).isFalse();
+        });
+        assertThat(new StoreNavigationContent(items).publicTree("en").get(0).description()).isEqualTo("All products / Categories");
+    }
 }
