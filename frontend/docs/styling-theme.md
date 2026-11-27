@@ -56,6 +56,12 @@
 | `shortcut: true` | 모바일 헤더의 바로가기 줄 — 첫 화면에서 핵심 목록으로 가는 길 |
 
 - 순서는 배열 순서다. 메뉴를 바꿀 때 `apps/storefront/src/components/header/*` 를 고치지 않는다.
+- **게시 메뉴가 정본이다(#602).** 어드민 **쇼핑몰 설정 > 메뉴**가 게시한 메뉴(BE #599 `GET /api/v1/store/navigation?locale=`)를 `[locale]` 레이아웃이 푸터처럼 요청마다
+  `loadStoreNavigation`(`src/lib/store-navigation.ts`, no-store · 3초)으로 읽는다. 게시본이 없거나(404) 읽지 못하면(장애 · 시간 초과 · 모양 불일치) 위 브랜드 설정 메뉴로 그린다(`navigationFor`). 빈 게시본은 빈 메뉴다.
+  - 최상위 = `NavItem`(설명이 없으면 빈 값), 하위 = `children`(`NavLink`, 3단계는 그 `children`, 전체 메뉴 패널에서 대제목 · 설명 아래 링크 · 들여쓴 목록). 하위 설명은 헤더가 쓰지 않는다.
+  - INTERNAL 은 경로 그대로(앱 `Link`), CATEGORY 는 `shopHref`(`/shop?category=`), EXTERNAL 은 `external: true` — 새 창(`noopener noreferrer`) + 스크린리더 새 창 안내, NONE 은 `href: null`(링크 없는 글자).
+    틀린 항목(모르는 유형 · 빈 표시명 · 안전하지 않은 주소)은 하위째 빼고 나머지를 보인다.
+  - 링크 없는 대제목은 1차 메뉴 · 바로가기 줄에 두지 않는다. 두 줄은 넘치면 가로로 스크롤하고(헤더 높이를 바꾸지 않는다), 패널의 긴 표시명은 줄바꿈한다(말줄임 없음).
 - 아직 없는 화면도 링크로 둘 수 있다. 앱의 `not-found.tsx` 가 "준비 중" 문구로 받는다(상태는 404).
 
 ### 3-1. 메인 화면 (home)
