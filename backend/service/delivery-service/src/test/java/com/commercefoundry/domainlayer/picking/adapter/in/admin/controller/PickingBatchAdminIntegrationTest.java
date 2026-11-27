@@ -3,12 +3,16 @@ package com.commercefoundry.domainlayer.picking.adapter.in.admin.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.commercefoundry.domainlayer.picking.application.exception.PickingErrorCode;
+import com.commercefoundry.domainlayer.picking.application.exception.PickingException;
 import com.commercefoundry.domainlayer.picking.application.port.out.OrderPickingSnapshotQueryPort;
+import com.commercefoundry.domainlayer.picking.application.port.out.SkuBarcodeQueryPort;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingSnapshot;
 import com.commercefoundry.security.audit.AdminAuditLog;
 import com.commercefoundry.security.principal.MemberRole;
@@ -16,6 +20,8 @@ import com.commercefoundry.security.support.TestTokens;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +50,9 @@ class PickingBatchAdminIntegrationTest {
 
     @MockitoBean
     private OrderPickingSnapshotQueryPort snapshots;
+
+    @MockitoBean
+    private SkuBarcodeQueryPort barcodes;
 
     @Test
     void persistsExclusionsAndCheckHistoryWithoutDuplicatingRetries() {
@@ -107,6 +116,7 @@ class PickingBatchAdminIntegrationTest {
             );
             verify(snapshots).findAll(orderIds);
             verifyNoMoreInteractions(snapshots);
+            verifyNoInteractions(barcodes);
         } finally {
             auditLogger.detachAppender(audit);
             audit.stop();
@@ -184,6 +194,97 @@ class PickingBatchAdminIntegrationTest {
             auditLogger.detachAppender(audit);
             audit.stop();
         }
+    }
+
+    @Test
+    void persistsUnknownBarcodeAndReusesTheSameResolvedCountsAcrossInputMethods() {
+        String check = createForScan() + "/orders/201/checks";
+        given(barcodes.resolve(Set.of("0001", "unknown"))).willReturn(Map.of("0001", 10L));
+        given(barcodes.resolve(Set.of("0001"))).willReturn(Map.of("0001", 10L));
+
+        String unknown = """
+            {"quantities":{"10":1,"20":1},"barcodeQuantities":{"0001":1,"unknown":1}}
+            """;
+        var failed = post(check, unknown);
+        assertThat(failed).hasStatusOk();
+        assertThat(failed).bodyJson().extractingPath("$.dataBody.checks[0].reason.code").isEqualTo("UNKNOWN_BARCODE");
+        assertThat(failed).bodyJson().extractingPath("$.dataBody.inspectionComplete").isEqualTo(false);
+        assertThat(post(check, unknown)).bodyJson().extractingPath("$.dataBody.checks.length()").isEqualTo(1);
+
+        var passed = post(check, """
+            {"quantities":{"10":1,"20":1},"barcodeQuantities":{"0001":1}}
+            """);
+        assertThat(passed).hasStatusOk();
+        assertThat(passed).bodyJson().extractingPath("$.dataBody.inspectionComplete").isEqualTo(true);
+        assertThat(passed).bodyJson().extractingPath("$.dataBody.checks[1].reason.code").isEqualTo("NONE");
+
+        var manualRetry = post(check, """
+            {"quantities":{"20":1,"10":2}}
+            """);
+        assertThat(manualRetry).hasStatusOk();
+        assertThat(manualRetry).bodyJson().extractingPath("$.dataBody.checks.length()").isEqualTo(2);
+    }
+
+    @Test
+    void allowsScanOnlyAndRejectsUnauthorizedScanBeforeLookup() {
+        String check = createForScan() + "/orders/201/checks";
+        String body = """
+            {"barcodeQuantities":{"0001":2,"0002":1}}
+            """;
+        var forbidden = mvc.post().uri(check).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.STAFF))
+            .contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+        assertThat(forbidden).hasStatus(403);
+        verifyNoInteractions(barcodes);
+
+        given(barcodes.resolve(Set.of("0001", "0002"))).willReturn(Map.of("0001", 10L, "0002", 20L));
+        var scanned = post(check, body);
+        assertThat(scanned).hasStatusOk();
+        assertThat(scanned).bodyJson().extractingPath("$.dataBody.inspectionComplete").isEqualTo(true);
+    }
+
+    @Test
+    void rejectsOverflowAndSeparatesRemoteOutageFromAnUnknownBarcode() {
+        String detail = createForScan();
+        String check = detail + "/orders/201/checks";
+        given(barcodes.resolve(Set.of("0001"))).willReturn(Map.of("0001", 10L));
+        given(barcodes.resolve(Set.of("0002"))).willThrow(new PickingException(PickingErrorCode.BARCODE_LOOKUP_UNAVAILABLE));
+
+        var overflow = post(check, """
+            {"quantities":{"10":9223372036854775807},"barcodeQuantities":{"0001":1}}
+            """);
+        assertThat(overflow).hasStatus(400);
+        assertThat(overflow).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("DELIVERY_035");
+        var unavailable = post(check, """
+            {"barcodeQuantities":{"0002":1}}
+            """);
+        assertThat(unavailable).hasStatus(503);
+        assertThat(unavailable).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("DELIVERY_039");
+        var fetched = mvc.get().uri(detail).header(HttpHeaders.AUTHORIZATION, bearer()).exchange();
+        assertThat(fetched).bodyJson().extractingPath("$.dataBody.checks.length()").isEqualTo(0);
+    }
+
+    @Test
+    void rejectsBarcodeInputInBulkInsteadOfCheckingOnlyTheManualCounts() {
+        String detail = createForScan();
+        var result = post(detail + "/checks", """
+            {"items":[{"orderId":"201","check":{"quantities":{"10":2,"20":1},"barcodeQuantities":{"unknown":1}}}]}
+            """);
+        assertThat(result).hasStatus(400);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("DELIVERY_160");
+        var fetched = mvc.get().uri(detail).header(HttpHeaders.AUTHORIZATION, bearer()).exchange();
+        assertThat(fetched).bodyJson().extractingPath("$.dataBody.checks.length()").isEqualTo(0);
+        verifyNoInteractions(barcodes);
+    }
+
+    private String createForScan() {
+        given(snapshots.findAll(List.of(201L))).willReturn(List.of(new PickingSnapshot(
+            201, "PREPARING", "KR", List.of(new PickingSnapshot.Line(10, 2, false), new PickingSnapshot.Line(20, 1, false))
+        )));
+        var created = post(PickingBatchAdminController.PATH, """
+            {"orderIds":["201"]}
+            """);
+        assertThat(created).hasStatus(201);
+        return created.getResponse().getHeader(HttpHeaders.LOCATION);
     }
 
     private MvcTestResult post(String path, String body) {

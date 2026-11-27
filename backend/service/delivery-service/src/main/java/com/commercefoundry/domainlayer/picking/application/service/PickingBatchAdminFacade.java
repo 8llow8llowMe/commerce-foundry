@@ -11,12 +11,13 @@ import com.commercefoundry.domainlayer.picking.application.info.PickingBatchInfo
 import com.commercefoundry.domainlayer.picking.application.info.PickingBulkCheckInfo;
 import com.commercefoundry.domainlayer.picking.application.port.in.PickingBatchAdminUseCase;
 import com.commercefoundry.domainlayer.picking.application.service.processor.OrderPickingSnapshotProcessor;
+import com.commercefoundry.domainlayer.picking.application.service.processor.PickingBarcodeProcessor;
 import com.commercefoundry.domainlayer.picking.application.service.processor.PickingBatchProcessor;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingBatch;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingCheck;
+import com.commercefoundry.domainlayer.picking.domain.model.PickingCheckSubmission;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -31,6 +32,7 @@ public class PickingBatchAdminFacade implements PickingBatchAdminUseCase {
 
     private final OrderPickingSnapshotProcessor snapshots;
     private final PickingBatchProcessor batches;
+    private final PickingBarcodeProcessor barcodes;
     private final PickingBatchAdminPresenter presenter;
     private final DeliveryAdminAuditProcessor audit;
 
@@ -104,7 +106,7 @@ public class PickingBatchAdminFacade implements PickingBatchAdminUseCase {
     private PickingBulkCheckInfo.OrderResult checkBulkOrder(long batchId, PickingOrderCheckCommand item) {
         try {
             PickingBatch batch = batches.check(batchId, item.orderId(), item.quantities());
-            PickingCheck check = submittedChecks(batch, item.orderId(), item.quantities()).findFirst().orElseThrow();
+            PickingCheck check = submittedChecks(batch, item.orderId(), PickingCheck.key(item.quantities())).findFirst().orElseThrow();
             return new PickingBulkCheckInfo.Recorded(item.orderId(), check.failure());
         } catch (PickingException exception) {
             if (exception.getErrorCode() != PickingErrorCode.CONCURRENTLY_CHANGED) {
@@ -115,11 +117,15 @@ public class PickingBatchAdminFacade implements PickingBatchAdminUseCase {
     }
 
     @Override
-    public PickingBatchAdminResponse check(long batchId, long orderId, Map<Long, Long> quantities, long actorMemberId) {
+    @Transactional(propagation = Propagation.NEVER)
+    public PickingBatchAdminResponse check(long batchId, PickingOrderCheckCommand command, long actorMemberId) {
         PickingBatch batch;
         PickingBatchAdminResponse response;
+        PickingCheckSubmission submission;
         try {
-            batch = batches.check(batchId, orderId, quantities);
+            // 상품 서비스 조회를 마친 뒤 기존 묶음 버전 비교로 검수 이력을 저장한다.
+            submission = barcodes.resolve(command);
+            batch = batches.checkSubmission(batchId, command.orderId(), submission);
             response = presenter.present(new PickingBatchInfo(batch));
         } catch (RuntimeException exception) {
             if (isAuditedFailure(exception)) {
@@ -127,13 +133,12 @@ public class PickingBatchAdminFacade implements PickingBatchAdminUseCase {
             }
             throw exception;
         }
-        audit.pickingOrderChecked(actorMemberId, batchId, submittedChecks(batch, orderId, quantities).anyMatch(PickingCheck::successful));
+        audit.pickingOrderChecked(actorMemberId, batchId, submittedChecks(batch, command.orderId(), submission.key()).anyMatch(PickingCheck::successful));
         return response;
     }
 
     // 재시도라면 마지막 기록 대신 이 요청과 수량이 같은 기록을 사용한다.
-    private Stream<PickingCheck> submittedChecks(PickingBatch batch, long orderId, Map<Long, Long> quantities) {
-        String submitted = PickingCheck.key(quantities);
+    private Stream<PickingCheck> submittedChecks(PickingBatch batch, long orderId, String submitted) {
         return batch.checks().stream().filter(check -> check.orderId() == orderId && check.quantitiesKey().equals(submitted));
     }
 

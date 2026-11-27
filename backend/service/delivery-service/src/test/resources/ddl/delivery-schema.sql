@@ -35,7 +35,7 @@
         updated_at timestamp(6) with time zone not null,
         attempt_no integer not null,
         batch_id bigint not null,
-        failure varchar(32) not null check ((failure in ('NONE','ORDER_NOT_IN_BATCH','INVALID_QUANTITY','WRONG_SKU','SHORTAGE','EXCESS','ALREADY_CHECKED'))),
+        failure varchar(32) not null check ((failure in ('NONE','ORDER_NOT_IN_BATCH','INVALID_QUANTITY','WRONG_SKU','SHORTAGE','EXCESS','ALREADY_CHECKED','UNKNOWN_BARCODE'))),
         order_id bigint not null,
         quantities_key text not null,
         primary key (id),
@@ -68,7 +68,7 @@
         '검수한 주문 아이디 (외부 FK: order-service orders.id) — 묶음 밖 주문이면 실패 기록이다';
 
     comment on column delivery.picking_check.quantities_key is
-        '보낸 수량 — 상품 옵션 오름차순 옵션:수량 을 쉼표로 이은 값. 같은 주문 같은 수량 재요청을 알아보는 키';
+        '검수 재요청 식별 키. SKU 수량을 정렬하고 미등록 바코드가 있으면 스캔 수량의 지문을 덧붙인다';
 
     create table delivery.picking_item (
         id bigint not null,

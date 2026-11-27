@@ -6,6 +6,7 @@ import static com.commercefoundry.domainlayer.picking.domain.model.PickingCheck.
 import static com.commercefoundry.domainlayer.picking.domain.model.PickingCheck.Failure.NONE;
 import static com.commercefoundry.domainlayer.picking.domain.model.PickingCheck.Failure.ORDER_NOT_IN_BATCH;
 import static com.commercefoundry.domainlayer.picking.domain.model.PickingCheck.Failure.SHORTAGE;
+import static com.commercefoundry.domainlayer.picking.domain.model.PickingCheck.Failure.UNKNOWN_BARCODE;
 import static com.commercefoundry.domainlayer.picking.domain.model.PickingCheck.Failure.WRONG_SKU;
 
 import java.util.ArrayList;
@@ -81,21 +82,29 @@ public record PickingBatch(long id, List<PickingSnapshot> orders, List<PickingEx
      * @throws IllegalArgumentException 주문 아이디가 양수가 아니거나 맵 · 옵션 · 수량이 null 이다
      */
     public PickingBatch check(long orderId, Map<Long, Long> quantities) {
+        return checkSubmission(orderId, new PickingCheckSubmission(quantities, Map.of()));
+    }
+
+    public PickingBatch checkSubmission(long orderId, PickingCheckSubmission submission) {
         if (orderId <= 0) {
             throw new IllegalArgumentException("주문 아이디는 양수여야 합니다.");
         }
-        String key = PickingCheck.key(quantities);
+        String key = submission.key();
         if (checks.stream().anyMatch(check -> check.orderId() == orderId && check.quantitiesKey().equals(key))) {
             return this;
         }
         PickingSnapshot order = orders.stream().filter(item -> item.orderId() == orderId).findFirst().orElse(null);
-        PickingCheck.Failure failure = order == null ? ORDER_NOT_IN_BATCH : failure(order, Map.copyOf(quantities));
+        PickingCheck.Failure failure = order == null ? ORDER_NOT_IN_BATCH : failure(order, submission);
         List<PickingCheck> next = new ArrayList<>(checks);
         next.add(new PickingCheck(orderId, key, failure));
         return new PickingBatch(id, orders, exclusions, next, version);
     }
 
-    private PickingCheck.Failure failure(PickingSnapshot order, Map<Long, Long> actual) {
+    private PickingCheck.Failure failure(PickingSnapshot order, PickingCheckSubmission submission) {
+        if (!submission.unknownBarcodes().isEmpty()) {
+            return UNKNOWN_BARCODE;
+        }
+        Map<Long, Long> actual = submission.quantities();
         if (checked(order.orderId())) {
             return ALREADY_CHECKED;
         }

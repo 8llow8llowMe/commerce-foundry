@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Null;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -22,9 +23,21 @@ public record PickingOrderCheckRequest(
         @NotNull(message = PickingValidationMessage.QUANTITY)
         @Positive(message = PickingValidationMessage.QUANTITY)
         @Digits(integer = 19, fraction = 0, message = PickingValidationMessage.QUANTITY)
-        @DecimalMax(value = "9223372036854775807", message = PickingValidationMessage.QUANTITY) BigDecimal> quantities
+        @DecimalMax(value = "9223372036854775807", message = PickingValidationMessage.QUANTITY) BigDecimal> quantities,
+
+    @Schema(hidden = true)
+    @Null(message = PickingValidationMessage.BARCODE_SINGLE_CHECK_ONLY)
+    Object barcodeQuantities
 ) {
+    public PickingOrderCheckRequest(Map<String, BigDecimal> quantities) {
+        this(quantities, null);
+    }
+
     public Map<Long, Long> toQuantities() {
+        return toQuantities(quantities);
+    }
+
+    static Map<Long, Long> toQuantities(Map<String, BigDecimal> quantities) {
         return quantities.entrySet().stream().collect(Collectors.toUnmodifiableMap(
             entry -> Long.parseLong(entry.getKey()), entry -> entry.getValue().longValueExact()
         ));

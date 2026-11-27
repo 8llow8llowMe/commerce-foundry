@@ -49,7 +49,7 @@ public class PickingCheckEntity extends BaseEntity implements Persistable<Long> 
     private Long orderId;
 
     @Column(name = "quantities_key", nullable = false, columnDefinition = "text",
-        comment = "보낸 수량 — 상품 옵션 오름차순 옵션:수량 을 쉼표로 이은 값. 같은 주문 같은 수량 재요청을 알아보는 키")
+        comment = "검수 재요청 식별 키. SKU 수량을 정렬하고 미등록 바코드가 있으면 스캔 수량의 지문을 덧붙인다")
     private String quantitiesKey;
 
     @Enumerated(EnumType.STRING)

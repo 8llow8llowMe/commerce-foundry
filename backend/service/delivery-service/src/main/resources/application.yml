@@ -67,6 +67,9 @@ resilience4j:
       # 출고 묶음의 피킹 스냅숏 조회 (GET /internal/v1/orders/picking-snapshots, #363)도 같은 인스턴스를 쓴다
       order-service:
         base-config: default
+      # 상품 옵션의 포장 검수 바코드 조회 (#741)
+      product-service:
+        base-config: default
 
 eureka:
   client:

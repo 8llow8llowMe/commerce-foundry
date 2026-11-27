@@ -4,7 +4,6 @@ import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.Pic
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.PickingBulkCheckAdminResponse;
 import com.commercefoundry.domainlayer.picking.application.command.PickingOrderCheckCommand;
 import java.util.List;
-import java.util.Map;
 
 public interface PickingBatchAdminUseCase {
     PickingBatchAdminResponse create(List<Long> orderIds, long actorMemberId);
@@ -15,5 +14,5 @@ public interface PickingBatchAdminUseCase {
 
     PickingBulkCheckAdminResponse checkBulk(long batchId, List<PickingOrderCheckCommand> items, long actorMemberId);
 
-    PickingBatchAdminResponse check(long batchId, long orderId, Map<Long, Long> quantities, long actorMemberId);
+    PickingBatchAdminResponse check(long batchId, PickingOrderCheckCommand command, long actorMemberId);
 }

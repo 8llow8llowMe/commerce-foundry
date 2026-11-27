@@ -87,7 +87,7 @@ public class PickingBatchAdminPresenter {
 
     private PickingBatchAdminResponse.Check check(PickingCheck check) {
         return new PickingBatchAdminResponse.Check(Long.toString(check.orderId()), check.successful(),
-            reason(check.failure()), submitted(check.quantitiesKey()));
+            reason(check.failure()), submitted(check.submittedSkuKey()));
     }
 
     private CodeNameDescriptionMetadata reason(PickingCheck.Failure failure) {
@@ -99,6 +99,7 @@ public class PickingBatchAdminPresenter {
             case SHORTAGE -> "수량 부족";
             case EXCESS -> "수량 초과";
             case ALREADY_CHECKED -> "이미 검수된 주문";
+            case UNKNOWN_BARCODE -> "등록되지 않은 바코드";
         };
         return CodeNameDescriptionMetadata.of(failure.name(), name, name);
     }
