@@ -49,6 +49,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.event.EventListener;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -264,7 +266,7 @@ class JobWorkerFlowTest {
 
         awaitJob(first, finished -> finished.status() == JobStatus.SUCCEEDED);
         awaitJob(second, finished -> finished.status() == JobStatus.SUCCEEDED);
-        assertThat(executions.maxConcurrent(FlowHandlers.SERIAL)).isEqualTo(1);
+        assertThat(executions.maxConcurrent(FlowHandlers.SERIAL)).as(executions.describe(FlowHandlers.SERIAL)).isEqualTo(1);
         assertThat(executions.count(first)).isEqualTo(1);
         assertThat(executions.count(second)).isEqualTo(1);
     }
@@ -419,7 +421,7 @@ class JobWorkerFlowTest {
 
                 @Override
                 public JobOutcome execute(JobExecution execution) {
-                    executions.started(SERIAL, execution.jobId());
+                    executions.started(SERIAL, execution.jobId(), execution.attempt());
                     try {
                         sleep(300);
                         return JobOutcome.empty();
@@ -465,21 +467,77 @@ class JobWorkerFlowTest {
             }
         }
 
-        /** 작업별 실행 횟수와 종류별 최대 동시 실행 수. */
-        static class Executions {
+        /**
+         * 작업별 실행 횟수와 종류별 최대 동시 실행 수. 동시 실행 상한 시험이 깨지면 어느 컨텍스트 · 스레드 · 시도가 겹쳤는지 보이도록
+         * 실행 구간을 함께 남긴다(#717).
+         */
+        static class Executions implements ApplicationContextAware {
 
             private final Map<Long, AtomicInteger> counts = new ConcurrentHashMap<>();
             private final Map<String, AtomicInteger> running = new ConcurrentHashMap<>();
             private final Map<String, AtomicInteger> maxRunning = new ConcurrentHashMap<>();
+            private final List<Run> runs = new CopyOnWriteArrayList<>();
+            private final ThreadLocal<Run> current = new ThreadLocal<>();
+            private String contextId = "?";
+
+            @Override
+            public void setApplicationContext(ApplicationContext applicationContext) {
+                contextId = applicationContext.getId() + "@" + Integer.toHexString(System.identityHashCode(applicationContext));
+            }
 
             void started(String type, long jobId) {
+                started(type, jobId, 0);
+            }
+
+            void started(String type, long jobId, int attempt) {
                 counts.computeIfAbsent(jobId, key -> new AtomicInteger()).incrementAndGet();
                 int now = running.computeIfAbsent(type, key -> new AtomicInteger()).incrementAndGet();
                 maxRunning.computeIfAbsent(type, key -> new AtomicInteger()).accumulateAndGet(now, Math::max);
+                Run run = new Run(type, jobId, attempt, Thread.currentThread().getName(), contextId, now, System.nanoTime());
+                runs.add(run);
+                current.set(run);
             }
 
             void finished(String type) {
                 running.get(type).decrementAndGet();
+                Run run = current.get();
+                if (run != null) {
+                    run.endNanos = System.nanoTime();
+                    current.remove();
+                }
+            }
+
+            /** 종류별 실행 구간 — 시작 순. 실패 메시지용. */
+            String describe(String type) {
+                return runs.stream().filter(run -> run.type.equals(type)).map(Run::toString)
+                    .collect(java.util.stream.Collectors.joining("\n", "\n", ""));
+            }
+
+            static final class Run {
+                private final String type;
+                private final long jobId;
+                private final int attempt;
+                private final String thread;
+                private final String contextId;
+                private final int runningAtStart;
+                private final long startNanos;
+                private volatile long endNanos;
+
+                Run(String type, long jobId, int attempt, String thread, String contextId, int runningAtStart, long startNanos) {
+                    this.type = type;
+                    this.jobId = jobId;
+                    this.attempt = attempt;
+                    this.thread = thread;
+                    this.contextId = contextId;
+                    this.runningAtStart = runningAtStart;
+                    this.startNanos = startNanos;
+                }
+
+                @Override
+                public String toString() {
+                    return "jobId=" + jobId + " attempt=" + attempt + " thread=" + thread + " context=" + contextId
+                        + " runningAtStart=" + runningAtStart + " start=" + startNanos + " end=" + (endNanos == 0 ? "-" : endNanos);
+                }
             }
 
             int count(long jobId) {

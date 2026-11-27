@@ -1,52 +1,53 @@
-# HANDOFF #717 JobWorkerFlowTest.perTypeLimitDefersSerially 간헐 실패 (2026-11-26 17:45)
+# HANDOFF #717 JobWorkerFlowTest.perTypeLimitDefersSerially 간헐 실패 (2026-11-27 09:30 갱신)
 
-브랜치 `test/be/717-job-worker-serial-flaky` (origin/develop ac60b3cc). 코드 변경 없음, 분석만. **PR 전에 이 파일을 지운다.**
+브랜치 `test/be/717-job-worker-serial-flaky` (develop 993e0ab6 위로 rebase). **PR 전에 이 파일을 지운다.**
 
 ## 결론 (현재까지)
 
-원인 미확정. 엔진 쪽 단일 인스턴스 슬롯 계산과 테스트 계측은 둘 다 읽어 보면 맞다 — 그래서 "한 워커 안의 경합"이 아니라
-**같은 `Executions` 빈을 보는 실행 경로가 둘 이상**이거나 **슬롯이 두 번 반납되는 드문 경로**를 의심한다. 프로덕션 코드는 고치지 않았다.
+원인 미확정, 재현도 아직 못 했다. 엔진 슬롯 계산과 테스트 계측을 읽어 보면 둘 다 맞다.
+프로덕션 코드는 고치지 않았다. 이번에 한 일은 **실패할 때 원인이 보이도록 테스트 계측을 늘린 것**이다.
+
+## 11-27 정정 — 이전 재현 결과는 무효
+
+- `cleanTest` 를 붙여도 test 태스크가 **빌드 캐시에서 복원(FROM-CACHE)** 된다. 11-26 의 "단독 3회 통과"(회당 약 10초)와
+  11-27 모듈 2·3회차(회당 약 45초)는 실제로 돌지 않았다. 반복 실행할 때는 **`--no-build-cache`** 를 반드시 붙인다.
+- 실제로 돈 것은 11-27 모듈 1회차 하나다. 계측을 넣은 상태로 7m43s 동안 1,829건 통과, JobWorkerFlowTest 11건 통과.
+- `--no-build-cache` 로 모듈 3회를 다시 돌리던 중 PC 메모리 부족으로 Claude Code 가 백그라운드 실행을 중단시켰다(09:28, 완료된 회차 없음).
+- 11-26 의 가설 3(`maxParallelForks = 2`)은 틀렸다. 루트 `build.gradle` 은 **CI 의 product-service 에서만** 2 fork 를 쓴다.
+  operations 는 로컬·CI 모두 단일 fork 이고, `junit-platform.properties` 가 없어 JUnit 병렬 실행도 없다.
 
 ## 근거
 
-- `JobWorkerFacade.dispatch` 는 `dispatchLock` 안에서 `reserveSlot(type, limit)` 으로 전체·종류별 칸을 함께 잡는다.
-  `FLOW_SERIAL` 은 `JobHandlerOptions(null,null,null,1)` → 종류별 상한 1.
-- 칸 반납(`releaseSlot`) 위치는 5곳뿐: dispatch 의 claim 예외 2곳 · claim 결과가 CLAIMED 아님 1곳(각각 start 전),
-  `start` 의 실행기 거절 catch 1곳, `run` 의 finally 1곳. 정상 경로에서 한 예약당 한 번 반납이다.
-- 테스트 핸들러는 `executions.started` → sleep 300ms → finally `executions.finished` 이고, 엔진은 핸들러가 돌아온 뒤에야
-  칸을 반납한다 → 계측 카운터 ≤ 엔진 칸 수. 한 엔진 안에서는 2가 나올 수 없다.
-- 리스너 `job-runner` 는 concurrency 1, 내장 Kafka 파티션 1.
-- lease 만료 회수(lease 2s, heartbeat 200ms) 로 같은 작업의 시도 2가 나와도 칸이 잡혀 있어 TYPE_FULL 로 미뤄진다 → 겹치지 않는다
-  (이 경우는 `count(first)==2` 로 드러난다).
+- `JobWorkerFacade` 는 `@Service` 하나뿐이다(`new JobWorkerFacade` 는 단위 테스트 `JobWorkerFacadeTest` 뿐).
+  `dispatch` 는 리스너 `job-runner`(concurrency 1, 파티션 1)에서만 불린다.
+- `dispatch` 는 `dispatchLock` 안에서 `reserveSlot(type, limit)` 으로 전체 칸과 종류별 칸을 함께 잡는다.
+  `FLOW_SERIAL` 은 `JobHandlerOptions(null,null,null,1)` 이라 종류별 상한이 1이다.
+- 칸 반납(`releaseSlot`)은 5곳이고, 어느 경로든 예약 한 번에 한 번만 반납한다:
+  claim 예외 2곳 · CLAIMED 가 아닌 결과 1곳 · 실행기 거절 1곳 · `run` 의 finally 1곳.
+  실행기(`JobWorkerExecutorConfig`)는 core=max, 큐 0, AbortPolicy 라 거절 예외는 작업을 넣기 전에 난다.
+- heartbeat 가 멈추는 경로(LOST·취소, RUN_TIMEOUT)는 실행 스레드에 멈춤 신호만 주고, 칸은 `run` 의 finally 에서 반납한다.
+- 테스트 핸들러는 `started` → 300ms 대기 → finally `finished` 순서다. 엔진은 핸들러가 돌아온 뒤에 칸을 반납하므로
+  계측 카운터는 엔진 칸 수를 넘을 수 없다.
+- 다른 컨텍스트의 워커일 가능성도 낮다. H2 `operations-flow` 는 이 클래스만 쓰고, `FLOW_SERIAL` 핸들러는
+  이 클래스의 중첩 `@TestConfiguration` 에만 있다. 다른 컨텍스트가 이 신호를 받으면 모르는 종류라 DLT 로 보낸다(이중 실행이 아니다).
 
-## 남은 가설 (다음 세션이 확인)
+## 이번 커밋의 계측 (JobWorkerFlowTest)
 
-1. **같은 JVM 에 같은 핸들러를 가진 워커가 둘** — 컨텍스트가 두 번 뜨는 경우(캐시 축출·재생성)인지. `started` 에 `execution.workerId()`·
-   스레드 이름·`System.identityHashCode(JobWorkerFacade)` 를 기록해 실패 시 메시지에 찍게 계측을 늘리면 바로 갈린다.
-2. **`start` 의 `jobWorkerTaskExecutor.execute` 가 작업을 실제로 넣은 뒤 예외** → catch 에서 칸 반납 + 실행 스레드의 finally 반납 = 이중 반납.
-   실행기(`JobWorkerExecutorConfig`)는 core=max=`worker.concurrency`, 큐 0, 기본 AbortPolicy 라 거절은 제출 전에 던진다 →
-   이 가설은 약하다(정상 JDK 경로에선 이중 반납 없음).
-3. 루트 `build.gradle:133` `maxParallelForks = 2` — 포크 간 공유 자원(같은 H2 이름 `operations-flow`, 포트)이 섞이는지.
+`Executions` 가 실행 구간마다 jobId · attempt · 스레드 이름 · `ApplicationContext` id@identity · 시작 시 running · 시작/종료 nanoTime 을
+남긴다. `maxConcurrent` 단언이 깨지면 `describe(SERIAL)` 로 두 구간이 메시지에 찍힌다. 이것으로 갈린다:
+- 컨텍스트 id 가 다르면 → 컨텍스트가 둘(테스트 구성 문제)
+- 같은 컨텍스트에서 시도가 다르거나 같은 작업이면 → 엔진 쪽(감독 세션에 먼저 보고한 뒤 수정)
+- 구간이 실제로는 겹치지 않으면 → 계측 경합
 
-### 가설 1 보강 (감독 세션 힌트: 컨텍스트 캐시로 다른 클래스의 워커가 같은 DB 작업을 집어감)
+## 다음 할 일
 
-- 17:35 확인: operations 의 `@SpringBootTest` 24개 중 `commerce.messaging.enabled=true` 는 4개
-  (JobWorkerFlowTest · DltAlertFlowTest · DltAlertKafkaPostgresTest · DltAlertActivationTest), `@EmbeddedKafka` 는 2개(JobWorkerFlowTest · DltAlertFlowTest).
-- H2 이름 `operations-flow` 는 JobWorkerFlowTest 만 쓴다. 나머지는 `application-test.yml` 의 `operations-context` → 다른 컨텍스트의
-  lease 만료 판정이 이 테스트의 작업 행을 볼 수는 없다. 다만 **DltAlertFlowTest 컨텍스트에도 job 리스너·워커 빈이 뜨는지**,
-  그 컨텍스트가 같은 내장 브로커(JVM 안 공유 여부)·같은 컨슈머 그룹 `<ns>.operations.job-runner` 를 쓰는지는 아직 확인 못 했다.
-  같은 브로커·그룹이면 파티션 재배정 순간 한쪽이 `FLOW_SERIAL` 을 모르는 종류로 DLT 에 보내는 쪽이지 이중 실행은 아니다
-  → 이중 실행을 만들려면 **SERIAL 핸들러를 가진 컨텍스트가 둘**이어야 한다. 계측(워커 id·스레드·컨텍스트 id)으로 확정할 것.
-- 확인 방법: `Executions.started` 에 `execution.workerId()`, `Thread.currentThread().getName()`, `ApplicationContext#getId()` 를 함께 기록하고,
-  `maxConcurrent` 실패 메시지에 겹친 두 기록을 찍는다. 스케줄러·워커 on/off 속성(`operations.jobs.*`)이 컨텍스트별로 어떤지도 본다.
-
-## 재현
-
-`./gradlew :service:operations-service:cleanTest :service:operations-service:test --tests "*JobWorkerFlowTest"` 3회(17:34, develop ac60b3cc 그대로):
-3회 모두 11건 통과, 실패 0 — **단독 실행으로는 재현 안 됨**. 이슈 보고는 모듈 전체 테스트 중 실패였으므로
-다음엔 `:service:operations-service:test` 전체(다른 클래스와 같은 JVM·`maxParallelForks=2`)로 반복해 본다.
+1. 메모리가 넉넉할 때 `./gradlew :service:operations-service:cleanTest :service:operations-service:test --no-build-cache --tests "*JobWorkerFlowTest"`
+   를 여러 번 돌린다. 클래스 하나라 가볍다. 실패하면 메시지에 찍힌 구간으로 위 분기를 판정한다.
+2. 그래도 안 나오면 모듈 전체(`--no-build-cache`)를 반복한다. CI 실패 로그가 있으면 그쪽이 더 빠르다.
+3. 원인이 정해지면: 테스트 문제면 결정적으로 고치고, 엔진 문제면 근거를 감독 세션에 먼저 보고한다.
+   계측만으로 PR 을 낼지는 감독 세션이 정한다.
 
 ## 다음 프롬프트
 
-> /dev-orchestrator #717 이어서. HANDOFF-717.md 의 가설 1→2→3 순서로, 먼저 테스트 계측에 workerId·스레드·워커 인스턴스 식별을 더하고
-> 클래스를 반복 실행해 원인을 가른다. 엔진 이중 반납이면 회귀 테스트 + 수정(이슈 댓글 먼저), 테스트 문제면 계측만 고친다. 끝나면 HANDOFF 삭제 후 /pr.
+> #717 이어서. HANDOFF-717.md "다음 할 일" 1→2 순서로 `--no-build-cache` 를 붙여 반복 재현한다(메모리 확인).
+> 실패 메시지의 실행 구간으로 원인을 판정한 뒤, 테스트 문제면 고쳐서 /pr, 엔진 문제면 근거를 감독 세션에 먼저 보고한다.
