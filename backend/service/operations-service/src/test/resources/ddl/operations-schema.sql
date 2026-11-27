@@ -870,6 +870,30 @@
     comment on column operations.size_chart_generation_receipt.requested_by_member_id is
         '요청자 식별자 (FK: auth.member.id)';
 
+    create table operations.store_brand_revision (
+        version bigint not null,
+        actor_member_id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        dark_logo_alt_text varchar(160),
+        dark_logo_id uuid,
+        draft_version bigint not null,
+        icon_alt_text varchar(160),
+        icon_id uuid,
+        logo_alt_text varchar(160),
+        logo_id uuid,
+        published_version bigint,
+        restored_from_version bigint,
+        primary key (version),
+        constraint ck_store_brand_revision_pointers check (version > 0 and draft_version between 1 and version and (published_version is null or published_version between 1 and version) and (draft_version = version or (published_version is not null and published_version = version)) and (restored_from_version is null or     (published_version is not null and published_version = version and restored_from_version between 1 and version - 1)) ),
+        constraint ck_store_brand_revision_asset_pairs check ((logo_id is null) = (logo_alt_text is null) and (dark_logo_id is null) = (dark_logo_alt_text is null) and (icon_id is null) = (icon_alt_text is null) )
+    );
+
+    comment on table operations.store_brand_revision is
+        '스토어 브랜드 편집·게시·복구 이력';
+
+    comment on column operations.store_brand_revision.actor_member_id is
+        '작업 관리자 아이디 (외부 FK: auth-service member.id)';
+
     create table operations.store_footer (
         id bigint not null,
         latest_revision integer not null,

@@ -48,6 +48,18 @@ public class OperationsAdminAuditProcessor {
         write(OperationsAdminAuditAction.STORE_NAVIGATION_PUBLISH, actorMemberId, "store-navigation:1", succeeded);
     }
 
+    public void brandDraftSaved(long actorMemberId, boolean succeeded) {
+        write(OperationsAdminAuditAction.STORE_BRAND_DRAFT_SAVE, actorMemberId, "store-brand:1", succeeded);
+    }
+
+    public void brandPublished(long actorMemberId, boolean succeeded) {
+        write(OperationsAdminAuditAction.STORE_BRAND_PUBLISH, actorMemberId, "store-brand:1", succeeded);
+    }
+
+    public void brandUploaded(long actorMemberId, boolean succeeded) {
+        write(OperationsAdminAuditAction.STORE_BRAND_UPLOAD, actorMemberId, "store-brand:1", succeeded);
+    }
+
     private void legalDocumentFinished(OperationsAdminAuditAction action, long actorMemberId, String type, String locale, boolean succeeded) {
         // Only fixed codes may reach audit metadata; never pass path input or document text.
         String target = ("TERMS".equals(type) || "PRIVACY".equals(type)) && ("ko".equals(locale) || "en".equals(locale))
