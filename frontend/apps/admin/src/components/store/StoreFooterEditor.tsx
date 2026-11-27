@@ -22,7 +22,13 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 
 import { AccessNotice } from '@/components/AccessNotice';
 import { accessDeniedOf, LOAD_FAILED, type AccessDenied, type FormErrors } from '@/lib/api-errors';
 import { moveItem } from '@/lib/display/order';
-import { CHECK_FIELDS, writeFailure } from '@/lib/store-footer/errors';
+import {
+  CHECK_FIELDS,
+  PUBLISH_RELOAD_FAILED,
+  publishNeedsReload,
+  publishOutcome,
+  writeFailure,
+} from '@/lib/store-footer/errors';
 import {
   blankRow,
   contentOf,
@@ -252,14 +258,47 @@ export function StoreFooterEditor() {
     setErrors({});
     setNotice(null);
     const revisionNumber = base.latestRevision;
-    apiFetch<FooterDetail>(STORE_FOOTER_PUBLISH_PATH, {
-      method: 'POST',
-      json: { expectedVersion: base.version, revisionNumber } satisfies FooterPublishRequest,
-    }).then((next) => {
+    const done = (next: FooterDetail) => {
       release();
       setPublishing(false);
       applied(next, `${revisionNumber}번을 게시했습니다. 스토어프론트 푸터에 바로 반영됩니다.`);
-    }, writeFailed);
+    };
+    apiFetch<FooterDetail>(STORE_FOOTER_PUBLISH_PATH, {
+      method: 'POST',
+      json: { expectedVersion: base.version, revisionNumber } satisfies FooterPublishRequest,
+    }).then(done, (cause: unknown) => {
+      if (!publishNeedsReload(cause)) {
+        writeFailed(cause);
+        return;
+      }
+      // 409 · 결과 모름 — 다시 읽어 그 번호가 공개 중이면 성공, 아니면 화면을 최신 저장본으로 바꾼다(`publishOutcome`).
+      // 게시는 저장한 초안만 하므로 지킬 입력이 없다. 초안 저장(PUT)의 409 는 위 `writeFailed` 로 입력을 지킨다
+      setPublishing(false);
+      loadDetail().then(
+        (next) => {
+          const outcome = publishOutcome(cause, next, revisionNumber);
+          if (outcome.kind === 'done') {
+            if (next) done(next);
+            return;
+          }
+          release();
+          if (outcome.kind === 'reload') {
+            setLoad({ kind: 'ready', base: next });
+            setForm(formOf(next));
+            setErrors({});
+            setConflict(false);
+            setNotice({ tone: 'error', text: outcome.notice });
+          } else if (outcome.kind === 'access') setLoad({ kind: 'denied', denied: outcome.denied });
+          else setErrors(outcome.errors);
+        },
+        (loadCause: unknown) => {
+          release();
+          const denied = accessDeniedOf(loadCause);
+          if (denied === 'forbidden') setLoad({ kind: 'denied', denied });
+          else setNotice({ tone: 'error', text: `${PUBLISH_RELOAD_FAILED} ${LOAD_FAILED}` });
+        },
+      );
+    });
   };
 
   const nameOf = (key: UniqueIdentifier) => {

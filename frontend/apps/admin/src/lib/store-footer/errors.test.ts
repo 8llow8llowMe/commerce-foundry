@@ -1,7 +1,16 @@
 import { ApiError } from '@cf/api-client';
 import { describe, expect, it } from 'vitest';
 import { SAVE_FAILED, SESSION_EXPIRED_ON_SAVE } from '@/lib/api-errors';
-import { CHECK_FIELDS, CONFLICT_NOTICE, UNKNOWN_OUTCOME_NOTICE, writeFailure } from './errors';
+import {
+  CHECK_FIELDS,
+  CONFLICT_NOTICE,
+  publishNotAppliedNotice,
+  publishOutcome,
+  publishReloadedNotice,
+  UNKNOWN_OUTCOME_NOTICE,
+  writeFailure,
+} from './errors';
+import type { FooterDetail } from './types';
 import { LABEL_INVALID, URL_CUSTOM_HOST, URL_FORMAT } from './form';
 
 const error = (
@@ -69,6 +78,56 @@ describe('writeFailure', () => {
     expect(writeFailure(error(500, 'X', 'server'))).toEqual({
       kind: 'errors',
       errors: { form: [SAVE_FAILED] },
+    });
+  });
+});
+
+describe('publishOutcome', () => {
+  const detail = (latestRevision: number, publishedRevision: number | null): FooterDetail => ({
+    version: 7,
+    latestRevision,
+    publishedRevision,
+    revision: {
+      revisionNumber: latestRevision,
+      copyrightText: { ko: null, en: null },
+      links: [],
+      createdBy: '1',
+      createdAt: '2026-11-27T00:00:00Z',
+      publishedBy: null,
+      publishedAt: null,
+    },
+  });
+  const conflict = error(409, 'STORE_FOOTER_020', 'conflict');
+
+  it('게시 409 뒤 다시 읽은 공개 번호가 요청 번호와 같으면 성공이다', () => {
+    expect(publishOutcome(conflict, detail(5, 5), 5)).toEqual({ kind: 'done' });
+  });
+
+  it('게시 409 뒤 다른 저장본이 최신이면 화면을 그 저장본으로 바꾼다(미저장 표시가 남지 않게)', () => {
+    expect(publishOutcome(conflict, detail(6, 4), 5)).toEqual({
+      kind: 'reload',
+      notice: publishReloadedNotice(6),
+      conflict: false,
+      resetTree: true,
+    });
+  });
+
+  it('결과 모름 뒤 공개되지 않았으면 같은 번호를 다시 게시하라고 안내한다', () => {
+    expect(
+      publishOutcome(error(504, 'GATEWAY_TIMEOUT', 'unknownOutcome'), detail(5, 4), 5),
+    ).toEqual({
+      kind: 'reload',
+      notice: publishNotAppliedNotice(5),
+      conflict: false,
+      resetTree: true,
+    });
+  });
+
+  it('다시 읽을 필요 없는 실패는 화면을 바꾸지 않는다', () => {
+    expect(publishOutcome(error(401, 'AUTH_001', 'unauthorized'), null, 5)).toEqual({
+      kind: 'errors',
+      errors: { form: [SESSION_EXPIRED_ON_SAVE] },
+      resetTree: false,
     });
   });
 });
