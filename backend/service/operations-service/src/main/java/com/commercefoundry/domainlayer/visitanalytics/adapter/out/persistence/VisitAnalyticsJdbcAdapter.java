@@ -1,8 +1,7 @@
 package com.commercefoundry.domainlayer.visitanalytics.adapter.out.persistence;
 
-import com.commercefoundry.domainlayer.visitanalytics.application.port.in.VisitAnalyticsUseCase.DailyViews;
-import com.commercefoundry.domainlayer.visitanalytics.application.port.in.VisitAnalyticsUseCase.ProductViews;
 import com.commercefoundry.domainlayer.visitanalytics.application.port.out.VisitAnalyticsStore;
+import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -16,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class VisitAnalyticsJdbcAdapter implements VisitAnalyticsStore {
 
     private final JdbcTemplate jdbc;
+    private final EntityManager entityManager;
 
     @Override
     @Transactional
@@ -32,40 +32,42 @@ public class VisitAnalyticsJdbcAdapter implements VisitAnalyticsStore {
             insert into operations.visit_product_daily (visit_day, product_id, view_count)
             values (?, ?, 0) on conflict do nothing
             """, day, productId);
-        jdbc.update("""
-            update operations.visit_product_daily
-               set view_count = view_count + 1
-             where visit_day = ? and product_id = ?
-            """, day, productId);
+        entityManager.createQuery("""
+            update VisitProductDailyEntity counter
+               set counter.viewCount = counter.viewCount + 1
+             where counter.visitDay = :day and counter.productId = :productId
+            """).setParameter("day", day).setParameter("productId", productId).executeUpdate();
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<ProductViews> topProducts(LocalDate from, LocalDate to) {
-        return jdbc.query("""
-            select product_id, sum(view_count) as views
-              from operations.visit_product_daily
-             where visit_day between ? and ?
-             group by product_id
-             order by views desc, product_id asc
-             limit 20
-            """, (row, index) -> new ProductViews(row.getLong("product_id"), row.getLong("views")), from, to);
+        return entityManager.createQuery("""
+            select counter.productId, sum(counter.viewCount)
+              from VisitProductDailyEntity counter
+             where counter.visitDay between :from and :to
+             group by counter.productId
+             order by sum(counter.viewCount) desc, counter.productId asc
+            """, ProductViews.class).setParameter("from", from).setParameter("to", to).setMaxResults(20).getResultList();
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<DailyViews> dailyProduct(long productId, LocalDate from, LocalDate to) {
-        return jdbc.query("""
-            select visit_day, view_count
-              from operations.visit_product_daily
-             where product_id = ? and visit_day between ? and ?
-             order by visit_day
-            """, (row, index) -> new DailyViews(row.getObject("visit_day", LocalDate.class), row.getLong("view_count")),
-            productId, from, to);
+        return entityManager.createQuery("""
+            select counter.visitDay, counter.viewCount
+              from VisitProductDailyEntity counter
+             where counter.productId = :productId and counter.visitDay between :from and :to
+             order by counter.visitDay
+            """, DailyViews.class).setParameter("productId", productId).setParameter("from", from).setParameter("to", to).getResultList();
     }
 
     @Override
     @Transactional
     public void purgeBefore(LocalDate receiptCutoff, LocalDate aggregateCutoff) {
-        jdbc.update("delete from operations.visit_event_receipt where visit_day < ?", receiptCutoff);
-        jdbc.update("delete from operations.visit_product_daily where visit_day < ?", aggregateCutoff);
+        entityManager.createQuery("delete from VisitEventReceiptEntity receipt where receipt.visitDay < :cutoff")
+            .setParameter("cutoff", receiptCutoff).executeUpdate();
+        entityManager.createQuery("delete from VisitProductDailyEntity counter where counter.visitDay < :cutoff")
+            .setParameter("cutoff", aggregateCutoff).executeUpdate();
     }
 }

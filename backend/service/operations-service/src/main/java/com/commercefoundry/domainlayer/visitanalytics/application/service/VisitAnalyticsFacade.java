@@ -1,12 +1,11 @@
 package com.commercefoundry.domainlayer.visitanalytics.application.service;
 
-import com.commercefoundry.domainlayer.visitanalytics.application.exception.VisitAnalyticsErrorCode;
-import com.commercefoundry.domainlayer.visitanalytics.application.exception.VisitAnalyticsException;
+import com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.dto.response.VisitAnalyticsResponses.Day;
+import com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.dto.response.VisitAnalyticsResponses.Product;
+import com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.presenter.VisitAnalyticsPresenter;
 import com.commercefoundry.domainlayer.visitanalytics.application.port.in.VisitAnalyticsUseCase;
-import com.commercefoundry.domainlayer.visitanalytics.application.port.out.VisitAnalyticsStore;
-import java.time.Clock;
+import com.commercefoundry.domainlayer.visitanalytics.application.service.processor.VisitAnalyticsProcessor;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -16,45 +15,25 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class VisitAnalyticsFacade implements VisitAnalyticsUseCase {
 
-    private static final ZoneId STORE_ZONE = ZoneId.of("Asia/Seoul");
-    private static final int RECEIPT_RETENTION_DAYS = 7;
-    private static final int AGGREGATE_RETENTION_DAYS = 400;
-    private static final int MAX_REPORT_DAYS = 31;
-
-    private final VisitAnalyticsStore store;
-    private final Clock clock;
+    private final VisitAnalyticsProcessor processor;
 
     @Override
     public void recordProductView(UUID eventId, long productId) {
-        store.recordProductView(eventId, productId, today());
+        processor.recordProductView(eventId, productId);
     }
 
     @Override
-    public List<ProductViews> topProducts(LocalDate from, LocalDate to) {
-        validatePeriod(from, to);
-        return store.topProducts(from, to);
+    public List<Product> topProducts(LocalDate from, LocalDate to) {
+        return processor.topProducts(from, to).stream().map(row -> VisitAnalyticsPresenter.product(row.productId(), row.views())).toList();
     }
 
     @Override
-    public List<DailyViews> dailyProduct(long productId, LocalDate from, LocalDate to) {
-        validatePeriod(from, to);
-        return store.dailyProduct(productId, from, to);
+    public List<Day> dailyProduct(long productId, LocalDate from, LocalDate to) {
+        return processor.dailyProduct(productId, from, to).stream().map(row -> VisitAnalyticsPresenter.day(row.day(), row.views())).toList();
     }
 
+    @Override
     public void purgeExpiredData() {
-        LocalDate today = today();
-        store.purgeBefore(today.minusDays(RECEIPT_RETENTION_DAYS - 1), today.minusDays(AGGREGATE_RETENTION_DAYS - 1));
-    }
-
-    private void validatePeriod(LocalDate from, LocalDate to) {
-        LocalDate today = today();
-        if (from == null || to == null || from.isBefore(today.minusDays(AGGREGATE_RETENTION_DAYS - 1))
-            || to.isAfter(today) || to.isBefore(from) || to.isAfter(from.plusDays(MAX_REPORT_DAYS - 1))) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.INVALID_PERIOD);
-        }
-    }
-
-    private LocalDate today() {
-        return LocalDate.now(clock.withZone(STORE_ZONE));
+        processor.purgeExpiredData();
     }
 }
