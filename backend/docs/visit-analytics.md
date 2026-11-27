@@ -7,8 +7,8 @@ operations-service의 방문 분석 컨텍스트가 수집과 어드민 집계�
 - 스토어프론트는 방문 분석에 명시적으로 동의한 뒤에만 같은 출처 BFF를 통해 `POST /api/v1/analytics/events`를 호출한다. 동의 철회 즉시 전송을 중단한다. BFF는 #134의 클라이언트 주소 전달을 사용하고 회원 요청의 access 토큰과 브라우저 User-Agent를 전달한다.
 - `application/json` 및 beacon의 `text/plain` UTF-8 본문에서 `{"type":"PRODUCT_VIEW","eventId":"5aa7e291-a1bb-47f4-9d9a-2fbb162268c9","productId":"42","consent":true}` 형식의 한 건을 받는다. 상품 상세의 한 조회당 무작위 UUID v4 하나를 생성해 전송 재시도에 재사용한다. 상품 ID는 양의 64비트 정수를 담은 문자열이다.
 - 204는 정상 처리, 재시도 중복, 미동의, 봇·내부 트래픽 또는 수집 비활성화를 포함한다. 응답 본문은 비어 있다. 잘못된 이벤트는 400 `VISIT_ANALYTICS_100`, 1KiB 초과는 413, 지원하지 않는 Content-Type 또는 Content-Encoding은 415다. 게이트웨이는 초당 1건·순간 10건을 #135 HMAC 버킷으로 세며, 초과하면 429와 Retry-After, 제한 기능이나 저장소를 쓸 수 없으면 503을 반환한다.
-- 어드민의 `GET /api/v1/admin/analytics/products/top?from=2026-11-01&to=2026-11-27`은 응답 봉투의 `data`에 `[{ "productId":"42", "views":123 }]` 형태로 최대 20개를 담는다. 조회수 내림차순과 상품 ID 오름차순으로 정렬한다. 월 순위는 이달 첫날부터 오늘까지를 조회한다.
-- `GET /api/v1/admin/analytics/products/{productId}/daily?from=...&to=...`는 `data`에 `[{ "day":"2026-11-27", "views":4 }]`를 날짜 오름차순으로 담는다. 조회수가 0인 날짜는 생략한다. 두 API는 한국 시간 기준 양 끝 날짜 포함, 최대 31일이며 유효한 기간이 아니면 400 `VISIT_ANALYTICS_101`이다. 상품 식별자가 유효하지 않으면 400 `VISIT_ANALYTICS_102`다. ADMIN과 OWNER만 호출할 수 있다. FE 계약 검토자는 `seonghoho`다.
+- 어드민의 `GET /api/v1/admin/analytics/products/top?from=2026-11-01&to=2026-11-27`은 응답 봉투의 `dataBody`에 `[{ "productId":"42", "views":123 }]` 형태로 최대 20개를 담는다. 조회수 내림차순과 상품 ID 오름차순으로 정렬한다. 월 순위는 이달 첫날부터 오늘까지를 조회한다.
+- `GET /api/v1/admin/analytics/products/{productId}/daily?from=...&to=...`는 `dataBody`에 `[{ "day":"2026-11-27", "views":4 }]`를 날짜 오름차순으로 담는다. 조회수가 0인 날짜는 생략한다. 두 API는 한국 시간 기준 양 끝 날짜 포함, 최대 31일이며 유효한 기간이 아니면 400 `VISIT_ANALYTICS_101`이다. 상품 식별자가 유효하지 않으면 400 `VISIT_ANALYTICS_102`다. ADMIN과 OWNER만 호출할 수 있다. FE 계약 검토자는 `seonghoho`다.
 
 ## 집계와 운영
 

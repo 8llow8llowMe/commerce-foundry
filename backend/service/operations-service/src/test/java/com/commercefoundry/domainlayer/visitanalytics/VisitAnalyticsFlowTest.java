@@ -59,14 +59,14 @@ class VisitAnalyticsFlowTest {
 
         mvc.perform(report("/top", yesterday, today, MemberRole.ADMIN))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].productId").value(Long.toString(product)))
-            .andExpect(jsonPath("$.data[0].views").value(3))
-            .andExpect(jsonPath("$.data[1].views").value(1));
+            .andExpect(jsonPath("$.dataBody[0].productId").value(Long.toString(product)))
+            .andExpect(jsonPath("$.dataBody[0].views").value(3))
+            .andExpect(jsonPath("$.dataBody[1].views").value(1));
         mvc.perform(report("/" + product + "/daily", yesterday, today, MemberRole.OWNER))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].day").value(yesterday.toString()))
-            .andExpect(jsonPath("$.data[0].views").value(1))
-            .andExpect(jsonPath("$.data[1].views").value(2));
+            .andExpect(jsonPath("$.dataBody[0].day").value(yesterday.toString()))
+            .andExpect(jsonPath("$.dataBody[0].views").value(1))
+            .andExpect(jsonPath("$.dataBody[1].views").value(2));
         assertThat(jdbc.queryForObject("select count(*) from operations.visit_event_receipt where event_id = ?", Long.class, anonymous))
             .isEqualTo(1L);
     }
