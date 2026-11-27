@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.port.in;
 
+import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuBarcodeResolveResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
 import java.util.List;
 
@@ -11,4 +12,6 @@ public interface SkuInternalUseCase {
      * @param skuIds 검증을 통과한 1~100개의 양수 아이디
      */
     SkuInternalResponse getSkus(List<Long> skuIds);
+
+    SkuBarcodeResolveResponse resolveBarcodes(List<String> barcodes);
 }

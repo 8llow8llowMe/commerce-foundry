@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.service;
 
+import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuBarcodeResolveResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.presenter.SkuInternalPresenter;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
@@ -27,5 +28,10 @@ public class SkuInternalFacade implements SkuInternalUseCase {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public SkuInternalResponse getSkus(List<Long> skuIds) {
         return skuInternalPresenter.toResponse(skuInternalProcessor.getSkus(skuIds));
+    }
+
+    @Override
+    public SkuBarcodeResolveResponse resolveBarcodes(List<String> barcodes) {
+        return skuInternalPresenter.toBarcodeResponse(skuInternalProcessor.resolveBarcodes(barcodes));
     }
 }

@@ -26,6 +26,9 @@ public record ProductSkuAdminItem(
     Integer weightGrams,
 
     @Schema(description = "HS 코드. 미입력이면 null", nullable = true)
-    String hsCode
+    String hsCode,
+
+    @Schema(description = "포장 검수 바코드. 미등록이면 null", example = "00123-A", nullable = true)
+    String barcode
 ) {
 }

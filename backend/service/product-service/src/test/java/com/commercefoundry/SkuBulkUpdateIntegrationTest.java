@@ -30,6 +30,7 @@ import com.commercefoundry.domainlayer.product.application.exception.SkuAdminErr
 import com.commercefoundry.domainlayer.product.application.exception.SkuAdminException;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductAdminUseCase;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuAdminUseCase;
+import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
 import com.commercefoundry.domainlayer.product.application.port.in.StockInternalUseCase;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuAdminRepositoryPort;
@@ -43,6 +44,7 @@ import com.commercefoundry.shared.commerce.Money;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
@@ -68,6 +70,7 @@ class SkuBulkUpdateIntegrationTest {
     static final long ID = 840001, CATEGORY = 840101, GROUP = 840201, SKU = 840301, VALUE = 840401;
     @Autowired EntityManager em;
     @Autowired SkuAdminUseCase edits;
+    @Autowired SkuInternalUseCase skuInternal;
     @Autowired ProductAdminUseCase products;
     @Autowired StockInternalUseCase stocks;
     @Autowired SkuRepository skuLocks;
@@ -155,6 +158,50 @@ class SkuBulkUpdateIntegrationTest {
             assertThat(em.createQuery("select count(s) from SkuEntity s where s.productId = :id", Long.class)
                 .setParameter("id", ID).getSingleResult()).isEqualTo(3);
         });
+    }
+
+    @Test
+    void barcodeLookupAndEditPreserveCaseLeadingZerosAndExistingOptions() {
+        var updated = edits.replace(barcodeCommand(0, "0001-Ab", "0001-ab"));
+        assertThat(updated.skus().getFirst().barcode()).isEqualTo("0001-Ab");
+        assertThat(updated.skus().get(1).barcode()).isEqualTo("0001-ab");
+        assertThat(updated.skus().get(2).barcode()).isNull();
+        assertThat(updated.skus().getFirst().saleStatus().code()).isEqualTo("STOP_SELLING");
+
+        var barcodes = skuInternal.resolveBarcodes(List.of("0001-Ab", "unknown", "0001-ab", "0001-Ab"));
+        assertThat(barcodes.skuIdsByBarcode()).containsExactlyInAnyOrderEntriesOf(Map.of("0001-Ab", String.valueOf(SKU), "0001-ab", String.valueOf(SKU + 1)));
+
+        var unchanged = edits.replace(command(1));
+        assertThat(unchanged.skus().getFirst().barcode()).isEqualTo("0001-Ab");
+        assertThat(unchanged.skus().get(1).barcode()).isEqualTo("0001-ab");
+
+        var cleared = edits.replace(barcodeCommand(2, "", null));
+        assertThat(cleared.skus().getFirst().barcode()).isNull();
+        assertThat(cleared.skus().get(1).barcode()).isEqualTo("0001-ab");
+        assertThat(skuInternal.resolveBarcodes(List.of("0001-Ab")).skuIdsByBarcode()).isEmpty();
+    }
+
+    @Test
+    void barcodesCanBeSwappedInOneEdit() {
+        edits.replace(barcodeCommand(0, "ABC-1", "ABC-2"));
+        var swapped = edits.replace(barcodeCommand(1, "ABC-2", "ABC-1"));
+
+        assertThat(swapped.skus().getFirst().barcode()).isEqualTo("ABC-2");
+        assertThat(swapped.skus().get(1).barcode()).isEqualTo("ABC-1");
+    }
+
+    @Test
+    void repeatedBarcodeInOneEditRollsBackChanges() {
+        expect(() -> edits.replace(barcodeCommand(0, "ABC-1", "ABC-1")), SkuAdminErrorCode.BARCODE_DUPLICATED);
+        assertThat(current().version()).isZero();
+        assertThat(skuInternal.resolveBarcodes(List.of("ABC-1")).skuIdsByBarcode()).isEmpty();
+    }
+
+    SkuBulkUpdateCommand barcodeCommand(long version, String first, String second) {
+        return new SkuBulkUpdateCommand(ID, version, 99L, List.of(
+            new SkuBulkUpdateCommand.Item(SKU, Money.of(0, KRW), STOP_SELLING, null, null, first),
+            new SkuBulkUpdateCommand.Item(SKU + 1, Money.of(0, KRW), ON_SALE, null, null, second),
+            item(SKU + 2, 0, ON_SALE)));
     }
 
     @Test

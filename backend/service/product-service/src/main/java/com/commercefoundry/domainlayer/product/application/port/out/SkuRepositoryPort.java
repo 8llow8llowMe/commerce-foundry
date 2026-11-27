@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.product.application.port.out;
 
 import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuBarcodeQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import java.util.Collection;
 import java.util.List;
@@ -15,6 +16,8 @@ public interface SkuRepositoryPort {
     List<Sku> findAllByProductId(long productId);
 
     List<Sku> findAllByIds(Collection<Long> skuIds);
+
+    List<SkuBarcodeQueryResult> findSkuIdsByBarcodes(Collection<String> barcodes);
 
     boolean existsById(long skuId);
 

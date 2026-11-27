@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.product.adapter.out.persistence.repositor
 import com.commercefoundry.domainlayer.product.application.mapper.SkuMapper;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.query.SkuAggregateQueryResult;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuBarcodeQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import java.util.Collection;
 import java.util.List;
@@ -30,6 +31,11 @@ public class SkuRepositoryAdapter implements SkuRepositoryPort {
             return List.of();
         }
         return skuMapper.toDomains(skuRepository.findAllById(skuIds));
+    }
+
+    @Override
+    public List<SkuBarcodeQueryResult> findSkuIdsByBarcodes(Collection<String> barcodes) {
+        return barcodes.isEmpty() ? List.of() : skuRepository.findSkuIdsByBarcodes(barcodes);
     }
 
     @Override
@@ -71,6 +77,7 @@ public class SkuRepositoryAdapter implements SkuRepositoryPort {
                 .saleStatus(sku.saleStatus())
                 .weightGrams(sku.weightGrams())
                 .hsCode(sku.hsCode() == null ? null : sku.hsCode().value())
+                .barcode(sku.barcode() == null ? null : sku.barcode().value())
                 .build())
             .toList());
     }

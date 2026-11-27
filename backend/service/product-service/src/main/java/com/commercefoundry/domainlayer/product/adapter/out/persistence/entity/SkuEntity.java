@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.product.adapter.out.persistence.entity;
 
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
+import com.commercefoundry.domainlayer.product.domain.model.SkuBarcode;
 import com.commercefoundry.persistence.entity.BaseEntity;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import jakarta.persistence.CheckConstraint;
@@ -25,7 +26,10 @@ import org.springframework.data.domain.Persistable;
 @Table(
     name = "sku",
     comment = "SKU (상품 × 옵션 값 조합)",
-    uniqueConstraints = @UniqueConstraint(name = "uk_sku_product_id_option_value_key", columnNames = {"product_id", "option_value_key"}),
+    uniqueConstraints = {
+        @UniqueConstraint(name = "uk_sku_product_id_option_value_key", columnNames = {"product_id", "option_value_key"}),
+        @UniqueConstraint(name = SkuEntity.BARCODE_UNIQUE_CONSTRAINT, columnNames = "barcode")
+    },
     check = {
         @CheckConstraint(name = "ck_sku_additional_price_non_negative", constraint = "additional_price_amount >= 0"),
         @CheckConstraint(name = "ck_sku_weight_grams_positive", constraint = "weight_grams is null or weight_grams > 0"),
@@ -43,6 +47,8 @@ import org.springframework.data.domain.Persistable;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class SkuEntity extends BaseEntity implements Persistable<Long> {
+
+    public static final String BARCODE_UNIQUE_CONSTRAINT = "uk_sku_barcode";
 
     @Id
     @Column(name = "id", comment = "SKU 아이디 (Snowflake)")
@@ -75,20 +81,31 @@ public class SkuEntity extends BaseEntity implements Persistable<Long> {
         comment = "통관 신고용 HS 코드 (숫자 6~10자리) — 해외 판매 상품만 필수, null 이면 미입력")
     private String hsCode;
 
+    @Column(name = "barcode", length = SkuBarcode.MAX_LENGTH, comment = "포장 검수 바코드 (스토어 내 유일, 미등록이면 null)")
+    private String barcode;
+
+    /** 같은 상품의 다른 SKU에 바코드를 재할당할 때 먼저 기존 할당을 해제한다. */
+    public void releaseBarcode() {
+        barcode = null;
+    }
+
     /** 기존 managed 행만 변경한다. createdAt·옵션 키·아이디를 보존하며 새 엔티티를 만들지 않는다. */
     public boolean replaceEditableProperties(com.commercefoundry.domainlayer.product.domain.model.Sku sku) {
         if (id != sku.id() || productId != sku.productId() || !optionValueKey.equals(sku.optionKey().value())) {
             throw new IllegalArgumentException("SKU 식별자와 옵션 구성은 변경할 수 없습니다");
         }
         String nextHsCode = sku.hsCode() == null ? null : sku.hsCode().value();
+        String nextBarcode = sku.barcode() == null ? null : sku.barcode().value();
         boolean changed = additionalPriceAmount != sku.additionalPrice().amount() || additionalPriceCurrency != sku.additionalPrice().currency()
-            || saleStatus != sku.saleStatus() || !java.util.Objects.equals(weightGrams, sku.weightGrams()) || !java.util.Objects.equals(hsCode, nextHsCode);
+            || saleStatus != sku.saleStatus() || !java.util.Objects.equals(weightGrams, sku.weightGrams()) || !java.util.Objects.equals(hsCode, nextHsCode)
+            || !java.util.Objects.equals(barcode, nextBarcode);
         if (changed) {
             additionalPriceAmount = sku.additionalPrice().amount();
             additionalPriceCurrency = sku.additionalPrice().currency();
             saleStatus = sku.saleStatus();
             weightGrams = sku.weightGrams();
             hsCode = nextHsCode;
+            barcode = nextBarcode;
         }
         return changed;
     }

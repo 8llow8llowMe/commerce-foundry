@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuInternalItem;
+import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuBarcodeResolveResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
 import com.commercefoundry.security.error.SecurityErrorCode;
@@ -15,8 +16,10 @@ import com.commercefoundry.security.internal.InternalTokenPropertiesConfig;
 import com.commercefoundry.security.resourceserver.InternalResourceServerConfigurer;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
+import com.commercefoundry.security.support.TestServiceTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 import org.junit.jupiter.api.DisplayName;
@@ -25,7 +28,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -48,6 +53,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 class SkuInternalControllerTest {
 
     private static final String PATH = "/internal/v1/skus";
+    private static final String BARCODE_PATH = PATH + "/barcodes/resolve";
     private static final String ORDER_SERVICE = "SERVICE_order-service";
 
     @Autowired
@@ -160,6 +166,64 @@ class SkuInternalControllerTest {
         void validationRunsBeforeAuthorization() {
             assertThat(mvc.get().uri(PATH).param("ids", "0")).hasStatus(HttpStatus.BAD_REQUEST);
             verifyNoInteractions(skuInternalUseCase);
+        }
+    }
+
+    @Nested
+    @DisplayName("바코드 벌크 조회")
+    class BarcodeLookup {
+
+        @Test
+        void deliveryServiceTokenIsAllowed() {
+            given(skuInternalUseCase.resolveBarcodes(List.of("001-A", "UNKNOWN")))
+                .willReturn(new SkuBarcodeResolveResponse(Map.of("001-A", "4611686018427387904")));
+
+            var result = resolveAs("delivery-service", "{\"barcodes\":[\"001-A\",\"UNKNOWN\"]}");
+            assertThat(result).hasStatusOk().bodyJson().extractingPath("$.dataBody.skuIdsByBarcode")
+                .isEqualTo(Map.of("001-A", "4611686018427387904"));
+            verify(skuInternalUseCase).resolveBarcodes(List.of("001-A", "UNKNOWN"));
+        }
+
+        @Test
+        void orderServiceTokenIsForbidden() {
+            SecurityEnvelopeAssertions.assertEnvelope(resolveAs("order-service", "{\"barcodes\":[\"001-A\"]}").getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(skuInternalUseCase);
+        }
+
+        @Test
+        void anonymousIsUnauthorized() {
+            var result = mvc.post().uri(BARCODE_PATH).contentType(MediaType.APPLICATION_JSON).content("{\"barcodes\":[\"001-A\"]}").exchange();
+            assertThat(result).hasStatus(HttpStatus.UNAUTHORIZED);
+            verifyNoInteractions(skuInternalUseCase);
+        }
+
+        @Test
+        void deliveryTokenCannotUseOrderLookup() {
+            var result = mvc.get().uri(PATH).param("ids", "1")
+                .header(HttpHeaders.AUTHORIZATION, TestServiceTokens.bearer("delivery-service", "product-service")).exchange();
+            SecurityEnvelopeAssertions.assertEnvelope(result.getResponse(), SecurityErrorCode.FORBIDDEN);
+            verifyNoInteractions(skuInternalUseCase);
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "{\"barcodes\": []}", "{\"barcodes\": [123]}", "{\"barcodes\": [null]}", "{\"barcodes\": [\"invalid barcode\"]}"
+        })
+        void malformedBarcodesAreRejected(String body) {
+            assertThat(resolveAs("delivery-service", body)).hasStatus(HttpStatus.BAD_REQUEST);
+            verifyNoInteractions(skuInternalUseCase);
+        }
+
+        @Test
+        void limitCountsTheOriginalListIncludingDuplicates() {
+            String barcodes = String.join(",", java.util.Collections.nCopies(101, "\"001-A\""));
+            assertThat(resolveAs("delivery-service", "{\"barcodes\":[" + barcodes + "]}")).hasStatus(HttpStatus.BAD_REQUEST);
+            verifyNoInteractions(skuInternalUseCase);
+        }
+
+        private MvcTestResult resolveAs(String caller, String content) {
+            return mvc.post().uri(BARCODE_PATH).contentType(MediaType.APPLICATION_JSON).content(content)
+                .header(HttpHeaders.AUTHORIZATION, TestServiceTokens.bearer(caller, "product-service")).exchange();
         }
     }
 

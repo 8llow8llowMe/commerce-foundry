@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.product.adapter.out.persistence.reposito
 
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.SkuEntity;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.repository.custom.SkuCustomRepository;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuBarcodeQueryResult;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.QueryHint;
 import java.util.Collection;
@@ -23,6 +24,13 @@ public interface SkuRepository extends JpaRepository<SkuEntity, Long>, SkuCustom
     /** 아이디 목록 중 있는 SKU 의 아이디만 — 행 전체를 읽지 않는다. 숨긴 · 삭제 상품의 SKU 도 있는 SKU 다. */
     @Query("select sku.id from SkuEntity sku where sku.id in :skuIds")
     List<Long> findExistingIds(Collection<Long> skuIds);
+
+    @Query("""
+        select new com.commercefoundry.domainlayer.product.application.port.out.query.SkuBarcodeQueryResult(sku.barcode, sku.id)
+        from SkuEntity sku
+        where sku.barcode in :barcodes
+        """)
+    List<SkuBarcodeQueryResult> findSkuIdsByBarcodes(Collection<String> barcodes);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = LOCK_TIMEOUT_MILLIS))
