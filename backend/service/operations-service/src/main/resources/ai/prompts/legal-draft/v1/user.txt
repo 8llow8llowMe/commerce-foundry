@@ -1,0 +1,3 @@
+Planning data with document type, locale, template version, allowed sections and confirmed section IDs:
+{{planningJson}}
+Choose the section order using the structured response schema.

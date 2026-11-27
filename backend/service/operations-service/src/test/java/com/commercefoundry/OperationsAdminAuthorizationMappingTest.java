@@ -56,6 +56,11 @@ class OperationsAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/store/legal-documents/{type}/{locale}/publish", AdminAuthority.SETTINGS_MANAGE),
         Map.entry("GET /api/v1/admin/store/legal-documents/{type}/{locale}/revisions", AdminAuthority.SETTINGS_READ),
         Map.entry("GET /api/v1/admin/store/legal-document-templates/{type}", AdminAuthority.SETTINGS_READ),
+        // 법률 문서 AI 초안 생성
+        Map.entry("POST /api/v1/admin/store/legal-document-drafts/generations", AdminAuthority.SETTINGS_MANAGE),
+        Map.entry("GET /api/v1/admin/store/legal-document-drafts/generations/{jobId}", AdminAuthority.SETTINGS_READ),
+        Map.entry("POST /api/v1/admin/store/legal-document-drafts/generations/{jobId}/review", AdminAuthority.SETTINGS_MANAGE),
+        Map.entry("POST /api/v1/admin/store/legal-document-drafts/generations/{jobId}/cancel", AdminAuthority.SETTINGS_MANAGE),
         // 푸터 초안·게시
         Map.entry("GET /api/v1/admin/store/footer", AdminAuthority.SETTINGS_READ),
         Map.entry("GET /api/v1/admin/store/footer/revisions", AdminAuthority.SETTINGS_READ),
