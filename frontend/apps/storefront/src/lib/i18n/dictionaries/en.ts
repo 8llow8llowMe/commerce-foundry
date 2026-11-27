@@ -17,6 +17,7 @@ export const en: Dictionary = {
     account: 'My account',
     logout: 'Sign out',
     accountNav: 'Account',
+    newWindow: 'opens in a new window',
   },
   auth: {
     login: {

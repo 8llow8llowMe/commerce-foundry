@@ -1,12 +1,13 @@
 'use client';
 
-import type { NavItem } from '@cf/ui';
+import { cx, type NavItem, type NavLink } from '@cf/ui';
 import { useId, useRef, useState } from 'react';
 import { LanguageLinks, type LanguageLink } from '@/components/i18n/LanguageLinks';
 import { Link } from '@/components/i18n/Link';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { CloseIcon, MenuIcon } from './HeaderIcons';
 import { LogoutButton } from './LogoutButton';
+import { NavAnchor } from './NavAnchor';
 
 export type MenuPanelProps = {
   brandName: string;
@@ -17,6 +18,51 @@ export type MenuPanelProps = {
 };
 
 const ACCOUNT_LINK = 'hover:text-primary disabled:opacity-50';
+
+/**
+ * 대제목 아래 하위 링크(게시 메뉴 #602). 3단계는 한 칸 들여쓴 목록이다. 긴 표시명은 줄바꿈한다(말줄임 없음).
+ * 링크 없는 묶음 제목은 글자만, 다른 사이트는 새 창이다(`NavAnchor`).
+ */
+function SubLinks({
+  links,
+  newWindowLabel,
+  onNavigate,
+  className,
+}: {
+  links: NavLink[];
+  newWindowLabel: string;
+  onNavigate: () => void;
+  className: string;
+}) {
+  return (
+    <ul className={className}>
+      {links.map((link, index) => (
+        <li key={`${index}-${link.href}`} className="flex flex-col gap-3">
+          <NavAnchor
+            href={link.href}
+            external={link.external}
+            newWindowLabel={newWindowLabel}
+            onClick={onNavigate}
+            className={cx(
+              'break-words',
+              link.href === null ? 'text-muted-fg' : 'hover:text-primary',
+            )}
+          >
+            {link.label}
+          </NavAnchor>
+          {link.children && (
+            <SubLinks
+              links={link.children}
+              newWindowLabel={newWindowLabel}
+              onNavigate={onNavigate}
+              className="ml-4 flex flex-col gap-3"
+            />
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /**
  * 햄버거 버튼 + 전체 메뉴 패널. 메뉴 아래에 계정 줄(로그인 · 회원가입 / 마이페이지 · 로그아웃)을 둔다.
@@ -78,18 +124,30 @@ export function MenuPanel({ brandName, items, labels, languages, signedIn }: Men
 
           <nav aria-label={labels.menu} className="mt-8 lg:mt-10">
             <ul className="grid grid-cols-1 gap-x-12 sm:grid-cols-2">
-              {items.map((item) => (
-                <li key={item.href}>
-                  <Link
+              {items.map((item, index) => (
+                <li key={`${index}-${item.href}`} className={item.children ? 'pb-5' : undefined}>
+                  <NavAnchor
                     href={item.href}
+                    external={item.external}
+                    newWindowLabel={labels.newWindow}
                     onClick={closePanel}
                     className="group flex flex-col gap-1 py-5 focus-visible:outline-offset-4"
                   >
-                    <span className="text-sm font-medium tracking-[0.2em] uppercase group-hover:text-primary">
+                    <span className="text-sm font-medium tracking-[0.2em] break-words uppercase group-hover:text-primary">
                       {item.label}
                     </span>
-                    <span className="text-sm text-muted-fg">{item.description}</span>
-                  </Link>
+                    {item.description && (
+                      <span className="text-sm text-muted-fg">{item.description}</span>
+                    )}
+                  </NavAnchor>
+                  {item.children && (
+                    <SubLinks
+                      links={item.children}
+                      newWindowLabel={labels.newWindow}
+                      onNavigate={closePanel}
+                      className="flex flex-col gap-3 text-sm"
+                    />
+                  )}
                 </li>
               ))}
             </ul>

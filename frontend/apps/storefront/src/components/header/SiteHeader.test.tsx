@@ -104,6 +104,95 @@ describe('SiteHeader', () => {
     expect(html).not.toContain('aria-label="바로가기"');
   });
 
+  describe('게시 메뉴(#602) — 하위 링크 · 링크 없는 대제목 · 다른 사이트', () => {
+    const PUBLISHED: NavItem[] = [
+      {
+        label: 'SHOP',
+        description: '전체 상품',
+        href: '/shop',
+        primary: true,
+        shortcut: true,
+        children: [
+          { label: '신상품', href: '/new' },
+          {
+            label: '하의 묶음',
+            href: null,
+            children: [{ label: '긴 치마', href: '/shop?category=42' }],
+          },
+          { label: '제휴몰', href: 'https://partner.example.com', external: true },
+        ],
+      },
+      { label: 'HELP', description: '', href: null, primary: true, shortcut: true },
+      {
+        label: 'MAGAZINE',
+        description: '',
+        href: 'https://magazine.example.com',
+        external: true,
+        primary: true,
+      },
+    ];
+
+    it('전체 메뉴는 대제목 · 설명 아래 하위 링크를, 3단계는 들여쓴 목록으로 보인다', () => {
+      const panel = navBlock(render(PUBLISHED), '전체 메뉴');
+      expect(panel).toContain('href="/new"');
+      // 링크 없는 하위 묶음 제목은 보조 글자색의 글자다
+      expect(panel).toContain('<span class="break-words text-muted-fg">하의 묶음</span>');
+      expect(panel).toMatch(/<ul class="ml-4[^"]*"><li[^>]*><a [^>]*href="\/shop\?category=42"/);
+      // 링크 없는 대제목은 링크가 아니라 글자다
+      expect(panel).not.toMatch(/<a [^>]*>[^<]*<span[^>]*>HELP/);
+      expect(panel).toContain('HELP');
+      // 설명이 비면 설명 줄을 그리지 않는다
+      expect(panel).not.toMatch(/HELP<\/span><span class="text-sm text-muted-fg"><\/span>/);
+    });
+
+    it('다른 사이트는 새 창 · noopener noreferrer · 새 창 표시 · 안내 문구로 연다', () => {
+      const html = render(PUBLISHED);
+      const external =
+        html.match(/<a [^>]*href="https:\/\/partner\.example\.com"[^>]*>[\s\S]*?<\/a>/)?.[0] ?? '';
+      expect(external).toContain('target="_blank"');
+      expect(external).toContain('rel="noopener noreferrer"');
+      expect(external).toContain('<span aria-hidden="true"> ↗</span>');
+      expect(external).toContain('<span class="sr-only"> (새 창에서 열림)</span>');
+    });
+
+    it('영문 스토어에서 내부 링크에는 /en 이 붙고 다른 사이트 주소는 그대로다', () => {
+      const html = renderToStaticMarkup(
+        <LocaleProvider locale="en" prefix="/en" dict={ko}>
+          <SiteHeader
+            brandName="ACME"
+            navigation={PUBLISHED}
+            labels={ko.header}
+            languages={[]}
+            signedIn={false}
+          />
+        </LocaleProvider>,
+      );
+      const primary = navBlock(html, '주 메뉴');
+      expect(primary).toContain('href="/en/shop"');
+      expect(primary).toContain('href="https://magazine.example.com"');
+      expect(primary).not.toContain('/en/https');
+      const panel = navBlock(html, '전체 메뉴');
+      expect(panel).toContain('href="/en/new"');
+      expect(panel).toContain('href="/en/shop?category=42"');
+      expect(panel).toContain('href="https://partner.example.com"');
+    });
+
+    it('링크 없는 대제목은 1차 메뉴 · 바로가기 줄에 두지 않는다', () => {
+      const html = render(PUBLISHED);
+      expect(navBlock(html, '주 메뉴')).not.toContain('HELP');
+      expect(navBlock(html, '바로가기')).not.toContain('HELP');
+      expect(navBlock(html, '바로가기')).toContain('SHOP');
+    });
+
+    it('하위 링크가 없는 기존 메뉴는 대제목 링크 안에 설명까지 그대로다', () => {
+      const panel = navBlock(render(), '전체 메뉴');
+      expect(panel).toMatch(
+        /<a [^>]*href="\/alpha"[^>]*><span[^>]*>ALPHA<\/span><span class="text-sm text-muted-fg">첫째 설명<\/span><\/a>/,
+      );
+      expect(panel).not.toContain('ml-4');
+    });
+  });
+
   it('언어가 둘 이상이면 메뉴 패널에 언어 전환 링크를 두고 지금 언어를 표시한다', () => {
     const languages: LanguageLink[] = [
       { locale: 'ko', name: '한국어', href: '/', target: { origin: '', prefix: '' } },
