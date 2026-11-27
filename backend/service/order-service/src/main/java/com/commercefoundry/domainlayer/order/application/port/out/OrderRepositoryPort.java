@@ -25,6 +25,9 @@ public interface OrderRepositoryPort {
     /** 주문 소유 확인 후 최신 헤더를 NOWAIT으로 잠근다. 호출 트랜잭션이 필요하다. */
     Optional<Order> findByIdAndMemberIdForUpdate(long orderId, long memberId);
 
+    /** 확정 후보를 재사용할 수 있도록 직전 등록의 커밋을 기다린다. 호출 트랜잭션이 대기 시간을 제한한다. */
+    Optional<Order> findByIdAndMemberIdForConfirmation(long orderId, long memberId);
+
     /**
      * 주문 하나(회원 무관)의 최신 헤더를 NOWAIT 으로 잠근다 (#17 B2a) — 반품 상태를 바꾸는 시스템 · 어드민 트랜잭션(반품 환불 기록 · 승인 · 거절 · 수동 확정)이
      * 클레임보다 먼저 잡는다. 호출 트랜잭션이 필요하고, 다른 트랜잭션이 쥐고 있으면 기다리지 않고 잠금 예외다. 없으면 빈 값이다.

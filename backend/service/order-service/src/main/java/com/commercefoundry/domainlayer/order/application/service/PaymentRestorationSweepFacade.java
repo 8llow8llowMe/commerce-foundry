@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.order.application.port.in.PaymentRestorat
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor.Hold;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Origin;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -46,10 +47,15 @@ public class PaymentRestorationSweepFacade implements PaymentRestorationSweepUse
             return;
         }
         try {
-            processor.inspect(claimed).ifPresent(target -> {
-                boolean fullyCanceled = processor.restore(target);
-                processor.complete(claimed, fullyCanceled);
-            });
+            if (claimed.origin() == Origin.PAYMENT_RECORD) {
+                processor.inspect(claimed).ifPresent(target -> {
+                    boolean fullyCanceled = processor.restore(target);
+                    processor.complete(claimed, fullyCanceled);
+                });
+            } else {
+                processor.inspectConfirmation(claimed).ifPresent(order ->
+                    processor.completeConfirmation(claimed, processor.restoreConfirmation(claimed, order)));
+            }
         } catch (Hold exception) {
             if (processor.hold(claimed, exception.code())) {
                 log.warn("payment restoration held. workId={}, code={}", claimed.id(), exception.code());

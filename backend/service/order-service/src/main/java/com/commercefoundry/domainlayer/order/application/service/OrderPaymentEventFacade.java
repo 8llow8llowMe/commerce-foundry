@@ -62,7 +62,8 @@ public class OrderPaymentEventFacade implements OrderPaymentEventUseCase {
                     Order order = target.order();
                     confirmation = stockCall(() -> orderStockProcessor.confirmOrReReserve(order,
                         reReservedId -> orderPaymentProcessor.recordReReservation(payment.paymentId(), order.id(), reReservedId, command.eventId()),
-                        reservationId -> orderPaymentProcessor.canConfirm(order.id(), reservationId)));
+                        reservationId -> orderPaymentProcessor.prepareConfirmation(payment, reservationId, command.eventId()),
+                        reservationId -> orderPaymentProcessor.discardUnavailableConfirmation(payment, reservationId)));
                 } else if (!probed && orderPaymentProcessor.canProbe(payment, target.order())) {
                     confirmation = probeConfirmed(payment, target.order());
                     probed = true;
@@ -81,7 +82,7 @@ public class OrderPaymentEventFacade implements OrderPaymentEventUseCase {
                 // EntityManager.refresh의 NOWAIT 예외는 @Component 어댑터에서 Spring 예외로 변환되지 않을 수 있다.
             } catch (OrderException exception) {
                 if (exception.getErrorCode() == OrderErrorCode.STOCK_RESERVATION_INCONSISTENT) {
-                    // 확정한 선점을 커밋된 기록이 책임지지 않는다 — 다시 해도 같다. 사람이 복원 · 환불을 확인한다(DLT)
+                    // 확정 증거가 없는 불일치는 DLT에서 확인한다.
                     throw new NonRetryableEventException("confirmed stock reservation not recorded");
                 }
                 throw exception;

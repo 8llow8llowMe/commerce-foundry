@@ -18,6 +18,8 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderPayment.Result;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Origin;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Status;
 import com.commercefoundry.global.properties.OrderPaymentRestorationProperties;
 import com.commercefoundry.messaging.consume.ProcessedEventStore;
 import com.commercefoundry.messaging.consume.NonRetryableEventException;
@@ -89,10 +91,36 @@ public class OrderPaymentProcessor {
         return candidates;
     }
 
-    /** confirm 사전 검사. 원격 호출 사이의 경쟁은 complete의 잠금 후 재검사가 막는다. */
-    @Transactional(readOnly = true, timeout = 5)
-    public boolean canConfirm(long orderId, long reservationId) {
-        return !orderPaymentRepositoryPort.existsRestorationIntent(orderId, reservationId);
+    /** 원격 확정 전에 후보를 커밋한다. PAID 및 복원 대상으로의 확정과 동일한 주문 잠금을 사용한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 5)
+    public boolean prepareConfirmation(VerifiedPayment payment, long reservationId, UUID eventId) {
+        Order order = orderRepositoryPort.findByIdAndMemberIdForConfirmation(payment.orderId(), payment.memberId()).orElse(null);
+        if (rejection(payment, order) != null || isRecorded(payment.paymentId(), eventId)
+            || orderPaymentRepositoryPort.existsRestorationIntent(payment.orderId(), reservationId)) {
+            return false;
+        }
+        Optional<OrderStockRestoration> work = orderStockRestorationRepositoryPort.findByReservationId(reservationId);
+        if (work.isPresent()) {
+            OrderStockRestoration candidate = work.get();
+            if (!isConfirmationAttempt(candidate, payment.orderId())) {
+                return false;
+            }
+            if (candidate.paymentId() != payment.paymentId()) {
+                orderStockRestorationRepositoryPort.addConfirmationParticipant(candidate.id(), payment.paymentId());
+            }
+            return true;
+        }
+        orderStockRestorationRepositoryPort.insert(OrderStockRestoration.forConfirmationAttempt(nextId(), payment.orderId(),
+            payment.paymentId(), reservationId, nextId(), clock.instant().plus(restorationProperties.minAge())));
+        return true;
+    }
+
+    /** PRODUCT_003/025는 해당 선점의 확정이 불가능함을 보여준다. 모호한 응답의 후보는 보존한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 5)
+    public void discardUnavailableConfirmation(VerifiedPayment payment, long reservationId) {
+        if (orderRepositoryPort.findByIdAndMemberIdForUpdate(payment.orderId(), payment.memberId()).isPresent()) {
+            takeConfirmationAttempt(payment.orderId(), reservationId);
+        }
     }
 
     /** 프로브 자격과 거절 reason은 별개다. 이미 결제된 주문의 선점을 해제 프로브로 건드리지 않는다. */
@@ -138,8 +166,7 @@ public class OrderPaymentProcessor {
         }
         if (existing.isPresent() || processedEventStore.exists(group(), command.eventId())) {
             if (confirmation != null && confirmation.isConfirmed() && !accountsFor(existing, payment.orderId(), confirmation.reservationId())) {
-                // 이번 실행이 확정한 선점을 어느 기록도 가리키지 않는다 — 다른 처리가 확정 전 취소(프로브 200)로 거절을 먼저 커밋했다.
-                // inbox 만 남기면 확정 선점이 조용히 샌다. 자동 복원은 후속 이슈 — 지금은 DLT 로 사람이 본다.
+                // 선행 커밋된 추적 증거가 없는 확정은 소유권을 확인할 때까지 DLT에서 보류한다.
                 log.error("confirmed stock reservation not recorded by committed payment reflection. orderId={}, paymentId={}, reservationId={}, eventId={}",
                     payment.orderId(), payment.paymentId(), confirmation.reservationId(), command.eventId());
                 throw new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT);
@@ -149,12 +176,13 @@ public class OrderPaymentProcessor {
         }
         Result rejected = rejection(payment, before);
         boolean fenced = confirmation != null && confirmation.isConfirmed()
-            && orderPaymentRepositoryPort.existsRestorationIntent(payment.orderId(), confirmation.reservationId());
+            && hasRestorationIntent(payment.orderId(), confirmation.reservationId());
         if (rejected == null && (confirmation == null || !confirmation.isConfirmed() || fenced)) {
             rejected = Result.REJECTED_STOCK_UNAVAILABLE;
         }
         OrderPayment record;
         if (rejected == null) {
+            takeConfirmationAttempt(before.id(), confirmation.reservationId());
             Order paid = before.markPaid(confirmation.reservationId());
             orderRepositoryPort.saveStatusChange(paid,
                 OrderStatusHistory.changedByService(nextId(), before, paid, OrderStatusHistory.PAYMENT_APPROVED));
@@ -163,13 +191,15 @@ public class OrderPaymentProcessor {
             && before.memberId() == payment.memberId() && before.quote().totalAmount().equals(payment.amount())) {
             if (!fenced && orderPaymentRepositoryPort.findPaidByOrderId(payment.orderId()).isEmpty()) {
                 requireRestorableOrder(before);
+                long claimId = takeConfirmationAttempt(before.id(), confirmation.reservationId()).map(OrderStockRestoration::claimId)
+                    .orElseGet(this::nextId);
                 OrderPayment restorable = orderPaymentRepositoryPort.insert(OrderPayment.rejectedAfterConfirmation(nextId(), payment.orderId(), payment.paymentId(),
-                    payment.memberId(), payment.amount(), payment.approvedAt(), rejected, confirmation.reservationId(), command.eventId(), nextId()));
+                    payment.memberId(), payment.amount(), payment.approvedAt(), rejected, confirmation.reservationId(), command.eventId(), claimId));
                 ensureRestorationWork(restorable);
                 return Optional.of(new StockRestorationTarget(restorable, before));
             }
-            // 다른 결제가 이미 결제 완료한 뒤 취소된 주문 — 확정 선점은 이긴 결제의 것이고 그 취소 클레임이 복원한다. 여기서 복원하면 두 번 는다.
-            log.warn("canceled order reservation already accounted for, skipping restoration. orderId={}, paymentId={}", payment.orderId(), payment.paymentId());
+            // PAID의 선점은 클레임이 담당하고, 다른 후보는 독립 스윕이 판정한다.
+            log.warn("payment reservation excluded from inline restoration. orderId={}, paymentId={}", payment.orderId(), payment.paymentId());
             record = OrderPayment.rejected(nextId(), payment.orderId(), payment.paymentId(), payment.memberId(), payment.amount(), payment.approvedAt(),
                 rejected, command.eventId());
         } else {
@@ -219,13 +249,36 @@ public class OrderPaymentProcessor {
         }
     }
 
-    /** 확정한 선점을 커밋된 기록이 이미 책임지는가 — 이 결제의 기록이 같은 선점을 가리키거나, 같은 주문의 결제 완료 기록이 그 선점이다. */
+    /** 같은 주문의 결제 기록이나 복원 원장이 확정 선점을 책임지는지 확인한다. */
     private boolean accountsFor(Optional<OrderPayment> existing, long orderId, long reservationId) {
         if (existing.isPresent() && Long.valueOf(reservationId).equals(existing.get().stockReservationId())) {
             return true;
         }
         return orderPaymentRepositoryPort.existsRestorationIntent(orderId, reservationId)
+            || orderStockRestorationRepositoryPort.findByReservationId(reservationId).filter(work -> work.orderId() == orderId).isPresent()
             || orderPaymentRepositoryPort.findPaidByOrderId(orderId).map(paid -> Long.valueOf(reservationId).equals(paid.stockReservationId())).orElse(false);
+    }
+
+    private boolean hasRestorationIntent(long orderId, long reservationId) {
+        return orderPaymentRepositoryPort.existsRestorationIntent(orderId, reservationId)
+            || orderStockRestorationRepositoryPort.findByReservationId(reservationId)
+                .filter(work -> !isConfirmationAttempt(work, orderId)).isPresent();
+    }
+
+    /** PAID 또는 PAYMENT_RECORD가 선점을 인수한다. 실패하면 원래 후보도 돌아온다. */
+    private Optional<OrderStockRestoration> takeConfirmationAttempt(long orderId, long reservationId) {
+        return orderStockRestorationRepositoryPort.findByReservationId(reservationId)
+            .filter(work -> isConfirmationAttempt(work, orderId))
+            .map(work -> {
+                if (!orderStockRestorationRepositoryPort.delete(work)) {
+                    throw new IllegalStateException("confirmation attempt changed under order lock");
+                }
+                return work;
+            });
+    }
+
+    private static boolean isConfirmationAttempt(OrderStockRestoration work, long orderId) {
+        return work.orderId() == orderId && work.origin() == Origin.CONFIRMATION_ATTEMPT && work.status() == Status.RESTORE_PENDING;
     }
 
     private boolean isRecorded(long paymentId, UUID eventId) {

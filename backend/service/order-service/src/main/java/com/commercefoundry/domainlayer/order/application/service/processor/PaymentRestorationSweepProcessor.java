@@ -7,6 +7,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRe
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentQueryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.StockReservationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
@@ -41,6 +42,7 @@ public class PaymentRestorationSweepProcessor {
     private final OrderEventPort events;
     private final PaymentQueryPort paymentQuery;
     private final StockRestorationPort stock;
+    private final StockReservationPort reservations;
     private final Clock clock;
 
     @Transactional(readOnly = true, timeout = 5)
@@ -69,22 +71,79 @@ public class PaymentRestorationSweepProcessor {
         return Optional.of(new StockRestorationTarget(payment, order));
     }
 
+    /** 주문 잠금 안에서 원래 대상의 소유권을 확인하고 PAID에 앞서 복원 의도를 커밋한다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 10)
+    public Optional<Order> inspectConfirmation(OrderStockRestoration claimed) {
+        Order order = orders.findByIdForUpdate(claimed.orderId()).orElseThrow(Hold::ownershipMismatch);
+        Optional<OrderStockRestoration> current = workRepository.findByClaimId(claimed.claimId());
+        if (current.isEmpty() || current.get().id() != claimed.id() || current.get().origin() != claimed.origin()
+            || current.get().status() != Status.RESTORE_PENDING || !Objects.equals(current.get().nextAttemptAt(), claimed.nextAttemptAt())) {
+            return Optional.empty();
+        }
+        OrderStockRestoration work = current.get();
+        if (work.orderId() != claimed.orderId() || work.paymentId() != claimed.paymentId() || work.stockReservationId() != claimed.stockReservationId()) {
+            throw Hold.ownershipMismatch();
+        }
+        Optional<OrderPayment> source = payments.findByPaymentId(claimed.paymentId());
+        Optional<OrderPayment> paid = payments.findPaidByOrderId(order.id());
+        source.ifPresent(record -> requireOrderOwnership(order, record));
+        paid.ifPresent(record -> {
+            requireOrderOwnership(order, record);
+            if (!Objects.equals(record.stockReservationId(), order.stockReservationId())) {
+                throw Hold.ownershipMismatch();
+            }
+        });
+
+        long reservationId = claimed.stockReservationId();
+        boolean owned = paid.filter(record -> Objects.equals(record.stockReservationId(), reservationId)).isPresent()
+            || payments.existsRestorationIntent(order.id(), reservationId);
+        if (owned && claimed.origin() == Origin.CONFIRMATION_ATTEMPT) {
+            workRepository.delete(claimed);
+            return Optional.empty();
+        }
+        if (owned || source.filter(record -> Objects.equals(record.stockReservationId(), reservationId)).isPresent()
+            || (paid.isEmpty() && !order.isAwaitingPaymentApproval() && order.status() != OrderStatus.CANCELED)) {
+            throw Hold.ownershipMismatch();
+        }
+        if (claimed.origin() == Origin.CONFIRMATION_ATTEMPT) {
+            if (source.isPresent() || paid.isPresent() || workRepository.hasResolvedParticipant(work.id(), order)) {
+                workRepository.markAbandoned(claimed, clock.instant());
+            }
+            return Optional.empty();
+        }
+        return Optional.of(order);
+    }
+
+    /** 해제와 확정의 경합은 product가 판정한다. 확정이 이겼을 때만 동일 claim으로 복원한다. */
+    @Transactional(propagation = Propagation.NEVER)
+    public boolean restoreConfirmation(OrderStockRestoration work, Order order) {
+        try {
+            reservations.release(work.stockReservationId(), order.id());
+            return false;
+        } catch (StockReservationException exception) {
+            if (exception.getFailure() != StockReservationException.Failure.CONFIRMED) {
+                throw stockFailure(exception);
+            }
+        }
+        restoreStock(work.claimId(), work.stockReservationId(), order);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 10)
+    public void completeConfirmation(OrderStockRestoration work, boolean restored) {
+        if (restored) {
+            workRepository.markRestored(work.claimId(), clock.instant());
+        } else {
+            // RELEASED는 product에서 CONFIRMED로 되돌아갈 수 없다.
+            workRepository.delete(work);
+        }
+    }
+
     @Transactional(propagation = Propagation.NEVER)
     public boolean restore(StockRestorationTarget target) {
         OrderPayment payment = target.orderPayment();
         PaymentQueryResult before = queryPayment(payment);
-        try {
-            stock.restoreCancellation(payment.restorationClaimId(), payment.stockReservationId(),
-                OrderStockProcessor.quantitiesBySkuId(target.order().quote()));
-        } catch (StockReservationException exception) {
-            throw switch (exception.getFailure()) {
-                case NOT_FOUND -> new Hold("PRODUCT_003");
-                case NOT_CONFIRMED -> new Hold("PRODUCT_027");
-                case QUANTITY_EXCEEDED -> new Hold("PRODUCT_028");
-                case RESTORATION_MISMATCH -> new Hold("PRODUCT_029");
-                default -> exception;
-            };
-        }
+        restoreStock(payment.restorationClaimId(), payment.stockReservationId(), target.order());
         PaymentQueryResult after = queryPayment(payment);
         if (approvalMismatch(before.approvedAt(), after.approvedAt())) {
             throw Hold.ownershipMismatch();
@@ -123,6 +182,31 @@ public class PaymentRestorationSweepProcessor {
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 5)
     public boolean hold(OrderStockRestoration claimed, String code) {
         return workRepository.hold(claimed, claimed.hold(code), clock.instant());
+    }
+
+    private void restoreStock(long claimId, long reservationId, Order order) {
+        try {
+            stock.restoreCancellation(claimId, reservationId, OrderStockProcessor.quantitiesBySkuId(order.quote()));
+        } catch (StockReservationException exception) {
+            throw stockFailure(exception);
+        }
+    }
+
+    private static RuntimeException stockFailure(StockReservationException exception) {
+        return switch (exception.getFailure()) {
+            case NOT_FOUND -> new Hold("PRODUCT_003");
+            case NOT_CONFIRMED -> new Hold("PRODUCT_027");
+            case QUANTITY_EXCEEDED -> new Hold("PRODUCT_028");
+            case RESTORATION_MISMATCH -> new Hold("PRODUCT_029");
+            default -> exception;
+        };
+    }
+
+    private static void requireOrderOwnership(Order order, OrderPayment payment) {
+        if (payment.orderId() != order.id() || payment.memberId() != order.memberId()
+            || !order.quote().totalAmount().equals(payment.totalAmount())) {
+            throw Hold.ownershipMismatch();
+        }
     }
 
     private OrderStockRestoration currentWork(OrderStockRestoration claimed) {

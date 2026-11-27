@@ -788,7 +788,7 @@ public abstract class OrderPaymentConsumerContract {
     }
 
     @Test
-    void confirmedRunLosingToProbeRejectionGoesToDltWithoutExtraReply() {
+    void confirmedRunLosingToProbeRejectionKeepsDurableAttemptWithoutExtraReply() {
         PaymentApprovalCommand command = arrange(OrderStatus.PENDING_PAYMENT);
         long reservationId = order(command).stockReservationId();
         PaymentApprovalCommand other = withEvent(command, UUID.randomUUID());
@@ -799,11 +799,15 @@ public abstract class OrderPaymentConsumerContract {
             return new StockConfirmationQueryResult(reservationId, command.orderId());
         });
 
-        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
+        facade.approve(command);
+
+        var work = workLedger.findByReservationId(reservationId).orElseThrow();
+        assertThat(work.origin()).isEqualTo(OrderStockRestoration.Origin.CONFIRMATION_ATTEMPT);
+        assertThat(work.status()).isEqualTo(OrderStockRestoration.Status.RESTORE_PENDING);
 
         assertThat(payment(command).stockReservationId()).isNull();
         assertThat(replies(command.orderId())).isEqualTo(1); // 먼저 커밋된 거절 회신뿐 — 추가 회신 없음
-        assertThat(inbox.exists(GROUP, command.eventId())).isFalse();
+        assertThat(inbox.exists(GROUP, command.eventId())).isTrue();
         assertThat(inbox.exists(GROUP, other.eventId())).isTrue();
         verifyNoInteractions(restorations);
     }

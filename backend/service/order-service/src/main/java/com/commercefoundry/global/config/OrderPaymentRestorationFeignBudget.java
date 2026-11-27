@@ -4,7 +4,7 @@ import java.util.Map;
 import org.springframework.cloud.openfeign.FeignClientProperties;
 import org.springframework.cloud.openfeign.FeignClientProperties.FeignClientConfiguration;
 
-/** 복원 배치 예산을 계산할 때 사용하는 두 Feign 클라이언트의 설정 경계. */
+/** 복원 배치 예산을 계산할 때 사용하는 Feign 클라이언트의 설정 경계. */
 final class OrderPaymentRestorationFeignBudget {
 
     private OrderPaymentRestorationFeignBudget() {
@@ -15,6 +15,7 @@ final class OrderPaymentRestorationFeignBudget {
         FeignClientConfiguration defaults = configs.get(properties.getDefaultConfig());
         requireSupported(defaults, configs.get("paymentClient"), "paymentClient");
         requireSupported(defaults, configs.get("stockRestorationClient"), "stockRestorationClient");
+        requireSupported(defaults, configs.get("stockReservationClient"), "stockReservationClient");
     }
 
     private static void requireSupported(FeignClientConfiguration defaults, FeignClientConfiguration client, String contextId) {
