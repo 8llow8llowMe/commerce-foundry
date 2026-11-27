@@ -13,10 +13,12 @@ public class PaymentObservationInternalPresenter {
             toBucket(info.inProgress()),
             toBucket(info.returnedReady()),
             toBucket(info.lateApproved()),
-            toBucket(info.doneOrderUnsynced()));
+            toBucket(info.doneOrderUnsynced()),
+            toBucket(info.autoCancelManualReview()));
     }
 
     private PaymentObservationResponse.Bucket toBucket(PaymentObservationInfo.Bucket bucket) {
-        return new PaymentObservationResponse.Bucket(bucket.count(), bucket.oldestAt());
+        // 미관측(null) 버킷은 JSON null 로 그대로 내보낸다. {count:0, oldestAt:null} 과 의미가 다르다.
+        return bucket == null ? null : new PaymentObservationResponse.Bucket(bucket.count(), bucket.oldestAt());
     }
 }

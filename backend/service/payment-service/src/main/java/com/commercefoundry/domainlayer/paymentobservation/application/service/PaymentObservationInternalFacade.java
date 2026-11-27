@@ -32,7 +32,8 @@ public class PaymentObservationInternalFacade implements PaymentObservationInter
                 toBucket(observation.inProgress()),
                 toBucket(observation.returnedReady()),
                 toBucket(observation.lateApproved()),
-                toBucket(observation.doneOrderUnsynced())));
+                toBucket(observation.doneOrderUnsynced()),
+                toBucket(observation.autoCancelManualReview())));
         } catch (DataAccessException | TransactionException exception) {
             var errorCode = PaymentObservationErrorCode.OBSERVATION_UNAVAILABLE;
             log.warn("결제 이상 후보 관측 실패. code={}, causeType={}", errorCode.getCode(), exception.getClass().getSimpleName());
@@ -41,6 +42,7 @@ public class PaymentObservationInternalFacade implements PaymentObservationInter
     }
 
     private PaymentObservationInfo.Bucket toBucket(PaymentAnomalyObservation.Bucket bucket) {
-        return new PaymentObservationInfo.Bucket(bucket.count(), bucket.oldestAt());
+        // 미관측(null) 버킷은 0건으로 바꾸지 않고 그대로 넘긴다.
+        return bucket == null ? null : new PaymentObservationInfo.Bucket(bucket.count(), bucket.oldestAt());
     }
 }

@@ -130,7 +130,8 @@ operations-service의 payment outbox 원천 관측 권한(#477 A3a): payment-ser
 `GET /internal/v1/outbox-observations/ready`는 `SERVICE_operations-service`만 허용한다. 미래 예약을 제외한 발행 가능 미발행 건수·최소시각을
 단일 집계로 제공하며, operations 호출자·주기 수집·알림·해소 연결은 후속이다. [관측 계약](outbox-observation-guide.md)을 따른다.
 
-`GET /internal/v1/payment-observations/anomalies`는 operations 전용 결제 이상 후보 여섯 버킷을 단일 집계로 제공한다.
+`GET /internal/v1/payment-observations/anomalies`는 operations 전용 결제 이상 후보 여섯 버킷을 단일 집계로 제공하고,
+자동 취소 게이트 ON이면 같은 트랜잭션의 두 번째 집계로 7번째 `autoCancelManualReview`를 더한다(게이트 OFF면 null, operations 소비는 #477 PR 2).
 payment 소유 Processor의 domain 관측값을 paymentobservation Facade가 조합한다. operations notification 컨텍스트는 A4b-1에서
 엄격 원천 소비와 다섯 사건의 불변 순수 정책을 소유한다. A4b-2는 `operations.payment_anomaly_alert_state` 다섯 행과
 최대 1,000명·5,000건 알림의 원자 저장 Processor를 추가한다. 결제·주문 업무 상태와 PG 처리는 변경하지 않는다.

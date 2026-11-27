@@ -825,7 +825,8 @@ POST 직후 증거 저장 전 중단도 GET 이력에 정확한 사유·동결 �
 운영 적용은 [취소 DDL 문서](payment-cancellation-ddl.md)와 실제 `ddl/payment-auto-cancel.sql`을 따른다.
 양수 claimId 보정과 스케줄러·관측 변경은 대상 모듈 컴파일/시험, 생성 스냅숏 일치, 실제 PostgreSQL 이행 시험으로 검증한 뒤 배포한다.
 이 문서는 운영 게이트 활성화 승인이 아니다.
-#213 어드민 알림·operations-service 연동은 구현하지 않았다. FE/HTTP 응답 계약은 유지한다.
+#213 어드민 알림은 구현하지 않았다. 자동 취소 MANUAL_REVIEW 는 [관측 API](payment-observation-guide.md) 7번째 버킷 `autoCancelManualReview`로
+노출하며(게이트 OFF면 null), operations 소비는 #477 PR 2다. FE/HTTP 응답 계약은 유지한다.
 
 #### 자동 발견·재시도 스케줄러
 
@@ -850,7 +851,7 @@ DB 원문/cause는 보존하지 않는다. #591 커서·두 seed·가드는 변�
 배포는 metadata DDL → scheduler DDL(기존 payment의 status,id 인덱스 포함) → 매핑 validate/생성 DDL 검증 → 전체 실행자 배포 → 별도 활성화 승인 순서다.
 전체 스냅숏으로 새 DB를 만들면 CREATE를 반복하지 말고 운영 스크립트의 세 seed INSERT만 적용한다.
 롤백은 단일 게이트 OFF·실행자 drain 후 구버전을 배포하고 양수 원장·의도·커서 진행값·PG 키를 보존한다. seed/claimId/키를 초기화하지 않는다.
-#213 어드민 알림·operations-service 연동은 구현하지 않았다.
+#213 어드민 알림은 구현하지 않았다. MANUAL_REVIEW 는 관측 API 7번째 버킷으로 노출하고, operations 소비는 #477 PR 2다.
 
 수동 확인은 MANUAL_REVIEW 영속 상태와 고정 사유 `AUTO_CANCEL_MANUAL_REVIEW`로 남긴다.
 최초 전이 커밋 후 같은 고정 코드 로그와 태그 없는 `commerce.payment.auto-cancel.manual-review` counter를 기록한다.
