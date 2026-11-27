@@ -106,12 +106,15 @@ ROUTING_HEAD = """## 모델 라우팅
 """
 
 ROUTING_TAIL = """
-- 역할 정의(`.codex/agents/*.toml`)의 모델·추론은 위 기본값이다. 등급을 바꿀 때는 `spawn_agent`에 `model`·`reasoning_effort`를
-  함께 넘긴다. 예: 위험 신호 없는 CRUD 는 `spawn_agent(agent_type="be_executor", model="{general_model}", reasoning_effort="{general_effort}", ...)`.
+- 현재 Codex 실행기에서 프로젝트의 명명 역할은 로드된 역할 정의의 모델·추론을 쓴다. `agent_type="be_executor"`처럼 역할을 지정할 때는
+  `model`·`reasoning_effort`를 생략한다. 세션마다 `spawn_agent` 역할 설명에서 고정 여부를 확인한다.
+- 호출별 모델·추론 지정이 필요하고 위임 범위가 허용하면 `agent_type="default"`에 `model`·`reasoning_effort`·`fork_turns="none"`을 넘긴다.
+  일반 등급 예시는 `spawn_agent(agent_type="default", model="{general_model}", reasoning_effort="{general_effort}", fork_turns="none", ...)`이다.
+  작업 메시지에 적용할 역할 지침, 권한·편집 범위와 검증 방법을 담는다. [Codex 호출 실측](../../../docs/ai-agents.md#codex-병렬-호출-실측)
 - 등급 고르기: T0 은 메인 세션 직접, T1(위험 신호 없음)은 일반, T1(신호 1개)·T2 는 핵심. T3 는 구현을 핵심에 추론 한 단계 위
   (돈·동시성이 꼬였거나 원인 미상 버그는 최대), 검토는 핵심 기본에 신호가 걸린 영역 리뷰어(결제·보안·DB)만 한 단계 위.
   ARCHITECTURE 는 설계(서비스 3개 이상·공개 계약 변경·재설계는 최대). 탐색은 빠름, 결제·인증처럼 틀리면 비싼 위치 찾기는 빠름 등급에 `high`.
-- 같은 일에서 두 번 실패하면 추론을 먼저, 그다음 모델을 한 단계 올린다. 최대 추론은 등급 표의 값을 넘기지 않는다.
+- 같은 일에서 두 번 실패하고 호출별 지정이 허용되면 추론을 먼저, 그다음 모델을 한 단계 올린다. 최대 추론은 등급 표의 값을 넘기지 않는다.
 - 보고에 실제로 쓴 등급·모델·추론 수준을 적는다. 위임할 수 없으면 메인 세션이 같은 순서로 처리한다.
 - 위치를 아는 파일 몇 개 읽기, 단일 git 명령은 메인 세션이 직접 한다. 하위 에이전트는 새 컨텍스트로 시작하므로 띄우는 비용이 더 크다.
 - `spawn_agent`의 기본 `fork_turns="all"`은 부모 기록 전체를 넘겨 토큰이 늘어난다. 탐색·검토처럼 지시로 충분한 일은 `fork_turns="none"`으로 띄우고
@@ -122,7 +125,7 @@ ROUTING_TAIL = """
 
 def codex_role_list(tier):
     roles = [f"`{codex_name(role)}`" for role, role_tier in ROLE_TIERS.items() if role_tier == tier]
-    return " · ".join(roles) if roles else "없음 — 구현 역할을 이 등급으로 낮춰 부른다"
+    return " · ".join(roles) if roles else "없음 (호출별 지정이 가능한 기본 에이전트 사용)"
 
 
 def routing(config):

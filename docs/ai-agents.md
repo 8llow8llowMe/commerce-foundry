@@ -80,18 +80,33 @@ Cursor는 Claude 호환 경로도 탐색하므로 같은 이름의 항목이 함
 실제 실행한 역할과 수행 방식을 결과에 기록한다.
 
 - 모델·추론은 작업 등급(설계 · 핵심 · 일반 · 빠름)을 따른다. 등급 표의 정본은 [claude-agents.md](claude-agents.md) "작업 등급과 모델 · 추론"이고 Claude · Codex 가 같은 등급을 쓴다.
-  역할 정의는 등급 기본값(`architect` 설계, 구현·검토 역할 핵심, `explorer`·`git_ops` 빠름)이고, `$dev-orchestrator`가 분류에 따라
-  `spawn_agent`의 `model`·`reasoning_effort`로 호출마다 등급을 바꾼다. Cursor 설계·구현·검토는 현재 세션 모델(`inherit`)을 따른다.
+  프로젝트의 명명 역할은 실행기가 로드한 역할 정의를 따른다. `architect`는 설계, 구현·검토 역할은 핵심, `explorer`·`git_ops`는 빠름 등급이다.
+  Cursor 설계·구현·검토는 현재 세션 모델(`inherit`)을 따른다.
   단일 명령은 위임하지 않는다 — 하위 에이전트는 새 컨텍스트로 시작하므로 짧은 일에는 띄우는 비용이 더 크다.
 - 검토·탐색·설계 역할은 소스·설정·문서를 편집하지 않는다. 실행 환경이 읽기 전용 도구 제한을 지원하면 함께 적용한다.
   역할 파일 자체가 도구 권한을 강제하는 것은 아니다. 검사 실행은 빌드 산출물을 만들 수 있다.
 - 병렬은 `$dev-orchestrator`의 `병렬 실행` 절(탐색 fan-out · 검토 fan-out · 쓰기 병렬 · 파이프라인, 금지 조건, 합치기)을 따른다.
   쓰기 병렬은 소유권이 겹치지 않고 작업자마다 별도 worktree 를 쓸 때만이고, 그 외 쓰기 역할은 한 번에 하나만 수행한다.
   Codex 하위 역할은 부모 sandbox 를 상속하므로, 작업자 worktree 가 쓰기 허용 범위 밖이면 sandbox 를 넓히지 말고 순차로 진행한다.
-- Codex에서 `spawn_agent(agent_type="be_db_reviewer", ...)`처럼 생성본의 `name`을 지정한다. 병렬은 한 턴에서 `spawn_agent`를 연달아 호출하고 `wait_agent`로 모은다.
-  등급을 바꿀 때는 `model`·`reasoning_effort`를 함께 넘기고, 지시로 충분한 탐색·검토는 `fork_turns="none"`에 맥락을 모두 담는다. 도구 목록에 역할이 없으면 새 세션에서 재확인한다.
+- Codex에서 `spawn_agent(agent_type="be_db_reviewer", ...)`처럼 생성본의 `name`을 지정한다. 병렬은 한 턴에서 `spawn_agent`를 연달아 호출한 뒤 결과를 모은다.
+  현재 실행기가 명명 역할의 모델·추론을 고정으로 표시하면 `model`·`reasoning_effort`를 생략한다. 도구 목록에 역할이 없으면 새 세션에서 재확인한다.
+- 호출별 지정이 필요하고 위임 범위가 허용하면 `agent_type="default"`, `model`, `reasoning_effort`, `fork_turns="none"`을 지정한다.
+  적용할 역할 지침과 권한·편집 범위, 필요한 맥락을 메시지에 담는다. 지원 여부는 실행기가 제공하는 도구 정의를 기준으로 확인한다.
 - 하위 역할은 재위임·커밋·푸시·이슈·PR을 수행하지 않는다. 메인 세션이 요청 범위 안에서 처리한다.
 - 메인 세션이 범위·계획·최종 결과를 판단하고 실제 검증 결과를 확인한다. 하위 역할의 통과 보고만으로 완료 처리하지 않는다.
+
+## Codex 병렬 호출 실측
+
+2026-11-27 Windows의 Codex CLI `0.172.0`에서 읽기 전용 보안·계층 리뷰어를 같은 턴에 연달아 호출했다. 결과를 기다리기 전 두 역할이 동시에 `running`으로 표시됐다. 각 리뷰어가 공통 UTC 시계로 기록한 구간은 다음과 같다.
+
+| 역할 | 첫 시각 | 종료 직전 |
+|------|---------|-----------|
+| `be_security_reviewer` | 06:02:58 | 06:03:50 |
+| `be_hexagonal_reviewer` | 06:03:10 | 06:04:11 |
+
+구간은 06:03:10~06:03:50에 40초 겹쳤다. 두 구간에는 각각 약 15초의 관측용 대기와 문서 확인이 포함됐다. 기록은 두 작업의 실행 상태가 겹친 시간을 보여준다.
+
+두 역할은 세션 기록의 해당 턴에서 `gpt-6.2-sol/medium`을 사용했다. 실행기가 역할 정의를 갱신한 뒤 같은 보안 역할을 한 번 더 호출했을 때는 `gpt-6.2-sol/high`였다. 별도 호출에서 `agent_type="default"`와 `fork_turns="none"`으로 `gpt-6.1-terra/medium`을 지정했고, 실제 턴 기록에서 적용을 확인했다. 명명 역할을 호출할 때는 현재 세션에 로드된 프로필을 확인한다. [#768 완료 기준](https://github.com/8llow8llowMe/commerce-foundry/issues/768)
 
 ## Codex 모델 갱신
 
@@ -101,7 +116,7 @@ Codex를 업데이트한 뒤 모델 선택 목록에서 새 모델의 ID와 지�
 |----|----|
 | `models` | 등급별 모델 ID |
 | `reasoning_effort` | 등급별 기본 추론 수준 — 역할 정의(`.codex/agents/*.toml`)에 들어간다 |
-| `max_reasoning_effort` | 등급별 최대 추론 수준 — 호출에서 올릴 수 있는 상한. 라우팅 표에 나온다 |
+| `max_reasoning_effort` | 등급별 최대 추론 수준 — 라우팅 표에 표시하는 상한. 호출에서 올리려면 실행기가 모델·추론 지정을 지원해야 한다 |
 | `role_reasoning_effort` | 역할별 예외 (예: `git-ops` 는 `low`). Claude frontmatter `effort` 에도 같은 값을 둔다 |
 
 역할 → 등급 매핑은 `scripts/sync-agent-skills.py`의 `ROLE_TIERS`, Claude 등급 모델은 `CLAUDE_TIERS`다. 검사 모드는 `.claude/agents` frontmatter 의 `model`·`effort`가 이 값과 다르면 실패한다.

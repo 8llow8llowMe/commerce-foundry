@@ -64,8 +64,9 @@ Leader 는 파일이 없다. **메인 세션이 맡는다** (`/backend-multi-age
   역할 → 등급 매핑은 `scripts/sync-agent-skills.py` 의 `ROLE_TIERS` 하나이고, 검사 모드가 Claude frontmatter 와 Codex 생성본이 이 매핑과 맞는지 본다.
 - **호출마다 등급을 고른다.** `/dev-orchestrator` 가 분류(T0~T3 · 위험 신호)로 등급을 정하고 하위 에이전트 호출에 `model` · `effort` 를 넘긴다
   (표는 그 스킬의 "등급 고르기"). Claude Agent 도구의 `effort` 인자는 사용자 · CLAUDE.md · 스킬이 명시할 때만 쓰게 돼 있다 —
-  `dev-orchestrator` 의 지시가 그 명시다. Codex 는 `spawn_agent` 의 `model` · `reasoning_effort` 인자로 같은 일을 한다.
-- 일반 등급에는 기본 역할이 없다. 구현 · 검토 역할을 `sonnet` / `medium`(Codex `gpt-6.1-terra` / `medium`)으로 낮춰 부른다.
+  `dev-orchestrator` 의 지시가 그 명시다. Codex에서 호출별 등급을 지정하려면 실행기가 재지정을 지원하는 기본 에이전트를 사용한다.
+  프로젝트의 명명 역할은 로드된 모델·추론 설정을 따른다. [Codex 호출 실측](ai-agents.md#codex-병렬-호출-실측)
+- Claude Code에서 일반 등급을 적용할 때는 구현 · 검토 역할에 `sonnet` / `medium`을 지정한다.
 - Cursor 는 `explorer` · `git-ops` 만 `claude-haiku-5-5` 로 고정하고 나머지는 세션 모델(`inherit`)이다. 호출별 effort 지정은 없다.
 
 ### 실측 (2026-11-26)
@@ -79,6 +80,11 @@ Leader 는 파일이 없다. **메인 세션이 맡는다** (`/backend-multi-age
 
 `gpt-6-luna` 는 `ultra` 를 지원하지 않으므로 빠름 등급의 최대는 `high` 로 둔다. 모델을 바꾸면 `--model-catalog` 검사가
 등급별 기본 · 최대 추론과 역할 예외를 모델이 지원하는지 본다 ([ai-agents.md](ai-agents.md) "Codex 모델 갱신").
+
+### 리뷰어 병렬 실행 기록
+
+[PR #769](https://github.com/8llow8llowMe/commerce-foundry/pull/769)에 기록된 Claude 실행에서 계층·보안 리뷰어의 실행 구간은 54초 겹쳤다.
+세 번째 `reviewer`는 사용자 중지 후 단독으로 다시 실행했다. 2026-11-27 Claude Code `2.1.332`에서도 별도 검증 세션에 사용할 인증을 확인하지 못해 리뷰어 3개 동시 실행은 미확인으로 남겼다.
 
 ### 공통
 
