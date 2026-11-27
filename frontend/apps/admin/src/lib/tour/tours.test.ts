@@ -10,6 +10,16 @@ import {
 } from './tours';
 
 describe('helpTopicFor · toursFor', () => {
+  it('재고 목록은 빈 검색 결과에서도 안내하고, 상세는 재고 표가 있어야 시작한다', () => {
+    const list = helpTopicFor('/stocks');
+    const detail = helpTopicFor('/stocks/42');
+    expect(list).toMatchObject({ title: '재고', tour: { id: 'stocks-v1' } });
+    expect(detail).toMatchObject({ title: '옵션별 재고', tour: { id: 'stock-detail-v1' } });
+    expect(driveSteps(list.tour!, (target) => target === 'product-search')).toHaveLength(1);
+    expect(driveSteps(detail.tour!, () => false)).toBeNull();
+    expect(driveSteps(detail.tour!, (target) => target === 'stock-table')).toHaveLength(2);
+  });
+
   it('경로마다 도움말을 고르고, 없는 경로는 기본 도움말이다', () => {
     expect(helpTopicFor('/size-charts/42').title).toBe('사이즈표 입력');
     expect(helpTopicFor('/size-charts').title).toBe('상품 사이즈표');

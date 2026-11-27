@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore, type Ref } from 'react';
 import { HeaderMenu } from '@/components/HeaderMenu';
 import { hasNewerGuide, serverTourState, tourProgress } from '@/lib/tour/progress';
 import { ALL_TOURS, CONSOLE_TOUR, helpTopicFor } from '@/lib/tour/tours';
@@ -22,11 +22,18 @@ export function HelpMenu() {
   const topic = helpTopicFor(pathname);
   const screenTour = topic.tour;
   const [open, setOpen] = useState(false);
+  const helpIcon = useRef<SVGSVGElement>(null);
   const state = useSyncExternalStore(tourProgress.subscribe, tourProgress.get, serverTourState);
   const newerGuide = hasNewerGuide(TOUR_IDS, state);
 
-  const replay = (tourId: string) => {
+  const closeForTour = () => {
+    // 투어 종료 시 돌아갈 초점을 보이는 도움말 버튼에 둔다.
+    helpIcon.current?.closest('button')?.focus();
     setOpen(false);
+  };
+
+  const replay = (tourId: string) => {
+    closeForTour();
     tourProgress.request(tourId);
   };
 
@@ -36,7 +43,7 @@ export function HelpMenu() {
       buttonLabel="도움말"
       open={open}
       onOpenChange={setOpen}
-      label={<HelpIcon />}
+      label={<HelpIcon iconRef={helpIcon} />}
     >
       {() => (
         <div className="flex max-h-[70dvh] flex-col gap-4 overflow-y-auto p-4 text-sm">
@@ -71,7 +78,7 @@ export function HelpMenu() {
             <MenuButton
               onClick={() => {
                 // 지금 화면부터 처음처럼 — 패널을 닫으면 처음 안내가 바로 시작된다
-                setOpen(false);
+                closeForTour();
                 tourProgress.reset();
               }}
             >
@@ -127,9 +134,10 @@ function MenuButton({ onClick, children }: { onClick: () => void; children: stri
   );
 }
 
-function HelpIcon() {
+function HelpIcon({ iconRef }: { iconRef: Ref<SVGSVGElement> }) {
   return (
     <svg
+      ref={iconRef}
       aria-hidden
       viewBox="0 0 24 24"
       className="size-5"
