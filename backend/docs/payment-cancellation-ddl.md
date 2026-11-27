@@ -196,7 +196,8 @@ payment_cancel_status_check | CHECK (((status)::text = ANY ((ARRAY['PENDING'::ch
 PENDING의 next_attempt_at·lease_until과 MANUAL_REVIEW를 관찰한다. 수동 사유는 `AUTO_CANCEL_MANUAL_REVIEW`로 고정한다.
 PG 거래·정확한 요청 표식·저장된 거래 증거를 대조하기 전에는 잔액만으로 성공 처리하거나 새 키로 재청구하지 않는다.
 14일 후에는 POST하지 않되 GET 확정을 허용한다. 만료 후 GET RETRY도 수동 확인으로 남기고 원장 PENDING은 보존한다.
-#213 어드민 알림이나 operations-service 연동이 제공된다는 뜻은 아니다.
+#213 어드민 알림이 제공된다는 뜻은 아니다. MANUAL_REVIEW 는 [관측 API](payment-observation-guide.md) 7번째 버킷 `autoCancelManualReview`로
+노출하며(게이트 OFF면 질의하지 않고 null), operations 소비는 #477 PR 2다.
 
 ### 별도 커서·스케줄러 DDL
 
@@ -213,7 +214,8 @@ CORE 메타데이터 DDL 다음 `service/payment-service/src/test/resources/ddl/
 기본 1분 주기·lane당 5건·락 15분이다. 세 lane 전체의 명목 예산을 검증하지만 벽시계 보장은 아니며 중복 안전성은 의도 token과 PG 멱등 키에 의존한다.
 게이트 ON에서는 Hibernate none 환경도 새 커서/세 seed·양수 claim 칼럼·원장·shedlock 누락으로 기동 실패한다.
 롤백은 게이트 OFF 후 drain하고 양수 원장·의도·커서 진행·고정 키를 보존한다. 구버전 #591 exact-two-seed 검사는 그대로 통과한다.
-#213 어드민 알림·operations-service 호출은 제공하지 않는다. 저장된 고정 수동 사유와 원문 없는 스케줄러 실패 로그로 확인한다.
+#213 어드민 알림은 제공하지 않는다. 저장된 고정 수동 사유와 원문 없는 스케줄러 실패 로그로 확인한다.
+MANUAL_REVIEW 는 관측 API 7번째 버킷으로 노출하고, operations 소비는 #477 PR 2다.
 
 수동 확인은 MANUAL_REVIEW 영속 상태와 고정 사유 `AUTO_CANCEL_MANUAL_REVIEW`로 남긴다.
 최초 전이 커밋 후 같은 고정 코드 로그와 태그 없는 `commerce.payment.auto-cancel.manual-review` counter를 기록한다.

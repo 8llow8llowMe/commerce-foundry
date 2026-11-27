@@ -3,11 +3,14 @@ package com.commercefoundry.domainlayer.paymentobservation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static com.commercefoundry.security.support.SecurityEnvelopeAssertions.assertEnvelope;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentAnomalyObservationPort;
+import com.commercefoundry.domainlayer.payment.application.service.processor.PaymentAnomalyObservationProcessor;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentAnomalyObservation;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.error.SecurityErrorCode;
@@ -16,6 +19,8 @@ import com.commercefoundry.security.support.TestTokens;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,9 +29,13 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.util.AopTestUtils;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
@@ -36,49 +45,93 @@ import tools.jackson.databind.json.JsonMapper;
 class PaymentObservationWebTest {
 
     static final String PATH = "/internal/v1/payment-observations/anomalies";
+    static final List<String> SIX_LANES = List.of("unknown", "manualReviewUnknown", "inProgress", "returnedReady", "lateApproved", "doneOrderUnsynced");
     @Autowired MockMvc mvc;
+    @Autowired PaymentAnomalyObservationProcessor processor;
     @MockitoBean PaymentAnomalyObservationPort repository;
+    private boolean originalAutoCancelGate;
+
+    @BeforeEach
+    void rememberAutoCancelGate() {
+        PaymentAnomalyObservationProcessor target = AopTestUtils.getUltimateTargetObject(processor);
+        Boolean original = (Boolean) ReflectionTestUtils.getField(target, "autoCancelEnabled");
+        originalAutoCancelGate = Boolean.TRUE.equals(original);
+    }
+
+    @AfterEach
+    void restoreAutoCancelGate() {
+        autoCancelGate(originalAutoCancelGate);
+    }
 
     @Test
-    void operationsReceivesOnlySixBucketsAndNullWithNoStoreWhileGatesAreClosed() throws Exception {
-        when(repository.observeAnomalies(any())).thenReturn(facts(0, null));
+    void operationsReceivesSixZeroBucketsAndUnobservedSeventhWithNoStoreWhileGatesAreClosed() throws Exception {
+        // 게이트 OFF 면 어댑터가 무엇을 돌려주든 7번째는 JSON null 이고 payment_auto_cancel 을 묻지 않는다.
+        when(repository.observeAnomalies(any())).thenReturn(facts(0, null, new PaymentAnomalyObservation.Bucket(9, Instant.EPOCH)));
         var response = mvc.perform(get(PATH).header("Authorization", bearer("operations-service", "payment-service")))
             .andExpect(status().isOk()).andReturn().getResponse();
         assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
         var body = JsonMapper.builder().build().readTree(response.getContentAsString()).get("dataBody");
         List<String> names = new ArrayList<>();
         body.propertyNames().forEach(names::add);
-        assertThat(names).containsExactlyInAnyOrder("observedAt", "unknown", "manualReviewUnknown", "inProgress", "returnedReady", "lateApproved", "doneOrderUnsynced");
+        assertThat(names).containsExactlyInAnyOrder("observedAt", "unknown", "manualReviewUnknown", "inProgress", "returnedReady", "lateApproved",
+            "doneOrderUnsynced", "autoCancelManualReview");
         assertThat(Instant.parse(body.get("observedAt").asText()).getNano() % 1_000).isZero();
-        for (String lane : List.of("unknown", "manualReviewUnknown", "inProgress", "returnedReady", "lateApproved", "doneOrderUnsynced")) {
-            List<String> fields = new ArrayList<>();
-            body.get(lane).propertyNames().forEach(fields::add);
-            assertThat(fields).containsExactlyInAnyOrder("count", "oldestAt");
+        for (String lane : SIX_LANES) {
+            assertThat(fields(body.get(lane))).containsExactlyInAnyOrder("count", "oldestAt");
             assertThat(body.get(lane).get("count").asLong()).isZero();
             assertThat(body.get(lane).get("oldestAt").isNull()).isTrue();
         }
+        assertThat(body.has("autoCancelManualReview")).isTrue();
+        assertThat(body.get("autoCancelManualReview").isNull()).isTrue();
+        verify(repository, never()).observeAutoCancelManualReview(any());
     }
 
     @Test
     void sixLanesPreserveDistinctCountsAndOldestTimestamps() throws Exception {
         Instant oldest = Instant.parse("2026-11-03T01:02:03.123456Z");
-        when(repository.observeAnomalies(any())).thenReturn(new PaymentAnomalyObservation(oldest.plusSeconds(60),
-            new PaymentAnomalyObservation.Bucket(7, oldest),
-            new PaymentAnomalyObservation.Bucket(2, oldest.plusSeconds(1)),
-            new PaymentAnomalyObservation.Bucket(3, oldest.plusSeconds(2)),
-            new PaymentAnomalyObservation.Bucket(4, oldest.plusSeconds(3)),
-            new PaymentAnomalyObservation.Bucket(5, oldest.plusSeconds(4)),
-            new PaymentAnomalyObservation.Bucket(6, oldest.plusSeconds(5))));
+        when(repository.observeAnomalies(any())).thenReturn(lanes(oldest));
         var response = mvc.perform(get(PATH).header("Authorization", bearer("operations-service", "payment-service")))
             .andExpect(status().isOk()).andReturn().getResponse();
         var body = JsonMapper.builder().build().readTree(response.getContentAsString()).get("dataBody");
-        List<String> lanes = List.of("unknown", "manualReviewUnknown", "inProgress", "returnedReady", "lateApproved", "doneOrderUnsynced");
-        for (int index = 0; index < lanes.size(); index++) {
-            var bucket = body.get(lanes.get(index));
-            assertThat(bucket.get("count").asLong()).isEqualTo(index == 0 ? 7 : index + 1);
-            assertThat(Instant.parse(bucket.get("oldestAt").asText())).isEqualTo(oldest.plusSeconds(index));
-        }
-        assertThat(Instant.parse(body.get("observedAt").asText())).isEqualTo(oldest.plusSeconds(60));
+        assertSixLanes(body, oldest);
+    }
+
+    @Test
+    void openGateExposesSeventhBucketWithOnlyCountAndOldestAtAndKeepsSixLanes() throws Exception {
+        autoCancelGate(true);
+        Instant oldest = Instant.parse("2026-11-03T01:02:03.123456Z");
+        when(repository.observeAnomalies(any())).thenReturn(lanes(oldest));
+        when(repository.observeAutoCancelManualReview(any())).thenReturn(new PaymentAnomalyObservation.Bucket(4, oldest.minusSeconds(90)));
+        String json = mvc.perform(get(PATH).header("Authorization", bearer("operations-service", "payment-service")))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        var body = JsonMapper.builder().build().readTree(json).get("dataBody");
+        assertSixLanes(body, oldest);
+        var bucket = body.get("autoCancelManualReview");
+        assertThat(fields(bucket)).containsExactlyInAnyOrder("count", "oldestAt");
+        assertThat(bucket.get("count").asLong()).isEqualTo(4);
+        assertThat(Instant.parse(bucket.get("oldestAt").asText())).isEqualTo(oldest.minusSeconds(90));
+        assertThat(json).doesNotContain("paymentId", "pgKey", "amount", "currency", "manualReason", "AUTO_CANCEL_MANUAL_REVIEW", "transactionKey",
+            "claimId", "sentinel");
+
+        when(repository.observeAutoCancelManualReview(any())).thenReturn(new PaymentAnomalyObservation.Bucket(0, null));
+        String emptyJson = mvc.perform(get(PATH).header("Authorization", bearer("operations-service", "payment-service")))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        var empty = JsonMapper.builder().build().readTree(emptyJson).get("dataBody").get("autoCancelManualReview");
+        assertThat(fields(empty)).containsExactlyInAnyOrder("count", "oldestAt");
+        assertThat(empty.get("count").asLong()).isZero();
+        assertThat(empty.get("oldestAt").isNull()).isTrue();
+    }
+
+    @Test
+    void openGateSecondStatementFailureReturnsSafe503(CapturedOutput output) throws Exception {
+        autoCancelGate(true);
+        String sentinel = "sentinel-auto-cancel-future-next-attempt";
+        when(repository.observeAnomalies(any())).thenReturn(facts(0, null, null));
+        when(repository.observeAutoCancelManualReview(any())).thenThrow(new DataIntegrityViolationException(sentinel));
+        var response = mvc.perform(get(PATH).header("Authorization", bearer("operations-service", "payment-service")))
+            .andExpect(status().isServiceUnavailable()).andReturn().getResponse();
+        assertThat(response.getContentAsString()).contains("PAYMENT_OBSERVATION_001").doesNotContain(sentinel);
+        assertThat(output.getAll()).contains("PAYMENT_OBSERVATION_001", "DataIntegrityViolationException").doesNotContain(sentinel);
     }
 
     @Test
@@ -107,9 +160,42 @@ class PaymentObservationWebTest {
         assertThat(output.getAll()).contains("PAYMENT_OBSERVATION_001", "DataAccessResourceFailureException").doesNotContain(sentinel);
     }
 
-    private static PaymentAnomalyObservation facts(long count, Instant oldest) {
+    /** 공유 컨텍스트의 Processor 게이트를 이 테스트 안에서만 바꾼다. @AfterEach 가 테스트 전 값으로 되돌린다. */
+    private void autoCancelGate(boolean enabled) {
+        PaymentAnomalyObservationProcessor target = AopTestUtils.getUltimateTargetObject(processor);
+        ReflectionTestUtils.setField(target, "autoCancelEnabled", enabled);
+    }
+
+    private static void assertSixLanes(JsonNode body, Instant oldest) {
+        for (int index = 0; index < SIX_LANES.size(); index++) {
+            var bucket = body.get(SIX_LANES.get(index));
+            assertThat(fields(bucket)).containsExactlyInAnyOrder("count", "oldestAt");
+            assertThat(bucket.get("count").asLong()).isEqualTo(index == 0 ? 7 : index + 1);
+            assertThat(Instant.parse(bucket.get("oldestAt").asText())).isEqualTo(oldest.plusSeconds(index));
+        }
+        assertThat(Instant.parse(body.get("observedAt").asText())).isEqualTo(oldest.plusSeconds(60));
+    }
+
+    private static List<String> fields(JsonNode node) {
+        List<String> fields = new ArrayList<>();
+        node.propertyNames().forEach(fields::add);
+        return fields;
+    }
+
+    private static PaymentAnomalyObservation lanes(Instant oldest) {
+        return new PaymentAnomalyObservation(oldest.plusSeconds(60),
+            new PaymentAnomalyObservation.Bucket(7, oldest),
+            new PaymentAnomalyObservation.Bucket(2, oldest.plusSeconds(1)),
+            new PaymentAnomalyObservation.Bucket(3, oldest.plusSeconds(2)),
+            new PaymentAnomalyObservation.Bucket(4, oldest.plusSeconds(3)),
+            new PaymentAnomalyObservation.Bucket(5, oldest.plusSeconds(4)),
+            new PaymentAnomalyObservation.Bucket(6, oldest.plusSeconds(5)),
+            null);
+    }
+
+    private static PaymentAnomalyObservation facts(long count, Instant oldest, PaymentAnomalyObservation.Bucket autoCancel) {
         var bucket = new PaymentAnomalyObservation.Bucket(count, oldest);
-        return new PaymentAnomalyObservation(Instant.EPOCH, bucket, bucket, bucket, bucket, bucket, bucket);
+        return new PaymentAnomalyObservation(Instant.EPOCH, bucket, bucket, bucket, bucket, bucket, bucket, autoCancel);
     }
 
     private static String bearer(String caller, String audience) {

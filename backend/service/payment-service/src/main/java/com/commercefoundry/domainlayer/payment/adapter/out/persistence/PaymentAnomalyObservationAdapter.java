@@ -25,6 +25,17 @@ public class PaymentAnomalyObservationAdapter implements PaymentAnomalyObservati
             new PaymentAnomalyObservation.Bucket(row.getInProgressCount(), row.getInProgressOldestAt()),
             new PaymentAnomalyObservation.Bucket(row.getReturnedReadyCount(), row.getReturnedReadyOldestAt()),
             new PaymentAnomalyObservation.Bucket(row.getLateApprovedCount(), row.getLateApprovedOldestAt()),
-            new PaymentAnomalyObservation.Bucket(row.getDoneOrderUnsyncedCount(), row.getDoneOrderUnsyncedOldestAt()));
+            new PaymentAnomalyObservation.Bucket(row.getDoneOrderUnsyncedCount(), row.getDoneOrderUnsyncedOldestAt()),
+            null);
+    }
+
+    @Override
+    public PaymentAnomalyObservation.Bucket observeAutoCancelManualReview(Instant observedAt) {
+        var row = repository.observeAutoCancelManualReview(observedAt);
+        // 기준 시각보다 미래인 행이 하나라도 있으면 여섯 버킷과 같이 관측 전체를 실패시킨다. min 에 가려지지 않게 따로 센다.
+        if (row.getFutureCount() > 0) {
+            throw new DataIntegrityViolationException("결제 관측 기준 시각이 유효하지 않습니다.");
+        }
+        return new PaymentAnomalyObservation.Bucket(row.getCandidateCount(), row.getOldestAt());
     }
 }

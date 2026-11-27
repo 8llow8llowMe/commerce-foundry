@@ -157,7 +157,8 @@ ID projection + limit 한 번이며 count/잠금/개인정보 로딩이 없다. 
 결제·메시징 게이트와 독립적으로 읽는다. operations 수집기·알림·해소 판정은 후속이며 [원천 관측 계약](outbox-observation-guide.md)을 따른다.
 
 `GET /internal/v1/payment-observations/anomalies`는 operations 전용 결제 이상 후보 원천이다(`@Hidden`, 공통 봉투 200, no-store).
-`observedAt`과 고정 여섯 `{count, oldestAt}` 버킷을 반환한다. UNKNOWN 전체에 수동 검토 부분집합을 합산하지 않으며 후보 시각 누락·미래는
+`observedAt`과 고정 일곱 `{count, oldestAt}` 버킷을 반환한다(7번째 `autoCancelManualReview`는 자동 취소 게이트 OFF면 버킷 자체가 null).
+UNKNOWN 전체에 수동 검토 부분집합을 합산하지 않으며 후보 시각 누락·미래는
 전체 503 `PAYMENT_OBSERVATION_001`이다. 상태 체류시간·임계값 판정이 아닌 [결제 관측 계약](payment-observation-guide.md)을 따른다.
 
 ## 2. 응답 구조
