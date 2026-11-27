@@ -149,8 +149,61 @@ class StoreNavigationPostgresTest {
             Arguments.of(insert + "'women', null, 'NONE', '중복', 'Duplicate', null, null, 9, true" + from, "store_navigation_item_pkey", "23505"),
             Arguments.of("update operations.store_navigation set id = 2", "ck_store_navigation_singleton", "23514"),
             Arguments.of("update operations.store_navigation set published_revision = 2", "ck_store_navigation_pointers", "23514"),
-            Arguments.of("update operations.store_navigation_revision set published_by = 8", "ck_store_navigation_revision_publication", "23514")
+            Arguments.of("update operations.store_navigation_revision set published_by = 8", "ck_store_navigation_revision_publication", "23514"),
+            Arguments.of("update operations.store_navigation_item set description_ko = '설명' where item_key = 'magazine'",
+                "ck_store_navigation_item_description", "23514"),
+            Arguments.of("update operations.store_navigation_item set primary_menu = true where item_key = 'women-skirts'",
+                "ck_store_navigation_item_placement", "23514"),
+            Arguments.of("update operations.store_navigation_item set shortcut_menu = true where item_key = 'women-skirts'",
+                "ck_store_navigation_item_placement", "23514")
         );
+    }
+
+    @Test
+    void omittedPlacementColumnsDefaultToFalseInDatabase() {
+        draft(null, 4000, content("Defaults"));
+        jdbc.update("insert into operations.store_navigation_item (revision_id, item_key, parent_key, type, label_ko, label_en, url, category_id,"
+            + " display_order, visible) select id, 'extra', null, 'NONE', '추가', 'Extra', null, null, 9, true from operations.store_navigation_revision");
+        assertThat(jdbc.queryForObject("select primary_menu or shortcut_menu from operations.store_navigation_item where item_key = 'extra'",
+            Boolean.class)).isFalse();
+    }
+
+    @Test
+    void draftAndPublishRaceCommitExactlyOneCompleteChange() throws Exception {
+        draft(null, 4000, content("Initial"));
+        var original = adapter.detail().orElseThrow().revision();
+        var outcomes = race(() -> draft(0L, REVISION_A, content("Next")), () -> adapter.publish(0L, 1, 8, NOW.plusSeconds(1)));
+        var result = adapter.detail().orElseThrow();
+        assertThat(result.navigation().version()).isEqualTo(1L);
+        if (outcomes.get(0)) {
+            assertThat(result.navigation().latestRevision()).isEqualTo(2);
+            assertThat(result.navigation().publishedRevision()).isNull();
+            assertThat(adapter.published()).isEmpty();
+            counts(2, 6);
+        } else {
+            assertThat(result.navigation().latestRevision()).isEqualTo(1);
+            assertThat(result.navigation().publishedRevision()).isEqualTo(1);
+            assertThat(adapter.published()).contains(result.revision());
+            assertThat(result.revision().content()).isEqualTo(original.content());
+            assertThat(result.revision().publishedBy()).isEqualTo(8L);
+            counts(1, 3);
+            assertThat(itemRows(REVISION_A)).isZero();
+        }
+    }
+
+    @Test
+    void concurrentPublicationsHaveOne409AndRetryRetainsFirstPublisherAndVersion() throws Exception {
+        draft(null, 4000, content("Initial"));
+        var outcomes = race(() -> adapter.publish(0L, 1, 8, NOW.plusSeconds(1)), () -> adapter.publish(0L, 1, 9, NOW.plusSeconds(2)));
+        var before = adapter.detail().orElseThrow();
+        assertThat(before.navigation().version()).isEqualTo(1L);
+        assertThat(before.navigation().publishedRevision()).isEqualTo(1);
+        assertThat(before.revision().publishedBy()).isEqualTo(outcomes.get(0) ? 8L : 9L);
+        assertThat(before.revision().publishedAt()).isEqualTo(NOW.plusSeconds(outcomes.get(0) ? 1 : 2));
+        assertThat(adapter.publish(0L, 1, 10, NOW.plusSeconds(3))).isEqualTo(before);
+        assertThat(adapter.detail()).contains(before);
+        assertThat(adapter.published()).contains(before.revision());
+        counts(1, 3);
     }
 
     private long itemRows(long revisionId) {

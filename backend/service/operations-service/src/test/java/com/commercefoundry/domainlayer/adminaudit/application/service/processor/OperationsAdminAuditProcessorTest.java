@@ -60,7 +60,7 @@ class OperationsAdminAuditProcessorTest {
             .filter(method -> method.isAnnotationPresent(AdminAudited.class))
             .map(method -> method.getAnnotation(AdminAudited.class).action()).toList();
         assertThat(declared).containsExactlyInAnyOrderElementsOf(Arrays.stream(OperationsAdminAuditAction.values()).map(Enum::name).toList());
-        assertThat(declared).hasSize(6).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
+        assertThat(declared).hasSize(7).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
     }
 
     @ParameterizedTest
@@ -108,31 +108,47 @@ class OperationsAdminAuditProcessorTest {
         }
     }
 
-    @Test
-    void navigationDraftSaveUsesFixedTargetAndAuditFailureCannotEscape() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void navigationActionsUseFixedTargetAndAuditFailureCannotEscape(boolean publish) {
+        String action = publish ? "STORE_NAVIGATION_PUBLISH" : "STORE_NAVIGATION_DRAFT_SAVE";
         doThrow(diagnosticFailure).when(diagnostic).warn(anyString(), any(), any(), any());
         try (var writer = mockStatic(AdminAuditLog.class)) {
-            writer.when(() -> AdminAuditLog.write("STORE_NAVIGATION_DRAFT_SAVE", 7L, "store-navigation:1", true)).thenThrow(auditFailure);
-            assertThatCode(() -> audit.navigationDraftSaved(7L, true)).doesNotThrowAnyException();
-            writer.verify(() -> AdminAuditLog.write("STORE_NAVIGATION_DRAFT_SAVE", 7L, "store-navigation:1", true), times(1));
+            writer.when(() -> AdminAuditLog.write(action, 7L, "store-navigation:1", true)).thenThrow(auditFailure);
+            assertThatCode(() -> {
+                if (publish) {
+                    audit.navigationPublished(7L, true);
+                } else {
+                    audit.navigationDraftSaved(7L, true);
+                }
+            }).doesNotThrowAnyException();
+            writer.verify(() -> AdminAuditLog.write(action, 7L, "store-navigation:1", true), times(1));
             writer.verifyNoMoreInteractions();
             verify(diagnostic).warn("Admin audit unavailable action={} actorMemberId={} exceptionType={}",
-                "STORE_NAVIGATION_DRAFT_SAVE", 7L, IllegalArgumentException.class.getName());
+                action, 7L, IllegalArgumentException.class.getName());
             verifyNoMoreInteractions(diagnostic);
         }
     }
 
-    @Test
-    void navigationPresenterFailurePreservesOriginalExceptionAndNeverWritesSuccess() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void navigationPresenterFailurePreservesOriginalExceptionAndNeverWritesSuccess(boolean publish) {
         var processor = mock(StoreNavigationProcessor.class);
         var presenter = mock(StoreNavigationAdminPresenter.class);
         when(presenter.detail(any())).thenThrow(original);
         var facade = new StoreNavigationAdminFacade(processor, presenter, audit);
+        String action = publish ? "STORE_NAVIGATION_PUBLISH" : "STORE_NAVIGATION_DRAFT_SAVE";
         doThrow(diagnosticFailure).when(diagnostic).warn(anyString(), any(), any(), any());
         try (var writer = mockStatic(AdminAuditLog.class)) {
-            writer.when(() -> AdminAuditLog.write("STORE_NAVIGATION_DRAFT_SAVE", 7L, "store-navigation:1", false)).thenThrow(auditFailure);
-            assertThatThrownBy(() -> facade.save(7L, new StoreNavigationCommands.SaveDraft(null, null))).isSameAs(original);
-            writer.verify(() -> AdminAuditLog.write("STORE_NAVIGATION_DRAFT_SAVE", 7L, "store-navigation:1", false), times(1));
+            writer.when(() -> AdminAuditLog.write(action, 7L, "store-navigation:1", false)).thenThrow(auditFailure);
+            assertThatThrownBy(() -> {
+                if (publish) {
+                    facade.publish(7L, new StoreNavigationCommands.Publish(0L, 1));
+                } else {
+                    facade.save(7L, new StoreNavigationCommands.SaveDraft(null, null));
+                }
+            }).isSameAs(original);
+            writer.verify(() -> AdminAuditLog.write(action, 7L, "store-navigation:1", false), times(1));
             writer.verifyNoMoreInteractions();
         }
     }

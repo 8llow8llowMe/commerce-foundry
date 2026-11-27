@@ -213,6 +213,71 @@ class StoreNavigationH2Test {
         var saved = processor.save(7, new StoreNavigationCommands.SaveDraft(null, unordered));
         assertThat(saved.revision().createdAt()).isEqualTo(Instant.parse(expected));
         assertThat(processor.detail()).isEqualTo(saved);
+        var published = processor.publish(8, new StoreNavigationCommands.Publish(saved.navigation().version(), 1));
+        assertThat(published.revision().publishedAt()).isEqualTo(Instant.parse(expected));
+        assertThat(processor.detail()).isEqualTo(published);
+        assertThat(processorAt(Instant.parse(input).plusSeconds(10)).publish(9, new StoreNavigationCommands.Publish(0L, 1))).isEqualTo(published);
+    }
+
+    @Test
+    void publicationMovesPointerOnceKeepsFirstPublisherAndNewDraftNeverChangesPublicTree() {
+        var first = draft(null, content("Original"));
+        assertThat(adapter.published()).isEmpty();
+        var published = adapter.publish(first.navigation().version(), 1, 8, NOW.plusSeconds(1));
+        assertThat(published.navigation().version()).isEqualTo(1L);
+        assertThat(published.navigation().publishedRevision()).isEqualTo(1);
+        var original = adapter.published().orElseThrow();
+        assertThat(original.publishedBy()).isEqualTo(8L);
+        assertThat(original.publishedAt()).isEqualTo(NOW.plusSeconds(1));
+        assertThat(original.content()).isEqualTo(first.revision().content());
+
+        var latest = draft(1L, content("Private"));
+        assertThat(latest.navigation().publishedRevision()).isEqualTo(1);
+        assertThat(adapter.published().orElseThrow()).isEqualTo(original);
+        var beforeRetry = adapter.detail().orElseThrow();
+        // 현재 게시본의 반복 게시는 오래된 버전이어도 변경 없이 현재 상태를 돌려준다.
+        assertThat(adapter.publish(0L, 1, 9, NOW.plusSeconds(9))).isEqualTo(beforeRetry);
+        assertThat(adapter.detail().orElseThrow()).isEqualTo(beforeRetry);
+        assertThat(adapter.published().orElseThrow()).isEqualTo(original);
+
+        var ko = processorAt(NOW).published("ko").items();
+        assertThat(ko).extracting(node -> node.label()).containsExactly("여성 Original", "매거진 Original");
+        assertThat(ko.getFirst().description()).isEqualTo("전체 상품 Original");
+        assertThat(ko.getFirst().primary()).isTrue();
+        assertThat(ko.get(1).shortcut()).isTrue();
+        assertThat(ko.getFirst().children()).extracting(node -> node.label()).containsExactly("신상 Original", "치마 Original");
+        error(() -> processorAt(NOW).published("fr"), StoreNavigationErrorCode.INVALID_REQUEST);
+    }
+
+    @Test
+    void firstPublicationRevalidatesStoredDraftAgainstCurrentDeploymentAllowlist() {
+        // 저장 당시 허용됐던 호스트가 배포 설정에서 빠진 상황을 포트에 직접 저장해 흉내 낸다.
+        var removed = new StoreNavigationContent(List.of(
+            new Item("x", null, "EXTERNAL", new Text("예시", "Example"), "https://removed.example.com/help", null, 1, false)));
+        draft(null, removed);
+        var before = adapter.detail().orElseThrow();
+        error(() -> processorAt(NOW).publish(8, new StoreNavigationCommands.Publish(0L, 1)), StoreNavigationErrorCode.URL);
+        assertThat(adapter.detail().orElseThrow()).isEqualTo(before);
+        assertThat(adapter.published()).isEmpty();
+        assertThat(revisions.count()).isEqualTo(1);
+    }
+
+    @Test
+    void staleVersionNonLatestRevisionAndInvalidCommandsNeverPartiallyChangePublication() {
+        var processor = processorAt(NOW);
+        error(() -> processor.publish(8, new StoreNavigationCommands.Publish(0L, 1)), StoreNavigationErrorCode.NOT_FOUND);
+        processor.save(7, new StoreNavigationCommands.SaveDraft(null, content("Example")));
+        processor.save(7, new StoreNavigationCommands.SaveDraft(0L, content("Latest")));
+        var before = adapter.detail().orElseThrow();
+        error(() -> processor.publish(8, new StoreNavigationCommands.Publish(0L, 2)), StoreNavigationErrorCode.CONFLICT);
+        error(() -> processor.publish(8, new StoreNavigationCommands.Publish(1L, 1)), StoreNavigationErrorCode.CONFLICT);
+        error(() -> processor.publish(8, new StoreNavigationCommands.Publish(1L, 3)), StoreNavigationErrorCode.CONFLICT);
+        error(() -> processor.publish(8, new StoreNavigationCommands.Publish(null, 2)), StoreNavigationErrorCode.VERSION);
+        error(() -> processor.publish(8, new StoreNavigationCommands.Publish(1L, 0)), StoreNavigationErrorCode.REVISION);
+        error(() -> processor.publish(8, new StoreNavigationCommands.Publish(1L, null)), StoreNavigationErrorCode.REVISION);
+        assertThat(adapter.detail().orElseThrow()).isEqualTo(before);
+        assertThat(adapter.published()).isEmpty();
+        assertThat(revisions.count()).isEqualTo(2);
     }
 
     private StoreNavigationQueryResults.Detail draft(Long version, StoreNavigationContent content) {
@@ -227,11 +292,13 @@ class StoreNavigationH2Test {
         // 입력 순서를 일부러 섞는다. 저장·조회 결과는 트리 전위 순서여야 한다.
         return new StoreNavigationContent(List.of(
             new Item("hidden-child", "hidden", "INTERNAL", new Text("숨김 하위 " + text, "Hidden child " + text), "/sale/kids", null, 1, true),
-            new Item("external", null, "EXTERNAL", new Text("매거진 " + text, "Magazine " + text), "https://links.example.com/magazine", null, 2, true),
+            new Item("external", null, "EXTERNAL", new Text("매거진 " + text, "Magazine " + text), null, "https://links.example.com/magazine", null,
+                2, true, false, true),
             new Item("women-skirts", "women", "CATEGORY", new Text("치마 " + text, "Skirts " + text), null, Long.MAX_VALUE, 2, true),
             new Item("hidden", null, "NONE", new Text("숨김 " + text, "Hidden " + text), null, null, 3, false),
             new Item("women-new", "women", "INTERNAL", new Text("신상 " + text, "New " + text), "/collections/new", null, 1, true),
-            new Item("women", null, "NONE", new Text("여성 " + text, "Women " + text), null, null, 1, true)));
+            new Item("women", null, "NONE", new Text("여성 " + text, "Women " + text), new Text("전체 상품 " + text, "All products " + text),
+                null, null, 1, true, true, false)));
     }
 
     private StoreNavigationProcessor processorAt(Instant now) {
