@@ -57,12 +57,14 @@ python -B -X utf8 scripts/codex_team.py ack S1 <메시지-ID> completed
 | 항목 | 의미 |
 |---|---|
 | `foreground: false` | 실행기 연결 없음. 메시지는 저장하지만 세션을 자동 재개하지 않음 |
-| `transport: pending` | 외부 inbox에 저장됨. 전경 실행기가 전달할 때까지 대기 |
+| `transport: pending` | 작업자 메시지는 전경 실행기의 큐 전달 대기. 이전 감독 메시지는 inbox에 보관 |
+| `transport: held` | 일반 보고가 감독 inbox에 보관됨 |
+| `transport: live_pending` | 감독에게 명시한 긴급 전달이 App Server 접수 전 상태 |
 | `transport: queued` | Codex 큐 등록 성공. 화면 표시·수신·작업 시작은 아직 증명하지 않음 |
 | `transport: dispatching/unknown` | 전달 도중 중단 또는 실패. 중복 방지를 위해 자동 재전송하지 않음 |
 | `state: received/started/completed` | 해당 역할 소유 세션이 각각 수신·착수·완료를 명시적으로 기록 |
 
-연결이 끊겨도 메시지와 작업은 남는다. `unknown`은 `inbox` 원문으로 처리하고 ack하면 된다. 새 작업을 다시 만들어 중복 실행하지 않는다. 작업자는 인계 직후와 작업 경계마다 inbox를 확인한다. 대기 중 Codex의 큐 소비·화면 갱신은 CLI 버전에 의존하므로 `queued`에서 멈췄다면 터미널에서 inbox 확인을 지시한다. 이 도구는 Codex TUI 자체를 패치하거나 임의의 빈 터미널을 찾아 붙이지 않는다.
+연결이 끊겨도 메시지와 작업은 남는다. `unknown`은 `inbox` 원문으로 처리하고 ack하면 된다. 새 작업을 다시 만들어 중복 실행하지 않는다. 작업자는 인계 직후와 작업 경계마다 inbox를 확인한다. 감독에게 보내는 일반 보고는 별도 터미널의 [감독 inbox](codex-supervisor-inbox.md)에 보관한다. 대기 중 Codex의 큐 소비·화면 갱신은 CLI 버전에 의존하므로 `queued`에서 멈췄다면 터미널에서 inbox 확인을 지시한다. 이 도구는 Codex TUI 자체를 패치하거나 임의의 빈 터미널을 찾아 붙이지 않는다.
 
 ## 상태·기존 감독 도구와의 관계
 
