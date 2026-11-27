@@ -35,6 +35,7 @@ describe('guideOf', () => {
       { key: 'size-chart-editor', version: 2 },
       { key: 'size-chart-templates', version: 1 },
       { key: 'shipping-domestic', version: 1 },
+      { key: 'store-navigation', version: 1 },
       { key: 'jobs', version: 1 },
     ]);
   });

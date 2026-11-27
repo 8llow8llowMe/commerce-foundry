@@ -566,6 +566,47 @@ const CLAIM_DETAIL_TOUR: Tour = {
   ],
 };
 
+/**
+ * 쇼핑몰 설정 > 메뉴(#602). 앵커(`nav-tree` · `nav-detail` · `nav-save` · `nav-preview` · `nav-publish`)는
+ * `StoreNavigationEditor` 에 달려 있다. 게시 구역은 한 번이라도 저장한 뒤에만 있어 선택이다.
+ */
+export const STORE_NAVIGATION_TOUR: Tour = {
+  id: 'store-navigation-v1',
+  steps: [
+    {
+      target: 'nav-tree',
+      title: '메뉴 구조',
+      body: '헤더 전체 메뉴의 순서와 단계입니다. 손잡이를 끌어 옮기고, 오른쪽으로 끌면 바로 위 항목의 하위 메뉴가 됩니다. 키보드는 손잡이에서 Alt 와 화살표를 씁니다. 3단계 · 한 메뉴 아래 20개 · 전체 60개까지입니다.',
+      side: 'right',
+    },
+    {
+      target: 'nav-detail',
+      title: '선택한 항목',
+      body: '항목 이름을 누르면 여기서 한국어 · 영어 표시명, 링크(쇼핑몰 안 페이지 · 카테고리 · 다른 사이트 · 링크 없는 묶음 제목), 노출을 고칩니다. PC 1차 메뉴 · 모바일 바로가기는 최상위 메뉴에서만 켤 수 있습니다.',
+      side: 'left',
+    },
+    {
+      target: 'nav-save',
+      title: '초안 저장',
+      body: '저장해도 고객 화면은 바뀌지 않습니다. 저장하지 않은 변경은 위쪽 "저장하지 않은 변경 버리기" 로 되돌릴 수 있습니다.',
+      side: 'top',
+    },
+    {
+      target: 'nav-preview',
+      title: '미리보기',
+      body: 'PC · 모바일과 국문 · 영문을 바꿔 가며 실제 헤더와 같은 구조로 확인합니다. 숨긴 항목은 빠지고, 고칠 곳은 확인 필요로 표시됩니다.',
+      side: 'top',
+    },
+    {
+      target: 'nav-publish',
+      title: '게시',
+      body: '저장한 최신 초안을 게시해야 스토어프론트 헤더가 바뀝니다. 게시본이 없으면 고객에게는 기본 메뉴가 보입니다.',
+      side: 'top',
+      optional: true,
+    },
+  ],
+};
+
 const COMMON_FAQ = [
   {
     question: '로그인이 자꾸 풀려요.',
@@ -957,6 +998,33 @@ const ROUTES: Route[] = [
       summary: '국내 · 해외 배송비 기준을 정합니다. 바꾼 기록은 아래 변경 이력에 남습니다.',
       faq: COMMON_FAQ,
       tour: null,
+    },
+  },
+  {
+    pattern: /^\/store\/navigation$/,
+    topic: {
+      title: '메뉴',
+      summary:
+        '스토어프론트 헤더의 메뉴(PC 1차 메뉴 · 모바일 바로가기 · 전체 메뉴)를 국문 · 영문 함께 편집합니다. 초안을 저장한 뒤 게시해야 고객 화면이 바뀝니다.',
+      faq: [
+        {
+          question: '저장했는데 스토어 메뉴가 그대로예요.',
+          answer:
+            '초안 저장은 고객에게 공개되지 않습니다. 아래 게시 구역에서 최신 초안을 게시하면 바로 바뀝니다. 게시한 적이 없으면 기본 메뉴가 보입니다.',
+        },
+        {
+          question: '다른 사이트 링크가 저장되지 않아요.',
+          answer:
+            '다른 사이트는 운영 설정에 등록된 사이트의 https 주소만 저장됩니다. 필요하면 운영 담당자에게 사이트 등록을 요청해 주세요.',
+        },
+        {
+          question: '영어 화면 경로에 /en 을 붙여야 하나요?',
+          answer:
+            '아니요. 쇼핑몰 안 페이지 경로는 /shop 처럼 적으면 영어 화면에서 /en 이 자동으로 붙습니다.',
+        },
+        ...COMMON_FAQ,
+      ],
+      tour: STORE_NAVIGATION_TOUR,
     },
   },
   {

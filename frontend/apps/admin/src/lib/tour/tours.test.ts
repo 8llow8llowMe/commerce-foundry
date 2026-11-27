@@ -193,6 +193,25 @@ describe('helpTopicFor · toursFor', () => {
     }
   });
 
+  it('메뉴 화면 투어는 트리 · 상세 · 저장 · 미리보기를 필수로, 저장 뒤에만 있는 게시 구역은 선택으로 가리킨다', () => {
+    expect(helpTopicFor('/store/navigation').title).toBe('메뉴');
+    expect(toursFor('/store/navigation').map((tour) => tour.id)).toEqual([
+      CONSOLE_TOUR.id,
+      'store-navigation-v1',
+    ]);
+    expect(
+      toursFor('/store/navigation')[1]?.steps.map((step) => [step.target, step.optional ?? false]),
+    ).toEqual([
+      ['nav-tree', false],
+      ['nav-detail', false],
+      ['nav-save', false],
+      ['nav-preview', false],
+      ['nav-publish', true],
+    ]);
+    // 푸터 화면은 메뉴 도움말을 쓰지 않는다
+    expect(helpTopicFor('/store/footer').title).not.toBe('메뉴');
+  });
+
   it('투어 아이디는 겹치지 않는다', () => {
     const ids = ALL_TOURS.map((tour) => tour.id);
     expect(new Set(ids).size).toBe(ids.length);
