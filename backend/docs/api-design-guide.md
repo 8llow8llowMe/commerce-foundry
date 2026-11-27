@@ -2348,6 +2348,12 @@ SETTINGS_READ/SETTINGS_MANAGE로 초안과 게시를 분리한다. PUT은 `paren
 모든 응답은 공통 봉투·no-store다. 상한·URL 정책·헤더 매핑(FE #602)·오류 `STORE_NAV_*`는 [스토어 상단 메뉴 가이드](store-navigation-guide.md)를 따른다.
 Gateway는 기존 `/api/v1/store/**`·`/api/v1/admin/store/**` 라우트를 재사용한다. 계약 검토자 `seonghoho`다.
 
+## 스토어 브랜드 이미지 (#598)
+
+operations-service의 브랜드 API는 SETTINGS_READ/SETTINGS_MANAGE로 미리보기·조회와 업로드·편집·게시·복구를 제한한다.
+공개 GET은 현재 게시본의 로고·아이콘 주소와 대체 텍스트를 내린다. 미게시 응답은 빈 필드로 기본 표시를 지원한다.
+정확한 경로·버전·캐시 정책·오류와 FE #601 연결 계약은 [스토어 브랜드 이미지 가이드](store-brand-assets-guide.md)를 따른다.
+
 ## 기존 고객 상담 REST (#470 PR-B2a)
 
 support-service는 GET /api/v1/support/conversations/{id}, GET .../{id}/messages?cursor=0&size=20,

@@ -10,7 +10,8 @@ operations-service의 job 컨텍스트가 파일 생성 결과의 예약·확정
 파일명·MIME·JSON·오류·파일 내용에 개인정보 원문을 넣지 않는 것은 핸들러 계약이다.
 `sensitive`는 개인정보 원문을 허용하는 플래그가 아니라 더 짧은 보관을 선택한다.
 
-스토리지는 반드시 **비공개 전용 버킷·전용 credential**로 운영한다. 공개 상품 이미지 버킷·CDN과 공유하지 않는다.
+스토리지는 반드시 **비공개 버킷·서버 전용 credential**로 운영한다. 공개 상품 이미지 버킷·CDN과 공유하지 않는다.
+같은 operations 버킷의 `store-brand/`는 브랜드에 예약되며, 작업 결과 객체와 수명 주기는 `job-results/`에 한정한다. [스토어 브랜드 이미지 가이드](store-brand-assets-guide.md)
 익명 GET을 차단하고 서버 credential은 해당 버킷의 PUT·HEAD·GET 서명·DELETE에 필요한 범위만 준다.
 공용 storage-core 기동 가드가 요구하는 `storage.public-base-url`은 유효한 HTTPS 설정값을 유지하되,
 작업 결과에는 `publicUrlOf`를 호출하거나 공개 URL을 반환하지 않는다. 해당 URL의 존재가 버킷 공개를 의미하지 않는다.
