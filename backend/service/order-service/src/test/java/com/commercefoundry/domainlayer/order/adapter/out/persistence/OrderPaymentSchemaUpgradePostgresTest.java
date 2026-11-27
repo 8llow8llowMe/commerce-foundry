@@ -68,10 +68,28 @@ class OrderPaymentSchemaUpgradePostgresTest {
             jdbc.update("update orders.order_payment set restored_at = now() where id = 10");
             RestorationSchemaMigration.run(source);
             RestorationSchemaMigration.run(source);
+            var abandonedConfirmation = new ResourceDatabasePopulator(new ClassPathResource("ddl/order-abandoned-confirmation.sql"));
+            abandonedConfirmation.setSqlScriptEncoding("UTF-8");
+            abandonedConfirmation.execute(source);
+            abandonedConfirmation.execute(source);
             return database;
         } catch (RuntimeException | Error failure) {
             database.stop();
             throw failure;
+        }
+    }
+
+    @Test
+    void abandonedConfirmationMigrationPreservesPaymentRecordAndAllowsBothNewOrigins() {
+        assertThat(jdbc.queryForObject("select origin from orders.order_stock_restoration where id=2", String.class)).isEqualTo("PAYMENT_RECORD");
+        try {
+            for (String origin : java.util.List.of("CONFIRMATION_ATTEMPT", "ABANDONED_CONFIRMATION")) {
+                assertThat(jdbc.update("update orders.order_stock_restoration set origin=? where id=2", origin)).isEqualTo(1);
+            }
+            assertThatThrownBy(() -> jdbc.update("update orders.order_stock_restoration set origin='INVALID' where id=2"))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        } finally {
+            jdbc.update("update orders.order_stock_restoration set origin='PAYMENT_RECORD' where id=2");
         }
     }
 

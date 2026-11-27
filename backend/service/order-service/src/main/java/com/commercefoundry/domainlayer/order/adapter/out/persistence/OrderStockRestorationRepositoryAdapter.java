@@ -1,11 +1,14 @@
 package com.commercefoundry.domainlayer.order.adapter.out.persistence;
 
+import com.commercefoundry.domainlayer.order.adapter.out.persistence.entity.OrderStockConfirmationParticipantEntity;
+import com.commercefoundry.domainlayer.order.adapter.out.persistence.entity.OrderStockConfirmationParticipantEntity.Key;
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.repository.OrderStockRestorationRepository;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderStockRestorationMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
+import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
-import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Origin;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Status;
+import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.EnumSet;
@@ -23,6 +26,7 @@ public class OrderStockRestorationRepositoryAdapter implements OrderStockRestora
 
     private final OrderStockRestorationRepository orderStockRestorationRepository;
     private final OrderStockRestorationMapper orderStockRestorationMapper;
+    private final EntityManager entityManager;
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
@@ -45,9 +49,50 @@ public class OrderStockRestorationRepositoryAdapter implements OrderStockRestora
 
     @Override
     public List<OrderStockRestoration> findDueRestorations(Instant now, int limit) {
-        return orderStockRestorationRepository.findByStatusAndOriginAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(Status.RESTORE_PENDING,
-            Origin.PAYMENT_RECORD, now, Limit.of(limit))
+        return orderStockRestorationRepository.findByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(Status.RESTORE_PENDING,
+            now, Limit.of(limit))
             .stream().map(orderStockRestorationMapper::toDomain).toList();
+    }
+
+    @Override
+    public Optional<OrderStockRestoration> findByReservationId(long reservationId) {
+        return orderStockRestorationRepository.findByStockReservationId(reservationId).map(orderStockRestorationMapper::toDomain);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void addConfirmationParticipant(long workId, long paymentId) {
+        Key key = new Key(workId, paymentId);
+        if (entityManager.find(OrderStockConfirmationParticipantEntity.class, key) == null) {
+            entityManager.persist(new OrderStockConfirmationParticipantEntity(key));
+        }
+    }
+
+    @Override
+    public boolean hasResolvedParticipant(long workId, Order order) {
+        var amount = order.quote().totalAmount();
+        return orderStockRestorationRepository.hasResolvedParticipant(workId, order.id(), order.memberId(), amount.amount(), amount.currency());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean markAbandoned(OrderStockRestoration work, Instant now) {
+        boolean marked = orderStockRestorationRepository.markAbandoned(work.id(), work.origin(), work.abandonConfirmation().origin(),
+            work.status(), work.nextAttemptAt(), micros(now)) == 1;
+        if (marked) {
+            orderStockRestorationRepository.deleteParticipants(work.id());
+        }
+        return marked;
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean delete(OrderStockRestoration work) {
+        boolean deleted = orderStockRestorationRepository.deleteByIdAndOrigin(work.id(), work.origin()) == 1;
+        if (deleted) {
+            orderStockRestorationRepository.deleteParticipants(work.id());
+        }
+        return deleted;
     }
 
     @Override
@@ -58,7 +103,7 @@ public class OrderStockRestorationRepositoryAdapter implements OrderStockRestora
             || claimed.attempts() != Math.addExact(before.attempts(), 1) || !claimed.nextAttemptAt().isAfter(before.nextAttemptAt())) {
             throw new IllegalArgumentException("pending restoration with incremented attempt and later lease required");
         }
-        return orderStockRestorationRepository.claim(before.id(), before.status(), before.nextAttemptAt(), claimed.attempts(), claimed.nextAttemptAt(),
+        return orderStockRestorationRepository.claim(before.id(), before.origin(), before.status(), before.nextAttemptAt(), claimed.attempts(), claimed.nextAttemptAt(),
             micros(now)) == 1;
     }
 
@@ -69,7 +114,7 @@ public class OrderStockRestorationRepositoryAdapter implements OrderStockRestora
         if (claimed.status() != Status.RESTORE_PENDING || held.status() != Status.HELD || claimed.attempts() != held.attempts()) {
             throw new IllegalArgumentException("held restoration required: status=" + held.status());
         }
-        return orderStockRestorationRepository.hold(claimed.id(), claimed.status(), claimed.nextAttemptAt(), Status.HELD, held.holdCode(), micros(now)) == 1;
+        return orderStockRestorationRepository.hold(claimed.id(), claimed.origin(), claimed.status(), claimed.nextAttemptAt(), Status.HELD, held.holdCode(), micros(now)) == 1;
     }
 
     @Override
