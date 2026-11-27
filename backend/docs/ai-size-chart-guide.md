@@ -7,7 +7,7 @@ operations-service의 작업 엔진(#212)과 알림 센터(#213), ai-core(#215)�
 이 문서는 #217의 구현 명세다. TEXT 입력의 생성·초안·운영자 적용 경계가 연결되어 있다.
 IMAGE 입력은 product-service 쪽(후보·확인·해시 재검증·internal 바이트 읽기, PR1 #690)과 operations-service의 IMAGE 생성 경로(PR2)가 구현되어 있다.
 product 플래그 `size-chart.draft.image-enabled`(기본 `false`)로 닫혀 있으며 운영 검증이 끝난 뒤에만 켠다. 닫혀 있으면 IMAGE 요청은 400 `SIZE_CHART_DRAFT_011`이다.
-일괄 제출은 후속 범위이며 API가 열리지 않는다. 실제 운영 AI 호출은 별도 설정·배포 검증 뒤에만 한다.
+TEXT 본문 후보 검토와 최대 10개 상품의 TEXT/IMAGE 일괄 제출(#737)을 지원한다. 실제 운영 AI 호출은 별도 설정·배포 검증 뒤에만 한다.
 
 | 소유자 | 책임 |
 |---|---|
@@ -28,11 +28,36 @@ product 플래그 `size-chart.draft.image-enabled`(기본 `false`)로 닫혀 있
 | `GET /api/v1/admin/size-chart-drafts?productId=&requestedByMe=&page=&size=` | `CATALOG_READ` | 복구용 초안 목록. 최신순·페이지 조회이며 각 행 때문에 operations를 호출하지 않음 |
 | `POST /api/v1/admin/size-chart-drafts/{draftId}/refresh` | `CATALOG_MANAGE` | 끝난 작업의 검증된 결과를 초안에 반영. 아직 실행 중이면 현재 초안 상태 반환 |
 | `POST /api/v1/admin/size-chart-drafts/{draftId}/apply` | `CATALOG_MANAGE` | `{expectedDraftVersion, correctedChart, acknowledgedWarningIds}`를 검증해 상품 사이즈표 전체 교체 |
-| `POST /api/v1/admin/size-chart-draft-batches` (후속, 미구현) | `CATALOG_MANAGE` | 최대 20개 상품의 개별 초안·작업 등록. 항목별 성공·실패와 안정적인 재시도 ID 반환 |
+| `GET /api/v1/admin/products/{productId}/size-chart/text-sources` | `CATALOG_READ` | 엄격 검사한 본문 표 후보 `[{sourceId, bodyHash, sourceText}]`. 민감·모호한 블록 제외 |
+| `POST /api/v1/admin/size-chart-drafts/batches` | `CATALOG_MANAGE` | `{items:[{productId, idempotencyKey:UUID, input:단건생성본문}]}` (1~10개, `SizeChartDraftBatchLimits.MAX_ITEMS`). 200, 항목별 `{productId,idempotencyKey,draftId,jobId,errorCode,retryable}` |
 
 TEXT 생성 입력은 운영자가 선택·입력한 치수 텍스트다. 상품 상세의 텍스트를 쓰려면 운영자가 차트 부분만 선택해 보내야 한다.
 서버는 승인한 한·영 측정 항목 어휘와 사이즈·수치 외 자유 문장 및 임의 템플릿 항목 이름을 AI 경로에서 거절한다.
-자동 HTML 텍스트 추출과 일괄 이미지 이관은 후속 범위다.
+본문 후보는 국문·영문 HTML의 명확한 table만 처리한다. 자유 문장·개인정보·숨김 내용·병합 셀·중첩 표·불명확한 치수는 블록 전체를 거절한다.
+숨김은 `hidden`·`aria-hidden`·`open` 없는 `<details>` 조상·인라인 스타일(`display:none`·`visibility:hidden`·`opacity:0`·`font-size:0`·`height`/`max-height`/`width`/`max-width:0`·`scale(0)`·화면 밖 배치 등)·흔한 숨김 클래스(`blind`·`sr-only`·`hide` 등)로 판정한다.
+본문에 `<style>` 요소나 stylesheet `<link>` 가 있으면 그 언어 본문의 후보를 하나도 만들지 않는다. 외부 스타일시트로 숨긴 내용은 서버가 알 수 없으므로 후보는 운영자가 화면과 대조해 검토한 뒤 제출한다.
+본문이 256KiB(문자 수)를 넘거나 파싱 오류가 있으면 해당 언어 본문에서는 후보를 만들지 않는다. 언어별로 앞 40개 table 만 검사하고 최대 20개 후보만 제공한다.
+관리자가 검토한 후보의 sourceText와 `textSelection:{sourceId,bodyHash}`를 단건 또는 배치 input에 보낸다.
+신규 생성 직전 현재 본문에서 후보를 다시 만들고 본문 SHA-256 및 선택 텍스트를 함께 대조한다. 불일치는 409 `SIZE_CHART_DRAFT_017`이다.
+일괄에서도 `textSelection` 이 있는 항목은 배치 시작의 벌크 스냅숏이 아니라 그 항목 차례에 상품을 다시 읽어 대조한다(앞 항목 처리 중 바뀐 본문은 그 항목만 017 실패).
+선택 메타데이터는 기존 TEXT 멱등 해시·source_json·적용 계약을 바꾸지 않는다. 이미 등록한 동일 키·입력의 재생은 저장된 스냅숏을 사용한다.
+기존 단건 수동 TEXT 입력도 유지한다. 선택 정보는 TEXT에서만 허용하고 서버의 엄격 검사에 통과한 후보 텍스트 그대로 제출한다.
+후보·배치 성공과 오류 응답은 no-store다. 배치는 전체 트랜잭션이나 별도 job 없이 기존 단건 등록을 순서대로 호출한다.
+0개·10개 초과·중복 상품·중복 UUID(대소문자만 다른 문자열 포함)는 어떤 조회·초안도 만들기 전에 400 `SIZE_CHART_DRAFT_118`로 거절한다. UUID는 항목마다 클라이언트가 발급·보존한다.
+상품·이미지는 벌크 조회한다. 반환 순서는 요청 순서다. 항목 하나의 필드 오류(형식·UUID·textSelection 모양 등)도 의도적으로 배치 전체 400이다 —
+FE 가 고친 뒤 같은 본문을 다시 보내면 되고, 접수 뒤의 입력 안전성·템플릿·이미지·본문 대조 오류만 항목 실패로 처리한다.
+응답의 `idempotencyKey` 는 정규화한 소문자 UUID 문자열이다(대문자로 보내도 소문자로 돌아온다). FE 는 이 값으로 요청 항목과 맞춘다.
+항목 `errorCode` 는 단건 API 와 같은 체계다 — 사이즈표 업무 오류(PRODUCT_059~073)는 단건 핸들러와 같은 매핑으로 `SIZE_CHART_DRAFT_001`(없음)·`003`(충돌)·`502`·`030` 으로 낸다. 상품 컨텍스트 예외는 계층 규칙(H8)상 항목에서 해석하지 않고 `505` 로 둔다.
+등록 불명은 draftId를 보존하며 같은 운영자·UUID·입력으로 실패 항목만 재시도한다. retryable은 5xx 및 매핑 전 원래 코드가 PRODUCT_072/073일 때만 true다(매핑 뒤 `003`).
+멱등 영수증은 운영자 + 키 단위라 다른 운영자가 같은 키를 보내도 앞 운영자의 초안·작업을 받지 못한다.
+예상하지 못한 항목 내부 오류는 원문 없이 SIZE_CHART_DRAFT_505(재시도 가능)로 격리하고, 로그에는 상품 아이디와 예외 타입·프레임만 남긴다.
+감사는 항목마다 단건과 같은 `SIZE_CHART_DRAFT_CREATE`(`product:<id>`) 줄, 끝에 `SIZE_CHART_DRAFT_BATCH_CREATE`(`size-chart-draft:batch`) 한 줄이다.
+배치 줄은 결과를 돌려줬으면(항목 일부 실패 포함) SUCCESS다. 요청 형식(DTO) 400 은 퍼사드에 닿지 않아 감사 줄이 없고, 퍼사드에 도달한 400(`118`)·벌크 조회 503 은 FAILURE다.
+7일 멱등 보관 기간 안에서만 자동 재시도한다. 성공 항목 키를 교체하거나 배치 자체의 job을 만들지 않는다.
+**응답 지연과 재전송.** 항목마다 operations 작업 등록(connect 2s + read 3s, 최대 약 5s/항목)을 순서대로 부르므로 10개면 최악 약 50s다.
+IMAGE 항목은 승인 이미지 바이트 재확인(스토리지 api-call-timeout 8s, 최대 4장)이 더해진다. 게이트웨이 `response-timeout` 은 10s 라 그 전에 504 가 날 수 있다.
+504·네트워크 오류면 FE 는 **같은 본문(같은 항목별 키) 전체를 그대로 다시 보낸다** — 이미 끝난 항목은 기존 초안을 재생하고 남은 항목만 처리된다. 키를 새로 만들면 초안과 유료 작업이 중복된다.
+요청 단위 시간 예산은 두지 않았다(후속). 운영자별 생성 빈도 상한도 없다 — ai-core 월 한도가 유일한 상한이며, 운영 AI 를 켜기 전에 후속으로 정한다.
 
 IMAGE 입력은 아래 순서를 따른다. 응답·오류·로그에는 스토리지 키·바이트·프롬프트를 싣지 않는다(미리보기는 우리 공개 주소만).
 

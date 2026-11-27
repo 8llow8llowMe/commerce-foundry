@@ -52,6 +52,8 @@ public enum ProductAdminAuditAction {
     SIZE_CHART_DRAFT_REFRESH,
     /** 검토한 초안 적용. 대상 size-chart-draft:<draftId> */
     SIZE_CHART_DRAFT_APPLY,
+    /** 초안 일괄 제출(#737). 대상 고정 키 {@code size-chart-draft:batch} — 상품 아이디 목록은 싣지 않고, 항목마다 SIZE_CHART_DRAFT_CREATE 줄을 따로 남긴다 */
+    SIZE_CHART_DRAFT_BATCH_CREATE,
     MEDIA_IMAGE_UPLOAD_ISSUE,
     MEDIA_IMAGE_UPLOAD_CONFIRM,
 

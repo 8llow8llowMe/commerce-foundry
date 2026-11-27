@@ -28,11 +28,13 @@ import com.commercefoundry.domainlayer.sizechart.application.port.out.SizeChartG
 import com.commercefoundry.domainlayer.sizechart.application.port.out.SizeChartTemplateRepositoryPort;
 import com.commercefoundry.domainlayer.sizechart.application.port.out.query.SizeChartGenerationRegistrationQueryResult;
 import com.commercefoundry.domainlayer.sizechart.application.port.out.query.SizeChartGenerationResultQueryResult;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftBatchProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftCleanupProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftInputProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftRemoteProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftValidationProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartTextSourceProcessor;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeChart;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraft;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraftStatus;
@@ -84,7 +86,8 @@ import org.springframework.transaction.support.TransactionTemplate;
     com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter.class,
     SizeChartDraftProcessor.class, SizeChartDraftValidationProcessor.class, SizeChartDraftRemoteProcessor.class, SizeChartDraftFacade.class,
     SizeChartDraftProperties.class, SizeChartDraftInputProcessor.class, SizeChartDraftCleanupProcessor.class,
-    SizeChartDraftSchedulerFacade.class, SizeChartDraftApplicationPersistenceTest.TimeConfig.class})
+    SizeChartDraftSchedulerFacade.class, SizeChartTextSourceProcessor.class, SizeChartDraftBatchProcessor.class,
+    SizeChartDraftApplicationPersistenceTest.TimeConfig.class})
 class SizeChartDraftApplicationPersistenceTest {
     private static final Instant NOW = Instant.parse("2026-11-07T00:00:00Z");
     @Autowired private SizeChartDraftFacade facade;
@@ -173,6 +176,19 @@ class SizeChartDraftApplicationPersistenceTest {
             .isInstanceOfSatisfying(SizeChartDraftTransportException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(SizeChartDraftTransportErrorCode.INPUT_CONFLICT));
         verifyNoInteractions(products, templates, charts, generation);
+    }
+
+    @Test
+    void anotherOperatorReusingAKeyInABatchNeverReceivesTheFirstOperatorsDraft() {
+        var key = UUID.randomUUID();
+        var first = facade.create(command(40, key, "S Chest 50cm"));
+        var item = facade.createBatchAdmin(List.of(command(41, key, "S Chest 50cm"))).items().getFirst();
+        // 멱등 영수증은 운영자 + 키 단위다. 같은 키 문자열이어도 다른 운영자에게 앞 운영자의 초안 · 작업을 돌려주지 않는다.
+        assertThat(item.draftId()).isNotEqualTo(String.valueOf(first.draftId()));
+        assertThat(item.jobId()).isNotEqualTo(String.valueOf(first.jobId()));
+        assertThat(port.findById(first.draftId()).orElseThrow().input().requestedByMemberId()).isEqualTo(40);
+        assertThat(item.errorCode()).isNull();
+        assertThat(repository.count()).isEqualTo(2);
     }
 
     @Test

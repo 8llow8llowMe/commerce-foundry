@@ -39,7 +39,8 @@ payment-service #591은 기본 OFF 재대조와 DB 거절 재시도를 제공한
 IMAGE 입력(플래그 `size-chart.draft.image-enabled`, 기본 닫힘)은 product가 관리 키 상품 이미지의 후보·확인·해시 재검증과
 internal 이미지 바이트 읽기(`generation-images/{index}`)를 소유한다. 외부 주소는 내려받지 않는다.
 양 서비스의 기능 전용 internal API와 허용 호출자는 `security-guide.md` §9-4, API·복구 계약은 [ai-size-chart-guide.md](ai-size-chart-guide.md)다.
-이미지·일괄 이관은 후속 범위이며 두 서비스 모두 무승인 이미지 AI 전송을 허용하지 않는다.
+본문 TEXT 후보(`GET …/size-chart/text-sources`)와 최대 10개 상품 일괄 제출(`POST /api/v1/admin/size-chart-drafts/batches`, #737)도 product가 소유한다 —
+일괄 제출은 항목마다 단건 멱등 경로를 재사용하고 별도 job 을 만들지 않는다. 두 서비스 모두 무승인 이미지 AI 전송을 허용하지 않는다.
 
 #359 AI 상품 초안은 product-service `productdraft` 가 초안 · 사실 · 이미지 키/ETag 고정 · 적용을, operations-service `productdraftgeneration` 이
 `PRODUCT_DRAFT_GENERATE` JobHandler · product 입력/이미지 바이트 Feign · AI 호출(`ai.features.product-draft`) · 검증한 결과 JSON 을 소유한다(PR-2b-1).

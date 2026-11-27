@@ -65,6 +65,8 @@ class ProductAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/products/{productId}/size-chart/drafts", AdminAuthority.CATALOG_MANAGE),
         Map.entry("GET /api/v1/admin/products/{productId}/size-chart/image-sources", AdminAuthority.CATALOG_READ),
         Map.entry("GET /api/v1/admin/products/{productId}/size-chart/image-sources/{sourceId}/inspection", AdminAuthority.CATALOG_MANAGE),
+        Map.entry("GET /api/v1/admin/products/{productId}/size-chart/text-sources", AdminAuthority.CATALOG_READ),
+        Map.entry("POST /api/v1/admin/size-chart-drafts/batches", AdminAuthority.CATALOG_MANAGE),
         Map.entry("GET /api/v1/admin/size-chart-drafts", AdminAuthority.CATALOG_READ),
         Map.entry("GET /api/v1/admin/size-chart-drafts/{draftId}", AdminAuthority.CATALOG_READ),
         Map.entry("POST /api/v1/admin/size-chart-drafts/{draftId}/refresh", AdminAuthority.CATALOG_MANAGE),

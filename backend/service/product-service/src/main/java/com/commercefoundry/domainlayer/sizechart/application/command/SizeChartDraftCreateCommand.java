@@ -9,10 +9,19 @@ import java.util.UUID;
  */
 public record SizeChartDraftCreateCommand(
     long productId, long templateId, long actorId, UUID idempotencyKey, String mode, String sourceText,
-    List<Image> images, boolean personalInfoRemovedConfirmed
+    List<Image> images, boolean personalInfoRemovedConfirmed, TextSelection textSelection
 ) {
     public SizeChartDraftCreateCommand {
         images = images == null ? List.of() : List.copyOf(images);
+    }
+
+    public SizeChartDraftCreateCommand(long productId, long templateId, long actorId, UUID idempotencyKey, String mode, String sourceText,
+        List<Image> images, boolean personalInfoRemovedConfirmed) {
+        this(productId, templateId, actorId, idempotencyKey, mode, sourceText, images, personalInfoRemovedConfirmed, null);
+    }
+
+    /** 검토한 본문 후보와 sourceText를 함께 대조한다. 기존 입력 해시에는 포함하지 않는다. */
+    public record TextSelection(String sourceId, String bodyHash) {
     }
 
     /** TEXT 입력. */

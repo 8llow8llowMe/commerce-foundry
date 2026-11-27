@@ -100,14 +100,9 @@ public class SizeChartDraftAdminExceptionHandler {
         return transport(new SizeChartDraftTransportException(SizeChartDraftTransportErrorCode.RESULT_UNAVAILABLE));
     }
 
+    /** 일괄 항목 결과({@code SizeChartDraftBatchProcessor})와 같은 매핑이다 — 정본은 {@link SizeChartDraftTransportErrorCode#ofBusinessFailure}. */
     private ResponseEntity<Response<Void>> businessFailure(HttpStatus status) {
-        var code = switch (status) {
-            case NOT_FOUND -> SizeChartDraftTransportErrorCode.NOT_FOUND;
-            case CONFLICT -> SizeChartDraftTransportErrorCode.BINDING_CONFLICT;
-            case SERVICE_UNAVAILABLE -> SizeChartDraftTransportErrorCode.RESULT_UNAVAILABLE;
-            default -> SizeChartDraftTransportErrorCode.UNSAFE_INPUT;
-        };
-        return transport(new SizeChartDraftTransportException(code));
+        return transport(new SizeChartDraftTransportException(SizeChartDraftTransportErrorCode.ofBusinessFailure(status)));
     }
 
     private MethodArgumentNotValidException normalize(MethodArgumentNotValidException exception) {

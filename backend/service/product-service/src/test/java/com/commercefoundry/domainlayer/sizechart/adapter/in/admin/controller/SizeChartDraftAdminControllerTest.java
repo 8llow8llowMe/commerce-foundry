@@ -10,23 +10,28 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.exception.SizeChartDraftAdminExceptionHandler;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftBatchItemInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageInspectionInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageSourceInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartTextSourceInfo;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftBatchLimits;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftUnavailableException;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartImageSourceRejection;
 import com.commercefoundry.domainlayer.sizechart.application.port.in.SizeChartDraftUseCase;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraftStatus;
+import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.error.SecurityErrorCode;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.support.SecurityEnvelopeAssertions;
 import com.commercefoundry.security.support.TestTokens;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
-import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageInspectionInfo;
-import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartImageSourceInfo;
-import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartImageSourceRejection;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -216,7 +221,7 @@ class SizeChartDraftAdminControllerTest {
     void getRefreshAndListReturnSafeNoStoreViewsAndFilterMeByPrincipal() throws Exception {
         given(useCase.getAdmin(9)).willReturn(presenter.detail(info(12L)));
         given(useCase.refreshAdmin(9, TestTokens.MEMBER_ID)).willReturn(presenter.detail(info(12L)));
-        given(useCase.listAdmin(null, TestTokens.MEMBER_ID, 0, 20)).willReturn(com.commercefoundry.persistence.dto.PageResponse.of(Page.empty()));
+        given(useCase.listAdmin(null, TestTokens.MEMBER_ID, 0, 20)).willReturn(PageResponse.of(Page.empty()));
         for (var result : new MvcTestResult[] {
             exchange(HttpMethod.GET, DRAFTS + "/9", null, null, MemberRole.ADMIN),
             exchange(HttpMethod.POST, DRAFTS + "/9/refresh", null, null, MemberRole.ADMIN),
@@ -287,6 +292,137 @@ class SizeChartDraftAdminControllerTest {
     void invalidListParametersNeverCallUseCase(String query) {
         assertThat(exchange(HttpMethod.GET, DRAFTS + query, null, null, MemberRole.ADMIN)).hasStatus(HttpStatus.BAD_REQUEST);
         verifyNoInteractions(useCase);
+    }
+
+    @Test
+    void textCandidatesAreReadableWithoutImageFeatureAndNeverCached() {
+        given(useCase.textSourcesAdmin(700)).willReturn(presenter.textSources(List.of(
+            new SizeChartTextSourceInfo("TEXT-KO-1", "a".repeat(64), "가슴 S 50"))));
+        var result = exchange(HttpMethod.GET, "/api/v1/admin/products/700/size-chart/text-sources", null, null, MemberRole.STAFF);
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataBody[0].sourceText").isEqualTo("가슴 S 50");
+        assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+    }
+
+    @Test
+    void selectedTextMetadataIsPassedToSingleCreate() {
+        given(useCase.createAdmin(any())).willReturn(presenter.accepted(info(12L)));
+        String body = "{\"templateId\":1,\"mode\":\"TEXT\",\"sourceText\":\"가슴 S 50\","
+            + "\"textSelection\":{\"sourceId\":\"TEXT-KO-1\",\"bodyHash\":\"" + "a".repeat(64) + "\"}}";
+        assertThat(exchange(HttpMethod.POST, CREATE, body, KEY, MemberRole.ADMIN)).hasStatus(HttpStatus.ACCEPTED);
+        verify(useCase).createAdmin(org.mockito.ArgumentMatchers.argThat(c -> c.textSelection() != null
+            && c.textSelection().sourceId().equals("TEXT-KO-1") && c.textSelection().bodyHash().equals("a".repeat(64))));
+    }
+
+    @Test
+    void batchReturnsPartialResultsNoStoreAndAuthenticatedActorWithStableItemKey() {
+        var key = java.util.UUID.fromString(KEY);
+        given(useCase.createBatchAdmin(any())).willReturn(presenter.batch(List.of(
+            new SizeChartDraftBatchItemInfo(700, key, 9L, null, "SIZE_CHART_DRAFT_501", true))));
+        var result = exchange(HttpMethod.POST, DRAFTS + "/batches", batchBody("700", KEY), null, MemberRole.ADMIN);
+        assertThat(result).hasStatusOk();
+        assertThat(result).bodyJson().extractingPath("$.dataBody.items[0].draftId").isEqualTo("9");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.items[0].errorCode").isEqualTo("SIZE_CHART_DRAFT_501");
+        assertThat(result).bodyJson().extractingPath("$.dataBody.items[0].retryable").isEqualTo(true);
+        assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        verify(useCase).createBatchAdmin(org.mockito.ArgumentMatchers.argThat(commands -> commands.size() == 1
+            && commands.getFirst().actorId() == TestTokens.MEMBER_ID && commands.getFirst().idempotencyKey().equals(key)));
+    }
+
+    @Test
+    void batchRejectsDuplicateProductOrKeyBeforeUseCase() {
+        String first = batchBody("700", KEY);
+        String secondKey = "d78880a4-544e-49ca-aa7f-3d07f70282db";
+        for (String second : List.of(batchBody("700", secondKey), batchBody("701", KEY.toUpperCase(Locale.ROOT)))) {
+            String body = first.substring(0, first.length() - 2) + "," + second.substring(10);
+            var result = exchange(HttpMethod.POST, DRAFTS + "/batches", body, null, MemberRole.ADMIN);
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("SIZE_CHART_DRAFT_118");
+            assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        }
+        verifyNoInteractions(useCase);
+    }
+
+    @Test
+    void batchOverTheLimitIsRejectedBeforeUseCaseButTheLimitItselfIsAccepted() {
+        given(useCase.createBatchAdmin(any())).willReturn(presenter.batch(List.of()));
+        var over = exchange(HttpMethod.POST, DRAFTS + "/batches", batchBodyOf(SizeChartDraftBatchLimits.MAX_ITEMS + 1), null, MemberRole.ADMIN);
+        assertThat(over).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(over).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("SIZE_CHART_DRAFT_118");
+        assertThat(over).bodyJson().extractingPath("$.dataHeader.resultMessage").asString().contains("1~10개");
+        assertThat(over.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        verifyNoInteractions(useCase);
+
+        assertThat(exchange(HttpMethod.POST, DRAFTS + "/batches", batchBodyOf(SizeChartDraftBatchLimits.MAX_ITEMS), null, MemberRole.ADMIN)).hasStatusOk();
+        verify(useCase).createBatchAdmin(org.mockito.ArgumentMatchers.argThat(commands -> commands.size() == 10));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-a-uuid", "11111111-1111-4111-8111-11111111111", ""})
+    void malformedItemKeyRejectsWholeBatchBeforeUseCase(String key) {
+        var result = exchange(HttpMethod.POST, DRAFTS + "/batches", batchBody("700", key), null, MemberRole.ADMIN);
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("SIZE_CHART_DRAFT_120");
+        assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        verifyNoInteractions(useCase);
+    }
+
+    @Test
+    void changedTextSelectionIsNoStoreConflict() {
+        given(useCase.createAdmin(any())).willThrow(new SizeChartDraftTransportException(SizeChartDraftTransportErrorCode.TEXT_SELECTION_CHANGED));
+        String body = "{\"templateId\":1,\"mode\":\"TEXT\",\"sourceText\":\"가슴 S 50\","
+            + "\"textSelection\":{\"sourceId\":\"TEXT-KO-1\",\"bodyHash\":\"" + "a".repeat(64) + "\"}}";
+        var result = exchange(HttpMethod.POST, CREATE, body, KEY, MemberRole.ADMIN);
+        assertThat(result).hasStatus(HttpStatus.CONFLICT);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("SIZE_CHART_DRAFT_017");
+        assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\"textSelection\":{\"sourceId\":\"TEXT-KO-1\",\"bodyHash\":\"" + "A" + "\"}",
+        "\"textSelection\":{\"sourceId\":\"KO-1\",\"bodyHash\":\"0000000000000000000000000000000000000000000000000000000000000000\"}"})
+    void malformedTextSelectionIsRejectedBeforeUseCase(String selection) {
+        String body = "{\"templateId\":1,\"mode\":\"TEXT\",\"sourceText\":\"가슴 S 50\"," + selection + "}";
+        var result = exchange(HttpMethod.POST, CREATE, body, KEY, MemberRole.ADMIN);
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("SIZE_CHART_DRAFT_119");
+        verifyNoInteractions(useCase);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"items\":[]}", "{\"items\":[null]}", "{}"})
+    void invalidBatchEnvelopeIsNoStoreBeforeUseCase(String body) {
+        var result = exchange(HttpMethod.POST, DRAFTS + "/batches", body, null, MemberRole.ADMIN);
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        verifyNoInteractions(useCase);
+    }
+
+    @Test
+    void readOnlyStaffCannotSubmitBatchAndCustomersCannotReadTextCandidates() {
+        SecurityEnvelopeAssertions.assertEnvelope(
+            exchange(HttpMethod.POST, DRAFTS + "/batches", batchBody("700", KEY), null, MemberRole.STAFF).getResponse(), SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(
+            exchange(HttpMethod.GET, "/api/v1/admin/products/700/size-chart/text-sources", null, null, MemberRole.CUSTOMER).getResponse(),
+            SecurityErrorCode.FORBIDDEN);
+        SecurityEnvelopeAssertions.assertEnvelope(
+            exchange(HttpMethod.POST, DRAFTS + "/batches", batchBody("700", KEY), null, null).getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        SecurityEnvelopeAssertions.assertEnvelope(
+            exchange(HttpMethod.GET, "/api/v1/admin/products/700/size-chart/text-sources", null, null, null).getResponse(),
+            SecurityErrorCode.UNAUTHORIZED);
+        verifyNoInteractions(useCase);
+    }
+
+    private String batchBody(String productId, String key) {
+        return "{\"items\":[{\"productId\":\"" + productId + "\",\"idempotencyKey\":\"" + key + "\",\"input\":" + BODY + "}]}";
+    }
+
+    /** 서로 다른 상품 · UUID 로 n 개 항목을 만든다. */
+    private String batchBodyOf(int count) {
+        String items = java.util.stream.IntStream.rangeClosed(1, count)
+            .mapToObj(i -> "{\"productId\":\"" + (700 + i) + "\",\"idempotencyKey\":\"" + java.util.UUID.randomUUID() + "\",\"input\":" + BODY + "}")
+            .collect(java.util.stream.Collectors.joining(","));
+        return "{\"items\":[" + items + "]}";
     }
 
     private void assertUncertain(MvcTestResult result) {

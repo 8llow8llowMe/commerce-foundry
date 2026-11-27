@@ -149,6 +149,8 @@ class ProductAdminAuditProcessorTest {
         processor.sizeChartDraftRefreshed(ACTOR, 9, false);
         processor.sizeChartDraftApplied(ACTOR, 9, true);
         processor.sizeChartDraftApplied(ACTOR, 9, false);
+        processor.sizeChartDraftBatchCreated(ACTOR, true);
+        processor.sizeChartDraftBatchCreated(null, false);
 
         assertThat(lines()).containsExactly(
             "action=SIZE_CHART_DRAFT_CREATE actorMemberId=" + ACTOR + " target=product:700 result=SUCCESS",
@@ -156,7 +158,9 @@ class ProductAdminAuditProcessorTest {
             "action=SIZE_CHART_DRAFT_REFRESH actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=SUCCESS",
             "action=SIZE_CHART_DRAFT_REFRESH actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=FAILURE",
             "action=SIZE_CHART_DRAFT_APPLY actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=SUCCESS",
-            "action=SIZE_CHART_DRAFT_APPLY actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=FAILURE"
+            "action=SIZE_CHART_DRAFT_APPLY actorMemberId=" + ACTOR + " target=size-chart-draft:9 result=FAILURE",
+            "action=SIZE_CHART_DRAFT_BATCH_CREATE actorMemberId=" + ACTOR + " target=size-chart-draft:batch result=SUCCESS",
+            "action=SIZE_CHART_DRAFT_BATCH_CREATE actorMemberId=- target=size-chart-draft:batch result=FAILURE"
         );
     }
 
