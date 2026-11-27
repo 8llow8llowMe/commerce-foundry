@@ -383,7 +383,10 @@ B2-E는 행 CAS와 동일 claim으로 중복 업무를 제어하고, 늦은 반�
 구버전 소비·트랜잭션·진행 중 원격 호출을 drain하고 위 A DDL/backfill을 재실행한다. 주문 승인 소비·운영 결제 gate를 닫은 상태에서 스윕을 별도로 검증한다.
 기동 검사가 확인하는 네 테이블 외에도 기존 orders·order_shipping_address·order_item·order_item_custom_option 스냅숏 조회 및 기존 쓰기 권한을 점검한다.
 완료 후 같은 claim의 양 원장 시각과 거절 outbox를 확인한다. 중지할 때는 스윕 게이트를 끈 뒤 진행 중 틱을 drain하고 작업행·락 기록을 보존한다.
-버려진 확정 선점·프로브 장애 분리 및 운영 알림은 #582 후속으로 확인한다. 기존 운영 결제·소비 활성화 선행 조건을 지킨다.
+#582 C는 B2 DDL 적용 후 `service/order-service/src/test/resources/ddl/order-abandoned-confirmation.sql`을 UTF-8로
+`psql -v ON_ERROR_STOP=1 -f` 실행해 작업 원장의 출처 제약을 확장한다. 결제 소비와 스윕을 끄고 기존 호출을 drain한 뒤 모든 order 인스턴스를 교체한다.
+구버전 소비자는 신규 복원 fence를 알지 못하므로 섞어 실행하지 않는다. 기존 결제 소비·운영 결제 활성화 선행 조건을 지킨다.
+프로브 장애 분리 및 운영 알림은 #582 후속으로 확인한다.
 
 ### 취소 원천 재고 복원 배포 (#14 C2b)
 
