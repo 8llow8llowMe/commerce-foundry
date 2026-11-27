@@ -104,6 +104,7 @@ class GatewayRouteCoverageTest {
         new Sample("/api/v1/admin/notifications/1", "operations-service"),
         new Sample("/api/v1/admin/onboarding/me/tours/console", "operations-service"),
         new Sample("/api/v1/support/conversations", "support-service"),
+        new Sample("/api/v1/support/guest-sessions", "support-service"),
         new Sample("/api/v1/admin/support/conversations/1", "support-service")
     );
 

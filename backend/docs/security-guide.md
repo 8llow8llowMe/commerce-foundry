@@ -689,13 +689,17 @@ security-core 의 아래 클래스는 서블릿 의존이 없다. 게이트웨�
 
 | 정책 (`RateLimitPolicy`) | 대상 | 기본 한도 (`gateway.rate-limit.*`) |
 |--------------------------|------|-------------------------------------|
+| `support-guest-session` (필수) | `POST /api/v1/support/guest-sessions` (비회원 상담 자격 발급, #470 B2b-1) | 분당 6회 · 순간 3회 |
+| `support-write` (필수) | 그 밖의 `/api/v1/support/**` POST (메시지 저장 · 이후 상담 POST, #470) | 분당 20회 · 순간 5회 |
 | `cart-merge` | `POST /api/v1/carts/*/merge` | 분당 6회 · 순간 3회 |
 | `cart-write` | 그 밖의 `/api/v1/carts/**` 쓰기 (POST · PUT · PATCH · DELETE) | 분당 60회 · 순간 20회 |
 | `order-quote` | `POST /api/v1/orders/quotes` (주문서 미리보기) | 분당 60회 · 순간 20회 |
 | `order-write` | 그 밖의 `/api/v1/orders/**` 쓰기 (POST · PUT · PATCH · DELETE) | 분당 12회 · 순간 5회 |
 | `payment-write` | `/api/v1/payments/**` 쓰기 (POST · PUT · PATCH · DELETE), 아래 웹훅 제외 | 분당 6회 · 순간 3회 |
 
-- **표 순서가 곧 우선순위다** — 위에서 처음 맞는 정책 하나만 센다. 그래서 병합은 `cart-write` 앞, 미리보기는 `order-write` 앞이다.
+- **(필수) 정책은 fail-open 이 아니다** — `RateLimitPolicy.mandatory()` 가 참인 상담 두 정책과 방문 분석(`analytics-events`, #226)은 세지 못하면 하류로 보내지 않고 503 `GATEWAY_002` 다(§15).
+  아래 fail-open 항목은 그 밖의 정책(장바구니 · 주문 · 결제)에만 해당한다.
+- **표 순서가 곧 우선순위다** — 위에서 처음 맞는 정책 하나만 센다. 그래서 병합은 `cart-write` 앞, 미리보기는 `order-write` 앞, 비회원 발급은 `support-write` 앞이다.
   미리보기는 주문서에서 수량 · 배송지를 바꿀 때마다 나가므로 주문 생성과 한도를 나눈다 — 나누지 않으면 몇 번 바꾼 뒤 "주문하기" 가 429 를 받는다(#158).
   미리보기 한도는 `POST /api/v1/orders/quotes` 에만 쓴다. 같은 경로의 다른 메서드 · 끝 슬래시는 `order-write` 로 센다(더 엄격한 `order-write` 로 세므로 우회가 아니다).
   **전제: 미리보기 핸들러(#13)는 로그인한 회원(`CUSTOMER`)만 받는다** — 토큰 없는 요청은 IP 계수(`gateway.client-ip.enabled`)가 꺼진 기본값에서 세지 않으므로,
@@ -1727,16 +1731,35 @@ JWT memberId만 사용한다. 잘못된/만료 bearer는 401로 종료하고 gue
 bearer가 없을 때 guest 누락·오류·폐기·만료는 같은 401 GUEST_SESSION_001이다. 인증/소유 검증은 매 요청 수행하고 타인/부재는 404다.
 개인 메시지 응답은 인증 실패를 포함해 no-store다. 자격·본문·키는 로그에 싣지 않는다.
 
-POST /api/v1/support/conversations/{id}/messages만 support-write 버킷(기본 분당 20, burst 5)으로 센다.
+POST /api/v1/support/conversations/{id}/messages를 support-write 버킷(기본 분당 20, burst 5)으로 센다
+(B2b-1부터 패턴은 비회원 발급을 뺀 `/api/v1/support/**` POST 전부, id 유지 — 아래 절).
 gateway.rate-limit.support-write로 한도를 조정한다. 회원은 memberId, 비회원은 기존 IP HMAC 버킷을 사용한다.
 보호는 필수다: 전역 rate-limit OFF, client-ip OFF, 신뢰 가능한 주체 계산 불가, Redis 오류/빈 응답/2초 상한 초과면
 하류로 보내지 않고 503 GATEWAY_002다. 회원 요청도 IP 보호 설정과 주체 계산이 준비되어야 한다.
 실제 한도 초과만 429 GATEWAY_006 + Retry-After다. 기존 cart/order/payment의 fail-open 정책은 유지한다.
 IP 해석은 기본 OFF이므로 공개 쓰기를 활성화하려면 기존 신뢰 프록시·HMAC 키·Redis 설정을 먼저 갖춘다.
-비회원 발급·대화 생성·WS 티켓은 이번 정책 대상이 아니며 후속 보호와 함께 공개한다.
-
+비회원 발급은 아래 B2b-1 절, 대화 생성(B2b-2)·WS 티켓(C)은 후속 보호와 함께 공개한다.
 
 상담 /api/v1/support/**의 no-store는 게이트웨이 초기 WebFilter에서도 적용한다.
 보안·요청 제한 필터보다 앞에서 헤더를 설정하고 응답 커밋 직전에 다시 고정하므로,
 하류에 닿지 않은 인증 401·한도 429·보호 장애 503과 하류 응답 모두 캐시하지 않는다.
 이 필터는 다른 서비스 경로의 Cache-Control을 수정하지 않는다.
+
+### 비회원 자격 공개 발급과 필수 발급 제한 (#470 PR-B2b-1)
+
+`POST /api/v1/support/guest-sessions`는 본문 없이 201 `{token, expiresAt}`을 낸다. 세션 id는 응답에 없다.
+`@PreAuthorize("isAnonymous()")`라 bearer가 없을 때만 발급한다 — 유효한 회원·운영자 JWT는 403, 잘못되거나 만료된 bearer는 401이며 익명으로 대체하지 않는다.
+**BFF는 인증 쿠키가 전혀 없을 때만 발급을 호출한다**(access 만료 회원은 먼저 재발급 — 오발급 방지, FE #223 계약). 쿠키는 BFF가 세팅한다.
+토큰은 응답 본문에만 한 번 실리고 응답 record toString·로그·예외에 원문·지문을 남기지 않는다. 서비스·게이트웨이 모두 이 응답과 401·403·429·503을 no-store로 낸다.
+
+게이트웨이는 발급을 별도 필수 정책 `support-guest-session`(기본 분당 6, burst 3 — `gateway.rate-limit.support-guest-session`)으로 센다.
+`RateLimitPolicy`의 첫 항목이라 `support-write` catch-all보다 먼저 맞고, 끝 슬래시·하위 경로는 `support-write`로 센다(둘 다 필수라 우회가 아니다).
+버킷은 support-write와 따로이며 익명 요청이라 IP HMAC으로 센다. 필수 판정은 enum `mandatory` 속성이고 상담 두 정책만 참이다.
+전역 rate-limit OFF, **client-ip OFF(기본값)**, 주체 계산 불가, Redis 오류/빈 응답/2초 상한 초과면 하류로 보내지 않고 503 GATEWAY_002다 —
+**닫힌 기본값이라 신뢰 프록시(`GATEWAY_TRUSTED_PROXIES`)·`GATEWAY_CLIENT_IP_HASH_KEY`를 갖추고 client-ip를 켜기 전에는 발급이 열리지 않는다.**
+신뢰 프록시 없이 켜면 비회원 전체가 BFF 주소 한 버킷(분당 6)이 된다(§7-3). 실제 한도 초과만 429 GATEWAY_006 + Retry-After(10초)다.
+한 IP 뒤 여러 사용자(NAT)는 같은 발급 버킷을 공유한다 — 한도는 설정으로만 조정한다.
+
+**운영에서 client-ip 를 켜기 전 전제(관문)** — 서비스 자체 계수기(#470-C, Redis ACL 뒤)와 만료 비회원 행 정리(보존 스케줄러)가 먼저다.
+지금은 주체당 버킷(IPv4 주소 1개 · IPv6 /64)만 있어 분산된 주소로 발급 행(`support_guest_session`)을 늘릴 수 있고, 전역 발급 버킷은 두지 않았다(PR 결정 항목).
+support-service(8087) 직접 접근은 게이트웨이 제한을 거치지 않으므로 사설망 전제(§5-1)에 기댄다.

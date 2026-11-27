@@ -251,6 +251,42 @@ class GatewayRateLimitTest {
         assertThat(UPSTREAM_PATHS).isEmpty();
     }
 
+    @Test
+    @DisplayName("비회원 자격 발급은 IP 버킷(support-guest-session)으로 세고, 초과 429 · 장애 503 모두 no-store 이며 하류에 닿지 않는다 (#470)")
+    void guestSessionIssueIsCountedByClientIpAndFailsClosed() {
+        String path = "/api/v1/support/guest-sessions";
+        webTestClient.post().uri(path).exchange().expectStatus().isOk();
+        assertThat(UPSTREAM_PATHS).containsExactly(path);
+        assertThat(rateLimiter.calls).containsExactly("SUPPORT_GUEST_SESSION:ip:" + clientIpHasher.hash("127.0.0.1"));
+
+        UPSTREAM_PATHS.clear();
+        rateLimiter.deniedPolicy = RateLimitPolicy.SUPPORT_GUEST_SESSION;
+        webTestClient.post().uri(path).exchange().expectStatus().isEqualTo(429)
+            .expectHeader().valueEquals(HttpHeaders.RETRY_AFTER, "10")
+            .expectHeader().valueEquals(HttpHeaders.CACHE_CONTROL, "no-store")
+            .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_006");
+        webTestClient.post().uri("/api/v1/support/conversations").contentType(MediaType.APPLICATION_JSON).bodyValue("{}").exchange()
+            .expectStatus().isOk();
+        assertThat(UPSTREAM_PATHS).as("발급 버킷이 차도 다른 상담 POST 는 support-write 로 간다").containsExactly("/api/v1/support/conversations");
+
+        UPSTREAM_PATHS.clear();
+        rateLimiter.deniedPolicy = null;
+        rateLimiter.fail = true;
+        webTestClient.post().uri(path).exchange().expectStatus().isEqualTo(503)
+            .expectHeader().valueEquals(HttpHeaders.CACHE_CONTROL, "no-store")
+            .expectBody().jsonPath("$.dataHeader.resultCode").isEqualTo("GATEWAY_002");
+        assertThat(UPSTREAM_PATHS).isEmpty();
+    }
+
+    @Test
+    @DisplayName("잘못된 bearer 의 발급 요청은 보안 체인이 401 로 끊어 세지 않는다")
+    void guestSessionWithInvalidBearerIsRejectedBeforeCounting() {
+        post("/api/v1/support/guest-sessions", "Bearer invalid").expectStatus().isUnauthorized()
+            .expectHeader().valueEquals(HttpHeaders.CACHE_CONTROL, "no-store");
+        assertThat(rateLimiter.calls).isEmpty();
+        assertThat(UPSTREAM_PATHS).isEmpty();
+    }
+
     private static final String BEARER = "Bearer ";
 
     private WebTestClient.ResponseSpec post(String path, String authorization) {

@@ -120,6 +120,7 @@ com.commercefoundry
      |- config                  (*BeansConfig, *PropertiesConfig, *FeaturesConfig, *SwaggerConfig)
      |- persistence             서비스 공용 영속성 도우미 (예: ConstraintViolations — 제약 이름 판정)
      |- support                 계층이 아닌 공용 값 · 도우미 (예: WarnThrottle, JobWorkerIdentity)
+     |- web                     서비스 전역 서블릿 필터 — 여러 컨텍스트 경로에 걸치는 것만 (예: support SupportCacheControlFilter)
      \- properties
 ```
 

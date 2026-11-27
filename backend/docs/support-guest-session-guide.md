@@ -3,7 +3,8 @@
 guestsession 컨텍스트는 비회원의 불투명 자격 증명을 소유한다. 회원 신원이나 권한 claim을 만들지 않는다.
 내부 Java 진입은 `GuestSessionInternalUseCase → Facade → Processor → crypto/store port`다.
 다른 컨텍스트는 architecture-guide §3에 따라 자기 Facade에서 GuestSessionProcessor만 호출한다.
-HTTP 진입이 없어 coding-conventions §8-1의 ExceptionHandler 생략 예외를 적용한다.
+공개 HTTP 진입은 발급 하나다(`GuestSessionWebController → GuestSessionWebUseCase → GuestSessionWebFacade → GuestSessionProcessor`,
+아래 PR-B2b-1 절). 오류 봉투는 guestsession 웹 어댑터 패키지 한정 `GuestSessionExceptionHandler`가 만든다.
 
 ## 발급과 저장
 
@@ -41,8 +42,8 @@ PR-B1b의 대화 내부 기반은 [support-conversation-guide.md](support-conver
 Clock을 읽어 만료·폐기를 판정하며, domain `GuestSessionIdentity(id, expiresAt)`만 반환한다.
 락 조회·refresh 잠금 실패는 원인 예외를 보존하지 않은 409 GUEST_SESSION_004다.
 기존 resolve의 시점 인증과 revoke의 낙관적 UPDATE 계약은 유지한다.
-HTTP·WebSocket·Redis·Gateway·요청 제한·회원 연결·AI 호출은 후속이다.
-외부 발급 API는 PR-B2 요청 제한과 함께 제공한다. 7일 자격 증명 만료와 비회원 대화 30일 보존은 다른 정책이며,
+공개 REST(B2a 사용 · B2b-1 발급)와 게이트웨이 필수 요청 제한은 아래 절을 따른다. WebSocket·회원 연결·공개 폐기·AI 호출은 후속이다.
+7일 자격 증명 만료와 비회원 대화 30일 보존은 다른 정책이며,
 물리 삭제·보존 스케줄러는 후속에서 대화 참조와 함께 설계한다. #470 전체는 OPEN을 유지한다.
 H2와 PostgreSQL이 같은 영속성 계약을 실행한다. PG17 생성 스냅숏을 init script로 적용하고 validate하며,
 발행 전에는 기존 지식 엔티티를 포함한 전체 엔티티 스캔으로 support-schema.sql을 다시 생성한다.
@@ -50,7 +51,29 @@ H2와 PostgreSQL이 같은 영속성 계약을 실행한다. PG17 생성 스냅�
 ## 기존 자격 증명의 REST 사용 (#470 PR-B2a)
 
 기존 비회원은 X-Support-Guest-Token으로 본인 대화 상세·메시지 커서 조회·메시지 POST만 호출할 수 있다.
-공개 발급·대화 생성·쿠키 발급은 B2b 범위다. 매 요청 resolveForUpdate와 기존 소유 검증을 같은 트랜잭션으로 묶는다.
+공개 발급은 아래 B2b-1 절, 대화 생성은 B2b-2 범위다. 매 요청 resolveForUpdate와 기존 소유 검증을 같은 트랜잭션으로 묶는다.
 유효한 CUSTOMER JWT가 함께 있으면 회원 신원이 우선하고 guest 헤더는 무시한다. 잘못된 bearer는 401이며 guest로 대체하지 않는다.
 운영자는 403이다. 자격 누락·오류·폐기·만료는 동일한 GUEST_SESSION_001이며 토큰은 응답·로그에 남기지 않는다.
 상세 HTTP 계약과 필수 게이트웨이 쓰기 제한은 support-conversation-guide.md를 따른다.
+
+## 비회원 자격 공개 발급 (#470 PR-B2b-1)
+
+| 메서드·경로 | 입력 | 성공 | dataBody |
+|---|---|---|---|
+| POST /api/v1/support/guest-sessions | 본문 없음 | 201 | token(43자), expiresAt(UTC ISO-8601, 발급 + P7D) |
+
+- 세션 id는 응답에 넣지 않는다. 쿠키(`cf_gs`)는 BFF가 세팅하며 서비스는 Set-Cookie를 내지 않는다.
+- `@PreAuthorize("isAnonymous()")` — bearer가 없을 때만 발급한다. 유효한 회원·운영자 JWT는 403, 잘못되거나 만료된 bearer는 401이다.
+  회원에게 비회원 자격은 쓸모가 없고, access가 만료된 회원이 비회원 자격을 받는 오발급을 막는다.
+  **BFF는 인증 쿠키(access·refresh)가 전혀 없을 때만 발급을 호출한다**(FE #223 계약).
+- WebFacade는 트랜잭션을 걸지 않고(NOT_SUPPORTED) Processor의 자체 트랜잭션 커밋 뒤 토큰을 반환한다 — 위 발급 계약 그대로다.
+  커밋 실패면 토큰이 나가지 않고, 지문 충돌은 409 GUEST_SESSION_003이다.
+- 응답은 `/api/v1/support/**` 전체에 걸리는 서비스 `SupportCacheControlFilter`(global/web, 보안 필터 앞)와 게이트웨이 필터로 no-store다.
+  인증 실패 401·403도 같다. 응답 record의 toString은 토큰을 가리며 토큰·지문은 로그·예외에 남기지 않는다.
+- 게이트웨이 필수 정책 `support-guest-session`(기본 분당 6 · burst 3, IP HMAC 버킷)으로 센다. 실제 초과만 429 GATEWAY_006 + Retry-After,
+  전역 제한 OFF·client-ip OFF(기본)·주체 불명·Redis 오류/타임아웃은 503 GATEWAY_002다(닫힌 기본값) — security-guide §15.
+- 발급한 토큰은 기존 B2a 진입(X-Support-Guest-Token)에 그대로 쓴다. 대화 생성(B2b-2)·폐기/회원 연결 공개 API는 이 범위가 아니다.
+  발급 요청에 기존 X-Support-Guest-Token이 붙어 와도 무시하고 새로 발급하며(201), 기존 토큰은 그대로 유효하다.
+- **운영 관문** — 운영에서 client-ip를 켜기 전 전제는 서비스 자체 계수기(#470-C)와 만료 비회원 행 정리(보존 스케줄러)다.
+  지금은 주체당 버킷(IPv4 주소 1개 · IPv6 /64)만 있어 분산된 주소로 발급 행을 늘릴 수 있다. 전역 발급 버킷은 두지 않았다(PR 결정 항목).
+  support-service(8087) 직접 접근은 게이트웨이 제한을 거치지 않아 사설망 전제(security-guide §5-1)에 기댄다.

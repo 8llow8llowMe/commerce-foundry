@@ -268,11 +268,11 @@ return ResponseEntity.ok().body(Response.success(response));
 |------|------|------|-----------------|
 | `GATEWAY_000` | 500 | 그 밖의 예상하지 못한 게이트웨이 오류 | 일시 오류 안내 |
 | `GATEWAY_001` | 404 | 어느 라우트에도 없는 경로. `/internal` 과 그 아래는 라우팅 · 토큰 검증 전에 명시적으로 이 코드다 (대소문자 · 인코딩 변형 포함) | 경로 오류 |
-| `GATEWAY_002` | 503 | 대상 서비스의 살아 있는 인스턴스가 없거나 연결에 실패했다 (요청이 서비스에 닿지 않았다) | 잠시 후 재시도 |
+| `GATEWAY_002` | 503 | 대상 서비스의 살아 있는 인스턴스가 없거나 연결에 실패했다 (요청이 서비스에 닿지 않았다). 상담 필수 요청 제한(`support-guest-session` · `support-write`)을 셀 수 없을 때(설정 꺼짐 · 주체 불명 · Redis 장애)도 이 코드다 | 잠시 후 재시도 |
 | `GATEWAY_003` | 504 | 서비스가 응답 타임아웃(10초) 안에 답하지 않았다 | 처리 여부 불명 (아래) |
 | `GATEWAY_004` | 400 · 405 · 그 밖의 4xx | 라우팅 전에 거절한 요청 — 정규화되지 않은 경로(400), `Authorization` 헤더가 둘 이상(400), 허용하지 않는 메서드(405 + `Allow`), chunked 본문 수신 시간 초과(408) · 동시 수신 총량 초과(411, `Content-Length` 를 붙여 다시 보낸다) | 요청 수정 |
 | `GATEWAY_005` | 502 | 요청을 보낸 뒤 서비스가 응답 전에 연결을 끊었다 | 처리 여부 불명 (아래) |
-| `GATEWAY_006` | 429 + `Retry-After` | 회원 단위 쓰기 요청 한도를 넘었다 — 장바구니 · 주문 · 결제 쓰기(웹훅 제외). 비로그인 IP 계수(`gateway.client-ip.enabled`, 기본 끔)를 켜면 토큰 없는 요청은 클라이언트 IP 단위로 센다 (`security-guide.md` §7-3) | `Retry-After` 초 뒤 재시도. 요청은 서비스에 닿지 않았다. 재발급 · 로그아웃하지 않는다 (#91) |
+| `GATEWAY_006` | 429 + `Retry-After` | 회원 · 클라이언트 IP 단위 쓰기 요청 한도를 넘었다 — 장바구니 · 주문 · 결제 쓰기(웹훅 제외), 상담 POST · 비회원 상담 자격 발급. 비로그인 IP 계수(`gateway.client-ip.enabled`, 기본 끔)를 켜면 토큰 없는 요청은 클라이언트 IP 단위로 센다 (`security-guide.md` §7-3) | `Retry-After` 초 뒤 재시도. 요청은 서비스에 닿지 않았다. 재발급 · 로그아웃하지 않는다 (#91) |
 | `GATEWAY_007` | 413 | 요청 본문이 상한(2MB)을 넘었다 (`security-guide.md` §7-4) | 요청은 서비스에 닿지 않았다. 본문을 줄여 다시 보낸다 |
 
 - **502 · 504 는 처리 여부를 알 수 없다** — 쓰기 요청은 같은 `Idempotency-Key` 로 재시도하거나 조회로 확인한다 (§6).
@@ -2368,7 +2368,7 @@ POST는 소문자 canonical UUID Idempotency-Key와 {content}를 받고 신규·
 Response 봉투·no-store·문자열 ID를 사용한다. 페이지는 messages/hasNext/nextCursor/lastSeq이며 다음 입력은 nextCursor다.
 기존 메시지/커서 정책과 오류는 support-conversation-guide.md를 따른다.
 필수 support-write 제한의 보호 설정 부재/Redis 장애는 503, 실제 초과만 429 + Retry-After다.
-게스트 발급·대화 생성(B2b)·WebSocket(C)은 후속이다. FE #223 계약 검토자는 seonghoho다.
+게스트 발급은 아래 B2b-1 절, 대화 생성(B2b-2)·WebSocket(C)은 후속이다. FE #223 계약 검토자는 seonghoho다.
 
 
 B2a의 locale/channel/status/authorType/message status는 coding-conventions §11의 제어 코드 예외다.
@@ -2379,3 +2379,20 @@ FE는 코드 자체를 문구로 표시하지 않고 언어 선택, 채널 처�
 명칭 변경·삭제는 계약 변경이고, 새 작성자·상태는 후속 API 계약과 FE 처리를 함께 확장한다.
 게이트웨이의 /api/v1/support/** 응답도 초기 WebFilter와 커밋 직전 헤더 적용으로 no-store를 보장한다.
 서비스에 닿지 않은 401·429·503에도 같은 계약을 적용하며 다른 서비스 경로의 캐시 정책은 바꾸지 않는다.
+
+## 비회원 상담 자격 발급 (#470 PR-B2b-1)
+
+`POST /api/v1/support/guest-sessions` — 본문 없음, 성공 **201** `{token, expiresAt}`(Response 봉투, no-store). 세션 id는 내리지 않는다.
+token은 base64url 무패딩 43자로 이 응답에서만 한 번 받으며, expiresAt은 UTC ISO-8601 발급 시각 + 7일(사용해도 연장 없음)이다.
+쿠키는 BFF가 세팅하고 이후 B2a 경로에 `X-Support-Guest-Token`으로 싣는다. BFF는 인증 쿠키가 전혀 없을 때만 이 API를 부른다.
+
+| 상황 | 상태 · 코드 |
+|---|---|
+| 발급 성공 | 201 |
+| 유효한 회원 · 운영자 JWT | 403 (발급하지 않는다) |
+| 잘못되거나 만료된 bearer | 401 (익명으로 대체하지 않는다) |
+| 발급 한도 초과(`support-guest-session`, 기본 분당 6 · burst 3) | 429 `GATEWAY_006` + `Retry-After` |
+| 제한 설정 꺼짐(client-ip 기본 OFF 포함) · 주체 불명 · Redis 장애 | 503 `GATEWAY_002` (닫힌 기본값) |
+| 드문 지문 충돌 | 409 `GUEST_SESSION_003` (새 요청으로 재시도) |
+
+계약 정본은 support-guest-session-guide.md의 B2b-1 절, 보호 조건은 security-guide.md §15다.
