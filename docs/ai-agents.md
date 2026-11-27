@@ -14,7 +14,7 @@ frontend/AGENTS.md                     프론트엔드 초기 지침
 .agents/roles/<name>.md                도구 중립 역할 지침 11개
 .cursor/agents/<name>.md                Cursor 하위 에이전트 11개 (생성본)
 .codex/agents/<name>.toml               Codex 하위 에이전트 11개 (생성본, 이름은 snake_case)
-.codex/agent-models.json               Codex 역할별 모델 ID와 추론 수준의 설정 원본
+.codex/agent-models.json               Codex 등급별 모델 ID와 기본·최대 추론 수준의 설정 원본
 .cursor/rules/commerce-foundry.mdc      Cursor의 항상 적용되는 프로젝트 진입 규칙
 scripts/sync-agent-skills.py            Claude 원본 → 공통 스킬·역할·하위 에이전트 동기화 및 검사
 ```
@@ -66,7 +66,7 @@ Cursor는 Claude 호환 경로도 탐색하므로 같은 이름의 항목이 함
 | 도구 | 위치 | 역할 | 모델 | 읽기 전용 |
 |------|------|------|------|-----------|
 | Cursor | `.cursor/agents/*.md` | 11개 전부 | `explorer`·`git-ops` 는 `claude-haiku-5-5`, 나머지 `inherit` | Claude 원본에 `Write`·`Edit` 없는 `tools` 가 있으면 `readonly: true` |
-| Codex | `.codex/agents/*.toml` | 11개 전부 (`-` → `_`) | `.codex/agent-models.json`의 역할별 모델과 추론 수준 | 부모 세션 sandbox 를 상속 — 읽기 전용은 역할 본문으로 제한한다 |
+| Codex | `.codex/agents/*.toml` | 11개 전부 (`-` → `_`) | `.codex/agent-models.json`의 등급별 모델과 기본 추론 수준 (역할 → 등급은 `ROLE_TIERS`) | 부모 세션 sandbox 를 상속 — 읽기 전용은 역할 본문으로 제한한다 |
 
 - Cursor 는 `.claude/agents/` 도 하위 에이전트로 읽는다. 같은 이름이면 `.cursor/agents/` 가 이기므로, 생성본이 Claude 모델명·`tools` 가
   섞인 정의를 덮어쓴다. 역할을 추가하면 `--write` 로 Cursor 정의도 같이 만든다.
@@ -79,18 +79,33 @@ Cursor는 Claude 호환 경로도 탐색하므로 같은 이름의 항목이 함
 지원되지 않거나 위임이 허용되지 않으면 동일한 탐색 → 설계 → 구현 → 검증 → 검토를 메인 세션에서 순차 수행한다.
 실제 실행한 역할과 수행 방식을 결과에 기록한다.
 
-- 탐색·git/gh 반복 작업은 Codex Terra 모델(`explorer`·`git_ops`)로 내리고, Codex 설계는 높은 추론 모델, 구현·검토는 작업용 모델로 실행한다. Cursor 설계·구현·검토는 현재 세션 모델(`inherit`)을 따른다.
+- 모델·추론은 작업 등급(설계 · 핵심 · 일반 · 빠름)을 따른다. 등급 표의 정본은 [claude-agents.md](claude-agents.md) "작업 등급과 모델 · 추론"이고 Claude · Codex 가 같은 등급을 쓴다.
+  역할 정의는 등급 기본값(`architect` 설계, 구현·검토 역할 핵심, `explorer`·`git_ops` 빠름)이고, `$dev-orchestrator`가 분류에 따라
+  `spawn_agent`의 `model`·`reasoning_effort`로 호출마다 등급을 바꾼다. Cursor 설계·구현·검토는 현재 세션 모델(`inherit`)을 따른다.
   단일 명령은 위임하지 않는다 — 하위 에이전트는 새 컨텍스트로 시작하므로 짧은 일에는 띄우는 비용이 더 크다.
 - 검토·탐색·설계 역할은 소스·설정·문서를 편집하지 않는다. 실행 환경이 읽기 전용 도구 제한을 지원하면 함께 적용한다.
   역할 파일 자체가 도구 권한을 강제하는 것은 아니다. 검사 실행은 빌드 산출물을 만들 수 있다.
-- 독립적인 읽기 전용 조사·검토만 병렬로 수행한다. 쓰기 역할은 한 번에 하나만 수행한다.
-- Codex에서 `spawn_agent(agent_type="be_db_reviewer", ...)`처럼 생성본의 `name`을 지정한다. 독립 검토는 여러 번 호출해 병렬 실행하고, 구현은 파일 소유권을 지정해 순서대로 위임한다. 도구 목록에 역할이 없으면 새 세션에서 재확인한다.
+- 병렬은 `$dev-orchestrator`의 `병렬 실행` 절(탐색 fan-out · 검토 fan-out · 쓰기 병렬 · 파이프라인, 금지 조건, 합치기)을 따른다.
+  쓰기 병렬은 소유권이 겹치지 않고 작업자마다 별도 worktree 를 쓸 때만이고, 그 외 쓰기 역할은 한 번에 하나만 수행한다.
+  Codex 하위 역할은 부모 sandbox 를 상속하므로, 작업자 worktree 가 쓰기 허용 범위 밖이면 sandbox 를 넓히지 말고 순차로 진행한다.
+- Codex에서 `spawn_agent(agent_type="be_db_reviewer", ...)`처럼 생성본의 `name`을 지정한다. 병렬은 한 턴에서 `spawn_agent`를 연달아 호출하고 `wait_agent`로 모은다.
+  등급을 바꿀 때는 `model`·`reasoning_effort`를 함께 넘기고, 지시로 충분한 탐색·검토는 `fork_turns="none"`에 맥락을 모두 담는다. 도구 목록에 역할이 없으면 새 세션에서 재확인한다.
 - 하위 역할은 재위임·커밋·푸시·이슈·PR을 수행하지 않는다. 메인 세션이 요청 범위 안에서 처리한다.
 - 메인 세션이 범위·계획·최종 결과를 판단하고 실제 검증 결과를 확인한다. 하위 역할의 통과 보고만으로 완료 처리하지 않는다.
 
 ## Codex 모델 갱신
 
-Codex를 업데이트한 뒤 모델 선택 목록에서 새 모델의 ID와 지원 추론 수준을 확인한다. `.codex/agent-models.json`의 `models`에서 `fast`는 탐색·Git 작업에 쓰는 `gpt-6.1-terra`, `design`은 설계, `work`는 구현·검토의 모델 ID다. `reasoning_effort`에서 각 역할의 추론 수준을 조정한다. 각 버전은 이 설정에서 명시적으로 선택하며, 파일과 생성 결과를 함께 검토하고 커밋한다.
+Codex를 업데이트한 뒤 모델 선택 목록에서 새 모델의 ID와 지원 추론 수준을 확인한다. `.codex/agent-models.json`은 등급 키 4개(`design` 설계 · `core` 핵심 · `general` 일반 · `fast` 빠름)로 쓴다.
+
+| 키 | 뜻 |
+|----|----|
+| `models` | 등급별 모델 ID |
+| `reasoning_effort` | 등급별 기본 추론 수준 — 역할 정의(`.codex/agents/*.toml`)에 들어간다 |
+| `max_reasoning_effort` | 등급별 최대 추론 수준 — 호출에서 올릴 수 있는 상한. 라우팅 표에 나온다 |
+| `role_reasoning_effort` | 역할별 예외 (예: `git-ops` 는 `low`). Claude frontmatter `effort` 에도 같은 값을 둔다 |
+
+역할 → 등급 매핑은 `scripts/sync-agent-skills.py`의 `ROLE_TIERS`, Claude 등급 모델은 `CLAUDE_TIERS`다. 검사 모드는 `.claude/agents` frontmatter 의 `model`·`effort`가 이 값과 다르면 실패한다.
+각 버전은 이 설정에서 명시적으로 선택하며, 파일과 생성 결과를 함께 검토하고 커밋한다.
 
 Windows PowerShell에서 Codex 사용자 홈의 `models_cache.json`이 있으면 아래 명령으로 선택 가능한 모델과 추론 수준을 대조한 뒤 생성한다. 사용자 지정 Codex 홈을 쓰면 해당 경로를 전달한다.
 

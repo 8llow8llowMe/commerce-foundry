@@ -60,4 +60,5 @@ Cursor에서 Claude 호환 스킬이 함께 보이면 이 저장소의 `.agents/
 네이티브 하위 에이전트는 생성본인 Cursor `.cursor/agents/`, Codex `.codex/agents/`의 11개 역할이다. Codex 역할 이름은 하이픈 대신 밑줄을 쓴다.
 넓은 탐색은 `explorer`, 여러 단계의 git·gh 작업은 `git-ops`(Codex `git_ops`)에 저비용 모델로 맡기고, 단일 명령은 직접 실행한다.
 하위 에이전트를 사용할 수 있고 위임이 허용된 경우에만 위임하며, 지원되지 않으면 메인 세션이 같은 역할을 순차 수행한다.
-독립적인 읽기 전용 조사·검토만 병렬화하고 쓰기 역할은 한 번에 하나만 실행한다. 그 외 역할의 모델은 현재 세션 설정을 따른다.
+독립적인 읽기 전용 조사·검토는 병렬화하고 쓰기 역할은 한 번에 하나만 실행한다. 예외는 파일·모듈 소유권이 겹치지 않고 worktree 를 격리한 쓰기 병렬뿐이다(`$dev-orchestrator`의 `병렬 실행` 절).
+역할의 모델·추론 수준은 작업 등급(설계 · 핵심 · 일반 · 빠름, [docs/claude-agents.md](docs/claude-agents.md))을 따르고 `spawn_agent`의 `model`·`reasoning_effort`로 호출마다 바꾼다.

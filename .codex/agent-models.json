@@ -1,13 +1,23 @@
 {
   "models": {
-    "fast": "gpt-6.1-terra",
     "design": "gpt-6.2-astra",
-    "work": "gpt-6.2-sol"
+    "core": "gpt-6.2-sol",
+    "general": "gpt-6.1-terra",
+    "fast": "gpt-6-luna"
   },
   "reasoning_effort": {
-    "explorer": "medium",
-    "git-ops": "low",
-    "design": "high",
-    "work": "medium"
+    "design": "xhigh",
+    "core": "high",
+    "general": "medium",
+    "fast": "medium"
+  },
+  "max_reasoning_effort": {
+    "design": "ultra",
+    "core": "max",
+    "general": "high",
+    "fast": "high"
+  },
+  "role_reasoning_effort": {
+    "git-ops": "low"
   }
 }
