@@ -30,7 +30,7 @@ python -B -X utf8 scripts/codex_team.py send S1 --from-role supervisor --live --
 
 `--live`는 선택한 역할에 저장한 메시지를 공용 서버에 직접 전달한다. 미로드 대상은 자동 resume하지 않는다. idle은 `turn/start`, 실행 중인 대상은 현재 turn ID를 확인한 `turn/steer`를 사용한다. turn 시작 시 model/cwd/sandbox/approval 설정을 덮어쓰지 않는다. 응답을 잃거나 상태가 경합하면 메시지를 자동 재전송하지 않고 inbox에 남긴다. `live_accepted`도 수신 확인이 아니며 수신자가 기존 `ack received → started → completed`를 남겨야 한다.
 
-작업자의 회신도 `send supervisor --from-role S1 --live`로 보낼 수 있다. 감독 세션이 이미 일하고 있다면 현재 turn에 추가된다. 단순 상태 조회는 inbox로 처리하고 상호 회신을 무한히 유발하지 않는다. 모든 메시지는 다른 에이전트의 입력으로 표시하며 승인·운영 권한을 부여하지 않는다.
+작업자의 일반 보고는 `send supervisor --from-role S1`으로 [별도 감독 inbox](codex-supervisor-inbox.md)에 보관한다. 작업을 막는 결정 요청만 `--live --event-key <안정된-이벤트-키>`를 명시한다. 감독 세션이 이미 일하고 있다면 긴급 입력은 현재 turn에 추가된다. 필요한 회신만 보내며 모든 메시지는 에이전트 입력으로 취급한다. 사용자 승인과 운영 권한은 별도로 확인한다.
 
 ## 연결 모드와 실패 경계
 

@@ -15,5 +15,6 @@ description: Commerce Foundry의 독립 Codex 세션을 역할명으로 등록�
 - 단독 전경 연결을 원하는 경우 해당 터미널의 PowerShell에서 `launch <역할>`로 한다. 현재 TUI 안에 셸 명령을 타이핑하지 않는다. 이미 열린 임의 창을 찾지 못했으면 연결됐다고 주장하지 않는다. 채팅에서 launch를 비대화형 실행하거나 백그라운드 재개로 대체하지 않는다.
 - `send`는 역할명으로 보낸다. 작업은 범위를 나타내는 안정된 `--task-key`, 인계는 UTF-8 `--message-file`을 사용한다. 메시지에는 목표·소유 경로·현재 SHA·명세·완료/미완·검증·다음 행동을 담고 타인 변경 보존을 지시한다.
 - 수신자는 inbox 원문 확인 후 `ack received`, 실제 착수 때 `started`, 근거를 포함한 완료 보고 후 `completed`를 순서대로 기록한다. 작업 경계마다 inbox를 읽고 `send supervisor --from-role S1` 등으로 보고한다. 감독도 보고 메시지에 같은 ack 순서를 적용할 수 있다.
+- 감독에게 보내는 일반 보고는 `send supervisor --from-role S1`으로 보관한다. 작업을 막는 결정 요청에만 `--live --event-key <이벤트-키>`를 명시한다. 감독의 열람과 PR 후속 확인은 [감독 inbox 운영 문서](../../../docs/codex-supervisor-inbox.md)를 따른다.
 - `queued`는 수신 확인이 아니다. `foreground`는 실행기 heartbeat이며 실제 화면 표시나 열람 증거가 아니다. 실제 사용자 창의 표시가 필요하면 사용자 확인 또는 UI 관찰을 별도로 확보한다. 연결 실패/unknown에서 같은 작업을 재배정하지 않는다.
 - 감독이 `$issue`로 이슈 선정·등록, `$dev-orchestrator`로 분류·계획·최종 검증 판단, `$pr`로 커밋·푸시·PR 생성을 맡는다. 작업자는 배정된 구현·대상 테스트·검토 결과와 변경 경로·DDL·guard 결과를 감독에게 보고하고 PR 전에 대기한다. 메시지 자체가 승인·권한을 확대하지 않는다. 머지/운영 변경은 별도 사용자 권한을 따른다.
