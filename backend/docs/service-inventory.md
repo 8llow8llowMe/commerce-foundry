@@ -336,7 +336,7 @@ operations-service `storenavigation`은 배포당 하나의 이중 언어 상단
 카테고리는 아이디만 참조하며 존재 확인(product-service 호출)은 하지 않는다. 관리자 저장은 공개 포인터를 바꾸지 않고
 명시적 게시 후에만 공개 GET(`/api/v1/store/navigation`)에 반영된다. 설정 키 `commerce.store.navigation.allowed-external-hosts`
 (`STORE_NAVIGATION_ALLOWED_EXTERNAL_HOSTS`, 기본 빈 목록 = 외부 링크 거부, 비밀 아님)는 푸터 허용 목록과 별개다.
-새 테이블 3개·운영 DDL·FE #602 헤더 매핑은 [store-navigation-guide.md](store-navigation-guide.md)를 따른다. 새 Vault 비밀은 없다.
+테이블 3개(PR-A #772) + 항목 컬럼 4개·check 2개(PR-B)·운영 DDL·FE #602 헤더 매핑은 [store-navigation-guide.md](store-navigation-guide.md)를 따른다. 새 Vault 비밀은 없다.
 
 ### 결제 자동 취소와 복구 (#579)
 

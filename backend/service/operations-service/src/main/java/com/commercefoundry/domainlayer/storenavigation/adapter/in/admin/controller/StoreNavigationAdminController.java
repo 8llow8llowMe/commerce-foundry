@@ -52,7 +52,7 @@ public class StoreNavigationAdminController {
     }
 
     @Operation(summary = "상단 메뉴 최신 초안 게시",
-        description = "최신 리비전만 게시합니다. 현재 게시본의 반복 요청은 변경 없이 성공하고, 그 외 버전·리비전 충돌은 409입니다.")
+        description = "최신 리비전만 게시합니다. 현재 게시본의 반복 요청은 변경 없이 성공하고, 그 외 버전·리비전 충돌은 409입니다. 미등록은 404입니다.")
     @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "STORE_NAVIGATION_PUBLISH")
     @PostMapping("/publication")

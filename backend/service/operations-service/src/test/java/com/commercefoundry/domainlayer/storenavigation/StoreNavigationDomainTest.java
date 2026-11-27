@@ -281,4 +281,19 @@ class StoreNavigationDomainTest {
         });
         assertThat(new StoreNavigationContent(items).publicTree("en").get(0).description()).isEqualTo("All products / Categories");
     }
+
+    @Test
+    void childDescriptionIsAllowedAndReachesPublicTree() {
+        // 하위 항목 설명도 저장·공개된다. 스토어프론트 헤더(#602)는 최상위 설명만 쓰지만 값은 그대로 내린다.
+        List<Item> items = List.of(
+            placed("shop", null, 1, null, true, false, false),
+            new Item("shop-new", "shop", "INTERNAL", new Text("신상", "New"), new Text("이번 주 입고", "This week"), "/collections/new", null,
+                1, true, false, false));
+        validate(items);
+
+        var ko = new StoreNavigationContent(items).publicTree("ko");
+        assertThat(ko.getFirst().description()).isNull();
+        assertThat(ko.getFirst().children()).singleElement().extracting(PublicNode::description).isEqualTo("이번 주 입고");
+        assertThat(new StoreNavigationContent(items).publicTree("en").getFirst().children().getFirst().description()).isEqualTo("This week");
+    }
 }
