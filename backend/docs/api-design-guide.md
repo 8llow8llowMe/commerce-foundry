@@ -1714,6 +1714,31 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 - 감사 `PICKING_BULK_CHECK`는 요청당 JWT 행위자·묶음 ID·결과만 남긴다. 모든 주문이 성공하면 `SUCCESS`이며 부분 실패는 `FAILURE`다.
   FE 계약 리뷰어는 `seonghoho`다.
 
+
+#### 상품 옵션 바코드로 단건 포장 검수하기 (#741)
+
+상품 관리자는 `CATALOG_MANAGE` 권한으로 기존 `PUT /api/v1/admin/products/{productId}/skus` 요청의 `skus[].barcode`를 등록하거나 바꾼다.
+바코드는 영문·숫자·하이픈·밑줄 1~64자의 문자열이며 대소문자와 앞자리 0을 보존한다. 미전송·`null`은 기존 값을 유지하고
+빈 문자열 `""`은 등록을 해제한다. 어드민 상품 상세의 `skus[].barcode`에서 값을 읽으며 미등록은 `null`이다.
+판매 중지된 SKU의 바코드도 예약되며, 스토어 안에서 중복 등록하면 409 `SKU_ADMIN_012`로 응답하고 편집 전체를 되돌린다.
+문자 또는 길이가 허용 범위를 벗어나면 400 `SKU_ADMIN_117`, JSON 숫자처럼 문자열이 아닌 값을 보내면 400 `PRODUCT_100`이다.
+
+`POST /internal/v1/skus/barcodes/resolve`는 서비스 토큰의 `SERVICE_delivery-service` 권한으로 `{"barcodes":["0001","ABC-2"]}`를 보낸다.
+한 번에 1~100개를 받으며, 응답 `dataBody.skuIdsByBarcode`는 등록된 바코드와 SKU ID 문자열을 매핑한다. 미등록 바코드는 결과에서 빠진다.
+판매가 중지되어도 이전 주문 스냅숏의 검수를 위해 바코드를 조회할 수 있다.
+
+`POST /api/v1/admin/deliveries/picking-batches/{batchId}/orders/{orderId}/checks`의 기존 `FULFILLMENT_MANAGE` 권한을 사용한다.
+직접 입력 `quantities`, 스캔 전용 `barcodeQuantities`, 또는 두 필드를 함께 보낼 수 있다. 예를 들어
+`{"quantities":{"789":1},"barcodeQuantities":{"0001":2}}`에서 `0001`이 SKU `789`로 해석되면 수량 3을 검수한다.
+각 수량은 양의 정수이고 두 필드의 항목을 합쳐 100개까지 받는다. 기존 `{"quantities":{}}`는 수량 부족을 기록하고
+바코드가 없는 SKU는 계속 직접 입력한다. 일괄 검수는 SKU 수량을 받으며 `check.barcodeQuantities`를 보내면 400 `DELIVERY_160`으로 거절한다.
+
+- 해석한 SKU와 수량이 같으면 직접 입력·스캔·혼합 간에 이전 검수 기록을 재사용한다. SKU별 합계가 `long` 범위를 넘으면 400 `DELIVERY_035`다.
+- 대상 주문의 미등록 바코드는 200 검수 이력에 `UNKNOWN_BARCODE`를 남긴다. 응답에 해석된 SKU별 수량을 담으며 스캔 원문은 이력에 저장하지 않는다.
+  이후 바코드가 등록되면 같은 스캔도 새 해석 결과로 검수한다. 앞서 성공한 검수는 유지한다.
+- 상품 서비스 장애나 잘못된 내부 응답은 503 `DELIVERY_039`를 반환하며 검수 이력을 저장하지 않는다. 스캔 없는 요청은 상품 서비스를 호출하지 않는다.
+- 출고 작업대 #364와 어드민 상품 편집의 계약 리뷰어는 `seonghoho`다. 스캐너는 키보드 입력으로 취급한다.
+
 ## 3. 계층 흐름
 
 ```text
