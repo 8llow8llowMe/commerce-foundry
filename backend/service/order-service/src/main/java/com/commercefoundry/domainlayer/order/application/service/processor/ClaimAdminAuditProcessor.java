@@ -36,4 +36,17 @@ public class ClaimAdminAuditProcessor {
     public void completed(long adminId, long claimId, boolean success) {
         AdminAuditLog.write("CLAIM_COMPLETE", adminId, AdminAuditLog.target("claim", claimId), success);
     }
+
+    /**
+     * 반품 승인 (#17 B2c-2) — 실패(409 · 503 · 404)도 false. 성공은 승인이 커밋됐다는 뜻이고(그 직후 남긴다) 환불 · 복원 결과는 상세 상태로 본다.
+     * 귀책 · 차감액 · 금액은 감사 줄에 넣지 않는다 — 클레임 승인 칸(귀책 · 재고 되돌림 · 차감액 · 승인자 · 시각)에 남는다.
+     */
+    public void returnApproved(long adminId, long claimId, boolean success) {
+        AdminAuditLog.write("CLAIM_RETURN_APPROVE", adminId, AdminAuditLog.target("claim", claimId), success);
+    }
+
+    /** 반품 거절 (#17 B2c-2) — 실패도 false. 사유 원문은 감사 줄에 넣지 않는다(클레임 결정 칸과, 주문이 바뀌었으면 주문 이력에 남는다). */
+    public void returnRejected(long adminId, long claimId, boolean success) {
+        AdminAuditLog.write("CLAIM_RETURN_REJECT", adminId, AdminAuditLog.target("claim", claimId), success);
+    }
 }

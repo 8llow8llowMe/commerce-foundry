@@ -42,6 +42,9 @@ class OrderAdminAuthorizationMappingTest {
         Map.entry("GET /api/v1/admin/claims/{claimId}", AdminAuthority.ORDER_READ),
         // 결제 후 취소 다시 시도(#17 A2b) — 같은 금액 · 같은 접수로 자동 처리를 다시 돌린다. 사용자 결정(2026-11-06)으로 ORDER_MANAGE
         Map.entry("POST /api/v1/admin/claims/{claimId}/retries", AdminAuthority.ORDER_MANAGE),
+        // 반품 승인 · 거절(#17 B2c-2) — 검수 결과로 결정하고 환불액은 서버가 계산 · 대조한다. 주문 처리 업무라 ORDER_MANAGE
+        Map.entry("POST /api/v1/admin/claims/{claimId}/return-approval", AdminAuthority.ORDER_MANAGE),
+        Map.entry("POST /api/v1/admin/claims/{claimId}/return-rejection", AdminAuthority.ORDER_MANAGE),
         // 수동 환불 확정 · 복원 생략 종결(#17 A3) — PG 를 부르지 않고 돈 · 재고 기록을 운영자 판단으로 닫는다. 대표만(SETTLEMENT_MANAGE)
         Map.entry("POST /api/v1/admin/claims/{claimId}/refund-confirmation", AdminAuthority.SETTLEMENT_MANAGE),
         Map.entry("POST /api/v1/admin/claims/{claimId}/completion", AdminAuthority.SETTLEMENT_MANAGE)

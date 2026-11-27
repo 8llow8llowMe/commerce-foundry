@@ -64,24 +64,30 @@ public record ClaimAdminDetailInfo(
 
     /**
      * 반품 결정 미리보기 (#17 B2c) — 지금 승인 · 거절할 수 있는지와 귀책별 정책 금액(차감 전). 승인 때 다시 계산하므로 화면 표시용이다.
-     * 거절은 반품 접수 + 주문 반품 요청만 보고, 진행 중 반품 · 결제 대조 · 산식은 승인에만 걸린다 — 그래서 승인 가능({@link #approvable()})과
+     * 거절은 반품 접수 + 주문 반품 요청만 보고, 진행 중 반품 · 결제 대조 · 산식 · 환불 처리 게이트는 승인에만 걸린다 — 그래서 승인 가능({@link #approvable()})과
      * 거절 가능({@link #rejectable()})이 따로다.
      *
      * @param blocker 승인할 수 없는 이유. 승인할 수 있으면 null. {@link Blocker#NOT_DECIDABLE} 이 아니면 거절은 할 수 있다
      * @param defaultFault 항목 사유로 정한 기본 귀책({@link ReturnRefundPolicy.Fault#defaultOf}). 반품이 아니면(결정 대상 아님) null
-     * @param refundByFault 귀책별 정책 금액 — 승인할 수 있을 때만 귀책 선언 순서로 채우고, 아니면 비어 있다
+     * @param refundByFault 귀책별 정책 금액 — 계산할 수 있을 때(승인 가능 · {@link Blocker#REFUND_NOT_OPEN})만 귀책 선언 순서로 채우고, 아니면 비어 있다
      */
     public record ReturnDecision(Blocker blocker, ReturnRefundPolicy.Fault defaultFault, List<FaultRefund> refundByFault) {
 
         public ReturnDecision {
             refundByFault = List.copyOf(refundByFault);
-            if ((blocker == null) == refundByFault.isEmpty() || (defaultFault == null && blocker != Blocker.NOT_DECIDABLE)) {
-                throw new IllegalArgumentException("승인할 수 있을 때만 귀책별 금액이 있고, 기본 귀책은 결정 대상 아님에서만 비울 수 있습니다");
+            boolean calculated = blocker == null || blocker == Blocker.REFUND_NOT_OPEN;
+            if (calculated == refundByFault.isEmpty() || (defaultFault == null && blocker != Blocker.NOT_DECIDABLE)) {
+                throw new IllegalArgumentException("계산할 수 있을 때(승인 가능 · 환불 처리 꺼짐)만 귀책별 금액이 있고, 기본 귀책은 결정 대상 아님에서만 비울 수 있습니다");
             }
         }
 
         public static ReturnDecision approvable(ReturnRefundPolicy.Fault defaultFault, List<FaultRefund> refundByFault) {
             return new ReturnDecision(null, Objects.requireNonNull(defaultFault, "defaultFault"), refundByFault);
+        }
+
+        /** 계산은 됐지만 환불 처리(재시도 스케줄러)가 꺼져 있어 승인할 수 없다 — 금액은 표시용으로 그대로 싣는다. 거절은 된다. */
+        public static ReturnDecision refundNotOpen(ReturnRefundPolicy.Fault defaultFault, List<FaultRefund> refundByFault) {
+            return new ReturnDecision(Blocker.REFUND_NOT_OPEN, Objects.requireNonNull(defaultFault, "defaultFault"), refundByFault);
         }
 
         public static ReturnDecision blocked(Blocker blocker, ReturnRefundPolicy.Fault defaultFault) {
@@ -111,14 +117,17 @@ public record ClaimAdminDetailInfo(
     }
 
     /**
-     * 반품을 지금 승인할 수 없는 이유 — 이름(코드)이 API 값이다. 승인 API(B2c-2)의 409 오류 코드와 짝을 이룬다. {@link #NOT_DECIDABLE} 만 거절도 막는다.
+     * 반품을 지금 승인할 수 없는 이유 — 이름(코드)이 API 값이다. 승인 API(B2c-2)의 409 오류 코드와 짝을 이룬다 — {@link #NOT_DECIDABLE} {@code ORDER_042},
+     * {@link #RETURN_IN_FLIGHT} {@code ORDER_043}, {@link #NOT_CALCULABLE} {@code ORDER_045}, {@link #REFUND_NOT_OPEN} 503 {@code ORDER_040}. {@link #NOT_DECIDABLE} 만
+     * 거절도 막는다 — 주문이 없으면 거절도 주문을 정리할 수 없어 여기에 든다. {@link #REFUND_NOT_OPEN} 은 데이터 판정이 모두 통과했을 때만 낸다(데이터 이유가 먼저 보인다).
      */
     @Getter
     @RequiredArgsConstructor
     public enum Blocker implements CodeNameDescribable {
-        NOT_DECIDABLE("결정 대상 아님", "반품 접수 상태가 아니거나(그 사이 승인 · 거절됨 포함) 주문이 반품 요청 상태가 아닙니다. 승인 · 거절 모두 할 수 없습니다."),
+        NOT_DECIDABLE("결정 대상 아님", "반품 접수 상태가 아니거나(그 사이 승인 · 거절됨 포함) 주문이 없거나 반품 요청 상태가 아닙니다. 승인 · 거절 모두 할 수 없습니다."),
         RETURN_IN_FLIGHT("다른 반품 환불 진행 중", "같은 주문의 다른 반품 환불이 끝나지 않았습니다. 그 반품을 먼저 마무리해야 승인할 수 있습니다. 거절은 할 수 있습니다."),
-        NOT_CALCULABLE("환불액 계산 불가", "주문이나 결제 기록이 없거나 결제 금액이 주문 금액과 맞지 않아 환불액을 계산할 수 없습니다. 주문 · 결제 기록 확인이 필요합니다.");
+        NOT_CALCULABLE("환불액 계산 불가", "결제 기록이 없거나 결제 금액이 주문 금액과 맞지 않아 환불액을 계산할 수 없습니다. 주문 · 결제 기록 확인이 필요합니다. 거절은 할 수 있습니다."),
+        REFUND_NOT_OPEN("환불 처리가 아직 열리지 않음", "자동 환불 처리가 꺼져 있어 지금은 승인할 수 없습니다. 환불액은 참고용입니다. 시스템 관리자에게 확인해 주세요. 거절은 할 수 있습니다.");
 
         private final String displayName;
         private final String description;

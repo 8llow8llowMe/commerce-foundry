@@ -315,9 +315,12 @@ public final class ReturnRefundPolicy {
             return new Refund(policyAmount, deduction.amount(), currency, fault);
         }
 
-        /** 0보다 큰 환불인가 — 아니면 승인을 거부한다(B2, 409). 0 원 반품 승인을 두지 않는다. */
+        /**
+         * 0보다 큰 환불인가 — 아니면 승인을 거부한다(B2c-2, 409 {@code ORDER_044}). 0 원 반품 승인을 두지 않는다. 빼지 않고 비교한다 — 음수 정책 금액에서 아주 큰
+         * 차감액을 빼면 {@link #amount()} 가 넘치지만(ArithmeticException) 이 판정은 넘치지 않는다. 참이면 {@link #amount()} 도 넘치지 않는다.
+         */
         public boolean isPayable() {
-            return amount() > 0;
+            return policyAmount > deduction;
         }
 
         /** 차감액을 금액으로 — 승인 기록({@link Claim.ReturnApproval})에 싣는다. */
@@ -328,7 +331,8 @@ public final class ReturnRefundPolicy {
         /** @throws IllegalStateException 0 이하 환불액 — 반품 승인이 이것으로 0 이하 환불을 거부한다 */
         public Money toMoney() {
             if (!isPayable()) {
-                throw new IllegalStateException("0 이하 환불액은 금액으로 바꿀 수 없습니다: " + amount() + " " + currency);
+                // amount() 를 부르지 않는다 — 0 이하인 경우 빼기가 넘칠 수 있다
+                throw new IllegalStateException("0 이하 환불액은 금액으로 바꿀 수 없습니다: policyAmount=%d, deduction=%d %s".formatted(policyAmount, deduction, currency));
             }
             return Money.of(amount(), currency);
         }

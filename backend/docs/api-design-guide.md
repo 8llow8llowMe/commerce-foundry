@@ -1432,13 +1432,24 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 | `POST /api/v1/admin/claims/{claimId}/retries` `{expectedVersion}` (#17 A2b) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 다시 시도할 수 없음(처리 완료 · 승인 전 · 거절된 반품 · 주문 상태 이상) `ORDER_038` · 자동 처리 중(lease 안) `ORDER_039` (409), 결제 취소 결과 미반영 `ORDER_036` · 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
 | `POST /api/v1/admin/claims/{claimId}/refund-confirmation` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · 사유 없음 · 공백 `ORDER_170` · 200자 초과 `ORDER_148` · 제어 문자 `ORDER_151` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(반품은 같은 주문 잠금 경합 포함) `ORDER_037` · 환불 실패가 아님 · 결과 미확인 · 반품 막힘인데 다시 시도 기한 안 · 주문이 취소 요청 · 취소 완료(반품은 반품 요청)가 아님 · 반품 정리 판정 불가 `ORDER_041` (409), 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
 | `POST /api/v1/admin/claims/{claimId}/completion` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | 본문 검증은 위와 같다(`ORDER_169` · `170` · `148` · `151`, 400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 종결 후보가 아님(복원 결과 미확인 · 주문 상태 이상 · 다른 상태) · 취소인데 주문이 취소 완료가 아님 `ORDER_041` (409) |
+| `POST /api/v1/admin/claims/{claimId}/return-approval` `{expectedVersion,fault?,restock,deductionAmount:{amount,currency},expectedRefundAmount:{amount,currency}}` (#17 B2c-2) | 200 다시 읽은 상세(위와 같은 모양 — 같은 요청에서 환불 · 복원을 이어 `status` 가 `COMPLETED` 등으로 나아가 있을 수 있다) | expectedVersion `ORDER_169` · restock 없음 `ORDER_171` · deductionAmount 없음 · 음수 · 통화 없음 `ORDER_172` · expectedRefundAmount 없음 · 0 이하 · 통화 없음 `ORDER_173` · 모르는 귀책 · 통화 `ORDER_100` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(같은 주문 잠금 경합 포함) `ORDER_037` · 결정할 수 없는 반품 `ORDER_042` · 다른 반품 환불 진행 중 `ORDER_043` · 환불액 0 이하 `ORDER_044` · 환불액 계산 불가 `ORDER_045` · 환불액 · 통화가 화면과 다름 `ORDER_046` (409), 재시도 스케줄러 꺼짐 `ORDER_040` · 결제 취소 결과 미반영 `ORDER_036` (503) |
+| `POST /api/v1/admin/claims/{claimId}/return-rejection` `{expectedVersion,reason}` (#17 B2c-2) | 200 다시 읽은 상세(위와 같은 모양) | 본문 검증은 확정 · 종결과 같다(`ORDER_169` · `170` · `148` · `151`, 400), claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(같은 주문 잠금 경합 포함) `ORDER_037` · 결정할 수 없는 반품 `ORDER_042` (409) |
 
+- **반품 승인 · 거절 (#17 B2c-2)** — 권한 `ORDER_MANAGE`. 승인 본문의 `fault` 가 없으면 상세의 `defaultFault` 다. `expectedRefundAmount` 는 화면에서 본
+  "고른 귀책의 `refundByFault` 금액 − 차감액"이다 — 서버가 주문을 잠그고 미리보기와 **같은 판정 · 산식**으로 다시 계산해 금액 · 통화가 다르면 409 `ORDER_046`(차감액 통화가
+  주문 통화와 다를 때도), 0 이하면 `ORDER_044` 다. 판정 409 는 미리보기 `reason` 과 짝이다 — `NOT_DECIDABLE` `ORDER_042` · `RETURN_IN_FLIGHT` `ORDER_043` ·
+  `NOT_CALCULABLE` `ORDER_045`. 승인은 재시도 스케줄러가 켜져 있어야 받는다(503 `ORDER_040`, 다시 시도와 같은 게이트). 200 이어도 결제사가 환불을 거절했을 수 있으니
+  `status` · `recovery.situation` 을 다시 읽는다. 거절은 진행 중 반품 · 결제 대조를 보지 않고(환불이 없다), 열린 반품이 남지 않으면 주문이 배송 완료(정산한 반품이 전량이면
+  반품 완료)로 돌아가며 사유가 클레임 결정 칸(`recovery.lastDecision`)과 주문 이력에 남는다.
 - **반품 결정 미리보기 `returnDecision` · 승인 기록 `returnApproval` (#17 B2c)** — 상세에서 접수(`REQUESTED`) 반품에만 `returnDecision` 이 있고 그 밖은 null 이다.
   `approvable` 은 지금 승인할 수 있는지(`reason` 이 null), `rejectable` 은 지금 거절할 수 있는지다 — 거절은 반품 접수 + 주문 반품 요청만 보므로 `reason` 이
-  `NOT_DECIDABLE` 일 때만 false 다. `reason`(metadata, 승인 가능이면 null)은 `NOT_DECIDABLE`(반품 접수가 아님 — 읽는 사이 승인 · 거절된 경우 포함 · 주문이 반품 요청이 아님)
-  · `RETURN_IN_FLIGHT`(같은 주문의 다른 반품 환불 진행 중) · `NOT_CALCULABLE`(주문 없음 · 결제 기록 없음 · 결제 금액과 주문 총액 불일치 등 데이터 이상)이다. `defaultFault`(metadata `CUSTOMER` ·
-  `SELLER`)는 항목 사유로 정한 기본 귀책, `refundByFault` 는 승인 가능할 때만 `CUSTOMER` · `SELLER` 순으로 정책 금액(차감 전, `MoneyItem`)을 준다 — **0 이하일 수 있다**
-  (재부과액이 반품 상품 금액보다 크면 승인할 수 없다). 미리보기는 잠그지 않으므로 표시용이고, 승인 API(B2c-2)가 같은 판정 · 산식을 다시 한다.
+  `NOT_DECIDABLE` 일 때만 false 다. `reason`(metadata, 승인 가능이면 null)은 `NOT_DECIDABLE`(반품 접수가 아님 — 읽는 사이 승인 · 거절된 경우 포함 · 주문이 없거나 반품 요청이 아님)
+  · `RETURN_IN_FLIGHT`(같은 주문의 다른 반품 환불 진행 중) · `NOT_CALCULABLE`(결제 기록 없음 · 결제 금액과 주문 총액 불일치 등 데이터 이상)
+  · `REFUND_NOT_OPEN`(데이터 판정은 모두 통과했지만 재시도 스케줄러 `order.cancellation.retry.enabled` 가 꺼져 승인이 503 `ORDER_040` 인 상태 — 데이터 이유가 있으면
+  그쪽이 먼저 보인다)이다. 주문이 없으면 거절도
+  주문을 정리할 수 없어 B2c-2 부터 `NOT_DECIDABLE` 이다(B2c-1 은 `NOT_CALCULABLE`). `defaultFault`(metadata `CUSTOMER` ·
+  `SELLER`)는 항목 사유로 정한 기본 귀책, `refundByFault` 는 승인 가능하거나 `REFUND_NOT_OPEN`(표시용)일 때만 `CUSTOMER` · `SELLER` 순으로 정책 금액(차감 전, `MoneyItem`)을 준다 — **0 이하일 수 있다**
+  (재부과액이 반품 상품 금액보다 크면 승인할 수 없다). 미리보기는 잠그지 않으므로 표시용이고, 승인 API 가 같은 판정 · 산식을 다시 한다.
   승인된 반품에는 `returnApproval`(운영자가 고른 귀책 `fault` metadata · `restock` · 차감액 `deduction` · 승인 시각)이 있고 승인자 아이디는 내지 않는다.
   결정 대기 반품 상세는 미리보기를 위해 주문(주문이 반품 요청이면 같은 주문 클레임 목록 · 결제 기록까지)을 더 읽는다 — 항목 수와 무관한 고정 횟수다.
 - **처리 상황 `recovery` (#17 A2b)** — 운영자는 비개발자라 원시 오류 코드(`PAYMENT_*` · `PRODUCT_*`) · 시도 횟수 · 결제 아이디를 내지 않는다.

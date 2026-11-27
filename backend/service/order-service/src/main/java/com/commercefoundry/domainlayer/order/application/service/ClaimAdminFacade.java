@@ -4,6 +4,7 @@ import com.commercefoundry.common.exception.RedactedThrowable;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminItem;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.ClaimAdminResponse;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.presenter.ClaimAdminPresenter;
+import com.commercefoundry.domainlayer.order.application.command.ClaimReturnApprovalCommand;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.model.ClaimAdminFilter;
@@ -11,6 +12,7 @@ import com.commercefoundry.domainlayer.order.application.port.in.ClaimAdminUseCa
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminAuditProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminRecoveryProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimReturnDecisionProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
@@ -22,8 +24,9 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 어드민 클레임 조회 · 결제 후 취소 다시 시도 · 수동 환불 확정 · 복원 생략 종결 (#17). 다시 시도 · 수동 확정은 PG 환불 · 재고 복원(원격 호출)이 이어져
- * <b>트랜잭션을 걸지 않는다</b> — 선점 · 확정은 {@link ClaimAdminRecoveryProcessor} 의 짧은 트랜잭션, 원격 구간은 고객 취소 · 재시도 스케줄러와 같은
+ * 어드민 클레임 조회 · 결제 후 취소 다시 시도 · 수동 환불 확정 · 복원 생략 종결 · 반품 승인 · 거절 (#17). 다시 시도 · 수동 확정 · 반품 승인은 PG 환불 · 재고 복원
+ * (원격 호출)이 이어져 <b>트랜잭션을 걸지 않는다</b> — 선점 · 확정 · 승인은 {@link ClaimAdminRecoveryProcessor} · {@link ClaimReturnDecisionProcessor} 의 짧은
+ * 트랜잭션, 원격 구간은 고객 취소 · 재시도 스케줄러와 같은
  * {@link OrderCancellationPipelineProcessor} 다.
  * 원격이 성공한 뒤의 롤백으로 "PG 는 취소했는데 DB 는 모르는" 창을 만들지 않으려고 둘을 나눈다.
  */
@@ -38,6 +41,7 @@ public class ClaimAdminFacade implements ClaimAdminUseCase {
     private final OrderCancellationPipelineProcessor pipelineProcessor;
     private final ClaimAdminPresenter presenter;
     private final ClaimAdminAuditProcessor audit;
+    private final ClaimReturnDecisionProcessor returnDecisionProcessor;
 
     @Override
     public PageResponse<ClaimAdminItem> getClaims(ClaimAdminFilter filter, long adminId) {
@@ -98,6 +102,37 @@ public class ClaimAdminFacade implements ClaimAdminUseCase {
             throw exception;
         }
         audit.completed(adminId, claimId, true);
+        return presenter.toResponse(processor.getDetail(claimId));
+    }
+
+    /**
+     * 반품 승인(tx: 주문 잠금 · 판정 · 환불액 대조 · APPROVED) → 환불 · 재고 복원(원격) → 현재 상세 (#17 B2c-2). 승인이 커밋되면 성공 감사를 바로 남긴다 —
+     * 이어지는 환불이 끊기면 다시 시도와 같이 미확정 한 번으로 세고(클레임은 APPROVED + lease) 스케줄러가 잇는다. 확정 환불 미기록(503 {@code ORDER_036})만 전달한다.
+     */
+    @Override
+    public ClaimAdminResponse approveReturn(ClaimReturnApprovalCommand command, long adminId) {
+        Claim approved;
+        try {
+            approved = returnDecisionProcessor.approve(command, adminId);
+        } catch (RuntimeException exception) {
+            audit.returnApproved(adminId, command.claimId(), false);
+            throw exception;
+        }
+        audit.returnApproved(adminId, command.claimId(), true);
+        progress(approved);
+        return presenter.toResponse(processor.getDetail(command.claimId()));
+    }
+
+    /** 반품 거절(tx: 주문 잠금 · REJECTED · 주문 정리 · ADMIN 이력) — 원격 호출 없음 (#17 B2c-2). */
+    @Override
+    public ClaimAdminResponse rejectReturn(long claimId, long expectedVersion, String reason, long adminId) {
+        try {
+            returnDecisionProcessor.reject(claimId, expectedVersion, reason, adminId);
+        } catch (RuntimeException exception) {
+            audit.returnRejected(adminId, claimId, false);
+            throw exception;
+        }
+        audit.returnRejected(adminId, claimId, true);
         return presenter.toResponse(processor.getDetail(claimId));
     }
 

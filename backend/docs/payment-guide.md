@@ -621,7 +621,7 @@ listener OFF와 cleanup OFF는 독립이다. cleanup은 기존 messaging/relay/c
   = 반품 클레임 아이디, `{claimId, amount, currency}`)로 부른다 — 금액은 승인 때 저장한 환불액(정책 금액 − 차감액)이고 결제의 부분 취소다. 분류 · 재시도 · 상한 ·
   14일 기한(반품은 **승인 시각** 기준, `Claim#refundDeadlineBase`)도 취소와 같다. payment 쪽 변경은 없다. 흐름은 `order-flow-guide.md` §5 "반품 환불 · 복원 엔진".
   - **한계 — 같은 결제에 다른 claimId 의 `PENDING` 이 있으면 409 `PAYMENT_016`** (아래 판정 순서) — 앞선 반품의 결과 미확인이 남은 결제의 다음 반품은 결제사 종결
-    거절처럼 `REFUND_FAILED`(`PAYMENT_016`)로 닫힌다. order 는 같은 주문에 `APPROVED` · `REFUND_FAILED` 반품이 있으면 승인을 받지 않아(B2c, 409) 정상 흐름에서는
+    거절처럼 `REFUND_FAILED`(`PAYMENT_016`)로 닫힌다. order 는 같은 주문에 `APPROVED` · `REFUND_FAILED` 반품이 있으면 승인을 받지 않아(B2c-2, 409 `ORDER_043`) 정상 흐름에서는
     겹치지 않지만, 반품 수동 확정 뒤 payment 원장이 `PENDING` 으로 남는 경우(#693 PR B + order 호출 전)는 연쇄될 수 있다.
   - 이미 환불된 claimId 의 재요청은 PG 없이 200 이다 — 반품 환불 기록이 주문 잠금에서 져 503 `ORDER_036` 으로 끝난 뒤 스케줄러가 같은 클레임을 다시 보낼 때의 수습 경로다.
   - `LATE_APPROVED` 결제는 대상이 아니다 — 반품의 결제 아이디는 order 의 결제 완료 기록(`order_payment` `PAID`)에서 오고, `LATE_APPROVED` 는 주문에 반영하지 않는다(§6).

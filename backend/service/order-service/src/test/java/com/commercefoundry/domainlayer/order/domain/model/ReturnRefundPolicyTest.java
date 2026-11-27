@@ -167,6 +167,17 @@ class ReturnRefundPolicyTest {
     }
 
     @Test
+    @DisplayName("환불 가능 판정은 빼지 않고 비교한다 — 음수 정책 금액에 아주 큰 차감액이어도 넘치지 않고 false 다(금액 계산만 넘친다)")
+    void payableCheckDoesNotOverflow() {
+        Refund huge = new Refund(-1_000, 0, CurrencyCode.KRW, Fault.CUSTOMER).withDeduction(krw(Long.MAX_VALUE));
+
+        assertThat(huge.isPayable()).isFalse();
+        assertThatThrownBy(huge::amount).isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(huge::toMoney).isInstanceOf(IllegalStateException.class);
+        assertThat(new Refund(Long.MAX_VALUE, Long.MAX_VALUE - 1, CurrencyCode.KRW, Fault.SELLER).toMoney()).isEqualTo(krw(1));
+    }
+
+    @Test
     @DisplayName("환불 결과는 계산에 쓴 귀책을 싣고 차감액을 바꿔도 그대로다 — 승인 기록이 이 값을 저장한다 (#17 B2c)")
     void refundCarriesFault() {
         Order order = order(domesticQuote(quoteLine(1, 10_000, 2), quoteLine(2, 5_000, 1)));
