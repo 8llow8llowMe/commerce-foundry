@@ -188,7 +188,8 @@ class PaymentAnomalyAlertSchedulerFacadeTest {
         verify(push, times(2)).enqueue(batches.capture());
         assertThat(batches.getAllValues()).extracting(List::size).containsExactly(PaymentAnomalyAlertStateProcessor.MAX_INSERT_BATCH, 1000);
         assertThat(batches.getAllValues().stream().flatMap(List::stream).toList()).containsExactlyElementsOf(saved);
-        // 최선 전달이다 — 첫 배치 거절 뒤 나머지를 넣지 않고 저장도 되돌리지 않는다
+        // 최선 전달이다 — enqueue 가 예외를 던지면 나머지 배치를 넣지 않고 저장도 되돌리지 않는다
+        // (실제 전달기의 포화 · 종료 거절은 예외 없이 경고만 남기므로 Facade 가 다음 배치도 시도한다)
         reset(push);
         doThrow(new IllegalStateException("queue full")).when(push).enqueue(any());
         assertThatCode(facade::observe).doesNotThrowAnyException();
