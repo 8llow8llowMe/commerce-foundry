@@ -42,6 +42,8 @@ class PriceBookSchemaUpgradePostgresTest {
             assertThat(legacyShape(connection)).isEqualTo(shape);
             assertThat(rows(connection, "select count(*) from product.product_price")).containsExactly(List.of("0"));
             assertThat(rows(connection, "select count(*) from product.sku_price")).containsExactly(List.of("0"));
+            // 가격 DDL의 구 스키마 보존을 확인한 뒤 현재 SKU 매핑에 필요한 후속 컬럼을 추가한다.
+            connection.createStatement().execute("alter table product.sku add column barcode varchar(64)");
             validateFourMappings();
         }
     }

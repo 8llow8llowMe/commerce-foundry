@@ -23,6 +23,10 @@ public final class SkuAdminValidationMessage {
     // 옵션 은퇴 (#9 PR-C2) — 111~115 는 #9 PR-C1 이 쓴다
     public static final String RETIREMENT_TARGETS = "SKU_ADMIN_116:은퇴할 옵션 · 값을 하나 이상, 각각 50개까지 보내 주세요.";
 
+    public static final String BARCODE = "SKU_ADMIN_117:바코드는 영문·숫자·하이픈·밑줄 1~64자의 문자열입니다.";
+
+    public static final String BARCODE_LIST = "SKU_ADMIN_118:조회할 바코드를 1~100개 보내 주세요.";
+
     private SkuAdminValidationMessage() {
     }
 }

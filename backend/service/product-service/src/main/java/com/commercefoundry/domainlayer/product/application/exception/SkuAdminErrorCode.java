@@ -22,7 +22,9 @@ public enum SkuAdminErrorCode {
     /** 상품당 SKU 상한(등록과 같은 100개) (#9 PR-C1). */
     SKU_LIMIT_EXCEEDED("SKU_ADMIN_010", "SKU 는 상품당 100개까지 둘 수 있습니다.", HttpStatus.BAD_REQUEST),
     /** 옵션 은퇴 (#9 PR-C2) — 이 상품의 옵션 · 값이 아니다. 메시지에 이유를 싣는다. (007~010 은 #9 PR-C1 이 쓴다) */
-    OPTION_RETIREMENT_INVALID("SKU_ADMIN_011", "은퇴할 옵션을 확인해 주세요: %s", HttpStatus.BAD_REQUEST);
+    OPTION_RETIREMENT_INVALID("SKU_ADMIN_011", "은퇴할 옵션을 확인해 주세요: %s", HttpStatus.BAD_REQUEST),
+    BARCODE_DUPLICATED("SKU_ADMIN_012", "이미 등록된 SKU 바코드입니다.", HttpStatus.CONFLICT),
+    BARCODE_INVALID("SKU_ADMIN_013", "SKU 바코드의 형식을 확인해 주세요.", HttpStatus.BAD_REQUEST);
 
     private final String code;
     private final String message;

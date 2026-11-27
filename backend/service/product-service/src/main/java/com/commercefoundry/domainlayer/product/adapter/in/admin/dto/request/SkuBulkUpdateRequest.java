@@ -1,9 +1,11 @@
 package com.commercefoundry.domainlayer.product.adapter.in.admin.dto.request;
 
+import com.commercefoundry.domainlayer.product.adapter.in.support.SkuBarcodeDeserializer;
 import com.commercefoundry.domainlayer.product.application.command.SkuBulkUpdateCommand;
 import com.commercefoundry.domainlayer.product.application.exception.SkuAdminValidationMessage;
 import com.commercefoundry.domainlayer.product.application.model.ProductSaleStatusFilter;
 import com.commercefoundry.domainlayer.product.domain.model.HsCode;
+import com.commercefoundry.domainlayer.product.domain.model.SkuBarcode;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -13,6 +15,7 @@ import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.util.List;
@@ -63,7 +66,12 @@ public record SkuBulkUpdateRequest(
 
         @Schema(description = "HS 코드. 점·하이픈·공백 제거 후 숫자 6~10자리. null/빈값/생략하면 삭제", nullable = true)
         @Size(max = 20, message = SkuAdminValidationMessage.HS_CODE)
-        String hsCode
+        String hsCode,
+
+        @Schema(description = "포장 검수 바코드. 미입력·null이면 유지, 빈 문자열이면 해제", example = "00123-A", nullable = true)
+        @Pattern(regexp = SkuBarcode.FORMAT + "|", message = SkuAdminValidationMessage.BARCODE)
+        @JsonDeserialize(using = SkuBarcodeDeserializer.class)
+        String barcode
     ) {
         @JsonIgnore
         @Schema(hidden = true)
@@ -78,7 +86,7 @@ public record SkuBulkUpdateRequest(
 
         SkuBulkUpdateCommand.Item toCommand() {
             return new SkuBulkUpdateCommand.Item(skuId, additionalPrice.toMoney(), saleStatus.toSaleStatus(), weightGrams,
-                hsCode == null || hsCode.isBlank() ? null : HsCode.fromStoredOrNull(normalizedHsCode()));
+                hsCode == null || hsCode.isBlank() ? null : HsCode.fromStoredOrNull(normalizedHsCode()), barcode);
         }
     }
 

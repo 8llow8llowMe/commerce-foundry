@@ -76,6 +76,22 @@ class SkuAdminControllerTest {
     }
 
     @ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"", "0001-Ab"})
+    void barcodeStringReachesCommandWithoutNormalization(String barcode) {
+        given(useCase.replace(any())).willReturn(ProductDetailAdminResponse.builder().productId("7").build());
+        String jsonBarcode = barcode == null ? "null" : "\"" + barcode + "\"";
+        String body = BODY.replace("\"hsCode\":", "\"barcode\":" + jsonBarcode + ",\"hsCode\":");
+
+        assertThat(mvc.put().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(body)
+            .header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.ADMIN))).hasStatusOk();
+
+        var capture = ArgumentCaptor.forClass(SkuBulkUpdateCommand.class);
+        verify(useCase).replace(capture.capture());
+        assertThat(capture.getValue().skus().getFirst().barcode()).isEqualTo(barcode);
+    }
+
+    @ParameterizedTest
     @MethodSource("invalidBodies")
     void fieldValidationRejectsBeforeUseCase(String body, String code) {
         var result = mvc.put().uri(PATH).contentType(MediaType.APPLICATION_JSON).content(body)
@@ -111,7 +127,11 @@ class SkuAdminControllerTest {
             Arguments.of(BODY.replace("\"version\":0", "\"version\":9223372036854775808"), "PRODUCT_100"),
             Arguments.of(BODY.replace("\"amount\":0", "\"amount\":9223372036854775808"), "PRODUCT_100"),
             Arguments.of(BODY.replace("\"4611686018427387904\"", "9223372036854775808"), "PRODUCT_100"),
-            Arguments.of(BODY.replace("ON_SALE", "SOLD_OUT"), "PRODUCT_100")
+            Arguments.of(BODY.replace("ON_SALE", "SOLD_OUT"), "PRODUCT_100"),
+            Arguments.of(BODY.replace("\"hsCode\":", "\"barcode\":\"a b\",\"hsCode\":"), "SKU_ADMIN_117"),
+            Arguments.of(BODY.replace("\"hsCode\":", "\"barcode\":\" \",\"hsCode\":"), "SKU_ADMIN_117"),
+            Arguments.of(BODY.replace("\"hsCode\":", "\"barcode\":\"" + "0".repeat(65) + "\",\"hsCode\":"), "SKU_ADMIN_117"),
+            Arguments.of(BODY.replace("\"hsCode\":", "\"barcode\":123,\"hsCode\":"), "PRODUCT_100")
         );
     }
 

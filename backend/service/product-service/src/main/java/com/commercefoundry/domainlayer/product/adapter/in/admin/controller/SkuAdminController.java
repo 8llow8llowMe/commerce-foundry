@@ -37,9 +37,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class SkuAdminController {
     private final SkuAdminUseCase skuAdminUseCase;
 
-    @Operation(summary = "상품 SKU 편집 속성 전체 교체", description = "기존 SKU 전체의 추가금·판매 상태·무게·HS 코드를 바꾸고 편집용 상세를 반환한다. "
+    @Operation(summary = "상품 SKU 편집 속성 전체 교체", description = "기존 SKU 전체의 추가금·판매 상태·무게·HS 코드·포장 검수 바코드를 바꾸고 편집용 상세를 반환한다. "
         + "동일 값도 상품 버전이 증가한다. 삭제 상품 404 SKU_ADMIN_001, 버전 충돌 409 SKU_ADMIN_002, "
-        + "SKU 집합 오류 400 SKU_ADMIN_003, 가격 오류 400 SKU_ADMIN_004, 잠금 충돌 409 SKU_ADMIN_005, 은퇴 옵션 판매중 400 SKU_ADMIN_006이다.")
+        + "SKU 집합 오류 400 SKU_ADMIN_003, 가격 오류 400 SKU_ADMIN_004, 잠금 충돌 409 SKU_ADMIN_005, 은퇴 옵션 판매중 400 SKU_ADMIN_006, 중복 바코드 409 SKU_ADMIN_012다.")
     @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
     @AdminAudited(action = "PRODUCT_SKUS_REPLACE")
     @PutMapping("/{productId}/skus")

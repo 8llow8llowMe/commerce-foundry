@@ -1100,6 +1100,7 @@
         updated_at timestamp(6) with time zone not null,
         additional_price_amount bigint not null,
         additional_price_currency varchar(3) not null check ((additional_price_currency in ('KRW','USD'))),
+        barcode varchar(64),
         hs_code varchar(10),
         option_value_key varchar(255) not null,
         product_id bigint not null,
@@ -1107,6 +1108,7 @@
         weight_grams integer,
         primary key (id),
         constraint uk_sku_product_id_option_value_key unique (product_id, option_value_key),
+        constraint uk_sku_barcode unique (barcode),
         constraint ck_sku_additional_price_non_negative check (additional_price_amount >= 0),
         constraint ck_sku_weight_grams_positive check (weight_grams is null or weight_grams > 0),
         constraint ck_sku_hs_code_format check (hs_code is null or (char_length(hs_code) between 6 and 10 and ltrim(hs_code, '0123456789') = ''))
@@ -1129,6 +1131,9 @@
 
     comment on column product.sku.additional_price_currency is
         '추가금 통화 — 상품 기본 판매가 통화와 같아야 한다';
+
+    comment on column product.sku.barcode is
+        '포장 검수 바코드 (스토어 내 유일, 미등록이면 null)';
 
     comment on column product.sku.hs_code is
         '통관 신고용 HS 코드 (숫자 6~10자리) — 해외 판매 상품만 필수, null 이면 미입력';

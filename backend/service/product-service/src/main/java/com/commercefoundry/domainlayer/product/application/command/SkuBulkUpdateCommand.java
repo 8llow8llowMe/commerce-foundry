@@ -10,6 +10,10 @@ public record SkuBulkUpdateCommand(long productId, long version, long actorMembe
         skus = List.copyOf(skus);
     }
 
-    public record Item(long skuId, Money additionalPrice, SaleStatus saleStatus, Integer weightGrams, HsCode hsCode) {
+    /** barcode가 null이면 유지하고 빈 문자열이면 해제한다. */
+    public record Item(long skuId, Money additionalPrice, SaleStatus saleStatus, Integer weightGrams, HsCode hsCode, String barcode) {
+        public Item(long skuId, Money additionalPrice, SaleStatus saleStatus, Integer weightGrams, HsCode hsCode) {
+            this(skuId, additionalPrice, saleStatus, weightGrams, hsCode, null);
+        }
     }
 }

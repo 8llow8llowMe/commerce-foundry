@@ -82,7 +82,8 @@ public class ProductAdminPresenter {
 
     private ProductSkuAdminItem toSkuItem(Sku sku) {
         return new ProductSkuAdminItem(String.valueOf(sku.id()), sku.optionKey().valueIds().stream().map(String::valueOf).toList(),
-            MoneyItems.of(sku.additionalPrice()), sku.saleStatus().toMetadata(), sku.weightGrams(), sku.hsCode() == null ? null : sku.hsCode().value());
+            MoneyItems.of(sku.additionalPrice()), sku.saleStatus().toMetadata(), sku.weightGrams(), sku.hsCode() == null ? null : sku.hsCode().value(),
+            sku.barcode() == null ? null : sku.barcode().value());
     }
 
     private ProductImageAdminItem toImageItem(ProductImage image) {

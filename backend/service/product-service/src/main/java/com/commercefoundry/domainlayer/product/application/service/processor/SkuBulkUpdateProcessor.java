@@ -12,7 +12,9 @@ import com.commercefoundry.domainlayer.product.domain.model.LegacyPriceWritePlan
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.ProductPricing;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
+import com.commercefoundry.domainlayer.product.domain.model.SkuBarcode;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -46,8 +48,15 @@ public class SkuBulkUpdateProcessor {
             throw new SkuAdminException(SkuAdminErrorCode.SKU_SET_INVALID);
         }
         var byId = existing.stream().collect(Collectors.toMap(Sku::id, Function.identity()));
-        var changed = requested.stream().map(item -> byId.get(item.skuId()).withEditableProperties(
-            item.additionalPrice(), item.saleStatus(), item.weightGrams(), item.hsCode())).toList();
+        var changed = requested.stream().map(item -> {
+            Sku sku = byId.get(item.skuId());
+            SkuBarcode barcode = updatedBarcode(item.barcode(), sku.barcode());
+            return sku.withEditableProperties(item.additionalPrice(), item.saleStatus(), item.weightGrams(), item.hsCode(), barcode);
+        }).toList();
+        var barcodes = changed.stream().map(Sku::barcode).filter(Objects::nonNull).toList();
+        if (barcodes.stream().distinct().count() != barcodes.size()) {
+            throw new SkuAdminException(SkuAdminErrorCode.BARCODE_DUPLICATED);
+        }
         ProductPricing.violation(current.salePrice(), current.listPrice(), changed.stream()
             .map(sku -> new ProductPricing.SkuPrice(sku.additionalPrice(), sku.saleStatus())).toList())
             .ifPresent(reason -> { throw new SkuAdminException(SkuAdminErrorCode.PRICE_INVALID, reason); });
@@ -68,6 +77,20 @@ public class SkuBulkUpdateProcessor {
             legacyPrices.write(plan);
         } catch (LegacyPriceWritePlan.RequestRuleViolationException exception) {
             throw new SkuAdminException(SkuAdminErrorCode.PRICE_INVALID, exception.getMessage());
+        }
+    }
+
+    private SkuBarcode updatedBarcode(String input, SkuBarcode current) {
+        if (input == null) {
+            return current;
+        }
+        if (input.isEmpty()) {
+            return null;
+        }
+        try {
+            return new SkuBarcode(input);
+        } catch (IllegalArgumentException exception) {
+            throw new SkuAdminException(SkuAdminErrorCode.BARCODE_INVALID, exception);
         }
     }
 

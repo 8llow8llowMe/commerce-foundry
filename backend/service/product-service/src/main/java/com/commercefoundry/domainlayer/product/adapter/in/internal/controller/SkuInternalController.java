@@ -1,10 +1,13 @@
 package com.commercefoundry.domainlayer.product.adapter.in.internal.controller;
 
 import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.request.SkuBarcodeResolveRequest;
+import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuBarcodeResolveResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
 import com.commercefoundry.domainlayer.product.application.exception.ProductValidationMessage;
 import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
 import io.swagger.v3.oas.annotations.Hidden;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -14,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -21,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 서비스 간 SKU 벌크 조회 — 장바구니 · 주문 생성이 SKU 마다 따로 부르지 않게 한 번에 받는다 ({@code coding-conventions.md} §9-6).
  *
- * <p>호출자는 order-service 하나다. 권한은 서비스 간 인증(#51)의 {@code SERVICE_<spring.application.name>} 이고, 허용 호출자가 아니면 거절한다
+ * <p>SKU 아이디 조회는 order-service, 포장 검수용 바코드 조회는 delivery-service만 호출한다. 권한은 서비스 간 인증(#51)의 {@code SERVICE_<spring.application.name>} 이고, 허용 호출자가 아니면 거절한다
  * (닫힌 쪽). 서비스 토큰이 없거나 틀린 요청은 internal 보안 체인이 이 컨트롤러에 닿기 전에 401({@code SECURITY_007})로 막는다
  * ({@code security-guide.md} §9).
  *
@@ -48,5 +53,11 @@ public class SkuInternalController {
         List<@NotNull(message = ProductValidationMessage.ID_POSITIVE) @Positive(message = ProductValidationMessage.ID_POSITIVE) Long> ids
     ) {
         return ResponseEntity.ok().body(Response.success(skuInternalUseCase.getSkus(ids)));
+    }
+
+    @PreAuthorize("hasAuthority('SERVICE_delivery-service')")
+    @PostMapping("/barcodes/resolve")
+    public ResponseEntity<Response<SkuBarcodeResolveResponse>> resolveBarcodes(@Valid @RequestBody SkuBarcodeResolveRequest request) {
+        return ResponseEntity.ok().body(Response.success(skuInternalUseCase.resolveBarcodes(request.barcodes())));
     }
 }

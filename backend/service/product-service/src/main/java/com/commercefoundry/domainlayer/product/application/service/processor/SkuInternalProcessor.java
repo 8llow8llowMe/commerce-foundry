@@ -8,6 +8,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductOptio
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.SkuBarcodeQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
 import com.commercefoundry.domainlayer.product.domain.model.OptionValue;
@@ -31,6 +32,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 서비스 간 SKU 벌크 조회 (주문 생성 · 장바구니 가격 확인). 쿼리는 SKU → 상품(숨김 · 삭제 포함) → 재고 → 옵션 값 → 옵션 그룹 5번이고 모두 in 절이다.
@@ -59,11 +61,19 @@ public class SkuInternalProcessor {
         .thenComparingLong(option -> option.value().id());
 
     private final SkuRepositoryPort skuRepositoryPort;
+
     private final ProductRepositoryPort productRepositoryPort;
     private final StockRepositoryPort stockRepositoryPort;
     private final ProductOptionRepositoryPort productOptionRepositoryPort;
     private final ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
     private final StoreProperties storeProperties;
+
+    /** 출고 대상은 주문 스냅숏이 정하므로 현재 판매·노출 상태로 바코드를 제한하지 않는다. */
+    @Transactional(readOnly = true, timeout = 5)
+    public Map<String, Long> resolveBarcodes(List<String> barcodes) {
+        return skuRepositoryPort.findSkuIdsByBarcodes(new LinkedHashSet<>(barcodes)).stream()
+            .collect(Collectors.toUnmodifiableMap(SkuBarcodeQueryResult::barcode, SkuBarcodeQueryResult::skuId));
+    }
 
     /**
      * @param skuIds 요청 순서 그대로. 중복은 첫 등장 순서로 한 번만 센다

@@ -3,12 +3,15 @@ package com.commercefoundry.domainlayer.product.adapter.in.internal.presenter;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.CustomOrderFieldInternalItem;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuInternalItem;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuOptionValueInternalItem;
+import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuBarcodeResolveResponse;
 import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.response.SkuInternalResponse;
 import com.commercefoundry.commerce.support.web.MoneyItems;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldDefinition;
 import com.commercefoundry.domainlayer.product.application.info.SkuInternalInfo;
 import com.commercefoundry.domainlayer.product.application.info.SkuOptionValueInfo;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -18,6 +21,12 @@ public class SkuInternalPresenter {
         return SkuInternalResponse.builder()
             .skus(skus.stream().map(this::toItem).toList())
             .build();
+    }
+
+    public SkuBarcodeResolveResponse toBarcodeResponse(Map<String, Long> skuIdsByBarcode) {
+        return new SkuBarcodeResolveResponse(skuIdsByBarcode.entrySet().stream().collect(Collectors.toUnmodifiableMap(
+            Map.Entry::getKey, entry -> String.valueOf(entry.getValue())
+        )));
     }
 
     private SkuInternalItem toItem(SkuInternalInfo sku) {

@@ -82,7 +82,7 @@ class PriceMigrationReadIntegrationTest {
         boolean h2 = isH2();
         var protectedBefore = protectedStructure();
         // 오직 테스트 전용 DB에서 손상 원천을 주입한다. 운영 DDL·엔티티는 바꾸지 않는다.
-        // unrelated CHECK·SKU 옵션 UNIQUE·PK·NOT NULL은 보존한다.
+        // unrelated CHECK·SKU 옵션 및 바코드 UNIQUE·PK·NOT NULL은 보존한다.
         for (Lane lane : Lane.values()) {
             String table = table(lane);
             // PostgreSQL information_schema는 NOT NULL도 합성 CHECK로 노출한다.
@@ -121,7 +121,7 @@ class PriceMigrationReadIntegrationTest {
                 }
             }
         }
-        assertThat(protectedStructure()).as("손상 fixture 준비가 NOT NULL·PK·SKU 옵션 UNIQUE를 보존한다").isEqualTo(protectedBefore);
+        assertThat(protectedStructure()).as("손상 fixture 준비가 NOT NULL·PK·SKU UNIQUE를 보존한다").isEqualTo(protectedBefore);
     }
 
     private boolean isH2() {
@@ -142,7 +142,8 @@ class PriceMigrationReadIntegrationTest {
             + "and (constraint_type='PRIMARY KEY' or (table_name='sku' and constraint_type='UNIQUE')) order by table_name,constraint_name");
         assertThat(constraints).filteredOn(constraint -> "PRIMARY KEY".equals(constraint.get("constraint_type"))).hasSize(4);
         assertThat(constraints).filteredOn(constraint -> "UNIQUE".equals(constraint.get("constraint_type")))
-            .singleElement().satisfies(constraint -> assertThat(constraint.get("constraint_name")).isEqualTo("uk_sku_product_id_option_value_key"));
+            .extracting(constraint -> constraint.get("constraint_name"))
+            .containsExactlyInAnyOrder("uk_sku_product_id_option_value_key", "uk_sku_barcode");
         return List.of(columns, constraints);
     }
 
