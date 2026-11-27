@@ -10,11 +10,14 @@ import java.util.Set;
 /**
  * 상단 메뉴 트리 규칙. 숨김 항목도 같은 규칙으로 검증한다(나중에 노출로 바꿔도 안전해야 한다).
  * 상한: 전체 {@value #MAX_ITEMS}개, 깊이 {@value #MAX_DEPTH}단계, 한 부모 아래 {@value #MAX_CHILDREN}개.
+ * 표시명은 두 언어 1~{@value #MAX_LABEL}자, 설명은 없거나 두 언어 1~{@value #MAX_DESCRIPTION}자. primary·shortcut 은 최상위 항목만 켠다.
  */
 public final class StoreNavigationValidator {
     public static final int MAX_ITEMS = 60;
     public static final int MAX_DEPTH = 3;
     public static final int MAX_CHILDREN = 20;
+    public static final int MAX_LABEL = 40;
+    public static final int MAX_DESCRIPTION = 80;
     private static final String KEY_PATTERN = "[a-z0-9][a-z0-9-]{0,39}";
 
     private StoreNavigationValidator() {
@@ -84,8 +87,15 @@ public final class StoreNavigationValidator {
         if (item.labels() == null) {
             fail(Reason.LABELS);
         }
-        text(item.labels().ko());
-        text(item.labels().en());
+        text(item.labels().ko(), MAX_LABEL, Reason.LABELS);
+        text(item.labels().en(), MAX_LABEL, Reason.LABELS);
+        if (item.descriptions() != null) {
+            text(item.descriptions().ko(), MAX_DESCRIPTION, Reason.DESCRIPTION);
+            text(item.descriptions().en(), MAX_DESCRIPTION, Reason.DESCRIPTION);
+        }
+        if ((item.primary() || item.shortcut()) && item.parentKey() != null) {
+            fail(Reason.PLACEMENT);
+        }
         switch (type) {
             case INTERNAL -> {
                 urls.validateInternal(item.url());
@@ -124,9 +134,9 @@ public final class StoreNavigationValidator {
         }
     }
 
-    private static void text(String value) {
-        if (value == null || value.isBlank() || value.length() > 40 || value.codePoints().anyMatch(Character::isISOControl)) {
-            fail(Reason.LABELS);
+    private static void text(String value, int max, Reason reason) {
+        if (value == null || value.isBlank() || value.length() > max || value.codePoints().anyMatch(Character::isISOControl)) {
+            fail(reason);
         }
     }
 

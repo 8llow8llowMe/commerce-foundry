@@ -6,4 +6,5 @@ import com.commercefoundry.domainlayer.storenavigation.application.command.Store
 public interface StoreNavigationAdminUseCase {
     StoreNavigationAdminResponses.Detail detail();
     StoreNavigationAdminResponses.Detail save(long actorMemberId, StoreNavigationCommands.SaveDraft command);
+    StoreNavigationAdminResponses.Detail publish(long actorMemberId, StoreNavigationCommands.Publish command);
 }

@@ -28,12 +28,32 @@ public class StoreNavigationProcessor {
         return info(port.detail().orElseThrow(() -> new StoreNavigationException(StoreNavigationErrorCode.NOT_FOUND)));
     }
 
+    /** 공개 트리는 게시본에서만 만든다. 초안은 내리지 않으며 언어 fallback 은 없다. 미등록·미게시는 404 다. */
+    public StoreNavigationInfos.Published published(String locale) {
+        if (!"ko".equals(locale) && !"en".equals(locale)) {
+            throw new StoreNavigationException(StoreNavigationErrorCode.INVALID_REQUEST);
+        }
+        var revision = port.published().orElseThrow(() -> new StoreNavigationException(StoreNavigationErrorCode.NOT_FOUND));
+        return new StoreNavigationInfos.Published(revision.content().publicTree(locale));
+    }
+
     public StoreNavigationInfos.Detail save(long actorMemberId, StoreNavigationCommands.SaveDraft command) {
         return write(() -> {
-            version(command.expectedVersion());
+            version(command.expectedVersion(), false);
             StoreNavigationValidator.validate(command.content(), urls);
             return port.saveDraft(command.expectedVersion(), command.content().ordered(), idGenerator.generateId(),
                 actorMemberId, clock.instant().truncatedTo(ChronoUnit.MICROS));
+        });
+    }
+
+    public StoreNavigationInfos.Detail publish(long actorMemberId, StoreNavigationCommands.Publish command) {
+        return write(() -> {
+            version(command.expectedVersion(), true);
+            if (command.revisionNumber() == null || command.revisionNumber() < 1) {
+                throw new StoreNavigationException(StoreNavigationErrorCode.REVISION);
+            }
+            return port.publish(command.expectedVersion(), command.revisionNumber(), actorMemberId,
+                clock.instant().truncatedTo(ChronoUnit.MICROS));
         });
     }
 
@@ -45,8 +65,8 @@ public class StoreNavigationProcessor {
         }
     }
 
-    private void version(Long version) {
-        if (version != null && version < 0) {
+    private void version(Long version, boolean required) {
+        if ((required && version == null) || (version != null && version < 0)) {
             throw new StoreNavigationException(StoreNavigationErrorCode.VERSION);
         }
     }

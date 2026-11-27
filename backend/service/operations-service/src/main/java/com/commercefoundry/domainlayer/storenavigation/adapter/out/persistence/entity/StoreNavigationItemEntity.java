@@ -14,6 +14,7 @@ import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.ColumnDefault;
 
 /**
  * 리비전별 불변 메뉴 항목. 편집용 key 가 리비전 안에서만 유일하므로 PK 는 (리비전, key) 다.
@@ -29,7 +30,10 @@ import lombok.NoArgsConstructor;
         @CheckConstraint(name = "ck_store_navigation_item_parent", constraint = "parent_key is null or parent_key <> item_key"),
         @CheckConstraint(name = "ck_store_navigation_item_target", constraint = "(type in ('INTERNAL', 'EXTERNAL') and url is not null"
             + " and category_id is null) or (type = 'CATEGORY' and url is null and category_id > 0)"
-            + " or (type = 'NONE' and url is null and category_id is null)")})
+            + " or (type = 'NONE' and url is null and category_id is null)"),
+        @CheckConstraint(name = "ck_store_navigation_item_description", constraint = "(description_ko is null and description_en is null)"
+            + " or (description_ko is not null and description_en is not null)"),
+        @CheckConstraint(name = "ck_store_navigation_item_placement", constraint = "parent_key is null or (primary_menu = false and shortcut_menu = false)")})
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class StoreNavigationItemEntity {
     @Id
@@ -53,6 +57,12 @@ public class StoreNavigationItemEntity {
     @Column(nullable = false, updatable = false, length = 40, comment = "영문 표시명")
     private String labelEn;
 
+    @Column(updatable = false, length = 80, comment = "국문 한 줄 설명 (없으면 영문과 함께 null)")
+    private String descriptionKo;
+
+    @Column(updatable = false, length = 80, comment = "영문 한 줄 설명 (없으면 국문과 함께 null)")
+    private String descriptionEn;
+
     @Column(updatable = false, length = 2048, comment = "검증한 내부 경로 또는 외부 HTTPS 주소 (CATEGORY·NONE 은 null)")
     private String url;
 
@@ -65,6 +75,15 @@ public class StoreNavigationItemEntity {
     @Column(nullable = false, updatable = false, comment = "공개 노출 여부")
     private boolean visible;
 
+    // primary 는 SQL 예약어라 컬럼 이름을 primary_menu 로 둔다. 기본값은 기존 행이 있는 테이블에 컬럼을 더할 때를 위해 DDL 에도 둔다.
+    @ColumnDefault("false")
+    @Column(nullable = false, updatable = false, comment = "PC 헤더 1차 메뉴 노출 (최상위 항목만)")
+    private boolean primaryMenu;
+
+    @ColumnDefault("false")
+    @Column(nullable = false, updatable = false, comment = "모바일 헤더 바로가기 노출 (최상위 항목만)")
+    private boolean shortcutMenu;
+
     public static StoreNavigationItemEntity create(long revisionId, StoreNavigationContent.Item item) {
         var entity = new StoreNavigationItemEntity();
         entity.revisionId = revisionId;
@@ -73,16 +92,21 @@ public class StoreNavigationItemEntity {
         entity.type = item.type();
         entity.labelKo = item.labels().ko();
         entity.labelEn = item.labels().en();
+        entity.descriptionKo = item.descriptions() == null ? null : item.descriptions().ko();
+        entity.descriptionEn = item.descriptions() == null ? null : item.descriptions().en();
         entity.url = item.url();
         entity.categoryId = item.categoryId();
         entity.displayOrder = item.displayOrder();
         entity.visible = item.visible();
+        entity.primaryMenu = item.primary();
+        entity.shortcutMenu = item.shortcut();
         return entity;
     }
 
     public StoreNavigationContent.Item toDomain() {
-        return new StoreNavigationContent.Item(itemKey, parentKey, type, new StoreNavigationContent.Text(labelKo, labelEn), url,
-            categoryId, displayOrder, visible);
+        var descriptions = descriptionKo == null && descriptionEn == null ? null : new StoreNavigationContent.Text(descriptionKo, descriptionEn);
+        return new StoreNavigationContent.Item(itemKey, parentKey, type, new StoreNavigationContent.Text(labelKo, labelEn), descriptions, url,
+            categoryId, displayOrder, visible, primaryMenu, shortcutMenu);
     }
 
     /** 복합 PK. 필드 이름·타입은 위 {@code @Id} 필드와 같아야 한다. */
