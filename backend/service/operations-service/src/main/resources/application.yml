@@ -65,6 +65,10 @@ commerce:
     outbox:
       relay:
         lock-table: operations.shedlock
+  # 상단 메뉴 EXTERNAL 링크에 허용할 정확한 외부 DNS 호스트 (쉼표 구분, 기본 비어 있음 = 외부 링크 전부 거부, 비밀 아님). 푸터 목록과 따로 둔다.
+  store:
+    navigation:
+      allowed-external-hosts: ${STORE_NAVIGATION_ALLOWED_EXTERNAL_HOSTS:}
 
 # 서비스 간 호출 서킷 (coding-conventions.md §10). adapter/out/client/support 의 *InternalResponseSupport 가 인스턴스 이름으로 감싼다.
 # spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다 — 서킷과 예외 변환을 한 곳(support)에서 한다
