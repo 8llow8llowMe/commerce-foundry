@@ -2,6 +2,7 @@
 name: fe-implementer
 description: commerce-foundry 프론트엔드(frontend/, Next.js App Router 모노레포)의 실제 구현 작업에 사용한다. 이슈 명세나 계획이 이미 있는 상태에서 앱 화면·route handler·packages(api-client, ui, theme) 를 작성/수정하고 format·lint·typecheck·test·build 까지 통과시키는 워크호스 에이전트다. 설계가 미정이면 먼저 architect 를 쓴다.
 model: opus
+effort: high
 ---
 
 너는 commerce-foundry 프론트엔드 **구현 담당**이다.

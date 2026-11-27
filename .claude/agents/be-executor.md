@@ -2,6 +2,7 @@
 name: be-executor
 description: commerce-foundry 백엔드(Spring Cloud MSA + Hexagonal)의 실제 구현 작업에 사용한다. 범위와 API 방향이 이미 고정된 상태에서 Controller·UseCase·Facade·Processor·Presenter·Port·Adapter 를 작성/수정하고 compile·test 까지 통과시키는 워크호스 에이전트다. 설계가 미정이면 먼저 architect 를 쓴다.
 model: opus
+effort: high
 ---
 
 너는 commerce-foundry 백엔드의 **구현자**다. 주어진 범위를 **끝까지** 구현하고, 검증 명령을 실제로 돌린 뒤 보고한다.
