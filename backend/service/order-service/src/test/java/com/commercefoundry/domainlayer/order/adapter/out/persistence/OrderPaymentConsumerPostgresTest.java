@@ -14,6 +14,7 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 import com.commercefoundry.domainlayer.order.application.model.StockConfirmation;
 import com.commercefoundry.domainlayer.order.application.model.VerifiedPayment;
+import com.commercefoundry.domainlayer.order.application.port.out.query.StockConfirmationQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
@@ -185,6 +186,162 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
             command.eventId(), otherEvent)).isEqualTo(2);
         assertThat(freshJdbc().queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(command.orderId())))
             .isEqualTo(fullyCanceled ? 0 : 1);
+    }
+
+    @Test
+    void abandonedConfirmationFencesStalePaidAndRecoversWithoutAnotherPaymentReply() throws Exception {
+        var losing = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservation = originalReservation(losing);
+        var entered = new CountDownLatch(1);
+        var confirmed = new CountDownLatch(1);
+        when(stock.confirm(reservation)).thenAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(workLedger.findByReservationId(reservation).orElseThrow().origin().name()).isEqualTo("CONFIRMATION_ATTEMPT");
+            entered.countDown();
+            awaitLatch(confirmed);
+            return new StockConfirmationQueryResult(reservation, losing.orderId());
+        });
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var inFlight = executor.submit(() -> facade.approve(losing));
+            try {
+                awaitLatch(entered);
+                long claim = workLedger.findByReservationId(reservation).orElseThrow().claimId();
+                processor.complete(losing, verified(losing), StockConfirmation.stockUnavailable());
+                makeDue(claim);
+                sweepBatch();
+                assertThat(workLedger.findByClaimId(claim).orElseThrow().origin().name()).isEqualTo("ABANDONED_CONFIRMATION");
+                verify(stock, never()).release(reservation, losing.orderId());
+
+                var stale = new PaymentApprovalCommand(UUID.randomUUID(), IDS.incrementAndGet(), losing.orderId(), losing.memberId(),
+                    losing.amount(), NOW, "CARD");
+                assertThat(processor.prepareConfirmation(verified(stale), reservation, stale.eventId())).isFalse();
+                processor.complete(stale, verified(stale), StockConfirmation.confirmed(reservation));
+                assertThat(payments.findPaidByOrderId(losing.orderId())).isEmpty();
+            } finally {
+                confirmed.countDown();
+            }
+            inFlight.get(20, TimeUnit.SECONDS);
+        }
+        long claim = workLedger.findByReservationId(reservation).orElseThrow().claimId();
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservation, losing.orderId());
+        makeDue(claim);
+        sweepBatch();
+        var restored = workLedger.findByClaimId(claim).orElseThrow();
+        assertThat(restored.status().name()).isEqualTo("RESTORED");
+        verify(restorations).restoreCancellation(claim, reservation, new java.util.TreeMap<>(Map.of(101L, 1)));
+        assertThat(payments.findByPaymentId(losing.paymentId()).orElseThrow().restoredAt()).isNull();
+        assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(losing.orderId())))
+            .isEqualTo(2);
+    }
+
+    @Test
+    void sweepPreservesWinningPaidReservationAndRecoversOnlyDifferentCandidate() {
+        var losing = arrange(OrderStatus.PENDING_PAYMENT);
+        long winnerReservation = originalReservation(losing);
+        long otherReservation = IDS.incrementAndGet();
+        assertThat(processor.prepareConfirmation(verified(losing), otherReservation, losing.eventId())).isTrue();
+        long claim = workLedger.findByReservationId(otherReservation).orElseThrow().claimId();
+        makeDue(claim);
+        sweepBatch();
+        assertThat(workLedger.findByClaimId(claim).orElseThrow().origin().name()).isEqualTo("CONFIRMATION_ATTEMPT");
+        verifyNoInteractions(stock, restorations);
+
+        var winner = new PaymentApprovalCommand(UUID.randomUUID(), IDS.incrementAndGet(), losing.orderId(), losing.memberId(),
+            losing.amount(), NOW, "CARD");
+        assertThat(processor.prepareConfirmation(verified(winner), winnerReservation, winner.eventId())).isTrue();
+        processor.complete(winner, verified(winner), StockConfirmation.confirmed(winnerReservation));
+        assertThat(workLedger.findByReservationId(winnerReservation)).isEmpty();
+
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(otherReservation, losing.orderId());
+        makeDue(claim);
+        sweepBatch();
+        makeDue(claim);
+        sweepBatch();
+        assertThat(workLedger.findByClaimId(claim).orElseThrow().status().name()).isEqualTo("RESTORED");
+        verify(stock, never()).release(winnerReservation, losing.orderId());
+        verify(restorations).restoreCancellation(eq(claim), eq(otherReservation), any());
+        assertThat(payments.findPaidByOrderId(losing.orderId()).orElseThrow().stockReservationId()).isEqualTo(winnerReservation);
+        assertThat(payments.findByPaymentId(losing.paymentId())).isEmpty();
+        verifyNoInteractions(remotePayment);
+    }
+
+    @Test
+    void candidateInsertCommitFailurePreventsConfirmAndAbandonmentCommitFailurePreventsProductCall() {
+        var command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservation = originalReservation(command);
+        try {
+            installFailure(command, true, false);
+            assertThat(sqlState(org.assertj.core.api.Assertions.catchThrowable(() -> facade.approve(command)))).isEqualTo("P0001");
+            assertThat(workLedger.findByReservationId(reservation)).isEmpty();
+            verifyNoInteractions(stock, restorations);
+        } finally {
+            removeFailure(command, true);
+        }
+        assertThat(processor.prepareConfirmation(verified(command), reservation, command.eventId())).isTrue();
+        processor.complete(command, verified(command), StockConfirmation.stockUnavailable());
+        long claim = workLedger.findByReservationId(reservation).orElseThrow().claimId();
+        try {
+            installSweepCommitFailure(command, "new.origin='ABANDONED_CONFIRMATION'");
+            makeDue(claim);
+            sweepBatch();
+            assertThat(workLedger.findByClaimId(claim).orElseThrow().origin().name()).isEqualTo("CONFIRMATION_ATTEMPT");
+            verifyNoInteractions(stock, restorations);
+        } finally {
+            removeFailure(command, true);
+        }
+        makeDue(claim);
+        sweepBatch();
+        assertThat(workLedger.findByClaimId(claim).orElseThrow().origin().name()).isEqualTo("ABANDONED_CONFIRMATION");
+        makeDue(claim);
+        sweepBatch();
+        verify(stock).release(reservation, command.orderId());
+        verifyNoInteractions(restorations);
+        assertThat(workLedger.findByClaimId(claim)).isEmpty();
+    }
+
+    @Test
+    void abandonedRestoreCompletionCommitFailureRetriesIdenticalClaimWithoutReplyOrInbox() {
+        var command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservation = originalReservation(command);
+        assertThat(processor.prepareConfirmation(verified(command), reservation, command.eventId())).isTrue();
+        processor.complete(command, verified(command), StockConfirmation.stockUnavailable());
+        long claim = workLedger.findByReservationId(reservation).orElseThrow().claimId();
+        makeDue(claim);
+        sweepBatch();
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservation, command.orderId());
+        var order = orders.findById(command.orderId()).orElseThrow();
+        try {
+            installSweepCommitFailure(command, "new.status='RESTORED'");
+            makeDue(claim);
+            sweepBatch();
+            var pending = workLedger.findByClaimId(claim).orElseThrow();
+            assertThat(pending.status().name()).isEqualTo("RESTORE_PENDING");
+            assertThat(sqlState(org.assertj.core.api.Assertions.catchThrowable(() -> sweepProcessor.completeConfirmation(pending, true))))
+                .isEqualTo("P0001");
+        } finally {
+            removeFailure(command, true);
+        }
+        makeDue(claim);
+        sweepBatch();
+        assertThat(workLedger.findByClaimId(claim).orElseThrow().status().name()).isEqualTo("RESTORED");
+        verify(restorations, times(2)).restoreCancellation(eq(claim), eq(reservation), any());
+        verifyNoInteractions(remotePayment);
+        assertThat(orders.findById(command.orderId()).orElseThrow()).isEqualTo(order);
+        assertThat(jdbc.queryForObject("select count(*) from orders.processed_event where event_id=?", Long.class, command.eventId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(command.orderId())))
+            .isEqualTo(1);
+    }
+
+    private long originalReservation(PaymentApprovalCommand command) {
+        return jdbc.queryForObject("select stock_reservation_id from orders.orders where id=?", Long.class, command.orderId());
+    }
+
+    private void makeDue(long claim) {
+        jdbc.update("update orders.order_stock_restoration set next_attempt_at=? where claim_id=?", java.sql.Timestamp.from(NOW), claim);
+    }
+
+    private static VerifiedPayment verified(PaymentApprovalCommand command) {
+        return new VerifiedPayment(command.paymentId(), command.orderId(), command.memberId(), command.amount(), NOW, "DONE");
     }
 
     @Test
@@ -529,12 +686,19 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
     @Test
     void kafkaRedeliversAfterActualNowaitExhaustionAndCommitsPaidExactlyOnce() throws Exception {
         var command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservation = originalReservation(command);
+        CountDownLatch confirmEntered = new CountDownLatch(1);
         CountDownLatch holding = new CountDownLatch(1);
         CountDownLatch releaseLock = new CountDownLatch(1);
         CountDownLatch exhausted = new CountDownLatch(1);
         CountDownLatch committed = new CountDownLatch(1);
         AtomicInteger failures = new AtomicInteger();
         AtomicInteger deliveries = new AtomicInteger();
+        when(stock.confirm(reservation)).thenAnswer(invocation -> {
+            confirmEntered.countDown();
+            awaitLatch(holding);
+            return new StockConfirmationQueryResult(reservation, command.orderId());
+        });
         String topic = "commerce-foundry.test.payment.nowait-" + UUID.randomUUID();
         var codec = new EventEnvelopeCodec(65536);
         var envelope = new EventEnvelope(command.eventId(), "payment-approved", 1, NOW, "payment", "payment", Long.toString(command.orderId()),
@@ -548,13 +712,15 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
             new StringDeserializer(), new StringDeserializer());
         ConcurrentMessageListenerContainer<String, String> container = null;
         try (var executor = Executors.newSingleThreadExecutor(); var admin = AdminClient.create(Map.of("bootstrap.servers", bootstrapServers()))) {
-            var lockHolder = executor.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(tx -> {
-                orders.findByIdAndMemberIdForUpdate(command.orderId(), command.memberId()).orElseThrow();
-                holding.countDown();
-                awaitLatch(releaseLock);
-            }));
+            var lockHolder = executor.submit(() -> {
+                awaitLatch(confirmEntered);
+                new TransactionTemplate(transactions).executeWithoutResult(tx -> {
+                    orders.findByIdAndMemberIdForUpdate(command.orderId(), command.memberId()).orElseThrow();
+                    holding.countDown();
+                    awaitLatch(releaseLock);
+                });
+            });
             try {
-                assertThat(holding.await(10, TimeUnit.SECONDS)).isTrue();
                 admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1), new NewTopic(topic + ".dlt", 1, (short) 1))).all().get(10, TimeUnit.SECONDS);
                 container = startConsumer(topic, consumers, kafka, deliveries, failure -> {
                     assertThat(failure).isInstanceOf(IllegalStateException.class).hasMessage("order payment conflict retry exhausted");
@@ -565,11 +731,13 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
                 });
                 kafka.send(topic, envelope.aggregateId(), codec.encode(envelope)).get(10, TimeUnit.SECONDS);
                 assertThat(exhausted.await(30, TimeUnit.SECONDS)).isTrue();
+                assertThat(workLedger.findByReservationId(reservation).orElseThrow().origin().name()).isEqualTo("CONFIRMATION_ATTEMPT");
                 assertThat(payments.findByPaymentId(command.paymentId())).isEmpty();
                 assertThat(inbox.exists("commerce-foundry.test.order.payment-approved", command.eventId())).isFalse();
                 assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=?",
                     Long.class, Long.toString(command.orderId()))).isZero();
             } finally {
+                confirmEntered.countDown();
                 releaseLock.countDown();
                 try {
                     lockHolder.get(20, TimeUnit.SECONDS);
@@ -633,8 +801,9 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
                 assertThatThrownBy(() -> processor.complete(command, verified, StockConfirmation.confirmed(reservationId)))
                     .isInstanceOfAny(PessimisticLockingFailureException.class, jakarta.persistence.PessimisticLockException.class,
                         jakarta.persistence.LockTimeoutException.class);
-                assertThatThrownBy(() -> facade.approve(command))
-                    .isInstanceOf(IllegalStateException.class).hasMessage("order payment conflict retry exhausted");
+                // 전체 승인 흐름은 이제 확정 요청 전에 영속 후보를 준비한다. 주문 잠금을 못 얻으면 이 단계에서 멈춘다.
+                assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(jakarta.persistence.QueryTimeoutException.class);
+                verify(stock, never()).confirm(anyLong());
                 assertThat(payments.findByPaymentId(command.paymentId())).isEmpty();
                 assertThat(inbox.exists("commerce-foundry.test.order.payment-approved", command.eventId())).isFalse();
             } finally {

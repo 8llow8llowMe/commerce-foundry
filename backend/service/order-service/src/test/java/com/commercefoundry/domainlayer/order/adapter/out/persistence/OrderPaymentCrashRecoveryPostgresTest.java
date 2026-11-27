@@ -6,7 +6,11 @@ import static com.commercefoundry.domainlayer.order.support.OrderFixtures.quoteL
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.commercefoundry.domainlayer.order.application.command.PaymentApprovalCommand;
+import com.commercefoundry.domainlayer.order.application.model.StockConfirmation;
+import com.commercefoundry.domainlayer.order.application.model.VerifiedPayment;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.domainlayer.order.support.OrderPaymentCrashChild;
@@ -63,25 +67,31 @@ class OrderPaymentCrashRecoveryPostgresTest {
     private static final AtomicLong IDS = new AtomicLong(91_000_000);
     private static final Instant NOW = Instant.parse("2026-11-02T00:00:00Z");
     @Autowired OrderRepositoryPort orders;
+    @Autowired OrderPaymentProcessor processor;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactions;
 
     @Test
     void killAfterInitialConfirm200ThenFreshJvmCanceledReplayRestoresExactlyOnce() throws Exception {
-        runCrash(false, false);
+        runCrash(false, false, false);
     }
 
     @Test
     void killAfterReReservedPartialCancelRestore200ThenFreshJvmUsesSameClaim() throws Exception {
-        runCrash(true, false);
+        runCrash(true, false, false);
     }
 
     @Test
     void killSweepJvmAfterProduct200ThenFreshSweepUsesSameClaimWithoutInbox() throws Exception {
-        runCrash(true, true);
+        runCrash(true, true, false);
     }
 
-    private void runCrash(boolean reReserved, boolean sweepRecovery) throws Exception {
+    @Test
+    void killLoserAfterConfirmAndKillSweepAfterRestoreThenFreshSweepRecoversWithSameClaim() throws Exception {
+        runCrash(true, false, true);
+    }
+
+    private void runCrash(boolean reReserved, boolean sweepRecovery, boolean abandoned) throws Exception {
         long orderId = IDS.incrementAndGet();
         long paymentId = IDS.incrementAndGet();
         long original = IDS.incrementAndGet();
@@ -91,6 +101,11 @@ class OrderPaymentCrashRecoveryPostgresTest {
         new TransactionTemplate(transactions).executeWithoutResult(tx -> orders.insert(order, OrderStatusHistory.created(IDS.incrementAndGet(), order)));
         if (reReserved) {
             jdbc.update("update orders.orders set status='EXPIRED',version=version+1 where id=?", orderId);
+        }
+        long firstParticipant = abandoned ? IDS.incrementAndGet() : paymentId;
+        if (abandoned) {
+            var firstPayment = new VerifiedPayment(firstParticipant, orderId, 7L, order.quote().totalAmount(), NOW, "DONE");
+            assertThat(processor.prepareConfirmation(firstPayment, replacement, UUID.randomUUID())).isTrue();
         }
         AtomicReference<String> source = new AtomicReference<>("DONE");
         AtomicBoolean barrier = new AtomicBoolean();
@@ -137,7 +152,50 @@ class OrderPaymentCrashRecoveryPostgresTest {
             await().atMost(Duration.ofSeconds(90)).until(() -> barrier.get() || !first.isAlive());
             assertThat(barrier).as("child boundary: %s", diagnostics(temporary.resolve("first.log"))).isTrue();
             assertThat(count("order_payment", "payment_id", paymentId)).isZero();
-            assertThat(count("order_stock_restoration", "payment_id", paymentId)).isZero();
+            var attempt = jdbc.queryForMap("select id, origin, claim_id, stock_reservation_id from orders.order_stock_restoration where payment_id=?",
+                firstParticipant);
+            assertThat(attempt.get("origin")).isEqualTo("CONFIRMATION_ATTEMPT");
+            assertThat(attempt.get("stock_reservation_id")).isEqualTo(reReserved ? replacement : original);
+            if (abandoned) {
+                // 최초 참여 결제는 반영 기록 없이 멈춘다. 두 번째 결제의 확정과 거절은 서로 다른 처리에서 끝난다.
+                assertThat(jdbc.queryForObject("select count(*) from orders.order_stock_confirmation_participant where work_id=? and payment_id=?",
+                    Long.class, attempt.get("id"), paymentId)).isEqualTo(1);
+                assertThat(count("order_payment", "payment_id", firstParticipant)).isZero();
+                var command = new PaymentApprovalCommand(event, paymentId, orderId, 7L, order.quote().totalAmount(), NOW, "CARD");
+                var payment = new VerifiedPayment(paymentId, orderId, 7L, command.amount(), NOW, "DONE");
+                processor.complete(command, payment, StockConfirmation.stockUnavailable());
+                kill(child);
+                long claim = (long) attempt.get("claim_id");
+                resumed = start(temporary, "classify", http, orderId, paymentId, event, "none", "1000");
+                assertSuccess(resumed, temporary.resolve("classify.log"));
+                assertThat(jdbc.queryForObject("select origin from orders.order_stock_restoration where claim_id=?", String.class, claim))
+                    .isEqualTo("ABANDONED_CONFIRMATION");
+                assertThat(restoreRequests).hasValue(0);
+                assertThat(jdbc.queryForObject("select count(*) from orders.order_stock_confirmation_participant where work_id=?",
+                    Long.class, attempt.get("id"))).isZero();
+
+                barrier.set(false);
+                resumed = start(temporary, "sweep-stop", http, orderId, paymentId, event, "restore", "1120");
+                Process interrupted = resumed;
+                await().atMost(Duration.ofSeconds(90)).until(() -> barrier.get() || !interrupted.isAlive());
+                assertThat(barrier).as("sweep boundary: %s", diagnostics(temporary.resolve("sweep-stop.log"))).isTrue();
+                assertThat(jdbc.queryForObject("select status from orders.order_stock_restoration where claim_id=?", String.class, claim))
+                    .isEqualTo("RESTORE_PENDING");
+                kill(resumed);
+
+                resumed = start(temporary, "sweep-resume", http, orderId, paymentId, event, "none", "1360");
+                assertSuccess(resumed, temporary.resolve("sweep-resume.log"));
+                assertThat(jdbc.queryForObject("select status from orders.order_stock_restoration where claim_id=?", String.class, claim))
+                    .isEqualTo("RESTORED");
+                assertThat(restoreRequests).hasValue(2);
+                assertThat(applications).hasValue(1);
+                assertThat(claims).containsExactly("/restore/" + claim + "/" + replacement + "/1");
+                assertThat(row(paymentId).get("result")).isEqualTo("REJECTED_STOCK_UNAVAILABLE");
+                assertThat(row(paymentId).get("restored_at")).isNull();
+                assertThat(inbox(event)).isEqualTo(1);
+                assertThat(outbox(orderId)).isEqualTo(1);
+                return;
+            }
             if (reReserved) {
                 assertThat(jdbc.queryForObject("select stock_reservation_id from orders.order_stock_confirmation where payment_id=?",
                     Long.class, paymentId)).isEqualTo(replacement);
@@ -152,7 +210,7 @@ class OrderPaymentCrashRecoveryPostgresTest {
                 await().atMost(Duration.ofSeconds(90)).until(() -> barrier.get() || !second.isAlive());
                 assertThat(barrier).as("child boundary: %s", diagnostics(temporary.resolve("second.log"))).isTrue();
                 var pending = row(paymentId);
-                assertThat(pending.get("restoration_claim_id")).isNotNull();
+                assertThat(pending.get("restoration_claim_id")).isEqualTo(attempt.get("claim_id"));
                 assertThat(pending.get("restored_at")).isNull();
                 var pendingWork = jdbc.queryForMap("select claim_id, stock_reservation_id, status from orders.order_stock_restoration where payment_id=?", paymentId);
                 assertThat(pendingWork.get("claim_id")).isEqualTo(pending.get("restoration_claim_id"));
@@ -177,25 +235,25 @@ class OrderPaymentCrashRecoveryPostgresTest {
                 } else {
                     resumed = start(temporary, "third", http, orderId, paymentId, event, "none");
                 }
-                assertSuccess(resumed);
+                assertSuccess(resumed, temporary.resolve(sweepRecovery ? "sweep-resume.log" : "third.log"));
                 assertThat(row(paymentId).get("restoration_claim_id")).isEqualTo(pending.get("restoration_claim_id"));
                 assertThat(restoreRequests).hasValue(sweepRecovery ? 3 : 2);
             } else {
-                assertSuccess(resumed);
+                assertSuccess(resumed, temporary.resolve("second.log"));
                 assertThat(restoreRequests).hasValue(1);
             }
             assertThat(row(paymentId).get("result")).isEqualTo("REJECTED_PAYMENT_NOT_DONE");
             assertThat(row(paymentId).get("restored_at")).isNotNull();
             assertThat(count("order_stock_restoration", "payment_id", paymentId)).isEqualTo(1);
             var completedWork = jdbc.queryForMap("select claim_id, status, restored_at from orders.order_stock_restoration where payment_id=?", paymentId);
-            assertThat(completedWork.get("claim_id")).isEqualTo(row(paymentId).get("restoration_claim_id"));
+            assertThat(completedWork.get("claim_id")).isEqualTo(attempt.get("claim_id")).isEqualTo(row(paymentId).get("restoration_claim_id"));
             assertThat(completedWork.get("status")).isEqualTo("RESTORED");
             assertThat(completedWork.get("restored_at")).isEqualTo(row(paymentId).get("restored_at"));
             assertThat(applications).hasValue(1);
             assertThat(inbox(event)).isEqualTo(sweepRecovery ? 0 : 1);
             assertThat(outbox(orderId)).isEqualTo(reReserved ? 1 : 0);
             resumed = start(temporary, "duplicate", http, orderId, paymentId, UUID.randomUUID(), "none");
-            assertSuccess(resumed);
+            assertSuccess(resumed, temporary.resolve("duplicate.log"));
             assertThat(applications).hasValue(1);
             assertThat(outbox(orderId)).isEqualTo(reReserved ? 1 : 0);
         } finally {
@@ -280,9 +338,10 @@ class OrderPaymentCrashRecoveryPostgresTest {
         assertThat(process.exitValue()).isNotZero();
     }
 
-    private static void assertSuccess(Process process) throws Exception {
-        assertThat(process.waitFor(90, TimeUnit.SECONDS)).as("Fresh child completed").isTrue();
-        assertThat(process.exitValue()).isZero();
+    private static void assertSuccess(Process process, Path log) throws Exception {
+        boolean completed = process.waitFor(90, TimeUnit.SECONDS);
+        assertThat(completed).as("Fresh child completed: %s", diagnostics(log)).isTrue();
+        assertThat(process.exitValue()).as("Fresh child exit: %s", diagnostics(log)).isZero();
     }
 
     private Map<String, Object> row(long payment) { return jdbc.queryForMap("select * from orders.order_payment where payment_id=?", payment); }

@@ -343,12 +343,14 @@ public final class ProductValidationMessage {
     (예: `ck_sku_hs_code_format`). `translate(col, '0123456789', '')` 는 H2 에서 문자를 지우지 않아(빈 치환 문자열을 무시) 맞는 값까지 거절한다.
 - PostgreSQL 식별자 상한은 **63자**다. 넘으면 의미를 해치지 않는 범위에서 축약한다. 스냅숏 테스트가 접두어(`idx_` · `uk_` · `ck_` + 테이블명)와 길이를 검사한다.
 
-### 9-4a. 재고 복원 작업원장 CAS 예외 (#582 A)
+### 9-4a. 재고 복원 작업원장 CAS 예외 (#582)
 
 `OrderStockRestorationEntity`만 상태 `@Version`/merge 원칙(§9-1)의 예외다. 최초 INSERT는 `Persistable.isNew()`로 persist하고,
 이후 save/merge는 금지한다. 상태 변경은 도메인이 허용한 전이를 JPQL 조건부 UPDATE로만 반영한다.
 선점·HELD는 기존 상태와 마이크로초 단위 `next_attempt_at`을 비교하고, 선점은 다음 시각을 반드시 앞으로 미룬다.
 완료는 같은 claim의 RESTORE_PENDING·HELD만 RESTORED로 바꾼다. 영향 1행만 성공이며 0행은 경합 패배·종결·부재다.
+#582 C의 후보 전환은 기존 출처·상태·선점 시각이 일치할 때만 허용한다. PAID·PAYMENT_RECORD가 인수한 후보와 해제가 확정된 후보는 출처를 비교해 삭제한다.
+동일 후보를 공유한 추가 결제의 연결은 출처 전환이나 후보 삭제와 함께 제거한다.
 claim·reservation 유니크와 상태 CHECK가 단일 작업·종결 상태 불변식을 보장한다. 모든 쓰기는 호출자 트랜잭션(MANDATORY)에 참여한다.
 일반 상태 엔티티에 이 예외를 확대하지 않는다. 독립 트랜잭션 경합·롤백·커밋 가시성과 DB CHECK를 PostgreSQL 17에서 검증한다.
 
