@@ -985,6 +985,122 @@
     comment on column operations.store_footer_revision.revision_number is
         '리비전 번호';
 
+    create table operations.store_navigation (
+        id bigint not null,
+        latest_revision integer not null,
+        published_revision integer,
+        version bigint not null,
+        primary key (id),
+        constraint ck_store_navigation_singleton check (id = 1),
+        constraint ck_store_navigation_pointers check (latest_revision > 0 and (published_revision is null or (published_revision > 0 and published_revision <= latest_revision))),
+        constraint ck_store_navigation_version check (version >= 0)
+    );
+
+    comment on table operations.store_navigation is
+        '스토어 상단 메뉴 단일 설정 루트';
+
+    comment on column operations.store_navigation.id is
+        '고정 루트 아이디 (1)';
+
+    comment on column operations.store_navigation.latest_revision is
+        '최신 리비전 번호';
+
+    comment on column operations.store_navigation.published_revision is
+        '게시 리비전 번호 (미게시 null)';
+
+    comment on column operations.store_navigation.version is
+        '낙관적 편집 버전';
+
+    create table operations.store_navigation_item (
+        item_key varchar(40) not null,
+        revision_id bigint not null,
+        category_id bigint,
+        display_order integer not null,
+        label_en varchar(40) not null,
+        label_ko varchar(40) not null,
+        parent_key varchar(40),
+        type varchar(20) not null,
+        url varchar(2048),
+        visible boolean not null,
+        primary key (item_key, revision_id),
+        constraint ck_store_navigation_item_type check (type in ('INTERNAL', 'EXTERNAL', 'CATEGORY', 'NONE')),
+        constraint ck_store_navigation_item_order check (display_order between 0 and 999),
+        constraint ck_store_navigation_item_parent check (parent_key is null or parent_key <> item_key),
+        constraint ck_store_navigation_item_target check ((type in ('INTERNAL', 'EXTERNAL') and url is not null and category_id is null) or (type = 'CATEGORY' and url is null and category_id > 0) or (type = 'NONE' and url is null and category_id is null))
+    );
+
+    comment on table operations.store_navigation_item is
+        '상단 메뉴 리비전별 불변 항목';
+
+    comment on column operations.store_navigation_item.item_key is
+        '리비전 안 편집용 항목 key';
+
+    comment on column operations.store_navigation_item.revision_id is
+        '리비전 아이디 (FK: store_navigation_revision.id)';
+
+    comment on column operations.store_navigation_item.category_id is
+        '카테고리 아이디 (외부 FK: product-service category.id, CATEGORY 만)';
+
+    comment on column operations.store_navigation_item.display_order is
+        '같은 상위 항목 안 표시 순서';
+
+    comment on column operations.store_navigation_item.label_en is
+        '영문 표시명';
+
+    comment on column operations.store_navigation_item.label_ko is
+        '국문 표시명';
+
+    comment on column operations.store_navigation_item.parent_key is
+        '같은 리비전의 상위 항목 key (최상위 null)';
+
+    comment on column operations.store_navigation_item.type is
+        '메뉴 유형 제어 코드';
+
+    comment on column operations.store_navigation_item.url is
+        '검증한 내부 경로 또는 외부 HTTPS 주소 (CATEGORY·NONE 은 null)';
+
+    comment on column operations.store_navigation_item.visible is
+        '공개 노출 여부';
+
+    create table operations.store_navigation_revision (
+        id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        created_by bigint not null,
+        navigation_id bigint not null,
+        published_at timestamp(6) with time zone,
+        published_by bigint,
+        revision_number integer not null,
+        primary key (id),
+        constraint uk_store_navigation_revision_navigation_id_revision_number unique (navigation_id, revision_number),
+        constraint ck_store_navigation_revision_number check (revision_number > 0),
+        constraint ck_store_navigation_revision_root check (navigation_id = 1),
+        constraint ck_store_navigation_revision_publication check ((published_by is null and published_at is null) or (published_by is not null and published_at is not null))
+    );
+
+    comment on table operations.store_navigation_revision is
+        '상단 메뉴 불변 리비전';
+
+    comment on column operations.store_navigation_revision.id is
+        '리비전 아이디 (Snowflake)';
+
+    comment on column operations.store_navigation_revision.created_at is
+        '작성 시각 (UTC)';
+
+    comment on column operations.store_navigation_revision.created_by is
+        '작성 관리자 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column operations.store_navigation_revision.navigation_id is
+        '상단 메뉴 루트 아이디 (FK: store_navigation.id)';
+
+    comment on column operations.store_navigation_revision.published_at is
+        '최초 게시 시각 (UTC)';
+
+    comment on column operations.store_navigation_revision.published_by is
+        '최초 게시 관리자 아이디 (외부 FK: auth-service member.id)';
+
+    comment on column operations.store_navigation_revision.revision_number is
+        '리비전 번호';
+
     create table operations.store_profile (
         id bigint not null,
         address varchar(500) not null,
@@ -1073,3 +1189,6 @@
 
     create index idx_outbox_published_at_available_at
        on operations.outbox (published_at, available_at);
+
+    create index idx_store_navigation_item_revision_id
+       on operations.store_navigation_item (revision_id);
