@@ -11,6 +11,9 @@ public final class StoreNavigationValidationMessage {
     public static final String CATEGORY = "STORE_NAV_110:CATEGORY 유형은 양수 카테고리 ID 가 필수이고 다른 유형은 카테고리 ID 를 넣지 않습니다.";
     public static final String ORDER = "STORE_NAV_111:표시 순서는 같은 상위 항목 아래에서 중복 없는 0~999여야 합니다.";
     public static final String VISIBLE = "STORE_NAV_112:노출 여부는 필수입니다.";
+    public static final String REVISION = "STORE_NAV_113:리비전 번호는 양수여야 합니다.";
+    public static final String DESCRIPTION = "STORE_NAV_114:설명은 없거나 두 언어 모두 제어문자 없는 1~80자여야 합니다.";
+    public static final String PLACEMENT = "STORE_NAV_115:PC 1차 메뉴·모바일 바로가기는 최상위 항목만 켤 수 있습니다.";
 
     private StoreNavigationValidationMessage() {
     }

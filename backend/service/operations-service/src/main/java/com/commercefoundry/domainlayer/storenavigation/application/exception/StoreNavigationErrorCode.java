@@ -4,7 +4,7 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 
-/** {@code CONFLICT}, {@code ITEMS}~{@code VISIBLE} 상수 이름은 {@code StoreNavigationRuleException.Reason} 과 같다(Processor 가 이름으로 바꾼다). */
+/** {@code CONFLICT}, {@code ITEMS}~{@code VISIBLE}, {@code DESCRIPTION}, {@code PLACEMENT} 상수 이름은 {@code StoreNavigationRuleException.Reason} 과 같다(Processor 가 이름으로 바꾼다). */
 @Getter
 @RequiredArgsConstructor
 public enum StoreNavigationErrorCode {
@@ -24,6 +24,9 @@ public enum StoreNavigationErrorCode {
     CATEGORY("STORE_NAV_110", "CATEGORY 유형은 양수 카테고리 ID 가 필수이고 다른 유형은 카테고리 ID 를 넣지 않습니다.", HttpStatus.BAD_REQUEST),
     ORDER("STORE_NAV_111", "표시 순서는 같은 상위 항목 아래에서 중복 없는 0~999여야 합니다.", HttpStatus.BAD_REQUEST),
     VISIBLE("STORE_NAV_112", "노출 여부는 필수입니다.", HttpStatus.BAD_REQUEST),
+    REVISION("STORE_NAV_113", "리비전 번호는 양수여야 합니다.", HttpStatus.BAD_REQUEST),
+    DESCRIPTION("STORE_NAV_114", "설명은 없거나 두 언어 모두 제어문자 없는 1~80자여야 합니다.", HttpStatus.BAD_REQUEST),
+    PLACEMENT("STORE_NAV_115", "PC 1차 메뉴·모바일 바로가기는 최상위 항목만 켤 수 있습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_TYPE_INVALID("STORE_NAV_198", "요청 파라미터 형식이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
     PARAMETER_REQUIRED("STORE_NAV_199", "필수 요청 파라미터가 없습니다.", HttpStatus.BAD_REQUEST);
 

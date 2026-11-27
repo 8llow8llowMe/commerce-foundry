@@ -13,6 +13,8 @@ import com.commercefoundry.domainlayer.storenavigation.application.port.out.quer
 import com.commercefoundry.domainlayer.storenavigation.domain.model.StoreNavigation;
 import com.commercefoundry.domainlayer.storenavigation.domain.model.StoreNavigationContent;
 import com.commercefoundry.domainlayer.storenavigation.domain.model.StoreNavigationRevision;
+import com.commercefoundry.domainlayer.storenavigation.domain.model.StoreNavigationUrlPolicy;
+import com.commercefoundry.domainlayer.storenavigation.domain.model.StoreNavigationValidator;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.persistence.PersistenceException;
@@ -37,12 +39,20 @@ public class StoreNavigationRepositoryAdapter implements StoreNavigationReposito
     private final StoreNavigationRevisionRepository revisions;
     private final StoreNavigationItemRepository items;
     private final EntityManager entityManager;
+    private final StoreNavigationUrlPolicy urls;
     private final PlatformTransactionManager transactions;
 
     @Override
     @Transactional(readOnly = true)
     public Optional<StoreNavigationQueryResults.Detail> detail() {
         return navigations.findById(1L).map(entity -> detail(entity.toDomain()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<StoreNavigationRevision> published() {
+        return navigations.findById(1L).map(StoreNavigationEntity::toDomain)
+            .filter(navigation -> navigation.publishedRevision() != null).map(navigation -> revision(navigation.publishedRevision()));
     }
 
     @Override
@@ -66,6 +76,28 @@ public class StoreNavigationRepositoryAdapter implements StoreNavigationReposito
             }
             entityManager.flush();
             return new StoreNavigationQueryResults.Detail(entity.toDomain(), revision);
+        });
+    }
+
+    @Override
+    public StoreNavigationQueryResults.Detail publish(Long expectedVersion, int revisionNumber, long actorMemberId, Instant now) {
+        return commit(false, () -> {
+            var entity = root();
+            var navigation = entity.toDomain();
+            var next = navigation.publish(expectedVersion, revisionNumber);
+            if (next == navigation) {
+                // 현재 게시 리비전의 반복 게시: 버전·게시자·게시 시각을 바꾸지 않는다.
+                return detail(navigation);
+            }
+            var revisionEntity = revisionEntity(revisionNumber);
+            var revision = revision(revisionEntity);
+            // 저장 뒤 배포 설정에서 허용 호스트가 빠졌을 수 있다. 새 게시는 지금 규칙으로 다시 검증한다.
+            StoreNavigationValidator.validate(revision.content(), urls);
+            var published = revision.publish(actorMemberId, now);
+            entity.apply(next);
+            revisionEntity.applyPublication(published);
+            entityManager.flush();
+            return new StoreNavigationQueryResults.Detail(entity.toDomain(), published);
         });
     }
 
@@ -94,9 +126,20 @@ public class StoreNavigationRepositoryAdapter implements StoreNavigationReposito
         return new StoreNavigationQueryResults.Detail(navigation, revision(navigation.latestRevision()));
     }
 
+    private StoreNavigationEntity root() {
+        return navigations.findById(1L).orElseThrow(() -> new StoreNavigationException(StoreNavigationErrorCode.NOT_FOUND));
+    }
+
     private StoreNavigationRevision revision(int revisionNumber) {
-        var entity = revisions.findByNavigationIdAndRevisionNumber(1L, revisionNumber)
+        return revision(revisionEntity(revisionNumber));
+    }
+
+    private StoreNavigationRevisionEntity revisionEntity(int revisionNumber) {
+        return revisions.findByNavigationIdAndRevisionNumber(1L, revisionNumber)
             .orElseThrow(() -> new StoreNavigationException(StoreNavigationErrorCode.NOT_FOUND));
+    }
+
+    private StoreNavigationRevision revision(StoreNavigationRevisionEntity entity) {
         var rows = items.findAllByRevisionIdIn(List.of(entity.getId())).stream().map(StoreNavigationItemEntity::toDomain).toList();
         // 행 순서는 보장되지 않는다. 저장 직후 결과(Processor 가 ordered() 로 넘긴 내용)와 같은 트리 전위 순서로 돌려준다.
         return entity.toDomain(new StoreNavigationContent(rows).ordered());

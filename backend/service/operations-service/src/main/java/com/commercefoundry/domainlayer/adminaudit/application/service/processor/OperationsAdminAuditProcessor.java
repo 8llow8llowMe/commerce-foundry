@@ -44,6 +44,10 @@ public class OperationsAdminAuditProcessor {
         write(OperationsAdminAuditAction.STORE_NAVIGATION_DRAFT_SAVE, actorMemberId, "store-navigation:1", succeeded);
     }
 
+    public void navigationPublished(long actorMemberId, boolean succeeded) {
+        write(OperationsAdminAuditAction.STORE_NAVIGATION_PUBLISH, actorMemberId, "store-navigation:1", succeeded);
+    }
+
     private void legalDocumentFinished(OperationsAdminAuditAction action, long actorMemberId, String type, String locale, boolean succeeded) {
         // Only fixed codes may reach audit metadata; never pass path input or document text.
         String target = ("TERMS".equals(type) || "PRIVACY".equals(type)) && ("ko".equals(locale) || "en".equals(locale))

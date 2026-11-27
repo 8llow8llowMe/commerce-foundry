@@ -17,8 +17,10 @@ public class StoreNavigationAdminPresenter {
     public StoreNavigationAdminResponses.Revision revision(StoreNavigationRevision revision) {
         var items = revision.content().items().stream()
             .map(item -> new StoreNavigationAdminResponses.Item(item.key(), item.parentKey(), item.type(),
-                new StoreNavigationAdminResponses.Text(item.labels().ko(), item.labels().en()), item.url(),
-                item.categoryId() == null ? null : Long.toString(item.categoryId()), item.displayOrder(), item.visible()))
+                new StoreNavigationAdminResponses.Text(item.labels().ko(), item.labels().en()),
+                item.descriptions() == null ? null : new StoreNavigationAdminResponses.Text(item.descriptions().ko(), item.descriptions().en()),
+                item.url(), item.categoryId() == null ? null : Long.toString(item.categoryId()), item.displayOrder(), item.visible(),
+                item.primary(), item.shortcut()))
             .toList();
         return new StoreNavigationAdminResponses.Revision(revision.revisionNumber(), items, Long.toString(revision.createdBy()), revision.createdAt(),
             revision.publishedBy() == null ? null : Long.toString(revision.publishedBy()), revision.publishedAt());

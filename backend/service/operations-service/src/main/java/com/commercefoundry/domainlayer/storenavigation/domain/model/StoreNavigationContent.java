@@ -26,19 +26,29 @@ public record StoreNavigationContent(List<Item> items) {
     /** INTERNAL: 스토어 내부 상대 경로, EXTERNAL: 허용 호스트 https URL, CATEGORY: 카테고리 참조(url 없음), NONE: 링크 없는 묶음 제목. */
     public enum Type { INTERNAL, EXTERNAL, CATEGORY, NONE }
 
-    public record Item(String key, String parentKey, String type, Text labels, String url, Long categoryId,
-                       Integer displayOrder, Boolean visible) {
+    /**
+     * 편집용 메뉴 항목. {@code descriptions} 는 대제목 아래 한 줄 설명(선택, 있으면 두 언어 모두),
+     * {@code primary} 는 PC 1차 메뉴, {@code shortcut} 은 모바일 바로가기 노출이며 둘 다 최상위 항목만 켤 수 있다.
+     */
+    public record Item(String key, String parentKey, String type, Text labels, Text descriptions, String url, Long categoryId,
+                       Integer displayOrder, Boolean visible, boolean primary, boolean shortcut) {
+        /** 설명·노출 위치 없이 만드는 항목(설명 null, primary·shortcut false). */
+        public Item(String key, String parentKey, String type, Text labels, String url, Long categoryId, Integer displayOrder,
+                    Boolean visible) {
+            this(key, parentKey, type, labels, null, url, categoryId, displayOrder, visible, false, false);
+        }
     }
 
-    public record PublicNode(String label, String type, String url, Long categoryId, List<PublicNode> children) {
+    public record PublicNode(String label, String description, String type, String url, Long categoryId, boolean primary,
+                             boolean shortcut, List<PublicNode> children) {
         public PublicNode {
             children = List.copyOf(children);
         }
     }
 
     /**
-     * 검증을 통과한 내용에서 공개 트리를 만든다. 숨김 항목은 하위 전체를 숨기고, 형제는 displayOrder 오름차순이다.
-     * 언어 fallback 은 없다.
+     * 검증을 통과한 내용에서 공개 트리를 만든다. 숨김 항목은 하위 전체를 숨기고(primary·shortcut 도 함께 빠진다),
+     * 형제는 displayOrder 오름차순이다. 언어 fallback 은 없다.
      */
     public List<PublicNode> publicTree(String locale) {
         return nodes(children(), null, locale);
@@ -73,8 +83,9 @@ public record StoreNavigationContent(List<Item> items) {
         return children.getOrDefault(parentKey, List.of()).stream()
             .filter(item -> Boolean.TRUE.equals(item.visible()))
             .sorted(Comparator.comparing(Item::displayOrder))
-            .map(item -> new PublicNode(item.labels().localized(locale), item.type(), item.url(), item.categoryId(),
-                nodes(children, Objects.requireNonNull(item.key()), locale)))
+            .map(item -> new PublicNode(item.labels().localized(locale),
+                item.descriptions() == null ? null : item.descriptions().localized(locale), item.type(), item.url(), item.categoryId(),
+                item.primary(), item.shortcut(), nodes(children, Objects.requireNonNull(item.key()), locale)))
             .toList();
     }
 }

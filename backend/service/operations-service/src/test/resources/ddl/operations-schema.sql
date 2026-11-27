@@ -1015,10 +1015,14 @@
         item_key varchar(40) not null,
         revision_id bigint not null,
         category_id bigint,
+        description_en varchar(80),
+        description_ko varchar(80),
         display_order integer not null,
         label_en varchar(40) not null,
         label_ko varchar(40) not null,
         parent_key varchar(40),
+        primary_menu boolean default false not null,
+        shortcut_menu boolean default false not null,
         type varchar(20) not null,
         url varchar(2048),
         visible boolean not null,
@@ -1026,7 +1030,9 @@
         constraint ck_store_navigation_item_type check (type in ('INTERNAL', 'EXTERNAL', 'CATEGORY', 'NONE')),
         constraint ck_store_navigation_item_order check (display_order between 0 and 999),
         constraint ck_store_navigation_item_parent check (parent_key is null or parent_key <> item_key),
-        constraint ck_store_navigation_item_target check ((type in ('INTERNAL', 'EXTERNAL') and url is not null and category_id is null) or (type = 'CATEGORY' and url is null and category_id > 0) or (type = 'NONE' and url is null and category_id is null))
+        constraint ck_store_navigation_item_target check ((type in ('INTERNAL', 'EXTERNAL') and url is not null and category_id is null) or (type = 'CATEGORY' and url is null and category_id > 0) or (type = 'NONE' and url is null and category_id is null)),
+        constraint ck_store_navigation_item_description check ((description_ko is null and description_en is null) or (description_ko is not null and description_en is not null)),
+        constraint ck_store_navigation_item_placement check (parent_key is null or (primary_menu = false and shortcut_menu = false))
     );
 
     comment on table operations.store_navigation_item is
@@ -1041,6 +1047,12 @@
     comment on column operations.store_navigation_item.category_id is
         '카테고리 아이디 (외부 FK: product-service category.id, CATEGORY 만)';
 
+    comment on column operations.store_navigation_item.description_en is
+        '영문 한 줄 설명 (없으면 국문과 함께 null)';
+
+    comment on column operations.store_navigation_item.description_ko is
+        '국문 한 줄 설명 (없으면 영문과 함께 null)';
+
     comment on column operations.store_navigation_item.display_order is
         '같은 상위 항목 안 표시 순서';
 
@@ -1052,6 +1064,12 @@
 
     comment on column operations.store_navigation_item.parent_key is
         '같은 리비전의 상위 항목 key (최상위 null)';
+
+    comment on column operations.store_navigation_item.primary_menu is
+        'PC 헤더 1차 메뉴 노출 (최상위 항목만)';
+
+    comment on column operations.store_navigation_item.shortcut_menu is
+        '모바일 헤더 바로가기 노출 (최상위 항목만)';
 
     comment on column operations.store_navigation_item.type is
         '메뉴 유형 제어 코드';

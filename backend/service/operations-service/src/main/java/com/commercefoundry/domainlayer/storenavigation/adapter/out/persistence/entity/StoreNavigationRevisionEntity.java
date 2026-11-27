@@ -57,6 +57,14 @@ public class StoreNavigationRevisionEntity {
         return entity;
     }
 
+    /** 최초 게시만 기록한다. 이미 게시된 리비전을 다시 게시해도 처음 게시자·시각은 바뀌지 않는다. */
+    public void applyPublication(StoreNavigationRevision revision) {
+        if (publishedAt == null) {
+            publishedBy = revision.publishedBy();
+            publishedAt = revision.publishedAt();
+        }
+    }
+
     public StoreNavigationRevision toDomain(StoreNavigationContent content) {
         return new StoreNavigationRevision(id, revisionNumber, content, createdBy, createdAt, publishedBy, publishedAt);
     }

@@ -8,4 +8,7 @@ public final class StoreNavigationCommands {
 
     public record SaveDraft(Long expectedVersion, StoreNavigationContent content) {
     }
+
+    public record Publish(Long expectedVersion, Integer revisionNumber) {
+    }
 }
