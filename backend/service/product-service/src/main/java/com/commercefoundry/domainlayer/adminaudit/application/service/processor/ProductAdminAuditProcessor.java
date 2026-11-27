@@ -111,6 +111,15 @@ public class ProductAdminAuditProcessor {
         write(ProductAdminAuditAction.SIZE_CHART_DRAFT_APPLY, actorMemberId, AdminAuditLog.target("size-chart-draft", draftId), succeeded);
     }
 
+    /**
+     * 사이즈표 초안 일괄 제출 요청 한 건 (#737). 여러 상품을 한 번에 다뤄 고정 키를 대상으로 둔다 — 상품 아이디 목록은 싣지 않는다(항목 줄이 따로 있다).
+     *
+     * @param actorMemberId 요청한 운영자 — 항목이 비어 알 수 없으면 {@code null}({@code -})
+     */
+    public void sizeChartDraftBatchCreated(Long actorMemberId, boolean succeeded) {
+        AdminAuditLog.write(ProductAdminAuditAction.SIZE_CHART_DRAFT_BATCH_CREATE.name(), actorMemberId, AdminAuditLog.target("size-chart-draft", "batch"), succeeded);
+    }
+
     public void mediaImageUploadIssued(long actorMemberId, java.util.UUID id, boolean succeeded) {
         write(ProductAdminAuditAction.MEDIA_IMAGE_UPLOAD_ISSUE, actorMemberId,
             id == null ? null : AdminAuditLog.target("media-upload", id.toString()), succeeded);

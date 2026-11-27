@@ -34,11 +34,13 @@ import com.commercefoundry.domainlayer.sizechart.application.port.out.query.Size
 import com.commercefoundry.domainlayer.sizechart.application.port.out.query.SizeChartGenerationResultQueryResult;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.ProductSizeChartProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftApplyProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftBatchProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftInputProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftRemoteProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftValidationProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartTextSourceProcessor;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeRow;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraft;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraftStatus;
@@ -94,7 +96,8 @@ import org.springframework.transaction.support.TransactionTemplate;
     SizeChartTemplateRepositoryAdapter.class, SizeChartDraftRepositoryAdapter.class, ProductSizeChartProcessor.class,
     SizeChartDraftProcessor.class, SizeChartDraftApplyProcessor.class, SizeChartDraftValidationProcessor.class,
     SizeChartDraftRemoteProcessor.class, SizeChartDraftInputProcessor.class, SizeChartDraftFacade.class,
-    SizeChartDraftProperties.class, SizeChartDraftCompletionTest.TimeConfig.class})
+    SizeChartDraftProperties.class, SizeChartTextSourceProcessor.class, SizeChartDraftBatchProcessor.class,
+    SizeChartDraftCompletionTest.TimeConfig.class})
 class SizeChartDraftCompletionTest {
     private static final Instant NOW = Instant.parse("2026-11-17T00:00:00Z");
     private static final String HASH = "c".repeat(64);

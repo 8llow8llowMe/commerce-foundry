@@ -3,14 +3,17 @@ package com.commercefoundry.domainlayer.sizechart.adapter.in.admin.controller;
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.request.SizeChartDraftApplyRequest;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.request.SizeChartDraftBatchCreateRequest;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.request.SizeChartDraftCreateRequest;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.request.SizeChartDraftValidationMessage;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftAcceptedResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftApplyResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftBatchResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftSummaryResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageInspectionResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageSourceResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartTextSourceResponse;
 import com.commercefoundry.domainlayer.sizechart.application.port.in.SizeChartDraftUseCase;
 import com.commercefoundry.persistence.dto.PageResponse;
 import com.commercefoundry.security.audit.AdminAudited;
@@ -65,6 +68,28 @@ public class SizeChartDraftAdminController {
     ) {
         return ResponseEntity.status(HttpStatus.ACCEPTED).cacheControl(CacheControl.noStore())
             .body(Response.success(useCase.createAdmin(request.toCommand(productId, actor.memberId(), UUID.fromString(key)))));
+    }
+
+    @Operation(summary = "본문 사이즈표 텍스트 후보", description = "국문·영문 상세 설명에서 명확한 치수표만 추출합니다. "
+        + "자유 문장이나 민감한 내용이 섞인 표는 제외합니다. 검토한 텍스트와 후보 아이디 및 본문 확인값을 생성 요청에 함께 보내 주세요.")
+    @PreAuthorize(AdminAuthority.CATALOG_READ)
+    @GetMapping("/api/v1/admin/products/{productId}/size-chart/text-sources")
+    public ResponseEntity<Response<List<SizeChartTextSourceResponse>>> textSources(
+        @Parameter(description = "상품 아이디") @PathVariable @Positive(message = SizeChartDraftValidationMessage.PRODUCT_ID) long productId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Response.success(useCase.textSourcesAdmin(productId)));
+    }
+
+    @Operation(summary = "사이즈표 초안 일괄 제출", description = "서로 다른 상품 최대 10개의 TEXT 또는 IMAGE 초안을 개별 접수합니다. "
+        + "항목별 UUID를 보존하고 실패 항목만 같은 UUID와 입력으로 재시도합니다. 일부 실패해도 다른 접수 결과는 유지됩니다.")
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "SIZE_CHART_DRAFT_BATCH_CREATE")
+    @PostMapping(DRAFTS + "/batches")
+    public ResponseEntity<Response<SizeChartDraftBatchResponse>> createBatch(
+        @AuthenticationPrincipal MemberPrincipal actor,
+        @RequestBody @Valid SizeChartDraftBatchCreateRequest request
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(Response.success(useCase.createBatchAdmin(request.toCommands(actor.memberId()))));
     }
 
     @Operation(summary = "사이즈표 초안 이미지 후보", description = "상품 이미지와 상세 설명의 이미지 중 사이즈표 초안에 쓸 수 있는 후보를 조회합니다. "

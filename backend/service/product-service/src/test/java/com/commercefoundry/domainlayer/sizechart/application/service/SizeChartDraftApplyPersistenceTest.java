@@ -32,9 +32,11 @@ import com.commercefoundry.domainlayer.sizechart.application.port.out.SizeChartG
 import com.commercefoundry.domainlayer.sizechart.application.port.out.SizeChartTemplateRepositoryPort;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.ProductSizeChartProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftApplyProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftBatchProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftRemoteProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftValidationProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartTextSourceProcessor;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeCell;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeChart;
 import com.commercefoundry.domainlayer.sizechart.domain.model.ProductSizeRow;
@@ -88,7 +90,8 @@ import org.springframework.transaction.support.TransactionTemplate;
     com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter.class,
     SizeChartTemplateRepositoryAdapter.class, SizeChartDraftRepositoryAdapter.class, ProductSizeChartProcessor.class,
     SizeChartDraftApplyProcessor.class, SizeChartDraftValidationProcessor.class, SizeChartDraftRemoteProcessor.class, SizeChartDraftFacade.class,
-    com.commercefoundry.global.config.SizeChartDraftProperties.class, SizeChartDraftApplyPersistenceTest.TimeConfig.class})
+    com.commercefoundry.global.config.SizeChartDraftProperties.class, SizeChartTextSourceProcessor.class, SizeChartDraftBatchProcessor.class,
+    SizeChartDraftApplyPersistenceTest.TimeConfig.class})
 class SizeChartDraftApplyPersistenceTest {
     private static final Instant NOW = Instant.parse("2026-11-07T00:00:00Z");
     private static final String SOURCE = "{\"text\":\"private source never belongs in receipt\"}";

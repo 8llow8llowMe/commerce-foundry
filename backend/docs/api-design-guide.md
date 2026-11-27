@@ -919,13 +919,15 @@ Idempotency-Key · 작성자 칸은 없다. 치수는 금액이 아니라 `numer
 
 기존 GET/PUT 사이즈표 응답은 유지한다. 새 초안은 AI 결과를 상품 표에 바로 쓰지 않고 운영자가 검토·수정한 뒤 적용한다.
 TEXT 는 승인된 측정 항목 어휘만 받는다. IMAGE 는 관리 키 상품 이미지만 받고 플래그 `size-chart.draft.image-enabled`(기본 `false`)로 닫혀 있다 —
-닫혀 있으면 IMAGE 생성 · 이미지 후보 · 확인 모두 400 `SIZE_CHART_DRAFT_011` 이다. 일괄 이관은 후속 범위다. 정본은 [AI 사이즈표 계약](ai-size-chart-guide.md)이다.
+닫혀 있으면 IMAGE 생성 · 이미지 후보 · 확인 모두 400 `SIZE_CHART_DRAFT_011` 이다. TEXT 후보는 `GET /api/v1/admin/products/{productId}/size-chart/text-sources`(CATALOG_READ), 일괄 제출은 `POST /api/v1/admin/size-chart-drafts/batches`(CATALOG_MANAGE, 최대 10개)다. 둘 다 no-store다. 배치는 항목별 UUID·성공/실패·재시도 가능 여부를 반환하고 중복 상품·키는 부작용 전에 거절한다. 선택 TEXT는 sourceText 및 textSelection의 sourceId·bodyHash를 현재 본문 후보와 대조한다. 기존 단건 해시·입력·적용과 IMAGE 승인 계약은 유지한다. 정본은 [AI 사이즈표 계약](ai-size-chart-guide.md)이다.
 
 | 경로 | 권한 | 성공·주요 오류 |
 |---|---|---|
 | `POST /api/v1/admin/products/{productId}/size-chart/drafts` | `CATALOG_MANAGE` | UUID `Idempotency-Key` 필수. `{templateId,mode:TEXT,sourceText}` 또는 `{templateId,mode:IMAGE,images:[{sourceId,approvedContentHash}](1~4장),personalInfoRemovedConfirmed:true}` → 202 `{draftId,jobId}`. 결합이 불명확하면 503 `SIZE_CHART_DRAFT_501` + 복구용 `Location`. 승인 뒤 이미지가 바뀌었으면 409 `SIZE_CHART_DRAFT_015` |
 | `GET /api/v1/admin/products/{productId}/size-chart/image-sources` | `CATALOG_READ` | 200 `[{sourceId,previewUrl,eligible,reason{code,name,description}}]`. 이미지를 내려받지 않는다 |
 | `GET /api/v1/admin/products/{productId}/size-chart/image-sources/{sourceId}/inspection` | `CATALOG_MANAGE` | 200 `{sourceId,contentHash,contentType,contentLength}`. 승인 흐름이고 최대 5MiB 를 읽어 GET 이지만 관리 권한이다 |
+| `GET /api/v1/admin/products/{productId}/size-chart/text-sources` | `CATALOG_READ` | 200 `[{sourceId,bodyHash,sourceText}]`. 국문·영문 본문의 엄격 검사한 표만. 자유 문장·개인정보·숨김·병합 셀·중첩 표는 블록째 제외 |
+| `POST /api/v1/admin/size-chart-drafts/batches` | `CATALOG_MANAGE` | `{items:[{productId,idempotencyKey,input}]}`(1~10개, input 은 단건 생성 본문) → 200 `{items:[{productId,idempotencyKey,draftId,jobId,errorCode,retryable}]}`(요청 순서). 0개·10개 초과·중복 상품·중복 UUID 는 부작용 전 400 `SIZE_CHART_DRAFT_118` |
 | `GET /api/v1/admin/size-chart-drafts?productId=&requestedByMe=&page=&size=` | `CATALOG_READ` | 200 최신순 `PageResponse`. operations 항목별 조회 없음 |
 | `GET /api/v1/admin/size-chart-drafts/{draftId}` | `CATALOG_READ` | 200 템플릿·구조화 후보·경고·상태·버전. 만료 410 `SIZE_CHART_DRAFT_005` |
 | `POST /api/v1/admin/size-chart-drafts/{draftId}/refresh` | `CATALOG_MANAGE` | 200 확정 작업 결과를 초안에 반영. 진행 중이면 기존 상태 반환 |
@@ -937,6 +939,10 @@ GET은 product의 저장 상태만 읽는다. 작업 완료는 기존 operations
 IMAGE 오류: 기능 닫힘 400 `011`, 이 상품에 없는 이미지 404 `012`, 쓸 수 없는 이미지 400 `013`, 형식·크기(JPEG·PNG·WebP, 5MiB) 400 `014`,
 승인 뒤 변경 409 `015`, internal 생성 이미지 변경 410 `016`(재시도 불가), 이미지 저장소 장애 503 `504`.
 IMAGE 필드 검증: 이미지 수·중복 `112`, 이미지 아이디 `113`, 확인값 `114`, 개인정보 확인 `115`, IMAGE에 텍스트 `116`, TEXT에 이미지 `117`.
+일괄·선택 TEXT: 배치 구조 400 `118`, textSelection 형식 400 `119`, 항목 UUID 400 `120`, 본문 후보 변경 409 `017`. 항목 하나의 필드 오류도 의도적으로 배치 전체 400 이다.
+접수 뒤 항목 오류는 항목의 `errorCode` 로만 싣는다 — 단건과 같은 코드 체계(업무 오류는 `001`·`003`·`030` 등으로 매핑, 예상하지 못한 오류는 `505` 재시도 가능).
+응답 `idempotencyKey` 는 정규화한 소문자 UUID 다. 실패 항목만 같은 운영자·UUID·입력으로 다시 보낸다. 사전 벌크 조회 장애는 배치 전체 503 `505` 다.
+항목마다 작업 등록(최대 약 5s)을 순서대로 불러 10개면 게이트웨이 10s 를 넘길 수 있다. 504·네트워크 오류면 **같은 본문(같은 키) 전체를 그대로 다시 보낸다** — 키를 새로 만들면 초안이 중복된다.
 내용과 product 측 멱등 키는 기본 7일이다. 만료 직후 상세·refresh·apply는 410, 목록은 제외한다.
 동일 키를 만료 뒤 자동 재시도하면 새 유료 작업이 생길 수 있으므로 FE는 만료된 키를 재사용하지 않는다.
 apply는 기존 #216의 완전한 행·칸 검증과 캡처한 템플릿·표 revision을 확인하고, 표 교체와 초안 영수증을 한 트랜잭션으로 저장한다.

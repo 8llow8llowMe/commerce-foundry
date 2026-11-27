@@ -1,19 +1,19 @@
 package com.commercefoundry.domainlayer.sizechart.application.service;
 
+import com.commercefoundry.common.exception.RedactedThrowable;
 import com.commercefoundry.domainlayer.adminaudit.application.service.processor.ProductAdminAuditProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductImageLookupProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductLookupProcessor;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
+import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftAcceptedResponse;
-import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageInspectionResponse;
-import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageSourceResponse;
-import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage;
-import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor;
-import com.commercefoundry.global.config.SizeChartDraftProperties;
-import java.util.Map;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftApplyResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftBatchResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartDraftSummaryResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageInspectionResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartImageSourceResponse;
+import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.dto.response.SizeChartTextSourceResponse;
 import com.commercefoundry.domainlayer.sizechart.adapter.in.admin.presenter.SizeChartDraftAdminPresenter;
 import com.commercefoundry.domainlayer.sizechart.application.command.ProductSizeChartUpsertCommand;
 import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDraftApplyCommand;
@@ -21,26 +21,36 @@ import com.commercefoundry.domainlayer.sizechart.application.command.SizeChartDr
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.exception.SizeChartException;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftApplyInfo;
+import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftBatchItemInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftInfo;
 import com.commercefoundry.domainlayer.sizechart.application.info.SizeChartDraftSummaryInfo;
+import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftImage;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportErrorCode;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftTransportException;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartDraftUnavailableException;
 import com.commercefoundry.domainlayer.sizechart.application.model.SizeChartGenerationStatus;
 import com.commercefoundry.domainlayer.sizechart.application.port.in.SizeChartDraftUseCase;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftApplyProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftBatchProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftRemoteProcessor;
 import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartDraftValidationProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartImageSourceProcessor;
+import com.commercefoundry.domainlayer.sizechart.application.service.processor.SizeChartTextSourceProcessor;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraft;
 import com.commercefoundry.domainlayer.sizechart.domain.model.SizeChartDraftStatus;
+import com.commercefoundry.global.config.SizeChartDraftProperties;
 import com.commercefoundry.persistence.dto.PageResponse;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -52,6 +62,7 @@ import org.springframework.transaction.TransactionTimedOutException;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 // Suspend any caller transaction: operations must see the committed input, and network I/O must hold no DB transaction.
@@ -68,10 +79,60 @@ public class SizeChartDraftFacade implements SizeChartDraftUseCase {
     private final SizeChartImageSourceProcessor imageSources;
     private final ProductImageLookupProcessor productImages;
     private final SizeChartDraftProperties properties;
+    private final SizeChartTextSourceProcessor textSources;
+    private final SizeChartDraftBatchProcessor batches;
 
     @Override
     public SizeChartDraftAcceptedResponse createAdmin(SizeChartDraftCreateCommand command) {
         return presenter.accepted(create(command));
+    }
+
+    @Override
+    public List<SizeChartTextSourceResponse> textSourcesAdmin(long productId) {
+        return presenter.textSources(textSources.sources(product(productId)));
+    }
+
+    /**
+     * 외부 I/O(operations 작업 등록)가 항목마다 있어 배치 전체에 트랜잭션을 걸지 않는다. 각 항목은 단건과 같은 경로로 Processor 가 커밋한 뒤 원격 등록하고,
+     * 기존 멱등 영수증(운영자 · UUID · 정규 입력)을 그대로 재사용한다. 그래서 실패 항목만 같은 키로 다시 보내면 이미 만든 초안을 재생한다.
+     *
+     * <p>감사: 항목마다 단건과 같은 {@code SIZE_CHART_DRAFT_CREATE}(product:&lt;id&gt;) 줄을 남기고, 끝에 배치 요청 자체의
+     * {@code SIZE_CHART_DRAFT_BATCH_CREATE} 줄을 하나 남긴다. 배치 줄은 항목 일부가 실패해도 결과를 돌려줬으면 SUCCESS 다.
+     */
+    @Override
+    public SizeChartDraftBatchResponse createBatchAdmin(
+        List<SizeChartDraftCreateCommand> commands) {
+        Long actorId = commands == null || commands.isEmpty() || commands.getFirst() == null ? null : commands.getFirst().actorId();
+        return presenter.batch(audited(() -> createBatch(commands), succeeded -> audit.sizeChartDraftBatchCreated(actorId, succeeded)));
+    }
+
+    private List<SizeChartDraftBatchItemInfo> createBatch(List<SizeChartDraftCreateCommand> commands) {
+        batches.validate(commands); // 0개 · 상한 초과 · 중복 상품 · 중복 키는 조회와 쓰기 전에 거절한다.
+        Map<Long, Product> found;
+        Map<Long, List<ProductImage>> images;
+        try {
+            found = products.findAllIncludingHidden(commands.stream().map(SizeChartDraftCreateCommand::productId).toList());
+            var imageProductIds = properties.isImageEnabled() ? commands.stream().filter(c -> "IMAGE".equals(c.mode()))
+                .map(SizeChartDraftCreateCommand::productId).toList() : List.<Long>of();
+            images = imageProductIds.isEmpty() ? Map.of() : productImages.findStillImagesIncludingHidden(imageProductIds).stream()
+                .collect(Collectors.groupingBy(ProductImage::productId));
+        } catch (RuntimeException exception) {
+            // 사전 벌크 조회 실패에는 어떤 항목도 등록하지 않았다. 안전한 no-store 오류 봉투로 돌려준다. 로그는 타입 · 프레임만 남긴다.
+            log.warn("size chart draft batch lookup failed. items={}", commands.size(), RedactedThrowable.of(exception));
+            throw new SizeChartDraftTransportException(SizeChartDraftTransportErrorCode.BATCH_ITEM_UNAVAILABLE);
+        }
+        List<SizeChartDraftBatchItemInfo> results = new ArrayList<>();
+        for (var command : commands) {
+            try {
+                var info = audited(() -> createDraft(command, found, images.getOrDefault(command.productId(), List.of())),
+                    succeeded -> audit.sizeChartDraftCreated(command.actorId(), command.productId(), succeeded));
+                results.add(batches.accepted(command, info));
+            } catch (RuntimeException exception) {
+                // 항목 실패는 그 항목에만 격리한다. 오류 코드 · 재시도 판정은 Processor 가 단건 API 와 같은 체계로 한다.
+                results.add(batches.failed(command, exception));
+            }
+        }
+        return results;
     }
 
     @Override
@@ -136,6 +197,11 @@ public class SizeChartDraftFacade implements SizeChartDraftUseCase {
     }
 
     private SizeChartDraftInfo createDraft(SizeChartDraftCreateCommand command) {
+        return createDraft(command, null, null);
+    }
+
+    private SizeChartDraftInfo createDraft(SizeChartDraftCreateCommand command, Map<Long, Product> preparedProducts,
+        List<ProductImage> preparedImages) {
         boolean image = command != null && "IMAGE".equals(command.mode());
         if (image) {
             requireImageEnabled();
@@ -147,10 +213,15 @@ public class SizeChartDraftFacade implements SizeChartDraftUseCase {
             if (replay.isPresent()) {
                 draft = replay.get();
             } else {
-                var found = products.findAllIncludingHidden(List.of(command.productId()));
+                var found = preparedProducts == null ? products.findAllIncludingHidden(List.of(command.productId())) : preparedProducts;
+                if (command.textSelection() != null) {
+                    // 일괄의 벌크 스냅숏은 앞 항목의 원격 등록 동안 낡을 수 있다. 본문 대조는 단건처럼 이 상품을 지금 다시 읽어 한다.
+                    var current = preparedProducts == null ? found : products.findAllIncludingHidden(List.of(command.productId()));
+                    textSources.verify(product(current, command.productId()), command);
+                }
                 // IMAGE: 저장 전, 트랜잭션 밖에서 지금 바이트를 다시 읽어 승인 해시와 대조한다. 바뀌었으면 초안을 만들지 않는다.
                 List<SizeChartDraftImage> approved = image ? imageSources.approve(command.productId(), product(found, command.productId()),
-                    productImages.findStillImagesIncludingHidden(command.productId()), command.images()) : List.of();
+                    preparedImages == null ? productImages.findStillImagesIncludingHidden(command.productId()) : preparedImages, command.images()) : List.of();
                 draft = processor.createOrReplay(command, requestHash, found, approved);
             }
         } catch (DataIntegrityViolationException exception) {
