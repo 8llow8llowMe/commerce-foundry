@@ -1,4 +1,4 @@
-import type { DriveStep } from 'driver.js';
+import type { Config, Driver, DriveStep } from 'driver.js';
 import type { Tour } from './tours';
 
 /** `data-tour` 값 → 선택자 */
@@ -32,6 +32,21 @@ export function driveSteps(tour: Tour, exists: (target: string) => boolean): Dri
       ...(step.side ? { side: step.side } : {}),
     },
   }));
+}
+
+/**
+ * 마치기 버튼과 마지막 단계의 오른쪽 화살표는 onDoneClick으로 온다.
+ * Esc · 닫기 · 바깥 누르기는 건너뜀이다. destroy() 뒤에는 활성 단계가 초기화된다.
+ */
+export function tourExitHooks(
+  finish: (status: 'COMPLETED' | 'SKIPPED', step: number | null, driver: Driver) => void,
+): Pick<Config, 'onDoneClick' | 'onDestroyStarted'> {
+  return {
+    onDoneClick: (_, __, { driver }) =>
+      finish('COMPLETED', driver.getActiveIndex() ?? null, driver),
+    onDestroyStarted: (_, __, { driver }) =>
+      finish('SKIPPED', driver.getActiveIndex() ?? null, driver),
+  };
 }
 
 /**

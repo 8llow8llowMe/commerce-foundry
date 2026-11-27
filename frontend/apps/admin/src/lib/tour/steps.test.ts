@@ -1,5 +1,32 @@
+import { driver } from 'driver.js';
 import { describe, expect, it, vi } from 'vitest';
-import { prefersReducedMotion, tourMotion } from './steps';
+import { prefersReducedMotion, tourExitHooks, tourMotion } from './steps';
+
+describe('tourExitHooks', () => {
+  it.each([
+    ['onDoneClick', 'COMPLETED'],
+    ['onDestroyStarted', 'SKIPPED'],
+  ] as const)('종료 훅 %s 는 활성 단계를 읽고 %s 로 기록한다', (hook, status) => {
+    const instance = driver();
+    const index = vi.spyOn(instance, 'getActiveIndex').mockReturnValue(2);
+    vi.spyOn(instance, 'destroy').mockImplementation(() => {
+      index.mockReturnValue(undefined);
+    });
+    const finish = vi.fn((_, __, activeDriver: typeof instance) => activeDriver.destroy());
+    tourExitHooks(finish)[hook]?.(
+      undefined,
+      {},
+      {
+        config: {},
+        state: {},
+        driver: instance,
+        index: 2,
+      },
+    );
+    expect(finish).toHaveBeenCalledExactlyOnceWith(status, 2, instance);
+    expect(instance.getActiveIndex()).toBeUndefined();
+  });
+});
 
 const media = (matches: boolean) =>
   vi.fn((query: string) => ({ matches, media: query }) as MediaQueryList);
