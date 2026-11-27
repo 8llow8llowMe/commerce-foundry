@@ -50,6 +50,21 @@ class GatewayRateLimitPropertiesTest {
         assertThat(properties.orderWrite()).isEqualTo(GatewayRateLimitProperties.DEFAULT_ORDER_WRITE);
         assertThat(properties.paymentWrite()).isEqualTo(new Limit(6, 3));
         assertThat(properties.orderQuote()).isEqualTo(GatewayRateLimitProperties.DEFAULT_ORDER_QUOTE);
+        assertThat(properties.supportWrite()).isEqualTo(new Limit(20, 5));
+        assertThat(properties.supportGuestSession()).isEqualTo(new Limit(6, 3));
+    }
+
+    @Test
+    @DisplayName("비회원 상담 자격 발급 한도는 상담 쓰기와 따로 바인딩한다 (#470)")
+    void bindsSupportGuestSessionSeparately() {
+        new ApplicationContextRunner().withUserConfiguration(RateLimitConfig.class)
+            .withPropertyValues("gateway.rate-limit.support-guest-session.requests-per-minute=2", "gateway.rate-limit.support-guest-session.burst=1")
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                GatewayRateLimitProperties properties = context.getBean(GatewayRateLimitProperties.class);
+                assertThat(properties.supportGuestSession()).isEqualTo(new Limit(2, 1));
+                assertThat(properties.supportWrite()).isEqualTo(new Limit(20, 5));
+            });
     }
     @ParameterizedTest
     @CsvSource({"12, 3", "6, 4"})

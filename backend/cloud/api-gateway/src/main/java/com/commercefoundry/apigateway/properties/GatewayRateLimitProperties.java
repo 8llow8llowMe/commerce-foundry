@@ -7,13 +7,14 @@ import org.springframework.boot.context.properties.bind.ConstructorBinding;
 /**
  * 고객 쓰기 API 의 회원 · 클라이언트 IP 단위 요청 제한 ({@code security-guide.md} §7-3). 정책과 대상 경로는 {@code RateLimitPolicy} 가 정하고, 한도만 여기서 바꾼다.
  *
- * @param enabled    기본 켬. 끄면 상담 메시지 POST는 503이고 그 밖의 요청은 세지 않는다
- * @param supportWrite 상담 메시지 POST — 필수 보호, 설정 부재·저장소 장애 시 503
+ * @param enabled    기본 켬. 끄면 상담 POST(비회원 발급 포함)는 503이고 그 밖의 요청은 세지 않는다
+ * @param supportWrite 비회원 발급을 뺀 상담 POST 전부(메시지 저장 등) — 필수 보호, 설정 부재·저장소 장애 시 503
  * @param cartMerge  장바구니 병합(로그인 직후 한 번) — 한 번에 항목을 많이 쓰는 가장 무거운 쓰기라 따로 센다
  * @param cartWrite  그 밖의 장바구니 쓰기 (담기 · 수량 변경 · 삭제)
  * @param orderWrite 주문 쓰기 (생성 · 취소 요청 등)
  * @param paymentWrite 결제 쓰기 — 준비 · 승인은 같은 버킷이고 웹훅은 제외한다
  * @param orderQuote 주문서 미리보기 — 주문서에서 값을 바꿀 때마다 나가 주문 생성보다 잦으므로 따로 센다
+ * @param supportGuestSession 비회원 상담 자격 발급(POST /api/v1/support/guest-sessions) — 필수 보호, 행을 만드는 익명 쓰기라 상담 POST 보다 엄격하다
  */
 @ConfigurationProperties(prefix = "gateway.rate-limit")
 public record GatewayRateLimitProperties(
@@ -23,11 +24,13 @@ public record GatewayRateLimitProperties(
     Limit orderWrite,
     Limit orderQuote,
     Limit paymentWrite,
-    Limit supportWrite
+    Limit supportWrite,
+    Limit supportGuestSession
 ) {
 
     private static final int SECONDS_PER_MINUTE = 60;
     static final Limit DEFAULT_SUPPORT_WRITE = new Limit(20, 5);
+    static final Limit DEFAULT_SUPPORT_GUEST_SESSION = new Limit(6, 3);
 
     /** yml 에 적지 않은 정책의 기본 한도. 값의 근거는 {@code security-guide.md} §7-3. */
     static final Limit DEFAULT_CART_MERGE = new Limit(6, 3);
@@ -37,12 +40,13 @@ public record GatewayRateLimitProperties(
     static final Limit DEFAULT_PAYMENT_WRITE = new Limit(6, 3);
 
     public GatewayRateLimitProperties(boolean enabled, Limit cartMerge, Limit cartWrite, Limit orderWrite, Limit orderQuote, Limit paymentWrite) {
-        this(enabled, cartMerge, cartWrite, orderWrite, orderQuote, paymentWrite, null);
+        this(enabled, cartMerge, cartWrite, orderWrite, orderQuote, paymentWrite, null, null);
     }
 
     @ConstructorBinding
     public GatewayRateLimitProperties {
         supportWrite = supportWrite == null ? DEFAULT_SUPPORT_WRITE : supportWrite;
+        supportGuestSession = supportGuestSession == null ? DEFAULT_SUPPORT_GUEST_SESSION : supportGuestSession;
         cartMerge = cartMerge == null ? DEFAULT_CART_MERGE : cartMerge;
         cartWrite = cartWrite == null ? DEFAULT_CART_WRITE : cartWrite;
         orderWrite = orderWrite == null ? DEFAULT_ORDER_WRITE : orderWrite;

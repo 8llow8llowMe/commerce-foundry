@@ -23,15 +23,17 @@ import reactor.core.publisher.Mono;
 
 /**
  * 고객 쓰기 API 를 주체 단위로 센다 ({@code security-guide.md} §7-3, 정책 {@link RateLimitPolicy}). 한도를 넘으면 하류로 보내지 않고
- * 429 {@code GATEWAY_006} + {@code Retry-After} 로 끊는다. 상담 메시지 쓰기만 필수 보호이며 보호 부재·저장소 장애는 503이다.
+ * 429 {@code GATEWAY_006} + {@code Retry-After} 로 끊는다. 필수 정책({@link RateLimitPolicy#mandatory()} — 상담 비회원 발급 · 상담 POST · 방문 분석 수집)은
+ * 보호 부재 · 주체 불명 · 저장소 장애면 503 {@code GATEWAY_002} 이고, 그 밖의 정책은 아래 fail-open 이다.
  *
  * <ul>
  *   <li><b>라우트 전역 필터(GlobalFilter)다.</b> 라우트에 걸린 요청만 오고, 보안 체인(토큰 검증 · 차단 목록 · 어드민 인가)이 끝난 뒤라 검증된 회원 id 를 쓴다.</li>
  *   <li><b>로그인한 요청은 회원 id, 토큰 없는 요청은 클라이언트 IP</b>({@link ClientIpResolver} — 신뢰 프록시만 {@code X-Forwarded-For} 를 믿는다)의 HMAC 으로 센다.
  *       HMAC 은 {@link ClientSubjectResolver} 가 만들고, 하류 헤더 {@code X-Client-Subject}({@link ClientSubjectHeaderFilter})와 같은 값이다. 같은 정책 한도를 쓰되 버킷이 따로다. 원격 주소조차 모르면 세지 않는다.
- *       <b>토큰 없는 요청은 {@code gateway.client-ip.enabled} 일 때만 센다(기본 끔 — §7-3).</b> 끄면 IP 를 해석 · 해시하지 않고 그대로 보낸다.</li>
+ *       <b>토큰 없는 요청은 {@code gateway.client-ip.enabled} 일 때만 센다(기본 끔 — §7-3).</b> 끄면 IP 를 해석 · 해시하지 않고 그대로 보낸다.
+ *       단 필수 정책(상담 두 개 · 방문 분석)은 제외 — 주체 불명 · client-ip 꺼짐이면 회원이어도 503 이다.</li>
  *   <li><b>저장소 장애 · 응답 없음이면 통과(fail-open)한다.</b> 제한은 남용 완화 수단이라 장애가 쇼핑 장애가 되지 않게 한다 — 차단 목록 일반 경로와 같은 판단(§7-1).
- *       warn 은 간격마다 한 번만 남긴다.</li>
+ *       warn 은 간격마다 한 번만 남긴다. 필수 정책(상담 두 개 · 방문 분석)은 제외 — 503 이다.</li>
  * </ul>
  */
 @Slf4j
@@ -81,8 +83,8 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
         RateLimitPolicy matched = policy.orElseThrow();
-        Optional<RateLimitSubject> requiredClient = matched.requiresClientIp() ? clientSubject(exchange) : Optional.empty();
-        if (matched.requiresClientIp() && (!properties.enabled() || requiredClient.isEmpty())) {
+        Optional<RateLimitSubject> requiredClient = matched.mandatory() ? clientSubject(exchange) : Optional.empty();
+        if (matched.mandatory() && (!properties.enabled() || requiredClient.isEmpty())) {
             return unavailable(exchange);
         }
         if (!properties.enabled()) {
@@ -127,7 +129,7 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
             .single()
             .timeout(CHECK_TIMEOUT)
             .onErrorResume(failure -> {
-                if (policy.requiresClientIp()) {
+                if (policy.mandatory()) {
                     return Mono.error(new RateLimitUnavailableException());
                 }
                 logFailOpen(policy, subject, exchange, failure);

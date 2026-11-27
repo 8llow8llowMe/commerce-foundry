@@ -20,8 +20,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.server.PathContainer;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.security.authentication.TestingAuthenticationToken;
@@ -203,66 +205,150 @@ class GatewayRateLimitFilterTest {
     }
 
     private static final String SUPPORT_MESSAGES = "/api/v1/support/conversations/123/messages";
+    private static final String SUPPORT_GUEST_SESSIONS = "/api/v1/support/guest-sessions";
+    private static final String GUEST_IP = "192.0.2.1";
+    /** 두 필수 정책의 대표 경로 — 상담 메시지 POST(support-write), 비회원 자격 발급(support-guest-session). */
+    private static final List<String> MANDATORY_PATHS = List.of(SUPPORT_MESSAGES, SUPPORT_GUEST_SESSIONS);
 
     @Test
-    void supportPolicyIsPostMessagesOnly() {
-        assertThat(RateLimitPolicy.match(org.springframework.http.HttpMethod.POST,
-            org.springframework.http.server.PathContainer.parsePath(SUPPORT_MESSAGES))).contains(RateLimitPolicy.SUPPORT_WRITE);
-        for (String path : List.of("/api/v1/support/conversations", "/api/v1/support/conversations/123", "/api/v1/support/guest-sessions")) {
-            assertThat(RateLimitPolicy.match(org.springframework.http.HttpMethod.POST,
-                org.springframework.http.server.PathContainer.parsePath(path))).isEmpty();
+    @DisplayName("상담 POST 는 발급 · 그 밖으로 나뉜다 — 발급이 catch-all 보다 먼저, 조회는 세지 않는다")
+    void supportPoliciesMatchGuestSessionFirst() {
+        assertThat(RateLimitPolicy.match(HttpMethod.POST, PathContainer.parsePath(SUPPORT_GUEST_SESSIONS))).contains(RateLimitPolicy.SUPPORT_GUEST_SESSION);
+        for (String path : List.of(SUPPORT_MESSAGES, "/api/v1/support/conversations", "/api/v1/support/conversations/123", SUPPORT_GUEST_SESSIONS + "/")) {
+            assertThat(RateLimitPolicy.match(HttpMethod.POST, PathContainer.parsePath(path))).as(path).contains(RateLimitPolicy.SUPPORT_WRITE);
         }
-        assertThat(RateLimitPolicy.match(org.springframework.http.HttpMethod.GET,
-            org.springframework.http.server.PathContainer.parsePath(SUPPORT_MESSAGES))).isEmpty();
+        for (String path : MANDATORY_PATHS) {
+            assertThat(RateLimitPolicy.match(HttpMethod.GET, PathContainer.parsePath(path))).as(path).isEmpty();
+        }
     }
 
     @Test
-    void supportDisabledOrUnresolvedProtectionFailsClosedEvenForMembers() {
-        for (GatewayRateLimitFilter target : List.of(filter(false), filter(true, CLIENT_IP_DISABLED))) {
-            AtomicBoolean routed = new AtomicBoolean();
-            MockServerWebExchange exchange = post(SUPPORT_MESSAGES, "192.0.2.1");
-            run(target, exchange, member(), routed);
-            assertThat(routed).isFalse();
-            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+    @DisplayName("필수 정책은 전역 OFF · client-ip OFF 면 회원 · 비회원 모두 503 GATEWAY_002 이고 제한기를 부르지 않는다")
+    void mandatoryPoliciesFailClosedWhenProtectionIsDisabled() {
+        for (String path : MANDATORY_PATHS) {
+            for (GatewayRateLimitFilter target : List.of(filter(false), filter(true, CLIENT_IP_DISABLED))) {
+                for (Authentication authentication : new Authentication[]{member(), null}) {
+                    AtomicBoolean routed = new AtomicBoolean();
+                    MockServerWebExchange exchange = post(path, GUEST_IP);
+                    run(target, exchange, authentication, routed);
+                    assertThat(routed).as(path).isFalse();
+                    assertThat(exchange.getResponse().getStatusCode()).as(path).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertGatewayCode(exchange, "GATEWAY_002");
+                }
+            }
         }
-        AtomicBoolean routed = new AtomicBoolean();
-        MockServerWebExchange noAddress = post(SUPPORT_MESSAGES);
-        run(filter, noAddress, member(), routed);
-        assertThat(routed).isFalse();
-        assertThat(noAddress.getResponse().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(limiter.calls).isEmpty();
     }
 
     @Test
-    void supportStorageFailureEmptyAndTimeoutFailClosed() {
-        for (Mono<Boolean> answer : List.<Mono<Boolean>>of(Mono.error(new IllegalStateException()), Mono.empty(), Mono.never())) {
-            limiter.answer = answer;
-            AtomicBoolean routed = new AtomicBoolean();
-            MockServerWebExchange exchange = post(SUPPORT_MESSAGES, "192.0.2.1");
-            run(exchange, member(), routed);
-            assertThat(routed).isFalse();
-            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-            assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isNull();
+    @DisplayName("필수 정책은 주체(원격 주소)를 정할 수 없으면 회원이어도 503 이다")
+    void mandatoryPoliciesFailClosedWhenSubjectIsUnknown() {
+        for (String path : MANDATORY_PATHS) {
+            for (Authentication authentication : new Authentication[]{member(), null}) {
+                AtomicBoolean routed = new AtomicBoolean();
+                MockServerWebExchange noAddress = post(path);
+                run(filter, noAddress, authentication, routed);
+                assertThat(routed).as(path).isFalse();
+                assertThat(noAddress.getResponse().getStatusCode()).as(path).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+            }
+        }
+        assertThat(limiter.calls).isEmpty();
+    }
+
+    @Test
+    @DisplayName("필수 정책은 저장소 오류 · 빈 응답 · 타임아웃이면 503 이고 Retry-After 를 싣지 않는다")
+    void mandatoryPoliciesFailClosedOnStorageFailure() {
+        for (String path : MANDATORY_PATHS) {
+            for (Mono<Boolean> answer : List.<Mono<Boolean>>of(Mono.error(new IllegalStateException()), Mono.empty(), Mono.never())) {
+                limiter.answer = answer;
+                AtomicBoolean routed = new AtomicBoolean();
+                MockServerWebExchange exchange = post(path, GUEST_IP);
+                run(exchange, null, routed);
+                assertThat(routed).as(path).isFalse();
+                assertThat(exchange.getResponse().getStatusCode()).as(path).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isNull();
+            }
         }
     }
 
     @Test
-    void supportLimitReturns429AndAllowedMembersAndGuestsAreCounted() {
+    @DisplayName("상담 메시지 POST 한도 초과는 429 + Retry-After 3, 허용된 회원 · 비회원은 각자 버킷으로 센다 — 회원 버킷 키는 그대로다")
+    void supportWriteLimitReturns429AndMemberBucketKeyIsUnchanged() {
         limiter.answer = Mono.just(false);
         AtomicBoolean routed = new AtomicBoolean();
-        MockServerWebExchange exchange = post(SUPPORT_MESSAGES, "192.0.2.1");
+        MockServerWebExchange exchange = post(SUPPORT_MESSAGES, GUEST_IP);
         run(exchange, member(), routed);
         assertThat(routed).isFalse();
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("3");
+        assertGatewayCode(exchange, "GATEWAY_006");
         limiter.answer = Mono.just(true);
         for (Authentication authentication : new Authentication[]{member(), null}) {
             routed.set(false);
-            run(post(SUPPORT_MESSAGES, "192.0.2.1"), authentication, routed);
+            run(post(SUPPORT_MESSAGES, GUEST_IP), authentication, routed);
             assertThat(routed).isTrue();
         }
-        assertThat(limiter.calls).anyMatch(call -> call.startsWith("SUPPORT_WRITE:member:"))
-            .anyMatch(call -> call.startsWith("SUPPORT_WRITE:ip:"));
+        assertThat(limiter.calls).containsExactly(
+            "SUPPORT_WRITE:member:" + MEMBER_ID, "SUPPORT_WRITE:member:" + MEMBER_ID, "SUPPORT_WRITE:ip:" + HASHER.hash(GUEST_IP));
+    }
+
+    @Test
+    @DisplayName("비회원 자격 발급 한도 초과는 429 + Retry-After 10(분당 6) 이고 하류로 보내지 않는다")
+    void guestSessionLimitReturns429WithRetryAfter() {
+        limiter.answer = Mono.just(false);
+        AtomicBoolean routed = new AtomicBoolean();
+        MockServerWebExchange exchange = post(SUPPORT_GUEST_SESSIONS, GUEST_IP);
+
+        run(exchange, null, routed);
+
+        assertThat(routed).isFalse();
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("10");
+        assertGatewayCode(exchange, "GATEWAY_006");
+        assertThat(limiter.calls).containsExactly("SUPPORT_GUEST_SESSION:ip:" + HASHER.hash(GUEST_IP));
+    }
+
+    @Test
+    @DisplayName("같은 IP 의 발급과 메시지 POST 는 서로 다른 버킷이다 — 발급 한도가 차도 메시지 POST 는 하류로 간다")
+    void guestSessionAndSupportWriteUseSeparateBuckets() {
+        limiter.deniedPolicy = RateLimitPolicy.SUPPORT_GUEST_SESSION;
+        AtomicBoolean issued = new AtomicBoolean();
+        AtomicBoolean written = new AtomicBoolean();
+
+        run(post(SUPPORT_GUEST_SESSIONS, GUEST_IP), null, issued);
+        run(post(SUPPORT_MESSAGES, GUEST_IP), null, written);
+
+        assertThat(issued).isFalse();
+        assertThat(written).isTrue();
+        String hash = HASHER.hash(GUEST_IP);
+        assertThat(limiter.calls).containsExactly("SUPPORT_GUEST_SESSION:ip:" + hash, "SUPPORT_WRITE:ip:" + hash);
+    }
+
+    @Test
+    @DisplayName("장바구니 · 주문 · 결제는 fail-open 을 유지한다 — 저장소 장애 · client-ip OFF · 전역 OFF 에도 하류로 간다")
+    void nonMandatoryPoliciesKeepFailOpen() {
+        for (String path : List.of(CART_ITEMS, "/api/v1/orders", "/api/v1/payments/confirm")) {
+            limiter.answer = Mono.error(new IllegalStateException("simulated outage"));
+            AtomicBoolean routed = new AtomicBoolean();
+            run(post(path, GUEST_IP), member(), routed);
+            assertThat(routed).as(path).isTrue();
+
+            limiter.answer = Mono.just(false);
+            AtomicBoolean anonymous = new AtomicBoolean();
+            MockServerWebExchange exchange = post(path, GUEST_IP);
+            run(filter(true, CLIENT_IP_DISABLED), exchange, null, anonymous);
+            assertThat(anonymous).as(path).isTrue();
+            assertThat(exchange.getResponse().getStatusCode()).as(path).isNull();
+
+            AtomicBoolean disabled = new AtomicBoolean();
+            run(filter(false), post(path, GUEST_IP), member(), disabled);
+            assertThat(disabled).as(path).isTrue();
+        }
+    }
+
+    private static void assertGatewayCode(MockServerWebExchange exchange, String code) {
+        JsonNode body = JSON.readTree(exchange.getResponse().getBodyAsString().block(TIMEOUT));
+        assertThat(body.path("dataHeader").path("resultCode").asString()).isEqualTo(code);
     }
 
     @Test
@@ -344,11 +430,13 @@ class GatewayRateLimitFilterTest {
 
         private final List<String> calls = new CopyOnWriteArrayList<>();
         private volatile Mono<Boolean> answer = Mono.just(true);
+        /** 이 정책의 버킷만 비었다고 답한다 — 정책마다 버킷이 따로인지 볼 때 쓴다. */
+        private volatile RateLimitPolicy deniedPolicy;
 
         @Override
         public Mono<Boolean> tryAcquire(RateLimitPolicy policy, RateLimitSubject subject) {
             calls.add(policy + ":" + subject.value());
-            return answer;
+            return policy == deniedPolicy ? Mono.just(false) : answer;
         }
     }
 }

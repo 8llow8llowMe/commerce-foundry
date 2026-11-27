@@ -2,8 +2,10 @@ package com.commercefoundry.apigateway.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Arrays;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.HttpMethod;
@@ -42,6 +44,33 @@ class RateLimitPolicyTest {
 
     @ParameterizedTest
     @CsvSource({
+        "/api/v1/support/guest-sessions,                SUPPORT_GUEST_SESSION",
+        "/api/v1/support/%67uest-sessions,              SUPPORT_GUEST_SESSION",
+        // 끝 슬래시 · 하위 경로는 발급 패턴에 맞지 않아 support-write catch-all 로 센다 — 어느 쪽이든 필수 보호라 우회가 아니다
+        "/api/v1/support/guest-sessions/,               SUPPORT_WRITE",
+        "/api/v1/support/guest-sessions/1,              SUPPORT_WRITE",
+        "/api/v1/support/conversations,                 SUPPORT_WRITE",
+        "/api/v1/support/conversations/123/messages,    SUPPORT_WRITE",
+        "/api/v1/support/conversations/123,             SUPPORT_WRITE",
+        "/api/v1/support,                               SUPPORT_WRITE"
+    })
+    @DisplayName("상담 POST — 비회원 발급이 support-write catch-all 보다 먼저 맞는다 (#470 B2b-1)")
+    void supportPostsMatchGuestSessionBeforeCatchAll(String path, RateLimitPolicy expected) {
+        assertThat(RateLimitPolicy.match(HttpMethod.POST, PathContainer.parsePath(path))).contains(expected);
+    }
+
+    @Test
+    @DisplayName("필수 보호는 상담 두 정책과 방문 분석뿐이다 — 장바구니 · 주문 · 결제는 fail-open 을 유지한다")
+    void onlySupportAndAnalyticsPoliciesAreMandatory() {
+        assertThat(Arrays.stream(RateLimitPolicy.values()).filter(RateLimitPolicy::mandatory))
+            .containsExactly(RateLimitPolicy.SUPPORT_GUEST_SESSION, RateLimitPolicy.SUPPORT_WRITE, RateLimitPolicy.ANALYTICS_EVENTS);
+        assertThat(RateLimitPolicy.values()[0]).as("첫 매칭 1개 규칙 — 발급이 맨 앞").isEqualTo(RateLimitPolicy.SUPPORT_GUEST_SESSION);
+        assertThat(RateLimitPolicy.SUPPORT_GUEST_SESSION.getId()).isEqualTo("support-guest-session");
+        assertThat(RateLimitPolicy.SUPPORT_WRITE.getId()).as("Redis 키 일부 — 넓혀도 진행 중인 버킷을 잇는다").isEqualTo("support-write");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
         "GET,     /api/v1/payments/1",
         "HEAD,    /api/v1/payments/1",
         "OPTIONS, /api/v1/payments/confirm",
@@ -57,7 +86,12 @@ class RateLimitPolicyTest {
         "GET,     /api/v1/orders/1",
         "POST,    /api/v1/admin/orders/1/status",
         "POST,    /api/v1/auth/login",
-        "POST,    /api/v1/products"
+        "POST,    /api/v1/products",
+        "GET,     /api/v1/support/guest-sessions",
+        "OPTIONS, /api/v1/support/guest-sessions",
+        "GET,     /api/v1/support/conversations/123/messages",
+        "POST,    /api/v1/admin/support/knowledge",
+        "POST,    /api/v1/supporting/1"
     })
     @DisplayName("조회 · preflight · 어드민 · 그 밖의 경로는 세지 않는다 — 로그인 시도 제한은 auth-service 가 맡는다(#66)")
     void ignoresOtherRequests(String method, String path) {

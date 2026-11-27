@@ -73,9 +73,14 @@ gateway:
     allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:}
   rate-limit:
     # 고객 쓰기 API 회원 · 클라이언트 IP 단위 요청 제한 (security-guide.md §7-3). 대상 경로는 RateLimitPolicy 가 정하고 한도만 여기서 바꾼다.
-    # requests-per-minute 는 60 의 약수 또는 배수, burst 는 한 번에 몰아서 허용하는 요청 수다. Redis 장애 때는 통과(fail-open)한다
+    # requests-per-minute 는 60 의 약수 또는 배수, burst 는 한 번에 몰아서 허용하는 요청 수다. Redis 장애 때는 통과(fail-open)한다(상담 두 정책 · 방문 분석 필수 정책 제외)
     enabled: true
-    # 상담 메시지 POST는 필수 보호다. 전역/IP OFF 또는 Redis 장애는 503이다.
+    # 상담 두 정책과 방문 분석(analytics-events)은 필수 보호다 — 전역 OFF · client-ip OFF(기본) · 주체 불명 · Redis 장애/타임아웃이면 세지 않고 보내는 대신 503 이다(닫힌 기본값).
+    # 비회원 자격 발급(POST /api/v1/support/guest-sessions)만 따로 센다. 회원·비회원 모두 같은 IP 뒤 여러 사용자(NAT)를 고려한 값이다 (#470)
+    support-guest-session:
+      requests-per-minute: 6
+      burst: 3
+    # 그 밖의 상담 POST 전부(/api/v1/support/** — 메시지 저장, 앞으로 생기는 대화 생성 등)
     support-write:
       requests-per-minute: 20
       burst: 5

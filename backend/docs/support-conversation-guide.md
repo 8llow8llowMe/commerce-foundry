@@ -157,8 +157,11 @@ GuestSessionProcessor.resolveForUpdate → Conversation/MessageProcessor 순서�
 공개 경로에서도 security-core가 먼저 401로 거절하며 비회원으로 대체하지 않는다. 운영자는 403이다.
 bearer가 없으면 기존 X-Support-Guest-Token이 필요하며 누락·형식 오류·미등록·폐기·만료는 동일한 401 GUEST_SESSION_001이다.
 인증 오류도 캐시하지 않는다. 문법상 잘못된 JSON·숫자는 MVC 바인딩에서 먼저 400이 될 수 있다.
+서비스의 no-store는 `global/web/SupportCacheControlFilter`가 보안 필터보다 먼저 `/api/v1/support/**` 전체(컬렉션 POST·비회원 발급 포함)에 건다.
+퍼센트 인코딩·매트릭스 변수도 MVC와 같은 PathPattern으로 판정한다(#470 PR-B2b-1 — 이전에는 `/conversations/` 하위만이었다).
 
-POST 메시지는 게이트웨이 support-write 필수 정책을 통과해야 한다. 제한기/IP 해석 비활성·주체 부재·Redis 장애/타임아웃은
+POST 메시지는 게이트웨이 support-write 필수 정책을 통과해야 한다. B2b-1부터 support-write는 비회원 발급(`support-guest-session`)을 뺀
+`/api/v1/support/**` POST 전부를 센다 — 앞으로 생기는 상담 POST도 보호 없이 열리지 않는다(id는 그대로라 진행 중인 버킷이 이어진다). 제한기/IP 해석 비활성·주체 부재·Redis 장애/타임아웃은
 503 GATEWAY_002, 실제 한도 초과만 429 GATEWAY_006 + Retry-After다. 조회는 이 쓰기 정책으로 세지 않는다.
 배포는 기존 신뢰 프록시/IP HMAC 설정과 Redis가 필요하다. 전역 IP 해석의 기본 OFF에서는 상담 쓰기를 열지 않는다.
 

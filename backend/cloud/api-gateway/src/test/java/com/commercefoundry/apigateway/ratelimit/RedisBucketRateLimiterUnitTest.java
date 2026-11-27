@@ -38,7 +38,9 @@ class RedisBucketRateLimiterUnitTest {
     void registersPolicyConfigs() {
         limiter();
 
-        assertThat(registered).containsOnlyKeys("cart-merge", "cart-write", "order-quote", "order-write", "payment-write", "support-write", "analytics-events");
+        assertThat(registered).containsOnlyKeys(
+            "cart-merge", "cart-write", "order-quote", "order-write", "payment-write", "support-write", "support-guest-session",
+            "analytics-events");
         RedisRateLimiter.Config merge = registered.get("cart-merge");
         assertThat(merge.getReplenishRate()).isEqualTo(1);
         assertThat(merge.getRequestedTokens()).isEqualTo(10);
@@ -55,6 +57,10 @@ class RedisBucketRateLimiterUnitTest {
         assertThat(analytics.getReplenishRate()).isEqualTo(1);
         assertThat(analytics.getRequestedTokens()).isEqualTo(1);
         assertThat(analytics.getBurstCapacity()).isEqualTo(10);
+        RedisRateLimiter.Config guestSession = registered.get("support-guest-session");
+        assertThat(guestSession.getReplenishRate()).isEqualTo(1);
+        assertThat(guestSession.getRequestedTokens()).isEqualTo(10);
+        assertThat(guestSession.getBurstCapacity()).isEqualTo(30);
     }
 
     @Test
@@ -64,6 +70,10 @@ class RedisBucketRateLimiterUnitTest {
 
         assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.CART_WRITE, RateLimitSubject.member(MEMBER_ID))).isEqualTo("cart-write:member:42");
         assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.ORDER_WRITE, RateLimitSubject.member(MEMBER_ID))).isEqualTo("order-write:member:42");
+        // support-write 패턴을 넓혀도 id 는 그대로라 진행 중인 회원 버킷 키가 바뀌지 않는다
+        assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.SUPPORT_WRITE, RateLimitSubject.member(MEMBER_ID))).isEqualTo("support-write:member:42");
+        assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.SUPPORT_GUEST_SESSION, RateLimitSubject.client(hash)))
+            .isEqualTo("support-guest-session:ip:" + hash);
         assertThat(RedisBucketRateLimiter.bucketId(RateLimitPolicy.CART_WRITE, RateLimitSubject.client(hash)))
             .isEqualTo("cart-write:ip:" + hash)
             .doesNotContain(CLIENT_IP);
