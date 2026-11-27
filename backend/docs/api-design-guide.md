@@ -2299,6 +2299,16 @@ operations-service의 `GET/PUT /api/v1/admin/store/footer`, `POST /api/v1/admin/
 정확한 이중 언어 필드·허용 호스트·오류·FE #600 안전 anchor 계약은 [스토어 푸터 가이드](store-footer-guide.md)를 따른다.
 Gateway는 기존 `/api/v1/store/**`·`/api/v1/admin/store/**` 라우트를 재사용한다. 계약 검토자 `seonghoho`다.
 
+## 스토어 상단 메뉴 (#599)
+
+operations-service의 `GET/PUT /api/v1/admin/store/navigation`, `POST /api/v1/admin/store/navigation/publication`은
+SETTINGS_READ/SETTINGS_MANAGE로 초안과 게시를 분리한다. PUT은 `parentKey`로 트리를 만드는 **평평한 항목 목록 전체 교체**이고
+항목 식별자는 리비전 안 편집용 `key`다. `expectedVersion`으로 충돌을 막고 반복 게시는 현재 게시본을 바꾸지 않는다.
+익명 `GET /api/v1/store/navigation?locale=ko|en`은 게시본의 **중첩 트리**만 내린다 — 노드는
+`{label,description,type,url,categoryId,primary,shortcut,children}`이고 key·숨김 항목·초안·버전은 없다. 카테고리 아이디는 문자열이다.
+모든 응답은 공통 봉투·no-store다. 상한·URL 정책·헤더 매핑(FE #602)·오류 `STORE_NAV_*`는 [스토어 상단 메뉴 가이드](store-navigation-guide.md)를 따른다.
+Gateway는 기존 `/api/v1/store/**`·`/api/v1/admin/store/**` 라우트를 재사용한다. 계약 검토자 `seonghoho`다.
+
 ## 기존 고객 상담 REST (#470 PR-B2a)
 
 support-service는 GET /api/v1/support/conversations/{id}, GET .../{id}/messages?cursor=0&size=20,

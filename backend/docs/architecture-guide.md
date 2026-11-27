@@ -430,6 +430,8 @@ store:
 - 푸터 채널·추가 외부 링크와 저작권 문구는 operations-service `storefooter`의 별도 초안·게시 리비전으로 관리한다(#597).
   `storeprofile`의 회사·CS 실정보와 `legaldocument`의 정책 본문·게시 상태를 복제하지 않는다. 계약은
   [store-footer-guide.md](store-footer-guide.md)를 따른다. 배포당 한 설정의 ko/en 문구를 함께 게시한다.
+- 스토어 상단 메뉴 트리(대제목·설명·PC 1차·모바일 바로가기·하위 링크)는 operations-service `storenavigation`의 초안·게시 리비전으로
+  관리한다(#599). 카테고리는 아이디로만 참조하고 product-service 카테고리를 복제하지 않는다. 계약은 [store-navigation-guide.md](store-navigation-guide.md)를 따른다.
 - 브랜드 특화 요구가 생기면 먼저 "다른 쇼핑몰에도 의미가 있는 일반 기능인가" 를 묻는다. 그렇다면
   플래그가 있는 공통 기능으로, 아니라면 확장 지점(전략 인터페이스)으로 만든다.
 
