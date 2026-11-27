@@ -302,6 +302,7 @@ delivery-service · operations-service · support-service 어드민 엔드포인
 | `PUT /api/v1/admin/store/profile` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
 | `GET /api/v1/admin/store/navigation` | `SETTINGS_READ` | 200 | 403 | 403 |
 | `PUT /api/v1/admin/store/navigation` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
+| `POST /api/v1/admin/store/navigation/publication` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
 | `/api/v1/admin/notifications/**` 5개 · `/api/v1/admin/onboarding/me/**` 3개 | `OPERATOR` | 200 | 200 | 200 |
 | `GET /api/v1/admin/support/knowledge` · `GET .../{documentId}` | `CS_READ` | 200 | 200 | 200 |
 | `POST /api/v1/admin/support/knowledge` · `PUT .../{documentId}` · `POST .../{documentId}/revisions` | `CS_MANAGE` | 200 | 200 | 403 |
@@ -319,6 +320,8 @@ delivery-service · operations-service · support-service 어드민 엔드포인
   종류별 READ 권한을 추가로 확인한다(#639). 미등록 종류와 권한 없는 종류는 목록에서 숨기고 상세·다운로드는 404다. 아래 종류별 조회 규칙을 따른다.
   취소는 기존 `REPORT_MANAGE` 계약을 유지한다.
 - 법적 문서 · 상점 공개 정보는 공개 사업자 정보와 약관이라 조회도 `SETTINGS_READ`(대표만)다.
+- **상단 메뉴(#599)** 도 같은 `SETTINGS_*` 다. 공개 `GET /api/v1/store/navigation?locale=ko|en` 은 `@PreAuthorize("permitAll()")`(익명 · 고객 토큰 모두 200)이며
+  **게시본만** 내린다 — 초안 · 숨김 항목과 그 하위 · 편집용 key · 버전 · 작성자는 공개 응답에 없다. 미등록 · 미게시는 404 `STORE_NAV_001` 이다.
 - 이 세 서비스에 `MultipartFile` 핸들러는 없다(`spring.servlet.multipart.*` 설정도 없음 — Boot 기본 한도).
 - 핸들러 전체 표는 `DeliveryAdminAuthorizationMappingTest` · `OperationsAdminAuthorizationMappingTest` · `SupportAdminAuthorizationMappingTest` 가,
   역할별 200 · 403 은 각 `*AdminControllerTest`(송장 · 배송비 정책 · 작업 · 결과 다운로드 · 법적 문서 · 상점 정보 · 알림 · 온보딩 · 캠페인 · 지식) 슬라이스가 고정한다.
@@ -1362,7 +1365,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   실제 줄은 Facade → 서비스 `adminaudit` Processor 가 `AdminAuditLog.write` 로 쓴다.
 - **서비스 쪽 구성** — 서비스당 `domainlayer/adminaudit`(application 만): `<Svc>AdminAuditAction` enum + `<Svc>AdminAuditProcessor`. Port/Adapter 는 DB 싱크가 있을 때만(auth).
   **operations 부분 통합 (#163 R1, #597, #599)**: `OperationsAdminAuditAction`·`OperationsAdminAuditProcessor`는 프로필 `STORE_PROFILE_UPDATE`, 법적 문서
-  `LEGAL_DOCUMENT_DRAFT_SAVE`·`LEGAL_DOCUMENT_PUBLISH`, 푸터 `STORE_FOOTER_DRAFT_SAVE`·`STORE_FOOTER_PUBLISH`, 상단 메뉴 `STORE_NAVIGATION_DRAFT_SAVE`를 소유한다.
+  `LEGAL_DOCUMENT_DRAFT_SAVE`·`LEGAL_DOCUMENT_PUBLISH`, 푸터 `STORE_FOOTER_DRAFT_SAVE`·`STORE_FOOTER_PUBLISH`, 상단 메뉴 `STORE_NAVIGATION_DRAFT_SAVE`·`STORE_NAVIGATION_PUBLISH`를 소유한다.
   enum은 전체 서비스 선언 집합이 아닌 이관한 네 컨텍스트의 부분집합이다.
   JOB 취소·결과 다운로드와 CAMPAIGN 미리보기는 기존 경로를 유지하며 서비스 전체 감사 통합은 후속 범위다.
   프로필 입력 검증 400은 감사하지 않으며, 저장 성공·버전 충돌 실패에는 본문 없이 `store-profile:1`만 기록한다.
@@ -1374,7 +1377,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
   adapter 트랜잭션 완료와 Presenter 조립이 모두 성공한 뒤 `SUCCESS`를 기록한다. Presenter 실패는 기존대로 `FAILURE`이며 DB 변경이 이미 커밋됐을 수 있다.
   프로필 사전 validate는 감사 범위 밖이고 법적 문서 도메인 키 검증 실패는 범위 안이므로 `target=- result=FAILURE`다. HTTP 본문 검증 400·401·403은 진입 전이라 감사하지 않는다.
   푸터 쓰기의 업무 실패는 고정 대상 `store-footer:1`로 기록한다. 링크 URL·표시명·저작권 문구는 감사·진단에 싣지 않는다.
-  상단 메뉴 초안 저장(#599)도 같은 경계로 고정 대상 `store-navigation:1`에 기록하며 항목 key·URL·표시명·카테고리 아이디는 싣지 않는다.
+  상단 메뉴 초안 저장·게시(#599)도 같은 경계로 고정 대상 `store-navigation:1`에 기록하며 항목 key·URL·표시명·설명·카테고리 아이디는 싣지 않는다.
   성공 감사는 업무 try 밖에서 한 번만 호출한다. 공통 Processor가 동기 writer의 RuntimeException을 격리하고, 진단도 실패하면 격리해 업무 응답·원래 예외를 보존한다.
   진단에는 코드가 정한 action·actorMemberId·예외 타입만 남기며 message·cause·stack·target·입력 본문은 전달하지 않는다.
   보호 범위는 현재 동기 HTTP 경로다. 외부 실제 트랜잭션에서 나중에 실행되는 afterCompletion 콜백 장애까지 보호하는 전역 보장은 아니다.
@@ -1404,7 +1407,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음(`markRead` · `markAllRead`) · 온보딩 투어 기록(`updateTour` · `updateTourLegacy`)은 본인 상태라 `@AdminAuditExempt` (#163 PR-E) |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | operations | `STORE_FOOTER_DRAFT_SAVE` · `STORE_FOOTER_PUBLISH` | #597. SETTINGS_MANAGE의 실제 JWT 관리자, 고정 target=`store-footer:1`, 성공·실패 한 줄. URL·표시명·저작권 문구는 기록하지 않는다. 수정 이력은 푸터 리비전 표가 소유한다 |
-| operations | `STORE_NAVIGATION_DRAFT_SAVE` | #599. SETTINGS_MANAGE의 실제 JWT 관리자, 고정 target=`store-navigation:1`, 성공·실패 한 줄. URL·표시명은 기록하지 않는다. 수정 이력은 상단 메뉴 리비전 표가 소유한다 |
+| operations | `STORE_NAVIGATION_DRAFT_SAVE` · `STORE_NAVIGATION_PUBLISH` | #599. SETTINGS_MANAGE의 실제 JWT 관리자, 고정 target=`store-navigation:1`, 성공·실패 한 줄. URL·표시명·설명은 기록하지 않는다. 수정 이력은 상단 메뉴 리비전 표가 소유한다 |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `PRODUCT_CUSTOM_ORDER_REPLACE` (`product:<id>`, #9 PR-B) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
 | product | `MEDIA_IMAGE_UPLOAD_ISSUE` · `MEDIA_IMAGE_UPLOAD_CONFIRM` (대상 `media-upload:<UUID>`, 식별자 없는 실패는 `-`) — URL · 전체 키 · ETag · MIME · 바이트 · 헤더 제외 | 사용 중 (#508, `ProductAdminAuditAction`) |
 | product | `SIZE_CHART_DRAFT_CREATE` (`product:<id>`) · `SIZE_CHART_DRAFT_REFRESH` · `SIZE_CHART_DRAFT_APPLY` (`size-chart-draft:<id>`) · `SIZE_CHART_DRAFT_BATCH_CREATE` (고정 `size-chart-draft:batch`) — 일괄 제출은 항목마다 `SIZE_CHART_DRAFT_CREATE` 한 줄과 배치 한 줄(결과를 돌려줬으면 항목 일부 실패여도 `SUCCESS`. 요청 형식(DTO) 400 은 퍼사드에 닿지 않아 무감사, 퍼사드에 도달한 400 · 벌크 조회 503 은 `FAILURE`, 항목이 비어 운영자를 모르면 `-`). 원문 텍스트 · 이미지 · 상품 아이디 목록 제외 | 사용 중 (#217 · #737, `ProductAdminAuditAction`) |
