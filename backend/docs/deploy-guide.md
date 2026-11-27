@@ -564,6 +564,26 @@ auth A1 활성 관리자 API와 payment A3a 관측 API(PR #548)를 먼저 배포
 
 operations 스키마 스냅숏에서 신규 `operations.dlt_alert_state`·`operations.dlt_partition_checkpoint` DDL만 추출해 `DLT_ALERT_ENABLED=true` 활성화 전에 적용한다. `ddl-auto=none`은 테이블을 만들지 않는다. 실제 프로세스에 `MESSAGING_ENABLED=true`·올바른 `KAFKA_NAMESPACE`도 주입한다. 기존 네 DLT와 주문 결제 회신 DLT 두 토픽의 READ/DESCRIBE, namespace가 붙은 `operations.dlt-alerts` 그룹 READ ACL, auth A1 활성 관리자 API·operations internal 서비스 토큰 허용을 확인한다. 두 회신 DLT 토픽은 #308 C3c 배포 시 생성돼야 하며, 없으면 DLT 알림 활성 상태의 operations 기동이 실패한다. 새 비밀 키는 없다. 허용 목록·재시도·롤백·상한·토픽 재생성 대응은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
 
+### 결제 이상 알림 여섯 사건 DDL (#477 PR 2)
+
+operations 의 결제 이상 알림이 payment 관측의 7번째 버킷 `autoCancelManualReview` 를 `AUTO_CANCEL_MANUAL_REVIEW` 사건으로 읽으면서
+`operations.payment_anomaly_alert_state` 가 다섯 행에서 여섯 행이 된다. 이미 이 테이블이 있는 모든 환경(**dev 포함** — `ddl-auto=update` 는
+기존 CHECK 를 바꾸지 않는다)에 `service/operations-service/src/test/resources/ddl/payment-anomaly-alert-state-auto-cancel.sql` 을
+`psql -v ON_ERROR_STOP=1 -f` 로 UTF-8 한 번 실행한다. 테이블이 아직 없는 환경은 생성 스냅숏(`ddl/operations-schema.sql`)의 테이블을 처음 적용하면 되고 이 스크립트는 필요 없다.
+
+순서: ① 수집 게이트 `PAYMENT_ANOMALY_ALERT_ENABLED=false` 확인 → ② 위 스크립트 → ③ 새 operations 를 모든 인스턴스에 배포 → ④ 게이트 ON.
+
+- 스크립트는 한 트랜잭션(`lock_timeout` 2초 · `statement_timeout` 30초)에서 테이블 잠금 → 자기 점검 → family · severity CHECK 교체 → 테이블 주석 갱신 →
+  `UNKNOWN` 행이 있을 때만 그 공통 워터마크(`last_observed_at` · `last_accepted_local_at`)를 복사한 `AUTO_CANCEL_MANUAL_REVIEW` NORMAL 행을 넣는다.
+  0행이면 행을 넣지 않고(첫 수집이 여섯 행을 INSERT), 여섯 행이면 넣지 않아 다시 실행할 수 있다.
+- 자기 점검: 이름 있는 두 CHECK(`ck_payment_anomaly_alert_state_family` · `ck_payment_anomaly_alert_state_severity`)가 없거나, 행이 0 · 다섯(새 키 없음) · 여섯 중
+  어느 것도 아니면(부분 행) `P0001` 로 아무것도 바꾸지 않고 실패한다. 부분 행은 애플리케이션처럼 스크립트도 보충하지 않는다 — 원인을 확인한 뒤
+  행을 모두 지우면(다음 수집이 0행부터 다시 만들고, 남아 있는 후보는 새 사건으로 다시 알린다) 스크립트를 다시 돌릴 수 있다.
+- **순서가 어긋나도 쓰기는 없다.** 새 operations 가 다섯 행을 읽거나 구 operations 가 여섯 행을 읽으면 손상으로 보고 모든 사건의 알림이
+  `payment_anomaly_collection_failed reason=storage` 로 멈춘다(상태 · 알림 무쓰기, 자동 보충 없음). 그래서 게이트를 끈 채로 DDL → 전체 배포를 끝낸 뒤 켠다.
+- payment 쪽 7번째 버킷(PR 1b)과 배포 순서는 무관하다 — 구버전 payment 의 필드 누락과 자동 취소 게이트 OFF 의 `null` 은 미관측이라 이 사건 상태만 유지한다.
+- 롤백(구 operations)은 게이트 OFF 뒤 별도 판단한다. 다운 스크립트는 두지 않는다. 새 Vault 키 · FE 계약 변경은 없다. 정책은 [anomaly-notifications.md](anomaly-notifications.md) A4b-1 · A4b-2.
+
 ### #579 자동 취소 배포·롤백
 
 자동 취소는 `payment.auto-cancel.enabled` 단일 게이트이며 기본 OFF다. 별도 scheduler.enabled는 사용하지 않는다.

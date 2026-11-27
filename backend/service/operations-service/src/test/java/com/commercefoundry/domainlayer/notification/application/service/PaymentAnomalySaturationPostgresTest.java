@@ -190,7 +190,7 @@ class PaymentAnomalySaturationPostgresTest {
                 metrics.put("postCommitReturnToRejectionNanos", rejectedAt.get() - storageReturnedAt.get());
                 metrics.put("collectorThreadAllocatedBytes", delta(allocationBefore, measurement.ownerAllocated()));
                 assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-                assertThat(statistics.getEntityInsertCount()).as("5000 notifications and five state rows").isEqualTo(5005);
+                assertThat(statistics.getEntityInsertCount()).as("5000 notifications and six state rows").isEqualTo(5006);
                 assertThat(statistics.getFlushCount()).isPositive();
                 metrics.put("hibernateInsertCount", statistics.getEntityInsertCount());
                 metrics.put("hibernateFlushCount", statistics.getFlushCount());
@@ -206,7 +206,7 @@ class PaymentAnomalySaturationPostgresTest {
                 // A separate, autocommit JDBC borrow reads actual committed rows; no test transaction surrounds the proxy.
                 assertCommitted();
                 metrics.put("committedNotificationRows", BATCH_SIZE);
-                metrics.put("committedStateRows", 5);
+                metrics.put("committedStateRows", 6);
                 long drainedAt = System.nanoTime();
                 gate.release.countDown();
                 assertThat(gate.drained.await(30, TimeUnit.SECONDS)).as("all accepted notifications drained").isTrue();
@@ -443,7 +443,8 @@ class PaymentAnomalySaturationPostgresTest {
                 var now = clock.instant().truncatedTo(ChronoUnit.MICROS);
                 var empty = new PaymentAnomalyObservation.Fact(0, null);
                 var active = new PaymentAnomalyObservation.Fact(1, now.minusSeconds(3600));
-                return new PaymentAnomalyObservation(now, active, empty, active, active, active, active);
+                // 7번째 버킷은 미관측(null)으로 두어 기존 5,000건(다섯 사건 × 1,000명) 포화 실험을 그대로 유지한다.
+                return new PaymentAnomalyObservation(now, active, empty, active, active, active, active, null);
             };
         }
     }

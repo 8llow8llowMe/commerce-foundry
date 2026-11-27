@@ -35,7 +35,13 @@ public class PaymentAnomalyObservationInternalResponseSupport {
         var body = root.path("dataBody");
         object(body);
         return new PaymentAnomalyObservation(instant(body.path("observedAt")), fact(body.path("unknown")), fact(body.path("manualReviewUnknown")),
-            fact(body.path("inProgress")), fact(body.path("returnedReady")), fact(body.path("lateApproved")), fact(body.path("doneOrderUnsynced")));
+            fact(body.path("inProgress")), fact(body.path("returnedReady")), fact(body.path("lateApproved")), fact(body.path("doneOrderUnsynced")),
+            optionalFact(body.path("autoCancelManualReview")));
+    }
+
+    /** 7번째 버킷의 누락(구버전 payment)과 JSON null(자동 취소 게이트 OFF)은 미관측이다. 객체면 다른 버킷과 같은 엄격 검증을 받는다. */
+    private PaymentAnomalyObservation.Fact optionalFact(JsonNode node) {
+        return node.isMissingNode() || node.isNull() ? null : fact(node);
     }
 
     private PaymentAnomalyObservation.Fact fact(JsonNode node) {

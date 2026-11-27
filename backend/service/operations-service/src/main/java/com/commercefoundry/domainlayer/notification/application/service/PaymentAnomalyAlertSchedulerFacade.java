@@ -79,7 +79,11 @@ public class PaymentAnomalyAlertSchedulerFacade implements PaymentAnomalyAlertSc
         // 최초 정상·억제도 빈 결과이므로 빈 목록만으로 시간 검증 거부로 단정하지 않는다.
         if (saved.isEmpty()) { return; }
         try {
-            push.enqueue(saved);
+            // 여섯 사건 × 1,000명(6,000건)은 전달 배치 상한을 넘으므로 나눠 넣는다. 최선 전달이라 일부 배치 거절은 저장을 되돌리지 않는다.
+            int limit = PaymentAnomalyAlertStateProcessor.MAX_INSERT_BATCH;
+            for (int from = 0; from < saved.size(); from += limit) {
+                push.enqueue(saved.size() <= limit ? saved : saved.subList(from, Math.min(saved.size(), from + limit)));
+            }
         } catch (RuntimeException ignored) {
             log.warn("payment_anomaly_push_failed reason=postcommit");
         }

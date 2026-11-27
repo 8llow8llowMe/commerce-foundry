@@ -9,7 +9,8 @@ import java.util.Objects;
 /** Pure whole-sample decision. No persistence, notification creation, or payment mutation. */
 public final class PaymentAnomalyPolicy {
     private PaymentAnomalyPolicy() { }
-    public enum Family { UNKNOWN, IN_PROGRESS, RETURNED_READY, LATE_APPROVED, DONE_ORDER_UNSYNCED }
+    /** Declaration order is not a contract. Storage sorts by {@link Enum#name()}, the same order as {@code ORDER BY family}. */
+    public enum Family { UNKNOWN, IN_PROGRESS, RETURNED_READY, LATE_APPROVED, DONE_ORDER_UNSYNCED, AUTO_CANCEL_MANUAL_REVIEW }
     public enum Status { NORMAL, ACTIVE }
     public enum Signal { OPENED, ESCALATED, REPEATED, CANDIDATES_DISAPPEARED }
 
@@ -37,7 +38,7 @@ public final class PaymentAnomalyPolicy {
                     || incident.lastAlertAt().isAfter(lastAcceptedLocalAt)
                     || !PaymentAnomalyObservation.microsecond(incident.firstDetectedAt())
                     || (family == Family.IN_PROGRESS || family == Family.RETURNED_READY) && incident.severity() != NotificationSeverity.WARNING
-                    || (family == Family.LATE_APPROVED || family == Family.DONE_ORDER_UNSYNCED) && incident.severity() != NotificationSeverity.CRITICAL)) {
+                    || criticalOnly(family) && incident.severity() != NotificationSeverity.CRITICAL)) {
                     throw new IllegalArgumentException("Invalid anomaly state chronology");
                 }
             });
@@ -60,11 +61,16 @@ public final class PaymentAnomalyPolicy {
         for (var family : Family.values()) {
             var fact = fact(sample, family);
             var old = previous == null ? null : previous.incidents().get(family);
+            if (fact == null) {
+                // 미관측(null)은 0건이 아니다. 이 사건만 이전 상태를 그대로 두고 신호를 내지 않는다(해소로 바꾸지 않는다).
+                // 공통 원천/로컬 워터마크는 다른 사건과 함께 전진한다.
+                next.put(family, old == null ? new Incident(Status.NORMAL, null, null, null) : old);
+                continue;
+            }
             boolean active = old != null && old.status() == Status.ACTIVE;
             boolean manual = family == Family.UNKNOWN && aged(sample.manualReviewUnknown(), sample.observedAt(), settings.manualReviewUnknown());
             boolean qualifies = manual || aged(fact, sample.observedAt(), threshold(settings, family));
-            var severity = manual || family == Family.LATE_APPROVED || family == Family.DONE_ORDER_UNSYNCED
-                ? NotificationSeverity.CRITICAL : NotificationSeverity.WARNING;
+            var severity = manual || criticalOnly(family) ? NotificationSeverity.CRITICAL : NotificationSeverity.WARNING;
             Incident incident;
             if (active && fact.count() == 0) {
                 incident = new Incident(Status.NORMAL, null, null, null);
@@ -86,9 +92,14 @@ public final class PaymentAnomalyPolicy {
         return new Decision(new State(sample.observedAt(), now, next), notices);
     }
 
+    /** 승격 없이 CRITICAL 로 고정된 사건. UNKNOWN 만 WARNING 에서 CRITICAL 로 승격할 수 있다. */
+    private static boolean criticalOnly(Family family) {
+        return family == Family.LATE_APPROVED || family == Family.DONE_ORDER_UNSYNCED || family == Family.AUTO_CANCEL_MANUAL_REVIEW;
+    }
     private static boolean aged(PaymentAnomalyObservation.Fact fact, Instant observed, Duration threshold) {
         return fact.count() > 0 && Duration.between(fact.oldestAt(), observed).compareTo(threshold) >= 0;
     }
+    /** null 은 AUTO_CANCEL_MANUAL_REVIEW 의 미관측뿐이다. 나머지 사건은 관측 생성자가 null 을 막는다. */
     private static PaymentAnomalyObservation.Fact fact(PaymentAnomalyObservation sample, Family family) {
         return switch (family) {
             case UNKNOWN -> sample.unknown();
@@ -96,6 +107,7 @@ public final class PaymentAnomalyPolicy {
             case RETURNED_READY -> sample.returnedReady();
             case LATE_APPROVED -> sample.lateApproved();
             case DONE_ORDER_UNSYNCED -> sample.doneOrderUnsynced();
+            case AUTO_CANCEL_MANUAL_REVIEW -> sample.autoCancelManualReview();
         };
     }
     private static Duration threshold(PaymentAnomalyPolicySettings settings, Family family) {
@@ -105,6 +117,7 @@ public final class PaymentAnomalyPolicy {
             case RETURNED_READY -> settings.returnedReady();
             case LATE_APPROVED -> settings.lateApproved();
             case DONE_ORDER_UNSYNCED -> settings.doneOrderUnsynced();
+            case AUTO_CANCEL_MANUAL_REVIEW -> settings.autoCancelManualReview();
         };
     }
 }

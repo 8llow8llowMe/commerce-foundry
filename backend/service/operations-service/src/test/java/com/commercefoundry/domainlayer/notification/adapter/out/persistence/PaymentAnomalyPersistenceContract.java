@@ -48,7 +48,7 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
     static PaymentAnomalyObservation sample(Instant at, boolean active) {
         var zero = new PaymentAnomalyObservation.Fact(0, null);
         var fact = active ? new PaymentAnomalyObservation.Fact(1, at.minusSeconds(3600)) : zero;
-        return new PaymentAnomalyObservation(at, fact, zero, fact, fact, fact, fact);
+        return new PaymentAnomalyObservation(at, fact, zero, fact, fact, fact, fact, fact);
     }
 
     List<Notification> accept(PaymentAnomalyObservation observation, List<Long> recipients, PaymentAnomalyPolicySettings settings) {
@@ -58,7 +58,7 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
     static PaymentAnomalyPolicy.State initial() { return PaymentAnomalyPolicy.accept(null, sample(NOW, false), NOW, SETTINGS).state(); }
 
     @Test
-    void exactCollectionBudgetStillCommitsAllFiveStatesAndNotifications() {
+    void exactCollectionBudgetStillCommitsAllSixStatesAndNotifications() {
         for (boolean existing : List.of(false, true)) {
             jdbc.update("delete from operations.payment_anomaly_alert_state");
             jdbc.update("delete from operations.notification");
@@ -67,13 +67,13 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
             if (existing) {
                 accept(sample(NOW.minusSeconds(1), false), List.of(1L), SETTINGS);
             }
-            assertThat(stateRows()).hasSize(existing ? 5 : 0);
+            assertThat(stateRows()).hasSize(existing ? 6 : 0);
             var timing = new PaymentAnomalyObservationTiming(NOW.minusSeconds(30), NOW, -30_000_000_000L);
-            var result = measure("E3_TIMING_BOUNDARY", 5, 1, () -> processor.accept(sample(NOW, true), List.of(1L), SETTINGS, timing));
+            var result = measure("E3_TIMING_BOUNDARY", 6, 1, () -> processor.accept(sample(NOW, true), List.of(1L), SETTINGS, timing));
             assertThat(result.failure()).isNull();
-            assertThat(result.saved()).hasSize(5);
-            assertSql(result.total(), 1, existing ? 0 : 5, existing ? 5 : 0, 5);
-            assertThat(stateRows()).hasSize(5);
+            assertThat(result.saved()).hasSize(6);
+            assertSql(result.total(), 1, existing ? 0 : 6, existing ? 6 : 0, 6);
+            assertThat(stateRows()).hasSize(6);
         }
     }
 
@@ -87,7 +87,7 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
                 accept(sample(NOW.minusSeconds(1), false), List.of(1L), SETTINGS);
             }
             var before = stateRows();
-            assertThat(before).hasSize(existing ? 5 : 0);
+            assertThat(before).hasSize(existing ? 6 : 0);
             var noticesBefore = jdbc.queryForList("select * from operations.notification order by id");
             for (var timing : List.of(new PaymentAnomalyObservationTiming(NOW, NOW, -30_000_000_001L),
                 new PaymentAnomalyObservationTiming(NOW, NOW, 1), new PaymentAnomalyObservationTiming(NOW, NOW.minusNanos(1), 0),
@@ -115,13 +115,13 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
     }
 
     @Test
-    void firstNormalPersistsFiveSortedStatesWithoutNotificationsAndReplayDoesNotWrite() {
+    void firstNormalPersistsSixSortedStatesWithoutNotificationsAndReplayDoesNotWrite() {
         var first = measure("E2_FIRST_NORMAL", 0, 1, () -> accept(sample(NOW, false), List.of(1L), SETTINGS));
         assertThat(first.failure()).isNull();
-        assertSql(first.total(), 1, 5, 0, 0);
+        assertSql(first.total(), 1, 6, 0, 0);
         assertThat(first.total().get("stateInsertFamilyOrder")).isEqualTo(FAMILIES);
         var before = stateRows();
-        assertThat(before).hasSize(5);
+        assertThat(before).hasSize(6);
         assertThat(before.stream().map(row -> row.get("family"))).containsExactlyElementsOf(FAMILIES);
         assertThat(before).allSatisfy(row -> {
             assertThat(row.get("version")).isEqualTo(0L);
@@ -141,10 +141,10 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
         accept(sample(NOW, false), List.of(1L), SETTINGS);
         var before = stateRows();
         clock.now = NOW.plusSeconds(1);
-        var result = measure("E2_EXISTING", 5, 1, () -> accept(sample(clock.now, true), List.of(1L), SETTINGS));
+        var result = measure("E2_EXISTING", 6, 1, () -> accept(sample(clock.now, true), List.of(1L), SETTINGS));
         assertThat(result.failure()).isNull();
-        assertSql(result.total(), 1, 0, 5, 5);
-        assertThat(result.saved()).hasSize(5).allSatisfy(n -> {
+        assertSql(result.total(), 1, 0, 6, 6);
+        assertThat(result.saved()).hasSize(6).allSatisfy(n -> {
             assertThat(n.sourceType()).isEqualTo("PAYMENT_ANOMALY_ALERT");
             assertThat(n.sourceId()).isEqualTo(n.id());
             assertThat(n.linkPath()).isEqualTo("/admin/payments");
@@ -152,7 +152,7 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
             assertThat(n.createdAt()).isNotNull();
         });
         var after = stateRows();
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < FAMILIES.size(); i++) {
             assertThat(after.get(i).get("created_at")).isEqualTo(before.get(i).get("created_at"));
             assertThat(after.get(i).get("version")).isEqualTo(1L);
             // 서로 다른 쓰기도 DB의 마이크로초 시각에서는 같은 값일 수 있다. 버전 증가가 실제 갱신을 확인한다.
@@ -220,10 +220,10 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
 
     @Test
     void partialRowsAndMismatchedWatermarksFailClosedWithoutRepair() {
-        for (int remaining = 1; remaining < 5; remaining++) {
+        for (int remaining = 1; remaining < FAMILIES.size(); remaining++) {
             jdbc.update("delete from operations.payment_anomaly_alert_state");
             accept(sample(NOW, false), List.of(1L), SETTINGS);
-            for (String family : FAMILIES.subList(remaining, 5)) {
+            for (String family : FAMILIES.subList(remaining, FAMILIES.size())) {
                 jdbc.update("delete from operations.payment_anomaly_alert_state where family = ?", family);
             }
             assertCorruptUnchanged();
@@ -236,6 +236,16 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
         jdbc.update("update operations.payment_anomaly_alert_state set last_observed_at = ?, last_accepted_local_at = ? where family = ?",
             java.sql.Timestamp.from(NOW), java.sql.Timestamp.from(NOW.plusSeconds(1)), FAMILIES.getFirst());
         assertCorruptUnchanged();
+    }
+
+    @Test
+    void legacyFiveRowStateWithoutAutoCancelFamilyFailsClosedWithoutRepair() {
+        // 업그레이드 DDL 없이 새 애플리케이션이 이전 다섯 행을 만나면 손상으로 보고 아무것도 쓰지 않는다(자동 보충 없음).
+        accept(sample(NOW, false), List.of(1L), SETTINGS);
+        jdbc.update("delete from operations.payment_anomaly_alert_state where family = ?", PaymentAnomalyPolicy.Family.AUTO_CANCEL_MANUAL_REVIEW.name());
+        assertThat(stateRows()).hasSize(5).noneMatch(row -> "AUTO_CANCEL_MANUAL_REVIEW".equals(row.get("family")));
+        assertCorruptUnchanged();
+        assertThat(stateRows()).hasSize(5);
     }
 
     private void assertCorruptUnchanged() {
@@ -280,7 +290,7 @@ abstract class PaymentAnomalyPersistenceContract extends AnomalyProbeSupport {
                 throw new IllegalStateException("synthetic post-state-flush failure");
             });
             assertThat(flushed.failure()).isInstanceOf(IllegalStateException.class);
-            assertThat(AnomalyProbeMeter.value(flushed.explicit(), existing ? "stateUpdateRows" : "stateInsertRows")).isEqualTo(5);
+            assertThat(AnomalyProbeMeter.value(flushed.explicit(), existing ? "stateUpdateRows" : "stateInsertRows")).isEqualTo(6);
             assertThat(stateRows()).isEqualTo(before);
             assertThat(jdbc.queryForList("select * from operations.notification order by id")).isEqualTo(noticesBefore);
             var input = new ArrayList<>(AnomalyProbeStore.fixture(4));

@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.*;
 import com.commercefoundry.domainlayer.notification.application.exception.NotificationException;
 import com.commercefoundry.domainlayer.notification.application.port.out.PaymentAnomalyObservationPort;
 import com.commercefoundry.domainlayer.notification.application.service.processor.PaymentAnomalyObservationProcessor;
+import com.commercefoundry.domainlayer.notification.domain.model.PaymentAnomalyObservation;
 import com.commercefoundry.security.internal.InternalTokenDecoderFactory;
 import com.commercefoundry.security.support.TestServiceTokens;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -45,6 +46,8 @@ class PaymentAnomalyObservationClientTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final WireMockServer SERVER = start();
     private static final List<String> LANES = List.of("unknown", "manualReviewUnknown", "inProgress", "returnedReady", "lateApproved", "doneOrderUnsynced");
+    /** 누락·JSON null 은 미관측으로 받는다. 객체면 다른 버킷과 같은 엄격 검증이다. */
+    private static final String AUTO_CANCEL = "autoCancelManualReview";
     @Autowired PaymentAnomalyObservationPort source;
     @Autowired PaymentAnomalyObservationProcessor processor;
     @Autowired CircuitBreakerRegistry circuits;
@@ -75,7 +78,8 @@ class PaymentAnomalyObservationClientTest {
             "inProgress":{"count":3,"oldestAt":"2026-09-30T23:52:00Z"},
             "returnedReady":{"count":4,"oldestAt":"2026-09-30T23:53:00Z"},
             "lateApproved":{"count":5,"oldestAt":"2026-09-30T23:54:00Z"},
-            "doneOrderUnsynced":{"count":6,"oldestAt":"2026-09-30T23:55:00Z"}}}
+            "doneOrderUnsynced":{"count":6,"oldestAt":"2026-09-30T23:55:00Z"},
+            "autoCancelManualReview":{"count":8,"oldestAt":"2026-09-30T23:56:00Z"}}}
             """;
     }
 
@@ -117,6 +121,20 @@ class PaymentAnomalyObservationClientTest {
         for (String invalid : new String[] {null, "null", "1", "true", "{}", "[]", "\"bad\"", "\"2026-10-01T00:00:00.123456789Z\""}) {
             cases.add(Arguments.of("observedAt=" + invalid, changed("dataBody/observedAt", invalid)));
         }
+        // 7번째 버킷: 누락·null 은 정상(미관측)이라 여기 없다. 그 밖의 비객체와 잘못된 count/oldestAt 은 관측 전체 실패다.
+        String autoCancel = "dataBody/" + AUTO_CANCEL;
+        for (String invalid : new String[] {"[]", "1", "0", "true", "false", "\"bucket\"", "\"null\"", "{}"}) {
+            cases.add(Arguments.of(AUTO_CANCEL + "=" + invalid, changed(autoCancel, invalid)));
+        }
+        for (String invalid : new String[] {null, "null", "-1", "1.0", "1.5", "1e0", "true", "\"1\"", "{}", "[]", "9223372036854775808", "0"}) {
+            cases.add(Arguments.of(AUTO_CANCEL + ".count=" + invalid, changed(autoCancel + "/count", invalid)));
+        }
+        for (String invalid : new String[] {null, "null", "1", "true", "{}", "[]", "\"bad\"", "\"2026-10-02T00:00:00Z\"",
+            "\"2026-09-30T23:56:00.123456789Z\""}) {
+            cases.add(Arguments.of(AUTO_CANCEL + ".oldestAt=" + invalid, changed(autoCancel + "/oldestAt", invalid)));
+        }
+        cases.add(Arguments.of(AUTO_CANCEL + " zero with oldestAt", changed(autoCancel, "{\"count\":0,\"oldestAt\":\"2026-09-30T23:56:00Z\"}")));
+        cases.add(Arguments.of(AUTO_CANCEL + " sentinel string", changed(autoCancel, "\"" + SENTINEL + "\"")));
         cases.add(Arguments.of("manual greater than unknown", changed("dataBody/manualReviewUnknown/count", "8")));
         cases.add(Arguments.of("manual minimum before unknown", changed("dataBody/manualReviewUnknown/oldestAt", "\"2026-09-30T23:49:00Z\"")));
         cases.add(Arguments.of("equal positive count but unequal minimum", changed("dataBody/manualReviewUnknown/count", "7")));
@@ -137,6 +155,7 @@ class PaymentAnomalyObservationClientTest {
             result.lateApproved().oldestAt(), result.doneOrderUnsynced().oldestAt()))
             .containsExactly(Instant.parse("2026-09-30T23:50:00Z"), Instant.parse("2026-09-30T23:51:00Z"), Instant.parse("2026-09-30T23:52:00Z"),
                 Instant.parse("2026-09-30T23:53:00Z"), Instant.parse("2026-09-30T23:54:00Z"), Instant.parse("2026-09-30T23:55:00Z"));
+        assertThat(result.autoCancelManualReview()).isEqualTo(new PaymentAnomalyObservation.Fact(8, Instant.parse("2026-09-30T23:56:00Z")));
         var requests = SERVER.findAll(getRequestedFor(urlEqualTo(PATH)));
         assertThat(requests).hasSize(1);
         var token = requests.getFirst().getHeader("Authorization");
@@ -167,6 +186,29 @@ class PaymentAnomalyObservationClientTest {
         assertThat(source.observe().unknown().oldestAt()).isNull();
         respond(changed("dataBody/futureField", "{\"count\":\"ignored\"}"));
         assertThat(source.observe().doneOrderUnsynced().count()).isEqualTo(6);
+    }
+
+    @Test
+    void autoCancelBucketMissingOrNullIsUnobservedAndZeroOrIndependentValuesAreObserved(CapturedOutput output) {
+        // 구버전 payment(필드 없음)와 자동 취소 게이트 OFF(JSON null)는 0건과 다른 미관측이다. 나머지 여섯 버킷은 그대로 읽는다.
+        for (String body : List.of(changed("dataBody/" + AUTO_CANCEL, null), changed("dataBody/" + AUTO_CANCEL, "null"))) {
+            respond(body);
+            var unobserved = source.observe();
+            assertThat(unobserved.autoCancelManualReview()).isNull();
+            assertThat(unobserved.doneOrderUnsynced().count()).isEqualTo(6);
+            SERVER.resetAll();
+        }
+        respond(changed("dataBody/" + AUTO_CANCEL, "{\"count\":0,\"oldestAt\":null}"));
+        assertThat(source.observe().autoCancelManualReview()).isEqualTo(new PaymentAnomalyObservation.Fact(0, null));
+        // UNKNOWN 수동 확인 부분집합과 무관하다 — 수동 확인 0건이어도, unknown 보다 많고 더 오래돼도 받는다. 추가 필드는 무시한다.
+        respond(changed("dataBody/" + AUTO_CANCEL, "{\"count\":9223372036854775807,\"oldestAt\":\"2026-01-01T00:00:00.000001Z\",\"reason\":\""
+            + SENTINEL + "\"}").replace("\"count\":2,", "\"count\":0,").replace("\"2026-09-30T23:51:00Z\"", "null"));
+        var independent = source.observe();
+        assertThat(independent.manualReviewUnknown()).isEqualTo(new PaymentAnomalyObservation.Fact(0, null));
+        assertThat(independent.autoCancelManualReview()).isEqualTo(new PaymentAnomalyObservation.Fact(Long.MAX_VALUE, Instant.parse("2026-01-01T00:00:00.000001Z")));
+        respond(changed("dataBody/" + AUTO_CANCEL, "{\"count\":1,\"oldestAt\":\"2026-10-01T00:00:00.123456Z\"}"));
+        assertThat(source.observe().autoCancelManualReview().oldestAt()).isEqualTo(Instant.parse("2026-10-01T00:00:00.123456Z"));
+        assertThat(output.getAll()).doesNotContain(SENTINEL);
     }
 
     @Test

@@ -3,9 +3,15 @@ package com.commercefoundry.domainlayer.notification.domain.model;
 import java.time.Instant;
 import java.util.List;
 
-/** Aggregate facts only: ages measure request start / PG approval, not state residence. */
+/**
+ * Aggregate facts only: ages measure request start / PG approval, not state residence.
+ *
+ * <p>{@code autoCancelManualReview} is nullable. null means "not observed" (payment auto-cancel gate OFF, or an older payment
+ * without the field) and differs from {@code {0, null}}. It is an independent fact aged by the last scheduled/claimed attempt,
+ * so it takes no part in the UNKNOWN subset relation; only its chronology is checked.
+ */
 public record PaymentAnomalyObservation(Instant observedAt, Fact unknown, Fact manualReviewUnknown, Fact inProgress,
-                                        Fact returnedReady, Fact lateApproved, Fact doneOrderUnsynced) {
+                                        Fact returnedReady, Fact lateApproved, Fact doneOrderUnsynced, Fact autoCancelManualReview) {
     public record Fact(long count, Instant oldestAt) {
         public Fact {
             if (count < 0 || (count == 0) != (oldestAt == null) || oldestAt != null && !microsecond(oldestAt)) {
@@ -23,6 +29,9 @@ public record PaymentAnomalyObservation(Instant observedAt, Fact unknown, Fact m
             if (fact.oldestAt() != null && fact.oldestAt().isAfter(observedAt)) {
                 throw new IllegalArgumentException("Invalid anomaly chronology");
             }
+        }
+        if (autoCancelManualReview != null && autoCancelManualReview.oldestAt() != null && autoCancelManualReview.oldestAt().isAfter(observedAt)) {
+            throw new IllegalArgumentException("Invalid anomaly chronology");
         }
         if (manualReviewUnknown.count() > unknown.count() || manualReviewUnknown.count() > 0
             && (manualReviewUnknown.oldestAt().isBefore(unknown.oldestAt())

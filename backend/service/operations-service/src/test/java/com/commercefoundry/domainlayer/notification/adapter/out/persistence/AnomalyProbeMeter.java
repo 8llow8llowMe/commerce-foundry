@@ -73,7 +73,8 @@ final class AnomalyProbeMeter implements QueryExecutionListener, MethodExecution
                         for (var operation : parameters) {
                             Object[] arguments = operation.getArgs();
                             if (arguments.length > 1 && arguments[1] instanceof String value
-                                && java.util.Set.of("UNKNOWN", "IN_PROGRESS", "RETURNED_READY", "LATE_APPROVED", "DONE_ORDER_UNSYNCED").contains(value)) {
+                                && java.util.Set.of("UNKNOWN", "IN_PROGRESS", "RETURNED_READY", "LATE_APPROVED", "DONE_ORDER_UNSYNCED",
+                                    "AUTO_CANCEL_MANUAL_REVIEW").contains(value)) {
                                 window.stateInsertFamilies.add(value);
                             }
                         }

@@ -196,6 +196,8 @@ operations:
       returned-ready: 10m
       late-approved: 0s
       done-order-unsynced: 10m
+      # payment 자동 취소 MANUAL_REVIEW(#477). payment 게이트 OFF·구버전이면 미관측이라 이 사건 상태를 그대로 둔다
+      auto-cancel-manual-review: 0s
       suppression: 1h
       max-observation-age: 30s
       initial-delay: 1m

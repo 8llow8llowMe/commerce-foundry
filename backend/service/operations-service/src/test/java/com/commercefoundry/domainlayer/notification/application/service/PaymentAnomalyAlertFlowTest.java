@@ -234,7 +234,7 @@ class PaymentAnomalyAlertFlowTest {
     static PaymentAnomalyObservation sample(Instant at, boolean active) {
         var empty = new PaymentAnomalyObservation.Fact(0, null);
         var unknown = active ? new PaymentAnomalyObservation.Fact(1, at.minusSeconds(600)) : empty;
-        return new PaymentAnomalyObservation(at, unknown, empty, empty, empty, empty, empty);
+        return new PaymentAnomalyObservation(at, unknown, empty, empty, empty, empty, empty, empty);
     }
 
     private List<List<Object>> snapshot() {
@@ -244,7 +244,7 @@ class PaymentAnomalyAlertFlowTest {
     }
 
     private void assertWatermark(Instant at, PaymentAnomalyPolicy.Status unknown) {
-        assertThat(states.findAll()).hasSize(5).allSatisfy(row -> assertThat(row.getLastObservedAt()).isEqualTo(at));
+        assertThat(states.findAll()).hasSize(6).allSatisfy(row -> assertThat(row.getLastObservedAt()).isEqualTo(at));
         assertThat(states.findById("UNKNOWN").orElseThrow().getStatus()).isEqualTo(unknown);
     }
 
@@ -263,7 +263,7 @@ class PaymentAnomalyAlertFlowTest {
                     assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
                     assertThat(notifications.count()).isEqualTo(stored);
                     assertThat(notifications.findById(Long.parseLong(message.notificationId()))).isPresent();
-                    assertThat(states.findAll()).hasSize(5).allSatisfy(row -> assertThat(row.getLastObservedAt()).isEqualTo(watermark));
+                    assertThat(states.findAll()).hasSize(6).allSatisfy(row -> assertThat(row.getLastObservedAt()).isEqualTo(watermark));
                     messages.add(message);
                 } catch (Throwable failure) {
                     failures.add(failure);

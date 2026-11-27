@@ -747,14 +747,14 @@
         status varchar(16) not null check ((status in ('NORMAL','ACTIVE'))),
         version bigint not null,
         primary key (family),
-        constraint ck_payment_anomaly_alert_state_family check (family in ('UNKNOWN','IN_PROGRESS','RETURNED_READY','LATE_APPROVED','DONE_ORDER_UNSYNCED')),
+        constraint ck_payment_anomaly_alert_state_family check (family in ('UNKNOWN','IN_PROGRESS','RETURNED_READY','LATE_APPROVED','DONE_ORDER_UNSYNCED','AUTO_CANCEL_MANUAL_REVIEW')),
         constraint ck_payment_anomaly_alert_state_incident check ((status = 'NORMAL' and severity is null and first_detected_at is null and last_alert_at is null) or (status = 'ACTIVE' and severity is not null and severity in ('WARNING','CRITICAL') and first_detected_at is not null and last_alert_at is not null)),
-        constraint ck_payment_anomaly_alert_state_severity check (status = 'NORMAL' or family = 'UNKNOWN' or (family in ('IN_PROGRESS','RETURNED_READY') and severity = 'WARNING') or (family in ('LATE_APPROVED','DONE_ORDER_UNSYNCED') and severity = 'CRITICAL')),
+        constraint ck_payment_anomaly_alert_state_severity check (status = 'NORMAL' or family = 'UNKNOWN' or (family in ('IN_PROGRESS','RETURNED_READY') and severity = 'WARNING') or (family in ('LATE_APPROVED','DONE_ORDER_UNSYNCED','AUTO_CANCEL_MANUAL_REVIEW') and severity = 'CRITICAL')),
         constraint ck_payment_anomaly_alert_state_chronology check (last_observed_at <= last_accepted_local_at and (status = 'NORMAL' or (first_detected_at <= last_observed_at and first_detected_at <= last_alert_at and last_alert_at <= last_accepted_local_at)))
     );
 
     comment on table operations.payment_anomaly_alert_state is
-        '결제 이상 다섯 사건의 수락 워터마크';
+        '결제 이상 여섯 사건의 수락 워터마크';
 
     comment on column operations.payment_anomaly_alert_state.family is
         '허용된 결제 이상 사건 키';
