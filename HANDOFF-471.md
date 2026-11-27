@@ -3,8 +3,20 @@
 ## 현재 상태
 
 - 브랜치 `feature/be/471-cs-handoff-state-machine`, base `origin/develop` 844b86ef. 워크트리 `commerce-foundry-wt/471-cs-handoff`.
-- **코드 변경 없음.** 이 커밋은 이 문서 하나다. architect 설계를 저장소 코드와 대조해 확정했고, 구현은 시작하지 않았다.
-- 검증 · 리뷰: 아직 없음.
+- 커밋 2개
+  - `9d6ddba7`: 이 문서(설계)
+  - 그 다음 커밋: 도메인 최소 단위 7파일(아래 "도메인 먼저 커밋할 최소 단위")
+- 구현한 것
+  - `Conversation` 에 `assigneeMemberId` · `handoffReason` · `handoffRequestedAt` 칸을 더했다. 사유와 요청 시각은 둘 다 있거나 둘 다 없다(불변식).
+  - 전이 표는 `TRANSITIONS` Map(현재 → 다음 → 허용 행위자)이다.
+  - 전이 메서드는 `requestHandoff(actorType, reason, now)` · `assign` · `resolve` · `close` · `systemClose` 이고, 결과는 `Conversation.Transition(conversation, event)` 다.
+  - 행위자와 사유가 어긋나면 IAE 다. 고객 · 비회원은 CUSTOMER_REQUEST 만, 시스템은 AI_* 만 쓴다.
+  - 기존 8인자 생성자는 위임으로 남겨 매퍼 · 생성 경로는 그대로다.
+- 검증
+  - 메인 세션이 `./gradlew :service:support-service:test --tests '*ConversationTest' --no-build-cache` 를 돌렸다 → 7건 통과.
+  - support 모듈 check 는 아직 안 돌렸다(checkstyle 태스크는 이 모듈에 없음).
+  - 영속 · DDL · API 는 아직 없다. 사용자 결정 1(이관 취소 전이)이 정해지면 전이 표를 고친다.
+- 리뷰: 아직 없음.
 - 설계 정본: #470 댓글 6569351436(상태 5개 · outbox 알림), #471 본문 · 댓글, 아래 "확정 설계". PR 전에 이 파일을 지운다.
 
 ## 확인한 사실 (근거 파일:줄, 경로는 `backend/service/support-service/src/main/java/com/commercefoundry/domainlayer/conversation` 기준)
