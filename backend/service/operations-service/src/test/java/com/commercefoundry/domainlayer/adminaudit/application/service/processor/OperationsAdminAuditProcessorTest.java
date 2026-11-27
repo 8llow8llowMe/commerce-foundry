@@ -21,6 +21,7 @@ import com.commercefoundry.domainlayer.legaldocument.application.command.LegalDo
 import com.commercefoundry.domainlayer.legaldocument.application.service.LegalDocumentAdminFacade;
 import com.commercefoundry.domainlayer.legaldocument.application.service.processor.LegalDocumentProcessor;
 import com.commercefoundry.domainlayer.legaldocument.application.service.processor.LegalDocumentTemplateProcessor;
+import com.commercefoundry.domainlayer.storebrand.adapter.in.admin.controller.BrandAssetAdminController;
 import com.commercefoundry.domainlayer.storeprofile.adapter.in.admin.controller.StoreProfileAdminController;
 import com.commercefoundry.domainlayer.storeprofile.adapter.in.admin.presenter.StoreProfileAdminPresenter;
 import com.commercefoundry.domainlayer.storeprofile.application.command.StoreProfileSaveCommand;
@@ -55,12 +56,12 @@ class OperationsAdminAuditProcessorTest {
     @Test
     void enumMatchesOnlyMigratedControllersNotAllOperationsActions() {
         var declared = Stream.of(StoreProfileAdminController.class, LegalDocumentAdminController.class, StoreFooterAdminController.class,
-                StoreNavigationAdminController.class)
+                StoreNavigationAdminController.class, BrandAssetAdminController.class)
             .flatMap(type -> Arrays.stream(type.getDeclaredMethods()))
             .filter(method -> method.isAnnotationPresent(AdminAudited.class))
             .map(method -> method.getAnnotation(AdminAudited.class).action()).toList();
         assertThat(declared).containsExactlyInAnyOrderElementsOf(Arrays.stream(OperationsAdminAuditAction.values()).map(Enum::name).toList());
-        assertThat(declared).hasSize(7).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
+        assertThat(declared).hasSize(10).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
     }
 
     @ParameterizedTest

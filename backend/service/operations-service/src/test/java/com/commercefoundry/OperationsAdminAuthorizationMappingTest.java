@@ -65,6 +65,13 @@ class OperationsAdminAuthorizationMappingTest {
         Map.entry("GET /api/v1/admin/store/navigation", AdminAuthority.SETTINGS_READ),
         Map.entry("PUT /api/v1/admin/store/navigation", AdminAuthority.SETTINGS_MANAGE),
         Map.entry("POST /api/v1/admin/store/navigation/publication", AdminAuthority.SETTINGS_MANAGE),
+        // 스토어 브랜드 이미지
+        Map.entry("GET /api/v1/admin/store/brand-assets", AdminAuthority.SETTINGS_READ),
+        Map.entry("GET /api/v1/admin/store/brand-assets/publications", AdminAuthority.SETTINGS_READ),
+        Map.entry("GET /api/v1/admin/store/brand-assets/uploads/{kind}/{assetId}", AdminAuthority.SETTINGS_READ),
+        Map.entry("PUT /api/v1/admin/store/brand-assets", AdminAuthority.SETTINGS_MANAGE),
+        Map.entry("POST /api/v1/admin/store/brand-assets/publication", AdminAuthority.SETTINGS_MANAGE),
+        Map.entry("POST /api/v1/admin/store/brand-assets/uploads/{kind}", AdminAuthority.SETTINGS_MANAGE),
         // 상점 프로필
         Map.entry("GET /api/v1/admin/store/profile", AdminAuthority.SETTINGS_READ),
         Map.entry("PUT /api/v1/admin/store/profile", AdminAuthority.SETTINGS_MANAGE),
