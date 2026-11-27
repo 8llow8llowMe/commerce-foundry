@@ -49,6 +49,18 @@ class GatewayRequestBodySizeFilterTest {
     private final GatewayRequestBodySizeFilter filter = filter(DataSize.ofBytes(LIMIT * 4L), Duration.ofSeconds(2), Duration.ofSeconds(2));
 
     @Test
+    void analyticsUsesOneKibCeiling() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/api/v1/analytics/events")
+            .contentType(MediaType.TEXT_PLAIN).contentLength(1025).body(" ".repeat(1025)));
+        AtomicReference<ServerHttpRequest> routed = new AtomicReference<>();
+
+        filter.filter(exchange, chain(routed)).block(TIMEOUT);
+
+        assertThat(routed).hasNullValue();
+        assertRejected(exchange, HttpStatus.CONTENT_TOO_LARGE, "GATEWAY_007");
+    }
+
+    @Test
     @DisplayName("요청 가드 바로 뒤, CORS · 보안 체인보다 앞에서 돈다")
     void runsRightAfterGuard() {
         assertThat(filter.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);

@@ -80,23 +80,30 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
         if (policy.isEmpty()) {
             return chain.filter(exchange);
         }
-        boolean mandatory = policy.get() == RateLimitPolicy.SUPPORT_WRITE;
-        if (mandatory && (!properties.enabled() || !clientSubjectResolver.enabled() || clientSubject(exchange).isEmpty())) {
+        RateLimitPolicy matched = policy.orElseThrow();
+        Optional<RateLimitSubject> requiredClient = matched.requiresClientIp() ? clientSubject(exchange) : Optional.empty();
+        if (matched.requiresClientIp() && (!properties.enabled() || requiredClient.isEmpty())) {
             return unavailable(exchange);
         }
         if (!properties.enabled()) {
             return chain.filter(exchange);
         }
+        Mono<RateLimitSubject> subject = matched == RateLimitPolicy.ANALYTICS_EVENTS
+            ? Mono.justOrEmpty(requiredClient)
+            : memberOrClient(exchange);
+        return subject.flatMap(value -> acquire(matched, value, exchange))
+            .defaultIfEmpty(true)
+            .flatMap(allowed -> allowed ? chain.filter(exchange) : reject(matched, exchange))
+            .onErrorResume(RateLimitUnavailableException.class, failure -> unavailable(exchange));
+    }
+
+    private Mono<RateLimitSubject> memberOrClient(ServerWebExchange exchange) {
         return ReactiveSecurityContextHolder.getContext()
             .map(SecurityContext::getAuthentication)
             .map(Authentication::getPrincipal)
             .ofType(MemberPrincipal.class)
             .map(member -> RateLimitSubject.member(member.memberId()))
-            .switchIfEmpty(Mono.defer(() -> Mono.justOrEmpty(clientSubject(exchange))))
-            .flatMap(subject -> acquire(policy.get(), subject, exchange))
-            .defaultIfEmpty(true)
-            .flatMap(allowed -> allowed ? chain.filter(exchange) : reject(policy.get(), exchange))
-            .onErrorResume(RateLimitUnavailableException.class, failure -> unavailable(exchange));
+            .switchIfEmpty(Mono.defer(() -> Mono.justOrEmpty(clientSubject(exchange))));
     }
 
     /**
@@ -120,7 +127,7 @@ public class GatewayRateLimitFilter implements GlobalFilter, Ordered {
             .single()
             .timeout(CHECK_TIMEOUT)
             .onErrorResume(failure -> {
-                if (policy == RateLimitPolicy.SUPPORT_WRITE) {
+                if (policy.requiresClientIp()) {
                     return Mono.error(new RateLimitUnavailableException());
                 }
                 logFailOpen(policy, subject, exchange, failure);
