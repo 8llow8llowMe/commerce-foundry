@@ -41,6 +41,9 @@ class OperationsAdminAuthorizationMappingTest {
     private static final Map<String, String> EXPECTED = Map.ofEntries(
         // 캠페인
         Map.entry("POST /api/v1/admin/campaigns/recipient-previews", AdminAuthority.CS_READ),
+        // 방문 분석 — ADMIN과 OWNER 전용
+        Map.entry("GET /api/v1/admin/analytics/products/top", AdminAuthority.REPORT_READ + " and hasAnyRole('ADMIN','OWNER')"),
+        Map.entry("GET /api/v1/admin/analytics/products/{productId}/daily", AdminAuthority.REPORT_READ + " and hasAnyRole('ADMIN','OWNER')"),
         // 백그라운드 작업
         Map.entry("GET /api/v1/admin/jobs", AdminAuthority.REPORT_READ),
         Map.entry("GET /api/v1/admin/jobs/{jobId}", AdminAuthority.REPORT_READ),

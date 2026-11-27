@@ -1175,6 +1175,41 @@
     comment on column operations.store_profile.version is
         '낙관적 편집 버전';
 
+    create table operations.visit_event_receipt (
+        event_id uuid not null,
+        visit_day date not null,
+        primary key (event_id)
+    );
+
+    comment on table operations.visit_event_receipt is
+        '방문 이벤트 중복 방지 영수증';
+
+    comment on column operations.visit_event_receipt.event_id is
+        '클라이언트가 생성한 무작위 이벤트 UUID';
+
+    comment on column operations.visit_event_receipt.visit_day is
+        '한국 시간 기준 수집일';
+
+    create table operations.visit_product_daily (
+        product_id bigint not null,
+        visit_day date not null,
+        view_count bigint not null,
+        primary key (product_id, visit_day),
+        constraint ck_visit_product_daily_counts check (product_id > 0 and view_count >= 0)
+    );
+
+    comment on table operations.visit_product_daily is
+        '상품별 일간 조회수';
+
+    comment on column operations.visit_product_daily.product_id is
+        '상품 식별자 (외부 참조: product-service product.id)';
+
+    comment on column operations.visit_product_daily.visit_day is
+        '한국 시간 기준 수집일';
+
+    comment on column operations.visit_product_daily.view_count is
+        '동의 후 집계한 조회수';
+
     create index idx_ai_usage_call_called_at_id
        on operations.ai_usage_call (called_at, id);
 
@@ -1210,3 +1245,9 @@
 
     create index idx_store_navigation_item_revision_id
        on operations.store_navigation_item (revision_id);
+
+    create index idx_visit_event_receipt_visit_day
+       on operations.visit_event_receipt (visit_day);
+
+    create index idx_visit_product_daily_visit_day
+       on operations.visit_product_daily (visit_day);

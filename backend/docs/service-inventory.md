@@ -104,6 +104,8 @@ SKU 는 해외 배송비 · 통관용 배송 무게 · HS 코드(둘 다 nullabl
 `picking_item`(대상 주문의 상품 옵션별 수량) · `picking_check`(검수 기록, append-only). **검수 완료는 출고가 아니다** — 주문 상태 · 송장 · 재고를 바꾸지 않고 출고는 송장 등록이 그때의 주문 상태로 판정한다.
 "장바구니" 는 회원 장바구니(`/api/v1/carts/me/**` — 조회 · 담기 · 수량 변경 · 삭제 · 로컬 장바구니 병합)가 있고, 가격 · 판매 상태를 product-service SKU 벌크 조회(Feign, 서비스 토큰 · 서킷)로 매번 읽는 상태다. 정책은 `order-flow-guide.md` §2-1.
 
+operations-service는 상품 상세 조회를 수집하고 일별·기간별 조회수를 제공한다 ([방문 분석](visit-analytics.md), #226).
+
 ## 2. 서비스 간 호출 (동기, Feign)
 
 | 호출하는 쪽 | 대상 | 용도 |
