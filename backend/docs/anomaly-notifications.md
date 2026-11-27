@@ -67,12 +67,21 @@ operations의 엄격 소비·순수 정책은 아래 A4b-1이며 주기 수집·
 ## 결제 이상 원천 소비·순수 사건 정책 (#477 A4b-1)
 
 `PaymentAnomalyObservationPort`는 A4a 원천을 읽고 같은 notification 컨텍스트의 불변 domain만 반환한다.
-여섯 버킷 전체를 검증한 뒤 UNKNOWN(전체와 수동 확인 부분집합), IN_PROGRESS, RETURNED_READY, LATE_APPROVED,
-DONE_ORDER_UNSYNCED 다섯 사건을 불변 상태와 신호로 함께 판정한다. 일반 UNKNOWN의 최솟값을 부분집합에서 빼서 추정하지 않는다.
+필수 여섯 버킷과 선택 7번째 버킷(`autoCancelManualReview`, #477 PR 2)을 검증한 뒤 UNKNOWN(전체와 수동 확인 부분집합), IN_PROGRESS, RETURNED_READY,
+LATE_APPROVED, DONE_ORDER_UNSYNCED, AUTO_CANCEL_MANUAL_REVIEW 여섯 사건을 불변 상태와 신호로 함께 판정한다. 일반 UNKNOWN의 최솟값을 부분집합에서 빼서 추정하지 않는다.
 
-기본 임계는 UNKNOWN 5분·수동 확인 0초·IN_PROGRESS 5분·RETURNED_READY 10분·LATE_APPROVED 0초·DONE 미동기화 10분이다.
-나이는 요청 시작/PG 승인 기준이며 상태 체류시간이나 동일 결제의 연속 관측 시간이 아니다. 불변 설정 모델은 수동 확인·늦은 승인만 0초를 허용하고
-나머지 임계는 1초 이상, 모두 최대 1일이다. 억제는 기본 1시간(1초~7일), 표본 나이는 기본 30초(1초~5분)다. 활성화 설정 바인딩은 아직 없다.
+기본 임계는 UNKNOWN 5분·수동 확인 0초·IN_PROGRESS 5분·RETURNED_READY 10분·LATE_APPROVED 0초·DONE 미동기화 10분·자동 취소 수동 확인 0초다
+(설정 키 `operations.notifications.payment-anomaly-alert.auto-cancel-manual-review`).
+나이는 요청 시작/PG 승인 기준이며 상태 체류시간이나 동일 결제의 연속 관측 시간이 아니다. 불변 설정 모델은 수동 확인·늦은 승인·자동 취소 수동 확인만 0초를 허용하고
+나머지 임계는 1초 이상, 모두 최대 1일이다. 억제는 기본 1시간(1초~7일), 표본 나이는 기본 30초(1초~5분)다.
+
+**자동 취소 수동 확인(7번째 버킷).** payment 자동 취소 의도가 MANUAL_REVIEW 로 멈춘 건수다 — 고객 돈이 PG 에 남아 사람 확인이 필요하다.
+`oldestAt`은 진입 시각이 아니라 마지막 실행 예정·획득 시각의 최솟값이다. UNKNOWN 수동 확인과는 별개 테이블·별개 사실이라 합산·부분집합 검증을 하지 않고
+`oldestAt ≤ observedAt` 시간 순서만 본다. 객체이면 다른 버킷과 같은 엄격 검증(정수 long·0/null 관계·마이크로초 시각)을 받고, 비객체·음수·잘못된 시각은
+관측 전체 실패다. 심각도는 CRITICAL 고정이며 승격(ESCALATED)은 없다. 억제·반복·후보 소멸은 다른 사건과 같은 규칙이다.
+버킷이 **누락(구버전 payment)이거나 JSON null(payment 자동 취소 게이트 OFF)이면 미관측**이다. 0건과 달리 이 사건의 이전 상태를 그대로 두고
+신호를 내지 않으며 해소로 바꾸지 않는다. 억제 경계를 넘겨도 반복하지 않는다. 공통 원천/로컬 워터마크와 다른 다섯 사건의 판정은 평소대로 진행한다.
+최초 표본이 미관측이면 이 사건은 NORMAL 로 시작한다. 후보 소멸 INFO는 PG 취소 완료를 선언하지 않는다.
 
 최초 정상 표본도 원천/로컬 워터마크를 보존한다. 양수이며 임계 이상이면 사건을 개시하고, 마지막 신호 로컬 시각에서 억제 경계 이상이면 반복한다.
 UNKNOWN의 수동 확인 조건 첫 충족은 억제 중에도 CRITICAL로 한 번 승격하며 억제를 다시 시작한다. 최초부터 수동 확인이면 개시 신호 하나만 만든다.
@@ -81,26 +90,33 @@ UNKNOWN의 수동 확인 조건 첫 충족은 억제 중에도 CRITICAL로 한 �
 처음 0, 실패·잘못된 버킷/부분집합, 같은/이전·오래된·미래 표본, 이전 수락 로컬 시각보다 역행한 판정은 신호 없이 전체 상태와 워터마크를 보존한다.
 
 이 단계는 SOURCE 읽기와 순수 판정만 제공한다. 아래 A4b-2가 영속 상태·수신자 fanout 저장을 추가하며 스케줄러·SSE 연결은 후속이다.
-HTTP 전/후/최종 Clock·nanoTime 검증은 A4b-3, 다섯 행의 원자 저장·공통 워터마크 검증은 A4b-2에서 연결한다.
-정책 Map의 반복 순서는 계약이 아니다. 후속 최초 INSERT는 잠금 조회의 `ORDER BY family`와 동일한 명시 정렬을 사용해야 한다.
+HTTP 전/후/최종 Clock·nanoTime 검증은 A4b-3, 여섯 행의 원자 저장·공통 워터마크 검증은 A4b-2에서 연결한다.
+정책 Map의 반복 순서는 계약이 아니다. 후속 최초 INSERT는 잠금 조회의 `ORDER BY family`와 동일한 명시 정렬(`Enum::name`)을 사용해야 한다.
+여섯 사건 이름은 첫 글자가 모두 달라(`AUTO_CANCEL_MANUAL_REVIEW` 가 처음) DB collation과 관계없이 두 정렬이 같다.
 
 ## 결제 이상 사건·전체 알림 원자 저장 (#477 A4b-2)
 
 `PaymentAnomalyAlertStateProcessor`는 이미 검증한 원천 표본·정책 설정·양수이며 중복 없는 수신자 1~1,000명과 필수 timing을 받는 내부 저장 경계다.
 수신자는 절삭하지 않으며 전체가 유효해야 한다. 전체 상태를 `ORDER BY family`·PESSIMISTIC_WRITE/NOWAIT로 한 번 읽은 뒤 최종 Clock과 ticker를 읽고 순수 정책을 적용한다.
-0행 또는 허용된 다섯 키와 공통 원천/로컬 워터마크가 모두 일치할 때만 판정한다. 부분 행·잘못된 키·워터마크 손상은 쓰기 없이 실패하며 자동 보충하지 않는다.
-최초 정상 표본도 상태 다섯 행을 INSERT하고 알림은 만들지 않는다. 빈 조회 뒤에는 경쟁자가 먼저 커밋해도 신규 INSERT를 유지한다.
+0행 또는 허용된 여섯 키와 공통 원천/로컬 워터마크가 모두 일치할 때만 판정한다. 부분 행·잘못된 키·워터마크 손상은 쓰기 없이 실패하며 자동 보충하지 않는다.
+#477 PR 2 이전의 다섯 행 DB도 부분 행이다 — 새 operations 배포 전에 업그레이드 DDL로 여섯 행을 만든다([deploy-guide.md](deploy-guide.md) "결제 이상 알림 여섯 사건 DDL").
+최초 정상 표본도 상태 여섯 행을 INSERT하고 알림은 만들지 않는다. 빈 조회 뒤에는 경쟁자가 먼저 커밋해도 신규 INSERT를 유지한다.
 기존 행은 같은 영속 컨텍스트에서 로딩·관리·쓰기 잠금이 확인된 Entity만 갱신해 감사 생성시각과 버전을 보존한다.
 
 상태와 모든 알림은 `@Transactional(timeout=15)` 한 트랜잭션에 저장한다. 초기 INSERT 경합·잠금 충돌·중간 알림 실패는 전체 롤백한다.
-NOWAIT는 기존 다섯 행 잠금 조회에 적용되며, 빈 조회가 존재하지 않는 키를 잠그거나 초기 PK INSERT 대기를 없애지는 않는다.
+NOWAIT는 기존 여섯 행 잠금 조회에 적용되며, 빈 조회가 존재하지 않는 키를 잠그거나 초기 PK INSERT 대기를 없애지는 않는다.
 15초 설정은 모든 Java 처리·pool 획득·네트워크·커밋을 정확히 15초에 중단하는 보장이 아니다.
 새 batch port는 호출자 트랜잭션을 요구하고 1~5,000개의 신규·미읽음·감사시각/버전 없는 알림과 ID 중복을 전체 사전검증한 뒤 `saveAllAndFlush`한다.
 반환은 입력 ID·순서에 대응하는 불변 목록이다. 한 번의 명시 flush는 JDBC batch 또는 SQL 한 문장을 뜻하지 않는다.
+여섯 사건 × 1,000명(최대 6,000건)은 이 상한을 넘으므로 Processor가 같은 트랜잭션 안에서 5,000건씩 나눠 부른다. 원자성은 트랜잭션 하나로 그대로다.
 각 알림은 `ANOMALY`, `PAYMENT_ANOMALY_ALERT`, 수신자별 Snowflake 알림 ID를 sourceId로 사용하며 기존 전역 source 유니크 제약을 유지한다.
 문구는 고정 한국어이고 링크는 `/admin/payments`다. 후보 소멸 INFO는 업무 복구·결제/주문 정합성 완료를 선언하지 않는다.
+자동 취소 수동 확인의 주어는 "결제 자동 취소 수동 확인"이며 다른 사건과 같은 개시·반복·후보 소멸 접미를 쓴다. 개인정보·금액·키·식별자는 넣지 않는다.
 
 배포 전 생성 DDL 스냅숏의 `payment_anomaly_alert_state` 신규 테이블·CHECK·주석만 적용한다. 전체 스냅숏을 기존 DB에 재실행하지 않는다.
+이미 다섯 사건 테이블이 있는 DB(dev 포함)는 `service/operations-service/src/test/resources/ddl/payment-anomaly-alert-state-auto-cancel.sql`로
+family·severity CHECK 교체·주석 갱신·UNKNOWN 워터마크를 복사한 NORMAL 행 1개 추가를 한 트랜잭션에 적용한다(0행이면 행 추가 없음, 재실행 가능).
+순서는 수집 게이트 OFF → DDL → 새 operations 전체 배포 → 게이트 ON이다. 어긋나면 모든 사건 알림이 storage 사유로 멈추지만 쓰기는 없다.
 운영 ddl-auto=none과 기존 단건·읽음·JOB·DLT·outbox 알림 경로는 유지한다. 새 Vault 비밀과 FE 응답 스키마 변경은 없다.
 이 경계는 자동 실행되지 않는다. 실제 HTTP 전후 Clock/nanoTime 기록·수신자 조회·활성화·커밋 후 SSE 연결은 E3b 후속 범위다.
 반환 목록 자체는 외부 트랜잭션이 있을 때 커밋 증거가 아니며, 후속 전달은 실제 커밋 이후에 연결해야 한다.
@@ -154,7 +170,8 @@ A3a(PR #548)는 payment-service의 읽기 전용 [outbox 원천 관측 API](outb
 구분할 수 없으므로 전송하지 않는다. 고정 분류 로그에는 결제키·금액·개인정보·토큰·예외 원문을 넣지 않는다.
 종료 이벤트는 전달기 자신이 속한 ApplicationContext에서 온 경우에만 신규 제출 차단·대기 폐기·interrupt를 요청한다.
 이미 시작된 동기 SSE가 interrupt를 무시하면 worker가 5초 안에 종료된다는 보장은 없다.
-전달기는 worker 1개·대기 16배치, 배치당 최대 5,000건이다. 768MiB에서 PG 생산과 큐 포화를 함께 계측하기 전에는
+전달기는 worker 1개·대기 16배치, 배치당 최대 5,000건이다. 한 수집의 저장 결과가 5,000건을 넘으면(여섯 사건 × 1,000명) Facade가 5,000건씩
+나눠 넣으며, 앞 배치가 거절되면 나머지는 넣지 않는다(최선 전달, 저장은 그대로). 768MiB에서 PG 생산과 큐 포화를 함께 계측하기 전에는
 이 크기의 운영 안전성·활성화 승인을 주장하지 않는다. 다른 서비스 원천 확대와 PG/주문 자동 복구도 이 연결 범위 밖이다.
 
 ## 결제 outbox 지연·해소 관측 (#477 A3b)

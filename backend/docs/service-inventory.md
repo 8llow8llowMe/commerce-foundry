@@ -131,10 +131,12 @@ operations-service의 payment outbox 원천 관측 권한(#477 A3a): payment-ser
 단일 집계로 제공하며, operations 호출자·주기 수집·알림·해소 연결은 후속이다. [관측 계약](outbox-observation-guide.md)을 따른다.
 
 `GET /internal/v1/payment-observations/anomalies`는 operations 전용 결제 이상 후보 여섯 버킷을 단일 집계로 제공하고,
-자동 취소 게이트 ON이면 같은 트랜잭션의 두 번째 집계로 7번째 `autoCancelManualReview`를 더한다(게이트 OFF면 null, operations 소비는 #477 PR 2).
+자동 취소 게이트 ON이면 같은 트랜잭션의 두 번째 집계로 7번째 `autoCancelManualReview`를 더한다(게이트 OFF면 null).
 payment 소유 Processor의 domain 관측값을 paymentobservation Facade가 조합한다. operations notification 컨텍스트는 A4b-1에서
-엄격 원천 소비와 다섯 사건의 불변 순수 정책을 소유한다. A4b-2는 `operations.payment_anomaly_alert_state` 다섯 행과
-최대 1,000명·5,000건 알림의 원자 저장 Processor를 추가한다. 결제·주문 업무 상태와 PG 처리는 변경하지 않는다.
+엄격 원천 소비와 사건의 불변 순수 정책을 소유한다 — #477 PR 2부터 7번째 버킷을 `AUTO_CANCEL_MANUAL_REVIEW` 사건으로 읽어 여섯 사건이며,
+버킷 누락·null은 미관측으로 그 사건 상태만 유지한다. A4b-2는 `operations.payment_anomaly_alert_state` 여섯 행과
+최대 1,000명 알림의 원자 저장 Processor를 추가한다(한 트랜잭션 안에서 5,000건씩 나눠 저장). 결제·주문 업무 상태와 PG 처리는 변경하지 않는다.
+다섯 행 DB는 업그레이드 DDL(`ddl/payment-anomaly-alert-state-auto-cancel.sql`, [deploy-guide.md](deploy-guide.md))이 먼저다.
 E3a는 잠금 후 필수 HTTP timing 검증과 미연결 단일 worker·대기 16배치 전달 기반을 추가한다. 생성 시 worker는 0개다.
 자동 수집·활성화·커밋 후 알림 전달 연결과 PG 생산 중 포화 검증은 E3b 후속이며 [관측 계약](payment-observation-guide.md)과 [저장 경계](anomaly-notifications.md)를 따른다.
 
@@ -299,9 +301,10 @@ CUSTOMER JWT와 기존 비밀번호 재인증으로 기존 member_id에만 연�
 operations-service는 auth 활성 관리자 목록과 payment-service의 읽기 전용 A3a 관측 API(PR #548)를 수집해 발행 지연 CRITICAL·ready 대기 해소 INFO를 알린다. 신규 `operations.outbox_alert_state`는 PAYMENT 단일 소스의 사고 상태·관측 워터마크를 소유한다. 결제/주문 업무 상태·PG·downstream 건강 판정은 소유하지 않는다. 기본 비활성 플래그·배포·실패 보존·시계 제약은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다. FE 스키마 변경과 새 Vault 비밀은 없다.
 
 operations-service는 payment-service의 읽기 전용 결제 이상 후보 관측 API도 기본 비활성 주기 수집으로 읽는다(#477 E3b).
-활성 관리자 전체 수신자와 다섯 사건의 상태·알림을 원자 저장하고 정상 커밋 뒤 SSE로 최선 전달한다. 결제·주문 상태를
-바꾸거나 후보 소멸을 복구 완료로 판정하지 않는다. 설정·억제·실패 보존·종료 한계는
-[anomaly-notifications.md](anomaly-notifications.md)의 E3b 절을 따른다. 새 공개 API·FE 계약·Vault 비밀·DDL은 없다.
+활성 관리자 전체 수신자와 여섯 사건(#477 PR 2에서 결제 자동 취소 수동 확인 추가)의 상태·알림을 원자 저장하고 정상 커밋 뒤 SSE로 최선 전달한다.
+결제·주문 상태를 바꾸거나 후보 소멸을 복구·PG 취소 완료로 판정하지 않는다. 설정·억제·실패 보존·종료 한계는
+[anomaly-notifications.md](anomaly-notifications.md)의 E3b 절을 따른다. 새 공개 API·FE 계약·Vault 비밀은 없다.
+PR 2의 운영 DDL은 기존 상태 테이블의 CHECK 교체·행 1개 추가 스크립트뿐이다([deploy-guide.md](deploy-guide.md) "결제 이상 알림 여섯 사건 DDL").
 
 ### DLT 이상 징후 알림 (#477 A2)
 

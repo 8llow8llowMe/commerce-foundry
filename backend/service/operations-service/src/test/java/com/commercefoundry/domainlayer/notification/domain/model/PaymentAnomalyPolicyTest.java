@@ -22,20 +22,25 @@ class PaymentAnomalyPolicyTest {
         return new PaymentAnomalyObservation.Fact(count, oldest);
     }
     static PaymentAnomalyObservation sample(Instant at, PaymentAnomalyObservation.Fact unknown, PaymentAnomalyObservation.Fact manual) {
-        return new PaymentAnomalyObservation(at, unknown, manual, ZERO, ZERO, ZERO, ZERO);
+        return new PaymentAnomalyObservation(at, unknown, manual, ZERO, ZERO, ZERO, ZERO, ZERO);
+    }
+    /** 다른 여섯 버킷은 0건이고 7번째 버킷만 바꾼다. null 은 미관측이다. */
+    static PaymentAnomalyObservation autoCancel(Instant at, PaymentAnomalyObservation.Fact value) {
+        return new PaymentAnomalyObservation(at, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, value);
     }
     static Decision accept(State previous, PaymentAnomalyObservation sample) {
         return PaymentAnomalyPolicy.accept(previous, sample, sample.observedAt(), SETTINGS);
     }
     static Stream<Arguments> boundaries() {
         return Stream.of(Arguments.of(Family.UNKNOWN, 300), Arguments.of(Family.IN_PROGRESS, 300), Arguments.of(Family.RETURNED_READY, 600),
-            Arguments.of(Family.LATE_APPROVED, 0), Arguments.of(Family.DONE_ORDER_UNSYNCED, 600));
+            Arguments.of(Family.LATE_APPROVED, 0), Arguments.of(Family.DONE_ORDER_UNSYNCED, 600), Arguments.of(Family.AUTO_CANCEL_MANUAL_REVIEW, 0));
     }
     static PaymentAnomalyObservation lane(Family family, Instant at, Instant oldest) {
         var positive = fact(1, oldest);
         return new PaymentAnomalyObservation(at, family == Family.UNKNOWN ? positive : ZERO, ZERO,
             family == Family.IN_PROGRESS ? positive : ZERO, family == Family.RETURNED_READY ? positive : ZERO,
-            family == Family.LATE_APPROVED ? positive : ZERO, family == Family.DONE_ORDER_UNSYNCED ? positive : ZERO);
+            family == Family.LATE_APPROVED ? positive : ZERO, family == Family.DONE_ORDER_UNSYNCED ? positive : ZERO,
+            family == Family.AUTO_CANCEL_MANUAL_REVIEW ? positive : ZERO);
     }
 
     @ParameterizedTest
@@ -56,7 +61,7 @@ class PaymentAnomalyPolicyTest {
     void manualSubsetStartsOnlyOneCriticalIncidentWithoutSubtractingOldest() {
         var decision = accept(null, sample(T, fact(3, T), fact(3, T)));
         assertThat(decision.notices()).containsExactly(entry(Family.UNKNOWN, new Notice(Signal.OPENED, NotificationSeverity.CRITICAL)));
-        assertThat(decision.state().incidents()).hasSize(5);
+        assertThat(decision.state().incidents()).hasSize(6);
     }
 
     @Test
@@ -92,19 +97,80 @@ class PaymentAnomalyPolicyTest {
     }
 
     @Test
-    void fiveFamiliesDecideTogetherAndRepeatExactlyAtSuppressionBoundary() {
+    void sixFamiliesDecideTogetherAndRepeatExactlyAtSuppressionBoundary() {
         var value = fact(4, T.minusSeconds(600));
-        var all = new PaymentAnomalyObservation(T, value, fact(1, T), value, value, value, value);
+        var all = new PaymentAnomalyObservation(T, value, fact(1, T), value, value, value, value, value);
         var opened = accept(null, all);
-        assertThat(opened.notices()).hasSize(5);
-        var beforeSample = new PaymentAnomalyObservation(T.plusSeconds(3599), value, ZERO, value, value, value, value);
+        assertThat(opened.notices()).hasSize(6);
+        var beforeSample = new PaymentAnomalyObservation(T.plusSeconds(3599), value, ZERO, value, value, value, value, value);
         var before = accept(opened.state(), beforeSample);
         assertThat(before.notices()).isEmpty();
-        var boundarySample = new PaymentAnomalyObservation(T.plusSeconds(3600), value, ZERO, value, value, value, value);
+        var boundarySample = new PaymentAnomalyObservation(T.plusSeconds(3600), value, ZERO, value, value, value, value, value);
         var boundary = accept(before.state(), boundarySample);
-        assertThat(boundary.notices()).hasSize(5).allSatisfy((family, notice) -> assertThat(notice.signal()).isEqualTo(Signal.REPEATED));
+        assertThat(boundary.notices()).hasSize(6).allSatisfy((family, notice) -> assertThat(notice.signal()).isEqualTo(Signal.REPEATED));
         var empty = accept(boundary.state(), sample(T.plusSeconds(3601), ZERO, ZERO));
-        assertThat(empty.notices()).hasSize(5).allSatisfy((family, notice) -> assertThat(notice.severity()).isEqualTo(NotificationSeverity.INFO));
+        assertThat(empty.notices()).hasSize(6).allSatisfy((family, notice) -> assertThat(notice.severity()).isEqualTo(NotificationSeverity.INFO));
+    }
+
+    @Test
+    void autoCancelManualReviewOpensCriticalAtZeroThresholdRepeatsAtSuppressionBoundaryAndEndsOnce() {
+        var opened = accept(null, autoCancel(T, fact(2, T)));
+        assertThat(opened.notices()).containsExactly(entry(Family.AUTO_CANCEL_MANUAL_REVIEW, new Notice(Signal.OPENED, NotificationSeverity.CRITICAL)));
+        assertThat(opened.state().incidents().get(Family.AUTO_CANCEL_MANUAL_REVIEW))
+            .isEqualTo(new Incident(Status.ACTIVE, NotificationSeverity.CRITICAL, T, T));
+        // UNKNOWN 수동 확인과 달리 승격 경로가 없다 — 억제 중에는 신호가 없다
+        var suppressed = accept(opened.state(), autoCancel(T.plusSeconds(3599), fact(3, T.minusSeconds(60))));
+        assertThat(suppressed.notices()).isEmpty();
+        var repeated = accept(suppressed.state(), autoCancel(T.plusSeconds(3600), fact(3, T.minusSeconds(60))));
+        assertThat(repeated.notices()).containsExactly(entry(Family.AUTO_CANCEL_MANUAL_REVIEW, new Notice(Signal.REPEATED, NotificationSeverity.CRITICAL)));
+        assertThat(repeated.state().incidents().get(Family.AUTO_CANCEL_MANUAL_REVIEW).firstDetectedAt()).isEqualTo(T);
+        var ended = accept(repeated.state(), autoCancel(T.plusSeconds(3601), ZERO));
+        assertThat(ended.notices()).containsExactly(entry(Family.AUTO_CANCEL_MANUAL_REVIEW,
+            new Notice(Signal.CANDIDATES_DISAPPEARED, NotificationSeverity.INFO)));
+        assertThat(ended.state().incidents().get(Family.AUTO_CANCEL_MANUAL_REVIEW).status()).isEqualTo(Status.NORMAL);
+        assertThat(accept(ended.state(), autoCancel(T.plusSeconds(3602), ZERO)).notices()).isEmpty();
+    }
+
+    @Test
+    void unobservedAutoCancelKeepsIncidentWithoutSignalOrResolutionWhileWatermarksAdvance() {
+        var current = accept(null, autoCancel(T, fact(1, T))).state();
+        var incident = current.incidents().get(Family.AUTO_CANCEL_MANUAL_REVIEW);
+        // 억제 경계를 넘겨도 미관측이면 반복하지 않고, 0건 해소로도 바꾸지 않는다
+        for (long seconds : List.of(1L, 3600L, 7200L)) {
+            var unobserved = accept(current, autoCancel(T.plusSeconds(seconds), null));
+            assertThat(unobserved.notices()).isEmpty();
+            assertThat(unobserved.state().incidents().get(Family.AUTO_CANCEL_MANUAL_REVIEW)).isSameAs(incident);
+            assertThat(unobserved.state().lastObservedAt()).isEqualTo(T.plusSeconds(seconds));
+            assertThat(unobserved.state().lastAcceptedLocalAt()).isEqualTo(T.plusSeconds(seconds));
+            current = unobserved.state();
+        }
+        // 다시 관측되면 기존 사건 그대로 반복·해소 규칙을 따른다
+        var repeated = accept(current, autoCancel(T.plusSeconds(7201), fact(1, T)));
+        assertThat(repeated.notices()).containsExactly(entry(Family.AUTO_CANCEL_MANUAL_REVIEW, new Notice(Signal.REPEATED, NotificationSeverity.CRITICAL)));
+        var ended = accept(repeated.state(), autoCancel(T.plusSeconds(7202), ZERO));
+        assertThat(ended.notices().get(Family.AUTO_CANCEL_MANUAL_REVIEW).signal()).isEqualTo(Signal.CANDIDATES_DISAPPEARED);
+        // 최초 표본이 미관측이면 NORMAL 로 시작하고 신호가 없다
+        var first = accept(null, autoCancel(T, null));
+        assertThat(first.notices()).isEmpty();
+        assertThat(first.state().incidents().get(Family.AUTO_CANCEL_MANUAL_REVIEW).status()).isEqualTo(Status.NORMAL);
+    }
+
+    @Test
+    void autoCancelObservationDoesNotChangeOtherFamilyDecisionsAndViceVersa() {
+        var unknownOnly = new PaymentAnomalyObservation(T, fact(1, T.minusSeconds(300)), ZERO, ZERO, ZERO, ZERO, ZERO, null);
+        var withoutAutoCancel = accept(null, unknownOnly);
+        assertThat(withoutAutoCancel.notices()).containsOnlyKeys(Family.UNKNOWN);
+        var both = accept(null, new PaymentAnomalyObservation(T, fact(1, T.minusSeconds(300)), ZERO, ZERO, ZERO, ZERO, ZERO, fact(5, T)));
+        assertThat(both.notices()).containsOnlyKeys(Family.UNKNOWN, Family.AUTO_CANCEL_MANUAL_REVIEW);
+        assertThat(both.notices().get(Family.UNKNOWN)).isEqualTo(withoutAutoCancel.notices().get(Family.UNKNOWN));
+        // 미관측 중에도 다른 사건은 평소처럼 해소된다
+        var ended = accept(both.state(), new PaymentAnomalyObservation(T.plusSeconds(1), ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, null));
+        assertThat(ended.notices()).containsExactly(entry(Family.UNKNOWN, new Notice(Signal.CANDIDATES_DISAPPEARED, NotificationSeverity.INFO)));
+        assertThat(ended.state().incidents().get(Family.AUTO_CANCEL_MANUAL_REVIEW).status()).isEqualTo(Status.ACTIVE);
+        // UNKNOWN 수동 확인 부분집합과 합산·포함 관계가 없다 — 수동 확인 0건이어도 자동 취소 수동 확인은 많을 수 있다
+        assertThatCode(() -> new PaymentAnomalyObservation(T, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, fact(Long.MAX_VALUE, T))).doesNotThrowAnyException();
+        assertThatThrownBy(() -> new PaymentAnomalyObservation(T, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, fact(1, T.plusNanos(1000))))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -136,7 +202,7 @@ class PaymentAnomalyPolicyTest {
     @Test
     void manualThresholdCanBePositiveAndSubsetDisappearanceDoesNotEndUnknown() {
         var config = new PaymentAnomalyPolicySettings(Duration.ofMinutes(5), Duration.ofSeconds(10), Duration.ofMinutes(5), Duration.ofMinutes(10),
-            Duration.ZERO, Duration.ofMinutes(10), Duration.ofHours(1), Duration.ofSeconds(30));
+            Duration.ZERO, Duration.ofMinutes(10), Duration.ZERO, Duration.ofHours(1), Duration.ofSeconds(30));
         var before = PaymentAnomalyPolicy.accept(null, sample(T, fact(2, T.minusSeconds(9)), fact(1, T.minusSeconds(9))), T, config);
         assertThat(before.notices()).isEmpty();
         var opened = PaymentAnomalyPolicy.accept(before.state(), sample(T.plusSeconds(1), fact(2, T.minusSeconds(9)), fact(1, T.minusSeconds(9))),
@@ -148,22 +214,39 @@ class PaymentAnomalyPolicyTest {
     }
 
     @Test
-    void settingsValidateAllDurationsAndOnlyTwoThresholdsAllowZero() {
+    void autoCancelThresholdCanBePositiveUpToOneDay() {
+        var config = new PaymentAnomalyPolicySettings(Duration.ofMinutes(5), Duration.ZERO, Duration.ofMinutes(5), Duration.ofMinutes(10),
+            Duration.ZERO, Duration.ofMinutes(10), Duration.ofDays(1), Duration.ofHours(1), Duration.ofSeconds(30));
+        var below = PaymentAnomalyPolicy.accept(null, autoCancel(T, fact(1, T.minus(Duration.ofDays(1)).plusNanos(1000))), T, config);
+        assertThat(below.notices()).isEmpty();
+        var opened = PaymentAnomalyPolicy.accept(null, autoCancel(T, fact(1, T.minus(Duration.ofDays(1)))), T, config);
+        assertThat(opened.notices()).containsExactly(entry(Family.AUTO_CANCEL_MANUAL_REVIEW, new Notice(Signal.OPENED, NotificationSeverity.CRITICAL)));
+    }
+
+    @Test
+    void settingsValidateAllDurationsAndOnlyThreeThresholdsAllowZero() {
         var valid = List.of(SETTINGS.unknown(), SETTINGS.manualReviewUnknown(), SETTINGS.inProgress(), SETTINGS.returnedReady(),
-            SETTINGS.lateApproved(), SETTINGS.doneOrderUnsynced(), SETTINGS.suppression(), SETTINGS.maxObservationAge());
+            SETTINGS.lateApproved(), SETTINGS.doneOrderUnsynced(), SETTINGS.autoCancelManualReview(), SETTINGS.suppression(), SETTINGS.maxObservationAge());
+        assertThat(SETTINGS.autoCancelManualReview()).isEqualTo(Duration.ZERO);
         for (int index = 0; index < valid.size(); index++) {
-            for (var invalid : List.of(Duration.ofNanos(-1), index == 6 ? Duration.ofDays(7).plusNanos(1)
-                : index == 7 ? Duration.ofMinutes(5).plusNanos(1) : Duration.ofDays(1).plusNanos(1))) {
+            for (var invalid : List.of(Duration.ofNanos(-1), index == 7 ? Duration.ofDays(7).plusNanos(1)
+                : index == 8 ? Duration.ofMinutes(5).plusNanos(1) : Duration.ofDays(1).plusNanos(1))) {
                 var values = valid.toArray(Duration[]::new);
                 values[index] = invalid;
                 assertThatThrownBy(() -> settings(values)).isInstanceOf(IllegalArgumentException.class);
             }
-            if (index != 1 && index != 4) {
+            if (index != 1 && index != 4 && index != 6) {
                 var values = valid.toArray(Duration[]::new);
                 values[index] = Duration.ZERO;
                 assertThatThrownBy(() -> settings(values)).isInstanceOf(IllegalArgumentException.class);
             }
         }
+        var maximum = valid.toArray(Duration[]::new);
+        maximum[6] = Duration.ofDays(1);
+        assertThat(settings(maximum).autoCancelManualReview()).isEqualTo(Duration.ofDays(1));
+        var missing = valid.toArray(Duration[]::new);
+        missing[6] = null;
+        assertThatThrownBy(() -> settings(missing)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -178,11 +261,26 @@ class PaymentAnomalyPolicyTest {
             .isInstanceOf(IllegalArgumentException.class);
         incidents.put(Family.IN_PROGRESS, new Incident(Status.ACTIVE, NotificationSeverity.CRITICAL, T, T));
         assertThatThrownBy(() -> new State(T, T, incidents)).isInstanceOf(IllegalArgumentException.class);
-        incidents.remove(Family.IN_PROGRESS);
+        incidents.put(Family.IN_PROGRESS, new Incident(Status.NORMAL, null, null, null));
+        // 자동 취소 수동 확인은 CRITICAL 고정이다 — WARNING 활성 상태는 복원하지 않는다
+        incidents.put(Family.AUTO_CANCEL_MANUAL_REVIEW, new Incident(Status.ACTIVE, NotificationSeverity.WARNING, T, T));
+        assertThatThrownBy(() -> new State(T, T, incidents)).isInstanceOf(IllegalArgumentException.class);
+        incidents.put(Family.AUTO_CANCEL_MANUAL_REVIEW, new Incident(Status.ACTIVE, NotificationSeverity.CRITICAL, T, T));
+        assertThat(new State(T, T, incidents).incidents()).hasSize(6);
+        // 이전 구성의 다섯 사건만으로는 상태를 만들지 않는다 — 빠진 사건을 자동 보충하지 않는다
+        incidents.remove(Family.AUTO_CANCEL_MANUAL_REVIEW);
         assertThatThrownBy(() -> new State(T, T, incidents)).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void familyNameOrderMatchesDatabaseOrderByFamily() {
+        // 저장 어댑터와 계약 테스트는 Enum::name 정렬을 ORDER BY family 와 같다고 본다. 첫 글자가 모두 달라 collation 과 무관하다.
+        assertThat(Stream.of(Family.values()).map(Enum::name).sorted().toList()).containsExactly(
+            "AUTO_CANCEL_MANUAL_REVIEW", "DONE_ORDER_UNSYNCED", "IN_PROGRESS", "LATE_APPROVED", "RETURNED_READY", "UNKNOWN");
+        assertThat(Stream.of(Family.values()).map(family -> family.name().charAt(0)).distinct()).hasSize(Family.values().length);
+    }
+
     private PaymentAnomalyPolicySettings settings(Duration[] values) {
-        return new PaymentAnomalyPolicySettings(values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7]);
+        return new PaymentAnomalyPolicySettings(values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8]);
     }
 }

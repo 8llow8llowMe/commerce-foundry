@@ -56,7 +56,8 @@ DB 실패 원문 sentinel 비노출, 7번째 버킷의 필드 한정(식별자·
 
 operations의 A4b-1 소비기는 기존 internal Feign 서비스 토큰·payment 서킷과 connect 2초/read 3초·HTTP 재시도 없음으로 이 원천만 읽는다.
 성공 봉투·여섯 버킷·정수 long·0/null·마이크로초 시각·UNKNOWN 부분집합 관계를 전체 검증하며 실패는 원인 없는 고정 `NOTIFICATION_052`로 바꾼다.
-7번째 버킷은 아직 읽지 않는다(필드 경로로 읽으므로 추가 필드는 무시된다). operations 소비·사건 정책은 #477 PR 2에서 연결한다.
+#477 PR 2부터 7번째 버킷도 읽는다. 누락·JSON null은 미관측(그 사건 상태 유지)이고, 객체면 같은 엄격 검증을 받으며 UNKNOWN 부분집합 검증에는 넣지 않는다.
+그 밖의 추가 필드는 필드 경로로 읽으므로 무시된다. operations 사건 정책은 [이상 알림](anomaly-notifications.md)의 AUTO_CANCEL_MANUAL_REVIEW를 따른다.
 원천 나이와 순수 사건 정책은 [이상 알림](anomaly-notifications.md)의 A4b-1을 따른다. E2에서 영속 상태·알림 원자 저장을,
 E3b에서 기본 비활성 주기 수집과 커밋 후 최선 SSE 전달을 연결한다. 기본 플래그를 실제 운영에 켜는 결정은 별도다.
 PG 재조회·수동 처리·결제 복구 API를 추가하지 않는다.

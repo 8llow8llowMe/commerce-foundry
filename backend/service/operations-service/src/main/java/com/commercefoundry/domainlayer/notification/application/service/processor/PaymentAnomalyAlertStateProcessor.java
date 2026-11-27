@@ -24,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 /** E2 내부 저장 경계. 원천 HTTP/수신자 조회와 커밋 후 전달은 후속 연결 계층의 책임이다. */
 @Component
 public class PaymentAnomalyAlertStateProcessor {
+    /** {@link NotificationBatchInsertPort} 한 번의 상한. 전달 배치 상한도 같은 값이다. */
+    public static final int MAX_INSERT_BATCH = 5000;
     private final PaymentAnomalyAlertStatePort states;
     private final NotificationBatchInsertPort notifications;
     private final SnowflakeIdGenerator ids;
@@ -79,7 +81,15 @@ public class PaymentAnomalyAlertStateProcessor {
                     "/admin/payments", recipient, "PAYMENT_ANOMALY_ALERT", id)));
             }
         }
-        return pending.isEmpty() ? List.of() : List.copyOf(notifications.insertAll(pending));
+        if (pending.isEmpty()) {
+            return List.of();
+        }
+        // 여섯 사건 × 수신자 1,000명은 6,000건으로 batch port 상한(5,000)을 넘는다. 같은 트랜잭션에서 나눠 저장해 원자성은 그대로다.
+        var saved = new ArrayList<Notification>(pending.size());
+        for (int from = 0; from < pending.size(); from += MAX_INSERT_BATCH) {
+            saved.addAll(notifications.insertAll(pending.subList(from, Math.min(pending.size(), from + MAX_INSERT_BATCH))));
+        }
+        return List.copyOf(saved);
     }
 
     private static String title(PaymentAnomalyPolicy.Family family, PaymentAnomalyPolicy.Signal signal) {
@@ -89,6 +99,7 @@ public class PaymentAnomalyAlertStateProcessor {
             case RETURNED_READY -> "결제 준비 복귀";
             case LATE_APPROVED -> "결제 늦은 승인";
             case DONE_ORDER_UNSYNCED -> "결제 완료 주문 미동기화";
+            case AUTO_CANCEL_MANUAL_REVIEW -> "결제 자동 취소 수동 확인";
         };
         return subject + switch (signal) {
             case OPENED -> " 후보가 감지되었습니다. 담당자는 점검해 주세요.";

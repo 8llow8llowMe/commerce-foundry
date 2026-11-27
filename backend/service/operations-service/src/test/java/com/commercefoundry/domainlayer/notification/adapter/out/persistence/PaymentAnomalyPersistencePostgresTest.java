@@ -75,19 +75,19 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
 
     @Test
     @Order(1)
-    void firstFiveSignalsTimesThousandAndExistingRepeatCommitFullBatch() {
+    void firstSixSignalsTimesThousandSplitAcrossBatchLimitAndExistingRepeatCommitAtomically() {
         var recipients = LongStream.rangeClosed(1, 1000).boxed().toList();
         for (int iteration = 0; iteration < 2; iteration++) {
             clock.now = NOW.plusSeconds(iteration * 3600L);
             ticker.now = 0;
             var observation = sample(clock.now, true);
-            var result = measure("E2_FULL_5000", 5000, iteration + 1, () -> accept(observation, recipients, SETTINGS));
+            var result = measure("E2_FULL_6000", 6000, iteration + 1, () -> accept(observation, recipients, SETTINGS));
             // 정상 최대치 실패는 여기서 즉시 중단한다. 실패를 허용하는 진단 분기는 없다.
             assertThat(result.failure()).isNull();
-            assertSql(result.total(), 1, iteration == 0 ? 5 : 0, iteration == 0 ? 0 : 5, 5000);
+            assertSql(result.total(), 1, iteration == 0 ? 6 : 0, iteration == 0 ? 0 : 6, 6000);
             assertThat(AnomalyProbeMeter.value(result.total(), "orderedNowaitSelect")).isEqualTo(1);
-            assertThat(result.saved()).hasSize(5000);
-            assertThat(result.saved().stream().map(Notification::id).distinct()).hasSize(5000);
+            assertThat(result.saved()).hasSize(6000);
+            assertThat(result.saved().stream().map(Notification::id).distinct()).hasSize(6000);
             assertThat(result.saved()).allSatisfy(n -> {
                 assertThat(n.sourceType()).isEqualTo("PAYMENT_ANOMALY_ALERT");
                 assertThat(n.sourceId()).isEqualTo(n.id());
@@ -95,7 +95,7 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
                 assertThat(n.unread()).isTrue();
             });
             var stored = transaction().execute(status -> repository.findAllById(result.saved().stream().map(Notification::id).toList()));
-            assertThat(stored).hasSize(5000);
+            assertThat(stored).hasSize(6000);
             var byId = stored.stream().collect(java.util.stream.Collectors.toMap(e -> e.getId(), e -> e));
             for (var expected : result.saved()) {
                 var actual = byId.get(expected.id());
@@ -109,16 +109,16 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
                 assertThat(actual.getVersion()).isZero();
             }
             for (long recipient : recipients) {
-                assertThat(result.saved().stream().filter(n -> n.recipientMemberId() == recipient)).hasSize(5);
+                assertThat(result.saved().stream().filter(n -> n.recipientMemberId() == recipient)).hasSize(6);
             }
-            assertThat(jdbc.queryForObject("select count(*) from operations.notification", Long.class)).isEqualTo((iteration + 1L) * 5000);
-            assertThat(jdbc.queryForObject("select count(*) from operations.payment_anomaly_alert_state where version=?", Long.class, iteration)).isEqualTo(5);
+            assertThat(jdbc.queryForObject("select count(*) from operations.notification", Long.class)).isEqualTo((iteration + 1L) * 6000);
+            assertThat(jdbc.queryForObject("select count(*) from operations.payment_anomaly_alert_state where version=?", Long.class, iteration)).isEqualTo(6);
         }
     }
 
     @Test
     @Order(2)
-    void fiveThousandFlushedNotificationsAndAllStatesRollBackOnPostFlushFailure() {
+    void sixThousandFlushedNotificationsAndAllStatesRollBackOnPostFlushFailure() {
         for (boolean existing : List.of(false, true)) {
             clock.now = NOW;
             ticker.now = 0;
@@ -128,17 +128,17 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
                 accept(sample(NOW, true), List.of(1L), SETTINGS);
             }
             var before = stateRows();
-            assertThat(before).hasSize(existing ? 5 : 0);
+            assertThat(before).hasSize(existing ? 6 : 0);
             var noticesBefore = jdbc.queryForList("select * from operations.notification order by id");
             clock.now = NOW.plusSeconds(3600);
             var observation = sample(clock.now, true);
             var recipients = LongStream.rangeClosed(1, 1000).boxed().toList();
-            var result = measure("E2_5000_POST_FLUSH_ROLLBACK", 5000, 1, () -> {
-                assertThat(accept(observation, recipients, SETTINGS)).hasSize(5000);
-                throw new IllegalStateException("synthetic post-5000-flush failure");
+            var result = measure("E2_6000_POST_FLUSH_ROLLBACK", 6000, 1, () -> {
+                assertThat(accept(observation, recipients, SETTINGS)).hasSize(6000);
+                throw new IllegalStateException("synthetic post-6000-flush failure");
             });
             assertThat(result.failure()).isInstanceOf(IllegalStateException.class);
-            assertSql(result.explicit(), 1, existing ? 0 : 5, existing ? 5 : 0, 5000);
+            assertSql(result.explicit(), 1, existing ? 0 : 6, existing ? 6 : 0, 6000);
             assertThat(stateRows()).isEqualTo(before);
             assertThat(jdbc.queryForList("select * from operations.notification order by id")).isEqualTo(noticesBefore);
         }
@@ -208,7 +208,7 @@ class PaymentAnomalyPersistencePostgresTest extends PaymentAnomalyPersistenceCon
                     assertThat(sqlState(result.failure())).isEqualTo("23505");
                 }
             }
-            assertThat(stateRows()).hasSize(5);
+            assertThat(stateRows()).hasSize(6);
         } finally {
             insert.countDown();
             executor.shutdown();

@@ -176,6 +176,25 @@ class PaymentAnomalyAlertSchedulerFacadeTest {
         verifyNoMoreInteractions(source, states, push);
     }
 
+    @Test
+    void sixFamiliesTimesThousandRecipientsAreEnqueuedInBatchLimitChunksInOrder() {
+        successfulObservation();
+        var saved = LongStream.rangeClosed(1, 6000).mapToObj(id -> new Notification(id, (id - 1) % 1000 + 1, NotificationKind.ANOMALY,
+            NotificationSeverity.CRITICAL, "결제 이상 후보", "/admin/payments", "PAYMENT_ANOMALY_ALERT", id, null, NOW, 0L)).toList();
+        when(states.accept(any(), any(), any(), any())).thenReturn(saved);
+        facade.observe();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Notification>> batches = ArgumentCaptor.forClass(List.class);
+        verify(push, times(2)).enqueue(batches.capture());
+        assertThat(batches.getAllValues()).extracting(List::size).containsExactly(PaymentAnomalyAlertStateProcessor.MAX_INSERT_BATCH, 1000);
+        assertThat(batches.getAllValues().stream().flatMap(List::stream).toList()).containsExactlyElementsOf(saved);
+        // 최선 전달이다 — 첫 배치 거절 뒤 나머지를 넣지 않고 저장도 되돌리지 않는다
+        reset(push);
+        doThrow(new IllegalStateException("queue full")).when(push).enqueue(any());
+        assertThatCode(facade::observe).doesNotThrowAnyException();
+        verify(push, times(1)).enqueue(any());
+    }
+
     @ParameterizedTest
     @ValueSource(longs = {-1L, 0L, 30_000_000_000L, 30_000_000_001L})
     void capturesHttpTimingAndLeavesBoundaryValidationToStateProcessor(long wallOffsetNanos) {
@@ -210,11 +229,11 @@ class PaymentAnomalyAlertSchedulerFacadeTest {
     }
 
     private static PaymentAnomalyAlertProperties properties(boolean enabled) {
-        return new PaymentAnomalyAlertProperties(enabled, null, null, null, null, null, null, null, null, null, null, null);
+        return new PaymentAnomalyAlertProperties(enabled, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     private static PaymentAnomalyObservation sample() {
         var empty = new PaymentAnomalyObservation.Fact(0, null);
-        return new PaymentAnomalyObservation(NOW, empty, empty, empty, empty, empty, empty);
+        return new PaymentAnomalyObservation(NOW, empty, empty, empty, empty, empty, empty, empty);
     }
 }

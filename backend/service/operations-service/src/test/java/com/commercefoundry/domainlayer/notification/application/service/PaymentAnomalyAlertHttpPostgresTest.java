@@ -128,7 +128,7 @@ class PaymentAnomalyAlertHttpPostgresTest {
     void authenticatedHttpCommitsStateAndNotificationsBeforeSseDespiteCallerRollback() throws Exception {
         respond(observedAt.minusSeconds(1), false);
         scheduler.observe();
-        assertThat(states.findAll()).hasSize(5).allSatisfy(row -> {
+        assertThat(states.findAll()).hasSize(6).allSatisfy(row -> {
             assertThat(row.getStatus()).isEqualTo(PaymentAnomalyPolicy.Status.NORMAL);
             assertThat(row.getLastObservedAt()).isEqualTo(observedAt.minusSeconds(1));
         });
@@ -217,7 +217,7 @@ class PaymentAnomalyAlertHttpPostgresTest {
 
     private void assertCommitted() {
         assertThat(notifications.count()).isEqualTo(2);
-        assertThat(states.findAll()).hasSize(5).allSatisfy(row -> assertThat(row.getLastObservedAt()).isEqualTo(observedAt));
+        assertThat(states.findAll()).hasSize(6).allSatisfy(row -> assertThat(row.getLastObservedAt()).isEqualTo(observedAt));
         assertThat(states.findById("UNKNOWN").orElseThrow().getStatus()).isEqualTo(PaymentAnomalyPolicy.Status.ACTIVE);
     }
 

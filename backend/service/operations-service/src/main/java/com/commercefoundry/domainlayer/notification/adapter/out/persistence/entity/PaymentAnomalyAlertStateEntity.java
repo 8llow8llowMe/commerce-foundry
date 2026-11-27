@@ -17,16 +17,16 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "payment_anomaly_alert_state", comment = "결제 이상 다섯 사건의 수락 워터마크", check = {
+@Table(name = "payment_anomaly_alert_state", comment = "결제 이상 여섯 사건의 수락 워터마크", check = {
     @CheckConstraint(name = "ck_payment_anomaly_alert_state_family", constraint =
-        "family in ('UNKNOWN','IN_PROGRESS','RETURNED_READY','LATE_APPROVED','DONE_ORDER_UNSYNCED')"),
+        "family in ('UNKNOWN','IN_PROGRESS','RETURNED_READY','LATE_APPROVED','DONE_ORDER_UNSYNCED','AUTO_CANCEL_MANUAL_REVIEW')"),
     @CheckConstraint(name = "ck_payment_anomaly_alert_state_incident", constraint =
         "(status = 'NORMAL' and severity is null and first_detected_at is null and last_alert_at is null) or "
             + "(status = 'ACTIVE' and severity is not null and severity in ('WARNING','CRITICAL') "
             + "and first_detected_at is not null and last_alert_at is not null)"),
     @CheckConstraint(name = "ck_payment_anomaly_alert_state_severity", constraint =
         "status = 'NORMAL' or family = 'UNKNOWN' or (family in ('IN_PROGRESS','RETURNED_READY') and severity = 'WARNING') "
-            + "or (family in ('LATE_APPROVED','DONE_ORDER_UNSYNCED') and severity = 'CRITICAL')"),
+            + "or (family in ('LATE_APPROVED','DONE_ORDER_UNSYNCED','AUTO_CANCEL_MANUAL_REVIEW') and severity = 'CRITICAL')"),
     @CheckConstraint(name = "ck_payment_anomaly_alert_state_chronology", constraint =
         "last_observed_at <= last_accepted_local_at and (status = 'NORMAL' or "
             + "(first_detected_at <= last_observed_at and first_detected_at <= last_alert_at and last_alert_at <= last_accepted_local_at))")
