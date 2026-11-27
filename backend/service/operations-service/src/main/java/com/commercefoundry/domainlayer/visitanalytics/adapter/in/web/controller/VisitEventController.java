@@ -1,7 +1,6 @@
 package com.commercefoundry.domainlayer.visitanalytics.adapter.in.web.controller;
 
-import com.commercefoundry.domainlayer.visitanalytics.application.exception.VisitAnalyticsErrorCode;
-import com.commercefoundry.domainlayer.visitanalytics.application.exception.VisitAnalyticsException;
+import com.commercefoundry.domainlayer.visitanalytics.adapter.in.support.VisitAnalyticsHttpErrors;
 import com.commercefoundry.domainlayer.visitanalytics.application.port.in.VisitAnalyticsUseCase;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
@@ -61,24 +60,24 @@ public class VisitEventController {
 
         var subjects = Collections.list(request.getHeaders(CLIENT_SUBJECT_HEADER));
         if (subjects.size() != 1 || !SUBJECT.matcher(subjects.getFirst()).matches()) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.CLIENT_SUBJECT_REQUIRED);
+            throw VisitAnalyticsHttpErrors.clientSubjectRequired();
         }
 
         JsonNode event = readEvent(request);
         JsonNode consent = event.path("consent");
         if (!event.isObject() || event.size() != 4 || !consent.isBoolean() || !"PRODUCT_VIEW".equals(text(event, "type"))) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.INVALID_EVENT);
+            throw VisitAnalyticsHttpErrors.invalidEvent();
         }
         String eventId = text(event, "eventId");
         String productId = text(event, "productId");
         if (!EVENT_ID.matcher(eventId).matches() || !PRODUCT_ID.matcher(productId).matches()) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.INVALID_EVENT);
+            throw VisitAnalyticsHttpErrors.invalidEvent();
         }
         long id;
         try {
             id = Long.parseLong(productId);
         } catch (NumberFormatException invalidId) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.INVALID_EVENT);
+            throw VisitAnalyticsHttpErrors.invalidEvent();
         }
         if (consent.booleanValue() && !isExcluded(request, member)) {
             useCase.recordProductView(UUID.fromString(eventId), id);
@@ -95,24 +94,24 @@ public class VisitEventController {
             if ((!MediaType.APPLICATION_JSON.equalsTypeAndSubtype(mediaType) && !MediaType.TEXT_PLAIN.equalsTypeAndSubtype(mediaType))
                 || (mediaType.getCharset() != null && !StandardCharsets.UTF_8.equals(mediaType.getCharset()))
                 || (encoding != null && !"identity".equalsIgnoreCase(encoding))) {
-                throw new VisitAnalyticsException(VisitAnalyticsErrorCode.UNSUPPORTED_BODY);
+                throw VisitAnalyticsHttpErrors.unsupportedBody();
             }
         } catch (IllegalArgumentException invalidType) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.UNSUPPORTED_BODY);
+            throw VisitAnalyticsHttpErrors.unsupportedBody();
         }
 
         if (request.getContentLengthLong() > BODY_LIMIT) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.BODY_TOO_LARGE);
+            throw VisitAnalyticsHttpErrors.bodyTooLarge();
         }
         byte[] bytes = request.getInputStream().readNBytes(BODY_LIMIT + 1);
         if (bytes.length > BODY_LIMIT) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.BODY_TOO_LARGE);
+            throw VisitAnalyticsHttpErrors.bodyTooLarge();
         }
         try {
             String json = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
             return reader.readValue(json);
         } catch (JacksonException | CharacterCodingException invalidJson) {
-            throw new VisitAnalyticsException(VisitAnalyticsErrorCode.INVALID_EVENT);
+            throw VisitAnalyticsHttpErrors.invalidEvent();
         }
     }
 

@@ -1,7 +1,5 @@
 package com.commercefoundry.domainlayer.visitanalytics.application.port.out;
 
-import com.commercefoundry.domainlayer.visitanalytics.application.port.in.VisitAnalyticsUseCase.DailyViews;
-import com.commercefoundry.domainlayer.visitanalytics.application.port.in.VisitAnalyticsUseCase.ProductViews;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -15,4 +13,10 @@ public interface VisitAnalyticsStore {
     List<DailyViews> dailyProduct(long productId, LocalDate from, LocalDate to);
 
     void purgeBefore(LocalDate receiptCutoff, LocalDate aggregateCutoff);
+
+    record ProductViews(long productId, long views) {
+    }
+
+    record DailyViews(LocalDate day, long views) {
+    }
 }

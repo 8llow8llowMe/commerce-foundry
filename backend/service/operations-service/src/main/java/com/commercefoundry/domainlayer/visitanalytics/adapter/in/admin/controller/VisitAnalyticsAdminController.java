@@ -1,11 +1,9 @@
 package com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.controller;
 
 import com.commercefoundry.common.dto.Response;
-import com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.presenter.VisitAnalyticsPresenter;
-import com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.presenter.VisitAnalyticsPresenter.Day;
-import com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.presenter.VisitAnalyticsPresenter.Product;
-import com.commercefoundry.domainlayer.visitanalytics.application.exception.VisitAnalyticsErrorCode;
-import com.commercefoundry.domainlayer.visitanalytics.application.exception.VisitAnalyticsException;
+import com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.dto.response.VisitAnalyticsResponses.Day;
+import com.commercefoundry.domainlayer.visitanalytics.adapter.in.admin.dto.response.VisitAnalyticsResponses.Product;
+import com.commercefoundry.domainlayer.visitanalytics.adapter.in.support.VisitAnalyticsHttpErrors;
 import com.commercefoundry.domainlayer.visitanalytics.application.port.in.VisitAnalyticsUseCase;
 import com.commercefoundry.security.principal.AdminAuthority;
 import io.swagger.v3.oas.annotations.Operation;
@@ -40,7 +38,7 @@ public class VisitAnalyticsAdminController {
         @RequestParam(required = false) String from, @RequestParam(required = false) String to
     ) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-            .body(Response.success(VisitAnalyticsPresenter.products(useCase.topProducts(date(from), date(to)))));
+            .body(Response.success(useCase.topProducts(date(from), date(to))));
     }
 
     @Operation(summary = "상품의 일간 조회수", description = "한국 날짜 기준 from과 to를 포함합니다. 조회수가 0인 날짜는 생략합니다.")
@@ -50,7 +48,7 @@ public class VisitAnalyticsAdminController {
         @PathVariable String productId, @RequestParam(required = false) String from, @RequestParam(required = false) String to
     ) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-            .body(Response.success(VisitAnalyticsPresenter.days(useCase.dailyProduct(productId(productId), date(from), date(to)))));
+            .body(Response.success(useCase.dailyProduct(productId(productId), date(from), date(to))));
     }
 
     private static LocalDate date(String value) {
@@ -61,7 +59,7 @@ public class VisitAnalyticsAdminController {
                 // 날짜 원문을 응답과 로그에 기록하지 않는다.
             }
         }
-        throw new VisitAnalyticsException(VisitAnalyticsErrorCode.INVALID_PERIOD);
+        throw VisitAnalyticsHttpErrors.invalidPeriod();
     }
 
     private static long productId(String value) {
@@ -72,6 +70,6 @@ public class VisitAnalyticsAdminController {
                 // long 범위를 넘은 상품 식별자다.
             }
         }
-        throw new VisitAnalyticsException(VisitAnalyticsErrorCode.INVALID_PRODUCT);
+        throw VisitAnalyticsHttpErrors.invalidProduct();
     }
 }

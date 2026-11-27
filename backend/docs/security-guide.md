@@ -295,6 +295,7 @@ delivery-service · operations-service · support-service 어드민 엔드포인
 | `PUT /api/v1/admin/shipping-policies/domestic` · `PUT .../international` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
 | `POST /api/v1/admin/campaigns/recipient-previews` | `CS_READ` | 200 | 200 | 200 |
 | `GET /api/v1/admin/jobs` · `GET /api/v1/admin/jobs/{jobId}` · `POST .../{jobId}/result-download` | `REPORT_READ` | 200 | 200 | 403 |
+| `GET /api/v1/admin/analytics/products/top` · `GET /api/v1/admin/analytics/products/{productId}/daily` | `REPORT_READ` + ADMIN·OWNER | 200 | 403 | 403 |
 | `POST /api/v1/admin/jobs/{jobId}/cancel` | `REPORT_MANAGE` | 200 | 403 | 403 |
 | `GET /api/v1/admin/store/legal-documents` · `.../{type}/{locale}` · `.../revisions` · `GET /api/v1/admin/store/legal-document-templates/{type}` | `SETTINGS_READ` | 200 | 403 | 403 |
 | `PUT /api/v1/admin/store/legal-documents/{type}/{locale}/draft` · `POST .../publish` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
