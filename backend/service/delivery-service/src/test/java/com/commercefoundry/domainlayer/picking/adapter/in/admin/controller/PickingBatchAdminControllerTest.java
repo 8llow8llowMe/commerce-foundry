@@ -5,6 +5,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.PickingBatchAdminResponse;
+import com.commercefoundry.domainlayer.picking.application.command.PickingOrderCheckCommand;
 import com.commercefoundry.domainlayer.picking.application.exception.PickingErrorCode;
 import com.commercefoundry.domainlayer.picking.application.exception.PickingException;
 import com.commercefoundry.domainlayer.picking.application.port.in.PickingBatchAdminUseCase;
@@ -60,7 +61,7 @@ class PickingBatchAdminControllerTest {
         PickingBatchAdminResponse response = new PickingBatchAdminResponse(BATCH_ID, 0L, false, 2, List.of(), List.of(), List.of(), List.of());
         given(useCase.create(List.of(2L), ACTOR)).willReturn(response);
         given(useCase.detail(1L)).willReturn(response);
-        given(useCase.check(1L, 2L, Map.of(10L, 2L), ACTOR)).willReturn(response);
+        given(useCase.check(1L, new PickingOrderCheckCommand(2L, Map.of(10L, 2L)), ACTOR)).willReturn(response);
 
         var created = post(PATH, CREATE_BODY, MemberRole.MANAGER);
         assertThat(created).hasStatus(201).hasHeader(HttpHeaders.LOCATION, PATH + "/" + BATCH_ID);
@@ -142,7 +143,7 @@ class PickingBatchAdminControllerTest {
         given(useCase.detail(1L)).willThrow(new PickingException(PickingErrorCode.BATCH_NOT_FOUND));
         given(useCase.create(List.of(2L), ACTOR)).willThrow(new PickingException(PickingErrorCode.NO_ELIGIBLE_ORDER),
             new PickingException(PickingErrorCode.SNAPSHOT_UNAVAILABLE));
-        given(useCase.check(1L, 2L, Map.of(10L, 2L), ACTOR)).willThrow(new PickingException(PickingErrorCode.CONCURRENTLY_CHANGED));
+        given(useCase.check(1L, new PickingOrderCheckCommand(2L, Map.of(10L, 2L)), ACTOR)).willThrow(new PickingException(PickingErrorCode.CONCURRENTLY_CHANGED));
 
         assertCode(get(DETAIL, MemberRole.STAFF), 404, "DELIVERY_034");
         assertCode(post(PATH, CREATE_BODY, MemberRole.MANAGER), 409, "DELIVERY_033");

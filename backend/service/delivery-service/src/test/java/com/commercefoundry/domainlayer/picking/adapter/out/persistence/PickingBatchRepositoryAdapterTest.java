@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.picking.adapter.out.persistence.repositor
 import com.commercefoundry.domainlayer.picking.application.mapper.PickingMapperImpl;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingBatch;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingCheck;
+import com.commercefoundry.domainlayer.picking.domain.model.PickingCheckSubmission;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingExclusion;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingSelection;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingSnapshot;
@@ -124,6 +125,24 @@ class PickingBatchRepositoryAdapterTest {
         assertThat(loaded.check(100, Map.of(10L, 5L))).as("같은 수량 재요청은 기록을 더하지 않는다").isSameAs(loaded);
         assertThat(pickingCheckRepository.findAllByBatchIdOrderByAttemptNoAsc(2)).extracting(check -> check.getAttemptNo()).containsExactly(1, 2);
         assertThat(pickingBatchRepository.findById(2L).orElseThrow().getCheckCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("미등록 바코드 검수 실패를 PostgreSQL에 저장하고 재조회한다")
+    void persistsUnknownBarcodeFailure() {
+        PickingBatch saved = created(4);
+        var submission = new PickingCheckSubmission(Map.of(10L, 5L), Map.of("unregistered", 1L));
+        adapter.addCheck(saved.checkSubmission(100, submission));
+        entityManager.clear();
+
+        PickingBatch loaded = adapter.findById(4).orElseThrow();
+        assertThat(loaded.checks()).singleElement().satisfies(check -> {
+            assertThat(check.failure()).isEqualTo(PickingCheck.Failure.UNKNOWN_BARCODE);
+            assertThat(check.submittedSkuKey()).isEqualTo("10:5");
+            assertThat(check.quantitiesKey()).doesNotContain("unregistered");
+        });
+        assertThat(loaded.checked(100)).isFalse();
+        assertThat(loaded.checkSubmission(100, submission)).isSameAs(loaded);
     }
 
     @Test

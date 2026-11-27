@@ -4,6 +4,7 @@ import com.commercefoundry.domainlayer.picking.application.exception.PickingErro
 import com.commercefoundry.domainlayer.picking.application.exception.PickingException;
 import com.commercefoundry.domainlayer.picking.application.port.out.PickingBatchRepositoryPort;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingBatch;
+import com.commercefoundry.domainlayer.picking.domain.model.PickingCheckSubmission;
 import com.commercefoundry.domainlayer.picking.domain.model.PickingSelection;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.Map;
@@ -45,10 +46,15 @@ public class PickingBatchProcessor {
      */
     @Transactional(timeout = 5)
     public PickingBatch check(long batchId, long orderId, Map<Long, Long> quantities) {
+        return checkSubmission(batchId, orderId, new PickingCheckSubmission(quantities, Map.of()));
+    }
+
+    @Transactional(timeout = 5)
+    public PickingBatch checkSubmission(long batchId, long orderId, PickingCheckSubmission submission) {
         PickingBatch batch = load(batchId);
         PickingBatch next;
         try {
-            next = batch.check(orderId, quantities);
+            next = batch.checkSubmission(orderId, submission);
         } catch (IllegalArgumentException exception) {
             throw new PickingException(PickingErrorCode.INVALID_CHECK, exception);
         }

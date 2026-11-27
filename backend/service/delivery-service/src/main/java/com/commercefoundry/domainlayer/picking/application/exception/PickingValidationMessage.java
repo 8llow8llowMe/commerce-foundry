@@ -16,6 +16,11 @@ public final class PickingValidationMessage {
     public static final String BULK_CHECK_ITEMS = "DELIVERY_156:검수 주문(items)은 1건 이상 20건 이하여야 합니다.";
     public static final String BULK_CHECK_ITEM = "DELIVERY_157:검수할 주문과 수량을 채워 주세요.";
 
+    public static final String BARCODE_INPUTS = "DELIVERY_158:상품 옵션과 바코드를 합쳐 100개까지 보낼 수 있습니다.";
+    public static final String BARCODE = "DELIVERY_159:바코드는 영문·숫자·하이픈·밑줄 1~64자로 보내 주세요.";
+
+    public static final String BARCODE_SINGLE_CHECK_ONLY = "DELIVERY_160:스캔 수량은 주문별 포장 검수에서만 보낼 수 있습니다.";
+
     private PickingValidationMessage() {
     }
 }

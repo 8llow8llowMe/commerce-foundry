@@ -4,7 +4,7 @@ import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.request.PickingBatchCreateRequest;
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.request.PickingBulkCheckRequest;
-import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.request.PickingOrderCheckRequest;
+import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.request.PickingSingleCheckRequest;
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.PickingBatchAdminResponse;
 import com.commercefoundry.domainlayer.picking.adapter.in.admin.dto.response.PickingBulkCheckAdminResponse;
 import com.commercefoundry.domainlayer.picking.application.exception.PickingValidationMessage;
@@ -114,8 +114,9 @@ public class PickingBatchAdminController {
 
     @Operation(
         summary = "주문별 포장 검수",
-        description = "상품 옵션별로 센 수량을 제출한다. 수량 부족·초과·다른 옵션은 200 응답의 검수 이력에 실패 사유를 남긴다. "
-            + "같은 주문에 같은 수량을 다시 보내면 이력을 추가하지 않는다. 동시 저장 충돌은 409(DELIVERY_037)다."
+        description = "상품 옵션별 직접 입력 수량과 바코드별 스캔 수량을 제출한다. 같은 옵션의 수량은 합산한다. "
+            + "수량 부족·초과·다른 옵션·미등록 바코드는 200 응답의 검수 이력에 실패 사유를 남긴다. "
+            + "같은 수량으로 재시도하면 이력을 추가하지 않는다. 동시 저장 충돌은 409(DELIVERY_037), 바코드 조회 장애는 503(DELIVERY_039)이다."
     )
     @PreAuthorize(AdminAuthority.FULFILLMENT_MANAGE)
     @AdminAudited(action = "PICKING_ORDER_CHECK")
@@ -124,8 +125,8 @@ public class PickingBatchAdminController {
         @AuthenticationPrincipal MemberPrincipal member,
         @Parameter(description = "출고 묶음 식별자", example = "4611686018427387904") @PathVariable long batchId,
         @Parameter(description = "주문 식별자") @PathVariable @Positive(message = PickingValidationMessage.ORDER_ID) long orderId,
-        @Valid @RequestBody PickingOrderCheckRequest request
+        @Valid @RequestBody PickingSingleCheckRequest request
     ) {
-        return ResponseEntity.ok(Response.success(useCase.check(batchId, orderId, request.toQuantities(), member.memberId())));
+        return ResponseEntity.ok(Response.success(useCase.check(batchId, request.toCommand(orderId), member.memberId())));
     }
 }

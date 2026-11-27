@@ -28,7 +28,9 @@ public record PickingCheck(long orderId, String quantitiesKey, Failure failure) 
         /** 더 꺼냈다. */
         EXCESS,
         /** 이미 검수에 성공한 주문을 다른 수량으로 다시 보냈다 — 앞선 성공을 덮지 않는다. */
-        ALREADY_CHECKED
+        ALREADY_CHECKED,
+        /** 상품에 등록되지 않은 바코드를 스캔했다. */
+        UNKNOWN_BARCODE
     }
 
     public PickingCheck {
@@ -41,6 +43,11 @@ public record PickingCheck(long orderId, String quantitiesKey, Failure failure) 
 
     public boolean successful() {
         return failure == Failure.NONE;
+    }
+
+    public String submittedSkuKey() {
+        int separator = quantitiesKey.indexOf('|');
+        return separator < 0 ? quantitiesKey : quantitiesKey.substring(0, separator);
     }
 
     /** 상품 옵션 → 수량을 순서 없는 키로 바꾼다. 맵 · 옵션 · 수량이 null 이면 {@link IllegalArgumentException}. */
