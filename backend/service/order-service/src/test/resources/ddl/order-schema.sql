@@ -645,6 +645,21 @@
     comment on column orders.order_stock_confirmation.stock_reservation_id is
         '확정하려는 재선점 아이디 (외부 FK: product-service stock_reservation.id)';
 
+    create table orders.order_stock_confirmation_participant (
+        work_id bigint not null,
+        payment_id bigint not null,
+        primary key (work_id, payment_id)
+    );
+
+    comment on table orders.order_stock_confirmation_participant is
+        '동일 재고 확정 후보의 추가 참여 결제';
+
+    comment on column orders.order_stock_confirmation_participant.work_id is
+        '확정 후보 아이디 (FK: order_stock_restoration.id)';
+
+    comment on column orders.order_stock_confirmation_participant.payment_id is
+        '참여 결제 아이디 (외부 FK: payment-service payment.id)';
+
     create table orders.order_stock_restoration (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
@@ -654,7 +669,7 @@
         hold_code varchar(30),
         next_attempt_at timestamp(6) with time zone,
         order_id bigint not null,
-        origin varchar(30) not null check ((origin in ('PAYMENT_RECORD'))),
+        origin varchar(30) not null check ((origin in ('PAYMENT_RECORD','CONFIRMATION_ATTEMPT','ABANDONED_CONFIRMATION'))),
         payment_id bigint not null,
         restored_at timestamp(6) with time zone,
         status varchar(20) not null check ((status in ('RESTORE_PENDING','RESTORED','HELD'))),
@@ -694,7 +709,7 @@
         '주문 아이디 (FK: orders.id)';
 
     comment on column orders.order_stock_restoration.origin is
-        '복원 의도 출처 (PAYMENT_RECORD)';
+        '작업 출처 (결제 기록 · 확정 시도 · 버려진 확정)';
 
     comment on column orders.order_stock_restoration.payment_id is
         '결제 아이디 (외부 FK: payment-service payment.id)';

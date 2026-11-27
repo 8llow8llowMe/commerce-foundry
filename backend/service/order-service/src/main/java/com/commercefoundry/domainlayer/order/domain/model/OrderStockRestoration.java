@@ -7,7 +7,7 @@ import java.util.Objects;
 
 /**
  * 결제 반영 재고 복원 작업 (#582, {@code orders.order_stock_restoration}) — 확정 선점 하나를 되돌릴 작업 한 건이다.
- * 후속 소비·스윕 연결을 위한 저장 기반이며 이 단계에서는 자동 복원을 실행하지 않는다. 선점 · 클레임마다 한 행이다.
+ * 결제 반영과 재고 복원 스윕이 사용하는 선점 · 클레임마다 한 행이다.
  *
  * <p>상태 전이는 아래 메서드로만 한다 — 바뀐 값을 돌려주고, 저장은 이전 값을 조건으로 건 조건부 UPDATE 다(두 처리가 같은 행을 덮어쓰지 않게).
  * <pre>
@@ -54,6 +54,22 @@ public record OrderStockRestoration(
             Origin.PAYMENT_RECORD, Status.RESTORE_PENDING, null, 0, nextAttemptAt, null, null);
     }
 
+    /** 원격 confirm 전에 커밋하는 후보. 복원 대상으로 확정될 때부터 PAID를 막는다. */
+    public static OrderStockRestoration forConfirmationAttempt(long id, long orderId, long paymentId, long reservationId, long claimId,
+        Instant nextAttemptAt) {
+        return new OrderStockRestoration(id, orderId, paymentId, reservationId, claimId, Origin.CONFIRMATION_ATTEMPT, Status.RESTORE_PENDING,
+            null, 0, nextAttemptAt, null, null);
+    }
+
+    /** 확정 시도의 소유권을 주문 잠금에서 판단한 뒤 복원 대상으로 전환한다. */
+    public OrderStockRestoration abandonConfirmation() {
+        if (origin != Origin.CONFIRMATION_ATTEMPT || status != Status.RESTORE_PENDING) {
+            throw new IllegalStateException("only a pending confirmation attempt can be abandoned");
+        }
+        return new OrderStockRestoration(id, orderId, paymentId, stockReservationId, claimId, Origin.ABANDONED_CONFIRMATION, status,
+            holdCode, attempts, nextAttemptAt, restoredAt, createdAt);
+    }
+
     /** 스윕 선점 — 시도를 하나 세고 다음 시각을 {@code min(maxBackoff, initialBackoff × 2^(시도-1))} 뒤로 미룬다. 선점이 곧 lease 다. */
     public OrderStockRestoration claimAttempt(Instant now, Duration initialBackoff, Duration maxBackoff) {
         if (status != Status.RESTORE_PENDING) {
@@ -91,7 +107,9 @@ public record OrderStockRestoration(
     /** 복원 의도가 생긴 곳. 더하기만 한다 — Hibernate enum check 가 값 목록을 가진다. */
     public enum Origin {
         /** 결제 반영 기록({@code order_payment.restoration_claim_id}) — 확정 뒤 취소 · 미승인 거절. */
-        PAYMENT_RECORD
+        PAYMENT_RECORD,
+        CONFIRMATION_ATTEMPT,
+        ABANDONED_CONFIRMATION
     }
 
     /** 작업 상태. 더하기만 한다. */

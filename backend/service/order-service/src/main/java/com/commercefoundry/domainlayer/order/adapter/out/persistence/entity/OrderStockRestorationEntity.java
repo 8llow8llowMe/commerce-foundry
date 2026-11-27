@@ -69,7 +69,7 @@ public class OrderStockRestorationEntity extends BaseEntity implements Persistab
     private Long claimId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "origin", nullable = false, length = 30, comment = "복원 의도 출처 (PAYMENT_RECORD)")
+    @Column(name = "origin", nullable = false, length = 30, comment = "작업 출처 (결제 기록 · 확정 시도 · 버려진 확정)")
     private OrderStockRestoration.Origin origin;
 
     @Enumerated(EnumType.STRING)

@@ -12,6 +12,7 @@ public final class OrderPaymentRestorationSchemaGuard implements SmartInitializi
     private static final Map<String, String> REQUIRED_COLUMNS = Map.of(
         "order_stock_restoration", "id,created_at,updated_at,attempts,claim_id,hold_code,next_attempt_at,order_id,origin,payment_id,"
             + "restored_at,status,stock_reservation_id",
+        "order_stock_confirmation_participant", "work_id,payment_id",
         "order_payment", "id,created_at,updated_at,approved_at,event_id,member_id,order_id,paid_order_id,payment_id,restoration_claim_id,"
             + "restored_at,result,stock_reservation_id,total_amount,total_currency",
         "outbox", "id,created_at,updated_at,aggregate_id,aggregate_type,available_at,event_type,last_error_code,payload,publish_attempts,"
