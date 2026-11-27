@@ -304,6 +304,8 @@ delivery-service · operations-service · support-service 어드민 엔드포인
 | `GET /api/v1/admin/store/navigation` | `SETTINGS_READ` | 200 | 403 | 403 |
 | `PUT /api/v1/admin/store/navigation` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
 | `POST /api/v1/admin/store/navigation/publication` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
+| `GET /api/v1/admin/store/brand-assets` · `GET .../publications` · `GET .../uploads/{kind}/{assetId}` | `SETTINGS_READ` | 200 | 403 | 403 |
+| `PUT /api/v1/admin/store/brand-assets` · `POST .../publication` · `POST .../uploads/{kind}` | `SETTINGS_MANAGE` | 200 | 403 | 403 |
 | `/api/v1/admin/notifications/**` 5개 · `/api/v1/admin/onboarding/me/**` 3개 | `OPERATOR` | 200 | 200 | 200 |
 | `GET /api/v1/admin/support/knowledge` · `GET .../{documentId}` | `CS_READ` | 200 | 200 | 200 |
 | `POST /api/v1/admin/support/knowledge` · `PUT .../{documentId}` · `POST .../{documentId}/revisions` | `CS_MANAGE` | 200 | 200 | 403 |
@@ -323,6 +325,8 @@ delivery-service · operations-service · support-service 어드민 엔드포인
 - 법적 문서 · 상점 공개 정보는 공개 사업자 정보와 약관이라 조회도 `SETTINGS_READ`(대표만)다.
 - **상단 메뉴(#599)** 도 같은 `SETTINGS_*` 다. 공개 `GET /api/v1/store/navigation?locale=ko|en` 은 `@PreAuthorize("permitAll()")`(익명 · 고객 토큰 모두 200)이며
   **게시본만** 내린다 — 초안 · 숨김 항목과 그 하위 · 편집용 key · 버전 · 작성자는 공개 응답에 없다. 미등록 · 미게시는 404 `STORE_NAV_001` 이다.
+- **브랜드 이미지(#598)** 는 `SETTINGS_*` 권한을 사용한다. 공개 설정과 이미지 GET은 익명으로 열며 현재 게시본에 연결된 PNG만 제공한다.
+  업로드는 PNG 본문을 크기 제한과 함께 읽고 비공개 스토리지에 저장한다. [스토어 브랜드 이미지 가이드](store-brand-assets-guide.md)
 - 이 세 서비스에 `MultipartFile` 핸들러는 없다(`spring.servlet.multipart.*` 설정도 없음 — Boot 기본 한도).
 - 핸들러 전체 표는 `DeliveryAdminAuthorizationMappingTest` · `OperationsAdminAuthorizationMappingTest` · `SupportAdminAuthorizationMappingTest` 가,
   역할별 200 · 403 은 각 `*AdminControllerTest`(송장 · 배송비 정책 · 작업 · 결과 다운로드 · 법적 문서 · 상점 정보 · 알림 · 온보딩 · 캠페인 · 지식) 슬라이스가 고정한다.
@@ -1409,6 +1413,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | operations | `STORE_FOOTER_DRAFT_SAVE` · `STORE_FOOTER_PUBLISH` | #597. SETTINGS_MANAGE의 실제 JWT 관리자, 고정 target=`store-footer:1`, 성공·실패 한 줄. URL·표시명·저작권 문구는 기록하지 않는다. 수정 이력은 푸터 리비전 표가 소유한다 |
 | operations | `STORE_NAVIGATION_DRAFT_SAVE` · `STORE_NAVIGATION_PUBLISH` | #599. SETTINGS_MANAGE의 실제 JWT 관리자, 고정 target=`store-navigation:1`, 성공·실패 한 줄. URL·표시명·설명은 기록하지 않는다. 수정 이력은 상단 메뉴 리비전 표가 소유한다 |
+| operations | `STORE_BRAND_DRAFT_SAVE` · `STORE_BRAND_PUBLISH` · `STORE_BRAND_UPLOAD` | #598. SETTINGS_MANAGE의 실제 JWT 관리자와 고정 target=`store-brand:1`로 유스케이스 성공·실패를 한 줄 기록한다. 게시 감사는 되돌리기 요청에도 적용한다. 복구 출처는 브랜드 리비전에 남긴다 |
 | product | `PRODUCT_DELETE` (`product:<id>`) · `PRODUCT_CUSTOM_ORDER_REPLACE` (`product:<id>`, #9 PR-B) · `CATEGORY_CREATE` · `CATEGORY_UPDATE` · `CATEGORY_DELETE` (`category:<id>`) · `SIZE_CHART_TEMPLATE_CREATE` · `SIZE_CHART_TEMPLATE_UPDATE` · `SIZE_CHART_TEMPLATE_DELETE` (`size-chart-template:<id>`) · `PRODUCT_SIZE_CHART_REPLACE` (`product:<id>`) — 생성 실패는 `-` | 사용 중 (#163 PR-B, `ProductAdminAuditAction`) |
 | product | `MEDIA_IMAGE_UPLOAD_ISSUE` · `MEDIA_IMAGE_UPLOAD_CONFIRM` (대상 `media-upload:<UUID>`, 식별자 없는 실패는 `-`) — URL · 전체 키 · ETag · MIME · 바이트 · 헤더 제외 | 사용 중 (#508, `ProductAdminAuditAction`) |
 | product | `SIZE_CHART_DRAFT_CREATE` (`product:<id>`) · `SIZE_CHART_DRAFT_REFRESH` · `SIZE_CHART_DRAFT_APPLY` (`size-chart-draft:<id>`) · `SIZE_CHART_DRAFT_BATCH_CREATE` (고정 `size-chart-draft:batch`) — 일괄 제출은 항목마다 `SIZE_CHART_DRAFT_CREATE` 한 줄과 배치 한 줄(결과를 돌려줬으면 항목 일부 실패여도 `SUCCESS`. 요청 형식(DTO) 400 은 퍼사드에 닿지 않아 무감사, 퍼사드에 도달한 400 · 벌크 조회 503 은 `FAILURE`, 항목이 비어 운영자를 모르면 `-`). 원문 텍스트 · 이미지 · 상품 아이디 목록 제외 | 사용 중 (#217 · #737, `ProductAdminAuditAction`) |

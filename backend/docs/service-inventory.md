@@ -341,6 +341,12 @@ operations-service `storenavigation`은 배포당 하나의 이중 언어 상단
 (`STORE_NAVIGATION_ALLOWED_EXTERNAL_HOSTS`, 기본 빈 목록 = 외부 링크 거부, 비밀 아님)는 푸터 허용 목록과 별개다.
 테이블 3개(PR-A #772) + 항목 컬럼 4개·check 2개(PR-B)·운영 DDL·FE #602 헤더 매핑은 [store-navigation-guide.md](store-navigation-guide.md)를 따른다. 새 Vault 비밀은 없다.
 
+## 스토어 브랜드 이미지 (#598)
+
+operations-service `storebrand`는 배포별 기본·어두운 배경용 로고, 사이트 아이콘의 검증·등록과 초안·게시·복구를 소유한다.
+이미지는 기존 비공개 오브젝트 스토리지의 브랜드 전용 경로에 보관한다. 공개 API는 현재 게시본에 연결된 PNG만 제공한다.
+검증·저장 정책과 FE #601 연결 계약은 [스토어 브랜드 이미지 가이드](store-brand-assets-guide.md)를 따른다.
+
 ### 결제 자동 취소와 복구 (#579)
 
 payment-service가 주문 반영 거절·LATE_APPROVED 자동 취소 의도와 lease/token 실행, 별도 세 lane의 발견·재시도를 담당한다.
