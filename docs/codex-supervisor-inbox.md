@@ -58,3 +58,9 @@ python -B -X utf8 scripts/codex_pr_watch.py --config <작업-JSON> --legacy-stat
 - 감독은 후속 처리까지 확인한 뒤 해당 이벤트를 `completed`로 기록한다. 읽음만으로는 후속 목록에서 사라지지 않는다.
 
 검증 환경에서는 자식 프로세스 환경에 `CODEX_TEAM_DB`를 절대 경로로 설정해 별도 SQLite를 사용한다. 운영 실행은 이 변수를 설정하지 않으면 Git common-dir 기준 팀 DB를 사용한다.
+
+## 검증 기록
+
+- Windows Python 3.13.5에서 `python -B -X utf8 -m unittest discover -s scripts -p 'test_*.py'`로 77개 테스트를 실행했다. 이관·중복·PR 후속 신호는 격리 SQLite와 고정 GitHub 응답으로 검증했다.
+- Windows ConPTY에서 등록된 감독 UUID로 별도 뷰를 열고 숫자·Enter로 한국어 두 줄 원문을 펼쳤다. 같은 메시지의 읽음 기록과 `pending` ack 상태를 다시 조회했다.
+- Codex CLI 0.172.0의 별도 stdio App Server에 임시 세션 세 개를 로드했다. 로컬 모의 모델로 감독의 한 턴을 유지하며 두 작업자가 보고했고, 유휴 중 보고와 실행 중 보고 모두 새 턴과 추가 사용자 입력을 만들지 않았다. 격리 팀 DB에서 한국어 원문, 배정과 ack 왕복을 확인했다. 긴급 전달 접수와 중복 차단은 App Server 대역 테스트로 검증했다.

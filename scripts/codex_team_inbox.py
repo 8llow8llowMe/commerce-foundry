@@ -90,4 +90,3 @@ def view_inbox(team, role, thread, *, actions_only=False):
             page = None
         else:
             print("목록에 있는 번호나 이동 키를 입력하세요.")
-
