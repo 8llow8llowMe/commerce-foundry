@@ -31,6 +31,11 @@ import com.commercefoundry.domainlayer.storefooter.adapter.in.admin.presenter.St
 import com.commercefoundry.domainlayer.storefooter.application.command.StoreFooterCommands;
 import com.commercefoundry.domainlayer.storefooter.application.service.StoreFooterAdminFacade;
 import com.commercefoundry.domainlayer.storefooter.application.service.processor.StoreFooterProcessor;
+import com.commercefoundry.domainlayer.storenavigation.adapter.in.admin.controller.StoreNavigationAdminController;
+import com.commercefoundry.domainlayer.storenavigation.adapter.in.admin.presenter.StoreNavigationAdminPresenter;
+import com.commercefoundry.domainlayer.storenavigation.application.command.StoreNavigationCommands;
+import com.commercefoundry.domainlayer.storenavigation.application.service.StoreNavigationAdminFacade;
+import com.commercefoundry.domainlayer.storenavigation.application.service.processor.StoreNavigationProcessor;
 import com.commercefoundry.security.audit.AdminAuditLog;
 import com.commercefoundry.security.audit.AdminAudited;
 import java.util.Arrays;
@@ -49,12 +54,13 @@ class OperationsAdminAuditProcessorTest {
 
     @Test
     void enumMatchesOnlyMigratedControllersNotAllOperationsActions() {
-        var declared = Stream.of(StoreProfileAdminController.class, LegalDocumentAdminController.class, StoreFooterAdminController.class)
+        var declared = Stream.of(StoreProfileAdminController.class, LegalDocumentAdminController.class, StoreFooterAdminController.class,
+                StoreNavigationAdminController.class)
             .flatMap(type -> Arrays.stream(type.getDeclaredMethods()))
             .filter(method -> method.isAnnotationPresent(AdminAudited.class))
             .map(method -> method.getAnnotation(AdminAudited.class).action()).toList();
         assertThat(declared).containsExactlyInAnyOrderElementsOf(Arrays.stream(OperationsAdminAuditAction.values()).map(Enum::name).toList());
-        assertThat(declared).hasSize(5).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
+        assertThat(declared).hasSize(6).doesNotContain("JOB_CANCEL", "CAMPAIGN_RECIPIENT_PREVIEW", "JOB_RESULT_DOWNLOAD");
     }
 
     @ParameterizedTest
@@ -98,6 +104,35 @@ class OperationsAdminAuditProcessorTest {
                 }
             }).isSameAs(original);
             writer.verify(() -> AdminAuditLog.write(action, 7L, "store-footer:1", false), times(1));
+            writer.verifyNoMoreInteractions();
+        }
+    }
+
+    @Test
+    void navigationDraftSaveUsesFixedTargetAndAuditFailureCannotEscape() {
+        doThrow(diagnosticFailure).when(diagnostic).warn(anyString(), any(), any(), any());
+        try (var writer = mockStatic(AdminAuditLog.class)) {
+            writer.when(() -> AdminAuditLog.write("STORE_NAVIGATION_DRAFT_SAVE", 7L, "store-navigation:1", true)).thenThrow(auditFailure);
+            assertThatCode(() -> audit.navigationDraftSaved(7L, true)).doesNotThrowAnyException();
+            writer.verify(() -> AdminAuditLog.write("STORE_NAVIGATION_DRAFT_SAVE", 7L, "store-navigation:1", true), times(1));
+            writer.verifyNoMoreInteractions();
+            verify(diagnostic).warn("Admin audit unavailable action={} actorMemberId={} exceptionType={}",
+                "STORE_NAVIGATION_DRAFT_SAVE", 7L, IllegalArgumentException.class.getName());
+            verifyNoMoreInteractions(diagnostic);
+        }
+    }
+
+    @Test
+    void navigationPresenterFailurePreservesOriginalExceptionAndNeverWritesSuccess() {
+        var processor = mock(StoreNavigationProcessor.class);
+        var presenter = mock(StoreNavigationAdminPresenter.class);
+        when(presenter.detail(any())).thenThrow(original);
+        var facade = new StoreNavigationAdminFacade(processor, presenter, audit);
+        doThrow(diagnosticFailure).when(diagnostic).warn(anyString(), any(), any(), any());
+        try (var writer = mockStatic(AdminAuditLog.class)) {
+            writer.when(() -> AdminAuditLog.write("STORE_NAVIGATION_DRAFT_SAVE", 7L, "store-navigation:1", false)).thenThrow(auditFailure);
+            assertThatThrownBy(() -> facade.save(7L, new StoreNavigationCommands.SaveDraft(null, null))).isSameAs(original);
+            writer.verify(() -> AdminAuditLog.write("STORE_NAVIGATION_DRAFT_SAVE", 7L, "store-navigation:1", false), times(1));
             writer.verifyNoMoreInteractions();
         }
     }
