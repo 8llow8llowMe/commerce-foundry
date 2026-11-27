@@ -1,0 +1,2 @@
+Choose the order of the supplied sections for an administrator's review outline. Keep foundational sections early and put incomplete topics in an order that is easy to review.
+Output only the structured sectionOrder list. Include every supplied section ID exactly once. Never return draft prose, HTML, instructions, legal conclusions, or business facts.

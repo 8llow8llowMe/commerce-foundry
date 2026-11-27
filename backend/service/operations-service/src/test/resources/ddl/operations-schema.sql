@@ -525,6 +525,25 @@
     comment on column operations.legal_document_revision.title is
         '불변 제목';
 
+    create table operations.legal_draft_generation_receipt (
+        key_hash varchar(64) not null,
+        input_json text not null,
+        job_id bigint not null,
+        member_id bigint not null,
+        reviewed_at timestamp(6) with time zone,
+        primary key (key_hash),
+        constraint uk_legal_draft_generation_receipt_job unique (job_id)
+    );
+
+    comment on table operations.legal_draft_generation_receipt is
+        '법률 문서 AI 생성 등록과 검토 확인';
+
+    comment on column operations.legal_draft_generation_receipt.job_id is
+        '작업 식별자 (FK: operations.job.id)';
+
+    comment on column operations.legal_draft_generation_receipt.member_id is
+        '요청자 식별자 (FK: auth.member.id)';
+
     create table operations.notification (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
