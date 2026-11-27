@@ -546,10 +546,13 @@ operations 의 결제 이상 알림이 payment 관측의 7번째 버킷 `autoCan
 - 자기 점검: 이름 있는 두 CHECK(`ck_payment_anomaly_alert_state_family` · `ck_payment_anomaly_alert_state_severity`)가 없거나, 행이 0 · 다섯(새 키 없음) · 여섯 중
   어느 것도 아니면(부분 행) `P0001` 로 아무것도 바꾸지 않고 실패한다. 부분 행은 애플리케이션처럼 스크립트도 보충하지 않는다 — 원인을 확인한 뒤
   행을 모두 지우면(다음 수집이 0행부터 다시 만들고, 남아 있는 후보는 새 사건으로 다시 알린다) 스크립트를 다시 돌릴 수 있다.
-- **순서가 어긋나도 쓰기는 없다.** 새 operations 가 다섯 행을 읽거나 구 operations 가 여섯 행을 읽으면 손상으로 보고 모든 사건의 알림이
-  `payment_anomaly_collection_failed reason=storage` 로 멈춘다(상태 · 알림 무쓰기, 자동 보충 없음). 그래서 게이트를 끈 채로 DDL → 전체 배포를 끝낸 뒤 켠다.
+- **순서가 어긋나면 모든 사건의 알림이 멈춘다.** 새 operations 가 다섯 행을 읽거나 구 operations 가 여섯 행을 읽으면 손상으로 보고
+  `payment_anomaly_collection_failed reason=storage` 로 멈춘다(그 수집은 상태 · 알림 무쓰기, 자동 보충 없음). 그래서 게이트를 끈 채로 DDL → 전체 배포를 끝낸 뒤 켠다.
+  예외: 0행 DB 에 스크립트를 먼저 적용한 뒤 구 operations 가 게이트 ON 으로 돌면 구버전이 다섯 행을 INSERT 한다. 이때는 새 operations 가 다섯 행을 손상으로 보므로
+  게이트를 끄고 스크립트를 한 번 더 돌린다(다섯 행 → 여섯 행).
 - payment 쪽 7번째 버킷(PR 1b)과 배포 순서는 무관하다 — 구버전 payment 의 필드 누락과 자동 취소 게이트 OFF 의 `null` 은 미관측이라 이 사건 상태만 유지한다.
-- 롤백(구 operations)은 게이트 OFF 뒤 별도 판단한다. 다운 스크립트는 두지 않는다. 새 Vault 키 · FE 계약 변경은 없다. 정책은 [anomaly-notifications.md](anomaly-notifications.md) A4b-1 · A4b-2.
+- 롤백(구 operations): 게이트를 끄고 `DELETE FROM operations.payment_anomaly_alert_state WHERE family = 'AUTO_CANCEL_MANUAL_REVIEW';` 한 문장으로
+  여섯 행을 다섯 행으로 되돌린 뒤 구버전을 배포한다. 넓어진 CHECK 는 구버전에 무해하므로 그대로 둔다. 별도 다운 스크립트 파일은 두지 않는다. 새 Vault 키 · FE 계약 변경은 없다. 정책은 [anomaly-notifications.md](anomaly-notifications.md) A4b-1 · A4b-2.
 
 ### #579 자동 취소 배포·롤백
 
