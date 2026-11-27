@@ -43,8 +43,10 @@ class OnboardingConfiguredGuidesTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final List<Guide> GUIDES = List.of(
         new Guide("console", 1), new Guide("stocks", 1), new Guide("stock-detail", 1), new Guide("size-charts", 1),
-        new Guide("size-chart-editor", 1), new Guide("size-chart-templates", 1), new Guide("shipping-domestic", 1),
-        new Guide("product-new", 2), new Guide("product-edit", 1), new Guide("payments", 1), new Guide("orders", 2), new Guide("order-detail", 2)
+        new Guide("size-chart-editor", 2), new Guide("size-chart-templates", 1), new Guide("shipping-domestic", 1),
+        new Guide("product-new", 2), new Guide("product-edit", 1), new Guide("payments", 1), new Guide("orders", 2), new Guide("order-detail", 2),
+        new Guide("products", 1), new Guide("product-detail", 1), new Guide("claims", 1), new Guide("claim-detail", 2),
+        new Guide("jobs", 1), new Guide("picking", 1)
     );
 
     @Autowired
@@ -70,7 +72,7 @@ class OnboardingConfiguredGuidesTest {
     void bindsDeployedGuidesAndPreservesExistingProgressAndOrder() throws Exception {
         assertThat(properties.guides()).containsExactlyElementsOf(GUIDES);
         for (Guide guide : GUIDES.subList(0, 7)) {
-            body(put(guide.key(), guide.version()));
+            body(update(guide.key(), guide.version()));
         }
 
         JsonNode tours = body(mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer()).exchange()).get("tours");
@@ -85,13 +87,16 @@ class OnboardingConfiguredGuidesTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"product-new,2", "product-edit,1", "payments,1", "orders,2", "order-detail,2"})
-    @DisplayName("배포된 5개 투어는 PUT 200이고 재요청 뒤에도 한 행으로 저장돼 GET에서 진행을 조회한다")
+    @CsvSource({
+        "product-new,2", "product-edit,1", "payments,1", "orders,2", "order-detail,2",
+        "size-chart-editor,2", "products,1", "product-detail,1", "claims,1", "claim-detail,2", "jobs,1", "picking,1"
+    })
+    @DisplayName("배포된 투어는 PATCH 200이고 재요청 뒤에도 한 행으로 저장돼 GET에서 진행을 조회한다")
     void deployedTourProgressIsStoredAndReturned(String key, int version) throws Exception {
-        JsonNode saved = body(put(key, version));
+        JsonNode saved = body(update(key, version));
         assertThat(saved.get("guideKey").asString()).isEqualTo(key);
         assertThat(saved.get("guideVersion").asInt()).isEqualTo(version);
-        body(put(key, version));
+        body(update(key, version));
 
         JsonNode tours = body(mvc.get().uri(PATH).header(HttpHeaders.AUTHORIZATION, bearer()).exchange()).get("tours");
         int index = GUIDES.indexOf(new Guide(key, version));
@@ -103,8 +108,8 @@ class OnboardingConfiguredGuidesTest {
         assertThat(repository.count()).isEqualTo(1L);
     }
 
-    private MvcTestResult put(String key, int version) {
-        return mvc.put().uri(PATH + "/tours/" + key).header(HttpHeaders.AUTHORIZATION, bearer()).contentType(MediaType.APPLICATION_JSON)
+    private MvcTestResult update(String key, int version) {
+        return mvc.patch().uri(PATH + "/tours/" + key).header(HttpHeaders.AUTHORIZATION, bearer()).contentType(MediaType.APPLICATION_JSON)
             .content("""
                 {"guideVersion": %d, "status": "IN_PROGRESS", "currentStep": 2}
                 """.formatted(version)).exchange();

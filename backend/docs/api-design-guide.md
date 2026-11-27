@@ -2162,6 +2162,9 @@ FE는 BE 배포 뒤 `lib/tour/onboarding-api.ts`의 메서드를 PUT에서 PATCH
 - FE 에 투어를 추가하거나 버전을 올릴 때 같은 릴리스의 operations-service 허용 목록에도 key · version 을 반영한다. 누락한 키는 404,
   예전 배포 버전에 새 버전 진행 기록을 보내면 400 `ONBOARDING_103`이다. 등록은 기존 순서를 유지하며 추가하고, 기존 진행 행을 삭제하지 않는다.
 - 상품 등록 `product-new` v2, 상품 수정 `product-edit` v1, 결제 `payments` v1, 주문 목록 `orders` v2, 주문 상세 `order-detail` v2를 등록했다(#544).
+- 재고 목록 `stocks` v1과 상세 `stock-detail` v1은 기존 버전을 유지한다. 상품 목록 `products` v1, 상품 상세 `product-detail` v1, 클레임 목록 `claims` v1,
+  클레임 상세 `claim-detail` v2, 백그라운드 작업·알림 `jobs` v1, 출고 작업대 `picking` v1을 추가하고 사이즈표 편집 `size-chart-editor`를 v2로 맞춘다(#228).
+  새로 등록한 투어는 운영자별로 기록되며, 이전 브라우저 기록은 서버 완료 상태로 옮기지 않는다.
 - **미시작은 행이 없다.** 기록이 없거나 기록 버전이 배포 버전과 다르면 응답에서 `NOT_STARTED` + 배포 버전이다.
 - 기록은 합친다(다른 기기 · 동시 탭). 같은 본문을 다시 보내도 결과가 같다(멱등).
   - 같은 버전 — 순위 `NOT_STARTED < IN_PROGRESS < {COMPLETED, SKIPPED}` 가 내려가지 않는다. 끝난 기록에 `IN_PROGRESS` 가 오면 그대로다. `SKIPPED → COMPLETED` 만 허용하고
