@@ -98,6 +98,7 @@
         payment_id bigint,
         request_key uuid not null,
         restock boolean,
+        return_fault varchar(16) check ((return_fault in ('CUSTOMER','SELLER'))),
         status varchar(20) not null check ((status in ('REQUESTED','APPROVED','REFUNDED','COMPLETED','REJECTED','REFUND_FAILED','RESTORATION_FAILED'))),
         type varchar(20) not null check ((type in ('RETURN','CANCELLATION'))),
         version bigint not null,
@@ -113,7 +114,8 @@
         constraint ck_claim_return_next_attempt check (type <> 'RETURN' or ((status in ('APPROVED', 'REFUNDED')) = (next_attempt_at is not null))),
         constraint ck_claim_cancellation_failure_code check (type <> 'CANCELLATION' or ((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))),
         constraint ck_claim_return_failure_code check (type <> 'RETURN' or ((status in ('REFUND_FAILED', 'RESTORATION_FAILED')) = (failure_code is not null))),
-        constraint ck_claim_admin_decision check ((decision_reason is null and decided_by_member_id is null and decided_at is null and decision_failure_code is null) or ((type = 'CANCELLATION' or status <> 'REQUESTED') and decision_reason is not null and length(trim(decision_reason)) > 0 and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null and ((decision_failure_code is not null and length(trim(decision_failure_code)) > 0) or (decision_failure_code is null and status = 'REJECTED'))))
+        constraint ck_claim_admin_decision check ((decision_reason is null and decided_by_member_id is null and decided_at is null and decision_failure_code is null) or ((type = 'CANCELLATION' or status <> 'REQUESTED') and decision_reason is not null and length(trim(decision_reason)) > 0 and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null and ((decision_failure_code is not null and length(trim(decision_failure_code)) > 0) or (decision_failure_code is null and status = 'REJECTED')))),
+        constraint ck_claim_return_fault check ((approved_at is null) = (return_fault is null))
     );
 
     comment on table orders.claim is
@@ -175,6 +177,9 @@
 
     comment on column orders.claim.restock is
         '검수 뒤 재고로 되돌릴지. 승인 이후 반품에만';
+
+    comment on column orders.claim.return_fault is
+        '반품 승인 때 운영자가 고른 귀책 (CUSTOMER / SELLER) — 환불액 계산 근거. 승인 이후 반품에만';
 
     comment on column orders.claim.status is
         '클레임 상태 (REQUESTED / APPROVED / REFUNDED / COMPLETED / REJECTED / REFUND_FAILED / RESTORATION_FAILED)';

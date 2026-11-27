@@ -120,8 +120,8 @@ public abstract class ReturnRefundPipelineContract {
 
     /** 시드 승인 — B2c 승인 API 대신 도메인 승인을 그대로 저장한다. */
     protected Claim approve(Claim requested, Order order, long refund, boolean restock, Instant now) {
-        return update(requested, requested.approveReturn(order, PAYMENT_ID, new ReturnRefundPolicy.Refund(refund, 0, CurrencyCode.KRW), restock, 9L, now,
-            LEASE));
+        return update(requested, requested.approveReturn(order, PAYMENT_ID, new ReturnRefundPolicy.Refund(refund, 0, CurrencyCode.KRW, ReturnRefundPolicy.Fault.CUSTOMER),
+            restock, 9L, now, LEASE));
     }
 
     private Claim update(Claim previous, Claim next) {

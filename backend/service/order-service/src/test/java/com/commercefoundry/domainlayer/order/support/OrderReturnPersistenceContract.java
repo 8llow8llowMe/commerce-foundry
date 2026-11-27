@@ -39,6 +39,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 public abstract class OrderReturnPersistenceContract {
     private static final AtomicLong IDS = new AtomicLong(930000);
     protected static final Instant NOW = Instant.parse("2026-11-03T00:00:00Z");
+    private static final Claim.Decision REJECTION = new Claim.Decision("검수 불합격", 9, NOW, null);
     @Autowired protected OrderRepositoryPort orders;
     @Autowired protected OrderReturnWebFacade facade;
     @Autowired protected OrderHistoryProcessor historyProcessor;
@@ -196,9 +197,9 @@ public abstract class OrderReturnPersistenceContract {
         Order order = create(OrderStatus.DELIVERED, 2);
         Claim requested = requestReturn(order);
         Instant approvedAt = Instant.parse("2026-11-03T01:02:03.123456789Z");
-        Claim.ReturnApproval approval = new Claim.ReturnApproval(false, krw(100), 9, approvedAt);
-        Claim approved = requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(1_000, 100, CurrencyCode.KRW), false, 9, approvedAt,
-            Duration.ofSeconds(120));
+        Claim.ReturnApproval approval = new Claim.ReturnApproval(ReturnRefundPolicy.Fault.CUSTOMER, false, krw(100), 9, approvedAt);
+        Claim approved = requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(1_000, 100, CurrencyCode.KRW, ReturnRefundPolicy.Fault.CUSTOMER),
+            false, 9, approvedAt, Duration.ofSeconds(120));
 
         Claim saved = tx().execute(s -> claimAdapter.update(approved));
         Claim read = claimAdapter.findById(requested.id()).orElseThrow();
@@ -211,11 +212,81 @@ public abstract class OrderReturnPersistenceContract {
         assertThat(jdbc.queryForMap("select restock, deduction_amount, approved_by_member_id, payment_id from orders.claim where id = ?", requested.id()))
             .containsEntry("restock", false).containsEntry("deduction_amount", 100L).containsEntry("approved_by_member_id", 9L).containsEntry("payment_id", 77L);
         Claim other = requestReturn(order);
-        tx().executeWithoutResult(s -> claimAdapter.update(other.rejectReturn()));
+        tx().executeWithoutResult(s -> claimAdapter.update(other.rejectReturn(REJECTION)));
         Claim rejected = claimAdapter.findById(other.id()).orElseThrow();
         assertThat(rejected.status()).isEqualTo(Claim.Status.REJECTED);
         assertThat(rejected.approval()).isNull();
         assertThat(claimAdapter.sumRequestedReturnQuantities(order.id())).containsExactly(entry(order.itemIds().getFirst(), 1L));
+    }
+
+    @Test
+    void returnFaultAndRejectionDecisionRoundTrip() {
+        // #17 B2c — 승인 귀책은 return_fault 칸에, 거절 결정은 결정 칸(직전 실패 코드 없음)에 저장 · 복원된다
+        Order order = create(OrderStatus.DELIVERED, 2);
+        Claim requested = requestReturn(order);
+        Claim approved = requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(1_000, 0, CurrencyCode.KRW, ReturnRefundPolicy.Fault.SELLER),
+            true, 9, NOW, Duration.ofSeconds(120));
+        tx().executeWithoutResult(s -> claimAdapter.update(approved));
+
+        assertThat(claimAdapter.findById(requested.id()).orElseThrow().approval().fault()).isEqualTo(ReturnRefundPolicy.Fault.SELLER);
+        assertThat(jdbc.queryForObject("select return_fault from orders.claim where id = ?", String.class, requested.id())).isEqualTo("SELLER");
+
+        Claim other = requestReturn(order);
+        tx().executeWithoutResult(s -> claimAdapter.update(other.rejectReturn(REJECTION)));
+        Claim rejected = claimAdapter.findById(other.id()).orElseThrow();
+        assertThat(rejected.decision()).isEqualTo(REJECTION);
+        assertThat(jdbc.queryForMap("select return_fault, decision_reason, decided_by_member_id, decision_failure_code from orders.claim where id = ?", other.id()))
+            .containsEntry("return_fault", null).containsEntry("decision_reason", "검수 불합격").containsEntry("decided_by_member_id", 9L)
+            .containsEntry("decision_failure_code", null);
+    }
+
+    @Test
+    void returnFaultSurvivesRefundAndRestorationTransitions() {
+        // #17 B2c — 승인 뒤 전이(REFUNDED → COMPLETED, REFUND_FAILED, RESTORATION_FAILED)를 저장해도 귀책 칸은 그대로다
+        Order first = create(OrderStatus.DELIVERED, 2);
+        Order second = create(OrderStatus.DELIVERED, 2);
+        Claim completed = approveAndSave(first, ReturnRefundPolicy.Fault.SELLER);
+        Claim refunded = tx().execute(s -> claimAdapter.update(completed.markRefunded(NOW.plusSeconds(60))));
+        assertFault(refunded, Claim.Status.REFUNDED, ReturnRefundPolicy.Fault.SELLER);
+        assertFault(tx().execute(s -> claimAdapter.update(refunded.complete())), Claim.Status.COMPLETED, ReturnRefundPolicy.Fault.SELLER);
+
+        Claim refundFailed = approveAndSave(first, ReturnRefundPolicy.Fault.CUSTOMER);
+        assertFault(tx().execute(s -> claimAdapter.update(refundFailed.failRefund("PAYMENT_999"))), Claim.Status.REFUND_FAILED, ReturnRefundPolicy.Fault.CUSTOMER);
+
+        Claim restorationFailed = approveAndSave(second, ReturnRefundPolicy.Fault.SELLER);
+        Claim refundedAgain = tx().execute(s -> claimAdapter.update(restorationFailed.markRefunded(NOW.plusSeconds(60))));
+        assertFault(tx().execute(s -> claimAdapter.update(refundedAgain.failRestoration("PRODUCT_027"))), Claim.Status.RESTORATION_FAILED,
+            ReturnRefundPolicy.Fault.SELLER);
+    }
+
+    private Claim approveAndSave(Order order, ReturnRefundPolicy.Fault fault) {
+        Claim requested = requestReturn(order);
+        return tx().execute(s -> claimAdapter.update(requested.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(1_000, 0, CurrencyCode.KRW, fault),
+            true, 9, NOW, Duration.ofSeconds(120))));
+    }
+
+    private void assertFault(Claim saved, Claim.Status status, ReturnRefundPolicy.Fault fault) {
+        Claim read = claimAdapter.findById(saved.id()).orElseThrow();
+        assertThat(read.status()).isEqualTo(status);
+        assertThat(read.approval().fault()).isEqualTo(fault);
+        assertThat(jdbc.queryForObject("select return_fault from orders.claim where id = ?", String.class, saved.id())).isEqualTo(fault.name());
+    }
+
+    @Test
+    void returnFaultChecksMatchDomain() {
+        // ck_claim_return_fault — 승인 칸(승인 시각)과 귀책은 함께 있거나 함께 없다. 값은 CUSTOMER · SELLER 뿐이다
+        Order order = create(OrderStatus.DELIVERED, 2);
+        long id = requestReturn(order).id();
+        Timestamp at = Timestamp.from(NOW);
+        String approve = "update orders.claim set status = 'APPROVED', payment_id = 77, expected_refund_amount = 900, expected_refund_currency = 'KRW', "
+            + "next_attempt_at = ?, approved_at = ?, approved_by_member_id = 9, restock = true, deduction_amount = 0, return_fault = ? where id = ?";
+
+        assertThatThrownBy(() -> jdbc.update("update orders.claim set return_fault = 'CUSTOMER' where id = ?", id)).as("승인 전 귀책")
+            .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update(approve, at, at, null, id)).as("귀책 없는 승인").isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update(approve, at, at, "STORE", id)).as("모르는 귀책 값").isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(jdbc.update(approve, at, at, "SELLER", id)).isEqualTo(1);
+        assertThat(claimAdapter.findById(id).orElseThrow().approval().fault()).isEqualTo(ReturnRefundPolicy.Fault.SELLER);
     }
 
     @Test
@@ -224,7 +295,7 @@ public abstract class OrderReturnPersistenceContract {
         long id = requestReturn(order).id();
         Timestamp at = Timestamp.from(NOW);
         String approve = "update orders.claim set status = 'APPROVED', payment_id = 77, expected_refund_amount = 900, expected_refund_currency = 'KRW', "
-            + "next_attempt_at = ?, approved_at = ?, approved_by_member_id = ?, restock = true, deduction_amount = ? where id = ?";
+            + "next_attempt_at = ?, approved_at = ?, approved_by_member_id = ?, restock = true, deduction_amount = ?, return_fault = 'CUSTOMER' where id = ?";
 
         assertThatThrownBy(() -> jdbc.update("update orders.claim set status = 'APPROVED', payment_id = 77, expected_refund_amount = 900, "
             + "expected_refund_currency = 'KRW', next_attempt_at = ? where id = ?", at, id)).as("승인 칸 없음").isInstanceOf(DataIntegrityViolationException.class);
@@ -279,7 +350,7 @@ public abstract class OrderReturnPersistenceContract {
         boolean approved = status != Claim.Status.REQUESTED && status != Claim.Status.REJECTED;
         return new Claim(IDS.incrementAndGet(), order.id(), UUID.randomUUID(), Claim.Type.RETURN, status, approved ? krw(1_500) : null, approved ? 77L : null, 0,
             Claim.Type.RETURN.isAwaitingAttempt(status) ? NOW : null, status.isFailed() ? "PAYMENT_016" : null, null,
-            approved ? new Claim.ReturnApproval(true, krw(500), 9, NOW) : null,
+            approved ? new Claim.ReturnApproval(ReturnRefundPolicy.Fault.CUSTOMER, true, krw(500), 9, NOW) : null,
             List.of(new ClaimItem(IDS.incrementAndGet(), orderItemId, 1, ClaimItem.Reason.CHANGE_OF_MIND)), null, null);
     }
 

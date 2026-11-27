@@ -25,7 +25,8 @@ public class ClaimMapper {
             .approvedAt(approval == null ? null : approval.approvedAt())
             .approvedByMemberId(approval == null ? null : approval.approvedByMemberId())
             .restock(approval == null ? null : approval.restock())
-            .deductionAmount(approval == null ? null : approval.deduction().amount()).version(claim.version()).build();
+            .deductionAmount(approval == null ? null : approval.deduction().amount())
+            .returnFault(approval == null ? null : approval.fault()).version(claim.version()).build();
     }
 
     public List<ClaimItemEntity> toItemEntities(Claim claim) {
@@ -42,12 +43,15 @@ public class ClaimMapper {
             entity.getCreatedAt(), entity.getVersion());
     }
 
-    /** 승인 칸 넷은 함께 있거나 함께 없다({@code ck_claim_return_approval}). 차감액 통화는 환불 통화다 — 승인 이후 반품은 환불액이 늘 있다. */
+    /**
+     * 승인 칸 넷과 귀책은 함께 있거나 함께 없다({@code ck_claim_return_approval} · {@code ck_claim_return_fault}). 차감액 통화는 환불 통화다 — 승인 이후 반품은
+     * 환불액이 늘 있다.
+     */
     private static Claim.ReturnApproval approval(ClaimEntity entity) {
         if (entity.getApprovedAt() == null) {
             return null;
         }
-        return new Claim.ReturnApproval(entity.getRestock(), Money.of(entity.getDeductionAmount(), entity.getExpectedRefundCurrency()),
+        return new Claim.ReturnApproval(entity.getReturnFault(), entity.getRestock(), Money.of(entity.getDeductionAmount(), entity.getExpectedRefundCurrency()),
             entity.getApprovedByMemberId(), entity.getApprovedAt());
     }
 }

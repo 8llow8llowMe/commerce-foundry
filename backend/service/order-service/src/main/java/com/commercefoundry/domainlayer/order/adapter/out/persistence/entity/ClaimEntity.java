@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.order.adapter.out.persistence.entity;
 
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
+import com.commercefoundry.domainlayer.order.domain.model.ReturnRefundPolicy;
 import com.commercefoundry.persistence.entity.BaseEntity;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import jakarta.persistence.CheckConstraint;
@@ -34,6 +35,8 @@ import lombok.NoArgsConstructor;
  *   <li>{@code ck_claim_cancellation_failure_code} · {@code ck_claim_return_failure_code} — 실패 코드는 종결 실패(REFUND_FAILED · RESTORATION_FAILED)에만 있다</li>
  *   <li>{@code ck_claim_admin_decision} — 결정 칸 넷은 모두 없거나 모두 있고, 직전 실패 코드는 거절(REJECTED) 결정일 때만 비울 수 있다. 접수(REQUESTED)
  *       반품에는 결정이 없다. 승인 뒤 반품의 결정 · 거절 결정은 B2 가 쓴다 — B1 도메인({@code Claim})은 같은 규칙으로 읽기만 한다</li>
+ *   <li>{@code ck_claim_return_fault} — 반품 귀책은 승인 칸(승인 시각)과 함께 있거나 함께 없다. 승인 칸은 승인 이후 반품에만 있으므로({@code ck_claim_return_approval})
+ *       귀책도 승인 이후 반품에만 있다 (#17 B2c). 값 check({@code claim_return_fault_check})는 enum 열에서 생긴다</li>
  * </ul>
  *
  * <p>재시도 스케줄러는 {@code idx_claim_type_next_attempt_at_id} 를
@@ -69,7 +72,8 @@ import lombok.NoArgsConstructor;
         @CheckConstraint(name = "ck_claim_admin_decision", constraint = "(decision_reason is null and decided_by_member_id is null and decided_at is null "
             + "and decision_failure_code is null) or ((type = 'CANCELLATION' or status <> 'REQUESTED') and decision_reason is not null and length(trim(decision_reason)) > 0 "
             + "and decided_by_member_id is not null and decided_by_member_id > 0 and decided_at is not null "
-            + "and ((decision_failure_code is not null and length(trim(decision_failure_code)) > 0) or (decision_failure_code is null and status = 'REJECTED')))")
+            + "and ((decision_failure_code is not null and length(trim(decision_failure_code)) > 0) or (decision_failure_code is null and status = 'REJECTED')))"),
+        @CheckConstraint(name = "ck_claim_return_fault", constraint = "(approved_at is null) = (return_fault is null)")
     })
 @Getter
 @Builder
@@ -137,6 +141,10 @@ public class ClaimEntity extends BaseEntity {
 
     @Column(name = "deduction_amount", comment = "반품 정책 금액에서 뺀 최소 단위 금액 (반품 배송비 등, 통화는 expected_refund_currency). 승인 이후 반품에만")
     private Long deductionAmount;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "return_fault", length = 16, comment = "반품 승인 때 운영자가 고른 귀책 (CUSTOMER / SELLER) — 환불액 계산 근거. 승인 이후 반품에만")
+    private ReturnRefundPolicy.Fault returnFault;
 
     @Version
     @Column(name = "version", nullable = false, comment = "낙관적 락 버전")
