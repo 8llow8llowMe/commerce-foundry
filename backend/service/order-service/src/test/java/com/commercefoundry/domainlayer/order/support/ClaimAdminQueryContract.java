@@ -186,9 +186,11 @@ public abstract class ClaimAdminQueryContract {
         assertThat(requested.getResponse().getStatus()).isEqualTo(200);
         assertThat(stats().getPrepareStatementCount()).as("결정 대기 반품만 주문 · 클레임 목록 · 결제를 더 읽는다").isEqualTo(REQUESTED_RETURN_DETAIL_QUERIES);
         jsonPath("$.dataBody.returnApproval").value((Object) null).match(requested);
-        jsonPath("$.dataBody.returnDecision.approvable").value(true).match(requested);
+        // 이 컨텍스트는 재시도 스케줄러 기본값(꺼짐)이라 데이터는 승인 가능해도 REFUND_NOT_OPEN 이다 — 금액은 표시용으로 그대로 보인다(#17 B2c-2).
+        // 게이트가 열린 승인 가능(reason null)은 ClaimAdminDecisionWebIntegrationTest 가 본다
+        jsonPath("$.dataBody.returnDecision.approvable").value(false).match(requested);
         jsonPath("$.dataBody.returnDecision.rejectable").value(true).match(requested);
-        jsonPath("$.dataBody.returnDecision.reason").value((Object) null).match(requested);
+        jsonPath("$.dataBody.returnDecision.reason.code").value("REFUND_NOT_OPEN").match(requested);
         jsonPath("$.dataBody.returnDecision.defaultFault.code").value("CUSTOMER").match(requested);
         jsonPath("$.dataBody.returnDecision.refundByFault[*].fault.code").value(org.hamcrest.Matchers.contains("CUSTOMER", "SELLER")).match(requested);
         jsonPath("$.dataBody.returnDecision.refundByFault[*].amount.amount").value(org.hamcrest.Matchers.contains(1000, 1000)).match(requested);

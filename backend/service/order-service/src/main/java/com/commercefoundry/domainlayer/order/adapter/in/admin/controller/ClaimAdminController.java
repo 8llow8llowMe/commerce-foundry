@@ -5,6 +5,7 @@ import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminItem;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.request.ClaimDecisionRequest;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.request.ClaimRetryRequest;
+import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.request.ClaimReturnApprovalRequest;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.ClaimAdminResponse;
 import com.commercefoundry.domainlayer.order.application.exception.OrderValidationMessage;
 import com.commercefoundry.domainlayer.order.application.model.ClaimAdminFilter;
@@ -34,7 +35,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "[어드민] 클레임", description = "반품 · 결제 후 취소 클레임 목록 · 상세 조회와 결제 후 취소 다시 시도 · 수동 환불 확정 · 복원 생략 종결")
+@Tag(name = "[어드민] 클레임", description = "반품 · 결제 후 취소 클레임 목록 · 상세 조회, 반품 승인 · 거절, 다시 시도 · 수동 환불 확정 · 복원 생략 종결")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -43,7 +44,7 @@ public class ClaimAdminController {
     private final ClaimAdminUseCase useCase;
 
     @Operation(summary = "클레임 목록 조회", description = "클레임 아이디 내림차순. 유형은 반품(RETURN) · 결제 후 취소(CANCELLATION), 상태는 REQUESTED · APPROVED · "
-        + "REFUNDED · COMPLETED · REJECTED · REFUND_FAILED · RESTORATION_FAILED 다(APPROVED 는 반품만). 반품 승인 · 거절 API 전까지 반품은 REQUESTED 만 생긴다. "
+        + "REFUNDED · COMPLETED · REJECTED · REFUND_FAILED · RESTORATION_FAILED 다(APPROVED 는 반품만). "
         + "예상 환불액 null은 미산정이다. "
         + "page는 0 이상, size는 1~100이며 page×size가 2,147,483,647을 넘으면 조회 전에 400(ORDER_167)이다.")
     @PreAuthorize(AdminAuthority.ORDER_READ)
@@ -120,5 +121,39 @@ public class ClaimAdminController {
         @RequestBody @Valid ClaimDecisionRequest request
     ) {
         return ResponseEntity.ok(Response.success(useCase.complete(claimId, request.expectedVersion(), request.reason(), admin.memberId())));
+    }
+
+    @Operation(summary = "반품 승인", description = "검수를 마친 반품 접수를 승인하고 환불 · 재고 복원을 이어 현재 상세를 준다. 환불액은 서버가 상세의 반품 결정 미리보기와 같은 "
+        + "판정 · 산식으로 다시 계산한다. 본문 {expectedVersion, fault(선택, 없으면 기본 귀책), restock, deductionAmount, expectedRefundAmount} — "
+        + "expectedRefundAmount 는 화면에서 본 '고른 귀책의 정책 금액 − 차감액'이다. 200 이어도 결제사가 환불을 거절했을 수 있으니 status · recovery.situation 을 다시 읽는다. "
+        + "버전 불일치 · 동시 변경(같은 주문 잠금 경합 포함) 409(ORDER_037), 결정할 수 없는 반품(접수가 아님 · 주문이 반품 요청이 아님) 409(ORDER_042), "
+        + "같은 주문의 다른 반품 환불 진행 중 409(ORDER_043), 환불액 0 이하 409(ORDER_044), 환불액 계산 불가(주문 · 결제 기록 이상) 409(ORDER_045), "
+        + "환불액 · 통화가 화면과 다름 409(ORDER_046), 자동 처리 꺼짐 503(ORDER_040), 결제 취소 결과 미반영 503(ORDER_036), 없는 접수 404(ORDER_032), "
+        + "본문 검증 400(expectedVersion ORDER_169 · restock ORDER_171 · deductionAmount ORDER_172 · expectedRefundAmount ORDER_173 · 모르는 귀책 · 통화 ORDER_100), "
+        + "양수가 아닌 아이디 400(ORDER_166).")
+    @PreAuthorize(AdminAuthority.ORDER_MANAGE)
+    @AdminAudited(action = "CLAIM_RETURN_APPROVE")
+    @PostMapping("/{claimId}/return-approval")
+    public ResponseEntity<Response<ClaimAdminResponse>> approveReturn(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @Parameter(description = "클레임 아이디") @PathVariable @Positive(message = OrderValidationMessage.CLAIM_ID_POSITIVE) long claimId,
+        @RequestBody @Valid ClaimReturnApprovalRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(useCase.approveReturn(request.toCommand(claimId), admin.memberId())));
+    }
+
+    @Operation(summary = "반품 거절", description = "반품 접수를 거절(끝)하고 현재 상세를 준다. 환불 · 재고 복원이 없다. 같은 주문에 열린 반품이 없으면 주문이 배송 완료(정산한 반품이 "
+        + "모든 수량이면 반품 완료)로 돌아가고 주문 이력에 사유가 남는다. 다른 반품 환불이 진행 중이어도 거절할 수 있다. 본문 {expectedVersion, reason}. "
+        + "버전 불일치 · 동시 변경(같은 주문 잠금 경합 포함) 409(ORDER_037), 결정할 수 없는 반품(접수가 아님 · 주문이 반품 요청이 아님) 409(ORDER_042), "
+        + "없는 접수 404(ORDER_032), 본문 검증 400(ORDER_169 · 170 · 148 · 151), 양수가 아닌 아이디 400(ORDER_166).")
+    @PreAuthorize(AdminAuthority.ORDER_MANAGE)
+    @AdminAudited(action = "CLAIM_RETURN_REJECT")
+    @PostMapping("/{claimId}/return-rejection")
+    public ResponseEntity<Response<ClaimAdminResponse>> rejectReturn(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @Parameter(description = "클레임 아이디") @PathVariable @Positive(message = OrderValidationMessage.CLAIM_ID_POSITIVE) long claimId,
+        @RequestBody @Valid ClaimDecisionRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(useCase.rejectReturn(claimId, request.expectedVersion(), request.reason(), admin.memberId())));
     }
 }

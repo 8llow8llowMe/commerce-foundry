@@ -504,6 +504,25 @@ B1(`claim-return-approval.sql`)까지 적용된 상태다(B2a · B2b 는 DDL 없
   둘 다 해당하지 않으면 null 이다(`api-design-guide.md` 클레임 어드민 절). 엔드포인트 · 권한은 그대로다.
 - **조회 비용** — 접수 반품 상세만 주문(주문이 반품 요청이면 클레임 목록 · 결제 기록까지)을 더 읽는다. 항목 수와 무관한 고정 횟수다.
 
+### 반품 승인 · 거절 API (#17 B2c-2)
+
+- **DDL 없음** — 승인(`APPROVED` + 승인 칸 · 귀책 · 다음 시각)과 거절(`REJECTED` + 직전 실패 코드 없는 결정 칸)은 B1 check(`ck_claim_return_approval` ·
+  `ck_claim_return_next_attempt` · `ck_claim_admin_decision`)와 B2c-1 의 `ck_claim_return_fault` 가 이미 받는다. **B2c-1 DDL(`claim-return-fault.sql`)이 적용된 환경에만
+  배포한다** — 귀책 칸이 없으면 승인 저장이 실패한다.
+- **배포 순서** — B2a · B2b · B2c-1 뒤. 이 배포부터 반품 `APPROVED` · `REJECTED` 행이 생긴다 — 위 B2a · B1 · B2c-1 절의 롤백 제한(승인 행이 생긴 뒤 B2a 이전 ·
+  B1 이전 앱으로 내리지 않는다, `return_fault` DDL 을 되돌리지 않는다)이 이때부터 실제로 걸린다. B2c-2 → B2c-1 앱 롤백은 안전하다(승인 · 거절 행을 읽고 엔진 · 수습이 그대로
+  돈다, 새 승인 · 거절만 막힌다).
+- **게이트** — 승인은 `order.cancellation.retry.enabled`(`ORDER_CANCELLATION_RETRY_ENABLED`)가 꺼져 있으면 503 `ORDER_040` 이다 — 승인 뒤 미확정 환불을 스케줄러가
+  따라와야 하기 때문이다. 거절은 원격 단계가 없어 게이트를 보지 않는다. 운영 결제 개방 순서(위 결제 → 주문 반영 표의 ⑥ · ⑦ · ⑧)는 그대로다.
+- **권한 · 감사** — 둘 다 `ORDER_MANAGE`(MANAGER 포함), 감사 `CLAIM_RETURN_APPROVE` · `CLAIM_RETURN_REJECT`(`security-guide.md` §3-1 · §11-4).
+- **운영 로그** — 승인은 `return approved by admin`, 거절은 `return rejected by admin` WARN(아이디 · 귀책 · 재고 되돌림만, 금액 · 사유 없음). 주문 없음 · 주문 상태 이상 ·
+  결제 기록 이상 · 산식 거부는 ERROR(`return claim has no order` · `return claim awaiting decision but order is not return requested` ·
+  `return order has no payment record` · `return order total differs from approved payment amount` · `return refund calculation failed`) — 상세 조회에서도 같은 판정이라
+  같은 ERROR 가 남는다(단, 주문 상태 이상은 잠그지 않는 상세 조회에서 경쟁으로도 날 수 있어 WARN). 데이터 이상이라 주문 · 결제 기록을 확인한다.
+- **FE 계약** — 새 경로 2개(`api-design-guide.md` 클레임 어드민 표). 상세의 미리보기 `reason` 은 주문이 없을 때 `NOT_CALCULABLE` 대신 `NOT_DECIDABLE`(거절도 막힘)이다.
+  새 오류 코드 `ORDER_042` ~ `046`(409) · 검증 `ORDER_171` ~ `173`(400). 새 미리보기 `reason` `REFUND_NOT_OPEN` — 재시도 스케줄러가 꺼진 환경(운영 기본값)에서는
+  데이터가 승인 가능해도 이 값이라 승인 버튼이 꺼지고(금액은 보인다) 거절만 된다.
+
 ### 결제 후 취소 클레임 배포 (#16 PR-2a)
 
 `claim`에 결제 후 취소(CANCELLATION) 유형 · 환불/복원 상태 · 재시도 칸(`payment_id`, `attempt_count`, `next_attempt_at`, `failure_code`)을 더한다.

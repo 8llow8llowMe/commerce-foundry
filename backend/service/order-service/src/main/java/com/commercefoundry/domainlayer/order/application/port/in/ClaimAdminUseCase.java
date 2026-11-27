@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.application.port.in;
 
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.item.ClaimAdminItem;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.ClaimAdminResponse;
+import com.commercefoundry.domainlayer.order.application.command.ClaimReturnApprovalCommand;
 import com.commercefoundry.domainlayer.order.application.model.ClaimAdminFilter;
 import com.commercefoundry.persistence.dto.PageResponse;
 
@@ -17,4 +18,10 @@ public interface ClaimAdminUseCase {
 
     /** 재고 복원이 종결 실패한 취소를 복원 없이 종결한다 (#17 A3). */
     ClaimAdminResponse complete(long claimId, long expectedVersion, String reason, long adminId);
+
+    /** 검수를 마친 반품 접수를 승인하고(환불액 서버 계산 · 화면 금액 대조) 환불 · 재고 복원을 잇는다 (#17 B2c-2). */
+    ClaimAdminResponse approveReturn(ClaimReturnApprovalCommand command, long adminId);
+
+    /** 반품 접수를 거절하고 같은 커밋에서 주문을 정리한다 — 환불 · 원격 호출 없음 (#17 B2c-2). */
+    ClaimAdminResponse rejectReturn(long claimId, long expectedVersion, String reason, long adminId);
 }

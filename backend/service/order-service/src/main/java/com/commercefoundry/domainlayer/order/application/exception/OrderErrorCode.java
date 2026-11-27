@@ -132,6 +132,19 @@ public enum OrderErrorCode {
      * 화면은 상세를 다시 읽어 {@code retryable} 이면 다시 시도를 안내한다.
      */
     CLAIM_DECISION_NOT_ALLOWED("ORDER_041", "이 클레임은 지금 이 처리를 할 수 없습니다. 처리 상황과 주문 상태를 확인하고, 다시 시도할 수 있으면 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /**
+     * 반품 승인 · 거절 대상이 아니다 — 반품 접수(REQUESTED)가 아니거나(그 사이 승인 · 거절됨 포함) 주문이 반품 요청이 아니거나 없다(#17 B2c-2).
+     * 상세 미리보기의 {@code NOT_DECIDABLE} 과 짝이다.
+     */
+    RETURN_NOT_DECIDABLE("ORDER_042", "이 반품은 지금 승인하거나 거절할 수 없습니다. 반품 상태와 주문 상태를 다시 확인해 주세요.", HttpStatus.CONFLICT),
+    /** 같은 주문의 다른 반품 환불이 끝나지 않았다 — 겹쳐 승인하면 환불액이 틀어진다(#17 B2c-2). 미리보기의 {@code RETURN_IN_FLIGHT} 와 짝이다. 거절은 된다. */
+    RETURN_REFUND_IN_FLIGHT("ORDER_043", "같은 주문의 다른 반품 환불이 아직 끝나지 않았습니다. 그 반품을 먼저 마무리한 뒤 승인해 주세요.", HttpStatus.CONFLICT),
+    /** 환불액(정책 금액 − 차감액)이 0 이하 — 0 원 반품 승인을 두지 않는다(#17 B2c-2). 차감액을 줄이거나 귀책을 다시 고른다. */
+    RETURN_REFUND_NOT_PAYABLE("ORDER_044", "환불할 금액이 0원 이하라 승인할 수 없습니다. 차감액이나 귀책을 다시 확인해 주세요.", HttpStatus.CONFLICT),
+    /** 결제 기록 없음 · 결제 금액 ≠ 주문 총액 · 산식 거부 — 데이터 이상이다(#17 B2c-2). 미리보기의 {@code NOT_CALCULABLE} 과 짝이다. */
+    RETURN_REFUND_NOT_CALCULABLE("ORDER_045", "주문 · 결제 기록이 맞지 않아 환불액을 계산할 수 없습니다. 시스템 관리자에게 확인을 요청해 주세요.", HttpStatus.CONFLICT),
+    /** 서버가 다시 계산한 환불액 · 통화가 운영자가 화면에서 본 값과 다르다 — 그 사이 다른 반품이 정산됐거나 통화가 다르다(#17 B2c-2). */
+    RETURN_REFUND_CHANGED("ORDER_046", "환불액이 화면에서 본 금액과 다릅니다. 새로고침해 환불액을 다시 확인한 뒤 승인해 주세요.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

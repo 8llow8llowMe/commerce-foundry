@@ -990,7 +990,7 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
 
 호출부 없는 저장 기반과 순수 도메인이다(A1 과 같은 방식). 엔드포인트 · 응답 모양 · 고객 반품 접수 동작은 바꾸지 않고, 새 상태 행을 만들지 않는다.
 기존 전이(`markRefunded` 등)의 반품 해제 · 스케줄러 · 파이프라인의 반품 분기 · 재고 복원 연결은 B2a(아래 "반품 환불 · 복원 엔진"), 반품 수습 확장은 B2b,
-승인 · 거절 API 는 B2c 다.
+승인 · 거절 API 는 B2c(준비 B2c-1, API B2c-2 — 아래 "반품 승인 · 거절 API")다.
 
 | 반품 상태 | 뜻 | 칸 | 다음 |
 |-----------|----|----|------|
@@ -1127,7 +1127,8 @@ B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지
 
 승인된 반품(`APPROVED`)의 환불 → 기록 · 주문 정리 → 재고 복원을 **결제 후 취소와 같은 파이프라인**(`OrderCancellationPipelineProcessor` · `OrderCancellationProcessor` ·
 재시도 스케줄러)으로 돌린다. 새 파이프라인 · 2-CAS · 잠금 TX · 503 `ORDER_036` 을 복제하지 않고 유형 분기는 아래 다섯뿐이다. 반품 `APPROVED` 행을 만드는 승인 API 는
-B2c 라 B2a 만 배포된 동안 호출부는 스케줄러뿐이고 실제로 도는 행은 없다(시험은 도메인 승인으로 만든 시드 행).
+B2c-2 라 그 전까지 호출부는 스케줄러뿐이고 실제로 도는 행은 없었다(시험은 도메인 승인으로 만든 시드 행). B2c-2 부터는 승인 API 가 승인 커밋 뒤 같은 요청에서
+이 파이프라인을 부르고(`ClaimAdminFacade#approveReturn`), 끊기면 스케줄러가 잇는다.
 
 | 분기 | 취소 | 반품 |
 |------|------|------|
@@ -1199,7 +1200,7 @@ B2c 라 B2a 만 배포된 동안 호출부는 스케줄러뿐이고 실제로 �
 
 ### 반품 결정 준비 · 결정 미리보기 (#17 B2c-1)
 
-승인 · 거절 API(B2c-2) 앞의 도메인 · 저장 준비와 어드민 상세의 미리보기다. 반품 `APPROVED` · `REJECTED` 행을 만드는 호출부는 아직 없다.
+승인 · 거절 API(B2c-2) 앞의 도메인 · 저장 준비와 어드민 상세의 미리보기다. 반품 `APPROVED` · `REJECTED` 행을 만드는 호출부는 B2c-2(아래)다.
 
 - **결정 대기** — `Claim#isAwaitingReturnDecision()` = 반품 ∧ `REQUESTED`. 미리보기와 승인 · 거절 전이가 이 자리에서만 출발한다.
 - **거절** — `Claim#rejectReturn(Decision)` 은 거절 사유 · 결정자 · 시각을 결정 칸에 싣는다. 직전 실패 코드가 있는 결정은 `IllegalArgumentException` 이다
@@ -1208,13 +1209,47 @@ B2c 라 B2a 만 배포된 동안 호출부는 스케줄러뿐이고 실제로 �
   `ck_claim_return_fault` = `(approved_at is null) = (return_fault is null)` — 승인 칸이 승인 이후 반품에만 있으므로 귀책도 그렇다. 귀책을 따로 넘기지 않으므로 저장된 귀책과 환불액이 갈라지지 않는다.
   운영 DDL 은 `deploy-guide.md` 의 반품 결정 준비 절이다.
 - **미리보기(`ClaimReturnDecisionProcessor#preview`, 읽기 전용 · 잠금 없음)** — 판정 순서는 승인 API 의 409 와 같다: 반품 접수가 아님(읽은 클레임 목록에서 그 사이 승인 · 거절된 경우 포함,
-  error 로그 없음) · 주문이 `RETURN_REQUESTED` 가 아님 → `NOT_DECIDABLE`, 같은 주문의 다른 반품이 `isReturnRefundInFlight` → `RETURN_IN_FLIGHT`, 주문 없음 · 결제 완료 기록 없음 · 결제 금액 ≠ 주문 총액(고객 취소와 같은 대조) · 산식 예외 →
-  `NOT_CALCULABLE`(error 로그, 금액 제외). 승인 가능하면 귀책별 정책 금액(`Settled#of` → `ReturnRefundPolicy#refund`, 차감 전)을 낸다 — 음수일 수 있어 `Money` 가 아니다.
+  error 로그 없음) · 주문 없음 · 주문이 `RETURN_REQUESTED` 가 아님(둘 다 error 로그) → `NOT_DECIDABLE`, 같은 주문의 다른 반품이 `isReturnRefundInFlight` → `RETURN_IN_FLIGHT`,
+  결제 완료 기록 없음 · 결제 금액 ≠ 주문 총액(고객 취소와 같은 대조) · 산식 예외 → `NOT_CALCULABLE`(error 로그, 금액 제외). 주문 없음은 B2c-1 에서 `NOT_CALCULABLE` 이었으나
+  거절도 주문을 정리할 수 없어 B2c-2 에서 `NOT_DECIDABLE` 로 옮겼다. 승인 가능하면 귀책별 정책 금액(`Settled#of` → `ReturnRefundPolicy#refund`, 차감 전)을 낸다 — 음수일 수 있어 `Money` 가 아니다.
   승인 가능(`approvable`)과 거절 가능(`rejectable`)을 나눈다 — 거절은 반품 접수 + 주문 반품 요청만 보므로 `NOT_DECIDABLE` 만 거절을 막는다.
   어드민 상세(`ClaimAdminProcessor#getDetail`)는 결정 대기 반품에만 붙이고, 그때만 주문(주문이 반품 요청이면 클레임 목록 · 결제 기록까지)을 더 읽는다.
 - 시험 — `ClaimTest`(거절 결정 · 직전 실패 코드 거부 · 결정 대기 판정 · 승인 귀책), `ClaimReturnDecisionProcessorTest`(가능 · 고객 귀책 음수 금액 · 그 사이 결정됨 · 정산 반영 · 진행 중 반품 · 결제 없음 · 금액 불일치 ·
   산식 예외 · 주문 상태 · 비대기), `ClaimAdminQueryContract`(H2 · PostgreSQL: 미리보기 JSON · 고정 쿼리 수 · 저장된 귀책 노출), `OrderReturnPersistenceContract`(귀책 · 거절 결정
   저장 · 복원, 승인 뒤 전이에서 귀책 유지, `ck_claim_return_fault`), `ReturnRefundPolicyTest`(결과의 귀책 · 차감 뒤 보존), `ClaimCancellationSchemaUpgradePostgresTest`(B2c ALTER 뒤 스냅숏 일치 · B2b 앱 모양 쓰기 · 귀책 check).
+
+### 반품 승인 · 거절 API (#17 B2c-2)
+
+`POST /api/v1/admin/claims/{claimId}/return-approval` · `/return-rejection`(권한 `ORDER_MANAGE`, 감사 `CLAIM_RETURN_APPROVE` · `CLAIM_RETURN_REJECT`).
+요청 · 응답 · 오류 코드는 `api-design-guide.md` 클레임 어드민 절이다. 둘 다 `ClaimReturnDecisionProcessor` 의 짧은 트랜잭션(5초)이고 Facade 는 트랜잭션을 걸지 않는다.
+
+- **판정은 미리보기와 한 메서드다** — `decidable`(주문 없음 · 주문이 반품 요청이 아님 · 읽은 목록에서 대상이 결정 대기가 아님) → `assessApproval`(진행 중 반품 · 결제 대조 ·
+  `Settled#of`) → `calculate`(`ReturnRefundPolicy#refund`)를 미리보기와 승인이 같이 부른다. 막는 이유 → 오류 코드는 `NOT_DECIDABLE` 409 `ORDER_042` ·
+  `RETURN_IN_FLIGHT` 409 `ORDER_043` · `NOT_CALCULABLE` 409 `ORDER_045` 로 1:1 이다. 다른 점은 주문을 읽는 방식(미리보기 `findById`, 결정 `findByIdForUpdate` NOWAIT)과
+  주문 상태 이상의 로그 수준(잠금 아래 결정은 데이터 이상이라 error, 잠그지 않은 미리보기는 그 사이 거절 · 정리가 끼는 경쟁으로도 보여 warn)이다.
+- **미리보기의 게이트** — 데이터 판정이 모두 통과해도 재시도 스케줄러가 꺼져 있으면(`paidCancellationOpen()` false, 운영 기본값) 미리보기는 `REFUND_NOT_OPEN` 이다 —
+  `approvable` false · `rejectable` true, 귀책별 금액은 표시용으로 그대로 싣는다. 승인의 503 `ORDER_040`(①)과 짝이고, 다시 시도 · 수동 확정 플래그
+  (`ClaimAdminRecoveryProcessor#isRetryable` · `#isRefundConfirmable`)와 같은 방식이다. 데이터 이유(042 · 043 · 045)가 있으면 그쪽을 먼저 보인다.
+- **같은 클레임의 동시 결정은 037 로 막힌다** — 승인 · 거절은 버전 대조로 대상 클레임을 먼저 읽어 영속성 컨텍스트에 올리므로, 주문 잠금 뒤 `findAllByOrderId` 가
+  돌려주는 대상도 그 (먼저 읽은) 상태다. 그래서 다른 결정이 그 사이 커밋했으면 "목록의 대상이 결정 대기가 아님(042)"이 아니라 저장의 `@Version` 대조에서
+  409 `ORDER_037` 이다 — 두 번째 결정은 저장되지 않는다. 목록의 대상 재확인은 잠그지 않는 미리보기에서만 실제로 걸린다.
+- **승인 순서** — ① 재시도 스케줄러 꺼짐 503 `ORDER_040`(다시 시도 · 수동 확정과 같은 게이트 — 승인 뒤 미확정 환불을 따라갈 쪽이 있어야 한다) ② 클레임 없음 404 `ORDER_032` ·
+  `expectedVersion` 불일치 409 `ORDER_037` ③ 결정 대기 반품이 아님 → 주문을 잠그지 않고 `ORDER_042` ④ **주문 NOWAIT 잠금**(지면 `ORDER_037`) ⑤ 판정(위)
+  ⑥ 귀책 = 요청 ?? `Fault#defaultOf` → 정책 금액, 산식 거부 `ORDER_045` ⑦ `Refund#withDeduction` — 차감액 통화 ≠ 주문 통화면 그 예외를 `ORDER_046` 으로
+  ⑧ `Refund#isPayable` false(정책 금액 ≤ 차감액, 환불액 0 이하) `ORDER_044` — 도메인 판정이 빼지 않고 비교해 음수 정책 금액 − 큰 차감액의 넘침이 없다 ⑨ 환불액(정책 − 차감) · 통화 ≠ 화면의 `expectedRefundAmount` `ORDER_046` ⑩ `Claim#approveReturn`(결제 아이디는
+  `order_payment` 결제 완료 기록, `now + lease`) → 저장(낙관락 실패 `ORDER_037`). payment-service 는 부르지 않는다. 주문 상태는 바꾸지 않는다(반품 요청에 머문다).
+  ⑩ 의 도메인 예외 → `ORDER_045` 분기는 지금 도달하지 않는 방어선이다(③ · ④ · ⑥ · ⑧ 과 산식 "총액 = 상품 합계 + 배송비" · lease 설정 검증이 먼저 막는다, 이유는 코드 주석).
+- **승인 커밋 뒤(Facade)** — 성공 감사를 바로 남기고, 승인한 클레임으로 파이프라인(`OrderCancellationPipelineProcessor#progress`)을 잇는다 — 다시 시도 · 수동 확정과 같다.
+  확정 환불 미기록 503 `ORDER_036` 만 전달하고, 그 밖의 예외는 미확정 한 번으로 센 뒤(`recordAttemptFailure`) 현재 상세 200 이다(클레임은 `APPROVED` + lease → 스케줄러).
+- **거절 순서** — ②③④ 같음(게이트 없음 — 원격 단계가 없다) → 주문 없음 · 반품 요청 아님 · 목록에서 대상이 결정 대기 아님 `ORDER_042` → `rejectReturn(Decision(사유, 관리자,
+  now, null))` → 목록의 대상을 바꿔 `ReturnRefundPolicy#outcome`(거부 → `ORDER_042` + error 로그, 저장 없음) → 클레임 저장 → `Order#settleReturn` → 바뀌었으면
+  `ADMIN` 이력(사유) → 낙관락 실패 `ORDER_037`. 진행 중 다른 반품 · 결제 기록은 보지 않는다 — 다른 반품이 열려 있으면 주문은 반품 요청에 머물고, 열린 반품이 없으면
+  배송 완료(정산한 반품이 전량이면 반품 완료)다.
+- **로그** — 승인 · 거절 WARN 은 아이디 · 귀책 · 재고 되돌림 · 주문 상태만 남긴다(금액 · 사유 없음). 데이터 이상 ERROR 는 미리보기와 같은 문구다.
+- 시험 — `ClaimReturnDecisionProcessorTest`(오류 코드별 · 미리보기와 승인 금액 일치 · 잠금 경합 · 넘침 · 거절 정리), `ClaimAdminFacadeTest`(커밋 직후 감사 · 036 전달 · 그 밖 미확정 기록),
+  `ClaimAdminControllerTest`(권한 · 본문 검증 171~173), `OrderAdminAuthorizationMappingTest`, `ClaimAdminDecisionWebIntegrationTest`(실제 체인: 승인 → 환불 · 복원 → 주문 배송 완료,
+  금액 불일치 046, 거절 → `ADMIN` 이력, 재전송 037), `ClaimReturnDecisionContract`(H2 · PostgreSQL: 승인 칸 저장 · 주문 그대로, 낡은 버전 · 이미 결정 · 진행 중 반품,
+  거절 결정 칸 · 주문 정리 · 이력, 결제 기록 없음), `ClaimReturnDecisionPostgresTest`(주문 잠금 경합 → 2초 안에 037 → 풀린 뒤 같은 화면으로 성공).
 
 ## 6. 어드민 운영 화면이 보는 것
 

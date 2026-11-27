@@ -22,6 +22,8 @@ import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelP
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelQueryResult;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
+import com.commercefoundry.domainlayer.order.domain.model.Claim;
+import com.commercefoundry.domainlayer.order.domain.model.ClaimItem;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
@@ -30,6 +32,7 @@ import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,7 +54,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 어드민 수동 환불 확정 · 복원 생략 종결 (#17 A3) — 실제 JWT · 권한 · Facade · 단계별 트랜잭션 · H2 를 관통하고 payment · product 호출만 스텁한다.
+ * 어드민 수동 환불 확정 · 복원 생략 종결 (#17 A3) · 반품 승인 · 거절 (#17 B2c-2) — 실제 JWT · 권한 · Facade · 단계별 트랜잭션 · H2 를 관통하고 payment · product 호출만 스텁한다.
  * 스텁은 실제 PG 환불의 증거가 아니다. 테스트 값은 모두 가짜다.
  *
  * <p>애노테이션 · 빈 대체(필드 이름까지)는 {@code ClaimAdminRetryWebIntegrationTest} · {@code OrderCancellationWebIntegrationTest} 와 같아 Spring 컨텍스트 캐시를
@@ -295,5 +298,89 @@ class ClaimAdminDecisionWebIntegrationTest {
         assertThat(version(order.id())).isEqualTo(before);
         assertThat(orderStatus(order.id())).isEqualTo("CANCEL_REQUESTED");
         verify(stockRestorationPort, never()).restoreCancellation(anyLong(), anyLong(), any());
+    }
+
+    // ---- 반품 승인 · 거절 (#17 B2c-2) ----
+
+    private static final String RETURN_REASON = "검수 결과 사용 흔적이 있어 반품 불가";
+
+    /** 결제 완료 주문(10,000 × 2 + 배송비 3,000 = 23,000)을 배송 완료 뒤 반품 요청으로 두고 1개 변심 반품 접수(REQUESTED)를 만든다. */
+    private Claim requestedReturn(Order order) {
+        jdbc.update("update orders.orders set status = 'RETURN_REQUESTED', delivered_at = ?, version = version + 1 where id = ?",
+            java.sql.Timestamp.from(Instant.now().minusSeconds(3_600)), order.id());
+        Claim requested = new Claim(ids.generateId(), order.id(), UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+            List.of(new ClaimItem(ids.generateId(), order.itemIds().getFirst(), 1, ClaimItem.Reason.CHANGE_OF_MIND)), null, null);
+        return new TransactionTemplate(transactionManager).execute(status -> claimRepository.insert(requested));
+    }
+
+    private Map<String, Object> claimRow(long claimId) {
+        return jdbc.queryForMap("select status, expected_refund_amount, return_fault, restock, deduction_amount, decision_reason, version from orders.claim "
+            + "where id = ?", claimId);
+    }
+
+    private MvcTestResult approveReturn(long claimId, long expectedVersion, long expectedRefund, MemberRole role) {
+        return mvc.post().uri("/api/v1/admin/claims/{claimId}/return-approval", claimId).header(HttpHeaders.AUTHORIZATION, bearer(1, role))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":" + expectedVersion + ",\"fault\":\"CUSTOMER\",\"restock\":true,"
+                + "\"deductionAmount\":{\"amount\":1000,\"currency\":\"KRW\"},\"expectedRefundAmount\":{\"amount\":" + expectedRefund + ",\"currency\":\"KRW\"}}")
+            .exchange();
+    }
+
+    @Test
+    @DisplayName("반품 승인 — 미리보기 금액 − 차감액으로 승인하면 같은 요청에서 환불 · 재고 복원까지 이어 완료되고 주문은 배송 완료로 돌아간다. 금액이 다르면 409 ORDER_046")
+    void returnApprovalRefundsAndRestores() {
+        Order order = paidOrder();
+        Claim requested = requestedReturn(order);
+
+        MvcTestResult before = detail(requested.id());
+        assertThat(before).bodyJson().extractingPath("$.dataBody.returnDecision.approvable").isEqualTo(true);
+        // 남는 10,000 은 무료배송 기준 미만이라 배송비 3,000 을 그대로 둔다 — 고객 귀책 23,000 − 13,000 = 10,000
+        assertThat(before).bodyJson().extractingPath("$.dataBody.returnDecision.refundByFault[0].amount.amount").isEqualTo(10_000);
+        assertThat(before).bodyJson().extractingPath("$.dataBody.returnDecision.reason").as("재시도 스케줄러가 켜져 있어 REFUND_NOT_OPEN 이 아니다").isNull();
+        assertThat(approveReturn(requested.id(), 0, 9_000, MemberRole.STAFF)).hasStatus(403);
+
+        MvcTestResult changed = approveReturn(requested.id(), 0, 10_000, MemberRole.MANAGER);
+        assertThat(changed).hasStatus(409);
+        assertThat(changed).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_046");
+        assertThat(claimRow(requested.id())).containsEntry("status", "REQUESTED");
+
+        MvcTestResult approved = approveReturn(requested.id(), 0, 9_000, MemberRole.MANAGER);
+
+        assertThat(approved).hasStatus(200);
+        assertThat(approved).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("COMPLETED");
+        assertThat(approved).bodyJson().extractingPath("$.dataBody.returnApproval.fault.code").isEqualTo("CUSTOMER");
+        assertThat(approved).bodyJson().extractingPath("$.dataBody.returnApproval.deduction.amount").isEqualTo(1_000);
+        assertThat(approved).bodyJson().extractingPath("$.dataBody.returnDecision").isNull();
+        assertThat(claimRow(requested.id())).containsEntry("status", "COMPLETED").containsEntry("return_fault", "CUSTOMER").containsEntry("restock", true)
+            .hasEntrySatisfying("expected_refund_amount", amount -> assertThat(((Number) amount).longValue()).isEqualTo(9_000));
+        verify(paymentCancelPort, times(1)).cancel(anyLong(), eq(requested.id()), eq(com.commercefoundry.shared.commerce.Money.of(9_000,
+            com.commercefoundry.shared.commerce.CurrencyCode.KRW)));
+        verify(stockRestorationPort, times(1)).restoreReturn(eq(requested.id()), anyLong(), any());
+        assertThat(orderStatus(order.id())).isEqualTo("DELIVERED");
+    }
+
+    @Test
+    @DisplayName("반품 거절 — 환불 · 복원 없이 REJECTED, 주문은 배송 완료로 돌아가고 ADMIN 이력에 사유가 남는다. 같은 화면으로 다시 보내면 409 ORDER_037")
+    void returnRejectionSettlesOrder() {
+        Order order = paidOrder();
+        Claim requested = requestedReturn(order);
+        String body = "{\"expectedVersion\":0,\"reason\":\"" + RETURN_REASON + "\"}";
+
+        MvcTestResult rejected = mvc.post().uri("/api/v1/admin/claims/{claimId}/return-rejection", requested.id())
+            .header(HttpHeaders.AUTHORIZATION, bearer(1, MemberRole.MANAGER)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+
+        assertThat(rejected).hasStatus(200);
+        assertThat(rejected).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("REJECTED");
+        assertThat(rejected).bodyJson().extractingPath("$.dataBody.recovery.lastDecision.reason").isEqualTo(RETURN_REASON);
+        assertThat(claimRow(requested.id())).containsEntry("status", "REJECTED").containsEntry("decision_reason", RETURN_REASON);
+        assertThat(orderStatus(order.id())).isEqualTo("DELIVERED");
+        assertThat(jdbc.queryForMap("select from_status, changed_by_type, reason from orders.order_status_history where order_id = ? and to_status = 'DELIVERED'",
+            order.id())).containsEntry("from_status", "RETURN_REQUESTED").containsEntry("changed_by_type", "ADMIN").containsEntry("reason", RETURN_REASON);
+        verify(paymentCancelPort, never()).cancel(anyLong(), anyLong(), any());
+        verify(stockRestorationPort, never()).restoreReturn(anyLong(), anyLong(), any());
+
+        MvcTestResult replay = mvc.post().uri("/api/v1/admin/claims/{claimId}/return-rejection", requested.id())
+            .header(HttpHeaders.AUTHORIZATION, bearer(1, MemberRole.MANAGER)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
+        assertThat(replay).hasStatus(409);
+        assertThat(replay).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_037");
     }
 }

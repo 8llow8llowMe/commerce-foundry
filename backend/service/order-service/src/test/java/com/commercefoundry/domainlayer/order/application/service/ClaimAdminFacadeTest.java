@@ -11,21 +11,25 @@ import static org.mockito.Mockito.when;
 
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.ClaimAdminResponse;
 import com.commercefoundry.domainlayer.order.adapter.in.admin.presenter.ClaimAdminPresenter;
+import com.commercefoundry.domainlayer.order.application.command.ClaimReturnApprovalCommand;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.info.ClaimAdminDetailInfo;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminAuditProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminRecoveryProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimReturnDecisionProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
+import com.commercefoundry.shared.commerce.CurrencyCode;
+import com.commercefoundry.shared.commerce.Money;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.transaction.CannotCreateTransactionException;
 
-/** 어드민 다시 시도의 단계 순서 · 실패 처리 · 감사 (#17 A2b). 선점 커밋 → 원격(트랜잭션 밖) → 현재 상세 순이다. */
+/** 어드민 다시 시도 · 수동 확정 · 종결 · 반품 승인 · 거절의 단계 순서 · 실패 처리 · 감사 (#17). 선점 · 확정 · 승인 커밋 → 원격(트랜잭션 밖) → 현재 상세 순이다. */
 class ClaimAdminFacadeTest {
     private static final long ADMIN = 9;
 
@@ -35,7 +39,8 @@ class ClaimAdminFacadeTest {
     private final OrderCancellationPipelineProcessor pipeline = mock(OrderCancellationPipelineProcessor.class);
     private final ClaimAdminPresenter presenter = mock(ClaimAdminPresenter.class);
     private final ClaimAdminAuditProcessor audit = mock(ClaimAdminAuditProcessor.class);
-    private final ClaimAdminFacade facade = new ClaimAdminFacade(processor, recovery, cancellation, pipeline, presenter, audit);
+    private final ClaimReturnDecisionProcessor returnDecision = mock(ClaimReturnDecisionProcessor.class);
+    private final ClaimAdminFacade facade = new ClaimAdminFacade(processor, recovery, cancellation, pipeline, presenter, audit, returnDecision);
 
     private final Claim held = mock(Claim.class);
     private final ClaimAdminDetailInfo detail = mock(ClaimAdminDetailInfo.class);
@@ -186,5 +191,87 @@ class ClaimAdminFacadeTest {
         verify(audit).completed(ADMIN, 2, false);
         verify(audit, never()).completed(ADMIN, 2, true);
         verify(processor, never()).getDetail(2);
+    }
+
+    // ---- 반품 승인 · 거절 (#17 B2c-2) ----
+
+    private static final ClaimReturnApprovalCommand APPROVAL = new ClaimReturnApprovalCommand(2, 4, null, true, Money.of(3_000, CurrencyCode.KRW),
+        Money.of(24_000, CurrencyCode.KRW));
+
+    @Test
+    @DisplayName("반품 승인 — 승인 커밋 직후 성공 감사를 남기고, 승인한 클레임으로 환불 · 복원(원격)을 이은 뒤 다시 읽은 상세를 낸다")
+    void approveReturnAuditsOnCommitThenProgresses() {
+        detailReady();
+        when(returnDecision.approve(APPROVAL, ADMIN)).thenReturn(held);
+
+        assertThat(facade.approveReturn(APPROVAL, ADMIN)).isSameAs(response);
+
+        InOrder order = inOrder(returnDecision, audit, pipeline, processor);
+        order.verify(returnDecision).approve(APPROVAL, ADMIN);
+        order.verify(audit).returnApproved(ADMIN, 2, true);
+        order.verify(pipeline).progress(held);
+        order.verify(processor).getDetail(2);
+        verify(cancellation, never()).recordAttemptFailure(any());
+    }
+
+    @Test
+    @DisplayName("반품 승인 — 거절(409 · 503 · 404)이면 원격을 부르지 않고 실패 감사를 한 번 남긴 뒤 그대로 던진다")
+    void approveReturnRefusalIsAudited() {
+        OrderException changed = new OrderException(OrderErrorCode.RETURN_REFUND_CHANGED);
+        when(returnDecision.approve(APPROVAL, ADMIN)).thenThrow(changed);
+
+        assertThatThrownBy(() -> facade.approveReturn(APPROVAL, ADMIN)).isSameAs(changed);
+
+        verify(pipeline, never()).progress(any());
+        verify(audit).returnApproved(ADMIN, 2, false);
+        verify(audit, never()).returnApproved(ADMIN, 2, true);
+    }
+
+    @Test
+    @DisplayName("반품 승인 — 승인은 커밋됐고 환불이 끊기면 미확정 한 번으로 세고 200 이다 — 스케줄러가 APPROVED + lease 를 잇는다")
+    void approveReturnInterruptedRefundIsCounted() {
+        detailReady();
+        when(returnDecision.approve(APPROVAL, ADMIN)).thenReturn(held);
+        when(pipeline.progress(held)).thenThrow(new CannotCreateTransactionException("db down"));
+
+        assertThat(facade.approveReturn(APPROVAL, ADMIN)).isSameAs(response);
+
+        verify(cancellation).recordAttemptFailure(held);
+        verify(audit).returnApproved(ADMIN, 2, true);
+        verify(audit, never()).returnApproved(ADMIN, 2, false);
+    }
+
+    @Test
+    @DisplayName("반품 승인 — 확정 환불 미기록(503 ORDER_036)은 세지 않고 전달한다. 승인은 이미 커밋돼 감사는 성공 하나뿐이다")
+    void approveReturnUnrecordedRefundIsPropagated() {
+        when(returnDecision.approve(APPROVAL, ADMIN)).thenReturn(held);
+        OrderException unrecorded = new OrderException(OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE);
+        when(pipeline.progress(held)).thenThrow(unrecorded);
+
+        assertThatThrownBy(() -> facade.approveReturn(APPROVAL, ADMIN)).isSameAs(unrecorded);
+
+        verify(cancellation, never()).recordAttemptFailure(any());
+        verify(audit).returnApproved(ADMIN, 2, true);
+        verify(audit, never()).returnApproved(ADMIN, 2, false);
+    }
+
+    @Test
+    @DisplayName("반품 거절 — 원격을 부르지 않고 성공 감사 뒤 다시 읽은 상세를 내며, 거절되면 실패 감사 뒤 그대로 던진다")
+    void rejectReturnWithoutRemoteCall() {
+        detailReady();
+        when(returnDecision.reject(2, 4, REASON, ADMIN)).thenReturn(held);
+
+        assertThat(facade.rejectReturn(2, 4, REASON, ADMIN)).isSameAs(response);
+
+        InOrder order = inOrder(returnDecision, audit, processor);
+        order.verify(returnDecision).reject(2, 4, REASON, ADMIN);
+        order.verify(audit).returnRejected(ADMIN, 2, true);
+        order.verify(processor).getDetail(2);
+        verify(pipeline, never()).progress(any());
+
+        OrderException notDecidable = new OrderException(OrderErrorCode.RETURN_NOT_DECIDABLE);
+        when(returnDecision.reject(2, 5, REASON, ADMIN)).thenThrow(notDecidable);
+        assertThatThrownBy(() -> facade.rejectReturn(2, 5, REASON, ADMIN)).isSameAs(notDecidable);
+        verify(audit).returnRejected(ADMIN, 2, false);
     }
 }

@@ -92,5 +92,11 @@ public final class OrderValidationMessage {
     public static final String CLAIM_EXPECTED_VERSION = "ORDER_169:expectedVersion 은 필수이며 0 이상이어야 합니다.";
     /** 수동 환불 확정 · 복원 생략 종결의 사유 (#17 A3). 길이는 {@link #REASON_LENGTH_MAX}, 제어 문자는 {@link #REASON_INVALID_CHARACTER} 다. */
     public static final String CLAIM_DECISION_REASON_REQUIRED = "ORDER_170:처리 사유(reason)를 적어 주세요.";
+    /** 반품 승인 (#17 B2c-2) — 검수 뒤 재고로 되돌릴지 운영자가 반드시 고른다. */
+    public static final String RETURN_RESTOCK_REQUIRED = "ORDER_171:재고로 되돌릴지(restock)를 골라 주세요.";
+    /** 반품 승인 차감액 (#17 B2c-2) — 차감이 없으면 0 으로 보낸다. */
+    public static final String RETURN_DEDUCTION_AMOUNT = "ORDER_172:deductionAmount 는 필수이며 amount 는 0 이상, currency 가 있어야 합니다.";
+    /** 반품 승인 예상 환불액 (#17 B2c-2) — 화면에서 본 환불액(정책 금액 − 차감액)이다. */
+    public static final String RETURN_EXPECTED_REFUND_AMOUNT = "ORDER_173:expectedRefundAmount 는 필수이며 amount 는 양수, currency 가 있어야 합니다.";
     public static final String IDEMPOTENCY_KEY_FORMAT ="ORDER_198:Idempotency-Key 는 완전한 UUID 형식이어야 합니다.";
 }
