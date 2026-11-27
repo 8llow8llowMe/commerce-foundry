@@ -146,6 +146,12 @@ public class OrderStockProcessor {
     /** 모든 confirm 직전에 영속 복원 의도를 검사한다. 진행 중인 confirm의 경쟁은 최종 DB 결정에서 다시 검사한다. */
     @Transactional(propagation = Propagation.NEVER)
     public StockConfirmation confirmOrReReserve(Order order, LongConsumer beforeReReservedConfirm, LongPredicate canConfirm) {
+        return confirmOrReReserve(order, beforeReReservedConfirm, canConfirm, reservationId -> { });
+    }
+
+    @Transactional(propagation = Propagation.NEVER)
+    public StockConfirmation confirmOrReReserve(Order order, LongConsumer beforeReReservedConfirm, LongPredicate canConfirm,
+        LongConsumer confirmationUnavailable) {
         if (!order.isAwaitingPaymentApproval()) {
             throw new IllegalArgumentException("결제 대기 · 만료 주문만 재고를 확정합니다: orderId=" + order.id() + ", status=" + order.status());
         }
@@ -156,9 +162,10 @@ public class OrderStockProcessor {
         try {
             return StockConfirmation.confirmed(confirmOwn(order.id(), order.stockReservationId()));
         } catch (StockReservationException exception) {
-            if (exception.getFailure() != StockReservationException.Failure.RELEASED && exception.getFailure() != StockReservationException.Failure.NOT_FOUND) {
+            if (!isConfirmationUnavailable(exception)) {
                 throw toConfirmationException(order.id(), exception);
             }
+            confirmationUnavailable.accept(order.stockReservationId());
             log.info("stock reservation gone before payment, re-reserving. orderId={}, failure={}", order.id(), exception.getFailure());
         }
         StockReservationQueryResult reReserved;
@@ -185,8 +192,16 @@ public class OrderStockProcessor {
         try {
             return StockConfirmation.reReservedAndConfirmed(confirmOwn(order.id(), reReserved.reservationId()));
         } catch (StockReservationException exception) {
+            if (isConfirmationUnavailable(exception)) {
+                confirmationUnavailable.accept(reReserved.reservationId());
+            }
             throw toConfirmationException(order.id(), exception);
         }
+    }
+
+    private static boolean isConfirmationUnavailable(StockReservationException exception) {
+        return exception.getFailure() == StockReservationException.Failure.RELEASED
+            || exception.getFailure() == StockReservationException.Failure.NOT_FOUND;
     }
 
     /**

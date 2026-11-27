@@ -66,9 +66,19 @@ public class OrderRepositoryAdapter implements OrderRepositoryPort {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Optional<Order> findByIdAndMemberIdForUpdate(long orderId, long memberId) {
+        return findOwnedForUpdate(orderId, memberId, Map.of("jakarta.persistence.lock.timeout", 0));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<Order> findByIdAndMemberIdForConfirmation(long orderId, long memberId) {
+        return findOwnedForUpdate(orderId, memberId, Map.of());
+    }
+
+    private Optional<Order> findOwnedForUpdate(long orderId, long memberId, Map<String, Object> hints) {
         return orderRepository.findOwnedId(orderId, memberId).flatMap(id -> {
             OrderEntity entity = entityManager.getReference(OrderEntity.class, id);
-            entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE, Map.of("jakarta.persistence.lock.timeout", 0));
+            entityManager.refresh(entity, LockModeType.PESSIMISTIC_WRITE, hints);
             return entity.getMemberId() == memberId ? Optional.of(toDomain(entity)) : Optional.empty();
         });
     }

@@ -63,7 +63,8 @@ class OrderPaymentRestorationLockConfigTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"paymentClient.read-timeout=3001", "stockRestorationClient.connect-timeout=0", "default.connect-timeout=2001",
+    @ValueSource(strings = {"paymentClient.read-timeout=3001", "stockRestorationClient.connect-timeout=0", "stockReservationClient.read-timeout=3001",
+        "default.connect-timeout=2001",
         "default.retryer=feign.Retryer$Default"})
     void invalidEffectiveFeignBudgetFailsBeforeScheduling(String option) {
         enabled().withBean(DataSource.class, () -> mock(DataSource.class))
