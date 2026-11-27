@@ -23,7 +23,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class StoreNavigationWebController {
     private final StoreNavigationWebUseCase useCase;
 
-    @Operation(summary = "게시한 상단 메뉴 조회", description = "locale 생략 시 ko이며 ko·en만 허용합니다. 미등록·미게시는 404입니다.")
+    @Operation(summary = "게시한 상단 메뉴 조회",
+        description = "locale 생략 시 ko이며 ko·en만 허용합니다(그 밖은 400 STORE_NAV_100). 미등록·미게시는 404입니다.")
     @PreAuthorize("permitAll()")
     @GetMapping
     public ResponseEntity<Response<StoreNavigationWebResponses.Content>> published(

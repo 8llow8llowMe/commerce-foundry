@@ -13,7 +13,7 @@
 |---|---|---|
 | `GET /api/v1/admin/store/navigation` | 없음 | 최신 초안 Detail. 미등록은 404 |
 | `PUT /api/v1/admin/store/navigation` | `{expectedVersion,items}` | 저장한 최신 Detail, 200 |
-| `POST /api/v1/admin/store/navigation/publication` | `{expectedVersion,revisionNumber}` | 최신 Detail, 200 |
+| `POST /api/v1/admin/store/navigation/publication` | `{expectedVersion,revisionNumber}` | 최신 Detail, 200. 미등록은 404 `STORE_NAV_001` |
 | `GET /api/v1/store/navigation` | `locale=ko`(기본, `ko|en`만 허용) | 게시본의 공개 트리. 미게시·미등록은 404 |
 
 - PUT의 `items`는 **평평한 목록**이다. 항목은
@@ -42,6 +42,8 @@
 | `type` | 링크 종류 | INTERNAL: `url` 경로 그대로, EXTERNAL: 새 창 외부 링크, CATEGORY: `categoryId`로 카테고리 경로 조립, NONE: 링크 없는 묶음 제목 |
 
 `primary`·`shortcut`은 최상위 항목만 켤 수 있다. 같은 항목이 둘 다 켜져도 된다. 순서는 모두 `displayOrder`를 따른다.
+`description`은 하위 항목에도 넣을 수 있고 공개 트리의 하위 노드에도 그대로 내려간다. 다만 스토어프론트 헤더(#602)는
+**최상위 항목의 설명만** 쓴다 — 하위 설명은 다른 화면(모바일 펼침 등)이 쓸 때를 위해 남겨 둔 값이다.
 FE는 브랜드별 고정 NavItem 대신 이 응답을 쓰고, 조회 실패·미게시 때 초안을 대체 노출하지 않는다.
 
 ## 초안·게시·동시성
@@ -51,6 +53,7 @@ FE는 브랜드별 고정 NavItem 대신 이 응답을 쓰고, 조회 실패·�
 - 게시는 `expectedVersion`(0 이상)과 양수 `revisionNumber`가 필수다. **현재 최신 초안만** 새 게시본으로 고른다.
   현재 게시 리비전의 반복 게시는 최신 초안이 따로 있어도 변경 없이 성공하며, 이 경우 오래된 `expectedVersion`도 허용한다.
   최초 게시자·게시 시각·버전은 반복 게시에서 유지한다. 그 밖의 오래된 버전·리비전은 409다.
+  같은 리비전을 동시에 게시하면 한쪽이 409다 — 게시 409 뒤 GET의 `publishedRevision`이 요청한 번호와 같으면 성공으로 본다.
 - 새 게시는 저장본을 **현재 배포 설정의 URL 규칙으로 다시 검증**한다. 저장 뒤 허용 호스트를 지웠다면 게시는 400 `STORE_NAV_109`이고
   아무것도 바뀌지 않는다(이미 게시된 리비전의 반복 게시는 재검증하지 않는다).
 - 고정 root `id=1`의 `@Version`, 최신/게시 포인터, 불변 리비전과 항목을 쓴다. root 갱신과 새 리비전·항목 INSERT,
@@ -67,7 +70,7 @@ FE는 브랜드별 고정 NavItem 대신 이 응답을 쓰고, 조회 실패·�
 | key | `[a-z0-9][a-z0-9-]{0,39}`, 목록 안에서 유일 |
 | 상위 | 목록에 있는 다른 항목 key. 자기 참조·순환 금지, 깊이 최대 3단계 |
 | 표시명 | `labels.ko`, `labels.en` 모두 공백 아닌 1~40 UTF-16 코드 단위, 제어문자 금지 |
-| 설명 | 없거나(null) `descriptions.ko`, `descriptions.en` 모두 공백 아닌 1~80자, 제어문자 금지 |
+| 설명 | 없거나(null) `descriptions.ko`, `descriptions.en` 모두 공백 아닌 1~80 UTF-16 코드 단위, 제어문자 금지 |
 | 순서·노출 | `displayOrder` 필수 0~999, 같은 상위 항목 아래에서 중복 금지(숨김 포함). `visible` 필수 |
 | 노출 위치 | `primary`·`shortcut`은 최상위 항목만 true |
 | 유형 | `INTERNAL`·`EXTERNAL`·`CATEGORY`·`NONE`(대소문자 구분) |
@@ -114,7 +117,10 @@ JPA 연관관계 없이 raw FK 컬럼 주석, `uk_`·`ck_` 제약을 둔다(sing
 유형별 url/category 형태, 설명 짝, 하위 항목 노출 위치). `primary`는 SQL 예약어라 컬럼 이름을 `primary_menu`·`shortcut_menu`로 둔다.
 Hibernate PostgreSQL 17 생성 결과를 `service/operations-service/src/test/resources/ddl/operations-schema.sql`에 반영하고 PR 운영 DDL에 싣는다.
 운영 DDL 적용 후 배포하며 기존 데이터 이관과 새 Vault 비밀은 없다. Gateway의 기존 `/api/v1/store/**`·`/api/v1/admin/store/**`
-operations 라우트를 재사용한다.
+operations 라우트를 재사용한다. dev는 `ddl-auto=update`가 기존 테이블에 컬럼은 더해도 check 제약은 만들지 않으므로,
+PR 본문의 운영 DDL(ALTER)을 dev에도 직접 적용한다.
+
+허용 외부 호스트를 설정에서 뺄 때는 그 링크를 지운 새 초안을 저장·게시한다(이미 게시된 리비전은 반복 게시 때 재검증하지 않는다).
 
 도메인 규칙, H2 왕복·롤백·게시, 실제 PostgreSQL 제약·경합(최초 저장·같은 버전 저장·저장/게시·동시 게시), 실제 JWT 권한·봉투·
 공개 필드 허용 목록·감사, DDL 스냅숏과 operations-service `cleanTest check`를 수행한다. Docker 없는 로컬의 PostgreSQL skip은

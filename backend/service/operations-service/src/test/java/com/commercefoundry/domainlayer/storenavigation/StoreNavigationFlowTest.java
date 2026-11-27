@@ -267,11 +267,17 @@ class StoreNavigationFlowTest extends ResourceServerSmokeTestSupport {
         assertThat(save(null, "Example").getStatus()).isEqualTo(200);
         error(save(null, "Duplicate"), 409, "STORE_NAV_020");
         error(save(9L, "Stale"), 409, "STORE_NAV_020");
-        for (String body : List.of("{", "{}", "{\"expectedVersion\":0}", "{\"revisionNumber\":1}",
-            "{\"expectedVersion\":-1,\"revisionNumber\":1}", "{\"expectedVersion\":0,\"revisionNumber\":0}")) {
-            error(request(post(PUBLICATION), body, MemberRole.ADMIN), 400, "STORE_NAV_1");
+        Map<String, String> invalidPublications = new LinkedHashMap<>();
+        invalidPublications.put("{", "STORE_NAV_100");
+        // 버전·리비전 번호가 둘 다 빠지면 오류가 둘이라 접두어만 본다.
+        invalidPublications.put("{}", "STORE_NAV_1");
+        invalidPublications.put("{\"expectedVersion\":0}", "STORE_NAV_113");
+        invalidPublications.put("{\"revisionNumber\":1}", "STORE_NAV_101");
+        invalidPublications.put("{\"expectedVersion\":-1,\"revisionNumber\":1}", "STORE_NAV_101");
+        invalidPublications.put("{\"expectedVersion\":0,\"revisionNumber\":0}", "STORE_NAV_113");
+        for (Map.Entry<String, String> entry : invalidPublications.entrySet()) {
+            error(request(post(PUBLICATION), entry.getKey(), MemberRole.ADMIN), 400, entry.getValue());
         }
-        error(request(post(PUBLICATION), "{\"expectedVersion\":0,\"revisionNumber\":0}", MemberRole.ADMIN), 400, "STORE_NAV_113");
         error(publish(0, 2), 409, "STORE_NAV_020");
         error(publish(1, 1), 409, "STORE_NAV_020");
         assertThat(revisions.count()).isEqualTo(1);
