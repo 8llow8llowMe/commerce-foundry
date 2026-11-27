@@ -163,7 +163,21 @@ class ReturnRefundPolicyTest {
         assertThat(refund.withDeduction(krw(5_001)).amount()).isEqualTo(-1);
         assertThat(refund.withDeduction(krw(3_000)).deductionMoney()).isEqualTo(krw(3_000));
         assertThatThrownBy(() -> refund.withDeduction(krw(5_000)).toMoney()).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> new Refund(5_000, -1, CurrencyCode.KRW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Refund(5_000, -1, CurrencyCode.KRW, Fault.CUSTOMER)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("환불 결과는 계산에 쓴 귀책을 싣고 차감액을 바꿔도 그대로다 — 승인 기록이 이 값을 저장한다 (#17 B2c)")
+    void refundCarriesFault() {
+        Order order = order(domesticQuote(quoteLine(1, 10_000, 2), quoteLine(2, 5_000, 1)));
+        Map<Long, Integer> toReturn = Map.of(item(order, 1), 1);
+
+        for (Fault fault : Fault.values()) {
+            Refund refund = refund(order, Settled.none(order), toReturn, fault);
+            assertThat(refund.fault()).isEqualTo(fault);
+            assertThat(refund.withDeduction(krw(1_000)).fault()).isEqualTo(fault);
+        }
+        assertThatThrownBy(() -> new Refund(5_000, 0, CurrencyCode.KRW, null)).isInstanceOf(NullPointerException.class);
     }
 
     @Test
@@ -421,7 +435,7 @@ class ReturnRefundPolicyTest {
             return new Claim(id, order.id(), UUID.randomUUID(), Claim.Type.RETURN, status, null, items, NOW, 0L);
         }
         return new Claim(id, order.id(), UUID.randomUUID(), Claim.Type.RETURN, status, krw(refund), 77L, 0, Claim.Type.RETURN.isAwaitingAttempt(status) ? NOW : null,
-            status.isFailed() ? "PAYMENT_016" : null, null, new Claim.ReturnApproval(true, krw(deduction), 9, NOW), items, NOW, 0L);
+            status.isFailed() ? "PAYMENT_016" : null, null, new Claim.ReturnApproval(ReturnRefundPolicy.Fault.CUSTOMER, true, krw(deduction), 9, NOW), items, NOW, 0L);
     }
 
     private static List<List<Long>> permutations(List<Long> units) {

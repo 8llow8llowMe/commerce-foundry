@@ -1420,11 +1420,19 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 | API | 응답 | 검증/오류 |
 |-----|------|-----------|
 | `GET /api/v1/admin/claims?orderId=&type=&status=&page=0&size=20` | 200 `PageResponse<{claimId,orderId,type,status,expectedRefund,requestedAt}>` | page 0 이상 `ORDER_144`, size 1~100 `ORDER_145`, orderId 양수 `ORDER_141`, page×size가 JPA offset 한도 초과 `ORDER_167`, 타입·범위 오류 `ORDER_198` (400) |
-| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}],recovery:{situation,nextAutomaticAttemptAt,retryable,refundConfirmable,completable,lastDecision:{reason,decidedAt}\|null,version}}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
+| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}],recovery:{situation,nextAutomaticAttemptAt,retryable,refundConfirmable,completable,lastDecision:{reason,decidedAt}\|null,version},returnApproval:{fault,restock,deduction,approvedAt}\|null,returnDecision:{approvable,rejectable,reason\|null,defaultFault,refundByFault:[{fault,amount}]}\|null}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
 | `POST /api/v1/admin/claims/{claimId}/retries` `{expectedVersion}` (#17 A2b) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 다시 시도할 수 없음(처리 완료 · 승인 전 · 거절된 반품 · 주문 상태 이상) `ORDER_038` · 자동 처리 중(lease 안) `ORDER_039` (409), 결제 취소 결과 미반영 `ORDER_036` · 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
 | `POST /api/v1/admin/claims/{claimId}/refund-confirmation` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · 사유 없음 · 공백 `ORDER_170` · 200자 초과 `ORDER_148` · 제어 문자 `ORDER_151` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(반품은 같은 주문 잠금 경합 포함) `ORDER_037` · 환불 실패가 아님 · 결과 미확인 · 반품 막힘인데 다시 시도 기한 안 · 주문이 취소 요청 · 취소 완료(반품은 반품 요청)가 아님 · 반품 정리 판정 불가 `ORDER_041` (409), 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
 | `POST /api/v1/admin/claims/{claimId}/completion` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | 본문 검증은 위와 같다(`ORDER_169` · `170` · `148` · `151`, 400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 종결 후보가 아님(복원 결과 미확인 · 주문 상태 이상 · 다른 상태) · 취소인데 주문이 취소 완료가 아님 `ORDER_041` (409) |
 
+- **반품 결정 미리보기 `returnDecision` · 승인 기록 `returnApproval` (#17 B2c)** — 상세에서 접수(`REQUESTED`) 반품에만 `returnDecision` 이 있고 그 밖은 null 이다.
+  `approvable` 은 지금 승인할 수 있는지(`reason` 이 null), `rejectable` 은 지금 거절할 수 있는지다 — 거절은 반품 접수 + 주문 반품 요청만 보므로 `reason` 이
+  `NOT_DECIDABLE` 일 때만 false 다. `reason`(metadata, 승인 가능이면 null)은 `NOT_DECIDABLE`(반품 접수가 아님 — 읽는 사이 승인 · 거절된 경우 포함 · 주문이 반품 요청이 아님)
+  · `RETURN_IN_FLIGHT`(같은 주문의 다른 반품 환불 진행 중) · `NOT_CALCULABLE`(주문 없음 · 결제 기록 없음 · 결제 금액과 주문 총액 불일치 등 데이터 이상)이다. `defaultFault`(metadata `CUSTOMER` ·
+  `SELLER`)는 항목 사유로 정한 기본 귀책, `refundByFault` 는 승인 가능할 때만 `CUSTOMER` · `SELLER` 순으로 정책 금액(차감 전, `MoneyItem`)을 준다 — **0 이하일 수 있다**
+  (재부과액이 반품 상품 금액보다 크면 승인할 수 없다). 미리보기는 잠그지 않으므로 표시용이고, 승인 API(B2c-2)가 같은 판정 · 산식을 다시 한다.
+  승인된 반품에는 `returnApproval`(운영자가 고른 귀책 `fault` metadata · `restock` · 차감액 `deduction` · 승인 시각)이 있고 승인자 아이디는 내지 않는다.
+  결정 대기 반품 상세는 미리보기를 위해 주문(주문이 반품 요청이면 같은 주문 클레임 목록 · 결제 기록까지)을 더 읽는다 — 항목 수와 무관한 고정 횟수다.
 - **처리 상황 `recovery` (#17 A2b)** — 운영자는 비개발자라 원시 오류 코드(`PAYMENT_*` · `PRODUCT_*`) · 시도 횟수 · 결제 아이디를 내지 않는다.
   `situation` 은 `{code,name,description}` metadata 이고 `NO_ACTION`(처리 끝 · 승인 전 · 거절된 반품) · `AUTO_PROCESSING`(환불 대기 · 복원 대기) · `REFUND_UNCONFIRMED` ·
   `REFUND_WAITING`(반품 — 같은 결제의 다른 환불에 막힘, #17 B2b) · `REFUND_REJECTED` · `RESTORATION_UNCONFIRMED` · `RESTORATION_REJECTED` · `ORDER_STATUS_MISMATCH` 다

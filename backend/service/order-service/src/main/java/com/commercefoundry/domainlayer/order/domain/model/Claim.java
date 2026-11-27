@@ -25,6 +25,7 @@ import lombok.RequiredArgsConstructor;
  * {@code REFUND_FAILED} · {@code RESTORATION_FAILED} 다. 상태는 아래 도메인 메서드로만 바꾼다. 환불 · 복원 호출은 이 클레임 아이디를 멱등 키로 쓴다.
  *
  * <p>반품 클레임의 수명 (#17 B1 저장 기반) — {@code REQUESTED}(접수 · 검수 대기) → 운영자 승인 {@code APPROVED}(환불 대기) 또는 거절 {@code REJECTED}(끝).
+ * 결정 대기 판정은 {@link #isAwaitingReturnDecision()}, 승인 기록은 운영자가 고른 귀책을 함께 저장하고 거절은 운영자 결정을 싣는다(#17 B2c).
  * 환불 대기를 뜻하는 상태가 유형마다 다르다 — 취소는 {@code REQUESTED}, 반품은 {@code APPROVED} 다. 그래서 대기 판정은 상태가 아니라 클레임
  * ({@link #isAwaitingAttempt()} · {@link #isAwaitingRefund()})이 한다. 승인 뒤 환불 · 복원 전이는 취소와 같은 메서드다(#17 B2a) — 환불 대기 자리만
  * 유형별({@link #awaitingRefundStatus()})이고, {@code restock=false} 반품은 복원 없이 REFUNDED → COMPLETED 다({@link #requiresRestoration()}).
@@ -104,7 +105,7 @@ public record Claim(
 
     /**
      * 운영자 결정 — DB 의 {@code ck_claim_admin_decision} 과 같다. 접수(REQUESTED) 반품에는 결정이 없고, 직전 실패 코드 없는 결정은 거절(REJECTED)에만 있다.
-     * 반품 결정(거절 사유 등)을 만드는 전이는 #17 B2 다 — B1 은 B2 가 쓴 행을 읽을 수만 있게 해 B2 → B1 롤백 때 매퍼가 깨지지 않게 한다.
+     * 반품 거절 결정(직전 실패 코드 없음)은 {@link #rejectReturn(Decision)}(#17 B2c)이 만든다 — B1 은 같은 규칙으로 읽기만 해 B2 → B1 롤백 때 매퍼가 깨지지 않는다.
      */
     private static void requireDecisionShape(Type type, Status status, Decision decision) {
         if (decision == null) {
@@ -255,6 +256,14 @@ public record Claim(
         return type == Type.RETURN && (status == Status.APPROVED || status == Status.REFUND_FAILED);
     }
 
+    /**
+     * 운영자의 반품 결정(승인 · 거절)을 기다리는가 — 반품 접수(REQUESTED)다 (#17 B2c). 어드민 상세의 반품 결정 미리보기와 승인 · 거절 전이가 이 자리에서만 출발한다.
+     * 주문 상태(반품 요청) · 진행 중 다른 반품은 부르는 쪽이 따로 본다.
+     */
+    public boolean isAwaitingReturnDecision() {
+        return type == Type.RETURN && status == Status.REQUESTED;
+    }
+
     /** 다음 시도를 기다리는 상태(환불 대기 · 복원 대기)인가 — 이때만 다음 시도 시각이 있다. 환불 대기는 취소면 REQUESTED, 반품이면 APPROVED 다. */
     public boolean isAwaitingAttempt() {
         return type.isAwaitingAttempt(status);
@@ -294,11 +303,13 @@ public record Claim(
 
     /**
      * 반품 승인 (#17 B1) — 검수를 마친 저장된 반품 접수(REQUESTED)를 환불 대기(APPROVED)로 바꾼다. 환불액 · 차감액 · 통화는 정책 결과
-     * {@link ReturnRefundPolicy.Refund} 하나에서 꺼낸다(환불액 = 정책 금액 − 차감액). 결제 아이디 · 승인 기록을 싣고 횟수 0, 다음 시각 {@code now + lease} 로
-     * 둔다 — {@link #requestCancellation} 과 같이 승인한 요청이 직접 환불을 끝낼 시간이다. 승인 가능 여부(주문 상태 · 진행 중 반품 409)는 부르는 쪽(B2)이 먼저 본다.
+     * {@link ReturnRefundPolicy.Refund} 하나에서 꺼낸다(환불액 = 정책 금액 − 차감액). 귀책도 그 결과가 계산에 쓴 값({@link ReturnRefundPolicy.Refund#fault()})을
+     * 승인 기록에 저장한다(#17 B2c, {@code claim.return_fault}) — 저장된 귀책과 환불액이 갈라지지 않는다. 결제 아이디 · 승인 기록을 싣고 횟수 0, 다음 시각
+     * {@code now + lease} 로 둔다 — {@link #requestCancellation} 과 같이 승인한 요청이 직접 환불을 끝낼 시간이다. 승인 가능 여부(주문 상태 · 진행 중 반품 409)는
+     * 부르는 쪽(B2)이 먼저 본다.
      *
      * @param order 이 반품의 저장된 주문 — 통화 · 총액 · 항목을 대조한다
-     * @param refund {@link ReturnRefundPolicy#refund} 결과에 차감액을 적용한 값. 0 이하면 {@link ReturnRefundPolicy.Refund#toMoney()} 가 거부한다
+     * @param refund {@link ReturnRefundPolicy#refund} 결과에 차감액을 적용한 값(귀책 포함). 0 이하면 {@link ReturnRefundPolicy.Refund#toMoney()} 가 거부한다
      * @param restock 검수 뒤 재고로 되돌릴지
      * @param now 승인 시각 — 반품 환불의 결제 취소 키 기한 기준이다
      * @param lease 승인한 요청이 직접 환불을 끝낼 시간({@code order.cancellation.retry.lease})
@@ -324,19 +335,28 @@ public record Claim(
         if (refund.currency() != order.quote().currency() || refund.policyAmount() > order.quote().totalAmount().amount()) {
             throw new IllegalArgumentException("반품 환불은 주문 통화 · 결제 총액 이하여야 합니다: claimId=" + id);
         }
-        ReturnApproval approval = new ReturnApproval(restock, refund.deductionMoney(), approvedByMemberId, now);
+        ReturnApproval approval = new ReturnApproval(refund.fault(), restock, refund.deductionMoney(), approvedByMemberId, now);
         return new Claim(id, orderId, requestKey, type, Status.APPROVED, amount, paymentId, 0, now.plus(lease).truncatedTo(ChronoUnit.MICROS), null, decision,
             approval, items, requestedAt, version);
     }
 
     /**
-     * 반품 거절 (#17 B1) — 저장된 반품 접수(REQUESTED)를 거절(REJECTED, 끝)로 바꾼다. 환불 · 복원이 없고 수량 합산에서 빠진다.
-     * 거절 사유 · 결정자 기록과 주문 상태 정리({@link Order#settleReturn})는 호출부(B2)가 정한다.
+     * 반품 거절 (#17 B1 · B2c) — 저장된 반품 접수(REQUESTED)를 거절(REJECTED, 끝)로 바꾸고 운영자 결정(거절 사유 · 결정자 · 시각)을 싣는다. 환불 · 복원이 없고
+     * 수량 합산에서 빠진다. 거절에는 직전 실패가 없으므로 결정의 직전 실패 코드는 비어 있어야 한다({@code ck_claim_admin_decision} 이 이 모양만 받는다).
+     * 주문 상태 정리({@link Order#settleReturn})는 호출부(B2c)가 같은 트랜잭션에서 한다.
+     *
+     * @throws IllegalStateException 반품이 아님 · 저장된 REQUESTED 가 아님
+     * @throws IllegalArgumentException 직전 실패 코드가 있는 결정
      */
-    public Claim rejectReturn() {
+    public Claim rejectReturn(Decision decision) {
+        Objects.requireNonNull(decision, "decision");
         requireReturn();
         requireStatus(Status.REQUESTED, Status.REJECTED);
-        return with(Status.REJECTED, attemptCount, null, null);
+        if (decision.previousFailureCode() != null) {
+            throw new IllegalArgumentException("반품 거절 결정에는 직전 실패 코드가 없습니다: claimId=" + id);
+        }
+        return new Claim(id, orderId, requestKey, type, Status.REJECTED, expectedRefund, paymentId, attemptCount, null, null, decision, approval, items,
+            requestedAt, version);
     }
 
     /** 재고 복원까지 끝났다(또는 복원하지 않는 반품의 환불 기록) — REFUNDED → COMPLETED. 이미 COMPLETED 면 그대로다. */
@@ -492,14 +512,16 @@ public record Claim(
     /**
      * 반품 승인 기록 (#17 B1) — 검수 결과와 승인한 운영자. 환불액은 클레임의 {@code expectedRefund}(정책 금액 − 차감액)다.
      *
+     * @param fault 운영자가 고른 귀책 — 환불액 계산에 쓴 값이다(#17 B2c, {@code claim.return_fault}). 승인된 반품에만 있다({@code ck_claim_return_fault})
      * @param restock 검수 뒤 재고로 되돌릴지 — 되돌리지 않으면(불량 폐기 등) 재고 복원을 부르지 않는다(B2)
      * @param deduction 정책 금액에서 뺀 금액(반품 배송비 · 훼손 등, 0 이상). 환불액과 같은 통화
      * @param approvedByMemberId 승인한 관리자 아이디 (외부 FK: auth-service member.id)
      * @param approvedAt 승인 시각 — 반품 환불의 결제 취소 키 기한 기준({@link Claim#refundDeadlineBase()})이다. 마이크로초로 자른다
      */
-    public record ReturnApproval(boolean restock, Money deduction, long approvedByMemberId, Instant approvedAt) {
+    public record ReturnApproval(ReturnRefundPolicy.Fault fault, boolean restock, Money deduction, long approvedByMemberId, Instant approvedAt) {
 
         public ReturnApproval {
+            Objects.requireNonNull(fault, "fault");
             Objects.requireNonNull(deduction, "deduction");
             Objects.requireNonNull(approvedAt, "approvedAt");
             if (approvedByMemberId <= 0) {

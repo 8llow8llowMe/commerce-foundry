@@ -16,6 +16,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 /** 운영자 다시 시도의 도메인 규칙 (#17 A2b) — 종결 실패 다시 열기와 업무 언어 처리 상황. 테스트 값은 모두 가짜다. */
 class ClaimRecoverySituationTest {
     private static final Instant NOW = Instant.parse("2026-11-10T00:00:00.123456789Z");
+    private static final Claim.Decision REJECTION = new Claim.Decision("검수 불합격", 9, NOW, null);
     private static final List<ClaimItem> ITEMS = List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER));
 
     private static Claim cancellation(Claim.Status status, String failure, int attempts) {
@@ -102,7 +103,7 @@ class ClaimRecoverySituationTest {
         Claim requested = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
             List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.CHANGE_OF_MIND)), NOW, 0L);
         Claim approved = new Claim(2, 1, requested.requestKey(), Claim.Type.RETURN, Claim.Status.APPROVED, krw(1_000), 77L, 0, NOW, null, null,
-            new Claim.ReturnApproval(false, krw(500), 9, NOW), requested.items(), NOW, 0L);
+            new Claim.ReturnApproval(ReturnRefundPolicy.Fault.CUSTOMER, false, krw(500), 9, NOW), requested.items(), NOW, 0L);
 
         assertThat(ClaimRecoverySituation.of(cancellation(Claim.Status.REJECTED, null, 0))).isEqualTo(ClaimRecoverySituation.NO_ACTION);
         // #17 B2b — 승인된 반품은 환불 대기(APPROVED + 다음 시각)라 취소의 REQUESTED 와 같이 자동 처리 중이다
@@ -113,7 +114,7 @@ class ClaimRecoverySituationTest {
         assertThat(ClaimRecoverySituation.of(approved.failRefund(Claim.REFUND_UNCONFIRMED))).isEqualTo(ClaimRecoverySituation.REFUND_UNCONFIRMED);
         assertThat(ClaimRecoverySituation.of(approved.markRefunded(NOW).failRestoration("PRODUCT_028"))).isEqualTo(ClaimRecoverySituation.RESTORATION_REJECTED);
         assertThat(ClaimRecoverySituation.of(cancellation(Claim.Status.REFUND_FAILED, "PAYMENT_016", 0))).isEqualTo(ClaimRecoverySituation.REFUND_REJECTED);
-        assertThat(ClaimRecoverySituation.of(requested.rejectReturn())).isEqualTo(ClaimRecoverySituation.NO_ACTION);
+        assertThat(ClaimRecoverySituation.of(requested.rejectReturn(REJECTION))).isEqualTo(ClaimRecoverySituation.NO_ACTION);
     }
 
     @ParameterizedTest

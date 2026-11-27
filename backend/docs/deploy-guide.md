@@ -471,6 +471,36 @@ A3 → A2(A1 이후 · A3 이전) 롤백은 안전하다 — A3 는 새 열이 �
 - **배포 순서** — B2a 뒤, B2c(승인 API) 전. B2b 만 배포된 동안은 반품 `APPROVED` 행이 없어 실제로 쓰이지 않는다. B2b → B2a 롤백은 승인 행이 생기기 전까지 안전하다.
 - **운영 알림** — 반품 수동 확정은 `return refund confirmed by admin without PG call` WARN 을 남긴다(취소는 `cancellation refund confirmed …`).
 
+### 반품 결정 준비 (#17 B2c-1)
+
+`service/order-service/src/test/resources/ddl/claim-return-fault.sql` 을 `psql -v ON_ERROR_STOP=1 -f` 로 UTF-8 실행한다. 직전 운영 형태는
+B1(`claim-return-approval.sql`)까지 적용된 상태다(B2a · B2b 는 DDL 없음). 정본은 `ClaimEntity` 와 스냅숏 `ddl/order-schema.sql` 이다.
+
+1. **preflight (읽기 전용)** — 첫 SELECT 는 승인 칸이 있는 클레임(`approved_at IS NOT NULL`)이 **0행**인지 본다. 승인 API(B2c-2) 전이라 승인 행을 만드는 호출부가 없으므로
+   0행이 정상이다. 한 행이라도 나오면 그 행의 귀책은 복원할 수 없으므로 멈추고 원인을 확인한다. 두 번째 SELECT 는 새 열 `return_fault` · 제약
+   (`ck_claim_return_fault`, `claim_return_fault_check`)이 아직 없는지(**0행**) 본다 — dev 에서 `ddl-auto=update` 인 새 앱이 먼저 기동해 열만 생겼고 값이 모두 비어 있으면
+   `DROP COLUMN return_fault` 뒤 적용한다(스크립트 주석). 하나라도 어긋나면 멈춘다(`IF EXISTS` 로 건너뛰지 않는다).
+2. **ALTER (배포 전, 1회)** — `lock_timeout = 5s` 의 한 트랜잭션이다. 열 1개(`return_fault varchar(16)`, nullable, 값 check `CUSTOMER` · `SELLER` — 이름은 PostgreSQL 기본
+   `claim_return_fault_check`), `ck_claim_return_fault`(`(approved_at is null) = (return_fault is null)` — 승인된 반품 ⇔ 귀책 있음), comment. 실패하면 아무것도 바뀌지 않는다.
+3. **앱 배포** — 모든 order-service 인스턴스를 교체한다. **dev 포함 모든 환경에서 새 앱 기동 전에 2를 적용한다** — dev 의 `ddl-auto=update` 는 새 열만 만들고 ck 제약은 만들지 않는다.
+
+- **롤링 · 롤백** — 이전 앱(B2b)은 귀책 칸을 모르지만 반품을 `REQUESTED`(승인 칸 null)로만 쓰므로 새 check 를 통과한다(`ClaimCancellationSchemaUpgradePostgresTest` 가
+  B2b 앱 모양 INSERT · UPDATE 로 확인). B2c-1 → B2b 앱 롤백은 DDL 을 그대로 두고 해도 안전하다 — B2c-1 도 승인 행을 쓰지 않는다. **B2c-2 가 승인 행을 쓴 뒤로는**
+  B2b 앱이 승인 행을 UPDATE 해도 매핑하지 않은 `return_fault` 는 그대로 남지만(Hibernate 는 매핑한 열만 갱신한다), 새 승인은 막힌다(B2b 에 승인 API 가 없다).
+- **DDL 되돌리기 (승인 행이 생기기 전에만)** — 승인 행이 있으면 귀책을 잃으므로 되돌리지 않는다. 앱을 B2b 로 먼저 내린 뒤 실행한다.
+
+  ```sql
+  SET lock_timeout = '5s';
+  BEGIN;
+  ALTER TABLE orders.claim DROP CONSTRAINT ck_claim_return_fault;
+  ALTER TABLE orders.claim DROP COLUMN return_fault; -- 값 check(claim_return_fault_check)도 함께 지워진다
+  COMMIT;
+  ```
+
+- **FE 계약** — 어드민 클레임 상세에 `returnDecision`(접수 반품의 결정 미리보기) · `returnApproval`(승인된 반품의 귀책 · 재고 되돌림 · 차감액 · 승인 시각)이 더해진다.
+  둘 다 해당하지 않으면 null 이다(`api-design-guide.md` 클레임 어드민 절). 엔드포인트 · 권한은 그대로다.
+- **조회 비용** — 접수 반품 상세만 주문(주문이 반품 요청이면 클레임 목록 · 결제 기록까지)을 더 읽는다. 항목 수와 무관한 고정 횟수다.
+
 ### 결제 후 취소 클레임 배포 (#16 PR-2a)
 
 `claim`에 결제 후 취소(CANCELLATION) 유형 · 환불/복원 상태 · 재시도 칸(`payment_id`, `attempt_count`, `next_attempt_at`, `failure_code`)을 더한다.

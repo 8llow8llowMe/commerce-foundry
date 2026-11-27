@@ -20,6 +20,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class ClaimAdminRecoveryPolicyTest {
     private static final Instant NOW = Instant.parse("2026-11-10T00:00:00.123456789Z");
+    private static final Claim.Decision REJECTION = new Claim.Decision("검수 불합격", 9, NOW, null);
     private static final List<ClaimItem> ITEMS = List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER));
 
     private static Claim claim(Claim.Status status, String failure) {
@@ -183,12 +184,12 @@ class ClaimAdminRecoveryPolicyTest {
         Claim requestedReturn = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
             List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
         Claim approvedReturn = new Claim(2, 1, requestedReturn.requestKey(), Claim.Type.RETURN, Claim.Status.APPROVED, krw(1_000), 77L, 0, NOW, null, null,
-            new Claim.ReturnApproval(true, krw(0), 7, NOW), requestedReturn.items(), NOW, 0L);
+            new Claim.ReturnApproval(ReturnRefundPolicy.Fault.CUSTOMER, true, krw(0), 7, NOW), requestedReturn.items(), NOW, 0L);
         // #17 B2b — 승인된 반품은 수습 대상이다: lease 가 끝난 환불 대기는 취소의 REQUESTED 와 같이 다시 시도(선점)한다. 확정 · 종결 후보는 아니다
         assertThatCode(() -> ClaimAdminRecoveryPolicy.requireRetry(approvedReturn, NOW.plusSeconds(1))).doesNotThrowAnyException();
         assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(approvedReturn, true)).isFalse();
         assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(approvedReturn)).isFalse();
-        for (Claim source : List.of(rejectedCancellation, requestedReturn, requestedReturn.rejectReturn())) {
+        for (Claim source : List.of(rejectedCancellation, requestedReturn, requestedReturn.rejectReturn(REJECTION))) {
             assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRetry(source, NOW.plusSeconds(1))).as(source.type() + " " + source.status())
                 .isInstanceOf(IllegalStateException.class);
             assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(source, true)).isFalse();
@@ -234,7 +235,7 @@ class ClaimAdminRecoveryPolicyTest {
 
     private static Claim returnClaim(Claim.Status status, String failure) {
         return new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, status, krw(1_000), 77L, 0, Claim.Type.RETURN.isAwaitingAttempt(status) ? NOW : null, failure,
-            null, new Claim.ReturnApproval(true, krw(0), 7, NOW), List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
+            null, new Claim.ReturnApproval(ReturnRefundPolicy.Fault.CUSTOMER, true, krw(0), 7, NOW), List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
     }
 
     @Test

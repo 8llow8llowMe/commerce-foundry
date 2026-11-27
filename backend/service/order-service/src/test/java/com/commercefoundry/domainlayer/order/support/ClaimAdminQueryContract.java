@@ -9,16 +9,22 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.OrderPaymentRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.ClaimItem;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
+import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.domainlayer.order.domain.model.ReturnRefundPolicy;
 import com.commercefoundry.security.audit.AdminAuditLog;
 import com.commercefoundry.security.principal.MemberRole;
 import com.commercefoundry.security.support.TestTokens;
+import com.commercefoundry.shared.commerce.CurrencyCode;
 import jakarta.persistence.EntityManagerFactory;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,9 +47,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 /** 실제 JWT·HTTP·DB에 동일한 계약을 적용한다. 전체 query 수에는 인증에서 발생한 조회도 포함한다. */
 public abstract class ClaimAdminQueryContract {
     private static final AtomicLong IDS = new AtomicLong(4_611_686_018_430_000_000L);
+    /**
+     * 결정 대기 반품 상세의 고정 쿼리 수 (#17 B2c) — 클레임 2(헤더 · 항목) + 주문 4. 주문이 반품 요청이면 같은 주문 클레임 목록 2 · 결제 기록 1 을 더 읽는다.
+     * 항목 수와 무관하다. 결정 대기 반품이 아닌 상세는 클레임 2 그대로다.
+     */
+    private static final int REQUESTED_RETURN_UNDECIDABLE_DETAIL_QUERIES = 6;
+    private static final int REQUESTED_RETURN_DETAIL_QUERIES = 9;
     @Autowired protected MockMvc mvc;
     @Autowired private ClaimRepositoryPort claims;
     @Autowired private OrderRepositoryPort orders;
+    @Autowired private OrderPaymentRepositoryPort payments;
     @Autowired private PlatformTransactionManager manager;
     @Autowired private EntityManagerFactory entityManagerFactory;
     @Autowired protected JdbcTemplate jdbc;
@@ -123,14 +136,18 @@ public abstract class ClaimAdminQueryContract {
     }
 
     @Test
-    void detailsHaveTwoQueriesRegardlessOfItemCountAndDoNotWrite() throws Exception {
+    void detailsHaveFixedQueriesRegardlessOfItemCountAndDoNotWrite() throws Exception {
         Fixture f = fixture();
         List<Object> before = snapshot(f);
         for (long id : List.of(f.older(), f.newer())) {
             stats().clear();
             var result = mvc.perform(get("/api/v1/admin/claims/" + id).header(HttpHeaders.AUTHORIZATION, bearer())).andReturn();
             assertThat(result.getResponse().getStatus()).isEqualTo(200);
-            assertThat(stats().getPrepareStatementCount()).isEqualTo(2);
+            // 접수 반품이라 결정 미리보기가 주문을 읽는다(#17 B2c) — 주문이 반품 요청이 아니라 클레임 목록 · 결제는 읽지 않는다
+            assertThat(stats().getPrepareStatementCount()).isEqualTo(REQUESTED_RETURN_UNDECIDABLE_DETAIL_QUERIES);
+            jsonPath("$.dataBody.returnDecision.reason.code").value("NOT_DECIDABLE").match(result);
+            jsonPath("$.dataBody.returnDecision.approvable").value(false).match(result);
+            jsonPath("$.dataBody.returnDecision.rejectable").value(false).match(result);
             jsonPath("$.dataBody.claimId").value(String.valueOf(id)).match(result);
             jsonPath("$.dataBody.orderId").value(String.valueOf(f.orderId())).match(result);
             jsonPath("$.dataBody.items[0].orderItemId").isString().match(result);
@@ -144,6 +161,63 @@ public abstract class ClaimAdminQueryContract {
         var missing = request("/api/v1/admin/claims/" + IDS.incrementAndGet(), MemberRole.ADMIN);
         assertThat(missing.getStatus()).isEqualTo(404);
         assertThat(missing.getContentAsString()).contains("ORDER_032");
+    }
+
+    @Test
+    void requestedReturnDetailHasDecisionPreviewAndApprovedReturnHasStoredFault() throws Exception {
+        // 반품 요청 주문(1,000 × 3 + 2,000 × 2 = 7,000 + 배송비 3,000)과 결제 완료 기록, 접수 반품(첫 항목 1개, 단순 변심)
+        long orderId = IDS.incrementAndGet();
+        Order placed = Order.place(orderId, TestTokens.MEMBER_ID, domesticQuote(quoteLine(101, 1000, 3), quoteLine(102, 2000, 2)),
+            IDS::incrementAndGet, address("KR"), IDS.incrementAndGet(), Instant.now().plusSeconds(1800));
+        Order paid = new Order(orderId, placed.memberId(), OrderStatus.PAID, placed.quote(), placed.itemIds(), placed.shippingAddress(),
+            placed.stockReservationId(), placed.paymentDueAt(), null, null, Instant.EPOCH, 0L);
+        long requestedId = IDS.incrementAndGet();
+        long approvedId = IDS.incrementAndGet();
+        new TransactionTemplate(manager).executeWithoutResult(tx -> {
+            orders.insert(placed, OrderStatusHistory.created(IDS.incrementAndGet(), placed));
+            jdbc.update("update orders.orders set status = 'RETURN_REQUESTED', delivered_at = ?, version = version + 1 where id = ?",
+                Timestamp.from(Instant.parse("2026-11-03T00:00:00Z")), orderId);
+            payments.insert(OrderPayment.paid(IDS.incrementAndGet(), paid, 77L, placed.quote().totalAmount(), Instant.parse("2026-11-01T00:00:00Z"), UUID.randomUUID()));
+            claims.insert(new Claim(requestedId, orderId, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+                List.of(new ClaimItem(IDS.incrementAndGet(), placed.itemIds().getFirst(), 1, ClaimItem.Reason.CHANGE_OF_MIND)), null, null));
+        });
+        stats().clear();
+        var requested = mvc.perform(get("/api/v1/admin/claims/" + requestedId).header(HttpHeaders.AUTHORIZATION, bearer())).andReturn();
+        assertThat(requested.getResponse().getStatus()).isEqualTo(200);
+        assertThat(stats().getPrepareStatementCount()).as("결정 대기 반품만 주문 · 클레임 목록 · 결제를 더 읽는다").isEqualTo(REQUESTED_RETURN_DETAIL_QUERIES);
+        jsonPath("$.dataBody.returnApproval").value((Object) null).match(requested);
+        jsonPath("$.dataBody.returnDecision.approvable").value(true).match(requested);
+        jsonPath("$.dataBody.returnDecision.rejectable").value(true).match(requested);
+        jsonPath("$.dataBody.returnDecision.reason").value((Object) null).match(requested);
+        jsonPath("$.dataBody.returnDecision.defaultFault.code").value("CUSTOMER").match(requested);
+        jsonPath("$.dataBody.returnDecision.refundByFault[*].fault.code").value(org.hamcrest.Matchers.contains("CUSTOMER", "SELLER")).match(requested);
+        jsonPath("$.dataBody.returnDecision.refundByFault[*].amount.amount").value(org.hamcrest.Matchers.contains(1000, 1000)).match(requested);
+        jsonPath("$.dataBody.returnDecision.refundByFault[0].amount.currency").value("KRW").match(requested);
+        assertSafe(requested.getResponse());
+
+        // 다른 항목의 반품을 판매자 귀책으로 승인해 저장하면 상세에 저장된 귀책이 보이고, 남은 접수 반품은 진행 중 반품에 막힌다
+        new TransactionTemplate(manager).executeWithoutResult(tx -> {
+            Order order = orders.findById(orderId).orElseThrow();
+            Claim stored = claims.insert(new Claim(approvedId, orderId, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+                List.of(new ClaimItem(IDS.incrementAndGet(), placed.itemIds().getLast(), 1, ClaimItem.Reason.DEFECTIVE)), null, null));
+            claims.update(stored.approveReturn(order, 77L, new ReturnRefundPolicy.Refund(2_000, 500, CurrencyCode.KRW, ReturnRefundPolicy.Fault.SELLER), false,
+                9, Instant.parse("2026-11-04T00:00:00Z"), Duration.ofMinutes(2)));
+        });
+        stats().clear();
+        var approved = mvc.perform(get("/api/v1/admin/claims/" + approvedId).header(HttpHeaders.AUTHORIZATION, bearer())).andReturn();
+        assertThat(stats().getPrepareStatementCount()).as("결정 대기가 아닌 상세는 클레임만 읽는다").isEqualTo(2);
+        jsonPath("$.dataBody.returnDecision").value((Object) null).match(approved);
+        jsonPath("$.dataBody.returnApproval.fault.code").value("SELLER").match(approved);
+        jsonPath("$.dataBody.returnApproval.restock").value(false).match(approved);
+        jsonPath("$.dataBody.returnApproval.deduction.amount").value(500).match(approved);
+        jsonPath("$.dataBody.returnApproval.approvedAt").value("2026-11-04T00:00:00Z").match(approved);
+        assertSafe(approved.getResponse());
+        assertThat(jdbc.queryForObject("select return_fault from orders.claim where id = ?", String.class, approvedId)).isEqualTo("SELLER");
+        var blocked = mvc.perform(get("/api/v1/admin/claims/" + requestedId).header(HttpHeaders.AUTHORIZATION, bearer())).andReturn();
+        jsonPath("$.dataBody.returnDecision.approvable").value(false).match(blocked);
+        jsonPath("$.dataBody.returnDecision.rejectable").value(true).match(blocked);
+        jsonPath("$.dataBody.returnDecision.reason.code").value("RETURN_IN_FLIGHT").match(blocked);
+        jsonPath("$.dataBody.returnDecision.refundByFault").isEmpty().match(blocked);
     }
 
     @Test

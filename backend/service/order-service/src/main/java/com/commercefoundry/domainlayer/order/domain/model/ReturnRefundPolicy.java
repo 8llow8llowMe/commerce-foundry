@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.order.domain.model;
 
+import com.commercefoundry.common.dto.metadata.CodeNameDescribable;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import java.util.HashMap;
@@ -101,7 +102,7 @@ public final class ReturnRefundPolicy {
             case CUSTOMER -> customerAmount(quote, remainingPaid, before, after);
             case SELLER -> empty ? remainingPaid : returnedItems;
         };
-        return new Refund(amount, 0, quote.currency());
+        return new Refund(amount, 0, quote.currency(), fault);
     }
 
     /** 고객 귀책 정책 금액 — {@code min(R, max(R − due(after), due(before) − due(after)))}. 판매자 귀책이 만든 재부과를 다음 변심 반품에 넘기지 않는다. */
@@ -161,12 +162,20 @@ public final class ReturnRefundPolicy {
         }
     }
 
-    /** 귀책 — 환불 산식만 가른다. 사유는 기본값만 정하고, 운영자가 검수 뒤 덮어쓴다(브랜드 규칙을 고정하지 않는다). */
-    public enum Fault {
+    /**
+     * 귀책 — 환불 산식만 가른다. 사유는 기본값만 정하고, 운영자가 검수 뒤 덮어쓴다(브랜드 규칙을 고정하지 않는다). 승인한 반품은 고른 귀책을
+     * {@code claim.return_fault} 에 저장한다(#17 B2c) — 이름(코드)이 DB · API 값이다.
+     */
+    @Getter
+    @RequiredArgsConstructor
+    public enum Fault implements CodeNameDescribable {
         /** 고객 귀책(단순 변심 등) — 이 반품이 만든 남는 주문의 배송비 재부과를 받는다. 판매자 귀책이 만든 재부과는 받지 않는다. */
-        CUSTOMER,
+        CUSTOMER("고객 귀책", "단순 변심 등 고객 사유입니다. 남는 주문이 무료배송 기준 아래로 내려가면 배송비를 다시 받습니다."),
         /** 판매자 귀책(불량 · 오배송) — 반품 항목 금액을 돌려주고 재부과하지 않는다. */
-        SELLER;
+        SELLER("판매자 귀책", "상품 불량 · 오배송 등 판매자 사유입니다. 반품 상품 금액을 돌려주고 배송비를 다시 받지 않습니다.");
+
+        private final String displayName;
+        private final String description;
 
         /** 기본 귀책 — 모든 항목 사유가 상품 불량 · 오배송이면 판매자, 하나라도 단순 변심이면 고객이다. */
         public static Fault defaultOf(Claim returnClaim) {
@@ -276,15 +285,17 @@ public final class ReturnRefundPolicy {
 
     /**
      * 계산한 반품 환불 — 최소 단위 정수 + 통화. 환불액은 {@code policyAmount − deduction} 이고 0 이하일 수 있어 {@link Money} 가 아니다.
-     * 반품 승인({@link Claim#approveReturn})은 이 값 하나에서 환불액 · 차감액 · 통화를 꺼낸다.
+     * 반품 승인({@link Claim#approveReturn})은 이 값 하나에서 환불액 · 차감액 · 통화 · 귀책을 꺼낸다 — 저장되는 귀책이 늘 금액을 계산한 귀책이다(#17 B2c).
      *
      * @param policyAmount 정책 금액(최소 단위). 음수면 재부과액이 반품 상품 금액보다 크다
      * @param deduction 운영자 차감액(최소 단위, 0 이상) — 반품 배송비 · 훼손 등
+     * @param fault 정책 금액을 계산한 귀책({@link #refund} 가 채운다). 차감액을 바꿔도 그대로다
      */
-    public record Refund(long policyAmount, long deduction, CurrencyCode currency) {
+    public record Refund(long policyAmount, long deduction, CurrencyCode currency, Fault fault) {
 
         public Refund {
             Objects.requireNonNull(currency, "currency");
+            Objects.requireNonNull(fault, "fault");
             if (deduction < 0) {
                 throw new IllegalArgumentException("차감액은 0 이상이어야 합니다: " + deduction);
             }
@@ -301,7 +312,7 @@ public final class ReturnRefundPolicy {
             if (deduction.currency() != currency) {
                 throw new IllegalArgumentException("차감액 통화가 환불 통화와 다릅니다: " + deduction.currency());
             }
-            return new Refund(policyAmount, deduction.amount(), currency);
+            return new Refund(policyAmount, deduction.amount(), currency, fault);
         }
 
         /** 0보다 큰 환불인가 — 아니면 승인을 거부한다(B2, 409). 0 원 반품 승인을 두지 않는다. */
