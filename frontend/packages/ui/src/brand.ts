@@ -4,13 +4,27 @@ import type { HomeMediaSlot, HomeSection } from './home';
 export type NavItem = {
   /** 대제목 (예: 'SHOP') */
   label: string;
-  /** 대제목 아래 한 줄 설명 (예: '전체 상품 / 카테고리') */
+  /** 대제목 아래 한 줄 설명 (예: '전체 상품 / 카테고리'). 없으면 빈 문자열 */
   description: string;
-  href: string;
+  /** 언어 접두어 없는 앱 경로('/shop') 또는 external 이면 https 주소. null 이면 링크 없는 대제목(하위 메뉴 묶음) */
+  href: string | null;
+  /** 다른 사이트 — 새 창으로 연다 */
+  external?: boolean;
   /** PC 헤더의 로고 아래 1차 메뉴에 노출한다 */
   primary?: boolean;
   /** 모바일 헤더에 바로가기로 노출한다. 첫 화면에서 핵심 목록으로 가는 길이다 */
   shortcut?: boolean;
+  /** 전체 메뉴 패널에서 대제목 아래 보이는 하위 링크(게시 메뉴 #602). 없으면 대제목 + 설명만 */
+  children?: NavLink[];
+};
+
+/** 전체 메뉴의 하위 링크. children 은 한 단계 더(3단계, 들여쓴 목록) */
+export type NavLink = {
+  label: string;
+  /** 앱 경로 또는 external 이면 https 주소. null 이면 링크 없는 묶음 제목 */
+  href: string | null;
+  external?: boolean;
+  children?: NavLink[];
 };
 
 /** 푸터 고객 안내 링크 (약관 · 개인정보처리방침 · 고객센터 등) */

@@ -21,6 +21,8 @@ export const ko = {
     account: '마이페이지',
     logout: '로그아웃',
     accountNav: '계정',
+    /** 다른 사이트 메뉴 링크의 스크린리더 안내 */
+    newWindow: '새 창에서 열림',
   },
   auth: {
     login: {

@@ -4,6 +4,7 @@ import { Link } from '@/components/i18n/Link';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { AccountIcon, BagIcon, SearchIcon } from './HeaderIcons';
 import { MenuPanel } from './MenuPanel';
+import { NavAnchor } from './NavAnchor';
 
 export type SiteHeaderProps = {
   brandName: string;
@@ -20,7 +21,8 @@ const NAV_LINK = 'text-xs tracking-[0.2em] uppercase hover:text-primary';
 /**
  * 스토어프론트 공통 헤더. 좌: 전체 메뉴 / 가운데: 워드마크 / 우: 검색 · 계정 · 장바구니.
  * 계정 아이콘은 로그아웃 상태면 로그인, 로그인 상태면 마이페이지로 간다. 로그아웃 · 회원가입은 전체 메뉴에 있다.
- * 아래 줄은 PC 에서 1차 메뉴(primary), 모바일에서 바로가기(shortcut)다. 메뉴는 브랜드 설정(@cf/brand)이 정한다.
+ * 아래 줄은 PC 에서 1차 메뉴(primary), 모바일에서 바로가기(shortcut)다. 메뉴는 어드민이 게시한 메뉴(#602), 없으면 브랜드 설정(@cf/brand)이다.
+ * 링크 없는 묶음 제목(href null)은 아래 줄에 두지 않는다 — 눌러도 갈 곳이 없다. 아래 줄은 넘치면 가로로 스크롤한다(높이를 바꾸지 않는다).
  */
 export function SiteHeader({
   brandName,
@@ -29,8 +31,8 @@ export function SiteHeader({
   languages,
   signedIn,
 }: SiteHeaderProps) {
-  const primary = navigation.filter((item) => item.primary);
-  const shortcuts = navigation.filter((item) => item.shortcut);
+  const primary = navigation.filter((item) => item.primary && item.href !== null);
+  const shortcuts = navigation.filter((item) => item.shortcut && item.href !== null);
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-bg">
@@ -83,14 +85,19 @@ export function SiteHeader({
         {primary.length > 0 && (
           <nav
             aria-label={labels.primaryNav}
-            className="hidden h-10 items-center justify-center lg:flex"
+            className="relative hidden h-10 items-center overflow-x-auto lg:flex"
           >
-            <ul className="flex justify-center gap-12">
-              {primary.map((item) => (
-                <li key={item.href}>
-                  <Link href={item.href} className={NAV_LINK}>
+            <ul className="mx-auto flex w-max gap-12 whitespace-nowrap">
+              {primary.map((item, index) => (
+                <li key={`${index}-${item.href}`}>
+                  <NavAnchor
+                    href={item.href}
+                    external={item.external}
+                    newWindowLabel={labels.newWindow}
+                    className={NAV_LINK}
+                  >
                     {item.label}
-                  </Link>
+                  </NavAnchor>
                 </li>
               ))}
             </ul>
@@ -100,14 +107,19 @@ export function SiteHeader({
         {shortcuts.length > 0 && (
           <nav
             aria-label={labels.shortcuts}
-            className="flex h-9 items-center justify-center lg:hidden"
+            className="relative flex h-9 items-center overflow-x-auto lg:hidden"
           >
-            <ul className="flex justify-center gap-8">
-              {shortcuts.map((item) => (
-                <li key={item.href}>
-                  <Link href={item.href} className={NAV_LINK}>
+            <ul className="mx-auto flex w-max gap-8 whitespace-nowrap">
+              {shortcuts.map((item, index) => (
+                <li key={`${index}-${item.href}`}>
+                  <NavAnchor
+                    href={item.href}
+                    external={item.external}
+                    newWindowLabel={labels.newWindow}
+                    className={NAV_LINK}
+                  >
                     {item.label}
-                  </Link>
+                  </NavAnchor>
                 </li>
               ))}
             </ul>

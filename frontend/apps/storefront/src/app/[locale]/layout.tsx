@@ -13,6 +13,7 @@ import { getDictionary } from '@/lib/i18n/dictionaries';
 import { localePrefix, localeTarget, localeUrl } from '@/lib/i18n/routing';
 import { getI18n, localeHomeHref } from '@/lib/i18n/server';
 import { loadStoreFooter } from '@/lib/store-footer';
+import { loadStoreNavigation, navigationFor } from '@/lib/store-navigation';
 import { loadStoreProfile } from '@/lib/store-profile';
 import '../globals.css';
 
@@ -44,8 +45,13 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
   const content = brand.content[locale];
   // 스토어프론트 화면은 이미 요청마다 렌더링된다(언어 판별) — 쿠키를 읽어도 정적 생성을 잃지 않는다
   const signedIn = await hasSession();
-  // 사업자 정보(#566)와 게시 푸터(#600)는 따로 실패한다 — 한쪽 장애가 다른 쪽을 숨기지 않게 나란히 부른다
-  const [store, channels] = await Promise.all([loadStoreProfile(), loadStoreFooter(locale)]);
+  // 사업자 정보(#566) · 게시 푸터(#600) · 게시 메뉴(#602)는 따로 실패한다 — 한쪽 장애가 다른 쪽을 숨기지 않게 나란히 부른다.
+  // 메뉴는 게시본이 없거나(404) 읽지 못하면 브랜드 설정 메뉴로 그린다
+  const [store, channels, menu] = await Promise.all([
+    loadStoreProfile(),
+    loadStoreFooter(locale),
+    loadStoreNavigation(locale),
+  ]);
   const languages = brand.locales.map((code) => ({
     locale: code,
     name: getDictionary(code).languageName,
@@ -61,7 +67,7 @@ export default async function LocaleLayout({ children, params }: LayoutProps<'/[
           <SessionProvider signedIn={signedIn}>
             <SiteHeader
               brandName={brand.name}
-              navigation={content.navigation}
+              navigation={navigationFor(menu, content.navigation)}
               labels={dict.header}
               languages={languages}
               signedIn={signedIn}

@@ -5,6 +5,7 @@ export type {
   InstagramLink,
   Locale,
   NavItem,
+  NavLink,
   ProductInfo,
   SizeGuide,
 } from './brand';
