@@ -63,6 +63,7 @@ describe('requiredPermissionOf', () => {
     expect(requiredPermissionOf('/admins')).toBe('STAFF_READ');
     expect(requiredPermissionOf('/products/new')).toBe('CATALOG_READ');
     expect(requiredPermissionOf('/store/footer')).toBe('SETTINGS_READ');
+    expect(requiredPermissionOf('/store/navigation')).toBe('SETTINGS_READ');
   });
 
   it('비슷한 앞부분만 같은 경로는 맞지 않는다', () => {
