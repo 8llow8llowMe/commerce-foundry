@@ -9,7 +9,7 @@
 export const OPERATOR_ROLES = ['ADMIN', 'OWNER', 'MANAGER', 'STAFF'] as const;
 export type OperatorRole = (typeof OPERATOR_ROLES)[number];
 
-/** 화면 진입을 가르는 조회 권한만 둔다(BE `AdminPermission` 의 `*_READ`). 버튼 단위(`*_MANAGE`)는 아래 `canManageSettlement` 하나뿐이다 */
+/** 화면 진입을 가르는 조회 권한만 둔다(BE `AdminPermission` 의 `*_READ`). 버튼 단위(`*_MANAGE`)는 아래 `canManageSettlement` · `canManageOrders` 뿐이다 */
 export type AdminReadPermission =
   | 'CATALOG_READ'
   | 'INVENTORY_READ'
@@ -67,6 +67,15 @@ export function permissionsOf(role: OperatorRole | null): readonly AdminReadPerm
 export function canManageSettlement(role: OperatorRole | null): boolean | null {
   if (role === null) return null;
   return role === 'ADMIN' || role === 'OWNER';
+}
+
+/**
+ * 주문 쓰기(`ORDER_MANAGE`) — 반품 승인 · 거절(#17 B2c-2) 버튼을 거른다. BE `grantedTo` 에서 ADMIN · OWNER · MANAGER 가 갖고 STAFF 는 없다.
+ * 역할을 모르면(null) null — 버튼을 숨기지 않고 서버 403 안내에 맡긴다(`canManageSettlement` 와 같은 규칙).
+ */
+export function canManageOrders(role: OperatorRole | null): boolean | null {
+  if (role === null) return null;
+  return role !== 'STAFF';
 }
 
 /**

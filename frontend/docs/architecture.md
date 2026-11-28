@@ -451,7 +451,9 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   그런 화면에 주소로 들어오면 본문 대신 403 안내를 그린다(`RouteGate`). 예: MANAGER 는 결제 확인(정산) · 원가 · 쇼핑몰 설정 · 관리자 계정 · 감사 로그가 안 보인다.
   **인가의 정본은 서버다** — 숨김은 보조이고, 역할을 읽지 못하면(고객 · 모르는 값 · 모양 다름) 거르지 않고 서버 403 안내에 맡긴다.
   역할 · 권한을 내려주는 BE API 가 생기면 claim 읽기와 사본을 그 응답으로 바꾼다. 버튼 단위(`*_MANAGE`) 숨김은 클레임 상세의 확정 · 종결(`SETTLEMENT_MANAGE`,
-  `canManageSettlement` — 대표 ADMIN · OWNER 만) 하나다. 그 페이지(서버 컴포넌트)가 같은 claim 읽기로 정해 넘기고, 역할을 모르면 숨기지 않는다.
+  `canManageSettlement` — 대표 ADMIN · OWNER 만)과 반품 승인 · 거절 · 처리 상황의 다시 시도(`ORDER_MANAGE`, `canManageOrders` — STAFF 만 없음)다.
+  숨긴 자리에는 권한 안내를 둔다.
+  그 페이지(서버 컴포넌트)가 같은 claim 읽기로 정해 넘기고, 역할을 모르면 숨기지 않는다.
   그 밖의 쓰기는 서버 403 → `AccessNotice` 다.
   **저장(쓰기) 중 401 은 예외다** — 세션이 30분뿐이라 폼을 오래 쓰면 생기는데, 로그인 화면으로 보내면 입력이 사라진다. 폼을 그대로 두고
   `SESSION_EXPIRED_ON_SAVE`("새 탭에서 다시 로그인한 뒤 저장해 주세요")를 폼 전체 오류로 둔다. 401 은 서버가 처리하지 않은 요청이라 다시 저장해도 안전하다.
@@ -506,9 +508,9 @@ BE 장바구니(`/api/v1/carts/me/**`, `backend/docs/order-flow-guide.md` §2-1)
   등록 자체는 상품 등록 투어가 안내한다.
 - **상품 상세 투어**(`product-detail-v1`, `/products/[productId]`) — 구역별 수정 링크(`product-edit-links`) · 재고 · 원가 · 사이즈표 링크(`product-related`) ·
   SKU 구역(`product-detail-skus`) · 판매 중지 · 삭제(`product-delete`, 권한 안내로 바뀔 수 있어 선택). 투어는 삭제 버튼을 누르지 않는다. 상세 테스트가 앵커 목록과 정의를 맞춰 본다.
-- **클레임 목록 투어**(`claims-v1`, `/claims`) — 조건(`claim-filters`) · 표(`claim-table`, 빈 목록이면 없어 선택) · 처리(승인 · 거절 · 환불) 준비 중 안내(가운데).
+- **클레임 목록 투어**(`claims-v1`, `/claims`) — 조건(`claim-filters`) · 표(`claim-table`, 빈 목록이면 없어 선택) · 처리는 상세에서 한다는 안내(가운데).
 - **클레임 상세 투어**(`claim-detail-v2`, `/claims/[claimId]`) — 접수 내용(`claim-summary`) · 접수 항목(`claim-items`) · 처리 상황(`claim-recovery`) ·
-  다시 시도(`claim-retry`) · 운영자 확정(`claim-decisions`, v2 에서 더함) · 반품 처리 준비 중 안내(가운데). 처리 상황 · 다시 시도 · 운영자 확정은 결제 후 취소에만 있고
+  다시 시도(`claim-retry`) · 운영자 확정(`claim-decisions`, v2 에서 더함) · 반품 결정 안내(가운데 — 반품 결정 칸 `claim-return-decision` 은 아직 투어 단계가 아니다). 처리 상황 · 다시 시도 · 운영자 확정은 결제 후 취소 · 승인된 반품에만 있고
   버튼은 할 수 있을 때만(확정 · 종결은 대표 관리자에게만) 있어 선택 단계다. 투어는 다시 시도 · 확정을 누르지 않는다(가리킨 요소는 투어 동안 눌리지 않는다).
   클레임 컴포넌트 테스트가 앵커를 맞춰 본다.
 - 전시 편집(`/displays/main`)에는 아직 투어가 없다.
@@ -1120,21 +1122,43 @@ PG 재조회 · 재승인 · 취소 · 환불은 하지 않는다(BE #15 잔여)
   원금은 결제 시도 금액이지 환불 뒤 잔액이 아니다. 미확정 사유는 DONE · FAILED 에도 과거 원인으로 남을 수 있다. 주문 회신은 수신 · 거절(코드) · 미수신이며, 미수신이 곧 복구 대상은 아니다.
 - 결제키 · 멱등 키 · PG 원문 · 회원 정보는 서버가 내려 주지 않고 화면도 다루지 않는다.
 
-### 클레임 (`/claims` · `/claims/[claimId]`, #30 · BE #574 · #687 · #696)
+### 클레임 (`/claims` · `/claims/[claimId]`, #30 · BE #574 · #687 · #696 · #17 B2c-2)
 
 메뉴 `주문 > 클레임`. order-service `GET /api/v1/admin/claims?type=&status=&orderId=&page=&size=20`(ORDER_READ, 조건 AND, 클레임 아이디 내림차순 `PageResponse`) ·
 `GET /api/v1/admin/claims/{claimId}` 와 결제 후 취소의 쓰기 셋 — 다시 시도 `POST .../retries`(ORDER_MANAGE) · 수동 환불 확정 `POST .../refund-confirmation` ·
-재고 복원 없이 종결 `POST .../completion`(둘 다 SETTLEMENT_MANAGE, BE #17 A3). 반품 승인 · 거절 · 환불과 취소 거절은 BE #17 잔여라 버튼 자리도 두지 않는다.
-BFF 는 범용 프록시가 넘긴다. 코드는 `lib/claim/`(계약 `types.ts` · 조건 `query.ts` · 다시 시도 `retry.ts` · 확정 · 종결 `decision.ts`), 화면은 `components/claim/` 다.
+재고 복원 없이 종결 `POST .../completion`(둘 다 SETTLEMENT_MANAGE, BE #17 A3), 반품 승인 `POST .../return-approval` · 거절 `POST .../return-rejection`(둘 다 ORDER_MANAGE, BE #17 B2c-2).
+결제 후 취소 거절은 BE #17 잔여라 버튼 자리도 두지 않는다.
+BFF 는 범용 프록시가 넘긴다. 코드는 `lib/claim/`(계약 `types.ts` · 조건 `query.ts` · 다시 시도 `retry.ts` · 확정 · 종결 `decision.ts` · 반품 승인 · 거절 `return-decision.ts`), 화면은 `components/claim/` 다.
 
-- **조건은 주소가 정본이다**(`parseClaimQuery`) — 서버가 지금 받는 값은 유형 `RETURN` · 상태 `REQUESTED` 뿐이다(다른 값은 400). 그 밖의 값 · long 범위 밖 주문 아이디는 "전체" 로 읽는다.
+- **조건은 주소가 정본이다**(`parseClaimQuery`) — 유형 `RETURN` · `CANCELLATION`, 상태는 BE `ClaimAdminFilter.Status` 와 같은 일곱 값(`REQUESTED` · `APPROVED` · `REFUNDED` · `COMPLETED` · `REJECTED` ·
+  `REFUND_FAILED` · `RESTORATION_FAILED`)만 받는다(다른 값은 400). 그 밖의 값 · long 범위 밖 주문 아이디는 "전체" 로 읽는다.
   BE 가 상태 · 유형을 늘리면 `CLAIM_TYPES` · `CLAIM_STATUSES` 에 BE enum 이름 그대로 더한다.
+- **확인이 필요한 건**(`ClaimQuickFilters`, 목록 위) — 반품 승인 대기(`type=RETURN&status=REQUESTED`) · 환불 실패 · 재고 복원 실패 바로가기(`CLAIM_PRESETS`). 지금 조건과 같으면 `aria-current`.
+  결제 확인 화면에 들어갈 수 있으면(`SETTLEMENT_READ`, 역할을 모르면 둔다) 결제 확인 화면의 "결제 확인 중"(`/payments?status=UNKNOWN`)도 둔다. 결제 쪽 환불 실패 필터는 서버가 받지 않아(`PAYMENT_198`) 두지 않는다.
+- **반품 결정**(`ClaimReturnDecision`, 반품에만) — 접수 반품은 상세의 `returnDecision` 으로 그린다. 승인은 귀책(서버 `defaultFault` 가 기본) · 재고로 되돌릴지(서버 필수라
+  "되돌림 / 되돌리지 않음" 을 고르기 전엔 승인하지 않는다) · 차감액(비면 0, `parseMoneyInput` 으로 주문 통화 최소 단위 정수, 음수 · 자릿수 초과 막음)을 받고,
+  칸의 중심은 "정책 환불액(고른 귀책의 `refundByFault`) − 차감액 = 환불 예정액" 내역이다. **이 뺄셈이 "클라이언트에서 금액을 계산하지 않는다" 의 유일한 예외다** —
+  계약이 본문 `expectedRefundAmount` 를 그 값으로 정했고, 서버가 같은 산식으로 다시 계산해 다르면 409 `ORDER_046`, 0 이하면 `ORDER_044` 다(서버가 대조하는 확인 값, `expectedRefundOf`).
+  정책 환불액 · 환불 예정액이 0 이하이거나 `approvable=false` 면 승인하지 않고 이유(`reason` name · description)를 그대로 보인다. `rejectable` 이면 거절은 따로 된다.
+  승인은 인라인 확인("환불 예정액은 N입니다")에서 확인할 때의 본문을 그대로 보내고, 거절은 사유(필수 · 200자 · 줄바꿈은 띄어쓰기로 바꾼다 · 검사는 확정 · 종결과 같다)를 받는다.
+  멱등 키는 없고 `expectedVersion` 으로 겹친 요청을 막는다 — 거절도 확인 단계를 열 때의 화면 버전을 저장해 보낸다. 확인 단계 동안 상세를 다시 읽어 버전 · 금액이 저장한 것과 달라지거나
+  버튼이 사라지면 확인 단계를 닫는다(`confirmStillValid`). 실패 뒤 화면 전이는 `failureTransition` 이 정한다.
+  오류는 운영자 문구로 바꾸고 원시 코드 · 서버 원문을 보이지 않는다(`returnFailure`). **승인은 결제사 환불까지 이어 가므로** 결과를 확신할 수 없는 실패(500 · 봉투 아님 · 코드 없는 503 · 모르는 코드 등)는
+  "처리하지 못했습니다" 가 아니라 결과 모름으로 안내한다. 409 · 503 · 404 · 결과 모름은 상세를 다시 읽고,
+  본문 400(`ORDER_171` · `172` · `173` · 사유 `170` · `148` · `151`)은 고칠 칸에 붙인다. **200 이어도 결제사가 환불을 거절했을 수 있어** 응답 `status` 로 결과 문구를 고르고(`approvalOutcome`)
+  승인 내용(귀책 · 재고 · 차감액 · 환불액 · 승인 시각)을 읽기 전용으로 다시 그린다(처리 상황은 아래 `ClaimRecovery` 가 그린다). 거절된 반품은 거절 사유(`recovery.lastDecision`)를 보인다.
+  버튼은 주문 관리 권한(`canManageOrders`)으로 거르고 STAFF 에게는 안내만 둔다.
 - **목록 · 상세** — 유형 · 상태 · 사유는 서버 `name`(설명은 `title`)이다. 예상 환불액은 `formatMoney` 로 표시만 하고, `null` 은 "미산정"(0원과 다르다)이다.
   상세는 접수 항목(주문 항목 아이디 · 수량 · 사유)을 보인다. 상품 이름 · 옵션은 응답에 없고 어드민 주문 상세 응답에도 주문 항목 아이디가 없어
   화면에서 잇지 않는다(순서로 짐작하지 않는다) — 주문 링크로 주문 상세에서 확인한다.
-- **처리 상황 · 다시 시도**(`ClaimRecovery`, 결제 후 취소에만) — 서버 `recovery.situation` 의 name · description, 다음 자동 확인 시각, 결과 미확인 환불의 결제 취소 기한(접수 + 14일, 참고용)을 보인다.
+- **처리 상황 · 다시 시도**(`ClaimRecovery`, 결제 후 취소 · 승인된 반품) — 서버 `recovery.situation` 의 name · description, 다음 자동 확인 시각, 결과 미확인 환불의 결제 취소 기한(참고용)을 보인다.
+  승인된 반품도 취소와 같은 처리 상황 · 버튼 플래그 · 수습 API 를 쓴다(BE #17 B2b). 기한의 기준만 다르다 — 취소는 **접수**, 반품은 **승인 시각**(`returnApproval.approvedAt`) + 14일이고
+  승인 기록이 없으면 보이지 않는다(`refundDeadlineOf`). 반품의 `REFUND_WAITING`(같은 결제의 다른 환불에 막힘)은 결제사 거절이 아니라 다시 시도가 열린 환불 단계라 기한도 보인다.
+  칸은 결제 후 취소 · 승인된 반품에 그리고, 접수 · 거절 반품은 서버 플래그가 모두 false 면 그리지 않아 반품 결정 칸과 겹치지 않는다(`showsRecovery`).
   "다시 시도" 는 `retryable` 일 때만 두고 확인 단계를 거쳐 `{expectedVersion: recovery.version}` 을 보낸다. 200 은 "다시 보냈다" 일 뿐이라 응답 상세를 그대로 다시 그린다.
-- **운영자 확정 · 종결**(`ClaimDecisions`, 처리 상황 칸 안) — **둘 다 결제사(PG)는 부르지 않는다.** 확정은 커밋 뒤 주문 취소 완료와 재고 복원(원격)으로 이어지고, 종결만 원격 호출이 없다.
+- **운영자 확정 · 종결**(`ClaimDecisions`, 처리 상황 칸 안, 결제 후 취소 · 승인된 반품) — **둘 다 결제사(PG)는 부르지 않는다.** 확정은 같은 커밋에서 주문을 정리하고(취소 요청 → 취소 완료,
+  반품 요청 → 반품 완료 · 배송 완료) 커밋 뒤 재고 복원(원격)으로 이어지며, 종결만 원격 호출이 없다. 유형은 보지 않고 서버 플래그(`refundConfirmable` · `completable`)만 따른다 —
+  서버는 반품의 `ORDER_STATUS_MISMATCH` 에 플래그를 주지 않는다.
   확인 단계에서 먼저 말한다 — 확정은 PG 상점관리자(결제사 콘솔)에서 실제 환불을 확인한 뒤에만 누르고, 결제 쪽 장부(결제 확인 화면의 환불 실패)가 그대로라
   PG 상점관리자에서 다시 취소하면 두 번 환불될 수 있다(BE #693). 종결은 재고 조정 전에 재고 이력에서 이 주문의 복원이 이미 들어갔는지 먼저 확인하고(`PRODUCT_029` 처럼 이미 복원됐을 수 있다),
   이미 복원됐으면 조정 없이 종결한다. 문구에서 "결제 관리 화면" 처럼 모호한 말을 쓰지 않는다 — 결제사 콘솔은 "PG 상점관리자", 우리 어드민은 "결제 확인 화면" 이다.

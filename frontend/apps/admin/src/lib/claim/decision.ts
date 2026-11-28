@@ -7,8 +7,9 @@ import {
 } from './types';
 
 /**
- * 결제 후 취소의 운영자 결정(#30 · BE #17 A3 · PR #696) — 수동 환불 확정 · 재고 복원 없이 종결.
- * 둘 다 **결제사(PG)는 부르지 않는다.** 확정은 커밋 뒤 주문 취소 완료와 재고 복원(원격)으로 이어지고, 종결만 원격 호출이 없다. 본문은 `{expectedVersion, reason}` 이고
+ * 결제 후 취소 · 승인된 반품의 운영자 결정(#30 · BE #17 A3 · B2b · PR #696) — 수동 환불 확정 · 재고 복원 없이 종결.
+ * 둘 다 **결제사(PG)는 부르지 않는다.** 확정은 같은 커밋에서 주문을 정리(취소 → 취소 완료, 반품 → 반품 완료 · 배송 완료)하고 커밋 뒤 재고 복원(원격)으로 이어지며,
+ * 종결만 원격 호출이 없다. 본문은 `{expectedVersion, reason}` 이고
  * 멱등 키는 계약에 없다 — 같은 화면 버전으로 두 번 보내면 두 번째는 409 `ORDER_037` 이라 겹쳐도 한 번만 반영된다.
  * 할 수 있는지의 정본은 서버 플래그(`refundConfirmable` · `completable`)와 권한(`SETTLEMENT_MANAGE`, 대표만)이다.
  */
@@ -28,11 +29,11 @@ export const decisionPath = (kind: DecisionKind, claimId: string) =>
     : adminClaimCompletionPath(claimId);
 
 /**
- * 지금 보일 결정 버튼. 결제 후 취소 접수이고 서버 플래그가 true 일 때만이다.
+ * 지금 보일 결정 버튼. 유형은 보지 않고 서버 플래그가 true 일 때만이다 — 서버는 승인 전 · 거절된 반품, 반품의 `ORDER_STATUS_MISMATCH` 에 플래그를 주지 않는다.
  * `canSettle` 이 false(대표가 아님)면 하나도 보이지 않는다. 역할을 모르면(null) 숨기지 않는다 — 서버 403 안내에 맡긴다.
  */
 export function decisionActions(claim: ClaimDetail, canSettle: boolean | null): DecisionKind[] {
-  if (claim.type.code !== 'CANCELLATION' || canSettle === false) return [];
+  if (canSettle === false) return [];
   const actions: DecisionKind[] = [];
   if (claim.recovery.refundConfirmable) actions.push('refundConfirmation');
   if (claim.recovery.completable) actions.push('completion');
@@ -44,11 +45,7 @@ export function decisionActions(claim: ClaimDetail, canSettle: boolean | null): 
  * 역할을 모르면(null) 버튼을 그대로 보이므로 false 다.
  */
 export function decisionNeedsOwner(claim: ClaimDetail, canSettle: boolean | null): boolean {
-  return (
-    canSettle === false &&
-    claim.type.code === 'CANCELLATION' &&
-    (claim.recovery.refundConfirmable || claim.recovery.completable)
-  );
+  return canSettle === false && (claim.recovery.refundConfirmable || claim.recovery.completable);
 }
 
 export const DECISION_OWNER_ONLY =
@@ -80,7 +77,7 @@ export function decisionReasonError(reason: string): string | null {
 
 export const DECISION_DONE: Record<DecisionKind, string> = {
   refundConfirmation:
-    '환불 완료로 기록했습니다. 재고 복원은 이어서 진행되니 아래 상태 · 처리 상황을 확인해 주세요.',
+    '환불 완료로 기록했습니다. 재고 복원이 필요하면 이어서 진행되니 아래 상태 · 처리 상황을 확인해 주세요.',
   completion: '재고 복원 없이 완료로 닫았습니다.',
 };
 export const DECISION_FAILED = '처리하지 못했습니다. 처리 상황을 다시 불러왔습니다.';
