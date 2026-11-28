@@ -121,7 +121,7 @@ operations-service는 상품 상세 조회를 수집하고 일별·기간별 조
 | operations-service | delivery-service | 운영자 온보딩 업무 사실 — 국내 배송비 정책 저장 여부 · 운영자별 최초 저장 시각(`GET /internal/v1/onboarding-facts/shipping-policy`, #357). memberId 는 operations 가 access 토큰으로 확인한 운영자. 호출 구현 #357 PR-B2 (`ShippingPolicyFactClient`, 서킷 `delivery-service`) — 장애면 그 업무만 `UNAVAILABLE`, 조회는 200 |
 | operations-service | product-service | 운영자 온보딩 상품 등록 사실 — 구매 가능 상품 존재 여부 · 운영자별 미삭제 상품 최초 등록 시각(`GET /internal/v1/onboarding-facts/product-registration`, #402). `ProductRegistrationFactClient`, 서킷 `product-service` — 장애면 상품 업무만 `UNAVAILABLE`, 조회는 200. 등록자 기록을 쓰는 상품 등록 API는 #9 의존 |
 | operations-service | product-service | 시점 원가 일괄 조회(`POST /internal/v1/sku-costs/query`, #361 PR-B) — 공헌이익 집계가 주문 항목의 (SKU, 주문 시각) 쌍을 100개씩 보내 그 시각의 유형별 원가를 받는다. 없는 SKU 는 빠지고 원가 미입력은 빈 costs 다. 호출 구현은 #362 |
-| operations-service | product-service | 품절 임박 커서 조회(`GET /internal/v1/stocks/low`, #229 PR-2). operations-service만 허용하는 조회 기반이며 소비자 클라이언트·스케줄러·알림 연결은 후속 |
+| operations-service | product-service | 품절 임박 커서 조회(`GET /internal/v1/stocks/low`, #229 PR-2). operations-service만 허용하는 조회 기반이다. 소비자 `LowStockObservationClient`(contextId 같은 이름, 서킷 `product-service` 공유, 응답 계약 검증은 서킷 밖)와 점검 상태 저장은 #229 PR-3a, 스케줄러·활성화 게이트는 PR-3b |
 | operations-service | product-service | AI 상품 초안 생성 입력 · 이미지 바이트(`GET /internal/v1/product-drafts/{draftId}/generation-input` · `…/generation-images/{index}`, #359 PR-2a 계약). 생성 요청 때 고정한 관리 키 · ETag 로만 읽고 바뀌었으면 410 `PRODUCT_DRAFT_044`. 플래그 `product-draft.generation-enabled` 기본 닫힘. `PRODUCT_DRAFT_GENERATE` 작업(#359 PR-2b)이 시도마다 입력 1번 + 이미지 순번마다 1번(최대 8) 부른다. `ProductDraftGenerationInputClient`(contextId 같은 이름, 읽기 10초), 서킷 `product-service`. 4xx 는 재시도 불가 종결(410 `044` → `IMAGE_CHANGED`), 5xx · 서킷은 재시도 |
 | product-service | operations-service | AI 상품 초안 생성 등록(`POST /internal/v1/product-draft-generation-jobs`) · 결과 조회(`GET /internal/v1/product-draft-generation-jobs/{jobId}/result`) (#359 등록 연결 B1, 결과 반영 B2). (draft ID, 회차 1~3) 영수증으로 재생하고 hash · 요청자 · 만료가 다르면 409 `PRODUCT_DRAFT_GENERATION_002`. product 는 초안 커밋 뒤 회차를 claim 해 등록하고 jobId 를 묶는다. 상품 초안 전용 서킷을 써 사이즈표 호출과 분리한다. 플래그 `operations.product-draft-generation.enabled` 기본 닫힘(신규 등록만 503). 계약은 `api-design-guide.md` §7-3 |
 | operations-service | auth-service | 마케팅 동의 `POST /internal/v1/marketing-consents/query` (#230). PR-B의 ADMIN 수신자 미리보기에서 실제 Feign 호출(`campaignConsentClient`, 서킷 `auth-service`). 최대100개 ID, 이름·연락처 없음. 실패·응답 계약 위반은503. 실제 발송 연결은 후속. |
@@ -313,6 +313,12 @@ PR 2의 운영 DDL은 기존 상태 테이블의 CHECK 교체·행 1개 추가 �
 ### DLT 이상 징후 알림 (#477 A2)
 
 operations-service는 기본 비활성 기능으로 기존 네 DLT를 구독하고 auth A1 internal 수신자 API의 활성 관리자에게 ANOMALY 알림을 저장한다. 결제 승인 DLT는 CRITICAL, 나머지는 WARNING이다. 토픽별 억제·파티션별 워터마크로 상태를 제한하며 업무 상태는 변경하지 않는다. 신규 operations 테이블은 `dlt_alert_state`·`dlt_partition_checkpoint`다. 배포·ACL·실패/복구·FE 계약은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
+
+### 품절 임박 정기 점검 알림 (#229 ①)
+
+operations-service notification 컨텍스트가 product 품절 임박 커서 조회를 읽어 새로 품절 임박이 된 SKU 건수를 LOW_STOCK 알림(요약 1건 × 수신자)으로 저장한다.
+신규 operations 테이블은 점검 워터마크 단일 행 `low_stock_alert_state`와 알린 SKU 추적 `low_stock_alert_sku`다. 재고 수량·기준값·상품 정보는 소유하지 않는다.
+PR-3a는 원천 클라이언트·판정·저장만 있고 자동 실행이 없다. 동작·설정은 [stock-alert-guide.md](stock-alert-guide.md)를 따른다.
 
 ## 쇼핑몰 공개 정보 (#566)
 
