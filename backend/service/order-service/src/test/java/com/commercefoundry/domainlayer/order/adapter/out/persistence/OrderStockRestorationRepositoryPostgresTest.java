@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.order.application.mapper.OrderStockRestorationMapperImpl;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentRestorationObservationQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Origin;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Status;
@@ -160,6 +161,28 @@ class OrderStockRestorationRepositoryPostgresTest {
             assertThat(tx(this::state)).isEqualTo(oldState);
         });
         assertThat(tx(this::state)).isEqualTo(newState);
+    }
+
+    @Test
+    void observationCountsPendingAndHeldInOneSnapshotWithInclusiveCutoff() {
+        Instant cutoff = Instant.parse("2026-11-18T01:00:00.123456Z");
+        assertThat(port.observe(cutoff)).isEqualTo(new PaymentRestorationObservationQueryResult(0, null, 0, null));
+        tx(() -> { for (long id : List.of(1L, 2L, 3L, 4L, 5L)) { port.insert(pending(id, NOW)); } return null; });
+        createdAt(1, cutoff.minusSeconds(600));
+        createdAt(2, cutoff);                 // 경계는 포함한다
+        createdAt(3, cutoff.plusNanos(1000)); // 관측 뒤 등록은 세지 않는다
+        createdAt(4, cutoff.minusSeconds(900));
+        createdAt(5, cutoff.minusSeconds(1200));
+        OrderStockRestoration toHold = port.findByClaimId(104).orElseThrow();
+        assertThat(tx(() -> port.hold(toHold, toHold.hold("PRODUCT_028"), NOW))).isTrue();
+        assertThat(tx(() -> port.markRestored(105, NOW))).isTrue(); // 끝난 작업은 세지 않는다
+
+        assertThat(port.observe(cutoff)).isEqualTo(
+            new PaymentRestorationObservationQueryResult(2, cutoff.minusSeconds(600), 1, cutoff.minusSeconds(900)));
+    }
+
+    private void createdAt(long id, Instant createdAt) {
+        jdbc.update("update orders.order_stock_restoration set created_at=? where id=?", java.sql.Timestamp.from(createdAt), id);
     }
 
     private String state() {
